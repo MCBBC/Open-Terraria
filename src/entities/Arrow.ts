@@ -399,6 +399,8 @@ export class Arrow extends Entity {
   gem: GemStaffFlags | null = null;
   /** SwirlTwins 正弦摆相位计数（localAI[0]，:38615 每步 +1） */
   private gemSwirlT = 0;
+  /** 114 邪恶三叉戟减速计时（ai[0]，:26781 每步 +1） */
+  private gem114T = 0;
 
   /** FindTargetWithLineOfSight 等价：视距内最近且有视线的敌怪（:38571 FindTargetWithLineOfSight） */
   private nearestEnemyWithLos(game: GameHooks, range: number): { cx: number; cy: number } | null {
@@ -860,6 +862,18 @@ export class Arrow extends Entity {
       this.vy = Math.min(this.vy + this.grav2, this.maxFall);
     }
     if (this.dragAlways !== 0) this.vx *= this.dragAlways;
+    // 1457 邪恶三叉戟弹 114 重做（AI aiStyle27 头 :26778-26812,1456 无此块）：
+    // scale 1.5、ai[0] 计时、localAI[0]=初速;20t 后速度 ×0.98 减速淡出,<1 Kill;
+    // alpha = Remap(localAI[0],2,0,1,0)×255（速度衰减即淡出）
+    if (this.projId === 114) {
+      if (this.drawScale !== 1.5) this.drawScale = 1.5;
+      this.gem114T++;
+      if (this.gem114T >= 20) {
+        this.vx *= 0.98;
+        this.vy *= 0.98;
+        if (Math.hypot(this.vx, this.vy) < 1) { this.killNow(game); return; }
+      }
+    }
     // 1457 宝石法珠行为（AI_029_GemStaffs :38561-38640 + HandleMovement :18106-18160）：
     //   Homing 视距 500（FastThenSlow/CanBounce ×2=1000）、转向率随距离/速度;
     //   FastThenSlow 恒 ×0.97 减速（缩到 0.1 以下 Kill）;

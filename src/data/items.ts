@@ -1886,20 +1886,34 @@ item({ key: 'vi_4339_f4339', name: '', maxStack: 999, value: 1, tile: 'v_724_cri
 item({ key: 'vi_4340_f4340', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 4 }); // 饵(地狱蝴蝶?)——数值/名走 itemfunc+l10n 链 // ←vi_4340_GoldDragonfly 独有字段搬移(批次A)
 item({ key: 'vi_4442_f4442', name: '', maxStack: 999, value: 1 }); // 竿(深渊钓竿?)——数值/名走 itemfunc+l10n 链
 
-// ---- 1457 新掉落物三件（无 1456 素材/atlas 条目,同 6145/6146 先例单独注册）：
+// ---- 1457 批 B 素材到位后的注册收口（2026-08-21）----
+// 6147-6195 已随 TEdit items.json(+49) 进 vanilla.json → 由上方自动注册循环注册
+// （vi_6153_GlacierFang / vi_6156_SilverBracer / vi_6158_MobiusStrip /
+//   vi_6165_PoisonBarb 等,键与原手写完全一致）。原 ITEMS_1457_NO_SPRITE 手写
+// def 注册删除——它在自动注册循环之后、无 vid 去重,素材收编后会同 vid 双注册
+// （2026-08-21 盘点报告 A 组附带发现）。此处只做两件零下标平移的收尾：
+// ① 卖价回填（DefaultToAccessory/SetShopValues 的 sellPrice,自动 def 缺省 value=1）：
+//   6153 GlacierFang 冰川之牙(冰箱 7 元池主件,BuriedChestsPass:840)/
 //   6156 SilverBracer 银护腕(上锁盒 1/4,OpenLockBox :9452-9454)/
 //   6158 MobiusStrip 莫比乌斯带(石巨人袋 1/6,OpenBossBag :7516-7518)/
 //   6165 PoisonBarb 毒刺(木匣 1/20 饰品池第 6 项,OpenFishingCrate :8084-8109)。
-//   三者 1457 SetDefaults 均为 DefaultToAccessory（Item.cs:47452/:47463/:47524）,
-//   饰品效果位（SilverBracer 受击银伤/PoisonBarb accPoisonBarb 箭体中毒等）在
-//   ApplyEquipFunctional 6147-6195 族,本批不移植（登记）——先保证掉落可入包 */
-const ITEMS_1457_NO_SPRITE: Array<[number, string, number]> = [
-  [6156, 'SilverBracer', 875],     // sellPrice(0,1,75) = (75+1×100)×5 = 875
-  [6158, 'MobiusStrip', 2500],     // sellPrice(0,5) = 5×100×5 = 2500
-  [6165, 'PoisonBarb', 375],       // sellPrice(0,0,75) = 75×5 = 375
-];
-for (const [vid, nm, val] of ITEMS_1457_NO_SPRITE) {
-  const ik = `vi_${vid}_${nm}`;
-  VANILLA_ITEM_KEY_BY_ID[vid] = ik;
-  item({ key: ik, name: '', value: val });
+//   饰品效果位（SilverBracer 召唤标记/PoisonBarb accPoisonBarb 等）在 1457
+//   ApplyEquipFunctional 6147-6195 族,本批不移植（登记）。
+const ITEMS_1457_VALUE: Record<number, number> = {
+  6153: 200,   // sellPrice(0,0,40) = 40×5（Item.cs:47425）
+  6156: 875,   // sellPrice(0,1,75) = (75+1×100)×5 = 875（:47453）
+  6158: 2500,  // sellPrice(0,5) = 5×100×5 = 2500（:47464）
+  6165: 375,   // sellPrice(0,0,75) = 75×5 = 375（:47525）
+};
+for (const [vid, val] of Object.entries(ITEMS_1457_VALUE)) {
+  const k = VANILLA_ITEM_KEY_BY_ID[Number(vid)];
+  const def = k === undefined ? undefined : ITEM_DEFS[byKey[k]];
+  if (def) def.value = val;
+}
+// ② 6153 兜底注册:仅当 atlas 链断（vanilla.json 未收编 6153,自动循环没注册）时
+//    补占位 def——保证冰箱池掷中它 vid 不再 -1 静默丢弃。文件尾追加,零下标平移。
+if (VANILLA_ITEM_KEY_BY_ID[6153] === undefined) {
+  const ik = 'vi_6153_GlacierFang';
+  VANILLA_ITEM_KEY_BY_ID[6153] = ik;
+  item({ key: ik, name: '', value: ITEMS_1457_VALUE[6153] ?? 1 });
 }

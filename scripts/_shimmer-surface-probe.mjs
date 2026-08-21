@@ -44,26 +44,22 @@ const res = await page.evaluate(async () => {
   const g = window.__swGame;
   const st = g.world.store;
   // 液体类型：本仓 liquidType 4=微光。找湖：x217-246, y449-464 的 liquid
-  const rows = [];
-  for (let y = 448; y <= 466; y++) {
-    let line = '';
-    for (let x = 214; x <= 250; x++) {
-      const i = st.idx(x, y);
-      const lt = st.liquidType[i];
-      const lv = st.liquid[i];
-      if (lv === 0) { line += (st.type[i] !== 0 ? '#' : '.'); continue; }
-      line += lv === 4 ? 'S' : lv === 1 ? 'w' : lv === 2 ? 'l' : 'h';
-      void lt;
+  // 白斑区 (292,428) 附近墙/tile 取证
+  const cells = [];
+  for (let y = 420; y <= 436; y++) for (let x = 284; x <= 300; x++) {
+    const i = st.idx(x, y);
+    if (st.wall[i] !== 0 || st.type[i] !== 0) {
+      cells.push({ x, y, wall: st.wall[i], type: st.type[i], fx: st.frameX[i], fy: st.frameY[i] });
     }
-    rows.push(String(y).padStart(3) + '|' + line);
   }
-  // 玩家传送到湖边触发渲染
-  g.player.x = 230 * 16; g.player.y = 440 * 16;
-  for (let i = 0; i < 30; i++) { g.player.vx = 0; g.player.vy = 0; g.fixedUpdate(1 / 60); }
-  return { rows, gl: g.world.groundLevel, liquidAt: st.liquid[st.idx(230, 460)], type: st.liquidType[st.idx(230, 460)] };
+  const walls = new Map();
+  for (const c of cells) walls.set('wall' + c.wall, (walls.get('wall' + c.wall) ?? 0) + 1);
+  const types = new Map();
+  for (const c of cells) types.set('type' + c.type, (types.get('type' + c.type) ?? 0) + 1);
+  return { cells: cells.slice(0, 40), walls: [...walls.entries()], types: [...types.entries()] };
 });
-console.log('微光湖地图（S=微光 w=水 #=固体 .=空）:');
-for (const r of res.rows) console.log(r);
-console.log('groundLevel:', res.gl, ' (230,460) 液量:', res.liquidAt, ' 类型:', res.type);
+console.log('白斑区墙分布:', JSON.stringify(res.walls));
+console.log('白斑区 tile 分布:', JSON.stringify(res.types));
+for (const c of (res.cells ?? []).slice(0, 20)) console.log('  (' + c.x + ',' + c.y + ') wall=' + c.wall + ' type=' + c.type + ' f=' + c.fx + ',' + c.fy);
 console.log('JS错误:', errs.length ? errs.join(' | ') : '无');
 await browser.close();

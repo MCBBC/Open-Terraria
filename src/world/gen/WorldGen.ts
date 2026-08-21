@@ -329,7 +329,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   //   :695 无条件调用）：悬空 Falling 块按类型静态化（53/495→397、112→398、234→399、
   //   116→402、224→147、其余→1）+ 四涂装种子单格涂（旗标未实装恒 no-op）。位置在
   //   vampireSeed 终段之后（与原版序一致）、多格残片兜底清扫之前。
-  finalSeedCleanup(world.store, world.seedFlags ?? {});
+  finalSeedCleanup(world.store, world.seedFlags ?? {}, world.chests);
   // ★终扫(finalize 之后):finalize 的幽灵 type 净化会把"flags=0 但 type 残留"
   // 的多格物体清成 0 → 在清扫 pass 之后【再造残片】(2026-08-13 缺位断言实锤:
   // 生成后 pot 残片 1 处,补扫即清零)。清扫幂等且廉价,此处兜底。

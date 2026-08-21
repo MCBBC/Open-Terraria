@@ -1,4 +1,4 @@
-// 水体"果冻效应"扭曲 GL 合成器（2026-08-21 原版 FilterWaterDistortion 后处理落地）。
+// 水体扭曲全屏 GL 合成器（2026-08-22 原版 FilterWaterDistortion 完整落地）。
 //
 // 【原版管线考古（Terarria1456，全部带行号）】
 // · 滤镜注册：ScreenEffectInitializer.cs:41
@@ -11,15 +11,14 @@
 //   WaterWaves.waterDistortionIntensity 1:1）。
 // · 应用点：FilterManager.EndCapture :127-176 —— 滤镜是【全屏后处理】：
 //   `filter.Apply(textureSize, sceneSize, sceneOffset); spriteBatch.Draw(t
-//   /*=screenTarget1 整个合成场景*/, ...)`（:154-156）。WaterShaderData.Apply
+//   /*=screenTarget1 整个合成场景（含光照）*/, ...)`（:154-156）。WaterShaderData.Apply
 //   (WaterShaderData.cs:362-377) 绑定：UseImage(_distortionTarget, 1)（波场，
 //   屏 1/4 分辨率）、UseImage(Main.waterTarget.Texture, 2, PointClamp)（前景水层）、
 //   UseTargetPosition/UseImageOffset（相机滚动补偿）。
 // · 采样器映射（ScreenShaderData.Apply :159-185 Textures[i+1]）：s0=场景(spriteBatch
 //   自带)、s1=noise(Images/Misc/noise 256²)、s2=波场、s3=前景 waterTarget。
-// · Main.cs:61748 waterTarget 直画进场景 / :61635 backWaterTarget 直画 —— 水层
-//   本体无扭曲；扭曲只发生在 EndCapture 的全屏 pass（场景像素按位移场重采样，
-//   权重由前景水层 alpha 门控：水体内部 w=1、水线边缘 |2f(q)| 部分权重、旱地 0）。
+// · ★水体本体不扭：Main.cs:61748 waterTarget 直画进场景 / :61635 backWaterTarget
+//   直画 —— 扭曲只发生在 EndCapture 的全屏 pass（场景像素按位移场重采样）。
 //
 // 【obj19 位移公式（tools/disasm-fx.mjs 逐指令复原；★负号修饰符三处订正——
 //    #26 add r0.zw, r0, -r1 / #29 mad r0.w, r3.z, -c13 / #59 add r0.x, r2.x, -r2.y，
@@ -34,28 +33,35 @@
 //   位移px  = (DISPX·0.1, DISPY)·32·opacity（c14/c5 链；opacity=1）(#39-42)
 //   （X 位移只含噪声项且额外 ×0.1 —— 原版涟漪只垂直推，水平 wobble 极弱。）
 //
-// 【本仓落地形态（Canvas2D 取舍，与 WaterWaves.ts 头注同源）】
-// 原版 filter 位移采样【合成后屏幕】；Canvas2D 无屏幕纹理 —— 位移施加在【水体层】
-// 上：VanillaLiquidRenderer 把前/背景水 pass 画进离屏 waterCanvas（=原版
-// waterTarget/backWaterTarget 语义），本模块按上表位移场重采样后合成回世界层
-// （吃光照）。波场 _R 通道以 LUMINANCE 8bit 上传（值域恒 k/256 量化——8bit 编码
-// 无损级），noise 一次性上传（REPEAT+LINEAR，256 pow2）。场景 alpha 门控
-// （obj19 #55-71 的 |Δα|·|2f+Δα−1| 权重）属"整屏扭"语义，水体层扭曲下不适用，
-// 取全权重（WaterWaves.ts 头注既有取舍）。
+// 【obj19 #55-71 alpha 门控（2026-08-22 逐指令复原——水下整屏扭曲的本体）】
+//   aD  = min(100·waterAlpha(位移后UV), 1)     # s3 前景水层（×100 = α>0.01 即饱和）
+//   aU  = min(100·waterAlpha(原始UV), 1)
+//   Δα  = aD − aU
+//   f   = min(100·(aD + aU), 1)                 # 水体存在门
+//   w   = smoothstep((DISPY·c5.y + 0.001)·500)  # c5.y=32/res.y → x = DISPY·16000/res.y+0.5
+//   gate= f · (1 − |Δα|·(1 − |2w+Δα−1|))
+//   out = lerp(scene(uv), scene(uvD), gate)     # #74 lrp
+//   语义：水体内部 Δα=0、f=1 → gate=1 → 整屏全量扭曲（水下一切随噪声场+波场晃动，
+//   即"水下热浪式扭曲"）；旱地 f=0 → gate=0；水线边缘 Δα 大 → 带状权重 = 果冻。
+//   w 项在 |DISPY·32| > 0.8px（res 800）即饱和为方向门（0/1）——只参与边缘带调制。
+//   ★登记偏差：XNA lrp 对超界权重外推；本实现把 x/gate 钳 [0,1]（饱和区行为
+//   一致，避免负权重外推花屏）。
 //
-// 合成形态同 GLWorldLight：GL 画布离屏，调用方在原 2D 链同一时序
-// `ctx.drawImage(layer.canvas, 0, 0)` 单次合成（身份变换、像素 1:1）。
-// GL 不可用/上下文丢失时 composite() 返回 false，调用方回退 2D 分块近似。
+// 【本仓落地形态】
+// 输入 = 带光照的完整世界层（GLWorldLight 输出画布，=原版 screenTarget 语义）+
+// 前景水离屏（waterTarget，alpha 门控纹理）。调用方在 compositeLight 的 GL 路径
+// 里以本模块输出替换直画。GL 不可用/上下文丢失时 composite() 返回 false，调用方
+// 原样直画（无扭曲——CPU 渲染/低端机自动降级，同 ?wwarp=0 逃生门）。
 
 export class GLWaterDistortion {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | null = null;
   private prog: WebGLProgram | null = null;
   private uni: Record<string, WebGLUniformLocation | null> = {};
+  private texScene: WebGLTexture | null = null;
   private texWater: WebGLTexture | null = null;
   private texNoise: WebGLTexture | null = null;
   private texWave: WebGLTexture | null = null;
-  private texFoot: WebGLTexture | null = null;
   private noiseReady = false;
   private noiseW = 256;
   private noiseH = 256;
@@ -63,7 +69,7 @@ export class GLWaterDistortion {
   private waveBytes: Uint8Array | null = null;
   /** 上下文丢失/初始化失败时间戳(0=健在);调用方 5s 退避后可重建 */
   diedAt = 0;
-  /** GL 永不可用(WebGL 缺失/shader 失败/软件渲染)——调用方直接走 2D 回退不再重建 */
+  /** GL 永不可用(WebGL 缺失/shader 失败/软件渲染)——调用方直接原样直画不再重建 */
   unavailable = false;
 
   private static VERT = `
@@ -75,19 +81,16 @@ void main() {
   gl_Position = vec4(aPos.x * 2.0 - 1.0, 1.0 - aPos.y * 2.0, 0.0, 1.0);
 }`;
 
-  // 位移公式 = WaterWaves.sampleDisplace 的 GLSL 镜像（公式出处见文件头；
-  // 测试锁常量：tests/water-warp.test.ts）。
-  // ★足迹回退（uFoot，前景 pass 专用）：前景水层不带浸润带（带入前景层会被合成
-  //   画在方块贴图之上 = 水蓝盖地形），位移采样落在地形区（层内透明）时回退本像素
-  //   原样——前景水色贴地形边界不被位移撕开；水线（空气侧）足迹恒空 → 不回退 →
-  //   水线自由升降（原版 filter 的 alpha 差门控语义的水层化近似）。
+  // 位移公式 = WaterWaves.sampleDisplace 的 GLSL 镜像 + obj19 #55-71 门控（公式出处
+  // 见文件头；测试锁常量：tests/water-warp.test.ts）。
+  // 场景纹理 = 带光照世界层（预乘 α 画布直拷）；输出 = mix(原样, 位移后, gate)
+  // ——预乘色插值仍预乘，drawImage 合成回主画布语义不变。
   static readonly FRAG = `
 precision highp float;
-uniform sampler2D uWater;
+uniform sampler2D uScene;
 uniform sampler2D uNoise;
 uniform sampler2D uWave;
-uniform sampler2D uFoot;
-uniform float uFootMode;
+uniform sampler2D uWater;
 uniform vec2 uCssSize;
 uniform vec2 uNoiseSize;
 uniform vec2 uWaveSize;
@@ -110,11 +113,16 @@ void main() {
   // 屏幕 css px 位移（c14.x=0.1 / c14.y=1.0 × c5=32·opacity/res × res）
   vec2 disp = vec2(dispx * 0.1, dispy) * 32.0;
   vec2 uvD = vUv + disp / uCssSize;
-  vec4 w = texture2D(uWater, uvD);
-  if (uFootMode > 0.5 && w.a < 0.02 && texture2D(uFoot, uvD).a > 0.02) {
-    w = texture2D(uWater, vUv);
-  }
-  gl_FragColor = w;
+  // ---- obj19 #55-71 alpha 门控 ----
+  float aD = min(texture2D(uWater, uvD).a * 100.0, 1.0);
+  float aU = min(texture2D(uWater, vUv).a * 100.0, 1.0);
+  float dA = aD - aU;
+  float f = min((aD + aU) * 100.0, 1.0);
+  // w = smoothstep((DISPY·c5.y+0.001)·500)，c5.y=32/res.y → x = dispy·16000/res.y + 0.5
+  float x = clamp(dispy * 16000.0 / uCssSize.y + 0.5, 0.0, 1.0);
+  float w = x * x * (3.0 - 2.0 * x);
+  float gate = clamp(f * (1.0 - abs(dA) * (1.0 - abs(2.0 * w + dA - 1.0))), 0.0, 1.0);
+  gl_FragColor = mix(texture2D(uScene, vUv), texture2D(uScene, uvD), gate);
 }`;
 
   constructor() {
@@ -142,7 +150,7 @@ void main() {
       preserveDrawingBuffer: true,
     })) as WebGLRenderingContext | null;
     if (!gl) { this.unavailable = true; this.diedAt = performance.now(); return; }
-    // 软件渲染器判不可用（同 GLWorldLight：全屏三纹理采样软渲染毫秒级）
+    // 软件渲染器判不可用（同 GLWorldLight：全屏四纹理采样软渲染毫秒级）
     try {
       const renderer = String(gl.getParameter(gl.RENDERER) ?? '');
       if (/swiftshader|software|llvmpipe|basic render/i.test(renderer)) {
@@ -176,7 +184,7 @@ void main() {
     }
     this.prog = prog;
     for (const n of ['uCssSize', 'uNoiseSize', 'uWaveSize', 'uProgress', 'uIntensity',
-      'uWater', 'uNoise', 'uWave', 'uFoot', 'uFootMode']) {
+      'uScene', 'uNoise', 'uWave', 'uWater']) {
       this.uni[n] = gl.getUniformLocation(prog, n);
     }
     const buf = gl.createBuffer();
@@ -185,16 +193,18 @@ void main() {
     const loc = gl.getAttribLocation(prog, 'aPos');
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    this.texScene = gl.createTexture();
     this.texWater = gl.createTexture();
     this.texNoise = gl.createTexture();
     this.texWave = gl.createTexture();
-    this.texFoot = gl.createTexture();
-    // 水层：CLAMP（越界 = 边缘重复，原版 PointClamp 同款边界语义）
-    gl.bindTexture(gl.TEXTURE_2D, this.texWater);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    // 场景/水层：CLAMP（越界 = 边缘重复，原版 PointClamp 同款边界语义）
+    for (const t of [this.texScene, this.texWater]) {
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
     // noise：256 pow2 → REPEAT 合法（LinearWrap，ScreenShaderData.cs:175-178 同款）
     gl.bindTexture(gl.TEXTURE_2D, this.texNoise);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
@@ -203,12 +213,6 @@ void main() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     // 波场：非 pow2（屏/4）→ CLAMP + LINEAR（= _readR 的 clamp+双线性）
     gl.bindTexture(gl.TEXTURE_2D, this.texWave);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    // 足迹纹理（CLAMP + LINEAR，采样落空回退判定）
-    gl.bindTexture(gl.TEXTURE_2D, this.texFoot);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -255,19 +259,21 @@ void main() {
   }
 
   /**
-   * 每帧合成：water（离屏水层，设备像素）按位移场重采样 → this.canvas。
-   * cssW/cssH = 位移场坐标系（模拟系 CSS px）；progress/intensity = waterWaves 公开态；
-   * waveR/gridW/gridH = 波场（readGridR/gridW/gridH）。失败返回 false（调用方走 2D 回退）。
+   * 每帧全屏合成：scene（带光照世界层，设备像素）按位移场重采样、前景水 alpha
+   * 门控 → this.canvas。water = 前景水离屏（waterTarget 门控纹理；null = 无水帧，
+   * 门控恒 0 = 原样直通）。cssW/cssH = 位移场坐标系（模拟系 CSS px）；
+   * progress/intensity = waterWaves 公开态；waveR/gridW/gridH = 波场。
+   * 失败返回 false（调用方原样直画）。
    */
   composite(
-    water: HTMLCanvasElement, noise: TexImageSource | null,
+    scene: HTMLCanvasElement, water: HTMLCanvasElement | null,
+    noise: TexImageSource | null,
     cssW: number, cssH: number, progress: number, intensity: number,
     waveR: Float32Array, gridW: number, gridH: number,
-    foot: HTMLCanvasElement | null = null,
   ): boolean {
     const gl = this.gl;
     if (!gl || !this.prog || this.diedAt) return false;
-    const w = water.width, h = water.height;
+    const w = scene.width, h = scene.height;
     if (w === 0 || h === 0 || gridW <= 0 || gridH <= 0) return false;
     if (!this.ensureNoise(noise)) return false;
     if (this.canvas.width !== w || this.canvas.height !== h) {
@@ -276,28 +282,29 @@ void main() {
     }
     gl.viewport(0, 0, w, h);
     gl.useProgram(this.prog);
-    // 水层上传（canvas 源预乘直拷——同 GLWorldLight 的 UNPACK 声明教训）
+    // 画布源预乘直拷（canvas 2D 产出一律预乘——UNPACK 声明教训同 GLWorldLight）
     gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.texScene);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
+    // 前景水门控纹理（α 参与门控；预乘不影响 α 通道）
+    gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, this.texWater);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, water);
+    if (water && water.width > 0 && water.height > 0) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, water);
+    } else {
+      // 无水帧：1×1 透明纹理 = 门控恒 0 = 原样直通
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+        new Uint8Array([0, 0, 0, 0]));
+    }
     this.uploadWave(waveR, gridW, gridH);
-    gl.uniform1i(this.uni.uWater, 0);
+    gl.uniform1i(this.uni.uScene, 0);
     gl.uniform1i(this.uni.uNoise, 1);
     gl.uniform1i(this.uni.uWave, 2);
-    // 足迹纹理（前景 pass：uFoot=背景水层；null = 关回退）
-    if (foot && foot.width > 0 && foot.height > 0) {
-      gl.activeTexture(gl.TEXTURE3);
-      gl.bindTexture(gl.TEXTURE_2D, this.texFoot);
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, foot);
-      gl.uniform1i(this.uni.uFoot, 3);
-      gl.uniform1f(this.uni.uFootMode, 1);
-    } else {
-      gl.uniform1f(this.uni.uFootMode, 0);
-    }
+    gl.uniform1i(this.uni.uWater, 3);
     gl.uniform2f(this.uni.uCssSize, cssW, cssH);
     gl.uniform2f(this.uni.uNoiseSize, this.noiseW, this.noiseH);
     gl.uniform2f(this.uni.uWaveSize, gridW, gridH);

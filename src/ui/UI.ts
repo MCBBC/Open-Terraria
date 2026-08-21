@@ -3697,7 +3697,8 @@ export class UI {
       [BuffType.Lifeforce, 'vi_2345_LifeforcePotion'], [BuffType.Endurance, 'vi_2346_EndurancePotion'],
       [BuffType.Wrath, 'vi_2349_WrathPotion'], [BuffType.Rage, 'vi_2347_RagePotion'],
       [BuffType.Tipsy, 'vi_2266_Sake'],
-      // 1457 魔力过热 396：Buff_396.png 为 1457 新素材本仓缺失 → 蓝药图标兜底
+      // 1457 魔力过热 396：Buff_396.png 已随 1457 素材批入仓（buff 栏走
+      // /sprites/vanilla/Buff_396.png 直链,UI.ts:2775）——本条降级为 onerror 兜底保留
       [BuffType.ManaHeat, 'vi_189_ManaPotion'],
       // 后期批（近似图标：月噬→吸血鬼 knives / 遮挡→暗影钥匙）
       [BuffType.MoonLeech, 'vi_1569_vampire_knives'], [BuffType.Obstructed, 'vi_329_shadow_key'],
@@ -3875,7 +3876,8 @@ export class UI {
       [BuffType.Lifeforce, 'vi_2345_LifeforcePotion'], [BuffType.Endurance, 'vi_2346_EndurancePotion'],
       [BuffType.Wrath, 'vi_2349_WrathPotion'], [BuffType.Rage, 'vi_2347_RagePotion'],
       [BuffType.Tipsy, 'vi_2266_Sake'],
-      // 1457 魔力过热 396：Buff_396.png 为 1457 新素材本仓缺失 → 蓝药图标兜底
+      // 1457 魔力过热 396：Buff_396.png 已随 1457 素材批入仓（buff 栏走
+      // /sprites/vanilla/Buff_396.png 直链,UI.ts:2775）——本条降级为 onerror 兜底保留
       [BuffType.ManaHeat, 'vi_189_ManaPotion'],
       // 后期批（近似图标：月噬→吸血鬼 knives / 遮挡→暗影钥匙）
       [BuffType.MoonLeech, 'vi_1569_vampire_knives'], [BuffType.Obstructed, 'vi_329_shadow_key'],

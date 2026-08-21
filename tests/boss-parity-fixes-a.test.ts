@@ -329,7 +329,7 @@ describe('史莱姆王跳跃循环/反挂机计数/小史莱姆(2026-08-19 台�
         if (!expert) expect(m.vanillaId).toBe(1);
         else expect([1, 535]).toContain(m.vanillaId);
         expect([0, -1000, -2000]).toContain(m.ai0);   // -1000*Next(3)
-        expect(m.ai1).toBe(0);
+        expect(m.ai1).toBe(-1);   // 1457 :43869 ai[1] 0→-1（显式空体内,不掷吞物）
       }
       expect(e.ai3).toBe(e.hp);               // 水位补记
     }
@@ -604,13 +604,14 @@ describe('月总核心 Lerp/清弹/兜底 + 头 -2 帧推进(2026-08-19 台账 E
     expect(h.projectiles.every((p) => p.dead)).toBe(true);
   });
 
-  it('二阶段兜底 1↔3 归位:槽 1 = 三连 462(35 伤),槽 3 = 452 螺旋(35 伤)', () => {
+  it('二阶段兜底 1↔3 归位:槽 1 = 三连 462(35 伤),槽 3 = 452 螺旋(35 伤)'
+    + '（1457 悬停槽 90→53,槽界随之平移）', () => {
     const h = makeHooks(makeWorld(false), P);
     const core = spawn(h, 398, 100, 100);
-    core.ai0 = 1; core.ai1 = 165;             // 槽 1(90..179)inSlot=76=dur-14 → 首发 462
+    core.ai0 = 1; core.ai1 = 128;             // AI 内 ai1+1 → 129 = 槽 1(53..142) inSlot=76=dur-14 → 首发 462
     moonLordCoreAI(core, h.hooks, h.player as never);
     expect(h.projectiles.filter((p) => p.projId === 462 && p.damage === 35).length).toBe(1);
-    core.ai1 = 539;                           // 槽 5(495..694)inSlot=45 → 452 螺旋首发
+    core.ai1 = 428;                           // ai1+1 → 429 = 槽 5(384..583) inSlot=45 → 452 螺旋首发
     moonLordCoreAI(core, h.hooks, h.player as never);
     expect(h.projectiles.filter((p) => p.projId === 452 && p.damage === 35).length).toBe(1);
   });

@@ -1324,11 +1324,14 @@ export class TownNPC extends Entity {
       if (pred.keepwalking && this.corneredT <= 0) {
         this.walkT = 90;
       }
+      // 湿身上浮助跑（:54619：velocity.Y<0 且 wet → ×1.2——水中跳出更高）。
+      // ★必须留在贴地块【内】：原版整段行走逻辑（含本行）包在 if(velocity.Y==0f)
+      // （:54398-54628，= 贴地态）里，×1.2 只在【起跳那一 tick】乘一次；曾放块外
+      // 每 tick 复合 → 溺水跳 vy-10.7 指数放大到 -300+，渔夫一跳窜上万格高空
+      //（2026-08-21 用户报障，探针 _anglerjump 复现 vy-373/y-228179）
+      if (this.vy < 0 && this.wet) this.vy *= 1.2;
     }
     const preX = this.x;
-    // 湿身上浮助跑（:54646：velocity.Y<0 且 wet → ×1.2——水中跳出更高，与
-    // :54647-54650 TownCritter 的同款 ×1.2 分列）
-    if (this.vy < 0 && this.wet) this.vy *= 1.2;
     // 湿身重力档（UpdateNPC_UpdateGravity :91940-91956）：浸水 0.2/蜜 0.1/
     // 微光 0.15；干侧 ENEMY_GRAVITY 0.3（NPC.cs:6026，2026-08-20 对齐批换正）；
     // 落速帽 7/4/5.5 由 updateNpcLiquid 第 6 段钳

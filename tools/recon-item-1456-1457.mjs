@@ -249,6 +249,14 @@ export async function recon() {
     // 121-126/597 七弹共用（1456 的显式 penetrate 行已删 = 缺省 1）。
     // usesLocalNPCImmunity/localNPCHitCooldown 走 ProjectileData 扩展列（代码侧消费）。
     proj: {
+      // 音符弹 76-78（:1583-1593 `int num2=30; switch(2){case 2: usesLocalNPCImmunity+
+      // localNPCHitCooldown=num2}`——反编译 switch(2) 恒走 case 2）+ 301 帕拉丁锤
+      // （:3927-3928）+ 309 FrostBlast（:4021-4022 usesLocalNPCImmunity+10）
+      '76': { localNPCHitCooldown: 30 },
+      '77': { localNPCHitCooldown: 30 },
+      '78': { localNPCHitCooldown: 30 },
+      '301': { localNPCHitCooldown: 10 },
+      '309': { localNPCHitCooldown: 10 },
       '121': { friendly: true, timeLeft: 300, localNPCHitCooldown: 60 },
       '122': { friendly: true, timeLeft: 300, localNPCHitCooldown: 60 },
       '123': { friendly: true, timeLeft: 300, localNPCHitCooldown: 60 },
@@ -320,7 +328,8 @@ export async function recon() {
       // 弹幕手补面:json 对 1456 提取的既知故意偏离(提取盲区手补,如 96 火焰 scale 终值/
       // 悠悠球 scale/aiStyle 0→1 兜底),两版源码同值时不算漂移、不回写——否则 --fix 会
       // 把手补抹回源码字面。1457 真变更(v56≠v57)仍按 1457 终态覆写(手补被终态取代)。
-      const handPatch = file === 'proj' && !changed56to57;
+      // 仅"json 显式写了他值"算手补;json 缺字段而源码有值 = 真漂移(照修)
+      const handPatch = file === 'proj' && !changed56to57 && vj !== undefined && vj !== null;
       if (handPatch) {
         handPatches.push(`${file}[${id}].${field}: json=${JSON.stringify(vj ?? null)} ≠ 源码=${JSON.stringify(v57)}(两版同值,既知手补保留)`);
       } else {

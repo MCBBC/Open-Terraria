@@ -207,8 +207,11 @@ function makeTempleGenerateBricks(st: TileStore, rooms: Room[], depths: number[]
     g.t = clamp(g.t, st.h); g.b = clamp(g.b, st.h);
     g.l = clamp(g.l - AMOUNT, st.w); g.r = clamp(g.r + AMOUNT, st.w);
     g.t = clamp(g.t - AMOUNT, st.h); g.b = clamp(g.b + AMOUNT, st.h);
-    if (g.r <= g.l) g.r = g.l + 1;
-    if (g.b <= g.t) g.b = g.t + 1;
+    // ★批4 review P2-7（DungeonBounds.CalculateHitbox cs:47-100）：退化修正是
+    //   `Right = Left + 1` **经属性 setter**（再钳 ≤max-10）——Left 已被钳到
+    //   maxTilesX-10 时 Right 钳回同值（宽度 0）;曾直写 g.l+1 无钳 → 多填一列/行。
+    if (g.r <= g.l) g.r = clamp(g.l + 1, st.w);
+    if (g.b <= g.t) g.b = clamp(g.t + 1, st.h);
     for (let k = g.l; k <= g.r; k++) {
       for (let l = g.t; l <= g.b; l++) setBrickClearAll(st, k, l);
     }
@@ -227,6 +230,21 @@ function makeTempleGenerateBricks(st: TileStore, rooms: Room[], depths: number[]
   }
 }
 
+/** C# Vector2（FNA）float32 仿真：float 逐运算舍入（fround）+ (float)Math.Sqrt。
+ *  ★批4 review P2-6：StrictAngles 距离/Line 步进曾全 double——C# `Vector2` 全
+ *  float32（Length≈1f 但可差 1 ULP → `num-=num2` 步数在整数边界差 1;坐标累积
+ *  误差可致尾格 round 差 1;Distance 的 d1/d2 相等性可翻转换端选择）。 */
+const fr32 = Math.fround;
+/** Vector2.Length()（FNA）：(float)Math.Sqrt((X*X)+(Y*Y)),内层 float 逐运算 */
+function vec2LengthF32(x: number, y: number): number {
+  return fr32(Math.sqrt(fr32(fr32(x * x) + fr32(y * y))));
+}
+/** Vector2.Distance(a,b)（FNA）：分量差 float 减 → 平方和 float 加 → Sqrt→float */
+function vec2DistanceF32(ax: number, ay: number, bx: number, by: number): number {
+  const dx = fr32(ax - bx), dy = fr32(ay - by);
+  return fr32(Math.sqrt(fr32(fr32(dx * dx) + fr32(dy * dy))));
+}
+
 /** makeTemple_GenerateBricks_Line_StrictAngles（1457 cs:34667）：共线直连;否则从
  *  「fillUpwards? (endX,startY) : (startX,endY)」原点取较远端做对角步进至共线,
  *  拆两段直线;500 步守卫超限回退整段直线。 */
@@ -238,8 +256,8 @@ function tmBricksLineStrictAngles(st: TileStore, startX: number, startY: number,
   }
   const oX = fillUpwards ? endX : startX;
   const oY = fillUpwards ? startY : endY;
-  const d1 = Math.hypot(oX - startX, oY - startY);
-  const d2 = Math.hypot(oX - endX, oY - endY);
+  const d1 = vec2DistanceF32(oX, oY, startX, startY);   // origin.Distance(start)
+  const d2 = vec2DistanceF32(oX, oY, endX, endY);       // origin.Distance(end)
   let vX = startX, vY = startY, wX = endX, wY = endY;
   if (d2 > d1) { vX = endX; vY = endY; wX = startX; wY = startY; }
   let cX = vX, cY = vY;
@@ -260,15 +278,21 @@ function tmBricksLineStrictAngles(st: TileStore, startX: number, startY: number,
 }
 
 /** makeTemple_GenerateBricks_Line（1457 cs:34709）：归一化步进逐格 ClearEverything+226,
- *  每格接 FillY/FillX 补柱;2000 步守卫;InWorld(5) 出界即停。 */
+ *  每格接 FillY/FillX 补柱;2000 步守卫;InWorld(5) 出界即停。
+ *  ★批4 review P2-6：SafeNormalize/Length/步进全按 C# float32 语义（Utils.cs:1936
+ *  SafeNormalize=零向量→默认 UnitX,否则 Vector2.Normalize=1f/(float)Math.Sqrt(X²+Y²)
+ *  逐 float 舍入后分量相乘;num-=num2 每步 fround）。 */
 function tmBricksLine(st: TileStore, startX: number, startY: number,
   endX: number, endY: number, fillLeft: boolean, fillUpwards: boolean): void {
-  let vX = startX, vY = startY;
-  const dX = endX - startX, dY = endY - startY;
-  if (dX === 0 && dY === 0) return;
-  const len = Math.hypot(dX, dY);
-  const nX = dX / len, nY = dY / len;          // SafeNormalize(UnitX)——len>0 恒走此支
-  let remain = len;
+  const dX = fr32(endX - startX), dY = fr32(endY - startY);   // Vector2 减法（整数域精确）
+  if (dX === 0 && dY === 0) return;                            // vector2 == Vector2.Zero
+  const len = vec2LengthF32(dX, dY);
+  // SafeNormalize(UnitX)：零向量 → 默认（此处 len>0 恒不走默认支,守卫照写）
+  const nX = len === 0 ? 1 : fr32(dX * fr32(1 / len));
+  const nY = len === 0 ? 0 : fr32(dY * fr32(1 / len));
+  const stepLen = vec2LengthF32(nX, nY);      // num2 = vector3.Length()（循环外一次）
+  let vX = fr32(startX), vY = fr32(startY);
+  let remain = len;                           // num（float32 剩余长度）
   let budget = 2000;
   let lastXAdj = -1, lastYAdj = -1;
   while (remain > 0) {
@@ -280,8 +304,8 @@ function tmBricksLine(st: TileStore, startX: number, startY: number,
         tmBricksLineFillY(st, fillUpwards, lastXAdj, px, py);
         tmBricksLineFillX(st, fillLeft, lastYAdj, px, py);
         lastXAdj = px; lastYAdj = py;
-        vX += nX; vY += nY;
-        remain -= 1;   // num -= vector3.Length()（归一化后恒 1）
+        vX = fr32(vX + nX); vY = fr32(vY + nY);
+        remain = fr32(remain - stepLen);   // num -= num2（float32 每步舍入）
         continue;
       }
       break;

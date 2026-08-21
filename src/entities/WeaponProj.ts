@@ -2860,9 +2860,14 @@ export class TorchGodProj extends Entity {
       if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.dead = true; return; }
     }
     // 命中玩家（无敌帧由 Player.damage 侧处理）。死亡归因 = ByProjectile
-    // （Projectile.Damage→Hurt 同源弹型名;此前漏设→死因残留旧值）
+    // （Projectile.Damage→Hurt 同源弹型名;此前漏设→死因残留旧值）。
+    // 1457 :43575-43578（1456 :40100-40107 owner=255/damage=0 假伤）:改
+    // owner==myPlayer && !unlockedBiomeTorches → SelfHurtPlayers() 真伤;
+    // SetDefaults 去 hostile（:8950）。本仓 unlockedBiomeTorches（火把神图腾
+    // 解锁位）未登记 → 恒未解锁 = 恒真伤（与 1456 假伤 0 的差异即本批修正点）
     const p = game.player;
-    if (nx < p.x + p.w && nx + this.w > p.x && ny < p.y + p.h && ny + this.h > p.y) {
+    if (!game.world.flags.unlockedBiomeTorches
+      && nx < p.x + p.w && nx + this.w > p.x && ny < p.y + p.h && ny + this.h > p.y) {
       p.lastDamageCause = {
         kind: 'projectile',
         name: game.projectileName?.(this.projId) ?? '弹幕',

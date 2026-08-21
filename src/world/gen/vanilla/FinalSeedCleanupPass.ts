@@ -49,21 +49,51 @@ const IS_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 61
  *  TileCleanupPass 同表副本（同源惯例,不 import 防耦合） */
 const UP_PROTECT_FAMILY = new Set([21, 26, 72, 77, 88, 467, 488]);
 
-/** WorldGen.CanKillTile(i, j)（1457 cs:62306+）本语境可达子集：落砂静态化的
- *  CanKillTile 消费只落在 (i,j±1) 邻格上——Boulders+CheckBoulderChest（落砂非巨石）、
- *  门 10/235/箱 21/467/88（被杀格类型 switch,落砂族不命中）均不可达,略。
- *  ★无 chest 注册表参数：CheckBoulderChest 分支不可达（同上）。 */
-function canKillTileFSC(st: TileStore, x: number, y: number): boolean {
+/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（1457 TileID.cs:169）——CheckTileBreakability 消费 */
+const PREVENTS_REMOVAL_FSC = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
+/** WorldGen.IsAContainer（cs:49237）= BasicDresser{88} ∪ {470,475} ∪ BasicChest{21,467}
+ *  ∪ BasicChestFake{441,468}（TileID.cs:315-319） */
+const IS_A_CONTAINER_FSC = new Set([21, 467, 88, 441, 468, 470, 475]);
+
+/** CheckTileBreakability_HasReasonToReturnEarly（cs:62962；hardMode 生成期恒假） */
+function hasReasonToReturnEarlyFSC(st: TileStore, ignoreTypeId: number, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i]!;
+  const sh = sheetOf(t);
+  if (t !== ignoreTypeId && (sh === 77 || PREVENTS_REMOVAL_FSC.has(sh))) return true;
+  if (sh === 10 && st.frameY[i]! >= 594 && st.frameY[i]! <= 646 && st.frameX[i]! < 54) return true;   // IsLockedDoor
+  return IS_A_CONTAINER_FSC.has(sh);   // scanForContainer:true
+}
+
+/** Chest.CanDestroyChest（cs:590）：无箱或有空箱才可毁——blockedChests=有货箱锚位集 */
+function canDestroyChestFSC(blockedChests: Set<number>, x: number, y: number): boolean {
+  return !blockedChests.has(x * 16384 + y);
+}
+
+/** WorldGen.CanKillTile(i, j)（1457 cs:62716-62840）本语境可达子集：落砂静态化的
+ *  CanKillTile 消费只落在 (i,j±1) 邻格上——被杀格可为任意类型,故被杀格 switch
+ *  （10 锁门 / 235 音乐盒三格扫 / 21·467·88 箱族 CanDestroyChest）与上邻仙人掌
+ *  80 帧门均可达（★批4 review P2-5:悬空沙下邻有货箱时 C# 拒杀 → 走原格静态化,
+ *  曾判可杀 → 走下格静态化把箱格覆盖成静态沙）。Boulders+CheckBoulderChest
+ *  （落砂族非巨石）不可达,略。 */
+function canKillTileFSC(st: TileStore, x: number, y: number, blockedChests: Set<number>): boolean {
   if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
   if (st.wall[i] === 350) return false;
+  const self = sheetOf(st.type[i]!);
   if (y >= 1) {
     const u = st.idx(x, y - 1);
     if (st.flags[u]) {
       const sh = sheetOf(st.type[u]!);
-      const self = sheetOf(st.type[i]!);
       if (UP_PROTECT_FAMILY.has(sh) && self !== sh) return false;
+      if (sh === 80 && self !== sh) {
+        // cs:62768-62777 仙人掌帧门：tile2.frameX/18 ∈ {0,1}∪{4,5} → 拒杀
+        const n = Math.trunc(st.frameX[u]! / 18);
+        if (n === 0 || n === 1 || n === 4 || n === 5) return false;
+      }
       if (IS_TREE_TRUNK.has(sh) || sh === 323) {
         const fx = st.frameX[u]!, fy = st.frameY[u]!;
         // cs:62282-62284 帧位例外（侧枝列/干身下段放行）
@@ -73,6 +103,20 @@ function canKillTileFSC(st: TileStore, x: number, y: number): boolean {
         if (sh === 323 && (fx === 66 || fx === 220)) return false;
       }
     }
+  }
+  // 被杀格类型 switch（cs:62795-62830）
+  const fx = st.frameX[i]!, fy = st.frameY[i]!;
+  if (self === 10) {
+    if (fy >= 594 && fy <= 646 && fx < 54) return false;   // IsLockedDoor(tile)
+  } else if (self === 235) {
+    const num2 = x - Math.trunc((fx % 54) / 18);
+    for (let k = 0; k < 3; k++) {
+      if (hasReasonToReturnEarlyFSC(st, st.type[i]!, num2 + k, y - 1)) return false;
+    }
+  } else if (self === 21 || self === 467) {
+    if (!canDestroyChestFSC(blockedChests, x - Math.trunc(Math.trunc(fx / 18) % 2), y - Math.trunc(fy / 18))) return false;
+  } else if (self === 88) {
+    if (!canDestroyChestFSC(blockedChests, x - Math.trunc(Math.trunc(fx / 18) % 3), y - Math.trunc(fy / 18))) return false;
   }
   return true;
 }
@@ -132,8 +176,16 @@ function finalSeedCleanupPaint(st: TileStore, x: number, y: number, f: SeedFlags
 
 /** FinalSeedCleanup（cs:695-747）：全种子终扫——悬空 Falling 块静态化。
  *  分支语义：上格可清/不存在 且 下格活且不可清 → 本格静态化（原地落定）；
- *  否则下格静态化（下坠一格成型,原格保留 Falling 态——原版如此,勿"修"）。 */
-export function finalSeedCleanup(st: TileStore, f: SeedFlags): void {
+ *  否则下格静态化（下坠一格成型,原格保留 Falling 态——原版如此,勿"修"）。
+ *  chests=世界箱注册表（CanDestroyChest 有货箱锚集镜像,cs:590）。 */
+export function finalSeedCleanup(st: TileStore, f: SeedFlags,
+  chests?: ReadonlyArray<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>): void {
+  const blockedChests = new Set<number>();
+  if (chests) {
+    for (const c of chests) {
+      if (c.items.some((it) => it && it.id > 0 && it.stack > 0)) blockedChests.add(c.x * 16384 + c.y);
+    }
+  }
   const num = 5;
   for (let i = num; i < st.w - num; i++) {
     for (let j = num; j < st.h - num; j++) {
@@ -144,19 +196,24 @@ export function finalSeedCleanup(st: TileStore, f: SeedFlags): void {
       if (solidTile3FSC(st, i, j + 1)) continue;      // 落点已实心 → 支撑成立,跳过
       const target = staticTargetSheet(sheet);
       const upGone = !st.inBounds(i, j - 1) || !st.flags[st.idx(i, j - 1)];
-      const upKillable = canKillTileFSC(st, i, j - 1);
+      const upKillable = canKillTileFSC(st, i, j - 1, blockedChests);
       const downActive = st.inBounds(i, j + 1) && !!st.flags[st.idx(i, j + 1)];
-      if ((upGone || upKillable) && downActive && !canKillTileFSC(st, i, j + 1)) {
+      if ((upGone || upKillable) && downActive && !canKillTileFSC(st, i, j + 1, blockedChests)) {
         resetToType(st, i, j, target);
         finalSeedCleanupPaint(st, i, j, f);
         continue;
       }
       resetToType(st, i, j + 1, target);
-      finalSeedCleanupPaint(st, i, j + 1, f);
-      // echo 涂种：静态化格补隐形（`!tile3.invisibleBlock()` 门;旗标未实装恒跳过）。
-      // invisibleBlock 暂记 wire bit6（渲染消费端批 F 接）
+      // ★批4 review P2-3（cs:739）：fall-down 分支涂【原格 (i,j)】——C# 是
+      //   `tile3.ResetToType; FinalSeedCleanup_Paint(i, j);`（曾误涂静态化格 j+1,
+      //   涂装种子一开即错格）
+      finalSeedCleanupPaint(st, i, j, f);
+      // echo 涂种（cs:740-743）：`!tile3.invisibleBlock()` 门 + fullbrightBlock(false)
+      //   + invisibleBlock(true)。invisibleBlock 暂记 wire bit6（渲染消费端批 F 接）;
+      //   fullbrightBlock 清位在 resetToType 后恒空（bTileHeader3=0）,保留调用形状
       if (f.coatEverythingEcho && !(st.wire[st.idx(i, j + 1)] & 64)) {
-        st.wire[st.idx(i, j + 1)] |= 64;
+        st.wire[st.idx(i, j + 1)] &= ~256;   // fullbrightBlock(false)
+        st.wire[st.idx(i, j + 1)] |= 64;     // invisibleBlock(true)
       }
     }
   }
@@ -212,7 +269,9 @@ function doCoatEverythingIlluminantSingleTile(st: TileStore, x: number, y: numbe
   } else if (f.illuminantJustRandomSpots) {
     // JustRandomSpots 分支原版每格掷 Next(2)——全图 pass 侧消费（此处单格版不掷,
     // 与原版单格语义一致:掷在 DoCoatEverythingIlluminant 循环内）
-    st.wire[i] |= 256 | 512;
+    // ★批4 review P3-11（cs:1023-1031）：fullbright 置位同时 invisibleBlock/Wall(false)
+    //  双清（曾只置位不清隐形）
+    st.wire[i] = (st.wire[i] & ~(64 | 128)) | 256 | 512;
   } else {
     st.wire[i] |= 256 | 512;
   }
@@ -307,8 +366,12 @@ export function doCoatEverythingEcho(st: TileStore, f: SeedFlags,
     const items = chests[m]!.items;
     if (!rngNext25()) continue;                       // genRand.Next(25) != 0 → continue
     if (!items[1] || (items[1].stack ?? 0) === 0) continue;   // chest.item[1].stack == 0 → continue
-    for (let n = 1; n < items.length; n++) {
-      if (!items[n] || (items[n]!.stack ?? 0) === 0) {
+    // ★批4 review P3-10（cs:928-934）：`for n < chest.maxItems`（40 定长槽）找首个
+    //  空堆叠槽——本仓 items 是紧凑数组（无洞）,曾按 items.length 封顶 → 永找不到
+    //  空槽,4409 实际塞不进。首空槽=items.length（≤39 时）,直写即追加。
+    for (let n = 1; n < 40; n++) {
+      const it = items[n];
+      if (!it || (it.stack ?? 0) === 0) {
         if (goggles >= 0) items[n] = { id: goggles, stack: 1 };
         break;
       }

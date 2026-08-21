@@ -5,7 +5,7 @@
 //   C 组 AI_GlobalFiringDistanceCheck + Nailhead 固定伤 + 蜂族跳力修复
 //   E 组 Midas Next(30,51)
 //   F 组 695/696 受 NPC 伤固定 5
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Enemy, aiGlobalFiringDistanceCheck } from '../src/entities/Enemy';
 import { applyProjStatus } from '../src/entities/projStatus';
 import { nailheadHitScatter } from '../src/entities/fighterFamilies';
@@ -107,21 +107,20 @@ describe('A 组 1457 新 debuff（DOTTally 等价段）', () => {
     const h = makeHooks();
     const lava = makeEnemy(h, 1, { hp: 100000 });
     lava.ai1 = 364;
-    lava.slimeAIForTest?.();
+    (lava as unknown as { slimeAI: (g: GameHooks, p: Player | null) => void }).slimeAI(h.hooks, null);
     expect(lava.debuffImmuneOverride?.get(20)).toBe(false);
     expect(lava.debuffImmuneOverride?.get(397)).toBe(false);
     expect(lava.debuffImmuneOverride?.get(395)).toBe(false);
-    // 静态表 1:[20] 免疫中毒 → 覆写后可施加
+    // 静态表 1:[20] 免疫中毒 → 覆写后可施加（proj 98 = 毒弹 → buff 20）
     const rec: Record<string, number> = lava as unknown as Record<string, number>;
-    (lava as { vanillaId: number }).vanillaId = 1;
-    applyProjStatus(20, rec);
+    applyProjStatus(98, rec);
     expect(rec.poisonT).toBeGreaterThan(0);
-    // 普通蓝史莱姆（无覆写）仍被静态表挡住
+    // 普通蓝史莱姆（无覆写）仍被静态表挡住（poisonT 保持缺省 0）
     const h2 = makeHooks();
     const plain = makeEnemy(h2, 1, { hp: 100000 });
     const rec2: Record<string, number> = plain as unknown as Record<string, number>;
-    applyProjStatus(20, rec2);
-    expect(rec2.poisonT).toBeUndefined();
+    applyProjStatus(98, rec2);
+    expect(rec2.poisonT).toBe(0);
   });
 });
 
@@ -143,6 +142,7 @@ describe('B 组 叠弹 min-1 层钳位', () => {
 describe('C 组 AI 数值/条件', () => {
   it('Nailhead 463 钉弹固定伤 GetAttackDamage_ForProjectiles(15,25)（:57792）——'
     + '经典 15 / 专家 25,不再随本体 damage×0.15', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);   // 1/3 掷中 + 弹数/方向确定
     const h = makeHooks();
     const e = makeEnemy(h, 463, { hp: 100000 });
     const fired: Array<{ dmg: number; proj: number }> = [];
@@ -150,7 +150,7 @@ describe('C 组 AI 数值/条件', () => {
       (_g: unknown, _x: number, _y: number, _vx: number, _vy: number, dmg: number, proj: number) => {
         fired.push({ dmg, proj });
       };
-    e.difficulty = 0;
+    e.difficulty = 1;   // GDL.CLASSIC
     e.justHitT = 2; e.lai3 = 0;
     nailheadHitScatter(e, h.hooks, null);
     expect(fired.length).toBeGreaterThan(0);
@@ -163,21 +163,22 @@ describe('C 组 AI 数值/条件', () => {
     const fired2: number[] = [];
     (e2 as unknown as { spawnHostileProj: (...a: unknown[]) => void }).spawnHostileProj =
       (_g: unknown, _x: number, _y: number, _vx: number, _vy: number, dmg: number) => { fired2.push(dmg); };
-    e2.difficulty = 1;
+    e2.difficulty = 2;  // GDL.EXPERT
     e2.justHitT = 2; e2.lai3 = 0;
     nailheadHitScatter(e2, h2.hooks, null);
     expect(fired2.length).toBeGreaterThan(0);
     for (const d of fired2) expect(d).toBe(25);
+    vi.restoreAllMocks();
   });
   it('AI_GlobalFiringDistanceCheck（:56405）：MaxWorldViewSize(1920×1200)−50 视野矩形,'
-    + '半轴 935×575 左闭右开', () => {
-    expect(aiGlobalFiringDistanceCheck(0, 0, 934, 574)).toBe(true);
-    expect(aiGlobalFiringDistanceCheck(0, 0, 935, 575)).toBe(true);
-    expect(aiGlobalFiringDistanceCheck(0, 0, 936, 0)).toBe(false);
-    expect(aiGlobalFiringDistanceCheck(0, 0, 0, 576)).toBe(false);
-    expect(aiGlobalFiringDistanceCheck(0, 0, -935, 0)).toBe(true);
-    expect(aiGlobalFiringDistanceCheck(0, 0, -936, 0)).toBe(false);
-    expect(aiGlobalFiringDistanceCheck(0, 0, 0, -576)).toBe(false);
+    + '半轴 935×575,Rectangle.Contains 左闭右开（参数序 = 射手,目标）', () => {
+    expect(aiGlobalFiringDistanceCheck(934, 574, 0, 0)).toBe(true);
+    expect(aiGlobalFiringDistanceCheck(-934, -574, 0, 0)).toBe(true);
+    expect(aiGlobalFiringDistanceCheck(935, 0, 0, 0)).toBe(false);   // 右缘开
+    expect(aiGlobalFiringDistanceCheck(0, 575, 0, 0)).toBe(false);   // 下缘开
+    expect(aiGlobalFiringDistanceCheck(-935, 0, 0, 0)).toBe(true);   // 左缘闭
+    expect(aiGlobalFiringDistanceCheck(936, 0, 0, 0)).toBe(false);
+    expect(aiGlobalFiringDistanceCheck(0, 576, 0, 0)).toBe(false);
   });
   it('蜂族 42/231-235 速度乘区 1f−scale → 2f−scale（:50884-50885,scale=1 时 1456=0）', () => {
     const h = makeHooks();

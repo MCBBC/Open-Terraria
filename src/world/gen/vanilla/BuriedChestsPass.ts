@@ -262,6 +262,11 @@ const PRE_STATS: Record<number, { d: number; ua: number; mana: number; kb0: bool
   220: { d: 32, ua: 45, mana: 0, kb0: false }, 112: { d: 48, ua: 16, mana: 12, kb0: false },
   218: { d: 32, ua: 30, mana: 21, kb0: false }, 670: { d: 21, ua: 20, mana: 0, kb0: false },
   4061: { d: 14, ua: 28, mana: 0, kb0: false }, 4062: { d: 24, ua: 17, mana: 6, kb0: false },
+  // ★批4 review 备案#12：6153 GlacierFang（1457 冰箱 7 元池新主件,Item.cs:47431-47441
+  //   DefaultToMagicWeapon(1115,24,4f)+mana10/kb2f/dmg11）——曾缺登记致 prefixTryGetFails
+  //   恒不重掷（经核算 magic 池四失败门对这套 stats 恒不触发,掷数等价）;补登记防未来
+  //   池/门变动时静默失准
+  6153: { d: 11, ua: 24, mana: 10, kb0: false },
 };
 const __fr = Math.fround;
 /** .NET Math.Round(float32 积, MidpointRounding.ToEven) == base（银行家舍入） */
@@ -833,8 +838,9 @@ function placeBuriedChestInner(
     if (iceDbg) iceDbg(i, gy, tBelow, mainId, style, 1);   // fired=1
     if (!mainId) {
       // ★1457（cs:36456）：`Next(6) 六选` → `Utils.SelectRandom(genRand, 7 元)`——
-      //   +6153 GlacierFang（1457 新魔法武器,本仓物品空间未注册=占位,掷骰照耗,
-      //   入箱时 vid()=-1 静默丢弃）；remix 覆写 1319→725 从内联三元改为命中后改写
+      //   +6153 GlacierFang（1457 新魔法武器;2026-08-21 素材批后已注册:
+      //   vanilla.json 收编 → 自动注册 vi_6153_GlacierFang,贴图/UseSound Item_210 齐）；
+      //   remix 覆写 1319→725 从内联三元改为命中后改写
       //   （普通种子零差异）；`Next(50)==0 → 669` 主物分支删除（669 移箱尾副物品
       //   1/50,cs:37781）。
       mainId = [670, 724, 950, 1319, 987, 1579, 6153][rng.nextInt(7)]; // cs:36456 SelectRandom=Next(7)

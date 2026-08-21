@@ -57,6 +57,12 @@ const FILES = [
     'Item_108', 'Item_109', 'Item_111', 'Item_113', 'Item_117', 'Item_128', 'Item_130',
     'Item_151', 'Item_156', 'Item_157', 'Item_158', 'Item_174', 'Item_181', 'Item_183',
     'Item_184', 'Item_185', 'Item_186', 'Item_187', 'Item_188', 'Item_196',
+    // ---- 1457 新 SoundID（SoundID.cs:816-836，LegacySoundStyle(2,N) → Item_N）----
+    // 200 未索/201 GlacierFang_Muzzle/203 ArcSurge/204 LightningStrikeHit/
+    // 205 StackableItem8ForRubyStaff/206 PyroclasticStone/207 ArmletOfRuin/
+    // 210 GlacierFang_Charging(物品 6153 UseSound)；202/208/209 登记为 Unused（全提）
+    'Item_200', 'Item_201', 'Item_202', 'Item_203', 'Item_204', 'Item_205',
+    'Item_206', 'Item_207', 'Item_208', 'Item_209', 'Item_210',
   ],
 ];
 

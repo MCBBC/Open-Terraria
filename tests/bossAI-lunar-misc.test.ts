@@ -79,18 +79,20 @@ function tick(h: ReturnType<typeof makeHooks>, n: number, only?: Enemy[]) {
 }
 
 describe('AI_081 月总游离眼 400', () => {
-  it('攻击表十槽循环：90t 进矢槽，d-14/-7 两连幻影矢（35 伤；t=d 槽切同帧不可达，原版同）', () => {
+  it('攻击表十槽循环：53t 悬停（1457 悬停槽 90→53）进矢槽，d-14/-7 两连幻影矢'
+    + '（35 伤；t=d 槽切同帧不可达，原版同）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 80, y: 96 });
     const core = spawn(h, 398, 80, 90);
     core.bInit = true; core.ai0 = 0;
     const eye = spawn(h, 400, 40, 88);
     eye.ai3 = core.id; eye.ai0 = 0; eye.ai1 = 0;
-    tick(h, 175, [eye]);
-    expect(eye.ai0).toBe(1);                          // 悬停 90t 后进矢槽(t=85)
+    // 1457 攻击表 [0,53],[1,90],…：矢槽 53..142,两发在槽内 t=76/83（ai1=129/136）
+    tick(h, 136, [eye]);
+    expect(eye.ai0).toBe(1);                          // 悬停 53t 后进矢槽
     expect(h.projectiles.filter((p) => p.damage === 35).length).toBe(2);   // t=d-14/-7 两发
-    tick(h, 40, [eye]);
-    expect(eye.ai0).toBe(0);                          // 180t 回悬停槽
+    tick(h, 14, [eye]);
+    expect(eye.ai0).toBe(0);                          // ai1=150 回悬停槽(143..195)
     expect(eye.cy).toBeLessThan(h.player.cy);         // 悬停玩家上方
   });
 

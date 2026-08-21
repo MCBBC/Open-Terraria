@@ -78,7 +78,7 @@ describe('项2 armorPen 独立字段（弹幕 armorPenetration 数据层 + settl
     expect(projectileData(1036)?.armorPenetration).toBe(30); // 麻线鞭蜘蛛
     expect(projectileData(916)?.armorPenetration).toBe(50);
     expect(projectileData(1045)?.armorPenetration).toBe(50);
-    expect(projectileData(1106)?.armorPenetration).toBe(5);  // 火舌
+    expect(projectileData(1106)?.armorPenetration).toBeUndefined(); // 1457 删 armorPenetration=5（SetDefaults 重排;1456=5）——狐火喷射走全额伤
     expect(projectileData(1)?.armorPenetration).toBeUndefined(); // 无穿甲档不落键
   });
   it('Arrow.settlePen = 玩家 AP + 本型号 AP（StrikeNPC :12068 两源,再入 :81913 池）', () => {

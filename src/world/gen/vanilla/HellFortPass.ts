@@ -58,7 +58,8 @@ const T_STATUE = TILE_BY_KEY['v_105_statue']!;
 function placeDoorHF(st: TileStore, rng: RNG, x: number, j: number, style: number): boolean {
   if (!st.inBounds(x, j - 2) || !st.inBounds(x, j + 2)) return false;
   const iUp = st.idx(x, j - 2);
-  if (!st.flags[iUp]) return false;
+  // ★批4 review P3-9：C# PlaceDoor 头是 `tile[i,j-2].nactive() && tileSolid`——补 inActive 位
+  if (!st.flags[iUp] || ((st.wire[iUp] >>> 5) & 1)) return false;
   const d = TILE_DEFS[st.type[iUp]];
   if (!d || !d.solid) return false;
   if (!solidTileHF(st, x, j + 2)) return false;
@@ -97,20 +98,24 @@ function placeTileDoorHF(st: TileStore, rng: RNG, x: number, j: number, style: n
   return true;
 }
 
-/** WorldGen.SolidTile（cs:42370）：nactive && solid && !solidTop && !半砖 && 无坡 */
+/** WorldGen.SolidTile（1457 cs:70642）：nactive && solid && !solidTop && !半砖 && 无坡
+ *  ★批4 review P3-9：补 inActive 位（与 noDoors 版一致;生成期无致动器,恒无差） */
 function solidTileHF(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
+  if ((st.wire[i] >>> 5) & 1) return false;                    // inActive（致动缩入）
   const d = TILE_DEFS[st.type[i]];
   return !!d && !!d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
 }
 
-/** WorldGen.SolidTile2（Place3x2 底检）：nactive && tileSolid（无坡/半砖门） */
+/** WorldGen.SolidTile2（Place3x2 底检,cs:71027）：nactive && tileSolid（无坡/半砖门）
+ *  ★批4 review P3-9：补 inActive 位 */
 function solidTile2HF(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
+  if ((st.wire[i] >>> 5) & 1) return false;                    // inActive
   const d = TILE_DEFS[st.type[i]];
   return !!d && !!d.solid && !d.platform;
 }
@@ -921,9 +926,14 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
     hellFortPlaceDoorLoop(st, rng, needDoor, doorExistsR, rows, c, colR, rowB, wallType, 19);
   }
   // ---- 层间平台口 + 列间 1/3 门(cs L16749-16792)----
+  // ★批4 review P3-8（1457 cs:33198-33203）：cell 循环头门= `!array5||!InWorld(
+  //  array2[c],array4[r],10) → continue`——InWorld 失败时该格的**平台写与门13
+  //  Next(3) 掷都被跳过**（掷流口径缺口;w≥4200 现世界尺寸 colR[4]≤0.75w+47<w-10
+  //  恒不可达,errorWorld 域可分叉）
   for (let c = 0; c < 5; c++) {
     for (let r = 0; r < 10; r++) {
       if (!occ[c][r]) continue;
+      if (!(colR[c] >= 10 && colR[c] < w - 10 && rowB[r] >= 10 && rowB[r] < h - 10)) continue;   // InWorld(...,10)
       if (r > 0 && occ[c][r - 1]) {
         // 平台口:列内 x 跨度 2-5
         let x1 = rng.int(colL[c] + 2, colR[c] - 2);

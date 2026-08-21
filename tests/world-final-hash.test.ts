@@ -15,6 +15,15 @@
 //   753·669 副物品/GetNextJungleChestItem 删 753 支/FinalSeedCleanup 终扫——
 //   终态四数组哈希按 1457 行为重捕(旧值锚 1456 几何,作废)。caves-checkpoint 的
 //   1456 C# oracle 金标 underworld 起不再可比,待 1457 oracle 重建。
+//
+// ★★2026-08-21 二次重捕(批4 review 修复 PlantCheck/碗锚/FSC 涂格)——修 1457 对齐
+//   偏差,非行为演进：①PlantCheck isMushroomOrSpore 三项(补 61/入口帧判定/type2==201
+//   回写 144↔270,cs:81818-81886)②Check2x1 case103 碗 AnchorValid(Table) 逃生门
+//   (cs:47417-47430,碗落平台/solidTop 不再误杀)③FinalSeedCleanup fall-down 分支
+//   涂原格(i,j)+canKillTileFSC 补仙人掌80帧门/箱族 CanDestroyChest/锁门·音乐盒支
+//   (悬空沙下邻有货箱改走原格静态化,箱格不再被覆盖)④makeTemple Vector2 float32
+//   仿真+退化 hitbox 走钳位 setter(本种子无差,备案)⑤HellFort cell InWorld(10) 门/
+//   SolidTile 族 inActive 位(现世界尺寸不可达,备案)。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';

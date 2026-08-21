@@ -1,6 +1,6 @@
-// 水体果冻后处理管线（GLWaterDistortion / WaterWarpCompositor）单测。
+// 水体全屏扭曲管线（GLWaterDistortion / WaterWarpCompositor）单测。
 // 金标来源：ScreenShader.cso obj19（pass "FilterWaterDistortion"）逐指令反汇编——
-// 见 src/render/GLWaterDistortion.ts 头注（负号修饰符三处订正后的最终公式）。
+// 见 src/render/GLWaterDistortion.ts 头注（位移公式 + #55-71 alpha 门控）。
 // GLSL 无法在 node 执行 → 沿用 heat-distortion.test.ts 的"源码锁常量"模式；
 // 坐标系/激活门为纯逻辑直测。
 import { describe, it, expect } from 'vitest';
@@ -43,18 +43,56 @@ describe('GLWaterDistortion.FRAG：obj19 位移公式锁（防漂移）', () => 
     expect(f).toContain('vUv * uCssSize');
     expect(f).toContain('px / uNoiseSize');
   });
+});
 
-  it('足迹回退（前景 pass）：采样落空(α<0.02)且足迹内有内容(α>0.02) → 回退本像素原样', () => {
-    // 2026-08-21 半砖水带撕开定谳修复：前景层不带浸润带（带入=水蓝盖地形），
-    // 位移采样落进地形区时靠 uFoot(=背景水层含浸润带) 判定足迹内 → 不撕开
-    expect(f).toContain('w.a < 0.02');
-    expect(f).toContain('texture2D(uFoot, uvD).a > 0.02');
-    expect(f).toContain('w = texture2D(uWater, vUv)');
+describe('GLWaterDistortion.FRAG：obj19 #55-71 alpha 门控锁（水下整屏扭曲的本体）', () => {
+  const f = GLWaterDistortion.FRAG;
+
+  it('四采样器：s0 场景（带光照世界层）/ s1 噪声 / s2 波场 / s3 前景水层（ScreenShaderData.Apply :159-185）', () => {
+    expect(f).toContain('uniform sampler2D uScene');
+    expect(f).toContain('uniform sampler2D uNoise');
+    expect(f).toContain('uniform sampler2D uWave');
+    expect(f).toContain('uniform sampler2D uWater');
+  });
+
+  it('α 饱和：min(α·100, 1)——α>0.01 即 1（#55-58 mul c14.z=100 + min c13.y=1）', () => {
+    expect(f).toContain('texture2D(uWater, uvD).a * 100.0');
+    expect(f).toContain('texture2D(uWater, vUv).a * 100.0');
+  });
+
+  it('存在门 f = min(100·(aD+aU), 1)；Δα = aD − aU（#59-63）', () => {
+    expect(f).toContain('float dA = aD - aU');
+    expect(f).toContain('min((aD + aU) * 100.0, 1.0)');
+  });
+
+  it('方向门 w = smoothstep((DISPY·c5.y+0.001)·500)，c5.y=32/res → x = dispy·16000/res + 0.5（#43-49）', () => {
+    expect(f).toContain('dispy * 16000.0 / uCssSize.y + 0.5');
+    expect(f).toContain('x * x * (3.0 - 2.0 * x)');
+  });
+
+  it('门控合成 gate = f·(1−|Δα|·(1−|2w+Δα−1|))；out = mix(原样, 位移后, gate)（#64-74 lrp）', () => {
+    expect(f).toContain('1.0 - abs(dA) * (1.0 - abs(2.0 * w + dA - 1.0))');
+    expect(f).toContain('mix(texture2D(uScene, vUv), texture2D(uScene, uvD), gate)');
+  });
+
+  it('门控语义三态：水体内部 Δα=0 → gate=f=1（整屏扭）；旱地 f=0 → 0；水线 |Δα| 大 → 带状果冻', () => {
+    // 纯数学复核门控公式在三态下的取值（与 FRAG 同式）
+    const gate = (aD: number, aU: number, w: number) => {
+      const dA = aD - aU;
+      const fq = Math.min((aD + aU) * 100, 1);
+      return fq * (1 - Math.abs(dA) * (1 - Math.abs(2 * w + dA - 1)));
+    };
+    expect(gate(1, 1, 0.5)).toBe(1);      // 水下内部：全量扭曲
+    expect(gate(0, 0, 0.5)).toBe(0);      // 旱地：不扭
+    const edge = gate(1, 0, 0.25);        // 水线：带状衰减（w=0.25 → 0.5）
+    expect(edge).toBeCloseTo(0.5, 10);
+    expect(gate(1, 0, 0)).toBe(0);        // 水线 w=0 端：门关
+    expect(Math.min(1, gate(1, 0, 1))).toBe(1);  // 水线 w=1 端：门全开（原始式外推 2，钳 1）
   });
 });
 
 describe('WaterWarpCompositor：激活门与坐标系（node 环境无 document → 恒不激活）', () => {
-  it('node 无 DOM：active() 恒 false、beginPass 恒 null（直画回退路径）', () => {
+  it('node 无 DOM：active() 恒 false、beginFgPass 恒 null（直画回退路径）', () => {
     const c = new WaterWarpCompositor();
     expect(c.active()).toBe(false);
     expect(c.mode).toBe('auto');   // 无 location → auto（GL 优先）
@@ -70,7 +108,7 @@ describe('WaterWarpCompositor：激活门与坐标系（node 环境无 document 
   });
 
   it('帧态换算三角闭合：css↔设备↔世界（WaterWarpFrameState 三系互算）', () => {
-    // 纯数学复核 2D 回退的坐标链：device→css（÷cssScale）→world（camL + css/cssZoom）
+    // 纯数学复核全屏 pass 的坐标链：device→css（÷cssScale）→world（camL + css/cssZoom）
     // 与 WaterWaves 采样系（world→css：(world−cam)·cssZoom）互逆
     const st = { cssW: 960, cssH: 540, cssScale: 2, cssZoom: 1.25, camL: 1000, camT: 2000 };
     const devX = 1920 / 2;                       // 设备 px（画面中心）
@@ -80,6 +118,13 @@ describe('WaterWarpCompositor：激活门与坐标系（node 环境无 document 
     // 逆变换（WaterWaves 采样系）：
     expect((worldX - st.camL) * st.cssZoom).toBeCloseTo(cssX, 10);
     expect(cssX * st.cssScale).toBeCloseTo(devX, 10);
+  });
+
+  it('平滑步长基准：x = DISPY·16000/res.y + 0.5 在 res.y=800 时 DISPY=±0.025 饱和（|位移|>0.8px 即方向门）', () => {
+    const x = (dispy: number, resY: number) => dispy * 16000 / resY + 0.5;
+    expect(x(0, 800)).toBeCloseTo(0.5, 10);      // 零位移 → 0.5 中心
+    expect(x(0.025, 800)).toBeCloseTo(1.0, 10);  // +0.8px 饱和
+    expect(x(-0.025, 800)).toBeCloseTo(0.0, 10); // −0.8px 饱和
   });
 });
 
@@ -92,8 +137,6 @@ describe('管线调试态（LiquidDebugState.warp）', () => {
     expect(d.active).toBe(true);
     expect(d.path).toBe('gl');
     expect(d.passes).toBe(before + 1);
-    setWaterWarpDebug('2d');
-    expect(liquidDebugState().warp.path).toBe('2d');
     clearWaterWarpDebug();
     expect(liquidDebugState().warp.active).toBe(false);
     expect(liquidDebugState().warp.path).toBe('off');

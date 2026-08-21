@@ -1137,7 +1137,12 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     return Math.min(frames - 1, blink + (e.lai1 <= 0 ? 2 : 0));
   }
   // 精灵萤 677（case 677,cs:73391-73402）：counter 每 tick +2、≥6 回卷 → 每 3t 推进
-  if (id === 677) return Math.floor(t / 3) % Math.max(1, Math.min(4, frames));
+  // 精灵萤 677（case 677,cs:73391-73402）：frameCounter 双 +=1（反编译）= 每 3t 一帧；
+  // frame.Y 0..4 循环（>=5 回卷）= 5 帧。贴图 NPC_677 88×110 = 5 帧×22（110/5 整）；
+  // ★曾按 npcFrameCount[677]=4 切 27.5px 非整帧 → 帧边界漂移拼接错影
+  // （2026-08-21 用户报"微光湖上方怪异贴图/动画调度问题"实抓）。帧 4 在原版因
+  // frame.Height=27 越界裁剪几乎不可见，本仓按贴图真实 5 帧全显（视觉更完整）。
+  if (id === 677) return Math.floor(t / 3) % 5;
   // 蜻蜓族 595-601（case 595,cs:73403-73419）：每 3t 一帧全帧循环
   if (id >= 595 && id <= 601) return Math.floor(t / 3) % Math.max(1, frames);
   // 蚯蚓族 357/448/484/606（case 357,cs:73455-73509）：腾空=帧1（+direction*0.1/t
@@ -3284,38 +3289,29 @@ export class Renderer {
     // 底边 +5 行（原版 Main.cs:42900-42908 屏下 +5/+4 边距）：P3 不处理窗口底部 10 行，
     // 外扩后未构建带落在屏幕外，防止视口底缘液体类型错画
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
-    // ==== 果冻后处理管线（原版 waterTarget/backWaterTarget + FilterWaterDistortion
-    //      双离屏语义；激活 = WaveQuality>0 + 噪声就绪 + 非 CPU 渲染。见
-    //      WaterWarpCompositor / GLWaterDistortion 头注）====
-    // 前景水 = waterTarget（位移场扭曲合成回世界层，吃光照）；背景水 = backWaterTarget
-    // 同扭（原版两层的像素都在被前景水 alpha 门控的全屏 filter 里一起扭）。
+    // ==== 全屏扭曲管线（原版 waterTarget/backWaterTarget 直画 + EndCapture 全屏
+    //      FilterWaterDistortion 语义；激活 = WaveQuality>0 + 噪声就绪 + 非 CPU 渲染）====
+    // ★水体本体不扭（Main.cs:61748/:61635 直画）：背景水直画世界层（墙/方块之前）；
+    //   前景水画进离屏（=waterTarget 独立渲染目标）后未扭曲合成回世界层——离屏同时
+    //   是 compositeLight 后全屏扭曲 pass 的 alpha 门控纹理。扭曲/水下晃动/水线果冻
+    //   全部由 Renderer.compositeLight → WaterWarpCompositor.applyFullScreen 交付。
     const waterfallAt = (x: number, y: number) => this.waterfalls.checkForWaterfall(x, y);
     const warpOn = !this.isCpuRender() && this._waveCss !== null
       && waterWaves.quality > 0 && waveTexReady() && this.waterWarp.active();
-    const warpCtx = warpOn ? this.waterWarp.beginPass(this.ctx, isBackground) : null;
     if (!warpOn) clearWaterWarpDebug();
     // 双 pass 共用同一时刻，避免动画帧错位（原版 PrepareDraw 每帧一次、两 pass 共享缓存）
-    drawVanillaLiquids(warpCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-      world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, !!warpCtx);
-    if (warpCtx) {
-      // ★浸润带画进【背景】离屏水层（2026-08-21 用户实报"半砖位没水直接透出背景"定谳修复）：
-      //   位移场按 out(p)=src(p+disp) 重采样——半砖顶 8px 水带/池底等【水贴地形】边界
-      //   采样落进地形区（水层内透明）= 水带被整段抹掉 = 空洞。浸润带 = 原版定义的
-      //   "水体足迹向实心格的延伸"（TileDrawing.cs:3859-4193），画进背景层后位移采样
-      //   恒落在足迹内不再撕开；带在层内位于水体之上（原层序），墙/方块贴图随后覆盖。
-      //   ★前景层【不放】带（曾以 destination-over 垫入 = 前景合成画在方块贴图之上
-      //     = 水蓝盖地形——用户实报撤回）：前景采样落空由 GL 合成的"足迹回退"兜住
-      //     （uFoot=背景层，见 GLWaterDistortion.FRAG）——采样落空但落在足迹内时
-      //     回退本像素原样，前景水色不被撕开。
-      if (isBackground && this.atlas) {
-        drawLiquidBehindTilesOnly(warpCtx, this.atlas, world.store, world.groundLevel,
-          tx0, ty0, tx1, ty1, this.waterStyle, waterfallAt, false, 1);
-      }
-      // 位移场扭曲合成（GL 优先；失败走 2D 分块回退）——身份变换、像素 1:1 进世界层。
-      // 前景 pass 附带足迹纹理（=背景水层）供采样落空回退
-      this.waterWarp.endPass(this.ctx, isBackground, this._waveCss!,
-        this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null,
-        isBackground ? null : this.waterWarp.footprintCanvas());
+    // warpMode 入参 = 表层逐格 bob 关闭（波动由全屏位移场交付）
+    if (isBackground) {
+      drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn);
+    } else if (warpOn) {
+      const fgCtx = this.waterWarp.beginFgPass(this.ctx);
+      drawVanillaLiquids(fgCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true);
+      if (fgCtx) this.waterWarp.endFgPass(this.ctx);
+    } else {
+      drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false);
     }
   }
 
@@ -10810,7 +10806,15 @@ export class Renderer {
       const lw = tilesX * ts * z, lh = tilesY * ts * z;
       const gl = this.worldLightLayer();
       if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [sx, sy, lw, lh])) {
-        this.ctx.drawImage(gl.canvas, 0, 0);
+        // ★全屏水体扭曲（原版 FilterManager.EndCapture :127-176 语义）：滤镜作用于
+        //   【带光照的完整合成场景】——水下整屏随噪声+波场晃动、水线果冻、旱地 0，
+        //   全由 obj19 alpha 门控交付（GLWaterDistortion 头注）。GL 不可用/逃生门
+        //   → 原样直画（无扭曲降级）。
+        const warped = this._waveCss && !this.isCpuRender() && waterWaves.quality > 0
+          ? this.waterWarp.applyFullScreen(gl.canvas, this._waveCss,
+            this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null)
+          : null;
+        this.ctx.drawImage(warped ?? gl.canvas, 0, 0);
         return;
       }
       const mctx = this.lightMaskCtxLayer;

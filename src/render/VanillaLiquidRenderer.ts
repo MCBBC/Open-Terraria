@@ -242,12 +242,6 @@ export function clearWaterWarpDebug(): void {
   _liqDebug.warp.path = 'off';
 }
 
-// ---- 果冻管线：本 pass 水体绘制区（设备 px；2D 回退分块合成只需覆盖此区）----
-let _wbMinX = 0, _wbMinY = 0, _wbMaxX = 0, _wbMaxY = 0, _wbHas = false;
-export function lastWaterDrawBounds(): [number, number, number, number] | null {
-  return _wbHas ? [_wbMinX, _wbMinY, _wbMaxX, _wbMaxY] : null;
-}
-
 /** 液体渲染调试快照（只读消费；DebugReport render.subsystems.liquids） */
 export function liquidDebugState(): LiquidDebugState {
   return _liqDebug;
@@ -274,9 +268,9 @@ export function drawVanillaLiquids(
   tx0: number, ty0: number, tx1: number, ty1: number,
   nowMs: number, isBackground = false, windSpeed = 0, waterStyle = 0,
   hasWaterfallAt?: (x: number, y: number) => boolean,
-  /** 果冻管线激活：水体画进离屏、由 WaterWarpCompositor 位移场整体扭曲——
-   *  表层格逐格 bob 关闭（bob 语义由位移场交付，= 原版 waterTarget 本体无 bob）；
-   *  本函数内的浸润带调用顺延到合成之后（调用方负责，保持"水体→浸润带"层序） */
+  /** 全屏扭曲管线激活（WaterWarpCompositor.active）：表层格逐格 bob 关闭——
+   *  bob 语义由 compositeLight 后的全屏位移场交付（原版 waterTarget 本体无 bob，
+   *  波动全部来自 FilterWaterDistortion 的屏幕位移）。水体/浸润带均直画目标层。 */
   warpMode = false,
 ): void {
   if (!atlas) { _liqDebug.atlasReady = false; return; }
@@ -523,19 +517,23 @@ export function drawVanillaLiquids(
   // 水波位移（WaterWaves，q>0 生效）：表层格（hasTE=水线）水线随 dy 升降——底边锚定、
   // 上沿移动（dstY+dy / 高 sh−dy），源矩形同步裁剪保持 1:1 像素；同一帧双 pass 采样
   // 确定性一致 → 背景/前景水线恒对齐。波光 tint 仅前景 pass（避免双 pass 重复提亮）。
-  // ★warpMode（果冻管线激活）时本块关闭：水体画进离屏由位移场整体扭曲（原版
-  //   waterTarget 本体无逐格 bob——bob 全部来自 FilterWaterDistortion 的屏幕位移）。
+  // ★warpMode（全屏扭曲管线激活）时本块关闭：波动全部来自 compositeLight 后的
+  //   FilterWaterDistortion 全屏位移（原版 waterTarget 本体无逐格 bob）。
   const waveOn = waterWaves.quality > 0 && !warpMode;
   const waveInvZ = waveOn ? 1 / Math.max(1e-6, waterWaves.viewZoom()) : 0;
   const _wdisp: [number, number] = [0, 0];
-  // 果冻管线：本 pass 水体绘制区（设备 px；世界变换一次取样换算）——2D 回退分块合成
-  // 只需覆盖此区（静态偏移直拷/分块都吃它）
-  let wbA = 0, wbD = 0, wbE = 0, wbF = 0;
-  if (warpMode) {
-    const m = ctx.getTransform();
-    wbA = m.a; wbD = m.d; wbE = m.e; wbF = m.f;
-    _wbHas = false;
-  }
+  // ★整数设备矩形分区（2026-08-22 用户终报"某些缩放下每格水之间浮点像素缝隙"）：
+  //   水格矩形=世界整数坐标，但 zoom·dpr 非整数时相邻格共享边落在设备分数像素，
+  //   光栅器对每个 drawImage 矩形【独立取边覆盖】→ 共享边 1px 无覆盖缝（背景
+  //   透出，水面成网格）。修=主循环切【身份变换】按设备像素绘制，每格设备矩形
+  //   按"共享边 ceil 分区"：左/上邻是水 → x0/y0=ceil(共享边)（与邻格 x1/y1=ceil
+  //   同值 → 不重不漏）；否则 floor（保水体外缘覆盖）。右/下边恒 ceil。
+  //   双 pass（不透明背景 + 0.5 前景）均无缝且无重叠加倍变深。源矩形不动，
+  //   ≤1 设备 px 拉伸不可感知（同 2026-08-18 chunk 整数设备矩形定案取舍）。
+  //   微光分支以 x*16 为参照（applyShimmerBaseTint）→ 逐 tile 恢复世界变换绘制。
+  const wldT = ctx.getTransform();
+  const devSX = wldT.a, devSY = wldT.d, devTE = wldT.e, devTF = wldT.f;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   for (let lx = PAD; lx < pw - PAD; lx++) {
     const x = px0 + lx;
     for (let ly = PAD; ly < ph - PAD; ly++) {
@@ -587,20 +585,6 @@ export function drawVanillaLiquids(
         waveSrcH = Math.min(drawSh, sh);
       }
       const dstX = x * 16 + Math.floor(n2 * 16);
-      // 果冻管线：累计本 pass 水体绘制区（世界→设备 px；2D 回退分块合成覆盖域）
-      if (warpMode) {
-        const xDev = wbA * dstX + wbE, yDev = wbD * dstY + wbF;
-        const x2 = xDev + wbA * sw, y2 = yDev + wbD * drawSh;
-        if (_wbHas) {
-          if (xDev < _wbMinX) _wbMinX = xDev;
-          if (yDev < _wbMinY) _wbMinY = yDev;
-          if (x2 > _wbMaxX) _wbMaxX = x2;
-          if (y2 > _wbMaxY) _wbMaxY = y2;
-        } else {
-          _wbHas = true;
-          _wbMinX = xDev; _wbMinY = yDev; _wbMaxX = x2; _wbMaxY = y2;
-        }
-      }
       // ---- 微光（shimmer, vt=3）：DrawShimmer（LiquidRenderer.cs:682-730）----
       // 原版三步：①基底层 water_14 直画 + 逐顶点 GetShimmerBaseColor 波动蓝移（:745-759）
       // ②sparkle 层：源矩形 X+48（water_14 的第 4 列 16px 闪纹带）、Y+80×GetShimmerFrame
@@ -610,6 +594,9 @@ export function drawVanillaLiquids(
       // 薄边缘条 sw<8 跳过防透明像素被压暗）；sparkle 用离线染色变体（hue 16 档量化）、
       // alpha 取四角均值
       if (vt === 3) {
+        // 微光分支以 x*16 为参照（applyShimmerBaseTint 的 u/v 归一化）→ 恢复世界
+        // 变换按世界像素绘制（微光液稀疏，逐 tile 切换开销可忽略）
+        ctx.setTransform(wldT);
         const tVis = (nowMs / 1000) * 60;                      // ≈ Main.timeForVisualEffects（帧计数）
         ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
         ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dstX, dstY, sw, drawSh);
@@ -656,12 +643,20 @@ export function drawVanillaLiquids(
             }
           }
         }
+        ctx.setTransform(1, 0, 0, 1, 0, 0);   // 回身份变换（设备像素主循环）
         continue;
       }
       // 双 pass（Main.cs DrawWaters(true/false) + LiquidRenderer.InternalDraw）：
       // 背景 pass 不透明（露出方块透明像素 = 浸润）；前景 pass 水 0.6 半透明质感
+      // ★设备矩形共享边 ceil 分区（见循环前块注）：不重不漏，分数 zoom 零缝
+      const ex0 = dstX * devSX + devTE, ex1 = (dstX + sw) * devSX + devTE;
+      const ey0 = dstY * devSY + devTF, ey1 = (dstY + drawSh) * devSY + devTF;
+      const dx0 = hasVisA[at(lx - 1, ly)] ? Math.ceil(ex0) : Math.floor(ex0);
+      const dy0 = hasVisA[at(lx, ly - 1)] ? Math.ceil(ey0) : Math.floor(ey0);
+      const dw = Math.ceil(ex1) - dx0, dh = Math.ceil(ey1) - dy0;
+      if (dw <= 0 || dh <= 0) continue;
       ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)));
-      ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dstX, dstY, sw, drawSh);
+      ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dx0, dy0, dw, dh);
       // 波光 tint（FilterWaterDistortion :106-111；仅表层 + 前景 pass，阈值 0.03 跳弱波）。
       // ★warpMode 下仍画（进离屏随位移场整体扭动——原版 glint 加在全屏 pass 输出上，
       //   位置与波前水线一致）；波光仅 q>0 门，不受 warpMode 关闭影响
@@ -671,12 +666,13 @@ export function drawVanillaLiquids(
           ctx.globalCompositeOperation = 'lighter';
           ctx.globalAlpha = Math.min(1, gl * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
           ctx.fillStyle = '#ffffff';
-          ctx.fillRect(dstX, dstY, sw, drawSh);
+          ctx.fillRect(dx0, dy0, dw, dh);
           ctx.globalCompositeOperation = 'source-over';
         }
       }
     }
   }
+  ctx.setTransform(wldT);   // 恢复世界变换（坡面增强/浸润带仍世界坐标）
 
   // ---- 斜面格水体覆盖增强（2026-08-21 用户定案"做得更好"）----
   // 原版：斜面格实心无液 → 不画前景水 → 角色站斜面上时身体与斜切三角区重叠的
@@ -742,10 +738,10 @@ export function drawVanillaLiquids(
   //   左右都有   → 整格 16 宽(:4108-4111);深度按液体量 num6=(256-max)/32*2 从底收
   // solidLayer=false：DrawLiquidBehindTiles 背景 pass(:451-467,墙层之前)——坡面格
   //   画【平面 Liquid 全矩形】(斜切区全覆盖,见 drawLiquidBehindTilesOnly 斜面表注释)
-  // ★果冻管线激活(warpMode)时本调用跳过：浸润带属于墙/方块层渲染（原版不进
-  //   waterTarget，filter 的 alpha 门在其上恒 0 = 不参与扭曲）——由调用方在离屏
-  //   水体合成【之后】直画世界层（保持"水体→浸润带"层序不变）
-  if (isBackground && !warpMode) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt, false);
+  // ★浸润带恒内联直画（2026-08-22 全屏扭曲重构：水体不再进离屏分层——浸润带
+  //   属于墙/方块层渲染，背景 pass 在墙/方块之前画 = 原版层序；全屏扭曲在
+  //   compositeLight 后统一施加，浸润带随场景一起扭，无需离屏足迹机制）
+  if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt, false);
 
   // ---- 调试快照落盘（DebugReport render.subsystems.liquids）----
   _liqDebug.calls++;

@@ -342,5 +342,6 @@ describe('史莱姆体内物品（SlimeBodyItemDropRule）', () => {
     const first = e2.ai1;
     e2.fixedUpdate(1 / 60, hooks);
     expect(e2.ai1).toBe(first);
-  });
+  }, 30000);   // 惰性 import('entities/Enemy') 冷加载 ≈14s（items/bossAI/Renderer
+               // 贴图懒加载在模块图内）——缺省 5s 超时误杀,非逻辑耗时
 });

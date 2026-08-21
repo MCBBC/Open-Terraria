@@ -177,18 +177,21 @@ describe('564/565 暗黑魔法师（FindFrame case 564/565，NPC.cs:68657-69085�
   });
 });
 
-describe('668 鹿角怪（FindFrame case 668，NPC.cs:67390-67501 + 序列表 :6516-6534）', () => {
-  it('ai0==1/4：攻击 1 表 [12,13,14,13,14,13,14,13,14,15,16,17]，每 4t 一格钳末帧', () => {
+describe('668 鹿角怪（FindFrame case 668，1457 NPC.cs:67543-67579 攻击态帧计数直读 ai[1] + 序列表 :6516-6534）', () => {
+  it('ai0==1/4：攻击 1 表 [12,13,14,13,14,13,14,13,14,15,16,17]，每 4t 一格钳末帧'
+    + '（1457：frameCounter=ai[1]，AI 相位驱动）', () => {
     for (const ai0 of [1, 4]) {
       const s = st();
-      const seq = run(() => deerclopsNextFrame(s, { ai0, vx: 0, vy: 0 }), 60);
+      let ai1 = 0;
+      const seq = run(() => deerclopsNextFrame(s, { ai0, ai1: ai1++, vx: 0, vy: 0 }), 60);
       expect(compress(seq)).toEqual([12, 13, 14, 13, 14, 13, 14, 13, 14, 15, 16, 17]);
       expect(seq[seq.length - 1]).toBe(17); // FromSequence 钳末帧后停住
     }
   });
   it('ai0==2：攻击 2 表 [12,15,16,17×4,13,18×4,12]（入段范围 12..18 非 12..12）', () => {
     const s = st();
-    const seq = run(() => deerclopsNextFrame(s, { ai0: 2, vx: 0, vy: 0 }), 60);
+    let ai1 = 0;
+    const seq = run(() => deerclopsNextFrame(s, { ai0: 2, ai1: ai1++, vx: 0, vy: 0 }), 60);
     expect(compress(seq)).toEqual([12, 15, 16, 17, 13, 18, 12]);
     // 表长 13（每格 4t）：17 与 18 各占 4 格（16t）
     const holds: Record<number, number> = {};
@@ -198,7 +201,9 @@ describe('668 鹿角怪（FindFrame case 668，NPC.cs:67390-67501 + 序列表 :6
   it('ai0∈{3,5,7,8}：攻击 3 表 [19,20,21,22,21,22,…]（入段范围 19..24 非 19..19）', () => {
     for (const ai0 of [3, 5, 7, 8]) {
       const s = st();
-      const seq = run(() => deerclopsNextFrame(s, { ai0, vx: 0, vy: 0 }), 20);
+      let ai1 = 0;
+      // 24t（ai1 0..23）= 6 格；1457 直读 ai[1] 后 tick 数即帧钟（旧本地自增多 1 拍）
+      const seq = run(() => deerclopsNextFrame(s, { ai0, ai1: ai1++, vx: 0, vy: 0 }), 24);
       expect(compress(seq)).toEqual([19, 20, 21, 22, 21, 22]);
     }
   });
