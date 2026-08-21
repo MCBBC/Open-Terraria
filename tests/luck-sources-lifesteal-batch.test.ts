@@ -26,7 +26,7 @@ describe('GenState.seedFlags 灌入（SeedEasterEggs.parseSeed）', () => {
 });
 
 describe('风筝 buff 383 / 恶臭 buff 120（Player.cs:9612-9623 / :9958-9961）', () => {
-  it('KiteBuff：移速 +0.25、镐速 ×0.85、kiteLuck 180s 一档钳 3', () => {
+  it('KiteBuff：移速 +0.15、镐速 ×0.9（1457 :10003-10004 削）、kiteLuck 180s 一档钳 3', () => {
     const b = new BuffState();
     expect(b.kiteLuckLevel).toBe(0);
     b.apply(BuffType.KiteBuff, 179);
@@ -35,13 +35,13 @@ describe('风筝 buff 383 / 恶臭 buff 120（Player.cs:9612-9623 / :9958-9961�
     expect(b.kiteLuckLevel).toBe(2);
     b.apply(BuffType.KiteBuff, 10_000);
     expect(b.kiteLuckLevel).toBe(3);
-    expect(b.pickSpeedMult).toBeCloseTo(0.85, 5);
+    expect(b.pickSpeedMult).toBeCloseTo(0.9, 5);   // 1457: 镐速 -0.15 → -0.1
     const noKite = new BuffState();
     expect(noKite.moveSpeedMult).toBe(1);
     b.remove(BuffType.KiteBuff);
     expect(b.moveSpeedMult).toBe(1);
     b.apply(BuffType.KiteBuff, 600);
-    expect(b.moveSpeedMult).toBeCloseTo(1.25, 5);
+    expect(b.moveSpeedMult).toBeCloseTo(1.15, 5);   // 1457: 移速 +0.25 → +0.15
   });
 
   it('luck 聚合：风筝档 +0.1/3·档、恶臭 −0.25（RecalculateLuck :28675/:28687-28690）', () => {

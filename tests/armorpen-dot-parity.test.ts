@@ -157,10 +157,13 @@ describe('项4 鞭敌方 debuff 分档（ApplyWhipDebuffs Projectile.cs:11067-11
     expect(miss.poisonT).toBeUndefined();
     vi.restoreAllMocks();
   });
-  it('1033/849 标记类不落 DoT 字段（362=链电标记/310=纯视觉,NPC.cs:93295-93299）', () => {
+  it('1033 电鳗鞭 → 362 落 eelWhipT 240t=4s（1457 DoT 重做:Add(100,50)=50 HP/s 平铺,'
+    + 'NPC.cs:92781——链式缩放/标记玩家数/链电粒子全删）;849 黑收成 310 纯视觉仍不落字段', () => {
+    // 旧断言（1456 锚"标记类不落 DoT 字段"）按 1457 终态更新
     const e: Record<string, number> = {};
     applyWhipDebuffs(1033, e);
+    expect(e.eelWhipT).toBe(4);
     applyWhipDebuffs(849, e);
-    expect(Object.keys(e)).toHaveLength(0);
+    expect(Object.keys(e)).toEqual(['eelWhipT']);
   });
 });

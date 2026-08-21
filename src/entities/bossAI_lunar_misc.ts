@@ -136,14 +136,19 @@ function shootL(
 }
 
 // ---------------------------------------------------------------------------
-// AI_081 月总游离眼 400(NPC.cs:38224-38667)
-// 攻击表 MoonLordAttacksArray2(:6966-6985)十槽循环,ai[1] 为全局计时逐槽累计:
-//   [悬停90, 矢90, 悬停90, 球135, 悬停90, 眼200, 悬停90, 光375, 悬停90, 球135]
+// AI_081 月总游离眼 400(1457 AI_081_TrueEyeOfCthulhu :42900-43340)
+// 攻击表 MoonLordAttacksArray2(InitializeMoonLordAttacks2 :6992-7029)十槽循环,
+// ai[1] 为全局计时逐槽累计。1457 起五个悬停槽 90→53(num=935/num2=1200-935=265/
+// num3=5 → num4=53,与头部攻击循环 1200t 相位对齐——真眼由部件 checkDead 按头部
+// ai[1] 相位召出,见 bossAI_duke_moonlord.spawnTrueEye):
+//   [悬停53, 矢90, 悬停53, 球135, 悬停53, 眼200, 悬停53, 光375, 悬停53, 球135]
 // localAI[0]=瞳孔角 [1]=睁眼度 [2]=缩放;ai[2]=球的扫射编码角/眼的螺旋角。
-// 注意:原版 ai[0]==-1 分支(:38284)在表驱动下不可达(表值仅 0..4),不移植。
+// 注意:原版 ai[0]==-1 分支(:43030)在表驱动下不可达(表值仅 0..4),不移植。
+// ai[0]==-2(出生残肢态,spawnTrueEye 置):悬停同款移动,表驱动只在悬停槽(atk==0)
+// 才接管(:43017-43022 `(!flag || num4 == 0)`)——攻击槽期间保持 -2 悬浮。
 // ---------------------------------------------------------------------------
 const ML_EYE_ATTACKS: ReadonlyArray<readonly [number, number]> = [
-  [0, 90], [1, 90], [0, 90], [2, 135], [0, 90], [3, 200], [0, 90], [4, 375], [0, 90], [2, 135],
+  [0, 53], [1, 90], [0, 53], [2, 135], [0, 53], [3, 200], [0, 53], [4, 375], [0, 53], [2, 135],
 ];
 
 export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | null) {
@@ -165,12 +170,16 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
     consumed += dur;
   }
   if (slot === 10) { slot = 0; e.ai1 = 0; consumed = 0; dur = ML_EYE_ATTACKS[0][1]; }
-  e.ai0 = ML_EYE_ATTACKS[slot][0];
+  // 1457 :43017-43022 表驱动接管门：ai[0] 与表值不同才写;出生残肢态(ai[0]==-2)
+  // 只在悬停槽(atk==0)被接管——攻击槽期间保持 -2(下方与悬停态同分支移动)
+  const atk = ML_EYE_ATTACKS[slot][0];
+  if (e.ai0 !== atk && (e.ai0 !== -2 || atk === 0)) e.ai0 = atk;
   const t = e.ai1 - consumed;           // num1294 槽内已历时
   const pcx = player ? player.cx : e.cx, pcy = player ? player.cy : e.cy;
 
-  if (e.ai0 === 0) {
-    // ---- 悬停(:38309-38345):玩家上方 200px 伺服(24 速/30 步进) + 同族 150px 排斥 ----
+  if (e.ai0 === 0 || e.ai0 === -2) {
+    // ---- 悬停(:38309-38345;1457 :43025 ai[0]==0||ai[0]==-2 同分支——出生残肢
+    //      态在表驱动接管前按悬停移动):玩家上方 200px 伺服(24 速/30 步进) + 同族 150px 排斥 ----
     if (player) e.facing = e.seekDirX(player);
     const dx = pcx + (player ? player.vx : 0) * 20 - e.cx;
     const dy = pcy + (player ? player.vy : 0) * 20 - e.cy;

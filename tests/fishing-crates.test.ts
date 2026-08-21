@@ -195,19 +195,25 @@ describe('锁盒两件（ItemSlot.cs:1693-1704 钥匙门）', () => {
     expect(ok).toBe(false);
     expect(gave).toBe(0);
   });
-  it('金锁盒：7 选 1（Next(7)=0→村正 164）+ 1/3 暗影钥匙 + 1/8 骨钥匙 5465', () => {
-    expect(run(3085, seq([0, 0, 0]), { consumeItem: () => true }))
-      .toEqual([[164, 1], [329, 1], [5465, 1]]);
+  it('金锁盒：7 选 1（Next(7)=0→村正 164）+ 1/3 暗影钥匙 + 1/8 骨钥匙 5465 + 1/4 银护腕', () => {
+    // 1457: 尾段新增 1/4 SilverBracer(6156)（OpenLockBox :9452-9454,FTW 支之后）
+    expect(run(3085, seq([0, 0, 0, 1]), { consumeItem: () => true }))
+      .toEqual([[164, 1], [329, 1], [5465, 1]]);          // 第 4 掷 1 → 6156 miss
+    expect(run(3085, seq([0, 0, 0, 0]), { consumeItem: () => true }))
+      .toEqual([[164, 1], [329, 1], [5465, 1], [6156, 1]]); // 第 4 掷 0 → 6156 出
   });
-  it('金锁盒 remix 第 4 支 157→2623 / FTW 1/5 5515（:9045/:9059 门序）', () => {
+  it('金锁盒 remix 第 4 支 157→2623 / FTW 1/5 5515（:9432/:9449 门序）+ 1457 银护腕', () => {
     // Next(7)=4 → 157；329 门掷 1 miss；5465 门掷 1 miss；缺省 getGoodWorld=false →
-    // Next(5) 不掷（脚本第 4 位不被消费）
-    expect(run(3085, seq([4, 1, 1]), { consumeItem: () => true }))
+    // Next(5) 不掷；1457 尾段恒掷 Next(4)（:9452-9454 SilverBracer 6156）
+    expect(run(3085, seq([4, 1, 1, 1]), { consumeItem: () => true }))
       .toEqual([[157, 1]]);
-    expect(run(3085, seq([4, 1, 1, 0]), { consumeItem: () => true, getGoodWorld: true }))
+    expect(run(3085, seq([4, 1, 1, 0, 1]), { consumeItem: () => true, getGoodWorld: true }))
       .toEqual([[157, 1], [5515, 1]]);
-    expect(run(3085, seq([4, 1, 1, 0]), { consumeItem: () => true, remixWorld: true, getGoodWorld: true }))
+    expect(run(3085, seq([4, 1, 1, 0, 1]), { consumeItem: () => true, remixWorld: true, getGoodWorld: true }))
       .toEqual([[2623, 1], [5515, 1]]);
+    // FTW 命中后仍掷银护腕门（1457 门序:FTW → 6156）
+    expect(run(3085, seq([4, 1, 1, 0, 0]), { consumeItem: () => true, getGoodWorld: true }))
+      .toEqual([[157, 1], [5515, 1], [6156, 1]]);
   });
   it('黑曜石锁盒 4879：无暗影钥匙 329 → false；持钥匙不消耗（consumeItem 永不被调）', () => {
     let consumed = 0;

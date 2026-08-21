@@ -25,8 +25,20 @@ import { playerCanHitEnemy } from './projTargets';
  *  帧 1-6 开火动画、第 12t 出火球 668 */
 const FLAMEBURST_TOWER = new Set([663, 665, 667]);
 /** 弩车三档（AI_134 :65584）：帧 0 待机、帧 1-5 开火（每 5t）、第 12t 出弩箭 680
- *  （速 16，T2 21）、25t 结束、冷却 GetBallistraShotDelay=160 */
+ *  （速 16，T2 21）、25t 结束、冷却 GetBallistraShotDelay */
 const BALLISTA_TOWER = new Set([677, 678, 679]);
+/** GetBallistraShotDelay 1:1（1457 :69721-69735；1456 :65707 同体）：
+ *  基础 160 → 侍从 T3 套装 100 → 弩车恐慌（ballistaPanic）60 → 双真 30。
+ *  本仓 setSquireT3/ballistaPanic（DD2 套装/哨兵背包恐慌位）未实装 → 恒 160 档，
+ *  档位结构先落（旗标接线随 DD2 套装批） */
+function ballistraShotDelayOf(player: object): number {
+  const p = player as { setSquireT3?: boolean; ballistaPanic?: boolean };
+  let result = 160;
+  if (p.setSquireT3) result = 100;
+  if (p.ballistaPanic) result = 60;
+  if (p.ballistaPanic && p.setSquireT3) result = 30;
+  return result;
+}
 /** 闪电光环三档（AI_137 :65910）：非射击——光环场伤害（宽 ≤999 扫描增长，
  *  localNPCHitCooldown=3）；帧 6 张连续循环 */
 const AURA_TOWER = new Set([688, 689, 690]);
@@ -749,7 +761,11 @@ export class MinionProj extends Entity {
     return n;
   }
 
-  /** 生成不占槽实体（计数器派生本体/守护者） */
+  /** 生成不占槽实体（计数器派生本体/守护者）。
+   *  1457 UpdateAbigailStatus/UpdateStormTigerStatus（Player.cs:12380/:12421）：
+   *  本体重生弹 knockBack 由 0f → 继承 projectile2.knockBack（计数器 kb）——
+   *  本仓 spawnBody 恒传 this.knockback（计数器出生即持法杖 kb,Game 'summon'
+   *  分支 spawnMinion 传 cw.knockback）→ 1457 语义已天然满足 */
   private spawnBody(game: GameHooks, projId: number, damage: number): MinionProj {
     const owner = this.ownerRef();
     const m = new MinionProj(this.cx, this.cy, projId, damage, this.knockback,
@@ -866,8 +882,14 @@ export class MinionProj extends Entity {
         return;
       }
       // 弩车族（AI_134）：帧 0 待机 → 帧表 1-5（每 5t）→ 第 12t 弩箭 680（速 16）
-      // → 25t 结束 → 冷却 160（GetBallistraShotDelay）
+      // → 25t 结束 → 冷却 GetBallistraShotDelay
       if (BALLISTA_TOWER.has(this.projId)) {
+        // 1457 :69599-69609（1456 :65607-65617 ai[1]=0）:落位首帧 ai[1]=shotDelay——
+        // 放置后不再立即射第一箭,先等满一档装填（160/100/60/30）
+        if (this.sInit === 0) {
+          this.sInit = 1;
+          this.sCool = ballistraShotDelayOf(game.player);
+        }
         if (this.sFire === 0) {
           const tgt = this.nearestEnemy(game, 900);
           if (tgt) this.facing = tgt.cx >= this.cx ? 1 : -1;
@@ -890,7 +912,7 @@ export class MinionProj extends Entity {
               Object.assign(new Arrow(this.cx - 8, this.cy - 8, vx, vy, dmgOf(), this.knockback, 680, null), { whipTagShot: true }),
               'projectiles');
           }
-          if (++this.sFireT >= 25) { this.sFire = 0; this.sCool = 160; }
+          if (++this.sFireT >= 25) { this.sFire = 0; this.sCool = ballistraShotDelayOf(game.player); }
         }
         return;
       }
@@ -1115,12 +1137,12 @@ export class MinionProj extends Entity {
     // Cool Whip 雪花哨兵 917（buff 312 维持）与 Cobwhip 蜘蛛 1036（buff 365 维持）：
     // 独立索敌 400/环绕，伤害吃 summonDamageMult
     // Foxparks 1094 喷火态（PR:56081-56159：ai[0] 1000-1003 每 4t 一发 1106；
-    // 伤 = dmg×0.75(:56133) ×命中 0.85(:12620)；OnFire 300t(:11002)；penetrate 4；
-    // 寿命 72t/54t 后不伤——Arrow 无 extraUpdates，速度×3/life÷3 等价换算）
+    // 伤 = dmg（1456 :56133 ×0.75 → 1457 :60068 全额）×命中 0.85(:12620)；OnFire 300t(:11002)；
+    // penetrate 4；寿命 72t/54t 后不伤——Arrow 无 extraUpdates，速度×3/life÷3 等价换算）
     if (this.projId === 1094 && this.foxChannel) {
       if (++this.foxT % 4 === 1) {
         const flame = new Arrow(this.cx - 3, this.cy - 3, this.foxAimX * 15, this.foxAimY * 15,
-          Math.max(1, Math.round(dmg0 * 0.75 * 0.85)), 0, 1106, null,
+          Math.max(1, Math.round(dmg0 * 0.85)), 0, 1106, null,
           { grav: 0, life: 24, pierce: 4 });
         flame.ignite = true; // 命中 OnFire 300t（PR:11002-11004）
         // 喷火嘶声（Projectile.cs:38958）：1106 弹 whoAmI%3==0 才播——三发一门近似；

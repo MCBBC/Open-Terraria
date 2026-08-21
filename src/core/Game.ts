@@ -143,6 +143,7 @@ import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { MONEY_TROUGH_USE } from '../data/vanillaOpenBags';
 import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
+import { isGemBolt, packGemStaffFeatures, type GemStaffFlags } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
 import { Enemy, visEffectFrames, bindEnemySoundPrewarm } from '../entities/Enemy';
@@ -767,6 +768,17 @@ function vanillaMainTime(timeOfDay: number): number {
 function minionSlotsOf(m: MinionProj): number {
   return m.projId === 387 || m.projId === 388 ? 0.5 : 1;
 }
+
+/** ProjectileID.Sets.FixedSelfDamageForPlayers（1457 :193,1456 无;SelfHurtPlayers
+ *  :15104-15152 消费）——爆炸对玩家定伤:发射器/陷阱炸药族 133-144/776-801=60、
+ *  1117 雷击=120;未列 = 弹幕自然伤害（Game.explodeAt 玩家段同表消费） */
+export const FIXED_SELF_DAMAGE_FOR_PLAYERS: Record<number, number> = (() => {
+  const t: Record<number, number> = {};
+  for (let i = 133; i <= 144; i++) t[i] = 60;
+  for (let i = 776; i <= 801; i++) t[i] = 60;
+  t[1117] = 120;
+  return t;
+})();
 
 export class Game implements GameHooks {
   /** FlexibleWandCycleOffset（Player.cs:3028 静态；持碎块魔杖族按 ↑/↓ 循环样式，
@@ -3017,6 +3029,8 @@ export class Game implements GameHooks {
     lucyEnterWorld();
     // Mechdusa queen 登记复位（WorldGen.clearWorld :6907 NPC.mechQueen=-1）
     resetMechQueen();
+    // ★1457：homelessSpawnTimeout 复位 54000（clearWorld cs:6976——读档/换世界即节流重置）
+    this.homelessSpawnTimeout = 54000;
     // M3 Boss 伤害统计复位 + 宿主注入（NPCDamageTracker.Reset :196-204;换世界清账）
     resetBossDamage();
     bindBossDamageHost({
@@ -5160,6 +5174,8 @@ export class Game implements GameHooks {
     //      StartNight/StartDay 双双清 checkForSpawns（:64711-64712/:64857-64858），
     //      计数锚在昼夜切换点，本仓锚全局 tick，不影响入驻节奏 ----
     if (this.tickCount % 7200 === 600) this.updateTownNpcArrival();
+    // ★1457：homelessSpawnTimeout 每 tick 递减（UpdateWorld cs:72083-72086）
+    if (this.homelessSpawnTimeout > 0) this.homelessSpawnTimeout--;
     // ---- 昼夜事件（UpdateTime_StartNight :64817 / StartDay :64876 语义） ----
     {
       const ct = w.clock.timeOfDay, pt = this._lastClockT;
@@ -6586,9 +6602,11 @@ export class Game implements GameHooks {
           const pk = Game.petBuffKinds();
           if (pk.light.has(btype) || pk.vanity.has(btype)) bother = false;
         }
-        // mana>0 且值得用 → 扣魔（:5557-5561）；魔不够则跳过本件
+        // mana>0 且值得用 → 扣魔（:5557-5561）；魔不够则跳过本件。
+        // 1457: 扣魔同时 ApplyManaRegenerationDelay()（QuickBuff_ShouldUseItem
+        // :5875-5888 `manaRegenDelay = (int)maxRegenDelay` 改调）——回蓝 buff 期钳 20
         if (bother && (f.mana ?? 0) > 0) {
-          if (p.mana >= f.mana!) { p.mana -= f.mana!; } else bother = false;
+          if (p.mana >= f.mana!) { p.mana -= f.mana!; p.applyManaRegenerationDelay(); } else bother = false;
         }
         if (!bother) continue;
         if (btype === 27) {                                              // :5566-5575 三选一
@@ -9645,11 +9663,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (pen < 0) pen = 3;
         pen = Math.max(1, Math.min(pen, 3));
         const gsM = projGravSpec(cw.shoot);
+        // 1457 宝石法珠分化（PackGemStaffFeatures Player.cs:49990）：shoot 主特性 ∪
+        // 胸部长袍特性（1282-1287/4256）;穿透/穿甲/timeLeft 终值化在 Arrow ctor 内做
+        let gemFlags: GemStaffFlags | undefined;
+        if (isGemBolt(cw.shoot)) {
+          const chestDef = ITEM_DEFS[this.player.inv.armor[1]?.id ?? -1];
+          const chestVid = chestDef ? (chestDef.vid ?? viIdFromKey(chestDef.key) ?? -1) : -1;
+          gemFlags = packGemStaffFeatures(cw.shoot, chestVid >= 0 ? chestVid : undefined,
+            def.vid ?? viIdFromKey(def.key) ?? undefined);
+        }
         const mArrow = new Arrow(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
           { grav: gsM.grav, gravDelay: gsM.delay, grav2: gsM.grav2, grav2At: gsM.grav2At,
-            dragAlways: gsM.drag, life: pd?.timeLeft ?? 600, pierce: pen });
+            dragAlways: gsM.drag, life: pd?.timeLeft ?? 600, pierce: pen, gem: gemFlags });
         // 星云 booster（StrikeNPC :12892-12905：魔法弹命中、套装在身、CD=0、1/3 → 掉 booster）
         mArrow.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧
         mArrow.critBonus = this.player.critChance('magic')
@@ -9702,6 +9729,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.entities.add(pg, 'projectiles');
           }
           this.player.useTime = cw.useTime;
+          this.piranhaChanItemId = pgItemId;   // 1457: 登记 channel 态（0 条补射用）
           this.playUseSound(critVid, 'bowShoot');   // UseSound=Item_10（itemUseSound 表数据驱动）
           this.input.mouseDown = false;
           break;
@@ -13107,6 +13135,51 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 开宝箱统一入口:锁定箱(原版 Chest.locked)需金钥匙,首次开启消耗 */
+  /** 食人鱼枪 0 条补射（1457 ItemCheck_OwnerOnlyCode :43878-43892 删 `num > 0`
+   *  门：channel 期 num<3 即 flag4=true——按住扳机全场 0 条也补齐 3 条。
+   *  1456 :42864 为 `num > 0 && num < 3`（0 条必须重新点击）。1-2 条场景仍由
+   *  实体侧 Arrow.pTopUp 驱动（原 1456 语义路径），此处只兜 0 条 */
+  private tickPiranhaChannelRefire(inp: Input | null): void {
+    if (this.piranhaChanItemId < 0) return;
+    const held = this.player.inv.heldItem();
+    const channeling = !!this.input?.mouseHeld && !this.input.uiBlocking
+      && held?.id === this.piranhaChanItemId && !this.player.dead;
+    if (!channeling) {
+      this.piranhaChanItemId = -1;
+      return;
+    }
+    const alive = this.entities.projectiles.filter(
+      (e) => (e as { projId?: number }).projId === PIRANHA_PROJ && !(e as { dead?: boolean }).dead).length;
+    if (alive > 0) return;                       // 1-2 条 → 实体侧 pTopUp 已覆盖
+    const def = ITEM_DEFS[held!.id];
+    const cw = def ? itemCombat(def.vid ?? viIdFromKey(def.key)) : null;
+    if (!cw || cw.shoot !== PIRANHA_PROJ || cw.shootSpeed == null) { this.piranhaChanItemId = -1; return; }
+    const pgSpd = cw.shootSpeed;
+    const pgDmg = cw.damage ?? 40;      // ItemCombat 可选字段（食人鱼枪表值 40）
+    const px = this.player.cx, py = this.player.cy - 4;
+    const [wx, wy] = this.camera.screenToWorld(inp?.mouseX ?? 0, inp?.mouseY ?? 0);
+    const ang = Math.atan2(wy - py, wx - px);
+    for (let i = 0; i < 3; i++) {
+      const pg = new Arrow(px, py,
+        Math.cos(ang) * pgSpd + (Math.floor(Math.random() * 81) - 40) * 0.05,
+        Math.sin(ang) * pgSpd + (Math.floor(Math.random() * 81) - 40) * 0.05,
+        pgDmg, cw.knockBack ?? 0, PIRANHA_PROJ, null,
+        { grav: 0, life: PIRANHA_LIFE, piranha: {
+          channel: () => !!this.input?.mouseHeld && !this.input.uiBlocking
+            && this.player.inv.heldItem()?.id === this.piranhaChanItemId && !this.player.dead,
+          aim: () => {
+            const [ax, ay] = this.camera.screenToWorld(inp?.mouseX ?? 0, inp?.mouseY ?? 0);
+            return { x: ax, y: ay };
+          },
+        } });
+      pg.pShootSpeed = pgSpd;
+      pg.critChance = 0.04 + (cw.crit ?? 0) / 100 + this.player.critChance('ranged') / 100;
+      pg.armorPen = this.player.equipStats.armorPen;
+      pg.frostEligible = true;
+      this.entities.add(pg, 'projectiles');
+    }
+  }
+
   private tryOpenChest(chest: { locked?: boolean }): void {
     // 物品保护（v3 房间制）：非房主禁开宝箱（v1 无箱子内容同步，取放全在本地——门禁开箱即拦截）
     if (!this.netCanChestInteract()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectItems')); return; }
@@ -13737,6 +13810,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  clearWorld 重置=进世界清零；与血月 roll 互斥门 :64818） */
   /** 本夜流星强度（Star.starfallBoost——每夜 NightSetup 重掷；坠星频率乘子） */
   private starfallBoost = 1.0;
+  /** ★1457 新增（WorldGen.homelessSpawnTimeout :4161，cs:4956/72083/6976）：城镇 NPC
+   *  流浪生成一天一户节流——>0 时 SpawnHomelessNPC 直接 return；成功生成置 54000
+   *  （=1 天）；UpdateWorld 每 tick 递减；clearWorld 复位 54000。不入存档（原版
+   *  WorldGen 静态字段）。 */
+  private homelessSpawnTimeout = 0;
   /** 本夜天幕流星已掷(_canShowMeteorFall 位;入夜重置) */
   private _skyMeteorShown = false;
   /** 陨石坠落旗标（WorldGen.spawnMeteor :4156——入夜 roll/EoW 击杀置位，夜半消费；
@@ -14517,7 +14595,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         kind: 'projectile',
         name: Lang.projectileName(projId || 108) ?? 'Explosives',
       };
-      p.damage(damage, cx, cy);
+      // 1457 :15104-15152 SelfHurtPlayers（1456 :13944 BombsHurtPlayers）:
+      // FixedSelfDamageForPlayers 定伤表（ProjectileID.cs:193,1456 无）——
+      // 发射器/陷阱炸药族 133-144/776-801 对玩家恒 60、1117 雷击 120（DamageVar 前
+      // 覆写）;未列弹 = 自然伤害。108/1002 的 playerIndex=-1/pvp=false 特判已删
+      // （1457 统一 !hostile && type!=949 门,hostile 弹本就 -1）
+      const fixedSelf = FIXED_SELF_DAMAGE_FOR_PLAYERS[projId];
+      p.damage(fixedSelf ?? damage, cx, cy);
     }
     // BombsHurtPlayers 跨端半边（Projectile.cs:13944-13981）：原版各端只结算【本地
     // 玩家】被炸（Main.LocalPlayer）——爆炸天然 victim-settles。远端代理在本端无爆炸
@@ -16431,7 +16515,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     } else {
       // SpawnHomelessNPC（:4992）：白天且当前无流浪 NPC 时，在已入住者的家附近生成；
       // 无人入住（无锚点）则不生成——新世界只有向导（WorldGen.cs:20036 出生）
-      if (!this.world.clock.isDay || homes.length === 0) return;
+      // ★1457（cs:4956-4988）：+homelessSpawnTimeout 节流门（>0 直接 return）+
+      //  需已有入住 NPC（num>0,排除 37 老人/453 骷髅商/368 旅商——同锚池口径）；
+      //  成功生成后置 54000（一天一户）
+      if (!this.world.clock.isDay || this.homelessSpawnTimeout > 0) return;
+      if (anchorPool.length === 0) return;
       if (npcs.some((n) => !n.home)) return;
       const homeAnchor = homes[Math.floor(Math.random() * homes.length)];  // 同 pickAnchor 口径（此处已保证 homes 非空）
       const ax = homeAnchor.x + (Math.random() < 0.5 ? -1 : 1) * (30 + Math.floor(Math.random() * 50));
@@ -16442,6 +16530,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (ay >= limit) return;
       const npc = new TownNPC(pick, ax * TILE + 8, (ay + 1) * TILE);
       this.entities.add(npc, 'npcs');
+      this.homelessSpawnTimeout = 54000;   // ★1457 cs:4988：成功入住后一天一户节流
       this.newText(Lang.text(`Announcement.HomelessArrived_${Math.floor(Math.random() * 6)}`, name), 50, 125, 255);
     }
   }
@@ -16558,7 +16647,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (en.dead) continue;
       const ex = en.x ?? 0, ey = en.y ?? 0, ew = en.w ?? 16, eh = en.h ?? 16;
       if (!(ex < rx + hw * 2 && ex + ew > rx && ey < ry + hh * 2 && ey + eh > ry)) continue;
-      const vid = en.vanillaId ?? -1;
+      const vid = (en as unknown as { vanillaId?: number }).vanillaId ?? -1;
       const grp = INVASION_GROUP[vid] ?? 0;
       if (grp > 0 && grp === this.world.invasionType) return false;
       if (Game.RESPAWN_BLOCKING_DANGER.has(vid)) return false;

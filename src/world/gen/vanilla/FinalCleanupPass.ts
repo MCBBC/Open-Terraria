@@ -308,17 +308,10 @@ function plantBadMatch(down: number, type: number): boolean {
   }
   return true;
 }
-/** PlantCheck_TryGetNewType（1457 cs:81892-81960）：按地基换型+帧折叠。
- *  ★1457 两改：①首分支 `3|110|24` → `3|61|110|24`（丛草植物 61 入
- *  isMushroomOrSpore 判定,fx==144 视作孢子/菇帧）；②isMushroomOrSpore 取
- *  **入口帧**（ref 形参在折叠前读）——旧 JS 用折叠后帧重算,fx≥162 折 126 的
- *  组合会漏置（与原版 144/270 判定错位）。 */
-function plantNewType(sheet: number, down: number, fx: number): { type: number; fx: number; spore: boolean } {
+/** PlantCheck_TryGetNewType（cs:81334-81418）：按地基换型+帧折叠 */
+function plantNewType(sheet: number, down: number, fx: number): { type: number; fx: number } {
   let type = sheet, nfx = fx;
-  // isMushroomOrSpore（入口帧判定,先于一切折叠）
-  let spore = false;
-  if (type === 3 || type === 110 || type === 24) spore = nfx === 144;
-  if (type === 201) spore = nfx === 270;
+  if ((type === 3 || type === 110 || type === 24)) { /* isMushroom 判定仅重帧 */ }
   if ((type === 3 || type === 73) && down !== 2 && down !== 477 && nfx >= 162) nfx = 126;
   if (type === 74 && down !== 60 && down !== 226 && nfx >= 162) nfx = 126;
   switch (down) {
@@ -329,7 +322,7 @@ function plantNewType(sheet: number, down: number, fx: number): { type: number; 
     case 60: case 226: type = 61; while (nfx > 126) nfx -= 126; break;
     case 70: type = 71; while (nfx > 72) nfx -= 72; break;
   }
-  return { type, fx: nfx, spore };
+  return { type, fx: nfx };
 }
 
 /** 扫描上下文：destroyObject 原版全局位（各 Check 首查尾清）；
@@ -707,7 +700,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   TileFrame 不查画幅墙洞（m20260811 #105 残 6 格：245 画 (3269,1374) 背墙
     //   (3270,1375) w0 洞，vanilla 整幅杀、JS 因 ⑫ 继承先行补墙存活）。
     case 245: case 246: case 241: case 242:
-      if (process.env.SW_NO_WALLART !== '1') checkWallArtSweep(st, ctx, x, y, sheet);
+      checkWallArtSweep(st, ctx, x, y, sheet);
       return true;
     // DDDDDD 批补（cs:86437-40 → CheckSuper cs:48117）：376 渔笼/443 间歇泉/
     //   444 蜂巢块——LLLL"不在场"备案陈旧（杀账铁证 KL t444×12/t443×1），485
@@ -1474,9 +1467,9 @@ function plantCheckSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, she
   if (r.type !== sheet) {
     st.type[i] = sid(r.type);
     st.frameX[i] = r.fx;
-    // ★1457（cs:81915-81922）：`if (isMushroomOrSpore) { frameX=144; if (type2==201) frameX=270; }`
-    //  ——201 判定改用**转化后** type2（1456 是原 type）;spore 取入口帧（plantNewType 内）。
-    if (r.spore) st.frameX[i] = 144;
+    const mushroom = (sheet === 3 || sheet === 110 || sheet === 24) && r.fx === 144
+      ? true : (sheet === 201 && r.fx === 270);
+    if (mushroom) st.frameX[i] = sheet === 201 ? 270 : 144;
   } else {
     ctx.destroyObject = true; killTileGen(st, ctx, x, y); ctx.destroyObject = false;
   }
@@ -1541,25 +1534,6 @@ function checkPileSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): voi
 }
 
 /** Check2x1（cs:46989）：横 2 格完整性 + {29,103,462} 桌面门 */
-/** WorldGen.AnchorValid(tile, AnchorType.Table)（1457 cs:52294）sheet 空间版：
- *  ① SolidWithTop/Table 支——平台（frameX/18 ∈ [0,7](且非半砖) ∪ [12,16] ∪ [25,26]）
- *     或 solid∩solidTop；②Table 支——tileTable 且 blockType==0（非半砖非坡）。
- *  1457 Check2x1 case 103（碗）桌面门失败时的逃生锚（cs:47416）。 */
-function anchorValidTableSheet(st: TileStore, x: number, y: number): boolean {
-  if (!st.inBounds(x, y)) return false;
-  if (!nactiveAt(st, x, y)) return false;   // EmptyTile 不在 Table 锚集
-  const i = st.idx(x, y);
-  const sh = SWEEP_SHEET[st.type[i]];
-  if (PLATFORMS.has(sh)) {
-    const num = Math.floor(st.frameX[i]! / 18);
-    if ((!st.half[i] && num >= 0 && num <= 7) || (num >= 12 && num <= 16) || (num >= 25 && num <= 26)) return true;
-  } else if (genSolidType(st.type[i]) && TILE_SOLID_TOP.has(sh)) {
-    return true;
-  }
-  if (!PLATFORMS.has(sh) && TILE_TABLE.has(sh) && !st.half[i] && st.slope[i] === 0) return true;
-  return false;
-}
-
 function check2x1Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
   if (ctx.destroyObject) return;
   const i = st.idx(x, y);
@@ -1569,14 +1543,12 @@ function check2x1Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
     && sheetAt2(st, x0, y) === sheet && sheetAt2(st, x0 + 1, y) === sheet
     && activeAt2(st, x0, y) && activeAt2(st, x0 + 1, y);
   if (sheet === 29 || sheet === 103 || sheet === 462) {
-    // ★1457（cs:47416）共用体拆 switch：case 103（碗）新增 AnchorValid(Table) 逃生门
     //  ——桌面门失败但底格是合法 Table 锚（平台平帧 / solid∩solidTop / tileTable 且
     //  blockType 0）仍存活；29/462 维持纯桌面门。
     for (const xx of [x0, x0 + 1]) {
       const bi = st.idx(xx, y + 1);
-      const tableFail = !st.flags[bi] || !TILE_TABLE.has(SWEEP_SHEET[st.type[bi]])
-        || st.half[bi] || slopeOf(st, xx, y + 1) === 1 || slopeOf(st, xx, y + 1) === 2;
-      if (tableFail && !(sheet === 103 && anchorValidTableSheet(st, xx, y + 1))) ok = false;
+      if (!st.flags[bi] || !TILE_TABLE.has(SWEEP_SHEET[st.type[bi]])
+        || st.half[bi] || slopeOf(st, xx, y + 1) === 1 || slopeOf(st, xx, y + 1) === 2) ok = false;
     }
   } else if (!solidAllowBottom(st, x0, y + 1) || !solidAllowBottom(st, x0 + 1, y + 1)) {
     // ★AAAAAA：cs:47039-47048 else 支——非桌族（含 185/16/18…）双底格

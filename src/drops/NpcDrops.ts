@@ -669,7 +669,8 @@ export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean, mi
 function coinAmountOnce(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas: boolean): number {
   const rng = ctx.rng;
   let num = value;
-  if (midas) num *= 1 + rng.int(10, 50) * 0.01;   // 金药剂 midas（:80422 Next(10,51) 左闭右开 → int(10,50)；rng.int(a,b)=Next(a,b+1) 约定）
+  // 1457 :80450 Midas 加成 Next(10,51) → Next(30,51)（+10~50% → +30~50%）
+  if (midas) num *= 1 + rng.int(30, 50) * 0.01;   // 金药剂 midas（1457 :80450 Next(30,51) 左闭右开 → int(30,50)；rng.int(a,b)=Next(a,b+1) 约定）
   num *= 1 + rng.int(-20, 75) * 0.01;             // :80425 Next(-20,76) → [-20,75]
   if (rng.int(0, 1) === 0) num *= 1 + rng.int(5, 10) * 0.01;    // 1/2 ×(1.05-1.10)
   if (rng.int(0, 3) === 0) num *= 1 + rng.int(10, 20) * 0.01;   // 1/4 ×(1.10-1.20)

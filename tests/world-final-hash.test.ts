@@ -8,6 +8,13 @@
 // 提交前必须人工确认改动本身是原版 1:1(金标只锁"没变",不锁"对不对")。
 // 注意:与 caves-checkpoint 的 C# 位级金标互补——那套锁到 underworld 且逐段,
 // 本门锁全管线终态(含 corruption 之后的全部 pass)。
+//
+// ★2026-08-21 再生(1457 对齐批 4)：HellFort 1457 重构(掷序重分配+翼/中央钳 3+
+//   AttemptToPlaceDoor 真实格检查+右外门修复+塌墙阶段)/makeTemple 砖线重做
+//   (深度组 DungeonBounds+StrictAngles L 线)/placeTrap_CanContinue 门/冰箱 7 元池+
+//   753·669 副物品/GetNextJungleChestItem 删 753 支/FinalSeedCleanup 终扫——
+//   终态四数组哈希按 1457 行为重捕(旧值锚 1456 几何,作废)。caves-checkpoint 的
+//   1456 C# oracle 金标 underworld 起不再可比,待 1457 oracle 重建。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';

@@ -998,11 +998,12 @@ export function dukeBubbleAI(e: Enemy, game: GameHooks, player: Player | null) {
 //   → 2 死亡演出(600t 后真死,全族消散)/ 3 玩家全灭离场(60t 后全族清除)。
 //   -2:远距(>2400px)传送归位后的短演出。
 
-/** 二阶段弹幕表 = MoonLordAttacksArray2(:6966-6985,10 槽循环),驱动 NPC 400 真眼
- *  (aiStyle 81,:38243-38264,由部件 checkDead 召出,见 spawnTrueEye)。
+/** 二阶段弹幕表 = MoonLordAttacksArray2(InitializeMoonLordAttacks2,1457 :6992-7029,
+ *  10 槽循环),驱动 NPC 400 真眼(AI_081_TrueEyeOfCthulhu,由部件 checkDead 召出,
+ *  见 spawnTrueEye)。1457 起五个悬停槽 90→53(与头部 1200t 循环相位对齐)。
  *  真眼数据/贴图缺失导致 spawn 失败时,攻击主链才折叠到核心上执行兜底。 */
 const ML_CORE_P2: ReadonlyArray<readonly [number, number]> = [
-  [0, 90], [1, 90], [0, 90], [2, 135], [0, 90], [3, 200], [0, 90], [4, 375], [0, 90], [2, 135],
+  [0, 53], [1, 90], [0, 53], [2, 135], [0, 53], [3, 200], [0, 53], [4, 375], [0, 53], [2, 135],
 ];
 
 /** 朝玩家发射一发弹幕的通用出口(伤害/弹 id 全部来自原版 NewProjectile 调用点;
@@ -1016,14 +1017,36 @@ function mlShoot(e: Enemy, game: GameHooks, player: Player, ox: number, oy: numb
 }
 void mlShoot;
 
-/** checkDead(:78845-78857):手 397 / 头 396 血尽 → ai0=-2 闭眼残肢的同时,于部件中心
- *  召 NPC 400 真眼,ai[3] = 部件的 ai[3](核心 id,游离眼 AI 据此锚定核心) */
+/** checkDead(:78845-78857)+1457 MoonLord_SpawnTrueEyeOfCthulhu(:41562-41583):
+ *  手 397 / 头 396 血尽 → ai0=-2 闭眼残肢的同时,于部件中心召 NPC 400 真眼。
+ *  1457 重做生成参数：ai[0]=-2（残肢态,表驱动悬停槽接管）、ai[1]=相位对齐值——
+ *    num2 = 1200/3 = 400;num3 = 188+400 = 588;num6 = 588+400×已有真眼数;
+ *    num7 = (参考ai1 − num6) mod 1200（负则 +1200）。
+ *    参考ai1 = 头 396 的 ai[1]（部件为手 397 时 FindFirstNPC(396) 取头部——
+ *    手自身 ai[1] 已被 checkDead 清零,头的是攻击循环相位基准）。
+ *  ai[3] = 部件的 ai[3](核心 id,游离眼 AI 据此锚定核心) */
 function spawnTrueEye(game: GameHooks, part: Enemy): void {
+  // CountNPCS(400) 在 NewNPC 之前计（:41564）——本仓 spawnPart 即入桶,先数后召
+  const count = (game.enemies() as Enemy[]).filter((n) => !n.dead && n.vanillaId === 400).length;
   const eye = spawnPart(game, part, 400);
   if (!eye) return;
   eye.x = part.cx - eye.w / 2;
   eye.y = part.cy - eye.h / 2;
-  eye.ai0 = 0; eye.ai1 = 0; eye.ai2 = 0; eye.ai3 = part.ai3;
+  const LOOP = 1200;                       // MoonLordHeadAttackTotalLoopTime :6030
+  const num2 = Math.trunc(LOOP / 3);       // 400（:41568）
+  const num3 = 188 + num2;                 // 588（:41569）
+  let ref = part.ai1;
+  if (part.vanillaId === 397) {            // :41571-41577 手 → 取头部相位
+    const head = (game.enemies() as Enemy[]).find((n) => !n.dead && n.vanillaId === 396);
+    if (head) ref = head.ai1;
+  }
+  let phase = ref - (num3 + num2 * count); // :41578-41580
+  phase %= LOOP;
+  if (phase < 0) phase += LOOP;
+  eye.ai0 = -2;                            // :41583 NewNPC 第 6 参 ai[0]=-2f
+  eye.ai1 = phase;                         // 第 7 参 ai[1]=num7 相位
+  eye.ai2 = 0;
+  eye.ai3 = part.ai3;
 }
 
 /** 月噬弹 456（Projectile.cs:5008 SetDefaults + aiStyle 85 :30678-30750）：
@@ -1849,9 +1872,11 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
   if (e.ai0 < -3) e.ai0 = 0;
   const core = (game.enemies() as Enemy[]).find((n) => n.id === e.ai3 && n.vanillaId === 398);
   if (!core || core.dead) { e.dead = true; return; } // :37714-37719
-  // checkDead(:78845-78857)同手:血尽 → ai0=-2 闭眼残肢 + 召真眼 400
+  // checkDead(:78845-78857)同手:血尽 → ai0=-2 闭眼残肢 + 召真眼 400。
+  // 1457 :78856 追加相位槽清理 ai[(type!=396)?1:2]=0——头 396 清 ai[2]、手 397 清
+  // ai[1];头的 ai[1] 保留 = 真眼生成相位的基准（spawnTrueEye 读它）
   if (e.hp <= 0 && e.ai0 !== -2 && e.ai0 !== -3) {
-    e.ai0 = -2; e.ai1 = 0; e.ai2 = 0; e.hp = e.maxHp; e.iframes = 2;
+    e.ai0 = -2; e.ai2 = 0; e.hp = e.maxHp; e.iframes = 2;
     spawnTrueEye(game, e);
   }
 

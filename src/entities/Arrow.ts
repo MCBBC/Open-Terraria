@@ -7,7 +7,7 @@ import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/Sprit
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { hitCritters, hitPlayer, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
-import { canHit } from '../physics/LineOfSight';
+import { canHit, canHitLine } from '../physics/LineOfSight';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -85,6 +85,7 @@ export function prefetchProjectiles(ids: Iterable<number>): void {
  *  整图绘制会把多帧压成胶片条（史莱姆随从 266 曾 12 帧压成一坨） */
 import projFramesJson from '../data/vanilla-projframes.json';
 import { projectileData } from '../data/vanillaProjectiles';
+import { isGemBolt, type GemStaffFlags, gemDamageMultiplier } from '../data/vanillaGemStaff';
 import { projGravSpec } from '../data/vanillaItemCombat';
 const PROJ_FRAMES = projFramesJson as Record<string, number>;
 export function projFrameCount(projId: number): number {
@@ -134,6 +135,9 @@ export interface ArrowOpts {
   /** aiStyle 14 弹跳弹（希腊火/装饰球等月事件弹幕，Projectile.cs 碰撞反弹
    *  cs:18314-18327 档）：撞实心块法向反弹 ×0.5 衰减而非消亡。 */
   bounce?: boolean;
+  /** 1457 宝石法珠特性（GemStaffFeatures，vanillaGemStaff.ts）——Game 侧
+   *  PackGemStaffFeatures 打包传入；穿透/穿甲/timeLeft 终值化在 ctor 内做 */
+  gem?: GemStaffFlags;
   /** aiStyle 14 荆棘球档（世纪之花 277，Projectile.cs:18306-18314）：
    *  vx 恒反 ×0.9；仅入撞 |vy|>3 才竖弹 ×0.9（地面滚动语义）。 */
   thornBounce?: boolean;
@@ -391,6 +395,47 @@ export class Arrow extends Entity {
   reflected = false;
   /** 穿透投射物的同敌免疫表（敌人 id 集合） */
   private hitSet = new Set<number>();
+  /** 1457 宝石法珠特性（null = 非宝石弹/未启用） */
+  gem: GemStaffFlags | null = null;
+  /** SwirlTwins 正弦摆相位计数（localAI[0]，:38615 每步 +1） */
+  private gemSwirlT = 0;
+
+  /** FindTargetWithLineOfSight 等价：视距内最近且有视线的敌怪（:38571 FindTargetWithLineOfSight） */
+  private nearestEnemyWithLos(game: GameHooks, range: number): { cx: number; cy: number } | null {
+    let best: { cx: number; cy: number } | null = null;
+    let bestD = range;
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { cx?: number; cy?: number; x: number; y: number; w: number; h: number; dead?: boolean };
+      if (e.dead) continue;
+      const cx = e.cx ?? e.x + e.w / 2;
+      const cy = e.cy ?? e.y + e.h / 2;
+      const d = Math.hypot(cx - this.cx, cy - this.cy);
+      if (d >= bestD) continue;
+      if (!canHitLine(game.world.store, this.cx, this.cy, 0, 0, cx, cy, 0, 0)) continue;
+      best = { cx, cy };
+      bestD = d;
+    }
+    return best;
+  }
+
+  /** AoeExplosion 爆段（Kill :77011-77058）：Resize(160)=80px 半径 AoE——
+   *  伤害 ×0.35/GetDamageMultiplier、kb ×0.35、penetrate -1（一击全杀段） */
+  private gemAoeBurst(game: GameHooks): void {
+    if (!this.gem?.aoeExplosion) return;
+    const mult = gemDamageMultiplier(this.gem);
+    const dmg = Math.max(1, Math.trunc(this.damage * (0.35 / mult)));
+    const R = 80;
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { cx?: number; cy?: number; x: number; y: number; w: number; h: number; dead?: boolean; hurt?: (...a: unknown[]) => boolean };
+      if (e.dead || !e.hurt) continue;
+      const cx = e.cx ?? e.x + e.w / 2;
+      const cy = e.cy ?? e.y + e.h / 2;
+      if (Math.abs(cx - this.cx) < R + e.w / 2 && Math.abs(cy - this.cy) < R + e.h / 2) {
+        e.hurt(dmg, Math.sign(cx - this.cx) * this.knockback * 0.35, 0, game, this.settlePen, false, this.pierceInit, true);
+      }
+    }
+    game.spawnParticles(this.cx, this.cy, '#C080FF', 18, 3, { life: 24, size: 3 });
+  }
   // ---- 喵刀弹 502（Meowmere Cat）专属态 ----
   /** ai[0]：弹跳+命中共享计数（0..5，≥5 消亡）——弹跳 :18169 递增/命中 :16794
    *  递增同槽（先到 5 者杀弹，喵叫音高 style=5+ai0 随之爬升） */
@@ -517,6 +562,19 @@ export class Arrow extends Entity {
     this.dragAlways = opts?.dragAlways ?? (gravExplicit ? 0 : spec0.drag ?? 0);
     this.life = opts?.life ?? 1200;
     this.pierce = opts?.pierce ?? 1;
+    // 1457 FinalizeProjectile_GemStaves（:22259-22296）：特性穿透/穿甲/timeLeft 终值化
+    if (opts?.gem) {
+      this.gem = opts.gem;
+      let addPen = 0;
+      let addArpen = 0;
+      if (opts.gem.fastThenSlow) { addPen = Math.max(addPen, 1); this.life *= 2; }
+      if (opts.gem.canBounce) addPen = Math.max(addPen, 2);
+      if (opts.gem.biggerHitbox) addPen = Math.max(addPen, 1);
+      if (opts.gem.arPenSpread) addArpen += 4;
+      if (opts.gem.allGems) { addPen = 2; addArpen = 4; this.life = 90; }
+      this.pierce += addPen;
+      this.armorPen += addArpen;
+    }
     this.pierceInit = this.pierce;
     this.hostile = opts?.hostile ?? false;
     this.bounce = opts?.bounce ?? false;
@@ -747,6 +805,9 @@ export class Arrow extends Entity {
     // 判定盒外扩 112×112 重结算 Damage() + 尘 31×4/228×80；近身 42/撞块/180t
     // 自毁全部走此口）
     if (this.martianRocket) this.rocketExplode(game);
+    // 1457 宝石法珠 AoeExplosion 爆段（Kill :77011-77058，黄玉法珠/长袍臂）：
+    // Resize(160) 80px 半径 AoE + 伤 ×0.35/GetDamageMultiplier + kb ×0.35
+    if (this.gem?.aoeExplosion && !this.dead) this.gemAoeBurst(game);
     this.dead = true;
     game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h, this.vx, this.vy);
   }
@@ -799,6 +860,65 @@ export class Arrow extends Entity {
       this.vy = Math.min(this.vy + this.grav2, this.maxFall);
     }
     if (this.dragAlways !== 0) this.vx *= this.dragAlways;
+    // 1457 宝石法珠行为（AI_029_GemStaffs :38561-38640 + HandleMovement :18106-18160）：
+    //   Homing 视距 500（FastThenSlow/CanBounce ×2=1000）、转向率随距离/速度;
+    //   FastThenSlow 恒 ×0.97 减速（缩到 0.1 以下 Kill）;
+    //   SwirlTwins 垂直向正弦摆（幅 6、0.05Hz×π 相位）
+    if (this.gem) {
+      const g = this.gem;
+      if (g.swirlTwins) {
+        const phase = Math.PI / 2;
+        const n19 = Math.sin((this.gemSwirlT) * (Math.PI * 2) * 0.05);
+        const n20 = Math.sin((this.gemSwirlT + 1) * (Math.PI * 2) * 0.05);
+        this.gemSwirlT++;
+        const d = n20 - n19;
+        const sp = Math.hypot(this.vx, this.vy) || 1;
+        this.x += (-this.vy / sp) * d * 6;
+        this.y += (this.vx / sp) * d * 6;
+        void phase;
+      }
+      if (g.fastThenSlow) {
+        if (Math.hypot(this.vx, this.vy) > 0.1) { this.vx *= 0.97; this.vy *= 0.97; }
+      }
+      if (g.homing) {
+        // :38563-38624 视距 500（FastThenSlow/CanBounce ×2）;FindTargetWithLineOfSight
+        // 取最近有视线目标;速度 <num9(8,FastThenSlow×2) 时 +0.1 提速并 ×1.1;
+        // rotateTowards 转向率 = Remap(距离,视距,0,0,1)×0.1+0.01（近距 +0.05 并
+        // Remap(速度,1,3,10,1) 放大）;近距 150px 内再向目标速度 lerp 0.2
+        const range = 500 * ((g.fastThenSlow || g.canBounce) ? 2 : 1);
+        const tgt = this.nearestEnemyWithLos(game, range);
+        if (tgt) {
+          let sp = Math.hypot(this.vx, this.vy);
+          const maxSp = 8 * (g.fastThenSlow ? 2 : 1);
+          if (sp < maxSp) {
+            this.vx += (this.vx / (sp || 1)) * 0.1;
+            this.vx *= 1.1;
+            this.vy *= 1.1;
+            sp = Math.hypot(this.vx, this.vy);
+          }
+          const dist = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
+          let turn = Math.max(0, 1 - dist / range) * 0.1 + 0.01;
+          if (sp < maxSp) {
+            turn += 0.05 * Math.max(1, Math.min(10, 10 - (sp - 1) * 4.5)); // Remap(sp,1,3,10,1) 近似
+          }
+          const want = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
+          const cur = Math.atan2(this.vy, this.vx);
+          let diff = want - cur;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          const nv = cur + Math.max(-turn, Math.min(turn, diff));
+          this.vx = Math.cos(nv) * sp;
+          this.vy = Math.sin(nv) * sp;
+          if (dist < 150) {           // :38622-38623 近距收敛 lerp
+            const k = Math.max(0, 1 - dist / 150) * 0.2;
+            const txv = ((tgt.cx - this.cx) / dist) * maxSp;
+            const tyv = ((tgt.cy - this.cy) / dist) * maxSp;
+            this.vx = this.vx * (1 - k) + txv * k;
+            this.vy = this.vy * (1 - k) + tyv * k;
+          }
+        }
+      }
+    }
     // 329 焰镰（aiStyle 56，:27666-27687）：首步继承发射者 rotation；此后
     // |vx|+|vy|<16 → 速度 ×1.05 自加速（子步粒度——原版 AI 每 update 一跑）；恒旋
     if (this.scytheRot !== null) {
@@ -1120,6 +1240,16 @@ export class Arrow extends Entity {
       if (!world.store.isSolid(tx, ty)) return;
       // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
       if (this.bounce && this.bounceOff(game)) return;
+      // 1457 宝石法珠 CanBounce（HandleMovement :18112-18150）：法向反弹 ×0.8 +
+      // penetrate--（归零消亡）——琥珀法珠/琥珀长袍臂
+      if (this.gem?.canBounce) {
+        if (this.hitHead || this.hitWall || this.onGround) {
+          this.vy = (this.hitHead || this.onGround) ? -this.vy * 0.8 : this.vy;
+          this.vx = this.hitWall ? -this.vx * 0.8 : this.vx;
+          if (--this.pierce <= 0) { this.killNow(game); return; }
+          return;
+        }
+      }
       // 喵刀弹 502（AI_008 弹跳档 :18165-18206）：tink 音 + ai[0] 计数 ≥5 消亡；
       // 全速翻面（无 ×0.9 衰减——type 15 才有 ×0.8），同 hitSet 语义无
       if (this.projId === 502 && this.meowBounceOff(game)) return;
@@ -1169,8 +1299,13 @@ export class Arrow extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
       if (e.dead) continue;
       if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892/CanBeChasedBy :91070——睡渔夫 376 等友好 NPC 玩家武器无效/不追踪）
+      const foxInf = dragonLine ? 0 : this.foxHitInflate();
+      // 1457 宝石法珠 BiggerHitbox（Colliding :15447-15474）：命中盒外扩 30px
+      const gemInf = !dragonLine && this.gem?.biggerHitbox ? 30 : 0;
+      const hitInf = foxInf + gemInf;
       const hitBox = !dragonLine
-        ? (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)
+        ? (this.x - hitInf < e.x + e.w && this.x + this.w + hitInf > e.x
+          && this.y - hitInf < e.y + e.h && this.y + this.h + hitInf > e.y)
         : (() => {
           for (let k2 = -40; k2 <= 40; k2 += 16) {
             const bx = this.cx + dPerpX * k2 - 8, by = this.cy + dPerpY * k2 - 8;
@@ -1264,6 +1399,18 @@ export class Arrow extends Entity {
     // 召骷髅王即此链);穿透/销毁语义与敌怪一致
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)
       && --this.pierce <= 0) { this.killNow(game); return; }
+  }
+
+  /** 1457 :15079-15086（Damage_GetHitbox 1106 狐火分支,仅此 type 挂高速门）:
+   *  num2 = (int)Remap(localAI[0],0,72,0,20)（localAI[0]=出膛龄）;velocity.Length()>10
+   *  → num2×2+10。本仓 1106 出生 life 24 = 72t 的 3 速等价（MinionProj 出生注释）,
+   *  龄 ×3 回 vanilla 刻度 */
+  private foxHitInflate(): number {
+    if (this.projId !== 1106) return 0;
+    const age = Math.min(this.age * 3, 72);
+    let n = Math.floor((age / 72) * 20);
+    if (Math.hypot(this.vx, this.vy) > 10) n = n * 2 + 10;
+    return n;
   }
 
   /** 1021 巨砾弹地（Projectile.cs:17578-17600）：Y 被挡 lastVy>4 → HitTiles 尘 +

@@ -149,35 +149,35 @@ describe('G7 16 debuff 字段 DoT(NPC.cs UpdateNPC_BuffApplyDOTs :92577+)', () =
 describe('G7 提取表新增条目对账(tools/extract-projstatus.mjs 复杂形状)', () => {
   it('ai1==i 定向族(598/636/971/975/614)入表,带 gate+src', () => {
     // StrikeNPC :12421 先写 ai[1]=victimIndex 再调 StatusNPC → 首击恒真
-    expect(TABLE['598']).toEqual([{ buff: 169, chance: 1, src: 10687, gate: 'ai1==i', durMin: 900, durMax: 900 }]);
-    expect(TABLE['636']).toEqual([{ buff: 189, chance: 1, src: 10691, gate: 'ai1==i', durMin: 300, durMax: 300 }]);
-    expect(TABLE['971']).toEqual([{ buff: 337, chance: 1, src: 10695, gate: 'ai1==i', durMin: 540, durMax: 540 }]);
-    expect(TABLE['975']).toEqual([{ buff: 344, chance: 1, src: 10699, gate: 'ai1==i', durMin: 540, durMax: 540 }]);
-    expect(TABLE['614']).toEqual([{ buff: 183, chance: 1, src: 10727, gate: 'ai1==i', durMin: 900, durMax: 900 }]);
+    expect(TABLE['598']).toEqual([{ buff: 169, chance: 1, src: 11341, gate: 'ai1==i', durMin: 900, durMax: 900 }]);
+    expect(TABLE['636']).toEqual([{ buff: 189, chance: 1, src: 11345, gate: 'ai1==i', durMin: 300, durMax: 300 }]);
+    expect(TABLE['971']).toEqual([{ buff: 337, chance: 1, src: 11349, gate: 'ai1==i', durMin: 540, durMax: 540 }]);
+    expect(TABLE['975']).toEqual([{ buff: 344, chance: 1, src: 11353, gate: 'ai1==i', durMin: 540, durMax: 540 }]);
+    expect(TABLE['614']).toEqual([{ buff: 183, chance: 1, src: 11381, gate: 'ai1==i', durMin: 900, durMax: 900 }]);
   });
   it('remix 局部变量族(15/954/979)取基档,ALT 分支记 gate', () => {
     // 15(:10907-10914):1/2 掷 OnFire 300t
-    expect(TABLE['15']).toEqual([{ buff: 24, chance: 0.5, src: 10907, gate: 'remixWorld→323', durMin: 300, durMax: 300 }]);
-    // 954(:10743-10757):外层 1/2 × 互斥双分支(1/3→60-239t,2/3→60-119t)
+    expect(TABLE['15']).toEqual([{ buff: 24, chance: 0.5, src: 11570, gate: 'remixWorld→323', durMin: 300, durMax: 300 }]);
+    // 954(1457:11397-11411):外层 1/2 × 互斥双分支(1/3→60-239t,2/3→60-119t)
     expect(TABLE['954']!.map((e) => [e.buff, e.chance, e.gate, e.durMin, e.durMax]))
       .toEqual([[24, 1 / 6, 'remixWorld→323', 60, 239], [24, 1 / 3, 'remixWorld→323', 60, 119]]);
     // 979(:10770-10784):基档 44 Frostburn,remix→324
     expect(TABLE['979']!.map((e) => [e.buff, e.gate, e.durMin, e.durMax]))
       .toEqual([[44, 'remixWorld→324', 60, 239], [44, 'remixWorld→324', 60, 119]]);
   });
-  it('85 ai0 三元(:10997-11000)取 else 档 323,ai0==1→324 记 gate', () => {
-    expect(TABLE['85']).toEqual([{ buff: 323, chance: 1, src: 10997, gate: 'ai0==1→324', durMin: 1200, durMax: 1200 }]);
+  it('85 ai0 三元(1457:11660-11663)取 else 档 323,ai0==1→324 记 gate', () => {
+    expect(TABLE['85']).toEqual([{ buff: 323, chance: 1, src: 11660, gate: 'ai0==1→324', durMin: 1200, durMax: 1200 }]);
   });
-  it('694-696 setHuntressT2 套装门(:10786)Oiled 240-510t', () => {
+  it('694-696 setHuntressT2 套装门(1457:11440)Oiled 240-510t', () => {
     for (const t of ['694', '695', '696']) {
-      expect(TABLE[t]).toEqual([{ buff: 204, chance: 1, src: 10786, gate: 'setHuntressT2', durMin: 240, durMax: 510 }]);
+      expect(TABLE[t]).toEqual([{ buff: 204, chance: 1, src: 11440, gate: 'setHuntressT2', durMin: 240, durMax: 510 }]);
     }
   });
-  it('全表条目均带 src 行号(落在 StatusNPC 10555-11065 区间)', () => {
+  it('全表条目均带 src 行号(落在 StatusNPC 1457:11176-11734 区间)', () => {
     for (const [k, list] of Object.entries(TABLE)) {
       for (const en of list) {
-        expect(en.src, `type ${k} 缺 src`).toBeGreaterThanOrEqual(10555);
-        expect(en.src, `type ${k} src 越界`).toBeLessThanOrEqual(11065);
+        expect(en.src, `type ${k} 缺 src`).toBeGreaterThanOrEqual(11176);
+        expect(en.src, `type ${k} src 越界`).toBeLessThanOrEqual(11734);
       }
     }
   });

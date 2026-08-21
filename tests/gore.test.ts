@@ -152,8 +152,11 @@ describe('① vanilla-gore.json 提取表健全性', () => {
         }
       }
     }
-    // 1456 HitEffect 守卫全集（提取器 _meta.notes 逐项对应原版守卫）
-    expect([...kinds].sort()).toEqual(['alt', 'dmg', 'net', 'redhat', 'rnd', 'sdir', 'shim']);
+    // HitEffect 守卫全集（提取器 _meta.notes 逐项对应原版守卫）。
+    // 1457 移除了最后一处 shim 门（发型师 353/354 头部 gore 第二段
+    // `!IsShimmerVariant` → 无条件 `IsShimmerVariant ? 1352 : 543`,:89208）——
+    // shim 语义改由 idAlt 承载,门集不再含 'shim'
+    expect([...kinds].sort()).toEqual(['alt', 'dmg', 'net', 'redhat', 'rnd', 'sdir']);
   });
 });
 

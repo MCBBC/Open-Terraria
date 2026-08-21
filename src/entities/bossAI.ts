@@ -643,7 +643,9 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
         s.vx = (Math.floor(Math.random() * 31) - 15) * 0.1;
         s.vy = (Math.floor(Math.random() * 31) - 30) * 0.1;
         s.ai0 = -1000 * Math.floor(Math.random() * 3);
-        s.ai1 = 0;
+        // 1457 :43869 ai[1] 0→-1——ai[1]==0 会让 slimeRollContainedItem 触发吞物
+        // 掷（:60951 ai[1]==0 = 未掷门）,史王子体显式空体内
+        s.ai1 = -1;
       }
     }
   }

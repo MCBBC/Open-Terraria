@@ -543,7 +543,19 @@ export class Boomerang extends Entity {
       }
     }
     // tileCollide=false（:37145）——moveStep 直接积分
-    const [spd, acc] = BOOMERANG_RETURN[this.projId] ?? (isPhase ? [40, 3] : [9, 0.4]); // :37146-37206
+    const [spd0, acc0] = BOOMERANG_RETURN[this.projId] ?? (isPhase ? [40, 3] : [9, 0.4]); // :37146-37206
+    // 1457 :40172-40186（1456 无）:回程参数接攻速缩放——num30 = Remap(1.5,0,1,1,1/meleeSpeed)
+    // = 1.5/meleeSpeed − 0.5 钳 1..10（本仓 meleeSpeed = 1/attackSpeedMult，即 toMax =
+    // attackSpeedMult）;光刃族豁免（flag3=false）。攻速惩罚档回程更慢更飘,加速档钳底 1 不缩
+    let spd = spd0, acc = acc0;
+    if (!isPhase) {
+      const asm = game.player.attackSpeedMult || 1;
+      let num30 = 1.5 * asm - 0.5;
+      if (num30 > 10) num30 = 10;
+      if (num30 < 1) num30 = 1;
+      spd *= num30;
+      acc *= num30;
+    }
     let dx = p.cx - this.cx, dy = p.cy - this.cy;
     const d = Math.hypot(dx, dy) || 1;
     // :37223-37232 距离 Kill 门（301 6000/其余 3000）

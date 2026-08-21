@@ -101,21 +101,36 @@ describe('宝藏袋开包引擎（Player.OpenBossBag :6828）', () => {
     oneOfN(5111, [5117, 5118, 5119, 5095]);
   });
 
-  it('3330 猪鲨袋:case5 非 remix 落 2623（1/6）、157 限 remix、与 2609 的 1/10 独立', () => {
-    let staff = 0, seal = 0, both = 0, sword = 0;
+  it('3330 猪鲨袋:case6 非 remix 落 2623（1/7,1457 插 Kraken case5）、157 限 remix、与 2609 的 1/10 独立', () => {
+    let staff = 0, seal = 0, both = 0, sword = 0, kraken = 0;
     for (let k = 0; k < 4000; k++) {
       let s = false, f = false;
       openBossBag(3330, (id) => {
         if (id === 2623) { s = true; staff++; }
         if (id === 157) { f = true; seal++; }
         if (id === 2609) sword++;
+        if (id === 3291) kraken++;
       }, W);
       if (s && f) both++;
     }
-    expect(both, '2623 与 157 必须互斥（同 branch5 的 remix 分裂）').toBe(0);
+    expect(both, '2623 与 157 必须互斥（同 branch6 的 remix 分裂）').toBe(0);
     expect(seal, '非 remix 世界 157 不掉').toBe(0);
-    expect(Math.abs(staff / 4000 - 1 / 6), '2623 应 1/6（曾 90%）').toBeLessThan(0.05);
+    // 1457: Next(6)→Next(7),case5 插 Kraken(3291),remix?157:2623 顺移 case6（:7579-7588）
+    expect(Math.abs(staff / 4000 - 1 / 7), '2623 应 1/7（1457 七臂池）').toBeLessThan(0.04);
+    expect(Math.abs(kraken / 4000 - 1 / 7), '3291 Kraken 应 1/7（1457 新增）').toBeLessThan(0.04);
     expect(Math.abs(sword / 4000 - 0.1), '2609 独立 1/10').toBeLessThan(0.05);
+  });
+
+  it('1457 新掉落:3329 石巨人袋 1/6 MobiusStrip(6158)（:7516-7518,与 2110 的 1/7 独立）', () => {
+    let mobius = 0, pet = 0;
+    for (let k = 0; k < 6000; k++) {
+      openBossBag(3329, (id) => {
+        if (id === 6158) mobius++;
+        if (id === 2110) pet++;
+      }, W);
+    }
+    expect(Math.abs(mobius / 6000 - 1 / 6), '6158 应 1/6（1457 新增）').toBeLessThan(0.04);
+    expect(Math.abs(pet / 6000 - 1 / 7), '2110 保持 1/7').toBeLessThan(0.04);
   });
 
   it('3318 史王袋/4957 史后袋:num8·num9 两掷恰 2 件且不重复', () => {

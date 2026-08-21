@@ -168,6 +168,9 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
       break;
     case 2: {                                        // 碎石喷发 :44545-44588
       const START = 32;                              // num8=4 → num9=8×4=32
+      // 1457 :44699-44702 入态首拍（ai1==0）加一声尖叫（1457 全 AI 8 处 vs 1456 6 处
+      // ——FindFrame 3 处尖叫移入 AI 后碎石态多出这一声）
+      if (e.ai1 === 0) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
       e.ai1 += 1;
       if (e.ai1 === START - 20) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
       if (e.ai1 === START) game.playSfxFile?.('deerclops_rubble_attack', 1, e.cx, e.cy);

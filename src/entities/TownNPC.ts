@@ -1052,8 +1052,12 @@ export class TownNPC extends Entity {
 
     // 被绑待救援：原地不动（仅重力落定），解救在 Game.talkToNearbyNpc / 净化粉
     // （原版 bound 类型同走 TargetClosest + spriteDirection，NPC.cs:19813-19816：
-    //  恒面向最近玩家——捆绑姿态转向救援者）
+    //  恒面向最近玩家——捆绑姿态转向救援者）。1457 AI() aiStyle==0 头段
+    //  （:19872-19875）每 tick `homeless = true`（NPCID.Sets.BoundTownNPCs =
+    //  {105,123,106,685,686,687,354,376,579,589}）——被缚者恒无家,本仓 home=null
+    //  等价（Game 入驻轮本就 skip bound,此处按 1457 字面每 tick 置空防残留）
     if (this.bound) {
+      this.home = null;
       const bp = (game as unknown as { player: Player }).player;
       if (bp && !bp.dead) this.facing = bp.cx < this.cx ? -1 : 1;
       this.vx = 0;

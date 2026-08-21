@@ -831,8 +831,21 @@ export function drawCactusCell(
   //  （2026-08-21 用户实报沙漠仙人掌贴图缝，缝精确落在 chunk 边界）。
   //  帧间内容连续（帧 n 的 y=16-17 ≡ 帧 n+1 的 y=0-1 延续），多画不重影；
   //  顶格帧(0,2) y=16-17 为透明、底格帧(0,0) y=16-17 有内容均自洽。
-  if (ux * 18 + 16 <= img.width && uy * 18 + 18 <= img.height) {
-    ctx.drawImage(img, ux * 18, uy * 18, 16, 18, px, py + 2, TILE, TILE + 2);
+  // 下方仍是仙人掌（续格）→ 源 18 高填缝；底格（下方非仙人掌）→ 原 16 高
+  // （帧 y=16-17 的扎根延伸丢弃，避免插入沙面下 2px——原版裁 16 同款）
+  const contBelow = st.inBounds(x, y + 1) && !!st.flags[st.idx(x, y + 1)]
+    && st.type[st.idx(x, y + 1)] === type;
+  if (ux * 18 + 16 <= img.width && uy * 18 + 16 <= img.height) {
+    // 主 pass：源 16×16、tileTop+2 下移（原版 :5083-5085）
+    ctx.drawImage(img, ux * 18, uy * 18, 16, 16, px, py + 2, TILE, TILE);
+    // ★chunk 缝补丁：cell 末行（y%16=15）的续格，tileTop 下移使底部 2px 越出
+    //  cell 底缘被烘焙 clip 裁掉 → 与下 cell 续格之间 2px 横缝（2026-08-21 用户
+    //  实报，缝精确落在 chunk 边界）。补丁 = 把帧 y=16..17（本格底部延伸，视觉
+    //  等价下格帧 y=0..1）画到本格 py+14..py+16（cell 内安全区）→ cell 底 2px
+    //  有内容，下格从 py'+2 起画帧 y=0 → 拼接连续。
+    if (contBelow && y >= 0 && (y % 16) === 15) {
+      ctx.drawImage(img, ux * 18, uy * 18 + 16, 16, 2, px, py + 14, TILE, 2);
+    }
   }
 }
 

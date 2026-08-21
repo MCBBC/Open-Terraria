@@ -480,7 +480,8 @@ export function chaosElementalStep(
 
 /** AI_AttemptToFindTeleportSpot（NPC.cs:18876-18946）1:1。返回落点 tile 坐标。
  *  opts：centered=净空改 i±fluff 矩形（星云脑 :41650）；inAir=免脚下实心（星云脑）；
- *  dungeonWallGate=地牢法师族门（:18899-18904：type 32/281-286 要求上一格地牢砖墙）。 */
+ *  dungeonWallGate=地牢法师族门（:18899-18904：type 32/281-286/693[1457 新增图书
+ *  管理员骷髅] 要求上一格地牢砖墙）。 */
 export function attemptToFindTeleportSpot(
   e: Enemy, game: GameHooks, targetTileX: number, targetTileY: number,
   rangeFromTargetTile: number, telefragPreventionDistanceInTiles: number,
@@ -743,7 +744,9 @@ export function nailheadHitScatter(e: Enemy, game: GameHooks, p: Player | null):
   }
   const ox = e.cx;                                        // :57611 Center.X
   const oy = e.y + e.w / 4;                               // :57611 position.Y + width/4
-  const dmg = Math.trunc(e.def.damage * 0.15);            // :57611 (int)(damage * 0.15)
+  // 1457 :57792：钉弹伤 (int)(damage×0.15) → GetAttackDamage_ForProjectiles(15,25)
+  // = Remap(difficulty, Classic, Expert, 15, 25) 固定档——不再随本体 damage 缩放
+  const dmg = getAttackDamageForProjectiles(15, 25, e.difficulty);
   for (let i = 0; i < num67; i++) {
     const num76 = 8 + Math.floor(Math.random() * 5);      // :57595 Next(8,13) = 8-12
     let vx = Math.floor(Math.random() * 201) - 100;       // :57596 Next(-100,101)

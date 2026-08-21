@@ -49,9 +49,10 @@ describe('vi_* 武器分类（combatWeapon）', () => {
     }
   });
 
-  it('魔法：紫晶法杖 → magic，mana 5、shoot 121', () => {
+  it('魔法：紫晶法杖 → magic，mana 7、shoot 121', () => {
+    // 1457: 宝石法杖 mana 全族上调（5→7，Terarria1457 Item.cs:9977；1456:9958=5）
     const w = combatWeapon({ key: 'vi_739_amethyst_staff' });
-    expect(w).toMatchObject({ kind: 'magic', mana: 5, shoot: 121, damage: 15, useTime: 37 });
+    expect(w).toMatchObject({ kind: 'magic', mana: 7, shoot: 121, damage: 15, useTime: 37 });
   });
 
   it('手里剑仍是 ai2 投掷武器（combatWeapon 不接管，thrownCombat 命中）', () => {

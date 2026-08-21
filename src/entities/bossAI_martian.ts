@@ -19,6 +19,7 @@
 // （World.get isExpert = difficulty >= EXPERT;曾硬编码 EXPERT=false 恒关）;netcode 跳过。
 // 弹幕贴图 Projectile_{264,435,438,447-450}.png 已入 sprites/vanilla(见 shootM 注释)。
 import type { Enemy } from './Enemy';
+import { aiGlobalFiringDistanceCheck } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE, ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
@@ -728,6 +729,11 @@ export function teslaTurretAI(e: Enemy, game: GameHooks, player: Player | null) 
   e.lightRGBAt = { x: e.cx, y: e.cy - 10 };   // :35411 光源 = Center.Y−10
 
   // ---- 电击循环（:35409-35450）----
+  // 1457 :35504-35506 计数归零门加 flag75 = AI_GlobalFiringDistanceCheck——
+  // 超视野时计数到 0 即回卷 -120（永不蓄满 = 不开火）
+  const flag75 = !!player && !player.dead
+    && aiGlobalFiringDistanceCheck(e.cx, e.cy, player.cx, player.cy);
+  if (e.ai0 === 0 && !flag75) e.ai0 = -120;
   if (e.ai0 < 60) e.ai0 += 1;
   if (e.justHit) e.ai0 = -30;            // 受击打断充电
   if (e.ai0 === 60 && player && !player.dead) {

@@ -2390,14 +2390,21 @@
   {
    "scaleExpr": "scale",
    "id": 94,
-   "line": 86351,
+   "line": 86416,
    "gates": [
     {
      "k": "net",
      "op": "!=",
      "v": 1
     }
-   ]
+   ],
+   "post": [
+    [
+     "al",
+     "npc"
+    ]
+   ],
+   "note1457": "NewGoreDirect + gore.alpha = alpha（gore 继承 NPC 透明度）"
   }
  ],
  "123": [
@@ -9330,8 +9337,8 @@
  "353": [
   {
    "id": 544,
-   "idAlt": 1353,
-   "line": 89135,
+   "idAlt": 1351,
+   "line": 89204,
    "gates": [
     {
      "k": "alt",
@@ -9342,13 +9349,8 @@
   },
   {
    "id": 543,
-   "line": 89139,
-   "gates": [
-    {
-     "k": "shim",
-     "not": true
-    }
-   ]
+   "line": 89208,
+   "idAlt": 1352
   },
   {
    "oy": 20,
@@ -9378,8 +9380,8 @@
  "354": [
   {
    "id": 544,
-   "idAlt": 1353,
-   "line": 89135,
+   "idAlt": 1351,
+   "line": 89204,
    "gates": [
     {
      "k": "alt",
@@ -9390,13 +9392,8 @@
   },
   {
    "id": 543,
-   "line": 89139,
-   "gates": [
-    {
-     "k": "shim",
-     "not": true
-    }
-   ]
+   "line": 89208,
+   "idAlt": 1352
   },
   {
    "oy": 20,

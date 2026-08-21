@@ -126,6 +126,22 @@ export function mouseTextColorApprox(): number {
   const p = t % 130;
   return p < 65 ? 190 + p : 255 - (p - 65);
 }
+
+/** AI_GlobalFiringDistanceCheck（1457 新增,NPC.cs:56405-56411）：
+ *  `Utils.CenteredRectangle(targetPos.ToPoint(), Main.MaxWorldViewSize)` 再
+ *  `Inflate(-50,-50)` → 以目标为中心的 1870×1150 视野矩形（半轴 935×575），
+ *  `Contains(shootPos.ToPoint())` = 射手在目标"最大世界视野"内才允许开火/索敌。
+ *  Main.MaxWorldViewSize = Point(1920,1200)（Main.cs:758 恒量,单人等价）。
+ *  Rectangle.Contains 语义：Left ≤ x < Right（XNA 左闭右开）;ToPoint = (int) 截断。
+ *  1457 共 11 处调用：aiStyle 8 施法者族（29 哥布林术士豁免）、13 诅咒触手 101、
+ *  14 哈比 48、19 蚁狮 69、22 幽灵族 122 大蜗牛、38 雪人 143/145、
+ *  73 火星炮塔 387、AI_003 战士 251 独眼僵尸/109 小丑、AI_005 蜂群 139 探针。
+ *  超视野效果 = 不开火/不索敌（防"隐形炮"） */
+export function aiGlobalFiringDistanceCheck(sx: number, sy: number, tx: number, ty: number): boolean {
+  const dx = Math.trunc(sx) - Math.trunc(tx);
+  const dy = Math.trunc(sy) - Math.trunc(ty);
+  return dx >= -935 && dx < 935 && dy >= -575 && dy < 575;
+}
 /** 661 帝皇蝶离神圣渐隐一步（NPC.cs:45240-45263 纯函数化，仅 type 661）：
  *  fading（目标失效 / 中心距 ≥300 / 目标玩家不在神圣，:45244-45252）→ ai2 +1，
  *  否则 −1，钳 [0, cap]（cap=50 常态；目标不在神圣抬到 60，:45242/:45250）；
@@ -1137,6 +1153,27 @@ export class Enemy extends Entity {
   midasT = 0;
   /** confused(31)：纳米药剂/浸剂命中——buff 存量（秒）。语义见 {@link confused} */
   confusedT = 0;
+  /** ---- 1457 新敌怪 debuff 家族（BuffID 395/397/398/399/400 + 362 电鳗鞭标记；
+   *  DOTTally 管线 NPC.cs:92746-92800,单位换算 lifeRegen/2 = HP/s）----
+   *  395 强酸 / 397 叶绿孢子：AddPoison(180,60) = 90 HP/s（:92751/:92755,可被 398 加速）
+   *  398 毒素加速：可加速族（AddPoison/AddBloodLoss/AddFlamable）DoT ×2（:92840-92847）
+   *  399/400 蓝/红闪电：纯视觉（Blue/RedLightningSmall 粒子 1/10,:92274/:92281）
+   *  362 markedByEelWhip：Add(100,50) = 50 HP/s 平铺（:92781——不可加速、不吃
+   *  Slimed 翻倍;1457 链式放电/标记玩家数机制全删,ApplyEelWhipDoT 成死代码） */
+  potentAcidT = 0;
+  chlorophyteSporeT = 0;
+  acceleratePoisonsT = 0;
+  blueLightningT = 0;
+  redLightningT = 0;
+  eelWhipT = 0;
+  potentAcidDoT = 0;
+  chlorophyteSporeDoT = 0;
+  eelWhipDoT = 0;
+  /** 实例级 buff 免疫覆写（1457 AI_001 熔岩史莱姆段 :61312-61316 运行时
+   *  `buffImmune[70/397/395/20] = false`）：vanilla buff id → false = 静态免疫表
+   *  （data/vanillaNpcImmunity）被运行时复位,AddBuff 照常施加。projStatus 施加门
+   *  与本表对账；true 侧暂无消费（原版运行时只做复位） */
+  debuffImmuneOverride?: Map<number, boolean>;
   /** 原版 confused 全局语义（NPC.TargetClosest 尾段 NPC.cs:78569-78572）：
    *  `if (confused) direction *= -1;`——各 AI 族用 direction 决定水平移动方向，
    *  因此 confused = 索敌的水平方向反向（directionY 不反转）。本仓各 AI 的
@@ -1144,6 +1181,33 @@ export class Enemy extends Entity {
    *  直接用玩家坐标差算位移向量的族（AI_005 蜂群/AI_013 植物/AI_056 地牢之魂）
    *  原版不读 direction，同样不反转（勿在这些族接 confused）。 */
   get confused(): boolean { return this.confusedT > 0; }
+  /** GetNPCColorTintedByBuffs（1457 NPC.cs:92142-92255）等价：debuff 染色的 RGB
+   *  乘区（1=不变）。原版在 draw color 上逐 debuff 累乘（buffColor 闭式 = 累乘后
+   *  一次乘 npcColor,与逐次乘等价）;本仓返回 [R,G,B] 乘区由 Renderer.drawEnemy 以
+   *  tintedSprite(multiply) 消费。ichor 为整色替换 (255,255,0)（:92246-92248）。
+   *  求值序 = 原版 if 链顺序（brokenArmor→poisoned→venom→chlorophyteSpore→
+   *  potentAcid→bleeding/hemorrhage→midas→betsysCurse→oiled→drippingSlime→ichor;
+   *  stinky/SparkleSlime/hunter 段本仓无对应态不进）。门 = canDisplayBuffs
+   *  （:92144,FTW getGood 245-248 石巨人族 false）。1457 新增 chlorophyteSpore
+   *  （中毒式 R×0.65 B×0.75）与 potentAcid（剧毒式 G×0.45 R×0.75）两段 */
+  get debuffTintRGB(): [number, number, number] | null {
+    if (!this.canDisplayBuffs) return null;
+    let r = 1, g = 1, b = 1;
+    let hit = false;
+    const mul = (rr: number, gg: number, bb: number) => { r *= rr; g *= gg; b *= bb; hit = true; };
+    if (this.brokenArmorT > 0) mul(0.75, 0.75, 0.75);            // :92148-92153
+    if (this.poisonT > 0) mul(0.65, 1, 0.75);                    // :92155-92160
+    if (this.venomT > 0) mul(0.75, 0.45, 1);                     // :92162-92167
+    if (this.chlorophyteSporeT > 0) mul(0.65, 1, 0.75);          // :92169-92174（1457 新）
+    if (this.potentAcidT > 0) mul(0.75, 0.45, 1);                // :92176-92181（1457 新）
+    if (this.bleedT > 0 || this.hemorrhageT > 0) mul(1, 0.85, 0.85);  // :92183-92188
+    if (this.midasT > 0) mul(0.85, 1, 0.3);                      // :92190-92195
+    if (this.betsysCurseT > 0) mul(0.8, 0.6, 1);                 // :92197-92202
+    if (this.oiledT > 0) mul(0.4, 0.4, 0.4);                     // :92204-92209
+    if (this.slimedT > 0) mul(0.8, 0.8, 1);                      // :92222-92227 drippingSlime
+    if (this.ichorT > 0) return [255, 255, 0];                   // :92246-92248 整色替换
+    return hit ? [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)] : null;
+  }
   /** oldTarget 等效（NPC.cs:6374 `public int target = -1;` + :8472/:91442 每帧
    *  `oldTarget = target;`）：-1=从未索过敌 → 首次 seekDirX 必转身（原版 oldTarget=-1
    *  使 :78553 门失效）；首次后恒 0（单人 target 槽位）→ 门生效 */
@@ -1807,12 +1871,19 @@ export class Enemy extends Entity {
     }
     // onFire DoT（NPC.cs:92616-92630:lifeRegen-8 = 4 HP/s,无防御结算）+ 火尘粒子（:92187）
     // Slimed(137 = drippingSlime,凝胶易燃):六火系每系再叠等量 lifeRegen → 各系 DoT 翻倍
-    //  （:92623-92624 onFire / :92633-92635 onFire3 / :92643-92645 frostburn /
-    //    :92655-92657 frostburn2 / :92667-92669 onFire2 / :92684-92686 shadowFlame）
-    // Oiled(204):六火系任意在身时【flat 再叠 -50 = +25 HP/s】(:92728-92737)——
+    //  （1457 DOTTally.AddFlamable :113-115 统一——六系全走 AddFlamable,语义同旧六处）
+    // Oiled(204):六火系任意在身时【flat 再叠 -50 = +25 HP/s】(:92801-92803)——
     //  非"按系翻倍"(旧 oiledMul=2 系误读,2026-08-13 G7 回源修正);slimedT 独立递减
     const slimedMul = this.slimedT > 0 ? 2 : 1;
-    // Oiled 的 -50 是【单块一次性】(:92728-92737),多火系并存时不得按系重复叠——
+    // 1457 AddFlamable :116-119：木史莱姆(type 1 && ai[1]==9 吞火把)每系 lifeRegen
+    // 额外 -16 = +8 HP/s——1456 该 +16 只挂在 onFrostBurn 块内(:92648 段),1457 收进
+    // AddFlamable 后六火系全吃;本仓按字面六系统一加
+    const woodSlimeFire = this.vanillaId === 1 && this.ai1 === 9 ? 8 : 0;
+    // 1457 DOTTally.SupportAcceleration(:127-131)+:92840-92847：398 毒素加速把
+    // "可加速"DoT(AddPoison/AddBloodLoss/AddFlamable——毒/流血/六火系)×2;
+    // 裸 Add(oiled/eelWhip/贴附族/daybreak/soulDrain)不加成
+    const accelMul = this.acceleratePoisonsT > 0 ? 2 : 1;
+    // Oiled 的 -50 是【单块一次性】(:92801-92803),多火系并存时不得按系重复叠——
     // 独立 oiledDoT 累加器结算,不并入各系
     const fireOn = this.onFireT > 0 || this.cursedT > 0 || this.onFire3T > 0
       || this.frostburnT > 0 || this.frostburn2T > 0 || this.shadowFlameT > 0;
@@ -1820,7 +1891,7 @@ export class Enemy extends Entity {
     if (this.slimedT > 0) this.slimedT -= dt;
     if (this.onFireT > 0) {
       this.onFireT -= dt;
-      this.onFireDoT += 4 * slimedMul * dt;
+      this.onFireDoT += (4 * slimedMul + woodSlimeFire) * accelMul * dt;
       if (this.onFireDoT >= 1) {
         const n = Math.floor(this.onFireDoT);
         this.onFireDoT -= n;
@@ -1836,17 +1907,18 @@ export class Enemy extends Entity {
       }
     }
 
-    // ---- 武器浸剂 debuff 滴血（R2，NPC.cs:92585/92703/92684 DoT 同 onFire 模式） ----
-    if (this.poisonT > 0) { this.poisonT -= dt; this.poisonDoT += 6 * dt; }
-    if (this.venomT > 0) { this.venomT -= dt; this.venomDoT += 30 * dt; }
-    // 六火系:各自基档 × slimedMul(cursed=onFire2 亦吃 Slimed 翻倍)
-    if (this.cursedT > 0) { this.cursedT -= dt; this.cursedDoT += 24 * slimedMul * dt; }
+    // ---- 武器浸剂 debuff 滴血（R2，NPC.cs:92585/92703/92684 DoT 同 onFire 模式；
+    //      1457 起毒/流血/六火系均入"可加速"池（AddPoison/AddBloodLoss/AddFlamable）） ----
+    if (this.poisonT > 0) { this.poisonT -= dt; this.poisonDoT += 6 * accelMul * dt; }
+    if (this.venomT > 0) { this.venomT -= dt; this.venomDoT += 30 * accelMul * dt; }
+    // 六火系:各自基档 × slimedMul(cursed=onFire2 亦吃 Slimed 翻倍) × accelMul(398)
+    if (this.cursedT > 0) { this.cursedT -= dt; this.cursedDoT += (24 * slimedMul + woodSlimeFire) * accelMul * dt; }
     // 四新系(NPC.cs:44→8HP/s(:92648) / 324→25HP/s(:92668) / 323→15HP/s(:92632) /
-    //  153→15HP/s(:92712),各吃 Slimed 翻倍)
-    if (this.frostburnT > 0) { this.frostburnT -= dt; this.frostburnDoT += 8 * slimedMul * dt; }
-    if (this.frostburn2T > 0) { this.frostburn2T -= dt; this.frostburn2DoT += 25 * slimedMul * dt; }
-    if (this.onFire3T > 0) { this.onFire3T -= dt; this.onFire3DoT += 15 * slimedMul * dt; }
-    if (this.shadowFlameT > 0) { this.shadowFlameT -= dt; this.shadowFlameDoT += 15 * slimedMul * dt; }
+    //  153→15HP/s(:92712),各吃 Slimed 翻倍 + 398 加速 + 木史莱姆 +8)
+    if (this.frostburnT > 0) { this.frostburnT -= dt; this.frostburnDoT += (8 * slimedMul + woodSlimeFire) * accelMul * dt; }
+    if (this.frostburn2T > 0) { this.frostburn2T -= dt; this.frostburn2DoT += (25 * slimedMul + woodSlimeFire) * accelMul * dt; }
+    if (this.onFire3T > 0) { this.onFire3T -= dt; this.onFire3DoT += (15 * slimedMul + woodSlimeFire) * accelMul * dt; }
+    if (this.shadowFlameT > 0) { this.shadowFlameT -= dt; this.shadowFlameDoT += (15 * slimedMul + woodSlimeFire) * accelMul * dt; }
     if (this.oiledT > 0) this.oiledT -= dt;
     if (this.brokenArmorT > 0) this.brokenArmorT -= dt;
     if (this.betsysCurseT > 0) this.betsysCurseT -= dt;
@@ -1856,11 +1928,12 @@ export class Enemy extends Entity {
       this.daybreakT -= dt;
       this.daybreakDoT += 100 * Math.max(1, daybreakStacks(this.id)) * dt;
     }
-    if (this.bleedT > 0) { this.bleedT -= dt; this.bleedDoT += 12 * dt; }
-    if (this.hemorrhageT > 0) { this.hemorrhageT -= dt; this.hemorrhageDoT += 100 * dt; }
-    // 贴附族层数结算（NPC.cs:92740-92863）：层数先随 dt 衰减（每层独立倒计时，
-    // 寿命=对应 buff 时长——与场上附着弹到寿消亡等价），再按层 ×单层 HP/s。
-    // 无零层兜底（:92740/:92761/:92786/:92846 四处均无 num==0→1；唯 Daybreak 有）
+    if (this.bleedT > 0) { this.bleedT -= dt; this.bleedDoT += 12 * accelMul * dt; }
+    if (this.hemorrhageT > 0) { this.hemorrhageT -= dt; this.hemorrhageDoT += 100 * accelMul * dt; }
+    // 贴附族层数结算（1457 AddStackedProjecitle NPC.cs:88-105）：层数先随 dt 衰减
+    // （每层独立倒计时,寿命=对应 buff 时长——与场上附着弹到寿消亡等价）,再按层 ×
+    // 单层 HP/s。1457 起 num==0 兜底 1（:100-103——debuff 旗标在而场上无附着弹时
+    // 按 1 层计;1456 为 0 伤害,唯 Daybreak 旧已有兜底）→ 598/971/975/614 四系统一
     const decay = (arr: number[]): number => {
       let n = 0;
       for (let i = arr.length - 1; i >= 0; i--) {
@@ -1869,17 +1942,26 @@ export class Enemy extends Entity {
       }
       return n;
     };
-    if (this.javelinT > 0) { this.javelinT -= dt; this.javelinDoT += 3 * decay(this.javelinStacks) * dt; }   // :92740-92759
+    if (this.javelinT > 0) { this.javelinT -= dt; this.javelinDoT += 3 * Math.max(1, decay(this.javelinStacks)) * dt; }   // :92776-92779
     else this.javelinStacks.length = 0;   // buff 尽层同步清（防御性；正常两钟同步到期）
-    if (this.spikeT > 0) { this.spikeT -= dt; this.spikeDoT += 3 * decay(this.spikeStacks) * dt; }           // :92761-92779
+    if (this.spikeT > 0) { this.spikeT -= dt; this.spikeDoT += 3 * Math.max(1, decay(this.spikeStacks)) * dt; }           // :92782-92785
     else this.spikeStacks.length = 0;
-    if (this.butcherT > 0) { this.butcherT -= dt; this.butcherDoT += 4 * decay(this.butcherStacks) * dt; }   // :92786-92804
+    if (this.butcherT > 0) { this.butcherT -= dt; this.butcherDoT += 4 * Math.max(1, decay(this.butcherStacks)) * dt; }   // :92786-92789
     else this.butcherStacks.length = 0;
     this.soulDrainActive = this.soulDrainT > 0;   // :91951 debuff 位镜像
     if (this.soulDrainT > 0) { this.soulDrainT -= dt; this.soulDrainDoT += 25 * dt; } // :92927-92935
-    if (this.stardustT > 0) { this.stardustT -= dt; this.stardustDoT += 20 * decay(this.stardustStacks) * dt; } // :92846-92863 num10×20
+    if (this.stardustT > 0) { this.stardustT -= dt; this.stardustDoT += 20 * Math.max(1, decay(this.stardustStacks)) * dt; } // :92792-92795
     else this.stardustStacks.length = 0;
-    // Oiled 独立结算(:92728-92737 单块 -50 = 25 HP/s,不随各系翻倍/重复)
+    // ---- 1457 新 debuff 家族（DOTTally :92746-92800）----
+    // 395/397 各 AddPoison(180,60) = 90 HP/s（可加速池）;362 电鳗鞭 Add(100,50) =
+    // 50 HP/s 平铺（裸 Add——不可加速、不吃 Slimed;链式缩放/标记玩家数/链电粒子全删）
+    if (this.potentAcidT > 0) { this.potentAcidT -= dt; this.potentAcidDoT += 90 * accelMul * dt; }
+    if (this.chlorophyteSporeT > 0) { this.chlorophyteSporeT -= dt; this.chlorophyteSporeDoT += 90 * accelMul * dt; }
+    if (this.eelWhipT > 0) { this.eelWhipT -= dt; this.eelWhipDoT += 50 * dt; }
+    if (this.acceleratePoisonsT > 0) this.acceleratePoisonsT -= dt;
+    if (this.blueLightningT > 0) this.blueLightningT -= dt;
+    if (this.redLightningT > 0) this.redLightningT -= dt;
+    // Oiled 独立结算(:92801-92803 单块 -50 = 25 HP/s,不随各系翻倍/重复)
     if (this.oiledDoT >= 1) {
       const n = Math.floor(this.oiledDoT);
       this.oiledDoT -= n;
@@ -1892,7 +1974,9 @@ export class Enemy extends Entity {
       ['onFire3T', 'onFire3DoT'], ['shadowFlameT', 'shadowFlameDoT'],
       ['daybreakT', 'daybreakDoT'], ['bleedT', 'bleedDoT'], ['hemorrhageT', 'hemorrhageDoT'],
       ['javelinT', 'javelinDoT'], ['spikeT', 'spikeDoT'], ['butcherT', 'butcherDoT'],
-      ['soulDrainT', 'soulDrainDoT'], ['stardustT', 'stardustDoT']] as const) {
+      ['soulDrainT', 'soulDrainDoT'], ['stardustT', 'stardustDoT'],
+      ['potentAcidT', 'potentAcidDoT'], ['chlorophyteSporeT', 'chlorophyteSporeDoT'],
+      ['eelWhipT', 'eelWhipDoT']] as const) {
       const acc = this[dKey];
       if (acc >= 1) {
         const n = Math.floor(acc);
@@ -1907,6 +1991,39 @@ export class Enemy extends Entity {
     // confused（buff 31）存量倒数；反向语义在各 AI 的索敌点（seekDirX）按
     // 原版 TargetClosest :78569 应用——不再对 vx 做周期翻转（旧近似已移除）
     if (this.confusedT > 0) this.confusedT -= dt;
+    // ---- 1457 新 debuff VFX（UpdateNPC_BuffApplyVFX :92263-92330 + A-5 孢子云
+    //      :92878-92894）。原版走 Dust/ParticleOrchestrator,本仓以 spawnParticles
+    //      近似（颜色/概率/速率 1:1;粒子形态差异登记）----
+    if (this.chlorophyteSporeT > 0) {
+      // 叶尘 dust 157 4/5（:92315-92323,noGravity、velocity×0.75、scale 1.95）
+      if (Math.random() < 4 / 5) {
+        game.spawnParticles(
+          this.x + Math.random() * this.w, this.y + Math.random() * this.h,
+          '#7BC043', 1, 0.4, { life: 30 + Math.random() * 12, grav: 0, damp: 0.96 });
+      }
+      // 孢子云 SporeCloud 1/60 每秒掷（:92878,在 !dontTakeDamage 门之外）
+      if (Math.floor(Math.random() * 60) === 0) {
+        game.spawnParticles(
+          this.x + 2 + Math.random() * Math.max(1, this.w - 4),
+          this.y + 2 + Math.random() * Math.max(1, this.h - 4),
+          '#A8D060', 3, Math.min(5, Math.hypot(this.vx, this.vy) * 0.5) || 0.5,
+          { life: 40, grav: -0.02, damp: 0.95 });
+      }
+    }
+    if (this.potentAcidT > 0 && Math.random() < 1 / 2) {
+      // 气泡尘 dust 171 1/2（:92325-92331,noGravity、fadeIn 1.5、scale 0.5）
+      game.spawnParticles(
+        this.x + Math.random() * this.w, this.y + Math.random() * this.h,
+        '#C8E8A0', 1, 0.2, { life: 24, grav: -0.05, damp: 0.97 });
+    }
+    if (this.blueLightningT > 0 && Math.floor(Math.random() * 10) === 0) {
+      // BlueLightningSmall 1/10（:92274-92280;本仓无 ParticleOrchestrator → 粒子近似）
+      game.spawnParticles(this.cx, this.cy, '#60A0FF', 2, 1.2, { life: 18, grav: 0, damp: 0.9 });
+    }
+    if (this.redLightningT > 0 && Math.floor(Math.random() * 10) === 0) {
+      // RedLightningSmall 1/10（:92281-92287）
+      game.spawnParticles(this.cx, this.cy, '#FF5050', 2, 1.2, { life: 18, grav: 0, damp: 0.9 });
+    }
 
     // 接触伤害（带上攻击者引用，供荆棘反伤）。damage=0（小动物等友好生物）不触发——
     // 否则 damagePlayer(0) 仍会击退/闪红，表现为"兔子撞我有攻击性"。
@@ -2374,13 +2491,21 @@ export class Enemy extends Entity {
       } else if (a1 === 364 || a1 === 1104 || a1 === 365 || a1 === 1105 || a1 === 366 || a1 === 1106) {
         // ---- 金属矿史莱姆强化段（S9，NPC.cs:61107-61178 全段，2026-08-19）：
         //  lavaImmune（:61108）由 npcLiquid.ts 状态位按 ai[1] 求值（非 SetDefaults
-        //  表内，本 AI 不重复置位）/ 防御 +30 / 伤害 ×3 / kbResist=0（buffImmune[70]/
-        //  [20] 复位——可携物五族原版本就无此免疫位，无操作）；一次性（lifeMax==
-        //  defLifeMax 门）scale ×1.2 + 盒随 bottom-center 重扩（w/h ×1.2 增量——原版
-        //  num22 字面，勿乘总 scale 复合）+ HP ×3；悬停重力：玩家在正上方（X 重叠 +
-        //  Bottom<Top + CanHit）→ flag2、direction=0、vx×0.5、vy 钳 ≥0 后 +gravity
-        //  （沉降贴人）；否则 vy>0 +gravity / vy<0 −gravity×0.75（升沉阻尼）。
-        //  光 (color/500) 在 slimeAI 尾段（:61152）。
+        //  表内，本 AI 不重复置位）/ 防御 +30 / 伤害 ×3 / kbResist=0。
+        //  1457 :61312-61316 运行时 buffImmune 复位（70/397/395/20 → false）——
+        //  本仓无实例级免疫表,以 debuffImmuneOverride 覆写位等价（projStatus 施加门
+        //  消费）：蓝史莱姆族静态免疫 20（中毒）,熔岩变体运行时可被中毒/强酸/叶绿
+        //  孢子/毒液命中（398 毒素加速全文件无 buffImmune 条目=无豁免,勿加）；
+        //  一次性（lifeMax==defLifeMax 门）scale ×1.2 + 盒随 bottom-center 重扩（w/h
+        //  ×1.2 增量——原版 num22 字面，勿乘总 scale 复合）+ HP ×3；悬停重力：玩家在
+        //  正上方（X 重叠 + Bottom<Top + CanHit）→ flag2、direction=0、vx×0.5、
+        //  vy 钳 ≥0 后 +gravity（沉降贴人）；否则 vy>0 +gravity / vy<0 −gravity×0.75
+        //  （升沉阻尼）。光 (color/500) 在 slimeAI 尾段（:61152）。
+        if (!this.debuffImmuneOverride) this.debuffImmuneOverride = new Map();
+        this.debuffImmuneOverride.set(70, false);                  // :61313 buffImmune[70]=false
+        this.debuffImmuneOverride.set(397, false);                 // :61314（1457 新）
+        this.debuffImmuneOverride.set(395, false);                 // :61315（1457 新）
+        this.debuffImmuneOverride.set(20, false);                  // :61316
         if (this.maxHp === this.def.hp) {                         // :61115 lifeMax==defLifeMax 一次性门
           const num22 = 1.2;
           this.vanillaScale = (this.vanillaScale ?? 1) * num22;   // :61119 scale ×1.2
@@ -3481,7 +3606,13 @@ export class Enemy extends Entity {
     const targeting = this.ai3 < num58F && (!daySurface || dayActive);
     if (targeting) {
       // :57765 TargetClosest（死亡 → faceTarget=false 只换 targetRect 不改朝向）
-      if (player && !player.dead) this.facing = this.seekDirX(player);
+      if (player && !player.dead) {
+        this.facing = this.seekDirX(player);
+        // 1457 SetTargetTrackingValues(:78562-78568) aiStyle==3 专档：directionY
+        // 不再按中心比较,改按"目标脚底 ≤ 自身脚底 → -1（上跳）/否则 +1"——
+        // 唯一消费点 = :60466 跳跃段总门（type 580 行走蚁狮 directionY==1 不跳）
+        this.dirY = (player.y + player.h <= this.y + this.h) ? -1 : 1;
+      }
     } else if (!(this.ai2 > 0 && FIGHTER_BUSY_WITH_ACTION.has(vidF))) {
       // :57771-57797 游荡转向；624/631 免 EncourageDespawn（:57773）
       if (daySurface && vidF !== 624 && vidF !== 631) this.encourageDespawn(10);
@@ -3567,7 +3698,11 @@ export class Enemy extends Entity {
     // 计数节奏）——ai3 专用于蓄力，不再与任何通用计数共用（Renderer.npcGlowSparkleEnvelope 消费）
     stormDiverStep(this, game, player);
     // 原版跳跃判定用碰撞前的速度符号（NPC 碰撞在 AI 之后）——
-    // 此处必须先捕获再碰撞，否则撞墙清零 vx 后 movingInto 恒假、战士永不跳墙
+    // 此处必须先捕获再碰撞，否则撞墙清零 vx 后 movingInto 恒假、战士永不跳墙。
+    // 1457 :60466 跳跃段总门 = velocity.Y>=0 && (type!=580 || directionY!=1)——
+    // 行走蚁狮 580 目标在下方（directionY==1,1457 SetTargetTrackingValues 专档赋值）
+    // 时整段跳过（贴地行走不跳）；directionY 由上方 targeting 段按 1457 规则写
+    const jumpGate580 = vidF !== 580 || this.dirY !== 1;
     const vxSign = this.vx > 0 ? 1 : this.vx < 0 ? -1 : 0;
     // ---- 台阶自动步升（L24512-24554）：前方高差 ≤16.1px 直接跨上（gfxOffY 视觉补偿略）----
     if (this.vy >= 0 && vxSign !== 0) {
@@ -3593,7 +3728,7 @@ export class Enemy extends Entity {
     // ---- 四级跳判定（L24651-24733）：仅在朝移动方向撞到东西时 ----
     // 原版全部跳跃赋值都有 velocity.Y == 0f 前置（AI_003 内 44 处同款门）——
     // 缺失此门时空中贴墙每帧 vy=-8 → 沿墙飞天贴天花板（主角靠近才掉落）
-    const movingInto = vxSign === dir && vxSign !== 0 && this.vy === 0;
+    const movingInto = jumpGate580 && vxSign === dir && vxSign !== 0 && this.vy === 0;
     if (movingInto) {
       if (this.h >= 32 && solidAt(fx, fy - 2)) {
         // 胸口前 2 格墙：上方再 1 格也堵 → -8，否则 -7
@@ -3748,7 +3883,8 @@ export class Enemy extends Entity {
     //  （164→165 等）——蜘蛛洞里贴墙爬的就是这一步，地表无背景墙自然不触发
     if (this.vy === 0 && this.vanillaId != null) {
       const wallForm = Enemy.SPIDER_WALL_FORM[this.vanillaId];
-      if (wallForm !== undefined && this.npcCanStickToWalls(st)
+      // 1457 :59481 贴墙检查同样按变换后（爬墙形态）盒评估
+      if (wallForm !== undefined && this.npcCanStickToWalls(st, wallForm)
         && this.tryMoveToTransformableSpaceInto(wallForm, st)) {
         this.tryTransformTo(wallForm, st, true, game);
       }
@@ -4061,7 +4197,9 @@ export class Enemy extends Entity {
         || (this.facing < 0 && this.cx > player.cx);                     // :59353 direction 锥
       if (this.ai2 >= num142 && this.vy === 0 && !player.dead
         && !player.buffs?.has(BuffType.Frozen)                           // :59353 !frozen
-        && facingPlayer && this.canSeePlayer(st, player)) {
+        // 1457 :59545-59549 flag14 = AI_GlobalFiringDistanceCheck 入开火门
+        && facingPlayer && aiGlobalFiringDistanceCheck(this.cx, this.cy, player.cx, player.cy)
+        && this.canSeePlayer(st, player)) {
         // 枪口（:59356-59357）：(Center.X + 6×direction, position.Y + 12)
         const mx = this.cx + 6 * this.facing, my = this.y + 12;
         let num144 = player.cx - mx + (Math.random() * 82 - 41);         // :59358/:59360 ±41
@@ -4437,39 +4575,45 @@ export class Enemy extends Entity {
 
   /** NPCCanStickToWalls 1:1（NPC.cs:56209-56229）：身体中心 3×3 内"非实心 tile 且有背景墙"
    *  的格数 >4 → 可贴墙（蜘蛛洞/洞穴天然满足，地表不满足 → 落回地面形态） */
-  private npcCanStickToWalls(st: GameHooks['world']['store']): boolean {
-    const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
-    let n = 0;
-    for (let i = cx - 1; i <= cx + 1; i++) {
-      for (let j = cy - 1; j <= cy + 1; j++) {
-        if (!st.inBounds(i, j)) continue;
-        const ii = st.idx(i, j);
-        const passable = st.type[ii] === 0 || !st.isSolid(i, j) || st.isPlatform(i, j);
-        if (passable && st.wall[ii] > 0) {
-          n++;
-          if (n > 4) return true;
+  /** NPCCanStickToWalls（NPC.cs:56382-56403 无参版 + 1457 :56357-56380 transformID 版）：
+   *  中心 3×3 内 >4 格"可通行且有背景墙"才算贴墙。1457 新签名按【变换后尺寸】
+   *  （TryGetAdjustedHitboxFromTransformation = Collision.TryChangingSizeFromBottomCenter
+   *  :81885-81893）评估——蜘蛛地↔墙互变时用目标形态的盒判断能否贴墙,失败回退
+   *  现尺寸。transformId 缺省 = 无参版（现盒）。 */
+  private npcCanStickToWalls(st: GameHooks['world']['store'], transformId?: number): boolean {
+    const evaluate = (bx: number, by: number, bw: number, bh: number): boolean => {
+      const cx = Math.floor((bx + bw / 2) / TILE), cy = Math.floor((by + bh / 2) / TILE);
+      let n = 0;
+      for (let i = cx - 1; i <= cx + 1; i++) {
+        for (let j = cy - 1; j <= cy + 1; j++) {
+          if (!st.inBounds(i, j)) continue;
+          const ii = st.idx(i, j);
+          const passable = st.type[ii] === 0 || !st.isSolid(i, j) || st.isPlatform(i, j);
+          if (passable && st.wall[ii] > 0) {
+            n++;
+            if (n > 4) return true;
+          }
         }
       }
+      return false;
+    };
+    if (transformId !== undefined) {
+      // TryGetAdjustedHitboxFromTransformation：底边中心锚定的尺寸变换盒（挪位
+      // 失败 = null → 回退现盒,原版 :56366-56377 同构）
+      const adj = this.computeAdjustedHitboxFromTransformation(transformId, st);
+      if (adj && evaluate(adj.x, adj.y, adj.w, adj.h)) return true;
     }
-    return false;
+    return evaluate(this.x, this.y, this.w, this.h);
   }
 
-  /** Transform 1:1（NPC.cs:81861-81919）：换类型 + 按比例结转 HP + ai[0..3] 清零；
-   *  位置按 TryChangingSizeFromBottomCenter（:81836）底边中心锚定改尺寸，
-   *  新碰撞盒与实心块重叠则放弃（原版换尺寸失败语义）。
-   *  game 可选 = TransformVisuals（:81902 Transform 尾对所有转化统一调用）播
-   *  音效用——见 transformVisuals */
-  /** TryMoveToTransformableSpaceInto（NPC.cs:81836-81848 + Collision.
-   *  TryChangingSizeFromBottomCenter :2495-2545，K2 批 2026-08-19）：蜘蛛族地↔墙
-   *  Transform 前的"挪位"——按目标盒先纵向（需长高：上探优先、余量补下探，探距
-   *  不足整段放弃）再横向（需加宽：左右对半起步、余量再补）扩盒并写回 position。
-   *  探距 = 盒沿该轴向可自由滑行的像素数（TileCollisionInStepsOf16 :2462-2493 的
-   *  逐像素等价；半砖按上半 8px 净空计）。返回 false = 挪不进 → 不转化。
-   *  成功后调用方走 tryTransformTo(…, allowEmbedded=true)（原版 Transform
-   *  withReposition:false——挪位已就绪，跳过底边锚定自检）。 */
-  private tryMoveToTransformableSpaceInto(id: number, st: GameHooks['world']['store']): boolean {
+  /** Collision.TryChangingSizeFromBottomCenter（NPC.cs:81885-81893 纯求值版,
+   *  不写回 position）：按目标 id 尺寸自底边中心扩/收盒,空间不足返回 null。
+   *  与 tryMoveToTransformableSpaceInto 共用探移算法（该函数 = 本式 + 写回） */
+  private computeAdjustedHitboxFromTransformation(
+    id: number, st: GameHooks['world']['store'],
+  ): { x: number; y: number; w: number; h: number } | null {
     const v = vanillaNpc(id);
-    if (!v) return false;
+    if (!v) return null;
     const s = v.scale ?? 1;
     const tw = Math.round(v.width * s), th = Math.round(v.height * s);
     let x = this.x, y = this.y, w = this.w, h = this.h;
@@ -4501,7 +4645,7 @@ export class Enemy extends Entity {
     if (num > 0) {
       const num2 = freeTravel('y', 1, num, x, y, w, h);        // :2501 向下可探
       const num3 = freeTravel('y', -1, num, x, y, w, h);       // :2502 向上可探
-      if (num3 + num2 < num) return false;                     // :2503-2506
+      if (num3 + num2 < num) return null;                      // :2503-2506
       let num4 = Math.min(num, num3);                          // :2507
       let num5 = 0;                                            // :2508
       let val = num - num4 - num5;
@@ -4518,7 +4662,7 @@ export class Enemy extends Entity {
     if (num6 > 0) {
       const num7 = freeTravel('x', 1, num6, x, y, w, h);       // :2524 向右可探
       const num8 = freeTravel('x', -1, num6, x, y, w, h);      // :2525 向左可探
-      if (num8 + num7 < num6) return false;                    // :2526-2529
+      if (num8 + num7 < num6) return null;                     // :2526-2529
       let num10 = Math.min(Math.trunc(num6 / 2), Math.min(num8, num7));  // :2531
       let num9 = num10;
       let val2 = num6 - num10 - num9;
@@ -4531,8 +4675,29 @@ export class Enemy extends Entity {
       x += Math.trunc(num6 / 2);                               // :2541 居中收窄
       w = tw;
     }
-    this.x = x;                                                // :81846 position = box.TopLeft()
-    this.y = y;
+    return { x, y, w, h };
+  }
+
+  /** Transform 1:1（NPC.cs:81861-81919）：换类型 + 按比例结转 HP + ai[0..3] 清零；
+   *  位置按 TryChangingSizeFromBottomCenter（:81836）底边中心锚定改尺寸，
+   *  新碰撞盒与实心块重叠则放弃（原版换尺寸失败语义）。
+   *  game 可选 = TransformVisuals（:81902 Transform 尾对所有转化统一调用）播
+   *  音效用——见 transformVisuals */
+  /** TryMoveToTransformableSpaceInto（NPC.cs:81836-81848 + Collision.
+   *  TryChangingSizeFromBottomCenter :2495-2545，K2 批 2026-08-19）：蜘蛛族地↔墙
+   *  Transform 前的"挪位"——按目标盒先纵向（需长高：上探优先、余量补下探，探距
+   *  不足整段放弃）再横向（需加宽：左右对半起步、余量再补）扩盒并写回 position。
+   *  探距 = 盒沿该轴向可自由滑行的像素数（TileCollisionInStepsOf16 :2462-2493 的
+   *  逐像素等价；半砖按上半 8px 净空计）。返回 false = 挪不进 → 不转化。
+   *  成功后调用方走 tryTransformTo(…, allowEmbedded=true)（原版 Transform
+   *  withReposition:false——挪位已就绪，跳过底边锚定自检）。 */
+  private tryMoveToTransformableSpaceInto(id: number, st: GameHooks['world']['store']): boolean {
+    // 求值体已抽到 computeAdjustedHitboxFromTransformation（F-40 微光/蜘蛛变换
+    // 贴墙检查共用同一 TryChangingSizeFromBottomCenter 算法）——本函数 = 求值 + 写回
+    const box = this.computeAdjustedHitboxFromTransformation(id, st);
+    if (!box) return false;
+    this.x = box.x;                                            // :81846 position = box.TopLeft()
+    this.y = box.y;
     return true;
   }
 
@@ -4749,9 +4914,11 @@ export class Enemy extends Entity {
     this.crawlT = (this.crawlT + (Math.abs(this.vx) + Math.abs(this.vy))
       * (this.vanillaId === 531 ? 0.4 : 0.5)) % 24;
     // 脱墙 → TryMoveToTransformableSpaceInto 挪位后 Transform 回地面形态
-    // （:29990-30014；K2 批 2026-08-19：挪不进目标盒空间则不转化）
+    // （:29990-30014；K2 批 2026-08-19：挪不进目标盒空间则不转化）。
+    // 1457 :30085 贴墙检查改 NPCCanStickToWalls(groundForm)——按【变换后地面形态】
+    // 的盒评估（TryGetAdjustedHitboxFromTransformation）,失败回退现盒
     const groundForm = Enemy.SPIDER_GROUND_FORM[this.vanillaId ?? -1];
-    if (groundForm !== undefined && !this.npcCanStickToWalls(st)
+    if (groundForm !== undefined && !this.npcCanStickToWalls(st, groundForm)
       && this.tryMoveToTransformableSpaceInto(groundForm, st)) {
       this.tryTransformTo(groundForm, st, true, game);
     }
@@ -4939,8 +5106,10 @@ export class Enemy extends Entity {
         this.visAngle = Math.max(-0.8, Math.min(0.8, aimRot));
         flag25 = aimRot >= -1.2 && aimRot <= 1.2;
       }
-      // 直射门（:24508-24521）：冷却尽 + 锥内 + CanHit → 装填 200 + 射
-      if (this.ai0 <= 0 && flag25 && this.canSeePlayer(st, player)) {
+      // 直射门（:24508-24521）：冷却尽 + 锥内 + CanHit → 装填 200 + 射。
+      // 1457 :24579 锥门内再加 AI_GlobalFiringDistanceCheck（超视野不装填）
+      if (this.ai0 <= 0 && flag25 && aiGlobalFiringDistanceCheck(this.cx, this.cy, player.cx, player.cy)
+        && this.canSeePlayer(st, player)) {
         this.ai0 = 200;
         game.playSfxFiles?.(['Item_5'], 1, this.cx, this.cy);   // :24503（==200 第一 tick 音）
         this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy, 12, 10, 31);
@@ -5635,7 +5804,10 @@ export class Enemy extends Entity {
       if (this.justHit) this.ai3 = 0;                           // :22826-22829
       this.ai3 += 1;
       if (this.ai3 >= 120) {
-        if (!this.embeddedInSolid(st) && this.canSeePlayer(st, player)) {
+        // 1457 :22880-22884：开火门加 flag23 = AI_GlobalFiringDistanceCheck
+        if (!this.embeddedInSolid(st)
+          && aiGlobalFiringDistanceCheck(this.cx, this.cy, player.cx, player.cy)
+          && this.canSeePlayer(st, player)) {
           const dmgP = getAttackDamageForProjectiles(22, 17.6, this.difficulty);  // :22843
           // :22837-22845：瞄准 ±10 抖动 → 归一 ×10（num222）
           let txP = player.cx - this.cx + (Math.floor(Math.random() * 21) - 10);
@@ -5734,7 +5906,9 @@ export class Enemy extends Entity {
     } else if (isHornet) {
       maxSpd = 3.5; accel = 0.021;
       if (vid === 231) { maxSpd = 3; accel = 0.017; }
-      maxSpd *= 1 - scale; accel *= 1 - scale;
+      // 1457 :50884-50885 修复：×(1f−scale) → ×(2f−scale)——蜂族 scale=1 时 1456
+      // 乘 0 = 速度/加速全零（只余 ±0.023 漂移悬停），1457 恢复正常追击
+      maxSpd *= 2 - scale; accel *= 2 - scale;
       // ---- 黄蜂地表 Y 阻尼（cs:50735-50747,审计蜂群#2）：自身在地表以上时,
       //      目标远低于自身 300px(下追过冲)或仅低 80px 内(贴地平飞)都 ×0.97 阻垂速 ----
       if (this.y / TILE < game.world.groundLevel && player) {
@@ -5845,7 +6019,9 @@ export class Enemy extends Entity {
       if (this.justHit) this.lai0 = 0;
       if (this.lai0 >= (mechQueenUp() ? 360 : 120)) {
         this.lai0 = 0;
-        if (player && losClear(game, this.cx, this.cy, player.cx, player.cy)) {
+        // 1457 :50830-50836 flag2（AI_GlobalFiringDistanceCheck）入探针开火门
+        if (player && aiGlobalFiringDistanceCheck(this.cx, this.cy, player.cx, player.cy)
+          && losClear(game, this.cx, this.cy, player.cx, player.cy)) {
           let pvx = sx, pvy = sy;
           if (mechQueenUp()) {
             const ddx = player.cx - this.cx - player.vx * 20;
@@ -6422,7 +6598,8 @@ export class Enemy extends Entity {
         }
       } else {
         this.ai1 += 1;
-        if (this.ai1 >= 180 && dist9 < 500 && this.vy === 0) {
+        // 1457 :63194 加 !confused——困惑（纳米浸剂）中的星云兽不再进入蓄力冲
+        if (!this.confused && this.ai1 >= 180 && dist9 < 500 && this.vy === 0) {
           flag = true;
           this.ai1 = 0;
           this.ai2 = 1;
@@ -6915,7 +7092,10 @@ export class Enemy extends Entity {
         }
       } else if (this.ai0 > shooter.ticks[shooter.ticks.length - 1]
         && this.ai0 >= shooter.reset + Math.floor(Math.random() * shooter.reset)) {
-        this.ai0 = 0;
+        // 1457 :23537-23539：哈比 48 的轮空重置门加 flag24（超视野不重置——
+        // 计数器越过阈值继续攀升,回视野后从下一阈值重新对拍）
+        if (vid !== 48 || !player
+          || aiGlobalFiringDistanceCheck(this.cx, this.cy, player.cx, player.cy)) this.ai0 = 0;
       }
     }
   }
@@ -7356,7 +7536,10 @@ export class Enemy extends Entity {
       }
       if (this.ai3 === 0) {
         this.lai1 += 1;
-        if (this.lai1 > 120 && player && !player.dead && this.canSeePlayer(st, player)) {
+        // 1457 :24949-24951 flag36 = AI_GlobalFiringDistanceCheck——超视野不充能
+        if (this.lai1 > 120 && player && !player.dead
+          && aiGlobalFiringDistanceCheck(this.cx, this.cy, player.cx, player.cy)
+          && this.canSeePlayer(st, player)) {
           this.lai1 = 0;
           this.ai3 = 1;
         }
@@ -9486,7 +9669,10 @@ export class Enemy extends Entity {
       if (!(this.x < foe.x + foe.w && this.x + this.w > foe.x
         && this.y < foe.y + foe.h && this.y + this.h > foe.y)) continue;
       const dir = foe.cx > this.cx ? -1 : 1;        // :93661 攻击者在右 → 向左击退
-      this.hurt(foe.def.damage, dir * 6, 0, game, 0, false, 1);   // StrikeNPCNoInteraction
+      // 1457 :93594-93596：695/696（Palworld 双宠受难态）受 NPC 伤固定 5，
+      // 不吃攻击方 damage（原版 `if (type == 695 || type == 696) num2 = 5;`）
+      const contactDmg = (id === 695 || id === 696) ? 5 : foe.def.damage;
+      this.hurt(contactDmg, dir * 6, 0, game, 0, false, 1);   // StrikeNPCNoInteraction
       this.npcImmune255 = 30;                       // :93664 immune[255]=num
       if (isBee) {
         // :93666-93696 蜂段：蜂受【victim.damage】反蜇（damage=0 也走 Strike
@@ -10119,7 +10305,7 @@ export class Enemy extends Entity {
         onSurface = true;
       }
     } else if (this.wet) {
-      this.vy -= 0.2;                                  // 深水无液面（:47906-47909）
+      this.vy -= 0.3;                                  // 深水无液面（1457 :48060,0.2→0.3）
     }
     if (this.ai0 !== 0) return;                        // ai[0]≠0 早退（:47910-47913）
     this.ai1 += 1;
@@ -10295,11 +10481,14 @@ export class Enemy extends Entity {
     if (!player) return;
     if (!player.dead) this.facing = this.seekDirX(player);   // :20786 死亡保持朝向
     // ---- ② 攻击蓄力点（:20984-21054）→ ai1=30（下帧起倒数，==25 发射）----
-    const at = (pts: number[]) => { if (pts.includes(this.ai0)) this.ai1 = 30; };
+    // 1457 :21080-21086 flag5 = AI_GlobalFiringDistanceCheck——超视野（玩家中心
+    // ±935/±575px 外）不开火；29 哥布林术士豁免（:21082-21084 flag5=true）
+    const flag5 = vid === 29 || aiGlobalFiringDistanceCheck(this.cx, this.cy, player.cx, player.cy);
+    const at = (pts: number[]) => { if (flag5 && pts.includes(this.ai0)) this.ai1 = 30; };
     if (vid === 283 || vid === 284) at([100, 150, 200, 250, 300]);
     else if (vid === 172) at([75, 150, 225, 300, 375, 450]);
     else if (vid === 281 || vid === 282) at([100, 120, 140, 200, 220, 240, 300, 320, 340]);
-    else if (vid === 533) { if (this.ai0 === 180) this.ai1 = 181; }   // :21006 特殊循环支
+    else if (vid === 533) { if (flag5 && this.ai0 === 180) this.ai1 = 181; }   // :21005-21007 特殊循环支
     else {
       // :21033-21037 flag4（RedHat 变体 32）双倍计时：+1 后奇数回退 → 恒落偶数、
       // 净 +2/t（蓄力点 100/200/300 均偶数照常命中 = 红帽法师整轮 2 倍速）。
@@ -10322,7 +10511,8 @@ export class Enemy extends Entity {
         ? attemptToFindTeleportSpotNearBooks(this, game, ptx, pty, 30) : null;
       if (!spot) {
         spot = attemptToFindTeleportSpot(this, game, ptx, pty,
-          20, 5, { dungeonWallGate: vid === 32 || (vid >= 281 && vid <= 286) });  // :21070 caster 参数 telefrag=5
+          // 1457 :18996 地牢墙门家族追加 693 图书管理员骷髅（骷髅王在场豁免同族）
+          20, 5, { dungeonWallGate: vid === 32 || (vid >= 281 && vid <= 286) || vid === 693 });  // :21070 caster 参数 telefrag=5
       }
       if (spot) {
         this.ai1 = vid === 24 ? 5 : 20;            // :21062-21066（Imp 短冷却 → 跳过 ==25 发射门）
@@ -11473,7 +11663,9 @@ export class Enemy extends Entity {
         }
       }
       // 史莱姆王死亡爆小史莱姆（HitEffect :86573-86607：4-7 只 NPC 1 体内随机
-      // 落点+随机初速——曾缺=死王不爆怪,2026-08-19 终审补;傀儡跳过同上）
+      // 落点+随机初速——曾缺=死王不爆怪,2026-08-19 终审补;傀儡跳过同上）。
+      // 1457 :86674-86676 补 ai[0]=-1000×Next(3)（首跳长延迟）+ ai[1]=-1（显式空
+      // 体内——0 会让 slimeRollContainedItem 触发吞物掷,C-18）
       if (this.vanillaId === 50 && !this.netPuppet) {
         const add = (game as unknown as { entities?: { add: (en: unknown, b: string) => void; nextId?: number } }).entities;
         const n = 4 + Math.floor(Math.random() * 4);   // Next(4,8) 含头不含尾 = 4-7
@@ -11482,6 +11674,8 @@ export class Enemy extends Entity {
           if (!b) continue;
           b.vx = (Math.random() - 0.5) * 6;
           b.vy = -3 - Math.random() * 3;
+          b.ai0 = -1000 * Math.floor(Math.random() * 3);   // :86675
+          b.ai1 = -1;                                      // :86676（1457:0→-1）
           add?.add(b, 'enemies');
         }
       }

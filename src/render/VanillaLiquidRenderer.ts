@@ -678,13 +678,16 @@ export function drawVanillaLiquids(
     }
   }
 
-  // ---- 斜面格水体覆盖增强（2026-08-21 用户定案"做得更好"+双重绘制）----
+  // ---- 斜面格水体覆盖增强（2026-08-21 用户定案"做得更好"）----
   // 原版：斜面格实心无液 → 不画前景水 → 角色站斜面上时身体与斜切三角区重叠的
-  // 部分无水色罩。用户定案增强：邻水的斜面格画水色覆盖，与正常水体同款【双 pass】：
-  //   背景 pass（isBackground=true）→ 不透明 1.0（= 正常水体的背景层）
-  //   前景 pass（isBackground=false）→ DEFAULT_OPACITY[0] = 0.6（= 正常水体前景层）
-  // 双层叠加后斜面斜切区的水色浓度与周围正常水体一致。形状 = LiquidSlope 斜面表。
-  {
+  // 部分无水色罩。用户定案增强：邻水的斜面格画水色覆盖。形状 = LiquidSlope 斜面表。
+  // ★仅背景 pass（isBackground=true）绘制——层级实证 TileDrawing.cs:526-529：
+  //   原版坡面浸润走 tileBatch.SetLayer(Layer_LiquidBehindTiles)，恒在 Layer_Tiles
+  //   方块层【之下】。曾双 pass 同画：前景份画在方块贴图之上，斜边 AA 像素被水色
+  //   盖出"边界盖在斜方块上层"（用户实报）。且背景份不透明 1.0 已定终色——相邻
+  //   水体=不透明背景层+前景 0.6 叠加，同色叠同色无色变，单份背景层即与水体
+  //   终色一致，无需第二份。
+  if (isBackground) {
     const slopeTex = getSlopeTex(waterStyle);
     if (slopeTex && slopeTex.width > 0) {
       for (let lx = PAD; lx < pw - PAD; lx++) {
@@ -694,17 +697,35 @@ export function drawVanillaLiquids(
           if (x < 0 || y < 0 || x >= st.w || y >= st.h) continue;   // st.idx 直读守卫
           const i = at(lx, ly);
           if (!isSolidA[i] || hasLiquidA[i]) continue;
-          const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
-          if (!hasLiquidA[ui] && !hasLiquidA[di] && !hasLiquidA[li] && !hasLiquidA[ri]) continue;
           // ★st.slope 是 store 下标——此处 i 是局部 padding 网格下标(at(lx,ly)),
           //   直喂会错位读数 → slope 恒落在 1-4 之外 → 整块静默跳过(2026-08-21
           //   用户三轮"仍然失效"的最终根因;前两轮修的是 groundLevel 门与贴图加载)
           const slope = st.slope[st.idx(x, y)];
           if (slope < 1 || slope > 4) continue;
+          // ★液面裁剪(2026-08-21 用户标注"氙奇葩"(242,231) slope2 壳堆×61%水位):
+          //   整格三角会把水画到液面之上(水爬坡)。原版浸润带按液位算液面下沉
+          //   num6=⌊(256-液位)/32⌋×2(TileDrawing.cs:4096),斜面表与平面带共用同一
+          //   源矩形(:4539 Y 复用 liquidSize)→ 只画液面以下的行,水线在切口内
+          //   保持水平、与邻格水面齐平。液位取坡面【开放侧】邻格最高值——固体背侧
+          //   的邻水不计(:3967-4028 slope 门同语义),否则水沿背侧斜边凭空出现
+          const liqAt = (dx: number, dy: number): number => {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= st.w || ny >= st.h) return 0;
+            return st.liquid[st.idx(nx, ny)];
+          };
+          const openLq = Math.max(
+            slope === 1 || slope === 3 ? 0 : liqAt(-1, 0),
+            slope === 2 || slope === 4 ? 0 : liqAt(1, 0),
+            slope === 3 || slope === 4 ? 0 : liqAt(0, -1),
+            slope === 1 || slope === 2 ? 0 : liqAt(0, 1),
+          );
+          if (openLq <= 0) continue;
+          const num6 = Math.floor((256 - openLq) / 32) * 2;
+          const sh = 16 - num6;
+          if (sh <= 0) continue;
           const sx = 18 * (slope - 1);
-          // 背景 pass 不透明 / 前景 pass 0.6——与正常水体双层结构一致
-          ctx.globalAlpha = isBackground ? 1 : (DEFAULT_OPACITY[0] ?? 0.6);
-          ctx.drawImage(slopeTex, sx, 0, 16, 16, x * 16, y * 16, 16, 16);
+          ctx.globalAlpha = 1;   // 背景层不透明（前景 0.6 份已撤，见块头注释）
+          ctx.drawImage(slopeTex, sx, num6, 16, sh, x * 16, y * 16 + num6, 16, sh);
         }
       }
       ctx.globalAlpha = 1;

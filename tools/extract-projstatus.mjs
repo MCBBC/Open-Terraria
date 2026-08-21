@@ -19,7 +19,9 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..');
-const SRC = join(ROOT, '..', 'Terarria1456', 'Terraria', 'Projectile.cs');
+// 源版本可选(recon-item-1456-1457.mjs 对账用;缺省 1456 = 既有产物基线)
+export const SRC_VER = process.env.SW_ITEM_VER ?? '1456';
+const SRC = join(ROOT, '..', 'Terarria' + SRC_VER, 'Terraria', 'Projectile.cs');
 const OUT = join(ROOT, 'src', 'data', 'vanilla-projstatus.json');
 const AUDIT = process.argv.includes('--audit'); // 自审计:不写文件,stdout 出 {types,entries,skipped}
 
@@ -207,5 +209,9 @@ if (AUDIT) {
     skipped: skipped.length, skippedKinds: skipped.map((x) => x[1]).slice(0, 20) }));
   process.exit(skipped.length > 25 ? 1 : 0); // 跳过数基数护栏(语义修正后基线 ~16)
 }
-writeFileSync(OUT, JSON.stringify(table, null, 1) + '\n');
-console.log(`写入 ${OUT}`);
+export const PROJ_STATUS_TABLE = table;
+export const PROJ_STATUS_SKIPPED = skipped;
+if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href) {
+  writeFileSync(OUT, JSON.stringify(table, null, 1) + '\n');
+  console.log(`projstatus: ${Object.keys(table).length} 型（源 Terarria${SRC_VER}）→ ${OUT}`);
+}

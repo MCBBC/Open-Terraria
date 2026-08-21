@@ -75,9 +75,16 @@ export interface ProjStatusCtx {
 /** 命中结算侧调用:按投射物型号掷骰并施加 debuff(AddBuff max 合并语义)。
  *  duration 掷骰 Next(durMin, durMax+1) tick → 秒(/60)。
  *  同 mut 组 = 互斥分支(单掷骰按累积概率选一,必中其一或全落空) */
+/** 1457 提取器 SKIP 档手补（Terarria1457 Projectile.cs:11453-11457）:
+ *  549 永恒水晶弹新增 Venom(70) 120t——`int time3 = 120; AddBuff(70, time3)`
+ *  局部变量时长表达式提取器不识别（SKIP 名单在案），按源码钉值代码层并表 */
+const PROJ_STATUS_1457_HANDPATCH: Record<number, StatusEntry[]> = {
+  549: [{ buff: 70, chance: 1, durMin: 120, durMax: 120, src: 11456 }],
+};
+
 export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, ctx?: ProjStatusCtx): void {
   if (projId === undefined || projId < 0) return;
-  const entries = TABLE[String(projId)];
+  const entries = TABLE[String(projId)] ?? PROJ_STATUS_1457_HANDPATCH[projId];
   if (!entries) return;
   let pendingMut: { id: number; roll: number } | null = null;
   for (const en of entries) {

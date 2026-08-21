@@ -90,8 +90,10 @@ describe('敌弹命中玩家（Damage_EVP）', () => {
       for (let i = 0; i < 6; i++) arrow.fixedUpdate(1 / 60, game);
     }
     expect(p.buffs.has(BuffType.Chilled)).toBe(true);
-    // Chilled 移速 ×0.75（Player.cs:25659-25661）
-    expect(p.buffs.moveSpeedMult).toBeCloseTo(0.75, 5);
+    // 1457: Chilled 移速减速移出 moveSpeedMult 乘法链,折入
+    // strongestMoveSpeedDebuff 取最强（Player.cs:26150-26152）——moveSpeedMult 恒 1
+    expect(p.buffs.moveSpeedMult).toBe(1);
+    expect(p.buffs.strongestMoveSpeedDebuff).toBeCloseTo(0.75, 5);
   });
 
   it('aiStyle 14 弹跳弹（希腊火 326）:落地反弹不消亡', () => {

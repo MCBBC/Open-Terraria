@@ -25,6 +25,30 @@ export interface SeedFlags {
   //  致敬；Secrets.ToSecret = BCrypt 哈希不可逆——原版凭哈希匹配，wiki 社区试出）。
   //  匹配口径同其它条目：去全部非字母数字后小写比对。运行时消费见 Player
   //  vampireSeedSunlightExposure（Player.cs:28191-28238 阳光炽灼全链）等
+
+  // ── 1457 秘密种子旗标域（登记位,触发链未实装=恒 false;行号 1457 WorldGen.cs）──
+  //  四涂装种子 + errorWorld：SecretSeed 哈希注册（BCrypt,无公开文本）,消费端 =
+  //  FinalSeedCleanupPass.ts（FinalSeedCleanup_Paint 单格涂 + 全图涂装 pass 族）。
+  //  文本/哈希触发与 .wld 旗标位落盘归秘密种子批（批 F）。
+  coatEverythingEcho?: boolean;        // :913 DoCoatEverythingEcho（边距 5+ErrorRemoval+8000 箱 1/25 塞 4409）
+  coatEverythingIlluminant?: boolean;  // :1005 DoCoatEverythingIlluminant（边距 5）
+  paintEverythingGray?: boolean;       // :777 DoPaintEverythingGray（边距 5;JustTheSurface 上界 worldSurface+Next(3)）
+  paintEverythingNegative?: boolean;   // :806 DoPaintEverythingNegative（边距 5;底边距 25 行）
+  errorWorld?: boolean;                // DoErrorWorldFinish/DoCoatEverythingEcho_ErrorRemoval 联动
+  dualDungeons?: boolean;              // SecretSeed.dualDungeons——placeTrap_CanContinue 界拒/
+  //  AddBuriedChest SkipOnDualDungeons 清旗/DungeonLayoutProvider 双地牢布局（批 F）
+  moreLightning?: boolean;             // :112 新种子（Register 带 base64 码,旗标版本≥323;批 F）
+  noLightning?: boolean;               // 同上（间隔 ÷2 且雨天即可）
+  //  Variations 子旗标（1457 新 Variations 系统,SecretSeed.Variations.*）：
+  echoJustSomeThings?: boolean;        // coatEverythingEchoJustSomeThings
+  echoJustInnerBlocks?: boolean;       // coatEverythingJustInnerBlocks
+  illuminantJustSomeThings?: boolean;  // coatEverythingIlluminantJustSomeThings
+  illuminantJustRandomSpots?: boolean; // coatEverythingIlluminantJustRandomSpots
+  grayUseWhite?: boolean;              // paintEverythingGrayUseWhite（漆 26 替 27）
+  grayJustTreasure?: boolean;          // paintEverythingGrayJustTreasure
+  grayJustTheSurface?: boolean;        // paintEverythingGrayJustTheSurface
+  negativeJustUnderground?: boolean;   // paintEverythingNegativeJustUnderground
+  negativeJustSomeThings?: boolean;    // paintEverythingNegativeJustSomeThings
 }
 
 const TABLE: Array<[RegExp, (f: SeedFlags) => void]> = [

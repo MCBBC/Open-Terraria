@@ -62,7 +62,7 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     p.manaAnimTicks = 0;
   };
 
-  it('移动中基础产额：max100/mana50 → floor((33+1)×0.6×1.15)=23/tick', () => {
+  it('移动中基础产额：max100/mana50 → floor(34×0.75)=25/tick（1457 公式:0.5+0.5x、×1.15 已删、下限 2）', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     p.baseMaxMana = 100;
@@ -70,18 +70,20 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     reset(p, 50);
     p.vx = 10;                       // 非静止（IsConsideredStandingStill :3175 |v|<0.05）
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.manaRegenCount).toBe(23);   // :19251-19268 产额公式
-    expect(p.mana).toBe(50);             // 23 < 120 不结算（:19275）
+    // 1457 :19568-19605：num5=max/3+bonus+1=34；num10=0.5+0.5×0.5=0.75；floor(34×0.75)=25
+    expect(p.manaRegenCount).toBe(25);
+    expect(p.mana).toBe(50);             // 25 < 120 不结算（:19659）
   });
 
-  it('静止加成：+max/3 → floor(67×0.6×1.15)=46/tick', () => {
+  it('静止加成：+全额基数（1457 改 +num5）→ floor(68×0.75)=51/tick', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     p.baseMaxMana = 100;
     settle(p, w);
     reset(p, 50);
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);   // 落地静止 vx=vy=0
-    expect(p.manaRegenCount).toBe(46);
+    // 1457 :19572-19575 静止/挂钩/回蓝档改加全额基数 num5（1456 只加 max/3）
+    expect(p.manaRegenCount).toBe(51);
   });
 
   it('蓄能结算：累积 ≥120 才 +1 魔并扣 120（6×23=138 → mana51/count18）', () => {
@@ -95,7 +97,8 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
       p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
     }
     expect(p.mana).toBe(51);
-    expect(p.manaRegenCount).toBe(18);  // 138-120
+    // 1457: 5×25 + 25（mana51 → num10=0.755 → floor(34×0.755)=25）= 150-120 = 30
+    expect(p.manaRegenCount).toBe(30);
   });
 
   it('存量系数 num2：满魔 1.0 → 39/tick；空魔 0.2 → 7/tick（:19262-19268）', () => {
@@ -106,11 +109,11 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     reset(p, 100);
     p.vx = 10;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.manaRegenCount).toBe(39);  // floor(34×1.0×1.15)
+    expect(p.manaRegenCount).toBe(34);  // 1457: 满魔 num10=1.0 → floor(34×1.0)
     reset(p, 0);
     p.vx = 10;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.manaRegenCount).toBe(7);   // floor(34×0.2×1.15)
+    expect(p.manaRegenCount).toBe(17);  // 1457: 空魔 num10=0.5 → floor(34×0.5)（原 1456 ×0.2×1.15=7）
   });
 
   it('用魔惩罚期：onManaItemUsed 后 delay=(1−0.5)×240+45 再 ×0.7=115.5，产额 0', () => {
@@ -123,7 +126,7 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     p.onManaItemUsed();                // :42131-42137 动画窗内每帧重置
     p.vx = 10;                         // 移动 → 不吃静止额外衰减
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.manaRegenDelay).toBeCloseTo(115.5 - 1, 6);  // :24378-24379 公式后 −1 衰减
+    expect(p.manaRegenDelay).toBe(114);  // 1457 ApplyManaRegenerationDelay:floor(165×0.7)=115 后 −1 衰减
     expect(p.manaRegenCount).toBe(0);  // delay>0 → manaRegen=0（:19270-19271）
     expect(p.mana).toBe(50);
   });
@@ -139,12 +142,14 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     p.onManaItemUsed();
     p.vx = 10;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.manaRegenDelay).toBe(20); // 113.5 → 帽 20
-    // 惩罚期过后（delay 清零）产额 = floor((34+33)×1.0×1.15)=77（num2 恒 1 :19265-19267）
+    // 1457: 钳 20 挪到置值时点（applyManaRegenerationDelay）→ 置 20 后本 tick 衰减
+    // −1（基础）−1（回蓝档）= 18（UpdateManaRegen 内的每帧钳已删,:19541-19560）
+    expect(p.manaRegenDelay).toBe(18);
+    // 惩罚期过后（delay 清零）产额 = floor((34+34)×1.0)=68（1457 num9=1、静止档加全额 num5）
     reset(p, 50);
     p.vx = 10;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.manaRegenCount).toBe(77);
+    expect(p.manaRegenCount).toBe(68);
   });
 
   it('瓶中星 158：manaRegenBonus+10 / delayBonus+0.5（:9629-9632）', () => {
@@ -156,15 +161,15 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     p.buffs.apply(BuffType.StarInBottle, 4800);
     p.vx = 10;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    // floor((34+10)×0.6×1.15)=floor(30.36)=30
-    expect(p.manaRegenCount).toBe(30);
+    // 1457: floor((34+10)×0.75)=floor(33)=33
+    expect(p.manaRegenCount).toBe(33);
     // delayBonus 只作用于惩罚期衰减：用魔后每 tick 多退 0.5
     reset(p, 50);
     p.useTime = 10;
     p.onManaItemUsed();
     p.vx = 10;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.manaRegenDelay).toBeCloseTo(115.5 - 1 - 0.5, 6); // :19236-19237
+    expect(p.manaRegenDelay).toBeCloseTo(115 - 1 - 0.5, 6); // 1457: floor(115.5)=115 置值后 −1−0.5
   });
 });
 

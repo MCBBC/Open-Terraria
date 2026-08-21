@@ -51,11 +51,10 @@ const remap = (value: number, from1: number, to1: number, from2: number, to2: nu
  *  913 火鞭 Firecracker → OnFire3(323) 240t=4s（NPC -30 lifeRegen=15HP/s）；
  *  912 酷鞭 Cool Whip → Frostburn2(324) 240t=4s（-50=25HP/s）——两者此前误并入
  *  OnFire(24) 4s 近似（-8=4HP/s）,2026-08-14 对齐分档；914 荆棘鞭 Snapthorn →
- *  1/5 AddBuff(20,180)；1033 电鳗鞭 5478 → 362/240 与 849 黑收成 Dark Harvest →
- *  310/240 在原版 NPC 侧【非 DoT 字段】：362=markedByEelWhip 链电标记（NPC.cs
- *  :93298 置位 → ApplyEelWhipDoT :92992 每 60t 对 600px 内至多 3 只标记怪放电,
- *  依赖 TagEffectState 5478 计数——链机制整块登记 GAP）、310=markedByScytheWhip
- *  仅视觉粒子（:92148 BlackLightningSmall,无数值效果）——两者不落本仓字段 */
+ *  1/5 AddBuff(20,180)；1033 电鳗鞭 5478 → 362/240（1457 重做：362=markedByEelWhip
+ *  从"链电标记"改 DOT 表平铺 Add(100,50)=50 HP/s,NPC.cs:92781——链式缩放/标记
+ *  玩家数/链电粒子全删,ApplyEelWhipDoT 成死代码）；849 黑收成 Dark Harvest →
+ *  310/240 = markedByScytheWhip 仅视觉粒子（:92188,无数值效果）——不落本仓字段 */
 export function applyWhipDebuffs(projId: number, enemy: Record<string, number>): void {
   if (projId === 913) enemy.onFire3T = Math.max(enemy.onFire3T ?? 0, 4);        // AddBuff(323,240)
   else if (projId === 912) enemy.frostburn2T = Math.max(enemy.frostburn2T ?? 0, 4); // AddBuff(324,240)

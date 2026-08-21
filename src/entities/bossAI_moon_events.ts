@@ -15,6 +15,7 @@
 // 弹幕贴图 Projectile_{109,110,180,325..329,345..352}.png 已入 sprites/vanilla(原 RENDER_PROXY
 // 代渲退役,Arrow 按 projId 懒加载真图)。
 import type { Enemy } from './Enemy';
+import { aiGlobalFiringDistanceCheck } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE } from '../core/constants';
@@ -947,12 +948,17 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
   const onG = e.onGround;   // moveAndCollide 落地即 vy=0（原版 velocity.Y==0 门）
 
   if (vid === 143) {
-    // 机枪雪球(:29129-29151)
+    // 机枪雪球(:29129-29151)。1457 :29199-29201 加 confused 清零 + flag43 =
+    // AI_GlobalFiringDistanceCheck——超视野不消耗计数（ai2 照加但不射击）
     e.ai2 += 1;
+    if (e.confused) e.ai2 = 0;
     if (e.ai2 >= 120) {
       e.ai2 = 0;
-      const ox = e.cx - e.facing * 12, oy = e.cy;
-      shootE(game, ox, oy, 12 * e.facing, 0, 25, 110);
+      if (player && !player.dead
+        && aiGlobalFiringDistanceCheck(e.cx, e.cy, player.cx, player.cy)) {
+        const ox = e.cx - e.facing * 12, oy = e.cy;
+        shootE(game, ox, oy, 12 * e.facing, 0, 25, 110);
+      }
     }
   }
   if (vid === 144 && e.ai1 >= 3) {
@@ -965,7 +971,13 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (e.ai2 >= 200) { e.ai2 = 0; e.ai1 = 0; }
     }
   } else if (vid === 145 && e.ai1 >= 3) {
-    // SnowBalla 投掷停顿(:29172-29206)：第 8 拍投雪球 109
+    // SnowBalla 投掷停顿(:29172-29206)：第 8 拍投雪球 109。
+    // 1457 :29243-29246 flag44 = AI_GlobalFiringDistanceCheck——落地且未蓄力且
+    // 超视野 → ai1 归零（回跳扑态,不进入投掷停顿）
+    if (onG && e.ai2 === 0 && (!player || player.dead
+      || !aiGlobalFiringDistanceCheck(e.cx, e.cy, player.cx, player.cy))) {
+      e.ai1 = 0;
+    }
     e.facing = player ? e.seekDirX(player) : -1;
     if (onG) {
       e.vx *= 0.9;

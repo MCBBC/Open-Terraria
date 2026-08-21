@@ -150,6 +150,190 @@ function setBrick(st: TileStore, x: number, y: number): void {
   st.slope[i] = 0; st.half[i] = 0;
 }
 
+/** Tile.ClearEverything + active + type 226（1457 cs:34620-34624 / 34726-34729）：
+ *  与 setBrick 差在**清墙/清帧/清漆/清线**（ClearEverything 全清后重置活性与类型）——
+ *  GenerateBricks 家族专用（房间实心填与挖腔仍走 setBrick,不清墙）。 */
+function setBrickClearAll(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  st.type[i] = BRICK; st.flags[i] = 1;
+  st.wall[i] = 0; st.liquid[i] = 0; st.liquidType[i] = 0;
+  st.half[i] = 0; st.slope[i] = 0;
+  st.frameX[i] = 0; st.frameY[i] = 0;
+  st.wire[i] = 0; st.paint[i] = 0; st.paintWall[i] = 0;
+}
+
+/** 砖线活动格判定（`!tile.active() || tile.type != 226` 的反谓词,FillX/FillY 用） */
+function isActiveBrick226(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  return !!st.flags[i] && sheetOfTP(st.type[i]!) === 226;
+}
+
+/** C# Math.Round（银行家舍入,ToEven）——JS Math.round 是 half-away,轴对齐整数
+ *  分量下两者同值,斜线分量为无理数不触 .5;保留显式实现对齐语义。 */
+function roundBanker(v: number): number {
+  const f = Math.floor(v), d = v - f;
+  if (d === 0.5) return f % 2 === 0 ? f : f + 1;
+  if (d === -0.5) return f % 2 === 0 ? f : f - 1;
+  return Math.round(v);
+}
+
+/** makeTemple_GenerateBricks（1457 cs:34592-34665,零掷骰）：①房间按深度组并界
+ *  （DungeonBounds.UpdateBounds）②组界 Inflate(10)（setter 钳 [10, 尺寸-10]）+
+ *  CalculateHitbox（Right≤Left→Left+1）→ 组界全填 ClearEverything+226 ③两两深度组
+ *  四角 StrictAngles 连线（Left/Right × Top/Bottom）。 */
+function makeTempleGenerateBricks(st: TileStore, rooms: Room[], depths: number[]): void {
+  const AMOUNT = 10;
+  const clamp = (v: number, hi: number) => Math.max(10, Math.min(hi - 10, v));
+  type Bnd = { l: number; t: number; r: number; b: number };
+  const groups: Array<Bnd | null> = depths.map(() => null);
+  for (let i = 0; i < rooms.length; i++) {
+    const d = depths[i];
+    const r = rooms[i];
+    const L = r.x, T = r.y, R = r.x + r.w, B = r.y + r.h;   // Rectangle.Left/Top/Right/Bottom
+    const g = groups[d];
+    if (!g) groups[d] = { l: L, t: T, r: R, b: B };
+    else {
+      if (L < g.l) g.l = L;
+      if (R > g.r) g.r = R;
+      if (T < g.t) g.t = T;
+      if (B > g.b) g.b = B;
+    }
+  }
+  for (const g of groups) {
+    if (!g) continue;
+    g.l = clamp(g.l, st.w); g.r = clamp(g.r, st.w);
+    g.t = clamp(g.t, st.h); g.b = clamp(g.b, st.h);
+    g.l = clamp(g.l - AMOUNT, st.w); g.r = clamp(g.r + AMOUNT, st.w);
+    g.t = clamp(g.t - AMOUNT, st.h); g.b = clamp(g.b + AMOUNT, st.h);
+    if (g.r <= g.l) g.r = g.l + 1;
+    if (g.b <= g.t) g.b = g.t + 1;
+    for (let k = g.l; k <= g.r; k++) {
+      for (let l = g.t; l <= g.b; l++) setBrickClearAll(st, k, l);
+    }
+  }
+  for (let m = 0; m < groups.length; m++) {
+    const a = groups[m];
+    if (!a) continue;
+    for (let n = m + 1; n < groups.length; n++) {
+      const b = groups[n];
+      if (!b) continue;
+      tmBricksLineStrictAngles(st, a.l, a.t, b.l, b.t, false, false);
+      tmBricksLineStrictAngles(st, a.r, a.t, b.r, b.t, true, false);
+      tmBricksLineStrictAngles(st, a.l, a.b, b.l, b.b, false, true);
+      tmBricksLineStrictAngles(st, a.r, a.b, b.r, b.b, true, true);
+    }
+  }
+}
+
+/** makeTemple_GenerateBricks_Line_StrictAngles（1457 cs:34667）：共线直连;否则从
+ *  「fillUpwards? (endX,startY) : (startX,endY)」原点取较远端做对角步进至共线,
+ *  拆两段直线;500 步守卫超限回退整段直线。 */
+function tmBricksLineStrictAngles(st: TileStore, startX: number, startY: number,
+  endX: number, endY: number, fillLeft: boolean, fillUpwards: boolean): void {
+  if (startX === endX || startY === endY) {
+    tmBricksLine(st, startX, startY, endX, endY, fillLeft, fillUpwards);
+    return;
+  }
+  const oX = fillUpwards ? endX : startX;
+  const oY = fillUpwards ? startY : endY;
+  const d1 = Math.hypot(oX - startX, oY - startY);
+  const d2 = Math.hypot(oX - endX, oY - endY);
+  let vX = startX, vY = startY, wX = endX, wY = endY;
+  if (d2 > d1) { vX = endX; vY = endY; wX = startX; wY = startY; }
+  let cX = vX, cY = vY;
+  const sx = wX > vX ? 1 : -1;
+  const sy = wY > vY ? 1 : -1;
+  let guard = 500;
+  while (cX !== wX && cY !== wY) {
+    guard--;
+    if (guard < 0) break;
+    cX += sx; cY += sy;
+  }
+  if (guard < 0) {
+    tmBricksLine(st, startX, startY, endX, endY, fillLeft, fillUpwards);
+    return;
+  }
+  tmBricksLine(st, startX, startY, cX, cY, fillLeft, fillUpwards);
+  tmBricksLine(st, cX, cY, endX, endY, fillLeft, fillUpwards);
+}
+
+/** makeTemple_GenerateBricks_Line（1457 cs:34709）：归一化步进逐格 ClearEverything+226,
+ *  每格接 FillY/FillX 补柱;2000 步守卫;InWorld(5) 出界即停。 */
+function tmBricksLine(st: TileStore, startX: number, startY: number,
+  endX: number, endY: number, fillLeft: boolean, fillUpwards: boolean): void {
+  let vX = startX, vY = startY;
+  const dX = endX - startX, dY = endY - startY;
+  if (dX === 0 && dY === 0) return;
+  const len = Math.hypot(dX, dY);
+  const nX = dX / len, nY = dY / len;          // SafeNormalize(UnitX)——len>0 恒走此支
+  let remain = len;
+  let budget = 2000;
+  let lastXAdj = -1, lastYAdj = -1;
+  while (remain > 0) {
+    budget--;
+    if (budget > 0) {
+      const px = roundBanker(vX), py = roundBanker(vY);
+      if (px >= 5 && px < st.w - 5 && py >= 5 && py < st.h - 5) {   // InWorld(px,py,5)
+        setBrickClearAll(st, px, py);
+        tmBricksLineFillY(st, fillUpwards, lastXAdj, px, py);
+        tmBricksLineFillX(st, fillLeft, lastYAdj, px, py);
+        lastXAdj = px; lastYAdj = py;
+        vX += nX; vY += nY;
+        remain -= 1;   // num -= vector3.Length()（归一化后恒 1）
+        continue;
+      }
+      break;
+    }
+    break;
+  }
+}
+
+/** makeTemple_GenerateBricks_Line_FillY（1457 cs:34750）：从当前格向 fill 方向探到
+ *  首个 226 实格（≤300 步、InWorld(5) 界内、y∈(10, h-10) 开区间）,回退重走逐格填 226。 */
+function tmBricksLineFillY(st: TileStore, fillUpwards: boolean, lastXAdjusted: number,
+  currentX: number, currentY: number): void {
+  if (currentX === lastXAdjusted) return;
+  const step = fillUpwards ? -1 : 1;
+  let num2 = currentY + step;
+  let count = 0;
+  while (!isActiveBrick226(st, currentX, num2)) {
+    count++;
+    num2 += step;
+    if (!st.inBounds(currentX, num2) || num2 < 5 || num2 >= st.h - 5) break;   // tile==null || !InWorld(5)
+  }
+  if (count >= 300 || num2 <= 10 || num2 >= st.h - 10) return;
+  num2 = currentY + step;
+  while (!isActiveBrick226(st, currentX, num2)) {
+    setBrickClearAll(st, currentX, num2);
+    num2 += step;
+    if (!st.inBounds(currentX, num2) || num2 < 5 || num2 >= st.h - 5) break;
+  }
+}
+
+/** makeTemple_GenerateBricks_Line_FillX（1457 cs:34791）：FillY 的 X 轴镜像
+ *  （fillLeft=false 向 +x;界 y∈(10, w-10)）。 */
+function tmBricksLineFillX(st: TileStore, fillLeft: boolean, lastYAdjusted: number,
+  currentX: number, currentY: number): void {
+  if (currentY === lastYAdjusted) return;
+  const step = fillLeft ? -1 : 1;
+  let num2 = currentX + step;
+  let count = 0;
+  while (!isActiveBrick226(st, num2, currentY)) {
+    count++;
+    num2 += step;
+    if (!st.inBounds(num2, currentY) || num2 < 5 || num2 >= st.w - 5) break;
+  }
+  if (count >= 300 || num2 <= 10 || num2 >= st.w - 10) return;
+  num2 = currentX + step;
+  while (!isActiveBrick226(st, num2, currentY)) {
+    setBrickClearAll(st, num2, currentY);
+    num2 += step;
+    if (!st.inBounds(num2, currentY) || num2 < 5 || num2 >= st.w - 5) break;
+  }
+}
+
 /** SolidTile(i, j)（cs:70155）：active + tileSolid + !tileSolidTop + 非半砖 + slope 0。
  *  与 SolidTile2（cs:70178，祭坛锚点门用）差一个 tileSolidTop（平台）条件,勿合并。 */
 function solidTileST(st: TileStore, x: number, y: number): boolean {
@@ -210,7 +394,9 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   const startDir = dir;                   // num3
   let runLen = rng.int(1, 2);             // num8:行程阈值,每次换向后 +1
   let runStep = 0;                        // num9
+  let depth = 0;                          // num13:深度组号（1457 roomDepths,每次换向 +1）
   let cx = sx, cy = sy;                   // num6/num7:上一间中心
+  const depths: number[] = [];            // array2（1457 cs:33789 `array2[i] = num13`）
   for (let n = 0; n < roomCount; n++) {
     // ★cs:33636 `int num19 = -10;` 声明在 for-i **体内**——每房重置;曾跨房累积,
     //  房距越滚越宽+掷骰漂移(F2 代理附带发现)
@@ -256,7 +442,8 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
     rooms.push(rect);
-    if (runStep > runLen) { runLen++; runStep = 1; }
+    depths.push(depth);   // ★1457：深度组号在换向判定【前】记录（cs:33789-33791）
+    if (runStep > runLen) { runLen++; runStep = 1; depth++; }
     dir = newDir as 1 | -1;
     cx = rx; cy = ry;
   }
@@ -267,32 +454,11 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     const f = (globalThis as { __swTmRooms?: (r: Room[], sx: number, sy: number) => void }).__swTmRooms;
     if (f) f(rooms.map((r) => ({ ...r })), sx, sy);
   }
-  // ---- 全房对实心砖连线(L17240-17278):四角组合插值走,每步铺整列砖 ----
-  for (let a = 0; a < rooms.length; a++) {
-    for (let b = 0; b < rooms.length; b++) {
-      if (a === b) continue;
-      for (let ea = 0; ea < 2; ea++) {
-        for (let eb = 0; eb < 2; eb++) {
-          let x1 = rooms[a].x + (ea === 1 ? rooms[a].w - 1 : 0);
-          let y1 = rooms[a].y;
-          let y1b = y1 + rooms[a].h;
-          let x2 = rooms[b].x + (eb === 1 ? rooms[b].w - 1 : 0);
-          let y2 = rooms[b].y;
-          let y2b = y2 + rooms[b].h;
-          let guard = 0;
-          while ((x1 !== x2 || y1 !== y2 || y1b !== y2b) && guard++ < 3000) {
-            if (x1 < x2) x1++;
-            if (x1 > x2) x1--;
-            if (y1 < y2) y1++;
-            if (y1 > y2) y1--;
-            if (y1b < y2b) y1b++;
-            if (y1b > y2b) y1b--;
-            for (let y = y1; y < y1b; y++) setBrick(st, x1, y);
-          }
-        }
-      }
-    }
-  }
+  // ---- ★1457 砖线重做（cs:33864 调用 → makeTemple_GenerateBricks cs:34592）----
+  // 1456 的「全房对四角连线」退役：房间按深度组（roomDepths,换向次数）并界 →
+  // DungeonBounds.Inflate(10) → 组界内 ClearEverything+226 全填 → 两两深度组四角
+  // StrictAngles L 形线（500 步守卫,超限回退直线）。★零 genRand——纯几何。
+  makeTempleGenerateBricks(st, rooms, depths);
   // ---- 房间实心 + 双遍游走挖腔(L17280-17381)----
   for (const r of rooms) {
     for (let x = r.x; x < r.x + r.w; x++) {

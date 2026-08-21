@@ -1366,16 +1366,17 @@ export function darkMageNextFrame(
   return idx;
 }
 
-/** 668 鹿角怪（FindFrame case 668，NPC.cs:67390-67501 + :6516-6534 序列表）。
- *  ai0==1/4 → 攻击 1 表（范围重置 12..17）；ai0==2 → 攻击 2 表（12..18）；
- *  ai0∈{3,5,7,8} → 攻击 3 表（19..24）；每 4t 走一格、FindFrame_FromSequence 钳末帧。
+/** 668 鹿角怪（FindFrame case 668，1457 NPC.cs:67543-67579 + :6516-6534 序列表）。
+ *  1457 重做：攻击态（ai0==1/2/3/4/5/7/8）帧计数直接读 ai[1]（AI 同步相位，
+ *  `frameCounter = ai[1]`）——删除 1456 的本地 counter 自增与"入场 y 钳位+尖叫"块
+ *  （尖叫移入 AI,1457 全 AI 8 处）。每 4t 走一格、FindFrame_FromSequence 钳末帧。
  *  默认：vy>0（或 localAI[0]==1，未移植略）→ 帧 1；vx==0 → 帧 0；
  *  行走 counter += |vx|（钳 150）、帧 = 2+counter/15（2..11） */
 const DEERCLOPS_ATK1_FRAMES = [12, 13, 14, 13, 14, 13, 14, 13, 14, 15, 16, 17];
 const DEERCLOPS_ATK2_FRAMES = [12, 15, 16, 17, 17, 17, 17, 13, 18, 18, 18, 18, 12];
 const DEERCLOPS_ATK3_FRAMES = [19, 20, 21, 22, 21, 22, 21, 22, 23, 24, 23, 24, 23, 24, 20, 19];
 export function deerclopsNextFrame(
-  s: NpcGridFrameState, o: { ai0: number; vx: number; vy: number; lai0?: number },
+  s: NpcGridFrameState, o: { ai0: number; ai1?: number; vx: number; vy: number; lai0?: number },
 ): number {
   let idx = s.idx;
   // 各攻击段入段越界范围（原版 num194/num195 等显式常量，非表尾值——攻击 2 表
@@ -1385,8 +1386,9 @@ export function deerclopsNextFrame(
       : o.ai0 === 3 || o.ai0 === 5 || o.ai0 === 7 || o.ai0 === 8 ? { seq: DEERCLOPS_ATK3_FRAMES, lo: 19, hi: 24 }
         : null;
   if (atk) {
-    if (idx < atk.lo || idx > atk.hi) { idx = atk.lo; s.counter = 0; }
-    s.counter++;
+    // 1457 :67548/:67555/:67562/:67570：frameCounter = ai[1]（AI 相位直读,
+    // 多人帧同步锚;单人 = 攻击态首拍起 4t/格,与旧本地自增同形但不再漂移）
+    s.counter = o.ai1 ?? 0;
     idx = atk.seq[Math.min(atk.seq.length - 1, Math.floor(s.counter / 4))];
   } else if (o.vy > 0 || o.lai0 === 1) {   // 跳跃帧(含上升段 lai0=1,曾只判下落)
     s.counter = 0;
@@ -4787,9 +4789,16 @@ export class Renderer {
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
         // ★有 color 的 NPC：base+color 两遍合一为单张合成精灵（xnaCombined 注），
-        //   此处先烘焙；基础层直绘被门控跳过（合成精灵已含 base 项，双画=叠 base）
-        const xnaColor = (e.colorRGBA && e.colorRGBA[3] > 0)
-          ? this.xnaCombined(`npc${e.vanillaId}`, r, e.colorRGBA,
+        //   此处先烘焙；基础层直绘被门控跳过（合成精灵已含 base 项，双画=叠 base）。
+        // GetNPCColorTintedByBuffs（1457 NPC.cs:92142）debuff 染色乘区先并入 color——
+        //   原版 draw color = light × npcColor,tint 是 npcColor 的通道乘区
+        const dbTint = e.debuffTintRGB;
+        const drawColor = dbTint && e.colorRGBA
+          ? [e.colorRGBA[0] * dbTint[0] / 255, e.colorRGBA[1] * dbTint[1] / 255,
+            e.colorRGBA[2] * dbTint[2] / 255, e.colorRGBA[3]] as number[]
+          : e.colorRGBA;
+        const xnaColor = (drawColor && drawColor[3] > 0)
+          ? this.xnaCombined(`npc${e.vanillaId}`, r, drawColor,
               Math.min(255, Math.max(e.spawnAlpha, 0)) / 255)  // ★用户校准态 ka=alpha/255（0.686）——原版推导值 1−alpha/255 待肉眼二选一
           : null;
         ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
@@ -4825,7 +4834,8 @@ export class Renderer {
         // 568/569 出生态紫雾（本体绘制层，先于本体画——Main.cs:26060-26076 拷贝循环
         // 在 vector72 本体 draw 之前）
         if (e.vanillaId === 568 || e.vanillaId === 569) this.drawWitherBirth(ctx, e, r, scale);
-        if (!xnaColor) ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
+        // debuff 染色在身时基础层由下方 tintedSprite(multiply) 版本承担（双画=叠亮）
+        if (!xnaColor && !dbTint) ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
         // ---- EoC 冲刺残影（Main.cs:25469-25481 1:1）：门 = ai[0]==3 且 ai[1]≥4
         //      （P2 连冲态 4 / 悬下方回冲态 5）→ 沿 oldPos 画 9 层鬼影，每层 RGBA
         //      × 0.5×(10−i)/20（越旧越淡），同一帧/旋转，锚点同本体（中心+eocOff）。
@@ -4851,8 +4861,9 @@ export class Renderer {
         }
         // 原版 color 二次绘制（Main.cs:24527 + NPC.GetColor L94903）：color≠default 时用
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
-        // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）
-        if (e.colorRGBA && e.colorRGBA[3] > 0) {
+        // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）。
+        // debuff 染色乘区（GetNPCColorTintedByBuffs,1457 :92142）已在上方并入 drawColor
+        if (drawColor && drawColor[3] > 0) {
           if (xnaColor) {
             // ★单张合成（base+color 两遍恒等,见 xnaCombined 长注）——α=occ 使
             //   空气背景 0.417 透出保留（三步 lighter 方案 α 钳 1 丢失它=过暗残因）
@@ -4865,12 +4876,12 @@ export class Renderer {
           //   ② destination-out(同贴图, ga=colorA/255) → dst×(1−T.a·kc) 精确衰减
           //   ③ lighter(tinted, ga=1) → +T·a·color.rgb 预乘加法贡献
           // （GetColor rgb 不乘 color.A——ga=colorA/255 会把贡献也乘 0.392）
-          const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, e.colorRGBA);
+          const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, drawColor);
           const anchorY2 = grounded ? -r.sh + 4 / scale : -r.sh / 2;
           const anchorY = anchorY2 + eocOff;
           if (tinted) {
             ctx.globalCompositeOperation = 'destination-out';
-            ctx.globalAlpha = e.colorRGBA[3] / 255;
+            ctx.globalAlpha = drawColor[3] / 255;
             ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
             ctx.globalCompositeOperation = 'lighter';
             ctx.globalAlpha = 1;
@@ -4878,6 +4889,17 @@ export class Renderer {
             ctx.globalCompositeOperation = 'source-over';
           }
           ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+          }
+        }
+        // debuff 染色（无自身 color 的 NPC）：tintedSprite(multiply) 替代基础精灵
+        // 直绘——原版 npcColor 乘进 draw color,等价于整精灵 RGB 乘区（α 保持轮廓）
+        else if (dbTint) {
+          const tinted = this.tintedSprite(`npcTint${e.vanillaId}`, r, dbTint);
+          if (tinted) {
+            ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+            ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h,
+              -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
+            ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
           }
         }
         // 史莱姆王体内忍者（Main.cs:22798-22818 1:1）：独立贴图 Ninja.png 叠画在
@@ -6159,7 +6181,8 @@ export class Renderer {
   private drawDeerclopsGrid(e: Enemy) {
     const img = this.atlas!.ensureVImage('vanilla/NPC_668.png');
     if (!img) return;
-    const idx = deerclopsNextFrame(this.npcGridFrame(e), { ai0: e.ai0, vx: e.vx, vy: e.vy, lai0: e.lai0 });
+    // 1457：攻击态帧计数读 ai[1]（AI 同步相位）
+    const idx = deerclopsNextFrame(this.npcGridFrame(e), { ai0: e.ai0, ai1: e.ai1, vx: e.vx, vy: e.vy, lai0: e.lai0 });
     // 几何查 NPC_GRIDS[668](5×5×218×240+pad2,重制管线同源)
     const g = NPC_GRIDS[668]!;
     const col = Math.floor(idx / (g.perRow ?? g.rows)), row = idx % (g.perRow ?? g.rows);

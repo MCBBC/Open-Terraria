@@ -67,12 +67,33 @@ describe('Item 数值三方对账金标(json × 1456 × 1457)', () => {
       'stats[982].life', 'stats[1595].def', 'stats[1613].def', 'stats[2221].def',
       'func[2209].healMana', 'whips[5477].dmg', 'whips[5688].dmg',
     ]);
+    // 新内容阈值:物品面 1457 新增 49 件(6147-6195)/弹幕面 25 弹(1111-1135)整条不计
+    const NEW_ID_FLOOR: Record<string, number> = { proj: 1111 };
+    const knownProj = new Set([
+      'proj[76].penetrate', 'proj[76].ignoreWater', 'proj[77].penetrate', 'proj[77].ignoreWater',
+      'proj[78].penetrate', 'proj[78].ignoreWater', 'proj[102].ranged',
+      'proj[114].penetrate', 'proj[114].timeLeft', 'proj[114].extraUpdates', 'proj[114].armorPenetration',
+      'proj[121].penetrate', 'proj[121].friendly', 'proj[121].timeLeft', 'proj[121].localNPCHitCooldown',
+      'proj[122].penetrate', 'proj[122].friendly', 'proj[122].timeLeft', 'proj[122].localNPCHitCooldown',
+      'proj[123].penetrate', 'proj[123].friendly', 'proj[123].timeLeft', 'proj[123].localNPCHitCooldown',
+      'proj[124].penetrate', 'proj[124].friendly', 'proj[124].timeLeft', 'proj[124].localNPCHitCooldown',
+      'proj[125].penetrate', 'proj[125].friendly', 'proj[125].timeLeft', 'proj[125].localNPCHitCooldown',
+      'proj[126].penetrate', 'proj[126].friendly', 'proj[126].timeLeft', 'proj[126].localNPCHitCooldown',
+      'proj[597].penetrate', 'proj[597].friendly', 'proj[597].timeLeft', 'proj[597].localNPCHitCooldown',
+      'proj[180].timeLeft', 'proj[206].timeLeft', 'proj[301].penetrate', 'proj[350].timeLeft',
+      'proj[352].timeLeft', 'proj[471].ranged', 'proj[478].penetrate', 'proj[480].timeLeft',
+      'proj[698].width', 'proj[698].timeLeft', 'proj[837].timeLeft', 'proj[837].tileCollide',
+      'proj[949].hostile', 'proj[1049].timeLeft', 'proj[1088].ranged', 'proj[1106].armorPenetration',
+    ]);
     const unexpected: string[] = [];
     for (const line of r.classB) {
       const m = line.match(/^(\w+)\[(\d+)\]\.(\w+):/);
       if (!m) { unexpected.push(line); continue; }
-      if (+m[2] >= 6147) continue; // 新内容物品(1457 新增 49 件)整条不计
-      if (!known.has(`${m[1]}[${m[2]}].${m[3]}`)) unexpected.push(line);
+      const [, file, idStr, field] = m;
+      const id = +idStr;
+      if (id >= (NEW_ID_FLOOR[file] ?? 6147)) continue; // 新内容整条不计
+      const key = `${file}[${id}].${field}`;
+      if (!known.has(key) && !knownProj.has(key)) unexpected.push(line);
     }
     expect(unexpected).toEqual([]);
   });

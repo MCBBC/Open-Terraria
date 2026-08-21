@@ -130,6 +130,11 @@ export function playerCanHitEnemy(
  *  弹体照常飞行——调用方不得据此销毁弹体。
  *  返回是否【实际造成伤害】(iframes/闪避吞掉时 false,对应原版 Hurt 返回 0;
  *  StatusPlayer 的 debuff 授予以此为准,:13798-13800)。 */
+/** ProjectileID.Sets.SkipDamage_EVP（1457 :275 新表,1456 无）={108,164,1002}——
+ *  爆炸物/地雷/TNT 桶类敌对弹不再走 EVP 打主人（自伤语义移交 Kill→SelfHurtPlayers
+ *  的 FixedSelfDamageForPlayers 定伤链） */
+const SKIP_DAMAGE_EVP = new Set([108, 164, 1002]);
+
 export function hitPlayer(
   self: { x: number; y: number; w: number; h: number },
   game: GameHooks,
@@ -138,6 +143,12 @@ export function hitPlayer(
   pvp = false,
 ): boolean {
   if (dmg <= 0) return false;
+  // 1457 :14846-14850（1456 :13706-13710 无此门）:SkipDamage_EVP 表早退。
+  // （1457 同段还删了受击路径的 TryDoingOnHitEffects——本仓 hitPlayer 本就无
+  //   owner OnHit 侧道,无需删;1091+双闪电种子 Heal(80) 依赖 1457 新种子旗标
+  //   noLightningSeed/moreLightningSeed,本仓 SeedFlags 未登记——不实装,随种子批）
+  const evpId = (self as { projId?: number }).projId;
+  if (evpId !== undefined && SKIP_DAMAGE_EVP.has(evpId)) return false;
   const p = game.player;
   if (p.dead) return false;
   if (p.iframes > 0) return false; // 原版 :13732 player.immune 门禁（General 槽）
