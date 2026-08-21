@@ -38,7 +38,7 @@ const out = await page.evaluate(async () => {
   let chainWorked = false;
   if (enemy) {
     const { Arrow } = await import('/src/entities/Arrow.ts');
-    const a = new Arrow(enemy.cx - 24, enemy.cy, 4, 0, 5, 1, 2, null, {});
+    const a = new Arrow(enemy.cx - 2, enemy.cy - 40, 0, 5, 5, 1, 2, null, {});
     g.entities.add(a, 'projectiles');
     Math.random = () => 0;
     try { for (let t = 0; t < 40; t++) g.fixedUpdate(1 / 60); }

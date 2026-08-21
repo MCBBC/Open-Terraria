@@ -25,6 +25,7 @@ import { Lang } from '../i18n/Lang';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { BESTIARY_CREDIT_REDIRECT } from '../data/bestiaryStatics.generated';
 import { VANILLA_NPCS } from '../data/vanillaNpcs';
+import { NPC_TINT_KA } from '../render/Renderer';
 // 负 netID 变体的 color/scale/alpha（SetDefaultsFromNetId L7633-7820；
 // public/sprites/vanilla-npcnetid.json，与 VanillaSpawner 同源数据）
 import vanillaNetIdJson from '../data/vanilla-npcnetid.json';
@@ -70,9 +71,8 @@ function bstTintedFrame(
   cx.imageSmoothingEnabled = false;
   cx.drawImage(img, 0, frameIdx * fh, w, fh, 0, 0, w, fh);
   const d = cx.getImageData(0, 0, w, fh);
-  // NPC.alpha 静态基线（SetDefaults；图鉴 dummy 与活体同值）——base 衰减系数
-  const npcAlpha = VANILLA_NPCS[String(npcId)]?.alpha ?? 0;
-  const ka = (255 - npcAlpha) / 255;
+  // ka = 渲染器经验定标值（Renderer.NPC_TINT_KA 0.55,同源保证图鉴/活体一致）
+  const ka = NPC_TINT_KA;
   const kc = (colorRGBA[3] ?? 255) / 255;
   const dd = d.data;
   for (let i = 0; i < dd.length; i += 4) {

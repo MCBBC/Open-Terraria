@@ -288,3 +288,172 @@ describe('drawMoonLordHand 锚点(Main.cs:24391-24447)', () => {
     expect(ops[i26].a).toEqual([0, 2 * 82, 46, 82, -(54 - 26) + 4, -42 + 4, 46, 82]);
   });
 });
+
+// ============ 30% 白斜坡补差(Renderer.applyMoonLordLightFloor,Main.cs:24345 族) ============
+// final_vanilla = sprite×(0.7L+0.3) = 已绘(sprite×L) + sprite×0.3×(1−L):
+// 差值色 rgb(0.3×(255−light)) 以 'lighter' 加性叠回。验证:色值数学/三步乘色序/
+// 剔除门(全亮零差跳过/出屏跳过/fullbright 跳过/behindTiles 跳过)。
+import { TILE } from '../src/core/constants';
+
+describe('applyMoonLordLightFloor(Main.cs:24345/24417/24479/24486)', () => {
+  function makeFixture(opts: {
+    light: [number, number, number]; fullbright?: boolean; behind?: boolean;
+    screen?: [number, number];
+  }) {
+    const mainOps: string[] = [];
+    const scratchOps: string[] = [];
+    let scratchGco = 'source-over';
+    const sctx = {
+      setTransform: () => scratchOps.push('xf'),
+      clearRect: () => scratchOps.push('clear'),
+      fillStyle: '',
+      fillRect: () => scratchOps.push('fill:' + String(sctx.fillStyle)),
+      globalCompositeOperation: scratchGco,
+      drawImage: () => scratchOps.push('draw@gco=' + scratchGco),
+    };
+    const scratch = {
+      width: 0, height: 0,
+      getContext: () => sctx,
+    };
+    const mainCtx = {
+      save: () => mainOps.push('save'),
+      restore: () => mainOps.push('restore'),
+      setTransform: () => mainOps.push('main-xf'),
+      globalCompositeOperation: 'source-over',
+      drawImage: () => mainOps.push('main:' + mainCtx.globalCompositeOperation),
+    };
+    const draws: string[] = [];
+    const fake = {
+      ctx: mainCtx,
+      mlFloorScratch: scratch,
+      fullbright: !!opts.fullbright,
+      isBehindTilesEnemy: () => !!opts.behind,
+      drawMoonLordCore: () => draws.push('398'),
+      drawMoonLordHand: () => draws.push('397'),
+      drawMoonLordHead: () => draws.push('396'),
+      drawMoonLordFreeEye: () => draws.push('400'),
+    };
+    const [lrx, lry] = [500, 500];
+    const light = { r: new Uint8Array([opts.light[0]]), g: new Uint8Array([opts.light[1]]), b: new Uint8Array([opts.light[2]]) };
+    const cam = {
+      zoom: 1.25,
+      worldToScreen: () => (opts.screen ?? [400, 300]),
+    };
+    const part = Enemy.fromVanilla(396, (lrx + 0.5) * TILE, (lry + 0.5) * TILE)!;
+    return { fake: fake as unknown as Renderer, mainOps, scratchOps, draws, sctx, light, lrx, lry, cam, part };
+  }
+
+  it('零光照:差值色 = rgb(77,77,77)(0.3×255),三步乘色 + lighter 叠回', () => {
+    const f = makeFixture({ light: [0, 0, 0] });
+    (Renderer.prototype as unknown as {
+      applyMoonLordLightFloor: (
+        e: unknown[], c: unknown, vw: number, vh: number,
+        lr: Uint8Array, lg: Uint8Array, lb: Uint8Array,
+        x: number, y: number, w: number, h: number,
+      ) => void;
+    }).applyMoonLordLightFloor.call(
+      f.fake, [f.part], f.cam, 1512, 862,
+      f.light.r, f.light.g, f.light.b, f.lrx, f.lry, 1, 1,
+    );
+    // scratch 序:resize 隐式清(首帧) → 绘(1st,桩不落 drawImage) → xf →
+    // multiply 填色 → xf → destination-in 绘(2nd);部件绘两次(乘色+α恢复)
+    expect(f.scratchOps.filter(o => o.startsWith('fill:')).length).toBe(1);
+    expect(f.scratchOps).toContain('fill:rgb(77,77,77)');
+    // 主画布:lighter 叠回
+    expect(f.mainOps).toContain('main:lighter');
+    expect(f.draws.filter(d => d === '396').length).toBe(2);
+  });
+
+  it('部分光照 (100,200,50):差值色 = rgb(47,17,62)(0.3×(255−L) 四舍五入)', () => {
+    const f = makeFixture({ light: [100, 200, 50] });
+    (Renderer.prototype as unknown as {
+      applyMoonLordLightFloor: (
+        e: unknown[], c: unknown, vw: number, vh: number,
+        lr: Uint8Array, lg: Uint8Array, lb: Uint8Array,
+        x: number, y: number, w: number, h: number,
+      ) => void;
+    }).applyMoonLordLightFloor.call(
+      f.fake, [f.part], f.cam, 1512, 862,
+      f.light.r, f.light.g, f.light.b, f.lrx, f.lry, 1, 1,
+    );
+    expect(f.scratchOps).toContain('fill:rgb(47,17,62)');
+  });
+
+  it('全亮 (255,255,255):差值 0 → 整体跳过(零开销)', () => {
+    const f = makeFixture({ light: [255, 255, 255] });
+    (Renderer.prototype as unknown as {
+      applyMoonLordLightFloor: (
+        e: unknown[], c: unknown, vw: number, vh: number,
+        lr: Uint8Array, lg: Uint8Array, lb: Uint8Array,
+        x: number, y: number, w: number, h: number,
+      ) => void;
+    }).applyMoonLordLightFloor.call(
+      f.fake, [f.part], f.cam, 1512, 862,
+      f.light.r, f.light.g, f.light.b, f.lrx, f.lry, 1, 1,
+    );
+    expect(f.scratchOps).toEqual([]);
+    expect(f.mainOps).toEqual([]);
+    expect(f.draws).toEqual([]);
+  });
+
+  it('光照矩形外 = 区域外黑(LightingEngine.lightAt 同口径)→ 满补差 rgb(77,77,77)', () => {
+    // 部件 tile 在光图外:lr 保持 0(非 255)→ 差值 = 0.3×255 = 76.5 → 77
+    const f = makeFixture({ light: [0, 0, 0] });
+    // 光图挪到别处(lrx=900):部件 tile (505,505) 落区外
+    (Renderer.prototype as unknown as {
+      applyMoonLordLightFloor: (
+        e: unknown[], c: unknown, vw: number, vh: number,
+        lr: Uint8Array, lg: Uint8Array, lb: Uint8Array,
+        x: number, y: number, w: number, h: number,
+      ) => void;
+    }).applyMoonLordLightFloor.call(
+      f.fake, [f.part], f.cam, 1512, 862,
+      f.light.r, f.light.g, f.light.b, 900, 900, 1, 1,
+    );
+    expect(f.scratchOps).toContain('fill:rgb(77,77,77)');
+  });
+
+  it('behindTiles 核心 398 同样补差(SetDefaults behindTiles=true,加性不破 z 序)', () => {
+    const f = makeFixture({ light: [0, 0, 0], behind: true });
+    const core = Enemy.fromVanilla(398, (f.lrx + 0.5) * TILE, (f.lry + 0.5) * TILE)!;
+    (Renderer.prototype as unknown as {
+      applyMoonLordLightFloor: (
+        e: unknown[], c: unknown, vw: number, vh: number,
+        lr: Uint8Array, lg: Uint8Array, lb: Uint8Array,
+        x: number, y: number, w: number, h: number,
+      ) => void;
+    }).applyMoonLordLightFloor.call(
+      f.fake, [core], f.cam, 1512, 862,
+      f.light.r, f.light.g, f.light.b, f.lrx, f.lry, 1, 1,
+    );
+    expect(f.draws.filter(d => d === '398').length).toBe(2);
+    expect(f.mainOps).toContain('main:lighter');
+  });
+
+  it('剔除门:出屏/fullbright 均不补', () => {
+    const off = makeFixture({ light: [0, 0, 0], screen: [-2000, 300] });
+    (Renderer.prototype as unknown as {
+      applyMoonLordLightFloor: (
+        e: unknown[], c: unknown, vw: number, vh: number,
+        lr: Uint8Array, lg: Uint8Array, lb: Uint8Array,
+        x: number, y: number, w: number, h: number,
+      ) => void;
+    }).applyMoonLordLightFloor.call(
+      off.fake, [off.part], off.cam, 1512, 862,
+      off.light.r, off.light.g, off.light.b, off.lrx, off.lry, 1, 1,
+    );
+    expect(off.draws).toEqual([]);
+    const fb = makeFixture({ light: [0, 0, 0], fullbright: true });
+    (Renderer.prototype as unknown as {
+      applyMoonLordLightFloor: (
+        e: unknown[], c: unknown, vw: number, vh: number,
+        lr: Uint8Array, lg: Uint8Array, lb: Uint8Array,
+        x: number, y: number, w: number, h: number,
+      ) => void;
+    }).applyMoonLordLightFloor.call(
+      fb.fake, [fb.part], fb.cam, 1512, 862,
+      fb.light.r, fb.light.g, fb.light.b, fb.lrx, fb.lry, 1, 1,
+    );
+    expect(fb.draws).toEqual([]);
+  });
+});

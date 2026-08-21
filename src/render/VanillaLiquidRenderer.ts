@@ -754,13 +754,13 @@ export function drawLiquidBehindTilesOnly(
   st: TileStore, groundLevel: number,
   tx0: number, ty0: number, tx1: number, ty1: number, waterStyle = 0,
   hasWaterfallAt?: (x: number, y: number) => boolean, solidLayer = true,
-  /** 果冻管线离屏水层填充模式（见 Renderer.drawLiquids ★浸润带画进离屏水层）：
-   *  1 = bg 层（source-over，原层序=水体之上）；2 = fg 层（destination-over 垫在
-   *  已有水体之下——只填透明区，静水逐位不变）。两模式均绕过"半砖+墙+上液跳带"
-   *  门（:4148-4151）——离屏层里该带被方块贴图覆盖不可见，但补全位移采样足迹 */
+  /** 果冻管线背景离屏水层填充模式（见 Renderer.drawLiquids ★浸润带画进离屏水层）：
+   *  1 = 画进背景水层（source-over，原层序=水体之上）。绕过"半砖+墙+上液跳带"门
+   *  （:4148-4151）——层内该带被方块贴图覆盖不可见，但补全位移采样足迹。
+   *  ★前景层禁止带入（前景合成画在方块贴图之上 = 水蓝盖地形——用户实报撤回）；
+   *    前景采样落空由 GL 合成的足迹回退兜住（GLWaterDistortion.FRAG uFoot） */
   warpFill = 0,
 ): void {
-  if (warpFill === 2) ctx.globalCompositeOperation = 'destination-over';
   // ★与原版 DrawTile_LiquidBehindTile 的定性保留偏差(2026-08-19 二轮清零后仅存):
   //  ①:4163-4166 地下半砖+上液"顶部顶点色×0"(逐 quad 垂直渐变,Canvas 2D 近似
   //    代价太高,用户裁定保留);②:4171-4182 flag6 多水型混合 DrawPartialLiquid——
@@ -981,7 +981,7 @@ export function drawLiquidBehindTilesOnly(
       if (lt === 3) {
         ctx.globalAlpha = 1;
         drawBand();
-        if (srcW >= 8 && warpFill !== 2) applyShimmerBaseTint(ctx, x, y, px, py, dstW, dstH,
+        if (srcW >= 8) applyShimmerBaseTint(ctx, x, y, px, py, dstW, dstH,
           (performance.now() / 1000) * 60);
         continue;
       }
@@ -1005,5 +1005,4 @@ export function drawLiquidBehindTilesOnly(
     }
   }
   ctx.globalAlpha = 1;
-  if (warpFill === 2) ctx.globalCompositeOperation = 'source-over';
 }

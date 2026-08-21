@@ -14416,11 +14416,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (c.dead || !c.hurt) continue;
       if (Math.abs((c.cx ?? cx) - cx) < hb + (cent.w >> 1)
         && Math.abs((c.cy ?? cy) - cy) < hb + (cent.h >> 1)) {
+        const churt = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));
         playEnemyHitSound(this, c);
         // 全参 hurt(小动物桶已全 Enemy 化——一击死由 lifeMax=5 自然达成)
-        c.hurt(Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100))),
-          cx - (c.cx ?? cx), cy - (c.cy ?? cy), this, pen);
-        this.addDamageNumber((c.cx ?? cx), (cent.y ?? cy), 5, false, '#FF8040');
+        c.hurt(churt, cx - (c.cx ?? cx), cy - (c.cy ?? cy), this, pen);
+        this.addDamageNumber((c.cx ?? cx), (cent.y ?? cy), churt, false, '#FF8040');
       }
     }
     // 城镇 NPC 爆炸窄门（Damage_PVE_Inner :11970-11972 同门：臭鸡蛋 318 非爆炸物

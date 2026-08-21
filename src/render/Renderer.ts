@@ -1779,6 +1779,22 @@ export function mapTileHoverName(sheet: number, frameX: number): string | null {
   return Lang.tileName(sheet);   // GetMapObjectName 图例名等价（Tiles.* 分节名）
 }
 
+/** NPC 染色合成 ka（base 贡献/遮蔽系数）——**经验定标 0.55**（2026-08-21 用户
+ *  肉眼 A/B：0.686(=alpha/255) 略过实、0.314(=(255−alpha)/255 反编译直译) 过透,
+ *  0.55 最接近原版）。★与反编译推导值 0.314 的差异未解（原版截图 B 通道拟合
+ *  支持 0.314、用户双眼支持 0.55——疑似截图场景光照/色彩管线差异,备案待
+ *  同机同场景复测）。?slimeka=<0..1> 仍可临时覆盖复验 */
+export const NPC_TINT_KA = (() => {
+  try {
+    const v = new URLSearchParams(location.search).get('slimeka');
+    if (v !== null) {
+      const n = Number(v);
+      if (Number.isFinite(n)) return Math.max(0, Math.min(1, n));
+    }
+  } catch { /* SSR/测试环境无 location */ }
+  return 0.55;
+})();
+
 export class Renderer {
   /** GL 合成层(#1 背景族 + #2 全屏地图共用;docs/webgl2-migration-plan.md) */
   glfx: GLSpriteLayer | null = null;
@@ -2849,6 +2865,13 @@ export class Renderer {
     // 7. 光照合成
     this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
+    // 7b'. 月总 30% 白斜坡（Main.cs:24345/24417/24479/24486
+    //      GetAlpha(Color.Lerp(Lighting.GetColor, White, 0.3f))——原版月总四部件
+    //      以「光照色向白 30%」为顶点色,暗处恒保 30% 亮度;本仓光照=合成期全屏
+    //      乘光,实体级顶点色通道不存在 → 合成后补差(见方法注)
+    this.applyMoonLordLightFloor(entities, cam, viewW, viewH,
+      lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+
     // 7a'. 晨昏镜头光斑(NextHorizonRenderer.DrawLensFlare :362-408,原版
     //      backbuffer 后处理不吃 tile 光——从世界层内挪出到光照合成后;曾画
     //      世界层内被乘光 → 加性耀斑变黑矩形,用户实报 2026-08-20)
@@ -3263,8 +3286,7 @@ export class Renderer {
     //      双离屏语义；激活 = WaveQuality>0 + 噪声就绪 + 非 CPU 渲染。见
     //      WaterWarpCompositor / GLWaterDistortion 头注）====
     // 前景水 = waterTarget（位移场扭曲合成回世界层，吃光照）；背景水 = backWaterTarget
-    // 同扭（原版两层的像素都在被前景水 alpha 门控的全屏 filter 里一起扭）；浸润带 =
-    // 墙/方块层渲染不参与扭曲 → 管线激活时改在合成后直画（层序不变）。
+    // 同扭（原版两层的像素都在被前景水 alpha 门控的全屏 filter 里一起扭）。
     const waterfallAt = (x: number, y: number) => this.waterfalls.checkForWaterfall(x, y);
     const warpOn = !this.isCpuRender() && this._waveCss !== null
       && waterWaves.quality > 0 && waveTexReady() && this.waterWarp.active();
@@ -3274,19 +3296,24 @@ export class Renderer {
     drawVanillaLiquids(warpCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
       world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, !!warpCtx);
     if (warpCtx) {
-      // ★浸润带画进离屏水层（2026-08-21 用户实报"半砖位没水直接透出背景"定谳修复）：
+      // ★浸润带画进【背景】离屏水层（2026-08-21 用户实报"半砖位没水直接透出背景"定谳修复）：
       //   位移场按 out(p)=src(p+disp) 重采样——半砖顶 8px 水带/池底等【水贴地形】边界
       //   采样落进地形区（水层内透明）= 水带被整段抹掉 = 空洞。浸润带 = 原版定义的
-      //   "水体足迹向实心格的延伸"（TileDrawing.cs:3859-4193），画进离屏层后位移采样
-      //   恒落在足迹内不再撕开。bg pass 带在水体之上（原层序）；fg pass 带以
-      //   destination-over 垫在水层之下——只填透明区，静水逐位不变。
-      if (this.atlas) {
+      //   "水体足迹向实心格的延伸"（TileDrawing.cs:3859-4193），画进背景层后位移采样
+      //   恒落在足迹内不再撕开；带在层内位于水体之上（原层序），墙/方块贴图随后覆盖。
+      //   ★前景层【不放】带（曾以 destination-over 垫入 = 前景合成画在方块贴图之上
+      //     = 水蓝盖地形——用户实报撤回）：前景采样落空由 GL 合成的"足迹回退"兜住
+      //     （uFoot=背景层，见 GLWaterDistortion.FRAG）——采样落空但落在足迹内时
+      //     回退本像素原样，前景水色不被撕开。
+      if (isBackground && this.atlas) {
         drawLiquidBehindTilesOnly(warpCtx, this.atlas, world.store, world.groundLevel,
-          tx0, ty0, tx1, ty1, this.waterStyle, waterfallAt, false, isBackground ? 1 : 2);
+          tx0, ty0, tx1, ty1, this.waterStyle, waterfallAt, false, 1);
       }
-      // 位移场扭曲合成（GL 优先；失败走 2D 分块回退）——身份变换、像素 1:1 进世界层
+      // 位移场扭曲合成（GL 优先；失败走 2D 分块回退）——身份变换、像素 1:1 进世界层。
+      // 前景 pass 附带足迹纹理（=背景水层）供采样落空回退
       this.waterWarp.endPass(this.ctx, isBackground, this._waveCss!,
-        this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null);
+        this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null,
+        isBackground ? null : this.waterWarp.footprintCanvas());
     }
   }
 
@@ -5033,6 +5060,8 @@ export class Renderer {
   private pumpkingArmImg: ImageBitmap | HTMLImageElement | null | undefined;
   /** 259/260 茎蔓强制亮彩的共享染色 scratch（source-atop 下限色） */
   private brightVineScratch: HTMLCanvasElement | null = null;
+  /** 月总 30% 白斜坡补差 scratch（applyMoonLordLightFloor，Main.cs:24345 族） */
+  private mlFloorScratch: HTMLCanvasElement | null = null;
 
   // ===================== NPC GlowMask 体系（Main.cs DrawNPC 硬编码发光层） =====================
   // 原版 NPC 无通用 glowMask 字段（与 Projectile/Item 不同）：发光层是 DrawNPC 里
@@ -7058,6 +7087,103 @@ export class Renderer {
    *  主 pass 已跳过该族（drawPlantVine 头部 return）——compositeLight 全屏乘光会
    *  压掉下限色，本方法在光照合成【后】绘制（render 7c 钩子）。逐敌用共享
    *  scratch source-atop 染色后按段旋转贴回；段循环与主 pass 同式（step 12/stop 20） */
+  /** 月总四部件 30% 白斜坡（Main.cs:24345/24417/24479/24486，G12 收尾）：
+   *  原版 case 396/397/398/400 的绘制色 = GetAlpha(Lerp(Lighting.GetColor(部件中心格),
+   *  White, 0.3f))——暗处月总恒保 30% 亮度。本仓光照 = compositeLight 全屏乘光,
+   *  实体级顶点色通道不存在;恒等式拆差后精确补齐:
+   *    final_vanilla = sprite×(0.7L+0.3) = 已绘(sprite×L) + sprite×0.3×(1−L)
+   *  → scratch 重绘部件 → 三步乘色 rgb(0.3×(255−light)) → 'lighter' 叠回
+   *  （加性,不覆盖后画实体,z 序零影响）。光照采样 = 部件中心格单点,与原版
+   *  Lighting.GetColor(point.X, point.Y) 同粒度;光图外按全亮(差值=0,不补)。
+   *  已知边界(备案):与月总重叠的后画实体(玩家/弹幕)像素会吃到该加性补差,
+   *  暗处重叠区偏亮 ≤0.3×sprite——z 序保持优先于逐像素归属,白天零差零开销。 */
+  private applyMoonLordLightFloor(
+    entities: Entity[], cam: Camera, viewW: number, viewH: number,
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+    lrx: number, lry: number, lrw: number, lrh: number,
+  ): void {
+    if (this.fullbright) return;
+    // ★398 核心 SetDefaults behindTiles=true(:14060,走 tile 后通道)——补差同样
+    //   适用(加性不破 z 序;被 tile 遮挡时溢出照亮遮挡格,备案:核心悬停开阔处为主)
+    const parts = (entities as Enemy[]).filter((n) => n instanceof Enemy && !n.dead
+      && (n.vanillaId === 396 || n.vanillaId === 397 || n.vanillaId === 398 || n.vanillaId === 400));
+    if (!parts.length) return;
+    const ctx = this.ctx;
+    const scratch = this.mlFloorScratch ??= document.createElement('canvas');
+    const sctx = scratch.getContext('2d');
+    if (!sctx) return;
+    const z = cam.zoom;
+    // 各部件最大绘制外接半径（世界 px）:398 躯干±290/臂±316/y −278..+360;
+    // 397 前臂旋转半径 ~426+手帧 −180..+92;396 头帧 y −130..+442+覆层 +214±28;
+    // 400 眼帧 78×120+瞳孔椭圆 ±30
+    const RAD: Record<number, number> = { 398: 380, 397: 460, 396: 470, 400: 90 };
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    for (const e of parts) {
+      const [sx, sy] = cam.worldToScreen(e.cx, e.cy);
+      const R = (RAD[e.vanillaId ?? -1] ?? 380) * z;
+      if (sx < -R || sy < -R || sx > viewW + R || sy > viewH + R) continue;
+      // 中心格单点光照(:24345 point = Center.ToTileCoordinates)。
+      // ★区域外 = 黑(0,0,0)——原版 GetColor 区域外语义(LightingEngine.lightAt 同口径,
+      //   曾误默认 255=全亮 → 差值 0 → 光照矩形外的部件永远拿不到补差)
+      let lr = 0, lg = 0, lb = 0;
+      const tx = Math.floor(e.cx / TILE), ty = Math.floor(e.cy / TILE);
+      if (tx >= lrx && ty >= lry && tx < lrx + lrw && ty < lry + lrh) {
+        const li = (ty - lry) * lrw + (tx - lrx);
+        lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
+      }
+      console.log('[mlfloor] vid=' + e.vanillaId + ' tile=' + tx + ',' + ty + ' L=(' + lr + ',' + lg + ',' + lb + ') rect=' + lrx + ',' + lry + '+' + lrw + 'x' + lrh);
+      // 差值色 = sprite×0.3×(255−light)/255（逐通道;全亮 → 0 跳过）
+      const cr = Math.round(0.3 * (255 - lr));
+      const cg = Math.round(0.3 * (255 - lg));
+      const cb = Math.round(0.3 * (255 - lb));
+      if (cr + cg + cb === 0) continue;
+      // scratch = 部件屏区 ∩ 视口(只处理可见区)
+      const bx0 = Math.max(0, Math.floor(sx - R)), by0 = Math.max(0, Math.floor(sy - R));
+      const bx1 = Math.min(viewW, Math.ceil(sx + R)), by1 = Math.min(viewH, Math.ceil(sy + R));
+      const bw = bx1 - bx0, bh = by1 - by0;
+      if (bw <= 0 || bh <= 0) continue;
+      if (scratch.width !== bw || scratch.height !== bh) {
+        scratch.width = bw; scratch.height = bh;
+      } else {
+        sctx.setTransform(1, 0, 0, 1, 0, 0);
+        sctx.globalCompositeOperation = 'source-over';
+        sctx.clearRect(0, 0, bw, bh);
+      }
+      // 世界→scratch 变换（同实体 pass:translate(round(vw/2),round(vh/2))·scale(z)·
+      // translate(-camRX,-camRY),平移再减 bbox 屏原点）
+      const setWorldXf = () => {
+        sctx.setTransform(z, 0, 0, z,
+          Math.round(viewW / 2) - bx0 - camRX * z, Math.round(viewH / 2) - by0 - camRY * z);
+      };
+      const drawPart = () => {
+        if (e.vanillaId === 398) this.drawMoonLordCore(e, entities);
+        else if (e.vanillaId === 397) this.drawMoonLordHand(e, entities);
+        else if (e.vanillaId === 396) this.drawMoonLordHead(e);
+        else this.drawMoonLordFreeEye(e);
+      };
+      const savedCtx = this.ctx;
+      this.ctx = sctx;
+      setWorldXf();
+      drawPart();                                              // 1st: 原样绘
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.globalCompositeOperation = 'multiply';
+      sctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+      sctx.fillRect(0, 0, bw, bh);                             // 2nd: 乘差值色
+      setWorldXf();
+      sctx.globalCompositeOperation = 'destination-in';
+      drawPart();                                              // 3rd: 源 α 恢复
+      this.ctx = savedCtx;
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.globalCompositeOperation = 'source-over';
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(scratch, bx0, by0);                        // 加性补差
+      ctx.restore();
+    }
+  }
+
   private drawBrightVines(
     entities: Entity[], cam: Camera, z: number,
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
@@ -10065,6 +10191,7 @@ export class Renderer {
     key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
     color: number[], ka: number,
   ): TintRect | null {
+    ka = NPC_TINT_KA;   // 经验定标（?slimeka= 可临时覆盖,见常量注）
     const kc = color[3] / 255;
     const q = (v: number) => Math.round(v) & ~7;
     const kaq = Math.round(Math.max(0, Math.min(1, ka)) * 64) / 64;

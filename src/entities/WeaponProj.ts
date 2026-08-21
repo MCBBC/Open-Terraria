@@ -2325,13 +2325,28 @@ export class GrenadeProj extends Entity {
         }
       }
     }
-    // 接触引爆（Damage :12330-12340 碰 NPC → timeLeft 钳 3；发射族 friendly 不炸玩家）
+    // 接触引爆（Damage_PVE_Inner :12330-12340 碰 NPC → timeLeft 钳 3；发射族
+    // friendly 不炸玩家）。★Damage() 每 tick 跑（Update :15738）→ 遍历 Main.npc
+    // 全表 = enemies+critters 两桶（碰小动物同样钳引信+弹体盒结算伤害——小动物
+    // 一击死）。曾只扫 enemies 桶（2026-08-21 补 critters）
     if (this.fuse > 3) {
       for (const ent of game.enemies()) {
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean };
         if (e.dead) continue;
         if (this.x < e.x + e.w && this.x + this.w > e.x
           && this.y < e.y + e.h && this.y + this.h > e.y) { this.fuse = 3; break; }
+      }
+      if (this.fuse > 3) {
+        for (const cent of game.critters?.() ?? []) {
+          const c = cent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean; hurt?: (g: unknown) => boolean };
+          if (!c || c.dead) continue;
+          if (this.x < c.x + c.w && this.x + this.w > c.x
+            && this.y < c.y + c.h && this.y + c.h > c.y) {
+            c.hurt?.(game);   // 弹体盒结算（小动物一击死）
+            this.fuse = 3;
+            break;
+          }
+        }
       }
     }
     if (--this.fuse <= 0) {
@@ -2479,6 +2494,20 @@ export class GrenadeProj extends Entity {
         if (e.dead) continue;
         if (this.x < e.x + e.w && this.x + this.w > e.x
           && this.y < e.y + e.h && this.y + this.h > e.y) { this.fuse = Math.min(this.fuse, 3); break; }
+      }
+      // critters 桶同钳（Damage_PVE 全表遍历——碰小动物=弹体盒一击死+钳引信;
+      // 与上方发射支接触段同语义,曾漏）
+      if (this.fuse > 3) {
+        for (const cent of game.critters?.() ?? []) {
+          const c = cent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean; hurt?: (g: unknown) => boolean };
+          if (!c || c.dead) continue;
+          if (this.x < c.x + c.w && this.x + this.w > c.x
+            && this.y < c.y + c.h && this.y + c.h > c.y) {
+            c.hurt?.(game);
+            this.fuse = Math.min(this.fuse, 3);
+            break;
+          }
+        }
       }
     }
     // ---- 引信倒数 → 爆（PrepareBombToBlow 在 timeLeft≤3 置 alpha=255 隐形本体，此处直接爆）----

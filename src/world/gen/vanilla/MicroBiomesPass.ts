@@ -808,7 +808,14 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
     if (st.inBounds(px, below)) {
       const bi = st.idx(px, below);
       if (!solidOrSlopedAt(st, px, below)) {
-        st.type[bi] = STONE; st.flags[bi] = 1;   // ResetToType(1)+active
+        // ★CCCCC：ResetToType(1)（cs:66+68）全语义——liquid=0（Tile.cs:281 首行！
+        //   12345 (1863,971) 石内岩浆 255 残留唯一根因：vanilla 整平 ResetToType 清液
+        //   而 JS 只写 type+active）+headers=32（线/致动清）+帧清+type=1+active(true)
+        st.liquid[bi] = 0; st.liquidType[bi] = 0;
+        st.wire[bi] = 0;
+        st.frameX[bi] = 0; st.frameY[bi] = 0;
+        st.paint[bi] = 0;
+        st.type[bi] = STONE; st.flags[bi] = 1;
       }
       st.slope[bi] = 0; st.half[bi] = 0;         // cs:67-68(两分支都复位)
       // XXXX：WorldUtils.TileFrame(result2.X+i, result2.Y+1, frameNeighbors:true)

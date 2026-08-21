@@ -89,10 +89,12 @@ export class WaterWarpCompositor {
   /**
    * 结束水体 pass：位移场扭曲离屏内容合成回 srcCtx（身份变换、设备像素 1:1）。
    * noiseSrc = 噪声贴图（atlas 提取；GL 一次性上传）。
+   * foot = 足迹纹理（前景 pass = 背景水层；GL 采样落空回退用，见 GLWaterDistortion.FRAG）。
    */
   endPass(
     srcCtx: CanvasRenderingContext2D, isBackground: boolean,
     st: WaterWarpFrameState, noiseSrc: TexImageSource | null,
+    foot: HTMLCanvasElement | null = null,
   ): void {
     const src = isBackground ? this.bgCanvas! : this.fgCanvas!;
     srcCtx.save();
@@ -104,7 +106,7 @@ export class WaterWarpCompositor {
       const gl = this.glLayer();
       if (gl && gl.composite(src, noiseSrc, st.cssW, st.cssH,
         waterWaves.progress, waterWaves.intensity,
-        waterWaves.readGridR(), waterWaves.gridW(), waterWaves.gridH())) {
+        waterWaves.readGridR(), waterWaves.gridW(), waterWaves.gridH(), foot)) {
         srcCtx.drawImage(gl.canvas, 0, 0);
         path = 'gl';
       }
@@ -115,6 +117,11 @@ export class WaterWarpCompositor {
     // ——否则直画路径每帧末尾的 globalAlpha=1 落在离屏上，主 ctx 残留前置 pass 的 alpha
     srcCtx.globalAlpha = 1;
     setWaterWarpDebug(path);
+  }
+
+  /** 背景水层画布（= 水体足迹含浸润带；前景 pass 采样落空回退的足迹纹理） */
+  footprintCanvas(): HTMLCanvasElement | null {
+    return this.bgCanvas;
   }
 
   /** GL 实例哨兵（活实例直取；死亡 5s 退避；初始化失败 30s 闩——同 worldLightLayer） */

@@ -261,7 +261,13 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
   //      检测自杀——原版同构的下一 tick 时序)。此处仅存量自愈兜底:旧版 hurt
   //      放行年代留下的负血实体(不再受击则 hurt 不触发)——AI 分发只跳 dead
   //      不跳 hp≤0,须在此收口,否则负血条永挂(2026-08-19) ----
-  if (e.hp <= 0) { e.die(game); return; }
+  if (e.hp <= 0) {
+    // 存量负血本体若 hasHead=true(dont=true)会挡 die→hurt 管线=同自由头挂空险
+    // (复审顺手对齐:原版 StrikeNPCNoInteraction 族绕 dontTakeDamage)
+    e.dontTakeDamage = false;
+    e.die(game);
+    return;
+  }
 
   // ---- FindFrame case 245(:73581-73609)状态帧(非循环动画):待机按 ai1 蓄力
   //      倒计分 5 档(-20 蹲伏起步);跳跃 ai0==1 → 原版 frame.Y=1(1 像素笔误值

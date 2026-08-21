@@ -55,9 +55,11 @@ const r = await page.evaluate(async () => {
   const sword = ui.pvpSwordBtn.getBoundingClientRect();
   const listR = ui.craftListEl.getBoundingClientRect();
   const searchRow = ui.craftSearchEl.getBoundingClientRect();
+  // 右缘列布局口径：剑在列表右缘之外、成就卡下方（不压卡）、不出面板
+  const advR = ui.achAdvisorEl.getBoundingClientRect();
   const pvpPos = {
     pvpRightOfList: sword.left >= listR.right - 2,
-    pvpBelowSearch: sword.top >= searchRow.bottom - 4,
+    pvpBelowAdvisor: sword.top >= advR.bottom - 2,
     pvpInPanel: sword.right <= ui.invPanel.getBoundingClientRect().right + 1,
   };
   // ⑤ 顶锚不遮热键栏：面板 top ≥ 热键栏底(72)+间隙
@@ -80,7 +82,7 @@ console.log(JSON.stringify(r, null, 1));
 const ok = r.topTexts.includes('住房') && !r.topTexts.includes('快速堆叠至附近宝箱')
   && r.qsIcon && r.qsSize[0] === 30 && r.qsBelowGrid >= -40 && r.qsAboveCraft >= 0
   && r.listH <= 240 && r.housingOpened && r.noOverlap
-  && r.pvpRightOfList && r.pvpBelowSearch && r.pvpInPanel;
+  && r.pvpRightOfList && r.pvpBelowAdvisor && r.pvpInPanel;
 console.log(ok ? 'PASS' : 'FAIL');
 await page.screenshot({ path: '/tmp/inv-layout.png' });
 await browser.close();

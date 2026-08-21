@@ -43,6 +43,14 @@ describe('GLWaterDistortion.FRAG：obj19 位移公式锁（防漂移）', () => 
     expect(f).toContain('vUv * uCssSize');
     expect(f).toContain('px / uNoiseSize');
   });
+
+  it('足迹回退（前景 pass）：采样落空(α<0.02)且足迹内有内容(α>0.02) → 回退本像素原样', () => {
+    // 2026-08-21 半砖水带撕开定谳修复：前景层不带浸润带（带入=水蓝盖地形），
+    // 位移采样落进地形区时靠 uFoot(=背景水层含浸润带) 判定足迹内 → 不撕开
+    expect(f).toContain('w.a < 0.02');
+    expect(f).toContain('texture2D(uFoot, uvD).a > 0.02');
+    expect(f).toContain('w = texture2D(uWater, vUv)');
+  });
 });
 
 describe('WaterWarpCompositor：激活门与坐标系（node 环境无 document → 恒不激活）', () => {

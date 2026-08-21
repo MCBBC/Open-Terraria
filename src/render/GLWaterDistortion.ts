@@ -55,6 +55,7 @@ export class GLWaterDistortion {
   private texWater: WebGLTexture | null = null;
   private texNoise: WebGLTexture | null = null;
   private texWave: WebGLTexture | null = null;
+  private texFoot: WebGLTexture | null = null;
   private noiseReady = false;
   private noiseW = 256;
   private noiseH = 256;
@@ -75,12 +76,18 @@ void main() {
 }`;
 
   // 位移公式 = WaterWaves.sampleDisplace 的 GLSL 镜像（公式出处见文件头；
-  // 测试锁常量：tests/water-warp.test.ts）
+  // 测试锁常量：tests/water-warp.test.ts）。
+  // ★足迹回退（uFoot，前景 pass 专用）：前景水层不带浸润带（带入前景层会被合成
+  //   画在方块贴图之上 = 水蓝盖地形），位移采样落在地形区（层内透明）时回退本像素
+  //   原样——前景水色贴地形边界不被位移撕开；水线（空气侧）足迹恒空 → 不回退 →
+  //   水线自由升降（原版 filter 的 alpha 差门控语义的水层化近似）。
   static readonly FRAG = `
 precision highp float;
 uniform sampler2D uWater;
 uniform sampler2D uNoise;
 uniform sampler2D uWave;
+uniform sampler2D uFoot;
+uniform float uFootMode;
 uniform vec2 uCssSize;
 uniform vec2 uNoiseSize;
 uniform vec2 uWaveSize;
@@ -102,7 +109,12 @@ void main() {
   float dispy = gy * 0.1 * uIntensity - clamp(h - 0.5, -0.3, 0.3);
   // 屏幕 css px 位移（c14.x=0.1 / c14.y=1.0 × c5=32·opacity/res × res）
   vec2 disp = vec2(dispx * 0.1, dispy) * 32.0;
-  gl_FragColor = texture2D(uWater, vUv + disp / uCssSize);
+  vec2 uvD = vUv + disp / uCssSize;
+  vec4 w = texture2D(uWater, uvD);
+  if (uFootMode > 0.5 && w.a < 0.02 && texture2D(uFoot, uvD).a > 0.02) {
+    w = texture2D(uWater, vUv);
+  }
+  gl_FragColor = w;
 }`;
 
   constructor() {
@@ -164,7 +176,7 @@ void main() {
     }
     this.prog = prog;
     for (const n of ['uCssSize', 'uNoiseSize', 'uWaveSize', 'uProgress', 'uIntensity',
-      'uWater', 'uNoise', 'uWave']) {
+      'uWater', 'uNoise', 'uWave', 'uFoot', 'uFootMode']) {
       this.uni[n] = gl.getUniformLocation(prog, n);
     }
     const buf = gl.createBuffer();
@@ -176,6 +188,7 @@ void main() {
     this.texWater = gl.createTexture();
     this.texNoise = gl.createTexture();
     this.texWave = gl.createTexture();
+    this.texFoot = gl.createTexture();
     // 水层：CLAMP（越界 = 边缘重复，原版 PointClamp 同款边界语义）
     gl.bindTexture(gl.TEXTURE_2D, this.texWater);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -190,6 +203,12 @@ void main() {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     // 波场：非 pow2（屏/4）→ CLAMP + LINEAR（= _readR 的 clamp+双线性）
     gl.bindTexture(gl.TEXTURE_2D, this.texWave);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    // 足迹纹理（CLAMP + LINEAR，采样落空回退判定）
+    gl.bindTexture(gl.TEXTURE_2D, this.texFoot);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -239,6 +258,7 @@ void main() {
     water: HTMLCanvasElement, noise: TexImageSource | null,
     cssW: number, cssH: number, progress: number, intensity: number,
     waveR: Float32Array, gridW: number, gridH: number,
+    foot: HTMLCanvasElement | null = null,
   ): boolean {
     const gl = this.gl;
     if (!gl || !this.prog || this.diedAt) return false;
@@ -261,6 +281,18 @@ void main() {
     gl.uniform1i(this.uni.uWater, 0);
     gl.uniform1i(this.uni.uNoise, 1);
     gl.uniform1i(this.uni.uWave, 2);
+    // 足迹纹理（前景 pass：uFoot=背景水层；null = 关回退）
+    if (foot && foot.width > 0 && foot.height > 0) {
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, this.texFoot);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, foot);
+      gl.uniform1i(this.uni.uFoot, 3);
+      gl.uniform1f(this.uni.uFootMode, 1);
+    } else {
+      gl.uniform1f(this.uni.uFootMode, 0);
+    }
     gl.uniform2f(this.uni.uCssSize, cssW, cssH);
     gl.uniform2f(this.uni.uNoiseSize, this.noiseW, this.noiseH);
     gl.uniform2f(this.uni.uWaveSize, gridW, gridH);

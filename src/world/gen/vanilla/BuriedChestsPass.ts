@@ -812,6 +812,9 @@ function placeBuriedChestInner(
   // (tile467&&style24) || (无主件 && 位置 && 脚下冰系)。★原版显式传 style 11
   // 也进本池（HouseBuilder 冰屋正是此路径）——旧实现 style===undefined 单门漏此
   const tBelow = st.type[st.idx(i, gy)];
+  // CCCCCC 诊断钩:记冰箱门判定输入+结果（i,gy,tBelow,mainId,style,fired)
+  const iceDbg = (globalThis as { __swIceGate?: (i: number, gy: number, tBelow: number, mainId: number, style: number, fired: number) => void }).__swIceGate;
+  if (iceDbg) iceDbg(i, gy, tBelow, mainId, style ?? -1, 0);
   // ★AAAAAA：cs:36112 冰系地基四元 {147,161,162,197}——197 冻胶块曾漏。
   if ((tile === CHEST && argStyle === 11) || (tile === CHEST2 && argStyle === 24)
     || (!mainId && gy >= gs.worldSurface + 25 && gy <= st.h - 205
@@ -821,6 +824,7 @@ function placeBuriedChestInner(
     //   曾漏（loot/掷流全对但帧写 style1）→ #101 DeadMans 金箱 style 过滤错位
     //   （(1546,552) 等四箱金标 sty11 vs 本仓 sty1 实证）。
     if (tile === CHEST) style = 11;
+    if (iceDbg) iceDbg(i, gy, tBelow, mainId, style, 1);   // fired=1
     if (!mainId) {
       mainId = [670, 724, 950, 1319, 987, 1579][rng.int(0, 5)]; // cs:36121-36125
       if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机
@@ -967,6 +971,10 @@ function placeBuriedChestInner(
   if (style === 16) flags.temple = true;
   if (style === 13) flags.skyTheme = true;
   const fw = TILE_DEFS[tile].vanilla?.fw ?? 2;
+  {
+    const wDbg = (globalThis as { __swChestWrite?: (i: number, topY: number, tile: number, style: number, fx: number) => void }).__swChestWrite;
+    if (wDbg) wDbg(i, topY, tile, style, style * fw * 18);
+  }
   for (let dx = -1; dx <= 0; dx++) {
     for (let dy = 0; dy < 2; dy++) {
       st.setTileSilent(i + dx, topY + dy, tile, style * fw * 18 + (dx + 1) * 18, dy * 18);

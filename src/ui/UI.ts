@@ -2452,18 +2452,23 @@ export class UI {
     clusterRow.appendChild(bEmote);
     right.appendChild(clusterRow);
     body.appendChild(right);
+    // 右缘列：成就提示牌 + PvP/队伍钮（2026-08-21 用户指定——面板右缘成就卡下方
+    // 整块空白，PvP 列挂这里流内排布，不挤合成区宽度；列高 225 < 左装备列 620，
+    // 面板高度不受影响。★与左列 rightRail（垃圾桶/钱币）重名，此为 advRail）
+    const advRail = el('div');
+    advRail.style.cssText = 'display:flex; flex-direction:column; gap:8px; flex:none; align-items:center;';
     // 成就提示牌 → 物品格右侧（用户指定；alignSelf 防 body stretch 拉高卡片）
-    this.achAdvisorEl.style.alignSelf = 'flex-start';
-    body.appendChild(this.achAdvisorEl);
+    this.achAdvisorEl.style.alignSelf = 'stretch';
+    advRail.appendChild(this.achAdvisorEl);
+    body.appendChild(advRail);
     this.invPanel.appendChild(body);
 
     // ---- PvP/队伍快切钮（DrawPVPIcons Main.cs:42074-42195：原版背包右下角；
-    //      本仓按用户指定挂合成区右侧空位（absolute 不占流高，回收面板底部）；
+    //      本仓按用户指定挂右缘列（成就卡下方流内，不挤合成区宽度）；
     //      原版 ShouldPVPDraw=netMode==1 仅联机画，本仓常开=设置页 PvP/队伍同款
     //      语义（单机调试便利 + 联机 msg13 同步）） ----
     const pvpWrap = el('div');
-    pvpWrap.style.cssText = 'position:absolute; right:0; top:4px;'
-      + 'display:flex; flex-direction:column; align-items:flex-end;';
+    pvpWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center;';
     // PvP 剑（:42112-42116：38px 帧裁 Width-2/Height-1 → 36×37）
     this.pvpSwordBtn = el('button', 'sw-btn');
     this.pvpSwordBtn.style.cssText = 'margin:0; width:36px; height:37px; padding:0; flex:none;'
@@ -2503,7 +2508,7 @@ export class UI {
       this.pvpTeamBtns.push(cell);
     }
     pvpWrap.appendChild(teamGrid);
-    // 挂载移至合成区容器（craftWrap.appendChild(pvpWrap)，见 buildInventoryPanel 尾段）
+    advRail.appendChild(pvpWrap);   // 右缘列成就卡下方（流内，不挤合成区）
     this.refreshPvpButtons();
 
     // 防御计数器（原版 DrawDefenseCounter Main.cs:41555-41623：Extra_58 盾 3×2 帧
@@ -2564,17 +2569,13 @@ export class UI {
     this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:520px;';
     modernRow.appendChild(this.craftGridEl);
     right.appendChild(modernRow);
-    // 合成区容器（relative）：PvP/队伍钮绝对定位其右侧空位（2026-08-21 用户指定
-    // "上移到合成栏目右侧的空位，回收下方空间"）——不占流高度，面板底边随之回收
     const craftWrap = el('div');
-    craftWrap.style.cssText = 'position:relative; min-height:130px;';   // min-height 防 PvP 列(≈125px)超出短列表底
     right.appendChild(craftWrap);
     this.craftListEl = el('div');
     // 原版无滚动条——滚轮驱动焦点评动(CraftingUI 滚动列表),不走原生滚动;
     // 曾 overflow-y:auto + refreshAll 重建行后 scrollTop 归零 = 滚动位置每帧重置
     this.craftListEl.style.cssText = 'height:240px; overflow:hidden; width:520px;';
     craftWrap.appendChild(this.craftListEl);
-    craftWrap.appendChild(pvpWrap);   // 顶部构建的 PvP/队伍列 → 合成区右侧（craftWrap 已在标题/搜索行之下，top:4 对齐列表顶）
     this.root.appendChild(this.invPanel);
   }
 
@@ -3184,6 +3185,9 @@ export class UI {
 
   /** 鱼眼合成列表焦点行（原版 focusRecipe；滚轮 ±1，CraftingUI 滚动 ±6.5/帧） */
   private craftFocus = 0;
+  /** 悬停预览行（材料格显示源；-1=无）。★只动材料格不动渲染窗——
+   *  窗口锚点/鱼眼中心恒用 craftFocus（滚轮/点击驱动），hover 不触发滚动 */
+  private hoverFocus = -1;
   /** Modern 合成网格：搜索栏 + 焦点配方材料格（1.4.5 CraftingGrid 语义） */
   private craftSearchEl: HTMLInputElement | null = null;
   private craftGridEl: HTMLElement | null = null;
@@ -3244,18 +3248,18 @@ export class UI {
       mats.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right;';
       row.appendChild(mats);
       row.addEventListener('mouseenter', () => {
-        // 悬停预选（Main.cs:41740-41744 HoverOverCraftingItemButton 点击分支：
-        // focusRecipe != 悬停行时点击 → focusRecipe = recipeIndex + 音 12）。
-        // DOM 侧把"点击才预选"提前到 hover 即预选——材料格/详情立即显示该配方
-        //（原版点击换焦点后本次点击不合成,防误触;此处 hover 无合成语义,零风险）
-        if (this.craftFocus !== idx) {
-          this.craftFocus = idx;
+        // 悬停预选（2026-08-21 用户两段定案：hover 显示该配方材料格，但【不得】
+        // 触发列表滚动——滚动只由滚轮驱动）。hoverFocus 只作材料格预览源，
+        // craftFocus（=渲染窗锚点/鱼眼中心）不被 hover 触碰 → 窗口纹丝不动
+        if (this.hoverFocus !== idx) {
+          this.hoverFocus = idx;
           this.refreshAll();
         }
       });
       row.addEventListener('mousedown', (ev) => {
         ev.stopPropagation();
-        this.craftFocus = idx; // 选中置焦（原版 focusRecipe=i）
+        this.craftFocus = idx; // 选中置焦（原版 focusRecipe=i，点击才动窗口）
+        this.hoverFocus = -1;  // 点击行即焦点，预览态退场
         // 点击行 = 合成（合成按钮已去除）。材料格存料先归还背包再统一扣料——
         // 防"料在格里、背包不足"的假失败（换焦点路径已由 refreshCraftGrid 归还）
         this.returnCraftGrid();
@@ -3276,8 +3280,13 @@ export class UI {
           ev.preventDefault();
           ev.stopPropagation();
           this.craftFocus = Math.max(0, this.craftFocus + (ev.deltaY > 0 ? 1 : -1));
+          this.hoverFocus = -1;   // 滚动后鼠标下配方已变，预览态退场回落焦点
           this.refreshAll();
         }, { passive: false });
+        // 移出列表清预览（行重建销毁不派发 leave，容器级兜底防残留）
+        cl.addEventListener('mouseleave', () => {
+          if (this.hoverFocus !== -1) { this.hoverFocus = -1; this.refreshAll(); }
+        });
       }
     }
     // Modern 合成网格材料格（焦点配方）
@@ -3300,7 +3309,10 @@ export class UI {
   /** 现代合成网格材料行（1.4.5 CraftingGrid：左键=放入/右键=取回/合成=格子优先） */
   private refreshCraftGrid(avail: Array<{ r: VanillaRecipeLike; count: number }>): void {
     if (!this.craftGridEl) return;
-    const focusR = avail[Math.min(this.craftFocus, avail.length - 1)]?.r ?? null;
+    // 材料格显示源：hover 预选行 > 滚轮焦点行（hover 不动渲染窗，见行 mouseenter 注）
+    const focusR = avail[this.hoverFocus >= 0
+      ? this.hoverFocus
+      : Math.min(this.craftFocus, avail.length - 1)]?.r ?? null;
     // 焦点配方变更：归还旧格内容
     if (focusR !== this.craftGridRecipe) {
       this.returnCraftGrid();
