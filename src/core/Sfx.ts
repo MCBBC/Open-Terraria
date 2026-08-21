@@ -97,7 +97,7 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   coin: ['Coin_0', 'Coin_1', 'Coins'],
   door_open: ['Door_Opened'],
   door_close: ['Door_Closed'],
-  splash: ['Splash_0', 'Splash_1'],
+  splash: ['Splash_0', 'Splash_1', 'Splash_2', 'Splash_3', 'Splash_4', 'Splash_5'],
   drown: ['Drown'],
   bowShoot: ['Item_5'],
   // 菜单 UI（原版 id 10=Menu_Open / id 11=Menu_Close / id 12=Menu_Tick）

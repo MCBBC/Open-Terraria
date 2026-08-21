@@ -156,8 +156,8 @@ export class GrappleProj extends Entity {
     //  通用 atan2−1.57 在 :49658 已赋）——纯视觉，GetGrapplingForces 仅 865 消费 rotation
     if (this.projType === 256) this.rot = Math.atan2(dy, dx) + SKELETRON_HAND_ROT;
     // :49685-49696 446 反重力钩：localAI[0] 每 tick +1、≥28 归 0（链帧行驱动）——纯视觉。
-    //  同段 AddLight(mountedCenter,(0,0.4,0.3))+PlotTileLine 沿线发光移至 draw()（本仓
-    //  光照引擎经 Renderer 暴露，draw 期注册 perFrame 点光同效）
+    //  同段 AddLight(mountedCenter,(0,0.4,0.3))+PlotTileLine 沿线发光 → 下方
+    //  lineLight 段（AI 期，与原版同段同拍）
     if (this.projType === 446) { this.lai0 += 1; if (this.lai0 >= 28) this.lai0 = 0; }
     // :49697-49704 652 静态钩：++frameCounter ≥7 → 推帧（6 帧循环）——纯视觉
     if (this.projType === 652 && ++this.frameCounter >= 7) {
@@ -165,6 +165,15 @@ export class GrappleProj extends Entity {
       this.headFrame += 1;
       if (this.headFrame >= 6) this.headFrame = 0;
     }
+    // :49687-49694（446）/ :49708-49727（646-649）沿线发光——原版 AI 期 AddLight
+    // （状态机分派前）。本仓 AI 期经 GameHooks.addLightAt 注册：fixedUpdate 内
+    // 登记 → 本 tick 尾 LightingEngine.compute 的 dirty 快进（LightingEngine.ts
+    // compute/runFullCycle）同帧消费呈现——与原版"AI 期注册 → 渲染期 LightTiles
+    // 快进消费"同为当帧可见。曾移至 draw() 期注册 = 经下一 tick compute 恒 1 tick
+    // 延迟（2026-08-21 复审③回迁）。★332/488 段光原版即 draw 期发射
+    // （Main.cs:28796-28816/:28970），仍留 drawChain——见该处注释。
+    const lineLight = hookChainOf(this.projType)?.lineLight;
+    if (lineLight) this.emitLineLight(game, p, lineLight);
 
     if (this.ai0 === GRAPPLE_FLY) {
       this.stepFly(game, dist);
@@ -291,7 +300,6 @@ export class GrappleProj extends Entity {
     const head = atlas ? asImg(atlas.ensureVImage(`vanilla/Projectile_${this.projType}.png`)) : null;
     if (spec && img) this.drawChain(r, p, spec, img, glow);
     else this.drawLegacyChain(ctx, p);                       // 兜底（全表贴图已解包，恒不触发）
-    if (spec?.lineLight) this.emitLineLight(r, p, spec.lineLight); // 446/646-649 端点+沿线发光
     if (head) this.drawHead(ctx, head);
     else this.drawLegacyHead(ctx);                            // 兜底
   }
@@ -338,6 +346,9 @@ export class GrappleProj extends Entity {
       const dist = Math.hypot(dx, dy);
       if (!Number.isFinite(dist) || dist < stopDist) break;   // NaN 门 + 残距停铺
       if (spec.segLightCycle) {          // 332：推进前取格、四色循环（:28796-28814）
+        // ★原版即 draw 期发射（Main.cs:28796-28816 DrawProjDirect 链铺循环内）——
+        //  非 AI 期；本仓 draw 期注册 → 下一 tick compute 的 dirty 快进消费
+        //  （恒 1 tick 相位差,原版 draw 期光同样要等下一轮 LightTiles 扫描态）
         const c = spec.segLightCycle[ci % 4];
         r.lighting?.addLight(Math.floor(px / TILE), Math.floor(py / TILE), c[0], c[1], c[2]);
       }
@@ -369,6 +380,7 @@ export class GrappleProj extends Entity {
         ctx.restore();
       }
       if (spec.segLight) {               // 488：推进后取格（:28971 AddLight(center)）
+        // ★原版即 draw 期发射（Main.cs:28970 DrawProjDirect type==488 段）——同 332
         const c = spec.segLight;
         r.lighting?.addLight(Math.floor(px / TILE), Math.floor(py / TILE), c[0], c[1], c[2]);
       }
@@ -396,16 +408,17 @@ export class GrappleProj extends Entity {
   }
 
   /** 446/646-649 端点 + 沿线 8px 逐格发光（AI_007 :49685-49727 原版 AI 期执行，
-   *  本仓移至 draw 期——Renderer.lighting perFrame 点光同效；
-   *  PlotTileLine = Utils.cs:2428 + PlotLine :2329 + CastLightOpen 门 :729-743） */
-  private emitLineLight(r: GrappleDrawHost, p: Player, rgb: readonly [number, number, number]): void {
-    const lt = r.lighting;
-    if (!lt) return;
+   *  本仓同在 AI 期——aiStep 经 GameHooks.addLightAt 注册，本 tick 尾
+   *  LightingEngine.compute 的 dirty 快进同帧消费呈现（调用点注释见 aiStep
+   *  lineLight 段）；PlotTileLine = Utils.cs:2428 + PlotLine :2329 + CastLightOpen
+   *  门 :729-743 */
+  private emitLineLight(game: GameHooks, p: Player, rgb: readonly [number, number, number]): void {
+    const add = game.addLightAt;
+    if (!add) return;                       // 测试桩无光照通道（types.ts:111 可选钩子）
     const hx = this.cx, hy = this.cy, mx = p.cx, my = p.cy;
-    lt.addLight(Math.floor(mx / TILE), Math.floor(my / TILE), rgb[0], rgb[1], rgb[2]); // mountedCenter
-    lt.addLight(Math.floor(hx / TILE), Math.floor(hy / TILE), rgb[0], rgb[1], rgb[2]); // Center
-    const st = r.world?.store;
-    if (!st) return;
+    add(mx, my, rgb[0], rgb[1], rgb[2]);    // AddLight(mountedCenter)（:49688/:49725）
+    add(hx, hy, rgb[0], rgb[1], rgb[2]);    // AddLight(Center)（:49726；446 由线首格覆盖）
+    const st = game.world.store;
     // ±width/2(4px) 垂直带 → tile 偏移（通常 (0,0)/(±1,0)）
     const len = Math.hypot(mx - hx, my - hy) || 1;
     const ox = (-(my - hy) / len) * 4, oy = ((mx - hx) / len) * 4;
@@ -418,7 +431,7 @@ export class GrappleProj extends Entity {
     const plot = (x: number, y: number): boolean => {
       if (!st.inBounds(x, y)) return false;
       if (st.isActive(x, y) && TILE_DEFS[st.get(x, y)]?.solid === true) return true;
-      lt.addLight(x, y, rgb[0], rgb[1], rgb[2]);
+      add(x * TILE, y * TILE, rgb[0], rgb[1], rgb[2]);   // 像素→格（floor(x*16/16)=x 恒等）
       return true;
     };
     plotLine(stx, sty, etx, ety,
@@ -450,9 +463,10 @@ export interface GrappleDrawHost {
   ctx: CanvasRenderingContext2D;
   /** SpriteAtlas 懒加载取图（未就绪返回 null） */
   atlas?: { ensureVImage(file: string): CanvasImageSource | null } | null;
-  /** 光照引擎（332/488 段光 + 446/646-649 沿线光；无则跳过） */
+  /** 光照引擎（332/488 段光——原版即 draw 期发射，Main.cs:28796-28816/:28970；
+   *  446/646-649 沿线光已回迁 AI 期（aiStep→addLightAt），不经本宿主；无则跳过） */
   lighting?: { addLight(x: number, y: number, r: number, g: number, b: number): void } | null;
-  /** 世界（沿线光的 CastLightOpen 实心门用） */
+  /** 世界（旧沿线光的 CastLightOpen 实心门用——段光不查地形，保留兼容测试桩） */
   world?: { store: ChainLightStore } | null;
 }
 

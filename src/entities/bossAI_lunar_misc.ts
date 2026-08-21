@@ -1859,6 +1859,24 @@ export function crawltipedeAI(e: Enemy, game: GameHooks, player: Player | null):
 //  574(悬浮脑 420 环绕):随 420 存活;每 180t 且对玩家 CanHitLine → 线发 576 弹
 //    (8 速 65 伤)后重置计时继续盘旋;悬浮脑瞬移时全量计时 -30(accelerate)。
 // ---------------------------------------------------------------------------
+/** Player.FindClosest（Player.cs:4733-4758）：中心曼哈顿距（原式 position+width/2
+ *  两心距同构），active&&!dead 取最小、严格 < 平距取先扫描槽（候选序 [本地槽 0,
+ *  ...代理] 对齐原版槽序）；全灭回退首候选（原版首活跃槽兜底）。
+ *  弹体侧消费点：LunarOrb 539 冲刺（:32191）/574 父亡兜底（:32193）、传送门 578
+ *  首帧定向（:32530）——M11 索敌链 */
+function findClosestPlayer(game: GameHooks, cx: number, cy: number): Player | null {
+  const cands = game.candidatePlayers?.() ?? [game.player];
+  let base: Player | null = null;
+  for (const p of cands) { if (p) { base = p; break; } }
+  let best = base;
+  let dist = -1;
+  for (const p of cands) {
+    if (!p || p.dead) continue;
+    const d = Math.abs(p.cx - cx) + Math.abs(p.cy - cy);
+    if (dist === -1 || d < dist) { dist = d; best = p; }
+  }
+  return best;
+}
 export class LunarOrb extends Entity {
   w = 18; h = 18;
   vx: number; vy: number;
@@ -1926,25 +1944,33 @@ export class LunarOrb extends Entity {
       }
     }
     if (this.ai0 === orbitT) {
-      const p = game.player;
-      if (this.kind === 539) {
-        // 直冲最近玩家(:32185-32212):方向 ±50px 抖动 ×0.8-1.2,16 速
-        const tx = p.cx + (Math.random() * 100 - 50), ty = p.cy + (Math.random() * 100 - 50);
-        const kx = 0.8 + Math.random() * 0.4, ky = 0.8 + Math.random() * 0.4;
-        const dx = (tx - this.cx) * kx, dy = (ty - this.cy) * ky;
-        const d = Math.hypot(dx, dy) || 1;
-        this.vx = (dx / d) * 16; this.vy = (dy / d) * 16;
-      } else {
-        // 线发 576 弹(:32204-32211):CanHitLine 门,8 速 65 伤;发射后重置计时。
-        // v6 傀儡不本地线发——房主的 576 弹经 msg27 同步,双端各发会翻倍
-        if (!this.netPuppet && !p.dead && canHitLine(game.world.store, this.cx, this.cy, 0, 0, p.cx, p.cy, 0, 0)) {
-          const dx = p.cx - this.cx, dy = p.cy - this.cy;
+      // 目标（:32175-32196）：539（flag47=true）→ Player.FindClosest 最近玩家；
+      // 574（flag47=false）→ 父 420 的索敌目标 Main.npc[ai[1]].target（父在生时，
+      // 父亡/失效 → FindClosest 兜底——574 父亡已在上行 Kill，兜底仅为类型安全）
+      // ——M11 索敌链（原版 Main.player[num861]）
+      const p: Player | null = this.kind === 539
+        ? findClosestPlayer(game, this.cx, this.cy)
+        : (parent!.targetRef?.(game) ?? findClosestPlayer(game, this.cx, this.cy));
+      if (p) {
+        if (this.kind === 539) {
+          // 直冲最近玩家(:32185-32212):方向 ±50px 抖动 ×0.8-1.2,16 速
+          const tx = p.cx + (Math.random() * 100 - 50), ty = p.cy + (Math.random() * 100 - 50);
+          const kx = 0.8 + Math.random() * 0.4, ky = 0.8 + Math.random() * 0.4;
+          const dx = (tx - this.cx) * kx, dy = (ty - this.cy) * ky;
           const d = Math.hypot(dx, dy) || 1;
-          (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(
-            new Arrow(this.cx, this.cy, (dx / d) * 8, (dy / d) * 8, 65, 0, 576, null,
-              { grav: 0, life: 600, pierce: 1, hostile: true }), 'projectiles');
+          this.vx = (dx / d) * 16; this.vy = (dy / d) * 16;
+        } else {
+          // 线发 576 弹(:32204-32211):CanHitLine 门,8 速 65 伤;发射后重置计时。
+          // v6 傀儡不本地线发——房主的 576 弹经 msg27 同步,双端各发会翻倍
+          if (!this.netPuppet && !p.dead && canHitLine(game.world.store, this.cx, this.cy, 0, 0, p.cx, p.cy, 0, 0)) {
+            const dx = p.cx - this.cx, dy = p.cy - this.cy;
+            const d = Math.hypot(dx, dy) || 1;
+            (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(
+              new Arrow(this.cx, this.cy, (dx / d) * 8, (dy / d) * 8, 65, 0, 576, null,
+                { grav: 0, life: 600, pierce: 1, hostile: true }), 'projectiles');
+          }
+          this.ai0 = 0;
         }
-        this.ai0 = 0;
       }
     }
     if (this.kind === 539 && this.ai0 > orbitT && ++this.frameT >= 2) {
@@ -1963,6 +1989,8 @@ export class LunarOrb extends Entity {
     this.dead = true;
     game.spawnParticles(this.cx, this.cy, '#8FE8FF', 20, 3.4, { life: 40, damp: 0.94 });
     game.spawnParticles(this.cx, this.cy, '#4FB8E8', 10, 2.2, { life: 36, damp: 0.94 });
+    // ★victim-settles：范围伤害盒恒查本地玩家（damagePlayer 只结算本地血；kind8
+    //  傀儡在访客端本地重建各查各的 game.player）——非索敌残留,勿改 targetRef
     const p = game.player;
     if (p && !p.dead && this.dmg > 0) {
       const half = 40;                                // 80×80 居中
@@ -2069,10 +2097,11 @@ export class VortexPortalProj extends Entity {
       this.sndPlayed = true;
       game.playSfxWav?.('Item_117', 1, this.x, this.y);
     }
-    // 578 首帧定朝向（:32529-32538）：门心→最近玩家角（零向量兜底 UnitY）
+    // 578 首帧定朝向（:32529-32538）：门心→最近玩家角（零向量兜底 UnitY）。
+    // 最近玩家 = Player.FindClosest(Center,0,0)（M11 索敌链：联机含访客代理）
     if (this.projId === 578 && this.lai0 === 0) {
       this.lai0 = 1;
-      const p = game.player;
+      const p = findClosestPlayer(game, this.cx, this.cy);
       let dx = 0, dy = 1;
       if (p) { dx = p.cx - this.cx; dy = p.cy - this.cy; }
       if (dx === 0 && dy === 0) { dx = 0; dy = 1; }

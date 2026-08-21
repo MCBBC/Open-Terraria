@@ -355,7 +355,8 @@ export const SPECIFIC_LAUNCHER_AMMO: Record<number, Record<number, number>> = {
 /** PickAmmo 弹型解析 1:1（Player.cs:52635-52668）：优先级 = Specific 匹配表 >
  *  雪人炮算式（338+ammo−771）/ MK2 算式（715+ammo−771）> 火箭族【加法】
  *  （发射器 shoot + 弹药 shoot，:52648-52651 —— 非替换！火箭一型 shoot=0 → 基弹，
- *  二/三/四型 +3/+6/+9 偏移）> 弹药 shoot 替换；弓族特例尾改写（3019/3052）。
+ *  二/三/四型 +3/+6/+9 偏移）> 弹药 shoot>0 门替换（:52656-52659，否则保留
+ *  发射器 shoot）；弓族特例尾改写（3019/3052）。
  *  此前误用"弹药 shoot 替换"链：火箭一型打出 projId 0 隐形弹、二型打出手里剑
  *  贴图（772.shoot=3=Shuriken），2026-08-14 对账修复 */
 export function resolveAmmoProjId(launcherVid: number, ammoVid: number, useAmmo: number,
@@ -369,7 +370,16 @@ export function resolveAmmoProjId(launcherVid: number, ammoVid: number, useAmmo:
   // item.shoot——Clentaminator 145 + 溶液 shoot 0-4/870-872 → 145-149/1015-1017；
   // 此前走"弹药 shoot 替换"尾链 → 绿溶液打出 projId 0 隐形弹，2026-08-20 修）
   if (useAmmo === AMMO_SOLUTION) return (launcherShoot ?? 0) + (ammoShoot ?? 0);
-  return ammoShoot ?? launcherShoot ?? 1;
+  // 尾链（Player.cs:52656-52659）：仅 item.shoot > 0 才替换 projToShoot（进
+  //  PickAmmo 前已初始化为发射器 sItem.shoot）；弹药 shoot≤0 → 保留发射器 shoot；
+  // 发射器自身也 ≤0 → 原版 projToShoot=0（NewProjectile 前置门不发射），本仓射击链
+  // 无 0 哨兵档 → 兜 1（木箭）。★曾用 ?? 链把显式 shoot:0 当有效值——绿溶液 780/
+  // 火箭一型 771 的显式 0 若未被上方加法支拦截即成隐形弹（2026-08-21 复审 P3③）
+  const ammoS = ammoShoot ?? 0;
+  if (ammoS > 0) return ammoS;
+  const launcherS = launcherShoot ?? 0;
+  if (launcherS > 0) return launcherS;
+  return 1;
 }
 
 /** vi_ useAmmo 远程武器（弓/枪/发射器，DefaultToRangedWeapon 族 useStyle=5）：

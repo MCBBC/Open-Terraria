@@ -256,11 +256,30 @@ export function readPylonModule(r: NetReader): PylonNetMsg | null {
 // 本仓现状：无 ParticleOrchestrator 编排器系统（唯一移植的编排视觉 = WoF 山羊火焰
 // FlameParticles——原版 Mount.cs:3892 clientOnly:true 不上网）；上表生产者在本地
 // 均未走编排通道（剑刃命中等用本地 dust/贴图特效）。照子集落地 = 通道 1:1 编解码 +
-// 服务器中继就位，生产/消费子集先接微光族两型（TownNPC shimmerRise 链本地已有
-// 同款视觉,NPC.cs:53674/:56004 原版广播位 1:1）；其余型到达时静默忽略（前向兼容）。
+// 服务器中继就位，生产/消费子集 = 微光族两型（TownNPC shimmerRise 链本地已有
+// 同款视觉,NPC.cs:53674/:56004 原版广播位 1:1）+ 2026-08-21 生产者补齐批四型
+// （PetExchange/VampireOnFire/Digestion/LoadoutChange——逐型评估清单见下方枚举注,
+// 原则 = 只接本仓已有视觉, 无视觉型登记不硬造）；其余型到达时静默忽略（前向兼容）。
 
-/** ParticleOrchestraType.cs 摘录（本仓已接消费/生产子集；全表 72 型见源文件） */
+/** ParticleOrchestraType.cs 摘录（本仓已接消费/生产子集；全表 72 型见源文件）。
+ *  2026-08-21 生产者补齐批（全 wire 面逐型评估，clientOnly:true 型原版永不上
+ *  网不在此列）：已接 6 型 = 微光族两型 + PetExchange（重掷绿爆=本地既有视觉,
+ *  NPC.cs:81733 广播位）/ VampireOnFire（Item_20 点火音=本地既有, Player.cs:28178）/
+ *  Digestion（马桶消化棕粒=本地既有, Player.cs:18751）/ LoadoutChange（切配装白闪
+ *  词汇世界化, Player.cs:5444——白闪本体是 UI 槽闪, 世界侧重放为白色升腾粒）。
+ *  登记未接（本仓无对应视觉, 不硬造）：剑刃轨迹/近战编排族（NightsEdge×4/
+ *  StardustPunch/MoonLordWhipHit/MoonLordWhipEye/PaladinsHammerShockwave/
+ *  SlapHand/WaffleIron/ClassyCane/FlyMeal——命中特效走本地 dust/弹幕近似且弹幕
+ *  已走 msg27 快照, 编排化会双画）、ItemTransfer（快速堆叠无飞行物视觉）、
+ *  TownSlimeTransform/InScreenDungeonSpawn/Keybrand/GasTrap/ChlorophyteLeafCrystalShot/
+ *  RainbowBoulder4/CattivaHit/HeroicisSetSpawnSound/PlayerVoiceOverrideSound/
+ *  DeadCells 族/BlackLightningHit/RainbowRodHit（鞭签特效本地近似=Arrow916+紫粒,
+ *  Arrow 走 msg27 同步, 粒子部分孤立不补）等——原版调用位见上表头注行号 */
 export const enum ParticleOrchestraType {
+  PetExchange = 19,         // 城镇宠物变体重掷成功（NPC.cs:81733 Broadcast）
+  VampireOnFire = 22,       // 吸鬼灼阳点火音（Player.cs:28178；Spawn_=纯 Item20 音）
+  LoadoutChange = 27,       // F1-F3 切配装（Player.cs:5444；UniqueInfo=配装档序）
+  Digestion = 29,           // 马桶消化（Player.cs:18751；MovementVector=−direction）
   ShimmerTownNPC = 32,      // 城镇 NPC 微光转化到位（NPC.cs:53674 / Player.cs:28402）
   ShimmerTownNPCSend = 33,  // 微光上升态远距落点传送（NPC.cs:56004）
 }

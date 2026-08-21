@@ -1723,20 +1723,19 @@ export class Player extends Entity {
     // SoundID 19(splash);入水 vy−3 / 出水 vy−4、vx×2.5、scale 0.8、α100、无重力
     if (this.inWater !== wasInWater && this.wetCount === 0) {
       const exiting = !this.inWater;
-      const px = this.x - 6, py = this.y + this.h / 2 - 8;
-      // spawnParticles(x,y,color,count,speed,opts):speed=扩散速率(≈vx×2.5),
-      // grav=重力(负值=上溅,≈原版 velocity.Y −3/−4 近似)
-      const upKick = exiting ? -0.15 : -0.12;   // 出水踢得更猛(−4 vs −3)
-      if (this.inHoney) {
-        // 蜜(20 颗,vy−1,scale 1.3,α100)
-        game.spawnParticles(px, py, '#D4A017', 20, 1.3, { life: 30, damp: 0.97, grav: upKick * 0.4 });
-        game.playSfx('splash', 0.8);
-      } else {
-        // 普通水/岩浆(50 颗,scale 0.8,α100,上溅+横向扩散)
-        const isLava = this.inLava;
-        game.spawnParticles(px, py, isLava ? '#FF6600' : '#4A9EFF', 50, 2.5, { life: 30, damp: 0.97, grav: upKick });
-        game.playSfx('splash');
+      // 原版矩形分布(Player.cs:27504-27509):NewDust(position.X−6, y+h/2−8,
+      // width+12, 24, dustWater())——盒内随机出生,vy−3/−4 上踢+vx×2.5 横散
+      const bx = this.x - 6, by = this.y + this.h / 2 - 8;
+      const bw = this.w + 12, bh = 24;
+      const upKick = exiting ? -0.15 : -0.12;
+      const color = this.inHoney ? '#D4A017' : this.inLava ? '#FF6600' : '#4A9EFF';
+      const count = this.inHoney ? 20 : 50;
+      for (let i = 0; i < count; i++) {
+        const dx = bx + Math.random() * bw;
+        const dy = by + Math.random() * bh;
+        game.spawnParticles(dx, dy, color, 1, 2.5, { life: 30, damp: 0.97, grav: upKick });
       }
+      game.playSfx('splash');
     }
     // wetCount 去抖（Player.cs:27464-27466 入水置 10 / :27558-27560 出水置 10 /
     // :27649-27651 每 tick 递减）——水波系统涟漪尺寸因子消费
@@ -5087,8 +5086,12 @@ export class Player extends Entity {
     this.buffs.immuneVanilla.clear();
     if (!this.buffs.has(BuffType.OnFire)) {             // :28170-28178 !onFire 才发
       // ParticleOrchestrator VampireOnFire（:28178）= Spawn_VampireOnFire
-      // （ParticleOrchestrator.cs:2352-2355）——仅播 SoundID.Item20，无粒子体
+      // （ParticleOrchestrator.cs:2352-2355）——仅播 SoundID.Item20，无粒子体。
+      // module8 广播（RequestParticleSpawn !clientOnly, PositionInWorld=Center）：
+      // 本地音已播,他端经 netApplyParticleOrchestra 同款落点复播
       game.playSfxWav?.('Item_20', 1, this.cx, this.y + this.h / 2);
+      game.broadcastParticleOrchestra?.(ParticleOrchestraType.VampireOnFire,
+        this.cx, this.y + this.h / 2);
     }
     // AddBuff 24/23/32 各 3【tick】= 0.05s（:28179-28181，AddBuff time 参为帧——
     // 每帧续期；24 OnFire/23 Cursed/32 Slow）

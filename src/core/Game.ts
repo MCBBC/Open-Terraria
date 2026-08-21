@@ -208,7 +208,7 @@ import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bes
 // F10 瞬移落脚搜索参数(角色 20×42 ≈ 2 宽×3 高净空 + 脚下实心)
 const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_RING_MAX = 60;
 import { ChunkCache } from '../render/ChunkCache';
-import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha } from '../render/Renderer';
+import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha, wormholeHeadHit } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
 import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS } from '../items/Inventory';
@@ -245,7 +245,7 @@ import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
 import { cround } from './csCompat';
 import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank } from '../stats/QuickStacking';
-import { bindsOf, isBound, keybindCodeLabel } from './Keybinds';
+import { bindsOf, isBound, keybindCodeLabel, type KeybindAction } from './Keybinds';
 import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
@@ -318,6 +318,14 @@ import { canvasWatchStats } from '../render/CanvasWatch';
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
 const AMMO_BULLET = 14;
+
+/** 观战退出键族的热键栏子集（Player.cs:16933 退出条件里的 Hotbar1-10/Plus/Minus
+ *  三个 Current 触发器——电平语义,keydown 边沿等价单发） */
+const SPECTATE_EXIT_HOTBAR: readonly KeybindAction[] = [
+  'Hotbar1', 'Hotbar2', 'Hotbar3', 'Hotbar4', 'Hotbar5',
+  'Hotbar6', 'Hotbar7', 'Hotbar8', 'Hotbar9', 'Hotbar10',
+  'HotbarPlus', 'HotbarMinus',
+];
 
 /** 枪族专属 UseSound 武器（Item.cs SetDefaults）：
  *  Item_36 霰弹枪族（Shotgun 534 / Boomstick 964 / OnyxBlaster 3788 / QuadBarrel 4703）；
@@ -1755,10 +1763,30 @@ export class Game implements GameHooks {
       && this.player.respawnTimer >= 60;
   }
 
+  /** 观战退出键族判定（HandleSpectatingControls :16933 的键盘半边——原版为
+   *  control* 电平 + Hotbar Current 触发器，keydown 边沿等价单发）。
+   *  :16933 原文键项 = Jump(JustReleased)/Inventory/Throw/Torch/Smart/Mount/
+   *  QuickHeal/QuickMana/CreativeMenu/Dash/ArmorSetAbility/Hotbar1-10/Hotbar±/
+   *  滚轮。触发器↔本仓 action 映射（TriggersSet.cs:786-833）：controlTorch=
+   *  SmartSelect、controlSmart=SmartCursor、controlMount=QuickMount、
+   *  controlCreativeMenu=OpenCreativePowersMenu（本仓 ToggleCreativeMenu）；
+   *  Throw/Dash/ArmorSetAbility 本仓无 action（Keybinds.ts:3-4 手柄 trigger/
+   *  拖出承担声明）→ 跳过；滚轮走 tick 半边（handleSpectatingControls）。
+   *  ★QuickBuff 不在退出族——:16940-16945 是虫洞药水传送（CanWormholeTo
+   *  Spectating 门，quickBuff() 内已接） */
+  spectateKeyExits(code: string): boolean {
+    return isBound('Jump', code) || isBound('Inventory', code)
+      || isBound('SmartSelect', code) || isBound('SmartCursor', code)
+      || isBound('QuickMount', code) || isBound('QuickHeal', code)
+      || isBound('QuickMana', code) || isBound('ToggleCreativeMenu', code)
+      || SPECTATE_EXIT_HOTBAR.some((a) => isBound(a, code));
+  }
+
   /** HandleSpectatingControls（:16931-16978）tick 半边：死亡观战（includeSelf 自机
    *  分支）+ 鼠标左右切换（原版 JustPressed.MouseLeft/MouseRight :16948-16955）+
-   *  目标失效回退。键位半边（Space/Escape 退出、←/→ 切换）走 keydownHandlers
-   *  （事件天然边沿，Input 无 keyEdge API）。手持 5644 切换播 Item197/198
+   *  滚轮退出（:16933 ScrollWheelDelta != 0）+ 目标失效回退。键位半边（退出键族
+   *  Space/Escape/H/J/C 等 + ←/→ 切换）走 keydownHandlers（事件天然边沿，Input
+   *  无 keyEdge API）。手持 5644 切换播 Item197/198
    *  （:16961-16971，!dead 门——死亡态不播）；失败的 NoMoreTargets 相机推挤未实装
    *  （原版同样 !dead 门，屏震近似暂略）。观战期间本方法吞掉 mouseDown/rightDown
    *  = 冻结使用/交互输入（原版观战中 control* 不入玩家模拟）。
@@ -1769,6 +1797,14 @@ export class Game implements GameHooks {
    *  值，HandleSpectatingControls 无条件跑） */
   private handleSpectatingControls() {
     const inp = this.input;
+    // 滚轮退出（:16933 尾项 ScrollWheelDelta != 0 → SetOrRequestSpectating(-1) return）。
+    // 置 0 消费防本 tick 末的滚轮视野缩放半边（「滚轮：全屏地图…」块）重复吃同
+    // 一滚动——原版滚轮是快捷栏滚动无此双消费,本仓滚轮=引擎扩展缩放键,退出即独占
+    if (inp.wheelDelta) {
+      inp.wheelDelta = 0;
+      this.setSpectating(-1);
+      return;
+    }
     if (this.player.dead) {
       if (!this.canDeathSpectate()) {
         this.setSpectating(-1);   // KillMe :38302 死亡清观战 / Ghost() :6349（幂等）
@@ -2074,6 +2110,8 @@ export class Game implements GameHooks {
   private lastMusic = -1;
   private _mapClickLatch = false;
   private _mapClickLatch2 = false;
+  /** 地图虫洞头像悬停态（上一帧；Main.cs unityMouseOver——悬停起始帧播 SoundID 12） */
+  private _mapWormholeHover = false;
   /** 地图内按压起点（松开时与当前位置比对 <6px 判定为点击，否则是拖动） */
   private _mapPressX = 0;
   private _mapPressY = 0;
@@ -2556,12 +2594,14 @@ export class Game implements GameHooks {
         }
       }
       // 观战键位半边（HandleSpectatingControls :16933-16955——keydown 天然边沿；
-      // 退出=Jump/Inv 族 → Space/Escape；切换=Left/Right（音效走 spectateCycle 共用段）。
+      // 退出键族 = spectateKeyExits()（:16933 键盘项）；滚轮无键盘码，走 tick 半边
+      // handleSpectatingControls 消费 wheelDelta。切换=Left/Right + 鼠标左右
+      // （:16947-16954，鼠标走 tick 半边已接；音效走 spectateCycle 共用段）。
       // 死亡观战（CanDeathSpectate）下 spectatingSlot=-1（自尸镜头）同样接管——
       // 原版 UpdateDead 尾无条件跑 HandleSpectatingControls，环选可从自尸起跳；
       // 死亡态退出键 setSpectating(-1) 与现状同值 = 无操作（:16937 幂等））
       if ((this.spectatingSlot >= 0 || this.canDeathSpectate()) && this.player) {
-        if (isBound('Jump', code) || isBound('Inventory', code)) this.setSpectating(-1);
+        if (this.spectateKeyExits(code)) this.setSpectating(-1);
         else if (isBound('Right', code)) this.spectateCycle(1);
         else if (isBound('Left', code)) this.spectateCycle(-1);
       }
@@ -4058,9 +4098,20 @@ export class Game implements GameHooks {
       }
     }
     if (!inp.mouseDown) this._mapClickLatch = false;
+    // 地图联机旗标注入（每帧：小地图头像队伍色描边也消费 mapNetActive）：
+    // mapWormholeMode = netMode==1 等价（联机访客——虫洞地图门）
+    this.renderer.mapNetActive = !!this.net?.active;
+    this.renderer.mapWormholeMode = !!this.net?.active && !this.net.policy.isHost;
     // 全屏地图：点击传送（两次确认）——第一次预选标记，第二次传送。
     // 按下只记起点，松开时位移 < 6px 才算"点击"（拖动平移、打开地图的按压都不误触传送）
     if (this.renderer.fullMap.open && !inp.uiBlocking) {
+      // 虫洞头像悬停音（Main.cs:55410-55412：unityMouseOver 起始帧 SoundID 12——
+      // 渲染侧 mapWormholeHead 帧内重算，此处只盯边沿）
+      {
+        const hovering = !!this.renderer.mapWormholeHead;
+        if (hovering && !this._mapWormholeHover) this.sfx.play('menuTick', 1);
+        this._mapWormholeHover = hovering;
+      }
       if (inp.mouseDown && !this._mapClickLatch2 && !this._mapClickLatch && !this.renderer['_mapOpenClick']) {
         this._mapClickLatch2 = true;
         this._mapPressX = inp.mouseX;
@@ -4087,6 +4138,11 @@ export class Game implements GameHooks {
             && (inp.keys.has('ControlLeft') || inp.keys.has('ControlRight'))) {
             this.triggerMapPing(
               (inp.mouseX - cx0) / fm.zoom, (inp.mouseY - cy0) / fm.zoom);
+            this._tpTarget = null;
+            this.renderer.tpMark = null;
+          } else if (this.tryWormholeHeadTeleport(inp.mouseX, inp.mouseY, tx, ty)) {
+            // 虫洞药水队友头像点击（Main.cs:55376-55450）：优先于晶塔/普通选点
+            //（原版头像环先跑、晶塔悬停 cancelWormHole 才让位——门禁内含晶塔让位）
             this._tpTarget = null;
             this.renderer.tpMark = null;
           } else if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
@@ -6306,12 +6362,17 @@ export class Game implements GameHooks {
 
   /** 配装热键切换（Loadout1/2/3 = F1/F2/F3，PlayerInput.cs:1923-1925）。
    *  TrySwitchingLoadout + SoundID 12 menuTick（背包按钮同款，Main.cs:41395-41431）；
-   *  切套白闪由 UI 侧 onLoadoutSwitched 回调触发（GetColorByLoadout :2554-2559） */
+   *  切套白闪由 UI 侧 onLoadoutSwitched 回调触发（GetColorByLoadout :2554-2559）；
+   *  module8 LoadoutChange 广播（Player.cs:5444 RequestParticleSpawn !clientOnly：
+   *  PositionInWorld=Center, UniqueInfoPiece=配装档序——本地视觉=UI 槽闪,世界侧
+   *  复放由消费端白色升腾粒承担,见 netApplyParticleOrchestra 注） */
   switchLoadout(k: 0 | 1 | 2): void {
     const p = this.player;
     if (!p || p.dead || p.inv.currentLoadout === k) return;
     p.inv.trySwitchingLoadout(k);
     this.sfx.play('menuTick', 1);
+    this.broadcastParticleOrchestra(ParticleOrchestraType.LoadoutChange,
+      p.cx, p.cy, 0, 0, k);
     this.cb.onInventoryChanged();
     this.cb.onLoadoutSwitched?.(k);
   }
@@ -6434,8 +6495,8 @@ export class Game implements GameHooks {
     // ---- 虫洞药水拦截（HandleSpectatingControls Player.cs:16942-16947：
     //      观战中按 QuickBuff 且 CanWormholeToSpectating（:17002-17009 =
     //      !dead && 观战目标有效 && 同队 team>0）→ UnityTeleport + TakeUnityPotion，
-    //      不进常规 QuickBuff。地图点击侧（Main.cs:55406 全屏地图队友头像）本仓无
-    //      全屏地图，未接（登记）----
+    //      不进常规 QuickBuff。地图点击侧（Main.cs:55406 全屏地图队友头像）已接
+    //      （tryWormholeHeadTeleport + 渲染侧 mapWormholeHead 悬停链）----
     if (this.spectatingSlot >= 0 && this.net?.active && this.spectatingSlot !== this.net.mySlot) {
       const rp = this.net.players.get(this.spectatingSlot);
       if (rp?.active && p.team > 0 && p.team === rp.team && p.hasUnityPotion()) {
@@ -8038,6 +8099,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                   pet.givenName = newNpcName(petId);
                   pet.hp = pet.maxHp;
                   this.spawnParticles(pet.cx, pet.cy, '#60E0A0', 20, 2, { life: 40 });
+                  // module8 PetExchange 广播（NPC.cs:81726-81733 BroadcastParticleSpawn：
+                  // PositionInWorld=Center, MovementVector=velocity）——本地绿粒已生,
+                  // 他端经 netApplyParticleOrchestra 同款复放
+                  this.broadcastParticleOrchestra(ParticleOrchestraType.PetExchange,
+                    pet.cx, pet.cy, pet.vx, pet.vy);
                 }
               }
               this.newText(Lang.text(rerolled ? 'Misc.PetExchangeSuccess' : 'Misc.PetExchangeFail') ?? '',
@@ -12465,6 +12531,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const drop = this.spawnDrop(p.cx, p.cy, VI(5395), stack);
           if (drop) drop.noGrabDelay = 100;         // :18758-18759 noGrabDelay 100t
           this.spawnParticles(p.cx, p.cy, '#8B5A2B', 8, 1.5, { grav: 0.4 });   // Digestion 近似
+          // module8 Digestion 广播（Player.cs:18751-18755 RequestParticleSpawn
+          // !clientOnly：PositionInWorld=MountedCenter, MovementVector=(−direction,0)）
+          // ——本地棕粒已生,他端同款复放
+          this.broadcastParticleOrchestra(ParticleOrchestraType.Digestion,
+            p.cx, p.cy, -p.facing, 0);
           break;
         }
       }
@@ -13288,6 +13359,40 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (key) this.spawnDrop(anchor.x * TILE + 24, anchor.y * TILE, key, 1, 0, -2);
     this.sfx.play('place');
     this.refreshPylons();
+  }
+
+  /** 全屏地图点队友头像 → 虫洞药水传送（Main.cs:55376-55450 头像环）。
+   *  命中盒 28×28×UIScale（:55400-55404，中心 = 本仓头像绘制中心）；门禁（:55406）
+   *  = 非己 + 同队 team>0 + netMode==1（联机访客——原版房主 netMode=2 地图点击
+   *  无法虫洞，1:1 保留；观战 B 键支无此门 = 原版两支各自口径）+ HasUnityPotion
+   *  + 晶塔图标悬停让位（cancelWormHole :55406/:55445，TeleportPylonsMapLayer.cs:96）。
+   *  点击帧鼠标精确命中（渲染侧 mapWormholeHead 悬停态只管高亮/文案，此处独立
+   *  复测防亚帧漂移）。返回 true = 已消费（传送+吞图+扣药） */
+  private tryWormholeHeadTeleport(mx: number, my: number, tx: number, ty: number): boolean {
+    const p = this.player;
+    if (!this.net?.active || this.net.policy.isHost) return false;   // netMode==1
+    if (p.dead || p.team <= 0 || !p.hasUnityPotion()) return false;
+    // 晶塔图标让位（悬停即让——与渲染侧 pylonHoverName 同源判定）
+    for (const py of this.pylons) {
+      if (Math.abs(tx - (py.x + 1.5)) <= 2 && Math.abs(ty - (py.y + 2)) <= 2) return false;
+    }
+    const fm = this.renderer.fullMap;
+    const viewW = this.renderer.canvas.width, viewH = this.renderer.canvas.height;
+    const cx0 = viewW / 2 - (this.world.w * fm.zoom) / 2 + fm.panX;
+    const cy0 = viewH / 2 - (this.world.h * fm.zoom) / 2 + fm.panY;
+    const hi = wormholeHeadHit(mx, my, cx0, cy0, fm.zoom, this.remotePlayerProxies);
+    if (hi < 0) return false;
+    const rp = this.remotePlayerProxies[hi] as Player;
+    if (rp.dead || p.team !== rp.team) return false;   // 同队门（含 CanBeSeen）
+    // UnityTeleport（:55446-55450）：position + 目标.Bottom − 自身.Bottom（含
+    // netOffset 渲染位——观战支同源）+ TakeUnityPotion + 吞点击关图
+    this.renderer.fullMap.open = false;
+    this.wormholeTeleportTo(
+      p.x + (rp.x + rp.netOffX + rp.w) - (p.x + p.w),
+      p.y + (rp.y + rp.netOffY + rp.h) - (p.y + p.h));
+    p.takeUnityPotion();
+    this.cb.onInventoryChanged?.();
+    return true;
   }
 
   /** 全屏地图上点晶塔图标 → HandleTeleportRequest 门禁（TeleportPylonsSystem.cs:100-205）。
@@ -15551,8 +15656,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** module8 编排粒子到达（原版客户端 SpawnParticlesDirect → Spawn_<type>）。
-   *  本仓已接消费子集 = 微光族两型（视觉与产生端本地 spawnParticles 同款爆发）；
-   *  其余型静默忽略（生产者未移植,前向兼容——表头注记全量清单） */
+   *  本仓已接消费子集 = 微光族两型 + 2026-08-21 生产者补齐批四型（PetExchange/
+   *  VampireOnFire/Digestion/LoadoutChange——视觉与产生端本地同款；逐型评估与
+   *  登记清单见 syncModules.ParticleOrchestraType 注）；其余型静默忽略（前向兼容） */
   netApplyParticleOrchestra(type: number, s: ParticleSettings): void {
     if (type === ParticleOrchestraType.ShimmerTownNPC) {
       // Spawn_ShimmerTownNPC :1696-1752（= TownNPC shimmerRise 到场三色爆发同款）
@@ -15564,14 +15670,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // Spawn_ShimmerTownNPCSend :1657-1694（= TownNPC shimmerLandAt ≥560px 双色爆发同款）
       this.spawnParticles(s.posX, s.posY, '#BEAFFF', 14, 1.2, { life: 30, grav: -0.05 });
       this.spawnParticles(s.posX, s.posY, '#BEF5FF', 10, 1.2, { life: 30, grav: -0.05 });
+    } else if (type === ParticleOrchestraType.PetExchange) {
+      // Spawn_PetExchange :2137-2147（13× gore61-64 纸屑环爆——本仓产生端同款绿粒）
+      this.spawnParticles(s.posX, s.posY, '#60E0A0', 20, 2, { life: 40 });
+    } else if (type === ParticleOrchestraType.VampireOnFire) {
+      // Spawn_VampireOnFire :2352-2355（纯 SoundID.Item20,无粒子体——产生端同款）
+      this.playSfxWav('Item_20', 1, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.Digestion) {
+      // Spawn_Digestion（dust216×3-6 + 偶发 gore580-583 + Item16——本仓产生端为
+      // 棕粒近似无音,消费端按同款棕粒复放；Item16 音与 gore 支未移植,登记）
+      this.spawnParticles(s.posX, s.posY, '#8B5A2B', 8, 1.5, { grav: 0.4 });
+    } else if (type === ParticleOrchestraType.LoadoutChange) {
+      // Spawn_LoadOutChange :1812-1845（dust16×40 白烟 + dust43×5 粉彩升腾——本仓
+      // 切配装视觉 = UI 槽闪（GetColorByLoadout 语义）,世界侧按白闪词汇以白色
+      // 升腾粒复放（含 uniqueInfo 配装档序,消费暂不分色））
+      this.spawnParticles(s.posX, s.posY, '#FFFFFF', 20, 1.2, { life: 30, grav: -0.1 });
     }
   }
 
   /** GameHooks.broadcastParticleOrchestra 实现（实体侧 → module8 上行;单机静默） */
-  broadcastParticleOrchestra(type: number, x: number, y: number, moveX = 0, moveY = 0): void {
+  broadcastParticleOrchestra(type: number, x: number, y: number, moveX = 0, moveY = 0, uniqueInfo = 0): void {
     this.net?.sendParticleOrchestra(type, {
       posX: x, posY: y, moveX, moveY,
-      uniqueInfo: 0,
+      uniqueInfo,
       invoker: this.net.mySlot & 0xff,
     });
   }
@@ -20909,7 +21030,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 收竿结算（Player.cs:51530-51598 ItemCheck_CheckFishingBobber）：物品掉落 /
-   *  血月敌怪（浮标处；618 +64px）/ 682 红城镇史莱姆一次性入镇 */
+   *  血月敌怪（浮标左上为底中锚；618 +64px）/ 682 红城镇史莱姆一次性入镇。
+   *  血月敌怪掷在 Bobber.fishingCheck（FishingCheck_RollEnemySpawns
+   *  Projectile.cs:19398-19429：血月夜非岩浆/蜂蜜池 1/6（血肉竿 4325→1/3）；
+   *  682 未解锁 1/5 优先 / 困难 {620 地精鲨,621 血鳗鱼,586 僵尸人鱼,587 眼球飞鱼}
+   *  +1/10 618 恐惧鹦鹉螺 / 非困难 {586,587}）——生成入口即本方法 */
   private reelBobber(bobber: Bobber): void {
     const caught = bobber.reel(this);
     if (caught === -1) {
@@ -20931,14 +21056,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.cb.onInventoryChanged?.();
     } else if (bobber.catchEnemy > 0) {
       const id = bobber.catchEnemy;
+      // 掷点（Player.cs:51588）：point = (int)bobber.position（浮标左上）；618 恐惧
+      // 鹦鹉螺 point.Y += 64（:51583-51585）；NPC.NewNPC 的 (X,Y) 是【底中】锚
+      // （NPC.cs:81547 nPC.Bottom = (X,Y)）——敌怪底中 = 浮标左上
       if (id === 682) {
-        this.world.flags.unlockedSlimeRedSpawn = true; // 世界级一次性（WorldFile :1413/:2433 持久化）
-        const slime = new TownNPC('town_slime_red', bobber.cx, bobber.cy);
+        this.world.flags.unlockedSlimeRedSpawn = true; // 世界级一次性（Player.cs:51586-51588 / WorldFile :1413/:2433 持久化）
+        const slime = new TownNPC('town_slime_red', bobber.x, bobber.y);
         this.entities.add(slime, 'npcs');
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NpcArrived', Lang.itemName(682) ?? ''));
       } else {
-        const en = Enemy.fromVanilla(id, bobber.cx - 8, bobber.cy - 8 + (id === 618 ? 64 : 0));
-        if (en) this.entities.add(en, 'enemies');
+        const en = Enemy.fromVanilla(id, bobber.cx, bobber.cy);
+        if (en) {
+          // fromVanilla 是中心语义 → 构造后按 NewNPC 底中锚改写（曾 cx−8/cy−8
+          // 中心近似：对 28×28 血鳗鱼头偏 18px，2026-08-21 复审 P3① 修）
+          en.x = bobber.x - en.w / 2;
+          en.y = bobber.y + (id === 618 ? 64 : 0) - en.h;
+          this.entities.add(en, 'enemies');
+        }
       }
       this.cb.onInventoryChanged?.();
     }

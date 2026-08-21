@@ -562,7 +562,7 @@ function dukeSharknado(e: Enemy, game: GameHooks, player: Player, st: DukeX, big
       // :49871 大龙卷 = PlaySound(29,…,20) Zombie_20 满响(曾借 roar 0.7)
       game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);
       // 状态 8:克苏龙卷弹(:49873-49876;ai2=flag6 狂暴→追踪速度 +12)
-      addProj(game, new DukeSharknadoBolt(e.cx, e.cy, 0, 0, true, dukeEnraged(game, player), e));
+      addProj(game, new DukeSharknadoBolt(e.cx, e.cy, 0, 0, true, dukeEnraged(game, player), e, player));
     } else {
       // :49644 小龙卷 = PlaySound(29,…,9) Zombie_9 满响
       game.playSfxWav?.('Zombie_9', 1, e.cx, e.cy);
@@ -611,21 +611,29 @@ export class DukeSharknadoBolt extends Entity {
   life = 300; // SetDefaults timeLeft
   /** 鲨鱼生成所需的 Duke 引用(spawnPart 位置供体,实际落点由龙卷覆写) */
   private src: Enemy;
+  /** 冻结追踪目标(原版 ai[1]=target+1,NPC.cs:49875 出弹瞬冻结;v6 重建端无此参
+   *  =undefined → 回退 src.targetRef→本地玩家,同访客端旧行为) */
+  private tgt: Player | null;
   dead = false;
 
-  constructor(x: number, y: number, vx: number, vy: number, big: boolean, enraged: boolean, src: Enemy) {
+  constructor(x: number, y: number, vx: number, vy: number, big: boolean, enraged: boolean, src: Enemy,
+    tgt?: Player | null) {
     super();
     this.x = x - this.w / 2;
     this.y = y - this.h / 2;
     this.vx0 = vx; this.vy0 = vy;
     this.big = big; this.enraged = enraged;
     this.src = src;
+    this.tgt = tgt ?? null;
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.life <= 0) { this.kill(game); return; }
     this.age++;
-    const p = game.player;
+    // 追踪目标 = 出弹瞬冻结的公爵索敌目标(原版 Main.player[ai[1]-1],Projectile.cs
+    // :28405-28447;ai[1]=target+1 由 NPC.cs:49875 NewProjectile 冻结)——M11 索敌链。
+    // 傀儡重建(访客端)无 tgt 无 src → 回退本地玩家(目标不同步,数据链限制)
+    const p = this.tgt ?? this.src?.targetRef(game) ?? game.player;
     if (this.big) {
       // :28405-28447 追踪:速 4(+12 狂暴)+localAI[0]/20,距玩家 <50px 即 Kill
       if (p && !p.dead) {
@@ -785,6 +793,8 @@ export class DukeSharknadoTornado extends Entity {
 
     // 接触伤害(hostile 弹 ×2 规则,Projectile.cs:13781:小 40→80 / 大 80→160)
     // 判定盒 = 整列(基座→列顶),宽取当前最宽段(= this.w,列顶段)
+    // ★victim-settles:恒查本地玩家(damagePlayer 只结算本地血;kind6 傀儡在访客
+    //  端本地重建各查各的 game.player)——非索敌残留,勿改 targetRef
     const p = game.player;
     if (p && !p.dead) {
       const halfW = this.w / 2;
@@ -1019,11 +1029,15 @@ export class MoonLeechProj extends Entity {
   private age = 0;         // localAI[0]
   private fed = false;     // localAI[1]（已吸血，不重复授 buff）
   private life = 600;      // timeLeft
+  /** 冻结追踪目标（原版 ai[1]=出弹瞬的玩家槽，Projectile.cs:30682-30747 全程
+   *  Main.player[ai[1]]——追踪/失联回程/授 buff 三处同一冻结目标） */
+  private tgt: Player;
   dead = false;
 
   constructor(src: Enemy, player: Player) {
     super();
     this.srcId = src.id;
+    this.tgt = player;
     this.x = src.cx - this.w / 2;
     this.y = src.cy + 216 - this.h / 2;   // 额前 (0,+216)
     const dx = player.cx - this.cx, dy = player.cy - this.cy;
@@ -1033,7 +1047,10 @@ export class MoonLeechProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
-    const player = game.player;
+    // 目标 = 构造期冻结的月总索敌目标（moonLordHeadAI 分发层 targetRef 传参；
+    // 原版 Main.player[ai[1]] 同源冻结）——M11 索敌链。本弹无 netProjMeta（房主
+    // 独占），联机目标为访客代理时 buff 施加不上链（引擎级缺口，同 proxy buff 类）
+    const player = this.tgt;
     if (--this.life <= 0 || !src || src.dead) { this.dead = true; return; }
     if (!player || player.dead) { if (this.out) this.out = false; }   // :30706-30712 玩家失联即回程
     this.age++;
@@ -1192,10 +1209,12 @@ export class MLDeathray extends Entity {
     const dirX = Math.cos(this.angle), dirY = Math.sin(this.angle);
     let amt = 0.5;
     let dist = this.laserScan(game, dirX, dirY, wSq);
-    const p = game.player;
-    if (this.kind === 'head' && p && !p.dead && !losClear(game, this.cx, this.cy, p.cx, p.cy)) {
-      // :30511-30519 头与玩家无视线 → 束长取 距玩家+150(防隔墙盲射)
-      dist = Math.min(2400, Math.hypot(p.cx - src.cx, p.cy - src.cy) + 150);
+    // :30511-30519 头与玩家无视线 → 束长取 距玩家+150(防隔墙盲射)。玩家 =
+    // Main.player[nPC13.target]（源头 396 的索敌目标，M11 链 src.targetRef；
+    // 傀儡端 targetPlayer 恒 null → 回退本地玩家=旧行为）
+    const tp = src.targetRef(game);
+    if (this.kind === 'head' && tp && !tp.dead && !losClear(game, this.cx, this.cy, tp.cx, tp.cy)) {
+      dist = Math.min(2400, Math.hypot(tp.cx - src.cx, tp.cy - src.cy) + 150);
       amt = 0.75;
     }
     this.len = lerp(this.len, dist, amt);
@@ -1233,6 +1252,9 @@ export class MLDeathray extends Entity {
     // :37600/:37777-37783），对束自身节拍与本仓通用 iframes（40t）等价；原实现
     // 只手乘 ×2 漏了难度乘区（专家 300 打成 150），且跨源无敌帧互斥差异（原版
     // 死光可穿透 General 免疫帧命中）= 单槽 iframes 引擎差异，备案偏差不硬改）
+    // ★victim-settles：命中判定恒本地玩家（damagePlayer 只结算本地血；kind7 傀儡
+    //  在访客端本地重建各查各的 game.player）——与上方 LOS 钳制的索敌目标分离
+    const p = game.player;
     if (p && !p.dead && segHitsRect(this.cx, this.cy, dirX * this.len, dirY * this.len, wSq, p)) {
       game.damagePlayer(
         hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2,

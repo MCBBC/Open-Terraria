@@ -80,12 +80,18 @@ describe('M6 键位（PlayerInput.cs:1926 ToggleCameraMode=F4）', () => {
     expect(actionsForCode('F4')).toContain('ToggleCameraMode');
   });
 
-  it('重绑语义:改键后 F4 不再触发,反选回默认恢复', () => {
+  it('重绑语义:改键后 F4 不再触发,反选清空=空表无绑定(非保护 action)', () => {
     const map = assignBinding({}, 'ToggleCameraMode', 'F6');
     expect(map.ToggleCameraMode).toEqual(['F6']);
-    const restored = assignBinding(map, 'ToggleCameraMode', 'F6');   // 反选解绑 → 回默认
-    expect(restored.ToggleCameraMode).toBeUndefined();
-    expect(isBound('ToggleCameraMode', 'F4')).toBe(true);
+    // 反选清空 → 保留空表=无绑定(2026-08-21 修正:原版 CheckRebindingProcessKeyboard
+    // :1504-1506 Remove 后允许空表,此前的"回默认"是对 FixDerpedRebinds 保护名单的
+    // 过度泛化——ToggleCameraMode 不在 MouseLeft/MouseRight/Inventory 三键名单内)
+    const restored = assignBinding(map, 'ToggleCameraMode', 'F6');
+    expect(restored.ToggleCameraMode).toEqual([]);
+    options.data.keybinds = restored;          // 调用方持久化后生效
+    expect(isBound('ToggleCameraMode', 'F4')).toBe(false);
+    expect(isBound('ToggleCameraMode', 'F6')).toBe(false);
+    options.data.keybinds = {};                // 清场
   });
 });
 

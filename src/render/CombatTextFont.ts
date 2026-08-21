@@ -6,6 +6,9 @@
 //   偏移的暗化层（本色调暗至 ×0.3,非纯黑）,4 = 本体;锚点 = 文字盒中心
 //   （origin = Measure/2）;crit 带 rotation（NewText :107 初始 ±0.12、Update
 //   :178-187 漂移 ±0.001/t）。
+// 第三字体 Item_Stack（= FontAssets.ItemStack,AssetInitializer.cs:110;Boss 血条
+//   数值文本 BigProgressBarHelper.DrawHealthText 用,2026-08-21 增）:仅数字+/
+//   11 字形裁片（p0 页 (0,0,240,104) 裁,字形坐标同原页),文字盒高 = lineSpacing 24。
 import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import combatFontJson from '../data/combat-font.json';
 
@@ -18,16 +21,24 @@ interface FontPage {
   kerning: Array<[number, number, number]>;
 }
 
-const FONTS = combatFontJson as unknown as { Combat_Text: FontPage; Combat_Crit: FontPage };
-const TEX: Array<ImageBitmap | HTMLImageElement | null> = [null, null];
-const CHAR_INDEX: Array<Map<number, number>> = [new Map(), new Map()];
-const READY: [boolean, boolean] = [false, false];
+/** 字体注册表（索引即 fi）:0=Combat_Text 1=Combat_Crit 2=Item_Stack */
+const FONT_KEYS = ['Combat_Text', 'Combat_Crit', 'Item_Stack'] as const;
+/** Item_Stack 的注册表索引（BossBars 数值文本用） */
+export const ITEM_STACK_FONT = 2;
+const FONTS = combatFontJson as unknown as Record<(typeof FONT_KEYS)[number], FontPage>;
+const TEX: Array<ImageBitmap | HTMLImageElement | null> = FONT_KEYS.map(() => null);
+const CHAR_INDEX: Array<Map<number, number>> = FONT_KEYS.map(() => new Map<number, number>());
+const READY: boolean[] = FONT_KEYS.map(() => false);
+
+// 字符索引与贴图解耦注册（无 Image 环境如 vitest 也可度量;贴图就绪门 READY 不变）
+FONT_KEYS.forEach((key, i) => {
+  FONTS[key].characters.forEach((c, k) => CHAR_INDEX[i].set(c, k));
+});
 
 (function load() {
   if (typeof Image === 'undefined') return;
-  const pages = [FONTS.Combat_Text, FONTS.Combat_Crit];
-  pages.forEach((p, i) => {
-    p.characters.forEach((c, k) => CHAR_INDEX[i].set(c, k));
+  FONT_KEYS.forEach((key, i) => {
+    const p = FONTS[key];
     const img = new Image();
     img.onload = () => upgradeToBitmap(img, (b) => { TEX[i] = b; READY[i] = true; });
     img.src = `sprites/${p.texture}`;
@@ -36,6 +47,11 @@ const READY: [boolean, boolean] = [false, false];
 
 export function combatFontReady(crit: boolean): boolean {
   return READY[crit ? 1 : 0];
+}
+
+/** Item_Stack 字体就绪（供 Boss 血条等消费方预检/兜底） */
+export function itemStackFontReady(): boolean {
+  return READY[ITEM_STACK_FONT];
 }
 
 /**
@@ -49,7 +65,7 @@ function tintedGlyph(fi: number, gi: number, fill: string): HTMLCanvasElement {
   const key = `${fi}|${gi}|${fill}`;
   const hit = tintCache.get(key);
   if (hit) return hit;
-  const f = fi === 1 ? FONTS.Combat_Crit : FONTS.Combat_Text;
+  const f = FONTS[FONT_KEYS[fi]];
   const img = TEX[fi]!;
   const g = f.glyphs[gi];
   const c = document.createElement('canvas');
@@ -64,18 +80,29 @@ function tintedGlyph(fi: number, gi: number, fill: string): HTMLCanvasElement {
   return c;
 }
 
-/** MeasureString（单行数字,XNA 语义:每字符 advance 后 +spacing,含尾字符）;
+/** MeasureString 内核（单行,XNA 语义:每字符 advance 后 +spacing,含尾字符）;
  *  高 = lineSpacing */
-export function combatMeasure(text: string, crit: boolean): { w: number; h: number } {
-  const f = FONTS[crit ? 'Combat_Crit' : 'Combat_Text'];
+function measureOf(fi: number, text: string): { w: number; h: number } {
+  const f = FONTS[FONT_KEYS[fi]];
   let w = 0;
   for (let i = 0; i < text.length; i++) {
-    const k = CHAR_INDEX[crit ? 1 : 0].get(text.charCodeAt(i));
+    const k = CHAR_INDEX[fi].get(text.charCodeAt(i));
     if (k === undefined) { w += 8 + f.spacing; continue; }
     const [l, wd, r] = f.kerning[k];
     w += l + wd + r + f.spacing;
   }
   return { w, h: f.lineSpacing };
+}
+
+/** MeasureString（单行数字,XNA 语义:每字符 advance 后 +spacing,含尾字符）;
+ *  高 = lineSpacing */
+export function combatMeasure(text: string, crit: boolean): { w: number; h: number } {
+  return measureOf(crit ? 1 : 0, text);
+}
+
+/** Item_Stack 的 MeasureString（Boss 血条数值文本） */
+export function itemStackMeasure(text: string): { w: number; h: number } {
+  return measureOf(ITEM_STACK_FONT, text);
 }
 
 /**
@@ -89,7 +116,7 @@ export function drawCombatText(
   scale: number, rotation: number, crit: boolean, targetScale = 1,
 ): void {
   const fi = crit ? 1 : 0;
-  const f = FONTS[crit ? 'Combat_Crit' : 'Combat_Text'];
+  const f = FONTS[FONT_KEYS[fi]];
   const img = TEX[fi];
   if (!img || !READY[fi]) return;
   const m = combatMeasure(text, crit);
@@ -123,4 +150,42 @@ export function drawCombatText(
   }
   ctx.restore();
   ctx.globalAlpha = 1;
+}
+
+/**
+ * Utils.DrawBorderStringFourWay（:2600-2628）· Item_Stack 字体（Boss 血条数值
+ * 文本,BigProgressBarHelper.DrawHealthText :62-76 的三段串各一次调用）:
+ * 5 遍绘制 = 黑边四向偏移 (±2,0)/(0,±2) + 白色本体;锚点为 XNA DrawString 语义
+ * ——(x,y) 是 origin 落点,文字盒左上 = (x-originX, y-originY),盒高 =
+ * lineSpacing(字形顶对齐行盒顶)。text 超出字符集(数字+"/")的字形按 8px 空位跳过
+ * （与飘字路径同兜底;BossBars 消费面恒为数字串,不触发）。
+ */
+export function drawItemStackBorderString(
+  ctx: CanvasRenderingContext2D,
+  text: string, x: number, y: number,
+  originX: number, originY: number,
+): void {
+  const fi = ITEM_STACK_FONT;
+  const f = FONTS.Item_Stack;
+  const img = TEX[fi];
+  if (!img || !READY[fi]) return;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  for (let layer = 0; layer < 5; layer++) {
+    const dx = layer === 0 ? -2 : layer === 1 ? 2 : 0;
+    const dy = layer === 2 ? -2 : layer === 3 ? 2 : 0;
+    const fill = layer < 4 ? '#000' : '#FFF';
+    let px = x - originX + dx;
+    const py = y - originY + dy;
+    for (let i = 0; i < text.length; i++) {
+      const gi = CHAR_INDEX[fi].get(text.charCodeAt(i));
+      if (gi === undefined) { px += 8; continue; }
+      const [l, wd, r] = f.kerning[gi];
+      px += l;
+      const g = f.glyphs[gi];
+      ctx.drawImage(tintedGlyph(fi, gi, fill), Math.round(px), Math.round(py));
+      px += wd + r + f.spacing;
+    }
+  }
+  ctx.restore();
 }

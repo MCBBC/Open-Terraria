@@ -19,7 +19,7 @@ import { World } from '../src/world/World';
 interface Shell {
   world: World;
   player: Player;
-  input: { mouseDown: boolean; rightDown: boolean };
+  input: { mouseDown: boolean; rightDown: boolean; wheelDelta: number };
   net: {
     active: boolean; mySlot: number;
     players: Map<number, { active: boolean; dead: boolean }>;
@@ -34,6 +34,7 @@ interface Shell {
   canDeathSpectate(): boolean;
   spectateNextPlayer(step: number, includeSelf: boolean): boolean;
   spectateCycle(step: number): boolean;
+  spectateKeyExits(code: string): boolean;
   handleSpectatingControls(): void;
   respawnPlayer(): void;
 }
@@ -57,7 +58,7 @@ function shell(opts: {
   const g = Object.create(Game.prototype) as unknown as Shell;
   g.world = w;
   g.player = p;
-  g.input = { mouseDown: false, rightDown: false };
+  g.input = { mouseDown: false, rightDown: false, wheelDelta: 0 };
   g.net = {
     active: opts.net !== false,
     mySlot: 3,
@@ -185,5 +186,65 @@ describe('respawnPlayer 清观战（Spawn :37186-37137 spectating=-1）', () => 
     expect(g.player.dead).toBe(false);
     expect(g.spectatingSlot).toBe(-1);
     expect(g.net.sendSpectateFocus).toHaveBeenCalledWith(-1);
+  });
+});
+
+// ===================== 退出键族扩表（复审② 2026-08-21，Player.cs:16933） =====================
+// 原版退出条件键盘项 = Jump(JustReleased)/Inventory/Throw/Torch/Smart/Mount/QuickHeal/
+// QuickMana/CreativeMenu/Dash/ArmorSetAbility/Hotbar1-10/Hotbar±/滚轮。默认键位下逐键断言；
+// Throw/Dash/ArmorSetAbility 本仓无 action（Keybinds.ts 头声明）跳过。
+
+describe('spectateKeyExits 退出键族（:16933 键盘半边,默认键位）', () => {
+  it('原版全键族命中：Space/Esc(E)/Shift(Ctrl)/R/H/J/C/Digit1-0', () => {
+    const g = shell();
+    // Jump / Inventory（既有两键——扩表不缩）
+    expect(g.spectateKeyExits('Space')).toBe(true);         // Jump
+    expect(g.spectateKeyExits('Escape')).toBe(true);        // Inventory
+    expect(g.spectateKeyExits('KeyE')).toBe(true);          // Inventory（本仓 E 并绑）
+    // 新扩：Torch=SmartSelect / Smart=SmartCursor / Mount=QuickMount
+    expect(g.spectateKeyExits('ShiftLeft')).toBe(true);     // SmartSelect(controlTorch)
+    expect(g.spectateKeyExits('ControlLeft')).toBe(true);   // SmartCursor(controlSmart)
+    expect(g.spectateKeyExits('KeyR')).toBe(true);          // QuickMount(controlMount)
+    // 新扩：QuickHeal / QuickMana / CreativeMenu
+    expect(g.spectateKeyExits('KeyH')).toBe(true);          // QuickHeal
+    expect(g.spectateKeyExits('KeyJ')).toBe(true);          // QuickMana
+    expect(g.spectateKeyExits('KeyC')).toBe(true);          // ToggleCreativeMenu(controlCreativeMenu)
+    // 新扩：Hotbar1-10 / Hotbar±（:16933 Current 触发器；±默认空表不触发）
+    for (const code of ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5',
+      'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0']) {
+      expect(g.spectateKeyExits(code)).toBe(true);
+    }
+  });
+
+  it('非退出键不误伤：移动 WASD/左键码/QuickBuff(B)', () => {
+    const g = shell();
+    expect(g.spectateKeyExits('KeyW')).toBe(false);
+    expect(g.spectateKeyExits('KeyA')).toBe(false);
+    expect(g.spectateKeyExits('KeyS')).toBe(false);
+    expect(g.spectateKeyExits('KeyD')).toBe(false);
+    expect(g.spectateKeyExits('KeyM')).toBe(false);         // MapFull 非退出键
+    // ★QuickBuff 不在 :16933 退出族——:16940-16945 是虫洞药水传送路径
+    // （CanWormholeToSpectating 门,quickBuff() 内已接,不走退出）
+    expect(g.spectateKeyExits('KeyB')).toBe(false);
+  });
+});
+
+describe('滚轮退出（:16933 尾项 ScrollWheelDelta != 0 → SetOrRequestSpectating(-1) return）', () => {
+  it('滚轮非零 → 退出观战并消费 wheelDelta（防同 tick 视野缩放重复消费）', () => {
+    const g = shell({ dead: true, respawnTimer: 100, slot: 5, players: { 5: { active: true, dead: false } } });
+    g.input.wheelDelta = 1;
+    g.handleSpectatingControls();
+    expect(g.spectatingSlot).toBe(-1);
+    expect(g.net.sendSpectateFocus).toHaveBeenCalledWith(-1);
+    expect(g.input.wheelDelta).toBe(0);          // 已消费
+  });
+
+  it('滚轮退出优先于环选（原版 :16938 return）——mouseDown 不被吞', () => {
+    const g = shell({ dead: true, respawnTimer: 100, slot: 5, players: { 1: { active: true, dead: false } } });
+    g.input.wheelDelta = -1;
+    g.input.mouseDown = true;
+    g.handleSpectatingControls();
+    expect(g.spectatingSlot).toBe(-1);           // 退出而非环选
+    expect(g.input.mouseDown).toBe(true);        // 未吞（return 先于环选段）
   });
 });

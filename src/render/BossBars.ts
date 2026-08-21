@@ -9,7 +9,8 @@
 //   （Helper.DrawBareBonesBar 全反编译无消费方——纯公共调试件，不移植）
 //
 // 数值链要点（各条"显示什么"）：
-//   Common     本体 life/lifeMax（BossHeadTextures 无头像的 NPC 不显示）
+//   Common     本体 life/lifeMax（BossHeadTextures 无头像的 NPC 不显示；
+//              头像取 bossHeadIndexOf 动态值——教徒仪式隐身态 -1=条消失）
 //   Twins      两体【和】血：跟踪体 + 首个找到的另一只（live lifeMax 相加）
 //   EoW        分子=全场 13-15 段 HP 和；分母=SetDefaults(14).lifeMax×(段数+2)
 //              恒定（段数=专家 70/普通 65，杀段只缩分子）；锚死自动换段续显
@@ -30,6 +31,7 @@
 // 屏幕矩形（外扩 5000px）相交的 NPC 中取【离玩家最近】者走 TryTracking 分派；
 // 已跟踪条每帧重校验，失效即断（本帧不画、下帧重扫）。
 import type { DrawRect } from '../assets/SpriteAtlas';
+import { drawItemStackBorderString, itemStackMeasure } from './CombatTextFont';
 import { vanillaNpc } from '../data/vanillaNpcs';
 import { VANILLA_BOSS_IDS } from '../entities/Enemy';
 import {
@@ -39,7 +41,10 @@ import {
 
 // ---------------------------------------------------------------------------
 // NPCID.Sets.BossHeadTextures（NPCID.cs:4861，CreateIntSet(-1, ...) 全 40 对）
-//   npc type → NPC_Head_Boss_N 头像索引；-1 = 无头像（Common 条不显示）
+//   npc type → NPC_Head_Boss_N 头像索引基表；-1 = 无头像（Common 条不显示）。
+//   动态覆写见 bossHeadIndexOf（NPC.cs:7536-7584 GetBossHeadTextureIndex）：
+//   Common/Twins/四塔/鹿角怪条按跟踪体实时态取值（原版同名调用），其余条直取
+//   基表值（原版各 .cs 写死 BossHeadTextures[x]）。
 // ---------------------------------------------------------------------------
 export const BOSS_HEAD_TEXTURES: Readonly<Record<number, number>> = {
   4: 0, 13: 2, 344: 3, 370: 4, 246: 5, 249: 5, 345: 6, 50: 7, 396: 8, 395: 9,
@@ -49,9 +54,69 @@ export const BOSS_HEAD_TEXTURES: Readonly<Record<number, number>> = {
   551: 34, 548: 36, 636: 37, 657: 38, 668: 39,
 };
 
-/** GetBossHeadTextureIndex（NPC.cs；-1=无） */
+/** GetBossHeadTextureIndex 基表查值（NPCID.Sets.BossHeadTextures[type]；-1=无） */
 export function bossHeadTextureIndex(type: number): number {
   return BOSS_HEAD_TEXTURES[type] ?? -1;
+}
+
+/** bossHeadIndexOf 的入参（BarNpc 的结构子集——Common/Twins/四塔/鹿角怪条按
+ *  跟踪体实时态取头像；其余条走静态基表值，同原版各 .cs 的直取写法） */
+export interface BossHeadNpc {
+  /** 原版 npc.type（vanillaId） */
+  type: number;
+  ai0: number;
+  ai1: number;
+  life: number;
+  lifeMax: number;
+  /** npc.localAI[2]（266 克脑二阶段入场门）——BarNpc 投影未含，缺省按 0；
+   *  BoC 条走静态基表（BrainOfCthuluBigProgressBar.cs:49 直取 [266]），
+   *  本 case 现仅作函数级 1:1 备档 */
+  localAI2?: number;
+}
+
+/** 拜月教徒仪式隐身窗（439/440 的 alpha==255 判定）。原版 GetBossHeadTextureIndex
+ *  读 alpha，而 AI_084 仪式态 alpha 是 ai1 的确定函数（NPC.cs:65586-65716）：
+ *  ai1∈[0,30) 渐隐 (int)(ai1/30*255)→0..246 / [30,90) 恒 255 / [90,120) 渐显
+ *  255→0（ai1=90 恰 255）/ [120,420) 恒 0（被打断 justHit 归零重来 :65012-65015）。
+ *  故 alpha==255 ⟺ ai1∈[30,90]——经 (ai0,ai1) 表达与逐帧读 alpha 等价。 */
+function cultistRitualInvisible(ai1: number): boolean {
+  return ai1 >= 30 && ai1 <= 90;
+}
+
+/** GetBossHeadTextureIndex（NPC.cs:7536-7584）：基表 + 动态覆写。
+ *  - 4   克眼 ai0≥2（二阶段）→ 1
+ *  - 266 克脑 ai0<0（二阶段）或 localAI[2]>0 → -1
+ *  - 262 世纪之花 life≤lifeMax/2（二阶段）→ 12
+ *  - 125 视网膜怪 ai0≥3 → 16；126 普兰黛拉 ai0≥3 → 21（双子二阶段头像）
+ *  - 439 教徒仪式态全隐身 → -1（条消失）；440 克隆体非仪式可显态 → -1
+ *  消费端：Common/Twins/四塔/鹿角怪条（各 .cs 经 nPC.GetBossHeadTextureIndex()）；
+ *  EoW/克脑/石巨人/月总/碟子/海盗船条用静态基表值（直取 BossHeadTextures[x]）。 */
+export function bossHeadIndexOf(e: BossHeadNpc): number {
+  const result = bossHeadTextureIndex(e.type);
+  switch (e.type) {
+    case 4:
+      if (e.ai0 >= 2) return 1;
+      break;
+    case 266:
+      if (e.ai0 < 0 || (e.localAI2 ?? 0) > 0) return -1;
+      break;
+    case 262:
+      if (e.life <= e.lifeMax / 2) return 12;
+      break;
+    case 125:
+      if (e.ai0 >= 3) return 16;
+      break;
+    case 126:
+      if (e.ai0 >= 3) return 21;
+      break;
+    case 439:
+      if (e.ai0 === 5 && cultistRitualInvisible(e.ai1)) return -1;
+      break;
+    case 440:
+      if (e.ai0 !== 5 || cultistRitualInvisible(e.ai1)) return -1;
+      break;
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +237,7 @@ export const COMMON_BAR: BigProgressBar = {
   validateAndCollect(tracked, ctx) {
     void ctx;
     if (!tracked.active) return null;
-    const headIndex = bossHeadTextureIndex(tracked.type);
+    const headIndex = bossHeadIndexOf(tracked);            // CommonBossBigProgressBar.cs:23
     if (headIndex === -1) return null;
     return { life: tracked.life, lifeMax: tracked.lifeMax, headIndex };
   },
@@ -195,7 +260,7 @@ export const TWINS_BAR: BigProgressBar = {
         break;
       }
     }
-    return { life, lifeMax, headIndex: bossHeadTextureIndex(tracked.type) };
+    return { life, lifeMax, headIndex: bossHeadIndexOf(tracked) };   // TwinsBigProgressBar.cs:37
   },
 };
 
@@ -301,7 +366,7 @@ function makeLunarPillarBar(towerId: number, key: string): BigProgressBar {
     key,
     validateAndCollect(tracked, ctx) {
       if (!tracked.active) return null;
-      const headIndex = bossHeadTextureIndex(tracked.type);
+      const headIndex = bossHeadIndexOf(tracked);          // LunarPillarBigProgessBar.cs:23
       if (headIndex === -1) return null;
       if (!playerNearNpcOfType(ctx.npcs, towerId, ctx.playerCx, ctx.playerCy)) return null;
       if (tracked.ai2 === 1) return null;                  // 死亡演出中
@@ -376,7 +441,7 @@ export const DEERCLOPS_BAR: BigProgressBar = {
   key: 'deerclops',
   validateAndCollect(tracked, ctx) {
     if (!tracked.active) return null;
-    const headIndex = bossHeadTextureIndex(tracked.type);
+    const headIndex = bossHeadIndexOf(tracked);            // DeerclopsBigProgressBar.cs:23
     if (headIndex === -1) return null;
     const a = Math.trunc(tracked.ai0);
     if (a === 6 || a === 7 || a === 8) {
@@ -481,7 +546,8 @@ export class BigProgressBarSystem {
 //   UI_BossBar.png 516×348=1×6 行 58px 帧：行0 整框(头像槽) / 行1 生命端盖 /
 //   行2 生命填充段(2px 源横向拉伸) / 行3 背景(×0.2) / 行4 盾端盖 / 行5 盾填充段。
 //   条 456×22 居中于 (W/2, H-50)；填充宽=(int)(456×占比) 取偶；头像净左上 =
-//   框左上-(32,24)+(4,20)。文本：盾>0 显盾否则显命（:123-133）。
+//   框左上-(32,24)+(4,20)。文本：盾>0 显盾否则显命（:123-133），FontAssets.
+//   ItemStack 位图字体（CombatTextFont 注册表）三段 DrawBorderStringFourWay。
 // ---------------------------------------------------------------------------
 const FH = 58, BW = 456, BH = 22, IX = 32, IY = 24;
 
@@ -540,25 +606,28 @@ export function drawBigProgressBar(
     c.drawImage(head.img, head.sx, head.sy, head.sw, head.sh, vec.x + 4, vec.y + 20, head.sw, head.sh);
   }
   if (showText) {
-    // DrawHealthText（:62-76 + 盾量版 :123-133：盾>0 显盾）
+    // DrawHealthText（:62-76 + 盾量版 :123-133：盾>0 显盾）。字体 =
+    // FontAssets.ItemStack（AssetInitializer.cs:110）位图字体（CombatTextFont
+    // 注册表第三字体,数字+"/" 裁片）;三段各一次 DrawBorderStringFourWay:
+    // "/" 居中 / cur 右对齐(锚点 center-5) / max 左对齐(锚点 center+5),
+    // origin.y = 行盒高(lineSpacing)/2,锚点 = 条中心 +(0,1)。
     const showShield = info.shield != null && info.shield.cur > 0;
-    const cur = Math.floor(showShield ? info.shield!.cur : info.life);
-    const max = Math.floor(showShield ? info.shield!.max : info.lifeMax);
-    c.font = 'bold 13px sans-serif';
-    c.textAlign = 'center';
-    c.lineWidth = 3;
-    c.strokeStyle = 'rgba(0,0,0,0.9)';
-    const cy2 = rect.y + rect.h / 2 + 5;
-    c.strokeText('/', rect.x + rect.w / 2, cy2);
-    c.fillStyle = '#FFF';
-    c.fillText('/', rect.x + rect.w / 2, cy2);
-    c.textAlign = 'right';
-    c.strokeText(String(cur), rect.x + rect.w / 2 - 5, cy2);
-    c.fillText(String(cur), rect.x + rect.w / 2 - 5, cy2);
-    c.textAlign = 'left';
-    c.strokeText(String(max), rect.x + rect.w / 2 + 5, cy2);
-    c.fillText(String(max), rect.x + rect.w / 2 + 5, cy2);
-    c.textAlign = 'start';
+    const cur = Math.trunc(showShield ? info.shield!.cur : info.life);   // (int)current
+    const max = Math.trunc(showShield ? info.shield!.max : info.lifeMax);
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2 + 1;
+    drawBarText(c, '/', cx, cy, 0.5);
+    drawBarText(c, String(cur), cx - 5, cy, 1);
+    drawBarText(c, String(max), cx + 5, cy, 0);
   }
   c.restore();
+}
+
+/** DrawHealthText 单段（Utils.DrawBorderStringFourWay :2600-2628 + 各段 origin:
+ *  "/"=Measure*0.5 / cur=Measure*(1,0.5) / max=Measure*(0,0.5)） */
+function drawBarText(
+  c: CanvasRenderingContext2D, text: string, x: number, y: number, alignX: number,
+): void {
+  const m = itemStackMeasure(text);
+  drawItemStackBorderString(c, text, x, y, m.w * alignX, m.h / 2);
 }

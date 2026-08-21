@@ -119,6 +119,34 @@ function filesFor(type: number): string[] {
     `vanilla/Projectile_${type}.png`];
 }
 
+/** AI 期沿线光驱动（复审③ 2026-08-21：446/646-649 沿线光回迁 AI 期——原版
+ *  Projectile.cs:49687-49727 AI 段 AddLight，本仓经 fixedUpdate→GameHooks.
+ *  addLightAt 发射）。几何同 drawHook（钩心 (1000,1000)/玩家心 (1300,1000)），
+ *  addLightAt 像素坐标→格坐标录制。玩家桩 isBlacklistedForGrappling=true 防
+ *  实心世界挂墙进 doLatch（光测试不涉挂墙链）。 */
+function aiDriveLineLight(projType: number,
+  store: { inBounds(x: number, y: number): boolean; isActive(x: number, y: number): boolean; get(x: number, y: number): number },
+  hook = { cx: 1000, cy: 1000 }, player = { cx: 1300, cy: 1000 }): Light[] {
+  const lights: Light[] = [];
+  const mkPlayer = (): Player => ({
+    cx: player.cx, cy: player.cy, dead: false,
+    buffs: { has: () => false },
+    isBlacklistedForGrappling: () => true,
+  } as unknown as Player);
+  const hooks = {
+    world: { store },
+    player: mkPlayer(),
+    addLightAt: (px: number, py: number, r: number, g: number, b: number) => {
+      lights.push({ x: Math.floor(px / TILE), y: Math.floor(py / TILE), r, g, b });
+    },
+  } as never;
+  const g = new GrappleProj(hook.cx, hook.cy, 0, 0, projType, mkPlayer);
+  g.x = hook.cx - g.w / 2;                              // 盒居中（同 drawHook）
+  g.y = hook.cy - g.h / 2;
+  g.fixedUpdate(1 / 60, hooks);
+  return lights;
+}
+
 // ---- ChainID 全表 ----
 
 describe('ChainID 全表（ChainID.cs）', () => {
@@ -406,19 +434,20 @@ describe('链段发光', () => {
     expect(host.lights[0].x).toBe(Math.floor(1012 / 16));
   });
 
+  // ★复审③（2026-08-21）：446/646-649 沿线光回迁 AI 期（原版 Projectile.cs
+  // :49687-49727 AI 段；曾移 draw 期 = 恒 1 tick 延迟）——经 fixedUpdate→
+  // GameHooks.addLightAt 发射，测试改为驱动 AI 期（332/488 段光仍走 draw，上方两例）
   it('446：端点 + 沿线开格发光（PlotTileLine + CastLightOpen 门）', () => {
-    const rec = makeCtxRecorder();
     // 全空世界（isActive=false → CastLightOpen 全放行）
     const store = {
       inBounds: () => true,
       isActive: () => false,
       get: () => 0,
     };
-    const host = makeHost(rec, filesFor(446), { store });
-    drawHook(446, host);
+    const lights = aiDriveLineLight(446, store);
     const [lr, lg, lb] = HOOK_CHAINS[446].lineLight!;
-    expect(host.lights.length).toBeGreaterThan(2);
-    for (const l of host.lights) {
+    expect(lights.length).toBeGreaterThan(2);
+    for (const l of lights) {
       expect([l.r, l.g, l.b]).toEqual([lr, lg, lb]);
       // 钩心 (1000,1000)=格(62,62) → 玩家 (1300,1000)=格(81,62)：水平线全在 y=62
       expect(l.y).toBe(62);
@@ -426,22 +455,20 @@ describe('链段发光', () => {
       expect(l.x).toBeLessThanOrEqual(81);
     }
     // 两端点必在（AddLight(mountedCenter)+AddLight(Center)）
-    expect(host.lights.some((l) => l.x === 62 && l.y === 62)).toBe(true);
-    expect(host.lights.some((l) => l.x === 81 && l.y === 62)).toBe(true);
+    expect(lights.some((l) => l.x === 62 && l.y === 62)).toBe(true);
+    expect(lights.some((l) => l.x === 81 && l.y === 62)).toBe(true);
   });
 
   it('446：实心格不放行（CastLightOpen `!solid` 门）', () => {
-    const rec = makeCtxRecorder();
     // (70,62) 设为实心
     const store = {
       inBounds: () => true,
       isActive: (x: number) => true,
       get: (x: number) => (x === 70 ? 1 : 0),   // tile 1 = dirt（solid）
     };
-    const host = makeHost(rec, filesFor(446), { store });
-    drawHook(446, host);
-    expect(host.lights.some((l) => l.x === 70 && l.y === 62)).toBe(false);
-    expect(host.lights.some((l) => l.x === 71 && l.y === 62)).toBe(true);
+    const lights = aiDriveLineLight(446, store);
+    expect(lights.some((l) => l.x === 70 && l.y === 62)).toBe(false);
+    expect(lights.some((l) => l.x === 71 && l.y === 62)).toBe(true);
   });
 });
 
@@ -450,13 +477,11 @@ describe('链段发光', () => {
 describe('plotLine Bresenham', () => {
   // 经 GrappleProj 模块内部实现间接验证：446 沿线光在纯水平线覆盖 62..80（终点 81 不绘）
   it('水平线：覆盖除终点外全部格 + 端点光补齐', () => {
-    const rec = makeCtxRecorder();
     const store = { inBounds: () => true, isActive: () => false, get: () => 0 };
-    const host = makeHost(rec, filesFor(446), { store });
-    drawHook(446, host);
-    const xs = new Set(host.lights.map((l) => l.x));
+    const lights = aiDriveLineLight(446, store);
+    const xs = new Set(lights.map((l) => l.x));
     for (let x = 62; x <= 81; x++) expect(xs.has(x)).toBe(true); // 终点 81 由端点光补
-    expect(host.lights.filter((l) => l.x === 70).length).toBe(1); // 每格恰一次
+    expect(lights.filter((l) => l.x === 70).length).toBe(1); // 每格恰一次
   });
 });
 

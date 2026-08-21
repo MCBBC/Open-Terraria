@@ -76,25 +76,32 @@ describe('694 水书宝箱怪 AI_010 多状态机', () => {
   it('咒球链 flag19：中距蓄 120t → 发射段 ai[2]==17 出水球 33 → 30t 回态 0', () => {
     const w = makeWorld();
     const spawned: Enemy[] = [];
-    // 距离 30 格 = 480px ∈ (300,500]：只 flag19 真（flag18 须 ≤300px）
+    // 距离 30 格 = 480px ∈ (300,500]：蓄力起点只 flag19 真（flag18 须 ≤300px）。
+    // ★悬浮逼近段（>350px 以 5px/t 逼近）会在 120t 内进 [100,300] 带 → flag18&&
+    // flag19 重叠每 tick 掷 Next(3)——种子 0.9 → floor(0.9*3)=2≠0 恒走咒球链
+    //（同 flag18 例的种子法；不种则末 tick 分支 1/3 概率落冲刺链 = flaky）
     const game = stubGame(w, { x: 90, y: 60 }, spawned);
-    const e = Enemy.fromVanilla(694, 60 * TILE, 60 * TILE)!;
-    e.ai3 = 0; e.ai2 = 0;
-    tick(e, game, 119);
-    expect(e.ai3).toBe(0);   // 尚未到 120
-    tick(e, game, 2);
-    expect(e.ai3).toBe(1);   // ai[2]>120 → 态 1（:21806-21809）
-    tick(e, game, 1);
-    expect(e.customFrameIdx ?? 0).toBeGreaterThanOrEqual(24);   // 态 1 帧 24..29（:77946-77960；帧机在 AI 段前跑，态切换次帧起效）
-    spawned.length = 0;
-    // 新一轮发射段：ai[2] 重置后爬至 17 出球（发射点 Center+(0,10)）
-    e.ai2 = 15; e.ai3 = 1;
-    tick(e, game, 3);
-    expect(e.ai2).toBeGreaterThanOrEqual(18);
-    expect(spawned.some((s) => s.vanillaId === 33)).toBe(true);   // NewNPC(33)（:21820-21824）
-    e.ai2 = 29;
-    tick(e, game, 3);
-    expect(e.ai3).toBe(0);   // ai[2]>30 → 态 0（:21813-21815）
+    const rnd = Math.random;
+    Math.random = () => 0.9;
+    try {
+      const e = Enemy.fromVanilla(694, 60 * TILE, 60 * TILE)!;
+      e.ai3 = 0; e.ai2 = 0;
+      tick(e, game, 119);
+      expect(e.ai3).toBe(0);   // 尚未到 120
+      tick(e, game, 2);
+      expect(e.ai3).toBe(1);   // ai[2]>120 → 态 1（:21806-21809）
+      tick(e, game, 1);
+      expect(e.customFrameIdx ?? 0).toBeGreaterThanOrEqual(24);   // 态 1 帧 24..29（:77946-77960；帧机在 AI 段前跑，态切换次帧起效）
+      spawned.length = 0;
+      // 新一轮发射段：ai[2] 重置后爬至 17 出球（发射点 Center+(0,10)）
+      e.ai2 = 15; e.ai3 = 1;
+      tick(e, game, 3);
+      expect(e.ai2).toBeGreaterThanOrEqual(18);
+      expect(spawned.some((s) => s.vanillaId === 33)).toBe(true);   // NewNPC(33)（:21820-21824）
+      e.ai2 = 29;
+      tick(e, game, 3);
+      expect(e.ai3).toBe(0);   // ai[2]>30 → 态 0（:21813-21815）
+    } finally { Math.random = rnd; }
   });
 
   it('冲刺链 flag18：1/3 掷中蓄 120t 转态 2，冲刺段（ai[2]≥10）速度 14 直线', () => {

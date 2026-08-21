@@ -830,6 +830,10 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
       if (gOK && !wasActive) {
         st.type[ai] = EXPLOSIVES; st.flags[ai] = 1;
         st.frameX[ai] = 0; st.frameY[ai] = 0;
+        // ★BBBBBB：PlaceTile(141) 尾 SquareTileFrame(i,j)（cs:60284）——九宫中心
+        //   resetFrame=true：184 苔藓邻格每访恒掷（22222 全序列对拍：van [3738,970]
+        //   矿爆尾 PT141 后 a3×6=九宫 184 访问掷，JS 漏致掷流前移 9 样本）
+        genSquareTileFrame(st, rng, barX, barGround);
       }
     }
   }

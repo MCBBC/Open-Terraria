@@ -1471,6 +1471,8 @@ export class BetsyBreath extends Entity {
     this.frameT++;
     // 判定线段（:14712-14733）：焰尾→焰头，宽 40（687 覆写 Colliding 为线段判定，
     // 非 30×30 弹体盒——伤害走 MLDeathray 同款直连 damagePlayer，iframes 门手写）
+    // ★victim-settles：命中/灼烧恒查本地玩家（damagePlayer/statusPlayer 只结算
+    // 本地——Projectile.Damage 逐玩家结算的本地半边）——非索敌残留,勿改 targetRef
     const headF = Math.min(1, this.t / 25);
     const tailF = Math.max(0, (this.t - 38) / 40);
     const dx = Math.cos(this.ang), dy = Math.sin(this.ang);
@@ -2553,6 +2555,7 @@ export class DD2GoblinBomb extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     const st = game.world.store;
     // 接触熔断（Projectile.Damage :12330-12340:碰玩家/NPC → timeLeft 钳 3）
+    // ★victim-settles：接触判定恒本地玩家（本端玩家碰弹才熔断自己端的引信）
     const pl = game.player;
     if (pl && !pl.dead
       && this.x < pl.x + pl.w && this.x + this.w > pl.x
@@ -2585,6 +2588,7 @@ export class DD2GoblinBomb extends Entity {
     game.spawnParticles(this.cx, this.cy, '#FFD24A', 14, 4, { life: 30, grav: -0.05 });
     game.spawnParticles(this.cx, this.cy, '#FF9A3C', 10, 3, { life: 40 });
     const bx = this.cx - 40, by = this.cy - 40;   // 80×80（:68689-68695）
+    // ★victim-settles：爆盒命中恒本地玩家（damagePlayer 只结算本地血）
     const pl = game.player;
     if (pl && !pl.dead
       && pl.x < bx + 80 && pl.x + pl.w > bx && pl.y < by + 80 && pl.y + pl.h > by) {
@@ -2643,6 +2647,7 @@ export class DD2OgreSmash extends Entity {
     this.w = size; this.h = size;
     this.x = ncx - size / 2; this.y = ncy - size / 2;
     // 伤害（hostile 盒:玩家 + 永恒水晶,同弹 id 免疫帧防连击）
+    // ★victim-settles：玩家侧恒本地玩家（damagePlayer 只结算本地血）
     const pl = game.player;
     if (pl && !pl.dead
       && pl.x < this.x + this.w && pl.x + pl.w > this.x

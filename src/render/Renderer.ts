@@ -12,8 +12,9 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, VANILLA_ITEM_ICON_MAP, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
-import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache } from '../player/PaperDoll';
+import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
 import { MALE_VARIANTS } from '../player/Appearance';
+import type { Appearance } from '../player/Appearance';
 import { hairDyeColor } from '../player/HairDyeColor';
 import type { Inventory } from '../items/Inventory';
 import { options } from '../core/Options';
@@ -253,6 +254,23 @@ const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2,
 // 下边缘 RGB 也全量加 → 染色时 destination-in 填 255 把 alpha 摊平，非保留原 alpha）。
 const extraSpriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
 /** Extra_N 贴图懒加载（sprites/vanilla/Extra_N.png；Image→Bitmap 升级同 projSprite） */
+/** 全屏地图虫洞头像命中纯函数（Main.cs:55376-55440 头像环）：命中盒 =
+ *  28×28×UIScale（:55400-55404 num83-86），中心 = 本仓头像绘制中心
+ *  （mapX(cx) = cx0 + cx/16·zoom——头像恒中心锚）。渲染侧悬停与 Game 点击链
+ *  （tryWormholeHeadTeleport 点击帧精确复测）共用；返回命中下标（无 = -1） */
+export function wormholeHeadHit(
+  mx: number, my: number, cx0: number, cy0: number, zoom: number,
+  remotes: ReadonlyArray<{ cx: number; cy: number }>,
+): number {
+  const half = 14 * 1.1;   // 28×28×UIScale 半宽（num79=UIScale≈1.1）
+  for (let i = 0; i < remotes.length; i++) {
+    const rp = remotes[i];
+    const hx = cx0 + rp.cx / TILE * zoom, hy = cy0 + rp.cy / TILE * zoom;
+    if (Math.abs(mx - hx) <= half && Math.abs(my - hy) <= half) return i;
+  }
+  return -1;
+}
+
 export function loadExtraSprite(n: number): ImageBitmap | HTMLImageElement | null {
   if (typeof Image === 'undefined') return null;
   const hit = extraSpriteCache.get(n);
@@ -2138,6 +2156,18 @@ export class Renderer {
   /** 全屏地图悬停格名（本帧；null=未悬停/无名）——Main.cs:55227-55360 悬停链的
    *  单槽 text（:55282+ 宝箱族覆盖晶塔名：本仓以"晶塔层让位"实现同序） */
   fullMapHoverName: string | null = null;
+  /** 联机态（netMode≠0 等价）——地图头像队伍色描边门（GetPlayerHeadBordersColor
+   *  :56088 netMode==0 → 白）。Game 每帧置位 */
+  mapNetActive = false;
+  /** 虫洞地图门（netMode==1 = 联机访客等价——Main.cs:55406；原版房主 netMode=2
+   *  无法地图点击虫洞，1:1 保留）。Game 每帧置位 */
+  mapWormholeMode = false;
+  /** 全屏地图虫洞头像悬停（Main.cs:55376-55440 头像环，帧内重算）：命中队友头像
+   *  且过全部门禁（同队 team>0 + 持 2997 + 非己 + 晶塔悬停让位 cancelWormHole）。
+   *  Game 悬停起始播 SoundID 12 + 点击链消费传送 */
+  mapWormholeHead: { slot: number; name: string } | null = null;
+  /** 全屏地图悬停远端头像名（无门禁原始命中，:55407 text=name——悬停提示位） */
+  mapHeadHoverName: string | null = null;
 
   /** 全屏地图缩放：以鼠标位置为锚点（鼠标下的地图点不动，不乱飞） */
   zoomFullMapAt(newZoom: number, mouseX: number, mouseY: number) {
@@ -2279,6 +2309,8 @@ export class Renderer {
       this._fm2dMap = null;
       this._fm2dFog = null;
       this._mapFogRowSeen = -1;
+      this.mapWormholeHead = null;   // 关图清悬停态（防下次开图读到陈旧命中）
+      this.mapHeadHoverName = null;
     }
     this._fmWasOpen = this.fullMap.open;
     // GPU 熔断期跳过全部画布工作(contextlost 抖动环,见 installGpuPressureGuard):
@@ -8737,6 +8769,9 @@ export class Renderer {
         const hs = vid >= 0 && VANILLA_IS_FOOD.has(vid) ? 1
           : vid >= 0 ? itemFuncOfVid(vid)?.holdStyle ?? (HOLD_STYLE_ITEMS.has(vid) ? 1 : 0) : 0;
         staticHoldStyle = hs === 7 ? 0 : hs;
+        // CanVisuallyHoldItem（:49462-49500）：抚摸中 holdStyle 4/5/6 持物隐藏
+        //（petting 三分支 return false——仅门持物绘制，身体行档不受此门）
+        if (p.petting.isPetting && (hs === 4 || hs === 5 || hs === 6)) staticHoldStyle = 0;
         holdStyleRaw = hs;
         // 变身坐骑（PlayerIsHidden）原版由 AdjustmentsForWolfMount 改锚续画手持物——
         // 此处原锚近似续画（不隐藏，登记锚点偏差）
@@ -9031,7 +9066,20 @@ export class Renderer {
       const sitOpt = sitDraw
         ? { sitting: { legIndex: dollEquip.legs ?? 0, seatYOffset: p.sitting ? -4 + Math.trunc(p.seatOffsetY) : 0, body: dollEquip.body ?? 0 } }
         : {};
-      const dollOpts = { ...(dyeColor ? { skipHair: true } : {}), ...(dual ? { rows } : {}), ...sitOpt };
+      // ---- 抚摸复合后臂（ItemCheck_ApplyHoldStyle :49499-49508 petting 分支）----
+      // petting.isPetting → 后臂换复合网格列 8 拉伸档帧（UpdateCompositeArm
+      // PlayerDrawSet.cs:2210-2237：phase0=ThreeQuarters 行1 / phase1=Full 行0，
+      // miscCounter%14/7 两相切换 = 抚摸起落节奏）绕肩轴 (26,30) 旋转
+      // −2π·(isPetSmall?0.2:0.3)。rot 取右向局部空间恒值：原版 SetCompositeArmBack
+      // 的 gravDir 取反（:4161-4166）+ XNA 翻转(先翻后转)与本仓外层
+      // scale(facing,1)/scale(1,-1) 镜像合成等价（mirror∘rotate(θ)=rotate(−θ)∘mirror
+      // 两向归一），朝向/重力翻转无需再改角。坐骑抚摸档（mount 62/63 → 0.36，
+      // :49501-49510）依赖 PetMount（未实现，登记）
+      const petArm = p.petting.isPetting
+        ? petArmParams(Math.min(1, p.pettingArmPhase) as 0 | 1, p.petting.isPetSmall)
+        : null;
+      const petOpt = petArm ? { petArm } : {};
+      const dollOpts = { ...(dyeColor ? { skipHair: true } : {}), ...(dual ? { rows } : {}), ...sitOpt, ...petOpt };
       const doll = compositePaperDoll(p.appearance, dollEquip, dollOpts);
       if (doll) {
         const row = rows.body;                     // 发/头甲/眼睑随身体行（bodyFrame）
@@ -9049,7 +9097,7 @@ export class Renderer {
           // 走皮肤公式，与原版逐 DrawData color 一致
           const s2 = stF.skinMul;                      // s'²
           const skinDoll = compositePaperDoll(p.appearance, dollEquip,
-            { skipHair: !!dyeColor, layer: 'skin', ...(dual ? { rows } : {}), ...sitOpt });
+            { skipHair: !!dyeColor, layer: 'skin', ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
           if (skinDoll) {
             const fs = dollFrameRows(tintRGBA(skinDoll, [s2, s2, s2]), rows);
             const ga = ctx.globalAlpha;
@@ -9063,7 +9111,7 @@ export class Renderer {
           //   ×armorMul——原版 colorHair×s'² / colorArmorHead×s'）：发色剂+潜行同开
           //   时该叠层不衰减，集成点在 drawDollHairOverlays（发色剂会话在途）
           const armorDoll = compositePaperDoll(p.appearance, dollEquip,
-            { layer: dyeColor ? 'armorNoHead' : 'armor', ...(dual ? { rows } : {}), ...sitOpt });
+            { layer: dyeColor ? 'armorNoHead' : 'armor', ...(dual ? { rows } : {}), ...sitOpt, ...petOpt });
           if (armorDoll) {
             const armorMul: [number, number, number] = stEq.vortexSet
               ? [vortexTint![0], vortexTint![1], vortexTint![2]]   // Lerp 通道（:1641-1644）
@@ -10810,7 +10858,8 @@ export class Renderer {
       (wx) => ox + (wx / TILE - sx) / viewTiles * size,
       (wy) => oy + (wy / TILE - sy) / viewTiles * size,
       entities.filter((e) => e instanceof TownNPC) as TownNPC[],
-      entities.filter((e) => e instanceof Enemy) as Enemy[], world);
+      entities.filter((e) => e instanceof Enemy) as Enemy[], world,
+      this.remotePlayers);
     ctx.restore();
     ctx.globalAlpha = 1;   // 框前景/按钮/时间文字不随 α（MinimapFrame.cs:182-188 恒 White）
     // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset——随皮肤）
@@ -11118,20 +11167,39 @@ export class Renderer {
     mapX: (wx: number) => number, mapY: (wy: number) => number,
     npcs: TownNPC[], enemies: Enemy[],
     world: World | null = null,
+    remotePlayers: Player[] = [],
+    wormholeSlot: number | null = null,
   ) {
     if (!this.atlas) return;
     const drawHead = (img: CanvasImageSource | null, wx: number, wy: number,
-      flip: boolean, rotation = 0, extra = 0, sw = 24, sh = 22) => {
+      flip: boolean, rotation = 0, extra = 0, sw = 24, sh = 22,
+      opts?: { scale?: number; border?: string | null }) => {
       if (!img) return;
       const x = mapX(wx), y = mapY(wy);
       ctx.save();
       ctx.translate(x, y);
       if (rotation) ctx.rotate(rotation);
-      ctx.scale(headScale, headScale);
+      ctx.scale(opts?.scale ?? headScale, opts?.scale ?? headScale);
       if (flip) ctx.scale(-1, 1);
       ctx.imageSmoothingEnabled = false;
-      // 黑描边(原版 OutlinedTextureRenderer 近似:四向偏移暗影)
-      if (extra) {
+      // 队伍色描边（MapHeadRenderer.CreateOutlines :101-148 1:1：黑外圈 8 向环
+      // (|j|+|k|==2 ×2px) + 边框色内圈 4 向环 (×2px) 的纯色剪影，实心头最后盖上；
+      // 描边色 ×alpha²（:112-116 color*=alpha*alpha——小地图半透明时描边更淡））
+      if (opts?.border) {
+        const a = ctx.globalAlpha;
+        if (a < 1) ctx.globalAlpha = a * a;
+        const sil = (color: string) => this.mapHeadSilhouette(img as CanvasImageSource, sw, sh, color);
+        for (const [dx, dy] of [[-4, 0], [-2, -2], [0, -4], [2, -2], [4, 0], [2, 2], [0, 4], [-2, 2]]) {
+          const s = sil('#000000');
+          ctx.drawImage(s, -sw / 2 + dx, -sh / 2 + dy, sw, sh);
+        }
+        for (const [dx, dy] of [[-2, 0], [0, -2], [2, 0], [0, 2]]) {
+          const s = sil(opts.border);
+          ctx.drawImage(s, -sw / 2 + dx, -sh / 2 + dy, sw, sh);
+        }
+        ctx.globalAlpha = a;
+      } else if (extra) {
+        // 旧暗影描边（保留给非玩家头路径）
         ctx.globalAlpha = 0.35;
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
           ctx.drawImage(img as CanvasImageSource, 0, 0, sw, sh, -sw / 2 + dx, -sh / 2 + dy, sw, sh);
@@ -11140,6 +11208,19 @@ export class Renderer {
       }
       ctx.drawImage(img as CanvasImageSource, 0, 0, sw, sh, -sw / 2, -sh / 2, sw, sh);
       ctx.restore();
+    };
+    // 玩家头描边色（GetPlayerHeadBordersColor Main.cs:56082-56097：死亡/幽灵透明、
+    // 敌对异队透明、自己恒 teamColor[team]（netMode≠0）、余 teamColor[team]）
+    const teamBorderCss = (team: number): string => {
+      const tc = TEAM_COLORS[Math.max(0, Math.min(5, Math.trunc(team)))];
+      return `rgb(${tc[0]},${tc[1]},${tc[2]})`;
+    };
+    const headBorder = (pl: Player, isSelf: boolean): string | null => {
+      if (pl.dead) return null;
+      if (!this.mapNetActive) return teamBorderCss(0);
+      if (isSelf) return teamBorderCss(pl.team);
+      if (pl.hostile && (pl.team !== player.team || pl.team === 0)) return null;
+      return teamBorderCss(pl.team);
     };
     // 玩家头(原版 PlayerHeadDrawRenderTargetContent:发型/头盔全层的组合头,中心锚)。
     // 纸娃娃帧 0 顶部 40×32 裁头带(整宽+发冠带,24×22 会削发型——用户报"绘制不完整");
@@ -11152,24 +11233,40 @@ export class Renderer {
       if (doll) {
         let img: CanvasImageSource = doll;
         if (dyeColor) {
-          const strip = this.headStripScratch ??= document.createElement('canvas');
-          if (strip.width !== 40 || strip.height !== 32) { strip.width = 40; strip.height = 32; }
-          const sctx = strip.getContext('2d')!;
-          sctx.imageSmoothingEnabled = false;
-          sctx.clearRect(0, 0, 40, 32);
-          const layer = dollHairLayer(player.appearance, equip?.head ?? 0);
-          const tinted = layer ? hairFrameTinted(layer, 0, dyeColor) : null;
-          if (tinted && layer?.back) sctx.drawImage(tinted, 0, 0, 40, 32, 0, 0, 40, 32);
-          sctx.drawImage(doll, 0, 0, 40, 32, 0, 0, 40, 32);
-          if (tinted) sctx.drawImage(tinted, 0, 0, 40, 26, 0, 0, 40, 26);
-          const head = headArmorImage(equip?.head ?? 0);
-          if (head) sctx.drawImage(head, 0, 0, 40, 32, 0, 0, 40, 32);
-          img = strip;
+          const strip = this.playerHeadStrip(doll, player.appearance, equip?.head ?? 0, dyeColor);
+          if (strip) img = strip;
         }
-        drawHead(img, player.cx, player.cy, player.facing < 0, 0, 1, 40, 32);
+        drawHead(img, player.cx, player.cy, player.facing < 0, 0, 0, 40, 32,
+          { border: headBorder(player, true) });
       } else return; // 纸娃娃未就绪:头像层整体等下一帧(原版头层贴图驱动同理)
     } else {
-      drawHead(this.atlas.ensureVImage('vanilla/NPC_Head_0.png'), player.cx, player.cy, false, 0, 1);
+      drawHead(this.atlas.ensureVImage('vanilla/NPC_Head_0.png'), player.cx, player.cy, false, 0, 0,
+        24, 22, { border: headBorder(player, true) });
+    }
+    // 远端玩家头（Main.cs:55378-55409 全屏 / :55156-55176 小地图同环）：CanBeSeen 门
+    // (:55166-55182 = 非互敌恒见；双敌对同队非零队才见)。虫洞悬停目标（wormholeSlot）
+    // 追加放大重画：scale+0.5、alpha 1、OurFavoriteColor(255,231,69) 金框
+    // （:55415-55419——仅全屏地图；小地图 hover 原版只显名不放大，本仓未接显名，登记）
+    for (const rp of remotePlayers) {
+      if (rp.dead) continue;
+      if (player.hostile && rp.hostile && !(player.team > 0 && player.team === rp.team)) continue;
+      if (!rp.appearance) continue;
+      const equip = dollEquipFromInv(rp.inv, this.atlas) as { head?: number | null };
+      const dyeColor = world ? this.hairDyeRenderColor(rp, world, null) : null;
+      const doll = compositePaperDoll(rp.appearance, equip, dyeColor ? { skipHair: true } : undefined);
+      if (!doll) continue;
+      let img: CanvasImageSource = doll;
+      if (dyeColor) {
+        const strip = this.playerHeadStrip(doll, rp.appearance, equip?.head ?? 0, dyeColor);
+        if (strip) img = strip;
+      }
+      const slot = (rp as unknown as { __netSlot?: number }).__netSlot ?? -1;
+      const hot = wormholeSlot !== null && slot === wormholeSlot;
+      drawHead(img, rp.cx, rp.cy, rp.facing < 0, 0, 0, 40, 32, { border: headBorder(rp, false) });
+      if (hot) {
+        drawHead(img, rp.cx, rp.cy, rp.facing < 0, 0, 0, 40, 32,
+          { scale: headScale + 0.5, border: 'rgb(255,231,69)' });
+      }
     }
     // 城镇 NPC 头(恒显,不含 bound 态)
     for (const n of npcs) {
@@ -11188,6 +11285,39 @@ export class Renderer {
       const rot = bossHeadRotation(vid, (e as unknown as { visAngle?: number }).visAngle ?? 0);
       drawHead(this.atlas.ensureVImage(`vanilla/NPC_Head_Boss_${idx}.png`), e.cx, e.cy, false, rot);
     }
+  }
+
+  /** 头像描边纯色剪影 scratch（source-in 填色；当帧即用勿存） */
+  private mapHeadSilScratch: HTMLCanvasElement | null = null;
+  private mapHeadSilhouette(img: CanvasImageSource, sw: number, sh: number, color: string): CanvasImageSource {
+    const sc = this.mapHeadSilScratch ??= document.createElement('canvas');
+    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+    const c = sc.getContext('2d')!;
+    c.clearRect(0, 0, sw, sh);
+    c.drawImage(img, 0, 0, sw, sh, 0, 0, sw, sh);
+    c.globalCompositeOperation = 'source-in';
+    c.fillStyle = color;
+    c.fillRect(0, 0, sw, sh);
+    c.globalCompositeOperation = 'source-over';
+    return sc;
+  }
+
+  /** 发色剂激活的头带合成（后发→本体→前发→头甲，40×32；drawMapHeads 本地/远端共用） */
+  private playerHeadStrip(doll: CanvasImageSource, appearance: Appearance,
+    headIdx: number, dyeColor: { r: number; g: number; b: number }): HTMLCanvasElement | null {
+    const strip = this.headStripScratch ??= document.createElement('canvas');
+    if (strip.width !== 40 || strip.height !== 32) { strip.width = 40; strip.height = 32; }
+    const sctx = strip.getContext('2d')!;
+    sctx.imageSmoothingEnabled = false;
+    sctx.clearRect(0, 0, 40, 32);
+    const layer = dollHairLayer(appearance, headIdx);
+    const tinted = layer ? hairFrameTinted(layer, 0, dyeColor) : null;
+    if (tinted && layer?.back) sctx.drawImage(tinted, 0, 0, 40, 32, 0, 0, 40, 32);
+    sctx.drawImage(doll, 0, 0, 40, 32, 0, 0, 40, 32);
+    if (tinted) sctx.drawImage(tinted, 0, 0, 40, 26, 0, 0, 40, 26);
+    const head = headArmorImage(headIdx);
+    if (head) sctx.drawImage(head, 0, 0, 40, 32, 0, 0, 40, 32);
+    return strip;
   }
 
   /** 全屏地图：半透明背景 + 完整世界图 + 边框 + 操作提示；支持拖动/缩放 */
@@ -11429,13 +11559,36 @@ export class Renderer {
     }
     // 头像层(原版 DrawNPCMapIcons2 :55602 + MapPlayerRenderer:玩家头/城镇 NPC 头/
     // Boss 头;headScale=min(1,(zoom×0.5+1)/3)——Main.cs:55140)
+    // 远端头像悬停/虫洞命中（Main.cs:55376-55440 头像环）：命中盒 28×28×UIScale
+    // （:55400-55404 num83-86，中心取本仓头像绘制中心）；门禁 = 非己 + 同队 team>0
+    // + netMode==1 + HasUnityPotion + 晶塔悬停让位（cancelWormHole :55406——
+    // pylonHoverName 为上一帧值，与原版"头环先跑、晶塔层后置"的一帧滞后同构）。
+    // 首中优先（flag3 :55406 break 语义）
     const p = this._lastPlayer;
+    this.mapWormholeHead = null;
+    this.mapHeadHoverName = null;
     if (p) {
-      this.drawMapHeads(ctx, p, Math.min(1, (fm.zoom * 0.2 * 2 + 1) / 3) * 1.1,
+      const headScale = Math.min(1, (fm.zoom * 0.2 * 2 + 1) / 3) * 1.1;
+      const hi = wormholeHeadHit(mouseX, mouseY, cx0, cy0, fm.zoom, this.remotePlayers);
+      if (hi >= 0) {
+        const rp = this.remotePlayers[hi];
+        // CanBeSeen（:55166-55182）：非互敌恒见；双敌对同队非零队才见
+        const seen = !(p.hostile && rp.hostile && !(p.team > 0 && p.team === rp.team));
+        if (seen && !rp.dead) {
+          this.mapHeadHoverName = rp.appearance?.name ?? '';
+          if (this.mapWormholeMode && p.team > 0 && p.team === rp.team && p.hasUnityPotion()
+            && !this.pylonHoverName) {
+            const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
+            if (slot !== undefined) this.mapWormholeHead = { slot, name: this.mapHeadHoverName };
+          }
+        }
+      }
+      this.drawMapHeads(ctx, p, headScale,
         (wx) => cx0 + wx / TILE * fm.zoom,
         (wy) => cy0 + wy / TILE * fm.zoom,
         entities.filter((e) => e instanceof TownNPC) as TownNPC[],
-        entities.filter((e) => e instanceof Enemy) as Enemy[], world);
+        entities.filter((e) => e instanceof Enemy) as Enemy[], world,
+        this.remotePlayers, this.mapWormholeHead?.slot ?? null);
     }
     // 传送预选标记（第一次点击的点，闪烁提示再次点击确认）
     const tp = this.tpMark;
@@ -11478,6 +11631,15 @@ export class Renderer {
           }
         }
       }
+    }
+    // 头像悬停文案（Main.cs:55407/:55420：头像环后写覆盖地块名——悬停名/传送文案；
+    // 晶塔层仍后画，但本仓晶塔提示让位 fullMapHoverName（已有约定），头像与晶塔
+    // 图标重叠的罕见例按头像优先处置，登记）
+    if (this.mapWormholeHead) {
+      this.fullMapHoverName = Lang.text('Game.TeleportTo', this.mapWormholeHead.name)
+        ?? this.fullMapHoverName;
+    } else if (this.mapHeadHoverName) {
+      this.fullMapHoverName = this.mapHeadHoverName;
     }
     this.drawPylonMapLayer(ctx, cx0, cy0, mouseX, mouseY);
     // 地图 ping 图标层（PingMapLayer——MapIconOverlay 注册序 Pylons→Pings :349-351，
@@ -11573,7 +11735,8 @@ export class Renderer {
       (wx) => num + wx / TILE * s,
       (wy) => num2 + wy / TILE * s,
       entities.filter((e) => e instanceof TownNPC) as TownNPC[],
-      entities.filter((e) => e instanceof Enemy) as Enemy[], world);
+      entities.filter((e) => e instanceof Enemy) as Enemy[], world,
+      this.remotePlayers);
     ctx.restore();
   }
   /** 2D 兜底地图画布最近重灌时的 minimap 脏块计数（变化才重灌） */

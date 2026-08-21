@@ -103,8 +103,9 @@ export interface GameHooks {
   /** 编排粒子广播（ParticleOrchestrator.BroadcastOrRequestParticleSpawn 联机半边：
    *  调用方本地视觉已生成,此钩子只送服务器中继（module8,排除发送者广播）。
    *  type = ParticleOrchestraType 注册序（net/syncModules）；moveX/Y = 位移型
-   *  编排的 MovementVector（ShimmerTownNPCSend）;缺省 = 单机/无网静默 */
-  broadcastParticleOrchestra?(type: number, x: number, y: number, moveX?: number, moveY?: number): void;
+   *  编排的 MovementVector（ShimmerTownNPCSend）；uniqueInfo = UniqueInfoPiece
+   *  （LoadoutChange = 配装档序）；缺省 = 单机/无网静默 */
+  broadcastParticleOrchestra?(type: number, x: number, y: number, moveX?: number, moveY?: number, uniqueInfo?: number): void;
   /** 原版 Dust 池（翅膀尘埃批引入；Game 本体实例化，缺省 = 不生成） */
   vanillaDust?: import('../fx/VanillaDust').VanillaDust;
   /** 世界坐标光源（翅膀 28 的 Bottom 微光等实体侧 AddLight） */

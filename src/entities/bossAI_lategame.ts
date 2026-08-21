@@ -431,24 +431,27 @@ export class LightningOrb extends Entity {
       if (this.alpha >= 255) { this.dead = true; return; }
     }
     this.ai0++;
-    // 每 30t 掷 466（:30889-30917；单人=1 目标，CanHit 1×1 点对视线门）
+    // 每 30t 掷 466（:30889-30917：按槽序扫玩家，逐个过 <2000px + CanHit 1×1 点对
+    // 视线门后入列，满 5 即停——M11 索敌链：联机含访客代理，原版扫 Main.player[0..254]）
     if (this.ai0 % 30 === 0 && this.ai0 < 180) {
-      const p = game.player;
-      if (p && !p.dead) {
+      let thrown = 0;
+      for (const p of (game.candidatePlayers?.() ?? [game.player])) {
+        if (thrown >= 5) break;                           // :30905-30909 num778≥5 break
+        if (!p || p.dead) continue;
         const dist = Math.hypot(p.cx - this.cx, p.cy - this.cy);
-        if (dist < 2000
-          && canHit(game.world.store, this.cx, this.cy, 1, 1, p.cx, p.cy, 1, 1)) {
-          const v83x = p.cx - this.cx, v83y = p.cy - this.cy;
-          const seed = Math.floor(Math.random() * 100);      // Main.rand.Next(100)
-          // Normalize(v83.RotatedByRandom(0.785))×7（:30913-30914）
-          const [rvx, rvy] = rot(v83x, v83y, (Math.random() - 0.5) * 2 * 0.7853981852531433);
-          const d = Math.hypot(rvx, rvy) || 1;
-          const bolt = new LightningBoltProj(this.cx, this.cy,
-            (rvx / d) * 7, (rvy / d) * 7, 466, this.damage,
-            Math.atan2(v83y, v83x), seed);
-          (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities
-            .add(bolt, 'projectiles');
-        }
+        if (dist >= 2000) continue;
+        if (!canHit(game.world.store, this.cx, this.cy, 1, 1, p.cx, p.cy, 1, 1)) continue;
+        const v83x = p.cx - this.cx, v83y = p.cy - this.cy;
+        const seed = Math.floor(Math.random() * 100);      // Main.rand.Next(100)
+        // Normalize(v83.RotatedByRandom(0.785))×7（:30913-30914）
+        const [rvx, rvy] = rot(v83x, v83y, (Math.random() - 0.5) * 2 * 0.7853981852531433);
+        const d = Math.hypot(rvx, rvy) || 1;
+        const bolt = new LightningBoltProj(this.cx, this.cy,
+          (rvx / d) * 7, (rvy / d) * 7, 466, this.damage,
+          Math.atan2(v83y, v83x), seed);
+        (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities
+          .add(bolt, 'projectiles');
+        thrown++;
       }
     }
     game.addLightAt?.(this.cx, this.cy, 0.4, 0.85, 0.9);     // :30918

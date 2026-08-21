@@ -462,18 +462,29 @@ export class Bobber extends Entity {
       ctx.arc(0, 0, 4, 0, Math.PI * 2);
       ctx.fill();
     }
-    // 声呐药水（buff 122,Projectile.cs:19340-19346）：咬钩时浮标上方弹渔获名——
-    // 此前 sonarLabel 数据在而零消费（音效域 #19/钓鱼域 B19,2026-08-13 接）
+    // 声呐药水（buff 122,Projectile.cs:19340-19346 渔获 / :19354-19361 敌怪）：
+    // 咬钩时浮标上方弹渔获名/血月敌怪名——此前 sonarLabel 数据在而零消费
+    // （音效域 #19/钓鱼域 B19,2026-08-13 接；敌怪名 2026-08-21 复审 P3① 补）
     if (this.biteT > 0 && owner?.buffs.has(BuffType.Sonar)) {
-      const label = this.sonarLabel();
-      if (label) {
-        const m = /^vi_(\d+)_/.exec(label);
-        const vid = m ? +m[1] : 0;
-        const name = vid > 0 ? (Lang as unknown as { itemName?: (v: number) => string }).itemName?.(vid) : null;
-        ctx.fillStyle = '#9FD8FF';
+      let name: string | null = null;
+      if (this.catchEnemy > 0) {
+        name = Lang.npcName(this.catchEnemy);   // SonarAlert 弹 NPC 名（:19358）
+      } else {
+        const label = this.sonarLabel();
+        if (label) {
+          const m = /^vi_(\d+)_/.exec(label);
+          const vid = m ? +m[1] : 0;
+          name = vid > 0
+            ? (Lang as unknown as { itemName?: (v: number) => string }).itemName?.(vid) ?? null
+            : null;
+          if (!name) name = label;
+        }
+      }
+      if (name) {
+        ctx.fillStyle = this.catchEnemy > 0 ? '#C04040' : '#9FD8FF';   // 敌怪红名（同预掷尘色）
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(name ?? label, 0, -12);
+        ctx.fillText(name, 0, -12);
       }
     }
     ctx.restore();

@@ -186,6 +186,23 @@ export type DollPart = 'head' | 'body' | 'legs';
  *  腿照常走 legFrame 循环；行走时身体同步腿（:36184-36186 bodyFrame.Y=legFrame.Y））。
  *  rows 模式烘焙出 40×56 单帧（身体件取 body 行、腿件取 legs 行） */
 export interface DollRows { body: number; legs: number }
+/** 抚摸复合后臂（ItemCheck_ApplyHoldStyle :49499-49508 petting 分支）：
+ *  stretch = UpdateCompositeArm（PlayerDrawSet.cs:2210-2237）拉伸档帧行——
+ *  0=Full / 1=ThreeQuarters（petting 仅这两档，miscCounter%14/7 两相切换，
+ *  源格 = 复合网格列 8 后臂拉伸档，替代动画行后臂格）；
+ *  rot = SetCompositeArmBack 传入角 −2π·(小宠 0.2 / 大宠 0.3)（右向局部空间值
+ *  恒定——朝向镜像/重力翻转由消费方外层变换承担：原版 gravDir 取反 + XNA 翻转
+ *  与本仓 scale(facing,1)/scale(1,-1) 镜像合成等价，见渲染侧注释） */
+export interface DollPetArm { stretch: 0 | 1; rot: number }
+
+/** 抚摸后臂档位/角度解算（ItemCheck_ApplyHoldStyle :49499-49508）：
+ *  phase = pettingArmPhase（miscCounter%14/7 两相）→ 拉伸档行（UpdateCompositeArm
+ *  :49499 num3==1 才 Full → 行 0；反相映射），rot = −2π·(isPetSmall?0.2:0.3)。
+ *  纯函数供渲染与单测共用。 */
+export function petArmParams(phase: 0 | 1, isPetSmall: boolean): DollPetArm {
+  return { stretch: (1 - phase) as 0 | 1, rot: -Math.PI * 2 * (isPetSmall ? 0.2 : 0.3) };
+}
+
 /** 坐姿腿切片参数（DrawSittingLegs PlayerDrawLayers.cs:1585-1735 照抄） */
 export interface DollSitting {
   /** 腿甲槽位 id（特殊切片表按 legIndex 分档；0/-1=默认切片） */
@@ -256,13 +273,14 @@ function sittingSlicePlan(legIndex: number, skin: boolean, bodyIdx: number, sY: 
 export function compositePaperDoll(
   a: Appearance,
   equip?: { head?: number | null; body?: number | null; legs?: number | null },
-  opts?: { skipHair?: boolean; layer?: DollLayer; part?: DollPart; rows?: DollRows; sitting?: DollSitting },
+  opts?: { skipHair?: boolean; layer?: DollLayer; part?: DollPart; rows?: DollRows; sitting?: DollSitting; petArm?: DollPetArm },
 ): Baked | null {
   const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '')
     + (opts?.skipHair ? '|nohair' : '') + (opts?.layer ? `|L${opts.layer}` : '')
     + (opts?.part ? `|P${opts.part}` : '')
     + (opts?.rows ? `|R${opts.rows.body},${opts.rows.legs}` : '')
-    + (opts?.sitting ? `|S${opts.sitting.legIndex},${opts.sitting.seatYOffset},${opts.sitting.body}` : '');
+    + (opts?.sitting ? `|S${opts.sitting.legIndex},${opts.sitting.seatYOffset},${opts.sitting.body}` : '')
+    + (opts?.petArm ? `|pA${opts.petArm.stretch},${opts.petArm.rot.toFixed(4)}` : '');
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -365,6 +383,14 @@ export function compositePaperDoll(
   const female = !MALE_VARIANTS.includes(a.skinVariant);
   const dy = female ? 2 : 0;
   const under = a.undershirtColor, shirt = a.shirtColor;
+  // 抚摸复合后臂（petting）：后臂换列 8 拉伸档格（Full=行0/ThreeQuarters=行1，
+  // UpdateCompositeArm 帧覆写 PlayerDrawSet.cs:2210-2237）绕肩轴旋转——替代
+  // 动画行后臂格（compBackArmFrame 同格语义，DrawPlayer_12_SkinComposite_
+  // BackArmShirt :1317-1426 全层共用）。旋转轴 = bodyVect(20,28)+
+  // GetCompositeOffset_BackArm(6,2) = (26,30)（:4189-4192；position/origin 共
+  // 偏移相消 → 部件左上对齐帧锚，偏移仅是 pivot——见文件头勘误注）。
+  const pet = opts?.petArm ?? null;
+  const PET_ARM_PIVOT: readonly [number, number] = [26, 30];
   // 身甲（Armor/Armor_{id} 复合网格，与玩家复合通道同构；有身甲时替代全部衣着层）
   const bodyArmor = equip?.body ? UITextures.get(`Armor_Armor_${equip.body}.png`) : null;
   const bodyArmorImg = bodyArmor ? (bodyArmor.img as HTMLImageElement) : null;
@@ -378,19 +404,41 @@ export function compositePaperDoll(
     if (noArmor && bodyArmorImg) continue;       // skin 层身甲槽留空（甲覆盖语义）
     const torsoX = row === 5 ? 1 : 0;
     const arm = ARM_FRAME[row];
-    const drawTinted = (img: ImageBitmap | HTMLImageElement, x: number, y: number, color: { r: number; g: number; b: number }) => {
-      // 全部部件左上角对齐帧锚点(原版 position-origin 相消;臂偏移仅是旋转 pivot,见文件头)
+    const drawTinted = (img: ImageBitmap | HTMLImageElement, x: number, y: number, color: { r: number; g: number; b: number }, rot = 0) => {
+      if (rot === 0) {
+        // 全部部件左上角对齐帧锚点(原版 position-origin 相消;臂偏移仅是旋转 pivot,见文件头)
+        ctx.drawImage(tint(img, color), x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
+          0, i * FRAME_H, FRAME_W, FRAME_H);
+        return;
+      }
+      // 帧内绕肩轴旋转（源格左上仍对齐帧锚点，pivot 处于格内 (26,30)）
+      ctx.save();
+      ctx.translate(PET_ARM_PIVOT[0], i * FRAME_H + PET_ARM_PIVOT[1]);
+      ctx.rotate(rot);
       ctx.drawImage(tint(img, color), x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
-        0, i * FRAME_H, FRAME_W, FRAME_H);
+        -PET_ARM_PIVOT[0], -PET_ARM_PIVOT[1], FRAME_W, FRAME_H);
+      ctx.restore();
     };
-    const drawArmorCell = (img: ImageBitmap | HTMLImageElement, x: number, y: number) => {
+    const drawArmorCell = (img: ImageBitmap | HTMLImageElement, x: number, y: number, rot = 0) => {
+      if (rot === 0) {
+        ctx.drawImage(img, x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
+          0, i * FRAME_H, FRAME_W, FRAME_H);
+        return;
+      }
+      ctx.save();
+      ctx.translate(PET_ARM_PIVOT[0], i * FRAME_H + PET_ARM_PIVOT[1]);
+      ctx.rotate(rot);
       ctx.drawImage(img, x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
-        0, i * FRAME_H, FRAME_W, FRAME_H);
+        -PET_ARM_PIVOT[0], -PET_ARM_PIVOT[1], FRAME_W, FRAME_H);
+      ctx.restore();
     };
     if (bodyArmorImg) {
       // 身甲复合绘制（PlayerDrawLayers:1345-1366 同构）：后肩→后臂→躯干→前肩→前臂，不再画衣着层
       drawArmorCell(bodyArmorImg, 1, 1 + dy);                          // 后肩
-      drawArmorCell(bodyArmorImg, arm[0], arm[1] + 2);                 // 后臂
+      // 后臂：petting 换列 8 拉伸档 + 旋转（甲臂同格；甲下皮肤臂层为既有
+      // 静态臂同款省略——missingArm/missingHand 语义沿本仓甲覆盖口径，登记）
+      if (pet) drawArmorCell(bodyArmorImg, 8, pet.stretch, pet.rot);   // 后臂（抚摸）
+      else drawArmorCell(bodyArmorImg, arm[0], arm[1] + 2);            // 后臂
       drawArmorCell(bodyArmorImg, torsoX, dy);                         // 躯干
       drawArmorCell(bodyArmorImg, 0, 1 + dy);                          // 前肩
       drawArmorCell(bodyArmorImg, arm[0], arm[1]);                     // 前臂
@@ -401,12 +449,16 @@ export function compositePaperDoll(
     //   后臂层序 = 皮肤7→皮肤5→底衫8→衬衫13（:1385-1403）；
     //   前臂层序 = 皮肤7→底衫8→衬衫13→衬衫6（:3796-3803,第4层是 6 不是 5）；
     //   肩/躯干按层序:底衫4(后肩→躯干→前肩) → 衬衫6(同序)——对应原版 13/14 两个 pass
-    const draws = [
+    //   petting：后臂四层全换列 8 拉伸档格 + 同角旋转（z 位不变，层序照旧）
+    const petRot = pet ? pet.rot : 0;
+    const backArmX = pet ? 8 : arm[0];
+    const backArmY = pet ? pet.stretch : arm[1] + 2;
+    const draws: Array<{ d: ReturnType<typeof gridRect>; rot?: boolean }> = [
       { d: gridRect(3, torsoX, dy, a.skinColor) },                              // 躯干皮肤(:1280)
-      { d: gridRect(7, arm[0], arm[1] + 2, a.skinColor) },                      // 后臂皮肤 A
-      { d: gridRect(5, arm[0], arm[1] + 2, a.skinColor) },                      // 后臂皮肤 B
-      { d: gridRect(8, arm[0], arm[1] + 2, under) },                            // 后臂底衫
-      { d: gridRect(13, arm[0], arm[1] + 2, shirt) },                           // 后臂衬衫
+      { d: gridRect(7, backArmX, backArmY, a.skinColor), rot: !!pet },          // 后臂皮肤 A
+      { d: gridRect(5, backArmX, backArmY, a.skinColor), rot: !!pet },          // 后臂皮肤 B
+      { d: gridRect(8, backArmX, backArmY, under), rot: !!pet },                // 后臂底衫
+      { d: gridRect(13, backArmX, backArmY, shirt), rot: !!pet },               // 后臂衬衫
       { d: gridRect(4, 1, 1 + dy, under) },                                     // 后肩·底衫
       { d: gridRect(4, torsoX, dy, under) },                                    // 躯干·底衫
       { d: gridRect(4, 0, 1 + dy, under) },                                     // 前肩·底衫
@@ -418,10 +470,10 @@ export function compositePaperDoll(
       { d: gridRect(13, arm[0], arm[1], shirt) },                               // 前臂衬衫
       { d: gridRect(6, arm[0], arm[1], shirt) },                                // 前臂衬衫 B(:3803)
     ];
-    for (const { d } of draws) {
-      const img = sheetRect(a.skinVariant, d.sheet);
+    for (const e of draws) {
+      const img = sheetRect(a.skinVariant, e.d.sheet);
       if (!img) continue;
-      drawTinted(img, d.x, d.y, d.color);
+      drawTinted(img, e.d.x, e.d.y, e.d.color, e.rot ? petRot : 0);
     }
   }
 

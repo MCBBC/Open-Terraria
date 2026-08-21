@@ -918,14 +918,18 @@ export class MartianDeathray extends Entity {
       this.dead = true; return;
     }
     if (src.vanillaId === 395 && !(src.ai3 % 120 >= 60 && src.ai0 === 2)) { this.dead = true; return; }
-    const p = game.player;
-    if (!p || p.dead) { this.dead = true; return; }   // timeLeft 240 兜底简化
     if (++this.age > 240) { this.dead = true; return; }
-    // :29726-29758 束高：y = 锚 cy+46，向下扫 ≤150 格找首个实心格
+    // :29726-29758 束高：y = 锚 cy+46，向下扫 ≤150 格找首个实心格。
+    // 束底 num652 = 目标玩家盒底（:29733-29740）：目标 = 锚 395 的索敌目标
+    // （M11 链 anchor.targetRef；392 电报走母舰槽 target——本仓 392.master=母舰）。
+    // 目标亡/缺 → 束底回落锚 Y+46（endY=startY；原版此处无 Kill 门——旧"玩家亡
+    // 即杀"系已登记简化，随本索敌批一并退役，240t 寿限仍兜底）
     const st = game.world.store;
     const colX = Math.floor(src.cx / 16);
     const startY = Math.floor((src.cy + 46) / 16);
-    const endY = Math.floor(p.y + p.h);   // num652 = 目标盒底（:29733-29740）
+    const anchor = src.vanillaId === 392 && src.master && !src.master.dead ? src.master : src;
+    const tp: Player | null = anchor.targetRef?.(game) ?? game.player;
+    const endY = tp && !tp.dead ? Math.floor(tp.y + tp.h) : startY;   // num652 = 目标盒底
     let span = 0;
     if (startY >= endY && st.isSolid(colX, startY)) {
       span = 1;
@@ -944,7 +948,10 @@ export class MartianDeathray extends Entity {
         { life: 18, grav: 0, size: 3 });
     }
     // 接触伤害（hostile 447 伤害链简化为玩家盒重叠每 6t 一跳）
-    if (this.age % 6 === 0
+    // ★victim-settles：恒查本地玩家（damagePlayer 只结算本地血）——与上方束底的
+    // 索敌目标分离（Projectile.Damage :12330 逐玩家结算的本地半边）
+    const p = game.player;
+    if (this.age % 6 === 0 && p && !p.dead
       && p.x < this.x + this.w && p.x + p.w > this.x
       && p.y < this.y + this.h && p.y + p.h > this.y) {
       (game as unknown as { damagePlayer(d: number, x: number, y: number, kx?: number): void })

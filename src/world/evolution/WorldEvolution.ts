@@ -850,10 +850,15 @@ export class WorldEvolution {
    *  （溶液弹 size 2/3、三瓶水 size 4）全走本入口 */
   convertArea(i: number, j: number, conversionType: number, size: number,
     tiles = true, walls = true): void {
+    const st = this.host.store;
     if (!tiles && !walls) return;
     for (let k = i - size; k <= i + size; k++) {
       for (let l = j - size; l <= j + size; l++) {
-        if (this.host.store.inBounds(k, l) && Math.abs(k - i) + Math.abs(l - j) < 6) {
+        // InWorld(k,l,1)（WorldGen.cs:9635-9643：fluff=1 → x/y ∈ [1, max-2]，留 1 格
+        // 世界边框）+ 菱形门 <6。本仓 inBounds 是 0 边框——曾多转最外 1 圈
+        // （2026-08-21 复审 P3④，WorldGen.cs:55108 原文照抄）
+        if (k >= 1 && k < st.w - 1 && l >= 1 && l < st.h - 1
+          && Math.abs(k - i) + Math.abs(l - j) < 6) {
           this.convert(k, l, conversionType, tiles, walls);
         }
       }
@@ -894,7 +899,9 @@ export class WorldEvolution {
 
   convert(i: number, j: number, conversionType: number, tiles = true, walls = true): void {
     const st = this.host.store;
-    if (!st.inBounds(i, j) || (!tiles && !walls)) return;
+    // InWorld(i,j,1)（cs:55117 与 convertArea 同款 1 格边框门——直调路径
+    // （applyPowder/spreadGrass 草转）也过此门；曾用 0 边框 inBounds，2026-08-21 P3④）
+    if (i < 1 || i >= st.w - 1 || j < 1 || j >= st.h - 1 || (!tiles && !walls)) return;
     const ti = this.at(i, j);
     const wall = st.wall[ti];
     const act = st.flags[ti] !== 0;
@@ -1081,7 +1088,9 @@ export class WorldEvolution {
             else if (WALL_CONV_NEW4.has(wall) && wall !== 215) convWall(215);
             else if (wall === 80) {
               // 蘑菇墙深度带（cs:55638-55652）：地表带/深岩带以下 → 土墙 15，
-              // 中段 → 草墙 64（genRand.Next(3) → Math.random 取整）
+              // 中段 → 草墙 64（genRand.Next(3) → Math.random 取整；运行时演化链
+              // 无种子契约（世界生成 genRand 不进运行时），行为等价保持不改——
+              // 2026-08-21 复审 P3④ 登记项）
               const h = st.h;
               if (j < this.host.worldSurface + 4 + Math.floor(Math.random() * 3)
                 || j > (h + this.host.rockLevel) / 2 - 3 + Math.floor(Math.random() * 3)) convWall(15);

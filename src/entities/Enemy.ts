@@ -636,13 +636,25 @@ export class Enemy extends Entity {
       const dyC = fx.cy - s.cy;
       const dist = Math.hypot(dxC, dyC);
       if (dist > 0.01) {
-        // :52296-52299：621-623 链距恒 24（非 width 28）；:52271 起始 num64=width
-        const isEel = s.vanillaId !== null && s.vanillaId >= 621 && s.vanillaId <= 623;
-        const linkDist = isEel ? 24 : s.w;
+        // 链距覆写表（NPC.cs:52279-52303，num64 以【段自身】type/width 判定——本循环
+        // 的 s 即原版跑该段的 NPC）：87-92 飞龙→42（:52280-52283）、454-459 幻影龙→36
+        // （:52284-52287）、513-515 墓穴爬虫→w−6（:52288-52291）、621-623 血鳗鱼→24
+        // （:52296-52299）；412-414 爬尾虫→w+6 在专属核 crawltipedeAI（bossAI_lunar_misc，
+        // :52292-52295）；getGoodWorld 13-15 EoW→62 在 eowAI（:52300-52303）；其余族 =
+        // 段自身 width（:52279）。曾只补 621-623，其余族误用 s.w（2026-08-21 复审 P3②）
+        const vid = s.vanillaId ?? 0;
+        let linkDist = s.w;
+        if (vid >= 87 && vid <= 92) linkDist = 42;
+        else if (vid >= 454 && vid <= 459) linkDist = 36;
+        else if (vid >= 513 && vid <= 515) linkDist -= 6;
+        else if (vid >= 621 && vid <= 623) linkDist = 24;
         const shrink = (dist - linkDist) / dist;
         s.x += dxC * shrink;
         s.y += dyC * shrink;
-        s.facing = dxC < 0 ? 1 : -1;         // 原版 spriteDirection（L52305）
+        // spriteDirection 仅 87-92/454-459/621-623 三族在此块翻转（:52310-52320，
+        // num49<0→1 / >0→-1）；本仓 aiStyle6 段渲染走 rotationDriven（Renderer 通用
+        // 镜像门跳过 facing）故对渲染惰性——保留全族写值，不改变现有观感
+        s.facing = dxC < 0 ? 1 : -1;
       }
       // 段旋转 = 指向前一段的方向（= 本段行进切向，与原版段速度角等价）
       if (dist > 0.01) s.visAngle = Math.atan2(dyC, dxC) + Math.PI * 0.5;

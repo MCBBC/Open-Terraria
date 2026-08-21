@@ -12,6 +12,12 @@ const F = fontJson as unknown as {
     characters: number[]; kerning: Array<[number, number, number]>;
   };
   Combat_Crit: { lineSpacing: number; characters: number[]; kerning: Array<[number, number, number]> };
+  Item_Stack: {
+    lineSpacing: number; spacing: number; defaultCharacter: number; texture: string;
+    glyphs: Array<{ x: number; y: number; width: number; height: number }>;
+    padding: Array<{ x: number; y: number; width: number; height: number }>;
+    characters: number[]; kerning: Array<[number, number, number]>;
+  };
 };
 
 describe('飘字位图字体资产（Combat_Text/Combat_Crit p22）', () => {
@@ -53,5 +59,47 @@ describe('飘字位图字体资产（Combat_Text/Combat_Crit p22）', () => {
     expect(a.w).toBeGreaterThan(5);
     expect(b.w).toBeGreaterThan(a.w);
     expect(combatMeasure('88', true).w).toBeGreaterThanOrEqual(combatMeasure('88', false).w); // crit ≥ 普通(个别字形同宽)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Item_Stack（FontAssets.ItemStack,AssetInitializer.cs:110）——Boss 血条数值文本
+// （BigProgressBarHelper.DrawHealthText）用;p0 页 (0,0,240,104) 裁片,数字+"/" 11 字形
+// ---------------------------------------------------------------------------
+describe('Item_Stack 位图字体（Boss 血条数值文本）', () => {
+  it('字符集 = "/"+0-9（DrawHealthText 三段串的完整字符面）;行盒 24', () => {
+    const f = F.Item_Stack;
+    expect(f.characters).toEqual([47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57]);
+    expect(f.lineSpacing).toBe(24);
+    expect(f.texture).toBe('vanilla/Item_Stack_p0.png');
+    expect(f.glyphs.length).toBe(11);
+    expect(f.kerning.length).toBe(11);
+    expect(f.padding.length).toBe(11);
+  });
+  it('字形矩形在 240×104 裁片内（p0 坐标原样保留,裁自 (0,0)）', () => {
+    for (const g of F.Item_Stack.glyphs) {
+      expect(g.x + g.width).toBeLessThanOrEqual(240);
+      expect(g.y + g.height).toBeLessThanOrEqual(104);
+      expect(g.width).toBeGreaterThan(0);
+      expect(g.height).toBeGreaterThanOrEqual(10);   // 数字 10-15px、'/' 14px
+      expect(g.height).toBeLessThanOrEqual(15);
+    }
+  });
+  it('itemStackMeasure:XNA 语义逐值（advance=l+w+r+spacing;缺字 8px 兜底）', async () => {
+    const { itemStackMeasure } = await import('../src/render/CombatTextFont');
+    expect(itemStackMeasure('1')).toEqual({ w: 5, h: 24 });          // kerning [1,3,1]
+    expect(itemStackMeasure('/')).toEqual({ w: 7, h: 24 });          // [0,7,0]
+    expect(itemStackMeasure('100')).toEqual({ w: 23, h: 24 });       // '1'5+'0'9+'0'9 逐字符 l+w+r
+    expect(itemStackMeasure('7').w).toBe(7);                          // '7' kerning [-1,8,0]——负左跨距为原版真值
+    expect(itemStackMeasure('A').w).toBe(8);                          // 字符集外兜底
+  });
+  it('drawItemStackBorderString:字体未就绪静默返回（node 无 Image;浏览器像素验证走探针）', async () => {
+    const { drawItemStackBorderString, itemStackFontReady } = await import('../src/render/CombatTextFont');
+    expect(itemStackFontReady()).toBe(false);
+    const stub = {
+      save: () => {}, restore: () => {}, drawImage: () => {},
+      set imageSmoothingEnabled(_v: boolean) {},
+    } as unknown as CanvasRenderingContext2D;
+    expect(() => drawItemStackBorderString(stub, '123', 100, 50, 0, 0)).not.toThrow();
   });
 });
