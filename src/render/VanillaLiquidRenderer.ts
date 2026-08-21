@@ -663,6 +663,35 @@ export function drawVanillaLiquids(
     }
   }
 
+  // ---- 斜面格水体覆盖增强（2026-08-21 用户定案"做得更好"+双重绘制）----
+  // 原版：斜面格实心无液 → 不画前景水 → 角色站斜面上时身体与斜切三角区重叠的
+  // 部分无水色罩。用户定案增强：邻水的斜面格画水色覆盖，与正常水体同款【双 pass】：
+  //   背景 pass（isBackground=true）→ 不透明 1.0（= 正常水体的背景层）
+  //   前景 pass（isBackground=false）→ DEFAULT_OPACITY[0] = 0.6（= 正常水体前景层）
+  // 双层叠加后斜面斜切区的水色浓度与周围正常水体一致。形状 = LiquidSlope 斜面表。
+  {
+    const slopeTex = atlas.ensureVImage(liquidSlopeSheet(1, waterStyle));
+    if (slopeTex && slopeTex.width > 0) {
+      for (let lx = PAD; lx < pw - PAD; lx++) {
+        const x = px0 + lx;
+        for (let ly = PAD; ly < ph - PAD; ly++) {
+          const y = py0 + ly;
+          const i = at(lx, ly);
+          if (!isSolidA[i] || hasLiquidA[i]) continue;
+          const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
+          if (!hasLiquidA[ui] && !hasLiquidA[di] && !hasLiquidA[li] && !hasLiquidA[ri]) continue;
+          const slope = st.slope[i];
+          if (slope < 1 || slope > 4) continue;
+          const sx = 18 * (slope - 1);
+          // 背景 pass 不透明 / 前景 pass 0.6——与正常水体双层结构一致
+          ctx.globalAlpha = isBackground ? 1 : (DEFAULT_OPACITY[0] ?? 0.6);
+          ctx.drawImage(slopeTex, sx, 0, 16, 16, x * 16, y * 16, 16, 16);
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
   // ---- 浸润 pass：DrawTile_LiquidBehindTile(TileDrawing.cs:3859-4193) ----
   // 对每个【实心方块格】，检查四邻是否有液体 → 在方块格内画一条液体带
   // （背景 pass，不透明）。方块贴图画在其上——透明圆角像素透出液体色而不是墙色/背景色。

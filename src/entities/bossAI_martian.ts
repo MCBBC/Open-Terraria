@@ -24,7 +24,7 @@ import type { Player } from './Player';
 import { TILE, ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
-import { getAttackDamageForProjectiles } from '../stats/ScaleStats';
+import { getAttackDamageForProjectiles, hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import { Arrow } from './Arrow';
 import { canStartInvasion, startInvasion, INVASION_MARTIAN } from '../world/Invasion';
 import { dutchmanCannonAI } from './bossAI_dd2';
@@ -954,8 +954,17 @@ export class MartianDeathray extends Entity {
     if (this.age % 6 === 0 && p && !p.dead
       && p.x < this.x + this.w && p.x + p.w > this.x
       && p.y < this.y + this.h && p.y + p.h > this.y) {
-      (game as unknown as { damagePlayer(d: number, x: number, y: number, kx?: number): void })
-        .damagePlayer(this.dmg, this.cx, this.cy, Math.sign(p.cx - this.cx));
+      // ★第 4 参是 attacker(Enemy) 非 kx——曾按过时签名传 Math.sign(...)（±1 truthy
+      //  数字）→ damagePlayer 内 attacker.def.name 读 Number.prototype.def=undefined
+      //  崩帧停机（2026-08-21 火星飞碟光柱战报障）。击退方向由 damagePlayer 内部
+      //  按 srcX/srcY 自算,此处无需传。
+      // ★伤害过 Damage_EVP 链（Projectile.cs:13770-13781，与 projTargets.hitPlayer/
+      //  Dart 同式）：难度乘区（旅程0.5/经典1/专家2/大师3）× 通用敌弹 ×2——
+      //  生成侧 50/80 是基础值（:36148 GetAttackDamage_ForProjectiles(50,50)/
+      //  :36666 num1195=80），曾裸传=经典半伤/专家四分之一伤
+      game.damagePlayer(
+        hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2,
+        this.cx, this.cy);
     }
   }
 

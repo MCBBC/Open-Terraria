@@ -1390,9 +1390,18 @@ export function runVinesPass(st: TileStore, rng: RNG, gs: GenState): void {
           }
           if (ok && countNearBlocksTypes(st, i, k, 20, 444) > 0) ok = false;
           if (ok) {
+            // ★DDDDDD 批（2026-08-21）序修正：原版=先整组 KillTile×4（cs:20468-73）
+            //   后整组写 444（cs:20474-84）两段循环——曾逐格 kill→place 交错，令
+            //   killTile 尾 SquareTileFrame 级联访到【刚放置的半组】→ CheckSuper(444)
+            //   完整性破整组误杀（引擎补 444 臂后显形：9293480 #89 T444>0×108，
+            //   12345 同族）。级联语义与原版一致，唯时序须同相。
             for (let a = i; a < i + 2; a++) {
               for (let b = k + 1; b < k + 3; b++) {
                 killTileVineCascade(st, rng, a, b);
+              }
+            }
+            for (let a = i; a < i + 2; a++) {
+              for (let b = k + 1; b < k + 3; b++) {
                 st.setTileSilent(a, b, HIVE, (a - i) * 18, (b - k - 1) * 18);
               }
             }

@@ -368,6 +368,7 @@ function killStalactiteTile(
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (!st.flags[i]) return;
+  (globalThis as { __swKillCap?: (x: number, y: number, sheet: number) => void }).__swKillCap?.(x, y, 165);
   st.flags[i] = 0; st.half[i] = 0;
   st.frameX[i] = 65535; st.frameY[i] = 65535;  // -1（Uint16 环回；inactive 格不读帧）
   st.type[i] = 0;

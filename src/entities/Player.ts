@@ -1706,17 +1706,43 @@ export class Player extends Entity {
     if (this.manaRegenCount < 0) this.manaRegenCount = 0;  // :25686-25688
     if (this.mana > smm) this.mana = smm;                  // :25690-25693
 
-    // 液体检测：身体采样在脚底上方固定 4px（贴脚即入水，不随身高缩放）
-    const liq = world.store.liquid[world.store.idx(
-      Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE),
-    )];
+    // 液体检测：WetCollision(Collision.cs:1575-1650) AABB 语义 1:1——
+    // 身体中心下半盒(±10,±h/2)与液体盒相交 = wet;液面高度参与判定
+    // (liquid 255→液面=格顶,液少→液面下沉)。★曾用"脚底上方 4px 单点采样":
+    // 水下走坡/半砖时 y 随地形抬 1-2px → 采样点跳出水面 → inWater 翻转 →
+    // 误触发出/入水音效+粒子(用户实报"水下走动出现水花")
     const wasInWater = this.inWater;
-    // wet 判定排除岩浆与微光（Collision.cs:1418 WetCollision 只认 !lava && !shimmer；
-    // 本仓编码 1水/2岩浆/3蜜/4微光——岩浆里不能"游泳"）
-    this.inWater = liq > 100 && (world.store.liquidType[
-      world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE))] === 1
-      || world.store.liquidType[
-        world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE))] === 3);
+    {
+      const bodyTop = this.y + this.h / 2;               // 身体中心(Collision.cs:1577)
+      const bodyBot = this.y + this.h;                   // 下半盒底
+      const bodyL = this.cx - 10, bodyR = this.cx + 10;  // num=10(:1579)
+      const ty0 = Math.max(0, Math.floor(this.y / TILE) - 1);
+      const ty1 = Math.min(world.store.h - 40, Math.floor((this.y + this.h) / TILE) + 2);
+      const tx0 = Math.max(0, Math.floor(this.cx / TILE) - 2);
+      const tx1 = Math.min(world.store.w - 1, Math.floor(this.cx / TILE) + 2);
+      let wet = false, honey = false;
+      for (let ty = ty0; ty <= ty1 && !wet; ty++) {
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const ti = world.store.idx(tx, ty);
+          const lq = world.store.liquid[ti];
+          if (lq <= 0) continue;
+          // 液面高度(:1594-1597):num5=(256-liquid)/32 → 液面下沉 2px/档
+          const drop = ((256 - lq) / 32) * 2;
+          const surfaceY = ty * TILE + drop;
+          const boxH = TILE - drop;
+          // AABB 相交(:1600-1602):身体下半盒 vs 液体盒
+          if (bodyR > tx * TILE && bodyL < tx * TILE + TILE
+            && bodyBot > surfaceY && bodyTop < surfaceY + boxH) {
+            wet = true;
+            if (world.store.liquidType[ti] === 3) honey = true;
+            break;
+          }
+        }
+      }
+      // :1418 wet 只认 !lava && !shimmer(蜜算 wet);岩浆里不能"游泳"
+      this.inWater = wet && !this.inLava;
+      this.inHoney = honey;
+    }
     // 入水/出水瞬间：水花尘 + 水花声（Player.cs:27464-27636,2026-08-20 补齐——
     // 曾只播入水声、零粒子=用户报"入水出水效果非常轻微且出水几乎没有"）
     // 原版两方向都出 50 颗 dustWater 尘(水样=33,岩浆样=35,微光=308,蜜=152)+
@@ -1764,7 +1790,8 @@ export class Player extends Entity {
     // 非 world.lavaLine（本仓岩浆线 ≈(rockLayer+h)/2 生成参数，比 h-200 浅 ~170 格，
     // 误用会提前关闭地狱层门）
     const underworldLayer = world.h - 200;
-    this.inShimmer = world.store.liquidType[centerIdx] === 4 && liq > 30;
+    this.inShimmer = world.store.liquidType[centerIdx] === 4
+      && world.store.liquid[centerIdx] > 30;
     // 授予采样（:27426-27433）与 shimmerWet 盒判定不同位：外门 = Collision.shimmer
     // 盒命中（inShimmer 近似），内采样另取【顶格】(Center.X/16, (position.Y+1)/16) 的
     // shimmer() 旗标——该旗标只看液体类型不看液量（同句 liquid>=0 恒真），浅浸即授予；

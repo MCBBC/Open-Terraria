@@ -397,7 +397,7 @@ import { runOceanCavesPass, runUnderwaterChestsPass } from './vanilla/OceanCaves
 import { runHellforgesPass } from './vanilla/HellforgesPass';
 import { runCorruptionPass, runAltarsPass } from './vanilla/CorruptionPass';
 import { runSandPatchesPass, runTunnelsPass, runDirtWallBgPass, runSmallHolesPass } from './vanilla/MissingCavesPass';
-import { settleWorldLiquids } from '../liquid/settle';
+import { settleWorldLiquids, finalGenMergeScan } from '../liquid/settle';
 import vanillaJson from '../../../public/sprites/vanilla.json';
 import { runUndergroundJungleTreesPass } from './vanilla/UndergroundJungleTreesPass';
 import { runQuickCleanupPass } from './vanilla/QuickCleanupPass';
@@ -1101,6 +1101,10 @@ function brokenTrapCleanupPass({ store, rng, world }: GenCtx) {
 
 function finalCleanupPass({ store, rng, world }: GenCtx) {
   runFinalCleanupPass(store, ctxGs[0]!, rng);
+  // ★DDDDDD 批（2026-08-21）归位：原版 FinalCleanup pass 体末的全图 LiquidCheck
+  // (createMergeTilesDuringGen:true)（cs:22639-50，ShimmerCleanUp 之后）——曾挂在
+  // #49/#97 沉降尾（settle.ts，时点早 8 pass）。终清理槽直调，掷骰走 pass 链流。
+  finalGenMergeScan(store, rng);
   // KKKK 移交（2026-08-18，IIII 批落地）：槽 101 v_383 活红木等后至写入可覆写已
   // 登记树的冠格（vanilla SkipTiles={21,467,226,237} 不含树干=原版语义覆写，tile
   // 侧无债）——管线尾修剪幽灵登记（冠格失活/非树族即出表），防运行期砍伐判定/

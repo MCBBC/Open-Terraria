@@ -129,9 +129,28 @@ export async function settleWorldLiquids(
   //   （#49 残差 L=47 根因：丛林活木 191 河床水池被尾部 WC 清空，vanilla 末态保留
   //   238/255——x86 对拍实证）
   if (mode === 'load') sim.waterCheck();
-  // 生成收尾：全图 LiquidCheck(createMergeTilesDuringGen:true)（WorldGen.cs:22639-22650）
-  // ——生成/读档期常规交互只做类型 strip 不落块，唯独这一次允许残余接触结块
-  if (mode === 'gen') sim.finalGenMergeCheck();
+  // ★DDDDDD 批（2026-08-21）归位：全图 LiquidCheck(createMergeTilesDuringGen:true)
+  //   （WorldGen.cs:22639-50）原版挂在 **FinalCleanup pass 体末**（cs:22304 委托内、
+  //   ShimmerCleanUp 之后）——曾挂在 #49/#97 沉降尾（时点早 8 pass，"管线无终 pass"
+  //   时代的备案；金标四链该域两侧均零接触故隐身）。现由 WorldGen 终清理槽直调
+  //   finalGenMergeScan()，settle 本体恢复 #49/#97 strip-only 原版口径。
   sim.dispose();
   onProgress?.(1);
+}
+
+/** 生成收尾全图 LiquidCheck(createMergeTilesDuringGen:true)（WorldGen.cs:22639-50，
+ *  FinalCleanup pass 体末、ShimmerCleanUp 之后）——DDDDDD 批从 settleWorldLiquids
+ *  尾归位到本独立入口，由 WorldGen 终清理槽在 runFinalCleanupPass 之后直调。
+ *  sim 装配口径=settle 尾态：gen-solid 覆写注入（LUT 同步）+ wg 窗关（#97 已恢复）
+ *  + isGeneratingOrLoadingWorld/generatingWorld 置位（createMergeTile 落块分支）。
+ *  ★收 store 参（LiquidSim 全程只读 world.store——探针基座重放路径无 World 壳）。 */
+export function finalGenMergeScan(store: World['store'], rng?: RNG): void {
+  const sim = new LiquidSim({ store } as World);
+  if (rng) sim.passRand = (max) => rng.nextInt(max);
+  sim.passRng = rng ?? null;
+  sim.isGeneratingOrLoadingWorld = true;
+  sim.generatingWorld = true;
+  sim.applyGenSolidOverrides(snapshotGenSolid());
+  sim.finalGenMergeCheck();
+  sim.dispose();
 }

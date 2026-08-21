@@ -23,7 +23,7 @@ import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
-import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { hostileProjectileDamage, mainDifficulty, mainExpertMode } from '../stats/ScaleStats';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
 import { projSprite, projFrameCount, volleyPhantomOrbs } from './Arrow';
 import { GorePiece } from './GorePiece';
@@ -803,7 +803,18 @@ export class DukeSharknadoTornado extends Entity {
       if (Math.abs(p.cx - this.cx) < halfW + p.w / 2 && Math.abs(p.cy - (colTop + colH / 2)) < colH / 2 + p.h / 2) {
         // 弹幕命中：attacker 仅做死亡归因，contactOnly 缺省 false → 荆棘不反伤
         // （反伤只在 NPC 接触分支 Player.cs:30910-30944）
-        game.damagePlayer(this.big ? 160 : 80, this.cx, this.cy, this.src);
+        // ★伤害链定谳（2026-08-21）：龙卷由 SharknadoBolt 385 Kill 弹生弹
+        //  （Projectile.cs :4919 段）——基础值生成处难度分支：小 384 =
+        //  expertMode?25:40、大 386 = expertMode?50:80；命中走 Damage_EVP
+        //  （:13770-13781）= hostileProjectileDamage 乘区（旅程0.5/经典1/专家2/
+        //  大师3）× 通用敌弹 ×2 → 旅程 40/80、经典 80/160、专家 100/200、
+        //  大师 150/300。曾烤死经典终值 80/160 = 专家/大师低伤、旅程双倍伤
+        const base = this.big
+          ? (mainExpertMode(game.world) ? 50 : 80)
+          : (mainExpertMode(game.world) ? 25 : 40);
+        game.damagePlayer(
+          hostileProjectileDamage(base, mainDifficulty(game.world)) * 2,
+          this.cx, this.cy, this.src);
       }
     }
   }

@@ -105,6 +105,8 @@ export interface SceneFlags {
   zoneDesert: boolean;
   /** 精确计数（SceneMetrics L604-665：视区扫描聚合计数，天气渲染/沙尘门用） */
   snowTileCount: number;
+  /** JungleTileCount（:613 同源 zone 扫描；地下背景雪/丛林让位判定 :53476 用） */
+  jungleTileCount: number;
   desertSandTileCount: number;
   /** 沙尘暴四色权重（EmitDust :171-178）：[普通沙,黑檀沙,猩红沙,珍珠沙] 扫描窗格数 */
   sandColorWeights: [number, number, number, number];
@@ -191,7 +193,7 @@ export const EMPTY_SCENE: SceneFlags = {
   zoneSkyHeight: false, zoneOverworldHeight: false, zoneDirtLayerHeight: false,
   zoneRockLayerHeight: false, zoneUnderworldHeight: false,
   zoneCorrupt: false, zoneCrimson: false, zoneHallow: false, zoneJungle: false,
-  zoneSnow: false, zoneDesert: false, snowTileCount: 0, desertSandTileCount: 0, graveyardTileCount: 0,
+  zoneSnow: false, zoneDesert: false, snowTileCount: 0, jungleTileCount: 0, desertSandTileCount: 0, graveyardTileCount: 0,
   sandColorWeights: [0, 0, 0, 0],
   zoneGlowshroom: false, zoneMeteor: false,
   zoneGraveyard: false, zoneShadowCandle: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
@@ -387,6 +389,7 @@ export function scanScene(
     zoneSnow: snow >= SNOW_THRESHOLD,
     zoneDesert,
     snowTileCount: snow,
+    jungleTileCount: jungle,
     desertSandTileCount: desert, // DesertSandTileCount = max(0, SandTileCount - OceanSandTileCount)（L665，
     // EmitDust 四色权重（:171-178 按【格数】非区旗——曾用 zone 旗近似）
     sandColorWeights: SAND_COLORS.map(([ , sheets]) => countSet(counts, ids(sheets))) as [number, number, number, number],

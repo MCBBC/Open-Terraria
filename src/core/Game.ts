@@ -18776,7 +18776,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy, contactOnly = false, pvp = false): number {
     const p = this.player;
     if (p.dead) return 0;
-    if (attacker) p.lastDamageCause = { kind: 'npc', name: (attacker.vanillaId != null ? Lang.npcName(attacker.vanillaId) : null) ?? attacker.def.name };
+    // 死因归因（装饰性信息）：attacker.def?.name 防御——曾有过时签名调用方把
+    // kx 数字传进 attacker 位（bossAI_martian 光柱），def 读 Number.prototype=undefined
+    // 直接崩帧停机；归因失败降级为无名死因,不值得停机（2026-08-21）
+    if (attacker) p.lastDamageCause = { kind: 'npc', name: (attacker.vanillaId != null ? Lang.npcName(attacker.vanillaId) : null) ?? attacker.def?.name ?? '' };
     // 旗 buff 接触减伤（Player.cs:30930-30933 GetBannerBuffEffect:经典 ×0.75/专家 ×0.5）
     if (attacker && attacker.vanillaId != null && contactOnly && this.bannerNpcActive(attacker.vanillaId)) {
       dmg = Math.max(1, Math.round(dmg * bannerReceivedMult(mainExpertMode(this.world))));

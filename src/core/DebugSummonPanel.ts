@@ -59,6 +59,20 @@ export function filterSummonEntries(
   return hit.slice(0, limit);
 }
 
+/** 显示名重名集（面板消歧用）：本地化名在【全量表】上被 >1 个 id 共享的集合。
+ *  原版本地化真实重名（zh：22 种僵尸变体全叫"僵尸"、10 稻草人/9 蝾螈…共 80 组）
+ *  ——面板每 id 一行,重名行视觉上即"重复项";命中行渲染时追加英文变体名消歧。 */
+export function summonCollidingNames(nameOf: (id: number) => string): Set<string> {
+  const counts = new Map<string, number>();
+  for (const e of SUMMON_ENTRIES) {
+    const n = nameOf(e.id) || e.name;
+    counts.set(n, (counts.get(n) ?? 0) + 1);
+  }
+  const out = new Set<string>();
+  for (const [n, c] of counts) if (c > 1) out.add(n);
+  return out;
+}
+
 export interface DebugSummonPanelHooks {
   /** 生成动作（Game.debugSpawnNpc）；返回错误文案或 null=成功 */
   spawn: (id: number, count: number, atMouse: boolean) => string | null;
@@ -182,6 +196,8 @@ export class DebugSummonPanel {
   private render(): void {
     if (!this.listEl) return;
     const rows = filterSummonEntries(this.query, 240, (id) => this.hooks.nameOf(id));
+    // 重名消歧集（全量表口径,与过滤无关——同一名字不管搜不搜都带后缀,行身份稳定）
+    const colliding = summonCollidingNames((id) => this.hooks.nameOf(id));
     this.listEl.innerHTML = '';
     for (const e of rows) {
       const row = document.createElement('div');
@@ -189,9 +205,12 @@ export class DebugSummonPanel {
       row.addEventListener('mouseenter', () => { row.style.cssText += ROW_HOVER; });
       row.addEventListener('mouseleave', () => { row.style.cssText = row.style.cssText.replace(ROW_HOVER, ''); });
       const disp = this.hooks.nameOf(e.id) || e.name;
+      // 原版本地化重名族（22 僵尸/10 稻草人/9 蝾螈…共 80 组）：追加英文变体名消歧
+      const ambig = colliding.has(disp) && e.name !== disp
+        ? `<span style="color:#667;flex:none;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${e.name}</span>` : '';
       row.innerHTML =
         `<span style="color:#789;min-width:34px;text-align:right;">${e.id}</span>` +
-        `<span style="flex:1;color:${e.town ? '#8CF' : e.critter ? '#8D8' : '#EEE'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${disp}</span>` +
+        `<span style="flex:1;color:${e.town ? '#8CF' : e.critter ? '#8D8' : '#EEE'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${disp}</span>` + ambig +
         (e.boss ? '<span style="color:#F66;">BOSS</span>' : '') +
         (e.town ? '<span style="color:#8CF;">镇</span>' : '') +
         (e.critter ? '<span style="color:#8D8;">宠</span>' : '');

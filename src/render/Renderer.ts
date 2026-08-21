@@ -10833,12 +10833,18 @@ export class Renderer {
       const gx = (mg.x - sx) / lwDev * w2;
       const gy = (mg.y - sy) / lhDev * h2;
       const gr = Math.max(4, mg.r / lwDev * w2);
-      if (gx > -gr * 2.2 && gy > -gr * 2.2 && gx < w2 + gr * 2.2 && gy < h2 + gr * 2.2) {
-        const halo = lc.createRadialGradient(gx, gy, gr, gx, gy, gr * 2.2);
+      // ★halo 只保月盘本体(2026-08-21 方片异常修复):曾外圈 2.2gr 大晕——渐变带
+      //   α<255 像素经 multiply 的 PDF 混合产生洗色+α 膨胀,视觉边界停在 α≈0 处
+      //   = 巨大半透明"方片"(fillRect 方形边界,用户两份报告逐像素实证:光图
+      //   19.9..72.7 → 屏幕 227..835 吻合)。收窄到月盘内+渐变带 ≤1.5 光图px
+      //   (拉伸后亚屏幕像素),硬边不可见;月光【照明】本来就走 skySeed 全场分量,
+      //   局部大晕是自造语义,砍掉无回归。
+      if (gx > -gr * 1.2 && gy > -gr * 1.2 && gx < w2 + gr * 1.2 && gy < h2 + gr * 1.2) {
+        const halo = lc.createRadialGradient(gx, gy, gr * 0.55, gx, gy, gr * 1.05);
         halo.addColorStop(0, 'rgba(255,255,255,1)');
         halo.addColorStop(1, 'rgba(255,255,255,0)');
         lc.fillStyle = halo;
-        lc.fillRect(gx - gr * 2.2, gy - gr * 2.2, gr * 4.4, gr * 4.4);
+        lc.fillRect(gx - gr * 1.05, gy - gr * 1.05, gr * 2.1, gr * 2.1);
       }
     }
     const ctx = this.ctx;

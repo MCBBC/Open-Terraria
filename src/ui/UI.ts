@@ -1545,7 +1545,9 @@ export class UI {
     }
     // 脉冲只作用于文字层（.sw-tooltip-lines）——面板底色恒定（原版 :20256 逐行
     // lineColors[k] *= mouseTextColor/255 只乘文字色，DrawInvBG 面板色不变）
-    this.tooltip.innerHTML = `<div class="sw-tooltip-lines">${html}<span style="display:none"></span>${linesHtml ? linesHtml.replace(/^<br>/, '') : ''}</div>`;
+    // ★首行 br 必须保留（2026-08-21 用户报"参数拼在名称后"）：曾 replace(/^<br>/,'')
+    //   把首个换行剥掉 → "铜短剑5 伤害"拼行；原版名称行后即换行（:20488 行链）
+    this.tooltip.innerHTML = `<div class="sw-tooltip-lines">${html}<span style="display:none"></span>${linesHtml}</div>`;
     this.tooltip.style.display = 'block';
     this.startTooltipPulse();
     this.applyTooltipBg();
@@ -1715,11 +1717,22 @@ export class UI {
     // 全量条目缓存（一次性构建：id/显示名/小写匹配串）
     // 匹配串含【英文原名】——zh 名只对部分家族含族词（翅膀族 zh 多为"XX之翼"，
     // 搜"翅膀"只见开发者翅膀；搜 wing/翼 才全）——2026-08-13 报障
+    // ★同 vid 去重（首个 def 胜出,与 ITEM_INTERNAL_OF_STABLE 归一口径一致）：
+    //   桥接批 snake 键 + vanilla.json 循环 Pascal 键曾双注册 1246 组（雷管双行
+    //   根因,2026-08-21）——存量双条目不删（ITEM_DEFS id=下标不可平移）,显示层滤掉
+    const seenVid = new Set<number>();
     const entries = ITEM_DEFS.map((d, id) => {
       const vid = d.key.startsWith('vi_') ? d.key.slice(3, d.key.indexOf('_', 3)) : '';
       const name = Lang.itemNameByKey(d.key) || d.key;
       const en = vid ? (ITEM_NAME_EN_BY_ID[+vid] ?? '') : '';
       return { id, d, name, lc: (name + ' ' + d.key + ' ' + vid + ' ' + en).toLowerCase() };
+    }).filter((e) => {
+      const m = /^vi_(\d+)_/.exec(e.d.key);
+      if (!m) return true;
+      const vid = Number(m[1]);
+      if (seenVid.has(vid)) return false;
+      seenVid.add(vid);
+      return true;
     });
     // 族词别名（zh 族词分裂：翅膀↔翼——搜"翅膀"也能命中"天使之翼"族；本地
     // 表软链不动 i18n；2026-08-13 报障）。匹配串已含英文原名（搜 wing 全族可见）
@@ -2581,11 +2594,15 @@ export class UI {
     // 6px 竖槽+滑块，几何由 refreshVanillaCrafting 尾部按行窗占比刷；拖滑块/
     // 点槽跳转，滚轮同列表口径
     const track = el('div');
+    // 槽底提亮+描边（2026-08-21 用户报"下滚一段才出现"——实为深蓝槽在面板上
+    // 隐形，打开即渲染但视觉不可辨；提对比让它从打开起就是显性滚动条）
     track.style.cssText = 'position:absolute; left:526px; top:0; bottom:0; width:6px;'
-      + 'background:rgba(24,20,52,0.65); border-radius:3px; cursor:pointer; display:none;';
+      + 'background:rgba(58,52,108,0.75); border:1px solid rgba(122,144,214,0.4);'
+      + 'border-radius:3px; cursor:pointer; display:none; box-sizing:border-box;';
     const thumb = el('div');
     thumb.style.cssText = 'position:absolute; left:0; width:6px; min-height:24px;'
-      + 'background:rgb(122,144,214); border-radius:3px; opacity:0.85; cursor:grab;';
+      + 'background:rgb(150,170,236); box-shadow:0 0 2px rgba(10,10,30,0.8);'
+      + 'border-radius:3px; cursor:grab;';
     track.appendChild(thumb);
     track.addEventListener('mousedown', (e) => {
       e.stopPropagation();
@@ -2614,16 +2631,30 @@ export class UI {
   /** 滚轮累积器（实例字段——列表元素每次进游戏重建，闭包累积器会随重建丢失半程量） */
   private craftWheelAcc = 0;
 
-  /** 滚轮步进（delta 累积阈值 100：标准齿距 deltaY≈100=1 齿 1 行；触控板小增量
-   *  按比例缓行；deltaMode 1(lines) ×40 换算；方向反转清零防吃半程余量） */
+  /** 滚轮步进（2026-08-21 用户三轮定标）：首响立即——距上次步进 >120ms 的
+   *  事件直接走 1 行（单格滚不迟钝）；120ms 内的连发/惯性走累积阈值 100
+   *  （触控板小增量按比例缓行）。deltaMode 1(lines) ×40 换算 */
+  private craftWheelLast = 0;
   private craftWheelStep(dyRaw: number, deltaMode: number): void {
     const dy = deltaMode === 1 ? dyRaw * 40 : dyRaw;
+    const now = performance.now();
+    const fresh = now - this.craftWheelLast > 120;
+    this.craftWheelLast = now;
+    if (fresh) {
+      // 新手势首事件：立即 1 行（无迟滞）
+      this.craftWheelAcc = 0;
+      this.craftFocus = Math.max(0, this.craftFocus + (dy > 0 ? 1 : -1));
+      this.hoverFocus = -1;
+      this.refreshAll();
+      return;
+    }
+    // 同手势连发：累积限速（惯性不连跳）
     if (this.craftWheelAcc !== 0 && Math.sign(dy) !== Math.sign(this.craftWheelAcc)) this.craftWheelAcc = 0;
     this.craftWheelAcc += dy;
     if (Math.abs(this.craftWheelAcc) < 100) return;
     this.craftWheelAcc = 0;
     this.craftFocus = Math.max(0, this.craftFocus + (dy > 0 ? 1 : -1));
-    this.hoverFocus = -1;   // 滚动后鼠标下配方已变，预览态退场回落焦点
+    this.hoverFocus = -1;
     this.refreshAll();
   }
 

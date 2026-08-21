@@ -125,6 +125,9 @@ for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sh
       const { runGemTreesPass } = await import('../src/world/gen/vanilla/GemPasses');
       const { runBrokenTrapCleanupPass } = await import('../src/world/gen/vanilla/BrokenTrapCleanupPass');
       const { runFinalCleanupPass } = await import('../src/world/gen/vanilla/FinalCleanupPass');
+      // DDDDDD：原版 FinalCleanup pass 体末全图 LiquidCheck 扫（cs:22639-50）——
+      //   与生产管线终清理槽同序（settle.ts finalGenMergeScan 归位件）
+      const { finalGenMergeScan } = await import('../src/world/liquid/settle');
       runMicroBiomesPass(st, rng, gs, chests);
       rng.reseed(SEED);
       runLilypadsPass(st, rng, gs);
@@ -134,6 +137,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sh
       runBrokenTrapCleanupPass(st, rng);
       rng.reseed(SEED);
       runFinalCleanupPass(st, gs, rng, { frameSparse: process.env.SW_A1_FS !== '0' });
+      finalGenMergeScan(st, rng);
     } else if (process.env.SW_A1_CHAIN === '104') {
       const { runLilypadsPass } = await import('../src/world/gen/vanilla/SurfaceDecorPasses');
       const { runGemTreesPass } = await import('../src/world/gen/vanilla/GemPasses');

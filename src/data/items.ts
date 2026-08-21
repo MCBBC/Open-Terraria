@@ -982,12 +982,32 @@ item({ key: 'vi_1958_NaughtyPresent', name: '', vid: 1958, value: 1, desc: '夜�
 
 export const VANILLA_ITEM_KEY_BY_ID: Record<number, string> = {};
 const _vim = (vanillaItemMeta as unknown as { items: Record<string, { name: string; key: string }> }).items ?? {};
+// vid → 既有 def 键：本循环键是 Pascal（vi_167_Dynamite），桥接批手写键是 snake
+// （vi_167_dynamite）——旧去重按整键精确比、大小写不同全漏 → 1246 组同 vid 双注册
+// （道具搜索双行"雷管"根因，2026-08-21）。ITEM_DEFS id=数组下标不可删（平移事故
+// 先例），存量双条目保留、由消费端按 vid 归一；此处按 vid 堵新注册，并把权威
+// 反查指向既有 def（内容等价且常更富：tile/tool/伤害等独有字段在桥接批侧）。
+const VID_SEEN_IDX = new Map<number, number>();
+for (const k of Object.keys(byKey)) {
+  const vm = /^vi_(\d+)_/.exec(k);
+  if (vm && !VID_SEEN_IDX.has(Number(vm[1]))) VID_SEEN_IDX.set(Number(vm[1]), byKey[k]);
+}
 for (const [idStr, m] of Object.entries(_vim)) {
   if (!m || typeof m.key !== 'string' || !m.key) continue;
+  const vid = Number(idStr);
   const ik = 'vi_' + idStr + '_' + m.key.replace(/[^A-Za-z0-9]/g, '');
-  VANILLA_ITEM_KEY_BY_ID[Number(idStr)] = ik; // 已注册的同样入表（wld 导入按 id 反查）
-  if (byKey[ik] !== undefined) continue;
+  const existingIdx = VID_SEEN_IDX.get(vid);
+  if (existingIdx !== undefined) {
+    // 同 vid 已注册（桥接批 snake 键）：不再注册重复 def（内部 id 平移对存档无影响
+    // ——v3 起磁盘走稳定 id），Pascal 键【别名】到既有 def 下标——UI.ts 药水表等
+    // 硬编码 Pascal 键与 wld 导入反查全部继续解析（指向内容更富的桥接 def）
+    byKey[ik] = existingIdx;
+    VANILLA_ITEM_KEY_BY_ID[vid] = ik;
+    continue;
+  }
+  VANILLA_ITEM_KEY_BY_ID[vid] = ik; // 已注册的同样入表（wld 导入按 id 反查）
   item({ key: ik, name: '', value: 1 });
+  VID_SEEN_IDX.set(vid, ITEM_DEFS.length - 1);
 }
 
 // ---- 音乐盒唱片全量 101 曲（Item.cs DefaultToMusicBox：createTile=139、

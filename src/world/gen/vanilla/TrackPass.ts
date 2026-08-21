@@ -496,6 +496,7 @@ export class TrackGenerator {
     if (!st.inBounds(x, y)) return;
     const i = st.idx(x, y);
     if (!st.flags[i]) return;
+    (globalThis as { __swLaneKill?: (x: number, y: number, sheet: number) => void }).__swLaneKill?.(x, y, SHEET_OF[st.type[i]!] ?? -1);
     const sheet = SHEET_OF[st.type[i]!];
     if (sheet < 0) return;
     // CheckTileBreakability(cs:63591→62403):2=整跳(实心格上有树干/箱/锁门等

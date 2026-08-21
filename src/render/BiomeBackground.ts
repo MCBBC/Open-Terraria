@@ -339,7 +339,8 @@ export class BiomeBackground {
   }
 
   /** 每帧状态推进：风格切换延迟 + alpha 渐变（UpdateBGVisibility ±0.05/帧，:63534/:63594） */
-  update(world: World, scene: SceneFlags, dtMs: number, screenCenterTileX?: number) {
+  update(world: World, scene: SceneFlags, dtMs: number,
+    geom?: { centerTileX: number; topTileY: number; bottomTileY: number }) {
     this.seedFor(world);
     if (!this.caveBackTreeX) {
       // 森林四段边界：原版用 treeX[0..2]（WorldGen 生成）；优先用 world.treeX
@@ -356,7 +357,7 @@ export class BiomeBackground {
     // ③ 等待帧数：新风格是森林 60 帧、否则 30（:63522 num = flag2?60:30——曾恒 30）
     // ④ 切换后：进森林 bgDelay=0 无冷却；否则 -60 负冷却 60 帧（:63524-63527，曾缺）
     // ⑤ 等待期回摆：preferred 折返时 bgDelay 逐帧衰减而非清零（:63443-63444）
-    const want = this.preferredStyle(scene, screenCenterTileX ?? scene.tileX);
+    const want = this.preferredStyle(scene, geom?.centerTileX ?? scene.tileX);
     let speed = 0.05;
     const isForestStyle = (st: number) => st === Forest1 || st === Forest2 || st === Forest3 || st === Forest4;
     if (this.bgDelay < 0) {
@@ -405,7 +406,7 @@ export class BiomeBackground {
       this.alphaFar[l] += target > this.alphaFar[l] ? Math.min(frames * 0.05, target - this.alphaFar[l]) : Math.max(-frames * 0.05, target - this.alphaFar[l]);
     }
     // 地下风格（:52245-52249：变更时新旧并行，ugBackTransition -= 0.25/帧）
-    const ugWant = this.pickUnderground(world, scene);
+    const ugWant = this.pickUnderground(world, scene, geom);
     if (ugWant !== this.ugStyle) {
       if (this.ugAlpha > 0 && this.ugStyle === ugWant) { /* noop */ }
       this.ugOld = this.ugStyle;
@@ -415,9 +416,14 @@ export class BiomeBackground {
     this.ugAlpha = Math.min(1, this.ugAlpha + frames * 0.25);
   }
 
-  /** DrawBackground_PickUndergroundBackgroundStyle :53454-53517 */
-  private pickUnderground(world: World, scene: SceneFlags): number {
-    const x = scene.tileX;
+  /** DrawBackground_PickUndergroundBackgroundStyle :53454-53540。
+   *  ★采样 = 屏幕中心 tile（:53456 num，同地表森林分段）；雪深门 = 屏底+1200px
+   *  （:53471）；深岩带 = 屏顶 tile（:53487 screenPosition.Y/16）——曾全用玩家 */
+  private pickUnderground(world: World, scene: SceneFlags,
+    geom?: { centerTileX: number; topTileY: number; bottomTileY: number }): number {
+    const x = geom?.centerTileX ?? scene.tileX;
+    const topTileY = geom?.topTileY ?? scene.tileY;
+    const bottomTileY = geom?.bottomTileY ?? scene.tileY;
     const w = world.store.w;
     const segIdx = x <= this.caveBackX[0] ? 0 : x <= this.caveBackX[1] ? 1 : x > this.caveBackX[2] ? 3 : 2;
     if (this.caveBackStyle[segIdx] === undefined) {
@@ -425,14 +431,22 @@ export class BiomeBackground {
     }
     let style = this.caveBackStyle[segIdx] ?? 0;
     style += 3;
-    // 雪原洞穴（原版 SnowTileCount 判定——SceneFlags 只有布尔近似：zoneSnow 且未到地狱带）
-    if (scene.zoneSnow && scene.tileY < world.store.h - 250 && scene.tileY > world.groundLevel) style = 1;
-    // 丛林洞穴
-    if (scene.zoneJungle) style = 11;
+    // 雪原洞穴（:53470-53473：SnowTileCount>Threshold（=zoneSnow） &&
+    // (屏底+1200px)/16 < maxTilesY−250——锚=屏底非玩家，且无地表下限门）
+    if (scene.zoneSnow && bottomTileY + 75 < world.store.h - 250) style = 1;
+    // 丛林洞穴（:53474-53483）：雪洞内须 JungleTileCount>SnowTileCount 才让位
+    // （雪/丛林边界雪洞保持），非雪洞无条件——曾无条件覆盖=雪洞被丛林抢
+    if (scene.zoneJungle) {
+      if (style === 1) {
+        if (scene.jungleTileCount > scene.snowTileCount) style = 11;
+      } else {
+        style = 11;
+      }
+    }
     // 沙滩地下
     if (scene.zoneBeach) {
       style = scene.zoneCorrupt ? 19 : scene.zoneCrimson ? 21 : scene.zoneHallow ? 20 : 18;
-    } else if (scene.tileY > world.rockLevel + 60 && scene.tileY < (world.lavaLine || world.store.h - 200) - 60) {
+    } else if (topTileY > world.rockLevel + 60 && topTileY < (world.lavaLine || world.store.h - 200) - 60) {
       if (scene.zoneSnow) style = scene.zoneCorrupt ? 15 : scene.zoneCrimson ? 16 : scene.zoneHallow ? 17 : style;
       else if (scene.zoneCorrupt) style = 12;
       else if (scene.zoneCrimson) style = 13;
@@ -454,10 +468,6 @@ export class BiomeBackground {
      *  =worldLayer 分层后不吃光,洞里恒亮且与时间无关)。缺省两者都画(旧序) */
     phase: 'all' | 'surface' | 'underground' = 'all',
   ) {
-    // 森林四段分界用【屏幕中心】tile（GetPreferredBGStyleForPlayer :63664
-    // num2=(screenPosition.X+screenWidth/2)/16）——非玩家 tile（曾用=提前/滞后
-    // 半屏 ~30 格切换）。群系 zone 判定仍是玩家中心（SceneMetrics 同原版）
-    this.update(world, scene, dtMs, Math.floor(cam.x / 16));
     const b: BGBlit = typeof (target as BGBlit).img === 'function'
       ? (target as BGBlit) : new CanvasBgBlit(this, target as CanvasRenderingContext2D);
     // Main.screenPosition 语义 = 屏幕【左上角】的世界坐标 = 中心 - 半屏/zoom。
@@ -466,6 +476,16 @@ export class BiomeBackground {
     // 下移 ~40px = 用户实报"远景背景图 Y 轴偏下"根因（2026-08-19）
     const camTopY = cam.y - viewH / 2 / cam.zoom;
     const camLeftX = cam.x - viewW / 2 / cam.zoom;
+    // ★采样几何（原版双轨）：森林四段分界/地下 caveBack 分段 =【屏幕中心】tile
+    // （GetPreferredBGStyleForPlayer :63664 num2、PickUndergroundBackgroundStyle
+    // :53456 num——均 (screenPosition.X+screenWidth/2)/16）；群系 zone 判定 =
+    // 玩家中心（SceneMetrics 169×124 窗口）。曾全用玩家 tile=半屏 ~30 格偏差
+    const geom = {
+      centerTileX: Math.floor(cam.x / 16),
+      topTileY: Math.floor(camTopY / 16),
+      bottomTileY: Math.floor((camTopY + viewH / cam.zoom) / 16),
+    };
+    this.update(world, scene, dtMs, geom);
     // 深度门（DrawClouds_Closest :59073 系各层共门 screenPosition.Y < ws×16+16）
     if (phase !== 'underground' && camTopY < world.groundLevel * 16 + 16) {
       this.drawSurface(b, world, cam, camTopY, camLeftX, viewW, viewH, tint);

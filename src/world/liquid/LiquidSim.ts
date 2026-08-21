@@ -938,7 +938,11 @@ export class LiquidSim {
   /** 生成收尾全图 LiquidCheck(createMergeTilesDuringGen:true)（WorldGen.cs:22639-22650）：
    *  常规生成期交互不落块（strip 分支），唯独收尾这一次允许把残余接触转成块。
    *  ★原版此处对湿格直接调 Liquid.LiquidCheck(x,y,liquidType(),...)——岩浆格
-   *  不走 LavaCheck 包装（无 7×7 沙漠 blast 前导），故 t==2 以 desertBlast=false */
+   *  不走 LavaCheck 包装（无 7×7 沙漠 blast 前导），故 t==2 以 desertBlast=false。
+   *  ★DDDDDD 批（2026-08-21）：水格（t==1）此前整缺——原版无 WaterCheck 包装，
+   *  LiquidCheck(x,y,0) 只在这次全图扫出现（运行期沉降只从岩浆/蜂蜜/微光侧触发，
+   *  水侧合并从未发生）。12345 #105 残 A=45/L=74 主债主（水岩界面 vanilla 双侧
+   *  落黑曜石、JS 只有岩浆侧）。 */
   finalGenMergeCheck() {
     const st = this.world.store;
     this.createMergeTilesDuringGen = true;
@@ -949,7 +953,8 @@ export class LiquidSim {
           const i = row + x;
           if (st.liquid[i] === 0) continue;
           const t = st.liquidType[i];
-          if (t === 2) this.lavaCheck(x, y, false);
+          if (t === 1) this.waterLiquidCheck(x, y);
+          else if (t === 2) this.lavaCheck(x, y, false);
           else if (t === 3) this.honeyCheck(x, y);
           else if (t === 4) this.shimmerCheck(x, y);
         }
@@ -971,6 +976,58 @@ export class LiquidSim {
       }
     }
     return false;
+  }
+
+  /** LiquidCheck 水侧（Liquid.cs:1233-1320，thisLiquidType=0）——生成收尾全图扫
+   *  （WorldGen.cs:22647）对水格直调，无 WaterCheck 包装（运行期 WaterCheck=
+   *  容器死亡检查，另一物）。水+岩浆→黑曜石 56 / 水+蜂蜜→蜂蜜块 229 /
+   *  水+微光→Aetherium 659（GetLiquidMergeTypes this=0 行，微光>蜂蜜>岩浆）。
+   *  ★case A 邻型旗用 anyX（liquid>0 门，Liquid.cs:1252-55）；异种清零不加门
+   *  （cs:1257-67 干格残型字节也走零写）；case B 水侧跳过下方裁切植物杀
+   *  （`thisLiquidType != 0` 门，Liquid.cs:1289）。 */
+  private waterLiquidCheck(x: number, y: number) {
+    const st = this.world.store;
+    if (this.solidTileFull(x, y)) return; // WorldGen.SolidTile：半砖/坡面放行（Liquid.cs:1236）
+    const i5 = this.idx(x, y);
+    const il = i5 - 1, ir = i5 + 1, iu = i5 - st.w, id = i5 + st.w;
+    const lq = st.liquid[il], rq = st.liquid[ir], uq = st.liquid[iu], dq = st.liquid[id];
+    const lt = st.liquidType[il], rt = st.liquidType[ir], ut = st.liquidType[iu], dt = st.liquidType[id];
+    if ((lq > 0 && lt !== 1) || (rq > 0 && rt !== 1) || (uq > 0 && ut !== 1)) {
+      // 情形 A：左右/上方有非水液体 → 汇总清零，产物生成在水格（Liquid.cs:1250-73）
+      let sum = 0;
+      if (lt !== 1) { sum += lq; st.liquid[il] = 0; }
+      if (rt !== 1) { sum += rq; st.liquid[ir] = 0; }
+      if (ut !== 1) { sum += uq; st.liquid[iu] = 0; }
+      // GetLiquidMergeTypes(this=0)（Liquid.cs:1437-52）：岩浆邻→56、蜂蜜邻→229、
+      // 微光邻→659（后写覆盖）；mergeType 恒异于 0 → `mergeType != this` 门恒过
+      const type = ((lq > 0 && lt === 4) || (rq > 0 && rt === 4) || (uq > 0 && ut === 4)) ? AETHERIUM
+        : ((lq > 0 && lt === 3) || (rq > 0 && rt === 3) || (uq > 0 && ut === 3)) ? HONEY_BLOCK
+        : OBSIDIAN;
+      const mergeType = type === AETHERIUM ? 4 : type === HONEY_BLOCK ? 3 : 2;
+      if (sum < 24) return;
+      // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill
+      const act = st.flags[i5] !== 0;
+      if (act && !this.obsidianKillIds.has(st.type[i5])) return;
+      st.liquid[i5] = 0;
+      st.liquidType[i5] = 0;
+      this.createMergeTile(x, y, type, 1, mergeType);
+    } else {
+      if (dq <= 0 || dt === 1) return;
+      // 情形 B：仅下方有异种液体 → 产物生成在下方格（Liquid.cs:1275-1317）
+      const selfAct = st.flags[i5] !== 0;
+      const selfT = st.type[i5];
+      const belowAct = st.flags[id] !== 0;
+      const belowT = st.type[id];
+      // flag：本格容器而下方不是（Liquid.cs:1285-88）——容器内液体允许向下合并
+      const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
+      // 水侧无下方裁切植物杀（`thisLiquidType != 0` 门，Liquid.cs:1289 水恒假）
+      if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
+      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
+      const type = dt === 4 ? AETHERIUM : dt === 3 ? HONEY_BLOCK : OBSIDIAN;
+      st.liquid[i5] = 0; st.liquidType[i5] = 0;
+      st.liquid[id] = 0; st.liquidType[id] = 0;
+      this.createMergeTile(x, y + 1, type, 1, dt);
+    }
   }
 
   /** 岩浆格与水/蜂蜜/微光接触 → 黑曜石 56 / 脆蜂蜜块 230 / Aetherium 659（阈值 24）。

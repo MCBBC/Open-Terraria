@@ -44,18 +44,19 @@ const r = await page.evaluate(async () => {
   await new Promise((r2) => setTimeout(r2, 250));
   const afterLeave = { hover: ui.hoverFocus, grid: gridCnt() };
   // ③ 滚轮 → 窗口移动
-  // 灵敏度（阈值 100）：60 不动；100 走 1 行；5×100 走 5 行
-  ui.craftListEl.dispatchEvent(new WheelEvent('wheel', { deltaY: 60, bubbles: true, cancelable: true }));
+  // 首响口径：单发（间隔>120ms）每发走 1 行——小 delta(30) 首发也立即走
+  ui.craftListEl.dispatchEvent(new WheelEvent('wheel', { deltaY: 30, bubbles: true, cancelable: true }));
   await new Promise((r2) => setTimeout(r2, 200));
-  const afterSmall = { focus: ui.craftFocus };          // 期望仍 0
+  const afterSmall = { focus: ui.craftFocus };          // 期望 1（首响立即）
   ui.craftListEl.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }));
   await new Promise((r2) => setTimeout(r2, 200));
-  const afterOne = { focus: ui.craftFocus };            // 期望 1
+  const afterOne = { focus: ui.craftFocus };            // 期望 2
   for (let k = 0; k < 5; k++) {
     ui.craftListEl.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }));
+    await new Promise((r2) => setTimeout(r2, 150));     // >120ms 间隔=独立手势
   }
-  await new Promise((r2) => setTimeout(r2, 300));
-  const afterWheel = { focus: ui.craftFocus };          // 期望 6
+  await new Promise((r2) => setTimeout(r2, 200));
+  const afterWheel = { focus: ui.craftFocus };          // 期望 7
   // 滚动条：可见、thumb 高>0；点槽下半 → 焦点跳大
   const trk = ui.craftTrackEl, thb = ui.craftThumbEl;
   const sb = {
@@ -69,12 +70,21 @@ const r = await page.evaluate(async () => {
   }
   await new Promise((r2) => setTimeout(r2, 300));
   const afterJump = { focus: ui.craftFocus };
-  return { s0, focus0: f0, afterHover, afterLeave, afterSmall, afterOne, afterWheel, sb, afterJump };
+  // 触控板连发限速：同任务 10×20（小增量惯性流）= 首响 1 行 + 累积 180→1 行 = 共 2
+  //（对比：鼠标齿距 100/发每发独立走 1 行=齿齿有响应，两种设备各自正确）
+  const beforeBurst = ui.craftFocus;
+  for (let k = 0; k < 10; k++) {
+    ui.craftListEl.dispatchEvent(new WheelEvent('wheel', { deltaY: -20, bubbles: true, cancelable: true }));
+  }
+  await new Promise((r2) => setTimeout(r2, 300));
+  const burst = { delta: beforeBurst - ui.craftFocus };   // 期望 2
+  return { s0, focus0: f0, afterHover, afterLeave, afterSmall, afterOne, afterWheel, sb, afterJump, burst };
 });
 console.log(JSON.stringify(r, null, 1));
 const ok = r.afterHover.start === r.s0 && r.afterHover.focus === r.focus0
   && r.afterHover.hover >= 0 && r.afterLeave.hover === -1
-  && r.afterSmall.focus === 0 && r.afterOne.focus === 1 && r.afterWheel.focus === 6
-  && r.sb.visible && r.sb.thumbH > 0 && r.afterJump.focus > r.afterWheel.focus;
+  && r.afterSmall.focus === 1 && r.afterOne.focus === 2 && r.afterWheel.focus === 7
+  && r.sb.visible && r.sb.thumbH > 0 && r.afterJump.focus > r.afterWheel.focus
+  && r.burst.delta === 2;
 console.log(ok ? 'PASS: hover 不滚窗只切材料格;滚轮才滚动' : 'FAIL');
 await browser.close();
