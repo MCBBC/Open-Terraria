@@ -1724,22 +1724,17 @@ export class Player extends Entity {
     if (this.inWater !== wasInWater && this.wetCount === 0) {
       const exiting = !this.inWater;
       const px = this.x - 6, py = this.y + this.h / 2 - 8;
-      const pw = this.w + 12, ph = 24;
-      const vyKick = exiting ? -4 : -3;
+      // spawnParticles(x,y,color,count,speed,opts):speed=扩散速率(≈vx×2.5),
+      // grav=重力(负值=上溅,≈原版 velocity.Y −3/−4 近似)
+      const upKick = exiting ? -0.15 : -0.12;   // 出水踢得更猛(−4 vs −3)
       if (this.inHoney) {
-        // 蜜(20 颗尘 152,vy−1,scale 1.3,α100)
-        for (let i = 0; i < 20; i++) {
-          game.spawnParticles(px + Math.random() * pw, py + Math.random() * ph,
-            '#B8860B', 1, 1.3, { life: 30, damp: 0.97, gravity: 0, vy: vyKick * 0.4, vx: (Math.random() - 0.5) * 5 });
-        }
+        // 蜜(20 颗,vy−1,scale 1.3,α100)
+        game.spawnParticles(px, py, '#D4A017', 20, 1.3, { life: 30, damp: 0.97, grav: upKick * 0.4 });
         game.playSfx('splash', 0.8);
       } else {
-        // 普通水/岩浆(50 颗尘)
+        // 普通水/岩浆(50 颗,scale 0.8,α100,上溅+横向扩散)
         const isLava = this.inLava;
-        for (let i = 0; i < 50; i++) {
-          game.spawnParticles(px + Math.random() * pw, py + Math.random() * ph,
-            isLava ? '#FF6600' : '#4A9EFF', 1, 0.8, { life: 30, damp: 0.97, gravity: 0, vy: vyKick, vx: (Math.random() - 0.5) * 5 * 2.5 });
-        }
+        game.spawnParticles(px, py, isLava ? '#FF6600' : '#4A9EFF', 50, 2.5, { life: 30, damp: 0.97, grav: upKick });
         game.playSfx('splash');
       }
     }

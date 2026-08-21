@@ -68,19 +68,28 @@ describe('M5 键位绑定表', () => {
     options.data.keybinds = {};
   });
 
-  it('重绑语义 = CheckRebindingProcessKeyboard：新键替换整表；已绑键反选解绑；Inventory 不许空', () => {
+  it('重绑语义 = CheckRebindingProcessKeyboard：新键替换整表；反选清空=空表无绑定；Inventory 保护回默认', () => {
     let map = sanitizeKeybinds({});
     // 新键替换整组（默认 Up=[W,↑] → 绑 X 后只剩 X）；调用方把新表写回 options
     map = assignBinding(map, 'Up', 'KeyX');
     options.data.keybinds = map;
     expect(map.Up).toEqual(['KeyX']);
     expect(bindsOf('Up')).toEqual(['KeyX']);
-    // 反选解绑：再按 X → 移除 → 空表回默认（非保护 action）
+    // 反选清空 → 保留空表=无绑定（原版 :1504-1506 Remove 后允许空；2026-08-21 修正：
+    // 此前误删键回落默认，属对 FixDerpedRebinds 保护名单的过度泛化）
     map = assignBinding(map, 'Up', 'KeyX');
     options.data.keybinds = map;
-    expect(map.Up).toBeUndefined();
-    expect(bindsOf('Up')).toEqual(['KeyW', 'ArrowUp']);
-    // FixDerpedRebinds：Inventory 解绑成空 → 回默认（ResetKeyBinding 语义）
+    expect(map.Up).toEqual([]);
+    expect(bindsOf('Up')).toEqual([]);
+    expect(isBound('Up', 'KeyW')).toBe(false);
+    expect(isBound('Up', 'ArrowUp')).toBe(false);
+    expect(actionsForCode('KeyW')).toEqual([]);
+    // 空表态再绑新键 → 单键表（非反选路径）
+    map = assignBinding(map, 'Up', 'KeyQ');
+    options.data.keybinds = map;
+    expect(bindsOf('Up')).toEqual(['KeyQ']);
+    // FixDerpedRebinds：Inventory（保护名单，MouseLeft/MouseRight 硬编码不入表）
+    // 解绑成空 → 回默认（ResetKeyBinding 语义）
     map = { Inventory: ['KeyE'] };
     map = assignBinding(map, 'Inventory', 'KeyE');
     expect(map.Inventory).toEqual(DEFAULT_KEYBINDS.Inventory);
@@ -91,15 +100,22 @@ describe('M5 键位绑定表', () => {
     options.data.keybinds = {};
   });
 
-  it('持久化清洗：未知 action 剔除、非字符串/空串剔除、去重', () => {
+  it('持久化清洗：未知 action 剔除、非字符串/空串剔除、去重；空表（无绑定态）保留', () => {
     expect(sanitizeKeybinds({
       Jump: ['KeyZ', 'KeyZ', ''],
       Hax: ['KeyQ'],                 // 未知 action
       Up: 'KeyW',                    // 非数组
       Down: [1, 'KeyS', null],       // 混入非字符串
-    })).toEqual({ Jump: ['KeyZ'], Down: ['KeyS'] });
+      Left: [],                      // 反选清空的无绑定态——原样存活（2026-08-21 修正：
+    })).toEqual({ Jump: ['KeyZ'], Down: ['KeyS'], Left: [] });   // 此前被丢=读档回默认）
     expect(sanitizeKeybinds(null)).toEqual({});
     expect(sanitizeKeybinds('x')).toEqual({});
+    // 空表经清洗-生效链后仍无绑定（非字符串项滤空 = 等价无绑定，与显式空表同态）
+    const m = sanitizeKeybinds({ Left: [] });
+    options.data.keybinds = m;
+    expect(bindsOf('Left')).toEqual([]);
+    expect(isBound('Left', 'KeyA')).toBe(false);
+    options.data.keybinds = {};
   });
 
   it('action 显示名 = UIKeybindingListItem.GetFriendlyName 的 Lang.menu 序', () => {

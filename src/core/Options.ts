@@ -210,7 +210,8 @@ export class OptionsStore {
         }
         this.data[k] = Math.min(1, Math.max(0.01, this.data[k]));
       }
-      // 键位表清洗（未知 action/非字符串项剔除；空表=全默认）
+      // 键位表清洗（未知 action/非字符串项剔除；空表=该 action 无绑定——2026-08-21
+      // 起 1:1 原版：反选清空的合法态存活读档，不再回落默认）
       this.data.keybinds = sanitizeKeybinds(this.data.keybinds);
       // M14 枚举归一化（旧档/手改坏值 → 原版默认）
       const DOOR_PREFS = ['enabled', 'gamepadOnly', 'disabled'] as const;
