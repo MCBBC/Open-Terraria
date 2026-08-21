@@ -250,10 +250,14 @@ export class Player extends Entity {
   /** 用魔物品动画窗剩余 tick（itemAnimation>0 期每帧重置 delay，:42131-42137） */
   manaAnimTicks = 0;
   // ---- 1457 ManaHeat 魔力过热族（Player.cs:961-967 字段声明）----
-  /** Player.slowMagicUse（:961）：蓝空过载施法标记——仅 DebugOptions.ManaV2（debug）
-   *  置位（CheckMana :53241→DoRunOutOfManaEffect :53258-53261），release 版恒 false。
-   *  本仓无 ManaV2 调试开关 → 恒 false，方法链按 1457 原样备位 */
+  /** Player.slowMagicUse（:961）：蓝空过载施法标记——DebugOptions.ManaV2 默认 true
+   *  （Testing/DebugOptions.cs:30）→ release 正式机制。置位 = CheckMana 蓝不足分支
+   *  :53241-53256 → DoRunOutOfManaEffect :53258-53261（空蓝照放+攻速 ×0.4）；
+   *  每次施法入口 CheckMana :53217 先清、喝蓝药 UndoSlowMagicUse :52585 清 */
   slowMagicUse = false;
+  /** Player.yoyoHitCounter（:1203，初始 -1）：EverySomeYoyoHits 共享命中计数器——
+   *  仅悠悠球 per-hit 族（545/546/554/555）命中时经 everySomeYoyoHits() 自增 */
+  yoyoHitCounter = -1;
   /** Player.manaHeat（:963）：魔法伤害乘区，ResetEffects 每帧清 1f（:18709），
    *  UpdateBuffs buff 396 段累加（:10416-10429） */
   manaHeat = 1;
@@ -1495,13 +1499,20 @@ export class Player extends Entity {
    *  新增 manaRegenBuff 时钳 20f——1456 该钳只在 UpdateManaRegen 每帧做，1457 挪到
    *  置值时点（QuickBuff :5877 / ItemCheck_ApplyManaRegenDelay :51204 /
    *  CommandForbiddenStorm :57546 三处改调本方法）→ 回蓝 buff 期间惩罚期变短。
-   *  smm = statManaMax2（调用侧已备）。DebugOptions.ManaV2 分支为 debug-only 未移植 */
+   *  smm = statManaMax2（调用侧已备）。
+   *  ★DebugOptions.ManaV2 分支（:19526-19537）为 release 正式行为（ManaV2 默认 true,
+   *  Testing/DebugOptions.cs:30）——2026-08-21 批 1 遗漏半边补齐：置值后钳 4 帧
+   *  （num2=num3=4：delay>4 → 4；statMana>0 → 恒钉 4）。官方"完全移除延迟"即此
+   *  4 帧残桩（0.067s），攻击期每帧刷新 delay=4 → UpdateManaRegen 恒落 5% 滴流支 */
   applyManaRegenerationDelay(smm = this.maxMana): void {
     const base = smm > 0 ? (1 - this.mana / smm) * 240 + 45 : 45;
     this.manaRegenDelay = Math.floor(base * 0.7);      // :19518-19521（×0.7 后才取整）
     if (this.buffs.manaRegenBuff && this.manaRegenDelay > 20) {
       this.manaRegenDelay = 20;                        // :19522-19525 回蓝期钳 20f
     }
+    // DebugOptions.ManaV2（:19526-19537）：num2=num3=4
+    if (this.manaRegenDelay > 4) this.manaRegenDelay = 4;   // if (delay > num3) delay = num3
+    if (this.mana > 0) this.manaRegenDelay = 4;             // if (statMana > 0) delay = num2（空蓝只钳上界不钉值）
   }
 
   /** 1457 新方法 TryApplyManaHeat（Player.cs:52644-52652）：登记最近 ManaHeat 源并
@@ -1550,11 +1561,20 @@ export class Player extends Entity {
     if (!this.slowMagicUse) return 1;
     return Player.SLOW_MAGIC_MULTIPLIER;
   }
-  /** UndoSlowMagicUse（:52593-52604）：把已放大的动画/时间窗缩回并清标记。
-   *  ★本仓无 itemAnimationMax/itemTimeMax 窗字段（swing 模型不同）→ 只清标记；
-   *  且 slowMagicUse 仅 ManaV2 debug 置位，release 恒 false，本方法实际不可达 */
+  /** UndoSlowMagicUse（:52593-52604）：喝蓝药时清标记（QuickMana :52585-52605 调用）。
+   *  ★原版函数体还会把 itemAnimation/itemAnimationMax/itemTime/itemTimeMax 各 ×2.5
+   *  （字面上是再拉长而非缩回——原版如此,照录）；本仓无 itemAnimationMax/itemTimeMax
+   *  窗字段（swing 模型不同）→ 只清标记,窗差登记 */
   undoSlowMagicUse(): void {
     this.slowMagicUse = false;
+  }
+  /** EverySomeYoyoHits（Player.cs:4293-4301）：悠悠球 per-hit 族共享计数器。
+   *  yoyoHitCounter 初始 -1 → 首次命中 -1%N≠0 不触发（原版同款,第 2 击才首触发）；
+   *  countUp=true 时命中后自增（伤害乘区侧 :13428/:13434 传 false 只读不加） */
+  everySomeYoyoHits(amount: number, countUp: boolean): boolean {
+    const result = this.yoyoHitCounter % amount === 0;
+    if (countUp) this.yoyoHitCounter++;
+    return result;
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
@@ -1787,14 +1807,22 @@ export class Player extends Entity {
     }
     // 1457: manaRegenBuff 钳 20 从 UpdateManaRegen 移除（:19541-19560 无此段）——
     // 钳制只在置值时点（applyManaRegenerationDelay）发生
+    // ★ManaV2 攻击期 5% 滴流（:19563-19567 + :19601-19604,2026-08-21 补批 1 遗漏半边）：
+    // flag2 = delay≤0（衰减后）;flag3 = ManaV2 && !flag2 && delay<4 → flag2 强制 true。
+    // 攻击期 ItemCheck_ApplyManaRegenDelay（:43143-43146 itemAnimation>0 && item.mana>0
+    // 每帧）→ ApplyManaRegenerationDelay 把 delay 恒刷回 4 → 衰减后 3 ∈ (0,4) →
+    // num10 ×= 0.05 = 攻击时 5% 产额（官方"攻击时仍以正常速率 5% 恢复"）。
+    // 药水"始终最大速率+攻击时也生效"同此支：manaRegenBuff → num9=1 无低蓝惩罚。
+    const flag2 = this.manaRegenDelay <= 0;
+    const flag3 = !flag2 && this.manaRegenDelay < 4;      // :19563-19567（ManaV2 恒真）
     let manaRegen = 0;
-    if (this.manaRegenDelay <= 0) {
-      this.manaRegenDelay = 0;
+    if (flag2) this.manaRegenDelay = 0;
+    if (flag2 || flag3) {
       // 1457 每帧产额（UpdateManaRegen :19568-19605）三改：
       // ①基数 = max/3+manaRegenBonus+1，静止/攀绳/魔力再生档改为【再加全额基数】
       //   （num5 = max/3+bonus+1；1456 只加 max/3）
       // ②存量系数 0.2+0.8×(mana/max) → 0.5+0.5×(mana/max)（空蓝回复 2.5 倍）
-      // ③下限钳 manaRegen<2 → =2；且 1456 的 ×1.15 全局乘区被移除
+      // ③下限钳 manaRegen<2 → =2；且 1456 的 ×1.15 全局乘区被移除（满蓝 -13%）
       const still = Math.abs(this.vx) < 0.05 && Math.abs(this.vy) < 0.05;
       const num5 = Math.floor(smm / 3) + mRegenBonus + 1;   // :19571
       manaRegen = num5;
@@ -1802,9 +1830,10 @@ export class Player extends Entity {
       if (this.usedArcaneCrystal) manaRegen += Math.floor(smm / 50);            // :19577-19580
       const num6 = smm > 0 ? this.mana / smm : 1;                               // :19582
       const num9 = this.buffs.manaRegenBuff ? 1 : 0.5;                          // :19584-19588
-      const num10 = num9 + (1 - num9) * num6;                                   // :19592
+      let num10 = num9 + (1 - num9) * num6;                                     // :19592
+      if (flag3) num10 *= 0.05;                          // :19601-19604 num11=0.05（攻击期滴流）
       manaRegen = Math.floor(manaRegen * num10);                                // :19599（×1.15 已删）
-      if (manaRegen < 2) manaRegen = 2;                                         // :19600-19603 下限
+      if (manaRegen < 2) manaRegen = 2;                                         // :19600-19603 下限（滴流支同样吃 2 下限）
     }
     // 蓄能结算（:19274-19278）：≥120 扣 120 换 1 魔（满魔时也扣——原版同语义）
     this.manaRegenCount += manaRegen;

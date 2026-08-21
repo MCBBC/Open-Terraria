@@ -1347,6 +1347,9 @@ export class YoyoProj extends Entity {
   spawnClone?: (x: number, y: number, vx: number, vy: number, dmg: number, kb: number) => void;
   /** 悠悠球命中链回调（Projectile.cs:12482 Player.Counterweight；-2 免调） */
   counterweight?: (hitX: number, hitY: number, dmg: number, kb: number) => void;
+  /** 1457 EverySomeYoyoHits per-hit 族伴生弹生成回调（:13761-13870 NewProjectile——
+   *  entities.add 不在 GameHooks,Game 侧 wireYoyoCallbacks 注入） */
+  spawnShot?: (spec: YoyoShotSpec) => void;
   /** 出生物品内部 id（Game 注入——channel 闭包的手持核对/族成员遗传：手套二号球、
    *  魔法线克隆、配重球 ctx 共用同物品 channel 判定） */
   itemId?: number;
@@ -1556,10 +1559,15 @@ export class YoyoProj extends Entity {
     // usesLocalNPCImmunity/Cooldown,走全局 10t）;命中链回调见 onYoyoHit
     hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen,
       (e) => this.onYoyoHit(e, game),
-      () => {
+      (_e) => {
         // 活跃态对玩家无视线 → 该击伤害 ×0.75（:12503-12505 num12）
         if (this.ai0 >= 0
           && !canHit(game.world.store, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h)) return 0.75;
+        // 1457 per-hit 族伤害乘区（countUp:false 只读不加,:13424-13436）：
+        // 555 Yelets 每 7 击 ×2、546 Artery 每 3 击 ×2——里程碑判定与 onYoyoHit
+        // 的生成掷（countUp:true 自增）同 tick 先后求值,共享计数器读数一致
+        if (this.projId === 555 && p.yoyoHitCounter % 7 === 0) return 2;
+        if (this.projId === 546 && p.yoyoHitCounter % 3 === 0) return 2;
         return 1;
       });
   }
@@ -1573,26 +1581,236 @@ export class YoyoProj extends Entity {
     const ecy = (e as { y: number; h: number }).y + (e as { y: number; h: number }).h / 2;
     if (this.ai0 === -2) {
       // 脱离态被弹开（:12469-12477）：速度 ÷5 + 上抛 Next(50,81)×0.1 钳 -16;
-      // 穿透自减（penetrate 3-6 尽 → Kill）
+      // 穿透自减（penetrate 3-6 尽 → Kill）——★不 return：原版 Damage() 内弹开段
+      // (:12469)与 per-hit 族段(:13761+)同函数先后执行,554/546/555 无 ai[0]!=-2 门
       this.vx /= 5; this.vy /= 5;
       this.vy -= (50 + Math.floor(Math.random() * 31)) * 0.1;
       if (this.vy < -16) this.vy = -16;
       if (--this.pierceLeft <= 0) this.dead = true;
+    } else {
+      this.counterweight?.(ecx, ecy, this.damage, this.knockback);   // :12482
+      this.dir = ecx < p.cx ? -1 : 1;   // :12484-12489
+      if (this.ai0 >= 0) {
+        // 活跃态命中反弹（:12490-12500）：v×-0.5 + 离敌向 ×16
+        let bx = this.cx - ecx, by = this.cy - ecy;
+        const bd = Math.hypot(bx, by) || 1;
+        this.vx = this.vx * -0.5 + (bx / bd) * 16;
+        this.vy = this.vy * -0.5 + (by / bd) * 16;
+        // 寿命快捷烧（:12501-12505）：localAI[0] += 20;对玩家无视线再 +40
+        const noLos = !canHit(game.world.store, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h);
+        const vms = 1 / (p.attackSpeedMult || 1);
+        this.lifeT += (noLos ? 60 : 20) / 60 / ((1 + vms) / 2);
+      }
+    }
+    // ---- 1457 EverySomeYoyoHits per-hit 族（Projectile.cs:13761-13870,批 D 落地）----
+    // 545 Cascade 每 2 击 → 1125 CascadeExplosion ×200%（208px 最近敌向,scale=
+    //   max(0.22+0.22r, dist/200) 钳 1.5,触发敌 localImmunity -1;ai[0]!=-2 门）
+    // 554 Kraken 每 4 击 → 3× 1135 KrakenWave ×50%（触发向 ±0.2π 扇,速 18+8r,
+    //   IDStatic 免疫 10t 三波共享）
+    // 546 Artery 每 3 击 → 5× 1134 CrystalShardMelee ×100%（矩形随机速 ±4,
+    //   IDStatic 免疫 20t 共享,首颗 ai[0]=0 其余 1）
+    // 555 Yelets 每 7 击 → 1130 TheEyeOfCthulhuDash ×200%（80px 最近敌向 ×14,
+    //   触发敌 localImmunity -1）
+    // 计数器 = Player.yoyoHitCounter（:1203 初始 -1 → 首击 -1%N≠0 不触发,原版同款）;
+    // 546/555 的伤害 ×2 乘区（:13428/:13434 countUp:false 只读）在本 tick dmgScale 侧
+    if (this.spawnShot) {
+      const victimId = (e as { id: number }).id;
+      // 最近敌搜索（:13765-13781 同构：CanBeChasedBy 口径 + LOS/noTileCollide + 排除触发敌;
+      // 距离 = Hitbox.ClosestPointInRect(Center)）
+      const closest = (b: { x: number; y: number; w: number; h: number }): [number, number, number] => {
+        const px = Math.max(b.x, Math.min(this.cx, b.x + b.w));
+        const py = Math.max(b.y, Math.min(this.cy, b.y + b.h));
+        return [px, py, Math.hypot(px - this.cx, py - this.cy)];
+      };
+      const findNearest = (maxD: number): { x: number; y: number; w: number; h: number; d: number } | null => {
+        let best: { x: number; y: number; w: number; h: number; d: number } | null = null;
+        for (const q of game.enemies()) {
+          const n = q as { x: number; y: number; w: number; h: number; id: number; dead: boolean;
+            maxHp: number; def?: { friendly?: boolean; critter?: boolean; noTileCollide?: boolean } };
+          if (n.dead || n.id === victimId || n.maxHp <= 5 || n.def?.friendly || n.def?.critter) continue;
+          if (!n.def?.noTileCollide
+            && !canHit(game.world.store, this.x, this.y, this.w, this.h, n.x, n.y, n.w, n.h)) continue;
+          const [, , d] = closest(n);
+          if (d < maxD) { maxD = d; best = { ...n, d }; }
+        }
+        return best;
+      };
+      const jit = () => (Math.random() * 2 - 1) * Math.PI * 2 * 0.025;   // NextFloatDirection×2π×0.025
+      if (this.projId === 545 && this.ai0 !== -2 && p.everySomeYoyoHits(2, true)) {
+        const t = findNearest(208);
+        let ang = Math.PI * 2 * Math.random();
+        let dist = 0;
+        if (t) { const [px, py, d] = closest(t); ang = Math.atan2(py - this.cy, px - this.cx); dist = d; }
+        let scale = 0.22 + 0.22 * Math.random();       // :13787 num46
+        if (scale < dist / 200) scale = dist / 200;    // :13789-13791
+        if (scale > 1.5) scale = 1.5;
+        const a = ang + jit();
+        this.spawnShot({ x: this.cx, y: this.cy, vx: Math.cos(a) * 1.1, vy: Math.sin(a) * 1.1,
+          projId: 1125, dmg: this.damage * 2, kb: this.knockback, scale, excludeId: victimId });
+      } else if (this.projId === 554 && p.everySomeYoyoHits(4, true)) {
+        const base = Math.atan2(ecy - this.cy, ecx - this.cx);   // :13805 spinningpoint2
+        const waveCd = new HitCooldown();                        // IDStatic 10（:10667）三波共享
+        for (const l of [-2, 0, 2]) {
+          const a = base + l * Math.PI * 2 * 0.05 + jit();
+          const spd = 18 + 8 * Math.random();                    // :13808（×(1-0×|l|)=1）
+          this.spawnShot({ x: this.cx, y: this.cy, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
+            projId: 1135, dmg: this.damage * 0.5, kb: this.knockback, sharedCd: waveCd });
+        }
+      } else if (this.projId === 546 && p.everySomeYoyoHits(3, true)) {
+        const shardCd = new HitCooldown();                       // IDStatic 20（:10653）五片共享
+        for (let m = 0; m < 5; m++) {
+          const vx0 = Math.random() * 8 - 4;                     // NextVector2Circular(8,8) 矩形均匀
+          const vy0 = Math.random() * 8 - 4;
+          const ja = jit();                                      // .RotatedBy(NextFloatDirection×2π×0.025)
+          this.spawnShot({ x: this.cx, y: this.cy,
+            vx: vx0 * Math.cos(ja) - vy0 * Math.sin(ja), vy: vx0 * Math.sin(ja) + vy0 * Math.cos(ja),
+            projId: 1134, dmg: this.damage, kb: this.knockback, sharedCd: shardCd });
+        }
+      } else if (this.projId === 555 && p.everySomeYoyoHits(7, true)) {
+        const t = findNearest(80);
+        let ang = Math.PI * 2 * Math.random();
+        if (t) { const [px, py] = closest(t); ang = Math.atan2(py - this.cy, px - this.cx); }
+        const a = ang + jit();
+        this.spawnShot({ x: this.cx, y: this.cy, vx: Math.cos(a) * 14, vy: Math.sin(a) * 14,
+          projId: 1130, dmg: this.damage * 2, kb: this.knockback, excludeId: victimId });
+      }
+    }
+  }
+}
+
+// ================= 悠悠球 per-hit 族伴生弹（1457 EverySomeYoyoHits 家族） =================
+
+/** YoyoShotProj——1457 新弹 1125/1130/1134/1135（Projectile.cs:10530-10670 SetDefaults +
+ *  AI_189 1125 支 :43034+ / AI_210 :37480-37570）。共同:SetDefaults tileCollide=false、
+ *  friendly/melee、无重力。逐型：
+ *   1125 CascadeExplosion（aiStyle 189）:32×32、alpha 255、hide=true（原版不画本体,
+ *    视觉=AI_189 首帧尘/软木爆炸）、5 帧 ×2t=10t 存活、scale=ai[1]、
+ *    usesLocalNPCImmunity+cooldown -1（每弹每敌一次;出生时对触发敌 localNPCImmunity=-1）
+ *   1130 TheEyeOfCthulhuDash（aiStyle 210）:100×100、penetrate -1、AI 20t 存活
+ *    （velocity ×0.92/t、MultiLerp 淡入淡出、frame 3-5 @6t）、local 免疫 -1
+ *   1134 CrystalShardMelee（aiStyle 24）:6×6、penetrate 1、light 0.5、alpha 50、
+ *    scale 1.2、timeLeft 600、usesIDStaticNPCImmunity+cooldown 20（同型共享 20t 静态免疫）
+ *   1135 KrakenWave（aiStyle 210）:100×100、penetrate -1、AI 同 1130（无帧动画,
+ *    rotation=速度向;首 6-7t 尘尾）、IDStatic 免疫 10（三波共享） */
+export interface YoyoShotSpec {
+  x: number; y: number;          // 出生中心（NewProjectile 居中语义,构造内换算盒左上）
+  vx: number; vy: number;
+  projId: number;
+  dmg: number; kb: number;
+  scale?: number;                // 1125/1130 的 ai[1]（缩放）
+  excludeId?: number;            // localNPCImmunity[victimIndex]=-1（触发敌免中本弹）
+  sharedCd?: HitCooldown;        // IDStatic 免疫共享（1134/1135 同型各弹共用一张表）
+}
+export class YoyoShotProj extends Entity {
+  damage: number;
+  knockback: number;
+  projId: number;
+  critChance = 0.04;
+  armorPen = 0;
+  meleeProj = true;
+  dead = false;
+  lightRGB: [number, number, number] | null = null;
+  life = 10;
+  private scale: number;
+  private excludeId: number;
+  private sharedCd: HitCooldown | null;
+  private ownCd = new HitCooldown();     // local 免疫（1125/1130 每弹一张）
+  private age = 0;                       // localAI[0]（AI_210 20t 寿命 / 1125 帧计数）
+  private frame = 0;
+  private frameCounter = 0;
+
+  constructor(spec: YoyoShotSpec) {
+    super();
+    const pd = projectileData(spec.projId);
+    this.w = pd?.width ?? 16; this.h = pd?.height ?? 16;
+    this.x = spec.x - this.w / 2; this.y = spec.y - this.h / 2;   // NewProjectile 居中(:10238)
+    this.vx = spec.vx; this.vy = spec.vy;
+    this.projId = spec.projId;
+    this.damage = Math.max(1, Math.trunc(spec.dmg));
+    this.knockback = spec.kb;
+    this.scale = spec.scale ?? 1;
+    this.excludeId = spec.excludeId ?? -1;
+    this.sharedCd = spec.sharedCd ?? null;
+    if (spec.projId === 1125) {
+      // AI_189 :43037 soundDelay==0 首帧 SoundID.DD2_ExplosiveTrapExplode（本仓
+      // sfx 表无 DD2 键 → 兜 'explosion' 近似,登记）
+      this.life = 10;                      // 5 帧 ×2t（:43056-43063 frame>=5 → Kill）
+    } else if (spec.projId === 1130 || spec.projId === 1135) {
+      this.life = 20;                      // AI_210 :37516/:37540 localAI[0]>=20 → Kill
+    } else {
+      this.life = pd?.timeLeft ?? 600;     // 1134 timeLeft 600（:10650）
+    }
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.age++;
+    if (--this.life <= 0) { this.dead = true; return; }
+    if (this.projId === 1125) {
+      // AI_189 1125 支：首帧尘/软木爆（:43070-43100,20 尘 6 号 + 烟 31 + gore 61-63——
+      // gore 池本仓无 API,登记）;scale=ai[1]（视觉缩放,本体不绘制）
+      if (this.age === 1) {
+        game.spawnParticles(this.cx, this.cy, '#F0A040', 14, 3 * this.scale, { life: 22, grav: 0.06, damp: 0.95 });
+        game.spawnParticles(this.cx, this.cy, '#807868', 8, 2 * this.scale, { life: 30, grav: -0.01, damp: 0.96 });
+      }
+    } else if (this.projId === 1130 || this.projId === 1135) {
+      // AI_210（:37481-37570）：velocity ×0.92/t;1130 rotation=速度向−π/2、
+      // frame 3-5 @6t;1135 rotation=速度向 + 首 20/3 t 每帧 8 尘（33 号,1/3 换 302）
+      this.vx *= 0.92; this.vy *= 0.92;
+      if (this.projId === 1130) {
+        this.frameCounter++;
+        if (this.frameCounter >= 6) { this.frameCounter = 0; this.frame++; }
+        if (this.frame < 3) this.frame = 3;
+      } else if (this.age <= 6) {
+        game.spawnParticles(this.cx, this.cy, '#C0C8E0', 3, 1.4, { life: 14, grav: 0, damp: 0.92 });
+      }
+    }
+    // ---- 命中（Damage 通用管线：盒相交 → hurt;免疫表按型）----
+    const cd = this.sharedCd ?? this.ownCd;
+    cd.tick();
+    this.ownCd.tick();
+    for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean };
+      if (e.dead) continue;
+      if (e.id === this.excludeId) continue;                 // localNPCImmunity[victim]=-1
+      if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+      const effCd = this.sharedCd ? cd : this.ownCd;         // IDStatic 型走共享表
+      if (!effCd.ready(e.id, this.sharedCd ? (this.projId === 1134 ? 20 : 10) : 9999)) continue;
+      const crit = Math.random() < this.critChance;
+      const dmg = crit ? this.damage * 2 : this.damage;
+      const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
+      playEnemyHitSound(game, e);
+      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit);
+      game.addDamageNumber(this.cx, this.cy - 8, dmg, crit, crit ? '#FFD040' : '#FF7060');
+      if (this.projId === 1134) break;                       // penetrate 1（:10643）
+    }
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    // 1125 hide=true（:10540）原版本体不绘制（视觉=尘爆）——跳过
+    if (this.projId === 1125) return;
+    const rot = this.projId === 1130
+      ? Math.atan2(this.vy, this.vx) - Math.PI / 2           // :37484 rotation=vel−π/2
+      : Math.atan2(this.vy, this.vx);                        // 1135/1134 =vel（:37536）
+    if (this.projId === 1130) {
+      // 6 帧竖条（projFrames[1130]=6,Main.cs:8866）——drawProj 无帧参,手绘
+      const ctx = r.ctx;
+      const img = projSprite(1130);
+      if (!ctx || !img || !(img.width > 0)) return;
+      const fh = img.height / 6;
+      ctx.save();
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(rot);
+      ctx.globalAlpha = 1 - this.age / 20;
+      ctx.drawImage(img, 0, Math.round(this.frame * fh), img.width, Math.round(fh),
+        -img.width / 2, -fh / 2, img.width, fh);
+      ctx.restore();
       return;
     }
-    this.counterweight?.(ecx, ecy, this.damage, this.knockback);   // :12482
-    this.dir = ecx < p.cx ? -1 : 1;   // :12484-12489
-    if (this.ai0 >= 0) {
-      // 活跃态命中反弹（:12490-12500）：v×-0.5 + 离敌向 ×16
-      let bx = this.cx - ecx, by = this.cy - ecy;
-      const bd = Math.hypot(bx, by) || 1;
-      this.vx = this.vx * -0.5 + (bx / bd) * 16;
-      this.vy = this.vy * -0.5 + (by / bd) * 16;
-      // 寿命快捷烧（:12501-12505）：localAI[0] += 20;对玩家无视线再 +40
-      const noLos = !canHit(game.world.store, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h);
-      const vms = 1 / (p.attackSpeedMult || 1);
-      this.lifeT += (noLos ? 60 : 20) / 60 / ((1 + vms) / 2);
-    }
+    drawProj(r, cam, this, this.projId, rot, this.projId === 1134 ? '#E0C0FF' : '#8090E0',
+      this.projId === 1134 ? 0.8 : Math.max(0, 1 - this.age / 20));
   }
 }
 

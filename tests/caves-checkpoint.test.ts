@@ -140,17 +140,29 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
     out.set(name, hashGrids(st)); outWall.set(name, hashWalls(st));
     if (streamProbe) console.log(`STREAM ${name}|${streamHash()}`);
     // 网格导出钩子(对账插桩:dormant——__cavesGridExport 存在时 dump 指定检查点的 typ/act)
+    // ★FFFFFF：at 支持逗号多名（落 `${dir}-${name}.*`）；单名旧格式（`${dir}.*`）兼容
     const ex = (globalThis as { __cavesGridExport?: { at: string; dir: string } }).__cavesGridExport;
-    if (ex && ex.at === name) {
+    if (ex && ex.at.split(',').includes(name)) {
       const n = st.w * st.h;
       const typ = Buffer.alloc(n * 2), act = Buffer.alloc(n), wal = Buffer.alloc(n * 2);
       for (let i = 0; i < n; i++) { typ.writeUInt16LE(st.type[i] & 0xffff, i * 2); act[i] = st.flags[i] ? 1 : 0; wal.writeUInt16LE(st.wall[i] & 0xffff, i * 2); }
       const { writeFileSync } = require('node:fs') as typeof import('node:fs');
-      writeFileSync(`${ex.dir}.typ`, typ); writeFileSync(`${ex.dir}.act`, act); writeFileSync(`${ex.dir}.wal`, wal);
-      writeFileSync(`${ex.dir}.liq`, st.liquid);   // HHHH 批诊断追加：液体通道导出（settle2 liq 对拍）
+      const dir = ex.at.split(',').length > 1 ? `${ex.dir}-${name}` : ex.dir;
+      writeFileSync(`${dir}.typ`, typ); writeFileSync(`${dir}.act`, act); writeFileSync(`${dir}.wal`, wal);
+      writeFileSync(`${dir}.liq`, st.liquid);   // HHHH 批诊断追加：液体通道导出（settle2 liq 对拍）
       // granite 首红猎杀（2026-08-17）：坡位/半砖通道一并导出（BuildMagmaMap 的
       // SolidTile 谓词 slope 敏感——granite 红裁决需六通道）
-      writeFileSync(`${ex.dir}.slope`, st.slope); writeFileSync(`${ex.dir}.half`, st.half);
+      writeFileSync(`${dir}.slope`, st.slope); writeFileSync(`${dir}.half`, st.half);
+      // ★FFFFFF：帧通道导出（EE_NEWARMS 臂读帧→帧债显影；65535=-1 语义两侧同构）
+      { const fx = Buffer.alloc(n * 2), fy = Buffer.alloc(n * 2);
+        for (let i = 0; i < n; i++) { fx.writeUInt16LE(st.frameX[i] & 0xffff, i * 2); fy.writeUInt16LE(st.frameY[i] & 0xffff, i * 2); }
+        writeFileSync(`${dir}.frx`, fx); writeFileSync(`${dir}.fry`, fy); }
+    }
+    // ★FFFFFF：逐掷账追踪窗钩子（dormant——__cavesTrace 存在时命中名置全局 trace 开关；
+    //   探针 _ffff1 在 UnifiedRandom 原型上挂账本，读此开关决定是否记账）
+    const tr = (globalThis as { __cavesTrace?: { onAt: string; flag: string } }).__cavesTrace;
+    if (tr && tr.onAt.split(',').includes(name)) {
+      (globalThis as { [k: string]: unknown })[tr.flag] = true;
     }
   };
   out.set('terrain', hashGrids(st));

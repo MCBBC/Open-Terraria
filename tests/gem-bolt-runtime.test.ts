@@ -165,7 +165,7 @@ describe('宝石七弹运行时: CanBounce(597 琥珀,HandleMovement :18112-1815
   //   点),自身位移是裸 `this.x += this.vx`(:1219)后查中心格;全仓对 Arrow 置这三旗的
   //   代码为零(仅 DD2 boss 自身 AI 写自己的 hitWall)。→ 琥珀法珠/琥珀长袍臂(597/4256)
   //   撞块直接走通用消亡口,无 ×0.8 法向反弹、无 penetrate--,1457 CanBounce 行为整段不可达。
-  it.skip('撞实心块:法向 ×0.8 反弹 + penetrate--(不消亡)——待产品修复后启用', () => {
+  it('撞实心块:法向 ×0.8 反弹 + penetrate--(不消亡)', () => {
     const st = new TileStore(200, 120);
     for (let x = 40; x < 60; x++) st.setTile(x, 49, 1);   // 弹飞行线 y 行铺实心
     const g = makeHooks([], st);
@@ -176,15 +176,6 @@ describe('宝石七弹运行时: CanBounce(597 琥珀,HandleMovement :18112-1815
     expect(a['pierce']).toBe(6);                          // penetrate--
   });
 
-  it('现状锚定(修复后本用例须反转):撞块即亡、无反弹——死代码证据', () => {
-    const st = new TileStore(200, 120);
-    for (let x = 40; x < 60; x++) st.setTile(x, 49, 1);
-    const g = makeHooks([], st);
-    const a = gemBolt(597, 40 * 16, 49 * 16 + 8, 8, 0, { canBounce: true }, { life: 100, pierce: 5 });
-    a.fixedUpdate(1 / 60, g);
-    expect(a.dead).toBe(true);                            // 走了通用消亡口
-    expect(a.vx).toBe(8);                                 // 速度未反弹
-  });
 });
 
 describe('宝石七弹运行时: ArPenSpread(125 红晶,构造期 armorPen+4)', () => {

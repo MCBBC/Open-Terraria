@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NPC_677 飞灵贴图帧切分工具</title>
+<style>
+body { margin: 0; padding: 20px; background: #1a1a2e; color: #ddd; font: 14px monospace; }
+h2 { color: #7eb8ff; margin: 16px 0 8px; }
+.hint { color: #aaa; font-size: 12px; margin: 4px 0; }
+.grid-wrap { margin: 10px 0; }
+.grid { display: inline-block; border: 1px solid #555; position: relative; }
+.cell { display: inline-block; vertical-align: top; position: relative; cursor: pointer; border: 1px solid #333; box-sizing: border-box; }
+.cell canvas { display: block; image-rendering: pixelated; }
+.cell .label { position: absolute; top: 2px; left: 2px; font-size: 10px; color: #0f0; background: rgba(0,0,0,.7); padding: 1px 4px; pointer-events: none; }
+.cell.sel { outline: 3px solid #ff0; outline-offset: -1px; }
+.cell.sel .label { color: #ff0; }
+#result { margin-top: 16px; padding: 10px; background: #0d0d1a; border: 1px solid #444; min-height: 40px; white-space: pre-wrap; font-size: 12px; color: #afa; }
+button { background: #3a5a8c; color: #fff; border: 0; padding: 6px 14px; cursor: pointer; margin: 4px 2px; font-size: 13px; }
+button:hover { background: #4a6a9c; }
+</style>
+</head>
+<body>
+<h2>NPC_677 飞灵贴图帧切分</h2>
+<div class="hint">原始贴图 88×110，逐 22×22 格展示（4 列 × 5 行）。点击选中你认为正确的飞灵帧，选完点"导出"把结果发给我。</div>
+<div class="grid-wrap"><div class="grid" id="grid"></div></div>
+<div>
+  <button onclick="exportSel()">📋 导出选中帧</button>
+  <button onclick="clearSel()">清除选择</button>
+</div>
+<div id="result"></div>
+<script>
+const W = 88, H = 110, CW = 22, CH = 22, COLS = 4, ROWS = 5;
+const img = new Image();
+img.src = '/sprites/vanilla/NPC_677.png';
+const selected = new Set();
+
+img.onload = () => {
+  const grid = document.getElementById('grid');
+  for (let gy = 0; gy < ROWS; gy++) {
+    for (let gx = 0; gx < COLS; gx++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.style.width = (CW * 8 + 2) + 'px';
+      cell.style.height = (CH * 8 + 2) + 'px';
+      const cv = document.createElement('canvas');
+      cv.width = CW * 8; cv.height = CH * 8;
+      const ctx = cv.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, gx * CW, gy * CH, CW, CH, 0, 0, CW * 8, CH * 8);
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = `列${gx} 行${gy}`;
+      cell.appendChild(cv);
+      cell.appendChild(label);
+      const key = gx + ',' + gy;
+      cell.onclick = () => {
+        if (selected.has(key)) { selected.delete(key); cell.classList.remove('sel'); }
+        else { selected.add(key); cell.classList.add('sel'); }
+      };
+      cell.dataset.key = key;
+      grid.appendChild(cell);
+    }
+    grid.appendChild(document.createElement('br'));
+  }
+};
+
+function exportSel() {
+  const keys = [...selected].sort();
+  const result = {
+    tool: 'faeling-frames',
+    textureSize: [W, H],
+    cellSize: [CW, CH],
+    selectedCells: keys.map(k => {
+      const [gx, gy] = k.split(',').map(Number);
+      return { col: gx, row: gy, x: gx * CW, y: gy * CH, w: CW, h: CH };
+    })
+  };
+  document.getElementById('result').textContent = JSON.stringify(result);
+  navigator.clipboard?.writeText(JSON.stringify(result)).then(() => {
+    document.getElementById('result').textContent += '\n✅ 已复制到剪贴板';
+  });
+}
+function clearSel() {
+  selected.clear();
+  document.querySelectorAll('.cell.sel').forEach(c => c.classList.remove('sel'));
+}
+</script>
+</body>
+</html>

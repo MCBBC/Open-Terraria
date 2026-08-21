@@ -27,6 +27,9 @@ export function remap(v: number, fromMin: number, fromMax: number, toMin: number
   return toMin + (toMax - toMin) * t;
 }
 
+import { getPass, defaultUniforms, SM2Pass, SM2Sampler } from '../fx/SM2Effect';
+import { GLAurora } from './GLAurora';
+
 /** Main.hslToRgb(Main.cs:47266-47296,byte 取整)——极光带色 hue 源 */
 export function hslToRgb255(hue: number, saturation: number, luminosity: number): [number, number, number] {
   const hue2rgb = (c: number, t1: number, t2: number) => {
@@ -65,7 +68,9 @@ export const AURORA_SEG = 140;
  *  ×20 频率本就 2.7 纹素/屏px(GPU 侧即缩小采样),q=0.25 加深至 ~10.7:1,
  *  由预混+线性升采样平滑,探针实测列标准差 7.4(帘状竖纹结构保留)、竖缝 0、
  *  4px 块边差 0.92 vs 块内 0.68(轻微,噪声内容下不可辨)。 */
-export const AURORA_QUALITY = 0.5;
+export const AURORA_QUALITY = 1.0;  // 全分辨率(1920×1080=2M px,~8ms/帧)——
+  // 曾 0.25/0.5:极光射线/色带渐变在半分辨率+放大后丢失=用户实拍"效果不对"
+  // 原版 GPU shader 逐屏像素连续采样,降采样无法复刻其柔滑渐变
 
 /** 月相(MoonPhase.cs:Full=0…ThreeQuartersAtRight=7) */
 export const enum AuroraMoonPhase {
@@ -353,6 +358,16 @@ export class AuroraSky {
   private sA = new Float32Array(SAMPLES);
   /** 逐像素烘焙离屏(grow-only 复用;α=255 黑底,'lighter' 加法直读 rgb) */
   private bandCanvas: HTMLCanvasElement | null = null;
+  /** SM2 字节码解释器上下文（Aurora pass .cso 逐指令执行） */
+  private sm2Pass: SM2Pass | null = null;
+  private _sm2C = new Float64Array(64 * 4);
+  private _sm2Regs = new Float64Array(32 * 4);
+  private _sm2Tex = new Float64Array(8 * 4);
+  private _sm2V0 = new Float64Array(8);
+  private _sm2O = new Float64Array(4);
+  /** WebGL2 极光渲染器（用户令：GPU shader 渲染替代 CPU 离屏） */
+  readonly glAurora = new GLAurora();
+  private glNoiseReady = false;
   private bandCtx: CanvasRenderingContext2D | null = null;
   private bandImg: ImageData | null = null;
   private bandBuf32: Uint32Array | null = null;
@@ -435,7 +450,90 @@ export class AuroraSky {
     // 纹理未就位帧跳过:加载窗 ≤ 数十 ms,而 skyOpacity 淡入 ≥ 数秒,视觉不可见;
     // 失败(资源缺失)则极光不画——像素公式的采样器是硬依赖,不做近似降级。
     if (noiseState !== 2) return;
+    if (noiseState !== 2) return;
+    // ★WebGL2 GPU 渲染路径（用户令：shader 反编译→GLSL→GPU 逐像素）——
+    //    computeBand 已产出带几何（sBotX/Y/sTopX/Y/sU/sD/sR/G/B/sA），
+    //    展开为三角形顶点传 GLAurora 用 GPU shader 逐像素渲染。
+    //    CPU rasterBands 保留为 GL 不可用时的兜底。
+    if (this.glAurora && !this.glAurora.unavailable) {
+      this.renderGL(ctx, viewW, viewH, m, globalTime, skyOpacity);
+      return;
+    }
     this.rasterBands(ctx, m, globalTime);
+  }
+
+  /** WebGL2 极光渲染：computeBand 几何 → 三角形顶点展开 → GLAurora GPU 渲染 */
+  private renderGL(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
+    m: AuroraMode, globalTime: number, skyOpacity: number): void {
+    // 需要外部 GL 上下文——缺则起自己的离屏 GL(成功后再取一次)
+    if (!this.glAurora['gl']) this.initOwnGL(viewW, viewH);
+    const gl: WebGL2RenderingContext | null = this.glAurora['gl'];
+    if (!gl) { this.rasterBands(ctx, m, globalTime); return; }
+
+    // 噪声贴图上传（首次）
+    if (!this.glNoiseReady && tex286 && tex287) {
+      this.glAurora.uploadNoise(gl, tex286, tex287);
+      this.glNoiseReady = true;
+    }
+
+    const sd = auroraSpecificData(m, 0);
+    const sdX = sd[0], sdY = sd[1];
+
+    // 展开三角形顶点：每带 140 段 × 2 三角 × 3 顶点 × 8 float
+    const SEG = AURORA_SEG;
+    const vertsPerBand = SEG * 6 * 8;
+    const totalVerts = m.bands * vertsPerBand;
+    const vdata = new Float32Array(totalVerts);
+    let vi = 0;
+    for (let i = 0; i < m.bands; i++) {
+      const base = i * (SEG + 1);
+      for (let k = SEG; k >= 1; k--) {
+        const o1 = base + k, o2 = base + k - 1;
+        const a1 = this.sA[o1], a2 = this.sA[o2];
+        if (a1 <= 0 && a2 <= 0) { vi += 48; continue; }
+        // 底部顶点 (grad=1)
+        const mkB = (o: number): number[] => [
+          this.sBotX[o], this.sBotY[o], this.sU[o], 1, this.sD[o],
+          (this.sR[o] * this.sA[o] | 0) / 255,
+          (this.sG[o] * this.sA[o] | 0) / 255,
+          (this.sB[o] * this.sA[o] | 0) / 255,
+        ];
+        // 顶部顶点 (grad=0, color2=白×num28)
+        const mkT = (o: number): number[] => [
+          this.sTopX[o], this.sTopY[o], this.sU[o], 0, this.sD[o],
+          (255 * this.sA[o] | 0) / 255,
+          (255 * this.sA[o] | 0) / 255,
+          (255 * this.sA[o] | 0) / 255,
+        ];
+        const b1 = mkB(o1), t1 = mkT(o1), b2 = mkB(o2), t2 = mkT(o2);
+        // 三角 1: b1, t1, b2
+        for (const v of [b1, t1, b2]) { vdata.set(v, vi); vi += 8; }
+        // 三角 2: t1, t2, b2
+        for (const v of [t1, t2, b2]) { vdata.set(v, vi); vi += 8; }
+      }
+    }
+    const vertexCount = vi / 8;
+    if (vertexCount === 0) return;
+
+    // GL 渲染到自己的 canvas 再 blit（极光画在 ctx 主画布上）
+    this.glAurora.render(gl, vdata, vertexCount, viewW, viewH, globalTime, sdX, sdY);
+    // blit GL canvas → 2D ctx（additive）
+    const glCanvas = this.glAurora['canvas'];
+    if (glCanvas) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(glCanvas, 0, 0, viewW, viewH);
+      ctx.drawImage(glCanvas, 0, 0, viewW, viewH);
+      ctx.restore();
+    }
+  }
+
+  private ownGL: WebGL2RenderingContext | null = null;
+  private initOwnGL(w: number, h: number): void {
+    if (this.ownGL) return;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    this.ownGL = c.getContext('webgl2');
   }
 
   /** 单带逐段几何/颜色(AuroraSky.cs:132-402 段循环 1:1;num* 命名保持反编译对照)。
@@ -639,6 +737,41 @@ export class AuroraSky {
     this.bandBuf32!.fill(0xFF000000, 0, ow * oh);          // α=255 黑底('lighter' 加 0)
 
     const V = this.triV;
+    // ★SM2 字节码解释器初始化（Aurora pass .cso 逐指令执行）
+    if (!this.sm2Pass) this.sm2Pass = getPass('Aurora');
+    const sm2Pass = this.sm2Pass;
+    const uniforms = defaultUniforms();
+    uniforms.uTime = globalTime;
+    let sm2C: Float64Array | null = null;
+    let sm2Samplers: SM2Sampler[] | null = null;
+    if (sm2Pass && tex286 && tex287) {
+      uniforms.uShaderSpecificData = [0, 0, 0, 0];  // per-band 覆写
+      sm2C = sm2Pass.setupConstants(uniforms);
+      sm2Samplers = [
+        (u: number, v: number): [number, number, number, number] => {
+          const x = u * 256 - 0.5, y = v * 256 - 0.5;
+          const ix = Math.floor(x), iy = Math.floor(y);
+          const fx = x - ix, fy = y - iy;
+          const x0 = ix & 255, x1 = (ix + 1) & 255;
+          const y0 = (iy & 255) * 256, y1 = ((iy + 1) & 255) * 256;
+          const a = tex286![y0 + x0], b = tex286![y0 + x1];
+          const c = tex286![y1 + x0], d = tex286![y1 + x1];
+          const r0 = a + (b - a) * fx, r1 = c + (d - c) * fx;
+          return [r0 + (r1 - r0) * fy, 0, 0, 1];
+        },
+        (u: number, v: number): [number, number, number, number] => {
+          const x = u * 128 - 0.5, y = v * 128 - 0.5;
+          const ix = Math.floor(x), iy = Math.floor(y);
+          const fx = x - ix, fy = y - iy;
+          const x0 = ix & 127, x1 = (ix + 1) & 127;
+          const y0 = (iy & 127) * 128, y1 = ((iy + 1) & 127) * 128;
+          const a = tex287![y0 + x0], b = tex287![y0 + x1];
+          const c = tex287![y1 + x0], d = tex287![y1 + x1];
+          const r0 = a + (b - a) * fx, r1 = c + (d - c) * fx;
+          return [r0 + (r1 - r0) * fy, 0, 0, 1];
+        },
+      ];
+    }
     for (let i = 0; i < m.bands; i++) {
       const sd = auroraSpecificData(m, i);
       const sdX = sd[0], sdY = sd[1];
@@ -667,8 +800,8 @@ export class AuroraSky {
         const w2 = (255 * a2 | 0) / 255; V[29] = w2; V[30] = w2; V[31] = w2;
         // PrepareIndices :135-140 前向两三角(后 6 索引=同三角背向,CullNone 重画
         // 两次 → 合成端 drawImage×2)
-        this.rasterTri(0, 8, 16, bx, by, q, ow, oh, sdX, sdY, c2x, c0x);
-        this.rasterTri(16, 8, 24, bx, by, q, ow, oh, sdX, sdY, c2x, c0x);
+        this.rasterTri(0, 8, 16, bx, by, q, ow, oh, sdX, sdY, c2x, c0x, sm2Pass, sm2C, sm2Samplers);
+        this.rasterTri(16, 8, 24, bx, by, q, ow, oh, sdX, sdY, c2x, c0x, sm2Pass, sm2C, sm2Samplers);
       }
     }
     g.putImageData(this.bandImg, 0, 0, 0, 0, ow, oh);
@@ -686,7 +819,9 @@ export class AuroraSky {
    *  属性沿跨度增量步进——属性精度 1e-12 级漂移,覆盖判定仍逐线精确求交)。 */
   private rasterTri(b0: number, b1: number, b2: number,
     bx: number, by: number, q: number, ow: number, oh: number,
-    sdX: number, sdY: number, c2x: number, c0x: number): void {
+    sdX: number, sdY: number, c2x: number, c0x: number,
+    sm2Pass: SM2Pass | null, sm2C: Float64Array | null,
+    sm2Samplers: SM2Sampler[] | null): void {
     const V = this.triV;
     const v0x = V[b0], v0y = V[b0 + 1], v1x = V[b1], v1y = V[b1 + 1], v2x = V[b2], v2y = V[b2 + 1];
     const e1x = v1x - v0x, e1y = v1y - v0y, e2x = v2x - v0x, e2y = v2y - v0y;
@@ -759,33 +894,39 @@ export class AuroraSky {
       let u2x = (u + sdY) * AURORA_F32.mul6 + c0x;         // :3136-3137
       let idx = (oy * ow + px0) * 4;
       for (let x = px0; x <= px1; x++, idx += 4) {
-        // grad = t0.y/t0.z(:3138 rcp + :3139 mul)
         const gv = tyv * (1 / tz);
-        // n1/n2:286 预混列横向 wrap 线性(:3142/:3143,v 方向已按带内常量预混)
-        const x1 = u1x * 256 - 0.5; let i1 = Math.floor(x1);
-        const f1v = x1 - i1;
-        const va = colR1[i1 & 255], vb = colR1[(i1 + 1) & 255];
-        const n1 = va + (vb - va) * f1v;
-        const x2 = u2x * 256 - 0.5; let i2 = Math.floor(x2);
-        const f2v = x2 - i2;
-        const wa = colR2[i2 & 255], wb = colR2[(i2 + 1) & 255];
-        const n2 = wa + (wb - wa) * f2v;
-        // n3:287 全二维 wrap 双线性(:3141/:3144)
-        const x3 = u * 128 - 0.5, y3 = gv * 128 - 0.5;
-        let i3 = Math.floor(x3); let j3 = Math.floor(y3);
-        const fx3 = x3 - i3, fy3 = y3 - j3;
-        const ta = t287[(j3 & 127) * 128 + (i3 & 127)], tb = t287[(j3 & 127) * 128 + ((i3 + 1) & 127)];
-        const tc = t287[((j3 + 1) & 127) * 128 + (i3 & 127)], td = t287[((j3 + 1) & 127) * 128 + ((i3 + 1) & 127)];
-        const n3 = ta + (tb - ta) * fx3 + ((tc + (td - tc) * fx3) - (ta + (tb - ta) * fx3)) * fy3;
-        // 强度链+色尾(:3145-3171;auroraIntensity 为唯一公式源,V8 内联热路径)
-        const k = auroraIntensity(n1, n2, n3, gv, sdY) * kx;
-        // ★加法写入(2026-08-21 极光阶梯伪影修复):原版 shader oC0.a≡0(:3170 字节码
-        //   实证)+FNA(One,InvSrcα)等效加法——重叠四边形【相加】非覆写;曾直写=
-        //   后带 k≈0 黑像素覆写先带亮像素=矩形缺口/阶梯(用户实拍)。α 恒 255
-        //   ('lighter' 复合按 rgb 加,α 无效)
-        data[idx] = Math.min(255, data[idx] + r * k * 255);
-        data[idx + 1] = Math.min(255, data[idx + 1] + g * k * 255);
-        data[idx + 2] = Math.min(255, data[idx + 2] + b * k * 255);
+        // ★SM2Effect 字节码解释器逐像素执行 .cso Aurora pass 实际指令（用户令替换手写公式）
+        if (sm2Pass && sm2C && sm2Samplers) {
+          const V0 = this._sm2V0, TX = this._sm2Tex;
+          V0[0] = r; V0[1] = g; V0[2] = b; V0[3] = 1;
+          TX[2] = tz;
+          const res = sm2Pass.execPixel(sm2C, this._sm2Regs, TX, V0, this._sm2O, u, gv, sm2Samplers);
+          if (res) {
+            data[idx] = Math.min(255, data[idx] + res[0] * 255);
+            data[idx + 1] = Math.min(255, data[idx + 1] + res[1] * 255);
+            data[idx + 2] = Math.min(255, data[idx + 2] + res[2] * 255);
+          }
+        } else {
+          // 兜底：手写公式（bake 失败时）
+          const x1 = u1x * 256 - 0.5; let i1 = Math.floor(x1);
+          const f1v = x1 - i1;
+          const va = colR1[i1 & 255], vb = colR1[(i1 + 1) & 255];
+          const n1 = va + (vb - va) * f1v;
+          const x2 = u2x * 256 - 0.5; let i2 = Math.floor(x2);
+          const f2v = x2 - i2;
+          const wa = colR2[i2 & 255], wb = colR2[(i2 + 1) & 255];
+          const n2 = wa + (wb - wa) * f2v;
+          const x3 = u * 128 - 0.5, y3 = gv * 128 - 0.5;
+          let i3 = Math.floor(x3); let j3 = Math.floor(y3);
+          const fx3 = x3 - i3, fy3 = y3 - j3;
+          const ta = t287[(j3 & 127) * 128 + (i3 & 127)], tb = t287[(j3 & 127) * 128 + ((i3 + 1) & 127)];
+          const tc = t287[((j3 + 1) & 127) * 128 + (i3 & 127)], td = t287[((j3 + 1) & 127) * 128 + ((i3 + 1) & 127)];
+          const n3 = ta + (tb - ta) * fx3 + ((tc + (td - tc) * fx3) - (ta + (tb - ta) * fx3)) * fy3;
+          const k = auroraIntensity(n1, n2, n3, gv, sdY) * kx;
+          data[idx] = Math.min(255, data[idx] + r * k * 255);
+          data[idx + 1] = Math.min(255, data[idx + 1] + g * k * 255);
+          data[idx + 2] = Math.min(255, data[idx + 2] + b * k * 255);
+        }
         u += du; tyv += dty; tz += dtz; r += dr; g += dg; b += db;
         u1x += du1; u2x += du2;
       }

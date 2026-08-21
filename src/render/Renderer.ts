@@ -4641,6 +4641,9 @@ export class Renderer {
       // NPC_690 贴图，而是按 ai[1] 样式从 Tiles_105 切 2×3 片 16×16 拼装
       // （direction==1 行 +3 镜像）；通用竖切路径会画错（json frames=1 单帧 28×38）
       if (e.vanillaId === 690) { this.drawStatueMimic(e); return; }
+      // 飞灵 677（DrawNPCDirect_Faeling :26306 自发光多层复合——不在光照前画，
+      // 移到光照合成后 7e 步骤专绘）
+      if (e.vanillaId === 677) return;
       // ---- 2D 网格贴图 NPC（原版 Main.cs DrawNPC 专属 case + FindFrame 专属 case）----
       // 这些表的动画帧是【cols×rows 网格】（Frame(cols,rows,fx,fy)），通用竖切路径
       // 会把整行/整条画出来——全部走 drawNpcGrid 切格 + 各自 FindFrame 帧状态机
@@ -5936,6 +5939,83 @@ export class Renderer {
    *  ai[1] 雕像样式从 Tiles_105 表切 2 列×3 行 16×16 片拼装——样式的表内步距
    *  36/54px（2×3 格 × 18px 含 1px 缝），direction==1 时行 +3（水平镜像区）；
    *  锚点 = Center+(0,-3)，逐片 origin (1-col, 1.5-row)×16（片内再内缩 1px 取整格） */
+  /** 飞灵 677 多层复合渲染（Main.cs:26306-26368 DrawNPCDirect_Faeling 1:1）。
+   *  贴图 88×110 = 4 列 × 5 行 22×22 格；4 列是 4 个【图层】非动画帧：
+   *  列 0 = 本体图案 / 列 1 = 翅膀 / 列 2 = 白色光晕体 / 列 3 = 闪烁 sparkle。
+   *  5 行 = 动画帧（FindFrame frame.Y 0..4 循环，frame.Y 是帧号）。
+   *  绘制顺序：①拖尾残影（旧位 × 列 2，彩虹色渐隐）②主光晕（列 2 行 0，白色加算）
+   *  ③翅膀（列 1 行 frame.Y，白 50%）④本体（列 0 行 frame.Y，彩虹 50%）
+   *  ⑤闪烁（列 3 行 whoAmI%5，脉冲缩放+彩虹）⑥辅助闪烁（列 3 行 1）。
+   *  在世界变换内调用——直接用世界坐标绘制。 */
+  private drawFaeling(e: Enemy, world: World) {
+    if (!this.atlas) return;
+    const img = this.atlas.ensureVImage('vanilla/NPC_677.png');
+    if (!img || !(img.width > 0)) return;
+    const ctx = this.ctx;
+    const CW = 22, CH = 22;
+    const tVis = performance.now() / 1000 * 60;
+    const num2 = ((e.id * 0.11 + tVis / 360) % 1 + 1) % 1;
+    const hsl = (h: number, s: number, l: number): [number, number, number] =>
+      Renderer.glowHslToRgb(((h % 1) + 1) % 1, s, l);
+    const animRow = Math.max(0, Math.min(4, Math.floor(e.animT / 3) % 5));
+    const scale = e.vanillaScale || 1;
+    const cell = (col: number, row: number) => ({ sx: col * CW, sy: row * CH, sw: CW, sh: CH });
+    const cx = e.cx, cy = e.cy;
+    const draw = (col: number, row: number, dx: number, dy: number,
+      r: number, g: number, b: number, alpha: number, sc: number, additive: boolean) => {
+      const c = cell(col, row);
+      ctx.save();
+      if (additive) ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      const w = CW * sc, h = CH * sc;
+      // 世界坐标直画（canvas 已在世界变换内），中心锚
+      ctx.drawImage(img, c.sx, c.sy, c.sw, c.sh, dx - w / 2, dy - h / 2, w, h);
+      ctx.restore();
+    };
+
+    const [br, bg, bb] = hsl(num2, 1, 0.65);
+
+    // ① 拖尾残影
+    const trailDepth = e.historyDepth();
+    const num4 = Math.max(0, trailDepth - 6);
+    const ox4 = e.histXAt(num4), oy4 = e.histYAt(num4);
+    const dist = Math.hypot(ox4 - e.x, oy4 - e.y);
+    let num9 = Math.max(0, Math.min(1, dist / Math.hypot(32, 16))) * 100;
+    num9 = Math.floor(num9 / 5) * 5 / 100;
+    const num7 = 32 * num9, num8 = 16 * num9;
+    for (let i = num4; i >= 5; i -= 3) {
+      if (i >= trailDepth) continue;
+      const ox = e.histXAt(i), oy = e.histYAt(i);
+      const num14 = Math.max(0, Math.min(1, i / Math.max(1, trailDepth)));
+      const num15 = 1 - num14;
+      const spin = Math.sin(e.id / 17 + tVis / 9 + num14 * 2 * Math.PI * 2) * num8;
+      const vx2 = ox - e.x + spin * Math.cos(Math.PI);
+      const vy2 = oy - e.y + (-num7) * Math.sin(Math.PI);
+      const [tr, tg, tb] = hsl(num2 + num15 * 0.5, 1, 0.5);
+      draw(2, 0, e.x + vx2, e.y + vy2, tr * 255, tg * 255, tb * 255, num14 * 0.16,
+        scale * Math.max(0, Math.min(2.5, num14 * num14 * 2.5)), false);
+    }
+
+    // ② 主光晕
+    draw(2, 0, cx, cy, 255, 255, 255, 1, scale, true);
+
+    // ③ 翅膀
+    draw(1, animRow, cx, cy, 255, 255, 255, 0.5, scale, false);
+
+    // ④ 本体
+    draw(0, animRow, cx, cy, br * 255, bg * 255, bb * 255, 0.5, scale, false);
+
+    // ⑤ 闪烁
+    const num16 = Math.max(0, Math.min(1, Math.sin(tVis / 60) * 0.3 + 0.3));
+    const num17 = 0.8 + Math.sin(tVis / 15 * Math.PI * 2) * 0.3;
+    const glowRow = e.id % 5;
+    const gr = (br + 127.5) / 1.5, gg = (bg + 127.5) / 1.5, gb = (bb + 127.5) / 1.5;
+    draw(3, glowRow, cx, cy, gr, gg, gb, num16, scale * num17, false);
+
+    // ⑥ 辅助闪烁
+    draw(3, 1, cx, cy, gr, gg, gb, num16, scale * num17, false);
+  }
+
   private drawStatueMimic(e: Enemy) {
     const ctx = this.ctx;
     if (!this.atlas) return;

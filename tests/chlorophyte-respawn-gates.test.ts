@@ -54,7 +54,7 @@ describe('1457 叶绿巨剑 1226 三连击(updateUse :7491 奖励击制)', () =>
   //   后果:①:7491 奖励击块死代码,chlorophyteBladeCounter 恒 0(×1.5 伤/×1.25 kb/
   //   (dir,0|1) 原版出手制全不生效);②弹走鼠标瞄准角 + 通用 pierce=1,非 1457 语义
   //   (1457:挥击动画 + 每挥射 1126,弹体 1456=229 → 1457=1126)。
-  it.skip('奖励击:counter 空 → ×1.5 伤 ×1.25 kb 水平出手,counter += dur×3——待产品修复后启用', () => {
+  it('奖励击:counter 空 → ×1.5 伤 ×1.25 kb 水平出手,counter += dur×3', () => {
     const { g, player, added } = chlorophyteGame(0);
     (g as unknown as { updateUse: (dt: number) => void }).updateUse(1 / 60);
     expect(added).toHaveLength(1);
@@ -65,7 +65,7 @@ describe('1457 叶绿巨剑 1226 三连击(updateUse :7491 奖励击制)', () =>
     expect(shot.vy).toBe(0);                                   // 奖励击水平出手 (dir,0)
     expect(player.chlorophyteBladeCounter).toBe(32 * 3);       // :49419-49421(useAnimation 32)
   });
-  it.skip('非奖励击:counter>0 → 原伤原 kb 向下出手 (dir,1),counter 不增', () => {
+  it('非奖励击:counter>0 → 原伤原 kb 向下出手 (dir,1),counter 不增', () => {
     const { g, player, added } = chlorophyteGame(96);
     (g as unknown as { updateUse: (dt: number) => void }).updateUse(1 / 60);
     const shot = added[0] as { damage: number; knockback: number; vx: number; vy: number };
@@ -75,27 +75,6 @@ describe('1457 叶绿巨剑 1226 三连击(updateUse :7491 奖励击制)', () =>
     expect(player.chlorophyteBladeCounter).toBe(96);
   });
 
-  it('现状锚定(修复后本用例须反转):combatWeapon(1226)=' +
-    "kind 'shot' → :7491 块不可达的根因", () => {
-    const cw = combatWeapon({ key: 'vi_1226_ChlorophyteClaymore' });
-    expect(cw?.kind).toBe('shot');        // melee+noMelee 落兜底(vanillaItemCombat.ts:253)
-    expect(cw?.shoot).toBe(229);
-  });
-  it('现状锚定:手持 1226 点击 → 走通用 shot 兜底(鼠标瞄准弹,无奖励击制)', () => {
-    const { g, player, added } = (() => {
-      const r = chlorophyteGame(0);
-      (r.g.input as { mouseY: number }).mouseY = 200;    // 鼠标指上方:兜底弹 vy<0
-      return r;
-    })();
-    (g as unknown as { updateUse: (dt: number) => void }).updateUse(1 / 60);
-    expect(added).toHaveLength(1);                       // 229 仍会射(useCombatWeapon 'shot' 兜底)
-    const shot = added[0] as { projId: number; damage: number; knockback: number; vy: number };
-    expect(shot.projId).toBe(229);
-    expect(shot.damage).toBe(95);                        // 无 ×1.5(奖励击制未接)
-    expect(shot.knockback).toBe(6);                      // 无 ×1.25
-    expect(shot.vy).toBeLessThan(0);                     // 鼠标瞄准角,非 (dir,0/1) 原版出手
-    expect(player.chlorophyteBladeCounter).toBe(0);      // 计数链死(恒 0,永不递减消费)
-  });
 });
 
 // ================= 复活跳过五门(AllowsRespawnTimerSkip :39264-39391) =================

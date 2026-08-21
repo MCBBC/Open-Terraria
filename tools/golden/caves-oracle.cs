@@ -22,6 +22,13 @@ const int BEACH_DISTANCE = 380; // WorldGen.beachDistance（cs:4102）
 
 var asm = Assembly.LoadFrom("/Users/vinlic/Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Terraria.exe");
 dynamic r = Activator.CreateInstance(asm.GetType("Terraria.Utilities.UnifiedRandom")!, seed)!;
+// ★FFFFFF：KILL_TRACE 逐杀账（诊断专用；须在一切 pass 前声明——statues 段 FC 引擎已活）
+System.IO.StreamWriter KILLW = null!;
+if (Environment.GetEnvironmentVariable("KILL_TRACE") is string kts0)
+{
+    KILLW = new System.IO.StreamWriter(kts0);
+    Console.WriteLine($"killtrace on -> {kts0}");
+}
 
 // ★每 pass 种子重播（2026-08-16 num4 破解收尾：RunPass 语义推广全链）——
 // 原版每个 GenPass 执行前 Main.rand = new UnifiedRandom(_seed)
@@ -33,7 +40,13 @@ dynamic r = Activator.CreateInstance(asm.GetType("Terraria.Utilities.UnifiedRand
 // （Desert 的 mound/entrance/hive、Dungeon 的 17 段、Shimmer 的 shell/pillars/
 // open）是【一个 pass 的内部段】，只在 pass 头重播一次。
 Type URType = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
-void Replay() => r = (dynamic)Activator.CreateInstance(URType, seed)!;
+// ★FFFFFF：ROLL_TRACE 逐掷账（诊断专用，默认关）——QRollWrap 包装在追踪窗内跨 Replay 保持
+void Replay()
+{
+    var nr = (dynamic)Activator.CreateInstance(URType, seed)!;
+    if (QRollWrap.On) { QRollWrap.Line("RESEED"); r = new QRollWrap { inner = nr }; }
+    else r = nr;
+}
 
 
 // ---- 网格（vanilla tile id；行主序 y*W+x，同 JS TileStore）----
@@ -79,16 +92,25 @@ void Checkpoint(string name)
     if (Environment.GetEnvironmentVariable("STREAM_PRINT") != null)
         Console.WriteLine($"STREAM {name}|{StreamHash():x8}");
     // GRID_DUMP=pyramids:/tmp/cs-pyr → 命中检查点时落 typ(LE16)/act/wal(LE16)/liq 裸数组（对拍用）
+    // ★FFFFFF：支持逗号多名 `a:/p1,b:/p2`（漂移带 6 名一次跑全落）——单名旧格式兼容
     var gd = Environment.GetEnvironmentVariable("GRID_DUMP");
-    if (gd != null && gd.Split(':')[0] == name)
+    if (gd != null)
     {
-        string p = gd.Split(':')[1];
-        File.WriteAllBytes(p + ".typ", ToBytes(typ));
-        File.WriteAllBytes(p + ".act", act);
-        File.WriteAllBytes(p + ".wal", ToBytes(wal));
-        File.WriteAllBytes(p + ".liq", liq);
-        File.WriteAllBytes(p + ".half", half); File.WriteAllBytes(p + ".slope", slope);   // A/B 诊断通道
-        Console.WriteLine($"griddump {name} -> {p}");
+        foreach (var pair in gd.Split(','))
+        {
+            var kv = pair.Split(':');
+            if (kv.Length == 2 && kv[0] == name)
+            {
+                string p = kv[1];
+                File.WriteAllBytes(p + ".typ", ToBytes(typ));
+                File.WriteAllBytes(p + ".act", act);
+                File.WriteAllBytes(p + ".wal", ToBytes(wal));
+                File.WriteAllBytes(p + ".liq", liq);
+                File.WriteAllBytes(p + ".half", half); File.WriteAllBytes(p + ".slope", slope);   // A/B 诊断通道
+                File.WriteAllBytes(p + ".frx", ToBytes(frX)); File.WriteAllBytes(p + ".fry", ToBytes(frY));   // ★FFFFFF：帧通道（EE_NEWARMS 臂读帧→帧债显影）
+                Console.WriteLine($"griddump {name} -> {p}");
+            }
+        }
     }
     // STATE_DUMP=dirtwallcleanup:/tmp/cs-st39 → 同上 + UnifiedRandom 内部态（结构段状态恢复对拍：
     // 上游 pass 多代理并发修改期，从该态直跑 #40-44 裁决，等价全链且不受上游 WIP 影响）
@@ -3506,9 +3528,134 @@ Replay(); // ▶pass 头重播：Webs cs:13659
 }
 Checkpoint("webs");
 
-// GrowAshTree —— JS TreePass.growTreeWithSettings(ASH_PROFILE) 哈希通道镜像。
-// 只需 type/active 落点一致 + 掷骰序一致（帧值不入哈希）：干身行循环的
-// num6(含冲突重掷)/num5/左右枝 k、tuft 双门、基座、树冠骰全部照 JS 顺序。
+// ★FFFFFF：干身帧表（TreePass.ts TRUNK，cs:30604-30700 同表）——EE_NEWARMS 臂读帧，
+//   帧债=臂误杀源（灰烬树 fx0 案：R1 cfx==0&&cfy<=130 误判孤立 → 树被杀）
+var TREE_TRUNK = new int[][] {
+    new[] { 0, 0 }, new[] { 0, 22 }, new[] { 0, 44 },
+    new[] { 0, 66 }, new[] { 0, 88 }, new[] { 0, 110 },
+    new[] { 22, 0 }, new[] { 22, 22 }, new[] { 22, 44 },
+    new[] { 44, 66 }, new[] { 44, 88 }, new[] { 44, 110 },
+    new[] { 22, 66 }, new[] { 22, 88 }, new[] { 22, 110 },
+    new[] { 88, 0 }, new[] { 88, 22 }, new[] { 88, 44 },
+    new[] { 66, 66 }, new[] { 66, 88 }, new[] { 66, 110 },
+    new[] { 110, 66 }, new[] { 110, 88 }, new[] { 110, 110 },
+    new[] { 0, 0 }, new[] { 0, 22 }, new[] { 0, 44 },
+    new[] { 0, 0 }, new[] { 0, 22 }, new[] { 0, 44 },
+};
+// TRUNK[num6][num5] → 平铺索引 num6*3+num5
+int TrunkFx(int num6, int num5) => TREE_TRUNK[num6 * 3 + num5][0];
+int TrunkFy(int num6, int num5) => TREE_TRUNK[num6 * 3 + num5][1];
+// ★FFFFFF：cs:30999 尾段 RangeFrame（JS genRangeFrame 镜像）——(x0-1..x1+1)×(y0-1..y1+1)
+//   逐格 TileFrame(reset=false)；184 苔芽每访恒掷 Next(3)、CheckTree 族重帧全分派
+void TreeRangeFrame(int x0, int y0, int x1, int y1)
+{
+    for (int cx = x0 - 1; cx <= x1 + 1; cx++)
+        for (int cy = y0 - 1; cy <= y1 + 1; cy++)
+            FcTileFrame(cx, cy);
+}
+
+
+bool fcReset = false;   // TileFrame resetFrame 通道（178 掷门）★FFFFFF 上移
+var FC_SOLID = new HashSet<int> {
+   0,1,2,6,7,8,9,10,22,23,25,30,37,38,39,40,41,43,44,45,
+   46,47,48,53,54,56,57,58,59,60,63,64,65,66,67,68,70,75,76,107,
+   108,109,111,112,115,116,117,118,119,120,121,122,123,127,130,137,138,140,145,146,
+   147,148,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,166,167,168,
+   169,170,175,176,177,179,180,181,182,183,188,189,190,191,192,193,194,195,196,197,
+   198,199,200,202,203,204,206,208,211,221,222,223,224,225,226,229,230,232,234,235,
+   248,249,250,251,252,253,255,256,257,258,259,260,261,262,263,264,265,266,267,268,
+   272,273,274,284,311,312,313,315,321,322,325,326,327,328,329,336,341,342,343,344,
+   345,346,347,348,350,351,357,365,366,367,368,369,370,371,381,383,384,385,387,388,
+   396,397,398,399,400,401,402,403,404,407,408,409,415,416,417,418,421,422,426,430,
+   431,432,433,434,446,447,448,449,450,451,458,459,460,472,473,474,476,477,478,479,
+   481,482,483,484,492,495,496,498,500,501,502,503,507,508,512,513,514,515,516,517,
+   534,535,536,537,539,540,541,546,557,562,563,566,618,625,626,627,628,633,635,641,
+   659,661,662,664,666,667,668,669,670,671,672,673,674,675,676,677,678,679,680,681,
+   682,683,684,685,686,687,688,689,690,691,692,708,711,712,713,714,715,716,717,718,
+   719,722,726,727,728,729,730,731,732,734,735,736,737,738,739,740,741,742,743,744,
+   745,746,747,748,749,750,
+};
+var FC_PLAT = new HashSet<int> {
+   14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,
+   297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,
+   414,427,435,436,437,438,439,469,532,533,538,542,544,550,551,553,554,555,556,558,
+   559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,
+   643,644,645,710,
+};
+
+// ★EEEEE 上移注：FC_* 表/fcSparse/fcDestroy 声明原在 HHHH FinalCleanup 段头，2026-08-19
+//   为 MicroBiomes 段（AAAAA 矿轨帧链 MbPlacePath→FcKillTile/FcTileFrame/
+//   FcSquareTileFrame）与 Statues 段（GGGGG statueFrameSweep→FcSquareTileFrame/
+//   FcSolidAllowBottom）两处前向引用上移至此（紧跟 FC_SOLID/FC_PLAT 表区）——局部
+//   变量须先声明后引用（局部函数可前向、变量不可）；纯表常量上移零语义变化。
+var FC_PLATFORMS = new HashSet<int> { 19, 427, 435, 436, 437, 438, 439 };   // TileID.Sets.Platforms
+var FC_BOULDERS = new HashSet<int> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716 };
+var FC_CLOUDS = new HashSet<int> { 189, 196, 460, 717, 718, 719 };
+var FC_PAINTINGS = new HashSet<int> { 245, 246, 240, 241, 242 };
+var FC_WALL_DUNGEON = new HashSet<int> { 7, 8, 9, 94, 95, 96, 97, 98, 99 };
+var FC_CONV_MOSS = new HashSet<int> { 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627 };
+var FC_MOSS_COLOR = new Dictionary<int, int> {
+    [179]=0,[512]=0,[180]=1,[513]=1,[181]=2,[514]=2,[182]=3,[515]=3,[183]=4,[516]=4,
+    [381]=5,[517]=5,[534]=6,[535]=6,[536]=7,[537]=7,[539]=8,[540]=8,[625]=9,[626]=9,[627]=10,[628]=10,
+};
+var FC_IS_VINE = new HashSet<int> { 52, 382, 62, 115, 205, 528, 636, 638 };
+var FC_TILE_TABLE = new HashSet<int> {
+   280,275,276,277,278,279,281,605,604,603,602,601,599,600,612,611,610,609,
+   608,606,607,558,554,553,551,550,542,413,309,297,296,645,643,644,632,640,
+   559,414,359,358,285,286,582,555,538,533,532,394,393,392,391,339,310,299,
+   298,629,619,556,544,364,363,362,361,710,376,380,14,469,18,19,114,101,87,
+   88,405,427,
+};
+var FC_NO_ATTACH = new HashSet<int> {
+   568,569,570,580,620,572,564,565,593,594,590,595,615,110,3,4,10,50,707,
+   20,19,13,14,469,486,488,704,487,489,490,15,497,16,134,17,18,21,467,441,
+   468,27,114,86,87,88,89,90,101,102,94,95,96,97,98,99,91,92,93,387,388,
+   427,390,
+};
+var FC_IS_DRIP = new HashSet<int> { 373, 374, 375, 461, 709 };
+var FC_C3X2_PLATFORM = new HashSet<int> { 285, 286, 298, 299, 310, 339, 538, 532, 544, 533, 555, 556, 582, 619, 629, 361, 362, 363, 364 };
+var FC_C3X2_TYPES = new HashSet<int> { 14, 17, 26, 77, 86, 87, 88, 89, 114, 133, 186, 187, 215, 217, 218, 237, 244, 285, 286, 298, 299, 310, 339, 361, 362, 363, 364, 377, 469, 532, 533, 538, 544, 555, 556, 582, 619, 629 };
+var FC_PLANTS = new HashSet<int> { 3, 24, 61, 71, 73, 74, 110, 113, 201, 637, 703 };
+var FC_IS_BEAM = new HashSet<int> { 124, 561, 574, 575, 576, 577, 578 };
+var FC_IS_TREE_TRUNK = new HashSet<int> { 5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634 };
+var FC_SPARSE_SKIP = new HashSet<int>(FC_C3X2_TYPES) { 165, 185, 28, 653, 240, 440, 485, 72 };
+
+// ═══ EEEEEE 批（2026-08-21）：引擎臂补全套件（AAAAAA-DDDDDD 镜像；表须先声明——
+//   settle2 块 LsKillTileGen 已改派 Fc 引擎，运行时先于本文件后段执行）═══
+var FC_TILE_SOLID_TOP = new HashSet<int> { 14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,414,427,469,532,533,538,542,544,550,551,553,554,555,556,558,559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,643,644,645,710 };
+var FC_NOT_REALLY_SOLID = new HashSet<int> { 387, 388, 10 };
+var FC_CHEST_PROTECT_2X2 = new HashSet<int> { 21, 467, 441, 468, 88, 470, 475 };
+var FC_INVALID_PILES = new HashSet<int> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716, 26, 237 };
+var FC_PILE_SNOW_ICE = new HashSet<int> { 147, 161, 162, 163, 164, 200, 224 };
+var FC_PILE_SAND = new HashSet<int> { 53, 112, 116, 234, 396, 397, 398, 399, 400, 401, 402, 403 };
+var FC_CHECK2XX_TYPES = new HashSet<int> { 104, 105, 207, 320, 337, 349, 356, 378, 410, 456, 465, 480, 489, 506, 509, 531, 545, 560, 591, 592, 657, 658, 663, 720, 721, 725 };
+var FC_FURNITURE_DUST = new HashSet<int> { 358,359,360,361,362,363,364,275,276,277,278,279,280,281,282,285,286,288,289,290,291,292,293,294,295,296,297,316,317,318,298,299,309,310,339,538,413,414,505,521,522,523,524,525,526,527,532,543,544,550,551,533,553,554,555,556,558,559,542,391,392,393,394,568,569,570,582,580,598,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,620,629,632,640,643,644,645,710 };
+var FC_TREE_GROUND_NORM = new HashSet<int> { 23, 661, 477, 60, 70, 109, 147, 199, 662, 492 };
+var FC_VANITY_GROUND = new HashSet<int> { 2, 109, 477, 492 };
+var FC_GEM_TREE_GROUND = new HashSet<int> { 1, 25, 117, 203, 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627 };
+var FC_ASH_TREE_GROUND = new HashSet<int> { 633 };
+var FC_TILE_STONE = new HashSet<int> { 63, 64, 65, 66, 67, 68, 130, 131, 566 };
+var FC_FORBIDS_SLOPING = new HashSet<int> { 21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597 };
+// CheckAlch 地基列（cs:45981；case 5 无岩浆枯杀款=XXXXX ②）
+var FC_ALCH_GROUND = new int[][] {
+    new int[] { 109, 2, 477, 492, 78, 380 },
+    new int[] { 60, 78, 380 },
+    new int[] { 0, 59, 78, 380 },
+    new int[] { 661, 662, 199, 203, 23, 25, 78, 380 },
+    new int[] { 53, 78, 380, 116 },
+    new int[] { 57, 633, 78, 380 },
+    new int[] { 78, 380, 147, 161, 163, 164, 200 },
+};
+int FcSandFallBase(int s) => s == 53 ? 397 : s == 112 ? 398 : s == 234 ? 399 : s == 224 ? 147 : s == 123 ? 1 : -1;
+bool FcIsSandFall(int s) => s == 53 || s == 112 || s == 234 || s == 224 || s == 123;
+bool fcSparse = false;
+bool fcDestroy = false;
+
+// ★FFFFFF：FC 引擎数据表上移（underworld 段 TreeRangeFrame 先于原声明位执行）
+
+// GrowAshTree —— JS TreePass.growTreeWithSettings(ASH_PROFILE) 镜像。
+// ★FFFFFF：帧写全量补齐（曾按「哈希通道镜像」只写 typ/act——EE_NEWARMS 臂读帧后
+//   零帧树被 R1/R4 误杀，piles 段 634 尘掷流分歧根因）。
 void GrowAshTree(int tx, int ty)
 {
     // 越过树苗（灰烬区无树苗 → 立即停）
@@ -3533,7 +3680,14 @@ void GrowAshTree(int tx, int ty)
             if (act[ei] == 0) continue;
             if (!EMPTY_ALLOW.Contains(typ[ei])) return;        // EmptyTileCheck 白名单
         }
-    void Put(int ax, int ay) { if (ax >= 0 && ax < W && ay >= 0 && ay < H) { typ[ay * W + ax] = 634; act[ay * W + ax] = 1; } }
+    void Put(int ax, int ay, int fx, int fy)
+    {
+        if (ax >= 0 && ax < W && ay >= 0 && ay < H)
+        {
+            typ[ay * W + ax] = 634; act[ay * W + ax] = 1;
+            frX[ay * W + ax] = (ushort)fx; frY[ay * W + ax] = (ushort)fy;   // ★FFFFFF：帧写补齐
+        }
+    }
     bool flagL = false, flagR = false;
     for (int i = num - height; i < num; i++)
     {
@@ -3544,22 +3698,33 @@ void GrowAshTree(int tx, int ty)
         flagL = false; flagR = false;
         if (num6 == 5 || num6 == 7) flagL = true;
         if (num6 == 6 || num6 == 7) flagR = true;
-        Put(tx, i);
-        if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx - 1, i); }   // 左枝 2 骰
-        if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx + 1, i); }   // 右枝 2 骰
+        Put(tx, i, TrunkFx(num6, num5), TrunkFy(num6, num5));
+        if (num6 == 5 || num6 == 7)                                                                 // 左枝 2 骰（cs:30741-30764）
+        {
+            int k = (int)r.Next(3); int f = (int)r.Next(3);
+            Put(tx - 1, i, f < 2 ? 44 : 66, f < 2 ? 198 + k * 22 : k * 22);
+        }
+        if (num6 == 6 || num6 == 7)                                                                 // 右枝 2 骰（cs:30766-30789）
+        {
+            int k = (int)r.Next(3); int f = (int)r.Next(3);
+            Put(tx + 1, i, f < 2 ? 66 : 88, f < 2 ? 198 + k * 22 : 66 + k * 22);
+        }
     }
     // 基座 tuft：两侧地面须灰烬草（GEM_TREE_FIT 口径此处即 633）——地狱腔天然全跳
     bool tuftFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && typ[num * W + tx + dx] == 633;
     bool tL = tuftFit(-1), tR = tuftFit(1);
     if ((int)r.Next(3) == 0) tL = false;
     if ((int)r.Next(3) == 0) tR = false;
-    if (tR) { int k = (int)r.Next(3); Put(tx + 1, num - 1); }
-    if (tL) { int k = (int)r.Next(3); Put(tx - 1, num - 1); }
+    if (tR) { int k = (int)r.Next(3); Put(tx + 1, num - 1, 22, 132 + k * 22); }
+    if (tL) { int k = (int)r.Next(3); Put(tx - 1, num - 1, 44, 132 + k * 22); }
     int baseK = (int)r.Next(3);                                 // ★cs:30906 无条件掷（与 JS TreePass 同步修正）
-    if (tL || tR) Put(tx, num - 1);
-    int crownFx = (int)r.Next(13) != 0 ? 22 : 0;               // 帧值不入哈希，仅保骰
+    if (tL && tR) Put(tx, num - 1, 88, 132 + baseK * 22);       // cs:30907-30959 三分支帧
+    else if (tL) Put(tx, num - 1, 0, 132 + baseK * 22);
+    else if (tR) Put(tx, num - 1, 66, 132 + baseK * 22);
+    int crownFx = (int)r.Next(13) != 0 ? 22 : 0;               // cs:30961 树冠
     int crownK = (int)r.Next(3);
-    Put(tx, num - height);
+    Put(tx, num - height, crownFx, 198 + crownK * 22);
+    TreeRangeFrame(tx - 2, num - height - 1, tx + 2, num + 1);   // ★FFFFFF：cs:30999 尾扫（曾整缺）
 }
 
 int[] uwConv={0}, uwCand={0}, uwGrow={0};
@@ -4713,12 +4878,16 @@ void Place3x2Altar(int px, int py, int style)
         if (typ[(py + 1) * W + i] == 138 || typ[(py + 1) * W + i] == 484 || (typ[(py + 1) * W + i] >= 664 && typ[(py + 1) * W + i] <= 665) || (typ[(py + 1) * W + i] >= 711 && typ[(py + 1) * W + i] <= 716)) ok = false;   // TileID.Sets.Boulders(TileID.cs:195)
     }
     if (!ok) return;
-    short f = (short)(54 * style);
     for (int i = 0; i < 3; i++)
         for (int j = 0; j < 2; j++)
         {
             int ti = (py - 1 + j) * W + (px - 1 + i);
             typ[ti] = 26; act[ti] = 1;
+            // ★FFFFFF：帧写补齐（JS place3x2 CorruptionPass:349-351 镜像）——曾整缺
+            //   → frX/frY 恒 0，EE_NEWARMS Check3x2 帧匹配失守 → 猩红逐组祭坛被误杀
+            //   （seed2 piles 段 12 格 N(2) 尘掷流分歧根因）
+            frX[ti] = (ushort)(54 * style + i * 18);
+            frY[ti] = (ushort)(j * 18);
         }
 }
 void AddShadowOrbGen(int ox, int oy, bool crimsonHeart)
@@ -6146,101 +6315,6 @@ int dgPosX, dgPosY, dgTopX;         // generatingDungeonPositionX/Y + generating
 int dgDungeonX = 0, dgDungeonY = 0; // Main.dungeonX/Y（老头锚；Early pit 陷阱 num44 下限用）
 
 var TREE_FIT = new HashSet<ushort> { 2, 23, 60, 70, 109, 147, 199, 477, 492, 633, 661, 662 };
-
-var FC_SOLID = new HashSet<int> {
-   0,1,2,6,7,8,9,10,22,23,25,30,37,38,39,40,41,43,44,45,
-   46,47,48,53,54,56,57,58,59,60,63,64,65,66,67,68,70,75,76,107,
-   108,109,111,112,115,116,117,118,119,120,121,122,123,127,130,137,138,140,145,146,
-   147,148,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,166,167,168,
-   169,170,175,176,177,179,180,181,182,183,188,189,190,191,192,193,194,195,196,197,
-   198,199,200,202,203,204,206,208,211,221,222,223,224,225,226,229,230,232,234,235,
-   248,249,250,251,252,253,255,256,257,258,259,260,261,262,263,264,265,266,267,268,
-   272,273,274,284,311,312,313,315,321,322,325,326,327,328,329,336,341,342,343,344,
-   345,346,347,348,350,351,357,365,366,367,368,369,370,371,381,383,384,385,387,388,
-   396,397,398,399,400,401,402,403,404,407,408,409,415,416,417,418,421,422,426,430,
-   431,432,433,434,446,447,448,449,450,451,458,459,460,472,473,474,476,477,478,479,
-   481,482,483,484,492,495,496,498,500,501,502,503,507,508,512,513,514,515,516,517,
-   534,535,536,537,539,540,541,546,557,562,563,566,618,625,626,627,628,633,635,641,
-   659,661,662,664,666,667,668,669,670,671,672,673,674,675,676,677,678,679,680,681,
-   682,683,684,685,686,687,688,689,690,691,692,708,711,712,713,714,715,716,717,718,
-   719,722,726,727,728,729,730,731,732,734,735,736,737,738,739,740,741,742,743,744,
-   745,746,747,748,749,750,
-};
-var FC_PLAT = new HashSet<int> {
-   14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,
-   297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,
-   414,427,435,436,437,438,439,469,532,533,538,542,544,550,551,553,554,555,556,558,
-   559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,
-   643,644,645,710,
-};
-
-// ★EEEEE 上移注：FC_* 表/fcSparse/fcDestroy 声明原在 HHHH FinalCleanup 段头，2026-08-19
-//   为 MicroBiomes 段（AAAAA 矿轨帧链 MbPlacePath→FcKillTile/FcTileFrame/
-//   FcSquareTileFrame）与 Statues 段（GGGGG statueFrameSweep→FcSquareTileFrame/
-//   FcSolidAllowBottom）两处前向引用上移至此（紧跟 FC_SOLID/FC_PLAT 表区）——局部
-//   变量须先声明后引用（局部函数可前向、变量不可）；纯表常量上移零语义变化。
-var FC_PLATFORMS = new HashSet<int> { 19, 427, 435, 436, 437, 438, 439 };   // TileID.Sets.Platforms
-var FC_BOULDERS = new HashSet<int> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716 };
-var FC_CLOUDS = new HashSet<int> { 189, 196, 460, 717, 718, 719 };
-var FC_PAINTINGS = new HashSet<int> { 245, 246, 240, 241, 242 };
-var FC_WALL_DUNGEON = new HashSet<int> { 7, 8, 9, 94, 95, 96, 97, 98, 99 };
-var FC_CONV_MOSS = new HashSet<int> { 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627 };
-var FC_MOSS_COLOR = new Dictionary<int, int> {
-    [179]=0,[512]=0,[180]=1,[513]=1,[181]=2,[514]=2,[182]=3,[515]=3,[183]=4,[516]=4,
-    [381]=5,[517]=5,[534]=6,[535]=6,[536]=7,[537]=7,[539]=8,[540]=8,[625]=9,[626]=9,[627]=10,[628]=10,
-};
-var FC_IS_VINE = new HashSet<int> { 52, 382, 62, 115, 205, 528, 636, 638 };
-var FC_TILE_TABLE = new HashSet<int> {
-   280,275,276,277,278,279,281,605,604,603,602,601,599,600,612,611,610,609,
-   608,606,607,558,554,553,551,550,542,413,309,297,296,645,643,644,632,640,
-   559,414,359,358,285,286,582,555,538,533,532,394,393,392,391,339,310,299,
-   298,629,619,556,544,364,363,362,361,710,376,380,14,469,18,19,114,101,87,
-   88,405,427,
-};
-var FC_NO_ATTACH = new HashSet<int> {
-   568,569,570,580,620,572,564,565,593,594,590,595,615,110,3,4,10,50,707,
-   20,19,13,14,469,486,488,704,487,489,490,15,497,16,134,17,18,21,467,441,
-   468,27,114,86,87,88,89,90,101,102,94,95,96,97,98,99,91,92,93,387,388,
-   427,390,
-};
-var FC_IS_DRIP = new HashSet<int> { 373, 374, 375, 461, 709 };
-var FC_C3X2_PLATFORM = new HashSet<int> { 285, 286, 298, 299, 310, 339, 538, 532, 544, 533, 555, 556, 582, 619, 629, 361, 362, 363, 364 };
-var FC_C3X2_TYPES = new HashSet<int> { 14, 17, 26, 77, 86, 87, 88, 89, 114, 133, 186, 187, 215, 217, 218, 237, 244, 285, 286, 298, 299, 310, 339, 361, 362, 363, 364, 377, 469, 532, 533, 538, 544, 555, 556, 582, 619, 629 };
-var FC_PLANTS = new HashSet<int> { 3, 24, 61, 71, 73, 74, 110, 113, 201, 637, 703 };
-var FC_IS_BEAM = new HashSet<int> { 124, 561, 574, 575, 576, 577, 578 };
-var FC_IS_TREE_TRUNK = new HashSet<int> { 5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634 };
-var FC_SPARSE_SKIP = new HashSet<int>(FC_C3X2_TYPES) { 165, 185, 28, 653, 240, 440, 485, 72 };
-
-// ═══ EEEEEE 批（2026-08-21）：引擎臂补全套件（AAAAAA-DDDDDD 镜像；表须先声明——
-//   settle2 块 LsKillTileGen 已改派 Fc 引擎，运行时先于本文件后段执行）═══
-var FC_TILE_SOLID_TOP = new HashSet<int> { 14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,414,427,469,532,533,538,542,544,550,551,553,554,555,556,558,559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,643,644,645,710 };
-var FC_NOT_REALLY_SOLID = new HashSet<int> { 387, 388, 10 };
-var FC_CHEST_PROTECT_2X2 = new HashSet<int> { 21, 467, 441, 468, 88, 470, 475 };
-var FC_INVALID_PILES = new HashSet<int> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716, 26, 237 };
-var FC_PILE_SNOW_ICE = new HashSet<int> { 147, 161, 162, 163, 164, 200, 224 };
-var FC_PILE_SAND = new HashSet<int> { 53, 112, 116, 234, 396, 397, 398, 399, 400, 401, 402, 403 };
-var FC_CHECK2XX_TYPES = new HashSet<int> { 104, 105, 207, 320, 337, 349, 356, 378, 410, 456, 465, 480, 489, 506, 509, 531, 545, 560, 591, 592, 657, 658, 663, 720, 721, 725 };
-var FC_FURNITURE_DUST = new HashSet<int> { 358,359,360,361,362,363,364,275,276,277,278,279,280,281,282,285,286,288,289,290,291,292,293,294,295,296,297,316,317,318,298,299,309,310,339,538,413,414,505,521,522,523,524,525,526,527,532,543,544,550,551,533,553,554,555,556,558,559,542,391,392,393,394,568,569,570,582,580,598,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,620,629,632,640,643,644,645,710 };
-var FC_TREE_GROUND_NORM = new HashSet<int> { 23, 661, 477, 60, 70, 109, 147, 199, 662, 492 };
-var FC_VANITY_GROUND = new HashSet<int> { 2, 109, 477, 492 };
-var FC_GEM_TREE_GROUND = new HashSet<int> { 1, 25, 117, 203, 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627 };
-var FC_ASH_TREE_GROUND = new HashSet<int> { 633 };
-var FC_TILE_STONE = new HashSet<int> { 63, 64, 65, 66, 67, 68, 130, 131, 566 };
-var FC_FORBIDS_SLOPING = new HashSet<int> { 21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597 };
-// CheckAlch 地基列（cs:45981；case 5 无岩浆枯杀款=XXXXX ②）
-var FC_ALCH_GROUND = new int[][] {
-    new int[] { 109, 2, 477, 492, 78, 380 },
-    new int[] { 60, 78, 380 },
-    new int[] { 0, 59, 78, 380 },
-    new int[] { 661, 662, 199, 203, 23, 25, 78, 380 },
-    new int[] { 53, 78, 380, 116 },
-    new int[] { 57, 633, 78, 380 },
-    new int[] { 78, 380, 147, 161, 163, 164, 200 },
-};
-int FcSandFallBase(int s) => s == 53 ? 397 : s == 112 ? 398 : s == 234 ? 399 : s == 224 ? 147 : s == 123 ? 1 : -1;
-bool FcIsSandFall(int s) => s == 53 || s == 112 || s == 234 || s == 224 || s == 123;
-bool fcSparse = false;
-bool fcDestroy = false;
 
 // —— ★NNNN 批：树族四件自 Trees pass 块上移至顶层（Dome 柱顶树在 Dungeon pass #
 //    36 消费 GrowTreeT——块内局部函数对块外不可见；`r` 捕获的是顶层 pass 活动流，
@@ -9019,7 +9093,11 @@ void DgPlaceDoorAt(int i2, int j2, int style)
     {
         int ti = (j2 + k) * W + i2;
         act[ti] = 1; typ[ti] = 10;
-        r.Next(3);                                            // frameX = Next(3)*18（PlaceDoor:31951 等）
+        // ★FFFFFF：帧写补齐（JS DungeonPass dgPlaceTileAt :2609-2612 镜像）——曾只掷不写
+        //   → frY 恒 0，EE_NEWARMS 门臂 FcCheckDoorClosed 锚上移一格误杀门体下 2 格
+        //   （seed2 (394,694-695) 绿砖门案，statues 段 A=2 基线根因）
+        frX[ti] = (ushort)(54 * (style / 36) + r.Next(3) * 18);
+        frY[ti] = (ushort)(54 * (style % 36) + (k + 1) * 18);
     }
 }
 // —— DungeonGlobalWallVariants（:1149-1252）——
@@ -10592,7 +10670,7 @@ uint StreamHash()
     // ★WWWWW（HHHHH 移交）：dungeon 段 r 已被换 DgCR 计数包装（:5759）——直读其
     //   SeedArray/inext 会 ArgumentException（STREAM_PRINT 在 dungeonL 首崩）。
     //   解包 inner 后再反射=DgStreamFNV/DgFlow 同款口径（零 DgCR 时行为不变）。
-    var rtS = ((object)r) is DgCR dcS ? dcS.inner : (object)r;
+    var rtS = ((object)r) is DgCR dcS ? dcS.inner : (((object)r) is QRollWrap qwS ? qwS.inner : (object)r);
     var sa = (int[])t.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rtS)!;
     var ix = (uint)t.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rtS)!;
     uint h = 0x811c9dc5;
@@ -10917,7 +10995,14 @@ void GrowGemTreeFn(int tx, int ty, int treeTile)
             if (act[ei] == 0) continue;
             if (!EMPTY_ALLOW.Contains(typ[ei])) return;         // EmptyTileCheck ignoreID=20
         }
-    void Put(int ax, int ay) { if (ax >= 0 && ax < W && ay >= 0 && ay < H) { typ[ay * W + ax] = (ushort)treeTile; act[ay * W + ax] = 1; } }
+    void Put(int ax, int ay, int fx, int fy)
+    {
+        if (ax >= 0 && ax < W && ay >= 0 && ay < H)
+        {
+            typ[ay * W + ax] = (ushort)treeTile; act[ay * W + ax] = 1;
+            frX[ay * W + ax] = (ushort)fx; frY[ay * W + ax] = (ushort)fy;   // ★FFFFFF：帧写补齐
+        }
+    }
     bool flagL = false, flagR = false;
     for (int i = num - height; i < num; i++)
     {
@@ -10928,22 +11013,33 @@ void GrowGemTreeFn(int tx, int ty, int treeTile)
         flagL = false; flagR = false;
         if (num6 == 5 || num6 == 7) flagL = true;
         if (num6 == 6 || num6 == 7) flagR = true;
-        Put(tx, i);
-        if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx - 1, i); }   // 左枝 2 骰
-        if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx + 1, i); }   // 右枝 2 骰
+        Put(tx, i, TrunkFx(num6, num5), TrunkFy(num6, num5));
+        if (num6 == 5 || num6 == 7)
+        {
+            int k = (int)r.Next(3); int f = (int)r.Next(3);
+            Put(tx - 1, i, f < 2 ? 44 : 66, f < 2 ? 198 + k * 22 : k * 22);
+        }
+        if (num6 == 6 || num6 == 7)
+        {
+            int k = (int)r.Next(3); int f = (int)r.Next(3);
+            Put(tx + 1, i, f < 2 ? 66 : 88, f < 2 ? 198 + k * 22 : 66 + k * 22);
+        }
     }
     // 基座 tuft（cs:30846-30861）：两侧草族才置位 + 各 1/3 概率抹除（2 骰无条件）
     bool tuftFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && TREE_FIT.Contains(typ[num * W + tx + dx]);
     bool tL = tuftFit(-1), tR = tuftFit(1);
     if ((int)r.Next(3) == 0) tL = false;
     if ((int)r.Next(3) == 0) tR = false;
-    if (tR) { int k = (int)r.Next(3); Put(tx + 1, num - 1); }
-    if (tL) { int k = (int)r.Next(3); Put(tx - 1, num - 1); }
+    if (tR) { int k = (int)r.Next(3); Put(tx + 1, num - 1, 22, 132 + k * 22); }
+    if (tL) { int k = (int)r.Next(3); Put(tx - 1, num - 1, 44, 132 + k * 22); }
     int baseK = (int)r.Next(3);                                 // ★cs:30906 无条件掷（基座干身帧骰）
-    if (tL || tR) Put(tx, num - 1);
+    if (tL && tR) Put(tx, num - 1, 88, 132 + baseK * 22);
+    else if (tL) Put(tx, num - 1, 0, 132 + baseK * 22);
+    else if (tR) Put(tx, num - 1, 66, 132 + baseK * 22);
     int crownFx = (int)r.Next(13) != 0 ? 22 : 0;                // cs:30961 树冠骰
     int crownK = (int)r.Next(3);
-    Put(tx, num - height);
+    Put(tx, num - height, crownFx, 198 + crownK * 22);
+    TreeRangeFrame(tx - 2, num - height - 1, tx + 2, num + 1);   // ★FFFFFF：cs:30999 尾扫（曾整缺）
 }
 void ShimmerOpeningFn(int direction, int X, int Y, int caveOpeningSize)
 {
@@ -11292,8 +11388,15 @@ bool PlaceDoorGen(int i, int j, int style)
     if (!InB(i, j - 2) || !InB(i, j + 2)) return false;
     if (act[(j - 2) * W + i] != 0 && SOLID.Contains(typ[(j - 2) * W + i]) && SolidTileGen(i, j + 2))
     {
-        r.Next(3); r.Next(3); r.Next(3);
-        for (int dy = -1; dy <= 1; dy++) { typ[(j + dy) * W + i] = 10; act[(j + dy) * W + i] = 1; }
+        // ★FFFFFF：帧写补齐（JS LivingTreePass placeDoorCore 镜像）——曾只掷不写
+        int fx0 = 54 * (style / 36), fy0 = 54 * (style % 36);
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            int v = r.Next(3);
+            typ[(j + dy) * W + i] = 10; act[(j + dy) * W + i] = 1;
+            frX[(j + dy) * W + i] = (ushort)(fx0 + v * 18);
+            frY[(j + dy) * W + i] = (ushort)(fy0 + (dy + 1) * 18);
+        }
         return true;
     }
     return false;
@@ -13388,6 +13491,14 @@ Replay(); // ▶pass 头重播：QuickCleanup cs:17987（island：#69 IslandHous
 Checkpoint("quickcleanup");
 StreamPt("quickcleanup");
 
+// ★FFFFFF：ROLL_TRACE 追踪窗开（beehives..microbiomes 六名逐掷账；诊断专用）
+if (Environment.GetEnvironmentVariable("ROLL_TRACE") is string qrt)
+{
+    QRollWrap.W = new System.IO.StreamWriter(qrt);
+    QRollWrap.On = true;
+    Console.WriteLine($"rolltrace on -> {qrt}");
+}
+
 // ═══════════════════ QQ 批追加区（2026-08-18）：Beehives→Piles→Trees→SettleLiquidsPart2→Cactus ═══════════════════
 // 协商约束：YY 独占 dungeon 段——本批全部新代码落在末尾追加区（quickcleanup 之后）。
 // ★Beehives 原版注册位 cs:16005（statues 16947 之前），此处受段位约束延后执行：
@@ -13571,6 +13682,18 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
     // HoneyPatchBiome.Place（cs:8-48）——★data 用有序 List+Contains 保 JS Set 插入序
     bool PlaceHoneyPatch(int ox, int oy)
     {
+        // ★FFFFFF：genFrameNeighbors 两模式（FinalCleanupPass.ts:578-586 镜像）——
+        //   setTile=中心+四邻全 reset=true；clearTile=四邻 reset=false（序 +x,-x,+y,-y）。
+        //   此前整缺 → 蜂蜜斑挖池/写块的邻格 frameImportant 击杀级联（树/坛/圣所族）丢失。
+        void HvFrameNbrSet(int fx, int fy)
+        {
+            FcTileFrame(fx, fy, true); FcTileFrame(fx + 1, fy, true); FcTileFrame(fx - 1, fy, true);
+            FcTileFrame(fx, fy + 1, true); FcTileFrame(fx, fy - 1, true);
+        }
+        void HvFrameNbrClear(int fx, int fy)
+        {
+            FcTileFrame(fx + 1, fy); FcTileFrame(fx - 1, fy); FcTileFrame(fx, fy + 1); FcTileFrame(fx, fy - 1);
+        }
         if (QQInW(ox, oy) && act[oy * W + ox] != 0 && HvSolidTile(ox, oy)) return false;   // 锚点实心拒
         int ry = -1;
         bool CondSolid(int px, int py)
@@ -13619,6 +13742,7 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
             {
                 int i = (ry + dy) * W + rx + dx;
                 typ[i] = 229; act[i] = 1; wal[i] = 0; liq[i] = 0; liqT[i] = 0; slope[i] = 0; half[i] = 0;
+                HvFrameNbrSet(rx + dx, ry + dy);       // ★FFFFFF：SetTile(229) setSelfFrames+setNeighborFrames
             }
         });
         // 圆(4,3) Blotches(2,0.3) + IsSolid + ClearTile + 掩码 [-6,6]×[0,3] 灌蜜
@@ -13640,6 +13764,7 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
                 if (!HvSolidOrSloped(rx + qx, ry + qy)) continue;
                 int i = (ry + qy) * W + rx + qx;
                 act[i] = 0; slope[i] = 0; half[i] = 0;     // ClearTile（幽灵 type 留）
+                HvFrameNbrClear(rx + qx, ry + qy);         // ★FFFFFF：ClearTile(frameNeighbors:true) 四邻
                 if (qx >= -6 && qx <= 6 && qy >= 0 && qy <= 3)
                 {
                     long k2 = HKey(qx, qy);
@@ -13663,6 +13788,7 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
             if (act[i] != 0) continue;                    // IsEmpty
             if (qx < -6 || qx > 6 || qy < 1 || qy > 3) continue;
             typ[i] = 59; act[i] = 1; wal[i] = 0; liq[i] = 0; liqT[i] = 0; slope[i] = 0; half[i] = 0;
+            HvFrameNbrSet(px, py);                         // ★FFFFFF：SetTile(59) setSelfFrames+setNeighborFrames
         }
         // All(data)@origin + Expand(1) + IsBelowHeight(含锚行) + IsNotSolid + NoLiquid(蜜) → 蜂壳 229
         foreach (var k2 in data)
@@ -13677,6 +13803,7 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
                     if (HvSolidOrSloped(px, py)) continue;
                     if (liq[i] > 0 && liqT[i] == 2) continue;
                     typ[i] = 229; act[i] = 1; wal[i] = 0; liq[i] = 0; liqT[i] = 0; slope[i] = 0; half[i] = 0;
+                    HvFrameNbrSet(px, py);                 // ★FFFFFF：SetTile(229) setSelfFrames+setNeighborFrames
                 }
         }
         QQAddProt(rx - 8, ry - 8, rx + 8, ry + 8, 0);
@@ -13738,12 +13865,19 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
             segEnds.Add(((int)Math.Floor(px2), (int)Math.Floor(py2)));
         }
         // FrameOutAllHiveContents（HiveBiome.cs:128-146）：±50 钳 [10,max-10) 行主序——wall 86 每格掷 Next(3)
+        // ★FFFFFF：补 tile 侧 SquareTileFrame（active-225 九宫）——JS genSquareTileFrame
+        //   的邻格 frameImportant 击杀级联（树 5/仙人掌 80 族，掷位零差）此前整段漏
+        //   转录 → oracle 蜂巢边树 41 格存活（seed2 (3619,342-349)/(3367,650-657)/
+        //   (3245,829-837) 三簇）而 JS 杀。须 EE_NEWARMS=1（case 5 树臂在门内）。
         {
             int fx0 = Math.Max(10, x - 50), fx1 = Math.Min(W - 10, x + 50);
             int fy0 = Math.Max(10, y - 50), fy1 = Math.Min(H - 10, y + 50);
             for (int ix = fx0; ix < fx1; ix++)
                 for (int iy = fy0; iy < fy1; iy++)
+                {
+                    if (act[iy * W + ix] != 0 && typ[iy * W + ix] == 225) FcSquareTileFrame(ix, iy);
                     if (wal[iy * W + ix] == 86) r.Next(3);
+                }
         }
         // 蜂蜜坠落块：每个段终点 2×2 实心处放封蜜块+凹槽
         foreach (var (ex2, ey2) in segEnds)
@@ -13854,18 +13988,64 @@ Replay(); // ▶pass 头重播：Piles cs:18900
         if (pileTrace) Console.Error.WriteLine($"PLT 3x2 ({ax},{ay}) t={type} st={style} ok={pr3}");
         return pr3;
     }
+    // ★FFFFFF：SolidTile2 坐标重载（cs:70497，SSSS 平台顶坡豁免）——此前误用
+    //   SolidTileAllowBottomSlope（cs:70211 无豁免、坡 3/4 放行）→ 平台顶坡地基上
+    //   JS 置堆/oracle 拒置（seed2 (4051,639) 首差掷 84 散射支）。
+    bool St2Pile(int ax, int ay)
+    {
+        if (!QQInW(ax, ay)) return false;
+        int i = ay * W + ax;
+        if (act[i] == 0) return false;
+        bool plat = FC_PLAT.Contains(typ[i]);
+        bool slopeOk = (plat && (slope[i] == 1 || slope[i] == 2)) || slope[i] == 0;
+        return (JGS(typ[i]) || plat) && slopeOk && half[i] == 0;
+    }
+    // InvalidTileForPilesOrSpeleothems（cs:39005）：active && Boulders
+    bool InvalidPilesP(int ax, int ay) => QQInW(ax, ay) && act[ay * W + ax] != 0 && BOULDERS_P.Contains(typ[ay * W + ax]);
+    int RawSheetAt(int ax, int ay) => QQInW(ax, ay) ? typ[ay * W + ax] : -1;   // 含 inactive 残型（cs:18989 命中判定）
     bool PlacePile3x2Core(int ax, int ay, ushort type, int style)
     {
-        for (int k = 0; k < 3; k++)
+        // ★FFFFFF：PlaceTile 前置清（cs:59497-59500，OOOO）——锚格 inactive 时清
+        //   type/帧/半砖/坡（残值 type 参与上游 rawSheetAt 命中判定须抹）
+        if (QQInW(ax, ay))
         {
-            for (int l = -1; l <= 0; l++)
-                if (!QQInW(ax + k, ay + l) || act[(ay + l) * W + ax + k] != 0) return false;
-            if (!SolidAllowBottom(ax + k, ay + 1)) return false;
+            int ti0 = ay * W + ax;
+            if (act[ti0] == 0) { typ[ti0] = 0; frX[ti0] = 0; frY[ti0] = 0; half[ti0] = 0; slope[ti0] = 0; }
         }
-        for (int k = 0; k < 3; k++)
-            for (int l = -1; l <= 0; l++)
-                SetTS(ax + k, ay + l, type, style * 54 + k * 18, (l + 1) * 18);
-        return true;
+        if (ax < 5 || ax > W - 5 || ay < 5 || ay > H - 5) return false;   // cs:52102 边距门
+        bool isPile = type == 186 || type == 187;
+        bool ok = true;
+        string why = "";
+        // ★FFFFFF：3×2 跨度=[x-1,x+1]（cs:52117 行主序 c∈{x-1,x,x+1}）——曾写
+        //   [ax,ax+2] 整族右移一格（JS placePile3x2 c=x-1..x+1, fx=base+(c-(x-1))*18）
+        for (int c = ax - 1; c <= ax + 1; c++)
+        {
+            for (int r2 = ay - 1; r2 <= ay; r2++)
+                if (!QQInW(c, r2) || act[r2 * W + c] != 0) { ok = false; why += $" occ{c},{r2}"; }   // 占用净空
+            if (isPile && InvalidPilesP(c, ay + 1)) { ok = false; why += $" bld{c}"; }   // cs:52141+52149
+            if (!St2Pile(c, ay + 1)) { ok = false; why += $" st2{c}"; }                 // cs:52156（平台顶坡豁免）
+        }
+        if (pileTrace && !ok)
+        {
+            string occ = "", bel = "";
+            for (int k = -1; k <= 1; k++)
+            {
+                int iA = (ay - 1) * W + ax + k, iB = ay * W + ax + k, iC = (ay + 1) * W + ax + k;
+                occ += $"{ax + k}:a{(act[iA] != 0 ? 1 : 0)}/{(act[iB] != 0 ? 1 : 0)} ";
+                bel += $"{ax + k}:t{typ[iC]} a{(act[iC] != 0 ? 1 : 0)} s{slope[iC]} h{half[iC]} plat{(FC_PLAT.Contains(typ[iC]) ? 1 : 0)} jgs{(JGS(typ[iC]) ? 1 : 0)} ";
+            }
+            Console.Error.WriteLine($"PLT FAIL ({ax},{ay}) [{why}] occ[{occ}] below[{bel}]");
+        }
+        if (ok)
+        {
+            for (int c = ax - 1; c <= ax + 1; c++)
+                for (int r2 = ay - 1; r2 <= ay; r2++)
+                    SetTS(c, r2, type, style * 54 + (c - (ax - 1)) * 18, r2 == ay - 1 ? 0 : 18);
+        }
+        // ★FFFFFF：case 分支尾帧（cs:60026，放置失败也跑）+ 成功尾帧（cs:60279-60285）
+        FcSquareTileFrame(ax, ay);
+        if (act[ay * W + ax] != 0) FcSquareTileFrame(ax, ay);
+        return ok;
     }
     int Attempts() => W / 2;                               // GetPileGenerationAttempts（cs:23873）
     bool OceanAt(int ax, int ay) => !(ay > (worldSurface + rockLayer) / 2.0 + 40) && (ax < BEACH_DISTANCE || ax > W - BEACH_DISTANCE);
@@ -13932,7 +14112,8 @@ Replay(); // ▶pass 头重播：Piles cs:18900
                     else
                     {
                         bool placedQ = !ShimmerAt(x, y) && PlacePile3x2(x, y, Pick(type), style);
-                        if (placedQ) flag = true;
+                        // ★FFFFFF：cs:18989 残值命中（rawSheetAt 含 inactive 残型；shimmer 拒置后残值同样命中）
+                        if (RawSheetAt(x, y) == 186 || RawSheetAt(x, y) == 187) flag = true;
                         if (flag && type == 186 && style <= 7) Scatter(x, y);
                     }
                 }
@@ -13962,7 +14143,7 @@ Replay(); // ▶pass 头重播：Piles cs:18900
                     if ((below == 57 || below == 58) && (int)r.Next(3) < 2) { type = 187; style = (int)r.Next(6, 9); }
                     if (below == 147 || below == 161 || below == 162) style = (int)r.Next(26, 32);
                     bool placedQ = PlacePile3x2(x, y, Pick(type), style);
-                    if (placedQ) flag = true;
+                    if (RawSheetAt(x, y) == 186 || RawSheetAt(x, y) == 187) flag = true;   // ★FFFFFF：残值命中
                     if (flag && type == 186 && style <= 7) Scatter(x, y);
                 }
             }
@@ -13996,7 +14177,7 @@ Replay(); // ▶pass 头重播：Piles cs:18900
                         || (ActAt(x + 1, y + 1) && SheetAt(x + 1, y + 1) == 2)) { type = 187; style = (int)r.Next(14, 17); }
                     if (below == 151 || below == 274) { type = 186; style = (int)r.Next(7); }
                     bool placedQ = style >= 0 && PlacePile3x2(x, y, Pick(type), style);
-                    if (placedQ) flag = true;
+                    if (RawSheetAt(x, y) == type) flag = true;   // ★FFFFFF：cs:19177 残值==type
                 }
             }
         }
@@ -14027,7 +14208,7 @@ Replay(); // ▶pass 头重播：Piles cs:18900
                         || (ActAt(x + 1, y + 1) && SheetAt(x + 1, y + 1) == 2)) { type = 187; style = (int)r.Next(14, 17); }
                     if (below == 151 || below == 274) { type = 186; style = (int)r.Next(7); }
                     bool placedQ = style >= 0 && PlacePile3x2(x, y, Pick(type), style);
-                    if (placedQ) flag = true;
+                    if (RawSheetAt(x, y) == type) flag = true;   // ★FFFFFF：cs:19254 残值==type
                     if (flag && style <= 7) Scatter(x, y);
                 }
             }
@@ -17820,6 +18001,9 @@ Replay(); // ▶MicroBiomes cs:21785
 }
 Checkpoint("microbiomes");
 StreamPt("microbiomes");
+// ★FFFFFF：追踪窗关（尾段 FC 掷流不入账）
+if (QRollWrap.On) { QRollWrap.On = false; QRollWrap.W.Dispose(); Console.WriteLine("rolltrace off"); }
+KILLW?.Flush(); KILLW = null;   // 置 null 关杀账（尾段 FC 扫仍走 FcKillTile，不可 Dispose 后复写）
 
 // ═════════ HHHH 批（2026-08-18）：Pass 105 FinalCleanup 逐格 TileFrame 扫掷 + ShimmerCleanUp ═════════
 // ZZZ 批 FinalCleanupPass.ts（+890 行扫掷）+ ShimmerCleanUp（cs:22639→34750）的 C# 镜像
@@ -17846,7 +18030,7 @@ bool FcSolid2(int x, int y)                        // SolidTile2（平台族补�
     int i = y * W + x;
     if (act[i] == 0) return false;
     int sh = typ[i];
-    return (FC_SOLID.Contains(sh) || FC_PLATFORMS.Contains(sh)) && slope[i] == 0 && half[i] == 0;
+    return (JGS((ushort)sh) || FC_PLATFORMS.Contains(sh)) && slope[i] == 0 && half[i] == 0;   // ★JS genSolidType||platforms
 }
 bool FcSolidTileP(int x, int y)                    // FinalCleanup solidTile（pristine+484+!platform）
 {
@@ -17856,38 +18040,39 @@ bool FcSolidTileP(int x, int y)                    // FinalCleanup solidTile（p
     int sh = typ[i];
     return FcTSolid(sh) && !FC_PLAT.Contains(sh) && half[i] == 0 && slope[i] == 0;
 }
-bool FcSolidAllowBottom(int x, int y)              // cs:70211
+bool FcSolidAllowBottom(int x, int y)              // cs:70211（★NNNN inActive 位 + KKKKK 口径）
 {
     if (!FcInB2(x, y)) return true;
     int i = y * W + x;
-    if (act[i] == 0) return false;
+    if (act[i] == 0 || inAct[i] != 0) return false;
     int sh = typ[i];
-    if (!(FC_SOLID.Contains(sh) || FC_PLAT.Contains(sh))) return false;
+    if (!(JGS((ushort)sh) || FC_PLAT.Contains(sh))) return false;   // ★JS genSolidType||platform（live 翻转表）
     int sl = slope[i];
     bool topSlope = sl == 1 || sl == 2;
     if (topSlope && !(FC_PLATFORMS.Contains(sh) && (frX[i] / 18 is >= 0 and <= 7 or >= 12 and <= 16 or >= 25 and <= 26))) return false;
     return half[i] == 0;
 }
-bool FcSolidAllowTop(int x, int y)                 // cs:70325
+bool FcSolidAllowTop(int x, int y)                 // cs:70325（★NNNN inActive 位）
 {
     if (!FcInB2(x, y)) return true;
     int i = y * W + x;
-    if (act[i] == 0) return false;
+    if (act[i] == 0 || inAct[i] != 0) return false;
     int sh = typ[i];
-    if (!(FC_SOLID.Contains(sh) || sh == 380)) return false;
+    if (!(JGS((ushort)sh) || sh == 380)) return false;              // ★JS genSolidType||380
     bool plat = FC_PLATFORMS.Contains(sh);
     bool bottomSlope = slope[i] == 3 || slope[i] == 4;
     return (!plat && !bottomSlope) || (plat && half[i] != 0);
 }
-bool FcSolidAllowSide(int x, int y, bool left)     // cs:70345/70365
+bool FcSolidAllowSide(int x, int y, bool left)     // cs:70345/70365（★KKKKK：L 排 {1,3}/R 排 {2,4}+inActive 位）
 {
     if (!FcInB2(x, y)) return true;
     int i = y * W + x;
-    if (act[i] == 0) return false;
+    if (act[i] == 0 || inAct[i] != 0) return false;
     int sh = typ[i];
-    if (!FC_SOLID.Contains(sh) || half[i] != 0) return false;
+    if (!JGS((ushort)sh) || half[i] != 0) return false;             // ★JS genSolidType
     if (FC_PLATFORMS.Contains(sh)) return false;
-    return left ? slope[i] != 2 : slope[i] != 1;
+    int sl = slope[i];
+    return left ? (sl != 1 && sl != 3) : (sl != 2 && sl != 4);
 }
 bool FcNActive(int x, int y) => FcAct(x, y) && (!FcInB2(x, y) || inAct[y * W + x] == 0);   // nactive（★NNNN：inActive 位=致动柱——Tower/Dome 致动柱在场后须查）
 bool FcAnchorSolidTile(int x, int y)               // AnchorValid(SolidTile)（cs:51866）
@@ -17895,7 +18080,7 @@ bool FcAnchorSolidTile(int x, int y)               // AnchorValid(SolidTile)（c
     if (!FcNActive(x, y)) return false;
     if (!FcInB2(x, y)) return false;
     int sh = typ[y * W + x];
-    if (!FC_SOLID.Contains(sh) || FC_PLAT.Contains(sh) || FC_NO_ATTACH.Contains(sh)) return false;
+    if (!JGS((ushort)sh) || FC_PLAT.Contains(sh) || FC_NO_ATTACH.Contains(sh)) return false;   // ★JS genSolidType
     return slope[y * W + x] == 0 && half[y * W + x] == 0;
 }
 void FcFlatten(int x, int y)
@@ -17940,6 +18125,9 @@ int FcDustAmount(int sheet, int fx)                // killTileDustAmount（cs:63
 }
 void FcDustRoll(int sheet, int fx)                 // MakeTileDust 每调的掷（cs:66744+；掷值只影响尘型→流位等价占位）
 {
+    // ★EEEEE 批引擎臂门：EE_NEWARMS=1 启用 AAAAAA-DDDDDD 全量臂+尘掷（ statues 段
+    //   尚差 kill-account 级对拍，默认关=已验证 70/78 态；转录体在本文件不丢）
+    if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "1") return;
     switch (sheet)
     {
         case 2: case 477: case 27: case 243: case 244: case 204: case 478:
@@ -17976,6 +18164,15 @@ void FcKillTile(int x, int y)                      // killTileGen（尘掷+setTi
     int i = y * W + x;
     if (act[i] == 0) return;
     int sheet = typ[i];
+    // ★FFFFFF：KILL_TRACE 逐杀账（诊断专用）——`K x y sheet` + 调用栈两帧（臂定位）
+    if (KILLW != null)
+    {
+        var st2 = new System.Diagnostics.StackTrace(1, false);
+        var frames = st2.GetFrames();
+        string caller = frames != null && frames.Length > 0 ? frames[0].GetMethod()?.Name ?? "?" : "?";
+        string caller2 = frames != null && frames.Length > 1 ? frames[1].GetMethod()?.Name ?? "?" : "?";
+        KILLW.WriteLine($"K {x} {y} {sheet} @{caller}<{caller2}");
+    }
     int fx = frX[i];
     int dust = FcDustAmount(sheet, fx);
     for (int k = 0; k < dust; k++) FcDustRoll(sheet, fx);
@@ -18056,7 +18253,7 @@ void FcCheckStal(int x, int j)                     // CheckStalactite 四分支�
     }
 }
 // ---- TileFrame 生成期（cs:82067）+ TileFrameImportant 分派（cs:85703+）----
-bool fcReset = false;                                  // TileFrame resetFrame 通道（178 掷门）
+// ★FFFFFF：fcReset 上移（TreeRangeFrame 于 underworld 段调用引擎，须先赋值）
 void FcTileFrame(int x, int y, bool reset = false)
 {
     fcReset = reset;
@@ -18074,7 +18271,7 @@ void FcTileFrame(int x, int y, bool reset = false)
 bool FcFrameImportant(int x, int y, int sh)
 {
     if (fcSparse && FC_SPARSE_SKIP.Contains(sh)) return true;   // 探针缺帧族跳过（_wwwrep 同构）
-    if (FC_PLATFORMS.Contains(sh)) { FcFramePlatform(x, y); return true; }   // ★AAAAAA：平台连接帧
+    if (FC_PLATFORMS.Contains(sh) && Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") { FcFramePlatform(x, y); return true; }
     switch (sh)
     {
         case 4: FcCheckTorch(x, y); return true;                             // ★AAAAAA：CheckTorch
@@ -18094,41 +18291,47 @@ bool FcFrameImportant(int x, int y, int sh)
         case 28: case 653: FcPot(x, y, sh); return true;
         case 240: case 440: Fc3x3Wall(x, y); return true;
         // ★DDDDDD：CheckSuper 通用臂（376 渔笼/443 间歇泉/444 蜂巢块/485）+ 画作墙检族
-        case 376: case 443: case 444: case 485: FcCheckSuper(x, y, sh); return true;
-        case 245: case 246: case 241: case 242: FcCheckWallArt(x, y, sh); return true;
+        case 376: case 443: case 444: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckSuper(x, y, sh); return true;
+        case 485: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckSuper(x, y, sh); else FcSuper485(x, y); return true;   // ★门：默认走旧 485 专臂，EE_NEWARMS=1 走通用臂
+        case 245: case 246: case 241: case 242: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckWallArt(x, y, sh); return true;
         case 136: FcFrame136(x, y); return true;
         case 129: case 149: FcFrame129(x, y); return true;
         case 529: FcFrame529(x, y); return true;
         case 81: FcFrame81(x, y); return true;
         // ★UUUU：178 宝石籽（reset 门掷）——FcTileFrame reset 参缺省 false
-        case 178: FcFrame178(x, y, fcReset); return true;
+        case 178: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcFrame178(x, y, fcReset); return true;
         // ★RRRR：门 + Check1x1 族
-        case 10: FcCheckDoorClosed(x, y); return true;
-        case 11: FcCheckDoorOpen(x, y); return true;
+        case 10: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckDoorClosed(x, y); return true;
+        case 11: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckDoorOpen(x, y); return true;
         case 36: case 135: case 141: case 210: case 239: case 428:
         case 593: case 624: case 650: case 656: case 700: case 701:
-            FcCheck1x1(x, y); return true;
+            if (Environment.GetEnvironmentVariable("EE_NO_1X1") == null) FcCheck1x1(x, y);
+            return true;
         // ★VVVVV：Check1x2 椅族 + CheckOrb 珠族
         case 15: case 20: case 216: case 338: case 390: case 493:
         case 497: case 590: case 595: case 615:
-            FcCheck1x2(x, y, sh); return true;
+            if (Environment.GetEnvironmentVariable("EE_NO_1X2") == null) FcCheck1x2(x, y, sh);
+            return true;
         case 12: case 31: case 639: case 696:
-            FcCheckOrb(x, y, sh); return true;
+            if (Environment.GetEnvironmentVariable("EE_NO_ORB") == null) FcCheckOrb(x, y, sh);
+            return true;
         // ★CCCCC/VVVVV/YYYYY/DDDDDD：Check2x2 双支派发
         case 138: case 411: case 484: case 752: case 751:
-            FcCheck2x2(x, y, sh); return true;
+            if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1" || Environment.GetEnvironmentVariable("EE_NO_2X2") != null) { }
+            else FcCheck2x2(x, y, sh);
+            return true;
         // ★YYYYY：CheckTree 树坍塌 + 观赏/宝石/灰烬树 + CheckChand 吊灯 + 向日葵
-        case 5: FcCheckTree(x, y); return true;
-        case 596: case 616: FcCheckTree(x, y, true); return true;
+        case 5: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckTree(x, y); return true;
+        case 596: case 616: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckTree(x, y, true); return true;
         case 583: case 584: case 585: case 586: case 587: case 588: case 589:
-            FcCheckTree(x, y, false, FC_GEM_TREE_GROUND); return true;
-        case 634: FcCheckTree(x, y, false, FC_ASH_TREE_GROUND); return true;
-        case 34: FcCheckChand(x, y, sh); return true;
-        case 27: FcCheckSunflower(x, y, sh); return true;
+            if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckTree(x, y, false, FC_GEM_TREE_GROUND); return true;
+        case 634: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckTree(x, y, false, FC_ASH_TREE_GROUND); return true;
+        case 34: if (Environment.GetEnvironmentVariable("EE_NO_CHAND") == null) FcCheckChand(x, y, sh); return true;
+        case 27: if (Environment.GetEnvironmentVariable("EE_NO_SUNF") == null) FcCheckSunflower(x, y, sh); return true;
         // ★KKKKK：CheckAlch 药草 + CheckJunglePlant
-        case 82: case 83: case 84: FcCheckAlch(x, y, sh); return true;
+        case 82: case 83: case 84: if (Environment.GetEnvironmentVariable("EE_NO_ALCH") == null) FcCheckAlch(x, y, sh); return true;
         case 233: case 236: case 238: case 702:
-            FcCheckJunglePlant(x, y, sh); return true;
+            if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckJunglePlant(x, y, sh); return true;
         case 324:
             if (!FcSolidAllowBottom(x, y + 1) || (FcAct(x, y + 1) && FC_BOULDERS.Contains(typ[(y + 1) * W + x]))) FcKillTile(x, y);
             return true;
@@ -18141,7 +18344,7 @@ bool FcFrameImportant(int x, int y, int sh)
         }
         default:
             if (FC_C3X2_TYPES.Contains(sh)) { Fc3x2(x, y, sh); return true; }
-            if (FC_CHECK2XX_TYPES.Contains(sh)) { FcCheck2xX(x, y, sh); return true; }   // ★KKKKK：2×N 竖排家具
+            if (FC_CHECK2XX_TYPES.Contains(sh) && Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") { FcCheck2xX(x, y, sh); return true; }   // ★KKKKK：2×N 竖排家具
             return false;
     }
 }
@@ -18338,7 +18541,8 @@ void Fc2x1(int x, int y, int sheet)                // Check2x1（cs:46989）
     bool ok = frX[y * W + x0 + 1] == frX[y * W + x0] + 18
         && typ[y * W + x0] == sheet && typ[y * W + x0 + 1] == sheet
         && act[y * W + x0] != 0 && act[y * W + x0 + 1] != 0;
-    if (sheet == 103)
+    bool eeLegacy = Environment.GetEnvironmentVariable("EE_NEWARMS") != "1";   // ★legacy 门=本批前 Fc2x1（29/103/462 同桌门、无 else 支/无 185 带/无尾双帧）
+    if (sheet == 103 && !eeLegacy)
     {
         // ★批4 review P1-2（1457 cs:47417-47430）：case103=桌面门【或】AnchorValid(Table)
         //   逃生门（两底格各判,短路序同原版）
@@ -18359,12 +18563,12 @@ void Fc2x1(int x, int y, int sheet)                // Check2x1（cs:46989）
                 || slope[bi] == 1 || slope[bi] == 2) ok = false;
         }
     }
-    else if (!FcSolidAllowBottom(x0, y + 1) || !FcSolidAllowBottom(x0 + 1, y + 1))
+    else if (!eeLegacy && (!FcSolidAllowBottom(x0, y + 1) || !FcSolidAllowBottom(x0 + 1, y + 1)))
     {
         // ★AAAAAA：cs:47039-47048 else 支——非桌族双底格 SolidTileAllowBottomSlope 支撑门
         ok = false;
     }
-    if (sheet == 185)
+    if (!eeLegacy && sheet == 185)
     {
         // cs:47051-47090：草地变体转化 + 变体带号底格雪/沙族门
         int li = y * W + x0, ri = y * W + x0 + 1;
@@ -18396,11 +18600,10 @@ void Fc2x1(int x, int y, int sheet)                // Check2x1（cs:46989）
         if (typ[y * W + xx] == sheet && act[y * W + xx] != 0) FcKillTile(xx, y);
     // ★KKKKK：185 内容掉落掷（cs:47135-47232）——生成期 noItem 无产物但 genRand
     //   实参先求值必耗掷（六带值域照原文）
-    if (sheet == 185) FcPileDropRolls(dropFx);
+    if (!eeLegacy && sheet == 185) FcPileDropRolls(dropFx);
     fcDestroy = false;
     // 尾双 SquareTileFrame（cs:47366-68）——KillTile 尾级联之外的两次九宫重访
-    FcSquareTileFrame(x0, y);
-    FcSquareTileFrame(x0 + 1, y);
+    if (!eeLegacy) { FcSquareTileFrame(x0, y); FcSquareTileFrame(x0 + 1, y); }
 }
 
 // Check2x1 type==185 内容掉落掷（cs:47137-47232）——掷序/值域 1:1
@@ -18497,7 +18700,8 @@ void FcPot(int x, int y, int sheet)                // CheckPot（cs:56807）
     //   SpawnThingsFromPot 头早退（cs:57185）零掷、653 大罐 Item 分支零掷，唯
     //   Gore switch 三档照掷：num4 25-27→2×Next(217,220)；28-30→2×Next(315,317)；
     //   31-33→Next(2,4)+次×Next(6)（m 链轨巷罐群后 vanilla 'b 2 5+a 6×4' 实证）
-    if (num4 >= 25 && num4 <= 27) { r.Next(217, 221); r.Next(217, 221); }
+    if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "1") { /* 默认=本批前无 Gore 掷 */ }
+    else if (num4 >= 25 && num4 <= 27) { r.Next(217, 221); r.Next(217, 221); }
     else if (num4 >= 28 && num4 <= 30) { r.Next(315, 318); r.Next(315, 318); }
     else if (num4 >= 31 && num4 <= 33)
     {
@@ -19099,6 +19303,8 @@ void FcCheckTree(int x, int y, bool vanity = false, HashSet<int>? groundSet = nu
     {
         if (dead) return;
         dead = true; cfx = -1; cfy = -1;
+        if (Environment.GetEnvironmentVariable("PILE_TRACE") != null)
+            Console.Error.WriteLine($"TREE-KILL ({x},{y}) self{self} fx{frameX0} fy{frameY0} L{num2} R{num3} U{num} D{num4} gOk{groundOk} van{vanity} gs{(groundSet != null ? "ash/gem" : "-")}");
         FcKillTile(x, y);
     }
     if (!groundOk && num4 != self
@@ -19450,7 +19656,12 @@ void Fc3x2(int x, int y, int sheet)                // Check3x2（cs:49190）
             int ki = l * W + k;
             if (act[ki] == 0 || typ[ki] != sheet
                 || frX[ki] != (k - x0) * 18 + styleCol * 54
-                || frY[ki] != (l - y0) * 18 + num3 * 36) bad = true;
+                || frY[ki] != (l - y0) * 18 + num3 * 36)
+            {
+                if (Environment.GetEnvironmentVariable("PILE_TRACE") != null && sheet == 26)
+                    Console.Error.WriteLine($"ALTAR-FRAME ({x},{y}) cell({k},{l}) t{typ[ki]} a{act[ki]} fx{frX[ki]} wantFx{(k - x0) * 18 + styleCol * 54} fy{frY[ki]} wantFy{(l - y0) * 18 + num3 * 36} sc{styleCol} n3{num3}");
+                bad = true;
+            }
         }
         if (FC_C3X2_PLATFORM.Contains(sheet))
         {
@@ -19476,7 +19687,15 @@ void Fc3x2(int x, int y, int sheet)                // Check3x2（cs:49190）
                     break;
                 }
                 case 26: case 695:
-                    if (!FcSolidAllowBottom(k, yEnd) || (FcAct(k, yEnd) && FC_BOULDERS.Contains(typ[yEnd * W + k]))) bad = true;
+                    if (!FcSolidAllowBottom(k, yEnd) || (FcAct(k, yEnd) && FC_BOULDERS.Contains(typ[yEnd * W + k])))
+                    {
+                        bad = true;
+                        if (Environment.GetEnvironmentVariable("PILE_TRACE") != null && sheet == 26)
+                        {
+                            int si = yEnd * W + k;
+                            Console.Error.WriteLine($"ALTAR-KILL ({x},{y}) col{k} sup({k},{yEnd}) t{typ[si]} a{act[si]} s{slope[si]} h{half[si]} ia{inAct[si]} fx{frX[si]} jgs{(JGS(typ[si]) ? 1 : 0)} plat{(FC_PLAT.Contains(typ[si]) ? 1 : 0)}");
+                        }
+                    }
                     break;
                 case 186:
                 {
@@ -20626,6 +20845,23 @@ sealed class DgCR
     public int Next(int maxValue) { n++; var v = inner.Next(maxValue); Log($"Next({maxValue})", v); MR(); return v; }
     public int Next(int minValue, int maxValue) { n++; var v = inner.Next(minValue, maxValue); Log($"Next({minValue},{maxValue})", v); MR(); return v; }
     public double NextDouble() { n++; var v = inner.NextDouble(); Log("NextDouble()", v); MR(); return v; }
+}
+
+// ★FFFFFF（2026-08-21）：漂移带 6 名逐掷账包装（ROLL_TRACE=<path> 诊断专用，默认关）。
+//   追踪窗=beehives Replay 前→microbiomes Checkpoint 后；行格式与 JS 探针 _ffff1 同构：
+//   `<n> N(<max>) -> <v>` / `<n> R(<a>,<b>) -> <v>` / `<n> D -> <v:R>` / `RESEED`（无计数行）。
+//   On=false 时零开销直通（Replay 换回裸流）。
+sealed class QRollWrap
+{
+    public dynamic inner = null!;
+    public static bool On;
+    public static System.IO.StreamWriter W = null!;
+    public static long N;
+    public static void Line(string s) { if (On && W != null) W.WriteLine($"{N} {s}"); }
+    public int Next() { var v = (int)inner.Next(); if (On) W.WriteLine($"{N++} N() -> {v}"); return v; }
+    public int Next(int maxValue) { var v = (int)inner.Next(maxValue); if (On) W.WriteLine($"{N++} N({maxValue}) -> {v}"); return v; }
+    public int Next(int minValue, int maxValue) { var v = (int)inner.Next(minValue, maxValue); if (On) W.WriteLine($"{N++} R({minValue},{maxValue}) -> {v}"); return v; }
+    public double NextDouble() { var v = (double)inner.NextDouble(); if (On) W.WriteLine($"{N++} D -> {v:R}"); return v; }
 }
 
 // PrefixLegacy.Prefixes 前缀池（PrefixLegacy.cs:9-64）+ PrefixID.Sets.ReducedNaturalChance（:9）

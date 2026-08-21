@@ -237,6 +237,18 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
         shoot, shootSpeed: base.shootSpeed,
       };
     }
+    // ★1457 叶绿巨剑 1226(melee+noMelee+shoot 229,useStyle 1):三连击重做后
+    //   noMelee=本体不走近战接触盒(伤害全在叶绿弹上),但仍是挥击动画武器——
+    //   落 'shot' 兜底 = 通用直射、chlorophyteBladeCounter 计数链整段死
+    //   (补盲测试 gem-bolt/chlorophyte 抓出)。归 melee 交 Game 挥击分支
+    //   heldVid===1226 专用支(ItemCheck_Shoot :49406-49426 计数制)——同天顶剑先例
+    if (vid === 1226 && c.melee) {
+      return {
+        kind: 'melee', damage: base.damage, knockback: base.knockback, useTime: base.useTime,
+        useAnimation: c.useAnimation ?? base.useTime, autoReuse: !!c.autoReuse,
+        shoot, shootSpeed: base.shootSpeed,
+      };
+    }
     // ★ melee+shoot（附魔剑 989/波刃 190 等 46 件）：原版语义 = 挥砍为主 +
     // 挥击中射弹（Player.cs:42880：flag4 = itemAnimation>0 && ItemTimeIsZero →
     // ItemCheck_Shoot，useTime 节奏发弹）。此前落入 shot 兜底 = 变成"光束枪"

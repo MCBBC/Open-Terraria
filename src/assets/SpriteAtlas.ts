@@ -301,6 +301,12 @@ export class SpriteAtlas {
     const img = this.ensureVImage(m.sheet);
     if (!img) return null;
     const idx = Math.max(0, Math.min(m.count - 1, frameIdx));
+    // ★677 精灵萤特殊：原版 FindFrame case 677 的 frame.Y 0..4 循环没乘帧高
+    //   （帧号当像素用，NPC.cs:73504-73514——原版自身 bug），源矩形 Y = 帧号 0..4px
+    //   → 原版飞灵动画 = 贴图顶部 4px 的微小抖动。本仓同款：sy = idx（不乘 frameH）
+    if (npcId === 677) {
+      return { img, sx: 0, sy: Math.max(0, Math.min(4, frameIdx)), sw: m.frameW, sh: m.frameH };
+    }
     return { img, sx: 0, sy: idx * m.frameH, sw: m.frameW, sh: m.frameH };
   }
 

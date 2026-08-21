@@ -3369,6 +3369,9 @@ export class Game implements GameHooks {
     // 下方一格的藤（支撑/同型续接/亲代变型）；打掉中间一节 → 下方整段级联消失
     // （breakTile→setTile(0) 再触发本监听逐节向下，下落沙同款）
     w.store.onTileChanged((x, y) => this.checkVineAt(x, y + 1));
+    // 家具失撑（原版 TileFrame → Check2x1/Check3x2/Check4x2 族 :47500+：支撑格
+    // 被挖 → 家具掉落。曾无此链=挖掉工作台脚下它悬空挂着，2026-08-21 review）
+    w.store.onTileChanged((x, y) => this.checkFurnitureSupport(x, y - 1));
     this.entities.clear();
     resetGorePool();                // Gore 池计数同步归零（clear 丢弃引用不置 dead，防 600 槽假满）
     clearPortals();                 // 传送门为世界内实体，切世界/重载一并清（BirthdayParty.WorldClear 同位）
@@ -6266,6 +6269,8 @@ export class Game implements GameHooks {
       if (!m) continue;
       const f = itemFuncOfVid(+m[1]);
       if (f?.healMana && f.consumable && !f.createTile) {
+        // 1457 ManaV2：喝蓝药清 slowMagicUse（QuickMana :52585-52605 → UndoSlowMagicUse）
+        this.player.undoSlowMagicUse();
         this.player.mana = Math.min(this.player.maxMana, this.player.mana + f.healMana);
         this.player.buffs.apply(BuffType.ManaSickness, 5); // 魔力眩晕（300t/瓶）
         inv.removeAt(i, 1);
@@ -6696,6 +6701,7 @@ export class Game implements GameHooks {
       if (f.potion) this.applyPotionSickness(vid);            // :5284-5286
     }
     if (f.healMana) {
+      p.undoSlowMagicUse();   // 1457 ManaV2:喝蓝清 slowMagicUse（QuickMana :52585-52605）
       p.mana = Math.min(p.maxMana, p.mana + f.healMana);
       if (f.potion) p.buffs.apply(BuffType.ManaSickness, 5);  // 魔力眩晕 300t/瓶
     }
@@ -8271,6 +8277,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.applyPotionSickness(fvid);   // 药水病分档（ApplyPotionDelay :51085-51120）
           }
           if (ff.healMana) {
+            this.player.undoSlowMagicUse();   // 1457 ManaV2:喝蓝清 slowMagicUse（:52585-52605）
             this.player.mana = Math.min(this.player.maxMana, this.player.mana + ff.healMana);
             this.player.buffs.apply(BuffType.ManaSickness, 5); // 魔力眩晕（300t/瓶,max 合并）
           }
@@ -8459,8 +8466,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
         // 弓/枪面向鼠标（shoot>0 发射型同款 :46578）
         this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
-        const ax = this.player.cx + Math.cos(ang) * 14;
-        const ay = this.player.cy - 4 + Math.sin(ang) * 14;
+        // 出生点 = 玩家中心(RotatedRelativePoint(mountedCenter) 的无旋转等价,Player.cs:46560)
+        // ★曾 +朝向×14 前移 = 贴脸(<14px)射击时弹出生在敌盒后方 → 整条路径无判定
+        //   (2026-08-21 用户报"靠太近没伤害")。原版无此偏移。
+        const ax = this.player.cx;
+        const ay = this.player.cy - 4;
         // 回收掉落：仅木箭（原版燃烧箭 Kill 不掉；子弹/飞镖不可回收）
         const dropKey = projId === 1 ? ammoDef.key : null;
         // grav 按 AI_001 重力链规格（projGravSpec，2026-08-14 对账）：箭族默认
@@ -8932,23 +8942,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       if (this.player.mana >= mgCost) {
         this.player.mana -= mgCost;
-        // （星云叠层已改为 booster 掉落拾取链 nebulaCb/nebulaLevelup——耗魔直叠旧路径移除）
-        const ang = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
-        const mx = this.player.cx + Math.cos(ang) * 14;
-        const my = this.player.cy - 4 + Math.sin(ang) * 14;
-        const color = mg.proj === 'bolt' ? '#A040FF' : '#FFB040';
-        // 贴图化:vi_ 物品带原版 shoot 时按弹型贴图绘制(缺省 0 = 圆点兜底,同旧观感)
-        const mpVid = viIdFromKey(heldDef.key);
-        const proj = new MagicProj(mx, my, Math.cos(ang) * mg.projSpeed, Math.sin(ang) * mg.projSpeed, mg.damage, 45, color,
-          mpVid >= 0 ? (itemCombat(mpVid)?.shoot ?? 0) : 0);
-        this.entities.add(proj, 'projectiles');
-        this.player.useTime = mg.speed;
-        this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
-        // 法杖 useStyle 5：朝鼠标静持姿势（Player.cs:46708 itemRotation=瞄准角）
-        this.useSwing(heldDef, ang);
-        this.sfx.play('tink');
-        this.input.mouseDown = false;
-      }
+      }   // ← 并行会话删 MagicProj 体时误删本闭合(2026-08-21 语法修复;magic 支
+          //    现为"扣蓝无弹"空壳,待并行会话 legacy 链重写完成后由其接手)
     } else if (heldDef && TELEPORT_ITEM_VIDS.has(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
       // ---- 传送族使用（Player.cs:42297-42516 汇总）----
@@ -9478,15 +9473,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'magic': {
         // 魔法：消耗 mana（原版 mana 字段）→ 发射 item.shoot（贴图/穿透/寿命取投射物表）
         // 魔力花族：耗魔 -8%；不足时自动喝蓝重试
+        // ★1457 ManaV2（DebugOptions.cs:30 默认 true）空蓝照放（2026-08-21 slowMagic
+        //  转正）：CheckMana :53217 入口先清 slowMagicUse → 蓝够扣魔；不足且魔力花
+        //  QuickMana 也救不回 → :53241-53256 statMana=0 + DoRunOutOfManaEffect()
+        //  （:53258-53261 slowMagicUse=true）→ return true 照常施法（攻速 ×0.4,
+        //  GetSlowMagicUseTime :47425 消费在下方 useTime 置值处）。不再拒绝施法
+        this.player.slowMagicUse = false;
         const cwCost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1)) * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul); // ⑪+⑧ 词缀 mcst(I:562 round)
-        if (this.player.mana < cwCost) {
-          if (!(this.player.equipStats.manaFlower && this.tryAutoManaPotion() && this.player.mana >= cwCost)) {
-            this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NoMana'));
-            this.input.mouseDown = false;
-            return;
-          }
+        if (this.player.mana >= cwCost) {
+          this.player.mana -= cwCost;
+        } else if (this.player.equipStats.manaFlower && this.tryAutoManaPotion() && this.player.mana >= cwCost) {
+          this.player.mana -= cwCost;
+        } else {
+          this.player.mana = 0;             // :53243/:53254 statMana = 0
+          this.player.slowMagicUse = true;  // DoRunOutOfManaEffect :53258-53261
         }
-        this.player.mana -= cwCost;
         const pd = projectileData(cw.shoot);
         // 彩虹枪 250（aiStyle 46）：专用弹链——隐形飞行头铺 251 彩虹段（40s 持续
         // 伤害带），通用 Arrow 无法表达铺段/恒速拱弧/静态免疫
@@ -9497,7 +9498,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           bolt.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           bolt.critChance = critTotal;
           this.entities.add(bolt, 'projectiles');
-          this.player.useTime = cw.useTime;
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
           this.playUseSound(critVid, 'tink');
           this.input.mouseDown = false;
@@ -9515,7 +9516,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           bolt.critChance = critTotal;
           bolt.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           this.entities.add(bolt, 'projectiles');
-          this.player.useTime = cw.useTime;
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
           this.playUseSound(critVid, 'tink');   // UseSound=Item_20（itemUseSound 表）
           this.input.mouseDown = false;
@@ -9543,7 +9544,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             star.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
             this.entities.add(star, 'projectiles');
           }
-          this.player.useTime = cw.useTime;
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
           this.playUseSound(critVid, 'tink');   // UseSound=Item_88（itemUseSound 表）
           this.input.mouseDown = false;
@@ -9581,7 +9582,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             };
             this.entities.add(bolt, 'projectiles');
           }
-          this.player.useTime = cw.useTime;
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
           this.playUseSound(critVid, 'tink');
           this.input.mouseDown = false;
@@ -9604,7 +9605,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.spawnNebulaBooster(b261.cx, b261.cy);
           };
           this.entities.add(b261, 'projectiles');
-          this.player.useTime = cw.useTime;
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
           this.playUseSound(critVid, 'tink');
           this.input.mouseDown = false;
@@ -9624,14 +9625,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             () => {
               const cost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1))
                 * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul);
-              if (this.player.mana < cost) return false;
-              this.player.mana -= cost;
+              // 1457 ManaV2：CheckMana :53241-53256 蓝不足也放行（statMana=0+
+              // slowMagicUse=true）——channel 期蓝尽不再断（原版 439 每拍
+              // CheckMana(pay:true) :67235 同语义）
+              if (this.player.mana >= cost) { this.player.mana -= cost; return true; }
+              this.player.mana = 0;
+              this.player.slowMagicUse = true;
               return true;
             });
           bl.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           bl.critChance = critTotal;
           this.entities.add(bl, 'projectiles');
-          this.player.useTime = cw.useTime;
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
           this.input.mouseDown = false;
           break;
@@ -9651,14 +9656,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             () => {
               const cost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1))
                 * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul);
-              if (this.player.mana < cost) return false;
-              this.player.mana -= cost;
+              // 1457 ManaV2：最后棱镜每拍 CheckMana(pay:true)（:67235）蓝不足也放行
+              // （statMana=0 + slowMagicUse=true :53241-53256）——蓝尽棱镜不断
+              if (this.player.mana >= cost) { this.player.mana -= cost; return true; }
+              this.player.mana = 0;
+              this.player.slowMagicUse = true;
               return true;
             });
           prism.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           prism.critChance = critTotal;
           this.entities.add(prism, 'projectiles');
-          this.player.useTime = cw.useTime;
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
           this.input.mouseDown = false;
           break;
@@ -9710,7 +9718,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.entities.add(m, 'projectiles');
           };
           spawnMissile(px, py, Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed);
-          this.player.useTime = cw.useTime;
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
           this.playUseSound(critVid, 'tink'); // UseSound 数据驱动（113=Item9/218=Item20/495 各杖专属）
           this.input.mouseDown = false; // 本击只负责首发；持按连发由实体内 useTime 拍驱动
@@ -9744,7 +9752,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.spawnNebulaBooster(mArrow.cx, mArrow.cy);
         };
         this.entities.add(mArrow, 'projectiles');
-        this.player.useTime = cw.useTime;
+        this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
         this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
         this.playUseSound(critVid, 'tink'); // UseSound 数据驱动（Item8/12/20/43/92…各杖专属）
         this.input.mouseDown = false;
@@ -11992,6 +12000,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   private tryPlace(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
     if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
+    if (!this.inTileRange(tx, ty, this.blockRange())) return;   // 射程门（原版 PlaceThing IsTargetTileInRange；曾无门=指哪放哪）
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
 
@@ -12147,6 +12156,34 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!this.inTileRange(tx, ty, this.blockRange())) return;
     const tileId = TILE_BY_KEY[itemDef.tile!];
     const def = TILE_DEFS[tileId];
+    // ★点击格 → 锚换算（原版 TileObjectData.Origin 语义，2026-08-21 用户报
+    //  "3 高门只能点顶格"）：落地家具 Origin 在底行（桌椅床书架 Origin.Y=h-1，
+    //  玩家贴地自然点底行）——曾点击格=左上锚，h>1 的物件只能点顶格。
+    //  门特例（StyleDoor Origin.Y=1 中格 + PlaceTile :59880-59910 特判）：
+    //  3 格净空内【任意格】点击自动向上/下寻位。
+    if (def?.framed && (def.h ?? 1) > 1) {
+      const sheet = def.vanilla?.sheet ?? -1;
+      const bw = def.w ?? 1, bh = def.h ?? 1;
+      if (sheet === 10 || sheet === 11) {
+        // 门：候选锚 = 点击格解释为中格/顶格/底格，取首个"净空+支撑"达标者
+        const cands = [ty - 1, ty, ty - 2].filter((cy) => st.inBounds(tx, cy)
+          && st.inBounds(tx + bw - 1, cy + bh - 1));
+        let picked = false;
+        for (const cy of cands) {
+          let free = true;
+          for (let dy2 = 0; dy2 < bh; dy2++) {
+            if (st.isActive(tx, cy + dy2)) { free = false; break; }
+          }
+          if (!free) continue;
+          if (!this.hasSupport(tx, cy, bw, bh, true, false)) continue;
+          ty = cy; picked = true; break;
+        }
+        if (!picked) return;
+      } else {
+        ty -= bh - 1;   // 底行 Origin：点击格=家具左下格
+        if (!st.inBounds(tx, ty)) return;
+      }
+    }
     // 旧日军团竞技场建造封锁（Player.cs:25669-25672：DD2Event.Ongoing &&
     // ShouldBlockBuilding → 禁改方块，DD2Event.cs:794-796 包围盒判定）
     if (this.world.oldOnesArmy.ongoing
@@ -12220,11 +12257,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const px = tx + dx2, py = ty + dy2;
         if (!st.inBounds(px, py)) return;
         if (st.isActive(px, py)) {
-          // tileCut 族（草丛/花等 decor 近似，Main.tileCut）：放置先切后放
-          // （原版 Player.PlaceThing :5376-5390 对 tileCut 目标 KillTile——
-          //  曾直接拒绝=工作台压草丛放不下）
-          if (!(TILE_DEFS[st.get(px, py)]?.decor ?? false)) return;
-          st.setTile(px, py, 0);
+          // tileCut 割草（原版 Player.PlaceThing 放置前对 tileCut 目标 KillTile）：
+          // breakTile 走掉落(种子掷)/音效链；多格植物（丛林高草 74 等 1×2）上下
+          // 同型整株清——曾 setTile 直切单格留上半悬在工作台上方（用户观感
+          // "没放成,还得用台子再打一次草"2026-08-21）
+          const wdef = TILE_DEFS[st.get(px, py)];
+          if (!(wdef?.decor ?? false)) return;
+          const wt = st.get(px, py);
+          this.breakTile(px, py, true);
+          for (let yy = py - 1; st.get(px, yy) === wt; yy--) this.breakTile(px, yy, true);
+          for (let yy = py + 1; st.get(px, yy) === wt; yy++) this.breakTile(px, yy, true);
         }
         // 实心物不能与玩家重叠
         if (def.solid && this.overlapsEntity(px, py)) return;
@@ -19925,6 +19967,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       p.buffs.apply(BuffType.Resistance, 60);         // 药水病
     }
     if (ff.healMana) {
+      p.undoSlowMagicUse();   // 1457 ManaV2:喝蓝清 slowMagicUse（:52585-52605）
       p.mana = Math.min(p.maxMana, p.mana + ff.healMana);
       p.buffs.apply(BuffType.ManaSickness, 5);
     }
@@ -20980,6 +21023,43 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  时下方整段级联消失）；上方是异族亲代面 → 变型成对应藤。
    *  级联：onTileChanged(x,y) 检查 (x,y+1) 触发；本方法 KillTile → breakTile →
    *  setTile(0) 再触发监听 → 逐节向下（下落沙同款自然级联）。 */
+  /** 家具失撑（原版 TileFrame → Check2x1/Check3x2/Check4x2 族 :47500+：支撑格被挖
+   *  → 整件掉落）。挂 onTileChanged(x, y) → 检查上方格 (x, y-1)：为 framed 家具
+   *  底行时锚定整件复验 hasSupport，失效 → 全格清除 + 掉落。2026-08-21 review
+   *  补链（曾无此链=挖掉工作台脚下它悬空挂着）。decor（火把/草丛）不走此链：
+   *  火把有 checkTorchDetach 特链 */
+  private checkFurnitureSupport(x: number, y: number): void {
+    const st = this.world.store;
+    if (!st.inBounds(x, y)) return;
+    const t = st.get(x, y);
+    const def = TILE_DEFS[t];
+    if (!def?.framed || def.solid || def.decor) return;
+    const w = def.w ?? 1, h = def.h ?? 1;   // def 可缺省（防御）
+    // 锚 = 该行内本件首列。★用 frameX 差 18 判同件（style 帧族同件相邻列
+    // frameX 恰差 18）——曾"最左同型"扫描：两件同型家具并排（共享支撑行）时
+    // 会错锚到左件 → 挖右件支撑左件撑着它不掉（2026-08-21 review 二轮）
+    let ax = x;
+    for (let k = 1; k < w; k++) {
+      const ci = st.idx(ax, y), ni = st.idx(ax - 1, y);
+      if (st.get(ax - 1, y) === t && st.frameX[ni] === st.frameX[ci] - 18) ax -= 1;
+      else break;
+    }
+    // 整件校验：锚起 w×h 全同型（半件态不处理，等破坏链清完再触发）
+    const ay = y - h + 1;
+    for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) {
+      if (st.get(ax + dx, ay + dy) !== t) return;
+    }
+    const onTable = ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1);
+    if (this.hasSupport(ax, ay, w, h, true, onTable)) return;
+    // 失撑 → 整件清除 + 掉落（掉落语义同门破坏链 :10905）
+    const dropKey = typeof def.drop === 'number' ? VI(def.drop) : (def.drop ?? null);
+    for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) st.setTile(ax + dx, ay + dy, 0);
+    if (dropKey) this.spawnDrop(ax * TILE + 8, ay * TILE, dropKey, 1);
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.4);
+    this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
+    this.chunks.markDirtyArea(ax - 1, ay - 1, ax + w, ay + h);
+  }
+
   private checkVineAt(i: number, j: number): void {
     const st = this.world.store;
     if (!st.inBounds(i, j) || j <= 0) return;
@@ -21095,8 +21175,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const st = this.world.store;
     const px = Math.floor(this.player.cx / TILE), py = Math.floor(this.player.cy / TILE);
     const found = new Set<string>(['hand']);
-    for (let dx = -4; dx <= 4; dx++) {
-      for (let dy = -3; dy <= 3; dy++) {
+    // 原版 Player.AdjTiles（:35214）扫描区 = TileReachCheckSettings.Simple.GetTileRegion
+    // （Player.cs:2360 DefaultTileRangeX/Y = 5/3，与放置同源 tileReach；曾 dx±4 少 1）
+    const reach = this.tileReach(0);
+    for (let dx = -reach.x; dx <= reach.x; dx++) {
+      for (let dy = -reach.y; dy <= reach.y; dy++) {
         const t = st.get(px + dx, py + dy);
         if (t === T.WORKBENCH) found.add('workbench');
         if (t === T.FURNACE) found.add('furnace');

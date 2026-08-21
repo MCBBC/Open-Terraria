@@ -1254,15 +1254,15 @@ export class Arrow extends Entity {
       if (!world.store.isSolid(tx, ty)) return;
       // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
       if (this.bounce && this.bounceOff(game)) return;
-      // 1457 宝石法珠 CanBounce（HandleMovement :18112-18150）：法向反弹 ×0.8 +
-      // penetrate--（归零消亡）——琥珀法珠/琥珀长袍臂
+      // 1457 宝石法珠 CanBounce（HandleMovement :18112-18150）：撞块法向反弹 ×0.8 +
+      // penetrate--（归零消亡）——琥珀法珠/琥珀长袍臂。hitWall 族旗是 moveAndCollide
+      // 分轴碰撞语义、本类裸位移不置位（曾据此判死=分支永假,反弹死代码）——
+      // 到达本分支即已撞实心,按速度主轴定反射面:|vx|>|vy| 水平撞壁反 vx,否则反 vy
       if (this.gem?.canBounce) {
-        if (this.hitHead || this.hitWall || this.onGround) {
-          this.vy = (this.hitHead || this.onGround) ? -this.vy * 0.8 : this.vy;
-          this.vx = this.hitWall ? -this.vx * 0.8 : this.vx;
-          if (--this.pierce <= 0) { this.killNow(game); return; }
-          return;
-        }
+        if (Math.abs(this.vx) > Math.abs(this.vy)) this.vx = -this.vx * 0.8;
+        else this.vy = -this.vy * 0.8;
+        if (--this.pierce <= 0) { this.killNow(game); return; }
+        return;
       }
       // 喵刀弹 502（AI_008 弹跳档 :18165-18206）：tink 音 + ai[0] 计数 ≥5 消亡；
       // 全速翻面（无 ×0.9 衰减——type 15 才有 ×0.8），同 hitSet 语义无
