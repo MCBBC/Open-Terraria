@@ -12043,6 +12043,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (swapOk) {
           const tileIdHere = TILE_BY_KEY[itemDef.tile!];
           if (tileIdHere !== targetType && tdef?.drop !== itemDef.key) {
+            // ★原版两道镐门(Player.cs:39186-39232 PlaceThing_TryReplacingTiles,
+            //   复审 2026-08-21 用户质疑"替换替代镐子"实锤缺门):
+            //   ① GetBestPickaxe()==null(背包 50 格无镐)→ return false——无镐不能替换
+            //   ② hitReplace.AddDamage(1) 按 GetPickaxeDamage(最佳镐力) 积累,
+            //      <100 只播尘/声/返还消耗品——HitTile 挖掘积累条,硬块需够力镐+多击,
+            //      与挖矿同节奏;≥100 才真正 ReplaceTile
+            const bestPick = this.bestPickaxePower();
+            if (bestPick <= 0) return;
+            // 每击伤害 = 最佳镐力,按目标 d.pick 门槛归零(与 tryMine 同口径:
+            // GetPickaxeDamage 数据侧等价——硬块镐力不足永不积累)
+            const tileDefHere = TILE_DEFS[targetType];
+            const pickNeed = tileDefHere?.pick ?? 0;
+            let hitDmg = pickNeed >= 0 && bestPick >= pickNeed ? bestPick : 0;
+            if (hitDmg <= 0) return;   // 镐力不足:原版 num2=0 恒走 fail 分支,永不换
+            const accumulated = this.hitTiles.addDamage(tx, ty, hitDmg, 1);
+            if (accumulated < 100) {
+              // 原版 :39216-39228:不足 → 尘+破坏音(不消耗放置物)
+              this.spawnParticles(tx * TILE + 8, ty * TILE + 8,
+                tdef?.mapColor ?? '#8a8a8a', 3, 1.2, { life: 20 });
+              this.playSfxFile?.('hit', 1, tx * TILE + 8, ty * TILE + 8);
+              return;
+            }
+            this.hitTiles.clear(tx, ty, 1);   // 清积累(同格新方块不继承旧伤害)
             this.breakTile(tx, ty, true);   // 旧块完整掉落链(音效+成就同破坏)
           }
         }
@@ -21890,6 +21913,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.lostCoins = 0;
     p.x = this.world.spawnX * TILE + 8;
     p.y = (this.world.spawnY - 3) * TILE;
+    // ★1457 出生扫位链未移植（Spawn_GetPositionAtSpawn :38008-38040 X±1 逐格找
+    // Spawn_IsAreaValidSpawn :38042+ 有效落位;IsAreaValidSpawn 含压板 135/CanTileHurt/
+    // InWorld(5) 三检）——本仓出生 = worldgen 固定 spawn（无运行时扫位/校验链,出生点
+    // 被改地形时可能嵌格）。备案：移植运行时出生链时两方法一并落。
     p.vx = 0; p.vy = 0;
     // 呼吸/岩浆宽限重置（Player.cs:37158 lavaTime=lavaMax / :37173 breath=breathMax；
     // 旧实现两者都没重置——戴护身符重生后进岩浆会被误判宽限已耗尽）

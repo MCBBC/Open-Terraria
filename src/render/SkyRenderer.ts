@@ -1730,7 +1730,9 @@ export class SkyRenderer {
    *  载体注明：原版为 SkyManager「Lantern」自定义天空层（spritebatch），此处 canvas 2D
    *  以同参数直接绘制（视差 (1/depth, 0.9/depth)×1.2、深度 alpha 分档 0.3-1.0、
    *  三份旋转光晕副本 + 主贴图 :243-254） */
-  private drawLanterns(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number, dtMs: number): void {
+  /** band: far=深度>5（远山之后,原版 DrawToDepth(5) 前带）/ near=深度≤5（全部山层
+   *  之前,:59310 后带——LanternSky 深度 1.6..6.0 按带插入山层,曾全画山后） */
+  private drawLanterns(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number, dtMs: number, band: 'far' | 'near' = 'far'): void {
     const up = LanternNight.lanternsUp;
     // _opacity ±0.01/帧（:119）
     this.lanternOpacity = Math.max(0, Math.min(1, this.lanternOpacity + (up ? 0.01 : -0.01) * (dtMs / (1000 / 60))));
@@ -1756,6 +1758,7 @@ export class SkyRenderer {
     for (let i = 0; i < N; i++) {
       const l = this.lanterns[i];
       if (!l.active) continue;
+      if (band === 'far' ? l.depth <= 5 : l.depth > 5) continue;   // 深度带分流
       // Update :131-149
       const num2 = Math.sin(l.x / 120) * 0.5;
       l.y += num2 * 0.5 * frames;
@@ -1838,6 +1841,13 @@ export class SkyRenderer {
       moonFrac,
       dtSec: dtMs / 1000,
     });
+  }
+
+  /** 灯笼夜 near 带（深度≤5 的近灯 = 全部群系背景层之前,原版 :59310 后带）——
+   *  Renderer 在 biomeBg.draw('surface') 之后调用。状态推进仍在 far 遍历内
+   *  （本方法只读不推进,重复调用安全） */
+  drawLanternsNear(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number, dtMs: number): void {
+    this.drawLanterns(ctx, viewW, viewH, camX, camY, dtMs, 'near');
   }
 
   // ================= 事件天幕（SlimeSky/MartianSky 1:1） =================
@@ -3796,8 +3806,10 @@ export class SkyRenderer {
 
     // 派对气球（PartySky：BirthdayParty.PartyIsUp 时 SkyManager 激活）
     this.drawPartyBalloons(ctx, viewW, viewH, camX, dtMs);
-    // 灯笼夜夜空（LanternSky：灯笼浮升层，需相机 Y 判地表门）
-    this.drawLanterns(ctx, viewW, viewH, camX, camY, dtMs);
+    // 灯笼夜夜空（LanternSky：灯笼浮升层，需相机 Y 判地表门）——far 带（深度>5,
+    // 远山之后）；near 带（深度≤5,山层之前）由 Renderer 在群系背景之后调
+    // drawLanternsNear（原版 DrawToDepth(5) 前后带插入 :59310/:59322）
+    this.drawLanterns(ctx, viewW, viewH, camX, camY, dtMs, 'far');
 
   }
 

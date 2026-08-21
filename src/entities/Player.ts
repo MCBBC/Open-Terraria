@@ -1067,8 +1067,9 @@ export class Player extends Entity {
     // ★1457 叶绿素套水晶叶三修（OnHit :6986-7036,1456 :6615-6640）——叶绿素套
     //  SetBonus 的水晶叶追踪弹（226 剑气→227 花瓣）三处门：①目标须 CanBeChasedBy
     //  （:6991-6996,1456 无）②226 弹 !active 即跳过（:7000,1456 无 active 检）③
-    //  索敌半径 800→1200px（:7007）。本仓叶绿素套 SetBonus（水晶叶弹）未移植（仅
-    //  头盔单件省弹 1/5 在上表）→ 三修无宿主。备案：移植水晶叶套弹时按 1457 三门落地。
+    //  新增 1200px 距离上限（:7007,1456 无半径门,首个 226 即触发）。本仓叶绿素套
+    //  SetBonus（水晶叶弹）未移植（仅头盔单件省弹 1/5 在上表）→ 三修无宿主。备案：
+    //  移植水晶叶套弹时按 1457 三门落地。
     const ARMOR_AMMO_SAVE_VID: Record<number, number> = {
       2758: 4, 1002: 5, 1549: 5, 4983: 10, 3804: 10, 3878: 5,
     };
@@ -1816,6 +1817,40 @@ export class Player extends Entity {
     // 1457: 叶绿巨剑三连击计数每帧递减（ItemCheck :43161-43163
     // `if (chlorophyteBladeCounter > 0) chlorophyteBladeCounter--`）
     if (this.chlorophyteBladeCounter > 0) this.chlorophyteBladeCounter--;
+
+    // A3（1457 :24823-24860 魔力过热蓝焰尘,2026-08-21 接线）：manaHeat≠1 期间每帧
+    // 2 掷,掷中率 = Remap(manaHeat,1.3→1,  rate 1→0) = clamp((manaHeat−1)/0.3)
+    // （本地玩家档;他玩家恒 0.3——本仓单本地模型恒走本地档）。尘 267 蓝焰:
+    // noLight+noGravity、vx=0、vy=rand×0.5−1.5、fadeIn/scale=0.7+1.3×rand、
+    // Color.Blue α200、y+5;CloneDust 伴生白尘 ×0.4 缩放/fadeIn
+    if (this.manaHeatMult !== 1) {
+      const pool = game.vanillaDust;
+      if (pool) {
+        const rate = Math.max(0, Math.min(1, (this.manaHeatMult - 1) / 0.3));
+        for (let k = 0; k < 2; k++) {
+          if (Math.random() * 6 >= rate) continue;
+          const d = pool.spawn(this.x, this.y, this.w, this.h, 267, 0, 0, 200,
+            { r: 0, g: 0, b: 255, a: 255 }, 1);
+          if (!d) continue;
+          d.noLight = true;
+          d.noGravity = true;
+          d.vy = d.vy * 0.5 - 1.5;
+          d.vx = 0;
+          d.fadeIn = 0.7 + Math.random() * 1.3;
+          d.scale = 0.7 + Math.random() * 1.3;
+          d.y += 5;
+          const d2 = pool.spawn(this.x, this.y, this.w, this.h, 267, 0, d.vy, 200,
+            { r: 255, g: 255, b: 255, a: 255 }, d.scale * 0.4);   // CloneDust 伴生
+          if (d2) {
+            d2.noLight = true;
+            d2.noGravity = true;
+            d2.vx = 0;
+            d2.fadeIn = d.fadeIn * 0.4;
+            d2.y = d.y;
+          }
+        }
+      }
+    }
 
     // 液体检测：Collision.WetCollision（Collision.cs:1575-1650）——**中心小盒**：
     // 宽 min(10,w) × 高 min(h/2,h)，以身体中心居中（vector = Center−(num/2,num2/2)）。

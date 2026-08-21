@@ -65,6 +65,12 @@ const DOOR_CLOSED_IDS = idsWithSheets(10);
 const ALTAR_IDS = idsWithSheets(77);
 
 // ---- 数据表类型（vanilla-mounts.json 提取产物） ----
+// ★1457 RollerSkateMovement 两改（Player.cs:28738-28778,1456 :28037-28062）——
+// 滑行减速带 6.5f → `accRunSpeed - 1f`（:28744,随装备/难度缩放）+ 空中门
+// `flag2 = vy==0 || |vx|<=originalRunSpeed`（:28752,空中不再向巡航速收敛）。
+// 本仓滚轴鞋坐骑在仓（vanilla-mounts.json 57-60,物品 5600 族）但 Player 的
+// RollerSkateMovement 专属分支未移植（Mounts.ts 无 skate 段,滑行阻尼走通用链）
+// → 两改无宿主。备案：移植滑行分支时按 1457 两处落地。
 export interface MountData {
   buff: number;
   /** 变身坐骑（52/54-56/61）与滚轴鞋（57-60）原版未设 = 0 */

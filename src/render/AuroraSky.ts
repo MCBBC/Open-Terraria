@@ -779,9 +779,13 @@ export class AuroraSky {
         const n3 = ta + (tb - ta) * fx3 + ((tc + (td - tc) * fx3) - (ta + (tb - ta) * fx3)) * fy3;
         // 强度链+色尾(:3145-3171;auroraIntensity 为唯一公式源,V8 内联热路径)
         const k = auroraIntensity(n1, n2, n3, gv, sdY) * kx;
-        data[idx] = r * k * 255;                           // :3171 UNORM 钳(Uint8Clamped)
-        data[idx + 1] = g * k * 255;
-        data[idx + 2] = b * k * 255;
+        // ★加法写入(2026-08-21 极光阶梯伪影修复):原版 shader oC0.a≡0(:3170 字节码
+        //   实证)+FNA(One,InvSrcα)等效加法——重叠四边形【相加】非覆写;曾直写=
+        //   后带 k≈0 黑像素覆写先带亮像素=矩形缺口/阶梯(用户实拍)。α 恒 255
+        //   ('lighter' 复合按 rgb 加,α 无效)
+        data[idx] = Math.min(255, data[idx] + r * k * 255);
+        data[idx + 1] = Math.min(255, data[idx + 1] + g * k * 255);
+        data[idx + 2] = Math.min(255, data[idx + 2] + b * k * 255);
         u += du; tyv += dty; tz += dtz; r += dr; g += dg; b += db;
         u1x += du1; u2x += du2;
       }
