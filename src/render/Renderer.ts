@@ -4727,22 +4727,36 @@ export class Renderer {
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
         // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）
         if (e.colorRGBA && e.colorRGBA[3] > 0) {
-          // 原版 GetColor pass = 标准 AlphaBlend：src = texel.rgb×color.rgb(×光照,
-          // type1 分支 color.rgb×light.rgb/255),srcA = texel.a×color.A/255 →
-          // out = src + D×(1−srcA)。★2026-08-20 修:旧 destination-out+lighter
-          // 两步是主画布直绘时代的等价写法;世界层化(2026-08-19 光照分层)后
-          // 本 ctx 是透明离屏层——lighter 在透明 dst 上把 α 饱和成 1,史莱姆
-          // 变成不透明纯色块(染色过浓+透明度异常);destination-out 乱削同层
-          // 底下实体。透明层上普通 source-over×(colorA/255) 与 XNA 逐位等价
-          // (先混后乘光 = 先乘后混,乘法分配律),乘光由层合成统一补上
+          // ★XNA 预乘混合精确 emulation（2026-08-20 史莱姆"浊暗"终案根因）：
+          // XNA content pipeline 贴图预乘 + AlphaBlend(One,InvSrcAlpha) 下
+          // GetColor pass：贡献 = T·a·color.rgb（type1 分支 rgb= color×light，
+          // 【不乘 color.A】），衰减 = dst×(1−T.a·color.A)。Canvas source-over
+          // 的贡献与衰减被 ga 刚性耦合（out=src·ga+dst·(1−ga)），ga=colorA/255
+          // 把贡献也乘了 0.392 → 蓝通道暗 ~2.6×（用户三连报"依然暗"真根因；
+          // 此前 alpha 表/GL 预乘两修均真实但非主因）。三步拆解逐位精确：
+          //   ② destination-out(同贴图, ga=colorA/255) → dst×(1−T.a·kc) 精确衰减
+          //   ③ lighter(tinted, ga=fade) → +T·a·color.rgb 预乘加法贡献
+          // （基础 pass GetAlpha rgb/A 同乘 ka → 现有 ga=ka source-over 已精确）
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, e.colorRGBA);
           // 与基础层同锚（底锚=−帧高+原版恒 +4 下沉，见主路径注；曾残留旧底锚
           // pad 变量在恒+4 改造时漏改——染色层 ReferenceError）
           const anchorY2 = grounded ? -r.sh + 4 / scale : -r.sh / 2;
           const anchorY = anchorY2 + eocOff; // 与基础层同锚——曾残留旧底锚条件,
           // 基础/染色两层错位 → 史莱姆"彩色+灰影"双画
-          ctx.globalAlpha = e.colorRGBA[3] / 255;
-          if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -r.sw / 2, anchorY, r.sw, r.sh);
+          if (tinted) {
+            // ★color.A 与 npc.alpha 无关（GetColor :94917 num4 = color.A−(255−light.A)
+            //   恒 color.A；rgb 分支同样不乘 (255−alpha)/255）——衰减/贡献都不乘
+            //   fade（spawnAlpha=静态 175 时 fade=0.314 会把两层全压暗回旧观感，
+            //   2026-08-20 信标抓包实锤 α=150=0.275+0.314）
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.globalAlpha = e.colorRGBA[3] / 255;
+            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = 1;
+            ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -r.sw / 2, anchorY, r.sw, r.sh);
+            ctx.globalCompositeOperation = 'source-over';
+          }
+          ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
           ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
         }
         // 史莱姆王体内忍者（Main.cs:22798-22818 1:1）：独立贴图 Ninja.png 叠画在
@@ -5811,14 +5825,22 @@ export class Renderer {
     if (slave && slave.colorRGBA && slave.colorRGBA[3] > 0) {
       // 气球壳随奴隶（Main.cs:23390-23393 三遍的前两遍）：
       // ① nPC.GetAlpha：帧 0 ×(1−slaveAlpha/255) 白雾遍（史莱姆 175 → 0.31）
-      // ② nPC.GetColor：标准 AlphaBlend×colorA/255——同 drawEnemy 主染色 pass
-      //    2026-08-20 修正(透明世界层上 lighter α 饱和 = 不透明纯色块,
-      //    destination-out 乱削本体)
-      ctx.globalAlpha = 1 - Math.min(255, Math.max(slave.spawnAlpha, 0)) / 255;
+      // ② nPC.GetColor：XNA 预乘精确三步（destination-out 衰减 + lighter 贡献）
+      //    ——同 drawEnemy 主染色 pass（2026-08-20 终案，见该处长注）
+      const fadeS = 1 - Math.min(255, Math.max(slave.spawnAlpha, 0)) / 255;
+      ctx.globalAlpha = fadeS;
       ctx.drawImage(img, 0, 0, fw, fh, -fw / 2, 0, fw, fh);
       const tinted = this.tintedSprite('npc594shell', { img, sx: 0, sy: 0, sw: fw, sh: fh }, slave.colorRGBA);
-      ctx.globalAlpha = slave.colorRGBA[3] / 255;
-      if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -fw / 2, 0, fw, fh);
+      if (tinted) {
+        // 同主路径：color.A 不乘 fade（见 drawEnemy 染色 pass 长注）
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.globalAlpha = slave.colorRGBA[3] / 255;
+        ctx.drawImage(img, 0, 0, fw, fh, -fw / 2, 0, fw, fh);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 1;
+        ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -fw / 2, 0, fw, fh);
+        ctx.globalCompositeOperation = 'source-over';
+      }
       ctx.globalAlpha = 1;
     }
     ctx.drawImage(img, variant * fw, 0, fw, fh, -fw / 2, 0, fw, fh);

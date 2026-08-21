@@ -102,8 +102,6 @@ export class LuckState {
   hasGardenGnomeNearby = false;
   /** 灯笼夜（LanternNight.LanternsUp，Game 侧每 tick 同步） */
   lanternsUp = false;
-  /** 装备幸运（equipmentBasedLuckBonus：四叶草族/马掌族/幸运币；Player 侧聚合写入） */
-  equipmentLuckBonus = 0;
   /** 银河珍珠已用（Player.cs:44786-44789 一次性）——物品 vi_5340_galaxy_pearl 已注册，
    *  Game 使用分支（useTime 45）置位后消耗 */
   usedGalaxyPearl = false;

@@ -119,6 +119,14 @@ const GRASS = TILE_BY_KEY['grass']!;                       // 2(InnerOutline 铺
 const SHORT_PLANTS = TILE_BY_KEY['v_3_forest_short_plants']!;   // ActionGrass SelectRandom{3,73}
 const TALL_PLANTS = TILE_BY_KEY['v_73_forest_tall_plants']!;
 const FLOWER_VINES = TILE_BY_KEY['v_382_flower_vines']!;   // ActionVines(3,5,382)
+/** ★BBBBBB：PlaceTile(3) 的 IsFitToPlaceFlowerIn 地面族（cs:58254，typeAttempted=3） */
+const PLANT_GROUND_3 = idsByVanillaSheet(2, 78, 380, 477, 579);
+/** ★BBBBBB：WallID.Sets.AllowsPlantsToGrow（WallID.cs:58，27 项——TreePass 同表） */
+const PLANT_WALLS = new Set<number>([
+  0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317, 63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80,
+]);
+/** ★BBBBBB：PlaceTile(3) 墙支 NextFromList(6,7,9..20)（cs:59582-95——14 项） */
+const GRASS_STYLE_LIST = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 /** Modifiers.SkipTiles(191,192):竖井挖穿活木/活木叶(EnchantedSwordBiome.cs:90) */
 const SHAFT_SKIP = idsByVanillaSheet(191, 192);
 /** ThinIceBiome.OnlyTiles(147,161,224,0,1):雪/冰/细雪/泥/石 → 162 */
@@ -290,8 +298,13 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       // !(NextDouble < SwordShrinePlacementChance 0.5) 才放置(cs:21886)——注意极性
       if (!(rng.next() < 0.5)) {
         // 重试 while (num15++ <= maxTilesX)(cs:21888):最多 w+1 次,掷序 Y→Next(2)→X
+        // ★BBBBBB：cs:21888 `origin3.Y = (int)GenVars.worldSurface + Next(50,100)`——
+        //   是 GenVars.worldSurface(Terrain 游走终值)非 Main.worldSurface！曾混用
+        //   gs.worldSurface(=Main.worldSurface)→ Y 域整体偏移(22222 实测差 71 格)，
+        //   剑冢 12/12 全拒 vs JS 过门多掷 → 掷流自 sword 段分叉 → 尾段全错位。
+        //   同款 GenVars 混淆 XXXXX 批已修矿爆点 rockLayer，此处为漏网点。
         for (let t = 0; t <= w; t++) {
-          const oy = Math.floor(gs.worldSurface) + rng.int(50, 99);   // Next(50, 100)
+          const oy = Math.floor(gs.genWorldSurface) + rng.int(50, 99);   // Next(50, 100)
           const ox = rng.int(0, 1) === 0                               // Next(2) == 0 → 左 30%
             ? rng.int(50, Math.floor(w * 0.3) - 1)                     // Next(50, w*0.3)
             : rng.int(Math.floor(w * 0.7), w - 51);                    // Next(w*0.7, w-50)
@@ -503,9 +516,11 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
           //   184 苔藓等 roll 族掷 Next(3)，UUUU 定谳机制循线补）
           genFrameNeighbors(st, rng, ux, uy, 'setTile');
           // OnlyWalls(0)→PlaceWall(type):SetTile 已清墙 → 恒过门,写 wallType
+          // ★BBBBBB：PlaceWall.Apply 先**写墙**再五连 SquareWallFrame（帧掷读新墙
+          //   ≠0 → 每中心 1×Next(0,3)）。曾先掷后写墙——掷时 wall 仍 0 被
+          //   wallFrameRollMB 的 wl===0 门跳过=**漏掷**，camp 段掷流前移（22222
+          //   全序列对拍 #82323 van=a3 vs js=d 定谳）。All(data) 段（:537）序正确。
           st.wall[ui] = wallType;
-          // XXXX：PlaceWall.Apply（Actions.cs:516-531）= 本格+四邻五连 SquareWallFrame
-          //   ——各仅中心 resetFrame=true 掷 Next(0,3)（墙≠0 且非 wallLargeFrames）
           placeWallFrameRollsMB(st, rng, ux, uy);
         }
       }
@@ -1811,6 +1826,10 @@ function placeEnchantedSwordShrine(
         const i = st.idx(px, py);
         st.flags[i] = 0; st.slope[i] = 0; st.half[i] = 0;   // ClearTile
         st.wire[i] &= ~WIRE_ACTUATOR;                       // +inActive(false)(Tile.cs:153)
+        // ★BBBBBB：ClearTile(frameNeighbors:true) 尾帧（WorldUtils.cs ClearTile →
+        //   四邻 TileFrame(resetFrame 默认 false)——184 苔藓邻格**每访恒掷**
+        //   Next(3)；22222 全序列对拍剑冢段 van 侧 2241 个 b0,3 缺失的主源之一）
+        genFrameNeighbors(st, rng, px, py, 'clearTile');
         cave.add(px - pointX, py - pointY);                 // Output(shapeData)
       }
     }
@@ -1829,6 +1848,9 @@ function placeEnchantedSwordShrine(
         st.type[i2] = DIRT; st.flags[i2] = 1;               // SetTile(0)
         st.wall[i2] = 0; st.liquid[i2] = 0; st.liquidType[i2] = 0;
         st.frameX[i2] = 0; st.frameY[i2] = 0; st.slope[i2] = 0; st.half[i2] = 0;
+        // ★BBBBBB：链尾 SetFrames(frameNeighbors:true)（cs:76→WorldUtils.TileFrame
+        //   五连 resetFrame=true）——184 邻格每访恒掷 + 中心苔藓格掷
+        genFrameNeighbors(st, rng, px, py, 'setTile');
         mound.add(px - point2X, py - point2Y);
       }
     }
@@ -1849,6 +1871,8 @@ function placeEnchantedSwordShrine(
     const i = st.idx(px, py);
     st.type[i] = GRASS; st.flags[i] = 1;                    // SetTile(2)
     st.frameX[i] = 0; st.frameY[i] = 0; st.slope[i] = 0; st.half[i] = 0;
+    // ★BBBBBB：SetFrames(frameNeighbors:true) 五连（cs:78）——同 ⑨ 补掷
+    genFrameNeighbors(st, rng, px, py, 'setTile');
   }
   // ⑫ 灌水(cs:79):RectangleMask(-40,40,0,40) + IsEmpty + SetLiquid()(默认 水/满)
   //   ——SetLiquid(Actions.cs:int type=0, byte value=255)= 全水。旧实现以为"排水",
@@ -1861,17 +1885,19 @@ function placeEnchantedSwordShrine(
     if (st.flags[i]) return;                                // IsEmpty
     st.liquid[i] = 255; st.liquidType[i] = LIQUID_TYPE.WATER;   // +1 编码:水=1
   });
-  // ⑬ 花墙 68 + 藤蔓(cs:80):全形状格铺墙,其后 OnlyTiles(2)→Offset(0,1)→藤蔓
-  cave.each((dx, dy) => {
-    const px = pointX + dx, py = pointY + dy;
-    if (!st.inBounds(px, py)) return;
-    st.wall[st.idx(px, py)] = 68;                           // PlaceWall(68, Flower Wall)
-  });
+  // ⑬ 花墙 68 + 藤蔓(cs:80):Chain(PlaceWall(68), OnlyTiles(2), Offset(0,1),
+  //    ActionVines)——★BBBBBB：**同一格流内顺序执行**(每格 PlaceWall→门→vines)，
+  //    曾拆两个 each=先全墙后全藤，vines 长度掷(int(3,5))与墙帧掷(Next(0,3))交错
+  //    序错位(22222 全序列 #84078 van=b3,6 vs js=b0,3 定谳)
   cave.each((dx, dy) => {
     const px = pointX + dx, py = pointY + dy;
     if (!st.inBounds(px, py)) return;
     const i = st.idx(px, py);
-    if (!st.flags[i] || st.type[i] !== GRASS) return;       // OnlyTiles(2)
+    st.wall[i] = 68;                                        // PlaceWall(68, Flower Wall)
+    // ★BBBBBB：PlaceWall.Apply 尾五连 SquareWallFrame（Actions.cs:516-531）——
+    //   墙≠0 且非 wallLargeFrames 的中心格掷 Next(0,3)（wallFrameRollMB 掷侧）
+    placeWallFrameRollsMB(st, rng, px, py);
+    if (!st.flags[i] || st.type[i] !== GRASS) return;       // OnlyTiles(2) 门
     const vx = px, vy = py + 1;                             // Offset(0, 1)
     if (!st.inBounds(vx, vy)) return;
     // ActionVines(3,5,382):Next(3,6) 长度,向下逐格铺到活性格为止
@@ -1909,8 +1935,19 @@ function placeEnchantedSwordShrine(
           if (!st.flags[i2] || st.type[i2] !== SAND) continue;     // OnlyTiles(53)
           st.type[i2] = HARDSAND_TILE;                             // SetTile(397)
           st.frameX[i2] = 0; st.frameY[i2] = 0;
+          // ★BBBBBB：SetTile(397).Output(data)（cs:84）——硬化格并入 data（HashSet
+          //   重复 add 无害，枚举序=槽序）
+          shaft.add(dx + i, dy + j);
         }
       }
+    });
+    // ★BBBBBB：第二行 Gen（cs:86）= ModShapes.All(data) + SetFrames(frameNeighbors:
+    //   true)——对 data 全集（清除格∪硬化格）五连 TileFrame（reset=true，184 每访
+    //   恒掷 + 中心苔藓掷）
+    shaft.each((dx, dy) => {
+      const px = ox + dx, py = sy0 + dy;
+      if (!st.inBounds(px, py)) return;
+      genFrameNeighbors(st, rng, px, py, 'setTile');
     });
   }
   // ⑮ 土丘剑(cs:89-94):ChanceOfRealSword 门(默认 1.0 恒真→187 style17;
@@ -1929,6 +1966,10 @@ function placeEnchantedSwordShrine(
   }
   // ⑯ 土丘表面草(cs:96):Offset(0,-1)→OnlyTiles(2)→Offset(0,-1)→ActionGrass
   //    (ActionGrass.cs:14-22):目标格与上格皆空 → PlaceTile(SelectRandom{3,73})
+  //    ★BBBBBB：PlaceTile 掷镜像（van PT 织入实测：SelectRandom=Next(2)；**仅
+  //      type 3** 有 IsFitToPlaceFlowerIn→墙支掷 (Next(50)/Next(35)/NextFromList(14)
+  //      /Next(6))——观测 (a50,a35,a14) 组=wall∈[63,70](⑬ 花墙 68)走 NextFromList；
+  //      type 73/187 的 PlaceTile 内部零掷（IsFit 组不含 73；187 TileObjectData 支）
   mound.each((dx, dy) => {
     const gx = point2X + dx, gy = point2Y + dy - 1;          // 第一层 Offset(0,-1)
     if (!st.inBounds(gx, gy)) return;
@@ -1936,8 +1977,31 @@ function placeEnchantedSwordShrine(
     if (!st.flags[gi] || st.type[gi] !== GRASS) return;      // OnlyTiles(2)
     const px = gx, py = gy - 1;                              // 第二层 Offset(0,-1)
     if (!st.inBounds(px, py) || !st.inBounds(px, py - 1)) return;
-    if (st.flags[st.idx(px, py)] || st.flags[st.idx(px, py - 1)]) return;
-    st.setTileSilent(px, py, rng.int(0, 1) === 0 ? SHORT_PLANTS : TALL_PLANTS, 0, 0);
+    const pi = st.idx(px, py);
+    if (st.flags[pi] || st.flags[st.idx(px, py - 1)]) return;
+    const pickShort = rng.nextInt(2) === 0;                  // Utils.SelectRandom{3,73}
+    let frameX = 0;
+    if (pickShort) {
+      // PlaceTile(3) 分支掷（cs:59517-59600）——IsFitToPlaceFlowerIn(3) 地面
+      //      {2,78,380,477,579}（cs:58247）+ 墙支 AllowsPlantsToGrow 双侧门
+      const bi = st.idx(px, py + 1);
+      const belowOk = st.flags[bi] !== 0 && st.slope[bi] === 0 && st.half[bi] === 0
+        && PLANT_GROUND_3.has(st.type[bi]!);
+      const liq = st.liquid[pi]! > 0;                        // cs:59489 液体格拒 3
+      if (belowOk && !liq) {
+        const wl = st.wall[pi]!, wl2 = st.wall[bi]!;
+        if (PLANT_WALLS.has(wl) && PLANT_WALLS.has(wl2)) {
+          if (rng.nextInt(50) === 0) {
+            frameX = 144;                                    // 磨菇变体（cs:59569-77）
+          } else if (rng.nextInt(35) === 0 || (wl >= 63 && wl <= 70)) {
+            frameX = GRASS_STYLE_LIST[rng.nextInt(GRASS_STYLE_LIST.length)]! * 18;
+          } else {
+            frameX = rng.nextInt(6) * 18;
+          }
+        }
+      }
+    }
+    st.setTileSilent(px, py, pickShort ? SHORT_PLANTS : TALL_PLANTS, frameX, 0);
   });
   // ⑰ structures.AddProtectedStructure(rectangle, 10)(cs:98/EnchantedSwordBiome.cs:110)
   //   ——pad 10 入全局保护图（GenState.protectedRects,addProtectedStructure 内部 Inflate）

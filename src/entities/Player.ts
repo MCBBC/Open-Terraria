@@ -1717,8 +1717,32 @@ export class Player extends Entity {
       world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE))] === 1
       || world.store.liquidType[
         world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE))] === 3);
-    // 入水瞬间：水花声（出水不响）
-    if (this.inWater && !wasInWater) game.playSfx('splash');
+    // 入水/出水瞬间：水花尘 + 水花声（Player.cs:27464-27636,2026-08-20 补齐——
+    // 曾只播入水声、零粒子=用户报"入水出水效果非常轻微且出水几乎没有"）
+    // 原版两方向都出 50 颗 dustWater 尘(水样=33,岩浆样=35,微光=308,蜜=152)+
+    // SoundID 19(splash);入水 vy−3 / 出水 vy−4、vx×2.5、scale 0.8、α100、无重力
+    if (this.inWater !== wasInWater && this.wetCount === 0) {
+      const exiting = !this.inWater;
+      const px = this.x - 6, py = this.y + this.h / 2 - 8;
+      const pw = this.w + 12, ph = 24;
+      const vyKick = exiting ? -4 : -3;
+      if (this.inHoney) {
+        // 蜜(20 颗尘 152,vy−1,scale 1.3,α100)
+        for (let i = 0; i < 20; i++) {
+          game.spawnParticles(px + Math.random() * pw, py + Math.random() * ph,
+            '#B8860B', 1, 1.3, { life: 30, damp: 0.97, gravity: 0, vy: vyKick * 0.4, vx: (Math.random() - 0.5) * 5 });
+        }
+        game.playSfx('splash', 0.8);
+      } else {
+        // 普通水/岩浆(50 颗尘)
+        const isLava = this.inLava;
+        for (let i = 0; i < 50; i++) {
+          game.spawnParticles(px + Math.random() * pw, py + Math.random() * ph,
+            isLava ? '#FF6600' : '#4A9EFF', 1, 0.8, { life: 30, damp: 0.97, gravity: 0, vy: vyKick, vx: (Math.random() - 0.5) * 5 * 2.5 });
+        }
+        game.playSfx('splash');
+      }
+    }
     // wetCount 去抖（Player.cs:27464-27466 入水置 10 / :27558-27560 出水置 10 /
     // :27649-27651 每 tick 递减）——水波系统涟漪尺寸因子消费
     if (this.inWater && !wasInWater && this.wetCount === 0) this.wetCount = 10;

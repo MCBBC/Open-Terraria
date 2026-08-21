@@ -13614,6 +13614,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'storm':
         wd.startRain(true, 0.85);
         wd.windSpeedTarget = 0.6;
+        // ★立即触发一次闪电(2026-08-20 用户报"从未见过闪电"):随机触发概率
+        //   1/261/tick,自然暴雨+强风罕见;预设切风暴应立即可见效果
+        wd.newLightning(true);
         announce('Mods.SandboxWorld.Weather.PresetStorm');
         break;
       case 'sandstorm':

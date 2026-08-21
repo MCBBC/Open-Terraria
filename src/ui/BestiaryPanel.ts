@@ -10,7 +10,7 @@
 //     解锁档 UnlockState 1 头像/2 +属性/3 +掉落/4 +掉落率（Bestiary.ts unlockState）
 //     掉落表 = vanilla-npcdrops.json 规则树展平（ItemDropBestiaryInfoElement 近似）
 // 打开入口：背包面板图鉴按钮（原版 BestiaryMenuButton Main.cs:41905）+ 暂停菜单。
-// 键位：Esc / E 关闭（DOM 面板惯例；capture 阶段拦截防 main.ts 暂停键二次消费）。
+// 键位：Inventory 键位表动作关闭（默认 Esc+E；capture 阶段拦截防 main.ts 暂停键二次消费）。
 // 已闭合登记（数据层 → UI 消费）：
 //   - 排序：Sort_BestiaryID（ContentSamples.NpcBestiarySortingId 九键链全键提取，
 //     含 GetLowestBiomeGroupIndex）/ Sort_Rarity（NpcBestiaryRarityStars，npcStats 投影）
@@ -97,6 +97,7 @@ import { npcValueOf } from '../drops/NpcDrops';
 import dropData from '../data/vanilla-npcdrops.json';
 import spawnData from '../data/vanilla-bestiary-spawn.json';
 import { UISfx } from '../vui/UISfx';
+import { isBound } from '../core/Keybinds';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import {
   bestiaryEntries, bestiaryCreditId, UnlockState,
@@ -695,8 +696,11 @@ export class BestiaryPanel {
   private ro: ResizeObserver | null = null;
   /** RO 稳定居抖定时器(close 时清,防面板关后补刷) */
   private roTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  /** 关闭键走键位表（Inventory 动作,与 main.ts 主链 isBound('Inventory') 同源;
+   *  原版图鉴在物品栏 UI 链内,随 Inventory 键开合——重绑后跟随）。capture 阶段
+   *  拦截防 main.ts 暂停键二次消费。 */
   private escHandler = (e: KeyboardEvent) => {
-    if (e.code === 'Escape' || e.code === 'KeyE') {
+    if (isBound('Inventory', e.code)) {
       e.stopImmediatePropagation();
       e.preventDefault();
       this.close();

@@ -84,6 +84,27 @@ for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sh
       console.log(`  [gf] golden frames injected (${inj}/${cnt}${keep.size ? ` keep-js=${[...keep]}` : ''})`);
     }
     const chests = JSON.parse(readFileSync(`${DIR}/chests.json`, 'utf8'));
+    if (process.env.SW_A1_GCIN) {
+      // 金标 chest.tsv 注入（坐标+物品位）
+      const { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } = await import('../src/data/items');
+      const lines2 = readFileSync(process.env.SW_A1_GCIN, 'utf8').trim().split('\n');
+      const gold: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }> = [];
+      for (const ln of lines2) {
+        const f = ln.split('\t');
+        const items: Array<{ id: number; stack: number } | null> = [];
+        for (let q2 = 3; q2 < f.length; q2++) {
+          if (f[q2] === '-') { items.push(null); continue; }
+          const [tid, stack] = f[q2]!.split(',').map(Number);
+          const key = VANILLA_ITEM_KEY_BY_ID[tid!];
+          const jsId = key ? ITEM_BY_KEY[key] : undefined;
+          items.push(jsId !== undefined ? { id: jsId, stack: stack! } : null);
+        }
+        gold.push({ x: Number(f[1]), y: Number(f[2]), items });
+      }
+      (chests as unknown[]).length = 0;
+      (chests as unknown[]).push(...gold);
+      console.log(`  [gcin] golden chest registry injected (${gold.length})`);
+    }
     const rng = new RNG(SEED);
     if (process.env.SW_A1_CHAIN === '102') {
       // 链式重放 101→102（微群系→水生植物），对拍 102
@@ -128,7 +149,30 @@ for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sh
       const { runGemTreesPass } = await import('../src/world/gen/vanilla/GemPasses');
       runGemTreesPass(st, rng, gs);
     } else {
-      runMicroBiomesPass(st, rng, gs, chests);
+      const spanOut2 = process.env.SW_A1_SPAN;
+      if (spanOut2) {
+        const lines2: string[] = [];
+        let roll2 = 0;
+        const rngS = new Proxy(rng, {
+          get(t, pr) {
+            const v = Reflect.get(t, pr, t);
+            if (typeof v !== 'function') return v;
+            return (...args: number[]) => {
+              roll2++;
+              const r2 = (v as (...a: number[]) => number).apply(t, args);
+              const f2 = String(pr);
+              if (f2 === 'nextInt') lines2.push(`a ${args[0]}`);
+              else if (f2 === 'int') lines2.push(`b ${args[0]} ${args[1]! + 1}`);
+              return r2;
+            };
+          },
+        }) as RNG;
+        runMicroBiomesPass(st, rngS, gs, chests);
+        writeFileSync(spanOut2, lines2.join('\n') + '\n');
+        console.log(`  [span] ${lines2.length} rolls → ${spanOut2}`);
+      } else {
+        runMicroBiomesPass(st, rng, gs, chests);
+      }
     }
     __setGenStateForProbe(null);
     if (process.env.SW_A1_REGION) {
