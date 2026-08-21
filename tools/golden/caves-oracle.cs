@@ -18760,15 +18760,15 @@ void FcCheck2xX(int x, int y, int sheet)
     while (rr >= 36) rr -= 36;
     if (rr == 18) num--;
     if (!FcInB2(num, y)) return;
-    int num3 = frY[num * W + y] / 18;
+    int num3 = frY[y * W + num] / 18;
     int num4 = sheet == 104 ? 5 : sheet == 207 ? 4 : 3;
     int num5 = 0;
     while (num3 >= num4) { num3 -= num4; num5 += num4 * 18; }
     int num6 = y - num3;
     if (sheet == 410 && num5 != 0) num5 += 2;
     if (!FcInB2(num, num6)) return;
-    int frameX = frX[num * W + y];
-    int frameY = frY[num * W + y];
+    int frameX = frX[y * W + num];
+    int frameY = frY[y * W + num];
     bool bad = false;
     for (int k = 0; k < num4; k++)
     {

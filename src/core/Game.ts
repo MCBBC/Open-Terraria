@@ -3836,41 +3836,33 @@ export class Game implements GameHooks {
     windSway.active = !this.paused; // _isActiveAndNotPaused（暂停不喷落叶；物理随 !paused 冻结）
     // 调试桥：暴露 app 实例（HMR 双实例防探针误读——EmoteBubble 同款教训）
     (window as unknown as { __swNatureParticles?: typeof natureParticles }).__swNatureParticles = natureParticles;
+    let steps = 0;
     if (!this.paused) {
       this.acc += elapsed;
-      let steps = 0;
       while (this.acc >= FIXED_DT && steps < 5) {
         this.fixedUpdate(FIXED_DT);
         this.acc -= FIXED_DT;
         steps++;
       }
     }
-    // 跳帧(原版 FrameSkipMode 三态,Main.cs:16950-16975):
-    //  on     激进——渲染耗时 > 预算×1.5 即跳,连跳 ≤2
-    //  subtle 温和——落后整帧(> 预算×2)才跳,连跳 ≤1(原版 successiveSkipped
-    //         Draws <= num3(0) 语义:最多连跳一次必须画一帧)
-    //  off    不跳。帧预算按上限档算,不锁 = 60 兜底
-    const fsm = options.data.frameSkipMode;
-    if (fsm !== 'off') {
-      const budget = 1000 / Math.max(30, options.data.frameCap || 60);
-      const over = this._lastRenderMs > budget * (fsm === 'subtle' ? 2 : 1.5);
-      const maxStreak = fsm === 'subtle' ? 1 : 2;
-      if (over && this._skipStreak < maxStreak) {
-        this._skipStreak++;
-        return;                       // 本帧只跑逻辑不渲染(SuppressDraw 语义)
-      }
+    // 跳帧（原版 FrameSkipMode 三态，Main.cs:16950-16975 1456 实况）：
+    //  ★原版"落后跳帧"分支是【死代码】——num3=0 使 ++successiveSkippedDraws<=0
+    //    永假（:16967-16973），任何档位都【不因渲染落后而跳过绘制】。本仓曾把
+    //    num3 误读成连跳上限 2/1，造出原版不存在的"落后跳帧"= 用户实报"温和档
+    //    激进、关掉反而流畅"（不规则跳帧=卡顿感；均匀落后=纯降帧，观感反而顺）。
+    //  三态的真实差异 = 超前帧节流：Subtle 对 accumulator 未满整帧的 tick
+    //    SuppressDraw（:16954-16959）——高刷屏上把绘制压回逻辑帧率（60）；
+    //    慢机（每 tick 都落后）永不触发 = 永不跳。Off/On 照画（跟随 rAF）。
+    //    On 与 Off 在 1456 的其余差异（XNA 固定时间步/失焦节流 :16893）无 Web
+    //    对应物——本仓逻辑恒 60Hz 定步累加器 + rAF 节拍已覆盖，两态同效。
+    if (!this.paused && options.data.frameSkipMode === 'subtle' && steps === 0) {
+      return;   // SuppressDraw 语义：逻辑未推进的超前帧不重绘（画布保留上一帧）
     }
-    this._skipStreak = 0;
     const r0 = performance.now();
     this.render();
-    this._lastRenderMs = performance.now() - r0;
     gfxQuality.drawsThisSecond++;
     gfxQuality.tick(r0);
   }
-  /** 上一帧渲染耗时(跳帧判定信号) */
-  private _lastRenderMs = 0;
-  /** 连续跳帧计数(≤2 钳) */
-  private _skipStreak = 0;
   /** 自动保存墙钟锚（DoUpdate_AutoSave 的 saveTime Stopwatch 等价；0=未起表） */
   private _autoSaveAt = 0;
   /** 自动暂停（Main.autoPause）Web 语义：切 tab(hidden) 暂停——标记"本次暂停是

@@ -8,5 +8,5 @@ it('dump', async () => {
   if (!spec) throw new Error('SW_EE_DUMP required');
   const [at, dir] = spec.split(':');
   (globalThis as { __cavesGridExport?: { at: string; dir: string } }).__cavesGridExport = { at, dir };
-  chainCheckpoints(process.env.SW_EE_SEED ?? '9293480', (process.env.SW_EE_EVIL ?? '0') as 0 | 1);
+  chainCheckpoints(process.env.SW_EE_SEED ?? '9293480', (Number(process.env.SW_EE_EVIL ?? 0) as 0 | 1));
 }, 600000);

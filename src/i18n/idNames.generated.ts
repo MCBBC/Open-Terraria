@@ -10180,6 +10180,7 @@ export const TILE_NAME_ITEM_BY_SHEET: Record<number, string> = {
   '748': '6109',
   '749': '6132',
   '750': '6134',
+  '753': '6147',
 };
 export const TILE_NAME_ZH_BY_ID: Record<number, string> = {
   '0': '土块',

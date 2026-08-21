@@ -20,6 +20,7 @@ for (const c of cases) {
       goldWall.set(name, wal);
     }
     const res = chainCheckpoints(c.seedText, c.evil);
+    if (c.seedText === '9293480') console.log(`P3HASH corruption ${res.grids.get('corruption')} underworld ${res.grids.get('underworld')}`);
     let green = 0, red = 0, firstBad = '';
     for (const n of gold.keys()) {
       const ok = res.grids.get(n) === gold.get(n);

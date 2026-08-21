@@ -22,14 +22,13 @@ const out = await page.evaluate(async () => {
   if (!dummy) return { err: 'no dummy' };
   const { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS } = await import('/src/data/items.ts');
   // 木弓 3503? 查 bow key
-  const bowKey = VANILLA_ITEM_KEY_BY_ID[3503] ?? VANILLA_ITEM_KEY_BY_ID[388];
+  const bowKey = VANILLA_ITEM_KEY_BY_ID[3504] ?? VANILLA_ITEM_KEY_BY_ID[388];   // 3504 铜弓(useAmmo 40 真远程)
   const arrowKey = VANILLA_ITEM_KEY_BY_ID[40];
   const r = { bowKey, arrowKey, bowId: ITEM_BY_KEY[bowKey], arrowId: ITEM_BY_KEY[arrowKey] };
   if (r.bowId == null || r.arrowId == null) return { ...r, err: 'missing bow/arrow' };
   // 弹药塞进背包(找空格)
   const inv = g.player.inv;
-  let ammoSlot = -1;
-  for (let i = 0; i < 40; i++) { if (!inv.slots[i]) { inv.slots[i] = { id: r.arrowId, stack: 99 }; ammoSlot = i; break; } }
+  inv.slots[54] = { id: r.arrowId, stack: 99 };   // 弹药栏 54-57(PickAmmo 首扫)
   inv.slots[g.player.inv.selected] = { id: r.bowId, stack: 1 };
   g.cb.onInventoryChanged();
   // 玩家退到距假人 ~8 格
@@ -42,17 +41,16 @@ const out = await page.evaluate(async () => {
   const hits = [];
   for (let shot = 0; shot < 3; shot++) {
     inp.mouseDown = true;
+    const nums0 = g.dmgNumbers.length;
     for (let t = 0; t < 35; t++) {
-      const before = dummy.dummyShake;
       g.fixedUpdate(1 / 60);
-      if (dummy.dummyShake > before) hits.push({ shot, t, shake: dummy.dummyShake,
-        num: g.dmgNumbers[g.dmgNumbers.length - 1]?.value });
-      if (g.player.useTime === 0 && t > 5) break;
+      if (g.dmgNumbers.length > nums0) { hits.push({ shot, t, shake: dummy.dummyShake,
+        num: g.dmgNumbers[g.dmgNumbers.length - 1]?.value }); break; }
     }
     inp.mouseDown = false;
     for (let t = 0; t < 30 && g.player.useTime > 0; t++) g.fixedUpdate(1 / 60);
   }
-  return { ...r, hits, nums: g.dmgNumbers.length, ammoLeft: inv.slots[ammoSlot]?.stack,
+  return { ...r, hits, nums: g.dmgNumbers.length, ammoLeft: inv.slots[54]?.stack,
     bowDef: { vid: ITEM_DEFS[r.bowId]?.vid, kind: (await import('/src/data/vanillaItemCombat.ts')).combatWeapon(ITEM_DEFS[r.bowId])?.kind } };
 });
 console.log(JSON.stringify(out, null, 1));

@@ -55,10 +55,12 @@ export interface OptionsData {
   /** 渲染帧率上限(2026-08-18 原版对齐):原版锁 60fps;0=不锁(跟随显示器 rAF)。
    *  逻辑 tick 恒 60Hz 不受影响(fixedUpdate 累加器);仅 gate 渲染帧 */
   frameCap: number;
-  /** 跳帧三态(原版 FrameSkipMode:Off/On/Subtle,默认 Subtle——原版 improved 路径
-   *  默认温和档):On=激进(超预算 1.5×即跳,连跳≤2);Subtle=温和(落后整帧才跳,
-   *  连跳≤1,原版 successiveSkippedDraws<=0 语义 Main.cs:16968);
-   *  渲染超预算时本帧只跑逻辑不画,保逻辑恒 60Hz */
+  /** 帧模式三态(原版 FrameSkipMode Off/On/Subtle,Main.cs:16950-16975 1456 实况):
+   *  ★"落后跳帧"在原版是死代码(num3=0 使 successiveSkippedDraws 门永假 :16968),
+   *  任何档位都不因渲染落后而跳绘制。Subtle=超前帧节流(accumulator 未满整帧的
+   *  tick SuppressDraw :16954——高刷屏把绘制压回逻辑帧率;慢机每 tick 都落后
+   *  永不触发);Off/On=跟随 rAF(两态在 1456 的其余差异为 XNA 固定时间步/失焦
+   *  节流 :16893,无 Web 对应物,本仓同效)。默认 Subtle(原版 improved 路径) */
   frameSkipMode: 'off' | 'on' | 'subtle';
   /** 水波质量四档（Main.WaveQuality，Main.cs:405 默认 3）：0=关 1=低 2=中 3=高。
    *  档位门见 WaterShaderData.cs:114-118（>=3 弹幕波/黏度补偿、>=2 玩家+涟漪、

@@ -65,7 +65,7 @@ export const AURORA_SEG = 140;
  *  ×20 频率本就 2.7 纹素/屏px(GPU 侧即缩小采样),q=0.25 加深至 ~10.7:1,
  *  由预混+线性升采样平滑,探针实测列标准差 7.4(帘状竖纹结构保留)、竖缝 0、
  *  4px 块边差 0.92 vs 块内 0.68(轻微,噪声内容下不可辨)。 */
-export const AURORA_QUALITY = 0.25;
+export const AURORA_QUALITY = 0.5;
 
 /** 月相(MoonPhase.cs:Full=0…ThreeQuartersAtRight=7) */
 export const enum AuroraMoonPhase {

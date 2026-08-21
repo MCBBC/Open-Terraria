@@ -405,8 +405,8 @@ export class SettingsPanel {
             : Lang.text('Mods.SandboxWorld.Settings.RenderModeAuto'),
           () => void options.set('renderMode', d.renderMode === 'gpu' ? 'cpu' : d.renderMode === 'cpu' ? 'auto' : 'gpu'),
         ),
-        // 跳帧三态(原版 FrameSkipMode:Off/On/Subtle,默认温和):渲染超预算只跑
-        // 逻辑不画,保逻辑恒 60Hz——弱机卡顿时"画面慢但游戏不慢"
+        // 帧模式三态(原版 FrameSkipMode,Main.cs:16950-16975):温和=超前帧节流
+        // (高刷屏绘制压回逻辑帧率;慢机永不触发——原版"落后跳帧"是死代码 num3=0)
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.FrameSkip'),
           () => d.frameSkipMode,
