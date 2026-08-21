@@ -170,13 +170,15 @@ function openHerbBag(give: BagGive, rnd: BagRand): void {
 
 /** OpenLockBox（Player.cs:9031-9062）：金锁盒 3085——地牢武器 7 选 1 + 1/3 暗影钥匙
  *  329 + 1/8 5465 + FTW 1/5 5515。switch(Next(7)) 的 0 支走 default=164（村正）。
- *  金钥匙 327 的消耗门在分派层（ItemSlot.cs:1695-1698 ConsumeItem 先于开盒）。 */
+ *  金钥匙 327 的消耗门在分派层（ItemSlot.cs:1695-1698 ConsumeItem 先于开盒）。
+ *  1457（:9424-9450）尾段新增 1/4 SilverBracer(6156)（无条件掷,FTW 支之后）。 */
 function openLockBox(give: BagGive, rnd: BagRand, remixWorld: boolean, getGoodWorld: boolean): void {
-  const roll = rnd.next(7);                                   // :9039
+  const roll = rnd.next(7);                                   // :9432
   give([164, 3317, 155, 156, remixWorld ? 2623 : 157, 163, 113][roll]);
-  if (rnd.next(3) === 0) give(329);                           // :9051-9054 Shadow Key
-  if (rnd.next(8) === 0) give(5465);                          // :9055-9058 Bone Key
-  if (getGoodWorld && rnd.next(5) === 0) give(5515);          // :9059-9061 FTW 世界 5515
+  if (rnd.next(3) === 0) give(329);                           // :9441-9444 Shadow Key
+  if (rnd.next(8) === 0) give(5465);                          // :9445-9448 Bone Key
+  if (getGoodWorld && rnd.next(5) === 0) give(5515);          // :9449-9451 FTW 世界 5515
+  if (rnd.next(4) === 0) give(6156);                          // 1457 :9452-9454 SilverBracer 1/4
 }
 
 /** OpenShadowLockbox（Player.cs:9011-9029）：黑曜石锁盒 4879——地狱武器 5 选 1

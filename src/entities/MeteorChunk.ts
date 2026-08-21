@@ -11,6 +11,7 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
 import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 
 export class MeteorChunk extends Entity {
   w = 14; h = 14;
@@ -48,7 +49,8 @@ export class MeteorChunk extends Entity {
     const p = game.player;
     if (!this.hitPlayer && p && !p.dead && this.aabbOverlaps(p)) {
       this.hitPlayer = true;                              // penetrate -1:穿过不消亡
-      game.damagePlayer(dmg, this.cx, this.cy);
+      // Damage_EVP：1078 生成值 50/40/35 是基础（WorldGen.cs:71798-71806），命中再过乘区×2
+      game.damagePlayer(hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy);
       p.buffs.apply(BuffType.OnFire, (300 + Math.floor(Math.random() * 301)) / 60);  // :11456
     }
     hitTownNpcs(this, game, dmg, Math.sign(this.vx) * 5);

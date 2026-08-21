@@ -53,13 +53,14 @@ describe('FallingBlock', () => {
     expect(world.store.get(33, 23)).toBe(TILE_BY_KEY['sand']!);
   });
 
-  it('命中玩家:10 伤害且每块只结算一次', () => {
+  it('命中玩家:EVP 链经典 20（基础 10×乘区1×2）且每块只结算一次', () => {
     const { game, dmg } = makeGame();
     const player = { x: 32 * 16, y: 10 * 16, w: 20, h: 42, dead: false } as never;
     (game as unknown as { player: unknown }).player = player;
     const fb = new FallingBlock(32 * 16 + 3, 10 * 16 + 3, 'sand');
     fb.fixedUpdate(1 / 60, game);
     fb.fixedUpdate(1 / 60, game);
-    expect(dmg).toEqual([FallingBlock.DAMAGE]);
+    // 2026-08-21 缺口类清偿：Damage_EVP（Projectile.cs:13770-13781）难度乘区×通用×2
+    expect(dmg).toEqual([FallingBlock.DAMAGE * 2]);
   });
 });

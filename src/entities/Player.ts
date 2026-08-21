@@ -248,6 +248,21 @@ export class Player extends Entity {
   manaRegenDelay = 0;
   /** 用魔物品动画窗剩余 tick（itemAnimation>0 期每帧重置 delay，:42131-42137） */
   manaAnimTicks = 0;
+  // ---- 1457 ManaHeat 魔力过热族（Player.cs:961-967 字段声明）----
+  /** Player.slowMagicUse（:961）：蓝空过载施法标记——仅 DebugOptions.ManaV2（debug）
+   *  置位（CheckMana :53241→DoRunOutOfManaEffect :53258-53261），release 版恒 false。
+   *  本仓无 ManaV2 调试开关 → 恒 false，方法链按 1457 原样备位 */
+  slowMagicUse = false;
+  /** Player.manaHeat（:963）：魔法伤害乘区，ResetEffects 每帧清 1f（:18709），
+   *  UpdateBuffs buff 396 段累加（:10416-10429） */
+  manaHeat = 1;
+  /** Player.latestManaPotionDamageBonus（:965）：最近一次 ManaHeat 源的功率 */
+  latestManaPotionDamageBonus = 0;
+  /** Player.latestManaPotionDuration（:967）：最近一次 ManaHeat 源时长（tick） */
+  latestManaPotionDuration = 0;
+  /** Player.chlorophyteBladeCounter（1457 新字段，叶绿巨剑 1226 三连击计数——
+   *  ItemCheck :43161-43163 每帧递减，ItemCheck_Shoot :49406 奖励击后 += itemAnimation×3） */
+  chlorophyteBladeCounter = 0;
   /** 调试：无敌 + 无限魔力（F2 切换，原版无）——damage() 早退 + 每 tick 血蓝回满
    *  （回满兜住 DoT/溺水/摔落等直改 hp 的路径）。仅本地调试语义，不入存档 */
   debugGod = false;
@@ -920,7 +935,15 @@ export class Player extends Entity {
         if (fx.flowerBoots) flowerBoots = true;   // 花靴/仙灵靴（:12688）
         if (fx.manaMagnet) manaMagnet = true;
         if (fx.magicCuffs) magicCuffs = true;
-        if (fx.manaFlower) manaFlower = true;
+        if (fx.manaFlower) {
+          manaFlower = true;
+          // 1457: 法力花增强（ApplyEquipFunctional case 3991 :14511-14516）——
+          // 新增 magicCrit += 5 / magicDamage += 0.05（manaCost -0.08 迁至
+          // UpdateEquips if(manaFlower) :13058-13062，本仓 Game 侧 ×0.92 已等价）。
+          // ★仅 3991 裸法力花有此两项：4000/4001(:14561-14569)与 555(:15706-15709)
+          // 只置 manaFlower 旗，不吃增强
+          if (accVid === 3991) { critMagic += 5; dmgMagic += 0.05; }
+        }
         if (fx.manaRegenBonus) manaRegenBonus += fx.manaRegenBonus;           // 魔力斗篷 982（:14383）
         if (fx.manaRegenDelayBonus) manaRegenDelayBonus += fx.manaRegenDelayBonus; // 982（:14382）
         // （fx.counterWeight 已并入上方悠悠球袋族 vid 直表——5547 是唯一 accfx 条目，
@@ -1261,6 +1284,8 @@ export class Player extends Entity {
     if (kind === 'magic') {
       m += this.buffs.magicDmgBonus;            // MagicPower +20%（:9669）
       m *= this.buffs.manaSickMagicMult;        // 魔力眩晕最高 -25% 线性恢复（:10003/:25616）
+      m *= this.manaHeatMult;                   // 1457: 魔力过热乘区（Update :26104
+                                                //   magicDamage *= manaHeat，紧跟 manaSick 段）
     }
     if (kind === 'ranged') m *= this.buffs.arrowDmgMult;   // Archery ×1.1（:9712,ranged 近义）
     // R1 药水：怒气(117)全系 +10%（:9947）；醉酒(25)近战 +10%（:11513）
@@ -1456,6 +1481,73 @@ export class Player extends Entity {
           && inAPlaceWithWind(st, this.x, this.y, this.w, this.h, game.world.groundLevel),
       },
     };
+  }
+
+  /** 1457 新方法 ApplyManaRegenerationDelay（Player.cs:19515-19540）：用魔惩罚期置值
+   *  统一入口。公式与 1456 三处内联相同（(1−mana/max)×240+45 再 ×0.7 取整），但
+   *  新增 manaRegenBuff 时钳 20f——1456 该钳只在 UpdateManaRegen 每帧做，1457 挪到
+   *  置值时点（QuickBuff :5877 / ItemCheck_ApplyManaRegenDelay :51204 /
+   *  CommandForbiddenStorm :57546 三处改调本方法）→ 回蓝 buff 期间惩罚期变短。
+   *  smm = statManaMax2（调用侧已备）。DebugOptions.ManaV2 分支为 debug-only 未移植 */
+  applyManaRegenerationDelay(smm = this.maxMana): void {
+    const base = smm > 0 ? (1 - this.mana / smm) * 240 + 45 : 45;
+    this.manaRegenDelay = Math.floor(base * 0.7);      // :19518-19521（×0.7 后才取整）
+    if (this.buffs.manaRegenBuff && this.manaRegenDelay > 20) {
+      this.manaRegenDelay = 20;                        // :19522-19525 回蓝期钳 20f
+    }
+  }
+
+  /** 1457 新方法 TryApplyManaHeat（Player.cs:52644-52652）：登记最近 ManaHeat 源并
+   *  挂 buff 396（时长 = time×60 tick）。power/time 任一为 0 不挂 buff（字段仍覆写） */
+  tryApplyManaHeat(power: number, time: number): void {
+    this.latestManaPotionDamageBonus = power;            // :52646
+    this.latestManaPotionDuration = time * 60;           // :52647
+    if (time !== 0 && power !== 0) {
+      this.buffs.apply(BuffType.ManaHeat, (time * 60) / 60);  // :52650 AddBuff(396, duration)
+    }
+  }
+
+  /** 1457 ApplyManaPotionManaHeat（Player.cs:52606-52642）：蓝药 189/500/2209 →
+   *  0.05/0.10/0.15 × 20s。★1457 该方法【无调用点】（死代码——活路径只有魔力星
+   *  35350/:35368 直调 TryApplyManaHeat），按原样备位不接线，喝蓝不触发 ManaHeat */
+  static readonly MANA_POTION_MANA_HEAT: Record<number, [number, number]> = {
+    189: [0.05, 20], 500: [0.1, 20], 2209: [0.15, 20],
+  };
+
+  /** 1457 魔力过热伤害乘区（Update :26098-26105 + UpdateBuffs buff 396 段 :10416-10429）：
+   *  manaHeat 每帧 ResetEffects 清 1f 后由 buff 396 累加
+   *  latestManaPotionDamageBonus × (buffTime/latestManaPotionDuration)——线性随
+   *  剩余时长衰减。本仓以纯读 getter 等价（active 存秒） */
+  get manaHeatMult(): number {
+    const left = this.buffs.active.get(BuffType.ManaHeat);
+    if (left === undefined || this.latestManaPotionDamageBonus === 0) return 1;
+    const duration = this.latestManaPotionDuration > 0 ? this.latestManaPotionDuration : 1;
+    return 1 + this.latestManaPotionDamageBonus * ((left * 60) / duration);
+  }
+
+  // ---- 1457 slowMagic 蓝空过载施法减速（Player.cs:47425-47456/:52593-52604）----
+  /** GetSlowMagicMultiplier（:47453-47456）：恒 2.5（private static） */
+  static readonly SLOW_MAGIC_MULTIPLIER = 2.5;
+  /** GetSlowMagicUseTime（:47425-47432）：出手窗时长 ×2.5 */
+  getSlowMagicUseTime(originalTime: number): number {
+    if (!this.slowMagicUse) return originalTime;
+    return Math.floor(Player.SLOW_MAGIC_MULTIPLIER * originalTime);
+  }
+  /** GetSlowMagicUseRate（:47434-47442）：充能速率 ÷2.5（弹幕 AI 每帧增量） */
+  getSlowMagicUseRate(): number {
+    if (!this.slowMagicUse) return 1;
+    return 1 / Player.SLOW_MAGIC_MULTIPLIER;
+  }
+  /** GetSlowMagicScalar（:47444-47451）：节拍/阈值标量 ×2.5 */
+  getSlowMagicScalar(): number {
+    if (!this.slowMagicUse) return 1;
+    return Player.SLOW_MAGIC_MULTIPLIER;
+  }
+  /** UndoSlowMagicUse（:52593-52604）：把已放大的动画/时间窗缩回并清标记。
+   *  ★本仓无 itemAnimationMax/itemTimeMax 窗字段（swing 模型不同）→ 只清标记；
+   *  且 slowMagicUse 仅 ManaV2 debug 置位，release 恒 false，本方法实际不可达 */
+  undoSlowMagicUse(): void {
+    this.slowMagicUse = false;
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
@@ -1667,8 +1759,11 @@ export class Player extends Entity {
     if (this.manaAnimTicks > 0) {
       // 用魔物品动画期：每帧重置 delay（ItemCheck :42131-42137 → ApplyManaRegenDelay
       // :49851-49856；spaceGun+太空枪族 127/4347/4348/514 豁免项本仓无该配饰，恒重置）
+      // 1457: 三处置 delay 改调 ApplyManaRegenerationDelay()（:19515-19540）——
+      // 内联同公式但带 manaRegenBuff 钳 20f（1456 只在 UpdateManaRegen 每帧钳，
+      // 1457 把钳挪到置值时点 → 回蓝 buff 期间施法/快捷 buff 的惩罚期变短）
       this.manaAnimTicks--;
-      this.manaRegenDelay = Math.floor((1 - this.mana / smm) * 240 + 45) * 0.7;
+      this.applyManaRegenerationDelay(smm);
     }
     // manaRegenBonus/manaRegenDelayBonus（:18481-18482 每帧清零后由 buff 158 :9629-9632
     // 与魔力斗篷 982 :14379-14383 重算）
@@ -1683,19 +1778,26 @@ export class Player extends Entity {
       if (still || this.onRope || this.buffs.manaRegenBuff) this.manaRegenDelay -= 1;
       if (this.usedArcaneCrystal) this.manaRegenDelay -= 0.05;   // :19442-19446
     }
-    if (this.buffs.manaRegenBuff && this.manaRegenDelay > 20) this.manaRegenDelay = 20; // :19247-19250
+    // 1457: manaRegenBuff 钳 20 从 UpdateManaRegen 移除（:19541-19560 无此段）——
+    // 钳制只在置值时点（applyManaRegenerationDelay）发生
     let manaRegen = 0;
     if (this.manaRegenDelay <= 0) {
       this.manaRegenDelay = 0;
-      // 每帧产额（:19251-19268）：max/3+1+bonus；静止/攀绳/魔力再生再 +max/3；
-      // 奥术水晶 +max/50；存量系数 num2=mana/max×0.8+0.2（魔力再生恒 1）×1.15 取整
+      // 1457 每帧产额（UpdateManaRegen :19568-19605）三改：
+      // ①基数 = max/3+manaRegenBonus+1，静止/攀绳/魔力再生档改为【再加全额基数】
+      //   （num5 = max/3+bonus+1；1456 只加 max/3）
+      // ②存量系数 0.2+0.8×(mana/max) → 0.5+0.5×(mana/max)（空蓝回复 2.5 倍）
+      // ③下限钳 manaRegen<2 → =2；且 1456 的 ×1.15 全局乘区被移除
       const still = Math.abs(this.vx) < 0.05 && Math.abs(this.vy) < 0.05;
-      manaRegen = Math.floor(smm / 3) + 1 + mRegenBonus;
-      if (still || this.onRope || this.buffs.manaRegenBuff) manaRegen += Math.floor(smm / 3);
-      if (this.usedArcaneCrystal) manaRegen += Math.floor(smm / 50);
-      let num2 = smm > 0 ? (this.mana / smm) * 0.8 + 0.2 : 1;
-      if (this.buffs.manaRegenBuff) num2 = 1;
-      manaRegen = Math.floor(manaRegen * num2 * 1.15);
+      const num5 = Math.floor(smm / 3) + mRegenBonus + 1;   // :19571
+      manaRegen = num5;
+      if (still || this.onRope || this.buffs.manaRegenBuff) manaRegen += num5;  // :19572-19575
+      if (this.usedArcaneCrystal) manaRegen += Math.floor(smm / 50);            // :19577-19580
+      const num6 = smm > 0 ? this.mana / smm : 1;                               // :19582
+      const num9 = this.buffs.manaRegenBuff ? 1 : 0.5;                          // :19584-19588
+      const num10 = num9 + (1 - num9) * num6;                                   // :19592
+      manaRegen = Math.floor(manaRegen * num10);                                // :19599（×1.15 已删）
+      if (manaRegen < 2) manaRegen = 2;                                         // :19600-19603 下限
     }
     // 蓄能结算（:19274-19278）：≥120 扣 120 换 1 魔（满魔时也扣——原版同语义）
     this.manaRegenCount += manaRegen;
@@ -1705,6 +1807,9 @@ export class Player extends Entity {
     }
     if (this.manaRegenCount < 0) this.manaRegenCount = 0;  // :25686-25688
     if (this.mana > smm) this.mana = smm;                  // :25690-25693
+    // 1457: 叶绿巨剑三连击计数每帧递减（ItemCheck :43161-43163
+    // `if (chlorophyteBladeCounter > 0) chlorophyteBladeCounter--`）
+    if (this.chlorophyteBladeCounter > 0) this.chlorophyteBladeCounter--;
 
     // 液体检测：WetCollision(Collision.cs:1575-1650) AABB 语义 1:1——
     // 身体中心下半盒(±10,±h/2)与液体盒相交 = wet;液面高度参与判定
@@ -2002,6 +2107,11 @@ export class Player extends Entity {
         this.updateDeathParts(game);    // UpdateDead :16878-16888 翻滚解体
       }
       this.updateSunScorchValues(game);  // UpdateDead 尾（Player.cs:16928）：死亡档衰减 −2
+      // 1457 UpdateDead 新增重置（Player.cs:17109-17110）：manaSick=false、manaHeat=1f
+      // （新机制字段随死亡归零；1456 无此两行。本仓 manaSick=buff 载体 → 同步摘除）
+      this.buffs.remove(BuffType.ManaSickness);
+      this.manaHeat = 1;
+      this.slowMagicUse = false;
       return;
     }
     // UpdateSunScorch 调用点（Player.Update :25349，UpdateEquips(i) 后一行——
@@ -2049,9 +2159,14 @@ export class Player extends Entity {
     // 限速 = 前三者的复合；runSlowdown ×1.75 以摩擦指数 1.75 等价（乘法摩擦下
     // 每帧减量 ∝ 1−f^n）
     const duneBoost = eqEarly.desertBoots && this.runningOnSand;
+    // 1457: 移动减速 debuff 折算 strongestMoveSpeedDebuff（Update :26204-26210
+    // moveSpeed *= strongestMoveSpeedDebuff → runAcceleration/maxRunSpeed 随之）——
+    // 取最强单项不叠加（1456 else-if 乘法链在 Buffs.moveSpeedMult，已迁出）
+    const strongestSlow = this.buffs.strongestMoveSpeedDebuff;
     const speedMult = this.buffs.moveSpeedMult * this.equipStats.moveMult * (this.inHoney ? 0.5 : 1)
       * (this.vortexStealthActive && this.stealth > 0 ? 0.3 : 1)   // 星璇潜行移速（:25563）
-      * (duneBoost ? 1.75 : 1);
+      * (duneBoost ? 1.75 : 1)
+      * strongestSlow;
     // 冰冻 Frozen(47,Player.cs:9749 frozen=true) ∪ 微光化 buff 353（:11381-11388
     // frozen=true 同语义）：整帧封移动输入——跳跃/攀绳/矿车同读这些标志,一并归零
     // （原版 Update 段 control* 清零语义,发生在移动积分之前）。帧末由 Game 重灌输入。
@@ -2185,10 +2300,9 @@ export class Player extends Entity {
       // 全速段（:19559:|vx|<maxRun）runAcceleration=0.08 全力;慢爬坡段（:19675:
       // maxRun≤|vx|<accRun）仅 ×0.2 且需 onGround(vy==0)或翼飞行——空中爬坡无效;
       // 翼飞行再 +0.2 一份（:19690）。无输入减速（:19771）:地面 runSlowdown=0.2
-      // 空中 ×0.5,加法钳 0（旧乘法摩擦曲线高速段衰减过快）。慢速/燃烧门（:19675/
-      // :19705 !slow&&!burned）。Chilled（:19485）压 accRun=maxRun 取消爬坡。
-      const slowDebuff = this.buffs.has(BuffType.Slow) || this.buffs.has(BuffType.Burning);
-      const chilled = this.buffs.has(BuffType.Chilled);
+      // 空中 ×0.5,加法钳 0（旧乘法摩擦曲线高速段衰减过快）。
+      // 1457: 慢速/燃烧爬坡门已删（:20091/:20121），Chilled 压 accRun 门改
+      // oldStyleParkour-only（:19901）——减速统一折入 strongestMoveSpeedDebuff
       const mnt = this.ridingMount ? this.mount : null;   // 坐骑参数接管（Player.cs:26310-26334）
       // ★水中不缩 Run 参数：原版 reset(:24096-24099)/moveSpeed 乘区(:25694-25695)/
       // 装备链(:26184-26300) 全链无任何 wet 因子——水中减速全在位移积分层
@@ -2202,7 +2316,11 @@ export class Player extends Entity {
       // 乘区在其后）；6/6.75 是靴族 equip 覆写。曾 `|| 6` = 裸装极速翻倍 6 px/t
       // （30mph vs 原版 15mph，2026-08-16 默认移速审计修）
       let accRun = this.equipStats.accRunSpeed || 3;
-      if (chilled) accRun = maxRun;                       // :19485
+      // 1457: accRunSpeed 也吃减速 debuff（Update :26207-26210 accRunSpeed *=
+      // strongestMoveSpeedDebuff，oldStyleParkour 豁免——本仓无 6190 老派跑酷书恒吃）；
+      // 1456 的 `chilled → accRunSpeed = maxRunSpeed` 门改为仅 oldStyleParkour
+      // （HorizontalMovement :19901-19903）——本仓无该配饰，Chilled 不再压跑步上限
+      accRun *= strongestSlow;
       if (mnt) {
         // :26329-26331：mounted 时 maxRun=RunSpeed / accRun=DashSpeed / runAcc=Acceleration
         //（CanUseWings 族走 Math.max 分支省略——本仓坐骑恒禁翼）。
@@ -2279,8 +2397,10 @@ export class Player extends Entity {
         if (ix > 0 ? this.vx < maxRun : this.vx > -maxRun) {
           if (ix > 0 ? this.vx < -runSlow : this.vx > runSlow) this.vx += ix * runSlow;
           this.vx += ix * runAcc;
-        } else if (!slowDebuff && canRamp && (ix > 0 ? this.vx < accRun : this.vx > -accRun)) {
-          // 慢爬坡段（:19675-19690:×0.2,翼飞行双份）
+        } else if (canRamp && (ix > 0 ? this.vx < accRun : this.vx > -accRun)) {
+          // 慢爬坡段（:19675-19690:×0.2,翼飞行双份）。1457: 爬坡分支删 `!slow && !burned`
+          // 门（:20091/:20121 只剩 dashDelay>=0）——减速改由 accRun×strongestSlow 承担
+          // （上面已乘），Slow/Burning 下仍可爬坡但上限被压
           if (ix > 0 ? this.vx < -runSlow : this.vx > runSlow) this.vx += ix * runSlow;
           this.vx += ix * runAcc * 0.2;
           if (wingAir) this.vx += ix * runAcc * 0.2;
@@ -2733,6 +2853,18 @@ export class Player extends Entity {
         // maxRunSpeed) → ×0.94；跌破档位即结束滑行（dashDelay=20）并把 vx 钳回
         // ±maxRunSpeed（:21108-21113）。num13 = max(accRunSpeed,maxRunSpeed)
         // （accRunSpeed=靴 6/裸 3，maxRunSpeed=3×moveSpeed）
+        // 1457: 步行两分支删 `dashDelay >= 0` 门（HorizontalMovement :19984/:20010）——
+        // 滑行中按反方向输入现在会制动冲刺：原版落 maxRunSpeed 步行分支
+        // （反向时 vx<maxRun / vx>-maxRun 成立）→ runSlowdown 制动 + runAcceleration
+        // 反向加速；同向输入不满足门，无效果。爬坡分支仍保留 dashDelay>=0（:20091/:20121）
+        if (ix !== 0) {
+          const mRun = this.ridingMount ? this.mount.runSpeed() : PLAYER_WALK_MAX * speedMult;
+          const rSlow = RUN_SLOWDOWN * this.equipStats.runSlowMul;
+          if (ix > 0 ? this.vx < mRun : this.vx > -mRun) {
+            if (ix > 0 ? this.vx < -rSlow : this.vx > rSlow) this.vx += ix * rSlow;
+            this.vx += ix * RUN_ACCELERATION;
+          }
+        }
         const num13 = Math.max(eq.accRunSpeed > 0 ? eq.accRunSpeed : 3, 3 * eq.moveMult);
         this.vortexStealthActive = false;  // :21106 滑行中强制显形
         if (Math.abs(this.vx) > 12) {
@@ -2746,9 +2878,11 @@ export class Player extends Entity {
       } else if (eq.dash > 0) {
         // 就绪段（:21128 else）：DoCommonDashHandle（:21267-21323）——双击窗收敛 +
         // 同向二连击触发（原版此段只在 dashDelay==0 时运行：冷却/滑行期点击不登记窗）
+        // 1457: 触发条件加 `!CCed`（DoCommonDashHandle :21740 `controlDash && !CCed &&
+        // releaseDash`）——冻结/结网/石化不能冲刺
         if (this.dashT > 0) this.dashT--;   // :21268-21271 每帧向 0 收敛
         else if (this.dashT < 0) this.dashT++;
-        if (this.inputX !== 0 && this.prevInputX === 0) {
+        if (!this.cced && this.inputX !== 0 && this.prevInputX === 0) {
           const dir = this.inputX;
           if (dir > 0 ? this.dashT > 0 : this.dashT < 0) {
             this.dashT = 0;               // :21305 触发即清双击窗
@@ -3520,11 +3654,13 @@ export class Player extends Entity {
     let pvx = tx - this.cx;                                // :22558-22560 vector7 = fromPosition
     let pvy = ty - this.cy;
     const len = Math.hypot(pvx, pvy);                      // :22561-22562 num8
-    let maxSpeed = 11;                                     // :22564 num9 = 11
+    let maxSpeed = 11;                                     // :23016 num9 = 11
     const first = this.grappling[0]!;
-    if (first.projType === 315) maxSpeed = 14;             // :22565-22566 蝙蝠钩
-    if (first.projType === 487) maxSpeed = 12;             // :22567-22568 荆棘钩
-    if (first.projType >= 646 && first.projType <= 649) maxSpeed = 16; // :22569-22570 月亮钩
+    if (first.projType === 315) maxSpeed = 14;             // :23019-23021 蝙蝠钩
+    if (first.projType === 73 || first.projType === 74) maxSpeed = 12.5; // 1457 :23022-23025
+                                                                         //   双钩蓝/红(DualHook) 11 → 12.5
+    if (first.projType === 487) maxSpeed = 12;             // :23026-23028 荆棘钩
+    if (first.projType >= 646 && first.projType <= 649) maxSpeed = 16; // :23029-23034 月亮钩
     const k = len > maxSpeed ? maxSpeed / len : 1;         // :22572-22574 num10
     pvx *= k;
     pvy *= k;
@@ -3672,9 +3808,19 @@ export class Player extends Entity {
   inputX = 0;
   inputJump = false;
   /** Player.maxRunSpeed（常规跑速上限 stat，:25695 base 3 × moveSpeed 乘区；
-   *  水中/蜂蜜等场景折扣不在此列——矿车撞击速比等按 stat 口径消费） */
+   *  水中/蜂蜜等场景折扣不在此列——矿车撞击速比等按 stat 口径消费）。
+   *  1457: moveSpeed 乘区含 strongestMoveSpeedDebuff（Update :26205 maxRunSpeed *=
+   *  moveSpeed，debuff 已折入） */
   get maxRunSpeed(): number {
-    return PLAYER_WALK_MAX * this.buffs.moveSpeedMult * this.equipStats.moveMult;
+    return PLAYER_WALK_MAX * this.buffs.moveSpeedMult * this.equipStats.moveMult
+      * this.buffs.strongestMoveSpeedDebuff;
+  }
+
+  /** Player.CCed（1457 Player.cs:6291/:21738 等消费；1456 为 frozen||webbed||stoned
+   *  内联三元，1457 收敛为属性，语义同）——硬控三件套 */
+  get cced(): boolean {
+    return this.buffs.has(BuffType.Frozen) || this.buffs.has(BuffType.Webbed)
+      || this.buffs.has(BuffType.Stoned);
   }
   // ---- 钩爪（AI_007 + GrappleMovement 1:1）----
   /** 本 tick 锚点表（原版 player.grappling[10] + grapCount，Player.cs:2608/:2828）：

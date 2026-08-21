@@ -4805,6 +4805,23 @@ export class Renderer {
         const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
         // 回填实际贴图底边（世界 y），供 drawHealthBar 定位兜底（见 Enemy.spriteBottomWorld 注释）
         e.spriteBottomWorld = (grounded ? e.y + e.h : e.cy) + (anchorY + eocOff + r.sh);
+        if (e.vanillaId === 50) {
+          // 史莱姆王体内忍者（Main.cs:22798-22817）：★画在本体【之前】=忍者
+          //  在史莱姆下层——原版忍者绘制 :22817 先于通用本体绘制 :22852，
+          //  凝胶体半透明盖住忍者身体只露出头/手。曾叠画在本体后=忍者浮在
+          //  史莱姆上层（2026-08-21 用户实报层序颠倒）
+          const ninja = this.atlas.vmisc('vanilla/Ninja.png');
+          if (ninja) {
+            const zeroY = -e.vy + (r.sy === 120 ? 2 : r.sy === 360 ? -2 : r.sy === 480 ? -6 : 0);
+            const zeroX = -e.vx * 2;
+            ctx.save();
+            ctx.translate(zeroX, -e.h / 2 + zeroY);   // 当前原点=KS 底心 → 中心=(0,-h/2)
+            ctx.rotate(e.vx * 0.05);
+            ctx.drawImage(ninja.img, -ninja.sw / 2, -ninja.sh / 2, ninja.sw, ninja.sh);
+            ctx.restore();
+          }
+        }
+
         // 568/569 出生态紫雾（本体绘制层，先于本体画——Main.cs:26060-26076 拷贝循环
         // 在 vector72 本体 draw 之前）
         if (e.vanillaId === 568 || e.vanillaId === 569) this.drawWitherBirth(ctx, e, r, scale);
@@ -4867,16 +4884,6 @@ export class Renderer {
         // KS 中心，随速度反向摆动（zero=-vy / -vx*2）+ rotation=vx*0.05，
         // 帧顶 120/360/480 的挤压帧 y 修正（+2/-2/-6）
         if (e.vanillaId === 50) {
-          const ninja = this.atlas.vmisc('vanilla/Ninja.png');
-          if (ninja) {
-            const zeroY = -e.vy + (r.sy === 120 ? 2 : r.sy === 360 ? -2 : r.sy === 480 ? -6 : 0);
-            const zeroX = -e.vx * 2;
-            ctx.save();
-            ctx.translate(zeroX, -e.h / 2 + zeroY);   // 当前原点=KS 底心 → 中心=(0,-h/2)
-            ctx.rotate(e.vx * 0.05);
-            ctx.drawImage(ninja.img, -ninja.sw / 2, -ninja.sh / 2, ninja.sw, ninja.sh);
-            ctx.restore();
-          }
           // 头顶金冠（Main.cs:25571-25595 case 50，1:1）：贴图 Extra_39（82×56，
           // wiki"the crown...separate image files...Extra_39 internally"）。锚点 =
           // KS Center 上移 (70-num223)×scale，num223 按帧序 [2,-6,2,10,2,0]；

@@ -59,9 +59,9 @@ export const WHIP_PROC_ITEMS = new Set([4912, 5476, 5477, 5480]);
 /** extraUpdates 覆盖（SetDefaults :7862-7885：847/849 extraUpdates=2 → MaxUpdates=3；
  *  其余 DefaultToWhip extraUpdates=1 :10103 → MaxUpdates=2） */
 export const WHIP_EXTRA_UPDATES = new Set([847, 849]);
-/** ProjectileID.Sets.SummonTagDamageMultiplier（ProjectileID.cs:31，默认 1；
- *  仅闪电光环 688/689/690 = 0.5） */
-export const SUMMON_TAG_MUL: Record<number, number> = { 688: 0.5, 689: 0.5, 690: 0.5 };
+/** ProjectileID.Sets.SummonTagDamageMultiplier（1456:31 默认 1，688/689/690=0.5；
+ *  1457:37 整表换血 = 仅 Smolstar 864 = 0.669——688/689/690 回落默认 1） */
+export const SUMMON_TAG_MUL: Record<number, number> = { 864: 0.669 };
 /** ProjectileID.Sets.MinionShot（ProjectileID.cs:197）——吃鞭 tag 的随从弹 */
 export const MINION_SHOT_SET = new Set([374, 376, 389, 195, 408, 433, 614, 818, 1044, 1097, 1106]);
 /** ProjectileID.Sets.SentryShot（ProjectileID.cs:199）——吃鞭 tag 的哨兵弹 */

@@ -20,6 +20,10 @@ export interface ProjectileData {
    *  再入 NPC.checkArmorPenetration :81913 池（+ichor15/broken20/betsy40）。
    *  条件档（148 remixWorld=20）提取器不可静态求值，未入表（登记） */
   armorPenetration?: number;
+  /** 1457: 局部 NPC 无敌帧（usesLocalNPCImmunity=true + localNPCHitCooldown=N，
+   *  Projectile.cs:10688-10689 ApplyGemStaffStats 等）——同一弹对同一敌 N t 后可再命中
+   *  （缺省=命中即永久免疫，Arrow.hitSet 旧语义）。Arrow 命中环按本列切换冷却表 */
+  localNPCHitCooldown?: number;
   friendly?: boolean;
   melee?: boolean;
   ranged?: boolean;

@@ -9,6 +9,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 
 export class FallingBlock extends Entity {
   w = 10; h = 10; // 原版 width/height = 10(vanilla-projectiles.json 全沙族一致)
@@ -50,7 +51,8 @@ export class FallingBlock extends Entity {
     const p = game.player;
     if (!this.hitPlayer && p && !p.dead && this.aabbOverlaps(p)) {
       this.hitPlayer = true;
-      game.damagePlayer(FallingBlock.DAMAGE, this.cx, this.cy);
+      // Damage_EVP：SandBallFalling 基础 10（P31 hostile 弹），命中再过乘区×2
+      game.damagePlayer(hostileProjectileDamage(FallingBlock.DAMAGE, mainDifficulty(game.world)) * 2, this.cx, this.cy);
     }
     // 敌人 + 小动物 + 城镇 NPC(friendly 方向;原版巨石碾压 NPC,hurt iframes 兜连击)
     hitTownNpcs(this, game, FallingBlock.DAMAGE, Math.sign(this.vx) * 2);

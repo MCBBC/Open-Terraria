@@ -1021,6 +1021,24 @@ for (const [mbVid, mbStyle] of Object.entries(MB_NO_SPRITE)) {
   VANILLA_ITEM_KEY_BY_ID[Number(mbVid)] = mbKey; // 掉落/录音链按 vid 反查
   item({ key: mbKey, name: '', value: 100000, tile: 'v_139_musicboxes', placeStyle: mbStyle });
 }
+
+// ---- 1457 新掉落物三件（无 1456 素材/atlas 条目,同 6145/6146 先例单独注册）：
+//   6156 SilverBracer 银护腕(上锁盒 1/4,OpenLockBox :9452-9454)/
+//   6158 MobiusStrip 莫比乌斯带(石巨人袋 1/6,OpenBossBag :7516-7518)/
+//   6165 PoisonBarb 毒刺(木匣 1/20 饰品池第 6 项,OpenFishingCrate :8084-8109)。
+//   三者 1457 SetDefaults 均为 DefaultToAccessory（Item.cs:47452/:47463/:47524）,
+//   饰品效果位（SilverBracer 受击银伤/PoisonBarb accPoisonBarb 箭体中毒等）在
+//   ApplyEquipFunctional 6147-6195 族,本批不移植（登记）——先保证掉落可入包 */
+const ITEMS_1457_NO_SPRITE: Array<[number, string, number]> = [
+  [6156, 'SilverBracer', 875],     // sellPrice(0,1,75) = (75+1×100)×5 = 875
+  [6158, 'MobiusStrip', 2500],     // sellPrice(0,5) = 5×100×5 = 2500
+  [6165, 'PoisonBarb', 375],       // sellPrice(0,0,75) = 75×5 = 375
+];
+for (const [vid, nm, val] of ITEMS_1457_NO_SPRITE) {
+  const ik = `vi_${vid}_${nm}`;
+  VANILLA_ITEM_KEY_BY_ID[vid] = ik;
+  item({ key: ik, name: '', value: val });
+}
 for (let mbStyle = 0; mbStyle < 100; mbStyle++) {
   const mbKey = VANILLA_ITEM_KEY_BY_ID[MUSIC_BOX_ITEM_BY_STYLE[mbStyle]];
   if (mbKey === undefined) continue; // 6145/6146 无素材，上方单独注册

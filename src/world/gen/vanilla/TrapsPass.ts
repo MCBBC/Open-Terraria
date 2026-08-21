@@ -635,8 +635,23 @@ function placePlate(st: TileStore, x: number, y: number, style: number): boolean
   return true;
 }
 
+/** placeTrap_CanContinue（1457 WorldGen.cs:8859 新增 helper）：wall 350（微光
+ *  保护墙）拒 + dualDungeons 秘密种子的潜在地牢界拒。★1457 在 placeTrap 共
+ *  9 处调用（入口/下落扫描/飞镖左右扫/巨石 6×6/炸药下落+5×5/热喷泉锚+底双列）
+ *  ——1456 的 noTraps 巨石检查块在 1457 已不在本方法（本仓 noTraps 巨石支线
+ *  未实装,无对应块可迁,备案）。dualDungeons 旗标未实装 → 界拒分支恒过。 */
+export function placeTrapCanContinue(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;   // 防御（原版各调用点已先 InWorld 短路）
+  if (st.wall[st.idx(x, y)] === 350) return false;
+  // 1457: `SecretSeed.dualDungeons.Enabled && !GenVars.DualDungeon_AllowTrapGenerationInDungeon
+  //  && DungeonUtils.InAnyPotentialDungeonBounds(x, y)` → false——种子未实装（批 F），恒不拒
+  return true;
+}
+
 /** placeTrap 主体（cs:8875-9460，普通种子路径）。type: 0 飞镖 / 1 巨石 / 2 炸药桶 / 3 热喷泉 */
 export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number, type = -1): boolean {
+  // ★1457 入口门（cs:8880）：CanContinue 先于微光回避
+  if (!placeTrapCanContinue(st, x2, y2)) return false;
   // 微光回避（cs:8884，用原始 y2 掷点）：距 shimmerPosition <100 拒（未生成时 (0,0)）
   const shx = gs.shimmerX >= 0 ? gs.shimmerX : 0, shy = gs.shimmerY >= 0 ? gs.shimmerY : 0;
   if (Math.hypot(x2 - shx, y2 - shy) < 100) return false;
@@ -646,6 +661,8 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   while (!solidTileV(st, x2, py)) {
     py++;
     if (py > st.h - 10) return false;
+    // ★1457 下落扫描内同门（cs:8902）
+    if (!placeTrapCanContinue(st, x2, py)) return false;
     if (py >= st.h - 300) deep = true;
   }
   py--;                                                               // cs:8910 num--
@@ -699,6 +716,8 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
       for (let m = colX - 2; m <= colX + 3; m++) {
         for (let n = top; n <= top + 3; n++) {
           if (!solidTileV(st, m, n)) allSolid = false;
+          // ★1457 cs:9187 巨石 6×6 扫描逐格同门（先 SolidTile 后 CanContinue 短路序同原版）
+          if (!placeTrapCanContinue(st, m, n)) return false;
           const ii = st.idx(m, n);
           if (st.flags[ii]) {
             const sh = sheetOf(st.type[ii]!);
@@ -793,15 +812,14 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     let by = py;
     for (let k = 0; k < drop; k++) {
       by++;
-      if (!solidTileV(st, bx, by)) return false;
+      // ★1457 cs:9368：InWorld(5)+SolidTile+CanContinue 三联（原版序短路）
+      if (!st.inBounds(bx, by) || !solidTileV(st, bx, by) || !placeTrapCanContinue(st, bx, by)) return false;
     }
     for (let xx = bx - 2; xx <= bx + 2; xx++) {
       for (let yy = by - 2; yy <= by + 2; yy++) {
-        if (st.inBounds(xx, yy)) {
-          const ii = st.idx(xx, yy);
-          if (st.wall[ii] === 350) return false;                      // cs:9369
-          if (!solidTileV(st, xx, yy)) return false;
-        }
+        // ★1457 cs:9378：`!InWorld || !SolidTile || !CanContinue` 三联——界外格
+        //   从 1456 的「跳过」改为「整处拒」（wall350 检查并入 CanContinue）
+        if (!st.inBounds(xx, yy) || !solidTileV(st, xx, yy) || !placeTrapCanContinue(st, xx, yy)) return false;
       }
     }
     killTileWhole(st, bx, by, rng);                                        // KillTile（cs:9382，清半砖/坡）
@@ -815,8 +833,11 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     // ---- 热喷泉（cs:9415-9452）：2×1，frameX = 18*k + 36*Next(2)；直写保半砖/坡 ----
     if (st.flags[st.idx(x2 + 1, py)]) return false;
     if (st.liquid[st.idx(x2, py)] > 0 && st.liquidType[st.idx(x2, py)] !== 2) return false;   // cs:9421 非岩浆液体拒
+    // ★1457 cs:9428 锚格同门
+    if (!placeTrapCanContinue(st, x2, py)) return false;
     for (let xx = x2; xx <= x2 + 1; xx++) {
-      if (!solidTileV(st, xx, py + 1)) return false;
+      // ★1457 cs:9446 底双列 InWorld(5)+SolidTile+CanContinue 三联
+      if (!st.inBounds(xx, py + 1) || !solidTileV(st, xx, py + 1) || !placeTrapCanContinue(st, xx, py + 1)) return false;
     }
     const fx = rng.int(0, 1);
     for (let k = 0; k < 2; k++) {
@@ -830,10 +851,11 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   const solidFor = (x: number, y: number) => solidTileV(st, x, y)
     || (st.inBounds(x, y) && st.flags[st.idx(x, y)] && isCracked(st.type[st.idx(x, y)]));
   let i1 = x2;
-  while (!solidFor(i1, j2)) { i1--; if (i1 < 0) return false; }
+  while (!solidFor(i1, j2)) { i1--; if (i1 < 0 || !placeTrapCanContinue(st, i1, j2)) return false; }   // ★1457 cs:9022 同门
   const i2 = i1;
   let i3 = x2;
-  while (!solidFor(i3, j2)) { i3++; if (i3 > st.w) return false; }
+  // ★1457 cs:9033：`num10 >= maxTilesX`（1456 是 `>`）+ 同门——右扫恰达世界右缘也拒
+  while (!solidFor(i3, j2)) { i3++; if (i3 >= st.w || !placeTrapCanContinue(st, i3, j2)) return false; }
   const i4 = i3;
   let f3 = x2 - i2 > 5 && x2 - i2 < 50;
   let f4 = i4 - x2 > 5 && i4 - x2 < 50;

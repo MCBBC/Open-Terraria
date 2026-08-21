@@ -90,7 +90,7 @@ import { segHitsRect } from './bossAI_duke_moonlord';
 import { statusPlayer } from './projTargets';
 import { TILE_DEFS } from '../data/tiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
-import { GDL, getKnockbackMultiplierScaledByDifficulty } from '../stats/ScaleStats';
+import { GDL, getKnockbackMultiplierScaledByDifficulty, hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 
@@ -1482,7 +1482,8 @@ export class BetsyBreath extends Entity {
       && segHitsRect(this.cx + dx * 400 * tailF, this.cy + dy * 400 * tailF,
         dx * segLen, dy * segLen, 40, p)) {
       // Damage_EVP：命中不消耗弹体；OnFire 420-600t（:11515-11517 statusPlayer 687 表）
-      game.damagePlayer(this.dmg, this.cx, this.cy);
+      // Damage_EVP：687 基础 35（:62449 段生成值）
+      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy);
       statusPlayer(game, 687);
     }
     // 尘（:65874-65896）：渐显期焰头 3 尘 6 + 每 t 焰体 1 尘 31（沿焰体随机分布）
@@ -2592,7 +2593,8 @@ export class DD2GoblinBomb extends Entity {
     const pl = game.player;
     if (pl && !pl.dead
       && pl.x < bx + 80 && pl.x + pl.w > bx && pl.y < by + 80 && pl.y + pl.h > by) {
-      game.damagePlayer(this.damage, this.cx, this.cy);
+      // Damage_EVP：projDmg=GetAttackDamage 生成基础值，命中再过乘区×2
+      game.damagePlayer(hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2, this.cx, this.cy);
     }
     for (const n of game.enemies() as Enemy[]) {
       // 永恒水晶 548 吃敌对爆伤（DD2 敌怪对水晶的伤害通道）
@@ -2652,7 +2654,8 @@ export class DD2OgreSmash extends Entity {
     if (pl && !pl.dead
       && pl.x < this.x + this.w && pl.x + pl.w > this.x
       && pl.y < this.y + this.h && pl.y + pl.h > this.y) {
-      game.damagePlayer(this.dmg, this.cx, this.cy);
+      // Damage_EVP：projDmg 生成基础值
+      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy);
     }
     for (const n of game.enemies() as Enemy[]) {
       if (n.dead || n.vanillaId !== 548 || n.dontTakeDamage) continue;

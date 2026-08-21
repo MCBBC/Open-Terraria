@@ -21,9 +21,12 @@ const hooks = (w: World, p?: Player): GameHooks => ({
   playSfxFiles: () => {}, showPickupLabel: () => {},
 }) as never;
 
-/** 水池世界：底部实心行 y=85，y 60-84 灌液体（深池防短测内触底） */
+/** 水池世界：底部实心行 y=85，y 60-84 灌液体（深池防短测内触底）。
+ *  ★高 200 而非 100：WetCollision 扫描窗钳 maxTilesY-40（Collision.cs:1598-1602
+ *  1:1）——高 100 时钳位 60 把 y 60-84 的水池整个排除在湿判定外（原版世界
+ *  1200+ 高此钳位永不触发，属小测试世界伪影） */
 function poolWorld(liquid = 1): World {
-  const w = new World(80, 100, 11, 'pool');
+  const w = new World(80, 200, 11, 'pool');
   for (let x = 0; x < 80; x++) {
     w.store.setTileSilent(x, 85, 1);
     for (let y = 60; y < 85; y++) w.store.setLiquid(x, y, 255, liquid);

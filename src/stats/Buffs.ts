@@ -104,7 +104,8 @@ export enum BuffType {
                    //   840t/专家 960t）；消费点 Projectile.cs:12879/12885/27124。
                    //   本仓吸血/治疗弹链未实装，效果位 getter 备用；
                    //   载荷在 NPC 401 召唤门禁（bossAI_duke_moonlord）
-  KiteBuff = 75,   // 风筝(383)：移速 +25% / 镐速 −15% / 放置速度 +15%（:9614-9617）+
+  KiteBuff = 75,   // 风筝(383)：移速 +15% / 镐速 −10% / 放置速度 +15%（1457 :10003-10006
+                   //   由 +25%/−15% 削；tileSpeed/wallSpeed +0.15 不变）+
                    //   kiteLuckLevel 三档 = clamp(buffTime/10800,0,3)（:9618-9623，
                    //   luck += 档×0.1/3 :28675）。授予物品（风筝族 4371 等）未移植，登记
   Stinky = 76,     // 恶臭(120)：luck −0.25（:9958-9961 stinky / :28687-28690）。
@@ -214,6 +215,32 @@ export enum BuffType {
   Starving = 110,      // 极饿(334)：防-4/暴击-4/伤-10%/近战速-10%/召唤击退-1/镐速+15%
                        //   （:11584-11595）+ 持续掉血（:18957-18981）+ 每 120t 直接伤害
                        //   statLifeMax2/50（沙漠/雪原 ×2，:19159-19176，死因 ByOther(18)）
+  // ---- 1457 新增（diff-1456-1457 批 1）----
+  ManaHeat = 111,      // 魔力过热(396,1457 新 buff)：magicDamage *= manaHeat——拾取魔力星
+                       //   TryApplyManaHeat(0.2,2s)（Player.cs:35348-35351）；每帧
+                       //   manaHeat += latestManaPotionDamageBonus×(buffTime/duration)
+                       //   （:10416-10429 线性衰减），ResetEffects 每帧清 1f（:18709）。
+                       //   药水 189/500/2209 的 ApplyManaPotionManaHeat 表(0.05/0.10/0.15
+                       //   ×20s)在 1457 为死代码（无调用点），不接线
+  Warmth = 112,        // 温暖(124)：resistCold=true（:10370-10372）——获得时立即把已有
+                       //   Chilled(46) ÷4 / Frozen(47) ÷2（下限 5t，AddBuff_ReduceTimeOfRelatedBuffs
+                       //   :5292-5315）；resistCold 在场时施加 46/47 时长同样 ÷4/÷2
+                       //   （AddBuff_DetermineBuffTimeToAdd :5429-5437）+ 寒冷伤减免
+                       //   （:31657，消费在受击链）。授予 = 暖冬药水（物品侧未接线则仅登记）
+  // ---- 1457 新敌怪 debuff 家族（diff 批 2；BuffID.cs:961-971；仅 StatusNPC 侧，
+  //      玩家不吃——不进 BuffState.DEBUFFS。施加源 = 1457 Projectile.cs:11203 毒液
+  //      浸剂伴发 395 / :11685 弹 282-283 / :11732 弹 1127 / :11195 催化腕带
+  //      catalystBand 398 / :11233 弹 1117→399 / :11237 弹 1122→400 +
+  //      Player.cs:6507/6537——新弹/新饰品未移植部分登记）----
+  PotentAcid = 113,        // 强酸(395,1457 新)：90 HP/s DoT（DOTTally.AddPoison(180,60)，
+                           //   NPC.cs:92751——可被 398 加速；中毒式染色 R×0.65 B×0.75）
+  ChlorophyteSpore = 114,  // 叶绿孢子(397,1457 新)：90 HP/s DoT（:92755 同款）+
+                           //   孢子云粒子 1/60/t（:92878）+ 叶尘 157 4/5（:92315）
+  AcceleratePoisons = 115, // 毒素加速(398,1457 新)：毒/流血/火焰族"可加速"DoT ×2
+                           //   （DOTTally.SupportAcceleration NPC.cs:127-131——只加成
+                           //   AddPoison/AddBloodLoss/AddFlamable，不加成裸 Add）
+  BlueLightning = 116,     // 蓝闪电(399,1457 新)：纯视觉——BlueLightningSmall 粒子 1/10
+  RedLightning = 117,      // 红闪电(400,1457 新)：纯视觉——RedLightningSmall 粒子 1/10
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -354,6 +381,19 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.NeutralHunger]: { vanillaBuff: 332, descKey: 'BuffDescription.NeutralHunger', fallbackName: '稍饿' },
   [BuffType.Hunger]: { vanillaBuff: 333, descKey: 'BuffDescription.Hunger', fallbackName: '饥饿' },
   [BuffType.Starving]: { vanillaBuff: 334, descKey: 'BuffDescription.Starving', fallbackName: '极饿' },
+  // 1457 新增：魔力过热 396（描述自有键——机制数值是本仓实现；原版 BuffName 走
+  // 1457 l10n，本仓 1456 语料无此键 → fallback 兜底）。贴图 Buff_396.png 为 1457
+  // 新素材，本仓素材库暂缺 → UI buffIconItem 以魔力再生药水图标兜底
+  [BuffType.ManaHeat]: { vanillaBuff: 396, descKey: 'Mods.SandboxWorld.Buff.ManaHeat.Desc', fallbackName: '魔力过热' },
+  // 1457 强化：温暖 124（描述用原版 BuffDescription.Warmth 现成键）
+  [BuffType.Warmth]: { vanillaBuff: 124, descKey: 'BuffDescription.Warmth', fallbackName: '温暖' },
+  // 1457 新敌怪 debuff 五件（名称/描述均自有键——1456 语料无 BuffName.395-400；
+  //  键在 tools/l10n-custom 两语补齐。敌怪侧 buff，无图标/UI 链）
+  [BuffType.PotentAcid]: { vanillaBuff: 395, descKey: 'Mods.SandboxWorld.Buff.PotentAcid.Desc', fallbackName: '强酸' },
+  [BuffType.ChlorophyteSpore]: { vanillaBuff: 397, descKey: 'Mods.SandboxWorld.Buff.ChlorophyteSpore.Desc', fallbackName: '叶绿孢子' },
+  [BuffType.AcceleratePoisons]: { vanillaBuff: 398, descKey: 'Mods.SandboxWorld.Buff.AcceleratePoisons.Desc', fallbackName: '毒素加速' },
+  [BuffType.BlueLightning]: { vanillaBuff: 399, descKey: 'Mods.SandboxWorld.Buff.BlueLightning.Desc', fallbackName: '蓝色闪电' },
+  [BuffType.RedLightning]: { vanillaBuff: 400, descKey: 'Mods.SandboxWorld.Buff.RedLightning.Desc', fallbackName: '红色闪电' },
 };
 
 /** BuffID.Sets.IsFedState（BuffID.cs:16 = {26,206,207,332,333,334}——含饥饿链三态：
@@ -597,6 +637,23 @@ export class BuffState {
       if (diff >= GDL.MASTER) durationSec *= 2.5;
       else if (diff >= GDL.EXPERT) durationSec *= 2;
     }
+    // 1457: resistCold（Warmth buff 124 在场，:10370-10372）时施加 Chilled(46)/
+    // Frozen(47) 时长 ÷4/÷2（AddBuff_DetermineBuffTimeToAdd :5429-5437）
+    if (vb === 46 || vb === 47) {
+      if (this.active.has(BuffType.Warmth)) durationSec /= (vb === 46 ? 4 : 2);
+    }
+    // 1457: 新获得 Warmth 时立即把已有 Chilled ÷4、Frozen ÷2（下限 5t）——
+    // AddBuff_ReduceTimeOfRelatedBuffs（Player.cs:5292-5315，AddBuff :5287 调）。
+    // 原版只在"未续期已有 Warmth"分支调（AddBuff_TryUpdatingExistingBuffTime
+    // 为真时不调）→ 已有 Warmth 时重复喝不重复削
+    if (vb === 124 && !this.active.has(BuffType.Warmth)) {
+      for (const [t, left] of this.active) {
+        const v = BUFF_DEFS[t]?.vanillaBuff;
+        if (v !== 46 && v !== 47) continue;
+        if (left <= 5 / 60) continue;                      // num2 > 5 才削（:5304/:5306）
+        this.active.set(t, Math.max(5 / 60, left / (v === 46 ? 4 : 2)));
+      }
+    }
     const cur = this.active.get(type);
     if (cur === undefined || cur < durationSec) this.active.set(type, durationSec);
   }
@@ -756,18 +813,31 @@ export class BuffState {
   // ---- 属性聚合（幂等读取，不做副作用写入）----
   get moveSpeedMult(): number {
     let m = this.active.has(BuffType.Agility) ? 1.25 : 1;   // Swiftness moveSpeed += 0.25
-    if (this.active.has(BuffType.Burning)) m *= 0.5;         // Burning moveSpeed *= 0.5（:18886）
-    if (this.active.has(BuffType.Slow)) m *= 0.5;            // Slow moveSpeed /= 2（:25653-25655）
-    if (this.active.has(BuffType.Chilled)) m *= 0.75;        // Chilled moveSpeed *= 0.75（:25659-25661）
+    // 1457: Burning/Slow/Chilled 三项从 moveSpeed 乘法链移除（Update :26132-26165
+    // 改折入 strongestMoveSpeedDebuff 取最强不叠加；1456 为 else-if 乘法链）
     if (this.active.has(BuffType.Webbed)) m = 0;             // Webbed moveSpeed = 0（:11471，
                                                              // 赋值非乘算——后续食物 += 档照加，原版同序）
     if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
     if (this.active.has(BuffType.Weak)) m *= 0.9;            // 虚弱 moveSpeed -= 0.1（:11510）
     if (this.active.has(BuffType.Werewolf)) m *= 1.05;      // 狼人 moveSpeed += 0.05（:11498）
-    if (this.active.has(BuffType.KiteBuff)) m += 0.25;       // 风筝 moveSpeed += 0.25（:9614）
+    if (this.active.has(BuffType.KiteBuff)) m += 0.15;       // 风筝 moveSpeed += 0.15
+                                                             // （1457 :10003 由 +0.25 削到 +0.15）
     if (this.active.has(BuffType.SugarRush)) m *= 1.2;       // 糖分冲刺 moveSpeed += 0.2（:9634）
     m += [0, 0.2, 0.3, 0.4][this.wellFedTier];               // 食物 moveSpeed += 0.2/0.3/0.4（:11532+）
     return m;
+  }
+  /** 1457 新机制 strongestMoveSpeedDebuff（Player.cs:26132-26165）：移动减速 debuff
+   *  全部折算 min 只取最强单项不叠加——OgreSpit(197) 1/3、Dazed(160) 1/3、
+   *  Burning 0.5、Slow 0.5、Chilled 0.75、盾举(shieldRaised,Player 侧) 1/3。
+   *  本仓未实装 buff 197/160（DD2 巨魔唾液/美杜莎眩晕玩家侧），接入时并入本链。
+   *  消费：Update 尾 moveSpeed *= 本值；accRunSpeed *= 本值（oldStyleParkour 豁免，
+   *  本仓无 6190 老派跑酷书 → 恒吃） */
+  get strongestMoveSpeedDebuff(): number {
+    let s = 1;
+    if (this.active.has(BuffType.Burning)) s = Math.min(s, 0.5);   // :26144-26146
+    if (this.active.has(BuffType.Slow)) s = Math.min(s, 0.5);      // :26147-26149
+    if (this.active.has(BuffType.Chilled)) s = Math.min(s, 0.75);  // :26150-26152
+    return s;
   }
   get defenseBonus(): number {
     let d = this.active.has(BuffType.Ironskin) ? 8 : 0;     // Ironskin statDefense += 8（1456）
@@ -857,7 +927,7 @@ export class BuffState {
   get pickSpeedMult(): number {
     return 1
       - (1 - this.wellFedPickMult)
-      - (this.active.has(BuffType.KiteBuff) ? 0.15 : 0);
+      - (this.active.has(BuffType.KiteBuff) ? 0.1 : 0);   // 1457 :10004 由 -0.15 削到 -0.1
   }
   /** 原版 buff 21（PotionSickness）无任何属性——只禁治疗（healBlocked）。
    *  旧实现 +80 maxHp 非原版（2026-08-13 对齐移除，喝药回血走 healLife 数据驱动） */

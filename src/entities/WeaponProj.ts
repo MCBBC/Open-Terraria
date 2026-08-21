@@ -1128,8 +1128,8 @@ export class CounterweightProj extends Entity {
     const lvx = this.vx, lvy = this.vy;
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.ai0 === -2) {
-      // 脱离态撞块（:16988-17006）：竖撞 lastVy>4 → 弹起 ×-0.6;横撞 → HitTiles 尘 +
-      // SoundID 0 + Kill
+      // 脱离态撞块（:16988-17006；1457 :69152-69160 定向自转门并入 554 Kraken）：竖撞 lastVy>4 → 弹起 ×-0.6;横撞 → HitTiles 尘 +
+      // SoundID 0 + Kill（配重 AI_099_1——1457 的 554 定向自转门仅 AI_099_2 本体）
       if ((this.onGround || this.hitHead) && lvy > 4) this.vy = -lvy * 0.6;
       if (this.hitWall) {
         game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });   // HitTiles 尘
@@ -1256,13 +1256,13 @@ export function counterweightDecision(
 /** 悠悠球型号三表（ProjectileID.cs:185/187/189 全量 1:1；键=projId，缺省=表默认） */
 export const YOYO_RANGE: Record<number, number> = { // 最大射程 px（默认 200）
   541: 130, 548: 170, 542: 195, 543: 207, 544: 215, 534: 220, 564: 225, 999: 225,
-  545: 235, 562: 235, 563: 250, 546: 275, 552: 270, 553: 330, 547: 280, 549: 290,
-  554: 340, 550: 370, 551: 370, 555: 360, 603: 400,
+  545: 235, 562: 320, 563: 250, 546: 275, 552: 270, 553: 330, 547: 280, 549: 290,
+  554: 380, 550: 370, 551: 370, 555: 360, 603: 400, // 1457: 562 FormatC 235→320 / 554 Kraken 340→380（ProjectileID.cs:281）
 };
 export const YOYO_TOP: Record<number, number> = {  // 顶速（默认 10）
   541: 9, 548: 11, 542: 12.5, 543: 12, 544: 13, 534: 13, 564: 14, 999: 14,
-  545: 14, 562: 17, 563: 12, 546: 15, 552: 14, 553: 15, 547: 17, 549: 16,
-  554: 16, 550: 16, 551: 16, 555: 16.5, 603: 17.5,
+  545: 14, 562: 17, 563: 16, 546: 15, 552: 14, 553: 15, 547: 17, 549: 16,
+  554: 22, 550: 16, 551: 16, 555: 16.5, 603: 17.5, // 1457: 563 Gradient 12→16 / 554 Kraken 16→22（ProjectileID.cs:283）
 };
 export const YOYO_LIFE: Record<number, number> = {  // 寿命倍率（默认 -1=无限）
   541: 3, 548: 5, 542: 7, 543: 6, 544: 8, 534: 9, 564: 11, 999: 11,
@@ -1366,7 +1366,8 @@ export class YoyoProj extends Entity {
       }
     }
     // :65180-65186 rotation：-2 档 += 0.45×direction（漂移向），其余 +0.45
-    this.rot += this.ai0 === -2 ? 0.45 * this.dir : 0.45;
+    // 1457 :69152-69160:定向自转门 ai[0]==-2 并入 554 Kraken（0.45×direction 同款）
+    this.rot += (this.ai0 === -2 || this.projId === 554) ? 0.45 * this.dir : 0.45;
     // -3 幽灵 alpha=255 全透明（:65117-65119）
     drawProj(r, cam, this, this.projId, this.rot, '#E04040', this.ghost ? 0 : 1);
   }
@@ -1506,9 +1507,10 @@ export class YoyoProj extends Entity {
         else if (this.vx < 0 && this.vx > -cap) this.vx -= 0.1;
       }
     } else if (this.ai0 < 0) {
-      // 回收态（ai0=-1/-3,:65152-65177）：惯性 ×0.8 取整、顶速 ×1.5、穿墙,
+      // 回收态（ai0=-1/-3;1457 :69131-69150）：惯性 ×0.8 浮点（1456 为
+      // (int)(n*0.8) 整截断,回收力度曲线阶梯化——浮点后连续衰减）、顶速 ×1.5、穿墙,
       // lerp 朝玩家;距手 <num8+10 或 >2000 → Kill
-      inertia = Math.floor(inertia * 0.8);
+      inertia *= 0.8;
       top *= 1.5;
       const dx = p.cx - this.cx;
       const dy = p.cy - this.cy;

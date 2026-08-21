@@ -28,11 +28,12 @@ export type ItemVariantKind =
   | 'enabled'               // ItemVariant.Enabled（zh「启用」）
   | 'disabledBossSummon';   // ItemVariant.DisabledBossSummon（zh「Boss召唤已禁用」）
 
-/** 三种激活条件（ItemVariants.cs:116-118） */
+/** 激活条件（ItemVariants.cs:116-118；1457 新增第四种 SkyblockWorld :121） */
 export type ItemVariantConditionKind =
   | 'remix'     // ItemVariantCondition.RemixWorld → Main.remixWorld（"don't dig up"）
   | 'getGood'   // ItemVariantCondition.GetGoodWorld → Main.getGoodWorld（"for the worthy"）
-  | 'mechdusa'; // ItemVariantCondition.MechdusaWorld → SpecialSeedFeatures.Mechdusa
+  | 'mechdusa'  // ItemVariantCondition.MechdusaWorld → SpecialSeedFeatures.Mechdusa
+  | 'skyblock'; // 1457: ItemVariantCondition.SkyblockWorld → Main.skyblockWorld（ItemVariants.cs:121）
 
 export interface ItemVariantEntry {
   variant: ItemVariantKind;
@@ -86,6 +87,7 @@ const R = (conditions: ItemVariantConditionKind[]): ItemVariantEntry =>
 const REMIX: ItemVariantConditionKind[] = ['remix'];
 const GET_GOOD: ItemVariantConditionKind[] = ['getGood'];
 const MECHDUSA: ItemVariantConditionKind[] = ['mechdusa'];
+const SKYBLOCK: ItemVariantConditionKind[] = ['skyblock']; // 1457 新增（ItemVariants.cs:145-146）
 
 /** 原版 item id → 变体条目（每 id 恰一条——1456 注册表无同 id 双变体） */
 export const ITEM_VARIANT_REGISTRY: Readonly<Record<number, readonly ItemVariantEntry[]>> = {
@@ -108,6 +110,9 @@ export const ITEM_VARIANT_REGISTRY: Readonly<Record<number, readonly ItemVariant
   5282: [W(REMIX)],     // Ash Wood Bow 灰烬木弓
   5283: [W(REMIX)],     // Ash Wood Hammer 灰烬木锤
   5284: [W(REMIX)],     // Ash Wood Sword 灰烬木剑
+  // 1457 新增（ItemVariants.cs:145-146，SkyblockWorld）
+  5687: [W(SKYBLOCK)],  // Slime Spear 黏液枪矛
+  5688: [W(SKYBLOCK)],  // Slime Whip 黏液鞭
   // ---- Rebalanced（GetGoodWorld，ItemVariants.cs:136-137）----
   197: [R(GET_GOOD)],   // Star Cannon 星星炮
   4060: [R(GET_GOOD)],  // Super Star Cannon 超级星星炮
@@ -146,8 +151,9 @@ export const ITEM_VARIANT_STATS: Readonly<Record<number, Readonly<ItemVariantSta
   // ---- Weaker（Remix）----
   // :7541-7550（基值 damage30/anim8/time8/mana6/autoReuse true/value=sellPrice(0,5)）
   517: { combat: { damage: 14, useTime: 15, useAnimation: 15, mana: 5, autoReuse: false }, rare: 1, value1456: 5000 },
-  // :9422-9427（基值 damage88/mana19/value 500000/rare6）
-  683: { combat: { damage: 42, mana: 9 }, rare: 3, value1456: 125000 },
+  // :9422-9427（基值 damage88/mana19/value 500000/rare6）；1457 弱变体 damage 42→77
+  // （Terarria1457 Item.cs:9445-9449，基值 150）
+  683: { combat: { damage: 77, mana: 9 }, rare: 3, value1456: 125000 },
   // :9858-9865（基值 damage39/anim14/time14/value=sellPrice(0,5)/rare5）
   725: { combat: { damage: 8, useTime: 17, useAnimation: 17 }, rare: 1, value1456: 100000 },
   // :16258-16266（基值 damage40/anim28/time28/kb6.5/autoReuse true；分支同值重赋 rare4/value 不列）
@@ -166,6 +172,10 @@ export const ITEM_VARIANT_STATS: Readonly<Record<number, Readonly<ItemVariantSta
   5283: { combat: { damage: 4 }, hammer: 35 },
   // :41932-41937（基值 damage13/anim17/time17）
   5284: { combat: { damage: 8, useTime: 23, useAnimation: 23 } },
+  // ---- 1457 新增 Weaker（Skyblock）（Terarria1457 Item.cs:44689-44691/:44696-44698）----
+  // 5687 黏液枪矛（基值 damage12）/ 5688 黏液鞭（基值 damage15）
+  5687: { combat: { damage: 9 } },
+  5688: { combat: { damage: 12 } },
   // ---- Rebalanced（GetGood/FTW）----
   // :3808-3812：damage=(int)(55*0.9)=49 / useTime=(int)(12*1.1)=13（(int)=截断）
   197: { damageMul: 0.9, useTimeMul: 1.1 },
@@ -192,6 +202,7 @@ function conditionMet(c: ItemVariantConditionKind, sf: SeedFlags | null | undefi
     case 'remix': return !!sf?.remix;
     case 'getGood': return !!sf?.getGoodWorld;
     case 'mechdusa': return isMechdusaWorld(sf);
+    case 'skyblock': return !!sf?.skyblock;
   }
 }
 

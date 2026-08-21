@@ -60,7 +60,12 @@ export function applyWhipDebuffs(projId: number, enemy: Record<string, number>):
   if (projId === 913) enemy.onFire3T = Math.max(enemy.onFire3T ?? 0, 4);        // AddBuff(323,240)
   else if (projId === 912) enemy.frostburn2T = Math.max(enemy.frostburn2T ?? 0, 4); // AddBuff(324,240)
   else if (projId === 914 && Math.random() < 0.2) enemy.poisonT = Math.max(enemy.poisonT ?? 0, 3); // 1/5 AddBuff(20,180)
-  // 1033→362 / 849→310：见上,标记类 buff 无独立 DoT 语义,不写字段
+  // 1457 重做（NPC.cs:92781-92784）：电鳗鞭 1033 → 362 markedByEelWhip = DOT 表平铺
+  //  Add(100,50)=50 HP/s（链式缩放/标记玩家数前置/链电粒子全删，ApplyEelWhipDoT 成
+  //  死代码）——1456 的"标记无 DoT 语义"登记作废，落 eelWhipT（Enemy DOTTally 段消费）
+  else if (projId === 1033) enemy.eelWhipT = Math.max(enemy.eelWhipT ?? 0, 4);  // AddBuff(362,240)
+  // 849→310：markedByScytheWhip 仅视觉粒子（:92188 BlackLightningSmall,无数值效果,
+  //  两版 Next(3) 均不变）——本仓无粒子管线,不写字段（登记）
 }
 
 export class WhipProj extends Entity {

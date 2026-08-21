@@ -1,7 +1,13 @@
 // 音效：原版 wav 素材（public/sounds/）+ WebAudio 合成兜底。
-// **按需加载（与贴图懒加载同策略，2026-08-10）**：不预读任何文件——播放未命中时
-// 后台 fetch+decode（pending 防重入、failed 负缓存防 404 循环），首播走合成兜底/静默，
-// 解码完成后后续播放命中真声。定向预热用 preloadFiles（如 Boss 召唤前取咆哮声）。
+// **按需加载 + 首播补播（2026-08-21）**：播放未命中缓存时后台 fetch+decode
+// （bufferPromises 去重、failed 负缓存防 404 循环），★本次触发不再丢声——
+// 旧实现 ensureBuffer 同步返回 null → playWavFile return false，首播静默/落合成，
+// 解码完成后第二声起才命中真声（用户报"发射子弹第一声永远静默"根因）。
+// 现 deferPlay 在解码完成后按原触发参数补播一次，playWavFile 返回 true 告知
+// 调用方"有声可闻"（合成兜底/通用 hit 回退不叠加）；仅负缓存命中（加载失败过）
+// 才返回 false 走合成。另在首次取得 AudioContext 时批量预热高频清单
+// WARMUP_NAMES（枪族/挖掘/战斗/UI——Item_36/41 等此前不在世界载入预热面），
+// 把补播窗提前到进世界前。定向预热仍用 preloadFiles（如 Boss 召唤前取咆哮声）。
 // hit 敌人受击 / hurt 玩家受击 / pickup 拾取 / dig 挖掘 / place 放置 / drink 饮用 / chop 砍树 / splash 落水
 // + killed 怪物死亡 / zombie 僵尸环境声 / roar Boss咆哮 / coin 拾币 / door_open door_close / tink 敲石 / shatter 玻璃破碎 / drown 溺水
 export type SfxName =
@@ -149,6 +155,26 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   // 以下无原版素材，走合成
   drink: ['Item_3'],  // SoundID.Item3(药水饮用/回忆药水起始音;素材曾缺走合成兜底)
 };
+
+/** 高频预热清单（Sfx 首次取得 AudioContext 时经 preloadNames 批量 decode，
+ *  不阻塞不发声）。按需加载体系下"清单外的首播"由 deferPlay 补播兜底（一个
+ *  fetch+decode 往返的延迟），本预热把高频轨的补播窗提前到进世界前：
+ *  - 枪族三件（Item_11/36/41）——世界载入预热面（Game.ts）只有 Item_11，
+ *    霰弹/手枪族本局首射静默 = 用户报障直接缺口；
+ *  - 菜单三件套——首手势即菜单点击，UISfx 与 Game.sfx 是两个实例，各自预热；
+ *  - 战斗/挖掘/拾取/门/液体高频。全 98 个 WAV_MAP 文件均在盘（2026-08-21 核对），
+ *    合计 PCM 约 10MB 量级，远小于单首 BGM。 */
+export const WARMUP_NAMES: SfxName[] = [
+  // UI（首手势即菜单点击）
+  'menuOpen', 'menuClose', 'menuTick', 'unlock',
+  // 战斗/挖掘/拾取高频
+  'hit', 'hurt', 'killed', 'pkilled', 'pickup', 'dig', 'place', 'chop', 'tink',
+  'shatter', 'coin', 'splash', 'drown', 'zombie', 'roar',
+  'door_open', 'door_close', 'drink', 'mech',
+  // 枪/弓/投掷/爆炸/召唤/鞭（"发射子弹首声静默"主面）
+  'gunShot', 'gunShotgun', 'gunHandgun', 'bowShoot', 'throw', 'explosion',
+  'summon', 'whipCrack',
+];
 
 /** 原版专属音量修正表（LegacySoundPlayer.PlaySound 各 case 内对 num2 的修正系数，
  *  Terarria1456/Terraria.Audio/LegacySoundPlayer.cs）。
@@ -309,9 +335,8 @@ export class Sfx {
     }
   }
 
-  /** 在途解码中的文件（防重复 fetch） */
-  private pending = new Set<string>();
-  /** 循环轨在途解码（Promise 去重，与 pending 互斥使用） */
+  /** 在途解码（Promise 去重：ensureBuffer 同步面 / deferPlay 补播 / 循环轨
+   *  共用的单一加载管线，防并发重复 fetch） */
   private bufferPromises = new Map<string, Promise<AudioBuffer | null>>();
   /** 取回失败/不存在的文件（负缓存，防 404 每次重试） */
   private failed = new Set<string>();
@@ -336,34 +361,16 @@ export class Sfx {
   /** 单实例槽:file → 正在播的 source(onended 清) */
   private singlePlaying = new Map<string, AudioBufferSourceNode>();
 
-  /** 按需取缓冲：未命中时后台 fetch+decode，同步返回已就位缓冲或 null。
+  /** 按需取缓冲（同步面）：命中返回缓冲；未命中触发后台加载并同步返回 null。
    *  资源包覆盖优先（M13，AssetSourceController.UseResourcePacks 的音频源同语义）：
    *  包内 Sounds/<X> 先于 sprites/ 基础源查询——命中即用包字节，不走 fetch。 */
   private ensureBuffer(file: string): AudioBuffer | null {
     const buf = this.buffers.get(file);
     if (buf) return buf;
-    if (this.pending.has(file) || this.failed.has(file)) return null;
+    if (this.failed.has(file)) return null;
     const ctx = this.ensure(true);
     if (!ctx) return null;
-    const override = packSoundOverrides.get(file);
-    if (override) {
-      this.pending.add(file);
-      ctx.decodeAudioData(override.slice().buffer)
-        .then((decoded) => { this.buffers.set(file, decoded); this.failed.delete(file); })
-        .catch(() => { this.failed.add(file); })
-        .finally(() => { this.pending.delete(file); });
-      return null;
-    }
-    this.pending.add(file);
-    fetch(`sounds/${file}.wav`)
-      .then((r) => (r.ok ? r.arrayBuffer() : null))
-      .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
-      .then((decoded) => {
-        if (decoded) this.buffers.set(file, decoded);
-        else this.failed.add(file);
-      })
-      .catch(() => { this.failed.add(file); })
-      .finally(() => { this.pending.delete(file); });
+    void this.ensureBufferAsync(file, ctx);   // 后台加载（bufferPromises 去重）
     return null;
   }
 
@@ -434,7 +441,19 @@ export class Sfx {
       this.ctx = new AC();
     }
     if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    this.warmup();
     return this.ctx;
+  }
+
+  /** 高频预热（每实例一次）：首次取得 AudioContext 即后台 decode WARMUP_NAMES。
+   *  触发点 = 该实例第一次任何播放/预热（菜单实例 UISfx.sfx 在首手势、
+   *  Game.sfx 在世界载入 preloadNames 处）——把枪声等高频轨的按需加载窗
+   *  提前到进世界前。静音时不取（解除静音后的首播再触发）。 */
+  private warmed = false;
+  private warmup(): void {
+    if (this.warmed || this.muted) return;
+    this.warmed = true;
+    this.preloadNames(WARMUP_NAMES);
   }
 
   /** 播放原版 wav（随机变体 + 轻微音高扰动）；vol 0-1 */
@@ -479,23 +498,32 @@ export class Sfx {
 
   // ---- 环境循环轨（SoundEngine.PlayTrackedSound 语义：常驻节点 + 音量平滑跟随）----
 
-  /** 异步取缓冲（ensureBuffer 的 Promise 版，供循环轨"缓冲就绪后再起振"） */
+  /** 异步取缓冲（单一加载管线：ensureBuffer 同步面 / deferPlay 首播补播 /
+   *  循环轨"缓冲就绪后再起振"共用；bufferPromises 去重防并发重复 fetch）。
+   *  资源包覆盖优先于 fetch（与 ensureBuffer 同语义）。 */
   private ensureBufferAsync(file: string, ctx: AudioContext): Promise<AudioBuffer | null> {
     const hit = this.buffers.get(file);
     if (hit) return Promise.resolve(hit);
     if (this.failed.has(file)) return Promise.resolve(null);
     const pending = this.bufferPromises.get(file);
     if (pending) return pending;
-    const p = fetch(`sounds/${file}.wav`)
-      .then((r) => (r.ok ? r.arrayBuffer() : null))
-      .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
-      .then((decoded) => {
-        if (decoded) { this.buffers.set(file, decoded); return decoded; }
+    const p = (async () => {
+      try {
+        const override = packSoundOverrides.get(file);
+        const ab = override
+          ? override.slice().buffer
+          : await fetch(`sounds/${file}.wav`).then((r) => (r.ok ? r.arrayBuffer() : null));
+        const decoded = ab ? await ctx.decodeAudioData(ab) : null;
+        if (decoded) { this.buffers.set(file, decoded); this.failed.delete(file); return decoded; }
         this.failed.add(file);
         return null;
-      })
-      .catch(() => { this.failed.add(file); return null; })
-      .finally(() => { this.bufferPromises.delete(file); });
+      } catch {
+        this.failed.add(file);
+        return null;
+      } finally {
+        this.bufferPromises.delete(file);
+      }
+    })();
     this.bufferPromises.set(file, p);
     return p;
   }
@@ -567,7 +595,46 @@ export class Sfx {
     return this.startLoopFile(file, vol, base);
   }
 
-  /** 按文件名直播（缓冲未就位时触发后台加载，本播返回 false 走合成兜底）。
+  /** 缓冲起振（playWavFile 即时路径与 deferPlay 补播共用的出声单点）：
+   *  音高（pitch 直传跳过抖动）+ 音轨分派（LegacySoundPlayer.cs:420-429：
+   *  ambient 成员 ×ambientVolume，其余 ×soundVolume(master)——替换而非叠加）+
+   *  单实例占槽（onended=自然播完/stop 均触发,清槽后可重播） */
+  private startBuffer(file: string, buf: AudioBuffer, vol: number, pitch?: number): void {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = pitch != null ? 2 ** pitch : 0.92 + Math.random() * 0.16;
+    const g = ctx.createGain();
+    g.gain.value = Math.min(1, vol * trackVolumeFor(file, this.ambient, this.master));
+    src.connect(g).connect(ctx.destination);
+    src.start();
+    if (Sfx.SINGLE_INSTANCE.has(file)) {
+      this.singlePlaying.set(file, src);
+      src.onended = () => {
+        if (this.singlePlaying.get(file) === src) this.singlePlaying.delete(file);
+      };
+    }
+  }
+
+  /** 首播补播（首声不丢，2026-08-21）：本次触发未命中缓存→ensureBuffer 已触发
+   *  后台加载，解码完成后按原触发参数补播一次。门/互斥在补播时点重判
+   *  （suppress 置位后排队的补播被拦——与即时路径同一门语义）；ctx 仍 suspended
+   *  则挂 resume 后起振。加载失败（负缓存）则本次保持静默，后续触发经
+   *  playWavFile false 走合成兜底（WAV_MAP 全 98 文件在盘，实际不达）。 */
+  private deferPlay(file: string, ctx: AudioContext, vol: number, x: number | undefined, y: number | undefined, pitch: number | undefined, replace: boolean | undefined): void {
+    void this.ensureBufferAsync(file, ctx).then((buf) => {
+      if (!buf || this.suppress) return;
+      if (!replace && Sfx.SINGLE_INSTANCE.has(file) && this.singlePlaying.has(file)) return;
+      const fire = () => this.startBuffer(file, buf, vol, pitch);
+      if (ctx.state === 'suspended') void ctx.resume().then(fire, fire);
+      else fire();
+    });
+  }
+
+  /** 按文件名直播。返回值 = "有声可闻"：已即时播出，或未命中缓存但已排队
+   *  deferPlay 补播（返回 true——调用方的合成兜底/通用 hit 回退不叠加出声）；
+   *  仅硬失败返回 false：载入静音门 / 静音 / 无 AudioContext / 距离衰减归零 /
+   *  负缓存命中（该文件已知加载失败）。
    *  vol 语义 = 原版 volumeScale（调用方传 1 = 原版默认）；原版各 case 的专属
    *  音量修正（FILE_CASE_VOL）在此单点统一乘，调用方无需手传修正系数。
    *  pitch = XNA SoundEffectInstance.Pitch（-1..1，频率倍率 2^pitch）——乐器族
@@ -586,23 +653,12 @@ export class Sfx {
     if (v <= 0) return false;
     vol = v * (FILE_CASE_VOL[file] ?? 1);
     const buf = this.ensureBuffer(file);
-    if (!buf) return false;
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.playbackRate.value = pitch != null ? 2 ** pitch : 0.92 + Math.random() * 0.16;
-    const g = ctx.createGain();
-    // 音轨分派（LegacySoundPlayer.cs:420-429）：ambient 成员 ×ambientVolume，
-    // 其余 ×soundVolume（master）——替换而非叠加，原版同构
-    g.gain.value = Math.min(1, vol * trackVolumeFor(file, this.ambient, this.master));
-    src.connect(g).connect(ctx.destination);
-    src.start();
-    // 单实例占槽（onended=自然播完/stop 均触发,清槽后可重播）
-    if (Sfx.SINGLE_INSTANCE.has(file)) {
-      this.singlePlaying.set(file, src);
-      src.onended = () => {
-        if (this.singlePlaying.get(file) === src) this.singlePlaying.delete(file);
-      };
+    if (!buf) {
+      if (this.failed.has(file)) return false;   // 已知缺失→合成兜底（负缓存语义不变）
+      this.deferPlay(file, ctx, vol, x, y, pitch, replace);   // ★首播不丢
+      return true;
     }
+    this.startBuffer(file, buf, vol, pitch);
     return true;
   }
 

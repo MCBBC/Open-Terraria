@@ -12,6 +12,7 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { BuffType } from '../stats/Buffs';
 import { TILE } from '../core/constants';
+import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 
 const SCREAM = ['deerclops_scream_0', 'deerclops_scream_1', 'deerclops_scream_2'];
 const ICE = ['deerclops_ice_attack_0', 'deerclops_ice_attack_1', 'deerclops_ice_attack_2'];
@@ -442,7 +443,8 @@ export class DeerclopsSpikeProj extends Entity {
     const p = game.player;
     if (p && !p.dead && this.opacity > 0.05
       && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
-      game.damagePlayer(this.dmg, this.cx, this.cy);
+      // Damage_EVP（:13770-13781）：难度乘区×通用敌弹×2——基础 13/18/15 为生成值，曾裸传=经典半伤
+      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy);
     }
     void game.world;
   }
@@ -495,7 +497,8 @@ export class DeerclopsRubbleProj extends Entity {
     const p = game.player;
     if (p && !p.dead
       && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
-      game.damagePlayer(this.dmg, this.cx, this.cy);
+      // Damage_EVP（:13770-13781）：难度乘区×通用敌弹×2——基础 13/18/15 为生成值，曾裸传=经典半伤
+      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy);
     }
   }
   draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {
@@ -592,7 +595,8 @@ export class InsanityShadowProj extends Entity {
     const p = game.player;
     if (p && !p.dead && this.alpha < 250
       && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
-      game.damagePlayer(this.dmg, this.cx, this.cy);
+      // Damage_EVP（:13770-13781）：难度乘区×通用敌弹×2——基础 13/18/15 为生成值，曾裸传=经典半伤
+      game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy);
     }
   }
   draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {

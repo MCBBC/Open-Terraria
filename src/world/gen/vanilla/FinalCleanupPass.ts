@@ -308,10 +308,17 @@ function plantBadMatch(down: number, type: number): boolean {
   }
   return true;
 }
-/** PlantCheck_TryGetNewType（cs:81334-81418）：按地基换型+帧折叠 */
-function plantNewType(sheet: number, down: number, fx: number): { type: number; fx: number } {
+/** PlantCheck_TryGetNewType（1457 cs:81892-81960）：按地基换型+帧折叠。
+ *  ★1457 两改：①首分支 `3|110|24` → `3|61|110|24`（丛草植物 61 入
+ *  isMushroomOrSpore 判定,fx==144 视作孢子/菇帧）；②isMushroomOrSpore 取
+ *  **入口帧**（ref 形参在折叠前读）——旧 JS 用折叠后帧重算,fx≥162 折 126 的
+ *  组合会漏置（与原版 144/270 判定错位）。 */
+function plantNewType(sheet: number, down: number, fx: number): { type: number; fx: number; spore: boolean } {
   let type = sheet, nfx = fx;
-  if ((type === 3 || type === 110 || type === 24)) { /* isMushroom 判定仅重帧 */ }
+  // isMushroomOrSpore（入口帧判定,先于一切折叠）
+  let spore = false;
+  if (type === 3 || type === 110 || type === 24) spore = nfx === 144;
+  if (type === 201) spore = nfx === 270;
   if ((type === 3 || type === 73) && down !== 2 && down !== 477 && nfx >= 162) nfx = 126;
   if (type === 74 && down !== 60 && down !== 226 && nfx >= 162) nfx = 126;
   switch (down) {
@@ -322,7 +329,7 @@ function plantNewType(sheet: number, down: number, fx: number): { type: number; 
     case 60: case 226: type = 61; while (nfx > 126) nfx -= 126; break;
     case 70: type = 71; while (nfx > 72) nfx -= 72; break;
   }
-  return { type, fx: nfx };
+  return { type, fx: nfx, spore };
 }
 
 /** 扫描上下文：destroyObject 原版全局位（各 Check 首查尾清）；
@@ -646,6 +653,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     sheet === 165 || sheet === 185 || sheet === 28 || sheet === 653 || sheet === 240
     || sheet === 440 || sheet === 485 || sheet === 72 || sheet === 178 || sheet === 138
     || sheet === 376 || sheet === 443 || sheet === 444   // DDDDDD：CheckSuper 读帧族同列（485 同款）
+    || sheet === 245 || sheet === 246 || sheet === 241 || sheet === 242   // DDDDDD：画作墙检读帧族（240/440 同款）
     || sheet === 411 || sheet === 752 || sheet === 751 || sheet === 5 || sheet === 596 || sheet === 616
     || sheet === 34 || sheet === 27
     || C3X2_TYPES.has(sheet)
@@ -694,6 +702,13 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
       checkJunglePlantSweep(st, ctx, x, y, sheet); return true;
     case 28: case 653: checkPotSweep(st, ctx, x, y, sheet); return true;
     case 240: case 440: check3x3WallSweep(st, ctx, x, y); return true;
+    // DDDDDD 批补（cs:86233-40）：画作墙检族 245=Check2x3Wall/246=Check3x2Wall/
+    //   241=Check4x3Wall/242=Check6x4Wall——引擎缺派发 → FinalCleanup 大循环
+    //   TileFrame 不查画幅墙洞（m20260811 #105 残 6 格：245 画 (3269,1374) 背墙
+    //   (3270,1375) w0 洞，vanilla 整幅杀、JS 因 ⑫ 继承先行补墙存活）。
+    case 245: case 246: case 241: case 242:
+      if (process.env.SW_NO_WALLART !== '1') checkWallArtSweep(st, ctx, x, y, sheet);
+      return true;
     // DDDDDD 批补（cs:86437-40 → CheckSuper cs:48117）：376 渔笼/443 间歇泉/
     //   444 蜂巢块——LLLL"不在场"备案陈旧（杀账铁证 KL t444×12/t443×1），485
     //   并入通用臂（原专臂语义等价+补尾 4×4 TileFrame 重扫 cs:48395）。
@@ -1459,9 +1474,9 @@ function plantCheckSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, she
   if (r.type !== sheet) {
     st.type[i] = sid(r.type);
     st.frameX[i] = r.fx;
-    const mushroom = (sheet === 3 || sheet === 110 || sheet === 24) && r.fx === 144
-      ? true : (sheet === 201 && r.fx === 270);
-    if (mushroom) st.frameX[i] = sheet === 201 ? 270 : 144;
+    // ★1457（cs:81915-81922）：`if (isMushroomOrSpore) { frameX=144; if (type2==201) frameX=270; }`
+    //  ——201 判定改用**转化后** type2（1456 是原 type）;spore 取入口帧（plantNewType 内）。
+    if (r.spore) st.frameX[i] = 144;
   } else {
     ctx.destroyObject = true; killTileGen(st, ctx, x, y); ctx.destroyObject = false;
   }
@@ -1526,6 +1541,25 @@ function checkPileSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): voi
 }
 
 /** Check2x1（cs:46989）：横 2 格完整性 + {29,103,462} 桌面门 */
+/** WorldGen.AnchorValid(tile, AnchorType.Table)（1457 cs:52294）sheet 空间版：
+ *  ① SolidWithTop/Table 支——平台（frameX/18 ∈ [0,7](且非半砖) ∪ [12,16] ∪ [25,26]）
+ *     或 solid∩solidTop；②Table 支——tileTable 且 blockType==0（非半砖非坡）。
+ *  1457 Check2x1 case 103（碗）桌面门失败时的逃生锚（cs:47416）。 */
+function anchorValidTableSheet(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  if (!nactiveAt(st, x, y)) return false;   // EmptyTile 不在 Table 锚集
+  const i = st.idx(x, y);
+  const sh = SWEEP_SHEET[st.type[i]];
+  if (PLATFORMS.has(sh)) {
+    const num = Math.floor(st.frameX[i]! / 18);
+    if ((!st.half[i] && num >= 0 && num <= 7) || (num >= 12 && num <= 16) || (num >= 25 && num <= 26)) return true;
+  } else if (genSolidType(st.type[i]) && TILE_SOLID_TOP.has(sh)) {
+    return true;
+  }
+  if (!PLATFORMS.has(sh) && TILE_TABLE.has(sh) && !st.half[i] && st.slope[i] === 0) return true;
+  return false;
+}
+
 function check2x1Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
   if (ctx.destroyObject) return;
   const i = st.idx(x, y);
@@ -1535,10 +1569,14 @@ function check2x1Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
     && sheetAt2(st, x0, y) === sheet && sheetAt2(st, x0 + 1, y) === sheet
     && activeAt2(st, x0, y) && activeAt2(st, x0 + 1, y);
   if (sheet === 29 || sheet === 103 || sheet === 462) {
+    // ★1457（cs:47416）共用体拆 switch：case 103（碗）新增 AnchorValid(Table) 逃生门
+    //  ——桌面门失败但底格是合法 Table 锚（平台平帧 / solid∩solidTop / tileTable 且
+    //  blockType 0）仍存活；29/462 维持纯桌面门。
     for (const xx of [x0, x0 + 1]) {
       const bi = st.idx(xx, y + 1);
-      if (!st.flags[bi] || !TILE_TABLE.has(SWEEP_SHEET[st.type[bi]])
-        || st.half[bi] || slopeOf(st, xx, y + 1) === 1 || slopeOf(st, xx, y + 1) === 2) ok = false;
+      const tableFail = !st.flags[bi] || !TILE_TABLE.has(SWEEP_SHEET[st.type[bi]])
+        || st.half[bi] || slopeOf(st, xx, y + 1) === 1 || slopeOf(st, xx, y + 1) === 2;
+      if (tableFail && !(sheet === 103 && anchorValidTableSheet(st, xx, y + 1))) ok = false;
     }
   } else if (!solidAllowBottom(st, x0, y + 1) || !solidAllowBottom(st, x0 + 1, y + 1)) {
     // ★AAAAAA：cs:47039-47048 else 支——非桌族（含 185/16/18…）双底格
@@ -1656,6 +1694,24 @@ function checkPotSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
       }
     }
   }
+  // ★DDDDDD 批（2026-08-21）：CheckPot 尾 Gore 掷表（cs:56896-56966）——生成期
+  //   SpawnThingsFromPot 头 isGeneratingOrLoadingWorld 早退（cs:57185）零掷、
+  //   653 大罐 Item 分支零掷，唯 Gore switch 的三档照掷（genRand 显式）：
+  //   num4 25-27→2×Next(217,220)；28-30→2×Next(315,317)；31-33→Next(2,5)+次×Next(6)。
+  //   m20260811 #101 首分叉实锤：标准轨巷杀 (2086-2087,922-923) 罐群后 vanilla 掷
+  //   'b 2 5+a 6×4'（span @312312），JS 零掷 → 后续轨位全漂（A=26083 债主）。
+  if (ctx.rng) {
+    if (num4 >= 25 && num4 <= 27) {
+      ctx.rng.nextIntRange(217, 220);
+      ctx.rng.nextIntRange(217, 220);
+    } else if (num4 >= 28 && num4 <= 30) {
+      ctx.rng.nextIntRange(315, 317);
+      ctx.rng.nextIntRange(315, 317);
+    } else if (num4 >= 31 && num4 <= 33) {
+      const goreCount = ctx.rng.int(2, 4);
+      for (let q = 0; q < goreCount; q++) ctx.rng.nextInt(6);
+    }
+  }
   ctx.destroyObject = false;
 }
 
@@ -1745,6 +1801,58 @@ function anchorValidSweep(st: TileStore, x: number, y: number, mask: number): bo
   if (!flag && (mask & 4) !== 0 && !plat && TILE_TABLE.has(sh) && bt === 0) flag = true;
   if (!flag && (mask & AN_SOLID_SIDE) !== 0 && solid && !solidTop && (bt === 4 || bt === 5)) flag = true;
   return flag;
+}
+
+/** Check2x3Wall/Check3x2Wall/Check4x3Wall/Check6x4Wall（cs:44628/44785/44908/44994）
+ *  画作族完整性（type+活性+墙>0+帧全等）→ 败整幅 KillTile。DDDDDD 批补派发。
+ *  零掷：掉落=固定 id Item.NewItem（无 genRand；生成期不入档）；样式轴 245 在
+ *  frameX（wrap2）/246 在 frameY（wrap2）/241 在 frameY（wrap3）/242 双轴合成。 */
+function checkWallArtSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
+  if (ctx.destroyObject) return;
+  const i = st.idx(x, y);
+  const tid = st.type[i];
+  const fx = st.frameX[i]!, fy = st.frameY[i]!;
+  let w: number, h: number, fxBase = 0, fyBase = 0, x0: number, y0: number;
+  if (sheet === 245) {
+    let s = Math.floor(fx / 18), n = 0;
+    while (s >= 2) { s -= 2; n++; }
+    x0 = x - s; y0 = y - Math.floor(fy / 18); fxBase = n * 36; w = 2; h = 3;
+  } else if (sheet === 246) {
+    let s = Math.floor(fy / 18), n = 0;
+    while (s >= 2) { s -= 2; n++; }
+    y0 = y - s; x0 = x - Math.floor(fx / 18); fyBase = n * 36; w = 3; h = 2;
+  } else if (sheet === 241) {
+    let s = Math.floor(fy / 18), n = 0;
+    while (s >= 3) { s -= 3; n++; }
+    y0 = y - s; x0 = x - Math.floor(fx / 18); fyBase = n * 54; w = 4; h = 3;
+  } else {
+    const fx18 = Math.floor(fx / 18), fy18 = Math.floor(fy / 18);
+    const n = 27 * Math.floor(fx18 / 6) + (fy18 >> 2);
+    y0 = y - (fy18 % 4); x0 = x - (fx18 % 6);
+    fyBase = (n % 27) * 72; fxBase = Math.floor(n / 27) * 108; w = 6; h = 4;
+  }
+  let bad = false;
+  for (let k = x0; k < x0 + w && !bad; k++) {
+    for (let l = y0; l < y0 + h; l++) {
+      if (!st.inBounds(k, l)) { bad = true; break; }
+      const q = st.idx(k, l);
+      if (st.type[q] !== tid || !st.flags[q] || st.wall[q] <= 0
+        || st.frameX[q] !== fxBase + (k - x0) * 18
+        || st.frameY[q] !== fyBase + (l - y0) * 18) { bad = true; break; }
+    }
+  }
+  if (!bad) return;
+  (globalThis as { __swWallArt?: (s2: string) => void }).__swWallArt?.(`KILL s=${sheet} visit(${x},${y}) grp(${x0},${y0}) fx0=${fx} fy0=${fy}`);
+  ctx.destroyObject = true;
+  for (let k = x0; k < x0 + w; k++) {
+    for (let l = y0; l < y0 + h; l++) {
+      if (st.inBounds(k, l)) {
+        const q = st.idx(k, l);
+        if (st.type[q] === tid && st.flags[q]) killTileGen(st, ctx, k, l);
+      }
+    }
+  }
+  ctx.destroyObject = false;
 }
 
 /** CheckSuper 通用（cs:48117）：多格完整性 + 类型专属锚（376 底行 solid/table

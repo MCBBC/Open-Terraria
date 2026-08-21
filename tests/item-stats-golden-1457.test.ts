@@ -1,0 +1,79 @@
+// Item 数值三方对账金标闸门:vanilla-item*.json × Item.cs(1456) × Item.cs(1457) 常驻化。
+// 解析逻辑 = tools/recon-item-1456-1457.mjs(库模式导入,与 CLI --fix 同源——防"闸门与
+// 修复器两套逻辑漂移")。1.4.5.7 是数值补丁(Item SetDefaults 54 条,报告"Item.cs 行为
+// 差异清单"),本闸门锁三件事:
+//   ① DRIFT=0:json 与 1457 终值零漂移(--fix 后的事实;手改 json 或重跑 1456 提取器会爆红)
+//   ② LEGACY=0:两版同值字段上 json 不得偏离 1456(基线保护,存量 1405 旧值回潮检测)
+//   ③ 解析器结构护栏:提取基数不低于基线(防反编译树/解析器结构漂移后静默半坏)
+// 已知暂缓项(deferredDrift):1226/1227 叶绿双剑 shoot 指向 1457 新弹 1126/1127,
+//   新弹 AI/贴图未实装前数据侧保留 1456 弹 id(见 recon FIX_SHOOT_KEEP)。
+// 注意:依赖仓库内 Terarria1456/、Terarria1457/ 反编译树(与 npc-stats-golden 同惯例)。
+import { describe, expect, it } from 'vitest';
+// @ts-expect-error 纯 JS 提取库(无类型声明)
+import { recon, FIX_SHOOT_KEEP } from '../tools/recon-item-1456-1457.mjs';
+
+const r = await recon();
+
+describe('Item 数值三方对账金标(json × 1456 × 1457)', () => {
+  it('① json 与 1457 SetDefaults 终值零漂移(DRIFT)', () => {
+    expect(r.drift).toEqual([]);
+  });
+
+  it('①b 已知暂缓项仅叶绿双剑 shoot 两条(新弹 1126/1127 未实装)', () => {
+    expect(r.deferredDrift.length).toBe(FIX_SHOOT_KEEP.size);
+    for (const line of r.deferredDrift) expect(line).toMatch(/combat\[122[67]\]\.shoot/);
+  });
+
+  it('② 两版同值字段上 json 与 1456 零漂移(LEGACY 基线保护)', () => {
+    expect(r.legacy).toEqual([]);
+  });
+
+  it('③a 解析器结构护栏:提取基数不低于基线', () => {
+    // 基线(2026-08-21):combat 4333(1456)/4348(1457, +49 新物品 6147-6195)/
+    // rare 3225→3275 / value 4889 / stats def 270 life 5 / whips 18
+    expect(r.coverage.combat1456).toBeGreaterThanOrEqual(4333);
+    expect(r.coverage.combat1457).toBeGreaterThanOrEqual(4348);
+    expect(r.coverage.rare1457).toBeGreaterThanOrEqual(3275);
+    expect(r.coverage.value1457).toBeGreaterThanOrEqual(4889);
+    expect(r.coverage.statsDef57).toBeGreaterThanOrEqual(270);
+    expect(r.coverage.statsLife57).toBeGreaterThanOrEqual(5);
+    expect(r.coverage.whips57).toBe(18);
+  });
+
+  it('③b CLASS B 迁移面锚点:既有物品(id<6147)的变化恰为已知 54 条清单,无意外新增', () => {
+    // 已知清单 = 报告"Item.cs 行为差异清单/SetDefaults 数值变化"节 + 4765(与 4766
+    // 同 case 贯穿组,报告漏列)。新物品 6147-6195 的整条新增不计入。
+    const known = new Set([
+      'combat[112].mana', 'combat[437].shootSpeed', 'combat[494].knockBack', 'combat[546].damage',
+      'combat[578].damage', 'combat[578].useTime', 'combat[578].useAnimation', 'combat[682].damage',
+      'combat[683].damage', 'combat[683].knockBack', 'combat[683].useTime', 'combat[683].useAnimation',
+      'combat[739].mana', 'combat[740].mana', 'combat[741].mana', 'combat[742].mana',
+      'combat[743].damage', 'combat[743].mana', 'combat[744].mana', 'combat[988].damage',
+      'combat[1178].useTime', 'combat[1178].useAnimation', 'combat[1178].shootSpeed',
+      'combat[1226].useAnimation', 'combat[1226].useTime', 'combat[1226].shoot', 'combat[1226].noMelee',
+      'combat[1227].damage', 'combat[1227].knockBack', 'combat[1227].useTime', 'combat[1227].useAnimation',
+      'combat[1227].shoot', 'combat[1227].shootSpeed', 'combat[1227].noMelee', 'combat[1227].noUseGraphic',
+      'combat[1227].useTurn',
+      'combat[1313].useTime', 'combat[1313].useAnimation', 'combat[1313].shootSpeed',
+      'combat[1350].damage', 'combat[1444].knockBack', 'combat[3011].damage',
+      'combat[3283].damage', 'combat[3289].damage', 'combat[3290].damage', 'combat[3291].damage',
+      'combat[3315].damage', 'combat[3315].crit', 'combat[3316].damage', 'combat[3377].mana',
+      'combat[3352].shootSpeed', 'combat[3772].shootSpeed', 'combat[3821].ranged', 'combat[3821].melee',
+      'combat[4270].damage', 'combat[4607].knockBack', 'combat[4765].noMelee', 'combat[4765].noUseGraphic',
+      'combat[4766].noMelee', 'combat[4766].noUseGraphic', 'combat[5285].noMelee', 'combat[5285].noUseGraphic',
+      'combat[5663].damage', 'combat[5687].damage',
+      'rare[1293].rare', 'rare[3315].rare', 'rare[3316].rare',
+      'value[255].value', 'value[4672].value', 'value[5920].value', 'value[5926].value',
+      'stats[982].life', 'stats[1595].def', 'stats[1613].def', 'stats[2221].def',
+      'func[2209].healMana', 'whips[5477].dmg', 'whips[5688].dmg',
+    ]);
+    const unexpected: string[] = [];
+    for (const line of r.classB) {
+      const m = line.match(/^(\w+)\[(\d+)\]\.(\w+):/);
+      if (!m) { unexpected.push(line); continue; }
+      if (+m[2] >= 6147) continue; // 新内容物品(1457 新增 49 件)整条不计
+      if (!known.has(`${m[1]}[${m[2]}].${m[3]}`)) unexpected.push(line);
+    }
+    expect(unexpected).toEqual([]);
+  });
+});

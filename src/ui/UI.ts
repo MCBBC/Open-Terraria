@@ -280,6 +280,8 @@ const CSS = `
 .sw-hotbar .sw-slot::before { display:none; } /* 快捷栏 Back14/20 贴图自带 alpha 语义 */
 .sw-slot:hover { filter:brightness(1.15); }
 .sw-slot img { position:absolute; inset:8px; width:36px; height:36px; image-rendering:pixelated; }
+/* 44px 垃圾桶槽：36px 物品图标居中（inset 8 会贴右下角偏 4px,2026-08-21 用户报） */
+.sw-slot.sw-trash img:not(.sw-trash-icon) { inset:4px; }
 .sw-slot .cnt { position:absolute; left:4px; bottom:0; font-size:12px; font-weight:bold; color:#fff;
   text-shadow:1px 1px 0 #000; transform-origin:left bottom; }
 /* Loadout 三色（ItemSlot.LoadoutSlotColors :322-340，×inventoryBack 灰 = multiply）：
@@ -319,7 +321,7 @@ const CSS = `
 /* 垃圾桶：原版槽底 = Inventory_Back7（ItemSlot.cs:2063 context 6）。
  * 空槽时画 Trash.png（ItemSlot.cs:2514-2520：32×32 居中，scale 0.85，
  *  颜色 Color(100,100,100,100) = 亮度×0.39 + alpha×0.39） */
-.sw-trash .sw-trash-icon { position:absolute; inset:8px; width:27px; height:27px;
+.sw-trash .sw-trash-icon { position:absolute; left:8.5px; top:8.5px; width:27px; height:27px;
   image-rendering:pixelated; pointer-events:none; filter:brightness(0.39); opacity:0.39; }
 .sw-lbl { font-size:12px; color:#9fb0dd; margin:6px 0 2px 0; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
@@ -2046,20 +2048,13 @@ export class UI {
 
   private placeTrash(): void {
     if (!this.heldStack) return;
-    const t = this.game.player.inv.trash;
-    if (!t) {
-      this.game.player.inv.trash = this.heldStack;
-      this.heldStack = null;
-    } else if (t.id === this.heldStack.id) {
-      const max = ITEM_DEFS[t.id].maxStack;
-      const put = Math.min(max - t.stack, this.heldStack.stack);
-      t.stack += put;
-      this.heldStack.stack -= put;
-      if (this.heldStack.stack <= 0) this.heldStack = null;
-    } else {
-      this.game.player.inv.trash = this.heldStack; // 交换：可把误放的东西取回
-      this.heldStack = t;
-    }
+    // 原版 Trash 槽=覆盖销毁（ItemSlot.cs:692-701：trashItem=item.Clone() 旧物直接
+    // 丢弃 + TrashItem/Grab 双音）——曾做同型合并/异型交换，旧物回手上="遗弃"
+    // 语义失效（2026-08-21 用户报"无法遗弃任何东西"）
+    this.game.player.inv.trash = { ...this.heldStack };
+    this.heldStack = null;
+    this.game.sfx.playFiles(['trash_item_0', 'trash_item_1'], 1);   // SoundID.TrashItem
+    this.game.sfx.play('pickup', 1);                                 // SoundID 7 Grab（:698）
     this.paintTrash();
   }
 
@@ -2668,7 +2663,10 @@ export class UI {
     const thumbH = Math.max(24, (meta.visRows / meta.len) * H);
     const usable = Math.max(1, H - thumbH);
     const ratio = Math.max(0, Math.min(1, (clientY - r.top - thumbH / 2) / usable));
-    const focus = Math.round(ratio * (meta.len - 1));
+    // 比例→窗起点（域 [0, len-visRows] 与 thumb 几何同域）→焦点=起点+4（滚轮同锚，
+    // 曾映射 [0,len-1] 与 thumb 域错位=拖到底列表没到尾）
+    const s = Math.round(ratio * (meta.len - meta.visRows));
+    const focus = Math.min(meta.len - 1, s + 4);
     if (focus !== this.craftFocus) {
       this.craftFocus = focus;
       this.hoverFocus = -1;
@@ -3320,9 +3318,18 @@ export class UI {
     // 曾按 MAX_ROWS=60 取窗 min(focus-30, len-60)：len<60 时恒 start=0，240px
     // overflow:hidden 容器永远只露前 ~8 行，滚轮只空转焦点、行窗不动。
     const VIS_ROWS = 8;   // 240px 容器 ÷ ~30px 行 ≈ 8 可见行（原版 ±5 居中同义）
+    const WIN = VIS_ROWS + 4;   // 渲染窗全宽（下缘 +4：鱼眼淡出余量）
     if (this.craftFocus > avail.length - 1) this.craftFocus = Math.max(0, avail.length - 1);   // 钳尾不回卷（ScrollCraftingList :582-589 钳 [0,len-1]）
-    const start = Math.max(0, this.craftFocus - (VIS_ROWS >> 1));
-    const end = Math.min(avail.length, start + VIS_ROWS + 4);   // 下缘 +4：鱼眼淡出余量
+    // ★start 钳到 maxStart（2026-08-21 用户报"拖到底还能往下拖"）：曾只 max(0,focus-4)
+    //   ——尾部 focus-4 会浪费视口（末页只渲染 len-start 行，thumb 随 visRows 缩水、
+    //   与拖拽域 [0,len-1] 不一致）。钳尾后视口恒满、thumb 高恒定、拖拽 1:1
+    const maxStart = Math.max(0, avail.length - WIN);
+    // 焦点上界=窗尾锚（maxStart+4）：到底后滚轮不再漂移 focus（曾只钳 len-1 →
+    // 底部继续滚会把 focus 推离窗锚,回滚出现最多 7 格死区）
+    const maxFocus = avail.length > WIN ? maxStart + (VIS_ROWS >> 1) : avail.length - 1;
+    if (this.craftFocus > maxFocus) this.craftFocus = maxFocus;
+    const start = Math.max(0, Math.min(this.craftFocus - (VIS_ROWS >> 1), maxStart));
+    const end = Math.min(avail.length, start + WIN);
     for (let idx = start; idx < end; idx++) {
       const { r, count } = avail[idx];
       const dy = idx - this.craftFocus; // 相对焦点的连续偏移（原版 availableRecipeY）
@@ -3394,7 +3401,7 @@ export class UI {
     // 一屏（无滚动余地）整条隐藏
     const meta = this.craftScrollMeta;
     meta.len = avail.length;
-    meta.visRows = end - start;
+    meta.visRows = Math.min(WIN, avail.length);   // 恒定（曾用 end-start=尾部缩水致 thumb 越拖越短）
     const trk = this.craftTrackEl, thb = this.craftThumbEl;
     if (trk && thb) {
       if (meta.len <= meta.visRows) {
@@ -3403,9 +3410,8 @@ export class UI {
         trk.style.display = '';
         const H = Math.max(1, trk.clientHeight);
         const thumbH = Math.max(24, (meta.visRows / meta.len) * H);
-        const maxStart = meta.len - meta.visRows;
         thb.style.height = `${thumbH}px`;
-        thb.style.top = `${(Math.min(start, maxStart) / maxStart) * (H - thumbH)}px`;
+        thb.style.top = `${(start / maxStart) * (H - thumbH)}px`;
       }
     }
   }

@@ -51,6 +51,16 @@ const SUPPORTED: Record<number, string> = {
   151: 'soulDrainT',   // SoulDrain:25 HP/s(:92927-92935,-50;魂镰 3006 联动登记 GAP)
   183: 'stardustT',    // StardustBleed:层数模型已接(20 HP/s/层,:92846-92863;
   //   层池 cap 10;MinionProj 613 星尘细胞→614 已在仓,弹命中即经本表入层)
+  // ---- 1457 新敌怪 debuff 家族（BuffID.cs:961-971；DoT/视觉在 Enemy.fixedUpdate
+  //      DOTTally 等价段,1457 NPC.cs:92746-92800）----
+  395: 'potentAcidT',        // PotentAcid:90 HP/s(AddPoison(180,60),:92751;可被 398 加速)
+  397: 'chlorophyteSporeT',  // ChlorophyteSpore:90 HP/s(:92755;+孢子云/叶尘 VFX)
+  398: 'acceleratePoisonsT', // AcceleratePoisons:可加速族 DoT ×2(:92840-92847)
+  399: 'blueLightningT',     // BlueLightning:纯视觉(BlueLightningSmall 1/10,:92274)
+  400: 'redLightningT',      // RedLightning:纯视觉(RedLightningSmall 1/10,:92281)
+  362: 'eelWhipT',           // EelWhipNPCDebuff(markedByEelWhip):50 HP/s 平铺 DoT
+  //   （1457 :92781 Add(100,50)——链式缩放/标记玩家数/链电粒子全删,ApplyEelWhipDoT
+  //   成死代码;施加源 = 鞭 1033 ApplyWhipDebuffs）
 };
 
 type StatusEnemy = { [field: string]: number | undefined };
@@ -91,9 +101,14 @@ export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, 
     }
     if (!hit) continue;
     // NPC buffImmune 门（NPC.cs:90968 AddBuff 免疫即 return + NPCID.Sets
-    // .DebuffImmunitySets 派生——2026-08-13 D5）
+    // .DebuffImmunitySets 派生——2026-08-13 D5）。1457 AI_001 熔岩史莱姆段
+    // （:61312-61316）对 70/397/395/20 运行时置 buffImmune=false——实例级覆写位
+    // （Enemy.debuffImmuneOverride）优先于静态表
     const vId = (enemy as { vanillaId?: number }).vanillaId;
-    if (vId !== undefined && vId > 0 && npcImmuneTo(vId, en.buff)) continue;
+    const override = (enemy as { debuffImmuneOverride?: Map<number, boolean> }).debuffImmuneOverride;
+    if (override?.get(en.buff) === false) {
+      // 运行时豁免（原版运行时复位语义）：跳过静态免疫表
+    } else if (vId !== undefined && vId > 0 && npcImmuneTo(vId, en.buff)) continue;
     const field = SUPPORTED[en.buff];
     if (!field) continue; // 未实装 buff,登记见上
     const ticks = en.durMin + Math.floor(Math.random() * (en.durMax - en.durMin + 1));
@@ -150,7 +165,11 @@ export function applyMeleeImbue(
   const max = (field: string, v: number): void => {
     if (v > (enemy[field] ?? 0)) enemy[field] = v;
   };
-  if (has(BuffType.ImbueVenom)) max('venomT', 5 + Math.random() * 5);
+  if (has(BuffType.ImbueVenom)) {
+    max('venomT', 5 + Math.random() * 5);
+    // 1457 StatusNPC :11201-11204：毒液浸剂命中伴发 AddBuff(395 PotentAcid, 60t=1s)
+    max('potentAcidT', 1);
+  }
   if (has(BuffType.ImbueCursed)) max('cursedT', 3 + Math.random() * 4);
   if (has(BuffType.ImbueFire)) max('onFireT', 3 + Math.random() * 4);
   if (has(BuffType.ImbueGold)) max('midasT', 2);

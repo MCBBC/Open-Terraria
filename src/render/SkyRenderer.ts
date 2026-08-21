@@ -756,6 +756,18 @@ function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: nu
   cx.fillRect(0, 0, c.width, c.height);
   cx.globalCompositeOperation = 'destination-in';
   cx.drawImage(tex, 0, 0);
+  // ★α 从亮度推导（2026-08-21 方片终案）：Sunflare 贴图 α 全 255（像素实测）——
+  // 原版是加性后处理 shader（final=texel.rgb×color×occlusion，【不采样 α】，
+  // 黑背景加性=不可见）；canvas drawImage+lighter 下黑背景不透明=巨大"方片"
+  // （用户三份报告）。加性语义的 canvas 等价：α=max(rgb)（黑=透明，亮=不透明），
+  // lighter 只加 RGB 与原版逐位等价。逐像素一次烘焙进缓存，运行时零开销。
+  const img = cx.getImageData(0, 0, c.width, c.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const m = d[i] > d[i + 1] ? (d[i] > d[i + 2] ? d[i] : d[i + 2]) : (d[i + 1] > d[i + 2] ? d[i + 1] : d[i + 2]);
+    d[i + 3] = m;
+  }
+  cx.putImageData(img, 0, 0);
   flareTintCache.set(key, c);
   if (flareTintCache.size > 24) {
     const first = flareTintCache.keys().next().value;

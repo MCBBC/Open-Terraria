@@ -137,6 +137,9 @@ export class ItemDrop extends Entity {
             game.addDamageNumber(player.cx, player.y, 20, false, '#40E080');
           } else {
             player.mana = Math.min(player.maxMana, player.mana + 100);
+            // 1457: 拾取魔力星附加 ManaHeat(0.2, 2s)（PickupItem :35346-35351——
+            //   184/1735/1868 星族分支内 myPlayer 门下 TryApplyManaHeat）
+            player.tryApplyManaHeat(0.2, 2);
             game.addDamageNumber(player.cx, player.y, 100, false, '#4080FF');
           }
           this.dead = true;

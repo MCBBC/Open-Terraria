@@ -147,11 +147,12 @@ function nearOtherChests(st: TileStore, x: number, y: number): boolean {
   return false;
 }
 
-/** 常春藤箱主件序(GetNextJungleChestItem cs:10130:循环 211/212/213/964 + 稀有替换) */
+/** 常春藤箱主件序(GetNextJungleChestItem cs:10130:循环 211/212/213/964 + 稀有替换)。
+ *  ★1457（cs:10146）删 `Next(50)==0 → 753` 首分支——753 现为 GiantTiki **tile** id
+ *  （1457 新内容,原写法疑似 bug）；海草 753 改为箱尾段副物品 1/50（cs:37773）。 */
 export function nextJungleItem(gs: GenState, rng: RNG): number {
   let result = [211, 212, 213, 964][gs.jungleItemIdx % 4];
-  if (rng.int(0, 49) === 0) result = 753;       // 1/50 海草
-  else if (rng.int(0, 14) === 0) result = 2292; // 1/15 玻璃钢鱼竿
+  if (rng.int(0, 14) === 0) result = 2292; // 1/15 玻璃钢鱼竿
   else if (rng.int(0, 19) === 0) result = 3017; // 1/20 花之靴
   gs.jungleItemIdx++;
   return result;
@@ -196,6 +197,9 @@ Object.assign(PRE_CLASS, {
   4062: 'magic', 112: 'magic', 218: 'magic',
   // boom（BoomerangsChakrams 集）：670 寒冰回旋镖
   670: 'boom',
+  // ★1457 新内容：6153 GlacierFang（PrefixLegacy.Magic 集,cs:73）——冰箱 7 元池新主件,
+  //   物品空间未注册（占位）但 Prefix(-1) 照耗 1×Next(4)（掷流对拍口径）
+  6153: 'magic',
   // acc（accessory&&!vanity&&CanGetPrefixes 全过）：冰 950/987/1579、沙 4055/4056、
   // 丛林 211/212/3017、水 863/4404/187、金字塔 848/857、天空 159/158/2219
   950: 'acc', 987: 'acc', 1579: 'acc', 4055: 'acc', 4056: 'acc',
@@ -538,17 +542,6 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
 
   // ---- 尾段(theme 附加,cs:37361-37560;tile 21 箱)----
   const items: Array<{ id: number; stack: number } | null> = out.map((it) => ({ ...it }));
-  // 主题尾件
-  if (flags.ivy && rng.int(0, 3) === 0) {
-    const id = vid(2204);
-    if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
-  }
-  if (flags.ice && rng.int(0, 6) === 0) {
-    const id = vid(2198);
-    if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
-  }
-  // flag12 天空主题（cs:37424-37474）：1/3 天空磨坊；Next(6) 五选一装饰画；
-  // 751 云 [50,100]（cs:37469）
   // ★此段在 items 快照之后——曾用 push() 落回 out（快照外,全部静默丢失）:
   // 12345 金标岛屋箱必有装饰画+云(f5255+751×88),JS 箱缺 2 件实锤。改 pushItem
   // 直接入 items;掷骰序与命中判定不变(零流影响)。
@@ -556,6 +549,19 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     const id = vid(v);
     if (id >= 0 && items.length < 40) items.push({ id, stack });
   };
+  // 主题尾件
+  if (flags.ivy && rng.int(0, 3) === 0) {
+    const id = vid(2204);
+    if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
+  }
+  // ★1457 新增（cs:37773）：flag4 && Next(50)==0 → 753 海草副物品（主物分支已删）
+  if (flags.ivy && rng.int(0, 49) === 0) pushItem(753);
+  if (flags.ice && rng.int(0, 6) === 0) {
+    const id = vid(2198);
+    if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
+  }
+  // ★1457 新增（cs:37781）：flag2 && Next(50)==0 → 669 鱼（原冰箱主物 1/50 移此）
+  if (flags.ice && rng.int(0, 49) === 0) pushItem(669);
   {
     const f12 = !!flags.skyTheme || mainVanillaId === 159 || mainVanillaId === 65
       || mainVanillaId === 158 || mainVanillaId === 2219;
@@ -826,9 +832,14 @@ function placeBuriedChestInner(
     if (tile === CHEST) style = 11;
     if (iceDbg) iceDbg(i, gy, tBelow, mainId, style, 1);   // fired=1
     if (!mainId) {
-      mainId = [670, 724, 950, 1319, 987, 1579][rng.int(0, 5)]; // cs:36121-36125
+      // ★1457（cs:36456）：`Next(6) 六选` → `Utils.SelectRandom(genRand, 7 元)`——
+      //   +6153 GlacierFang（1457 新魔法武器,本仓物品空间未注册=占位,掷骰照耗,
+      //   入箱时 vid()=-1 静默丢弃）；remix 覆写 1319→725 从内联三元改为命中后改写
+      //   （普通种子零差异）；`Next(50)==0 → 669` 主物分支删除（669 移箱尾副物品
+      //   1/50,cs:37781）。
+      mainId = [670, 724, 950, 1319, 987, 1579, 6153][rng.nextInt(7)]; // cs:36456 SelectRandom=Next(7)
+      if (gs.seedFlags.remix && mainId === 1319) mainId = 725;
       if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机
-      if (rng.int(0, 49) === 0) mainId = 669; // 1/50 鱼
     }
   }
   // ---- 天空箱降档门（cs:36180-36189，原版位于 hell 门后）：style12 的落定格

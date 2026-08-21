@@ -52,6 +52,7 @@ import { LightningBoltProj } from './LightningBoltProj';
 import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
+import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 
 /** 原版 localAI[0..3](Enemy 只有 ai0-ai3,localAI 独立 → WeakMap 落盘) */
 const localAI = new WeakMap<Enemy, number[]>();
@@ -1996,7 +1997,8 @@ export class LunarOrb extends Entity {
       const half = 40;                                // 80×80 居中
       if (p.x < this.cx + half && p.x + p.w > this.cx - half
         && p.y < this.cy + half && p.y + p.h > this.cy - half) {
-        game.damagePlayer(this.dmg, this.cx, this.cy, null);
+        // Damage_EVP：539/574 生成基础 60，命中再过乘区×2
+        game.damagePlayer(hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2, this.cx, this.cy, null);
       }
     }
   }

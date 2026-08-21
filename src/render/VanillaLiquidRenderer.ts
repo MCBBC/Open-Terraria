@@ -253,6 +253,21 @@ export function liquidDebugState(): LiquidDebugState {
   return _liqDebug;
 }
 
+/** LiquidSlope 贴图独立懒加载（不走 atlas.ensureVImage——LiquidSlope 不在
+ *  预载/重烘列表,首次调用返回 null 且不触发网络加载 = 永远 null。
+ *  模块级缓存跨帧持久——函数内声明会每帧重建 Map = Image 永远 width=0） */
+const _slopeTexCache = new Map<number, HTMLImageElement>();
+const getSlopeTex = (waterStyle: number): HTMLImageElement | null => {
+  const ws = Math.max(0, Math.min(14, waterStyle));
+  let im = _slopeTexCache.get(ws);
+  if (im === undefined) {
+    im = new Image();
+    im.src = `sprites/vanilla/LiquidSlope_${ws}.png`;
+    _slopeTexCache.set(ws, im);
+  }
+  return im.width > 0 ? im : null;
+};
+
 export function drawVanillaLiquids(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null,
   st: TileStore, groundLevel: number,
@@ -670,17 +685,21 @@ export function drawVanillaLiquids(
   //   前景 pass（isBackground=false）→ DEFAULT_OPACITY[0] = 0.6（= 正常水体前景层）
   // 双层叠加后斜面斜切区的水色浓度与周围正常水体一致。形状 = LiquidSlope 斜面表。
   {
-    const slopeTex = atlas.ensureVImage(liquidSlopeSheet(1, waterStyle));
+    const slopeTex = getSlopeTex(waterStyle);
     if (slopeTex && slopeTex.width > 0) {
       for (let lx = PAD; lx < pw - PAD; lx++) {
         const x = px0 + lx;
         for (let ly = PAD; ly < ph - PAD; ly++) {
           const y = py0 + ly;
+          if (x < 0 || y < 0 || x >= st.w || y >= st.h) continue;   // st.idx 直读守卫
           const i = at(lx, ly);
           if (!isSolidA[i] || hasLiquidA[i]) continue;
           const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
           if (!hasLiquidA[ui] && !hasLiquidA[di] && !hasLiquidA[li] && !hasLiquidA[ri]) continue;
-          const slope = st.slope[i];
+          // ★st.slope 是 store 下标——此处 i 是局部 padding 网格下标(at(lx,ly)),
+          //   直喂会错位读数 → slope 恒落在 1-4 之外 → 整块静默跳过(2026-08-21
+          //   用户三轮"仍然失效"的最终根因;前两轮修的是 groundLevel 门与贴图加载)
+          const slope = st.slope[st.idx(x, y)];
           if (slope < 1 || slope > 4) continue;
           const sx = 18 * (slope - 1);
           // 背景 pass 不透明 / 前景 pass 0.6——与正常水体双层结构一致

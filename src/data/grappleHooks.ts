@@ -70,8 +70,8 @@ function lunar(): HookProjStats {
 export const HOOK_PROJ_STATS: Record<number, HookProjStats> = {
   13: { range: 300, retract: DEFAULT_RETRACT, maxLatched: DEFAULT_MAX_LATCHED, pull: DEFAULT_PULL, quickMax: 1, quickTotal: 1, extraUpdates: 0 },            // Hook（普通钩，Projectile.cs:49706/:49895；Player.cs:6005-6007）
   32: { range: 400, retract: 15, maxLatched: DEFAULT_MAX_LATCHED, pull: DEFAULT_PULL, quickMax: DEFAULT_QUICK_MAX, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // IvyWhip 常春藤鞭（:49706/:49896-49897）
-  73: { range: 440, retract: 17, maxLatched: 1, pull: DEFAULT_PULL, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 },                             // DualHookBlue 双钩蓝（:49706/:49900-49902；num17=1 :49831-49833；num7=2 Player.cs:5993-5995）
-  74: { range: 440, retract: 17, maxLatched: 1, pull: DEFAULT_PULL, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 },                             // DualHookRed 双钩红（同 73；由 Player.cs:6057-6065 交替生成）
+  73: { range: 440, retract: 17, maxLatched: 1, pull: 12.5, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 },                             // DualHookBlue 双钩蓝（:49706/:49900-49902；num17=1 :49831-49833；num7=2 Player.cs:5993-5995；牵引 12.5 = 1457 :23022-23025 由 11 上调）
+  74: { range: 440, retract: 17, maxLatched: 1, pull: 12.5, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 },                             // DualHookRed 双钩红（同 73；由 Player.cs:6057-6065 交替生成；牵引 12.5 = 1457 :23022-23025）
   165: { range: 375, retract: DEFAULT_RETRACT, maxLatched: 8, pull: DEFAULT_PULL, quickMax: 8, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 },               // WebSlingerHook 吐蛛丝者（:49706/:49825-49827；num17=8 :49825；num7=8 Player.cs:5997-5999）
   230: gem(0), 231: gem(1), 232: gem(2), 233: gem(3), 234: gem(4), 235: gem(5),                 // 宝石钩 紫晶/黄玉/蓝玉/翡翠/红玉/钻石
   256: { range: 425, retract: DEFAULT_RETRACT, maxLatched: 2, pull: DEFAULT_PULL, quickMax: 2, quickTotal: 2, extraUpdates: 1 },                                // SkeletronHand 骷髅王之手（:49706/:3120-3129；num17=2 :49828；num7=2/num8=2 Player.cs:6012-6014）

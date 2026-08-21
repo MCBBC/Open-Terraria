@@ -27,6 +27,12 @@ export function itemFuncOfVid(vid: number): ItemFunc | null {
   return FUNC[String(vid)] ?? null;
 }
 
+// 1457: 叶绿军刃 1227 重做（Terarria1457 Item.cs:15140-15158）useStyle 1→13（短剑直刺姿势）。
+// 完整重做还含 shoot 228→1127（ChlorophyteSaberStab 新弹，未实装）——弹体替换随新弹批落，
+// 本表先对齐 useStyle（heldUseStyle 持姿路由消费）；damage/shoot 等战斗字段以
+// vanilla-itemcombat.json 为权威（本表同名字段非武器伤害取数口）。
+FUNC['1227'] = { ...FUNC['1227'], useStyle: 13 };
+
 /** 内部 item id（vi_ key）→ 功能画像 */
 export function itemFuncOfInternal(id: number, key: string): ItemFunc | null {
   const m = /^vi_(\d+)_/.exec(key);

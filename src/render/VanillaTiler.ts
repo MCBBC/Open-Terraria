@@ -824,9 +824,15 @@ export function drawCactusCell(
   // 生物群系变体:向下扫沙类(腐化/猩红/神圣)→ 拆行等价的独立贴图
   const img = cactusTextureFor(atlas, st, x, y);
   if (!img) return;
-  // 原版 GetTileDrawData case 80(:5083-5085):16×16、tileTop +2(插入沙面 2px)
-  if (ux * 18 + 16 <= img.width && uy * 18 + 16 <= img.height) {
-    ctx.drawImage(img, ux * 18, uy * 18, 16, 16, px, py + 2, TILE, TILE);
+  // 原版 GetTileDrawData case 80(:5083-5085):16×16、tileTop +2(插入沙面 2px)。
+  // ★源矩形取 18 高（帧内容 y=0..17 全取）：帧 y=16-17 是本格底部的延伸内容，
+  //  填回 tileTop 下移后越出格界的 2px——否则 chunk 烘焙 cell 末行（y%16=15）
+  //  的溢出 2px 被 clip 裁掉，与下 cell 续格之间出现 2px 横缝
+  //  （2026-08-21 用户实报沙漠仙人掌贴图缝，缝精确落在 chunk 边界）。
+  //  帧间内容连续（帧 n 的 y=16-17 ≡ 帧 n+1 的 y=0-1 延续），多画不重影；
+  //  顶格帧(0,2) y=16-17 为透明、底格帧(0,0) y=16-17 有内容均自洽。
+  if (ux * 18 + 16 <= img.width && uy * 18 + 18 <= img.height) {
+    ctx.drawImage(img, ux * 18, uy * 18, 16, 18, px, py + 2, TILE, TILE + 2);
   }
 }
 

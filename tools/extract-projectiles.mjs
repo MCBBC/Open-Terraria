@@ -3,13 +3,16 @@
 // `if (type == N) {...} else if (type == M) {...}` 链（约 436 行起），
 // 不是 switch-case —— 之前按 switch 解析提取到 0 条就是这个原因。
 // 深度 1 赋值捕获；输出 src/data/vanilla-projectiles.json
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, writeSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const src = readFileSync(`${ROOT}/Terarria1456/Terraria/Projectile.cs`, 'utf8');
+// 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;缺省 1456 = 既有产物基线)
+export const SRC_VER = process.env.SW_ITEM_VER ?? '1456';
+const src = readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Projectile.cs`, 'utf8');
 
 // ---- SetDefaults(int Type) 方法体 ----
-const fnIdx = src.indexOf('public void SetDefaults(int Type');
+const fnIdx = src.indexOf('void SetDefaults(int Type');
 if (fnIdx < 0) throw new Error('SetDefaults not found');
 const start = src.indexOf('{', fnIdx);
 let depth = 0, end = start;
@@ -26,7 +29,7 @@ const body = src.slice(start + 1, end);
 // 语义模型:仅【顶层链】互斥(每 id 吃第一个命中块);块内嵌套的纯 type if
 // (如 986-993 块内 `if (type >= 987 && type <= 993) { light = 1f; }`)随外块
 // 对该 id 求值后一并并入;非纯 type 条件(Main.expertMode 等)不可静态求值,跳过。
-const MAX_ID = 1110;
+const MAX_ID = 1140; // 1457 新增 25 弹(1111-1135,ProjectileID.Count 1136)——登记面含新弹 SetDefaults
 /** 平衡括号取 if 条件串;返回 { cond, condEnd } 或 null */
 function readCond(text, ifParenAt) {
   let d = 0;
@@ -134,6 +137,13 @@ const depth1Lines = (block) => {
 // 条件档(Main.remixWorld 148=20)非纯 type 条件,按既有限制跳过(登记)
 const NUM_FIELDS = ['aiStyle', 'width', 'height', 'penetrate', 'timeLeft', 'damage', 'light', 'scale', 'extraUpdates', 'armorPenetration'];
 const BOOL_FIELDS = ['friendly', 'melee', 'ranged', 'magic', 'minion', 'hostile', 'tileCollide', 'ignoreWater', 'pierce'];
+// 同块同字段重复赋值取【最后一条】(C# 顺序执行语义/仓库"取最终态"约定——
+// 96 火焰 `scale = 0.9f; scale = 1.3f;` 曾被首匹配读成 0.9,与提交产物漂移)
+const lastMatch = (ls, re) => {
+  let hit = null;
+  for (const l of ls) if (re.test(l)) hit = l;
+  return hit;
+};
 
 // ---- DefaultTo* 辅助方法展开（1456 惯例：DefaultToSpear()/DefaultToYoyo()/DefaultToFlail() 等
 //      内部设 aiStyle 19/99/15 —— 长矛/悠悠球/连枷不在链内直写 aiStyle，必须展开才有值） ----
@@ -148,7 +158,7 @@ for (const hm of src.matchAll(/public void (DefaultTo\w+)\(\)\s*\{/g)) {
   const rec = {};
   const hlines = depth1Lines(src.slice(hs + 1, he));
   for (const f of NUM_FIELDS) {
-    const line = hlines.find((l) => new RegExp(`^${f} = -?[\\d.]+f?;`).test(l));
+    const line = lastMatch(hlines, new RegExp(`^${f} = -?[\\d.]+f?;`));
     if (line) rec[f] = parseFloat(line.match(/-?[\d.]+/)[0]);
   }
   for (const f of BOOL_FIELDS) {
@@ -165,7 +175,7 @@ for (const { id, block } of blocks) {
   const rec = {};
   const apply = (ls) => {
     for (const f of NUM_FIELDS) {
-      const line = ls.find((l) => new RegExp(`^${f} = -?[\\d.]+f?;`).test(l));
+      const line = lastMatch(ls, new RegExp(`^${f} = -?[\\d.]+f?;`));
       if (line) rec[f] = parseFloat(line.match(/-?[\d.]+/)[0]);
     }
     for (const f of BOOL_FIELDS) {
@@ -186,10 +196,23 @@ for (const { id, block } of blocks) {
   if (Object.keys(rec).length) data[id] = { ...(data[id] || {}), ...rec }; // 区间与单值重叠时合并（后设覆盖）
 }
 
-writeFileSync(`${ROOT}/game/src/data/vanilla-projectiles.json`, JSON.stringify(data));
-console.error(`共 ${Object.keys(data).length} 投射物`);
-console.error('手里剑(3):', JSON.stringify(data['3']));
-console.error('回旋镖(6):', JSON.stringify(data['6']));
-console.error('手雷(28):', JSON.stringify(data['28']));
-console.error('长矛(23):', JSON.stringify(data['23']));
-console.error('悠悠球(546):', JSON.stringify(data['546']));
+// 库模式出口(recon-item-1456-1457.mjs 三方对账用);写盘仅 CLI 直跑时执行,
+// 被 import 时不落盘(否则 1457 实例会覆写 1456 基线产物)
+export const PROJ_DATA = data;
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  // --dump:全量数据出 stdout 不落盘(recon 双版本对账用;vitest 模块运行器按路径
+  //  缓存忽略 query-string,库模式双实例不可靠——子进程各带 env 最稳)。
+  //  ★writeSync 直写 fd 1:process.exit/大载荷走管道时异步 write 会在 64KB 截断
+  if (process.argv.includes('--dump')) {
+    const s = JSON.stringify({ src: SRC_VER, projectiles: data, count: Object.keys(data).length });
+    writeSync(1, s);
+    process.exit(0);
+  }
+  writeFileSync(`${ROOT}/game/src/data/vanilla-projectiles.json`, JSON.stringify(data));
+  console.error(`共 ${Object.keys(data).length} 投射物（源 Terarria${SRC_VER}）`);
+  console.error('手里剑(3):', JSON.stringify(data['3']));
+  console.error('回旋镖(6):', JSON.stringify(data['6']));
+  console.error('手雷(28):', JSON.stringify(data['28']));
+  console.error('长矛(23):', JSON.stringify(data['23']));
+  console.error('悠悠球(546):', JSON.stringify(data['546']));
+}

@@ -16,7 +16,7 @@
 //   ④ 旗灯环锚点格判活「内列任意类型拒」分支;⑤ styles 三元素先掷再判重。
 //   残余=10 格 ghost(原版 KillTile 级联清 type=0 vs 本仓保留输入 ghost——
 //   非内容通道,见 docs/worldgen/content-parity 文档 N 批节)。
-import type { TileStore } from '../../TileStore';
+import { TileStore } from '../../TileStore';   // 值导入：塌墙 ClearTile 清 WIRE_ACTUATED 位
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
@@ -710,32 +710,129 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState,
   void gs;
 }
 
+/** WorldGen.SolidTile(i, j, noDoors)（1457 cs:70642）：active+tileSolid+!solidTop+
+ *  非半砖+slope 0+!inActive；noDoors 时 type 10（门）不算实心。 */
+function solidTileNoDoorsHF(st: TileStore, x: number, y: number, noDoors: boolean): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !d.solid || d.platform || st.half[i] || st.slope[i] !== 0) return false;
+  if ((st.wire[i] >>> 5) & 1) return false;                    // inActive（致动缩入）
+  if (noDoors && st.type[i] === T_DOOR) return false;
+  return true;
+}
+
+/** HellFort_AttemptToPlaceDoor /bool 重载（1457 cs:33449）：锚格上下 (y-4/y) 均
+ *  非门实心才落门——清 y-1..y-3（wallType>0 才补墙）+ PlaceTile(x, y-1, 10, mute,
+ *  forced:false, style)。★1456 四处门落点是无条件直写（仅 InWorld 门）,1457 改
+ *  真实格检查——第 4 扇门（右外门）因此从「恒 break 从不触发」变为可触发。 */
+function hellFortAttemptDoorAt(st: TileStore, rng: RNG, x: number, y: number, wallType: number, doorStyle: number): boolean {
+  if (!st.inBounds(x, y) || !st.inBounds(x, y - 4)) return false;
+  if (!solidTileNoDoorsHF(st, x, y - 4, true) || !solidTileNoDoorsHF(st, x, y, true)) return false;
+  for (let k = 1; k <= 3; k++) {
+    const ti = st.idx(x, y - k);
+    st.flags[ti] = 0;
+    if (wallType > 0) st.wall[ti] = wallType;   // ★1457 外门 wallType=0 → 不打墙
+  }
+  placeTileDoorHF(st, rng, x, y - 1, doorStyle);
+  return true;
+}
+
+/** HellFort_AttemptToPlaceDoor /while 重载（1457 cs:33433）：`while (needDoor)` 逐轮
+ *  Next(10) 抽行,命中候选行才尝试落门——失败（锚检查拒）不置 needDoor=false,
+ *  继续重掷（1456 是命中即单次无条件落门后 break）。doorExists 记账成功落门行,
+ *  供尾部塌墙阶段跳过有门的墙段。 */
+function hellFortPlaceDoorLoop(st: TileStore, rng: RNG, needDoor: { v: boolean },
+  doorExists: boolean[][] | null, door: boolean[], x: number,
+  doorX: number[], doorY: number[], wallType: number, doorStyle: number): void {
+  let guard = 0;
+  while (needDoor.v) {
+    const num = rng.nextInt(10);
+    if (door[num]) {
+      const ok = hellFortAttemptDoorAt(st, rng, doorX[x], doorY[num], wallType, doorStyle);
+      if (ok) needDoor.v = false;
+      if (doorExists) doorExists[x][num] = ok;
+    }
+    // ★原版无守卫（候选行锚检查恒过后单轮收敛）;守卫仅防异常种子下的活锁
+    if (++guard > 100000) break;
+  }
+}
+
+/** HellFort_CanCrumbleWall（1457 cs:33383）：先掷 Next(2)（0→拒,掷恒耗）;再查墙段
+ *  外侧一列 (wallX±1, wallTop+1..wallBottom-1) 无墙/无液/非实心。 */
+function hellFortCanCrumbleWall(st: TileStore, rng: RNG, dir: number, x: number, y: number,
+  wallX: number[], wallTop: number[], wallBottom: number[]): boolean {
+  if (rng.nextInt(2) === 0) return false;
+  const wx = wallX[x];
+  const wy = wallTop[y];
+  const hgt = wallBottom[y] - wy;
+  if (!(wx >= 10 && wx < st.w - 10 && wy >= 10 && wy < st.h - 10)) return false;   // InWorld(wx, wy, 10)
+  const cx = wx + dir;
+  for (let k = 1; k < hgt; k++) {
+    const yy = wy + k;
+    if (!st.inBounds(cx, yy)) return false;
+    const ti = st.idx(cx, yy);
+    if (st.wall[ti] > 0 || st.liquid[ti] > 0 || solidTileHF(st, cx, yy)) return false;
+  }
+  return true;
+}
+
+/** HellFort_AttemptToCrumbleWall（1457 cs:33409）：墙段内 NextFloat 取点 + Next(2)
+ *  抖动定塌陷终点（<2 强制 2、钳 wallBottom-1）,起点 wallTop+1 起把实心格
+ *  ClearTile（=清坡+失活+清致动位;type 幽灵保留,与全管线口径一致）。 */
+function hellFortAttemptCrumbleWall(st: TileStore, rng: RNG, x: number, y: number,
+  wallX: number[], wallTop: number[], wallBottom: number[]): void {
+  const wx = wallX[x];
+  const wt = wallTop[y];
+  const wb = wallBottom[y];
+  const start = wt + 1;
+  // (int)((float)(h-3) * NextFloat())——float32 乘积截断,与 C# 位级同口径
+  let end = start + Math.trunc(Math.fround(Math.fround(wb - wt - 3) * Math.fround(rng.next())));
+  end += rng.nextInt(2);
+  if (end - start < 2) end = start + 2;
+  end = Math.min(wb - 1, end);
+  for (let k = start; k <= end; k++) {
+    if (!st.inBounds(wx, k)) continue;
+    const ti = st.idx(wx, k);
+    if (st.flags[ti]) {
+      st.flags[ti] = 0;
+      st.slope[ti] = 0;
+      st.half[ti] = 0;
+      st.wire[ti] &= ~TileStore.WIRE_ACTUATED;   // inActive(false)
+    }
+  }
+}
+
 function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: number, wallType: number, tno = -1): void {
   const { w, h } = st;
   const hellTop = h - 200;
   // ---- 列左右界(cs L16563-16572):中央 ±4-9,其余依次外扩 8-19 ----
+  // ★1457（cs:32998-33008）掷序重分配：1456 先右翼(3-4 掷)后左翼(5-6 掷),
+  //   1457 改为**左翼先掷(3-4)/右翼后掷(5-6)**——掷数不变,几何镜像级偏移
   const colL = new Array<number>(5), colR = new Array<number>(5);
   colL[2] = i - rng.int(4, 9);
   colR[2] = i + rng.int(4, 9);
-  colL[3] = colR[2]; colR[3] = colL[3] + rng.int(8, 19);
-  colL[4] = colR[3]; colR[4] = colL[4] + rng.int(8, 19);
-  colR[1] = colL[2]; colL[1] = colR[1] - rng.int(8, 19);
+  colR[1] = colL[2]; colL[1] = colR[1] - rng.int(8, 19);   // ★1457 左翼先（掷 3-4）
   colR[0] = colL[1]; colL[0] = colR[0] - rng.int(8, 19);
+  colL[3] = colR[2]; colR[3] = colL[3] + rng.int(8, 19);   // ★1457 右翼后（掷 5-6）
+  colL[4] = colR[3]; colR[4] = colL[4] + rng.int(8, 19);
   // ---- 行上下界(cs L16575-16586):层高 6-11,行 3 锚定 j ----
   const rowT = new Array<number>(10), rowB = new Array<number>(10);
   rowT[3] = j - rng.int(6, 11); rowB[3] = j;
   for (let r = 4; r < 10; r++) { rowT[r] = rowB[r - 1]; rowB[r] = rowT[r] + rng.int(6, 11); }
   for (let r = 2; r >= 0; r--) { rowB[r] = rowT[r + 1]; rowT[r] = rowB[r] - rng.int(6, 11); }
   // ---- 占用网格(cs L16587-16640):2 轮各两个 1/3 翼 ----
+  // ★1457（cs:33036-33040）走廊槽数钳 3：`num4 = num5 = 3` 且翼行
+  //   `Clamp(Next(10), 3, 3)` 恒 3（1456 是 Next(10) 直接扩 span）——翼恒从第 3 行起,
+  //   span 不再被翼扩（仅无翼时的 while 环仍可扩）
   const occ: boolean[][] = Array.from({ length: 5 }, () => new Array(10).fill(false));
   let hasLWing = false, hasRWing = false;
   let spanLo = 3, spanHi = 3;
   for (let round = 0; round < 2; round++) {
     if (rng.int(0, 2) === 0) {
       hasLWing = true;
-      let r = rng.int(0, 9);
-      if (r < spanLo) spanLo = r;
-      if (r > spanHi) spanHi = r;
+      let r = Math.max(3, Math.min(3, rng.int(0, 9)));   // ★1457 Clamp(Next(10),3,3)——掷照耗
       let wingCol = 1;
       if (rng.int(0, 1) === 0) { occ[0][r] = true; occ[1][r] = true; wingCol = 0; }
       else occ[1][r] = true;
@@ -744,9 +841,7 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
     }
     if (rng.int(0, 2) === 0) {
       hasRWing = true;
-      let r = rng.int(0, 9);
-      if (r < spanLo) spanLo = r;
-      if (r > spanHi) spanHi = r;
+      let r = Math.max(3, Math.min(3, rng.int(0, 9)));   // ★1457 同上
       let wingCol = 3;
       if (rng.int(0, 1) === 0) { occ[3][r] = true; occ[4][r] = true; wingCol = 4; }
       else occ[3][r] = true;
@@ -766,8 +861,11 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
     if (bad) for (let r = 0; r < 10; r++) occ[c][r] = false;
   }
   // ---- 中央列跨度(cs L16663-16682)----
-  let n4 = rng.int(0, 9); if (n4 < spanLo) spanLo = n4;
-  let n5 = rng.int(0, 9); if (n5 > spanHi) spanHi = n5;
+  // ★1457（cs:33104-33108）：两掷改钳位（`Max(num4,Next(10))`/`Min(num5,Next(10))`）
+  //   ——1456 是 Next(10) 直接扩 span；掷数不变
+  let n4 = Math.max(spanLo, rng.int(0, 9));
+  n4 = Math.min(spanHi, rng.int(0, 9));
+  void n4;
   if (!hasLWing && !hasRWing) {
     let guard = 0;
     while (spanHi - spanLo < 5 && guard++ < 1000) {
@@ -810,30 +908,17 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
     }
   }
   // ---- 列间门 style19(cs L16719-16748):每个列对随机选一个共占行开 3 高门洞 ----
+  // ★1457（cs:33186-33195）：改经 HellFort_AttemptToPlaceDoor——while 重掷 + 锚格
+  //   真实检查（y-4/y 非门实心）+ doorExists2 记账（塌墙阶段跳过有门墙段）
+  const doorExistsL: boolean[][] = Array.from({ length: 5 }, () => new Array<boolean>(10).fill(false));
+  const doorExistsR: boolean[][] = Array.from({ length: 5 }, () => new Array<boolean>(10).fill(false));
   for (let c = 0; c < 4; c++) {
     const rows: boolean[] = new Array(10).fill(false);
-    let any = false;
+    const needDoor = { v: false };
     for (let r = 0; r < 10; r++) {
-      if (occ[c][r] && occ[c + 1][r]) { rows[r] = true; any = true; }
+      if (occ[c][r] && occ[c + 1][r]) { rows[r] = true; needDoor.v = true; }
     }
-    while (any) {
-      const r = rng.int(0, 9);
-      if (rows[r]) {
-        any = false;
-        tr(`T#${tno} colDoor c=${c} r=${r} x=${colR[c]} y=${rowB[r] - 1}..${rowB[r] - 3}`);
-        for (let k = 1; k <= 3; k++) {
-          const y = rowB[r] - k;
-          if (!st.inBounds(colR[c], y)) continue;
-          const ti = st.idx(colR[c], y);
-          st.flags[ti] = 0; st.wall[ti] = wallType;
-        }
-        // 原版 PlaceTile(col,rowB-1,10,mute,forced:false,style19)(cs:33091):
-        // 分支 A 条件 j-1/j-2 空(刚打)+j-3 实心(rowB-4=房内边列砖,层高≥7 恒真)
-        // → PlaceDoor 落 3 格门+3 掷(H2 旧结论「恒 return false 从不出门」已被
-        // dump28 typ=10 实证推翻,2026-08-17 复核 cs:59868-59906 修正)
-        placeTileDoorHF(st, rng, colR[c], rowB[r] - 1, 19);
-      }
-    }
+    hellFortPlaceDoorLoop(st, rng, needDoor, doorExistsR, rows, c, colR, rowB, wallType, 19);
   }
   // ---- 层间平台口 + 列间 1/3 门(cs L16749-16792)----
   for (let c = 0; c < 5; c++) {
@@ -862,18 +947,15 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
       }
       if (c < 4 && occ[c + 1][r] && rng.int(0, 2) === 0) {
         tr(`T#${tno} door13 c=${c} r=${r} x=${colR[c]} y=${rowB[r] - 1}..${rowB[r] - 3}`);
-        for (let k = 1; k <= 3; k++) {
-          const y = rowB[r] - k;
-          if (!st.inBounds(colR[c], y)) continue;
-          const ti = st.idx(colR[c], y);
-          st.flags[ti] = 0; st.wall[ti] = wallType;
-        }
-        // 原版 PlaceTile(cs:33157)同 colDoor 几何 → 落门+3 掷(H2 修正)
-        placeTileDoorHF(st, rng, colR[c], rowB[r] - 1, 19);
+        // ★1457（cs:33233）：单次 AttemptToPlaceDoor（/bool 重载）——锚检查拒则
+        //   整处放弃（1456 无条件直写）;不写 doorExists（ref 门传 null）
+        hellFortAttemptDoorAt(st, rng, colR[c], rowB[r], wallType, 19);
       }
     }
   }
   // ---- 左外门(cs L16793-16832):最左占用列,外侧 3 格空且无液 ----
+  // ★1457（cs:33252-33268）：候选行预检后交 AttemptToPlaceDoor（wallType=0 不打墙）
+  //   + doorExists 记账
   for (let c = 0; c < 5; c++) {
     const rows: boolean[] = new Array(10).fill(false);
     let any = false;
@@ -881,35 +963,24 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
       if (occ[c][r]) { rows[r] = true; any = true; }
     }
     if (any) {
-      let ok = false;
+      const needDoor = { v: false };
       for (let r = 0; r < 10; r++) {
         if (!rows[r]) continue;
         const x = colL[c] - 1;
-        if (x < 1) { rows[r] = false; continue; }
+        if (!st.inBounds(x, rowB[r] - 3)) { rows[r] = false; continue; }
         if (!st.flags[st.idx(x, rowB[r] - 1)] && !st.flags[st.idx(x, rowB[r] - 2)] && !st.flags[st.idx(x, rowB[r] - 3)]
           && st.liquid[st.idx(x, rowB[r] - 1)] === 0 && st.liquid[st.idx(x, rowB[r] - 2)] === 0
-          && st.liquid[st.idx(x, rowB[r] - 3)] === 0) ok = true;
+          && st.liquid[st.idx(x, rowB[r] - 3)] === 0) needDoor.v = true;
         else rows[r] = false;
       }
-      while (ok) {
-        const r = rng.int(0, 9);
-        if (rows[r]) {
-          ok = false;
-          tr(`T#${tno} leftDoor c=${c} r=${r} x=${colL[c]} y=${rowB[r] - 1}..${rowB[r] - 3}`);
-          for (let k = 1; k <= 3; k++) {
-            const y = rowB[r] - k;
-            if (!st.inBounds(colL[c], y)) continue;
-            const ti = st.idx(colL[c], y);
-            st.flags[ti] = 0;
-          }
-          // 原版 PlaceTile(cs:33196)同 colDoor 几何 → 落门+3 掷;外门不打墙(H2 修正)
-          placeTileDoorHF(st, rng, colL[c], rowB[r] - 1, 19);
-        }
-      }
+      hellFortPlaceDoorLoop(st, rng, needDoor, doorExistsL, rows, c, colL, rowB, 0, 19);
       break;
     }
   }
   // ---- 右外门(cs L16833-16877):最右占用列 ----
+  // ★1457（cs:33292-33304）第 4 扇门修复：1456 的界外判据误用列号 num37(0-4)
+  //   比 20（`num37 < 20 → break` 恒真）→ 右外门校验在首占用行即中断,正常世界
+  //   从不触发;1457 删除该死分支,直接按真实格（array2[c]+1 三格空+无液）预检。
   for (let c = 4; c >= 0; c--) {
     const rows: boolean[] = new Array(10).fill(false);
     let any = false;
@@ -917,36 +988,17 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
       if (occ[c][r]) { rows[r] = true; any = true; }
     }
     if (any) {
-      let ok = false;
+      const needDoor = { v: false };
       for (let r = 0; r < 10; r++) {
         if (!rows[r]) continue;
-        // ★原版 cs:33218 的界外判据用的是列号 num37(0-4)而非 x 坐标——恒 <20 →
-        //   恒 break:右外门校验循环在首个占用行即中断,flag8 恒 false,**正常世界
-        //   右外门从不触发**(0 掷 0 打洞;dump28 x1113/x1231 列全砖实证)。旧实现
-        //   自作主张改成 x 判据致右门误发+多耗掷(T#1 尾段流位 +13 的根因)。
-        if (c < 20 || c > w - 20) break;
         const x = colR[c] + 1;
-        if (x > w - 2) { rows[r] = false; continue; }
+        if (!st.inBounds(x, rowB[r] - 3)) { rows[r] = false; continue; }
         if (!st.flags[st.idx(x, rowB[r] - 1)] && !st.flags[st.idx(x, rowB[r] - 2)] && !st.flags[st.idx(x, rowB[r] - 3)]
           && st.liquid[st.idx(x, rowB[r] - 1)] === 0 && st.liquid[st.idx(x, rowB[r] - 2)] === 0
-          && st.liquid[st.idx(x, rowB[r] - 3)] === 0) ok = true;
+          && st.liquid[st.idx(x, rowB[r] - 3)] === 0) needDoor.v = true;
         else rows[r] = false;
       }
-      while (ok) {
-        const r = rng.int(0, 9);
-        if (rows[r]) {
-          ok = false;
-          tr(`T#${tno} rightDoor c=${c} r=${r} x=${colR[c]} y=${rowB[r] - 1}..${rowB[r] - 3}`);
-          for (let k = 1; k <= 3; k++) {
-            const y = rowB[r] - k;
-            if (!st.inBounds(colR[c], y)) continue;
-            const ti = st.idx(colR[c], y);
-            st.flags[ti] = 0;
-          }
-          // 原版 PlaceTile(cs:33236)同 colDoor 几何 → 落门+3 掷;外门不打墙(H2 修正)
-          placeTileDoorHF(st, rng, colR[c], rowB[r] - 1, 19);
-        }
-      }
+      hellFortPlaceDoorLoop(st, rng, needDoor, doorExistsR, rows, c, colR, rowB, 0, 19);
       break;
     }
   }
@@ -990,6 +1042,23 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
         }
       }
       break;
+    }
+  }
+  // ---- ★1457 新增塌墙阶段（cs:33362-33378）：每个占用单元的左右墙段,无门
+  //      （doorExists 未记账）且外侧一列全空（CanCrumbleWall,先掷 Next(2)）时,
+  //      在墙段内随机取段 ClearTile——地狱塔向外界「塌」出开口。掷序：逐格
+  //      左 1 掷(+命中 +2 掷)、右 1 掷(+命中 +2 掷)。
+  for (let c = 0; c < 5; c++) {
+    for (let r = 0; r < 10; r++) {
+      if (!occ[c][r]) continue;
+      if (!doorExistsL[c][r] && hellFortCanCrumbleWall(st, rng, -1, c, r, colL, rowT, rowB)) {
+        hellFortAttemptCrumbleWall(st, rng, c, r, colL, rowT, rowB);
+        tr(`T#${tno} crumbleL c=${c} r=${r} x=${colL[c]}`);
+      }
+      if (!doorExistsR[c][r] && hellFortCanCrumbleWall(st, rng, 1, c, r, colR, rowT, rowB)) {
+        hellFortAttemptCrumbleWall(st, rng, c, r, colR, rowT, rowB);
+        tr(`T#${tno} crumbleR c=${c} r=${r} x=${colR[c]}`);
+      }
     }
   }
 }

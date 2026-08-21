@@ -18,11 +18,15 @@
 //   只认 case 体顶层(depth 3)无条件赋值——变体 if 块内赋值属 WeakerVariant 等变体，
 //   本表建模基础变体，取顶层赋值序列的**最后一个**（工厂调用与显式赋值按源序覆盖，
 //   DefaultToFood→SetShopValues 即此模式）），嵌套 if/switch 内赋值忽略。
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, writeSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const src = readFileSync(`${ROOT}/Terarria1456/Terraria/Item.cs`, 'utf8');
-const LINES = src.split('\n');
+// 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;缺省 1456 = 既有产物基线)
+export const SRC_VER = process.env.SW_ITEM_VER ?? '1456';
+
+/** 提取库:Item.cs 全文 → { RARE, VALUE }（id → 档位/价值,铜币,1.4.4 口径） */
+export function extractRareValue(src) {
+  const LINES = src.split('\n');
 
 // ============ 区域：SetDefaults1..5 + SetFoodDefaults 方法体 ============
 
@@ -158,6 +162,18 @@ for (const [from, to] of REGIONS) {
   while (groups.length) flush(groups[0]);
 }
 
-writeFileSync(`${ROOT}/game/src/data/vanilla-itemrare.json`, JSON.stringify(RARE));
-writeFileSync(`${ROOT}/game/src/data/vanilla-itemvalue.json`, JSON.stringify(VALUE));
-console.error(`rare 条目: ${Object.keys(RARE).length} / value 条目: ${Object.keys(VALUE).length}`);
+  return { RARE, VALUE };
+}
+
+const { RARE, VALUE } = extractRareValue(readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8'));
+export { RARE, VALUE };
+if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href) {
+  // --dump:全量表出 stdout 不落盘(recon-item-1456-1457.mjs 双版本对账用)
+  if (process.argv.includes('--dump')) {
+    writeSync(1, JSON.stringify({ src: SRC_VER, RARE, VALUE }));
+  } else {
+    writeFileSync(`${ROOT}/game/src/data/vanilla-itemrare.json`, JSON.stringify(RARE));
+    writeFileSync(`${ROOT}/game/src/data/vanilla-itemvalue.json`, JSON.stringify(VALUE));
+    console.error(`rare 条目: ${Object.keys(RARE).length} / value 条目: ${Object.keys(VALUE).length}（源 Terarria${SRC_VER}）`);
+  }
+}

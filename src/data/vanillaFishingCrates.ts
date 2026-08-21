@@ -46,8 +46,9 @@ function openWoodenCrate(give: BagGive, hard: boolean, rnd: BagRand): void {
     if (f && rnd.next(40) === 0) { give(3200); f = false; }                // :7683-7687
     if (f && rnd.next(40) === 0) { give(3201); f = false; }                // :7688-7692
     if (hard && f && rnd.next(25) === 0) { give(2424); f = false; }        // :7693-7697
-    if (rnd.next(20) === 0) {                                               // :7698-7716 五选一
-      give([285, 953, 4341, 3068, 3084][rnd.next(5)]);
+    if (rnd.next(20) === 0) {                                               // :8084-8109 六选一
+      // 1457: 饰品池 Next(5)→Next(6)，尾插 PoisonBarb(6165)（旧五件各被稀释到 1/6）
+      give([285, 953, 4341, 3068, 3084, 6165][rnd.next(6)]);
       f = false;
     }
     if (!hard && f && rnd.next(50) === 0) { give(997); f = false; }        // :7717-7720 普通档灰 Zapinator

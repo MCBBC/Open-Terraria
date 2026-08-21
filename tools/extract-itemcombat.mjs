@@ -10,13 +10,16 @@
 //   · UseSound 侧道（不入 combat 记录）→ 重生成 src/data/vanilla-itemusesound.json
 //     （SetFoodDefaults 食物族 DefaultToFood Item2/3 + DefaultToStaff Item43 / DefaultToWhip Item152 等）
 //   · SetFoodDefaults 仅作三通道来源（食物条目不进 combat 表，useTurn/useSound 走侧道）
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const AUDIT = process.argv.includes('--audit'); // 自审计模式:不写文件,stdout 出 JSON 摘要
-const src = readFileSync(`${ROOT}/Terarria1456/Terraria/Item.cs`, 'utf8');
+// 源版本可选(recon-item-1456-1457.mjs 以 query-string 双实例分别取 1456/1457;
+// 缺省 1456 = 既有产物基线,直接跑本文件行为不变)
+export const SRC_VER = process.env.SW_ITEM_VER ?? '1456';
+const src = readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8');
 
 // ---- 方法体切片（配平花括号） ----
 function methodBody(name) {
@@ -31,12 +34,13 @@ function methodBody(name) {
   return '';
 }
 const bodies = [
-  methodBody('public void SetDefaults(int Type'),
-  methodBody('public void SetDefaults1(int type)'),
-  methodBody('public void SetDefaults2(int type)'),
-  methodBody('public void SetDefaults3(int type)'),
-  methodBody('public void SetDefaults4(int type)'),
-  methodBody('public void SetDefaults5(int type)'),
+  // 签名前缀不带可见性修饰符(1456=public / 1457=private,substring 匹配两者兼容)
+  methodBody('void SetDefaults(int Type'),
+  methodBody('void SetDefaults1(int type)'),
+  methodBody('void SetDefaults2(int type)'),
+  methodBody('void SetDefaults3(int type)'),
+  methodBody('void SetDefaults4(int type)'),
+  methodBody('void SetDefaults5(int type)'),
 ];
 
 // ---- switch-case 块拆分 ----
@@ -476,7 +480,7 @@ for (const id of [2192, 2193, 2194, 2195, 2196, 2197, 2198, 2203, 2204]) {
 //      useTurn=true（DefaultToFood/DefaultToHealingPotion）与 UseSound Item2/3 走侧道）----
 const FOOD_USETURN = new Map();
 {
-  const foodBody = methodBody('private void SetFoodDefaults(');
+  const foodBody = methodBody('void SetFoodDefaults(');
   for (const { ids, block } of parseSwitch(foodBody)) {
     const lines = depth1Lines(stripOuterBrace(block));
     const eff = helperEffectsOf(lines);
@@ -509,6 +513,11 @@ export const EXTRA_USETURN = (() => {
   return m;
 })();
 
+// 库模式出口(recon-item-1456-1457.mjs 三方对账用):当前 SRC_VER 的 combat 记录与
+// UseSound 侧道表。Map<string id, rec>;直接跑本文件仍写 1456 基线产物,行为不变。
+export const COMBAT_DATA = data;
+export const COMBAT_SOUND = SOUND;
+
 // ---- 自审计(--audit):与提取同源,防"提取器坏了但没人发现"(2026-08-13 targetId
 //      错基底=铜剑丢出去,曾静默 44/2612 件错数据) ----
 function main() {
@@ -533,6 +542,14 @@ function main() {
 
   const obj = {};
   for (const [k, v] of data) obj[k] = v;
+  // --dump:全量数据出 stdout 不落盘(recon-item-1456-1457.mjs 双版本对账用——
+  //  vitest 的模块运行器按路径缓存忽略 query-string,库模式双实例不可靠,故走子进程)
+  if (process.argv.includes('--dump')) {
+    const soundOut = {};
+    for (const [id, v] of SOUND) if (v !== null && v !== undefined) soundOut[id] = v;
+    writeSync(1, JSON.stringify({ src: SRC_VER, items: obj, useSound: soundOut, anomalies: audit }));
+    return;
+  }
   if (AUDIT) {
     const summary = {
       items: data.size,

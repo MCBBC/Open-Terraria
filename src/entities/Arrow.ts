@@ -397,6 +397,12 @@ export class Arrow extends Entity {
   meowCount = 0;
   /** localNPCHitCooldown 同敌再命中冷却（SetDefaults :5466-5468 = 10t） */
   private meowHitCd = new Map<number, number>();
+  /** 1457: 通用局部 NPC 无敌帧（usesLocalNPCImmunity + localNPCHitCooldown=N，
+   *  Projectile.cs:10688-10689 等）——同弹对同敌 N t 冷却后再命中（数据列驱动，
+   *  121-126/597 宝石法珠 60t / 77-78 音符 30t / 309 FrostBlast 10t / 502 喵刀 10t 同型） */
+  private localImmuneCd = new Map<number, number>();
+  /** 本弹的 localNPCHitCooldown（>0 = 启用局部免疫冷却语义） */
+  private localImmune = 0;
   /** oldPos 拖尾环（彩虹拖尾 Main.cs:32495-32513 沿 oldPos 逐段绘制，N=10） */
   private meowTrail: number[] = [];
   /** 迪斯科 RGB（DoUpdate_AnimateDiscoRGB Main.cs:19441 六段 ±7/帧；初值 R=255） */
@@ -518,6 +524,7 @@ export class Arrow extends Entity {
     this.skullBoneT = opts?.skullBone ? 1 : 0;
     this.homing = opts?.homing ?? null;
     this.extraUpdates = opts?.extraUpdates ?? pd0?.extraUpdates ?? 0;   // 子弹 14=1(2 步/tick)、高速弹 207=2
+    this.localImmune = pd0?.localNPCHitCooldown ?? 0;
     this.drag = opts?.drag ?? 1;
     this.maxFall = opts?.maxFall ?? 16;
     this.tumble = opts?.tumble ?? false;
@@ -1094,6 +1101,9 @@ export class Arrow extends Entity {
       for (const [k, v] of this.meowHitCd) {
         if (v <= 1) this.meowHitCd.delete(k); else this.meowHitCd.set(k, v - 1);
       }
+      for (const [k, v] of this.localImmuneCd) {
+        if (v <= 1) this.localImmuneCd.delete(k); else this.localImmuneCd.set(k, v - 1);
+      }
     }
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
@@ -1183,6 +1193,11 @@ export class Arrow extends Entity {
           const cd = this.meowHitCd.get(e.id) ?? 0;
           if (cd > 0) continue;
           this.meowHitCd.set(e.id, 10);
+        } else if (this.localImmune > 0) {
+          // 1457: 通用局部免疫（usesLocalNPCImmunity+localNPCHitCooldown=N，数据列驱动）
+          const cd = this.localImmuneCd.get(e.id) ?? 0;
+          if (cd > 0) continue;
+          this.localImmuneCd.set(e.id, this.localImmune);
         } else if (this.hitSet.has(e.id)) continue; // 穿透弹已命中过此敌
         // ★鞭 tag（WhipTagEffect.CanRunHitEffects :73-84：MinionShot/SentryShot 弹幕吃
         //   tag——随从/哨兵射出的箭 whipTagShot 置标时走 resolveWhipTagHit 统一结算：

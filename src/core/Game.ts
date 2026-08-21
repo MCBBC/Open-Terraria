@@ -832,6 +832,11 @@ export class Game implements GameHooks {
   /** 上一 tick 的夜内时间（0-32400t；鹿角怪 16200t 午夜跨越检测，Main.cs:64602-64603） */
   private _lastNightTicks = 0;
   private _prevRightDown = false;
+  /** 死亡界面跳跃键上一 tick 电平（1457 Main.cs:46124 JustBecameTrue(Jump) 边沿检测） */
+  private _prevRespawnSkipJump = false;
+  /** 食人鱼枪 channel 态（1457 :43878 删 num>0 门后 0 条也补射——本仓 0 条场景
+   *  由 Game 侧按电平补齐；实体侧 pTopUp 仍管 1-2 条场景） */
+  private piranhaChanItemId = -1;
   private _scopeZoomed = false;
   private _scopePrevZoom = 1;
   /** 狙击镜 1858 / 侦察镜 4005 */
@@ -4663,6 +4668,18 @@ export class Game implements GameHooks {
       // 渲染/逻辑同源——2026-08-17 补齐幽灵相 boss 延迟）
       player.bossNearOnDeath = !player.lastPvpDeath
         && this.entities.enemies.some((en) => (en as unknown as { def?: { boss?: boolean } }).def?.boss && !en.dead);
+      // 1457: 死亡界面按跳跃跳过复活倒计时（Main.cs:46124-46134 JustBecameTrue(Jump)
+      // → LocalPlayer.SkipRespawnTime()；门 = Player.AllowsRespawnTimerSkip :39264-39291，
+      // DeadSkipLockoutTime=90 :1627）。本仓 respawnTimer 计数向上（与原版 deadTime
+      // 同源递增）→ 跳过 = 计时到点直接 respawnPlayer。幽灵相/PvP 死亡/deadTime<90
+      // 三门内联；其余四门在 allowsRespawnTimerSkip()
+      const jumpEdge = !!player.inputJump && !this._prevRespawnSkipJump;
+      this._prevRespawnSkipJump = !!player.inputJump;
+      if (jumpEdge && player.respawnTimer >= 90
+        && !player.isGhostPhase(this.world) && !player.lastPvpDeath
+        && this.allowsRespawnTimerSkip()) {
+        this.respawnPlayer();
+      }
       if (player.respawnTimer > (600 + (player.bossNearOnDeath ? 600 : 0))
         * (mainExpertMode(this.world) ? 1.5 : 1)) this.respawnPlayer();
     } else {
@@ -4684,6 +4701,11 @@ export class Game implements GameHooks {
     // ---- 棉花糖烤串（holdStyle 1 静持检查，Player.cs:49604-49641）----
     this.checkMarshmallowRoast();
     this.prevSwingMouse = !!this.input?.mouseDown; // 挥剑点击沿（非 autoReuse 武器需重新点击）
+    // 1457: 食人鱼枪 channel 补射删 `num > 0` 门（ItemCheck_OwnerOnlyCode :43878-43892
+    // `if (num < 3) flag4 = true`——1456 :42864 为 `num > 0 && num < 3`）——按住扳机
+    // 期间全场 0 条也补射。本仓补弹在实体侧 pTopUp（须有存活个体驱动）→ 0 条场景
+    // 在此按 channel 电平补齐 3 条；松手/换持/死亡即清通道
+    this.tickPiranhaChannelRefire(inp);
     // ⑩ 边沿门的上一帧快照（须在 updateUse 后记录,见上方注记）
     this._prevRightDown = !!inp?.rightDown;
     this._prevMouseDown = !!inp?.mouseDown;
@@ -6556,18 +6578,13 @@ export class Game implements GameHooks {
           if (vb === btype) { bother = false; break; }
           if (Game.QUICK_MELEE_BUFF_VANILLA.has(btype) && Game.QUICK_MELEE_BUFF_VANILLA.has(vb)) { bother = false; break; }
         }
-        // 光宠/宠物同类互斥（:5684-5695：attempted 是 lightPet/vanityPet → 同类
-        // 已在场即不 bother——Main.lightPet/vanityPet 成员集经 petBuffKinds 反查）
+        // 1457: 光宠/时装宠物品不再被快捷 buff 自动使用（QuickBuff_ShouldUseItem
+        // :5885-5888 `if (Main.lightPet[btype] || Main.vanityPet[btype]) flag = false`
+        // ——1456 :5684-5695 只在同类宠物已在场时不 bother,1457 改为无条件跳过;
+        // Main.lightPet/vanityPet 成员集经 petBuffKinds 反查）
         if (bother) {
           const pk = Game.petBuffKinds();
-          if (pk.light.has(btype) || pk.vanity.has(btype)) {
-            for (const [bt] of p.buffs.active) {
-              const vb = BUFF_DEFS[bt]?.vanillaBuff;
-              if (vb === undefined) continue;
-              if (pk.light.has(vb) && pk.light.has(btype)) { bother = false; break; }
-              if (pk.vanity.has(vb) && pk.vanity.has(btype)) { bother = false; break; }
-            }
-          }
+          if (pk.light.has(btype) || pk.vanity.has(btype)) bother = false;
         }
         // mana>0 且值得用 → 扣魔（:5557-5561）；魔不够则跳过本件
         if (bother && (f.mana ?? 0) > 0) {
@@ -7403,6 +7420,39 @@ export class Game implements GameHooks {
           }
         } else if (cwMelee?.shoot && cwMelee.shootSpeed != null) {
           const ang2 = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
+          // ---- 1457: 叶绿巨剑 1226 三连击重做（ItemCheck_Shoot :49406-49426 +
+          // chlorophyteBladeCounter :43161-43163 每帧递减）——计数空的那一击=奖励击：
+          // ×1.5 伤 ×1.25 击退、水平出手，出手后 counter += itemAnimation×3
+          // （useAnimation=32 → 96t ≈ 三次挥击的普通击）；非奖励击向下出手
+          // velocity=(dir,1)。★弹体 1457 由 229→1126（新弹未移植,Projectile 域），
+          // 本仓沿用 229 + shootSpeed 标量速度（原版 1126 裸 (dir,0/1) 速度由
+          // 其 AI 自放大,229 无该 AI → 归一化×shootSpeed 等价出手手感）----
+          if (heldVid === 1226) {
+            this.player.facing = Math.cos(ang2) > 0 ? 1 : -1;
+            const rewardHit = this.player.chlorophyteBladeCounter <= 0;      // :49409 flag9
+            const cDmg = Math.max(1, Math.round((this.swing.dmg ?? cwMelee.damage)
+              * (rewardHit ? 1.5 : 1)));                                     // :49411-49413
+            const cKb = (this.swing.kb ?? cwMelee.knockback) * (rewardHit ? 1.25 : 1);  // :49414
+            const cdir = this.player.facing;
+            const cdvy = rewardHit ? 0 : 1;                                  // :49417 (dir, 0/1)
+            const cdl = Math.hypot(cdir, cdvy) || 1;
+            const csp = cwMelee.shootSpeed / this.player.attackSpeedMult;
+            const cstar = new Arrow(
+              this.player.cx, this.player.cy - 4,
+              cdir / cdl * csp, cdvy / cdl * csp,
+              cDmg, cKb, cwMelee.shoot, null,
+              (() => { const g = projGravSpec(cwMelee.shoot); const cpd = projectileData(cwMelee.shoot);
+                return { grav: g.grav, gravDelay: g.delay, grav2: g.grav2, grav2At: g.grav2At,
+                  dragAlways: g.drag, life: cpd?.timeLeft ?? 600, pierce: Math.max(1, cpd?.penetrate ?? 1) }; })());
+            cstar.critChance = arcCrit;
+            cstar.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+            this.entities.add(cstar, 'projectiles');
+            if (rewardHit) {
+              this.player.chlorophyteBladeCounter += (this.swing?.dur ?? cwMelee.useAnimation ?? 32) * 3;  // :49419-49421
+            }
+            this.mining = null;
+            return;
+          }
           // 发射型武器面向鼠标（同 useCombatWeapon——ItemCheck_Shoot :46578 语义）
           this.player.facing = Math.cos(ang2) > 0 ? 1 : -1;
           const pd = projectileData(cwMelee.shoot);
@@ -13102,8 +13152,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
       }
       // ★ 暗影钥匙 329 可重复使用（Player.cs:32716 flag16=num78!=329 → stack-- 只
-      //   在非 329 时执行；bank4 分支 :32750 同门）——只验持有不消耗
-      if (keyVid === 329 ? this.countVanillaItem(329) <= 0 : !this.consumeVanillaItem(keyVid)) {
+      //   在非 329 时执行；bank4 分支 :32750 同门）——只验持有不消耗。
+      // 1457: 钥匙搜索循环 `< 58` → `<= 58`（TileInteractionsUse :33438）——垃圾槽
+      //   （inventory[58] = 本仓 inv.trash）里的钥匙也能开锁；329 只验持有同样吃垃圾槽
+      const keyInTrash = (() => {
+        const t = this.player.inv.trash;
+        return !!t && slotVanillaId(t.id) === keyVid && t.stack > 0;
+      })();
+      const hasKey = keyVid === 329
+        ? (this.countVanillaItem(329) > 0 || keyInTrash)
+        : (this.consumeVanillaItem(keyVid) || (() => {
+            // 垃圾槽钥匙消耗（:33447-33455：stack-- 清槽；MP 侧 mouseItem 同步为
+            // 网络语义,单人等价于钥匙消失）
+            const t = this.player.inv.trash;
+            if (!t || slotVanillaId(t.id) !== keyVid || t.stack <= 0) return false;
+            t.stack--;
+            if (t.stack <= 0) this.player.inv.trash = null;
+            this.cb.onInventoryChanged?.();
+            return true;
+          })());
+      if (!hasKey) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestLocked'));
         this.input.rightDown = false;
         return;
@@ -15404,11 +15472,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (this.swingHitSet.has(tn.id)) continue;
       const eq = this.player.equipStats;
       const doll = tn.vanillaId === 22 ? eq.killGuide : tn.vanillaId === 54 ? eq.killClothier : false;
-      if (!doll || !hitRect(tn.x, tn.y, tn.w, tn.h)) continue;
+      // 1457: friendly 门豁免 FlyMeal（ProcessHitAgainstNPC :44627 `!nPC.isLikeATownNPC
+      // || sItem.type != 5129 && sItem.type != 3351`——苍蝇美食可打 likeATownNPC 族;
+      // 3351 为 1457 新弱版未移植。本仓 likeATownNPC 面 = TownNPC 实体）
+      const heldVidFly = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1;
+      const isFlyMeal = heldVidFly === 5129;
+      if ((!doll && !isFlyMeal) || !hitRect(tn.x, tn.y, tn.w, tn.h)) continue;
       this.swingHitSet.add(tn.id);
       const swBase = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
-        * this.player.damageMult('melee')); // ⑥ pen 移 hit 时（挥击处传）
-      const swDmg = Math.max(1, Math.round(swBase * (1 + (Math.random() * 30 - 15) / 100)));
+        * this.player.damageMult('melee')
+        * (this.player.buffs.has(BuffType.ImbueNano) ? 1.05 : 1)); // ⑥ pen 移 hit 时（挥击处传）
+        // 1457: Nano 灌注 ×1.05（ProcessHitAgainstNPC :44760-44764 meleeEnchant==6
+        // → GetNanoFlaskDamageBoost()=1.05,对城镇 NPC 命中同乘）
+      let swDmg = Math.max(1, Math.round(swBase * (1 + (Math.random() * 30 - 15) / 100)));
+      // 1457: FlyMeal 打 likeATownNPC ×2、type 18（商人,报告文本误标"向导"——
+      // NPCID 18=Merchant）再 ×2 = ×4（:44700-44708）。armorPenetrationPercent=1f
+      // 未接（TownNPC.hurt 无 pen 参,登记）
+      if (isFlyMeal) {
+        swDmg *= 2;
+        if (tn.vanillaId === 18) swDmg *= 2;
+        this.achievements.notifyProgressionEvent(42);   // :44741-44744 townNPC 门
+      }
       tn.hurt(swDmg, (Math.sign(tn.cx - p.cx) || this.player.facing) * 2, 0, this);
     }
     for (const ent of this.entities.enemies) {
@@ -15434,9 +15518,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         + (itemCombat(this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1)?.crit ?? 0) / 100;
       // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急；
       // vi_ 数据驱动近战武器优先取挥击时缓存的 combat 表伤害/击退（swing.dmg/kb）；
-      // 装备全系伤害乘区（徽章/险恶词缀等，ApplyEquipFunctional dmgMelee 段）
+      // 装备全系伤害乘区（徽章/险恶词缀等，ApplyEquipFunctional dmgMelee 段）。
+      // 1457: Nano 灌注 ×1.05（ProcessHitAgainstNPC :44760-44764 meleeEnchant==6
+      // → GetNanoFlaskDamageBoost() = 1.05，crit 翻倍前的乘区）
       const baseDmg = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
-        * this.player.damageMult('melee')); // ⑥ pen 移 hit 时（挥击处传）
+        * this.player.damageMult('melee')
+        * (this.player.buffs.has(BuffType.ImbueNano) ? 1.05 : 1)); // ⑥ pen 移 hit 时（挥击处传）
       this.player.onMeleeHit(); // 甲虫进攻套蓄能（命中结算前计数无碍）
       // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
       const dmg = Math.max(1, Math.round(baseDmg * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
@@ -16456,9 +16543,34 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  沙转投射物时的 setTile 会再次触发监听器 → 上方沙继续入队) */
   private sandQueue: Array<[number, number]> = [];
 
+  /** Player.AllowsRespawnTimerSkip 的后四门（1457 Player.cs:39264-39328）：
+   *  ①NearAnyNPCsThatBlockRespawn(:39293-39323)——玩家中心 MaxWorldViewSize
+   *  (1920×1200,:754-758) 视野矩形外扩 320px 内,入侵组匹配当前 invasionType 的
+   *  敌怪或 DangerThatPreventsOtherDangers 大危险族(NPCID.cs:4875 =
+   *  {517,422,507,493,399,13,14,15})在场即阻止;②AnyBossHindersRespawnTime
+   *  (:39397)——本仓复用 bossNearOnDeath（在场 boss 全算,比原版 4000px+交战门
+   *  更严,方向安全）;③南瓜月/霜月(moonEvent.kind!=0)④DD2 进行中 */
+  private allowsRespawnTimerSkip(): boolean {
+    const p = this.player;
+    const hw = 960 + 320, hh = 600 + 320;                     // 视野半宽/半高 + Inflate(320)
+    const rx = p.cx - hw, ry = p.cy - hh;
+    for (const en of this.entities.enemies) {
+      if (en.dead) continue;
+      const ex = en.x ?? 0, ey = en.y ?? 0, ew = en.w ?? 16, eh = en.h ?? 16;
+      if (!(ex < rx + hw * 2 && ex + ew > rx && ey < ry + hh * 2 && ey + eh > ry)) continue;
+      const vid = en.vanillaId ?? -1;
+      const grp = INVASION_GROUP[vid] ?? 0;
+      if (grp > 0 && grp === this.world.invasionType) return false;
+      if (Game.RESPAWN_BLOCKING_DANGER.has(vid)) return false;
+    }
+    if (this.world.moonEvent.kind !== 0) return false;
+    if (this.world.oldOnesArmy.ongoing) return false;
+    if (p.bossNearOnDeath) return false;
+    return true;
+  }
+
   /** 打开对话框:台词/按钮按 NPC 类型生成,UI 经 onNpcDialog 渲染 */
-  private openNpcDialog(npc: TownNPC, chatOverride?: string) {
-    this.dialogNpc = npc;
+  private openNpcDialog(npc: TownNPC, chatOverride?: string) {    this.dialogNpc = npc;
     // 图鉴聊天解锁（NPC.cs:45223 SetTalkNPC→RegisterChatStartWith：与城镇 NPC 对话即记；
     // 首聊才广播——module4，原版 RegisterChatStartWith 的 flag 门 :26-34）
     if (this.world.bestiary.registerChat(npc.vanillaId)) {
@@ -16468,8 +16580,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 快乐度快照（Player.SetTalkNPC Player.cs:4189-4193：GetShoppingSettings 一次算好，
     // currentShoppingSettings 供商店价格/心情报告/成就共用）
     this.dialogHappiness = this.computeShopHappiness(npc);
-    // 成就：与最大快乐度 NPC 对话（Player.cs:4195-4197 PriceAdjustment<=0.82 → event 20）
-    if (this.dialogHappiness.priceMul <= 0.82) {
+    // 成就：与最大快乐度 NPC 对话（Player.cs:4195-4197 PriceAdjustment<=0.82 → event 20）。
+    // 1457 加门（:4376）：`nPC != null && type >= 0 && !BoundTownNPCs[type] && !homeless`
+    // ——被绑定城镇 NPC（老人/睡渔夫等）与无家者不再误触发砍价成就
+    if (npc.vanillaId >= 0 && !Game.BOUND_TOWN_NPC_VANILLA.has(npc.vanillaId)
+      && npc.home !== null && this.dialogHappiness.priceMul <= 0.82) {
       this.achievements.handleSpecialEvent(20, {
         statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana,
       });
@@ -16563,6 +16678,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     angler: 376,       // 旧档兜底：睡渔夫已改放真 Enemy 376（placeSleepingAngler），
                        // 历史存档可能带 bound TownNPC 'angler'——登记使 any(376) 场上唯一门仍闭合
   };
+
+  /** NPCID.Sets.BoundTownNPCs（1457 NPC.cs 权威集 {105,123,106,685,686,687,354,376,579,589}）
+   *  ——1457 砍价成就门（Player.cs:4376）消费 */
+  private static readonly BOUND_TOWN_NPC_VANILLA: ReadonlySet<number> = new Set([
+    105, 123, 106, 685, 686, 687, 354, 376, 579, 589,
+  ]);
+
+  /** NPCID.Sets.DangerThatPreventsOtherDangers（NPCID.cs:4875）——复活跳过门
+   *  NearAnyNPCsThatBlockRespawn（1457 Player.cs:39305/:39319）消费 */
+  private static readonly RESPAWN_BLOCKING_DANGER: ReadonlySet<number> = new Set([
+    517, 422, 507, 493, 399, 13, 14, 15,
+  ]);
 
   /** NPC.HasSpecialEventText（NPC.cs:96081-96105 1:1）：五环境态按原版顺序各 1/3
    *  掷骰，命中且语言包有 "<Cat>SpecialText.<Event>" 池 → 随机一条。
