@@ -34,6 +34,16 @@ export function itemFuncOfVid(vid: number): ItemFunc | null {
 // vanilla-itemcombat.json 为权威（本表同名字段非武器伤害取数口）。
 FUNC['1227'] = { ...FUNC['1227'], useStyle: 13 };
 
+// 悠悠球族 useStyle 5 提取缺口（Item.cs case 3262 起共享 case 块 `useStyle = 5;
+// noUseGraphic = true; noMelee = true`——跨 id 大块提取器漏列；3292/3389/5294 三件
+// 已在表）。useSwing 持姿路由（heldUseStyle）与 useStyleBodyRow 身体行（:35986-36011
+// 瞄准向行 2/3/4 分档）消费；缺省回退 1 会把悠悠球挥舞画成三段挥砍姿势。
+for (const yoyoVid of [3262, 3278, 3279, 3280, 3281, 3282, 3283, 3284, 3285, 3286,
+  3287, 3288, 3289, 3290, 3291, 3315, 3316, 3317]) {
+  if (!FUNC[String(yoyoVid)]) FUNC[String(yoyoVid)] = {};
+  FUNC[String(yoyoVid)].useStyle = 5;
+}
+
 /** 内部 item id（vi_ key）→ 功能画像 */
 export function itemFuncOfInternal(id: number, key: string): ItemFunc | null {
   const m = /^vi_(\d+)_/.exec(key);

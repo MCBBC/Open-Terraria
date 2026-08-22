@@ -173,7 +173,8 @@ export const ITEM_VARIANT_STATS: Readonly<Record<number, Readonly<ItemVariantSta
   // :41932-41937（基值 damage13/anim17/time17）
   5284: { combat: { damage: 8, useTime: 23, useAnimation: 23 } },
   // ---- 1457 新增 Weaker（Skyblock）（Terarria1457 Item.cs:44689-44691/:44696-44698）----
-  // 5687 黏液枪矛（基值 damage12）/ 5688 黏液鞭（基值 damage15）
+  // 5687 黏液枪矛（1457 基值 damage12）/ 5688 黏液鞭（1457 基值 damage15→弱化 12；
+  // 本仓标杆 1456 后基值已回滚 12=Item.cs:44660,弱化档恰与基值同值）
   5687: { combat: { damage: 9 } },
   5688: { combat: { damage: 12 } },
   // ---- Rebalanced（GetGood/FTW）----

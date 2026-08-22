@@ -71,7 +71,7 @@ describe('combatWeapon summon 分流', () => {
 });
 
 describe('MinionProj 行为', () => {
-  it('飞行随从：无目标悬停玩家侧后 → 有目标朝目标移动 → >1300px 瞬移回', () => {
+  it('飞行随从：无目标悬停玩家侧后 → 有目标朝目标移动 → >2000px 瞬移回（1456 :62786 num35>2000）', () => {
     const { hooks, player } = makeHooks();
     const m = new MinionProj(player.x, player.y, 375, 17, 2, false, 0, false, () => player);
     // 无敌悬停几帧：靠近玩家
@@ -89,8 +89,12 @@ describe('MinionProj 行为', () => {
     expect(Math.hypot((enemy.cx as number) - m.cx, (enemy.cy as number) - m.cy)).toBeLessThan(d0);
     // 接触造成伤害（hp 下降）
     expect(enemy.hp).toBeLessThan(1000);
-    // 远离 >1300 → 瞬移回
-    m.x = player.cx + 2000;
+    // 远离 ≤2000（1456 :62786 门）不回收
+    m.x = player.cx + 1500;
+    m.fixedUpdate(1, h2);
+    expect(Math.hypot(m.cx - player.cx, m.cy - player.cy)).toBeGreaterThan(1000);
+    // >2000 → 瞬移回
+    m.x = player.cx + 2200;
     m.fixedUpdate(1, h2);
     expect(Math.hypot(m.cx - player.cx, m.cy - player.cy)).toBeLessThan(100);
   });

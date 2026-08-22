@@ -242,6 +242,23 @@ export class WhipProj extends Entity {
       const pts = this.pointsAt(prevAi0 + s, true);
       this.tryHit(game, owner, pts);
     }
+    // ---- 半程鞭尖音（AI_165 :45051-45070）：ai[0] 到达 (int)(timeToFlyOut/2f) 那一
+    //  update,在鞭尖（FillWhipControlPoints 缺省视觉曲线 :45618 getActualCollisionPoints=
+    //  false,控制点末位 = 鞭尖 :45052-45054）播音,按弹体 id 分档：1029→NPCDeath1
+    //  （音量 ×0.6,PlaySound(style,pos,pitchOffset=0,volumeScale=0.6) :45057,Legacy
+    //  形参序 SoundEngine.cs:88）、1030→NPCHit9（:45061）、1033→Item193（:45065）、
+    //  其余全部→Item153（:45069）。本仓 ai0 每 tick 跳 maxUpdates（原版逐 update +1
+    //  精确相等）→ 过半沿判定（与蛇环补挥同式 :267）;曲线取 half 时刻快照
+    //  （原版 ai[0]==half 当拍求值,过沿 tick 最多滞后 maxUpdates-1 update）----
+    const half = Math.floor(this.timeToFlyOut / 2); // (int)(timeToFlyOut/2f) :45051
+    if (prevAi0 < half && this.ai0 >= half) {
+      const pts = this.pointsAt(half, false);
+      const tip = pts[pts.length - 1]; // :45054
+      if (this.projId === 1029) game.playSfxFiles(['NPC_Killed_1'], 0.6, tip.x, tip.y);       // SoundID.NPCDeath1 :45057
+      else if (this.projId === 1030) game.playSfxFiles(['NPC_Hit_9'], 1, tip.x, tip.y);       // SoundID.NPCHit9 :45061
+      else if (this.projId === 1033) game.playSfxFiles(['Item_193'], 1, tip.x, tip.y);        // SoundID.Item193 :45065
+      else game.playSfxFiles(['Item_153'], 1, tip.x, tip.y);                                  // SoundID.Item153 :45069
+    }
     // ---- 月主鞭 1035 多重补鞭（:45038-45048：ai[2] < ai[0]/timeToFlyOut×3 时补一鞭
     //  并 ai[2]+1——全程累计补 3 鞭；子鞭 ai[2]≥10 不再补且固定 30t 寿命 :45755-45758）----
     if (this.projId === 1035 && this.ai2 < 10 && owner) {
@@ -323,7 +340,7 @@ export class WhipProj extends Entity {
         // 衰减链（:12604-12678）：每次命中后鞭 damage 字段 ×falloff
         this.dmgNow = Math.max(1, Math.round(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1)));
         // tag（TryApplyTagToNPC :13635-13638 → TagEffectStack :80-87）：1457 起入玩家
-        // MRU 栈（时长 = TagDuration × tagEffectDuration,5479=480 其余 240;ImmuneToWhips
+        // MRU 栈（时长 = TagDuration × tagEffectDuration,1456 全表 240;ImmuneToWhips
         // 11 种敌门内跳过）;自 buff（AddTheBuff :53-60）随 tag 施加,非 manual 档 ×时长
         const enVan = (e as unknown as { vanillaId?: number }).vanillaId ?? 0;
         owner?.tagEffectStack.tryApplyTagToNPC(this.itemId, e.id, enVan, this.bonusTagDmg);
@@ -333,23 +350,20 @@ export class WhipProj extends Entity {
           this.procEnabled = true;
           owner?.tagEffectStack.tryEnableProcOnNPC(this.itemId, e.id);
         }
-        // 5479（proj 1034）星座星：1457 改 proc 门控（:14001-14008）——localAI[0]==0 且
-        //  CanProcOnNPC(5479)（=随从命中过被 tag 敌,由 WhipTagEffect_Constellation
-        //  .OnTaggedHit 启用）才撒星,伤 = damage×2 基数 ×0.22/颗（:15013-15040,
-        //  1456 是首鞭无条件 ×0.33）;撒完 RemoveAllProcs(5479)。沿鞭每 3 控制点一颗、
-        //  垂直曲线方向飞出;生成点落实心砖回退玩家中心（:15031-15036,登记未接地形检测）
-        if (this.projId === 1034 && this.localAI0 === 0 && owner
-          && owner.tagEffectStack.canProcOnNPC(5479, e.id)) {
+        // 5479（proj 1034）星座星雨——1456 语义（Projectile.cs:12965-12970 case 1034：
+        //  localAI[0]==0 首鞭命中即 SpawnConstellationStarsTowards,无条件、无 proc 消费;
+        //  :13868-13880 伤 = (int)damage×0.33/颗）。1457 的 CanProcOnNPC 门 +
+        //  RemoveAllProcs + ×2×0.22 档退役。沿鞭每 3 控制点一颗、垂直曲线方向飞出
+        if (this.projId === 1034 && this.localAI0 === 0 && owner) {
           this.localAI0 = 1;
-          owner.tagEffectStack.removeAllProcs(5479);
-          const starDmg = Math.max(1, Math.trunc(dmg * 2 * 0.22));
+          const starDmg = Math.max(1, Math.trunc(dmg * 0.33)); // :13870
           const add = (el: unknown, b: string) =>
             (game as unknown as { entities: { add: (x: unknown, y: string) => void } }).entities.add(el, b);
           for (let i = 2; i < pts.length - 1; i += 3) {
             const a = pts[i], b = pts[i + 1];
             const dx = b.x - a.x, dy = b.y - a.y;
             const d = Math.hypot(dx, dy) || 1;
-            // 垂直方向（:13875-13878）：(dx,dy) 旋转 -π/2×player.direction×gravDir
+            // 垂直方向（:13877）：(dx,dy) 旋转 -π/2×player.direction×gravDir
             //  （gravDir 恒 1）——facing>0 → (dy,-dx)；facing<0 → (-dy,dx)，
             //  再乘 (1+NextFloatDirection×3) 随机速率（可负 → 反向）
             const f = owner ? owner.facing : 1;
@@ -364,22 +378,28 @@ export class WhipProj extends Entity {
         // 命中链（case 912/1028 :13981-13992）保持固定 180t 不缩放
         const hb = WHIP_HIT_BUFF[this.itemId];
         if (hb && owner) owner.whipBuffs[hb] = 180;
-        if (WHIP_HIT_SIDEKICK[this.itemId] && owner) this.spawnSidekick(game, owner, this.itemId);
+        // 伴生召唤出生点 = 被命中敌怪 Center（:12948/:12959 NewProjectile 位置参）
+        if (WHIP_HIT_SIDEKICK[this.itemId] && owner) {
+          this.spawnSidekick(game, owner, this.itemId, v2(e.x + e.w / 2, e.y + e.h / 2));
+        }
         game.addDamageNumber(p.x, p.y, dmg, false, '#FFD060');
       }
     }
   }
 
-  /** 命中附属召唤（:12936-12951）：酷鞭 4911 → 雪花哨兵 917（伤 15，buff 312 维持）；
+  /** 命中附属召唤（:12943-12963）：酷鞭 4911 → 雪花哨兵 917（伤 15，buff 312 维持）；
    *  麻线鞭 5473 → 小蜘蛛 1036（伤 2，buff 365 维持）——同类在场不重复生成
-   *  （原版 coolWhipBuff/cobWhipBuff flag 在 buff 期内置位） */
-  private spawnSidekick(game: GameHooks, owner: Player, itemId: number): void {
+   *  （原版 coolWhipBuff/cobWhipBuff flag 在 buff 期内置位）。
+   *  出生点 = 被命中敌怪 Center、速度零矢量、击退 0（NewProjectile(
+   *  GetProjectileSource_FromThis(), targetNPC.Center, Vector2.Zero, 917, 15, 0f,
+   *  owner) :12948 / 1036, 2, 0f :12959——此前误出生玩家旁 + kb 1.5） */
+  private spawnSidekick(game: GameHooks, owner: Player, itemId: number, at: V2): void {
     const want = WHIP_HIT_SIDEKICK[itemId];
     if (!want) return;
     const projs = (game as unknown as { entities: { projectiles: MinionProj[]; add: (e: unknown, b: string) => void } }).entities;
     if (projs.projectiles.some((m) => m instanceof MinionProj && !m.dead && m.projId === want.proj)) return;
-    const m = new MinionProj(owner.cx, owner.cy - 30, want.proj, want.dmg, 1.5,
-      false, 0, false, () => (owner.dead ? null : owner));
+    const m = new MinionProj(at.x, at.y, want.proj, want.dmg, 0,
+      false, 0, false, () => (owner.dead ? null : owner)); // kb=0f :12948/:12959
     m.noSlot = true;
     projs.add(m, 'projectiles');
   }

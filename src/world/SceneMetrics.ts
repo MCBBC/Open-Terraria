@@ -115,6 +115,10 @@ export interface SceneFlags {
   zoneMeteor: boolean;
   zoneGraveyard: boolean;
   zoneShadowCandle: boolean;   // tile 646 暗影蜡烛（NPC.cs:328-333）
+  /** HasClock（SceneMetrics.cs:465-467）：扫描窗内有落地座钟 104 → 玩家 accWatch
+   *  提到 3（金表精度时间行,Player.cs:12593-12596）。窗=ZoneScanSize 169×124,
+   *  与原版 VisualScanArea(1920/16+49 × 1200/16+49) 同尺寸 */
+  hasClock: boolean;
   /** 群系光照影响(0-1,Game 每 tick 写入:SetBackColor 群系变色的输入;
    *  蘑菇/墓园为帧平滑值 Main.cs:61380-61404/SceneState.cs:412-418) */
   biomeLightInfluence?: {
@@ -196,7 +200,7 @@ export const EMPTY_SCENE: SceneFlags = {
   zoneSnow: false, zoneDesert: false, snowTileCount: 0, jungleTileCount: 0, desertSandTileCount: 0, graveyardTileCount: 0,
   sandColorWeights: [0, 0, 0, 0],
   zoneGlowshroom: false, zoneMeteor: false,
-  zoneGraveyard: false, zoneShadowCandle: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
+  zoneGraveyard: false, zoneShadowCandle: false, hasClock: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
   zoneUndergroundDesert: false, townNPCCount: 0,
   musicBoxStyle: -1, fountainColor: -1, monolithType: -1, bloodMoonMonolith: false, partyUp: false,
   hasSunflower: false,
@@ -323,6 +327,9 @@ export function scanScene(
   const snow = countSet(counts, SNOW_TILES);
   const mushroom = countSet(counts, MUSHROOM_TILES);
   const shadowCandleCount = counts.get(646) ?? 0;   // ShadowCandle tile 646
+  // HasClock（cs:465-467 `if (tile.type == 104) HasClock = true`——ScanTiles 窗内任一）
+  const CLOCK_TILE = SHEET_MAP.get(104) ?? -1;
+  const hasClock = CLOCK_TILE >= 0 && (counts.get(CLOCK_TILE) ?? 0) > 0;
   const meteor = countSet(counts, METEOR_TILES);
   const dungeonTiles = countSet(counts, DUNGEON_TILES);
   // ShimmerTileCount/HoneyBlockCount/PartyMonolithCount（cs:601/621）
@@ -400,6 +407,7 @@ export function scanScene(
     zoneMeteor: meteor >= METEOR_THRESHOLD,
     zoneGraveyard: graveyard >= GRAVEYARD_THRESHOLD,
     zoneShadowCandle: shadowCandleCount > 0,   // tile 646
+    hasClock,
     zoneDungeon,
     zoneTemple: centerWall === 87,
     zoneBeach,

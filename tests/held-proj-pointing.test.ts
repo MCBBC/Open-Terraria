@@ -165,7 +165,8 @@ describe('绘制调用采样(drawUseItem 消费指向角)', () => {
     r.animTick = 0;
     r.itemIcon = () => null;
     r.ctx = ctx;
-    const p = { cx: px, cy: py, x: px - 8, y: py - 14, w: 16, h: 28, facing };
+    // equipStats：drawUseItem 手套族 meleeScaleGlove 缩放档读该对象（缺省空 = 不缩放）
+    const p = { cx: px, cy: py, x: px - 8, y: py - 14, w: 16, h: 28, facing, equipStats: {} };
     (Renderer.prototype as unknown as {
       drawUseItem(c: CanvasRenderingContext2D, pl: unknown, s: HeldProjSwing, f: unknown): void;
     }).drawUseItem.call(r, ctx, p, swing, null);

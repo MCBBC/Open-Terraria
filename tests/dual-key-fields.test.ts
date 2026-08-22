@@ -46,16 +46,19 @@ describe('双键清理批次A：字段搬移差异清零', () => {
   });
 
   it('搬移抽验：挖掘力三件套（tool/axePower）落进蛇形 def', () => {
-    // vi_579_drax：pick 200 + axe 22（VANILLA_TOOL_POWERS 源数据，曾只落在驼峰 def）
+    // vi_579_drax：pick 200 + axe 22（VANILLA_TOOL_POWERS 源数据，曾只落在驼峰 def）。
+    // 2026-08-22 F1 工具节奏修复：回填循环把 itemCombat 的 speed/useTime/damage/
+    // knockback + 三力（pickPower/axePower/hammerPower）一并桥进 tool——此处按
+    // Object.asymmetricMatch 抽核心力/节奏字段，不再钉全对象形状
     const drax = ITEM_DEFS[ITEM_BY_KEY['vi_579_drax']];
-    expect(drax.tool).toEqual({ type: 'pick', power: 200 });
+    expect(drax.tool).toMatchObject({ type: 'pick', power: 200, pickPower: 200, axePower: 22, useTime: 7, speed: 25 });
     expect(drax.axePower).toBe(22);
     // vi_122_molten_pickaxe：pick 100
     const molten = ITEM_DEFS[ITEM_BY_KEY['vi_122_molten_pickaxe']];
-    expect(molten.tool).toEqual({ type: 'pick', power: 100 });
+    expect(molten.tool).toMatchObject({ type: 'pick', power: 100, useTime: 18, speed: 23 });
     // vi_1305_the_axe：hammer 100 + axe 35
     const axe = ITEM_DEFS[ITEM_BY_KEY['vi_1305_the_axe']];
-    expect(axe.tool).toEqual({ type: 'hammer', power: 100 });
+    expect(axe.tool).toMatchObject({ type: 'hammer', power: 100, hammerPower: 100, axePower: 35, useTime: 7 });
     expect(axe.axePower).toBe(35);
   });
 

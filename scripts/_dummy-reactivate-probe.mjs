@@ -45,7 +45,16 @@ const out = await page.evaluate(async () => {
   const step3 = { deadConfirmed, respawned: true, waitMs: 'polled' };
   // ---- 4. 霰弹枪+火枪子弹射击验证命中 ----
   const shotgun = idOf(/^vi_534_/) >= 0 ? idOf(/^vi_534_/) : idOf(/^vi_575_/);
-  const bullet = idOf(/^vi_97_/);
+  // 弹药按 ammoId===97 直扫(绕开 __swItems 键别名污染:vi_97_* 多键同指 393 墙物)
+  let bullet = -1;
+  try {
+    const { ITEM_DEFS } = await import('/src/data/items.ts');
+    for (let i = 0; i < ITEM_DEFS.length; i++) {
+      const d = ITEM_DEFS[i];
+      const vid = d?.vid ?? (d?.key ? Number(String(d.key).match(/^vi_(\d+)_/)?.[1] ?? -1) : -1);
+      if (d?.ammoId === 97 || vid === 97) { bullet = i; break; }
+    }
+  } catch { bullet = -1; }
   pl.inv.slots[pl.inv.selected] = { id: shotgun, stack: 1 };
   pl.inv.slots[54] = { id: bullet, stack: 999 };
   g.cb.onInventoryChanged();

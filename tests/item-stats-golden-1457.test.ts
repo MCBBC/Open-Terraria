@@ -2,21 +2,35 @@
 // 解析逻辑 = tools/recon-item-1456-1457.mjs(库模式导入,与 CLI --fix 同源——防"闸门与
 // 修复器两套逻辑漂移")。1.4.5.7 是数值补丁(Item SetDefaults 54 条,报告"Item.cs 行为
 // 差异清单"),本闸门锁三件事:
-//   ① DRIFT=0:json 与 1457 终值零漂移(--fix 后的事实;手改 json 或重跑 1456 提取器会爆红)
+//   ① DRIFT=0:json 与 1457 终值零漂移(①内 1456 回滚白名单除外——本仓标杆 1456,
+//     已决回滚字段见 ROLLBACK_1456 注释;其余手改 json 或重跑 1456 提取器会爆红)
 //   ② LEGACY=0:两版同值字段上 json 不得偏离 1456(基线保护,存量 1405 旧值回潮检测)
 //   ③ 解析器结构护栏:提取基数不低于基线(防反编译树/解析器结构漂移后静默半坏)
 // 已知暂缓项(deferredDrift):1226/1227 叶绿双剑 shoot 指向 1457 新弹 1126/1127,
 //   新弹 AI/贴图未实装前数据侧保留 1456 弹 id(见 recon FIX_SHOOT_KEEP)。
 // 注意:依赖仓库内 Terarria1456/、Terarria1457/ 反编译树(与 npc-stats-golden 同惯例)。
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 // @ts-expect-error 纯 JS 提取库(无类型声明)
 import { recon, FIX_SHOOT_KEEP } from '../tools/recon-item-1456-1457.mjs';
 
 const r = await recon();
 
 describe('Item 数值三方对账金标(json × 1456 × 1457)', () => {
-  it('① json 与 1457 SetDefaults 终值零漂移(DRIFT)', () => {
-    expect(r.drift).toEqual([]);
+  // 1456 回滚白名单:本仓标杆 1456(CLAUDE.md),以下字段 json 取 1456 终值,与 1457 的
+  // 差异=已决回滚(非漂移;recon --fix 会抹回 1457,勿再跑)。逐条 1456 依据:
+  //   func[2209].healMana 300(1456 Item.cs:22323;1457 :22349=400)
+  //   whips[5477].dmg 75(1456 Item.cs:43149 DefaultToWhip(1032,75,2f,4f);1457=50)
+  //   whips[5688].dmg 12(1456 Item.cs:44660 DefaultToWhip(1104,12,1f,4f);1457=15)
+  //   combat[4607].knockBack 4(1456 Item.cs:38123 `knockBack = 4f`;1457=2.5)
+  const ROLLBACK_1456 = new Set([
+    'func[2209].healMana', 'whips[5477].dmg', 'whips[5688].dmg', 'combat[4607].knockBack',
+    // proj[478].penetrate 2：1456 SetDefaults `penetrate = 2`（Projectile.cs:5263 诅咒镖）；
+    // 1457 改 3——json 取 1456 终值（2026-08-22 弹幕穿透表批修正，曾误载 1457 值）
+    'proj[478].penetrate',
+  ]);
+  it('① json 与 1457 SetDefaults 终值零漂移(DRIFT;1456 回滚白名单除外)', () => {
+    expect(r.drift.filter((l: string) => !ROLLBACK_1456.has(l.slice(0, l.indexOf(':'))))).toEqual([]);
   });
 
   it('①b 已知暂缓项仅叶绿双剑 shoot 两条(新弹 1126/1127 未实装)', () => {
@@ -99,5 +113,18 @@ describe('Item 数值三方对账金标(json × 1456 × 1457)', () => {
       if (!known.has(key) && !knownProj.has(key)) unexpected.push(line);
     }
     expect(unexpected).toEqual([]);
+  });
+
+  it('④ 1457 段(≥6100)在表 50 条锚点(防 1456 档整表重跑抹段;提取器已带合并保留)', () => {
+    // 2026-08-22 隐患备案清偿:vanilla-itemcombat.json 的 1457 专属段(Palworld 召唤杖
+    // 6148/6149/6161/6164 等)曾仅存于 JSON——裸跑提取器 1456 默认档会整段抹掉。
+    // 现双保险=①提取器 1456 档写盘合并保留(extract-itemcombat.mjs 写盘前钩)
+    // ②本锚点:四杖 combat 数据 + 1457 段基数。
+    const combat = JSON.parse(readFileSync(new URL('../src/data/vanilla-itemcombat.json', import.meta.url), 'utf8'));
+    expect(combat['6148']).toMatchObject({ shoot: 1112, damage: 22, summon: true });
+    expect(combat['6149']).toMatchObject({ shoot: 1113, damage: 40, summon: true });
+    expect(combat['6161']).toMatchObject({ shoot: 1118, damage: 5, summon: true });
+    expect(combat['6164']).toMatchObject({ shoot: 1119, damage: 40, summon: true });
+    expect(Object.keys(combat).filter((k) => +k >= 6100).length).toBeGreaterThanOrEqual(50);
   });
 });

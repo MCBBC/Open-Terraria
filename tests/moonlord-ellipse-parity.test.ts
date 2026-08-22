@@ -205,9 +205,11 @@ describe('drawMoonLordHead 锚点(Main.cs:24449-24504)', () => {
     // 眼窝(38×68 源,origin (19,34))
     const socketIdx = ops.findIndex(o => o.op === 'drawImage' && o.img === 'Extra_18');
     expect(ops[socketIdx].a).toEqual([0, 0, 38, 68, -19, -34, 38, 68]);
-    // 头帧:源 (col*191,row*268,191,268) dest (-95.5,-65,382,536)
+    // 头帧:源 (col*191,row*268,191,268) dest (-191,-130,382,536)——XNA origin
+    // (95.5,65) 施加 scale 2 = 有效偏移 (191,130)(曾少乘 scale = 脸右/上偏 95.5/65px,
+    // 用户报"左偏+下偏"错位,2026-08-22 修)
     const bodyIdx = ops.findIndex(o => o.op === 'drawImage' && o.img === 'NPC_396');
-    expect(ops[bodyIdx].a).toEqual([1 * 191, 1 * 268, 191, 268, -95.5, -65, 382, 536]);
+    expect(ops[bodyIdx].a).toEqual([1 * 191, 1 * 268, 191, 268, -191, -130, 382, 536]);
     // 破体覆层:Extra_29 锚 (floor(cx),floor(cy+4)) 源行 lai3/5、dest (-45,-50,90,100);
     // Extra_25 锚 (floor(cx),floor(cy+214)) 源行 lai2/7、dest (-28,-28,56,56)
     const i29 = ops.findIndex(o => o.op === 'drawImage' && o.img === 'Extra_29');

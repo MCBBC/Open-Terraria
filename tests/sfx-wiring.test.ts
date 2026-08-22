@@ -288,13 +288,13 @@ describe('C. MinionProj.ts 族专属音', () => {
     s.fixedUpdate(1, hooks);
     expect(sfx.length).toBe(len);         // 90t 冷却内不重播
   });
-  it('Foxparks 1094：首帧叫一声，20t 后 pal_summon', () => {
+  it('Foxparks 1094：首帧 pal_summon（soundDelay 0→-1 :59131），20t 后家族叫声（→-20 :59128）', () => {
     const { hooks, sfx } = makeMinionHooks();
     const m = new MinionProj(60 * TILE, 90 * TILE, 1094, 20, 2, false, 0, false, () => hooks.player as never as Player);
     m.fixedUpdate(1, hooks);
-    expect(played(sfx, 'pal_foxparks')).toHaveLength(1);
-    for (let k = 0; k < 19; k++) m.fixedUpdate(1, hooks);
     expect(played(sfx, 'pal_summon')).toHaveLength(1);
+    for (let k = 0; k < 19; k++) m.fixedUpdate(1, hooks);
+    expect(played(sfx, 'pal_foxparks')).toHaveLength(1);
   });
 });
 

@@ -222,6 +222,8 @@ for (let q = 0; q < TILE_DEFS.length; q++) {
 
 const STATUE_105 = statueTileKey(105);
 const STATUE_349 = statueTileKey(349);
+/** ★PPPPP 导出：MarblePileWithStatues 的 Statue（cs:10547）复用同放置模型 */
+export { STATUE_105, STATUE_349 };
 const TRAP = statueTileKey(135);   // cs:4451 PlaceTile(135)——超级飞镖陷阱（曾误 137）
 const TRAP_162 = statueTileKey(162);
 const WIRE_RED = TileStore.WIRE_RED;

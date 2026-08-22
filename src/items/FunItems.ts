@@ -3,6 +3,9 @@
 //   ItemCheck_PlayInstruments   Player.cs:45892-46024 （乐器族入口：musicDist + 音符）
 //   PlayDrums                   Player.cs:46106-46156 （鼓槌 10 档音色按鼠标距离）
 //   ItemCheck_GetMeleeHitboxParticles Player.cs:44429-44462（泡泡棒 1450 气泡 gore 掷骰）
+//   ItemCheck_ApplyUseStyle 1124 支 Player.cs:42946-42958（蜂巢挥动发蜂掷骰）
+//   ItemCheck_ApplyPetBuffs 425 支 Player.cs:52256-52272（仙灵铃三选一）
+//   Chest.Lock Chest.cs:409-473（金锁 5328 可锁样式表）
 //
 // 本模块纯函数化：全部状态走入参（随机源注入），不触 Game/World/Sfx。
 // Game.ts 单点 if 调用（use 链「趣味使用分支」），消费侧只做 IO 装配。
@@ -68,4 +71,56 @@ export function bubbleWandGoreRoll(rnd: () => number): BubbleWandRoll | null {
   else if (next(3) === 0) goreType = 411;                 // :44453-44456
   if (goreType < 0) return null;
   return { goreType, scale: (51 + next(50)) * 0.01 };     // Next(51,101)*0.01
+}
+
+// ---------------------------------------------------------------------------
+// 蜂巢 1124 发蜂掷骰（Player.cs:42946-42958，挥动期每 tick）：
+//   外层门 1/30（:42948 Next(30)==0）→ 弹 = beeType()（:12006——Hive Pack 3333
+//   半数 566 巨蜂；本仓 equipStats 无 strongBees 通道恒 181，与 Arrow.ts 蜂箭
+//   swarm 同款登记）→ 伤 = beeDamage(5)（:12017——181 档 5+Next(2)）、
+//   kb = beeKB(0) = 0（:12026）。出生点 = 近战判定盒中心、速度 = 朝鼠标 ×6。
+// ---------------------------------------------------------------------------
+export interface HiveBeeRoll { damage: number }
+
+export function hiveBeeRoll(rnd: () => number): HiveBeeRoll | null {
+  if (Math.floor(rnd() * 30) !== 0) return null;          // :42948 Next(30)==0
+  return { damage: 5 + Math.floor(rnd() * 2) };           // beeDamage(5)=5+Next(2)（:12021）
+}
+
+// ---------------------------------------------------------------------------
+// 仙灵铃 425 三选一（Player.cs:52256-52272 ItemCheck_ApplyPetBuffs 的 425 支）：
+//   num = Next(3) → 27 蓝 / 101 红 / 102 绿；先 DelBuff 全部 27/101/102 再
+//   AddBuff(num, 3600)（60s）。左键直用与 QuickBuff 共用本掷（原版同入口）。
+// ---------------------------------------------------------------------------
+export function fairyBellVariant(rnd: () => number): 27 | 101 | 102 {
+  const r = Math.floor(rnd() * 3);                        // :52258 Next(3)
+  return r === 1 ? 101 : r === 2 ? 102 : 27;              // :52259-52265
+}
+
+// ---------------------------------------------------------------------------
+// 金锁 5328 可锁样式表（Chest.Lock Chest.cs:409-473 + PlaceThing_LockChest
+//   Player.cs:40946-41010 的样式门 1:1）：锚格 sheet + frameX/36（style）判定。
+//   delta = 四格 frameX 右移量；plantGate = 世纪之花门（:431/:455 !downedPlantBoss
+//   → false 不锁不耗）；ach = 锁沙漠箱成就 BIG_BOOTY(20)（:458）。
+//   已锁样式（2/4/23-27/36/38/40）与无锁位样式（0/木箱 0 等）→ null（Chest.Lock
+//   default → return false，原版同款不可锁不耗）。
+// ---------------------------------------------------------------------------
+export interface ChestLockSpec { delta: number; plantGate: boolean; ach: number }
+
+export function chestLockOf(sheet: number, frameX: number): ChestLockSpec | null {
+  const style = Math.floor(frameX / 36);
+  if (sheet === 21) {
+    if (style === 1 || style === 3 || style === 35 || style === 37 || style === 39) {
+      return { delta: 36, plantGate: false, ach: 0 };     // :428-431/:440-442 → num=36
+    }
+    if (style >= 18 && style <= 22) {
+      return { delta: 180, plantGate: true, ach: 0 };     // :432-439 群系锁位（num=180）
+    }
+    return null;                                          // default → return false（:443-445）
+  }
+  if (sheet === 467) {
+    if (style === 12) return { delta: 36, plantGate: true, ach: 20 };  // :447-459 沙漠锁位
+    return null;
+  }
+  return null;
 }

@@ -76,8 +76,11 @@ function labelOf(file: string, line: number): string {
   const g = globalThis as { __m8dStore?: Parameters<typeof dump>[0] };
   const t0 = Date.now();
   try {
+    const M8D_FLAGS: Record<string, boolean> = {};
+    for (const f of (process.env.SW_M8D_FLAGS ?? '').split(',').filter(Boolean)) M8D_FLAGS[f] = true;
     await generateWorld({
-      width: W, height: H, seedText: '9293480', evil: 0,
+      width: W, height: H, seedText: process.env.SW_M8D_SEED ?? '9293480', evil: 0,
+      seedFlags: Object.keys(M8D_FLAGS).length > 0 ? M8D_FLAGS : undefined,
       onWorldPartial: (w) => { if (!g.__m8dStore) g.__m8dStore = w.store as never as typeof g.__m8dStore; },
     });
   } catch (e) {

@@ -310,6 +310,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       if (pu.usedAegisCrystal !== undefined) g.player.usedAegisCrystal = pu.usedAegisCrystal;
       if (pu.usedAegisFruit !== undefined) g.player.usedAegisFruit = pu.usedAegisFruit;
       if (pu.usedArcaneCrystal !== undefined) g.player.usedArcaneCrystal = pu.usedArcaneCrystal;
+      if (pu.usedGalaxyPearl !== undefined) g.player.luckState.usedGalaxyPearl = pu.usedGalaxyPearl;
       if (pu.usedGummyWorm !== undefined) g.player.usedGummyWorm = pu.usedGummyWorm;
       if (pu.usedAmbrosia !== undefined) g.player.usedAmbrosia = pu.usedAmbrosia;
     }

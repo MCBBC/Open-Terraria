@@ -154,7 +154,12 @@ export class Inventory {
   currentLoadout = 0;
   /** 恶魔之心 3335(Player.cs:44575-44583)解锁第六配饰槽(armor[8];基座 5=3-7) */
   extraAccessory = false;
-  /** 功能配饰槽上界(不含):基座 5,恶魔之心 6(UpdateEquipAccessories 语义) */
+  /** 功能配饰槽上界(不含):基座 5,恶魔之心 6(UpdateEquipAccessories 语义)。
+   *  ★偏差备案(2026-08-22 补 C 审计 3335 批):原版第 6 槽有世界难度门——
+   *  UpdateAccessories :18139-18145 `extraAccessory && (Main.expertMode ||
+   *  Main.gameMenu) → extraAccessorySlots=1,否则 0`(经典世界不生效,旗标仍存)。
+   *  本仓不设门:玩家档与世界档同槽共存亡(quicksave 单键/WldImport 重置玩家
+   *  WldImport.ts:616),extraAccessory=true 不可能跨难度世界携带,门结构不可达 */
   get accSlotMax(): number { return ACC_ARMOR_START + 5 + (this.extraAccessory ? 1 : 0); }
   /** 垃圾桶持久槽（Player.trashItem :1380——关背包保留、死亡清空 :53394） */
   trash: InvItem | null = null;

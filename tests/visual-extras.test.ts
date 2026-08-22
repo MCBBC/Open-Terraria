@@ -19,7 +19,7 @@ const pngSize = (f: string): [number, number] => {
   const b = readFileSync(vanillaFile(f));
   return [b.readUInt32BE(16), b.readUInt32BE(20)];
 };
-/** GLOW_{id}.png 全量清单（379 张，GlowMaskID 空间） */
+/** GLOW_{id}.png 全量清单（384 张，GlowMaskID 空间;1457 批B +5 Glow_379-383） */
 const glowIds = readdirSync(VANILLA)
   .filter((f) => /^Glow_\d+\.png$/.test(f))
   .map((f) => Number(f.slice(5, -4)));
@@ -58,10 +58,10 @@ describe('① Glow 发光覆层表（Main.cs DrawNPC 尾段硬编码 GlowMask �
     }
   });
 
-  it('Glow 素材是 GlowMaskID 空间（0..378 连续 379 张）——按 NPC id 猜文件名的回归闸', () => {
-    expect(glowIds).toHaveLength(379);
+  it('Glow 素材是 GlowMaskID 空间（0..383 连续 384 张;1457 批B +5）——按 NPC id 猜文件名的回归闸', () => {
+    expect(glowIds).toHaveLength(384);
     expect(Math.min(...glowIds)).toBe(0);
-    expect(Math.max(...glowIds)).toBe(378);
+    expect(Math.max(...glowIds)).toBe(383);   // 1457 批B +Glow_379-383
   });
 
   it('专属分支 NPC（月总 396/397/398、女皇 636、鹿角怪 668、暗黑魔法师 564/565）不落通用表', () => {

@@ -83,6 +83,53 @@ export function isWaterTorchStyle(frameY: number): boolean {
   return WATER_TORCH_STYLES.has(Math.floor(frameY / 22));
 }
 
+// ---- 群系火把样式（TorchGodsFlavor 自动转换链，2026-08-22 补 C 审计 5573 效果端）----
+
+/** TorchID.Sets.IsABiomeTorch（Terraria.ID/TorchID.cs:12）：
+ *  false 兜底 + {0 普通炬,18 腐化,19 猩红,20 神圣,21 丛林,23 微光,13 骨,7 恶魔,9 冰雪,
+ *  22 蘑菇,16 沙漠}——TorchGodsFlavor 只转换该集内的样式（彩炬/诅咒等不属"群系炬"） */
+export const IS_BIOME_TORCH_STYLE = new Set([0, 18, 19, 20, 21, 23, 13, 7, 9, 22, 16]);
+
+/** TorchID.Dust（TorchID.cs:77-81）：样式 0-23 → 转换弹 1084 尾迹/落点尘埃 id */
+export const TORCH_DUST_BY_STYLE: readonly number[] = [
+  6, 59, 60, 61, 62, 63, 64, 65, 75, 135,
+  158, 169, 156, 234, 66, 242, 293, 294, 295, 296,
+  297, 298, 307, 310,
+];
+
+/** BiomeTorchPlaceStyle 的群系输入（Player.Zone* 位 + 深度/世界旗） */
+export interface BiomeTorchZones {
+  shimmer: boolean; dungeon: boolean; temple: boolean; underworld: boolean;
+  glowshroom: boolean; hallow: boolean; corrupt: boolean; crimson: boolean;
+  snow: boolean; jungle: boolean; desert: boolean; undergroundDesert: boolean;
+  /** 玩家 tileY ≤ worldSurface（地表沙漠门 :39626 `position.Y < worldSurface*16`） */
+  aboveSurface: boolean;
+  /** Main.remixWorld（:39631 don't dig up 沙漠补支） */
+  remixWorld: boolean;
+}
+
+/**
+ * BiomeTorchPlaceStyle（Player.cs:39586-39635 1:1 提取）：当期群系 → 应使用的火把样式。
+ * 消费端①TorchGodsFlavor（:39529，buff 376 火把神药水每 tick 1/10 扫屏把**异群系群系炬**
+ * 转成本表样式）；②原版手持火把自动换样式（UsingBiomeTorches，unlockedBiomeTorches
+ * 消费端，本仓未建——登记）。无命中群系 = 0（普通炬，不触发转换）。
+ */
+export function biomeTorchPlaceStyle(z: BiomeTorchZones): number {
+  if (z.shimmer) return 23;          // :39592-39594
+  if (z.dungeon) return 13;          // :39596-39598
+  if (z.temple) return 21;           // :39600-39602 ZoneLihzhardTemple
+  if (z.underworld) return 7;        // :39604-39606 position.Y > UnderworldLayer*16
+  if (z.glowshroom) return 22;       // :39608-39610
+  if (z.hallow) return 20;           // :39612-39614
+  if (z.corrupt) return 18;          // :39616-39618
+  if (z.crimson) return 19;          // :39620-39622
+  if (z.snow) return 9;              // :39624-39626
+  if (z.jungle) return 21;           // :39628-39630
+  if ((z.desert && z.aboveSurface) || z.undergroundDesert) return 16;  // :39632-39634
+  if (z.desert && z.remixWorld) return 16;                             // :39636-39638
+  return 0;
+}
+
 /** 物品 key → 放置火把样式 torchId（Item.cs SetDefaults placeStyle + 生物群系火把显式表）。
  *  彩色火把 427-433 = id-426（1-7）；群系火把 BIOME 表；水炬 = 8（咒火 523）/11（灵液 1333）
  *  /17（珊瑚 4384）；legacy 'torch' 与其余 → 0 */

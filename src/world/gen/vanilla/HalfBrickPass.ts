@@ -299,17 +299,22 @@ function checkSuper(st: TileStore, rng: RNG, x: number, y: number): void {
 
 /** 原版 KillTile(i,j) 生成期路径的完整掷骰模型 + 击杀（type=0 清型）。
  *  生成期 noItem=true 无掉落掷;isGeneratingOrLoadingWorld=true 时尘段恒跑
- *  （cs:63747 dust 段在 effectOnly 早退之前,无 netMode 门）。 */
-function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
+ *  （cs:63747 dust 段在 effectOnly 早退之前,无 netMode 门）。
+ *  ★PPPPP（2026-08-22）导出复用：WavyCaverer（cs:12335 KillTile）与
+ *  LavaLayerCaverer（cs:74066 KillTile）的雕刻支同模型——尘掷流位+尾
+ *  SquareTileFrame 级联必须一致，勿在新 pass 重写近似版。 */
+export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   const i = st.idx(x, y);
   const sheet = SHEET_OF[st.type[i]] ?? -1;
-  // cs:63904：蛛网(51)带蜘蛛墙(62) → 先掷 Next(4)（结果只改 noItem,生成期本就 true）
-  if (sheet === 51 && st.wall[i] === 62) rng.nextInt(4);
   const n = killDustAmount(sheet);
   const amt = n === -1 ? (st.frameX[i] / 22 >= 5 ? 5 : 10) : n;
   const per = killDustRollsPer(sheet, st.frameX[i]);
   swAct('K', x, y, 0);   // 原版 WLog 在 KillTile 入口（尘掷之前）
   for (let k = 0; k < amt; k++) for (let r = 0; r < per; r++) rng.nextInt(6);
+  // cs:63904：蛛网(51)带蜘蛛墙(62) → Next(4)（结果只改 noItem,生成期恒 noItem=true）。
+  // ★PPPPP（2026-08-22）勘误：原版此掷在尘段**之后**（cs:63904 > cs:63748 尘环）——
+  //   曾前置 → 掷序错,CONST 链 LavaLayerCaverer 雕到蛛网+蜘蛛墙即从该点流移
+  if (sheet === 51 && st.wall[i] === 62) rng.nextInt(4);
   // cs:63941：地狱石(58) 击杀于 UnderworldLayer(=h-200) 之下 → 灌岩浆 128
   if (sheet === 58 && y > st.h - 200) { st.liquid[i] = 128; st.liquidType[i] = 2; }
   st.setTileSilent(x, y, 0);

@@ -86,7 +86,9 @@ function anyNpcs(game: GameHooks, id: number): boolean {
  *  110=600 */
 const PROJ_GRAV: Record<number, number> = { 349: 0.2, 326: 0.2, 327: 0.2, 328: 0.2, 346: 0.2, 352: 0.2, 345: 0.5 };
 /** AI_014 重力延迟 5 子步（:23484-23498）；345 针叶 50t（:54244） */
-const PROJ_GRAV_DELAY: Record<number, number> = { 326: 5, 327: 5, 328: 5, 346: 5, 352: 5, 345: 50 };
+// aiStyle14 族原版门为严格 `ai[0] > 5f`（Projectile.cs:23486-23498）——Arrow 门已统一
+// `age >= gravDelay`（AI_001 默认档 :54686 `>= 15` 语义），存 6 等价（345 为 `>= 50` :54242 原值）
+const PROJ_GRAV_DELAY: Record<number, number> = { 326: 6, 327: 6, 328: 6, 346: 6, 352: 6, 345: 50 };
 const PROJ_BOUNCE = new Set([326, 327, 328, 346, 352]);
 const PROJ_LIFE: Record<number, number> = {
   325: 420, 326: 360, 327: 360, 328: 360, 329: 420,

@@ -108,6 +108,7 @@ void Checkpoint(string name)
                 File.WriteAllBytes(p + ".liq", liq);
                 File.WriteAllBytes(p + ".half", half); File.WriteAllBytes(p + ".slope", slope);   // A/B 诊断通道
                 File.WriteAllBytes(p + ".frx", ToBytes(frX)); File.WriteAllBytes(p + ".fry", ToBytes(frY));   // ★FFFFFF：帧通道（EE_NEWARMS 臂读帧→帧债显影）
+                File.WriteAllBytes(p + ".lty", liqT);   // ★MMMMMM：liquidType 通道（oracle 0水/1岩浆/2蜜/3微光；JS +1）——(3544,649) 幽灵泥残差案对拍
                 Console.WriteLine($"griddump {name} -> {p}");
             }
         }
@@ -8128,7 +8129,10 @@ void DgTowerEntrance(int i, int j, int preSeed)
             if (DgInWorld(x, y, 0)) { int ti = y * W + x; liq[ti] = 0; liqT[ti] = 0; DgClearSlope(ti); }
     int n2 = 5, n3 = 35, n4 = 40, n5 = 100;
     int n7 = j - 30;
-    int n8 = 30, n9 = 25, n10 = 30, n11 = 20, n12 = 50, n13 = 15, n14 = 20, n16 = 95;
+    int n8 = 30, n9 = 25, n10 = 30, n11 = 20, n12 = 50, n13 = 15, n14 = 20;
+    // ★PPPPP-CONST：n16=num8+num11+num15=30+20+40=90（TowerDungeonEntrance.cs:90，
+    //   1456/1457 同构；JS 与 oracle 同抄 95=双源同错，塔顶整体高 5 格）
+    int n16 = n8 + n11 + 40;
     int minY = n7 - n16, maxY = n7 + 10;
     // 塔侧地表圆清 Circle(15)+Actions.Clear（Shapes.Circle.Perform 椭圆逐行）
     {
@@ -8298,15 +8302,15 @@ void DgTowerEntrance(int i, int j, int preSeed)
     DgBottomWedge(i - n13, n7 - n16 + n2, 3, false);
     DgBottomWedge(i + n13 - 1, n7 - n16 + n2, 3, true);
     // 九处平台候选（:362-373，OverrideHeightFluff=0）
-    dgPlats.Add(new DPlat { X = i - n10 - 2, Y = n7 - n8 + 15, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
-    dgPlats.Add(new DPlat { X = i - n10 - 2, Y = n7 - n8 + 21, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
-    dgPlats.Add(new DPlat { X = i - n14 - 2, Y = n7 - n12 + 15, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
-    dgPlats.Add(new DPlat { X = i - n14 - 2, Y = n7 - n12 + 21, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
-    dgPlats.Add(new DPlat { X = i + n10 + 2, Y = n7 - n8 + 15, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
-    dgPlats.Add(new DPlat { X = i + n10 + 2, Y = n7 - n8 + 21, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
-    dgPlats.Add(new DPlat { X = i + n14 + 2, Y = n7 - n12 + 15, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
-    dgPlats.Add(new DPlat { X = i + n14 + 2, Y = n7 - n12 + 21, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
-    dgPlats.Add(new DPlat { X = i, Y = n7 - n12 + n2 - 3, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
+    dgPlats.Add(new DPlat { X = i - n10 - 2, Y = n7 - n8 + 15, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 , Nowb = true });   // ★QQQQQQ：TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）——塔九候选补齐（与 Dome 上对同款）
+    dgPlats.Add(new DPlat { X = i - n10 - 2, Y = n7 - n8 + 21, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 , Nowb = true });   // ★QQQQQQ：TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）——塔九候选补齐（与 Dome 上对同款）
+    dgPlats.Add(new DPlat { X = i - n14 - 2, Y = n7 - n12 + 15, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 , Nowb = true });   // ★QQQQQQ：TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）——塔九候选补齐（与 Dome 上对同款）
+    dgPlats.Add(new DPlat { X = i - n14 - 2, Y = n7 - n12 + 21, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 , Nowb = true });   // ★QQQQQQ：TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）——塔九候选补齐（与 Dome 上对同款）
+    dgPlats.Add(new DPlat { X = i + n10 + 2, Y = n7 - n8 + 15, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 , Nowb = true });   // ★QQQQQQ：TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）——塔九候选补齐（与 Dome 上对同款）
+    dgPlats.Add(new DPlat { X = i + n10 + 2, Y = n7 - n8 + 21, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 , Nowb = true });   // ★QQQQQQ：TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）——塔九候选补齐（与 Dome 上对同款）
+    dgPlats.Add(new DPlat { X = i + n14 + 2, Y = n7 - n12 + 15, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 , Nowb = true });   // ★QQQQQQ：TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）——塔九候选补齐（与 Dome 上对同款）
+    dgPlats.Add(new DPlat { X = i + n14 + 2, Y = n7 - n12 + 21, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 , Nowb = true });   // ★QQQQQQ：TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）——塔九候选补齐（与 Dome 上对同款）
+    dgPlats.Add(new DPlat { X = i, Y = n7 - n12 + n2 - 3, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 , Nowb = true });   // ★QQQQQQ：TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）——塔九候选补齐（与 Dome 上对同款）
     // 窗族（:375-429）
     {
         int n30 = n7 - n16 + 20;
@@ -14882,6 +14886,20 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     bool mergeTilesDuringGen = false;                       // finalGenMergeCheck 窗口
     HashSet<ushort> tiwOff = new();                         // tilesIgnoreWater 生效域
     HashSet<ushort> wgOff = new();                          // worldGenTilesIgnoreWater 生效域
+    // ★MMMMMM：区域液迹（(3544,649) 残差案对拍）——LIQ_REG="x0,y0,x1,y1" + LIQ_OUT 落文件；
+    //   无 env 时零开销零输出（金标再生不受影响）。行序=执行序，与 JS 探针 _mmtrace 同构：
+    //   A=入列 B=入缓冲 D=出列(首) d=出列(尾态) U=update(首) u=update(尾) S=SettleWaterAt
+    //   R=轮界 W=WaterCheck 后区域快照
+    System.IO.StreamWriter liqTw = null;
+    int liqSeq = 0, liqRx0 = 0, liqRy0 = 0, liqRx1 = 0, liqRy1 = 0;
+    if (Environment.GetEnvironmentVariable("LIQ_REG") != null)
+    {
+        var lr = Environment.GetEnvironmentVariable("LIQ_REG").Split(',');
+        liqRx0 = int.Parse(lr[0]); liqRy0 = int.Parse(lr[1]); liqRx1 = int.Parse(lr[2]); liqRy1 = int.Parse(lr[3]);
+        liqTw = new System.IO.StreamWriter(Environment.GetEnvironmentVariable("LIQ_OUT") ?? "/tmp/or-liqtrace.txt");
+    }
+    bool LiqIn(int x, int y) => liqTw != null && x >= liqRx0 && x <= liqRx1 && y >= liqRy0 && y <= liqRy1;
+    void LiqLog(string s) { liqTw.WriteLine($"{liqSeq++} {s}"); }
     (int x, int y)? lsShimmer = shimmerXOut > 0 ? ((int x, int y)?)(shimmerXOut, shimmerYOut) : null;  // 以太中心
     int dgSide = dungeonRight ? 1 : -1;
     int dgEx0 = dgSide < 0 ? (int)(W * 0.05) : (int)(W * 0.55);
@@ -15171,6 +15189,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
             {
                 bufX[bufCount] = ax; bufY[bufCount] = ay; bufCount++;
                 checking[i] = 1;                            // LiquidBuffer.AddBuffer :115
+                if (LiqIn(ax, ay)) LiqLog($"B {ax} {ay} buf={bufCount} nl={numLiquid}");
             }
             return;
         }
@@ -15179,6 +15198,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         if (numLiquid < lq.Count) lq[numLiquid] = (ax, ay, 0, 0);
         else lq.Add((ax, ay, 0, 0));
         numLiquid++;
+        if (LiqIn(ax, ay)) LiqLog($"A {ax} {ay} nl={numLiquid}");
         // 岩浆/水冲毁死亡方块链（L1199 门）：生成期 isGeneratingOrLoadingWorld=true 不发击杀
     }
     void TilesIgnoreWater(bool on)
@@ -15332,6 +15352,8 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         int x = e.x, y = e.y;
         int i5 = y * W + x, il = i5 - 1, ir = i5 + 1, id = i5 + W;
         int amt = liq[i5];
+        bool mmTrace = LiqIn(x, y);
+        if (mmTrace) LiqLog($"D {x} {y} amt={amt} kill={e.kill} l={l} nl={numLiquid}");
         if (amt < 2)
         {
             liq[i5] = 0;
@@ -15382,6 +15404,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
             else if (liqT[i5] == 3) ShimmerCheck(x, y);
         }
         // swap-remove（:1193 只搬 x/y/kill，delay 保留本槽旧值）
+        if (mmTrace) LiqLog($"d {x} {y} -> {liq[i5]}");
         numLiquid--;
         checking[i5] = 0;
         var tail = lq[numLiquid];
@@ -15507,6 +15530,8 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         var e = lq[l];
         int x = e.x, y = e.y;
         int i5 = y * W + x;
+        bool mmTrace = LiqIn(x, y);
+        if (mmTrace) LiqLog($"U {x} {y} amt={liq[i5]} k={e.kill} l={l} nl={numLiquid} wc={wetCounter}");
         if (BlocksLiquid(x, y)) { lq[l] = (x, y, 999, e.delay); return; }
         int startAmt = liq[i5];
         if (y > H - 200 && liqT[i5] == 0 && liq[i5] > 0)    // 地狱蒸发：水每 tick -2
@@ -15605,6 +15630,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
             }
         }
         else lq[l] = (x, y, e.kill + 1, e.delay);
+        if (mmTrace) LiqLog($"u {x} {y} -> {liq[i5]} k={lq[l].kill}");
     }
     void UpdateLiquidInner()
     {
@@ -15764,6 +15790,8 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         byte type = srcType;
         int liquid = liq[oi];
         liq[oi] = 0;
+        bool mmS = LiqIn(originX, originY);
+        if (mmS) LiqLog($"S {originX} {originY} amt={liquid} t={srcType}");
         bool flag1 = true;
         for (; ; )
         {
@@ -15828,6 +15856,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         int fi = Y * W + X;
         liq[fi] = (byte)liquid;
         liqT[fi] = type;
+        if (mmS) LiqLog($"s {originX} {originY} -> {X} {Y} amt={liq[fi]} t={type}");
         if (liq[fi] > 0)
         {
             AttemptToMoveLiquid(X, Y, srcType, 1);
@@ -15898,13 +15927,28 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     foreach (var t in LS_WG_IGNORE) wgOff.Add(t);           // worldGenTilesIgnoreWater(true)
     QuickWater(3, -1);
     WaterCheck();
+    if (liqTw != null)                      // 首轮前区域快照（quickWater+waterCheck 后）
+    {
+        for (int y = liqRy0; y <= liqRy1; y++)
+            for (int x = liqRx0; x <= liqRx1; x++)
+                if (liq[y * W + x] > 0) LiqLog($"W {x} {y} {liq[y * W + x]} t{liqT[y * W + x]}");
+        LiqLog("WEND");
+    }
     quickSettle = true;
     for (int round = 0; round < 10; round++)
     {
         int maxIter = (numLiquid + bufCount) * 5;    // 轮预算=轮始活量×5（无下限）
         int roundIter = 0;
-        while (numLiquid > 0 && roundIter < maxIter) { UpdateLiquid(); roundIter++; }
+        if (liqTw != null) LiqLog($"ROUND {round} numLiquid={numLiquid} buf={bufCount} maxIter={maxIter}");
+        while (numLiquid > 0 && roundIter < maxIter) { if (liqTw != null) LiqLog($"C nl={numLiquid} wc={wetCounter}"); UpdateLiquid(); roundIter++; }
         WaterCheck();
+        if (liqTw != null)                      // 区域快照（轮末）
+        {
+            for (int y = liqRy0; y <= liqRy1; y++)
+                for (int x = liqRx0; x <= liqRx1; x++)
+                    if (liq[y * W + x] > 0) LiqLog($"W r{round} {x} {y} {liq[y * W + x]} t{liqT[y * W + x]}");
+            LiqLog($"WEND r{round} numLiquid={numLiquid}");
+        }
     }
     quickSettle = false;
     wgOff = new HashSet<ushort>();                          // worldGenTilesIgnoreWater(false)
@@ -15916,6 +15960,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     //   自本处【归位】到 FinalCleanup pass 体末（ShimmerCleanUp 之后）——原版实挂点；
     //   水侧（LiquidCheck(x,y,0)）整缺补全。settle 本体恢复 #49/#97 strip-only 原版口径。
     SOLID.Remove(484);                                      // pass 尾 tileSolid[484]=false（cs:21111）
+    liqTw?.Flush(); liqTw?.Close();                         // ★MMMMMM：区域液迹收口
 }
 Checkpoint("settle2");
 StreamPt("settle2");

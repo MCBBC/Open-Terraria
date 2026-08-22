@@ -2689,6 +2689,7 @@ export class UI {
     this.root.appendChild(this.buffBar);
     this.buffBlocks.clear();
     this.petBuffBlocks.clear();
+    this.nebulaBuffBlocks.clear();
     // 块按激活顺序动态创建（原版按 buff 槽序全量显示，无白名单——此前硬编码
     // 19 种，战斗/镇静/挖矿/糖分冲刺等 20+ 种永不显示）
   }
@@ -2837,6 +2838,69 @@ export class UI {
     if (liveBlocks.length && this.buffBar.lastElementChild !== liveBlocks[liveBlocks.length - 1]) {
       for (const b of liveBlocks) this.buffBar.appendChild(b);
     }
+    // ---- 星云增益派生通道（补 C ⚠️图标批：原版拾取星云 booster 即 AddBuff
+    //      173-181（NebulaLevelup Player.cs:56091-56121），buff 栏随档位显示
+    //      Buff_173-181.png；本仓等级/效果在 Player.nebula 主状态（效果消费
+    //      :1606/:1633/:3740-3746 已接），此处补图标派生层——等级>0 的族出块，
+    //      图标随档位换 Buff_{base+lvl-1}.png，倒计时=nebulaT）----
+    const nebStates = ([0, 1, 2] as const).map((fam) => {
+      const nb = this.game!.player.nebulaBuffIcons().find((n) => n.fam === fam) ?? null;
+      let ui = this.nebulaBuffBlocks.get(fam);
+      if (nb && !ui) {
+        ui = this.makeNebulaBlock(fam);
+        this.nebulaBuffBlocks.set(fam, ui);
+      }
+      return { nb, ui };
+    });
+    for (const { nb, ui } of nebStates) {
+      if (!ui) continue;
+      const u = ui;
+      if (!nb) {
+        u.block.style.display = 'none';
+        continue;
+      }
+      u.block.style.display = 'flex';
+      u.block.title = `${Lang.buffName(nb.vanillaBuff) ?? '星云'}：${Lang.buffDesc(nb.vanillaBuff) ?? ''}`;
+      u.time.textContent = Lang.text('Mods.SandboxWorld.Time.Seconds', nb.secs);
+      const want = remasterBuffIcon?.(nb.vanillaBuff) ?? `/sprites/vanilla/Buff_${nb.vanillaBuff}.png`;
+      if (!(u.icon as HTMLImageElement).src.endsWith(want)) {
+        (u.icon as HTMLImageElement).src = want;
+      }
+    }
+    const liveNeb = nebStates.filter((s) => s.nb && s.ui).map((s) => s.ui!.block);
+    if (liveNeb.length) {
+      const last = liveNeb[liveNeb.length - 1];
+      if (this.buffBar.lastElementChild !== last) for (const b of liveNeb) this.buffBar.appendChild(b);
+    }
+  }
+
+  /** 星云增益派生块（key = 族 0 伤/1 命/2 魔）。不进 BuffState——等级真值在
+   *  Player.nebula（NebulaLevelup :56091 逐级升/降），右键取消 = nebulaCancel
+   *  （原版右键 DelBuff → UpdateBuffs_NebulaBuffs :11660 派生链断,效果即停） */
+  nebulaBuffBlocks = new Map<0 | 1 | 2, { block: HTMLElement; icon: ImageBitmap | HTMLImageElement; time: HTMLElement }>();
+
+  private makeNebulaBlock(fam: 0 | 1 | 2): { block: HTMLElement; icon: ImageBitmap | HTMLImageElement; time: HTMLElement } {
+    const block = el('div', 'sw-buff');
+    block.style.display = 'none';
+    block.style.cssText += 'position:relative; width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer; flex:0 0 auto;';
+    const icon = el('img') as HTMLImageElement;
+    icon.draggable = false;
+    icon.style.cssText = 'width:32px; height:32px; image-rendering:pixelated; display:block; opacity:0.4; transition:opacity 0.2s linear;';
+    block.appendChild(icon);
+    const time = el('span', '', '');
+    time.style.cssText = 'position:absolute; left:-4px; right:-4px; top:34px; text-align:center; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
+    block.appendChild(time);
+    block.addEventListener('mouseenter', () => { icon.style.opacity = '1'; });
+    block.addEventListener('mouseleave', () => { icon.style.opacity = '0.4'; });
+    block.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (!this.game) return;
+      this.game.player.nebulaCancel(fam);
+      this.game.sfx.play('menuTick');          // SoundID 12（Main.cs:42793 非 debuff 取消）
+      this.refreshBuffs();
+    });
+    this.buffBar?.appendChild(block);
+    return { block, icon, time };
   }
 
   // Buff → 物品图标（仅作原版 Buff 贴图缺失时的兜底——正道是 Buff_{vanillaBuff}.png）

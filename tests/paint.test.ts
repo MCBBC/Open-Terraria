@@ -683,13 +683,15 @@ describe('SmartCursor 油漆三策略（SmartCursorHelper.cs:668-807）', () => 
 describe('史莱姆踩漆 lerp（NPC.cs:60971-61087）', () => {
   it('站在红漆上：颜色向 (255,0,0) 收敛、alpha 向 100 收敛（:60977-60981）', () => {
     const w = new World(64, 48, 7, 'slime-paint');
-    for (let x = 28; x < 36; x++) w.store.setTileSilent(x, 30, DIRT);
+    // 加固:漆面铺宽(史莱姆 AI 朝玩家跳,8 格窄面会走出界掉底——2026-08-22 flaky 定位)
+    for (let x = 8; x < 56; x++) w.store.setTileSilent(x, 30, DIRT);
     w.store.setPaintSilent(30, 30, 1);   // 红漆
+    for (let x = 8; x < 56; x++) if (x !== 30) w.store.setPaintSilent(x, 30, 1); // 全面红漆(排除 !=30 负相门)
     const e = Enemy.fromVanilla(1, 30 * TILE, 28 * TILE); // 绿史莱姆（type 1）
     expect(e).not.toBeNull();
     expect(e!.colorRGBA).not.toBeNull();
     const before = [...e!.colorRGBA!];
-    const p = new Player(4 * TILE, 20 * TILE, new Inventory());
+    const p = new Player(40 * TILE, 20 * TILE, new Inventory());   // 玩家放漆面中央上方,史莱姆双向跳跃不出界
     const h = hooks(w, p);
     for (let i = 0; i < 240 && !e!.dead; i++) e!.fixedUpdate(1 / 60, h);
     const after = e!.colorRGBA!;
@@ -714,7 +716,7 @@ describe('史莱姆踩漆 lerp（NPC.cs:60971-61087）', () => {
 
   it('无漆立足点 → 不变色（无 ai[1] 体内物品时全静默）', () => {
     const w = new World(64, 48, 7, 'slime-plain');
-    for (let x = 28; x < 36; x++) w.store.setTileSilent(x, 30, DIRT);
+    for (let x = 8; x < 56; x++) w.store.setTileSilent(x, 30, DIRT);   // 加固:宽台防走出界
     const e = Enemy.fromVanilla(1, 30 * TILE, 28 * TILE)!;
     const before = [...e.colorRGBA!];
     const h = hooks(w, new Player(4 * TILE, 20 * TILE, new Inventory()));

@@ -1,7 +1,11 @@
 // 最后的棱镜（Last Prism 3541）弹链 1:1：
 //   633 棱镜晶体（SetDefaults :6514）：14×18 aiStyle75 drawLayer7 magic，channel 主控。
 //     AI_075（:63626-63717）：ai[0]=charge（魔耗节奏 30→90t 后 15→120t 后 5）；
+//     damage=(int)(手持物 damage×player.magicDamage) 每拍刷新（:63630；632 光棱
+//     damage=projectile3.damage 逐拍同步 :30375）；
 //     ai[1] 每 tick 置 0：aim=鼠标向 lerp(prev,0.92) 平滑 ×shootSpeed(30)；
+//     晶体帧速 num40=ai0<120?4:1（:63686-63694）；充能音 Item15 每 20t 循环、
+//     首拍不播（:63693-63700，UseSound=null 故为 channel 期唯一音源）；
 //     channel&&mana&&!noItems&&!CCed 存活，charge==1 时生成 6×632 光棱；
 //     断 channel → Kill。
 //   632 光棱（SetDefaults :6525）：18×18 aiStyle84 alpha255 tileCollide=false。
@@ -183,13 +187,21 @@ export class PrismProj extends Entity {
   channelCb: () => boolean;
   aimCb: () => { x: number; y: number };
   payMana: () => boolean;
+  /** 每拍伤害刷新（:63630 damage=(int)(手持物 damage×player.magicDamage)）——Game 注入
+   *  trunc(手持物面板(含词缀)×player.damageMult('magic'))；缺省 = 出生定死（旧路径/测试） */
+  dmgCb?: () => number;
   prongs: PrismProng[] = [];
   dead = false;
-  private frame = 0;
+  /** 帧计数器/当前帧（原版 frameCounter/frame，:63686-63694） */
+  private frameCounter = 0;
+  private crystalFrame = 0;
+  /** 充能音 soundDelay（:63693-63700：num38=10×2=20t 循环） */
+  private sndT = 0;
   private spawnGuard = false;
 
   constructor(dirX: number, dirY: number, damage: number, knockback: number,
-    channelCb: () => boolean, aimCb: () => { x: number; y: number }, payMana: () => boolean) {
+    channelCb: () => boolean, aimCb: () => { x: number; y: number }, payMana: () => boolean,
+    dmgCb?: () => number) {
     super();
     const n = Math.hypot(dirX, dirY) || 1;
     this.dirX = dirX / n * 30; this.dirY = dirY / n * 30;   // shootSpeed 30
@@ -198,14 +210,21 @@ export class PrismProj extends Entity {
     this.channelCb = channelCb;
     this.aimCb = aimCb;
     this.payMana = payMana;
+    this.dmgCb = dmgCb;
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    this.frame++;
     // 魔耗节奏（:63628-63636：>90t 15 拍、>120t 5 拍，否则 30 拍）
     this.charge++;
     const cadence = this.charge > 120 ? 5 : this.charge > 90 ? 15 : 30;
+    // 伤害动态刷新（:63630）：damage=(int)(手持物 damage×player.magicDamage) 每拍重算
+    // ——MagicPower/魔力眩晕/魔力过热等乘区变动即时生效（曾出生定死）；632 光棱逐拍
+    // 同步 damage=projectile3.damage（:30375；满充 ×3 :30376-30378 在 PrismProng 命中侧另乘）
+    if (this.dmgCb) {
+      this.damage = this.dmgCb();
+      for (const q of this.prongs) q.damage = this.damage;
+    }
     if (this.charge % cadence === 0 && !this.payMana()) { this.dead = true; this.killProngs(); return; }
     // aim 平滑（:63662-63676）：value7=Normalize(瞄准向) 先归一，再
     // Lerp(value7, Normalize(velocity), 0.92)（曾漏归一直接 0.08×原始差——鼠标
@@ -219,8 +238,27 @@ export class PrismProj extends Entity {
     let my = ay * 0.08 + (this.dirY / pd) * 0.92;
     const ml = Math.hypot(mx, my) || 1;
     this.dirX = mx / ml * 30; this.dirY = my / ml * 30;
+    // 晶体帧速（:63686-63694）：frameCounter++，num40 = ai0<120 ? 4 : 1（充能期
+    // 4t/帧、≥120t 后 1t/帧——曾恒 3t/帧）；≥num40 归零并 ++frame（≥5 回 0）
+    this.frameCounter++;
+    const num40 = this.charge < 120 ? 4 : 1;
+    if (this.frameCounter >= num40) {
+      this.frameCounter = 0;
+      if (++this.crystalFrame >= 5) this.crystalFrame = 0;
+    }
+    // 充能嗡鸣（:63693-63700）：soundDelay=num38(10)×2=20t 循环，ai0==1 首拍不播
+    // （633 UseSound=null，channel 期唯一音源；播放接法同 460 :63504-63512 先例）
+    if (this.sndT <= 0) {
+      this.sndT = 10 * 2;
+      if (this.charge !== 1) game.playSfxFiles(['Item_15'], 1, this.cx, this.cy);
+    }
+    this.sndT--;
     // channel 门（:63700-63717）：断 channel/noItems/CCed → Kill
     if (!this.channelCb()) { this.dead = true; this.killProngs(); return; }
+    // channel 期用魔动画续期（Player.cs:43143-43146 itemAnimation 持续>0 每帧
+    // ItemCheck_ApplyManaRegenDelay → delay 钉 4 = 全程 5% 滴流回蓝；2026-08-22
+    // 审计 ❌ 修复——棱镜充能 120t+ 远超 useTime 10t,不续期则白嫖魔力）
+    game.player.onChannelManaHold?.();
     // 挂玩家手（heldProj 语义：parent.Center 即光棱轨道圆心）
     const pl = game.player as unknown as { cx: number; cy: number } | null;
     if (!pl) { this.dead = true; this.killProngs(); return; }
@@ -247,12 +285,13 @@ export class PrismProj extends Entity {
   }
 
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
-    // 晶体本体（Projectile_633.png 26×120 = 5 帧；帧按充能推进≈3t/帧）
+    // 晶体本体（Projectile_633.png 26×120 = 5 帧；帧速 :63686-63694——充能 4t/帧、
+    // ≥120t 后 1t/帧，由 fixedUpdate 推进 crystalFrame）
     const img = projSprite(633);
     const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const fh = img.height / 5;
-    const f = Math.floor(this.frame / 3) % 5;
+    const f = this.crystalFrame;
     const rot = Math.atan2(this.dirY, this.dirX);
     ctx.save();
     ctx.translate(this.cx, this.cy);
@@ -265,9 +304,11 @@ export class PrismProj extends Entity {
 
 /** 充能爆破炮 2882 → 460/461/459（AI_075 :63442-63620 的 460 分支 + AI_84 461 锚定）：
  *  460 晶体：channel 主控；ai[0] 计数（80=二档尘/180=满蓄 flag4）；每 5t 重瞄
- *  （vel=归一瞄准向）；音 Item15 按 (5−档)×2 间隔；459 小弹发射点 = ai0==1、
- *  ≤50 每 10t、80-180 每 30t（速度 10）；ai0==180 发 461 光束（伤害×1.5）后
- *  光束灭即亡。命中 461 = 线碰撞 22×scale（:14612-14620）+ LaserScan 2400。 */
+ *  （vel=归一瞄准向）；音 Item15 按 (5−档)×2 间隔；魔耗节点 = 80t/180t/满蓄后每 20t
+ *  （:63454-63459 flag3 + :63562-63563 flag6）；459 小弹发射点 = ai0==1、
+ *  ≤50 每 10t、80-180 每 30t（速度 10；二段 num35=0.7+num20×0.3≥1 → 伤害×2.5
+ *  :63610-63611）；ai0==180 发 461 光束（伤害×1.5）后光束灭即亡。
+ *  命中 461 = 线碰撞 22×scale（:14612-14620）+ LaserScan 2400。 */
 export class BlasterBeam extends Entity {
   w = 18; h = 18;
   damage: number;
@@ -379,8 +420,8 @@ export class ChargedBlaster extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.charge++;
-    const full = this.charge >= 180;
-    const stage = (this.charge >= 180 ? 2 : this.charge >= 80 ? 1 : 0);
+    const full = this.charge >= 180;                                        // flag4（:63460）
+    const stage = (this.charge >= 180 ? 2 : this.charge >= 80 ? 1 : 0);     // num20（:63445-63453）
     // 重瞄（:63476-63496：满蓄前 ai1≥5 门、满蓄 ai0%5）
     if (!full) this.aimCd++;
     if ((!full && this.aimCd >= 5) || (full && this.charge % 5 === 0)) {
@@ -398,36 +439,49 @@ export class ChargedBlaster extends Entity {
     this.sndT--;
     // channel 门（:63562-63565）——断链即亡
     if (!this.channelCb()) { this.dead = true; if (this.beam) this.beam.dead = true; return; }
+    // channel 期用魔动画续期（Player.cs:43143-43146 itemAnimation 持续>0 每帧
+    // ItemCheck_ApplyManaRegenDelay → delay 钉 4 = 全程 5% 滴流回蓝；2026-08-22
+    // 审计 ❌ 修复——蓄力 180t+ 远超 useTime,不续期则白嫖魔力）
+    game.player.onChannelManaHold?.();
     // 挂手
     const pl = game.player as unknown as { cx: number; cy: number } | null;
     if (!pl) { this.dead = true; return; }
     this.x = pl.cx - this.w / 2;
     this.y = pl.cy - this.h / 2;
+    // 魔耗节点（:63454-63459 flag3 = 80t / 180t / 满蓄后每 20t；结算式 :63562-63563
+    // flag6 = !flag3 || CheckMana(mana, pay:true)——只在 flag3 拍扣魔（flag3 拍必落
+    // 在 flag5 发射拍内：80=ai1 满 5、180 与 %20 均 %5==0），曾错成每发 459 小弹扣。
+    // 扣魔失败 → Kill（:63564-63565 else 分支；1457 ManaV2 payMana 恒放行）
+    const flag3 = this.charge === 80 || this.charge === 180
+      || (this.charge > 180 && this.charge % 20 === 0);
+    if (flag3 && !this.payMana()) {
+      this.dead = true; if (this.beam) this.beam.dead = true; return;
+    }
     if (!full) {
-      // 459 小弹（:63592-63620：ai0==1 / ≤50 每 10t / 80-180 每 30t；速度 10）
+      // 459 小弹（:63590-63612 flag7：ai0==1 / ≤50 每 10t / 80-180 每 30t；速度 10）
       const fire = this.charge === 1
         || (this.charge <= 50 && this.charge % 10 === 0)
-        || (this.charge >= 80 && this.charge % 30 === 0);
-      if (fire && this.payMana()) {
+        || (this.charge >= 80 && this.charge < 180 && this.charge % 30 === 0);
+      if (fire) {
+        // 二段伤害（:63610-63611）：num35 = 0.7 + num20×0.3（num20=0/1/2 → 0.7/1.0/1.3），
+        // num35<1 ? damage : (int)(damage×2.5)。C# float 0.7f+0.3f 恰 = 1.0f（80t 起即
+        // ×2.5）；JS 双精 0.7+0.3=0.9999999999999999 不可直接比，按 num20 判门；(int)=截断
+        const num36 = stage === 0 ? this.damage : Math.trunc(this.damage * 2.5);
         const bolt = new Arrow(this.cx, this.cy, this.dirX * 10, this.dirY * 10,
-          this.damage, this.knockback, 459, null,
+          num36, this.knockback, 459, null,
           { grav: 0, life: 600, pierce: 1 });
         bolt.critChance = this.critChance;
         bolt.armorPen = this.armorPen;
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(bolt, 'projectiles');
       }
     } else if (this.charge === 180) {
-      // 满蓄发 461 光束（伤害 ×1.5，:63569-63578）
-      if (this.payMana()) {
-        const beam = new BlasterBeam(Math.round(this.damage * 1.5), this.knockback);
-        beam.parent = this;
-        beam.critChance = this.critChance;
-        beam.armorPen = this.armorPen;
-        this.beam = beam;
-        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(beam, 'projectiles');
-      } else {
-        this.dead = true; return;
-      }
+      // 满蓄发 461 光束（:63566-63578，(int)(damage×1.5) 截断）——魔耗已由 flag3@180 支付
+      const beam = new BlasterBeam(Math.trunc(this.damage * 1.5), this.knockback);
+      beam.parent = this;
+      beam.critChance = this.critChance;
+      beam.armorPen = this.armorPen;
+      this.beam = beam;
+      (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(beam, 'projectiles');
     } else if (this.beam?.dead) {
       this.dead = true; return;      // 光束灭即亡（:63580-63587）
     }

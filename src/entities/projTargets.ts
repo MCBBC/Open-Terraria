@@ -135,6 +135,38 @@ export function playerCanHitEnemy(
  *  的 FixedSelfDamageForPlayers 定伤链） */
 const SKIP_DAMAGE_EVP = new Set([108, 164, 1002]);
 
+/** NPC.coldDamage 寒冷系敌弹表（Projectile.cs SetDefaults 逐型 coldDamage = true，
+ *  1.4.5.6 全 29 型——冰雪族弹幕：冰块 80/敌雪球 109/冰回力镖 113/冰霜弹 118-120/
+ *  霜燃箭 172/冰锥 174/霜弹 253/霜光束 257/冰镰 263/北地长矛族 342-344/霜波 348 等）
+ *  ——消费 = 温暖(124) resistCold 受击 ×0.7（Projectile.cs:13764-13766 Damage_EVP
+ *  段：banner 后、难度乘区前） */
+export const COLD_DAMAGE_PROJS: ReadonlySet<number> = new Set([
+  80, 109, 113, 118, 119, 120, 128, 166, 172, 174, 177, 253, 257, 263,
+  308, 309, 337, 342, 343, 344, 348, 349, 359, 520, 912, 917, 961, 962, 979,
+]);
+
+/** NPC.coldDamage 寒冷系敌怪表（NPC.cs SetDefaults 逐型 coldDamage = true，
+ *  1.4.5.6 全 16 型）——消费 = 温暖(124) resistCold 接触伤 ×0.7
+ *  （Player.cs:30961-30963 NPC 接触循环：thorns 后、Hurt 前） */
+export const COLD_DAMAGE_NPCS: ReadonlySet<number> = new Set([
+  143, // Snowman Gangsta
+  144, // Mister Stabby
+  145, // Snow Balla
+  147, // Ice Slime
+  150, // Ice Bat
+  154, // Ice Tortoise
+  169, // Ice Elemental
+  184, // Spiked Ice Slime
+  185, // Snow Flinx
+  206, // Icy Merman
+  243, // Ice Golem
+  343, // Yeti
+  345, // Ice Queen
+  352, // Flocko
+  629, // Ice Mimic
+  668, // Deerclops
+]);
+
 export function hitPlayer(
   self: { x: number; y: number; w: number; h: number },
   game: GameHooks,
@@ -153,6 +185,12 @@ export function hitPlayer(
   if (p.dead) return false;
   if (p.iframes > 0) return false; // 原版 :13732 player.immune 门禁（General 槽）
   if (!projOverlap(self.x, self.y, self.w, self.h, p)) return false;
+  // 温暖(124) resistCold：寒冷系敌弹 ×0.7（Projectile.cs:13764-13766——banner 段后、
+  // hostileDamageScaling 前；(int) 截断）。PvP 弹走 Damage_PVP 无此段,不乘
+  if (!pvp && evpId !== undefined && COLD_DAMAGE_PROJS.has(evpId)
+    && p.buffs.has(BuffType.Warmth)) {
+    dmg = Math.trunc(dmg * 0.7);
+  }
   const ifr = p.iframes;
   // ★ 玩家受伤难度乘区 + 全局 ×2（Projectile.cs:13770-13778，Damage_EVP 段）：
   //   `if (!reflected) num3 = (int)(num3 * hostileDamageScaling.Sample(Main.Difficulty));`

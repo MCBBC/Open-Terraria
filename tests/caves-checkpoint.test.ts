@@ -161,6 +161,8 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
       { const fx = Buffer.alloc(n * 2), fy = Buffer.alloc(n * 2);
         for (let i = 0; i < n; i++) { fx.writeUInt16LE(st.frameX[i] & 0xffff, i * 2); fy.writeUInt16LE(st.frameY[i] & 0xffff, i * 2); }
         writeFileSync(`${dir}.frx`, fx); writeFileSync(`${dir}.fry`, fy); }
+      // ★LLLLLL：liquidType 导出（(3544,649) 幽灵泥 4 单元水案——无掷逻辑分歧需 lty 通道对拍）
+      writeFileSync(`${dir}.lty`, st.liquidType);
     }
     // ★FFFFFF：逐掷账追踪窗钩子（dormant——__cavesTrace 存在时命中名置全局 trace 开关；
     //   探针 _ffff1 在 UnifiedRandom 原型上挂账本，读此开关决定是否记账）
@@ -318,7 +320,8 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
 /** settleWorldLiquids(world,'gen') 的同步镜像（src/liquid/settle.ts gen 路径零 await 版）——
  *  掷骰走 pass 链流（passRand=rng），与 oracle settle2 段同构：quickWater → waterCheck →
  *  10 轮 quickSettle updateLiquid（轮预算=轮始活量×5 恒跑满）→ 尾部 waterCheck →
- *  finalGenMergeCheck + tileSolid[484]=false。 */
+ *  tileSolid[484]=false（finalGenMergeCheck 不在此——DDDDDD 归位 FinalCleanup 体末，
+ *  链侧由 finalcleanup 名前 finalGenMergeScan 承接，MMMMMM 批）。 */
 function settlePart2ChainSync(world: World, st: TileStore, gs: GenState, rng: RNG): void {
   const sim = new LiquidSim(world);
   const rollLog = typeof process !== 'undefined' && !!process.env.QQ_ROLL_LOG;
@@ -367,7 +370,11 @@ function settlePart2ChainSync(world: World, st: TileStore, gs: GenState, rng: RN
   // ★VVV 门镜像（2026-08-18 BBBB）：gen 尾恢复后【无】waterCheck（settle.ts :100-108——
   //   尾部 WaterCheck 仅读档路径；借读档尾会把 10/190/191/192 翻实心后轮内合法驻留
   //   液体整片清零，#49 活木水池 L=47 根因）。曾无条件跑 → settle2 链值偏离 oracle。
-  sim.finalGenMergeCheck();
+  // ★MMMMMM（2026-08-22）：finalGenMergeCheck 曾残留此处（DDDDDD 前的旧挂点）——原版
+  //   全图 LiquidCheck(createMergeTilesDuringGen:true)（cs:22639-50）实挂 FinalCleanup
+  //   pass 体末（ShimmerCleanUp 后），#97 沉降尾无此扫。残留致 settle2 即清薄水膜
+  //   （seed2 (3544,649) 4 单元水膜坐蜜上→case B <24 抹零），settle2/cactus/microbiomes
+  //   三名液通道对 oracle 恒红；finalGenMergeScan 已在 finalcleanup 名前直调（:315）。
   sim.dispose();
   // pass 尾 tileSolid[484]=false（cs:21111，liquidSettlePass 同款——desert 头已翻，幂等）
   flipGenSolid([484], false);

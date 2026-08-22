@@ -82,11 +82,97 @@ describe('WorldStore', () => {
 
 describe('SeedEasterEggs', () => {
   it('彩蛋种子识别（去分隔符小写）', () => {
-    expect(parseSeed('not the bees').flags.crimsonForce).toBe(true);
+    expect(parseSeed('not the bees').flags.notTheBees).toBe(true);
     expect(parseSeed('ForTheWorthy').flags.getGoodWorld).toBe(true);
     expect(parseSeed('05162020').flags.drunkWorld).toBe(true);
     expect(parseSeed('getfixedboi').flags.everything).toBe(true);
     expect(parseSeed('普通种子').flags).toEqual({});
+  });
+
+  it('特殊种子 int 路（S0-2：零填充/正负号/CRC 碰撞串经 TranslateSeed 比对命中）', () => {
+    // drunk：唯一纯数字路由（SpecialSeedValues {5162020}，SpecialSeedNames 为空）
+    expect(parseSeed('5162020').flags.drunkWorld).toBe(true);
+    expect(parseSeed('005162020').flags.drunkWorld).toBe(true);
+    expect(parseSeed('-5162020').flags.drunkWorld).toBe(true);
+    expect(parseSeed(' 5162020 ').flags.drunkWorld).toBe(true);
+    // CRC32 碰撞串（大小写敏感，对原文算；int 路比对=TranslateSeed 有符号直比，无 Abs）
+    expect(parseSeed('now aunt brush').flags.drunkWorld).toBe(true);
+    expect(parseSeed('disapprove stiff solution').flags.drunkWorld).toBe(true);
+    // "Joke Disappear Horizon" 的 CRC32 = -5162020（负）——原版 GetOptionFromSeedText
+    // 对 CRC 路不做 Abs（WorldFileData.cs:399-410 Abs 只在 int.TryParse 分支），
+    // 有符号比对不命中（wiki 该条目与反编译码不符，以码为准）
+    expect(parseSeed('Joke Disappear Horizon').flags.drunkWorld).toBeFalsy();
+    // 自造别名退役：原版 SpecialSeedNames 为空
+    expect(parseSeed('drunkworld').flags.drunkWorld).toBeFalsy();
+    // celeb：{5162021, 5162011} int 路 + celebrationmk10 文本路
+    expect(parseSeed('05162021').flags.tenthAnniversary).toBe(true);
+    expect(parseSeed('-5162011').flags.tenthAnniversary).toBe(true);
+    expect(parseSeed('celebration mk10!').flags.tenthAnniversary).toBe(true);
+    expect(parseSeed('5162021').flags.tenthAnniversary).toBe(true);
+  });
+
+  it('getfixedboi 七依赖全置（WorldSeedOption_Everything.Dependencies，S0-2 补齐）', () => {
+    const f = parseSeed('getfixedboi').flags;
+    expect(f.everything).toBe(true);
+    expect(f.remix).toBe(true);
+    expect(f.drunkWorld).toBe(true);
+    expect(f.notTheBees).toBe(true);
+    expect(f.noTraps).toBe(true);
+    expect(f.theConstant).toBe(true);
+    expect(f.tenthAnniversary).toBe(true);
+    expect(f.getGoodWorld).toBe(true);
+  });
+
+  it('秘密种子明文路由 37/37（明文经 BCrypt 对注册码逐枚验证，S0-2）', () => {
+    const CASES: Array<[string, keyof import('../src/world/gen/SeedEasterEggs').SeedFlags]> = [
+      ['monochrome', 'paintEverythingGray'],
+      ['negative infinity', 'paintEverythingNegative'],
+      ['invisible plane', 'coatEverythingEcho'],
+      ['x-ray vision', 'coatEverythingIlluminant'],
+      ['mole people', 'noSurface'],
+      ['save the rainforest', 'extraLivingTrees'],
+      ['the care bears movie', 'extraFloatingIslands'],
+      ['I am error', 'errorWorld'],
+      ['night of the living dead', 'graveyardBloodmoonStart'],
+      ['such great heights', 'surfaceIsInSpace'],
+      ['bring a towel', 'rainsForAYear'],
+      ['abandoned manors', 'biggerAbandonedHouses'],
+      ['how did I get here', 'randomSpawn'],
+      ['beam me up', 'addTeleporters'],
+      ['too easy', 'startInHardmode'],
+      ['fish mox', 'noInfection'],
+      ['does that sparkle', 'hallowOnTheSurface'],
+      ['purify this', 'infectedSeed'],
+      ['toadstool', 'surfaceIsMushrooms'],
+      ['sandy britches', 'surfaceIsDesert'],
+      ['truck stop', 'pooEverywhere'],
+      ['arachnophobia', 'noSpiderCaves'],
+      ['more traps please', 'actuallyNoTraps'],
+      ['rainbow road', 'rainbowStuff'],
+      ['jagged rocks', 'digExtraHoles'],
+      ['planetoids', 'roundLandmasses'],
+      ['waterpark', 'extraLiquid'],
+      ["we don't even test for that", 'portalGunInChests'],
+      ['winter is coming', 'worldIsFrozen'],
+      ['pumpkin season', 'halloweenGen'],
+      ['hocus pocus', 'endlessHalloween'],
+      ['jingle all the way', 'endlessChristmas'],
+      ['what a horrible night to have a curse', 'vampireSeed'],
+      ['royale with cheese', 'teamBasedSpawns'],
+      ['double daring dangers', 'dualDungeons'],
+      ['electric boogaloo', 'moreLightning'],
+      ['calm before the storm', 'noLightning'],
+    ];
+    expect(CASES).toHaveLength(37);
+    for (const [plain, flag] of CASES) {
+      const f = parseSeed(plain).flags as Record<string, boolean>;
+      expect(f[flag as string], plain).toBe(true);
+    }
+    // 归一化变体同门 + 非明文不误触
+    expect(parseSeed('bEam-me_Up!').flags.addTeleporters).toBe(true);
+    expect(parseSeed('dracula').flags.vampireSeed).toBeFalsy();
+    // 秘密种子不产特殊世界名（原版两体系独立）
+    expect(parseSeed('monochrome').specialName).toBeNull();
   });
 
   it('特殊世界名映射', () => {

@@ -104,13 +104,14 @@ export enum BuffType {
                    //   840t/专家 960t）；消费点 Projectile.cs:12879/12885/27124。
                    //   本仓吸血/治疗弹链未实装，效果位 getter 备用；
                    //   载荷在 NPC 401 召唤门禁（bossAI_duke_moonlord）
-  KiteBuff = 75,   // 风筝(383)：移速 +15% / 镐速 −10% / 放置速度 +15%（1457 :10003-10006
-                   //   由 +25%/−15% 削；tileSpeed/wallSpeed +0.15 不变）+
+  KiteBuff = 75,   // 风筝(383)：移速 +25% / 镐速 −15% / 放置速度 +15%（1456 :9612-9616——
+                   //   曾取 1457 :10003-10006 的 +15%/−10%，按仓内标杆改回 1456 终值）+
                    //   kiteLuckLevel 三档 = clamp(buffTime/10800,0,3)（:9618-9623，
                    //   luck += 档×0.1/3 :28675）。授予物品（风筝族 4371 等）未移植，登记
   Stinky = 76,     // 恶臭(120)：luck −0.25（:9958-9961 stinky / :28687-28690）。
-                   //   授予 = 恶臭药水 1332 / 弹幕 1080 命中（Projectile.cs:67585-67590
-                   //   ApplyBuffTo(120,600)）——物品与弹体未移植，登记
+                   //   授予 = 臭味药水 2353 投掷弹 371（Foul Potion）消亡 80px 内
+                   //   ApplyBuffTo(120,1800t=30s)（Projectile.cs:75203-75228，玩家+NPC）
+                   //   / 鸟粪弹 1080 命中 600t=10s（:67585-67590，PoopProj 已接）
   Werewolf = 71,     // 狼人(28,月亮符 485 夜间)：melee +5.1%伤/+2暴/+5.1%速（:11488-11498）
   BrainOfConfusionBuff = 72,
   Weak = 73,         // 虚弱(33,狼人 155 命中施加)：近战-5.1%伤/速、防-4、移速-10%（:11506-11511） // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
@@ -161,6 +162,10 @@ export enum BuffType {
   Invisibility = 94,  // 隐身(10)：生成环 spawnRate×1.2/maxSpawns×0.8（NPC.cs:611-615）
                       //   ——授予链 = 隐身药水 297（10800t=3min）。敌怪索敌无视未移植
                       //   （stealth 子系统登记）
+  Silenced = 70,      // 沉默(35)：mana>0 物品整支不可用（Player.cs:9737 silence=true →
+                      //   :51383-51385 `sItem.mana > 0 && silence` CanUse=false）。
+                      //   授予链 = 红药水 678 固定 11 减益（:42271-42283，2026-08-22
+                      //   补 B 批）；专家/大师时长 ×2/×2.5（BuffID.cs:28 集内）
   // ---- R10 敌弹 StatusPlayer 全量批（Projectile.StatusPlayer :11450-11722 授予链，
   //      表驱动结算 = entities/projTargets.ts statusPlayer + data/vanilla-statusplayer.json）----
   Darkness = 95,      // 黑暗(22)：blind=true（Player.cs:11318-11321）→ 光衰减 air/solid
@@ -222,11 +227,12 @@ export enum BuffType {
                        //   （:10416-10429 线性衰减），ResetEffects 每帧清 1f（:18709）。
                        //   药水 189/500/2209 的 ApplyManaPotionManaHeat 表(0.05/0.10/0.15
                        //   ×20s)在 1457 为死代码（无调用点），不接线
-  Warmth = 112,        // 温暖(124)：resistCold=true（:10370-10372）——获得时立即把已有
-                       //   Chilled(46) ÷4 / Frozen(47) ÷2（下限 5t，AddBuff_ReduceTimeOfRelatedBuffs
-                       //   :5292-5315）；resistCold 在场时施加 46/47 时长同样 ÷4/÷2
-                       //   （AddBuff_DetermineBuffTimeToAdd :5429-5437）+ 寒冷伤减免
-                       //   （:31657，消费在受击链）。授予 = 暖冬药水（物品侧未接线则仅登记）
+  Warmth = 112,        // 温暖(124)：resistCold=true（:9963-9965）——寒冷系敌怪/敌弹
+                       //   受击 ×0.7（NPC 接触 :30961-30963 / 弹幕 :13764-13766，消费在
+                       //   Game.damagePlayer + projTargets.hitPlayer）。★46/47 削时（÷4/÷2）
+                       //   为 1.4.5.7 新增（wiki Desktop 1.4.5.7），1456 反编译无此逻辑
+                       //   （AddBuff 全链 :5066-5203 无 Warmth 分支）——本仓按 1457 保留，
+                       //   已备案。授予 = 暖冬药水 2359（vi_2359 桥接 900s）
   // ---- 1457 新敌怪 debuff 家族（diff 批 2；BuffID.cs:961-971；仅 StatusNPC 侧，
   //      玩家不吃——不进 BuffState.DEBUFFS。施加源 = 1457 Projectile.cs:11203 毒液
   //      浸剂伴发 395 / :11685 弹 282-283 / :11732 弹 1127 / :11195 催化腕带
@@ -252,6 +258,81 @@ export enum BuffType {
   PalworldMountTrustyChilletIgnis = 121, // 可靠的疾旋火鼬(392,1457 新,坐骑 65)
   ClayPotMinion = 122,                   // 黏土蓓蕾(393,1457 新)
   ForbiddenMinion = 123,                 // 禁戒遗迹(394,1457 新)
+  // ---- 58 缺口轻项批（2026-08-22 全道具审计：46 件——宠物/光宠/坐骑骑乘态/
+  //      召唤物伴生/星云增益/事件标记。原版也仅在 Draw/标记层消费（UpdateBuffs
+  //      无属性 case，或效果在 pet/mount/minion 本体状态位）→ 补 BUFF_DEFS 条目后
+  //      Game.ts BUFF_BY_VANILLA 反查即可施加、UI buff 栏 Buff_N.png 图标即可显示，
+  //      无需消费逻辑。★枚举值 200+ 起避让既有 0-123 段（74 空位留给后续小批）。
+  //      名称一律取原版 BuffID 内部名（idNames.generated BUFF_NAME_BY_ID 同源）----
+  ShadowOrb = 200,             // 暗影珠(19,←115 暗影珠)：光源宠
+  FairyBlue = 201,             // 仙灵(27,←425 仙灵珠；QuickBuff 三选一 27/101/102)
+  BabyEater = 202,             // 吞噬怪宝宝(45,←603)：宠物
+  Pygmies = 203,               // 矮人(49,←1157 矮人项链)：召唤物伴生
+  BabySkeletronHead = 204,     // 骷髅王头宝宝(50,←1169)：宠物
+  BabyHornet = 205,            // 黄蜂宝宝(51,←1170)：宠物
+  TikiSpirit = 206,            // 提基幽魂(52,←1171)：宠物
+  PetLizard = 207,             // 宠物蜥蜴(53,←1172)：宠物
+  PetParrot = 208,             // 宠物鹦鹉(54,←1180)：宠物
+  BabyTruffle = 209,           // 松露人宝宝(55,←1181)：宠物
+  PetSapling = 210,            // 宠物树苗(56,←1182)：宠物
+  Wisp = 211,                  // 妖灵(57,←1183 僵尸手指)：光宠
+  BabyDinosaur = 212,          // 恐龙宝宝(61,←1242)：宠物
+  BabySlime = 213,             // 史莱姆宝宝(64,←1309 史莱姆杖)：宠物
+  EyeballSpring = 214,         // 弹簧眼(65,←1311)：宠物
+  BabySnowman = 215,           // 雪人宝宝(66,←1312)：宠物
+  PetSpider = 216,             // 宠物蜘蛛(81,←1798)：宠物
+  Squashling = 217,            // 南瓜娃娃(82,←1799)：宠物
+  Ravens = 218,                // 乌鸦(83,←1802 乌鸦法杖)：召唤物伴生
+  BlackCat = 219,              // 黑猫(84,←1810)：宠物
+  CursedSapling = 220,         // 诅咒树苗(85,←1837)：宠物
+  Puppy = 221,                 // 小狗(91,←1927)：宠物
+  BabyGrinch = 222,            // 格林奇宝宝(92,←1959)：宠物
+  SpiderMinion = 223,          // 蜘蛛(133,←2551 蜘蛛法杖)：召唤物伴生
+  TwinEyesMinion = 224,        // 双子魔眼(134,←2535 双子魔眼法杖)：召唤物伴生
+  PirateMinion = 225,          // 海盗(135,←2584 海盗法杖)：召唤物伴生
+  MiniMinotaur = 226,          // 福恩(136,←2587)：宠物
+  MagicLantern = 227,          // 魔法灯笼(152,←3043)：光宠（敌怪高亮标记层）
+  BabyFaceMonster = 228,       // 脸怪宝宝(154,←3060)：宠物
+  CrimsonHeart = 229,          // 猩红之心(155,←3062)：光宠
+  DeadlySphere = 230,          // 致命球(161,←3249 致命球法杖)：召唤物伴生
+  NebulaUpLife1 = 231,         // 生命星云(173,←3454)：星云塔增益标记（效果在
+                               //   nebulaLeveler 主状态,原版 UpdateBuffs 亦无 case）
+  NebulaUpMana1 = 232,         // 魔力星云(176,←3455)：同上
+  NebulaUpDmg1 = 233,          // 伤害星云(179,←3453)：同上
+  StardustMinion = 234,        // 星尘细胞(182,←3474 星尘细胞法杖)：召唤物伴生
+  StardustDragonMinion = 235,  // 星尘之龙(188,←3531 星尘之龙法杖)：召唤物伴生
+  SuspiciousTentacle = 236,    // 可疑眼球(190,←3577 月总掉落)：光宠（自动攻击标记层）
+  PetDD2Gato = 237,            // 飞翔Gato(200,←3857 DD2 宠物)：宠物
+  PetDD2Ghost = 238,           // 闪烁灯芯(201,←3856 DD2 宠物)：宠物
+  BatOfLight = 239,            // 血红蝙蝠(213,←4269 吸血鬼小蝙蝠杖)：召唤物伴生
+  VampireFrog = 240,           // 吸血鬼青蛙(214,←4273 吸血鬼青蛙法杖)：召唤物伴生
+  BabyBird = 241,              // 雀宝宝(216,←4281)：宠物
+  StormTiger = 242,            // 沙漠虎(263,←4607 沙漠虎法杖)：召唤物伴生
+  Smolstar = 243,              // 附魔飞刀(271,←4758 附魔飞刀)：召唤物伴生
+  AbigailMinion = 244,         // 阿比盖尔(335,←5114 深渊之歌)：召唤物伴生
+  DeadCellsMushroomBoiMinion = 245, // 蘑菇小伙伴(355,←5456 DeadCells 站掉落)：召唤物伴生
+  TorchGodPotion = 247,       // 火把祝福(376,←5573 火把神药水)：驱动 TorchGodsFlavor
+                              //   群系火把自动转换（Player.cs:10594-10596/:39529——
+                              //   转换弹 1084 事件系统未建,登记 #157）
+  FairyRed = 248,             // 红仙灵(101,←425 仙灵铃三选一)：光宠标记
+  FairyGreen = 249,           // 绿仙灵(102,←425 仙灵铃三选一)：光宠标记
+  // ---- 随从杖伴生 buff 泛化批（2026-08-22 补 C「24 件随从杖伴生 buff 全缺施加链」：
+  //      8 件缺 DEFS 的重项——ItemCheck_ApplyPetBuffs（Player.cs:52226-52440）点名
+  //      的召唤杖 buffType。枚举名一律取原版 BuffID 内部名（58 缺口批同约定）；
+  //      名称/描述走原版 BuffName/BuffDescription（zh-Hans/en-US 语料在键,含 385/386
+  //      帕鲁两条——1456 语料已含帕鲁文案）。图标 Buff_N.png 已在盘 ----
+  HornetMinion = 250,          // 黄蜂(125,←2364 黄蜂法杖,弹373)：召唤物伴生
+  ImpMinion = 251,             // 小鬼(126,←2365 小鬼法杖,弹375)：召唤物伴生
+  SharknadoMinion = 252,       // 鲨鱼旋风(139,←2621 鲨旋法杖,弹407)：召唤物伴生
+  UFOMinion = 253,             // UFO(140,←2749 异星法杖,弹423)：召唤物伴生
+  EmpressBlade = 254,          // 泰拉棱镜(322,←5005 女皇之剑,弹946)：召唤物伴生
+  FlinxMinion = 255,           // 小雪怪(325,←5069 皮皮法杖,弹951)：召唤物伴生
+  PalworldMinionCattiva = 256, // 捣蛋猫(385,←5663 可靠的捣蛋猫,弹1093)：召唤物伴生
+  PalworldMinionFoxsparks = 257, // 火绒狐(386,←5664 可靠的火绒狐,弹1094)：召唤物伴生
+  // ---- 配饰审计 P0 批（2026-08-22）：冰冻护盾族（Player.cs:14348-14351）----
+  IceBarrier = 246,    // 冰障(62,冰冻海龟壳 1253/冰冻护盾 3997 半血挂)：半血以下 endurance+0.25
+                       //   （UpdateBuffs :10127-10152；超半血 DelBuff——施加/移除门在
+                       //   Player.fixedUpdate 与装备 1253/3997 半血判定联动）
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -356,6 +437,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.KiteBuff]: { vanillaBuff: 383, descKey: 'BuffDescription.Kite', fallbackName: '腾灵' },
   [BuffType.Stinky]: { vanillaBuff: 120, descKey: 'BuffDescription.Stinky', fallbackName: '恶臭' },
   [BuffType.Slow]: { vanillaBuff: 32, descKey: 'BuffDescription.Slow', fallbackName: '缓慢' },
+  [BuffType.Silenced]: { vanillaBuff: 35, descKey: 'BuffDescription.Silenced', fallbackName: '沉默' },
   // 世纪之花批：毒种子 276 命中授予（Projectile.cs:11527-11535），描述用原版键
   [BuffType.Poisoned]: { vanillaBuff: 20, descKey: 'BuffDescription.Poisoned', fallbackName: '中毒' },
   // 血肉墙舌头两态（描述走原版 BuffDescription 现成键，同 Honey/MoonLeech 先例）
@@ -393,8 +475,9 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Hunger]: { vanillaBuff: 333, descKey: 'BuffDescription.Hunger', fallbackName: '饥饿' },
   [BuffType.Starving]: { vanillaBuff: 334, descKey: 'BuffDescription.Starving', fallbackName: '极饿' },
   // 1457 新增：魔力过热 396（描述自有键——机制数值是本仓实现；原版 BuffName 走
-  // 1457 l10n，本仓 1456 语料无此键 → fallback 兜底）。贴图 Buff_396.png 为 1457
-  // 新素材，本仓素材库暂缺 → UI buffIconItem 以魔力再生药水图标兜底
+  // 1457 l10n，本仓 1456 语料无此键 → fallback 兜底）。贴图 Buff_396.png 已随
+  // 1457 素材批（scripts/atlas-append-1457.mjs）入仓且与源库 MD5 同源，UI 直链
+  // 正常显示；buffIconItem 药水图标仅作 onerror 兜底保留
   [BuffType.ManaHeat]: { vanillaBuff: 396, descKey: 'Mods.SandboxWorld.Buff.ManaHeat.Desc', fallbackName: '魔力过热' },
   // 1457 强化：温暖 124（描述用原版 BuffDescription.Warmth 现成键）
   [BuffType.Warmth]: { vanillaBuff: 124, descKey: 'BuffDescription.Warmth', fallbackName: '温暖' },
@@ -413,6 +496,79 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.PalworldMountTrustyChilletIgnis]: { vanillaBuff: 392, descKey: 'Mods.SandboxWorld.Buff.PalworldMountTrustyChilletIgnis.Desc', fallbackName: '可靠的疾旋火鼬' },
   [BuffType.ClayPotMinion]: { vanillaBuff: 393, descKey: 'Mods.SandboxWorld.Buff.ClayPotMinion.Desc', fallbackName: '黏土蓓蕾' },
   [BuffType.ForbiddenMinion]: { vanillaBuff: 394, descKey: 'Mods.SandboxWorld.Buff.ForbiddenMinion.Desc', fallbackName: '禁戒遗迹' },
+  // 火把祝福 376（火把神药水 5573）：描述走原版 BuffDescription.TorchGodPotion
+  //（zh/en 语料现成,与 Honey/Chilled 先例同构）；zh 名也在 BuffDescription 分片,
+  // BuffName 键缺 → 走 fallbackName（zh-Hans.Game.json:968"火把祝福"）
+  [BuffType.TorchGodPotion]: { vanillaBuff: 376, descKey: 'BuffDescription.TorchGodPotion', fallbackName: '火把祝福' },
+  // ---- 58 缺口轻项批（2026-08-22）：46 件宠物/光宠/召唤物伴生/星云增益/事件标记。
+  //  描述全部走原版 BuffDescription.<Internal>（46 键在 12 语语料全存在,与
+  //  Honey/Chilled 先例同构,无需自造键）；fallbackName 取 zh-Hans 官方 BuffName。
+  //  原版也仅在 Draw/标记层消费——条目即终点,无消费逻辑（见枚举段注释）----
+  [BuffType.ShadowOrb]: { vanillaBuff: 19, descKey: 'BuffDescription.ShadowOrb', fallbackName: '暗影珠' },
+  [BuffType.FairyBlue]: { vanillaBuff: 27, descKey: 'BuffDescription.FairyBlue', fallbackName: '仙灵' },
+  // 仙灵铃 425 三选一其余两色（Player.cs:52256-52272 Next(3)→27/101/102）——
+  // 101/102 缺条目时 BUFF_BY_VANILLA 反查落空 → 三掷只蓝档生效（QuickBuff 同门）。
+  // 2026-08-22 补 C 审计 ⚠️425 修复批补全（Buff_101/102.png 已在盘）
+  [BuffType.FairyRed]: { vanillaBuff: 101, descKey: 'BuffDescription.FairyRed', fallbackName: '仙灵' },
+  [BuffType.FairyGreen]: { vanillaBuff: 102, descKey: 'BuffDescription.FairyGreen', fallbackName: '仙灵' },
+  [BuffType.BabyEater]: { vanillaBuff: 45, descKey: 'BuffDescription.BabyEater', fallbackName: '吞噬怪宝宝' },
+  [BuffType.Pygmies]: { vanillaBuff: 49, descKey: 'BuffDescription.Pygmies', fallbackName: '矮人' },
+  [BuffType.BabySkeletronHead]: { vanillaBuff: 50, descKey: 'BuffDescription.BabySkeletronHead', fallbackName: '骷髅王头宝宝' },
+  [BuffType.BabyHornet]: { vanillaBuff: 51, descKey: 'BuffDescription.BabyHornet', fallbackName: '黄蜂宝宝' },
+  [BuffType.TikiSpirit]: { vanillaBuff: 52, descKey: 'BuffDescription.TikiSpirit', fallbackName: '提基幽魂' },
+  [BuffType.PetLizard]: { vanillaBuff: 53, descKey: 'BuffDescription.PetLizard', fallbackName: '宠物蜥蜴' },
+  [BuffType.PetParrot]: { vanillaBuff: 54, descKey: 'BuffDescription.PetParrot', fallbackName: '宠物鹦鹉' },
+  [BuffType.BabyTruffle]: { vanillaBuff: 55, descKey: 'BuffDescription.BabyTruffle', fallbackName: '松露人宝宝' },
+  [BuffType.PetSapling]: { vanillaBuff: 56, descKey: 'BuffDescription.PetSapling', fallbackName: '宠物树苗' },
+  [BuffType.Wisp]: { vanillaBuff: 57, descKey: 'BuffDescription.Wisp', fallbackName: '妖灵' },
+  [BuffType.BabyDinosaur]: { vanillaBuff: 61, descKey: 'BuffDescription.BabyDinosaur', fallbackName: '恐龙宝宝' },
+  [BuffType.BabySlime]: { vanillaBuff: 64, descKey: 'BuffDescription.BabySlime', fallbackName: '史莱姆宝宝' },
+  [BuffType.EyeballSpring]: { vanillaBuff: 65, descKey: 'BuffDescription.EyeballSpring', fallbackName: '弹簧眼' },
+  [BuffType.BabySnowman]: { vanillaBuff: 66, descKey: 'BuffDescription.BabySnowman', fallbackName: '雪人宝宝' },
+  [BuffType.PetSpider]: { vanillaBuff: 81, descKey: 'BuffDescription.PetSpider', fallbackName: '宠物蜘蛛' },
+  [BuffType.Squashling]: { vanillaBuff: 82, descKey: 'BuffDescription.Squashling', fallbackName: '南瓜娃娃' },
+  [BuffType.Ravens]: { vanillaBuff: 83, descKey: 'BuffDescription.Ravens', fallbackName: '乌鸦' },
+  [BuffType.BlackCat]: { vanillaBuff: 84, descKey: 'BuffDescription.BlackCat', fallbackName: '黑猫' },
+  [BuffType.CursedSapling]: { vanillaBuff: 85, descKey: 'BuffDescription.CursedSapling', fallbackName: '诅咒树苗' },
+  [BuffType.Puppy]: { vanillaBuff: 91, descKey: 'BuffDescription.Puppy', fallbackName: '小狗' },
+  [BuffType.BabyGrinch]: { vanillaBuff: 92, descKey: 'BuffDescription.BabyGrinch', fallbackName: '格林奇宝宝' },
+  [BuffType.SpiderMinion]: { vanillaBuff: 133, descKey: 'BuffDescription.SpiderMinion', fallbackName: '蜘蛛' },
+  [BuffType.TwinEyesMinion]: { vanillaBuff: 134, descKey: 'BuffDescription.TwinEyesMinion', fallbackName: '双子魔眼' },
+  [BuffType.PirateMinion]: { vanillaBuff: 135, descKey: 'BuffDescription.PirateMinion', fallbackName: '海盗' },
+  [BuffType.MiniMinotaur]: { vanillaBuff: 136, descKey: 'BuffDescription.MiniMinotaur', fallbackName: '福恩' },
+  [BuffType.MagicLantern]: { vanillaBuff: 152, descKey: 'BuffDescription.MagicLantern', fallbackName: '魔法灯笼' },
+  [BuffType.BabyFaceMonster]: { vanillaBuff: 154, descKey: 'BuffDescription.BabyFaceMonster', fallbackName: '脸怪宝宝' },
+  [BuffType.CrimsonHeart]: { vanillaBuff: 155, descKey: 'BuffDescription.CrimsonHeart', fallbackName: '猩红之心' },
+  [BuffType.DeadlySphere]: { vanillaBuff: 161, descKey: 'BuffDescription.DeadlySphere', fallbackName: '致命球' },
+  [BuffType.NebulaUpLife1]: { vanillaBuff: 173, descKey: 'BuffDescription.NebulaUpLife1', fallbackName: '生命星云' },
+  [BuffType.NebulaUpMana1]: { vanillaBuff: 176, descKey: 'BuffDescription.NebulaUpMana1', fallbackName: '魔力星云' },
+  [BuffType.NebulaUpDmg1]: { vanillaBuff: 179, descKey: 'BuffDescription.NebulaUpDmg1', fallbackName: '伤害星云' },
+  [BuffType.StardustMinion]: { vanillaBuff: 182, descKey: 'BuffDescription.StardustMinion', fallbackName: '星尘细胞' },
+  [BuffType.StardustDragonMinion]: { vanillaBuff: 188, descKey: 'BuffDescription.StardustDragonMinion', fallbackName: '星尘之龙' },
+  [BuffType.SuspiciousTentacle]: { vanillaBuff: 190, descKey: 'BuffDescription.SuspiciousTentacle', fallbackName: '可疑眼球' },
+  [BuffType.PetDD2Gato]: { vanillaBuff: 200, descKey: 'BuffDescription.PetDD2Gato', fallbackName: '飞翔Gato' },
+  [BuffType.PetDD2Ghost]: { vanillaBuff: 201, descKey: 'BuffDescription.PetDD2Ghost', fallbackName: '闪烁灯芯' },
+  [BuffType.BatOfLight]: { vanillaBuff: 213, descKey: 'BuffDescription.BatOfLight', fallbackName: '血红蝙蝠' },
+  [BuffType.VampireFrog]: { vanillaBuff: 214, descKey: 'BuffDescription.VampireFrog', fallbackName: '吸血鬼青蛙' },
+  [BuffType.BabyBird]: { vanillaBuff: 216, descKey: 'BuffDescription.BabyBird', fallbackName: '雀宝宝' },
+  [BuffType.StormTiger]: { vanillaBuff: 263, descKey: 'BuffDescription.StormTiger', fallbackName: '沙漠虎' },
+  [BuffType.Smolstar]: { vanillaBuff: 271, descKey: 'BuffDescription.Smolstar', fallbackName: '附魔飞刀' },
+  [BuffType.AbigailMinion]: { vanillaBuff: 335, descKey: 'BuffDescription.AbigailMinion', fallbackName: '阿比盖尔' },
+  [BuffType.DeadCellsMushroomBoiMinion]: { vanillaBuff: 355, descKey: 'BuffDescription.DeadCellsMushroomBoiMinion', fallbackName: '蘑菇小伙伴！' },
+  // 冰障 62（冰冻护盾族）：名称/描述走原版 BuffDescription.IceBarrier（12 语言现成），
+  // 图标 Buff_62.png 已入库——buff 栏直显
+  [BuffType.IceBarrier]: { vanillaBuff: 62, descKey: 'BuffDescription.IceBarrier', fallbackName: '冰障' },
+  // ---- 随从杖伴生 buff 泛化批 8 件（2026-08-22 补 C 重项；描述走原版
+  //  BuffDescription.<Internal>——zh-Hans/en-US 语料在键含 385/386 帕鲁两条，
+  //  同 58 缺口批先例,无需自造键）----
+  [BuffType.HornetMinion]: { vanillaBuff: 125, descKey: 'BuffDescription.HornetMinion', fallbackName: '黄蜂' },
+  [BuffType.ImpMinion]: { vanillaBuff: 126, descKey: 'BuffDescription.ImpMinion', fallbackName: '小鬼' },
+  [BuffType.SharknadoMinion]: { vanillaBuff: 139, descKey: 'BuffDescription.SharknadoMinion', fallbackName: '鲨鱼旋风' },
+  [BuffType.UFOMinion]: { vanillaBuff: 140, descKey: 'BuffDescription.UFOMinion', fallbackName: 'UFO' },
+  [BuffType.EmpressBlade]: { vanillaBuff: 322, descKey: 'BuffDescription.EmpressBlade', fallbackName: '泰拉棱镜' },
+  [BuffType.FlinxMinion]: { vanillaBuff: 325, descKey: 'BuffDescription.FlinxMinion', fallbackName: '小雪怪' },
+  [BuffType.PalworldMinionCattiva]: { vanillaBuff: 385, descKey: 'BuffDescription.PalworldMinionCattiva', fallbackName: '捣蛋猫' },
+  [BuffType.PalworldMinionFoxsparks]: { vanillaBuff: 386, descKey: 'BuffDescription.PalworldMinionFoxsparks', fallbackName: '火绒狐' },
 };
 
 /** BuffID.Sets.IsFedState（BuffID.cs:16 = {26,206,207,332,333,334}——含饥饿链三态：
@@ -442,8 +598,8 @@ const BUFF_NO_SAVE = new Set([
   140, 144, 146, 147, 150, 158, 159, 161, 163, 164, 170, 171, 172, 173, 174,
   175, 176, 177, 178, 179, 180, 181, 182, 187, 188, 194, 195, 196, 197, 198,
   199, 205, 213, 214, 215, 263, 271, 320, 321, 322, 325, 335, 348, 353, 355,
-  366, 385, 386,
-]);
+  366, 385, 386, 389, 390, 393, 394,   // 1457 Palworld 随从伴生（Main.cs:9199-9204；
+]);                                    //  391/392 坐骑伴生不在表=随档保存）
 /** vanilla buff id → 本仓 BuffType 反查（存档恢复 + statusPlayer 授予链共用）。
  *  ★Object.keys 恒返回【字符串】——必须 Number() 还原枚举数值键，否则
  *  BuffState.active 的 Map 以 '93' 存键，has(BuffType.X)/get(BuffType.X) 的
@@ -534,6 +690,8 @@ export class BuffState {
     // 80=:8827、149=:8841、164=:8846、196=:8850；均不在护士排除表）
     BuffType.Darkness, BuffType.Cursed, BuffType.Blackout, BuffType.Webbed,
     BuffType.VortexDebuff, BuffType.WitheredWeapon,
+    BuffType.Silenced,   // Main.debuff[35]=true（Main.cs:8815）；不在护士排除表
+                         //（BuffID.cs:32）——红药水 678 减益族（2026-08-22 补 B 批）
     BuffType.Wet,      // Main.debuff[103]=true（Main.cs:8833）——潮湿可被护士计价清除；
                        // 103 不在 NurseCannotRemoveDebuff 排除表（BuffID.cs:30）
   ]);
@@ -656,13 +814,13 @@ export class BuffState {
       if (diff >= GDL.MASTER) durationSec *= 2.5;
       else if (diff >= GDL.EXPERT) durationSec *= 2;
     }
-    // 1457: resistCold（Warmth buff 124 在场，:10370-10372）时施加 Chilled(46)/
-    // Frozen(47) 时长 ÷4/÷2（AddBuff_DetermineBuffTimeToAdd :5429-5437）
+    // ★1.4.5.7 新增（1456 反编译 AddBuff 全链 :5066-5203 无 Warmth 分支；wiki
+    // "Desktop 1.4.5.7" 条目）：resistCold（Warmth 124 在场）时施加 Chilled(46)/
+    // Frozen(47) 时长 ÷4/÷2。本仓按 1457 保留（与 1456 标杆的偏差已备案）
     if (vb === 46 || vb === 47) {
       if (this.active.has(BuffType.Warmth)) durationSec /= (vb === 46 ? 4 : 2);
     }
-    // 1457: 新获得 Warmth 时立即把已有 Chilled ÷4、Frozen ÷2（下限 5t）——
-    // AddBuff_ReduceTimeOfRelatedBuffs（Player.cs:5292-5315，AddBuff :5287 调）。
+    // ★同上 1.4.5.7：新获得 Warmth 时立即把已有 Chilled ÷4、Frozen ÷2（下限 5t）。
     // 原版只在"未续期已有 Warmth"分支调（AddBuff_TryUpdatingExistingBuffTime
     // 为真时不调）→ 已有 Warmth 时重复喝不重复削
     if (vb === 124 && !this.active.has(BuffType.Warmth)) {
@@ -839,8 +997,8 @@ export class BuffState {
     if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
     if (this.active.has(BuffType.Weak)) m *= 0.9;            // 虚弱 moveSpeed -= 0.1（:11510）
     if (this.active.has(BuffType.Werewolf)) m *= 1.05;      // 狼人 moveSpeed += 0.05（:11498）
-    if (this.active.has(BuffType.KiteBuff)) m += 0.15;       // 风筝 moveSpeed += 0.15
-                                                             // （1457 :10003 由 +0.25 削到 +0.15）
+    if (this.active.has(BuffType.KiteBuff)) m += 0.25;       // 风筝 moveSpeed += 0.25
+                                                             // （1456 :9613；1457 :10003 削到 +0.15 不取）
     if (this.active.has(BuffType.SugarRush)) m *= 1.2;       // 糖分冲刺 moveSpeed += 0.2（:9634）
     m += [0, 0.2, 0.3, 0.4][this.wellFedTier];               // 食物 moveSpeed += 0.2/0.3/0.4（:11532+）
     return m;
@@ -901,6 +1059,21 @@ export class BuffState {
   get manaMaxBonus(): number {
     return this.active.has(BuffType.Clairvoyance) ? 20 : 0;
   }
+  /** 水晶球预见魔法伤 +5%（magicDamage += 0.05f，Player.cs:11483）——与 MagicPower
+   *  (+0.2,:9669) 同为 magicDamage 加算项，并入 magicDmgBonus 供 damageMult('magic') 消费 */
+  get clairvoyanceMagicDamage(): number {
+    return this.active.has(BuffType.Clairvoyance) ? 0.05 : 0;
+  }
+  /** 水晶球预见魔法暴击 +2（magicCrit += 2，Player.cs:11482） */
+  get clairvoyanceMagicCrit(): number {
+    return this.active.has(BuffType.Clairvoyance) ? 2 : 0;
+  }
+  /** 水晶球预见耗魔 -2%（manaCost -= 0.02f，Player.cs:11485）——原版 manaCost 是
+   *  1f 起的加算聚合（饰品/药水同池），消费端 (int)(item.mana × manaCost)；
+   *  本仓折成乘法因子并入 equipStats.manaCostMul（Player.computeEquipStats） */
+  get clairvoyanceManaCostMult(): number {
+    return this.active.has(BuffType.Clairvoyance) ? 0.98 : 1;
+  }
   /** 弹药箱 20% 不耗弹（PickAmmo :52746 rand.Next(5)==0） */
   get hasAmmoBox(): boolean {
     return this.active.has(BuffType.AmmoBox);
@@ -946,7 +1119,7 @@ export class BuffState {
   get pickSpeedMult(): number {
     return 1
       - (1 - this.wellFedPickMult)
-      - (this.active.has(BuffType.KiteBuff) ? 0.1 : 0);   // 1457 :10004 由 -0.15 削到 -0.1
+      - (this.active.has(BuffType.KiteBuff) ? 0.15 : 0);  // 1456 :9614 pickSpeed -= 0.15f
   }
   /** 原版 buff 21（PotionSickness）无任何属性——只禁治疗（healBlocked）。
    *  旧实现 +80 maxHp 非原版（2026-08-13 对齐移除，喝药回血走 healLife 数据驱动） */
@@ -1003,9 +1176,10 @@ export class BuffState {
   get manaRegenBuff(): boolean {
     return this.active.has(BuffType.ManaRegen);
   }
-  /** 魔法伤害 +20%（:9669） */
+  /** 魔法伤害 +20%（:9669）+ 水晶球预见 +5%（:11483，同池加算） */
   get magicDmgBonus(): number {
-    return this.active.has(BuffType.MagicPower) ? 0.2 : 0;
+    return (this.active.has(BuffType.MagicPower) ? 0.2 : 0)
+      + this.clairvoyanceMagicDamage;
   }
   /** 箭伤 ×1.1（:9712;本仓库 ranged 管道统一消费,乘 ranged 全系——近义注明） */
   /** 魔力眩晕 magic 减伤（Player.cs:10003：0.25×剩余/300；apply 用秒，300t=5s） */

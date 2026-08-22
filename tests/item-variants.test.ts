@@ -47,11 +47,13 @@ const EXPECTED_REGISTRY: Record<number, [string, string[]]> = {
   556: ['disabledBossSummon', ['mechdusa']],
   557: ['disabledBossSummon', ['mechdusa']],
   5334: ['enabled', ['mechdusa']],
+  5687: ['weaker', ['skyblock']],   // 1457 +黏液枪矛弱变体(ItemVariants :145-146)
+  5688: ['weaker', ['skyblock']],   // 1457 +黏液鞭弱变体
 };
 
 describe('注册表（ItemVariants.cs:119-141）', () => {
-  it('23 条逐项：变体种类 + 激活条件', () => {
-    expect(Object.keys(ITEM_VARIANT_REGISTRY)).toHaveLength(23);
+  it('25 条逐项：变体种类 + 激活条件(1457 批3 +683 弱变体/skyblock 条件)', () => {
+    expect(Object.keys(ITEM_VARIANT_REGISTRY)).toHaveLength(25);
     for (const [vidStr, [kind, conditions]] of Object.entries(EXPECTED_REGISTRY)) {
       const vid = Number(vidStr);
       const entries = ITEM_VARIANT_REGISTRY[vid];
@@ -186,7 +188,7 @@ describe('属性覆写 · Stronger（remix）', () => {
 
   it('5147 冰霜魔杖（:41094-41104）：damage 42 / mana 6 / shootSpeed 12 / autoReuse', () => {
     const c = itemCombat(5147)!;
-    expect(c.damage).toBe(42);
+    expect(c.damage).toBe(42);   // 1457 StrongerVariant 仍 42(Item.cs:41118,勿与 683 的 77 混淆)
     expect(c.useTime).toBe(10);
     expect(c.mana).toBe(6);
     expect(c.shootSpeed).toBe(12);
@@ -208,7 +210,7 @@ describe('属性覆写 · Weaker（remix）', () => {
 
   it('683 邪恶三叉戟（:9422-9427）：damage 42 / mana 9', () => {
     const c = itemCombat(683)!;
-    expect(c.damage).toBe(42);
+    expect(c.damage).toBe(77);   // 1457 终值(批3 落)
     expect(c.mana).toBe(9);
   });
 
@@ -281,7 +283,7 @@ describe('普通世界无变体（同物品常规值）', () => {
     expect(itemCombat(3069)!.autoReuse).toBeUndefined();
     expect(itemCombat(517)!.damage).toBe(30);
     expect(itemCombat(517)!.autoReuse).toBe(true);
-    expect(itemCombat(683)!.damage).toBe(88);
+    expect(itemCombat(683)!.damage).toBe(150);   // 1457 终值(批3 落,1456 为 88)
     expect(itemCombat(683)!.mana).toBe(19);
     expect(itemCombat(725)!.damage).toBe(39);
     expect(itemCombat(1314)!.damage).toBe(40);
@@ -338,9 +340,9 @@ describe('DisabledBossSummon（Player.cs:43125/:43143/:43159 同门）', () => {
 // ---------------------------------------------------------------------------
 
 describe('覆写表 ITEM_VARIANT_STATS', () => {
-  it('有属性改写的 20 件均在表（544/556/557 纯语义禁用无字段）', () => {
+  it('有属性改写的 22 件均在表（1457 +5687/5688;544/556/557 纯语义禁用无字段）', () => {
     const withStats = [112, 157, 1319, 1325, 3069, 5147, 517, 683, 725, 1314, 2623,
-      5279, 5280, 5281, 5282, 5283, 5284, 197, 4060, 5334];
+      5279, 5280, 5281, 5282, 5283, 5284, 197, 4060, 5334, 5687, 5688];
     for (const vid of withStats) expect(ITEM_VARIANT_STATS[vid], `vid ${vid}`).toBeDefined();
     for (const vid of [544, 556, 557]) expect(ITEM_VARIANT_STATS[vid]).toBeUndefined();
     // 注册表 24 件全可达

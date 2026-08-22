@@ -566,6 +566,9 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       treeTops: wld.treeTops?.length ? wld.treeTops : undefined,
       crimson: wld.isCrimson,
       moonType: wld.moonType,
+      // 彩蛋种子旗标九位回填（WldParser 头读 WorldFile.cs:1242-1250；S0-3——曾读位即弃，
+      // 导入原版特殊种子档丢全部特性。仅真值落键，普通世界={} 与旧档缺省同形）
+      seedFlags: Object.keys(wld.seedFlags).length ? { ...wld.seedFlags } : undefined,
       // 世界难度（WldParser.ts:108-111 gameMode 位；Main.cs:2677）——
       // 0 经典 1 专家 2 大师 3 旅程，loadSaveData 回填 world.difficulty
       difficulty: wld.gameMode,

@@ -1,8 +1,12 @@
 // 一次性诊断：JS↔oracle 检查点对拍（任意种子）
+// ★OOOOOO 批(2026-08-22)加存在性门:/tmp/chain_{seed}.json 临时对拍资产已清,缺资产时
+//   skip（原 it 体内 readFileSync ENOENT 恒红;正式对账走 tests/caves-checkpoint 的
+//   tests/golden/caves-chain-*.json,本探针仅在临时 oracle 链在盘时复跑）。
 import { it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { chainCheckpoints } from '../tests/caves-checkpoint.test';
-it('seed checkpoints vs oracle', async () => {
+const hasChain = existsSync('/tmp/chain_4444.json') && existsSync('/tmp/chain_6666.json');
+(hasChain ? it : it.skip)('seed checkpoints vs oracle', async () => {
   for (const seed of ['4444', '6666']) {
     const golden = JSON.parse(readFileSync(`/tmp/chain_${seed}.json`, 'utf8'));
     const gold = new Map<string, string>();

@@ -26,7 +26,14 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     case 42: return [0, style * 36];
     case 33: case 49: return [0, style * 22];
     case 34: return [Math.floor(style / 37) * 108, (style % 37) * 54];
-    case 100: return [0, style * 72];
+    // 100 烛台 / 172 水槽（Place2x2 cs:51436-51446 `frameX=k*18, frameY=style*num+l*18`,
+    // num=36（172=38）——样式竖排。曾写 100→style*72「skip2 实测」：实为素材空带误读
+    // （Tiles_100 2016px=56 带×36,行隙实测 394/610/646/826… 全在 36 带界 −2px）,
+    // style≥1 放置帧错带→光照表(TileLightScanner case 100 fy/36)与掉落表
+    // （vanillaStyleDrops styleFromFrame[100]=fy/36）全错位;172 同支（38 带宽,
+    // 2014=53×38 精确）。掉落侧反函数=vanillaStyleDrops.styleFromFrame
+    case 100: return [0, style * 36];
+    case 172: return [0, style * 38];
     case 93: return [0, style * 110];
     case 91: return [(style % 111) * 18, Math.floor(style / 111) * 54];
     case 240: return [(style % 36) * 54, Math.floor(style / 36) * 54];

@@ -4,14 +4,16 @@
 //  - TagEffectState（TagEffectState.cs:1-120）：每 tag 型一份,per-NPC
 //    TimeLeftOnNPC/ProcTimeLeftOnNPC 双表（本作敌无槽位复用,用 Map<enemyId,n>）
 //  - TagDamageChanges（TagDamageChanges.cs:1-21）：ModifyHit 记账聚合结构体
-//  - UniqueTagEffect/WhipTagEffect 族（ItemID.cs:1313-1428 全表 + 10 个子类）
+//  - UniqueTagEffect/WhipTagEffect 族（表数据 = 1456 ItemID.cs:1301-1413 全表 19 条
+//    + 6 子类;栈框架本体仍是 1457 TagEffectStack.cs）
 //  1456 的"单例 tag 挂敌实体"模型（whipTagT 单值字段）已退役：1457 多 tag 全值
 //  叠加（Projectile.cs:12946-12962）+ proc 消费语义反转（OnProcHit 返 bool 才清,
 //  TagEffectState.cs:113-118）。敌侧不再存 tag 态——查询一律走
 //  owner.tagEffectStack（isNPCTagged/canProcOnNPC/anyTagged）。
 //  tag/proc 时长 = TagDuration × Player.tagEffectDuration（:62-66/:68-71;
 //  SilverBracer 6156 族 +2f → ×3）。
-import { Arrow } from './Arrow';
+import { Arrow, projFrameImg } from './Arrow';
+import { Entity } from './Entity';
 import { playerCanHitEnemy } from './projTargets';
 import { trySnapStrike } from '../stats/SnapStrike';
 import type { GameHooks } from './types';
@@ -26,8 +28,9 @@ export type TagEffectKind =
   | 'base' | 'starcrash' | 'flower' | 'possession' | 'firecracker'
   | 'swordwhip' | 'eel' | 'darkharvest' | 'constellation' | 'kaleidoscope';
 
-/** WhipTagEffect 单条（ItemID.cs:1313-1428 UniqueTagEffects 36 对全表）；
- *  TagDuration 缺省 240（WhipTagEffect ctor :15-18）,5479 星鞭覆写 480 */
+/** WhipTagEffect 单条（1456 ItemID.cs:1301-1413 UniqueTagEffects object[38] = 19 条全表）；
+ *  TagDuration 缺省 240（WhipTagEffect.cs:17 generalWhipMarkDuration + ctor :19-22,
+ *  1456 全表无任何覆写——1457 的 5479=480 覆写退役） */
 export interface TagEffectDef {
   itemId: number;
   kind: TagEffectKind;
@@ -47,7 +50,7 @@ const def = (itemId: number, tagDamage: number, extra: Partial<TagEffectDef> = {
   playerBuffId: 0, playerBuffTime: 0, playerBuffAppliedManually: false, ...extra,
 });
 
-/** ItemID.Sets.UniqueTagEffects（1457 ItemID.cs:1313-1428） */
+/** ItemID.Sets.UniqueTagEffects（1456 ItemID.cs:1301-1413） */
 export const TAG_EFFECTS: Record<number, TagEffectDef> = {
   5688: def(5688, 3),
   5473: def(5473, 3, { playerBuffId: 365, playerBuffTime: 180, playerBuffAppliedManually: true }),
@@ -58,15 +61,23 @@ export const TAG_EFFECTS: Record<number, TagEffectDef> = {
   4913: def(4913, 6, { playerBuffId: 314, playerBuffTime: 180 }),
   5074: def(5074, 7),
   4911: def(4911, 6, { playerBuffId: 312, playerBuffTime: 180, playerBuffAppliedManually: true }),
-  4678: def(4678, 9, { kind: 'swordwhip', playerBuffId: 308, playerBuffTime: 180 }),
+  // 4678 = 基类 WhipTagEffect（1456 ItemID.cs:1356-1362）——1457 的
+  //  swordwhip/MegaSlash 子类（+30 flat + 916 弹）1456 无,退役
+  4678: def(4678, 9, { playerBuffId: 308, playerBuffTime: 180 }),
   5477: def(5477, 9, { kind: 'flower' }),
   4680: def(4680, 15, { kind: 'darkharvest', playerBuffId: 311, playerBuffTime: 180 }),
   4679: def(4679, 8, { critChance: 10 }),
-  5478: def(5478, 12, { kind: 'eel', critChance: 5 }),
-  5479: def(5479, 15, { kind: 'constellation', tagDuration: 480, critChance: 15 }), // :1398-1402
+  // 5478 = 基类（1456 ItemID.cs:1381-1387;NetSync=true :1386 仅 MP 同步位,单机无消费）
+  //  ——1457 的 eel/链电子类（+50 flat + 链电）1456 无,退役
+  5478: def(5478, 12, { critChance: 5 }),
+  // 5479 = 基类（1456 ItemID.cs:1388-1393）,TagDuration 走缺省 240（1457 的 480
+  //  覆写退役）;kind 名保留仅作星鞭星雨路由标记,见 TagEffectState.onHit 注
+  5479: def(5479, 15, { kind: 'constellation', critChance: 15 }),
   4914: def(4914, 20, { kind: 'kaleidoscope', critChance: 10 }),
   5480: def(5480, 25, { kind: 'possession', critChance: 10 }),
   4912: def(4912, 0, { kind: 'firecracker' }),
+  // 6143 Foxparks = 基类（1456 ItemID.cs:1408-1412）——1457 整条删除,1456 在表
+  6143: def(6143, 4),
 };
 
 // ---- 兼容导出（旧单值表 → 新框架派生；消费方 WhipProj/测试沿用） ----
@@ -104,25 +115,30 @@ export const WHIP_RANGE: Record<number, number> = {
   1031: 1.1, 952: 0.95, 913: 1.4, 912: 1.5, 847: 1.75, 1032: 1.8,
   848: 1.6, 849: 2.15, 1033: 2.0, 915: 2.2, 1034: 2.2, 1035: 2.2,
 };
-/** 多目标伤害衰减（:12604-12678：命中后鞭 damage 字段 ×此倍率,键=projId） */
+/** 多目标伤害衰减（1456 Projectile.cs:12598-12679：命中后鞭 damage 字段 ×此倍率,键=projId;
+ *  1034 星鞭 0.90 在 :12674-12676） */
 export const WHIP_FALLOFF: Record<number, number> = {
   1104: 0.40, 1028: 0.40, 841: 0.50, 1029: 0.60, 1030: 0.60, 914: 0.60,
   1031: 0.70, 952: 0.90, 913: 0.66, 912: 0.70, 847: 0.80, 1032: 0.85,
   848: 0.95, 849: 0.90, 1033: 0.95, 915: 0.80, 1034: 0.90, 1035: 0.95,
 };
-/** proc 启用鞭（TryDoingOnHitEffects :13968-14013）：
- *  {913,1031,1032} 首鞭门（localAI[0]==0）；{847,1033,1035} 每鞭（1457 新增 1033）；
- *  1034 星鞭走独立 case（CanProcOnNPC 门 + RemoveAllProcs,不吃本表）。
- *  键=物品 id（tagEffectType）：913→4912/1031→5476/1032→5477/847→4680/1033→5478/1035→5480 */
-export const WHIP_PROC_ITEMS = new Set([4912, 5476, 5477, 4680, 5478, 5480]);
-/** 首鞭门组（case 913/1031/1032 :13969-13975 localAI[0]==0 才 TryEnableProc） */
+/** proc 启用鞭（1456 Projectile.cs:12932-12981 伤害管线尾 switch(type)）：
+ *  {913,1031,1032} 首鞭门（localAI[0]==0 才 TryEnableProc :12934-12942）；
+ *  {1035} 每鞭无条件（:12972-12974）。847 无分支（黑收成 916 走 OnTaggedHit,
+ *  WhipTagEffect_DarkHarvest.cs:9-12,无需 proc）、1033 无分支——4680/5478 不入组
+ *  （1457 新增退役）;1034 星鞭独立 case（:12965-12971 首鞭撒星,非 proc）。
+ *  键=物品 id（tagEffectType）：913→4912/1031→5476/1032→5477/1035→5480 */
+export const WHIP_PROC_ITEMS = new Set([4912, 5476, 5477, 5480]);
+/** 首鞭门组（case 913/1031/1032 :12934-12942 localAI[0]==0 才 TryEnableProc） */
 export const WHIP_PROC_ONCE_ITEMS = new Set([4912, 5476, 5477]);
 /** extraUpdates 覆盖（SetDefaults :7862-7885：847/849 extraUpdates=2 → MaxUpdates=3；
  *  其余 DefaultToWhip extraUpdates=1 :10103 → MaxUpdates=2） */
 export const WHIP_EXTRA_UPDATES = new Set([847, 849]);
-/** ProjectileID.Sets.SummonTagDamageMultiplier（1457:37 整表 = 仅 Smolstar 864 = 0.669；
- *  1456 的 688/689/690=0.5 回落默认 1） */
-export const SUMMON_TAG_MUL: Record<number, number> = { 864: 0.669 };
+/** ProjectileID.Sets.SummonTagDamageMultiplier——本仓标杆 1456（Terraria.ID/ProjectileID.cs:31
+ *  `CreateFloatSet(1f, 688f, 0.5f, 689f, 0.5f, 690f, 0.5f)`）= 688/689/690（DD2Lightning
+ *  AuraT1-T3 闪电光环,ProjectileID.cs:1736-1740）= 0.5;864 Smolstar=0.669 是 1457 新增
+ *  （1457 ProjectileID.cs:37 整表换血）,随从弹面并表登记 */
+export const SUMMON_TAG_MUL: Record<number, number> = { 864: 0.669, 688: 0.5, 689: 0.5, 690: 0.5 };
 /** ProjectileID.Sets.MinionShot（ProjectileID.cs:197）——吃鞭 tag 的随从弹 */
 export const MINION_SHOT_SET = new Set([374, 376, 389, 195, 408, 433, 614, 818, 1044, 1097, 1106]);
 /** ProjectileID.Sets.SentryShot（ProjectileID.cs:199）——吃鞭 tag 的哨兵弹 */
@@ -175,6 +191,10 @@ export interface WhipHitCtx {
   realLife: number;
   /** 被命中敌宽高（花瓣速度 max(w,h)/8、月主弹外扩盒） */
   hurtEnemyWH: { w: number; h: number };
+  /** 被命中敌左上角（月主弹 1045 出生盒 = Hitbox.Inflate(30,16).Y-8 :13838-13840） */
+  hurtEnemyXY: { x: number; y: number };
+  /** 被命中敌速度（月主弹出生点敌速 ×16 前置 :13858；缺省 0） */
+  hurtEnemyVel: { x: number; y: number };
 }
 
 /** 单个 tag 型的激活态（TagEffectState.cs:1-120 1:1;int[maxNPCs] 双表 → Map） */
@@ -249,7 +269,9 @@ export class TagEffectState {
     changes.addedBaseDamage += d.tagDamage;
     if (changes.highestAddedBaseDamage < d.tagDamage) changes.highestAddedBaseDamage = d.tagDamage;
     if (d.critChance > 0 && Math.random() * 100 < d.critChance) changes.crit = true;
-    // 子类 ModifyProcHit（proc 窗口内一次性——消费在 onHit 侧,窗口判定此处）
+    // 子类 ModifyProcHit（proc 窗口内一次性——消费在 onHit 侧,窗口判定此处）。
+    // 1456 表仅 firecracker 有 proc 乘区;'swordwhip'/'eel' 两档是 1457 子类存档,
+    // 1456 表（4678/5478 = 基类）下不可达,勿再从表数据路由
     if (this.canProcOnNPC(ctx.hurtNpcId)) {
       switch (d.kind) {
         case 'firecracker':
@@ -312,9 +334,10 @@ export class TagEffectState {
         ctx.add(new Arrow(ctx.hx, ctx.hy, 0, -1, 0, 0, 916, null, { grav: 0, life: 24, pierce: 99 }));
         break;
       case 'constellation':
-        // WhipTagEffect_Constellation :8-11：随从命中被 tag 敌 → 启用 proc 窗口
-        //（星鞭本体的星雨消耗走 WhipProj case 1034 侧,CanRunHitEffects 拦掉鞭本体）
-        this.enableProcOnNPC(npcId);
+        // 1456 无此子类：5479 = 基类 WhipTagEffect（ItemID.cs:1388-1393,TagDamage 15/
+        //  Crit 15）——无 OnTaggedHit/OnProcHit 覆写,星雨 = 鞭本体首鞭无条件撒
+        //  （Projectile.cs:12965-12970）,不经 proc 窗口。1457 的"随从命中启用 proc"
+        //  退役（kind 名保留,表 1456 化另行处理）
         break;
       case 'kaleidoscope':
         // WhipTagEffect_Kaleidoscope :8-15：RainbowRodHit 粒子（本仓粒子管线近似）
@@ -354,46 +377,165 @@ export class TagEffectState {
         break;
       }
       case 'flower': {
-        // WhipTagEffect_ViolentDisplayOfFlower :8-34（1457 重做）：花瓣伤基数 =
-        // (calcDamage + bonusTagDamage) × 2.25,均分 3-6 瓣（3 + Next(0,4)）,
-        // 每瓣 = ceil((int)总数 / 瓣数),速 = max(w,h)/8,localNPCImmunity=30
+        // WhipTagEffect_ViolentDisplayOfFlower（1456 :8-25,ItemID.cs:1363-1367 表条目
+        //  TagDamage=9 是 tag 伤）：OnProcHit → SpawnFlowerExplosionOn(…, 40)（:8-11,
+        //  瓣伤 = 固定 40 形参,非 calc/bonus 派生）——固定 3 瓣（num2=3f :16）、
+        //  均布角速 = max(w,h)/8（:19-21 RotatedByRandom(0.3927) 抖动）、
+        //  出生预置 localNPCImmunity[target]=30（:23——花瓣自目标体内出生,30t 内
+        //  不得命中目标本体,经 Arrow localImmuneSeed 通道）。
+        //  1457 重做版（(calc+bonus)×2.25 均分 3-6 瓣,1457 _ViolentDisplayOfFlower
+        //  :17-33）退役——本条按 1456 语义回退
         consumed = true;
-        const total = Math.trunc((calcDamage + ctx.bonusTagDamage) * 2.25);
-        const petals = 3 + Math.floor(Math.random() * 4);
-        const per = Math.max(1, Math.ceil(total / petals));
-        const base = Math.random() * Math.PI * 2;
+        const base = Math.random() * Math.PI * 2;                                  // :15
         const enwh = ctx.hurtEnemyWH;
-        const spd = Math.max(1, Math.max(enwh.w, enwh.h) / 8);
-        for (let i = 0; i < petals; i++) {
-          const a = (i / petals) * Math.PI * 2 + base + (Math.random() * 2 - 1) * 0.3926991;
-          ctx.add(new Arrow(ctx.hx, ctx.hy, Math.cos(a) * spd, Math.sin(a) * spd, per, 0, 1038, null,
-            { grav: 0, life: 120, pierce: 99 }));
+        const spd = Math.max(1, Math.max(enwh.w, enwh.h) / 8);                     // :20
+        for (let i = 0; i < 3; i++) {
+          const a = (i / 3) * Math.PI * 2 + base + (Math.random() * 2 - 1) * 0.39269909262657166;
+          ctx.add(new Arrow(ctx.hx, ctx.hy, Math.cos(a) * spd, Math.sin(a) * spd, 40, 0, 1038,
+            null, { grav: 0, life: 120, pierce: 99,
+              localImmuneSeed: { npcId: ctx.hurtNpcId, t: 30 } }));                // :23 = 30t
         }
         break;
       }
       case 'possession': {
-        // WhipTagEffect_Possession :10-14 + SpawnMoonLordWhipProc :13832-13853：
-        // 固定伤 20,三连 1045（case 1045 :14014-14018 链至 ai[1]>=2 停）
+        // 1456 WhipTagEffect_Possession.OnProcHit（WhipTagEffect_Possession.cs:6-10）：
+        // SpawnMoonLordWhipProc(proj, npc, 20, 0)——单发 1045 固定伤 20,弧线出生点+
+        // 旋转弹道（Projectile.cs:13832-13866）;命中链式补发（:12975-12980 ai[1]<2 →
+        // 代数+1,全程 ≤3）。1457 的"一次三连"退役
         consumed = true;
-        const wh = ctx.hurtEnemyWH;
-        for (let i = 0; i < 3; i++) {
-          const px = ctx.hx - wh.w / 2 - 30 + Math.random() * (wh.w + 60);
-          const py = ctx.hy - wh.h / 2 - 24 + Math.random() * (wh.h + 32);
-          ctx.add(new Arrow(px, py, (Math.random() - 0.5) * 4, 6, 20, 1, 1045, null,
-            { grav: 0, life: 60, pierce: 99 }));
-        }
+        MoonLordWhipProc.spawn(game, ctx.add,
+          { x: ctx.hurtEnemyXY.x, y: ctx.hurtEnemyXY.y, w: ctx.hurtEnemyWH.w, h: ctx.hurtEnemyWH.h },
+          ctx.hurtEnemyVel, 0);
         break;
       }
       case 'eel':
       case 'swordwhip':
-        // 两者的 OnProcHit 恒 return true（_ElectricEel :16-19 / _SwordWhip :21-24）——
-        // 数值侧已在 modifyHit 记账
+        // 1457 退役档（_ElectricEel :16-19 / _SwordWhip :21-24 恒 return true）——
+        // 1456 表 5478/4678 = 基类,此两 kind 不可达,仅存档
         consumed = true;
         break;
       default:
         break; // 基类/constellation/kaleidoscope/darkharvest：OnProcHit 默认 false 不消耗
     }
     if (consumed) this.clearProcOnNPC(npcId);   // :113-118 消费语义反转
+  }
+}
+
+/** 月主鞭 proc 弹 1045（MoonLordWhipProc,AI_152）：
+ *  SetDefaults（Projectile.cs:9607-9624）：20×20、friendly、tileCollide=false、
+ *  melee、penetrate=1（首敌即逝）、localNPCHitCooldown=-1、extraUpdates=1（每 tick
+ *  2 update）→ timeLeft=24×2=48 update、armorPenetration=50、scale 1+rand(30)×0.01。
+ *  AI_152（:20880-20955）：alpha 每 update -50 淡入、velocity 每 update 旋转
+ *  ai[0]/(24×MaxUpdates)=ai[0]/48（:20930 num4=24 为 1045 专属）再 ×0.96、
+ *  首帧 Item1 音（:20907-20911）。命中（:12975-12980 case 1045）：ai[1]<2 →
+ *  SpawnMoonLordWhipProc(self, npc, damage=20, ai[1]+1) 链式补发,全程 ≤3 发。
+ *  1045 ∉ MinionShot/SentryShot（ProjectileID.cs:197/:199）→ CanRunHitEffects=false
+ *  （WhipTagEffect.cs:76-87）不吃鞭 tag——纯直伤通道。
+ *  出生点/弹道 = SpawnMoonLordWhipProc（:13832-13866）1:1：命中盒 Inflate(30,16)
+ *  再 Y-8 内随机点、朝盒心速 7-15、弧度 ai[0]=±(π/5+4π/5×rand)×0.5、初旋 π/4、
+ *  从盒心沿弧倒推 24 步得出生点、敌速 ×16 前置。 */
+export class MoonLordWhipProc extends Entity {
+  w = 20; h = 20;
+  /** 固定伤 20（procDamage 形参,链式各代同值 :12978/:13864） */
+  readonly damage = 20;
+  /** ai[0]：每 update 旋转量（弧度,测试断言用） */
+  readonly arc: number;
+  /** ai[1]：代数（0=proc 首发链,1/2=补发链;≥2 不再补 :12976） */
+  readonly gen: number;
+  private ticks = 0;
+  private readonly hitSet = new Set<number>();
+
+  private constructor(x: number, y: number, vx: number, vy: number, arc: number, gen: number) {
+    super();
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
+    this.vx = vx; this.vy = vy;
+    this.arc = arc; this.gen = gen;
+  }
+
+  /** SpawnMoonLordWhipProc（:13832-13866）1:1。rect = 敌 Hitbox（盒 Inflate(30,16)+Y-8
+   *  在此内做 :13838-13840）,vel = 敌速度（×16 前置 :13858）,gen = ai[1] 代数 */
+  static spawn(game: GameHooks, add: (e: unknown, b?: string) => void,
+    rect: { x: number; y: number; w: number; h: number }, vel: { x: number; y: number },
+    gen: number): void {
+    const bx = rect.x - 30, by = rect.y - 24, bw = rect.w + 60, bh = rect.h + 32; // :13838-13840
+    const sx = bx + Math.random() * bw, sy = by + Math.random() * bh;             // :13841 盒内随机点
+    const cx = bx + bw / 2, cy = by + bh / 2;                                     // :13842 盒心
+    let dx = cx - sx, dy = cy - sy;
+    const dl = Math.hypot(dx, dy);
+    if (dl > 0) { dx /= dl; dy /= dl; } else { dx = 0; dy = -1; }                 // SafeNormalize 回退 -UnitY
+    const spd = 7 + Math.random() * 8;                                            // :13843
+    // :13845-13846 弧度 = ±(π/5 + 4π/5×rand) × 0.5
+    const arc = (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 5 + Math.PI * 4 / 5 * Math.random()) * 0.5;
+    // :13847 初旋 π/4 → :13852-13857 从盒心沿弧倒推 24 步
+    const a0 = Math.PI / 4;
+    let vx = (dx * Math.cos(a0) - dy * Math.sin(a0)) * spd;
+    let vy = (dx * Math.sin(a0) + dy * Math.cos(a0)) * spd;
+    let px = cx, py = cy;
+    for (let j = 0; j < 24; j++) {
+      px -= vx; py -= vy;
+      const da = -arc / 24;
+      const tvx = vx * Math.cos(da) - vy * Math.sin(da);
+      vy = vx * Math.sin(da) + vy * Math.cos(da);
+      vx = tvx;
+    }
+    px += vel.x * 16; py += vel.y * 16;                                           // :13858
+    add(new MoonLordWhipProc(px, py, vx, vy, arc, gen));
+    void game;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.dead) return;
+    // 每 tick 2 update（extraUpdates=1 :9620）：旋转 ai[0]/48（:20930-20931）+ ×0.96（:20947）
+    for (let u = 0; u < 2; u++) {
+      const da = this.arc / 48;
+      const c = Math.cos(da), s = Math.sin(da);
+      const tvx = this.vx * c - this.vy * s;
+      this.vy = this.vx * s + this.vy * c;
+      this.vx = tvx;
+      this.vx *= 0.96; this.vy *= 0.96;
+      this.x += this.vx; this.y += this.vy;
+    }
+    if (++this.ticks >= 24) { this.dead = true; return; } // timeLeft=48 update :9621
+    // 命中（penetrate=1 首敌即逝 :9616;armorPenetration=50 :9623;kb=0 :13864）
+    for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, 1045)) continue;
+      const en = ent as unknown as {
+        id: number; dead: boolean; x: number; y: number; w: number; h: number; vx?: number; vy?: number;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number) => boolean;
+      };
+      if (en.dead || this.hitSet.has(en.id)) continue;
+      if (this.x >= en.x + en.w || this.x + this.w <= en.x
+        || this.y >= en.y + en.h || this.y + this.h <= en.y) continue;
+      en.hurt(this.damage, 0, 0, game, 50);
+      // 链式补发（:12975-12980：ai[1]<2 → SpawnMoonLordWhipProc(damage, ai[1]+1)）
+      if (this.gen < 2) {
+        MoonLordWhipProc.spawn(game,
+          (el) => (game as unknown as { entities: { add: (x: unknown, b?: string) => void } }).entities.add(el, 'projectiles'),
+          { x: en.x, y: en.y, w: en.w, h: en.h }, { x: en.vx ?? 0, y: en.vy ?? 0 }, this.gen + 1);
+      }
+      this.dead = true;
+      return;
+    }
+  }
+
+  draw(r: import('../render/Renderer').Renderer): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projFrameImg(1045, 0);
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, ((this.ticks * 2 + 1) * 50) / 255); // alpha 每 update -50 → 0（:20884-20893）
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(Math.atan2(this.vy, this.vx));
+    ctx.imageSmoothingEnabled = false;
+    if (img) ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    else {
+      ctx.fillStyle = '#C8B0FF';
+      ctx.beginPath();
+      ctx.arc(0, 0, 9, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 }
 
@@ -529,7 +671,8 @@ export class TagEffectStack {
  * owner 缺省 game.player——单机语义;MP 远端随从按本端玩家栈近似,与旧版一致）。
  */
 export function resolveWhipTagHit(
-  en: WhipTagged & { w?: number; h?: number; realLife?: number | null },
+  en: WhipTagged & { w?: number; h?: number; x?: number; y?: number;
+    vx?: number; vy?: number; realLife?: number | null },
   baseDmg: number,
   game: GameHooks,
   add: (e: unknown) => void,
@@ -551,6 +694,8 @@ export function resolveWhipTagHit(
     hurtNpcId: en.id,
     realLife: en.realLife ?? -1,
     hurtEnemyWH: { w: en.w ?? 16, h: en.h ?? 16 },
+    hurtEnemyXY: { x: en.x ?? hx - (en.w ?? 16) / 2, y: en.y ?? hy - (en.h ?? 16) / 2 },
+    hurtEnemyVel: { x: en.vx ?? 0, y: en.vy ?? 0 },
   };
   const changes = tagDamageChangesNone();
   stack.modifyHit(ctx, changes, game);                             // :12947

@@ -79,6 +79,8 @@ export interface GenConfigDTO {
   seedText: string;
   name?: string;
   evil?: 0 | 1 | -1;  // 0 腐化 / 1 猩红 / -1 随机
+  /** 彩蛋种子旗标直注（GenConfig.seedFlags，S0-1 解耦；缺省=parseSeed(seedText) 派生） */
+  seedFlags?: import('../world/gen/SeedEasterEggs').SeedFlags;
   preview: boolean;   // 生成期降采样位图预览开关
 }
 

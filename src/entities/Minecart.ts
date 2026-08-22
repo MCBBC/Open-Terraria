@@ -145,6 +145,9 @@ export class Minecart extends Entity {
   dead = false;
   /** 坐骑贴图（Mount.frontTexture 文件名，atlas.ensureVImage 懒加载） */
   texture = DEFAULT_CART_TEXTURE;
+  /** 坐骑发光层（Mount.frontTextureGlow——Mount.Draw :5523 case 2 同帧二次 Draw，
+   *  加色管线；机械矿车 11 = MinecartMechGlow，Mount.cs:1506。null = 无发光层） */
+  textureGlow: string | null = null;
   /** 升级套件已解锁（Player.UsingSuperCart → SuperCart* 常量） */
   superCart = false;
   /** 车身朝向翻转（撞弹性挡板时随输入翻；Player.cartFlip） */
@@ -188,6 +191,11 @@ export class Minecart extends Entity {
   applyMountStats(): void {
     const hb = this.mdata?.heightBoost ?? 10;
     this.h = 42 + hb;
+    // 贴图/发光层随坐骑档取（机械矿车 11 → MinecartMech/Glow，Mount.cs:1505-1506；
+    // 其余矿车族 frontTextureGlow 恒 Empty → null）。与 Game.mountMinecartAt 的
+    // cart.texture 赋值同式（CART_MOUNT_TEXTURES[mountId] ?? DEFAULT）——实体自洽
+    this.texture = CART_MOUNT_TEXTURES[this.mountId] ?? DEFAULT_CART_TEXTURE;
+    this.textureGlow = this.mdata?.frontTextureGlow ?? null;
   }
 
   // ---- 坐骑参数（Mount.cs RunSpeed/DashSpeed/Acceleration getter :480-506 +

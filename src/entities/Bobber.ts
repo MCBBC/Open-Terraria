@@ -415,7 +415,8 @@ export class Bobber extends Entity {
   }
 
   private tackleBox(p: Player): boolean {
-    // 钓具箱族（accfx 未提取该字段——经装备名快速判定，渔夫耳环 2374/渔具袋 3721/钓具箱 2375）
+    // 钓具箱族 accTackleBox（equipStats.fishingTackle——2026-08-22 配饰审计补字段：
+    // 2375 钓具箱/3721 渔具袋/5064 防熔渔具袋 :14123-14140；渔夫耳环 2374 只有钓技+10 不在此族）
     return (p as unknown as { equipStats: { fishingTackle?: boolean } }).equipStats?.fishingTackle ?? false;
   }
 

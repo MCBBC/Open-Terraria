@@ -18,7 +18,10 @@ import type { GameHooks } from '../src/entities/types';
 
 describe('GenState.seedFlags 灌入（SeedEasterEggs.parseSeed）', () => {
   it('醉酒/十周年种子旗标解析；金标种子旗标恒空', () => {
-    expect(parseSeed('drunk world').flags.drunkWorld).toBe(true);
+    // drunk 唯一触发=数字路 5162020（WorldSeedOption_Drunk.SpecialSeedNames 为空——
+    // "drunk world" 文本自造别名已随 S0-2 退役）
+    expect(parseSeed('05162020').flags.drunkWorld).toBe(true);
+    expect(parseSeed('drunk world').flags.drunkWorld).toBeFalsy();
     expect(parseSeed('celebrationmk10').flags.tenthAnniversary).toBe(true);
     expect(parseSeed('9293480').flags).toEqual({});
     expect(newGenState(100, 100).seedFlags).toEqual({});
@@ -26,7 +29,7 @@ describe('GenState.seedFlags 灌入（SeedEasterEggs.parseSeed）', () => {
 });
 
 describe('风筝 buff 383 / 恶臭 buff 120（Player.cs:9612-9623 / :9958-9961）', () => {
-  it('KiteBuff：移速 +0.15、镐速 ×0.9（1457 :10003-10004 削）、kiteLuck 180s 一档钳 3', () => {
+  it('KiteBuff：移速 +0.25、镐速 ×0.85（1456 :9613-9614 终值——1457 削档不取）、kiteLuck 180s 一档钳 3', () => {
     const b = new BuffState();
     expect(b.kiteLuckLevel).toBe(0);
     b.apply(BuffType.KiteBuff, 179);
@@ -35,13 +38,13 @@ describe('风筝 buff 383 / 恶臭 buff 120（Player.cs:9612-9623 / :9958-9961�
     expect(b.kiteLuckLevel).toBe(2);
     b.apply(BuffType.KiteBuff, 10_000);
     expect(b.kiteLuckLevel).toBe(3);
-    expect(b.pickSpeedMult).toBeCloseTo(0.9, 5);   // 1457: 镐速 -0.15 → -0.1
+    expect(b.pickSpeedMult).toBeCloseTo(0.85, 5);  // 1456 :9614 pickSpeed -= 0.15f
     const noKite = new BuffState();
     expect(noKite.moveSpeedMult).toBe(1);
     b.remove(BuffType.KiteBuff);
     expect(b.moveSpeedMult).toBe(1);
     b.apply(BuffType.KiteBuff, 600);
-    expect(b.moveSpeedMult).toBeCloseTo(1.15, 5);   // 1457: 移速 +0.25 → +0.15
+    expect(b.moveSpeedMult).toBeCloseTo(1.25, 5);  // 1456 :9613 moveSpeed += 0.25f
   });
 
   it('luck 聚合：风筝档 +0.1/3·档、恶臭 −0.25（RecalculateLuck :28675/:28687-28690）', () => {

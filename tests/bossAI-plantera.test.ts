@@ -154,7 +154,8 @@ describe('世纪之花 AI_051', () => {
     expect([275, 276, 277]).toContain(p.projId);
     if (p.projId === 277) {
       expect(p.thornBounce).toBe(true);
-      expect(p.grav).toBe(0.3);
+      expect(p.grav).toBe(0.2);            // 277 = aiStyle14 档 0.2（P.cs:23498 `ai[0] > 5` 后
+                                           //  vy+=0.2；SetDefaults :3362-3369 无重力覆写）
     } else {
       expect(p.grav).toBe(0.025);          // Projectile.cs:54318-54329
       expect(p.gravDelay).toBe(35);

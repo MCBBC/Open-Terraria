@@ -415,6 +415,16 @@ export class WorldEvolution {
         }
         if (cnt < 2) this.placeTight(i, j + 1);
       }
+    } else if (sheet === 254) {
+      // 南瓜株成长（⚠️3 2026-08-22 批，cs:72376-72380）：Next((frameX+10)/10)==0 →
+      // GrowPumpkin（:52522——stage=fx/36 逐档 1/1·1/4·1/8·1/11,stage≥4 停）
+      if (Math.random() < 1 / Math.max(1, Math.floor((st.frameX[this.at(i, j)] + 10) / 10))) {
+        this.growPumpkin(i, j);
+      }
+    } else if (sheet === 78 || sheet === 380 || sheet === 579) {
+      // 陶罐 78/花盆箱 380/石魔像头 579 顶部随机杂草（⚠️3,cs:72381-72390）：
+      // 上格空 + genRand.Next(2)==0 → PlaceTile(3)（杂草 frameX=Next(5)*18,cs:59700-59704）
+      if (!this.active(i, j - 1) && Math.random() < 0.5) this.place1(i, j - 1, 3, 0, 5);
     } else if (SPREAD_OVERGROUND.has(sheet)) {
       this.grassGrowth(i, j, minI, maxI, minJ, maxJ, false);
       if ((sheet === 32 || sheet === 352) && Math.random() < 1 / 3) {
@@ -1582,6 +1592,38 @@ export class WorldEvolution {
     if (sheet === 84 && fx === 36 && Math.random() < 1 / 2) {
       // 开花 → 成熟回落（cs:45874-45885 else-if 链）
       st.setTile(x, y, S(83), fx, 0);
+    }
+  }
+
+  // ================= 南瓜株成长（GrowPumpkin cs:52522-52586） =================
+
+  /** GrowPumpkin（cs:52522）1:1：2×2 整株 stage=fx/36（0..4）,完整性与草族支撑
+   *  （下方两柱须 SolidTile ∈ {2,477,109,492},cs:52552-52556）双门 → 全格 fx+=36。
+   *  采样格可为株内任意格（锚=fx%2/fy%2 归一,cs:52527-52540） */
+  private growPumpkin(i: number, j: number): void {
+    const st = this.host.store;
+    const i0 = st.idx(i, j);
+    const t = this.typeAt(i, j);
+    const fx = st.frameX[i0], fy = st.frameY[i0];
+    const stage = Math.floor(fx / 36);
+    if (stage >= 4) return;                       // cs:52541-52543（num4>=4 不再长）
+    const ax = i - (Math.floor(fx / 18) % 2);     // cs:52531-52539 列归一
+    const ay = j - (Math.floor(fy / 18) % 2);     // cs:52527-52530 行归一
+    for (let dx = 0; dx < 2; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        if (!st.inBounds(ax + dx, ay + dy)) return;
+        const ii = st.idx(ax + dx, ay + dy);
+        if (!st.flags[ii] || st.type[ii] !== t || st.frameX[ii] !== dx * 18 + stage * 36) return;
+      }
+      // 支撑：SolidTile 且 草族（2 草/477 草变体/109 圣草/492 圣草变体,cs:52552-52556）
+      const bi = st.idx(ax + dx, ay + 2);
+      if (!this.solidTile(ax + dx, ay + 2)) return;
+      const bs = sheetOf(st.type[bi]);
+      if (bs !== 2 && bs !== 477 && bs !== 109 && bs !== 492) return;
+    }
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+      const ii = st.idx(ax + dx, ay + dy);
+      st.setTile(ax + dx, ay + dy, t, st.frameX[ii] + 36, st.frameY[ii]);   // cs:52570-52580 全格 frameX+=36
     }
   }
 

@@ -16,6 +16,7 @@ import { tileRunner } from './TileRunner';
 import { growTree } from './TreePass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
+import { runLavaLayerCaverer } from './LavaLayerCavererPass';
 // node:fs 动态导入（探针落盘 SW_DG_LIGHTS_GRID 才用）——顶层静态导入会进
 // worker bundle 被 vite 外部化炸构建（2026-08-18 实锤：writeFileSync is not
 // exported by "__vite-browser-external"）。改运行时 require，浏览器恒 false 门
@@ -374,6 +375,13 @@ export function runDungeonPass(
   const doorData: DDoor[] = [];
   const platData: DPlat[] = [];
   const pits: DBnd[] = [];
+  // ★QQQQQQ（2026-08-22）：已生成窗盒（DungeonWindow 子类构造即入 dungeonFeatures，
+  //   GenerateFeature 恒 true→generated=true；Bounds=逐写格 UpdateBounds）——
+  //   DungeonWindow.CanGenerateFeatureAt 对**非 WallVariants** 特征恒 false
+  //   （DungeonWindow.cs:9-17），CanGenerateFeatureAt 的 dungeonFeatures 环逐盒拒。
+  //   JS 曾缺此门：CONST 塔 seed 一书架候选落入窗盒 → vanilla 拒/JS 收 → +4 掷
+  //   流位移（span 首consumption差 @34324）→ 下游 DgBanners/LavaLayerCaverer 全连坐。
+  const winBoxes: DBnd[] = [];
   const bounds = new DBnd(w, h);
   const entBounds = new DBnd(w, h);
   let entExists = false;
@@ -1240,7 +1248,26 @@ export function runDungeonPass(
   //（!flag 门）；每 10 步记平台候选（InAHallway → hf=5）。头部掷序与 Legacy 支逐位
   // 同构（strength→steps→方向链），覆写值弃而位次保留——种子流两支等价推进。
   function dgEntHallPrecalc(seed: number, sx0: number, sy0: number, tgx: number, tgy: number): void {
-    const hr = dgUR(seed);
+    // flag 支直线：v=End-Start，SafeNormalize(v,UnitX)，steps=ceil(|v|/1)
+    const dvx = tgx - sx0, dvy = tgy - sy0;
+    const len = Math.sqrt(dvx * dvx + dvy * dvy);
+    const vx = len === 0 ? 1 : dvx / len, vy = len === 0 ? 0 : dvy / len;
+    const num5 = 0.5;
+    const n6 = 30;
+    const hb = new DBnd(w, h);
+    hb.set(Math.trunc(sx0), Math.trunc(sy0), Math.trunc(sx0), Math.trunc(sy0));
+    const hall: DHall = { seed, generated: true, forceX: false, isEntrance: true, bounds: hb, sx: sx0, sy: sy0, ex: 0, ey: 0, sdx: vx, sdy: vy, edx: vx, edy: vy };
+    halls.push(hall);
+    // ★QQQQQQ（2026-08-22）precalc 支每步跑 LegacyHall **两次**：DungeonCrawler.cs:540-541
+    //   dungeonHall.CalculateHall(data,currentPos,val) → LegacyHall(generating:false)
+    //   + dungeonHall.GenerateHall(data) → LegacyHall(generating:true)——两跑各自
+    //   new UnifiedRandom(RandomSeed)（LEH.cs:26-27），私有掷流同值重放两遍；写门/
+    //   平台候选在 generating 门内（LEH.cs:243/:297-313），边界更新在门外（:246-249，
+    //   两跑同值幂等）。JS 曾单跑=每步少耗一遍私有流（CONST 链 #32 塔段「掷形差」
+    //   根因之一；span 对拍 vanilla 每颗主流 Next(10,30) 配两段相同厅头 b5 9|b10 30）。
+    for (let dryP = 0; dryP < 2; dryP++) {
+    const dry = dryP === 0;                        // pass0=CalculateHall（只掷不写）
+    const hr = dgUR(seed);                         // ★每跑各 new UnifiedRandom(RandomSeed)——头掷全量重放
     const hri = (a: number, b: number): number => hr.nextIntRange(a, b + 1);
     const hrn = (n: number): number => hr.nextInt(n);
     const num = hri(5, 8);                       // strength（存活——盒宽/Fluff 用）
@@ -1248,18 +1275,8 @@ export function runDungeonPass(
     if (hrn(3) !== 0) hri(0, 199);               // 方向掷链（覆写弃值保位）
     else if (hrn(3) === 0) hri(50, 75);
     else if (hrn(6) === 0) { /* vy*=2 分支无掷 */ }
-    // flag 支直线：v=End-Start，SafeNormalize(v,UnitX)，steps=ceil(|v|/1)
-    const dvx = tgx - sx0, dvy = tgy - sy0;
-    const len = Math.sqrt(dvx * dvx + dvy * dvy);
-    const vx = len === 0 ? 1 : dvx / len, vy = len === 0 ? 0 : dvy / len;
     let steps = Math.ceil(len);
     let px = sx0 + 0.0, py = sy0 + 0.0;
-    const num5 = 0.5;
-    const n6 = 30;
-    const hb = new DBnd(w, h);
-    hb.set(Math.trunc(px), Math.trunc(py), Math.trunc(px), Math.trunc(py));
-    const hall: DHall = { seed, generated: true, forceX: false, isEntrance: true, bounds: hb, sx: px, sy: py, ex: 0, ey: 0, sdx: vx, sdy: vy, edx: vx, edy: vy };
-    halls.push(hall);
     const roomsArea = roomsInSpots(px, py, px + vx * steps, py + vy * steps, Math.trunc(steps / 2 + num));
     let n8 = 0;                                  // 平台节奏计数（num8 初 0，num7=10）
     while (steps > 0) {
@@ -1271,7 +1288,7 @@ export function runDungeonPass(
       const y1 = Math.max(n6, Math.min(h - n6 - 1, Math.trunc(py + num + 4.0 + hrn(6))));
       bounds.upd(x0, y0, x1, y1);
       hb.upd(x0, y0, x1, y1);
-      for (let x = x0; x < x1; x++) {
+      if (!dry) for (let x = x0; x < x1; x++) {
         for (let y = y0; y < y1; y++) {
           const i = st.idx(x, y);
           const p = prot(x, y, roomsArea);
@@ -1281,7 +1298,7 @@ export function runDungeonPass(
           if (f2 && canPlaceTileAt(i)) chTile(i, brick, true);
         }
       }
-      for (let x = x0 + 1; x < x1 - 1; x++) {
+      if (!dry) for (let x = x0 + 1; x < x1 - 1; x++) {
         for (let y = y0 + 1; y < y1 - 1; y++) {
           const i = st.idx(x, y);
           const p = prot(x, y, roomsArea);
@@ -1297,24 +1314,27 @@ export function runDungeonPass(
       const kx1 = Math.max(n6, Math.min(w - n6 - 1, Math.trunc(px + num * num5 + n16)));
       const ky0 = Math.max(n6, Math.min(h - n6 - 1, Math.trunc(py - num * num5 - n16)));
       const ky1 = Math.max(n6, Math.min(h - n6 - 1, Math.trunc(py + num * num5 + n16)));
-      n8--;
-      if (n8 <= 0) { n8 = 10; platData.push({ x: Math.trunc(px), y: Math.trunc(py), hall: true, hf: 5, pots: 0.25 }); }
-      for (let x = kx0; x < kx1; x++) {
-        for (let y = ky0; y < ky1; y++) {
-          const i = st.idx(x, y);
-          const p = prot(x, y, roomsArea);
-          if (p === 3) continue;
-          let f4 = true;
-          if (p === 2 && isDW(st.wall[i])) f4 = false;
-          st.flags[i] = 0;
-          st.slope[i] = 0; st.half[i] = 0;       // ClearTile()（清坡+半砖）
-          if (f4) chWall(i, wall, false);
+      if (!dry) {
+        n8--;
+        if (n8 <= 0) { n8 = 10; platData.push({ x: Math.trunc(px), y: Math.trunc(py), hall: true, hf: 5, pots: 0.25 }); }
+        for (let x = kx0; x < kx1; x++) {
+          for (let y = ky0; y < ky1; y++) {
+            const i = st.idx(x, y);
+            const p = prot(x, y, roomsArea);
+            if (p === 3) continue;
+            let f4 = true;
+            if (p === 2 && isDW(st.wall[i])) f4 = false;
+            st.flags[i] = 0;
+            st.slope[i] = 0; st.half[i] = 0;       // ClearTile()（清坡+半砖）
+            if (f4) chWall(i, wall, false);
+          }
         }
       }
       px += vx; py += vy;                        // flag=true → 无 0.98 纵向衰减
     }
     posX = Math.trunc(px); posY = Math.trunc(py);
     hall.ex = px; hall.ey = py;
+    }
   }
 
   // ================= TowerDungeonEntrance.TowerEntrance（Entrances/TowerDungeonEntrance.cs:40-461）=================
@@ -1447,7 +1467,10 @@ export function runDungeonPass(
     // ★PlaceWall(245) 掷在写门内（XX 批 x86 对拍定谳：s4444 tower 段 E 哈希
     //   b4788d7e 仅在 write-gated 模型下命中——与 jungle 段 PlaceWall
     //   "成功落墙必掷 SquareWallFrame" 同口径；155 次调用仅 151 写=151 掷）
-    if (x > 1 && y > 1 && x < w - 2 && y < h - 2 && wallAt(x, y) === 0) { raw(); st.wall[st.idx(x, y)] = FENCE; }
+    //   ★QQQQQQ：掷的过载=WallFrame(resetFrame) 的 Next(0,3)（Framing.cs:395，
+    //   span 实证 vanilla 记 b 0 3×151）——曾用 raw()=Next()（同耗 1 样本流等价，
+    //   但 span 签名不合）；ri(0,2)=nextIntRange(0,3) 精确同构。
+    if (x > 1 && y > 1 && x < w - 2 && y < h - 2 && wallAt(x, y) === 0) { ri(0, 2); st.wall[st.idx(x, y)] = FENCE; }
   }
   // TowerEntrance_LineOfFence（:463-476）：y<=10 直退；条件循环不变量→全或无
   function dgLineOfFence(lx: number, rx: number, y: number): void {
@@ -1478,8 +1501,10 @@ export function runDungeonPass(
     rn(1);                                        // style.GetWindowPlatformStyle（Next(1) 单元素）
     if (dgTW) dgTW.win = (dgTW.win as number) + 1;
     const glass = overrideGlass > 0 ? overrideGlass : winGlass;
+    const box = new DBnd(w, h);
+    box.set(px, py, px, py);                      // Bounds.SetBounds(placeX,placeY,placeX,placeY)
     const setW = (x: number, y: number, v: number): void => {
-      if (st.inBounds(x, y)) st.wall[st.idx(x, y)] = v;
+      if (st.inBounds(x, y)) { st.wall[st.idx(x, y)] = v; box.upd(x, y); }   // 每写格 UpdateBounds
     };
     for (let i2 = 0; i2 < ww; i2++) {
       const cx = px + i2 - Math.trunc(ww / 2);
@@ -1501,11 +1526,15 @@ export function runDungeonPass(
         }
       }
     }
+    box.calc();                                   // Bounds.CalculateHitbox()
+    winBoxes.push(box);                           // GenerateFeature 恒 true → generated=true
   }
   // DungeonWindowMosaic.Window_Skeletron（:46-190）——17×15 颅 + 11×7 颚 + 边缘描线
   function dgWindowMosaicSkel(px: number, py: number, glass: number): void {
+    const box = new DBnd(w, h);
+    box.set(px, py, px + 1, py + 1);              // Mosaic: SetBounds(placeX,placeY,placeX+1,placeY+1)
     const setW = (x: number, y: number, v: number): void => {
-      if (st.inBounds(x, y)) st.wall[st.idx(x, y)] = v;
+      if (st.inBounds(x, y)) { st.wall[st.idx(x, y)] = v; box.upd(x, y); }
     };
     const skullOK = (x: number, y: number, ww: number, wh: number): boolean => {
       if (x < 0 || y < 0 || x >= ww || y >= wh) return false;
@@ -1589,11 +1618,15 @@ export function runDungeonPass(
         setW(cx, n21, winEdge);
       }
     }
+    box.calc();
+    winBoxes.push(box);
   }
   // DungeonWindowMosaic.Window_MoonLord（:192-330）——左右 8×7+7×6 侧眼 + 7×8 中眼
   function dgWindowMosaicMoon(px: number, py: number, glass: number): void {
+    const box = new DBnd(w, h);
+    box.set(px, py, px + 1, py + 1);              // Mosaic: SetBounds(placeX,placeY,placeX+1,placeY+1)
     const setW = (x: number, y: number, v: number): void => {
-      if (st.inBounds(x, y)) st.wall[st.idx(x, y)] = v;
+      if (st.inBounds(x, y)) { st.wall[st.idx(x, y)] = v; box.upd(x, y); }
     };
     const sideOK = (x: number, y: number, left: boolean, ww: number, wh: number): boolean => {
       if (x < 0 || y < 0 || x >= ww || y >= wh) return false;
@@ -1650,6 +1683,8 @@ export function runDungeonPass(
         if (!midOK(n9, n12 + 1, n5, n6)) setW(cx, cy + 1, winEdge);
       }
     }
+    box.calc();
+    winBoxes.push(box);
   }
   // TowerEntrance_Door（:433-461）：num/num2 门洞扫带 + 墙清/k≥-2..0 清块 +
   // 双 PlaceTile(10,style13)（PlaceDoor 3×Next(3) 成功即掷）
@@ -1688,7 +1723,11 @@ export function runDungeonPass(
     }
     const n2 = 5, n3 = 35, n4 = 40, n5 = 100;
     const n7 = j - 30;                            // 塔基线（num7=j-num6, num6=30）
-    const n8 = 30, n9 = 25, n10 = 30, n11 = 20, n12 = 50, n13 = 15, n14 = 20, n16 = 95;
+    // ★PPPPP（2026-08-22）n16 勘误：原版 num16 = num8+num11+num15 = 30+20+40 = **90**
+    //   （TowerDungeonEntrance.cs:66-70）。JS/oracle 曾同抄 95（双源同错——顶柱/顶檐
+    //   整体高 5 格,篝火 y 156≠161 实证）；四链种子恰无 Tower 入口故未暴露,CONST 链
+    //   首差定罪。caves-oracle.cs 侧同步勘误归 golden 工具所有方（本批禁区）。
+    const n8 = 30, n9 = 25, n10 = 30, n11 = 20, n12 = 50, n13 = 15, n14 = 20, n16 = 90;
     const minY = n7 - n16, maxY = n7 + 10;
     // 塔侧地表圆清 Circle(15)（:92-98 Shapes.Circle.Perform 椭圆逐行 + Actions.Clear
     // =ClearEverything）
@@ -1706,7 +1745,17 @@ export function runDungeonPass(
         }
       }
     }
-    entBounds.set(i - n4, minY, i + n4 + 1, maxY);
+    // ★RRRRRR（2026-08-23）Bounds 语义对齐：原版 = SetBounds(i,j,i,j)（:59）+
+    //   UpdateBounds(i-n4,minY,i+n4+1,maxY)（:112，**只扩不缩**）→ 底边保持 **j**
+    //   （maxY=j-20<j 不扩）；尾 CalculateHitbox（:462）→ hitbox=[i-40,j-120)..[i+41,j)。
+    //   JS 曾直接 set(i-n4,minY,i+n4+1,maxY) → 底边 j-20，塔盒短 20 格 → 盒内书架/画/
+    //   尖刺候选 JS 多放行（vanilla 经 TowerDungeonEntrance.CanGenerateFeatureAt:31-37
+    //   拒 Bookshelves/Paintings/Spikes）——CONST 链 #32 首差根因（x86 CGFA 探针实证：
+    //   vanilla 于掷 34324 对候选 (3693,284) VERDICT REJECT，JS 同位放行）。QQQQQQ ⑥
+    //   「入口 hitbox=陈旧单格」结论不成立（:462 无条件重算 hitbox）。Dome 侧 JS
+    //   （:1966-67 set(i,j,i,j)+upd）本就同构，无需改。
+    entBounds.set(i, j, i, j);
+    entBounds.upd(i - n4, minY, i + n4 + 1, maxY);
     entExists = true;
     // 基座箱（:100-213）：n∈[-40,40]×m∈[-5,100)——m<0 全清；0..5/5..10 双带（窗带
     // ClearEverything+!flag4 补墙 / 实体带 !flag4 置砖）；m≥10 表层换装（!flag4 或
@@ -1843,15 +1892,15 @@ export function runDungeonPass(
     dgBottomWedge(i - n13, n7 - n16 + n2, 3, false);
     dgBottomWedge(i + n13 - 1, n7 - n16 + n2, 3, true);
     // 九处平台候选（:362-373，OverrideHeightFluff=0）
-    platData.push({ x: i - n10 - 2, y: n7 - n8 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
-    platData.push({ x: i - n10 - 2, y: n7 - n8 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
-    platData.push({ x: i - n14 - 2, y: n7 - n12 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
-    platData.push({ x: i - n14 - 2, y: n7 - n12 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
-    platData.push({ x: i + n10 + 2, y: n7 - n8 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
-    platData.push({ x: i + n10 + 2, y: n7 - n8 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
-    platData.push({ x: i + n14 + 2, y: n7 - n12 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
-    platData.push({ x: i + n14 + 2, y: n7 - n12 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
-    platData.push({ x: i, y: n7 - n12 + n2 - 3, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    platData.push({ x: i - n10 - 2, y: n7 - n8 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });   // ★TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）
+    platData.push({ x: i - n10 - 2, y: n7 - n8 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });   // ★TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）
+    platData.push({ x: i - n14 - 2, y: n7 - n12 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });   // ★TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）
+    platData.push({ x: i - n14 - 2, y: n7 - n12 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });   // ★TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）
+    platData.push({ x: i + n10 + 2, y: n7 - n8 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });   // ★TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）
+    platData.push({ x: i + n10 + 2, y: n7 - n8 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });   // ★TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）
+    platData.push({ x: i + n14 + 2, y: n7 - n12 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });   // ★TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）
+    platData.push({ x: i + n14 + 2, y: n7 - n12 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });   // ★TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）
+    platData.push({ x: i, y: n7 - n12 + n2 - 3, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });   // ★TowerEntrance_AddPlatform NoWaterbolt=true（TED.cs:587）
     // 窗族（:375-429）——num30=n7-75；Regular=3+2+2+1 八窗 / Mosaic=大窗+2+2+1 五窗
     {
       const n30 = n7 - n16 + 20;
@@ -2236,8 +2285,12 @@ export function runDungeonPass(
     if (!inW(x, y, 5)) return false;
     if (wallAt(x, y) === 350) return false;
     if (feat === 1 && entExists && entBounds.contains(x, y)) return false;
-    if (feat !== 2) {
+    // feat 3=WallVariants（pit/window 门均放行：DungeonPitTrap.cs:35/DungeonWindow.cs:11）
+    if (feat !== 2 && feat !== 3) {
       for (const pb of pits) if (pb.contains(x, y)) return false;
+    }
+    if (feat !== 3) {
+      for (const wb of winBoxes) if (wb.contains(x, y)) return false;   // ★QQQQQQ 窗盒门
     }
     return true;
   }
@@ -2647,7 +2700,7 @@ export function runDungeonPass(
         seen.add(key(p[0], p[1]));
         const ti = st.idx(p[0], p[1]);
         if (st.wall[ti] === 0 || st.wall[ti] === wallType || st.wall[ti] === 244 || st.wall[ti] === 62
-          || !featOK(p[0], p[1], 2)) continue;
+          || !featOK(p[0], p[1], 3)) continue;   // ★feat3=WallVariants（pit/window 放行）
         if (entExists && entBounds.contains(p[0], p[1])) {
           if (st.wall[ti] !== wall) continue;
         } else if (st.wall[ti] !== wall) continue;
@@ -2956,11 +3009,14 @@ export function runDungeonPass(
       if (rn(2) === 0) { rn(2); rn(8); }
       if (rn(2) === 0) { rn(2); rn(26); }
       if (rn(2) === 0) rn(3);
-      if (rn(3) > 0) { rn(6); rn(3); }
-      if (rn(3) > 1) { rn(6); rn(3); }
-      if (rn(2) === 0) rn(3);
-      if (rn(2) === 0) { rn(2); rn(16); }
-      if (rn(2) === 0) rn(3);
+      // ★QQQQQQ 勘误（span 签名对拍 cs:37086/:37116/:37151-37152）：stack 掷过载
+      //   Next(1,3)≠Next(3)、Next(2,5)≠Next(3)、Next(15,31)≠Next(16)——同耗 1 样本
+      //   （DGSEGHASH 流对拍不可见），值域不同=真宝箱 stack 语义差。
+      if (rn(3) > 0) { rn(6); ri(1, 2); }
+      if (rn(3) > 1) { rn(6); ri(1, 2); }
+      if (rn(2) === 0) ri(2, 4);
+      if (rn(2) === 0) { rn(2); ri(15, 30); }
+      if (rn(2) === 0) ri(1, 2);          // ★QQQQQQ：73 钱 stack=Next(1,3)（cs:37186）
     } else {
       if (num10 > 0) prefixRolls(num10);
       else rn(4);
@@ -3114,7 +3170,10 @@ export function runDungeonPass(
               }
               void num9;
               let n10 = ri(min, max - 1);            // ri 闭区间 ↔ Next(min, max)
-              if (bsEvG) bsEvG.push([k0, dgMainRolls, num8, y, n10, flag3, n7, k]);
+              if (bsEvG) bsEvG.push([k0, dgMainRolls, num8, y, n10, flag3, n7, k,
+                featOK(num8, y, 0), entNoFeat(num8, y),
+                winBoxes.findIndex((wb) => wb.contains(num8, y)),
+                entBounds.contains(num8, y) && entExists]);
               while (n10 > 0) {
                 chTile(st.idx(x, y), PLATFORM, false);
                 // ★2026-08-16 审计：书架平台样式 = shelfStyles 按墙变体三档
@@ -3156,6 +3215,9 @@ export function runDungeonPass(
       }
       if (ncount > 1000) { ncount = 0; num3++; }
     }
+    // ★QQQQQQ 探针旁路：窗盒汇总（tools/_qqqqq3.test.ts 消费）
+    (globalThis as { __bsWin?: unknown[][] }).__bsWin =
+      winBoxes.map((wb: DBnd) => [wb.L, wb.T, wb.R, wb.B]);
   }
   // PlaceTile 近似：目标格净空 + 有墙/侧邻/底邻锚 → 单格放置（帧不入哈希）
   function placeSimple(x: number, y: number, tile: number): boolean {
@@ -4322,6 +4384,10 @@ export function runDungeonPass(
   gs.generatingDungeonPositionX = posX;
   gs.dungeonY = dungeonY;
   gs.dungeonEntX = dungeonX; gs.dungeonEntY = dungeonY;
+  // ★PPPPP（2026-08-22）LavaLayerCaverer（cs:74003）：Dungeon pass 尾段（cs:14926-14929，
+  //   dungeonData.Clear() 之后、pass 委托结束前）——饥荒世界岩浆层隧道。同 pass 内
+  //   调用（无重播）,流位紧接 MakeDungeon 之后;门=constant&&!tenth&&!remix。
+  runLavaLayerCaverer(st, rng, gs);
 }
 export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1, support = true, styleRowH?: number, styleColW?: number): boolean {
   const def = TILE_DEFS[tile];

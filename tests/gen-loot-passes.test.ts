@@ -33,9 +33,21 @@ describe('物资对齐:战利品与新增 pass', () => {
   it('全部宝箱有货 + 新 pass 密度(小世界)', async () => {
     const world = await generateWorld({ width: 4200, height: 1200, seedText: 'loot-check-1' });
 
-    // ① 全部有货:原版仅神庙箱可能为空(锁箱语义)——至多 1 只空箱
+    // ① 全部有货:原版空箱仅两类——梳妆台容器(vanilla 88,Place3x2 里
+    //    Chest.CreateChest 注册的空容器,地狱屋/地下屋都放;OOOOOO 批 x86 基线
+    //    39 原版世界 10,017 箱共 239 空箱,100% 是梳妆台、0 其他)与神庙锁箱
+    //    (锁箱语义)——非梳妆台空箱 ≤1。旧断言"至多 1 只空箱"与原版事实不符
+    //    (TTTT 2026-08-19 接线梳妆台注册后暴露,UUUU 批已备案非回滚自因)。
+    const DRESSER = TILE_BY_KEY['dresser']!;
+    const st1 = world.store;
     const empty = world.chests.filter((c) => !c.items.some((it) => it));
-    expect(empty.length).toBeLessThanOrEqual(1);
+    const emptyNonDresser = empty.filter((c) => {
+      const i = st1.idx(c.x, c.y);   // 梳妆台容器锚点=3×2 左上格
+      return !(st1.flags[i] && st1.type[i] === DRESSER);
+    });
+    expect(emptyNonDresser.length).toBeLessThanOrEqual(1);
+    //    梳妆台空容器本身也要有界(原版小世界 1-10 只):防"容器泛滥"回归
+    expect(empty.length).toBeLessThanOrEqual(16);
 
     // ② 战利品丰富度:深度分支杂物表 → 平均每箱 ≥3 件
     const totalItems = world.chests.reduce((s, c) => s + c.items.filter(Boolean).length, 0);

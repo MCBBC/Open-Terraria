@@ -27,6 +27,12 @@ export interface GenConfig {
   name?: string;
   /** 邪恶群系：-1 随机（默认） 0 腐化 1 猩红（UIWorldCreation 对应原版 WorldGenParam_Evil） */
   evil?: -1 | 0 | 1;
+  /** 彩蛋种子旗标直注位（S0-1 seed/flags 解耦，对齐原版 WorldFileData 与
+   *  WorldGenerationOptions 解耦语义）：显式传入时**覆盖** parseSeed(seedText) 派生——
+   *  使「数字种子+任意旗标组合」可表达（原版 serverconfig `seed_<name>=1` + 普通
+   *  -seed 的等价通道，彩蛋种子金标对拍的唯一确定性入口）。缺省（不传）= 现行为
+   *  （从 seedText 单源派生）。旗标语义见 SeedEasterEggs.ts。 */
+  seedFlags?: SeedFlags;
   /** 每 pass 完成后回调部分世界（生成期实时地图预览用；无需等 finalize） */
   onWorldPartial?: (world: World, passIndex: number, passName: string) => void;
 }
@@ -54,7 +60,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   // size 档派生 W/H（UI 语义）；显式 width/height 仍可用（探针/测试直给）
   const { width, height } = cfg.size !== undefined ? SIZE_DIMS[cfg.size] : cfg;
   const world = new World(width, height, seed, cfg.name ?? '新世界');
-  world.seedFlags = parseSeed(cfg.seedText || '').flags; // 运行时消费（血月 1/6 十周年 / drunk 黎明翻转）
+  // 旗标解析：cfg.seedFlags 直注优先（S0-1 解耦），缺省回退 seedText 派生（现行为）。
+  // 运行时消费（血月 1/6 十周年 / drunk 黎明翻转等）
+  world.seedFlags = cfg.seedFlags ?? parseSeed(cfg.seedText || '').flags;
   const rng = new RNG(seed);
   // 注：曾在此 createNoise2D(() => rng.next())——simplex 构造即消耗 RNG 流
   //（建置换表 256+ 次），而全管线无消费者。种子等价必须零预耗，已删除。
@@ -342,7 +350,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
 // ---------- 原版管线 pass(阶段 1-2 移植) ----------
 import { newGenState, type GenState } from './vanilla/GenState';
 import { flipGenSolid, resetGenSolid } from './vanilla/GenSolid';
-import { parseSeed } from './SeedEasterEggs';
+import { parseSeed, type SeedFlags } from './SeedEasterEggs';
 import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
 import { runOceanSandPass, runBeachesPass, runBeachDecorPass } from './vanilla/BeachPass';
@@ -374,6 +382,7 @@ import { runMultitileFragmentSweepPass } from './vanilla/MultitileFragmentSweep'
 import { runMossAndMossCavesPass } from './vanilla/MossPass';
 import { runGrassWallPass } from './vanilla/GrassWallPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
+import { runWavyCavesPass } from './vanilla/WavyCavesPass';
 import { runTreePass, randomizeTreeStyle, randomizeCaveBackgrounds, growAshTree } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
 import { runPotsPass } from './vanilla/PotsPass';
@@ -439,12 +448,12 @@ async function liquidSettlePass({ world, rng }: GenCtx) {
 
 /** 种子等价对账钩子（terrain oracle）：只跑 Reset 掷骰 + Terrain pass，
  *  返回 GenState 与逐列地表（trunc(num3)），供与 C# 参考实现逐列比对 */
-export function runResetAndTerrain(cfg: { width: number; height: number; seedText: string; evil?: -1 | 0 | 1 }): {
+export function runResetAndTerrain(cfg: { width: number; height: number; seedText: string; evil?: -1 | 0 | 1; seedFlags?: SeedFlags }): {
   gs: GenState; surface: Int32Array; seed: number; world: World; rng: RNG; ctx: GenCtx;
 } {
   const seed = translateSeed(cfg.seedText);
   const world = new World(cfg.width, cfg.height, seed);
-  world.seedFlags = parseSeed(cfg.seedText).flags;
+  world.seedFlags = cfg.seedFlags ?? parseSeed(cfg.seedText).flags;
   const rng = new RNG(seed);
   const ctx: GenCtx = {
     world, store: world.store, rng,
@@ -465,9 +474,9 @@ function vanillaTerrain(ctx: GenCtx) {
   // 世界种子 int——DesertHive 的 FastRandom(seed).WithModifier(57005) 主种子
   // （DesertHive.cs:253，与 genRand 完全独立的第二条随机流）
   gs.seed = translateSeed(cfg.seedText);
-  // 彩蛋种子旗标（SeedEasterEggs.parseSeed）——特殊种子 pass 分支消费（GemPasses 等）；
-  // 金标种子 flags 恒空集 → 掷骰流位置不受影响
-  gs.seedFlags = parseSeed(cfg.seedText).flags;
+  // 彩蛋种子旗标——特殊种子 pass 分支消费（GemPasses 等）；cfg.seedFlags 直注优先
+  // （S0-1 解耦），缺省回退 seedText 派生。金标种子 flags 恒空集 → 掷骰流位置不受影响
+  gs.seedFlags = cfg.seedFlags ?? parseSeed(cfg.seedText).flags;
   // ===== Reset 掷骰（1456 WorldGen.generateWorld cs:11159-11472 逐行 1:1）=====
   // 原版在 AddPasses 循环之前按此固定顺序消耗 Main.rand（种子等价的流位置契约）。
   // 天气/背景/月亮等值我们未消费——照掷照弃，只保留 GenState 下游字段。
@@ -494,12 +503,17 @@ function vanillaTerrain(ctx: GenCtx) {
   // ⑤⑥ slimeRainTime / cloudBGActive（cs:11277-11283，天气初值，未消费）
   rng.nextIntRange(86400 * 2, 86400 * 3);
   rng.nextIntRange(8640, 86400);
-  // ⑦-⑩ 矿石替代对（cs:11286-11298）——Next(2)==0 用替代矿
+  // ⑦-⑩ 矿石替代对（cs:11286-11310）——Next(2)==0 用替代矿。
+  // ★PPPPP（2026-08-22）矿石锁：原版铁/金两掷包在 `(!dontStarveWorldGen||drunkWorldGen)&&`
+  //   之内（cs:11294-11298 铁 / cs:11305-11310 金）——Next(2) 在 if **内**，纯 Constant
+  //   两掷不发生（RNG 流恒 -2 样本，下游全体移位；.wld 头铁证=CONST worldId 抽取位
+  //   t=16 而普通种子 t=18，RECON-CONST）。铜/银两掷无条件（cs:11289/11300）。
+  const constOreLock = !!gs.seedFlags.theConstant && !gs.seedFlags.drunkWorld;
   gs.oreTiers = {
     copper: rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_tin']! : TILE_BY_KEY['ore_copper']!,
-    iron: rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_lead']! : TILE_BY_KEY['ore_iron']!,
+    iron: !constOreLock && rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_lead']! : TILE_BY_KEY['ore_iron']!,
     silver: rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_tungsten']! : TILE_BY_KEY['ore_silver']!,
-    gold: rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_platinum']! : TILE_BY_KEY['ore_gold']!,
+    gold: !constOreLock && rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_platinum']! : TILE_BY_KEY['ore_gold']!,
   };
   // ⑪ crimson（cs:11321）+ UI 覆盖（骰照掷仅覆盖结果，cs:11326-11332）
   gs.crimson = rng.nextIntRange(0, 2) === 0;
@@ -734,6 +748,10 @@ function vanillaCaves({ store, rng }: GenCtx) {
   runSmallHolesPass(store, rng, gs);    // 小空洞（每轮 2 发挖除 runner）
   rng.reseed(gs.seed); // ▶DirtLayerCaves cs:12094（函数内部另有 RockLayer/SurfaceCaves 边界重播）
   runCavesPass(store, rng, gs);
+  // ▶WavyCaves cs:12301（PPPPP CONST 批新增）：饥荒世界专属正弦波隧道——普通世界
+  //   门内零掷骰跳过（原版同构）。注册序 SurfaceCaves(12240) < 本 pass < IceBiome(12343)。
+  rng.reseed(gs.seed); // ▶WavyCaves cs:12301
+  runWavyCavesPass(store, rng, gs);
 }
 
 // 原版 1456 真实注册序（执行序=注册序，WorldGenerator.cs:447 _passes[PassResults.Count]）：
@@ -1292,9 +1310,9 @@ function isTileNearby(store: TileStore, x: number, y: number, sheet: number, dis
 /** 墓园 pass 触发门（cs:18110-18120 原文条件）：
  *  `!Skyblock.denySomeGeneration && ((dontStarve && (drunk || getGood) && !tenthAnniversary)
  *   || SecretSeed.graveyardBloodmoonStart.Enabled)`
- *  注：1.4.5.6 "getfixedboi"（Everything）同时开 DontStarve/Drunk/FTW **与** Anniversary
- *  （WorldSeedOption_Everything.cs:24-31 全依赖表）→ 被最后的 !tenthAnniversary 否决，
- *  与本表（getfixedboi 不置 theConstant/tenthAnniversary）殊途同归：均不触发。 */
+ *  注：1.4.5.6 "getfixedboi"（Everything）七依赖全开（WorldSeedOption_Everything.cs:24-31，
+ *  含 DontStarve 与 Anniversary）→ 被最后的 !tenthAnniversary 否决（S0-2 后 parseSeed
+ *  同表全置，与原版 zenith 逐门同值）。 */
 export function graveyardSeedGate(sf: import('./SeedEasterEggs').SeedFlags): boolean {
   if (sf.skyblock) return false;                                    // :18110 Skyblock.denySomeGeneration
   return (sf.theConstant && (sf.drunkWorld || sf.getGoodWorld) && !sf.tenthAnniversary)

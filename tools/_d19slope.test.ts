@@ -1,5 +1,8 @@
 // 一次性(W 批续):沙漠带幻影坡首个写入 pass 定位(#20-#52 逐事件边界)。
 // SW_PARITY=1 npx vitest run tools/_d19slope.test.ts
+// ★OOOOOO 批(2026-08-22)加存在性门:/tmp/sw-hsv 诊断资产已清,缺资产时静默 skip
+//   (原模块级 readFileSync 在收集期 ENOENT,把全量回归炸红;资产可按原采集管线
+//   重建后再 SW_PARITY=1 复跑——W/X 批幻影坡案已结,工具留档)。
 import { it } from 'vitest';
 const RUN = !!process.env.SW_PARITY;
 import { readFileSync } from 'node:fs';
@@ -10,8 +13,10 @@ import type { TileStore } from '../src/world/TileStore';
 const W = 4200, H = 1200, N = W * H;
 const TV = '/tmp/sw-hsv';
 const rd = (p: string) => new Uint8Array(readFileSync(p).buffer.slice(0));
-const t52h = rd(`${TV}/hs52.half`), t52s = rd(`${TV}/hs52.slope`);
-const t19h = rd(`${TV}/hs19.half`), t19s = rd(`${TV}/hs19.slope`);
+// 缺资产→零长数组(it 体内判 length 后 skip),不再收集期抛 ENOENT
+const rd0 = (p: string): ArrayBuffer => { try { return readFileSync(p).buffer.slice(0); } catch { return new ArrayBuffer(0); } };
+const t52h = new Uint8Array(rd0(`${TV}/hs52.half`)), t52s = new Uint8Array(rd0(`${TV}/hs52.slope`));
+const t19h = new Uint8Array(rd0(`${TV}/hs19.half`)), t19s = new Uint8Array(rd0(`${TV}/hs19.slope`));
 
 const DX0 = 2427, DX1 = 2786, DY0 = 210, DY1 = 959, DW = DX1 - DX0 + 1, DH = DY1 - DY0 + 1;
 let store: TileStore | null = null;
@@ -21,6 +26,7 @@ const snaps: Array<{ label: string; s: Uint8Array; h: Uint8Array }> = [];
 let full52: { h: Uint8Array; s: Uint8Array } | null = null;
 
 (RUN ? it : it.skip)('d19 phantom first-writer bisect', async () => {
+  if (!t52h.length || !t19h.length) { console.log('skip: /tmp/sw-hsv 资产缺失(hs52/hs19),按头注重建后复跑'); return; }
   const origReseed = RNG.prototype.reseed;
   const onReseed = function (this: RNG, seed: number) {
     origReseed.call(this, seed);

@@ -25,6 +25,10 @@
 //   liq = (液量, liquidType) 差。wld 侧 liquidType 实测 {1水,2岩浆,3蜂蜜}（JS LIQUID_TYPE
 //         +1 编码同构）；微光(4)在 wld 解码头里无独立位——若 JS 侧有微光液体将以
 //         liq 差异对形式显形（报告可见，非静默）。
+//   pt/pw = 方块漆/墙漆 id 差（S0-4 第四通道：store.paint/paintWall ↔ wld tiles
+//         paint/paintWall 直比，0-31 同域零投影）。普通世界两侧恒 0（基线信号）；
+//         drunk/celeb/ftw 基线的涂装债在此通道显形（FinishDrunkGen/FinishGetGoodWorld/
+//         celeb Paint 系列对拍入口）。
 //   JS 内部 tile id → 原版 id：TILE_DEFS[i].vanilla.sheet 投影；无映射的 active 格单列
 //   unmappedJsActiveCells 计数并以 UNMAPPED 对入 typ 差异表。
 // 带边界（按 wld 头锚，两世界同尺寸）：
@@ -172,8 +176,9 @@ function countSparse(
 }
 
 interface ZoneStat {
-  cells: number; typ: number; act: number; wal: number; liq: number;
+  cells: number; typ: number; act: number; wal: number; liq: number; pt: number; pw: number;
   typTop: Array<[string, number]>; walTop: Array<[string, number]>; liqTop: Array<[string, number]>;
+  ptTop: Array<[string, number]>; pwTop: Array<[string, number]>;
 }
 function topN(m: Map<string, number>, n: number): Array<[string, number]> {
   return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
@@ -185,8 +190,8 @@ interface WorldReport {
   error?: string;
   header?: Record<string, { v: number | boolean | number[]; j: number | boolean | number[]; d: number | string }>;
   sparse?: Record<string, { v: number | number[]; j: number | number[] }>;
-  zones?: Record<string, ZoneStat & { typPct: number; walPct: number; liqPct: number }>;
-  overall?: { cells: number; typ: number; act: number; wal: number; liq: number; typPct: number; walPct: number; liqPct: number; unmappedJsActiveCells: number };
+  zones?: Record<string, ZoneStat & { typPct: number; walPct: number; liqPct: number; ptPct: number; pwPct: number }>;
+  overall?: { cells: number; typ: number; act: number; wal: number; liq: number; pt: number; pw: number; typPct: number; walPct: number; liqPct: number; ptPct: number; pwPct: number; unmappedJsActiveCells: number };
 }
 
 function anchor<T extends number | boolean | number[]>(v: T, j: T): { v: T; j: T; d: number | string } {
@@ -259,10 +264,11 @@ async function runWorld(row: Row): Promise<WorldReport> {
   const bandOf = new Uint8Array(h);
   for (let y = 0; y < h; y++) bandOf[y] = y < gl - 60 ? 0 : y < rl ? 1 : y < caveEnd ? 2 : y < hellTop ? 3 : 4;
   const zones = BAND_NAMES.map(() => ({
-    cells: 0, typ: 0, act: 0, wal: 0, liq: 0,
+    cells: 0, typ: 0, act: 0, wal: 0, liq: 0, pt: 0, pw: 0,
     typM: new Map<string, number>(), walM: new Map<string, number>(), liqM: new Map<string, number>(),
+    ptM: new Map<string, number>(), pwM: new Map<string, number>(),
   }));
-  const overall = { cells: n, typ: 0, act: 0, wal: 0, liq: 0, typPct: 0, walPct: 0, liqPct: 0, unmappedJsActiveCells: 0 };
+  const overall = { cells: n, typ: 0, act: 0, wal: 0, liq: 0, pt: 0, pw: 0, typPct: 0, walPct: 0, liqPct: 0, ptPct: 0, pwPct: 0, unmappedJsActiveCells: 0 };
   const bump = (m: Map<string, number>, k: string) => { m.set(k, (m.get(k) ?? 0) + 1); };
   for (let i = 0; i < n; i++) {
     const z = zones[bandOf[(i / w) | 0]];
@@ -290,17 +296,26 @@ async function runWorld(row: Row): Promise<WorldReport> {
       z.liq++; overall.liq++;
       bump(z.liqM, `t${vlt}:${vamt}>t${jlt}:${jamt}`);
     }
+    // 油漆双通道（S0-4）：0-31 直比（双方 0 = 无漆不计差）
+    const vp = wt.paint[i], jp = jt.paint[i];
+    if (vp !== jp) { z.pt++; overall.pt++; bump(z.ptM, `${vp}>${jp}`); }
+    const vpw = wt.paintWall[i], jpw = jt.paintWall[i];
+    if (vpw !== jpw) { z.pw++; overall.pw++; bump(z.pwM, `${vpw}>${jpw}`); }
   }
   overall.typPct = (overall.typ / n) * 100;
   overall.walPct = (overall.wal / n) * 100;
   overall.liqPct = (overall.liq / n) * 100;
+  overall.ptPct = (overall.pt / n) * 100;
+  overall.pwPct = (overall.pw / n) * 100;
   base.zones = {};
   BAND_NAMES.forEach((name, bi) => {
     const z = zones[bi];
     base.zones![name] = {
-      cells: z.cells, typ: z.typ, act: z.act, wal: z.wal, liq: z.liq,
+      cells: z.cells, typ: z.typ, act: z.act, wal: z.wal, liq: z.liq, pt: z.pt, pw: z.pw,
       typTop: topN(z.typM, 5), walTop: topN(z.walM, 5), liqTop: topN(z.liqM, 5),
+      ptTop: topN(z.ptM, 5), pwTop: topN(z.pwM, 5),
       typPct: (z.typ / z.cells) * 100, walPct: (z.wal / z.cells) * 100, liqPct: (z.liq / z.cells) * 100,
+      ptPct: (z.pt / z.cells) * 100, pwPct: (z.pw / z.cells) * 100,
     };
   });
   base.overall = overall;
@@ -325,8 +340,8 @@ function printSummary(rep: Report) {
   if (!entries.length) { console.log('（报告为空）'); return; }
   entries.sort((a, b) => 'sml'.indexOf(a.size) - 'sml'.indexOf(b.size) || a.file.localeCompare(b.file));
   console.log(`\n===== 收敛矩阵汇总（${entries.length} 世界，${OUT}）=====`);
-  console.log('file            gen(s)  hdrΔ | trunk v/j      treeCC v/j     chest v/j  statue v/j  pot v/j  | typ%      wal%      liq%');
-  let typSum = 0, walSum = 0, liqSum = 0, ok = 0;
+  console.log('file            gen(s)  hdrΔ | trunk v/j      treeCC v/j     chest v/j  statue v/j  pot v/j  | typ%      wal%      liq%      pt%       pw%');
+  let typSum = 0, walSum = 0, liqSum = 0, ptSum = 0, pwSum = 0, ok = 0;
   for (const e of entries) {
     if (e.error) { console.log(`${e.file.padEnd(16)} ERROR: ${e.error}`); continue; }
     const hdrBad = Object.values(e.header!).filter((a) => a.d !== 0).length;
@@ -340,13 +355,15 @@ function printSummary(rep: Report) {
       + `${String(c.v).padStart(4)}/${String(c.j).padEnd(4)} `
       + `${String(stt.v.cc).padStart(4)}/${String(stt.j.cc).padEnd(4)} `
       + `${String(p.v.cc).padStart(5)}/${String(p.j.cc).padEnd(5)} | `
-      + `${fmtPct(o.typPct).padStart(9)} ${fmtPct(o.walPct).padStart(9)} ${fmtPct(o.liqPct).padStart(9)}`,
+      + `${fmtPct(o.typPct).padStart(9)} ${fmtPct(o.walPct).padStart(9)} ${fmtPct(o.liqPct).padStart(9)}`
+      + ` ${fmtPct(o.ptPct ?? 0).padStart(9)} ${fmtPct(o.pwPct ?? 0).padStart(9)}`,
     );
-    typSum += o.typPct; walSum += o.walPct; liqSum += o.liqPct; ok++;
+    typSum += o.typPct; walSum += o.walPct; liqSum += o.liqPct;
+    ptSum += o.ptPct ?? 0; pwSum += o.pwPct ?? 0; ok++;
   }
   if (ok) {
-    console.log(`${'-'.repeat(120)}`);
-    console.log(`均值（${ok} 世界）：typ%=${(typSum / ok).toFixed(3)} wal%=${(walSum / ok).toFixed(3)} liq%=${(liqSum / ok).toFixed(3)}`);
+    console.log(`${'-'.repeat(140)}`);
+    console.log(`均值（${ok} 世界）：typ%=${(typSum / ok).toFixed(3)} wal%=${(walSum / ok).toFixed(3)} liq%=${(liqSum / ok).toFixed(3)} pt%=${(ptSum / ok).toFixed(3)} pw%=${(pwSum / ok).toFixed(3)}`);
   }
   // 分区 typ 细目矩阵
   console.log('\nfile            | sky.t%    surface.t%  cave.t%    deep.t%    hell.t%   | sky.w%  surf.w% cave.w% deep.w% hell.w%');
@@ -394,7 +411,7 @@ function printSummary(rep: Report) {
       if (entry.error) console.log(`  ✗ ${entry.error}`);
       else {
         console.log(
-          `  ✓ gen=${entry.genSeconds!.toFixed(0)}s typ%=${entry.overall!.typPct.toFixed(3)} wal%=${entry.overall!.walPct.toFixed(3)} liq%=${entry.overall!.liqPct.toFixed(3)}`
+          `  ✓ gen=${entry.genSeconds!.toFixed(0)}s typ%=${entry.overall!.typPct.toFixed(3)} wal%=${entry.overall!.walPct.toFixed(3)} liq%=${entry.overall!.liqPct.toFixed(3)} pt%=${(entry.overall!.ptPct ?? 0).toFixed(3)} pw%=${(entry.overall!.pwPct ?? 0).toFixed(3)}`
           + ` trunk ${entry.sparse!.trees.v.trunkRuns}/${entry.sparse!.trees.j.trunkRuns}`
           + ` chest ${entry.sparse!.chests.v}/${entry.sparse!.chests.j}`
           + ` statue ${entry.sparse!.statues.v.cc}/${entry.sparse!.statues.j.cc}`

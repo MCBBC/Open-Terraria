@@ -274,12 +274,179 @@ function shellPile(st: TileStore, rng: RNG, X: number, Y: number, worldSurface: 
   return true;
 }
 
+// ---- 原版 MarblePiles 段（cs:16358-16388）+ MarblePileWithStatues（cs:10421-10545）
+//      + Statue（cs:10547-10573）——PPPPP CONST 批 2026-08-22 新增 ----
+// ShellPilesMarblePilesAndSpikePits pass 头段：饥荒世界 5×(w/4200) 个地表大理石补丁
+//（中心 ±100 回避、80 次尝试、blob 半径 2-3（1/10 +1）、3-5 层逐像素椭圆），每堆
+// ≤3 座雕像（statueList Next(2,len) 随机 + PlaceTile(forced) + 2×3 刷白漆 26）。
+import { STATUE_LIST, STATUE_105, STATUE_349 } from './StatuesPass';
+import { vanGenSolidType } from './GenSolid';
+import { genSquareTileFrame } from './FinalCleanupPass';
+
+const MARBLE_367 = TILE_BY_KEY['v_367_marble_block']!;
+const LIVINGWOOD_191 = TILE_BY_KEY['v_191_living_wood_block']!;
+/** JS type → 原版 sheet id（本文件本地副本） */
+const SHEET_BP = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let q = 0; q < TILE_DEFS.length; q++) {
+  const s = TILE_DEFS[q]?.vanilla?.sheet;
+  if (typeof s === 'number') SHEET_BP[q] = s;
+}
+
+/** WorldGen.SolidTile（cs:70155）全谓词（MarblePileWithStatues 下探门用） */
+function solidTileFullBP(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i] || (st.wire[i] & 32)) return false;
+  const d = TILE_DEFS[st.type[i]];
+  return !!d && genSolidType(st.type[i]) && !d.platform && !st.half[i] && st.slope[i] === 0;
+}
+
+/** Statue（cs:10547-10573）1:1：statueList[Next(2,len)] 随机雕像，y 下扫到首个活性
+ *  再退一格放置；放置模型同 StatuesPass（2×3 净空 + SolidTile2 底座 + 55 列帧换行
+ *  + 尾 SquareTileFrame），成功后 2×3 刷 paint（26=白漆）。 */
+function statueMarble(st: TileStore, rng: RNG, x: number, yIn: number, paint: number): boolean {
+  const si = rng.int(2, STATUE_LIST.length - 1);            // Next(2, statueList.Length)
+  const [sheet, style] = STATUE_LIST[si]!;
+  let y = yIn;
+  while (!st.inBounds(x, y) || !st.flags[st.idx(x, y)]) {
+    y++;
+    if (y >= st.h) break;
+  }
+  if (y >= st.h) return false;
+  y--;
+  if (y < 2 || !st.inBounds(x + 1, y + 1)) return false;
+  // PlaceTile forced 语义：2×3 占用格须非 active（cs:39751）+ SolidTile2 底座（cs:39762）
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = -2; dy <= 0; dy++) {
+      if (st.flags[st.idx(x + dx, y + dy)]) return false;
+    }
+  }
+  for (const bx of [x, x + 1]) {
+    const bi = st.idx(bx, y + 1);
+    if (!st.flags[bi] || st.half[bi] || st.slope[bi] !== 0
+      || ((st.wire[bi] >>> 5) & 1) === 1 || !vanGenSolidType(st.type[bi])) return false;
+  }
+  const tile = sheet === 349 ? STATUE_349 : STATUE_105;
+  if (!tile) return false;
+  const row = Math.floor(style / 55);
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = 0; dy < 3; dy++) {
+      st.setTileSilent(x + dx, y - 2 + dy, tile, (style - row * 55) * 36 + dx * 18, row * 54 + dy * 18);
+    }
+  }
+  genSquareTileFrame(st, rng, x, y);                        // PlaceTile case 105 尾（cs:60100）
+  for (let i = 0; i < 2; i++) {
+    for (let j = 0; j < 3; j++) {
+      st.paint[st.idx(x + i, y - 2 + j)] = paint;           // cs:10568-10571 color(paint)
+    }
+  }
+  return true;
+}
+
+/** MarblePileWithStatues（cs:10421-10545）1:1：X 列自 Y 下探首个实心（须泥/草面、
+ *  无墙），±130/±60 盒内无既有大理石/活木 → 逐像素椭圆堆大理石 367（层间中心
+ *  漂移、出 30 格半径即重置），尾在堆面刷 ≤3 座白漆雕像。 */
+function marblePileWithStatues(st: TileStore, rng: RNG, X: number, Y: number, worldSurface: number): boolean {
+  let num = Y;
+  while (!solidTileFullBP(st, X, num)) {
+    num++;
+    if (num > worldSurface) return false;                   // cs:10432
+  }
+  const top = st.idx(X, num);
+  if (SHEET_BP[st.type[top]] !== 0 && SHEET_BP[st.type[top]] !== 2) return false;  // cs:10436
+  if (st.wall[top] > 0) return false;                       // cs:10440
+  // ±130/±60 盒（Clamp 30..max-30）内已有 367/191 → 拒（cs:10442-10458）
+  const cx0 = Math.max(30, Math.min(st.w - 30, X - 130));
+  const cx1 = Math.max(30, Math.min(st.w - 30, X + 130));
+  const cy0 = Math.max(30, Math.min(st.h - 30, num - 60));
+  const cy1 = Math.max(30, Math.min(st.h - 30, num + 60));
+  for (let i = cx0; i <= cx1; i++) {
+    for (let j = cy0; j <= cy1; j++) {
+      const ii = st.idx(i, j);
+      if (st.flags[ii] && (st.type[ii] === MARBLE_367 || st.type[ii] === LIVINGWOOD_191)) return false;
+    }
+  }
+  num--;
+  let vx = X, vy = num;                                     // val（cs:10460-10461）
+  let dvx = rng.next() * 0.6 - 0.3;                         // val2.X（cs:10463）
+  let dvy = rng.next() * 0.5 + 0.5;                         // val2.Y（cs:10464）
+  const radius = rng.int(2, 3) + (rng.nextInt(10) === 0 ? 1 : 0); // num8（cs:10466-10469）
+  const layers = rng.int(3, 5);                             // num9 = Next(3,6)（cs:10470）
+  const w5 = radius * 5;
+  for (let n = 0; n < layers; n++) {
+    for (let k = X - w5; k <= X + w5; k++) {
+      let row = num + radius * 3;                           // num10（cs:10478）
+      while (row > num - radius * 3) {
+        const r = radius * rng.int(70, 90) * 0.01 * 1.2;    // num11（每像素一掷,cs:10481）
+        const dx = vx - k, dy = vy - row;                   // val3 = val - (k,row)
+        if (Math.sqrt(dx * dx + dy * dy) > 30) {            // cs:10484 出圈 → 重置中心/漂移
+          vx = X; vy = num;
+          dvx = rng.next() * 0.6 - 0.3;
+          dvy = rng.next() * 0.5 + 0.5;
+        } else {
+          const dx2 = dx * 0.25, dy2 = dy * 0.8;            // cs:10497-10498
+          if (Math.sqrt(dx2 * dx2 + dy2 * dy2) < r && st.flags[st.idx(k, row)]) {
+            const pi = st.idx(k, row);
+            st.flags[pi] = 1; st.half[pi] = 0; st.slope[pi] = 0; st.type[pi] = MARBLE_367;
+            // isGeneratingOrLoadingWorld → SquareTileFrame 跳过（cs:10502-10504）
+          }
+        }
+        row--;
+      }
+    }
+    vx += dvx;                                              // cs:10516
+    dvx += rng.next() * 0.2 - 0.1;                          // cs:10517
+    dvy += (0.1 + rng.next() * 0.1) * 0.8;                  // cs:10518
+    // cs:10519-10520 Utils.Clamp 裸语句（返回值丢弃）= no-op——shellPile 同款原版笔误
+  }
+  // —— 雕像 ≤3（cs:10523-10543）：偶数列、首座必放/后续 1/5，堆面（终值 vy）上方 ——
+  let statues = 0;
+  for (let l = X - w5; l <= X + w5; l++) {
+    if (statues >= 3) break;
+    if (l % 2 !== 1 && (statues <= 0 || rng.nextInt(5) === 0)) {
+      let sy = Math.trunc(vy) - 20;                         // num13（cs:10529）
+      while (sy < st.h && !st.flags[st.idx(l, sy)]) sy++;   // 下扫首个活性（原版无上界,实践速达）
+      if (sy > 0 && sy < st.h && st.type[st.idx(l, sy)] === MARBLE_367
+        && !st.flags[st.idx(l, sy - 1)] && statueMarble(st, rng, l, sy - 1, 26)) {
+        statues++;
+      }
+    }
+  }
+  return true;
+}
+
+/** MarblePiles pass 头段（cs:16358-16388）：constant 门内 80 次尝试放 5×(w/4200) 堆，
+ *  中部 ±100 回避（命中重掷一次仍命中则弃）。 */
+function runMarblePilesSection(st: TileStore, rng: RNG, gs: GenState): void {
+  const w = st.w;
+  const target = Math.trunc(5.0 * (w / 4200.0));            // num（cs:16366）
+  const mid = Math.trunc(w / 2);                            // num4（cs:16368）
+  const avoidL = mid - 100, avoidR = mid + 100;             // num5/num6（cs:16369）
+  let placed = 0;                                           // num2（cs:16367）
+  for (let i = 0; i < 80; i++) {
+    let x = rng.int(100, w - 101);                          // Next(100, maxTilesX-100)
+    if (x >= avoidL && x <= avoidR) {
+      x = rng.int(100, w - 101);
+      if (x >= avoidL && x <= avoidR) continue;             // cs:16373-16379
+    }
+    const y = Math.floor(gs.worldSurface / 2);              // (int)Main.worldSurface / 2
+    if (marblePileWithStatues(st, rng, x, y, gs.worldSurface)) {
+      placed++;
+      if (placed >= target) break;                          // cs:16384-16387
+    }
+  }
+}
+
 /** 海滩装饰 = 原版 ShellPiles 段（cs:16393-16501；海藻不在此——由 Lilypads pass 的
  *  GrowCheckSeaweed 承担，cs:22177-22192 全列上扫）。
  *  注意：本 pass 在原版注册序中先于 SmoothWorld（cs:16385 < 16507），管线里须排在
- *  "半砖平滑"之前，否则堆出的散沙无人回收（两侧悬空孤立单格清理在平滑 pass）。 */
+ *  "半砖平滑"之前，否则堆出的散沙无人回收（两侧悬空孤立单格清理在平滑 pass）。
+ *  ★PPPPP（2026-08-22）：MarblePiles 头段归位——原版在本 pass 头、notTheBees 门
+ *  **之前**（蜜蜂世界也有大理石堆；noSurface 秘密种子门本仓未接,备案）。
+ *  AddSpikeCaves（cs:16391,noTraps+FTW 组合门）与 Constant 无关未移植（RECON-CONST）。 */
 export function runBeachDecorPass(st: TileStore, rng: RNG, gs: GenState): void {
-  if (gs.seedFlags.notTheBees) return;                // cs:16393：蜜蜂世界整段跳过（零掷骰）
+  if (gs.seedFlags?.theConstant) runMarblePilesSection(st, rng, gs);
+  if (gs.seedFlags?.notTheBees) return;               // cs:16393：ShellPiles 段门（零掷骰）
   const spawn = (x: number, y: number) => shellPile(st, rng, x, y, gs.worldSurface);
   // ---- 左侧（cs:16399-16450）----
   if (rng.int(0, 1) === 0) {                          // genRand.Next(2)==0

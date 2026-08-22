@@ -80,7 +80,7 @@ describe('TagEffectStack（TagEffectStack.cs 1:1）', () => {
     const e = mkEnemy(1, 0, 0);
     player.tagEffectStack.tryApplyTagToNPC(4672, e.id);
     expect(player.tagEffectStack.activeTypes()).toEqual([4672]);
-    player.tagEffectStack.tryApplyTagToNPC(5479, e.id);   // 星鞭 480t
+    player.tagEffectStack.tryApplyTagToNPC(5479, e.id);   // 星鞭 240t
     expect(player.tagEffectStack.activeTypes()).toEqual([5479]);   // 4672 被驱逐
     expect(player.tagEffectStack.isNPCTagged(4672, e.id)).toBe(false);
   });
@@ -108,12 +108,12 @@ describe('TagEffectStack（TagEffectStack.cs 1:1）', () => {
     expect(player.whipBuffs[314]).toBe(180);
   });
 
-  it('tag 时长 = TagDuration × tagEffectDuration（:62-66）;星鞭 5479 = 480（ItemID.cs:1398-1402）', () => {
+  it('tag 时长 = TagDuration × tagEffectDuration（:62-66）;星鞭 5479 = 240（1456 ItemID.cs:1388-1393 基类缺省,WhipTagEffect.cs:17-22）', () => {
     const { player } = makeHooks();
     const e = mkEnemy(4, 0, 0);
     player.tagEffectStack.tryApplyTagToNPC(5479, e.id);
-    // 内部窗口经行为验证：update() 479 次后仍标记,第 480 次后失效
-    for (let i = 0; i < 479; i++) player.tagEffectStack.update();
+    // 内部窗口经行为验证：update() 239 次后仍标记,第 240 次后失效
+    for (let i = 0; i < 239; i++) player.tagEffectStack.update();
     expect(player.tagEffectStack.isNPCTagged(5479, e.id)).toBe(true);
     player.tagEffectStack.update();
     expect(player.tagEffectStack.isNPCTagged(5479, e.id)).toBe(false);
@@ -146,15 +146,15 @@ describe('TagEffectStack（TagEffectStack.cs 1:1）', () => {
     expect(player.tagEffectStack.activeCount).toBe(0);   // 未激活（:80-82 先门后激活）
   });
 
-  it('UniqueTagEffects 全表锚（1457 ItemID.cs:1313-1428）：36→18 项键值抽查', () => {
-    expect(Object.keys(TAG_EFFECTS).length).toBe(18);
-    expect(TAG_EFFECTS[4678]).toMatchObject({ kind: 'swordwhip', tagDamage: 9, playerBuffId: 308 });
-    expect(TAG_EFFECTS[5478]).toMatchObject({ kind: 'eel', tagDamage: 12, critChance: 5 });
-    expect(TAG_EFFECTS[5479]).toMatchObject({ kind: 'constellation', tagDuration: 480, tagDamage: 15, critChance: 15 });
+  it('UniqueTagEffects 全表锚（1456 ItemID.cs:1301-1413）：19 项键值抽查', () => {
+    expect(Object.keys(TAG_EFFECTS).length).toBe(19);
+    expect(TAG_EFFECTS[4678]).toMatchObject({ kind: 'base', tagDamage: 9, playerBuffId: 308 });   // :1356-1362（1457 swordwhip 退役）
+    expect(TAG_EFFECTS[5478]).toMatchObject({ kind: 'base', tagDamage: 12, critChance: 5 });      // :1381-1387（1457 eel 退役）
+    expect(TAG_EFFECTS[5479]).toMatchObject({ kind: 'constellation', tagDuration: 240, tagDamage: 15, critChance: 15 }); // :1388-1393 基类缺省 240
     expect(TAG_EFFECTS[4914]).toMatchObject({ kind: 'kaleidoscope', tagDamage: 20, critChance: 10 });
     expect(TAG_EFFECTS[5480]).toMatchObject({ kind: 'possession', tagDamage: 25, critChance: 10 });
     expect(TAG_EFFECTS[4912]).toMatchObject({ kind: 'firecracker', tagDamage: 0 });
-    expect(TAG_EFFECTS[6143]).toBeUndefined();   // 1457 删除 Foxparks 整条
+    expect(TAG_EFFECTS[6143]).toMatchObject({ kind: 'base', tagDamage: 4 });   // :1408-1412 Foxparks（1457 删,1456 在表）
     expect(TAG_EFFECTS[5473]?.playerBuffAppliedManually).toBe(true);  // 365 manual
     expect(TAG_EFFECTS[4911]?.playerBuffAppliedManually).toBe(true);  // 312 manual
   });
@@ -172,59 +172,59 @@ describe('1457 数值大改', () => {
     expect(player.tagEffectStack.canProcOnNPC(4912, e.id)).toBe(false);  // 恒消耗
   });
 
-  it('星鞭 5479：mark 240→480 + 星 33%→44% + proc 门控（case 1034 :14001-14008）', () => {
+  it('星鞭 5479 星雨按 1456（Projectile.cs:12965-12970/:13868-13880）：首鞭无条件撒星 ×0.33、无 proc 门/消费（1457 门控退役）', () => {
     const e = mkEnemy(11, 0, 0);
     const { hooks, player, added } = makeHooks([e]);
-    expect(TAG_EFFECTS[5479].tagDuration).toBe(480);
-    // 无 proc（随从未命中）：鞭本体命中不撒星
+    expect(TAG_EFFECTS[5479].tagDuration).toBe(240);   // 1456 ItemID.cs:1388-1393 基类缺省（1457 的 480 覆写退役）
+    // 首鞭命中即撒星（无需随从预启 proc——1456 case 1034 localAI[0]==0 无条件）
     const w = new WhipProj(player.cx, player.cy, 0, 1034, 5479, 50, 4, 30, 4, () => player);
     for (let i = 0; i < 9; i++) w.fixedUpdate(1, hooks);
     const pts = w.pointsAt(20, true);
     e.cx = pts[10].x; e.cy = pts[10].y; e.x = pts[10].x - 8; e.y = pts[10].y - 12;
     w.fixedUpdate(1, hooks);
-    expect(added.filter((a) => a instanceof Arrow && (a as Arrow).projId === 1039).length).toBe(0);
-    // 随从命中被 tag 敌（OnTaggedHit → TryEnableProcOnNPC :8-11）→ 鞭再命中撒星 44%
-    resolveWhipTagHit(e, 10, hooks, () => {}, 1, e.cx, e.cy, player, 0, 374);  // 374 MinionShot
-    expect(player.tagEffectStack.canProcOnNPC(5479, e.id)).toBe(true);
-    const w2 = new WhipProj(player.cx, player.cy, 0, 1034, 5479, 50, 4, 30, 4, () => player);
-    for (let i = 0; i < 9; i++) w2.fixedUpdate(1, hooks);
-    e.cx = pts[10].x; e.cy = pts[10].y; e.x = pts[10].x - 8; e.y = pts[10].y - 12;
-    w2.fixedUpdate(1, hooks);
     const stars = added.filter((a) => a instanceof Arrow && (a as Arrow).projId === 1039) as Arrow[];
     expect(stars.length).toBe(6);
-    expect(stars[0].damage).toBe(Math.trunc(50 * 2 * 0.22));   // damage×2 基数 ×0.22/颗
-    expect(player.tagEffectStack.canProcOnNPC(5479, e.id)).toBe(false);  // RemoveAllProcs（:14006）
+    expect(stars[0].damage).toBe(Math.max(1, Math.trunc(50 * 0.33)));   // :13870 damage×0.33（非 ×2×0.22）
+    // case 1034 不启用也不消费 proc（:12965-12970 无 TryEnableProcOnNPC/RemoveAllProcs）
+    expect(player.tagEffectStack.canProcOnNPC(5479, e.id)).toBe(false);
   });
 
-  it('花鞭 5477 proc：总伤 (calc+bonus)×2.25 均分 3-6 瓣（_ViolentDisplayOfFlower :17-34）', () => {
+  it('花鞭 5477 proc（1456 语义）：固定 3 瓣×每瓣固定 40、瓣对目标预置免疫 30t（_ViolentDisplayOfFlower.cs:8-25 + ItemID.cs:1363-1367;1457 (calc+bonus)×2.25 均分 3-6 瓣重做版退役）', () => {
     const e = mkEnemy(12, 0, 0);
     const { hooks, player, added } = makeHooks([e]);
     player.tagEffectStack.tryApplyTagToNPC(5477, e.id);
     player.tagEffectStack.tryEnableProcOnNPC(5477, e.id);
     const res = resolveWhipTagHit(e, 40, hooks, (el) => {
       (hooks as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles');
-    }, 1, e.cx, e.cy, player, 10);   // bonusTagDamage=10（命中弹自带,单次合成 :12954）
+    }, 1, e.cx, e.cy, player, 10);   // bonusTagDamage=10（命中弹自带——瓣伤不派生自它,仅 tag 加成吃）
     expect(res.dmg).toBe(40 + 9 + 10);   // TagDamage 9 + bonus 10（无乘区）
     const petals = added.filter((a) => a instanceof Arrow && (a as Arrow).projId === 1038) as Arrow[];
-    expect(petals.length).toBeGreaterThanOrEqual(3);
-    expect(petals.length).toBeLessThanOrEqual(6);
-    const total = Math.trunc((40 + 10) * 2.25);   // 112
-    const per = Math.ceil(total / petals.length);
-    expect(petals.every((p) => p.damage === Math.max(1, per))).toBe(true);
+    expect(petals.length).toBe(3);                          // 固定 3 瓣（:16 num2=3f）
+    expect(petals.every((p) => p.damage === 40)).toBe(true);   // 每瓣固定 40（:10 petalDamage 形参）
+    // 瓣预置 localNPCImmunity[target]=30（:23）：花瓣自目标体内出生,30t 内不得命中
+    // 目标本体（Update :15330 先递减后跑命中 → 第 30 拍起可命中）——按在目标身上驱动
+    const rvi = vi.spyOn(Math, 'random').mockReturnValue(0.99);   // 播种:非暴击档(4%)
+    const petal = petals[0];
+    petal.vx = 0; petal.vy = 0;                    // 钉在出生点（=目标体内）不动
+    for (let t = 0; t < 29; t++) petal.fixedUpdate(1, hooks);
+    expect(e.hits.length).toBe(0);                 // 30t 窗口内不命中
+    petal.fixedUpdate(1, hooks);
+    expect(e.hits.length).toBe(1);                 // 第 30 拍（递减归零）起命中
+    expect(e.hits[0]).toBe(40);
+    rvi.mockRestore();
   });
 
-  it('多 tag 全值叠加 + 词缀 bonus 单次合成（:12949-12956）+ 电鳗 flat', () => {
+  it('多 tag 全值叠加 + 词缀 bonus 单次合成（:12949-12956）;5478 基类无 flat/proc（1456 ItemID.cs:1381-1387）', () => {
     const e = mkEnemy(13, 0, 0);
     const { hooks, player } = makeHooks([e]);
     setMaxTags(player, 3);
     player.tagEffectStack.tryApplyTagToNPC(4672, e.id, 0, 5);   // 皮革鞭 tagdmg 词缀 5
     player.tagEffectStack.tryApplyTagToNPC(5478, e.id, 0, 5);   // 电鳗鞭（同词缀取 max）
-    player.tagEffectStack.tryEnableProcOnNPC(5478, e.id);
     const rvi = vi.spyOn(Math, 'random').mockReturnValue(0.99);   // 播种:5478 crit 5% 不触发(未播种 flaky,同吸血鬼飞刀教训)
     const res = resolveWhipTagHit(e, 100, hooks, () => {}, 0.669, e.cx, e.cy, player);
     rvi.mockRestore();
-    // Σtag = 4+12 = 16;+bonus 5 → (16+5)×0.669 = 14（截断）;+flat 50（链电 0 目标）
-    expect(res.dmg).toBe(100 + Math.trunc((4 + 12 + 5) * 0.669) + 50);
+    // Σtag = 4+12 = 16;+bonus 5 → (16+5)×0.669 = 14（截断）;5478 基类无 AddedFlatDamage
+    expect(res.dmg).toBe(100 + Math.trunc((4 + 12 + 5) * 0.669));
   });
 });
 

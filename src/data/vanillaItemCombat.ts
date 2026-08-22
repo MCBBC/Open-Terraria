@@ -35,25 +35,30 @@ export interface ItemCombat {
 const RAW = combatJson as unknown as Record<string, ItemCombat>;
 
 // ---- 鞭系（DefaultToWhip 提取，Item.cs SetDefaults switch 共 18 把）----
+// JSON 无注释,此处钉两文件的手钉 1456 值（1456↔1457 冲突以 1456 为准,重跑 recon --fix
+// 会抹回 1457,金标闸门 tests/item-stats-golden-1457.test.ts ① 白名单拦截）：
+//   whips[5477] 花鞭 dmg=75（Item.cs:43149 `DefaultToWhip(1032, 75, 2f, 4f)`;1457 改 50）
+//   whips[5688] 史莱姆鞭 dmg=12（Item.cs:44660 `DefaultToWhip(1104, 12, 1f, 4f)`;1457 改 15）
+//   combat[4607] 沙漠虎杖 knockBack=4（Item.cs:38123 `knockBack = 4f`;1457 改 2.5）
 import whipsJson from './vanilla-whips.json';
 const WHIPS = whipsJson as unknown as Record<string, { proj: number; dmg: number; kb: number; speed: number; anim: number }>;
 
 // ---- 提取缺口补丁（tools/extract-itemcombat.mjs 只解析 case 内字面赋值）----
 // DefaultToSpear/DefaultToStaff/DefaultToMagicWeapon/DefaultToRangedWeapon 的形参
-// 赋值（Item.cs:47630/:48045/:48057）漏提：4347/4348/4703/5629 仅剩 damage/knockBack、
+// 赋值（Item.cs:47630/:48045/:48057）漏提：4347/4348/5629 仅剩 damage/knockBack、
 // 4788-4790（剑矛三件 DefaultToSpear+SetWeaponValues）与 4060-4062 整条缺失。
-// 下表按源码 case 逐件 1:1（:35651/:35672/:37119/:38629/:39341-39353/:44212）：
+// 下表按源码 case 逐件 1:1（:35651/:35672/:37119/:39341-39353/:44212）：
 //   DefaultToSpear → useStyle5 / useTime=useAnimation=animationTime / shootSpeed=push / noMelee+melee
 //   DefaultToStaff → magic / autoReuse / mana=manaPerShot / UseSound43
 //   DefaultToMagicWeapon → magic / noMelee / useTime=useAnimation=singleShotTime
 //   DefaultToRangedWeapon → noMelee / ranged / useAmmo=ammoID（5629 随后 ranged=false 已在表内）
+//   （4703 四管霰弹枪 :38629 同款漏提——已直接回填 json 键"4703"，2026-08-22 移出本表）
 const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '4060': { shoot: 728, useAmmo: 75, useTime: 18, useAnimation: 18, shootSpeed: 20, damage: 60, knockBack: 5, noMelee: true, ranged: true, autoReuse: true },
   '4061': { shoot: 730, useTime: 28, useAnimation: 28, shootSpeed: 3.5, damage: 14, knockBack: 6, noMelee: true, melee: true },
   '4062': { shoot: 731, useTime: 17, useAnimation: 17, shootSpeed: 8, mana: 6, damage: 24, knockBack: 3, noMelee: true, magic: true, autoReuse: true },
   '4347': { shoot: 876, useTime: 36, useAnimation: 36, shootSpeed: 15, noMelee: true, magic: true },
   '4348': { shoot: 876, useTime: 36, useAnimation: 36, shootSpeed: 15, noMelee: true, magic: true },
-  '4703': { shoot: 14, useAmmo: 97, useTime: 55, useAnimation: 55, shootSpeed: 7, noMelee: true, ranged: true },
   '4788': { shoot: 877, useTime: 24, useAnimation: 24, shootSpeed: 3.5, damage: 60, knockBack: 12, noMelee: true, melee: true },
   '4789': { shoot: 878, useTime: 24, useAnimation: 24, shootSpeed: 3.5, damage: 130, knockBack: 14, noMelee: true, melee: true },
   '4790': { shoot: 879, useTime: 24, useAnimation: 24, shootSpeed: 3.5, damage: 90, knockBack: 13, noMelee: true, melee: true },
@@ -68,6 +73,10 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '3507': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
   '3513': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
   '3519': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
+  // ---- 血腥锤斧 4317（Item.cs:36950-36964）SetWeaponValues(30, 7f) 形参赋值
+  //   提取器不解析 → damage/knockBack 双缺。F1 工具节奏修复（2026-08-22）把
+  //   combat.damage/knockBack 桥进 def.tool——缺省会让挥击伤/词缀乘区回落 1/3 ----
+  '4317': { damage: 30, knockBack: 7 },
   // ---- 湿/干/土制炸弹族（Item.cs:39461-39473 / :39787-39799 共享 case 段算式
   //   `shoot = 903 + (type - 4824)` / `shoot = 910 + (type - 4908)` 提取器不解析字面量
   //   → 缺 shoot 整族死路径。此处按源码算式逐件回填（4824-4827→903-906，
@@ -96,6 +105,21 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '5392': { shoot: 870, ammo: 780, consumable: true },
   '5393': { shoot: 871, ammo: 780, consumable: true },
   '5394': { shoot: 872, ammo: 780, consumable: true },
+  // ---- 弹药伤害 4 错手补（审计 2026-08-22 §弹药 ❌6；Item.cs SetDefaults 逐件核对，
+  //   提交版 JSON 为旧快照值——重跑提取器已出对值但全文件与 1457 钉值有 90+ 行漂移，
+  //   不可整体重生成，故落桥接层）----
+  //   546 诅咒弹 15→12（Item.cs:7882 `damage = 12`）
+  '546': { damage: 12 },
+  //   988 霜冻箭 9→7（:12724）
+  '988': { damage: 7 },
+  //   1350 纳米弹 10→15（:16662）
+  '1350': { damage: 15 },
+  //   3011 灵液镖 10→7（:27806）
+  '3011': { damage: 7 },
+  //   1319 雪球炮 useAmmo 949（Item.cs:16307 `useAmmo = AmmoID.Bullet` 后 :16318
+  //     `useAmmo = AmmoID.Snowball` 双赋值，C# 顺序语义终值=Snowball 949；1457 同构
+  //     :16335/:16338——提取器首匹配取到中段 Bullet 97。2026-08-22 弹幕基建批顺带修）
+  '1319': { useAmmo: 949 },
   // ---- 1457 批 C 新魔法武器五件（DefaultToMagicWeapon/DefaultToStaff/SetWeaponValues
   //   辅助方法形参赋值提取器不解析 → json 只收编了直写字段。逐件回填 1457 终值：
   //   6152 DaybloomStaff（Item.cs:47411-47422 DefaultToMagicWeapon(1114,40,6)+useTime=4
@@ -151,6 +175,8 @@ export const AMMO_DART = 283;
 export const AMMO_ROCKET = 771;
 export const AMMO_SOLUTION = 780;
 export const AMMO_FLARE = 931;
+/** AmmoID.Snowball = 949（AmmoID.cs:134——雪球炮 1319 useAmmo，Item.cs:16318） */
+export const AMMO_SNOWBALL = 949;
 
 // ================= vi_* 武器语义解析（1456 数据驱动） =================
 
@@ -243,7 +269,9 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
       // /130/134/137/138（OOA 四塔）。**aiStyle 54 不是哨兵**——唯一使用者 317 乌鸦是
       // minion（:3825-3836 minion=true/minionSlots=1，无 sentry 字段），此前误入哨兵
       // 路径吃到"60t 一发"兜底
-      return { kind: 'summon', shoot, sentry: ai === 53 || ai === 123 || ai === 130 || ai === 134 || ai === 137 || ai === 138,
+      // 197 = 5463→1025 悬空毒眼球哨兵(P.cs:9424-9433 aiStyle=197/sentry=true——
+      // 曾漏 → 误归随从占随从槽;2026-08-22 审计附带给补)
+      return { kind: 'summon', shoot, sentry: ai === 53 || ai === 123 || ai === 130 || ai === 134 || ai === 137 || ai === 138 || ai === 197,
         ...base };
     }
     if (ai === AI_FLAIL) return { kind: 'flail', shoot, ...base };
@@ -299,12 +327,22 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
   return null;
 }
 
-/** 旧判定（消耗型投掷武器）保留：shoot+consumable+noMelee 且无 useAmmo/ammo */
+/** 可直掷的"武器+弹药"双职件白名单：雪球 949（useStyle1+shoot166+consumable，
+ *  Item.cs:12337-12353——手持左键直接掷出弹 166，同时是雪球炮 1319 的弹药）。
+ *  金币 71-74 虽同为双职数据面（useStyle1+shoot158-161），但原版 ItemCheck_Shoot
+ *  有显式 IsACoin 门（Player.cs:46473-46476 `if (sItem.IsACoin) canShoot = false`）
+ *  ——四币【不可】掷出（补 B 审计"金币可投掷"系误读，:52594-52605 是金币枪
+ *  PickAmmo 的币槽扫描非投掷链）；种子 283 等无 useStyle 永不入使用链。 */
+const THROWABLE_AMMO_DUAL = new Set([949]);
+
+/** 旧判定（消耗型投掷武器）：shoot+consumable+noMelee 且无 useAmmo；
+ *  ammo 双职件仅白名单（雪球）可掷——原版按 useStyle/IsACoin 判定（见上注） */
 export function thrownCombat(def: CombatWeaponItemLike): { shoot: number; damage: number } | null {
   const vid = def.vid ?? viIdFromKey(def.key);
   if (vid < 0) return null;
   const c = itemCombat(vid);
-  if (!c?.shoot || !c.consumable || !c.noMelee || c.useAmmo || c.ammo) return null;
+  if (!c?.shoot || !c.consumable || !c.noMelee || c.useAmmo) return null;
+  if (c.ammo && !THROWABLE_AMMO_DUAL.has(vid)) return null;
   return { shoot: c.shoot, damage: c.damage ?? 0 };
 }
 
@@ -318,7 +356,7 @@ export function thrownCombat(def: CombatWeaponItemLike): { shoot: number; damage
  *  · 逐型自带重力（替代默认）：见 AI1_GRAV 表
  *  · 686/711 两段式（:54640-54659）：+0.1@ai0≥10 再 +0.1@≥20、vx×0.99 */
 const AI1_NO_DROP = new Set<number>([
-  // flag3（ai[0] 不自增；498 例外——分支内手动计数，在 AI1_GRAV 表）
+  // flag3（ai[0] 不自增；498/639 例外——639 timeLeft 门档在 AI1_GRAV 表）
   5, 14, 20, 36, 38, 55, 83, 84, 88, 89, 98, 100, 104, 110, 158, 159, 160, 161, 180, 184,
   242, 248, 257, 259, 265, 270, 279, 283, 284, 285, 286, 287, 299, 302, 323, 325, 348, 349,
   350, 355, 374, 376, 389, 435, 436, 438, 440, 442, 449, 459, 462, 467, 468, 469, 472, 483,
@@ -330,7 +368,9 @@ const AI1_NO_DROP = new Set<number>([
   239, 264, 675, 437, 477,
 ]);
 
-/** 逐型重力 [rate/update, ai0 门槛]（顶层链 :54009-54032 + 嵌套链 :54310-54626） */
+/** 逐型重力 [rate/update, ai0 门槛]（顶层链 :54009-54032 + 嵌套链 :54310-54626）。
+ *  负 rate = 上飘（1006 微光箭 flag4 分支 :54686-54696 vy−=0.1，终端 −16 走
+ *  AI_001 尾 flag7 对称钳 :54878-54890——Arrow grav<0 档取 −maxFall） */
 const AI1_GRAV: Record<number, [number, number]> = {
   81: [0.07, 20], 91: [0.07, 20],                                        // :54009-54016
   174: [0.15, 5], 605: [0.15, 5], 920: [0.15, 5], 921: [0.15, 5], 926: [0.15, 5],  // :54017-54024
@@ -340,7 +380,12 @@ const AI1_GRAV: Record<number, [number, number]> = {
   195: [0.15, 40], 1097: [0.15, 40],                                     // :54381-54408
   267: [0.075, 20], 478: [0.075, 20], 479: [0.075, 20],                  // :54409-54423
   408: [0.05, 45], 495: [0.04, 30], 498: [0.15, 50],                     // :54482/:54597/:54608
-  507: [0.3, 60], 508: [0.3, 60], 662: [0.3, 60], 680: [0.3, 60], 685: [0.3, 60],  // :54589-54596
+  // 507 族原版门为严格 `> 60`（:54589-54596）——Arrow 门已统一 `>=`，存 61 等价
+  507: [0.3, 61], 508: [0.3, 61], 662: [0.3, 61], 680: [0.3, 61], 685: [0.3, 61],  // :54589-54596
+  // 1006 微光箭 flag4 上飘（:54686-54696，ai[0] 正常自增——不在 flag3 表）；
+  // 639 月总箭（:54660-54663 timeLeft ≤ MaxUpdates×45−14 门 = 子步 14 起 +0.1，
+  // flag3 冻结 ai[0]，门槛按子步龄计——extraUpdates 2 与 timeLeft 同步子步消耗）
+  1006: [-0.1, 15], 639: [0.1, 14],
 };
 
 /** 686/711 两段式（grav2 通道） */
@@ -416,6 +461,20 @@ export function resolveAmmoProjId(launcherVid: number, ammoVid: number, useAmmo:
   return 1;
 }
 
+/** 沙枪 266 三色砂换弹（PickAmmo :52666-52678）：projToShoot==42（沙枪基弹
+ *  Sand Ball）时按弹药品种改写弹体——黑檀砂 370→65 / 猩红砂 408→68 /
+ *  沙漠化石 1246→354，各 +5 伤（原版直加 Damage，位于 :52686 弹药伤乘算之前；
+ *  本仓与熔火箭袋 +2 同走 ammoBonus 通道，见 Game 远程段注释）。
+ *  普通沙 169 弹体恒 42 不加伤。返回 null = 非沙枪/非换弹品种 */
+export function resolveSandGunSwap(launcherVid: number, projId: number, ammoVid: number):
+  { projId: number; bonus: number } | null {
+  if (launcherVid !== 266 || projId !== 42) return null;
+  if (ammoVid === 370) return { projId: 65, bonus: 5 };
+  if (ammoVid === 408) return { projId: 68, bonus: 5 };
+  if (ammoVid === 1246) return { projId: 354, bonus: 5 };
+  return null;
+}
+
 /** vi_ useAmmo 远程武器（弓/枪/发射器，DefaultToRangedWeapon 族 useStyle=5）：
  *  返回 useAmmo id（AmmoID.Arrow=40 / Bullet=97 …）；非 useAmmo 物品返回 0。
  *  combatWeapon 对 useAmmo 物品返回 null（弓弩/弹药体系另走 PickAmmo），Game 远程
@@ -425,4 +484,122 @@ export function rangedAmmoWeapon(def: CombatWeaponItemLike): number {
   if (vid < 0) return 0;
   const ua = itemCombat(vid)?.useAmmo ?? 0;
   return ua > 0 ? ua : 0;
+}
+
+// ================= 逐枪射击链纯函数（Game 远程分支消费，可单测） =================
+
+/** 弹药伤害分道（GetWeaponDamageMultiplier Player.cs:52521-52535 的 AmmoID.Sets 三表）：
+ *  IsArrow{40 箭,1836 桩}→bowEffective（本仓 'arrow'）/ IsBullet{97 弹,1783 糖果玉米}
+ *  →gunEffective（'bullet'）/ IsSpecialist{771 火箭,1261 刺炮弹,1785 南瓜,3108 钉弹,
+ *  71 钱币,931 信号弹,283 飞镖,949 雪球,75 坠落星,23 凝胶}→specialistEffective
+ *  （本仓 'rocket' 桶）/ 其余 → rangedDamage（'other'）。此前负滤（≠弹/火箭/镖/溶液）
+ *  把雪球/星星/凝胶/钱币/信号弹全误落 'arrow' 桶（2026-08-22 对齐三表）。
+ *  原版另查 item.ammo（弹药侧类别），本仓按 useAmmo 单侧判——弓/枪/发射器的
+ *  useAmmo 已定类别，弹药交叉（弓射桩/枪射糖果玉米）由 useAmmo 侧同名集覆盖 */
+const AMMO_KIND_ARROW = new Set([40, 1836]);
+const AMMO_KIND_BULLET = new Set([97, 1783]);
+const AMMO_KIND_SPECIALIST = new Set([771, 1261, 1785, 3108, 71, 931, 283, 949, 75, 23]);
+
+export type AmmoDamageKind = 'arrow' | 'bullet' | 'rocket' | 'other';
+
+export function ammoDamageKind(useAmmo: number): AmmoDamageKind {
+  if (AMMO_KIND_ARROW.has(useAmmo)) return 'arrow';
+  if (AMMO_KIND_BULLET.has(useAmmo)) return 'bullet';
+  if (AMMO_KIND_SPECIALIST.has(useAmmo)) return 'rocket';
+  return 'other';
+}
+
+/** 弓族弹型换体全链（PickAmmo 尾链 Player.cs:52660-52705 + ItemCheck_Shoot 弹型段
+ *  :46525-46549，顺序敏感：熔火箭袋在蜂膝弓之后、ItemCheck 表在整链最末——
+ *  熔火箭袋先把木箭 1→2 后，熔岩之怒 120 的 `projToShoot==1` 门即不再触发，同原版）。
+ *  返回换体后弹型 + 熔火箭袋 +2 加伤（:52704 同支结算） */
+export function resolveBowProjOverride(bowVid: number, projId: number,
+  hasMoltenQuiver: boolean): { projId: number; ammoBonus: number } {
+  let p = projId;
+  let ammoBonus = 0;
+  if (bowVid === 3019 && p === 1) p = 485;   // 炼狱天弓：木箭→狱翼箭（:52660-52663）
+  if (bowVid === 3052) p = 495;              // 暗影焰弓恒 495（:52664-52667）
+  if (bowVid === 4953 && p === 1) p = 932;   // 暮夕：木箭→月总矢（:52668-52670）
+  if (bowVid === 2888 && p === 1) p = 469;   // 蜂膝弓：木箭→蜂箭（:52698-52701）
+  if (hasMoltenQuiver && p === 1) { p = 2; ammoBonus = 2; }   // 熔火箭袋族（:52702-52705）
+  if (p === 1 && bowVid === 120) p = 2;      // 熔岩之怒：仅木箭→火矢（:46525-46528）
+  if (bowVid === 682) p = 117;               // 骨弓恒骨箭（:46529-46533）
+  if (bowVid === 725) p = 120;               // 冰雪弓恒霜箭（:46534-46537）
+  if (bowVid === 2223) p = 357;              // 脉冲弓恒脉冲矢（:46542-46545）
+  return { projId: p, ammoBonus };
+}
+
+/** 海啸 2624 五扇出生解算（Player.cs:47138-47164）：5 矢扇形——出生点 = 锚点(玩家中心)
+ *  + 40px 瞄准向旋转 π/10×(i−2)，速度全体 = 瞄准速原样（不散布）；起手 CanHit 失败
+ *  → 出生点整体回拉一个 40px 瞄准向（:47146-47150），CanHitLine(中心→出生点−速度)
+ *  失败 → 该矢出生点向心回拉 15px（:47152-47155）。canHit/canHitLine = Collision 桥接
+ *  （0 尺寸盒；原版两查分别为 Collision.CanHit :47145 / CanHitLine :47152） */
+export function tsunamiFanShots(ax: number, ay: number, cx: number, cy: number,
+  svx: number, svy: number,
+  canHit: (x1: number, y1: number, x2: number, y2: number) => boolean,
+  canHitLine: (x1: number, y1: number, x2: number, y2: number) => boolean,
+): Array<{ x: number; y: number; vx: number; vy: number }> {
+  const vlen = Math.hypot(svx, svy) || 1;
+  const dirX = (svx / vlen) * 40, dirY = (svy / vlen) * 40;
+  const clear0 = canHit(ax, ay, ax + dirX, ay + dirY);
+  const shots: Array<{ x: number; y: number; vx: number; vy: number }> = [];
+  for (let i = 0; i < 5; i++) {
+    const ra = (Math.PI / 10) * (i - 2);
+    const c = Math.cos(ra), s = Math.sin(ra);
+    let sx = ax + dirX * c - dirY * s;
+    let sy = ay + dirX * s + dirY * c;
+    if (!clear0) { sx -= dirX; sy -= dirY; }
+    if (!canHitLine(cx, cy, sx - svx, sy - svy)) {
+      const pl = Math.hypot(sx - cx, sy - cy) || 1;
+      sx -= ((sx - cx) / pl) * 15;
+      sy -= ((sy - cy) / pl) * 15;
+    }
+    shots.push({ x: sx, y: sy, vx: svx, vy: svy });
+  }
+  return shots;
+}
+
+/** 暮夕 4953 逐发弹规格（Player.cs:47307-47315）：第 3 发（扇位 num60==2）→
+ *  932 月总矢 + 伤×2；弹型 932（含木箭整链换体）恒速×2（:47313-47315） */
+export function eventideShotSpec(shotIdx: number, projId: number, damage: number, speed: number):
+  { pid: number; dmg: number; spd: number } {
+  let pid = projId;
+  let dmg = damage;
+  let spd = speed;
+  if (shotIdx === 2) { pid = 932; dmg = damage * 2; }
+  if (pid === 932) spd = speed * 2;
+  return { pid, dmg, spd };
+}
+
+/** 逐枪弹型强制/转换（Player.cs ItemCheck_Shoot 弹型段，无视 PickAmmo 解析结果）：
+ *  电圈发射器 2796 恒 442（:46539-46541，此前走火箭加法链混入 445/448/451 假弹）/
+ *  气喇叭 5117 恒 968（:46547-46549，useAmmo 97 仅作耗弹/加伤）/
+ *  狙击步枪 1254·维纳斯万能枪 1255·Uzi 1265：火枪弹(14)→高速弹 242（:46477-46487） */
+export function forceGunProjId(gunVid: number, projId: number): number {
+  if (gunVid === 2796) return 442;
+  if (gunVid === 5117) return 968;
+  if ((gunVid === 1254 || gunVid === 1255 || gunVid === 1265) && projId === 14) return 242;
+  return projId;
+}
+
+/** 逐枪省弹档（Player.cs:52755-52778 六档独立掷，先于装备/buff 档）：
+ *  [Next 分母, 掷 0 才省]——98 迷你鲨/1782 糖果玉米步枪 Next(3)==0 省 1/3、
+ *  533 巨鲨/2270 加特利托 Next(2)==0 省 1/2、1553 SDMG/1929 链式机枪 Next(3)!=0
+ *  即省 = 仅耗 1/3。此前整块漏 = 六枪实际耗弹 ×1.33-3 倍（2026-08-22 补） */
+export const GUN_AMMO_SAVE: Record<number, [number, boolean]> = {
+  98: [3, true],     // 迷你鲨（:52759-52761）
+  1782: [3, true],   // 糖果玉米步枪（:52755-52757）
+  533: [2, true],    // 巨鲨（:52767-52769）
+  2270: [2, true],   // 加特利托（:52763-52765）
+  1553: [3, false],  // SDMG 仅耗 1/3（:52775-52777）
+  1929: [3, false],  // 链式机枪 仅耗 1/3（:52771-52773）
+};
+
+/** 逐枪省弹判定（rand01 = Math.random()，等价 Main.rand.Next(denom) 商值）：
+ *  返回 true = 本发不耗弹；非表枪恒 false */
+export function gunAmmoSaveHit(vid: number, rand01: number): boolean {
+  const t = GUN_AMMO_SAVE[vid];
+  if (!t) return false;
+  const roll = Math.floor(rand01 * t[0]);
+  return t[1] ? roll === 0 : roll !== 0;
 }

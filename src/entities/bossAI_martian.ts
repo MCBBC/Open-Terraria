@@ -391,16 +391,31 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
   const m = mount as Enemy;
   // ---- 锚定跟随（:35764-35845 + 36200-36214）：零速贴主体 + 偏移 ----
   let ox = 0, oy = 0;
-  let spriteDir = m.facing;
-  if (id === 390) { ox = 0; oy = -14; }
+  // spriteDirection（:35908-35919）：394 按 ai[1] 固定侧（:35886 num1121）；392/393
+  // 随主体 spriteDirection——主体(AI_076)全段从不写 → 恒默认 -1 不翻面。本仓
+  // core.facing 默认 1 与原版默认 -1 不同源，直取会误翻，故 392/393 钉 -1。
+  let spriteDir = -1;
+  if (id === 390) { ox = 0; oy = -14; spriteDir = m.facing; }
   else if (id === 392) { ox = 0; oy = 2; }
   else if (id === 393) { ox = e.ai1 === 1 ? 60 : -60; oy = 29; }
   else if (id === 394) { ox = e.ai1 === 1 ? 49 : -49; oy = -13; spriteDir = e.ai1 === 1 ? 1 : -1; }
-  else if (id === 416) { ox = -m.facing * 10; oy = -30; }
+  else if (id === 416) { ox = -m.facing * 10; oy = -30; spriteDir = m.facing; }
+  // ---- 部件旋转继承 + 锚偏移随主体旋转（cs:35813-35817/:35871-35872/:35883-35884，
+  //      492 同构 :35893-35898）：vector133 ×= 主体 scale → RotatedBy(主体 rotation)，
+  //      rotation = 主体 rotation。主体 rotation 恒 0 时（巡航/弹幕态）全部 no-op，
+  //      仅 expert 死亡自旋态(ai0==1,cs:36644-36662 相位摆动→整周自旋)部件绕主体公转。
+  //      渲染侧派发门 stR===75&&(392|393|394)（2026-08-20 旋转三件套台账遗留批）----
+  e.visAngle = m.visAngle;
+  {
+    const mrot = m.visAngle, msc = m.vanillaScale || 1;
+    const c = Math.cos(mrot), s = Math.sin(mrot);
+    const rx = (ox * c - oy * s) * msc;
+    const ry = (ox * s + oy * c) * msc;
+    ox = rx; oy = ry;
+  }
   e.vx = 0; e.vy = 0;
   e.x = m.cx - e.w / 2 + ox;
   e.y = m.cy - e.h / 2 + oy;
-  // spriteDirection（394 按 ai[1] 固定侧,其余随主体;:36206-36212）
   e.facing = spriteDir === 1 ? 1 : -1;
 
   if (id === 390) {

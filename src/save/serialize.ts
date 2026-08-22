@@ -167,6 +167,7 @@ export interface SaveData {
       usedAegisCrystal?: boolean;
       usedAegisFruit?: boolean;
       usedArcaneCrystal?: boolean;
+      usedGalaxyPearl?: boolean;
       usedGummyWorm?: boolean;
       usedAmbrosia?: boolean;
     };

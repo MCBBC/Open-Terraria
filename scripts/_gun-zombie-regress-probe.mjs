@@ -34,7 +34,16 @@ const out = await page.evaluate(async () => {
   // 玩家传送到位+瞄准
   pl.x = z.cx - 130 - pl.w / 2; pl.y = z.cy - pl.h / 2; pl.vx = 0; pl.vy = 0;
   const shotgun = idOf(/^vi_534_/) >= 0 ? idOf(/^vi_534_/) : idOf(/^vi_575_/);
-  const bullet = idOf(/^vi_97_/);
+  // 弹药按 ammoId===97 直扫(绕开 __swItems 键别名污染:vi_97_* 多键同指 393 墙物)
+  let bullet = -1;
+  try {
+    const { ITEM_DEFS } = await import('/src/data/items.ts');
+    for (let i = 0; i < ITEM_DEFS.length; i++) {
+      const d = ITEM_DEFS[i];
+      const vid = d?.vid ?? (d?.key ? Number(String(d.key).match(/^vi_(\d+)_/)?.[1] ?? -1) : -1);
+      if (d?.ammoId === 97 || vid === 97) { bullet = i; break; }
+    }
+  } catch { bullet = -1; }
   pl.inv.slots[pl.inv.selected] = { id: shotgun, stack: 1 };
   pl.inv.slots[54] = { id: bullet, stack: 999 };
   g.cb.onInventoryChanged();

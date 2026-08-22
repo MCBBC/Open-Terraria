@@ -115,6 +115,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
       usedAegisCrystal: player.usedAegisCrystal,
       usedAegisFruit: player.usedAegisFruit,
       usedArcaneCrystal: player.usedArcaneCrystal,
+      usedGalaxyPearl: player.luckState.usedGalaxyPearl,   // PL:53835/:54303（银河珍珠 5340）
       usedGummyWorm: player.usedGummyWorm,
       usedAmbrosia: player.usedAmbrosia,
     },

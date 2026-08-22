@@ -46,9 +46,23 @@ export interface ItemDef {
     useTime?: number;
     knockback?: number;
     reach?: number;       // 攻击/作用半径（px）
+    /** 三力全量（Game.itemFuncTool 同形）：dualToolResolve 的 multi 判定读的是
+     *  tool 对象内的 pickPower/axePower/hammerPower 三字段——只写主 power 时
+     *  双工具（Drax/镐斧/锤斧族）multi 恒假 = 副力失效（F2,2026-08-22 工具审计） */
+    pickPower?: number;
+    axePower?: number;
+    hammerPower?: number;
   };
   /** 副工具力（Hamaxe 系双工具：主 tool.type 外的另一力，挖掘入口按主类型判定） */
   axePower?: number;
+  /** aiStyle20 持械工具弹（链锯/钻/插孔锤族，Item.cs SetDefaults useStyle5+channel
+   *  +shoot：1262 :15631-15650 / 3098 :30931-30946）——shoot = 持械弹 id（252 插孔
+   *  锤 / 509 链锯）、channel = 持械门。Game 工具分支按住生成持械弹体
+   *  （entities/ChainsawProj，AI_020 :23837-23942）承载接触伤害；挖掘由 tool 力
+   *  并行结算（原版 channel 期 ItemCheck_UseMiningTools :45009 照常跑，弹体不挖块）。
+   *  缺省时 Game 回退 itemCombat(vid).shoot（3098 无显式字段同走此路） */
+  shoot?: number;
+  channel?: boolean;
   heal?: number;          // 食用/饮用回复
   potion?: {
     buff: PotionBuff;
@@ -414,6 +428,9 @@ item({ key: 'vi_1579_flurry_boots', name: '', value: 1 });
 item({ key: 'vi_4056_ancient_chisel', name: '', value: 1 });
 item({ key: 'vi_4346_encumbering_stone', name: '', value: 1 });
 item({ key: 'vi_1319_snowball_cannon', name: '', value: 1 });
+// 雪球弹 949（AmmoID.Snowball=AmmoID.cs:134；雪球炮 1319 useAmmo=949，Item.cs:16318——
+// combat.ammo=949 供 PickAmmo 反查；此前未注册 = 雪球炮无弹可装）
+item({ key: 'vi_949_snowball', name: '', value: 1 });
 item({ key: 'vi_3199_ice_mirror', name: '', value: 1 });
 item({ key: 'vi_950_ice_skates', name: '', value: 1 });
 item({ key: 'vi_4443_demonic_hellcart', name: '', value: 1 });
@@ -636,6 +653,9 @@ item({ key: 'vi_2270_gatligator', name: '', value: 1 });
 item({ key: 'vi_2797_xenopopper', name: '', value: 1 });
 item({ key: 'vi_3475_星旋机枪', name: '', value: 1 });
 item({ key: 'vi_3788_玛瑙爆破枪', name: '', value: 1 });
+// 四管霰弹枪 4703（Item.cs:38628-38640 DefaultToRangedWeapon(14,Bullet,55,7f)——
+// 战斗数值已回填 vanilla-itemcombat.json 键"4703"；图标经 vi_ 键回退 vanilla.json items['4703'].icon）
+item({ key: 'vi_4703_四管霰弹枪', name: '', value: 1 });
 item({ key: 'vi_5117_气喇叭', name: '', value: 1 });
 item({ key: 'vi_39_泥灰墙', name: '', value: 1 });
 item({ key: 'vi_44_彩虹砖墙', name: '', value: 1 });
@@ -864,6 +884,12 @@ item({ key: 'vi_2739_BoosterTrack', name: '', value: 1, tile: 'v_314_minecart_tr
 //（128 → 470，后者生效 = 1.4 DisplayDoll 改版）；extract-itemfunc 只抓到死代码的
 // 128，故此处按源码最终态补 createTile=470 / placeStyle=0（原先缺 tile 放置无效）
 item({ key: 'vi_498_mannequin', name: '', value: 1, tile: 'v_470_mannequins', placeStyle: 0 });
+// 女模特（Womannequin 1989）/帽架（HatRack 3977）：同 498 血案——Item.cs case 体内
+// createTile 被赋值两次（1989: :21260 269 → :21264 470+placeStyle 2；3977: :35327 269 →
+// :35331 475），extract-itemfunc 只抓首值 269（legacy 女模特 tile）——帽架会放成女模特、
+// 帽架 TE 存储类永不触发。按源码最终态补（2026-08-22 补 A 审计）
+item({ key: 'vi_1989_Womannquin', name: '', value: 1, tile: 'v_470_mannequins', placeStyle: 2 });
+item({ key: 'vi_3977_HatRack', name: '', value: 1, tile: 'v_475_hat_rack', placeStyle: 0 });
 item({ key: 'vi_4721_mushroom_beam', name: '', value: 1 });
 item({ key: 'vi_819_living_wood_door', name: '', value: 1 });
 item({ key: 'vi_1458_obsidian_door', name: '', value: 1 });
@@ -956,7 +982,12 @@ item({ key: 'vi_1188_palladium_pickaxe', name: '', value: 1, tool: { type: 'pick
 item({ key: 'vi_1195_orichalcum_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 165 } }); // ←vi_1195_OrichalcumPickaxe 独有字段搬移(批次A)
 item({ key: 'vi_1202_titanium_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 190 } }); // ←vi_1202_TitaniumPickaxe 独有字段搬移(批次A)
 item({ key: 'vi_1234_chlorophyte_warhammer', name: '', value: 1, tool: { type: 'hammer', power: 90 } }); // ←vi_1234_ChlorophyteWarhammer 独有字段搬移(批次A)
-item({ key: 'vi_1262_chlorophyte_jackhammer', name: '', value: 1, tool: { type: 'hammer', power: 90 } }); // ←vi_1262_ChlorophyteJackhammer 独有字段搬移(批次A)
+// 叶绿插孔锤 1262（Item.cs:15631-15650）：useStyle5/channel/shoot 252（AI_020 插孔机
+// :23837-23942）/damage45/knockBack5.2/useTime7/useAnimation25/hammer90/noUseGraphic
+// ——shoot/channel 驱动持械弹体（entities/ChainsawProj，接触伤害）；tool.useTime=7
+// 为挖掘节奏（channel 期 ItemCheck_UseMiningTools toolTime 循环 :42891-42899）
+item({ key: 'vi_1262_chlorophyte_jackhammer', name: '', value: 1,
+  tool: { type: 'hammer', power: 90, useTime: 7 }, shoot: 252, channel: true }); // ←vi_1262_ChlorophyteJackhammer 独有字段搬移(批次A)
 item({ key: 'vi_1305_the_axe', name: '', value: 1, tool: { type: 'hammer', power: 100 }, axePower: 35 }); // ←vi_1305_TheAxe 独有字段搬移(批次A)
 item({ key: 'vi_1506_spectre_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 200 } }); // ←vi_1506_SpectrePickaxe 独有字段搬移(批次A)
 item({ key: 'vi_1507_spectre_hamaxe', name: '', value: 1, tool: { type: 'hammer', power: 90 }, axePower: 30 }); // ←vi_1507_SpectreHamaxe 独有字段搬移(批次A)
@@ -1333,14 +1364,35 @@ for (const wi of Object.values(wallItemsJson as Record<string, { wall: number; k
 // 条件破坏链的道具入口:圣锤 80 砸祭坛/邪恶石 65 需梦魇镐/神庙砖 210 需 Picksaw 级等
 // ⚠ axe 单位=源码原值(斧力%÷5,如 Drax axe=22=110%)——消费端 int(axe*1.2);
 //   曾误存 70(当全百分比)致双工具砍树快 3 倍,2026-08-13 对齐 Player.cs:45098
-const VANILLA_TOOL_POWERS: Record<number, { pick?: number; hammer?: number; axe?: number }> = JSON.parse("{\"103\":{\"pick\":65},\"104\":{\"hammer\":55},\"122\":{\"pick\":100},\"204\":{\"hammer\":60,\"axe\":20},\"217\":{\"hammer\":70,\"axe\":30},\"367\":{\"hammer\":80},\"579\":{\"pick\":200,\"axe\":22},\"654\":{\"hammer\":40},\"657\":{\"hammer\":35},\"660\":{\"hammer\":55},\"776\":{\"pick\":110},\"777\":{\"pick\":150},\"778\":{\"pick\":180},\"787\":{\"hammer\":85},\"797\":{\"hammer\":55},\"798\":{\"pick\":70},\"922\":{\"hammer\":40},\"990\":{\"pick\":200,\"axe\":22},\"1188\":{\"pick\":130},\"1195\":{\"pick\":165},\"1202\":{\"pick\":190},\"1234\":{\"hammer\":90},\"1262\":{\"hammer\":90},\"1305\":{\"hammer\":100,\"axe\":35},\"1506\":{\"pick\":200},\"1507\":{\"hammer\":90,\"axe\":30},\"3481\":{\"hammer\":59},\"3487\":{\"hammer\":50},\"3493\":{\"hammer\":43},\"3499\":{\"hammer\":38},\"3505\":{\"hammer\":35},\"3511\":{\"hammer\":45},\"3517\":{\"hammer\":55},\"3525\":{\"hammer\":100,\"axe\":30},\"4317\":{\"hammer\":80}}");
+export const VANILLA_TOOL_POWERS: Record<number, { pick?: number; hammer?: number; axe?: number }> = JSON.parse("{\"103\":{\"pick\":65},\"104\":{\"hammer\":55},\"122\":{\"pick\":100},\"204\":{\"hammer\":60,\"axe\":20},\"217\":{\"hammer\":70,\"axe\":30},\"367\":{\"hammer\":80},\"579\":{\"pick\":200,\"axe\":22},\"654\":{\"hammer\":40},\"657\":{\"hammer\":35},\"660\":{\"hammer\":55},\"776\":{\"pick\":110},\"777\":{\"pick\":150},\"778\":{\"pick\":180},\"787\":{\"hammer\":85},\"797\":{\"hammer\":55},\"798\":{\"pick\":70},\"922\":{\"hammer\":40},\"990\":{\"pick\":200,\"axe\":22},\"1188\":{\"pick\":130},\"1195\":{\"pick\":165},\"1202\":{\"pick\":190},\"1234\":{\"hammer\":90},\"1262\":{\"hammer\":90},\"1305\":{\"hammer\":100,\"axe\":35},\"1506\":{\"pick\":200},\"1507\":{\"hammer\":90,\"axe\":30},\"3481\":{\"hammer\":59},\"3487\":{\"hammer\":50},\"3493\":{\"hammer\":43},\"3499\":{\"hammer\":38},\"3505\":{\"hammer\":35},\"3511\":{\"hammer\":45},\"3517\":{\"hammer\":55},\"3525\":{\"hammer\":100,\"axe\":30},\"4317\":{\"hammer\":80,\"axe\":30}}");
+import { itemCombat } from './vanillaItemCombat';
 for (const [idS, tp] of Object.entries(VANILLA_TOOL_POWERS)) {
   const key = VANILLA_ITEM_KEY_BY_ID[Number(idS)];
   if (!key) continue;
   const def = ITEM_DEFS[ITEM_BY_KEY[key]];
   if (!def) continue;
   const type = tp.pick !== undefined ? 'pick' : 'hammer';
-  def.tool = { type: type as ToolType, power: tp.pick ?? tp.hammer ?? 0 };
+  // F1（2026-08-22 工具审计）：speed/useTime/damage/knockback 从 itemCombat 桥入——
+  //  此前只写 {type,power}，Game.updateUse 工具分支 tool.speed??46（:7835）与
+  //  tool.useTime??spd（:7853）双双回落 46t：35 件（梦魇/熔岩/钴/秘银/精金/钯/山铜/
+  //  钛/幽魂镐、Drax、镐斧、圣锤、全部 def.tool 锤斧）挖掘冷却 46t（原版 7-25t，
+  //  慢 1.8-6.6 倍）。数值 = Item.cs SetDefaults 逐件终值（itemCombat 与源码逐件一致，
+  //  审计抽查 14 件全中）。模块加载期变体层未灌入 → 恒取常规世界基值（remix 变体
+  //  useTime 覆写仅 itemFuncTool 63 件桥接受益；工具族无变体 useTime 差，无行为差）。
+  // F2：三力全量写进 tool 对象（dualToolResolve 只认 tool 内 pick/axe/hammer 三力，
+  //  只写主 power 时 multi 恒假 = 8 件双工具副斧力失效不能砍树）。
+  const c = itemCombat(Number(idS));
+  def.tool = {
+    type: type as ToolType,
+    power: tp.pick ?? tp.hammer ?? 0,
+    speed: c?.useAnimation,
+    useTime: c?.useTime,
+    damage: c?.damage,
+    knockback: c?.knockBack,
+    pickPower: tp.pick,
+    axePower: tp.axe,
+    hammerPower: tp.hammer,
+  };
   if (tp.axe !== undefined) def.axePower = tp.axe;
 }
 
@@ -1681,7 +1733,7 @@ import { TILE_KEY_BY_SHEET } from './tiles';
 //  故此族 92 条只有 5 条落进 itemfunc（直赋 createTile 的 250/2741/3565/3566/4275），
 //  其余 87 条以本表为权威。每物种独立 tile id、placeStyle 恒 0（DefaultToPlaceableTile
 //  双参重载缺省），放置链 = 普通家具（GAP ① 见 render/CritterCage.ts）
-const CAGE_ITEM_SHEET: ReadonlyArray<readonly [number, number]> = [
+export const CAGE_ITEM_SHEET: ReadonlyArray<readonly [number, number]> = [
   [250, 282],                        // Fish Bowl（鱼缸，:4378 直赋）
   [2162, 275], [2163, 276], [2164, 277], [2165, 278], [2166, 279], [2167, 280], [2168, 281],
   [2174, 285], [2175, 286],
@@ -1711,6 +1763,37 @@ for (const [vid, sheet] of CAGE_ITEM_SHEET) {
   if (!d || d.tile !== undefined) continue;   // 手写链接优先（vi_4376_rat_cage 样板等）
   const tk = TILE_KEY_BY_SHEET.get(sheet);
   if (tk !== undefined) d.tile = tk;
+}
+
+// ---- 有真实原版放置物品的 tile key 集（createTile 三源并集 → sheet 反查,惰性建表）----
+//  多格破坏返还判据（Game.breakTile object 分支）：原版 Check* 帧检只对【有放置物品】
+//  的 tile 返还物件（TileObjectData 族——雕像 105/画 240-247/旗帜 91/地狱熔炉 77/
+//  提取器 219/水晶球 125/日晷 356/训练假人 378…）；纯世界生成装饰无物品可还
+//  （165 冰凌/233 丛林大植物/529 海燕麦/647-652 瓦砾/751·752 蜥蛋等 27 族——
+//  itemfunc 与 vanilla.json items.createTile 均无该 tile）。
+//  ★取原始数据并集而非 ITEM_DEFS.tile 反查：与注册顺序/手写链接解耦。双源分歧 3 件
+//  （498/1989/3977 源码二次赋值,见上方回填注）恰是 legacy 模特族——并集语义下
+//  128/269 仍判「有物返还」，与原版 CheckMan :46589 掉 498 / CheckWoman 掉 1989 一致
+//  （返还判据按 tile 族,不按终态由哪件物品放置）。惰性 = 首次调用才建表
+import itemFuncRaw from './vanilla-itemfunc.json';
+let _vanillaPlaceableTiles: ReadonlySet<string> | null = null;
+export function vanillaPlaceableTileKeys(): ReadonlySet<string> {
+  if (_vanillaPlaceableTiles === null) {
+    const s = new Set<string>();
+    const add = (sheet: number) => {
+      const tk = TILE_KEY_BY_SHEET.get(sheet);
+      if (tk !== undefined) s.add(tk);
+    };
+    for (const f of Object.values(itemFuncRaw) as Array<{ createTile?: number }>) {
+      if (f.createTile != null && f.createTile !== -1) add(f.createTile);
+    }
+    for (const it of Object.values(vanillaItemMeta.items) as Array<{ createTile?: number }>) {
+      if (it.createTile != null) add(it.createTile);
+    }
+    for (const [, sheet] of CAGE_ITEM_SHEET) add(sheet);
+    _vanillaPlaceableTiles = s;
+  }
+  return _vanillaPlaceableTiles;
 }
 
 // ---- 捕获小动物 → 通用锚桩 tile 724（Item.DefaultToCapturedCritter :47613-47626：

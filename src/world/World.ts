@@ -150,7 +150,8 @@ export class World {
    *  ——不含快进/睡觉两档的旧入口，保留给不参与 dayRate 链的调用方 */
   journeyTimeScale(): number { return this.journeyFreezeTime ? 0 : this.journeyTimeRate; }
   /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；血月 1/6 十周年 / drunkWorld 黎明翻转用。
-   *  生成期灌入 + 存档 header.seedFlags 持久化；wld 导入恒 {}） */
+   *  生成期灌入 + 存档 header.seedFlags 持久化；wld 导入自 S0-3 起按头九位回填
+   *  （WldImport→SaveData.header.seedFlags→SaveFile.ts:281），普通档={}） */
   seedFlags: import('./gen/SeedEasterEggs').SeedFlags = {};
   name: string;
   seed: number;

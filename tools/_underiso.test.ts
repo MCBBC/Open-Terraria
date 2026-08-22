@@ -1,6 +1,9 @@
 // 一次性诊断：#28 Underworld 隔离重放 + 分段掷数计——dump027（原版 Webs 末态）直接
 // 构造 store，复刻 runUnderworldPass 全段（与真身逐字节一致性校验）+ runHellFortPass，
 // 对拍 dump028；输出各段掷骰数（原版总定标 14,451,380 = FNV 8f1bfb12）。
+// ★OOOOOO 批(2026-08-22)加存在性门:/tmp/sw-num4 + /tmp/sw-uw-liqtype.bin 诊断资产
+//   已清,缺资产时静默 skip(原模块级 readFileSync 收集期 ENOENT 炸红全量回归;
+//   #28 隔离案已结,掷数定标 14,451,380 在案,工具留档)。
 import { it } from 'vitest';
 const RUN = !!process.env.SW_PARITY;
 import { readFileSync } from 'node:fs';
@@ -20,14 +23,18 @@ const VG = '/tmp/sw-num4/van_x86_g';
 const W = 4200, H = 1200;
 const load = (idx: number, ext: string, name: string) =>
   readFileSync(`${VG}/${String(idx).padStart(3, '0')}_${name}.${ext}`);
-const t27 = new Uint16Array(load(27, 'typ', 'Webs').buffer.slice(0));
-const a27 = load(27, 'act', 'Webs');
-const w27 = new Uint16Array(load(27, 'wal', 'Webs').buffer.slice(0));
-const l27 = load(27, 'liq', 'Webs');
-const t28 = new Uint16Array(load(28, 'typ', 'Underworld').buffer.slice(0));
-const a28 = load(28, 'act', 'Underworld');
-const w28 = new Uint16Array(load(28, 'wal', 'Underworld').buffer.slice(0));
-const l28 = load(28, 'liq', 'Underworld');
+// 缺资产→零长数组(it 体内判 length 后 skip),不再收集期抛 ENOENT
+const ld0 = (idx: number, ext: string, name: string): ArrayBuffer => {
+  try { return load(idx, ext, name).buffer.slice(0); } catch { return new ArrayBuffer(0); }
+};
+const t27 = new Uint16Array(ld0(27, 'typ', 'Webs'));
+const a27 = new Uint8Array(ld0(27, 'act', 'Webs'));
+const w27 = new Uint16Array(ld0(27, 'wal', 'Webs'));
+const l27 = new Uint8Array(ld0(27, 'liq', 'Webs'));
+const t28 = new Uint16Array(ld0(28, 'typ', 'Underworld'));
+const a28 = new Uint8Array(ld0(28, 'act', 'Underworld'));
+const w28 = new Uint16Array(ld0(28, 'wal', 'Underworld'));
+const l28 = new Uint8Array(ld0(28, 'liq', 'Underworld'));
 
 const REV = new Map<number, number>();
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -40,7 +47,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (typeof s === 'number') SHEET[i] = s;
 }
 
-const LIQTYPE27 = readFileSync('/tmp/sw-uw-liqtype.bin');   // JS 管线 ▶Underworld 时点真值（含岩浆类型位）
+const LIQTYPE27 = (() => { try { return readFileSync('/tmp/sw-uw-liqtype.bin'); } catch { return new Uint8Array(0); } })();   // JS 管线 ▶Underworld 时点真值（含岩浆类型位）
 const mkStore = (): TileStore => {
   const st = new TileStore(W, H);
   for (let i = 0; i < W * H; i++) {
@@ -202,6 +209,7 @@ function replicaUW(st: TileStore, rng: RNG, gs: GenState, mark: (s: string) => v
 const VAN_N = 14451380;
 
 (RUN ? it : it.skip)('underworld isolated replay: sectioned roll counts + diff', () => {
+  if (!t27.length || !LIQTYPE27.length) { console.log('skip: /tmp/sw-num4|/tmp/sw-uw-liqtype.bin 资产缺失,按头注重建后复跑'); return; }
   const rt = runResetAndTerrain({ width: W, height: H, seedText: '9293480', evil: 0 });
   // A) 真身跑一遍 + 段末快照（计掷）
   const stA = mkStore();

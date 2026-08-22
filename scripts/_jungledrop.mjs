@@ -60,6 +60,34 @@ const r = await page.evaluate(async () => {
       g.breakTile(102, 60, true);
       return [...dropsAt];
     })(),
+    plants: (() => {            // 植物族扩展：3/24/201/73/71/227
+      const P3 = TILE_BY_KEY['v_3_forest_short_plants'];
+      const P24 = TILE_BY_KEY['v_24_corruption_short_plants'];
+      const P201 = TILE_BY_KEY['v_201_crimson_short_plants'];
+      const P73 = TILE_BY_KEY['v_73_forest_tall_plants'];
+      const P71 = TILE_BY_KEY['v_71_mushroom_plant'];
+      const P227 = TILE_BY_KEY['v_227_dye_plants'];
+      let kdiCalls = 0;
+      const origKdi = g.killTileDropItems.bind(g);
+      g.killTileDropItems = function (a, b, c) { kdiCalls++; return origKdi(a, b, c); };
+      const one = (tile, fx, x) => {
+        dropsAt.length = 0; kdiCalls = 0;
+        st.setTile(x, 60, tile);
+        st.frameX[st.idx(x, 60)] = fx;
+        st.frameY[st.idx(x, 60)] = 0;
+        g.breakTile(x, 60, true);
+        return { keys: dropsAt.map((d) => d.key), kdiCalls };
+      };
+      return {
+        forest144: one(P3, 144, 90),      // 期望蘑菇 vi_5_Mushroom
+        forestSeeds: one(P3, 0, 91),      // 1/2 且需吹管——无吹管=空
+        corrupt: one(P24, 144, 92),       // 期望腐化蘑菇 vi_60_VileMushroom
+        crimson: one(P201, 270, 93),      // 期望猩红蘑菇 vi_2887
+        tallSeeds: one(P73, 0, 94),       // 无吹管=空
+        mush: one(P71, 0, 95),            // 1/2 发光蘑菇 vi_183
+        dye: one(P227, 0, 96),            // 期望 vi_1107_TealMushroom
+      };
+    })(),
   };
 });
 console.log(JSON.stringify(r, null, 1));
@@ -67,5 +95,23 @@ const sp = r.spores[0];
 const ok = sp && sp.key === 'vi_331_JungleSpores' && sp.stack >= 2 && sp.stack <= 3
   && r.rose[0] && r.rose[0].key === 'vi_223_NaturesGift'
   && (!r.large703 || (r.large703[0] && r.large703[0].key === 'vi_331_JungleSpores'));
-console.log(ok ? 'PASS: 丛林植物帧级掉落' : 'FAIL');
+const pl = r.plants;
+const ok2 = pl.forest144[0] === 'vi_5_Mushroom' && pl.forestSeeds.length === 0
+  && pl.corrupt[0] === 'vi_60_VileMushroom' && pl.crimson[0] === 'vi_2887_ViciousMushroom'
+  && pl.tallSeeds.length === 0 && (pl.mush.length === 0 || ['vi_194_MushroomGrassSeeds', 'vi_183_GlowingMushroom'].includes(pl.mush[0]))
+  && pl.dye[0] === 'vi_1107_TealMushroom';
+const parts = {
+  sp: !!sp && sp.key === 'vi_331_JungleSpores' && sp.stack >= 2 && sp.stack <= 3,
+  rose: !!r.rose[0] && r.rose[0].key === 'vi_223_NaturesGift',
+  l703: !r.large703 || (!!r.large703[0] && r.large703[0].key === 'vi_331_JungleSpores'),
+  f144: pl.forest144.keys[0] === 'vi_5_Mushroom',
+  fSeeds: pl.forestSeeds.keys.length === 0,
+  corrupt: pl.corrupt.keys[0] === 'vi_60_VileMushroom',
+  crimson: pl.crimson.keys[0] === 'vi_2887_ViciousMushroom',
+  tSeeds: pl.tallSeeds.keys.length === 0,
+  mush: pl.mush.keys.length === 0 || ['vi_194_MushroomGrassSeeds', 'vi_183_GlowingMushroom'].includes(pl.mush.keys[0]),
+  dye: pl.dye.keys[0] === 'vi_1107_TealMushroom',
+};
+console.log(JSON.stringify(parts));
+console.log(Object.values(parts).every(Boolean) ? 'PASS: 丛林+植物族帧级掉落' : 'FAIL');
 await browser.close();

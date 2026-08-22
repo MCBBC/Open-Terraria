@@ -17,6 +17,7 @@ import { genSolidType } from './GenSolid';
 const WALL_DIRT = 2;        // WallID.Dirt
 const WALL_DIRT_UNSAFE = 15; // WallID.DirtUnsafe
 const WALL_GRASS_UNSAFE = 63;
+const WALL_SPIDER_UNSAFE = 62; // WallID.SpiderUnsafe（PPPPP：饥荒世界地表化目标）
 const WALL_FLOWER_UNSAFE = 65;
 /** WallID.Sets.CannotBeReplacedByWallSpread（WallID.cs:60）：木/泥块/土/丛林土/… */
 const WALL_CANNOT_REPLACE = new Set([4, 40, 3, 83, 87, 244, 34]);
@@ -148,7 +149,14 @@ export function runGrassWallPass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
       if (found && sx > -1 && sy > -1 && countDirtTiles(st, sx, sy) < MAX_TILE_COUNT) {
-        spreadWall2(st, sx, sy, WALL_GRASS_UNSAFE);
+        // ★PPPPP（cs:19776-19786）：maxValue=3（FTW 组合 10）；饥荒世界 Next(maxValue)!=0
+        //   → 蜘蛛墙 62 地表化（纯 Constant 2/3、FTW+Constant 9/10）。掷骰在 constant
+        //   门内（普通世界零消耗）。Variations.noSpiderCavesActuallyNoSpiderCaves 门
+        //   （noSpiderCaves∧activeSecretSeedCount<4）纯 Constant 恒 false,不接（备案）。
+        const maxValue = gs.seedFlags?.getGoodWorld ? 10 : 3;
+        let wallType = WALL_GRASS_UNSAFE;
+        if (gs.seedFlags?.theConstant && rng.nextInt(maxValue) !== 0) wallType = WALL_SPIDER_UNSAFE;
+        spreadWall2(st, sx, sy, wallType);
       }
     }
   }

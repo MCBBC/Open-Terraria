@@ -46,6 +46,7 @@ function makeEnemy(flag: boolean, hurtLog: number[]): Enemy {
   e.reflectsProjectiles = flag;
   (e as unknown as { hurt: (d: number) => boolean }).hurt = (d: number) => {
     hurtLog.push(d);
+    e.iframes = 10;   // Enemy.hurt :11554 通用档（命中置全局 immune 帧——弹侧 :11905 门依赖此帧）
     return true;
   };
   return e;

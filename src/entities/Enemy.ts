@@ -17,14 +17,24 @@ import { vanillaNpc, vanillaSoundFiles, NPC_STATIC_ALPHA, type VanillaNpc } from
 import { IDLE_SOUNDS, CHATTER_SOUNDS, CRITTER_SOUNDS } from '../data/vanillaNpcAmbience';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 
-/** 镇静药水(物品 3090)的 npcTypeNoAggro 置位表（Player.cs:14144-14168：
- *  `if (currentItem.type == 3090)` 下逐项 npcTypeNoAggro[N]=true，共 23 类；
- *  字段声明 Player.cs:2858。本仓等效语义：Calming buff（vanillaBuff 106）生效
- *  期间视为置位，消费点 effectiveTargetDist(+1000 罚)与 seekDirX(不面向门)。 */
+/** 皇家凝胶 3090（ItemID.RoyalGel，非镇静药水）的 npcTypeNoAggro 置位表
+ *  （Player.cs:14144-14168：`if (currentItem.type == 3090)` 下逐项
+ *  npcTypeNoAggro[N]=true，共 23 类；字段声明 Player.cs:2858。本仓等效语义：
+ *  置位源 = Calming buff（vanillaBuff 106，镇静药水）∪ 装备 3090
+ *  （equipStats.royalGel，见 npcNoAggroActive），消费点 effectiveTargetDist
+ *  (+1000 罚)/targetClosest(+1000)与 seekDirX(不面向门)。 */
 export const CALMING_NO_AGGRO_TYPES: ReadonlySet<number> = new Set([
   1, 16, 59, 71, 81, 138, 121, 122, 141, 147, 183, 184, 204, 225, 244,
   302, 333, 335, 334, 336, 537, 676, 667,
 ]);
+
+/** npcTypeNoAggro[type] 置位源并集（Player.cs:14144-14168）：镇静 buff（Calming 106）
+ *  ∪ 皇家凝胶 3090 装备（equipStats.royalGel——2026-08-22 配饰审计补接，
+ *  此前装备源缺位，3090 只登记不生效）。测试桩无 equipStats 时可选链兜底 false。 */
+export function npcNoAggroActive(player: Player): boolean {
+  return !!player.buffs?.has(BuffType.Calming)
+    || !!(player as unknown as { equipStats?: { royalGel?: boolean } }).equipStats?.royalGel;
+}
 /** Main.wallDungeon（Main.cs:10507-10515：主题墙 7/8/9 + 1.4 变体 94-99）——地牢之魂
  *  双门的墙侧（SceneMetrics/WorldGen 各有一份同值表） */
 const DUNGEON_WALL_IDS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
@@ -1169,6 +1179,10 @@ export class Enemy extends Entity {
   potentAcidDoT = 0;
   chlorophyteSporeDoT = 0;
   eelWhipDoT = 0;
+  /** stinky(120)：苍蝇美食 5129 挥砍命中 5s（Player.StatusToNPC :6203-6206）。
+   *  原版 NPC 侧效果 = 其余敌怪索敌改以 stinky 者为目标（NPC.cs:53888/53899）——
+   *  本仓敌怪索敌 AI 未建模该转向（登记 GAP），字段仅承载 buff 存量/倒计时 */
+  stinkyT = 0;
   /** 实例级 buff 免疫覆写（1457 AI_001 熔岩史莱姆段 :61312-61316 运行时
    *  `buffImmune[70/397/395/20] = false`）：vanilla buff id → false = 静态免疫表
    *  （data/vanillaNpcImmunity）被运行时复位,AddBuff 照常施加。projStatus 施加门
@@ -1235,7 +1249,7 @@ export class Enemy extends Entity {
     // faceTarget=false 时整段朝向更新跳过（direction 保留旧值）——与潜行门同落点，
     // 原版里它在 :78547 `if (faceTarget)` 外层判定，故先于潜行门生效。
     if (CALMING_NO_AGGRO_TYPES.has(this.vanillaId ?? -1) && this.facing !== 0
-      && !!player.buffs?.has(BuffType.Calming)) {
+      && npcNoAggroActive(player)) {
       return this.facing;
     }
     if (itemAnimZero && player.aggro < 0 && this.hadTarget && !this.def.boss) {
@@ -1258,12 +1272,12 @@ export class Enemy extends Entity {
     const num = Math.abs(player.cx - this.cx) + Math.abs(player.cy - this.cy);
     let dist = num - player.aggro;                       // :78491 num -= player.aggro
     // 镇静罚项（NPC.cs:78492-78495）：player.npcTypeNoAggro[type] && direction != 0
-    // → num += 1000f。npcTypeNoAggro[type] 即镇静 buff 生效位（CALMING_NO_AGGRO_TYPES，
-    // Player.cs:14144-14168 物品 3090 逐项置位 23 类）。★单人语义：NPC.direction
+    // → num += 1000f。npcTypeNoAggro[type] 置位源 = 镇静 buff（CALMING_NO_AGGRO_TYPES）
+    // + 皇家凝胶 3090 装备（Player.cs:14144-14168 逐项置位 23 类）。★单人语义：NPC.direction
     // 恒 ±1（本仓 facing 同构，:324 `vx>0?1:-1` / :675 缺省 1，无 0 值）→
     // 罚项对表内怪恒生效 = 索敌半径 +1000 曼哈顿（canTargetPlayerAt 门等效收窄）。
     if (CALMING_NO_AGGRO_TYPES.has(this.vanillaId ?? -1) && this.facing !== 0
-      && !!player.buffs?.has(BuffType.Calming)) dist += 1000;
+      && npcNoAggroActive(player)) dist += 1000;
     return dist;
   }
   /** 各 AI 族索敌门统一入口：有效距离（已按原版减 aggro）< range。
@@ -1310,7 +1324,7 @@ export class Enemy extends Entity {
       let num = this.targetMetric(p);                       // :78503-78505
       num -= p.aggro ?? 0;                                  // :78507 num -= aggro（真 Player 恒数值；?? 0 护测试桩）
       if (CALMING_NO_AGGRO_TYPES.has(this.vanillaId ?? -1) && this.facing !== 0
-        && !!p.buffs?.has(BuffType.Calming)) num += 1000;   // :78508-78510
+        && npcNoAggroActive(p)) num += 1000;   // :78508-78510
       if (!t || num < distance) {                           // :78511
         t = true; distance = num; this.targetPlayer = p;
       }
@@ -1989,6 +2003,7 @@ export class Enemy extends Entity {
     // confused（buff 31）存量倒数；反向语义在各 AI 的索敌点（seekDirX）按
     // 原版 TargetClosest :78569 应用——不再对 vx 做周期翻转（旧近似已移除）
     if (this.confusedT > 0) this.confusedT -= dt;
+    if (this.stinkyT > 0) this.stinkyT -= dt;   // stinky(120) 存量倒数（AI 转向 GAP 见字段注）
     // ---- 1457 新 debuff VFX（UpdateNPC_BuffApplyVFX :92263-92330 + A-5 孢子云
     //      :92878-92894）。原版走 Dust/ParticleOrchestrator,本仓以 spawnParticles
     //      近似（颜色/概率/速率 1:1;粒子形态差异登记）----
@@ -2145,6 +2160,10 @@ export class Enemy extends Entity {
     } else if (vid === 133) {                                         // 游荡眼 :74760-74769
       if (this.vx > 0) this.visAngle = Math.atan2(this.vy, this.vx);
       else if (this.vx < 0) this.visAngle = Math.atan2(this.vy, this.vx) + Math.PI;
+    } else if (vid === 664) {                                         // 火把神 :75558
+      this.visAngle = this.vx * 0.1;                  // 纯 vx 函数;spriteDirection=sign(vx)
+      // （:75552-75556 双态档）→ 通用 facing 镜像语义。原版本体无生成路径
+      // （事件=弹幕 949,664 仅图鉴记账）——写点为三件套完备性预置。
     }
   }
 
@@ -3161,7 +3180,12 @@ export class Enemy extends Entity {
       this.dead = true;
       return;
     }
-    // 摇晃衰减（FindFrame 488 分支 cs:71516-71544 同步逻辑在渲染帧端）
+    // 摇晃衰减（FindFrame 488 分支 cs:71522-71527：>24 钳 24 是【字段写入】——
+    // 命中侧存 clamp(dmg,20,120)（cs:83498-83507），帧机每拍先钳 24 再 -1，
+    // 净效果=计时器恒 20..24。曾漏钳 → 大伤害命中 shake=100 时
+    // ceil(100/4)=25 帧号越界被 min(frames-1) 钳到末帧并卡 ~76 tick（用户报
+    // "连射卡在错误帧,停火才播完后续帧"）
+    if (this.dummyShake > 24) this.dummyShake = 24;
     if (this.dummyShake > 0) this.dummyShake--;
     // 静止：仅重力站立
     this.applyGravity(game);
@@ -6755,7 +6779,10 @@ export class Enemy extends Entity {
     if (vid === 423 && Math.abs(this.vx) >= num11 * 0.95 && Math.random() < 1 / 3) {
       game.spawnParticles(this.cx, this.cy, '#C8D8E8', 1, 0.2, { life: 30, grav: 0 });
     }
-    // ---- 546 滚转（cs:63359-63364）：rotation += vx×0.05、spriteDirection=−direction ----
+    // ---- 546 滚转（cs:63365-63369）：rotation += vx×0.05 持续累积（滚转无态机——
+    //      台账"case 3/0.05/AngleTowards 态机"实为 AI_110_Betsy 段误归属）；半句
+    //      spriteDirection=−direction 落 Renderer 546 反翻档（facing<0 才翻，facing
+    //      兼作本 AI 的 direction 不可就地取反）；渲染派发门 stR===26&&idR===546 ----
     if (vid === 546) {
       this.visAngle += this.vx * 0.05;
     }
@@ -11474,7 +11501,7 @@ export class Enemy extends Entity {
     // 受击只记摇晃强度+方向（渲染帧端消费），掉血由 dummyAI 回满
     if (this.vanillaId === 488) {
       this.dummyShake = Math.max(20, Math.min(120, dmg));
-      this.dummyHitDir = Math.sign(kbx) || this.dummyHitDir;
+      this.dummyHitDir = Math.sign(kbx);   // cs:83506 localAI[1]=hitDirection 无条件写入（0=未定向）
       this.iframes = 8;
       // 受击反馈(2026-08-21 用户报"子弹射假人无命中效果"):原版假人是 immortal
       // 非 dontTakeDamage——StrikeNPC 走完整反馈(NPCHit15 音+伤害数字)后 life 不减。

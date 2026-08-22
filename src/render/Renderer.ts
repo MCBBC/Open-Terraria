@@ -134,7 +134,7 @@ import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug } from './VanillaLiquidRenderer';
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
-import { renderEnv } from './VanillaTiler';
+import { renderEnv, DRAW_Y_OFFSET } from './VanillaTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
@@ -171,7 +171,7 @@ class GLBgBlit implements BGBlit {
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { TOWN_HOLDOUT } from '../data/vanillaTownAttack';
-import { viIdFromKey } from '../data/vanillaItemCombat';
+import { viIdFromKey, itemCombat } from '../data/vanillaItemCombat';
 import { VANILLA_IS_FOOD, type FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { drawEmotes } from './EmoteBubble';
@@ -389,6 +389,9 @@ import { dutchmanAnim, witherBeastLocal } from '../entities/bossAI_dd2';
 import { mlElipseVec } from '../entities/bossAI_duke_moonlord';
 import { wingDrawOf, wingDrawFrame, wingAnchorForRow, HEADGEAR_ZERO_ROWS, stealthFactors } from '../data/vanillaWingVisuals';
 import { dyeApplyOf, applyDyePass, type DyeApply } from '../data/vanillaDyes';
+import {
+  BALLOON_TORSO_FRAMING, WAIST_TORSO_FRAMING, SHOE_ROLLER_SKATE, FACE_DRAW_OFFSET, OFFSETS_PLAYER_OFFHAND,
+} from '../data/vanillaAccDrawslots';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageData, type SM2Uniforms } from '../fx/SM2Effect';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
@@ -1032,7 +1035,9 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     return Math.floor(t / 8) % frames;
   }
   // 训练假人 488（FindFrame case 488，cs:71516-71544）：摇晃动画帧由受击强度驱动——
-  // num140 = 方向==-1 ? 4 : 6；帧 = ceil(shake/num140)（dir==1 再 +5）；shake 每帧 -1
+  // num140 = 方向==-1 ? 4 : 6；帧 = ceil(shake/num140)（dir==1 再 +5）；shake 每帧 -1。
+  // NPC 自身不画贴图（tile 378 是视觉本体）——完整 1:1（含 tile 变体朝向翻转
+  // :71518-71520）在 drawDummyTileAnim 覆盖层；此处仅作公式参照
   if (id === 488) {
     const dir = e.dummyHitDir;
     const step = dir === -1 ? 4 : 6;
@@ -2708,6 +2713,10 @@ export class Renderer {
 
       // 自然层粒子（原版 Gore：落叶/滴水——DrawGores 在 tile 层后实体前）
       natureParticles.draw(ctx, this.atlas);
+
+      // 训练假人动画行覆盖层（TileDrawing.cs:4374-4399 addFrY 等价）：假人受击
+      // 摇晃时按 NPC 帧行号重画锚格 tile 表源矩形，覆盖烘焙静止行
+      this.drawDummyTileAnim(ctx, world, entities);
     }
 
     // 2c'. 导线覆盖层(原版画在水之上实体之下,Main.cs:46721;手持电路工具或 F7 时可见)
@@ -3366,6 +3375,47 @@ export class Renderer {
   showWires = false;
   /** 宏伟蓝图拖拽预览(Game.render 注入;世界坐标 tile) */
   grandPreview: { from: [number, number]; to: [number, number]; mode: number } | null = null;
+
+  /** 训练假人动画行覆盖层（TileDrawing.cs:4374-4399 addFrY 1:1）：tile 378 是视觉
+   *  本体，烘焙层只画静止行 0；假人 NPC 受击时把锚格 tile 表源矩形按帧号下移整行
+   *  重画（原版 addFrY = npc.frame.Y/55*54，Tiles_378 行高 54）。
+   *  帧行号 = FindFrame 488（NPC.cs:71516-71540）：dir=hitDir 依锚格 frameX≥36 取反
+   *  （:71518-71520，tile 变体即镜像朝向），步长 = dir==-1?4:6，帧=ceil(shake/步长)，
+   *  dir==1 再 +5（上半帧行）；变体列 = frameX≥36?36:0（表 72px=左右两朝向各 36px）。
+   *  逐格 16×16 采样 + DRAW_Y_OFFSET[378]=2 与烘焙逐像素对齐（整块 32×48 直画会把
+   *  18px 步进的格间 padding 画进去，右列左移 2px 错位）。NPC 自身不画贴图。 */
+  private drawDummyTileAnim(ctx: CanvasRenderingContext2D, world: World, entities: Entity[]) {
+    const img = this.atlas?.ensureVImage('vanilla/Tiles_378.png');
+    if (!img) return;
+    const st = world.store;
+    const DUMMY = TILE_BY_KEY['v_378_target_dummy'];
+    if (DUMMY === undefined) return;
+    for (const ent of entities) {
+      if (!(ent instanceof Enemy) || ent.dead || (ent as Enemy).vanillaId !== 488) continue;
+      const e = ent as Enemy;
+      if (e.dummyShake <= 0 || !e.dummyAnchor) continue;
+      const [ax, ay] = e.dummyAnchor;
+      const ai = st.idx(ax, ay);
+      if (!st.inBounds(ax, ay) || st.type[ai] !== DUMMY) continue;
+      const flip = st.frameX[ai] >= 36;
+      const dir = (flip ? -1 : 1) * e.dummyHitDir;   // 0=未定向（原版 num139=0：步长 6、无 +5）
+      const step = dir === -1 ? 4 : 6;
+      let idx = Math.ceil(e.dummyShake / step);
+      if (idx > 0 && dir === 1) idx += 5;
+      const row = Math.min(10, idx);                       // 表 11 行；公式上限 9
+      const vx = flip ? 36 : 0;
+      const dy = DRAW_Y_OFFSET[378] ?? 0;
+      for (let cy = 0; cy < 3; cy++) {
+        for (let cx = 0; cx < 2; cx++) {
+          const r = this.atlas!.vframeAt(378, vx + cx * 18, row * 54 + cy * 18);
+          if (!r) continue;
+          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh,
+            (ax + cx) * TILE, (ay + cy) * TILE + dy, TILE, TILE);
+        }
+      }
+    }
+  }
+
   private drawWires(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
     if (!this.showWires || !this.atlas) return;
     const wires = this.atlas.ensureVImage('vanilla/WiresNew.png');
@@ -4656,6 +4706,11 @@ export class Renderer {
       // 飞灵 677（DrawNPCDirect_Faeling :26306 自发光多层复合——不在光照前画，
       // 移到光照合成后 7e 步骤专绘）
       if (e.vanillaId === 677) return;
+      // 训练假人 488（TileDrawing.cs:4374-4399）：tile 378 是视觉本体——烘焙层画
+      // 静止行，受击动画由 drawDummyTileAnim 覆盖层按 NPC 帧行号重画 tile 表源矩形
+      // （原版 addFrY = npc.frame.Y/55*54）。NPC 自身贴图不画（NPC_488.png 的
+      // frame.Y 只是 tile 行号数据源）——双画=两朝向/错位叠影（用户实报）
+      if (e.vanillaId === 488) return;
       // ---- 2D 网格贴图 NPC（原版 Main.cs DrawNPC 专属 case + FindFrame 专属 case）----
       // 这些表的动画帧是【cols×rows 网格】（Frame(cols,rows,fx,fy)），通用竖切路径
       // 会把整行/整条画出来——全部走 drawNpcGrid 切格 + 各自 FindFrame 帧状态机
@@ -4740,7 +4795,7 @@ export class Renderer {
           || idR === 210 || idR === 211 || (idR >= 231 && idR <= 235));
         const rotationDriven = !tiltOnly5
           && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 9 || stR === 19 || stR === 21 || stR === 23
-            || stR === 40 || stR === 56);
+            || stR === 40 || stR === 56 || stR === 76);   // 76=火星飞碟核心 395(spriteDirection 恒默认从不写)
         if (e.vanilla?.aiStyle === 21) {
           // AI_021 刺球（type 72，cs:24685/:24704）：rotation ±direction×directionY×0.13/t
           // 随 ai[1] 相位交替——visAngle 承载累计角（Enemy.spikeBallAI W2 批 2026-08-19）
@@ -4788,6 +4843,31 @@ export class Renderer {
         else if (stR === 102 || stR === 109) ctx.rotate(e.visAngle); // AI_102/109 沙尘精/黑暗魔法师:rotation=vx*0.04(cs:42249/:66415)
         else if (stR === 103) ctx.rotate(e.visAngle);  // AI_103 沙鲨族:rotation=vy*dir*0.1 钳±0.2(cs:42765)
         else if (stR === 18) ctx.rotate(e.visAngle);   // AI_018 水母族:漂移形 rotation=vx*0.4 / 攻击形 atan2(v)+π/2 / 离水 vx*0.1(cs:24371/24422/24459)
+        else if (stR === 76) ctx.rotate(e.visAngle);   // AI_076 火星飞碟核心 395:相位摆动→整周自旋(martianSaucerAI 写 visAngle,ai0==1 态 cs:36644-36662;ai0==2 归 0 :36748)。
+          // 原版 case 392-395 专属绘制 base+GlowMask 同 rotation 同 origin 二次 Draw(cs:24202-24231)
+          // ——本仓 drawNpcGlow 在本体同一变换内叠画(见调用点注),rotate 一次即双层跟随,glow 管线零改动。
+          // spriteDirection 恒默认 -1 从不写(AI_076 全段无 direction 写点)→进 rotationDriven 禁镜像。
+        else if (stR === 75 && (idR === 392 || idR === 393 || idR === 394)) ctx.rotate(e.visAngle);
+          // AI_075 飞碟部件 392/393/394:rotation=主体 rotation(cs:35816-35817/:35871-35872/:35883-35884,
+          // martianSaucerPartAI 继承 visAngle+锚偏移同步 RotatedBy)。逐 id 门:同 aiStyle 的骑手
+          // 390/416/坐骑 391/415/荷兰炮 492 不接(492 走 dutchmanCannonAI 早退;骑手族原版 rotation 恒 0)。
+          // 394 spriteDirection=±1 按 ai[1](:35886)仍翻面→不进 rotationDriven;392/393 随主体恒 -1 不翻。
+        else if (stR === 26 && idR === 546) {
+          // 546 怒滚虫(AI_026 cs:63365-63369):rotation += vx×0.05 持续滚转累积(chargerAI 尾写 visAngle)。
+          // 原版 generic draw origin=halfSize=帧中心 → 枢轴在帧中心;本仓地面型 translate=盒底,
+          // 故先把枢轴平移到帧中心(−sh/2+4/scale)→rotate→平回(滚转球枢轴差半帧高,不修=绕触地点公转观感)。
+          // 【台账勘误】台账"DrawNPC :62640-62741 态机(case 3 朝 0/π/越阈 0.05/AngleTowards)"
+          // 实为 AI_110_Betsy(cs:62640-62741)段误归属——546 真身无态机,仅此一行累积式+镜像取反。
+          // （平移在 ctx.scale 之前=世界系:帧中心世界偏移 = −sh·scale/2 + 4）
+          const pc546 = 4 - (r.sh * scale) / 2;
+          ctx.translate(0, pc546);
+          ctx.rotate(e.visAngle);
+          ctx.translate(0, -pc546);
+        }
+        else if (idR === 664) ctx.rotate(e.visAngle);  // 火把神(FindFrame :75558 rotation=vx×0.1,findFrameRotation 层喂值)。
+          // 原版/本仓均无 664 生成路径(事件本体=弹幕 949,664 仅图鉴记账 Player.cs:37109-37116)——
+          // 门为三件套完备性预置,若未来接事件实体生成即活。spriteDirection=sign(vx)(:75552-75556
+          // 双态档)→通用 facing 镜像语义,不进 rotationDriven。
         else if (stR === 67) {
           // AI_067 蜗牛(G4 批 2026-08-19):rotation 四象限 0.1/t 缓转(snailAI 维护
           // visAngle,:34763-34857)+ 象限 spriteDirection 局部翻面(Enemy.snailSdir,
@@ -4812,12 +4892,15 @@ export class Renderer {
         // 蚯蚓族 357/374/448/484/606 case 从不设 spriteDirection(:73455)→恒不镜像
         // (蛆虫族 485-487 :73515 设 direction→正常镜像)
         const owlMirror = e.vanillaId === 611 || e.vanillaId === 689;
+        // 546 怒滚虫 spriteDirection=−direction(cs:63368)→同鸮族反翻档:facing<0 才翻
+        // (facing 兼作 chargerAI 的 AI direction,不可在 AI 侧取反)
+        const sdirNeg546 = e.vanillaId === 546;
         const wormMirror = stR === 66 && !(e.vanillaId >= 485 && e.vanillaId <= 487);
         // 蜗牛 aiStyle67 spriteDirection 走象限表(上方旋转分支自带局部翻面)——
         // 通用 facing 镜像禁用,否则与象限翻面叠加成恒翻
         const snailMirror = stR === 67;
-        if (!rotationDriven && !owlMirror && !wormMirror && !snailMirror && e.facing > 0) ctx.scale(-1, 1);
-        if (!rotationDriven && owlMirror && e.facing < 0) ctx.scale(-1, 1);
+        if (!rotationDriven && !owlMirror && !sdirNeg546 && !wormMirror && !snailMirror && e.facing > 0) ctx.scale(-1, 1);
+        if (!rotationDriven && (owlMirror || sdirNeg546) && e.facing < 0) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
@@ -6730,7 +6813,9 @@ export class Renderer {
       ctx.translate(e.cx, e.cy);
       ctx.rotate(rot);
       if (flip) ctx.scale(-1, 1);
-      ctx.drawImage(head, col * fw, row * fh2, fw, fh2, -95.5, -65, fw * 2, fh2 * 2);
+      // XNA origin 施加 scale：有效偏移 = origin×scale = (95.5,65)×2 = (191,130)
+      // （曾写 -95.5,-65 少乘 scale = 脸贴图右/上偏 95.5/65px，用户报"左偏+下偏"）
+      ctx.drawImage(head, col * fw, row * fh2, fw, fh2, -191, -130, fw * 2, fh2 * 2);
       ctx.restore();
     }
     // 破体覆层（:24499-24501）：Extra_29 行 = localAI[3]/5（lai3）、Extra_25 行 =
@@ -8523,6 +8608,155 @@ export class Renderer {
     applyDyePass(data, w, h, dye, extra, rect);
   }
 
+  /** 配饰身上贴图·身后族（DrawPlayer_10_BackAcc PlayerDrawLayers.cs:590-655——
+   *  层序在翼后肤前 LegacyPlayerRenderer.cs:186-194 + DrawPlayer_11_Balloons :1140-1172）。
+   *  身架族贴图 40×56/帧与 bodyFrame 同矩形:原版锚 Position+(w/2−20,h−56+4)
+   *  +bodyPosition、origin bodyVect(20,28) 化简 = 脚底局部 (-20,-52,40,56)。
+   *  槽值/染料来自 equipStats.accDraw（Player.UpdateVisibleAccessory :36441-36520 聚合） */
+  private drawAccBehindLayers(ctx: CanvasRenderingContext2D, p: Player,
+    accRows: { body: number; legs: number }, stealthClamp: number,
+    mnt: import('../entities/Mounts').MountInstance | null): void {
+    const ad = p.equipStats.accDraw;
+    if (!this.atlas || (ad.back <= 0 && ad.balloon <= 0)) return;
+    const bodyRow = accRows.body;
+    // 披风（back）：坐姿隐藏（UpdateVisibleAccessory :36473-36475 sitting → back=-1）
+    if (ad.back > 0 && !p.sitting) {
+      const tex = this.atlas.ensureVImage(`vanilla/Acc_Back_${ad.back}.png`);
+      if (tex && tex.width > 0) {
+        this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeBack, stealthClamp, p.facing);
+      }
+    }
+    // 气球（身后族;躯干架 18 已路由 balloonFront 画身前,此处恒非躯干架 4 帧竖条）
+    if (ad.balloon > 0 && !BALLOON_TORSO_FRAMING.has(ad.balloon)) {
+      const tex = this.atlas.ensureVImage(`vanilla/Acc_Balloon_${ad.balloon}.png`);
+      if (tex && tex.height >= 224) {
+        // DrawPlayer_11_Balloons :1152-1170：锚 = OffsetsPlayerOffhand[bodyRow]
+        // (Main.cs:456-477) + (0,14)、origin (26+dir·4, 34);帧 = 真实时钟
+        // Millisecond%800/200 四档（:1154）。dir=−1 档经镜像空间换算见 bx
+        const off = OFFSETS_PLAYER_OFFHAND[bodyRow % 20];
+        const bx = p.facing === 1 ? off[0] - 40 : off[0] + 12;
+        const by = off[1] - 76;
+        const frame = Math.floor((performance.now() % 800) / 200);
+        const fh = Math.floor(tex.height / 4);
+        const dyeEmu = ad.dyeBalloon > 0 ? dyeApplyOf(ad.dyeBalloon) : null;
+        if (dyeEmu) dyeEmu.uniforms.uDirection = p.facing;
+        const sc = dyeEmu ? this.wingTexSource(tex, 0, frame * fh, tex.width, fh, dyeEmu, null) : null;
+        const ga = ctx.globalAlpha;
+        if (stealthClamp < 1) ctx.globalAlpha = ga * stealthClamp;
+        if (sc) ctx.drawImage(sc, bx, by);
+        else ctx.drawImage(tex, 0, frame * fh, tex.width, fh, bx, by, tex.width, fh);
+        ctx.globalAlpha = ga;
+      }
+    }
+  }
+
+  /** 配饰身上贴图·身前族（层序 = LegacyPlayerRenderer.DrawPlayer_UseNormalLayers
+   *  :170-236 身前段：14_Shoes(腿) → 18_OffhandAcc → 19_WaistAcc → 20_NeckAcc →
+   *  22_FaceAcc → 32_FrontAcc → 25_Shield → 29_OnhandAcc → 12_1_BalloonFronts。
+   *  坐骑隐藏（mntHidden）不画;front 族原版 !mount.Active 门（:3884）照抄。
+   *  染料逐族 cXxx（UpdateItemDye :9329-9420 路由,accDraw 聚合侧已配对） */
+  private drawAccFrontLayers(ctx: CanvasRenderingContext2D, p: Player,
+    accRows: { body: number; legs: number }, stealthClamp: number,
+    mnt: import('../entities/Mounts').MountInstance | null): void {
+    const ad = p.equipStats.accDraw;
+    if (!this.atlas) return;
+    const atlas = this.atlas;
+    const bodyRow = accRows.body;
+    const legRow = accRows.legs;
+    // 14_Shoes（:1756-1775）：legFrame 对齐 + 滚轴鞋 (0,2)·Directions 偏移
+    //（GetShoeDrawOffset :4713-4721;坐姿切片 DrawSittingLegs 登记未建模）
+    if (ad.shoe > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Shoes_${ad.shoe}.png`);
+      if (tex && tex.width > 0) {
+        this.drawAccBodyFrame(ctx, tex, legRow, ad.dyeShoe, stealthClamp, p.facing,
+          0, SHOE_ROLLER_SKATE.has(ad.shoe) ? 2 : 0);
+      }
+    }
+    // 18_OffhandAcc（:2044-2054）：bodyFrame 对齐（手环/手套族身后手）
+    if (ad.handOff > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_HandsOff_${ad.handOff}.png`);
+      if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeHandOff, stealthClamp, p.facing);
+    }
+    // 19_WaistAcc（:2066-2080）：UsesTorsoFraming{5,10,12} 用 bodyFrame,余 legFrame
+    if (ad.waist > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Waist_${ad.waist}.png`);
+      if (tex && tex.width > 0) {
+        this.drawAccBodyFrame(ctx, tex, WAIST_TORSO_FRAMING.has(ad.waist) ? bodyRow : legRow,
+          ad.dyeWaist, stealthClamp, p.facing);
+      }
+    }
+    // 20_NeckAcc（:2081-2090）
+    if (ad.neck > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Neck_${ad.neck}.png`);
+      if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeNeck, stealthClamp, p.facing);
+    }
+    // 胡须（DrawPlayer_21_Head_TheFace 段 :2430-2445,头图层内）：headPosition 锚=
+    // bodyFrame 同矩形;PreventBeardDraw 头盔门未建模（登记）。威尔逊族 2-4 原版
+    // 染发色（UseHairColor）——本仓画原生色,发色染色登记未建模
+    if (ad.beard > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Beard_${ad.beard}.png`);
+      if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeBeard, stealthClamp, p.facing);
+    }
+    // 22_FaceAcc（:2801-2852）：headPosition 锚=bodyFrame 同矩形;face 19 骨盔
+    // (0,-6) 偏移（GetFaceDrawOffset :4370-4372;花族/面罩的头盔条件偏移登记未建模）
+    if (ad.face > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Face_${ad.face}.png`);
+      if (tex && tex.width > 0) {
+        const fo = FACE_DRAW_OFFSET[ad.face] ?? [0, 0];
+        this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeFace, stealthClamp, p.facing, fo[0], fo[1]);
+      }
+    }
+    // 32_FrontAcc（:3880-3890 + 前后半 :3891-3977）：披风前半+躯干前饰;原版
+    // 前后半拆层（BackPart 先于盾/FrontPart 后于手）本仓单层合并整幅一次画
+    if (ad.front > 0 && !mnt) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Front_${ad.front}.png`);
+      if (tex && tex.width > 0) {
+        const dx = ad.front === 13 ? -2 : 0;   // GetFrontDrawOffset :4692-4698
+        this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeFront, stealthClamp, p.facing, dx, 0);
+      }
+    }
+    // 25_Shield（:3055-3127）：盾举抬升 -4·gravDir（:3061-3063;举盾光环/格挡
+    // 弹开视觉 :3072-3125 登记未建模）;盾贴图 40 宽与 bodyFrame 同宽→宽度修正无感
+    if (ad.shield > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Shield_${ad.shield}.png`);
+      if (tex && tex.width > 0) {
+        this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeShield, stealthClamp, p.facing,
+          0, p.shieldRaised ? -4 : 0);
+      }
+    }
+    // 29_OnhandAcc（:3838-3846）
+    if (ad.handOn > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_HandsOn_${ad.handOn}.png`);
+      if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeHandOn, stealthClamp, p.facing);
+    }
+    // 12_1_BalloonFronts（:1107-1139）：躯干架 18 王权节杖,bodyFrame 对齐
+    if (ad.balloonFront > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Balloon_${ad.balloonFront}.png`);
+      if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeBalloonFront, stealthClamp, p.facing);
+    }
+  }
+
+  /** 配饰身架族单帧绘制（40×56/帧,与本体 bodyFrame/legFrame 同矩形）：
+   *  原版各层锚 Position+(w/2−20,h−56+4)+origin bodyVect(20,28) 化简 =
+   *  脚底局部 (-20,-52,40,56)（DrawPlayer_10/14/18/19/20/22/25/29/32 各层同式）。
+   *  染料走 wingTexSource 同款 SM2 仿真链（uDirection=朝向,cXxx 逐族着色）;
+   *  alphaMul = stealth A×s' 档（armor 色族） */
+  private drawAccBodyFrame(ctx: CanvasRenderingContext2D,
+    tex: ImageBitmap | HTMLImageElement | HTMLCanvasElement, row: number,
+    dyeVid: number, alphaMul: number, facing: number,
+    dx = 0, dy = 0): void {
+    const fh = 56;
+    if (tex.height < fh * (row + 1)) return;   // 帧行越界（残缺表）防御
+    const dyeEmu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
+    if (dyeEmu) dyeEmu.uniforms.uDirection = facing;
+    const sc = dyeEmu ? this.wingTexSource(tex, 0, row * fh, tex.width, fh, dyeEmu, null) : null;
+    const ga = ctx.globalAlpha;
+    if (alphaMul < 1) ctx.globalAlpha = ga * alphaMul;
+    if (sc) ctx.drawImage(sc, -20 + dx, -52 + dy);
+    else ctx.drawImage(tex, 0, row * fh, tex.width, fh, -20 + dx, -52 + dy, tex.width, fh);
+    ctx.globalAlpha = ga;
+  }
+
   /** 翅膀纹理可绘源：染料仿真 → tint 链（无处理时返回原图）。返回 canvas 时
    *  调用方按整幅居中绘制（sw/sh 尺寸） */
   private wingTexSource(img: ImageBitmap | HTMLImageElement | HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number,
@@ -9263,8 +9497,14 @@ export class Renderer {
         }
       }
     }
-    // 挥舞动画（工具）：人物身后图层——挥砍弧大部分在身体轮廓外，身后不遮挡
-    if (swing && swing.item >= 0 && ITEM_DEFS[swing.item]?.tool) {
+    // 挥舞动画（手持物统一层）：人物身后图层。原版 weaponDrawOrder 恒
+    // BehindFrontArm（PlayerDrawSet.cs:354 默认档；4952 头侧持/高尔夫收势两特例除外）
+    // = DrawPlayer_27_HeldItem 画在躯干之后、前臂 28_ArmOverItem 之前
+    // （LegacyPlayerRenderer.cs:233-235）——本仓身体为单层合成（前臂无独立绘制层），
+    // "前臂层之下"收敛为身体后图层：工具与武器挥舞统一画在身后（此前工具身后/
+    // 武器身前两套层序分裂）。noGraphic 族（noUseGraphic，矛/炸弹/鞭/短剑等 381 件）
+    // 不画物品贴图——投射物即本体
+    if (swing && swing.item >= 0 && !swing.noGraphic) {
       this.drawUseItem(ctx, p, swing, flicker);
     }
     if (mrot) ctx.restore();   // 段 A 收口（手持层随机身旋转；TransformDrawData 同转）
@@ -9408,6 +9648,22 @@ export class Renderer {
         }
       }
     }
+    // ---- 配饰身上贴图（配饰审计系统性批 2026-08-22）----
+    // 纸娃娃装备与帧行（身后/身前两族与纸娃娃共用——playerFrameRows 有
+    // swimPhase 相位副作用,一帧只许一次复算）
+    let accDollEquip: { head: number | null; body: number | null; legs: number | null } | null = null;
+    let accRows: { body: number; legs: number } = { body: 0, legs: 0 };
+    if (!mntHidden) {
+      accDollEquip = p.appearance ? dollEquipFromInv(p.inv, this.atlas, p.appearance, mnt?.type === 54) : null;
+      if (accDollEquip) {
+        if (p.buffs.has(BuffType.Werewolf)) accDollEquip = { head: 38, body: 21, legs: 20 };
+        if (p.merman) accDollEquip = { head: 39, body: 22, legs: 21 };
+      }
+      accRows = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, accDollEquip?.legs ?? 0);
+    }
+    // 身后族（DrawPlayer_10_BackAcc :590-655 层序在翼后肤前 LegacyPlayerRenderer.cs:186-194
+    // + DrawPlayer_11_Balloons :1140-1172）
+    this.drawAccBehindLayers(ctx, p, accRows, stealthClamp, mnt);
     // ---- 纸娃娃帧（捏人外观优先，M7；20 帧表默认朝右，与 NPC 相反不做内层翻转） ----
     // use 期间 bodyFrame 行（Player.cs:35874-35990 itemAnimation>0 分支逐 useStyle）：
     // 返回 -1 = 该族不改 bodyFrame（useStyle 10/14/15 与无匹配分支的 16），走常规动画行
@@ -9442,20 +9698,16 @@ export class Renderer {
       }
     }
     if (p.appearance && !mntHidden) {
-      let dollEquip = dollEquipFromInv(p.inv, this.atlas, p.appearance, mnt?.type === 54);
-      // ⑮ 狼人形态（PlayerFrame :35457-35466：wereWolf 时盔甲槽强制 38/21/20）；
-      // 人鱼形态（:35473-35494：merman 强制 39/22/21——原版同段后置，覆盖狼人；
-      // 全脸头甲 38∈HidesHead 时 base 脸已由 PaperDoll HIDES_HEAD 门跳过，39 原版
-      // 不在 HidesHead——base 脸画在 39 号全脸甲之下，与原版一致）
-      if (p.buffs.has(BuffType.Werewolf)) dollEquip = { head: 38, body: 21, legs: 20 };
-      if (p.merman) dollEquip = { head: 39, body: 22, legs: 21 };
+      // 装备与帧行已在上方配饰身后族段复算（accDollEquip/accRows——一帧一次,
+      // playerFrameRows 的 swimPhase 相位副作用禁双调）
+      const dollEquip = accDollEquip!;
       // 发色剂（Player.hairDye 1..12）：动态染料逐帧变色——头发/头甲拆出烘焙，
       // 此处按 后发→本体→前发→头甲 叠画（PlayerDrawSet 发层序同构）
       const dyeColor = this.hairDyeRenderColor(p, world, flicker);
       // ★body/legs 双行（原版 PlayerFrame 两条独立状态机，见 playerFrameRows）：
       // 行等同时走整表缓存路径（行走 = 身体同步腿 :36184-36186）；不等时烘焙
       // 40×56 单帧（rows 进 compositePaperDoll 缓存键）
-      const rows = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, dollEquip.legs ?? 0);
+      const rows = accRows;
       const dual = rows.body !== rows.legs;
       // 坐姿（PlayerDrawSet.cs:332-343 isSitting = 坐椅 ∪ 坐骑 17 高尔夫车/23 扫帚/45
       // 木翼）→ 腿通道走 DrawSittingLegs 切片（腿甲全档切片表 :1473；皮肤/裤/鞋默认
@@ -9593,6 +9845,11 @@ export class Renderer {
       ctx.drawImage(sheet, frame * fw, 0, fw, fh, -fw / 2, -fh, fw, fh);
     }
 
+    // ---- 配饰身上贴图·身前族（配饰审计系统性批 2026-08-22）----
+    // 层序 = LegacyPlayerRenderer.DrawPlayer_UseNormalLayers（:170-236）身前段,
+    // 详见 drawAccFrontLayers
+    this.drawAccFrontLayers(ctx, p, accRows, stealthClamp, mnt);
+
     ctx.restore();
     // ---- 日曜盾球（DrawPlayer_26_SolarShield, PlayerDrawLayers.cs:3128-3146）----
     // Extra_61+shields-1 单贴图（1/2/3 层各一张,整簇）；锚 = 玩家中心+solarShieldPos[0]；
@@ -9708,17 +9965,25 @@ export class Renderer {
         }
         ctx.drawImage(img, 0, fr * fh, img.width, fh,
           anchorX - img.width / 2, anchorY + gfxOff - fh / 2, img.width, fh);
+        // 发光层（Mount.Draw case 2 :5523/:5849-5851 texture2D2 同帧同位二次 Draw，
+        // 走玩家 DrawData 加色管线——canvas 等价 'lighter'。机械矿车 11 专属，
+        // Mount.cs:1505-1506 frontTextureGlow=MinecartMechMount[1]）
+        if (cart.textureGlow) {
+          const glow = this.atlas.ensureVImage(cart.textureGlow);
+          if (glow) {
+            const gfh = Math.floor(glow.height / frames);
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.drawImage(glow, 0, fr * gfh, glow.width, gfh,
+              anchorX - glow.width / 2, anchorY + gfxOff - gfh / 2, glow.width, gfh);
+            ctx.globalCompositeOperation = 'source-over';
+          }
+        }
         ctx.restore();
       }
     }
-    // 使用类物品（托举：药水/方块等非工具）：身体前方图层，避免被身体挡住。
-    // noGraphic 族(短剑 noUseGraphic=true)不画物品贴图——投射物即本体,双画=两个贴图
-    // 段 C：DrawPlayer_27_HeldItem 在原版绘制缓存内 → 与本体同转（TransformDrawData）
-    if (swing && swing.item >= 0 && !ITEM_DEFS[swing.item]?.tool && !swing.noGraphic) {
-      if (mrot) { ctx.save(); applyPlayerMountRotation(ctx, mrot); }
-      this.drawUseItem(ctx, p, swing, flicker);
-      if (mrot) ctx.restore();
-    }
+    // 使用类物品层已并入段 A（身体后图层）——原版 weaponDrawOrder 恒 BehindFrontArm
+    // （PlayerDrawSet.cs:354），工具/武器/消耗品挥舞同一层序，勿在此双画
+    // （旧"非工具画身体前"分支已退役，2026-08-22 手持层级统一）
     if (p.sitting) ctx.restore();   // 坐椅偏移收口
 
     void world;
@@ -9967,7 +10232,7 @@ export class Renderer {
   /** use 期间 bodyFrame 行（Player.cs:35874-35990，itemAnimation>0 分支逐 useStyle）。
    *  -1 = 不改 bodyFrame（useStyle 10/14/15 被 flag6 排除在 :35716、16 无匹配分支），
    *  交给常规动画行（行走/跳跃）。aim 仅 useStyle 5 用（:35986 itemRotation*direction 档） */
-  private useStyleBodyRow(swing: { t: number; dur: number; useStyle?: number; aim?: number }, p: Player): number {
+  private useStyleBodyRow(swing: { t: number; dur: number; item?: number; useStyle?: number; aim?: number }, p: Player): number {
     const us = swing.useStyle ?? 1;
     const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
     switch (us) {
@@ -9988,6 +10253,11 @@ export class Renderer {
         return n >= 0.5 ? 3 : 2;
       }
       case 5: {
+        // :35989-35992：吹箭筒 281/吹箭枪 986 使用中恒行2（itemRotation 档不适用——
+        // 吹管持械为平举吹奏姿，此前恒走 itemRotation 档 = 行2/3/4 随瞄准角跳变）
+        const bpVid = swing.item != null
+          ? viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '') : -1;
+        if (bpVid === 281 || bpVid === 986) return 2;
         // :35986-36011：默认行3；itemRotation*dir < -0.75 → 行2、> 0.6 → 行4。
         // itemRotation = Atan2(aimY*dir, aimX*dir)（:46730）——朝左时与裸 aim 相差 ±π，
         // 此前直接 aim*facing 同源错位。gravDir=-1 行2↔4 互换（:35996-36011）
@@ -10148,9 +10418,29 @@ export class Renderer {
       const yT = (h: number) => ph === 0 ? 24
         : h > 64 ? 14 : h > 52 ? 12 : ph === 1 && h > 32 ? 8 : 10;
       // phase2（起手）持位在身后（:50071 `center - (w/2-num6)*dir`）
-      return ph === 2
-        ? { x: -(fw * 0.5 - xT(fw)), y: yT(fh) }
-        : { x: fw * 0.5 - xT(fw), y: yT(fh) };
+      let px = ph === 2 ? -(fw * 0.5 - xT(fw)) : fw * 0.5 - xT(fw);
+      const py = yT(fh);
+      // 特例持位（Player.cs:49930-50104，与 Game.updateSwingHits 命中盒侧同源双表）：
+      // · 1827 利刃手套爪族（Item.claw={1827}，Main.cs:6742-6744）三段独立持位
+      //   X=10/8/6、Y=26/24/20（:49930-49956）
+      // · 2320 岩鱼/2330 紫挥棒鱼/2341 掠夺鲨：X +8(早)/+4(中)/+4(末)、Y(中/末)+4
+      //   （:49971-50095 逐段 num4/5/6 += 4·8——早/中段公式 +(w/2−num) 故 X 取负）
+      // · 671 钥匙牌：X +12/+6/+8、Y(中)+10、Y(末)+8（同段）
+      // · 426 破城刃 UsesBetterMeleeItemLocation（ItemID.cs:76 唯一件）zero 偏移
+      //   (-4,1)/(-6,-4)/(4,-2)（:50097-50104 itemLocation += zero*Directions）
+      const hv = heldVid;
+      if (hv === 1827) {
+        const cx2 = ph === 0 ? 10 : ph === 1 ? 8 : 6;
+        px = ph === 2 ? -(fw * 0.5 - cx2) : fw * 0.5 - cx2;
+        return { x: px, y: ph === 0 ? 26 : ph === 1 ? 24 : 20 };
+      }
+      const dxs = hv === 2320 || hv === 2330 || hv === 2341 ? (ph === 0 ? -8 : ph === 1 ? -4 : 4)
+        : hv === 671 ? (ph === 0 ? -12 : ph === 1 ? -6 : 8)
+          : hv === 426 ? [-4, -6, 4][ph] : 0;
+      const dys = hv === 2320 || hv === 2330 || hv === 2341 ? (ph === 0 ? 0 : 4)
+        : hv === 671 ? (ph === 0 ? 0 : ph === 1 ? 10 : 8)
+          : hv === 426 ? [1, -4, -2][ph] : 0;
+      return { x: px + dxs, y: py + dys };
     };
     switch (us) {
       case 1: {
@@ -10159,6 +10449,8 @@ export class Renderer {
         //  末段(anim<0.333max ⟺ pAnim≤1/3)→前持位(phase0) / 中段→(phase1) /
         //  起手(anim≥0.666max ⟺ pAnim≥2/3)→后举位(phase2)。此前按"递增进度"整段接反
         rot = (pAnim - 0.5) * -3.5 - 0.3;
+        // Item.claw（1827）/2320·2330·2341/671/426 特例持位在 swingTier 内统一
+        // 分流（:49930-50104，与 Game.updateSwingHits 命中盒侧同源双表）
         const seg = pAnim <= 1 / 3 ? swingTier(0) : pAnim < 2 / 3 ? swingTier(1) : swingTier(2);
         offX = seg.x; offY = seg.y;
         break;
@@ -10199,11 +10491,14 @@ export class Renderer {
         if (vid === 3779) { offX = 6; offY = p.h * 0.5 + 6; rot = 0; }      // :50343（itemRotation=0）
         else if (vid === 4262) { offX = -6; offY = p.h * 0.5 - 6; rot = 0; } // :50349
         else if (vid >= 0 && STAFF_ITEMS.has(vid)) {
-          // :50382-50383 itemLocation = MountedCenter + itemRotation 向量×6（3476 为 14）；
+          // :50382-50383 itemLocation = MountedCenter + itemRotation 向量×6；
+          // ★3476 特档 = 14（:50376-50379 num22 逐型覆写，全 staff 集唯一一件——
+          //  3476 星璇秘法书持位前伸 14px；此前漏 = 贴身 8px）
+          const staffReach = vid === 3476 ? 14 : 6;
           // ★绘制角 = itemRotation + 0.785*direction（PlayerDrawLayers.cs:3370——法杖斜持
           // 45°，此前漏叠 → 34 件法杖全少转 45°）
-          offX = Math.cos(aim) * 6;
-          offY = p.h * 0.5 + Math.sin(aim) * 6;
+          offX = Math.cos(aim) * staffReach;
+          offY = p.h * 0.5 + Math.sin(aim) * staffReach;
           rot = aim + 0.785;
         } else {
           // 非法杖（枪/弓/悠悠球等）：X=中心-2*dir、Y=MountedCenter-fh/2（:50387），
@@ -10237,8 +10532,12 @@ export class Renderer {
         // GetFrontHandPosition(Full, num11-π/2)（:49887-49913，dir=1 展开）
         const hx = 10 * Math.cos(num11) - 4 - 3 * Math.sin(num11);
         const hy = 10 * Math.sin(num11) - 2 + 3 * Math.cos(num11);
-        offX = hx + (8 + (2 - 8) * t);
-        offY = p.h * 0.5 + hy;
+        // ★缩放因子（:50145-50152）：手位向量（相对 MountedCenter）先整体
+        // ×MathHelper.Lerp(1.5,1.2,t)（举杯起始远端伸臂、随饮用进度收回），
+        // 再叠加 X 向 dir×Lerp(8,2,t) 前移——此前漏乘 = 98 件药水手位贴身 3-5px
+        const armStretch = 1.5 + (1.2 - 1.5) * t;   // MathHelper.Lerp(1.5, 1.2, t)
+        offX = hx * armStretch + (8 + (2 - 8) * t);
+        offY = p.h * 0.5 + hy * armStretch;
         // ★轴心（PlayerDrawLayers.cs:3263-3275 useStyle 9）：origin = Size*(0.5,0.4)
         // （5009/5042/5645 为 (0.26,0.5)；朝左时原版取 X=1-X——镜像空间恒用 dir=1 值）
         const vid9 = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
@@ -10303,6 +10602,13 @@ export class Renderer {
     ctx.translate(p.cx + p.facing * offX, p.y + offY);
     if (p.facing === -1) ctx.scale(-1, 1); // 镜像空间：旋转自动随镜像取反（与原版 -direction 因子等价）
     ctx.rotate(rot);
+    // GetAdjustedItemScale（Player.cs:41919-41930；PlayerDrawLayers.cs:3170 DrawData
+    // scale）：melee 武器且手套族 meleeScaleGlove 在身 → 手持贴图 ×1.1（缩放绕握点
+    // ——translate 后 scale，与原版 origin 锚定等价；Game 命中盒侧同乘 :44509-44511）
+    if (p.equipStats.meleeScaleGlove
+      && (heldVid >= 0 ? itemCombat(heldVid)?.melee : false)) {
+      ctx.scale(1.1, 1.1);
+    }
     if (ar) {
       // 默认 origin = (W*0.5 − W*0.5*dir, H)（PlayerDrawLayers.cs:3260）：
       // dir=1 → 底左角 / dir=−1 → 底右角钉在 itemLocation（握点）旋转——

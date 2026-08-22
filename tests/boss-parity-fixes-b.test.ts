@@ -246,14 +246,14 @@ describe('moon_events 弹体物理表（Projectile.cs SetDefaults/AI_014/AI_056/
   it('aiStyle14 重力延迟 5 子步（:23484-23498）;352 尖刺同族（grav 0.2/bounce/1200t）', () => {
     const h = makeHooks(makeWorld(), { x: 100, y: 60 });
     const greek = new Arrow(60 * TILE, 60 * TILE, 4, -2, 40, 0, 326, null,
-      { grav: 0.2, gravDelay: 5, life: 360, pierce: 1, hostile: true, bounce: true });
+      { grav: 0.2, gravDelay: 6, life: 360, pierce: 1, hostile: true, bounce: true });
     h.projectiles.push(greek);
     for (let t = 0; t < 5; t++) greek.fixedUpdate(1 / 60, h.hooks);
     expect(greek.vy).toBe(-2);          // 前 5 子步纯惯性
     greek.fixedUpdate(1 / 60, h.hooks);
     expect(greek.vy).toBeCloseTo(-1.8, 5);   // 第 6 子步 +0.2
     const spike = new Arrow(60 * TILE, 40 * TILE, 4, -2, 80, 0, 352, null,
-      { grav: 0.2, gravDelay: 5, life: 1200, pierce: 1, hostile: true, bounce: true });
+      { grav: 0.2, gravDelay: 6, life: 1200, pierce: 1, hostile: true, bounce: true });
     expect(spike.bounce).toBe(true);    // 352 = aiStyle 14 弹跳族（曾漏）
     expect(spike.life).toBe(1200);      // timeLeft 3600/3（:4155）
   });

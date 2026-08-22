@@ -1,9 +1,14 @@
 // 一次性诊断：两种子 dungeon 家族占据（tile 41/43/44 + wall 7/8/9/94-99）两侧对比。
+// ★OOOOOO 批(2026-08-22)加双门:①SW_DUNGEONOCC env 门（双世界全生成 ~2min,属诊断
+//   非回归,此前无门每轮全量回归白烧 2min 负载——hive 负载 flaky 的共因之一）;
+//   ②/tmp/vserver86 基线存在性门（基线被外清时 skip,不再 ENOENT 恒红）。
 import { it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
+
+const RUN = !!process.env.SW_DUNGEONOCC;
 
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-2);
 for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sheet; if (typeof s === 'number') SHEET[i] = s; }
@@ -35,7 +40,11 @@ function stats(label: string, w: number, h: number, getType: (i: number) => numb
   console.log(`  wall bbox=[${wminX},${wmaxX}]x[${wminY},${wmaxY}]`);
 }
 
-it('dungeon occupancy', async () => {
+(RUN ? it : it.skip)('dungeon occupancy', async () => {
+  if (!existsSync('/tmp/vserver86/s4444.wld') || !existsSync('/tmp/vserver86/s6666.wld')) {
+    console.log('skip: /tmp/vserver86 基线缺失,按 gen86.sh 管线重建后复跑');
+    return;
+  }
   for (const seed of ['4444', '6666']) {
     const wld = parseWld(new Uint8Array(readFileSync(`/tmp/vserver86/s${seed}.wld`)));
     stats(`v${seed}`, wld.tilesWide, wld.tilesHigh, (i) => wld.tiles.type[i], (i) => wld.tiles.active[i], (i) => wld.tiles.wall[i]);

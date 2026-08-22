@@ -3,6 +3,7 @@
 // 只支持读取：section header / header flags / tiles（RLE）/ chests / town npcs。
 // bestiary 等尾部 section 通过 sectionPointers 跳过，不做 footer 校验。
 import { BinaryReaderLE } from './BinaryReaderLE';
+import type { SeedFlags } from '../world/gen/SeedEasterEggs';
 
 export interface WldTileData {
   active: Uint8Array;    // active 标志（dirt 的 id 是 0，必须用此数组区分空气）
@@ -79,6 +80,9 @@ export interface WldWorld {
     cloudBGActive: number; numClouds: number; windSpeedTarget: number;
     slimeRainTime?: number;
   };
+  /** 彩蛋种子旗标九位（WorldFile.cs:1242-1250 写/:1988-2014 读，版本门逐位；
+   *  仅真值落键——普通世界为 {} 空对象。S0-3：导入原版特殊种子档即激活特性） */
+  seedFlags: SeedFlags;
 }
 
 export class WldParseError extends Error {}
@@ -137,17 +141,22 @@ export function parseWld(buf: Uint8Array): WldWorld {
   let fastForwardTimeToDawn = false;
   let fastForwardTimeToDusk = false;
   let moondialCooldown = 0;
+  // 彩蛋种子旗标九位（WorldFile.cs:1242-1250 写序 = :1988-2014 读序，版本门逐位）：
+  //   v222 drunk / v227 good(FTW) / v238 tenthAnniversary / v239 dontStarve(theConstant) /
+  //   v241 notTheBees / v249 remix / v266 noTraps / v267 zenith(everything) / v302 skyblock
+  // S0-3：曾读位即弃——导入原版特殊种子档丢全部特性，现回填 seedFlags
+  const seedFlags: SeedFlags = {};
   if (version >= 209) {
     gameMode = r.i32();
-    if (version >= 222) r.boolean(); // drunk
-    if (version >= 227) r.boolean(); // good
-    if (version >= 238) r.boolean();
-    if (version >= 239) r.boolean();
-    if (version >= 241) r.boolean();
-    if (version >= 249) r.boolean(); // remix
-    if (version >= 266) r.boolean(); // notraps
-    if (version >= 267) r.boolean(); // zenith
-    if (version >= 302) r.boolean(); // skyblock
+    if (version >= 222 && r.boolean()) seedFlags.drunkWorld = true;
+    if (version >= 227 && r.boolean()) seedFlags.getGoodWorld = true;
+    if (version >= 238 && r.boolean()) seedFlags.tenthAnniversary = true;
+    if (version >= 239 && r.boolean()) seedFlags.theConstant = true;
+    if (version >= 241 && r.boolean()) seedFlags.notTheBees = true;
+    if (version >= 249 && r.boolean()) seedFlags.remix = true;
+    if (version >= 266 && r.boolean()) seedFlags.noTraps = true;
+    if (version >= 267 && r.boolean()) seedFlags.everything = true;
+    if (version >= 302 && r.boolean()) seedFlags.skyblock = true;
   } else if (version === 208 || version >= 112) {
     r.boolean();
   }
@@ -325,6 +334,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     treeX, treeStyle, treeTops,
     tiles, chests, npcs,
     weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },
+    seedFlags,
   };
 }
 

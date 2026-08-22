@@ -196,7 +196,9 @@ describe('③ parseSeed 旗标解析（稀有云门接线源）', () => {
   });
 
   it('归一化 = [^a-z0-9]+ 全剥（WorldGenerationOptions.cs:69），非数字串恒空旗标', () => {
-    expect(parseSeed('drunk world').flags.drunkWorld).toBe(true);
+    // drunk 文本非原版触发（SpecialSeedNames 为空）；数字路 5162020 才命中（S0-2 int 路）
+    expect(parseSeed('05162020').flags.drunkWorld).toBe(true);
+    expect(parseSeed('drunk world').flags.drunkWorld).toBeFalsy();
     expect(parseSeed('getfixedboi').flags.everything).toBe(true);
     expect(parseSeed('9293480').flags).toEqual({});
     // 窄归一化（旧实现只剥 空格/._-）下漏网的标点/其他符号形态

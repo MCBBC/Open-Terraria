@@ -37,12 +37,12 @@ describe('喵刀弹 502（Meowmere Cat）', () => {
     const w = emptyWorld();
     const game = makeGame(w);
     const cat = new Arrow(50 * TILE, 80 * TILE, 0, 0, 100, 6.5, 502, null,
-      { grav: 0.2, gravDelay: 19, life: 600, pierce: 5 });
+      { grav: 0.2, gravDelay: 20, life: 600, pierce: 5 });
     // 平飞期（age≤19）无重力
     for (let t = 0; t < 19; t++) cat.fixedUpdate(1, game);
     expect(cat.vy).toBe(0);
     cat.fixedUpdate(1, game);
-    expect(cat.vy).toBeGreaterThan(0);            // ai[1]>=20 → vy+=0.2
+    expect(cat.vy).toBeGreaterThan(0);            // ai[1]>=20（:22651-22653）→ vy+=0.2
     // 落地（~16px 上方 × 若干 tick）
     let guard = 0;
     while (cat.vy > 0 && !cat.dead && guard++ < 400) cat.fixedUpdate(1, game);

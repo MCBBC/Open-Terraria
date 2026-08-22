@@ -1,5 +1,7 @@
 // 一次性(X 批):全图@52 残余幻影坡溯源——首写事件 + 该格 type/wall + @52 时点态。
 // SW_PARITY=1 npx vitest run tools/_x52slope.test.ts
+// ★OOOOOO 批(2026-08-22)加存在性门:/tmp/sw-hsv 诊断资产已清,缺资产时静默 skip
+//   (原模块级 readFileSync 收集期 ENOENT 炸红全量回归;W/X 批幻影坡案已结,工具留档)。
 import { it } from 'vitest';
 const RUN = !!process.env.SW_PARITY;
 import { readFileSync } from 'node:fs';
@@ -11,7 +13,9 @@ import { TILE_DEFS } from '../src/data/tiles';
 const W = 4200, H = 1200, N = W * H;
 const TV = '/tmp/sw-hsv';
 const rd = (p: string) => new Uint8Array(readFileSync(p).buffer.slice(0));
-const t52h = rd(`${TV}/hs52.half`), t52s = rd(`${TV}/hs52.slope`);
+// 缺资产→零长数组(it 体内判 length 后 skip),不再收集期抛 ENOENT
+const rd0 = (p: string): ArrayBuffer => { try { return readFileSync(p).buffer.slice(0); } catch { return new ArrayBuffer(0); } };
+const t52h = new Uint8Array(rd0(`${TV}/hs52.half`)), t52s = new Uint8Array(rd0(`${TV}/hs52.slope`));
 
 let store: TileStore | null = null;
 let completedSlot: string | null = null;
@@ -22,6 +26,7 @@ let firstEv: Uint8Array | null = null;
 let snap52: { s: Uint8Array; h: Uint8Array; t: Uint16Array; a: Uint8Array; w: Uint16Array } | null = null;
 
 (RUN ? it : it.skip)('x52 whole-map phantom provenance', async () => {
+  if (!t52h.length) { console.log('skip: /tmp/sw-hsv 资产缺失(hs52),按头注重建后复跑'); return; }
   const origReseed = RNG.prototype.reseed;
   const onReseed = function (this: RNG, seed: number) {
     origReseed.call(this, seed);

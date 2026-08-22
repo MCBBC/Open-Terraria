@@ -542,6 +542,23 @@ function main() {
 
   const obj = {};
   for (const [k, v] of data) obj[k] = v;
+  // 手工回填（提取器盲区,2026-08-22 召唤/事件审计——重生成后不得丢失）：
+  //  · 544/556/557 机械三王召唤物：赋值在 `if (Variant != DisabledBossSummonVariant)`
+  //    块内（深度 2,Item.cs:7855-7862/:7987-7994/:8000-8007）,深度 1 扫描漏收
+  //    ——useStyle 4/consumable/useAnimation 45/useTime 45
+  //  · 2350 回归药水：`useTime = (useAnimation = 30)` 链式赋值未解析
+  //    （Item.cs:23621）——useTime/useAnimation 30
+  for (const vid of ['544', '556', '557']) {
+    obj[vid] = { useTime: 45, useAnimation: 45, consumable: true };
+  }
+  obj['2350'] = { ...obj['2350'], useTime: 30, useAnimation: 30 };
+  //  · 炸弹六件 4824-4827/4908-4909：`shoot = 903 + (type - 4824)` 算术表达式未解析
+  //    （Item.cs:39487/:39783）——补 shoot 903-906/910-911（2026-08-22 补 C 审计：
+  //    缺 shoot → thrownCombat 返 null 不可投掷）
+  const BOMB_SHOOT = { 4824: 903, 4825: 904, 4826: 905, 4827: 906, 4908: 910, 4909: 911 };
+  for (const [vid, sh] of Object.entries(BOMB_SHOOT)) {
+    obj[vid] = { ...obj[vid], shoot: sh };
+  }
   // --dump:全量数据出 stdout 不落盘(recon-item-1456-1457.mjs 双版本对账用——
   //  vitest 的模块运行器按路径缓存忽略 query-string,库模式双实例不可靠,故走子进程)
   if (process.argv.includes('--dump')) {
@@ -565,6 +582,21 @@ function main() {
     };
     process.stdout.write(JSON.stringify(summary));
     process.exit(audit.length ? 1 : 0);
+  }
+  // ★1457 段合并保留（2026-08-22 防整表重跑丢失）：SRC_VER=1456（默认档）写盘时，
+  //   1457 专属 id（≥6100,Palworld/1457 配饰族等,1456 Item.cs 无 case）从现表原样
+  //   并回——否则裸跑默认档会把 50 条 1457 条目整段抹掉。1457 档（SW_ITEM_VER=1457）
+  //   天然全量产出,不进此分支。recon --fix 是字段级合并不受影响。
+  if (SRC_VER === '1456') {
+    let prev = null;
+    try { prev = JSON.parse(readFileSync(`${ROOT}/game/src/data/vanilla-itemcombat.json`, 'utf8')); } catch { /* 首次生成无旧表 */ }
+    if (prev) {
+      let merged = 0;
+      for (const [k, v] of Object.entries(prev)) {
+        if (Number(k) >= 6100 && obj[k] === undefined) { obj[k] = v; merged++; }
+      }
+      if (merged > 0) console.error(`[extract-itemcombat] 1456 档写盘:合并保留 1457 段 ${merged} 条`);
+    }
   }
   writeFileSync(`${ROOT}/game/src/data/vanilla-itemcombat.json`, JSON.stringify(obj));
   // UseSound 全量表（Item_N / 命名轨；null 显式静音剔除）

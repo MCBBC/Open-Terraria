@@ -254,9 +254,14 @@ export class MagicMissileProj extends Entity {
     let aim: { x: number; y: number } | null = null;
     if (this.mode === 0) {
       if (this.channelCb()) {
+        // channel 期用魔动画续期（Player.cs:43143-43146 itemAnimation 持续>0 每帧
+        // ItemCheck_ApplyManaRegenDelay → delay 钉 4 = 全程 5% 滴流回蓝；2026-08-22
+        // 审计 ❌ 修复——channel 弹寿命>useTime,不续期则 10t 后回满速回蓝白嫖魔力）
+        game.player.onChannelManaHold?.();
         aim = this.aimCb();   // ai[0]/ai[1] = 光标（:40566-40573）
         // 持按连发（Player.cs:42143-42147 循环重用）：每 useTime 一发新弹，由最新
-        // 存活弹独占驱动（尾部）；mana 不足则跳过本循环（:51190 失败不发弹）
+        // 存活弹独占驱动（尾部）；扣魔走 Game 侧 payMana 回调（1457 ManaV2 恒放行,
+        // 空蓝照发+slowMagicUse 标记——CheckMana :53216-53253 同语义）
         while (ALIVE.length && ALIVE[ALIVE.length - 1].dead) ALIVE.pop();
         if (ALIVE[ALIVE.length - 1] === this) {
           if (++this.reuseT >= this.useTime) {

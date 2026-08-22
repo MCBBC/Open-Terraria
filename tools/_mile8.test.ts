@@ -19,6 +19,10 @@ const EVIL = process.env.SW_M8_EVIL !== undefined ? Number(process.env.SW_M8_EVI
 // YYYY 批旁路参：中世界链（6400×1800）+大 N 禁缓存（每槽 ~115MB×106 槽会爆 RSS）
 const W = Number(process.env.SW_M8_W ?? 4200), H = Number(process.env.SW_M8_H ?? 1200), N = W * H;
 const NOCACHE = process.env.SW_M8_NOCACHE === '1';
+// PPPPP 批旁路参：彩蛋种子旗标直注（S0-1 seedFlags 通道）——逗号分隔旗标名
+// （如 SW_M8_FLAGS=theConstant），与 SW_M8_SEED 数字种子配套（对拍秘密种子链用）
+const M8_FLAGS: Record<string, boolean> = {};
+for (const f of (process.env.SW_M8_FLAGS ?? '').split(',').filter(Boolean)) M8_FLAGS[f] = true;
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
@@ -46,6 +50,7 @@ const LABEL2DUMP = new Map<string, number>([
   ['SandPatches', 2], ['Tunnels', 3], ['MountainCaves', 4], ['DirtWallBackgrounds', 5],
   ['RocksInDirt', 6], ['DirtInRocks', 7], ['Clay', 8], ['SmallHoles', 9],
   ['DirtLayerCaves', 10], ['RockLayerCaves', 11], ['SurfaceCaves', 12],
+  ['WavyCaves', 13],
   ['IceBiome', 14], ['Grass', 15], ['JunglePass', 16], ['MudCavesToJungleGrass', 17],
   ['DesertBiome', 18], ['GlowingMushroomPatches', 19], ['Marble', 20], ['Granite', 21],
   ['FloatingIslands', 22], ['DirtToMud', 23], ['Silt', 24], ['OresAndShinies', 25],
@@ -185,6 +190,7 @@ function labelOf(file: string, line: number): string {
     try {
       await generateWorld({
         width: W, height: H, seedText: SEED, evil: EVIL as -1 | 0 | 1,
+        seedFlags: Object.keys(M8_FLAGS).length > 0 ? M8_FLAGS : undefined,
         onWorldPartial: (w, i) => {
           if (!curStore) curStore = w.store as never as typeof curStore;
           const idx = SLOT_END.get(i);

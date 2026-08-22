@@ -61,6 +61,9 @@ const SUPPORTED: Record<number, string> = {
   362: 'eelWhipT',           // EelWhipNPCDebuff(markedByEelWhip):50 HP/s 平铺 DoT
   //   （1457 :92781 Add(100,50)——链式缩放/标记玩家数/链电粒子全删,ApplyEelWhipDoT
   //   成死代码;施加源 = 鞭 1033 ApplyWhipDebuffs）
+  120: 'stinkyT',      // Stinky(苍蝇美食 5129 挥砍命中,Player.cs:6203-6206):敌怪侧
+  //   效果 = 其余敌怪以 stinky 者为目标(NPC.cs:53888/53899 TargetClosest 门)——
+  //   本仓敌怪索敌 AI 未建模该转向,登记 GAP;字段仅承载 buff 存量/倒计时
 };
 
 type StatusEnemy = { [field: string]: number | undefined };
@@ -174,6 +177,48 @@ export function applyMagmaStoneSwing(magmaStone: boolean, enemy: StatusEnemy): v
   const r = Math.random();
   const sec = r < 0.25 ? 6 : r < 0.625 ? 4 : 1;
   if (sec > (enemy.onFire3T ?? 0)) enemy.onFire3T = sec;
+}
+
+/** 近战挥砍命中 → 持械武器专属 debuff（Player.StatusToNPC :6139-6249 的 type 分支；
+ *  调用点 Player.cs:43739 `StatusToNPC(sItem.type, npcIndex)`，type = 持械物品 id）。
+ *  同函数的 meleeEnchant 浸剂块（:6141-6171）= applyMeleeImbue、frostBurn（:6180-6183）
+ *  = applyFrostBurn、magmaStone（:6184-6198）= applyMagmaStoneSwing——均已单独实装，
+ *  此处补齐逐武器档（概率 = Next(N)==0 ⟺ 1/N；时长 tick/60 = 秒；AddBuff max 合并）：
+ *   · 2330 紫挥棒鱼 1/2 → Confused(31) 1-3s（:6172-6175）
+ *   · 3352 血腥砍刀 100% → Bleeding(30) 4-6s（:6176-6179）
+ *   · 3211 1/1 → Ichor(69) 5-10s（:6199-6202）
+ *   · 5129 苍蝇美食 100% → Stinky(120) 5s（:6203-6206；AI 侧 GAP 见 SUPPORTED 注）
+ *   · switch（:6207-6248）：121 火山 1/2 OnFire(24) 3s / 3823 圣骑锤 1/4 OnFire3(323) 5s /
+ *     5382 1/3 OnFire3 5s / 122 1/10 OnFire 3s / 190 草剑 1/4 Poisoned(20) 7s /
+ *     217 1/5 OnFire 3s / 1123 拍手 100% Confused(31) 2s
+ *  免疫门与 applyProjStatus 同源（NPC.AddBuff buffImmune + DebuffImmunitySets，:90968） */
+export function applyWeaponStatusSwing(weaponVid: number, enemy: StatusEnemy): void {
+  if (weaponVid < 0) return;
+  const roll = (denom: number): boolean => denom <= 1 || Math.floor(Math.random() * denom) === 0;
+  const add = (buff: number, ticks: number): void => {
+    const vId = (enemy as { vanillaId?: number }).vanillaId;
+    const override = (enemy as { debuffImmuneOverride?: Map<number, boolean> }).debuffImmuneOverride;
+    if (override?.get(buff) === false) {
+      // 运行时豁免（原版运行时复位语义）：跳过静态免疫表
+    } else if (vId !== undefined && vId > 0 && npcImmuneTo(vId, buff)) return;
+    const field = SUPPORTED[buff];
+    if (!field) return;   // 未实装 buff（登记见 SUPPORTED 注）
+    const sec = ticks / 60;
+    if (sec > (enemy[field] ?? 0)) enemy[field] = sec;
+  };
+  switch (weaponVid) {
+    case 2330: if (roll(2)) add(31, 60 * (1 + Math.floor(Math.random() * 3))); break;  // Next(1,4)
+    case 3352: add(30, 60 * (4 + Math.floor(Math.random() * 3))); break;               // Next(4,7)
+    case 3211: add(69, 60 * (5 + Math.floor(Math.random() * 5))); break;               // Next(5,10)
+    case 5129: add(120, 300); break;
+    case 121: if (roll(2)) add(24, 180); break;
+    case 3823: if (roll(4)) add(323, 300); break;
+    case 5382: if (roll(3)) add(323, 300); break;
+    case 122: if (roll(10)) add(24, 180); break;
+    case 190: if (roll(4)) add(20, 420); break;
+    case 217: if (roll(5)) add(24, 180); break;
+    case 1123: add(31, 120); break;
+  }
 }
 
 export function applyMeleeImbue(

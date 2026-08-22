@@ -58,6 +58,15 @@ export const TILE_ANIM_RATE: Record<number, number> = {
   171: 17, // 圣诞树串灯（Main.cs:18609-18618 counter>16 → 每 17 tick；4 帧回卷。
            //   ★只管重烘焙节奏：帧行偏移由 VanillaTiler.drawXmasTreeCell 按
            //   Xmas_4 的 130px 行距自取（不走本表 pitch 语义）
+  // ---- 瀑布族（⚠️3 2026-08-22 批，Main.cs:18743-18793 逐 id counter 档）----
+  // 8 帧回卷（>7→0）；pitch 90（TileDrawing.cs:6085-6094 case 326/327/328/329/345/
+  // 351/421/422/458/459/708 `addFrY = tileFrame*90`，素材 234×720=8 带）。'auto' 帧
+  // 块——帧带偏移由 VanillaTiler auto 分支叠加（style 分支不适用）
+  326: 5,  // 水瀑布（counter>=5）
+  327: 10, // 岩浆瀑（counter>=10）
+  345: 10, // 蜂蜜瀑（counter>=10）
+  458: 10, // 沙瀑（counter>=10）
+  459: 10, // 雪瀑（counter>=10）
 };
 
 /** pitch 特例表（其余走默认 38，TileDrawing GetTileDrawData switch 实证）。
@@ -69,6 +78,7 @@ const TILE_ANIM_PITCH: Record<number, number> = {
   354: 54, 355: 54, 499: 54, 592: 54,
   12: 36, 31: 36, 217: 36, 218: 36, 244: 36, 639: 36,
   207: 72, 739: 90, 748: 90,
+  326: 90, 327: 90, 345: 90, 458: 90, 459: 90,   // 瀑布族（TileDrawing.cs:6085-6094）
 };
 
 /** 回卷上限显式覆盖（默认 floor(素材高/pitch)；素材含未用行时以原版回卷为准） */

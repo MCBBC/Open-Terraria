@@ -20,6 +20,7 @@ import { canHit } from '../physics/LineOfSight';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import { drawYoyoStringLine, stringColorOpts } from '../render/StringLine';
 import { BuffType } from '../stats/Buffs';
+import { TORCH_DUST_BY_STYLE } from '../world/Torch';
 
 /** 原版投射物绘制偏移表（Main.cs:29375-29826 num143/num144 表,96 条静态项）。
  *  语义:贴图左上角落于 (盒左 + num144, 盒上 − num143)——num143 为"上移"量。
@@ -94,7 +95,7 @@ export function projDrawOffsetFor(projId: number, dirX: number, boxH: number): r
  *    num145 = (贴图宽 + 盒宽)/2 → 展开后贴图左上角落于 (盒左 + num144, 盒上 − num143),
  *    旋转绕 anchor 进行。非方贴图(W≠盒宽)按此公式为"盒左对齐"而非居中。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
-function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number; h: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0, mirror = false, centerAnchor = false): void {
+function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number; h: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0, mirror = false, centerAnchor = false, scale = 1): void {
   // drawSize=绘制尺寸(0=取碰撞盒 w；-1=贴图原生尺寸——原版投射物绘制语义,
   // 爆炸族雷管 10×32 竖条等非方贴图必须走原生尺寸否则被拉方)
   // mirror=旋转坐标系内水平镜像（XNA dir=FlipHorizontally 等价，绕 origin 翻转）
@@ -109,13 +110,16 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   const img = img0;
   const hasImg = !!(img && (img.width > 0) && img.width > 0);
   const W = hasImg ? img!.width : dw;
-  const num145 = (W + e.w) / 2;                       // (贴图宽−盒宽)/2 + 盒宽/2
+  // num145 = (贴图宽−盒宽)/2 + 盒宽/2 = 贴图宽/2（Main.cs:29601 原式化简）——
+  // 旋转枢=贴图水平中点;曾误写 (贴图宽+盒宽)/2 → 悠悠球/回旋镖绕偏心点公转
+  const num145 = W / 2;
   // 偏移取值：方向/高度依赖项优先（弹体朝向取实体 facing——spriteDirection 语义），
   // 其余走静态表（共享求值——MinionProj 等消费端同源）
   const off3 = projDrawOffsetFor(projId, (e as { facing?: number }).facing ?? 0, e.h);
   const [off143, off144, num145Adj] = off3 ?? [0, 0, 0];
   const num145f = num145 + num145Adj;
-  const s = dw / W;                                   // 绘制缩放(原生尺寸=1)
+  const dwS = dw * scale;                             // 绘制缩放（M.cs:32360 Vector2.One×proj.scale）
+  const s = dwS / W;                                  // 绘制缩放(原生尺寸=1)
   ctx.save();
   ctx.globalAlpha = alpha; // AI_161 细剑淡入淡出(:44993-44994)
   if (centerAnchor) {
@@ -125,10 +129,13 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
     if (mirror) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
     if (hasImg) {
-      ctx.drawImage(img!, -W / 2, -(img!.height / 2), W, img!.height);
+      // ★中心锚组绘制尺寸=贴图原生×scale（M.cs:32360 vector76=Vector2.One×proj.scale,
+      // origin=贴图中心）——勿用 dw（drawSize=0 时 dw=盒宽,会把球缩到命中盒大小）
+      const sw = W * scale, sh = img!.height * scale;
+      ctx.drawImage(img!, -sw / 2, -sh / 2, sw, sh);
     } else {
       ctx.fillStyle = fallbackColor;
-      ctx.fillRect(-dw / 2, -dw / 2, dw, dw);
+      ctx.fillRect(-dwS / 2, -dwS / 2, dwS, dwS);
     }
     ctx.restore();
     return;
@@ -138,10 +145,10 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   if (mirror) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = false;
   if (hasImg) {
-    ctx.drawImage(img!, -num145f * s, -(e.h / 2 + off143) * s, dw, dw * (img!.height / img!.width));
+    ctx.drawImage(img!, -num145f * s, -(e.h / 2 + off143) * s, dwS, dwS * (img!.height / img!.width));
   } else {
     ctx.fillStyle = fallbackColor;
-    ctx.fillRect(-dw / 2, -dw / 2, dw, dw);
+    ctx.fillRect(-dwS / 2, -dwS / 2, dwS, dwS);
   }
   ctx.restore();
 }
@@ -192,6 +199,16 @@ function hitEnemies(
   /** 命中伤害乘区（求值于 hurt 前、按敌逐个）：悠悠球对玩家无视线时 ×0.75
    *  （Projectile.cs:12503-12505 num12×0.75） */
   dmgScale?: (e: unknown) => number,
+  /** 玩家级共享免疫门（NPC.immune[owner]>0 语义 = Enemy.iframes）：true 时不建
+   *  逐弹私账、改按敌方全局免疫帧去重——悠悠球/配重球走此档（DefaultToYoyo
+   *  不设 usesLocalNPCImmunity/localNPCHitCooldown,Projectile.cs:10155-10161;
+   *  Damage_PVE 前置门 npc.immune[owner]==0 :11905,hurt 落地置 10t :13152 缺省档）。
+   *  同玩家全部 aiStyle 99 弹共享:手套二号球/配重球 10t 内不能重复命中同敌 */
+  playerImmune = false,
+  /** 前向延伸命中盒（AI_019 长矛 105/46/153 伸出相,Projectile.cs:43530-43571）：
+   *  Colliding（:14554-14576）语义 = 弹心→盒心按 max(w,h)(min12) 步进连续方盒
+   *  + 延伸盒本体,与弹体 AABB 并集判定 */
+  extBox?: { x: number; y: number; w: number; h: number } | null,
 ): void {
   // 小动物:一击致死(原版小动物是 NPC;近战挥砍同语义)。回旋镖/悠悠球等穿透型
   // 命中小动物不消耗穿透语义——hurt 自带 iframes 防同帧连击
@@ -202,15 +219,36 @@ function hitEnemies(
   const me = self as ReflectableWeaponProj;
   // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 需 friendly 门禁）
   if (me.reflected) return;
+  // 延伸盒步进盒组（Colliding :14560-14572：num18 = max(W,H) 且 ≥12，从弹心到
+  // 盒心每 num18 一个同尺寸方盒,末盒=延伸盒本体——弹体 AABB 之外的走廊补判）
+  const extRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+  if (extBox) {
+    const scx = self.x + self.w / 2, scy = self.y + self.h / 2;
+    const ccx = extBox.x + extBox.w / 2, ccy = extBox.y + extBox.h / 2;
+    const dist = Math.hypot(ccx - scx, ccy - scy);
+    const step = Math.max(12, Math.max(extBox.w, extBox.h));   // :14564-14566
+    for (let d = step; d < dist; d += step) {
+      const t = d / dist;
+      extRects.push({ x: scx + (ccx - scx) * t - extBox.w / 2, y: scy + (ccy - scy) * t - extBox.h / 2, w: extBox.w, h: extBox.h });
+    }
+    extRects.push(extBox);                                     // :14573-14575
+  }
   for (const ent of game.enemies()) {
     if (!playerCanHitEnemy(ent, game, self.projId ?? 0)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
     const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
     if (e.dead) continue;
-    if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
+    const bodyHit = self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y;
+    const extHit = !bodyHit && extRects.some((r) =>
+      r.x < e.x + e.w && r.x + r.w > e.x && r.y < e.y + e.h && r.y + r.h > e.y);
+    if (!bodyHit && !extHit) continue;
     // 反射源命中（Projectile.cs:12050-12060）：按 projId 查 CanBeReflected 白名单——
     // 回旋镖 aiStyle3/长矛 19/161/悠悠球 99/15 均不在表内不反射，白名单内新弹型自动生效
     if (me.projId !== undefined && tryReflectProjectile(me, me.projId, e, game)) return;
-    if (!hitCd.ready(e.id, cooldown)) continue;
+    if (playerImmune) {
+      // 玩家级共享免疫门（:11905 npc.immune[owner]==0 前置;本仓 = Enemy.iframes,
+      // hurt 落地置 10t）——替代逐弹 hitCd 私账（mock 敌无 iframes 字段 = 恒放行）
+      if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;
+    } else if (!hitCd.ready(e.id, cooldown)) continue;
     // 暴击 = GetWeaponCrit 语义:4 基础 + 武器 item.crit + 装备/buff（Game 侧合并传入；
     // 此前全族写死 4%——Sunfury 原版 crit=7 应为 11%）
     const crit = Math.random() < (me.critChance ?? 0.04);
@@ -298,6 +336,14 @@ const BOOMERANG_DUST: Record<number, [string, number]> = {
   113: ['#B0C0FF', 1], 320: ['#C0E8FF', 0.4], 383: ['#D0A0FF', 0.3],
   867: ['#FF6060', 0.4], 1000: ['#FFD080', 0.3], 182: ['#FFD080', 0.5],
 };
+
+/** melee 投掷初速（ItemCheck_Shoot :46430-46434）：shootSpeed / meleeSpeed——
+ *  本仓 attackSpeedMult = 1/meleeSpeed（Player.ts CapAttackSpeeds 镜像）,
+ *  等价 shootSpeed × attackSpeedMult。NoMeleeSpeedVelocityScaling 排除表
+ *  {699,707,877-879,985,973}（ProjectileID.cs:337）的弹型不缩放,调用方自查 */
+export function meleeThrowSpeed(shootSpeed: number, attackSpeedMult: number): number {
+  return shootSpeed * (attackSpeedMult || 1);
+}
 
 /** 回旋镖命中盒型号表（SetDefaults aiStyle=3 全 36 型提取：type→size;
  *  光刃族 1065-1070/1072/1074/1076/1102=46,其余 38） */
@@ -426,6 +472,12 @@ export class Boomerang extends Entity {
     this.moveStep(game, isPhase);
     // ---- 尾段 rotation/尘（:37294-37352,全部状态运行） ----
     this.aiVisual(game, isPhase);
+    // ---- direction 自动更新（Projectile.Update :15674-15682 AutomaticallyChangesDirection:
+    //      aiStyle 3 且 ai[0]!=1 → direction = vx<0 ? -1 : 1（vx==0 → 1）——出程每 tick
+    //      跟随速度 X 符号,撞墙反弹后自旋反向;返回段（ai[0]==1）冻结。置于 rotation 段
+    //      后 = 本 tick 自旋仍用上一 tick 符号,与原版"AI(:15434)先于移动/转向(:15674)"
+    //      的节拍一致;曾恒用出生 facing → 反弹后自旋不反向）----
+    if (this.ai0 !== 1) this.dir = this.vx < 0 ? -1 : 1;
     // ---- 命中结算（同敌冷却 10t = NPC immune[owner]=10,:13172-13174） ----
     hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || this.dir, this.armorPen,
       () => this.onHitEnemy());
@@ -730,6 +782,38 @@ const SPEAR_SIZE: Record<number, [number, number]> = {
   877: [25, 25], 878: [25, 25], 879: [25, 25],
 };
 
+/** AI_019_Spears_GetExtensionHitbox（Projectile.cs:43530-43571）纯函数：
+ *  105 昆恩枪/46 暗黑长枪/153 腐叉（default return false——其余长矛无延伸盒）在
+ *  【伸出相】（itemAnimation ≥ itemAnimationMax/3，:43533 缩回相不生成）沿速度向
+ *  生成前向延伸方盒：
+ *    num2 = Remap(itemAnimation, max, ⌊max/3⌋, 0,1) = t/(max−⌊max/3⌋)（出生 0 →
+ *           伸出相末 1，钳 [0,1]）
+ *    距离 num7 = 10 + len·num2（len：105/46=50、153=40；default 30）、
+ *    边长 num8 = 10 + size·num2（size：105=20、46=15、153=10；default 10）
+ *    len ×= 1/meleeSpeed（:43559——本仓 attackSpeedMult = 1/meleeSpeed）
+ *    盒 = CenteredRectangle(Center + velocity向·num7, (num8,num8))
+ *  消费：伤害 Colliding 步进盒（:14554-14576，hitEnemies extBox 参）+ CutTiles
+ *  （:14176-14179 CutTilesAt(extensionBox)）。t/dur 与 SpearProj 的 itemAnimation
+ *  同源（itemAnim = dur − t） */
+export function spearExtensionHitbox(
+  projId: number, t: number, dur: number,
+  cx: number, cy: number, dx: number, dy: number,
+  attackSpeedMult = 1,
+): { x: number; y: number; w: number; h: number } | null {
+  if (projId !== 105 && projId !== 46 && projId !== 153) return null;   // :43544 default
+  if (dur - t < dur / 3) return null;                    // :43533-43535 缩回相（浮点 max/3）
+  const num3 = Math.floor(dur / 3);                                     // :43536 int 除法
+  let num4 = 50, num6 = 15;
+  if (projId === 105) { num4 = 50; num6 = 20; }
+  else if (projId === 153) { num4 = 40; num6 = 10; }
+  num4 *= attackSpeedMult;                                              // :43559
+  const num2 = Math.min(1, Math.max(0, t / (dur - num3)));              // :43539 Remap
+  const num7 = 10 + num4 * num2;                                        // :43560
+  const num8 = 10 + num6 * num2;                                        // :43561
+  const ccx = cx + dx * num7, ccy = cy + dy * num7;                     // :43562
+  return { x: ccx - num8 / 2, y: ccy - num8 / 2, w: num8, h: num8 };    // :43563
+}
+
 export class SpearProj extends Entity {
   w = 18; h = 18;
   damage: number;
@@ -746,6 +830,9 @@ export class SpearProj extends Entity {
   private dy: number;
   /** 原版 item.shootSpeed（velocity 模长——位移=offset×此值,勿当单位向量用） */
   private spd: number;
+  /** 出生帧乘上的 meleeSpeed 缩放（attackSpeedMult = 1/meleeSpeed）——延伸盒
+   *  len ×= 1/meleeSpeed（Projectile.cs:43559）复用同值（缺省 1 = 无缩放） */
+  private spdMul = 1;
   private t = 0;
   private dur: number;
   /** 型号伸缩参数 */
@@ -801,7 +888,7 @@ export class SpearProj extends Entity {
     // attackSpeedMult = 1/meleeSpeedTotal,Player.ts 同式）。出生帧一次定型
     if (this.t === 0) {
       const am = (p as { attackSpeedMult?: number }).attackSpeedMult;
-      if (am && am > 0 && am !== 1) this.spd *= am;
+      if (am && am > 0 && am !== 1) { this.spd *= am; this.spdMul = am; }
     }
     if (RAPIER_PROJ.has(this.projId)) {
       // AI_161_RapierStabs(:44987-45004) + extraUpdates=1(DefaultToShortsword :10165;
@@ -825,7 +912,20 @@ export class SpearProj extends Entity {
     const offset = n6 + n7 * num9 - n8 * num10;
     this.x = p.cx - this.w / 2 + this.dx * offset * this.spd;
     this.y = p.cy - this.h / 2 + this.dy * offset * this.spd;
-    hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1, this.armorPen); // 一次突刺每敌只结算一次
+    // 前向延伸盒（AI_019_Spears_GetExtensionHitbox :43530-43571，仅 105/46/153 伸出相）
+    const extBox = spearExtensionHitbox(this.projId, this.t, this.dur,
+      this.cx, this.cy, this.dx, this.dy, this.spdMul);
+    // CutTiles（Projectile.CutTiles aiStyle 19 支 :14176-14179）：CutTilesAt(extensionBox)
+    // ——伸出相延伸盒扫杂草/瓦罐（弹体本体格在下方 hitCritters/命中管线外另行处理）
+    if (extBox) {
+      for (let ty = Math.floor(extBox.y / 16); ty <= Math.floor((extBox.y + extBox.h) / 16); ty++) {
+        for (let tx = Math.floor(extBox.x / 16); tx <= Math.floor((extBox.x + extBox.w) / 16); tx++) {
+          game.cutTile(tx, ty);
+        }
+      }
+    }
+    hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1, this.armorPen,
+      undefined, undefined, false, extBox); // 一次突刺每敌只结算一次（延伸盒并入判定）
   }
 
   /** AI_161 单个 AI 子步（:44989-45003）：ai[0]++ → Center=玩家心+velocity×(ai[0]−1)
@@ -1134,7 +1234,7 @@ export class CounterweightProj extends Entity {
       this.x += this.vx;
       this.y += this.vy;
       hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen,
-        (e) => this.onHit(e));
+        (e) => this.onHit(e), undefined, true);   // 玩家级共享免疫（aiStyle 99 同族）
       return;
     }
     // 移动/碰撞（环绕与脱离态;回收态上方已直积分返回）
@@ -1165,7 +1265,7 @@ export class CounterweightProj extends Entity {
       if (ns > 6) { this.vx *= 0.5; this.vy *= 0.5; }
     }
     hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen,
-      (e) => this.onHit(e));
+      (e) => this.onHit(e), undefined, true);   // 玩家级共享免疫（DefaultToYoyo :5809-5813）
   }
 
   /** 命中链（Projectile.cs:12467-12508 aiStyle 99 段;-2 只被弹开,其余走
@@ -1355,7 +1455,11 @@ export class YoyoProj extends Entity {
   itemId?: number;
 
   constructor(x: number, y: number, damage: number, knockback: number, projId: number,
-    stringLen: number, channel: () => boolean, target: () => { x: number; y: number }) {
+    stringLen: number, channel: () => boolean, target: () => { x: number; y: number },
+    /** 出生初速（=16×attackSpeedMult = 16/meleeSpeed,Game 侧初掷传入;缺省 0 =
+     *  魔法线克隆/手套二号球等自带速度的生成点不注入——原版走各自 NewProjectile
+     *  显式速度 :65110-65116/:11977-11992） */
+    initSpeed = 0) {
     super();
     this.x = x; this.y = y;
     this.handX = x; this.handY = y;
@@ -1365,6 +1469,17 @@ export class YoyoProj extends Entity {
     this.stringLen = stringLen;
     this.channel = channel;
     this.target = target;
+    // 出生初速（ItemCheck_Shoot :46430-46434 melee 弹速 = shootSpeed/meleeSpeed——
+    // 悠悠球 shootSpeed=16 且不在 NoMeleeSpeedVelocityScaling 排除表;:46642-46680
+    // num4/5 = (光标−手心)归一×speed → 16/meleeSpeed 朝光标。此前零速起步,
+    // 首帧全靠 AI 逼近段加速=出速迟钝）
+    if (initSpeed > 0) {
+      const t0 = target();
+      const ddx = t0.x - (x + this.w / 2), ddy = t0.y - (y + this.h / 2);
+      const dl = Math.hypot(ddx, ddy);
+      if (dl > 0) { this.vx = (ddx / dl) * initSpeed; this.vy = (ddy / dl) * initSpeed; }
+      else { this.vx = initSpeed; this.vy = 0; }   // num4==0&&num5==0 → (direction,0) 档
+    }
     // 无限寿命型号（Sets.YoyosLifeTimeMultiplier 缺省 -1,ProjectileID.cs:185）不上限
     if ((YOYO_LIFE[projId] ?? -1) === -1) this.life = Number.POSITIVE_INFINITY;
   }
@@ -1537,7 +1652,7 @@ export class YoyoProj extends Entity {
       this.x += this.vx;
       this.y += this.vy;
       hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen,
-        (e) => this.onYoyoHit(e, game));
+        (e) => this.onYoyoHit(e, game), undefined, true);
       return;
     }
     // ---- 活跃/脱离态移动+碰撞（原版 yoyo tileCollide=true 撞墙滑动;
@@ -1555,8 +1670,9 @@ export class YoyoProj extends Entity {
         return;
       }
     }
-    // 命中冷却 10t（NPC immune[owner] 缺省——yoyo SetDefaults 未设
-    // usesLocalNPCImmunity/Cooldown,走全局 10t）;命中链回调见 onYoyoHit
+    // 命中免疫 = 玩家级共享 10t（DefaultToYoyo 无 usesLocalNPCImmunity/
+    // localNPCHitCooldown,Projectile.cs:10155-10161 → Damage_PVE 走 npc.immune[owner]
+    // 全局档 :11905/:13152——同玩家所有悠悠球/配重球共享,不再逐弹私账）
     hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen,
       (e) => this.onYoyoHit(e, game),
       (_e) => {
@@ -1569,7 +1685,7 @@ export class YoyoProj extends Entity {
         if (this.projId === 555 && p.yoyoHitCounter % 7 === 0) return 2;
         if (this.projId === 546 && p.yoyoHitCounter % 3 === 0) return 2;
         return 1;
-      });
+      }, true);
   }
 
   /** 命中链（Projectile.cs:12467-12508 aiStyle 99 段）:-2 只被弹开（不触发
@@ -1851,7 +1967,8 @@ const FLAIL_PARAMS: Record<number, Partial<FlailParams>> = {
 
 /** 链贴图（DrawProj_FlailChains Main.cs:34757-34781 switch）：型号 → Chain_N；
  *  948 三段混排（前 4 节 Chain43 全亮 → 2 节 Chain42 → 其余 Chain41）；
- *  757 = Extra_99 六帧竖条动画链 */
+ *  757 = Extra_99 六帧竖条动画链。★1058 不走本表——独立支用 Chain37
+ *  （M.cs:28831-28977,见 FlailProj.drawChain1058） */
 function flailChainTex(projId: number): string {
   switch (projId) {
     case 25: return 'Chain2';
@@ -1912,6 +2029,11 @@ export class FlailProj extends Entity {
   private spinT = 0;
   /** localAI[0] 弹墙累计（AI_015_HandleMovementCollision:41006） */
   private bounces = 0;
+  /** spriteDirection（=direction,:41479-41483 每 tick=sign(vx),1058 豁免保持出生向;
+   *  绘制侧 -1 水平翻转 M.cs:29827-29831） */
+  private spriteDir = 1;
+  /** SetDefaults scale（P.cs:10075-10076 命中盒缩放 + M.cs:32360 绘制缩放共用） */
+  private texScale: number;
   private rotation = 0;
   private hitCd = new HitCooldown();
   /** 手部坐标（链条起点，每 tick 刷新） */
@@ -1932,9 +2054,16 @@ export class FlailProj extends Entity {
     this.target = target;
     this.prm = { ...FLAIL_DEFAULT, ...FLAIL_PARAMS[projId] };
     const pd = projectileData(projId);
-    this.w = pd?.width ?? 22;
-    this.h = pd?.height ?? 22;
+    // 命中盒 = (int)(SetDefaults 宽高 × scale)（Projectile.cs:10075-10076 SetDefaults
+    // 尾段统一缩放,JSON 宽高为缩放前原值）——25=0.9→19、26/35/154=0.8→17;
+    // 曾取裸型号宽 → 带 scale 的 4 型号命中盒偏大
+    this.texScale = pd?.scale ?? 1;
+    this.w = Math.trunc((pd?.width ?? 22) * this.texScale);
+    this.h = Math.trunc((pd?.height ?? 22) * this.texScale);
     if (projId === 1058) this.alpha = 255; // SetDefaults :9719(出场淡入起点)
+    // spriteDirection 初值 = 出手向（NewProjectile direction 语义;1058 无 per-tick
+    // 更新 :41479 门——保持出生向,其余型号首 tick 起被 sign(vx) 覆写）
+    this.spriteDir = this.target().x >= this.x + this.w / 2 ? 1 : -1;
   }
 
   /** ai[0] 状态只读视图(0 旋转/1 掷出/2 回拉/3 垂链/4 回收/5 坠落/6 垂地悬荡)——测试对账用 */
@@ -1946,13 +2075,17 @@ export class FlailProj extends Entity {
     // alpha 原版语义(Main.cs:28965 color *= (255-alpha)/255——越大越透明)
     // 链球族（25/26/35/63/154/247/757）都在 :32360 中心锚组——球心=盒中心、
     // origin=贴图中心（曾走 num145 偏置锚：球体枢轴偏移+链连接点错位）
+    // spriteDirection=-1 → 水平翻转（M.cs:29827-29831 FlipHorizontally;:41479-41483
+    // 每 tick=sign(vx),1058 豁免保持出生向）;绘制 ×scale（M.cs:32360 Vector2.One×scale）
     drawProj(r, cam, this, this.projId, this.rotation, '#E04040',
-      Math.max(0, (255 - this.alpha) / 255), 0, false, true);
+      Math.max(0, (255 - this.alpha) / 255), 0, this.spriteDir === -1, true, this.texScale);
   }
 
   /** 链条（DrawProj_FlailChains Main.cs:34752-34842 1:1）：球心 → 手臂方向逐节
-   *  步长=链节高，每节按所在格光照着色；948 三段混排 / 757 六帧动画链 */
+   *  步长=链节高，每节按所在格光照着色；948 三段混排 / 757 六帧动画链。
+   *  ★1058 Flairon 走独立支（M.cs:28831-28977,非本通用表）——见 drawChain1058 */
   private drawChain(ctx: CanvasRenderingContext2D, r: Renderer): void {
+    if (this.projId === 1058) { this.drawChain1058(ctx, r); return; }
     const img = chainImg(flailChainTex(this.projId));
     if (!img || !(img.width > 0) || img.width === 0) {
       // 贴图未就绪兜底：细线（旧实现形态）
@@ -2008,6 +2141,53 @@ export class FlailProj extends Entity {
     }
   }
 
+  /** 1058 Flairon 链独立支（Main.cs:28831-28977,与通用 DrawProj_FlailChains 分流）：
+   *  贴图 Chain37（缺省 Chain3 是通用表兜底,1058 不在表内）;链节高=贴图整高;
+   *  从球心向玩家步进【先步进后绘制】（首节在球心前方一节距,:28966-28968）;
+   *  while(dist ≥ 链节高+1) 终止（:28931-28934——通用表的 remain 起步式会多画 2 节
+   *  戳进玩家）;rotation 恒=atan2(球心→玩家)−π/2（:28917-28918,循环外一次定型）;
+   *  逐节 Lighting.GetColor 着色（无 948 亮度下限/无 alpha 门,:28969-28971） */
+  private drawChain1058(ctx: CanvasRenderingContext2D, r: Renderer): void {
+    const img = chainImg('Chain37');
+    if (!img || !(img.width > 0) || img.width === 0) {
+      // 贴图未就绪兜底：细线（通用支同款）
+      ctx.strokeStyle = '#605848';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(this.handX, this.handY);
+      ctx.lineTo(this.x + this.w / 2, this.y + this.h / 2);
+      ctx.stroke();
+      return;
+    }
+    const linkH = img.height;
+    const lighting = (r as unknown as { lighting?: { lightAt: (tx: number, ty: number) => [number, number, number] } | null }).lighting;
+    const lightAt = (wx: number, wy: number): number => {
+      if (!lighting) return 1;
+      const [lr, lg, lb] = lighting.lightAt(Math.floor(wx / TILE), Math.floor(wy / TILE));
+      return Math.min(1, (lr * 0.3 + lg * 0.5 + lb * 0.2) / 255);
+    };
+    let cx = this.x + this.w / 2, cy = this.y + this.h / 2;
+    let dx = this.handX - cx, dy = this.handY - cy;
+    const d0 = Math.hypot(dx, dy);
+    if (!Number.isFinite(d0) || d0 === 0) return;   // NaN/零向量门（:28920-28926 flag20）
+    const rotation = Math.atan2(dy, dx) - Math.PI / 2;   // :28917-28918（循环外定型）
+    ctx.imageSmoothingEnabled = false;
+    for (;;) {
+      dx = this.handX - cx; dy = this.handY - cy;
+      const d = Math.hypot(dx, dy);
+      if (d < linkH + 1) break;                      // :28931-28934 终止门
+      const ul = d || 1;
+      cx += (dx / ul) * linkH;                       // 先步进（:28966-28968）
+      cy += (dy / ul) * linkH;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(rotation);
+      ctx.globalAlpha = Math.min(1, Math.max(0, lightAt(cx, cy)));
+      ctx.drawImage(img, -img.width / 2, -linkH / 2);
+      ctx.restore();
+    }
+  }
+
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.life <= 0) { this.dead = true; return; }
     // 火焰重锤 948 入水(非岩浆)→ 变型 948→947(:41064-41067 type==948 && wet && !lavaWet)
@@ -2028,13 +2208,20 @@ export class FlailProj extends Entity {
     const returnKill = this.prm.returnKill * inv;
     const farPull = this.prm.farPullSpeed * inv;
     const maxRange = 800;
-    // 击杀门（:41053-41059）：主角死亡/离手 900×(1/meleeSpeed)
+    // 击杀门（:41053-41056）：主角死亡 / noItems（诅咒 23 :11326-11330,本仓=Cursed buff）/
+    // CCed（冰冻·蛛网·石化三件套,Player.cced）/ 离手 900×(1/meleeSpeed)
     const distHand = () => Math.hypot(this.x + this.w / 2 - p.cx, this.y + this.h / 2 - p.cy);
-    if (p.dead || distHand() > 900 * inv) { this.dead = true; return; }
+    if (p.dead || p.buffs.has(BuffType.Cursed) || p.cced || distHand() > 900 * inv) {
+      this.dead = true; return;
+    }
+    // :41057-41059 全屏地图打开 → Kill（原版 Main.myPlayer==owner 门,单机恒真）
+    if (game.mapFullscreen?.()) { this.dead = true; return; }
     const held = this.channel();
     // num17/num18(:41164-41165):链长上限=掷速×飞行tick;垂地悬荡放行 +160
     const num17 = throwSpd * this.prm.flightTicks;
     const num18 = num17 + 160;
+    // doFastThrowDust（:41232,case 1 入口置位——尘率分档用,取 switch 前状态）
+    const fastThrow = this.st === 1;
     let cd = 10; // num11 默认每敌冷却
     switch (this.st) {
       case 0: { // 旋转态（:41168-41228）：绕体公转,松手朝鼠标掷出
@@ -2262,14 +2449,49 @@ export class FlailProj extends Entity {
         }
       }
     }
-    // 火尘（AI_015_Flails_Dust :41778-41785:type 35 每帧 1 颗火尘 noGravity）
+    // ---- AI_015_Flails_Dust（:41740-41812;doFastThrowDust=掷出态 :41232）----
+    // 火尘（:41778-41785:type 35 每帧 1 颗火尘 noGravity;948 同型 :41786-41792）
     if (this.projId === 35 || this.projId === 948) {
       game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#FF8830', 1, 0.5,
         { life: 20, grav: 0, size: 2 });
     } else if (this.projId === 26) {
       // :41770-41775 hallow 尘近似
       if (Math.random() < 0.2) game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#B0A0FF', 1, 0.5, { life: 20, grav: 0, size: 2 });
+    } else if (this.projId === 25) {
+      // 25（:41742-41751）：尘 14,Next(掷出态?1:15)==0——掷出态每 tick,其余 1/15
+      if (Math.floor(Math.random() * (fastThrow ? 1 : 15)) === 0) {
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 14, 0, 0, 150, null, 1.3);
+      }
+    } else if (this.projId === 154) {
+      // 154（:41800-41805）：尘 115,noGravity,初速 v×0.4 后 ×0.25（净 ×0.1）
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 115,
+        this.vx * 0.4, this.vy * 0.4, 140, null, 1.5);
+      if (d) { d.noGravity = true; d.vx *= 0.25; d.vy *= 0.25; }
+    } else if (this.projId === 757) {
+      // 757（:41753-41770）双段：①弹体处 2 掷 Next(|v|<8?10:4)==0 尘 5（scale 0.8、
+      //   fadeIn 1.3、velocity+=v/4;掷出态 num 减半）②链上 lerp 段 10 掷 Next(40)==0,
+      //   位置=Lerp(玩家心,球心,rand)+(−8,0) 落 16×16 盒,scale 1.3、velocity+=v/4
+      const fastDiv = fastThrow ? 2 : 1;
+      const num1 = (Math.hypot(this.vx, this.vy) < 8 ? 10 : 4) / fastDiv;
+      for (let i = 0; i < 2; i++) {
+        if (Math.floor(Math.random() * num1) === 0) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 5, 0, 0, 0, null, 0.8);
+          if (d) { d.vx += this.vx / 4; d.vy += this.vy / 4; d.fadeIn = 1.3; }
+        }
+      }
+      const num2 = 40 / fastDiv;
+      for (let i = 0; i < 10; i++) {
+        if (Math.floor(Math.random() * num2) === 0) {
+          const lx = p.cx + (this.cx - p.cx) * Math.random() - 8;
+          const ly = p.cy + (this.cy - p.cy) * Math.random();
+          const d = game.spawnDust?.(lx, ly, 16, 16, 5, 0, 0, 0, null, 1.3);
+          if (d) { d.vx += this.vx / 4; d.vy += this.vy / 4; }
+        }
+      }
     }
+    // direction/spriteDirection = sign(vx)（:41479-41483 每 tick 重写,vx==0 → -1;
+    // 1058 豁免保持出生向）——绘制侧 -1 水平翻转（M.cs:29827-29831）,曾恒 false
+    if (this.projId !== 1058) this.spriteDir = this.vx > 0 ? 1 : -1;
     // 击退方向 = projectile.direction(:41479-41482 velocity.X>0?1:-1,vx==0 → -1;
     // 1058 走专属式 :41398-41405 = 反(player→球)方向)——此前 Math.sign(vx)||1
     // 把 vx==0 档写成 1,1:1 修正
@@ -2481,7 +2703,11 @@ export class GrenadeProj extends Entity {
   /** 引信 timeLeft 1:1（SetDefaults :10348-10408）：炸弹/手雷族 180、炸药棍族
    *  {29,470,637}=300——此前误写 150/135/180 */
   fuse: number;
-  onExplode!: (x: number, y: number, damage: number) => void;
+  onExplode!: (x: number, y: number, damage: number, oldVx?: number, oldVy?: number) => void;
+  /** 1088 橡实种弹撞块种树检查（AI_016 撞块响应段 :18342-18346：CanAcornPlant →
+   *  Kill——Kill 内再判一次决定种植/掉落）。Game 侧注入（placeAcornSapling 域）；
+   *  返回 true = 本弹立即按 Kill 消亡走 onExplode（种植路径），false = 正常反弹 */
+  bouncePlantCheck?: (cx: number, cy: number) => boolean;
   private rot = 0;
   dead = false;
   /** 引信嘶声循环句柄（AI_016 :44276-44281 PlayTrackedLoopedSound；Kill :67373 Stop） */
@@ -2513,6 +2739,12 @@ export class GrenadeProj extends Entity {
   /** 感应雷（:44750-44768）：|v|<0.2 → alpha+2 钳 200 布防半隐 */
   private static readonly FIRED_MINE = new Set([135, 138, 141, 144,
     778, 782, 786, 789, 792, 795, 798, 801]);
+  /** 延迟重力弧（:44881-44901）：ai[0]>10 后 vy+0.2/update（vy==0&&vx≠0 时另
+   *  vx×0.97 摩擦）——1088 橡实种弹（5629 橡实弹弓）与其同支 9 型（30/397/517/
+   *  681/588/779/783/862/863，本仓暂无发射源=惰性成员）；ai[0] 在原支内被
+   *  钳回 10（:44885）→ 此后每拍恒触发 */
+  private static readonly FIRED_ARC = new Set([30, 397, 517, 681, 588,
+    779, 783, 862, 863, 1088]);
   /** 发射支 ai[0]（追踪 ramp 用） */
   private firedAi0 = 0;
 
@@ -2531,7 +2763,7 @@ export class GrenadeProj extends Entity {
   private armedAlpha = 0;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, fuse: number,
-    projId: number, onExplode: (x: number, y: number, damage: number) => void) {
+    projId: number, onExplode: (x: number, y: number, damage: number, oldVx?: number, oldVy?: number) => void) {
     super();
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
@@ -2585,7 +2817,7 @@ export class GrenadeProj extends Entity {
     if (--this.fuse <= 0) {
       this.dead = true;
       this.destroy();
-      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage);
+      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, this.vx, this.vy);
       return;
     }
     // ---- 家族行为（发射支通用 ai[0] += 1 :44836——榴弹 15u 重力门/追踪 ramp 都吃它）----
@@ -2623,6 +2855,15 @@ export class GrenadeProj extends Entity {
         this.vy = Math.min(this.vy + 0.2, 16);
       }
     }
+    if (GrenadeProj.FIRED_ARC.has(this.projId) && this.firedAi0 > 10) {
+      // 延迟重力弧（:44881-44901）：ai[0]>10 起 vy+0.2/update；落地滚行摩擦
+      // （vy==0&&vx≠0 → vx×0.97，|vx|<0.01 归零——:44886-44893）
+      if (this.vy === 0 && this.vx !== 0) {
+        this.vx *= 0.97;
+        if (this.vx > -0.01 && this.vx < 0.01) this.vx = 0;
+      }
+      this.vy += 0.2;
+    }
     if (GrenadeProj.FIRED_MINE.has(this.projId)) {
       // 恒重力 + 减速布防（:44857-44868）：vy+=0.2、v×0.97、|v|<0.1 归零
       this.vy = Math.min(this.vy + 0.2, 16);
@@ -2646,6 +2887,17 @@ export class GrenadeProj extends Entity {
       const ty = Math.floor(py / TILE);
       return st.inBounds(tx, ty) && st.isSolid(tx, ty);
     };
+    // 1088 橡实种弹：撞块先查种树点（:18342-18346 CanAcornPlant → Kill——
+    // Kill 内种植/掉落，oldVelocity = 入撞前速度）
+    if (this.projId === 1088 && this.bouncePlantCheck
+      && (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, ny + this.h - 1)
+        || solidAt(this.x + this.w - 1, ny + this.h - 1))
+      && this.bouncePlantCheck(this.cx, this.cy)) {
+      this.dead = true;
+      this.destroy();
+      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, lastVx, lastVy);
+      return;
+    }
     if (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, ny + this.h - 1)) {
       if (GrenadeProj.FIRED_STICK.has(this.projId)) {
         this.vx = 0; this.vy = 0; this.stickPending = true; this.fuse = Math.min(this.fuse, 3);
@@ -2747,7 +2999,7 @@ export class GrenadeProj extends Entity {
     if (--this.fuse <= 0) {
       this.dead = true;
       this.destroy();
-      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage);
+      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage, this.vx, this.vy);
       return;
     }
     // 旋转 = 滚动（AI_016 :44909-44915 rotation += velocity.X × 0.1；本族不在排除表）
@@ -3099,6 +3351,75 @@ export class TorchGodProj extends Entity {
       return;
     }
     this.x = nx; this.y = ny;
+  }
+}
+
+// ================= 火把神祝福转换弹 1084（aiStyle 202，AI_202_TorchGodHelper :37557-37596） =================
+
+/**
+ * proj 1084 TorchGodHelper（SetDefaults Projectile.cs:9831-9839：4×4 aiStyle202
+ * penetrate−1 tileCollide=false extraUpdates=2 timeLeft=300）——火把神药水 5573 的
+ * buff 376 效果端（Player.TorchGodsFlavor :39529 每 tick 1/10 扫屏）发射的转换弹：
+ * 飞向异群系群系炬（ai[1]=tx/ai[2]=ty，ai[0]=目标样式），抵达 16px 内 → tile 4 的
+ * frameY = style×22（:37566-37571）+ Kill。首帧 Item8 音（:37573-37576）、尾迹每
+ * AI 次 4 粒 TorchID.Dust[style]（:37578-37594）、Kill 时 Item10 + 40 粒同尘
+ * （:67610-67630）。extraUpdates=2 = 每 tick 移动+AI 3 次（属性定义 :338-348）。
+ */
+export class TorchGodHelperProj extends Entity {
+  readonly projId = 1084;
+  dead = false;
+  w = 4; h = 4;                                   // :9834-9835
+  vx: number; vy: number;
+  x: number; y: number;
+  private sndT = 0;                               // localAI[0] 首帧音哨兵（:37573）
+  private static readonly RUNS = 3;               // extraUpdates=2 → 1+2 次/tick
+  constructor(
+    x: number, y: number, vx: number, vy: number,
+    /** ai[0]：目标火把样式（frameY = style×22，:37568） */
+    readonly style: number,
+    /** ai[1]/ai[2]：目标 tile 坐标（:37558-37559） */
+    readonly tx: number, readonly ty: number,
+    /** 转换回调（Game 侧：tile 4 校验 + frameY 直写 + 脏标记） */
+    private readonly convert: (tx: number, ty: number, style: number) => void,
+    /** 尘回调（Game 侧：NewDust(4×4,alpha100) 后 velocity×velMul/scale×1.1/
+     *  noLightEmittance——尾迹 0.3（:37586-37590）、Kill 爆 2.5（:67619）。
+     *  fullBright 位本仓 VDust 无,登记视觉微差） */
+    private readonly dust: (x: number, y: number, type: number, velMul: number) => void,
+  ) {
+    super();
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    drawProj(r, cam, this, 1084, Math.atan2(this.vy, this.vx), '#FFD890');
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    const dustId = TORCH_DUST_BY_STYLE[this.style] ?? 6;
+    for (let run = 0; run < TorchGodHelperProj.RUNS; run++) {
+      const tpx = this.tx * 16 + 8, tpy = this.ty * 16 + 8;   // ToWorldCoordinates（:37560）
+      // 抵达 16px 内 → 吸附 + 转换 + Kill（:37562-37572）
+      if (Math.hypot(tpx - (this.x + this.w / 2), tpy - (this.y + this.h / 2)) < 16) {
+        this.x = tpx - this.w / 2; this.y = tpy - this.h / 2;
+        this.vx = 0; this.vy = 0;
+        this.convert(this.tx, this.ty, this.style);
+        this.dead = true;
+        game.playSfxWav?.('Item_10', 1, this.cx, this.cy);   // Kill 音（:67611）
+        for (let i = 0; i < 40; i++) {                        // :67613-67630 num14=40
+          this.dust(this.x, this.y, dustId, 2.5);
+        }
+        return;
+      }
+      // 尾迹：每 AI 次 4 粒沿速度路径采样（:37578-37594 num4=4，position+velocity/4×num5；
+      // 尘速 = NewDust 抖动 ×0.3——非弹速,原版 NewDust 传 0 速）
+      for (let d = 0; d < 4; d++) {
+        this.dust(this.x + (this.vx / 4) * d, this.y + (this.vy / 4) * d, dustId, 0.3);
+      }
+      this.x += this.vx; this.y += this.vy;   // tileCollide=false 直线（:9837）
+    }
+    // 首帧 Item8 音（:37573-37576 localAI[0]==0）
+    if (!this.sndT) { this.sndT = 1; game.playSfxWav?.('Item_8', 1, this.cx, this.cy); }
   }
 }
 

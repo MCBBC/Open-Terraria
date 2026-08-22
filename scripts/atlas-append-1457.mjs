@@ -63,6 +63,25 @@ if (NEW_ITEMS.length) {
   console.log(`Item_Atlas_2.png: ${NEW_ITEMS.length} 新物品`);
 }
 
+// ---- ①b TEdit 缺口补打包（2026-08-22 资产审计 ❌1）----
+// TEdit items.json 缺 26 个 1.4.4+ 新物品 id（0/2772/2773/2775/2777/2778/2780/
+// 2782/2783/2785/2881/3462/3463/3465/3847-3851/3861/3862/3978/4010/4058/4143/
+// 4722），其中已注册进游戏数据的仅 4722 First Fractal（items.ts vi_4722_first_fractal，
+// itemfunc melee/shoot 857/useStyle 5）——缺键时 vicon(4722) 返回 null → 程序化兜底
+// 图标。其余 25 张源图无 def/itemfunc 消费方（审计 ❌2 备案，注册时在此补一行）。
+// ★勿改回 vanilla-atlas.mjs 主驱动：全量重跑会重排既有子矩形并丢弃本脚本追加键
+// （2026-08-21 贴图全错事故）。此处走单体直引（vicon 无 ix/iy 即整图语义），
+// 幂等：键已存在即跳过。
+if (!v.items['4722']) {
+  const src = srcOf('Item_4722.png');
+  if (src) {
+    copyFileSync(src, join(OUT_DIR, 'Item_4722.png')); copied++;
+    v.items['4722'] = { name: 'First Fractal', key: 'FirstFractal', createTile: null, icon: 'vanilla/Item_4722.png' };
+    v.itemNames['4722'] = 'First Fractal';
+    console.log('TEdit 缺口补打包: Item_4722 First Fractal（单体直引）');
+  } else missing.push('Item_4722(png)');
+}
+
 // ---- ② tile 753 ----
 if (!v.tiles['753']) {
   const meta = tileById.get(753);
@@ -88,6 +107,27 @@ if (!v.tiles['753']) {
     v.tileNames['753'] = meta.name;
     console.log('tile 753 增键:', meta.name, `${base.cols}x${base.rows}`);
   } else missing.push(`Tiles_753(${!meta ? 'meta' : 'png'})`);
+}
+
+// ---- ②b 伪装宝箱族(TextureCopyLoad:icon 复制源箱矩形;items.ts 自动注册循环生效) ----
+{
+  const raw = readFileSync(join(ROOT, '..', 'Terarria1457', 'Terraria.ID', 'ItemID.cs'), 'utf8');
+  const seg = raw.split('TextureCopyLoad = Factory.CreateIntSet(-1,')[1].split(');')[0];
+  const nums = seg.match(/\d+/g).map(Number);
+  const tex = {};
+  for (let i = 0; i + 1 < nums.length; i += 2) tex[nums[i]] = nums[i + 1];
+  const tedit = JSON.parse(readFileSync(join(TEDIT, 'items.json'), 'utf8'));
+  const tbyid = new Map(tedit.map((i) => [i.id, i]));
+  for (const [fakeStr, src] of Object.entries(tex)) {
+    const ks = String(fakeStr);
+    if (v.items[ks]) continue;
+    const meta = tbyid.get(Number(ks));
+    const srcE = v.items[String(src)];
+    if (!meta || !srcE) continue;
+    v.items[ks] = { name: meta.name ?? '', key: meta.key ?? '', createTile: meta.createTile ?? null,
+      icon: srcE.icon, ix: srcE.ix, iy: srcE.iy, iw: srcE.iw, ih: srcE.ih };
+    v.itemNames[ks] = meta.name ?? '';
+  }
 }
 
 // ---- ③ 单图直引族 ----

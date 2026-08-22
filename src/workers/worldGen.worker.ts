@@ -38,7 +38,7 @@ ctx.onmessage = async (e) => {
       const world = await generateWorld(
         {
           width: req.cfg.width, height: req.cfg.height, size: req.cfg.size, seedText: req.cfg.seedText,
-          name: req.cfg.name, evil: req.cfg.evil,
+          name: req.cfg.name, evil: req.cfg.evil, seedFlags: req.cfg.seedFlags,
           // 生成期实时预览：worker 侧降采样 RGBA → transfer（替代旧 onWorldPartial 整 world 回调）
           onWorldPartial: req.cfg.preview
             ? (w, passIndex, passName) => {

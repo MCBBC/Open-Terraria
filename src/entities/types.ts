@@ -44,6 +44,9 @@ export interface GameHooks {
   ): void;
   /** 敌人列表(投射物命中判定用) */
   enemies(): unknown[];
+  /** Main.mapFullscreen（全屏地图开关——链锤 AI_015 击杀门 Projectile.cs:41057-41059
+   *  消费：开图瞬间链锤消失。Game 实现 = renderer.fullMap.open 镜像;缺省 = 不杀） */
+  mapFullscreen?(): boolean;
   /** 城镇 NPC 自卫弹入投射物桶(attackUpdate 消费) */
   spawnTownShot?(shot: import('./TownShot').TownShot): void;
   /** 小动物产生的弹幕入投射物桶（AI_024 鸟粪 1080 等；仅本地——MP 门禁在产生端） */
@@ -115,8 +118,11 @@ export interface GameHooks {
   /** 位置衰减音效（实体侧 SoundEngine.PlaySound）——name 走 SfxName */
   playSfxAt?(name: import('../core/Sfx').SfxName, x: number, y: number): void;
   /** 弹幕消亡钩子（Projectile.Kill 按弹型分发；x/y/w/h = 弹体命中盒，
-   *  oldVx/oldVy = 消亡时速度——碎镜 1085 的 Kill 特效链消费） */
-  onProjectileDeath?(projId: number, x: number, y: number, w?: number, h?: number, oldVx?: number, oldVy?: number, dmg?: number): void;
+   *  oldVx/oldVy = 消亡时速度——碎镜 1085 的 Kill 特效链消费；
+   *  flags = 弹体态补充：hostile（Damage() 结算方向）/ ai0（92 坠星代际链）/
+   *  kb+arpen（41 狱炎箭 64×64 重结算的击退/穿甲，取自弹体）） */
+  onProjectileDeath?(projId: number, x: number, y: number, w?: number, h?: number, oldVx?: number, oldVy?: number, dmg?: number,
+    flags?: { hostile?: boolean; ai0?: number; kb?: number; arpen?: number }): void;
   /** 粉末云实效（净化粉 proj 10 / 邪恶粉 11 / 猩红粉 463，Projectile.cs:22399-22533
    *  AI_006 每帧回调）：命中盒内逐格 WorldGen.Convert + Damage_TryUsingPowders（:13646）
    *  NPC 转化。Game 实现（evolution.convert + bound 税务官 Transform 链） */

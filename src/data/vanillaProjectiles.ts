@@ -1,6 +1,14 @@
 // 原版投射物数据（tools/extract-projectiles.mjs 从 Terarria1456 Projectile.cs SetDefaults 提取）。
 // 注意 1456 的 SetDefaults 是 if/else-if 链（非 switch），且长矛/悠悠球/连枷等族走
 // DefaultTo*() 辅助方法（aiStyle 19/99/15）、悠悠球批量定义在 `type >= A && type <= B` 区间块。
+// ★手补清单（2026-08-22 弹幕基建批；提取器 NUM_FIELDS 未含 localNPCHitCooldown/
+//   usesLocalNPCImmunity，timeLeft=MaxUpdates 算式与 MaxUpdates 别名亦不解析——重跑
+//   提取器会抹，须按此重放；金标闸门 item-stats-golden ROLLBACK_1456 已钉 478）：
+//   478  penetrate=2（P.cs:5263；1457 改 3，现提取器已出对值）
+//   639  extraUpdates=2 / timeLeft=90 / localNPCHitCooldown=-1（:6594-6610 MaxUpdates=2、
+//        timeLeft=MaxUpdates*45、usesLocalNPCImmunity 永久局部免疫）
+//   932  localNPCHitCooldown=60（:8570-8572）
+//   309  localNPCHitCooldown=10（历史手补，Arrow localImmune 消费）
 import projJson from './vanilla-projectiles.json';
 
 export interface ProjectileData {
@@ -35,6 +43,17 @@ export interface ProjectileData {
 }
 
 const TABLE = projJson as unknown as Record<string, ProjectileData>;
+
+// ---- 提取错手补（桥接层，JSON 重生成不回退）----
+// 478 诅咒镖 penetrate 3 → 2：Projectile.cs:5264 `penetrate = 2`（SetDefaults 直写）。
+// 提交版 JSON 曾写 3（提取/快照漂移），修复前被 Arrow pierce 缺省 bug 掩盖——
+// pierce 读表后诅咒镖会多穿 1（审计 2026-08-22 §弹药 ⚠️3）
+const DATA_PATCH: Record<string, Partial<ProjectileData>> = {
+  '478': { penetrate: 2 },
+};
+for (const k of Object.keys(DATA_PATCH)) {
+  TABLE[k] = { ...TABLE[k], ...DATA_PATCH[k] };
+}
 
 /** 原版 projectile type → 投射物数据（无条目返回 null） */
 export function projectileData(type: number): ProjectileData | null {

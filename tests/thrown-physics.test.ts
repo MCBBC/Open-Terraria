@@ -30,20 +30,22 @@ function makeHooks(world: World) {
 }
 
 describe('投掷武器物理（aiStyle 2 默认档）', () => {
-  it('前 20 tick 平飞：无重力、无阻力', () => {
+  it('前 19 tick 平飞；第 20 tick（ai0>=20，:21961-21966）起重力', () => {
     const hooks = makeHooks(makeWorld());
     const a = new Arrow(100 * TILE, 50 * TILE, 10, 0, 10, 0, 3, null, { ...THROWN, life: 2000 });
-    for (let i = 0; i < 20; i++) a.fixedUpdate(1, hooks);
+    for (let i = 0; i < 19; i++) a.fixedUpdate(1, hooks);
     expect(a.vy).toBe(0);          // 平飞期零下坠
     expect(a.vx).toBeCloseTo(10);  // 无阻力
+    a.fixedUpdate(1, hooks);       // 第 20 tick：ai[0]+=1 → 20 >= 20 → vy+0.4
+    expect(a.vy).toBeCloseTo(0.4, 6);
   });
 
-  it('21t 起：重力 0.4/tick + X 阻力 ×0.97/tick', () => {
+  it('20t 起：重力 0.4/tick + X 阻力 ×0.97/tick（:21963-21966 ai[0]>=20 含等号）', () => {
     const hooks = makeHooks(makeWorld());
     const a = new Arrow(100 * TILE, 50 * TILE, 10, 0, 10, 0, 3, null, { ...THROWN, life: 2000 });
     for (let i = 0; i < 30; i++) a.fixedUpdate(1, hooks);
-    expect(a.vy).toBeCloseTo(0.4 * 10, 1);        // 10 个重力 tick
-    expect(a.vx).toBeCloseTo(10 * Math.pow(0.97, 10), 2);
+    expect(a.vy).toBeCloseTo(0.4 * 11, 1);        // 11 个重力 tick（第 20..30，≥ 门）
+    expect(a.vx).toBeCloseTo(10 * Math.pow(0.97, 11), 2);
   });
 
   it('终端下落速度 32（非箭矢档 16）', () => {

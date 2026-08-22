@@ -70,8 +70,8 @@ function lunar(): HookProjStats {
 export const HOOK_PROJ_STATS: Record<number, HookProjStats> = {
   13: { range: 300, retract: DEFAULT_RETRACT, maxLatched: DEFAULT_MAX_LATCHED, pull: DEFAULT_PULL, quickMax: 1, quickTotal: 1, extraUpdates: 0 },            // Hook（普通钩，Projectile.cs:49706/:49895；Player.cs:6005-6007）
   32: { range: 400, retract: 15, maxLatched: DEFAULT_MAX_LATCHED, pull: DEFAULT_PULL, quickMax: DEFAULT_QUICK_MAX, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // IvyWhip 常春藤鞭（:49706/:49896-49897）
-  73: { range: 440, retract: 22, maxLatched: 1, pull: 12.5, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // 1457: 回收 17→22（AI_007 num18，Terarria1457 Projectile.cs AI_007 ai[0]==1 段；报告"649 星尘钩"系型号误标——646-649 恒 24 两版相同）                             // DualHookBlue 双钩蓝（:49706/:49900-49902；num17=1 :49831-49833；num7=2 Player.cs:5993-5995；牵引 12.5 = 1457 :23022-23025 由 11 上调）
-  74: { range: 440, retract: 22, maxLatched: 1, pull: 12.5, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // 1457: 同 73 回收 17→22                             // DualHookRed 双钩红（同 73；由 Player.cs:6057-6065 交替生成；牵引 12.5 = 1457 :23022-23025）
+  73: { range: 440, retract: 17, maxLatched: 1, pull: DEFAULT_PULL, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // DualHookBlue 双钩蓝（回收 17 = Projectile.cs:49894-49902 ai[0]==1 段 `if(type==73||type==74) num18=17f`；射程 :49706；num17=1 :49831-49833；num7=2 Player.cs:5993-5995；牵引 11 = Player.cs:22562 num9 缺省——:22563-22574 仅 315/487/646-649 覆盖。22/12.5 是 1457 才上调（1457 Projectile.cs AI_007/:23022-23025）,本仓标杆 1456；报告"649 星尘钩"系型号误标——646-649 恒 24 两版相同）
+  74: { range: 440, retract: 17, maxLatched: 1, pull: DEFAULT_PULL, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // DualHookRed 双钩红（同 73：回收 17 Projectile.cs:49894-49902/牵引 11 Player.cs:22562 缺省；由 Player.cs:6057-6065 交替生成。22/12.5 是 1457 才上调,本仓标杆 1456）
   165: { range: 375, retract: DEFAULT_RETRACT, maxLatched: 8, pull: DEFAULT_PULL, quickMax: 8, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 },               // WebSlingerHook 吐蛛丝者（:49706/:49825-49827；num17=8 :49825；num7=8 Player.cs:5997-5999）
   230: gem(0), 231: gem(1), 232: gem(2), 233: gem(3), 234: gem(4), 235: gem(5),                 // 宝石钩 紫晶/黄玉/蓝玉/翡翠/红玉/钻石
   256: { range: 425, retract: DEFAULT_RETRACT, maxLatched: 2, pull: DEFAULT_PULL, quickMax: 2, quickTotal: 2, extraUpdates: 1 },                                // SkeletronHand 骷髅王之手（:49706/:3120-3129；num17=2 :49828；num7=2/num8=2 Player.cs:6012-6014）
@@ -134,7 +134,7 @@ export const HOOK_ITEMS: Record<number, HookItemStats> = {
   2585: hookItem(396, 13),    // SlimeHook 史莱姆钩（case 2585）
   2800: hookItem(446, 14),    // AntiGravityHook 反重力钩（case 2800）
   3020: hookItem(486, 15),    // TendonHook 肌腱钩（Item.cs:27945-27951，shoot=486+type-3020）
-  3021: hookItem(487, 15),    // ThornHook 荆棘钩
+  3021: hookItem(487, 16),    // ThornHook 荆棘钩（shootSpeed 16——Item.cs:27955-27957 `if(type==3021) shootSpeed=16f`，曾误取共用缺省 15）
   3022: hookItem(488, 15),    // IlluminantHook 荧光钩
   3023: hookItem(489, 15),    // WormHook 蠕虫钩
   3572: hookItem(646, 18),    // LunarHook 月亮钩（Item.cs:32201-32211；QuickGrapple 轮换 646-649）

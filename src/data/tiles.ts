@@ -93,7 +93,7 @@ def({ key: 'ore_adamantite', name: '精金矿', solid: true, opacity: 1, pick: 1
 def({ key: 'ore_palladium', name: '钯金矿', solid: true, opacity: 1, pick: 100, mapColor: '#EF5A32', drop: 1104, vanilla: { sheet: 221, frame: 'auto' } });
 def({ key: 'ore_orichalcum', name: '山铜矿', solid: true, opacity: 1, pick: 110, mapColor: '#E760E4', drop: 1105, vanilla: { sheet: 222, frame: 'auto' } });
 def({ key: 'ore_titanium', name: '钛矿', solid: true, opacity: 1, pick: 150, mapColor: '#395565', drop: 1106, vanilla: { sheet: 223, frame: 'auto' } });
-def({ key: 'ore_chlorophyte', name: '叶绿矿', solid: true, opacity: 1, pick: 65, mapColor: '#BFE973', drop: 947, vanilla: { sheet: 211, frame: 'auto' } });
+def({ key: 'ore_chlorophyte', name: '叶绿矿', solid: true, opacity: 1, pick: 200, mapColor: '#BFE973', drop: 947, vanilla: { sheet: 211, frame: 'auto' } }); // pick 200（Player.cs:52989 `type==211 && pickPower<200 → num=0`；曾误 65=弹幕/爆炸侧 pickPowerEnough 提前判可伤）
 
 // ---- 宝石矿（掉对应宝石） ----
 def({ key: 'gem_sapphire', name: '蓝宝石矿', solid: true, opacity: 1, pick: 30, mapColor: '#6E8CB6', drop: 177, vanilla: { sheet: 63, frame: 'auto' } });

@@ -1,7 +1,7 @@
 // 一次性诊断：s6666 corruption 分叉 A/B——把 g28 输入的 66 个幽灵格清成 x86 值后
 // 跑 corruption，看主流态是否收敛到 x86 P|29（54dbbe4b）。
 import { it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { runResetAndTerrain } from '../src/world/gen/WorldGen';
 import { runDunesPass } from '../src/world/gen/vanilla/DunesPass';
 import { runOceanSandPass } from '../src/world/gen/vanilla/BeachPass';
@@ -35,7 +35,11 @@ function streamHash(rng: unknown): string {
   return h.toString(16).padStart(8, '0');
 }
 
-it('ghost A/B corruption 6666', async () => {
+// ★OOOOOO 批(2026-08-22)加存在性门:/tmp/hscmp 诊断资产已清,缺资产时 skip
+//   （原 it 体内 readFileSync ENOENT 恒红;s6666 corruption 分叉案已结,工具留档,
+//   资产按 g28/js-g28 采集管线重建后可复跑）。
+const hasHsCmp = existsSync('/tmp/hscmp/gd/6666/g28.typ');
+(hasHsCmp ? it : it.skip)('ghost A/B corruption 6666', async () => {
   const W = 4200;
   // 66 幽灵格（x86 g28: type=0；JS g28: 残留）
   const ghost: Array<[number, number]> = [];

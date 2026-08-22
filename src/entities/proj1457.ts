@@ -686,6 +686,10 @@ export class GlacierFangShot extends Entity {
         this.release(game, p);
         return;
       }
+      // channel 蓄力期用魔动画续期（Player.cs:43143-43146 itemAnimation 持续>0 每帧
+      // ItemCheck_ApplyManaRegenDelay → delay 钉 4 = 全程 5% 滴流回蓝；2026-08-22
+      // 审计 ❌ 修复——蓄力最长 60 拍(慢施 ÷2.5=150t)远超 useTime,不续期则白嫖魔力）
+      p.onChannelManaHold?.();
       const m = this.ctl.aim();
       // 挂手：RotatedRelativePoint(MountedCenter) − Size/2（:37587）
       this.x = p.cx - this.w / 2;

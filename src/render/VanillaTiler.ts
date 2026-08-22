@@ -16,7 +16,7 @@ import {
 } from '../world/MinecartTrack';
 import { cageFamilyOf, drawCageCell } from './CritterCage';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
-import { animFrameIdx, animYOffset } from './TileAnim';
+import { animFrameIdx, animYOffset, TILE_ANIM_RATE } from './TileAnim';
 
 type Frame = [number, number];
 
@@ -1098,6 +1098,13 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
   let r: DrawRect | null = null;
   if (frame === 'auto') {
     r = frameFor(atlas, sheet, st, x, y, type, same);
+    // 动画 'auto' 块（瀑布族 326/327/345/458/459：Main.cs:18743-18793 8 帧回卷、
+    // TileDrawing.cs:6085-6094 addFrY=frame*90）——TEdit 8 向帧取自首带,动画帧
+    // = sy + 帧序×90。与 style 分支的 animYOffset 叠加语义一致（ChunkCache 已按
+    // TILE_ANIM_RATE 登记重烘焙）
+    if (r && TILE_ANIM_RATE[sheet]) {
+      r = { ...r, sy: r.sy + animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18) };
+    }
   } else {
     // 重建帧偏移：只针对帧数据全 0 的残缺物体（wld 部分家具）。
     // 邻居必须同样存 (0,0) 才视为同物体的待重建格——已带 18px 偏移的邻居

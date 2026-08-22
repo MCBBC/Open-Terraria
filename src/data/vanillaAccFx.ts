@@ -59,6 +59,7 @@ export interface AccFx {
   huntressSave?: number; // 10% 概率不耗弹
   kbGlove?: number;      // 力量手套族：近战击退翻倍
   autoReuseGlove?: number; // 力量手套族：近战武器自动连挥（Player.TryAllowingItemReuse :52040-52042）
+  meleeScaleGlove?: number; // 手套族近战放大：GetAdjustedItemScale ×1.1（Player.cs:41919-41930）
   flowerBoots?: number;    // 花靴 3017/仙灵靴 3993（GrantArmorBenefits :12682-12688 行走生花）
   yoyoString?: number;   // 悠悠球线：射程 +
   tileSpeed?: number;    // 放置加速（砌砖刀族;手持可放置非火把时 tileSpeed+0.5，:12604-12610）
@@ -83,6 +84,19 @@ export interface AccFx {
   merman?: number;      // accMerman：水中不耗气并人鱼化（月亮/天界/海神贝壳）
   arcticDivingGear?: number; // 1861 极地潜水装备：专家雪原冷水 Chilled 免疫（:27692）
   jellyfishGlow?: number;    // 1860 水母潜水装备：浸水发光 1.8/0.4/1.2（:14682-14688）
+  // ---- 配饰审计 P0 批（2026-08-22 审计 docs/audit/item-audit-2026-08-22.md）----
+  fishingTackle?: number;   // accTackleBox（2375/3721/5064 :14123-14140）：鱼饵消耗分母 +1（:51645）
+  lavaFishing?: number;     // accLavaFishing（4881/5064 :14127-14140）：岩浆钓门（:19230）
+  dmgMinion?: number;       // minionDamage += X（召唤伤加算乘区；935/1301/3015 :14900/:14431/:14105）
+  endurance?: number;       // endurance += X（受伤减免加算；蠕虫围巾 3224 :14532-14535）
+  manaCostOff?: number;     // manaCost -= X（耗魔【加算】折扣；大自然的恩赐 223 :14561-14563）
+  royalGel?: number;        // 皇家凝胶 3090：23 类史莱姆 npcTypeNoAggro（:14144-14168）
+  toolboxRange?: number;    // 工具箱 1923：tileRangeX/Y +1（:14405-14408；与 2215 族 +3/+2 叠加）
+  mechShowWires?: number;   // 机械透镜 3619：InfoAccMechShowWires 装备即显电线（:12400-12402）
+  autoActuator?: number;    // 加压器 3624：放置实心瓦自动上致动器（:14746-14748/:39977-40010）
+  magiluminescence?: number; // 荧光体 5107：地面 acc×1.75/maxRun×1.15/accRun×1.15/slow×1.75（:26188-26194）
+  iceBarrier?: number;      // 冰龟壳 1253/冰冻盾 3997：半血挂 buff 62 IceBarrier（:14348-14351）
+  lavaRose?: number;        // 玫瑰族（1323/908/4003/4004/5000）：岩浆伤 80-45/OnFire 420-210（:27384-27387）
 }
 
 const FX = fxJson as Record<string, AccFx>;
@@ -96,11 +110,14 @@ const BEHAVIOR_FX: Record<string, AccFx> = {
   // 211 猛爪手套 :14559-14562 / 897 强力手套 :14753-14756 / 1343 机械手套 :14761-14764 /
   // 936 烈火手套 :14823-14826 / 3992 泰坦手套 :13995-13999——各只置旗 + meleeSpeed += 0.12，
   // 数值段在 vanilla-accfx.json 已有，此处补布尔行为）
+  // ★meleeScaleGlove 仅 5 件置位（211 猛爪手套【不】置——:14559-14562 无此行）：
+  // 536 泰坦手套 :15029-15033 / 897 :14754 / 936 :14824 / 1343 :14761 / 3992 :13997
   '211': { autoReuseGlove: 1 },
-  '897': { autoReuseGlove: 1 },
-  '1343': { autoReuseGlove: 1 },
-  '936': { autoReuseGlove: 1 },
-  '3992': { autoReuseGlove: 1 },
+  '897': { autoReuseGlove: 1, meleeScaleGlove: 1 },
+  '1343': { autoReuseGlove: 1, meleeScaleGlove: 1 },
+  '936': { autoReuseGlove: 1, meleeScaleGlove: 1 },
+  '3992': { autoReuseGlove: 1, meleeScaleGlove: 1 },
+  '536': { meleeScaleGlove: 1 },   // 泰坦手套（:15029-15033：kbGlove 走 json 数值段）
   '268': { divingHelm: 1 },
   '394': { divingHelm: 1 },
   '1860': { divingHelm: 1, jellyfishGlow: 1 },   // 浸水 AddLight(1.8,0.4,1.2)（:14682-14688）
@@ -108,6 +125,7 @@ const BEHAVIOR_FX: Record<string, AccFx> = {
   '497': { merman: 1 },
   '861': { merman: 1, nightWolf: 1 },   // Moon Shell：accMerman + wolfAcc（:14585-14591）
   '3110': { merman: 1, nightWolf: 1 },  // Celestial Shell：同（:14853-14859；json 的 skyStone 保留）
+  '485': { nightWolf: 1 },              // Moon Charm 裸月光护身符：wolfAcc（:14633-14640；夜间门在消费端 Player.ts）
   // 花靴/仙灵靴 flowerBoots（GrantArmorBenefits :12682-12688：行走生花）
   '3017': { flowerBoots: 1 },
   '3993': { flowerBoots: 1 },

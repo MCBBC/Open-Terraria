@@ -1,6 +1,9 @@
 // 一次性诊断：#28 Underworld 隔离重放分检——y<1000 液体只有 QW 触及(后续段全在 y≥1020),
 // 故终态 mid-world liq 差 = QuickWater 残差直接读数。输出:mid-world 差异坐标聚类、
 // 每差异格的邻域状态(js vs v28)、岩浆/水归类,用于定位 QW 移植残差根因。
+// ★OOOOOO 批(2026-08-22)加存在性门:/tmp/sw-num4 + /tmp/sw-uw-liqtype.bin 诊断资产
+//   已清,缺资产时静默 skip(原模块级 readFileSync 收集期 ENOENT 炸红全量回归;
+//   #28 Underworld 隔离案已结——四链+world-final 金标全绿,工具留档)。
 import { it } from 'vitest';
 const RUN = !!process.env.SW_PARITY;
 import { readFileSync } from 'node:fs';
@@ -19,21 +22,25 @@ const VG = '/tmp/sw-num4/van_x86_g';
 const W = 4200, H = 1200;
 const load = (idx: number, ext: string, name: string) =>
   readFileSync(`${VG}/${String(idx).padStart(3, '0')}_${name}.${ext}`);
-const t27 = new Uint16Array(load(27, 'typ', 'Webs').buffer.slice(0));
-const a27 = load(27, 'act', 'Webs');
-const w27 = new Uint16Array(load(27, 'wal', 'Webs').buffer.slice(0));
-const l27 = load(27, 'liq', 'Webs');
-const t28 = new Uint16Array(load(28, 'typ', 'Underworld').buffer.slice(0));
-const a28 = load(28, 'act', 'Underworld');
-const w28 = new Uint16Array(load(28, 'wal', 'Underworld').buffer.slice(0));
-const l28 = load(28, 'liq', 'Underworld');
+// 缺资产→零长数组(it 体内判 length 后 skip),不再收集期抛 ENOENT
+const ld0 = (idx: number, ext: string, name: string): ArrayBuffer => {
+  try { return load(idx, ext, name).buffer.slice(0); } catch { return new ArrayBuffer(0); }
+};
+const t27 = new Uint16Array(ld0(27, 'typ', 'Webs'));
+const a27 = new Uint8Array(ld0(27, 'act', 'Webs'));
+const w27 = new Uint16Array(ld0(27, 'wal', 'Webs'));
+const l27 = new Uint8Array(ld0(27, 'liq', 'Webs'));
+const t28 = new Uint16Array(ld0(28, 'typ', 'Underworld'));
+const a28 = new Uint8Array(ld0(28, 'act', 'Underworld'));
+const w28 = new Uint16Array(ld0(28, 'wal', 'Underworld'));
+const l28 = new Uint8Array(ld0(28, 'liq', 'Underworld'));
 
 const REV = new Map<number, number>();
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number' && !REV.has(s)) REV.set(s, i);
 }
-const LIQTYPE27 = readFileSync('/tmp/sw-uw-liqtype.bin');
+const LIQTYPE27 = (() => { try { return readFileSync('/tmp/sw-uw-liqtype.bin'); } catch { return new Uint8Array(0); } })();
 
 const mkStore = (): TileStore => {
   const st = new TileStore(W, H);
@@ -50,6 +57,7 @@ const mkStore = (): TileStore => {
 const ASH = T.ASH;
 
 (RUN ? it : it.skip)('underworld QW midworld residual localization', () => {
+  if (!t27.length || !LIQTYPE27.length) { console.log('skip: /tmp/sw-num4|/tmp/sw-uw-liqtype.bin 资产缺失,按头注重建后复跑'); return; }
   const rt = runResetAndTerrain({ width: W, height: H, seedText: '9293480', evil: 0 });
   const gs = rt.gs as GenState;
   console.log(`gs: waterLine=${gs.waterLine} lavaLine=${gs.lavaLine} rockLevel=${gs.rockLevel} worldSurface=${gs.worldSurface} h-200=${H - 200}`);

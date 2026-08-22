@@ -903,8 +903,11 @@ function placeTightGen(st: TileStore, rng: RNG, x: number, y: number): void {
 }
 
 export function runWebsInSpiderCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // ★PPPPP（cs:20146-20150）：饥荒世界扫描起点 worldSurface → **50**（地表带也布
+  //  蛛网/蜂巢钟乳石——配合草墙 pass 的蜘蛛墙 62 地表化）。
+  const jStart = gs.seedFlags?.theConstant ? 50 : Math.floor(gs.worldSurface);
   for (let i = 100; i < st.w - 100; i++) {
-    for (let j = Math.floor(gs.worldSurface); j < st.h - 100; j++) {
+    for (let j = jStart; j < st.h - 100; j++) {
       const idx = st.idx(i, j);
       if (st.wall[idx] === 86) {
         if (st.liquid[idx] > 0) st.liquidType[idx] = 3; // honey(true)（cs:20155）
