@@ -111,6 +111,10 @@ const BEHAVIOR_FX: Record<string, AccFx> = {
   // 花靴/仙灵靴 flowerBoots（GrantArmorBenefits :12682-12688：行走生花）
   '3017': { flowerBoots: 1 },
   '3993': { flowerBoots: 1 },
+  // ---- 1457 新配饰主属性（vanilla-accfx.json 提取器未覆盖 6147-6195 族,手补——
+  //      行为旗走 Player.ts/SUMMON_GEAR 链,此处只收 accfx 形状的主数值）----
+  '6188': { def: 1 },   // 复原之盾 RestorationShield（ItemID.cs:13922;itemstats def1/life2,
+                        //  life 已走 statOfInternal itemLife 通道,def 走本表）
 };
 
 const FX_BY_IID = (() => {

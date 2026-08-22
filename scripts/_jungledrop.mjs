@@ -64,8 +64,8 @@ const r = await page.evaluate(async () => {
 });
 console.log(JSON.stringify(r, null, 1));
 const sp = r.spores[0];
-const ok = sp && sp.key === 'vi_331_jungle_spores' && sp.stack >= 2 && sp.stack <= 3
+const ok = sp && sp.key === 'vi_331_JungleSpores' && sp.stack >= 2 && sp.stack <= 3
   && r.rose[0] && r.rose[0].key === 'vi_223_NaturesGift'
-  && (!r.large703 || (r.large703[0] && r.large703[0].key === 'vi_331_jungle_spores'));
+  && (!r.large703 || (r.large703[0] && r.large703[0].key === 'vi_331_JungleSpores'));
 console.log(ok ? 'PASS: 丛林植物帧级掉落' : 'FAIL');
 await browser.close();

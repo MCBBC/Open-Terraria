@@ -4290,28 +4290,35 @@ void UwRandHellPicture(out int tileT, out int style)
 void UwHellFort(int i, int j, int tileType, int wallType)
 {
     int hellTop = H - 200;
-    // ---- 列左右界：★1457（cs:32998-33008，batch4 镜像）掷序重分配——左翼先掷（掷 3-4）/
-    //      右翼后掷（掷 5-6），1456 相反；掷数不变、几何镜像级偏移 ----
+    // ---- ★LLLLLL 批 1457→1456 回滚（2026-08-22）：EEEEEE 批曾镜像 1457（cs:32998-33008）
+    //      掷序重分配——本批逐处还原 1456 真值（Terarria1456/WorldGen.cs cs:32850-33310，
+    //      JS HellFortPass.ts KKKKKK 回滚后实现为蓝本；mile8 #28 三链同签名定罪）：
+    //      ① 列界掷序=右翼先（掷 3-4）/左翼后（掷 5-6）；② 翼行 Next(10) 直接扩 span；
+    //      ③ 中央跨度两掷 Next(10) 直接扩 span（无钳位）；④ 四处门落点=命中候选行即
+    //      单次无条件直写（仅 InWorld 门，无锚检查/无 doorExists）；⑤ 右外门死分支保留
+    //      （原版 bug：num37<20 恒真）；⑥ 无塌墙阶段。1457 语义存档 rollback1457/ ----
+    // ---- 列左右界（1456 cs:32874-32883）：中央 ±Next(4,10)、翼列依次外扩 Next(8,20) ----
     var colL = new int[5]; var colR = new int[5];
     colL[2] = i - r.Next(4, 10); colR[2] = i + r.Next(4, 10);
-    colR[1] = colL[2]; colL[1] = colR[1] - r.Next(8, 20);   // ★1457 左翼先
-    colR[0] = colL[1]; colL[0] = colR[0] - r.Next(8, 20);
-    colL[3] = colR[2]; colR[3] = colL[3] + r.Next(8, 20);   // ★1457 右翼后
+    colL[3] = colR[2]; colR[3] = colL[3] + r.Next(8, 20);   // ★1456 右翼先（掷 3-4）
     colL[4] = colR[3]; colR[4] = colL[4] + r.Next(8, 20);
+    colR[1] = colL[2]; colL[1] = colR[1] - r.Next(8, 20);   // ★1456 左翼后（掷 5-6）
+    colR[0] = colL[1]; colL[0] = colR[0] - r.Next(8, 20);
     // ---- 行上下界（同 1456）----
     var rowT = new int[10]; var rowB = new int[10];
     rowT[3] = j - r.Next(6, 12); rowB[3] = j;
     for (int rr = 4; rr < 10; rr++) { rowT[rr] = rowB[rr - 1]; rowB[rr] = rowT[rr] + r.Next(6, 12); }
     for (int rr = 2; rr >= 0; rr--) { rowB[rr] = rowT[rr + 1]; rowT[rr] = rowB[rr] - r.Next(6, 12); }
     var occ = new bool[5, 10];
-    var doorExistsL = new bool[5, 10]; var doorExistsR = new bool[5, 10];
     bool hasLWing = false, hasRWing = false; int spanLo = 3, spanHi = 3;
     for (int round = 0; round < 2; round++)
     {
         if (r.Next(3) == 0)
         {
             hasLWing = true;
-            int rr = Math.Max(3, Math.Min(3, r.Next(10)));   // ★1457（cs:33036-33040）Clamp(Next(10),3,3)恒 3——掷照耗、span 不再被翼扩
+            int rr = r.Next(10);                     // ★1456（cs:32908-32916）Next(10) 直接扩 span（1457 曾 Clamp 恒 3）
+            if (rr < spanLo) spanLo = rr;
+            if (rr > spanHi) spanHi = rr;
             int wingCol = 1;
             if (r.Next(2) == 0) { occ[0, rr] = true; occ[1, rr] = true; wingCol = 0; }
             else occ[1, rr] = true;
@@ -4321,7 +4328,9 @@ void UwHellFort(int i, int j, int tileType, int wallType)
         if (r.Next(3) == 0)
         {
             hasRWing = true;
-            int rr = Math.Max(3, Math.Min(3, r.Next(10)));   // ★1457 同上
+            int rr = r.Next(10);                     // ★1456（cs:32943-32951）同上
+            if (rr < spanLo) spanLo = rr;
+            if (rr > spanHi) spanHi = rr;
             int wingCol = 3;
             if (r.Next(2) == 0) { occ[3, rr] = true; occ[4, rr] = true; wingCol = 4; }
             else occ[3, rr] = true;
@@ -4342,16 +4351,16 @@ void UwHellFort(int i, int j, int tileType, int wallType)
         }
         if (bad) for (int rr = 0; rr < 10; rr++) occ[c, rr] = false;
     }
-    // ---- 中央列跨度：★1457（cs:33104-33108）两掷改钳位（Max/Min），span 不动（掷数不变）----
-    int n4 = Math.Max(spanLo, r.Next(10));
-    n4 = Math.Min(spanHi, r.Next(10));
+    // ---- 中央列跨度（1456 cs:33002-33027）：两掷 Next(10) 直接扩 span（1457 曾 Max/Min
+    //      钳位）；无翼 while 环同构扩 span（span 单调扩张必收敛，原版无守卫）----
+    int n4 = r.Next(10); if (n4 < spanLo) spanLo = n4;
+    n4 = r.Next(10); if (n4 > spanHi) spanHi = n4;
     if (!hasLWing && !hasRWing)
     {
-        int guard = 0;
-        while (spanHi - spanLo < 5 && guard++ < 1000)
+        while (spanHi - spanLo < 5)
         {
-            int a = r.Next(10); if (a < spanLo) spanLo = a;
-            int b = r.Next(10); if (b > spanHi) spanHi = b;
+            n4 = r.Next(10); if (n4 < spanLo) spanLo = n4;
+            n4 = r.Next(10); if (n4 > spanHi) spanHi = n4;
         }
     }
     for (int rr = spanLo; rr <= spanHi; rr++) occ[2, rr] = true;
@@ -4374,20 +4383,37 @@ void UwHellFort(int i, int j, int tileType, int wallType)
             }
         }
     }
-    // ---- 列间门 style19：★1457（cs:33186-33195）改经 HellFort_AttemptToPlaceDoor——while 重掷
-    //      （锚检查拒不置 needDoor=false）+ 锚格 y-4/y 非门实心真实检查 + doorExistsR 记账 ----
+    // ---- 列间门 style19（1456 cs:33080-33110）：while 抽行命中即单次无条件直写
+    //      （清 y-1..y-3 + 补墙 wallType×3 + PlaceTile 门；仅 InWorld 门——1457 曾改
+    //      AttemptToPlaceDoor：锚检查拒则重掷+doorExists 记账，已回滚）----
     for (int c = 0; c < 4; c++)
     {
         var rows = new bool[10]; bool needDoor = false;
         for (int rr = 0; rr < 10; rr++) if (occ[c, rr] && occ[c + 1, rr]) { rows[rr] = true; needDoor = true; }
-        UwHFDoorLoop(ref needDoor, doorExistsR, rows, c, colR, rowB, wallType, 19);
+        while (needDoor)
+        {
+            int rr = r.Next(10);
+            if (rows[rr])
+            {
+                needDoor = false;
+                if (colR[c] >= 10 && colR[c] < W - 10 && rowB[rr] >= 10 && rowB[rr] < H - 10)   // InWorld(colR,rowB,10)
+                {
+                    for (int k = 1; k <= 3; k++)
+                    {
+                        int ti = (rowB[rr] - k) * W + colR[c];
+                        act[ti] = 0;
+                        wal[ti] = (ushort)wallType;
+                    }
+                    UwPlaceTileDoorHF(colR[c], rowB[rr] - 1, 19);
+                }
+            }
+        }
     }
     for (int c = 0; c < 5; c++) for (int rr = 0; rr < 10; rr++)
     {
         if (!occ[c, rr]) continue;
-        // ★批4 review P3-8（1457 cs:33198-33203，EEEEEE 镜像）：cell 循环头门——
-        //   InWorld 失败时该格的平台写与门13 Next(3) 掷都被跳过（w≥4200 恒不可达，
-        //   errorWorld 域可分叉）
+        // cell 循环头门（1456 cs:33111-33118 原样，非 1457 新增）：InWorld 失败时该格的
+        //   平台写与门13 Next(3) 掷都被跳过（w≥4200 恒不可达，errorWorld 域可分叉）
         if (!(colR[c] >= 10 && colR[c] < W - 10 && rowB[rr] >= 10 && rowB[rr] < H - 10)) continue;
         if (rr > 0 && occ[c, rr - 1])
         {
@@ -4409,54 +4435,68 @@ void UwHellFort(int i, int j, int tileType, int wallType)
             }
             else break;
         }
-        // ★1457（cs:33233）：单次 AttemptToPlaceDoor（/bool 重载）——锚检查拒则整处放弃
-        //   （1456 无条件直写）；不写 doorExists（ref 门传 null 语义）
+        // ★1456（cs:33145-33154）：1/3 门=无条件直写（清 3 格+补墙+PlaceTile 门，无锚检查
+        //   ——1457 曾改单发 AttemptToPlaceDoor，已回滚）
         if (c < 4 && occ[c + 1, rr] && r.Next(3) == 0)
         {
-            bool needDoor2 = true;
-            UwHFAttemptDoorAt(colR[c], rowB[rr], wallType, 19);
+            for (int k = 1; k <= 3; k++)
+            {
+                int ti = (rowB[rr] - k) * W + colR[c];
+                act[ti] = 0;
+                wal[ti] = (ushort)wallType;
+            }
+            UwPlaceTileDoorHF(colR[c], rowB[rr] - 1, 19);
         }
     }
-    // ---- 左外门：★1457（cs:33252-33268）候选行预检后交 AttemptToPlaceDoor（wallType=0 不打墙）+ doorExistsL 记账 ----
+    // ---- 左外门（1456 cs:33157-33201）：最左占用列；候选行预检（外侧 colL-1 三格空且
+    //      无液，否则剔出候选）→ while 抽行命中即**无条件直写**（只清 colL 三格+PlaceTile
+    //      门，**不打墙**——1456 外门无 wall 写；1457 曾改 AttemptToPlaceDoor+doorExistsL，
+    //      已回滚）----
     for (int c = 0; c < 5; c++)
     {
         var rows = new bool[10]; bool any = false;
         for (int rr = 0; rr < 10; rr++) if (occ[c, rr]) { rows[rr] = true; any = true; }
-        if (any)
+        if (!any) continue;
+        bool needDoor = false;
+        for (int rr = 0; rr < 10; rr++)
         {
-            bool needDoor = false;
-            for (int rr = 0; rr < 10; rr++)
-            {
-                if (!rows[rr]) continue;
-                int x = colL[c] - 1;
-                if (x < 0 || x >= W || rowB[rr] - 3 < 0 || rowB[rr] - 3 >= H) { rows[rr] = false; continue; }
-                if (act[(rowB[rr] - 1) * W + x] == 0 && act[(rowB[rr] - 2) * W + x] == 0 && act[(rowB[rr] - 3) * W + x] == 0
-                    && liq[(rowB[rr] - 1) * W + x] == 0 && liq[(rowB[rr] - 2) * W + x] == 0 && liq[(rowB[rr] - 3) * W + x] == 0) needDoor = true;
-                else rows[rr] = false;
-            }
-            UwHFDoorLoop(ref needDoor, doorExistsL, rows, c, colL, rowB, 0, 19);
-            break;
+            if (!rows[rr]) continue;
+            int x = colL[c] - 1;
+            if (x < 0 || x >= W || rowB[rr] - 3 < 0 || rowB[rr] - 3 >= H) { rows[rr] = false; continue; }
+            if (act[(rowB[rr] - 1) * W + x] == 0 && act[(rowB[rr] - 2) * W + x] == 0 && act[(rowB[rr] - 3) * W + x] == 0
+                && liq[(rowB[rr] - 1) * W + x] == 0 && liq[(rowB[rr] - 2) * W + x] == 0 && liq[(rowB[rr] - 3) * W + x] == 0) needDoor = true;
+            else rows[rr] = false;
         }
+        while (needDoor)
+        {
+            int rr = r.Next(10);
+            if (rows[rr])
+            {
+                needDoor = false;
+                for (int k = 1; k <= 3; k++) act[(rowB[rr] - k) * W + colL[c]] = 0;
+                UwPlaceTileDoorHF(colL[c], rowB[rr] - 1, 19);
+            }
+        }
+        break;
     }
-    // ---- 右外门：★1457（cs:33292-33304）第 4 扇门修复——删 1456「num37<20 恒 break」死分支，
-    //      改真实三格预检（array2[c]+1 空且无液）+ doorExistsR 记账 ----
+    // ---- 右外门（1456 cs:33202-33249）：★原版死分支保留（N 批实证+IIIIII IL 复裁维持）
+    //      ——预检环首候选行即 `num37 < 20`（num37=列号 0-4 恒真）→ break；flag8 恒 false
+    //      =右外门从不放置且预检后零掷（1457 曾"修复"此门=偏差，已回滚）----
     for (int c = 4; c >= 0; c--)
     {
         var rows = new bool[10]; bool any = false;
         for (int rr = 0; rr < 10; rr++) if (occ[c, rr]) { rows[rr] = true; any = true; }
         if (any)
         {
-            bool needDoor = false;
+            bool flag8 = false;
             for (int rr = 0; rr < 10; rr++)
             {
-                if (!rows[rr]) continue;
-                int x = colR[c] + 1;
-                if (x < 0 || x >= W || rowB[rr] - 3 < 0 || rowB[rr] - 3 >= H) { rows[rr] = false; continue; }
-                if (act[(rowB[rr] - 1) * W + x] == 0 && act[(rowB[rr] - 2) * W + x] == 0 && act[(rowB[rr] - 3) * W + x] == 0
-                    && liq[(rowB[rr] - 1) * W + x] == 0 && liq[(rowB[rr] - 2) * W + x] == 0 && liq[(rowB[rr] - 3) * W + x] == 0) needDoor = true;
-                else rows[rr] = false;
+                if (rows[rr])
+                {
+                    break;   // ★num37 < 20 恒真（列号 0-4）——1456 原样死分支
+                }
             }
-            UwHFDoorLoop(ref needDoor, doorExistsR, rows, c, colR, rowB, 0, 19);
+            while (flag8) { /* 不可达（1456 死分支） */ }
             break;
         }
     }
@@ -4501,92 +4541,10 @@ void UwHellFort(int i, int j, int tileType, int wallType)
             break;
         }
     }
-    // ---- ★1457 新增塌墙阶段（cs:33362-33378）：每个占用单元左右墙段——无门（doorExists 未记账）
-    //      且外侧一列全空（CanCrumbleWall，先掷 Next(2)）时在墙段内随机取段 ClearTile。掷序：
-    //      逐格左 1 掷(+命中 +2 掷)、右 1 掷(+命中 +2 掷) ----
-    for (int c = 0; c < 5; c++)
-    {
-        for (int rr = 0; rr < 10; rr++)
-        {
-            if (!occ[c, rr]) continue;
-            if (!doorExistsL[c, rr] && UwHFCanCrumbleWall(-1, c, rr, colL, rowT, rowB))
-                UwHFAttemptCrumbleWall(c, rr, colL, rowT, rowB);
-            if (!doorExistsR[c, rr] && UwHFCanCrumbleWall(1, c, rr, colR, rowT, rowB))
-                UwHFAttemptCrumbleWall(c, rr, colR, rowT, rowB);
-        }
-    }
-}
-bool UwHFSolidTileNoDoors(int x, int y, bool noDoors)
-{
-    if (x < 0 || y < 0 || x >= W || y >= H) return false;
-    int i = y * W + x;
-    if (act[i] == 0) return false;
-    ushort t = typ[i];
-    if (!SOLID.Contains(t) || t == 19 || (t >= 427 && t <= 439)) return false;   // tileSolid+!platform（UwSolidTileHF 同口径）
-    if (half[i] != 0 || slope[i] != 0) return false;
-    if (inAct[i] != 0) return false;                                             // inActive（致动缩入）
-    if (noDoors && t == 10) return false;
-    return true;
-}
-bool UwHFAttemptDoorAt(int x, int y, int wallType, int doorStyle)
-{
-    if (x < 0 || y < 0 || x >= W || y >= H || y - 4 < 0) return false;           // JS inBounds(x,y)/inBounds(x,y-4)
-    if (!UwHFSolidTileNoDoors(x, y - 4, true) || !UwHFSolidTileNoDoors(x, y, true)) return false;
-    for (int k = 1; k <= 3; k++)
-    {
-        int ti = (y - k) * W + x;
-        act[ti] = 0;
-        if (wallType > 0) wal[ti] = (ushort)wallType;                            // ★1457 外门 wallType=0 → 不打墙
-    }
-    UwPlaceTileDoorHF(x, y - 1, doorStyle);
-    return true;
-}
-void UwHFDoorLoop(ref bool needDoor, bool[,] doorExists, bool[] door, int x, int[] doorX, int[] doorY, int wallType, int doorStyle)
-{
-    int guard = 0;
-    while (needDoor)
-    {
-        int num = r.Next(10);
-        if (door[num])
-        {
-            bool ok = UwHFAttemptDoorAt(doorX[x], doorY[num], wallType, doorStyle);
-            if (ok) needDoor = false;
-            doorExists[x, num] = ok;
-        }
-        // ★JS 守卫仅防异常种子活锁（原版无；锚检查恒过后单轮收敛）
-        if (++guard > 100000) break;
-    }
-}
-bool UwHFCanCrumbleWall(int dir, int x, int y, int[] wallX, int[] wallTop, int[] wallBottom)
-{
-    if (r.Next(2) == 0) return false;                                            // 0→拒（掷恒耗）
-    int wx = wallX[x], wy = wallTop[y], hgt = wallBottom[y] - wy;
-    if (!(wx >= 10 && wx < W - 10 && wy >= 10 && wy < H - 10)) return false;     // InWorld(wx,wy,10)
-    int cx = wx + dir;
-    for (int k = 1; k < hgt; k++)
-    {
-        int yy = wy + k;
-        if (cx < 0 || yy < 0 || cx >= W || yy >= H) return false;
-        int ti = yy * W + cx;
-        if (wal[ti] > 0 || liq[ti] > 0 || UwSolidTileHF(cx, yy)) return false;
-    }
-    return true;
-}
-void UwHFAttemptCrumbleWall(int x, int y, int[] wallX, int[] wallTop, int[] wallBottom)
-{
-    int wx = wallX[x], wt = wallTop[y], wb = wallBottom[y];
-    int start = wt + 1;
-    // (int)((float)(h-3) * NextFloat())——float32 乘积截断（Utils.NextFloat=(float)NextDouble）
-    int end = start + (int)((float)(wb - wt - 3) * (float)(double)r.NextDouble());
-    end += r.Next(2);
-    if (end - start < 2) end = start + 2;
-    end = Math.Min(wb - 1, end);
-    for (int k = start; k <= end; k++)
-    {
-        if (wx < 0 || k < 0 || wx >= W || k >= H) continue;
-        int ti = k * W + wx;
-        if (act[ti] != 0) { act[ti] = 0; slope[ti] = 0; half[ti] = 0; inAct[ti] = 0; }   // ClearTile()
-    }
+    // ---- ★1456 到此结束（cs:33310）——1457 的「塌墙阶段」（CanCrumbleWall/
+    //      AttemptCrumbleWall+doorExists 双账本+SolidTileNoDoors/AttemptDoorAt/DoorLoop
+    //      五 helper）不存在于 1456，LLLLLL 批随主体一并删除；1457 语义存档
+    //      src/world/gen/vanilla/rollback1457/HellFort.1457.ts（1457 对齐战役复用）----
 }
 
 void UwAddHellHouses()
@@ -6357,6 +6315,9 @@ bool EmptyTileCheckT(int x0, int x1, int y0, int y1, int ignoreVan)
     return true;
 }
 // 干身帧表（TRUNK，L14213-14425）——帧不入哈希（棕榈域 529/530 帧另有消费，干身帧无消费方）
+// ★GGGGGG：干身帧表复用顶层 TREE_TRUNK（TrunkFx/TrunkFy，:3533 FFFFFF 批已立）——
+//   常规树 GrowTrunkT/观赏树 GrowVanityTreeT 曾整段「帧值不消费」写 0 →
+//   EE_NEWARMS 臂读帧域 284 格树帧债（trees 检查点）。
 void GrowTrunkT(int i, int index1, int height, ushort treeTile)
 {
     bool flagL = false, flagR = false;
@@ -6369,18 +6330,21 @@ void GrowTrunkT(int i, int index1, int height, ushort treeTile)
         flagL = false; flagR = false;
         if (num5 == 5 || num5 == 7) flagL = true;
         if (num5 == 6 || num5 == 7) flagR = true;
-        SetTSG(i, y, treeTile, 0, 0);                   // 帧值不消费（见上注）
+        SetTSG(i, y, treeTile, TrunkFx(num5, num4), TrunkFy(num5, num4));   // ★GGGGGG：干身帧入表
         if (num5 == 5 || num5 == 7)
         {
             int k = (int)r.Next(3);
-            int f2 = (int)r.Next(3);                   // <2 判定（帧不入哈希，骰照掷）
-            SetTSG(i - 1, y, treeTile, 0, 0);
+            int f2 = (int)r.Next(3);
+            // ★GGGGGG：侧枝帧补齐（cs:30201-30247；JS 同源）——变体骰 <2 走 198+ 行贴干枝
+            if (f2 < 2) SetTSG(i - 1, y, treeTile, 44, 198 + k * 22);
+            else SetTSG(i - 1, y, treeTile, 66, k * 22);
         }
         if (num5 == 6 || num5 == 7)
         {
             int k = (int)r.Next(3);
             int f2 = (int)r.Next(3);
-            SetTSG(i + 1, y, treeTile, 0, 0);
+            if (f2 < 2) SetTSG(i + 1, y, treeTile, 66, 198 + k * 22);
+            else SetTSG(i + 1, y, treeTile, 88, 66 + k * 22);
         }
     }
     // 基座方向 num6：两侧整砖+适树适配翻转
@@ -9540,6 +9504,7 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
                     frX[ti] = (ushort)(36 * style + a * 18);
                     frY[ti] = (ushort)(b == 0 ? 0 : 18);
                 }
+            MbCx.Anchors.Add((long)cy * 16384 + cx);   // ★IIIIII 锚位入册（左上格）
         }
         // —— 战利品掷骰（深/金/表三分支 + 尾段；与 JS rollChestLoot 同构 + Prefix(-1) 补齐）——
         // ★EEEEE 镜像（BBBBB ①）：surface 支门接 flag0（:36280 (flag23 && (flag||flag6))||flag11
@@ -11436,6 +11401,11 @@ bool PlaceTileGen(int i, int j, int type, int style)
             {
                 typ[(j - 1) * W + i] = 15; act[(j - 1) * W + i] = 1;
                 typ[j * W + i] = 15; act[j * W + i] = 1;
+                // ★IIIIII：帧写补齐（cs:46682-90 Place1x2）——frY=style*40+{0,18}、frX=0。
+                //   曾裸写无帧 → FinalCleanup 逐格 TileFrame→Check1x2 帧一致性门
+                //   （cs:43413）fail → 活树腔椅被整杀（seed1 (402/406,274) 案，act 差 4 格）
+                frY[(j - 1) * W + i] = (ushort)(style * 40); frX[(j - 1) * W + i] = 0;
+                frY[j * W + i] = (ushort)(style * 40 + 18); frX[j * W + i] = 0;
                 return true;
             }
             return false;
@@ -11710,7 +11680,7 @@ bool AddBuriedChestGen(int i, int j, int mainItemInChest, int chestStyle, ushort
                     if (!InB(cx + dx, cy + dy)) { ok = false; break; }
                     typ[ci] = chestTileType; act[ci] = 1;
                 }
-            if (ok) num8 = 0;
+            if (ok) { num8 = 0; MbCx.Anchors.Add((long)cy * 16384 + cx); }   // ★IIIIII 锚位入册
         }
         if (num8 < 0) return false;
         // ---- 战利品掷骰（cs:36266-37569）----
@@ -12427,6 +12397,8 @@ void GrowLivingTreePassageRoomG(int minl, int minr, int Y)
     {
         num9 += 2;
         bool ch1 = PlaceTileGen(num8, Y, 15, 5);
+        // ★IIIIII：面向翻转（cs:29404；JS LivingTreePass ch1 && num<0 → fx+=18）——曾漏
+        if (ch1 && num < 0) for (int dy = -1; dy <= 0; dy++) frX[(Y + dy) * W + num8] += 18;
         if (ltTrRM) Console.WriteLine($"R5chair ok={ch1} st={StreamHash():x8} num9={num9}");
     }
     num8 = num < 0 ? num3 + 2 : num5 - 2;
@@ -12436,6 +12408,8 @@ void GrowLivingTreePassageRoomG(int minl, int minr, int Y)
     if ((int)r.Next(num9) == 0)
     {
         bool ch2 = PlaceTileGen(num8, Y, 15, 5);
+        // ★IIIIII：面向翻转（cs:29415；JS ch2 && num>0 → fx+=18）——曾漏
+        if (ch2 && num > 0) for (int dy = -1; dy <= 0; dy++) frX[(Y + dy) * W + num8] += 18;
         if (ltTrRM) Console.WriteLine($"R7chair ok={ch2} st={StreamHash():x8}");
     }
     num8 = num < 0 ? num3 + 8 : num5 - 7;
@@ -13714,7 +13688,12 @@ bool QQCanPlace(int bx0, int by0, int bx1, int by1, int pad)
     if (bx0 < 0 || by0 < 0 || bx1 > W - 1 || by1 > H - 1) return false;
     int px0 = bx0 - pad, py0 = by0 - pad, px1 = bx1 + pad, py1 = by1 + pad;
     foreach (var pr in protRects)
-        if (px0 < pr.x1 && pr.x0 < px1 && py0 < pr.y1 && pr.y0 < py1) return false;
+        if (px0 < pr.x1 && pr.x0 < px1 && py0 < pr.y1 && pr.y0 < py1)
+        {
+            if (Environment.GetEnvironmentVariable("MB_TRACE") != null)
+                Console.Error.WriteLine($"MBCPFAIL rect=({px0},{py0} -> {px1},{py1}) hit=[{pr.x0},{pr.y0} -> {pr.x1},{pr.y1}]");
+            return false;
+        }
     for (int px = px0; px < px1; px++)
         for (int py = py0; py < py1; py++)
         {
@@ -13724,7 +13703,12 @@ bool QQCanPlace(int bx0, int by0, int bx1, int by1, int pad)
         }
     return true;
 }
-void QQAddProt(int bx0, int by0, int bx1, int by1, int pad) => protRects.Add((bx0 - pad, by0 - pad, bx1 + pad, by1 + pad));
+void QQAddProt(int bx0, int by0, int bx1, int by1, int pad)
+{
+    protRects.Add((bx0 - pad, by0 - pad, bx1 + pad, by1 + pad));
+    if (Environment.GetEnvironmentVariable("MB_TRACE") != null)
+        Console.Error.WriteLine($"MBPROT add=({bx0 - pad},{by0 - pad} -> {bx1 + pad},{by1 + pad}) n={protRects.Count}");
+}
 
 // ═════════ Pass 47 Beehives（cs:16005-16058 + HiveBiome.cs + HoneyPatchBiome.cs，HiveSpiderPass.ts 镜像）═════════
 Replay(); // ▶pass 头重播：Beehives cs:16005
@@ -14134,12 +14118,22 @@ Replay(); // ▶pass 头重播：Piles cs:18900
     bool pileTrace = Environment.GetEnvironmentVariable("PILE_TRACE") != null;
     bool ActAt(int ax, int ay) => QQInW(ax, ay) && act[ay * W + ax] != 0;
     int SheetAt(int ax, int ay) => QQInW(ax, ay) && act[ay * W + ax] != 0 ? typ[ay * W + ax] : -1;
-    // SolidTile2（cs:46862）：active && tileSolid && slope==0 && !half（GenSolid 覆写生效=SOLID 现值）
+    // SolidTile2（cs:70497 坐标重载）：active && !inActive && (genSolid||platform)
+    //   && slopeOk && !half——slopeOk=(platform&&(1||2))||0。
+    //   ★GGGGGG：曾用 cs:70178 Tile 重载语义（JGS∧slope0）缺平台支 → 平台上 1x1
+    //   小堆整族误拒（JS SSSS 仲裁同案：#77 残 2 格=顶坡平台小堆误拒；本种子
+    //   (2189,1042)/(2193,1042) 平台小堆案=scatter 门差@13740 的真身）。
     bool SolidTile2(int ax, int ay)
     {
         if (!QQInW(ax, ay)) return false;
         int i = ay * W + ax;
-        return act[i] != 0 && JGS(typ[i]) && slope[i] == 0 && half[i] == 0;   // HHHH: JS PilesPass.solidTile2（genSolid）
+        if (act[i] == 0 || inAct[i] != 0) return false;
+        // ★GGGGGG 勘误：平台集=FC_PLATFORMS（TileID.Sets.Platforms 7 集，JS
+        //   PLATFORM_SOLID 同源）——曾用 FC_PLAT（d.platform 86 家具集）→ 工作台/
+        //   桌椅族全算"平台"承堆（seed1 (2504,1072) 工作台上小堆案）。
+        bool plat = FC_PLATFORMS.Contains(typ[i]);
+        bool slopeOk = (plat && (slope[i] == 1 || slope[i] == 2)) || slope[i] == 0;
+        return (JGS(typ[i]) || plat) && slopeOk && half[i] == 0;
     }
     // SolidTileAllowBottomSlope（cs:70211）：active && (solid||platform) && !half && 非顶坡(1/2)
     bool SolidAllowBottom(int ax, int ay)
@@ -14170,6 +14164,11 @@ Replay(); // ▶pass 头重播：Piles cs:18900
             SetTS(ax + 1, ay, 185, pileStyle * 36 + 18, 18);
             return true;
         }
+        if (Environment.GetEnvironmentVariable("PILE_TRACE") != null)
+        {
+            int si2 = QQInW(ax, ay + 1) ? (ay + 1) * W + ax : -1;
+            Console.Error.WriteLine($"PLT0 n={QRollWrap.N} ({ax},{ay}) st={pileStyle} sup={(si2 >= 0 ? typ[si2] : -1)}/{(SolidTile2(ax, ay + 1) ? 1 : 0)} jgs={(si2 >= 0 && JGS(typ[si2]) ? 1 : 0)} plat={(si2 >= 0 && FC_PLAT.Contains(typ[si2]) ? 1 : 0)} sl={(si2 >= 0 ? slope[si2] : -1)} hf={(si2 >= 0 ? half[si2] : -1)} ia={(si2 >= 0 ? inAct[si2] : -1)}");
+        }
         if (!SolidTile2(ax, ay + 1) || ActAt(ax, ay)) return false;
         SetTS(ax, ay, 185, pileStyle * 18, 0);
         return true;
@@ -14188,7 +14187,8 @@ Replay(); // ▶pass 头重播：Piles cs:18900
         if (!QQInW(ax, ay)) return false;
         int i = ay * W + ax;
         if (act[i] == 0) return false;
-        bool plat = FC_PLAT.Contains(typ[i]);
+        // ★GGGGGG 勘误：同 SolidTile2——平台集=FC_PLATFORMS 7 集（非 FC_PLAT 86 集）
+        bool plat = FC_PLATFORMS.Contains(typ[i]);
         bool slopeOk = (plat && (slope[i] == 1 || slope[i] == 2)) || slope[i] == 0;
         return (JGS(typ[i]) || plat) && slopeOk && half[i] == 0;
     }
@@ -14750,9 +14750,17 @@ Replay(); // ▶pass 头重播：Trees cs:20085
             flagL = false; flagR = false;
             if (num6 == 5 || num6 == 7) flagL = true;
             if (num6 == 6 || num6 == 7) flagR = true;
-            SetTS(x, i, treeTile, 0, 0);
-            if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); int f2 = (int)r.Next(3); SetTS(x - 1, i, treeTile, 0, 0); }
-            if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); int f2 = (int)r.Next(3); SetTS(x + 1, i, treeTile, 0, 0); }
+            SetTS(x, i, treeTile, TrunkFx(num6, num5), TrunkFy(num6, num5));   // ★GGGGGG：观赏树干身帧入表（与 GrowTree 同表）
+            if (num6 == 5 || num6 == 7)
+            {
+                int k = (int)r.Next(3); int f2 = (int)r.Next(3);
+                if (f2 < 2) SetTS(x - 1, i, treeTile, 44, 198 + k * 22); else SetTS(x - 1, i, treeTile, 66, k * 22);
+            }
+            if (num6 == 6 || num6 == 7)
+            {
+                int k = (int)r.Next(3); int f2 = (int)r.Next(3);
+                if (f2 < 2) SetTS(x + 1, i, treeTile, 66, 198 + k * 22); else SetTS(x + 1, i, treeTile, 88, 66 + k * 22);
+            }
         }
         bool TuftFit(int dx) => QQInW(x + dx, num) && act[num * W + x + dx] != 0
             && half[num * W + x + dx] == 0 && slope[num * W + x + dx] == 0 && TREE_FIT.Contains(typ[num * W + x + dx]);
@@ -14863,7 +14871,13 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     int stuckCount = 0, stuckAmount = 0;
     const int BUF_CAP = 49998;
     var bufX = new int[BUF_CAP]; var bufY = new int[BUF_CAP];
-    int bufHead = 0, bufTail = 0;
+    // ★LLLLLL（2026-08-22）：LiquidBuffer 出序改 swap-remove（JS LiquidSim DDDDD 批同款
+    //    修正）——曾用 head/tail 环形 FIFO+回灌量=空余量，与原版（回灌量=当前活动数
+    //    numLiquid，cs:1134 恒等式；DelBuffer(0) swap-remove 出序 A,C,B…，LiquidBuffer
+    //    .cs:24-29）双重错位 → 缓冲带首触种子回灌时序整体漂移。seed2 1511931452 实证：
+    //    settle2 大水体排空首触缓冲带 → (3544,649) 残膜 4 单元时序差（JS/x86=排空）。
+    //    掷账不受影响（缓冲路径零掷）——ROLL_TRACE ALL-ROLLS-EQUAL 下唯一残差格。
+    int bufCount = 0;
     bool lsGenWorld = true;                                 // generatingWorld
     bool mergeTilesDuringGen = false;                       // finalGenMergeCheck 窗口
     HashSet<ushort> tiwOff = new();                         // tilesIgnoreWater 生效域
@@ -14913,7 +14927,78 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         //   FinalCleanup 引擎（genSquareTileFrame=cs:80924/82067/85703 全量 TileFrameImportant
         //   分派）——旧私有四臂子集（LsSquareTileFrame→Check2x2/CheckSuper 两臂）缺 case 184
         //   苔藓芽每帧恒掷 Next(3)/PlantCheck/CheckOrb 等臂（#97 wcfirst 首差掷 25 vs 2 实证）
-        FcSquareTileFrame(kx, ky);
+        LsSquareTileFrameGen(kx, ky);
+    }
+    // ---- ★LLLLLL（2026-08-22）：SquareTileFrameGen=旗帜前置扫+Fc 引擎（JS LiquidSim
+    //    .squareTileFrameGen 1:1 镜像）——vanilla KillTile 尾 SquareTileFrame(cs:80924)→
+    //    TileFrame case 91(cs:86442)→CheckBanner(cs:46105)：1×3 旗帜组帧/锚门任一破 →
+    //    destroyObject 期整组 KillTile。缺臂实证（seed2 1511931452）：settle2 地狱塔旗 91
+    //    下格被岩浆杀（WaterCheck 死亡表）后无级联、顶格残活（JS/x86=整组杀）→ 尘掷流
+    //    分叉 → settle2/cactus/microbiomes/finalcleanup 四名红。FCP 引擎缺 case 91 与 JS
+    //    同款过渡（前置扫替代；引擎补臂后可撤）。表口径：FC_NOT_REALLY_SOLID={387,388,10}
+    //    ≡JS NOT_REALLY_SOLID_SHEETS；FC_SOLID 含平台族≡JS d.solid||d.platform；
+    //    FC_PLATFORMS≡Platforms≡solidTop（JS 同源近似）----
+    bool lsBannerDestroy = false;                             // destroyObject 再入闸（cs:46105 头闸）
+    void LsSquareTileFrameGen(int x, int y)
+    {
+        for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++)
+        {
+            int nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+            int ni = ny * W + nx;
+            if (act[ni] != 0 && typ[ni] == 91) LsCheckBanner(nx, ny, typ[ni]);
+        }
+        FcSquareTileFrame(x, y);
+    }
+    void LsCheckBanner(int bx, int bj, ushort type)
+    {
+        if (lsBannerDestroy) return;                                  // cs:46105 头闸
+        int bi0 = bj * W + bx;
+        int row = frY[bi0] / 18, num2 = 0;
+        while (row >= 3) { row -= 3; num2++; }                        // 样式段（3 行/样式）
+        int num = bj - row;                                           // 组顶格 y
+        int bfx = frX[bi0];
+        bool bad = false;
+        for (int k = 0; k < 3; k++)
+        {
+            int yy = num + k;
+            if (yy < 0 || yy >= H) { bad = true; continue; }          // 越界=新 Tile→失配
+            int q = yy * W + bx;
+            if (act[q] == 0 || typ[q] != type
+                || frY[q] != k * 18 + num2 * 54
+                || frX[q] != bfx) bad = true;                         // cs:46119-46141
+        }
+        int ay = num - 1;
+        if (ay < 0 || ay >= H) bad = true;                            // 锚越界=新 Tile
+        else
+        {
+            int q = ay * W + bx;
+            ushort at = typ[q];
+            if (act[q] == 0) bad = true;                              // cs:46147 !nactive
+            else
+            {
+                bool topSlope = slope[q] == 1 || slope[q] == 2;
+                bool halfBrick = half[q] != 0;
+                bool bottomSlope = slope[q] == 3 || slope[q] == 4;
+                bool tileSolid = FC_SOLID.Contains(at);               // JS d.solid||d.platform（平台在表）
+                bool isPlatform = FC_PLATFORMS.Contains(at);          // ≡solidTop/Platforms（JS 同源）
+                bool num3 = topSlope || halfBrick || tileSolid;       // cs:46151
+                bool flag2 = !isPlatform || (isPlatform && (halfBrick || topSlope));
+                bool flag3 = num3 && flag2 && !FC_NOT_REALLY_SOLID.Contains(at) && !bottomSlope;
+                if (isPlatform || at == 380) flag3 = true;            // cs:46154 平台/花盆箱特例
+                if (!flag3) bad = true;
+            }
+        }
+        if (!bad) return;
+        lsBannerDestroy = true;
+        for (int k = 0; k < 3; k++)
+        {
+            int yy = num + k;
+            if (yy < 0 || yy >= H) continue;
+            if (typ[yy * W + bx] == type) LsKillTileGen(bx, yy);
+        }
+        lsBannerDestroy = false;
+        // cs:46174+ type==91 掉落支：生成期不产实体（JS 同备案，零掷）
     }
     // TileFrame 生成期子集（cs:82067）：边界闸 + 非活性清 half/slope 残基 + 帧重要族派发
     void LsTileFrame(int x, int y)
@@ -15080,15 +15165,11 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         if (act[i] != 0 && SolidNP(t) && t != 546) return;   // HHHH: JS t!==0=内部空格门（活性格恒过）；vanilla 0=泥土——曾把活性泥土格漏拒入列/漏清液
         if (numLiquid >= curMaxLiquid - 1)
         {
-            if (bufTail - bufHead < BUF_CAP)
+            // ★LLLLLL：AddBuffer 尾接（LiquidBuffer.cs:12-19）——纯 bufCount 追加，
+            //    无环形压缩（JS 同；swap-remove 出序下压缩会破坏 A,C,B… 序）
+            if (bufCount < BUF_CAP)
             {
-                if (bufTail == BUF_CAP)
-                {
-                    Array.Copy(bufX, bufHead, bufX, 0, bufTail - bufHead);
-                    Array.Copy(bufY, bufHead, bufY, 0, bufTail - bufHead);
-                    bufTail -= bufHead; bufHead = 0;
-                }
-                bufX[bufTail] = ax; bufY[bufTail] = ay; bufTail++;
+                bufX[bufCount] = ax; bufY[bufCount] = ay; bufCount++;
                 checking[i] = 1;                            // LiquidBuffer.AddBuffer :115
             }
             return;
@@ -15292,8 +15373,9 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
                         // ★XXXXX（EEEEEE 镜像）：每次转化尾随 SquareTileFrame(i,j)
                         //   （cs:1557/1562——3×3 帧扫把上方依附植物经 PlantCheck 锚亡杀链
                         //   收割；级联走 Fc 引擎全分派，与 JS squareTileFrameGen 同源）
-                        if (LS_BURN_AIR.Contains(t)) { typ[ni] = 0; act[ni] = 0; half[ni] = 0; slope[ni] = 0; FcSquareTileFrame(nx, ny); }
-                        else if (LS_BURN_DIRT.Contains(t)) { typ[ni] = 59; act[ni] = 1; FcSquareTileFrame(nx, ny); }
+                        //   ★LLLLLL：改经 LsSquareTileFrameGen（+旗帜前置扫，JS 同构）
+                        if (LS_BURN_AIR.Contains(t)) { typ[ni] = 0; act[ni] = 0; half[ni] = 0; slope[ni] = 0; LsSquareTileFrameGen(nx, ny); }
+                        else if (LS_BURN_DIRT.Contains(t)) { typ[ni] = 59; act[ni] = 1; LsSquareTileFrameGen(nx, ny); }
                     }
             }
             else if (liqT[i5] == 2) HoneyCheck(x, y);
@@ -15567,15 +15649,21 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
                     DelWater(l);
                 }
             }
-            if (bufTail > bufHead)                           // LiquidBuffer 回灌
+            if (bufCount > 0)                                // LiquidBuffer 回灌
             {
-                int free = Math.Min(curMaxLiquid - numLiquid, bufTail - bufHead);
+                // ★LLLLLL：回灌量=numLiquid（cs:1134 恒等式 curMaxLiquid-(curMaxLiquid-
+                //    numLiquid)，与空余量无关）+ DelBuffer(0) swap-remove（AddWater 之后
+                //    执行——重入队的同格被尾元素换回头位，出序 A,C,B…）。JS LiquidSim
+                //    DDDDD 批修正镜像；旧 FIFO+空余量上限=回灌时序整体错位根因。
+                int free = Math.Min(numLiquid, bufCount);
                 for (int n = 0; n < free; n++)
                 {
-                    int bx = bufX[bufHead], by = bufY[bufHead];
-                    bufHead++;
+                    int bx = bufX[0], by = bufY[0];
                     checking[by * W + bx] = 0;
                     AddWater(bx, by);
+                    bufCount--;
+                    bufX[0] = bufX[bufCount];
+                    bufY[0] = bufY[bufCount];
                 }
             }
             if (numLiquid > 0 && numLiquid > stuckAmount - 50 && numLiquid < stuckAmount + 50)
@@ -15764,7 +15852,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     {
         lq.Clear();
         numLiquid = 0;
-        bufHead = 0; bufTail = 0;
+        bufCount = 0;
         Array.Clear(checking, 0, checking.Length);
         for (int x = 1; x < W - 1; x++)
             for (int y = H - 2; y > 0; y--)
@@ -15811,13 +15899,30 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     QuickWater(3, -1);
     WaterCheck();
     quickSettle = true;
+    // ★LLLLLL TEMP 诊断（用完即删）：LIQ_TRACE=路径 → 逐 UpdateLiquid 记录
+    //   (3543..3544,649)/(3544,650) 三格液面变化 + 轮首活量/缓冲量
+    var liqTracePath = Environment.GetEnvironmentVariable("LIQ_TRACE");
+    System.IO.StreamWriter? liqW = liqTracePath != null ? new System.IO.StreamWriter(liqTracePath) : null;
+    int liqIter = 0;
+    int pA = 649 * W + 3543, pB = 649 * W + 3544, pC = 650 * W + 3544;
+    int la = liq[pA], lb = liq[pB], lc = liq[pC];
     for (int round = 0; round < 10; round++)
     {
-        int maxIter = (numLiquid + (bufTail - bufHead)) * 5;    // 轮预算=轮始活量×5（无下限）
+        int maxIter = (numLiquid + bufCount) * 5;    // 轮预算=轮始活量×5（无下限）
         int roundIter = 0;
-        while (numLiquid > 0 && roundIter < maxIter) { UpdateLiquid(); roundIter++; }
+        liqW?.WriteLine($"ROUND {round} numLiquid={numLiquid} buf={bufCount} maxIter={maxIter}");
+        while (numLiquid > 0 && roundIter < maxIter)
+        {
+            UpdateLiquid(); roundIter++; liqIter++;
+            if (liq[pA] != la || liq[pB] != lb || liq[pC] != lc)
+            {
+                la = liq[pA]; lb = liq[pB]; lc = liq[pC];
+                liqW?.WriteLine($"it={liqIter} r={round} c3543_649={la} c3544_649={lb} c3544_650={lc}");
+            }
+        }
         WaterCheck();
     }
+    liqW?.Dispose();
     quickSettle = false;
     wgOff = new HashSet<ushort>();                          // worldGenTilesIgnoreWater(false)
     // ★VVV（2026-08-18 镜像）：恢复后【无尾部 WaterCheck】——生成期两 pass（cs:16286-16293/
@@ -16417,6 +16522,7 @@ Replay(); // ▶MicroBiomes cs:21785
         int i = y * W + x;
         typ[i] = 162; act[i] = 1; frX[i] = 0; frY[i] = 0;
         wal[i] = 0; liq[i] = 0; liqT[i] = 0; half[i] = 0; slope[i] = 0;
+        MbFrameNbrSet(x, y);                        // ★GGGGGG：SetTile(162,setSelfFrames) 五连（JS setThinIce 尾，UUUU 补掷）
     }
     bool MbPlaceThinIcePatch(int ox, int oy)
     {
@@ -16496,7 +16602,14 @@ Replay(); // ▶MicroBiomes cs:21785
             }
             num4 += num5 - 2;
         }
-        QQAddProt(ox - 25, oy - 25, ox + 25, oy + 25, 0);   // AddStructure 近似入保护图（JS 备案同款）
+        // ★GGGGGG：薄冰斑保护登记整行撤销——vanilla ThinIceBiome.cs:32 是
+        //   `structures.AddStructure(rect, 8)`：StructureMap.cs:72-79 只入 _structures
+        //   **不入 _protectedStructures**，CanPlace（:19-56）仅查 _protectedStructures
+        //   ⇒ 薄冰斑不参与结构互斥。oracle 曾 QQAddProt 入 CanPlace 集 → 矿爆
+        //   (1113,597) attempt 被薄冰斑 [1102,548→1152,598] 误拒（MBTRACE 实证
+        //   MBCPFAIL hit=该矩形；g1 solid=227/184 本已过）→ microbiomes 全链漂移。
+        //   JS XXXX 批 span 对拍同案定谳（vanilla 放行被保护版拒绝的矿爆 try）后
+        //   撤登记——JS 为真值，oracle 对齐。
         return true;
     }
     {
@@ -16523,7 +16636,10 @@ Replay(); // ▶MicroBiomes cs:21785
     }
     void MbFrameNbrSet(int fx2, int fy2)        // SetFrames(frameNeighbors:true)=中心+四邻 TileFrame(reset=true)
     {
-        FcTileFrame(fx2, fy2, true); FcTileFrame(fx2 + 1, fy2); FcTileFrame(fx2 - 1, fy2); FcTileFrame(fx2, fy2 + 1); FcTileFrame(fx2, fy2 - 1);
+        // ★GGGGGG：四邻 reset 补 true（JS genFrameNeighbors 'setTile' 五连全 true——
+        //   WorldUtils.SetTile setSelfFrames+setNeighborFrames 双真；曾邻居漏 true，
+        //   178 宝石籽类 reset 门掷臂在邻格时漏掷——潜伏债）
+        FcTileFrame(fx2, fy2, true); FcTileFrame(fx2 + 1, fy2, true); FcTileFrame(fx2 - 1, fy2, true); FcTileFrame(fx2, fy2 + 1, true); FcTileFrame(fx2, fy2 - 1, true);
     }
     var MB_WALL_LARGE_FRAMES = new HashSet<ushort> { 224, 323, 324, 325, 326, 327, 328, 329, 330, 185, 274, 355, 358, 359, 362, 363, 366, 179, 146, 147, 167, 354 };
     var MB_PLANT_GROUND_3 = new HashSet<ushort> { 2, 78, 380, 477, 579 };
@@ -17110,8 +17226,11 @@ Replay(); // ▶MicroBiomes cs:21785
                 vy = Math.Max(-1, Math.Min(1, vy));
             }
         }
+        if (mbTrace != 0) Console.Error.WriteLine($"MBGATE ({ox},{oy}) anchor=({x},{y}) total={total} solid={solid} g1={(solid < (int)Math.Truncate(total / 2.0) ? "FAIL" : "ok")}");
         if (solid < (int)Math.Truncate(total / 2.0)) return false;
-        if (!QQCanPlace(x - 15, y - 10, x + 15, y + 10, 0)) return false;
+        bool gcp = QQCanPlace(x - 15, y - 10, x + 15, y + 10, 0);
+        if (mbTrace != 0) Console.Error.WriteLine($"MBCP ({ox},{oy}) canPlace={gcp}");
+        if (!gcp) return false;
         foreach (var key in dataKeys)
         {
             int qx = (int)(key % W), qy = (int)(key / W);
@@ -17121,6 +17240,7 @@ Replay(); // ▶MicroBiomes cs:21785
             //   连墙带液带帧带坡全清后写 type
             typ[i] = barType; act[i] = 1; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
             wal[i] = 0; liq[i] = 0; liqT[i] = 0;
+            MbFrameNbrSet(qx, qy);                       // ★GGGGGG：setSelfFrames+setNeighborFrames 五连（JS :750，XXXX 补）
         }
         // Circle(5)+Blotches(2,0.3) 挖房（中心=(x-trunc(-dir*5), y-5)）
         {
@@ -17142,7 +17262,13 @@ Replay(); // ▶MicroBiomes cs:21785
                     else pts.Add((cx + dx, cy + dy));
                     foreach (var (qx, qy) in pts)
                         if (QQInW(qx, qy))                             // HHHH（CCCC 3）：ClearTile=ClearSlope+active(false)（致动位生成期恒 0）
-                        { act[qy * W + qx] = 0; slope[qy * W + qx] = 0; half[qy * W + qx] = 0; }
+                        {
+                            act[qy * W + qx] = 0; slope[qy * W + qx] = 0; half[qy * W + qx] = 0;
+                            // ★GGGGGG：WorldUtils.ClearTile(frameNeighbors:true)=四邻
+                            //   TileFrame(reset=false)（JS :774，XXXX 补——邻格 184/178 类
+                            //   roll 臂掷侧）
+                            FcTileFrame(qx + 1, qy); FcTileFrame(qx - 1, qy); FcTileFrame(qx, qy + 1); FcTileFrame(qx, qy - 1);
+                        }
                 }
             }
         }
@@ -17241,7 +17367,10 @@ Replay(); // ▶MicroBiomes cs:21785
         {
             if (++tries > 3000) break;
             int ox = (int)r.Next(BEACH_DISTANCE, W - BEACH_DISTANCE);
-            int oy = (int)r.Next(rockLayer, H - 200);
+            // ★GGGGGG：cs:21964 top2=(int)GenVars.rockLayer（游走终值 gvRockLayer）——
+            //   曾误用 Main.rockLayer（rockLayer，493）→ 矿爆点 Y 域偏移 13 格
+            //   （JS XXXX 批同案定谳：van Next(523,1000) vs 误用版 Next(571,1000)）。
+            int oy = (int)r.Next((int)gvRockLayer, H - 200);
             if (mbTrace != 0) Console.Error.WriteLine($"MBTRY ({ox},{oy})");
             if (MbPlaceMiningExplosives(ox, oy)) placed++;
         }
@@ -17305,11 +17434,29 @@ Replay(); // ▶MicroBiomes cs:21785
         }
     }
     int mbJungleItemIdx = 0;    // gs.jungleItemIdx（探针实证链内先序消费=0）
+    // ★IIIIIL IL 复裁（2026-08-22，任务③）：1.4.5.6 金标二进制 /tmp/sw-slp/TerrariaServer.hs.exe
+    //   （md5 80e7ca0ec86781768de0396334775d9b，Assembly Version=1.4.5.6）Cecil 只读审读——
+    //   WorldGen::GetNextJungleChestItem IL instr[20]-[26] = `genRand.Next(50)==0 → 753`
+    //   首分支【在】，全法 3 个 Next 位点=50/15/20；AddBuriedChest 全法 197 个 Next 位点中
+    //   Next(50) 仅 3 处且均非 flag4 海草尾门（instr717=主件 669 门、instr2455/3371=
+    //   stack `Next(50)+50`）。⇒ 1456 反编译 cs:10147 与二进制全等；1457 cs:10164
+    //   （删首支+尾段 cs:37773/37860 加 1/50）系 1457 真实改动。**裁决：1456 二进制
+    //   真值=首分支在**。JS BuriedChestsPass.nextJungleItem 有意取 1457 → JS 侧偏差
+    //   移交协调者（本批 JS src 零改动纪律）。★LLLLLL 起（hellfort 主体回 1456 后）
+    //   oracle 默认=1456 真值：JS BuriedChestsPass JJJJJJ 批已回滚 1456，双端同态，
+    //   无 env 即对拍口径（金标再生 §2a 命令无 env 亦正确）；SW_MB_1457=1 才切 1457
+    //   口径（1457 对齐战役备用，勿默认）。
+    bool MB_1457 = Environment.GetEnvironmentVariable("SW_MB_1457") != null;
     int MbNextJungleItem()
     {
         int[] seq = { 211, 212, 213, 964 };
         int result = seq[mbJungleItemIdx % 4];
-        if ((int)r.Next(50) == 0) result = 753;
+        // ★GGGGGG 备案偏差 → ★IIIIII 复裁结案：1456 cs:10147 有 `Next(50)==0 → 753(Seaweed)`
+        //   首分支且二进制同（见 MB 注）；1457 cs:10164 删（海草 1/50 移箱尾段
+        //   cs:37773）。JS BuriedChestsPass.nextJungleItem=1456（JJJJJJ 批回滚，
+        //   注释在案）——oracle 默认 1456 同态；SW_MB_1457=1 切 1457（首支删+尾段
+        //   1/50 加，掷数不变）。
+        if (!MB_1457 && (int)r.Next(50) == 0) result = 753;
         else if ((int)r.Next(15) == 0) result = 2292;
         else if ((int)r.Next(20) == 0) result = 3017;
         mbJungleItemIdx++;
@@ -17358,6 +17505,8 @@ Replay(); // ▶MicroBiomes cs:21785
             if (!genShadowKey || (int)r.Next(3) == 0) genShadowKey = true;
             if (!genRamRune || (int)r.Next(8) == 0) { genRamRune = true; MbPrefixRolls(5465); }
         }
+        if (Environment.GetEnvironmentVariable("MB_TRACE") != null)
+            Console.Error.WriteLine($"MBIVYLOOT gy={gy} mainId={mainId} dg={flagDungeon} isGold={((gy < rockLayer) ? 1 : 0)} n={QRollWrap.N}");
         MbPrefixRolls(mainId);
         bool isGold = gy < rockLayer;
         if (isGold)
@@ -17367,13 +17516,20 @@ Replay(); // ▶MicroBiomes cs:21785
             if ((int)r.Next(3) == 0) r.Next(10, 20);                                    // 炸弹 166 [10,19]
             if ((int)r.Next(5) == 0) { }                                                // 天使雕像（无掷）
             if ((int)r.Next(3) == 0) r.Next(50, 101);                                   // 绳 [50,100]
-            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(3, 11); }                      // 锭 [3,10]
+            // ★IIIIII：gold 支锭 stack 值域勘误 Next(3,11)→Next(10)（vanilla cs:36734
+            //   `genRand.Next(10) + 5`=[5,14]；曾误抄 cave 支 cs:37051 Next(8)+3=[3,10]——
+            //   掷参 N(8) vs JS N(10) 同位分歧，seed2 掷账 first-div@168241 主因之一；
+            //   stack 值不入哈希只保掷账全等）
+            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(10); }                         // 锭 Next(10)+5=[5,14]（cs:36734）
             if ((int)r.Next(2) == 0) { r.Next(2); r.Next(25, 50); }                     // 箭 [25,49]
             if ((int)r.Next(2) == 0) r.Next(3, 6);                                      // 药水
-            if ((int)r.Next(3) > 0) { r.Next(9); r.Next(2, 3); }
-            if ((int)r.Next(3) != 0) r.Next(3, 5);                                      // 回城
+            // ★IIIIII 值域勘误（cs:36770/36745/36833）：药水 stack Next(2,3)→Next(1,3)、
+            //   回城 Next(3,5)→Next(2,5)、银币 Next(51,90)→Next(50,90)——gold 支三处
+            //   误抄 cave 支值域（掷参不同位不移，seed2 掷账 first-div@168248 实锤）
+            if ((int)r.Next(3) > 0) { r.Next(9); r.Next(1, 3); }
+            if ((int)r.Next(3) != 0) r.Next(2, 5);                                      // 回城
             if ((int)r.Next(2) == 0) r.Next(11, 21);                                    // 火把 [10,20]
-            if ((int)r.Next(2) == 0) r.Next(51, 90);                                    // 银币 [50,89]
+            if ((int)r.Next(2) == 0) r.Next(50, 90);                                    // 银币 [50,89]
         }
         else if (gy <= H - 250)
         {
@@ -17384,15 +17540,17 @@ Replay(); // ▶MicroBiomes cs:21785
             if (flagDungeon) MbDungeonGates();
             if ((int)r.Next(5) == 0) { }                                                 // 43 1/5
             if ((int)r.Next(3) == 0) { }                                                 // 167 1/3
-            if ((int)r.Next(5) == 0) r.Next(25, 51);                                     // 51 [25,50]
+            // ★GGGGGG：51 门 Next(5)→Next(4)（vanilla cs:37045 `genRand.Next(4)==0`；
+            //   曾 1/5 → 门分支概率偏 + 掷流值分歧 microbiomes@117152）
+            if ((int)r.Next(4) == 0) r.Next(25, 51);                                     // 51 [25,50]
             if ((int)r.Next(2) == 0) { r.Next(2); r.Next(3, 11); }                       // 锭
             if ((int)r.Next(2) == 0) { r.Next(2); r.Next(25, 51); }                      // 烈焰箭
             if ((int)r.Next(2) == 0) r.Next(3, 6);                                       // 188
-            if ((int)r.Next(3) > 0) { r.Next(6); r.Next(2, 3); }
-            if ((int)r.Next(3) > 1) { r.Next(6); r.Next(2, 3); }
-            if ((int)r.Next(2) == 0) r.Next(3, 5);                                       // 回城
-            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(16, 31); }                      // 火把/荧光棒 [15,30]
-            if ((int)r.Next(2) == 0) r.Next(2, 3);                                       // 金币 [1,2]
+            if ((int)r.Next(3) > 0) { r.Next(6); r.Next(1, 3); }                         // ★GGGGGG stack Next(1,3)（cs:37162）
+            if ((int)r.Next(3) > 1) { r.Next(6); r.Next(1, 3); }                         // ★GGGGGG 同上
+            if ((int)r.Next(2) == 0) r.Next(2, 5);                                       // 回城（cs:37148 Next(2,5)；曾 3,5）
+            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(15, 31); }                      // 火把/荧光棒（cs:37152 Next(15,31)；曾 16,31）
+            if ((int)r.Next(2) == 0) r.Next(1, 3);                                       // 金币（cs:37098 族 Next(1,3)；曾 2,3）
         }
         else
         {
@@ -17405,14 +17563,22 @@ Replay(); // ▶MicroBiomes cs:21785
             if ((int)r.Next(2) == 0) { r.Next(2); r.Next(15, 30); }                      // 陨铁/金锭 [15,29]
             if ((int)r.Next(2) == 0) { r.Next(2); r.Next(50, 75); }                      // 箭矢 [50,74]
             if ((int)r.Next(2) == 0) r.Next(15, 21);                                     // 227 [15,20]
-            if ((int)r.Next(3) > 0) { r.Next(8); r.Next(2, 3); }
-            if ((int)r.Next(3) > 0) { r.Next(8); r.Next(2, 3); }
-            if ((int)r.Next(3) == 0) { r.Next(2, 3); r.Next(2); }                        // 回城/回归
+            // ★IIIIII 值域勘误（cs:37296/37299/37346/37368）：首对门 Next(3)→Next(4)、
+            //   药水 stack 三处 Next(2,3)→Next(1,3)（vanilla `genRand.Next(1, 3)`）
+            if ((int)r.Next(4) > 0) { r.Next(8); r.Next(1, 3); }
+            if ((int)r.Next(3) > 0) { r.Next(8); r.Next(1, 3); }
+            if ((int)r.Next(3) == 0) { r.Next(1, 3); r.Next(2); }                        // 回城/回归
             if ((int)r.Next(2) == 0) { r.Next(2); r.Next(15, 30); }                      // 火把/荧光棒
             if ((int)r.Next(2) == 0) r.Next(2, 5);                                       // 金币 [2,4]
         }
         // 尾段
         if ((int)r.Next(4) == 0) { }                                                     // ivy 2204 1/4
+        // ★GGGGGG：1457 cs:37773 海草副物品 1/50（flag4 && Next(50)==0 → 753）——
+        //   与 MbNextJungleItem 的 1457 对齐同案（1456 该 1/50 在主件函数首分支，
+        //   1457 移至箱尾）。JS tail=1456（JJJJJJ 批回滚）；曾缺 → microbiomes@117172
+        //   掷流分歧。★IIIIII IL 复裁：1456 二进制尾段无此掷（AddBuriedChest Next(50)
+        //   仅 3 处均非海草门）→ 默认（1456 态）跳过；SW_MB_1457=1 才掷（掷侧短路成对）。
+        if (MB_1457 && (int)r.Next(50) == 0) { }                                         // 753 海草 1/50（仅 1457 态）
         if (flagDungeon && (int)r.Next(8) == 0) { }                                      // 2192 1/8
         if ((int)r.Next(12) == 0) r.Next(14);                                            // voice
     }
@@ -17468,6 +17634,9 @@ Replay(); // ▶MicroBiomes cs:21785
                     frX[k] = (ushort)(10 * 2 * 18 + (dx + 1) * 18); frY[k] = (ushort)(dy * 18);
                 }
         }
+        // ★IIIIII：chest 锚位入册（Chest.CreateChest=(i-1,gy-2)；JS sink 同构）——
+        //   CanDestroyChest/CanKillTile 坡链消费（MbSmoothSlope→MbCanKillTileSlope）
+        MbCx.Anchors.Add((long)topY * 16384 + (i - 1));
         MbRollIvyLoot(gy, mainId, flagDungeon);
         return true;   // chest sink（world.chests）oracle 无消费者——不入册，备案
     }
@@ -17559,6 +17728,12 @@ Replay(); // ▶MicroBiomes cs:21785
         double num8 = r.NextDouble() + 1.0;
         double num9 = r.NextDouble() + 2.0;
         if ((int)r.Next(2) == 0) num9 = -num9;
+        // ★GGGGGG：UUUU 掷侧镜像（JS setMahog/shaftCell/branchCell 尾随帧链）——
+        //   SetTile(383) 尾 genTileFrame(中心 reset=true)；ClearTile+PlaceWall(78) 尾
+        //   genFrameNeighbors('clearTile') 四邻+placeWallFrameRollsMB 五连；
+        //   分枝 SetTile 尾 genFrameNeighbors('setTile') 中心+四邻 reset=true。
+        //   曾整段缺 → microbiomes 段 mahogany 首树分枝期掷流分叉（JS N(3) 邻帧臂
+        //   掷 vs oracle 零掷，first-div@114137）。
         void MbSetMahog(int x, int y)
         {
             if (!QQInW(x, y)) return;
@@ -17567,6 +17742,7 @@ Replay(); // ▶MicroBiomes cs:21785
             if (wal[i] == 87) return;
             wal[i] = 0; liq[i] = 0; liqT[i] = 0; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
             typ[i] = 383; act[i] = 1;
+            FcTileFrame(x, y, true);                                    // 尾随 SetFrames()（cs:55）
         }
         void MbShaftCell(int x, int y)
         {
@@ -17575,7 +17751,10 @@ Replay(); // ▶MicroBiomes cs:21785
             if (act[i] != 0 && MB_MAHOGANY_SKIP.Contains(typ[i])) return;
             if (wal[i] == 87) return;
             act[i] = 0; slope[i] = 0; half[i] = 0;
-            wal[i] = 78;
+            // ClearTile(frameNeighbors)：四邻 TileFrame(reset=false)（+x/-x/+y/-y）
+            FcTileFrame(x + 1, y); FcTileFrame(x - 1, y); FcTileFrame(x, y + 1); FcTileFrame(x, y - 1);
+            wal[i] = 78;                                                // PlaceWall(78)
+            MbPlaceWallFrameRolls(x, y);                                // 五连 SquareWallFrame 掷侧
         }
         void MbGenRect(int x, int y, int width, int height, Action<int, int> a)
         {
@@ -17600,8 +17779,14 @@ Replay(); // ▶MicroBiomes cs:21785
             int i = y * W + x;
             if (act[i] != 0 && MB_MAHOGANY_SKIP.Contains(typ[i])) return;
             if (wal[i] == 87) return;
+            // ★IIIIII：SetTile(383) Clear 连墙清（KKKKK，JS :1039）——曾漏
+            wal[i] = 0;
             liq[i] = 0; liqT[i] = 0; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
             typ[i] = 383; act[i] = 1;
+            // SetFrames(frameNeighbors:true)（cs:75/79/80）：中心+四邻 reset=true
+            FcTileFrame(x, y, true);
+            FcTileFrame(x + 1, y, true); FcTileFrame(x - 1, y, true);
+            FcTileFrame(x, y + 1, true); FcTileFrame(x, y - 1, true);
         }
         void MbShapeBranch(double angle, int distance, int bx, int by)
         {
@@ -17668,8 +17853,12 @@ Replay(); // ▶MicroBiomes cs:21785
                         int i = ly * W + lx;
                         if (act[i] != 0 && MB_LEAF_SKIP.Contains(typ[i])) continue;
                         if (wal[i] == 78 || wal[i] == 87) continue;
+                        // ★IIIIII：SetTile(384) Clear 连墙清（KKKKK，JS :1143）——曾漏 → 树域墙差 6,099
+                        wal[i] = 0;
                         liq[i] = 0; liqT[i] = 0; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
                         typ[i] = 384; act[i] = 1;
+                        // ★GGGGGG：SetFrames(frameNeighbors:true) 五连（JS :1148，UUUU 补掷）
+                        MbFrameNbrSet(lx, ly);
                     }
                 }
             }
@@ -17681,8 +17870,11 @@ Replay(); // ▶MicroBiomes cs:21785
             int i = y * W + x;
             if (act[i] != 0 && MB_MAHOGANY_SKIP.Contains(typ[i])) return;
             if (wal[i] == 87) return;
+            // ★IIIIII：SetTile(383,setSelfFrames) Clear 连墙清（KKKKK，JS :1159）——曾漏
+            wal[i] = 0;
             liq[i] = 0; liqT[i] = 0; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
             typ[i] = 383; act[i] = 1;
+            MbFrameNbrSet(x, y);                         // ★GGGGGG（JS :1164，UUUU 补掷）
         }
         for (int k = 0; k < 4; k++)
         {
@@ -17965,14 +18157,226 @@ Replay(); // ▶MicroBiomes cs:21785
                 return;
         }
     }
+    // ★IIIIII：CheckTileBreakability（cs:62403-62512）——MbKillTileLane 曾缺此门（JS
+    //   TrackPass.killTileLane 有）→ 巷杀对"上有树干/容器/仙人掌/锁门"的格 JS/vanilla
+    //   拒杀（brk2 整跳零掷 / brk1 fail 支类型转换+九宫、零尘掷）而 oracle 照杀带尘掷
+    //   → std#51 PlacePath 掷流 923 vs JS 808（+115）→ 自第 4 轨起全段轨系漂移
+    //   （seed2 首格差 (2105,390)=JS 第 4 轨巷挖、oracle 无）。TrackPass.ts:527-570 镜像。
+    var MB_TRK_BOULDERS = new HashSet<ushort> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716 };
+    var MB_TRK_TREE_TRUNK = new HashSet<ushort> { 5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634 };
+    var MB_TRK_MOSS = new HashSet<ushort> { 179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627 };
+    var MB_TRK_PREV_REMOVAL = new HashSet<ushort> { 5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634 };
+    bool MbIsLockedDoor(int x, int y)               // IsLockedDoor（cs:69248）：type10 && fy∈[594,646] && fx<54
+    {
+        if (!QQInW(x, y)) return false;
+        int i = y * W + x;
+        return typ[i] == 10 && frY[i] >= 594 && frY[i] <= 646 && frX[i] < 54;
+    }
+    bool MbHasReason(int ignoreSheet, int x, int y, bool scanForContainer)   // HasReasonToReturnEarly（cs:62494-62512）
+    {
+        if (!QQInW(x, y)) return false;
+        int i = y * W + x;
+        if (act[i] == 0) return false;
+        int sh = typ[i];
+        // 生成期 hardMode=false → type77 门恒真（JS S_TABLE 折叠同型）
+        if (sh != ignoreSheet && (sh == 77 || MB_TRK_PREV_REMOVAL.Contains((ushort)sh))) return true;
+        if (MbIsLockedDoor(x, y)) return true;
+        return scanForContainer && MB_CONTAINER.Contains((ushort)sh);
+    }
+    bool MbCheckBoulderChest(int x, int y, int fx, int fy, int sh)           // CheckBoulderChest（cs:48810-33）
+    {
+        int num = fx / 18 * -1;
+        if (num < -1) num += 2;
+        num += x;
+        int num2 = fy;
+        while (num2 >= 36) num2 -= 36;
+        num2 = y - num2 / 18;
+        if (MbHasReason(sh, num, num2 - 1, true)) return true;
+        if (MbHasReason(sh, num + 1, num2 - 1, true)) return true;
+        return false;
+    }
+    int MbCheckTileBreakability(int x, int y)       // CheckTileBreakability（cs:62403-62490）
+    {
+        if (!QQInW(x, y)) return 0;
+        if (y < 1 || y > H - 1) return 0;
+        int i = y * W + x;
+        int sh = typ[i];
+        if (y + 1 < H && act[(y + 1) * W + x] != 0 && MbIsLockedDoor(x, y + 1)) return 2;
+        if (!MbStaticSolid((ushort)sh) && !MB_PLATFORM.Contains((ushort)sh)) return 0;      // !tileSolid && !tileSolidTop → 恒可杀
+        if (y - 1 >= 0 && act[(y - 1) * W + x] != 0)
+        {
+            int ui = (y - 1) * W + x;
+            int shUp = typ[ui];
+            int fxu = frX[ui], fyu = frY[ui];
+            bool flag = MB_CONTAINER.Contains((ushort)sh);                          // IsAContainer(本格)
+            if (MbHasReason(sh, x, y - 1, !flag))
+            {
+                if (MB_TRK_TREE_TRUNK.Contains((ushort)shUp))
+                {
+                    if ((fxu == 66 && fyu >= 0 && fyu <= 44) || (fxu == 88 && fyu >= 66 && fyu <= 110) || fyu >= 198) return 0;
+                    return 2;
+                }
+                if (shUp == 323) { if (fxu == 66 || fxu == 220) return 2; return 0; }
+                return 2;
+            }
+            if (shUp == 80 && shUp != sh)
+            {
+                int num = fxu / 18;
+                if (num == 0 || num == 1 || num == 4 || num == 5) return 2;
+            }
+            if (sh == 10 && MbIsLockedDoor(x, y)) return 1;
+            if (MB_TRK_BOULDERS.Contains((ushort)sh))
+            {
+                if (MbCheckBoulderChest(x, y, frX[i], frY[i], sh)) return 1;
+                return 0;
+            }
+        }
+        if (sh == 235)
+        {
+            int num2 = x - frX[i] % 54 / 18;
+            for (int k = 0; k < 3; k++)
+                if (MbHasReason(sh, num2 + k, y - 1, true)) return 2;
+        }
+        return 0;
+    }
+    bool MbTrkSolidTile(int x, int y)               // TrackPass.solidTile（WorldGen.SolidTile 口径）
+    {
+        if (!QQInW(x, y)) return false;
+        int i = y * W + x;
+        return act[i] != 0 && MbStaticSolid(typ[i]) && !MB_PLATFORM.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;
+    }
+    // ★IIIIII：Tile.SmoothSlope（cs:822-877）全链——MbPlacePath 第二遍曾整段缺（vanilla
+    //   cs:119-124 每列两调：轨下 y+1 + 轨上 y-playerHeight）→ 轨下/邻坡全缺 → seed1
+    //   microbiomes 段 slope 通道 +883 差、finalcleanup ③ 臂以坡谓词为门的 6 格落沙
+    //   转化级联（(676,516) 53→397 等）。TrackPass.ts:596-657 镜像。
+    var MB_POUND_BLOCK = new HashSet<ushort> { 10, 48, 137, 232, 380, 387, 388, 476, 484 };
+    var MB_FORBIDS_SLOPING = new HashSet<ushort> { 21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597 };
+    // （MbSolidOrSloped 复用 :16388 既有定义=SolidOrSlopedTile 同语义）
+    bool MbForbidsSloping(int x, int y)             // ForbidsSloping（cs:81484，按型查）
+        => QQInW(x, y) && MB_FORBIDS_SLOPING.Contains(typ[y * W + x]);
+    bool MbCanDestroyChest(int x, int y) => !MbCx.Anchors.Contains((long)y * 16384 + x);
+    bool MbCanKillTileSlope(int x, int y)           // CanKillTile（cs:62262-62345 生成期档）
+    {
+        if (!QQInW(x, y)) return false;
+        int i = y * W + x;
+        if (act[i] == 0) return false;
+        if (wal[i] == 350) return false;
+        int sh = typ[i], fx = frX[i], fy = frY[i];
+        if (y - 1 >= 0 && act[(y - 1) * W + x] != 0)
+        {
+            int ui = (y - 1) * W + x;
+            int shUp = typ[ui], fxu = frX[ui], fyu = frY[ui];
+            if (MB_TRK_TREE_TRUNK.Contains((ushort)shUp) && shUp != sh
+                && !(fxu == 66 && fyu >= 0 && fyu <= 44) && !(fxu == 88 && fyu >= 66 && fyu <= 110) && fyu < 198) return false;
+            if (shUp == 323 && shUp != sh && (fxu == 66 || fxu == 220)) return false;
+            if ((shUp == 21 || shUp == 26 || shUp == 72 || shUp == 77 || shUp == 88 || shUp == 467 || shUp == 488) && shUp != sh) return false;
+            if (shUp == 80 && shUp != sh)
+            {
+                int num = fxu / 18;
+                if (num == 0 || num == 1 || num == 4 || num == 5) return false;
+            }
+        }
+        if (MB_TRK_BOULDERS.Contains((ushort)sh) && MbCheckBoulderChest(x, y, fx, fy, sh)) return false;
+        if (sh == 10 && MbIsLockedDoor(x, y)) return false;
+        if (sh == 235)
+        {
+            int num2 = x - fx % 54 / 18;
+            for (int k = 0; k < 3; k++) if (MbHasReason(sh, num2 + k, y - 1, true)) return false;
+        }
+        if (sh == 21 || sh == 467) { if (!MbCanDestroyChest(x - fx / 18 % 2, y - fy / 18)) return false; }
+        else if (sh == 88) { if (!MbCanDestroyChest(x - fx / 18 % 3, y - fy / 18)) return false; }
+        return true;
+    }
+    bool MbCanPoundTile(int x, int y)               // CanPoundTile（cs:81434-79；生成期恒 isGenerating）
+    {
+        if (!QQInW(x, y)) return false;
+        int i = y * W + x;
+        int sh = typ[i];
+        if (MB_POUND_BLOCK.Contains((ushort)sh)) return false;
+        if (MB_TRK_BOULDERS.Contains((ushort)sh)) return false;
+        if (sh == 190 || sh == 30) return false;
+        if (y - 1 >= 0 && act[(y - 1) * W + x] != 0 && MbForbidsSloping(x, y - 1)) return false;
+        return MbCanKillTileSlope(x, y);
+    }
+    void MbSmoothSlope(int x, int y, bool applyToNeighbors = true)
+    {
+        if (applyToNeighbors)
+        {
+            MbSmoothSlope(x + 1, y, false);
+            MbSmoothSlope(x - 1, y, false);
+            MbSmoothSlope(x, y + 1, false);
+            MbSmoothSlope(x, y - 1, false);
+        }
+        if (!QQInW(x, y)) return;
+        if (!MbCanPoundTile(x, y) || !MbSolidOrSloped(x, y)) return;
+        int i = y * W + x;
+        bool flag = y - 1 >= 0 && act[(y - 1) * W + x] != 0;            // !TileEmpty
+        bool flag2 = !MbSolidOrSloped(x, y - 1) && flag;
+        bool flag3 = MbSolidOrSloped(x, y + 1);
+        bool flag4 = MbSolidOrSloped(x - 1, y);
+        bool flag5 = MbSolidOrSloped(x + 1, y);
+        int num = ((flag ? 1 : 0) << 3) | ((flag3 ? 1 : 0) << 2) | ((flag4 ? 1 : 0) << 1) | (flag5 ? 1 : 0);
+        switch (num)
+        {
+            case 10: if (!flag2) { half[i] = 0; slope[i] = 3; } break;
+            case 9: if (!flag2) { half[i] = 0; slope[i] = 4; } break;
+            case 6: half[i] = 0; slope[i] = 1; break;
+            case 5: half[i] = 0; slope[i] = 2; break;
+            case 4: slope[i] = 0; half[i] = 1; break;
+            default: half[i] = 0; slope[i] = 0; break;
+        }
+    }
+    bool mbFossilBreak = false;
+    void MbFossilShatter(int x, int y, int sh)      // AttemptFossilShattering（cs:63526-54；FFFFF #101 巷内 404 可达）
+    {
+        if (sh != 404 || mbFossilBreak) return;
+        mbFossilBreak = true;
+        for (int k = x - 1; k <= x + 1; k++)
+            for (int l = y - 1; l <= y + 1; l++)
+            {
+                int maxValue = 15;
+                if (!MbTrkSolidTile(k, l + 1)) maxValue = 4;
+                else if (k == x && l == y - 1) maxValue = 4;                // fail 恒 false
+                if ((k != x || l != y) && QQInW(k, l))
+                {
+                    int ki = l * W + k;
+                    if (act[ki] != 0 && typ[ki] == 404 && (int)r.Next(maxValue) == 0)
+                        MbKillTileLane(k, l);
+                }
+            }
+        mbFossilBreak = false;
+    }
+
     void MbKillTileLane(int x, int y)              // 生成期 KillTile（cs:63559 fail=false 档）
     {
         if (!QQInW(x, y)) return;
         int i = y * W + x;
         if (act[i] == 0) return;
+        if (typ[i] >= 753) return;                 // JS sheet<0 门（未实装 sheet 恒拒杀）
+        // ★IIIIII：CheckTileBreakability 门（cs:63579 在 KillTile 体内）——brk2 整跳 /
+        //   brk1 fail 支（转换+九宫、尘掷=fail 档且可达族 {10,138} 尘掷恒 0 → 等价零掷）
+        int brk = MbCheckTileBreakability(x, y);
+        if (brk == 2) return;
+        if (brk == 1)
+        {
+            // fail 支（cs:63757-73）：草族→泥/石转换 + SquareTileFrame（可达族不命中转换，全表移植）
+            int sh0 = typ[i];
+            if (sh0 == 2 || sh0 == 23 || sh0 == 109 || sh0 == 199 || sh0 == 477 || sh0 == 492) typ[i] = 0;
+            else if (sh0 == 633) typ[i] = 57;
+            else if (sh0 == 60 || sh0 == 661 || sh0 == 662 || sh0 == 70) typ[i] = 59;
+            if (MB_TRK_MOSS.Contains((ushort)typ[i])) typ[i] = 1;
+            FcSquareTileFrame(x, y);
+            return;
+        }
         int dust = MbKillDustAmount(typ[i], frX[i]);
         for (int k = 0; k < dust; k++) MbDustRoll(r, typ[i], frX[i]);
-        FcKillTile(x, y);                          // setTileSilent(0)+SquareTileFrame 级联（液体/墙保留）
+        MbFossilShatter(x, y, typ[i]);             // ★IIIIII：cs:63756（曾缺）
+        // ★IIIIII：写侧不再走 FcKillTile——其体内自带 FcDustAmount 尘掷循环（EE_NEWARMS
+        //   默认开）→ 曾与本函数头上的 MbDustRoll 循环【双重尘掷】（std#51 窗 N(2) 240 vs
+        //   JS 120 实锤），自第 4 轨起全段轨系漂移。改为内联 setTileSilent(0)+九宫级联
+        //   （=FcKillTile 尾段，尘掷只保留头上一次，vanilla 顺序 尘→化石→写）。
+        FcSetTile(x, y, 0);
+        FcSquareTileFrame(x, y);
     }
     void MbTf314(int x, int y)                      // WorldGen.TileFrame(resetFrame:true) 单格 314 分派
     {
@@ -18016,6 +18420,13 @@ Replay(); // ▶MicroBiomes cs:21785
             if ((int)r.Next(7) == 0) mbPlayerHeight = (int)r.Next(5, 9);
             var th = mbHist[k];
             if (!QQInW(th.x, th.y)) continue;
+            // ★IIIIII：SmoothSlope 两调（cs:119-124）——曾整段缺（见 MbSmoothSlope 注）
+            MbSmoothSlope(th.x, th.y + 1);
+            {
+                int ai = (th.y - mbPlayerHeight) * W + th.x;
+                bool oob = th.y - mbPlayerHeight < 0;
+                if (oob || act[ai] == 0 || typ[ai] != 379) MbSmoothSlope(th.x, th.y - mbPlayerHeight);
+            }
             int idx = th.y * W + th.x;
             int wireBits = mbWire[idx] & 15;        // 四色线暂存（cs:129-132）
             if (pressure[k] != 0 && k > 0 && mbHist[k - 1].y == th.y && mbHist[k + 1].y == th.y)
@@ -18089,13 +18500,17 @@ Replay(); // ▶MicroBiomes cs:21785
     }
     {
         int trackFailLimit = (int)Math.Truncate(W / 2.0);
+        bool mbTT2 = Environment.GetEnvironmentVariable("MB_TTRACE") != null;   // ★IIIIII：逐 attempt 账
+        int mbAtt = 0;
         int trackCount = (int)r.Next(MbScW(1), MbScW(2) + 1);
         int tDone = 0, tFail = 0;
         while (tDone < trackCount)
         {
             int ox = (int)r.Next(10, W - 10);
             int oy = (int)r.Next(worldSurface, H - 200);
-            if (MbTrackPlace(ox, oy, MbScW(400), MbScW(1000))) { tDone++; tFail = 0; }
+            bool ok = MbTrackPlace(ox, oy, MbScW(400), MbScW(1000));
+            if (mbTT2) Console.WriteLine($"MBATT long #{mbAtt++} ox={ox} oy={oy} -> {(ok ? "PLACED" : $"fail{mbTrackFail[0]},{mbTrackFail[1]},{mbTrackFail[2]},{mbTrackFail[3]},{mbTrackFail[4]}")}");
+            if (ok) { tDone++; tFail = 0; }
             else { tFail++; if (tFail > trackFailLimit) { tDone++; tFail = 0; } }
         }
         trackCount = (int)r.Next(Math.Max(1, (int)Math.Truncate(mbAreaScale * 4)), Math.Max(1, (int)Math.Truncate(mbAreaScale * 7)) + 1);
@@ -18104,7 +18519,9 @@ Replay(); // ▶MicroBiomes cs:21785
         {
             int ox = (int)r.Next(10, W - 10);
             int oy = (int)r.Next(worldSurface, H - 200);
-            if (MbTrackPlace(ox, oy, MbScW(150), MbScW(300))) { tDone++; tFail = 0; }
+            bool ok = MbTrackPlace(ox, oy, MbScW(150), MbScW(300));
+            if (mbTT2) Console.WriteLine($"MBATT std #{mbAtt++} ox={ox} oy={oy} -> {(ok ? "PLACED" : $"fail{mbTrackFail[0]},{mbTrackFail[1]},{mbTrackFail[2]},{mbTrackFail[3]},{mbTrackFail[4]}")}");
+            if (ok) { tDone++; tFail = 0; }
             else { tFail++; if (tFail > trackFailLimit) { tDone++; tFail = 0; } }
         }
         int trackCells = 0;
@@ -20207,6 +20624,64 @@ if (fcBase != null)
 }
 Replay(); // ▶pass 头重播：FinalCleanup cs:22304（pass 105；ShimmerCleanUp 同 pass 尾段不重播）
 // ① tileSolid[484]=false（cs:22305）——FC 谓词表内联（FcTSolid），无 SOLID 翻转
+// ★IIIIII：② FillWallHolesInArea（cs:22307；JS FinalCleanupPass.fillWallHolesInArea
+//   PPPP 实装镜像）——曾备案跳过 → 地表带墙洞不填（seed1 finalcleanup 墙差 182：
+//   云岛 wall73/活木 244/96 等众数填充）。InSpot=BFS 洪泛 ≥150 弃填、单格不填、
+//   空计分兜底泥墙 2、只补 wall==0 格；膨胀仅从"触空"格发起。
+bool FcFillWallHolesInSpot(int ox, int oy, int maxWalls)
+{
+    if (!(ox >= 2 && oy >= 2 && ox < W - 2 && oy < H - 2)) return false;   // InWorld(,2)
+    var inSet = new HashSet<long>();
+    var counts = new Dictionary<ushort, int>();
+    var next = new List<(int x, int y)> { (ox, oy) };
+    while (next.Count > 0)
+    {
+        var cur = next; next = new List<(int x, int y)>();
+        int ci = 0;
+        while (ci < cur.Count)
+        {
+            if (inSet.Count >= maxWalls) return false;                     // cs:9915 阈值弃填
+            (int x, int y) = cur[ci++];
+            long k = (long)x * 65536 + y;
+            if (inSet.Contains(k)) continue;
+            if (!(x >= 1 && y >= 1 && x < W - 1 && y < H - 1)) continue;   // cs:9923 InWorld(,1)
+            inSet.Add(k);
+            int i = y * W + x;
+            if (wal[i] != 0) { counts[wal[i]] = counts.GetValueOrDefault(wal[i]) + 1; continue; }
+            bool exposed = false;
+            for (int dx = -1; dx <= 1 && !exposed; dx++) if (act[y * W + (x + dx)] == 0) exposed = true;
+            if (!exposed) for (int dy = -1; dy <= 1 && !exposed; dy++) if (act[(y + dy) * W + x] == 0) exposed = true;
+            if (exposed) { next.Add((x - 1, y)); next.Add((x + 1, y)); next.Add((x, y - 1)); next.Add((x, y + 1)); }
+        }
+    }
+    if (inSet.Count == 1) return false;                                    // cs:9982 单格不填
+    ushort best = 0; int bestN = -1;
+    foreach (var kv in counts) if (kv.Value > bestN) { best = kv.Key; bestN = kv.Value; }
+    if (bestN == -1) best = 2;                                             // cs:9993 兜底泥墙
+    foreach (var k in inSet)
+    {
+        int x = (int)(k / 65536), y = (int)(k % 65536);
+        int i = y * W + x;
+        if (wal[i] == 0) wal[i] = best;
+    }
+    return true;
+}
+{
+    int endY2 = Math.Min((int)worldSurface, H - 2);
+    for (int fwx = 0; fwx < W; fwx++)
+    {
+        int cx2 = Math.Min(Math.Max(fwx, 2), W - 3);
+        bool hadWall2 = false;
+        for (int fwy = 2; fwy < endY2; fwy++)
+        {
+            if (wal[fwy * W + cx2] == 0)
+            {
+                if (hadWall2) { hadWall2 = false; FcFillWallHolesInSpot(cx2, fwy, 150); }
+            }
+            else hadWall2 = true;
+        }
+    }
+}
 for (int fci = 0; fci < W; fci++)
 {
     for (int fcj = 0; fcj < H; fcj++)
@@ -20607,6 +21082,11 @@ if (shimmerXOut >= 0 && shimmerYOut >= 0)
         }
     }
 }
+
+// ★GGGGGG：检查点 76 定名（runbook ④「75→N」首名）——pass 105 FinalCleanup
+//   （主扫+ShimmerCleanUp+体末 LiquidCheck cs:22639-50）链侧对拍名。JS 链侧
+//   caves-checkpoint.test.ts 同名 snap（runFinalCleanupPass+finalGenMergeScan）。
+Checkpoint("finalcleanup");
 
 // 终态九通道 dump（head-to-head 用）
 var fcDump = Environment.GetEnvironmentVariable("HHHH_FC_DUMP");
@@ -21048,6 +21528,13 @@ sealed class DgCR
 //   追踪窗=beehives Replay 前→microbiomes Checkpoint 后；行格式与 JS 探针 _ffff1 同构：
 //   `<n> N(<max>) -> <v>` / `<n> R(<a>,<b>) -> <v>` / `<n> D -> <v:R>` / `RESEED`（无计数行）。
 //   On=false 时零开销直通（Replay 换回裸流）。
+// ★IIIIII：chest 锚位册（CanDestroyChest cs:590-607 镜像——生成期箱皆有货恒"不可毁"；
+//   JS TrackPass.blockedChestAnchors 同构。登记点=三处 chest 写入成功位（锚=左上格）。
+static class MbCx
+{
+    public static readonly System.Collections.Generic.HashSet<long> Anchors = new();
+}
+
 sealed class QRollWrap
 {
     public dynamic inner = null!;

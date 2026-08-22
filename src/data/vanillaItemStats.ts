@@ -30,6 +30,28 @@ const STATS = statsJson as Record<string, VanillaItemStat>;
 // UpdateEquips :14219-14222 counterWeight 直置 + ApplyEquipVanity :13800-13803 虚荣档）
 for (let _v = 3309; _v <= 3314; _v++) STATS[String(_v)] ??= { acc: 1 };
 
+// 1457 新配饰族 acc 槽位手补（提取器源=1456 无 6147-6195;1457 ItemID.cs:13858-13936 +
+// Item.cs SetDefaults DefaultToAccessory——accessory=true。armorAccepts 功能配饰槽门
+// `st.acc===1` 依赖本标记,缺失 = 全族无法穿进配饰槽）。非配饰成员不入表：
+// 6147 巨型提基像/6148-6152 Palworld 宠物坐骑/6153-6155 武器/6161·6164 召唤杖/
+// 6163 暮光之握=配饰!/6171 宝石法杖/6173 ArcSurge 武器/6174 Digtoise 坐骑/
+// 6190·6195 跑酷书/6191·6192 亲缘桃子（使用型）
+const ACC_STATS_1457: Array<[number, VanillaItemStat]> = [
+  [6156, { acc: 1 }], [6157, { acc: 1 }], [6158, { acc: 1 }], [6159, { acc: 1 }],
+  [6160, { acc: 1 }], [6163, { acc: 1 }], [6165, { acc: 1 }], [6166, { acc: 1 }],
+  [6167, { acc: 1 }], [6168, { acc: 1 }], [6169, { acc: 1 }], [6170, { acc: 1 }],
+  [6172, { acc: 1 }], [6175, { acc: 1 }], [6176, { acc: 1 }], [6177, { acc: 1 }],
+  [6178, { acc: 1 }], [6179, { acc: 1 }], [6180, { acc: 1 }], [6181, { acc: 1 }],
+  [6182, { acc: 1 }], [6183, { acc: 1 }], [6184, { acc: 1 }], [6185, { acc: 1 }],
+  [6186, { acc: 1 }], [6187, { acc: 1 }],
+  // 6188/6189 提取器已有条目（def/life）但缺 acc——合并而非覆盖
+  [6188, { acc: 1 }], [6189, { acc: 1 }],
+  [6193, { acc: 1 }], [6194, { acc: 1 }],
+];
+for (const [_v, _s] of ACC_STATS_1457) {
+  STATS[String(_v)] = { ...(STATS[String(_v)] ?? {}), ..._s };
+}
+
 // 世界态变体防御覆写（Item.cs :41852-41875：remix 世界灰烬木三件 def 全降 1）
 // ——取数口叠层（vanillaItemCombat.itemCombat 同法），上下文由 Game.afterWorldLoad 灌入
 function overlayVariantDefense(vid: number, s: VanillaItemStat | null): VanillaItemStat | null {

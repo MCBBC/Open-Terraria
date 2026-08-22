@@ -1,6 +1,12 @@
 // 1457 新增：FinalSeedCleanup 全种子终扫（WorldGen.cs:692 FinalizeSecretSeeds 尾部
 // **无条件**调用 + 实现 :695-830）+ 四涂装种子族单格/全图 pass。
 //
+// ★★KKKKKK 批（2026-08-22）DORMANT 备案：本 pass 是 **1457-only**——1456 的
+//   FinalizeSecretSeeds（Terarria1456/Terraria/WorldGen.cs:576-680）**无此调用**、
+//   1456 全源 grep「FinalSeedCleanup」零命中。IIIIII IL 复裁裁决 1456（=1.4.5.6
+//   二进制真值）为准 → **任何种子都不跑**，WorldGen.ts 接线已撤（本文件保留=
+//   1457 语义存档,1457 对齐战役时按 1457 WorldGen.cs:692 重新接线即可）。
+//
 // ── 结构 ──
 //   FinalSeedCleanup(:695)        全图 [5, 尺寸-5) 扫描：悬空 Falling 块按类型静态化
 //                                 （224→147 / 53,495→397 / 112→398 / 234→399 / 116→402,

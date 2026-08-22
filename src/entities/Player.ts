@@ -767,9 +767,7 @@ export class Player extends Entity {
     const inv = this.inv;
     let k = '';
     for (let i = 0; i < inv.armor.length; i++) {
-      // GetEffectiveArmor 口径（LoadoutShare）：跨配装收藏共享件入键——
-      // 他套收藏变动/卸下同步失效缓存
-      const s = inv.getEffectiveArmor(i);
+      const s = inv.armor[i];
       k += (s?.id ?? 0) + 'p' + (s?.prefix ?? 0) + '.';
     }
     for (let i = 0; i < inv.dye.length; i++) {
@@ -858,7 +856,7 @@ export class Player extends Entity {
     let accSharpBarb = false, mysticSashDodge = false, accTimerCrit = false;
     let ammoCyclerMode = 0;   // PlayerAmmoCyclingMode（PlayerAmmoCyclingMode.cs:None=0/AmmoSlots=1/FullInventory=2/Random=3）
     for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) {
-      const s = this.inv.getEffectiveArmor(i);
+      const s = this.inv.armor[i];
       if (!s) continue;
       const fx = accFxOfInternal(s.id);
       // 巫毒娃娃(Player.cs:8801 killGuide / :8804 killClothier):装备即置位——
@@ -914,6 +912,18 @@ export class Player extends Entity {
       if (accVid === 3334) yoyoGlove = true;                  // 悠悠球手套（:14223-14226）
       // ---- 1457 新配饰行为旗（ApplyEquipFunctional case 6166-6189 :14596-14739;
       //      数值主属性走下方 accfx/SUMMON_GEAR 链,此处只收行为布尔/模式）----
+      //  登记未接（效果旗已聚合,消费端待批）：
+      //  · accHarpyCharm 6166/6180/6181——弧线引矢三段（Update_HarpyCharm :28663-28705
+      //    扫 arrow 弹改向 ApplyHarpyCharm :58752-58805 + AI_001 rotateTowards 消费
+      //    + PhoenixQuivered/SeraphNecklaced 命中 323/300 :11179-11181）在 Arrow.ts
+      //    （批 C 域）,旗先落;冷却 90t（6180 ×0.8 :28671-28673）字段未建
+      //  · accSnappingStone 6167 远程命中触发（Projectile.cs:13443-13446 kind0）——
+      //    弹侧挂点在 Arrow.ts;脉冲本体已实装（stats/SnapStrike kind0）
+      //  · ammoCyclerMode 6168-6194——弹药轮换本体（PickAmmo_IterateRange :54330-54389
+      //    + ItemCheck 弹药消耗轮换 :54209-54217）未接,仅 +8% 远程伤生效
+      //  · accSentryBackpack 6172/6175/6176/6177——哨兵携带（SetAsSelectedSentryBackpackTarget
+      //    /IsSentryBeingCarried/AI_Sentries_HeavySlingReposition）未接,旗+6176 暴击生效
+      //  · accTimerCrit 6170——时间蓄能暴击（:28524-28570 accTimerCritCharge）未接
       if (accVid === 6166) { accHarpyCharm = true; critRanged += 5; }              // 鹰妖护符（:14596-14599）
       else if (accVid === 6167) accSnappingStone = true;                           // 拍击石（:14600-14602）
       else if (accVid === 6170) accTimerCrit = true;                               // 计时暴击（:14603-14605,登记未接）
@@ -1067,7 +1077,7 @@ export class Player extends Entity {
     // ApplyEquipFunctional 只扫功能槽）。备案：功能槽侧原版有 hideVisibleAccessory 门
     //（:36362 !hide 才应用），本仓无 per-slot 隐藏字段未建模。
     for (let i = 13; i < 20; i++) {
-      const s = this.inv.getEffectiveArmor(i);
+      const s = this.inv.armor[i];
       if (!s) continue;
       const v = ITEM_DEFS[s.id];
       const vid = v?.vid ?? (v?.key?.startsWith('vi_') ? parseInt(v.key.slice(3), 10) : -1);
@@ -1116,15 +1126,15 @@ export class Player extends Entity {
       if (fx.wickedArmlet) accWickedArmlet = true;
     };
     let seenDd2 = false;
-    for (let i = 0; i < 3; i++) sumFx(this.inv.getEffectiveArmor(i));
+    for (let i = 0; i < 3; i++) sumFx(this.inv.armor[i]);
     // GrantArmorBenefits 盔甲三件扫描（Player.cs:12826-12831）：armor 268 潜水头盔 → accDivingHelm
     for (let i = 0; i < 3; i++) {
-      const s = this.inv.getEffectiveArmor(i);
+      const s = this.inv.armor[i];
       if (s && accFxOfInternal(s.id)?.divingHelm) divingHelm = true;
     }
     // 套装/头盔 type 检测（vid 直查）：蘑菇矿头 1546箭/1547弹/1548火箭（:13274-13288）
     const aVid = (i: number): number => {
-      const d = ITEM_DEFS[this.inv.getEffectiveArmor(i)?.id ?? -1];
+      const d = ITEM_DEFS[this.inv.armor[i]?.id ?? -1];
       return d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
     };
     const [hVid, bVid, lVid] = [aVid(0), aVid(1), aVid(2)];
@@ -1136,7 +1146,7 @@ export class Player extends Entity {
     nebulaSet = hVid === 2760 && bVid === 2761 && lVid === 2762;
     beetleOff = hVid === 2199 && bVid === 2200 && lVid === 2202; // 进攻甲
     beetleDef = hVid === 2199 && bVid === 2201 && lVid === 2202; // 防御甲（壳：beetleEndurance 15%/球）
-    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) sumFx(this.inv.getEffectiveArmor(i));
+    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) sumFx(this.inv.armor[i]);
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
     // DD2 盔甲散件主属性（DD2_PIECE_FX——Player.cs:12709-12810 胸/腿件逐件扫描,2026-08-13）
     for (let _i = 0; _i < 3; _i++) {
@@ -1213,9 +1223,9 @@ export class Player extends Entity {
     let huntressT2 = false;
     // 召唤系套装（SUMMON_SET 槽序键；散件效果已在上扫，此处只叠套装层）
     const summonSet = (() => {
-      const st0 = statOfInternal(this.inv.getEffectiveArmor(0)?.id ?? -1);
-      const st1 = statOfInternal(this.inv.getEffectiveArmor(1)?.id ?? -1);
-      const st2 = statOfInternal(this.inv.getEffectiveArmor(2)?.id ?? -1);
+      const st0 = statOfInternal(this.inv.armor[0]?.id ?? -1);
+      const st1 = statOfInternal(this.inv.armor[1]?.id ?? -1);
+      const st2 = statOfInternal(this.inv.armor[2]?.id ?? -1);
       if (!st0?.hs || st1?.bs === undefined || st2?.ls === undefined) return null;
       const s = SUMMON_SET[`${st0.hs}|${st1.bs}|${st2.ls}`] ?? SUMMON_SET[`${st0.hs}|${st1.bs}|*`];
       if (!s) return null;

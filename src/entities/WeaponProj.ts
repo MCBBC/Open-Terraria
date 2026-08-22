@@ -1781,7 +1781,7 @@ export class YoyoShotProj extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
-      playEnemyHitSound(game, e);
+      playEnemyHitSound(game, e as Parameters<typeof playEnemyHitSound>[1]);
       e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit);
       game.addDamageNumber(this.cx, this.cy - 8, dmg, crit, crit ? '#FFD040' : '#FF7060');
       if (this.projId === 1134) break;                       // penetrate 1（:10643）

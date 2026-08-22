@@ -116,7 +116,7 @@ export interface GameHooks {
   playSfxAt?(name: import('../core/Sfx').SfxName, x: number, y: number): void;
   /** 弹幕消亡钩子（Projectile.Kill 按弹型分发；x/y/w/h = 弹体命中盒，
    *  oldVx/oldVy = 消亡时速度——碎镜 1085 的 Kill 特效链消费） */
-  onProjectileDeath?(projId: number, x: number, y: number, w?: number, h?: number, oldVx?: number, oldVy?: number): void;
+  onProjectileDeath?(projId: number, x: number, y: number, w?: number, h?: number, oldVx?: number, oldVy?: number, dmg?: number): void;
   /** 粉末云实效（净化粉 proj 10 / 邪恶粉 11 / 猩红粉 463，Projectile.cs:22399-22533
    *  AI_006 每帧回调）：命中盒内逐格 WorldGen.Convert + Damage_TryUsingPowders（:13646）
    *  NPC 转化。Game 实现（evolution.convert + bound 税务官 Transform 链） */

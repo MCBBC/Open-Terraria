@@ -308,15 +308,16 @@ function plantBadMatch(down: number, type: number): boolean {
   }
   return true;
 }
-/** PlantCheck_TryGetNewType（1457 cs:81818-81886）：按地基换型+帧折叠。
- *  ★批4 review P1-1①②：isMushroomOrSpore 判据族含 **61**（1457 由 3|110|24 扩为
- *  3|61|110|24,cs:81886-81892）且按【入口帧】判定——C# 在折叠前读 frameX,故
- *  down∈{60,226} 把 144 折成 18、down=70 折成 72 的场景仍判 true（回写 144）。
- *  spore 随返回值交调用方（PlantCheck 尾按 type2 回写 144/270）。 */
+/** PlantCheck_TryGetNewType（1456 cs:81348-81420）：按地基换型+帧折叠。
+ *  ★KKKKKK 批 1457→1456 回滚：①isMushroom 判据族=**3|110|24**（1457 批曾按
+ *  1457 cs:81886-81892 扩入 61——61 不在 1456 判据族,1456 cs:81351）；②按【入口帧】
+ *  判定——C# 在折叠前读 frameX,故 down∈{60,226} 把 144 折成 18、down=70 折成 72
+ *  的场景仍判 true（回写 144）。spore 随返回值交调用方（1456 PlantCheck 尾按
+ *  **入口 type** 回写 144/270,1457 是按 type2——见 plantCheckSweep 注）。 */
 function plantNewType(sheet: number, down: number, fx: number): { type: number; fx: number; spore: boolean } {
   let type = sheet, nfx = fx;
   let spore = false;
-  if (type === 3 || type === 61 || type === 110 || type === 24) spore = nfx === 144;   // 入口帧
+  if (type === 3 || type === 110 || type === 24) spore = nfx === 144;   // 入口帧（1456 判据族,无 61）
   if (type === 201) spore = nfx === 270;                                               // 入口帧
   if ((type === 3 || type === 73) && down !== 2 && down !== 477 && nfx >= 162) nfx = 126;
   if (type === 74 && down !== 60 && down !== 226 && nfx >= 162) nfx = 126;
@@ -1473,10 +1474,12 @@ function plantCheckSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, she
   if (r.type !== sheet) {
     st.type[i] = sid(r.type);
     st.frameX[i] = r.fx;
-    // ★批4 review P1-1③（cs:81871-81880）：spore 判定用入口帧（TryGetNewType 出参）、
-    //   回写分支查 **type2==201（转化后类型）**——入口 3(fx144)+down199/662 → 写 270、
-    //   入口 201(fx270)+down2/477 → 写 144（曾双向错帧：判折叠后帧+查入口 sheet）。
-    if (r.spore) st.frameX[i] = r.type === 201 ? 270 : 144;
+    // ★KKKKKK 1456 回滚（cs:81300-81310）：spore 判定用入口帧（TryGetNewType 出参）、
+    //   回写分支查 **入口 type（原 sheet）==201 → 270,否则 144**——1457 批曾按
+    //   type2（转化后类型）查（cs:81871-81880）。1456 语义：入口 201(fx270)+down
+    //   2/477 → 写 270；入口 3/110/24(fx144)+down 199/662 → 写 144（转化成 201 也
+    //   保持 144——1456 不看转化后类型）。
+    if (r.spore) st.frameX[i] = sheet === 201 ? 270 : 144;
   } else {
     ctx.destroyObject = true; killTileGen(st, ctx, x, y); ctx.destroyObject = false;
   }
@@ -1549,17 +1552,11 @@ function check2x1Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
   let ok = st.frameX[st.idx(x0 + 1, y)] === st.frameX[st.idx(x0, y)]! + 18
     && sheetAt2(st, x0, y) === sheet && sheetAt2(st, x0 + 1, y) === sheet
     && activeAt2(st, x0, y) && activeAt2(st, x0 + 1, y);
-  if (sheet === 103) {
-    // ★批4 review P1-2（1457 cs:47417-47430）：case103=桌面门【或】AnchorValid(Table)
-    //  逃生门（两底格各判,短路序同原版）——碗底为平台平帧 / solid∩solidTop /
-    //  tileTable 且 blockType 0 时存活;29/462 维持纯桌面门（cs:47431-47441）。
-    for (const xx of [x0, x0 + 1]) {
-      const bi = st.idx(xx, y + 1);
-      const tableGate = !st.flags[bi] || !TILE_TABLE.has(SWEEP_SHEET[st.type[bi]])
-        || st.half[bi] !== 0 || slopeOf(st, xx, y + 1) === 1 || slopeOf(st, xx, y + 1) === 2;
-      if (tableGate && !anchorValidSweep(st, xx, y + 1, 4)) ok = false;   // 4=AnchorType.Table
-    }
-  } else if (sheet === 29 || sheet === 462) {
+  if (sheet === 103 || sheet === 29 || sheet === 462) {
+    // ★KKKKKK 1456 回滚（cs:47019-47033）：1456 的 case103 与 29/462 同支=纯桌面门
+    //  （两底格各判:非活性/非 tileTable/halfBrick/topSlope → flag）；1457 批曾按
+    //  1457 cs:47648 给 103 加 AnchorValid(Table) 逃生门（碗底为平台平帧/
+    //  solid∩solidTop/tileTable 且 blockType 0 时存活）——1456 无此门,已并回。
     for (const xx of [x0, x0 + 1]) {
       const bi = st.idx(xx, y + 1);
       if (!st.flags[bi] || !TILE_TABLE.has(SWEEP_SHEET[st.type[bi]])

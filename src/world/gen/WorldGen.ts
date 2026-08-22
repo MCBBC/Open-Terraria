@@ -325,11 +325,12 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   // 吸血鬼种子终段（WorldGen.cs:22625-22631：GenerateWorld 尾部全部 GenPass 之后
   // vampireSeed → RandomizeWorldSpawn + PlaceTorchesAroundSpawn + PutMonsterVanityInChests）
   vampireSeedFinishPass(ctx);
-  // ★1457 全种子终扫（cs:22666 SecretSeed.FinalizeSecretSeeds 尾 → FinalSeedCleanup
-  //   :695 无条件调用）：悬空 Falling 块按类型静态化（53/495→397、112→398、234→399、
-  //   116→402、224→147、其余→1）+ 四涂装种子单格涂（旗标未实装恒 no-op）。位置在
-  //   vampireSeed 终段之后（与原版序一致）、多格残片兜底清扫之前。
-  finalSeedCleanup(world.store, world.seedFlags ?? {}, world.chests);
+  // ★KKKKKK 批（2026-08-22）撤除 FinalSeedCleanup 终扫：该 pass 是 **1457 新增**
+  //   （1457 WorldGen.cs:692 FinalizeSecretSeeds 尾无条件调用 FinalSeedCleanup:695;
+  //   1456 cs:576-680 FinalizeSecretSeeds 无此调用、全源 grep 零命中）——悬空
+  //   Falling 块静态化（53/495→397、112→398、234→399、116→402、224→147、其余→1）
+  //   属 1457 语义,1456 真值下任何种子都不跑。1457 语义存档 →
+  //   vanilla/FinalSeedCleanupPass.ts（文件保留,头注已标 1457-only dormant）。
   // ★终扫(finalize 之后):finalize 的幽灵 type 净化会把"flags=0 但 type 残留"
   // 的多格物体清成 0 → 在清扫 pass 之后【再造残片】(2026-08-13 缺位断言实锤:
   // 生成后 pot 残片 1 处,补扫即清零)。清扫幂等且廉价,此处兜底。
@@ -406,7 +407,8 @@ import { settleWorldLiquids, finalGenMergeScan } from '../liquid/settle';
 import vanillaJson from '../../../public/sprites/vanilla.json';
 import { runUndergroundJungleTreesPass } from './vanilla/UndergroundJungleTreesPass';
 import { runQuickCleanupPass } from './vanilla/QuickCleanupPass';
-import { finalSeedCleanup } from './vanilla/FinalSeedCleanupPass';
+// ★KKKKKK：finalSeedCleanup import 已撤（1457-only pass,1456 管线不接线;
+//   存档见 vanilla/FinalSeedCleanupPass.ts 头注）。
 
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
 async function liquidSettlePass({ world, rng }: GenCtx) {

@@ -148,11 +148,15 @@ function nearOtherChests(st: TileStore, x: number, y: number): boolean {
 }
 
 /** 常春藤箱主件序(GetNextJungleChestItem cs:10130:循环 211/212/213/964 + 稀有替换)。
- *  ★1457（cs:10146）删 `Next(50)==0 → 753` 首分支——753 现为 GiantTiki **tile** id
- *  （1457 新内容,原写法疑似 bug）；海草 753 改为箱尾段副物品 1/50（cs:37773）。 */
+ *  ★IIIIII IL 复裁（2026-08-22）→ JJJJJJ 回滚 1456：金标二进制（1.4.5.6,
+ *  TerrariaServer.hs.exe）GetNextJungleChestItem 全法 46 指令与 1456 反编译
+ *  cs:10147 逐指令全等——`Next(50)==0 → 753(海草)` 首分支【在】（instr[20]-[26]）；
+ *  1457 cs:10164 才删（海草 1/50 移箱尾 cs:37773）。本函数曾有意取 1457 行为
+ *  （旧注释在案）——与金标再生窗口成对回滚（oracle SW_MB_1456=1 同态门已备）。 */
 export function nextJungleItem(gs: GenState, rng: RNG): number {
   let result = [211, 212, 213, 964][gs.jungleItemIdx % 4];
-  if (rng.int(0, 14) === 0) result = 2292; // 1/15 玻璃钢鱼竿
+  if (rng.int(0, 49) === 0) result = 753; // ★1456 cs:10147 首分支（IIIIII IL 复裁：1457 才删）
+  else if (rng.int(0, 14) === 0) result = 2292; // 1/15 玻璃钢鱼竿
   else if (rng.int(0, 19) === 0) result = 3017; // 1/20 花之靴
   gs.jungleItemIdx++;
   return result;
@@ -197,8 +201,8 @@ Object.assign(PRE_CLASS, {
   4062: 'magic', 112: 'magic', 218: 'magic',
   // boom（BoomerangsChakrams 集）：670 寒冰回旋镖
   670: 'boom',
-  // ★1457 新内容：6153 GlacierFang（PrefixLegacy.Magic 集,cs:73）——冰箱 7 元池新主件,
-  //   物品空间未注册（占位）但 Prefix(-1) 照耗 1×Next(4)（掷流对拍口径）
+  // ★1457 新内容：6153 GlacierFang（PrefixLegacy.Magic 集,cs:73）——1457 冰箱 7 元池
+  //   新主件;★JJJJJ 回滚 1456 后主物池回到 Next(6) 六选,6153 不可达（死数据留档）
   6153: 'magic',
   // acc（accessory&&!vanity&&CanGetPrefixes 全过）：冰 950/987/1579、沙 4055/4056、
   // 丛林 211/212/3017、水 863/4404/187、金字塔 848/857、天空 159/158/2219
@@ -559,14 +563,14 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     const id = vid(2204);
     if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
   }
-  // ★1457 新增（cs:37773）：flag4 && Next(50)==0 → 753 海草副物品（主物分支已删）
-  if (flags.ivy && rng.int(0, 49) === 0) pushItem(753);
+  // ★JJJJJ 回滚 1456（IIIIII IL 复裁：二进制 AddBuriedChest Next(50) 仅 3 处均非尾段
+  //   海草/鱼门；1456 尾段 cs:37415-37512 无 753/669 掷）——曾按 1457 补的两条
+  //   `flag4 && Next(50)==0 → 753`（cs:37773）/`flag2 && Next(50)==0 → 669`（cs:37781）
+  //   各多耗 1 掷/箱，掷流整体漂移（四链 mile8 破绿主因之一），已删。
   if (flags.ice && rng.int(0, 6) === 0) {
     const id = vid(2198);
     if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
   }
-  // ★1457 新增（cs:37781）：flag2 && Next(50)==0 → 669 鱼（原冰箱主物 1/50 移此）
-  if (flags.ice && rng.int(0, 49) === 0) pushItem(669);
   {
     const f12 = !!flags.skyTheme || mainVanillaId === 159 || mainVanillaId === 65
       || mainVanillaId === 158 || mainVanillaId === 2219;
@@ -837,15 +841,15 @@ function placeBuriedChestInner(
     if (tile === CHEST) style = 11;
     if (iceDbg) iceDbg(i, gy, tBelow, mainId, style, 1);   // fired=1
     if (!mainId) {
-      // ★1457（cs:36456）：`Next(6) 六选` → `Utils.SelectRandom(genRand, 7 元)`——
-      //   +6153 GlacierFang（1457 新魔法武器;2026-08-21 素材批后已注册:
-      //   vanilla.json 收编 → 自动注册 vi_6153_GlacierFang,贴图/UseSound Item_210 齐）；
-      //   remix 覆写 1319→725 从内联三元改为命中后改写
-      //   （普通种子零差异）；`Next(50)==0 → 669` 主物分支删除（669 移箱尾副物品
-      //   1/50,cs:37781）。
-      mainId = [670, 724, 950, 1319, 987, 1579, 6153][rng.nextInt(7)]; // cs:36456 SelectRandom=Next(7)
+      // ★1456（cs:36122-36130）IIIIII IL 复裁 → JJJJJJ 回滚：二进制 instr673=`Next(6)`
+      //   六选（6153 GlacierFang 系 1457 新内容，1456 全源无此 id——PRE_CLASS/PRE_STATS
+      //   的 6153 登记自此为死数据，留档防未来池变动）；instr719=`Next(50)==0 → 669`
+      //   主物门（1457 删移箱尾 cs:37781）。remix 1319→725 在 1456 为内联三元，
+      //   命中后改写与之一致（普通种子零差异）。
+      mainId = [670, 724, 950, 1319, 987, 1579][rng.nextInt(6)]; // cs:36122 Next(6) 六选
       if (gs.seedFlags.remix && mainId === 1319) mainId = 725;
-      if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机
+      if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机 cs:36125
+      if (rng.int(0, 49) === 0) mainId = 669; // ★1456 cs:36126 Next(50)==0→669（1457 删）
     }
   }
   // ---- 天空箱降档门（cs:36180-36189，原版位于 hell 门后）：style12 的落定格

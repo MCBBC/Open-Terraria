@@ -2,7 +2,7 @@
 //  权威：Terarria1457/Terraria.GameContent.Items/TagEffectStack.cs（:1-139）+
 //  TagEffectState.cs（:1-120）+ TagDamageChanges.cs + WhipTagEffect_*.cs 十类 +
 //  ItemID.cs:1313-1428 UniqueTagEffects 全表 + Player.cs :13068-13083/:14615-14739
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
@@ -220,7 +220,9 @@ describe('1457 数值大改', () => {
     player.tagEffectStack.tryApplyTagToNPC(4672, e.id, 0, 5);   // 皮革鞭 tagdmg 词缀 5
     player.tagEffectStack.tryApplyTagToNPC(5478, e.id, 0, 5);   // 电鳗鞭（同词缀取 max）
     player.tagEffectStack.tryEnableProcOnNPC(5478, e.id);
+    const rvi = vi.spyOn(Math, 'random').mockReturnValue(0.99);   // 播种:5478 crit 5% 不触发(未播种 flaky,同吸血鬼飞刀教训)
     const res = resolveWhipTagHit(e, 100, hooks, () => {}, 0.669, e.cx, e.cy, player);
+    rvi.mockRestore();
     // Σtag = 4+12 = 16;+bonus 5 → (16+5)×0.669 = 14（截断）;+flat 50（链电 0 目标）
     expect(res.dmg).toBe(100 + Math.trunc((4 + 12 + 5) * 0.669) + 50);
   });

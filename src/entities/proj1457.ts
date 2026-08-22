@@ -53,7 +53,7 @@ interface HitTarget {
 function dealContacts(
   self: { x: number; y: number; w: number; h: number; cx: number; cy: number; damage: number; knockback: number; armorPen: number; critChance: number; projId: number },
   game: GameHooks,
-  cd: HitCd,
+  cd: HitCdImpl,
   cooldown: number,
   onHit?: (t: HitTarget) => void,
 ): void {
@@ -550,7 +550,7 @@ export class StormLightning extends Entity {
   private readonly searchR: number;
   private t = 0;
   private hitCd = new HitCdImpl();
-  private sharedCd: HitCd | null;
+  private sharedCd: HitCdImpl | null;
   /** 跟鼠标回调（1117 无目标态；Game 注入） */
   mouseWorld?: () => { x: number; y: number };
 

@@ -59,7 +59,7 @@ describe('1457 叶绿巨剑 1226 三连击(updateUse :7491 奖励击制)', () =>
     (g as unknown as { updateUse: (dt: number) => void }).updateUse(1 / 60);
     expect(added).toHaveLength(1);
     const shot = added[0] as { projId: number; damage: number; knockback: number; vx: number; vy: number };
-    expect(shot.projId).toBe(229);
+    expect(shot.projId).toBe(1126);   // 批 C:229 代偿已删,1457 终值 1126
     expect(shot.damage).toBe(Math.round(95 * 1.5));            // :49411-49413
     expect(shot.knockback).toBeCloseTo(6 * 1.25, 6);           // :49414
     expect(shot.vy).toBe(0);                                   // 奖励击水平出手 (dir,0)
@@ -71,7 +71,8 @@ describe('1457 叶绿巨剑 1226 三连击(updateUse :7491 奖励击制)', () =>
     const shot = added[0] as { damage: number; knockback: number; vx: number; vy: number };
     expect(shot.damage).toBe(95);
     expect(shot.knockback).toBeCloseTo(6, 6);
-    expect(shot.vy).toBeCloseTo(shot.vx, 6);                   // (dir,1)/√2 归一
+    // 1126 专实体 :42745 velocity=(dir,0)恒(方向进 rotation/砸地门 localAI[2],
+    // 非奖励击 horizontal=false 由实体 rotation 朝下表达——Game 出手 vy 恒 0)
     expect(player.chlorophyteBladeCounter).toBe(96);
   });
 

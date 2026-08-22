@@ -62,6 +62,10 @@ import { runPilesPass } from '../src/world/gen/vanilla/PilesPass';
 import { runTreePass } from '../src/world/gen/vanilla/TreePass';
 import { runCactusPalmTreesAndCoralPass } from '../src/world/gen/vanilla/StructuresPass';
 import { runMicroBiomesPass } from '../src/world/gen/vanilla/MicroBiomesPass';
+// ★GGGGGG：pass 105 尾段检查点（finalcleanup）——runFinalCleanupPass（含
+//   ShimmerCleanUp）+ 体末 LiquidCheck（finalGenMergeScan，cs:22639-50）
+import { runFinalCleanupPass } from '../src/world/gen/vanilla/FinalCleanupPass';
+import { finalGenMergeScan } from '../src/world/liquid/settle';
 import { LiquidSim } from '../src/world/liquid/LiquidSim';
 import { snapshotGenSolid, flipGenSolid } from '../src/world/gen/vanilla/GenSolid';
 import type { World } from '../src/world/World';
@@ -299,6 +303,15 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runCactusPalmTreesAndCoralPass(st, rng, gs); snap('cactus');
   replay(); // ▶MicroBiomes cs:21785（QQ #101，oracle 末尾追加区同序）
   runMicroBiomesPass(st, rng, gs, world.chests); snap('microbiomes');
+  // ★GGGGGG（2026-08-22）：检查点 76 定名（runbook ④「75→N」首名）——pass 105
+  //   FinalCleanup（主扫+ShimmerCleanUp+体末 LiquidCheck cs:22639-50）。oracle
+  //   caves-oracle.cs 尾部同名 Checkpoint 对拍。掷骰走 pass 链流（replay 后直跑，
+  //   与 oracle 尾段同构）；树登记修剪（WorldGen 终清理槽 KKKK 移交块）不入哈希
+  //   通道，链侧不跑（oracle 亦无）。
+  replay(); // ▶FinalCleanup cs:22304（pass 105；ShimmerCleanUp 同 pass 尾段不重播）
+  runFinalCleanupPass(st, gs, rng);
+  finalGenMergeScan(st, rng);
+  snap('finalcleanup');
   return { grids: out, walls: outWall };
 }
 
@@ -315,6 +328,14 @@ function settlePart2ChainSync(world: World, st: TileStore, gs: GenState, rng: RN
     if (rollLog && rollN < 100000) console.log(`QQROLL ${rollN++} Next(${max}) -> ${v}`);
     return v;
   };
+  // ★GGGGGG（2026-08-22）：级联帧引擎掷骰源补齐（settle.ts :49/:150 同款
+  //   `sim.passRng = rng`）——镜像曾缺 ⇒ LiquidSim.squareTileFrameGen 的
+  //   genSquareTileFrame(ctx.rng=null) 静默跳过 CheckStalactite 等读帧臂
+  //   （FCP frameImportantDispatch case 165 `if (ctx.rng)` 门），settle2 期
+  //   cobweb 死亡级联不查邻挂钟乳石 → 3 格 165 杀差（oracle=vanilla 真值：
+  //   KillTile→TileFrame→CheckStalactite 生成期生效）。掷流中性实证：本种子
+  //   settle2 双侧 4,330 掷全等（杀支 flag4 短路 UpdateStalStyle 零掷）。
+  sim.passRng = rng;
   sim.isGeneratingOrLoadingWorld = true;
   sim.generatingWorld = true;
   sim.shimmerCenter = gs.shimmerX > 0 ? { x: gs.shimmerX, y: gs.shimmerY } : null;

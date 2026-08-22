@@ -194,9 +194,12 @@ export class Inventory {
 
   /** GetEffectiveArmor（1457 Player.cs:5679-5734,LoadoutShare"收藏装备跨配装共享"）：
    *  当前 Loadout 槽位为空时,跨三套 Loadout 同槽找【收藏】件共享——甲/配饰/时装全槽。
+   *  ★原版消费面全在【视觉】（Main.cs:17552-17567 头/身/腿槽 + Player.cs:9696
+   *  UpdateItemDye 染色;NPC.cs:417 绘制）——属性聚合（ApplyEquipFunctional）仍走
+   *  裸 armor[]，共享件不给数值（防"空槽白嫖属性"）。
    *  CanShareArmor（:5699-5727）的配件互斥深检（ItemSlot.CanEquipBothAccessories
-   *  物品对表）未建模,只做槽型门 armorAccepts（登记）;命中即用（sharedFromLoadout
-   *  高亮提示 UI 登记未接） */
+   *  物品对表）未建模,只做槽型门 armorAccepts（登记）;sharedFromLoadout 高亮 UI
+   *  与渲染侧接线登记未接 */
   getEffectiveArmor(slot: number): InvItem | null {
     const cur = this.armor[slot] ?? null;
     if (cur) return cur;

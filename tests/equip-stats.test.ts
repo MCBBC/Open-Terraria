@@ -17,9 +17,9 @@ describe('装备数据表（extract-equip-prefix.mjs）', () => {
     expect(armorSlotIndexOfInternal(_iid(77))).toBe(2);
   });
 
-  it('配饰效果：再生手环49 life2 / 星力手环111 mana20 / 赫尔墨斯靴54 runSpeed6', () => {
+  it('配饰效果：再生手环49 life2 / 星力手环111 mana40(1457 :15040-15046) / 赫尔墨斯靴54 runSpeed6', () => {
     expect(statOfInternal(_iid(49))).toMatchObject({ life: 2, acc: 1 });
-    expect(accFxOfInternal(_iid(111))).toMatchObject({ mana: 20 });
+    expect(accFxOfInternal(_iid(111))).toMatchObject({ mana: 40 });   // 1457 switch :15040-15046(1456 为 20)
     expect(accFxOfInternal(_iid(54))).toMatchObject({ runSpeed: 6 });
   });
 

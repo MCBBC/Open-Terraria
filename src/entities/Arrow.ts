@@ -399,6 +399,8 @@ export class Arrow extends Entity {
   gem: GemStaffFlags | null = null;
   /** SwirlTwins 正弦摆相位计数（localAI[0]，:38615 每步 +1） */
   private gemSwirlT = 0;
+  /** SwirlTwins 反相相位(1457 ai[1]:0=首弹,1=孪生弹,:49924-49926) */
+  gemPhase = 0;
   /** 114 邪恶三叉戟减速计时（ai[0]，:26781 每步 +1） */
   private gem114T = 0;
 
@@ -811,7 +813,7 @@ export class Arrow extends Entity {
     // Resize(160) 80px 半径 AoE + 伤 ×0.35/GetDamageMultiplier + kb ×0.35
     if (this.gem?.aoeExplosion && !this.dead) this.gemAoeBurst(game);
     this.dead = true;
-    game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h, this.vx, this.vy);
+    game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h, this.vx, this.vy, this.damage);
   }
 
   /** 448 Kill 爆炸（:70544-70580）：position 归心后 width=height=112 重开判定盒
@@ -881,15 +883,15 @@ export class Arrow extends Entity {
     if (this.gem) {
       const g = this.gem;
       if (g.swirlTwins) {
-        const phase = Math.PI / 2;
-        const n19 = Math.sin((this.gemSwirlT) * (Math.PI * 2) * 0.05);
-        const n20 = Math.sin((this.gemSwirlT + 1) * (Math.PI * 2) * 0.05);
+        // :38618-38630 num18=ai[1]×π(孪生弹反相);本仓 gemPhase 0/1
+        const num18 = this.gemPhase * Math.PI;
+        const n19 = Math.sin((this.gemSwirlT) * (Math.PI * 2) * 0.05 + num18);
+        const n20 = Math.sin((this.gemSwirlT + 1) * (Math.PI * 2) * 0.05 + num18);
         this.gemSwirlT++;
         const d = n20 - n19;
         const sp = Math.hypot(this.vx, this.vy) || 1;
         this.x += (-this.vy / sp) * d * 6;
         this.y += (this.vx / sp) * d * 6;
-        void phase;
       }
       if (g.fastThenSlow) {
         if (Math.hypot(this.vx, this.vy) > 0.1) { this.vx *= 0.97; this.vy *= 0.97; }
@@ -1247,36 +1249,41 @@ export class Arrow extends Entity {
     // noTileCollide 族（SetDefaults 逐型 325/329/348/350/351…，HandleMovement
     // 整段不跑）——撞块/砍草整段跳过（曾漏 = 月事件弹幕扎进地里被地形吞噬）
     if (tileType !== 0 && !this.noTileCollide && !(this.starY !== null && !this.starCollide)) {
-      // 可砍物（杂草/瓦罐）：Projectile.CutTiles 语义——弹幕扫过即砍
+      // 可砍物（杂草/瓦罐）：Projectile.CutTiles 语义——原版 CutTiles 是 Damage()
+      // 内的旁路副作用（Projectile.cs:11824，在 :15738 Damage 调用链内），不拦截命中
       game.cutTile(tx, ty);
-      // 阻挡判定只看【实心】(Main.tileSolid 语义):树干/火把/平台等非实心格
-      // 箭直接穿过(此前 tileType!==0 一刀切,箭会被树挡住——树 solid:false)
-      if (!world.store.isSolid(tx, ty)) return;
-      // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
-      if (this.bounce && this.bounceOff(game)) return;
-      // 1457 宝石法珠 CanBounce（HandleMovement :18112-18150）：撞块法向反弹 ×0.8 +
-      // penetrate--（归零消亡）——琥珀法珠/琥珀长袍臂。hitWall 族旗是 moveAndCollide
-      // 分轴碰撞语义、本类裸位移不置位（曾据此判死=分支永假,反弹死代码）——
-      // 到达本分支即已撞实心,按速度主轴定反射面:|vx|>|vy| 水平撞壁反 vx,否则反 vy
-      if (this.gem?.canBounce) {
-        if (Math.abs(this.vx) > Math.abs(this.vy)) this.vx = -this.vx * 0.8;
-        else this.vy = -this.vy * 0.8;
-        if (--this.pierce <= 0) { this.killNow(game); return; }
+      // 阻挡/消亡判定只看【实心】(Main.tileSolid 语义):树干/火把/平台等非实心格
+      // 箭直接穿过,且【继续走下方命中管线】——曾对非实心格整体 return,把该 tick
+      // 的 NPC/玩家命中全部跳过:训练假人(378 贴图格与 18×40 命中盒同位,穿过全程
+      // 弹心都在 378 格内)子弹零命中穿体而过;草丛/树冠内的弹幕同样漏判。
+      // 原版 HandleMovement 只在实心格 Kill(:16132),Damage 在其后独立运行(:15738)
+      if (world.store.isSolid(tx, ty)) {
+        // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
+        if (this.bounce && this.bounceOff(game)) return;
+        // 1457 宝石法珠 CanBounce（HandleMovement :18112-18150）：撞块法向反弹 ×0.8 +
+        // penetrate--（归零消亡）——琥珀法珠/琥珀长袍臂。hitWall 族旗是 moveAndCollide
+        // 分轴碰撞语义、本类裸位移不置位（曾据此判死=分支永假,反弹死代码）——
+        // 到达本分支即已撞实心,按速度主轴定反射面:|vx|>|vy| 水平撞壁反 vx,否则反 vy
+        if (this.gem?.canBounce) {
+          if (Math.abs(this.vx) > Math.abs(this.vy)) this.vx = -this.vx * 0.8;
+          else this.vy = -this.vy * 0.8;
+          if (--this.pierce <= 0) { this.killNow(game); return; }
+          return;
+        }
+        // 喵刀弹 502（AI_008 弹跳档 :18165-18206）：tink 音 + ai[0] 计数 ≥5 消亡；
+        // 全速翻面（无 ×0.9 衰减——type 15 才有 ×0.8），同 hitSet 语义无
+        if (this.projId === 502 && this.meowBounceOff(game)) return;
+        // 荆棘球 277 专属档（Projectile.cs:18306-18314）：vx 恒反 ×0.9；
+        // 仅入撞 |vy|>3 竖弹 ×0.9（贴地滚动）
+        if (this.thornBounce && this.thornBounceOff(game)) return;
+        // 1021 月总巨砾弹地档（Projectile.cs:17578-17600）：Y 撞 Dig 音+×−0.9
+        // 反弹 / X 撞 ×−0.75 计 3 次超次消亡（false 交还下方消亡口）
+        if (this.mlBoulder && this.boulderBounceOff(game)) return;
+        // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落），然后消失
+        if (this.dropKey && Math.random() < 1 / 3) game.spawnDrop(this.x, this.y, this.dropKey, 1);
+        this.killNow(game);
         return;
       }
-      // 喵刀弹 502（AI_008 弹跳档 :18165-18206）：tink 音 + ai[0] 计数 ≥5 消亡；
-      // 全速翻面（无 ×0.9 衰减——type 15 才有 ×0.8），同 hitSet 语义无
-      if (this.projId === 502 && this.meowBounceOff(game)) return;
-      // 荆棘球 277 专属档（Projectile.cs:18306-18314）：vx 恒反 ×0.9；
-      // 仅入撞 |vy|>3 竖弹 ×0.9（贴地滚动）
-      if (this.thornBounce && this.thornBounceOff(game)) return;
-      // 1021 月总巨砾弹地档（Projectile.cs:17578-17600）：Y 撞 Dig 音+×−0.9
-      // 反弹 / X 撞 ×−0.75 计 3 次超次消亡（false 交还下方消亡口）
-      if (this.mlBoulder && this.boulderBounceOff(game)) return;
-      // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落），然后消失
-      if (this.dropKey && Math.random() < 1 / 3) game.spawnDrop(this.x, this.y, this.dropKey, 1);
-      this.killNow(game);
-      return;
     }
     // 敌对弹命中玩家（原版 Projectile.Damage_EVP :13706-13830）：不消耗弹体，
     // Player.damage 自带 iframes 去重（= 原版 player.immune 门禁）；
@@ -1389,6 +1396,10 @@ export class Arrow extends Entity {
             e as unknown as Record<string, number>);
         }
         if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
+        // ★1457 GetDamageMultiplier(Player.cs:49810-49813):宝石弹【全部伤害】(含本体
+        //   直击)乘 SwirlTwins 0.6/CanBounce 0.8/ArPenSpread 0.5 取最小——曾只在
+        //   AoeExplosion 爆伤消费,三系法杖本体直击虚高 25-67%(完整性审查 P1-1)
+        if (this.gem) dmg = Math.max(1, Math.round(dmg * gemDamageMultiplier(this.gem)));
         playEnemyHitSound(game, e);
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');

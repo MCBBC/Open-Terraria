@@ -3363,6 +3363,12 @@ export class Game implements GameHooks {
     // 世界就绪时全图扫描锚点（frameX%36==0 && frameY==0）生成静止假人 NPC；
     // 放置时单点生成；锚 tile 破坏时由 dummyAI 自行消亡
     this.spawnAllDummies();
+    // 周期再激活(TETrainingDummy.Update :44-77 每帧语义的节流等价):假人 NPC 因
+    // 任何原因消失(自灭/读档丢失/被清)而锚 tile 仍在+玩家 1600px 内 → 重生。
+    // 曾只在世界就绪扫一次 → NPC 消失后 tile 贴图仍站原地,子弹穿透无判定
+    // (2026-08-21 用户报"假人无法判定子弹伤害")
+    w.store.onTileChanged(() => { this._dummyReactivateDirty = true; });
+    this._dummyReactivateTick = 0;
     // 下落沙:任何格变化 → 检查其上方是否为失去支撑的沙族(级联由转换时的
     // setTile 再次触发本监听器自然完成;生成/导入期 setTileSilent 不触发)
     this.sandQueue.length = 0;
@@ -3893,6 +3899,7 @@ export class Game implements GameHooks {
 
   private fixedUpdate(dt: number) {
     this.tickCount++;
+    this.reactivateDummies();   // 训练假人再激活(TETrainingDummy.Update 节流)
     // 行为录制：玩家运动轨迹骨干（每 60t ≈ 1s 一采样；vx/vy 一位小数防噪）
     if (this.tickCount % 60 === 0) {
       const p = this.player;
@@ -5514,12 +5521,11 @@ export class Game implements GameHooks {
           if (player.y < w.groundLevel * TILE) this.renderer.sky.starFallAt(sx, st.w);
         }
       }
-      // 流星夜（boost>3）附魔夜行者 484（NPC.cs:2316-2319：云≤55 无云背景 RollLuck(2)==0）
-      if (this.starfallBoost > 3 && Math.random() < 0.5 && !player.dead
-        && player.y < w.groundLevel * TILE) {
-        const e = Enemy.fromVanilla(484, player.cx + (Math.random() - 0.5) * 800, player.y - 200);
-        if (e) this.entities.add(e, 'enemies');
-      }
+      // 流星夜（boost>3）附魔夜行者 484（NPC.cs:2316-2319）——归位 VanillaSpawner
+      // case-2 草族链（雨支后/萤火虫支前，受生成上限/频率/草地瓦片扫描门控）。
+      // ★曾在此每 tick 50% 于 player.y-200 天上直刷、无上限无频率 = 星流夜
+      // "粉虫雨"洪水（用户实抓 535 只，2026-08-21；2026-08-22 修），starfallBoost
+      // 经 spawner 字段注入（spawnCycle 段）
     }
     // ---- 陨石坠落消费（HandleMeteorFall :64948-64981：原始 Main.time>16200 即消费
     //      ——夜=午夜后 / 昼=上午 9 点后均可落,白天杀 EoW 当天落是原版行为）----
@@ -9558,6 +9564,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  （:53258-53261 slowMagicUse=true）→ return true 照常施法（攻速 ×0.4,
         //  GetSlowMagicUseTime :47425 消费在下方 useTime 置值处）。不再拒绝施法
         this.player.slowMagicUse = false;
+        // 6152 DaybloomStaff 停发窗（Player.cs flag 门:动画末 useTime×4=16t 不出手——
+        //  门在扣魔【前】,停发 tick 不耗蓝;先于下方 CheckMana 段）
+        if (critVid === 6152) {
+          const swT0 = this.swing?.t ?? 0, swDur0 = this.swing?.dur ?? 40;
+          if (swDur0 > 0 && swT0 > swDur0 - 16) {
+            this.player.useTime = 4;
+            this.input.mouseDown = false;
+            break;
+          }
+        }
         const cwCost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1)) * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul); // ⑪+⑧ 词缀 mcst(I:562 round)
         if (this.player.mana >= cwCost) {
           this.player.mana -= cwCost;
@@ -9577,12 +9593,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  火花弹（湿亡/×0.985 阻力/130t 后缩径消亡——Arrow dragAlways 近似）+
         //  出手 ±4px 抖动/±0.157 旋向（:49946-49952）+ Damage ×0.8? 否——1114 无折价
         if (critVid === 6152) {
-          const swT = this.swing?.t ?? 0, swDur = this.swing?.dur ?? 40;
-          if (swDur > 0 && swT > swDur - cw.useTime * 4) {   // 动画末 16t 停发（flag 门）
-            this.player.useTime = cw.useTime;
-            this.input.mouseDown = false;
-            break;
-          }
+          // （停发窗门已前置到扣魔前——见 case 'magic' 头部）
           const jx = (Math.random() * 2 - 1) * 4, jy = (Math.random() * 2 - 1) * 4;   // NextVector2Circular(4,4)
           const jr = (Math.random() * 2 - 1) * 0.15707963705062866;                  // RotatedByRandom(0.157)
           const jc = Math.cos(jr), js = Math.sin(jr);
@@ -9997,11 +10008,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           gemFlags = packGemStaffFeatures(cw.shoot, chestVid >= 0 ? chestVid : undefined,
             def.vid ?? viIdFromKey(def.key) ?? undefined);
         }
-        const mArrow = new Arrow(px, py,
-          Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+        // ★1457 发射侧参数(Player.cs:49796-49812):FastThenSlow 出速 ×5、
+        //   CanBounce 出速 ×1.25、ArPenSpread 出手点环形偏移 12px;SwirlTwins 双弹
+        //   (第二颗 ai[1]=1 → 摆动反相,:49922-49926);Damage×GetDamageMultiplier
+        //   在弹命中侧等价消费(Arrow 命中处 gemDamageMultiplier)
+        let gvx = Math.cos(ang) * cw.shootSpeed, gvy = Math.sin(ang) * cw.shootSpeed;
+        let gpx = px, gpy = py;
+        let gemPhase: number | undefined;
+        if (gemFlags) {
+          if (gemFlags.fastThenSlow) { gvx *= 5; gvy *= 5; }
+          if (gemFlags.canBounce) { gvx *= 1.25; gvy *= 1.25; }
+          if (gemFlags.arPenSpread) {
+            const er = Math.random() * Math.PI * 2;
+            gpx += Math.cos(er) * 12; gpy += Math.sin(er) * 12;   // NextVector2CircularEdge(12,12)
+          }
+          if (gemFlags.swirlTwins) gemPhase = 1;
+        }
+        const mArrow = new Arrow(gpx, gpy, gvx, gvy,
           cw.damage, cw.knockback, cw.shoot, null,
           { grav: gsM.grav, gravDelay: gsM.delay, grav2: gsM.grav2, grav2At: gsM.grav2At,
-            dragAlways: gsM.drag, life: pd?.timeLeft ?? 600, pierce: pen, gem: gemFlags });
+            dragAlways: gsM.drag, life: pd?.timeLeft ?? 600, pierce: pen, gem: gemFlags, gemPhase });
         // 星云 booster（StrikeNPC :12892-12905：魔法弹命中、套装在身、CD=0、1/3 → 掉 booster）
         mArrow.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧
         mArrow.critBonus = this.player.critChance('magic')
@@ -10012,6 +10038,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.spawnNebulaBooster(mArrow.cx, mArrow.cy);
         };
         this.entities.add(mArrow, 'projectiles');
+        if (gemFlags?.swirlTwins) {
+          const twin = new Arrow(gpx, gpy, gvx, gvy,
+            cw.damage, cw.knockback, cw.shoot, null,
+            { grav: gsM.grav, gravDelay: gsM.delay, grav2: gsM.grav2, grav2At: gsM.grav2At,
+              dragAlways: gsM.drag, life: pd?.timeLeft ?? 600, pierce: pen, gem: gemFlags, gemPhase: 1 });
+          twin.armorPen = mArrow.armorPen;
+          twin.critBonus = mArrow.critBonus;
+          this.entities.add(twin, 'projectiles');   // :49924-49926 aiArgs 1f=反相摆
+        }
         this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
         this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
         this.playUseSound(critVid, 'tink'); // UseSound 数据驱动（Item8/12/20/43/92…各杖专属）
@@ -11324,7 +11359,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // Check2xX :38199-38226——139 style=frameY/36、207 style=frameX/36；
       // KillTile_GetItemDrops 两 tile 均在无掉落表里，掉落全走帧检分支）
       const framedSheet = def.vanilla?.sheet ?? -1;
-      if (framedSheet === 139) {
+      if (framedSheet === 703) {
+        // 丛林 Echo 植物（KillTile_DropItems case 703 :65660 只按帧掉
+        // 195/208/331/223，无放置物返还——帧表已在 killTileDropItems 发放）
+        dropKey = '';
+      } else if (framedSheet === 139) {
         dropKey = VANILLA_ITEM_KEY_BY_ID[musicBoxDropItemOf(Math.floor(preFrameY / 36))] ?? dropKey;
       } else if (framedSheet === 207) {
         const fDrop = fountainDropItemOf(Math.floor(preFrameX / 36));
@@ -11462,8 +11501,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
     }
-    if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, typeof def.drop === 'number' ? VI(def.drop) : def.drop, 1);
-    else if (def.key.startsWith('v_')) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
+    // 703 丛林 Echo 植物：KillTile_DropItems case 703 只按帧掉 195/208/331/223
+    // （killTileDropItems 已发放）——无放置物返还（曾双掉=帧表+place_v 自掉）；
+    // 音效/粒子照走
+    if (def.vanilla?.sheet !== 703) {
+      if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, typeof def.drop === 'number' ? VI(def.drop) : def.drop, 1);
+      else if (def.key.startsWith('v_')) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
+    }
     this.killTileBreakSound(type, x, y);
     this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
   }
@@ -19772,7 +19816,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  → Gore 1394-1397（Center 出、初速=-阻尼旧速，NewGore 自带 :1347-1348 扰动）
    *  → 命中盒外扩 150px 与玩家矩形相交 → brokenMirrorBadLuckTime = 25200
    *  （luck −0.25 档，UpdateBrokenMirrorLuck :28700-28711 衰减） */
-  onProjectileDeath(projId: number, x: number, y: number, w = 0, h = 0, oldVx = 0, oldVy = 0) {
+  onProjectileDeath(projId: number, x: number, y: number, w = 0, h = 0, oldVx = 0, oldVy = 0, dmg = 0) {
     // 月总幻影矢/球 452/454 消亡爆(Projectile.cs:69827-69897):音+尘+范围伤二次
     // 结算(判定盒外扩 144/208×2;gore 61-63 略)——2026-08-19 终审补
     if (projId === 452 || projId === 454) {
@@ -19786,6 +19830,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         && p.y < cy + R && p.y + p.h > cy - R) {
         // Damage() 二次结算:原版沿用弹 damage(命中已 ×2,此处近似同值直伤)
         this.damagePlayer(20, cx, cy, undefined);
+      }
+      return;
+    }
+    // 1457 地狱之翼蝙蝠 117 消亡撒骨片（Projectile.cs:76244-76260 Kill 117 支）：
+    // 2 片 1124 BoneShard（伤 ×0.25、速度 = 反向单位向量.RotatedBy(π).RotatedByRandom
+    // (0.5236)×(1+rand×2)、出生点 = 中心+向×5）——1457 新增分支
+    if (projId === 117) {
+      const shardDmg = Math.max(1, Math.round((dmg || 14) * 0.25));   // (int)(damage×0.25)（:76257）
+      for (let i = 0; i < 2; i++) {
+        const ba = Math.atan2(oldVy, oldVx) + Math.PI + (Math.random() * 2 - 1) * 0.5235987901687622;
+        const bs = (1 + Math.random() * 2);
+        const shard = new Arrow(x + w / 2 + Math.cos(ba) * 5, y + h / 2 + Math.sin(ba) * 5,
+          Math.cos(ba) * bs, Math.sin(ba) * bs, shardDmg, 0, 1124, null,
+          { grav: 0.3, life: 600, pierce: 1 });
+        shard.frostEligible = true;   // ranged 弹（SetDefaults ranged :10516-10528）
+        this.entities.add(shard, 'projectiles');
       }
       return;
     }
@@ -20484,6 +20544,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.entities.add(e, 'enemies');
       if (e.def.boss) {
         this.boss = e;                     // 接管 Boss 槽(血条/死亡记账)
+        // 月总部件 396/397 单独召唤 = 无核心锚定首帧即死(ai3=0 找不到核心,
+        // :37714-37719 e.dead=true)→ boss 槽误走击败流程播"月亮领主已被打败！"
+        // (用户报"召唤瞬间显示被打败"根因,2026-08-22)。转为召唤核心 398——
+        // 核心 AI 出生演出首帧自生成双手+头三件套,与原版 SpawnOnPlayer(398) 同
+        if (id === 396 || id === 397) {
+          e.dead = true;   // 部件直清(无掉落语义,不经死亡管线)
+          this.boss = null;
+          const core = Enemy.fromVanilla(398, x, y);
+          if (!core) return `${id} 无 vanilla-npcs 数据`;
+          core.y = y - core.h;
+          core.id = this.entities.nextId++;
+          this.entities.add(core, 'enemies');
+          this.boss = core;
+          this.announceBossSummon(398);
+          continue;
+        }
         // 世界消息广播(左下角 ChatMonitor,同召唤链 announceBossSummon):
         // SpawnOnPlayer 末尾 HasAwoken 开关(NPC.cs:81495-81511)。WoF 113 走
         // SpawnWOF 专属链(公告无咆哮)——此处仅补文本
@@ -21313,6 +21389,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   // ================= 训练假人（tile 378 + NPC 488，TETrainingDummy 1:1） =================
   /** 全图扫描 tile 378 锚点生成假人（原版 WorldFile 加载后的 TileEntity 激活） */
+  private _dummyReactivateDirty = true;
+  private _dummyReactivateTick = 0;
+  /** TETrainingDummy.Update(:44-77)节流等价:tile 378 锚在+玩家 1600px 内+无活 NPC
+   *  → 重生。触发 = tile 变化置 dirty(放置/破坏/替换)或 300t 周期巡检 */
+  private reactivateDummies() {
+    if (++this._dummyReactivateTick % 300 !== 0 && !this._dummyReactivateDirty) return;
+    this._dummyReactivateDirty = false;
+    const st = this.world.store;
+    const DUMMY = TILE_BY_KEY['v_378_target_dummy'];
+    if (!DUMMY) return;
+    const pl = this.player;
+    const pcx = Math.floor(pl.cx / TILE), pcy = Math.floor(pl.cy / TILE);
+    const R = 100;   // 1600px = 100 格
+    for (let y = Math.max(0, pcy - R); y < Math.min(st.h - 1, pcy + R); y++) {
+      for (let x = Math.max(0, pcx - R); x < Math.min(st.w - 1, pcx + R); x++) {
+        const i = st.idx(x, y);
+        if (st.type[i] !== DUMMY || st.frameX[i] % 36 !== 0 || st.frameY[i] !== 0) continue;
+        const has = this.entities.enemies.some((e) => !e.dead && (e as Enemy).vanillaId === 488
+          && (e as Enemy).dummyAnchor?.[0] === x && (e as Enemy).dummyAnchor?.[1] === y);
+        if (!has) this.spawnDummyAt(x, y);
+      }
+    }
+  }
+
   private spawnAllDummies() {
     const st = this.world.store;
     const DUMMY = TILE_BY_KEY['v_378_target_dummy'];

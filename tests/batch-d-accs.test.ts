@@ -168,31 +168,38 @@ describe('拍击石系三脉冲', () => {
 
 // ============ LoadoutShare（GetEffectiveArmor/GetEffectiveDye :5679-5758） ============
 describe('LoadoutShare 收藏装备跨配装共享', () => {
-  it('当前槽空 + 他套同槽收藏件 → 共享生效（甲/配饰/染料）;未收藏不共享', () => {
+  it('当前槽空 + 他套同槽收藏件 → 共享生效（视觉原语）;未收藏不共享;属性不走共享件', () => {
     const p = makeHooks().player;
-    const ironHelm = iid(37);   // 护目镜 37（头+1 防,armorAccepts 槽型门内）
-    // 他套（loadouts[1]）头槽放收藏护目镜
-    p.loadouts[1].armor[0] = { id: ironHelm, stack: 1, favorited: true };
-    expect(p.inv.getEffectiveArmor(0)?.id).toBe(ironHelm);
-    expect(p.equipStats.def).toBe(1);                     // computeEquipStats 走 effective 口径
-    // 取消收藏 → 不共享
-    p.loadouts[1].armor[0] = { id: ironHelm, stack: 1 };
-    expect(p.inv.getEffectiveArmor(0)).toBeNull();
+    const shield = iid(6188);   // 复原之盾（def+1,armorAccepts 配饰槽内）
+    // 他套（loadouts[1]）配饰槽放收藏复原之盾
+    p.inv.loadouts[1].armor[3] = { id: shield, stack: 1, favorited: true };
+    expect(p.inv.getEffectiveArmor(3)?.id).toBe(shield);
+    // ★属性不走共享件（原版 GetEffectiveArmor 消费面全在视觉,Main.cs:17552/
+    //  Player.cs:9696——ApplyEquipFunctional 仍扫裸 armor[],空槽无数值）
     expect(p.equipStats.def).toBe(0);
+    // 取消收藏 → 不共享
+    p.inv.loadouts[1].armor[3] = { id: shield, stack: 1 };
+    expect(p.inv.getEffectiveArmor(3)).toBeNull();
+    // 本槽非空 → 恒用本槽
+    p.inv.armor[3] = { id: shield, stack: 1 };
+    expect(p.inv.getEffectiveArmor(3)?.id).toBe(shield);
+    p.inv.armor[3] = null;
     // 染料同语义（GetEffectiveDye :5736-5758 无兼容门）
-    p.loadouts[2].dye[0] = { id: iid(3572), stack: 1, favorited: true }; // 基础蓝染料
-    expect(p.inv.getEffectiveDye(0)?.id).toBe(iid(3572));
+    p.inv.loadouts[2].dye[0] = { id: iid(1015), stack: 1, favorited: true }; // 蓝染料 1015
+    expect(p.inv.getEffectiveDye(0)?.id).toBe(iid(1015));
   });
 
   it('本槽非空 → 恒用本槽（不叠加）;收藏件入 equipStatsKey（跨套变动失效缓存）', () => {
     const p = makeHooks().player;
-    p.loadouts[1].armor[0] = { id: iid(37), stack: 1, favorited: true };
-    p.inv.armor[0] = { id: iid(77), stack: 1 };   // 铁护胫?——头槽放腿件不合法,用头件
-    p.inv.armor[0] = { id: iid(37), stack: 1 };
-    expect(p.inv.getEffectiveArmor(0)?.id).toBe(iid(37));  // 本槽优先
+    p.inv.loadouts[1].armor[0] = { id: iid(37), stack: 1, favorited: true };
+    expect(p.inv.getEffectiveArmor(0)?.id).toBe(iid(37));  // 共享生效
+    // 属性键走裸槽（共享件不入 stats 口径）——卸收藏键不变
     const k1 = p['equipStatsKey']();
-    p.loadouts[1].armor[0] = null;                // 他套收藏卸下 → 键变
-    expect(p['equipStatsKey']()).not.toBe(k1);
+    p.inv.loadouts[1].armor[0] = null;
+    expect(p['equipStatsKey']()).toBe(k1);
+    // 本槽非空 → 恒用本槽
+    p.inv.armor[0] = { id: iid(37), stack: 1 };
+    expect(p.inv.getEffectiveArmor(0)?.id).toBe(iid(37));
   });
 });
 

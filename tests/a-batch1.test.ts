@@ -127,7 +127,7 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     p.vx = 10;                         // 移动 → 不吃静止额外衰减
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
     expect(p.manaRegenDelay).toBe(3);    // 1457 ManaV2:applyManaRegenerationDelay 钳 4 → 本 tick 衰减 −1 = 3
-    expect(p.manaRegenCount).toBe(0);  // delay>0 → manaRegen=0（:19270-19271）
+    expect(p.manaRegenCount).toBe(2);  // 1457 ManaV2:惩罚期产额=攻击期 5% 回蓝(非 0,:19541-19560)
     expect(p.mana).toBe(50);
   });
 
@@ -142,9 +142,9 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     p.onManaItemUsed();
     p.vx = 10;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    // 1457: 钳 20 挪到置值时点（applyManaRegenerationDelay）→ 置 20 后本 tick 衰减
-    // −1（基础）−1（回蓝档）= 18（UpdateManaRegen 内的每帧钳已删,:19541-19560）
-    expect(p.manaRegenDelay).toBe(18);
+    // 1457 ManaV2: applyManaRegenerationDelay 双钳归 4 → 本 tick 衰减
+    // −1（基础）−1（回蓝档）= 2（UpdateManaRegen 内的每帧钳已删,:19541-19560）
+    expect(p.manaRegenDelay).toBe(2);
     // 惩罚期过后（delay 清零）产额 = floor((34+34)×1.0)=68（1457 num9=1、静止档加全额 num5）
     reset(p, 50);
     p.vx = 10;
