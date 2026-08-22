@@ -986,6 +986,13 @@ export function horizonCloudShadeApprox(
   );
 }
 
+/** Main.atmo（海拔大气系数，SkyRenderer.atmoValue 的纯函数化——BiomeBackground
+ *  cloudBG 大云图层（Main.cs:58787-58871 num5=ProcessCloudAlpha()×atmo）共用） */
+export function atmoOf(camY: number, worldW: number, surfaceY: number): number {
+  return Math.max(0, Math.min(1,
+    (camY / 16 - (65 + 10 * (worldW / 4200) ** 2)) / Math.max(1, surfaceY / 16 / 5)));
+}
+
 // ================= 沙尘暴/暴风雪全屏色罩（SandstormSky.cs / BlizzardSky.cs 1:1） =================
 // 原版是 SkyManager 自定义天空层（ScreenEffectInitializer.cs:71-72 注册）：Draw
 // (SandstormSky.cs:49-60 / BlizzardSky.cs:48-60) 以 MagicPixel 全屏 alpha 混合一张
@@ -3410,8 +3417,7 @@ export class SkyRenderer {
   /** 大气层衰减(Main.cs:62622 UpdateAtmosphereTransparencyToSkyColor 的 atmo 值;
    *  2026-08-20 起 Renderer 也消费——云量压暗 cots 用) */
   atmoValue(camY: number): number {
-    return Math.max(0, Math.min(1,
-      (camY / 16 - (65 + 10 * (this.fx.worldW / 4200) ** 2)) / Math.max(1, this.fx.surfaceY / 16 / 5)));
+    return atmoOf(camY, this.fx.worldW, this.fx.surfaceY);
   }
 
   // ================= SunVisibilityPixel 遮挡采样（HorizonHelper.cs:42-80） =================

@@ -8,6 +8,7 @@
 import { upgradeToBitmap, loadBitmapOnly, SpriteAtlas } from '../assets/SpriteAtlas';
 import type { World } from '../world/World';
 import type { SceneFlags } from '../world/SceneMetrics';
+import { atmoOf } from './SkyRenderer';
 
 // ---- SurfaceBackgroundID（Terraria.ID/SurfaceBackgroundID.cs） ----
 const Forest1 = 0, Corruption = 1, Desert = 2, Jungle = 3, Ocean = 4, CorruptDesert = 5,
@@ -159,6 +160,11 @@ class CanvasBgBlit implements BGBlit {
 }
 
 export class BiomeBackground {
+  /** Main.cloudBGAlpha（:58782-58792 漂移累积器，cloudBG 大云图双层 α 源；
+   *  与 SkyRenderer 同名位同式——HorizonClouds 强度消费那份，此处消费云图层 α） */
+  private cloudBGAlpha = 0;
+  /** Main.cloudBGX[2]（:58796-58804/:58845-58852 风漂移累积，wrap ±w·scale） */
+  private cloudBGX = new Float64Array(2);
   /** 贴图懒加载缓存（n → img；-1 = 加载失败） */
   private imgs = new Map<number, ImageBitmap | HTMLImageElement | null>();
   /** 地表风格状态（≈Main.bgStyle/bgDelay/bgAlphaFrontLayer/bgAlphaFarBackLayer） */
@@ -549,6 +555,55 @@ export class BiomeBackground {
           { alpha, tint: tintOn });
       }
     };
+    // ---- cloudBG 大云图双层（Main.cs:58787-58871，Background 112/113）----
+    // 门 = cloudBGAlpha>0（累积器 :58781-58792：cloudBGActive>0 时 +0.0005·dayRate/t
+    //  否则 −，钳 0..1；门 = !drunkWorld && camTop ≤ worldSurface+10 tile——阴天/雨雪
+    //  天渐显的大云幕，晴天恒 0 不画）。原版序：极光（DrawToDepth 1/0.09 :58829）
+    //  在本层之前——Renderer sky.draw 先于 biomeBg.draw 已保证。
+    //  层0 = Background 112：scale1.65 / par0.09 / topY=num3·900+600 / α=min(1,α累积)
+    //  层1 = Background 113：scale1.85 / par0.12 / topY=num3·1100+750 / α=min(1,α累积×1.5)
+    //  色 = ColorOfSurfaceBackgroundsBase×α×num5（:58828/:58831，num5=ProcessCloud
+    //  Alpha()×atmo，本仓无塔/月总天空 fade → ProcessCloudAlpha 恒 1）——沿用本文件
+    //  既有山层同款约定：α 进 globalAlpha、rgb 走 tint（tint 烘焙缓存按色键控，α 独立
+    //  变化不破缓存）。风漂移 cloudBGX += windSpeedCurrent×par×9×dayRate
+    //  （FocusHelper.AllowSkyMovement=GameplayActive，游戏内恒真 :58796），wrap ±w·scale。
+    {
+      const wr = world.weather;
+      const dayRate = world.dayRate?.() ?? 1;
+      const camTopTiles = camTopY / 16;
+      if (!(world.seedFlags?.drunkWorld) && camTopTiles <= world.groundLevel + 10) {
+        this.cloudBGAlpha = wr && wr.cloudBGActive > 0
+          ? Math.min(1, this.cloudBGAlpha + 0.0005 * dayRate)
+          : Math.max(0, this.cloudBGAlpha - 0.0005 * dayRate);
+      }
+      if (this.cloudBGAlpha > 0) {
+        const atmo = atmoOf(cam.y, world.w, world.groundLevel);
+        const wind = wr?.windSpeedCurrent ?? 0;
+        const sheets = [
+          { tex: 112, scale: 1.65, par: 0.09, topA: 900, topB: 600, aMul: 1 },
+          { tex: 113, scale: 1.85, par: 0.12, topA: 1100, topB: 750, aMul: 1.5 },
+        ] as const;
+        for (let s = 0; s < 2; s++) {
+          const cf = sheets[s];
+          const im = this.img(cf.tex);
+          if (!im || !(im.width > 0)) continue;
+          const wScaled = im.width * cf.scale;
+          this.cloudBGX[s] += wind * cf.par * 9 * dayRate;         // :58796/:58845
+          if (this.cloudBGX[s] > wScaled) this.cloudBGX[s] -= wScaled;
+          if (this.cloudBGX[s] < -wScaled) this.cloudBGX[s] += wScaled;
+          const a = Math.min(1, this.cloudBGAlpha * cf.aMul) * atmo;
+          if (a <= 0.01) continue;
+          const topY = num3 * cf.topA + cf.topB + scAdj + pushHack;  // :58807/:58854
+          const startX = -BiomeBackground.ieeeRemOf(camLeftX * cf.par, wScaled)
+            - wScaled / 2 - wScaled + this.cloudBGX[s];              // :58811-58813
+          const loops = Math.ceil(viewW / wScaled) + 4;              // :58815 +2+2
+          for (let i = 0; i < loops; i++) {
+            b.img(im, 0, 0, im.width, im.height, startX + i * wScaled, topY,
+              wScaled + 1, im.height * cf.scale, { alpha: a, tint: tintOn });
+          }
+        }
+      }
+    }
     // 远山层 Step1（bgAlphaFarBackLayer；parallax 0.15/scale 1，:59240）
     const farTex = FAR_TEX[this.bgStyle];
     if (farTex !== undefined) {

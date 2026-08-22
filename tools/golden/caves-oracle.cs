@@ -15899,30 +15899,13 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     QuickWater(3, -1);
     WaterCheck();
     quickSettle = true;
-    // ★LLLLLL TEMP 诊断（用完即删）：LIQ_TRACE=路径 → 逐 UpdateLiquid 记录
-    //   (3543..3544,649)/(3544,650) 三格液面变化 + 轮首活量/缓冲量
-    var liqTracePath = Environment.GetEnvironmentVariable("LIQ_TRACE");
-    System.IO.StreamWriter? liqW = liqTracePath != null ? new System.IO.StreamWriter(liqTracePath) : null;
-    int liqIter = 0;
-    int pA = 649 * W + 3543, pB = 649 * W + 3544, pC = 650 * W + 3544;
-    int la = liq[pA], lb = liq[pB], lc = liq[pC];
     for (int round = 0; round < 10; round++)
     {
         int maxIter = (numLiquid + bufCount) * 5;    // 轮预算=轮始活量×5（无下限）
         int roundIter = 0;
-        liqW?.WriteLine($"ROUND {round} numLiquid={numLiquid} buf={bufCount} maxIter={maxIter}");
-        while (numLiquid > 0 && roundIter < maxIter)
-        {
-            UpdateLiquid(); roundIter++; liqIter++;
-            if (liq[pA] != la || liq[pB] != lb || liq[pC] != lc)
-            {
-                la = liq[pA]; lb = liq[pB]; lc = liq[pC];
-                liqW?.WriteLine($"it={liqIter} r={round} c3543_649={la} c3544_649={lb} c3544_650={lc}");
-            }
-        }
+        while (numLiquid > 0 && roundIter < maxIter) { UpdateLiquid(); roundIter++; }
         WaterCheck();
     }
-    liqW?.Dispose();
     quickSettle = false;
     wgOff = new HashSet<ushort>();                          // worldGenTilesIgnoreWater(false)
     // ★VVV（2026-08-18 镜像）：恢复后【无尾部 WaterCheck】——生成期两 pass（cs:16286-16293/
