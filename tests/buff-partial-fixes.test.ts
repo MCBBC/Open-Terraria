@@ -2,7 +2,7 @@
 // 药水/食物章节 E 区 + BUFF_DEFS 矩阵 ⚠️ 项）：
 //   1. Clairvoyance(29) 补三项：魔伤+5%/魔暴+2/耗魔-2%（Player.cs:11481-11485）
 //   2. SugarRush(192) 补镐速 -0.2（:9634-9637 pickSpeed -= 0.2f）
-//   3. KiteBuff(383) 数值定案回 1456：+0.25/-0.15（:9612-9616；曾取 1457 值）
+//   3. KiteBuff(383) 数值（★1457 基准：+0.15/-0.1 :10003-10004；旧 1456 钉 +0.25/-0.15 已反转）
 //   4. Stinky(120) 授予：臭味药水 2353 → 投掷弹 371 消亡 80px 内 30s
 //      （Projectile.cs:75203-75228。★审计原文"药水 1332"有误——1332=Ichor 澳液，
 //        1456 ItemID.cs:6245 StinkPotion=2353，按反编译定案）
@@ -130,20 +130,20 @@ describe('SugarRush(192)：挖掘冷却链 pickSpeed -= 0.2', () => {
   });
 });
 
-// ============ 3. KiteBuff(383) 数值定案 1456（:9612-9616） ============
-describe('KiteBuff(383)：moveSpeed +0.25 / pickSpeed -0.15（1456 终值,1457 值废弃）', () => {
-  it('moveSpeedMult：仅风筝 = 1.25（1456 :9613 moveSpeed += 0.25f）', () => {
+// ============ 3. KiteBuff(383) 数值（★1457 基准 Player.cs:10003-10006；2026-08-23 基准切换,旧 1456 钉 +0.25/-0.15 反转） ============
+describe('KiteBuff(383)：moveSpeed +0.15 / pickSpeed -0.1（1457 终值）', () => {
+  it('moveSpeedMult：仅风筝 = 1.15（1457 :10003 moveSpeed += 0.15f）', () => {
     const p = mkPlayer();
     expect(p.buffs.moveSpeedMult).toBe(1);
     p.buffs.apply(BuffType.KiteBuff, 60);
-    expect(p.buffs.moveSpeedMult).toBeCloseTo(1.25, 5);
+    expect(p.buffs.moveSpeedMult).toBeCloseTo(1.15, 5);
   });
-  it('挖掘冷却链 -0.15（1456 :9614 pickSpeed -= 0.15f；1457 的 -0.1 移除）', () => {
-    expect(gameSrc).toContain('- (buffs.has(BuffType.KiteBuff) ? 0.15 : 0)');
-    expect(gameSrc).not.toContain('- (buffs.has(BuffType.KiteBuff) ? 0.1 : 0)');
+  it('挖掘冷却链 -0.1（1457 :10004 pickSpeed -= 0.1f；旧 1456 钉 -0.15 已反转）', () => {
+    expect(gameSrc).toContain('- (buffs.has(BuffType.KiteBuff) ? 0.1 : 0)');
+    expect(gameSrc).not.toContain('- (buffs.has(BuffType.KiteBuff) ? 0.15 : 0)');
     const p = mkPlayer();
     p.buffs.apply(BuffType.KiteBuff, 60);
-    expect(p.buffs.pickSpeedMult).toBeCloseTo(0.85, 5);
+    expect(p.buffs.pickSpeedMult).toBeCloseTo(0.9, 5);
   });
   it('放置速度 +0.15 两半边不变（1456 :9616-9617 tileSpeed/wallSpeed += 0.15f）', () => {
     expect(gameSrc).toContain('if (this.player.buffs.has(BuffType.KiteBuff)) s += 0.15;');

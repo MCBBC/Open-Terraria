@@ -42,6 +42,7 @@ import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
+import { runFinishNoTraps } from './FinishNoTrapsPass';
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0(空格)安全退化 */
 const SHEET_TO_INTERNAL = new Map<number, number>();
@@ -308,16 +309,15 @@ function plantBadMatch(down: number, type: number): boolean {
   }
   return true;
 }
-/** PlantCheck_TryGetNewType（1456 cs:81348-81420）：按地基换型+帧折叠。
- *  ★KKKKKK 批 1457→1456 回滚：①isMushroom 判据族=**3|110|24**（1457 批曾按
- *  1457 cs:81886-81892 扩入 61——61 不在 1456 判据族,1456 cs:81351）；②按【入口帧】
+/** PlantCheck_TryGetNewType（1457 cs:81886-81928）：按地基换型+帧折叠。
+ *  ★1457 对齐档 2（2026-08-23）：isMushroom 判据族=**3|61|110|24**（1457 cs:81889
+ *  扩入 61;1456 cs:81351 是 3|110|24——KKKKKK 批曾随 1456 基准删）。按【入口帧】
  *  判定——C# 在折叠前读 frameX,故 down∈{60,226} 把 144 折成 18、down=70 折成 72
- *  的场景仍判 true（回写 144）。spore 随返回值交调用方（1456 PlantCheck 尾按
- *  **入口 type** 回写 144/270,1457 是按 type2——见 plantCheckSweep 注）。 */
+ *  的场景仍判 true（回写 144）。spore 随返回值交调用方（回写键见 plantCheckSweep 注）。 */
 function plantNewType(sheet: number, down: number, fx: number): { type: number; fx: number; spore: boolean } {
   let type = sheet, nfx = fx;
   let spore = false;
-  if (type === 3 || type === 110 || type === 24) spore = nfx === 144;   // 入口帧（1456 判据族,无 61）
+  if (type === 3 || type === 61 || type === 110 || type === 24) spore = nfx === 144;   // 入口帧（1457 cs:81889 判据族含 61）
   if (type === 201) spore = nfx === 270;                                               // 入口帧
   if ((type === 3 || type === 73) && down !== 2 && down !== 477 && nfx >= 162) nfx = 126;
   if (type === 74 && down !== 60 && down !== 226 && nfx >= 162) nfx = 126;
@@ -369,6 +369,25 @@ const platformProperTop = (fx: number): boolean => {
   const n = Math.floor(fx / 18);
   return (n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26);
 };
+/** AnchorValid(tile, AnchorType.Table)（1457 cs:52294-52340,Table 单独位）：
+ *  nactive && ( 平台正帧（!half 且 fx/18∈[0,7],或 fx/18∈[12,16]∪[25,26],PlatformFrameWidth
+ *  =TileObjectData._data[19].CoordinateFullWidth=18） || solid∩solidTop ||
+ *  (!平台∩tileTable∩blockType()==0) ）。Check2x1 case103 逃生门消费（cs:47417-47430）。
+ *  blockType（Tile.cs:232）：half→1,slope1→2,slope2→3,其余 0。 */
+function anchorValidTable(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !nactiveAt(st, x, y)) return false;
+  const i = st.idx(x, y);
+  const ti = st.type[i];
+  const sh = SWEEP_SHEET[ti];
+  const d = TILE_DEFS[ti];
+  if (PLATFORMS.has(sh)) {
+    const n = Math.floor(st.frameX[i]! / 18);
+    if ((!st.half[i] && n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26)) return true;
+  } else if (genSolidType(ti) && d && d.platform) return true;   // tileSolid ∩ tileSolidTop
+  if (!PLATFORMS.has(sh) && TILE_TABLE.has(sh) && !st.half[i]
+    && slopeOf(st, x, y) !== 1 && slopeOf(st, x, y) !== 2) return true;   // blockType()==0
+  return false;
+}
 /** SolidTileAllowBottomSlope（cs:70211）：active&&(solid||solidTop)&&(!顶坡||平台正帧)&&!half&&!inActive。
  *  ★RRRR 批（2026-08-19）：tileSolid 一律走 genSolidType（Main.tileSolid 生成期镜像）——
  *  Piles pass 头翻转（cs:18906：379/229/190/196/189/717-719/202/460/484=false）期间，
@@ -1474,12 +1493,11 @@ function plantCheckSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, she
   if (r.type !== sheet) {
     st.type[i] = sid(r.type);
     st.frameX[i] = r.fx;
-    // ★KKKKKK 1456 回滚（cs:81300-81310）：spore 判定用入口帧（TryGetNewType 出参）、
-    //   回写分支查 **入口 type（原 sheet）==201 → 270,否则 144**——1457 批曾按
-    //   type2（转化后类型）查（cs:81871-81880）。1456 语义：入口 201(fx270)+down
-    //   2/477 → 写 270；入口 3/110/24(fx144)+down 199/662 → 写 144（转化成 201 也
-    //   保持 144——1456 不看转化后类型）。
-    if (r.spore) st.frameX[i] = sheet === 201 ? 270 : 144;
+    // ★1457 对齐档 2（2026-08-23,cs:81871-81880）：spore 判定用入口帧（TryGetNewType
+    //   出参）不变,回写分支查 **type2（转化后类型）==201 → 270,否则 144**——1456
+    //   cs:81300-81310 查入口 type（KKKKKK 批曾随 1456 基准回滚）。1457 语义：入口
+    //   3/61/110/24(fx144)+down 199/662 → 转化成 201 → 写 270（1456 写 144）。
+    if (r.spore) st.frameX[i] = r.type === 201 ? 270 : 144;
   } else {
     ctx.destroyObject = true; killTileGen(st, ctx, x, y); ctx.destroyObject = false;
   }
@@ -1552,11 +1570,20 @@ function check2x1Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
   let ok = st.frameX[st.idx(x0 + 1, y)] === st.frameX[st.idx(x0, y)]! + 18
     && sheetAt2(st, x0, y) === sheet && sheetAt2(st, x0 + 1, y) === sheet
     && activeAt2(st, x0, y) && activeAt2(st, x0 + 1, y);
-  if (sheet === 103 || sheet === 29 || sheet === 462) {
-    // ★KKKKKK 1456 回滚（cs:47019-47033）：1456 的 case103 与 29/462 同支=纯桌面门
-    //  （两底格各判:非活性/非 tileTable/halfBrick/topSlope → flag）；1457 批曾按
-    //  1457 cs:47648 给 103 加 AnchorValid(Table) 逃生门（碗底为平台平帧/
-    //  solid∩solidTop/tileTable 且 blockType 0 时存活）——1456 无此门,已并回。
+  if (sheet === 103) {
+    // ★1457 对齐档 2（2026-08-23,cs:47417-47430）：case103 独立支=桌面门【或】
+    //  AnchorValid(Table) 逃生门（两底格各判,短路序同原版）——碗底为平台正帧/
+    //  solid∩solidTop/tileTable 且 blockType 0 时存活。1456（cs:47019-47033）的
+    //  case103 与 29/462 同支=纯桌面门（KKKKKK 批曾随 1456 基准并回）。
+    for (const xx of [x0, x0 + 1]) {
+      const bi = st.idx(xx, y + 1);
+      const tableGate = !st.flags[bi] || !TILE_TABLE.has(SWEEP_SHEET[st.type[bi]])
+        || st.half[bi] || slopeOf(st, xx, y + 1) === 1 || slopeOf(st, xx, y + 1) === 2;
+      if (tableGate && !anchorValidTable(st, xx, y + 1)) ok = false;
+    }
+  } else if (sheet === 29 || sheet === 462) {
+    // 纯桌面门（1456≡1457 同支,cs:47431-47442）：两底格各判非活性/非 tileTable/
+    // halfBrick/topSlope → flag
     for (const xx of [x0, x0 + 1]) {
       const bi = st.idx(xx, y + 1);
       if (!st.flags[bi] || !TILE_TABLE.has(SWEEP_SHEET[st.type[bi]])
@@ -2529,7 +2556,7 @@ function fillWallHolesInArea(st: TileStore, gs: GenState): void {
 
 export function runFinalCleanupPass(
   st: TileStore, gs: GenState, rng?: RNG,
-  opts?: { frameSparse?: boolean; stats?: ZzzStats },
+  opts?: { frameSparse?: boolean; stats?: ZzzStats; chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }> },
 ): void {
   const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: !!opts?.frameSparse, stats: opts?.stats ?? __zzzLastStats };
   // ★pass 头 tileSolid 翻转（cs:22306 `Main.tileSolid[484] = false`）：滚动仙人掌
@@ -2728,6 +2755,15 @@ export function runFinalCleanupPass(
         st.type[t] = DIRTIEST;
       }
     }
+  }
+
+  // ── FinishNoTraps（cs:22622-22625 调用位：⑭ 之后、ShimmerCleanUp 之前）──
+  //    ★SSSSSS-NOTRAPS 批新增（实现体在 FinishNoTrapsPass.ts）：noTrapsWorldGen
+  //    专属 Finish 子段（生命水晶巨石化/雕像·死箱接驳/炸药埋点/残箱退金箱/
+  //    Gas Trap 塞箱）。掷流位次敏感（ShimmerCleanUp r90 块每格 2×NextDouble
+  //    在其后）——勿移动调用位。
+  if (gs.seedFlags.noTraps && opts?.chests && rng) {
+    runFinishNoTraps(st, rng, gs, opts.chests);
   }
 
   // ── ShimmerCleanUp（cs:22639→34750，⑭ 之后同 pass 尾段；ZZZ 批补）──

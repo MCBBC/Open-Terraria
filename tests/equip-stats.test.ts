@@ -17,9 +17,9 @@ describe('装备数据表（extract-equip-prefix.mjs）', () => {
     expect(armorSlotIndexOfInternal(_iid(77))).toBe(2);
   });
 
-  it('配饰效果：再生手环49 life2 / 星力手环111 mana20(1456 :14375-14377) / 赫尔墨斯靴54 runSpeed6', () => {
+  it('配饰效果：再生手环49 life2 / 星力手环111 mana40(1457 :15040-15046) / 赫尔墨斯靴54 runSpeed6', () => {
     expect(statOfInternal(_iid(49))).toMatchObject({ life: 2, acc: 1 });
-    expect(accFxOfInternal(_iid(111))).toMatchObject({ mana: 20 });   // 1456 statManaMax2 += 20（1457 才改 40,本仓取 1456）
+    expect(accFxOfInternal(_iid(111))).toMatchObject({ mana: 40 });   // 1457 switch :15040-15046(星力手环族 +20→+40;2026-08-23 基准切换 1457)
     expect(accFxOfInternal(_iid(54))).toMatchObject({ runSpeed: 6 });
   });
 
@@ -143,7 +143,8 @@ describe('Player 装备属性聚合', () => {
     const p = mkPlayer();
     // 恶魔之翼 492：wingSlot 1 → 100t / 6.25 速度（WingStatsInitializer）
     p.inv.armor[3] = { id: _iid(492), stack: 1 };
-    expect(p.equipStats.wing).toEqual({ logic: 1, slot: 1, time: 100, accSpeed: 6.25, accelMult: 1, hover: false });
+    // hidden = hideVisibleAccessory 旗（UpdateEquips :12580 隐藏翼门,2026-08-23 批新增字段）
+    expect(p.equipStats.wing).toEqual({ logic: 1, slot: 1, time: 100, accSpeed: 6.25, accelMult: 1, hover: false, hidden: false });
     // 忍者大师装备 984：dash 1 + blackBelt
     p.inv.armor[4] = { id: _iid(984), stack: 1 };
     expect(p.equipStats.dash).toBe(1);

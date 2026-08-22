@@ -1,4 +1,5 @@
-// 召唤/鞭类 1456 对齐修复批回归（2026-08-22，标杆 Terarria1456/Terraria/Projectile.cs）：
+// 召唤/鞭类对齐回归（2026-08-23 基准切换 1457,标杆 Terarria1457/Terraria/Projectile.cs；
+// ①-⑧ 各节行号锚为两版共有段,数值行为一致）：
 //  ① 阿比盖尔 963 困难档伤害系数（:12116-12125 num9 0.55 / hardMode 1.3）
 //  ② 星尘龙 625 追击加速 ×1.5 + Dot 阻尼 + 距敌 Size×0.75 门（:40229-40244）
 //  ③ 星尘龙伤害段数 localAI[0] 含尾段（:40342 每段 self+1，基础龙 3 段）
@@ -7,8 +8,8 @@
 //  ⑥ 乌鸦 317 归位门 500/1400（ai[1]≠0 || friendly，:27422-27426）
 //  ⑦ Foxparks 1094 按 velocity.X 翻转（:56111-56120 移出 MINION_NO_FLIP）
 //  ⑧ 致命球 533 自旋相位门 ai[0]<3 || ≥9（:28874-28877）
-//  ⑨ 星鞭 5479 星雨 1456 语义：首鞭无条件 ×0.33 无 proc 消费（:12965-12970/:13868-13880）
-//  ⑩ 月主鞭 5480 proc：单发 1045 弧线弹 + 命中链式补发 ≤3（:13832-13867/:12975-12980）
+//  ⑨ 星鞭 5479 星雨 1457 语义：CanProcOnNPC 门 + RemoveAllProcs、伤 ×2×0.22（:14001-14007/:15013-15036）
+//  ⑩ 月主鞭 5480 proc：单发 1045 弧线弹（:14977-15011 num=1）+ 命中链式补发 ≤3（:14015-14018）
 import { describe, expect, it } from 'vitest';
 import { MinionProj } from '../src/entities/MinionProj';
 import { WhipProj } from '../src/entities/WhipProj';
@@ -265,29 +266,33 @@ describe('⑧ 致命球 533 自旋相位门（1456 :28874-28877）', () => {
   });
 });
 
-describe('⑨ 星鞭 5479 星雨 1456 语义（:12965-12970/:13868-13880）', () => {
-  it('首鞭命中即撒星（无 proc 门）、伤 ×0.33、不消费 proc', () => {
+describe('⑨ 星鞭 5479 星雨 1457 语义（Projectile.cs:14001-14007/:15013-15036）', () => {
+  it('CanProcOnNPC 门（随从 OnTaggedHit 启窗）+ RemoveAllProcs、伤 ×2×0.22', () => {
     const e = mkEnemy(1, 0, 0);
     const { hooks, player, added } = makeHooks([e]);
     const w = new WhipProj(player.cx, player.cy, 0, 1034, 5479, 30, 4, 30, 4, () => player);
     for (let i = 0; i < 9; i++) w.fixedUpdate(1, hooks);
     const pts = w.pointsAt(18, true);
     e.cx = pts[10].x; e.cy = pts[10].y; e.x = pts[10].x - 8; e.y = pts[10].y - 12;
-    w.fixedUpdate(1, hooks);                             // 首鞭命中
-    const stars = added.filter((a) => a instanceof Arrow && (a as Arrow).projId === 1039) as Arrow[];
-    expect(stars.length).toBe(6);                        // 每 3 控制点一颗（:13873）
-    expect(stars[0].damage).toBe(Math.max(1, Math.trunc(30 * 0.33)));
-    expect(player.tagEffectStack.canProcOnNPC(5479, e.id)).toBe(false); // 无 proc 消费
-    // 第二挥（新弹 localAI[0]=0）再命中再撒——per-swing 门
+    w.fixedUpdate(1, hooks);                             // 首鞭命中（无 proc 窗 → 不撒星 :14002）
+    expect(added.filter((a) => a instanceof Arrow && (a as Arrow).projId === 1039).length).toBe(0);
+    // 随从命中经 WhipTagEffect_Constellation.OnTaggedHit（_Constellation.cs:6-10）启窗——直书等价态
+    player.tagEffectStack.tryEnableProcOnNPC(5479, e.id);
+    // 第二挥（新弹 localAI[0]=0）命中 → 撒星 + RemoveAllProcs（:14005-14006）
     const w2 = new WhipProj(player.cx, player.cy, 0, 1034, 5479, 30, 4, 30, 4, () => player);
     for (let i = 0; i < 9; i++) w2.fixedUpdate(1, hooks);
+    const pts2 = w2.pointsAt(18, true);
+    e.cx = pts2[10].x; e.cy = pts2[10].y; e.x = pts2[10].x - 8; e.y = pts2[10].y - 12;
     w2.fixedUpdate(1, hooks);
-    expect(added.filter((a) => a instanceof Arrow && (a as Arrow).projId === 1039).length).toBe(12);
+    const stars = added.filter((a) => a instanceof Arrow && (a as Arrow).projId === 1039) as Arrow[];
+    expect(stars.length).toBe(6);                        // 每 3 控制点一颗（:15019 i+=3）
+    expect(stars[0].damage).toBe(Math.max(1, Math.trunc(Math.round(30 * 0.9) * 2 * 0.22))); // :14005+:15016-15017
+    expect(player.tagEffectStack.canProcOnNPC(5479, e.id)).toBe(false); // RemoveAllProcs（:14006）
   });
 });
 
-describe('⑩ 月主鞭 5480 proc 1456 语义（:13832-13867/:12975-12980）', () => {
-  it('单发 1045（伤 20 弧线弹）+ 命中链式补发 ai[1]<2 → 全程 ≤3', () => {
+describe('⑩ 月主鞭 5480 proc 1457 语义（Projectile.cs:14977-15011/:14015-14018）', () => {
+  it('单发 1045（伤 20 弧线弹,num=Next(1,4) 后被覆写 1）+ 命中链式补发 ai[1]<2 → 全程 ≤3', () => {
     const e = mkEnemy(1, 200 * 8, 60 * 16, 240, 240);    // 大判定盒容纳弧线漂移
     const { hooks, player, added } = makeHooks([e]);
     player.tagEffectStack.tryApplyTagToNPC(5480, e.id, e.vanillaId);
@@ -295,18 +300,18 @@ describe('⑩ 月主鞭 5480 proc 1456 语义（:13832-13867/:12975-12980）', (
     const res = resolveWhipTagHit(e, 10, hooks, (el) => {
       (hooks as unknown as { entities: { add: (x: unknown, b?: string) => void } }).entities.add(el, 'projectiles');
     }, 1, e.cx, e.cy, player);
-    // TagDamage=25（ItemID.cs:1400-1405）;5480 CritChance=10（:1404）→ 10% TagCrit ×2
+    // TagDamage=25（ItemID.cs:1412-1417）;5480 CritChance=10（:1416）→ 10% TagCrit ×2
     expect([10 + 25, (10 + 25) * 2]).toContain(res.dmg);
     expect(player.tagEffectStack.canProcOnNPC(5480, e.id)).toBe(false); // proc 消费
     const genOf = (p: MoonLordWhipProc) => p.gen;
     let procs = added.filter((a): a is MoonLordWhipProc => a instanceof MoonLordWhipProc);
-    expect(procs.length).toBe(1);                        // 单发（1457 三连已废）
+    expect(procs.length).toBe(1);                        // 单发（:14980-14981 死掷后 num=1）
     expect(procs[0].damage).toBe(20);
     expect(procs[0].arc).not.toBe(0);                    // 旋转弧线弹道
     // gen0 命中 → 伤 20（pen 50）+ 补发 gen1
     procs[0].x = e.cx - procs[0].w / 2; procs[0].y = e.cy - procs[0].h / 2;
     procs[0].fixedUpdate(1, hooks);
-    expect(e.pens[e.pens.length - 1]).toBe(50);          // armorPenetration=50（:9623）
+    expect(e.pens[e.pens.length - 1]).toBe(50);          // armorPenetration=50（:9910）
     procs = added.filter((a): a is MoonLordWhipProc => a instanceof MoonLordWhipProc);
     expect(procs.length).toBe(2);
     expect(genOf(procs[1])).toBe(1);
@@ -316,7 +321,7 @@ describe('⑩ 月主鞭 5480 proc 1456 语义（:13832-13867/:12975-12980）', (
     procs = added.filter((a): a is MoonLordWhipProc => a instanceof MoonLordWhipProc);
     expect(procs.length).toBe(3);
     expect(genOf(procs[2])).toBe(2);
-    // gen2 命中 → ai[1]=2 不再补发（:12976）
+    // gen2 命中 → ai[1]=2 不再补发（:14016）
     procs[2].x = e.cx - procs[2].w / 2; procs[2].y = e.cy - procs[2].h / 2;
     procs[2].fixedUpdate(1, hooks);
     procs = added.filter((a): a is MoonLordWhipProc => a instanceof MoonLordWhipProc);

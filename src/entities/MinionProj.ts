@@ -154,6 +154,10 @@ const MINION_SUMMON_SFX: Record<number, Array<{ track: string; vol: number; at: 
   1094: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_foxparks', vol: 0.35, at: 20 }],
   1112: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_cattiva', vol: 0.35, at: 20 }],
   1113: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_foxparks', vol: 0.35, at: 20 }],
+  // 1098/1123 钻地龟出场双声（AI_204 :39222-39231：soundDelay-- ==-1 → PalSummon
+  // 0.15（tick1）/ ==-20 → PalDigtoise 0.35（tick20）——SoundID.cs:1072/:1094 同族节拍）
+  1098: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_digtoise', vol: 0.35, at: 20 }],
+  1123: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_digtoise', vol: 0.35, at: 20 }],
   ...Object.fromEntries([663, 665, 667, 677, 678, 679, 688, 689, 690, 691, 692, 693]
     .map((id) => [id, [{ track: 'dd2_defense_tower_spawn', vol: 0.7, at: 1 }]])),
 };
@@ -218,6 +222,11 @@ export class MinionProj extends Entity {
   projId: number;
   /** true=哨兵（定点炮台，独立于随从上限） */
   sentry: boolean;
+  /** 1457 哨兵携带态（原版 ai[2]==1f，IsSentryBeingCarried :80527-80530）：被
+   *  accSentryBackpack 四件（6172/6175/6176/6177）拾起背在身上——随玩家移动、
+   *  照常开火、仍占哨兵上限（WipableTurret :530-540 不豁免携带态）；拾起后无
+   *  放下机制，直至消亡/被驱逐（UpdateMaxTurrets :53699-53727 同池） */
+  carriedByBackpack = false;
   /** 哨兵剩余寿命（t；随从不耗） */
   life: number;
   /** 同列槽位序（多随从环形悬停错位） */
@@ -310,6 +319,31 @@ export class MinionProj extends Entity {
   private palA0 = 0;
   /** ai[1]：扑击剩余 tick（num10 初值 16/30，:50490/:50499） */
   private palA1 = 0;
+  // ---- 1457 帕鲁钻地龟 1098/1123（AI_204_Digtoise Projectile.cs:39169-39506 态机，
+  //      2026-08-23 内容缺口批；物品 5667 PalworldDigtoise / 6174 PalworldTrustyDigtoise）----
+  /** ai[0]：0 出场 / 1 向下挖 / 2 向右挖 / 3 向左挖 / 4 离场 / 5 抚摸（:39173-39178） */
+  private digA0 = 0;
+  /** ai[1]：态内计时（出场 180t 转挖 / 挖掘节拍 num4=40 蓄势 + 20/10t 间隔 / 离场 600t 灭） */
+  private digA1 = 0;
+  /** localAI[1]：挖掘帧加速计数（num7 = 4 - lai1/4，:39377-39380） */
+  private digLai1 = 0;
+  /** 挖掘帧（0-2 出场/待机，2-9 挖掘循环 :39237-39245/:39375-39390） */
+  digFrame = 0;
+  private digFrameCounter = 0;
+  /** soundDelay 镜像：出场段 pal_summon(-1)/pal_digtoise(-20) 与挖掘段 Item199
+   *  （≤0 → 置 10）共用槽（:39222-39231/:39395-39397）——出场两声已并入
+   *  MINION_SUMMON_SFX 表（at 1/20 与原版节拍同构），本槽只承载挖掘声 */
+  private digSoundCd = 0;
+  /** 挖掘态读口（Game.commandDigtoises :48713-48726 指挥链） */
+  get digtoiseA0(): number { return this.digA0; }
+  set digtoiseA0(v: number) { this.digA0 = v; this.digA1 = 0; }
+  /** 抚摸中（flag10 = player.petting.isPetting && petting.proj==whoAmI :50053/:59101
+   *  的本仓等价——Game 抚摸白名单写入，petting 停止时统一清） */
+  beingPetted = false;
+  /** 抚摸 Joy 计时（localAI[0] :50106-50113 1093/1112/1118 镜像 / localAI[2]
+   *  :59122-59131 1094/1113 镜像）：flag10 且归零 → 60t 重触发 Joy 音；
+   *  `> (flag10?1:0)` 递减——抚摸中钉 1、停摸后放空到 0 */
+  palJoyCd = 0;
   // ---- 同伴方块 653（AI_067,Projectile.cs:46657/46804-46860/47055-47830）----
   private cubeA0 = 0;     // ai[0]：0 地面跟随 / 1 归位悬浮
   private cubeLai0 = 0;    // localAI[0]：岩浆尖叫计数 0..20（近主清零 :47088）
@@ -595,12 +629,41 @@ export class MinionProj extends Entity {
    *    空中 1（下落 2）/ 扑击 3-6|3-7；接触伤冷却 9/30（localNPCHitCooldown
    *    :10375/:10483）
    *  · 未折算：ai[0]=3 帮工意图（TryAssigningHelp :52208 依赖 IntentionGuesser
-   *    智能光标系统，本仓无）、HitIntention 采掘（:52167 同门）、抚摸 Joy 音
-   *    （petting 未接随从族）、湿身 vy×2（:51545 wet 判定链未接） */
+   *    智能光标系统，本仓无——核实 src/ 零命中后维持登记,勿造系统）、HitIntention
+   *    采掘（:52167 同门）；抚摸 Joy 音/湿身 vy×2 已随 2026-08-23 Trusty 批接通
+   *    （palJoyTick / palGroundStep wet 支） */
+  /** 抚摸 Joy 音计时（帕鲁随从族五件通用，每 tick 在 AI 分派前调）：
+   *  flag10 = player.petting.isPetting && petting.proj == whoAmI（:50053 AI_067 /
+   *  :59101 AI_026——本仓等价 = p.petting.isPetting && this.beingPetted，Game 侧
+   *  白名单单目标写入）。计时器：flag10 且 localAI==0 → 置 60 + Joy 音（一声/次抚摸
+   *  会话——`> (flag10?1:0)` 递减使抚摸中钉 1 不归零，不重触发；停摸放空 1→0）。
+   *  60t 槽原版兼作 Draw 层心形气泡进度（Main.cs:34820-34825 localAI∈(1,60)）——
+   *  本仓无世界锚定气泡，登记不建模。音：1093/1112 PalCattivaJoy（:50106-50112，
+   *  AI_067 flag8 支）/ 1094/1113 PalFoxparksJoy（:59122-59131，AI_026 flag8 支，
+   *  计时槽 localAI[2]）/ 1118 只走计时无音（AI_067 flag9 支 :50066-50070） */
+  private palJoyTick(game: GameHooks, p: Player): void {
+    if (this.projId !== 1093 && this.projId !== 1112 && this.projId !== 1118
+      && this.projId !== 1094 && this.projId !== 1113) return;
+    const flag10 = p.petting.isPetting && this.beingPetted;
+    if (flag10 && this.palJoyCd === 0) {
+      this.palJoyCd = 60;
+      if (this.projId === 1093 || this.projId === 1112) {
+        game.playSfxFiles(['pal_cattiva_joy'], 0.35, this.cx, this.cy);   // SoundID.cs:1078 0.35
+      } else if (this.projId === 1094 || this.projId === 1113) {
+        game.playSfxFiles(['pal_foxparks_joy'], 0.35, this.cx, this.cy);  // SoundID.cs:1090 0.35
+      }
+    }
+    if (this.palJoyCd > (flag10 ? 1 : 0)) this.palJoyCd--;
+  }
+
   private palGroundStep(game: GameHooks, p: Player, dmg0: number): void {
     const flag8 = this.projId === 1112;
     const num10 = flag8 ? 16 : 30;            // 扑击时长（:50490/:50499）
     const num2 = flag8 ? 800 : 500;           // 索敌射程（:50030/:50052）
+    // wet（Projectile.wet = Collision.WetCollision 每 tick 碰撞盒浸液判定）——本仓
+    // 以中心格液量 >0 近似（Enemy.wet「中心小盒判水线」同法备案），湿身跳 ×2 消费
+    const stWet = game.world.store;
+    const wet = stWet.liquid[stWet.idx(Math.floor(this.cx / 16), Math.floor(this.cy / 16))] > 0;
     // ---- ai[0]==1 归位（:50636-50853；先于地面段——原版该态不索敌不行走）----
     if (this.palA0 === 1) {
       const dpx1 = p.cx - this.cx, dpy1 = p.cy - this.cy;
@@ -760,6 +823,12 @@ export class MinionProj extends Entity {
           : d < 140 ? -10 : d < 160 ? -11 : d < 190 ? -12 : d < 210 ? -13
           : d < 270 ? -14 : d < 310 ? -15 : -16;
       }
+      // 湿身跳 ×2（1457 Projectile.cs:51616-51619，1456 :51545 同支——贴水起跳翻倍）：
+      // `if (wet && num62 == 0f) velocity.Y *= 2f`。num62 = GetLerpValue(0,100,vector15.Y)
+      // × GetLerpValue(-2,-6,velocity.Y)（:51509，vector15=目标锚-自身心 = 本仓 dyA），
+      // 在本支（velocity.Y==0 贴地段）计算时 vy 恒 0 → 第二因子钳 0 → num62 恒 0，
+      // 门恒真——净效果 = 贴地且 wet 时起跳速度翻倍（-5.1→-10.2 … -16→-32）
+      if (wet) this.vy *= 2;
     }
     // 朝向（:51558-51568：vx 定向，静止朝主）
     if (this.vx < 0) this.facing = -1;
@@ -1112,9 +1181,16 @@ export class MinionProj extends Entity {
     this.ground = ground;
     this.life = sentry ? 60 * 600 : Infinity; // 哨兵 10 分钟（哨兵类默认时限近似）
     this.ownerRef = owner;
-    // 帕鲁三件出场淡入（SetDefaults alpha=255：1112 :10377/1113 :10400/1118 :10485）
-    this.alphaFade = projId === 1112 || projId === 1113 || projId === 1118 ? 255 : 0;
+    // 帕鲁出场淡入（SetDefaults alpha=255：1112 :10377/1113 :10400/1118 :10485/
+    // 1098 :10241/1123 :10506-10513）
+    this.alphaFade = projId === 1112 || projId === 1113 || projId === 1118
+      || projId === 1098 || projId === 1123 ? 255 : 0;
+    // 钻地龟 34×34（SetDefaults :10242-10243/:10507-10508——MinionProj 缺省 16×16）
+    if (projId === 1098 || projId === 1123) { this.w = 34; this.h = 34; }
   }
+
+  /** 归属玩家（ownerRef 公开读——Game 抚摸白名单按 owner 过滤） */
+  get ownerPlayer(): Player | null { return this.ownerRef(); }
 
   /** 按 id 取敌（AI_120 ai[1] 目标槽 :42198-42207 等价） */
   private enemyById(game: GameHooks, id: number): EnemyLike | null {
@@ -1182,13 +1258,44 @@ export class MinionProj extends Entity {
     }
     // 帕鲁出场淡入（DoPalAppearEffect :39509-39515：alpha -= 15/tick，17t 全显）
     if (this.alphaFade > 0) this.alphaFade = Math.max(0, this.alphaFade - 15);
+    // 帕鲁随从族抚摸 Joy 计时（AI 首段，:50053-50113/:59101-59131——先于各家族分支,
+    // foxChannel 等早退支也照走）
+    {
+      const owner0 = this.ownerRef();
+      if (owner0) this.palJoyTick(game, owner0);
+    }
     if (this.projId === 653) { this.companionCubeStep(game); return; }
     if (this.sentry) {
       if (--this.life <= 0) { this.dead = true; return; }
-      // 落地（AI_130 尾部 :65420：tileCollide=true + velocity.Y += 0.2）
-      this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
-      moveAndCollide(this, game.world, 0, this.vy);
       const owner = this.ownerRef();
+      // ---- 1457 哨兵携带（accSentryBackpack 四件 6172 重携/6175 侦察/6176 圣殿
+      //      骑士/6177 皇家卫队——ApplyEquipFunctional :14612-14685 全四件置旗）----
+      //  拾起门 CanGetPickedUpBySentryBackpack（Projectile.cs:80532-80552）：sentry +
+      //  owner 本地 + 玩家挂背包且抓取冷却 0（:80543）+ 哨兵盒与玩家盒相交（:80547）
+      //  → ai[2]=1（:37811-37815，各哨兵 AI 同款插入）。抓取冷却被携带者每拍续约 2
+      //  （SetAsSelectedSentryBackpackTarget :80554-80557）→ 同时至多携带一门
+      if (!this.carriedByBackpack && owner
+        && owner.equipStats.accSentryBackpack && owner.accSentryBackpackGrabCooldown <= 0
+        && this.x < owner.x + owner.w && this.x + this.w > owner.x
+        && this.y < owner.y + owner.h && this.y + this.h > owner.y) {
+        this.carriedByBackpack = true;
+      }
+      if (this.carriedByBackpack) {
+        // AI_Sentries_HeavySlingReposition 头（:70096-70103）：!accSentryBackpack
+        // → Kill（携带中卸下背包 = 哨兵当场消亡）
+        if (!owner || !owner.equipStats.accSentryBackpack) { this.dead = true; return; }
+        owner.accSentryBackpackGrabCooldown = 2;           // :80556 续约占位
+        this.vx = 0; this.vy = 0;                          // :37820 velocity = Zero
+        // :37821 tileCollide=false + AI_Sentries_HeavySlingReposition default 支
+        //（:70259-70265）：Center = MountedCenter（+headgear 微移,本仓省略）——
+        // 哨兵背在身上随玩家移动,各塔族开火段照常跑（原版拾起块后 AI 继续 :37824+）
+        this.x = owner.cx - this.w / 2;
+        this.y = owner.cy - this.h / 2;
+      } else {
+        // 落地（AI_130 尾部 :65420：tileCollide=true + velocity.Y += 0.2）
+        this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
+        moveAndCollide(this, game.world, 0, this.vy);
+      }
       // 随从/哨兵伤害：武器基伤 × summonDamageMult（live 刷新，换装即时生效，
       // Projectile.cs:15368 语义）+ 护甲穿透（对随从弹幕生效 :12068）
       const dmgOf = () => Math.max(1, Math.round(this.damage * (owner ? owner.summonDamageMult : 1))); // ⑥ pen 移 hit 时

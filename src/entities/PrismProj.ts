@@ -53,7 +53,8 @@ export class PrismProng extends Entity {
   opacity = 0;
   /** 光棱 scale（charge 展开 1.4×(1−num724)，满充 1.4） */
   prongScale = 1;
-  /** 同敌 5t 免疫（immune[owner]=5 :13032） */
+  /** 同敌免疫窗（Damage_PVE_Inner :14058：immune[owner]=GetSlowMagicUseTime(5)——
+   *  常态 5t/蓝空过载 12t） */
   private hitCd = new Map<number, number>();
   dead = false;
   lightRGB: [number, number, number] | null = null;
@@ -137,7 +138,12 @@ export class PrismProng extends Entity {
           playEnemyHitSound(game, e);
           e.hurt(dmg, this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit);
           game.addDamageNumber(this.cx, this.cy - 8, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
-          this.hitCd.set(e.id, 5);
+          // 同敌免疫窗（Damage_PVE_Inner :14058 `type==632 → immune[owner]=
+          // GetSlowMagicUseTime(5)`）：常态 5t,蓝空过载（slowMagicUse）×2.5=12t
+          // （缺省 5——旧桩 player 无此方法时行为不变）
+          this.hitCd.set(e.id, (game.player as unknown as {
+            getSlowMagicUseTime?: (n: number) => number;
+          }).getSlowMagicUseTime?.(5) ?? 5);
           break;
         }
       }
@@ -303,11 +309,13 @@ export class PrismProj extends Entity {
 }
 
 /** 充能爆破炮 2882 → 460/461/459（AI_075 :63442-63620 的 460 分支 + AI_84 461 锚定）：
- *  460 晶体：channel 主控；ai[0] 计数（80=二档尘/180=满蓄 flag4）；每 5t 重瞄
- *  （vel=归一瞄准向）；音 Item15 按 (5−档)×2 间隔；魔耗节点 = 80t/180t/满蓄后每 20t
- *  （:63454-63459 flag3 + :63562-63563 flag6）；459 小弹发射点 = ai0==1、
- *  ≤50 每 10t、80-180 每 30t（速度 10；二段 num35=0.7+num20×0.3≥1 → 伤害×2.5
- *  :63610-63611）；ai0==180 发 461 光束（伤害×1.5）后光束灭即亡。
+ *  460 晶体：channel 主控；ai[0] += GetSlowMagicUseRate()（:67404,1457 slowMagic 六消费
+ *  点之一——常态 1/t、蓝空过载 0.4/f,蓄压档 80/180 拉长 2.5×）；每 5t 重瞄
+ *  （vel=归一瞄准向,瞄准拍兼 flag5 发射拍 :67439）；音 Item15 按 (5−档)×2 间隔；
+ *  魔耗节点 = (int)ai0==80/==180/满蓄后 %20（:63454-63459 flag3 + :63562-63563 flag6）；
+ *  459 小弹发射点 = ai0==1、≤50 每 (int)ai0%10、80-180 每 (int)ai0%30（速度 10；
+ *  二段 num35=0.7+num20×0.3≥1 → 伤害×2.5 :63610-63611）；(int)ai0==180 发 461 光束
+ *  （伤害×1.5）后光束灭即亡（flag5 拍才查 :63580-63587）。
  *  命中 461 = 线碰撞 22×scale（:14612-14620）+ LaserScan 2400。 */
 export class BlasterBeam extends Entity {
   w = 18; h = 18;
@@ -419,12 +427,20 @@ export class ChargedBlaster extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    this.charge++;
+    // ai[0] += GetSlowMagicUseRate()（:67404——1457 slowMagic 六消费点之一）：常态 1/t、
+    // 蓝空过载 0.4/t（蓄压全档 80/180 拉长 2.5×）。★Math.fround = C# float 累积语义：
+    // 0.4f 双精/单精累积都永不落整 20 倍数（下 flag5 直通条件实证零命中），floor 档
+    // 80/180 到达拍一致（单精 200/451,452）。缺省 1（旧桩 player 无此方法时行为不变）
+    const rate = (game.player as unknown as { getSlowMagicUseRate?: () => number })
+      .getSlowMagicUseRate?.() ?? 1;
+    this.charge = Math.fround(this.charge + rate);
     const full = this.charge >= 180;                                        // flag4（:63460）
     const stage = (this.charge >= 180 ? 2 : this.charge >= 80 ? 1 : 0);     // num20（:63445-63453）
+    const ai0 = Math.trunc(this.charge);                                    // (int)ai[0] 截断
     // 重瞄（:63476-63496：满蓄前 ai1≥5 门、满蓄 ai0%5）
     if (!full) this.aimCd++;
-    if ((!full && this.aimCd >= 5) || (full && this.charge % 5 === 0)) {
+    const aimTick = (!full && this.aimCd >= 5) || (full && ai0 % 5 === 0);
+    if (aimTick) {
       if (!full) this.aimCd = 0;
       const aim = this.aimCb();
       let ax = aim.x - this.cx, ay = aim.y - this.cy;
@@ -448,20 +464,30 @@ export class ChargedBlaster extends Entity {
     if (!pl) { this.dead = true; return; }
     this.x = pl.cx - this.w / 2;
     this.y = pl.cy - this.h / 2;
-    // 魔耗节点（:63454-63459 flag3 = 80t / 180t / 满蓄后每 20t；结算式 :63562-63563
-    // flag6 = !flag3 || CheckMana(mana, pay:true)——只在 flag3 拍扣魔（flag3 拍必落
-    // 在 flag5 发射拍内：80=ai1 满 5、180 与 %20 均 %5==0），曾错成每发 459 小弹扣。
-    // 扣魔失败 → Kill（:63564-63565 else 分支；1457 ManaV2 payMana 恒放行）
-    const flag3 = this.charge === 80 || this.charge === 180
-      || (this.charge > 180 && this.charge % 20 === 0);
+    // flag5 发射拍（:67430-67440）：ai0==1（0.4 步进永不成立,原版同款哑档）‖
+    // 满蓄 ai[0]%20f==0（0.4 累积恒非整 20 倍数——fround/双精都零命中,哑档）‖
+    // 瞄准拍（重瞄门内 flag5=true :67439）。★发射/魔耗/光束存活检查全挂此拍
+    // （:67442 flag5 门）——常态 1/t 下所有 %10/%30 发射拍均为 5 的倍数 = 瞄准拍,
+    // 行为不变;过载 0.4/t 下 459 只在 floor∈{10,20,...,50,80,110,140,170} 的瞄准拍出
+    const flag5 = this.charge === 1 || (full && this.charge % 20 === 0) || aimTick;
+    if (!flag5) return;
+    // 魔耗节点（:63454-63459 flag3 = (int)ai0==80 / ==180 / 满蓄后 (int)ai0%20==0；
+    // 结算式 :63562-63563 flag6 = !flag3 || CheckMana(mana, pay:true)——只在 flag3 拍
+    // 扣魔（flag3 拍必落在 flag5 发射拍内：80=ai1 满 5、180 与 %20 均 %5==0），
+    // 曾错成每发 459 小弹扣。扣魔失败 → Kill（:63564-63565 else 分支；1457 ManaV2
+    // payMana 恒放行）。★(int) 截断门——过载 0.4 步进下 floor 80 停 2-3 拍,
+    // 但 flag5 门只放瞄准拍 → 扣魔一次（原版同款）
+    const flag3 = ai0 === 80 || ai0 === 180
+      || (this.charge > 180 && ai0 % 20 === 0);
     if (flag3 && !this.payMana()) {
       this.dead = true; if (this.beam) this.beam.dead = true; return;
     }
     if (!full) {
-      // 459 小弹（:63590-63612 flag7：ai0==1 / ≤50 每 10t / 80-180 每 30t；速度 10）
+      // 459 小弹（:63590-63612 flag7：ai0==1 / ≤50 且 (int)ai0%10==0 / 80-180 且
+      // (int)ai0%30==0；速度 10）
       const fire = this.charge === 1
-        || (this.charge <= 50 && this.charge % 10 === 0)
-        || (this.charge >= 80 && this.charge < 180 && this.charge % 30 === 0);
+        || (this.charge <= 50 && ai0 % 10 === 0)
+        || (this.charge >= 80 && this.charge < 180 && ai0 % 30 === 0);
       if (fire) {
         // 二段伤害（:63610-63611）：num35 = 0.7 + num20×0.3（num20=0/1/2 → 0.7/1.0/1.3），
         // num35<1 ? damage : (int)(damage×2.5)。C# float 0.7f+0.3f 恰 = 1.0f（80t 起即
@@ -474,8 +500,11 @@ export class ChargedBlaster extends Entity {
         bolt.armorPen = this.armorPen;
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(bolt, 'projectiles');
       }
-    } else if (this.charge === 180) {
-      // 满蓄发 461 光束（:63566-63578，(int)(damage×1.5) 截断）——魔耗已由 flag3@180 支付
+    } else if (ai0 === 180) {
+      // 满蓄发 461 光束（:63566-63578，(int)(damage×1.5) 截断）——魔耗已由 flag3@180 支付。
+      // ★原版无"已发"守卫：(int)ai0==180 在 0.4 步进下停 2 拍（fround 实证 451/452）
+      // 且两拍均瞄准拍 → 过载首蓄会连发 2 根（ai[1] 被后根覆写,前根成孤儿——原版如此,
+      // 照录）；本槽 this.beam 只留后根引用
       const beam = new BlasterBeam(Math.trunc(this.damage * 1.5), this.knockback);
       beam.parent = this;
       beam.critChance = this.critChance;
@@ -483,7 +512,7 @@ export class ChargedBlaster extends Entity {
       this.beam = beam;
       (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(beam, 'projectiles');
     } else if (this.beam?.dead) {
-      this.dead = true; return;      // 光束灭即亡（:63580-63587）
+      this.dead = true; return;      // 光束灭即亡（:63580-63587,flag5 拍才查）
     }
   }
 

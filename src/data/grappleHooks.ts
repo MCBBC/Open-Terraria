@@ -1,50 +1,52 @@
-// 钩爪（Grappling Hooks）全量变体表——数值一律取 Terarria1456（1.4.5.6）最终态。
+// 钩爪（Grappling Hooks）全量变体表——数值一律取 Terarria1457（1.4.5.7）最终态
+// （73/74 双钩回收 17→22、牵引 11→12.5 为 1457 唯一钩爪数值变化）。
 //
-// 数据来源（行号 = Terarria1456 反编译源码）：
+// 数据来源（行号 = 反编译源码；除 73/74 外各钩数值两版一致,其行号锚沿用 1456 段——
+// 1457 AI_007 段 :53483 起行号平移,值逐行对拍无差;73/74 条目已换注 1457 行号）：
 //  · 物品族 shoot/shootSpeed/useTime/useAnimation —— Item.cs SetDefaults1-5 各 case 块
-//  · 弹体射程门（num3 > X → ai[0]=1 回收）—— Projectile.cs AI_007:49706-49747
-//  · 回收速度（ai[0]==1 的 num18）—— Projectile.cs:49894-49927
-//  · 挂墙后同主人最大并存锚数（num17）—— Projectile.cs:49821-49836
-//  · 牵引速度上限（GetGrapplingForces 的 num9）—— Player.cs:22560-22570
-//  · QuickGrapple 在飞上限 num7 / 总数上限 num8 —— Player.cs:5989-6014
+//  · 弹体射程门（num3 > X → ai[0]=1 回收）—— Projectile.cs AI_007:53483（链表 :53567）
+//  · 回收速度（ai[0]==1 的 num18）—— Projectile.cs:53715-53768
+//  · 挂墙后同主人最大并存锚数（num17）—— Projectile.cs:53643-53685
+//  · 牵引速度上限（GetGrapplingForces 的 num9）—— Player.cs:23013-23033
+//  · QuickGrapple 在飞上限 num7 / 总数上限 num8 —— Player.cs:6362-6412
 //  · 弹体宽高 —— Projectile.cs SetDefaults（已由 vanilla-projectiles.json 全量提取，
 //    经逐条对账与源码一致）；timeLeft 一律 `timeLeft *= 10`（默认 3600 → 36000，
-//    Projectile.cs:527 + 各钩 case）；extraUpdates 仅 256(=1)/935(=3)
+//    Projectile.cs:950 + 各钩 case）；extraUpdates 仅 256(=1)/935(=3)
 //
 // 本表为全表登记：未实装触发路径的罕见钩（403 轨道钩由右键轨道单独发射、
 // 74 红钩由 73 双钩交替生成）同样登记，数据可用即 1:1。
 
 /** 单个钩爪弹体型号的玩法数值 */
 export interface HookProjStats {
-  /** 超过此距离（px）立即转入回收态 ai[0]=1（Projectile.cs:49706-49747）。
-   *  null = 无射程门（403 轨道钩不在该链表内，仅 2500px 硬上限 :49704） */
+  /** 超过此距离（px）立即转入回收态 ai[0]=1（Projectile.cs:53567 链表）。
+   *  null = 无射程门（403 轨道钩不在该链表内，仅 2500px 硬上限 :53515） */
   range: number | null;
-  /** 回收段速度 px/tick（Projectile.cs:49894-49827 各 num18 覆盖；默认 11 :49895） */
+  /** 回收段速度 px/tick（Projectile.cs:53715-53768 各 num18 覆盖；默认 11 :53716） */
   retract: number;
-  /** 挂墙瞬间对同主人全部 aiStyle7 锚的并存上限（Projectile.cs num17 :49821-49836；
-   *  默认 3 :49824；超限杀最旧 num16 最小 timeLeft :49851-49854） */
+  /** 挂墙瞬间对同主人全部 aiStyle7 锚的并存上限（Projectile.cs num17 :53643-53685；
+   *  默认 3 :53644；超限杀最旧 num16 最小 timeLeft :53683-53685） */
   maxLatched: number;
-  /** 牵引速度上限 px/tick（Player.cs:22560-22570 num9；缺省 11 :22562） */
+  /** 牵引速度上限 px/tick（Player.cs:23013-23033 num9；缺省 11 :23013） */
   pull: number;
-  /** QuickGrapple 在飞上限 num7（Player.cs:5989-6008；缺省 3 :5989） */
+  /** QuickGrapple 在飞上限 num7（Player.cs:6362-6410；缺省 3 :6362） */
   quickMax: number;
-  /** QuickGrapple 总数上限 num8（Player.cs:5990/:6009-6011；缺省 999 :5990）。
-   *  单钩族为 1：再发射先杀最旧（Player.cs:6041-6044 num6+num5>=num8 → Kill） */
+  /** QuickGrapple 总数上限 num8（Player.cs:6363/:6386-6390；缺省 999 :6363）。
+   *  单钩族为 1：再发射先杀最旧（Player.cs:6412 num6+num5>=num8 → Kill） */
   quickTotal: number;
   /** 每 tick 额外更新次数（Projectile.cs SetDefaults extraUpdates；其余钩为 0） */
   extraUpdates: number;
 }
 
-const DEFAULT_MAX_LATCHED = 3;   // Projectile.cs:49824 num17 = 3
-const DEFAULT_RETRACT = 11;      // Projectile.cs:49895 num18 = 11f
-const DEFAULT_PULL = 11;         // Player.cs:22562 num9 = 11f
-const DEFAULT_QUICK_MAX = 3;     // Player.cs:5989 num7 = 3
-const DEFAULT_QUICK_TOTAL = 999; // Player.cs:5990 num8 = 999
+const DEFAULT_MAX_LATCHED = 3;   // Projectile.cs:53644 num17 = 3
+const DEFAULT_RETRACT = 11;      // Projectile.cs:53716 num18 = 11f
+const DEFAULT_PULL = 11;         // Player.cs:23013 num9 = 11f
+const DEFAULT_QUICK_MAX = 3;     // Player.cs:6362 num7 = 3
+const DEFAULT_QUICK_TOTAL = 999; // Player.cs:6363 num8 = 999
 
 function gem(gemIndex: number): HookProjStats {
-  // 宝石钩 230-235：射程 300+(type-230)*30（Projectile.cs:49736-49742）
-  // 回收 11+(type-230)*0.75（Projectile.cs:49898-49899）；单钩族 QuickGrapple
-  // num7=1/num8=1（Player.cs:6005-6007）
+  // 宝石钩 230-235：射程 300+(type-230)*30（Projectile.cs:53567 链表内联）
+  // 回收 11+(type-230)*0.75（Projectile.cs:53736-53738）；单钩族 QuickGrapple
+  // num7=1/num8=1（Player.cs:6386-6390）
   return {
     range: 300 + gemIndex * 30,
     retract: 11 + gemIndex * 0.75,
@@ -70,8 +72,8 @@ function lunar(): HookProjStats {
 export const HOOK_PROJ_STATS: Record<number, HookProjStats> = {
   13: { range: 300, retract: DEFAULT_RETRACT, maxLatched: DEFAULT_MAX_LATCHED, pull: DEFAULT_PULL, quickMax: 1, quickTotal: 1, extraUpdates: 0 },            // Hook（普通钩，Projectile.cs:49706/:49895；Player.cs:6005-6007）
   32: { range: 400, retract: 15, maxLatched: DEFAULT_MAX_LATCHED, pull: DEFAULT_PULL, quickMax: DEFAULT_QUICK_MAX, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // IvyWhip 常春藤鞭（:49706/:49896-49897）
-  73: { range: 440, retract: 17, maxLatched: 1, pull: DEFAULT_PULL, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // DualHookBlue 双钩蓝（回收 17 = Projectile.cs:49894-49902 ai[0]==1 段 `if(type==73||type==74) num18=17f`；射程 :49706；num17=1 :49831-49833；num7=2 Player.cs:5993-5995；牵引 11 = Player.cs:22562 num9 缺省——:22563-22574 仅 315/487/646-649 覆盖。22/12.5 是 1457 才上调（1457 Projectile.cs AI_007/:23022-23025）,本仓标杆 1456；报告"649 星尘钩"系型号误标——646-649 恒 24 两版相同）
-  74: { range: 440, retract: 17, maxLatched: 1, pull: DEFAULT_PULL, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // DualHookRed 双钩红（同 73：回收 17 Projectile.cs:49894-49902/牵引 11 Player.cs:22562 缺省；由 Player.cs:6057-6065 交替生成。22/12.5 是 1457 才上调,本仓标杆 1456）
+  73: { range: 440, retract: 22, maxLatched: 1, pull: 12.5, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // DualHookBlue 双钩蓝（回收 22 = 1457 Projectile.cs:53716 缺省 11 → :53723-53725 ai[0]==1 段 `if(type==73||type==74) num18=22f`（1456 是 17 :49888-49890）；射程 440 :53567；num17=1 :53661-53664；num7=2 Player.cs:6365-6367；牵引 12.5 = Player.cs:23013 num9 缺省 11 → :23022-23025 `case 73: case 74: num9=12.5f`（1457 新设 case,1456 无覆盖=11 :22559-22574））
+  74: { range: 440, retract: 22, maxLatched: 1, pull: 12.5, quickMax: 2, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 }, // DualHookRed 双钩红（同 73：回收 22 = 1457 Projectile.cs:53723-53725（1456 :49888-49890=17）/牵引 12.5 = 1457 Player.cs:23022-23025；由 Player.cs 交替段生成（1456 :6057-6065 同体））
   165: { range: 375, retract: DEFAULT_RETRACT, maxLatched: 8, pull: DEFAULT_PULL, quickMax: 8, quickTotal: DEFAULT_QUICK_TOTAL, extraUpdates: 0 },               // WebSlingerHook 吐蛛丝者（:49706/:49825-49827；num17=8 :49825；num7=8 Player.cs:5997-5999）
   230: gem(0), 231: gem(1), 232: gem(2), 233: gem(3), 234: gem(4), 235: gem(5),                 // 宝石钩 紫晶/黄玉/蓝玉/翡翠/红玉/钻石
   256: { range: 425, retract: DEFAULT_RETRACT, maxLatched: 2, pull: DEFAULT_PULL, quickMax: 2, quickTotal: 2, extraUpdates: 1 },                                // SkeletronHand 骷髅王之手（:49706/:3120-3129；num17=2 :49828；num7=2/num8=2 Player.cs:6012-6014）

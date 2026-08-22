@@ -297,6 +297,40 @@ function checkSuper(st: TileStore, rng: RNG, x: number, y: number): void {
   }
 }
 
+/** WorldGen.fossilBreak（cs:4361 private static bool）：碎裂链防重入位 */
+let fossilBreak = false;
+
+/** WorldGen.AttemptFossilShattering（1456 cs:63526-63553）1:1：
+ *  沙漠化石(404)被 KillTile 时 3×3 邻域逐格检定,每个「非本格 && 活性 && 404」
+ *  邻格掷 1 次（短路 &&,掷值只对合格邻格消耗）——maxValue：下格非实心(SolidTile)
+ *  →4;下格实心且恰为本格正上方且 !fail→4;其余 15。命中 0 → 递归
+ *  KillTile(k,l,noItem:true)（fossilBreak 位挡嵌套碎裂,链式清簇）。
+ *  ★SolidTile=cs:70155 全谓词（active&&solid&&!solidTop&&!half&&!slope&&!inActive,
+ *  OOB→false）,复用本文件 solidTile（GenSolid 生成期翻转表同源）。
+ *  ★fail 形参：本仓生成期 killTile 全部 fail=false 语义（fail:true 支路 cs:63758
+ *  的草族转化未移植,现无调用点）,恒 false 传入。 */
+function attemptFossilShattering(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (fossilBreak) return;
+  fossilBreak = true;
+  for (let k = x - 1; k <= x + 1; k++) {
+    for (let l = y - 1; l <= y + 1; l++) {
+      let maxValue = 15;
+      if (!solidTile(st, k, l + 1)) {
+        maxValue = 4;
+      } else if (k === x && l === y - 1) {
+        maxValue = 4;
+      }
+      if (k === x && l === y) continue;
+      if (!st.inBounds(k, l)) continue;
+      const ni = st.idx(k, l);
+      if (st.flags[ni] && SHEET_OF[st.type[ni]] === 404 && rng.nextInt(maxValue) === 0) {
+        killTile(st, rng, k, l);
+      }
+    }
+  }
+  fossilBreak = false;
+}
+
 /** 原版 KillTile(i,j) 生成期路径的完整掷骰模型 + 击杀（type=0 清型）。
  *  生成期 noItem=true 无掉落掷;isGeneratingOrLoadingWorld=true 时尘段恒跑
  *  （cs:63747 dust 段在 effectOnly 早退之前,无 netMode 门）。
@@ -311,6 +345,46 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   const per = killDustRollsPer(sheet, st.frameX[i]);
   swAct('K', x, y, 0);   // 原版 WLog 在 KillTile 入口（尘掷之前）
   for (let k = 0; k < amt; k++) for (let r = 0; r < per; r++) rng.nextInt(6);
+  // cs:63756 AttemptFossilShattering（TTTTTT 批 2026-08-23 补）：沙漠化石(404)被击杀
+  //   时 3×3 邻域连锁碎裂——CONST 链 LavaLayerCaverer 雕进地下沙漠化石簇即从该列
+  //   流移（vanilla 每个活性 404 邻格掷 1 次 Next(15)/Next(4),命中 0 连锁击杀;
+  //   404 尘段 10 次迭代零 genRand → 流上只见碎裂掷不见尘掷,定罪铁证）。
+  //   原版序：尘段(cs:63747) → 本掷(cs:63756) → 蛛网掷(cs:63904),勿再挪位。
+  if (sheet === 404) attemptFossilShattering(st, rng, x, y);
+  // cs:63840-63894 裂砖(481-483)连锁（TTTTTT 批 2026-08-23 补）：8 邻域逐格掷
+  //   Next(6)（正上邻 num17=3——仅 case2 减半,正下/斜向恒 6）,掷对「活性邻格」
+  //   发生（短路 && 在 type 检查**之前**——非裂砖活性邻格也占掷位）;命中 0 且
+  //   邻格是 481-483 → 本格先 active(false)（链期间成 ghost 型）再递归 KillTile
+  //   （嵌套链无防重入位,原版如此;尘段 3 迭代零 genRand → 流上只见链掷）。
+  //   尾 projectile(736-738) 生成期不入档且不掷 genRand,略。
+  //   ★CONST 链定罪：LavaLayerCaverer 雕进地牢裂砖带（x≈3620 列）vanilla 多掷
+  //   3×Next(6) 而 JS 零掷,流移即此。
+  if (sheet >= 481 && sheet <= 483) {
+    for (let m = 0; m < 8; m++) {
+      let num17 = 6;
+      let nx = x;
+      let ny = y;
+      switch (m) {
+        case 0: nx--; break;
+        case 1: nx++; break;
+        case 2: ny--; num17 = 3; break;
+        case 3: ny++; break;
+        case 4: nx--; ny--; break;
+        case 5: nx++; ny--; break;
+        case 6: nx--; ny++; break;
+        case 7: nx++; ny++; break;
+      }
+      if (!st.inBounds(nx, ny)) continue; // 原版此处 OOB 即崩;裂砖不入世界边缘,实践不可达
+      const qi = st.idx(nx, ny);
+      const qs = SHEET_OF[st.type[qi]] ?? -1;
+      if (st.flags[qi] && rng.nextInt(num17) === 0 && qs >= 481 && qs <= 483) {
+        st.flags[i] = 0;                 // tile.active(active:false)（cs:63871）
+        killTile(st, rng, nx, ny);
+      }
+    }
+  }
+  // cs:63900 CheckTileBreakability2_ShouldTileSurvive（箱/展示娃娃/帽架可免毁）——
+  //   生成期 Caverer 带未命中,备案不移植（TTTTTT 批）
   // cs:63904：蛛网(51)带蜘蛛墙(62) → Next(4)（结果只改 noItem,生成期恒 noItem=true）。
   // ★PPPPP（2026-08-22）勘误：原版此掷在尘段**之后**（cs:63904 > cs:63748 尘环）——
   //   曾前置 → 掷序错,CONST 链 LavaLayerCaverer 雕到蛛网+蜘蛛墙即从该点流移

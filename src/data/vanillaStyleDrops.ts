@@ -39,6 +39,22 @@ const Lanterns: T = [136, 1390, 1391, 1392, 1393, 1394, 1395, 1431, 1808, 1859, 
 /** 瓶杯 13——GetItemDrop_Bottles（WorldGen.cs:41265 KillTile :65587 fx/18） */
 const Bottles: T = [31, 28, 110, 350, 351, 2234, 2244, 2257, 2258];
 
+/** 灯族 93——GetItemDrop_Lamps（WorldGen.cs:41087-41262 Check1xX :37877 fy/54）:
+ *  0→342 / 1-10→2082+style-1 / 11-16→2129+style-11 / 17-64 显式档（65 档全收）。
+ *  ★R12 备案定谳修（2026-08-23）：93=1×3 竖排带 54（非 110/1×6）——帧⇄style 见
+ *  FurnitureStyle case 93；放置侧 placeStyle 档位与素材 37 带×2 列（TileDrawing
+ *  :6518-6522 wrap1998）对齐 */
+const Lamps: T = [
+  342,
+  2082, 2083, 2084, 2085, 2086, 2087, 2088, 2089, 2090, 2091,   // style 1-10
+  2129, 2130, 2131, 2132, 2133, 2134,                           // style 11-16
+  2225, 2533, 2547, 2563, 2578, 2643, 2644, 2645, 2646, 2647,   // style 17-26
+  2819, 3135, 3137, 3136, 3892, 3942, 3969, 4156, 4177, 4198,   // style 27-36
+  4219, 4308, 4577, 5159, 5180, 5201, 5559, 5612, 5700, 5723,   // style 37-46
+  5748, 5767, 5788, 5809, 5830, 5849, 5869, 5889, 5909, 5943,   // style 47-56
+  5966, 5986, 6009, 6032, 6055, 6078, 6100, 6122,               // style 57-64
+];
+
 /** 钢琴 87——GetItemDrop_Pianos（WorldGen.cs:41298 Check3x2 :49703 fx/54） */
 const Pianos: T = [333, 641, 642, 643, 919, 2245, 2246, 2247, 2254, 2255, 2256, 2376, 2377, 2378, 2379, 2380, 2381, 2382, 2383, 2384, 2385, 2531, 2548, 2565, 2580, 2671, 2821, 3141, 3143, 3142, 3915, 3916, 3944, 3971, 4158, 4179, 4200, 4221, 4310, 4579, 5161, 5182, 5203, 5561, 5614, 5702, 5725, 5750, 5769, 5790, 5811, 5832, 5851, 5871, 5891, 5911, 5945, 5968, 5988, 6011, 6034, 6057, 6080, 6102, 6124];
 
@@ -124,6 +140,7 @@ export const styleFromFrame: Record<number, (fx: number, fy: number) => number> 
   88: (fx) => Math.floor(fx / 54),
   89: (fx) => Math.floor(fx / 54),
   90: (_fx, fy) => Math.floor(fy / 36),
+  93: (_fx, fy) => Math.floor(fy / 54),
   96: (fx) => Math.floor(fx / 36),
   100: (_fx, fy) => Math.floor(fy / 36),
   101: (fx) => Math.floor(fx / 54),
@@ -158,6 +175,7 @@ export function styleDropVid(sheet: number, style: number): number {
     case 88: return pick(Dressers, style);
     case 89: return pick(Benches, style);
     case 90: return pick(Bathtubs, style);
+    case 93: return pick(Lamps, style);
     case 96: return pick(CookingPots, style);
     case 100: return pick(Candelabras, style);
     case 101: return pick(Bookcases, style);

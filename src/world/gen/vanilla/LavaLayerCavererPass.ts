@@ -36,6 +36,10 @@ export function runLavaLayerCaverer(st: TileStore, rng: RNG, gs: GenState): void
     (x >= 0 && x < w && y >= 0 && y < h) ? st.wall[st.idx(x, y)] : 0;
   const typeAt = (x: number, y: number): number =>
     (x >= 0 && x < w && y >= 0 && y < h) ? st.type[st.idx(x, y)] : 0;
+  // 取证钩（swAct 同款惯例,未注册零开销）：begin/col/loop2/end 四相,
+  // 与 vanilla exe 织入 LLON/LLOFF/KT 对拍用（TTTTTT 批）
+  const ll = (globalThis as { __swLL?: (kind: string, x: number, t: number, b: number, c: number) => void }).__swLL;
+  ll?.('begin', 0, 0, 0, 0);
 
   const minGap = 2;                              // num（cs:74004）
   const maxGap = 8;                              // num2（cs:74005）
@@ -47,6 +51,7 @@ export function runLavaLayerCaverer(st: TileStore, rng: RNG, gs: GenState): void
   let center = bandTop;                          // num8（cs:74011）
   // cs:74012-74089：列主扫 11..w-10
   for (let x = 11; x <= w - 10; x++) {
+    ll?.('col', x, top, bot, center);
     if (rng.nextInt(4) === 0) {                  // cs:74014
       center += rng.int(-4, 4);                  // Next(-4,5)
       if (center < bandTop - band) center = bandTop - band;
@@ -76,23 +81,28 @@ export function runLavaLayerCaverer(st: TileStore, rng: RNG, gs: GenState): void
     let noDungeonInside = true;                  // flag（cs:74048）
     for (let y = top - 1; y <= bot + 1; y++) {
       if (WALL_DUNGEON.has(wallAt(x, y)) && y > top && y < bot) noDungeonInside = false; // cs:74050-74054
-      // cs:74056-74060：带顶/底同地牢墙 → 桥接墙 = 该墙（j 循环内逐格判定,原版如此）
-      if (WALL_DUNGEON.has(wallAt(x, top)) && wallAt(x, top) === wallAt(x, bot)) {
-        carry = wallAt(x, top);
-      }
-      const wi = st.idx(x, y);
-      if (carry < 0) {
-        carry = st.wall[wi];                     // cs:74061-74063 首格捕获
-      } else {
-        st.wall[wi] = carry;                     // cs:74064-74066 逐格覆写
-      }
-      // cs:74067-74071：带外两侧皆非地牢（wall+type 双门）→ 全清 0
-      //（★原版不对称怪癖：wall 读 bot+2、type 读 bot+3——照抄）
-      const wA = wallAt(x, top - 2), tA = typeAt(x, top - 2);
-      const wB = wallAt(x, bot + 2), tB = typeAt(x, bot + 3);
-      if ((!WALL_DUNGEON.has(wA) && !TILE_DUNGEON.has(SHEET[tA] ?? -1))
-        || (!WALL_DUNGEON.has(wB) && !TILE_DUNGEON.has(SHEET[tB] ?? -1))) {
-        st.wall[wi] = 0;
+      // ★RRRRRR（2026-08-23）原版 :74051 `if (wallDungeon(wall[j]))` **整段门**——
+      //   捕获/覆写/清零只对地牢墙格生效；JS 曾无门 → 非地牢墙（大理石 178/丛林 64 等）
+      //   被逐格覆写/清零（CONST #32 残差：van wall178→js 0 全带散布的根因）。
+      if (WALL_DUNGEON.has(wallAt(x, y))) {
+        // cs:74056-74060：带顶/底同地牢墙 → 桥接墙 = 该墙（j 循环内逐格判定,原版如此）
+        if (WALL_DUNGEON.has(wallAt(x, top)) && wallAt(x, top) === wallAt(x, bot)) {
+          carry = wallAt(x, top);
+        }
+        const wi = st.idx(x, y);
+        if (carry < 0) {
+          carry = st.wall[wi];                   // cs:74061-74063 首格捕获
+        } else {
+          st.wall[wi] = carry;                   // cs:74064-74066 逐格覆写
+        }
+        // cs:74067-74071：带外两侧皆非地牢（wall+type 双门）→ 全清 0
+        //（★原版不对称怪癖：wall 读 bot+2、type 读 bot+3——照抄）
+        const wA = wallAt(x, top - 2), tA = typeAt(x, top - 2);
+        const wB = wallAt(x, bot + 2), tB = typeAt(x, bot + 3);
+        if ((!WALL_DUNGEON.has(wA) && !TILE_DUNGEON.has(SHEET[tA] ?? -1))
+          || (!WALL_DUNGEON.has(wB) && !TILE_DUNGEON.has(SHEET[tB] ?? -1))) {
+          st.wall[wi] = 0;
+        }
       }
     }
     if (noDungeonInside) carry = -1;             // cs:74072-74074
@@ -105,6 +115,7 @@ export function runLavaLayerCaverer(st: TileStore, rng: RNG, gs: GenState): void
     }
   }
   // —— 第二循环：地牢墙跨缺口补墙（cs:74087-74146）——
+  ll?.('loop2', 0, 0, 0, 0);
   for (let l = 10; l < w - 10; l++) {
     for (let m = bandTop - band - 10; m < bandTop + band + 10; m++) {
       if (!WALL_DUNGEON.has(wallAt(l, m))) continue;
@@ -121,4 +132,5 @@ export function runLavaLayerCaverer(st: TileStore, rng: RNG, gs: GenState): void
       }
     }
   }
+  ll?.('end', 0, 0, 0, 0);
 }

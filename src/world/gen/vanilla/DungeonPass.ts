@@ -2953,20 +2953,22 @@ export function runDungeonPass(
     if (surf) {
       if (num10 > 0) prefixRolls(num10);
       else rn(10);
-      if (rn(6) === 0) rn(1);                        // 282 荧光棒（弃值掷）
-      if (rn(6) === 0) rn(1);                        // 279 飞刀
+      // ★RRRRRR（2026-08-23）surface 支 stack 掷值域八连勘误（QQQQQ ③-3 同族残留——
+      //   掷数 1:1 流位中性,纯值域保真;WG.cs 行号实测）：rn(N)→ri(min,max)。
+      if (rn(6) === 0) ri(40, 75);                   // 282 荧光棒 stack=Next(40,76)（cs:36367）
+      if (rn(6) === 0) ri(150, 300);                 // 279 飞刀 stack=Next(150,301)（cs:36378）
       if (rn(6) === 0) { if (rn(5) === 0) rn(2); if (rn(10) === 0) rn(3); }
       if (rn(6) === 0) { if (rn(5) === 0) rn(2); if (rn(10) === 0) rn(3); }
-      if (rn(3) === 0) rn(6);
+      if (rn(3) === 0) ri(3, 5);                     // 168 stack=Next(3,6)（cs:36427）
       if (rn(2) === 0) { rn(2); rn(8); }
-      if (rn(2) === 0) rn(51);
+      if (rn(2) === 0) ri(50, 100);                  // 965 stack=Next(50,101)（cs:36440）
       if (rn(3) !== 0) { rn(2); rn(26); }
       if (rn(2) === 0) rn(3);
-      if (rn(3) !== 0) rn(6);
-      if (rn(3) > 0) { rn(6); rn(3); }
+      if (rn(3) !== 0) ri(3, 5);                     // 2350 stack=Next(3,6)（cs:36470）
+      if (rn(3) > 0) { rn(6); ri(1, 2); }            // stack7=Next(1,3)（cs:36473）
       if (rn(2) === 0) { rn(2); rn(11); }
-      if (rn(2) === 0) rn(30);
-      if (rn(2) === 0) rn(100);
+      if (rn(2) === 0) ri(10, 29);                   // 72 金币 stack=Next(10,30)（cs:36535）
+      if (rn(2) === 0) ri(50, 99);                   // 9 铜币 stack=Next(50,100)（cs:36541）
     } else if (gold) {
       if (num10 > 0) {
         prefixRolls(num10);

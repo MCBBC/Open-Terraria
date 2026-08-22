@@ -308,8 +308,9 @@ function killUnsupportedFurniture(st: TileStore, rng: RNG, cx: number, cy: numbe
   }
 }
 
-/** WorldGen.PlaceTile 派发到各型放置器（FillRooms/cascadePlace 用到的型别全收） */
-function placeFurniture(st: TileStore, key: string, x: number, y: number, style = 0, _anchor?: string): boolean {
+/** WorldGen.PlaceTile 派发到各型放置器（FillRooms/cascadePlace 用到的型别全收）。
+ *  export 仅供 tests/placement-frame-debt.test.ts 带向单测（Place2x2 竖排带） */
+export function placeFurniture(st: TileStore, key: string, x: number, y: number, style = 0, _anchor?: string): boolean {
   const t = TILE_BY_KEY[key];
   if (t === undefined) return false;
   const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
@@ -357,7 +358,14 @@ function placeFurniture(st: TileStore, key: string, x: number, y: number, style 
       return placeFloorObject(st, x, y, 2, 1, t, (dx) => style * 36 + dx * 18, () => 0);
     case 94: case 95: case 97: case 98: case 99: case 100: case 125: case 126: case 172: case 173:
     case 287: case 751: case 752:   // Place2x2(cs:51352)：(x-1,y-1) 2×2（94 keg 在此）
-      return placeFloorObject(st, x - 1, y - 1, 2, 2, t, (dx) => style * 36 + dx * 18, (dy) => dy * 18);
+      // ★R12 备案定谳=属实,2026-08-23 修带向：Place2x2 cs:51433-51443
+      //   `num=(type==172)?38:36; frameX=k*18; frameY=style*num+l*18`——样式带在
+      //   【frameY】竖排（烛台 100/水槽 172 等），曾写 frameX=style*36 带向相反。
+      //   与放置侧（FurnitureStyle case 100/172）及帧检侧（Check2x2 :48405 num5=fy/36
+      //   /172=fy/38）对齐。现调用面仅 keg(94) style=0（fillRooms choices/cascadePlace
+      //   均零样式）→ 修前修后字节等价，worldgen oracle 哈希不受扰
+      return placeFloorObject(st, x - 1, y - 1, 2, 2, t, (dx) => dx * 18,
+        (dy) => (sheet === 172 ? 38 : 36) * style + dy * 18);
     case 101:                       // Place3x4(cs:51943)：(x-1,y-3) 3×4 + SquareTileFrame（零掷）
       return placeFloorObject(st, x - 1, y - 3, 3, 4, t, (dx) => style * 54 + dx * 18, (dy) => dy * 18);
     case 219:                       // case106 族 Place3x3(cs:53549 num=-2 段)：(x-1,y-2) 3×3

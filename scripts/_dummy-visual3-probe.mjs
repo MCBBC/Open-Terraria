@@ -25,7 +25,7 @@ const setup = await page.evaluate(async () => {
   // 全 6 格帧(2 宽×3 高,18px 步进;锚=左上 frameX0/frameY0)——模拟真实施放
   for (let cy2 = 0; cy2 < 3; cy2++)
     for (let cx2 = 0; cx2 < 2; cx2++)
-      st.setTile(tx + cx2, ty - 1 + cy2, T378, { frameX: cx2 * 18, frameY: cy2 * 18 });
+      st.setTile(tx + cx2, ty - 1 + cy2, T378, cx2 * 18, cy2 * 18);
   g['spawnDummyAt'](tx, ty - 1);
   await new Promise((r) => setTimeout(r, 600));
   const d = (g.entities.enemies || []).find((n) => !n.dead && n.vanillaId === 488);

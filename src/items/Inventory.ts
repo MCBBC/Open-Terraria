@@ -229,15 +229,17 @@ export class Inventory {
     return cur;
   }
 
-  /** 该槽位是否为油漆（Item.PaintOrCoating，Item.cs:334-344）。
-   *  涂层（paintCoating 4668/5344）系统未建——本仓 PaintOrCoating 仅 paint>0，涂层惰性 */
+  /** 该槽位是否为油漆/涂层（Item.PaintOrCoating，Item.cs:334-344：
+   *  paint<=0 ? paintCoating>0 : true——两域任一即真） */
   private isPaintSlot(i: number): boolean {
     const s = this.slots[i];
-    return !!s && s.stack > 0 && (ITEM_DEFS[s.id]?.paint ?? 0) > 0;
+    if (!s || s.stack <= 0) return false;
+    const d = ITEM_DEFS[s.id];
+    return (d?.paint ?? 0) > 0 || (d?.paintCoating ?? 0) > 0;
   }
 
   /** FindPaintOrCoating（Player.cs:41272-41289）1:1：弹药栏 54-57 优先，
-   *  再全包 0-57。返回油漆所在槽位下标；无油漆 -1 */
+   *  再全包 0-57。返回油漆/涂层所在槽位下标；无 -1 */
   findPaintSlot(): number {
     for (let i = AMMO_START; i < AMMO_START + AMMO_SLOTS; i++) {
       if (this.isPaintSlot(i)) return i;
@@ -253,6 +255,13 @@ export class Inventory {
   heldPaintLookup(): number {
     const i = this.findPaintSlot();
     return i < 0 ? 0 : (ITEM_DEFS[this.slots[i]!.id]?.paint ?? 0);
+  }
+
+  /** 同上的涂层侧（SmartCursorHelper.cs:40 paintCoatingLookup / :177
+   *  coatingLookup = item.paintCoating；FindPaintOrCoating 命中槽的涂层 id，无 0） */
+  heldCoatingLookup(): number {
+    const i = this.findPaintSlot();
+    return i < 0 ? 0 : (ITEM_DEFS[this.slots[i]!.id]?.paintCoating ?? 0);
   }
 
   heldDef() {

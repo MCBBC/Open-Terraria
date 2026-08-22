@@ -173,8 +173,9 @@ export const ITEM_VARIANT_STATS: Readonly<Record<number, Readonly<ItemVariantSta
   // :41932-41937（基值 damage13/anim17/time17）
   5284: { combat: { damage: 8, useTime: 23, useAnimation: 23 } },
   // ---- 1457 新增 Weaker（Skyblock）（Terarria1457 Item.cs:44689-44691/:44696-44698）----
-  // 5687 黏液枪矛（1457 基值 damage12）/ 5688 黏液鞭（1457 基值 damage15→弱化 12；
-  // 本仓标杆 1456 后基值已回滚 12=Item.cs:44660,弱化档恰与基值同值）
+  // 5687 黏液枪矛（基值 damage12→弱化 9）/ 5688 黏液鞭（基值 damage15→弱化 12）。
+  // ★2026-08-23 基准切换 1457：基值取 1457 终值（曾按 1456 钉 5688 基值 12,弱化档
+  // 恰与基值同值的"巧合"随之消除——现 15→12 与原版 Weaker 语义一致）
   5687: { combat: { damage: 9 } },
   5688: { combat: { damage: 12 } },
   // ---- Rebalanced（GetGood/FTW）----

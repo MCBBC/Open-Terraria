@@ -26,12 +26,13 @@ import { wingStatOf } from '../data/vanillaWingStats';
 import { stepWingFrame, FLAP_HOVER_SET } from '../data/vanillaWingVisuals';
 import type { WingFrameState } from '../data/vanillaWingVisuals';
 import { accFxOfInternal } from '../data/vanillaAccFx';
-import { accDrawSlotsOf, BALLOON_TORSO_FRAMING } from '../data/vanillaAccDrawslots';
+import { accDrawSlotsOf, BALLOON_TORSO_FRAMING, BACK_DRAW_IN_BACKPACK, BACK_DRAW_IN_TAIL } from '../data/vanillaAccDrawslots';
 import { dyeEntryOf } from '../data/vanillaDyes';
 import { ARMOR_SET_BONUSES, type ArmorSetBonus } from '../data/vanillaArmorSets';
 import { DD2_PIECE_FX } from '../data/vanillaArmorSets';
 import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummonStats';
 import { TagEffectStack } from './WhipTag';
+import { harpyCharmEffect } from './Arrow';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
@@ -43,6 +44,48 @@ import { journeyPowers } from '../world/JourneyPowers';
 /** 旅程上帝模式激活（GodmodePower.IsEnabledForPlayer——绑定态读取，
  *  对应原版 Player.creativeGodMode 每帧自 power 授予 Player.cs:25208） */
 function journeyGodmodeActive(): boolean { return journeyPowers().godmode; }
+
+// ---- 1457 弹药轮换槽序（Player.cs:3175-3180 静态表 1:1）----
+/** AmmoSlotOrder_Default（:3175）：币槽 50-53 → 弹药槽 54-57 → 背包 0-53 */
+export const AMMO_SLOT_ORDER_DEFAULT: readonly number[] = Object.freeze([
+  50, 51, 52, 53, 54, 55, 56, 57, ...Array.from({ length: 54 }, (_, i) => i),
+]);
+/** AmmoSlotOrder_AmmoOnly（:3178）：弹药槽 54-57（AmmoSlots 轮换模式专用） */
+export const AMMO_SLOT_ORDER_AMMO_ONLY: readonly number[] = Object.freeze([54, 55, 56, 57]);
+/** AmmoSlotOrder_CoinsOnly（:3180）：币槽 50-53（币族武器 + AmmoSlots 模式） */
+export const AMMO_SLOT_ORDER_COINS_ONLY: readonly number[] = Object.freeze([50, 51, 52, 53]);
+
+/** PickAmmo_IterateRange（Player.cs:54326-54366）1:1：按槽序扫 `matches(slot) &&
+ *  stack>0` 的弹药——cycling 时先数兼容组数 num2（:54332-54341,0 组早退 null），
+ *  跳过 `offset % num2` 组（:54346）后取第一组；forceFirst（779/5134 :54347-54350）
+ *  压 0。返回槽位下标，-1 = 无弹药（原版 null）。 */
+export function pickAmmoIterateRange(
+  order: readonly number[],
+  slots: ReadonlyArray<{ id: number; stack: number } | null>,
+  matches: (id: number) => boolean,
+  offset: number,
+  cycling: boolean,
+  forceFirst: boolean,
+): number {
+  let skip = 0;
+  if (cycling) {
+    let count = 0;                                       // num2 :54332
+    for (const s of order) {
+      const it = slots[s];
+      if (it && it.stack > 0 && matches(it.id)) count++;
+    }
+    if (count === 0) return -1;                          // :54342-54345
+    skip = forceFirst ? 0 : offset % count;              // :54346-54350
+  }
+  for (const s of order) {                               // :54352-54364
+    const it = slots[s];
+    if (it && it.stack > 0 && matches(it.id)) {
+      if (skip === 0) return s;
+      skip--;
+    }
+  }
+  return -1;                                             // :54365
+}
 import type { Enemy } from './Enemy';
 import { GrappleProj, GRAPPLE_LATCH } from './GrappleProj';
 import { TRACK_SHEET } from '../data/grappleHooks';
@@ -178,7 +221,7 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     iceSkate: boolean;   // 冰刀族 950/1861/1862/5000：冰面不滑+加速（:26237-26255）
     waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
     jumpOpts: string[];
-    wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
+    wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean; hidden: boolean } | null;
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
     jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
     canFloat: boolean;   // canFloatInWater（:2594——仅两源：甲件 4404 水上漂靴 :12842-12846 ∪ buff265 脚蹼药水 :9592；注意 flipper 饰品不授予）
@@ -197,9 +240,11 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
       back: number; front: number; shield: number; shoe: number; waist: number;
       neck: number; face: number; balloon: number; balloonFront: number;
       handOn: number; handOff: number; beard: number;
+      backpack: number; tail: number;
       dyeBack: number; dyeFront: number; dyeShield: number; dyeShoe: number; dyeWaist: number;
       dyeNeck: number; dyeFace: number; dyeBalloon: number; dyeBalloonFront: number;
       dyeHandOn: number; dyeHandOff: number; dyeBeard: number;
+      dyeBackpack: number; dyeTail: number;
     };
     /** 配饰仇恨轴合计（ApplyEquipFunctional aggro ±400：3015 恶臭香氛/3991 奥术花/
      *  4005 侦察瞄准镜/4006 潜行箭袋 -400(:14098/:13992/:14064/:14067)，
@@ -567,6 +612,30 @@ export class Player extends Entity {
   /** 拍击石系共用冷却（Player.accSnappingStoneCooldown :1215,360t——6167 拍击石/
    *  6178 焰爆石/6179 毁灭臂镗三脉冲同轴,Update :28599-28610 递减+回充音登记未接） */
   accSnappingStoneCooldown = 0;
+  // ---- 1457 配饰四件运行态（字段 :1219/:1229/:1231/:1237/:1241；Update 调用链
+  //      :24760-24763，本体 :28521-28659。消费端：弹药轮换=Game 射击路径
+  //      PickAmmo :54326-54390；哨兵携带=MinionProj sentry 分支
+  //      CanGetPickedUpBySentryBackpack :80532-80557；蓄能暴击=Game 近战命中
+  //      TryConsumingTimerCrit :28564-28572；弧线引矢=Arrow.ts harpyCharmEffect）----
+  /** Player.ammoCyclingCooldown（:1229）：PickAmmo 实耗一发 → useAnimation+120
+   *  （:54211-54212）；Update_AmmoCycler :28632-28638 走完归 0 拍把 offset 复位
+   *  = 停火 useAnimation+120t 后轮换回第一组弹药 */
+  ammoCyclingCooldown = 0;
+  /** Player.ammoCyclingOffset（:1231）：每发 ++（:54213）、Random 模式直写
+   *  Main.rand.Next()（:54214-54217）；选弹 = offset % 兼容弹药组数（:54346） */
+  ammoCyclingOffset = 0;
+  /** Player.accHarpyCharmCooldown（:1219）：引矢冷却 90t、6180 炽天使 ×0.8=72
+   *  （:28670-28674）；Update_HarpyCharm :28648-28659 递减、归零拍才扫描 */
+  accHarpyCharmCooldown = 0;
+  /** Player.accSentryBackpackGrabCooldown（:1237）：携带中每拍被哨兵 AI 续约 2
+   *  （SetAsSelectedSentryBackpackTarget :80554-80557）——>0 期其余哨兵不可再被拾
+   *  （CanGetPickedUpBySentryBackpack :80543 门）= 同时至多携带一门 */
+  accSentryBackpackGrabCooldown = 0;
+  /** Player.accTimerCritCharge（:1241，0..1000；timerCritChargeFull :3387 ≥1000）：
+   *  Update_TimerCrit :28521-28562 充能 3/t（用物中）+3/t（闲置）+3/t（|v|<0.1 驻立）；
+   *  近战命中消费 → −15（:28570），负窗 1/t 回充（:28528-28533）且窗内命中仍暴击
+   *  （TryConsumingTimerCrit :28566 `charge < 0f` 亦过门） */
+  accTimerCritCharge = 0;
   /** 1457 相机平移档（Player.Settings.PanControl_Keyboard :359;ButtonControlMode.cs:
    *  Hold=0/Click=1/OnAlways=2/OffAlways=3,缺省 Hold=旧行为。设置 UI 循环切换
    *  CyclePanControl_KeyboardAndMouse :379-382 登记未接——控制台/测试可直写） */
@@ -577,6 +646,16 @@ export class Player extends Entity {
   /** 各信息显示开关(Player.hideInfo[13] :776;按下标=图标序,随存档;
    *  唯一交互=背包界面点图标切换,Main.cs:46547-46573) */
   hideInfo: boolean[] = new Array(13).fill(false);
+  /** 配饰格可见性开关(Player.hideVisibleAccessory[10] :1590;下标=装备槽序,随存档)。
+   *  交互=装备页配饰格旁眼睛图标点击翻转(Main.cs:40855-40880,仅 num40>2 配饰段
+   *  3-9 有图标;盔甲 0-2 与社交 13-19 无)。消费侧:①UpdateVisibleAccessories
+   *  :36361 !hide 才 UpdateVisibleAccessory(功能槽贴图隐藏,功能效果不受影响
+   *  ——ApplyEquipFunctional :13962 独立扫);②翅膀特例 :12580 隐藏翼在
+   *  vy≠0 且 mount.CanUseWings 时仍显形;③UpdateItemDye :9313-9322 隐藏槽染料
+   *  不应用(翼族/盾 fallback 豁免);④社交槽 13-19 第二轮 :36368-36375 无 hide 门。
+   *  ★原版语义定谳:眼睛图标只挂功能配饰段,"虚荣槽 13-19 也可隐藏"与原版不符,
+   *  审计登记回写不改码 */
+  hideVisibleAccessory: boolean[] = new Array(10).fill(false);
   /** 击杀计数行"最近击杀"(Player.lastCreatureHit :2458;命中写入 :20175/:43750) */
   lastCreatureHit = -1;
   /** 渔情行粘性缓存(Player.displayedFishingInfo :2498;浮漂在水时保持旧值) */
@@ -867,6 +946,9 @@ export class Player extends Entity {
     k += inv.extraAccessory ? 'E' : 'e';
     k += this.usedGummyWorm ? 'G' : 'g';
     k += this.panicTime > 0 ? 'P' : 'p';
+    // 配饰格可见性开关段（hideVisibleAccessory,Player.cs:1590——UpdateVisibleAccessories
+    // :36361 !hide 门进 accDraw 聚合,翻转帧必须失效缓存;只记配饰段 3..accSlotMax）
+    for (let i = ACC_ARMOR_START; i < inv.accSlotMax; i++) k += this.hideVisibleAccessory[i] ? 'H' : 'h';
     // 背包生效域段（I 档,信息/机械饰品背包扫描 :12494-12500 的输入）：只记
     // INV_EFFECTIVE_VIDS 命中格（vid+槽位）——未命中格不影响 computeEquipStats
     // 输出,内容键对实际输入仍完备
@@ -918,7 +1000,7 @@ export class Player extends Entity {
     const immuneBuffs = new Set<number>(); // Player.buffImmune（十字章族装备扫描累积）
     let desertBoots = false, waterWalk = false, jumpBoost = false, panic = false, starCloak = false;
     const jumpSet = new Set<string>();
-    let wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null = null;
+    let wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean; hidden: boolean } | null = null;
     let dash = 0, blackBelt = false, bees = false, carpet = false;
     let jumpSpd = 0, arrowDmg = 0;
     let equipHasQuiver = false;
@@ -973,9 +1055,10 @@ export class Player extends Entity {
     const accDraw = {
       back: 0, front: 0, shield: 0, shoe: 0, waist: 0, neck: 0, face: 0,
       balloon: 0, balloonFront: 0, handOn: 0, handOff: 0, beard: 0,
+      backpack: 0, tail: 0,
       dyeBack: -1, dyeFront: -1, dyeShield: -1, dyeShoe: -1, dyeWaist: -1,
       dyeNeck: -1, dyeFace: -1, dyeBalloon: -1, dyeBalloonFront: -1,
-      dyeHandOn: -1, dyeHandOff: -1, dyeBeard: -1,
+      dyeHandOn: -1, dyeHandOff: -1, dyeBeard: -1, dyeBackpack: -1, dyeTail: -1,
     };
     /** 槽 → 族赋值（UpdateVisibleAccessory :36451-36520 后写覆盖语义 + back 披风
      *  清 front :36468-36471；face 槽按 ArmorIDs.Face.Sets 分流 face/mask/flower/
@@ -989,7 +1072,14 @@ export class Player extends Entity {
       const dyeVid = dyeItem ? (ITEM_DEFS[dyeItem.id]?.vid ?? viIdFromKey(ITEM_DEFS[dyeItem.id]?.key ?? '') ?? -1) : -1;
       if (ds.handOn) { accDraw.handOn = ds.handOn; accDraw.dyeHandOn = dyeVid; }
       if (ds.handOff) { accDraw.handOff = ds.handOff; accDraw.dyeHandOff = dyeVid; }
-      if (ds.back) { accDraw.back = ds.back; accDraw.dyeBack = dyeVid; accDraw.front = 0; accDraw.dyeFront = -1; }
+      if (ds.back) {
+        // Back 子层三路由（UpdateVisibleAccessory :36455-36466）：DrawInBackpackLayer
+        // → Player.backpack / DrawInTailLayer → Player.tail（两者不占 back 不清 front）/
+        // 其余（披风族）→ back + front=-1 互斥清写
+        if (BACK_DRAW_IN_BACKPACK.has(ds.back)) { accDraw.backpack = ds.back; accDraw.dyeBackpack = dyeVid; }
+        else if (BACK_DRAW_IN_TAIL.has(ds.back)) { accDraw.tail = ds.back; accDraw.dyeTail = dyeVid; }
+        else { accDraw.back = ds.back; accDraw.dyeBack = dyeVid; accDraw.front = 0; accDraw.dyeFront = -1; }
+      }
       if (ds.front) { accDraw.front = ds.front; accDraw.dyeFront = dyeVid; }
       if (ds.shoe) { accDraw.shoe = ds.shoe; accDraw.dyeShoe = dyeVid; }
       if (ds.waist) { accDraw.waist = ds.waist; accDraw.dyeWaist = dyeVid; }
@@ -1020,9 +1110,11 @@ export class Player extends Entity {
       // 巫毒娃娃(Player.cs:8801 killGuide / :8804 killClothier):装备即置位——
       // 玩家弹幕/近战对向导(22)/裁缝师(54) 的伤害门(Projectile.cs:11970-11972)
       const accVid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
-      // 身上贴图绘制槽（UpdateVisibleAccessories :36331-36351 功能槽轮 + !hide 门——
-      // 本仓无 per-slot 隐藏字段未建模,登记;社交槽 13-19 轮在下方独立 for）
-      if (accVid > 0) accDrawApply(s, i);
+      // 身上贴图绘制槽（UpdateVisibleAccessories :36331-36351 功能槽轮 + !hide 门
+      // :36361——per-slot 隐藏开关已建模（hideVisibleAccessory,眼睛图标只藏贴图,
+      // 功能效果 ApplyEquipFunctional :13962 独立扫不受影响）;社交槽 13-19 轮在
+      // 下方独立 for,原版无 hide 门）
+      if (accVid > 0 && !this.hideVisibleAccessory[i]) accDrawApply(s, i);
       // 仇恨轴（aggro ±400 七件,见 PlayerEquipStats.aggroAcc 注）
       if (AGGRO_NEG.has(accVid)) aggroAcc -= 400;
       else if (AGGRO_POS.has(accVid)) aggroAcc += 400;
@@ -1050,7 +1142,14 @@ export class Player extends Entity {
       const wingSlot = statOfInternal(s.id)?.wing;
       if (wingSlot && wingSlot > 0) {
         const ws = wingStatOf(wingSlot);
-        wing = { logic: wingSlot, slot: wingSlot, time: ws.time, accSpeed: ws.accSpeed, accelMult: ws.accelMult, hover: ws.hover };
+        // 隐藏翼门（UpdateEquips :12577-12586）：!hideVisibleAccessory[n] 才写
+        // wings（视觉）,wingsLogic 恒写;隐藏翼不覆盖前槽可见翼（gate 败=保持旧值）。
+        // hidden 随翼记录,渲染侧补 vy≠0 且未骑坐骑的显形特例（:12580 vy 项不入
+        // 记忆化键,只能在消费侧判）
+        const wingHidden = this.hideVisibleAccessory[i] ?? false;
+        if (!wingHidden || !wing) {
+          wing = { logic: wingSlot, slot: wingSlot, time: ws.time, accSpeed: ws.accSpeed, accelMult: ws.accelMult, hover: ws.hover, hidden: wingHidden };
+        }
       }
       // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
       if (statOfInternal(s.id)?.str) yoyoString = true;
@@ -1263,8 +1362,10 @@ export class Player extends Entity {
     }
     // 时装配饰槽 13-19 的线色（Player.cs:36361-36372 UpdateVisibleAccessories 第二轮：
     // 社交槽无条件走 UpdateVisibleAccessory——时装线饰品同样染线；yoyoString 不在此轮，
-    // ApplyEquipFunctional 只扫功能槽）。备案：功能槽侧原版有 hideVisibleAccessory 门
-    //（:36362 !hide 才应用），本仓无 per-slot 隐藏字段未建模。
+    // ApplyEquipFunctional 只扫功能槽）。★per-slot 隐藏定谳（2026-08-23）：社交槽
+    // 原版【无】hideVisibleAccessory 门（:36368-36375 第二轮无条件;Main.cs:40855
+    // 眼睛图标只挂 num40>2 功能配饰段）——"虚荣槽 13-19 可隐藏"与原版不符,
+    // 审计登记项回写备案,本仓同原版不设门。
     for (let i = 13; i < 20; i++) {
       const s = this.inv.armor[i];
       if (!s) continue;
@@ -1631,6 +1732,9 @@ export class Player extends Entity {
       if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;   // 枯萎武器（:25715）
       // 猪鲨崽增益（Mount.cs UpdateEffects case 12 :4991：minionDamage += 0.15）
       if (this.ridingMount && this.mount.type === 12 && this.mount.fishronBoost) m += 0.15;
+      // 帕鲁坐骑 62-65（1457 Mount.cs UpdateEffects case 62/63/64/65 :4862-4867：
+      // melee/ranged/magic/minion 四系各 += 0.1——疾旋鼬/疾旋火鼬及其 Trusty 版）
+      if (this.ridingMount && this.mount.type >= 62 && this.mount.type <= 65) m += 0.1;
       return m;
     }
     let m = 1 + (kind === 'melee' ? st.dmgMelee : kind === 'ranged' ? st.dmgRanged : st.dmgMagic);
@@ -1658,6 +1762,9 @@ export class Player extends Entity {
     // 猪鲨崽增益（Mount.cs UpdateEffects case 12 :4988-4992：melee/ranged/magic/minion
     // 四系各 += 0.15——湿身/半血以下/雨中露天的 MountFishronSpecial 态）
     if (this.ridingMount && this.mount.type === 12 && this.mount.fishronBoost) m += 0.15;
+    // 帕鲁坐骑 62-65（1457 Mount.cs UpdateEffects case 62/63/64/65 :4862-4867）：
+    // melee/ranged/magic/minion 四系各 += 0.1
+    if (this.ridingMount && this.mount.type >= 62 && this.mount.type <= 65) m += 0.1;
     // 枯萎武器(196)：四系伤害 ×0.5（Player.cs:25712-25719）
     if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;
     return m;
@@ -1740,6 +1847,94 @@ export class Player extends Entity {
     // ⑰ 时间蓄能（原版持续近战 ~90t/球）：命中只刷新续航窗口，蓄能走 fixedUpdate 每 tick
     if (this.equipStats.beetleOff || this.equipStats.beetleDef) this.lastMeleeTick = 30;
   }
+
+  // ---- 1457 配饰四件本体（ammoCycler / sentry backpack / accTimerCrit /
+  //      accHarpyCharm——旗落聚合在 equipStats,运行态+消费端 2026-08-23 批）----
+
+  /** Update_AmmoCycler + Update_SentryBackpack + Update_HarpyCharm + Update_TimerCrit
+   *  （Player.cs:24760-24763 四连调,本体 :28632-28659/:28521-28562/:28661-28704）。
+   *  fixedUpdate 每 tick 调（原版 Update 同位）。 */
+  private update1457AccBodies(game: GameHooks): void {
+    // Update_AmmoCycler（:28632-28638）：冷却走完归 0 拍把轮换偏移复位
+    if (this.ammoCyclingCooldown > 0 && --this.ammoCyclingCooldown === 0) {
+      this.ammoCyclingOffset = 0;
+    }
+    // Update_SentryBackpack（:28640-28646）：抓取占位冷却递减（携带中哨兵 AI 每拍续约）
+    if (this.accSentryBackpackGrabCooldown > 0) this.accSentryBackpackGrabCooldown--;
+    // Update_HarpyCharm（:28648-28659）：冷却 >0 递减,归零拍扫描在场箭引矢
+    if (this.accHarpyCharmCooldown > 0) this.accHarpyCharmCooldown--;
+    else harpyCharmEffect(game, this);
+    // Update_TimerCrit（:28521-28562）：num=1000 上限
+    if (this.accTimerCritCharge < 1000) {
+      if (this.accTimerCritCharge < 0) {
+        this.accTimerCritCharge += 1;                    // :28528-28533 负窗 1/t 回充
+      } else {
+        // :28534-28537 num5 = 3 + (UsingOrReusingItem ? 0 : 3) + (|v|<0.1 ? 3 : 0)
+        // ——本仓 UsingOrReusingItem ≈ itemAnimTicks>0 || useTime>0（挥舞窗/冷却窗）
+        const usingItem = this.itemAnimTicks > 0 || this.useTime > 0;
+        const speed = Math.hypot(this.vx, this.vy);
+        this.accTimerCritCharge += 3 + (usingItem ? 0 : 3) + (speed < 0.1 ? 3 : 0);
+        if (this.accTimerCritCharge >= 1000) {
+          this.accTimerCritCharge = 1000;                // :28538-28542 钳满
+          if (this.equipStats.accTimerCrit) {
+            // :28543-28561 满蓄提示 SoundID.Item28（vol 0.04/pitch −0.9）+ 尘 228×5
+            game.playSfxFiles?.(['Item_28'], 0.04, this.cx, this.cy);
+            for (let i = 0; i < 5; i++) {
+              game.spawnDust?.(this.x, this.y + this.h * (1 - this.accTimerCritCharge / 1000),
+                this.w, this.h, 228, 0, 0.03, 255, null, 0.9, true);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** TryConsumingTimerCrit（Player.cs:28564-28595；调用点 :44657 ItemCheck 近战命中
+   *  等 5 处全在近战接触结算）：满蓄（timerCritChargeFull :3387 ≥1000）或负冷却窗
+   *  （charge<0，:28566）→ 强制暴击；charge>0 时消费置 −15（:28568-28571,负窗内
+   *  不重置=15t 连暴窗）；粒子（:28576-28593 NightsEdge 编排+尘 228×20）近似取
+   *  相交盒中心。返回 true = 本次命中强制暴击。 */
+  tryConsumingTimerCrit(game: GameHooks, rx: number, ry: number, rw: number, rh: number): boolean {
+    if (!this.equipStats.accTimerCrit) return false;
+    if (!(this.accTimerCritCharge >= 1000 || this.accTimerCritCharge < 0)) return false;
+    if (this.accTimerCritCharge > 0) this.accTimerCritCharge = -15;   // :28568-28571
+    game.spawnParticles?.((rx + rw / 2), (ry + rh / 2), '#E8E8FF', 6, 2.2, { life: 20, grav: 0 });
+    return true;
+  }
+
+  /** PickAmmo 实耗侧轮换推进（Player.cs:54209-54217）：模式≠None 且真实射击
+   *  （!dontConsume）→ cooldown = useAnimation+120、offset++；Random 模式 offset
+   *  直写随机（:54214-54217）。无弹药早退（:54101-54104）不推进——调用侧须在
+   *  选弹命中后调。 */
+  noteAmmoCycledShot(useAnimation: number): void {
+    if (this.equipStats.ammoCyclerMode === 0) return;
+    this.ammoCyclingCooldown = useAnimation + 120;
+    this.ammoCyclingOffset++;
+    if (this.equipStats.ammoCyclerMode === 3) {
+      this.ammoCyclingOffset = Math.floor(Math.random() * 2147483647);   // Main.rand.Next()
+    }
+  }
+
+  /** PickAmmo_PickAmmoItem（Player.cs:54368-54390）+ PickAmmo_IterateRange
+   *  （:54326-54366）：按 ammoCyclerMode 选弹药槽,返回命中的背包槽位（-1=无弹药）。
+   *  AmmoSlots(1)=先只在弹药槽（54-57;币族 50-53）内轮换,空则回退默认序【不轮换】
+   *  （:54389 allowAmmoCycling=false）;FullInventory(2)/Random(3)=默认序轮换;
+   *  None(0)=默认序首个（1.4.4 语义）。默认序 = 币 50-53 → 弹药 54-57 → 背包 0-53
+   *  （AmmoSlotOrder_Default :3175）。克塔敏化器 779/大地改造器 5134 恒取第一组
+   *  （:54347-54350）。matches = `item.ammo == sItem.useAmmo && stack > 0` 的槽判定。 */
+  pickAmmoSlot(matches: (id: number) => boolean, useAmmo: number, weaponVid: number): number {
+    const mode = this.equipStats.ammoCyclerMode;
+    const forceFirst = weaponVid === 779 || weaponVid === 5134;   // :54347-54350
+    if (mode === 1) {
+      const order = useAmmo === 71 ? AMMO_SLOT_ORDER_COINS_ONLY : AMMO_SLOT_ORDER_AMMO_ONLY;
+      const hit = pickAmmoIterateRange(order, this.inv.slots, matches,
+        this.ammoCyclingOffset, true, forceFirst);
+      if (hit >= 0) return hit;
+    }
+    return pickAmmoIterateRange(AMMO_SLOT_ORDER_DEFAULT, this.inv.slots, matches,
+      this.ammoCyclingOffset, mode === 2 || mode === 3, forceFirst);
+  }
+
   /** 装备暴击率（critX 段 + 词缀 67/68） */
   critChance(kind: 'melee' | 'ranged' | 'magic'): number {
     const st = this.equipStats;
@@ -1950,7 +2145,13 @@ export class Player extends Entity {
     if (!this.slowMagicUse) return 1;
     return 1 / Player.SLOW_MAGIC_MULTIPLIER;
   }
-  /** GetSlowMagicScalar（:47444-47451）：节拍/阈值标量 ×2.5 */
+  /** GetSlowMagicScalar（:47444-47451）：节拍/阈值标量 ×2.5（slowMagicUse=false → 1）。
+   *  ★1457 全部消费点核实（grep 全仓仅 3 处,全在 Projectile.cs）：439 激光机枪
+   *  帧拍 frameCounter≥4×scalar（:67211）+ 音隔 soundDelay=(24−6×档)×scalar（:67222）、
+   *  535 美杜莎之首石化阈值 (int)(60×scalar)/4（:45301）。两件武器本仓均未实装
+   *  （2795 激光机枪无 AI、535 弹无 AI——Enemy.ts:2901 的 535 是美杜莎 NPC）→
+   *  本仓暂零消费,按 parity 原语保留（tests/diff-1457-player-batch1 已断言 1/2.5）,
+   *  武器实装时直接接（登记债） */
   getSlowMagicScalar(): number {
     if (!this.slowMagicUse) return 1;
     return Player.SLOW_MAGIC_MULTIPLIER;
@@ -2682,6 +2883,8 @@ export class Player extends Entity {
     //（:26416）+ 帧态机分派（:35745-35790）。冻结/石化/蛛网控场强制下坐（:26556）
     if (this.ridingMount) {
       if (this.buffs.has(BuffType.Frozen) || this.buffs.has(BuffType.Stoned) || this.buffs.has(BuffType.Webbed)) {
+        // 坐骑抚摸随下坐终止（Mount.Dismount :6219-6222 petting.mount → Stop）
+        if (this.petting.mount) this.stopPettingAnimal();
         this.mount.dismount(this, game);
       } else {
         this.mount.upkeep(this);
@@ -3169,7 +3372,9 @@ export class Player extends Entity {
       // ★1457 翅膀"隐藏显形"门变更（ApplyEquipFunctional :15710-15716,1456 :12583）：
       // `!hideVisibleAccessory[slot] || (vy≠0 && mount.CanUseWings)` → `(… && !mount.Active)`
       // ——1456 骑【可飞】坐骑时被隐藏的翅膀下落中仍显形,1457 骑任何坐骑都不再显形。
-      // 本仓无 per-slot 隐藏字段（hideVisibleAccessory 未建模,见 :971 备案）→ 无宿主;
+      // 本仓 per-slot 隐藏已建模（hideVisibleAccessory,聚合侧 hidden 旗随翼记录）:
+      // 隐藏翼的【飞行逻辑】不受影响（原版 wingsLogic 恒写 :12585,本仓 wingsLogic
+      // 同）,显形门在渲染侧补 vy≠0 特例（Renderer 翅膀层）。
       // 绘制侧 ShouldDrawWingsThatAreAlwaysAnimated（:30271,1457 未改,仍 mount.CanUseWings）
       // 本仓以 !ridingMount 等价（坐骑恒禁翼族,两式同假）——下方 shouldDraw 同。
       const wings = eq.wing && !mnt2 ? eq.wing.logic : 0;   // wingsLogic = armor.wingSlot（:12584）
@@ -3791,6 +3996,10 @@ export class Player extends Entity {
     }
     // 拍击石系冷却递减（Update :28603——0 档回充音效登记未接）
     if (this.accSnappingStoneCooldown > 0) this.accSnappingStoneCooldown--;
+    // ---- 1457 配饰四件运行态（Update_AmmoCycler :28632 / Update_SentryBackpack
+    //      :28640 / Update_HarpyCharm :28648 / Update_TimerCrit :28521——原版
+    //      Update :24760-24763 同段连排）----
+    this.update1457AccBodies(game);
 
     // 落地摔伤结算（Player.cs:25005-25091：25 格 + extraFall 起伤，超格数 ×10 线性；
     // 翼豁免 flag9=任一盔甲槽 wingSlot>-1；幸运马掌 noFallDmg；落在水里豁免）
@@ -6060,6 +6269,10 @@ export class Player extends Entity {
     isPetSmall: false,
     offsetX: 0, offsetY: 0,
     targetBottomX: 0, targetBottomY: 0,
+    /** 坐骑抚摸支（PlayerPettingInfo.mount，Player.cs:33613 构造第三态）：
+     *  骑乘 62-65 时右键坐骑 → PetMount（:33601-33620）——不 snap 站位（人已在坐骑上），
+     *  UpdatePettingAnimal :33746-33752 mount 支 num=direction（无对侧站位语义） */
+    mount: false,
     /** 宠物跟随体存活校验回调（Game 注入——目标死亡/换宠返回 false） */
     validTarget: null as null | (() => boolean),
   };
@@ -6106,12 +6319,32 @@ export class Player extends Entity {
     this.petting.targetBottomX = target.cx + ox;
     this.petting.targetBottomY = target.bottomY;
     this.petting.validTarget = target.valid;
+    this.petting.mount = false;
+    return true;
+  }
+
+  /** PetMount（Player.cs:33601-33620）：骑乘中右键坐骑的抚摸支——toggle 语义
+   *  （抚摸中再点 = Stop，:33603-33606）；置 petting.mount 态（无站位 snap——
+   *  PetAnimal 的 TryGetTarget 门 :33627-33629 对 mount 态恒 false，直接落状态位）。
+   *  返回 = 是否进入抚摸态（true 时 Game 侧播 PalChilletJoy + 成就 21——
+   *  :33614-33619 音效在 PetMount 内、HandleSpecialEvent(21) :33612） */
+  petMount(): boolean {
+    if (this.petting.isPetting) {
+      this.stopPettingAnimal();
+      return false;
+    }
+    this.stopPettingAnimal();
+    this.petting.isPetting = true;
+    this.petting.mount = true;
+    this.petting.isPetSmall = false;          // isPetSmall: false（Mount.cs:6164）
+    this.petting.validTarget = null;
     return true;
   }
 
   /** StopPettingAnimal（:33009-33012） */
   stopPettingAnimal(): void {
     this.petting.isPetting = false;
+    this.petting.mount = false;
     this.petting.validTarget = null;
   }
 
@@ -6134,6 +6367,17 @@ export class Player extends Entity {
   /** UpdatePettingAnimal（:33015-33033）：目标失效/漂移 >2px/移动键/换向 → 停 */
   private updatePettingAnimal(): void {
     if (!this.petting.isPetting) return;
+    // 坐骑抚摸支（:33746-33752）：TryGetTarget 对 mount 态恒 false → 跳过漂移门；
+    // num = direction（:33748-33750 坐骑无对侧站位）→ `num != direction` 恒 false
+    if (this.petting.mount) {
+      // controlLeft/Right/Up/Down/Jump || pulley || (mount.Active && !petting.mount)
+      // （:33751）——本仓 pulley 未跟踪（登记）；骑乘中抚摸的 mount.Active && !mount
+      // 恒 false；下坐即停（Dismount :6219-6222 显式 Stop，Mounts/Game 下坐路径调）
+      if (this.inputX !== 0 || this.inputUp || this.inputDown || this.inputJump) {
+        this.stopPettingAnimal();
+      }
+      return;
+    }
     const ok = this.petting.validTarget?.() ?? false;
     const drift = Math.hypot(
       this.petting.targetBottomX - (this.x + this.w / 2),
@@ -6146,6 +6390,9 @@ export class Player extends Entity {
       this.stopPettingAnimal();
     }
   }
+
+  /** 换向沿备案（UpdatePettingAnimal :33752 `num != direction` 的坐骑支——
+   *  num=direction 恒等,坐骑抚摸无换向停门；宠物支的换向停门见上） */
 
   private updateEyeState(game: GameHooks): void {
     // SetStateByPlayerInfo（:75-122）——优先级：致盲 > 受击锁存 > 床 > 中度伤 > 醉 >

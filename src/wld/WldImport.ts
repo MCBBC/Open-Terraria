@@ -449,6 +449,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   const slopeArr = new Uint8Array(n);
   const paintArr = new Uint8Array(n);
   const paintWallArr = new Uint8Array(n);
+  const coatArr = new Uint8Array(n);
 
   const chestAt = new Map<string, { x: number; y: number }>();
   for (const c of wld.chests) chestAt.set(`${c.x},${c.y}`, c);
@@ -508,6 +509,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     // 油漆双通道直拷（WorldFile.cs:2571-2586 parser 已按 5bit 域解码；0=无漆）
     paintArr[i] = wld.tiles.paint[i];
     paintWallArr[i] = wld.tiles.paintWall[i];
+    coatArr[i] = wld.tiles.coat[i];   // 涂层四位（WF:2659-2677 header4）
+    // 废弃荧光漆迁移（ConvertIlluminantPaintToNewField，WorldFile.cs:2806-2825）
+    if (paintArr[i] === 31) { paintArr[i] = 0; coatArr[i] |= 8; }
+    if (paintWallArr[i] === 31) { paintWallArr[i] = 0; coatArr[i] |= 16; }
   }
   if (unmapped > 0) warnings.push(`${unmapped} 个未知 tile 已降级为石块`);
 
@@ -608,6 +613,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     blocks: bytesToB64(rlePairs(combineHalfSlope(halfArr, slopeArr))),
     paint: bytesToB64(rlePairs(paintArr)),         // 油漆（WF:2571-2574）
     paintWall: bytesToB64(rlePairs(paintWallArr)), // 墙漆（WF:2583-2586）
+    coat: bytesToB64(rlePairs(coatArr)),           // 涂层四位（WF:1539-1552）
     // ★explored 故意不写段（= 全 0 迷雾）：原版地图探索数据存在 .wld 伴档 .twld
     // （MapHelper.SaveMap），.wld 本体不含——WldParser 只读 .wld，无从回填，
     // 导入后从头探索（与旧存档行为一致）

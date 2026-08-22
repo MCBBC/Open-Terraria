@@ -9,6 +9,8 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
+// ★1457 对齐档 2：砖线（makeTemple_GenerateBricks）从 1457 语义存档即插接线
+import { makeTempleGenerateBricks } from './rollback1457/TempleBricks.1457';
 
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { killTileWhole } from './TrapsPass';
@@ -150,43 +152,12 @@ function setBrick(st: TileStore, x: number, y: number): void {
   st.slope[i] = 0; st.half[i] = 0;
 }
 
-// ★KKKKKK 批（2026-08-22）1457→1456 回滚：1457 批（8/21 18:09）曾把砖线段换成
-// makeTemple_GenerateBricks（深度组并界+StrictAngles L 形线）——本批还原 1456 的
-// 「全房对四角连线」（1456 cs:33700-33760）。1457 语义全量存档 →
-// rollback1457/TempleBricks.1457.ts。房间链布局/实心填/双遍挖腔/templePather/
-// outerTempled/入口/清理/祭坛各段 1456≡1457（源码 diff 仅变量改名与 `||`→`|`
-// 无副作用改写），本批零改动。
-// 1456 makeTemple 砖线（cs:33700-33760）：k×l×m×n 四重环——房 k 的左/右界(l)与
-// 房 m 的左/右界(n)配对；三坐标（x、top、bot）同步步进靠拢，每步把 x 列的
-// [top,bot) 段填 226（active+type+liquid=0+slope0+half0,不清墙=setBrick 五连写）。
-// k==m 且 l==n 时三坐标已相等,while 零步。**零掷骰**（掷流与布局环完全解耦）。
-function templeCorridors1456(st: TileStore, rooms: Room[]): void {
-  for (let k = 0; k < rooms.length; k++) {
-    for (let l = 0; l < 2; l++) {
-      for (let m = 0; m < rooms.length; m++) {
-        for (let n = 0; n < 2; n++) {
-          let x = rooms[k].x;
-          if (l === 1) x += rooms[k].w - 1;          // Rectangle.Right = X+Width-1
-          let top = rooms[k].y;
-          let bot = top + rooms[k].h;                // num23 = Y + Height
-          let x2 = rooms[m].x;
-          if (n === 1) x2 += rooms[m].w - 1;
-          const top2 = rooms[m].y;
-          const bot2 = top2 + rooms[m].h;
-          while (x !== x2 || top !== top2 || bot !== bot2) {
-            if (x < x2) x++;
-            if (x > x2) x--;
-            if (top < top2) top++;
-            if (top > top2) top--;
-            if (bot < bot2) bot++;
-            if (bot > bot2) bot--;
-            for (let y = top; y < bot; y++) setBrick(st, x, y);
-          }
-        }
-      }
-    }
-  }
-}
+// ★KKKKKK 批（2026-08-22）曾把砖线段回滚为 1456 的「全房对四角连线」
+// （1456 cs:33700-33760,k×l×m×n 四重环+三坐标同步步进,零掷骰）。
+// ★2026-08-23 1457 对齐档 2：换回 1457 makeTemple_GenerateBricks（1457
+// cs:33864 调用位,实现在 rollback1457/TempleBricks.1457.ts 即插接线）。
+// 房间链布局/实心填/双遍挖腔/templePather/outerTempled/入口/清理/祭坛各段
+// 1456≡1457（源码 diff 仅变量改名与 `||`→`|` 无副作用改写），零改动。
 
 /** SolidTile(i, j)（cs:70155）：active + tileSolid + !tileSolidTop + 非半砖 + slope 0。
  *  与 SolidTile2（cs:70178，祭坛锚点门用）差一个 tileSolidTop（平台）条件,勿合并。 */
@@ -249,8 +220,11 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   let runLen = rng.int(1, 2);             // num8:行程阈值,每次换向后 +1
   let runStep = 0;                        // num9
   let cx = sx, cy = sy;                   // num6/num7:上一间中心
-  // ★KKKKKK：1457 的 roomDepths（num13 深度组号/array2 记录）随 GenerateBricks
-  //   一并回滚删除——1456 布局环无此量（掷流不受影响,纯记账）。
+  // ★1457 对齐档 2（2026-08-23）复线：roomDepths（1457 cs:33780 `int num13 = 0` 深度
+  //   组号=换向次数,cs:33852 `array2[i]` 记录）——GenerateBricks 按深度组并界连线。
+  //   1456 布局环无此量（掷流不受影响,纯记账）。
+  const depths: number[] = [];
+  let depthGroup = 0;                     // num13
   for (let n = 0; n < roomCount; n++) {
     // ★cs:33636 `int num19 = -10;` 声明在 for-i **体内**——每房重置;曾跨房累积,
     //  房距越滚越宽+掷骰漂移(F2 代理附带发现)
@@ -296,7 +270,11 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
     rooms.push(rect);
-    if (runStep > runLen) { runLen++; runStep = 1; }
+    // ★1457（cs:33852-33859）深度组记账：末房（i==num2,含 uwCut 截断后 roomCount=n+1
+    //   的当房）记 num13+1,其余记 num13;随后换向（runStep>runLen）→ num13++。
+    //   顺序=记账在换向增量**之前**（末房与前一房同组时仍 +1 隔离）
+    depths.push(n === roomCount - 1 ? depthGroup + 1 : depthGroup);
+    if (runStep > runLen) { runLen++; runStep = 1; depthGroup++; }
     dir = newDir as 1 | -1;
     cx = rx; cy = ry;
   }
@@ -307,10 +285,10 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     const f = (globalThis as { __swTmRooms?: (r: Room[], sx: number, sy: number) => void }).__swTmRooms;
     if (f) f(rooms.map((r) => ({ ...r })), sx, sy);
   }
-  // ---- ★1456 砖线（cs:33700 调用位）：全房对四角连线（零掷骰）----
-  // 1457 批曾改 makeTemple_GenerateBricks（深度组并界+StrictAngles）——KKKKKK 批
-  // 还原 1456「全房对连线」（见 templeCorridors1456 头注与 rollback1457 存档）。
-  templeCorridors1456(st, rooms);
+  // ---- ★1457 砖线（cs:33864 调用位,1456 是 cs:33700 全房对连线）：深度组并界 +
+  //      StrictAngles L 形线（零掷骰,掷流与布局环解耦）——1457 对齐档 2 按存档
+  //      rollback1457/TempleBricks.1457.ts 即插接线（makeTempleGenerateBricks）。
+  makeTempleGenerateBricks(st, rooms, depths);
   // ---- 房间实心 + 双遍游走挖腔(L17280-17381)----
   for (const r of rooms) {
     for (let x = r.x; x < r.x + r.w; x++) {

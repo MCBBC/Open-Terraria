@@ -123,6 +123,10 @@ export interface SaveData {
   paint?: string;
   /** 背景墙油漆（原版 Tile.cs:365-373 bTileHeader&0x1F；WF:1486-1491 存档位） */
   paintWall?: string;
+  /** 涂层四位（原版 WF:1539-1552 存档位：bit1(2)=invisibleBlock bit2(4)=invisibleWall
+   *  bit3(8)=fullbrightBlock bit4(16)=fullbrightWall——原版打包进 header4 字节，
+   *  本仓独立 RLE 通道同构；旧档缺字段=全 0 无涂层） */
+  coat?: string;
   /** 战争迷雾 0/1 位图（World.explored；原版 .twld MapHelper 段的等价物）。
    *  base64 RLE 同构通道——0/1 游程压到几个字节；旧档缺段 = 全 0 未探索（旧行为，不迁移） */
   explored?: string;
@@ -156,6 +160,10 @@ export interface SaveData {
     anglerQuestsFinished?: number;
     /** 信息显示开关(Player.hideInfo[13] :776;按下标=图标序;旧档缺省全 false) */
     hideInfo?: boolean[];
+    /** 配饰格可见性开关(Player.hideVisibleAccessory[10] :1590;下标=装备槽序 3-9 有效,
+     *  Main.cs:40855-40880 眼睛图标翻转;原版按位打包 :53813-53819,本仓布尔数组直存;
+     *  旧档缺省全 false=全可见) */
+    hideVisibleAccessory?: boolean[];
     /** PVE 死亡计数（Player.numberOfDeathsPVE,PL:53840;旧档缺省 0） */
     deathsPve?: number;
     /** 发色剂染料 shaderId 1..12（Player.hairDye byte,PL:53805-53808 写/:54214-54216
@@ -216,6 +224,8 @@ export interface SaveStoreView {
   half: Uint8Array; slope: Uint8Array;
   /** 油漆双通道（0-31；原版 Tile.color()/wallColor() 5bit 域） */
   paint: Uint8Array; paintWall: Uint8Array;
+  /** 涂层四位（WF:1539-1552 位编码；缺省=不写该段） */
+  coat?: Uint8Array;
   /** 战争迷雾 0/1 位图（World.explored，与 store 同长；缺省=不写该段=旧行为全 0） */
   explored?: Uint8Array;
 }
@@ -373,6 +383,8 @@ export function serializeSave(
     // 油漆双通道（原版 WF:1474-1491 独立字节位；本仓独立 RLE 通道，旧档缺=全 0）
     paint: bytesToB64(rlePairs(st.paint)),
     paintWall: bytesToB64(rlePairs(st.paintWall)),
+    // 涂层四位（WF:1539-1552；undefined 不落段 → 旧读档端无害忽略）
+    coat: st.coat ? bytesToB64(rlePairs(st.coat)) : undefined,
     // 战争迷雾（0/1 位图 RLE：全 0/全 1 各 1 游程 = ~7 字节；undefined 不落段 →
     // JSON.stringify 丢弃该键，旧读档端无害忽略）
     explored: st.explored ? bytesToB64(rlePairs(st.explored)) : undefined,

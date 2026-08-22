@@ -1,11 +1,12 @@
 // 1457 新增：FinalSeedCleanup 全种子终扫（WorldGen.cs:692 FinalizeSecretSeeds 尾部
 // **无条件**调用 + 实现 :695-830）+ 四涂装种子族单格/全图 pass。
 //
-// ★★KKKKKK 批（2026-08-22）DORMANT 备案：本 pass 是 **1457-only**——1456 的
-//   FinalizeSecretSeeds（Terarria1456/Terraria/WorldGen.cs:576-680）**无此调用**、
-//   1456 全源 grep「FinalSeedCleanup」零命中。IIIIII IL 复裁裁决 1456（=1.4.5.6
-//   二进制真值）为准 → **任何种子都不跑**，WorldGen.ts 接线已撤（本文件保留=
-//   1457 语义存档,1457 对齐战役时按 1457 WorldGen.cs:692 重新接线即可）。
+// ★★2026-08-23 1457 对齐档 2：**已接线**——项目基准切 ../Terarria1457/ 后按 1457
+//   WorldGen.cs:22666 `SecretSeed.FinalizeSecretSeeds()`（vampireSeed 终段之后）→
+//   尾部 :692 无条件调 FinalSeedCleanup 接回（WorldGen.ts generateWorld 尾,
+//   vampireSeedFinishPass 之后、MultitileFragmentSweep 兜底之前）。
+//   （KKKKKK 批 2026-08-22 曾因 1456 基准撤线：1456 的 FinalizeSecretSeeds
+//   Terarria1456/Terraria/WorldGen.cs:576-680 无此调用、全源 grep 零命中。）
 //
 // ── 结构 ──
 //   FinalSeedCleanup(:695)        全图 [5, 尺寸-5) 扫描：悬空 Falling 块按类型静态化
@@ -24,7 +25,7 @@
 //  仅登记旗标位（恒 false）——文本/哈希触发链归秘密种子批（批 F）。终扫的落砂静态化
 //  部分不依赖旗标，普通世界照跑。
 import { TILE_DEFS } from '../../../data/tiles';
-import type { TileStore } from '../../TileStore';
+import { TileStore } from '../../TileStore';
 import type { SeedFlags } from '../SeedEasterEggs';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 
@@ -152,6 +153,7 @@ function resetToType(st: TileStore, x: number, y: number, sheet: number): void {
   st.frameX[i] = 0;
   st.frameY[i] = 0;
   st.wire[i] = 0;          // sTileHeader=32：线四色+致动器+已致动全清
+  st.coat[i] = 0;          // bTileHeader3=0（Tile.cs:285 ResetToType 全头清，含涂层四位）
   st.paint[i] = 0;         // bTileHeader=0：墙漆清
   st.paintWall[i] = 0;
 }
@@ -215,11 +217,12 @@ export function finalSeedCleanup(st: TileStore, f: SeedFlags,
       //   涂装种子一开即错格）
       finalSeedCleanupPaint(st, i, j, f);
       // echo 涂种（cs:740-743）：`!tile3.invisibleBlock()` 门 + fullbrightBlock(false)
-      //   + invisibleBlock(true)。invisibleBlock 暂记 wire bit6（渲染消费端批 F 接）;
+      //   + invisibleBlock(true)。位落 TileStore.coat 真通道（WF:1539-1552 位编码，
+      //   渲染/光照消费端已接——ChunkCache 隐形跳过 + TileLightScanner 不挡光）;
       //   fullbrightBlock 清位在 resetToType 后恒空（bTileHeader3=0）,保留调用形状
-      if (f.coatEverythingEcho && !(st.wire[st.idx(i, j + 1)] & 64)) {
-        st.wire[st.idx(i, j + 1)] &= ~256;   // fullbrightBlock(false)
-        st.wire[st.idx(i, j + 1)] |= 64;     // invisibleBlock(true)
+      if (f.coatEverythingEcho && !(st.coat[st.idx(i, j + 1)] & TileStore.COAT_INVISIBLE_BLOCK)) {
+        st.coat[st.idx(i, j + 1)] &= ~TileStore.COAT_FULLBRIGHT_BLOCK;   // fullbrightBlock(false)
+        st.coat[st.idx(i, j + 1)] |= TileStore.COAT_INVISIBLE_BLOCK;     // invisibleBlock(true)
       }
     }
   }
@@ -228,8 +231,8 @@ export function finalSeedCleanup(st: TileStore, f: SeedFlags,
 // ===================== 四涂装种子族（旗标未实装,结构先行） =====================
 
 /** DoCoatEverythingEcho_SingleTile（cs:940-988）：JustSomeThings/JustInnerBlocks/
- *  全涂 三变体——本仓 Tile 无 invisible/fullbright 位,先以 wire 高位暂记
- *  （bit6=invisibleBlock/bit7=invisibleWall,渲染消费端批 F 接）。 */
+ *  全涂 三变体——位落 TileStore.coat 真通道（invisibleBlock=2/invisibleWall=4，
+ *  WF:1539-1552 位编码；渲染消费端已接）。 */
 function doCoatEverythingEchoSingleTile(st: TileStore, x: number, y: number, f: SeedFlags): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
@@ -238,7 +241,7 @@ function doCoatEverythingEchoSingleTile(st: TileStore, x: number, y: number, f: 
     const isBoulder = [138, 484, 664, 665, 711, 712, 713, 714, 715, 716].includes(sh);
     if (sh === 48 || sh === 232 || sh === 137 || (isBoulder && sh !== 665 && sh !== 711)
       || sh === 141 || sh === 135 || sh === 443) {
-      st.wire[i] |= 64;   // invisibleBlock(true)
+      st.coat[i] |= TileStore.COAT_INVISIBLE_BLOCK;   // invisibleBlock(true)
     }
   } else if (f.echoJustInnerBlocks) {
     let allSolid = true;
@@ -247,10 +250,10 @@ function doCoatEverythingEchoSingleTile(st: TileStore, x: number, y: number, f: 
         if (!solidTile3FSC(st, a, b)) allSolid = false;
       }
     }
-    if (allSolid) st.wire[i] |= 64 | 128;      // invisibleBlock+invisibleWall
-    if (!f.errorWorld) st.wire[i] |= 128;      // invisibleWall
+    if (allSolid) st.coat[i] |= TileStore.COAT_INVISIBLE_BLOCK | TileStore.COAT_INVISIBLE_WALL;
+    if (!f.errorWorld) st.coat[i] |= TileStore.COAT_INVISIBLE_WALL;      // invisibleWall
   } else {
-    st.wire[i] |= 64 | 128;
+    st.coat[i] |= TileStore.COAT_INVISIBLE_BLOCK | TileStore.COAT_INVISIBLE_WALL;
   }
 }
 
@@ -259,27 +262,28 @@ function doCoatEverythingEchoSingleTile(st: TileStore, x: number, y: number, f: 
 function doCoatEverythingEchoErrorRemoval(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
-  if (st.wire[i] & 64) st.flags[i] = 0;        // invisibleBlock → active(false)
-  if (st.wire[i] & 128) st.wall[i] = 0;        // invisibleWall → wall=0
+  if (st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) st.flags[i] = 0;   // invisibleBlock → active(false)
+  if (st.coat[i] & TileStore.COAT_INVISIBLE_WALL) st.wall[i] = 0;     // invisibleWall → wall=0
   if (solidTile3FSC(st, x, y)) st.wall[i] = 0;
 }
 
 /** DoCoatEverythingIlluminant_SingleTile（cs:1005-1040）：fullbright 位
- *  （bit 暂记同上,渲染消费端批 F 接）。 */
+ *  （fullbrightBlock=8/fullbrightWall=16，渲染消费端已接）。 */
 function doCoatEverythingIlluminantSingleTile(st: TileStore, x: number, y: number, f: SeedFlags): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (f.illuminantJustSomeThings) {
     const sh = sheetOf(st.type[i]!);
-    if (sh === 12 || sh === 665 || sh === 639) st.wire[i] |= 256;   // fullbrightBlock
+    if (sh === 12 || sh === 665 || sh === 639) st.coat[i] |= TileStore.COAT_FULLBRIGHT_BLOCK;
   } else if (f.illuminantJustRandomSpots) {
     // JustRandomSpots 分支原版每格掷 Next(2)——全图 pass 侧消费（此处单格版不掷,
     // 与原版单格语义一致:掷在 DoCoatEverythingIlluminant 循环内）
     // ★批4 review P3-11（cs:1023-1031）：fullbright 置位同时 invisibleBlock/Wall(false)
     //  双清（曾只置位不清隐形）
-    st.wire[i] = (st.wire[i] & ~(64 | 128)) | 256 | 512;
+    st.coat[i] = (st.coat[i] & ~(TileStore.COAT_INVISIBLE_BLOCK | TileStore.COAT_INVISIBLE_WALL))
+      | TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_FULLBRIGHT_WALL;
   } else {
-    st.wire[i] |= 256 | 512;
+    st.coat[i] |= TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_FULLBRIGHT_WALL;
   }
 }
 

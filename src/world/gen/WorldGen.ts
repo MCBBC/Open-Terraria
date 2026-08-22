@@ -333,12 +333,12 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   // 吸血鬼种子终段（WorldGen.cs:22625-22631：GenerateWorld 尾部全部 GenPass 之后
   // vampireSeed → RandomizeWorldSpawn + PlaceTorchesAroundSpawn + PutMonsterVanityInChests）
   vampireSeedFinishPass(ctx);
-  // ★KKKKKK 批（2026-08-22）撤除 FinalSeedCleanup 终扫：该 pass 是 **1457 新增**
-  //   （1457 WorldGen.cs:692 FinalizeSecretSeeds 尾无条件调用 FinalSeedCleanup:695;
-  //   1456 cs:576-680 FinalizeSecretSeeds 无此调用、全源 grep 零命中）——悬空
-  //   Falling 块静态化（53/495→397、112→398、234→399、116→402、224→147、其余→1）
-  //   属 1457 语义,1456 真值下任何种子都不跑。1457 语义存档 →
-  //   vanilla/FinalSeedCleanupPass.ts（文件保留,头注已标 1457-only dormant）。
+  // ★1457 对齐档 2（2026-08-23）复线：FinalSeedCleanup 终扫——1457 WorldGen.cs:22666
+  //   `SecretSeed.FinalizeSecretSeeds()`（vampireSeed 终段 cs:22657-22665 之后）尾部
+  //   cs:692 **无条件**调用 FinalSeedCleanup（:695-747）：悬空 Falling 块静态化
+  //   （53/495→397、112→398、234→399、116→402、224→147、其余→1）+逐格
+  //   FinalSeedCleanup_Paint。1456 无此调用（KKKKKK 批曾撤,基准回 1457 后复线）。
+  finalSeedCleanup(ctx.store, ctx.world.seedFlags ?? {}, world.chests);
   // ★终扫(finalize 之后):finalize 的幽灵 type 净化会把"flags=0 但 type 残留"
   // 的多格物体清成 0 → 在清扫 pass 之后【再造残片】(2026-08-13 缺位断言实锤:
   // 生成后 pot 残片 1 处,补扫即清零)。清扫幂等且廉价,此处兜底。
@@ -350,6 +350,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
 // ---------- 原版管线 pass(阶段 1-2 移植) ----------
 import { newGenState, type GenState } from './vanilla/GenState';
 import { flipGenSolid, resetGenSolid } from './vanilla/GenSolid';
+import { setBoulderSolidity } from './vanilla/TrapsPass';
 import { parseSeed, type SeedFlags } from './SeedEasterEggs';
 import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
@@ -416,8 +417,9 @@ import { settleWorldLiquids, finalGenMergeScan } from '../liquid/settle';
 import vanillaJson from '../../../public/sprites/vanilla.json';
 import { runUndergroundJungleTreesPass } from './vanilla/UndergroundJungleTreesPass';
 import { runQuickCleanupPass } from './vanilla/QuickCleanupPass';
-// ★KKKKKK：finalSeedCleanup import 已撤（1457-only pass,1456 管线不接线;
-//   存档见 vanilla/FinalSeedCleanupPass.ts 头注）。
+// ★1457 对齐档 2（2026-08-23）复线：finalSeedCleanup import 恢复（1457 FinalizeSecretSeeds
+//   尾无条件终扫;KKKKKK 批曾撤,基准回 1457 后按 1457 WorldGen.cs:22666/:692 接回）。
+import { finalSeedCleanup } from './vanilla/FinalSeedCleanupPass';
 
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
 async function liquidSettlePass({ world, rng }: GenCtx) {
@@ -441,6 +443,12 @@ async function liquidSettlePass({ world, rng }: GenCtx) {
     }
   }
   await settleWorldLiquids(world, 'gen', undefined, rng, true);
+  // ★SSSSSS：QuickWater 尾 tilesIgnoreWater(false) → SetBoulderSolidity(true)
+  //   （Liquid.cs:74/141——巨石九族沉降毕回实心；noTraps 的 cs:111/141 条件支与
+  //   tilesIgnoreWater 语义重合,冗余）。Piles 巨石段尾的 false 由此还原——普通种子
+  //   484 亦被还原（GenSolid 旧时间线注记「484 恒非实心到结束」漏计本路径,四链
+  //   回归实证无读者不受扰）。
+  setBoulderSolidity(true);
   // ★pass 尾 tileSolid 翻转（cs:16292 `Main.tileSolid[484] = false`）——DesertBiome
   //   头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
   flipGenSolid([484], false);
@@ -1126,7 +1134,8 @@ function brokenTrapCleanupPass({ store, rng, world }: GenCtx) {
 }
 
 function finalCleanupPass({ store, rng, world }: GenCtx) {
-  runFinalCleanupPass(store, ctxGs[0]!, rng);
+  // ★SSSSSS：opts.chests 透传——FinishNoTraps (E) 段（每箱 1/15 塞 5346 Gas Trap）
+  runFinalCleanupPass(store, ctxGs[0]!, rng, { chests: world.chests as never });
   // ★DDDDDD 批（2026-08-21）归位：原版 FinalCleanup pass 体末的全图 LiquidCheck
   // (createMergeTilesDuringGen:true)（cs:22639-50，ShimmerCleanUp 之后）——曾挂在
   // #49/#97 沉降尾（settle.ts，时点早 8 pass）。终清理槽直调，掷骰走 pass 链流。

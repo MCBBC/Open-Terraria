@@ -1,9 +1,12 @@
 // 拍击石系三脉冲（Projectile.TryMakingSnappingStoneStrike 1457 :14347-14420 1:1）：
 //  6167 拍击石   kind 0（ranged 命中触发 :13443-13446）——30×rangedDamage/120px/2 目标
+//                【消费端已接 entities/Arrow.ts 通用命中环：!hostile（≈ownedBySomeone）
+//                + projectileData.ranged 位门】
 //  6178 焰爆石   kind 1（melee|ranged 命中触发 :13439-13442）——45×meleeDamage/300px/
 //                弹 1131 + 目标 323 Hellfire 180t（:14396-14401）
 //  6179 毁灭臂镗 kind 2（tag 命中触发 :13447-13450）——150×minionDamage/400px/弹 1132
-//  共用冷却 Player.accSnappingStoneCooldown=360t（:14382-14383）;命中盒外目标取
+//  共用冷却 Player.accSnappingStoneCooldown=360t（:14382-14383,Player.ts:571 字段/
+//  :3837 逐 t 递减——Update_SnappingStone :28592-28604 同款）;命中盒外目标取
 //  FindTargetWithLineOfSight（:14405-14412,至多 num2=2 个,跳过本次受击者）。
 //  弹 1121/1131/1132 timeLeft=2 速 UnitY×0.1（:14413-14416）——本仓 Arrow 直生近似。
 import type { GameHooks } from '../entities/types';

@@ -2447,6 +2447,9 @@ export class Enemy extends Entity {
     if (!ok) return;
     st.setTile(x, y - 1, TILE_BY_KEY['v_82_herbs_sprout'] ?? 0, 18 * style, 0);
     st.paint[k] = st.paint[g];                                 // CopyPaintAndCoating（:45479）
+    // 涂层位侧（Tile.CopyPaintAndCoating，Tile.cs:897-903：color+invisibleBlock+
+    // fullbrightBlock 三拷——方块侧两位随漆继承，墙位不动）
+    st.coat[k] = (st.coat[k] & ~TileStore.COAT_BLOCK_MASK) | (st.coat[g] & TileStore.COAT_BLOCK_MASK);
   }
 
   /** AI_001_Slimes 原版核（1.4.5.6 NPC.cs:60735+）：

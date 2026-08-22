@@ -24,9 +24,11 @@ export interface DeviceCtx {
   shootProjectile(px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind, form?: number, anchor?: [number, number]): void;
   /** 喷泉去重（Wiring.cs:1529-1545）：同锚点是否已有 aiStyle73 弹在喷 */
   hasFountainAt?(tx: number, ty: number): boolean;
-  /** 统计附近某类投射物数量(尖刺球惩罚表/兔兔炮场内上限用) */
+  /** 统计附近某类投射物数量(兔兔炮场内上限用;尖刺球预算扫描 1457 :1819-1826 为
+   *  原版死代码——type==num96 比较发生在 num96=185 赋值前 → 无预算上限,不再消费) */
   countProjectiles(kind: 'spiky' | 'bunny', px: number, py: number, radius: number): number;
-  /** 尖刺球预算惩罚(Wiring.cs 1456 :1952-1966):场上每个 185 按距 (px,py) 距离扣分 */
+  /** 已退役(2026-08-23 尖刺球 1457 对齐):原 1456 case -7 死分支预算表,活跃分支
+   *  (1456/1457 :1819-1826)的扫描自死,保留成员仅为 Game.ts ctx 兼容 */
   spikyBudgetPenalty?(px: number, py: number): number;
   /** 门开关(原版 HitWireSingle 10/11:随机方向+反向重试) */
   doorOpen(x: number, y: number): boolean;
@@ -326,7 +328,7 @@ export function switchMonolith(w: Wiring, x: number, y: number): void {
   }
 }
 
-/** 陷阱(137)发射(Wiring.cs:1495-1743 + Item.cs placeStyle)。frameY/18=种类:
+/** 陷阱(137)发射(1457 Wiring.cs:1764-1890 case 137 + Item.cs placeStyle)。frameY/18=种类:
  *  0飞镖(98) 1超级飞镖(184) 2烈焰(187,隐形+尘埃) 3尖刺球(185) 4长矛(186) */
 function fireTrap(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
   const st = w.st;
@@ -342,19 +344,30 @@ function fireTrap(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
     const px = x * 16 + 8 + 10 * dirX, py = y * 16 + 8 + 10 * dirY;
     ctx.shootProjectile(px, py, dirX * speed, dirY * speed, dmg, kind === 0 ? 'dart' : kind === 1 ? 'superdart' : 'flame');
   } else if (kind === 3) {
-    // 尖刺球(Wiring.cs:1536-1599 / 1456 :1944-1976):CheckMech 300 + 场上每个 185
-    // 按自身距离扣预算(<50→50 <100→15 <200→10 <300→8 <400→6 <500→5 <700→4
-    // <900→3 <1200→2 其余 1),预算>0 才发。发射无视朝向(1405 曾按 frameX 定向,
-    // 1456 改为纯下丢,取 1456):固定方块底 (x*16+8, y*16+22),
-    // vx=rand(-20,21)*0.05 ∈[-1,1]、vy=4+rand(0,21)*0.05 ∈[4,5]
+    // 尖刺球(1457 Wiring.cs:1812-1857 case 3;1456 :1812-1856 同文——两版活跃分支逐字节一致):
+    // CheckMech 300 → frameX 四向定向(:1833-1852 frameX/18:case0/1 下+1/case2 上−1/
+    // case3 左−1/case4 右+1);speed = 4×dir + Next(-20+(dir==1?20:0),
+    // 21-(dir==-1?20:0))×0.05(:1853-1854)→ 顺向 [4,5]/反向 [-5,-4]/法向 [-1,1];
+    // 出生偏移 14×dir(:1855)、伤 40(:1830)。
+    // ★预算扫描(:1819-1826)原版即死代码:扫描比较 type==num96 时 num96 尚为初值 0
+    // (:1770),num96=185 在扫描后才赋(:1829)→ num99 恒 200 → 无预算上限。
+    // 1456 的"纯下丢"形态(:1960-1965 vx=Next(-20,21)×0.05/vy=4+Next(0,21)×0.05)位于
+    // case -7(:1942-1968)=第二个 switch(num95) 负值段,num95=frameY/18≥0 恒不可达——
+    // 本仓旧实现误取该死分支,现按两版一致的活跃分支定向发射。
     if (!w.checkMech(x, y, 300)) return;
-    let budget = 200;
-    if (ctx.spikyBudgetPenalty) budget -= ctx.spikyBudgetPenalty(x * 16 + 8, y * 16 + 8);
-    else budget -= ctx.countProjectiles('spiky', x * 16 + 8, y * 16 + 8, 1200) * 8;
-    if (budget <= 0) return;
-    ctx.shootProjectile(x * 16 + 8, y * 16 + 22,
-      (Math.floor(Math.random() * 41) - 20) * 0.05,
-      4 + Math.floor(Math.random() * 21) * 0.05, 40, 'spiky');
+    let sx = 0, sy = 1;                              // case 0/1 = 下(:1835-1839)
+    switch (Math.floor(st.frameX[i] / 18)) {
+      case 2: sx = 0; sy = -1; break;                // 上(:1840-1843)
+      case 3: sx = -1; sy = 0; break;                // 左(:1844-1847)
+      case 4: sx = 1; sy = 0; break;                 // 右(:1848-1852)
+    }
+    const jit = (d: number) => {                     // Next(-20+(d==1?20:0), 21-(d==-1?20:0))×0.05
+      const lo = -20 + (d === 1 ? 20 : 0);
+      const hi = 21 - (d === -1 ? 20 : 0);
+      return (lo + Math.floor(Math.random() * (hi - lo))) * 0.05;
+    };
+    ctx.shootProjectile(x * 16 + 8 + 14 * sx, y * 16 + 8 + 14 * sy,
+      4 * sx + jit(sx), 4 * sy + jit(sy), 40, 'spiky');
   } else if (kind === 4) {
     // 下向火焰(CheckMech 90)
     if (!w.checkMech(x, y, 90)) return;

@@ -2,8 +2,8 @@
 //   1 鞭主干    AI_165_Whip :45006-45117 + FillWhipControlPoints :45618-45681 +
 //              GetWhipSettings :45683-45761 + Colliding :14482-14494
 //   2 哨兵      aiStyle 53 :27172-27382（初冷 120 / 射速 60·60·90 / 扇区炮口）
-//   3 MinionShot 吃鞭 tag   TagEffectState :216-243 + WhipTagEffect.cs:58-84 +
-//              ProjectileID.cs:197 MinionShot / :199 SentryShot
+//   3 MinionShot 吃鞭 tag   TagEffectState :216-243 + WhipTagEffect.cs:76-87 +
+//              ProjectileID.cs:291 MinionShot / :293 SentryShot（1457 行号）
 //   4 沙漠虎 818 链  AI_067_TigerSpecialAttack :46383-46479 + AI_162 :44056-44123
 //   5 AI_120    StardustGuardian :41969-42299 + 拳盒 Colliding :14294-14300
 //   6 localNPCImmunity  Update :15330 / Damage_PVE :11878 / 写入 :13153
@@ -182,7 +182,7 @@ describe('鞭主干 1:1（:45006/:45618/:45683）', () => {
     b.w.fixedUpdate(1, b.hooks);
     expect(b.player.tagEffectStack.isNPCTagged(4912, b.e.id)).toBe(true);  // tag 窗口开启
     expect(TAG_EFFECTS[4912].tagDamage).toBe(0);       // Firecracker 无 flat TagDamage
-    expect(b.player.tagEffectStack.canProcOnNPC(4912, b.e.id)).toBe(true); // proc 启用（case 913 :13969-13975）
+    expect(b.player.tagEffectStack.canProcOnNPC(4912, b.e.id)).toBe(true); // proc 启用（case 913 :13970-13977）
   });
 
   it('月主鞭 1035 补鞭：30t 寿命内补 3 鞭（:45038-45048，ai[2]<progress×3）', () => {
@@ -195,20 +195,29 @@ describe('鞭主干 1:1（:45006/:45618/:45683）', () => {
     expect(lashes[0].timeToFlyOut).toBe(30 * 2);           // 子鞭固定 30t（:45755-45758）
   });
 
-  it('5479 星座星雨（1456 :12965-12970/:13868-13880）：首鞭命中即撒星、伤 ×0.33、无 proc 门/消费', () => {
+  it('5479 星座星雨（1457 :14001-14007/:15013-15036）：CanProcOnNPC 门 + RemoveAllProcs、伤 ×2×0.22（随从 OnTaggedHit 启窗）', () => {
     const e = mkEnemy(7, 0, 0);
     const { hooks, player, added } = makeHooks([e]);
     const w = new WhipProj(player.cx, player.cy, 0, 1034, 5479, 30, 4, 30, 4, () => player);
     for (let i = 0; i < 9; i++) w.fixedUpdate(1, hooks);
     const pts = w.pointsAt(20, true);
     e.cx = pts[10].x; e.cy = pts[10].y; e.x = pts[10].x - 8; e.y = pts[10].y - 12;
-    // 无 proc 窗口（随从未命中过）也撒星——1456 case 1034 首鞭无条件（1457 门控已退役）
+    // 无 proc 窗口（随从未命中过）→ 不撒星（case 1034 CanProcOnNPC 门 :14002）
     w.fixedUpdate(1, hooks);
+    expect(added.filter((a) => a instanceof Arrow && (a as Arrow).projId === 1039).length).toBe(0);
+    // 随从命中经 WhipTagEffect_Constellation.OnTaggedHit（_Constellation.cs:6-10）启窗——直书等价态
+    player.tagEffectStack.tryEnableProcOnNPC(5479, e.id);
+    // 第二挥命中 → 撒星 + RemoveAllProcs（:14005-14006）
+    const w2 = new WhipProj(player.cx, player.cy, 0, 1034, 5479, 30, 4, 30, 4, () => player);
+    for (let i = 0; i < 9; i++) w2.fixedUpdate(1, hooks);
+    const pts2 = w2.pointsAt(20, true);
+    e.cx = pts2[10].x; e.cy = pts2[10].y; e.x = pts2[10].x - 8; e.y = pts2[10].y - 12;
+    w2.fixedUpdate(1, hooks);
     const stars = added.filter((a) => a instanceof Arrow && (a as Arrow).projId === 1039);
-    expect(stars.length).toBe(6);   // 20 段 → 每 3 控制点一颗（:13873 i+=3）
-    // 伤 = damage×0.33（:13870；1457 的 ×2×0.22 档退役）
-    expect((stars[0] as Arrow).damage).toBe(Math.max(1, Math.trunc(30 * 0.33)));
-    // case 1034 不启用也不消费 proc（:12965-12970 无 TryEnableProcOnNPC/RemoveAllProcs）
+    expect(stars.length).toBe(6);   // 20 段 → 每 3 控制点一颗（:15019 i+=3）
+    // 伤 = (int)(鞭伤×2×0.22)（:14005 传 damage×2 → :15016-15017 num=0.22;鞭伤取衰减后 30×0.90=27）
+    expect((stars[0] as Arrow).damage).toBe(Math.max(1, Math.trunc(Math.round(30 * 0.9) * 2 * 0.22)));
+    // RemoveAllProcs（:14006）——proc 窗口已清
     expect(player.tagEffectStack.canProcOnNPC(5479, e.id)).toBe(false);
   });
 });
@@ -252,7 +261,7 @@ describe('MinionShot tag/proc 继承', () => {
     expect(meteor!.damage).toBe(Math.max(1, Math.trunc(10 * 1.33))); // OnProcHit 伤=基数×1.33（_Starcrash :22）
   });
 
-  it('5480 月主弹 proc（1456 :13832-13867）：单发 1045 弧线弹、固定伤 20、gen=0', () => {
+  it('5480 月主弹 proc（1457 :14977-15011）：单发 1045 弧线弹、固定伤 20、gen=0', () => {
     const e = mkEnemy(10, 0, 0);
     e.hurtFx = (d: number) => { e.hp -= d; };
     const { hooks, player, added } = makeHooks([e]);
@@ -260,15 +269,15 @@ describe('MinionShot tag/proc 继承', () => {
     const res = resolveWhipTagHit(e, 10, hooks, (el) => {
       (hooks as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles');
     }, 1, e.cx, e.cy, player);
-    // 5480 无 ModifyProcHit 乘区;TagDamage=25（ItemID.cs:1400-1405）;CritChance=10（:1404）
-    // → 10% TagCrit ×2（1456 WhipTagEffect.ModifyTaggedHit :69-71 掷 crit）
+    // 5480 无 ModifyProcHit 乘区;TagDamage=25（ItemID.cs:1412-1417）;CritChance=10（:1416）
+    // → 10% TagCrit ×2（WhipTagEffect.ModifyTaggedHit :87-91 掷 crit）
     expect([10 + 25, (10 + 25) * 2]).toContain(res.dmg);
     expect(player.tagEffectStack.canProcOnNPC(5480, e.id)).toBe(false);   // 一次性（ClearProc 先于 OnProcHit）
     const procs = added.filter((a) => a instanceof MoonLordWhipProc) as MoonLordWhipProc[];
-    expect(procs.length).toBe(1);           // 单发（:13834-13835 num=1;1457 三连已退役）
-    expect(procs[0].damage).toBe(20);       // 固定伤 20（_Possession.cs:8）
-    expect(procs[0].gen).toBe(0);           // ai[1]=0（aiCounter 初值 :13864）
-    expect(procs[0].arc).not.toBe(0);       // 弧线弹道（ai[0]=±(π/5..π/2) :13845-13846）
+    expect(procs.length).toBe(1);           // 单发（:14980-14981 num=Next(1,4) 后被 `num=1` 覆写=死掷）
+    expect(procs[0].damage).toBe(20);       // 固定伤 20（_Possession.cs:6-8）
+    expect(procs[0].gen).toBe(0);           // ai[1]=0（aiCounter 初值 :15010）
+    expect(procs[0].arc).not.toBe(0);       // 弧线弹道（ai[0]=±(π/5..π/2) :14993-14995）
   });
 
   it('4912 火鞭 proc（1457 ×2.75 乘区）：命中伤 = (10+0)×2.75，918 爆炸 = 基数×2.75（_Firecracker.cs:9-29）', () => {
@@ -310,22 +319,22 @@ describe('MinionShot tag/proc 继承', () => {
     void hooks;
   });
 
-  it('4678/5478 按 1456 = 基类 WhipTagEffect（ItemID.cs:1356-1362/:1381-1387）：仅 TagDamage 入账,无 proc/flat/链电（1457 MegaSlash/电鳗退役）', () => {
+  it('4678 剑鞭 MegaSlash（1457 :1368-1374 + _SwordWhip.cs:17-27）：proc 窗口内 +30 flat;5478 电鳗链电（:1393-1397 + _ElectricEel.cs:18-56）：+50 flat + 近邻 5 目标 ×20 直伤', () => {
     const e = mkEnemy(14, 0, 0);
     const near = mkEnemy(15, 40, 0);
     const { hooks, player } = makeHooks([e, near]);
-    // 1456 proc switch（Projectile.cs:12932-12981）无 4678/5478 分支——此处强开 proc
-    // 窗口验证也不产生额外伤（基类无 OnProcHit/ModifyProcHit 语义）
+    // 4678：proc 窗口内命中 → ModifyProcHit MegaSlash +30（_SwordWhip.cs:17-27）
     tagEnemy(player, e, 4678);
     expect(player.whipBuffs[308]).toBe(180);   // OnTagAppliedToNPC → AddTheBuff（WhipTagEffect.cs:45-59）
     const res = resolveWhipTagHit(e, 10, hooks, () => {}, 1, e.cx, e.cy, player);
-    expect(res.dmg).toBe(10 + 9);         // TagDamage 9（ItemID.cs:1359）,无 +30 flat
+    expect(res.dmg).toBe(10 + 9 + 30);    // TagDamage 9（ItemID.cs:1371）+ MegaSlash 30（_SwordWhip.cs:26）
+    // 5478：链电 450px 内最近 5 目标 ×20 直伤 + AddedFlatDamage 50+50×n（_ElectricEel.cs:20-56）
     tagEnemy(player, e, 5478);
     const rvi = vi.spyOn(Math, 'random').mockReturnValue(0.99);   // 播种:5478 crit 5% 不触发（防 flaky）
     const res2 = resolveWhipTagHit(e, 10, hooks, () => {}, 1, e.cx, e.cy, player);
     rvi.mockRestore();
-    expect(res2.dmg).toBe(10 + 12);       // TagDamage 12（ItemID.cs:1384）,无 +50 flat
-    expect(near.hp).toBe(10000);          // 无链电（1457 CreateLightningBlast 退役）
+    expect(res2.dmg).toBe(10 + 12 + 100); // TagDamage 12（:1396）+ 50 + 50×1（链电命中 near 1 目标,:55）
+    expect(near.hp).toBe(10000 - 20);     // TryHittingNPC(near, 20)（:51）
   });
 });
 

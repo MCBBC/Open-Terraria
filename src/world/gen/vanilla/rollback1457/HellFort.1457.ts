@@ -1,5 +1,8 @@
 // ★1457 语义存档（KKKKKK 批 2026-08-22 从 HellFortPass.ts 回滚时摘存）。
-// 本文件**不接线**（零被 import），仅供 1457 对齐战役复用。1456 真值裁决：
+// ★2026-08-23 1457 对齐档 2：**已接线**——HellFortPass.hellFort() 本批按本存档
+//   头注换回 1457 语义，门落点（hellFortPlaceDoorLoop/hellFortAttemptDoorAt）与
+//   塌墙阶段（hellFortCanCrumbleWall/hellFortAttemptCrumbleWall）四 helper 直接
+//   import 自本文件（存档即插式）。1456 真值裁决：
 // IIIIII IL 复裁（hs.exe=1.4.5.6 二进制）+ Terarria1456/Terraria/WorldGen.cs
 // HellFort cs:32850-33310（无塌墙阶段/门落点无条件直写/右翼先掷/Next(10) 扩 span）。
 // 1457 语义差异清单（相对 1456，源=Terarria1457 cs:32974-33456）：

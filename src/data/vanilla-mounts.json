@@ -1,5 +1,5 @@
 {
- "count": 64,
+ "count": 66,
  "names": {
   "0": "Rudolph",
   "1": "Bunny",
@@ -64,7 +64,9 @@
   "60": "RollerSkatesPink",
   "61": "Pixie",
   "62": "Chillet",
-  "63": "ChilletIgnis"
+  "63": "ChilletIgnis",
+  "64": "TrustyChillet",
+  "65": "TrustyChilletIgnis"
  },
  "sets": {
   "CanUseHooks": [
@@ -131,6 +133,8 @@
    true,
    false,
    false,
+   false,
+   false,
    false
   ],
   "CanDash": [
@@ -190,6 +194,8 @@
    false,
    false,
    false,
+   true,
+   true,
    true,
    true,
    true,
@@ -263,6 +269,8 @@
    true,
    false,
    false,
+   false,
+   false,
    false
   ],
   "DoesNotOverrideLegFrames": [
@@ -327,6 +335,8 @@
    true,
    true,
    true,
+   false,
+   false,
    false,
    false,
    false
@@ -395,6 +405,8 @@
    true,
    false,
    false,
+   false,
+   false,
    false
   ],
   "IsRollerSkates": [
@@ -461,6 +473,8 @@
    true,
    false,
    false,
+   false,
+   false,
    false
   ],
   "Cart": [
@@ -518,6 +532,8 @@
    true,
    false,
    true,
+   false,
+   false,
    false,
    false,
    false,
@@ -593,6 +609,8 @@
    false,
    true,
    false,
+   false,
+   false,
    false
   ],
   "PlayerIsHidden": [
@@ -658,6 +676,8 @@
    false,
    false,
    true,
+   false,
+   false,
    false,
    false
   ],
@@ -725,6 +745,8 @@
    false,
    true,
    false,
+   false,
+   false,
    false
   ],
   "DontDismountWhenCCed": [
@@ -790,6 +812,8 @@
    false,
    false,
    true,
+   false,
+   false,
    false,
    false
   ]
@@ -3360,6 +3384,118 @@
     10
    ],
    "buff": 388
+  },
+  "64": {
+   "spawnDust": 15,
+   "heightBoost": 4,
+   "flightTimeMax": 0,
+   "fallDamage": 0.5,
+   "runSpeed": 3,
+   "dashSpeed": 9,
+   "acceleration": 0.32,
+   "jumpHeight": 11,
+   "jumpSpeed": 8.1,
+   "walkingGraceTimeMax": 10,
+   "totalFrames": 13,
+   "xOffset": 7,
+   "bodyFrame": 3,
+   "yOffset": -10,
+   "playerHeadOffset": 10,
+   "standingFrameCount": 4,
+   "standingFrameDelay": 12,
+   "standingFrameStart": 0,
+   "runningFrameCount": 6,
+   "runningFrameDelay": 30,
+   "runningFrameStart": 6,
+   "dashingFrameCount": 7,
+   "dashingFrameDelay": 130,
+   "dashingFrameStart": 5,
+   "flyingFrameCount": 6,
+   "flyingFrameDelay": 6,
+   "flyingFrameStart": 1,
+   "inAirFrameCount": 1,
+   "inAirFrameDelay": 12,
+   "inAirFrameStart": 4,
+   "idleFrameCount": 4,
+   "idleFrameDelay": 4,
+   "idleFrameStart": 0,
+   "idleFrameLoop": true,
+   "swimFrameCount": 1,
+   "swimFrameDelay": 12,
+   "swimFrameStart": 4,
+   "backTexture": "Extra_301.png",
+   "buff": 391,
+   "playerYOffsets": [
+    10,
+    10,
+    10,
+    10,
+    12,
+    16,
+    12,
+    10,
+    12,
+    16,
+    16,
+    14,
+    10
+   ]
+  },
+  "65": {
+   "spawnDust": 15,
+   "heightBoost": 4,
+   "flightTimeMax": 0,
+   "fallDamage": 0.5,
+   "runSpeed": 3,
+   "dashSpeed": 9,
+   "acceleration": 0.32,
+   "jumpHeight": 11,
+   "jumpSpeed": 8.1,
+   "walkingGraceTimeMax": 10,
+   "totalFrames": 13,
+   "xOffset": 7,
+   "bodyFrame": 3,
+   "yOffset": -10,
+   "playerHeadOffset": 10,
+   "standingFrameCount": 4,
+   "standingFrameDelay": 12,
+   "standingFrameStart": 0,
+   "runningFrameCount": 6,
+   "runningFrameDelay": 30,
+   "runningFrameStart": 6,
+   "dashingFrameCount": 7,
+   "dashingFrameDelay": 130,
+   "dashingFrameStart": 5,
+   "flyingFrameCount": 6,
+   "flyingFrameDelay": 6,
+   "flyingFrameStart": 1,
+   "inAirFrameCount": 1,
+   "inAirFrameDelay": 12,
+   "inAirFrameStart": 4,
+   "idleFrameCount": 4,
+   "idleFrameDelay": 4,
+   "idleFrameStart": 0,
+   "idleFrameLoop": true,
+   "swimFrameCount": 1,
+   "swimFrameDelay": 12,
+   "swimFrameStart": 4,
+   "backTexture": "Extra_302.png",
+   "buff": 392,
+   "playerYOffsets": [
+    10,
+    10,
+    10,
+    10,
+    12,
+    16,
+    12,
+    10,
+    12,
+    16,
+    16,
+    14,
+    10
+   ]
   }
  },
  "itemMount": {
@@ -3425,7 +3561,9 @@
   "5642": 60,
   "5662": 61,
   "5665": 62,
-  "5666": 63
+  "5666": 63,
+  "6150": 64,
+  "6151": 65
  },
  "buffMount": {
   "90": 0,
@@ -3491,7 +3629,9 @@
   "381": 60,
   "384": 61,
   "387": 62,
-  "388": 63
+  "388": 63,
+  "391": 64,
+  "392": 65
  },
  "textureOk": {
   "0": true,
@@ -3557,6 +3697,8 @@
   "60": false,
   "61": true,
   "62": true,
-  "63": true
+  "63": true,
+  "64": true,
+  "65": true
  }
 }

@@ -30,11 +30,11 @@ function emptyWorld(): World {
 }
 
 describe('修复1：穿透表（SetDefaults penetrate 直读）', () => {
-  it('抽查五弹：小丑箭 −1 / 水晶镖 5 / 诅咒之焰 2 / 诅咒镖 2 / 月总箭 4', () => {
+  it('抽查五弹：小丑箭 −1 / 水晶镖 5 / 诅咒之焰 2 / 诅咒镖 3 / 月总箭 4', () => {
     expect(new Arrow(0, 0, 1, 0, 10, 1, 5).pierce).toBe(-1);    // P.cs:594
     expect(new Arrow(0, 0, 1, 0, 10, 1, 477).pierce).toBe(5);   // :5252
     expect(new Arrow(0, 0, 1, 0, 10, 1, 95).pierce).toBe(2);    // :1529
-    expect(new Arrow(0, 0, 1, 0, 10, 1, 478).pierce).toBe(2);   // :5263
+    expect(new Arrow(0, 0, 1, 0, 10, 1, 478).pierce).toBe(3);   // 1457 P.cs:5538(1456 :5263 曾为 2)
     expect(new Arrow(0, 0, 1, 0, 10, 1, 639).pierce).toBe(4);   // :6609
   });
 

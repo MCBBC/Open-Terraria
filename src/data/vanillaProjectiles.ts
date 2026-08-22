@@ -44,13 +44,10 @@ export interface ProjectileData {
 
 const TABLE = projJson as unknown as Record<string, ProjectileData>;
 
-// ---- 提取错手补（桥接层，JSON 重生成不回退）----
-// 478 诅咒镖 penetrate 3 → 2：Projectile.cs:5264 `penetrate = 2`（SetDefaults 直写）。
-// 提交版 JSON 曾写 3（提取/快照漂移），修复前被 Arrow pierce 缺省 bug 掩盖——
-// pierce 读表后诅咒镖会多穿 1（审计 2026-08-22 §弹药 ⚠️3）
-const DATA_PATCH: Record<string, Partial<ProjectileData>> = {
-  '478': { penetrate: 2 },
-};
+// ---- ★DATA_PATCH 已清空（2026-08-23 基准切换 1457）：曾以 1456 为准钉 478 诅咒镖
+// penetrate 3→2（Projectile.cs 1456 :5264）,现 1457 :5531 `penetrate = 3` 为权威,
+// json 载 3 即正确,补丁撤除（审计 2026-08-22 §弹药 ⚠️3 的"多穿 1"结论随基准反转）
+const DATA_PATCH: Record<string, Partial<ProjectileData>> = {};
 for (const k of Object.keys(DATA_PATCH)) {
   TABLE[k] = { ...TABLE[k], ...DATA_PATCH[k] };
 }

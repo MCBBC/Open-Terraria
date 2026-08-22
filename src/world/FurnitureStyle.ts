@@ -5,7 +5,7 @@
 //  33/49 蜡烛/水蜡烛:样式竖排 Y 步22(33 表 36×1412 实测)
 //  34 吊灯:样式 Y 行54、wrap37 换列 X+108;亮灭块内 X +54(214×2000 实测)
 //  100 烛台:样式竖排 Y 步72(skip2;142×2016 实测);亮灭 X(Wiring :1381)
-//  93 路灯:样式竖排 Y 步110(70×2048 行带实测);亮灭 X 0/18
+//  93 灯族:样式竖排 Y 步54、wrap37 换列 X+36(渲染端折算,见 VanillaTiler);亮灭 X 0/18
 //  91 旗帜:样式横排 X 步18、wrap111 换行 Y+54(WorldGen.cs:46176 `frameX/18 + 行*111`
 //  与 cs:46273-46278 PlaceBanner `fx=style*18, s>=111 → fx-=1998/fy+=54`;12345 金标
 //  岛屋 banner style7/9 = f126/f162 实锤。曾误写步54/wrap37(1998/54=37 误读),style7
@@ -34,7 +34,18 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     // 2014=53×38 精确）。掉落侧反函数=vanillaStyleDrops.styleFromFrame
     case 100: return [0, style * 36];
     case 172: return [0, style * 38];
-    case 93: return [0, style * 110];
+    // 93 灯族（★R12 备案定谳=属实,2026-08-23 修）：原版 1×3 非 1×6——
+    //  TileObjectData.cs:2394-2419 Style1xX（Width=1/Height=3/CoordinateHeights{16,16,16},
+    //  92 路灯柱才 CopyFrom 后 Height=6）+ Place1xX（WorldGen.cs:39203-39226,num2=3,
+    //  `frameY = j*18 + style*54`）+ Wiring.ToggleLamp（Wiring.cs:2954-2975,
+    //  SendTileSquare(1,3)+fy 行折 3）。style 带=54：Check1xX（:37802-37819,num=3,
+    //  `while(fy>=54) fy-=54` = fy/54）= TileLightScanner case 93 = TileFlames
+    //  （:3242-3363 style=frameY/54）= TileDrawing.cs:6518-6520（`num65=frameY/54`）。
+    //  存储帧=原版【未折】raw（style*54 可越 2048 表底）——渲染端按 TileDrawing
+    //  `num70=frameY/1998 → addFrY-=1998*n / addFrX+=36*n` 折列（VanillaTiler 同式）,
+    //  故此处【不】预折（预折进 frameX 会破坏亮灭 X 0/18 门=光照/电线翻转全错）。
+    //  掉落侧反函数=vanillaStyleDrops.styleFromFrame[93]=fy/54（GetItemDrop_Lamps :41087）
+    case 93: return [0, style * 54];
     case 91: return [(style % 111) * 18, Math.floor(style / 111) * 54];
     case 240: return [(style % 36) * 54, Math.floor(style / 36) * 54];
     case 241: return [0, style * 54];

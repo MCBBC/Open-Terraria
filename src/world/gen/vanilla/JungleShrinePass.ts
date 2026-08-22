@@ -99,11 +99,15 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
           st.liquidType[st.idx(lx, ly)] = 0;
         }
       }
-      // 空腔 + 墙(cs:16129-16137)
+      // 空腔 + 墙(cs:16129-16137)。★SSSSSS 勘误：原版清腔 = `active(false)`+写墙
+      //   （cs:16150-16156）——type/帧/half/slope 全保留（幽灵格语义）；曾用
+      //   setTileSilent(0) 连带清 slope/half+抹幽灵 type → 腔内残坡格 S3/S4 被
+      //   抹平（notraps 链 #48 (919,516) S3/(923,516) S4 五格实证）。改为直写
+      //   flags=0（与 FinalCleanup ⑭ 的直写 flags 同款）。
       for (let lx = x - halfW; lx <= x + halfW; lx++) {
         for (let ly = y - halfH; ly <= y + halfH; ly++) {
           if (!st.inBounds(lx, ly)) continue;
-          st.setTileSilent(lx, ly, 0);
+          st.flags[st.idx(lx, ly)] = 0;
           st.setWallSilent(lx, ly, hutWall);
         }
       }

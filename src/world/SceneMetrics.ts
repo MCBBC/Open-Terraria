@@ -44,9 +44,10 @@ const GRAVEYARD_TILES = ids([85]);
 const HONEY_BLOCK = SHEET_MAP.get(229) ?? -1;
 const PARTY_MONOLITH = SHEET_MAP.get(455) ?? -1;
 
-/** 器件帧态 tile（内部 id → sheet）：139 八音盒 / 207 喷泉 / 410·509 天塔柱 / 480 血月柱 */
+/** 器件帧态 tile（内部 id → sheet）：139 八音盒 / 207 喷泉 / 410·509 天塔柱 / 480 血月柱
+ *  / 657 回声腔（EchoMonolith，SceneMetrics.cs:545-549；涂层隐形位显示门） */
 const FX_SHEET_IDS = new Map<number, number>();
-for (const sh of [139, 207, 410, 480, 509]) {
+for (const sh of [139, 207, 410, 480, 509, 657]) {
   const id = SHEET_MAP.get(sh);
   if (id !== undefined) FX_SHEET_IDS.set(id, sh);
 }
@@ -138,6 +139,10 @@ export interface SceneFlags {
   monolithType: number;
   /** 血月柱激活（SceneMetrics.cs:542-546 → Main.cs:61417 并入 BloodMoonActive） */
   bloodMoonMonolith: boolean;
+  /** 回声腔激活（SceneMetrics.cs:545-549 case 657：frameY>=54 开帧 → EchoMonolith）。
+   *  消费 = Main.ShouldShowInvisibleBlocksAndWalls（Main.cs:57403-57408）——涂层
+   *  隐形位（TileStore.coat）的显示门，Game 每 tick 装配进 store.showInvisibleBlocks */
+  echoMonolith: boolean;
   /** 派对进行中（BirthdayParty.PartyIsUp：ManualParty/GenuineParty；入夜 CheckNight 结束） */
   partyUp: boolean;
   /** HasSunflower（SceneMetrics.cs:594/626-630）：窗口内有向日葵 且 墓碑计数 ≤ GraveyardTileMin(16)。
@@ -202,7 +207,7 @@ export const EMPTY_SCENE: SceneFlags = {
   zoneGlowshroom: false, zoneMeteor: false,
   zoneGraveyard: false, zoneShadowCandle: false, hasClock: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
   zoneUndergroundDesert: false, townNPCCount: 0,
-  musicBoxStyle: -1, fountainColor: -1, monolithType: -1, bloodMoonMonolith: false, partyUp: false,
+  musicBoxStyle: -1, fountainColor: -1, monolithType: -1, bloodMoonMonolith: false, echoMonolith: false, partyUp: false,
   hasSunflower: false,
   zoneGranite: false, zoneMarble: false, zoneHive: false, zoneGemCave: false,
   behindBackwall: false, shimmerTileCount: 0, honeyBlockCount: 0, partyMonolithCount: 0,
@@ -265,7 +270,7 @@ export function scanScene(
   // 实心格内液体不进 _liquidCounts——shimmerTileCount 的口径来源
   let shimmerLiquid = 0;
   // 器件态累加器（SceneMetrics.cs:471-585 ScanEnums；后扫到者覆盖 = 原版逐格覆写语义）
-  let mbStyle = -1, fountain = -1, monolith = -1, bloodMoonMono = false;
+  let mbStyle = -1, fountain = -1, monolith = -1, bloodMoonMono = false, echoMono = false;
   const oceanTopY = (worldSurface + rockLevel) / 2 + 40; // oceanLevel（WorldGen.cs:4393）
   const beachDist = BEACH_DISTANCE;
   for (let y = sy0; y <= sy1; y++) {
@@ -305,6 +310,8 @@ export function scanScene(
           const mt = monolithTypeOf(fxSh, st.frameX[i], st.frameY[i]);
           if (mt >= 0) monolith = mt;
         } else if (fxSh === 480) bloodMoonMono = bloodMoonMonolithOf(fxSh, st.frameY[i]) || bloodMoonMono;
+        // 回声腔 657（SceneMetrics.cs:545-549 case 657：frameY>=54 激活帧 → EchoMonolith）
+        else if (fxSh === 657) echoMono = echoMono || st.frameY[i] >= 54;
       }
     }
   }
@@ -417,6 +424,7 @@ export function scanScene(
     fountainColor: fountain,
     monolithType: monolith,
     bloodMoonMonolith: bloodMoonMono,
+    echoMonolith: echoMono,
     partyUp,
     zoneGranite,
     zoneMarble,

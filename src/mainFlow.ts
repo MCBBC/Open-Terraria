@@ -354,6 +354,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // 旅程力量·玩家侧（IPersistentPerPlayerContent）已在 loadSaveData 内合并进
     // world.journeyPowers（SaveFile.ts 统一路径），此处无需重复回填
     if (Array.isArray(player.hideInfo)) g.player.hideInfo = player.hideInfo; // PL:776 hideInfo[13]
+    // PL:53813-53819 hideVisibleAccessory[10]（配饰格眼睛开关,旧档缺省全 false）
+    if (Array.isArray(player.hideVisibleAccessory)) {
+      const hv = new Array<boolean>(10).fill(false);
+      for (let i = 0; i < 10 && i < player.hideVisibleAccessory.length; i++) hv[i] = !!player.hideVisibleAccessory[i];
+      g.player.hideVisibleAccessory = hv;
+    }
     if (player.hairDye !== undefined) g.player.hairDye = player.hairDye;   // PL:53805-53808 发色剂 byte（旧档缺省 0）
     // ★ 读档回填后必须刷 UI：HUD 快捷栏在 makeGame 时以空背包画过一次，
     //   此前不刷新 → 存档道具要等用户点工具栏/开背包才显示

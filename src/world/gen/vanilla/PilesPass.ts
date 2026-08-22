@@ -13,8 +13,9 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { flipGenSolid, genSolidType } from './GenSolid';
+import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
+import { setBoulderSolidity } from './TrapsPass';
 
 const PILE185 = TILE_BY_KEY['v_185_small_decos']!;
 const PILE186 = TILE_BY_KEY['v_186_decos_3x2']!;
@@ -186,12 +187,83 @@ function placePile3x2(st: TileStore, rng: RNG, x: number, y: number, type: numbe
   return ok;
 }
 
+/** WorldGen.Place2x2（cs:51780）Piles 语境副本（同源副本禁 import 惯例；与
+ *  MicroBiomesPass.place2x2Direct / TrapsPass.place2x2Traps 同构）。 */
+const PILES_PLACE2X2_TABLE = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299,
+  309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538,
+  542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610,
+  611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+function place2x2Piles(st: TileStore, x: number, y: number, type: number): boolean {
+  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;
+  // ★PlaceTile 头（cs:59494+59500）：138/711 实心 → 头门=EmptyTile(锚)（生成期
+  //   ≡!active，玩家/NPC 域空）；过门后 inactive 锚 Clear(Tile|TilePaint|Slope)
+  //   （ghost type/帧/坡/半砖/块漆清零——Place2x2 后续拒绝也保留此清）
+  if (st.flags[st.idx(x, y)]) return false;
+  st.setTileSilent(x, y, 0);
+  for (let i = x - 1; i <= x; i++) {
+    for (let j = y - 1; j <= y; j++) {
+      if (st.flags[st.idx(i, j)]) return false;
+    }
+    const gi = st.idx(i, y + 1);
+    const gt = st.type[gi]!;
+    const solid2 = st.flags[gi] !== 0 && vanGenSolidType(gt)
+      && st.slope[gi] === 0 && st.half[gi] === 0
+      && ((st.wire[gi] >>> 5) & 1) === 0;
+    if (!st.flags[gi] || (!solid2 && !PILES_PLACE2X2_TABLE.has(SHEET[gt]))) return false;
+  }
+  for (let k = x - 1; k <= x; k++) {
+    for (let l = y - 1; l <= y; l++) {
+      st.setTileSilent(k, l, type, (k - x + 1) * 18, (l - y + 1) * 18);
+    }
+  }
+  return true;
+}
+
+/** ★SSSSSS-NOTRAPS（cs:18921-18190→1457 cs:18135-18204）：noTraps/errorWorld 巨石
+ *  三角堆——W*H*0.0004 次（remix ÷2）：全域掷点下扫首个活性格上一格，anyShimmer 拒，
+ *  三连 PlaceTile(138)（tenth 1/5 用 711）= (x,y)/(x+2,y)/(x+1,y-2) 三角。段首
+ *  SetBoulderSolidity(true)（巨石须实心才过 Place2x2 地面门）+ 段尾 false（此后
+ *  生成期巨石恒非实心到 SettleLiquidsAgain 的 QuickWater 还原）。 */
+function runBoulderPileSection(st: TileStore, rng: RNG, gs: GenState): void {
+  const nf = gs.seedFlags;
+  if (!(nf.noTraps || nf.errorWorld) || nf.actuallyNoTraps) return;
+  const { w, h } = st;
+  const ws = Math.floor(gs.worldSurface);
+  const b138 = TILE_BY_KEY['v_138_boulder']!;
+  const b711 = TILE_BY_KEY['v_711_rainbow_boulder']!;
+  setBoulderSolidity(true);
+  const tries = Math.trunc(w * h * 0.0004);
+  const count = nf.remix ? Math.trunc(tries / 2) : tries;
+  for (let i = 0; i < count; i++) {
+    let x = rng.int(50, w - 51);                                      // Next(50, w-50)
+    let y = rng.int(ws, h - 251);                                     // Next(ws, h-250)
+    if (nf.theConstant && !nf.remix && i < Math.trunc(count / 10)) {
+      y = rng.int(100, h - 251);                                      // Next(100, h-250)
+      while (x > w * 0.4 && x < w * 0.6) x = rng.int(50, w - 51);     // 侧域重掷
+    }
+    let j = y;
+    for (; !st.flags[st.idx(x, j)] && j < h - 250; j++) { /* 下扫 */ }
+    j--;
+    const ji = st.idx(x, j);
+    if (st.liquid[ji] > 0 && st.liquidType[ji] === 4) continue;       // anyShimmer 拒
+    let boulder = b138;
+    if (nf.tenthAnniversary && rng.int(0, 4) === 0) boulder = b711;   // tenth 1/5 彩虹巨石
+    place2x2Piles(st, x, j, boulder);
+    place2x2Piles(st, x + 2, j, boulder);
+    place2x2Piles(st, x + 1, j - 2, boulder);
+  }
+  setBoulderSolidity(false);
+}
+
 /** Piles pass 主体（cs:18900-19599） */
 export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
   // ★pass 头 tileSolid 翻转（cs:18906-18916,逐条 1:1）：379/229/190/196/189/
   //   717/718/719/202/460/484 全部置非实心——原 PASS_NON_SOLID 局部表迁移至此。
   //   （cs:18919 SetBoulderSolidity(false) 在 noTrapsWorldGen 门内,普通种子不触发,备案）
   flipGenSolid([379, 229, 190, 196, 189, 717, 718, 719, 202, 460, 484], false);
+  // ★SSSSSS-NOTRAPS：巨石三角堆段（原版位次=teleporters/graveyard 段之后、①洞穴堆
+  //   之前；本仓两前置段均为未实装种子专属 → 直接置于段首）
+  runBoulderPileSection(st, rng, gs);
   const w = st.w, h = st.h;
   const ws = Math.floor(gs.worldSurface);
   /** GetPileGenerationAttempts（cs:23873）：w/2（skyblock ÷10 分支不触发） */

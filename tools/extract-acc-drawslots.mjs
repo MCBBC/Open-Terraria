@@ -8,12 +8,16 @@
 // `if (type >= A && type <= B)` 范围块（虚荣披风 2284-2287 backSlot/frontSlot
 // 算式族——extract-equip-prefix 的 case 段扫描不含 default 体，Boss 面具同款缺口，
 // patch-vanity-stats.mjs ③ 同类补法）。
-// 用法: node tools/extract-acc-drawslots.mjs [--audit]   （--audit 只比对不落盘）
+// 用法: node tools/extract-acc-drawslots.mjs [--audit] [--ver=1456|1457]
+//   （--audit 只比对不落盘；SW_VER/--ver 选标杆,缺省 1457——1.4.5.7 对齐批
+//   2026-08-23 起基准换 1457,1456 留作回拍）
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
 const AUDIT = process.argv.includes('--audit');
-const src = readFileSync(`${ROOT}Terarria1456/Terraria/Item.cs`, 'utf8');
+const VER = (process.argv.find((a) => a.startsWith('--ver='))?.slice(6)
+  ?? process.env.SW_VER ?? '1457').replace(/[^0-9]/g, '') || '1457';
+const src = readFileSync(`${ROOT}Terarria${VER}/Terraria/Item.cs`, 'utf8');
 
 // ---- 与 extract-equip-prefix.mjs 同款的解析核（该脚本非模块,此处复制;改动须双同步）----
 function methodBodyOf(src, name) {

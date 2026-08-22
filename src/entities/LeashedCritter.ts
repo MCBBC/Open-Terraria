@@ -1,20 +1,23 @@
 // ============================================================================
-// LeashedEntity 拴绳实体系统（1.4.4+，标杆 = Terarria1456 反编译全目录）
+// LeashedEntity 拴绳实体系统（1.4.4+，标杆 = Terarria1457 反编译全目录；
+// 1456 基线增量以 ★1457 注明）
 //
 // 原版结构（全部 1:1 对表，行号随实现标注）：
 //   Terraria.GameContent/LeashedEntity.cs          —— 注册表 + 按 section 流式
-//     更新/绘制（Registry.RegisterAll :113-135 / UpdateEntities :411 /
+//     更新/绘制（★1457 Registry.RegisterAll :118-142 / UpdateEntities :411 /
 //     DrawEntities :474；DrawNPCs(behindTiles:false) 起手调 :22163）
-//   Terraria.GameContent/LeashedEntities/LeashedCritter.cs
+//   Terraria.GameContent.LeashedEntities/LeashedCritter.cs
 //     —— 拴绳小动物基类：锚桩格 AnchorPosition + 可放回物品（SetDefaults 取
 //     sample.makeNPC；Recall :115 越界拉回 = 锚桩中心-16px）
-//   Terraria.GameContent.LeashedEntities/{Walker,Crawler,Snail,Runner,Flyer,
-//     Fly,NormalButterfly,EmpressButterfly,HellButterfly,Firefly,ShimmerFly,
-//     Dragonfly,CrawlingFly,Bird,Waterfowl,Fish,Fairy,Jumper,WaterStrider}
-//     LeashedCritter.cs —— 19 个原型（Registry 注册序即 Type 1-19）
-//   Terraria.GameContent.LeashedEntities/LeashedKite.cs —— 风筝（Type 0）
+//   Terraria.GameContent.LeashedEntities/{Walker,AquaticWalker,Crawler,Snail,
+//     Turtle,Runner,Flyer,NormalButterfly,EmpressButterfly,HellButterfly,
+//     Firefly,ShimmerFly,Dragonfly,CrawlingFly,Bird,Waterfowl,Fish,Fairy,
+//     Jumper,WaterStrider}LeashedCritter.cs
+//     —— ★1457 21 个原型（Registry 注册序即 Type 1-21；1456 19 原型 + 新增
+//     AquaticWalkerLeashedCritter/TurtleLeashedCritter 两类，均 drawBubble=false）
+//   Terraria.GameContent.LeashedEntities/LeashedKite.cs —— 风筝（Type 1；0 = null 槽）
 //   Terraria.GameContent.Tile_Entities/TECritterAnchor.cs —— tile 724 锚桩 TE：
-//     static ctor SetPrototypeCollection 全表（:64-84）按 **makeNPC** 选原型
+//     static ctor SetPrototypeCollection 全表（★1457 :64-85）按 **makeNPC** 选原型
 //   Terraria.GameContent.Tile_Entities/TEKiteAnchor.cs —— tile 723 风筝锚桩 TE
 //     （CreateLeashedEntity :54-62 取 ContentSamples.ItemsByType[itemType].shoot）
 //   TELeashedEntityAnchor.cs / TELeashedEntityAnchorWithItem.cs —— 放置钩
@@ -172,25 +175,56 @@ export function anyLiquidAt(st: TileStore, x: number, y: number, waterOnly = fal
 }
 
 /**
- * DrawBubble 可见判定（LeashedCritter.Draw :200-205）：tile 取 _dummy.Center
- *  （= Center + (0,8)，CopyToDummy :171）；`(isAquatic && liquid<255) ||
- *  (!isAquatic && liquid>0)`——水生（FishLeashedCritter）在非满水格 / 陆生在
- *  有液格 时画 Gore_413 气泡
+ * DrawBubble 可见判定（★1457 LeashedCritter.ShouldDrawBubble :213-265 +
+ * TileRequiresBubble :267-278；1456 为 Draw 内联三行简式 :200-205）：
+ *  ① drawBubble 旗（Turtle/AquaticWalker/WaterStrider 三族 false——Renderer 侧门）
+ *  ② tile 取 **Center 本格**（1456 取 _dummy.Center = Center+(0,8)）
+ *  ③ 本格非 nactive/非 solid/平台 → 直接 TileRequiresBubble（= 核心谓词）
+ *  ④ 本格实心平放 → false；半砖/坡面 → 按朝向探邻格（半砖=上左右、坡 1=上右、
+ *     2=上左、3=下右、4=下左），任一邻格命中谓词即 true
+ *  核心谓词 = `(isAquatic && liquid<255) || (!isAquatic && liquid>0)`
  */
 export function leashedBubbleVisible(st: TileStore, cx: number, cy: number, isAquatic: boolean): boolean {
-  const tx = Math.floor(cx / T), ty = Math.floor((cy + 8) / T);
-  if (!st.inBounds(tx, ty)) return false;
-  const liquid = st.liquid[st.idx(tx, ty)];
-  return (isAquatic && liquid < 255) || (!isAquatic && liquid > 0);
+  const tx = Math.floor(cx / T), ty = Math.floor(cy / T);
+  // TileRequiresBubble（:267-278）——GetTileSafely 越界 = 液 0 的非激活格
+  const requires = (x: number, y: number): boolean => {
+    const liquid = st.inBounds(x, y) ? st.liquid[st.idx(x, y)] : 0;
+    if (!isAquatic || liquid >= 255) {
+      if (!isAquatic) return liquid > 0;
+      return false;
+    }
+    return true;
+  };
+  const i0 = st.inBounds(tx, ty) ? st.idx(tx, ty) : -1;
+  // nactive()（active && !inActive）——本仓 wire bit5 = inActive
+  const active = i0 >= 0 && st.type[i0] !== 0 && (st.wire[i0] & 32) === 0;
+  const d = i0 >= 0 ? TILE_DEFS[st.type[i0]] : undefined;
+  if (!active || !d?.solid || d.platform) return requires(tx, ty);   // :221-224
+  const half = !!st.half[i0];
+  const slope = st.slope[i0];
+  if (slope === 0 && !half) return false;                            // :227-230
+  let up = false, down = false, left = false, right = false;
+  if (half) { up = right = left = true; }                            // :235-238
+  else switch (slope) {                                              // :241-254
+    case 1: up = right = true; break;
+    case 2: up = left = true; break;
+    case 3: down = right = true; break;
+    case 4: down = left = true; break;
+  }
+  if (up && requires(tx, ty - 1)) return true;                       // :256-265
+  if (down && requires(tx, ty + 1)) return true;
+  if (left && requires(tx - 1, ty)) return true;
+  if (right && requires(tx + 1, ty)) return true;
+  return false;
 }
 
 // ============================================================================
 // 原型注册表（LeashedEntity.Registry.RegisterAll :113-135 + 各族 ctor 参数）
 // ============================================================================
 
-/** 原型族（= Registry 注册序 1-19；0 = kite） */
+/** 原型族（★1457 = Registry 注册序 1-21，见 PROTOTYPE_REGISTER_ORDER；0 = null 槽、1 = kite） */
 export type LeashedFamily =
-  | 'walker' | 'crawler' | 'snail' | 'runner'
+  | 'walker' | 'aquaticWalker' | 'crawler' | 'snail' | 'turtle' | 'runner'
   | 'flyer' | 'normalButterfly' | 'empressButterfly' | 'hellButterfly'
   | 'firefly' | 'shimmerFly' | 'dragonfly' | 'crawlingFly'
   | 'bird' | 'waterfowl' | 'fish' | 'fairy'
@@ -204,8 +238,11 @@ export interface LeashedPrototype {
   /** 放置帧档（Player.cs:42771-42773 previewPlaceStyle → frameX = style*18） */
   anchorStyle: number;
   move: MoveEngine;
-  /** 活动半径（格）——LeashedCritter.strayingRangeInBlocks */
+  /** 活动半径（格）——★1457 拆 X/Y 双字段（LeashedCritter.cs:37/:39
+   *  strayingRangeInBlocksX/Y；1456 单字段 strayingRangeInBlocks）。此为 X 分量 */
   straying: number;
+  /** Y 分量（缺省 = straying；★1457 仅 waterStrider 分叉 =12，WaterStrider.cs:13-14） */
+  strayingY?: number;
   // ---- walker（WalkerLeashedCritter）----
   walkingPace?: number;
   // ---- flyer（FlyerLeashedCritter）----
@@ -244,6 +281,9 @@ export interface LeashedPrototype {
   hellGlow?: boolean;
   /** Waterfowl：vy!=0 → 画 NPC type+1 泳姿表（WaterfowlLeashedCritter.cs:16-21） */
   waterfowlSwimSheet?: boolean;
+  /** ★1457 LeashedCritter.cs:43 drawBubble（缺省 true）——false 关气泡
+   *  （Turtle :9 / AquaticWalker :9 / WaterStrider :21 三族置 false） */
+  drawBubble?: boolean;
 }
 
 /** 逐原型参数表（各族 ctor 默认值 1:1）。
@@ -251,12 +291,24 @@ export interface LeashedPrototype {
  *  Snail = Crawler + 缩放/点光；Fly 族（Normal/Empress/Hell/Firefly/ShimmerFly）
  *  = Flyer + Fly 缩放；Bird/Waterfowl/Fish/Dragonfly/CrawlingFly/Fairy = Flyer 派生 */
 export const PROTOTYPES: Readonly<Record<LeashedFamily, LeashedPrototype>> = {
-  // WalkerLeashedCritter.cs:31-34：pace 0.8 / straying 3 / style 0
+  // WalkerLeashedCritter.cs:26/:31-34（★1457）：pace 0.8 / straying X=Y=3 / style 0
   walker: { family: 'walker', anchorStyle: 0, move: 'walker', straying: 3, walkingPace: 0.8 },
+  // ★1457 AquaticWalkerLeashedCritter（Walker 子类 + drawBubble=false，:7-11）：
+  //   蛙 361/445 + 企鹅 148/149——水陆两栖行走族，入液不吐气泡
+  aquaticWalker: {
+    family: 'aquaticWalker', anchorStyle: 0, move: 'walker', straying: 3, walkingPace: 0.8,
+    drawBubble: false,
+  },
   // CrawlerLeashedCritter.cs:9-14：style 1 / pace 0.4
   crawler: { family: 'crawler', anchorStyle: 1, move: 'walker', straying: 3, walkingPace: 0.4 },
   // SnailLeashedCritter（Crawler 子类 + SetDefaults/VisualEffects 覆写）
   snail: { family: 'snail', anchorStyle: 1, move: 'walker', straying: 3, walkingPace: 0.4, snailFx: true },
+  // ★1457 TurtleLeashedCritter（Crawler 子类 + drawBubble=false，:7-11）——
+  //   龟 616/617 从 crawler 族迁出（TECritterAnchor :79 独立行）；水陆两栖不吐泡
+  turtle: {
+    family: 'turtle', anchorStyle: 1, move: 'walker', straying: 3, walkingPace: 0.4,
+    drawBubble: false,
+  },
   // RunnerLeashedCritter.cs:9-14：style 1 / pace 1.5
   runner: { family: 'runner', anchorStyle: 1, move: 'walker', straying: 3, walkingPace: 1.5 },
   // FlyerLeashedCritter.cs:23-35：style 4 / straying 7 / wait 60-300 / speed 1 / accel 0.2 / brake 10
@@ -344,20 +396,62 @@ export const PROTOTYPES: Readonly<Record<LeashedFamily, LeashedPrototype>> = {
     maxJumpWidth: 112, minJumpWidth: 48, maxJumpHeight: 64, maxJumpDuration: 30,
     jumpCooldown: 60, canStandOnWater: false,
   },
-  // WaterStriderLeashedCritter.cs:11-25：wait 60-120 / straying 5 / 跳宽 8-32 / 高 0 /
-  //   时长 14 / 冷却 15 / 站水面
+  // WaterStriderLeashedCritter.cs:9-25（★1457）：wait 60-120 / straying X=5 **Y=12**
+  //   （:13-14 双字段分叉，1456 单字段 5）/ 跳宽 8-32 / 高 0 / 时长 14 / 冷却 15 /
+  //   站水面 / drawBubble=false（:21）
   waterStrider: {
-    family: 'waterStrider', anchorStyle: 0, move: 'jumper', straying: 5,
+    family: 'waterStrider', anchorStyle: 0, move: 'jumper', straying: 5, strayingY: 12,
     minWaitTime: 60, maxWaitTime: 120,
     maxJumpWidth: 32, minJumpWidth: 8, maxJumpHeight: 0, maxJumpDuration: 14,
-    jumpCooldown: 15, canStandOnWater: true,
+    jumpCooldown: 15, canStandOnWater: true, drawBubble: false,
   },
 };
 
 /**
- * TECritterAnchor static ctor 全表（TECritterAnchor.cs:64-84）——按 **NPC id**
+ * ★1457 Registry.RegisterAll 注册序（LeashedEntity.cs:118-142）：Prototypes[0]=null、
+ * 1=kite（Register&lt;LeashedKite&gt;）、2 起逐 Register(...)——Type 即数组下标。1456 为
+ * 19 原型（无 3 aquaticWalker/6 turtle，waterStrider=19）；联机 Registry.Get(type)
+ * .NewInstance 用此序，本仓原型按名寻址、此表作注册序锁 + 文档
+ */
+export const PROTOTYPE_REGISTER_ORDER: ReadonlyArray<LeashedFamily> = [
+  'walker',            // 2  :122
+  'aquaticWalker',     // 3  :123 ★新增
+  'crawler',           // 4  :124
+  'snail',             // 5  :125
+  'turtle',            // 6  :126 ★新增
+  'runner',            // 7  :127
+  'flyer',             // 8  :128
+  'normalButterfly',   // 9  :129
+  'empressButterfly',  // 10 :130
+  'hellButterfly',     // 11 :131
+  'firefly',           // 12 :132
+  'shimmerFly',        // 13 :133
+  'dragonfly',         // 14 :134
+  'crawlingFly',       // 15 :135
+  'bird',              // 16 :136
+  'waterfowl',         // 17 :137
+  'fish',              // 18 :138
+  'fairy',             // 19 :139
+  'jumper',            // 20 :140
+  'waterStrider',      // 21 :141
+];
+
+/** 原型 Type（= PROTOTYPE_REGISTER_ORDER 下标 + 2；kite=1/null=0，LeashedEntity.cs:144-148） */
+export function prototypeTypeOf(family: LeashedFamily): number {
+  return PROTOTYPE_REGISTER_ORDER.indexOf(family) + 2;
+}
+
+/** straying Y 分量（★1457 X/Y 双字段拆分；未分叉族 Y ≡ X） */
+export function strayingYOf(p: LeashedPrototype): number {
+  return p.strayingY ?? p.straying;
+}
+
+/**
+ * TECritterAnchor static ctor 全表（★1457 TECritterAnchor.cs:64-85）——按 **NPC id**
  * （= Item.makeNPC）覆写原型。CreateCustomSet 缺省 = WalkerLeashedCritter，
  * SetPrototypeCollection 顺序覆写（661/653 先落 Flyer 再被 Empress/Hell 覆盖）。
+ * ★1457 迁移：361/445（蛙/金蛙）+148/149（企鹅）→ AquaticWalker（:76）、
+ * 616/617（龟）从 Crawler 迁出 → Turtle（:79）
  */
 const PROTOTYPE_OVERRIDES: ReadonlyArray<readonly [LeashedFamily, readonly number[]]> = [
   // :67 Flyer（444 金蝶留在 Flyer；661/653 随后两行被覆盖）
@@ -378,22 +472,26 @@ const PROTOTYPE_OVERRIDES: ReadonlyArray<readonly [LeashedFamily, readonly numbe
   ['crawlingFly', [604, 605, 669]],
   // :75 Fairy（583 粉 / 584 绿 / 585 蓝）
   ['fairy', [585, 584, 583]],
-  // :76 Crawler（357 蠕虫 / 448 金蠕虫 / 484-487 夜爬虫族 / 606 蛆 / 616/617 龟）
-  ['crawler', [357, 448, 484, 485, 486, 487, 606, 616, 617]],
-  // :77 Snail（359 蜗牛 / 360 发光蜗牛 / 655 熔岩蜗牛）
+  // :76 ★AquaticWalker（361 蛙 / 445 金蛙 / 148/149 企鹅——1456 缺省 walker 族迁入）
+  ['aquaticWalker', [361, 445, 148, 149]],
+  // :77 Crawler（357 蠕虫 / 448 金蠕虫 / 484-487 夜爬虫族 / 606 蛆；★616/617 迁出）
+  ['crawler', [357, 448, 484, 485, 486, 487, 606]],
+  // :78 Snail（359 蜗牛 / 360 发光蜗牛 / 655 熔岩蜗牛）
   ['snail', [359, 360, 655]],
-  // :78 Runner（300 鼠 / 447 金鼠 / 610 大鼠）
+  // :79 ★Turtle（616 龟 / 617 丛林龟——1456 crawler 族迁出）
+  ['turtle', [616, 617]],
+  // :80 Runner（300 鼠 / 447 金鼠 / 610 大鼠）
   ['runner', [300, 447, 610]],
-  // :79 Bird（74 鸟 / 297 蓝鸟 / 298 红鸟 / 442 金鸟 / 611 鸮 / 671/672 鹦鹉 /
+  // :81 Bird（74 鸟 / 297 蓝鸟 / 298 红鸟 / 442 金鸟 / 611 鸮 / 671/672 鹦鹉 /
   //   673 鹈鹕?见名 Toucan / 675/674 鸡尾鹦鹉）
   ['bird', [74, 297, 298, 442, 611, 671, 672, 673, 675, 674]],
-  // :80 Waterfowl（362/364 鸭 / 602 海鸥 / 608 蹼鷉）
+  // :82 Waterfowl（362/364 鸭 / 602 海鸥 / 608 蹼鷉）
   ['waterfowl', [362, 364, 602, 608]],
-  // :81 Fish（55 金鱼 / 592 金金鱼 / 607 鲤齿鱼 / 626/627 海马 / 688 河豚）
+  // :83 Fish（55 金鱼 / 592 金金鱼 / 607 鲤齿鱼 / 626/627 海马 / 688 河豚）
   ['fish', [55, 592, 607, 626, 627, 688]],
-  // :82 Jumper（377 蚱蜢 / 446 金蚱蜢）
+  // :84 Jumper（377 蚱蜢 / 446 金蚱蜢）
   ['jumper', [377, 446]],
-  // :83 WaterStrider（612/613 水黾）
+  // :85 WaterStrider（612/613 水黾）
   ['waterStrider', [612, 613]],
 ];
 
@@ -752,7 +850,7 @@ export class LeashedCritterEntity {
     // Update :96-98：Center.ToTileCoordinates16
     const tpx = Math.floor(this.cx) >> 4;
     const tpy = Math.floor(this.cy) >> 4;
-    this.handleFallingWalker(st, tpx, tpy, straying);
+    this.handleFallingWalker(st, tpx, tpy, straying, strayingYOf(p));
     // :100-107
     this.waitTime--;
     if (this.waitTime <= 0) {
@@ -775,8 +873,8 @@ export class LeashedCritterEntity {
     this.afterMove();
   }
 
-  /** HandleFalling（WalkerLeashedCritter.cs:141-175） */
-  private handleFallingWalker(st: TileStore, tpx: number, tpy: number, straying: number): void {
+  /** HandleFalling（★1457 WalkerLeashedCritter.cs:141-175；拉回门 :132 用 Y 分量） */
+  private handleFallingWalker(st: TileStore, tpx: number, tpy: number, straying: number, strayingY: number): void {
     if (solidTile2(st, tpx, tpy + 1)) {
       this.vy = 0;
       if (this.state === W_FALLING || this.state === W_RECALLING) {
@@ -794,7 +892,7 @@ export class LeashedCritterEntity {
     this.tx = tpx;
     this.ty = Math.min(tpy + 1, (st.h - 1));
     if (this.state !== W_RECALLING) {
-      if (this.ty - this.ay > straying) {
+      if (this.ty - this.ay > strayingY) {
         this.state = W_RECALLING;
         this.waitTime = RECALL_DURATION;
       } else {
@@ -853,13 +951,13 @@ export class LeashedCritterEntity {
   // Flyer 引擎（FlyerLeashedCritter.cs 全文 1:1）
   // ------------------------------------------------------------------
 
-  /** PickNewTarget（FlyerLeashedCritter.cs:55-66） */
+  /** PickNewTarget（★1457 FlyerLeashedCritter.cs:55-66：X 用 strayingX、Y 用 strayingY） */
   private pickFlyTarget(): void {
     const p = this.proto;
     const straying = p.straying;
     const groundBias = !!p.hasGroundBias && this.ay === this.ty && this.rand.next(4) !== 0;
     this.tx = this.ax + this.rand.range(-straying, straying + 1);
-    this.ty = this.ay + this.rand.range(-straying, 1);
+    this.ty = this.ay + this.rand.range(-strayingYOf(p), 1);
     if (groundBias) this.ty = this.ay;
   }
 
@@ -1020,7 +1118,7 @@ export class LeashedCritterEntity {
     this.cy += this.vy;
     this.vy += GRAVITY;
     if (this.vy > MAX_FALL_SPEED) this.vy = MAX_FALL_SPEED;
-    if (this.state !== J_RECALLING && curY - this.ay > p.straying) {
+    if (this.state !== J_RECALLING && curY - this.ay > strayingYOf(p)) {   // :200 Y 分量
       this.state = J_RECALLING;
       this.waitTime = RECALL_DURATION;
     }
@@ -1063,7 +1161,7 @@ export class LeashedCritterEntity {
         }
         continue;
       }
-      for (let k = 0; k < p.straying; k++) {
+      for (let k = 0; k < strayingYOf(p); k++) {              // :258 Y 分量下探界
         ty++;
         if (solidTile2(st, tx, ty)
           || (!!p.canStandOnWater && anyLiquidAt(st, tx, ty, true))) {
@@ -2592,4 +2690,22 @@ function hue2rgb(p: number, q: number, tIn: number): number {
 //     纯粒子位置差异）。
 //   ⑥ solidTile2 平台特例 —— 已对齐：WorldGen.cs:70503 全条件入（平台+上半坡
 //     算实心；平台平放走 slope==0 也算；下半坡 3/4 不算）。
+//   ⑦ ★1457 对齐批（2026-08-23）—— 已入：Registry 注册序 21 原型
+//     （PROTOTYPE_REGISTER_ORDER = LeashedEntity.cs:118-142）+ 新族
+//     AquaticWalker（361/445/148/149，:76）/ Turtle（616/617，:79）+ drawBubble
+//     旗（LeashedCritter.cs:43；三族 false）+ ShouldDrawBubble/TileRequiresBubble
+//     （:213-278，leashedBubbleVisible 已换 1457 形态）+ straying X/Y 拆分
+//     （:37/:39；waterStrider Y=12，WaterStrider.cs:13-14）。
+//     登记（1457 有、本批未迁移——影响面为既有族引擎，逐项待批）：
+//     a) SolidTile2 → 四函数拆分（SolidTileAllowTopSlope/NoPlatforms/
+//        AllowBottomSlope/AllowPlatformTopFrame，WorldGen.cs:70500 区新增）——
+//        Walker AdvanceTargetPosition :42-48 / Flyer Spawn :45 与探针 :102 换函数；
+//     b) Flyer IsBlockedByMedium（FlyerLeashedCritter.cs:104 探针段新增液体遮挡门）；
+//     c) Jumper buoyancy=0.4（JumperLeashedCritter.cs:31 水中浮力）+ TryStartJump
+//        初速重排（:116-118）+ Move 落点 CanStandOnTile 复核（:82）+
+//        TryGetReachableTile 重写（num2=min(AnchorY,CenterY/16) 起扫 :238-268）；
+//     d) DrawBubble 绘制档缩放 num2=max(1, frame.Size()*scale/(rect.Size()-8))
+//        （LeashedCritter.cs:301-306，大个体气泡放大——Renderer.drawLeashedBubble）；
+//     e) Recall 尘 noLight=noLightEmittance=true（:133-139 Recall_CreateDustAtLocation，
+//        本仓 recallDust 未带此二旗）。
 // ============================================================================

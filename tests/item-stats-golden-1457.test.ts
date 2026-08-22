@@ -17,19 +17,11 @@ import { recon, FIX_SHOOT_KEEP } from '../tools/recon-item-1456-1457.mjs';
 const r = await recon();
 
 describe('Item 数值三方对账金标(json × 1456 × 1457)', () => {
-  // 1456 回滚白名单:本仓标杆 1456(CLAUDE.md),以下字段 json 取 1456 终值,与 1457 的
-  // 差异=已决回滚(非漂移;recon --fix 会抹回 1457,勿再跑)。逐条 1456 依据:
-  //   func[2209].healMana 300(1456 Item.cs:22323;1457 :22349=400)
-  //   whips[5477].dmg 75(1456 Item.cs:43149 DefaultToWhip(1032,75,2f,4f);1457=50)
-  //   whips[5688].dmg 12(1456 Item.cs:44660 DefaultToWhip(1104,12,1f,4f);1457=15)
-  //   combat[4607].knockBack 4(1456 Item.cs:38123 `knockBack = 4f`;1457=2.5)
-  const ROLLBACK_1456 = new Set([
-    'func[2209].healMana', 'whips[5477].dmg', 'whips[5688].dmg', 'combat[4607].knockBack',
-    // proj[478].penetrate 2：1456 SetDefaults `penetrate = 2`（Projectile.cs:5263 诅咒镖）；
-    // 1457 改 3——json 取 1456 终值（2026-08-22 弹幕穿透表批修正，曾误载 1457 值）
-    'proj[478].penetrate',
-  ]);
-  it('① json 与 1457 SetDefaults 终值零漂移(DRIFT;1456 回滚白名单除外)', () => {
+  // ★2026-08-23 基准切换 1457：ROLLBACK_1456 白名单已删除——json 全量取 1457 终值
+  // （recon DRIFT=0 实证;曾按旧 1456 标杆钉 2209/5477/5688/4607/478 五条,现 1457 值
+  // 400/50/15/2.5/3 即权威,白名单机制保留空集防未来"新内容未实装先切数据"场景）
+  const ROLLBACK_1456 = new Set<string>([]);
+  it('① json 与 1457 SetDefaults 终值零漂移(DRIFT;白名单已空=基准 1457)', () => {
     expect(r.drift.filter((l: string) => !ROLLBACK_1456.has(l.slice(0, l.indexOf(':'))))).toEqual([]);
   });
 

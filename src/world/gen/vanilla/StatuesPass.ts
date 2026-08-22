@@ -273,7 +273,14 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   if (!STATUE_105) return;
   const { w, h } = st;
-  const count = Math.floor(STATUE.length * 2 * (w / 4200));
+  // ★SSSSSS-NOTRAPS（cs:16968-16974）：noTrapsWorldGen && !skyblock → num3×15，
+  //   tenth/ntb 再整除 5（int 除法在 ×15 之后）。普通种子不触发。
+  const nf = gs.seedFlags;
+  let count = Math.floor(STATUE.length * 2 * (w / 4200));
+  if (nf.noTraps && !nf.skyblock) {
+    count *= 15;
+    if (nf.tenthAnniversary || nf.notTheBees) count = Math.trunc(count / 5);
+  }
   let num = 0; // 样式序游标(cs:16970 顺序轮换)
   const yMin = Math.floor((gs.worldSurface * 2 + gs.rockLevel) / 3);
   for (let i = 0; i < count; i++) {

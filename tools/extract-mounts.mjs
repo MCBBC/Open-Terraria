@@ -31,7 +31,7 @@ const buffIdSrc = readFileSync(BUFF_ID, 'utf8');
 // ---- MountID.cs：const int 名表 ----
 const names = {};
 for (const m of mountIdSrc.matchAll(/^\tpublic const int (\w+) = (\d+);$/gm)) names[+m[2]] = m[1];
-const mountCount = +(mountIdSrc.match(/public static int Count = (\d+);/)?.[1] ?? 0);
+let mountCount = +(mountIdSrc.match(/public static int Count = (\d+);/)?.[1] ?? 0);
 
 // ---- MountID.cs Sets：CreateBoolSet(...) / CreateIntSet(...) 展开 ----
 //  bool 集：args 全部为置位索引；int 集：首参为缺省值、其后 (键, 值) 成对
@@ -273,6 +273,69 @@ const buffMount = {};
   args.shift();                       // 首参 = 缺省值 -1
   for (let i = 0; i + 1 < args.length; i += 2) buffMount[args[i]] = args[i + 1];
 }
+
+// ---- ★1457 Trusty 坐骑 64/65 overlay（2026-08-23 Palworld 坐骑批,重生成保留）----
+// 主源 = 1456（MountID.Count=64,无 Trusty 族）。1457 新增两坐骑：
+//   Terraria.ID/MountID.cs:162 `TrustyChillet = 64` / :164 `TrustyChilletIgnis = 65`、
+//   :166 Count = 66；Mount.cs:2567-2572 `SetAsChillet(mountData, 391, Extra[301], hardmode:true)`
+//   → mounts[64]、`SetAsChillet(mountData, 392, Extra[302], hardmode:true)` → mounts[65]。
+// 数值 = SetAsChillet hardmode 支（1457 Mount.cs:2682-2690）：dashSpeed 9/jumpHeight 11/
+// jumpSpeed 8.1（非 hardmode 支 6.5/6/8.01 是 1457 侧 62/63 的新值——本仓 62/63 仍
+// 1456 旧值 9/8/8.01,登记不随迁）。其余字段/帧组/playerYOffsets 与 hardmode 无关
+// （1457 :2691-2756 ≡ 1456 :2652-2716 逐行同,62 条目即证）。贴图与 62/63 共用
+// Extra_301/302.png（1457 :2752-2753 同一 TextureAssets.Extra 下标）。
+// 召唤物品 6150/6151（1457 Item.cs:47385-47410 `mountType = 64/65`,UseSound=PalSummon）+
+// 坐骑 buff 391/392（1457 BuffID.cs:152 MountType 尾段 `391, 64, 392, 65`）。
+// CanDash 能力位（1457 MountID.cs:11）：62-65 在表（骑乘中可发起盾冲冲刺）。
+const MOUNTS_1457_TRUSTY = {
+  64: {
+    spawnDust: 15, heightBoost: 4, flightTimeMax: 0, fallDamage: 0.5,
+    runSpeed: 3, dashSpeed: 9, acceleration: 0.32, jumpHeight: 11, jumpSpeed: 8.1,
+    walkingGraceTimeMax: 10, totalFrames: 13,
+    xOffset: 7, bodyFrame: 3, yOffset: -10, playerHeadOffset: 10,
+    standingFrameCount: 4, standingFrameDelay: 12, standingFrameStart: 0,
+    runningFrameCount: 6, runningFrameDelay: 30, runningFrameStart: 6,
+    dashingFrameCount: 7, dashingFrameDelay: 130, dashingFrameStart: 5,
+    flyingFrameCount: 6, flyingFrameDelay: 6, flyingFrameStart: 1,
+    inAirFrameCount: 1, inAirFrameDelay: 12, inAirFrameStart: 4,
+    idleFrameCount: 4, idleFrameDelay: 4, idleFrameStart: 0, idleFrameLoop: true,
+    swimFrameCount: 1, swimFrameDelay: 12, swimFrameStart: 4,
+    backTexture: 'Extra_301.png', buff: 391,
+    playerYOffsets: [10, 10, 10, 10, 12, 16, 12, 10, 12, 16, 16, 14, 10],
+  },
+  65: {
+    spawnDust: 15, heightBoost: 4, flightTimeMax: 0, fallDamage: 0.5,
+    runSpeed: 3, dashSpeed: 9, acceleration: 0.32, jumpHeight: 11, jumpSpeed: 8.1,
+    walkingGraceTimeMax: 10, totalFrames: 13,
+    xOffset: 7, bodyFrame: 3, yOffset: -10, playerHeadOffset: 10,
+    standingFrameCount: 4, standingFrameDelay: 12, standingFrameStart: 0,
+    runningFrameCount: 6, runningFrameDelay: 30, runningFrameStart: 6,
+    dashingFrameCount: 7, dashingFrameDelay: 130, dashingFrameStart: 5,
+    flyingFrameCount: 6, flyingFrameDelay: 6, flyingFrameStart: 1,
+    inAirFrameCount: 1, inAirFrameDelay: 12, inAirFrameStart: 4,
+    idleFrameCount: 4, idleFrameDelay: 4, idleFrameStart: 0, idleFrameLoop: true,
+    swimFrameCount: 1, swimFrameDelay: 12, swimFrameStart: 4,
+    backTexture: 'Extra_302.png', buff: 392,
+    playerYOffsets: [10, 10, 10, 10, 12, 16, 12, 10, 12, 16, 16, 14, 10],
+  },
+};
+const NAMES_1457_TRUSTY = { 64: 'TrustyChillet', 65: 'TrustyChilletIgnis' }; // MountID.cs:162/:164
+const ITEM_MOUNT_1457 = { 6150: 64, 6151: 65 };          // Item.cs:47385-47410
+const BUFF_MOUNT_1457 = { 391: 64, 392: 65 };            // BuffID.cs:152 尾段
+const COUNT_1457 = 66;                                    // MountID.cs:166
+for (const [id, data] of Object.entries(MOUNTS_1457_TRUSTY)) {
+  mounts[id] = data;
+  names[id] = NAMES_1457_TRUSTY[id];
+}
+Object.assign(itemMount, ITEM_MOUNT_1457);
+Object.assign(buffMount, BUFF_MOUNT_1457);
+mountCount = COUNT_1457;
+// Sets 能力位数组随 Count 扩到 66（本表全 bool 集,缺省 false）+ CanDash 64/65 置位
+for (const arr of Object.values(sets)) {
+  while (arr.length < mountCount) arr.push(false);
+}
+sets.CanDash[64] = true;
+sets.CanDash[65] = true;
 
 // ---- 贴图可得性登记 ----
 const textureOk = {};

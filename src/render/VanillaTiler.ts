@@ -1132,6 +1132,16 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       }
       ofy = (ay % fh) * 18;
     }
+    // 灯族 93 样式折列（TileDrawing.cs:6518-6522 case 93 1:1）：存储帧=raw style*54
+    // （Place1xX cs:39226 不折,可越 2048 表底）——`num70=frameY/1998`（1998=37 带×54）
+    // → addFrY-=1998*n / addFrX+=36*n（折到第 n 列:每列 2 个 18px 竖带=灭/亮档,
+    // Tiles_93 70×2048 实测内容列 0-15/18-33/36-51/54-69）。★必须在零帧重建门
+    // （ofx===0&&ofy===0）之后折:预折会把 fy≥1998 的帧变 ofy=0 触发重建误扫描
+    if (sheet === 93) {
+      const wrapN = Math.floor(ofy / 1998);
+      ofy -= 1998 * wrapN;
+      ofx += 36 * wrapN;
+    }
     // 旧版素材表【分带布局】兼容：wld 帧按新游戏单行布局存储（样式全部横排一行），
     // 而素材包里的表较窄、样式分多带排列（一行放不下就换到下一带）。
     // 样式索引超出一带容量 → 换带重算（如 Tiles_187：带宽 35 样式×54px，

@@ -55,18 +55,18 @@ describe('配饰审计 P0：近战点燃与闪避断链', () => {
   });
 });
 
-describe('配饰审计 P0：魔力四件 statManaMax2 += 20（1456 :14375-14403）', () => {
-  it('accfx 记 mana 20（111/982/1595/2221；40 为 1457 值不取）', () => {
+describe('配饰审计 P0：魔力四件 statManaMax2（★1457 基准 Player.cs:15030-15048；旧 1456 钉 20/25 已反转）', () => {
+  it('accfx 记 mana 40（111/982/1595/2221；1457 :15034/:15042 num=40）', () => {
     for (const vid of [111, 982, 1595, 2221]) {
-      expect(accFxOfInternal(_iid(vid))?.mana, `vid ${vid}`).toBe(20);
+      expect(accFxOfInternal(_iid(vid))?.mana, `vid ${vid}`).toBe(40);
     }
   });
 
-  it('982 魔力再生手环：equipStats.mana 20 + manaRegenBonus 25 + manaRegenDelayBonus 1（:14379-14383）', () => {
+  it('982 魔力再生手环：equipStats.mana 40 + manaRegenBonus 60 + manaRegenDelayBonus 1（1457 :15042-15046,与 6188/6189 同档）', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.armor[3] = { id: _iid(982), stack: 1 };
-    expect(p.equipStats.mana).toBe(20);
-    expect(p.equipStats.manaRegenBonus).toBe(25);      // 60 为 1457 值
+    expect(p.equipStats.mana).toBe(40);
+    expect(p.equipStats.manaRegenBonus).toBe(60);
     expect(p.equipStats.manaRegenDelayBonus).toBe(1);
   });
 });

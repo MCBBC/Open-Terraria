@@ -75,7 +75,8 @@ function runTicks(m: LeashedEntityManager, st: TileStore, n: number, cx: number,
 // ① 原型注册表全量对账
 // ----------------------------------------------------------------------------
 
-/** TECritterAnchor.cs:64-84 覆写表按注册序的**最终态**（661/653 被后行覆盖） */
+/** TECritterAnchor.cs:64-85 覆写表按注册序的**最终态**（661/653 被后行覆盖；
+ *  ★1457：361/445/148/149 → AquaticWalker、616/617 → Turtle） */
 const EXPECT_NPC_FAMILY: ReadonlyArray<readonly [LeashedFamily, readonly number[]]> = [
   ['flyer', [444]],
   ['normalButterfly', [356]],
@@ -86,8 +87,10 @@ const EXPECT_NPC_FAMILY: ReadonlyArray<readonly [LeashedFamily, readonly number[
   ['dragonfly', [595, 596, 601, 597, 598, 599, 600]],
   ['crawlingFly', [604, 605, 669]],
   ['fairy', [583, 584, 585]],
-  ['crawler', [357, 448, 484, 485, 486, 487, 606, 616, 617]],
+  ['aquaticWalker', [361, 445, 148, 149]],
+  ['crawler', [357, 448, 484, 485, 486, 487, 606]],
   ['snail', [359, 360, 655]],
+  ['turtle', [616, 617]],
   ['runner', [300, 447, 610]],
   ['bird', [74, 297, 298, 442, 611, 671, 672, 673, 675, 674]],
   ['waterfowl', [362, 364, 602, 608]],
@@ -96,7 +99,7 @@ const EXPECT_NPC_FAMILY: ReadonlyArray<readonly [LeashedFamily, readonly number[
   ['waterStrider', [612, 613]],
 ];
 
-describe('拴绳小动物：原型注册表（TECritterAnchor.cs:64-84）', () => {
+describe('拴绳小动物：原型注册表（TECritterAnchor.cs:64-85）', () => {
   it('覆写表逐族命中（缺省 walker），与 NPC_FAMILY 一致', () => {
     for (const [family, ids] of EXPECT_NPC_FAMILY) {
       for (const id of ids) {
@@ -105,7 +108,7 @@ describe('拴绳小动物：原型注册表（TECritterAnchor.cs:64-84）', () =
       }
     }
     // 缺省 = Walker（CreateCustomSet(WalkerLeashedCritter)）
-    for (const id of [46, 299, 361, 366, 367, 148, 374, 443, 445, 538, 539, 614, 639]) {
+    for (const id of [46, 299, 366, 367, 374, 443, 538, 539, 614, 639]) {
       expect(prototypeOfNpc(id).family, `npc ${id} 应缺省 walker`).toBe('walker');
     }
   });
@@ -161,12 +164,12 @@ describe('拴绳小动物：原型注册表（TECritterAnchor.cs:64-84）', () =
     expect(anchorStyleOfItem(2001)).toBe(4);
   });
 
-  it('19 个原型全在（Registry.RegisterAll :116-134 注册序）', () => {
-    expect(Object.keys(PROTOTYPES)).toHaveLength(18); // 18 LeashedCritter 族（kite 独立类）
-    // 引擎归属：walker 系 4 族 / flyer 系 12 族 / jumper 系 2 族
+  it('★1457 21 原型全在（Registry.RegisterAll :118-142 注册序）', () => {
+    expect(Object.keys(PROTOTYPES)).toHaveLength(20); // 20 LeashedCritter 族（kite 独立类）
+    // 引擎归属：walker 系 6 族（+aquaticWalker/turtle）/ flyer 系 12 族 / jumper 系 2 族
     const engines: Record<string, number> = { walker: 0, flyer: 0, jumper: 0 };
     for (const p of Object.values(PROTOTYPES)) engines[p.move]++;
-    expect(engines).toEqual({ walker: 4, flyer: 12, jumper: 2 });
+    expect(engines).toEqual({ walker: 6, flyer: 12, jumper: 2 });
   });
 
   it('风筝族 24 件 → projType（DefaultToKite 调用点）+ tile 723 物品链', () => {
@@ -723,19 +726,18 @@ describe('inAPlaceWithWind（WorldGen.cs:87586-87627）', () => {
 // ⑧ DrawBubble 判定（LeashedCritter.Draw :200-205）
 // ----------------------------------------------------------------------------
 
-describe('DrawBubble 判定（leashedBubbleVisible，LeashedCritter.cs:200-205）', () => {
+describe('DrawBubble 判定（leashedBubbleVisible，★1457 ShouldDrawBubble :213-278）', () => {
   it('水生（isAquatic）：非满水格画气泡；陆生：有液格画气泡', () => {
     const st = new TileStore(8, 8);
     st.liquid[st.idx(4, 4)] = 255;
     st.liquid[st.idx(5, 4)] = 0;
     st.liquid[st.idx(6, 4)] = 80;
-    // tile 取 _dummy.Center = (cx, cy+8)
-    const cx = 4 * 16 + 8 - 8;                        // 使 tile 落在 (4,4)
-    const at = (tx: number) => leashedBubbleVisible(st, tx * 16, 4 * 16 - 8, true);
+    // ★1457 tile 取 Center 本格（1456 取 _dummy.Center = (cx, cy+8)）
+    const at = (tx: number) => leashedBubbleVisible(st, tx * 16, 4 * 16, true);
     expect(at(4)).toBe(false);                        // 满液格不画（鱼在水里）
     expect(at(5)).toBe(true);                         // 空气格画（鱼离水）
-    expect(leashedBubbleVisible(st, 6 * 16, 4 * 16 - 8, false)).toBe(true);  // 陆生入液
-    expect(leashedBubbleVisible(st, 5 * 16, 4 * 16 - 8, false)).toBe(false); // 陆生在空气
+    expect(leashedBubbleVisible(st, 6 * 16, 4 * 16, false)).toBe(true);  // 陆生入液
+    expect(leashedBubbleVisible(st, 5 * 16, 4 * 16, false)).toBe(false); // 陆生在空气
   });
 });
 

@@ -199,4 +199,16 @@ export interface GameHooks {
    *  （GetBestPickaxe :39439-39450 前五十格最高 pick）对该格可伤。
    *  Game 实现 = bestPickaxePower + tileNoFail/门槛表；缺省 = true（放行近似） */
   pickPowerEnough?(x: number, y: number): boolean;
+  /** 帕鲁钻地龟挖块（Player.PickTile :54398-54447 实体侧通道——AI_204_Digtoise
+   *  Projectile.cs:39466-39505 消费）：tx/ty = 目标格，pickPower = 镐力
+   *  （1123 = max(26, GetBestPickaxe.pick) :39476-39480 / 1098 恒 26），
+   *  capDamage = dealDamageAsIfBaseNumberIs（1123=36 / 1098=26 :39475-39481）——
+   *  每击伤害 = GetPickaxeDamage 后按 cap 比例钳制，hitTile 缓冲积累 ≥100 破坏。
+   *  返回 true = 该格本次确有伤害（AI 的 num10 计数——有块但全不可伤 → 转离场态）。
+   *  Game 实现 = petPickTile（与玩家/钻头坐骑共享 hitTile 单缓冲，原版同 Player.hitTile）；
+   *  缺省 = 不挖（测试 mock 兼容） */
+  petPickTile?(tx: number, ty: number, pickPower: number, capDamage: number): boolean;
+  /** Player.GetBestPickaxe（:40413 前 0-49 格最高 pick 镐的 pick 值；无镐 = null）。
+   *  1123 钻地龟镐力档（max(26, bestPickaxe.pick) :39476-39480）数据源 */
+  bestPickaxePower?(): number | null;
 }

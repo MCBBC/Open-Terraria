@@ -6,9 +6,10 @@
 //  出发的多段链：每段按 num4 相位角旋转累积（num5 伸展/收回包络 = 2/3 伸展 + 1/3 收回，
 //  收回期整体绕锚点旋绕），命中 = 沿实际曲线每个控制点放 18×18 盒（Colliding
 //  :14482-14494，getActualCollisionPoints 冻结随机相位 num13=1 :45654-45657）。
-//  多目标伤害衰减 = 鞭自身 damage 字段在每次命中后 ×falloff（:12604-12678 switch，
-//  第 n 个敌 ×falloff^(n-1)）；命中施加 tag（TagEffectState.TryApplyTagToNPC
-//  TagEffectState.cs:178-186 + WhipTagEffect.cs:58-70）并启用 proc（:12936-12981）。
+//  多目标伤害衰减 = 鞭自身 damage 字段在每次命中后 ×falloff（1457 Projectile.cs
+//  :13453-13550 switch，第 n 个敌 ×falloff^(n-1)）；命中施加 tag（TagEffectState.
+//  TryApplyTagToNPC TagEffectState.cs:87-93 + WhipTagEffect.cs:34-46）并启用 proc
+//  （:13968-14013）。
 import { Entity } from './Entity';
 import { applyProjStatus, applyMeleeImbue } from './projStatus';
 import { hitTownNpcs, playerCanHitEnemy } from './projTargets';
@@ -103,11 +104,11 @@ export class WhipProj extends Entity {
   private dmgNow: number;
   /** 本挥动已命中敌（localNPCHitCooldown=-1 → 每敌一次 :10104） */
   private hitSet = new Set<number>();
-  /** 星座星每挥动一次门（case 1034 localAI[0]==0 :12966-12970） */
+  /** 星座星每挥动一次门（case 1034 localAI[0]==0 :14001-14007） */
   private localAI0 = 0;
   /** 蛇环补挥标记（补挥不再级联补挥;原版经 withAudioVisualFeedback=false 分支无动画自然不触发） */
   isEcho = false;
-  /** proc 启用门（case 913/1031/1032 localAI[0]==0 :12936-12940；1035 无门） */
+  /** proc 启用门（case 913/1031/1032 localAI[0]==0 :13970-13977；847/1033/1035 无门） */
   private procEnabled = false;
   private ownerRef: () => Player | null;
   /** 月主鞭补鞭瞄准（Game 注入鼠标方向；缺省沿用初始朝向 :45045-45046） */
@@ -337,33 +338,39 @@ export class WhipProj extends Entity {
           e as unknown as Record<string, number>,
           () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
             ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
-        // 衰减链（:12604-12678）：每次命中后鞭 damage 字段 ×falloff
+        // 衰减链（:13453-13550）：每次命中后鞭 damage 字段 ×falloff
         this.dmgNow = Math.max(1, Math.round(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1)));
-        // tag（TryApplyTagToNPC :13635-13638 → TagEffectStack :80-87）：1457 起入玩家
-        // MRU 栈（时长 = TagDuration × tagEffectDuration,1456 全表 240;ImmuneToWhips
-        // 11 种敌门内跳过）;自 buff（AddTheBuff :53-60）随 tag 施加,非 manual 档 ×时长
+        // tag（TryApplyTagToNPC :13635-13638 → TagEffectStack :80-87）：tag 态入玩家
+        // MRU 栈（时长 = TagDuration × tagEffectDuration,1457 表 5479=480 其余 240;
+        // ImmuneToWhips 11 种敌门内跳过）;自 buff（AddTheBuff :53-60）随 tag 施加,
+        // 非 manual 档 ×时长
         const enVan = (e as unknown as { vanillaId?: number }).vanillaId ?? 0;
         owner?.tagEffectStack.tryApplyTagToNPC(this.itemId, e.id, enVan, this.bonusTagDmg);
         // proc 启用（TryDoingOnHitEffects :13968-14013）：{913,1031,1032} 首鞭门
-        //  localAI[0]==0；{847,1033,1035} 每鞭（1457 新增 1033 电鳗鞭）
+        //  localAI[0]==0（:13970-13977）；{847,1033,1035} 每鞭无条件（:14009-14013）
         if (WHIP_PROC_ITEMS.has(this.itemId) && (WHIP_PROC_ONCE_ITEMS.has(this.itemId) ? !this.procEnabled : true)) {
           this.procEnabled = true;
           owner?.tagEffectStack.tryEnableProcOnNPC(this.itemId, e.id);
         }
-        // 5479（proj 1034）星座星雨——1456 语义（Projectile.cs:12965-12970 case 1034：
-        //  localAI[0]==0 首鞭命中即 SpawnConstellationStarsTowards,无条件、无 proc 消费;
-        //  :13868-13880 伤 = (int)damage×0.33/颗）。1457 的 CanProcOnNPC 门 +
-        //  RemoveAllProcs + ×2×0.22 档退役。沿鞭每 3 控制点一颗、垂直曲线方向飞出
-        if (this.projId === 1034 && this.localAI0 === 0 && owner) {
+        // 5479（proj 1034）星座星雨——1457 语义（Projectile.cs:14001-14007 case 1034：
+        //  localAI[0]==0 且 CanProcOnNPC(5479,敌) 才撒星 → localAI[0]=1 + RemoveAllProcs；
+        //  proc 窗由随从命中经 WhipTagEffect_Constellation.OnTaggedHit :6-10 启用）。
+        //  ConstellationWhip_SpawnConstellationStarsTowards（:15013-15036）伤 =
+        //  (int)((int)(damage×2)×0.22)/颗（:14005 传 damage×2 → :15016-15017 num=0.22），
+        //  damage = 衰减后的鞭伤（falloff :13453 先于 TryDoingOnHitEffects :13641）。
+        //  沿鞭每 3 控制点一颗、垂直曲线方向飞出
+        if (this.projId === 1034 && this.localAI0 === 0 && owner
+          && owner.tagEffectStack.canProcOnNPC(5479, e.id)) {
           this.localAI0 = 1;
-          const starDmg = Math.max(1, Math.trunc(dmg * 0.33)); // :13870
+          owner.tagEffectStack.removeAllProcs(5479);                          // :14006
+          const starDmg = Math.max(1, Math.trunc(this.dmgNow * 2 * 0.22));    // :14005 + :15016-15017
           const add = (el: unknown, b: string) =>
             (game as unknown as { entities: { add: (x: unknown, y: string) => void } }).entities.add(el, b);
           for (let i = 2; i < pts.length - 1; i += 3) {
             const a = pts[i], b = pts[i + 1];
             const dx = b.x - a.x, dy = b.y - a.y;
             const d = Math.hypot(dx, dy) || 1;
-            // 垂直方向（:13877）：(dx,dy) 旋转 -π/2×player.direction×gravDir
+            // 垂直方向（:15023-15025）：(dx,dy) 旋转 -π/2×player.direction×gravDir
             //  （gravDir 恒 1）——facing>0 → (dy,-dx)；facing<0 → (-dy,dx)，
             //  再乘 (1+NextFloatDirection×3) 随机速率（可负 → 反向）
             const f = owner ? owner.facing : 1;

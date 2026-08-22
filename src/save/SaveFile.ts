@@ -43,6 +43,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     wall: st.wall, liquid: st.liquid, liquidType: st.liquidType, wire: st.wire,
     half: st.half, slope: st.slope,
     paint: st.paint, paintWall: st.paintWall,   // 油漆双通道（WF:1474-1491）
+    coat: st.coat,                              // 涂层四位（WF:1539-1552）
     explored: world.explored,                   // 战争迷雾（原版 .twld MapHelper 段等价）
   };
   const meta: SaveMeta = {
@@ -121,6 +122,11 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     },
     anglerQuestsFinished: player.anglerQuestsFinished ?? 0,     // PL:1790（渔夫奖励阶梯）
     hideInfo: player.hideInfo ?? undefined,     // PL:776 hideInfo[13](DrawInfoAccs 行开关)
+    // PL:53813-53819 hideVisibleAccessory[10] 位打包（本仓布尔数组直存;仅配饰段
+    // 3-9 有效,全 false 时省略=旧档缺省语义）
+    hideVisibleAccessory: player.hideVisibleAccessory?.some(Boolean)
+      ? [...player.hideVisibleAccessory]
+      : undefined,
     hairDye: player.hairDye ?? 0,               // PL:53805-53808 hairDye byte（发色剂槽）
   };
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events);
@@ -151,6 +157,7 @@ export function buildSaveParts(world: World): {
     wall: st.wall, liquid: st.liquid, liquidType: st.liquidType, wire: st.wire,
     half: st.half, slope: st.slope,
     paint: st.paint, paintWall: st.paintWall,   // 油漆双通道（WF:1474-1491）
+    coat: st.coat,                              // 涂层四位（WF:1539-1552）
     explored: world.explored,                   // 战争迷雾（服务器档随世界下发）
   };
   const meta: SaveMeta = {
@@ -477,6 +484,26 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
       const end = Math.min(i + run + 1, nAll);
       for (; i < end; i++) tyPw[i] = v & 31;
+    }
+  }
+  // 涂层四位（WF:1539-1552 存档位 2/4/8/16；旧档缺字段 → 全 0 = 无涂层，同 paint 容忍）
+  {
+    const tyC = st.coat;
+    const u8 = b64ToBytes(data.coat ?? '');
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let v = 0; s = 0;
+      for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      const end = Math.min(i + run + 1, nAll);
+      for (; i < end; i++) tyC[i] = v & 31;
+    }
+    // 废弃荧光漆迁移（ConvertIlluminantPaintToNewField，WorldFile.cs:2806-2825）：
+    // paint 31 → paint 0 + fullbrightBlock / wallColor 31 → 0 + fullbrightWall
+    for (let i = 0; i < nAll; i++) {
+      if (tyP[i] === 31) { tyP[i] = 0; tyC[i] |= 8; }   // :2811-2815
+      if (tyPw[i] === 31) { tyPw[i] = 0; tyC[i] |= 16; } // :2816-2820
     }
   }
   // 战争迷雾（0/1 位图；旧档缺段 → 全 0 未探索 = 旧行为，不迁移不报错。

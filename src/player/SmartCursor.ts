@@ -172,6 +172,9 @@ export interface SmartCursorEnv {
    *  paintLookup；仅手持刷/滚（1071/1543/1072/1544）时由 FindPaintOrCoating 取值，
    *  刮刀不查——缺省 0 = 三油漆策略目标集恒空，1:1） */
   paintLookup?: number;
+  /** 同上的涂层侧（SmartCursorHelper.cs:40 paintCoatingLookup；:177
+   *  coatingLookup = item.paintCoating。缺省 0 = 涂层项不参与目标集） */
+  coatingLookup?: number;
   /** 钩爪锚点集（SmartCursorHelper.cs:106-115 _grappleTargets：player.grappling 表
    *  各锚 Center 的 tile 坐标）。Step_Pickaxe_MineSolids 射线终点/免挖集用；缺省空集 */
   grappleAnchors?: Pt[];
@@ -377,9 +380,11 @@ interface HeldSemantics {
   placeStyle: number;
   /** 背包油漆 id（env.paintLookup；SmartCursorHelper.cs:93 装配） */
   paintLookup: number;
+  /** 背包涂层 id（env.coatingLookup；SmartCursorHelper.cs:40 paintCoatingLookup） */
+  coatingLookup: number;
 }
 
-function heldSemantics(held: SmartCursorHeld, paintLookup = 0): HeldSemantics {
+function heldSemantics(held: SmartCursorHeld, paintLookup = 0, coatingLookup = 0): HeldSemantics {
   const def = held.def;
   const tool = held.tool;
   return {
@@ -392,6 +397,7 @@ function heldSemantics(held: SmartCursorHeld, paintLookup = 0): HeldSemantics {
     createWall: def?.wallId != null ? def.wallId : null,
     placeStyle: def?.placeStyle ?? 0,
     paintLookup,
+    coatingLookup,
   };
 }
 
@@ -437,7 +443,7 @@ export class SmartCursor {
     if (!used) return; // :69-72
 
     const st = env.st;
-    const sem = heldSemantics(env.held, env.paintLookup ?? 0);
+    const sem = heldSemantics(env.held, env.paintLookup ?? 0, env.coatingLookup ?? 0);
     const s = env.settings;
     // :82-87 tileTarget 钳到世界 [10, max-10]
     const raw = { x: Math.floor(env.mouse.x / 16), y: Math.floor(env.mouse.y / 16) };
@@ -1365,12 +1371,11 @@ export class SmartCursor {
     if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
   }
 
-  // ---- 油漆三策略（SmartCursorHelper.cs:668-807）1:1。涂层（paintCoating）系统未建——
-  //      原版条件里的 fullbrightBlock/invisibleBlock/fullbrightWall/invisibleWall 项恒
-  //      false（本仓无涂层位），paintLookup==0 时刷/滚两策略目标集恒空（:724/:769 外门） ----
+  // ---- 油漆三策略（SmartCursorHelper.cs:668-807）1:1。涂层位（TileStore.coat）已建，
+  //      刮刀四涂层位项（:683-686/:690-692）与刷/滚涂层目标项（:738/:781）全量接入 ----
 
-  /** :668-720 Step_PaintScrapper——扫描可及区，"有方块漆/墙漆/长苔藓 184"的格为目标，
-   *  取离鼠标最近（:700-712 num2 距离 = 格中心*16+8 到 mouse） */
+  /** :668-720 Step_PaintScrapper——扫描可及区，"有方块漆/墙漆/涂层位/长苔藓 184"的格
+   *  为目标，取离鼠标最近（:700-712 num2 距离 = 格中心*16+8 到 mouse） */
   private stepPaintScrapper(
     env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
     set: (x: number, y: number) => void, taken: () => boolean,
@@ -1384,13 +1389,18 @@ export class SmartCursor {
         if (!st.inBounds(i, j)) continue;
         const k = st.idx(i, j);
         const active = st.flags[k] !== 0 && st.type[k] !== 0;
+        const coat = st.coat[k];
         let flag = false;
         if (active) { // :681-687
           flag ||= st.paint[k] > 0;                 // tile.color() > 0
           flag ||= sheetOf(st.type[k]) === 184;     // tile.type == 184（长苔藓）
+          flag ||= (coat & TS.COAT_FULLBRIGHT_BLOCK) !== 0;  // :686 fullbrightBlock()
+          flag ||= (coat & TS.COAT_INVISIBLE_BLOCK) !== 0;   // :687 invisibleBlock()
         }
         if (st.wall[k] > 0) {                       // :688-693
           flag ||= st.paintWall[k] > 0;             // wallColor() > 0
+          flag ||= (coat & TS.COAT_FULLBRIGHT_WALL) !== 0;   // :691 fullbrightWall()
+          flag ||= (coat & TS.COAT_INVISIBLE_WALL) !== 0;    // :692 invisibleWall()
         }
         if (flag) targets.push({ x: i, y: j });     // :694-697
       }
@@ -1401,25 +1411,32 @@ export class SmartCursor {
     }
   }
 
-  /** :722-765 Step_PaintBrush——手持刷（1071/1543）且背包有油漆；目标 = active 且
-   *  颜色 != 目标漆 的格（涂层项恒 false）；取最近 */
+  /** :722-765 Step_PaintBrush——手持刷（1071/1543）且背包有油漆/涂层；目标 = active 且
+   *  （有漆 ∧ 色不同 ∨ 荧光涂层 ∧ 未置荧光位 ∨ 回声涂层 ∧ 未置隐形位）（:738 位或式）；
+   *  取最近 */
   private stepPaintBrush(
     env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
     set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
     const vid = sem.vid ?? -1;
-    if (!PAINT_BRUSH_ITEMS.has(vid) || sem.paintLookup === 0 || taken()) return; // :724
+    // :724 paintLookup==0 && paintCoatingLookup==0 → return
+    if (!PAINT_BRUSH_ITEMS.has(vid) || (sem.paintLookup === 0 && sem.coatingLookup === 0) || taken()) return;
     const st = env.st;
     const paintLookup = sem.paintLookup;
+    const coatingLookup = sem.coatingLookup;
     const targets: Pt[] = [];
     for (let i = reach.x0; i <= reach.x1; i++) {
       for (let j = reach.y0; j <= reach.y1; j++) {
         if (!st.inBounds(i, j)) continue;
         const k = st.idx(i, j);
-        // :738 active && (paintLookup!=0 && color()!=paintLookup | 涂层项)
-        if (st.flags[k] !== 0 && st.type[k] !== 0 && st.paint[k] !== paintLookup) {
-          targets.push({ x: i, y: j });
-        }
+        if (st.flags[k] === 0 || st.type[k] === 0) continue;   // :738 tile.active()
+        const coat = st.coat[k];
+        // :738 (paintLookup!=0 && color()!=paintLookup) | (coating==1 && !fullbrightBlock)
+        //      | (coating==2 && !invisibleBlock)
+        const flag = (paintLookup !== 0 && st.paint[k] !== paintLookup)
+          || (coatingLookup === 1 && (coat & TS.COAT_FULLBRIGHT_BLOCK) === 0)
+          || (coatingLookup === 2 && (coat & TS.COAT_INVISIBLE_BLOCK) === 0);
+        if (flag) targets.push({ x: i, y: j });
       }
     }
     const point = nearestOf(targets, env.mouse);     // :745-757
@@ -1428,16 +1445,19 @@ export class SmartCursor {
     }
   }
 
-  /** :767-807 Step_PaintRoller——手持滚（1072/1544）且背包有油漆；目标 = 有墙且
-   *  墙前无实心遮挡（:781 !active || !tileSolid || tileSolidTop）且墙色 != 目标漆；取最近 */
+  /** :767-807 Step_PaintRoller——手持滚（1072/1544）且背包有油漆/涂层；目标 = 有墙且
+   *  墙前无实心遮挡（:781 !active || !tileSolid || tileSolidTop）且（墙色不同 ∨ 涂层
+   *  目标位未置）；取最近 */
   private stepPaintRoller(
     env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
     set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
     const vid = sem.vid ?? -1;
-    if (!PAINT_ROLLER_ITEMS.has(vid) || sem.paintLookup === 0 || taken()) return; // :769
+    // :769 paintLookup==0 && paintCoatingLookup==0 → return
+    if (!PAINT_ROLLER_ITEMS.has(vid) || (sem.paintLookup === 0 && sem.coatingLookup === 0) || taken()) return;
     const st = env.st;
     const paintLookup = sem.paintLookup;
+    const coatingLookup = sem.coatingLookup;
     const targets: Pt[] = [];
     for (let i = reach.x0; i <= reach.x1; i++) {
       for (let j = reach.y0; j <= reach.y1; j++) {
@@ -1445,10 +1465,15 @@ export class SmartCursor {
         const k = st.idx(i, j);
         const t = st.type[k];
         const active = st.flags[k] !== 0 && t !== 0;
-        // :781 wall>0 && (!active || !tileSolid || tileSolidTop) && 墙色 != 目标漆
+        const coat = st.coat[k];
+        // :781 wall>0 && (!active || !tileSolid || tileSolidTop)
+        //      && (paintLookup!=0 && wallColor()!=paintLookup | coating==1 && !fullbrightWall
+        //          | coating==2 && !invisibleWall)
         if (st.wall[k] > 0
           && (!active || !tileSolidType(t) || tileSolidTopType(t))
-          && st.paintWall[k] !== paintLookup) {
+          && ((paintLookup !== 0 && st.paintWall[k] !== paintLookup)
+            || (coatingLookup === 1 && (coat & TS.COAT_FULLBRIGHT_WALL) === 0)
+            || (coatingLookup === 2 && (coat & TS.COAT_INVISIBLE_WALL) === 0))) {
           targets.push({ x: i, y: j });
         }
       }

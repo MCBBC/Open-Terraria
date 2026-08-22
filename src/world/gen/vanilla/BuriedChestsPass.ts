@@ -147,17 +147,14 @@ function nearOtherChests(st: TileStore, x: number, y: number): boolean {
   return false;
 }
 
-/** 常春藤箱主件序(GetNextJungleChestItem cs:10130:循环 211/212/213/964 + 稀有替换)。
- *  ★IIIIII IL 复裁（2026-08-22）→ JJJJJJ 回滚 1456：金标二进制（1.4.5.6,
- *  TerrariaServer.hs.exe）GetNextJungleChestItem 全法 46 指令与 1456 反编译
- *  cs:10147 逐指令全等——`Next(50)==0 → 753(海草)` 首分支【在】（instr[20]-[26]）；
- *  1457 cs:10164 才删（海草 1/50 移箱尾 cs:37773）。本函数曾有意取 1457 行为
- *  （旧注释在案）——与金标再生窗口成对回滚（oracle SW_MB_1456=1 同态门已备）。 */
+/** 常春藤箱主件序(GetNextJungleChestItem cs:10146:循环 211/212/213/964 + 稀有替换)。
+ *  ★1457 对齐档 2（2026-08-23）：基准回 ../Terarria1457/ ——1457 cs:10164-10176
+ *  **无** `Next(50)==0 → 753` 首分支（1456 cs:10147 有,IIIIII IL 复裁在案;海草
+ *  1/50 移箱尾段 cs:37773,本文件尾段已同步复线）。 */
 export function nextJungleItem(gs: GenState, rng: RNG): number {
   let result = [211, 212, 213, 964][gs.jungleItemIdx % 4];
-  if (rng.int(0, 49) === 0) result = 753; // ★1456 cs:10147 首分支（IIIIII IL 复裁：1457 才删）
-  else if (rng.int(0, 14) === 0) result = 2292; // 1/15 玻璃钢鱼竿
-  else if (rng.int(0, 19) === 0) result = 3017; // 1/20 花之靴
+  if (rng.int(0, 14) === 0) result = 2292; // 1/15 玻璃钢鱼竿 cs:10165
+  else if (rng.int(0, 19) === 0) result = 3017; // 1/20 花之靴 cs:10169
   gs.jungleItemIdx++;
   return result;
 }
@@ -563,14 +560,16 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     const id = vid(2204);
     if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
   }
-  // ★JJJJJ 回滚 1456（IIIIII IL 复裁：二进制 AddBuriedChest Next(50) 仅 3 处均非尾段
-  //   海草/鱼门；1456 尾段 cs:37415-37512 无 753/669 掷）——曾按 1457 补的两条
-  //   `flag4 && Next(50)==0 → 753`（cs:37773）/`flag2 && Next(50)==0 → 669`（cs:37781）
-  //   各多耗 1 掷/箱，掷流整体漂移（四链 mile8 破绿主因之一），已删。
+  // ★1457 对齐档 2（2026-08-23）复线：尾段 753/669 副物品门——1457 cs:37771-37784
+  //   `flag4 && Next(50)==0 → 753(海草)` / `flag2 && Next(50)==0 → 669`（1456 无此
+  //   二掷,IIIIII IL 复裁在案;1456 的 753 在 GetNextJungleChestItem 首分支、669 在
+  //   主件段,均已随基准回 1457 删除）。各耗 1 掷/箱（命中判定先行,掷侧恒耗）。
+  if (flags.ivy && rng.int(0, 49) === 0) pushItem(753);   // cs:37773 海草 1/50（flag4）
   if (flags.ice && rng.int(0, 6) === 0) {
     const id = vid(2198);
     if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
   }
+  if (flags.ice && rng.int(0, 49) === 0) pushItem(669);   // cs:37781 669 1/50（flag2）
   {
     const f12 = !!flags.skyTheme || mainVanillaId === 159 || mainVanillaId === 65
       || mainVanillaId === 158 || mainVanillaId === 2219;
@@ -841,15 +840,14 @@ function placeBuriedChestInner(
     if (tile === CHEST) style = 11;
     if (iceDbg) iceDbg(i, gy, tBelow, mainId, style, 1);   // fired=1
     if (!mainId) {
-      // ★1456（cs:36122-36130）IIIIII IL 复裁 → JJJJJJ 回滚：二进制 instr673=`Next(6)`
-      //   六选（6153 GlacierFang 系 1457 新内容，1456 全源无此 id——PRE_CLASS/PRE_STATS
-      //   的 6153 登记自此为死数据，留档防未来池变动）；instr719=`Next(50)==0 → 669`
-      //   主物门（1457 删移箱尾 cs:37781）。remix 1319→725 在 1456 为内联三元，
-      //   命中后改写与之一致（普通种子零差异）。
-      mainId = [670, 724, 950, 1319, 987, 1579][rng.nextInt(6)]; // cs:36122 Next(6) 六选
-      if (gs.seedFlags.remix && mainId === 1319) mainId = 725;
-      if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机 cs:36125
-      if (rng.int(0, 49) === 0) mainId = 669; // ★1456 cs:36126 Next(50)==0→669（1457 删）
+      // ★1457 对齐档 2（2026-08-23）：基准回 ../Terarria1457/ ——主件池 cs:36456
+      //   `Utils.SelectRandom(genRand, new short[7] { 670, 724, 950, 1319, 987,
+      //   1579, 6153 })` = **Next(7) 七选**（6153 GlacierFang 系 1457 新内容,
+      //   1456 是 Next(6) 六选,IIIIII IL 复裁 instr673 在案）；`Next(50)==0 → 669`
+      //   主物门 1457 已删（669 1/50 移箱尾段 cs:37781,本文件尾段已同步复线）。
+      mainId = [670, 724, 950, 1319, 987, 1579, 6153][rng.nextInt(7)]; // cs:36456 Next(7) 七选
+      if (gs.seedFlags.remix && mainId === 1319) mainId = 725;   // cs:36457-36459
+      if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机 cs:36460
     }
   }
   // ---- 天空箱降档门（cs:36180-36189，原版位于 hell 门后）：style12 的落定格
@@ -906,6 +904,16 @@ function placeBuriedChestInner(
   //   (2930,830) vanilla 多掷 2（Ram Rune Prefix Next(4)+池选）→ 流分叉（尾批 2-C）
   if (tile === CHEST && style !== 0 && gy >= gs.worldSurface && isDungeonWall(st.wall[st.idx(i, gy)])) {
     flags.dungeon = true;
+  }
+
+  // ---- ★SSSSSS-NOTRAPS（cs:36582-36586）：noTraps 地下金箱(21@style1) → 死亡之箱
+  //   (467@style4)。remix 时 1/3 穿透（保留金箱）。战利品分支按深度（与样式无关）
+  //   → 金箱战利品不变，仅贴图/箱体改写——vanilla 语义原样。
+  if (gs.seedFlags.noTraps && style === 1 && tile === CHEST) {
+    if (!gs.seedFlags.remix || rng.int(0, 2) === 0) {
+      style = 4;
+      tile = CHEST2;
+    }
   }
 
   // ---- notNearOtherChests 通道（cs:36253 透传 → PlaceChest cs:57838-57840）：

@@ -99,11 +99,13 @@ const idleBeams = (): DrillBeam[] => [{ tx: -1, ty: -1, cooldown: 0, purpose: 0 
 const DRILL_CX = 10 * 16 + 8, DRILL_CY = 20 * 16 + 8;
 
 describe('坐骑数据表（Mount.cs Initialize 提取）', () => {
-  it('64 坐骑全量登记 + 名称表', () => {
-    expect(Object.keys(MOUNT_DATA)).toHaveLength(64);
+  it('66 坐骑全量登记 + 名称表（64/65 = 1457 TrustyChillet 族,extract-mounts overlay）', () => {
+    expect(Object.keys(MOUNT_DATA)).toHaveLength(66);
     expect(MOUNT_NAMES['0']).toBe('Rudolph');
     expect(MOUNT_NAMES['7']).toBe('UFO');
     expect(MOUNT_NAMES['63']).toBe('ChilletIgnis');
+    expect(MOUNT_NAMES['64']).toBe('TrustyChillet');
+    expect(MOUNT_NAMES['65']).toBe('TrustyChilletIgnis');
   });
 
   it('陆行族参数：驯鹿/兔兔/史莱姆/蜥蜴/独角兽', () => {
@@ -138,11 +140,13 @@ describe('坐骑数据表（Mount.cs Initialize 提取）', () => {
     expect(MOUNT_SETS.IsTransformationMount[0]).toBe(false);
   });
 
-  it('贴图可得性登记：主贴图 60/64；滚轴鞋族（57-60）无贴图走色块近似', () => {
+  it('贴图可得性登记：主贴图 62/66（+1457 Trusty 64/65 共用 Extra_301/302）；滚轴鞋族（57-60）无贴图走色块近似', () => {
     const ok = Object.entries(MOUNT_TEXTURE_OK).filter(([, v]) => v).length;
-    expect(ok).toBe(60);
+    expect(ok).toBe(62);
     expect(MOUNT_TEXTURE_OK['57']).toBe(false);
     expect(MOUNT_TEXTURE_OK['0']).toBe(true);
+    expect(MOUNT_TEXTURE_OK['64']).toBe(true);
+    expect(MOUNT_TEXTURE_OK['65']).toBe(true);
   });
 
   it('召唤物品链（Item.cs mountType）：鞍族 + 矿车族', () => {

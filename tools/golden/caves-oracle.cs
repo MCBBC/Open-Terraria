@@ -4089,6 +4089,88 @@ bool UwSolidTile2HF(int x, int y)
     ushort t = typ[i];
     return SOLID.Contains(t) && !(t == 19 || (t >= 427 && t <= 439));
 }
+// ★2026-08-23 1457 对齐档 2 helper 组（1457 cs:33433-33468/33383-33432；与 JS
+//   rollback1457/HellFort.1457.ts 同构镜像——SolidTile(noDoors)/AttemptDoorAt/
+//   DoorLoop/CanCrumbleWall/AttemptCrumbleWall）
+bool UwSolidTileNoDoorsHF(int x, int y, bool noDoors)
+{
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    int i = y * W + x;
+    if (act[i] == 0 || inAct[i] != 0) return false;
+    ushort t = typ[i];
+    if (!SOLID.Contains(t) || t == 19 || (t >= 427 && t <= 439) || half[i] != 0 || slope[i] != 0) return false;
+    return !(noDoors && t == 10);
+}
+bool UwAttemptDoorAtHF(int x, int y, int wallType, int doorStyle)
+{
+    // HellFort_AttemptToPlaceDoor /bool（1457 cs:33449）：锚格上下 (y-4/y) 均非门实心
+    //   才落门——清 y-1..y-3（wallType>0 才补墙,外门 wallType=0 不打墙）+
+    //   PlaceTile(x, y-1, 10, mute, forced:false, style)。★1456 四处门落点是无条件直写。
+    if (x < 0 || y < 0 || x >= W || y >= H || y - 4 < 0) return false;
+    if (!UwSolidTileNoDoorsHF(x, y - 4, true) || !UwSolidTileNoDoorsHF(x, y, true)) return false;
+    for (int k = 1; k <= 3; k++)
+    {
+        int ti = (y - k) * W + x;
+        act[ti] = 0;
+        if (wallType > 0) wal[ti] = (ushort)wallType;
+    }
+    UwPlaceTileDoorHF(x, y - 1, doorStyle);
+    return true;
+}
+void UwPlaceDoorLoopHF(ref bool needDoor, bool[,] doorExists, bool[] door, int x, int[] doorX, int[] doorY, int wallType, int doorStyle)
+{
+    // HellFort_AttemptToPlaceDoor /while（1457 cs:33433）：逐轮 Next(10) 抽行,命中候选行
+    //   才尝试落门——失败（锚检查拒）不置 needDoor=false 继续重掷;doorExists 记账成功
+    //   落门行。★原版无守卫（候选行锚检查恒过后单轮收敛）;守卫仅防异常种子活锁。
+    int guard = 0;
+    while (needDoor)
+    {
+        int num = r.Next(10);
+        if (door[num])
+        {
+            bool ok = UwAttemptDoorAtHF(doorX[x], doorY[num], wallType, doorStyle);
+            if (ok) needDoor = false;
+            if (doorExists != null) doorExists[x, num] = ok;
+        }
+        if (++guard > 100000) break;
+    }
+}
+bool UwCanCrumbleWallHF(int dir, int x, int y, int[] wallX, int[] wallTop, int[] wallBottom)
+{
+    // HellFort_CanCrumbleWall（1457 cs:33383）：先掷 Next(2)（0→拒,掷恒耗）;再查墙段
+    //   外侧一列 (wallX±1, wallTop+1..wallBottom-1) 无墙/无液/非实心。
+    if (r.Next(2) == 0) return false;
+    int wx = wallX[x], wy = wallTop[y];
+    int hgt = wallBottom[y] - wy;
+    if (wx < 10 || wx >= W - 10 || wy < 10 || wy >= H - 10) return false;   // InWorld(wx,wy,10)
+    int cx = wx + dir;
+    for (int k = 1; k < hgt; k++)
+    {
+        int yy = wy + k;
+        if (cx < 0 || yy < 0 || cx >= W || yy >= H) return false;
+        int ti = yy * W + cx;
+        if (wal[ti] > 0 || liq[ti] > 0 || UwSolidTileHF(cx, yy)) return false;
+    }
+    return true;
+}
+void UwAttemptCrumbleWallHF(int x, int y, int[] wallX, int[] wallTop, int[] wallBottom)
+{
+    // HellFort_AttemptToCrumbleWall（1457 cs:33409）：墙段内 NextFloat 取点 + Next(2)
+    //   抖动定塌陷终点（<2 强制 2、钳 wallBottom-1）,起点 wallTop+1 起把实心格
+    //   ClearTile（=清坡+失活+清致动位;type 幽灵保留,与全管线口径一致）。
+    int wx = wallX[x], wt = wallTop[y], wb = wallBottom[y];
+    int start = wt + 1;
+    int end = start + (int)((float)(wb - wt - 3) * (float)r.NextDouble());   // (int)((float)(h-3)*NextFloat())
+    end += r.Next(2);
+    if (end - start < 2) end = start + 2;
+    end = Math.Min(wb - 1, end);
+    for (int k = start; k <= end; k++)
+    {
+        if (wx < 0 || k < 0 || wx >= W || k >= H) continue;
+        int ti = k * W + wx;
+        if (act[ti] != 0) { act[ti] = 0; slope[ti] = 0; half[ti] = 0; inAct[ti] = 0; }
+    }
+}
 void UwSet(int x, int y, int t, int fx, int fy)
 {
     if (x < 0 || y < 0 || x >= W || y >= H) return;
@@ -4291,35 +4373,43 @@ void UwRandHellPicture(out int tileT, out int style)
 void UwHellFort(int i, int j, int tileType, int wallType)
 {
     int hellTop = H - 200;
-    // ---- ★LLLLLL 批 1457→1456 回滚（2026-08-22）：EEEEEE 批曾镜像 1457（cs:32998-33008）
-    //      掷序重分配——本批逐处还原 1456 真值（Terarria1456/WorldGen.cs cs:32850-33310，
-    //      JS HellFortPass.ts KKKKKK 回滚后实现为蓝本；mile8 #28 三链同签名定罪）：
-    //      ① 列界掷序=右翼先（掷 3-4）/左翼后（掷 5-6）；② 翼行 Next(10) 直接扩 span；
-    //      ③ 中央跨度两掷 Next(10) 直接扩 span（无钳位）；④ 四处门落点=命中候选行即
-    //      单次无条件直写（仅 InWorld 门，无锚检查/无 doorExists）；⑤ 右外门死分支保留
-    //      （原版 bug：num37<20 恒真）；⑥ 无塌墙阶段。1457 语义存档 rollback1457/ ----
-    // ---- 列左右界（1456 cs:32874-32883）：中央 ±Next(4,10)、翼列依次外扩 Next(8,20) ----
+    // ---- ★2026-08-23 1457 对齐档 2（代码重接线）：项目基准切 ../Terarria1457/ →
+    //      本函数按 1457 真值（Terarria1457/WorldGen.cs HellFort cs:32974-33456）与
+    //      JS HellFortPass.ts（本批复线后实现）逐处换回 1457 语义：
+    //      ① 列界掷序=左翼先（cs:32996-33008）；② 翼行 Clamp(Next(10),num4,num5)
+    //      （num4=num5=3 恒 3,不扩 span,cs:33013/33036）；③ 中央跨度 Max/Min 钳位
+    //      （cs:33090-33091）；④ 四处门落点=AttemptToPlaceDoor while 重掷+锚格真实
+    //      检查+doorExists 记账（cs:33158-33169/33433-33468）；⑤ 1/3 门=单发
+    //      AttemptToPlaceDoor（cs:33205-33211）；⑥ 右外门死分支删除=可触发
+    //      （cs:33251-33283）；⑦ 新增塌墙阶段（cs:33347-33365/33383-33432）。
+    //      1456 真值（右翼先/直扩 span/门无条件直写/死分支/无塌墙）见
+    //      Terarria1456 cs:32850-33310（KKKKKK/LLLLLL 批账）----
+    // ---- 列左右界（1457 cs:32996-33008）：中央 ±Next(4,10)、翼列依次外扩 Next(8,20) ----
     var colL = new int[5]; var colR = new int[5];
     colL[2] = i - r.Next(4, 10); colR[2] = i + r.Next(4, 10);
-    colL[3] = colR[2]; colR[3] = colL[3] + r.Next(8, 20);   // ★1456 右翼先（掷 3-4）
-    colL[4] = colR[3]; colR[4] = colL[4] + r.Next(8, 20);
-    colR[1] = colL[2]; colL[1] = colR[1] - r.Next(8, 20);   // ★1456 左翼后（掷 5-6）
+    colR[1] = colL[2]; colL[1] = colR[1] - r.Next(8, 20);   // ★1457 左翼先（掷 3-4）
     colR[0] = colL[1]; colL[0] = colR[0] - r.Next(8, 20);
+    colL[3] = colR[2]; colR[3] = colL[3] + r.Next(8, 20);   // ★1457 右翼后（掷 5-6）
+    colL[4] = colR[3]; colR[4] = colL[4] + r.Next(8, 20);
     // ---- 行上下界（同 1456）----
     var rowT = new int[10]; var rowB = new int[10];
     rowT[3] = j - r.Next(6, 12); rowB[3] = j;
     for (int rr = 4; rr < 10; rr++) { rowT[rr] = rowB[rr - 1]; rowB[rr] = rowT[rr] + r.Next(6, 12); }
     for (int rr = 2; rr >= 0; rr--) { rowB[rr] = rowT[rr + 1]; rowT[rr] = rowB[rr] - r.Next(6, 12); }
     var occ = new bool[5, 10];
-    bool hasLWing = false, hasRWing = false; int spanLo = 3, spanHi = 3;
+    // ★1457 门记账双账本（cs:32995-32996）：doorExists2=右侧墙段（列间门/右外门）、
+    //   doorExists=左侧墙段（左外门）——塌墙阶段跳过有门的墙段
+    var doorExists = new bool[5, 10];
+    var doorExists2 = new bool[5, 10];
+    bool hasLWing = false, hasRWing = false; int spanLo = 3, spanHi = 3;   // ★1457 num4/num5=3 起恒 3
     for (int round = 0; round < 2; round++)
     {
         if (r.Next(3) == 0)
         {
             hasLWing = true;
-            int rr = r.Next(10);                     // ★1456（cs:32908-32916）Next(10) 直接扩 span（1457 曾 Clamp 恒 3）
-            if (rr < spanLo) spanLo = rr;
-            if (rr > spanHi) spanHi = rr;
+            // ★1457（cs:33013）翼行=Clamp(Next(10), num4, num5)——num4=num5=3 恒 3,
+            //   span 不再被翼扩（1456 cs:32908-32916 是 Next(10) 直接扩）
+            int rr = Math.Max(spanLo, Math.Min(spanHi, r.Next(10)));
             int wingCol = 1;
             if (r.Next(2) == 0) { occ[0, rr] = true; occ[1, rr] = true; wingCol = 0; }
             else occ[1, rr] = true;
@@ -4329,9 +4419,7 @@ void UwHellFort(int i, int j, int tileType, int wallType)
         if (r.Next(3) == 0)
         {
             hasRWing = true;
-            int rr = r.Next(10);                     // ★1456（cs:32943-32951）同上
-            if (rr < spanLo) spanLo = rr;
-            if (rr > spanHi) spanHi = rr;
+            int rr = Math.Max(spanLo, Math.Min(spanHi, r.Next(10)));   // ★1457（cs:33036）同上
             int wingCol = 3;
             if (r.Next(2) == 0) { occ[3, rr] = true; occ[4, rr] = true; wingCol = 4; }
             else occ[3, rr] = true;
@@ -4352,10 +4440,11 @@ void UwHellFort(int i, int j, int tileType, int wallType)
         }
         if (bad) for (int rr = 0; rr < 10; rr++) occ[c, rr] = false;
     }
-    // ---- 中央列跨度（1456 cs:33002-33027）：两掷 Next(10) 直接扩 span（1457 曾 Max/Min
-    //      钳位）；无翼 while 环同构扩 span（span 单调扩张必收敛，原版无守卫）----
-    int n4 = r.Next(10); if (n4 < spanLo) spanLo = n4;
-    n4 = r.Next(10); if (n4 > spanHi) spanHi = n4;
+    // ---- 中央列跨度（1457 cs:33090-33104）：两掷 Next(10) 经 Max/Min 钳位（n16 覆写
+    //      丢弃、span 保持 [3,3]；1456 cs:33002-33027 是两掷直接扩 span）；无翼 while
+    //      环同构扩 span（span 单调扩张必收敛，原版无守卫）----
+    int n4 = Math.Max(spanLo, r.Next(10));   // num16 = Max(num4, Next(10))（弃）
+    n4 = Math.Min(spanHi, r.Next(10));       // num16 = Min(num5, Next(10))（弃）
     if (!hasLWing && !hasRWing)
     {
         while (spanHi - spanLo < 5)
@@ -4384,31 +4473,14 @@ void UwHellFort(int i, int j, int tileType, int wallType)
             }
         }
     }
-    // ---- 列间门 style19（1456 cs:33080-33110）：while 抽行命中即单次无条件直写
-    //      （清 y-1..y-3 + 补墙 wallType×3 + PlaceTile 门；仅 InWorld 门——1457 曾改
-    //      AttemptToPlaceDoor：锚检查拒则重掷+doorExists 记账，已回滚）----
+    // ---- 列间门 style19（1457 cs:33158-33169）：while 抽行+AttemptToPlaceDoor
+    //      （锚格真实检查,拒则重掷;成功落门记 doorExists2 右侧账本）——1456
+    //      cs:33080-33110 是命中即单次无条件直写（仅 InWorld 门）----
     for (int c = 0; c < 4; c++)
     {
         var rows = new bool[10]; bool needDoor = false;
         for (int rr = 0; rr < 10; rr++) if (occ[c, rr] && occ[c + 1, rr]) { rows[rr] = true; needDoor = true; }
-        while (needDoor)
-        {
-            int rr = r.Next(10);
-            if (rows[rr])
-            {
-                needDoor = false;
-                if (colR[c] >= 10 && colR[c] < W - 10 && rowB[rr] >= 10 && rowB[rr] < H - 10)   // InWorld(colR,rowB,10)
-                {
-                    for (int k = 1; k <= 3; k++)
-                    {
-                        int ti = (rowB[rr] - k) * W + colR[c];
-                        act[ti] = 0;
-                        wal[ti] = (ushort)wallType;
-                    }
-                    UwPlaceTileDoorHF(colR[c], rowB[rr] - 1, 19);
-                }
-            }
-        }
+        UwPlaceDoorLoopHF(ref needDoor, doorExists2, rows, c, colR, rowB, wallType, 19);
     }
     for (int c = 0; c < 5; c++) for (int rr = 0; rr < 10; rr++)
     {
@@ -4436,23 +4508,16 @@ void UwHellFort(int i, int j, int tileType, int wallType)
             }
             else break;
         }
-        // ★1456（cs:33145-33154）：1/3 门=无条件直写（清 3 格+补墙+PlaceTile 门，无锚检查
-        //   ——1457 曾改单发 AttemptToPlaceDoor，已回滚）
+        // ★1457（cs:33205-33211）：1/3 门=单发 AttemptToPlaceDoor（bool 重载,锚检查
+        //   拒即弃、不重掷、不记账——1456 cs:33145-33154 是无条件直写）
         if (c < 4 && occ[c + 1, rr] && r.Next(3) == 0)
         {
-            for (int k = 1; k <= 3; k++)
-            {
-                int ti = (rowB[rr] - k) * W + colR[c];
-                act[ti] = 0;
-                wal[ti] = (ushort)wallType;
-            }
-            UwPlaceTileDoorHF(colR[c], rowB[rr] - 1, 19);
+            UwAttemptDoorAtHF(colR[c], rowB[rr], wallType, 19);
         }
     }
-    // ---- 左外门（1456 cs:33157-33201）：最左占用列；候选行预检（外侧 colL-1 三格空且
-    //      无液，否则剔出候选）→ while 抽行命中即**无条件直写**（只清 colL 三格+PlaceTile
-    //      门，**不打墙**——1456 外门无 wall 写；1457 曾改 AttemptToPlaceDoor+doorExistsL，
-    //      已回滚）----
+    // ---- 左外门（1457 cs:33214-33249）：最左占用列；候选行预检（外侧 colL-1 三格空且
+    //      无液，否则剔出候选）→ while 抽行+AttemptToPlaceDoor（wallType=0=不打墙）
+    //      +doorExists（左侧账本）记账——1456 是命中即无条件直写、无记账 ----
     for (int c = 0; c < 5; c++)
     {
         var rows = new bool[10]; bool any = false;
@@ -4468,38 +4533,29 @@ void UwHellFort(int i, int j, int tileType, int wallType)
                 && liq[(rowB[rr] - 1) * W + x] == 0 && liq[(rowB[rr] - 2) * W + x] == 0 && liq[(rowB[rr] - 3) * W + x] == 0) needDoor = true;
             else rows[rr] = false;
         }
-        while (needDoor)
-        {
-            int rr = r.Next(10);
-            if (rows[rr])
-            {
-                needDoor = false;
-                for (int k = 1; k <= 3; k++) act[(rowB[rr] - k) * W + colL[c]] = 0;
-                UwPlaceTileDoorHF(colL[c], rowB[rr] - 1, 19);
-            }
-        }
+        UwPlaceDoorLoopHF(ref needDoor, doorExists, rows, c, colL, rowB, 0, 19);
         break;
     }
-    // ---- 右外门（1456 cs:33202-33249）：★原版死分支保留（N 批实证+IIIIII IL 复裁维持）
-    //      ——预检环首候选行即 `num37 < 20`（num37=列号 0-4 恒真）→ break；flag8 恒 false
-    //      =右外门从不放置且预检后零掷（1457 曾"修复"此门=偏差，已回滚）----
+    // ---- 右外门（1457 cs:33251-33283）：1456 的原版死分支（预检环首候选行 num37<20
+    //      恒真→break,右外门从不放置且零掷）已删除——右外门可触发：预检（colR+1 三格
+    //      空+无液）→ while 抽行+AttemptToPlaceDoor（wallType=0）+doorExists2 记账 ----
     for (int c = 4; c >= 0; c--)
     {
         var rows = new bool[10]; bool any = false;
         for (int rr = 0; rr < 10; rr++) if (occ[c, rr]) { rows[rr] = true; any = true; }
-        if (any)
+        if (!any) continue;
+        bool needDoor = false;
+        for (int rr = 0; rr < 10; rr++)
         {
-            bool flag8 = false;
-            for (int rr = 0; rr < 10; rr++)
-            {
-                if (rows[rr])
-                {
-                    break;   // ★num37 < 20 恒真（列号 0-4）——1456 原样死分支
-                }
-            }
-            while (flag8) { /* 不可达（1456 死分支） */ }
-            break;
+            if (!rows[rr]) continue;
+            int x = colR[c] + 1;
+            if (x < 0 || x >= W || rowB[rr] - 3 < 0 || rowB[rr] - 3 >= H) { rows[rr] = false; continue; }
+            if (act[(rowB[rr] - 1) * W + x] == 0 && act[(rowB[rr] - 2) * W + x] == 0 && act[(rowB[rr] - 3) * W + x] == 0
+                && liq[(rowB[rr] - 1) * W + x] == 0 && liq[(rowB[rr] - 2) * W + x] == 0 && liq[(rowB[rr] - 3) * W + x] == 0) needDoor = true;
+            else rows[rr] = false;
         }
+        UwPlaceDoorLoopHF(ref needDoor, doorExists2, rows, c, colR, rowB, 0, 19);
+        break;
     }
     // ---- 顶层平台口（同 1456）----
     for (int rr = 0; rr < 10; rr++)
@@ -4542,10 +4598,25 @@ void UwHellFort(int i, int j, int tileType, int wallType)
             break;
         }
     }
-    // ---- ★1456 到此结束（cs:33310）——1457 的「塌墙阶段」（CanCrumbleWall/
-    //      AttemptCrumbleWall+doorExists 双账本+SolidTileNoDoors/AttemptDoorAt/DoorLoop
-    //      五 helper）不存在于 1456，LLLLLL 批随主体一并删除；1457 语义存档
-    //      src/world/gen/vanilla/rollback1457/HellFort.1457.ts（1457 对齐战役复用）----
+    // ---- 塌墙阶段（★1457 新增 cs:33347-33365）：每个占用单元的左/右墙段——无门
+    //      （doorExists/doorExists2 未记账）且外侧一列全空（CanCrumbleWall 先掷
+    //      Next(2),cs:33383）→ AttemptToCrumbleWall（cs:33409）段内 NextFloat/Next(2)
+    //      取塌陷终点把实心格 ClearTile——地狱塔向外界「塌」出开口。1456 无此阶段 ----
+    for (int c = 0; c < 5; c++)
+    {
+        for (int rr = 0; rr < 10; rr++)
+        {
+            if (!occ[c, rr]) continue;
+            if (!doorExists[c, rr] && UwCanCrumbleWallHF(-1, c, rr, colL, rowT, rowB))
+            {
+                UwAttemptCrumbleWallHF(c, rr, colL, rowT, rowB);
+            }
+            if (!doorExists2[c, rr] && UwCanCrumbleWallHF(1, c, rr, colR, rowT, rowB))
+            {
+                UwAttemptCrumbleWallHF(c, rr, colR, rowT, rowB);
+            }
+        }
+    }
 }
 
 void UwAddHellHouses()
@@ -8146,7 +8217,13 @@ void DgTowerEntrance(int i, int j, int preSeed)
                 if (DgInWorld(xx, yy, 0)) DgClrAll(yy * W + xx);
         }
     }
-    dgEntBounds.Set(i - n4, minY, i + n4 + 1, maxY);
+    // ★RRRRRR（2026-08-23）Bounds 语义对齐（TowerDungeonEntrance.cs:59 SetBounds+ :112
+    //   UpdateBounds 只扩不缩+ :462 CalculateHitbox）→ 底边保持 **j**（maxY=j-20<j 不扩）。
+    //   曾 Set(i-n4,minY,...) 直写=底边 j-20 短 20 格；x86 CGFA 探针实证 vanilla 于掷
+    //   34324 拒书架候选 (3693,284)（全盒内/短盒外）。与 DungeonPass.ts dgTowerEntrance
+    //   同步（Dome 侧 Set+Upd 本就同构）。
+    dgEntBounds.Set(i, j, i, j);
+    dgEntBounds.Upd(i - n4, minY, i + n4 + 1, maxY);
     dgEntExists = true;
     // 基座箱（:100-213）
     for (int n = -n4; n <= n4; n++)
@@ -17469,23 +17546,18 @@ Replay(); // ▶MicroBiomes cs:21785
     //   Next(50) 仅 3 处且均非 flag4 海草尾门（instr717=主件 669 门、instr2455/3371=
     //   stack `Next(50)+50`）。⇒ 1456 反编译 cs:10147 与二进制全等；1457 cs:10164
     //   （删首支+尾段 cs:37773/37860 加 1/50）系 1457 真实改动。**裁决：1456 二进制
-    //   真值=首分支在**。JS BuriedChestsPass.nextJungleItem 有意取 1457 → JS 侧偏差
-    //   移交协调者（本批 JS src 零改动纪律）。★LLLLLL 起（hellfort 主体回 1456 后）
-    //   oracle 默认=1456 真值：JS BuriedChestsPass JJJJJJ 批已回滚 1456，双端同态，
-    //   无 env 即对拍口径（金标再生 §2a 命令无 env 亦正确）；SW_MB_1457=1 才切 1457
-    //   口径（1457 对齐战役备用，勿默认）。
-    bool MB_1457 = Environment.GetEnvironmentVariable("SW_MB_1457") != null;
+    //   真值=首分支在**。
+    // ★2026-08-23 1457 对齐档 2：项目基准切 ../Terarria1457/ → oracle 默认翻 **1457**
+    //   （JS BuriedChestsPass 同批复线,双端同态）：GetNextJungleChestItem 首支删
+    //   （1457 cs:10164-10176 无 Next(50) 位点）、尾段海草 1/50 无条件掷（cs:37773）。
+    //   SW_MB_1457 门删除（1456 口径退役——需要 1456 对拍时用 git 历史版本）。
     int MbNextJungleItem()
     {
         int[] seq = { 211, 212, 213, 964 };
         int result = seq[mbJungleItemIdx % 4];
-        // ★GGGGGG 备案偏差 → ★IIIIII 复裁结案：1456 cs:10147 有 `Next(50)==0 → 753(Seaweed)`
-        //   首分支且二进制同（见 MB 注）；1457 cs:10164 删（海草 1/50 移箱尾段
-        //   cs:37773）。JS BuriedChestsPass.nextJungleItem=1456（JJJJJJ 批回滚，
-        //   注释在案）——oracle 默认 1456 同态；SW_MB_1457=1 切 1457（首支删+尾段
-        //   1/50 加，掷数不变）。
-        if (!MB_1457 && (int)r.Next(50) == 0) result = 753;
-        else if ((int)r.Next(15) == 0) result = 2292;
+        // ★1457 cs:10164-10176：无 `Next(50)==0 → 753` 首分支（1456 cs:10147 有——
+        //   海草 1/50 移箱尾段 cs:37773,见 MbPlaceBuriedChestIvy 尾段）。
+        if ((int)r.Next(15) == 0) result = 2292;
         else if ((int)r.Next(20) == 0) result = 3017;
         mbJungleItemIdx++;
         return result;
@@ -17601,12 +17673,12 @@ Replay(); // ▶MicroBiomes cs:21785
         }
         // 尾段
         if ((int)r.Next(4) == 0) { }                                                     // ivy 2204 1/4
-        // ★GGGGGG：1457 cs:37773 海草副物品 1/50（flag4 && Next(50)==0 → 753）——
-        //   与 MbNextJungleItem 的 1457 对齐同案（1456 该 1/50 在主件函数首分支，
-        //   1457 移至箱尾）。JS tail=1456（JJJJJJ 批回滚）；曾缺 → microbiomes@117172
-        //   掷流分歧。★IIIIII IL 复裁：1456 二进制尾段无此掷（AddBuriedChest Next(50)
-        //   仅 3 处均非海草门）→ 默认（1456 态）跳过；SW_MB_1457=1 才掷（掷侧短路成对）。
-        if (MB_1457 && (int)r.Next(50) == 0) { }                                         // 753 海草 1/50（仅 1457 态）
+        // ★2026-08-23 1457 对齐档 2：1457 cs:37773 海草副物品 1/50（flag4 && Next(50)==0
+        //   → 753）——本函数=常春藤箱路径（flag4 恒真）。1456 无此掷（IIIIII IL 复裁：
+        //   1456 二进制 AddBuriedChest Next(50) 仅 3 处均非尾段海草门,1456 的 1/50 在
+        //   GetNextJungleChestItem 首分支）；基准回 1457 后无条件掷（与 JS BuriedChestsPass
+        //   尾段同批复线,SW_MB_1457 门删除）。
+        if ((int)r.Next(50) == 0) { }                                                    // 753 海草 1/50（1457 cs:37773）
         if (flagDungeon && (int)r.Next(8) == 0) { }                                      // 2192 1/8
         if ((int)r.Next(12) == 0) r.Next(14);                                            // voice
     }
@@ -19139,8 +19211,12 @@ void FcPlantCheck(int x, int y, int sheet)         // PlantCheck（cs:81280-8131
     if (nt != sheet)
     {
         typ[i] = (ushort)nt; frX[i] = (ushort)nfx;
-        bool mushroom = (sheet == 3 || sheet == 110 || sheet == 24) && nfx == 144 ? true : (sheet == 201 && nfx == 270);
-        if (mushroom) frX[i] = (ushort)(sheet == 201 ? 270 : 144);
+        // ★2026-08-23 1457 对齐档 2（cs:81889/81871-81880）：①判据族扩入 61
+        //   （3|61|110|24;1456 cs:81351 是 3|110|24）;②回写键=type2（转化后 nt）
+        //   ==201 → 270（1456 cs:81300-81310 查入口 type）。spore 判定仍用入口帧
+        //   （TryGetNewType 出参语义,C# 在折叠前读 frameX）。
+        bool mushroom = (sheet == 3 || sheet == 61 || sheet == 110 || sheet == 24) && nfx == 144 ? true : (sheet == 201 && nfx == 270);
+        if (mushroom) frX[i] = (ushort)(nt == 201 ? 270 : 144);
     }
     else
     {

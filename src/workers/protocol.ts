@@ -14,6 +14,8 @@ export interface TileBuffers {
   half: ArrayBuffer; slope: ArrayBuffer; wire: ArrayBuffer;
   /** 油漆双通道（0-31，原版 Tile.cs:609-617/:365-373；旧包可缺省——TileStore 以全零补齐） */
   paint?: ArrayBuffer; paintWall?: ArrayBuffer;
+  /** 涂层四位通道（WorldFile.cs:1539-1552 位编码 2/4/8/16；旧包可缺省=全 0） */
+  coat?: ArrayBuffer;
   /** 战争迷雾（旧包可缺省——fromPacket 以全零补齐；读档路径含存档 explored 解码结果） */
   explored?: ArrayBuffer;
 }

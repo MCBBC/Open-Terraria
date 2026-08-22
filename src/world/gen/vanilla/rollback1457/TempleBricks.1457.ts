@@ -1,5 +1,7 @@
 // ★1457 语义存档（KKKKKK 批 2026-08-22 从 TemplePass.ts 回滚时摘存）。
-// 本文件**不接线**（零被 import），仅供 1457 对齐战役复用。
+// ★2026-08-23 1457 对齐档 2：**已接线**——TemplePass 本批把 1456「全房对四角连线」
+//   换回 makeTemple_GenerateBricks（本文件 makeTempleGenerateBricks,已 export），
+//   roomDepths 深度组记账在 TemplePass 房间链环内同步复线。
 // 1457 差异（相对 1456，源=Terarria1457/Terraria/WorldGen.cs）：
 //   makeTemple（cs:33730-34591）把 1456 的「全房对四角连线」（cs:33700-33760,
 //   k×l×m×n 四重环+三坐标同步步进逐列填 226,零掷骰）替换为 makeTemple_GenerateBricks
@@ -54,7 +56,7 @@ function roundBanker(v: number): number {
  *  （DungeonBounds.UpdateBounds）②组界 Inflate(10)（setter 钳 [10, 尺寸-10]）+
  *  CalculateHitbox（Right≤Left→Left+1）→ 组界全填 ClearEverything+226 ③两两深度组
  *  四角 StrictAngles 连线（Left/Right × Top/Bottom）。 */
-function makeTempleGenerateBricks(st: TileStore, rooms: Room[], depths: number[]): void {
+export function makeTempleGenerateBricks(st: TileStore, rooms: Room[], depths: number[]): void {
   const AMOUNT = 10;
   const clamp = (v: number, hi: number) => Math.max(10, Math.min(hi - 10, v));
   type Bnd = { l: number; t: number; r: number; b: number };

@@ -27,6 +27,7 @@ import { projectileData } from '../src/data/vanillaProjectiles';
 import type { GameHooks } from '../src/entities/types';
 
 const gameSrc = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
+const playerSrc = readFileSync(new URL('../src/entities/Player.ts', import.meta.url), 'utf8');
 
 type DustLike = { vx: number; vy: number; noGravity: boolean; scale: number };
 
@@ -433,7 +434,9 @@ describe('⑦ 坠落星 75 点击消耗（:42602 门无豁免）', () => {
   });
 
   it('金币枪币槽优先扫描接线（PickAmmo :52593-52605 前置环）', () => {
-    expect(gameSrc).toMatch(/\[\[50, 54\], \[54, 58\], \[0, 54\]\]/);
-    expect(gameSrc).toContain('useAmmo === 71');
+    // 2026-08-23 弹药轮换批：扫描收拢进 Player.pickAmmoSlot（PickAmmo_PickAmmoItem
+    // :54368-54390）——币族前置环 = AmmoSlots 模式币槽序分支（Player.cs:3180/:54372）
+    expect(gameSrc).toMatch(/pickAmmoSlot\(ammoMatch, useAmmo/);
+    expect(playerSrc).toMatch(/useAmmo === 71 \? AMMO_SLOT_ORDER_COINS_ONLY : AMMO_SLOT_ORDER_AMMO_ONLY/);
   });
 });

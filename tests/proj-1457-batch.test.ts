@@ -24,18 +24,20 @@ describe('1457 悠悠球三表(ProjectileID.cs:281/283 + AI_099_2)', () => {
     expect(YOYO_TOP[563]).toBe(16);
     expect(YOYO_TOP[554]).toBe(22);
   });
-  it('SummonTagDamageMultiplier: 1456 表 {688/689/690:0.5}+864:0.669 并表(1456 ProjectileID.cs:31;864=1457 :37 新增)', () => {
-    // 本仓标杆 1456:688/689/690 闪电光环=0.5(Terraria.ID/ProjectileID.cs:31
-    // CreateFloatSet(1f,688f,0.5f,689f,0.5f,690f,0.5f));864 Smolstar=0.669 为 1457 新增
-    // (1457 ProjectileID.cs:37),随从弹面并表登记
-    expect(SUMMON_TAG_MUL).toEqual({ 864: 0.669, 688: 0.5, 689: 0.5, 690: 0.5 });
+  it('SummonTagDamageMultiplier: ★1457 表={864:0.669}(ProjectileID.cs:37;1456 的 688/689/690:0.5 三项已删)', () => {
+    // 1457 ProjectileID.cs:37 CreateFloatSet(1f,864f,0.669f)——旧 1456 :31 的
+    // 688/689/690 闪电光环 0.5 三项在 1457 已移除,864 Smolstar=0.669 唯一保留。
+    // 2026-08-23 基准切换 1457 后按 1457 表锁（旧"并表"断言作废）
+    expect(SUMMON_TAG_MUL).toEqual({ 864: 0.669 });
   });
 });
 
 describe('1457 回力镖/钩爪(AI_003/AI_007)', () => {
-  it('双钩 73/74 回收 17(1456 Projectile.cs:49894-49902 ai[0]==1 num18=17f;22 是 1457 才改,本仓标杆 1456;报告"649 星尘钩"系误标,646-649 恒 24)', () => {
-    expect(HOOK_PROJ_STATS[73].retract).toBe(17);
-    expect(HOOK_PROJ_STATS[74].retract).toBe(17);
+  it('双钩 73/74 回收 22(1457 Projectile.cs:53723-53725 ai[0]==1 num18=22f;1456 :49888-49890=17)+牵引 12.5(1457 Player.cs:23022-23025 case 73/74;1456 无覆盖=11);报告"649 星尘钩"系误标,646-649 恒 24', () => {
+    expect(HOOK_PROJ_STATS[73].retract).toBe(22);
+    expect(HOOK_PROJ_STATS[74].retract).toBe(22);
+    expect(HOOK_PROJ_STATS[73].pull).toBe(12.5);
+    expect(HOOK_PROJ_STATS[74].pull).toBe(12.5);
     expect(HOOK_PROJ_STATS[649].retract).toBe(24);
   });
 });
@@ -90,8 +92,8 @@ describe('1457 弹幕 SetDefaults 批(vanilla-projectiles.json = 1457 终值)', 
     expect(projectileData(350)?.timeLeft).toBe(300);
     expect(projectileData(352)?.timeLeft).toBe(1200);
   });
-  it('478 诅咒镖 penetrate 2(1456 回滚,Item.cs:5263;1457 改 3)/ 480 timeLeft 180 / 698 地裂 75×200·timeLeft 5', () => {
-    expect(projectileData(478)?.penetrate).toBe(2);
+  it('478 诅咒镖 penetrate 3(★1457 基准 Projectile.cs:5531;旧 1456 钉 2 已撤)/ 480 timeLeft 180 / 698 地裂 75×200·timeLeft 5', () => {
+    expect(projectileData(478)?.penetrate).toBe(3);
     expect(projectileData(480)?.timeLeft).toBe(180);
     expect(projectileData(698)?.width).toBe(75);
     expect(projectileData(698)?.timeLeft).toBe(5);
@@ -137,11 +139,11 @@ describe('1457 Item SetDefaults 终值抽查(combat/whips 全量在 item-stats-g
     expect(c['683'].useAnimation).toBe(27);
     expect(c['683'].knockBack).toBeCloseTo(6.66, 6);
   });
-  it('悠悠球 damage(3283-3291)与鞭系(whips 5477/5688;1456 终值:Item.cs:43149/:44660)', () => {
+  it('悠悠球 damage(3283-3291)与鞭系(whips 5477/5688;★1457 基准终值:Item.cs:43178/:44693)', () => {
     expect(c['3291'].damage).toBe(120);
     expect(c['3315'].crit).toBe(20);
-    // 1457 终值:5477 花鞭 dmg=75→50(Item.cs DefaultToWhip(1032,50,2f,4f))/
-    // 5688 史莱姆鞭 dmg=12→15(DefaultToWhip(1104,15,1f,4f))
+    // 1457 终值:5477 花鞭 dmg=50(Item.cs:43178 DefaultToWhip(1032,50,2f,4f))/
+    // 5688 史莱姆鞭 dmg=15(DefaultToWhip(1104,15,1f,4f))——旧"1456 终值 75/12"标题随基准切换勘误
     expect((whipsJson as Record<string, { dmg: number }>)['5477'].dmg).toBe(50);
     expect((whipsJson as Record<string, { dmg: number }>)['5688'].dmg).toBe(15);
   });

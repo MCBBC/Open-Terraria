@@ -34,6 +34,20 @@ export class TileStore {
   readonly paint: Uint8Array;
   /** 背景墙油漆 id（0-31，原版 Tile.cs:365-373 `wallColor()` = bTileHeader & 0x1F） */
   readonly paintWall: Uint8Array;
+  /** 涂层（Coating）四位：bit 编码 = 存档 header4 位（WorldFile.cs:1539-1552 写 /
+   *  :2659-2677 读）——bit1(2)=invisibleBlock bit2(4)=invisibleWall
+   *  bit3(8)=fullbrightBlock bit4(16)=fullbrightWall。
+   *  原版运行时位在 Tile.cs bTileHeader3 bit5/6/7（:558-607）与 sTileHeader bit15
+   *  （:748-762），本仓统一收进单字节通道（同 paint 先例）。物品侧：
+   *  4668 夜明涂料 paintCoating=1（Item.cs:38471）→ fullbright 位；
+   *  5344 回声涂料 paintCoating=2（Item.cs:42387）→ invisible 位。 */
+  readonly coat: Uint8Array;
+  /** 显示隐形块/墙（Main.ShouldShowInvisibleBlocksAndWalls，Main.cs:57403-57408
+   *  = SceneMetrics.EchoMonolith（657 回声腔激活帧，SceneMetrics.cs:545-549）
+   *  ∨ Player.CanSeeInvisibleBlocks（幽灵护目镜 4409 :14080 / 回声腔物品 5345
+   *  时装格 :13796））。本仓由 Game 每 tick 装配进 store（渲染/光照/烘焙的
+   *  公共分母）；翻转时 Game 负责 chunks.invalidateAll + lighting.dirty */
+  showInvisibleBlocks = false;
   // wire 位掩码常量（对应原版 Tile.cs:396-459 的 wire/wire2/wire3/wire4/actuator/inActive）
   static readonly WIRE_RED = 1;
   static readonly WIRE_BLUE = 2;
@@ -42,6 +56,15 @@ export class TileStore {
   static readonly WIRE_ACTUATOR = 16;
   static readonly WIRE_ACTUATED = 32;
   static readonly WIRE_COLORS = 15; // 四色掩码
+
+  // 涂层位掩码（= 存档 header4 位，WorldFile.cs:1539-1552；Tile.cs 运行时位
+  // bTileHeader3 bit5/6/7 + sTileHeader bit15 的仓内单字节编码）
+  static readonly COAT_INVISIBLE_BLOCK = 2;  // Tile.cs:558-573 invisibleBlock
+  static readonly COAT_INVISIBLE_WALL = 4;   // Tile.cs:575-590 invisibleWall
+  static readonly COAT_FULLBRIGHT_BLOCK = 8; // Tile.cs:592-607 fullbrightBlock
+  static readonly COAT_FULLBRIGHT_WALL = 16; // Tile.cs:748-762 fullbrightWall
+  static readonly COAT_BLOCK_MASK = 2 | 8;   // 方块侧两位（KillTile 清位域）
+  static readonly COAT_WALL_MASK = 4 | 16;   // 墙侧两位（KillWall 清位域）
 
   // tile 变更监听（chunk 缓存 / 光照脏标记 / 液体模拟统一从这里拿事件）
   private listeners: Array<(x: number, y: number) => void> = [];
@@ -72,6 +95,8 @@ export class TileStore {
       const nBuf = bufs.type.byteLength / 2;
       this.paint = bufs.paint ? new Uint8Array(bufs.paint) : new Uint8Array(nBuf);
       this.paintWall = bufs.paintWall ? new Uint8Array(bufs.paintWall) : new Uint8Array(nBuf);
+      // 涂层位通道（旧包可缺省 = 全 0 无涂层，同 paint 兜底）
+      this.coat = bufs.coat ? new Uint8Array(bufs.coat) : new Uint8Array(nBuf);
       return;
     }
     const n = w * h;
@@ -87,6 +112,7 @@ export class TileStore {
     this.wire = new Uint8Array(n);
     this.paint = new Uint8Array(n);
     this.paintWall = new Uint8Array(n);
+    this.coat = new Uint8Array(n);
   }
 
   idx(x: number, y: number): number { return y * this.w + x; }
@@ -177,7 +203,10 @@ export class TileStore {
     //   KillTile（WorldGen.cs:63933-63939）active(false)+halfBrick(false)+ClearBlockPaintAndCoating；
     //   PlaceTile（WorldGen.cs:59499-59501）!active() 时 Clear(Tile|TilePaint|Slope)。
     //   即油漆只在 active→active 的替换（草化/转化）中存活
-    if (type === 0 || !wasActive) this.paint[i] = 0;
+    if (type === 0 || !wasActive) {
+      this.paint[i] = 0;
+      this.coat[i] &= ~TileStore.COAT_BLOCK_MASK; // ClearBlockPaintAndCoating（Tile.cs:934-939：color/fullbright/invisible 三清，只清方块侧）
+    }
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetTile, x, y, v: type, fx: frameX, fy: frameY });
     this.listeners.forEach((fn) => fn(x, y));
   }
@@ -209,7 +238,10 @@ export class TileStore {
     this.frameX[i] = frameX;
     this.frameY[i] = frameY;
     if (type === 0) { this.half[i] = 0; this.slope[i] = 0; } // 挖除同步清位（防生成期脏残留）
-    if (type === 0 || !wasActive) this.paint[i] = 0;          // KillTile/PlaceTile 油漆清位（同 setTile）
+    if (type === 0 || !wasActive) {
+      this.paint[i] = 0;                          // KillTile/PlaceTile 油漆清位（同 setTile）
+      this.coat[i] &= ~TileStore.COAT_BLOCK_MASK; // ClearBlockPaintAndCoating（Tile.cs:934-939）
+    }
   }
 
   setWall(x: number, y: number, wall: number) {
@@ -221,7 +253,10 @@ export class TileStore {
       // 墙漆清位：KillWall（WorldGen.cs:60425-60426）wall=0 后 ClearWallPaintAndCoating；
       // PlaceWall（:75199-75201）本身不清 wallColor——但 KillWall 已保证 wall==0 ⇒ 无漆，
       // 故 0→非0 铺墙时同样归零（保持原版不可达态不变量，见 world/Paint.ts）
-      if (wall === 0 || !hadWall) this.paintWall[i] = 0;
+      if (wall === 0 || !hadWall) {
+        this.paintWall[i] = 0;
+        this.coat[i] &= ~TileStore.COAT_WALL_MASK; // ClearWallPaintAndCoating（Tile.cs:941-946）
+      }
       if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetWall, x, y, v: wall, fx: 0, fy: 0 });
       this.listeners.forEach((fn) => fn(x, y));
     }
@@ -232,7 +267,10 @@ export class TileStore {
     const i = this.idx(x, y);
     const hadWall = this.wall[i] !== 0;
     this.wall[i] = wall;
-    if (wall === 0 || !hadWall) this.paintWall[i] = 0; // 同 setWall 的墙漆清位
+    if (wall === 0 || !hadWall) {
+      this.paintWall[i] = 0;                    // 同 setWall 的墙漆清位
+      this.coat[i] &= ~TileStore.COAT_WALL_MASK; // ClearWallPaintAndCoating（Tile.cs:941-946）
+    }
   }
 
   /** 油漆写入（WorldGen.paintTile/paintWall 等价原语）。发 listeners：油漆改变 tile/wall
@@ -263,6 +301,24 @@ export class TileStore {
   setPaintWallSilent(x: number, y: number, v: number) {
     if (!this.inBounds(x, y)) return;
     this.paintWall[this.idx(x, y)] = v & 31;
+  }
+
+  /** 涂层位写入（WorldGen.paintCoatTile/paintCoatWall 等价原语的位装配侧）。
+   *  发 listeners：涂层改变 tile/wall 渲染（隐形跳过/全亮叠层）→ chunk 须重烘。
+   *  mask=要改的位域（COAT_*），bits=该域目标值（0=清除）。 */
+  setCoat(x: number, y: number, mask: number, bits: number) {
+    if (!this.inBounds(x, y)) return;
+    const i = this.idx(x, y);
+    const v = (this.coat[i] & ~mask) | (bits & mask);
+    if (this.coat[i] === v) return;
+    this.coat[i] = v;
+    this.listeners.forEach((fn) => fn(x, y));
+  }
+
+  setCoatSilent(x: number, y: number, mask: number, bits: number) {
+    if (!this.inBounds(x, y)) return;
+    const i = this.idx(x, y);
+    this.coat[i] = (this.coat[i] & ~mask) | (bits & mask);
   }
 
   /** 导线/致动位写入（Wiring 系统）。不发 listeners：导线不进 chunk 烘焙画布，

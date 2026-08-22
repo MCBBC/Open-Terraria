@@ -12,6 +12,7 @@ import { shade } from '../assets/Palette';
 import { applyPaintTint, applyPaintTintSpecial, getTilePaintSettings, type LeafPaintSettings } from '../world/Paint';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
 import type { AutoTiler } from './AutoTiler';
+import { TileStore } from '../world/TileStore';
 import type { World } from '../world/World';
 
 // 我们的 tile → Maples RuleTile 规则名（有规则的走素材自动贴合，无规则回退程序化）
@@ -30,6 +31,12 @@ export interface ChunkPair {
   sy: number;
   /** cell 归还凭据 page*CELLS_PER_PAGE+slot;-1 = 外部 stub(测试)/独立目标(无页) */
   cell: number;
+  /** 荧光涂层叠层（独立 256² 画布，懒分配——仅 chunk 内存在 fullbrightBlock/Wall
+   *  涂层位时创建）：从已烘墙/页拷贝涂层格 16×16 区域。Renderer 在光照合成【后】
+   *  绘制 = 原版 DrawTiles_GetLightOverride（TileDrawing.cs:6727-6731）tileLight=White
+   *  的等价物（全屏乘光管线无逐格顶点色通道，叠层是仓内最小侵入实现）。
+   *  undefined = 本 chunk 无荧光涂层格（零开销路径）。 */
+  glow?: HTMLCanvasElement;
 }
 
 // ---- 油漆逐像素着色（ChunkCache 静态烘焙消费，world/Paint 字节码真值） ----
@@ -572,13 +579,49 @@ export class ChunkCache {
     const wall = wallPage, tile = tilePage;
     // ★异常安全:save 后必须 restore——异常逃逸会让【共享页】上下文残留 clip+
     // translate,下次烘焙错位到 2×偏移(独立画布时代异常自含,页化后必须显式复位)
+    let pair: ChunkPair;
     try {
       this.bakeChunkBody(cx, cy, wctx, ctx, wall, tile, ox, oy);
     } finally {
       wctx.restore();
       ctx.restore();
     }
-    return { wall, tile, sx: ox, sy: oy, cell };
+    pair = { wall, tile, sx: ox, sy: oy, cell };
+    // ---- 荧光涂层叠层烘焙（fullbrightBlock/Wall 位格 16×16 拷贝；无涂层格零开销）----
+    //  墙区先拷、tile 区后拷 = 同格内墙下 tile 上的世界层序（跨格序与原版逐格
+    //  绘制一致：涂层格各自独立 16×16）。多格物件只有被涂格区域进叠层 = 与油漆
+    //  逐格着色的等价边界同口径（见下方油漆 pass 登记注）。
+    const st2 = this.world.store;
+    const x0 = cx * CHUNK, y0 = cy * CHUNK;
+    const FB = TileStore.COAT_FULLBRIGHT_BLOCK | TileStore.COAT_FULLBRIGHT_WALL;
+    let hasGlow = false;
+    for (let ly = 0; ly < CHUNK && !hasGlow; ly++) {
+      for (let lx = 0; lx < CHUNK; lx++) {
+        if (st2.coat[st2.idx(x0 + lx, y0 + ly)] & FB) { hasGlow = true; break; }
+      }
+    }
+    if (hasGlow && typeof document !== 'undefined') {
+      const glow = document.createElement('canvas');
+      glow.width = S; glow.height = S;
+      const gctx = glow.getContext('2d')!;
+      gctx.imageSmoothingEnabled = false;
+      for (let ly = 0; ly < CHUNK; ly++) {
+        for (let lx = 0; lx < CHUNK; lx++) {
+          const i = st2.idx(x0 + lx, y0 + ly);
+          const c = st2.coat[i];
+          if (!(c & FB)) continue;
+          const px = lx * TILE, py = ly * TILE;
+          if (c & TileStore.COAT_FULLBRIGHT_WALL) {
+            gctx.drawImage(wallPage, ox + px, oy + py, TILE, TILE, px, py, TILE, TILE);
+          }
+          if (c & TileStore.COAT_FULLBRIGHT_BLOCK && st2.flags[i] && st2.type[i] !== 0) {
+            gctx.drawImage(tilePage, ox + px, oy + py, TILE, TILE, px, py, TILE, TILE);
+          }
+        }
+      }
+      pair.glow = glow;
+    }
+    return pair;
   }
 
   /** bakeChunkInto 的绘制主体(私有;坐标全为 cell 内局部,translate 已由外层挂好) */
@@ -599,6 +642,10 @@ export class ChunkCache {
           const i = st.idx(x, y);
           const wallId = st.wall[i];
           if (wallId === 0) continue;
+          // 回声涂层墙（invisibleWall）：不绘制（TileDrawing.IsVisible 同款门——
+          // DrawTiles 墙段 :991 flag2=IsVisible → !flag2 时 flag=false 跳墙绘制），
+          // 仅 showInvisibleBlocks（回声腔激活/幽灵护目镜）时显形
+          if ((st.coat[i] & TileStore.COAT_INVISIBLE_WALL) !== 0 && !st.showInvisibleBlocks) continue;
           const px = lx * TILE, py = ly * TILE;
           if (this.wallTiler.hasTexture(wallId)) {
             this.wallTiler.draw(wctx, st, x, y, wallId, this.truncatesWalls, px, py);
@@ -633,6 +680,11 @@ export class ChunkCache {
         const type = st.type[i];
         // 原版语义:非活性格不渲染(TileRunner 会给空气格写幽灵 type)
         if (type === 0 || !st.flags[i]) continue;
+        // 回声涂层块（invisibleBlock）：不绘制（TileDrawing.IsVisible，TileDrawing.cs:
+        // 1434-1452——invisibleBlock() → return _shouldShowInvisibleBlocks；墙/水从
+        // 缺口透出 = 原版"隐形的墙后世界"）。特例同表：19 平台 48 行/541·631 恒隐
+        // （:1437-1443，与涂层无关的固有隐形帧，本仓未建模该帧语义，不接）
+        if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) continue;
         // 已致动(inActive):幽灵态淡显(原版 DrawInactiveSorter,Main.cs:2828 附近)
         // 每格开头统一设定 alpha(各 continue 路径无需逐个恢复,下一格自愈)
         const actuated = (st.wire[i] & 32) !== 0;
@@ -642,6 +694,11 @@ export class ChunkCache {
         // 风摆动图块（草/藤/吊挂植物/树冠标记帧）：摘出静态烘焙，
         // 由 Renderer 的 WindSway overlay 逐帧动态绘制（原版 AddSpecialPoint 特殊路径）
         if (def.vanilla && swayBakeSkip(type, st.frameX[i])) continue;
+        // 训练假人（tile 378）：摘出静态烘焙，由 Renderer drawDummyTileAnim 逐帧
+        // 动态绘制当前动画行（TileDrawing.cs:4374-4399 addFrY 单层绘制语义）——
+        // 烘焙静止行垫底+动画行覆盖会出现"同朝向重影"：后仰姿态的底部/边缘
+        // 透明像素会透出烘焙层的静止行（2026-08-23 用户实报）
+        if (def.vanilla?.sheet === 378) continue;
         // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
         if (def.vanilla && this.autotiler) {
           // 动画陈设（原版 AnimateTiles/GetTileDrawData addFrY）：frameY += 帧索引*pitch

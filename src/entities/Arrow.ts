@@ -7,6 +7,7 @@ import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/Sprit
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { hitCritters, hitPlayer, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
+import { trySnapStrike } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { LIQUID_TYPE } from '../world/TileStore';
 import { TILE } from '../core/constants';
@@ -481,10 +482,27 @@ export class Arrow extends Entity {
   /** 477 水晶镖平滑姿态角（前 5 拍对齐速度角+π/2、之后 (rot×2+aim)/3，
    *  :54802-54812——draw 消费；null = 未初始化走默认档） */
   dartRot: number | null = null;
+  // ---- 1457 弧线引矢（AI_001_Features 位标 Projectile.cs:243-289——ai[2] 的
+  //      FloatIntUnion 位 0..3；本仓展开为四布尔。写入端 = Player 侧
+  //      Update_HarpyCharm/HarpyCharmEffect :28648-28704 扫描 → applyHarpyCharm
+  //      （ApplyHarpyCharm :58779-58807）；消费端 = subStep 尾 homing 段（AI_001
+  //      尾 :58752-58777）+ 命中侧 phoenixQuivered（StatusNPC :11178-11182）----
+  /** bit0 HarpyCharmed（:245-251）：已被引矢锁定——homing 激活 + 玩家扫描跳过 */
+  harpyCharmed = false;
+  /** bit1 HarpyCharmConsumed（:257-263）：homing 中目标丢失 → 置位停引（:58772-58776），
+   *  弹体回普通弹道（原版位不复位） */
+  harpyCharmConsumed = false;
+  /** bit2 PhoenixQuivered（:269-275，6181 凤凰箭袋标记）：命中 → Hellfire(323) 300t
+   *  （StatusNPC :11178-11182 `nPC.AddBuff(323, 300)`） */
+  phoenixQuivered = false;
+  /** bit3 SeraphNecklaced（:281-287，6180 炽天使标记）：命中仅视觉
+   *  （SilverBulletSparkle :71881-71893 + GetAlpha 白 :80608-80613），无结算面 */
+  seraphNecklaced = false;
 
   /** FindTargetWithLineOfSight 等价：视距内最近且有视线的敌怪（:38571 FindTargetWithLineOfSight）。
-   *  h = 目标命中盒高（225 叶绿箭归巢瞄准点上偏移 nPC.height×0.1..0.5 消费，:17147） */
-  private nearestEnemyWithLos(game: GameHooks, range: number): { cx: number; cy: number; h: number } | null {
+   *  h = 目标命中盒高（225 叶绿箭归巢瞄准点上偏移 nPC.height×0.1..0.5 消费，:17147）。
+   *  公开：1457 弧线引矢玩家侧扫描（harpyCharmEffect）对在场箭逐支调同款视距索敌 */
+  nearestEnemyWithLos(game: GameHooks, range: number): { cx: number; cy: number; h: number } | null {
     let best: { cx: number; cy: number; h: number } | null = null;
     let bestD = range;
     for (const ent of game.enemies()) {
@@ -1087,6 +1105,22 @@ export class Arrow extends Entity {
       if (st.isSolid(tx, y)) return false;
     }
     return true;
+  }
+
+  /** ApplyHarpyCharm（Projectile.cs:58779-58807）：引矢落标——rotateTowards
+   *  (maxChange=π :58781/:58784) 一步全转保速 + 置 HarpyCharmed 位（:58787）+
+   *  6181→PhoenixQuivered（:58788-58791）/ 6180→SeraphNecklaced（:58792-58795）+
+   *  timeLeft 钳 ≤300（:58797-58800）。粒子（:58802 HarpyCharm/PhoenixQuiver/
+   *  SeraphNecklace 三型）视觉面省略。 */
+  applyHarpyCharm(tcx: number, tcy: number, itemVid: number): void {
+    const sp = Math.hypot(this.vx, this.vy);
+    const want = Math.atan2(tcy - this.cy, tcx - this.cx);
+    this.vx = Math.cos(want) * sp;                       // rotateTowards π = 全角一步到位
+    this.vy = Math.sin(want) * sp;
+    this.harpyCharmed = true;                            // :58787
+    if (itemVid === 6181) this.phoenixQuivered = true;   // :58788-58791
+    if (itemVid === 6180) this.seraphNecklaced = true;   // :58792-58795
+    if (this.life > 300) this.life = 300;                // :58797-58800 timeLeft 钳 300
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
@@ -1728,6 +1762,23 @@ export class Arrow extends Entity {
         }
       }
     }
+    // ---- 1457 弧线引矢消费（AI_001 尾 :58752-58777——本段在 AI_001 最末，重力/
+    //      姿态/±16 钳之后、位移之前；命中侧 phoenixQuivered 见下方命中环）----
+    if (this.harpyCharmed && !this.harpyCharmConsumed) {
+      // :58756-58758 num253=视距 1600、maxChange=π（一步全转）→
+      // FindTargetWithLineOfSight(1600)
+      const tgt = this.nearestEnemyWithLos(game, 1600);
+      if (tgt) {
+        const spH = Math.hypot(this.vx, this.vy);
+        const wantH = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
+        this.vx = Math.cos(wantH) * spH;                   // :58761 rotateTowards(π) 保速
+        this.vy = Math.sin(wantH) * spH;
+        if (spH < 1) { this.vx = 0; this.vy = 1; }         // :58762-58765 SafeNormalize(UnitY)
+        if (spH < 12) { this.vx *= 1.05; this.vy *= 1.05; }   // :58766-58769 低速自加速
+      } else {
+        this.harpyCharmConsumed = true;                    // :58772-58776 无目标 → 位停引
+      }
+    }
     this.x += this.vx;
     this.y += this.vy;
     // 喵刀弹 502：迪斯科点光（Projectile.cs:22613-22621 (Disco+0.5)/2）+ 拖尾采样
@@ -1922,6 +1973,12 @@ export class Arrow extends Entity {
           const en4 = e as unknown as { onFire3T?: number };
           en4.onFire3T = Math.max(en4.onFire3T ?? 0, 5 + Math.random() * 5); // AddBuff(323,Next(300,600))=5-10s
         }
+        // 1457 凤凰箭袋 6181 引矢标记（StatusNPC :11178-11182：aiStyle1 +
+        // PhoenixQuivered 位 → AddBuff(323, 300) = Hellfire 定值 5s，无掷幅）
+        if (this.phoenixQuivered) {
+          const en4b = e as unknown as { onFire3T?: number };
+          en4b.onFire3T = Math.max(en4b.onFire3T ?? 0, 5);
+        }
         // 命中 debuff（StatusNPC:10555 表驱动——火枪弹 2 33% OnFire 180t 等,按型号掷骰）
         applyProjStatus(this.projId, e as unknown as Record<string, number>);
         if (this.betsyCurse) {
@@ -1938,6 +1995,18 @@ export class Arrow extends Entity {
             e as unknown as Record<string, number>);
         }
         if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
+        // 拍击石 6167 kind0 远程脉冲（Damage_PVE_Inner :13443-13446 `(ranged &
+        // ownedBySomeone) && accSnappingStone → TryMakingSnappingStoneStrike(…,0)`）：
+        // 门 = 玩家弹（!hostile ≈ ownedBySomeone,本仓同 :1019 owner==myPlayer 近似）
+        // + 型号 ranged 位（projectileData 表,1121 脉冲弹自身也 ranged——360t 共用冷却
+        // 在 trySnapStrike 内先置,不递归；随从/哨兵弹 668/680/1120 等无 ranged 位自然
+        // 排除,与原版同门）+ 6167 在身。30×远程伤/120px/2 目标弹 1121
+        if (!this.hostile
+          && (projectileData(this.projId)?.ranged ?? false)
+          && (game.player as unknown as { equipStats?: { accSnappingStone?: boolean } })
+            ?.equipStats?.accSnappingStone) {
+          trySnapStrike(game, game.player, 0, e.x + e.w / 2, e.y + e.h / 2, e.id);
+        }
         // ★1457 GetDamageMultiplier(Player.cs:49810-49813):宝石弹【全部伤害】(含本体
         //   直击)乘 SwirlTwins 0.6/CanBounce 0.8/ArPenSpread 0.5 取最小——曾只在
         //   AoeExplosion 爆伤消费,三系法杖本体直击虚高 25-67%(完整性审查 P1-1)
@@ -2374,5 +2443,74 @@ export function nudgePhantomOrbs(game: GameHooks, ownerId: number, dvx: number, 
     if (p.orbOwnerId !== ownerId || p.orbAi0 === -1) continue;
     p.vx += dvx;
     p.vy += dvy;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 1457 弧线引矢（鹰妖护符 6166 / 炽天使项链 6180 / 凤凰箭袋 6181）玩家侧扫描
+// ---------------------------------------------------------------------------
+
+/** 原版 Projectile.arrow = true 弹型全集（SetDefaults 23 处直写 :811/:821/:841/:853/
+ *  :1241/:1747/:1908/:2062/:2097/:2583/:3104/:3642/:3692/:5440/:5478/:5608/:5685/
+ *  :6783/:6877/:7525/:7997/:8847/:9574——1 木箭/2 燃烧箭/4 邪箭/5 小丑箭/41 狱炎箭/
+ *  91 圣箭/225 叶绿箭/469 蜂箭/474 骨箭/485 狱翼箭/639 月总箭/710 空中祸害裂片/
+ *  932 仙王射弹等）。弧线引矢扫描门 = `projectile.arrow && aiStyle == 1`
+ *  （Player.cs:28682） */
+export const VANILLA_ARROW_PROJS = new Set([
+  1, 2, 4, 5, 41, 91, 103, 117, 120, 172, 225, 278, 282, 469, 474, 485, 495,
+  631, 639, 710, 819, 932, 1006,
+]);
+
+/** HarpyCharmEffect 玩家参数面（结构化类型——Player 实体直传，避免实体环） */
+export interface HarpyCharmPlayer {
+  cx: number;
+  cy: number;
+  equipStats: { accHarpyCharm: boolean; accSeraphNecklace: boolean; hasPhoenixQuiver: boolean };
+  /** Player.accHarpyCharmCooldown（:1219）——命中引矢时直写（:28702） */
+  accHarpyCharmCooldown: number;
+}
+
+/** HarpyCharmEffect（Player.cs:28661-28704，由 Update_HarpyCharm :28648-28659 在
+ *  冷却归零拍调用）：扫描在场玩家箭——距玩家 [400,1200)（:28667-28687 三非门：
+ *  <400 太近不引 / ≥当前最近跳过 / >1200 太远不引）、arrow+aiStyle1+未引（:28682），
+ *  取最近一支且其 FindTargetWithLineOfSight(1600) 有视线目标 → ApplyHarpyCharm。
+ *  冷却 90t、6180 炽天使 ×0.8=72（:28670-28674）；标记件优先级
+ *  hasPhoenixQuiver→6181 > accSeraphNecklace→6180 > 6166（:28700）。 */
+export function harpyCharmEffect(game: GameHooks, player: HarpyCharmPlayer): void {
+  if (!player.equipStats.accHarpyCharm || player.accHarpyCharmCooldown > 0) return;   // :28663-28666
+  const NEAR = 400;      // num :28667
+  const FAR = 1200;      // num2 :28668
+  const LOS = 1600;      // num3 :28669
+  let cd = 90;           // num4 :28670
+  if (player.equipStats.accSeraphNecklace) cd = Math.trunc(cd * 0.8);   // :28671-28674 →72
+  let best: Arrow | null = null;             // num6 :28676
+  let bestD = Number.POSITIVE_INFINITY;      // num7 :28678 float.MaxValue
+  let target: { cx: number; cy: number } | null = null;   // npcTargetIndex
+  const list = (game as unknown as { entities?: { projectiles?: unknown[] } }).entities?.projectiles ?? [];
+  for (const o of list) {
+    const p = o as Arrow;
+    // :28682 门：active/arrow/owner==whoAmI/aiStyle==1/未 HarpyCharmed——本仓
+    // owner 等价 = 非敌方弹（!hostile；玩家弹恒 owner 本地）
+    if (p.dead || p.hostile) continue;
+    if (!VANILLA_ARROW_PROJS.has(p.projId)) continue;
+    if ((projectileData(p.projId)?.aiStyle ?? -1) !== 1) continue;
+    if (p.harpyCharmed) continue;
+    const d = Math.hypot(p.cx - player.cx, p.cy - player.cy);   // num8 :28686
+    // :28687 原式 `!(d<400) && !(d>=best) && !(d>1200)` = [400,1200] 内比最近
+    if (!(d < NEAR) && !(d >= bestD) && !(d > FAR)) {
+      const tgt = p.nearestEnemyWithLos(game, LOS);             // :28689
+      if (tgt) {
+        bestD = d;
+        best = p;
+        target = tgt;
+      }
+    }
+  }
+  if (best && target) {
+    // :28700 标记件 id 三档 → :28701 ApplyHarpyCharm → :28702 冷却写入
+    const itemVid = player.equipStats.hasPhoenixQuiver ? 6181
+      : player.equipStats.accSeraphNecklace ? 6180 : 6166;
+    best.applyHarpyCharm(target.cx, target.cy, itemVid);
+    player.accHarpyCharmCooldown = cd;
   }
 }

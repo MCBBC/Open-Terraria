@@ -35,11 +35,9 @@ export interface ItemCombat {
 const RAW = combatJson as unknown as Record<string, ItemCombat>;
 
 // ---- 鞭系（DefaultToWhip 提取，Item.cs SetDefaults switch 共 18 把）----
-// JSON 无注释,此处钉两文件的手钉 1456 值（1456↔1457 冲突以 1456 为准,重跑 recon --fix
-// 会抹回 1457,金标闸门 tests/item-stats-golden-1457.test.ts ① 白名单拦截）：
-//   whips[5477] 花鞭 dmg=75（Item.cs:43149 `DefaultToWhip(1032, 75, 2f, 4f)`;1457 改 50）
-//   whips[5688] 史莱姆鞭 dmg=12（Item.cs:44660 `DefaultToWhip(1104, 12, 1f, 4f)`;1457 改 15）
-//   combat[4607] 沙漠虎杖 knockBack=4（Item.cs:38123 `knockBack = 4f`;1457 改 2.5）
+// ★2026-08-23 基准切换 1457：json 已载 1457 终值（whips[5477] 花鞭 50/whips[5688]
+// 史莱姆鞭 15/combat[4607] 沙漠虎杖 kb 2.5），recon 闸门 DRIFT=0。旧"手钉 1456 值"
+// 注释作废（曾以 1456 为准钉 75/12/4,白名单已随基准切换删除）。
 import whipsJson from './vanilla-whips.json';
 const WHIPS = whipsJson as unknown as Record<string, { proj: number; dmg: number; kb: number; speed: number; anim: number }>;
 
@@ -105,17 +103,11 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '5392': { shoot: 870, ammo: 780, consumable: true },
   '5393': { shoot: 871, ammo: 780, consumable: true },
   '5394': { shoot: 872, ammo: 780, consumable: true },
-  // ---- 弹药伤害 4 错手补（审计 2026-08-22 §弹药 ❌6；Item.cs SetDefaults 逐件核对，
-  //   提交版 JSON 为旧快照值——重跑提取器已出对值但全文件与 1457 钉值有 90+ 行漂移，
-  //   不可整体重生成，故落桥接层）----
-  //   546 诅咒弹 15→12（Item.cs:7882 `damage = 12`）
-  '546': { damage: 12 },
-  //   988 霜冻箭 9→7（:12724）
-  '988': { damage: 7 },
-  //   1350 纳米弹 10→15（:16662）
-  '1350': { damage: 15 },
-  //   3011 灵液镖 10→7（:27806）
-  '3011': { damage: 7 },
+  // ---- ★弹药伤害 4 错补丁已撤（2026-08-23 基准切换 1457）：曾以 1456 为准钉
+  //   546→12/988→7/1350→15/3011→7,现 json 的 1457 终值（15/9/10/10）即权威,
+  //   补丁层删除（Item.cs 1457 实测行号:546 case:7897 damage=:7899/988 case:12740
+  //   damage=:12743/1350 case:16683 damage=:16686/3011 case:27828 damage=:27833
+  //   ——recon CLASS B 权威;初版注释行锚有漂移,2026-08-23 复核校正）。
   //   1319 雪球炮 useAmmo 949（Item.cs:16307 `useAmmo = AmmoID.Bullet` 后 :16318
   //     `useAmmo = AmmoID.Snowball` 双赋值，C# 顺序语义终值=Snowball 949；1457 同构
   //     :16335/:16338——提取器首匹配取到中段 Bullet 97。2026-08-22 弹幕基建批顺带修）
@@ -137,6 +129,14 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '6154': { shoot: 1116, useAnimation: 42, useTime: 42, shootSpeed: 5, mana: 20, damage: 20, knockBack: 3.5, noMelee: true, magic: true, autoReuse: true },
   '6155': { shoot: 1117, useAnimation: 55, useTime: 55, shootSpeed: 8, mana: 30, damage: 150, knockBack: 10, crit: 10, noMelee: true, magic: true, autoReuse: true },
   '6173': { shoot: 1122, useAnimation: 18, useTime: 6, shootSpeed: 8, mana: 18, damage: 180, knockBack: 4, noMelee: true, magic: true, autoReuse: true, noUseGraphic: true },
+  //   6171 BejeweledStaff（2026-08-23 内容缺口批；Item.cs:47551-47554
+  //     DefaultToStaff(126, 6f, 22, 15)+SetWeaponValues(27, 6f)）：
+  //     DefaultToStaff（:48016-48023）= DefaultToMagicWeapon(126,22,6,autoReuse)
+  //     +mana15+40×40+Item43；DefaultToMagicWeapon（:48433-48441）= autoReuse/
+  //     useStyle5/useAnim=useTime22/shoot126/speed6/noMelee/magic。
+  //     出手链 = PackGemStaffFeatures（Player.cs:50002 `AllGems = (HeldItem.type
+  //     == 6171)`）→ vanillaGemStaff.packGemStaffFeatures allGems 位 ----
+  '6171': { shoot: 126, useAnimation: 22, useTime: 22, shootSpeed: 6, mana: 15, damage: 27, knockBack: 6, noMelee: true, magic: true, autoReuse: true },
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };

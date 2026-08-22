@@ -3,6 +3,10 @@
 //
 // 数据源 = tools/extract-mounts.mjs 从反编译源码提取的 src/data/vanilla-mounts.json
 //（64 坐骑全量：参数/帧组/贴图表名/能力位/召唤物品/坐骑 buff）。
+// ★1457 Trusty 坐骑 64/65（2026-08-23 Palworld 批）：提取器主源 1456 无此二条，
+// 由 extract-mounts.mjs 的 MOUNTS_1457_TRUSTY overlay 并表（SetAsChillet hardmode 支
+// 1457 Mount.cs:2682-2690 + 物品 6150/6151 Item.cs:47385-47410 + buff 391/392
+// BuffID.cs:152 尾段；62-65 共用帧组/贴图 Extra_301/302.png）。
 // 矿车族（MountID.Sets.Cart）走 src/entities/Minecart.ts 轨道运动学，本模块不回退
 //（isCart 门：参数/帧状态仍可查询，物理由 Minecart 接管）。
 //
@@ -143,6 +147,8 @@ const MOUNT_FALLBACK_COLOR: Record<number, string> = {
   49: '#E05020', 50: '#6090FF', 52: '#A0A8B0', 54: '#C8A060', 55: '#909098', 56: '#584868',
   57: '#E8E8E8', 58: '#58C058', 59: '#F0F0F0', 60: '#F090C0', 61: '#F0D048', 62: '#68C8E8',
   63: '#F08040',
+  // 1457 Trusty 族（64/1457 MountID.cs:162 / 65/:164）——与 62/63 同贴图（Extra_301/302）
+  64: '#68C8E8', 65: '#F08040',
 };
 export const mountFallbackColor = (id: number): string => MOUNT_FALLBACK_COLOR[id] ?? '#8A6A4A';
 
@@ -160,6 +166,8 @@ export interface MountedPlayerView {
   inputX: number; inputJump: boolean; inputUp: boolean; inputDown: boolean;
   /** 上一 tick 是否按下跳跃（releaseJump 语义：松开后才可重触发飞行/起跳） */
   prevInputJump: boolean;
+  /** 盾冲滑行态（Player.dashDelay：<0 = 滑行中；62-65 冲刺帧门 Mount.cs:4541-4545） */
+  dashDelay?: number;
   gravDir: number;
   /** 缓存世界（fixedUpdate 每帧刷新；Hover/TryBeginningFlight 的 tile 探针用） */
   store: {
@@ -1586,8 +1594,17 @@ export class MountInstance {
           const delay = d.idleFrameDelay ?? 12;
           const step = Math.trunc((this.idleTime - this.idleTimeNext) / delay);
           if (step >= (d.idleFrameCount ?? 0)) {
-            if (d.idleFrameLoop) { this.idleTime = this.idleTimeNext; this.frame = d.idleFrameStart ?? 0; }
-            else { this.frameCounter = 0; this.frame = d.standingFrameStart ?? 0; this.idleTime = 0; }
+            if (d.idleFrameLoop) {
+              this.idleTime = this.idleTimeNext; this.frame = d.idleFrameStart ?? 0;
+              // 62-65（1457 Mount.cs:4246-4251）：idle 循环回卷时 1/20 直接打断回
+              // 站立首帧（待机动画提前收尾；idleTimeNext 对 62-65 = 缺省 rand(900,1500)
+              // ——:4202-4204 显式分支与缺省同值，无差异）
+              if (this.type >= 62 && this.type <= 65 && Math.random() < 0.05) {
+                this.frameCounter = 0;
+                this.frame = d.standingFrameStart ?? 0;
+                this.idleTime = 0;
+              }
+            } else { this.frameCounter = 0; this.frame = d.standingFrameStart ?? 0; this.idleTime = 0; }
           } else {
             this.frame = (d.idleFrameStart ?? 0) + step;
           }
@@ -1645,6 +1662,7 @@ export class MountInstance {
         break;
       }
       case FRAME_IN_AIR: {
+        const preAirFrame = this.frame;   // :4385 `int frame = _frame`（62-65 扇翼门用前置帧）
         this.frameCounter += 1;
         if (this.frameCounter > (d.inAirFrameDelay ?? 12)) {
           this.frameCounter -= d.inAirFrameDelay ?? 12;
@@ -1653,6 +1671,14 @@ export class MountInstance {
         if (this.frame < (d.inAirFrameStart ?? 0)
           || this.frame >= (d.inAirFrameStart ?? 0) + Math.max(1, d.inAirFrameCount ?? 1)) {
           this.frame = d.inAirFrameStart ?? 0;
+        }
+        // 62-65 扇翼保持（1457 Mount.cs:4404-4417）：入空中时前置帧 <4（站立组）→
+        // 计数器钉在 inAirFrameDelay-1（下拍不推进）；计数 <6 → 帧 5（扇翼），否则
+        // 计数器钉 6（净效果：空中恒 inAirFrameStart=4 滑翔帧，扇翼支仅状态抖动沿可见）
+        if (this.type >= 62 && this.type <= 65) {
+          if (preAirFrame < 4) this.frameCounter = (d.inAirFrameDelay ?? 12) - 1;
+          if (this.frameCounter < 6) this.frame = 5;
+          else this.frameCounter = 6;
         }
         // 蜜蜂悬停副帧（翅膀层 :4412-4425：疲劳越低拍越快）
         if (this.type === 5 && (d.fatigueMax ?? 0) > 0) {
@@ -1709,6 +1735,13 @@ export class MountInstance {
         break;
       }
     }
+    // 62-65 盾冲帧（1457 Mount.cs:4541-4545）：dashDelay ∈ [-5,-1]（滑行段）整段
+    // 钉帧 5（冲刺帧组 dashingFrameStart）——骑乘中发起的盾冲（MountID.Sets.CanDash
+    // 62-65 在表,MountID.cs:11）以本帧表达
+    if (this.type >= 62 && this.type <= 65
+      && p.dashDelay !== undefined && p.dashDelay < 0 && p.dashDelay >= -5) {
+      this.frame = 5;
+    }
   }
 
   /** 每帧帧态调度（Player.cs:35745-35790 的 mount.UpdateFrame 分派 1:1）。
@@ -1734,12 +1767,16 @@ export class MountInstance {
   // ---- 上下坐骑 ----
 
   /** 上坐骑（Mount.cs SetMount :6184-6296）：同型/无效 id/蜜蜂浸水 拒绝；
-   *  换骑先复位旧实例。坐骑 buff（AddBuff(buff,3600)）不入 BuffState——原版该 buff
-   *  是 TimeLeftDoesNotDecrease 的占位（每 tick 刷回 10t，掉 buff 即下坐），本仓以
-   *  mount.active 单一真源表达，buff 附带效果（131/168/265 的 ignoreWater 等）由
-   *  swimFree/免淹门直接消费；出生尘（DoSpawnDust :6363）经 game 回调 */
+   *  换骑先复位旧实例。坐骑 buff（AddBuff(buff,3600) :6291）不入 BuffState——原版该
+   *  buff 是 TimeLeftDoesNotDecrease 的占位（UpdateBuffs MountType 分支 :9968-9971
+   *  每 tick `SetMount+buffTime=10` 续期，掉 buff 即下坐），本仓以 mount.active 单一
+   *  真源表达（391→64/392→65 的映射在 BUFF_TO_MOUNT，续期语义由 active 常驻承载，
+   *  下坐即无 buff——与 Dismount :6214 ClearBuff 等价），buff 附带效果（131/168/265
+   *  的 ignoreWater 等）由 swimFree/免淹门直接消费；出生尘（DoSpawnDust :6363）与
+   *  62-65 上骑音（PalChillet :6349-6352）经 game 回调 */
   setMount(m: number, p: MountedPlayerView & { buffs?: { remove(t: unknown): void } }, game?: {
     spawnParticles?(x: number, y: number, color: string, n: number, spd?: number): void;
+    playSfxFiles?(files: string[], vol?: number, x?: number, y?: number): void;
   }): boolean {
     if (this.type === m || m < 0 || m >= MOUNT_COUNT) return false;
     if (m === 5 && p.inWater) return false;              // 蜜蜂座骑浸水不可上（:6190）
@@ -1757,6 +1794,11 @@ export class MountInstance {
     // 出生尘（DoSpawnDust :6363：spawnDust 族；本仓粒子为程序化圆，数量 10）
     if (game?.spawnParticles && d?.spawnDust) {
       game.spawnParticles(p.x + p.w / 2, p.y + p.h / 2, '#C8C8C8', 10, 1.5);
+    }
+    // 62-65 上骑叫（SetMount :6349-6352 `(uint)(type - 62) <= 3u` → PalChillet
+    // 0.35，SoundID.cs:1080——疾旋鼬/疾旋火鼬及其 Trusty 版四坐骑同支）
+    if (game?.playSfxFiles && m >= 62 && m <= 65) {
+      game.playSfxFiles(['pal_chillet'], 0.35, p.x + p.w / 2, p.y + p.h / 2);
     }
     return true;
   }

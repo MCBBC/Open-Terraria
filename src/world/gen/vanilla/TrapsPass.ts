@@ -68,6 +68,7 @@ const CHEST21 = sheetId(21);
 const CHEST467 = sheetId(467);
 const BOULDER138 = sheetId(138);
 const BOULDER711 = sheetId(711);
+const BOULDER712 = sheetId(712);
 const BOULDER713 = sheetId(713);
 const BOULDER714 = sheetId(714);
 const BOULDER715 = sheetId(715);
@@ -77,6 +78,14 @@ const SHEET379 = sheetId(379);
 
 const WIRE_RED = TileStore.WIRE_RED;
 const WIRE_ACTUATOR = TileStore.WIRE_ACTUATOR;
+
+/** WorldGen.SetBoulderSolidity（cs:11036）＝tileSolid 九巨石族整体翻转。
+ *  ★集合不含 665（生命水晶巨石在 Boulders 集但不在本翻转列——1456/1457 逐行同）。
+ *  SSSSSS-NOTRAPS 批接线（原 GenSolid.ts「特殊种子专属翻转备案」三处之一）。 */
+const BOULDER_FLIP_SHEETS = [138, 484, 664, 711, 712, 713, 714, 715, 716];
+export function setBoulderSolidity(solid: boolean): void {
+  flipGenSolid(BOULDER_FLIP_SHEETS, solid);
+}
 
 /** GenVars.boulderPetsPlaced（cs:9302 宠物巨石计数，每局生成清零） */
 let boulderPetsPlaced = 0;
@@ -613,12 +622,16 @@ function lWire(st: TileStore, x0: number, y0: number, x1: number, y1: number): v
   }
 }
 
-/** PlaceTile(i,j,135,style)（Place1x1 cs:45194：InWorld2 + 地基 SolidTile2 + 本格须空；
- *  135 非 IsAMechanism，机构门恒过）。门不过=无板（无掷骰副作用——style 已由调用方掷）。 */
-function placePlate(st: TileStore, x: number, y: number, style: number): boolean {
+/** PlaceTile(i,j,135,style)（Place1x1 cs:45194：InWorld2 + 地基 SolidTile2 + 本格须空 +
+ *  机关×巨石底座互斥门）。门不过=无板（无掷骰副作用——style 已由调用方掷）。
+ *  ★SSSSSS：补 Place1x1 的 IsAMechanism×Boulders 底座拒（cs:45213）——trap 调用点
+ *  前置 CanGeneratePressurePlateAt 已拒巨石底座（行为中性），FinishNoTraps (B) 的
+ *  随机板支无前置门（巨石世界必需）。导出供 FinishNoTrapsPass 复用。 */
+export function placePlate(st: TileStore, x: number, y: number, style: number): boolean {
   if (x < 2 || y < 2 || x > st.w - 3 || y > st.h - 3) return false;   // InWorld(x,y,2)
   if (st.flags[st.idx(x, y)] !== 0) return false;                     // Place1x1 !tile.active()
   if (!solidTile2V(st, x, y + 1)) return false;
+  if (isBoulderType(st.type[st.idx(x, y + 1)]!)) return false;        // cs:45213 机关×巨石底座
   st.setTileSilent(x, y, PLATE, 0, style * 18);
   const i = st.idx(x, y);
   st.half[i] = 0; st.slope[i] = 0;                                    // PlaceTile 前奏 Clear（cs:59497）
@@ -655,6 +668,9 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   // 微光回避（cs:8884，用原始 y2 掷点）：距 shimmerPosition <100 拒（未生成时 (0,0)）
   const shx = gs.shimmerX >= 0 ? gs.shimmerX : 0, shy = gs.shimmerY >= 0 ? gs.shimmerY : 0;
   if (Math.hypot(x2 - shx, y2 - shy) < 100) return false;
+  // ★noTraps 巨石非实心窗 #1（cs:8892-8894）：下扫前 SetBoulderSolidity(false)
+  const nf = gs.seedFlags;
+  if (nf.noTraps) setBoulderSolidity(false);
   // 下扫实心地面（cs:8894-8905）
   let py = y2;
   let deep = false;
@@ -665,9 +681,11 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     if (!placeTrapCanContinue(st, x2, py)) return false;
     if (py >= st.h - 300) deep = true;
   }
+  // ★noTraps 巨石非实心窗 #2（cs:8908-8910）：下扫毕还原实心
+  if (nf.noTraps) setBoulderSolidity(true);
   py--;                                                               // cs:8910 num--
-  // 邻蘑菇草 70 回避（cs:8911 IsTileNearby ±20）/ 蜥蜴墙 87（cs:8915）/ 微光墙 350（cs:8919）
-  if (isTileNearby(st, x2, py, 70, 20)) return false;
+  // 邻蘑菇草 70 回避（cs:8911 IsTileNearby ±20；★noTraps 跳过）/ 蜥蜴墙 87（cs:8915）/ 微光墙 350（cs:8919）
+  if (!nf.noTraps && isTileNearby(st, x2, py, 70, 20)) return false;
   const wi = st.idx(x2, py);
   if (st.wall[wi] === 87) return false;
   if (st.wall[wi] === 350) return false;
@@ -676,6 +694,8 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   if (type === -1 && rng.int(0, 19) === 0) type = 2;
   else if (type === -1 && py > gs.lavaLine + 30 && rng.int(0, 5) !== 0) type = 3;
   else if (type === -1) type = rng.int(0, 1);
+  // ★noTraps+tenth 强制巨石（cs:8957-8961）：Next(4)==0 → type=1（掷照耗）
+  if (nf.noTraps && nf.tenthAnniversary && rng.int(0, 3) === 0) type = 1;
   // 共同守卫（cs:8961-8985）
   if (x2 < 3 || py < 3 || x2 > st.w - 4 || py > st.h - 4) return false;   // InWorld(x2,num,3)
   if (lava && type !== 3) return false;
@@ -704,13 +724,21 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
       }
     }
   }
+  // ★noTraps 巨石非实心窗 #3（cs:9005-9007）：switch 前再翻非实心（case 0/3 的
+  //   各 return false/true 路径保持非实心逸出；case 1 头部/尾门翻回实心）
+  if (nf.noTraps) setBoulderSolidity(false);
 
   if (type === 1) {
     // ---- 巨石陷阱（cs:9151-9345）----
-    const petCap = st.w >= 8400 ? 6 : st.w >= 6400 ? 4 : 2;           // GetWorldSize 三档（cs:9153）
+    // ★noTraps（cs:9159-9162）：宠物巨石上限 ×2 + SetBoulderSolidity(true)
+    //   （6×6 扫描期巨石算实心——SolidTile 判定进 allSolid/石壳统计）
+    const petBase = st.w >= 8400 ? 6 : st.w >= 6400 ? 4 : 2;          // GetWorldSize 三档（cs:9153）
+    const petCap = nf.noTraps ? petBase * 2 : petBase;
+    if (nf.noTraps) setBoulderSolidity(true);
     let colX = x2 + rng.int(-1, 1);                                   // num4（cs:9166 Next(-1,2)）
     let top = py - 8;                                                 // num5（cs:9165）
-    if (anyBoulderNearby(st, colX, top, 10)) return false;            // cs:9174
+    // ★noTraps（cs:9168-9177）：邻巨石检查半径 6（普通 10）
+    if (anyBoulderNearby(st, colX, top, nf.noTraps ? 6 : 10)) return false;
     for (;;) {
       let allSolid = true, n2 = 0;
       for (let m = colX - 2; m <= colX + 3; m++) {
@@ -760,11 +788,21 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     // cs:9253-9254 两块石头（PlaceTile forced=false：EmptyTile 门，非空格不写）
     if (!st.flags[st.idx(colX, top + 2)]) st.setTileSilent(colX, top + 2, STONE1);
     if (!st.flags[st.idx(colX + 1, top + 2)]) st.setTileSilent(colX + 1, top + 2, STONE1);
-    // 巨石变体掷（cs:9255-9306；普通种子分支——notTheBees/tenth/registry 段恒假跳过）
+    // 巨石变体掷（cs:9255-9306）。★SSSSSS-NOTRAPS：maxValue2/3/4（蛛/岩浆/地牢
+    //   巨石分母）noTraps 时 1/2/4（普通 2/6/3）；maxValue（tenth 彩虹分母）
+    //   noTraps&&!remix 时 5（普通 7）；新增 712 便便支（ntb||noTraps||poo 1/5）与
+    //   664 支（(tenth||noTraps) 1/3）——掷序逐支照抄（分母命中后才判 close*）。
     let boulderId = BOULDER138;
-    if (rng.int(0, 1) === 0 && closeSpiders(st, colX, top)) boulderId = BOULDER714;
-    else if (rng.int(0, 5) === 0 && closeDungeon(st, colX, top, gs.dungeonSide)) boulderId = BOULDER715;
-    else if (rng.int(0, 2) === 0 && closeLava(st, colX, top)) boulderId = BOULDER713;
+    const maxValue2 = nf.noTraps ? 1 : 2;
+    const maxValue3 = nf.noTraps ? 2 : 3;
+    const maxValue4 = nf.noTraps ? 4 : 6;
+    const maxValue = nf.noTraps && !nf.remix ? 5 : 7;
+    if (rng.int(0, maxValue2 - 1) === 0 && closeSpiders(st, colX, top)) boulderId = BOULDER714;
+    else if (rng.int(0, maxValue4 - 1) === 0 && closeDungeon(st, colX, top, gs.dungeonSide)) boulderId = BOULDER715;
+    else if (rng.int(0, maxValue3 - 1) === 0 && closeLava(st, colX, top)) boulderId = BOULDER713;
+    else if ((nf.notTheBees || nf.noTraps || nf.pooEverywhere) && rng.int(0, 4) === 0) boulderId = BOULDER712;
+    else if (nf.tenthAnniversary && rng.int(0, maxValue - 1) === 0) boulderId = BOULDER711;
+    else if ((nf.tenthAnniversary || nf.noTraps) && rng.int(0, 2) === 0) boulderId = BOULDER664;
     else if (rng.int(0, 24) === 0) boulderId = BOULDER711;
     else if (rng.int(0, 19) === 0) boulderId = BOULDER664;
     if (boulderId === BOULDER138 && boulderPetsPlaced < petCap) { boulderPetsPlaced++; boulderId = BOULDER716; }
@@ -826,6 +864,8 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     st.setTileSilent(bx, by, EXPLOSIVES, 0, rng.int(0, 1) * 18);      // cs:9383-9386
     placePlate(st, x2, py, rng.int(2, 3));                            // cs:9387
     lWire(st, x2, py, bx, by);
+    // ★noTraps（cs:9457-9460）：switch 尾门（case2 break 落此处）——还原巨石实心
+    if (nf.noTraps) setBoulderSolidity(true);
     return false;                                                     // cs:9413 break → 9459 return false
   }
 
@@ -833,6 +873,11 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     // ---- 热喷泉（cs:9415-9452）：2×1，frameX = 18*k + 36*Next(2)；直写保半砖/坡 ----
     if (st.flags[st.idx(x2 + 1, py)]) return false;
     if (st.liquid[st.idx(x2, py)] > 0 && st.liquidType[st.idx(x2, py)] !== 2) return false;   // cs:9421 非岩浆液体拒
+    // ★noTraps+(tenth||ntb)（cs:9425-9433）：1/3 概率拒 + 邻热喷泉 443 ±30 回避
+    if (nf.noTraps && (nf.tenthAnniversary || nf.notTheBees)) {
+      if (rng.int(0, 2) !== 0) return false;
+      if (isTileNearby(st, x2, py, 443, 30)) return false;
+    }
     // ★1457 cs:9428 锚格同门
     if (!placeTrapCanContinue(st, x2, py)) return false;
     for (let xx = x2; xx <= x2 + 1; xx++) {
@@ -875,7 +920,15 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   if (st.wall[st.idx(i5, j2)] === 350) return false;                  // cs:9092
   placePlate(st, x2, py, st.wall[st.idx(x2, py)] > 0 ? 2 : rng.int(2, 3));   // cs:9097-9104
   killTileWhole(st, i5, j2, rng);                                          // KillTile（cs:9105，整块语义）
-  st.setTileSilent(i5, j2, TRAP137, dir === 1 ? 18 : 0, 0);           // cs:9115（style0）
+  // ★ntb+noTraps（cs:9106-9114）：蜂蜜飞镖变体 num33（掷照耗，液体邻格强制 1；
+  //   dontStarve 染 27 未建模——旗标不叠加场景）。style→frameY=18*num33。
+  let num33 = 0;
+  if (nf.notTheBees && nf.noTraps && !nf.remix) {
+    num33 = rng.int(1, 2);                                              // Next(1,3)
+    const wet = (x: number) => st.liquid[st.idx(x, j2)] > 0;
+    if (wet(i5) || wet(i5 - 1) || wet(i5 + 1)) num33 = 1;
+  }
+  st.setTileSilent(i5, j2, TRAP137, dir === 1 ? 18 : 0, 18 * num33);  // cs:9115（frameY=18*style）
   lWire(st, x2, py, i5, j2);
   return true;
 }
@@ -1035,7 +1088,12 @@ export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): bo
 }
 
 /** pass 76 Traps 主体（cs:18769-18898）：w*0.05 次 placeTrap + w*0.003 次 PlaceSandTrap。
- *  两段计数均为裸 double 比较（cs:18800/18866 `for i < num`，不取整） */
+ *  两段计数均为裸 double 比较（cs:18800/18866 `for i < num`，不取整）。
+ *  ★SSSSSS-NOTRAPS 批（cs:18778-18912 noTrapsWorldGen 全支）：
+ *  ①次数 ×100（(tenth||ntb)&&remix ×5 / tenth||ntb ×2）；②采样域 x∈[50,W-50)
+ *  y∈[50,H-50)（remix y≤H-210）且 `(y>worldSurface || wall>0)` 收（无 oceanDepths 重掷）；
+ *  ③TNT 桶 W*3 次（tenth W/3；remix y∈[ws,(H-350+rock)/2] 否则 [rock,H-200]）；
+ *  ④沙陷阱 ×5；⑤pass 尾 SetBoulderSolidity(true)。 */
 export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Array<{ x: number; y: number; items: unknown[] }>): void {
   // ★pass 头 tileSolid 翻转（cs:18773 `Main.tileSolid[379] = false`）：
   //   本仓生成期不放置 379,行为无差,存档时间线。pass 尾 cs:18897 还原 true。
@@ -1050,21 +1108,51 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
       chestItemAnchors.add(c.y * st.w + c.x);
     }
   }
-  const trapTries = st.w * 0.05;
+  const nf = gs.seedFlags;
+  let trapTries = st.w * 0.05;
+  if (nf.noTraps) {
+    // cs:18781-18783：三元链逐层照抄（double 乘法次序保持）
+    trapTries = ((nf.tenthAnniversary || nf.notTheBees) && nf.remix) ? trapTries * 5
+      : (!nf.tenthAnniversary && !nf.notTheBees) ? trapTries * 100 : trapTries * 2;
+  } else if (nf.getGoodWorld) {
+    trapTries *= 1.5;
+  }
   for (let n = 0; n < trapTries; n++) {
     for (let k = 0; k < 1150; k++) {
-      let x = rng.int(200, st.w - 201);                               // Next(200, w-200)
-      let y = rng.int(gs.worldSurface, st.h - 211);                   // Next(surface, h-210)
-      // oceanDepths（cs:10978：y≤(surface+rock)/2+40 且海滩带）重掷
-      const oceanTop = (gs.worldSurface + gs.rockLevel) / 2 + 40;
-      while (y <= oceanTop && (x < gs.beachDistance || x > st.w - gs.beachDistance)) {
-        x = rng.int(200, st.w - 201);
-        y = rng.int(gs.worldSurface, st.h - 211);
+      if (nf.noTraps) {
+        // cs:18816-18827：全域采样（无 oceanDepths 重掷）
+        const x = rng.int(50, st.w - 51);                             // Next(50, w-50)
+        let y = rng.int(50, st.h - 51);                               // Next(50, h-50)
+        if (nf.remix) y = rng.int(50, st.h - 211);                    // remix: Next(50, h-210)
+        if ((y > gs.worldSurface || st.wall[st.idx(x, y)] > 0) && placeTrap(st, rng, gs, x, y, -1)) break;
+      } else {
+        let x = rng.int(200, st.w - 201);                               // Next(200, w-200)
+        let y = rng.int(gs.worldSurface, st.h - 211);                   // Next(surface, h-210)
+        // oceanDepths（cs:10978：y≤(surface+rock)/2+40 且海滩带）重掷
+        const oceanTop = (gs.worldSurface + gs.rockLevel) / 2 + 40;
+        while (y <= oceanTop && (x < gs.beachDistance || x > st.w - gs.beachDistance)) {
+          x = rng.int(200, st.w - 201);
+          y = rng.int(gs.worldSurface, st.h - 211);
+        }
+        if (st.wall[st.idx(x, y)] === 0 && placeTrap(st, rng, gs, x, y, -1)) break;
       }
-      if (st.wall[st.idx(x, y)] === 0 && placeTrap(st, rng, gs, x, y, -1)) break;
     }
   }
-  const sandTries = st.w * 0.003;
+  if (nf.noTraps) {
+    // ---- TNT 桶（cs:18829-18851）：W*3 次（tenth W/3）----
+    let tntTries = st.w * 3;
+    if (nf.tenthAnniversary) tntTries = st.w / 3;
+    for (let k = 0; k < tntTries; k++) {
+      const x = rng.int(50, st.w - 51);                               // Next(50, w-50)
+      const y = nf.remix
+        ? rng.int(Math.floor(gs.worldSurface), Math.floor((st.h - 350 + gs.rockLevel) / 2))
+        : rng.int(Math.floor(gs.rockLevel), st.h - 201);              // Next(rock, h-200)
+      placeTNTBarrel(st, x, y);
+    }
+  }
+  let sandTries = st.w * 0.003;
+  if (nf.noTraps) sandTries *= 5;                                     // cs:18857-18859
+  else if (nf.getGoodWorld) sandTries *= 1.5;
   for (let n = 0; n < sandTries; n++) {
     for (let k = 0; k < 20000; k++) {
       const x = rng.int(Math.floor(st.w * 0.15), Math.floor(st.w * 0.85) - 1);
@@ -1072,7 +1160,61 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
       if (st.wall[st.idx(x, y)] === 187 && placeSandTrap(st, rng, x, y)) break;
     }
   }
+  // ★pass 尾（cs:18893-18896）：noTraps → SetBoulderSolidity(true)（巨石族回实心）
+  if (nf.noTraps) setBoulderSolidity(true);
   // ★pass 尾还原（cs:18897 `Main.tileSolid[379] = true`）
   flipGenSolid([379], true);
   chestList = null; chestItemAnchors = null;
+}
+
+/** placeTNTBarrel（cs:8836-8856）：下扫首个活性格上一格放 654（TNT 桶，2×2
+ *  PlaceTile→Place2x2 族）。anyShimmer 拒。零掷（Place2x2 门内读写均不耗）。 */
+const TNT_BARREL = sheetId(654);
+export function placeTNTBarrel(st: TileStore, x: number, y: number): boolean {
+  let py = y;
+  while (!st.flags[st.idx(x, py)]) {
+    py++;
+    if (py > st.h - 350) return false;
+  }
+  py--;
+  {
+    const i = st.idx(x, py);
+    if (st.liquid[i] > 0 && st.liquidType[i] === 4) return false;     // anyShimmer（LIQ_SHIMMER）
+  }
+  // PlaceTile(654) → Place2x2（cs:60229 分派；右下锚语义同 MicroBiomes place2x2Direct）
+  return place2x2Traps(st, x, py, TNT_BARREL);
+}
+
+/** WorldGen.PlaceTile→Place2x2（cs:59833 头 + cs:51780-51820）Traps 语境副本：
+ *  右下锚 (x,y) 写 (x-1..x)×(y-1..y)，2×2 区须全空 + 逐列 (i,y+1)
+ *  nactive&&(SolidTile2||tileTable)。★PlaceTile 头语义（SSSSSS 补）：654 非实心
+ *  → 头门 `!tileSolid[num]` 恒过（forced=false 路不拒锚占位），inactive 锚格
+ *  Clear(Tile|TilePaint|Slope)（ghost type/帧/坡/半砖/块漆清零——Place2x2 后续
+ *  拒绝也保留此清）。与 MicroBiomesPass.place2x2Direct 同源（副本禁 import）。 */
+const PLACE2X2_TABLE = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299,
+  309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538,
+  542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610,
+  611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+function place2x2Traps(st: TileStore, x: number, y: number, type: number): boolean {
+  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;   // cs:51786
+  // ★PlaceTile 头（cs:59500）：inactive 锚 Clear(Tile|TilePaint|Slope)（654 非实心
+  //   → 头门恒过，先清后派发；active 锚不清——ResetsHalfBrick[654]=false）
+  if (!st.flags[st.idx(x, y)]) st.setTileSilent(x, y, 0);
+  for (let i = x - 1; i <= x; i++) {
+    for (let j = y - 1; j <= y; j++) {
+      if (st.flags[st.idx(i, j)]) return false;                       // cs:51376 空置门
+    }
+    const gi = st.idx(i, y + 1);
+    const gt = st.type[gi]!;
+    const solid2 = st.flags[gi] !== 0 && vanGenSolidType(gt)
+      && st.slope[gi] === 0 && st.half[gi] === 0
+      && ((st.wire[gi] >>> 5) & 1) === 0;                             // SolidTile2（inActive 位）
+    if (!st.flags[gi] || (!solid2 && !PLACE2X2_TABLE.has(sheetOf(gt)))) return false;
+  }
+  for (let k = x - 1; k <= x; k++) {
+    for (let l = y - 1; l <= y; l++) {
+      st.setTileSilent(k, l, type, (k - x + 1) * 18, (l - y + 1) * 18);
+    }
+  }
+  return true;
 }

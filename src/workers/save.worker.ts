@@ -15,6 +15,8 @@ interface SaveRequest {
     half: ArrayBuffer; slope: ArrayBuffer;
     /** 油漆双通道（旧客户端可缺省 → 全 0 = 无漆，与 explored 同款缺省容忍） */
     paint?: ArrayBuffer; paintWall?: ArrayBuffer;
+    /** 涂层四位（WF:1539-1552；旧客户端可缺省 → 不落 coat 段） */
+    coat?: ArrayBuffer;
     /** 战争迷雾 0/1 位图（旧客户端可缺省 → 不落 explored 段 = 读档全 0 旧行为） */
     explored?: ArrayBuffer;
   };
@@ -44,6 +46,8 @@ self.onmessage = (e: MessageEvent<SaveRequest>) => {
       // 油漆双通道（旧客户端缺省 → 全 0 无漆）
       paint: new Uint8Array(req.bufs.paint ?? new ArrayBuffer(n)),
       paintWall: new Uint8Array(req.bufs.paintWall ?? new ArrayBuffer(n)),
+      // 涂层四位（WF:1539-1552；旧客户端缺省 → undefined = 不落 coat 段）
+      coat: req.bufs.coat ? new Uint8Array(req.bufs.coat) : undefined,
       // 战争迷雾（旧客户端缺省 → undefined = 不落 explored 段，读档按全 0 旧行为）
       explored: req.bufs.explored ? new Uint8Array(req.bufs.explored) : undefined,
     };

@@ -564,6 +564,11 @@ export class TileLightScanner {
     const type = st.type[i];
     const actuated = (st.wire[i] & TileStore.WIRE_ACTUATED) !== 0;
     if (type !== 0 && !actuated && this.blocksLight[type] && st.slope[i] === 0) {
+      // 回声涂层块不挡光传播（LightIsBlocked，TileLightScanner.cs:154-166：
+      // `if (tile.invisibleBlock()) return _drawInvisibleWalls;`——显示隐形块时才挡）
+      if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) {
+        return Mask.None;
+      }
       // 注意 actuated 已在上条件排除(原版 !tile.inActive())
       const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? -1;
       return CRACKED_SHEETS.has(sheet) ? Mask.CrackedBricks : Mask.Solid;
@@ -591,9 +596,13 @@ export class TileLightScanner {
       if (sheet === 54 || sheet === 541 || sheet === 328 || sheet === 459 || sheet === 748 || sheet === 750) {
         // 落到墙透光判定（原版此分支同样要求 wallLight）
       } else if (!actuated && this.blocksLight[type]) {
-        if (st.slope[i] === 0 && st.half[i] === 0) return false;
+        // 回声涂层块放行天光（:3170/:3267 析取支 `(tile.invisibleBlock() &&
+        // !_drawInvisibleWalls)`——隐形块不算挡阳，显示态除外）
+        if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) {
+          // 落到墙透光判定（同玻璃族支）
+        } else if (st.slope[i] === 0 && st.half[i] === 0) return false;
         // 坡面/半砖例外：四邻必须全干（:3170 第三析取支的邻格 liquid==0）
-        if (st.liquid[st.idx(x, y - 1)] !== 0 || st.liquid[st.idx(x, y + 1)] !== 0
+        else if (st.liquid[st.idx(x, y - 1)] !== 0 || st.liquid[st.idx(x, y + 1)] !== 0
           || st.liquid[st.idx(x - 1, y)] !== 0 || st.liquid[st.idx(x + 1, y)] !== 0) return false;
       }
     }

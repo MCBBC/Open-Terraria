@@ -82,6 +82,10 @@ export interface ItemDef {
    *  1073-1099 → 1-27、1966/1967/1968 → 28/29/30（PaintID.cs）。0/缺省=非油漆。
    *  Item 上无 paintWall 字段——刷墙/刷块由工具决定（Player.cs:41236/:41254） */
   paint?: number;
+  /** 涂层 id（Item.paintCoating，Item.cs:120；SetDefaults :38471/:42387 赋值）。
+   *  4668 夜明涂料 → 1（fullbright 位）、5344 回声涂料 → 2（invisible 位）。
+   *  0/缺省=非涂层。与 paint 互斥（原版无双持物品）；由刷/滚工具消耗（Player.cs:41291） */
+  paintCoating?: number;
   /** 油漆工具族（Player.cs PlaceThing_Paintbrush/Roller/Scrapper :41254/:41236/:41152）：
    *  brush=1071/1543 刷方块、roller=1072/1544 刷墙、scraper=1100/1545 清除 */
   paintTool?: 'brush' | 'roller' | 'scraper';
@@ -1099,7 +1103,7 @@ void 0;
 //  棕/暗影/负相 1966/1967/1968 → 28/29/30（:21168-21185）。
 //  工具族 paintTool（Player.cs PlaceThing 分派 :41152/:41236/:41254）：1071/1543 刷、
 //  1072/1544 滚、1100/1545 刮（IsPaintScraper 集 ItemID.cs:254）。涂层 4668/5344 走
-//  paintCoating 位（Item.cs:38471/:42387）——涂层系统未建，不在本表 ----
+//  paintCoating 位（Item.cs:38471/:42387，见 COATING_ITEM_TABLE）----
 const PAINT_ITEM_TABLE: ReadonlyArray<readonly [number, number]> = [
   ...Array.from({ length: 27 }, (_, i) => [1073 + i, i + 1] as const),   // 1073-1099 → 1-27
   [1966, 28], [1967, 29], [1968, 30],
@@ -1108,6 +1112,15 @@ for (const [vid, p] of PAINT_ITEM_TABLE) {
   const k = VANILLA_ITEM_KEY_BY_ID[vid];
   const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
   if (d) d.paint = p;
+}
+// 涂层（Item.cs SetDefaults：4668 paintCoating=1 :38471 / 5344 paintCoating=2 :42387）
+const COATING_ITEM_TABLE: ReadonlyArray<readonly [number, number]> = [
+  [4668, 1], [5344, 2],
+];
+for (const [vid, c] of COATING_ITEM_TABLE) {
+  const k = VANILLA_ITEM_KEY_BY_ID[vid];
+  const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
+  if (d) d.paintCoating = c;
 }
 const PAINT_TOOL_TABLE: ReadonlyArray<readonly [number, NonNullable<ItemDef['paintTool']>]> = [
   [1071, 'brush'], [1543, 'brush'],

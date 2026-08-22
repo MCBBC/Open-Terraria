@@ -55,9 +55,10 @@ describe('booster 翅膀属性链（WingStatsInitializer.cs:55-58）', () => {
   it('Player 装备链：星旋强化翼 3469 → equipStats.wing 槽 30 悬浮档；日耀 3468 → 9 速无悬浮', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.armor[3] = { id: _iid(3469), stack: 1 };
-    expect(p.equipStats.wing).toEqual({ logic: 30, slot: 30, time: 180, accSpeed: 6.5, accelMult: 1.5, hover: true });
+    // hidden = hideVisibleAccessory 旗（UpdateEquips :12580 隐藏翼门,2026-08-23 批新增字段）
+    expect(p.equipStats.wing).toEqual({ logic: 30, slot: 30, time: 180, accSpeed: 6.5, accelMult: 1.5, hover: true, hidden: false });
     p.inv.armor[3] = { id: _iid(3468), stack: 1 };
-    expect(p.equipStats.wing).toEqual({ logic: 29, slot: 29, time: 180, accSpeed: 9, accelMult: 2.5, hover: false });
+    expect(p.equipStats.wing).toEqual({ logic: 29, slot: 29, time: 180, accSpeed: 9, accelMult: 2.5, hover: false, hidden: false });
   });
 
   it('悬停档集合：flag19 hover 档(Player.cs:26471)含 29/30/32；visuals canHover(:28997)含 30/31', () => {

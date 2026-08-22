@@ -3305,16 +3305,31 @@ export class TorchGodProj extends Entity {
   dead = false;
   private rangeLeft: number;
   private tileCollide = false;
+  /** ai[0]：TorchID.Dust[被熄火把样式]（:17757/:40104 尾迹+爆尘取色） */
+  dustType = 6;
+  /** 尘回调（Game.torchGodDust——尾迹/Kill 爆尘共用,velMul 由调用方给） */
+  private readonly dust?: (x: number, y: number, type: number, velMul: number) => void;
 
-  constructor(x: number, y: number, vx: number, vy: number, rangePx: number) {
+  constructor(x: number, y: number, vx: number, vy: number, rangePx: number,
+    dustType = 6,
+    dust?: (x: number, y: number, type: number, velMul: number) => void) {
     super();
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
     this.rangeLeft = rangePx;
+    this.dustType = dustType;
+    this.dust = dust;
   }
 
   draw(r: Renderer, cam: Camera): void {
     drawProj(r, cam, this, 949, Math.atan2(this.vy, this.vx) + Math.PI / 2, '#FFB060');
+  }
+
+  /** Kill（:67632-67652）：Item10 音 + 20 粒 ai[0] 尘（vel×0.8、Next(3)!=0→noGravity） */
+  private kill(game: GameHooks): void {
+    game.playSfxWav?.('Item_10', 1, this.cx, this.cy);
+    for (let k = 0; k < 20; k++) this.dust?.(this.x, this.y, this.dustType, 0.8);
+    this.dead = true;
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -3327,7 +3342,11 @@ export class TorchGodProj extends Entity {
     const nx = this.x + this.vx, ny = this.y + this.vy;
     if (this.tileCollide) {
       const tx = Math.floor((nx + this.w / 2) / TILE), ty = Math.floor((ny + this.h / 2) / TILE);
-      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.dead = true; return; }
+      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.kill(game); return; }
+    }
+    // 尾迹（AI_184 :40120-40130）：每 AI 4 粒,沿 velocity/4×k 段布点,vel×0.3
+    for (let k = 0; k < 4; k++) {
+      this.dust?.(this.x + (this.vx / 4) * k, this.y + (this.vy / 4) * k, this.dustType, 0.3);
     }
     // 命中玩家（无敌帧由 Player.damage 侧处理）。死亡归因 = ByProjectile
     // （Projectile.Damage→Hurt 同源弹型名;此前漏设→死因残留旧值）。
@@ -3347,7 +3366,7 @@ export class TorchGodProj extends Entity {
       // 曾恒 20）。原版在生成掷处算定,难度事件期内不变 → 命中时算等价
       p.damage(hostileProjectileDamage(40, mainDifficulty(game.world)),
         Math.sign(p.cx - (nx + this.w / 2)) || 1, 0, game as never);
-      this.dead = true;
+      this.kill(game);
       return;
     }
     this.x = nx; this.y = ny;

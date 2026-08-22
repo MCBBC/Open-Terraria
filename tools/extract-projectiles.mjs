@@ -8,7 +8,9 @@ import { pathToFileURL } from 'node:url';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 // 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;缺省 1456 = 既有产物基线)
-export const SRC_VER = process.env.SW_ITEM_VER ?? '1456';
+// ★2026-08-23 基准切换 1457：缺省源版本 1456→1457（裸跑不再把 1457 专属字段打回 1456;
+// 旧 1456 档仍可 SW_ITEM_VER=1456 显式取）
+export const SRC_VER = process.env.SW_ITEM_VER ?? '1457';
 const src = readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Projectile.cs`, 'utf8');
 
 // ---- SetDefaults(int Type) 方法体 ----

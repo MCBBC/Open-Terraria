@@ -258,7 +258,7 @@ def({ key: 'v_135_pressure_plates', name: '', solid: false, framed: true, opacit
 def({ key: 'v_91_banners', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#0D5882', drop: null, vanilla: { sheet: 91, frame: 'style', fw: 1, fh: 3 } });
 def({ key: 'v_242_paintings_6x4', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 4, mapColor: '#63321E', drop: null, vanilla: { sheet: 242, frame: 'style', fw: 6, fh: 4 } });
 def({ key: 'v_50_books', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#AA3072', drop: null, vanilla: { sheet: 50, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_93_lamps', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 6, mapColor: '#FDDD03', drop: null, light: undefined /* 动态光 → specialTileLight case 93：吊灯样式表 frameY/54 */, vanilla: { sheet: 93, frame: 'style', fw: 1, fh: 3 } });
+def({ key: 'v_93_lamps', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#FDDD03', drop: null, light: undefined /* 动态光 → specialTileLight case 93：吊灯样式表 frameY/54 */, vanilla: { sheet: 93, frame: 'style', fw: 1, fh: 3 } }); // ★R12 定谳修：足迹 1×3（TileObjectData.cs:2394-2419 Style1xX Height=3/Place1xX cs:39203-39226 num2=3/ToggleLamp Wiring.cs:2954-2975 SendTileSquare(1,3)）；曾 1×6 系与 92 路灯柱（:2421-2424 Height=6）混同
 def({ key: 'v_549_seaweed', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#365314', drop: null, vanilla: { sheet: 549, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_254_pumpkin_plant', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#F89E5C', drop: null, vanilla: { sheet: 254, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_571_bamboo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#A5A81A', drop: null, vanilla: { sheet: 571, frame: 'style', fw: 1, fh: 1 } });
@@ -399,6 +399,13 @@ def({ key: 'v_120_mudstone_brick', name: '', solid: true, opacity: 1, pick: 0, m
 def({ key: 'v_714_spider_boulder', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#808080', drop: null, vanilla: { sheet: 714, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_752_chillet_egg', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7ad9e8', drop: null, vanilla: { sheet: 752, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_751_sleeping_digtoise', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#baa854', drop: null, vanilla: { sheet: 751, frame: 'style', fw: 2, fh: 2 } });
+// 1457 巨型提基雕像 753（2026-08-23 内容缺口批；TileID.cs:1943 `GiantTiki = 753`）：
+// TileObjectData.cs:4126-4131 CopyFrom(Style3x3) → 3×3 + AnchorBottom(SolidTile|
+// SolidWithTop|SolidSide|AlternateTile,宽3) + AnchorAlternateTiles=[753]（可叠放在
+// 其它巨型提基顶上）+ DrawYOffset 2；掉落 = WorldGen.cs:53723-53725 GetItemDrop
+// case 753 → 物品 6147（Item.cs:47341-47344 Blue1/买 25 银 + DefaultToPlaceableTile(753,0)）。
+// 素材 Tiles_753.png 在盘（public/sprites/vanilla/，terraria-assets Images 同名同图）
+def({ key: 'v_753_gianttiki', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#8C6038', drop: 6147, vanilla: { sheet: 753, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_664_bouncy_boulder', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#808080', drop: null, vanilla: { sheet: 664, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_711_rainbow_boulder', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#808080', drop: null, light: [3, 3, 3], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 711, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_715_ghoulder', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#808080', drop: null, vanilla: { sheet: 715, frame: 'style', fw: 2, fh: 2 } });

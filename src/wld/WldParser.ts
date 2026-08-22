@@ -18,6 +18,8 @@ export interface WldTileData {
   slope: Uint8Array;      // 坡面 1-4(== 2-5;Tile.cs sTileHeader bits 12-14 编码)
   paint: Uint8Array;      // 方块油漆 0-31（WorldFile.cs:2571-2574 header3 0x08 位后随 1 字节）
   paintWall: Uint8Array;  // 墙油漆 0-31（WorldFile.cs:2583-2586 header3 0x10 位后随 1 字节）
+  coat: Uint8Array;       // 涂层四位（WorldFile.cs:2659-2677 header4：bit1(2)=invisibleBlock
+                          //  bit2(4)=invisibleWall bit3(8)=fullbrightBlock bit4(16)=fullbrightWall）
 }
 
 export interface WldChest { x: number; y: number; name: string; items: Array<{ id: number; stack: number } | null>; }
@@ -356,6 +358,7 @@ function decodeTiles(
   const slope = new Uint8Array(n);
   const paint = new Uint8Array(n);
   const paintWall = new Uint8Array(n);
+  const coat = new Uint8Array(n);
   const halfBits = half, slopeBits = slope; // 半砖/坡面解码目标
 
   let idx = 0; // y * w + x，列优先推进
@@ -365,8 +368,10 @@ function decodeTiles(
       let header2 = 0, header3 = 0, header4 = 0;
       if (header1 & 0x01) header2 = r.u8();
       if (header2 & 0x01) header3 = r.u8();
+      // header4 = 涂层字节（WorldFile.cs:2659-2677 读侧 b3：bit1(2) invisibleBlock/
+      //  bit2(4) invisibleWall/bit3(8) fullbrightBlock/bit4(16) fullbrightWall；
+      //  写侧 :1539-1552 同位。269+ 才有该字节——旧版无涂层域）
       if (version >= 269 && header3 & 0x01) header4 = r.u8();
-      void header4;
 
       let tileType = 0;
       let fx = 0, fy = 0;
@@ -432,10 +437,11 @@ function decodeTiles(
         slope[i] = blockSlope;
         paint[i] = tilePaint;
         paintWall[i] = wallPaint;
+        coat[i] = header4 & 30;   // 涂层四位（WF:2659-2677；&30 = 2|4|8|16 位域钳脏数据）
       }
       y += rle;
     }
   }
   void idx;
-  return { active, type, frameX, frameY, wall, liquid, liquidType, wire, half, slope, paint, paintWall };
+  return { active, type, frameX, frameY, wall, liquid, liquidType, wire, half, slope, paint, paintWall, coat };
 }

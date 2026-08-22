@@ -64,9 +64,9 @@ describe('① penetrate 全域（Arrow 缺省读 SetDefaults，Projectile.cs）'
     expect(mk(14).pierceInit).toBe(1);
   });
 
-  it('⚠️3 proj 478 诅咒镖 penetrate 3→2（Projectile.cs:5264 提取错已修）', () => {
-    expect(projectileData(478)?.penetrate).toBe(2);
-    expect(mk(478).pierceInit).toBe(2);   // 表值修复后不再多穿 1
+  it('⚠️3 proj 478 诅咒镖 penetrate=3（★1457 基准：Projectile.cs:5531 `penetrate = 3`;旧 1456 钉 2 已随基准切换撤除）', () => {
+    expect(projectileData(478)?.penetrate).toBe(3);
+    expect(mk(478).pierceInit).toBe(3);
   });
 });
 
@@ -100,15 +100,15 @@ describe('② 5392-5394 溶液装填（Item.cs:42744-42752）', () => {
 // ---------------------------------------------------------------------------
 // ③ 弹药伤害 4 错（Item.cs SetDefaults 权威值）
 // ---------------------------------------------------------------------------
-describe('③ 弹药伤害 4 错（vanilla-itemcombat 旧快照 → 桥接层对齐）', () => {
-  it('546 诅咒弹 15→12（Item.cs:7882）；988 霜冻箭 9→7（:12724）', () => {
-    expect(itemCombat(546)?.damage).toBe(12);
-    expect(itemCombat(988)?.damage).toBe(7);
+describe('③ 弹药伤害（★1457 基准：json 1457 终值即权威,旧 1456 桥接层补丁已撤）', () => {
+  it('546 诅咒弹 15 / 988 霜冻箭 9（1457 Item.cs case:7897 damage=:7899 / case:12740 damage=:12743）', () => {
+    expect(itemCombat(546)?.damage).toBe(15);
+    expect(itemCombat(988)?.damage).toBe(9);
   });
 
-  it('1350 纳米弹 10→15（:16662）；3011 灵液镖 10→7（:27806）', () => {
-    expect(itemCombat(1350)?.damage).toBe(15);
-    expect(itemCombat(3011)?.damage).toBe(7);
+  it('1350 纳米弹 10（case:16683 damage=:16686）/ 3011 灵液镖 10（case:27828 damage=:27833）', () => {
+    expect(itemCombat(1350)?.damage).toBe(10);
+    expect(itemCombat(3011)?.damage).toBe(10);
   });
 
   it('其余弹药伤害不变项（40/47/545/3009 抽样防桥接层误伤）', () => {

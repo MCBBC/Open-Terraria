@@ -104,10 +104,11 @@ export enum BuffType {
                    //   840t/专家 960t）；消费点 Projectile.cs:12879/12885/27124。
                    //   本仓吸血/治疗弹链未实装，效果位 getter 备用；
                    //   载荷在 NPC 401 召唤门禁（bossAI_duke_moonlord）
-  KiteBuff = 75,   // 风筝(383)：移速 +25% / 镐速 −15% / 放置速度 +15%（1456 :9612-9616——
-                   //   曾取 1457 :10003-10006 的 +15%/−10%，按仓内标杆改回 1456 终值）+
-                   //   kiteLuckLevel 三档 = clamp(buffTime/10800,0,3)（:9618-9623，
-                   //   luck += 档×0.1/3 :28675）。授予物品（风筝族 4371 等）未移植，登记
+  KiteBuff = 75,   // 风筝(383)：移速 +15% / 镐速 −10% / 放置速度 +15%（★1457 基准
+                   //   Player.cs:10003-10006；旧 1456 钉 +25%/−15% 已随 2026-08-23
+                   //   基准切换反转）+ kiteLuckLevel 三档 = clamp(buffTime/10800,0,3)
+                   //   （:10008-10010，luck += 档×0.1/3）。授予物品（风筝族 4371 等）
+                   //   未移植，登记
   Stinky = 76,     // 恶臭(120)：luck −0.25（:9958-9961 stinky / :28687-28690）。
                    //   授予 = 臭味药水 2353 投掷弹 371（Foul Potion）消亡 80px 内
                    //   ApplyBuffTo(120,1800t=30s)（Projectile.cs:75203-75228，玩家+NPC）
@@ -997,8 +998,7 @@ export class BuffState {
     if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
     if (this.active.has(BuffType.Weak)) m *= 0.9;            // 虚弱 moveSpeed -= 0.1（:11510）
     if (this.active.has(BuffType.Werewolf)) m *= 1.05;      // 狼人 moveSpeed += 0.05（:11498）
-    if (this.active.has(BuffType.KiteBuff)) m += 0.25;       // 风筝 moveSpeed += 0.25
-                                                             // （1456 :9613；1457 :10003 削到 +0.15 不取）
+    if (this.active.has(BuffType.KiteBuff)) m += 0.15;       // 风筝 moveSpeed += 0.15（★1457 :10003；旧 1456 钉 0.25 已反转）
     if (this.active.has(BuffType.SugarRush)) m *= 1.2;       // 糖分冲刺 moveSpeed += 0.2（:9634）
     m += [0, 0.2, 0.3, 0.4][this.wellFedTier];               // 食物 moveSpeed += 0.2/0.3/0.4（:11532+）
     return m;
@@ -1119,7 +1119,7 @@ export class BuffState {
   get pickSpeedMult(): number {
     return 1
       - (1 - this.wellFedPickMult)
-      - (this.active.has(BuffType.KiteBuff) ? 0.15 : 0);  // 1456 :9614 pickSpeed -= 0.15f
+      - (this.active.has(BuffType.KiteBuff) ? 0.1 : 0);   // ★1457 :10004 pickSpeed -= 0.1f（旧 1456 钉 0.15 已反转）
   }
   /** 原版 buff 21（PotionSickness）无任何属性——只禁治疗（healBlocked）。
    *  旧实现 +80 maxHp 非原版（2026-08-13 对齐移除，喝药回血走 healLife 数据驱动） */

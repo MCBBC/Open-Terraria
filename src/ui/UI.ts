@@ -956,6 +956,42 @@ export class UI {
     return s;
   }
 
+  /** 配饰格可见性眼睛开关（per-slot 隐藏,Main.cs:40846-40896）：InventoryTickOn/Off
+   *  图标叠格右上,光标为空时点击翻转 player.hideVisibleAccessory[slot]（PlaySound(12)
+   *  =menuTick :40878;悬停文案 Lang.inter[58+num45] = LegacyInterface.59 可见/60 隐藏）。
+   *  ★原版只挂功能配饰段 3-9（num40>2 门 :40855）——盔甲 0-2 与社交 13-19 无图标
+   *  （社交槽原版无 hide 门,UpdateVisibleAccessories :36368-36375 第二轮无条件） */
+  private attachVisibilityEye(slotEl: HTMLElement, slotIdx: number): void {
+    const eye = el('button', 'sw-btn sw-acceye');
+    eye.style.cssText = 'position:absolute; right:-12px; top:-10px; width:24px; height:20px;'
+      + 'margin:0; padding:0; z-index:5; background:center/contain no-repeat; image-rendering:pixelated;';
+    eye.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (this.heldStack) return;   // 原版 mouseItem.IsAir 门（:40859）
+      const p = this.game?.player;
+      if (!p) return;
+      p.hideVisibleAccessory[slotIdx] = !p.hideVisibleAccessory[slotIdx];
+      this.game!.sfx.play('menuTick');   // SoundEngine.PlaySound(12)（:40878）
+      this.paintAccEyes();
+    });
+    slotEl.style.position = 'relative';
+    slotEl.appendChild(eye);
+    this.accEyeEls.set(slotIdx, eye);
+    this.paintAccEye(eye, slotIdx);
+  }
+
+  /** 眼睛图标态（InventoryTickOn/Off :40862-40865）+ 悬停文案（:40889 inter[59/60]） */
+  private paintAccEye(eye: HTMLElement, slotIdx: number): void {
+    const hidden = this.game?.player.hideVisibleAccessory[slotIdx] ?? false;
+    eye.style.backgroundImage = `url(sprites/vanilla/Inventory_Tick_${hidden ? 'Off' : 'On'}.png)`;
+    eye.title = Lang.text(hidden ? 'LegacyInterface.60' : 'LegacyInterface.59');
+  }
+
+  /** 全部眼睛图标重刷（读档回填/翻槽后） */
+  private paintAccEyes(): void {
+    for (const [idx, eye] of this.accEyeEls) this.paintAccEye(eye, idx);
+  }
+
   /** 一键装备判定（ItemSlot.CanSwapEquip :3009-3020 + RightClick :1541：
    *  盔甲/配饰/染料/宠物/光源/矿车/坐骑/钩爪均可一键装备；
    *  vi_ 物品的盔甲/配饰归属查 vanilla-itemstats.json） */
@@ -2087,6 +2123,8 @@ export class UI {
   /** 装备/杂项页签与 Loadout 按钮（背包面板顶部） */
   private eqPageEl: HTMLElement | null = null;
   private miscPageEl: HTMLElement | null = null;
+  /** 配饰格可见性眼睛钮（槽序 → 元素,attachVisibilityEye 登记/refreshAllNow 重刷） */
+  private accEyeEls = new Map<number, HTMLElement>();
   private loadoutBtns: HTMLButtonElement[] = [];
   private eqPageBtns: HTMLButtonElement[] = [];
   /** 背包侧"堆叠至附近宝箱"钮（ChestStack：左键堆叠/右键循环模式；开箱时隐藏） */
@@ -2285,7 +2323,7 @@ export class UI {
     // 装备页：三列 L→R = 染料 | 时装 | 装备（原版 DrawInventory :40830-40968：
     //  x=sw-186/-139/-92 单列纵向 47px 列距；配饰段相对盔甲段下移 num35=4px）。
     //  两段式竖列（盔甲段 + 4px 组距 + 配饰段）
-    const vcol2 = (label: string, a: number, na: number, b: number, nb: number, where: SlotWhere) => {
+    const vcol2 = (label: string, a: number, na: number, b: number, nb: number, where: SlotWhere, eyes = false) => {
       const col = el('div');
       col.appendChild(el('div', 'sw-lbl', label));
       const wrap = el('div');
@@ -2294,6 +2332,7 @@ export class UI {
       for (let k = 0; k < nb; k++) {
         const sl = this.makeSlotEl(b + k, where);
         if (k === 0) sl.style.marginTop = '4px'; // 段组距（原版 num35=4）
+        if (eyes) this.attachVisibilityEye(sl, b + k);
         wrap.appendChild(sl);
       }
       col.appendChild(wrap);
@@ -2301,10 +2340,11 @@ export class UI {
       return col;
     };
     this.eqPageEl = el('div');
+    this.accEyeEls.clear();   // 面板重建（重进世界）时旧眼钮引用作废
     this.eqPageEl.style.cssText = 'display:flex; gap:16px;'; // 列距拉开：自制列标签与邻列槽贴叠会被读成"词左边的杂字"（原版无文字标签不显此问题）
     this.eqPageEl.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 7, 'dye'));            // 染料 dye[0-2]+[3-9]
     this.eqPageEl.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor')); // 时装 armor[10-12]+[13-17]
-    const equipCol = vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor');          // 装备 armor[0-2]+[3-7]（防御计数器挂此列底）
+    const equipCol = vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor', true);   // 装备 armor[0-2]+[3-7]（防御计数器挂此列底;配饰段挂眼睛开关）
     this.eqPageEl.appendChild(equipCol);
     left.appendChild(this.eqPageEl);
     // 杂项页：miscEquips[5]（宠物/光源/矿车/坐骑/抓钩，context 19/20/18/17/16）+ miscDyes[5]（context 33）
@@ -3228,6 +3268,7 @@ export class UI {
     this.refreshHotbar();
     this.moveGhost();
     this.paintTrash();
+    this.paintAccEyes();
     this.refreshPvpButtons();
     try {
       this.achAdvisorEl?.update();

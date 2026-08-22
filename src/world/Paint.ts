@@ -20,7 +20,10 @@
 //   物品 4668 GlowPaint(paintCoating=1, 荧光) / 5344 EchoCoating(paintCoating=2, 隐形)，
 //   走 Tile.fullbrightBlock/invisibleBlock 位（Tile.cs:558-607）而非 5bit 油漆域。
 //   旧档迁移 ConvertIlluminantPaintToNewField（WorldFile.cs:2806-2825）。
-//   本仓未建涂层存储/渲染链——涂层物品惰性（购买后无效果），登记依赖；油漆域 1-30 全量生效。
+//   本仓涂层链已建（2026-08-23）：存储 = TileStore.coat 四位通道（WF:1539-1552 位编码）；
+//   涂刷 = paintCoatTile/paintCoatWall（本文件尾）+ Game.tryPainting ApplyCoating 分支；
+//   渲染 = ChunkCache 隐形跳过 + 全亮叠层（pair.glow）+ Renderer 光照后合成；
+//   光照 = TileLightScanner 隐形格不挡光（TileLightScanner.cs:154-166）。
 
 /** PaintID（Terraria.ID/PaintID.cs:5-69）。深层漆 = 浅层 id+12（13-24）。 */
 export const enum PAINT_ID {
@@ -105,13 +108,22 @@ export function paintColor(color: number): readonly [number, number, number, num
 }
 
 /** 涂层 id → RGBA（WorldGen.cs:44063-44071 coatingColor）。1=荧光 2=隐形，其余透明。
- *  涂层系统未建（见文件头），仅涂刷尘/UI 可能消费 */
+ *  消费方 = 涂刷尘（paintCoatEffect :44114-44131 的 Dust 143 色） */
 export function coatingColor(coating: number): readonly [number, number, number, number] {
   switch (coating) {
     case 1: return [235, 170, 255, 255];
     case 2: return [180, 245, 255, 255];
     default: return [0, 0, 0, 0]; // Color.Transparent
   }
+}
+
+/** 涂层 id（Item.paintCoating，Item.cs:120；SetDefaults :38471/:42387 赋值） */
+export const enum PAINT_COAT {
+  NONE = 0,
+  /** 4668 夜明涂料（Illuminant Coating）→ fullbrightBlock/Wall 位 */
+  ILLUMINANT = 1,
+  /** 5344 回声涂料（Echo Coating）→ invisibleBlock/Wall 位 */
+  ECHO = 2,
 }
 
 // ===================== 渲染消费（TileShader.cso SM2 字节码真值） =====================
@@ -172,7 +184,8 @@ export function coatingColor(coating: number): readonly [number, number, number,
 //      （ImageData 循环；fround 序与 UNORM 取整在函数内做，循环只搬运字节）。
 //   3. 精度：逐指令按 f32 寄存器序模拟（Math.fround）；老 ATI fp24 硬件与 fp32 存在
 //      LSB 级差；写回按 UNORM8 最近偶取整兜底。
-//   4. 涂层（paintCoating 1/2 → fullbright/invisible 位）系统未建，另行登记（文件头）。
+//   4. 涂层（paintCoating 1/2 → fullbright/invisible 位）已建（文件头）；涂层渲染不走
+//      本 shader 域（原版涂层在 tileLight/可见性门，TileDrawing.cs:6727-6731/:1434-1452）。
 
 /** float32 一步舍入（SM2 寄存器精度——逐指令镜像字节码运算序） */
 const fr32 = Math.fround;
@@ -553,6 +566,12 @@ export interface PaintableStore {
   idx(x: number, y: number): number;
 }
 
+/** 涂层读写视图（TileStore 满足；coat 位编码 = WF:1539-1552，掩码见 TileStore.COAT_*） */
+export interface CoatableStore extends PaintableStore {
+  coat: Uint8Array;
+  setCoat(x: number, y: number, mask: number, bits: number): void;
+}
+
 /**
  * WorldGen.paintTile（WorldGen.cs:44137-44159）逐行 1:1：
  * 非活性格 / 已同色 → false（不消耗油漆，Player.ApplyPaint :41357 同守卫）；
@@ -589,3 +608,118 @@ export function paintWall(
 export function paintDustColor(newPaint: number, oldPaint: number): readonly [number, number, number, number] {
   return paintColor(newPaint === 0 ? oldPaint : newPaint); // :44093-44097
 }
+
+// ===================== 涂层涂刷原语（WorldGen.cs 1:1） =====================
+
+/** coatingColors（WorldGen.cs:44073-44089）：取该格既有涂层色列表（尘效回退用）。
+ *  block=true 方块侧（fullbrightBlock/invisibleBlock），false 墙侧。顺序 = 先荧光后隐形 */
+export function coatingColorsOf(coatBits: number, block: boolean): Array<readonly [number, number, number, number]> {
+  const out: Array<readonly [number, number, number, number]> = [];
+  const fullbright = block ? TileStoreCoat.BLOCK_FULLBRIGHT : TileStoreCoat.WALL_FULLBRIGHT;
+  const invisible = block ? TileStoreCoat.BLOCK_INVISIBLE : TileStoreCoat.WALL_INVISIBLE;
+  if (coatBits & fullbright) out.push(coatingColor(1));   // :44081-44083
+  if (coatBits & invisible) out.push(coatingColor(2));    // :44085-44087
+  return out;
+}
+
+/** TileStore.COAT_* 的本地镜像（避免 world/Paint ← → world/TileStore 循环 import；
+ *  位值与 WorldFile.cs:1539-1552 存档位一致，TileStore 侧有断言测试锁定） */
+const TileStoreCoat = {
+  BLOCK_INVISIBLE: 2,
+  WALL_INVISIBLE: 4,
+  BLOCK_FULLBRIGHT: 8,
+  WALL_FULLBRIGHT: 16,
+} as const;
+
+/**
+ * WorldGen.paintCoatTile（WorldGen.cs:44161-44207）逐行 1:1：
+ *   非活性格 → false（:44163-44166）；paintCoatId 0=双位清除（两位全空 → false :44169-44173，
+ *   清后 SquareTileFrame :44174）；1=置荧光位（已置 → false :44176-44180）；
+ *   2=置隐形位（已置 → false :44181-44186，置后 SquareTileFrame :44187）；
+ *   其余 id → false（:44168 default）。原版 SquareTileFrame(resetFrame:false) 触发邻帧
+ *   重算——涂层不改 framing，仓内等价 = store listeners（chunk 重烘）已由 setCoat 发出。
+ *   broadcast（NetMessage 63 :44192-44194）单机无操作，仓内多人走 TileOp 通道（登记：
+ *   paint 通道本就未接 netReporter，同域不扩）。
+ *   尘效（:44197-44200 paintCoatEffect）经 coatDust 钩子（取色见 paintCoatDustColor）。
+ */
+export function paintCoatTile(
+  st: CoatableStore, x: number, y: number, paintCoatId: number,
+  coatDust: CoatDustHook | null = null,
+): boolean {
+  if (!st.inBounds(x, y)) return false;           // Main.tile[x,y] null 检查等价
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;                 // :44163-44166 !tile.active()
+  const coat = st.coat[i];
+  const oldColors = coatingColorsOf(coat, true);  // :44167 尘效回退色（写入前取）
+  const FB = TileStoreCoat.BLOCK_FULLBRIGHT, INV = TileStoreCoat.BLOCK_INVISIBLE;
+  switch (paintCoatId) {
+    case 0: { // :44169-44175
+      if (!(coat & FB) && !(coat & INV)) return false;
+      st.setCoat(x, y, FB | INV, 0);
+      break;
+    }
+    case 1: // :44176-44180
+      if (coat & FB) return false;
+      st.setCoat(x, y, FB, FB);
+      break;
+    case 2: { // :44181-44187
+      if (coat & INV) return false;
+      st.setCoat(x, y, INV, INV);
+      break;
+    }
+    default:
+      return false;                               // :44168
+  }
+  if (coatDust) coatDust(x, y, paintCoatDustColor(paintCoatId, oldColors)); // :44197-44200
+  return true;
+}
+
+/**
+ * WorldGen.paintCoatWall（WorldGen.cs:44209-44255）逐行 1:1（墙版）：
+ *   wall==0 → false（:44211-44214）；位域换 fullbrightWall/invisibleWall，其余同构。
+ */
+export function paintCoatWall(
+  st: CoatableStore, x: number, y: number, paintCoatId: number,
+  coatDust: CoatDustHook | null = null,
+): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (st.wall[i] === 0) return false;             // :44211-44214 tile.wall == 0
+  const coat = st.coat[i];
+  const oldColors = coatingColorsOf(coat, false); // :44215
+  const FB = TileStoreCoat.WALL_FULLBRIGHT, INV = TileStoreCoat.WALL_INVISIBLE;
+  switch (paintCoatId) {
+    case 0: { // :44217-44223
+      if (!(coat & FB) && !(coat & INV)) return false;
+      st.setCoat(x, y, FB | INV, 0);
+      break;
+    }
+    case 1: // :44224-44228
+      if (coat & FB) return false;
+      st.setCoat(x, y, FB, FB);
+      break;
+    case 2: { // :44229-44235
+      if (coat & INV) return false;
+      st.setCoat(x, y, INV, INV);
+      break;
+    }
+    default:
+      return false;                               // :44216
+  }
+  if (coatDust) coatDust(x, y, paintCoatDustColor(paintCoatId, oldColors)); // :44245-44248
+  return true;
+}
+
+/** paintCoatEffect（WorldGen.cs:44114-44131）取色侧：id 0（刮除）时随机回退旧涂层色，
+ *  否则恒新涂层色（coatingColor）。仓内尘钩子按 rgba 取色，此处返回 RGBA。 */
+export function paintCoatDustColor(
+  paintCoatId: number, oldColors: Array<readonly [number, number, number, number]>,
+): readonly [number, number, number, number] {
+  if (paintCoatId === 0 && oldColors.length > 0) {   // :44120-44122
+    return oldColors[Math.floor(Math.random() * oldColors.length)];
+  }
+  return coatingColor(paintCoatId);                  // :44119
+}
+
+/** paintCoatEffect 尘效钩子：坐标 + 已定尘色（RGBA）——Game 侧接 spawnParticles */
+export type CoatDustHook = (x: number, y: number, color: readonly [number, number, number, number]) => void;
