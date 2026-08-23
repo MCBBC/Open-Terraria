@@ -21,6 +21,7 @@ interface Hooks {
   playSfxFiles(files: string[]): void;
   spawnParticles(_x: number, _y: number, _c: string, count: number): void;
   damagePlayer(): void;
+  addDamageNumber(): void;
   enemies(): unknown[];
   entities: { add(e: unknown, b: string): void };
 }
@@ -37,6 +38,7 @@ function casterWorld() {
     playSfxFiles(files) { hooks.sfx.push(files); },
     spawnParticles(_x, _y, _c, count) { hooks.dust += count; },
     damagePlayer() {},
+    addDamageNumber() {},   // Enemy.hurt 伤害数字链（RV3 后桩缺口补）
     enemies: () => [],
     entities: {
       add(e, b) {

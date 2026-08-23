@@ -24237,10 +24237,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (bad) {
           // 原版失配杀=整段水列（:59362-59373 自 num7-4 到 num2 逐格 KillTile）——
           // 519 def 1×1 到不了 breakTile object 整件支,此处显式逐格入队
+          //（★先捕 type：首格 breakTile 后 st.type[i] 归零）
+          const selfType = st.type[i];
           let top = y;
-          while (top > 0 && st.get(x, top - 1) === st.type[i]) top--;
+          while (top > 0 && st.get(x, top - 1) === selfType) top--;
           for (let ky = top; ky < groundY; ky++) {
-            if (st.get(x, ky) === st.type[i]) this.killDecorTile(x, ky);
+            if (st.get(x, ky) === selfType) this.killDecorTile(x, ky);
           }
         }
         return;
