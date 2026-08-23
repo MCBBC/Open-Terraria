@@ -1838,7 +1838,8 @@ export class VanillaSpawner {
         // 地表白日水面线（:1918-1930 复用 findDryGapY）
         const num26 = this.findDryGapY(this.spawnTileY);
         if (num26 > 0 && !this.xRange) {
-          // :1933 草族(2/477) && 1/5 → 水黾 616
+          // :1933(1457 NPC.cs:2027-2029) 草族(2/477) && 1/5 → 616=海龟 Turtle
+          //（R4 勘误:616 非水黾——水黾=612/金 613 走下方沙地支,本支行为与原版一致仅注释错名）
           if (N(5) && (t === T.GRASS || t === T.MOWED_GRASS)) return this.spawnNPC(x, num26 * TILE, 616, rng);
           // :1937 沙地：1/2 无风无雨 → 水黾群 613 金/612（原版 1-3 只,单返回值交付 1 只）;
           //  否则鸊鷉 608

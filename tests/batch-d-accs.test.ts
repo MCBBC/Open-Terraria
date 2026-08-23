@@ -168,18 +168,20 @@ describe('拍击石系三脉冲', () => {
 
 // ============ LoadoutShare（GetEffectiveArmor/GetEffectiveDye :5679-5758） ============
 describe('LoadoutShare 收藏装备跨配装共享', () => {
-  it('当前槽空 + 他套同槽收藏件 → 共享生效（视觉原语）;未收藏不共享;属性不走共享件', () => {
+  it('当前槽空 + 他套同槽收藏件 → 共享生效且属性走共享件（R4-19 裁决:P57:13015-13048）;未收藏不共享', () => {
     const p = makeHooks().player;
     const shield = iid(6188);   // 复原之盾（def+1,armorAccepts 配饰槽内）
     // 他套（loadouts[1]）配饰槽放收藏复原之盾
     p.inv.loadouts[1].armor[3] = { id: shield, stack: 1, favorited: true };
     expect(p.inv.getEffectiveArmor(3)?.id).toBe(shield);
-    // ★属性不走共享件（原版 GetEffectiveArmor 消费面全在视觉,Main.cs:17552/
-    //  Player.cs:9696——ApplyEquipFunctional 仍扫裸 armor[],空槽无数值）
-    expect(p.equipStats.def).toBe(0);
+    // ★属性走共享件（R4-19 蓝队裁决,1457 P57:13015-13048 逐行:GrantArmorBenefits
+    //  k=0..9 / ApplyEquipFunctional m=3..9 全走 GetEffectiveArmor——共享件给全部
+    //  属性;批 D 报告"消费面全在视觉/属性不走共享件"与源码相反,测试锚已改写）
+    expect(p.equipStats.def).toBe(1);
     // 取消收藏 → 不共享
     p.inv.loadouts[1].armor[3] = { id: shield, stack: 1 };
     expect(p.inv.getEffectiveArmor(3)).toBeNull();
+    expect(p.equipStats.def).toBe(0);
     // 本槽非空 → 恒用本槽
     p.inv.armor[3] = { id: shield, stack: 1 };
     expect(p.inv.getEffectiveArmor(3)?.id).toBe(shield);
@@ -189,14 +191,15 @@ describe('LoadoutShare 收藏装备跨配装共享', () => {
     expect(p.inv.getEffectiveDye(0)?.id).toBe(iid(1015));
   });
 
-  it('本槽非空 → 恒用本槽（不叠加）;收藏件入 equipStatsKey（跨套变动失效缓存）', () => {
+  it('本槽非空 → 恒用本槽（不叠加）;收藏件入 equipStatsKey（跨套变动失效缓存,R4-19 键段同步）', () => {
     const p = makeHooks().player;
     p.inv.loadouts[1].armor[0] = { id: iid(37), stack: 1, favorited: true };
     expect(p.inv.getEffectiveArmor(0)?.id).toBe(iid(37));  // 共享生效
-    // 属性键走裸槽（共享件不入 stats 口径）——卸收藏键不变
+    // 共享件是聚合输入 → 卸收藏必须失效缓存（键含共享件,与 computeEquipStats 同口径）
     const k1 = p['equipStatsKey']();
+    expect(k1).toContain('1352p0.');
     p.inv.loadouts[1].armor[0] = null;
-    expect(p['equipStatsKey']()).toBe(k1);
+    expect(p['equipStatsKey']()).not.toBe(k1);
     // 本槽非空 → 恒用本槽
     p.inv.armor[0] = { id: iid(37), stack: 1 };
     expect(p.inv.getEffectiveArmor(0)?.id).toBe(iid(37));

@@ -388,7 +388,7 @@ export function placeFurniture(st: TileStore, key: string, x: number, y: number,
  *  GGGGG：placeStatueTrap 共享版带 PlaceTile(135) 尾 SquareTileFrame 内联级联
  *  （与 vanilla HouseBuilder→PlaceStatueTrap→PlaceTile 同构；WWWW kstage 快照
  *  扫描对零掷击杀幂等，掷型检查(184/165 重帧)以内联为准=vanilla 流位）。 */
-function placeStatue(st: TileStore, rng: RNG, x: number, y: number, idx: number): boolean {
+function placeStatue(st: TileStore, rng: RNG, x: number, y: number, idx: number, gs: GenState): boolean {
   const [sheet, style] = STATUE_LIST[idx];
   const tile = sheet === 349 ? STATUE_349 : STATUE_105;
   let ok = true;
@@ -413,7 +413,7 @@ function placeStatue(st: TileStore, rng: RNG, x: number, y: number, idx: number)
       regHouseObj(st, x, y - 2, 2, 3, 'floor');
     }
   }
-  if (STATUES_WITH_TRAPS.has(idx)) placeStatueTrap(st, rng, x, y);
+  if (STATUES_WITH_TRAPS.has(idx)) placeStatueTrap(st, rng, x, y, gs);
   return ok;
 }
 
@@ -1169,7 +1169,7 @@ function ageRoom(st: TileStore, rng: RNG, gs: GenState, r: Rect, theme: Theme, d
 }
 
 // ---------- FillRooms(画/烛台交替 + 装饰循环) ----------
-function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme): void {
+function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme, gs: GenState): void {
   // 家具七选(HouseBuilder.FillRooms choices;沙漠 Tables2 → tile 469)
   const choices: Array<[string, number]> = [
     [def.tables2 ? 'v_469_tables_group_2' : 'table', def.table],
@@ -1237,7 +1237,7 @@ function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme
         placeFurniture(st, 'v_186_decos_3x2', x, y, rng.int(22, 25));
         break;
       case 2: // 雕像(statueList[Next(2, len)],陷阱雕像照接)
-        placeStatue(st, rng, x, y, rng.int(2, STATUE_LIST.length - 1));
+        placeStatue(st, rng, x, y, rng.int(2, STATUE_LIST.length - 1), gs);
         break;
       case 3: {
         const [key, style] = choices[rng.int(0, choices.length - 1)];
@@ -1747,7 +1747,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('bp', ox, oy, 0, __rn());
     // 7) FillRooms:画/烛台 + 装饰(每房)
-    for (const r of rooms) fillRooms(st, rng, r, def, theme);
+    for (const r of rooms) fillRooms(st, rng, r, def, theme, gs);
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('fr', ox, oy, 0, __rn());
     // 8) AgeRoom:七主题蚀变(原版无噪声种子掷骰——旧实现自掷 1<<30 非原版消耗,已删)

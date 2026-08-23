@@ -126,6 +126,13 @@ export interface OptionsData {
    *  分类层送最匹配箱（QuickStacking.cs:421-440）；右键循环（Main.cs:41297-41301
    *  CycleQuickStackMode + 音效 10 menuOpen） */
   quickStackMode: 'quick' | 'smart';
+  /** 手柄右摇杆平移四档（R4-13,PlayerInputProfile.cs:59-61/:227-228——缺省
+   *  OnAlways(2)?★键盘缺省 Hold(0)、手柄缺省 OnAlways;本仓单输入轴取键盘档。
+   *  运行时四档已 1:1(Game.ts PanControl 段),此键管持久化——曾刷新即丢 */
+  panControlMode: number;              // 0=OffAlways/Hold 1=Hold 2=OnAlways 3=Click（PlayerInputProfile.cs 枚举序）
+  /** 设置版本号（R4-14,M57:4241 Put("LastLaunchedVersion",325)——迁移按 >= 门;
+   *  本仓迁移仍字段嗅探,此键先落语义锚,后续迁移改造消费） */
+  settingsVersion: number;
 }
 
 const KEY = 'sandboxworld.options';
@@ -169,6 +176,8 @@ export class OptionsStore {
     autoSaveIntervalMin: 10,                // 原版 600000ms 恒值
     autoPause: false,                       // Main.cs:1280
     quickStackMode: 'quick',                // Player.Settings.StackToChestsPreferredMode（QuickStackToNearbyChests）
+    panControlMode: 0,                      // Hold（PlayerInputProfile.cs:59 键盘缺省）
+    settingsVersion: 325,                   // LastLaunchedVersion（M57:4241）
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];
@@ -198,6 +207,10 @@ export class OptionsStore {
       if (typeof this.data.waveQuality !== 'number'
         || !Number.isFinite(this.data.waveQuality)) this.data.waveQuality = 3;
       this.data.waveQuality = Math.min(3, Math.max(0, Math.round(this.data.waveQuality)));
+      // R4-13：PanControl 档位钳 [0,3]（PlayerInputProfile.cs:194-201 读回卫门同语义）
+      if (typeof this.data.panControlMode !== 'number'
+        || !Number.isFinite(this.data.panControlMode)) this.data.panControlMode = 0;
+      this.data.panControlMode = Math.min(3, Math.max(0, Math.round(this.data.panControlMode)));
       // 小地图皮肤归一化:存档里的未知/旧键 → Default
       // (SelectionHolder.SetActiveFrame(string) 未命中 → Options.Values.First() = Default)
       if (!(MINIMAP_FRAME_SKINS as readonly string[]).includes(this.data.minimapFrame)) {

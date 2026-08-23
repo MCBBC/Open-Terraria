@@ -556,7 +556,14 @@ function killTileGen(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   //   ——神庙锁门三格拒毁（下方格活性锁门门 cs:62422-625 / HasReasonToReturnEarly
   //   →IsLockedDoor cs:62433+62504-507）。只拒杀不加支：fail 支（num==1,锁门顶格
   //   存活+级联）gen 域不可达于现绿链（构造保证）,备案残差见账本 YYYYY 批。
-  if (checkTileBreakability(st, x, y) === 2) return;
+  //   ★同门连带清偿 CONST #49 Settle_Liquids L=2089（XXXXX 移交液体域债）——
+  //   LiquidSim.killTileAt 沉降期 KillTile（WaterCheck 死亡表/LiquidCheck 植物裁切）
+  //   走本引擎,拒毁差经尘掷流位+瞬时支撑态扰动 254→255 Next(30) 均分掷 → 纯 L 通道
+  //   差（A/T/W 末态零差）。__swBrkRefuse=永久零开销探针钩（__swKillCap 同款）。
+  if (checkTileBreakability(st, x, y) === 2) {
+    (globalThis as { __swBrkRefuse?: (x: number, y: number, sheet: number) => void }).__swBrkRefuse?.(x, y, SWEEP_SHEET[st.type[i]]);
+    return;
+  }
   const sheet = SWEEP_SHEET[st.type[i]];
   const fx = st.frameX[i]!;
   (globalThis as { __swKillCap?: (x: number, y: number, sheet: number) => void }).__swKillCap?.(x, y, sheet);

@@ -3502,7 +3502,9 @@ export class SkyRenderer {
     this.stepWeatherTints(dtMs / 1000);
     const t = clock.timeOfDay;
     const isDay = t > ClockVal.DAWN && t < ClockVal.DUSK;
-    const dayTimeTicks = isDay ? ((t - 0.25) / 0.5) * 54000 : 0;
+    // ★0.1875 基(=Clock.DAWN,原版 Main.time 0=4:30AM)——曾用 0.25 基差 1.5h,
+    //  日/月位与晨昏窗整体偏移(2026-08-23 校正,菜单调度对拍抓出)
+    const dayTimeTicks = isDay ? ((t - ClockVal.DAWN) / 0.625) * 54000 : 0;
     // 晨昏可见性(GetVisibilities :217-256,复用既有 sunVisibilities 单实现)
     // +调色板相位(Main.HorizonPhase)——日/月绘制、晨昏渐变与 Renderer.
     // setFrameHorizon(光种渗入)共用;镜头光斑走 drawWorldFx 链不变
@@ -3556,7 +3558,7 @@ export class SkyRenderer {
       ctx.fillRect(0, 0, viewW, viewH);
       // 回落分支的日食压暗(主分支已含于 cots)
       if (clock.eclipse && t > ClockVal.DAWN && t < ClockVal.DUSK) {
-        const dayTime = ((t - 0.25) / 0.5) * 54000;
+        const dayTime = ((t - ClockVal.DAWN) / 0.625) * 54000;
         const L = Math.min(1, dayTime / 1242);
         if (L > 0) {
           ctx.save();
@@ -3665,8 +3667,9 @@ export class SkyRenderer {
     // ---- 原版太阳/月亮(Main.cs:62279 DrawSunAndMoon 一比一,2026-08-20 补全
     //      双通道日光色/云遮蔽/光斑——此前单通道裸绘,用户实报"太阳渲染差
     //      十万八千里")----
-    // 昼夜时间(我们 0.25/0.75 边界 → 原版 day 0-54000 / night 0-32400)
-    const nightTime = !isDay ? ((((t - 0.75) + 1) % 1) / 0.5) * 32400 : 0;
+    // 昼夜时间(Clock.DAWN 0.1875/DUSK 0.8125 边界 → 原版 day 0-54000 / night
+    //  0-32400;★曾用 0.25/0.75 基=差 1.5h,月位/晨昏窗整体偏移 2026-08-23 校正)
+    const nightTime = !isDay ? ((((t - ClockVal.DUSK) + 1) % 1) / 0.375) * 32400 : 0;
     // 云遮蔽系数(DrawSunAndMoon :62352-62360/:62378-62383:num12/num13 =
     // 1-蘑菇影响-cloudAlpha×1.5×atmo,钳 0;蘑菇影响 Game 平滑值经 scene 注入)
     const cloudAlpha = this.weatherRef?.cloudAlpha ?? 0;

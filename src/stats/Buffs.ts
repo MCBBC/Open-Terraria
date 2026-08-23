@@ -752,8 +752,14 @@ export class BuffState {
   /** 饥饿链事件回调（Player 注入：表情 146/147/148 + SoundID.Hungry）——
    *  UpdateHungerBuffs :11705/:11726 的 EmoteBubble.MakeLocalPlayerEmote + :11728 PlaySound */
   onHungerEvent: ((kind: 'neutral' | 'hungry' | 'starving') => void) | null = null;
-  /** 极饿周期直伤累加器（:19169 lifeRegenCount ≤ -120×num12 → HurtLifeRegen） */
+  /** 极饿流干账（lifeRegenCount 语义,HP 口径:-num2/2 HP/s 入账,每 -num12 结算
+   *  num12 伤——R5-F7 单通道化后复用原 2s 直伤计时器字段） */
   private starvingHitAccum = 0;
+  /** 本 tick ENV_DOTS 是否有 DoT 结算（含被星云免掉的——原版 DoT 段照写
+   *  lifeRegenTime=0,星云只免伤害不清爬坡;Player 消费于 lifeRegenTime 复位门） */
+  dotActiveTick = false;
+  /** 星云生命套层数（buff 174-175 级数,Player 每帧写;UpdateLifeRegen :19220 消费） */
+  nebulaLifeLevel = 0;
 
   /** UpdateStarvingState（Player.cs:11743-11768）：无任何 fed-state（26/206/207/332/
    *  333/334）在栏 → 授予 332（remix 组合 28800t 否则 18000t）。原版在 UpdateBuffs
@@ -833,7 +839,25 @@ export class BuffState {
       }
     }
     const cur = this.active.get(type);
-    if (cur === undefined || cur < durationSec) this.active.set(type, durationSec);
+    // R5-F20：槽位 44 上限（maxBuffs :1491）+ 满时驱逐第一个非 debuff 槽、
+    // 全 debuff 则拒绝（AddBuff_ActuallyTryToAddTheBuff :5317-5351）——旧无上限。
+    // 本仓 Map 无空槽概念,等价实现 = size≥44 时删首个非 debuff 键
+    if (cur === undefined && this.active.size >= 44) {
+      let evicted = false;
+      for (const [t] of this.active) {
+        if (!BuffState.DEBUFFS.has(t)) { this.active.delete(t); evicted = true; break; }
+      }
+      if (!evicted) return;
+    }
+    // R5-F18：AddBuffTimeAdditivelyToCap（BuffID.cs:34 + :5402-5410）——buff 94
+    // 魔力眩晕加法叠至上限 600t、buff 383 腾灵 43200t;其余 max 合并不缩短
+    //（:5411-5414）。旧一律 max 合并,魔瓶连喝眩晕时长不叠
+    const addCapTicks = vb === 94 ? 600 : vb === 383 ? 43200 : 0;
+    if (addCapTicks > 0) {
+      this.active.set(type, Math.min(addCapTicks / 60, (cur ?? 0) + durationSec));
+    } else if (cur === undefined || cur < durationSec) {
+      this.active.set(type, durationSec);
+    }
   }
   has(type: BuffType): boolean {
     return this.active.has(type);
@@ -886,6 +910,15 @@ export class BuffState {
     }
     // 链尾转移（UpdateHungerBuffs :11636——在递减之后、效果聚合之前） */
     this.updateHungerBuffs();
+    // ---- 免疫即除已有（Player.Update :26213-26218：每帧扫 buffImmune[type] →
+    //      DelBuff）——R5-F19：旧 immuneVanilla 只挡新增（apply 门 :5057）,已挂
+    //      OnFire 时装黑曜石头骨原版下帧熄火,我方烧满时长。递减后执行同原版序 ----
+    if (this.immuneVanilla.size > 0) {
+      for (const [t] of [...this.active]) {
+        const v = BUFF_DEFS[t]?.vanillaBuff;
+        if (v !== undefined && this.immuneVanilla.has(v)) this.active.delete(t);
+      }
+    }
     // ---- UpdateBuffs 正项（Player.cs:9640+）：Regeneration lifeRegen+=4（2 HP/s）、
     //      Honey :18955 lifeRegen+=2（1 HP/s）、狼人 :11496 lifeRegen+=1（0.5 HP/s）。
     //      注意原版这些都在 NaturalLifeRegen 的 DoT 段（:18779+）**之前**求值——
@@ -921,21 +954,31 @@ export class BuffState {
       heal += d;
     }
     if (dots < 0) this.dotChunkOut += -dots;
-    // ---- 极饿 334 双重掉血（Player.cs:18957-18981 + :19159-19176）：
-    //      ① lifeRegen = -max(4, 120×statLifeMax2/3000)（同 DoT 语义：清正项后常驻流失）
-    //      ② 每 120t（2s）HurtLifeRegen(max(2, statLifeMax2/50) ×(ZoneDesert||ZoneSnow→×2))，
-    //        statLife≤0 → KillMe(ByOther(18)=饿死，死因链在 Player.fixedUpdate） */
+    this.dotActiveTick = dots !== 0;
+    // ---- 星云生命套 DoT 全免（UpdateLifeRegen :19220-19223：`lifeRegen < 0 &&
+    //      nebulaLevelLife > 0 → lifeRegen = 0`——位于 ENV_DOTS 之后、极饿段之前,
+    //      故【极饿不掉免】。R5-F1：旧只做 +3HP/s/级正项,负项照扣,已补）----
+    if (dots < 0 && this.nebulaLifeLevel > 0) {
+      heal -= dots;
+      dots = 0;
+      this.dotChunkOut = 0;
+    }
+    // ---- 极饿 334 单通道流干（Player.cs :19255-19276 + :19458-19477）：
+    //      lifeRegen = -num2（num2=max(4,120×maxLife/3000)）逐 tick 入 lifeRegenCount,
+    //      每 -num13（=120×num12,num12=max(2,maxLife/50)）结算一次 num12 伤
+    //      （ZoneDesert/ZoneSnow → dmg×2,流速不变）。R5-F7：旧"连续流失 + 每 2s
+    //      直伤"双通道并行（400HP:8+4=12HP/s +50%,周期 2s vs 原版 60t）,已废——
+    //      400HP 基准 = num2=16/t → 60t 一跳 8 伤 = 8HP/s */
     if (this.active.has(BuffType.Starving)) {
-      if (heal > 0) heal = 0;                                  // :18960-18966 清正项
+      if (heal > 0) heal = 0;                                  // :19257-19260 清正项
       const num2 = Math.max(4, 120 * this.starvingMaxHp / 3000);
-      const drain = this.rateAccum(BuffType.Starving, -num2 / 2, dt);
-      dots += drain;
-      heal += drain;
-      this.starvingHitAccum += dt;
-      if (this.starvingHitAccum >= 2 - 1e-9) {   // 120t（2s）整数界——浮点累加 1/60×120 差 1e-15
-        this.starvingHitAccum -= 2;
-        const num12 = Math.max(2, Math.floor(this.starvingMaxHp / 50));
-        const hit = num12 * (this.starvingZoneBoost ? 2 : 1);
+      const num12 = Math.max(2, Math.floor(this.starvingMaxHp / 50));
+      const num13 = 120 * num12;                               // :19466（lifeRegen 单位）
+      // lifeRegenCount 流干账（HP 口径:num13 单位 = num12 HP;浮点累加补 epsilon）
+      this.starvingHitAccum += (-num2 / 2) * dt;
+      while (this.starvingHitAccum <= -num12 + 1e-9) {
+        this.starvingHitAccum += num12;
+        const hit = num12 * (this.starvingZoneBoost ? 2 : 1);  // :19465 沙漠/雪原 dmg×2
         dots -= hit;
         heal -= hit;
       }

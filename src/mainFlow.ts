@@ -333,6 +333,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         g.player.inv.loadouts[k] = {
           armor: src.armor.map((it) => it ? { ...it } : null),
           dye: src.dye.map((it) => it ? { ...it } : null),
+          hide: src.hide ? [...src.hide] : Array(10).fill(false),   // R4-12（旧档缺省 false）
         };
       }
     }
@@ -888,6 +889,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   function quitToMenu() {
+    // R4-8（WF57:6649 SaveAndQuit 语义）：原版 SaveAndQuit 必入队存档后才断线回菜单
+    // ——本仓退出曾不落盘,"退出即存档"预期落空。存档读 game 引用,须先于 destroy();
+    // 序列化入参在调用帧同步取值,异步尾流不依赖 game 存活。异常不阻断退出
+    try { doSave(); } catch (e) { console.error('quitToMenu save failed', e); }
     mobile?.destroy();
     mobile = null;
     game?.destroy();

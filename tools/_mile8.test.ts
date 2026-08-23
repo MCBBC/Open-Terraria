@@ -158,6 +158,12 @@ function labelOf(file: string, line: number): string {
     if (m) DUMPNAME.set(Number(m[1]), m[2]);
   }
   console.log(`dump names: ${DUMPNAME.size} (8ch dir=${G2})`);
+  // ★YYYYYY（2026-08-23）假绿免疫（XXXXX 批遗留#6 落地）：VG 传错目录（如 home-sec-*
+  //  只有 .wld）→ DUMPNAME 空 → chans() 全 '(no dump)' → 全槽假绿。名表必须从
+  //  8 通道 dump 目录取——SW_M8_VG 应与 SW_M8_G2 同目录。
+  if (DUMPNAME.size < 100) {
+    throw new Error(`mile8 假绿免疫：dump names=${DUMPNAME.size} <100——SW_M8_VG(${VG}) 缺 8 通道名表,应指向 dump 目录（与 SW_M8_G2 相同）`);
+  }
   const rows: Row[] = [];
   let curStore: Parameters<typeof cmp>[2] | null = null;
   const seen = new Set<number>();

@@ -250,10 +250,12 @@ function render(n) {
 // OneFromOptions(1, RegisterIceMimic_GetEasyModeItemPool(isRemix: true)) 这类把池工厂方法
 // 当实参的写法，lit() 解析不出（→ ids:[] 假绿）。池内容一律照抄 ItemDropDatabase.cs 原文。
 const POOL_METHODS = {
-  // :244-250：int[]{670,724,950,0,987,1579}，obj[3] = isRemix ? 725 : 1319
+  // 1457 :244-251：int[8]{670,724,950,6153,0,987,1579,6172}，obj[4] = isRemix ? 725 : 1319
+  // （1456 是 6 选 int[]{670,724,950,0,987,1579}+obj[3]——蓝队 R2-10：曾照抄 1456 形
+  //  漏 6153 GlacierFang/6172 HeavySling，肉前池 6 选≠原版 8 选）
   RegisterIceMimic_GetEasyModeItemPool: (args) => {
     const isRemix = boolArg(args[0]);
-    return [670, 724, 950, isRemix ? 725 : 1319, 987, 1579];
+    return [670, 724, 950, 6153, isRemix ? 725 : 1319, 987, 1579, 6172];
   },
 };
 function boolArg(n) {
@@ -712,6 +714,104 @@ const slimeBody = {};
     }
   }
 }
+
+// ============ 1457 差异补丁（本提取器基准树是 Terarria1456；1457 对齐差异在此重放） ============
+// 1456→1457 ItemDropDatabase.cs 全量 diff 共 11 处（2026-08-23 蓝队 R2 复核逐处核对，
+// 与 /tmp/recon 批 B"11 条差异"同一清单）——重跑本脚本不会丢（曾因裸重跑回退过一次）：
+function apply1457DropPatches(entries) {
+  const find = (npc, pred) => entries.find((e) => !e.global && e.npcs && e.npcs.includes(npc) && (!pred || pred(e)));
+  const oneOfIn = (e) => {
+    // 取 entry 内第一个 oneOf 节点（629/370 的 gate→gate→oneOf 嵌套）
+    let r = e?.rule;
+    while (r) {
+      if (r.k === 'oneOf') return r;
+      r = r.chain?.find?.((c) => c.on === 'success')?.rule ?? r.chain?.[0]?.rule;
+    }
+    return null;
+  };
+  // ①② 629 冰模仿怪：硬模两支池 +6172（1457 :236-237；软模 8 选池已由 POOL_METHODS 承载）
+  //  629 的四支 gate 都嵌在 common(1312) 的 failedRoll 链内——按 cond 名全树找 oneOf
+  {
+    const e629 = entries.find((x) => !x.global && x.npcs?.length === 1 && x.npcs[0] === 629);
+    const stack = [e629?.rule];
+    while (stack.length) {
+      const r = stack.pop();
+      if (!r || typeof r !== 'object') continue;
+      if (r.k === 'gate' && (r.cond?.name === 'NotRemixSeedHardmode' || r.cond?.name === 'RemixSeedHardmode')) {
+        const o = oneOfIn({ rule: r });
+        if (o && !o.ids.includes(6172)) o.ids.push(6172);
+      }
+      for (const c of r.chain ?? []) stack.push(c.rule);
+    }
+  }
+  // ③ 245 石巨人直杀：NotExpert 6158 1/6（1457 :653 新增，插在 1294 1/4 之后）
+  {
+    const at = entries.findIndex((e) => !e.global && e.npcs?.length === 1 && e.npcs[0] === 245
+      && e.rule?.k === 'cond' && e.rule.item === 1294);
+    if (at >= 0 && !entries.some((e) => !e.global && e.npcs?.includes(245) && e.rule?.item === 6158)) {
+      entries.splice(at + 1, 0, { npcs: [245], rule: { k: 'cond', cond: { name: 'NotExpert', args: [] }, item: 6158, denom: 6, min: 1, max: 1, num: 1 } });
+    }
+  }
+  // ④ 370 猪鲨直杀两支池插入 3291（1457 :669-670：…,5478,3291,2623 / …,5478,3291,157）
+  for (const cond of ['NotRemixSeedHardmode', 'RemixSeed']) {
+    const e = entries.find((x) => !x.global && x.npcs?.length === 1 && x.npcs[0] === 370
+      && x.rule?.k === 'gate' && x.rule.cond?.name === cond);
+    const o = oneOfIn(e);
+    if (o && !o.ids.includes(3291)) o.ids.splice(o.ids.indexOf(5478) + 1, 0, 3291);
+  }
+  // ⑤ 删 1456 全局 YoyosKraken 3291 1/400（1457 :795 删注册）
+  {
+    const at = entries.findIndex((e) => e.global && e.rule?.item === 3291 && e.rule?.cond?.name === 'YoyosKraken');
+    if (at >= 0) entries.splice(at, 1);
+  }
+  // ⑥ 395 火星飞碟：6173 1/50（1457 :925 新增，插在 masterAll 4815 之后）
+  {
+    const at = entries.findIndex((e) => !e.global && e.npcs?.length === 1 && e.npcs[0] === 395 && e.rule?.k === 'masterAll');
+    if (at >= 0 && !entries.some((e) => !e.global && e.npcs?.includes(395) && e.rule?.item === 6173)) {
+      entries.splice(at + 1, 0, { npcs: [395], rule: { k: 'common', item: 6173, denom: 50, min: 1, max: 1 } });
+    }
+  }
+  // ⑦ 483/482：6167 1/80（1457 :932 新增，插在 3086 之后）
+  {
+    const at = entries.findIndex((e) => !e.global && e.npcs?.length === 2 && e.npcs.includes(483) && e.npcs.includes(482)
+      && e.rule?.item === 3086);
+    if (at >= 0 && !entries.some((e) => !e.global && e.npcs?.includes(483) && e.npcs?.includes(482) && e.rule?.item === 6167)) {
+      entries.splice(at + 1, 0, { npcs: [483, 482], rule: { k: 'common', item: 6167, denom: 80, min: 1, max: 1 } });
+    }
+  }
+  // ⑧ 475 池插 6168（1457 :989：3029,3030,3051,6168,3022）
+  {
+    const e = entries.find((x) => !x.global && x.npcs?.length === 1 && x.npcs[0] === 475 && x.rule?.k === 'oneOf');
+    if (e && !e.rule.ids.includes(6168)) e.rule.ids.splice(3, 0, 6168);
+  }
+  // ⑨ 528/529：6157 1/40（1457 :1032 新增，插在 OneFromOptions(40,3786…) 之后）
+  {
+    const at = entries.findIndex((e) => !e.global && e.npcs?.length === 2 && e.npcs.includes(528) && e.npcs.includes(529)
+      && e.rule?.k === 'oneOf');
+    if (at >= 0 && !entries.some((e) => !e.global && e.npcs?.includes(528) && e.npcs?.includes(529) && e.rule?.item === 6157)) {
+      entries.splice(at + 1, 0, { npcs: [528, 529], rule: { k: 'common', item: 6157, denom: 40, min: 1, max: 1 } });
+    }
+  }
+  // ⑩ 49/51/150/93/634 的 18：1/200 → 1/100（1457 :1034）
+  {
+    const e = entries.find((x) => !x.global && x.npcs?.length === 5 && x.npcs.includes(49) && x.rule?.item === 18);
+    if (e && e.rule.denom === 200) e.rule.denom = 100;
+  }
+  // ⑪ 16/185/167/197 的 393：1/100 → 1/50（1457 :1036）
+  {
+    const e = entries.find((x) => !x.global && x.npcs?.length === 4 && x.npcs.includes(16) && x.rule?.item === 393);
+    if (e && e.rule.denom === 100) e.rule.denom = 50;
+  }
+  // ⑫ 179/83：6159 1/25（1457 :1058 新增，插在 996 1/200（9-npc 组）之后）
+  {
+    const at = entries.findIndex((e) => !e.global && e.npcs?.includes(179) && e.npcs?.includes(83)
+      && e.rule?.item === 996);
+    if (at >= 0 && !entries.some((e) => !e.global && e.npcs?.includes(179) && e.npcs?.includes(83) && e.rule?.item === 6159)) {
+      entries.splice(at + 1, 0, { npcs: [179, 83], rule: { k: 'common', item: 6159, denom: 25, min: 1, max: 1 } });
+    }
+  }
+}
+apply1457DropPatches(entries);
 
 writeFileSync('src/data/vanilla-npcdrops.json', JSON.stringify({ entries, slimeBody }));
 writeFileSync('src/data/vanilla-npcvalue.json', JSON.stringify(values));

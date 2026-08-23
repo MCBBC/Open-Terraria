@@ -362,6 +362,13 @@ export class MinionProj extends Entity {
   foxChannel = false;
   foxAimX = 0; foxAimY = 0;
   private foxT = 0;
+  /** 火绒狐 1094/1113 帧态机（AI_026 flag8 帧段 :64729-64826 折算,foxAnimTick 维护）：
+   *  foxFrame 直映原版 frame——待机 18-25 / 行走 28-35 / 空中 27 / 攻击 36-41 往返 /
+   *  抚摸 45-52（网格切片见 Arrow PROJ_GRID,帧域 = 列主序 6×9） */
+  private foxFrame = 18;
+  private foxFrameCd = 0;
+  /** 上一拍 X（flag27 = position.X==oldPosition.X 横向零位移判定 :63334） */
+  private foxPrevX = 0;
   private pounceCd = 0;
   /** 帕鲁出场淡入（DoPalAppearEffect :39509-39515：SetDefaults alpha=255 起每 tick
    *  -15，17t 全显——1112 :10377 / 1113 :10400 / 1118 :10485；其余随从 0=不淡入） */
@@ -678,7 +685,7 @@ export class MinionProj extends Entity {
 
   /** 帕鲁地面随从 1112 可靠的捣蛋猫 / 1118 黏土蓓蕾（AI_067 flag8/flag9 分支折算，
    *  Projectile.cs:50014-52160；1093 同 flag8 段共用——本仓 1093 暂走通用飞行近似，
-   *  并入随其审计项）。判定盒本仓统一 16×16（原版 14×22 :10368-10377/:10478-10487）。
+   *  并入随其审计项）。判定盒 = 原版真值 14×22（:10365-10366/:10453-10454,构造器置）。
    *  · 态机 ai[0]：0 地面跟随+索敌（num2=800/500 :50030/:50052，Minion_FindTargetInRange
    *    skipIfCannotHitWithOwnBody=true :50496-50504 → 视线门）→ 距敌侧翼点 <20px 入
    *    扑击 ai[0]=2（:51166-51177 num30=20）；2 扑击（friendly=true 才有接触伤
@@ -725,6 +732,53 @@ export class MinionProj extends Entity {
       }
     }
     if (this.palJoyCd > (flag10 ? 1 : 0)) this.palJoyCd--;
+  }
+
+  /** 火绒狐 1094/1113 帧态机（AI_026 flag8 帧段 Projectile.cs:64729-64826 1:1 折算）。
+   *  分支序与帧域同原版：攻击(ai[1]>0) 36-41 往返（n=fc/3,n≥6 → 11-n,负钳 0）/
+   *  贴地静止+抚摸 45-52 每 4fc / 贴地静止 18-25 每 4fc / 贴地行走 28-35
+   *  （fc += ⌊|vx|⌋+1,≥10 翻页）/ 空中(vy≠0) 27。
+   *  时序：每 tick 在 AI 分派前调（foxChannel 早退支也照走）——flag27 消费上一拍
+   *  位移（原版帧段在移动后求值,此处滞后一拍,备案近似）;本仓 1094/1113 统一飞行
+   *  （spawnMinion ground=false）→ 常态落空中帧 27,贴地各态留待地面型判定细分。 */
+  private foxAnimTick(p: Player): void {
+    if (this.projId !== 1094 && this.projId !== 1113) return;
+    const stationary = this.x === this.foxPrevX;
+    this.foxPrevX = this.x;
+    const petted = p.petting.isPetting && this.beingPetted;
+    if (this.shootCd > 0) {
+      // 攻击段（:64731-64754）：入段钉 36;1094 fc 在 ai[1]==40（1113==30）拍清零
+      if (this.foxFrame < 36 || this.foxFrame >= 42) { this.foxFrameCd = 0; this.foxFrame = 36; }
+      if (this.shootCd === 40 || (this.projId === 1113 && this.shootCd === 30)) this.foxFrameCd = 0;
+      this.foxFrameCd++;
+      let n = Math.floor(this.foxFrameCd / 3);
+      if (n >= 6) n = 11 - n;
+      if (n < 0) n = 0;
+      this.foxFrame = 36 + n;
+    } else if (this.onGround) {
+      if (stationary && petted) {
+        // 抚摸段（:64756-64766）：45 起每 4fc 翻页,≥53 回 45
+        if (this.foxFrame < 45 || this.foxFrame >= 53) this.foxFrame = 45;
+        if (++this.foxFrameCd >= 4) { this.foxFrameCd = 0; if (++this.foxFrame >= 53) this.foxFrame = 45; }
+      } else if (stationary) {
+        // 待机段（:64767-64775）：18-25 循环
+        if (this.foxFrame < 18 || this.foxFrame >= 26) this.foxFrame = 18;
+        if (++this.foxFrameCd >= 4) { this.foxFrameCd = 0; if (++this.foxFrame >= 26) this.foxFrame = 18; }
+      } else if (Math.abs(this.vx) > 0.8) {
+        // 行走段（:64776-64790）：fc 按 |vx| 累进,≥10 翻页,28-35 循环
+        this.foxFrameCd += Math.floor(Math.abs(this.vx));
+        this.foxFrameCd++;
+        if (this.foxFrame < 28 || this.foxFrame >= 36) this.foxFrame = 28;
+        if (this.foxFrameCd >= 10) { this.foxFrameCd = 0; if (++this.foxFrame >= 36) this.foxFrame = 28; }
+      } else {
+        this.foxFrame = 18;
+        this.foxFrameCd = 0;
+      }
+    } else {
+      // 空中（:64791-64797 vy<0 / :64798-64801 vy>0 同帧 27）
+      this.foxFrameCd = 0;
+      this.foxFrame = 27;
+    }
   }
 
   private palGroundStep(game: GameHooks, p: Player, dmg0: number): void {
@@ -1386,8 +1440,12 @@ export class MinionProj extends Entity {
         if (tgt) {
           if (type === 407) {
             if (num23 > 400) {                         // :66603-66610
-              this.vx = (this.vx * 20 + nx * 3) / 21;
-              this.vy = (this.vy * 20 + ny * 3) / 21;
+              // ★v 原地 ×3（num26=3 :66606-66607）——nx/ny 改写带入下方公共段,
+              //  远距实际并入 ×18 向量（蓝队 R7-20：曾用 nx*3 做 lerp 未改 nx,
+              //  公共段仍 ×6 → 远距咬合速度仅原版 1/3）
+              nx *= 3; ny *= 3;
+              this.vx = (this.vx * 20 + nx) / 21;
+              this.vy = (this.vy * 20 + ny) / 21;
             } else {
               this.vx *= 0.96; this.vy *= 0.96;        // :66613
             }
@@ -1446,6 +1504,9 @@ export class MinionProj extends Entity {
             this.vx = (this.vx * 20 + (v2x / l) * eff) / 21;
             this.vy = (this.vy * 20 + (v2y / l) * eff) / 21;
           } else {
+            // direction = player.direction（:66760 贴身档;下方姿态块 :66947 会在 vx≠0 时
+            //  覆写 direction,故仅 vx==0 悬停肩上时可见——蓝队 R7-23 补）
+            this.facing = p.facing;
             this.vx *= 0.9; this.vy *= 0.9;            // :66763-66765
           }
         } else if (type === 407) {
@@ -1537,6 +1598,12 @@ export class MinionProj extends Entity {
               (ay - this.cy) / l * shooter.speed, dmg, this.knockback, shooter.shot, null,
               { grav: 0, life: shooter.life ?? 1200 });
             shot.whipTagShot = true;   // MinionShot 吃鞭 tag（ProjectileID.Sets.MinionShot）
+            if (shooter.shot === 614) {
+              // 614 星尘细胞弹 = aiStyle 113 TargetSticker（蓝队 R7-19）：NewProjectile
+              // 第 11 参传目标索引 num13（:67122-67128）——硬追踪/失的即杀/183 buff 门
+              shot.stickerTgt = tgt.id;
+              shot.alpha = 255;        // SetDefaults alpha=255（:6619,AI −63/t 淡入 :41293）
+            }
             if (type === 613) {        // :67129 后坐 velocity -= v4/3
               this.vx -= (ax - this.cx) / l * shooter.speed / 3;
               this.vy -= (ay - this.cy) / l * shooter.speed / 3;
@@ -2255,8 +2322,14 @@ export class MinionProj extends Entity {
     // 1098 :10241/1123 :10506-10513）
     this.alphaFade = projId === 1112 || projId === 1113 || projId === 1118
       || projId === 1098 || projId === 1123 ? 255 : 0;
-    // 钻地龟 34×34（SetDefaults :10242-10243/:10507-10508——MinionProj 缺省 16×16）
+    // 命中盒真值（SetDefaults width/height——MinionProj 缺省 16×16；与
+    // vanilla-projectiles.json 对齐，绘制侧 1:1 贴图锚盒左上、与盒尺寸解耦）：
+    //  钻地龟 1098/1123 34×34（:10245-10246/:10507-10508）
+    //  帕鲁地面随从 1112/1118 14×22（:10365-10366/:10453-10454）
+    //  禁戒魂灵 1119 14×22（:10467-10468）/ 火绒狐 1113 18×18（:10381-10382）
     if (projId === 1098 || projId === 1123) { this.w = 34; this.h = 34; }
+    else if (projId === 1112 || projId === 1118 || projId === 1119) { this.w = 14; this.h = 22; }
+    else if (projId === 1113) { this.w = 18; this.h = 18; }
   }
 
   /** 归属玩家（ownerRef 公开读——Game 抚摸白名单按 owner 过滤） */
@@ -2281,7 +2354,8 @@ export class MinionProj extends Entity {
    *  1456 :62416/:62433 同段;集火门 :66374 同测点。登记:门距测敌心,423 原版测
    *  顶心 vector2=(0.5,0)（:66365-66368）——差 ≤敌半高,不另开通道） */
   private nearestEnemy(game: GameHooks, maxRange: number,
-    sight: 'none' | 'line' | 'point' = 'none', from: 'self' | 'player' = 'self'): EnemyLike | null {
+    sight: 'none' | 'line' | 'point' = 'none', from: 'self' | 'player' = 'self',
+    focusRange = 900): EnemyLike | null {
     const p = this.ownerRef();
     if (!p) return null;
     const bx = from === 'player' ? p.cx : this.cx;
@@ -2306,12 +2380,14 @@ export class MinionProj extends Entity {
       if (stack.anyTagged(en.id) && d < taggedD) { taggedD = d; tagged = en; }
     }
     // 右键集火优先（OwnerMinionAttackTargetNPC 模板 :27431：有效且距本随从 <900；
-    //  AI_062 集火同样过视线门 :66375/:66413,门距 = num12×3 同测点）
+    //  AI_062 集火同样过视线门 :66375/:66413,门距 = num12×3——num12 已被 :66327
+    //  无条件覆盖 2000（963=700）→ 6000/2100。蓝队 R7-21：曾硬编码 900（引 AI_026
+    //  模板值）,远屏集火 >900px 失效回退最近目标,鞭 tag 拉远打时随从脱靶）
     const focus = (p as unknown as { minionTargetId?: number }).minionTargetId ?? -1;
     if (focus >= 0) {
       for (const e of game.enemies()) {
         const en = e as never as EnemyLike;
-        if (!en.dead && en.id === focus && Math.hypot(en.cx - bx, en.cy - by) < 900) {
+        if (!en.dead && en.id === focus && Math.hypot(en.cx - bx, en.cy - by) < focusRange) {
           if (sight === 'line' && !canHitLine(game.world.store, this.x, this.y, this.w, this.h, en.x, en.y, en.w, en.h)) break;
           if (sight === 'point' && !canHit(game.world.store, this.cx, this.cy, 0, 0, en.cx, en.cy, 0, 0)) break;
           return en;
@@ -2339,6 +2415,8 @@ export class MinionProj extends Entity {
     {
       const owner0 = this.ownerRef();
       if (owner0) this.palJoyTick(game, owner0);
+      // 火绒狐帧态机（AI_026 flag8 帧段折算）——同 palJoyTick 先于各家族早退支
+      if (owner0 && (this.projId === 1094 || this.projId === 1113)) this.foxAnimTick(owner0);
     }
     if (this.projId === 653) { this.companionCubeStep(game); return; }
     if (this.sentry) {
@@ -2659,7 +2737,8 @@ export class MinionProj extends Entity {
     // 373/375（:66431 base.Center）与 533（:30333 base.Center）以随从为基准
     const ai62 = AI62_SHOOTERS.has(this.projId);
     const tgt = ai62
-      ? this.nearestEnemy(game, 2000, 'line', AI62_PLAYER_TARGETING.has(this.projId) ? 'player' : 'self')
+      ? this.nearestEnemy(game, 2000, 'line', AI62_PLAYER_TARGETING.has(this.projId) ? 'player' : 'self',
+        6000)   // 集火门距 = num12×3 = 6000（:66327 num12=2000 + :66374 ×3;蓝队 R7-21）
       : this.projId === 533
         ? this.nearestEnemy(game, 2000, 'line')
         : this.nearestEnemy(game, MINION_SHOOT[this.projId]?.search
@@ -3138,6 +3217,11 @@ export class MinionProj extends Entity {
       frame = Math.floor(this.age / tickPer) % count;
       if (atkOff && (this.projId === 375
         ? (this.a62A1 > 0 && this.a62A1 < 24) : this.attackFlash > 0)) frame += atkOff;
+    } else if (this.projId === 1094 || this.projId === 1113) {
+      // 火绒狐帧态机（AI_026 flag8 帧段 :64729-64826 折算,foxAnimTick 每 tick 维护）。
+      // 贴图 = 6 列×9 行网格（1457 Main.cs:33734-33737 X=(frame/9)*64、
+      // Y=(frame%9)*46、62×44）——切片在 Arrow PROJ_GRID,projFrames 表无此二型
+      frame = this.foxFrame;
     } else {
       frame = frames > 1 ? Math.floor(this.age / 8) % frames : 0;
     }
@@ -3146,6 +3230,22 @@ export class MinionProj extends Entity {
     // 帕鲁出场淡入（Projectile alpha 通道：绘制色 = 原色 × (255-α)/255——
     // DoPalAppearEffect 每 tick α-15，17t 全显 :39509-39515）
     if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
+    // ---- 火绒狐喷火态本体替换（ai[0]>=1000，1457 Main.cs:33738-33741/:33790-33797）----
+    // 本体贴图换 Extra_303 顶格（Frame(1,3)=60×36）：焰团心 = vector99(center+(0,-11))
+    // − origin(30−10sd,12) + size/2 = (cx+10sd, cy−5)；dir ^= FlipHorizontally 镜像保真。
+    // 焰流粒子锥（DrawProj_Flamethrower_Foxsparks :35719,采样本体图中带白剪影
+    // Frame(1,7,0,3..5) 染色）本仓以 1106 弹幕流近似,不建模
+    if ((this.projId === 1094 || this.projId === 1113) && this.foxChannel) {
+      const ex = r.atlas?.ensureVImage('vanilla/Extra_303.png') ?? null;
+      if (ex) {
+        ctx.translate(this.cx + 10 * this.facing, this.cy - 5);
+        if (this.facing < 0) ctx.scale(-1, 1);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(ex as CanvasImageSource, 0, 0, 60, 36, -30, -18, 60, 36);
+      }
+      ctx.restore();
+      return;
+    }
     // ---- 原版偏移表消费（Main.cs:29375-29826 num143/144 + 通用绘制 :34040）----
     // 全型号统一走公式（2026-08-19 清零近似）：有表项用 num143/144,未登记 = 0/0
     // → 贴图左上角 = (盒左+num144, 盒上−num143) = 盒左上对齐（曾一律盒心居中近似,
@@ -3171,6 +3271,11 @@ export class MinionProj extends Entity {
         ctx.scale(-1, 1);
       }
     } else if (this.facing < 0 && !MINION_NO_FLIP.has(this.projId)) ctx.scale(-1, 1);
+    // 火绒狐翻转侧原点修正（1457 Main.cs:33814 origin32.X += Flip→−8：XNA 镜像绕
+    // origin 使贴图整体左移 8px;本仓镜像绕 anchor 无原点修正 → 补画位偏移,
+    // 翻转侧落位 [cx−39,cx+23] 与原版对齐,非翻转侧 [cx−31,cx+31] 不动）
+    const foxFlipAdj = (this.projId === 1094 || this.projId === 1113)
+      && this.facing < 0 && !MINION_NO_FLIP.has(this.projId) ? 8 : 0;
     if (this.projId === 653) {
       // 同伴方块：SetDefaults scale=0.8（:6740）+ rotation 独立累计（cubeRot,
       // rotation+=vx/20——不走龙链 rot,直接套用）;34×34 单帧
@@ -3178,7 +3283,7 @@ export class MinionProj extends Entity {
       ctx.scale(0.8, 0.8);
     }
     if (img) {
-      if (off3) ctx.drawImage(img, -num145, -(this.h / 2 + off3[0]), img.width, img.height);
+      if (off3) ctx.drawImage(img, -num145 + foxFlipAdj, -(this.h / 2 + off3[0]), img.width, img.height);
       else ctx.drawImage(img, -img.width / 2, -img.height / 2);   // 贴图未就绪兜底(无偏移量可依)
     } else {
       // 兜底：召唤符记色块（哨兵紫 / 随从金）——贴图缺失或懒加载未就绪

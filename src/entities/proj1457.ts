@@ -49,19 +49,29 @@ interface HitTarget {
 }
 
 /** 通用命中结算：盒相交 → 暴击掷 → hurt + StatusNPC + 飘字。
- *  cooldown<0 = 每敌一次（localNPCHitCooldown −1）；返回是否命中过。 */
+ *  cooldown<0 = 每敌一次（localNPCHitCooldown −1）；返回是否命中过。
+ *  gate：ownerHitCheck 距离门（CanHitWithMeleeWeapon :12415-12417 距离段）+
+ *  usesOwnerMeleeHitCD 共享命中表（Damage_PVE :12596 门 + StrikeNPC :14343 写——
+ *  与玩家挥击弧共用 per-enemy 命中表，同一挥击内弧+弹不双结算）。 */
 function dealContacts(
   self: { x: number; y: number; w: number; h: number; cx: number; cy: number; damage: number; knockback: number; armorPen: number; critChance: number; projId: number },
   game: GameHooks,
   cd: HitCdImpl,
   cooldown: number,
   onHit?: (t: HitTarget) => void,
+  gate?: { ownerCx: number; ownerCy: number; maxDist: number; sharedHits?: Set<number> },
 ): void {
   cd.tick();
   for (const ent of game.enemies()) {
     const e = ent as unknown as HitTarget & { vanillaId?: number };
     if (!e || e.dead) continue;
     if (!playerCanHitEnemy(ent, game, self.projId)) continue;
+    if (gate) {
+      // ownerHitCheckDistance：Distance(ent.Center) > N → 不命中（:12416-12418）
+      if (Math.hypot(e.x + e.w / 2 - gate.ownerCx, e.y + e.h / 2 - gate.ownerCy) > gate.maxDist) continue;
+      // usesOwnerMeleeHitCD：玩家近战命中表已记该敌 → 本弹跳过（:12596 flag2=false）
+      if (gate.sharedHits?.has(e.id)) continue;
+    }
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     if (!cd.ready(e.id, cooldown)) continue;
     const crit = Math.random() < self.critChance;
@@ -69,6 +79,8 @@ function dealContacts(
     const kdir = Math.sign((e.x + e.w / 2) - self.cx) || 1;
     e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit);   // 音/飘值=单点
     applyProjStatus(self.projId, ent as unknown as Record<string, number>);
+    // 命中回写共享表（StrikeNPC :14343 SetMeleeHitCooldown——玩家挥击弧同帧不再结算）
+    gate?.sharedHits?.add(e.id);
     onHit?.(ent as unknown as HitTarget);
   }
 }
@@ -84,8 +96,9 @@ function dealContacts(
  *   - scale = (0.85 + num×0.6)×ai[2]（:42756 num6=0.85/num5=0.62 + :42995 ×ai[2]）
  *   - Center = player.RotatedRelativePoint(MountedCenter) − velocity（:42757）
  *   - 挥击尾孢子（:42924-42947，与 localAI[2] 无关）：num≤0.8 期间每帧掷
- *     Remap(meleeSpeed,1,1/3,4,2)==0 出一颗 1128（伤 ×0.75、ai1=90+rand(60)），
- *     age==animMax/3 与 2×animMax/3 保底必出（:42933-42938）
+ *     Remap(meleeSpeed,1,1/3,4,2)==0 出一颗 1128（伤 ×0.75、ai1=90+rand(60)）；
+ *     :42933-42938 两处 localAI[1] 保底分支为死代码（全函数无 localAI[1] 写，恒 0
+ *     → localAI[0]==0 永假）——勿再读成保底帧（蓝队 R2-07 勘误）
  *   - 砸地孢子云（:42763-42820，仅 localAI[2]==1 水平击）：num≥0.8 首帧在刃尖前方
  *     FindChlorophyteSporeCloudSpawn（:42565）找 solid 台面 → onSlamCloud 回调
  *   - num≥1 Kill（:42997-43000） */
@@ -111,6 +124,9 @@ export class ChloroClaymoreBlade extends Entity {
   private scl = 0.85;
   private cloudFired = false;   // num≥0.8 单次门（num14<num11 比较）
   private hitCd = new HitCdImpl();  // usesLocalNPCImmunity + localNPCHitCooldown −1（:10550-10556）
+  /** usesOwnerMeleeHitCD 共享命中表（:10556 → Game 注入玩家挥击 swingHitSet——
+   *  同一挥击内弧+刃对同敌只结算一次；蓝队 R2-08） */
+  sharedMeleeHits: Set<number> | null = null;
   /** 挥击尾孢子生成（Game 注入：NewProjectile 1128——伤 ×0.75 已在 Game 侧折算） */
   spawnSpore: (x: number, y: number, vx: number, vy: number, life: number) => void = () => {};
   /** 砸地孢子云生成（Game 注入：FindChlorophyteSporeCloudSpawn+SpawnChlorophyteSporeCloud） */
@@ -156,8 +172,11 @@ export class ChloroClaymoreBlade extends Entity {
     if (num <= 0.8 && this.spawnSpore) {
       const ms = p.attackSpeedMult > 0 ? 1 / p.attackSpeedMult : 1;   // meleeSpeed（Player.ts 倒数还原）
       const remap = 4 + (2 - 4) * Math.min(1, Math.max(0, (ms - 1) / (1 / 3 - 1)));  // Remap(ms,1,1/3,4,2)
-      const guaranteed = this.age === Math.floor(this.animMax / 3) || this.age === Math.floor((this.animMax / 3) * 2);
-      if (guaranteed || Math.floor(Math.random() * Math.max(1, Math.round(remap))) === 0) {
+      // ★:42933-42938 的两处 `localAI[0]==localAI[1]/3` "保底帧"是死代码——AI_190
+      //  （:42734-43002）全函数无 localAI[1] 赋值（恒 0 → 条件要求 localAI[0]==0，
+      //  而首帧自增后 ≥1 永假）。原版孢子纯靠每帧 Next(Remap(meleeSpeed,1,1/3,4,2))==0
+      //  掷。蓝队 R2-07：曾把死分支读成 animMax/3、2animMax/3 保底必出，孢子密度虚高
+      if (Math.floor(Math.random() * Math.max(1, Math.round(remap))) === 0) {
         // :42926 vector9 = player.velocity×0.77 + vector7×5（vector7=随机侧向单位向量）
         const side = this.rot + (Math.random() * 2 - 1) * (Math.PI / 2) * 0.7 + this.dir * Math.PI / 2;
         const svx = p.vx * 0.77 + Math.cos(side) * 5;
@@ -170,7 +189,11 @@ export class ChloroClaymoreBlade extends Entity {
       }
     }
     // ---- 命中（usesLocalNPCImmunity + cooldown −1 :10550-10556）----
-    dealContacts(this, game, this.hitCd, -1);
+    // ownerHitCheck + ownerHitCheckDistance=300（:10554-10555）→ 只判 300px 内目标
+    // （CanHitWithMeleeWeapon :12415 距离段；LOS 探针四支本仓登记近似——玩家本体
+    // 挥击亦无 LOS 门）；usesOwnerMeleeHitCD（:10556）→ 与玩家挥击共享命中表
+    dealContacts(this, game, this.hitCd, -1, undefined,
+      { ownerCx: p.cx, ownerCy: p.cy, maxDist: 300, sharedHits: this.sharedMeleeHits ?? undefined });
     // ---- 绿光（:42948-42953）----
     game.addLightAt?.(this.cx, this.cy, 0, 0.42, 0);
     if (num >= 1) this.dead = true;                              // :42997-43000
@@ -699,7 +722,9 @@ export class GlacierFangShot extends Entity {
         this.vy = (m.y - p.cy) / d * spd;
       }
       if (Math.floor(this.charge) % 20 === 0 && this.charge > 0) {
-        game.playSfxAt?.('shatter', this.cx, this.cy);         // GlacierFang_Charging（:37610,SfxName 表缺冰系键→shatter 近似,登记）
+        // R4-37：GlacierFang_Charging=Item_210（Projectile.cs:37610-37613 soundDelay=20 节拍;
+        // 文件级音量 ×0.35=LegacySoundPlayer.cs:579 case210,FILE_CASE_VOL 自动生效）
+        game.playSfxWav?.('Item_210', 1, this.cx, this.cy);
         this.ctl.payMana();                                    // CheckMana(pay:true)（:37613）
       }
       this.charge += this.ctl.chargeRate();                    // ai[0] += GetSlowMagicUseRate()（:37626）
@@ -745,7 +770,8 @@ export class GlacierFangShot extends Entity {
     const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
     if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.dead = true; return; }
     void p;
-    game.playSfxAt?.('shatter', this.cx, this.cy);           // GlacierFang_Muzzle（:37635,SfxName 表缺冰系键→shatter 近似,登记）
+    // R4-37：GlacierFang_Muzzle=Item_201 pitch+0.2（Projectile.cs:37634 PlaySound(...,0.2f)）
+    game.playSfxWav?.('Item_201', 1, this.cx, this.cy, 0.2);
     game.spawnParticles(this.cx, this.cy, '#BFE8FF', 10, 2.6, { life: 20, grav: 0, damp: 0.93 });
   }
 

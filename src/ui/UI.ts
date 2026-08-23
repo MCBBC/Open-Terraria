@@ -140,6 +140,10 @@ import type { ChestData } from '../world/World';
 type SlotWhere = 'inv' | 'chest' | 'armor' | 'dye' | 'misc' | 'miscDye';
 
 const iconCache = new Map<number, string>();
+/** AfterItemSwap 换型音表（R4-39/R4-17,IS57:1975-1985）：右键/放置换型落槽后
+ *  newType ∈ 此表 → SoundID 22(Unlock),否则 7(Grab)。含 1457 新 6168/6169/6193/6194 */
+const AFTER_ITEM_SWAP = new Set([5325, 4131, 5060, 5059, 5324, 5329, 5330, 4346, 5391, 5323,
+  5455, 4767, 5453, 5309, 5454, 6190, 6195, 5358, 5359, 5360, 5361, 5437, 6168, 6169, 6193, 6194, 2611, 5526]);
 // 防御盾 img dataURL 烘焙(2026-08-19 压 IOSurface 基数:盾图从独立 canvas 改 img;
 // 模块级 scratch 只此一张 52×48,产物按 (难度列,辉光) 缓存 ≤6 条)
 const DEF_SHIELD_SCRATCH = typeof document !== 'undefined' ? document.createElement('canvas') : null;
@@ -412,6 +416,9 @@ export function pvpIconFrame(hostile: boolean, hover: boolean, team: number): re
 export const PVP_COOLDOWN_MS = 5000;
 
 export class UI {
+  /** LoadoutShare 首用提示可见性（Player.Settings.ShowLoadoutShareHint,M57:4303/:4645——
+   *  R4-15;原版持久化到 settings,本仓会话态,首次共享后置否。持久化随 R4-14） */
+  static loadoutShareHintVisible = true;
   devMode = false; // 开发者模式：进世界时全道具入包 + 出生点展示区
   root: HTMLElement;
   game!: Game;  // 生命周期由 enterGame 置入;quitToMenu 经 detachGame() 摘引用(2026-08-13 泄露 review)
@@ -938,14 +945,37 @@ export class UI {
         this.shiftClick(i, where);
         return;
       }
-      // Alt+左键（OverrideHover :533-561）：收藏/取消（仅背包/钱币/弹药格，favorited 禁 Shift 转移）
-      if (e.altKey && !e.shiftKey && (where === 'inv') && i < 58) {
-        const cur = this.game.player.inv.slots[i];
-        if (cur) {
-          cur.favorited = !cur.favorited;
-          this.game.sfx.play('menuTick', 1);
-          this.refreshAll();
-          return;
+      // Alt+左键（OverrideHover :533-561）：背包/钱币/弹药格=收藏/取消（favorited 禁
+      // Shift 转移）;装备五类格=跨配装共享开关（R4-15,canLoadoutShareAt[8-12]
+      // IS57:367-371 → ToggleLoadoutShare :851-861：置 favorited+音12+
+      // ClearSlotShareInOtherLoadouts :863-884 同槽仅一套可共享;misc 族原版
+      // assert 跳过清理=仅 toggle）
+      if (e.altKey && !e.shiftKey) {
+        const inv = this.game.player.inv;
+        if (where === 'inv' && i < 58) {
+          const cur = inv.slots[i];
+          if (cur) {
+            cur.favorited = !cur.favorited;
+            this.game.sfx.play('menuTick', 1);
+            this.refreshAll();
+            return;
+          }
+        } else if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
+          const cur = this.slotContent(where, i);
+          if (cur) {
+            cur.favorited = !cur.favorited;
+            if (cur.favorited) UI.loadoutShareHintVisible = false;   // DisableLoadoutShareHint :857
+            if (cur.favorited && (where === 'armor' || where === 'dye')) {
+              const backups = inv.loadouts.map((l) => (where === 'armor' ? l.armor : l.dye));
+              for (const arr of backups) {
+                const b = arr[i];
+                if (b) b.favorited = false;
+              }
+            }
+            this.game.sfx.play('menuTick', 1);
+            this.refreshAll();
+            return;
+          }
         }
       }
       this.dragFrom = { i, where, sx: e.clientX, sy: e.clientY };
@@ -1320,6 +1350,10 @@ export class UI {
         if (where === 'armor' && !inv.armorAccepts(i, cur.id)) return;
         arr[i] = this.heldStack;
         this.heldStack = cur;
+        // R4-39（AfterItemSwap,IS57:1975-1985）：装备/杂项槽交换后播音——新入槽件
+        // ∈换型表（含 1457 新 6168/6169/6193/6194）→ SoundID 22(Unlock),否则 7(Grab)
+        const nv = vanillaIdOfItemKey(ITEM_DEFS[this.heldStack.id]?.key ?? '');
+        this.game.sfx.play(nv > 0 && AFTER_ITEM_SWAP.has(nv) ? 'unlock' : 'pickup', 1);
       }
       this.refreshAll();
       // 成就：装备态检查（拖拽落装备位 = HandleOnEquip 同义路径）
@@ -1576,6 +1610,25 @@ export class UI {
       socialSlot: where === 'dye' || where === 'miscDye',
     };
     let linesHtml = '';
+    // ---- LoadoutShare 行族（R4-15,M57:20824-20833 共享两行 + :21517-21519 首用提示）：
+    // 装备五类格（canLoadoutShareAt[8-12],IS57:367-371）悬停时,紧随名称行（GetLinesInfo
+    // 里在全部统计行之前）：共享来源行 > 共享标记行 > （未收藏且未用过共享时）提示行。
+    // 提示色 = OurFavoriteColor(255,231,69) α190（Main.cs:886/:21520）;共享两行走默认
+    // 文字色（GetLinesInfo 未赋 lineColors）。ShowLoadoutShareHint 设置持久化缺（R4-14）
+    // ——本仓会话内首次共享后不再显示（DisableLoadoutShareHint :857 语义）
+    if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
+      const inv = this.game.player.inv;
+      const from = (where === 'armor' || where === 'dye')
+        ? inv.effectiveSharedFrom(i, where === 'dye')
+        : null;
+      if (from !== null) {
+        linesHtml += `<br>${Lang.text('UI.ItemLoadoutSharedFrom', from + 1)}`;
+      } else if (s.favorited) {
+        linesHtml += `<br>${Lang.text('UI.ItemLoadoutShared')}`;
+      } else if (UI.loadoutShareHintVisible) {
+        linesHtml += `<br><span style="color:rgba(255,231,69,0.75)">${Lang.text('UI.ItemLoadoutShareHint')}</span>`;
+      }
+    }
     for (const ln of assembleTooltipLines(def, s, tps, staticTip, ctx)) {
       const color = ln.journeyColor ? '#B46BD8' : ln.color;   // Colors.JourneyMode 紫
       if (ln.yoyoLogo) { linesHtml += `<br><img class="sw-yoyo-logo" src="sprites/vanilla/OneDropLogo.png" alt="">`; continue; }
@@ -2231,7 +2284,7 @@ export class UI {
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
           if (this.game.player.inv.currentLoadout === k) return;
-          this.game.player.inv.trySwitchingLoadout(k);
+          this.game.player.inv.trySwitchingLoadout(k, this.game.player.hideVisibleAccessory);   // R4-12
           this.game.sfx.play('menuTick', 1); // SoundID 12（TrySwitchingLoadout）
           this.flashLoadoutSwitch();
           this.refreshAll();

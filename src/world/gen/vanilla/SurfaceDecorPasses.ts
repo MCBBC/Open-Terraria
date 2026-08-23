@@ -2327,6 +2327,11 @@ function placeJunglePlant(st: TileStore, rng: RNG, gs: GenState, x: number, y: n
     return;
   }
   let fx: number;
+  // ★R3-11 复核定谳（蓝队驳回红队）：1457 W57:60086/60092 `(genRand.Next(60) == 0) & flag2`
+  //  与 1456 `genRand.Next(60) == 0 && flag2` 的求值序列**完全相同**——`&&` 左操作数
+  //  Next(60) 两版恒被求值，被短路/位与的只是无副作用的 flag2 纯读；else-if 链到达
+  //  条件亦同 → 两版掷流逐位相同，无"多耗 2 掷"。★勿改先掷后判：那会在
+  //  Next(60)==0 命中支内多掷 Next(230)（真偏移，金标四通道全移位的教训）
   if (rng.int(0, 59) === 0 && deepOk) fx = 144;                           // Next(60)
   else if (rng.int(0, 229) === 0 && deepOk) fx = 162;                     // Next(230)
   else if (rng.int(0, 14) === 0 && !temple) {                             // Next(15)

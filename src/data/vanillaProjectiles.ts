@@ -1,4 +1,5 @@
-// 原版投射物数据（tools/extract-projectiles.mjs 从 Terarria1456 Projectile.cs SetDefaults 提取）。
+// 原版投射物数据（tools/extract-projectiles.mjs 从 Projectile.cs SetDefaults 提取；
+// ★2026-08-23 基准切换 1457——提取器缺省源版本 SW_ITEM_VER 缺省 1457）。
 // 注意 1456 的 SetDefaults 是 if/else-if 链（非 switch），且长矛/悠悠球/连枷等族走
 // DefaultTo*() 辅助方法（aiStyle 19/99/15）、悠悠球批量定义在 `type >= A && type <= B` 区间块。
 // ★手补清单（2026-08-22 弹幕基建批；提取器 NUM_FIELDS 未含 localNPCHitCooldown/
@@ -9,6 +10,20 @@
 //        timeLeft=MaxUpdates*45、usesLocalNPCImmunity 永久局部免疫）
 //   932  localNPCHitCooldown=60（:8570-8572）
 //   309  localNPCHitCooldown=10（历史手补，Arrow localImmune 消费）
+//   ---- 1457 新弹 1112-1135 缺失列（2026-08-23 本批；行号=Terarria1457 P.cs）----
+//   提取器三类盲区：①usesLocalNPCImmunity+localNPCHitCooldown（NUM_FIELDS 无后者）
+//   ②usesIDStaticNPCImmunity+idStaticNPCHitCooldown（接口新增列）③`width = (height = 16);`
+//   元组赋值（`^width = 数字;` 正则不匹配）。逐条：
+//   1112=9(:10375-10376) 1115=-1(:10412-10413) 1116=-1(:10425-10426)
+//   1117 w/h=16(:10431)  1118=30(:10462-10463) 1119=30(:10477-10478)
+//   1120=60(:10487-10488) 1121=60(:10498-10499)
+//   1122 w/h=16(:10440)+idStatic=10(:10449-10450) 1125=-1(:10543-10544)
+//   1126=-1(:10554) 1127=-1(:10559) 1128 idStatic=30(:10569) 1129=-1(:10583)
+//   1130=-1(:10614) 1131=60(:10625) 1132=60(:10636) 1134 idStatic=20(:10668)
+//   1135 idStatic=10(:10679)
+//   消费面：Arrow ctor localImmune=本列（1120 随从弹/1121·1131·1132 拍击石三脉冲——
+//   同敌 60t 冷却再命中）；1112/1118/1119（MinionProj）与 1115/1116/1125-1130/1134/1135
+//   （proj1457/YoyoShotProj）实体侧自持命中表，数值已与实体实现对齐，本列为数据面存档
 import projJson from './vanilla-projectiles.json';
 
 export interface ProjectileData {
@@ -32,6 +47,10 @@ export interface ProjectileData {
    *  Projectile.cs:10688-10689 ApplyGemStaffStats 等）——同一弹对同一敌 N t 后可再命中
    *  （缺省=命中即永久免疫，Arrow.hitSet 旧语义）。Arrow 命中环按本列切换冷却表 */
   localNPCHitCooldown?: number;
+  /** 1457: 全场同型共享静态免疫帧（usesIDStaticNPCImmunity=true + idStaticNPCHitCooldown=N，
+   *  SetDefaults 逐型直写——同型所有弹共用一张表，非每弹一张）。消费侧=实体自持共享表
+   *  （1122→proj1457 ID_STATIC_1122=10 / 1128=30 / 1134=20 / 1135=10），本列为数据面存档 */
+  idStaticNPCHitCooldown?: number;
   friendly?: boolean;
   melee?: boolean;
   ranged?: boolean;

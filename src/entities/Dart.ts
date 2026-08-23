@@ -834,6 +834,7 @@ export class Dart extends Entity {
       case 'roll': this.rot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * this.dir; break;
       case 'spin': this.rot += st.spinRate! * this.dir; break;
       case 'tilt': this.rot = this.vx * 0.125; break;          // 836 蒲公英籽 :43312
+      case 'vxSpin': this.rot += this.vx * 0.1; break;         // aiStyle16 炸弹族 :48444
       case 'none': this.rot = 0; break;
     }
     // ---- alpha 渐入（alpha=255 SetDefaults 族;速率:'speed'=|v|*0.9 [:52782 302 族]/恒减）----
@@ -897,8 +898,27 @@ export class Dart extends Entity {
         this.vy = (this.vy * st.home.lerp + tvy) / (st.home.lerp + 1);
       }
     }
-    this.x += this.vx;
-    this.y += this.vy;
+    if (st.bomb) {
+      // ---- aiStyle16 炸弹族位移（75 HappyBomb）：轴分离 + 撞块反弹
+      //      （Projectile.cs:19868-19876：X 碰 → −lastVX×0.4；Y 碰且 lastVY>0.7
+      //      → −lastVY×0.4,否则停）+ 贴地摩擦 vx×0.97（:48390-48396 velocity.Y==0
+      //      门的脚下实心近似）----
+      const belowSolid = game.world.store.isSolid(
+        Math.floor(this.cx / TILE), Math.floor((this.y + this.h + 1) / TILE));
+      if (belowSolid && this.vy >= 0) this.vx *= 0.97;
+      const lvx = this.vx, lvy = this.vy;
+      this.x += this.vx;
+      if (game.world.store.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
+        this.x -= this.vx; this.vx = -lvx * 0.4;
+      }
+      this.y += this.vy;
+      if (game.world.store.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
+        this.y -= this.vy; this.vy = lvy > 0.7 ? -lvy * 0.4 : 0;
+      }
+    } else {
+      this.x += this.vx;
+      this.y += this.vy;
+    }
     // ---- 31 沙球沿途击碎（:55106-55136 KillTile 清单，每 tick 扫重叠盒）：
     //      水晶12/雕像105/钟乳石165/裸露宝石178/小石堆185/大石堆186-187/
     //      魔力水晶639/生命水晶巨石665——沙球扫过即碎 ----
@@ -953,12 +973,20 @@ export class Dart extends Entity {
       hitPlayer(this, game, this.damage);
       this.dead = true;
     }
+    // ---- 75 HappyBomb 近身引信（AI_016 :47809-47820）：距存活玩家中心 <40px
+    //      即 Kill(=爆炸;tenthAnniversaryWorld 豁免本仓无此世界) ----
+    if (st.proxKill && !game.player.dead
+      && Math.hypot(game.player.cx - this.cx, game.player.cy - this.cy) < st.proxKill) {
+      this.rocketKill(game);
+    }
   }
 
   /** 303 骷髅火箭 Kill（Projectile.Kill :74533 组:128×128 伤害盒 + 22 盒烟尘/火/Gore +
-   *  SoundID.Item14;不炸地形——不在 ExplodeTiles 表 cs:75262） */
+   *  SoundID.Item14;不炸地形——不在 ExplodeTiles 表 cs:75262）。
+   *  75 HappyBomb 同组(:80070-80122):爆炸伤 60/kb8(rocketDmg 覆写) */
   private rocketKill(game: GameHooks): void {
     this.dead = true;
+    const st = this.projId ? DART_STYLE[this.projId] : undefined;
     const cx = this.cx, cy = this.cy;
     game.playSfxFiles(['Item_14'], 1, cx, cy);
     game.spawnParticles(cx, cy, '#9A9A9A', 30, 2, { life: 40, damp: 0.96 });          // 尘 31 ×1.4
@@ -968,7 +996,7 @@ export class Dart extends Entity {
     const box = { x: cx - 64, y: cy - 64, w: 128, h: 128 };
     const p = game.player;
     if (!p.dead && box.x < p.x + p.w && box.x + box.w > p.x && box.y < p.y + p.h && box.y + box.h > p.y) {
-      hitPlayer(this, game, this.damage);
+      hitPlayer(this, game, st?.rocketDmg ?? this.damage);
     }
   }
 
@@ -1149,7 +1177,7 @@ export class Dart extends Entity {
 interface DartStyle {
   w: number; h: number;                  // 碰撞盒(SetDefaults width/height)
   scale?: number;                        // 绘制缩放(SetDefaults scale)
-  rot: 'align90' | 'a45' | 'roll' | 'spin' | 'tilt' | 'none';
+  rot: 'align90' | 'a45' | 'roll' | 'spin' | 'tilt' | 'none' | 'vxSpin';
   spinRate?: number;
   alpha0?: number;                       // 出生 alpha(255=渐入)
   fade?: 'speed' | number;               // 渐入速率
@@ -1166,6 +1194,14 @@ interface DartStyle {
   trail?: { color: string; count: number; life?: number; grav?: number };
   sfx?: string[];                        // 发射音(原版 wav)
   rocket?: number;                       // Kill 爆炸盒半宽(303)
+  /** Kill 爆炸伤害覆写（75 HappyBomb:飞行伤 80,爆炸 Resize(128) 后 damage=60
+   *  :80116-80122——不覆写则沿用飞行伤） */
+  rocketDmg?: number;
+  /** aiStyle16 炸弹族位移（75）：轴分离 + 撞块反弹（X:−lastVX×0.4 /
+   *  Y:lastVY>0.7 → −lastVY×0.4,Projectile.cs:19868-19876）+ 贴地 vx×0.97 */
+  bomb?: boolean;
+  /** 距存活玩家中心 <N px 即 Kill 爆炸（75 :47809-47820,40px） */
+  proxKill?: number;
   shrink?: number;                       // scale 递减(288)
   frameRand?: number;                    // 出生随机帧(909)
   animEvery?: number;                    // 帧动画步进(836:6)
@@ -1246,6 +1282,13 @@ const DART_STYLE: Record<number, DartStyle> = {
     sfx: ['Item_11'], fallback: '#FFF0B0' },
   // 303 火箭(骷髅爆破 293 :59893):14×20 aiStyle16 手雷族:重力 0.3 滚转,life180,Kill 128 盒爆炸
   303: { w: 14, h: 20, rot: 'roll', grav: 0.3, life: 180, rocket: 64, fallback: '#B8B8C0' },
+  // 75 HappyBomb(小丑 109 :60411-60417 投掷,伤 80/timeLeft 300):22×22 aiStyle16
+  //    hostile penetrate-1(SetDefaults :1550-1557)。AI_016:age>5 起重力 0.2 +
+  //    贴地 vx×0.97(:48390-48396),rot+=vx×0.1(:48444),撞块反弹 ±0.4(:19868-19876),
+  //    距玩家中心<40px 即 Kill(:47809-47820);首帧 PlaySound(66)=Item_66(:47804-47808);
+  //    Kill 爆炸=Item14 + 128×128 伤害盒伤 60 kb8(:80116-80122)+尘 31/6+Gore 61-63
+  75: { w: 22, h: 22, rot: 'vxSpin', grav: 0.2, gravDelay: 5, life: 300,
+    bomb: true, proxKill: 40, rocket: 64, rocketDmg: 60, sfx: ['Item_66'], fallback: '#505048' },
   // 31 沙球(蚁狮 69 :24520 速12/伤10/timeLeft300/ai[0]=2 敌版):10×10。
   // 蚁狮档(AI_010 ai[0]==2 :55081-55100):重力 0.2 + vx 侧摩 ±0.04 向 0 收 + vy 钳 10
   // ——曾误用 ai[0]==1 落地态的 0.41(坠速翻倍,弧线错);spin 0.1 恒速(:55158);尘 32。

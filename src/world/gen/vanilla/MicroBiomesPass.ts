@@ -1389,6 +1389,11 @@ export class DeadMansChestBiome {
         if (!st.flags[idx] || isContainer(st.type[idx])) return;
       }
     }
+    // ★R3-21（1457 DeadMansChestBiome.cs:262-266 FindBoulderTrapSpot_CheckSpot，
+    //  1456 无此段）：陷阱位正下两格 (x,y+1)/(x+1,y+1) 均实心 → 放弃该位
+    //  （防陷阱巨石被埋/引线布局异形）
+    if (st.inBounds(x, y + 1) && st.inBounds(x + 1, y + 1)
+      && st.flags[st.idx(x, y + 1)] && st.flags[st.idx(x + 1, y + 1)]) return;
     for (let m = x - 2; m <= x + 3; m++) {
       for (let n = y - 6; n <= y - 1; n++) {
         if (!st.inBounds(m, n)) continue;
@@ -2064,7 +2069,8 @@ function vanGenSolidSolidTopGate(st: TileStore, x: number, y: number): boolean {
 /** 地狱熔岩陷阱:岩浆湖底掏腔,湖底层致动石栅 + 压板 135 style7 + 红线。
  *  门禁:锚点须满格岩浆;11×11 内 ≥50 满岩浆格;±20 无红线;腔高 ≤40 且 ≥4 */
 export function placeLavaTrap(st: TileStore, gs: GenState, x: number, y: number, rng0?: RNG): boolean {
-  void gs;
+  // ★R3-10 同族（W57:8633-8636）：actuallyNoTrapsForRealIMeanIt → return true
+  if (gs.seedFlags.actuallyNoTraps) return true;
   if (!st.inBounds(x, y)) return false;
   const num = 5, minLava = 50, maxDrop = 40, scanR = 20, minGap = 4;
   const i0 = st.idx(x, y);

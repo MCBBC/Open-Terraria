@@ -21,6 +21,21 @@
 //   重冻(旧值锚 1456 几何,作废)。caves/shimmer 链 C# oracle 金标已同批翻 1457
 //   并再生(76 检查点,双种子全绿)——oracle↔JS 双端同态。
 //
+// ── ★R3 复核批再生(2026-08-23 晚,蓝队) ──
+//   9293480:     type 6cb0458b flags cbd422a4 wall ecddbfc9 liquid 187910ac
+//   1511931452:  type 9ce0c031 flags c099611c wall f740fc50 liquid 76d0cd6f
+//   重冻原因:
+//   ① R3-8 makeTemple 末房深度组(W57:33852 三元死代码恒 num13,蓝队确认)——
+//      删多余末房组框(少一次 Inflate(10) 填砖+4 条 StrictAngles 角线);
+//   ② 工作区在途 YYYYY 批(并行会话,NOTRAPS #58 神庙锁门:FCP 摘
+//      checkTileBreakability 门+LivingTree killTileGen 补同门)一并入基线。
+//   ★R3-11(红队"丛林草丛 Next(60)/Next(230) 短路差")复核**驳回**:
+//     `(Next(60)==0) & flag2` 与 `... && flag2` 求值序列相同——&& 左操作数
+//     Next(60) 两版恒求值,短路的只是无副作用的 flag2 纯读,掷流逐位同。
+//     曾试"先掷后判"修→金标四通道全移位(Next(60)==0 命中支内多掷
+//     Next(230) 的真偏移),已回滚并在 SurfaceDecorPasses 留驳回注释。
+//   caves oracle 检查点(76 点)在相关 pass 之前,不受影响(已验全绿)。
+//
 // ── 旧基线备案(1456 硬钉期,2026-08-21/22 批次) ──
 //   9293480:     type 816e0bcf flags 93f048c5 wall 4f89a71f liquid 893afc95
 //   1511931452:  type 1e3fcec8 flags 1e64968d wall cedb77a4 liquid dc75ac81

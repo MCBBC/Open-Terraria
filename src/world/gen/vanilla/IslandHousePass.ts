@@ -5,12 +5,10 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { ITEM_BY_KEY } from '../../../data/items';
-import { rollChestLoot } from './BuriedChestsPass';
+import { placeBuriedChest } from './BuriedChestsPass';
 import { placeFurn } from './DungeonPass';
 
 const SUNPLATE = TILE_BY_KEY['v_202_sunplate_block']!;
-const CHEST = TILE_BY_KEY['chest']!;
 const TABLE = TILE_BY_KEY['table']!;
 const CHAIR = TILE_BY_KEY['chair']!;
 const BANNER = TILE_BY_KEY['v_91_banners']!;
@@ -171,26 +169,17 @@ function islandHouse(
   // 第 4 间起 Next(4) 全四随机——★旧实现只有三件且 >2 时 Next(3)，2219 永不出现
   let loot = houseIdx;
   if (loot > 3) loot = rng.int(0, 3);
-  const lootKeys = ['vi_159_shiny_red_balloon', 'vi_65_starfury', 'vi_158_lucky_horseshoe', 'vi_2219_celestial_magnet'];
-  const lootId = ITEM_BY_KEY[lootKeys[loot]] ?? ITEM_BY_KEY[lootKeys[0]];
-  // 箱锚=PlaceChest(i-1, num7-1)(cs:36251)——2×2 左列 i-1、行 floorY-1..floorY
-  // (12345 金标三岛箱 tile 全在 (i-1,i) 列,曾错在 i 列右偏一格)
-  const bx = i - 1, by = floorY - 1;
-  // PlaceChestDirect 语义:frameX = 36*style + dx*18,顶行 frameY=0
-  st.setTileSilent(bx, by, CHEST, 13 * 36, 0);
-  st.setTileSilent(bx + 1, by, CHEST, 13 * 36 + 18, 0);
-  st.setTileSilent(bx, by + 1, CHEST, 13 * 36, 18);
-  st.setTileSilent(bx + 1, by + 1, CHEST, 13 * 36 + 18, 18);
-  // 战利品走 rollChestLoot（原版经 AddBuriedChest：岛高 < rockLevel → 金箱分支杂物表 +
-  // flag12 尾段【主件 159/65/158/2219 触发：4978 幼翼 1/40、天空磨坊 1/3、装饰画、
-  // 751 云】——旧实现只有裸主件，审计三.10 修复）
+  // ★ZZZZZZ（NTB #69 域清偿）：天空箱改走 AddBuriedChest 同语义（cs:79999-80005
+  //   `AddBuriedChest(i, num13-3, mainItemInChest, false, 13, trySlope:false, 0)`，
+  //   num13=val.Y=floorY）——曾 setTileSilent 直排+rollChestLoot，跳过 AddBuriedChest
+  //   头部：①NTB 蜂箱带支 flag21 门（cs:36093-36101，ntb&&!remix&&!theConstant 时
+  //   Next(5)+Next(-2,3) 无条件先掷 2 掷/屋）→ NTB 链每屋少烧 2 掷，#69 起
+  //   FloatingIslandHouses 流整体前移；②±2 巨石/祭坛逐行扫、CanPlace 液体/锚腿门、
+  //   JJJJ 预清场——普通种子下本几何恒过（四链回归实证零影响），NTB 下补齐烧掷位。
+  //   失败（返回 false）不重试不补写：原版 IslandHouse 对返回值同样不重试
+  //   （cs:79999 裸调用），skyIslandHouseCount 照常自增（cs:80022）。
   const lootVid = [159, 65, 158, 2219][loot];
-  const items = rollChestLoot({
-    rng, gs, gy: by, worldH: st.h, mainKey: lootKeys[loot],
-    flags: { skyTheme: true },
-  }, lootVid);
-  if (!items.some((it) => it && it.id === lootId)) items.unshift({ id: lootId, stack: 1 });
-  chests.push({ x: bx, y: by, items });
+  placeBuriedChest(st, rng, gs, chests, i, floorY - 3, { style: 13, loot: lootVid });
   // 窗(Glass Wall 21,cs L48312-48327):halfW>10 → ±2 宽,否则 ±1;
   // 中心 x = i∓halfW/2±1,y = (j1+j2)/2 - 1 ± 1
   const winHalf = halfW > 10 ? 2 : 1;

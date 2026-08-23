@@ -126,7 +126,7 @@ import {
   setLucySinks, tickLucyCooldowns, lucyEnterWorld, lucyTryIdle, lucyTryWithCooldown, create as lucyCreate,
 } from '../items/LucyAxe';
 // spawnEmote 统一从 :163 的合并导入（spawnEmote, tickEmotes）取——重复导入已清
-import { itemUseSoundWav } from '../data/itemUseSound';
+import { itemUseSoundWav, itemUseSoundPerceivedVol } from '../data/itemUseSound';
 import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
 import { applyFrostBurn, applyMagmaStoneSwing, applyWeaponStatusSwing } from '../entities/projStatus';
 import { trySnapStrike } from '../stats/SnapStrike';
@@ -145,19 +145,19 @@ import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { MONEY_TROUGH_USE } from '../data/vanillaOpenBags';
 import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
-import { isGemBolt, packGemStaffFeatures, type GemStaffFlags } from '../data/vanillaGemStaff';
+import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
 import { Enemy, visEffectFrames, bindEnemySoundPrewarm } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
 import { spawnMechQueenEnsemble, spawnSkeletronCaster } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
-import { TownNPC } from '../entities/TownNPC';
+import { TownNPC, isItStormingNext } from '../entities/TownNPC';
 import { scanScene, EMPTY_SCENE, scanBiomeLightCounts, type SceneFlags } from '../world/SceneMetrics';
 import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
-import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar } from '../stats/ScaleStats';
+import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL } from '../stats/ScaleStats';
 import {
-  bindJourneyPowers, journeyPowers, shouldDisableSpawns,
+  bindJourneyPowers, journeyPowers, shouldDisableSpawns, spawnRateMultiplier,
 } from '../world/JourneyPowers';
 import { pickMusic, newMusicState, MUSIC_SLOT, resolveEventMusic, isOldOnesArmy, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
@@ -215,6 +215,7 @@ import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha,
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
 import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS } from '../items/Inventory';
+import { isDyeItem } from '../data/vanillaEquip';
 import {
   instrumentNotePitch, instrumentUseSound, drumSoundFile, bubbleWandGoreRoll,
   hiveBeeRoll, fairyBellVariant, chestLockOf,
@@ -682,6 +683,37 @@ const CATTAIL_GROUND_FY: Record<number, number> = {
  *  :54352 的树干特支略——323/树干格视作锚点,备案） */
 const sheetAt = (st: { get(x: number, y: number): number }, x: number, y: number): number =>
   TILE_DEFS[st.get(x, y)]?.vanilla?.sheet ?? -1;
+
+/** WorldGen.IsTileReplaceable（★R3-18，W57:62825-62868）1:1——替换放置共门
+ *  （Player.cs:40182 消费，先于镐门；ReplaceTile:63068/Liquid.cs:1372 同经此）：
+ *  wall==350（skyblock/remix 保护墙）拒；上邻 80 仙人掌/488 倒木拒；
+ *  PreventsTileReplaceIfOnTopOfIt{5,323,72,583-589,596,616,634}（TileID.cs:171）
+ *  且异型时拒——树干族（IsATreeTrunk TileID.cs:161）侧枝帧放行
+ *  （fx==66·fy 0-44 / fx==88·fy 66-110 / fy≥198），323 棕榈 fx 66/220 拒。
+ *  液体合块侧原版本走失败回退（KillTile+PlaceTile forced），行为已等价，不接 */
+const PREVENTS_TILE_REPLACE_SHEETS = new Set([5, 323, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+function isTileReplaceable(st: Game['world']['store'], x: number, y: number): boolean {
+  if (y < 1) return true;                       // :62828 原版 y>=1 才查上邻
+  const i = st.idx(x, y);
+  if (st.wall[i] === 350) return false;         // :62835
+  const ui = st.idx(x, y - 1);
+  if (!st.flags[ui]) return true;               // :62838 上邻非 active → 可换
+  const us = sheetAt(st, x, y - 1);
+  if (us === 80 || us === 488) return false;    // :62839-62844 仙人掌/倒木
+  if (PREVENTS_TILE_REPLACE_SHEETS.has(us) && st.type[i] !== st.type[ui]) {
+    if (TREE_TRUNK_SHEETS.has(us)) {            // :62846-62856 树干帧规则
+      const fx = st.frameX[ui]!, fy = st.frameY[ui]!;
+      if ((fx === 66 && fy >= 0 && fy <= 44) || (fx === 88 && fy >= 66 && fy <= 110) || fy >= 198) return true;
+      return false;
+    }
+    if (us === 323) {                           // :62857-62863 棕榈
+      const fx = st.frameX[ui]!;
+      return !(fx === 66 || fx === 220);
+    }
+    return false;
+  }
+  return true;
+}
 /** PlantCheck 地基失配（cs:81421,与生成期 FinalCleanupPass.plantBadMatch 同式） */
 function plantBadMatch(down: number, type: number): boolean {
   if ((type !== 3 || down === 2 || down === 477 || down === 78 || down === 380 || down === 579)
@@ -1550,6 +1582,10 @@ export class Game implements GameHooks {
   private netNpcLast = new Map<number, { x: number; y: number; hp: number; t: number }>();
   private netProjLast = new Map<number, { x: number; y: number; t: number }>();
   private netDropSeen = new Map<number, ItemDrop>();
+  /** 掉落 re-assert 轮转（R4-1，对照 1457 Main.cs:65543-65553 服务器 60t 轮转 1 槽
+   *  重发 SyncItem）：游标 + 上拍时刻 */
+  private netDropReassertIdx = 0;
+  private netDropReassertAt = -999;
 
   /** 快照广播轮转游标（review C4：固定遍历序 + >=24 break 会让第 25 个起的实体
    *  永远拿不到快照（入侵/血月 >24 同屏移动怪时后段集体饿死被误清）。游标本轮
@@ -1690,6 +1726,24 @@ export class Game implements GameHooks {
         net.sendItemOp(0, d.netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack, d.x, d.y, d.vx, d.vy);
       }
       cur.set(d.netId, d);
+    }
+    // R4-1（1457 Main.cs:65543-65553）：服务器每 60t 轮转重 assert 物品槽——
+    // 周期性重播愈合丢包/迟到端。我方 spawn 是一次性（差分只在诞生时发 op0），
+    // 远端傀儡仅靠 300t TTL 保活（netSweepPuppets），丢一个 op0 即 5 秒蒸发 →
+    // 拥有端按同款 60t 节拍重 assert。原版 400 槽恒 1 槽/60t（全环 24000t）但
+    // 其客户端物品无 TTL；我方 TTL=300t 兼任丢主 GC，全环周期必须 < TTL →
+    // 每拍 assert ⌈n/4⌉ 条（≤4 条时每拍全量；接收端 netApplyItemOp 对已存傀儡
+    // 是 upsert：校正位置 + 刷新 seen，不重复入桶）。
+    if (cur.size && this.tickCount - this.netDropReassertAt >= 60) {
+      this.netDropReassertAt = this.tickCount;
+      const ids = [...cur.keys()];
+      const batch = Math.min(ids.length, Math.max(1, Math.ceil(ids.length / 4)));
+      for (let k = 0; k < batch; k++) {
+        const netId = ids[this.netDropReassertIdx % ids.length];
+        this.netDropReassertIdx = (this.netDropReassertIdx + 1) % ids.length;
+        const d = cur.get(netId)!;
+        net.sendItemOp(0, netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack, d.x, d.y, d.vx, d.vy);
+      }
     }
     for (const netId of this.netDropSeen.keys()) {
       if (!cur.has(netId)) net.sendItemOp(1, netId); // 上轮在、本轮没 = 拾取/过期 → take
@@ -3897,6 +3951,9 @@ export class Game implements GameHooks {
     cultistWorldClear();            // CultistRitual.recheck 运行时位复位（delay 走存档）
     this.golfState.worldClear();    // GolfState.WorldClear（GolfState.cs:69-76）：轨迹记录/跟踪态不进存档
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
+    // R4-13：PanControl 四档持久化灌入（PlayerInputProfile.cs:194-201 读回语义——
+    // 曾纯运行时字段,刷新即回 Hold 档）
+    this.player.panControlMode = options.data.panControlMode;
     // 魔力花 QuickMana 钩子接线（Player.checkMana manaFlower 支 :53226-53239 内的
     // QuickMana() :5590——channel 续发扣魔蓝不足时自动喝蓝;音效/背包回调在 Game 侧
     // 故经钩子反转依赖。quickMana = QuickMana 全门版 :5590-5596/:5621）
@@ -5295,18 +5352,22 @@ export class Game implements GameHooks {
       // → LocalPlayer.SkipRespawnTime()；门 = Player.AllowsRespawnTimerSkip :39264-39291，
       // DeadSkipLockoutTime=90 :1627）。本仓 respawnTimer 计数向上（与原版 deadTime
       // 同源递增）→ 跳过 = 计时到点直接 respawnPlayer。幽灵相/PvP 死亡/deadTime<90
-      // 三门内联；其余四门在 allowsRespawnTimerSkip()
+      // 三门内联；其余四门在 allowsRespawnTimerSkip()。
+      // ★全门结果同步写 player.respawnSkipUi——死亡 UI 的"按SPACE跳过"提示
+      //   淡入/滑移（Main.cs:46104-46134 同门）与此位联动（Renderer 消费）
+      player.respawnSkipUi = player.respawnTimer >= 90
+        && !player.isGhostPhase(this.world) && !player.lastPvpDeath
+        && this.allowsRespawnTimerSkip();
       const jumpEdge = !!player.inputJump && !this._prevRespawnSkipJump;
       this._prevRespawnSkipJump = !!player.inputJump;
-      if (jumpEdge && player.respawnTimer >= 90
-        && !player.isGhostPhase(this.world) && !player.lastPvpDeath
-        && this.allowsRespawnTimerSkip()) {
+      if (jumpEdge && player.respawnSkipUi) {
         this.respawnPlayer();
       }
       if (player.respawnTimer > (600 + (player.bossNearOnDeath ? 600 : 0))
         * (mainExpertMode(this.world) ? 1.5 : 1)) this.respawnPlayer();
     } else {
       this._deathHandled = false;
+      player.respawnSkipUi = false;   // 复活后 UI 位复位（提示淡出计数随 Renderer 归零）
     }
 
     // ---- 智能光标（每帧 lookup；结果供 updateUse 覆盖目标格 + 渲染黄框） ----
@@ -6046,6 +6107,49 @@ export class Game implements GameHooks {
         w.clock.timeOfDay = this.pendingTimeSkip;
         this._lastClockT = this.pendingTimeSkip;
         this.pendingTimeSkip = null;
+      }
+    }
+    // ---- Main.IsItStorming 全局旗推进（Main.cs:2978 _shouldUseStormMusic；
+    //      UpdateWindyDayState :12927-12960 迟滞机，阈值见 TownNPC.isItStormingNext）----
+    w.weather.storming = isItStormingNext(w.weather.cloudAlpha, w.weather.windSpeedTarget, w.weather.storming);
+    // ---- FTW 巨石雨（SpawnFallingObjects 风暴臂 :72217-72240）：drunk+getGood+
+    //      !remix+IsItStorming；窗口 `(int)GlobalTimeWrappedHourly % 80 < 45 → 停`——
+    //      GlobalTimeWrappedHourly=实时运行秒%3600（Main.cs:17014 XNA GameTime 墙钟，
+    //      非游戏内时间）→ 仅实时秒%80 ∈ [45,80) 落石；Next(3)==0（dontStarve 5）→
+    //      随机点 !SolidCollision(32,32) → 弹 99（1/50→1013，netImportant 变体单机
+    //      无差）伤 70 kb10；_isRainingBoulders 记账，窗口关闭沿 → 成就 34
+    //      ITS_SHALING_OUTSIDE（:72235-72239）。dontStarve×FTW 冰雹 1049 臂
+    //      （:72268-72290）依赖 theConstant 世界链（登记缺口）暂缓
+    {
+      const sf = w.seedFlags;
+      if (sf?.drunkWorld && sf?.getGoodWorld && !sf?.remix && w.weather.storming) {
+        const wrappedHourly = (performance.now() / 1000) % 3600;
+        const raining = Math.floor(wrappedHourly) % 80 >= 45;
+        if (!raining && this._isRainingBoulders) this.achievements.notifyProgressionEvent(34);
+        this._isRainingBoulders = raining;
+        if (raining) {
+          const maxValue = sf.theConstant ? 5 : 3;
+          if (Math.random() < 1 / maxValue) {          // Next(maxValue)==0
+            const bst = w.store;
+            const bx = (Math.floor(Math.random() * (bst.w - 50)) + 100) * TILE;
+            const by = Math.floor(Math.random() * Math.floor(bst.h * 0.05)) * TILE;
+            // !Collision.SolidCollision(position,32,32)：盒 [x-16,y-16,x+16,y+16] 无实心
+            let clear = true;
+            for (let tx = Math.floor((bx - 16) / TILE); clear && tx <= Math.floor((bx + 15.999) / TILE); tx++) {
+              for (let ty = Math.floor((by - 16) / TILE); ty <= Math.floor((by + 15.999) / TILE); ty++) {
+                if (bst.inBounds(tx, ty) && bst.isSolid(tx, ty)) { clear = false; break; }
+              }
+            }
+            if (clear) {
+              const wind = Math.max(-16, Math.min(16, w.weather.windSpeedCurrent * 16));
+              this.entities.add(new TrapShot(bx, by, wind, 8, 70, 'boulder'), 'projectiles');
+            }
+          }
+        }
+      } else if (this._isRainingBoulders) {
+        // 风暴/种子条件消失（:72226 `!num && _isRainingBoulders`）→ 成就边沿
+        this._isRainingBoulders = false;
+        this.achievements.notifyProgressionEvent(34);
       }
     }
     // ---- 夜间坠星（SpawnFallingObjects :71861-71898：每 tick 概率
@@ -7059,7 +7163,7 @@ export class Game implements GameHooks {
   switchLoadout(k: 0 | 1 | 2): void {
     const p = this.player;
     if (!p || p.dead || p.inv.currentLoadout === k) return;
-    p.inv.trySwitchingLoadout(k);
+    p.inv.trySwitchingLoadout(k, p.hideVisibleAccessory);   // R4-12：可见性随套互换
     this.sfx.play('menuTick', 1);
     this.broadcastParticleOrchestra(ParticleOrchestraType.LoadoutChange,
       p.cx, p.cy, 0, 0, k);
@@ -8251,6 +8355,10 @@ export class Game implements GameHooks {
               cdir, cdvy, cDmg, cKb, animMax, ps?.size ?? 1);                // ai[2]=itemScale（:49422）
             blade.critChance = arcCrit;
             blade.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+            // usesOwnerMeleeHitCD（Projectile.cs:10556→Damage_PVE :12596/:14343）：
+            // 刃与玩家挥击弧共享同一套近战命中表——同一挥击内弧+刃对同敌不双跳字
+            //（蓝队 R2-08；1129 同款偏差已在类注释自认登记）
+            blade.sharedMeleeHits = this.swingHitSet;
             blade.spawnSpore = (sx, sy, svx, svy, life) => {
               // NewProjectile 1128（:42940-42941）：伤 ×0.75（:42927 num27）
               const spore = new ChloroSporeCloud(sx, sy, svx, svy,
@@ -11034,6 +11142,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.entities.add(gf, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(10);   // SetDummyItemTime(10)（:37609）
           this.player.onManaItemUsed();
+          this.playUseSound(6153, 'tink');   // R4-37 use-start UseSound=GlacierFang_Charging（P57:52316-52330）
           this.input.mouseDown = false;
           break;
         }
@@ -11405,59 +11514,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 穿透直读 SetDefaults penetrate（2026-08-22 修复1：去 [1,3] 钳——280 黄金雨
         // 5 被砍成 3；Arrow 已支持 −1 无限穿透语义，按原版直传）
         const pen = pd?.penetrate ?? 1;
-        const gsM = projGravSpec(cw.shoot);
-        // 1457 宝石法珠分化（PackGemStaffFeatures Player.cs:49990）：shoot 主特性 ∪
-        // 胸部长袍特性（1282-1287/4256）;穿透/穿甲/timeLeft 终值化在 Arrow ctor 内做
-        let gemFlags: GemStaffFlags | undefined;
-        if (isGemBolt(cw.shoot)) {
-          const chestDef = ITEM_DEFS[this.player.inv.armor[1]?.id ?? -1];
-          const chestVid = chestDef ? (chestDef.vid ?? viIdFromKey(chestDef.key) ?? -1) : -1;
-          gemFlags = packGemStaffFeatures(cw.shoot, chestVid >= 0 ? chestVid : undefined,
-            def.vid ?? viIdFromKey(def.key) ?? undefined);
-        }
-        // ★1457 发射侧参数(Player.cs:49796-49812):FastThenSlow 出速 ×5、
-        //   CanBounce 出速 ×1.25、ArPenSpread 出手点环形偏移 12px;SwirlTwins 双弹
-        //   (第二颗 ai[1]=1 → 摆动反相,:49922-49926);Damage×GetDamageMultiplier
-        //   在弹命中侧等价消费(Arrow 命中处 gemDamageMultiplier)
-        let gvx = Math.cos(ang) * cw.shootSpeed, gvy = Math.sin(ang) * cw.shootSpeed;
-        let gpx = px, gpy = py;
-        let gemPhase: number | undefined;
-        if (gemFlags) {
-          if (gemFlags.fastThenSlow) { gvx *= 5; gvy *= 5; }
-          if (gemFlags.canBounce) { gvx *= 1.25; gvy *= 1.25; }
-          if (gemFlags.arPenSpread) {
-            const er = Math.random() * Math.PI * 2;
-            gpx += Math.cos(er) * 12; gpy += Math.sin(er) * 12;   // NextVector2CircularEdge(12,12)
-          }
-          if (gemFlags.swirlTwins) gemPhase = 1;
-        }
-        const mArrow = new Arrow(gpx, gpy, gvx, gvy,
-          cw.damage, cw.knockback, cw.shoot, null,
-          { grav: gsM.grav, gravDelay: gsM.delay, grav2: gsM.grav2, grav2At: gsM.grav2At,
-            dragAlways: gsM.drag, life: pd?.timeLeft ?? 3600, pierce: pen, gem: gemFlags, gemPhase });
-        // 星云 booster（StrikeNPC :12892-12905：魔法弹命中、套装在身、CD=0、1/3 → 掉 booster）
-        mArrow.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧
-        mArrow.critBonus = this.player.critChance('magic')
-          + (itemCombat(def.vid ?? viIdFromKey(def.key) ?? -1)?.crit ?? 0) + (ps?.crt ?? 0); // 审计 §6 + ⑧
-        mArrow.nebulaCb = () => {
-          if (!this.player.equipStats.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1 / 3) return;
-          this.player.nebulaCD = 30; // :12895
-          this.spawnNebulaBooster(mArrow.cx, mArrow.cy);
-        };
-        this.entities.add(mArrow, 'projectiles');
-        if (gemFlags?.swirlTwins) {
-          const twin = new Arrow(gpx, gpy, gvx, gvy,
-            cw.damage, cw.knockback, cw.shoot, null,
-            { grav: gsM.grav, gravDelay: gsM.delay, grav2: gsM.grav2, grav2At: gsM.grav2At,
-              dragAlways: gsM.drag, life: pd?.timeLeft ?? 3600, pierce: pen, gem: gemFlags, gemPhase: 1 });
-          twin.armorPen = mArrow.armorPen;
-          twin.critBonus = mArrow.critBonus;
-          this.entities.add(twin, 'projectiles');   // :49924-49926 aiArgs 1f=反相摆
-        }
-        this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
-        this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
-        this.playUseSound(critVid, 'tink'); // UseSound 数据驱动（Item8/12/20/43/92…各杖专属）
-        this.input.mouseDown = false;
+        // 1457 宝石法珠全链（ItemCheck_Shoot 宝石支 :49779-49904）——特性打包/出速
+        // 乘区/发射侧 (int) 截断/RepeatsGem/AllGems 三连扇/SwirlTwins 孪生全在
+        // fireGemStaffBolts（蓝队 R2 批重构：半动画补挥 :43033-43041 复用同一链）
+        this.fireGemStaffBolts(cw, def, ps, ang, px, py, critVid, pen, false);
         break;
       }
       case 'shot': {
@@ -11886,12 +11946,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const vein = Game.altarOreVeinRoll(rng);
       tileRunner(st, rng, lastGenState() ?? { worldSurface: this.world.groundLevel, lavaLine: st.h - 200, waterLine: this.world.groundLevel } as never, x, y, { strength: vein.strength, steps: vein.steps, type: ore, addTile: true });
     }
-    const wraiths = 1 + Math.floor(Math.random() * 2);
-    for (let k = 0; k < wraiths; k++) {
-      const e = Enemy.fromVanilla(82, this.player.cx + (Math.random() - 0.5) * 64, this.player.y - 32);
-      if (e) {
-        e.id = this.entities.nextId++;
-        this.entities.enemies.push(e);
+    // 幽灵惩罚（:49506-49524）：flag2=true 起手,旅程刷怪滑杆 GetShouldDisableSpawnsFor
+    // → flag2=false（不出）;★R3-7 曾无条件 1+rand(2) 只 Wraith
+    if (!(this.world.isJourney && shouldDisableSpawns(this.world.journeyPowers.spawnRateSlider))) {
+      const wraiths = 1 + Math.floor(Math.random() * 2);
+      for (let k = 0; k < wraiths; k++) {
+        const e = Enemy.fromVanilla(82, this.player.cx + (Math.random() - 0.5) * 64, this.player.y - 32);
+        if (e) {
+          e.id = this.entities.nextId++;
+          this.entities.enemies.push(e);
+        }
       }
     }
     this.world.altarCount++;
@@ -13102,6 +13166,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (framedSheet === 55 || framedSheet === 85 || framedSheet === 425 || framedSheet === 573) {
         this.world.signs = this.world.signs.filter((s) => !(s.x === ax && s.y === ay));
       }
+      // ★R3-6 墓碑幽灵（1457 W57:44083-44139 KillTile case 85）：砸墓碑掷墓碑幽灵
+      //  316——num13=8（经典）/4（专家）/2（大师）；旅程刷怪滑杆：
+      //  GetShouldDisableSpawnsFor→0，否则 num13=max(1, num13/remapValue)
+      //  （RemapSliderValueToPowerValue 0.1~10）；Next(num13)==0 且 CountNPCS(316)<2
+      //  → SpawnOnPlayer 最近玩家。1456 的 ZoneGraveyard||!dayTime||y>worldSurface
+      //  门在 1457 整体删除（W56:43762-43770）=任意处可出、概率按难度放大
+      if (framedSheet === 85) {
+        let num13 = 8;
+        const gdl = mainDifficulty(this.world);
+        if (gdl >= GDL.MASTER) num13 = 2;
+        else if (gdl >= GDL.EXPERT) num13 = 4;
+        const jp = this.world.journeyPowers;
+        if (this.world.isJourney) {
+          if (shouldDisableSpawns(jp.spawnRateSlider)) num13 = 0;
+          else num13 = Math.max(1, Math.floor(num13 / spawnRateMultiplier(jp.spawnRateSlider)));
+        }
+        if (num13 > 0 && Math.random() < 1 / num13
+          && this.entities.enemies.filter((e) => !e.dead && e.vanillaId === 316).length < 2) {
+          const ghost = Enemy.fromVanilla(316, this.player.cx + (Math.random() - 0.5) * 64, this.player.y - 32);
+          if (ghost) {
+            ghost.id = this.entities.nextId++;
+            this.entities.enemies.push(ghost);
+          }
+        }
+      }
       // 宝箱登记注销（BasicChest {21,467}——TileID.cs:315）。★非空箱到不了这里：
       // breakTile 头部 shouldTileSurviveAt 门（原版 CheckTileBreakability2 :62526
       // DestroyChest false → 存活）已拦；此处只剩空箱/梳妆台同表记录的移除
@@ -14253,6 +14342,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         if (styleSwap) { swapOk = true; }
         if (swapOk) {
+          // ★R3-18（W57:62825 IsTileReplaceable;Player.cs:40182 消费,先于镐门）:
+          //  wall350 保护墙/上邻仙人掌·倒木/树干·棕榈异型替换拒
+          if (!isTileReplaceable(st, tx, ty)) return;
           const tileIdHere = TILE_BY_KEY[itemDef.tile!];
           if (tileIdHere !== targetType && tdef?.drop !== itemDef.key) {
             // ★原版两道镐门(Player.cs:39186-39232 PlaceThing_TryReplacingTiles,
@@ -16166,6 +16258,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private homelessSpawnTimeout = 0;
   /** 本夜天幕流星已掷(_canShowMeteorFall 位;入夜重置) */
   private _skyMeteorShown = false;
+  /** FTW 巨石雨记账旗（WorldGen._isRainingBoulders :72235——风暴臂窗口状态，
+   *  关闭沿触发成就 34 ITS_SHALING_OUTSIDE） */
+  private _isRainingBoulders = false;
   /** 陨石坠落旗标（WorldGen.spawnMeteor :4156——入夜 roll/EoW 击杀置位，夜半消费；
    *  WorldFile :1301/:2098 持久化 → 挂 world.flags 随存档走） */
   private get meteorPending(): boolean { return !!this.world?.flags.spawnMeteor; }
@@ -16267,8 +16362,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.renderer?.sky?.aurora.setActive(
         !!this.scene?.zoneSnow && !w.clock.isDay && !stormFlag && this.graveyardIntensity < 0.5);
     }
-    // 白天 tick 进度（原版 time 0-54000 ↔ 我们 timeOfDay 白天前半段 0.25-0.75 线性）
-    const dayTimeTicks = w.clock.isDay ? ((w.clock.timeOfDay - 0.25) / 0.5) * 54000 : 0;
+    // 白天 tick 进度（原版 Main.time 0-54000 ↔ Clock.DAWN 0.1875 基 0.625 跨度；
+    //  ★曾用 0.25 基差 1.5h,2026-08-23 全仓时基统一校正）
+    const dayTimeTicks = w.clock.isDay ? ((w.clock.timeOfDay - Clock.DAWN) / 0.625) * 54000 : 0;
     // 行为录制：雨切换沿（原版 StartRain/StopRain 无公告——沿检测是唯一锚点）
     if (weather.raining !== this._recLastRaining) {
       this._recLastRaining = weather.raining;
@@ -17748,6 +17844,96 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.player.facing = mwx >= this.player.cx ? 1 : -1;
   }
 
+  /** 1457 宝石法珠发射全链（ItemCheck_Shoot 宝石支 Player.cs:49779-49904）。
+   *  发射侧完成：特性位打包（PackGemStaffFeatures :49990）、出速 ×5/×1.25、出手点
+   *  环形偏移 12、Damage×GetDamageMultiplier 的 (int) 截断（:49813-49814）、RepeatsGem
+   *  +4 伤 +1 击退（:49815-49819，乘区【后】）、AllGems 三连扇（:49870-49896）、
+   *  SwirlTwins 孪生第二颗 aiArgs=1f 反相摆（:49897-49904——★主弹 aiArgs 缺省 =
+   *  相位 0，蓝队 R2-01：曾主/孪双弹同相位 1 = 蛇形摆失效）。
+   *  midSwing=true：ArPenSpread 半动画补挥（:43033-43041，withAudioVisualFeedback:
+   *  false → 不重置 itemTime/不耗魔——耗魔在 ItemCheck_ActuallyUseItem/不落 mouseDown）。
+   *  非宝石弹返回 false（调用方走通用直射）。 */
+  private fireGemStaffBolts(
+    cw: CombatWeapon, def: { vid?: number; key: string },
+    ps: { arpen?: number; crt?: number } | null | undefined,
+    ang: number, px: number, py: number, critVid: number, pen: number, midSwing: boolean,
+  ): boolean {
+    // 窄化 magic 支（shoot/shootSpeed 必有）；非 magic kind 不消费（调用方兜底）
+    if (cw.kind !== 'magic') return false;
+    const isGem = isGemBolt(cw.shoot);
+    const chestDef = ITEM_DEFS[this.player.inv.armor[1]?.id ?? -1];
+    const chestVid = chestDef ? (chestDef.vid ?? viIdFromKey(chestDef.key) ?? -1) : -1;
+    // 非宝石魔法弹（水矢/恶魔镰…）走同一条 Arrow 直射，gem 位缺省——与重构前
+    // case 'magic' 尾部通用路径逐字段同形（勿丢：曾因 early-return 让全魔法系哑火）
+    const gemFlags = isGem
+      ? packGemStaffFeatures(cw.shoot, chestVid >= 0 ? chestVid : undefined,
+        def.vid ?? viIdFromKey(def.key) ?? undefined)
+      : undefined;
+    const gsM = projGravSpec(cw.shoot);
+    const life = projectileData(cw.shoot)?.timeLeft ?? 3600;
+    const arpen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧
+    const critBonus = this.player.critChance('magic')
+      + (itemCombat(def.vid ?? viIdFromKey(def.key) ?? -1)?.crit ?? 0) + (ps?.crt ?? 0); // 审计 §6 + ⑧
+    // 出手参数（:49796-49812，仅宝石弹）：FastThenSlow 出速 ×5、CanBounce ×1.25、
+    // ArPenSpread 出手点 NextVector2CircularEdge(12,12) 环形偏移
+    let gvx = Math.cos(ang) * cw.shootSpeed, gvy = Math.sin(ang) * cw.shootSpeed;
+    let gpx = px, gpy = py;
+    if (gemFlags?.fastThenSlow) { gvx *= 5; gvy *= 5; }
+    if (gemFlags?.canBounce) { gvx *= 1.25; gvy *= 1.25; }
+    if (gemFlags?.arPenSpread) {
+      const er = Math.random() * Math.PI * 2;
+      gpx += Math.cos(er) * 12; gpy += Math.sin(er) * 12;
+    }
+    // ★发射侧乘区（:49813-49814 `(int)((float)Damage * damageMultiplier)` C# 截断，
+    //  蓝队 R2-06：曾落命中侧 Math.round——x.5 档系统性 +1）+ RepeatsGem 成套奖励
+    let gdmg = gemFlags ? Math.max(1, Math.trunc(cw.damage * gemDamageMultiplier(gemFlags))) : cw.damage;
+    let gkb = cw.knockback;
+    if (gemFlags?.repeatsGem) { gdmg += 4; gkb += 1; }   // :49815-49819
+    const mkBolt = (vid: number, vx: number, vy: number, bx: number, by: number,
+      phase: number | undefined) => {
+      const b = new Arrow(bx, by, vx, vy, gdmg, gkb, vid, null,
+        { grav: gsM.grav, gravDelay: gsM.delay, grav2: gsM.grav2, grav2At: gsM.grav2At,
+          dragAlways: gsM.drag, life, pierce: pen, gem: gemFlags, gemPhase: phase });
+      b.armorPen = arpen;
+      b.critBonus = critBonus;
+      // 星云 booster（StrikeNPC :12892-12905：魔法弹命中、套装在身、CD=0、1/3 → 掉 booster）
+      b.nebulaCb = () => {
+        if (!this.player.equipStats.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1 / 3) return;
+        this.player.nebulaCD = 30; // :12895
+        this.spawnNebulaBooster(b.cx, b.cy);
+      };
+      this.entities.add(b, 'projectiles');
+    };
+    if (gemFlags?.allGems) {
+      // AllGems 三连扇（:49870-49896）：宝石型 NextFromList 七选【一次】（三发同型）、
+      // ±(π/4)/10 扇形展开、速度 ×Remap(|i-2|,0,1,1.1,1)（中快旁慢）；ai[1]=i(1..3)。
+      // 基向量 = ×5/×1.25 后的 num4/num5（spinningpoint3 在乘区之后取）。AllGems2
+      // 七连扇（:49822-49868）1457 无置位点 = 死代码，不移植
+      const gemTypes = [121, 122, 123, 124, 597, 125, 126];
+      const fanType = gemTypes[Math.floor(Math.random() * gemTypes.length)];
+      const baseSp = Math.hypot(gvx, gvy);
+      const baseAng = Math.atan2(gvy, gvx);
+      for (let i = 1; i <= 3; i++) {
+        const off = i - 2;
+        const fa = baseAng + off * (Math.PI / 4) / 10;
+        const fv = baseSp * (off === 0 ? 1.1 : 1);
+        mkBolt(fanType, Math.cos(fa) * fv, Math.sin(fa) * fv, gpx, gpy, i);
+      }
+    } else {
+      mkBolt(cw.shoot, gvx, gvy, gpx, gpy, undefined);   // 主弹相位 0
+      if (gemFlags?.swirlTwins) {
+        mkBolt(cw.shoot, gvx, gvy, gpx, gpy, 1);         // 孪生 aiArgs 1f=反相摆
+      }
+    }
+    if (!midSwing) {
+      this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
+      this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
+      this.playUseSound(critVid, 'tink'); // UseSound 数据驱动（Item8/12/20/43/92…各杖专属）
+      this.input.mouseDown = false;
+    }
+    return true;
+  }
+
   private updateSwingHits() {
     if (!this.swing) return;
     this.swing.t--;
@@ -17773,6 +17959,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const held = this.player.inv.heldItem();
     if (!held) return;
     const heldDef = ITEM_DEFS[held.id];
+    // ---- 1457 宝石杖 ArPenSpread 半动画第二击（Player.cs:43033-43041）----
+    //  门 = 手持宝石杖（(type-739)<=5 || type==3377）+ 特性位 ArPenSpread（红晶杖
+    //  743/红晶袍 1286 臂）+ itemAnimation == itemAnimationMax/2（整除，恰一帧）→
+    //  再调一次 ItemCheck_Shoot(withAudioVisualFeedback:false)——红晶杖/红晶袍臂
+    //  每次挥击双发（第二发在动画中点，不重置 itemTime/不耗魔）。蓝队 R2-04 补
+    const gemVid = heldDef.vid ?? viIdFromKey(heldDef.key) ?? -1;
+    if (this.swing && this.swing.item === held.id
+      && (gemVid >= 739 && gemVid <= 744 || gemVid === 3377)
+      && this.swing.t === Math.floor(this.swing.dur / 2)) {
+      const gemCw = combatWeapon(heldDef);
+      if (gemCw && gemCw.kind === 'magic' && isGemBolt(gemCw.shoot)) {
+        const gPs = this.heldPrefixStat();
+        const chestDef = ITEM_DEFS[this.player.inv.armor[1]?.id ?? -1];
+        const chestVid = chestDef ? (chestDef.vid ?? viIdFromKey(chestDef.key) ?? -1) : -1;
+        if (packGemStaffFeatures(gemCw.shoot, chestVid >= 0 ? chestVid : undefined, gemVid).arPenSpread) {
+          // 出手链同 case 'magic'（:10612-10614）：当前光标向、枪口点
+          const gAng = Math.atan2(this.input.mouseY - this.renderer.canvas.height / 2,
+            this.input.mouseX - this.renderer.canvas.width / 2);
+          const gpx = this.player.cx + Math.cos(gAng) * 14;
+          const gpy = this.player.cy - 4 + Math.sin(gAng) * 14;
+          this.fireGemStaffBolts(gemCw, heldDef, gPs, gAng, gpx, gpy, gemVid,
+            projectileData(gemCw.shoot)?.penetrate ?? 1, true);
+        }
+      }
+    }
     const tool = heldDef.tool ?? this.itemFuncTool(held.id);
     // ---- 近战整体门（Player.cs:42964）：(damage>=0 && !noMelee) 才进 GetMeleeHitbox，
     // 且 CutTiles/MeleeHitNPCs 都在 damage>0 内（cs:42991-43006）——
@@ -18747,7 +18958,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 置位，普通种子恒假）或每轮 1/40 重掷（另需在场 NPC ≥20，见优先级链）
         return !!this.world.flags.unlockedPartyGirlSpawn || Math.random() < 1 / 40;
       case 'dyer': {
-        // SpawnAllowed_DyeTrader（cs:7096）：unlockedDyeTraderSpawn 或 背包有染料/染料物
+        // SpawnAllowed_DyeTrader（1457 NPC.cs:7144-7180）：unlockedDyeTraderSpawn 或
+        // 背包有染料/染料物 或【染料槽 GetEffectiveDye(0-9) 有染料】或 miscDyes 有染料
+        // （R4-26 #9：染料槽有染料的玩家原版能召,曾只扫背包）
         if (uf.unlockedDyeTraderSpawn) return true;
         for (const s of p.inv.slots) {
           if (!s) continue;
@@ -18755,6 +18968,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (!def) continue;
           const vid = def.vid ?? viIdFromKey(def.key);
           if ((vid >= 1107 && vid <= 1120) || (vid >= 3385 && vid <= 3388)) return true;
+        }
+        for (let k = 0; k < 10; k++) {
+          const d = p.inv.getEffectiveDye(k);
+          if (d && isDyeItem(d.id)) return true;
+        }
+        for (const m of p.inv.miscDyes) {
+          if (m && isDyeItem(m.id)) return true;
         }
         return false;
       }
@@ -18983,7 +19203,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  成功生成后置 54000（一天一户）
       if (!this.world.clock.isDay || this.homelessSpawnTimeout > 0) return;
       if (anchorPool.length === 0) return;
-      if (npcs.some((n) => !n.home)) return;
+      // ★R3-1（1457 W57:5551-5564 FindAnyHomelessTownNPC）："已有流浪者"门带四元
+      //  排除集 {37 老人/453 骷髅商/368 旅行商/160 松露人}——原版这四者恒 homeless
+      //  （老人地牢驻点/骷髅商·旅商本就无家/松露人无蘑菇房时恒无家），不排除则
+      //  任一在场即把流浪到达链永久锁死（旅商每天白天在场=日常必现）
+      if (npcs.some((n) => !n.home && ![37, 453, 368, 160].includes(n.vanillaId))) return;
       const homeAnchor = homes[Math.floor(Math.random() * homes.length)];  // 同 pickAnchor 口径（此处已保证 homes 非空）
       const ax = homeAnchor.x + (Math.random() < 0.5 ? -1 : 1) * (30 + Math.floor(Math.random() * 50));
       if (ax < 3 || ax > st.w - 4) return;
@@ -19300,6 +19524,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!inp.uiBlocking && !p.dead) {
       const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
       this.tileInteractionsMouseOver(Math.floor(wx / TILE), Math.floor(wy / TILE), p);
+      // 帕鲁坐骑抚摸悬停图标（Mount.TryPettingMount :6155-6175,由 Mount.Draw 挂 =
+      // 帧内后于 TileInteractionsMouseOver 的悬停扫描,故覆写其结果）：骑乘 62-65
+      // 站立(|vx|<1 :6140)且光标落在 Bottom+(direction*26,-54) 24×24 心形盒 →
+      // cursorItemIconEnabled + cursorItemIconID = 本坐骑召唤物
+      // {62:5665, 63:5666, 64:6150, 65:6151}（:6161-6172）。lastMouseInterface 门以
+      // uiBlocking 近似(与本函数头部悬停扫描同口径);noThrow=4(:6158,压 T 键投掷)
+      // 本仓无投掷键建模,不接线
+      if (p.ridingMount && p.mount.type >= 62 && p.mount.type <= 65 && Math.abs(p.vx) < 1) {
+        const [mx, my] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        const hx = p.x + p.w / 2 + p.facing * 26;
+        const hy = p.y + p.h - 54;
+        if (Math.abs(mx - hx) < 12 && Math.abs(my - hy) < 12) {
+          p.cursorItemIconEnabled = true;
+          p.cursorItemIconID = p.mount.type === 62 ? 5665
+            : p.mount.type === 63 ? 5666
+              : p.mount.type === 64 ? 6150 : 6151;
+        }
+      }
     }
     // 余辉验证（:45929-45945）：所选槽物品 id 与缓存比对（缓存键 = 原版 vid）
     const held = p.inv.slots[p.inv.selected];
@@ -19540,9 +19782,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return dialog(2);
       }
       if (w.clock.isDay) {
-        const f = (w.clock.timeOfDay - 0.25) / 0.5; // 昼内进度 0-1(原版 Main.time/43200)
-        if (f < 16200 / 43200) return dialog(4 + r3());   // 清晨 4-6
-        if (f > 37800 / 43200) return dialog(7 + r3());   // 傍晚 7-9
+        const f = (w.clock.timeOfDay - Clock.DAWN) / 0.625; // 昼内进度 0-1(=Main.time/54000)
+        if (f < 16200 / 54000) return dialog(4 + r3());   // 清晨 4-6(原版 time<16200)
+        if (f > 37800 / 54000) return dialog(7 + r3());   // 傍晚 7-9(time>37800)
         return dialog(10 + r3());                          // 白昼 10-12
       }
       const nf = (((w.clock.timeOfDay - Clock.DUSK) % 1) + 1) % 1 / 0.375; // 夜内进度 0-1（32400t 窗口）
@@ -19724,7 +19966,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 四人组(派对女孩+机械师+护士+军火商)307;派对女孩/爆破手/电子人互cue 302/303/308;
       // 月相常规池(287-290/294 | 295-298 | 299/301/313/314)+ StylistChatter 池
       if (w.clock.bloodMoon) return dialog(304 + rN(3));             // 血月(cs:95820)
-      if (w.clock.isDay && (w.clock.timeOfDay - 0.25) / 0.5 < 16200 / 43200 && r3() === 0) return dialog(311);
+      if (w.clock.isDay && (w.clock.timeOfDay - Clock.DAWN) / 0.625 < 16200 / 54000 && r3() === 0) return dialog(311);
       const male = (p.appearance?.skinVariant ?? 0) === 0;
       if (male && r3() === 0) return dialog([293, 300][rN(2)]);
       if (!male && r3() === 0) return dialog([291, 292, 312][rN(3)]);
@@ -20098,7 +20340,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       raining: !!w.weather?.raining,
       cloudBGAlpha: w.weather?.cloudBGAlpha ?? 0,
       dayTime: isDay,
-      time: isDay ? ((t - 0.25) / 0.5) * 54000 : ((((t - 0.75) + 1) % 1) / 0.5) * 32400,
+      time: isDay ? ((t - Clock.DAWN) / 0.625) * 54000 : ((((t - Clock.DUSK) + 1) % 1) / 0.375) * 32400,
       moonPhase: w.clock.moonPhase,
       bloodMoon: !!w.clock.bloodMoon,
     }));
@@ -21547,6 +21789,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★ Main.masterMode/expertMode 经 mainMasterMode/mainExpertMode 求值
       //   （Main.cs:2760/2762 = Difficulty>=Master/Expert；getGoodWorld 抬档同样生效）
       const accVids = accessoryVanillaIds(p);
+      // 混乱之脑 3223 命中侧困惑反伤（Player.Hurt :38690-38722 Retaliate 分支——
+      // Counter∈{General,BossNoCheese,PaladinsShield} 且受击前非无敌。R5-F25：
+      // 旧把困惑挂在【闪避】脉冲上错位,闪避侧只挂 buff 321,困惑归此处）：
+      // 逐敌掷 (300+2×实扣)/500 → 困惑；半径 num13=Next(200+实扣/2, 301+实扣×2)
+      // 软钳（>500 ×0.75 递增/>700 ×0.5/>900 ×0.25）；时长 Next(90+实扣/3, 300+实扣/2)t
+      if (!pvp && accVids.includes(3223)) {
+        for (const e of this.enemies()) {
+          const en = e as { cx?: number; cy?: number; confusedT?: number; dead?: boolean };
+          if (en.dead || en.cx === undefined || en.cy === undefined || en.confusedT === undefined) continue;
+          if (Math.random() * 500 >= 300 + ok * 2) continue;
+          let num13 = 200 + ok / 2 + Math.random() * (101 + ok * 1.5);
+          if (num13 > 500) num13 = 500 + (num13 - 500) * 0.75;
+          if (num13 > 700) num13 = 700 + (num13 - 700) * 0.5;
+          if (num13 > 900) num13 = 900 + (num13 - 900) * 0.25;
+          if (Math.hypot(en.cx - p.cx, en.cy - p.cy) >= num13) continue;
+          en.confusedT = (90 + ok / 3 + Math.random() * (210 + ok / 6)) / 60;
+        }
+      }
       const star = starCloakStarInfo(accVids, p.equipStats.starCloak);
       if (star.active) {
         let starDmg = 75;
@@ -21758,6 +22018,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // Damage() 二次结算:原版沿用弹 damage(命中已 ×2,此处近似同值直伤)
         this.damagePlayer(20, cx, cy, undefined);
       }
+      return;
+    }
+    // R4-38：禁戒仆从弹 1120 消亡 Dig 音 + 尘（Projectile.cs:76927-76952 Kill 1120 支：
+    // PlaySound(0)=Dig + 15 尘 170 noGravity×0.3——尘近似并入通用消亡,此处补音）
+    if (projId === 1120) {
+      this.playSfxFiles(['Dig_0', 'Dig_1', 'Dig_2'], 0.6, x + w / 2, y + h / 2);
       return;
     }
     // 1457 地狱之翼蝙蝠 117 消亡撒骨片（Projectile.cs:76244-76260 Kill 117 支）：
@@ -23353,8 +23619,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  Item_12 激光枪/Item_43 魔镜反弹/Item_92 水矢 等），无显式回落各路径原通道音 */
   playUseSound(vid: number, fallback: string, vol?: number): void {
     const wav = itemUseSoundWav(vid);
-    if (wav) this.playSfxFile(wav, vol);
-    else this.sfx.play(fallback as 'throw', vol);
+    // R4-41：WithVolumePerceived（LegacySoundStyle.cs:69-74 ×volume^1.6609）——
+    // 感知音量挂在 style 上（6154 MysticBloom 0.65→0.489）,显式 vol 优先
+    const v = vol ?? itemUseSoundPerceivedVol(vid) ?? undefined;
+    if (wav) this.playSfxFile(wav, v);
+    else this.sfx.play(fallback as 'throw', v);
   }
 
   /** 矿车碾过压板轨道（Minecart.HitTrackSwitch → Wiring.HitSwitch，Minecart.cs:1287-1294）：
@@ -24905,6 +25174,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const outId = ITEM_BY_KEY[outKey];
     const left = this.player.inv.add(outId, r.createStack * times);
     if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left); // 背包装不下→掉落
+    // R4-18（HandleWeirdCrafts,M57:43354-43364）：合成 6148/6149（Trusty 件）即杀
+    // 场上旧代帕鲁弹 1093/1094（KillProjectilesOfTypeForLocalPlayer）——召唤侧互清
+    // （freeUpMinionsForSummon ①）已做,这半边"合成新玩具杀旧宠物"曾缺
+    if (outId !== undefined) {
+      const craftVid = vanillaIdOfItem(outId);
+      if (craftVid === 6148 || craftVid === 6149) {
+        const killId = craftVid === 6148 ? 1093 : 1094;
+        for (const ent of this.entities.projectiles) {
+          const m = ent as MinionProj;
+          if (!m.dead && m.projId === killId) m.dead = true;
+        }
+      }
+    }
     // 可放置成品 → tile/wall sheet 预取（合成完成即拉,放置首烘即真图;
     // 不等 onInventoryChanged 全包扫描——直调零时差,在飞去重防双发）
     if (outId !== undefined) this.prefetchPlaceableSheets([outId]);

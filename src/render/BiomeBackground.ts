@@ -15,6 +15,16 @@ const Forest1 = 0, Corruption = 1, Desert = 2, Jungle = 3, Ocean = 4, CorruptDes
   Hallow = 6, Snow = 7, Crimson = 8, Mushroom = 9, Forest2 = 10, Forest3 = 11, Forest4 = 12,
   HallowDesert = 13, CrimsonDesert = 14;
 
+/** 样式 → BackgroundChangeFlashInfo areaId（TreeTopsInfo.AreaId 槽位：
+ *  0-3=Forest1-4、4=Corrupt、5=Jungle、6=Snow、7=Hallow、8=Crimson、9=Desert、
+ *  10=Ocean、11=Mushroom、12=Underworld——BackgroundChangeFlashInfo.cs:9-22） */
+const STYLE_TO_AREA: Record<number, number> = {
+  0: 0, 10: 1, 11: 2, 12: 3,
+  1: 4, 3: 5, 7: 6, 6: 7, 8: 8,
+  2: 9, 5: 9, 13: 9, 14: 9,
+  4: 10, 9: 11,
+};
+
 interface LayerDef { tex: number; scale: number; parallax: number; topA: number; topB: number }
 /** 群系 3 层标准参数（DrawSurfaceBG_* 实测常量；topY = num3*topA + topB） */
 const L3 = (t: number[], y1: number, y2: number, y3: number): LayerDef[] => [
@@ -171,6 +181,9 @@ export class BiomeBackground {
   bgStyle = 0;
   /** 瞬切计数（instantBGTransitionCounter :63518；森林→森林同生成背景） */
   private instantBG = 0;
+  /** BackgroundChangeFlashInfo._flashPower（13 area 槽；Renderer 消费画黑闪） */
+  readonly bgFlash = new Float64Array(13);
+  private lastFlashStyle = 0;
   /** 森林风格 → 该段 WorldGen 生成背景 ID（GetCurrentBackgroundOfStyle :8062
    *  的 treeBG1..4 = treeStyle[0..3]；等值 ⇒ 视觉相同 ⇒ 过渡可瞬切） */
   private forestBgId(world: World, style: number): number {
@@ -387,6 +400,21 @@ export class BiomeBackground {
       this.instantBG--;
       this.bgStyle = want;
       speed = 1;
+    }
+    // BackgroundChangeFlashInfo（BackgroundChangeFlashInfo.cs 1:1）：样式落定即
+    // flash[area]=1（ValueChanged :36-40 的 !gameMenu 门——本类只服务游戏内），
+    // Renderer 于地表背景后画全屏黑闪遮罩（DrawSurfaceBG_DrawChangeOverlay
+    // :60533-60542）。★原版"过渡"= 交叉淡化（上）+ 黑闪遮罩双保险，非纯淡出。
+    // ★检测 bgStyle 实变（delayed/instant 两处赋值汇合点），非 want 变化时
+    { // （want 先变只进 bgDelay 计数，flash 须等真正落定）
+      for (let i = 0; i < this.bgFlash.length; i++) {
+        this.bgFlash[i] = Math.max(0, this.bgFlash[i] - 0.05 * frames);   // UpdateFlashValues :31-37
+      }
+      if (this.bgStyle !== this.lastFlashStyle) {
+        const area = STYLE_TO_AREA[this.bgStyle];
+        if (area !== undefined) this.bgFlash[area] = 1;
+        this.lastFlashStyle = this.bgStyle;
+      }
     }
     // 前景层 alpha（UpdateBGVisibility_FrontLayer :63534-63551）：升 0.05/帧；
     // 降侧有沙漠变体互换豁免（:63566-63582 IsDesertVariantSwap {2,5,13,14}）——

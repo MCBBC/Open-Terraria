@@ -108,13 +108,13 @@ describe('② 物品映射（mountType→SetMount 链入口）', () => {
     expect(VANILLA_ITEM_KEY_BY_ID[6150]).toBe('vi_6150_PalworldMountTrustyChillet');
     expect(VANILLA_ITEM_KEY_BY_ID[6151]).toBe('vi_6151_PalworldMountTrustyChilletIgnis');
   });
-  it('稀有度/价值已在盘（Item.cs:47386 Blue1/1 银 → rare 1/value 100 铜币口径）', () => {
-    // rare/value 由 vanilla-itemrare/itemvalue.json 承载（extract-itemrare.mjs,
-    // 1.4.4 铜币口径不含 ×5）——坐骑批只补 mountType 映射
+  it('稀有度/价值已在盘（Item.cs:47386 Blue1/1 银 → rare 1/value 500 铜币）', () => {
+    // rare/value 由 vanilla-itemrare/itemvalue.json 承载（extract-itemrare.mjs;
+    // ★2026-08-23 sellPrice 含 ×5 尾乘——sellPrice(0,0,1)=1银卖价 → value=5银买入）
     const rare = JSON.parse(readFileSync(join(ROOT, 'src/data/vanilla-itemrare.json'), 'utf8'));
     const value = JSON.parse(readFileSync(join(ROOT, 'src/data/vanilla-itemvalue.json'), 'utf8'));
-    expect([rare['6150'], value['6150']]).toEqual([1, 100]);   // Blue1 + sellPrice(0,0,1)
-    expect([rare['6151'], value['6151']]).toEqual([5, 100]);   // Pink5 + sellPrice(0,0,1)
+    expect([rare['6150'], value['6150']]).toEqual([1, 500]);   // Blue1 + sellPrice(0,0,1)×5
+    expect([rare['6151'], value['6151']]).toEqual([5, 500]);   // Pink5 + sellPrice(0,0,1)×5
   });
 });
 

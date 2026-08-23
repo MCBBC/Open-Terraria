@@ -316,7 +316,7 @@ describe('召唤师鞭 tag 配饰九件', () => {
     void hooks;
   });
 
-  it('蛇环补挥（:43041-43063）：第 3n 次真挥动画过半 → 补挥背包下一把鞭 ×0.25 伤', () => {
+  it('蛇环补挥（:43041-43063）：第 3n 次真挥动画过半 → 补挥背包下一把鞭 ×0.3 伤', () => {
     const e = mkEnemy(20, 0, 0);
     const { hooks, player, added } = makeHooks([e]);
     player.inv.armor[3] = { id: iid(6157), stack: 1 };   // 蛇环
@@ -330,7 +330,9 @@ describe('召唤师鞭 tag 配饰九件', () => {
     for (let i = 0; i < 16 && !w.dead; i++) w.fixedUpdate(1, hooks);
     const echoes = added.filter((x) => x instanceof WhipProj) as WhipProj[];
     expect(echoes.length).toBe(1);
-    expect(echoes[0].damage).toBe(Math.max(3, Math.round(40 * 0.25)));   // ×0.25（min 3）
+    // ×0.3 伤（1457 :49174 num169=0.3,(int) 截断,min 3）/×0.25 击退（num170）——
+    // 蓝队 R2-09 勘误：曾把击退系数 0.25 抄给伤害
+    expect(echoes[0].damage).toBe(Math.max(3, Math.trunc(40 * 0.3)));
     expect(echoes[0].knockback).toBeCloseTo(4 * 0.25);
     expect(echoes[0].isEcho).toBe(true);
   });

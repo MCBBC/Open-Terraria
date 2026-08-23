@@ -223,7 +223,8 @@ Object.assign(PRE_CLASS, {
   // boom（BoomerangsChakrams 集）：670 寒冰回旋镖
   670: 'boom',
   // ★1457 新内容：6153 GlacierFang（PrefixLegacy.Magic 集,cs:73）——1457 冰箱 7 元池
-  //   新主件;★JJJJJ 回滚 1456 后主物池回到 Next(6) 六选,6153 不可达（死数据留档）
+  //   新主件;★1457 对齐档 2 后主物池 = hfIs1457() 门下 Next(7) 七选（本文件 :905,
+  //   cs:36456）,6153 可达;1456 缺省态仍是 Next(6) 六选（:908）
   6153: 'magic',
   // acc（accessory&&!vanity&&CanGetPrefixes 全过）：冰 950/987/1579、沙 4055/4056、
   // 丛林 211/212/3017、水 863/4404/187、金字塔 848/857、天空 159/158/2219
@@ -484,8 +485,8 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       prefixRolls(rng, mainVanillaId);   // cs:36841 SetDefaults+Prefix(-1)（★冰箱 ±7 根因）
       if (flags.ice && rng.int(0, 4) === 0) push(3199);       // 1/5 冰镜
       if (flags.desert) {
-        if (rng.int(0, 6) === 0) push(4346);                  // 1/7 沙漠矿车
-        if (rng.int(0, 14) === 0) push(4066);                 // 1/15 沙漠矿车(副)
+        if (rng.int(0, 6) === 0) push(4346);                  // 1/7 拖累石（Encumbering Stone,R4-21 勘误:4346 非矿车;WorldGen.cs:37198-37201）
+        if (rng.int(0, 14) === 0) push(4066);                 // 1/15 沙漠矿车(副,:37203-37206)
       }
       if (flags.ivy) {
         if (!gs.gennedMahoganyWands || rng.int(0, 4) === 0) {

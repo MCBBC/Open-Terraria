@@ -20,8 +20,11 @@
 //  ① 链 A 独占 else-if 链（:423-2139）：一尘至多命中一链接，命中者跳过 :1884
 //     通用重力与 :2136 兜底 vx×0.99（267/278 例外见 case 注）；
 //  ② 公共段：:2144 旋转 + :2148 fadeIn 老化（全体）；
-//  ③ 链 B 独占链（:2197-2386）：130-134/278/219-223/226/272 + :2379 兜底
+//  ③ 链 B 独占链（:2197-2386）：130-134/278/219-223/226/272/331 + :2379 兜底
 //     （type!=304 && noGravity → velocity×0.92、fadeIn==0 时 scale−0.04）。
+//     ★R4-30：226/272/331 三档已实装（226 固定蓝光/272 固定紫光/331=1457 新自色光
+//     受 noLightEmittance 门）——头注曾虚标覆盖、实际 switch 缺 case（226 被闪电弹
+//     真实消费落 default）。331 绘制端拖影/四向贴片（M57:39639-39695）未建模（登记）。
 //  本引擎 switch(链A)+老化后 switch(链B) 两段对应；261/264/182 维持翅膀批
 //  既有链 A 单段近似（其后通用重力照旧——扩表时勿动）。
 //
@@ -388,6 +391,49 @@ export class VanillaDust {
       }
       // ---- 链 B 独占段（:2197-2386，公共老化之后）----
       switch (d.type) {
+        // R4-30：226/272/331 三档补（Dust.cs:2317-2400;1456 无 331,226/272 曾落
+        // default 无光无阻尼——226 被 LightningBoltProj 真实消费）。customData
+        // （Player 跟随/Color 自色光）本仓无该字段=不建模（备案）
+        case 226: {  // :2317-2350：固定光 (0.2,0.7,1.0)×min(scale,1) + 0.93 阻尼
+          const k = Math.min(d.scale, 1);
+          if (!d.noLight) {
+            this.lights.push({ x: d.x, y: d.y, r: 0.2 * k, g: 0.7 * k, b: 1.0 * k });
+          }
+          if (d.noGravity) {
+            d.vx *= 0.93; d.vy *= 0.93;
+            if (d.fadeIn === 0) d.scale += 0.0025;
+          }
+          d.vx *= 0.97; d.vy *= 0.99;                    // :2339 velocity *= (0.97,0.99)
+          d.scale -= 0.01;
+          break;
+        }
+        case 331: {  // :2352-2371（1457 新）：自色光 color RGB×min(scale,1) 受 noLightEmittance 门
+          const k = Math.min(d.scale, 1);
+          if (d.noGravity) {                             // 1457 语义:noGravity 才 0.93 阻尼（无 else 档）
+            d.vx *= 0.93; d.vy *= 0.93;
+            if (d.fadeIn === 0) d.scale += 0.0025;
+          }
+          d.vx *= 0.97; d.vy *= 0.99;
+          if (!d.noLightEmittance) {
+            const c = d.color ?? BLACK;
+            this.lights.push({ x: d.x, y: d.y, r: c.r / 255 * k, g: c.g / 255 * k, b: c.b / 255 * k });
+          }
+          d.scale -= 0.01;
+          break;
+        }
+        case 272: {  // :2373-2400：固定光 (0.5,0.2,0.8)×min(scale,1) + 0.93 阻尼
+          const k = Math.min(d.scale, 1);
+          if (!d.noLight) {
+            this.lights.push({ x: d.x, y: d.y, r: 0.5 * k, g: 0.2 * k, b: 0.8 * k });
+          }
+          if (d.noGravity) {
+            d.vx *= 0.93; d.vy *= 0.93;
+            if (d.fadeIn === 0) d.scale += 0.0025;
+          }
+          d.vx *= 0.97; d.vy *= 0.99;
+          d.scale -= 0.01;
+          break;
+        }
         case 278: {  // :2240-2269：自色光 + 双档阻尼 + 入实心格收缩
           const k = Math.min(d.scale, 1);                 // :2242-2246
           if (!d.noLight && !d.noLightEmittance) {        // :2247-2250

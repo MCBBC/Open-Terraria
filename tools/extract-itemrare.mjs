@@ -18,13 +18,29 @@
 //   只认 case 体顶层(depth 3)无条件赋值——变体 if 块内赋值属 WeakerVariant 等变体，
 //   本表建模基础变体，取顶层赋值序列的**最后一个**（工厂调用与显式赋值按源序覆盖，
 //   DefaultToFood→SetShopValues 即此模式）），嵌套 if/switch 内赋值忽略。
+//
+// 2026-08-23 sellPrice 系统性漏乘 ×5 修复：sellPrice(p,g,s,c) = buyPrice(…)×5
+//   （1457 Item.cs:49426-49429 尾乘 5；1456 :49019-49022 同式；extract-shops.mjs
+//   同名分支早已带 ×5，本件是漏网者）。旧 evalPrice 把 sellPrice 与 buyPrice 同式
+//   求值 → 全表 sellPrice 系条目统一 ÷5（case 757 实证 200000，应为 1000000）。
+//   FACTORY_VALUE 同病同修：SeaShell/Vanitypet 手算常量按无 ×5 口径，改存源码
+//   表达式串经修后 evalPrice 求值（Solution/Food/HealingPotion 本就是 buyPrice 不变，
+//   Torch/MusicBox 字面量不变）。2026-08-23 二批（只读价格字段 + 自赋值伪影）：
+//   ⑥ `value = shadowOrbPrice/dungeonPrice/queenBeePrice/hellPrice/eclipse*` 只读
+//      字段引用不可求值 → FIELD_PRICE 映射表（字段 → 初始化器 sellPrice 表达式，
+//      1457 Item.cs:71-83 / 1456 :52-64，经 evalPrice 自动 ×5 与 sellPrice 系同口径）；
+//   ⑦ 反编译器自赋值伪影 `value = (value = 250000);`（1456:6323 case 425 /
+//      :10417 case 774）→ evalPrice 剥 `(value = X)` 壳。
+//   变体分支内字段引用不收（case 2623 影杖 WeakerVariant `value = dungeonPrice`
+//   :25670，基础变体已有顶层 sellPrice(0,5)，按既有"建模基础变体"口径忽略）。
 import { readFileSync, writeFileSync, writeSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 // 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;缺省 1456 = 既有产物基线)
 export const SRC_VER = process.env.SW_ITEM_VER ?? '1456';
 
-/** 提取库:Item.cs 全文 → { RARE, VALUE }（id → 档位/价值,铜币,1.4.4 口径） */
+/** 提取库:Item.cs 全文 → { RARE, VALUE }（id → 档位/价值,铜币,原版 value 字段终值——
+ *  sellPrice 系含 ×5 尾乘,2026-08-23 修正） */
 export function extractRareValue(src) {
   const LINES = src.split('\n');
 
@@ -47,15 +63,41 @@ const REGIONS = ['SetDefaults1', 'SetDefaults2', 'SetDefaults3', 'SetDefaults4',
 
 // ============ 表达式求值 ============
 
-/** sellPrice/buyPrice(p, g, s[, c]) = p*1e6 + g*1e4 + s*100 + c（Item.cs 同名方法同式） */
+/** 只读价格字段 → 初始化器 sellPrice 表达式（Item.cs 顶部 private readonly 字段，
+ *  静态扫描只见 `value = shadowOrbPrice;` 引用名 → 先展开为表达式再走 sellPrice
+ *  求值（自动 ×5，与 sellPrice 系条目同口径）。出处行号：1457 Item.cs:71-83 /
+ *  1456 :52-64，两版初始化器同式。 */
+const FIELD_PRICE = {
+  shadowOrbPrice: 'sellPrice(0, 1, 50)',        // 1457:71 / 1456:52 → 75000（卖 1金50银）
+  dungeonPrice: 'sellPrice(0, 1, 75)',          // 1457:73 / 1456:54 → 87500（卖 1金75银）
+  queenBeePrice: 'sellPrice(0, 2)',             // 1457:75 / 1456:56 → 100000（卖 2金）
+  hellPrice: 'sellPrice(0, 2, 50)',             // 1457:77 / 1456:58 → 125000（卖 2金50银）
+  eclipsePrice: 'sellPrice(0, 7, 50)',          // 1457:79 / 1456:60 → 375000（卖 7金50银）
+  eclipsePostPlanteraPrice: 'sellPrice(0, 10)', // 1457:81 / 1456:62 → 500000（卖 10金）
+  eclipseMothronPrice: 'sellPrice(0, 12, 50)',  // 1457:83 / 1456:64 → 625000（卖 12金50银）
+};
+
+/** buyPrice(p, g, s[, c]) = p*1e6 + g*1e4 + s*100 + c（Item.cs:49421-49424，铜币直和）。
+ *  sellPrice(p, g, s[, c]) = buyPrice(…) × 5（Item.cs:49426-49429 尾乘 5；1456
+ *  :49019-49022 同式）——参数语义 = 玩家卖出价（币面额），value 字段存 NPC 买入价
+ *  = 卖价×5（原版商店 5:1 买卖差）。★2026-08-23 系统性漏乘修复：旧实现把两者
+ *  同式求值，全表 sellPrice 系条目统一 ÷5（case 757 实证 200000，应为 1000000）。 */
 function evalPrice(expr) {
   let out = expr
-    .replace(/(?:sellPrice|buyPrice)\(([^()]*)\)/g, (_all, args) => {
+    .replace(new RegExp(`\\b(${Object.keys(FIELD_PRICE).join('|')})\\b`, 'g'), (n) => `(${FIELD_PRICE[n]})`)
+    .replace(/sellPrice\(([^()]*)\)/g, (_all, args) => {
+      const a = args.split(',').map((x) => parseInt(x.trim(), 10) || 0);
+      return String(((a[0] || 0) * 1e6 + (a[1] || 0) * 1e4 + (a[2] || 0) * 100 + (a[3] || 0)) * 5);
+    })
+    .replace(/buyPrice\(([^()]*)\)/g, (_all, args) => {
       const a = args.split(',').map((x) => parseInt(x.trim(), 10) || 0);
       return String((a[0] || 0) * 1e6 + (a[1] || 0) * 1e4 + (a[2] || 0) * 100 + (a[3] || 0));
     })
     .replace(/\((?:int|double|float)\)\s*/g, '')  // (int)((double)x * 1.5) 族强转
     .trim();
+  // 反编译器自赋值伪影：`value = (value = 250000);`（1456:6323 case 425 /
+  // :10417 case 774）→ 剥壳取内层表达式（C# 赋值表达式值为右操作数）
+  while (/\(value = ([^()]*)\)/.test(out)) out = out.replace(/\(value = ([^()]*)\)/g, '$1').trim();
   if (!/^[\d+\-*/(). ]+$/.test(out)) return null;
   try {
     // eslint-disable-next-line no-new-func
@@ -74,18 +116,20 @@ const RARITY_COLOR = {
 };
 
 // ============ 工厂方法 value 表（方法体内赋值，静态扫描不可见） ============
-//  DefaultToSeaShell :47579-47611 按 type 内层 switch；DefaultToSolution :47434；
-//  DefaultToVanitypet :47560；DefaultToTorch :48094；DefaultToFood :48182；
-//  DefaultToHealingPotion :48195；DefaultToMusicBox :48263。
+//  行号锚 = 1457：DefaultToSeaShell :47967-47993 按 type 内层 switch；DefaultToSolution
+//  :47800-47808；DefaultToVanitypet :47937-47952；DefaultToTorch :48471-48482；
+//  DefaultToFood :48544-48570；DefaultToHealingPotion :48573-48615；DefaultToMusicBox
+//  :48638-48648。表值一律存源码表达式字符串、经上方 evalPrice 求值（sellPrice 自动
+//  ×5）——★旧表存手算常量（按无 ×5 口径），SeaShell/Vanitypet 六族随之 ÷5。
 //  DefaultToPlaceableTile/Wall / DefaultToCapturedCritter 不设 value（缺表=0 是对的）。
 const FACTORY_VALUE = {
-  DefaultToSeaShell: (id) => (id === 4071 ? 10000 : id === 4072 || id === 4073 ? 2000 : id === 2626 ? 1000 : 500),
-  DefaultToSolution: () => 1500,        // buyPrice(0, 0, 15)
-  DefaultToVanitypet: () => 20000,      // sellPrice(0, 2)
-  DefaultToTorch: () => 60,
-  DefaultToFood: () => 2000,            // buyPrice(0, 0, 20)
-  DefaultToHealingPotion: () => 2000,   // buyPrice(0, 0, 20)
-  DefaultToMusicBox: () => 100000,
+  DefaultToSeaShell: (id) => (id === 4071 ? 'sellPrice(0, 1)' : id === 4072 || id === 4073 ? 'sellPrice(0, 0, 20)' : id === 2626 ? 'sellPrice(0, 0, 10)' : 'sellPrice(0, 0, 5)'),
+  DefaultToSolution: () => 'buyPrice(0, 0, 15)',
+  DefaultToVanitypet: () => 'sellPrice(0, 2)',
+  DefaultToTorch: () => '60',             // value = 60 字面量
+  DefaultToFood: () => 'buyPrice(0, 0, 20)',
+  DefaultToHealingPotion: () => 'buyPrice(0, 0, 20)',
+  DefaultToMusicBox: () => '100000',      // value = 100000 字面量
 };
 
 const RARE = {};
@@ -115,7 +159,7 @@ for (const [from, to] of REGIONS) {
       for (const e of g.entries) {
         if (e.kind === 'value') val = e.v;
         else if (e.kind === 'rare') rar = e.v;
-        else if (e.kind === 'factory') val = FACTORY_VALUE[e.name](id);
+        else if (e.kind === 'factory') { const fv = evalPrice(FACTORY_VALUE[e.name](id)); if (fv !== null) val = fv; }
       }
       if (val !== undefined && VALUE[id] === undefined) VALUE[id] = val;
       if (rar !== undefined && RARE[id] === undefined) RARE[id] = rar;

@@ -1475,8 +1475,13 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
       (n) => !n.dead && (n.vanillaId === 396 || n.vanillaId === 397) && n.ai3 === e.id);
     if (e.ai0 === 0) {
       e.iframes = 2; // dontTakeDamage(:36856)
-      // 部件缺失 → 核心即毁(:36866-36890 flag84)
-      if (parts.length < 3) { e.dead = true; return; }
+      // 部件缺失 → 核心即毁(:41682-41701 flag:任一 397/396 失效 → life=0 +
+      // HitEffect + active=false 直清,**不经 checkDead**——无击败公告/不写
+      // downedBoss3/无掉落,与 ai0=3 玩家全灭离场同语义。★bossFled 置位:
+      // Game boss 槽以 dead 触发完整击败流程,直写 dead 曾播"月亮领主已被
+      // 打败!"+写 downed_398 假通关(生成期部件 spawn 失败即触发;
+      // 2026-08-23 蓝队 R1-06 修,同 :1553 ai0=3 分支 2026-08-22 修法)
+      if (parts.length < 3) { e.bossFled = true; e.dead = true; return; }
       // 三部件全部闭眼残肢(ai0=-2)→ 解除无敌进二阶段(:36891-36909 flag85)
       if (parts.every((p) => p.ai0 === -2)) { e.ai0 = 1; e.ai1 = 0; }
     }
@@ -1681,7 +1686,9 @@ function mlCoreBarrage(e: Enemy, game: GameHooks, player: Player) {
 //   / 3 三连幻影矢 462(30 伤,预判 20t)。
 // 无敌语义:dontTakeDamage = frame>=21(:37215)——只有攻击中(睁眼)可受击。
 
-const ML_HAND_ATTACKS: Readonly<Record<number, ReadonlyArray<readonly [number, number]>>> = {
+/** 手攻击表(MoonLordAttacksArray[0/1],NPC.cs:6938-6962)——Renderer SmolBullet
+ *  预警(蓝队 R1-03)按 ai2 选行解码槽内时间,导出共用 */
+export const ML_HAND_ATTACKS: Readonly<Record<number, ReadonlyArray<readonly [number, number]>>> = {
   0: [[0, 50], [1, 70], [2, 330], [0, 60], [3, 90]],
   1: [[1, 70], [0, 50], [3, 90], [0, 60], [2, 330]],
 };
@@ -1868,9 +1875,26 @@ function handFireEye(e: Enemy, game: GameHooks, x: HandX, side: number) {
 //   / 3 三连幻影矢 462(30 伤,:37991-38015)。-2 闭眼残肢(80 接触伤)/ -3 核心死亡后永闭。
 // 无敌语义:dontTakeDamage = localAI[3]>=15(:37724)。
 
-const ML_HEAD_ATTACKS: ReadonlyArray<readonly [number, number]> = [
+/** 头攻击表(MoonLordAttacksArray[2],NPC.cs:6974-6990)——Renderer 预警共用 */
+export const ML_HEAD_ATTACKS: ReadonlyArray<readonly [number, number]> = [
   [3, 180], [0, 30], [2, 435], [3, 180], [1, 375],
 ];
+
+/** 攻击表纯解码（attackSlot 的无副作用版,Main.cs 绘制侧 :25180-25191/:25246-25257/
+ *  :25324-25336 同构循环——只读 ai1 定位槽,不回写）。Renderer SmolBullet 预警/
+ *  死光蓄能星芒(蓝队 R1-03)消费 */
+export function mlSlotDecode(
+  ai1: number, table: ReadonlyArray<readonly [number, number]>,
+): { atk: number; t: number; dur: number } {
+  let consumed = 0;
+  let slot = 0;
+  for (; slot < table.length; slot++) {
+    if (!(table[slot][1] + consumed <= ai1)) break;
+    consumed += table[slot][1];
+  }
+  if (slot >= table.length) slot = table.length - 1;   // 越界取末槽(AI 侧每 tick 回绕,瞬态)
+  return { atk: table[slot][0], t: ai1 - consumed, dur: table[slot][1] };
+}
 
 export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
   // 类默认 ai0=-1120 会令 `ai0>=0` 攻击表门恒假 = 头部冻结(2026-08-13 ai0 清查;

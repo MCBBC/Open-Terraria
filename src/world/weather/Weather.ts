@@ -171,6 +171,11 @@ export class WeatherState {
   numCloudsTemp = this.numClouds;
   windSpeedTarget = 0;
   windSpeedCurrent = 0;
+  /** Main.IsItStorming（Main.cs:2978 = _shouldUseStormMusic；UpdateWindyDayState
+   *  :12927-12960 迟滞机）全局风暴旗——FTW 巨石雨窗（WorldGen.SpawnFallingObjects
+   *  :72217）/风暴音乐等消费；由 Game 每帧以 isItStormingNext 推进（与
+   *  TownNPC.storming 缓存同源同算法） */
+  storming = false;
   windCounter = 0;
   extremeWindCounter = 0;
   /** 闪电白 0-1（天空背景色向白 lerp，Main.cs:63346） */
@@ -222,6 +227,9 @@ export class WeatherState {
   // ================= 原版公开操作（Main.cs:64107-64210） =================
 
   stopRain(instant = false) {
+    // ★R3-14（1457 Main.cs:65617-65625 StopRain）：永久雨（IsRainingForever）不可停
+    //  ——清零族全跳过（1456 同构；当前 rainTime 上限不可达，读档/rainsForAYear 显形）
+    if (this.rainTime >= 5184000) return;
     this.rainTime = 0;
     this.raining = false;
     this.maxRaining = 0;
@@ -249,7 +257,8 @@ export class WeatherState {
     if (this.rng.int(0, 2) === 0) num5 += 0.1;
     if (this.rng.int(0, 3) === 0) num5 += 0.15;
     if (this.rng.int(0, 4) === 0) num5 += 0.2;
-    this.rainTime = Math.round(num4 * num5);
+    // ★R3-14（1457 Main.cs:65693-65695）：永久雨不重掷时长（保持 5,184,000+）
+    if (this.rainTime < 5184000) this.rainTime = Math.round(num4 * num5);
     this.changeRain(instant, strengthOverride);
     this.raining = true;
   }
@@ -266,6 +275,10 @@ export class WeatherState {
     } else {
       val = this.rng.int(0, 2) !== 0 ? this.rng.int(5, 30) * 0.01 : this.rng.int(5, 40) * 0.01;
     }
+    // ★R3-14（1457 Main.cs:65705-65710；1456 :64195-64197 为 0.01f）：永久雨
+    //  （IsRainingForever = rainTime≥5,184,000，Main.cs:3140）雨强下限钳 0.1
+    //  ——当前 startRain 时长上限不可达,读入原版永雨档/rainsForAYear 落地时显形
+    if (this.rainTime >= 5184000) val = Math.max(val, 0.1);
     this.maxRaining = val;
     if (instant) this.cloudAlpha = this.maxRaining;
   }

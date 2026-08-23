@@ -81,6 +81,13 @@ export interface ProjStatusCtx {
    *  （StatusNPC :11183-11188,`arrow && !noEnchantments` 门）。箭侧调用方
    *  （Arrow.ts,批 C 域）未接,登记 */
   accPoisonBarb?: boolean;
+  /** 614 星尘细胞弹 ai[1]（蓝队 R7-19）：表内 gate 'ai1==i' 条目（buff 183×900t,
+   *  StatusNPC :11381-11383 `type==614 && ai[1]==i`）只施加到绑定目标——传入
+   *  stickerTgt（本仓敌 id）与被命中敌 id 比对;缺省（旧调用面）= 门放行 */
+  ai1TargetId?: number;
+  /** 1104 火鞭（蓝队 R7-41）：跳过表中 OnFire(24) 条目——该 buff 由 WhipProj 侧
+   *  窗口判定（中段 ±1 + 鞭身 !wet + 鞭尖 50×50 盒）后直投 applyBuffTicks */
+  suppressBuff?: number;
 }
 
 /** 命中结算侧调用:按投射物型号掷骰并施加 debuff(AddBuff max 合并语义)。
@@ -107,6 +114,13 @@ export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, 
     // 运行时门:setHuntressT2 未穿套装 → 该条不施加(其余 gate 档已按基档并入,
     //  见文件头注释,不拦)
     if (en.gate === 'setHuntressT2' && !ctx?.setHuntressT2) continue;
+    // gate 'ai1==i'（614 星尘细胞弹 183,StatusNPC :11381-11383）：只上 ai[1] 绑定
+    //  目标——ctx.ai1TargetId 缺席（旧调用面）= 放行（基档语义不变）;蓝队 R7-19
+    if (en.gate === 'ai1==i' && ctx?.ai1TargetId !== undefined
+      && ctx.ai1TargetId !== (enemy as { id?: number }).id) continue;
+    // 调用方点名跳过某 buff（1104 火鞭 OnFire 窗口化,蓝队 R7-41—— WhipProj 侧
+    //  窗口判定后经 applyBuffTicks 直投）
+    if (ctx?.suppressBuff !== undefined && en.buff === ctx.suppressBuff) continue;
     let hit: boolean;
     if (en.mut !== undefined) {
       // 互斥组:同组共用一次掷骰,按累积 chance 区间判定本条是否被选中
@@ -123,30 +137,36 @@ export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, 
       hit = Math.random() < en.chance;
     }
     if (!hit) continue;
-    // NPC buffImmune 门（NPC.cs:90968 AddBuff 免疫即 return + NPCID.Sets
-    // .DebuffImmunitySets 派生——2026-08-13 D5）。1457 AI_001 熔岩史莱姆段
-    // （:61312-61316）对 70/397/395/20 运行时置 buffImmune=false——实例级覆写位
-    // （Enemy.debuffImmuneOverride）优先于静态表
-    const vId = (enemy as { vanillaId?: number }).vanillaId;
-    const override = (enemy as { debuffImmuneOverride?: Map<number, boolean> }).debuffImmuneOverride;
-    if (override?.get(en.buff) === false) {
-      // 运行时豁免（原版运行时复位语义）：跳过静态免疫表
-    } else if (vId !== undefined && vId > 0 && npcImmuneTo(vId, en.buff)) continue;
-    const field = SUPPORTED[en.buff];
-    if (!field) continue; // 未实装 buff,登记见上
     const ticks = en.durMin + Math.floor(Math.random() * (en.durMax - en.durMin + 1));
-    const sec = ticks / 60;
-    const cur = enemy[field] ?? 0;
-    if (sec > cur) enemy[field] = sec;
-    // 贴附族层数登记（NPC.cs:92740-92863 层数=场上附着弹计数）：169/183/337/344
-    // 每次施加=一枚贴附弹入池——层寿命=本处 buff 时长（与贴附弹 60×num11 AI 次
-    // 寿命等长），Enemy.fixedUpdate 按层×单层 HP/s 结算；上限（KillOldestJavelin
-    // :13019-13030：598=6/614=10）在 Enemy.addStickerStack 内执行。
-    // 189 Daybreak 走 WeaponProj.daybreakStacks 活计数（有实体），不入此链
-    if (en.buff === 169 || en.buff === 183 || en.buff === 337 || en.buff === 344) {
-      (enemy as { addStickerStack?: (b: 169 | 183 | 337 | 344, d: number) => void })
-        .addStickerStack?.(en.buff, sec);
-    }
+    applyBuffTicks(enemy, en.buff, ticks);
+  }
+}
+
+/** 单条 buff 直投（AddBuff max 合并 + NPC buffImmune 门 + 贴附层登记）——
+ *  applyProjStatus 循环尾与 WhipProj 1104 窗口直投共用（蓝队 R7-41 提取） */
+export function applyBuffTicks(enemy: StatusEnemy, buff: number, ticks: number): void {
+  // NPC buffImmune 门（NPC.cs:90968 AddBuff 免疫即 return + NPCID.Sets
+  // .DebuffImmunitySets 派生——2026-08-13 D5）。1457 AI_001 熔岩史莱姆段
+  // （:61312-61316）对 70/397/395/20 运行时置 buffImmune=false——实例级覆写位
+  // （Enemy.debuffImmuneOverride）优先于静态表
+  const vId = (enemy as { vanillaId?: number }).vanillaId;
+  const override = (enemy as { debuffImmuneOverride?: Map<number, boolean> }).debuffImmuneOverride;
+  if (override?.get(buff) === false) {
+    // 运行时豁免（原版运行时复位语义）：跳过静态免疫表
+  } else if (vId !== undefined && vId > 0 && npcImmuneTo(vId, buff)) return;
+  const field = SUPPORTED[buff];
+  if (!field) return; // 未实装 buff,登记见上
+  const sec = ticks / 60;
+  const cur = enemy[field] ?? 0;
+  if (sec > cur) enemy[field] = sec;
+  // 贴附族层数登记（NPC.cs:92740-92863 层数=场上附着弹计数）：169/183/337/344
+  // 每次施加=一枚贴附弹入池——层寿命=本处 buff 时长（与贴附弹 60×num11 AI 次
+  // 寿命等长），Enemy.fixedUpdate 按层×单层 HP/s 结算；上限（KillOldestJavelin
+  // :13019-13030：598=6/614=10）在 Enemy.addStickerStack 内执行。
+  // 189 Daybreak 走 WeaponProj.daybreakStacks 活计数（有实体），不入此链
+  if (buff === 169 || buff === 183 || buff === 337 || buff === 344) {
+    (enemy as { addStickerStack?: (b: 169 | 183 | 337 | 344, d: number) => void })
+      .addStickerStack?.(buff, sec);
   }
 }
 

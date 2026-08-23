@@ -246,7 +246,10 @@ describe('⑤ 帕鲁地面随从 1112/1118（AI_067 flag8/flag9）', () => {
       const groundCy = 100 * 16 - 12;   // 地表行 y=100 → 敌踏地
       const e = mkEnemy(1, 60 * 16 + 30, groundCy);
       const { hooks } = makeHooks([e]);
-      const m = new MinionProj(e.cx - 14, e.cy - 8, projId, 10, 2, false, 0, false, () => player);
+      // 出生盒底 2px 凌空（真值盒 14×22 后 e.cy-8 会让盒底嵌入地表 2px——原版
+      // TileCollision crossing-only 落地不救嵌入盒,Collision.cs:2388 `bottom<=格顶`
+      // 才接,嵌入即沉底穿行,扑击后停在地表下 16px → 侧翼点距离 >20 永不重入）
+      const m = new MinionProj(e.cx - 14, e.cy - 12, projId, 10, 2, false, 0, false, () => player);
       m.fixedUpdate(1, hooks);   // 距侧翼点 <20 → 入扑击（ai[1]=num10 未减，次 tick 才进 2 段）
       expect((m as unknown as { palA0: number }).palA0).toBe(2);
       expect((m as unknown as { palA1: number }).palA1).toBe(num10);
@@ -354,5 +357,32 @@ describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_026 flag10 射击段）', () =>
     const rec = e as unknown as { onFire3T?: number };
     expect(rec.onFire3T ?? 0).toBeGreaterThanOrEqual(5);
     expect(rec.onFire3T ?? 0).toBeLessThanOrEqual(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑦ 新弹命中盒真值（SetDefaults width/height——MinionProj 缺省 16×16 曾误用）
+//    标杆 Terarria1457/Terraria/Projectile.cs：1112 :10365-10366 / 1113 :10381-10382 /
+//    1118 :10453-10454 / 1119 :10467-10468（各 14×22 / 18×18）+ 1098 :10245-10246 /
+//    1123 :10507-10508（34×34 既有先例）；数据表 vanilla-projectiles.json 同值
+// ---------------------------------------------------------------------------
+describe('⑦ 新弹命中盒真值（Projectile.cs SetDefaults width/height）', () => {
+  it('1112/1118/1119 = 14×22、1113 = 18×18、1098/1123 = 34×34', () => {
+    expect([mk(1112).w, mk(1112).h]).toEqual([14, 22]);
+    expect([mk(1118).w, mk(1118).h]).toEqual([14, 22]);
+    expect([mk(1119).w, mk(1119).h]).toEqual([14, 22]);
+    expect([mk(1113).w, mk(1113).h]).toEqual([18, 18]);
+    expect([mk(1098).w, mk(1098).h]).toEqual([34, 34]);
+    expect([mk(1123).w, mk(1123).h]).toEqual([34, 34]);
+  });
+  it('实体盒 = 数据表真值（vanilla-projectiles.json 与 SetDefaults 对齐）', () => {
+    for (const id of [1112, 1113, 1118, 1119, 1098, 1123]) {
+      const m = mk(id);
+      const d = projectileData(id)!;
+      expect([m.w, m.h], `proj ${id}`).toEqual([d.width, d.height]);
+    }
+  });
+  it('链外型不吃新分支：375 小鬼仍实体缺省 16×16（375 原版真值 34×26 :4591-4592,旧弹另账）', () => {
+    expect([mk(375).w, mk(375).h]).toEqual([16, 16]);
   });
 });

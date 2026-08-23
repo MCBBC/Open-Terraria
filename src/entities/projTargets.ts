@@ -4,7 +4,8 @@
 import type { GameHooks } from './types';
 import { BuffType, buffTypeByVanilla, type BuffState } from '../stats/Buffs';
 import { projectileData } from '../data/vanillaProjectiles';
-import { hostileProjectileDamage, mainDifficulty, mainExpertMode } from '../stats/ScaleStats';
+import { hostileProjectileDamage, mainDifficulty, mainExpertMode, damageVar } from '../stats/ScaleStats';
+import { bannerReceivedMult } from '../world/Banners';
 import { petSlimeHitVoice } from '../data/vanillaNpcAmbience';
 import statusPlayerJson from '../data/vanilla-statusplayer.json';
 
@@ -185,14 +186,28 @@ export function hitPlayer(
   if (p.dead) return false;
   if (p.iframes > 0) return false; // 原版 :13732 player.immune 门禁（General 槽）
   if (!projOverlap(self.x, self.y, self.w, self.h, p)) return false;
-  // 温暖(124) resistCold：寒冷系敌弹 ×0.7（Projectile.cs:13764-13766——banner 段后、
+  // R5-F21：DamageVar ±15% 掷骰（Projectile.cs:13762 `num3 = Main.DamageVar(damage,
+  // -Main.player[owner].luck)`——Damage_EVP 首段,先掷后吃 banner/resistCold/缩放）。
+  // PvP 弹走 Damage_PVP 的 Main.DamageVar（0.85-1.15,数值侧已含）——同样掷
+  dmg = damageVar(dmg, pvp ? 0 : -p.luck);
+  // R5-F22：旗 buff 减伤对敌弹生效（Projectile.cs:13763-13765 `GetBannerBuffEffect(
+  // bannerIdToRespondTo)`——bannerIdToRespondTo = 发射 NPC 的 banner（:11112-11116
+  // FindBannerToAssociateTo）。本仓弹体侧仅 Dart 带 ownerNpcId,其余族发射者追踪
+  // 未建模——有 ownerNpcId 即吃旗减伤,无则跳过（登记）
+  if (!pvp) {
+    const srcNpcId = (self as { ownerNpcId?: number }).ownerNpcId ?? 0;
+    if (srcNpcId > 0 && (game as { bannerNpcActive?: (id: number) => boolean }).bannerNpcActive?.(srcNpcId)) {
+      dmg = Math.max(1, Math.round(dmg * bannerReceivedMult(mainExpertMode(game.world))));
+    }
+  }
+  // 温暖(124) resistCold：寒冷系敌弹 ×0.7（Projectile.cs:13766-13768——banner 段后、
   // hostileDamageScaling 前；(int) 截断）。PvP 弹走 Damage_PVP 无此段,不乘
   if (!pvp && evpId !== undefined && COLD_DAMAGE_PROJS.has(evpId)
     && p.buffs.has(BuffType.Warmth)) {
     dmg = Math.trunc(dmg * 0.7);
   }
   const ifr = p.iframes;
-  // ★ 玩家受伤难度乘区 + 全局 ×2（Projectile.cs:13770-13778，Damage_EVP 段）：
+  // ★ 玩家受伤难度乘区 + 全局 ×2（Projectile.cs:14912-14917，Damage_EVP 段）：
   //   `if (!reflected) num3 = (int)(num3 * hostileDamageScaling.Sample(Main.Difficulty));`
   //   随后 `int num4 = 2; num3 *= num4;`——敌弹对玩家恒 ×2（对所有难度，含经典）。
   //   hostileDamageScaling = GameDifficultyData.HostileProjectileDamageMultiplier
@@ -203,8 +218,8 @@ export function hitPlayer(
   //   接触侧是 Player.Hurt 直入（Enemy.def.damage 已是 ScaleStats 终值）。
   //   （本函数调用方均为 hostile 弹幕，无 reflected 路径——反射弹转 friendly 打怪）
   game.damagePlayer(
-    // pvp=true 不乘敌弹难度缩放与 ×2——那是 Damage_EVP（NPC 敌弹）专属（:13770-13778）；
-    // 玩家 PvP 弹走 Damage_PVP 的 Main.DamageVar（0.85-1.15 幅度,数值侧已含）直传
+    // pvp=true 不乘敌弹难度缩放与 ×2——那是 Damage_EVP（NPC 敌弹）专属（:14912-14917）；
+    // 玩家 PvP 弹走 Damage_PVP 的 Main.DamageVar 直传
     pvp ? dmg : hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2,
     self.x + self.w / 2, self.y + self.h / 2,
     undefined, false, pvp);

@@ -30,8 +30,13 @@ const SNOW_OR_ICE = new Set([147, 161, 200, 163, 164]);
  *  ★UUUUUU：NTB 跳过（cs:16329 头门 `!roundLandmasses && !noSurface &&
  *  (!notTheBees || dontStarve)`——蜂蜜世界沙已变蜂蜜块，纯 NTB 恒跳过）。 */
 export function runRemoveSurfaceWaterAboveSandPass(st: TileStore, gs: GenState): void {
-  if (gs.seedFlags.notTheBees && !gs.seedFlags.theConstant
-    && !gs.seedFlags.roundLandmasses && !gs.seedFlags.noSurface && !gs.seedFlags.skyblock) return;
+  // ★ZZZZZZ（NTB #50 定罪）：原版门（cs:16297）= `!Skyblock.denySomeGeneration &&
+  //   !SecretSeed.extraLiquid.Enabled`——**无 notTheBees/theConstant 支**（1405 无本
+  //   pass,系 1.4.4+ 新增;extraLiquid 系独立哈希名种子 cs:392,JS 未建模）。曾自加
+  //   `ntb&&!theConstant&&…` 早退 → NTB 沙上清液整段跳过：vanilla 050 抹掉 (1373,249)
+  //   蜜×2+水×1（沙柱上方残液）,JS 保留 = #50 Y0>3×2/Y0>1×1 首差。denySome=skyblock
+  //   族（WorldGen.cs:3130）,JS 支持种子集内仅 skyblock 需跳过。
+  if (gs.seedFlags.skyblock) return;
   for (let x = 400; x < st.w - 400; x++) {
     for (let y = 100; y < gs.worldSurface - 1; y++) {
       const i = st.idx(x, y);

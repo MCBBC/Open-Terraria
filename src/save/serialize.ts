@@ -147,7 +147,7 @@ export interface SaveData {
     miscEquips?: Array<SavedItem | null>;
     miscDyes?: Array<SavedItem | null>;
     /** 三套 Loadout（EquipmentLoadout：armor[20]+dye[10]；当前套序号） */
-    loadouts?: Array<{ armor: Array<SavedItem | null>; dye: Array<SavedItem | null> }>;
+    loadouts?: Array<{ armor: Array<SavedItem | null>; dye: Array<SavedItem | null>; hide?: boolean[] }>;
     currentLoadout?: number;
     /** Buff 槽（原版 buffType+buffTime 44 槽,PL:53913-53925;[vanillaBuffId, 剩余秒],
      *  Main.buffNoSave 已过滤——旧档缺省=无 buff） */
@@ -402,6 +402,7 @@ export function serializeSave(
       loadouts: player.loadouts?.map((l) => ({
         armor: l.armor.map(mapItem),
         dye: l.dye.map(mapItem),
+        hide: l.hide ? [...l.hide] : undefined,   // R4-12：配饰可见性随套（旧档缺省）
       })),
     },
     npcs: townNpcs ?? [],   // 城镇 NPC 段(WorldFile.cs:1703-1750 NPC 段;曾硬编码 [] 断链)

@@ -12,8 +12,8 @@
 //  ★1457 编排器对齐（2026-08-23）：命中尘 = Spawn_SnappingStone{,Melee,Summon}
 //  （ParticleOrchestrator.cs:593-812）Dust 段 1:1 入 vanillaDust 池（见
 //  snapStrikeDust）；FadingParticle/PrettySparkle 环带 + 三音效登记未接（编排器
-//  粒子类型本仓无池）。受击者自身脉冲（Projectile.cs:14432-14437 victim.Center）
-//  调用侧无盒径参数,登记。
+//  粒子类型本仓无池）。受击者自身脉冲（Projectile.cs:14432-14437 victim.Center,
+//  num11=盒径/2 钳 100）已补（R4-33,蓝队）——victim 盒径经可选参传入。
 import type { GameHooks } from '../entities/types';
 import type { Player } from '../entities/Player';
 import { Arrow } from '../entities/Arrow';
@@ -37,6 +37,7 @@ export function trySnapStrike(
   hx: number,
   hy: number,
   victimId: number,
+  victimBox?: { w: number; h: number; cx: number; cy: number },
 ): boolean {
   if (!owner || owner.accSnappingStoneCooldown > 0) return false;   // :14352-14354
   const eq = owner.equipStats;
@@ -78,6 +79,11 @@ export function trySnapStrike(
     //  环带 + 音效（Item72/PyroclasticStone/ArmletOfRuin）登记未接
     snapStrikeDust(game, kind, t.cx, t.cy, Math.hypot(t.w ?? 16, t.h ?? 16) / 2);
   }
+  // R4-33（Projectile.cs:14432-14437）：受击者自身也发一次脉冲——num11=盒径/2 钳 100
+  if (victimBox) {
+    snapStrikeDust(game, kind, victimBox.cx, victimBox.cy,
+      Math.min(100, Math.hypot(victimBox.w, victimBox.h) / 2));
+  }
   return strikes > 0;
 }
 
@@ -97,6 +103,8 @@ function snapStrikeDust(game: GameHooks, kind: 0 | 1 | 2, x: number, y: number, 
   if (!pool) return;
   const rand = Math.random;
   if (kind === 0) {
+    // R4-33：num11 = 盒径/2 钳 100（Projectile.cs:14414-14421）——超大盒径角案钳制
+    sizeHalf = Math.min(100, sizeHalf);
     const num = Math.min(0.12, (sizeHalf * (0.3 + 1.4 * rand())) / 256);   // :600-605
     for (let j = 0; j < 20; j++) {
       const chloro = Math.floor(rand() * 3) !== 0;                 // Next(3)!=0 → 226

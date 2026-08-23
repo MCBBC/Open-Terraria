@@ -436,7 +436,12 @@ export class SmartCursor {
   lookup(env: SmartCursorEnv): void {
     this.showing = false; // :63
     const used = this.wanted; // Main.SmartCursorIsUsed = SmartCursorWanted（Main.cs:2962）
-    if (!env.controlUseItem || !used) { // :64-68
+    // R4-44（SmartCursorHelper.cs:64/:167-174）：1457 清锁条件补第三项
+    // !UsingSmartCursorWithContinuity——连通锁只对【持平台类物品】跨帧存活;
+    // 中途切非平台物品再切回,原版锁已被中间帧清掉,本仓曾沿用陈旧锁线
+    const heldSheet = env.held.def?.tile != null ? sheetOf(TILE_BY_KEY[env.held.def.tile] ?? -1) : null;
+    const continuityHeld = heldSheet != null && PLATFORMS.has(heldSheet);
+    if (!env.controlUseItem || !used || !continuityHeld) { // :64-68
       this.lockedDirection = null;
       this.lockedContinuity = null;
     }

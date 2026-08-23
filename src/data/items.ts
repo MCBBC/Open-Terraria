@@ -2010,18 +2010,64 @@ item({ key: 'vi_4442_f4442', name: '', maxStack: 999, value: 1 }); // 竿(深渊
 //   vi_6165_PoisonBarb 等,键与原手写完全一致）。原 ITEMS_1457_NO_SPRITE 手写
 // def 注册删除——它在自动注册循环之后、无 vid 去重,素材收编后会同 vid 双注册
 // （2026-08-21 盘点报告 A 组附带发现）。此处只做两件零下标平移的收尾：
-// ① 卖价回填（DefaultToAccessory/SetShopValues 的 sellPrice,自动 def 缺省 value=1）：
-//   6153 GlacierFang 冰川之牙(冰箱 7 元池主件,BuriedChestsPass:840)/
-//   6156 SilverBracer 银护腕(上锁盒 1/4,OpenLockBox :9452-9454)/
-//   6158 MobiusStrip 莫比乌斯带(石巨人袋 1/6,OpenBossBag :7516-7518)/
-//   6165 PoisonBarb 毒刺(木匣 1/20 饰品池第 6 项,OpenFishingCrate :8084-8109)。
-//   饰品效果位（SilverBracer 召唤标记/PoisonBarb accPoisonBarb 等）在 1457
-//   ApplyEquipFunctional 6147-6195 族,本批不移植（登记）。
+// ① 卖价回填（SetShopValues(rare, sellPrice/buyPrice(...)) 的 value,自动 def 缺省 value=1；
+//   rare 已由 vanilla-itemrare.json 全 49 条覆盖,配饰槽位在 vanillaItemStats
+//   ACC_STATS_1457,武器战斗数值在 vanillaItemCombat json+EXTRACT_PATCH——此处只补 value）。
+//   ★sellPrice(plat,gold,silver,copper) = (c+100s+1e4g+1e6p)×5、buyPrice 同式不 ×5
+//   （1457 Item.cs:49421-49429）——旧表 4 条曾把第 3 参当铜币算（6153=200 等,
+//   全族系统性 ÷100,2026-08-23 全量重提取时修正）。饰品效果位（SilverBracer 召唤
+//   标记/PoisonBarb accPoisonBarb 等）在 1457 ApplyEquipFunctional 6147-6195 族,
+//   本批不移植（登记）。
 const ITEMS_1457_VALUE: Record<number, number> = {
-  6153: 200,   // sellPrice(0,0,40) = 40×5（Item.cs:47425）
-  6156: 875,   // sellPrice(0,1,75) = (75+1×100)×5 = 875（:47453）
-  6158: 2500,  // sellPrice(0,5) = 5×100×5 = 2500（:47464）
-  6165: 375,   // sellPrice(0,0,75) = 75×5 = 375（:47525）
+  6147: 2500,   // 巨型提基 buyPrice(0,0,25)=25银（Item.cs:47342）
+  6148: 50000,  // 可靠的捣蛋猫 sellPrice(0,1)=1金×5（:47355）
+  6149: 50000,  // 可靠的火绒狐 sellPrice(0,1)（:47375）
+  6150: 500,    // 可靠的疾旋鼬 sellPrice(0,0,1)=1银×5（:47386）
+  6151: 500,    // 可靠的疾旋火鼬 sellPrice(0,0,1)（:47399）
+  6152: 1,      // 太阳花法杖 buyPrice(0,0,1)=1铜（:47412）
+  6153: 20000,  // 冰川之牙 sellPrice(0,0,40)=40银×5（:47424;旧 200 系参序误读）
+  6154: 75000,  // 神秘绽放 sellPrice(0,1,50)=(50×100+1e4)×5（:47436）
+  6155: 50000,  // 闪电之击 sellPrice(0,1)（:47450）
+  6156: 87500,  // 银护腕 sellPrice(0,1,75)（:47454;旧 875 同上）
+  6157: 100000, // 蛇形手环 sellPrice(0,2)（:47460）
+  6158: 250000, // 莫比乌斯带 sellPrice(0,5)=5金×5（:47465;旧 2500 同上）
+  6159: 100000, // 邪恶臂环 sellPrice(0,2)（:47469）
+  6160: 50000,  // 锐刺 sellPrice(0,1)（:47474）
+  6161: 500,    // 黏土蓓蕾法杖 sellPrice(0,0,1)（:47498）
+  6162: 175000, // 衔尾蛇指环 sellPrice(0,3,50)（:47478）
+  6163: 112500, // 暮光之握 sellPrice(0,2,25)（:47483）
+  6164: 50000,  // 毁灭法杖 sellPrice(0,1)（:47507）
+  6165: 37500,  // 淬毒刺 sellPrice(0,0,75)（:47526;旧 375 同上）
+  6166: 32500,  // 鹰身女妖护符 sellPrice(0,0,65)（:47530）
+  6167: 75000,  // 碎裂之石 sellPrice(0,1,50)（:47534）
+  6168: 400000, // 混沌弹筒 sellPrice(0,8)（:47541,6168/6169/6193/6194 共享 case）
+  6169: 400000, // 混沌弹筒（满载） 同上（:47541）
+  6170: 50000,  // 附魔计时器 sellPrice(0,1)（:47545）
+  6171: 50000,  // 宝石法杖 sellPrice(0,1)（:47554）
+  6172: 50000,  // 重型投石索 sellPrice(0,1)（:47549）
+  6173: 50000,  // 电弧涌动 sellPrice(0,1)（:47560）
+  6174: 50000,  // 可靠的碎岩龟 sellPrice(0,1)（:47574）
+  6175: 212500, // 斥候投石索 sellPrice(0,4,25)（:47580）
+  6176: 187500, // 圣殿骑士投石索 sellPrice(0,3,75)（:47584）
+  6177: 75000,  // 皇家卫队护具 sellPrice(0,1,50)（:47588）
+  6178: 100000, // 火山碎屑石 sellPrice(0,2)（:47594）
+  6179: 100000, // 毁灭臂环 sellPrice(0,2)（:47598）
+  6180: 75000,  // 炽天使项链 sellPrice(0,1,50)（:47603）
+  6181: 225000, // 凤凰箭袋 sellPrice(0,4,50)（:47608）
+  6182: 75000,  // 邪恶之爪 sellPrice(0,1,50)（:47613）
+  6183: 87500,  // 银盾 sellPrice(0,1,75)（:47619）
+  6184: 75000,  // 甜蜜倒刺 sellPrice(0,1,50)（:47625）
+  6185: 75000,  // 催化手环 sellPrice(0,1,50)（:47629）
+  6186: 100000, // 德鲁伊蛇纹斗篷 sellPrice(0,2)（:47634）
+  6187: 75000,  // 交错心形项链 sellPrice(0,1,50)（:47640）
+  6188: 75000,  // 恢复之盾 sellPrice(0,1,50)（:47645）
+  6189: 100000, // 秘术腰带 sellPrice(0,2)（:47652）
+  6190: 350000, // 旧世界跑酷指南 sellPrice(0,7)（:47657）
+  6191: 0,      // 小亲情桃 sellPrice()=0（:47662）
+  6192: 0,      // 亲情桃 sellPrice()=0（:47667）
+  6193: 400000, // 混沌弹筒（随机） sellPrice(0,8)（:47541 共享 case）
+  6194: 400000, // 混沌弹筒（简易） 同上（:47541）
+  6195: 350000, // 旧世界跑酷指南（未激活） sellPrice(0,7)（:47672）
 };
 for (const [vid, val] of Object.entries(ITEMS_1457_VALUE)) {
   const k = VANILLA_ITEM_KEY_BY_ID[Number(vid)];

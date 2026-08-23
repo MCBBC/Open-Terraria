@@ -41,6 +41,18 @@ export const FIGHTER_NO_DOOR: ReadonlySet<number> = new Set([
   528, 529, 530, 532, 582, 624, 631,
 ]);
 
+/** AI_003 攻门白名单（1457 NPC.cs:60590 flag25 全表）。消费点 = 攻门段 :60601
+ *  flag28 = ((!bloodMoon||getGoodWorld) && !graveyardRoll[1/60]) & flag25——表内型
+ *  在普通夜每次敲击 ai[1] 先归零再 +5 → 恒 5 < 10 **永不开门**；仅血月（FTW 除外）/
+ *  墓地掷中/玩家置不可破墙时才累计到 10 开门。表外攻门型（26 拆门/27 +1/
+ *  31·294-296 +6/460 直开）不受 flag28 重置 → 任意夜累计。★表内 430/449-452/481
+ *  同时在 FIGHTER_NO_DOOR（flag8=false 不攻门）——按原版字面全量收录。 */
+export const FIGHTER_DOOR_WHITELIST: ReadonlySet<number> = new Set([
+  3, 691, 430, 590, 331, 332, 132, 161, 186, 187, 188, 189, 200, 223, 320, 321,
+  319, 21, 324, 323, 322, 44, 196, 167, 77, 197, 202, 203, 449, 450, 451, 452,
+  481, 201, 635,
+]);
+
 /** 横向移动三元组（else-if 链各分支的共形段：超速衰减 / 限速内加速） */
 export interface FighterMove {
   /** 限速 |vx| 上限（原版 num8x） */
@@ -936,7 +948,8 @@ export function factorAcceleration(
 export function stormDiverStep(e: Enemy, game: GameHooks, player: Player | null): void {
   if (e.vanillaId !== 425) return;
   if (e.lai3 === 0) { e.lai3 = 1; e.ai3 = -120; }                     // :58867-58871 出生门
-  if (e.vy === 0) e.ai2 = 0;                                          // :58872-58875 落地复位喷包态
+  // ★R3-3（1457 :59054，1456 :58873 无 || confused）：困惑也复位喷包态（落地坠落）
+  if (e.vy === 0 || e.confused) e.ai2 = 0;
   const st = game.world.store;
   if (player && !player.dead) {
     if (e.vy !== 0 && e.ai2 === 1) {
@@ -945,7 +958,9 @@ export function stormDiverStep(e: Enemy, game: GameHooks, player: Player | null)
       //（:71003-71005）对全部帧恒置同式 → 等价"贴图恒反向"，属绘制层登记项（S 侧），
       // 此处不翻 facing 以免起降瞬间往返镜像。
       if (canHit(st, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h)) {
-        const num115 = player.cx - e.facing * 300 - e.cx;             // :58886 横向期望（保持 300px）
+        // ★R3-3（1457 :59068-59072）：困惑翻转横向期望方向（1456 直用 direction）
+        const dir115 = e.confused ? -e.facing : e.facing;
+        const num115 = player.cx - dir115 * 300 - e.cx;               // :58886 横向期望（保持 300px）
         const num116 = player.y + player.h - (e.y + e.h);             // :58887 Bottom 差
         if (num115 < 0 && e.vx > 0) e.vx *= 0.9;                      // :58888-58892 逆期望阻尼
         else if (num115 > 0 && e.vx < 0) e.vx *= 0.9;
@@ -971,7 +986,7 @@ export function stormDiverStep(e: Enemy, game: GameHooks, player: Player | null)
           e.vy += e.y < o.y ? -0.15 : 0.15;                           // :58957-58960
         }
       }
-    } else if (player.cy + 100 < e.y                                   // :58963 Center.Y+100 < position.Y
+    } else if (!e.confused && player.cy + 100 < e.y                    // ★R3-3 1457 :59150 加 !confused（困惑禁起飞）
       && canHit(st, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h)) {
       e.vy = -5;                                                      // :58964-58965 起飞
       e.ai2 = 1;                                                      // :58966
@@ -983,6 +998,9 @@ export function stormDiverStep(e: Enemy, game: GameHooks, player: Player | null)
       && canHitLine(st, e.cx, e.cy, 0, 0, player.cx, player.cy, 0, 0); // :58980 CanHitLine(center,0,0→center,0,0)
     const step = stormDiverAimStep(e.ai3, aim);
     e.ai3 = step.ai3;
+    // ★R3-3（1457 :59160-59162）：困惑清空蓄力（回摆后置 0——调用后清零与原版
+    //  「回摆→清零→状态机」序在 confused 态下效果相同：ai3 恒 0、永不发射）
+    if (e.confused) e.ai3 = 0;
     if (step.fired) {                                                 // :58988-59015 满蓄发射
       const mx = e.cx + e.facing * 30, my = e.cy + 2;                 // :58993 chaserPosition = Center+(dir*30,2)
       const num121 = 20;                                              // :58992 弹速

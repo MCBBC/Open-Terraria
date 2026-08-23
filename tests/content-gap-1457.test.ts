@@ -77,7 +77,7 @@ describe('①钻地龟数据锚（6174/5667 + 1098/1123）', () => {
     expect(VANILLA_ITEM_KEY_BY_ID[5667]).toBe('vi_5667_PalworldDigtoise');
     const rare = JSON.parse(readFileSync(join(ROOT, 'src/data/vanilla-itemrare.json'), 'utf8'));
     const value = JSON.parse(readFileSync(join(ROOT, 'src/data/vanilla-itemvalue.json'), 'utf8'));
-    expect([rare['6174'], value['6174']]).toEqual([3, 10000]);   // rare3 + sellPrice(0,1)=1金
+    expect([rare['6174'], value['6174']]).toEqual([3, 50000]);   // rare3 + sellPrice(0,1)×5=5金买入
   });
 });
 
@@ -299,9 +299,12 @@ describe('⑤宝石法杖 6171', () => {
     const f = packGemStaffFeatures(126, undefined, 6171);
     expect(f.allGems).toBe(true);                      // HeldItem.type==6171（:50002）
     expect(f.biggerHitbox).toBe(true);                 // shoot==126（:50001）
-    expect(f).toEqual({                                 // 全特性位点亮（vanillaGemStaff 展开臂）
+    // ★AllGems 只追加四特性 Homing/CanBounce/AoeExplosion/FastThenSlow
+    //  （Player.cs:49783-49790——SwirlTwins/ArPenSpread/BiggerHitbox 不加,本弹
+    //  biggerHitbox 来自 shoot==126 臂 :50001）;此前期望 8 位全亮为误读
+    expect(f).toEqual({
       biggerHitbox: true, allGems: true, aoeExplosion: true, canBounce: true,
-      fastThenSlow: true, homing: true, arPenSpread: true, swirlTwins: true,
+      fastThenSlow: true, homing: true,
     });
     expect(gemDamageMultiplier(f)).toBe(1);            // AllGems 恒 1（Projectile.cs:167-169）
   });

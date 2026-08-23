@@ -15,6 +15,9 @@ export class Input {
    *  被 use 清掉后无 mousedown 事件回填,链球出生 1 帧即判松手回收(2026-08-13) */
   mouseHeld = false;
   rightDown = false;
+  /** R4-22（FocusHelper.cs:134-139 → TriggersSet.cs:851-859）：失焦置位,回焦首击
+   *  被吞、松键解除——原版 delayUseItem 同名语义 */
+  delayUseItem = false;
   uiBlocking = false;     // 背包/合成等打开时为 true
   wheelDelta = 0;
   /** keydown 边沿回调（含原生事件——Shift+F1/F2/F3 调试键迁移需要 e.shiftKey） */
@@ -57,7 +60,12 @@ export class Input {
       this.keys.delete(e.code);
       this.onKeyEvent?.(e.code, false);  // 行为录制：键沿（松开）
     }) as EventListener);
-    onWin('blur', (() => { this.keys.clear(); this.touchKeys.clear(); this.mouseHeld = false; }) as EventListener);
+    onWin('blur', (() => {
+      this.keys.clear(); this.touchKeys.clear(); this.mouseHeld = false;
+      // R4-22（FocusHelper.cs:134-139）：窗口失焦即置 delayUseItem——回焦的那一下
+      // mousedown 不开火（TriggersSet.cs:851-859：置位期间压掉使用键,松键才解除）
+      this.delayUseItem = true;
+    }) as EventListener);
     onEl('mousemove', ((e: MouseEvent) => {
       const r = this.el.getBoundingClientRect();
       this.mouseX = e.clientX - r.left;
@@ -67,11 +75,16 @@ export class Input {
     onWin('mousedown', ((e: MouseEvent) => {
       // UI 面板上的点击不穿透为游戏输入
       if ((e.target as HTMLElement)?.closest?.('.sw-panel, .sw-slot, .sw-recipe, .sw-btn')) return;
-      if (e.button === 0) { this.mouseDown = true; this.mouseHeld = true; }
+      if (e.button === 0) {
+        // R4-22：delayUseItem 置位期间吞掉本次使用边沿（mouseHeld 保持——按住不松
+        // 仍不开火,松键才解除,同 TriggersSet 语义）
+        if (this.delayUseItem) return;
+        this.mouseDown = true; this.mouseHeld = true;
+      }
       if (e.button === 2) this.rightDown = true;
     }) as EventListener);
     onWin('mouseup', ((e: MouseEvent) => {
-      if (e.button === 0) { this.mouseDown = false; this.mouseHeld = false; }
+      if (e.button === 0) { this.mouseDown = false; this.mouseHeld = false; this.delayUseItem = false; }
       if (e.button === 2) this.rightDown = false;
     }) as EventListener);
     onEl('contextmenu', (e) => e.preventDefault());

@@ -864,8 +864,8 @@ const remap = (v: number, a: number, b: number, c: number, d: number) =>
 /** DrawAfterAllObjects 可见性（:117-147 1:1）：仅昼；晨/昏双窗，日食清零，×0.4 ×太阳地平线因子 */
 export function litNatureVisibility(clock: Clock): number {
   const t = clock.timeOfDay;
-  if (!(t > 0.25 && t < 0.75)) return 0;
-  const time = ((t - 0.25) / 0.5) * 54000;
+  if (!(t > 0.1875 && t < 0.8125)) return 0;   // Clock.DAWN/DUSK(★曾 0.25/0.75 基差 1.5h)
+  const time = ((t - 0.1875) / 0.625) * 54000;
   const dawn = remap(time, 1200, 5400, 0, 1) * remap(time, 1200, 7200, 1, 0) * 0.3;
   let dusk = remap(time, 54000 - 10800, 54000 - 4200, 0, 1) * remap(time, 54000 - 1800, 54000 - 600, 1, 0) * 0.4;
   dusk *= dusk;
@@ -906,7 +906,7 @@ export function drawWindSwayTiles(
     bloodMoon: clock?.bloodMoon ?? false,
     raining: !!world.weather?.raining,
     cloudAlpha: world.weather?.cloudAlpha ?? 0,
-    mainTime: isDay ? ((t - 0.25) / 0.5) * 54000 : 0,
+    mainTime: isDay ? ((t - 0.1875) / 0.625) * 54000 : 0,   // =Main.time(★时基校正 2026-08-23)
     waterStyle,
     zones,
   };

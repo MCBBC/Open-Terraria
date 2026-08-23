@@ -4,9 +4,10 @@
 //   121 紫晶 Homing / 124 翡翠 FastThenSlow / 597 琥珀 CanBounce(0.8 反弹) /
 //   123 蓝晶 SwirlTwins / 122 黄玉 AoeExplosion / 125 红晶 ArPenSpread / 126 钻石 BiggerHitbox
 // 穿对应宝石长袍（1282-1287/4256）时任意宝石弹获得长袍特性（Player.cs:49990-50003）；
-// 6171 Bejeweled Staff = AllGems（全特性；本仓未注册该物品，位留）。
+// 6171 Bejeweled Staff = AllGems（:49783-49790 追加 Homing/CanBounce/AoeExplosion/
+// FastThenSlow 四特性；本仓已注册该物品——vanillaItemCombat '6171'，创造/导入可得）。
 
-/** 特性位（GemStaffFeatures Bits 0-7，Projectile.cs:38-160） */
+/** 特性位（GemStaffFeatures Bits 0-9，Projectile.cs:38-160） */
 export interface GemStaffFlags {
   homing?: boolean;       // Bits[0] 紫晶
   fastThenSlow?: boolean; // Bits[1] 翡翠
@@ -16,6 +17,9 @@ export interface GemStaffFlags {
   arPenSpread?: boolean;  // Bits[5] 红晶
   biggerHitbox?: boolean; // Bits[6] 钻石
   allGems?: boolean;      // Bits[7] 6171 Bejeweled Staff（全特性）
+  repeatsGem?: boolean;   // Bits[8] 同色成套（长袍+本弹同宝石）——发射侧 +4 伤 +1 击退
+  // Bits[9] allGems2：1457 PackGemStaffFeatures 无置位点（Player.cs:49990-50007 只写
+  //  Bits0-8）→ AllGems2 七连扇支（:49822-49868）为死代码，不移植（蓝队 R2 复核备案）
 }
 
 /** 宝石弹 → 主特性（PackGemStaffFeatures 的 shoot==N 臂，Player.cs:49994-50001） */
@@ -40,7 +44,21 @@ export const GEM_ROBE_FEATURES: Readonly<Record<number, GemStaffFlags>> = {
   1287: { biggerHitbox: true }, // Diamond Robe
 };
 
-/** PackGemStaffFeatures 1:1（Player.cs:49990-50012）：shoot 主特性 ∪ 长袍特性 ∪ AllGems */
+/** 宝石弹/长袍 → 同色判定键（RepeatsGem 七组布尔 :50006 的等价压缩：
+ *  shoot 主特性位 == 长袍特性位 才算成套，如 121+1282 真、121+1285 假） */
+const GEM_COLOR_KEY: Readonly<Record<number, keyof GemStaffFlags>> = {
+  121: 'homing', 124: 'fastThenSlow', 597: 'canBounce', 123: 'swirlTwins',
+  122: 'aoeExplosion', 125: 'arPenSpread', 126: 'biggerHitbox',
+};
+const ROBE_COLOR_KEY: Readonly<Record<number, keyof GemStaffFlags>> = {
+  1282: 'homing', 1285: 'fastThenSlow', 4256: 'canBounce', 1284: 'swirlTwins',
+  1283: 'aoeExplosion', 1286: 'arPenSpread', 1287: 'biggerHitbox',
+};
+
+/** PackGemStaffFeatures 1:1（Player.cs:49990-50012）：shoot 主特性 ∪ 长袍特性 ∪ AllGems
+ *  ∪ RepeatsGem（同色成套，!AllGems 门）。★AllGems 的四特性追加发生在发射侧
+ *  （:49783-49790 Homing/CanBounce/AoeExplosion/FastThenSlow——SwirlTwins/ArPenSpread/
+ *  BiggerHitbox 【不】加），此处一并落位使 bits 与原版 ai[0] 同值 */
 export function packGemStaffFeatures(
   shoot: number,
   armorBodyVid: number | undefined,
@@ -50,10 +68,16 @@ export function packGemStaffFeatures(
   const robe = armorBodyVid !== undefined ? GEM_ROBE_FEATURES[armorBodyVid] : undefined;
   if (robe) Object.assign(f, robe);
   if (heldVid === 6171) {
+    // :49783-49790 AllGems 追加四特性（发射侧同序；乘区 GetDamageMultiplier 对
+    //  AllGems 恒 1，:165-169）
     f.allGems = true;
-    f.homing = f.fastThenSlow = f.canBounce = f.aoeExplosion = true;
-    f.swirlTwins = f.arPenSpread = f.biggerHitbox = true;
+    f.homing = f.canBounce = f.aoeExplosion = f.fastThenSlow = true;
+    return f;   // AllGems 时 RepeatsGem 不置位（:50004 if (!AllGems) 门）
   }
+  // :50005-50007 RepeatsGem：本弹与长袍同宝石（七组布尔）
+  const sk = GEM_COLOR_KEY[shoot];
+  const rk = armorBodyVid !== undefined ? ROBE_COLOR_KEY[armorBodyVid] : undefined;
+  if (sk !== undefined && rk !== undefined && sk === rk) f.repeatsGem = true;
   return f;
 }
 

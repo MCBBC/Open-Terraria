@@ -77,6 +77,12 @@ const PROJ_DRAW_OFFSET_DYN: Record<number, (dirX: number, h: number) => readonly
   392: (d) => [-2, 4 * d, 0],
   313: (_d, h) => (h !== 54 ? [20, -12, 0] : [0, 0, 0]),
   397: () => [-2, -2, -1],   // num145−1（cs:29821-29823）
+  // 火绒狐 1094/1113（2026-08-23 网格贴图批；非 num143/144 表系,1457 Main.cs:33742
+  // vector99.Y -= 11 专支折算：帧 62×44 心 = (cx, cy−11)、盒 18×18 →
+  // 贴图左上 = (盒左−22, 盒上−24)。翻转侧 −8 原点修正不走本表（MinionProj
+  // 消费端恒传 dirX=−1）,由 MinionProj.draw foxFlipAdj 直补）
+  1094: () => [24, -22, 0],
+  1113: () => [24, -22, 0],
 };
 
 /** num143/num144(含 397 的 num145−1)偏移求值——静态+动态两表共用,
@@ -2994,6 +3000,10 @@ export class GrenadeProj extends Entity {
       this.destroy();
       return;
     }
+    // CutTiles（Projectile.cs:11824/:16575：friendly/hostile 且 damage>0 每 update
+    // 沿速度线切割草/藤/罐——火箭直飞穿藤即断。曾缺=火箭无法打掉丛林藤蔓(用户报,
+    // 枪械走 Arrow.subStep cutTile 正常)）
+    game.cutTile(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
     // 滚转：火箭族不滚（:44908 排除）→ 朝向速度；榴弹/雷滚转
     if (GrenadeProj.FIRED_STICK.has(this.projId)) {
       this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;   // 贴图纵向（同箭族）
@@ -3185,7 +3195,9 @@ export class GrenadeProj extends Entity {
     }
     this.x = body.x;
     this.y = body.y;
-    if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { this.dead = true; this.destroy(); }
+    if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { this.dead = true; this.destroy(); return; }
+    // CutTiles 同发射支（friendly+damage>0 沿路径切割——投掷炸弹滚过草/藤同样断）
+    game.cutTile(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
   }
 }
 
@@ -3447,7 +3459,12 @@ export class TorchGodProj extends Entity {
       // 乘区口径错,Sample 曲线 Journey0.5→Master3）。原版在生成掷处算定,命中时算等价
       p.damage(hostileProjectileDamage(40, mainDifficulty(game.world)),
         Math.sign(p.cx - (nx + this.w / 2)) || 1, 0, game as never);
-      this.kill(game);
+      // ★R3-16（1457 P57:43575-43579 AI_184_BadTorchLuck → SelfHurtPlayers
+      //  :15104-15152）：原版命中后**不杀弹**——949 继续飞，玩家无敌帧内由
+      //  immune 门静默、无敌帧结束再判（SelfHurtPlayers 每 AI 帧调用）。本仓曾
+      //  this.kill → 火把神之焰碰玩家即消失（原版穿透续飞反复判定）。
+      //  位置仍须推进（SelfHurtPlayers 不冻结弹），否则卡原地每帧重复判定
+      this.x = nx; this.y = ny;
       return;
     }
     this.x = nx; this.y = ny;

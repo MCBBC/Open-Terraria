@@ -730,7 +730,9 @@ export function resolveWhipTagHit(
   // 毁灭臂镗 6179（Damage :13447-13450）：tag 伤害成立的命中 → kind2 脉冲
   //（150×minionDamage/400px/2 目标,共用 360t 冷却）
   if (changes.addProjectileTagDamage && owner?.equipStats.accArmletOfRuin) {
-    trySnapStrike(game, owner, 2, hx, hy, en.id);
+    const vw = en.w ?? 16, vh = en.h ?? 16, vx0 = en.x ?? hx, vy0 = en.y ?? hy;
+    trySnapStrike(game, owner, 2, hx, hy, en.id,
+      { w: vw, h: vh, cx: vx0 + vw / 2, cy: vy0 + vh / 2 });   // R4-33 victim 自脉冲
   }
   if (crit) dmg *= 2;
   return { dmg: Math.max(1, Math.round(dmg)), crit };

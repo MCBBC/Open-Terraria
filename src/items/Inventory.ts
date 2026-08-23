@@ -148,8 +148,9 @@ export class Inventory {
   miscEquips: Array<InvItem | null>;
   /** miscDyes[5]：杂项装备染料（Player.cs:1378） */
   miscDyes: Array<InvItem | null>;
-  /** 三套 Loadout（EquipmentLoadout = armor[20]+dye[10]，Swap :65-82 元素级互换） */
-  loadouts: Array<{ armor: Array<InvItem | null>; dye: Array<InvItem | null> }>;
+  /** 三套 Loadout（EquipmentLoadout = armor[20]+dye[10]+hide[10]，Swap :65-82 三段
+   *  元素级互换——R4-12 补 hide 段：配饰可见性随套记忆） */
+  loadouts: Array<{ armor: Array<InvItem | null>; dye: Array<InvItem | null>; hide: boolean[] }>;
   /** 当前 Loadout 序号（0-2） */
   currentLoadout = 0;
   /** 恶魔之心 3335(Player.cs:44575-44583)解锁第六配饰槽(armor[8];基座 5=3-7) */
@@ -174,12 +175,15 @@ export class Inventory {
     this.loadouts = Array.from({ length: LOADOUT_COUNT }, () => ({
       armor: Array(ARMOR_TOTAL).fill(null),
       dye: Array(DYE_SLOTS).fill(null),
+      hide: Array(10).fill(false),   // EquipmentLoadout.Hide = new bool[10]（:18）
     }));
   }
 
   /** 切换 Loadout（Player.TrySwitchingLoadout :5430-5434：先 Swap 当前套装备份仓、
    *  再 Swap 目标仓——玩家身上即换上目标套装，原套装入当前备份仓） */
-  trySwitchingLoadout(idx: number): void {
+  /** R4-12（EquipmentLoadout.cs:63-80）：hideVisible ↔ Hide[k] 第三段互换——
+   *  配饰可见性随套记忆。hideVisible 由调用侧传入（Player 字段,Inventory 不持有） */
+  trySwitchingLoadout(idx: number, hideVisible?: boolean[]): void {
     if (idx === this.currentLoadout || idx < 0 || idx >= LOADOUT_COUNT) return;
     const swap = (a: Array<InvItem | null>, b: Array<InvItem | null>, n: number) => {
       for (let i = 0; i < n; i++) { const t = a[i]; a[i] = b[i]; b[i] = t; }
@@ -190,6 +194,14 @@ export class Inventory {
     swap(this.dye, cur.dye, DYE_SLOTS);
     swap(this.armor, next.armor, ARMOR_TOTAL);
     swap(this.dye, next.dye, DYE_SLOTS);
+    if (hideVisible) {
+      for (let k = 0; k < 10 && k < hideVisible.length && k < cur.hide.length; k++) {
+        const t0 = hideVisible[k]; hideVisible[k] = cur.hide[k]; cur.hide[k] = t0;
+      }
+      for (let k = 0; k < 10 && k < hideVisible.length && k < next.hide.length; k++) {
+        const t0 = hideVisible[k]; hideVisible[k] = next.hide[k]; next.hide[k] = t0;
+      }
+    }
     this.currentLoadout = idx;
   }
 
@@ -199,12 +211,14 @@ export class Inventory {
 
   /** GetEffectiveArmor（1457 Player.cs:5679-5734,LoadoutShare"收藏装备跨配装共享"）：
    *  当前 Loadout 槽位为空时,跨三套 Loadout 同槽找【收藏】件共享——甲/配饰/时装全槽。
-   *  ★原版消费面全在【视觉】（Main.cs:17552-17567 头/身/腿槽 + Player.cs:9696
-   *  UpdateItemDye 染色;NPC.cs:417 绘制）——属性聚合（ApplyEquipFunctional）仍走
-   *  裸 armor[]，共享件不给数值（防"空槽白嫖属性"）。
-   *  CanShareArmor（:5699-5727）的配件互斥深检（ItemSlot.CanEquipBothAccessories
-   *  物品对表）未建模,只做槽型门 armorAccepts（登记）;sharedFromLoadout 高亮 UI
-   *  与渲染侧接线登记未接 */
+   *  ★消费面裁决（R4-19,1457 P57:13015-13048 逐行核实）：属性聚合
+   *  （GrantPrefixBenefits+GrantArmorBenefits k=0..9 / ApplyEquipFunctional m=3..9）
+   *  【全走 GetEffectiveArmor——共享件给全部属性】;"防空槽白嫖"由"只填空槽"+
+   *  CanShareArmor（:5699-5727 槽型门 + CanEquipBothAccessories 配件互斥）承担,
+   *  不存在"属性走裸 armor[]"的例外。视觉族（Main.cs:17552 头身腿帧/Player.cs:9696
+   *  UpdateItemDye/UpdateVisibleAccessories）同样走 effective。
+   *  CanShareArmor 的配件互斥深检（ItemSlot.CanEquipBothAccessories 物品对表）
+   *  未建模,只做槽型门 armorAccepts（登记）;sharedFromLoadout 幽灵绘制登记未接 */
   getEffectiveArmor(slot: number): InvItem | null {
     const cur = this.armor[slot] ?? null;
     if (cur) return cur;
@@ -227,6 +241,21 @@ export class Inventory {
       if (item && item.favorited) return item;
     }
     return cur;
+  }
+
+  /** 共享来源序号（tooltip "共享自配装{0}"/ItemLoadoutSharedFrom 用,GetEffectiveArmor
+   *  的 out sharedFromLoadout 位）：当前槽非空 → null;否则首个同槽收藏件（甲侧过
+   *  armorAccepts 门,不兼容 break 同 :5688-5691）→ 其 Loadout 序号 */
+  effectiveSharedFrom(slot: number, dye: boolean): number | null {
+    if ((dye ? this.dye[slot] : this.armor[slot])) return null;
+    for (let i = 0; i < this.loadouts.length; i++) {
+      const item = (dye ? this.loadouts[i].dye : this.loadouts[i].armor)[slot];
+      if (item && item.favorited) {
+        if (!dye && !this.armorAccepts(slot, item.id)) break;
+        return i;
+      }
+    }
+    return null;
   }
 
   /** 该槽位是否为油漆/涂层（Item.PaintOrCoating，Item.cs:334-344：

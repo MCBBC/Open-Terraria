@@ -84,7 +84,11 @@ const T_STATUE = TILE_BY_KEY['v_105_statue']!;
 //  （首次 hellFort 调用发生在用例执行期,晚于模块级赋值）。
 let hfMode1457: boolean | null = null;
 export function hfIs1457(): boolean {
-  if (hfMode1457 === null) hfMode1457 = process.env.SW_MB_1457 === '1';
+  if (hfMode1457 === null) {
+    // 浏览器 worker 无 process（node 测试环境才有 env）——守卫防 worldgen 崩
+    // （2026-08-23:裸引用致共享 dev server 全部 worldgen 卡 pass4,游戏无法加载）
+    hfMode1457 = (typeof process !== 'undefined' && process.env?.SW_MB_1457) === '1';
+  }
   return hfMode1457;
 }
 

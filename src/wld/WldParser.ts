@@ -95,6 +95,11 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (version < 210) {
     throw new WldParseError(`不支持的世界文件版本 ${version}（需要 1.4+，version >= 210）。请在游戏中重新保存该地图。`);
   }
+  // R4-11（WF57:197/:717/:3027/:3442 四处 `num > 325` 拒载同语义）：未来版本按
+  // 当前头布局静默错解比明确拒绝更危险——326+ 一律拒。
+  if (version > 325) {
+    throw new WldParseError(`不支持的世界文件版本 ${version}（本复刻最高支持 325 / 1.4.5）。`);
+  }
   if (version >= 140) {
     // header magic（中文版为不同常量，这里宽放校验）
     const magic = new TextDecoder().decode(r.bytes(7));
@@ -267,7 +272,13 @@ export function parseWld(buf: Uint8Array): WldWorld {
     const n = r.u8();
     for (let i = 0; i < n; i++) { r.i16(); r.i16(); }
   }
-  if (version >= 304) r.boolean();
+  if (version >= 304 && r.boolean()) seedFlags.dualDungeons = true; // WF57:1432 写/:2515 读
+  // v323 起尾接 moreLightning/noLightning 两布尔（WF57:1433-1434 写/:2516-2517 读）——
+  // R4-9：缺读会使 manifest 从错误偏移解出（varint 长度解出乱码串），两旗标导入即丢
+  if (version >= 323) {
+    if (r.boolean()) seedFlags.moreLightning = true;
+    if (r.boolean()) seedFlags.noLightning = true;
+  }
   if (version >= 299 && version < 313) r.u32();
   if (version >= 299) r.string(); // manifest
 

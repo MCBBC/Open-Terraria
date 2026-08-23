@@ -147,7 +147,8 @@ function shootL(
 // ai[0]==-2(出生残肢态,spawnTrueEye 置):悬停同款移动,表驱动只在悬停槽(atk==0)
 // 才接管(:43017-43022 `(!flag || num4 == 0)`)——攻击槽期间保持 -2 悬浮。
 // ---------------------------------------------------------------------------
-const ML_EYE_ATTACKS: ReadonlyArray<readonly [number, number]> = [
+/** 真眼攻击表(MoonLordAttacksArray2)——Renderer SmolBullet 预警(蓝队 R1-03)共用 */
+export const ML_EYE_ATTACKS: ReadonlyArray<readonly [number, number]> = [
   [0, 53], [1, 90], [0, 53], [2, 135], [0, 53], [3, 200], [0, 53], [4, 375], [0, 53], [2, 135],
 ];
 
@@ -155,7 +156,11 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
   // :38227 PlaySound(29,…,Next(100,101))——含头不含尾=恒 100 → Zombie_100,
   // case29 style100 ×0.25 由 FILE_CASE_VOL 自动乘(曾借 roar 轨 0.15,2026-08-18 对账修)
   if (rnd(420) === 0) game.playSfxWav?.('Zombie_100', 1, e.cx, e.cy);
-  // ---- 核心锚定(:38231-38237):ai[3]=核心 id,亡→静默消散 ----
+  // ---- 核心锚定(:42907-42912):ai[3]=核心 id,核心亡/失效 → life=0 + HitEffect +
+  //      active=false。★HitEffect 对 400 是空操作(HitEffect 82492-90939 全链无
+  //      type==400 分支,末位 else 对 type!=156 直接 return;月总件 gore 619-622
+  //      属核心死亡演出 AI_077 ai0==-2 段:41915-41922,且该段清眼也是 active=false
+  //      直清:41926-41931)——本仓 dead 直写即 1:1,勿加 gore/死亡声(蓝队 R1-09 驳回) ----
   const core = enemies(game).find((n) => n.id === e.ai3 && n.vanillaId === 398);
   if (!core || core.dead) { e.dead = true; return; }
   e.iframes = 2;                        // SetDefaults dontTakeDamage=true(:14090)
@@ -191,22 +196,28 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
     tx = (tx / d) * 24; ty = (ty / d) * 24;
     e.vx = (e.vx * 29 + tx) / 30;
     e.vy = (e.vy * 29 + ty) / 30;
-    for (const n of enemies(game)) {                      // :38327-38345
+    for (const n of enemies(game)) {                      // :43000-43020（1457 重校：
+      // num8=1.25/距离门 <100——曾按 1456 :38323-38345 的 0.25/150 移植后未随
+      // AI_081 重做复核,分离力弱 5 倍+半径偏大,真眼群在玩家头顶叠团）
       if (n !== e && !n.dead && n.vanillaId === 400
-        && Math.hypot(n.cx - e.cx, n.cy - e.cy) < 150) {
-        if (e.x < n.x) e.vx -= 0.25; else e.vx += 0.25;
-        if (e.y < n.y) e.vy -= 0.25; else e.vy += 0.25;
+        && Math.hypot(n.cx - e.cx, n.cy - e.cy) < 100) {
+        if (e.x < n.x) e.vx -= 1.25; else e.vx += 1.25;
+        if (e.y < n.y) e.vy -= 1.25; else e.vy += 1.25;
       }
     }
   } else if (e.ai0 === 1) {
-    // ---- 幻影矢 462(:38347-38395):减速瞄准,dur-14/-7/dur 三连(35 伤,速 8) ----
+    // ---- 幻影矢 462(:43025-43068):减速瞄准,dur-14/-7/dur 三连(35 伤,速 8) ----
     if (t === 0 && player) e.facing = e.seekDirX(player);
     e.vx *= 0.95; e.vy *= 0.95;
     if (Math.hypot(e.vx, e.vy) < 1) { e.vx = 0; e.vy = 0; }
     const dx = pcx + (player ? player.vx : 0) * 20 - e.cx;
     const dy = pcy + (player ? player.vy : 0) * 20 - e.cy;
-    x[0] = angleLerp(x[0], Math.atan2(dy, dx), 0.5);
-    x[1] = Math.min(1, x[1] + 0.05);
+    // :43033-43040 瞳角/睁眼度只在槽时 < num-14-5(=dur-19) 推进——末 19t 冻结,
+    // 弹道指向锁定(齐射可预读)。曾每 tick 无门执行=出手向不可预读
+    if (t < dur - 19) {
+      x[0] = angleLerp(x[0], Math.atan2(dy, dx), 0.5);
+      x[1] = Math.min(1, x[1] + 0.05);
+    }
     x[2] = lerp(x[2], t < 20 ? 1.1 : 0.4, 0.2);
     // :38389 PlaySound(4,…,6)=case4 死音库 → NPC_Killed_6(曾错 NPC_Hit_6,终审修)
     if (t === dur - 35) game.playSfxWav?.('NPC_Killed_6', 1, e.cx, e.cy);

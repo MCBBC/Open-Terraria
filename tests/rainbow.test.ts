@@ -267,7 +267,8 @@ describe('充能爆破炮 2882 → 460/461（AI_075 460 分支）', () => {
     for (let t = 0; t < 180 && !bl.dead; t++) bl.fixedUpdate(1, game);
     expect(bl.beam).toBeTruthy();
     bl.beam!.dead = true;                                          // 模拟光束消亡
-    bl.fixedUpdate(1, game);
+    // 1457 :67520 光束灭检查挂 flag5 门(瞄准拍/charge%20)——非每拍查,≤5 拍内必亡
+    for (let t = 0; t < 6 && !bl.dead; t++) bl.fixedUpdate(1, game);
     expect(bl.dead).toBe(true);
   });
 });

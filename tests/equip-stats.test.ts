@@ -96,7 +96,8 @@ describe('Player 装备属性聚合', () => {
     // 云朵瓶 158? no——云朵瓶 id：查 accfx jumpOpts
     p.inv.armor[3] = null;
     p.inv.armor[6] = { id: _iid(1164), stack: 1 }; // 气球束：Cloud+Sandstorm+Blizzard
-    expect(p.equipStats.jumpOpts).toEqual(['Cloud', 'Sandstorm', 'Blizzard']);
+    // R5-F10：jumpOpts 按原版消费优先序（JumpMovement :20875-20922）排列
+    expect(p.equipStats.jumpOpts).toEqual(['Sandstorm', 'Blizzard', 'Cloud']);
     // 仙灵靴 3993 → rocketBoots 2
     p.inv.armor[4] = null;
     p.inv.armor[5] = null;
@@ -108,14 +109,14 @@ describe('Player 装备属性聚合', () => {
     expect(p.equipStats.armorPen).toBe(5);
   });
 
-  it('恐慌项链：damage 触发 panicTime=300 → 移速聚合 +1.0', () => {
+  it('恐慌项链：damage 触发 panicTime=480(8s) → 移速聚合 +1.0', () => {
     const p = mkPlayer();
     p.hp = 100;
     p.inv.armor[3] = { id: _iid(1290), stack: 1 }; // 恐慌项链
     expect(p.equipStats.moveMult).toBe(1);
     p.damage(10, 0, 0);
-    expect(p.panicTime).toBe(300);
-    expect(p.equipStats.moveMult).toBeCloseTo(2, 5);   // +1.0(:25034 满档,旧 +0.5 是 1.4.0 值)
+    expect(p.panicTime).toBe(480);   // R5-F26：AddBuff(63,480)（Hurt :38524），旧 300 且按秒递减
+    expect(p.equipStats.moveMult).toBeCloseTo(2, 5);   // +1.0(:10218 moveSpeed++)
   });
 
   it('钴护盾：damage 不再施加击退', () => {

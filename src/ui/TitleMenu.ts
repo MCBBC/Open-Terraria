@@ -89,6 +89,8 @@ const CSS = `
   text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;
   pointer-events: none;
 }
+/* 右下署名（GLM-5.3/OX-Alpha 协作声明）用【内联样式】——注入样式表的
+   getElementById 守卫在 HMR 期会驻留旧 CSS 吞掉变更，内联不受其害 */
 /* 日/月命中层 + 可见体：罩住天空画布里的太阳/月亮（Main.cs:62420 value4）。
    z-index:-1 = 根 stacking context 内垫底——必在天空画布(0)之上、logo/按钮之下，
    不会截走菜单按钮的点击；touch-action:none 防触摸拖动触发页面手势。
@@ -135,12 +137,15 @@ export class TitleMenu {
   private modY = 0;
 
   constructor(parent: HTMLElement, private flow: TitleMenuFlow) {
-    if (!document.getElementById('sw-title-style')) {
-      const style = document.createElement('style');
+    // 样式表每次挂载都刷新内容（★HMR/迭代期旧 <style> 驻留会吞掉 CSS 变更——
+    // getElementById 守卫只建不更，用户可见"样式改了不生效"即此因）
+    let style = document.getElementById('sw-title-style') as HTMLStyleElement | null;
+    if (!style) {
+      style = document.createElement('style');
       style.id = 'sw-title-style';
-      style.textContent = CSS;
       document.head.appendChild(style);
     }
+    style.textContent = CSS;
     // Logo 昼夜对（Main.LogoA/LogoB 交叉淡化；巨石 logo 1/200 随机 = SetTitle rand.Next(200)）
     const boulder = Math.random() < 1 / 200;
     const daySrc = boulder ? 'sprites/vanilla-ui/Logo5.png' : 'sprites/vanilla-ui/Logo.png';
@@ -156,11 +161,11 @@ export class TitleMenu {
         <div class="sw-title-btn" data-act="sp">${Lang.text('LegacyMenu.12')}</div>
         <div class="sw-title-btn" data-act="mp">${Lang.text('LegacyMenu.13')}</div>
         <div class="sw-title-btn" data-act="set">${Lang.text('LegacyMenu.14')}</div>
-        <div class="sw-title-btn" data-act="packs">${Lang.text('Mods.SandboxWorld.Remaster.MenuBtn')}</div>
-        <div class="sw-title-btn" data-act="credits">${Lang.text('UI.Credits')}</div>
+        <div class="sw-title-btn" data-act="buy">${Lang.text('Mods.SandboxWorld.Menu.BuyTerraria')}</div>
         <div class="sw-title-btn" data-act="quit">${Lang.text('LegacyMenu.15')}</div>
       </div>
       <div class="sw-title-version">SandboxWorld v0.1.0</div>
+      <div style="position:fixed;right:30px;bottom:8px;font-size:13px;color:#fff;padding:0 16px;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;z-index:20;">由<b style="font-weight:700;-webkit-text-stroke:0.6px #fff;text-shadow:0.5px 0 0 #fff,-0.5px 0 0 #fff,0 0.5px 0 #fff,0 -0.5px 0 #fff;">GLM-5.3</b>与<b style="font-weight:700;-webkit-text-stroke:0.6px #fff;text-shadow:0.5px 0 0 #fff,-0.5px 0 0 #fff,0 0.5px 0 #fff,0 -0.5px 0 #fff;">OX-Alpha</b>共同协作复刻<br>仅用于AI学习研究禁止用于商业用途，原版请从官方渠道购买</div>
     `;
     this.logoDay = this.root.querySelector('.logo-day') as unknown as HTMLImageElement;
     this.logoNight = this.root.querySelector('.logo-night') as unknown as HTMLImageElement;
@@ -180,13 +185,12 @@ export class TitleMenu {
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
     const on = (act: string, fn: () => void) => {
-      this.root.querySelector(`[data-act=${act}]`)!.addEventListener('click', fn);
+      this.root.querySelector(`[data-act=${act}]`)?.addEventListener('click', fn);
     };
     on('sp', () => flow.onSinglePlayer());
     on('mp', () => flow.onMultiplayer());
     on('set', () => flow.onSettings());
-    on('packs', () => flow.onAssetPacks?.());
-    on('credits', () => flow.onCredits());
+    on('buy', () => window.open('https://store.steampowered.com/app/105600/Terraria', '_blank', 'noopener'));
     on('quit', () => flow.onQuit());
     parent.appendChild(this.root);
     this.startLogoFade();
@@ -243,8 +247,8 @@ export class TitleMenu {
     // time = span * (mouseX + 图宽) / (屏宽 + 图宽*2)，钳 [10, span-10]（原版 :62434-62446）
     const time = Math.max(10, Math.min(span - 10, span * (mouseX + size0) / (W + size0 * 2)));
     const t01 = isDay
-      ? 0.25 + (time / 54000) * 0.5
-      : (0.75 + (time / 32400) * 0.5) % 1;
+      ? 0.1875 + (time / 54000) * 0.625
+      : (0.8125 + (time / 32400) * 0.375) % 1;
     // sunModY/moonModY = mouseY - 基准y（:62430/:62440；基准 = celestialState 的
     // dip 公式 y——拖动中垂直跟手，松手后 ×0.999 缓回）
     if (mouseY !== undefined) {
@@ -295,7 +299,7 @@ export class TitleMenu {
     set('sp', t('LegacyMenu.12'));
     set('mp', t('LegacyMenu.13'));
     set('set', t('LegacyMenu.14'));
-    set('credits', t('UI.Credits'));
+    set('buy', t('Mods.SandboxWorld.Menu.BuyTerraria'));
     set('quit', t('LegacyMenu.15'));
   }
 

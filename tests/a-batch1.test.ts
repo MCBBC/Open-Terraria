@@ -218,12 +218,12 @@ describe('冲刺（DashMovement 1:1）', () => {
     // 对比：无墙时触发帧 vx 保留 16.9（见上例）——减半分支只对探测命中生效
   });
 
-  it('滑行阻尼：|vx|>12 → ×0.985（:21100-21102）', () => {
+  it('滑行阻尼：|vx|>12 → ×0.992（dash1 基础档 num14=0.992,:21428——1457 各 dash 段覆写：2/3/4=0.985）', () => {
     const { w, p } = mkNinja();
     doubleTap(p, w);
     p.inputX = 1;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.vx).toBeCloseTo(16.9 * 0.985, 6);
+    expect(p.vx).toBeCloseTo(16.9 * 0.992, 6);   // R5-F14：dash1(977 忍者装备)基础档 0.992,旧 0.985
     expect(p.dashDelay).toBe(-1);   // 仍滑行
   });
 

@@ -38,6 +38,8 @@ import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
+// ★YYYYYY（2026-08-23）：Check3x2 清除环 KillTile 头门（cs:63579）——HalfBrickPass 1:1 实现
+import { checkTileBreakability } from './HalfBrickPass';
 
 /** 世界树对拍探针开关（种子等价期临时；默认关闭零开销） */
 const LT_TRACE = typeof process !== 'undefined' && !!process.env.LT_TRACE;
@@ -207,11 +209,15 @@ function place3x2(st: TileStore, x: number, y: number, style: number): boolean {
 
 /** WorldGen.KillTile 生成期语义（cs:63559,cs:63955-63960 收尾）：active(false)+
  *  halfBrick(false)+frameX/frameY=-1+清漆；**type/slope 保留**（幽灵 187）；
- *  无掉落掷骰（isGeneratingOrLoadingWorld → noItem=true；type51/wall62 掷骰分支不触及）。 */
+ *  无掉落掷骰（isGeneratingOrLoadingWorld → noItem=true；type51/wall62 掷骰分支不触及）。
+ *  ★YYYYYY（2026-08-23）：补 CheckTileBreakability 头门（cs:63579 num==2 拒毁,尘段
+ *  之前零掷零写）——vanilla Check3x2 清除环（cs:49428-49432）走的就是带门 KillTile；
+ *  本副本与 FCP 引擎同款只拒杀不加 fail 支。 */
 function killTileGen(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (!st.flags[i]) return;
+  if (checkTileBreakability(st, x, y) === 2) return;
   st.flags[i] = 0;
   st.half[i] = 0;
   st.frameX[i] = -1;
@@ -800,11 +806,25 @@ export function growLivingTree(
   }
   if (activeAt(st, i, j)) { if (LT_TRACE) console.log(`GLT r2 x=${i} j=${j} anchor-active`); return false; }
   const gSheet = sheetAt(st, i, j + 1);
-  if (gSheet !== 0 && gSheet !== 2 && gSheet !== 1 && gSheet !== 40 && !ORE_SHEETS.has(gSheet)) { if (LT_TRACE) console.log(`GLT r3 x=${i} j=${j} ground=${gSheet}`); return false; }
+  // ★YYYYYY（2026-08-23）NTB #42：cs:28163-28174 脚基门——非 NTB 脚基 ∉
+  //   {0,2,1,40,Ore} 即拒；**NTB 追加放行 60 丛林草/59 泥**（`(!notTheBees ||
+  //   (foot!=60 && foot!=59))` 反式）。JS 曾缺 NTB 析取 → 蜂罐丛林带树全拒。
+  //   （cs:28167-28173 的 tenthAnniversary 存活支=191/192/383/384 脚基拒——
+  //   celebrationmk10 组合,常规路径不可达,不移植。）
+  const ntbFoot = gs.seedFlags.notTheBees && (gSheet === 60 || gSheet === 59);
+  if (gSheet !== 0 && gSheet !== 2 && gSheet !== 1 && gSheet !== 40 && !ORE_SHEETS.has(gSheet) && !ntbFoot) { if (LT_TRACE) console.log(`GLT r3 x=${i} j=${j} ground=${gSheet}`); return false; }
   if (j < 150) { if (LT_TRACE) console.log(`GLT r4 x=${i} j=${j} <150`); return false; }
 
+  // ★YYYYYY（2026-08-23）NTB #42：cs:28186-28192 干宽三连——skyblock/extraLivingTrees
+  //   之后的 **`else if (notTheBees && !drunkWorldGen)`** 支：num3-=Next(0,2)/
+  //   num4+=Next(0,2)（2 掷+加宽）。JS 曾整支缺 → NTB 干窄 1 格+流移 2 掷。
+  const ntbWiden = gs.seedFlags.notTheBees && !gs.seedFlags.drunkWorld;
   let num3 = i - rng.int(2, 2);   // cs:28182 Next(2,3) 恒 2（保留掷骰消耗）
   let num4 = i + rng.int(2, 2);   // cs:28183
+  if (ntbWiden) {
+    num3 -= rng.int(0, 1);        // cs:28189-28190 Next(0,2)
+    num4 += rng.int(0, 1);        // cs:28191-28192
+  }
   if (rng.int(0, 4) === 0) {      // cs:28200 Next(5)
     if (rng.int(0, 1) === 0) num3--;
     else num4++;
@@ -816,6 +836,11 @@ export function growLivingTree(
     num6 = i - 20; num7 = i + 20;
     num3 = i - rng.int(1, 2);
     num4 = i + rng.int(1, 2);
+    // ★YYYYYY（2026-08-23）NTB #42：cs:28214-28218 patch 干宽同款加宽支
+    if (ntbWiden) {
+      num3 -= rng.int(0, 1);      // cs:28215-28216 Next(0,2)
+      num4 += rng.int(0, 1);      // cs:28217-28218
+    }
     flag = num5 >= 4;
   }
   // 净空检查（cs:28232-28255）：树冠投影内(上方到 j-5)不得有实心物
@@ -1105,7 +1130,12 @@ export function runLivingTreesPass(
         // cs:15622-15629：自顶向下找首个实心格（超过 worldSurface 放弃）
         for (; !activeAt(st, num6, j) && j < gs.worldSurface; j++) { /* 空转 */ }
         if (j >= gs.worldSurface) continue;
-        if (sheetAt(st, num6, j) === 0) {   // cs:15632 type==0(泥土)
+        // ★YYYYYY（2026-08-23）NTB #42：cs:15629 锚基门 `type==0 || (notTheBees &&
+        //   type==60) || (notTheBees && tenthAnniversary && !drunk)`——蜂罐世界锚基
+        //   放行丛林草 60（第三析取 tenthAnniversary 系 celebrationmk10 组合,不在
+        //   常规路径,按约定不移植）。JS 曾只认 0 → NTB 丛林草带活树锚全拒。
+        const baseSheet = sheetAt(st, num6, j);
+        if (baseSheet === 0 || (gs.seedFlags.notTheBees && baseSheet === 60)) {   // cs:15629
           j--;
           if (j > 150) {
             let flag2 = true;

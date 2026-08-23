@@ -236,7 +236,9 @@ const WIRE_RED = TileStore.WIRE_RED;
  *  ②PlaceTile case 135 尾 SquareTileFrame(tx,ty)（cs:60162-65）——放置期组拆
  *  级联（邻格 165/187 族惰性帧校验击杀）；③放置校验=PlaceTile 后回读
  *  tile2.active()&&type==135（cs:4453）才拉线返回。 */
-export function placeStatueTrap(st: TileStore, rng: RNG, x: number, y: number): void {
+export function placeStatueTrap(st: TileStore, rng: RNG, x: number, y: number, gs?: GenState): void {
+  // ★R3-10 同族（W57:4409-4411）：actuallyNoTrapsForRealIMeanIt → return（与 !InWorld 同门）
+  if (gs?.seedFlags.actuallyNoTraps) return;
   if (!st.inBounds(x, y) || x < 20 || x > st.w - 21 || y < 20 || y > st.h - 21 || !TRAP) return;
   for (let i = -10; i <= 10; i++) {
     for (let j = -10; j <= 10; j++) {
@@ -367,7 +369,7 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
       //   含"幻影成功"——随机 y 落在既有同型雕像体内（flag2 拒）也计成功推进 num
       //   （甚至触发 PlaceStatueTrap）。
       if (st.flags[ai] && SHEET[st.type[ai]] === sheet) {
-        if (STATUES_WITH_TRAPS.has(num)) placeStatueTrap(st, rng, x, y);
+        if (STATUES_WITH_TRAPS.has(num)) placeStatueTrap(st, rng, x, y, gs);
         num++;
         done = true;
       } else {

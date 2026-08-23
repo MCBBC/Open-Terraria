@@ -96,7 +96,10 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
     e.lai2 += 1;
     const idx = Math.floor(e.lai2 / interval);
     if (e.lai2 % interval === 0 && Math.hypot(p.cx - e.cx, p.cy - e.cy) < 1200) {
-      addProj(game, new InsanityShadowProj(p, 10, idx % 3));
+      // :44905-44911 Boss_CanShootExtraAt(i, num3%3, 3, 1200f)——第二参 hint 是
+      // 多人多目标错峰参数非变体选择(变体在 RandomizeInsanityShadowFor 内
+      // Next(4));单人 1200px 门近似已足
+      addProj(game, new InsanityShadowProj(p, 10));
     }
     if (idx >= 3) e.lai2 = 0;
   } else {
@@ -152,17 +155,20 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
       }
       break;
     }
-    case 1:                                          // 前向尖刺 :44528-44538
+    case 1:                                          // 前向尖刺 :44666-44678
+      // :44667-44669 入态首拍(ai[1]==0,自增前)Scream——曾误 30(1456 帧机入带
+      // 时机残留),尖叫晚 0.5s=尖刺已在脚下(蓝队 R1-04 修)
+      if (e.ai1 === 0) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
       e.ai1 += 1; halt = true;
       makeSpikesForward(game, e, p, 1);
-      // FindFrame :67394-67400 尖刺态入攻击帧带时 Scream(原版在帧机,此处
-      // AI 侧入态首拍等价——曾整态无声,2026-08-19 终审补)
-      if (e.ai1 === 30) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
       if (e.ai1 >= 80) { e.ai0 = 0; e.ai1 = 0; }
       break;
-    case 4:                                          // 双侧尖刺 :44530-44543
+    case 4:                                          // 双侧尖刺 :44679-44691
+      if (e.ai1 === 0) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);    // :44681-44683 首拍(同上)
       e.ai1 += 1; halt = true;
-      if (e.ai1 === 30) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);   // :67452-67460 入带 Scream(终审补)
+      // :44687 每 tick TargetClosest——90t 铺刺期间玩家穿位持续转向,
+      // 左右侧尖刺分配随 direction 实时翻转(蓝队 R1-11 补)
+      if (p && !p.dead) e.facing = p.cx > e.cx ? 1 : -1;
       makeSpikesBothSides(game, e, p, 1);
       if (e.ai1 >= 90) { e.ai0 = 0; e.ai1 = 0; }
       break;
@@ -227,7 +233,8 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
       if (e.ai1 === 30) {
         game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
         if (p && !p.dead) e.facing = p.cx > e.cx ? 1 : -1;
-        for (let i = 0; i < 6; i++) addProj(game, new InsanityShadowProj(p, DMG_HANDS, i % 3));
+        // :44855-44861 六连各独立 RandomizeInsanityShadowFor(Next(4) 逐只重掷)
+        for (let i = 0; i < 6; i++) addProj(game, new InsanityShadowProj(p, DMG_HANDS));
       }
       e.ai1 += 1; halt = true;
       if (e.ai1 % 4 === 0 && e.ai1 >= 28) {
@@ -526,8 +533,8 @@ export class DeerclopsRubbleProj extends Entity {
 }
 
 // ---------------------------------------------------------------------------
-// 弹幕 965 敌对影手（AI_187_ShadowHand :39798-39940 + RandomizeInsanityShadowFor
-// :39703-39796）。ai0 初值 0/180/300/390 直接选定变体段,到段尾即灭（总寿 480t 封顶）
+// 弹幕 965 敌对影手（AI_187_ShadowHand :43273-43420 + RandomizeInsanityShadowFor
+// :43178-43265）。ai0 初值 0/180/300/390 直接选定变体段,到段尾即灭（总寿 480t 封顶）
 // ---------------------------------------------------------------------------
 export class InsanityShadowProj extends Entity {
   w = 40; h = 40;
@@ -537,17 +544,67 @@ export class InsanityShadowProj extends Entity {
   private ai0: number;
   private readonly ai1: number;
   private rotation = 0;
-  constructor(target: { cx: number; cy: number; vx: number } | null, private dmg: number, hint: number) {
+  constructor(target: { cx: number; cy: number; vx: number; vy?: number } | null, private dmg: number) {
     super();
-    // RandomizeInsanityShadowFor 单人近似：玩家环上随机点 + 段直选
+    // RandomizeInsanityShadowFor（Projectile.cs:43178-43265）1:1：num2=Next(4)
+    // 均匀四变体（曾 hint%3 错峰参当变体选→390 螺旋恒不可达+按出手序确定可预判,
+    // 蓝队 R1-05 修）。isHostile 档:num3=200 num4=30 num5=30。
+    // ★出生安全重掷环(43178 尾 8 次)只对"非目标玩家"判盒——单人目标即唯一玩家
+    // → 恒一次通过,单人无需实现。
     const c = target ?? { cx: 0, cy: 0, vx: 0 };
-    const a = Math.random() * Math.PI * 2;
-    this.x = c.cx - Math.cos(a) * 200 - this.w / 2;
-    this.y = c.cy - Math.sin(a) * 200 - this.h / 2;
-    this.vx = Math.cos(a) * 4;
-    this.vy = Math.sin(a) * 4;
-    this.ai0 = [0, 180, 300, 390][hint % 4];
-    this.ai1 = a;
+    const cvy = (target as { vy?: number } | null)?.vy ?? 0;
+    let num = Math.floor(Math.random() * 2) * 2 - 1;          // Next(2)*2-1 = ±1
+    const num2 = Math.floor(Math.random() * 4);               // Next(4) 变体
+    const num3 = 200;
+    const num5 = 30;
+    if (c.vx * num > 0) num *= -1;                            // :43189 出生在移动背侧
+    // RotatedBy(θ) = (x cosθ − y sinθ, x sinθ + y cosθ)
+    if (num2 === 1) {                                         // :43210-43222 环绕
+      const num10 = Math.random() * Math.PI * 2;
+      this.x = c.cx - Math.cos(num10) * num3 - this.w / 2;
+      this.y = c.cy - Math.sin(num10) * num3 - this.h / 2;
+      this.ai0 = 180;
+      this.ai1 = num10 - Math.PI / 2;
+      this.vx = Math.cos(num10) * 4;
+      this.vy = Math.sin(num10) * 4;
+    } else if (num2 === 2) {                                  // :43223-43235 俯冲
+      const num9 = Math.random() * Math.PI * 2;
+      this.x = c.cx - Math.cos(num9) * num3 - this.w / 2;
+      this.y = c.cy - Math.sin(num9) * num3 - this.h / 2;
+      this.ai0 = 300;
+      this.ai1 = num9;
+      this.vx = Math.cos(num9) * 4;
+      this.vy = Math.sin(num9) * 4;
+    } else if (num2 === 3) {                                  // :43236-43256 螺旋收束
+      const f = Math.random() * Math.PI * 2;
+      const num7 = 60;                                        // isHostile
+      const num8 = (Math.PI / 2 / num7) * (Math.random() * 2 - 1);   // NextFloatDirection ∈ [-1,1)
+      let px = c.cx + c.vx * num7, py = c.cy + cvy * num7;    // 出生 = 目标 + 速度×60 前瞻
+      let vecX = Math.cos(f) * 8, vecY = Math.sin(f) * 8;
+      for (let i = 0; i < num7; i++) {                        // 沿旋矢回走 60 步
+        px -= vecX; py -= vecY;
+        const cs = Math.cos(-num8), sn = Math.sin(-num8);
+        const nvx = vecX * cs - vecY * sn, nvy = vecX * sn + vecY * cs;
+        vecX = nvx; vecY = nvy;
+      }
+      this.x = px - this.w / 2;
+      this.y = py - this.h / 2;
+      this.vx = vecX; this.vy = vecY;
+      this.ai0 = 390;
+      this.ai1 = num8;
+    } else {                                                  // default :43197-43209 侧向直插
+      // num4=30,variant0 hostile 再 +10 → num12 = 40+10 = 50,速 = 200/50 = 4
+      const num11 = (Math.random() * 2 - 1) * Math.PI * 0.125;       // ±22.5° 扇形
+      const ox = num * -num3, oy = 0;
+      const rx = Math.cos(num11), ry = Math.sin(num11);
+      this.x = c.cx + c.vx * num5 + (ox * rx - oy * ry) - this.w / 2;
+      this.y = c.cy + cvy * num5 + (ox * ry + oy * rx) - this.h / 2;
+      const spd = num3 / 50, vx0 = num * spd, vy0 = 0;
+      this.vx = vx0 * rx - vy0 * ry;
+      this.vy = vx0 * ry + vy0 * rx;
+      this.ai0 = 0;
+      this.ai1 = 0;
+    }
   }
   fixedUpdate(_dt: number, game: GameHooks): void {
     this.ai0 += 1;

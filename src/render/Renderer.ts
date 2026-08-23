@@ -371,7 +371,7 @@ import { statOfInternal } from '../data/vanillaItemStats';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { ICE_SLIP_IDS, FROZEN_SLIME_ID } from '../entities/Player';
-import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS } from '../entities/Mounts';
+import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS, MOUNT_DATA } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
 import { localAIOf } from '../entities/bossAI_moon_events';
@@ -388,7 +388,8 @@ import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
 import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
 import { wofDrawArea } from '../entities/bossAI_wof';
 import { dutchmanAnim, witherBeastLocal } from '../entities/bossAI_dd2';
-import { mlElipseVec } from '../entities/bossAI_duke_moonlord';
+import { mlElipseVec, mlSlotDecode, ML_HAND_ATTACKS, ML_HEAD_ATTACKS } from '../entities/bossAI_duke_moonlord';
+import { ML_EYE_ATTACKS } from '../entities/bossAI_lunar_misc';
 import { wingDrawOf, wingDrawFrame, wingAnchorForRow, HEADGEAR_ZERO_ROWS, stealthFactors } from '../data/vanillaWingVisuals';
 import { dyeApplyOf, applyDyePass, type DyeApply } from '../data/vanillaDyes';
 import {
@@ -1821,6 +1822,83 @@ export const NPC_TINT_KA = (() => {
   return 0.55;
 })();
 
+// ===================== 月总 1457 战斗预警绘制（蓝队 R1-03） =====================
+/** SmolBullet(幻影矢 462)齐射预警（Main.cs:25193-25211 手 397 ai0==3 /
+ *  :25262-25280 头 396 ai0==3 / :25337-25346 真眼 400 ai0==1,三处同式）。
+ *  GetMoonlordSmolBulletWarningTimes(Main.cs:26697-26700)恒 40/10:
+ *  num155=Remap(t,dur−50,dur−10,1,0)(线宽 1→0)、num156=Remap(同窗,0,1)
+ *  (星芒 flare/线 α 0→1)——窗前 num156=0 无绘制。星芒 White→Cyan
+ *  (fadeIn 0→0.5/fadeOut 0.9→1,rot=t×2π/dur×3×num156²,scale=(10,6)×num155²,
+ *  fatness=(3,3));瞄准线 = 瞳位 → 瞳位×30,宽 16×num155,Cyan×num156→透明。
+ *  (ex,ey)=瞳位椭圆偏移,(offX,offY)=段附加偏移(手 vector39=−sx,3/头 0/眼 0) */
+function mlSmolBulletWarn(
+  ctx: CanvasRenderingContext2D | null,
+  cx: number, cy: number, ex: number, ey: number, offX: number, offY: number,
+  t: number, dur: number,
+): void {
+  if (!ctx || dur <= 0) return;
+  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+  const num155 = 1 + (0 - 1) * clamp01((t - (dur - 50)) / ((dur - 10) - (dur - 50)));
+  const num156 = clamp01((t - (dur - 50)) / ((dur - 10) - (dur - 50)));
+  if (num156 <= 0) return;
+  const rot = t * (Math.PI * 2 / dur) * 3 * num156 * num156;
+  prettyStarSparkle(ctx, 1, cx + ex + offX, cy + ey + offY,
+    [255, 255, 255], [0, 255, 255],
+    num156, 0, 0.5, 0.9, 1,
+    rot, [10 * num155 * num155, 6 * num155 * num155], [3, 3]);
+  const x1 = cx + ex + offX, y1 = cy + ey + offY;
+  const x2 = cx + ex * 30 + offX, y2 = cy + ey * 30 + offY;
+  const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+  grad.addColorStop(0, `rgba(0,255,255,${num156})`);
+  grad.addColorStop(1, 'rgba(0,255,255,0)');
+  ctx.save();
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 16 * num155;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** 死光蓄能星芒（头 396 ai0==1 Main.cs:25276-25307——两段同式块各画一次=双画;
+ *  真眼 400 ai0==4 Main.cs:25352-25379 双星芒异式）。包络 num=Remap(t,0,180,0,1)
+ *  (槽前 180t 渐入);k=num+0.1+0.05·sin(num·2π·18) 呼吸。注意:原版此二段的
+ *  "朝玩家瞄准线"包在 `if (0 == 1)` 死代码内(:25288/:25362)——只有星芒是活的
+ *  (红队 R1-03 把死代码线也当活行为,蓝队复核勘误) */
+function mlMoonLordChargeSparkle(
+  ctx: CanvasRenderingContext2D | null,
+  cx: number, cy: number, ex: number, ey: number, t: number, kind: 'head' | 'eye',
+): void {
+  if (!ctx) return;
+  const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+  const num = clamp01(t / 180);                       // Remap(t,0,180,0,1)
+  if (num <= 0) return;
+  const k = num + 0.1 + 0.05 * Math.sin(num * Math.PI * 2 * 18);
+  if (kind === 'head') {
+    // 头:同式星芒画两次(:25276-25286 + :25297-25307 两个 if(ai0==1) 块)
+    for (let i = 0; i < 2; i++) {
+      prettyStarSparkle(ctx, 1, cx + ex, cy + ey,
+        [255, 255, 255], [0, 255, 255],
+        num, 0, 0.3, 0.9, 1,
+        num * num * Math.PI * 2 * 5,
+        [5 * k, 3.6 * k], [3, 3]);
+    }
+  } else {
+    // 眼:星芒 A(rot=0,scale=(5,3)×1.25,fat=(3,3))+ 星芒 B(rot=num²·2π·3,
+    // scale=(5,5)×0.85,fat=(3,3)×0.85)
+    prettyStarSparkle(ctx, 1, cx + ex, cy + ey,
+      [255, 255, 255], [0, 255, 255],
+      num, 0, 0.5, 0.9, 1,
+      0, [5 * 1.25 * k, 3 * 1.25 * k], [3, 3]);
+    prettyStarSparkle(ctx, 1, cx + ex, cy + ey,
+      [255, 255, 255], [0, 255, 255],
+      num, 0, 0.5, 0.9, 1,
+      num * num * Math.PI * 2 * 3,
+      [5 * 0.85 * k, 5 * 0.85 * k], [3 * 0.85, 3 * 0.85]);
+  }
+}
+
 export class Renderer {
   /** GL 合成层(#1 背景族 + #2 全屏地图共用;docs/webgl2-migration-plan.md) */
   glfx: GLSpriteLayer | null = null;
@@ -2392,8 +2470,9 @@ export class Renderer {
       screenTileY: cam.y / TILE,
       dayTime: clock0 ? clock0.isDay : true,
       // 映射到原版 24h 表盘（Utils.GetDayTimeAs24FloatStartingFromMidnight :738-745）：
-      // 我方黎明 timeOfDay=0.25 ↔ 4.5h；取模防午夜负值
-      hour24: ((((clock0 ? clock0.timeOfDay : 0.5) - 0.25) % 1 + 1) % 1) * 24 + 4.5,
+      // Clock.timeOfDay 本就是 0=午夜 24h 表盘(0.1875=4:30AM)——直乘 24
+      // （★曾用 −0.25+4.5 式与 Clock 定义自相矛盾差 1.5h,2026-08-23 校正）
+      hour24: (clock0 ? clock0.timeOfDay : 0.5) * 24,
       nightElapsed01: (((clock0 ? clock0.timeOfDay : 0) - 0.8125) % 1 + 1) % 1,
       fullMoon: clock0?.moonPhase === 0,
       worldBloodMoon: !!clock0?.bloodMoon,
@@ -2418,7 +2497,7 @@ export class Renderer {
       // 月总战滤镜激活门（SceneState.cs:109 ClosestNPCPosition[398]≠Zero——
       // SceneMetrics.cs:739-763 全场 NPC 扫描，核心屏外也激活）：取首个在场
       // 核心（vanillaId 398）中心；drawScreenFilterChain 同源取其屏幕位
-      moonLordCore: this._moonLordCorePos(entities),
+      moonLordCore: this._moonLordFilterTarget(entities),
     });
     this._monoFrameMs = this._liquidNow;
 
@@ -2516,6 +2595,19 @@ export class Renderer {
       }
       if (!bgDone) {
         this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
+      }
+      // DrawSurfaceBG_DrawChangeOverlay（:60533-60542 BackgroundChangeFlashInfo）：
+      // 群系背景切换的黑闪遮罩（flash=1 落定、−0.05/帧衰减 20 帧；ValueChanged
+      // !gameMenu 门=仅游戏内，菜单换样式无闪）。原版画在每组层后=世界层之前
+      for (let a = 0; a < 13; a++) {
+        const p = this.biomeBg.bgFlash[a];
+        if (p > 0.01) {
+          ctx.save();
+          ctx.globalAlpha = p;
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, viewW, viewH);
+          ctx.restore();
+        }
       }
       // 云近双通道（DrawClouds_Closer/_Closest :58871/:58942——群系背景层之后）
       this.sky.drawCloudsNear(ctx, viewW, viewH, cam.y);
@@ -2925,7 +3017,7 @@ export class Renderer {
     //       时光照暗 → 加性光晕被乘成不可见,与耀斑同类错误 2026-08-20 审计）
     const litVis = litNatureVisibility(clock);
     if (litVis > 0.003) {
-      const ft = ((clock.timeOfDay - 0.25) / 0.5);
+      const ft = ((clock.timeOfDay - 0.1875) / 0.625);   // =Main.time/54000(★时基校正)
       const sunX = Math.max(0, Math.min(1, ft)) * viewW;
       const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
       const sunY = dip * 250 + 180;
@@ -3177,22 +3269,37 @@ export class Renderer {
     //      100px 屏幕 10 气泡；岩浆宽限耗损时换火焰条）
     this.breathMeter.draw(ctx, player, cam, viewH, this.atlas, this.playerInventory);
 
-    // 12. 死亡画面（DrawInterface_35_YouDied Main.cs:44765 + 灰化遮罩）
+    // 12. 死亡画面（DrawInterface_35_YouDied Main.cs:44765 + 1457 跳过提示）
     if (player.dead) this.drawDeathScreen(ctx, player, viewW, viewH);
+
+    // 13. 死亡色调（★用户需求：整帧色调变灰如"遗照"——非加遮罩；immuneAlpha ramp
+    //     → grayscale 滤镜自绘整帧（含世界+HUD+死亡文字全部去饱和）。原版无此
+    //     全屏效果（GetDeathAlpha 只作用于死亡 UI 文字）=本仓视觉增强。
+    //     filter 不支持的环境（旧 Safari）静默跳过=保持彩色，不回退遮罩）
+    if (player.dead && player.immuneAlpha > 0 && 'filter' in ctx) {
+      const k = (Math.min(255, player.immuneAlpha) / 255) * 0.85;   // 上限 85% 灰度（保留微弱色相更近"遗照"）
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.filter = `grayscale(${k.toFixed(3)})`;
+      ctx.drawImage(ctx.canvas, 0, 0);
+      ctx.restore();                                                 // restore 复位 filter
+    }
   }
 
-  /** 死亡 UI（原版 DrawInterface_35_YouDied :44765-44801 1:1 + 灰化遮罩）：
+  /** 死亡 UI（原版 DrawInterface_35_YouDied :44765-44801 1:1 + 1457 跳过提示）：
    *  - 中央文字「你被杀死了……」（Lang.inter[38]，DeathText 大字号）@ 屏中 -60
    *  - 掉钱行「掉了{0}」（Game.DroppedCoins，仅 lostCoins>0）@ 下一行
-   *  - 重生倒计时（Game.RespawnInSuffix {0}=秒数，scale 0.7）@ 屏中 +10
-   *  - 文字色 = GetDeathAlpha（Player.cs:53284：r=0.9α g=0.5α b=0.5α a=0.4α——
+   *  - ★1457 跳过提示（Main.cs:46104-46134）："按SPACE跳过"（Game.RespawnSkip，
+   *    {InputTrigger_Jump}→SPACE）@ 提示位；门=player.respawnSkipUi（全门同跳过逻辑）；
+   *    淡入 num4=Remap(frames,0,60,0,1)、滑移 num3=Remap(num4,0,1,70,20)·num4
+   *  - 重生倒计时（Game.RespawnInSuffix {0}=秒数，scale 0.7）@ 提示位 +40
+   *    （原版 num 共用：提示滑移带动倒计时同步下移，门关时 slide=0）
+   *  - 文字色 = GetDeathAlpha（Player.cs:54848：r+α0.9 g+α0.5 b+α0.5 a+α0.4——
    *    immuneAlpha +2/tick 缓升，红黑渐显）
-   *  - 灰化遮罩（原版无全局去饱和——视觉近似：随 immuneAlpha 渐深的中性灰罩） */
+   *  - 灰化：已移除遮罩方案——整帧色调去饱和在 render() 尾段（遗照式，见彼处注） */
+  private _respawnSkipFrames = 0;
   private drawDeathScreen(ctx: CanvasRenderingContext2D, player: Player, viewW: number, viewH: number) {
     const a = player.immuneAlpha / 255; // 0→1 缓升（约 2.1s 走满）
-    // 灰化遮罩
-    ctx.fillStyle = `rgba(46, 40, 46, ${(a * 0.55).toFixed(3)})`;
-    ctx.fillRect(0, 0, viewW, viewH);
     // 文字色（GetDeathAlpha 公式）
     const col = `rgba(${Math.round(230 * 0.9 * a)},${Math.round(230 * 0.5 * a)},${Math.round(230 * 0.5 * a)},${(a * 0.4 + a * 0.6).toFixed(3)})`;
     ctx.textAlign = 'center';
@@ -3215,12 +3322,33 @@ export class Renderer {
       ctx.strokeText(coins, cx, viewH / 2 - 10);
       ctx.fillText(coins, cx, viewH / 2 - 10);
     }
-    // 重生倒计时（原版 num=-60+70=+10，scale 0.7）
+    // ★1457 跳过提示（Main.cs:46104-46134）：frames 计数器可用时递增/不可用归零；
+    //   淡入 60t、滑移 70→20px·num4（Remap 链 1:1）；文案 {InputTrigger_Jump}→SPACE
+    let slide = 0;
+    if (player.respawnSkipUi) {
+      this._respawnSkipFrames++;
+      const num4 = Math.min(1, this._respawnSkipFrames / 60);          // Remap(0,60→0,1)
+      const num3 = 70 - num4 * 50;                                     // Remap(num4,0,1→70,20)
+      slide = num3 * num4;
+      const skipAlpha = a * num4;                                      // GetDeathAlpha(Transparent)*num4
+      const skipText = Lang.text('Mods.SandboxWorld.UI.RespawnSkip');
+      ctx.font = 'bold 20px "Fusion Pixel 12px zh_hans", monospace';
+      ctx.strokeStyle = `rgba(0,0,0,${(skipAlpha * 0.85).toFixed(3)})`;
+      ctx.lineWidth = 4;
+      const sy = viewH / 2 + 26 + slide;
+      ctx.strokeText(skipText, cx, sy);
+      ctx.fillStyle = `rgba(${Math.round(255 * 0.9 * a)},${Math.round(255 * 0.5 * a)},${Math.round(255 * 0.5 * a)},${skipAlpha.toFixed(3)})`;
+      ctx.fillText(skipText, cx, sy);
+    } else {
+      this._respawnSkipFrames = 0;                                     // :46137 else 归零
+    }
+    // 重生倒计时（原版 num=-60+70=+10，scale 0.7；★位置随提示滑移联动——num 共用）
     const secs = 1 + Math.floor(player.respawnTimer / 60);
     ctx.font = 'bold 24px "Fusion Pixel 12px zh_hans", monospace';
     const cd = Lang.text('Game.RespawnInSuffix', String(secs));
-    ctx.strokeText(cd, cx, viewH / 2 + 36);
-    ctx.fillText(cd, cx, viewH / 2 + 36);
+    const cdY = viewH / 2 + (player.respawnSkipUi ? 26 + slide + 40 : 36);
+    ctx.strokeText(cd, cx, cdY);
+    ctx.fillText(cd, cx, cdY);
     ctx.textBaseline = 'alphabetic';
   }
   /** Game 每帧注入：本次死亡掉落钱数（LocalPlayer.lostCoins） */
@@ -6782,6 +6910,15 @@ export class Renderer {
       ctx.restore();
     }
     ctx.restore();
+    // ---- SmolBullet 齐射预警（Main.cs:25193-25211,蓝队 R1-03）：ai0==3 槽末
+    //      50t 青色星芒+瞄准线;瞳位椭圆 (30,66)×lai1 + vector39=(−sx,3) ----
+    if (e.ai0 === 3) {
+      const slot = mlSlotDecode(Math.max(0, e.ai1), ML_HAND_ATTACKS[e.ai2 === 0 ? 0 : 1]);
+      if (slot.atk === 3) {
+        const [ex, ey] = mlElipseVec(e.lai0, 30 * e.lai1, 66 * e.lai1);
+        mlSmolBulletWarn(ctx, e.cx, e.cy, ex, ey, -sx, 3, slot.t, slot.dur);
+      }
+    }
   }
 
   /** 月总头 396（case 396 :24449-24503）：眼窝（ai0<0 闲置 Extra_26 行 / 否则 Extra_18
@@ -6938,6 +7075,19 @@ export class Renderer {
       ctx.restore();
     }
     ctx.restore();
+    // ---- 战斗预警（Main.cs:25262-25307,蓝队 R1-03）：ai0==3 SmolBullet 齐射
+    //      星芒+瞄准线(瞳椭圆 (27,59),vector46=(0,0));ai0==1 死光蓄能星芒
+    //      (Remap(t,0,180) 包络,双画) ----
+    if (e.ai0 === 3 || e.ai0 === 1) {
+      const slot = mlSlotDecode(Math.max(0, e.ai1), ML_HEAD_ATTACKS);
+      if (slot.atk === 3 && e.ai0 === 3) {
+        const [ex, ey] = mlElipseVec(e.lai0, 27 * e.lai1, 59 * e.lai1);
+        mlSmolBulletWarn(ctx, e.cx, e.cy, ex, ey, 0, 0, slot.t, slot.dur);
+      } else if (slot.atk === 1 && e.ai0 === 1) {
+        const [ex, ey] = mlElipseVec(e.lai0, 27 * e.lai1, 59 * e.lai1);
+        mlMoonLordChargeSparkle(ctx, e.cx, e.cy, ex, ey, slot.t, 'head');
+      }
+    }
   }
 
   /** 月总游离眼 400（Main.cs:24492-24504 case 400 独占，1:1）：本体 NPC_400 帧
@@ -6974,6 +7124,17 @@ export class Renderer {
       ctx.drawImage(ex19.img, ex19.sx, ex19.sy, ex19.sw, ex19.sh,
         (-ex19.sw / 2) * sc, (-ex19.sh / 2) * sc, ex19.sw * sc, ex19.sh * sc);
       ctx.restore();
+      // ---- 战斗预警（Main.cs:25337-25379,蓝队 R1-03）：ai0==1 SmolBullet 齐射
+      //      星芒+瞄准线(表源 MoonLordAttacksArray2,无附加偏移);ai0==4 死光
+      //      蓄能双星芒(Remap(t,0,180) 包络) ----
+      if (e.ai0 === 1 || e.ai0 === 4) {
+        const slot = mlSlotDecode(Math.max(0, e.ai1), ML_EYE_ATTACKS);
+        if (slot.atk === 1 && e.ai0 === 1) {
+          mlSmolBulletWarn(ctx, e.cx, e.cy, ex, ey, 0, 0, slot.t, slot.dur);
+        } else if (slot.atk === 4 && e.ai0 === 4) {
+          mlMoonLordChargeSparkle(ctx, e.cx, e.cy, ex, ey, slot.t, 'eye');
+        }
+      }
     }
   }
 
@@ -9865,10 +10026,16 @@ export class Renderer {
       // mnt 非空即骑乘;hidden 旗由聚合侧随翼记录,vy 项不入记忆化键故在此判）
       const wingAgg = p.equipStats.wing;
       // 隐藏翼显形门（★1457 :15709-15717 改 `vy!=0 && !mount.Active`——1456 旧条件
-      // 是 vy!=0 && mount.CanUseWings;1457 下骑【任何】坐骑时隐藏翼 vy≠0 即显形,
-      // 不再要求坐骑能飞。V2b D6 差异登记转正）
+      // 是 vy!=0 && mount.CanUseWings;1457 下骑【任何】坐骑都不再显形,仅"空中且
+      // 未骑乘"一途（R4-24 勘误:此前注释把方向写反,代码一直是对的——勿按旧注释
+      // "对齐"。与 Player.ts:3419-3425 正确注释一致）。V2b D6 差异登记转正）
       const wingVisible = !wingAgg?.hidden || (p.vy !== 0 && !mnt);
-      const wingSlot = wingAgg && wingVisible && !mnt && !merfolkClearWings && !mntHidden ? wingAgg.logic : 0;
+      // R4-23（P57:26824-26834 + Mount.cs:572-580/:2550-2585）：MountData.CanUseWings
+      // 是 C# bool 字段【缺省 false】,仅 SetAsRollerSkate(57-60) 置 true;未骑乘恒 true。
+      // 本仓曾骑任何坐骑恒清翼（过严）。vanilla-mounts.json 仅 57-60 带该键(=true),
+      // 其余缺省=false。滚轴鞋滑行分支未实装（备案）
+      const mountCanWings = !mnt || MOUNT_DATA[String(mnt.type)]?.CanUseWings === true;
+      const wingSlot = wingAgg && wingVisible && mountCanWings && !merfolkClearWings && !mntHidden ? wingAgg.logic : 0;
       if (wingSlot > 0 && this.atlas) {
         const d = wingDrawOf(wingSlot);
         const dyeEmu = dyeApplyOf(p.wingDyeVid());
@@ -11409,7 +11576,7 @@ export class Renderer {
         ctx.drawImage(gl.canvas, 0, 0);
         // moonLord 族补画（无像素读取，GL 链结果上直叠——VeryHigh 序在 Medium
         // 柱族之后即补画在后，次序同原版 EndCapture 链表）
-        const core4 = this._moonLordCorePos(this._frameEntities);
+        const core4 = this._moonLordFilterTarget(this._frameEntities);
         const playerScr = { x: (player.cx - cam.x) * z + viewW / 2, y: (player.cy - cam.y) * z + viewH / 2 };
         for (const f of mono.visibleFilters()) {
           if (f.def.kind !== 'moonLord') continue;
@@ -11431,7 +11598,7 @@ export class Renderer {
     if (mono.anyInUse) {
       // 月总核心屏幕位（MoonLord 滤镜 UseTargetPosition=npc[398].Center，
       // MoonLordScreenShaderData.cs:42-45——aimAtPlayer=false 支）
-      const core = this._moonLordCorePos(this._frameEntities);
+      const core = this._moonLordFilterTarget(this._frameEntities);
       mono.draw(ctx, this.canvas, viewW, viewH, {
         x: (player.cx - cam.x) * z + viewW / 2,
         y: (player.cy - cam.y) * z + viewH / 2,
@@ -11442,17 +11609,41 @@ export class Renderer {
     }
   }
 
-  /** 本帧实体列表快照（_moonLordCorePos 消费用；render() 每帧刷新） */
+  /** 本帧实体列表快照（_moonLordFilterTarget 消费用；render() 每帧刷新） */
   private _frameEntities: Entity[] = [];
-  /** Moon Lord Core（NPC 398）中心世界 px；null=不在场。
-   *  SceneState.cs:109 的 ClosestNPCPosition[398] 全场扫描等价（每帧线性
-   *  查找，实体列表 ≤ 数百——与视区扫描无涉，屏外核心也返回） */
-  private _moonLordCorePos(entities: Entity[]): { x: number; y: number } | null {
+  /** Moon Lord 滤镜目标位（MoonLordScreenShaderData.UpdateMoonLordIndex
+   *  MoonLordScreenShaderData.cs:24-66,1457 重写——蓝队 R1-07a 补):
+   *  基准 = 核心 398 中心;①真眼 400 ai0==4(死光炮)按攻击包络
+   *  Remap(t,0,180,0,1)×Remap(t,340,360,1,0) 取最强者 Lerp 混入
+   *  (t = ai1 对 MoonLordAttacksArray2 解码槽内时间);②核心 ai0==-2(远距传送
+   *  归位剧,ai1 0→60)按 Remap(ai1,55,60,1,0) 拉回核心(★非死亡演出——398
+   *  死亡演出是 ai0=2,红队 R1-07 表述勘误)。null=核心不在场 */
+  private _moonLordFilterTarget(entities: Entity[]): { x: number; y: number } | null {
+    let core: Enemy | null = null;
     for (const e of entities) {
       const en = e as Entity & { vanillaId?: number | null; dead?: boolean };
-      if (!en.dead && en.vanillaId === 398) return { x: (e as Enemy).cx, y: (e as Enemy).cy };
+      if (!en.dead && en.vanillaId === 398) { core = e as Enemy; break; }
     }
-    return null;
+    if (!core) return null;
+    const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+    let tx = core.cx, ty = core.cy;
+    // ① 死光炮真眼包络混合（取包络最强者）
+    let num = 0, ex = 0, ey = 0;
+    for (const e of entities) {
+      const en = e as Entity & { vanillaId?: number | null; dead?: boolean; ai0?: number };
+      if (en.dead || en.vanillaId !== 400 || en.ai0 !== 4) continue;
+      const eye = e as Enemy;
+      const slot = mlSlotDecode(Math.max(0, eye.ai1), ML_EYE_ATTACKS);
+      const env = clamp01((slot.t - 0) / 180) * (1 - clamp01((slot.t - 340) / 20));
+      if (env > num) { num = env; ex = eye.cx; ey = eye.cy; }
+    }
+    if (num > 0) { tx = tx + (ex - tx) * num; ty = ty + (ey - ty) * num; }
+    // ② 核心传送剧拉回（Remap(ai1,55,60,1,0)）
+    if (core.ai0 === -2) {
+      const num2 = 1 - clamp01((core.ai1 - 55) / 5);
+      if (num2 > 0) { tx = tx + (core.cx - tx) * num2; ty = ty + (core.cy - ty) * num2; }
+    }
+    return { x: tx, y: ty };
   }
 
   /** render() 世界段入口调用：切换 this.ctx → 世界层（返回 null = 逃生门关闭，

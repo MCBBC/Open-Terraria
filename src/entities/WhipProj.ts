@@ -289,8 +289,9 @@ export class WhipProj extends Entity {
     // ---- 蛇环补挥（accSnakeBand,ItemCheck_ManageUsage :43041-43063）：真挥计数
     //  repeatWhipSwings % 3 == 0 且物品动画过半（本仓代理 = 鞭 ai0 过 timeToFlyOut/2,
     //  同一时刻）→ 补挥一鞭：maxTagEffects>1 时从手持+1 起扫背包取下一把 IsAWhip,
-    //  否则同件;伤 = GetWeaponDamage×0.25（min 3）/击退 ×0.25/朝向散布 ±0.314rad
-    //  （ItemCheck_Shoot !withAudioVisualFeedback 分支 :49168-49182）——无音效无动画。
+    //  否则同件;伤 = GetWeaponDamage×0.3（min 3）/击退 ×0.25/朝向散布 ±0.314rad
+    //  （ItemCheck_Shoot !withAudioVisualFeedback 分支 :49165-49182:num169=0.3 伤/
+    //  num170=0.25 击退——蓝队 R2-09 勘误,曾误把击退系数抄给伤害）——无音效无动画。
     //  登记偏差：原版 GetWeaponDamage 含玩家伤害乘区+词缀,本仓取鞭表基伤
     //  （combatWeapon whip.dmg）×召唤乘区在 ctor 内,词缀不并入 ----
     if (owner?.equipStats.accSnakeBand && !this.isEcho && this.ai2 < 10
@@ -319,7 +320,7 @@ export class WhipProj extends Entity {
       }
       const echo = new WhipProj(owner.cx, owner.cy,
         this.aimAng() + (Math.random() * 2 - 1) * 0.3141593, echoProj, echoItem,
-        Math.max(3, Math.round(echoDmg * 0.25)), echoKb * 0.25, echoAnim, echoSpeed,
+        Math.max(3, Math.trunc(echoDmg * 0.3)), echoKb * 0.25, echoAnim, echoSpeed,
         () => owner, this.aimAng);
       echo.isEcho = true;
       (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(echo, 'projectiles');

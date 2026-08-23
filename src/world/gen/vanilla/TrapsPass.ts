@@ -669,6 +669,10 @@ export function placeTrapCanContinue(st: TileStore, x: number, y: number): boole
 
 /** placeTrap 主体（cs:8875-9460，普通种子路径）。type: 0 飞镖 / 1 巨石 / 2 炸药桶 / 3 热喷泉 */
 export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number, type = -1): boolean {
+  // ★R3-10（W57:8876-8879；1456 :8878-8881 同有——存量缺口非 1457 增量）：
+  //  "moretrapsplease"（actuallyNoTrapsForRealIMeanIt）种子下陷阱全免,入口即
+  //  return true（把"没放"当"放成功",防调用方重试）——先于 CanContinue
+  if (gs.seedFlags.actuallyNoTraps) return true;
   // ★1457 入口门（cs:8880）：CanContinue 先于微光回避
   if (!placeTrapCanContinue(st, x2, y2)) return false;
   // 微光回避（cs:8884，用原始 y2 掷点）：距 shimmerPosition <100 拒（未生成时 (0,0)）

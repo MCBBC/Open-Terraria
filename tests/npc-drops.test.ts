@@ -221,8 +221,9 @@ describe('提取器三盲区 + 求值器门（2026-08-13 审计修复）', () =>
   });
 
   it('盲区3：冰模仿怪 629 肉前池（RegisterIceMimic_GetEasyModeItemPool 方法实参）', () => {
-    // :244-250 池 {670,724,950,(1319),987,1579}；挂 NotRemixSeedEasymode 门（曾恒 false → 整支丢失）
-    const pool = [670, 724, 950, 1319, 987, 1579];
+    // 1457 :244-251 池 8 选 {670,724,950,6153,(1319),987,1579,6172}（obj[4]=isRemix?725:1319；
+    //  1456 是 6 选——蓝队 R2-10 补 6153/6172）；挂 NotRemixSeedEasymode 门（曾恒 false → 整支丢失）
+    const pool = [670, 724, 950, 6153, 1319, 987, 1579, 6172];
     const { counts, perKill } = sample(629, 300, {});
     let hits = 0;
     for (const ids of perKill) {
@@ -233,6 +234,8 @@ describe('提取器三盲区 + 求值器门（2026-08-13 审计修复）', () =>
     expect(hits).toBeGreaterThan(255);   // 1/20 主骰失败后恒掉 → ≈95%
     expect(counts.has(676)).toBe(false);  // 硬模式独占项不出
     expect(counts.has(1264)).toBe(false);
+    expect((counts.get(6153) ?? 0)).toBeGreaterThan(0);   // 1457 新件 GlacierFang 可掉
+    expect((counts.get(6172) ?? 0)).toBeGreaterThan(0);   // 1457 新件 HeavySling 可掉
   });
 
   it('条件补齐：NotRemixSeedEasymode = !hardMode / RemixSeedEasymode 恒 false（Conditions.cs:1370/1318）', () => {

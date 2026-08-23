@@ -101,13 +101,22 @@ const sheetAt = (st: TileStore, x: number, y: number): number =>
 
 /** Tile.honey(true)（Tile.cs:397）：无条件置蜜（清 lava 位） */
 const setHoney = (st: TileStore, i: number): void => { st.liquidType[i] = LIQUID_TYPE.HONEY; };
-/** Tile.honey(false)（&=191）：仅蜜→水 */
+/** Tile.honey(false)（Tile.cs:404 `bTileHeader &= 191`）：清蜜位【位掩码语义】——
+ *  蜜(0x40)→水、**微光(0x60)→岩浆(0x20)**、水/岩浆不变。曾只做「蜜→水」漏微光支
+ *  ——NTB #49 定罪：以太腔微光池（沙滩带 x<bd+200 支）被 honey(false) 后 vanilla
+ *  变岩浆 → QuickWater 头 ShimmerRemoveWater（非微光液体全清）抹零；JS 保留微光
+ *  → #49 L=697 残留（048→049 对拍实证）。 */
 const clearHoney = (st: TileStore, i: number): void => {
-  if (st.liquidType[i] === LIQUID_TYPE.HONEY) st.liquidType[i] = LIQUID_TYPE.WATER;
+  const t = st.liquidType[i];
+  if (t === LIQUID_TYPE.HONEY) st.liquidType[i] = LIQUID_TYPE.WATER;
+  else if (t === LIQUID_TYPE.SHIMMER) st.liquidType[i] = LIQUID_TYPE.LAVA;
 };
-/** Tile.lava(false)（&=223）：仅岩浆→水 */
+/** Tile.lava(false)（Tile.cs:385 `bTileHeader &= 223`）：清岩浆位【位掩码语义】——
+ *  岩浆(0x20)→水、**微光(0x60)→蜜(0x40)**、水/蜜不变（与 clearHoney 同款陷阱）。 */
 const clearLava = (st: TileStore, i: number): void => {
-  if (st.liquidType[i] === LIQUID_TYPE.LAVA) st.liquidType[i] = LIQUID_TYPE.WATER;
+  const t = st.liquidType[i];
+  if (t === LIQUID_TYPE.LAVA) st.liquidType[i] = LIQUID_TYPE.WATER;
+  else if (t === LIQUID_TYPE.SHIMMER) st.liquidType[i] = LIQUID_TYPE.HONEY;
 };
 
 // ============================================================
@@ -391,6 +400,8 @@ function placeJunglePlantImpl(st: TileStore, rng: RNG, gs: GenState, x: number, 
     return;
   }
   let fx: number;
+  // ★R3-11 复核驳回（同源副本，详见 SurfaceDecorPasses.placeJunglePlant 同位注释）：
+  //  `&` vs `&&` 求值序列相同，保持原形
   if (rng.int(0, 59) === 0 && deepOk) fx = 144;
   else if (rng.int(0, 229) === 0 && deepOk) fx = 162;
   else if (rng.int(0, 14) === 0 && !temple) {

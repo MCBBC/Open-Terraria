@@ -310,10 +310,14 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
     rooms.push(rect);
-    // ★1457（cs:33852-33859）深度组记账：末房（i==num2,含 uwCut 截断后 roomCount=n+1
-    //   的当房）记 num13+1,其余记 num13;随后换向（runStep>runLen）→ num13++。
-    //   顺序=记账在换向增量**之前**（末房与前一房同组时仍 +1 隔离）
-    depths.push(n === roomCount - 1 ? depthGroup + 1 : depthGroup);
+    // ★1457（W57:33852）深度组记账：`array2[i] = ((i == num2) ? (num13 + 1) : num13)`
+    //  的 num13+1 臂是**死代码**——num2 初值=房间总数（W57:33746），循环条件
+    //  `i < num2` 每轮重估；末房门 `(i == num2 - 1) | flag2`（W57:33815-33817）把
+    //  num2 收成 i+1 后循环当轮即终止 → 判定时恒 i < num2，`i == num2` 恒假，
+    //  末房（含 uwCut 截断房）恒记 num13（并入当前组）。★R3-8：本仓曾按三元
+    //  表面意图给末房多分一组（多一次组框 Inflate(10) 填砖+4 条 StrictAngles 角线
+    //  ——该算法零掷骰不漂 RNG 流，纯格差），现对齐原版实际行为=无条件记 depthGroup
+    depths.push(depthGroup);
     if (runStep > runLen) { runLen++; runStep = 1; depthGroup++; }
     dir = newDir as 1 | -1;
     cx = rx; cy = ry;
@@ -1162,6 +1166,8 @@ function placeTrap137TP(st: TileStore, x: number, y: number, style: number): voi
  *  横向（压板居中+两端墙飞镖+上延叠陷+KillTile 锚）或纵向（天花板火焰陷+两侧
  *  追加+无 KillTile）→ AddWireFromPointToPoint 三色导线。 */
 function mayanTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number): boolean {
+  // ★R3-10 同族（W57:8300-8303）：actuallyNoTrapsForRealIMeanIt → return true
+  if (gs.seedFlags.actuallyNoTraps) return true;
   const wireBit = (n: number) => n === 0 ? TileStore.WIRE_RED : n === 1 ? TileStore.WIRE_BLUE : TileStore.WIRE_GREEN;
   const nactive = (x: number, y: number) => {
     if (!st.inBounds(x, y)) return false;
