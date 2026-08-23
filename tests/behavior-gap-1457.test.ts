@@ -204,19 +204,24 @@ describe('getSlowMagicScalar 登记债（1457 三消费全在本仓未实装弹�
 // ==================== ② 1133 SnakeBandStarCloakTinkerStar（Player.cs:38738-38753） ====================
 describe('1133 星斗篷 override 链（:38738-38753 顺序赋值后者覆盖）', () => {
   it('优先序矩阵：snakeCloak 6186→1133 最高档 > manaCloak 723 > beeCloak 724 > starVeil 725 > starCloak 726', () => {
+    // ★V6 复核勘误：触发 vid 曾错位（929=炮弹/982=魔力再生带）——真身 StarVeil=862
+    // （ItemID.cs:3270）/ManaCloak=4001（:9548）/StarCloak=532（:2610）
     expect(starCloakStarInfo([], false)).toEqual({ active: false, projType: 726 });
-    expect(starCloakStarInfo([880], true).projType).toBe(726);
-    expect(starCloakStarInfo([929], false).projType).toBe(725);
+    expect(starCloakStarInfo([532], true).projType).toBe(726);
+    expect(starCloakStarInfo([862], false).projType).toBe(725);
     expect(starCloakStarInfo([1247], false).projType).toBe(724);
-    expect(starCloakStarInfo([982], false).projType).toBe(723);
+    expect(starCloakStarInfo([4001], false).projType).toBe(723);
     expect(starCloakStarInfo([6186], false).projType).toBe(1133);
     expect(starCloakStarInfo([6186], false).active).toBe(true);
+    // ★反向断言（防回归）：魔力再生带 982/炮弹 929 均不得触发斗篷
+    expect(starCloakStarInfo([982], false).active).toBe(false);
+    expect(starCloakStarInfo([929], false).active).toBe(false);
     // 蛇斗篷压过全部旧 override 件（:38747-38751 最后赋值）
-    expect(starCloakStarInfo([982, 6186], false).projType).toBe(1133);
-    expect(starCloakStarInfo([1247, 982, 929, 6186], false).projType).toBe(1133);
+    expect(starCloakStarInfo([4001, 6186], false).projType).toBe(1133);
+    expect(starCloakStarInfo([1247, 4001, 862, 6186], false).projType).toBe(1133);
     // 无 6186 时维持旧序：mana > bee > veil（:38738-38746）
-    expect(starCloakStarInfo([929, 1247], false).projType).toBe(724);
-    expect(starCloakStarInfo([982, 1247], false).projType).toBe(723);
+    expect(starCloakStarInfo([862, 1247], false).projType).toBe(724);
+    expect(starCloakStarInfo([4001, 1247], false).projType).toBe(723);
   });
 
   it('6186 在身即 active（case 6186 同时置 starCloakItem :14726-14729）', () => {

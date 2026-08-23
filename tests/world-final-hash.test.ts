@@ -9,27 +9,22 @@
 // 注意:与 caves-checkpoint 的 C# 位级金标互补——那套锁到 underworld 且逐段,
 // 本门锁全管线终态(含 corruption 之后的全部 pass)。
 //
-// ★2026-08-21 再生(1457 对齐批 4)：HellFort 1457 重构(掷序重分配+翼/中央钳 3+
-//   AttemptToPlaceDoor 真实格检查+右外门修复+塌墙阶段)/makeTemple 砖线重做
-//   (深度组 DungeonBounds+StrictAngles L 线)/placeTrap_CanContinue 门/冰箱 7 元池+
-//   753·669 副物品/GetNextJungleChestItem 删 753 支/FinalSeedCleanup 终扫——
-//   终态四数组哈希按 1457 行为重捕(旧值锚 1456 几何,作废)。caves-checkpoint 的
-//   1456 C# oracle 金标 underworld 起不再可比,待 1457 oracle 重建。
+// ★2026-08-23 再生(1457 对齐档 2=**1457 基线重冻**)：项目基准切 ../Terarria1457/
+//   后 worldgen 从 1456 硬钉整体切回 1457——HellFort 1457 复线(左翼先掷/翼行
+//   Clamp(Next(10),3,3)/中央跨 Max-Min 钳/门落点 AttemptToPlaceDoor+doorExists
+//   记账/右外门修复/塌墙阶段,helper 即插自 rollback1457/HellFort.1457.ts)/
+//   makeTemple 砖线复线(深度组 GenerateBricks,rollback1457/TempleBricks.1457.ts)/
+//   BuriedChests 三掷位(753 首支删/669 主物门删/主件池 Next(6)→Next(7) 六选加
+//   6153 GlacierFang/尾段 753·669 副物品门复线)/FinalCleanup PlantCheck 判据族
+//   补 61+spore 回写按 type2/case103 AnchorValid(Table) 逃生门/FinalSeedCleanup
+//   终扫复线(1457 WorldGen.cs:22666→:692)。终态四数组哈希按 **1457 链新基线**
+//   重冻(旧值锚 1456 几何,作废)。caves/shimmer 链 C# oracle 金标已同批翻 1457
+//   并再生(76 检查点,双种子全绿)——oracle↔JS 双端同态。
 //
-// ★★2026-08-21 二次重捕(批4 review 修复 PlantCheck/碗锚/FSC 涂格)——修 1457 对齐
-//   偏差,非行为演进：①PlantCheck isMushroomOrSpore 三项(补 61/入口帧判定/type2==201
-//   回写 144↔270,cs:81818-81886)②Check2x1 case103 碗 AnchorValid(Table) 逃生门
-//   (cs:47417-47430,碗落平台/solidTop 不再误杀)③FinalSeedCleanup fall-down 分支
-//   涂原格(i,j)+canKillTileFSC 补仙人掌80帧门/箱族 CanDestroyChest/锁门·音乐盒支
-//   (悬空沙下邻有货箱改走原格静态化,箱格不再被覆盖)④makeTemple Vector2 float32
-//   仿真+退化 hitbox 走钳位 setter⑤HellFort cell InWorld(10) 门/SolidTile 族
-//   inActive 位。
-//   ★重捕结果=与批4 基线【逐位相同】(双种子四数组哈希均不变,回退对照实证)：
-//   ①只动 frameX（金标四数组外）——种子 9293480 上 69 处 sheet61 植物帧 18→144;
-//   ②两金标种子终态碗 103 均不踩逃生门(9293480 碗=0/1511931452 碗=8 且全过纯
-//   桌面门);③FSC 箱邻/仙人掌邻场景两种子未出现;④float32/钳位在两种子神庙无
-//   ULP 差。修复对这两粒种子是【行为保持】,分歧只在边界场景种子上显形——金标
-//   无需改值,重捕仅为换锚声明。
+// ── 旧基线备案(1456 硬钉期,2026-08-21/22 批次) ──
+//   9293480:     type 816e0bcf flags 93f048c5 wall 4f89a71f liquid 893afc95
+//   1511931452:  type 1e3fcec8 flags 1e64968d wall cedb77a4 liquid dc75ac81
+//   （批4 review 的 PlantCheck 61/碗锚/FSC 涂格等修复史见 git/批账,此处不再展开）
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';

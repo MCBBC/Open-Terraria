@@ -13,7 +13,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 
@@ -130,6 +130,223 @@ const CHEST_PROTECT_2X2 = idsByVanillaSheet(21, 467, 441, 468, 88, 470, 475);
  *  级联击杀期间嵌套 TileFrame 不再发起新 Check2x2（非活性清残基不受闸限）。 */
 let destroyObject = false;
 
+/** TileFrame case 165（cs:85996 `CheckStalactite(i,j)`）注入槽：checkStalactite 住
+ *  ShimmerPass（其 import 本文件 solidTile）——直接反向 import 成环,浏览器包循环
+ *  依赖有 TDZ 前科,故注册制（ShimmerPass 模块体注册,生成期全部模块体先于 pass
+ *  执行,时序安全）。TTTTTT 批 2026-08-23：CONST 链 LavaLayerCaverer 雕刻带内
+ *  钟乳石(165)失锚——vanilla KillTile 尾 SquareTileFrame 级联经 TileFrame case165
+ *  链杀,JS 漏 case → 38 格钟乳石残存（#32 末段残差,流位零差纯状态差）。 */
+export type TileFrame165 = (
+  st: TileStore, rng: RNG, x: number, y: number,
+  reframe?: (st: TileStore, rng: RNG, x: number, y: number) => void,
+) => void;
+let tileFrame165: TileFrame165 | null = null;
+export function registerTileFrame165(f: TileFrame165): void { tileFrame165 = f; }
+
+/* ── Check3x2 186/187 堆支（cs:49190,TTTTTT 批 2026-08-23）──────────────────
+ * killTile 级联域的 3×2 大堆复核（LargePiles 186/LargePiles2 187——TileFrameImportant
+ * case 14/17/26/…/186/187 组派发,本域实证命中 187）。与 SurfaceDecorPasses.
+ * check3x2PileSweep（RRRRR 批,flowers 域）/FinalCleanupPass.check3x2Sweep（引擎）
+ * 三方同源副本（禁互 import 惯例）;本副本杀链走本文件 killTile（全量级联：
+ * 尘掷+化石碎裂+裂砖链+SquareTileFrame→165/186/187 重查）,复扫=本文件 tileFrame。 */
+const SAND_FAM_3X2 = new Set([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
+const ICE_SET_3X2 = new Set([161, 163, 164, 200]);
+/** 原版 sheet 186/187 的本仓 tile id（惰性解析,TILE_BY_KEY 键名稳定） */
+let _pile186 = -1;
+function pile186Id(): number {
+  if (_pile186 < 0) _pile186 = TILE_BY_KEY['v_186_decos_3x2'] ?? 0;
+  return _pile186;
+}
+
+function check3x2PileKT(st: TileStore, rng: RNG, x: number, y: number, sheet: number): void {
+  if (destroyObject) return;                                          // cs:49194
+  const k0 = st.idx(x, y);
+  const num3 = (st.frameY[k0]! / 36) | 0;
+  const num4 = st.frameY[k0]! % 36;
+  const top = y - ((num4 / 18) | 0);
+  let num5 = (st.frameX[k0]! / 18) | 0;
+  let num6 = 0;
+  while (num5 > 2) { num5 -= 3; num6++; }
+  num5 = x - num5;
+  const num7 = num6 * 54;
+  const num8 = top + 2;
+  let flag = false;
+  for (let k = num5; k < num5 + 3; k++) {
+    for (let l = top; l < num8; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }              // null→非活性→flag
+      const kk = st.idx(k, l);
+      if (!st.flags[kk] || SHEET_OF[st.type[kk]] !== sheet
+        || st.frameX[kk] !== (k - num5) * 18 + num7 || st.frameY[kk] !== (l - top) * 18 + num3 * 36) flag = true;
+    }
+    if (!st.inBounds(k, num8)) continue;                              // 越界=支撑真（cs:70214）
+    const bi = st.idx(k, num8);
+    if (!solidTileAllowBottomSlope(st, k, num8)) { flag = true; continue; }
+    if (st.flags[bi] && BOULDERS.has(SHEET_OF[st.type[bi]] ?? -1)) { flag = true; continue; } // InvalidTileForPiles
+    if (!st.flags[bi]) continue;                                      // 非活性底免材质门
+    const b = SHEET_OF[st.type[bi]] ?? -1;
+    if (sheet === 187) {                                              // cs:49331-49346
+      const ok = num6 <= 5 ? (b === 59 || b === 60 || b === 226)
+        : num6 <= 8 ? (b === 57 || b === 58 || b === 75 || b === 76)
+          : num6 >= 29 ? SAND_FAM_3X2.has(b)
+            : true;
+      if (!ok) flag = true;
+    } else {                                                          // 186（cs:49291-49323）
+      const ok = num6 >= 26 && num6 <= 31 ? (b === 147 || ICE_SET_3X2.has(b) || b === 162 || b === 224)
+        : num6 >= 32 ? (b === 59 || b === 70)
+          : true;
+      if (!ok) flag = true;
+    }
+  }
+  // 187→186 草底降帧（cs:49348-49364）：顶行帧 756-900 且三底列全非草族（裸读 type）
+  if (sheet === 187 && st.inBounds(num5, top) && st.inBounds(num5 + 2, top + 2)) {
+    const kTop = st.idx(num5, top);
+    if (st.frameX[kTop]! >= 756 && st.frameX[kTop]! <= 900) {
+      const grassy = (k: number): boolean => {
+        if (!st.flags[k]) return false;
+        const s = SHEET_OF[st.type[k]] ?? -1;
+        return s === 2 || s === 477 || s === 492;
+      };
+      if (!grassy(st.idx(num5, top + 2)) && !grassy(st.idx(num5 + 1, top + 2)) && !grassy(st.idx(num5 + 2, top + 2))) {
+        for (let m = num5; m < num5 + 3; m++) {
+          for (let l = top; l < top + 2; l++) {
+            const kk = st.idx(m, l);
+            st.frameX[kk] = st.frameX[kk]! - 378;
+            st.type[kk] = pile186Id();
+          }
+        }
+      }
+    }
+  }
+  if (!flag) return;
+  destroyObject = true;                                               // cs:49386
+  for (let m = num5; m < num5 + 3; m++) {
+    for (let l = top; l < num8; l++) {
+      if (!st.inBounds(m, l)) continue;
+      const kk = st.idx(m, l);
+      if (st.flags[kk] && SHEET_OF[st.type[kk]] === sheet) killTile(st, rng, m, l);
+    }
+  }
+  destroyObject = false;
+  // cs:49856-49862：复位后 5×5 TileFrame 复扫（连锁杀邻组）
+  for (let m = num5 - 1; m < num5 + 4; m++) {
+    for (let l = top - 1; l < top + 4; l++) tileFrame(st, rng, m, l);
+  }
+}
+
+/* ── CheckOnTable1x1（cs:43548）/ CheckBanner（cs:46103）级联支（TTTTTT 批）────
+ * CONST 链定罪：Caverer 雕掉地牢书架/旗锚 → vanilla KillTile 尾级联经
+ * TileFrameImportant case 50（书）/91（旗）链杀,JS 漏派发 → 7 格残存。 */
+/** Main.tileTable（Main.cs:6828-6869+7983-7987 全 77 项） */
+const TILE_TABLE_S = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** TileFrameImportant case 13/33/49/50/78/174/372/646/707 组（cs:86348） */
+const ON_TABLE_1X1_S = new Set([13, 33, 49, 50, 78, 174, 372, 646, 707]);
+/** TileID.Sets.NotReallySolid（TileID.cs:355） */
+const NOT_REALLY_SOLID_S = new Set([387, 388, 10]);
+
+function blockTypeAt(st: TileStore, i: number): number {
+  if (st.half[i]) return 1;
+  const s = st.slope[i]!;
+  return s > 0 ? s + 1 : 0;
+}
+/** AnchorValid(tile, AnchorType.Table)（cs:51867）生成期子集（nactive 门内） */
+function anchorValidTableKT(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i] || (st.wire[i] & 0x20)) return false;
+  const t = st.type[i];
+  const d = TILE_DEFS[t];
+  const solid = genSolidType(t);
+  const solidTop = !!(d && d.platform);
+  if (solid && !solidTop && !NO_ATTACH.has(t) && blockTypeAt(st, i) === 0) return true;
+  if (d && d.platform) {
+    const num = Math.trunc(st.frameX[i]! / 18);
+    if ((!st.half[i] && num >= 0 && num <= 7) || (num >= 12 && num <= 16) || (num >= 25 && num <= 26)) return true;
+  } else if (solid && solidTop) return true;
+  if (!solidTop && TILE_TABLE_S.has(SHEET_OF[t] ?? -1) && blockTypeAt(st, i) === 0) return true;
+  return false;
+}
+/** CheckOnTable1x1（cs:43548）：下格 topSlope→平台边支/杀;halfBrick→杀;
+ *  否则 AnchorValid(Table)∪tileTable 存活,78 烛台走 SolidTileAllowBottomSlope,余杀 */
+function checkOnTable1x1KT(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (!st.inBounds(x, y + 1)) return;
+  const bi = st.idx(x, y + 1);
+  const bs = st.slope[bi]!;
+  if (bs === 1 || bs === 2) {                                    // topSlope()
+    const d = TILE_DEFS[st.type[bi]];
+    if (d && d.platform) {
+      const bt = blockTypeAt(st, bi);
+      const edgeOk = (side: number): boolean => {
+        if (!st.inBounds(x + side, y + 1)) return false;
+        const si = st.idx(x + side, y + 1);
+        return st.flags[si] !== 0 && blockTypeAt(st, si) === 0
+          && !!(TILE_DEFS[st.type[si]]?.platform);
+      };
+      if ((bt !== 3 || !edgeOk(-1)) && (bt !== 2 || !edgeOk(1))) killTile(st, rng, x, y);
+    } else {
+      killTile(st, rng, x, y);
+    }
+  } else if (st.half[bi]) {
+    killTile(st, rng, x, y);
+  } else {
+    if (anchorValidTableKT(st, x, y + 1)
+      || (st.flags[bi] && TILE_TABLE_S.has(SHEET_OF[st.type[bi]] ?? -1))) return;
+    if (SHEET_OF[st.type[st.idx(x, y)]] === 78) {
+      if (!solidTileAllowBottomSlope(st, x, y + 1)) killTile(st, rng, x, y);
+    } else {
+      killTile(st, rng, x, y);
+    }
+  }
+}
+/** CheckBanner（cs:46103）：case 91 1×3 旗——三格帧完整性 + 顶锚 nactive+实心支 */
+function checkBannerKT(st: TileStore, rng: RNG, x: number, j: number): void {
+  if (destroyObject) return;
+  const i0 = st.idx(x, j);
+  let num = Math.trunc(st.frameY[i0]! / 18);
+  let num2 = 0;
+  while (num >= 3) { num -= 3; num2++; }
+  num = j - num;
+  const frameX = st.frameX[i0]!;
+  const type = SHEET_OF[st.type[i0]] ?? -1;
+  let flag = false;
+  for (let k = 0; k < 3; k++) {
+    if (!st.inBounds(x, num + k)) { flag = true; continue; }
+    const ki = st.idx(x, num + k);
+    if (!st.flags[ki]) flag = true;
+    else if ((SHEET_OF[st.type[ki]] ?? -1) !== type) flag = true;
+    else if (st.frameY[ki] !== k * 18 + num2 * 54) flag = true;
+    else if (st.frameX[ki] !== frameX) flag = true;
+  }
+  if (st.inBounds(x, num - 1)) {
+    const ti = st.idx(x, num - 1);
+    if (!st.flags[ti] || (st.wire[ti] & 0x20)) {
+      flag = true;                                    // !nactive()（cs:46139）
+    } else {
+      const tt = st.type[ti];
+      const d = TILE_DEFS[tt];
+      const solid = genSolidType(tt);
+      const solidTop = !!(d && d.platform);
+      const num3 = st.slope[ti] === 1 || st.slope[ti] === 2 || st.half[ti] !== 0 || solid;
+      const flag2 = !solidTop || (solidTop && (st.half[ti] !== 0 || st.slope[ti] === 1 || st.slope[ti] === 2));
+      let flag3 = num3 && flag2 && !NOT_REALLY_SOLID_S.has(SHEET_OF[tt] ?? -1)
+        && !(st.slope[ti] === 3 || st.slope[ti] === 4);
+      if ((d && d.platform) || (SHEET_OF[tt] ?? -1) === 380) flag3 = true;
+      if (!flag3) flag = true;
+    }
+  } else {
+    flag = true;                                      // null tile → new Tile() → !nactive
+  }
+  if (!flag) return;
+  destroyObject = true;
+  for (let k = 0; k < 3; k++) {
+    if (st.inBounds(x, num + k)) {
+      const ki = st.idx(x, num + k);
+      if ((SHEET_OF[st.type[ki]] ?? -1) === type) killTile(st, rng, x, num + k);
+    }
+  }
+  destroyObject = false;
+  // cs:46175+ 掉落支（num4==312..315 特殊旗）——生成期 noItem 且不掷 genRand,略
+}
+
 /** TileFrame 生成期路径子集（cs:82067）：边界闸 + 非活性清 half/slope +
  *  巨石族 Check2x2。PaintClear 生成期无漆可清;液体/AddWater 段被
  *  !generatingWorld 门挡;基础块 TileFrameCosmetic 同门不跑。 */
@@ -139,6 +356,23 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
   if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; return; }  // cs:82078-83
   if (BOULDERS.has(st.type[i])) check2x2(st, rng, x, y);
   else if (LARVA.has(st.type[i])) checkSuper(st, rng, x, y);      // cs:86437-40 case 485
+  else {
+    const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+    if (sheet === 165 && tileFrame165) {
+      // cs:39022 CheckStalactite：destroyObject 全程 true（vanilla 在 KillTile 段
+      // 置位,级联内嵌套 TileFrame 不发起新 Check2x2）——reframe=完整 tileFrame
+      // （vanilla KillTile→SquareTileFrame→全量 TileFrame,ZZZ 批同口径）
+      destroyObject = true;
+      tileFrame165(st, rng, x, y, (s, r, xx, yy) => tileFrame(s, r, xx, yy));
+      destroyObject = false;
+    } else if (sheet === 186 || sheet === 187) {
+      check3x2PileKT(st, rng, x, y, sheet);                        // cs:86713 组→Check3x2
+    } else if (ON_TABLE_1X1_S.has(sheet)) {
+      checkOnTable1x1KT(st, rng, x, y);                            // cs:86348 组→CheckOnTable1x1
+    } else if (sheet === 91) {
+      checkBannerKT(st, rng, x, y);                                // cs:86438 case 91→CheckBanner
+    }
+  }
 }
 
 /** SquareTileFrame（cs:80924）：3×3 逐格 TileFrame,列主序与原版逐条一致。 */
@@ -331,6 +565,115 @@ function attemptFossilShattering(st: TileStore, rng: RNG, x: number, y: number):
   fossilBreak = false;
 }
 
+/* ── CheckTileBreakability（cs:62403）+ ShouldTileSurvive（cs:62515）──────────
+ * KillTile 头部不可破坏门（TTTTTT 批 2026-08-23 补）：CONST 链 LavaLayerCaverer
+ * 雕进地牢带埋箱（21）→ vanilla 箱本体 ShouldTileSurvive 存活 + 箱下砖格
+ * CheckTileBreakability=2 拒毁（上邻箱=容器→scanForContainer 命中）,JS 曾照毁
+ * →12 格纯状态差（流位零差：箱/砖尘段均零掷）。 */
+const BASIC_CHEST_S = new Set([21, 467]);
+const BASIC_DRESSER_S = new Set([88]);
+const BASIC_CHEST_FAKE_S = new Set([441, 468]);
+/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:305） */
+const PREVENTS_REMOVAL_ON_TOP = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
+
+function sheetAtKT(st: TileStore, x: number, y: number): number {
+  if (!st.inBounds(x, y)) return -1;
+  return SHEET_OF[st.type[st.idx(x, y)]] ?? -1;
+}
+function activeAtKT(st: TileStore, x: number, y: number): boolean {
+  return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
+}
+/** IsLockedDoor（cs:69248）：10 门 fy∈[594,646] 且 fx<54 */
+function isLockedDoorKT(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  return SHEET_OF[st.type[i]] === 10 && st.frameY[i]! >= 594 && st.frameY[i]! <= 646 && st.frameX[i]! < 54;
+}
+/** IsAContainer（cs:48831）：Dresser∪{470,475}∪BasicChest∪BasicChestFake */
+function isAContainerKT(st: TileStore, x: number, y: number): boolean {
+  const t = sheetAtKT(st, x, y);
+  if (!BASIC_DRESSER_S.has(t) && t !== 470 && t !== 475 && !BASIC_CHEST_S.has(t)) return BASIC_CHEST_FAKE_S.has(t);
+  return true;
+}
+/** CheckTileBreakability_HasReasonToReturnEarly（cs:62466）。★77 熔炉门带
+ *  !Main.hardMode——生成期恒肉前 → 恒真。 */
+function hasReasonToReturnEarlyKT(st: TileStore, ignoreSheet: number, tx: number, ty: number, scanForContainer: boolean): boolean {
+  const t = sheetAtKT(st, tx, ty);
+  if (ignoreSheet !== t) {
+    if (t === 77) return true;
+    if (PREVENTS_REMOVAL_ON_TOP.has(t)) return true;
+  }
+  if (isLockedDoorKT(st, tx, ty)) return true;
+  if (scanForContainer && isAContainerKT(st, tx, ty)) return true;
+  return false;
+}
+/** CheckBoulderChest（cs:48810）：巨石锚 2×2 顶两格容器/保护物扫 */
+function checkBoulderChestKT(st: TileStore, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  let num = Math.trunc(st.frameX[i]! / 18) * -1;
+  if (num < -1) num += 2;
+  num += x;
+  let num2 = st.frameY[i]!;
+  for (; num2 >= 36; num2 -= 36) { /* frameY % 36 */ }
+  num2 = y - Math.trunc(num2 / 18);
+  const self = SHEET_OF[st.type[i]] ?? -1;
+  return hasReasonToReturnEarlyKT(st, self, num, num2 - 1, true)
+    || hasReasonToReturnEarlyKT(st, self, num + 1, num2 - 1, true);
+}
+/** CheckTileBreakability（cs:62403）：0=可毁 / 1=转 fail 支路 / 2=拒毁（零掷零写）。
+ *  tileSolid 走 genSolidType（生成期翻转表,本文件 solidTile 同口径）,
+ *  tileSolidTop≈d.platform（本文件既有近似口径）。 */
+export function checkTileBreakability(st: TileStore, x: number, y: number): number {
+  if (y < 1 || y > st.h - 1) return 0;
+  const i = st.idx(x, y);
+  const self = SHEET_OF[st.type[i]] ?? -1;
+  if (activeAtKT(st, x, y + 1) && isLockedDoorKT(st, x, y + 1)) return 2;
+  const d = TILE_DEFS[st.type[i]];
+  if (!genSolidType(st.type[i]) && !(d && d.platform)) return 0;
+  if (activeAtKT(st, x, y - 1)) {
+    const flag = isAContainerKT(st, x, y);
+    if (hasReasonToReturnEarlyKT(st, self, x, y - 1, !flag)) {
+      const u = st.idx(x, y - 1);
+      const ut = SHEET_OF[st.type[u]] ?? -1;
+      if (TREE_TRUNK.has(st.type[u])) {                    // IsATreeTrunk（cs:62427-62437）
+        const fx = st.frameX[u]!, fy = st.frameY[u]!;
+        if ((fx === 66 && fy >= 0 && fy <= 44) || (fx === 88 && fy >= 66 && fy <= 110) || fy >= 198) return 0;
+        return 2;
+      }
+      if (ut === 323) {                                    // 棕榈干（cs:62438-62443）
+        const fx = st.frameX[u]!;
+        if (fx === 66 || fx === 220) return 2;
+        return 0;
+      }
+      return 2;
+    }
+    if (sheetAtKT(st, x, y - 1) === 80 && self !== 80) {   // 仙人掌上邻帧门（cs:62445-62451）
+      const n = Math.trunc(st.frameX[st.idx(x, y - 1)]! / 18);
+      if (n === 0 || n === 1 || n === 4 || n === 5) return 2;
+    }
+    if (self === 10 && isLockedDoorKT(st, x, y)) return 1;
+    if (BOULDERS.has(st.type[i])) {
+      if (checkBoulderChestKT(st, x, y)) return 1;
+      return 0;
+    }
+  }
+  if (self === 235) {                                     // 音乐盒三格扫（cs:62455-62464）
+    const num2 = x - Math.trunc((st.frameX[i]! % 54) / 18);
+    for (let k = 0; k < 3; k++) {
+      if (activeAtKT(st, num2 + k, y - 1) && hasReasonToReturnEarlyKT(st, self, num2 + k, y - 1, true)) return 2;
+    }
+  }
+  return 0;
+}
+/** CheckTileBreakability2_ShouldTileSurvive（cs:62515）生成期子集：
+ *  BasicChest{21,467}/Dresser{88} → Chest.DestroyChest——生成期箱恒有物
+ *  （放置即战利品填充;DungeonPass.ts CanKillTile 支同口径先例）→ 存活;
+ *  470 展示娃娃/475 帽架 → TE 不存在于生成期 → IsBreakable=true → 不存活。 */
+function shouldTileSurviveKT(st: TileStore, x: number, y: number): boolean {
+  const t = SHEET_OF[st.type[st.idx(x, y)]] ?? -1;
+  return BASIC_CHEST_S.has(t) || t === 88;
+}
+
 /** 原版 KillTile(i,j) 生成期路径的完整掷骰模型 + 击杀（type=0 清型）。
  *  生成期 noItem=true 无掉落掷;isGeneratingOrLoadingWorld=true 时尘段恒跑
  *  （cs:63747 dust 段在 effectOnly 早退之前,无 netMode 门）。
@@ -339,7 +682,13 @@ function attemptFossilShattering(st: TileStore, rng: RNG, x: number, y: number):
  *  SquareTileFrame 级联必须一致，勿在新 pass 重写近似版。 */
 export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   const i = st.idx(x, y);
+  if (!st.flags[i]) return;                    // cs:63568 !active 早退（零掷零写）
   const sheet = SHEET_OF[st.type[i]] ?? -1;
+  // cs:63579-63581 CheckTileBreakability（TTTTTT 批 2026-08-23 补）：
+  //   2=拒毁（零掷零写早退,尘段之前）;1=转 fail 支路（存活+转化+级联）
+  const brk = checkTileBreakability(st, x, y);
+  const fail = brk === 1;
+  if (brk === 2) return;
   const n = killDustAmount(sheet);
   const amt = n === -1 ? (st.frameX[i] / 22 >= 5 ? 5 : 10) : n;
   const per = killDustRollsPer(sheet, st.frameX[i]);
@@ -349,8 +698,17 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   //   时 3×3 邻域连锁碎裂——CONST 链 LavaLayerCaverer 雕进地下沙漠化石簇即从该列
   //   流移（vanilla 每个活性 404 邻格掷 1 次 Next(15)/Next(4),命中 0 连锁击杀;
   //   404 尘段 10 次迭代零 genRand → 流上只见碎裂掷不见尘掷,定罪铁证）。
-  //   原版序：尘段(cs:63747) → 本掷(cs:63756) → 蛛网掷(cs:63904),勿再挪位。
+  //   原版序：尘段(cs:63747) → 本掷(cs:63756) → fail 支(cs:63758) → 蛛网掷(cs:63904)。
   if (sheet === 404) attemptFossilShattering(st, rng, x, y);
+  if (fail) {
+    // cs:63758-63776 fail 支路：ShakeTree（IsShakeable=树族,gen 域 fail 仅
+    //   锁门(10)/巨石箱顶(Boulders)两源,树族不可达 → 略）+ 草族转化表
+    //   （2/23/109/199/477/492→0、633→57、60/661/662/70→59——gen 域 fail 源
+    //   10/Boulders 与转化表零交集,备案不移植;tileMoss/tileMossBrick 同）。
+    //   存活语义=仅 SquareTileFrame 级联。
+    squareTileFrame(st, rng, x, y);
+    return;
+  }
   // cs:63840-63894 裂砖(481-483)连锁（TTTTTT 批 2026-08-23 补）：8 邻域逐格掷
   //   Next(6)（正上邻 num17=3——仅 case2 减半,正下/斜向恒 6）,掷对「活性邻格」
   //   发生（短路 && 在 type 检查**之前**——非裂砖活性邻格也占掷位）;命中 0 且
@@ -383,8 +741,9 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
       }
     }
   }
-  // cs:63900 CheckTileBreakability2_ShouldTileSurvive（箱/展示娃娃/帽架可免毁）——
-  //   生成期 Caverer 带未命中,备案不移植（TTTTTT 批）
+  // cs:63900 CheckTileBreakability2_ShouldTileSurvive（TTTTTT 批 2026-08-23 补）：
+  //   有物箱/梳妆台免毁（尘段之后——尘掷已耗,箱族尘 10 迭代零掷故流位不变）
+  if (shouldTileSurviveKT(st, x, y)) return;
   // cs:63904：蛛网(51)带蜘蛛墙(62) → Next(4)（结果只改 noItem,生成期恒 noItem=true）。
   // ★PPPPP（2026-08-22）勘误：原版此掷在尘段**之后**（cs:63904 > cs:63748 尘环）——
   //   曾前置 → 掷序错,CONST 链 LavaLayerCaverer 雕到蛛网+蜘蛛墙即从该点流移

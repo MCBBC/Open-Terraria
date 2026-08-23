@@ -11,9 +11,9 @@
 //                     天塔柱 410 :38235-38238→3536+style / 月神像 663→5381）
 //   Check2x2   :48405（水晶球 125 :48716-48719 / 水槽 172→GetItemDrop_Sinks
 //                     :48849-48851 / 笼缸 360/505/521-527/543/568-570/580/620/652
-//                     :48624-48656 / 巨石 132/138/664/665/711/712 经 TileFrame
-//                     :86672-86680 派发）
-//   Check3x2   :49190（地狱熔炉 77→2190 / 营火 215→GetCampfireItemDrop :64033 /
+//                     :48624-48656 / 巨石族经 TileFrame no-op break 组 :86409-86428
+//                     闭合后 goto case 132（:86670）→ Check2x2 派发（:86688））
+//   Check3x2   :49190（地狱熔炉 77→221（:49692）/ 营火 215→GetCampfireItemDrop :64033 /
 //                     精金·钛金熔炉 133 / 砧 86 / 山铜·秘银砧 134→Check2x1 :46804 组）
 //   Check3x3   :53092（提取器 219→997 / 灌注台 243 / 染料缸 228 / 固体机 220）
 //   CheckBanner :46103（旗帜 91 :46174-46204 逐 style 掉 5651/5672/5673…放置旗）
@@ -30,14 +30,16 @@ import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import {
-  vanillaPlaceableTileKeys, CAGE_ITEM_SHEET,
+  vanillaPlaceableTileKeys, CAGE_ITEM_SHEET, VANILLA_ITEM_KEY_BY_ID,
 } from '../src/data/items';
+import { coinBandVid } from '../src/data/vanillaStyleDrops';
 import { VI } from '../src/data/itemKeys';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
 import funcJson from '../src/data/vanilla-itemfunc.json';
 import vanillaItemMeta from '../public/sprites/vanilla.json';
-import { multiTileDropKey, chestDestroyableAt } from '../src/core/Game';
+import { Game, multiTileDropKey, chestDestroyableAt } from '../src/core/Game';
 import { shouldTileSurviveAt } from '../src/entities/Mounts';
+import { TrapShot } from '../src/entities/Dart';
 
 const placeable = vanillaPlaceableTileKeys();
 const keyOf = (k: string) => TILE_BY_KEY[k]!;
@@ -46,6 +48,26 @@ const dropKeyOf = (k: string) => {
   expect(def, `tile def ${k} 应存在`).toBeDefined();
   return multiTileDropKey(def!, placeable);
 };
+
+interface Drop { key: string; n: number }
+/** breakTile 运行时 harness（同 style-drop-restore breakShell + TrapShot 捕获;
+ *  player={} = spawnBoulderRoll 的 cs:48764 生成/读档门近似） */
+function boulderShell(w: World, drops: Drop[], projs: TrapShot[]) {
+  const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {
+    world: World; breakTile: (x: number, y: number, byPlayer?: boolean) => void;
+  };
+  g.world = w;
+  g.chunks = { markDirtyArea: () => {} };
+  g.spawnParticles = () => {};
+  g.sfx = { play: () => {} };
+  g.spawnDrop = (x: number, y: number, key: string, n: number) => { drops.push({ key, n }); return null; };
+  g.recLog = () => {};
+  g.dumpChest = () => {};
+  g.entities = { add: (e: unknown) => { if (e instanceof TrapShot) projs.push(e); }, drops: [], critters: [], enemies: [] };
+  g.trackTile = 0;
+  g.player = { equipStats: {}, cx: 0, cy: 0 };   // spawnBoulderRoll 门 + killTileDropBait 花靴门读 equipStats
+  return g as unknown as { breakTile: (x: number, y: number, byPlayer?: boolean) => void };
+}
 
 // ============ A. 审计 ⚠️1 名录族：破坏返还 place_v_（基础返还） ============
 describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () => {
@@ -67,7 +89,7 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
   });
 
   it('功能站族：地狱熔炉 77/提取器 219/灌注台 243/染料缸 228/水晶球 125', () => {
-    // 77→2190（Check3x2）/219→997、243、228（Check3x3 :53092）/125（Check2x2 :48716）
+    // 77→221（Check3x2 :49692）/219→997、243、228（Check3x3 :53092）/125（Check2x2 :48716）
     for (const k of ['v_77_hellforge', 'v_219_extractinator', 'v_243_imbuing_station', 'v_228_dye_vat', 'v_125_crystal_ball']) {
       expect(dropKeyOf(k)).toBe('place_' + k);
     }
@@ -87,9 +109,32 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
     }
   });
 
-  it('巨石族（Check2x2 :86672 派发——132/138/664/665/711/712 有物品档）', () => {
-    for (const k of ['v_138_boulder', 'v_664_bouncy_boulder', 'v_711_rainbow_boulder', 'v_712_poo_boulder', 'v_713_lava_boulder', 'v_714_spider_boulder', 'v_715_ghoulder']) {
-      expect(dropKeyOf(k)).toBe('place_' + k);
+  it('巨石族挖掉=整件清+滚石弹+无物品（❌2：Check2x2 :48579-48755 无 num14+KillTile no-drop :66120-66140——原版永不返还,wiki "cannot be picked up again once placed"）', () => {
+    // 运行时拦截在 object 分支前（Game.breakTile 巨石支路）——multiTileDropKey 纯函数
+    // 对有放置物品档仍返回 place_（D 段 oracle 不动）,运行时不消费。逐 sheet 弹伤表
+    // （cs:48766-48801）;716 也滚（case 716→弹 1057 伤 70）
+    const w = new World(40, 40, 7, 'mtd-boulder');
+    const drops: Drop[] = [];
+    const projs: TrapShot[] = [];
+    const g = boulderShell(w, drops, projs);
+    const dmgOf: Record<string, number> = {
+      v_138_boulder: 70, v_484_rolling_cactus: 35, v_664_bouncy_boulder: 70, v_665_life_crystal_boulder: 70,
+      v_711_rainbow_boulder: 100, v_712_poo_boulder: 50, v_713_lava_boulder: 70, v_714_spider_boulder: 50,
+      v_715_ghoulder: 70, v_716_friendly_boulder: 70,
+    };
+    for (const k of Object.keys(dmgOf)) {
+      drops.length = 0; projs.length = 0;
+      const t = keyOf(k);
+      for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+        w.store.setTileSilent(10 + dx, 10 + dy, t, dx * 18, dy * 18);
+      }
+      g.breakTile(11, 11, false);          // 右下格命中（非锚格也整件清）
+      expect(drops, k).toEqual([]);        // 永不返还物品
+      expect(projs.length, k).toBe(1);     // 滚石弹（弹种贴图恒 'boulder',伤害逐档）
+      expect(projs[0].kind).toBe('boulder');
+      expect(projs[0].damage).toBe(dmgOf[k]);
+      expect(w.store.get(10, 10), k).toBe(0);
+      expect(w.store.get(11, 10), k).toBe(0);
     }
   });
 
@@ -107,8 +152,8 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
   });
 });
 
-// ============ B. 无物品纯世界生成装饰：维持无掉落 ============
-describe('无原版放置物品的装饰：维持无掉落（原版无物可还）', () => {
+// ============ B. 无物品纯世界生成装饰：无放置物品返还（资源掉落登记待接,⚠️4） ============
+describe('无原版放置物品的装饰：无放置物品返还（⚠️4 勘误:非"原版无物可还"——9 def 原版有资源掉落,登记待接）', () => {
   it('冰凌 165/丛林大植物 233/海燕麦 529/绿洲植物 530', () => {
     // 529 原版单格写入（cs:58333 CheckSeaOat 无 Item.NewItem）——def 1×2 走多格分支
     for (const k of ['v_165_cave_decos', 'v_233_jungle_large_plants', 'v_529_sea_oats', 'v_530_oasis_plants']) {
@@ -117,21 +162,63 @@ describe('无原版放置物品的装饰：维持无掉落（原版无物可还�
   });
 
   it('瓦砾 648/649/651/652 + 蜥蛋 751/752', () => {
+    // ⚠️4 登记：648（Check3x2 :49618 逐 style 掉 195/174/150/3/…）/651（:49679→195/331/
+    // 62）/652（:48705-48707）/647（:49573 分档）原版有资源掉落——无【放置物品】返还,
+    // 资源档登记待接（本表只锁放置物品侧）
     for (const k of ['v_648_large_rubble_3x2_group_2', 'v_649_medium_rubble_2x1', 'v_651_large_rubble_3x2_group_3', 'v_652_medium_rubble_2x2', 'v_751_sleeping_digtoise', 'v_752_chillet_egg']) {
       expect(dropKeyOf(k)).toBe('');
     }
   });
 
   it('echo 变体/倒木/垃圾桶/legacy 武器架/开态门件（特例分支或特例拦截承担）', () => {
-    // 488 倒木→mysticLogs 延迟旗分支；706→breakShrineSword（4144/989）；
-    // 236/238→生命果/世花分支；386/389=开态（关闭态 387/388 才有物品）
-    for (const k of ['v_694_stalactite_1x2_echo', 'v_702_life_fruit_replica', 'v_704_fallen_log_echo', 'v_705_oasis_plants_echo', 'v_706_terragrim_shrine_echo', 'v_488_fallen_log', 'v_99_trash_can', 'v_334_weapon_rack_legacy_do_not_use', 'v_386_trapdooropen', 'v_389_tallgateopen', 'v_165_cave_decos']) {
+    // 488 倒木→mysticLogs 延迟旗分支+木头 9×Next(10,21)（:49561,⚠️4 已接）；
+    // 706→breakShrineSword（4144/989）；236/238→生命果/世花分支；
+    // 386/389=开态（关闭态 387/388 才有物品;389 双 def 已并入 v_389_tall_gate_open）
+    for (const k of ['v_694_stalactite_1x2_echo', 'v_702_life_fruit_replica', 'v_704_fallen_log_echo', 'v_705_oasis_plants_echo', 'v_706_terragrim_shrine_echo', 'v_488_fallen_log', 'v_99_trash_can', 'v_334_weapon_rack_legacy_do_not_use', 'v_386_trapdooropen', 'v_389_tall_gate_open', 'v_165_cave_decos']) {
       expect(dropKeyOf(k)).toBe('');
     }
   });
 
   it('716 友好巨石无物品档（713-715 有）——逐 tile 判据非逐组', () => {
     expect(dropKeyOf('v_716_friendly_boulder')).toBe('');
+  });
+
+  it('⚠️4 资源掉落接档：倒木 488→木头 9×Next(10,21)（:49561）/钱币带 186→frameX 段铜银金（:49726-49836）', () => {
+    const w = new World(60, 40, 7, 'mtd-res');
+    const drops: Drop[] = [];
+    const g = boulderShell(w, drops, []);
+    // 倒木 488 3×2：无 place 返还 + 木头 9 一件 10..20 根
+    const log = keyOf('v_488_fallen_log');
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, log, dx * 18, dy * 18);
+    }
+    g.breakTile(10, 10, false);
+    expect(drops.length).toBe(1);
+    expect(drops[0].key).toBe(VANILLA_ITEM_KEY_BY_ID[9]);
+    expect(drops[0].n).toBeGreaterThanOrEqual(10);
+    expect(drops[0].n).toBeLessThanOrEqual(20);
+    // 钱币带 186 3×2：fx=900（铜段 [864,954]）→ 3 保底+掷串全为铜 71、stack 20..99
+    const decos = keyOf('v_186_decos_3x2');
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(20 + dx, 10 + dy, decos, 900 + dx * 18, dy * 18);
+    }
+    drops.length = 0;
+    g.breakTile(20, 10, false);
+    expect(drops.length).toBeGreaterThanOrEqual(3);   // 铜段 3 保底（:49731-49736）+掷串
+    for (const d of drops) {
+      expect(d.key).toBe(VANILLA_ITEM_KEY_BY_ID[71]);
+      expect(d.n).toBeGreaterThanOrEqual(20);
+      expect(d.n).toBeLessThanOrEqual(99);
+    }
+    // 段直查纯函数：段界（<864 无 / [864,954] 铜 / (954,1062] 银 / (1062,1170] 金 / 越段无）
+    expect(coinBandVid(864)).toBe(71);
+    expect(coinBandVid(954)).toBe(71);
+    expect(coinBandVid(972)).toBe(72);
+    expect(coinBandVid(1062)).toBe(72);
+    expect(coinBandVid(1080)).toBe(73);
+    expect(coinBandVid(1170)).toBe(73);
+    expect(coinBandVid(846)).toBe(0);
+    expect(coinBandVid(1188)).toBe(0);
   });
 });
 
@@ -143,7 +230,7 @@ describe('def.drop 有值的族：直掉原版物品不变', () => {
   });
 });
 
-// ============ D. 系统性 oracle：279 个多格 drop:null def 全量对拍 ============
+// ============ D. 系统性 oracle：280 个多格 drop:null def 全量对拍（⚠️5 勘误:前注 279） ============
 describe('系统性对拍：多格 drop:null 全量 def vs 原版 createTile 数据', () => {
   // 独立 oracle：itemfunc（提取器）∪ vanilla.json items.createTile（终态回退源）∪
   // CAGE_ITEM_SHEET（87 条提取器解不开的笼缸）→ sheet 是否有原版放置物品
@@ -165,6 +252,9 @@ describe('系统性对拍：多格 drop:null 全量 def vs 原版 createTile 数
   });
 
   it('全量：有原版物品 ↔ place_v_ 兜底；无 ↔ 无掉落（与 vanillaPlaceableTileKeys 一致）', () => {
+    // ★纯函数层 oracle：巨石族（Boulders 表 138/484/664/665/711-716,有放置物品档）运行时
+    // 已改由 object 分支前拦截（❌2=整件清+滚石弹+无物品,A 段直证）,本表值不回改——
+    // 兜底判据本身（createTile 双源）不变,仅消费侧让位特例支路;654 TNT 同理（❌1 dropKey=''）
     let withItem = 0, withoutItem = 0;
     for (const d of multiDropNull) {
       const has = vanillaSheets.has(d.vanilla!.sheet!);

@@ -11,12 +11,14 @@
 //   −π/4×ai0×(1−num) + 内芯 + 主色 + 帧3 白芯层组。972 无帧3 三层（单层 0.3）。
 //   刀尖星尘闪光 = DrawPrettyStarSparkle 原语（:27424/:27527-27530/:27568-27571/
 //   :27627/:27664-27667，经 Renderer.prettyStarSparkle——参数表见下方 SWING_SPARKLE）。
-//   997 南瓜弹 321（:12837→Player:41472 屏外 100-300px 召 321 追击）暂缓。
+//   997 命中召南瓜弹 321 已实装（Projectile.cs:13728-13732 → Player.HorsemansBlade_
+//   SpawnPumpkin :42444-42462）——SwingArc 命中处生成，弹体见文件尾 HorsemansPumpkin。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 import { prettyStarSparkle } from '../render/Renderer';
+import { canHitLine } from '../physics/LineOfSight';
 
 interface ArcOwner { cx: number; cy: number; x: number; y: number; w: number; h: number; facing: number; dead: boolean }
 
@@ -48,6 +50,8 @@ const SWING_STYLE: Record<number, SwingStyle> = {
 export class SwingArc extends Entity {
   w = 16; h = 16;
   damage: number;
+  /** 弹体击退（NewProjectile KnockBack 实参；997 命中召南瓜弹 321 透传用） */
+  kb = 6.5;
   projId: number;
   ai0: number;
   ai1: number;
@@ -99,7 +103,7 @@ export class SwingArc extends Entity {
     // 命中：穿透（型号表）+ 同敌单跳（usesLocalNPCImmunity 族）
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; cx: number; cy: number; id: number; dead: boolean; dontTakeDamage?: boolean; spawnedFromStatue?: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitSet.has(e.id)) continue;
       const reach = 85 * this.scaleCur;
       const ex = this.cx + Math.cos(this.rot) * reach * 0.5;
@@ -112,6 +116,15 @@ export class SwingArc extends Entity {
       e.hurt(dmg, this.ai0 * 6.5, 0, game, this.armorPen, crit);
       game.addDamageNumber(ex, ey, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       this.hitSet.add(e.id);
+      // ★1457 无头骑士剑 997 命中召南瓜弹 321（Projectile.cs:13728-13732：门 =
+      // (!immortal|flag9) && !SpawnedFromStatue && !CountsAsCritter——flag9 仅调试
+      // 假人 488；dmg=damage×1f、kb=弹体击退）→ Player.HorsemansBlade_SpawnPumpkin
+      // （Player.cs:42444-42462）屏外 ±半视口召 321 追击，见文件尾 HorsemansPumpkin
+      if (this.projId === 997) {
+        if (!e.dontTakeDamage && !e.spawnedFromStatue) {
+          spawnHorsemansPumpkin(game, e.id, e.cx, e.cy, this.damage, this.kb);
+        }
+      }
     }
     if (this.t >= this.ai1) this.dead = true;
   }
@@ -1068,6 +1081,135 @@ export class GrassSlash extends Entity {
     const fw = 32, fh = 18;
     const dw = fw * 1.3, dh = fh * 1.3;
     ctx.drawImage(img, 0, this.frame * 20, fw, fh, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+  }
+}
+
+/** 南瓜弹出生屏外偏移（Player.HorsemansBlade_SpawnPumpkin Player.cs:42444-42456）：
+ *  Main.MaxWorldViewSize = Point(1920,1200)（Main.cs:754-758），前段 rand(100,300)（:42449-42450）在
+ *  `num + (x/2 − num)` / `num − (x/2 + num)` 两分支中均被整式消去 = 死值——
+ *  实际偏移恒 ±960/±600（各轴独立 50/50），即玩家位 ± 半视口。 */
+const PUMPKIN_VIEW_HALF_X = 1920 / 2;
+const PUMPKIN_VIEW_HALF_Y = 1200 / 2;
+
+/** 南瓜弹出生（HorsemansBlade_SpawnPumpkin Player.cs:42444-42462 1:1）：
+ *  位 = 玩家 position + (±960, ±600)（:42451-42454）、初速 = normalize(目标心−出生点)×8（:42456-42461）、
+ *  ai[0] = 目标 npcIndex（仓内 = 实体 id）、dmg/kb = 调用方透传。 */
+export function spawnHorsemansPumpkin(
+  game: GameHooks, targetId: number, tcx: number, tcy: number, dmg: number, kb: number,
+): HorsemansPumpkin {
+  const p = game.player;
+  const sx = p.x + (Math.random() < 0.5 ? -1 : 1) * PUMPKIN_VIEW_HALF_X;   // :42451 x 轴塌缩
+  const sy = p.y + (Math.random() < 0.5 ? -1 : 1) * PUMPKIN_VIEW_HALF_Y;   // :42452 y 轴塌缩、:42453-42454 加玩家位
+  const dx = tcx - sx, dy = tcy - sy;
+  const dl = Math.hypot(dx, dy) || 1;
+  const sp = 8 / dl;                                                       // :42458-42461 num5=8f/num5
+  const pumpkin = new HorsemansPumpkin(sx, sy, dx * sp, dy * sp, dmg, kb, targetId);
+  (game as unknown as { entities: { add(e: HorsemansPumpkin, bucket: string): void } })
+    .entities.add(pumpkin, 'projectiles');                                 // NewProjectile :42462
+  return pumpkin;
+}
+
+/** 无头骑士剑南瓜弹 321（SetDefaults Projectile.cs:4141-4150 + AI_055 :29201-29274）：
+ *  30×30、friendly、melee、tileCollide=false 穿墙、ignoreWater、penetrate 1、
+ *  timeLeft 3600。AI：向 ai[0] 目标收敛 v=(v×14+dir×8)/15；目标失效 → 1000px
+ *  曼哈顿 + CanHit 重锁（无则保持直飞——原版 Kill 门只挡 ai[0] 越界槽，恒不触发）；
+ *  每拍尘 6（8px 内缩、vel×0.5+弹速×0.5、noGravity/noLight、scale1.4）；命中即亡 +
+ *  Kill 特效（:77759-77773 Sound 10 + 2×20 尘 6 反速 ×2）。 */
+export class HorsemansPumpkin extends Entity {
+  w = 30; h = 30;
+  damage: number;
+  kb: number;
+  /** ai[0] = 目标实体 id（原版 npcIndex） */
+  ai0: number;
+  critChance = 0.04;
+  armorPen = 0;
+  dead = false;
+  private frame = 0;
+  private frameCtr = 0;
+  private life = 3600;
+  private rot = 0;
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, kb: number, targetId: number) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.vx = vx; this.vy = vy;
+    this.damage = damage;
+    this.kb = kb;
+    this.ai0 = targetId;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    if (--this.life <= 0) { this.dead = true; return; }
+    // 帧循环（:29203-29212 frameCounter>0 恒真 → 每拍 +1、>2 归 0）
+    if (++this.frameCtr > 0) { this.frameCtr = 0; if (++this.frame > 2) this.frame = 0; }
+    // 追踪/重锁（:29223-29269）
+    const enemies = game.enemies() as Array<{
+      id: number; x: number; y: number; w: number; h: number; dead: boolean;
+    }>;
+    const tgt = enemies.find((e) => e.id === this.ai0);
+    if (tgt && !tgt.dead && playerCanHitEnemy(tgt, game, 321)) {
+      // CanBeChasedBy（:29227）+ !CountsAsCritter（projTargets 友好门近似）
+      const dx = tgt.x + tgt.w / 2 - this.cx, dy = tgt.y + tgt.h / 2 - this.cy;
+      const dl = Math.hypot(dx, dy) || 1;
+      this.vx = (this.vx * 14 + dx / dl * 8) / 15;                          // :29229 num427=8f、:29238 收敛式
+      this.vy = (this.vy * 14 + dy / dl * 8) / 15;
+    } else {
+      // 重锁（:29241-29257）：1000 曼哈顿内 Collision.CanHit 最近者
+      let bd = 1000, bi = 0;
+      for (const e of enemies) {
+        if (e.dead || !playerCanHitEnemy(e, game, 321)) continue;
+        const d = Math.abs(this.cx - (e.x + e.w / 2)) + Math.abs(this.cy - (e.y + e.h / 2));
+        if (d >= bd) continue;
+        if (!canHitLine(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+        bd = d; bi = e.id;
+      }
+      if (bi !== 0) this.ai0 = bi;
+    }
+    // 朝向（:29213-29222：vx<0 → spriteDirection −1 + 反向 atan2；绘制侧 Y 翻转近似）
+    this.rot = Math.atan2(this.vy, this.vx);
+    // 尘 6（:29260-29268）
+    const d = game.spawnDust?.(this.x + 8, this.y + 8, this.w - 16, this.h - 16, 6,
+      this.vx * 0.5, this.vy * 0.5, 0, null, 1.4, true);
+    if (d) { d.vx *= 0.5; d.vy *= 0.5; }
+    this.x += this.vx; this.y += this.vy;
+    // 命中（penetrate 1：首敌即亡；tileCollide=false 不撞块）
+    for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, 321)) continue;   // friendly 门（Damage_PVE_Inner :11892）
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
+      if (e.dead) continue;
+      if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+      const crit = Math.random() < this.critChance;
+      const dmg = crit ? this.damage * 2 : this.damage;
+      playEnemyHitSound(game, e);
+      e.hurt(dmg, Math.sign(this.vx || 1) * this.kb, 0, game, this.armorPen, crit);
+      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
+      // Kill 特效（Projectile.cs:77759-77773：SoundID.Item10 + 2×20 尘 6 反速 ×2）
+      game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);
+      for (let i = 0; i < 20; i++) {
+        for (const sc of [2, 1]) {
+          const kd = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+            -this.vx * 0.2, -this.vy * 0.2, 100, null, sc);
+          if (kd) { kd.vx *= 2; kd.vy *= 2; }
+        }
+      }
+      this.dead = true;
+      break;
+    }
+  }
+
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+    const img = projSprite(321);
+    const ctx = r.ctx;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rot);
+    if (this.vx < 0) ctx.scale(1, -1);                 // spriteDirection −1（:29212-29215）
+    ctx.imageSmoothingEnabled = false;
+    const fh = img.height / 3;                         // Main.projFrames[321]=3（AI frame 0-2）
+    ctx.drawImage(img, 0, this.frame * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
     ctx.restore();
   }
 }

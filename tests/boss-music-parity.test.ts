@@ -7,7 +7,7 @@
 //     全游戏唯一"非物品也咆哮"的生成点 = 地牢守卫 68（NPC.cs:21929-21933）。
 //   战斗曲 = UpdateAudio_DecideOnNewMusic type→num3 switch（Main.cs:12196-12260）
 //     + flag→MusicID 链（:12459-12503）；boss 兜底 Boss1(5)（:12283-12287）。
-// 本文件字面量表 = 原版权威，防回归；改表必须先核 1456 行号。
+// 本文件字面量表 = 原版权威，防回归；改表必须先核 1457 行号（树基准 1457,唤起链数值两版同值）。
 import { describe, it, expect } from 'vitest';
 import { MUSIC, BOSS_MUSIC, bossMusicFor, pickMusic, newMusicState, resolveEventMusic } from '../src/data/Music';
 import { INVASION_MUSIC } from '../src/world/Invasion';
@@ -48,7 +48,7 @@ const VANILLA_TABLE: Record<number, {
   668: { name: 'Deerclops',      announce: 'awoken',   itemRoar: true,  music: 90 },   // 鹿角怪之物 5120 :43229
 };
 
-describe('Boss 唤起三件套冻结对账（NPC.cs/Player.cs/Main.cs 1456）', () => {
+describe('Boss 唤起三件套冻结对账（NPC.cs/Player.cs/Main.cs,1456/1457 同值,行号锚 1456）', () => {
   it('苏醒公告：bossSummonAnnounceKind 与 SpawnBoss switch 逐项一致', () => {
     for (const [idStr, row] of Object.entries(VANILLA_TABLE)) {
       const id = Number(idStr);

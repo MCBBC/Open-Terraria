@@ -43,8 +43,8 @@ describe('放置回填(createTile → def.tile)', () => {
     }
   });
 
-  it('钱币三档 maxStack=100(100 进位依赖)——铂币 74 无覆盖=9999（1456 堆叠改制）', () => {
-    // 1456 SetDefaults 仅 11 处 maxStack 覆盖：71/72/73=100，74（铂币）无覆盖走
+  it('钱币三档 maxStack=100(100 进位依赖)——铂币 74 无覆盖=9999（1456/1457 同值堆叠改制）', () => {
+    // 1456/1457 同值 SetDefaults 仅 11 处 maxStack 覆盖(1457 :2222-2264 三档)：71/72/73=100，74（铂币）无覆盖走
     // CommonMaxStack=9999（Item.cs:66；曾四档全 100 的旧断言陈旧）
     for (const vid of [71, 72, 73]) {
       expect(defOfVid(vid)!.maxStack, `vid ${vid}`).toBe(100);

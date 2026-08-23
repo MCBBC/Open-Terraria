@@ -70,7 +70,7 @@ function makeHooks(world: World, playerAt: { x: number; y: number }): Harness {
 // ① M12 血鳗鱼 621-623
 // ---------------------------------------------------------------------------
 describe('① M12 血鳗鱼 621-623（数据 + wormFollow 链 + 渐显 + 舵机）', () => {
-  it('数据补齐：622/623 与 SetDefaults :16922-16960 一致（1456 数值照抄）', async () => {
+  it('数据补齐：622/623 与 SetDefaults :16922-16960 一致（1456 数值照抄,1456/1457 同值——recon-npc CLASS B=0）', async () => {
     const data = (await import('../public/sprites/vanilla-npcs.json')).default as Record<string, {
       damage: number; defense: number; lifeMax: number; aiStyle: number;
       width: number; height: number; alpha: number; behindTiles: boolean; friendly?: boolean;

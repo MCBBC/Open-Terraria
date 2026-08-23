@@ -6,7 +6,7 @@
 //   ② 信息/机械饰品背包生效域——inventory[0..57] 扫描（UpdateEquips :12494-12500）
 //   ③ 翅膀 accelMult 消费（WingAirLogicTweaks :28852/:28856）+ jumpSpeedBoost 叠加
 //     （:14250/:13986）+ 多翅膀槽序后写胜出（:12578-12586）+ aggro 轴 ±400 七件
-// 数值一律取 1456 反编译最终态。
+// 数值基准 1457（Terarria1457/;本文件所涉配饰数值两版同值,绘制槽表已按 1457 再生）。
 import { describe, it, expect } from 'vitest';
 import { ITEM_BY_KEY } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
@@ -229,7 +229,7 @@ describe('配饰系统性②：信息/机械饰品背包生效域（UpdateEquips
     expect(g.accDepthMeter).toBe(1);
   });
 
-  it('手机 3124 放弹药排 54 → 信息 12 门全开（0..57 含钱币/弹药/垃圾四排,按 1456 字面）', () => {
+  it('手机 3124 放弹药排 54 → 信息 12 门全开（0..57 含钱币/弹药/垃圾四排,1456/1457 同值字面）', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.slots[54] = { id: _iid(3124), stack: 1 };
     const g = p.equipStats.infoAccs;

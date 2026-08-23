@@ -152,7 +152,7 @@ function item(d: Partial<ItemDef> & { key: string; name: string }) {
 
  // 金币雨（WorldGen.cs:71848）
 
-// ---- 药水（Buff 来源;buffType/buffTime 对齐 1456 Item.cs case 288-305）----
+// ---- 药水（Buff 来源;buffType/buffTime 对齐 Item.cs case 288-305——1456/1457 该段逐字节同,已 diff 核验）----
 // 时长换算:buffTime/60 = 秒(Regeneration/Swiftness/Ironskin/Thorns 均 28800t=480s=8min)
 
 
@@ -637,9 +637,20 @@ item({ key: 'vi_3870_betsys_wrath', name: '', value: 1 });
 item({ key: 'vi_3098_butchers_chainsaw', name: '', value: 1 });
 // ---- 原版远程武器+弹药全量注册（useAmmo 族对账 2026-08-13：枪 24/弓弩 39/
 // 发射器 7/吹箭 4——此前仅 6 把，弹链数据驱动已备）----
-item({ key: 'vi_95_地牢砖墙', name: '', value: 1 });
-item({ key: 'vi_96_地牢砖墙', name: '', value: 1 });
-item({ key: 'vi_98_地牢砖墙', name: '', value: 1 });
+// ★键名卫生（2026-08-23 备案遗留③）：下列 vi_ 键后缀曾张冠李戴（泥灰墙/彩虹砖墙/
+// 铂金砖墙/地牢砖墙/纯数字垃圾段），本次按 1457 ItemID.cs 常量 + 官方 zh-Hans 译名
+// 改正（:1624 WoodenBow=39/:1634 DemonBow=44/:1640 UnholyArrow=47/:1736
+// FlintlockPistol=95/:1738 Musket=96/:1740 MusketBall=97/:1742 Minishark=98/
+// :1744 IronBow=99/:1786 MoltenFury=120/:2014 MeteorShot=234/:2102 SilverBullet=278）。
+// ★vid 一律不动——稳定 id 表只取 vi_<id>_ 前缀（本文件尾 ITEM_STABLE_OF_INTERNAL 段
+// :2043-2054），存档 v3/v4 走数值稳定 id、v2 裸下标走冻结快照
+// legacyItemIndex.generated.json（经查不含旧键）→ 改后缀零存档兼容风险,无需别名映射。
+// 显示名走 vi_<id>_ 前缀解析（Lang.ts:93-100）同样不受后缀影响。全库 grep 消费点:
+// 仅本文件定义 + idNames.generated.ts 生成表 1 处（已同步）;诊断脚本均按 /^vi_NNN_/
+// 前缀正则匹配,不受影响。
+item({ key: 'vi_95_燧发枪', name: '', value: 1 });      // FlintlockPistol（曾误名"地牢砖墙"）
+item({ key: 'vi_96_火枪', name: '', value: 1 });        // Musket（曾误名"地牢砖墙"）
+item({ key: 'vi_98_迷你鲨', name: '', value: 1 });      // Minishark（曾误名"地牢砖墙"）
 item({ key: 'vi_219_凤凰爆破枪', name: '', value: 1 });
 item({ key: 'vi_434_发条式突击步枪', name: '', value: 1 });
 item({ key: 'vi_533_megashark', name: '', value: 1 });
@@ -661,10 +672,30 @@ item({ key: 'vi_3788_玛瑙爆破枪', name: '', value: 1 });
 // 战斗数值已回填 vanilla-itemcombat.json 键"4703"；图标经 vi_ 键回退 vanilla.json items['4703'].icon）
 item({ key: 'vi_4703_四管霰弹枪', name: '', value: 1 });
 item({ key: 'vi_5117_气喇叭', name: '', value: 1 });
-item({ key: 'vi_39_泥灰墙', name: '', value: 1 });
-item({ key: 'vi_44_彩虹砖墙', name: '', value: 1 });
-item({ key: 'vi_99_地牢砖墙', name: '', value: 1 });
-item({ key: 'vi_120_1952', name: '', value: 1 });
+// ---- 备案遗留④五枪（2026-08-23，数值全在 vanilla-itemcombat.json 1457 终值，
+//      图标经 vi_ 键回退 vanilla.json items['<id>'].icon）----
+// 127 太空枪（Item.cs:2911-2929：magic/mana6/shoot 20 灰色电弧/伤20/速17/use17——
+//   UseSound=Item157，任务书里"shoot157?"系 UseSound 误记）
+item({ key: 'vi_127_太空枪', name: '', value: 1 });
+// 514 激光枪（Item.cs:7498-7516：magic/mana8/shoot 88 紫激光/伤29/速17/use12）
+item({ key: 'vi_514_激光枪', name: '', value: 1 });
+// 3107 钉枪（Item.cs:28758-28774：ranged/useAmmo 3108 钉弹/shoot 514/伤85/use15；
+//   散布 ±Next(-40,41)×0.02 见 Game.ts 逐枪散布表）
+item({ key: 'vi_3107_钉枪', name: '', value: 1 });
+item({ key: 'vi_3108_钉', name: '', value: 1 });   // Nail 弹药（Item.cs:28775-28787：shoot 514/伤30/速6）
+// 1782 糖果玉米步枪（Item.cs:19751-19771：ranged/useAmmo 1783/shoot 311/伤60/
+//   crit+6/use9；1/3 省弹 GUN_AMMO_SAVE 已录）
+item({ key: 'vi_1782_糖果玉米步枪', name: '', value: 1 });
+item({ key: 'vi_1783_糖果玉米', name: '', value: 1 });   // CandyCorn 弹药（Item.cs:19772-19784：shoot 311/伤9/速4）
+// 1258 刺炮发射器 Stynger（Item.cs:15588-15605：ranged/useAmmo 1261 刺炮弹/
+//   shoot 246/伤45/kb5/use22；弹 246 Kill 爆炸+撒 249 破片链已在
+//   Game.onProjectileDeath 246 分支；散布 ±0.01+出生点抖动见 Game.ts）
+item({ key: 'vi_1258_刺炮发射器', name: '', value: 1 });
+item({ key: 'vi_1261_刺炮弹', name: '', value: 1 });   // StyngerBolt 弹药（Item.cs:1261 段：shoot 246/伤17/速2）
+item({ key: 'vi_39_木弓', name: '', value: 1 });        // WoodenBow（曾误名"泥灰墙"）
+item({ key: 'vi_44_恶魔弓', name: '', value: 1 });      // DemonBow（曾误名"彩虹砖墙"）
+item({ key: 'vi_99_铁弓', name: '', value: 1 });        // IronBow（曾误名"地牢砖墙"）
+item({ key: 'vi_120_熔火之怒', name: '', value: 1 });   // MoltenFury（曾误名"1952"纯数字垃圾段）
 item({ key: 'vi_435_钴连弩', name: '', value: 1 });
 item({ key: 'vi_436_秘银连弩', name: '', value: 1 });
 item({ key: 'vi_481_精金连弩', name: '', value: 1 });
@@ -709,9 +740,9 @@ item({ key: 'vi_986_blowgun', name: '', value: 1 });
 item({ key: 'vi_3007_飞镖手枪', name: '', value: 1 });
 item({ key: 'vi_3008_飞镖步枪', name: '', value: 1 });
 // ---- 远程弹药全量（ammo 字段族：子弹 16/箭 15/火箭 12/飞镖 5——PickAmmo 背包/弹药栏扫描用）----
-item({ key: 'vi_97_地牢砖墙', name: '', value: 1 });
-item({ key: 'vi_234_4052', name: '', value: 1 });
-item({ key: 'vi_278_4515', name: '', value: 1 });
+item({ key: 'vi_97_火枪子弹', name: '', value: 1 });    // MusketBall（曾误名"地牢砖墙"）
+item({ key: 'vi_234_流星弹', name: '', value: 1 });     // MeteorShot（曾误名"4052"垃圾段）
+item({ key: 'vi_278_银子弹', name: '', value: 1 });     // SilverBullet（曾误名"4515"垃圾段）
 item({ key: 'vi_515_水晶子弹', name: '', value: 1 });
 item({ key: 'vi_546_诅咒弹', name: '', value: 1 });
 item({ key: 'vi_1302_高速子弹', name: '', value: 1 });
@@ -723,7 +754,7 @@ item({ key: 'vi_1351_爆破弹', name: '', value: 1 });
 item({ key: 'vi_1352_金子弹', name: '', value: 1 });
 item({ key: 'vi_3104_无尽火枪袋', name: '', value: 1 });
 item({ key: 'vi_3567_夜明弹', name: '', value: 1 });
-item({ key: 'vi_47_铂金砖墙', name: '', value: 1 });
+item({ key: 'vi_47_邪箭', name: '', value: 1 });        // UnholyArrow（曾误名"铂金砖墙"）
 item({ key: 'vi_516_圣箭', name: '', value: 1 });
 item({ key: 'vi_545_诅咒箭', name: '', value: 1 });
 item({ key: 'vi_988_霜冻箭', name: '', value: 1 });
@@ -1064,7 +1095,7 @@ for (let mbStyle = 0; mbStyle < 100; mbStyle++) {
   if (!mbDef) continue;
   mbDef.tile = 'v_139_musicboxes';
   mbDef.placeStyle = mbStyle;
-  // maxStack 不覆写：DefaultToMusicBox（:48250-48267）不设 maxStack → 1456 默认 9999
+  // maxStack 不覆写：DefaultToMusicBox（1456 :48250-48267）不设 maxStack → 默认 9999（1456/1457 同值,1457 Item.cs:85/:49020）
   mbDef.value = 100000; // DefaultToMusicBox value = 10 金
 }
 
@@ -1082,7 +1113,7 @@ for (const [fnVid, fnStyle] of FOUNTAIN_ITEM_STYLE) {
   if (!fnDef) continue;
   fnDef.tile = 'v_207_water_fountains';
   fnDef.placeStyle = fnStyle;
-  // maxStack 不覆写：喷泉 case 无 maxStack 赋值 → 1456 默认 9999
+  // maxStack 不覆写：喷泉 case 无 maxStack 赋值 → 1456/1457 同值默认 9999
 }
 void 0;
 
@@ -1332,6 +1363,9 @@ export const PRIV_ITEM_STABLE: Record<string, number> = {
   'place_v_262_amethystgemspark': 10396, 'place_v_263_topazgemspark': 10397, 'place_v_264_sapphiregemspark': 10398, 'place_v_265_emeraldgemspark': 10399,
   'place_v_266_rubygemspark': 10400, 'place_v_267_diamondgemspark': 10401, 'place_v_268_ambergemspark': 10402, 'place_v_335_fireworksbox': 10403,
   'place_v_338_fireworkfountain': 10404, 'place_v_372_peacecandle': 10405, 'place_v_386_trapdooropen': 10406, 'place_v_389_tallgateopen': 10407,
+  // (⚠️5 2026-08-23：v_389_tallgateopen def 已退役——唯一消费点 devices.ShiftTallGate 改用
+  //  v_389_tall_gate_open;def 槽位保留防 TILE_DEFS 内部 id 平移（world-final-hash 金标锁
+  //  raw 数组）,place 物品随 def 自动注册故本号保留,10407 冻结不复用)
   'place_v_410_lunarmonolith': 10408, 'place_v_419_logicgatelamp': 10409, 'place_v_420_logicgate': 10410, 'place_v_421_conveyorbeltleft': 10411,
   'place_v_423_logicsensor': 10412, 'place_v_424_wirepipe': 10413, 'place_v_425_announcementbox': 10414, 'place_v_428_weightedpressureplate': 10415,
   'place_v_429_wirebulb': 10416, 'place_v_440_gemlocks': 10417, 'place_v_441_fakecontainers': 10418, 'place_v_442_projectilepressurepad': 10419,

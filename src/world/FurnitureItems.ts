@@ -33,9 +33,11 @@
 
 import { TILE_BY_KEY } from '../data/tiles';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
-import { itemCombat } from '../data/vanillaItemCombat';
+import { itemCombat, viIdFromKey } from '../data/vanillaItemCombat';
 import { vanillaStatOfVid } from '../data/vanillaItemStats';
 import { equipKindOfVid } from '../data/vanillaEquip';
+import { ITEM_DEFS } from '../data/items';
+import { ITEM_ACCESSORY_INCOMPATIBILITY_TYPE } from '../data/vanillaSets1457';
 
 /** 挂物族类别 */
 export type FurnitureKind = 'item_frame' | 'weapon_rack' | 'display_doll' | 'hat_rack' | 'food_platter' | 'display_jar' | 'critter_anchor' | 'kite_anchor';
@@ -307,13 +309,31 @@ export function dollTargetSlot(rec: FurnitureItemRecord, vid: number): number {
   return -1;
 }
 
-/** GetAccessoryTargetSlot（TEDisplayDoll.cs:727-738）：HasIncompatibleAccessory
- *  （ItemSlot.cs:3208-3220 + CanEquipBothAccessories :3195-3206）命中 → 冲突槽；
- *  否则 3..7 首空；全满 → 3 */
+/** 槽内存量 id（内部 id）→ 原版 vid（vi_<id>_ 键反查；未收录 = -1） */
+function slotVid(id: number): number {
+  const k = ITEM_DEFS[id]?.key;
+  return k ? viIdFromKey(k) : -1;
+}
+
+/** ItemID.Sets.AccessoryIncompatibilityType（★1457 ItemID.cs:58，缺省 -1）——
+ *  四件 AmmoCycler 互斥组 6168（vanillaSets1457.ITEM_ACCESSORY_INCOMPATIBILITY_TYPE） */
+function incompatGroupOf(vid: number): number {
+  return ITEM_ACCESSORY_INCOMPATIBILITY_TYPE[vid] ?? -1;
+}
+
+/** GetAccessoryTargetSlot（★1457 TEDisplayDoll.cs:747-761）：HasIncompatibleAccessory
+ *  （ItemSlot.CanEquipBothAccessories :3470-3489：同 id / 双翼 / ★1457
+ *  AccessoryIncompatibilityType 同组）命中 → 冲突槽（TryFitting 整体交换）；
+ *  否则 3..7 首空；全满 → 3。★修：槽内存量为内部 id,比较前经 slotVid 归一到
+ *  vid 空间（原 `cur.id === vid` 跨 id 空间恒假 = 同 id/双翼冲突分支死代码） */
 function dollAccessoryTargetSlot(rec: FurnitureItemRecord, vid: number): number {
+  const g = incompatGroupOf(vid);
   for (let i = 3; i <= 7; i++) {
     const cur = rec.slots[i];
-    if (cur && (cur.id === vid || (vanillaWingSlot(cur.id) > 0 && vanillaWingSlot(vid) > 0))) return i;
+    if (!cur) continue;
+    const cv = slotVid(cur.id);
+    if (cv === vid || (vanillaWingSlot(cv) > 0 && vanillaWingSlot(vid) > 0)
+      || (g !== -1 && g === incompatGroupOf(cv))) return i;
   }
   for (let i = 3; i <= 7; i++) {
     if (!rec.slots[i]) return i;

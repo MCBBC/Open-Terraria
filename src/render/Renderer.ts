@@ -394,6 +394,7 @@ import {
   BALLOON_TORSO_FRAMING, WAIST_TORSO_FRAMING, SHOE_ROLLER_SKATE, FACE_DRAW_OFFSET, OFFSETS_PLAYER_OFFHAND,
   BACK_DRAW_IN_BACKPACK, BACK_DRAW_IN_TAIL, MOUNT_BACKPACK_OK, BACK_IS_ACAPE,
   NECK_IS_SCARF, FRONT_SCARF_CAPE_HIDE, FRONT_NECK_LAYER_ALWAYS, SITTING_LEG_SLICES,
+  SITTING_LEG_SLICES_SPECIAL, SITTING_LEG_SPECIAL_LEGS,
   FACE_HELMET_OFFSET, HELMET_DRAW_OFFSET, FACE_MASK_HELMET_HIDE, FACE_FLOWER_HELMET_HIDE,
   HEAD_HIDES_HEAD, PREVENT_BEARD_DRAW,
   shieldHaloFactor, shieldParryTransform,
@@ -8771,24 +8772,27 @@ export class Renderer {
    *  染料逐族 cXxx（UpdateItemDye :9329-9420 路由,accDraw 聚合侧已配对） */
   private drawAccFrontLayers(ctx: CanvasRenderingContext2D, p: Player,
     accRows: { body: number; legs: number }, stealthClamp: number,
-    mnt: import('../entities/Mounts').MountInstance | null, head = 0): void {
+    mnt: import('../entities/Mounts').MountInstance | null, head = 0, sittingLegsVid = 0): void {
     const ad = p.equipStats.accDraw;
     if (!this.atlas) return;
     const atlas = this.atlas;
     const bodyRow = accRows.body;
     const legRow = accRows.legs;
     // 14_Shoes（:1756-1775）：legFrame 对齐 + 滚轴鞋 (0,2)·Directions 偏移
-    //（GetShoeDrawOffset :4713-4721）。坐姿走 DrawSittingLegs（:1768→:1585-1676）
-    // 默认支两片切片：先 (sy+2,h-2) 身段后叠 (sy+0,2) 顶带（同锚=顶带下身段上移 2px,
-    // SITTING_LEG_SLICES;num3=1/num2=0 :1660-1672）
+    //（GetShoeDrawOffset :4713-4721）。坐姿走 DrawSittingLegs（:1768→:1585-1754）：
+    // ★默认支三片 [46,10]+[44,2]+[42,2]（num3=2/num2=42 :1594-1596）;217 族特例支
+    // 两片 [[2,54],[0,2]]（num3=1/num2=0 :1608-1716,legs 169/177/178/181/182/206/217）
+    // ——V2b 复核勘误：曾把特例支两片当默认支全档通用
     if (ad.shoe > 0) {
       const tex = atlas.ensureVImage(`vanilla/Acc_Shoes_${ad.shoe}.png`);
       if (tex && tex.width > 0) {
         const roller = SHOE_ROLLER_SKATE.has(ad.shoe) ? 2 : 0;
         if (p.sitting) {
-          // 表序 = 原版循环序（num10=num3→0：身段先、顶带后叠）
-          for (let k = 0; k < SITTING_LEG_SLICES.length; k++) {
-            const [oy, h2] = SITTING_LEG_SLICES[k];
+          // 表序 = 原版循环序（num10=num3→0：身段先、顶带后叠）；分支按 legs vid
+          const slices = SITTING_LEG_SPECIAL_LEGS.has(sittingLegsVid)
+            ? SITTING_LEG_SLICES_SPECIAL : SITTING_LEG_SLICES;
+          for (let k = 0; k < slices.length; k++) {
+            const [oy, h2] = slices[k];
             this.drawAccBodyFrame(ctx, tex, legRow, ad.dyeShoe, stealthClamp, p.facing,
               0, roller, oy, h2);
           }
@@ -10059,7 +10063,7 @@ export class Renderer {
     // ---- 配饰身上贴图·身前族（配饰审计系统性批 2026-08-22）----
     // 层序 = LegacyPlayerRenderer.DrawPlayer_UseNormalLayers（:170-236）身前段,
     // 详见 drawAccFrontLayers。head = 纸娃娃头盔 ArmorIDs（胡须/脸饰头盔门）
-    this.drawAccFrontLayers(ctx, p, accRows, stealthClamp, mnt, accDollEquip?.head ?? 0);
+    this.drawAccFrontLayers(ctx, p, accRows, stealthClamp, mnt, accDollEquip?.head ?? 0, accDollEquip?.legs ?? 0);
 
     ctx.restore();
     // ---- 日曜盾球（DrawPlayer_26_SolarShield, PlayerDrawLayers.cs:3128-3146）----
@@ -12730,10 +12734,21 @@ export class Renderer {
     } else if (this.mapHeadHoverName) {
       this.fullMapHoverName = this.mapHeadHoverName;
     }
+    // ★1457 钻地龟图标层（DigtoiseMapLayer——MapIconOverlay 注册序 Main.cs:374
+    //   Digtoise→BossBag→Spawn→TeamBasedSpawn→TeleportPylons,画在晶塔层之前）
+    this.drawDigtoiseMapLayer(ctx, cx0, cy0, mouseX, mouseY, entities);
     this.drawPylonMapLayer(ctx, cx0, cy0, mouseX, mouseY);
     // 地图 ping 图标层（PingMapLayer——MapIconOverlay 注册序 Pylons→Pings :349-351，
     // 画在晶塔层之上）
     this.drawMapPingLayer(ctx, cx0, cy0);
+    // ★1457 钻地龟层悬停文案（MapIcons 单槽 text：先画先写、后层覆盖——头像/晶塔
+    //   均未命中才显示）
+    if (this.digtoiseHoverName && !this.fullMapHoverName && !this.pylonHoverName) {
+      ctx.font = '13px sans-serif';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.fillText(this.digtoiseHoverName, mouseX, mouseY - 14);
+    }
     if (this.fullMapHoverName) {
       ctx.font = '13px sans-serif';
       ctx.fillStyle = '#FFFFFF';
@@ -12835,6 +12850,43 @@ export class Renderer {
   /** 连续黑帧计数 + 最近一次探针结果（F5 报告消费） */
   private _mapGlBlack = 0;
   _mapGlLastProbe: [number, number, number, number] = [0, 0, 0, 0];
+
+  /** 全屏地图钻地龟图标层（★1457 DigtoiseMapLayer.cs:9-29 1:1）：
+   *  本地玩家的钻地龟随从弹（1098 PalworldDigtoise/1123 PalworldTrustyDigtoise，
+   *  owner==localPlayer 首中即 break :14-:26）→ Extra_305（116×36 = SpriteFrame(2,1)
+   *  58×36 双列,列 = spriteDirection≤0?1:0 :21）画在弹体 Bottom/16+(0.5,0) 格锚、
+   *  Alignment.Bottom（图标底边贴锚）:19-21;悬停 → "UI.Digtoise"（:22-24,本仓
+   *  Mods.SandboxWorld.UI.Digtoise 键）。单槽 text：先画先写,后层（头像/晶塔）覆盖 */
+  private digtoiseHoverName: string | null = null;
+  private drawDigtoiseMapLayer(
+    ctx: CanvasRenderingContext2D, cx0: number, cy0: number,
+    mouseX: number, mouseY: number, entities: unknown[],
+  ) {
+    this.digtoiseHoverName = null;
+    const tex = this.atlas?.vmisc('vanilla/Extra_305.png');
+    const fm = this.fullMap;
+    const p = this._lastPlayer;
+    for (const ent of entities) {
+      const m = ent as { dead?: boolean; projId?: number; ownerPlayer?: unknown;
+        x: number; y: number; w: number; h: number; facing?: number } | undefined;
+      if (!m || m.dead || (m.projId !== 1098 && m.projId !== 1123)) continue;
+      if (!p || m.ownerPlayer !== p) continue;               // :17 owner==localPlayer
+      const fw = 58, fh = 36;                                // SpriteFrame(2,1) 帧尺寸
+      const scale = Math.max(1, Math.min(2, fm.zoom));       // 同晶塔层 scaleIfSelected 档
+      // vector2 = projectile.Bottom/16（:20）+ vector (0.5,0)（:19）→ 格锚
+      const mx = cx0 + (m.x / TILE + m.w / TILE + 0.5) * fm.zoom;
+      const my = cy0 + ((m.y + m.h) / TILE) * fm.zoom;       // Alignment.Bottom 底边贴锚
+      const dw = fw * scale, dh = fh * scale;
+      if (tex && mx > -dw && mx < ctx.canvas.width + dw && my > -dh && my < ctx.canvas.height + dh) {
+        const col = (m.facing ?? 1) <= 0 ? 1 : 0;            // :21 spriteDirection≤0 → 列 1
+        ctx.drawImage(tex.img, tex.sx + col * fw, tex.sy, fw, fh, mx - dw / 2, my - dh, dw, dh);
+      }
+      if (Math.abs(mouseX - mx) <= dw / 2 && mouseY >= my - dh && mouseY <= my) {
+        this.digtoiseHoverName = Lang.text('Mods.SandboxWorld.UI.Digtoise');
+      }
+      break;                                                 // :25 首中即出（单宠语义）
+    }
+  }
 
   /** 全屏地图晶塔图标层（TeleportPylonsMapLayer.cs 1:1）：
    *   - 连线（:52-75）：当前塔（MapPylonTile）→ 其余每座晶塔的黑 6px/白 2px 双线

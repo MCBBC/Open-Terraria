@@ -111,8 +111,9 @@ const tintCache = new WeakMap<Tex, Map<string, HTMLCanvasElement>>();
 
 /** 染色：multiply 乘 RGB；flatten=false 时 destination-in 回贴原 alpha（保形），
  *  flatten=true 时摊平 alpha=255（'lighter' 加色用——透明像素成不透明黑，加 0 无害）。
- *  （ChunkCache.tintRegion 同款三段合成） */
-function tintedTex(tex: Tex, rgb: readonly [number, number, number], flatten: boolean): HTMLCanvasElement | null {
+ *  （ChunkCache.tintRegion 同款三段合成；鞭渲染 WhipProj 亦消费——鞭身渔线/彩色鞭尖） */
+export function tintedTex(tex: Tex, rgb: readonly [number, number, number], flatten: boolean): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;   // node 单测/非 DOM 环境无画布可染（消费端跳笔）
   const w = (tex as { width: number }).width, h = (tex as { height: number }).height;
   if (!w || !h) return null;
   let m = tintCache.get(tex);

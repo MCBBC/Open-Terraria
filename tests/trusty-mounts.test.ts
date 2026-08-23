@@ -52,6 +52,13 @@ describe('① Trusty 坐骑 64/65 数据表（SetAsChillet hardmode:true）', ()
       expect(MOUNT_DATA[id].jumpHeight).not.toBe(6);
     }
   });
+  it('62/63 非 hardmode 档（★1457 :2692-2698 SetAsChillet 增 hardmode 形参,普通支 dashSpeed 6.5/jumpHeight 6/jumpSpeed 8.01;V2b 复核补——旧表载 1456 单档 9/8）', () => {
+    for (const id of ['62', '63']) {
+      expect(MOUNT_DATA[id]).toMatchObject({
+        dashSpeed: 6.5, jumpHeight: 6, jumpSpeed: 8.01, runSpeed: 3, acceleration: 0.32,
+      });
+    }
+  });
   it('帧组/偏移与 62/63 同表（:2691-2756 ≡ 1456 助手段）+ buff 391/392', () => {
     expect(MOUNT_DATA['64']).toMatchObject({
       buff: 391, xOffset: 7, bodyFrame: 3, yOffset: -10, playerHeadOffset: 10,
@@ -325,7 +332,8 @@ describe('⑦ 抚摸 Joy 音计时（:50053-50113 AI_067 / :59101-59131 AI_026�
     expect(sfx).toContain('pal_foxparks_joy');                   // AI_026 flag8 支（:59122-59131）
   });
   it('抚摸白名单：帕鲁随从五件入表（GetPettingInfo :39545-39563）', () => {
-    expect(GAME_TS).toContain('PALPETTABLE_MINIONS = new Set([1093, 1112, 1118, 1094, 1113])');
+    // ★2026-08-23 内容缺口批：+1098/1123 钻地龟（:39552-39555 isPetSmall+num2=48）
+    expect(GAME_TS).toContain('PALPETTABLE_MINIONS = new Set([1093, 1112, 1118, 1094, 1113, 1098, 1123])');
   });
 });
 

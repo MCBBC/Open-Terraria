@@ -1,4 +1,4 @@
-// 原版 NPC lavaImmune 全表（Terarria1456/NPC.cs SetDefaults `else if (type == N)` 链中
+// 原版 NPC lavaImmune 全表（★1456/1457 同值,recon-npc CLASS B=0;源= NPC.cs SetDefaults `else if (type == N)` 链中
 // `lavaImmune = true` 的全部 NPC id，tools 提取脚本一次性扫描）。岩浆接触伤害门禁
 // （NPC.cs:94526 `!lavaImmune`）与原版一致：表内怪入浆不掉血不上火。
 export const NPC_LAVA_IMMUNE = new Set<number>([

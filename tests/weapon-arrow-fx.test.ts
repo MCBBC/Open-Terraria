@@ -233,6 +233,7 @@ describe('⑤ 710 空中祸害空旷加伤/裂片', () => {
       const enemy = mkEnemy(1, 100 * TILE, 40 * TILE);
       const game = makeGame(emptyWorld(), [enemy]);
       const a = new Arrow(100 * TILE - 4, 40 * TILE - 2, 6, 0, 20, 4, 710, null, {});
+      a.critChance = -1;   // 钳非暴击（缺省回落 4% 基础暴击 = 批序换 RNG 流即偶发 ×2 假失败）
       a.fixedUpdate(1, game);
       expect(enemy.hits.length).toBe(1);
       expect(enemy.hits[0][0]).toBe(30);                       // (int)(20×1.5)（:12238）
@@ -242,6 +243,7 @@ describe('⑤ 710 空中祸害空旷加伤/裂片', () => {
       const enemy = mkEnemy(1, 100 * TILE, 188 * TILE);
       const game = makeGame(emptyWorld(), [enemy]);
       const a = new Arrow(100 * TILE - 4, 188 * TILE - 2, 6, 0, 20, 4, 710, null, {});
+      a.critChance = -1;   // 同上钳非暴击
       a.fixedUpdate(1, game);
       expect(enemy.hits.length).toBe(1);
       expect(enemy.hits[0][0]).toBe(20);

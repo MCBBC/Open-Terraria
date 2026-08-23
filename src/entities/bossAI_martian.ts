@@ -312,9 +312,11 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     e.vx *= 0.96; e.vy *= 0.96;
     e.ai1 += 1;
     if (e.ai1 >= 150) { e.ai0 = 2; e.ai1 = 0; e.visAngle = 0; }
-    else if (e.ai1 < 40) e.visAngle = Math.sin((e.ai1 / 40) * Math.PI * 2) * 0.2;   // UnitY.RotatedBy(t).Y = sin
-    else if (e.ai1 < 80) e.visAngle = Math.sin((e.ai1 / 20) * Math.PI * 2) * 0.3;
-    else if (e.ai1 < 120) e.visAngle = Math.sin((e.ai1 / 10) * Math.PI * 2) * 0.4;
+    // ★UnitY.RotatedBy(θ).Y = 0·sinθ + 1·cosθ = **cosθ**（Utils.cs:1752-1761 实文;
+    //  2026-08-23 V5 复核纠正——曾误写 sin=相位差 1/4 周期,进相位应 ~满倾 0.198 非 0 爬升）
+    else if (e.ai1 < 40) e.visAngle = Math.cos((e.ai1 / 40) * Math.PI * 2) * 0.2;
+    else if (e.ai1 < 80) e.visAngle = Math.cos((e.ai1 / 20) * Math.PI * 2) * 0.3;
+    else if (e.ai1 < 120) e.visAngle = Math.cos((e.ai1 / 10) * Math.PI * 2) * 0.4;
     else e.visAngle = ((e.ai1 - 120) / 30) * Math.PI * 2;
   } else if (e.ai0 === 2) {
     // ---- expert 死光弹幕（:36670-36749,3600t 循环;每 120t 后 60t 为射线窗）----

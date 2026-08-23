@@ -320,6 +320,14 @@ const SAND_BALL_PROJ = new Set([42, 65, 68, 354]);
 /** AI_010 途经破坏表（:55114-55120）：草族/装饰/雕像/宝石——KillTile 全语义 */
 const SAND_BALL_CUT_SHEETS = new Set([185, 186, 187, 165, 12, 665, 639, 105, 178]);
 
+/** 信号枪族（aiStyle 33，AI_033 Projectile.cs:27425-27498）：163 信号弹（信号枪
+ *  930）/310（5378 前身彩蛋弹）/1008（探矿信号弹）/1009 诅咒信号弹（5378 诅咒
+ *  信号弹，PickAmmo 弹药 931 同槽换弹）/1010/1011。SetDefaults 同构：6×6 盒、
+ *  penetrate −1、alpha 255（渐显）、timeLeft 36000（163 :2517-2526 / 1009 :9592-9601） */
+const FLARE_PROJS = new Set([163, 310, 1008, 1009, 1010, 1011]);
+/** AI_033 尘尾型号表（:27446-27464 switch(type)）：alpha<70 期每 update 一枚 */
+const FLARE_DUST: Record<number, number> = { 163: 127, 310: 187, 1008: 169, 1009: 75, 1010: 66, 1011: 310 };
+
 /** SetDefaults alpha 初值（Projectile.alpha，逐型直写；GetAlpha :75940 消费）。
  *  仅接本批消费 id（提取器 NUM_FIELDS 未含 alpha，登记）：未列 = 0 全显。
  *  5 小丑箭 100(:599，GetAlpha :76579 固定 (255,255,255,0) 不消费——登记)/
@@ -333,6 +341,10 @@ const SAND_BALL_CUT_SHEETS = new Set([185, 186, 187, 165, 12, 665, 639, 105, 178
 const PROJ_ALPHA0: Record<number, number> = {
   5: 100, 94: 50, 95: 100, 280: 255, 477: 255, 478: 255, 521: 255, 639: 255, 932: 0,
   207: 255, 837: 255,
+  163: 255, 310: 255, 1008: 255, 1009: 255, 1010: 255, 1011: 255,   // 信号枪族（163 :2523 等）
+  514: 255,                                                          // 钉（aiStyle 93 −25/t 渐显 :33427-33434）
+  246: 255,                                                          // 刺炮弹（−20/t 渐显 :58106-58110）
+  311: 255,                                                          // 糖果玉米（−50/t 渐显 :58117-58123）
 };
 
 /** 直立族（aiStyle 29 全链 :24994-25207 零 rotation 赋值=恒不旋转）：宝石法杖箭
@@ -647,6 +659,26 @@ export class Arrow extends Entity {
   martianRocket = false;
   /** 沙球族（aiStyle 10，42/65/68/354）激活——ctor 按 SAND_BALL_PROJ 自动置位 */
   sandBall = false;
+  // ---- 信号枪族（aiStyle 33，AI_033 :27425-27498 + 撞块贴壁 :18731-18745）----
+  /** 族激活——ctor 按 FLARE_PROJS 自动置位（163 信号枪 930 / 1009 诅咒信号弹 5378） */
+  flare = false;
+  /** ai[0]/ai[1] 姿态向量（非贴壁期每拍取当前速度；贴壁后冻结——draw 侧
+   *  rotation = atan2(ai1, ai0)+π/2 :27497 消费，贴壁时 velocity 已清零） */
+  private flareAi0 = 0;
+  private flareAi1 = 0;
+  /** localAI[0]：1 = 已贴壁停驻（撞块置 1 :18744；脱块回 0 + localAI[1]=30 :27480-27483） */
+  private flareStuck = 0;
+  /** localAI[1]：≥30 后每拍 vy+0.09（:27477-27482 自增后钳回 30 = 恒触发档） */
+  private flareGravT = 0;
+  // ---- 钉 514（aiStyle 93，钉枪 3107 弹，AI_093 Projectile.cs:33425-33487）----
+  /** ai[0]：0 飞行（20t 后下垂）/ 1 撞块弹开（×0.6/t 衰减）/ <0 刺入敌体
+   *  （= −(敌 id+1)，跟随敌心偏移 velocity） */
+  nail93 = false;
+  nailAi0 = 0;
+  /** ai[1] 计时（飞行 20t 下垂门 / 刺入·弹开 90t 消亡门） */
+  private nailAi1 = 0;
+  /** 刺入 DoT 节拍（immune[owner]=1 档 :14060-14062 → 隔拍再刺） */
+  private nailDotT = 0;
   /** 448 ai[0]（0 引信 / 1 点火追踪） */
   private rkAi0 = 0;
   /** 448 ai[1] 引信倒数（出生 20，:36099 NewProjectile 第 10 参） */
@@ -741,6 +773,9 @@ export class Arrow extends Entity {
     this.homing = opts?.homing ?? null;
     this.extraUpdates = opts?.extraUpdates ?? pd0?.extraUpdates ?? 0;   // 子弹 14=1(2 步/tick)、高速弹 207=2
     this.localImmune = pd0?.localNPCHitCooldown ?? 0;
+    // 311 糖果玉米 usesLocalNPCImmunity+localNPCHitCooldown=10（SetDefaults
+    // :4047-4048，提取器漏提两列 → 常量补；同敌 10t 冷却再命中）
+    if (projId === 311) this.localImmune = 10;
     // 出生预置局部免疫（localNPCImmunity[target]=N——花瓣 1038 = 30t,见 opts 注）
     if (opts?.localImmuneSeed) this.spawnImmuneCd.set(opts.localImmuneSeed.npcId, opts.localImmuneSeed.t);
     this.drag = opts?.drag ?? 1;
@@ -773,6 +808,10 @@ export class Arrow extends Entity {
     this.martianRocket = !!opts?.martianRocket;
     // 沙球族自动激活（SetDefaults aiStyle 10 表驱动，无需 opts 注入）
     this.sandBall = SAND_BALL_PROJ.has(projId);
+    // 信号枪族自动激活（SetDefaults aiStyle 33 表驱动：163 :2517-2526 等）
+    this.flare = FLARE_PROJS.has(projId);
+    // 钉自动激活（SetDefaults aiStyle 93 :5843-5852，钉枪 3107 / 钉弹 3108 shoot）
+    this.nail93 = projId === 514;
     if (opts?.starFall) {
       this.starFallLine = opts.starFall.lineY;
       this.starFallGen = opts.starFall.gen ?? 0;
@@ -797,8 +836,14 @@ export class Arrow extends Entity {
       case 94: case 95: return 200 / 255;
       case 521: case 639: return (255 - this.alpha) / 255;
       // 207/837（GetAlpha :76682-76687：r=g=b=255−alpha → 缺省路径同式）/
-      // 92（aiStyle5 通用闪烁档 :22222-22238，alpha 0↔200 振荡）
+      // 92（aiStyle5 通用闪烁档 :22222-22238，alpha 0↔200 振荡）/
+      // 163 族信号弹（SetDefaults alpha=255 :2523，AI_033 −50/t 渐显 :27428-27435
+      // → 缺省路径同式，5 拍淡入）
       case 207: case 837: case 92: return (255 - this.alpha) / 255;
+      case 163: case 310: case 1008: case 1009: case 1010: case 1011:
+        return (255 - this.alpha) / 255;
+      case 514: return (255 - this.alpha) / 255;   // 钉 aiStyle 93 渐显（:33427-33434）
+      case 246: case 311: return (255 - this.alpha) / 255;   // 刺炮弹/糖果玉米渐显
       default: return null;
     }
   }
@@ -873,8 +918,11 @@ export class Arrow extends Entity {
     const tumbling = this.tumble && !(this.tumblePoseLock && this.age <= this.gravDelay);
     // 食人鱼姿态由 AI 侧维护（pRot/pFlip）：咬住时 velocity 清零（:26126-26129），
     // 现算 atan2(0,0)=0 会把鱼掰回正右——原版 rotation 在清速前取目标向（:26119-26143）
+    // 信号弹同型：rotation = atan2(ai[1], ai[0])+π/2（:27497），贴壁 velocity 清零后
+    // ai 向量冻结在末速——现算 atan2(0,0)=0 会把弹头掰回正上
     const ang = this.piranha ? this.pRot
-      : (tumbling ? this.tumbleRot : Math.atan2(this.vy, this.vx));
+      : this.flare ? Math.atan2(this.flareAi1, this.flareAi0)
+        : (tumbling ? this.tumbleRot : Math.atan2(this.vy, this.vx));
     const img = projSprite(this.projId);
     // 喵刀弹 502 彩虹拖尾（Main.cs:32495-32513）：Projectile_250.png（14×32）沿
     // oldPos 逐段——旋转=段向-π/2、纵向拉伸=段长/32、alpha=127/255×(1-i/N)，
@@ -1121,6 +1169,21 @@ export class Arrow extends Entity {
     if (itemVid === 6181) this.phoenixQuivered = true;   // :58788-58791
     if (itemVid === 6180) this.seraphNecklaced = true;   // :58792-58795
     if (this.life > 300) this.life = 300;                // :58797-58800 timeLeft 钳 300
+  }
+
+  /** Collision.SolidCollision 等价（aiStyle 33 贴壁判定 :27480/:27487）：弹体
+   *  6×6 盒覆盖到的格任一实心即 true（SolidCollision 逐格扫盒语义） */
+  private flareSolidOverlap(game: GameHooks): boolean {
+    const st = game.world.store;
+    const x0 = Math.floor(this.x / TILE), x1 = Math.floor((this.x + this.w - 1) / TILE);
+    const y0 = Math.floor(this.y / TILE), y1 = Math.floor((this.y + this.h - 1) / TILE);
+    for (let ix = x0; ix <= x1; ix++) {
+      for (let iy = y0; iy <= y1; iy++) {
+        if (!st.inBounds(ix, iy)) continue;
+        if (st.isSolid(ix, iy)) return true;
+      }
+    }
+    return false;
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
@@ -1378,6 +1441,108 @@ export class Arrow extends Entity {
         this.hwFrameT = 0;
         this.hwFrame = (this.hwFrame + 1) % 5;
       }
+    } else if (this.flare) {
+      // ---- 信号枪族（aiStyle 33，AI_033 Projectile.cs:27425-27498）----
+      // ① alpha −50/t 渐显（:27428-27435，SetDefaults 255 :2523 → 5 拍全显）
+      if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 50);
+      // ② 尘尾（alpha<70 期每 update 一枚 :27444-27472）：型号按 FLARE_DUST 表
+      //   （163→127 火花/1009→75 诅咒焰…），出生点 (x, y−2) 6×6、scale 1.6、
+      //   noGravity、速度 = 弹速、位置/速度再沿姿态向量回退 1（拖在弹后）
+      if (this.alpha < 70) {
+        const n260 = 4;                                        // num260 = 4f（:27437）
+        let fx = this.flareAi0, fy = this.flareAi1;
+        if (fx === 0 && fy === 0) { fx = 1; fy = 0; }          // :27439-27441 零向量取 (1,0)
+        const fl = Math.hypot(fx, fy) || 1;
+        const ux = (fx / fl) * n260, uy = (fy / fl) * n260;    // 归一 ×4（:27442-27445）
+        const dF = game.spawnDust?.(this.x, this.y - 2, 6, 6, FLARE_DUST[this.projId] ?? 127,
+          this.vx, this.vy, 100, null, 1.6, true);
+        if (dF) {
+          dF.x -= ux; dF.y -= uy;
+          dF.vx -= ux; dF.vy -= uy;
+        }
+      }
+      // ③ 停驻/重力（:27474-27493）：localAI[0]==0 飞行档——ai 向量跟速度、
+      //   localAI[1]≥30 后每拍 vy+0.09（自增后钳回 30 = 恒触发）；贴壁档——
+      //   脱块回飞行（localAI[1]=30 立即续坠）+ damage=0（停驻弹不伤人）
+      if (this.flareStuck === 0) {
+        this.flareAi0 = this.vx;
+        this.flareAi1 = this.vy;
+        this.flareGravT++;
+        if (this.flareGravT >= 30) {
+          this.vy += 0.09;
+          this.flareGravT = 30;
+        }
+      } else {
+        if (!this.flareSolidOverlap(game)) {
+          this.flareStuck = 0;
+          this.flareGravT = 30;
+        }
+        this.damage = 0;
+      }
+      // ④ vy 钳 16（:27494-27496）
+      if (this.vy > 16) this.vy = 16;
+      // ⑤ rotation = atan2(ai1, ai0)+π/2（:27497，draw 侧消费 flareAi 向量）
+    } else if (this.nail93) {
+      // ---- 钉 514（aiStyle 93，AI_093 Projectile.cs:33425-33487）----
+      // ① alpha −25/t 渐显（:33427-33434）+ vy 钳 18（:33435-33438）
+      if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 25);
+      if (this.vy > 18) this.vy = 18;
+      if (this.nailAi0 === 0) {
+        // ② 飞行档：ai[1]>20 后下垂（vy+0.1、vx×0.992，:33439-33448）；rotation
+        //    恒跟速度（默认 atan2+π/2 draw 档即 :33447）
+        this.nailAi1++;
+        if (this.nailAi1 > 20) { this.vy += 0.1; this.vx *= 0.992; }
+      } else if (this.nailAi0 === 1) {
+        // ③ 撞块弹开档：tileCollide=false + 速度 ×0.6/t 衰减（:33450-33455），
+        //    ai[1]>90 消亡（:33479-33486）
+        this.noTileCollide = true;
+        this.vx *= 0.6; this.vy *= 0.6;
+        if (++this.nailAi1 > 90) { this.killNow(game); return; }
+      } else {
+        // ④ 刺入档（ai[0]<0）：钉心 = 敌心 − velocity（velocity 即刺入偏移向量，
+        //    :33459-33463）；敌亡 → 脱刺随机 6 速弹出（:33464-33473）；偏移过长
+        //    ×0.99 收敛（:33474-33477）；ai[1]>90 消亡（:33479-33486）
+        this.noTileCollide = true;
+        const eid = -this.nailAi0 - 1;
+        const tgt = (game.enemies() as Array<{ id: number; dead: boolean; cx: number; cy: number; w: number; h: number }>)
+          .find((e2) => e2.id === eid);
+        if (!tgt || tgt.dead) {
+          this.nailAi0 = 0;
+          this.nailAi1 = 20;
+          const aN = Math.random() * Math.PI * 2;   // Next(-100,101)² 归一 ×6 等价
+          this.vx = Math.cos(aN) * 6;
+          this.vy = Math.sin(aN) * 6;
+        } else {
+          if (Math.hypot(this.vx, this.vy) > (tgt.w + tgt.h) / 3) { this.vx *= 0.99; this.vy *= 0.99; }
+          this.x = tgt.cx - this.vx - this.w / 2;
+          this.y = tgt.cy - this.vy - this.h / 2;
+          if (++this.nailAi1 > 90) { this.killNow(game); return; }
+          // 刺入 DoT（Damage aiStyle93 段 :13368-13376 dmg×0.15 + :14060-14062
+          // immune[owner]=1 隔拍再刺）；暴击链同通用弹
+          if (++this.nailDotT >= 2) {
+            this.nailDotT = 0;
+            const rec = tgt as unknown as { hurt?: (...a: unknown[]) => boolean; iframes?: number };
+            if (rec.hurt && !(tgt as unknown as { dead?: boolean }).dead) {
+              const critN = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+              const dN = Math.max(1, Math.trunc(this.damage * 0.15)) * (critN ? 2 : 1);
+              rec.hurt(dN, 0, 0, game, this.settlePen, critN, 1, true);
+              game.addDamageNumber(this.cx, this.cy, Math.round(dN), critN, critN ? '#FF8040' : '#FFD060');
+            }
+          }
+        }
+      }
+    } else if (this.projId === 246) {
+      // 刺炮弹 246（AI_001 type 段 :58105-58114，刺炮发射器 1258）：alpha −20/t
+      // 渐显（SetDefaults 255 :3296）+ ai[0]≥60 后 vy+0.15/t 下坠（age=ai[0]，
+      // extraUpdates 1 → 2 子步/t 同 vanilla ai[0] 节奏）；Kill 爆炸+249 破片在
+      // Game.onProjectileDeath 246 分支
+      if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 20);
+      if (this.age >= 60) this.vy += 0.15;
+    } else if (this.projId === 311) {
+      // 糖果玉米 311（AI_001 type 段 :58116-58132，糖果玉米步枪 1782）：alpha
+      // −50/t 渐显（SetDefaults 255 :4041）+ ai[0]≥30 后 vy+0.5/t 下坠
+      if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 50);
+      if (this.age >= 30) this.vy += 0.5;
     }
     // ---- alpha 通道 AI 侧（修复4：Projectile.alpha 逐型衰减）----
     if (this.projId === 521) {
@@ -1819,6 +1984,34 @@ export class Arrow extends Entity {
       // 弹心都在 378 格内)子弹零命中穿体而过;草丛/树冠内的弹幕同样漏判。
       // 原版 HandleMovement 只在实心格 Kill(:16132),Damage 在其后独立运行(:15738)
       if (world.store.isSolid(tx, ty)) {
+        // 钉 514 撞块（HandleMovement aiStyle 93 支 :18931-18941）：不消亡——
+        // ai[1]=0/ai[0]=1 + tileCollide=false + position+=velocity + 速度 =
+        // lastVelocity 归一×3 弹开（AI 侧 ×0.6/t 衰减、90t 消亡）
+        if (this.nail93 && this.nailAi0 === 0) {
+          this.nailAi1 = 0;
+          this.nailAi0 = 1;
+          this.noTileCollide = true;
+          this.x += this.vx;
+          this.y += this.vy;
+          const nl = Math.hypot(this.vx, this.vy) || 1;
+          this.vx = (this.vx / nl) * 3;
+          this.vy = (this.vy / nl) * 3;
+          return;
+        }
+        // 信号枪族贴壁（HandleMovement aiStyle 33 支 :18731-18745）：不消亡不反弹
+        // ——position += lastVelocity（原版湿弹 /2；本仓 wet 未建模恒全速）再嵌入
+        // 一步 + velocity 归零 + localAI[0]=1；此后 AI 侧 damage=0 停驻、块被挖/
+        // 脱块即恢复下坠（localAI[1]=30 立即续坠 :27480-27483）
+        if (this.flare) {
+          if (this.flareStuck === 0) {
+            this.x += this.vx;
+            this.y += this.vy;
+            this.vx = 0;
+            this.vy = 0;
+            this.flareStuck = 1;
+          }
+          return;
+        }
         // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
         if (this.bounce && this.bounceOff(game)) return;
         // 1457 宝石法珠 CanBounce（HandleMovement :18112-18150）：撞块法向反弹 ×0.8 +
@@ -1881,6 +2074,32 @@ export class Arrow extends Entity {
     const dSpd = Math.hypot(this.vx, this.vy) || 1;
     const dPerpX = dragonLine ? -this.vy / dSpd : 0;
     const dPerpY = dragonLine ? this.vx / dSpd : 0;
+    // ---- 钉 514（aiStyle 93）命中专管：刺入/弹开态不入通用管线（DoT 已在 AI 侧
+    //      隔拍直投）；飞行态首中即刺入（Damage aiStyle93 段 :13368-13376——
+    //      ai[1]=0、ai[0]=-敌-1、velocity=敌心-弹心；伤全额、immune[owner]=1 档
+    //      :14060-14062 不耗穿透不入 hitSet）----
+    if (this.nail93 && this.nailAi0 !== 0) return;
+    if (this.nail93 && this.nailAi0 === 0) {
+      for (const ent of game.enemies()) {
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; cx: number; cy: number; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean };
+        if (e.dead) continue;
+        if (!playerCanHitEnemy(e, game, this.projId)) continue;
+        if (!(this.x < e.x + e.w && this.x + this.w > e.x
+          && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+        if (((e as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;   // immune[owner] 门
+        const critN = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+        const dN = Math.max(1, Math.trunc(this.damage)) * (critN ? 2 : 1);
+        playEnemyHitSound(game, e);
+        e.hurt(dN, 0, 0, game, this.settlePen, critN, 1, true);
+        game.addDamageNumber(this.cx, this.cy, Math.round(dN), critN, critN ? '#FF8040' : '#FFD060');
+        this.nailAi0 = -(e.id + 1);            // :13372-13373 ai[0] = -victimIndex-1
+        this.nailAi1 = 0;                      // :13370 ai[1] = 0
+        this.vx = e.cx - this.cx;              // :13374 velocity = targetNPC.Center - Center
+        this.vy = e.cy - this.cy;
+        this.noTileCollide = true;             // :33450 刺入态 tileCollide=false
+        return;
+      }
+    } else {
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
       if (e.dead) continue;
@@ -1981,6 +2200,16 @@ export class Arrow extends Entity {
         }
         // 命中 debuff（StatusNPC:10555 表驱动——火枪弹 2 33% OnFire 180t 等,按型号掷骰）
         applyProjStatus(this.projId, e as unknown as Record<string, number>);
+        // 信号枪族点燃（StatusNPC :11687-11696：163/310/1008/1010/1011 →
+        //   OnFire(24) Next(3)==0?600:300t = 10s/5s；1009 诅咒信号弹 →
+        //   Cursed Inferno(39) 600t=10s（:11702-11705））
+        if (this.projId === 1009) {
+          (e as unknown as { cursedT?: number }).cursedT =
+            Math.max((e as unknown as { cursedT?: number }).cursedT ?? 0, 10);
+        } else if (FLARE_PROJS.has(this.projId)) {
+          const en5 = e as unknown as { onFireT?: number };
+          en5.onFireT = Math.max(en5.onFireT ?? 0, Math.random() < 1 / 3 ? 10 : 5);
+        }
         if (this.betsyCurse) {
           // Betsy's Curse 203（type 711 命中 AddBuff(203,600) :10719-10721）——
           // 原版无"每层 -10 防"堆叠档：betsysCurse flag（NPC.cs:93287-93289）只是
@@ -2041,6 +2270,7 @@ export class Arrow extends Entity {
         if (this.pierce > 0 && --this.pierce <= 0) { this.killNow(game); return; }
       }
     }
+    }   // 钉 514 命中专管 else 收口
     // 城镇 NPC 受击(原版 Projectile.Damage 对 friendly NPC 同样生效——杀裁缝师
     // 召骷髅王即此链);穿透/销毁语义与敌怪一致
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)

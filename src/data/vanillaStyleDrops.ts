@@ -1,4 +1,5 @@
 // 原版 GetItemDrop_* 样式→物品掉落表（1456 全量机械转录,tests/style-drop-restore.test.ts 对拍）。
+// ★1457 等价性已核：GetItemDrop_* 函数族两版逐字节同（1457 :40117-40900 ≡ 1456 :39766-40549,整体平移 +351）。
 // 来源=../Terarria1456/Terraria/WorldGen.cs 逐函数 switch 逐 case 提取（脚本转录+原函数
 // 语义等价:case 落空共享下一 result/算术档 result=base+style±k/default 回落 style0 档）。
 // 每表注释=vanilla 函数行号 + 调用点 Check* 帧检行号 + 该族 style 的帧推导式。
@@ -87,8 +88,10 @@ const Dressers: T = [334, 647, 648, 649, 918, 2386, 2387, 2388, 2389, 2390, 2391
 const Chests: T = [48, 306, 306, 328, 328, 343, 348, 625, 626, 627, 680, 681, 831, 838, 914, 952, 1142, 1298, 1528, 1529, 1530, 1531, 1532, 1528, 1529, 1530, 1531, 1532, 2230, 2249, 2250, 2526, 2544, 2559, 2574, 2612, 2612, 2613, 2613, 2614, 2614, 2615, 2616, 2617, 2618, 2619, 2620, 2748, 2814, 3180, 3125, 3181];
 const Chests_2: T = [3884, 3885, 3939, 3965, 3988, 4153, 4174, 4195, 4216, 4265, 4267, 4574, 4712, 4712, 5156, 5177, 5198, 5556, 5609, 5697, 5720, 5745, 5763, 5784, 5805, 5826, 5846, 5865, 5886, 5905, 5939, 5962, 5982, 6005, 6028, 6051, 6074, 6118];
 
-/** 门 10/11——GetDoorItem（WorldGen.cs:69257,DropDoorItem :69466 ← CheckDoor
- *  :87159 关门/:87253 开门;style=doorStyleOf(fx,fy)=fx/54*36+fy/54） */
+/** 门 10/11——GetDoorItem（WorldGen.cs:69257,DropDoorItem :69466 ← CheckDoorClosed
+ *  :87159 关门/CheckDoorOpen :87253 开门）。style 反推分式：关门=fx/54*36+fy/54
+ *  （:87159 段 num4）;开门=fy/54+fx/72*36（CheckDoorOpen :87093-87094——开态
+ *  fx=72*列+(direction==-1?36:0),❌3 复核 2026-08-23：两式不可混用） */
 const Doors: T = [25, 650, 651, 652, 816, 817, 818, 819, 820, 837, 912, 0, 1137, 1138, 1139, 1140, 1411, 1412, 1413, 1458, 1709, 1710, 1711, 1712, 1793, 1815, 1924, 2044, 2265, 2528, 2561, 2576, 2815, 3129, 3131, 3130, 3888, 3941, 3967, 4155, 4176, 4197, 4218, 4307, 4415, 4576, 5158, 5179, 5200, 5558, 5611, 5699, 5722, 5747, 5765, 5786, 5807, 5828, 5867, 5907];
 
 
@@ -193,12 +196,26 @@ export function styleDropVid(sheet: number, style: number): number {
 }
 
 /** sheet+破坏前帧 → 原版物品 vid（0=无）。149 节日灯/194 骨块为帧直读特例;
- *  10/11 门走 Doors 表(style 由 Door.doorStyleOf 推,调用侧传 sheet=10) */
+ *  10/11 门走 Doors 表——10 关门 style=fx/54*36+fy/54（CheckDoorClosed :87159 段）、
+ *  11 开门 style=fy/54+fx/72*36（CheckDoorOpen :87093-87094）——调用侧按 tile 型传
+ *  10/11（Game.breakTile 门路径,❌3：曾恒传 10,开门 fx=72s+36 带反推错档） */
 export function styleDropVidOfFrames(sheet: number, fx: number, fy: number): number {
   if (sheet === 149) return holidayLightVid(fx);
   if (sheet === 194) return BONE_BLOCK;
-  if (sheet === 10 || sheet === 11) return pick(Doors, Math.floor(fx / 54) * 36 + Math.floor(fy / 54));
+  if (sheet === 10) return pick(Doors, Math.floor(fx / 54) * 36 + Math.floor(fy / 54));
+  if (sheet === 11) return pick(Doors, Math.floor(fx / 72) * 36 + Math.floor(fy / 54));
   const der = styleFromFrame[sheet];
   if (!der) return 0;
   return styleDropVid(sheet, der(fx, fy));
+}
+
+/** 丛林钱币带 186（⚠️4 接档,Check3x2 case 186 WorldGen.cs:49726-49836）：frameX 段
+ *  直查——<864 无掉落 / [864,954]→铜 71 / (954,1062]→银 72 / (1062,1170]→金 73。
+ *  段界对 3 列 frameX 步 18 列间不变（同件任一格命中同带）,掷串在 Game.spawnCoinBand */
+export function coinBandVid(fx: number): number {
+  if (fx < 864) return 0;
+  if (fx <= 954) return 71;
+  if (fx <= 1062) return 72;
+  if (fx <= 1170) return 73;
+  return 0;
 }

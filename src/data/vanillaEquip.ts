@@ -1,4 +1,4 @@
-// 物品装备分类运行时（tools/extract-equip-prefix.mjs 从 1456 源码提取）。
+// 物品装备分类运行时（tools/extract-equip-prefix.mjs 从源码提取;ItemSlot.PickItemMovementAction 判定两版同值,提取器结构绑定 SetDefaults1-5=1456 布局）。
 // 判定规则 1:1 于 ItemSlot.PickItemMovementAction（ItemSlot.cs:1197-1248）：
 //   dye=BindShader 表 / pet/light=buffType→Main.vanityPet·lightPet / mount·cart=mountType
 //   / hook=mountType==-1 && Main.projHook[shoot]（projHook=aiStyle 7）

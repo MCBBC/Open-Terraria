@@ -1,5 +1,5 @@
 // 日食（Solar Eclipse）+ 宇宙四塔（Lunar Events / 天界入侵）全量移植回归。
-// 反编译源 = /Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/（1.4.5.6 权威态）：
+// 反编译源 = /Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/（★树基准 1457;日食/月主链数值 1456/1457 同值,行号锚 1456 段两树并存可解析）：
 //
 // 日食：
 //  - 黎明自然 roll            Main.cs:64899-64920（UpdateTime_StartDay 尾段 if/else）

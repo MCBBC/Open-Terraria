@@ -6,10 +6,11 @@
 //     ArmorIDs.cs:1695-1699 三路由）
 //   ③ 举盾光环/格挡视觉（DrawPlayer_25_Shield :3073-3125）
 //   ④ 脸饰头盔条件偏移/隐没（GetFaceDrawOffset :4352-4432 + FaceAcc :2801-2852 门）
-//   ⑤ 3015/3016 expertOnly 门定谳（1456 全库无 expertOnly=true 赋值=死字段）
+//   ⑤ 3015/3016 expertOnly 门定谳（1456/1457 两版全库均无 expertOnly=true 赋值=死字段）
 //   ⑥ 小项定谳：威尔逊胡须发色（UseHairColor={2,3,4}→colorHair,本仓无发色系统登记）/
 //     坐姿鞋切片（DrawSittingLegs :1585-1676）/ front 前后半拆层（:3891-3977）
-// 数值一律取 1456 反编译最终态。
+// 数值基准 1457（Terarria1457/;本文件所涉配饰数值/集合两版同值,ArmorIDs 差异见
+// src/data/vanillaAccDrawslots.ts 头注——expertOnly 探针直读 1457 树）。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -18,7 +19,7 @@ import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import {
   accDrawSlotsOf, BACK_DRAW_IN_BACKPACK, BACK_DRAW_IN_TAIL, BACK_IS_ACAPE,
   MOUNT_BACKPACK_OK, NECK_IS_SCARF, FRONT_SCARF_CAPE_HIDE, FRONT_NECK_LAYER_ALWAYS,
-  SITTING_LEG_SLICES, FACE_HELMET_OFFSET, HELMET_DRAW_OFFSET,
+  SITTING_LEG_SLICES, SITTING_LEG_SLICES_SPECIAL, SITTING_LEG_SPECIAL_LEGS, FACE_HELMET_OFFSET, HELMET_DRAW_OFFSET,
   FACE_MASK_HELMET_HIDE, FACE_FLOWER_HELMET_HIDE, HEAD_HIDES_HEAD,
   PREVENT_BEARD_DRAW, BEARD_USE_HAIR_COLOR, shieldHaloFactor, shieldParryTransform,
 } from '../src/data/vanillaAccDrawslots';
@@ -106,7 +107,7 @@ describe('配饰未建模①：hideVisibleAccessory 字段与聚合门（Player.
 // ================= ② back 子层三路由 =================
 
 describe('配饰未建模②：back 子层背包/尾巴族（ArmorIDs.cs:1695-1697 + PlayerDrawLayers :479/:568）', () => {
-  it('字面集合对拍 1456：DrawInBackpackLayer={7,8,9,10,15,16,32,33} / DrawInTailLayer={18,19,21,25,26,27,28}', () => {
+  it('字面集合对拍（1456/1457 同值,ArmorIDs.cs 1457 :1695-1697）：DrawInBackpackLayer={7,8,9,10,15,16,32,33} / DrawInTailLayer={18,19,21,25,26,27,28}', () => {
     expect([...BACK_DRAW_IN_BACKPACK].sort((a, b) => a - b)).toEqual([7, 8, 9, 10, 15, 16, 32, 33]);
     expect([...BACK_DRAW_IN_TAIL].sort((a, b) => a - b)).toEqual([18, 19, 21, 25, 26, 27, 28]);
     // 审计登记文案勘误：15/16 在背包集非尾巴集（1695 vs 1697）
@@ -276,20 +277,23 @@ describe('配饰未建模④：脸饰头盔门与偏移表（GetFaceDrawOffset :
 // ================= ⑥ 小项：坐姿鞋切片 / front 前后半拆层 =================
 
 describe('配饰未建模⑥：坐姿鞋切片（DrawSittingLegs :1585-1676）与 front 前后半拆层（:3891-3977）', () => {
-  it('切片表 = 默认支两片 [sy+2,h-2] 身段 + [sy+0,2] 顶带（num3=1/num2=0 :1660-1672）', () => {
-    expect(SITTING_LEG_SLICES).toEqual([[2, 54], [0, 2]]);
+  it('切片表 = 默认支三片 [46,10]+[44,2]+[42,2]（num3=2/num2=42 :1594-1596/:1719-1732;★V2b 复核勘误:旧表 [[2,54],[0,2]] 是 217 族特例支非默认支）', () => {
+    expect(SITTING_LEG_SLICES).toEqual([[46, 10], [44, 2], [42, 2]]);
+    expect(SITTING_LEG_SLICES_SPECIAL).toEqual([[2, 54], [0, 2]]);   // legs 169/177/178/181/182/206/217 特例支
+    expect(SITTING_LEG_SPECIAL_LEGS.has(217) && SITTING_LEG_SPECIAL_LEGS.has(169)).toBe(true);
   });
 
-  it('渲染：站姿整幅单画;坐姿两片同锚（源 sy=2 高 54 先画、sy=0 高 2 顶带后叠）', () => {
+  it('渲染：站姿整幅单画;坐姿默认支三片同锚（身段 [46,10] 先画、两条 2px 顶带后叠）', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.armor[3] = { id: _iid(54), stack: 1 };   // 鞋 shoe=6
     const stand = drawAccWithFake('drawAccFrontLayers', p);
     expect(stand.draws.length).toBe(1);
     p.sitting = true;
     const sit = drawAccWithFake('drawAccFrontLayers', p, true);
-    expect(sit.draws.length).toBe(2);
-    expect([sit.draws[0].sy, sit.draws[0].sh]).toEqual([2, 54]);    // 身段（先画）
-    expect([sit.draws[1].sy, sit.draws[1].sh]).toEqual([0, 2]);     // 顶带（后叠）
+    expect(sit.draws.length).toBe(3);
+    expect([sit.draws[0].sy, sit.draws[0].sh]).toEqual([46, 10]);   // 身段（先画）
+    expect([sit.draws[1].sy, sit.draws[1].sh]).toEqual([44, 2]);    // 顶带 1
+    expect([sit.draws[2].sy, sit.draws[2].sh]).toEqual([42, 2]);    // 顶带 2
     expect(sit.draws[0].dy).toBe(-52);
   });
 
@@ -327,9 +331,9 @@ describe('配饰未建模⑥：坐姿鞋切片（DrawSittingLegs :1585-1676）�
 
 // ================= ⑤ 3015/3016 expertOnly 定谳（回写备案不改码） =================
 
-describe('配饰未建模⑤：3015/3016 expertOnly 门定谳（1456 死字段,登记不接）', () => {
-  const itemCs = resolve(process.cwd(), '../Terarria1456/Terraria/Item.cs');
-  it('1456 全库无 expertOnly = true 赋值（Item.cs 仅 :110 声明/:48555 复位）→ 门对 3015/3016 恒不生效', () => {
+describe('配饰未建模⑤：3015/3016 expertOnly 门定谳（1456/1457 两版死字段,登记不接）', () => {
+  const itemCs = resolve(process.cwd(), '../Terarria1457/Terraria/Item.cs');
+  it('1457 全库无 expertOnly = true 赋值（Item.cs 仅 :129 声明/:48960 复位;1456 :110/:48555 同构）→ 门对 3015/3016 恒不生效', () => {
     if (!existsSync(itemCs)) throw new Error(`标杆缺失: ${itemCs}`);
     const src = readFileSync(itemCs, 'utf8');
     expect(src.includes('expertOnly = true')).toBe(false);

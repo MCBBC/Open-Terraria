@@ -77,12 +77,12 @@ describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
 
   function shell(npcs: TownNPC[], killGuide: boolean) {
     const g = Object.create(Game.prototype) as unknown as {
-      world: World; entities: { enemies: unknown[]; npcs: TownNPC[] };
+      world: World; entities: { enemies: unknown[]; npcs: TownNPC[]; critters: unknown[] };
       player: unknown; spawnParticles: () => void; addDamageNumber: () => void;
       playSfxFiles: () => void; net?: unknown; remotePlayerProxies?: unknown[];
     };
     g.world = new World(40, 40, 20, 'boom');
-    g.entities = { enemies: [], npcs };
+    g.entities = { enemies: [], npcs, critters: [] };   // critters 桶 2026-08-21 并入爆炸扫描
     g.spawnParticles = () => {};
     g.addDamageNumber = () => {};   // 真方法碰未初始化 dmgNumbers → 'push' of undefined
     g.playSfxFiles = () => {};

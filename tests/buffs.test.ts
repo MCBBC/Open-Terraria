@@ -2,7 +2,7 @@
 // 1) AddBuff max 合并（Player.cs:5138 TryUpdatingExistingBuffTime：续期不缩短）
 // 2) Honey(48)：1 HP/s、浸入续期恒 30s、离开倒计时
 // 3) Regeneration(2)：2 HP/s（lifeRegen+4）
-// 4) Ironskin(5)：防御 +8（1456 数值）
+// 4) Ironskin(5)：防御 +8（1456/1457 同值）
 // 5) 到期自动移除
 import { describe, it, expect } from 'vitest';
 import { BuffState, BuffType, BUFF_DEFS, buffTypeByVanilla, wetFromBubbleContact } from '../src/stats/Buffs';
@@ -66,7 +66,7 @@ describe('数值（1.4.5.6 UpdateBuffs L9640+）', () => {
     expect(healed).toBeLessThanOrEqual(10);
   });
 
-  it('Ironskin(5)：防御 +8（1456 数值，非旧 6）', () => {
+  it('Ironskin(5)：防御 +8（1456/1457 同值，非旧 6）', () => {
     const b = new BuffState();
     expect(b.defenseBonus).toBe(0);
     b.apply(BuffType.Ironskin, 10);

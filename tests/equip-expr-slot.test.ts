@@ -24,7 +24,7 @@ import { Inventory } from '../src/items/Inventory';
 import { Player } from '../src/entities/Player';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const CS_PRESENT = existsSync(join(ROOT, '..', 'Terarria1456', 'Terraria', 'Item.cs'));
+const CS_PRESENT = existsSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Item.cs'));
 const _iid = (vid: number): number => ITEM_BY_KEY[vanillaItemKey(vid)!];
 
 describe('表达式槽位数据（Item.cs:30802 / :31081）', () => {

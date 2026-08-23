@@ -1,5 +1,5 @@
 // 墓园（Graveyard）系统 + 日食怪战士族 8 条行为分支回归。
-// 反编译源 = /Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/（1.4.5.6 权威态）。
+// 反编译源 = /Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/（★树基准 1457;墓园/日食链数值 1456/1457 同值）。
 //
 // 墓园：
 //  - 判定口径（tile 计数，非生成 pass）   SceneMetrics.cs:622-635（GraveyardTileCount =

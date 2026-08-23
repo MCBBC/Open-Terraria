@@ -20,7 +20,7 @@ import { World } from '../src/world/World';
 import { saveGame, loadSave } from '../src/save/SaveFile';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const CS_PRESENT = existsSync(join(ROOT, '..', 'Terarria1456', 'Terraria.Initializers', 'DyeInitializer.cs'));
+const CS_PRESENT = existsSync(join(ROOT, '..', 'Terarria1457', 'Terraria.Initializers', 'DyeInitializer.cs'));
 const TABLE = (hairJson as unknown as { hairDyes: Record<string, { shaderId: number; kind: string; bindLine: number }> }).hairDyes;
 
 const ctx = (over: Partial<HairDyeCtx> = {}): HairDyeCtx => ({

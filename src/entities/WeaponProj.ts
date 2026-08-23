@@ -345,6 +345,20 @@ export function meleeThrowSpeed(shootSpeed: number, attackSpeedMult: number): nu
   return shootSpeed * (attackSpeedMult || 1);
 }
 
+/** 挥掷系 shoot 出生落点核（ItemCheck_Shoot 通用尾支）：pointPosition =
+ *  RotatedRelativePoint(MountedCenter)（1457 Player.cs:47588——无旋转/坐骑/睡坐
+ *  = 玩家中心）→ NewProjectile 盒心落点（Projectile.cs:10878-10879
+ *  position=(X−w/2, Y−h/2)）。链锤/悠悠球不在任何 sItem.type 特支 = 【无 per-weapon
+ *  出生偏移】（备案所记"Center.X+9×dir、Bottom−8"经 1457/1456/1405 三版
+ *  Player.cs/Projectile.cs 核对均无此式,2026-08-23）。e = 已构造弹体（读其
+ *  SetDefaults 盒宽高）,(cx,cy) = 玩家中心;原地写回盒左上并返回。 */
+export function placeAtShootSpawn<T extends { x: number; y: number; w: number; h: number }>(
+  e: T, cx: number, cy: number): T {
+  e.x = cx - e.w / 2;
+  e.y = cy - e.h / 2;
+  return e;
+}
+
 /** 回旋镖命中盒型号表（SetDefaults aiStyle=3 全 36 型提取：type→size;
  *  光刃族 1065-1070/1072/1074/1076/1102=46,其余 38） */
 const BOOMERANG_SIZE: Record<number, number> = {
@@ -1306,8 +1320,11 @@ export class CounterweightProj extends Entity {
       }
     }
     // -3 幽灵 alpha=255（全透明,:64734-64736）;贴图原生尺寸（SetDefaults 盒 10×10 而贴
-    // 图 16×16,drawSize=-1 防缩）
-    drawProj(r, cam, this, this.projId, this.rot + Math.PI / 2, '#B09060', this.ghost ? 0 : 1, -1);
+    // 图 16×16,drawSize=-1 防缩）。旋转 = proj.rotation 原样（1457 通用尾支
+    // M.cs:35040 rotation=proj.rotation、origin=(num153,盒高/2+num151),配重球 556-561/1079
+    // 无 num151/152 特支亦无 +π/2——自转增量在 AI（AI_099_1 :68463 rotation+=0.5f,本仓
+    // rot+=0.5 同源）;曾 +π/2 = 球体朝向恒偏 90°。悠悠球同族直绘 this.rot（YoyoProj.draw）
+    drawProj(r, cam, this, this.projId, this.rot, '#B09060', this.ghost ? 0 : 1, -1);
   }
 }
 
@@ -1965,7 +1982,7 @@ const FLAIL_PARAMS: Record<number, Partial<FlailParams>> = {
   1058: { flightTicks: 16, throwSpeed: 23, spinHitCd: 10, orbitRadius: 45 },
 };
 
-/** 链贴图（DrawProj_FlailChains Main.cs:34757-34781 switch）：型号 → Chain_N；
+/** 链贴图（DrawProj_FlailChains 1457 Main.cs:35907-35938 switch;1456 :34757-34781）：型号 → Chain_N；
  *  948 三段混排（前 4 节 Chain43 全亮 → 2 节 Chain42 → 其余 Chain41）；
  *  757 = Extra_99 六帧竖条动画链。★1058 不走本表——独立支用 Chain37
  *  （M.cs:28831-28977,见 FlailProj.drawChain1058） */
@@ -2081,9 +2098,10 @@ export class FlailProj extends Entity {
       Math.max(0, (255 - this.alpha) / 255), 0, this.spriteDir === -1, true, this.texScale);
   }
 
-  /** 链条（DrawProj_FlailChains Main.cs:34752-34842 1:1）：球心 → 手臂方向逐节
-   *  步长=链节高，每节按所在格光照着色；948 三段混排 / 757 六帧动画链。
-   *  ★1058 Flairon 走独立支（M.cs:28831-28977,非本通用表）——见 drawChain1058 */
+  /** 链条（DrawProj_FlailChains 1457 Main.cs:35901-35990 1:1;1456 同段 :34752-34842）：
+   *  球心 → 手臂方向逐节步长=链节高，每节按所在格光照着色；948 三段混排 /
+   *  757 六帧动画链。★1058 Flairon 走独立支（1457 M.cs:29479-29640,非本通用表）
+   *  ——见 drawChain1058 */
   private drawChain(ctx: CanvasRenderingContext2D, r: Renderer): void {
     if (this.projId === 1058) { this.drawChain1058(ctx, r); return; }
     const img = chainImg(flailChainTex(this.projId));
@@ -2105,12 +2123,17 @@ export class FlailProj extends Entity {
       const [lr, lg, lb] = lighting.lightAt(Math.floor(wx / TILE), Math.floor(wy / TILE));
       return Math.min(1, (lr * 0.3 + lg * 0.5 + lb * 0.2) / 255);
     };
-    // 球心 → 臂方向（playerArmPosition.MoveTowards(center,4) 近似为手部）
+    // 球心 → 臂方向。链向量起点 = armPosition.MoveTowards(center, 4f)（1457 M.cs:35941,
+    // DrawProj_FlailChains :35901-35990;1456 同式 :34792）——臂位向球心先收 4px 再取
+    // (起点−球心) 向量 → 链长 = 臂球距 − 4（MoveTowards 不越界:距 ≤4 落在球心=零向量,
+    // SafeNormalize(Zero) 归零 → num4=链节高/2 恰画一节,本仓 d<1 门近似同态）。
+    // 曾直接以手部坐标全距起步 → 链多出 4px 戳进手臂
     const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
     let dx = this.handX - cx0, dy = this.handY - cy0;
-    const d = Math.hypot(dx, dy);
-    if (d < 1) return;
-    dx /= d; dy /= d;
+    const dHand = Math.hypot(dx, dy);
+    if (dHand < 1) return;
+    dx /= dHand; dy /= dHand;
+    const d = Math.max(0, dHand - 4);   // MoveTowards(center,4) 后的链向量长（:35941/:35946 num4=d+链节高/2）
     const frames = this.projId === 757 ? 6 : 1;
     const linkH = img.height / frames + (this.projId === 757 ? -2 : 0);
     const rotation = Math.atan2(dy, dx) + Math.PI / 2;
@@ -2133,7 +2156,10 @@ export class FlailProj extends Entity {
       ctx.translate(px, py);
       ctx.rotate(rotation);
       ctx.imageSmoothingEnabled = false;
-      ctx.globalAlpha = Math.max(0.15, alpha);
+      // 逐节取光即原版语义（:35950 color=Lighting.GetColor(节所在格)——黑暗中链全黑
+      // 不可见;曾设 0.15 globalAlpha 下限=黑暗里链仍隐约可见,原版无此下限。
+      // 948 中段 140/255 是原版【色阶】下限（:35963-35976 R/G/B≥140）非 alpha 下限）
+      ctx.globalAlpha = alpha;
       ctx.drawImage(tex, 0, sy, tex.width, sh, -tex.width / 2, -sh / 2, tex.width, sh);
       ctx.restore();
       px += dx * linkH;
@@ -2141,12 +2167,14 @@ export class FlailProj extends Entity {
     }
   }
 
-  /** 1058 Flairon 链独立支（Main.cs:28831-28977,与通用 DrawProj_FlailChains 分流）：
-   *  贴图 Chain37（缺省 Chain3 是通用表兜底,1058 不在表内）;链节高=贴图整高;
-   *  从球心向玩家步进【先步进后绘制】（首节在球心前方一节距,:28966-28968）;
-   *  while(dist ≥ 链节高+1) 终止（:28931-28934——通用表的 remain 起步式会多画 2 节
-   *  戳进玩家）;rotation 恒=atan2(球心→玩家)−π/2（:28917-28918,循环外一次定型）;
-   *  逐节 Lighting.GetColor 着色（无 948 亮度下限/无 alpha 门,:28969-28971） */
+  /** 1058 Flairon 链独立支（1457 Main.cs:29479-29640,与通用 DrawProj_FlailChains
+   *  分流;1456 同段 :28831-28977）：贴图 Chain37（缺省 Chain3 是通用表兜底,1058 不在
+   *  表内）;链节高=贴图整高;从球心向玩家步进【先步进后绘制】（首节在球心前方一节距,
+   *  1457 :29607-29609）;while(dist ≥ 链节高+1) 终止（:29593-29596——通用表的 remain
+   *  起步式会多画 2 节戳进玩家）;rotation 恒=atan2(球心→玩家)−π/2（:29582-29583,
+   *  循环外一次定型）;逐节 Lighting.GetColor 着色（无 948 亮度下限/无 alpha 门,
+   *  :29614-29616）。★本支起点=mountedCenter 直取（:29581 vector21=mountedCenter−center2,
+   *  无通用支的 MoveTowards(−4)）→ handX/handY=玩家中心即对齐,勿套 ① 的 −4 */
   private drawChain1058(ctx: CanvasRenderingContext2D, r: Renderer): void {
     const img = chainImg('Chain37');
     if (!img || !(img.width > 0) || img.width === 0) {
@@ -2727,9 +2755,19 @@ export class GrenadeProj extends Entity {
   private static readonly FIRED_STICK = new Set([134, 137, 140, 143, 303,
     338, 339, 340, 341, 776, 780, 784, 787, 790, 793, 796, 799,
     803, 804, 805, 806, 807, 808, 809, 810, 930]);
-  /** 火箭族（:44685-44742）：|vx|<15&&|vy|<15 → v×1.1 飞行加速；|v|≥8 烟尾 */
+  /** 火箭族（:48181-48240）：|vx|<15&&|vy|<15 → v×1.1 飞行加速；|vx|≥8 或 |vy|≥8
+   *  每 update 2×尘 num13 + 2×尘 31 烟尾 */
   private static readonly FIRED_ROCKET = new Set([134, 137, 140, 143, 303,
     776, 780, 784, 787, 790, 793, 796, 799]);
+  /** 烟尾尘型号表（:47974-47990 num13）：普通火箭 6 烟雾 / 776·780 228 / 784·805
+   *  1/3 水 / 787·806 1/3 尘 35 / 790·807 1/3 尘 152 */
+  private static rocketTrailDust(projId: number): number {
+    if (projId === 776 || projId === 780) return 228;
+    if (projId === 784 || projId === 805) return Math.random() < 1 / 3 ? 6 : 33;   // Dust.dustWater() 默认水样 33（Dust.cs:405-423，水样分档未建模）
+    if (projId === 787 || projId === 806) return Math.random() < 1 / 3 ? 6 : 35;
+    if (projId === 790 || projId === 807) return Math.random() < 1 / 3 ? 6 : 152;
+    return 6;
+  }
   /** 雪人/集束追踪（:44570-44684）：ai0>30 搜敌 600(930:650)+视线 → lerp 1/12 → dir×16(930:12) */
   private static readonly FIRED_HOME = new Set([338, 339, 340, 341,
     803, 804, 805, 806, 807, 808, 809, 810, 930]);
@@ -2840,12 +2878,27 @@ export class GrenadeProj extends Entity {
       this.vy += (gy - this.vy) / 12;
     }
     if (GrenadeProj.FIRED_ROCKET.has(this.projId)) {
-      if (Math.abs(this.vx) < 15 && Math.abs(this.vy) < 15) {             // 飞行加速 ×1.1（:44738-44741）
+      if (Math.abs(this.vx) < 15 && Math.abs(this.vy) < 15) {             // 飞行加速 ×1.1（:48236-48238）
         this.vx *= 1.1; this.vy *= 1.1;
       }
-      if (Math.hypot(this.vx, this.vy) >= 8 && Math.random() < 0.6) {     // 烟尾（|v|≥8，:44689-44736）
-        game.spawnParticles(this.cx - this.vx * 0.5, this.cy - this.vy * 0.5,
-          Math.random() < 0.5 ? '#C8C8C8' : '#8890A0', 1, 1.6, { life: 24 });
+      // 烟尾（AI_016 :48183-48234）：|vx|≥8 或 |vy|≥8 每 update 2 拍循环（n=0/1）——
+      // 每拍烟尘 num13（scale×2+Next(10)×0.1、v×0.2、noGravity）+ 火尘 31（scale 0.5、
+      // fadeIn 1+Next(5)×0.1、v×0.05）；出生点 = (x+3+n·v/2)−v/2、盒 (w−8,h−8)。
+      // 曾 60% 掷 1 粒合成粒子 = 烟尾密度/形态与原版不符（备案遗留③）
+      if (Math.abs(this.vx) >= 8 || Math.abs(this.vy) >= 8) {
+        const dust13 = GrenadeProj.rocketTrailDust(this.projId);
+        for (let n = 0; n < 2; n++) {
+          const ox = n === 1 ? this.vx * 0.5 : 0;
+          const oy = n === 1 ? this.vy * 0.5 : 0;
+          const px = this.x + 3 + ox - this.vx * 0.5;
+          const py = this.y + 3 + oy - this.vy * 0.5;
+          const bw = Math.max(5, this.w - 8), bh = Math.max(5, this.h - 8);
+          const d13 = game.spawnDust?.(px, py, bw, bh, dust13, 0, 0, 100, null,
+            2 + Math.floor(Math.random() * 10) * 0.1, true);
+          if (d13) { d13.vx *= 0.2; d13.vy *= 0.2; }
+          const d31 = game.spawnDust?.(px, py, bw, bh, 31, 0, 0, 100, null, 0.5);
+          if (d31) { d31.fadeIn = 1 + Math.floor(Math.random() * 5) * 0.1; d31.vx *= 0.05; d31.vy *= 0.05; }
+        }
       }
     }
     if (GrenadeProj.FIRED_GRENADE.has(this.projId)) {
@@ -3362,8 +3415,9 @@ export class TorchGodProj extends Entity {
         name: game.projectileName?.(this.projId) ?? '弹幕',
       };
       // 1457 :18000：`damage = (int)(40f × HostileProjectileDamageMultiplier.Sample(
-      // Main.Difficulty))`——经典 40/专家 60(×1.5)/大师 80(×2)（D-❌④ 2026-08-21 接线,
-      // 曾恒 20）。原版在生成掷处算定,难度事件期内不变 → 命中时算等价
+      // Main.Difficulty))`——经典 40/专家 80(×2)/大师 120(×3)（GameDifficultyData.cs:67
+      // 曲线斜率 1;D-❌④ 2026-08-21 接线,曾恒 20。★V5 复核勘误:旧注释"×1.5/×2"系
+      // 乘区口径错,Sample 曲线 Journey0.5→Master3）。原版在生成掷处算定,命中时算等价
       p.damage(hostileProjectileDamage(40, mainDifficulty(game.world)),
         Math.sign(p.cx - (nx + this.w / 2)) || 1, 0, game as never);
       this.kill(game);

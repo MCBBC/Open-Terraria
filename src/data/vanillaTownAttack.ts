@@ -1,5 +1,5 @@
 // 城镇 NPC 自卫攻击系统数据(NPCID.Sets 四表 + AI_007 四态逐类型参数)。
-// 表:NPCID.cs:4835-4851(1456);参数:NPC.cs AI_007_TownEntities
+// 表:NPCID.cs:4835-4851(1456 行号锚,1457 平移同值);参数:NPC.cs AI_007_TownEntities（AI 数值两版零改动,diff 报告§四）
 //   ai[0]==10 近战 :54747-54936 / ==12 弓 :54936-55240 /
 //   ==14 魔法 :55240-55405 / ==15 挥击 :55406-55538(转录核对版)。
 // 伤害缩放:GetAttackDamage_ForTownNPC = ×GameDifficultyData.TownNPCDamageMultiplier

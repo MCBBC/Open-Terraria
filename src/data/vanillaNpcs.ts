@@ -1,6 +1,7 @@
 // 原版 1.4.0.5 全量 NPC 数据（tools/extract-npcs.mjs 从 Terarria1405/NPC.cs SetDefaults 提取）。
 // 增量补齐（2026-08-11）：473-476/590/591/594/628/629/631/634/635/692 十三条取自
-// Terarria1456/NPC.cs SetDefaults + Main.cs npcFrameCount（数值一律取 1456 最终态）。
+// Terarria1456/NPC.cs SetDefaults + Main.cs npcFrameCount（★1456/1457 零差异——
+// recon-npc 闸门 CLASS B 钉死 SetDefaults/npcFrameCount 双零漂移,树基准 1457）。
 // 弹跳球族增量（2026-08-11）：665 ChaosBallTim / 666 VileSpitEaterOfWorlds 两条取自
 // Terarria1456/NPC.cs SetDefaults :17338-17367（aiStyle 9，字段对齐 30/112 同族；贴图
 // NPC_665/666.png 已在 sprites，此前纯数据缺口）。

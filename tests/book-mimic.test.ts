@@ -271,7 +271,7 @@ describe('教徒仪式圈召唤链（Projectile 490 :31282-31292）', () => {
     expect(s1.wormFollow).toBe(head);
     s1.fixedUpdate(1 / 60, game);
     expect(s1.spawnAlpha).toBeLessThan(255);
-    // 1456 数值对齐：头 10000HP/100 伤/15 防；身 10000/50/30
+    // 1456/1457 同值对齐(recon-npc CLASS B=0)：头 10000HP/100 伤/15 防；身 10000/50/30
     expect(head.maxHp).toBe(10000);
     expect(head.def.damage).toBe(100);
     expect(segs[0].def.defense).toBe(30);

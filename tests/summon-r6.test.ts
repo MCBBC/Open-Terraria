@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { combatWeapon } from '../src/data/vanillaItemCombat';
 import { MinionProj } from '../src/entities/MinionProj';
+import { Arrow } from '../src/entities/Arrow';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
@@ -71,7 +72,7 @@ describe('combatWeapon summon 分流', () => {
 });
 
 describe('MinionProj 行为', () => {
-  it('飞行随从：无目标悬停玩家侧后 → 有目标朝目标移动 → >2000px 瞬移回（1456 :62786 num35>2000）', () => {
+  it('飞行随从：无目标悬停玩家侧后 → 有目标保持射手距离带并开火 → >2000px 瞬移回（1457 :66744 num35>2000）', () => {
     const { hooks, player } = makeHooks();
     const m = new MinionProj(player.x, player.y, 375, 17, 2, false, 0, false, () => player);
     // 无敌悬停几帧：靠近玩家
@@ -83,13 +84,18 @@ describe('MinionProj 行为', () => {
       cx: 100 * 16 + 8, cy: 80 * 16 + 12,
       hp: 1000, hurt: (d: number) => { enemy.hp = (enemy.hp as number) - d; return true; },
     };
-    const { hooks: h2 } = makeHooks([enemy]);
+    const { hooks: h2, added } = makeHooks([enemy]);
     const d0 = Math.hypot(enemy.cx as number - m.cx, enemy.cy as number - m.cy);
-    for (let k = 0; k < 220; k++) m.fixedUpdate(1, h2); // 640px 距离 / 5px 每帧
+    for (let k = 0; k < 220; k++) m.fixedUpdate(1, h2); // 640px 距离
     expect(Math.hypot((enemy.cx as number) - m.cx, (enemy.cy as number) - m.cy)).toBeLessThan(d0);
-    // 接触造成伤害（hp 下降）
-    expect(enemy.hp).toBeLessThan(1000);
-    // 远离 ≤2000（1456 :62786 门）不回收
+    // 2026-08-23 备案项①：375 小鬼=射手——交战 <150 反推（:66660-66668）/
+    // 150-200 ×0.97 阻尼 → 稳态悬于 150-200 距离带【不贴身接触】（旧行为直冲
+    // 贴身已废）；伤害走 376 火球射击通道（:67056-67059）
+    const dEnemy = Math.hypot((enemy.cx as number) - m.cx, (enemy.cy as number) - m.cy);
+    expect(dEnemy).toBeGreaterThan(120);
+    expect(enemy.hp).toBe(1000);                         // 距离带内零接触伤
+    expect(added.some((a) => a instanceof Arrow && (a as Arrow).projId === 376)).toBe(true);
+    // 远离 ≤2000（:66744 num35>2000 同值门）不回收
     m.x = player.cx + 1500;
     m.fixedUpdate(1, h2);
     expect(Math.hypot(m.cx - player.cx, m.cy - player.cy)).toBeGreaterThan(1000);

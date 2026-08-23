@@ -14,7 +14,7 @@ describe('钱币单轨(vi_71-74)', () => {
     expect(COIN_VALUES).toEqual([1, 100, 10000, 1000000]);
     // 面额档堆叠上限(src/data/items.ts:84-85 VANILLA_MAX_STACK,commit b8164728):
     // 铜/银/金(71-73)=100——DoCoins 升位门只认 71-73(Player.cs:38570);
-    // 白金 74 无覆盖 = 1456 默认 9999(1.4.4 堆叠改制,手写 maxStack 不生效)
+    // 白金 74 无覆盖 = 1456/1457 同值默认 9999(1.4.4 堆叠改制,手写 maxStack 不生效)
     for (let i = 0; i < 4; i++) {
       expect(ITEM_DEFS[ITEM_BY_KEY[COIN_KEYS[i]]].maxStack).toBe(i < 3 ? 100 : 9999);
     }

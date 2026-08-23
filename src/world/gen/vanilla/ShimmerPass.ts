@@ -22,8 +22,13 @@ import { addProtectedStructure } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSolidType } from './GenSolid';
-import { solidTile } from './HalfBrickPass';
+import { solidTile, registerTileFrame165 } from './HalfBrickPass';
 import { growGemTree } from './TreePass';
+
+// TileFrame case165（cs:85996）注册：killTile 尾 SquareTileFrame 级联的钟乳石失锚
+// 链杀（TTTTTT 批 2026-08-23,CONST LavaLayerCaverer 带 38 格定罪）。注册制防
+// HalfBrickPass⇄ShimmerPass 循环依赖;生成期模块体先于全部 pass 执行,时序安全。
+registerTileFrame165(checkStalactite);
 
 /** Main.tileMoss（TileID.cs）：苔藓族 sheet 集（石族钟乳石帧判定用） */
 const MOSS_SHEETS = new Set<number>(Array.from(idsByVanillaSheet(182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627)).map((id) => TILE_DEFS[id]?.vanilla?.sheet ?? -1));

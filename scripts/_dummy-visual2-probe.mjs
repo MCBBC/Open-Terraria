@@ -71,7 +71,7 @@ const out = await page.evaluate(async () => {
   // 场地诊断:假人锚格与弹高行的 tile
   const dRow = [];
   for (let x = tx - 2; x <= tx + 3; x++) dRow.push({ x, t: st.get(x, ty), solid: st.isSolid(x, ty) });
-  return { gunKey, ammoKey, gunId: shotgun, ammoId: bullet, musketId: idOf(/^vi_97_MusketBall/), ammoSlot54: pl.inv.slots[54], heldId: pl.inv.slots[pl.inv.selected]?.id, anchor: [tx, ty - 1], dgeo: { cx: Math.round(d.cx), cy: Math.round(d.cy), x: Math.round(d.x), y: Math.round(d.y), w: d.w, h: d.h }, traj: traj.slice(0, 12), dRow };
+  return { gunKey, ammoKey, gunId: shotgun, ammoId: bullet, musketId: idOf(/^vi_97_火枪子弹/), ammoSlot54: pl.inv.slots[54], heldId: pl.inv.slots[pl.inv.selected]?.id, anchor: [tx, ty - 1], dgeo: { cx: Math.round(d.cx), cy: Math.round(d.cy), x: Math.round(d.x), y: Math.round(d.y), w: d.w, h: d.h }, traj: traj.slice(0, 12), dRow };   // 2026-08-23 键名卫生:vi_97 后缀改正（曾误名"地牢砖墙",MusketBall=97）
 });
 console.log(JSON.stringify(out));
 await browser.close();

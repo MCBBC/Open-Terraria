@@ -1,4 +1,4 @@
-// 原版配方数据运行时（tools/extract-recipes.mjs 从 Terarria1456 Recipe.cs 提取，3309 条：
+// 原版配方数据运行时（tools/extract-recipes.mjs 从 Recipe.cs 提取，3309 条【1456 基准;1457 增量≈30 条全在新物品段 6152+,存量配方同值,新段=新内容债未并入】：
 // 含 for 循环生成段 137 条——蝴蝶罐/蜻蜓罐/武器架/字母雕像/伪装宝箱/串平衡锤）。
 // 可用性 = Recipe.UpdateRecipeList（Recipe.cs:229-258）：环境条件（站点/液体/群系）× 材料计数。
 // 组匹配 = RecipeGroup（id 假偏移 1000000，Recipe.cs:20）——组计数 = 组内所有物品持有数之和。
@@ -18,6 +18,10 @@ export interface VanillaRecipe {
   groups: number[];
   honey?: boolean; water?: boolean; lava?: boolean;
   snow?: boolean; graveyard?: boolean; alchemy?: boolean;
+  /** 1457：Ocram's Razor(5334) 需 remix+getGood/everything 世界（Mechdusa 三合一） */
+  mechdusa?: boolean;
+  /** 1457：火把神恩宠解锁（5573/5638） */
+  torchGod?: boolean;
   /** decraft 族(2026-08-13 提取器补提,Recipe.cs 裸赋值 :1064/:1140/:1145) */
   notDecraftable?: boolean;
   crimson?: boolean;
@@ -302,6 +306,10 @@ export interface VanillaCraftCtx {
   nearLava?: boolean;
   zoneSnow?: boolean;
   zoneGraveyard?: boolean;
+  /** remix+getGood/everything 世界（Mechdusa） */
+  mechdusa?: boolean;
+  /** 火把神恩宠已解锁 */
+  torchGod?: boolean;
 }
 
 /** 环境条件（PlayerMeetsEnvironmentConditions Recipe.cs:321-357） */
@@ -320,6 +328,8 @@ export function envOk(r: VanillaRecipe, ctx: VanillaCraftCtx): boolean {
   if (r.lava && !ctx.nearLava) return false;
   if (r.snow && !ctx.zoneSnow) return false;
   if (r.graveyard && !ctx.zoneGraveyard) return false;
+  if (r.mechdusa && !ctx.mechdusa) return false;
+  if (r.torchGod && !ctx.torchGod) return false;
   return true;
 }
 

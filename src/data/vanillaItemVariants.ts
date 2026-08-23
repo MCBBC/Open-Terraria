@@ -54,7 +54,7 @@ export interface ItemVariantStats {
   defense?: number;
   /** Item.hammer 覆写（5283 灰烬木锤 45→35） */
   hammer?: number;
-  /** 1456 真 Item.value（买入单位 = sellPrice 含 ×5 尾乘）。★仅登记未接线：
+  /** 1456 真 Item.value（字段名保留历史;值经 recon-item 闸门对 1457 复核,买入单位 = sellPrice 含 ×5 尾乘）。★仅登记未接线：
    *  本仓 vanilla-itemvalue.json 是 1.4.4 口径（sellPrice 不含 ×5）+ 字面量
    *  混编的既有表，变体值接入须待价值表整体重定基（见报告遗留） */
   value1456?: number;
@@ -125,7 +125,7 @@ export const ITEM_VARIANT_REGISTRY: Readonly<Record<number, readonly ItemVariant
 };
 
 // ---------------------------------------------------------------------------
-// 属性覆写表（Item.cs SetDefaults 23 处 Variant 分支逐字面，行号 1456）
+// 属性覆写表（Item.cs SetDefaults 23 处 Variant 分支逐字面,行号锚 1456——★1457 已合并 SetDefaults1-5 → SetDefaults(int Type, ItemVariant),Variant 分支语义保留,值经 recon 闸门复核）
 // ---------------------------------------------------------------------------
 
 /**

@@ -144,8 +144,14 @@ describe('火星飞碟族：核心相位摆动 + 部件继承/公转 + 派发镜
     e.bInit = true;                              // 跳过首帧部件生成块（其内 ai0/ai1 清零会覆写预设）
     e.ai0 = 1;
     e.ai1 = 9;
-    martianSaucerAI(e, h.hooks, null);                          // ai1→10 → 首档 sin(10/40·2π)×0.2
-    expect(e.visAngle).toBeCloseTo(0.2, 5);
+    martianSaucerAI(e, h.hooks, null);                          // ai1→10 → 首档 cos(10/40·2π)×0.2
+    // ★UnitY.RotatedBy(θ).Y=cosθ（Utils.cs:1752-1761;V5 复核纠正——曾锁 sin 值 0.2,
+    //  实为 cos(π/2)×0.2=0;补中相断言防 sin/cos 再翻转）
+    expect(e.visAngle).toBeCloseTo(Math.cos((10 / 40) * Math.PI * 2) * 0.2, 5);
+    expect(e.visAngle).toBeCloseTo(0, 5);                       // ai1=10 → θ=π/2 → cos=0（sin 会给 0.2）
+    e.ai1 = 49;
+    martianSaucerAI(e, h.hooks, null);                          // ai1→50 → 二档 θ=50/20·2π=5π → cos=−1→−0.3（sin=0 可鉴别）
+    expect(e.visAngle).toBeCloseTo(-0.3, 5);
     e.ai1 = 134;                                                // →135 ≥120 整周段 (135-120)/30·2π
     martianSaucerAI(e, h.hooks, null);
     expect(e.visAngle).toBeCloseTo((15 / 30) * Math.PI * 2, 5);

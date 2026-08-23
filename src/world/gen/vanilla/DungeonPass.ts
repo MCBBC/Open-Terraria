@@ -17,6 +17,9 @@ import { growTree } from './TreePass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { runLavaLayerCaverer } from './LavaLayerCavererPass';
+// 1457 地牢域对齐（docs/worldgen/dungeon-1457-alignment.md）：双地牢旗→行为接线
+// （trap 窗口/潜在界域回填）+ GOTHIC 平台档（DungeonGlobalPlatforms.cs:42-45,仅帧通道）。
+import { dualDungeonState, dualDungeonTrapWindow } from './DungeonStyles1457';
 // node:fs 动态导入（探针落盘 SW_DG_LIGHTS_GRID 才用）——顶层静态导入会进
 // worker bundle 被 vite 外部化炸构建（2026-08-18 实锤：writeFileSync is not
 // exported by "__vite-browser-external"）。改运行时 require，浏览器恒 false 门
@@ -293,6 +296,16 @@ export function runDungeonPass(
   const potB = Math.max(10, Math.min(h - 10, Math.trunc(h * potBt)));
   const potContains = (x: number, y: number): boolean =>
     x >= Math.max(10, Math.min(w - 10, potL)) && x < Math.max(10, Math.min(w - 10, potR)) && y >= potT && y < potB;
+  // ★dungeon-1457 批：潜在地牢界域回填共享态（GenVars.dungeonGenVars[i].
+  //   outerPotentialDungeonBounds 的 JS 投影）——TrapsPass 的 placeTrap 双地牢界拒门
+  //   （WorldGen.cs:8865）消费。普通世界（无双地牢旗）enabled=false → 门恒不拒,
+  //   与 1456 行为逐位一致（1457 该门首项 dualDungeons.Enabled 短路）。界域值与
+  //   potContains 同构（半开矩形,查询期钳位在此预钳）。
+  dualDungeonState.enabled = !!gs.seedFlags?.dualDungeons;
+  dualDungeonState.potentialBounds = [{
+    l: Math.max(10, Math.min(w - 10, potL)), r: Math.max(10, Math.min(w - 10, potR)),
+    t: potT, b: potB,
+  }];
   // ★入口三掷已随每 pass 重播改造（2026-08-16）归位 **Dunes pass 头**（cs:11542
   //   SetupDungeonGenVarVariables 尾段——主题掷后紧跟）：掷①② Next(3) 与 RandomSeed
   //   Next() 原版在 Dunes 消耗，此处只取 Dunes 落盘的 entSeed/A/B（兜底自掷仅限绕过
@@ -2727,6 +2740,11 @@ export function runDungeonPass(
       if (!inW(d.x, d.y, 30)) continue;
       const force = !!d.force;
       const x = d.x, y = d.y;
+      // ★dungeon-1457 批（DungeonGlobalPlatforms.cs:42-45,1457 新增）：平台锚点墙
+      //   ∈[94,105]（地牢 slab/tile 墙变体族,含 1456 即有的 94-99）→ 平台档强制
+      //   54（GOTHIC 平台）。仅帧通道（frameY=18*54）,不改 tile/掷序——四通道金标
+      //   零扰动。C# 判定用锚点 (x,y) 原位墙（行搜索前），此处同位。
+      const platStyleEff = (wallAt(x, y) >= 94 && wallAt(x, y) <= 105) ? 54 : platformStyle;
       let row = -1;
       // ★2026-08-16 审计：num3 = OverrideHeightFluff ?? 5（DungeonGlobalPlatforms.cs:44-57）
       //   ——房间候选（roomPlatformsDoors，platformFluff=3）扫 y±3；走廊/入口候选 ±5。
@@ -2776,13 +2794,13 @@ export function runDungeonPass(
       let qx = x + 1;
       while (inW(px, py, 0) && actAt(px, py) === 0) {
         chTile(st.idx(px, py), PLATFORM, false);
-        st.frameY[st.idx(px, py)] = 18 * platformStyle; // DungeonGlobalPlatforms:158
+        st.frameY[st.idx(px, py)] = 18 * platStyleEff; // DungeonGlobalPlatforms:158+42-45(1457 GOTHIC 档)
         px--;
         if (px <= 10) break;
       }
       while (inW(qx, py, 0) && actAt(qx, py) === 0) {
         chTile(st.idx(qx, py), PLATFORM, false);
-        st.frameY[st.idx(qx, py)] = 18 * platformStyle;
+        st.frameY[st.idx(qx, py)] = 18 * platStyleEff;
         qx++;
         if (qx >= w - 10) break;
       }
@@ -3495,7 +3513,12 @@ export function runDungeonPass(
   }
 
   // ============ DungeonGlobalTraps（:23-152，Default：placeTrap(x,y,0) 飞镖）============
+  // ★dungeon-1457 批（DungeonGlobalTraps.cs:33/:154）：陷阱窗口首尾设
+  //   GenVars.DualDungeon_AllowTrapGenerationInDungeon=true/false——窗口内世界
+  //   placeTrap 的双地牢界拒门放行（原版窗口覆盖本特征全程;JS 侧世界 placeTrap
+  //   只在 TrapsPass（后置 pass）跑,窗口此处开闭即还原原版时序语义）。
   function dgTraps(): void {
+    dualDungeonTrapWindow.allowTrapGenerationInDungeon = true;
     const num5 = Math.trunc(8.4 * (w / 4200) * 1.0);
     let ncount = 0, num4 = 0;
     while (num4 < num5) {
@@ -3505,6 +3528,7 @@ export function runDungeonPass(
       if (isDW(wallAt(x, y)) && placeTrap0(x, y)) ncount = 1000;
       if (ncount > 1000) { num4++; ncount = 0; }
     }
+    dualDungeonTrapWindow.allowTrapGenerationInDungeon = false;
   }
   // placeTrap type=0（WorldGen.cs:8875-9150 飞镖分支）
   function placeTrap0(x2: number, y2: number): boolean {

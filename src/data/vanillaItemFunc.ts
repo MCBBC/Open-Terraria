@@ -1,4 +1,4 @@
-// 道具功能画像运行时（tools/extract-itemfunc.mjs 从 1456 Item.cs 提取）。
+// 道具功能画像运行时（tools/extract-itemfunc.mjs 从 Item.cs 提取;提取器结构绑定 SetDefaults1-5=1456 布局,存量字段两版同值,1457 新物品段走手补）。
 // 用途：vi_ 批次物品的功能桥接——工具（镐/斧/锤挖掘）、药水（治疗/魔力/Buff）。
 export interface ItemFunc {
   melee?: number; ranged?: number; magic?: number; summon?: number;

@@ -259,8 +259,8 @@ describe('图鉴数据表收尾（2026-08-13 收尾批）', () => {
 
   it('boss 判定 1:1（BestiaryEntry.Enemy :37：npc.boss ∨ ShouldBeCountedAsBossForBestiary）', () => {
     expect(isBossForBestiary(4)).toBe(true);    // EoC（SetDefaults boss=true）
-    expect(isBossForBestiary(395)).toBe(true);  // 火星飞碟核心（1456 boss=true）
-    expect(isBossForBestiary(668)).toBe(true);  // 鹿角怪（1456 boss=true）
+    expect(isBossForBestiary(395)).toBe(true);  // 火星飞碟核心（1456/1457 同值 boss=true）
+    expect(isBossForBestiary(668)).toBe(true);  // 鹿角怪（1456/1457 同值 boss=true）
     expect(isBossForBestiary(13)).toBe(true);   // 世吞头（Sets 表补充）
     expect(isBossForBestiary(664)).toBe(true);  // 火把神（双源）
     expect(isBossForBestiary(68)).toBe(false);  // 地牢守卫（boss=false，AI 运行期才置）

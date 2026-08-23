@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { VANILLA_NPCS } from '../src/data/vanillaNpcs';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url)); // game/ 的上一级=仓库根
-const MAIN_CS = `${ROOT}/Terarria1456/Terraria/Main.cs`;
+const MAIN_CS = `${ROOT}/Terarria1457/Terraria/Main.cs`;   // 树基准 1457（npcFrameCount 1456/1457 零差异,recon-npc CLASS B 钉死）
 
 /** 流式提取 Main.npcFrameCount[697]（Main.cs:65994 起的初始化数组：
  *  去 // 注释后从 '{' 收集到 '};'——已与 697 项全长核对） */

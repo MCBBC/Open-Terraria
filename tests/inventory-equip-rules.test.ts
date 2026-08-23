@@ -1,6 +1,6 @@
-// 装备唯一性 + 堆叠上限对账（ItemSlot.cs :1311-1327/:3196-3245 + Item.cs:66/48615）：
-//   ① vi_ maxStack = 1456 最终态:默认 9999(CommonMaxStack),仅 {71,72,73}=100
-//     与 8 任务/钥匙物 =1——1405 的 1844 处逐物品赋值在 1.4.4 已改制废弃
+// 装备唯一性 + 堆叠上限对账（ItemSlot.cs :1311-1327/:3196-3245 + Item.cs 1456 :66/48615 ≡ 1457 :85/:49020）：
+//   ① vi_ maxStack = 1456/1457 同值:默认 9999(CommonMaxStack,1457 Item.cs:85),仅 {71,72,73}=100
+//     （1457 :2222-2264）与 8 任务/钥匙物 =1——1405 的 1844 处逐物品赋值在 1.4.4 已改制废弃
 //   ② 功能配饰段同 type 唯一(自身槽放行)+ 双翅膀互斥 + 功能↔社交段同 type 互斥
 //   ③ 盔甲功能↔时装段同款互斥,DualEquipArmor{205,5004,4955} 白名单例外
 import { describe, it, expect } from 'vitest';
@@ -13,7 +13,7 @@ const idOf = (vid: number): number | undefined => {
   return k !== undefined ? ITEM_BY_KEY[k] : undefined;
 };
 
-describe('vi_ 堆叠上限 = 1456 最终态（默认 9999）', () => {
+describe('vi_ 堆叠上限 = 1456/1457 同值（默认 9999）', () => {
   it('治疗药水 188 / 铜短剑 4 / 铂币 74 = 9999;铜银金 71-73 = 100', () => {
     expect(ITEM_DEFS[idOf(188)!].maxStack).toBe(9999);
     expect(ITEM_DEFS[idOf(4)!].maxStack).toBe(9999);

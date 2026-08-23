@@ -160,33 +160,36 @@ describe('③ 星尘龙伤害段数 localAI[0]（1456 :40342/:12097）', () => {
   });
 });
 
-describe('④ AI_062 索敌射程分档 + 视线门（1456 :62362-62375/:62434）', () => {
+describe('④ AI_062 索敌射程分档 + 视线门（1457 :66319-66333/:66392）', () => {
   it('射手族 373 射程 2000：1200px 外的敌仍入索敌（旧 1000 门漏）', () => {
     const e = mkEnemy(1, 60 * 16 + 1200, 90 * 16);
     const { hooks, player } = makeHooks([e]);
     const m = mkMinion(373, player, player.cx, e.cy - 8); // 中心与敌同高 → 纯水平
     m.fixedUpdate(1, hooks);
-    expect(m.vx).toBe(5);                                // 锁定 → 速 5 直奔（悬停档 ≤4）
+    // 2026-08-23 备案项①：交战 >200 加速段 velocity=(v×40+向×6)/41（:66616-66623）
+    // ——首拍自静止 → 6/41（旧"5 速直冲"近似已废）
+    expect(m.vx).toBeCloseTo(6 / 41, 6);
   });
-  it('CanHitLine 视线门：墙后敌不入索敌（:62434）', () => {
+  it('CanHitLine 视线门：墙后敌不入索敌（:66392）', () => {
     const e = mkEnemy(1, 60 * 16 + 500, 90 * 16);
     const { hooks, player, store } = makeHooks([e]);
     for (let y = 70; y < 100; y++) store.setTile(75, y, 1);   // 中间实心墙列
     const m = mkMinion(373, player, player.cx, e.cy - 8);
     m.fixedUpdate(1, hooks);
-    expect(Math.abs(m.vx)).toBeLessThan(5);              // 无目标 → 悬停移速 <5
+    expect(Math.abs(m.vx)).toBeLessThan(5);              // 无目标 → 归位档移速 <5
   });
-  it('963 阿比盖尔 700 档 + CanHit 1×1 门（:62372-62375/:62455）', () => {
+  it('963 阿比盖尔 700 档 + CanHit 1×1 门（:66330-66333/:66435）', () => {
     const eFar = mkEnemy(1, 60 * 16 + 900, 90 * 16);     // >700 → 不索敌
     const a = makeHooks([eFar]);
     const m1 = mkMinion(963, a.player, a.player.cx, eFar.cy - 8);
     m1.fixedUpdate(1, a.hooks);
-    expect(Math.abs(m1.vx)).toBeLessThan(7.4);           // 无目标 → 跟随档速 ≤4.8
-    const eNear = mkEnemy(2, 60 * 16 + 400, 90 * 16);    // <700 → 索敌冲刺 7.4
+    expect(Math.abs(m1.vx)).toBeLessThan(4.8);           // 无目标 → 归位档速 ≤4.8
+    const eNear = mkEnemy(2, 60 * 16 + 400, 90 * 16);    // <700 → 索敌交战加速
     const b = makeHooks([eNear]);
     const m2 = mkMinion(963, b.player, b.player.cx, eNear.cy - 8);
     m2.fixedUpdate(1, b.hooks);
-    expect(m2.vx).toBeCloseTo(7.4, 6);
+    // 交战 >200 加速段 velocity=(v×36+向×6)/37（:66620-66622,num3=18,num27=6）
+    expect(m2.vx).toBeCloseTo(6 / 37, 6);
   });
 });
 

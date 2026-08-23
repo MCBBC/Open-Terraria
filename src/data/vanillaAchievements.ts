@@ -1,4 +1,4 @@
-// 原版成就注册表 1:1（Terarria1456/Terraria.Initializers/AchievementInitializer.cs）。
+// 原版成就注册表 1:1（AchievementInitializer.cs;1456/1457 同值——1457 无成就系统变更）。
 // 条件语义（AchievementInitializer.cs AddCondition/AddConditions）：
 //   flag(name)          CustomFlagCondition.Create(name) —— HandleSpecialEvent/装备检查置位
 //   int(name, v)        CustomIntCondition.Create(name, v) —— 计数 ≥ v 完成

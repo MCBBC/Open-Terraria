@@ -126,6 +126,19 @@ describe('钩爪 AI_007（Projectile.cs:49647-49980）', () => {
     }
   });
 
+  it('双钩 73/74 运行时牵引 12.5（★1457 Player.cs:23022-23025 case 73/74;V1 复核补运行时钳覆盖——数据表外 getGrapplingForces 硬编码同源）', () => {
+    const { st, p, hooks } = makeWorld();
+    for (let x = 26; x <= 34; x++) st.setTileSilent(x, 24, DIRT);
+    for (const type of [73, 74] as const) {
+      const g = fire(p, type, 0, -1, 13.5);       // 双钩 shootSpeed 13.5（Item.cs 976/977）
+      for (let t = 0; t < 200 && g.ai0 !== GRAPPLE_LATCH; t++) g.fixedUpdate(1 / 60, hooks);
+      expect(g.ai0).toBe(GRAPPLE_LATCH);
+      step(g, p, hooks);
+      expect(Math.hypot(p.vx, p.vy)).toBeCloseTo(12.5, 2);  // 269px > 12.5 → 钳在上限
+      p.removeAllGrapplingHooks();
+    }
+  });
+
   it('跳键沿释放（Player.cs:22447-22480）：慢速(<2)时附带跳跃、钩全灭', () => {
     const { st, p, hooks } = makeWorld();
     for (let x = 26; x <= 34; x++) st.setTileSilent(x, 24, DIRT);   // 玩家 cy≈661 → 距 269px（<300 射程）

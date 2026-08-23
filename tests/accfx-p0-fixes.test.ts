@@ -1,7 +1,8 @@
 // 配饰审计 P0 修复批（2026-08-22，docs/audit/item-audit-2026-08-22.md「配饰类道具审计」）：
-// 钓鱼族四件断链 / 1322·1343 点燃 / 3223 闪避 / 魔力四件 mana 20 / 2998+935·1301·3015 召唤伤 /
+// 钓鱼族四件断链 / 1322·1343 点燃 / 3223 闪避 / 魔力四件 mana 40 / 2998+935·1301·3015 召唤伤 /
 // 圣骑士盾族免击退+冰障 / 单件批（485/900/953/975/3224/223/3090/1923/3619/3624/5107/lavaRose 族）。
-// 数值一律取 1456 反编译最终态（1457 才改 40 的魔力四件按 1456=20）。
+// 数值基准 1457（Terarria1457/）：魔力四件 111/982/1595/2221 mana=40（Player.cs:15030-15047
+// switch 终值；旧 1456 钉 20/25 已随 2026-08-23 基准切换反转），其余配饰数值两版同值。
 import { describe, it, expect } from 'vitest';
 import { accFxOfInternal } from '../src/data/vanillaAccFx';
 import { SUMMON_GEAR } from '../src/data/vanillaSummonStats';

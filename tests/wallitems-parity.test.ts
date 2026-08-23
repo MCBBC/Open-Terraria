@@ -17,6 +17,10 @@ import { fileURLToPath } from 'node:url';
 import wallItems from '../src/data/vanilla-wallitems.json';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
+// ★树锚保持 1456：1457 Item.cs 已把 SetDefaults1-5 合并为单个 SetDefaults(int Type,
+// ItemVariant variant=null)（:48666,物品系统重构）——本测试的独立重推导按 1-5 方法体
+// 分区解析,结构绑定 1-5 布局,无法直读 1457;数据等价性已核：createWall 赋值 136 处
+// 两版逐字节同、WallID.cs 全同 → vanilla-wallitems.json 对 1457 仍成立。
 const ITEM_CS = `${ROOT}/Terarria1456/Terraria/Item.cs`;
 const WALLID_CS = `${ROOT}/Terarria1456/Terraria.ID/WallID.cs`;
 

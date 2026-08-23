@@ -316,7 +316,7 @@ describe('弹 949 生成与行为（AI_184）', () => {
     const p1 = new TorchGodProj(90, 118, 8, 0, 1000, 6, locked.dust);
     p1.fixedUpdate(1 / 60, locked.game);
     expect(locked.dmgCalls.length, '未解锁 → 真伤（本仓 1457 语义 :43575）').toBe(1);
-    expect(locked.dmgCalls[0]).toBeGreaterThan(0);
+    expect(locked.dmgCalls[0]).toBe(40);   // ★V5 复核补强：经典档基伤 40（hostileProjectileDamage(40,classic);曾只断 >0,回归 20 不红）
     expect(p1.dead).toBe(true);
     expect(locked.player.lastDamageCause).toMatchObject({ kind: 'projectile' });
 

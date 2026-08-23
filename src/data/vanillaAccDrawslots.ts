@@ -22,16 +22,20 @@ export function accDrawSlotsOf(vid: number): AccDrawSlots | null {
   return vid > 0 ? (SLOTS[String(vid)] ?? null) : null;
 }
 
-// ---- ArmorIDs.Sets 路由表（Terraria.ID/ArmorIDs.cs 1457 字面集合；1456 基线
-//      增量以 ★1457 注明）----
+// ---- ArmorIDs.Sets 路由表（★树基准 1457：Terraria.ID/ArmorIDs.cs 1457 字面集合；
+//      文中 1456 行号/集合均为历史增量锚——两版集合差异已核：PreventFaceMaskDraw −102、
+//      DrawFaceMaskUnderHeadLayer +203、Back/Front IsACape +41/+17、Waist
+//      UsesTorsoFraming+IsABelt +17、HidesCompositeShoulders +17、Head/Body/HandOn
+//      Count +8/+3/+2、UsesNewFramingCode 扩段；DrawInBackpackLayer/DrawInTailLayer 同值）----
 
 /** Balloon.Sets.UsesTorsoFraming / DrawInFrontOfBackArmLayer（ArmorIDs.cs:2213-2215）
  *  ——两者同集 {18 Royal Scepter}：躯干架贴图 + 画在持物臂前层 */
 export const BALLOON_TORSO_FRAMING = new Set([18]);
 
 /** Waist.Sets.UsesTorsoFraming（★1457 ArmorIDs.cs:1945：{5 工具腰带,10 黑腰带/大师忍者
- *  gear,12 武僧腰带,17 DruidicSerpentCloak}；1456 :1918 无 17）——命中用 bodyFrame,
- * 否则 legFrame（DrawPlayer_19_WaistAcc :2070-2072） */
+ *  gear,12 武僧腰带,17 MysticArtsSash 秘术腰封}；1456 :1917 无 17）——命中用 bodyFrame,
+ * 否则 legFrame（DrawPlayer_19_WaistAcc :2070-2072）。★V1 复核勘误：17=MysticArtsSash
+ * （Waist 命名空间 :1984），DruidicSerpentCloak 是 Front 17/Back 41 非本族 */
 export const WAIST_TORSO_FRAMING = new Set([5, 10, 12, 17]);
 
 /** Face 三层路由（UpdateItemDye :9386-9402 + DrawPlayer_22_FaceAcc :2807）：
@@ -89,10 +93,16 @@ export const FRONT_SCARF_CAPE_HIDE = new Set([13]);
  *  本仓 front 6 无表项,登记） */
 export const FRONT_NECK_LAYER_ALWAYS = new Set([13]);
 
-/** DrawSittingLegs 默认支切片表（PlayerDrawLayers.cs:1660-1672：num3=1 两片——
- *  先画 (sy+2,h-2) 身段、后叠 (sy+0,2) 顶带,同锚同位=顶带下身段整体上移 2px;
- *  DrawPlayer_14_Shoes :1768 坐姿鞋走同函数）[sy, h] 对 */
-export const SITTING_LEG_SLICES: Array<[number, number]> = [[2, 54], [0, 2]];
+/** DrawSittingLegs 切片表（★V2b 复核勘误：原表 [[2,54],[0,2]] 是 217 族【特例支】
+ *  非默认支！PlayerDrawLayers.cs:1594-1596 默认支 num=2/num2=42/num3=2 → 循环
+ *  num10=2..0 三片 [46,10]+[44,2]+[42,2]（:1719-1732：首片 Y+46 高 10、余两片
+ *  Height=2 顶带）；特例支（:1608-1716 num3=1/num2=0）=legs 217/169(非 skin)/
+ *  177/178/181/182/206 → 两片 [[2,54],[0,2]]。DrawPlayer_14_Shoes :1768 传
+ *  legIndex=player.legs 同分支）[sy, h] 对 */
+export const SITTING_LEG_SLICES: Array<[number, number]> = [[46, 10], [44, 2], [42, 2]];
+export const SITTING_LEG_SLICES_SPECIAL: Array<[number, number]> = [[2, 54], [0, 2]];
+/** 特例支 legs 集合（:1608 门 legIndex==169||!skin + case 217/:1703-1707 族） */
+export const SITTING_LEG_SPECIAL_LEGS = new Set([169, 177, 178, 181, 182, 206, 217]);
 
 // ---- 脸饰/胡须头盔条件层（1456 未建模细项批 2026-08-23）----
 

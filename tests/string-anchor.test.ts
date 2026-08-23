@@ -198,7 +198,7 @@ describe('RotatedRelativePoint（Player.cs:4063-4089）', () => {
 
 // ============================================================
 // ③ ApplyItemPositionOffsetFromMount（Player.cs:50638-50795）
-//    1456 唯一有表坐骑 = 54 迅猛龙（MountID.cs:142）
+//    唯一有表坐骑 = 54 迅猛龙（MountID.cs:142；1456 :50638 ≡ 1457 :52019 函数同文）
 // ============================================================
 describe('mount 54 持物偏移表（Player.cs:50638-50795）', () => {
   it('悠悠球行档：aim −0.75/0.6 阈值分档 2/3/4（:50746-50757 + :35994-36010）', () => {
@@ -241,7 +241,7 @@ describe('mount 54 持物偏移表（Player.cs:50638-50795）', () => {
     p.useTime = 8;                          // itemAnimation>0 代理（useTime 计窗）
     expect(p.applyItemPositionOffsetFromMount(100, 200, { aim: 0 }))
       .toEqual({ x: 108, y: 200 });
-    // 独角兽 10：1456 表外坐骑 → 恒零
+    // 独角兽 10：1456/1457 两版表外坐骑 → 恒零
     ride(p, 10);
     expect(p.applyItemPositionOffsetFromMount(100, 200, { itemAnimating: true, aim: 0 }))
       .toEqual({ x: 100, y: 200 });

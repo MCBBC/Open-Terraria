@@ -482,6 +482,11 @@ def({ key: 'v_335_fireworksbox', name: '', decor: true, framed: true, opacity: 0
 def({ key: 'v_338_fireworkfountain', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 2, mapColor: '#55FFA0', drop: null, vanilla: { sheet: 338, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_372_peacecandle', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#FC80C9', drop: null, light: undefined /* 动态光 → specialTileLight case 372：和平蜡烛 frameX==0 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 372, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_386_trapdooropen', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 386, frame: 'style', fw: 2, fh: 2 } });
+// ⚠️5 并 def（2026-08-23）：本 def 已退役——唯一消费点 devices.ShiftTallGate 已改用
+// v_389_tall_gate_open（非 decor/opacity1 版,WldImport/Door.shiftTallGate 同款）,同一原版
+// tile 389 两套渲染/支撑语义就此归一。★槽位保留不删：TILE_DEFS 内部 id=数组下标,中段删
+// def 会整体平移后续 id（world-final-hash 金标锁 raw type 数组,存档走 stable-id 双表不受
+// 影响）；旧存档 wiring 开门态 stable 389 由表尾兼容别名接到 1027 同一 def。
 def({ key: 'v_389_tallgateopen', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 5, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 389, frame: 'style', fw: 1, fh: 5 } });
 def({ key: 'v_410_lunarmonolith', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 3, mapColor: '#4B8BA6', drop: null, vanilla: { sheet: 410, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_419_logicgatelamp', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#585F72', drop: null, vanilla: { sheet: 419, frame: 'style', fw: 1, fh: 1 } });
@@ -900,7 +905,7 @@ const PRIV_TILE_STABLE: Record<string, number> = {
   skull_lantern: 1021, water_candle: 1022,
   mushroom: 1023, flower: 1024, tallgrass: 1025,  // 自造装饰(真身 v_3_forest_short_plants 独占 sheet 3)
   tree: 1026,                                      // 自有树(真身 v_5_trees 独占 sheet 5)
-  'v_389_tall_gate_open': 1027,                    // 开门态变体(真身 v_389_tallgateopen 独占 389)
+  'v_389_tall_gate_open': 1027,                    // 高门开启态（⚠️5 并 def 后唯一 sheet 389 身;1029 前号冻结不复用）
   pixel_block: 1028,                               // 自研像素方块(F11 图片导入):RGB 编码进 frameX/Y,渲染端直画
   dirt: 1029,                                      // sheet=0 让位存档 air 哨兵(★曾误派 1028 与 pixel_block
                                                     //  冲突→pixel_block 双表被丢→图片方块群存档即变 air 丢失)
@@ -920,6 +925,11 @@ for (let i = 1; i < TILE_DEFS.length; i++) {
   TILE_STABLE_OF_INTERNAL[i] = s;
   TILE_INTERNAL_OF_STABLE[s] = i;
 }
+// ⚠️5 并 def 兼容别名（2026-08-23）：v_389_tallgateopen（decor 版,stable=389）已退役归一到
+// v_389_tall_gate_open（stable=1027,唯一消费点 devices.ShiftTallGate 已改投）——旧存档
+// wiring ShiftTallGate 写出的开门态存的是 stable 389,读档经此别名落到归一 def（否则旧门
+// 载入 decor 版,Door.shiftTallGate 的 from=OPEN 型比对失配 → 关不上）;新存档一律写 1027
+TILE_INTERNAL_OF_STABLE[389] = TILE_INTERNAL_OF_STABLE[1027];
 
 /** sheet(=原版 TileID) → 首个同 sheet def 的内部 tile id(-1=未注册)。
  *  放置回填(itemfunc.createTile → def.tile)与 wld 兜底导入共用(WldImport SHEET_FALLBACK 同语义) */

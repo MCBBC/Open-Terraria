@@ -95,7 +95,7 @@ describe('八音盒（tile 139）', () => {
       const def = ITEM_DEFS[ITEM_BY_KEY[key]]!;
       expect(def.tile).toBe('v_139_musicboxes');
       expect(def.placeStyle).toBe(s);
-      // 1456 堆叠改制：CommonMaxStack=9999 默认、唱片无逐物品覆盖（曾 .toBe(1) 陈旧）
+      // 1456/1457 同值堆叠改制：CommonMaxStack=9999 默认(1457 Item.cs:85)、唱片无逐物品覆盖（曾 .toBe(1) 陈旧）
       expect(def.maxStack).toBe(9999);
     }
     // 6145 彩虹巨石/6146 静音盒（无素材不在 vanilla.json）单独注册：style 99/100

@@ -32,17 +32,21 @@ interface StubEnemy {
   id: number; x: number; y: number; w: number; h: number; dead: boolean; hp: number;
   onFire3T?: number;
   hurtLog: Array<{ dmg: number; crit: boolean }>;
+  readonly cx: number;
+  readonly cy: number;
+  hurt: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean,
+    pierce?: number, fromPlayer?: boolean) => boolean;
 }
 function mkEnemy(id: number, x: number, y: number, w = 16, h = 16): StubEnemy {
-  const e: StubEnemy = { id, x, y, w, h, dead: false, hp: 10000, hurtLog: [] };
+  const e = { id, x, y, w, h, dead: false, hp: 10000, hurtLog: [] as Array<{ dmg: number; crit: boolean }> } as StubEnemy;
   Object.defineProperties(e, {
     cx: { get: () => e.x + e.w / 2 },
     cy: { get: () => e.y + e.h / 2 },
   });
-  e.hurt = ((d: number, _kx: number, _ky: number, _g: unknown, _pen?: number, crit?: boolean) => {
+  e.hurt = (d: number, _kx: number, _ky: number, _g: unknown, _pen?: number, crit?: boolean) => {
     e.hurtLog.push({ dmg: d, crit: !!crit });
     return false;
-  }) as never;
+  };
   return e;
 }
 

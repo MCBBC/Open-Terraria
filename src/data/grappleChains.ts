@@ -1,6 +1,6 @@
 // 钩爪链分节贴图表 —— Main.cs DrawProjDirect 链段 if-else 链（:28188-29206）1:1 提取。
 //
-// 数据来源（行号 = Terarria1456 反编译源码）：
+// 数据来源（行号 = Terarria1456 反编译源码;链段绘制两版同值,1457 行号整体平移）：
 //  · ChainID.cs（全 17 条）—— TextureAssets.Chains[0..16] 的数组下标含义
 //    （AssetInitializer.cs:876-879 `Images\Chains_N`）；
 //    实际被钩爪消费的槽位 = 0..3（486-489 肌腱/荆棘/荧光/蠕虫）、8..11+12..15

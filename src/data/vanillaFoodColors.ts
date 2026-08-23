@@ -1,4 +1,4 @@
-// 食物/饮料咀嚼粒子色表（tools 手动提取自 1456 ItemID.cs:260-345 FoodParticleColors /
+// 食物/饮料咀嚼粒子色表（tools 手动提取自 ItemID.cs:260-345 FoodParticleColors /【1456/1457 同值段,1457 新物品只追加在段外】
 // :580-620 DrinkParticleColors——ItemID.Sets 每件食物 2-4 色； 乘色已折算取整）。
 // 消费 = Game 食物粒子发射链（Player.cs:43033 ItemCheck_EmitFoodParticles /
 // :43052 ItemCheck_EmitDrinkParticles：itemAnimation 全程 food 50% 掷/drink 每帧，

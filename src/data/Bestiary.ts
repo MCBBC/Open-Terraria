@@ -94,7 +94,7 @@ export function netIdOfCredit(creditId: string): number | undefined {
 }
 
 /** NPC.CountsAsACritter（NPC.cs:6803-6812）——遇数扫描/小动物条目判定。
- *  lifeMax/damage 取 npcStats（1456 SetDefaults 全量含旧 json 缺失的 33 条，
+ *  lifeMax/damage 取 npcStats（1456/1457 同值 SetDefaults 全量——recon-npc CLASS B=0——含旧 json 缺失的 33 条，
  *  如 614 爆炸兔 hp5/dmg0 → 小动物） */
 export function countsAsACritter(npcId: number): boolean {
   if (npcId === 594 || npcId === 686) return false;
@@ -141,7 +141,7 @@ const sightSource = (npcId: number): Source => ({ t: 'sight', credit: bestiaryCr
 const chatSource = (npcId: number): Source => ({ t: 'chat', credit: bestiaryCreditId(npcId) });
 
 /** BestiaryEntry.Enemy :37 的 boss 判定（npc.boss ∨ NPCID.Sets.ShouldBeCountedAsBossForBestiary）：
- *  npc.boss 取 npcStats 表（1456 SetDefaults boss=true 的 22 条：EoC/骷髅王/世吞头/蜂后/
+ *  npc.boss 取 npcStats 表（1456/1457 同值 SetDefaults boss=true 的 22 条：EoC/骷髅王/世吞头/蜂后/
  *  肉山/机械三王/世纪之花/石巨人/双月/邪教徒/史莱姆皇后/光女/火星飞碟核心/火把神/鹿角怪），
  *  Sets 补充 {517,422,507,493,13,664}（四柱/世吞头/火把神）。BossBestiaryInfoElement
  *  挂载（Filters.ByBoss）与 quickUnlock 同源 */

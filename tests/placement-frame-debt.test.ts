@@ -7,8 +7,11 @@
 //   ② CaveHousePass.placeFurniture Place2x2 分支带向：frameX=style*36→frameY=style*num
 //      （Place2x2 cs:51433-51443 `frameX=k*18, frameY=style*num+l*18`，num=36/172=38）
 //      ——现调用面仅 keg(94) style=0 → 新旧写法字节等价（本文件 B 段直证）
-//   ③ TNT 桶 654 电线引爆：定谳=原版【无此链】不改码（Wiring.cs 器件表无 case 654；
-//      Check2x2 case 654→proj 1002 :48771 不可达死码）——本文件 C 段锁"无致动无掉落"
+//   ③ TNT 桶 654：电线不致动定谳=属实不改码（Wiring.cs 器件表无 case 654）;
+//      ★破坏侧勘误（❌1 复核 2026-08-23）：前判"Check2x2 case 654 不可达死码"系漏看
+//      goto——no-op break 组（:86409-86428）闭合后 goto case 132（:86670）→ Check2x2
+//      （:86688）→ 失撑即 NewProjectile(1002,400)（:48771-48772）——C 段锁
+//      "无致动 + 挖/毁=整件清+1002 爆炸+无掉落"
 import { describe, expect, it } from 'vitest';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
@@ -180,13 +183,15 @@ describe('CaveHousePass.placeFurniture Place2x2（cs:51433-51443 frameX=k*18 / f
   });
 });
 
-// ============ C. TNT 桶 654：电线引爆定谳=原版无此链（不改码回归锁） ============
-// Wiring.cs HitWireSingle 器件表（:1012-3229 全 case 清单）无 case 654；唯一 proj 1002
-// 生成点=Check2x2 case 654（WorldGen.cs:48771-48772），而 Check2x2 仅被 TileFrame 三个
-// dispatch 列表（:86402/:86541/:86688）调用、654 在 no-op break 组（:86427）→不可达死码。
-// 被爆炸波及同静默：Projectile.ExplodeTiles（Projectile.cs:75835-75856）逐格 KillTile，
-// 654=no-drop（:66114）+0 尘（:66664）→ 无掉落无爆炸无连锁。
-describe('TNT 桶 654（原版语义：电线无致动 / 破坏无掉落无爆炸）', () => {
+// ============ C. TNT 桶 654：电线不致动（原版无器件 case）+ 挖/毁=整件清+1002 爆炸 ============
+// Wiring.cs HitWireSingle 器件表（:1012-3229 全 case 清单）确无 case 654——电线不致动
+// 语义保留（本段前两测锁负控）。★破坏侧勘误（❌1 复核 2026-08-23）：前判"Check2x2
+// case 654 不可达死码"系漏看 goto——TileFrameImportant no-op break 组（:86409-86428,
+// 654 在 :86427）switch 闭合后 `goto case 132`（:86670）→ 654 仍进 Check2x2（:86688）
+// → 整件失撑/缺件即 Projectile.NewProjectile(1002, 400)（:48771-48772,桶中心
+// num2*16+8/num6*16+8）。挖/毁 TNT 桶=整件清+爆炸;爆炸波及他桶经 breakTile 再触发=
+// 自然殉爆（tntBarrelBlast 队列防重入,等价原版 destroyObject 旗 :48567/:48800）。
+describe('TNT 桶 654（原版语义：电线无致动 / 破坏=无掉落+1002 等效爆炸）', () => {
   it('deviceTable(654) = false（无 case）+ 帧/格不变 + explode 零调用（对照 case 141 炸药才引爆）', () => {
     const { w } = wiringFixture();
     const t = keyOf('v_654_tnt_barrel');
@@ -216,19 +221,52 @@ describe('TNT 桶 654（原版语义：电线无致动 / 破坏无掉落无爆�
     expect(w.st.frameX[w.st.idx(10, 10)]).toBe(0);
   });
 
-  it('破坏对照：654 无样式掉落表（styleDropVidOfFrames=0）+ breakTile 无掉落（KillTile :66114 no-drop）', () => {
+  it('破坏对照：654 无样式掉落表 + breakTile 无掉落但整件清+桶中心 1002 爆炸一次（❌1:cs:48771-48772）', () => {
     expect(styleDropVidOfFrames(654, 0, 0)).toBe(0);
     expect(styleDropVidOfFrames(654, 18, 36)).toBe(0);
     const w = new World(40, 40, 7, 'pfd');
     const drops: Array<{ key: string; n: number }> = [];
     const g = breakShell(w, drops);
+    const blasts: Array<[number, number, number, number, number]> = [];
+    (g as unknown as Record<string, unknown>).explodeAt =
+      (tx: number, ty: number, dmg: number, radius: number, _dt: boolean, _hb: unknown, _pen: unknown, projId: number) => {
+        blasts.push([tx, ty, dmg, radius, projId]);
+      };
+    (g as unknown as Record<string, unknown>).player = { equipStats: {} };   // cs:48764 生成/读档门近似
     const t = keyOf('v_654_tnt_barrel');
     for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
       w.store.setTileSilent(10 + dx, 10 + dy, t, dx * 18, dy * 18);
     }
     g.breakTile(10, 10, false);
-    expect(drops).toEqual([]);                     // 无掉落=无爆炸结算载体（原版静默清除）
+    expect(drops).toEqual([]);                     // 无物品返还（KillTile :66114 no-drop）
     expect(w.store.get(10, 10)).toBe(0);
+    expect(w.store.get(11, 11)).toBe(0);           // 整件清（2×2 锚点算法）
+    // 桶中心 (10*16+8, 10*16+8) 1002 等效爆炸恰一次：基伤 400/ExplodeTiles 半径 10
+    expect(blasts).toEqual([[10, 10, 400, 10, 1002]]);
+  });
+
+  it('殉爆：两桶相邻挖一 → 另桶经爆炸波及 breakTile 入队,本爆结算后再爆（❌1 防重入门=destroyObject 旗等价）', () => {
+    const w = new World(40, 40, 7, 'pfd');
+    const drops: Array<{ key: string; n: number }> = [];
+    const g = breakShell(w, drops);
+    const t = keyOf('v_654_tnt_barrel');
+    const place = (bx: number) => {
+      for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+        w.store.setTileSilent(bx + dx, 10 + dy, t, dx * 18, dy * 18);
+      }
+    };
+    place(10); place(13);
+    const blasts: Array<[number, number]> = [];
+    (g as unknown as Record<string, unknown>).explodeAt = (tx: number, ty: number) => {
+      blasts.push([tx, ty]);
+      // 模拟爆炸波及：炸点右侧 3 格处他桶整件破坏（真实 explodeAt 逐格 breakTile）
+      if (w.store.get(tx + 3, ty) === t) g.breakTile(tx + 3, ty);
+    };
+    (g as unknown as Record<string, unknown>).player = { equipStats: {} };
+    g.breakTile(10, 10, false);
+    // 串行殉爆：本爆 (10,10) 结算中他桶只入队,队首 (13,10) 在本爆后补爆
+    expect(blasts).toEqual([[10, 10], [13, 10]]);
+    expect(w.store.get(13, 10)).toBe(0);
   });
 });
 

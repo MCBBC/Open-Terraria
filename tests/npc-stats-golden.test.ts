@@ -38,7 +38,7 @@ describe('NPC 数值三方对账金标(json × 1456 × 1457)', () => {
   it('③b 锚点值(已知正确值,防解析语义漂移)', () => {
     const g = (id: number, k: string) => (r.results56[id] ?? {})[k];
     expect(g(1, 'lifeMax')).toBe(25);       // 蓝史莱姆
-    expect(g(16, 'lifeMax')).toBe(90);      // 恶魔之眼(1456 终值,1405 旧 60)
+    expect(g(16, 'lifeMax')).toBe(90);      // 恶魔之眼(1456/1457 同值终值,1405 旧 60)
     expect(g(454, 'damage')).toBe(100);     // 幻影龙头
     expect(g(525, 'lifeMax')).toBe(250);    // 邪恶食尸鬼(公共180+case70)
     expect(g(527, 'knockBackResist')).toBeCloseTo(0.4, 6); // 0.6-0.2 浮点

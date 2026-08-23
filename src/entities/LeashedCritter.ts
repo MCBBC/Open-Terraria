@@ -850,7 +850,7 @@ export class LeashedCritterEntity {
     // Update :96-98：Center.ToTileCoordinates16
     const tpx = Math.floor(this.cx) >> 4;
     const tpy = Math.floor(this.cy) >> 4;
-    this.handleFallingWalker(st, tpx, tpy, straying, strayingYOf(p));
+    this.handleFallingWalker(st, tpx, tpy, strayingYOf(p));
     // :100-107
     this.waitTime--;
     if (this.waitTime <= 0) {
@@ -874,7 +874,7 @@ export class LeashedCritterEntity {
   }
 
   /** HandleFalling（★1457 WalkerLeashedCritter.cs:141-175；拉回门 :132 用 Y 分量） */
-  private handleFallingWalker(st: TileStore, tpx: number, tpy: number, straying: number, strayingY: number): void {
+  private handleFallingWalker(st: TileStore, tpx: number, tpy: number, strayingY: number): void {
     if (solidTile2(st, tpx, tpy + 1)) {
       this.vy = 0;
       if (this.state === W_FALLING || this.state === W_RECALLING) {

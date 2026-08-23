@@ -10,14 +10,22 @@
 //  :13453-13550 switch，第 n 个敌 ×falloff^(n-1)）；命中施加 tag（TagEffectState.
 //  TryApplyTagToNPC TagEffectState.cs:87-93 + WhipTagEffect.cs:34-46）并启用 proc
 //  （:13968-14013）。
+// 渲染层（2026-08-23 重做,1457 Main.cs:36656-37670 DrawWhip 族 1:1）：鞭身 =
+// FishingLine 染色线体沿控制点链逐段旋贴（:36756-36768,per-whip 色表 :36675-36748;
+// 1028-1035 flag 末段少画 1 节 :36734-36736;1035 flag2 整条不画 :36726）,鞭尖 =
+// 16 个专署 tip 函数（:36818-37669）竖向帧切片沿控制点排布（WHIP_TIPS 分发表）——
+// 此前误用鞭贴图整条切片近似。光照色一律原色直画（实体层画在全屏光照合成前 =
+// 合成自动乘光,StringLine 渔线段链既有口径）。
 import { Entity } from './Entity';
 import { applyProjStatus, applyMeleeImbue } from './projStatus';
 import { hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
-import { projFrameImg, projFrameCount } from './Arrow';
+import { projSprite } from './Arrow';
 import { MinionProj } from './MinionProj';
 import { Arrow } from './Arrow';
+import { tintedTex } from '../render/StringLine';
+import { prettyStarSparkle } from '../render/Renderer';
 import { ITEM_DEFS } from '../data/items';
 import { combatWeapon } from '../data/vanillaItemCombat';
 import {
@@ -106,6 +114,10 @@ export class WhipProj extends Entity {
   private hitSet = new Set<number>();
   /** 星座星每挥动一次门（case 1034 localAI[0]==0 :14001-14007） */
   private localAI0 = 0;
+  /** localAI[1]（AI_165 :48541-48543：1035 首次更新 1+Main.rand.Next(3)——月主鞭
+   *  尾帧行号,消费点 DrawWhip_MoonLordWhip :37067;其余鞭恒 0。原版在首次 AI 更新
+   *  掷,本仓提前到 ctor——纯视觉帧档,等价） */
+  private lai1: number;
   /** 蛇环补挥标记（补挥不再级联补挥;原版经 withAudioVisualFeedback=false 分支无动画自然不触发） */
   isEcho = false;
   /** proc 启用门（case 913/1031/1032 localAI[0]==0 :13970-13977；847/1033/1035 无门） */
@@ -130,6 +142,7 @@ export class WhipProj extends Entity {
     this.rotation = ang + Math.PI / 2; // :45013
     this.spriteDir = Math.cos(ang) >= 0 ? 1 : -1; // :45018
     this.ai1 = Math.random() * 2 - 1; // ai[1] = Main.rand.NextFloatDirection()
+    this.lai1 = projId === 1035 ? 1 + Math.floor(Math.random() * 3) : 0; // :48541-48543
     this.maxUpdates = (WHIP_EXTRA_UPDATES.has(projId) ? 2 : 1) + 1;
     this.ownerRef = owner;
     // 鞭攻速（SetItemAnimation：summonerWeaponSpeedBonus × whipUseTimeMultiplier 封顶
@@ -414,36 +427,606 @@ export class WhipProj extends Entity {
   draw(r: import('../render/Renderer').Renderer): void {
     const ctx = r.ctx;
     if (!ctx) return;
-    const img = projFrameImg(this.projId, 0);
     // 视觉曲线（带随机相位卷曲 :45653）
     const pts = this.controlPoints(false);
-    const arm = pts[0];
-    if (!img) {
+    const img = projSprite(this.projId);
+    const lineTex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png') ?? null;
+    if (!img && !lineTex) {
+      // 双贴图未就绪（懒加载首帧）→ 折线兜底,下帧自愈
       ctx.strokeStyle = '#D8B060';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(arm.x, arm.y);
+      ctx.moveTo(pts[0].x, pts[0].y);
       for (const p of pts) ctx.lineTo(p.x, p.y);
       ctx.stroke();
       return;
     }
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    // 沿控制点排布贴图段（原版 DrawProj_Whip 以控制点切向切片绘制，此处以
-    // projFrames 帧数对齐切向排布近似）
-    const frames = projFrameCount(this.projId);
-    const segs = frames > 1 ? Math.min(frames, pts.length - 1) : Math.min(pts.length - 1, 10);
-    for (let s = 0; s < segs; s++) {
-      const a = pts[Math.floor((s / segs) * (pts.length - 1))];
-      const b = pts[Math.min(pts.length - 1, Math.floor(((s + 1) / segs) * (pts.length - 1)))];
-      const ang = Math.atan2(b.y - a.y, b.x - a.x);
-      ctx.save();
-      ctx.translate(a.x, a.y);
-      ctx.rotate(ang + Math.PI / 2);
-      if (this.spriteDir < 0) ctx.scale(1, -1);
-      ctx.drawImage(img, -img.width / 2, -img.height / 2);
-      ctx.restore();
+    // ① 鞭身渔线（DrawWhip :36732-36756）
+    if (lineTex) drawWhipLineBody(ctx, lineTex, this.projId, pts);
+    // ② 鞭尖（DrawWhip switch :36759-36815 → WHIP_TIPS 分发表）
+    const tip = WHIP_TIPS[this.projId];
+    if (tip && img) {
+      tip({
+        ctx, tex: img,
+        // GlowMask[358]（DrawWhip_EelWhip :37206-37207 加色辉光,仅电鳗鞭消费）
+        glow: this.projId === 1033 ? r.atlas?.ensureVImage?.('vanilla/Glow_358.png') ?? null : null,
+        pts, n: pts.length - 1, prog: this.progress, dir: this.spriteDir,
+        lai1: this.lai1, hue: whipHueClock(), opacity: 1, // proj.Opacity :542-547 = 1-alpha/255,鞭 alpha 恒 0
+      });
     }
     ctx.restore();
+  }
+}
+
+// ===================== 鞭渲染（1457 Main.cs:36656-37670 DrawWhip 族 1:1） =====================
+// DrawWhip（:36656-36816）两层：
+//  ① 鞭身 = TextureAssets.FishingLine（12×12）染色线体,沿控制点链逐段旋贴
+//    （:36740-36756）：段色 = Lighting.GetColor(段位,per-whip 色表 :36669-36729)——
+//    本仓实体层画在全屏光照合成【前】= 合成自动乘光（StringLine 渔线段链同口径,
+//    逐像素乘光 ≈ 逐段取光）;scale=(1,(段长+2)/12)、origin=(W/2,2)（:36662/
+//    :36746）。flag（1028-1035 :36694-36726）→ num-- 末段少画 1 节（:36734-36736,
+//    鞭尖贴图占位）;flag2（仅 1035 false :36726）→ 整条不画线体;flag3（1034 :36721）
+//    → 免逐段取光（本仓合成乘光近似,登记偏差）。
+//  ② 鞭尖 = 16 个专署 tip 函数（:36818-37669）把 Projectile_*.png 竖向帧切片
+//    （Texture2D.Frame(cols,rows) :36822 后 Height-=2 :36824、origin=Size/2 :36825 等）,
+//    部分档 origin.Y-4/-8）沿控制点排布;段色 = Lighting.GetColor → 本仓 White 直画。
+//  【累计位形等价】SlimeWhip/MeteorWhip/MoonLordWhip/EelWhip/BoneWhip/CoolWhip/
+//  FireWhip/RainbowWhip/ThornWhip/WhipSword 的 vector2 从 controlPoints[0] 起每段
+//  累加段矢量（:36826/:36861 等）——累计和 ≡ controlPoints[i],统一按 pts[i] 取位。
+//  【预乘混合】XNA AlphaBlend = 预乘（One/InvSrcAlpha）：画色 C 实效 =
+//  tex.rgb×C.rgb + 背景×(1−C.A) —— A=0 纯加色（'lighter'+摊平染色）、A≥255 纯替换
+//  （保形染色 source-over）、中间档两笔（StringLine.drawSegment 同款三档）。
+
+type Tex = ImageBitmap | HTMLImageElement;
+type RGBA = readonly [number, number, number, number];
+/** 不透明白（各 tip 的 Lighting.GetColor 档——本仓合成乘光,原色直画） */
+const TIP_WHITE: RGBA = [255, 255, 255, 255];
+const scalarLerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+
+/** miscCounterNormalized 等价（Player.cs:3373 = miscCounter/300;miscCounter 每
+ *  tick +1、wrap 300 :29529-29531 → 5s 一循环;performance.now 秒/5 同率同域）。
+ *  消费点 = DrawWhip_RainbowWhip :37361（晨星鞭彩虹相） */
+function whipHueClock(): number {
+  return typeof performance !== 'undefined' ? (performance.now() / 5000) % 1 : 0;
+}
+
+/** Main.hslToRgb（:48689-48728,hue2rgb :48730-48748）——Math.Round 后 (byte) */
+function hue2rgb(c: number, t1: number, t2: number): number {
+  if (c < 0) c++;
+  if (c > 1) c--;
+  if (6 * c < 1) return t1 + (t2 - t1) * 6 * c;
+  if (2 * c < 1) return t2;
+  if (3 * c < 2) return t1 + (t2 - t1) * (2 / 3 - c) * 6;
+  return t1;
+}
+function hslToRgb255(h: number, s: number, l: number, a: number): RGBA {
+  let r: number, g: number, b: number;
+  if (s === 0) { r = g = b = Math.round(l * 255); }
+  else {
+    const t2 = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const t1 = 2 * l - t2;
+    r = Math.round(hue2rgb(h + 1 / 3, t1, t2) * 255);
+    g = Math.round(hue2rgb(h, t1, t2) * 255);
+    b = Math.round(hue2rgb(h - 1 / 3, t1, t2) * 255);
+  }
+  return [(r & 0xff), (g & 0xff), (b & 0xff), (a & 0xff)];
+}
+
+/** 1034 线色 = hslToRgb(0.6,1,0.5,20)×0.6（:36720,XNA Color*float 截断）
+ *  = (0,102,255,20)×0.6 → (0,61,153,12)——A=12 中间档（近纯加色） */
+const WHIP_1034_LINE: RGBA = (() => {
+  const c = hslToRgb255(0.6, 1, 0.5, 20);
+  const t = (v: number) => Math.trunc(v * 0.6) & 0xff;
+  return [t(c[0]), t(c[1]), t(c[2]), t(c[3])];
+})();
+
+/** 鞭身线色表（DrawWhip switch :36669-36729;表外 = 缺省 White :36663） */
+export const WHIP_LINE_COLORS: Record<number, RGBA> = {
+  847: [255, 69, 0, 255],      // OrangeRed :36669-36670
+  849: [0, 0, 0, 255],         // SlateBlue→Black（:36672-36674 死赋值,落终态 Black）
+  848: [0, 0, 139, 255],       // DarkBlue :36676-36677
+  912: [173, 216, 230, 255],   // LightBlue :36679-36680
+  913: [178, 34, 34, 255],     // Firebrick :36682-36683
+  914: [34, 139, 34, 255],     // ForestGreen :36685-36686
+  915: [255, 255, 255, 255],   // White :36688-36689
+  952: [210, 180, 140, 255],   // Tan :36691-36692
+  1028: [128, 128, 128, 255],  // Gray :36694-36696
+  1029: [128, 0, 128, 255],    // Purple :36698-36700
+  1030: [255, 0, 0, 255],      // Red :36702-36704
+  1031: [88, 85, 155, 255],    // new Color(88,85,155) :36706-36708
+  1032: [143, 215, 29, 255],   // new Color(143,215,29) :36710-36712
+  1033: [0, 0, 255, 255],      // Blue :36714-36716
+  1034: WHIP_1034_LINE,        // hslToRgb(0.6,1,0.5,20)×0.6 :36718-36721
+  1035: [0, 255, 0, 255],      // Lime :36723-36725
+  1104: [78, 136, 255, 255],   // new Color(78,136,255) :36728-36729（画时再 ×0.5 :36751-36753）
+};
+
+/** flag（:36694-36726 置位的 1028-1035）→ 鞭身末段少画 1 节（:36734-36736） */
+const WHIP_TAIL_SHORT = new Set([1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035]);
+
+/** 鞭身线体段数（:36732-36740）：num = list.Count-1（= segments）,flag 再 -1;
+ *  1035 flag2=false 整条不画（:36726/:36738）。测试/调试用纯函数 */
+export function whipLineSegmentCount(projId: number, segments: number): number {
+  if (projId === 1035) return 0;
+  return WHIP_TAIL_SHORT.has(projId) ? segments - 1 : segments;
+}
+
+/** 预乘三档染色帧绘制（XNA spriteBatch.Draw 等价;StringLine.drawSegment 同款语义
+ *  泛化到任意源/宿矩形+翻转）：pos=落点、ang=旋转、origin=(ox,oy) 贴图内锚点、
+ *  sc=(sx,sy) 缩放。白 A=255 免染色直画（node 测试无 canvas 也走此档）。 */
+function drawWhipFrame(
+  ctx: CanvasRenderingContext2D, tex: Tex,
+  sx: number, sy: number, sw: number, sh: number,
+  px: number, py: number, ang: number,
+  ox: number, oy: number, scx: number, scy: number,
+  color: RGBA, flip = false,
+): void {
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(ang);
+  if (flip) ctx.scale(-1, 1);   // XNA FlipHorizontally（origin 恒水平中点,翻转等价）
+  ctx.imageSmoothingEnabled = false;
+  const dx = -ox * scx, dy = -oy * scy;
+  const dw = sw * scx, dh = sh * scy;
+  const [r, g, b, a] = color;
+  if (r === 255 && g === 255 && b === 255 && a === 255) {
+    ctx.drawImage(tex, sx, sy, sw, sh, dx, dy, dw, dh);
+  } else if (a === 0) {
+    // 纯加色：摊平染色 + 'lighter'（A=0 预乘 = 背景零衰减）
+    const t = tintedTex(tex, [r, g, b], true);
+    if (t) { ctx.globalCompositeOperation = 'lighter'; ctx.drawImage(t, sx, sy, sw, sh, dx, dy, dw, dh); }
+  } else if (a >= 255) {
+    // 纯替换：保形染色 source-over
+    const t = tintedTex(tex, [r, g, b], false);
+    if (t) ctx.drawImage(t, sx, sy, sw, sh, dx, dy, dw, dh);
+  } else {
+    // 中间档两笔：黑形压暗背景(×(1−A/255)) + 摊平染色 'lighter' 补贡献
+    const black = tintedTex(tex, [0, 0, 0], false);
+    const t = tintedTex(tex, [r, g, b], true);
+    if (black && t) {
+      ctx.globalAlpha = a / 255;
+      ctx.drawImage(black, sx, sy, sw, sh, dx, dy, dw, dh);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(t, sx, sy, sw, sh, dx, dy, dw, dh);
+    }
+  }
+  ctx.restore();
+}
+
+/** 竖向帧切片（Texture2D.Frame(cols,rows)[row] 再 Height-=2,各 DrawWhip_* 同款：
+ *  :36822-36825/:36869-36872/:37356-37359 等;MoonLordWhip :37058-37060 为 4×7） */
+function whipFrameRect(tex: Tex, cols: number, rows: number, row: number): {
+  sx: number; sy: number; sw: number; sh: number;
+} {
+  const fw = tex.width / cols, fh = tex.height / rows;
+  return { sx: 0, sy: row * fh, sw: fw, sh: fh - 2 };
+}
+
+/** DrawWhip_* 共享上下文（proj 字段 + 视觉控制点） */
+export interface WhipTipCtx {
+  ctx: CanvasRenderingContext2D;
+  /** TextureAssets.Projectile[proj.type]（各 tip 的帧切片源） */
+  tex: Tex;
+  /** TextureAssets.GlowMask[358]（仅 DrawWhip_EelWhip :37206-37207 加色辉光） */
+  glow: Tex | null;
+  /** FillWhipControlPoints 视觉曲线（:36658） */
+  pts: V2[];
+  /** controlPoints.Count - 1（各函数 num3/num4 = 段数） */
+  n: number;
+  /** GetWhipAnimationPercent（:45763-45768）= ai[0]/timeToFlyOut */
+  prog: number;
+  /** spriteDirection（:45018） */
+  dir: number;
+  /** localAI[1]（1035 尾帧行,AI_165 :48541-48543） */
+  lai1: number;
+  /** miscCounterNormalized（Player.cs:3373;DrawWhip_RainbowWhip :37361） */
+  hue: number;
+  /** proj.Opacity（Projectile.cs:542-547 = 1-alpha/255,鞭恒 1） */
+  opacity: number;
+}
+
+/** 段绘制共用（各 tip 循环体同构）：第 i 段 = pts[i]→pts[i+1] 切向,帧 row
+ *  （竖向 rows 行、cols 列）,oyShift = origin.Y 偏移（-4/-8 档）,sc=(sx,sy)。 */
+function whipSeg(
+  c: WhipTipCtx, i: number, rows: number, cols: number, row: number,
+  oyShift: number, sx: number, sy: number, flip: boolean, color: RGBA = TIP_WHITE,
+): void {
+  const a = c.pts[i], b = c.pts[i + 1];
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const fr = whipFrameRect(c.tex, cols, rows, row);
+  drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh,
+    a.x, a.y, Math.atan2(dy, dx) - Math.PI / 2,
+    fr.sw / 2, fr.sh / 2 - oyShift, sx, sy, color, flip);
+}
+
+/** Utils.GetLerpValue(from,to,t,clamped:true)（Utils.cs:315-334,含 from>to 反向档） */
+function getLerpValue(from: number, to: number, t: number): number {
+  if (from < to) { if (t < from) return 0; if (t > to) return 1; }
+  else { if (t < to) return 1; if (t > from) return 0; }
+  return (t - from) / (to - from);
+}
+
+/** 挥动包络（:37541-37542/:37601-37602/:37661-37662 同式）：
+ *  GetLerpValue(0.1,0.7,t)×GetLerpValue(0.9,0.7,t) —— 伸展期升、0.7 峰值、收回期降 */
+function whipSwingEnvelope(t: number): number {
+  return getLerpValue(0.1, 0.7, t) * getLerpValue(0.9, 0.7, t);
+}
+
+/** Utils.MultiLerp(percent,0,1,0)（Utils.cs:279-290）——电鳗鞭 i==1 段 X 抖动包络
+ *  （:37183） */
+function multiLerp010(p: number): number {
+  const f = [0, 1, 0];
+  const step = 1 / (f.length - 1);
+  let acc = step, idx = 0;
+  while (p / acc > 1 && idx < f.length - 2) { acc += step; idx++; }
+  return f[idx] + (f[idx + 1] - f[idx]) * ((p - step * idx) / step);
+}
+
+// -------------------- 16 个专署鞭尖函数（:36818-37669 全量 1:1） --------------------
+
+/** DrawWhip_WhipSword（:37446-37495,847 剑鞭）：帧档 switch :37458-37482——
+ *  {0}→0(Y-4)/{3,5,7}→1/{9,11,13}→2/{15,17}→3/{19}→4,其余跳笔（:37480-37482）;
+ *  scale 1、无翻转 */
+function whipTipSword(c: WhipTipCtx): V2 {
+  for (let i = 0; i < c.n; i++) {
+    let row = -1, oy = 0;
+    if (i === 0) { oy = 4; row = 0; }
+    else if (i === 3 || i === 5 || i === 7) row = 1;        // switch :37458-37482
+    else if (i === 9 || i === 11 || i === 13) row = 2;
+    else if (i === 15 || i === 17) row = 3;
+    else if (i === 19) row = 4;
+    if (row < 0) continue;                                   // default flag=false :37480-37482
+    whipSeg(c, i, 5, 1, row, oy, 1, 1, false);
+  }
+  return c.pts[c.n - 1];
+}
+
+/** DrawWhip_WhipBland（:37617-37669,841 皮鞭）：每段都画,行 = 1/2/3 按 i>10/i>20
+ *  分档（:37643-37652）,尾段 row4 + scale=lerp(0.5,1.5,包络)（:37654-37662——
+ *  先赋 1.3 再被覆写,净效果只余 lerp）;spriteDirection==1 水平翻转 */
+function whipTipBland(c: WhipTipCtx): V2 {
+  const flip = c.dir === 1;                                  // :37619-37622
+  for (let i = 0; i < c.n; i++) {
+    let row = 0, oy = 0, sc = 1;
+    if (i === 0) oy = 4;                                     // :37637
+    else row = i > 20 ? 3 : i > 10 ? 2 : 1;                  // :37643-37652
+    if (i === c.n - 1) {                                     // i == Count-2 :37654-37662
+      row = 4;
+      sc = scalarLerp(0.5, 1.5, whipSwingEnvelope(c.prog));
+    }
+    whipSeg(c, i, 5, 1, row, oy, sc, sc, flip);              // float scale → 双轴
+  }
+  return c.pts[c.n - 1];
+}
+
+/** DrawWhip_WhipMace（:37497-37555,848 晨星鞭）：偶数段画（i%2==0,行 1/2/3 按
+ *  i>10/i>20 分档 :37520-37532）,尾段 row4 + scale=lerp(0.5,2,包络)（:37534-37542） */
+function whipTipMace(c: WhipTipCtx): V2 {
+  const flip = c.dir === 1;                                  // :37499-37502
+  for (let i = 0; i < c.n; i++) {
+    let draw = false, row = 0, oy = 0, sc = 1;
+    if (i === 0) { oy = 4; draw = true; }                    // :37517-37518
+    else if (i % 2 === 0) { draw = true; row = i > 20 ? 3 : i > 10 ? 2 : 1; }
+    if (i === c.n - 1) {                                     // i == Count-2 :37534-37542
+      draw = true; row = 4;
+      sc = scalarLerp(0.5, 2, whipSwingEnvelope(c.prog));
+    }
+    if (!draw) continue;
+    whipSeg(c, i, 5, 1, row, oy, sc, sc, flip);              // float scale → 双轴
+  }
+  return c.pts[c.n - 1];
+}
+
+/** DrawWhip_WhipScythe（:37557-37615,849 黑收成）：与 Mace 全同,尾段 scale 改
+ *  lerp(0.5,1.5,包络)（:37594-37602） */
+function whipTipScythe(c: WhipTipCtx): V2 {
+  const flip = c.dir === 1;                                  // :37559-37562
+  for (let i = 0; i < c.n; i++) {
+    let draw = false, row = 0, oy = 0, sc = 1;
+    if (i === 0) { oy = 4; draw = true; }
+    else if (i % 2 === 0) { draw = true; row = i > 20 ? 3 : i > 10 ? 2 : 1; }
+    if (i === c.n - 1) {                                     // i == Count-2 :37594-37602
+      draw = true; row = 4;
+      sc = scalarLerp(0.5, 1.5, whipSwingEnvelope(c.prog));
+    }
+    if (!draw) continue;
+    whipSeg(c, i, 5, 1, row, oy, sc, sc, flip);              // float scale → 双轴
+  }
+  return c.pts[c.n - 1];
+}
+
+/** DrawWhip_CoolWhip（:37251-37300,912 酷鞭）≡ DrawWhip_FireWhip（:37302-37351,
+ *  913 火鞭）——帧表/色/缩放逐行相同,同体共享。帧档 {0}→0(Y-4)/{3,5,7}→1/
+ *  {9,11,13}→2/{15,17}→3/{19}→4,其余跳笔;色 = GetAlpha(Lighting)（alpha=0 → 原色） */
+function whipTipCoolWhip(c: WhipTipCtx): V2 {
+  for (let i = 0; i < c.n; i++) {
+    let row = -1, oy = 0;
+    if (i === 0) { oy = 4; row = 0; }
+    else if (i === 3 || i === 5 || i === 7) row = 1;        // switch :37263-37286
+    else if (i === 9 || i === 11 || i === 13) row = 2;
+    else if (i === 15 || i === 17) row = 3;
+    else if (i === 19) row = 4;
+    if (row < 0) continue;
+    whipSeg(c, i, 5, 1, row, oy, 1, 1, false);
+  }
+  return c.pts[c.n - 1];
+}
+
+/** DrawWhip_ThornWhip（:37406-37444,914 荆棘鞭）：每段都画,尾段 row4 scale1.1、
+ *  其余 row=1+i%3 scale0.8（switch :37419-37430） */
+function whipTipThorn(c: WhipTipCtx): V2 {
+  for (let i = 0; i < c.n; i++) {
+    let row = 0, oy = 0, sc = 1;
+    if (i === 0) oy = 4;
+    else if (i === 19) { row = 4; sc = 1.1; }
+    else { row = 1 + (i % 3); sc = 0.8; }
+    whipSeg(c, i, 5, 1, row, oy, sc, sc, false);            // float scale → 双轴 :37433
+  }
+  return c.pts[c.n - 1];
+}
+
+/** DrawWhip_RainbowWhip（:37353-37404,915 晨星）：彩虹相 hue=(miscCounterNorm×5+
+ *  i×0.05)%1（:37383）;i==0(Y-4)/i==39(row4) 恒画,其余 i%2==0 才画（:37369-37377）。
+ *  三笔：①Lerp(光色,彩虹色×A127×lerpValue,0.5)（:37391） ②彩虹×0.1 加色 ×1.2
+ *  （:37392-37393） ③i==39 彩虹×0.3(A127) ×1.4（:37396-37398） */
+function whipTipRainbow(c: WhipTipCtx): V2 {
+  for (let i = 0; i < c.n; i++) {
+    let draw = true, row = 0, oy = 0;
+    if (i === 0) { oy = 4; row = 0; }
+    else if (i === 39) row = 4;
+    else { draw = i % 2 === 0; row = 1 + (i % 3); }           // :37371-37376
+    if (!draw) continue;
+    const hue = (((c.hue * 5 + i * 0.05) % 1) + 1) % 1;      // :37383
+    const col = hslToRgb255(hue, 1, 0.5, 255);
+    const lv = getLerpValue(c.n - 10, c.n - 2, i);            // :37385
+    const a1 = Math.trunc(127 * lv) & 0xff;                   // A/=2 再 ×lv（:37387-37388）
+    const a = c.pts[i], b = c.pts[i + 1];
+    const ang = Math.atan2(b.y - a.y, b.x - a.x) - Math.PI / 2;
+    const fr = whipFrameRect(c.tex, 1, 5, row);
+    const ox = fr.sw / 2, oy2 = fr.sh / 2 - oy;
+    // ①Lerp(Lighting, color2, 0.5)（:37391）——光色本仓取 White（合成乘光）
+    const c1: RGBA = [
+      Math.trunc(255 + (col[0] - 255) * 0.5) & 0xff,
+      Math.trunc(255 + (col[1] - 255) * 0.5) & 0xff,
+      Math.trunc(255 + (col[2] - 255) * 0.5) & 0xff, a1,
+    ];
+    drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1, 1, c1);
+    // ②color2.A=0 → ×0.1,scale ×1.2（:37392-37393,加色）
+    drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1.2, 1.2,
+      [Math.trunc(col[0] * 0.1) & 0xff, Math.trunc(col[1] * 0.1) & 0xff, Math.trunc(col[2] * 0.1) & 0xff, 0]);
+    if (i === 39) {
+      // ③color2=color,A=127 → ×0.3,scale ×1.4（:37396-37398）
+      drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh, a.x, a.y, ang, ox, oy2, 1.4, 1.4,
+        [Math.trunc(col[0] * 0.3) & 0xff, Math.trunc(col[1] * 0.3) & 0xff, Math.trunc(col[2] * 0.3) & 0xff, 127]);
+    }
+  }
+  return c.pts[c.n - 1];
+}
+
+/** DrawWhip_BoneWhip（:37214-37249,952 骨鞭）：每段都画,i==0(Y-4)/i==19(row4)/
+ *  其余 row=1+i%3（switch :37226-37236） */
+function whipTipBone(c: WhipTipCtx): V2 {
+  for (let i = 0; i < c.n; i++) {
+    let row = 0, oy = 0;
+    if (i === 0) oy = 4;
+    else if (i === 19) row = 4;
+    else row = 1 + (i % 3);
+    whipSeg(c, i, 5, 1, row, oy, 1, 1, false);
+  }
+  return c.pts[c.n - 1];
+}
+
+/** DrawWhip_SlimeWhip（:36818-36864,1104 史莱姆鞭）：i==0(row0 :36836)/尾段
+ *  (row4 :36840)/其中 row=round(lerp(1,3,(i-1)/(n-2)))（:36845-36846）且仅 i%3==0
+ *  画（:36847）;色 = Lighting×0.5 → White×0.5 = (127,127,127,127) 截断（:36858） */
+function whipTipSlime(c: WhipTipCtx): V2 {
+  for (let i = 0; i < c.n; i++) {
+    let row: number, draw = true;
+    if (i === 0) row = 0;
+    else if (i === c.n - 1) row = 4;                            // i == num4-1 :36840
+    else {
+      row = Math.round(scalarLerp(1, 3, (i - 1) / (c.n - 2)));  // num3 = max(1, num-2) = 3 :36828
+      if (i % 3 !== 0) draw = false;                            // :36847-36849
+    }
+    if (!draw) continue;
+    whipSeg(c, i, 5, 1, row, 0, 1, 1, false, [127, 127, 127, 127]);
+  }
+  return c.pts[c.n];   // 累计位形走完 = 末控制点（:36863）
+}
+
+/** DrawWhip_GenericWhip（:36866-36921,1028 麻线鞭 seg6 w1 / 1029 恶魔鞭 1030 血鞭
+ *  seg6 w0.5）：跳 i==1（:36882）,i==0(Y-4 :36893-36895)/尾段(row=segmentCount-1
+ *  :36897-36899)/其余 row=1+num4%(segmentCount-2)（:36903-36904）;
+ *  sx=Remap(num4,5,n×0.75,startW,endW)（:36912-36915,num4==0 → 1） */
+function whipTipGeneric(c: WhipTipCtx, segmentCount: number, startWidth: number, endWidth: number): V2 {
+  const num2 = Math.max(1, segmentCount - 1);                 // :36874
+  const num3 = c.n;                                            // controlPoints.Count-1 :36875
+  for (let i = 0; i < num3; i++) {
+    if (i === 1) continue;                                      // :36882
+    let row: number, oy = 0;
+    if (i === 0) { oy = 4; row = 0; }                           // :36893-36895
+    else if (i === num3 - 1) row = segmentCount - 1;           // :36897-36899
+    else row = 1 + (i % (num2 - 1));                           // num5 = num4 % (num2-num) :36903-36904
+    let sx = remap(i, 5, num3 * 0.75, startWidth, endWidth);   // :36912
+    if (i === 0) sx = 1;                                        // :36913-36915
+    whipSeg(c, i, segmentCount, 1, row, oy, sx, 1, false);
+  }
+  return c.pts[num3 - 1];
+}
+
+/** DrawWhip_FlowerWhip（:36923-36980,1032 花鞭 seg5 w0.5）：同 GenericWhip,但
+ *  中段仅 i%2==0 画（:36962）,尾段 origin.Y-8（:36951-36954） */
+function whipTipFlower(c: WhipTipCtx, segmentCount: number, startWidth: number, endWidth: number): V2 {
+  const num2 = Math.max(1, segmentCount - 1);                 // :36931
+  const num3 = c.n;                                              // :36932
+  for (let i = 0; i < num3; i++) {
+    let row: number, oy = 0;
+    if (i === 0) { oy = 4; row = 0; }                           // :36947-36949
+    else if (i === num3 - 1) { row = segmentCount - 1; oy = 8; } // :36951-36954
+    else {
+      row = 1 + (i % (num2 - 1));                               // :36958-36959
+      if (i % 2 !== 0) continue;                                // :36962
+    }
+    let sx = remap(i, 5, num3 * 0.75, startWidth, endWidth);   // :36971
+    if (i === 0) sx = 1;                                        // :36972-36974
+    whipSeg(c, i, segmentCount, 1, row, oy, sx, 1, false);
+  }
+  return c.pts[num3 - 1];
+}
+
+/** DrawWhip_Constellation（:36982-37054,1034 星座鞭 seg6）：GenericWhip 同构 + 星芒
+ *  ——跳 i==1（:37000）;i==0(Y-4,fatness0 :37012-37015)/尾段(row5,fatness×2
+ *  :37017-37020);中段色 (255,255,255,50) 且 sx×0.5（:37040-37043）;
+ *  fatness×=1+i×0.03（:37033）;(i+1)%3==0 → DrawPrettyStarSparkle（:37047-37049,
+ *  shine=hsl(0.6,1,0.5) :37034、draw=White×0.5、flare=挥动进度 :36992、rot=π/2、
+ *  scale=(Remap(p,0,1,2,0),Remap(p,0,1,4,0))） */
+function whipTipConstellation(c: WhipTipCtx, segmentCount: number): V2 {
+  const num2 = Math.max(1, segmentCount - 1);                 // :36990
+  const num4 = c.n;                                              // :36993
+  for (let i = 0; i < num4; i++) {
+    if (i === 1) continue;                                      // :37000
+    let fat = 1;                                                // fatness = Vector2.One :37002
+    let row: number, oy = 0;
+    if (i === 0) { oy = 4; row = 0; fat = 0; }                 // :37012-37015
+    else if (i === num4 - 1) { row = segmentCount - 1; fat = 2; } // :37017-37020
+    else row = 1 + (i % (num2 - 1));                           // num6 = num5 % (num2-num) :37024-37025
+    let sx = remap(i, 5, num4 * 0.75, 1, 1);                   // :37035
+    if (i === 0) sx = 1;                                        // :37036-37038
+    fat *= 1 + i * 0.03;                                        // :37033
+    let color: RGBA = TIP_WHITE;
+    if (i !== 0 && i !== num4 - 1) { color = [255, 255, 255, 50]; sx *= 0.5; } // :37040-37043
+    whipSeg(c, i, segmentCount, 1, row, oy, sx, 1, false, color);
+    if ((i + 1) % 3 === 0) {                                    // :37047
+      const p = c.pts[i];
+      const shine = hslToRgb255(0.6, 1, 0.5, 255);              // hslToRgb(0.6,1,0.5) = (0,102,255)
+      prettyStarSparkle(c.ctx, c.opacity, p.x, p.y,
+        [255, 255, 255], [shine[0], shine[1], shine[2]],
+        c.prog, 0, 0.5, 0.5, 1, Math.PI / 2,
+        [remap(c.prog, 0, 1, 2, 0), remap(c.prog, 0, 1, 4, 0)], [fat, fat],
+        0.5, 1);                                                // drawColor=White×0.5 → drawDim 0.5
+    }
+  }
+  return c.pts[num4 - 1];
+}
+
+/** DrawWhip_MoonLordWhip（:37056-37106,1035 月主鞭）：Frame(4,7)（:37060）列 0、
+ *  scale (1,1.25)（:37091）,尾帧行 = 4+(localAI[1]-1)（:37067,lai1∈1..3 → row4..6）;
+ *  i==0(Y-4 :37075)/尾段（:37079）/其余 row=1+i%3（:37083）。1457 的尾彩
+ *  rectangle2/color2（:37093-37098）算后未画 = 死代码,不录（1456 曾有第二笔彩虹
+ *  描,1457 终态已删）;子鞭 flag=ai[2]>=10（:37068）在 1457 无视觉差 */
+function whipTipMoonLord(c: WhipTipCtx): V2 {
+  const tailRow = 4 + (c.lai1 - 1);                            // :37067
+  for (let i = 0; i < c.n; i++) {
+    let row: number, oy = 0;
+    if (i === 0) { oy = 4; row = 0; }
+    else if (i === c.n - 1) row = tailRow;                      // i == num4-1 :37079
+    else row = 1 + (i % 3);                                     // num5 = i % (num2-num) = i%3 :37083
+    whipSeg(c, i, 7, 4, row, oy, 1, 1.25, false);
+  }
+  return c.pts[c.n];
+}
+
+/** DrawWhip_MeteorWhip（:37108-37153,1031 星陨鞭 seg6）：i==0(row0)/尾段(row5)/
+ *  其余 row=round(lerp(1,4,(i-1)/(n-2)))（:37135-37136）且仅 i%3==0 画（:37137）;
+ *  色 = 恒 White 不取光（:37147,本仓同直画） */
+function whipTipMeteor(c: WhipTipCtx): V2 {
+  for (let i = 0; i < c.n; i++) {
+    let row: number, draw = true;
+    if (i === 0) row = 0;
+    else if (i === c.n - 1) row = 5;                            // i == num4-1 :37130
+    else {
+      row = Math.round(scalarLerp(1, 4, (i - 1) / (c.n - 2)));  // num3 = max(1, num-2) = 4 :37118
+      if (i % 3 !== 0) draw = false;                            // :37137-37139
+    }
+    if (!draw) continue;
+    whipSeg(c, i, 6, 1, row, 0, 1, 1, false, TIP_WHITE);
+  }
+  return c.pts[c.n];
+}
+
+/** DrawWhip_EelWhip（:37155-37212,1033 电鳗鞭 seg5）：i==0 跳笔（:37178-37179）;
+ *  i==1(row0,X 抖动 = -6×MultiLerp(prog,0,1,0) 随段角旋转 :37181-37183);尾段
+ *  row4（:37189）;其余 row 按 i<25/i<35 分 1/2/3（:37192-37193）;
+ *  sx=Remap(i,2,n-5,0.5,1)（:37203）;本体（:37205）+ GlowMask[358] 同矩形加色辉光
+ *  （:37206-37207,A=0 纯加色）;dir==1 水平翻转（:37158-37161） */
+function whipTipEel(c: WhipTipCtx): V2 {
+  const flip = c.dir === 1;                                     // :37158-37161
+  for (let i = 0; i < c.n; i++) {
+    let draw = true, row = 0, spX = 0;
+    if (i === 0) draw = false;                                  // :37178-37179
+    else if (i === 1) { row = 0; spX = -6 * multiLerp010(c.prog); } // :37181-37183
+    else if (i === c.n - 1) row = 4;                            // i == num2-1 :37189
+    else row = i < 25 ? 1 : i < 35 ? 2 : 3;                     // :37192-37193
+    if (!draw) continue;
+    const a = c.pts[i], b = c.pts[i + 1];
+    const ang = Math.atan2(b.y - a.y, b.x - a.x);               // num4 原始角（未 -π/2）
+    const px = a.x + Math.cos(ang) * spX, py = a.y + Math.sin(ang) * spX; // spinningpoint.RotatedBy :37205
+    const fr = whipFrameRect(c.tex, 1, 5, row);
+    const sx = remap(i, 2, c.n - 5, 0.5, 1);                    // :37203 ×proj.scale(=1)
+    drawWhipFrame(c.ctx, c.tex, fr.sx, fr.sy, fr.sw, fr.sh,
+      px, py, ang - Math.PI / 2, fr.sw / 2, fr.sh / 2, sx, 1, TIP_WHITE, flip);
+    if (c.glow) {
+      drawWhipFrame(c.ctx, c.glow, fr.sx, fr.sy, fr.sw, fr.sh,
+        px, py, ang - Math.PI / 2, fr.sw / 2, fr.sh / 2, sx, 1, [255, 255, 255, 0], flip);
+    }
+  }
+  return c.pts[c.n];
+}
+
+/** GenericWhip 1029/1030 共用包装（原版两 case 同函数同参 :36791-36795） */
+const whipTipGeneric6Half = (c: WhipTipCtx): V2 => whipTipGeneric(c, 6, 0.5, 0.5);
+
+/** 鞭尖分发表（DrawWhip switch :36759-36815 全 18 条 → 16 个专署函数;
+ *  913≡912 同体、1029/1030 同体） */
+export const WHIP_TIPS: Record<number, (c: WhipTipCtx) => V2> = {
+  847: whipTipSword,                                          // case :36761-36762
+  841: whipTipBland,                                          // case :36764-36765
+  848: whipTipMace,                                           // case :36767-36768
+  849: whipTipScythe,                                         // case :36770-36771
+  912: whipTipCoolWhip,                                       // case :36773-36774
+  913: whipTipCoolWhip,                                       // case :36776-36777（FireWhip 全同体）
+  914: whipTipThorn,                                          // case :36779-36780
+  915: whipTipRainbow,                                        // case :36782-36783
+  952: whipTipBone,                                           // case :36785-36786
+  1028: (c) => whipTipGeneric(c, 6, 1, 1),                    // case :36788-36789
+  1029: whipTipGeneric6Half,                                  // case :36791-36792
+  1030: whipTipGeneric6Half,                                  // case :36794-36795
+  1031: whipTipMeteor,                                        // case :36797-36798
+  1032: (c) => whipTipFlower(c, 5, 0.5, 0.5),                 // case :36800-36801
+  1033: whipTipEel,                                           // case :36803-36804
+  1034: (c) => whipTipConstellation(c, 6),                    // case :36806-36807
+  1035: whipTipMoonLord,                                      // case :36809-36810
+  1104: whipTipSlime,                                         // case :36812-36813
+};
+
+/** 鞭身渔线体（DrawWhip :36732-36756）：FishingLine 染色线体沿控制点链逐段旋贴——
+ *  scale=(1,(段长+2)/12)、origin=(W/2,2)（:36662-36663/:36743）;段数见
+ *  whipLineSegmentCount（flag 末段少 1 节/1035 整条不画）;1034 flag3 免取光、
+ *  1104 色 ×0.5（:36750-36752）——色表落终态后直画 */
+function drawWhipLineBody(
+  ctx: CanvasRenderingContext2D, tex: Tex, projId: number, pts: V2[],
+): void {
+  if (projId === 1035) return;                                  // flag2=false :36726/:36738
+  const color0 = WHIP_LINE_COLORS[projId] ?? TIP_WHITE;         // 缺省 White :36668
+  let color = color0;
+  if (projId === 1104) {                                        // :36751-36753 color2 ×= 0.5f
+    color = [
+      Math.trunc(color0[0] * 0.5) & 0xff, Math.trunc(color0[1] * 0.5) & 0xff,
+      Math.trunc(color0[2] * 0.5) & 0xff, Math.trunc(color0[3] * 0.5) & 0xff,
+    ];
+  }
+  // 1034 flag3（:36721/:36747-36749）= 免逐段取光——本仓光照由合成统一乘,无分支
+  const num = whipLineSegmentCount(projId, pts.length - 1);     // :36733-36736
+  for (let i = 0; i < num; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    // value2 = value.Frame() 整图（:36661,无 Height-=2——与鞭尖帧切片不同档）
+    drawWhipFrame(ctx, tex, 0, 0, tex.width, tex.height,
+      a.x, a.y, Math.atan2(dy, dx) - Math.PI / 2,
+      tex.width / 2, 2, 1, (len + 2) / tex.height, color);      // origin(W/2,2)/scale(:36662/:36746)
   }
 }

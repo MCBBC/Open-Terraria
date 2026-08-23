@@ -600,7 +600,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 92: // 路灯柱 1×6 frameX ±18(:1483-1494)
       flipBlock(w, x, y, 1, 6, 'x', 18, 18);
       return true;
-    case 93: // 蒂基火炬 1×3 frameX ±18(:1228-1243)
+    case 93: // 灯族 ToggleLamp 1×3 frameX ±18（Wiring.cs:1687-1688→:2954-2975;⚠️5 勘误:前注"蒂基火炬"误名）
       flipBlock(w, x, y, 1, 3, 'x', 18, 18);
       return true;
     case 95: case 100: case 126: case 173: case 564: // 2×2 灯具族 frameX ±36(:1381-1404)
@@ -848,7 +848,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       return true;
     }
     case 388: case 389: { // 高门关/开互换(ShiftTallGate;帧近似)
-      const openK = 'v_389_tallgateopen', closedK = 'v_388_tall_gate_closed';
+      const openK = 'v_389_tall_gate_open', closedK = 'v_388_tall_gate_closed';   // ⚠️5 并 def:v_389_tallgateopen 已退役
       const toOpen = sheet === 388;
       const target = TILE_BY_KEY[toOpen ? openK : closedK] ?? 0;
       if (!target) return true;

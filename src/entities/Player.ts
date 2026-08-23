@@ -1101,7 +1101,7 @@ export class Player extends Entity {
     };
     // 仇恨轴（ApplyEquipFunctional case 内 aggro ±400 直赋——功能槽 only,
     // 社交槽 ApplyEquipVanity 无 aggro）
-    const AGGRO_NEG = new Set([3015, 3991, 4005, 4006]);
+    const AGGRO_NEG = new Set([3015, 3991, 4005, 4006, 6175]);   // 6175 侦察哨兵背包（★1457 :14670-14677 aggro-=400;V6 复核补）
     const AGGRO_POS = new Set([3016, 3992, 3998]);
     for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) {
       const s = this.inv.armor[i];
@@ -1769,7 +1769,8 @@ export class Player extends Entity {
     if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;
     return m;
   }
-  /** 远程分道乘区（Player.cs:3820-3824 bowEffectiveDamage 拆分）：
+  /** 远程分道乘区（1457 Player.cs:3966-3970 bowEffectiveDamage/gunEffectiveDamage/
+   *  specialistEffectiveDamage 拆分,消费 GetWeaponDamageMultiplier :54031-54055）：
    *  箭 = (rangedDamage + 箭袋stack) × Archery × 蘑菇矿箭头 1.12 × 潜行增伤；
    *  弹/火箭 = rangedDamage × 对应蘑菇矿头 1.12 × 潜行；其他（飞镖等）= rangedDamage */
   rangedDamageMult(kind: 'arrow' | 'bullet' | 'rocket' | 'other'): number {
@@ -1777,10 +1778,15 @@ export class Player extends Entity {
     const base = this.damageMult('ranged'); // rangedDamage 全链（装备+四系 buff）
     const stealthBonus = 1 + (1 - this.stealth) * (st.vortexSet ? 0.8 : st.shroomiteSet ? 0.6 : 0);
     if (kind === 'arrow') {
-      // bowEffectiveDamage :3820 = (rangedDamage/arrowMult + stack) × arrowMult²
-      //   = (rangedDamage + stack×arrowMult) × arrowMult——stack 段平方差异在此
+      // 1457 Player.cs:3966 bowEffectiveDamage = (rangedDamage/rangedMultDamage
+      //   + arrowDamageAdditiveStack) × rangedMultDamage × arrowDamage——箭袋 stack
+      //   只乘 arrowDamage 一次（旧码 stack×arrowMult 内外双乘 = stack 段 ×arrowMult²
+      //   登记债,2026-08-22 备案遗留①修复）。rangedMultDamage 全仓仅枯萎武器 ×0.5
+      //   （:26233;:18454 ResetEffects 每帧复位 1f）,本仓枯萎已折入 damageMult
+      //   ('ranged')（:1769）→ 先 /M 还原加算链、stack 加在后、再回乘 M,与原式逐项等价
       const arrowMult = this.buffs.arrowDmgMult * (st.shroomiteType === 'arrow' ? 1.12 : 1);
-      return (base + st.arrowStack * arrowMult) * arrowMult * stealthBonus;
+      const rangedMultDamage = this.buffs.has(BuffType.WitheredWeapon) ? 0.5 : 1;   // :26233
+      return ((base / rangedMultDamage) + st.arrowStack) * rangedMultDamage * arrowMult * stealthBonus;
     }
     if (kind === 'bullet') return base * (st.shroomiteType === 'bullet' ? 1.12 : 1) * stealthBonus;
     if (kind === 'rocket') return base * (st.shroomiteType === 'rocket' ? 1.12 : 1) * stealthBonus;
@@ -2084,20 +2090,34 @@ export class Player extends Entity {
     if (this.mana > 0) this.manaRegenDelay = 4;             // if (statMana > 0) delay = num2（空蓝只钳上界不钉值）
   }
 
+  /** 魔力花 QuickMana 钩子（CheckMana manaFlower 支 :53226-53239 内的 QuickMana()
+   *  调用,:5590）。Player 层无 Game 引用（音效/背包变更回调在 Game 侧）→ 构造后由
+   *  Game 接线到 quickMana()（QuickMana 全门版：死亡/满蓝/药水病 healBlocked 门,
+   *  :5590-5596 + :5621 GetItemToUse 的 potionDelay 门）。未接线（测试/远端代理）
+   *  = 该支静默跳过,行为同无魔力花 */
+  quickManaHook: (() => void) | null = null;
+
   /** 1457 CheckMana（Player.cs:53216-53253；DebugOptions.ManaV2 默认 true——
    *  Testing/DebugOptions.cs:30,release 正式行为）：入口清 slowMagicUse（:53217）→
-   *  蓝够扣魔返 true；不足 → statMana=0（:53243/:53254）+ DoRunOutOfManaEffect()
-   *  （:53258-53261 slowMagicUse=true）→ ManaV2 恒返 true =【空蓝照放】（慢施惩罚经
-   *  GetSlowMagicUseTime/Rate/Scalar :47425-47456 消费）。★manaFlower QuickMana 支
-   *  （:53226-53239）本仓在 Game 主施法链 tryAutoManaPotion 侧处理,本端口不含——
-   *  channel 续发回调（魔法飞弹族持按连发每拍 ItemCheck_TryStartUse :52660-52690 →
-   *  ItemCheck_ActuallyPayMana :53277 → CheckMana）直接消费;主链 :9943-9961 内联同语义
-   *  （2026-08-22 审计 ❌：续发此前蓝不足 return false 跳发,与主链不一致） */
-  checkMana(amount: number): boolean {
+   *  蓝够扣魔返 true；不足 → manaFlower QuickMana 支（:53226-53239,2026-08-22 备案
+   *  遗留②补齐：channel 续发每拍 ItemCheck_TryStartUse :52660-52690 →
+   *  ItemCheck_ActuallyPayMana :53277 → CheckMana 直通本端口,装备魔力花时自动喝蓝
+   *  重估——Game 主施法链 :9943-9961 内联支不动,两条入口语义自此一致）→ 仍不足
+   *  statMana=0（:53243/:53254）+ DoRunOutOfManaEffect()（:53258-53261
+   *  slowMagicUse=true）→ ManaV2 恒返 true =【空蓝照放】（慢施惩罚经
+   *  GetSlowMagicUseTime/Rate/Scalar :47425-47456 消费） */
+  checkMana(amount: number, blockQuickMana = false): boolean {
     this.slowMagicUse = false;                     // :53217 入口清标记（每次重估）
     if (this.mana >= amount) {
       this.mana -= amount;                         // if (pay) statMana -= num
       return true;
+    }
+    if (this.equipStats.manaFlower && !blockQuickMana) {   // :53226 if (manaFlower && !blockQuickMana)
+      this.quickManaHook?.();                      // :53228 QuickMana()（Game.quickMana 全门版）
+      if (this.mana >= amount) {
+        this.mana -= amount;                       // if (pay) statMana -= num
+        return true;
+      }
     }
     this.mana = 0;                                 // :53243/:53254 statMana = 0
     this.slowMagicUse = true;                      // DoRunOutOfManaEffect :53258-53261
@@ -2330,8 +2350,10 @@ export class Player extends Entity {
         else this.buffs.remove(bt);
       });
     }
-    this.lifeRegenTime += (1 + (this.buffs.has(BuffType.Honey) ? 2 : 0))
-      * (this.usedAegisCrystal ? 1.2 : 1);   // 蜂蜜×3 速(:18954)/神盾水晶 +0.2(:18931)
+    this.lifeRegenTime += 1 + (this.buffs.has(BuffType.Honey) ? 2 : 0);   // 蜂蜜 +2/t（:18954 加法并列项）
+    // 神盾水晶 +0.2/t（★V2a 复核 ⚠️e 勘误：原版 :18930-18934 为【加法独立项】,
+    // 曾写成 (1+蜂蜜)×1.2 乘算 → 蜂蜜同挂时 3.6/t vs 原版 3.2/t）
+    if (this.usedAegisCrystal) this.lifeRegenTime += 0.2;
     // 坐/睡加成（:19053-19056）：lifeRegenTime +3/tick + 自然回血 ×1.3
     if (this.sitting || this.sleeping) this.lifeRegenTime += 3;
     // 魂镰吸魂（:18939 lifeRegenTime += 2；:18977-18983 回复加成 (5+n)/2 截断

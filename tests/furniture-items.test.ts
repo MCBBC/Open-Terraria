@@ -149,10 +149,22 @@ describe('挂物族：放置限制（对表 TE 的 Fits/CanQuickSwap 判定）',
     expect(dollTargetSlot(rec, VID.legs)).toBe(2);
     expect(dollTargetSlot(rec, VID.acc)).toBe(3);    // 首个空配饰位
     rec.slots[3] = { id: iid(VID.acc), stack: 1 };
-    expect(dollTargetSlot(rec, VID.acc)).toBe(4);    // 下一个空位
+    // ★1457 GetAccessoryTargetSlot（TEDisplayDoll.cs:747-752）：HasIncompatibleAccessory
+    //  命中（同 id）→ 冲突槽 3（TryFitting 整体交换），非下一空位
+    //  （旧断言"下一个空位"锁的是跨 id 空间恒假的死分支,本批修正）
+    expect(dollTargetSlot(rec, VID.acc)).toBe(3);
     expect(dollTargetSlot(rec, VID.mount)).toBe(8);  // 坐骑槽
     expect(dollTargetSlot(rec, VID.sword)).toBe(9);  // misc 持握展示
     expect(dollTargetSlot(rec, VID.arrow)).toBe(-1); // 不可放
+    // ★1457 AccessoryIncompatibilityType 组互斥（ItemSlot.cs:3482-3486）：6168 组
+    //  {6168,6169,6193,6194} 任二不可共存 → 冲突槽
+    const g1 = iid(6168), g2 = iid(6169);
+    if (g1 !== undefined && g2 !== undefined) {
+      const rec2: FurnitureItemRecord = { x: 0, y: 0, kind: 'display_doll', slots: new Array(19).fill(null) };
+      rec2.slots[5] = { id: g1, stack: 1 };
+      expect(dollTargetSlot(rec2, 6169)).toBe(5);    // 同组 → 冲突槽
+      expect(dollTargetSlot(rec2, VID.acc)).toBe(3); // 异组 → 首空
+    }
   });
 });
 

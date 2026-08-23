@@ -137,6 +137,9 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //     出手链 = PackGemStaffFeatures（Player.cs:50002 `AllGems = (HeldItem.type
   //     == 6171)`）→ vanillaGemStaff.packGemStaffFeatures allGems 位 ----
   '6171': { shoot: 126, useAnimation: 22, useTime: 22, shootSpeed: 6, mana: 15, damage: 27, knockBack: 6, noMelee: true, magic: true, autoReuse: true },
+  //   1782 糖果玉米步枪 crit+6（2026-08-23 备案遗留④；Item.cs:19755 `crit += 6`
+  //     复合赋值提取器不解析 → json 缺 crit。GetWeaponCrit 消费 :25230-25232）----
+  '1782': { crit: 6 },
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };
@@ -178,7 +181,7 @@ export const AMMO_FLARE = 931;
 /** AmmoID.Snowball = 949（AmmoID.cs:134——雪球炮 1319 useAmmo，Item.cs:16318） */
 export const AMMO_SNOWBALL = 949;
 
-// ================= vi_* 武器语义解析（1456 数据驱动） =================
+// ================= vi_* 武器语义解析（json 数据驱动;json 已过 recon-item 闸门=1457 终值,DRIFT=0） =================
 
 /** vi_<id>_<slug> key → 原版 item id（vi_ 批次未显式存 vid 时从 key 反解） */
 export function viIdFromKey(key: string): number {
@@ -461,7 +464,7 @@ export function resolveAmmoProjId(launcherVid: number, ammoVid: number, useAmmo:
   return 1;
 }
 
-/** 沙枪 266 三色砂换弹（PickAmmo :52666-52678）：projToShoot==42（沙枪基弹
+/** 沙枪 266 三色砂换弹（PickAmmo :52680-52696;★V1 复核校正,旧锚 :52666-52678 实为 4953/4381/4058 特例段）：projToShoot==42（沙枪基弹
  *  Sand Ball）时按弹药品种改写弹体——黑檀砂 370→65 / 猩红砂 408→68 /
  *  沙漠化石 1246→354，各 +5 伤（原版直加 Damage，位于 :52686 弹药伤乘算之前；
  *  本仓与熔火箭袋 +2 同走 ammoBonus 通道，见 Game 远程段注释）。

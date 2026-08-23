@@ -1,4 +1,5 @@
-// 1.4.5.7 新增 ID.Sets 全量登记（批 B 数据层收尾，2026-08-22）。
+// 1.4.5.7 新增 ID.Sets 全量登记（批 B 数据层收尾，2026-08-22；★2026-08-23 消费点
+// 逐表核 1457 定谳——接/登记处置见各表注）。
 //
 // 数据来源（行号 = Terarria1457 反编译源码；1456 均无这些表）：
 //   · Terraria.ID/ItemID.cs        :58 / :80 / :181
@@ -14,7 +15,30 @@
 //     NPCID.Sets.BoundTownNPCs                    → src/core/Game.ts BOUND_TOWN_NPC_VANILLA
 //   · CloudID.Sets.RareClouds_* 有消费点（SkyRenderer.rollRareCloud）——落在
 //     src/render/SkyRenderer.ts（渲染模块内聚，含 41 Rare_Pixie 的 hardMode 门）。
-//   · 其余暂无消费点，登记在本模块备批 C/D 接线（值已逐表对过 1457 源码）。
+//   · 其余各表 2026-08-23 处置（消费点行号 = 1457）：
+//     ITEM_ACCESSORY_INCOMPATIBILITY_TYPE   → 已接 world/FurnitureItems.ts
+//       dollAccessoryTargetSlot（ItemSlot.CanEquipBothAccessories :3482-3486 组门）
+//     ITEM_USES_HAND_POSITION_…DISPLAY_DOLLS → 登记（Player.cs:51301 手位锚——本仓
+//       模特画平面图标 Renderer.ts drawFurniture 'display_doll' 支,无持物姿态宿主）
+//     ITEM_DROP_WITH_GRAB_DELAY_FOR_ALL_PLAYERS → 登记（Player.cs:5191 掉落所有权
+//       GrabDelayForAllPlayers——MP 他客延迟;本仓 ItemDrop 单拾取门（ItemDrop.ts
+//       :114 age>noGrabDelay）只建模本地玩家,语义已覆盖,MP 全员延迟待 ItemDrop
+//       多玩家拾取通道）
+//     PROJ_DESPAWN_ITEM_ICON                → 登记（Main.cs:28499 Draw 期
+//       TryDespawningProjectile 掉图标——宿主 = ai16 引信超时消散分支）
+//     PROJ_DESPAWN_ITEM_GIVES_ITEM_BACK     → 登记（Main.cs:38542 Kill 期退物品——
+//       同上宿主）
+//     PROJ_DISPLAY_DOLL_DRAW_USE_STYLE      → 登记（TEDisplayDoll.cs:469 useStyle 5
+//       摆姿——同模特平面图标宿主缺口）
+//     TILE_IS_A_PRESSURE_PLATE              → 定谳登记不改码：1457 全库**零消费点**
+//       （仅 TileID.cs:325 声明,tML 预留位）——本仓压板链保持硬编码 135
+//       （Game.checkPressurePlates）/428（updateTriggerTiles）与原版消费侧一致
+//     TILE_REMOVE_WHEN_UNDER_SPAWN          → 已接 world/gen/WorldGen.ts
+//       vampireSeedFinishPass（WorldGen.cs:25229-25263 RemoveSpecificTilesUnderSpawn
+//       ← DoAdditionalChangesAroundSpawnIfNeeded :25223 noTraps 门）
+//     NPC_SYNC_ANCHOR                       → 登记（MessageBuffer.cs:1627 netOffset
+//       平滑锚 / NetMessage.cs:692 位置写出——50 史莱姆王 (0.5,1) 底心锚;宿主 =
+//       本仓 net NPC 快照通道（ClientNet.sendNpcSnapshot）位置语义,接时随包）
 //     表形态：Record<vanillaId, value>（缺省值见各表注释，未列 = 缺省）。
 
 // ---------------------------------------------------------------------------

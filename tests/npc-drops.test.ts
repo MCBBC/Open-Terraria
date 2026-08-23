@@ -117,7 +117,8 @@ describe('怪物掉落采样（行为）', () => {
       expect(l + b).toBeLessThanOrEqual(1); // 至多其一
       lens += l; black += b;
     }
-    // 1456 :1087：晶状体 1/100（≈20/2000）；黑晶状体 = 晶状体失败后 1/3（≈660/2000）
+    // 晶状体 1/100（≈20/2000）；黑晶状体 = 晶状体失败后 1/3（≈660/2000）——
+    // 1456 ItemDropDatabase.cs:1087 ≡ 1457 :1091 同一条规则 Common(236,100).OnFailedRoll(Common(38,3))
     expect(lens).toBeGreaterThan(10);
     expect(black).toBeGreaterThan(550);
     expect(black).toBeLessThan(800);

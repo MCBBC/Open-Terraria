@@ -11,7 +11,7 @@ import itemCombatJson from '../src/data/vanilla-itemcombat.json';
 import projStatusJson from '../src/data/vanilla-projstatus.json';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const CS_PRESENT = existsSync(join(ROOT, '..', 'Terarria1456', 'Terraria', 'Item.cs'));
+const CS_PRESENT = existsSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Item.cs'));
 const TABLE = itemCombatJson as unknown as Record<string, Record<string, unknown>>;
 
 describe('提取器自审计·常跑层(已提交 JSON,不依赖 C# 源)', () => {

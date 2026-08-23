@@ -2,7 +2,9 @@
 //   ⚠️2 多格 15 族 + 已覆盖同病 3 族 + 1×1 版 6 族——挖掉按帧掉 GetItemDrop_* 真物品
 //      （原 R10 place_v_/style0 恒档）；数据层=src/data/vanillaStyleDrops.ts（1456
 //      WorldGen.cs GetItemDrop_* 23 函数逐 case 机械转录）
-//   ⚠️3 杂项：巨石族失撑→滚石弹（Check2x2 :86672 派发）/座钟授时（SceneMetrics.HasClock
+//   ⚠️3 杂项：巨石族失撑→滚石弹（TileFrame no-op break 组 :86409-86428 闭合后
+//      goto case 132 :86670 → Check2x2 :86688 派发,⚠️5 勘误:前注 :86672 系 goto 落点行）/
+//      座钟授时（SceneMetrics.HasClock
 //      → accWatch=3,Player.cs:12593）/瀑布族 8 帧动画（Main.cs:18743-18793）/陶罐顶部
 //      杂草 + 南瓜株成长（UpdateWorld :72376-72390）
 import { describe, expect, it, vi } from 'vitest';
@@ -143,6 +145,19 @@ describe('styleDropVid 逐族两档（⚠️2 15 族 + 同病 3 族 + 1×1 版�
     expect(styleDropVidOfFrames(11, 0, 594)).toBe(0);   // style 11 锁门段无物品
   });
 
+  it('开门 11 开式反推（❌3,CheckDoorOpen :87093-87094 fy/54+fx/72*36）：fx=108→style37→3941;关门式误反推 73→越界回落 25', () => {
+    // 开态 fx=72*列+(direction==-1?36:0)：style37（col=1,row=1）朝左开 → fx=72+36=108,
+    // fy=54。关门式 fx/54*36+fy/54=2*36+1=73（越界→pick 回落 Doors[0]=25 木门,掉错材质）;
+    // 开式 108/72*36+1=37 → Doors[37]=3941
+    expect(styleDropVidOfFrames(11, 108, 54)).toBe(3941);
+    expect(styleDropVidOfFrames(10, 108, 54)).toBe(25);                 // 旧恒传 10 的错档直证
+    // 朝右开（direction=+1）同 style：fx=72（无 +36 档）→ 两式同值 37
+    expect(styleDropVidOfFrames(11, 72, 54)).toBe(3941);
+    expect(styleDropVidOfFrames(10, 72, 54)).toBe(3941);
+    // style1 乌木门开态（col=0,row=1,fx=0/36）两式同值——恒传 10 只在 col≥1 且朝左开时错
+    expect(styleDropVidOfFrames(11, 36, 54)).toBe(650);
+  });
+
   it('全表 vid 均有真实物品键（VANILLA_ITEM_KEY_BY_ID 全覆盖,掉落可实例化）', () => {
     const sheets = [13, 14, 15, 18, 19, 21, 33, 34, 42, 79, 85, 87, 88, 89, 90, 96, 100, 101, 104, 172, 194, 239, 330, 331, 332, 333, 467, 469, 487, 497];
     let checked = 0;
@@ -265,7 +280,23 @@ describe('breakTile 按帧掉真物品（object 分支 + 1×1 分支 + 门）', 
     expect(drops).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[650], n: 1 }]);
   });
 
-  it('TNT 桶 654 挖掉无掉落（KillTile :66114 no-drop + TileFrame :86427 无 Check）', () => {
+  it('开门 style37（fx=108 带朝向档 36,fy=54）挖掉 → vi_3941（❌3 开式反推 CheckDoorOpen :87093-87094,曾恒传 10 掉 vi_25）', () => {
+    const w = new World(40, 40, 7, 'sdr');
+    const drops: Drop[] = [];
+    const g = breakShell(w, drops);
+    const t = keyOf('door_open');
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 3; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, t, 108 + dx * 18, 54 + dy * 18);
+    }
+    g.breakTile(11, 11, false);   // 右列中格命中（整扇移除,帧取命中格反推）
+    expect(drops).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[3941], n: 1 }]);
+    expect(w.store.get(10, 10)).toBe(0);
+    expect(w.store.get(11, 12)).toBe(0);
+  });
+
+  it('TNT 桶 654 挖掉无物品返还（KillTile :66114 no-drop;爆炸链=❌1,见 placement-frame-debt C 段）', () => {
+    // ⚠️5 勘误:前注"TileFrame :86427 无 Check"系漏看 goto case 132（:86670）——654 仍进
+    // Check2x2（:86688）,挖/毁=整件清+1002 爆炸;本壳 player 未建（cs:48764 门）只锁无返还
     const w = new World(40, 40, 7, 'sdr');
     const drops: Drop[] = [];
     const g = breakShell(w, drops);
@@ -350,7 +381,7 @@ describe('checkFurnitureSupport（⚠️2 失撑样式掉落 + ⚠️3 巨石/�
     expect(w.store.get(10, 10)).toBe(0);
   });
 
-  it('巨石 138 失撑 → 2×2 清 + 滚石弹（Check2x2 :86672→cs:48766 弹 99 伤 70）,无物品掉落', () => {
+  it('巨石 138 失撑 → 2×2 清 + 滚石弹（Check2x2 :86688→cs:48766 弹 99 伤 70）,无物品掉落', () => {
     const w = new World(40, 40, 7, 'sdr');
     const drops: Drop[] = [];
     const projs: TrapShot[] = [];
@@ -387,6 +418,38 @@ describe('checkFurnitureSupport（⚠️2 失撑样式掉落 + ⚠️3 巨石/�
     g.checkFurnitureSupport(11, 11);
     expect(projs.length).toBe(1);
     expect(projs[0].damage).toBe(50);
+  });
+
+  it('TNT 桶 654 失撑 → 整件清+桶中心 1002 爆炸（❌1:非 Boulders 表走 :48464-48470 支撑支,cs:48771-48772）', () => {
+    const w = new World(40, 40, 7, 'sdr');
+    const drops: Drop[] = [];
+    const g = supportShell(w, drops, []);
+    const blasts: Array<[number, number, number, number, number]> = [];
+    (g as unknown as Record<string, unknown>).explodeAt =
+      (tx: number, ty: number, dmg: number, radius: number, _dt: boolean, _hb: unknown, _pen: unknown, projId: number) => {
+        blasts.push([tx, ty, dmg, radius, projId]);
+      };
+    const t = keyOf('v_654_tnt_barrel');
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, t, dx * 18, dy * 18);
+    }
+    w.store.setTileSilent(10, 12, idOfSheet(1));
+    w.store.setTileSilent(11, 12, idOfSheet(1));
+    g.checkFurnitureSupport(10, 11);          // 支撑还在 → 不爆
+    expect(blasts).toEqual([]);
+    expect(w.store.get(10, 10)).toBe(t);
+    // 桌面（tileTable）也算支撑（:48464-48470 solid||table）→ 仍不爆
+    w.store.setTile(10, 12, 0);
+    w.store.setTileSilent(10, 12, idOfSheet(14), 0, 0);
+    w.store.setTileSilent(11, 12, idOfSheet(14), 18, 0);
+    g.checkFurnitureSupport(10, 11);
+    expect(blasts).toEqual([]);
+    w.store.setTile(11, 12, 0);               // 挖右支撑 → 失撑爆
+    g.checkFurnitureSupport(11, 11);
+    expect(w.store.get(10, 10)).toBe(0);      // 整件清
+    expect(w.store.get(11, 11)).toBe(0);
+    expect(drops).toEqual([]);                // 无物品返还
+    expect(blasts).toEqual([[10, 10, 400, 10, 1002]]);   // 桶中心 (168,168)
   });
 });
 

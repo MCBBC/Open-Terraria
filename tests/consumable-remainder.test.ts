@@ -13,7 +13,8 @@
 //      BiomeTorchPlaceStyle 群系表（:39586-39635）
 //   F. ⚠️ 三小件核对：1345 彩带 / 1124 蜂巢（挥动+通用消耗 :42602）、
 //      5328 金锁（R9 批已修，本批只核对消费链在位）
-// 标杆：Terarria1456/（Item.cs / Player.cs / Projectile.cs / Chest.cs / TorchID.cs / BuffID.cs）。
+// 标杆：Terarria1457/（树基准 1457;本文件所涉数值两版同值,行号锚沿用 1456 段——
+//      两树并存可解析;药水 case 288-305 段 1456/1457 逐字节同）。
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Inventory } from '../src/items/Inventory';
@@ -71,7 +72,7 @@ describe('A① 神盾果 5338 usedAegisFruit → 防御 +4（UpdatePermanentBoos
 });
 
 describe('A② 软糖虫 5341 usedGummyWorm → 钓力 +3（:12451-12453）', () => {
-  // ★补 B 审计表记「+2」系误——1456 反编译终值 fishingSkill += 3，按标杆取 3
+  // ★补 B 审计表记「+2」系误——反编译终值 fishingSkill += 3（1456 :12451-12453 ≡ 1457 :12952-12955 同值）
   it('equipStats.fishingSkill 旗置位后 +3', () => {
     const p = mkPlayer();
     const base = p.equipStats.fishingSkill;
@@ -118,8 +119,9 @@ describe('A④ 仙馔 5342 usedAmbrosia → 镐速-0.05/砌速+0.05/墙速+0.05�
 });
 
 describe('A⑤ 神盾水晶 5337 usedAegisCrystal → 生命再生计时 +0.2/t（:18931-18933）', () => {
-  it('lifeRegenTime 累积段 ×1.2 乘区在链（基 1/t + 蜂蜜 +2，再 ×1.2 = +0.2/t 净效果）', () => {
-    expect(playerSrc).toContain('* (this.usedAegisCrystal ? 1.2 : 1)');
+  it('lifeRegenTime 加法独立项 +0.2（★V2a 复核勘误:原版 :18930-18934 为加法并列项非乘算——曾写 (1+蜂蜜)×1.2,蜂蜜同挂 3.6/t vs 原版 3.2/t）', () => {
+    expect(playerSrc).toContain('if (this.usedAegisCrystal) this.lifeRegenTime += 0.2;');
+    expect(playerSrc).not.toContain('* (this.usedAegisCrystal ? 1.2 : 1)');
   });
   it('使用链：六件 flagOnce 一次性门 + 重复使用不消耗（:44768-44801 !used* 门）', () => {
     for (const [vid, flag] of [

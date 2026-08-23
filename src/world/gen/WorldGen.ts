@@ -353,6 +353,7 @@ import { flipGenSolid, resetGenSolid } from './vanilla/GenSolid';
 import { setBoulderSolidity } from './vanilla/TrapsPass';
 import { parseSeed, type SeedFlags } from './SeedEasterEggs';
 import { runTerrainPass } from './vanilla/TerrainPass';
+import { TILE_REMOVE_WHEN_UNDER_SPAWN } from '../../data/vanillaSets1457';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
 import { runOceanSandPass, runBeachesPass, runBeachDecorPass } from './vanilla/BeachPass';
 import { runIceBiomePass, runSlushPass } from './vanilla/IceBiomePass';
@@ -387,6 +388,7 @@ import { runWavyCavesPass } from './vanilla/WavyCavesPass';
 import { runTreePass, randomizeTreeStyle, randomizeCaveBackgrounds, growAshTree } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
 import { runPotsPass } from './vanilla/PotsPass';
+import { runTeleporterPass } from './vanilla/TeleporterPass';
 import { runGravitatingSandPass } from './vanilla/GravitatingSandPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runPyramidPass, runWetJunglePass, runAlchemyHerbsPass } from './vanilla/StructuresPass';
@@ -1452,6 +1454,18 @@ function potPass({ store, rng, world }: GenCtx) {
   // （尾部清剿批 2026-08-17：行为/掷序零变化；样式链/PlacePot 细注见彼处）。
   const gs = ctxGs[0];
   if (!gs) return;
+  // ---- ★1457 传送门放置（TeleporterGenerator，cs:18128-18134 本 pass 首段，
+  //      先于墓园/瓦罐消耗 RNG 流；"beam me up" 秘密种子专属，普通世界零掷）----
+  //  skyblock 变体臂 cs:16700-16705 登记不接（本仓无 skyblock 生成管线）。
+  //  spawn 距门传 (0,0)：生成期 Main.spawnTile 尚为静态缺省 0（clearWorld/Reset
+  //  均不复位，SpawnPoint pass cs:19605 在本 pass 之后）→ <20 门恒不触发
+  runTeleporterPass(store, rng, gs, {
+    addTeleporters: !!gs.seedFlags?.addTeleporters,
+    dualDungeons: !!gs.seedFlags?.dualDungeons,
+    skyblock: false,                                // cs:16700 臂未接（见上注）
+    spawnX: 0,
+    spawnY: 0,
+  });
   // ---- 墓园群系（cs:18110-18120：本 pass 首段，先于瓦罐消耗 RNG 流）----
   // 门见 graveyardSeedGate（秘密种子专属；普通世界零墓碑=原版常态）
   if (graveyardSeedGate(gs.seedFlags)) {
@@ -1932,6 +1946,25 @@ function vampireSeedFinishPass(ctx: GenCtx): void {
       genSquareTileFrame(st, rng, tx, ty);
     } else {
       i--;   // cs:25268 命中实格不消耗次数
+    }
+  }
+  // ---- ★1457 RemoveSpecificTilesUnderSpawn（cs:25229-25263 ← DoAdditionalChangesAroundSpawn
+  //     IfNeeded :25223-25225 的 noTrapsWorldGen 门）：出生点竖带 5 列×50 行清
+  //      TileID.Sets.RemoveWhenUnderSpawn 族（压板 135/442/428+尖刺 48+间歇泉 443，
+  //      vanillaSets1457.TILE_REMOVE_WHEN_UNDER_SPAWN），KillTile(noItem) 直清 ----
+  //  原版四调用位（:1051/:1901 DoRandomSpawn/:22662 vampire/:23018 RandomizeWorldSpawn
+  //  尾）本仓仅 vampire 路径有宿主（randomSpawn/errorWorld 重掷臂登记未接）。
+  if (world.seedFlags?.noTraps) {
+    const removeIds = new Set(TILE_REMOVE_WHEN_UNDER_SPAWN.map((s) => sheetId(s)).filter((v) => v > 0));
+    for (let i = 0; i < 50; i++) {
+      const num = spawnY + i;
+      if (!(spawnX >= 5 && num >= 5 && spawnX < st.w - 5 && num < st.h - 5)) continue;   // InWorld(·,·,5)
+      for (let dx = -2; dx <= 2; dx++) {
+        const x = spawnX + dx;
+        if (!st.inBounds(x, num)) continue;
+        const k = st.idx(x, num);
+        if (st.flags[k] && removeIds.has(st.type[k])) st.setTileSilent(x, num, 0);
+      }
     }
   }
 }

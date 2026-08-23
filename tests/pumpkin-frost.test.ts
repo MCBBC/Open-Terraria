@@ -1,5 +1,5 @@
 // 南瓜月（Pumpkin Moon）+ 霜月（Frost Moon）事件全量移植回归。
-// 反编译源 = /Terarria1456/（1.4.5.6 权威态）：
+// 反编译源 = /Terarria1457/（★树基准 1457;南瓜月/霜月链数值 1456/1457 同值,行号锚 1456 段）：
 //  - 分数表  MoonEventRequiredPointsPerWaveLookup   NPC.cs:6534-6539
 //  - 难度乘区 GetMoonEventPointScalar                NPC.cs:79230-79241
 //  - 计分/进波 CheckProgressFrostMoon               NPC.cs:79243-79384

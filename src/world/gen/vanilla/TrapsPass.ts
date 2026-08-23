@@ -11,6 +11,8 @@ import type { GenState } from './GenState';
 import { TILE_DEFS } from '../../../data/tiles';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
+// ★dungeon-1457 批：placeTrap 双地牢界拒门（WorldGen.cs:8865）三因子承载
+import { placeTrapDualDungeonReject } from './DungeonStyles1457';
 
 // ---- 内部 id / sheet 解析（表均为原版 sheet id 空间，消费端经 sheetOf 换算） ----
 const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
@@ -652,12 +654,16 @@ export function placePlate(st: TileStore, x: number, y: number, style: number): 
  *  保护墙）拒 + dualDungeons 秘密种子的潜在地牢界拒。★1457 在 placeTrap 共
  *  9 处调用（入口/下落扫描/飞镖左右扫/巨石 6×6/炸药下落+5×5/热喷泉锚+底双列）
  *  ——1456 的 noTraps 巨石检查块在 1457 已不在本方法（本仓 noTraps 巨石支线
- *  未实装,无对应块可迁,备案）。dualDungeons 旗标未实装 → 界拒分支恒过。 */
+ *  未实装,无对应块可迁,备案）。 */
 export function placeTrapCanContinue(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;   // 防御（原版各调用点已先 InWorld 短路）
   if (st.wall[st.idx(x, y)] === 350) return false;
-  // 1457: `SecretSeed.dualDungeons.Enabled && !GenVars.DualDungeon_AllowTrapGenerationInDungeon
-  //  && DungeonUtils.InAnyPotentialDungeonBounds(x, y)` → false——种子未实装（批 F），恒不拒
+  // ★dungeon-1457 批接线（WorldGen.cs:8865）：`SecretSeed.dualDungeons.Enabled &&
+  //   !GenVars.DualDungeon_AllowTrapGenerationInDungeon && InAnyPotentialDungeonBounds`
+  //   → 拒。界拒门三因子由 DungeonStyles1457.placeTrapDualDungeonReject 承载：
+  //   普通世界 dualDungeons=false → 首因子假恒不拒（=1456 行为,零扰动）；
+  //   双地牢世界 Dungeon pass 的 dgTraps 窗口开/关还原原版放行时序。
+  if (placeTrapDualDungeonReject(x, y)) return false;
   return true;
 }
 

@@ -137,7 +137,7 @@ describe('勋章物品注册链', () => {
   it('vi_3817_DefenderMedal 已注册且 vid 反查闭合（掉落→背包→计数全链）', () => {
     expect(medalId).toBeDefined();
     expect(vanillaIdOfItem(medalId)).toBe(DEFENDER_MEDAL_ITEM_ID);
-    // maxStack：1456 默认 9999（case 3817 无覆盖，VANILLA_MAX_STACK 表仅 11 例外）
+    // maxStack：1456/1457 同值默认 9999（case 3817 无覆盖，1457 Item.cs:85/:49020；VANILLA_MAX_STACK 表仅 11 例外）
     expect(ITEM_DEFS[medalId].maxStack).toBe(9999);
   });
 });

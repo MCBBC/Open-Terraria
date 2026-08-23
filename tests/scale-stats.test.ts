@@ -572,7 +572,7 @@ describe('getGoodAdjustments 整族（NPC.cs:17874-18027）', () => {
     const e = Enemy.fromVanilla(245, 0, 0)!;
     expect(e.w).toBe(70); expect(e.h).toBe(70);
     expect(e.vanillaScale).toBeCloseTo(0.5, 6);       // 渲染乘区 = 总scale/基scale
-    expect(e.maxHp).toBe(22500);   // lifeMax 1456 终值 15000(曾 9000=1405 旧值,2026-08-19)
+    expect(e.maxHp).toBe(22500);   // lifeMax 1456/1457 同值 15000(曾 9000=1405 旧值,2026-08-19)
     expect(e.def.damage).toBe(115);
     expect(e.def.defense).toBe(26);                   // getGood 对 245 无防改
   });
