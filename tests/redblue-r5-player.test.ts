@@ -196,17 +196,18 @@ describe('R5-F13/F14/F15/F17 冲刺', () => {
     expect(p.solarDashing).toBe(true);
   });
 
-  it('F15 出口钳速吃 moveSpeed 乘区（Slow 32 → strongestSlow 0.5,num15=max(3,1.5)=1.5,:21429/:26204-26210）', () => {
+  it('F15 出口钳速吃 moveSpeed 乘区（Agility 21 → moveSpeedMult 1.25,num15=max(3,3.75)=3.75,:21429/:26204-26210）', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     p.inv.armor[3] = { id: _iid(977), stack: 1 };
     settle(p, w);
-    p.buffs.apply(BuffType.Slow, 30);
+    p.buffs.apply(BuffType.Agility, 1200);
     doubleTap(p, w);
-    p.vx = 1.4;                                        // <1.5 → 直接结束滑行钳回
+    p.inputX = 0;                                      // 松方向键（排除 ix 制动支）
+    p.vx = 3.5;                                        // ∈(3,3.75) → 直接结束滑行钳回
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
     expect(p.dashDelay).toBe(20);
-    expect(p.vx).toBeCloseTo(1.5, 6);                  // 旧钳回 3（缺 strongestSlow）
+    expect(p.vx).toBeCloseTo(3.75, 6);                 // 旧钳回 3（缺 buffs.moveSpeedMult）
   });
 
   it('F17 骑乘禁冲刺（:21579 mount.Active && !CanDash → return）', () => {
@@ -243,8 +244,11 @@ describe('R5-F1/F3/F5/F6 生命再生', () => {
     settle(p, w, 320);
     p.hp = 390;
     const t0 = p.hp;
+    const x0 = p.x;
     p.vx = 3;                                          // 移动（无抓钩）→ ×0.5
     for (let i = 0; i < 480; i++) {
+      p.x = x0;                                        // 原地跑（防跑出世界摔死）
+      p.lifeRegenTime = 300;                           // 钉 1 档（排除 eRT 爬坡噪声）
       p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
       p.vx = 3;
     }
@@ -257,13 +261,17 @@ describe('R5-F1/F3/F5/F6 生命再生', () => {
     p.baseMaxHp = 400;
     settle(p, w, 320);
     p.hp = 390;
-    (p as unknown as { grappling: (object | null)[] }).grappling[0] = { x: 0, y: 0 };
+    const g = p as unknown as { grappling: (object | null)[] };
     const t0 = p.hp;
+    const x0 = p.x;
     p.vx = 3;
     for (let i = 0; i < 240; i++) {
+      p.x = x0;
+      p.lifeRegenTime = 300;
+      g.grappling[0] = { x: 0, y: 0 };
       p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
       p.vx = 3;
-      (p as unknown as { grappling: (object | null)[] }).grappling[0] = { x: 0, y: 0 };
+      g.grappling[0] = { x: 0, y: 0 };
     }
     expect(p.hp - t0).toBe(2);                         // 抓钩+移动 = 静止档 1.25→Round 1
   });
@@ -275,8 +283,9 @@ describe('R5-F1/F3/F5/F6 生命再生', () => {
     let healed = 0;
     for (let i = 0; i < 60; i++) healed += b.tick(1 / 60);
     expect(healed).toBe(0);                            // OnFire 4HP/s 被星云免掉
-    // 极饿在 nebula 检查之后 → 照常掉血
+    // 极饿在 nebula 检查之后 → 照常掉血（饥饿链须 dontStarveWorld,否则链尾剥离）
     const b2 = new BuffState();
+    b2.dontStarveWorld = true;
     b2.nebulaLifeLevel = 1;
     b2.starvingMaxHp = 400;
     b2.apply(BuffType.Starving, 10);
@@ -291,13 +300,18 @@ describe('R5-F1/F3/F5/F6 生命再生', () => {
     p.baseMaxHp = 400;
     settle(p, w, 320);
     p.hp = 390;
-    (p as unknown as { soulDrain: number }).soulDrain = 3;
+    const sd = p as unknown as { soulDrain: number };
+    sd.soulDrain = 3;
     const t0 = p.hp;
+    const x0 = p.x;
     p.vx = 3;                                          // 移动档 ×0.5——num3 不受乘区
     for (let i = 0; i < 120; i++) {
+      p.x = x0;
+      p.lifeRegenTime = 300;                           // 钉 1 档（移动 ×0.5 → Round 0）
+      sd.soulDrain = 3;
       p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
       p.vx = 3;
-      (p as unknown as { soulDrain: number }).soulDrain = 3;
+      sd.soulDrain = 3;
     }
     // num3=(5+3)/2=4 units/tick flat → 4×120/120 = 4 HP；自然再生移动 0.5→Round 0
     expect(p.hp - t0).toBe(4);
@@ -308,6 +322,7 @@ describe('R5-F1/F3/F5/F6 生命再生', () => {
 describe('R5-F7 极饿单通道流干', () => {
   it('400HP：8HP/s、60t 一跳 8 伤（num2=16/t,num12=8,num13=960）——旧双通道 12HP/s', () => {
     const b = new BuffState();
+    b.dontStarveWorld = true;
     b.starvingMaxHp = 400;
     b.apply(BuffType.Starving, 10);
     let healed = 0;
@@ -319,6 +334,7 @@ describe('R5-F7 极饿单通道流干', () => {
 
   it('沙漠/雪原 dmg×2 流速不变（:19465 num13 不乘）', () => {
     const b = new BuffState();
+    b.dontStarveWorld = true;
     b.starvingMaxHp = 400;
     b.starvingZoneBoost = true;
     b.apply(BuffType.Starving, 10);
@@ -382,12 +398,14 @@ describe('R5-F18/F19 buff 栈', () => {
 // ============ F21/F22 DamageVar ±15% + 旗减伤（Main.cs:67097 / Projectile.cs:14904） ============
 describe('R5-F21/F22 DamageVar', () => {
   it('±15% 边界与确定性序列（注入 rnd）', () => {
-    // 序列：第一掷 0.0 → -15%；重掷 0.99 → +14%
-    const seq = [0, 0.99];
+    // 序列：第一掷 0.0 → -15%（85）；luck 判定 0.5；重掷 0.99 → +15%（115）
+    const seq = [0, 0.5, 0.99];
     let i = 0;
-    const rnd = (): number => seq[i++ % 2];
-    expect(damageVar(100, 1, rnd)).toBe(114);          // luck>0 取高
+    const rnd = (): number => seq[i++ % 3];
+    expect(damageVar(100, 1, rnd)).toBe(115);          // luck>0 取高
+    i = 0;
     expect(damageVar(100, -1, rnd)).toBe(85);          // luck<0 取低
+    i = 0;
     expect(damageVar(100, 0, rnd)).toBe(85);           // 无 luck 只一掷
     for (let k = 0; k < 300; k++) {
       const v = damageVar(100, 0);
@@ -458,7 +476,6 @@ describe('R5-F23/F24/F25/F26/F27 受击管线', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     settle(p, w);
-    p.defense = 0;
     p.damage(1, p.cx, p.cy - 10, false);
     expect(p.iframes).toBe(20);                        // 旧恒 40
     p.iframes = 0;
@@ -514,6 +531,70 @@ describe('R5-F23/F24/F25/F26/F27 受击管线', () => {
     expect(p.panicTime).toBe(480);
     for (let i = 0; i < 60; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);   // 1s
     expect(p.panicTime).toBe(420);                     // 480-60（旧 -=dt 只减 1）
+  });
+});
+
+// ============ F4 丰盛大餐（OnKillNPC :20627-20630 + :19283-19287） ============
+describe('R5-F4 丰盛大餐 336', () => {
+  it('lifeRegen+6 = 3HP/s flat（乘区外）', () => {
+    const w = mkWorld();
+    const p = mkPlayer(w);
+    p.baseMaxHp = 400;
+    settle(p, w, 320);
+    p.buffs.apply(BuffType.HeartyMeal, 7);
+    p.hp = 390;
+    const t0 = p.hp;
+    const x0 = p.x;
+    p.vx = 3;                                          // 移动档 ×0.5→Round 0,排除自然再生
+    for (let i = 0; i < 120; i++) {
+      p.x = x0;
+      p.lifeRegenTime = 300;
+      p.buffs.apply(BuffType.HeartyMeal, 7);           // 续期防到期
+      p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+      p.vx = 3;
+    }
+    expect(p.hp - t0).toBe(6);                         // 6 units/tick × 120 / 120 = 6 HP
+  });
+});
+
+// ============ 蓝队勘误：蜂蜜 flat 正项在 DoT 后不被清零（:19250-19254） ============
+describe('R5-蓝队勘误 蜂蜜×DoT', () => {
+  it('DoT+蜂蜜：flat 1HP/s 不被清零（:19252 在 DoT 段后）；极饿期两笔蜂蜜全抹（:19255 覆写）', () => {
+    const b = new BuffState();
+    b.apply(BuffType.Honey, 30);
+    b.apply(BuffType.OnFire, 30);
+    let healed = 0;
+    for (let i = 0; i < 60; i++) healed += b.tick(1 / 60);
+    // OnFire -4HP/s + 蜂蜜 flat +1HP/s + 对冲 +2HP/s（钳 ≤0）= -1HP/s
+    expect(healed).toBe(-1);                           // 旧 -4（flat 被清零）
+    // 极饿覆写期：蜂蜜 flat/对冲全不生效 → 纯 -8HP/s
+    const b2 = new BuffState();
+    b2.dontStarveWorld = true;
+    b2.starvingMaxHp = 400;
+    b2.apply(BuffType.Honey, 30);
+    b2.apply(BuffType.Starving, 30);
+    let healed2 = 0;
+    for (let i = 0; i < 60; i++) healed2 += b2.tick(1 / 60);
+    expect(healed2).toBe(-8);                          // 蜂蜜不抵极饿（:19255 整值覆写）
+  });
+});
+
+// ============ F2 闪亮石 3337 静止整段（:19061-19249/:19333-19376） ============
+describe('R5-F2 闪亮石', () => {
+  it('静止档：eRT 跳档 1800（:19243-19245）+ flat +4 + ×1.1（:19365）——400HP 静止 ≈4HP/s', () => {
+    const w = mkWorld();
+    const p = mkPlayer(w);
+    p.baseMaxHp = 400;
+    p.inv.armor[3] = { id: _iid(3337), stack: 1 };
+    settle(p, w, 12);                                  // 短 settle（eRT 低,静止档直接跳 1800）
+    expect(p.equipStats.shinyStone).toBe(true);
+    p.hp = 390;
+    const t0 = p.hp;
+    for (let i = 0; i < 120; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);   // 2s 静止
+    // eRT=1800+4t → 6 档 ×1.25 ×1.1 = 8.25 → Round 8；+ flat +4（:19248）= 12 units/t
+    // = 6HP/s（头 2t eRT<90 未跳档,略低）;num6=(eRT-3000)/300 在 120t 内仍负段 0
+    expect(p.hp - t0).toBeGreaterThanOrEqual(9);       // 旧 0.5HP/s 档（无闪亮石整段）只有 +1
+    expect(p.hp - t0).toBeLessThanOrEqual(12);
   });
 });
 

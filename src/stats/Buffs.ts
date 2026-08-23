@@ -330,6 +330,7 @@ export enum BuffType {
   FlinxMinion = 255,           // 小雪怪(325,←5069 皮皮法杖,弹951)：召唤物伴生
   PalworldMinionCattiva = 256, // 捣蛋猫(385,←5663 可靠的捣蛋猫,弹1093)：召唤物伴生
   PalworldMinionFoxsparks = 257, // 火绒狐(386,←5664 可靠的火绒狐,弹1094)：召唤物伴生
+  HeartyMeal = 258,              // 丰盛大餐(336,火腿棍 5096 击杀授予 AddBuff(336,420))：lifeRegen+6=3HP/s
   // ---- 配饰审计 P0 批（2026-08-22）：冰冻护盾族（Player.cs:14348-14351）----
   IceBarrier = 246,    // 冰障(62,冰冻海龟壳 1253/冰冻护盾 3997 半血挂)：半血以下 endurance+0.25
                        //   （UpdateBuffs :10127-10152；超半血 DelBuff——施加/移除门在
@@ -507,6 +508,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   //  原版也仅在 Draw/标记层消费——条目即终点,无消费逻辑（见枚举段注释）----
   [BuffType.ShadowOrb]: { vanillaBuff: 19, descKey: 'BuffDescription.ShadowOrb', fallbackName: '暗影珠' },
   [BuffType.FairyBlue]: { vanillaBuff: 27, descKey: 'BuffDescription.FairyBlue', fallbackName: '仙灵' },
+  [BuffType.HeartyMeal]: { vanillaBuff: 336, descKey: 'BuffDescription.HeartyMeal', fallbackName: '丰盛大餐' },
   // 仙灵铃 425 三选一其余两色（Player.cs:52256-52272 Next(3)→27/101/102）——
   // 101/102 缺条目时 BUFF_BY_VANILLA 反查落空 → 三掷只蓝档生效（QuickBuff 同门）。
   // 2026-08-22 补 C 审计 ⚠️425 修复批补全（Buff_101/102.png 已在盘）
@@ -755,9 +757,12 @@ export class BuffState {
   /** 极饿流干账（lifeRegenCount 语义,HP 口径:-num2/2 HP/s 入账,每 -num12 结算
    *  num12 伤——R5-F7 单通道化后复用原 2s 直伤计时器字段） */
   private starvingHitAccum = 0;
-  /** 本 tick ENV_DOTS 是否有 DoT 结算（含被星云免掉的——原版 DoT 段照写
+  /** 本 tick ENV_DOTS 是否有 DoT 流量在账（含被星云免掉的——原版 DoT 段照写
    *  lifeRegenTime=0,星云只免伤害不清爬坡;Player 消费于 lifeRegenTime 复位门） */
   dotActiveTick = false;
+  /** 蜂蜜对冲流率账（:19212 lifeRegen+4 钳≤0 = 2HP/s——分块架构下的流量对冲账,
+   *  逐 tick 抵减已弹出的 DoT 分块;余量跨 tick 结转） */
+  private honeyOffsetAccum = 0;
   /** 星云生命套层数（buff 174-175 级数,Player 每帧写;UpdateLifeRegen :19220 消费） */
   nebulaLifeLevel = 0;
 
@@ -919,14 +924,17 @@ export class BuffState {
         if (v !== undefined && this.immuneVanilla.has(v)) this.active.delete(t);
       }
     }
-    // ---- UpdateBuffs 正项（Player.cs:9640+）：Regeneration lifeRegen+=4（2 HP/s）、
-    //      Honey :18955 lifeRegen+=2（1 HP/s）、狼人 :11496 lifeRegen+=1（0.5 HP/s）。
-    //      注意原版这些都在 NaturalLifeRegen 的 DoT 段（:18779+）**之前**求值——
-    //      DoT 的 if(lifeRegen>0) lifeRegen=0 会把它们整池清零（见下）----
+    // ---- UpdateBuffs 正项（Player.cs:9640+）：Regeneration lifeRegen+=4（2 HP/s,
+    //      :10036-10039）、狼人 :11496 lifeRegen+=1（0.5 HP/s）。
+    //      注意原版这些都在 NaturalLifeRegen 的 DoT 段（:19065+）**之前**求值——
+    //      DoT 的 if(lifeRegen>0) lifeRegen=0 会把它们整池清零（见下）。
+    //      ★Honey(48) 的 UpdateBuffs case（:10158-10161）只置 honey 旗——其 lifeRegen
+    //      贡献全在 UpdateLifeRegen 内（:19212 对冲档 + :19250-19254 flat +2）,位于
+    //      DoT 段【之后】不被清零。R5 蓝队勘误：旧把 1HP/s 正项放在 DoT 前被清零,
+    //      DoT+蜂蜜期间少回 1HP/s,已移到 DoT 后（见下方 honeyFlat）----
     heal += this.rateAccum(BuffType.Regen, 2, dt);
-    heal += this.rateAccum(BuffType.Honey, 1, dt);
     // 树妖祝福 165（:9986 lifeRegen += 6 = 3 HP/s）——同在 UpdateBuffs 正项段，
-    // NaturalLifeRegen 求值于其后（与 Regen/Honey 同批，可被 DoT 清零）
+    // NaturalLifeRegen 求值于其后（与 Regen 同批，可被 DoT 清零）
     heal += this.rateAccum(BuffType.DryadsWard, 3, dt);
     if (this.active.has(BuffType.Werewolf)) {
       // 狼人 lifeRegen++（:11496）= 0.5 HP/s → 每 2 秒恒 1 HP（独立累加器，勿与篝火
@@ -939,6 +947,7 @@ export class BuffState {
     //      （曾直接相加，恢复池被 DoT 按净额吃掉）。分块弹出（DOT_CHUNK），
     //      净伤害记入 dotChunkOut 供 HurtLifeRegen 飘字消费 ----
     let dots = 0;
+    let dotFlow = false;   // DoT 流量在账（非块发射瞬间——对冲门/再生复位用流量口径）
     for (const [t, hpPerSec] of ENV_DOTS) {
       if (!this.active.has(t)) continue;
       if (heal > 0) heal = 0;                       // :18781 等 if (lifeRegen > 0) lifeRegen = 0
@@ -952,9 +961,10 @@ export class BuffState {
       const d = this.rateAccum(t, rate, dt);
       dots += d;
       heal += d;
+      dotFlow = true;
     }
     if (dots < 0) this.dotChunkOut += -dots;
-    this.dotActiveTick = dots !== 0;
+    this.dotActiveTick = dotFlow;
     // ---- 星云生命套 DoT 全免（UpdateLifeRegen :19220-19223：`lifeRegen < 0 &&
     //      nebulaLevelLife > 0 → lifeRegen = 0`——位于 ENV_DOTS 之后、极饿段之前,
     //      故【极饿不掉免】。R5-F1：旧只做 +3HP/s/级正项,负项照扣,已补）----
@@ -984,11 +994,30 @@ export class BuffState {
       }
       if (dots < 0) this.dotChunkOut += -dots;
     }
-    // 蜂蜜对冲（Player.cs:18915-18922：lifeRegen<0 时 honey 额外 lifeRegen+4 = +2 HP/s，
-    // 且对冲后钳回 ≤0）——DoT 系统已实装,补上 buff-system-port 备忘里标"暂缺"的分支
-    if (heal < 0 && this.active.has(BuffType.Honey)) {
-      heal += this.rateAccum(BuffType.Honey, 2, dt, true);
-      if (heal > 0) heal = 0;
+    // 蜂蜜对冲（Player.cs:19212-19219：lifeRegen<0 时 honey 额外 lifeRegen+4 = +2 HP/s，
+    // 对冲后钳回 ≤0）。原版按 tick 连续流量结算;本仓 DoT 分块弹出,按块发 +1 HP 会在
+    // 块边界整 HP 漂移——改为【流率对冲】：2HP/s 计入累加账,直接抵减本 tick 已弹出
+    // 的 DoT 分块（钳 ≤0 语义 = cancel ≤ -dots）,净值与原版逐 tick 精确一致
+    if (this.active.has(BuffType.Honey) && !this.active.has(BuffType.Starving)
+      && (this.dotActiveTick || dots < 0)) {
+      this.honeyOffsetAccum += 2 * dt;          // +4 lifeRegen 单位/tick,流量口径逐 tick 计提
+      if (dots < 0) {
+        const cancel = Math.min(-dots, this.honeyOffsetAccum);
+        this.honeyOffsetAccum -= cancel;
+        dots += cancel;
+        heal += cancel;
+        this.dotChunkOut -= cancel;
+        if (heal > 0) heal = 0;
+      }
+    } else {
+      this.honeyOffsetAccum = 0;                // 蜂蜜离栏即清账（原版对冲无跨期结转）
+    }
+    // 蜂蜜 flat 正项（UpdateLifeRegen :19250-19254：honey → lifeRegenTime+=2、
+    // lifeRegen+=2 = 1 HP/s——位于 DoT/对冲段后不被清零,R5 蓝队勘误移出正项池）。
+    // ★极饿期不生效：原版 :19255 极饿 lifeRegen = -num2 是【整值覆写】,把
+    //   :19212 对冲与 :19252 flat 两笔蜂蜜全部抹掉（蓝队勘误补的门）
+    if (this.active.has(BuffType.Honey) && !this.active.has(BuffType.Starving)) {
+      heal += this.rateAccum(BuffType.Honey, 1, dt);
     }
     // ---- 光环正项（NaturalLifeRegen :18988-18993，位于 DoT 段之后——篝火/心灯
     //      的 lifeRegen 按原版可对冲 DoT）----

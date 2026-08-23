@@ -153,8 +153,9 @@ export class MenuBackground {
   }
 
   /** 标题屏日月拖拽写时间（GOING_OLDSCHOOL B2，TitleMenu 反算 t01 抛出）。
-   *  反解回 vanilla time/dayTime 供调度链继续；拖拽期时间冻结由 onSunMoonGrab
-   *  每帧调 setGrabbing（300ms 尾窗近似 alreadyGrabbingSunOrMoon 的按住态） */
+   *  反解回 vanilla time/dayTime 供调度链继续；拖拽期时间冻结 = 本方法每次调用
+   *  刷 grabUntil 300ms 尾窗（tick 里 grabbing=now<grabUntil ≈ 原版
+   *  alreadyGrabbingSunOrMoon 按住态 :19766——松手后 300ms 内恢复推进，无感） */
   setClockT(time01: number): void {
     const t = ((time01 % 1) + 1) % 1;
     this.clock.timeOfDay = t;

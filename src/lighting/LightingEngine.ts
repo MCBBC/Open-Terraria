@@ -152,9 +152,10 @@ export class LightingEngine {
     const ar = this.active.r, ag = this.active.g, ab = this.active.b;
     const scale = globalBrightness * 255;
     for (let i = 0; i < outR.length; i++) {
-      outR[i] = Math.min(255, Math.round(ar[i] * scale));
-      outG[i] = Math.min(255, Math.round(ag[i] * scale));
-      outB[i] = Math.min(255, Math.round(ab[i] * scale));
+      // 原版 ExportTo(LT57:231-233)是 `(int)(color*num)` 截断,非四舍五入
+      outR[i] = Math.min(255, Math.trunc(ar[i] * scale));
+      outG[i] = Math.min(255, Math.trunc(ag[i] * scale));
+      outB[i] = Math.min(255, Math.trunc(ab[i] * scale));
     }
   }
 

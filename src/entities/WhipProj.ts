@@ -17,7 +17,7 @@
 // 此前误用鞭贴图整条切片近似。光照色一律原色直画（实体层画在全屏光照合成前 =
 // 合成自动乘光,StringLine 渔线段链既有口径）。
 import { Entity } from './Entity';
-import { applyProjStatus, applyMeleeImbue } from './projStatus';
+import { applyProjStatus, applyBuffTicks, applyMeleeImbue } from './projStatus';
 import { hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -163,8 +163,13 @@ export class WhipProj extends Entity {
   /** GetWhipSettings（:45683-45761） */
   get segments(): number { return WHIP_SEGMENTS[this.projId] ?? 20; }
   get rangeMultiplier(): number { return WHIP_RANGE[this.projId] ?? 1; }
-  /** timeToFlyOut = itemAnimationMax × MaxUpdates（:45685；月主子鞭固定 30 :45755-45758） */
+  /** timeToFlyOut（GetWhipSettings :49219-49230）：itemAnimationMax × MaxUpdates
+   *  （:45685；月主子鞭 ai2≥10 固定 30 :45755-45758）;ai2≥1000 通道 = 蛇环补挥
+   *  （ItemCheck_Shoot !withAudioVisualFeedback :49171 ai6=1000+itemAnimationMax×2 →
+   *  timeToFlyOut = ai2−1000,不再乘 MaxUpdates——蓝队 R7-40：847/849 补挥曾 ×3/2×
+   *  于原版;该通道同时天然压制 1035 补鞭（ai2≥10 门）,与原版一致） */
   get timeToFlyOut(): number {
+    if (this.ai2 >= 1000) return this.ai2 - 1000;
     return (this.ai2 >= 10 && this.projId === 1035 ? 30 : this.anim) * this.maxUpdates;
   }
   /** 锚点 = 玩家手部（GetPlayerArmPosition :37071 按持械帧偏移，此处取玩家中心近似） */
@@ -253,8 +258,10 @@ export class WhipProj extends Entity {
     // ---- 命中：每 update 沿实际曲线逐控制点放 18×18 盒（Colliding :14482-14494；
     //  Damage 每 update 跑一次 :15336-15340，此处按 MaxUpdates 插值等价）----
     for (let s = 1; s <= this.maxUpdates; s++) {
-      const pts = this.pointsAt(prevAi0 + s, true);
-      this.tryHit(game, owner, pts);
+      const ai0s = prevAi0 + s;
+      const pts = this.pointsAt(ai0s, true);
+      this.cutTilesAlong(game, pts);   // CutTiles（:15292-15300,蓝队 R7-38 整缺）
+      this.tryHit(game, owner, pts, ai0s);
     }
     // ---- 半程鞭尖音（AI_165 :45051-45070）：ai[0] 到达 (int)(timeToFlyOut/2f) 那一
     //  update,在鞭尖（FillWhipControlPoints 缺省视觉曲线 :45618 getActualCollisionPoints=
@@ -279,8 +286,13 @@ export class WhipProj extends Entity {
       const num2 = this.progress * 3; // :45041
       if (this.ai2 < num2) {
         this.ai2 += 1; // :45044
+        // 子鞭伤 = 母鞭当前 damage 字段（:48596-48610 NewProjectile 读现值——衰减链
+        //  :13497-13540 直接改写弹体 damage,母鞭已命中 N 敌后补鞭 = 满伤×0.95^N）。
+        //  蓝队 R7-39：曾传 this.damage（恒满伤）。本仓 ctor 会再乘召唤乘区,
+        //  故先除回（dmgNow 已含乘区+衰减,还原出衰减后的"基伤"再进 ctor）
+        const lashBase = this.dmgNow / (owner.summonDamageMult || 1);
         const lash = new WhipProj(owner.cx, owner.cy, this.aimAng(), this.projId, this.itemId,
-          this.damage, this.knockback, 30, this.speed,
+          lashBase, this.knockback, 30, this.speed,
           () => owner, this.aimAng);
         lash.ai2 = 10 + this.ai2; // :45047（≥10 = 子鞭标记）
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(lash, 'projectiles');
@@ -323,12 +335,55 @@ export class WhipProj extends Entity {
         Math.max(3, Math.trunc(echoDmg * 0.3)), echoKb * 0.25, echoAnim, echoSpeed,
         () => owner, this.aimAng);
       echo.isEcho = true;
+      echo.ai2 = 1000 + echoAnim * 2;   // ai6=1000+itemAnimationMax×2（Player.cs:49171）
       (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(echo, 'projectiles');
     }
   }
 
+  /** CutTiles（Projectile.cs:15292-15300 `Sets.IsAWhip[type]` 支）：FillWhipControlPoints
+   *  后逐控制点 `PlotTileLine(点−(w×scale/2,0), 点+(w×scale/2,0), h×scale, CutTiles)`
+   *  ——鞭全程割草族/瓦罐/蛛网（Damage() 内旁路副作用,不拦命中）。蓝队 R7-38 整缺：
+   *  召唤师用鞭清草/开罐手感缺失。PlotTileLine 直线光栅 ≈ 控制点盒域扫描
+   *  （鞭 18×18、scale 1 → ±9px 半盒;同帧去重防重复 cutTile） */
+  private cutTilesAlong(game: GameHooks, pts: V2[]): void {
+    const hw = this.w / 2, hh = this.h / 2;
+    const st = game.world.store;
+    const seen = new Set<number>();
+    for (const pt of pts) {
+      const x0 = Math.floor((pt.x - hw) / 16), x1 = Math.floor((pt.x + hw) / 16);
+      const y0 = Math.floor((pt.y - hh) / 16), y1 = Math.floor((pt.y + hh) / 16);
+      for (let ty = y0; ty <= y1; ty++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          if (!st.inBounds(tx, ty)) continue;
+          const key = ty * 100000 + tx;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          game.cutTile(tx, ty);
+        }
+      }
+    }
+  }
+
   /** 单次曲线快照的命中结算（tag/proc/debuff/buff 语义见各段注释） */
-  private tryHit(game: GameHooks, owner: Player | null, pts: V2[]): void {
+  private tryHit(game: GameHooks, owner: Player | null, pts: V2[], ai0At?: number): void {
+    // 1104 火鞭 OnFire 窗口（蓝队 R7-41）：buff 24 仅当鞭身 !wet && ai[0] ∈
+    // ((t/3)×2 ± 1) && 鞭尖 50×50 盒与敌盒相交（StatusNPC :11255-11272——中段
+    // "溅火"专属;曾表驱动无条件每击必上）。wet = 鞭心格有液体（原版 Collision
+    // wet 旗近似）;鞭尖 = 命中曲线末控制点
+    let spark1104 = false;
+    let tipBox1104: { x: number; y: number; w: number; h: number } | null = null;
+    if (this.projId === 1104) {
+      const stW = game.world.store;
+      const wxW = Math.floor(this.cx / 16), wyW = Math.floor(this.cy / 16);
+      const wet = stW.inBounds(wxW, wyW) && stW.liquid[stW.idx(wxW, wyW)] > 0;
+      const num2 = Math.trunc(this.timeToFlyOut / 3) * 2;      // :11259-11260
+      const a0 = ai0At ?? this.ai0;
+      if (!wet && a0 >= num2 - 1 && a0 <= num2 + 1) {          // :11262 中段 ±1
+        const tip = pts[pts.length - 1];
+        tipBox1104 = { x: tip.x - 25, y: tip.y - 25, w: 50, h: 50 };   // :11266 50×50 盒
+        spark1104 = true;
+      }
+    }
     for (const p of pts) {
       // 城镇 NPC:巫毒窄门(原版鞭=friendly 弹,同 Damage_PVE_Inner :11970-11972——
       // 仅向导 22/裁缝师 54 装备对应巫毒娃娃时可伤;18×18 控制点盒同敌怪判定)
@@ -345,8 +400,19 @@ export class WhipProj extends Entity {
         const dmg = this.dmgNow; // 当前鞭伤（已含召唤乘区+护穿；衰减链前）
         const wpOwner = this.ownerRef();
         e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068
-        // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）
-        applyProjStatus(this.projId, e as unknown as Record<string, number>);
+        // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）。
+        //  1104：Slimed(137) 照表;OnFire(24) 表项抑制、按上方窗口直投（:11255-11272）
+        if (this.projId === 1104) {
+          applyProjStatus(this.projId, e as unknown as Record<string, number>, { suppressBuff: 24 });
+          if (spark1104 && tipBox1104
+            && tipBox1104.x < e.x + e.w && tipBox1104.x + tipBox1104.w > e.x
+            && tipBox1104.y < e.y + e.h && tipBox1104.y + tipBox1104.h > e.y) {
+            applyBuffTicks(e as unknown as Record<string, number>, 24,
+              60 * (3 + Math.floor(Math.random() * 3)));   // 60×Next(3,6)=180-300t
+          }
+        } else {
+          applyProjStatus(this.projId, e as unknown as Record<string, number>);
+        }
         // 武器浸剂(StatusNPC:10559 门含 whip:IsAWhip)——鞭命中同享药剂 debuff
         applyMeleeImbue((game.player as unknown as { buffs: { has: (b: never) => boolean } }).buffs,
           e as unknown as Record<string, number>,

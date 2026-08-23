@@ -166,7 +166,7 @@ import { Lang } from '../i18n/Lang';
 import { setNpcNameResolver, setGlobalSubstitutionContext } from '../i18n/LanguageManager';
 import { clearPaperDollCache } from '../player/PaperDoll';
 import { portraitUrl } from '../data/npcPortraits';
-import { tileRunner } from '../world/gen/vanilla/TileRunner';
+import { oreRunner } from '../world/gen/vanilla/TileRunner';
 import { growTree, growPalmTree, growVanityTree, growAshTree, growGemTree } from '../world/gen/vanilla/TreePass';
 import type { GenState } from '../world/gen/vanilla/GenState';
 import { lastGenState } from '../world/gen/WorldGen';
@@ -6473,9 +6473,23 @@ export class Game implements GameHooks {
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
     // 光衰减每帧覆盖（LightingEngine.UpdateLightDecay :137-187）：群系水色 RGB 衰减表
     // + 夜枭 nightVision（air/solid ×1.03）——水下/洞穴视野随药水与群系变化
+    // SceneState 附加（SceneState.cs:303-360）：headcovered ×0.85、微光域 shimmerAlpha、
+    // getGoodWorld 衰减档（史莱姆女王 2000 内 ×0.6 / 神庙 ×0.88 / 地牢 ×0.94）
+    let ftwDecay: 'queen' | 'temple' | 'dungeon' | undefined;
+    if (this.world.seedFlags?.getGoodWorld) {
+      const queenNear = this.entities.enemies.some((e) => (e as Enemy).vanillaId === 245
+        && (e.x - player.x) ** 2 + (e.y - player.y) ** 2 < 2000 * 2000);
+      ftwDecay = queenNear ? 'queen'
+        : this.scene?.zoneTemple ? 'temple'
+          : this.scene?.zoneDungeon ? 'dungeon' : undefined;
+    }
     updateLightDecay(this.renderer.waterStyle, player.buffs.has(BuffType.NightOwl),
       this.blackout || player.buffs.has(BuffType.Blackout),   // buff 80 双源（:190-194）
-      player.buffs.has(BuffType.Darkness));                   // buff 22 blind（:185-189 + GlobalBrightness 1.0）
+      player.buffs.has(BuffType.Darkness), {                  // buff 22 blind（:185-189 + GlobalBrightness 1.0）
+        headcovered: player.buffs.obstructed,                 // buff 163（Player.cs:11421;LightingEngine.cs:199-203）
+        inShimmer: !!this.scene?.zoneShimmer,                 // SceneState.UpdateShimmer :338-360
+        ftwDecay,
+      });
     // 手持光源（原版 ItemCheck_EmitHeldItemLight Player.cs:48990）：
     // (Torches[type] && !wet) || WaterTorches[type] 才发光——入水熄灭；
     // 颜色 = TorchID.TorchColor(torchId)（TorchID.cs _lights 全表：
@@ -11922,8 +11936,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       { slot: 'adamantite', base: 111, alt: 223 },
     ];
     const td = TIER_ORES[tier];
+    // R8-12:原版全程 genRand(世界种子流)——改种子派生流(结构性等价,与 HardmodePass
+    // initializeHardMode 备案口径一致);矿种 roll 同流(:49384-49393 SavedOreTiers 首砸)
+    const rng = new RNG((this.world.seed ^ 0x5eed_0001) | 0);
     if (this.world.savedOreTiers[td.slot] === -1) {
-      this.world.savedOreTiers[td.slot] = Math.random() < 0.5 ? td.base : td.alt; // Next(2)==0 → 替代
+      this.world.savedOreTiers[td.slot] = rng.int(0, 1) === 0 ? td.base : td.alt; // Next(2)==0 → 替代
     }
     const oreSheet = this.world.savedOreTiers[td.slot];
     const ore = TILE_INTERNAL_BY_SHEET.get(oreSheet) ?? TILE_BY_KEY['ore_cobalt'];
@@ -11936,15 +11953,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (tier === 0) veins *= 1.05;              // 钴档恒 ×1.05（:49008）
     if (oreSheet !== td.base) veins *= 0.9;     // 替代矿更稀有（:48991/:49016/:49029）
     const band = tier === 0 ? this.world.groundLevel : tier === 1 ? this.world.rockLevel : (this.world.rockLevel * 2 + st.h) / 3;
-    const rng = new RNG((Math.random() * 1e9) | 0);
     const cap = Math.floor(veins);
     for (let k = 0; k < cap; k++) {
-      const x = 100 + Math.floor(Math.random() * (st.w - 200));
-      const y = Math.floor(band) + Math.floor(Math.random() * Math.max(1, st.h - 150 - Math.floor(band)));
-      // 双掷（WorldGen.cs:49095 十周年 / :49099 常规）：OreRunner(i,j,strength,steps)
+      // :49488-49494 OreRunner(Next(100,w-100), Next((int)band, h-150), …)
+      const x = rng.int(100, st.w - 100);
+      const y = rng.int(Math.floor(band), st.h - 150);
+      // 双掷（WorldGen.cs:49501/49505）：OreRunner(i,j,strength,steps)
       // 两参各独立取一次 genRand.Next(5,10)——单 r 同传两用会把脉粗细与长度锁死相关
       const vein = Game.altarOreVeinRoll(rng);
-      tileRunner(st, rng, lastGenState() ?? { worldSurface: this.world.groundLevel, lavaLine: st.h - 200, waterLine: this.world.groundLevel } as never, x, y, { strength: vein.strength, steps: vein.steps, type: ore, addTile: true });
+      // ★R8-10:祭坛矿走 OreRunner(49246)非 TileRunner——只替换白名单实心块/
+      // 不填空气腔/清油漆/恒斜率漂移(原 tileRunner addTile:true 会把矿填进洞穴)
+      const bb = oreRunner(st, rng, x, y, { strength: vein.strength, steps: vein.steps, type: ore, ntb: !!this.world.seedFlags?.notTheBees });
+      if (bb) this.chunks.markDirtyArea(bb.x0 - 1, bb.y0 - 1, bb.x1 + 1, bb.y1 + 1);
     }
     // 幽灵惩罚（:49506-49524）：flag2=true 起手,旅程刷怪滑杆 GetShouldDisableSpawnsFor
     // → flag2=false（不出）;★R3-7 曾无条件 1+rand(2) 只 Wraith
@@ -16111,28 +16131,86 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     DD2_EVENT_HOOKS.difficulty = () => this.world.oldOnesArmy.ongoingDifficulty;
   }
 
-  /** 压力板 135:踩上瞬间 HitSwitch(Collision.SwitchTiles 玩家语义;敌人触发见 Enemy 侧) */
+  /** 压力板 135:踩上瞬间 HitSwitch(Collision.SwitchTiles objType=5,Player.cs:28485) */
   private checkPressurePlates(): void {
-    // 原版 Collision.SwitchTiles(Player.cs:18439):扫玩家 AABB 覆盖的全部格,
-    // 命中压板 135 边沿触发(踩上/离开各一次,plateLatch 按格去重)
     const p = this.player;
-    const x0 = Math.floor(p.x / TILE), x1 = Math.floor((p.x + p.w - 1) / TILE);
-    const y0 = Math.floor(p.y / TILE), y1 = Math.floor((p.y + p.h - 1) / TILE);
     // 复用 Set(2026-08 审计 G9:此前每 tick new Set + [...spread],60Hz 恒定分配)
     const pressed = this._platePressed; pressed.clear();
-    for (let ty = y0; ty <= y1; ty++) {
-      for (let tx = x0; tx <= x1; tx++) {
-        if (this.wiring?.sheetOf(tx, ty) === 135) {
-          const key = tx + ',' + ty;
-          pressed.add(key);
-          if (!this.plateLatch.has(key)) this.wiring?.hitSwitch(tx, ty);
-        }
-      }
-    }
+    this.switchTilesScan(p, 5, this.plateLatch, pressed);
     for (const key of pressed) this.plateLatch.add(key);
     // Set 迭代中删除当前元素是安全的——省去 [...spread] 复制
     for (const key of this.plateLatch) {
       if (!pressed.has(key)) this.plateLatch.delete(key);
+    }
+  }
+
+  /** Collision.SwitchTiles(Collision.cs:3240-3377)1:1 接触扫描。
+   *  objType:2=NPC(NPC.cs:91619 全量 lifeMax>1 && !noTileCollide;type 白名单只管
+   *  蜗牛缩壳 ai 不影响 HitSwitch)/3=弹幕白名单 {99,1013,1047,655,727,1014,1021,
+   *  1048,1053,1054,1055,1057}(Projectile.cs:17195)/4=其余 tileCollide 弹幕
+   *  (HandleMovement :19978)/5=玩家(Player.cs:28485)。
+   *  判定:脚部带 [ty*16+12, ty*16+16.01) 与格柱 X 相交;风格门 frameY/18——
+   *  {2,3,4,6,7} 仅玩家(5)、{5} 排除 objType{1,4,5}(NPC 2/弹幕 3 可触)、{0,1} 全体;
+   *  210 地雷全体、443 间歇泉仅 objType{1,5}、442 感应垫板仅 objType 4 且按
+   *  frameX/22 四向 16×10 子矩形新旧位判定;风格 7 触发后 KillTile 一次性;
+   *  135 命中即 return(每实体每帧至多一块板),210/443 continue。
+   *  边沿触发经 latch(原版 oldPosition 全格带判定同构:入带触发/离带复位) */
+  private switchTilesScan(e: { x: number; y: number; w: number; h: number; id: number },
+                          objType: 2 | 3 | 4 | 5, latch: Set<string>, pressed?: Set<string>): void {
+    const w = this.wiring;
+    if (!w) return;
+    const st = this.world.store;
+    const x0 = Math.max(0, Math.floor(e.x / TILE) - 1);
+    const x1 = Math.min(st.w, Math.floor((e.x + e.w) / TILE) + 2);
+    const y0 = Math.max(0, Math.floor(e.y / TILE) - 1);
+    const y1 = Math.min(st.h - 40, Math.floor((e.y + e.h) / TILE) + 2);
+    for (let ty = y0; ty < y1; ty++) {
+      for (let tx = x0; tx < x1; tx++) {
+        const sh = w.sheetOf(tx, ty);
+        if (sh !== 135 && sh !== 210 && sh !== 443 && sh !== 442) continue;
+        // 脚部带判定(Collision.cs:3352-3357:vector.Y=j*16+12,带高 4.01)
+        const vy = ty * TILE + 12;
+        if (!(e.x + e.w > tx * TILE && e.x < tx * TILE + TILE
+          && e.y + e.h > vy && e.y < vy + 4.01)) continue;
+        const key = e.id + '|' + tx + ',' + ty;
+        if (sh === 442) {
+          // 感应垫板:仅 objType 4;frameX/22 四向 16×10 子矩形 + 新入旧出
+          if (objType === 4) {
+            const r = { x: tx * TILE, y: ty * TILE, w: 16, h: 10 };
+            switch (Math.floor(st.frameY[st.idx(tx, ty)] / 22)) {
+              case 0: r.y = ty * TILE + TILE - 10; break;
+              case 1: break;
+              case 2: r.w = 10; r.h = 16; break;
+              case 3: r.x = tx * TILE + TILE - 10; r.w = 10; r.h = 16; break;
+            }
+            const isIn = e.x + e.w > r.x && e.x < r.x + r.w && e.y + e.h > r.y && e.y < r.y + r.h;
+            if (isIn) {
+              pressed?.add(key);
+              if (!latch.has(key)) {
+                latch.add(key);
+                w.hitSwitch(tx, ty);
+              }
+            }
+          }
+          continue;
+        }
+        // 旧位全格带跳过(:3356 oldPosition 判定;latch 入带触发/离带复位同构)
+        pressed?.add(key);
+        if (latch.has(key)) continue;
+        latch.add(key);
+        if (sh === 210) { w.hitSwitch(tx, ty); continue; }          // 地雷:全体(:3374-3378)
+        if (sh === 443) {                                            // 间歇泉:objType 1/5(:3379-3385)
+          if (objType === 1 || objType === 5) w.hitSwitch(tx, ty);
+          continue;
+        }
+        // 压板 135 风格门(:3358-3368)
+        const style = Math.floor(st.frameY[st.idx(tx, ty)] / 18);
+        if ((style === 4 || style === 2 || style === 3 || style === 6 || style === 7) && objType !== 5) { latch.delete(key); pressed?.delete(key); continue; }
+        if (style === 5 && (objType === 1 || objType === 4 || objType === 5)) { latch.delete(key); pressed?.delete(key); continue; }
+        w.hitSwitch(tx, ty);
+        if (style === 7) this.breakTile(tx, ty);  // 一次性板(:3366-3372 KillTile)
+        return;  // :3375 命中即返回(每实体每帧至多一块压板)
+      }
     }
   }
 
@@ -16199,31 +16277,34 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  小动物族触发压板 135(NPC.cs:47613 白名单由 critters 桶近似);
    *  巨石弹幕(原版 type 99,Projectile.cs:11833)触发 135 与弹幕垫板 442 */
   private updateEntityPlates(): void {
-    const w = this.wiring;
-    if (!w) return;
     const pressed = this._entityPlatePressed; pressed.clear();
-    const scan = (e: Entity, checkPad: boolean) => {
-      const x0 = Math.floor(e.x / TILE), x1 = Math.floor((e.x + e.w - 1) / TILE);
-      const y0 = Math.floor(e.y / TILE), y1 = Math.floor((e.y + e.h - 1) / TILE);
-      for (let ty = y0; ty <= y1; ty++) {
-        for (let tx = x0; tx <= x1; tx++) {
-          const sh = w.sheetOf(tx, ty);
-          if (sh === 135 || (checkPad && sh === 442)) {
-            const key = e.id + '|' + tx + ',' + ty;
-            pressed.add(key);
-            if (!this.entityPlateLatch.has(key)) w.hitSwitch(tx, ty);
-          }
-        }
-      }
+    const latch = this.entityPlateLatch;
+    // NPC 全量(NPC.cs:91619:lifeMax>1 && !noTileCollide → objType 2;敌怪/城镇 NPC/
+    // 小动物同路——小动物原版即 NPC,lifeMax 5)
+    const npcScan = (e: Entity) => {
+      const en = e as unknown as { noTileCollide?: boolean; maxHp?: number; hp?: number };
+      if (en.noTileCollide) return;
+      if ((en.maxHp ?? en.hp ?? 0) <= 1) return;
+      this.switchTilesScan(e as { x: number; y: number; w: number; h: number; id: number }, 2, latch, pressed);
     };
-    for (const c of this.entities.critters) scan(c, false);
-    for (const e of this.entities.projectiles) {
-      // duck-typing 判巨石(勿用 instanceof:跨模块实例会判失败)
-      if ((e as TrapShot).kind === 'boulder') scan(e, true);
+    for (const c of this.entities.critters) npcScan(c);
+    for (const n of this.entities.npcs) npcScan(n);
+    for (const en of this.entities.enemies) npcScan(en);
+    // 弹幕:巨石族(vid 99 ∈ 白名单)走 objType 3(可触发风格 5 板);
+    // 其余 tileCollide 弹幕走 objType 4(地雷 210/感应垫板 442;Projectile.cs:19978
+    // HandleMovement 全量,owner==myPlayer 单机恒真)
+    for (const p of this.entities.projectiles) {
+      const kind = (p as TrapShot).kind;
+      if (kind === 'boulder') {
+        this.switchTilesScan(p as { x: number; y: number; w: number; h: number; id: number }, 3, latch, pressed);
+      }
+      this.switchTilesScan(p as { x: number; y: number; w: number; h: number; id: number }, 4, latch, pressed);
     }
-    for (const key of pressed) this.entityPlateLatch.add(key);
-    for (const key of this.entityPlateLatch) {
-      if (!pressed.has(key)) this.entityPlateLatch.delete(key);
+    for (const key of pressed) latch.add(key);
+    // 离带复位:仅清"压板/垫板"键(210/443 无 latch 语义,键不会入 pressed——
+    // 但 442/135 的键在 pressed 缺席时清)
+    for (const key of latch) {
+      if (!pressed.has(key)) latch.delete(key);
     }
   }
 
@@ -18256,6 +18337,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1) // 0.65 自造已摘（glove×2/Titan×1.5=P:52477-52498）
         * (swingVid === 3106 ? 1 + (1 - this.player.stealth) : 1);
       const killed = e.hurt(dmg, kdir * kb, 0, this, this.player.equipStats.armorPen + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165);音/飘值=StrikeNPC 单点
+      // 丰盛大餐 336（OnKillNPC :20627-20630：externalKillingBlowSource is Item
+      // { type: 5096 }（火腿棍）→ AddBuff(336, 420)=7s。R5-F4：近战击杀通道接线——
+      // 效果端 lifeRegen+6（:19283-19287）在 Player 再生累加器）
+      if (killed && swingVid === 5096) this.player.buffs.apply(BuffType.HeartyMeal, 7);
       // 武器浸剂（meleeEnchant 表 Player.cs:11604 → 敌 debuff :6141-6171 时长 Next(a,b) 秒）
       if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
       if (this.player.buffs.has(BuffType.ImbueCursed)) e.cursedT = Math.max(e.cursedT, 3 + Math.random() * 4);

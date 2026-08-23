@@ -84,6 +84,8 @@ const LILY_FLOOR_ROWS: Array<[Set<number>, number]> = [
   [new Set([109, 116]), 18],
   [new Set([60]), 36],
 ];
+/** solid∧solidTop∧非平台族（CheckLilyPad 59305 kill 支;Main.cs:9798/9800） */
+const LILY_SOLIDTOP_KILL = new Set([239, 380]);
 
 // ── KillTile 尘粒掷骰族（与 HalfBrickPass U 批同源表；原版 sheet id 键）────────
 // 原版 KillTile(i,j)（cs:63747-63751）每次击杀调 KillTile_GetTileDustAmount（cs:66654）
@@ -225,18 +227,18 @@ export class LiquidSim {
    *  生成期常规交互不落块，唯独收尾那次允许落块 */
   private createMergeTilesDuringGen = false;
   /** 确定性随机（原版 3 格分支用 WorldGen.genRand 而非 Main.rand——Liquid.cs:639。
-   *  mulberry32 与 world.seed 派生：同 seed 世界双路径沉降结果逐格一致） */
-  private genState: number;
+   *  ★R8-20:运行期回退流 = UnifiedRandom(world.seed) 专用持久流（vanilla 运行期
+   *  UpdateLiquid 挂 SwapRandom("UpdateLiquid") → Main.cs:3300-3311 每会话一建
+   *  `new UnifiedRandom(Seed)` 只被本 pass 消费;读档沉降原版吃全局 Main.rand,
+   *  本仓无全局流,同用本流——登记偏差）。曾用 mulberry32=与 vanilla 流位不同构 */
+  private runtimeRand: UnifiedRandom | null = null;
   private genRand(): number {
-    this.genState = (this.genState + 0x6d2b79f5) | 0;
-    let t = this.genState;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    if (!this.runtimeRand) this.runtimeRand = new UnifiedRandom(this.world.seed);
+    return this.runtimeRand.nextDouble();
   }
 
   /** genRand.Next(max)（Liquid.cs:898 / KillTile 尘掷族）：pass 链钩优先，
-   *  缺省回退私有 mulberry32（旧路径兼容，*[0,1) 采样与 Next 同耗 1 掷） */
+   *  缺省回退种子派生 UnifiedRandom 专流（R8-20） */
   private roll(max: number): number {
     if (this.passRand) return this.passRand(max);
     return Math.floor(this.genRand() * max);
@@ -479,6 +481,11 @@ export class LiquidSim {
       const d = TILE_DEFS[id];
       if (d && d.solid && !d.platform) this.solidNP[id] = 1;
     }
+    // ★R8-18:泡泡 379 在液体域全程=实心（Liquid.cs:453 Update 头/QuickWater :114
+    // `Main.tileSolid[379]=true`;仅实体段 Main.cs:17936 置 false、:17982 进
+    // UpdateWorld 前置回——本 LUT 只被液体域消费,恒 1 即原版液体窗口口径）。
+    // 缺此=水自由穿过泡泡机、被封液体不出列、AddWater 拒收失效
+    if (this.id379 >= 0) this.solidNP[this.id379] = 1;
   }
 
   /** 溢出缓冲长度（Game 的生成期轮上限计算用，原版 LiquidBuffer.numLiquidBuffer） */
@@ -1066,8 +1073,10 @@ export class LiquidSim {
       if (lt !== 2) { sum += lq; st.liquid[il] = 0; }
       if (rt !== 2) { sum += rq; st.liquid[ir] = 0; }
       if (ut !== 2) { sum += uq; st.liquid[iu] = 0; }
-      if (lt === 3 || rt === 3 || ut === 3) { type = CRISPY_HONEY; mergeType = 3; }
-      if (lt === 4 || rt === 4 || ut === 4) { type = AETHERIUM; mergeType = 4; } // 微光优先级最高（L1443-1451）
+      // ★R8-19:anyX 旗标一律带 liquid>0 门(Tile.cs:402-431 anyHoney/anyShimmer)——
+      // 残型字节(空格清液不清型,waterCheckInner≡WG57:81707)不得选产物
+      if ((lq > 0 && lt === 3) || (rq > 0 && rt === 3) || (uq > 0 && ut === 3)) { type = CRISPY_HONEY; mergeType = 3; }
+      if ((lq > 0 && lt === 4) || (rq > 0 && rt === 4) || (uq > 0 && ut === 4)) { type = AETHERIUM; mergeType = 4; } // 微光优先级最高（L1443-1451）
       if (sum < 24) return;
       // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill（火把/植物被顶掉，非 decor 近似）
       const act = st.flags[i5] !== 0;
@@ -1084,8 +1093,9 @@ export class LiquidSim {
       const belowT = st.type[id];
       // flag：本格容器而下方不是（Liquid.cs:1285-1288）——容器内液体允许向下合并
       const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
-      // 非水本格 + 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1289-1295）
-      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
+      // 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1287 `thisLiquidType != 0 &&
+      // tileCut`——岩浆/蜂蜜/微光三路恒真,水路无此支;★R8-23 曾误译 selfT!==1）
+      if (belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
       // 落块门（Liquid.cs:1294）：下方空 / tileObsidianKill / 容器位 三者其一
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
@@ -1112,9 +1122,11 @@ export class LiquidSim {
       if (rt !== 3) { sum += rq; st.liquid[ir] = 0; }
       if (ut !== 3) { sum += uq; st.liquid[iu] = 0; }
       if (sum < 24) return; // 1456 LiquidCheck 统一阈值 24
-      const type = (lt === 4 || rt === 4 || ut === 4) ? AETHERIUM
-        : (lt === 2 || rt === 2 || ut === 2) ? CRISPY_HONEY : HONEY_BLOCK;
-      const mergeType = (lt === 4 || rt === 4 || ut === 4) ? 4 : (lt === 2 || rt === 2 || ut === 2) ? 2 : 1;
+      // ★R8-19:产物旗标带 liquid>0 门（GetLiquidMergeTypes L1386+ anyLava/anyShimmer）
+      const type = ((lq > 0 && lt === 4) || (rq > 0 && rt === 4) || (uq > 0 && ut === 4)) ? AETHERIUM
+        : ((lq > 0 && lt === 2) || (rq > 0 && rt === 2) || (uq > 0 && ut === 2)) ? CRISPY_HONEY : HONEY_BLOCK;
+      const mergeType = ((lq > 0 && lt === 4) || (rq > 0 && rt === 4) || (uq > 0 && ut === 4)) ? 4
+        : ((lq > 0 && lt === 2) || (rq > 0 && rt === 2) || (uq > 0 && ut === 2)) ? 2 : 1;
       // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill
       const act = st.flags[i5] !== 0;
       if (act && !this.obsidianKillIds.has(st.type[i5])) return;
@@ -1128,8 +1140,9 @@ export class LiquidSim {
       const belowAct = st.flags[id] !== 0;
       const belowT = st.type[id];
       const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
-      // 非水本格 + 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1289-1295）
-      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
+      // 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1287 `thisLiquidType != 0 &&
+      // tileCut`——岩浆/蜂蜜/微光三路恒真,水路无此支;★R8-23 曾误译 selfT!==1）
+      if (belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; } // 1456 统一 24
       const type = dt === 4 ? AETHERIUM : dt === 2 ? CRISPY_HONEY : HONEY_BLOCK;
@@ -1154,14 +1167,20 @@ export class LiquidSim {
       if (lt !== 4) { sum += lq; st.liquid[il] = 0; }
       if (rt !== 4) { sum += rq; st.liquid[ir] = 0; }
       if (ut !== 4) { sum += uq; st.liquid[iu] = 0; }
-      // mergeType == thisType 门（L1269）：三邻中仍有微光 → 不产块（liquidMergeType 被拉回 3）
-      if (sum < 24 || lt === 4 || rt === 4 || ut === 4) return;
+      // ★R8-19:mergeType != this 门（L1269）真值 = 三邻中有水/岩浆/蜂蜜（anyX 带
+      // liquid>0 门）——GetLiquidMergeTypes(this=微光)对水/岩浆/蜂蜜各置 mergeType
+      // 0/1/2（L1437-1470 后写覆盖），全无则 mergeType 恒 this → 不产块。
+      // 此前误译成"三邻有微光则弃"（恒假门）。mergeType = 水→岩浆→蜂蜜定序最后命中
+      const wNear = (lq > 0 && lt === 1) || (rq > 0 && rt === 1) || (uq > 0 && ut === 1);
+      const lNear = (lq > 0 && lt === 2) || (rq > 0 && rt === 2) || (uq > 0 && ut === 2);
+      const hNear = (lq > 0 && lt === 3) || (rq > 0 && rt === 3) || (uq > 0 && ut === 3);
+      if (sum < 24 || (!wNear && !lNear && !hNear)) return;
       // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill
       const act = st.flags[i5] !== 0;
       if (act && !this.obsidianKillIds.has(st.type[i5])) return;
       st.liquid[i5] = 0;
       st.liquidType[i5] = 0;
-      this.createMergeTile(x, y, AETHERIUM, 4, (lt !== 4 ? lt : rt !== 4 ? rt : ut) || 1);
+      this.createMergeTile(x, y, AETHERIUM, 4, hNear ? 3 : lNear ? 2 : 1);
     } else {
       if (dq <= 0 || dt === 4) return;
       // 情形 B：仅下方有异种液体 → 产物生成在下方格（Liquid.cs:1275-1317）
@@ -1170,8 +1189,9 @@ export class LiquidSim {
       const belowAct = st.flags[id] !== 0;
       const belowT = st.type[id];
       const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
-      // 非水本格 + 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1289-1295）
-      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
+      // 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1287 `thisLiquidType != 0 &&
+      // tileCut`——岩浆/蜂蜜/微光三路恒真,水路无此支;★R8-23 曾误译 selfT!==1）
+      if (belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
       st.liquid[i5] = 0; st.liquidType[i5] = 0;
@@ -1290,9 +1310,11 @@ export class LiquidSim {
     }
     if (bad) { this.killTileAt(x, y); return; }
     // 阶段 5 bloom 切换（45981+ case 5 尾段）：Daybloom(82) 豁免，仅岩浆格生效
+    // ★R8-22:anyLava()=liquid>0 && lava（Tile.cs:416-422,WG57:46451）——液退净残型
+    // 岩浆不做 83↔84 互转
     if (stage !== 5) return;
     const t = st.type[i5];
-    if (t === this.herbSproutId || st.liquidType[i5] !== 2) return;
+    if (t === this.herbSproutId || !(st.liquid[i5] > 0 && st.liquidType[i5] === 2)) return;
     if (st.liquid[i5] > 16) {
       if (t === this.herbMatureId) st.setTile(x, y, this.herbBloomId, st.frameX[i5], st.frameY[i5]);
     } else if (t === this.herbBloomId) {
@@ -1335,8 +1357,12 @@ export class LiquidSim {
         // 下方退水成空 → 下移一格（59289-59304）
         st.setTile(x, y + 1, this.lilyPadId, st.frameX[i5], st.frameY[i5]);
         st.setTile(x, y, 0);
-      } else if (!belowDef?.platform && (!belowDef?.solid)) {
-        // 下方被非平台实心家具占据 → 掉落清除（59305-59312）
+      } else if (!belowDef?.platform && (!belowDef?.solid
+        || LILY_SOLIDTOP_KILL.has(TILE_DEFS[st.type[ib]]?.vanilla?.sheet ?? -1))) {
+        // 下方被非平台实心家具占据 → 掉落清除（59305-59312: !Platform &&
+        // (!tileSolid || tileSolidTop)——solid∧solidTop∧非平台族仅 {239,380}
+        // （Main.cs:9798/9800 梁/花箱,Platforms 表无之）;★R8-21 曾漏 solidTop 半边;
+        //   门 10 tileSolidTop=false（Main.cs 无赋值）原版保垫——红队该半句有误）
         this.killTileAt(x, y);
       }
     }

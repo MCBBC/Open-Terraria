@@ -183,7 +183,7 @@ export class BiomeBackground {
   private instantBG = 0;
   /** BackgroundChangeFlashInfo._flashPower（13 area 槽；Renderer 消费画黑闪） */
   readonly bgFlash = new Float64Array(13);
-  private lastFlashStyle = 0;
+  private lastFlashStyle = -1;   // −1=未登记（首帧只登记不闪）
   /** 森林风格 → 该段 WorldGen 生成背景 ID（GetCurrentBackgroundOfStyle :8062
    *  的 treeBG1..4 = treeStyle[0..3]；等值 ⇒ 视觉相同 ⇒ 过渡可瞬切） */
   private forestBgId(world: World, style: number): number {
@@ -410,7 +410,9 @@ export class BiomeBackground {
       for (let i = 0; i < this.bgFlash.length; i++) {
         this.bgFlash[i] = Math.max(0, this.bgFlash[i] - 0.05 * frames);   // UpdateFlashValues :31-37
       }
-      if (this.bgStyle !== this.lastFlashStyle) {
+      if (this.lastFlashStyle === -1) {
+        this.lastFlashStyle = this.bgStyle;   // 首帧只登记不闪（原版 flash 燒在生成期被加载屏盖住）
+      } else if (this.bgStyle !== this.lastFlashStyle) {
         const area = STYLE_TO_AREA[this.bgStyle];
         if (area !== undefined) this.bgFlash[area] = 1;
         this.lastFlashStyle = this.bgStyle;

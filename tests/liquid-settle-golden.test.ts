@@ -55,10 +55,11 @@ describe('液体沉降 golden(优化等价性闸门)', () => {
     const st = world.store;
     const hash = [st.liquid, st.liquidType, st.type, st.flags].map((a) =>
       fnv1a(new Uint8Array(a.buffer, a.byteOffset, a.byteLength))).join(' ');
-    expect(hash).toBe('3675701a d6806ecf b6f70ec5 e84ee6b5');
-    // golden 更新（DD 终清批 2026-08-17）：轮上限 max(1000,n3*5) → 原版精确 n3*5
-    // （WorldGen.cs:16252/21079；#97 x86 实证尾轮 2 振子格每轮恰 10 迭代打满预算
-    // break——下限 1000 多跑 8×990 迭代=末态/掷流漂移）。旧哈希 f4f6614e 为下限版
-    // 快照;type/flags/liquidType 三通道不变,仅 liquid 通道随尾轮提前止损更新。
+    expect(hash).toBe('05d92427 0ea8b4ae b6f70ec5 e84ee6b5');
+    // golden 更新（蓝队 r8 批 2026-08-24）：shimmerCheck 情形 A 的 mergeType!=this 门
+    // 由误译"三邻有微光则弃"改为 vanilla 真值"三邻有水/岩浆/蜂蜜(带 liquid>0 门)才产块"
+    // （GetLiquidMergeTypes Liquid.cs:1386-1454;R8-19）——夹具微光腔残型字节场景
+    // 旧门吞合并,新门按 vanilla 补产 Aetherium。type/flags 通道不变,liquid/liquidType
+    // 随合并清零差异更新。旧哈希 3675701a 为误译版快照;更早 f4f6614e 为轮上限下限版。
   }, 120000);
 });

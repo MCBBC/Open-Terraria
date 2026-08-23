@@ -69,7 +69,7 @@ describe('小动物 AI 家族', () => {
     expect(jumpVy).toBeGreaterThan(-5.7);
   });
 
-  it('蚱蜢 377（aiStyle 1）：玩家 200px 外不蹦；靠近才激愤跳', () => {
+  it('蚱蜢 377（aiStyle 1）：跳 machine 平静态照跑（R6-B 2-3，1457 :62135 门只看落地）；激愤才索敌转向', () => {
     const far = critterWorld({ x: 70, y: 40 });
     const e = Enemy.fromVanilla(377, 40 * 16, 59 * 16)!;
     let jumped = false;
@@ -77,7 +77,9 @@ describe('小动物 AI 家族', () => {
       e.fixedUpdate(1 / 60, far.hooks);
       if (e.vy < -1) { jumped = true; break; }
     }
-    expect(jumped).toBe(false); // 远处保持走路档
+    // 1457 :62135 贴地门不含 flag3——平静蚱蜢原地蹦跳（flag3 只关 TargetClosest
+    // :62245 与激愤逃跳反转 :62305；曾自造"0.2 慢爬不进跳循环"档）
+    expect(jumped).toBe(true);
     const near = critterWorld({ x: 41, y: 58 });
     const e2 = Enemy.fromVanilla(377, 40 * 16, 59 * 16)!;
     let hopped = false;

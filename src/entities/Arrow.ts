@@ -963,6 +963,7 @@ export class Arrow extends Entity {
       // → 缺省路径同式，5 拍淡入）
       case 207: case 837: case 92: return (255 - this.alpha) / 255;
       case 114: return (255 - this.alpha) / 255;   // 邪恶三叉戟（缺省路径同式;AI 侧速度 Remap 改写）
+      case 604: return (255 - this.alpha) / 255;   // 孢子云（aiStyle 115 alpha+10/t 淡出 :35062-35068）
       case 163: case 310: case 1008: case 1009: case 1010: case 1011:
         return (255 - this.alpha) / 255;
       case 514: return (255 - this.alpha) / 255;   // 钉 aiStyle 93 渐显（:33427-33434）
@@ -1355,14 +1356,20 @@ export class Arrow extends Entity {
     }
   }
 
-  /** 单次子步（无 extraUpdates 时即整帧本体） */
+  /** 单次子步（无 extraUpdates 时即整帧本体）——timeLeft 递减在 AI/位移/命中之后。
+   *  蓝队 R7-5：原版 `timeLeft--; if (timeLeft <= 0) Kill()` 位于子步循环【末尾】
+   *  （Update :17307-17311，AI/位移/Damage 之后）——AI 恰好跑 timeLeft 次,且寿命尽
+   *  当拍即杀（Kill 链如 AoeExplosion 同拍触发）。曾在子步头递减：全体 Arrow 系
+   *  寿命恒少 1 个 AI update（timeLeft 门控型 837 −33 速消/639 重力门级联偏移一拍） */
   private subStep(game: GameHooks): void {
-    // timeLeft 递减时点（蓝队 R7-5）：原版 `timeLeft--; if (timeLeft <= 0) Kill()` 在
-    // 子步循环【末尾】（Update :17307-17311，AI/位移/Damage 之后）——AI 恰好跑
-    // timeLeft 次。本仓递减在子步头，判死须用 `< 0`（第 timeLeft+1 次子步头部即杀、
-    // 不跑 AI）——曾用 `<= 0` 使全体 Arrow 系寿命恒少 1 个 AI update（timeLeft 门控型
-    // 837 −33 速消/639 重力门级联偏移一拍）
-    if (--this.life < 0) { this.killNow(game); return; }
+    if (this.life <= 0) { this.killNow(game); return; }   // 防御（正常由尾部递减杀）
+    this.subStepAI(game);
+    if (this.dead) return;                                // AI 侧已杀（killNow 已走）
+    if (--this.life <= 0) this.killNow(game);
+  }
+
+  /** 子步 AI 本体（subStep 包装——life 递减/判死收口在包装层） */
+  private subStepAI(game: GameHooks): void {
     const world = game.world;
     this.age++;
     // 469 蜂箭入水即消亡（AI_001 头 Projectile.cs:51125 `type == 469 && wet &&
@@ -1489,6 +1496,19 @@ export class Arrow extends Entity {
           this.killNow(game);
           return;
         }
+      }
+    } else if (this.projId === 604) {
+      // ---- 604 孢子云（aiStyle 115 :35047-35069,603 悠悠球伴生弹——蓝队 R7-30）----
+      //  SetDefaults :6073-6083：14×14/friendly/penetrate −1/melee/scale 1.2/
+      //  IDStatic 10t。AI：光 0.075/0.3/0.15、速度 ×0.985 阻尼、旋转 +=vx×0.2
+      //  ±0.08、ai[1]>30 后 alpha +10/t 至 255 消亡（约 57t 寿命）
+      this.lightRGB = [0.075, 0.3, 0.15];
+      this.vx *= 0.985; this.vy *= 0.985;
+      this.spinRot += this.vx * 0.2 + (this.vx > 0 ? 0.08 : -0.08);
+      this.aiCnt++;
+      if (this.aiCnt > 30) {
+        this.alpha = Math.min(255, this.alpha + 10);
+        if (this.alpha >= 255) { this.killNow(game); return; }
       }
     } else if (this.projId === 614) {
       // ---- 614 星尘细胞弹 = aiStyle 113 TargetSticker（:41289-41330）----
@@ -2395,16 +2415,10 @@ export class Arrow extends Entity {
         // Damage_PVE flag2 `usesLocalNPCImmunity && array[i] == 0` :11858 同式；
         // 花瓣 1038 = 30t，过期后照常走下方分支）
         if ((this.spawnImmuneCd.get(e.id) ?? 0) > 0) continue;
-        // 376 小鬼火球 IDStatic 共享免疫（usesIDStaticNPCImmunity + cooldown 6t
-        // :4612-4615——全场同型一张表,多只小鬼齐射不叠伤;蓝队 R7-24 曾走逐弹 hitSet）
-        if (this.projId === 376) {
-          const now376 = Date.now();
-          if ((ID_STATIC_376.get(e.id) ?? 0) > now376) continue;
-          ID_STATIC_376.set(e.id, now376 + 100);   // 6t = 100ms
-          if (ID_STATIC_376.size > 512) {
-            for (const [k, v] of ID_STATIC_376) if (v <= now376) ID_STATIC_376.delete(k);
-          }
-        }
+        // 376 小鬼火球 / 604 孢子云 IDStatic 共享免疫（usesIDStaticNPCImmunity——
+        // 全场同型一张表,多弹齐射不叠伤;蓝队 R7-24 曾走逐弹 hitSet）
+        if ((this.projId === 376 || this.projId === 604)
+          && !idStaticCheck(this.projId, e.id, this.projId === 376 ? 100 : 167)) continue;
         // 502 喵刀弹：localNPCHitCooldown=10t 同敌再命中（穿透弹 hitSet 是永久免疫，
         // 502 是"同一敌 10t 冷却后可再咬"——SetDefaults :5466-5468）
         if (this.projId === 502) {
@@ -2771,7 +2785,7 @@ export class Arrow extends Entity {
     for (const [k, v] of this.pHitCd) {
       if (v <= 1) this.pHitCd.delete(k); else this.pHitCd.set(k, v - 1);
     }
-    if (--this.life < 0) { this.piranhaKill(game); return; }   // R7-5 同 subStep（:17307 递减在 AI 后）
+    if (--this.life < 0) { this.piranhaKill(game); return; }   // R7-5：AI 恰跑 timeLeft 次（食人鱼无 Kill 链,杀拍差一子步无观察面,备案）
     this.age++;
     // 淡入（:26067-26071）
     this.pAlpha = Math.max(0, this.pAlpha - 50);

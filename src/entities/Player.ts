@@ -2392,8 +2392,10 @@ export class Player extends Entity {
         else this.buffs.remove(bt);
       });
     }
-    // 乘区外 flat lifeRegen 单位缓存（闪亮石静止 +4 :19248;魂镰 num3 在下方 soulDrainBonus）
+    // 乘区外 flat lifeRegen 单位缓存（闪亮石静止 +4 :19248;丰盛大餐 +6 :19283-19287;
+    // 魂镰 num3 在下方 soulDrainBonus）
     let shinyFlatUnits = 0;
+    const heartyFlatUnits = this.buffs.has(BuffType.HeartyMeal) ? 6 : 0;   // 3HP/s
     this.lifeRegenTime += 1 + (this.buffs.has(BuffType.Honey) ? 2 : 0);   // 蜂蜜 +2/t（:18954 加法并列项）
     // 神盾水晶 +0.2/t（★V2a 复核 ⚠️e 勘误：原版 :18930-18934 为【加法独立项】,
     // 曾写成 (1+蜂蜜)×1.2 乘算 → 蜂蜜同挂时 3.6/t vs 原版 3.2/t）
@@ -2463,9 +2465,9 @@ export class Player extends Entity {
       const rf = Math.floor(num5);
       const rd = num5 - rf;
       const rounded = rd > 0.5 ? rf + 1 : rd < 0.5 ? rf : (rf % 2 === 0 ? rf : rf + 1);
-      // lifeRegenCount 语义：rounded(num5) + 乘区外 flat（闪亮石静止 +4、魂镰 num3）
-      // 逐 tick 入账,满 120 单位 = 1 HP（:19384 + :19407-19433）
-      this.regenAccum += (rounded + shinyFlatUnits + this.soulDrainBonus) / 120;
+      // lifeRegenCount 语义：rounded(num5) + 乘区外 flat（闪亮石静止 +4、丰盛大餐 +6、
+      // 魂镰 num3）逐 tick 入账,满 120 单位 = 1 HP（:19384 + :19407-19433）
+      this.regenAccum += (rounded + shinyFlatUnits + heartyFlatUnits + this.soulDrainBonus) / 120;
       if (this.regenAccum >= 1) {
         const n = Math.floor(this.regenAccum);
         this.regenAccum -= n;
@@ -3369,12 +3371,14 @@ export class Player extends Entity {
       this.vy = Math.max(-lJSpd, Math.min(lMaxFall, this.vy));
       this.fallStartY = null;
     } else {
-      if ((jumpEdge || eqJ.autoJump) && this.onGround) {
+      if (this.inputJump && (jumpEdge || (this.ridingMount ? this.mount.autoJump : eqJ.autoJump)) && this.onGround) {
         // 跳跃速度 = 基础 + jumpSpeedBoost（蛙腿族 +1.6，Player.jumpSpeedBoost :22427）；
         // 重力倒置时方向取反（gravDir，Player.cs:3207 全部 vy 乘 gravDir 语义）
         // 起跳门 = releaseJump || (autoJump && vy==0)（JumpMovement :20845——按住跳键
-        // 落地不自动连跳,须松键再按;蛙蹼族 autoJump（:14507/:14533/:14539/:14546）
-        // 才免松键。R5-F12：旧 held 门（按住即落地重跳）= 全员恒 autoJump,已废）
+        // 落地不自动连跳,须松键再按;autoJump 来源 = 蛙蹼族配饰（:14507/:14533/:14539/
+        // :14546）或坐骑 constantJump 族（Mount.UpdateEffects :4850 `mountedPlayer.
+        // autoJump = AutoJump`——骑乘期【覆写】配饰档）。R5-F12：旧 held 门（按住即
+        // 落地重跳）= 全员恒 autoJump,已废）
         this.vy = -mJumpSpd * gd;
         this.jumpHold = mJumpTicks;
         jumpStartedThisTick = true;

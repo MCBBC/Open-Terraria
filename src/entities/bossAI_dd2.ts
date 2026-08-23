@@ -1384,9 +1384,14 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
   // ---- 招式选择（:66476-66484,ai[0]==0 且出生 60t 后） ----
   if (e.ai0 === 0 && x[3] >= 60) {
     let next = 0;
-    // ±600×±200 内受伤友军 <2 → 强制召骷髅（:66478-66492）
+    // ±600×±200 内受伤友军 <2 → 强制召骷髅（1457 :66642-66656）——原版扫 Main.npc
+    // 全体（城镇 NPC 受伤同样触发召骷髅），本仓补 entities.npcs（R6-B 5-10）
     let hurt = 0;
     for (const n of game.enemies() as Enemy[]) {
+      if (n.dead || n.hp >= n.maxHp) continue;
+      if (Math.abs(n.cx - e.cx) <= 600 && Math.abs(n.cy - e.cy) <= 200) hurt++;
+    }
+    for (const n of (game as unknown as { entities: { npcs: Array<{ dead: boolean; hp: number; maxHp: number; cx: number; cy: number }> } }).entities.npcs) {
       if (n.dead || n.hp >= n.maxHp) continue;
       if (Math.abs(n.cx - e.cx) <= 600 && Math.abs(n.cy - e.cy) <= 200) hurt++;
     }
@@ -2158,6 +2163,8 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
   const x = dd2LocalAI(e);
   const id = e.vanillaId ?? 0;
+  // flag（:63614）：tick 初 vx==vy==0 且未受击——卡死小跳（:65030）消费
+  const flag107Stuck = e.vx === 0 && e.vy === 0 && !e.justHit;
   // ---- 目标（先取,各族 case 内的音效/选招都读它） ----
   let tgt = w107Target(game, e, player);
   // ---- 食人魔距离选招（cs:63528-63555）：ai[0]<=0 且出生 60t 后,按目标距定 ai[1] ----

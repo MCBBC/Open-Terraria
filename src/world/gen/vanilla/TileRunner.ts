@@ -336,3 +336,76 @@ function inUndergroundDesert(gs: GenState, x: number, y: number): boolean {
   const ud = gs.undergroundDesert;
   return !!ud && x >= ud.x0 && x <= ud.x1 && y >= ud.y0 && y <= ud.y1;
 }
+
+// ---- OreRunner(WorldGen.cs:49246-49355)——祭坛矿/地表矿脉专用原语,与 TileRunner 是
+//      两个不同原语(R8-10):①无 addTile 语义,只改写 active 格(矿脉绝不凸进空气腔);
+//      ②白名单替换表(49312):泥土/石/草族/沙/雪 147/粘土/泥 59/苔族 tileMoss/
+//      199/200/203/234/396-403 全家族/(NTB)230/(神庙砖 225 且 wall!=108)——表外
+//      (地牢砖/灰烬/黑曜石/家具)一律不动;③命中后 paintTile(k,l,0) 清油漆(49315);
+//      ④盒钳 [0,maxTilesX]/[0,maxTilesY](49281-49296,TileRunner 是 [1,w-1]);
+//      ⑤运动:val+=val2 后只重掷 X(Next(-10,11)*0.05 钳 ±1,49342-49351)——Y 速度
+//      仅初掷 Next(-10,11)*0.1 恒定=恒斜率直线漂移;无 num3 液掷、无 framed 跳过、
+//      无 ClearSlope(OreRunner 不清坡)。dist 骰对全盒格消耗(短路在骰后)。 ----
+/** Main.tileMoss 全表(Main.cs:7146-7186):179/180/181/182/183/381/534/536/539/625/627 */
+const ORE_REPLACE_SHEETS = [
+  0, 1, 23, 25, 40, 53, 57, 59, 60, 70, 109, 112, 116, 117, 147, 161, 163, 164,
+  199, 200, 203, 234, 396, 397, 398, 399, 400, 401, 402, 403,
+  179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627,
+];
+export interface OreRunnerOpts {
+  strength: number;
+  steps: number;
+  /** 内部 tile id(替换产物);-1 = 只处理墙(本仓未用) */
+  type: number;
+  /** notTheBees 世界:白名单追加 230(蘑菇泥) */
+  ntb?: boolean;
+}
+export function oreRunner(
+  st: TileStore, rng: RNG, i: number, j: number, o: OreRunnerOpts,
+): { x0: number; y0: number; x1: number; y1: number } | null {
+  const { strength, steps, type } = o;
+  const replace = idsByVanillaSheet(...ORE_REPLACE_SHEETS);
+  if (o.ntb) for (const id of idsByVanillaSheet(230)) replace.add(id);
+  const templeBrick = idsByVanillaSheet(225);
+  let num = strength;
+  let num2 = steps;
+  let px = i + 0.0, py = j + 0.0;
+  const vx0 = rng.int(-10, 10) * 0.1;   // 49268-49269 双初掷(X/Y 各一次)
+  let vx = vx0;
+  const vy = rng.int(-10, 10) * 0.1;
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  while (num > 0 && num2 > 0) {
+    if (py < 0 && num2 > 0 && type === MUD) num2 = 0;  // 49278 泥出顶即停
+    num = strength * (num2 / steps);
+    num2--;
+    // 盒界 trunc+钳 [0,w]/[0,h](49281-49296;TileRunner 是 [1,w-1])
+    const x0 = Math.max(0, Math.trunc(px - num * 0.5));
+    const x1 = Math.min(st.w, Math.trunc(px + num * 0.5));
+    const y0 = Math.max(0, Math.trunc(py - num * 0.5));
+    const y1 = Math.min(st.h, Math.trunc(py + num * 0.5));
+    for (let k = x0; k < x1; k++) {
+      for (let l = y0; l < y1; l++) {
+        // dist 骰对全盒格消耗(49303-49305:骰在短路链首段内恒掷)
+        if (!(Math.abs(k - px) + Math.abs(l - py) < strength * 0.5 * (1 + rng.int(-10, 10) * 0.015))) continue;
+        if (!st.inBounds(k, l)) continue;  // 原版靠盒钳不越界;防御等价
+        const idx = st.idx(k, l);
+        if (type !== -1 && st.flags[idx] !== 0) {
+          const t = st.type[idx];
+          // 白名单(49312-49314):表外不动;225 神庙砖带 wall!=108 门
+          const ok = replace.has(t) || (templeBrick.has(t) && st.wall[idx] !== 108);
+          if (ok) {
+            st.type[idx] = type;
+            st.paint[idx] = 0;              // paintTile(k,l,0) 清油漆(49315)
+            if (k < bx0) bx0 = k; if (k > bx1) bx1 = k;
+            if (l < by0) by0 = l; if (l > by1) by1 = l;
+          }
+        }
+      }
+    }
+    px += vx; py += vy;                     // 49353
+    vx += rng.int(-10, 10) * 0.05;          // 49354 只重掷 X
+    if (vx > 1) vx = 1;
+    if (vx < -1) vx = -1;
+  }
+  return bx0 === Infinity ? null : { x0: bx0, y0: by0, x1: bx1, y1: by1 };
+}

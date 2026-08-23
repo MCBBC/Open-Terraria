@@ -12,7 +12,7 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { projSprite } from './Arrow';
+import { Arrow, projSprite } from './Arrow';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile } from './projTargets';
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -1441,6 +1441,8 @@ export class YoyoProj extends Entity {
   stringColor = 0;
   /** localAI[0] 累积寿命（秒，÷(1+meleeSpeed)/2 折算；超 YOYO_LIFE → 回收态） */
   private lifeT = 0;
+  /** 603 孢子伴生计数（localAI[1],:68830——≥6 掷 604 并清零;蓝队 R7-30） */
+  private sporeT = 0;
   /** ai[0] 状态机（AI_099_2_Yoyos 全量）：
    *  >=0 = 目标 X 缓存（活跃追标，ai[1]=目标 Y）；
    *  -1  = 回收（松手/石化冰冻/超寿命/1.3×超程 → 飞回玩家 <top+10 消亡）；
@@ -1582,6 +1584,44 @@ export class YoyoProj extends Entity {
     if (lifeMul !== -1 && this.lifeT > lifeMul) {
       this.recallFamily?.();   // :64853-64865 该玩家所有 aiStyle99 ai0>=0 → -1（含配重球）
       this.ai0 = -1;
+    }
+    // ---- 603 孢子伴生（:68829-68868,蓝队 R7-30 整缺）——每 6t 反向掷一枚 604 孢子云：
+    //  v = velocity×0.25 + 随机向（归一 ×Next(10,41)×0.1,1/3 概率 ×2）;400px 曼哈顿内
+    //  有视线敌 → 改朝敌 ×8;×0.8 后 NewProjectile(Center−v, v, 604, damage, knockBack)。
+    //  ai[0]!=3 门对悠悠球恒真（ai[0] 存光标 X）;ai0=-1 回收期照掷（原版同门）----
+    if (this.projId === 603 && this.ai0 !== 3) {
+      this.sporeT++;
+      if (this.sporeT >= 6) {
+        this.sporeT = 0;
+        let svx = this.vx * 0.25, svy = this.vy * 0.25;
+        let rx = 0, ry = 0;
+        do {
+          rx = Math.floor(Math.random() * 201) - 100;
+          ry = Math.floor(Math.random() * 201) - 100;
+        } while (rx === 0 && ry === 0);
+        const rl = Math.hypot(rx, ry) || 1;
+        const rm = (10 + Math.floor(Math.random() * 31)) * 0.1 * (Math.floor(Math.random() * 3) === 0 ? 2 : 1);
+        svx += (rx / rl) * rm;
+        svy += (ry / rl) * rm;
+        let best = 400;
+        for (const ent of game.enemies()) {
+          if (!playerCanHitEnemy(ent, game)) continue;          // CanBeChasedBy :91070
+          const e2 = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+          if (e2.dead) continue;
+          const ecx = e2.x + e2.w / 2, ecy = e2.y + e2.h / 2;
+          const md = Math.abs(this.cx - ecx) + Math.abs(this.cy - ecy);
+          if (md >= best) continue;
+          if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e2.x, e2.y, e2.w, e2.h)) continue;
+          best = md;
+          const dl = Math.hypot(ecx - this.cx, ecy - this.cy) || 1;
+          svx = (ecx - this.cx) / dl * 8; svy = (ecy - this.cy) / dl * 8;   // 朝敌 ×8（:68857-68861）
+        }
+        svx *= 0.8; svy *= 0.8;
+        const shot = new Arrow(this.cx - svx, this.cy - svy, svx, svy,
+          Math.max(1, Math.round(this.damage)), this.knockback, 604, null,
+          { grav: 0, life: 120, noTileCollide: false });
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');
+      }
     }
     // ---- 活跃态（ai0 >= 0,:64983-65148）----
     if (this.ai0 >= 0) {

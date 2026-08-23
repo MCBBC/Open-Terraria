@@ -36,6 +36,7 @@ export class LightMap {
 
   clear(): void {
     this.r.fill(0); this.g.fill(0); this.b.fill(0);
+    this.mask.fill(0); // LightMap.cs:70-79 Clear 连 mask 一起清(世界边缘 1 格环陈旧 mask)
   }
 
   /** Blur()(L86-91):两遍 BlurPass + NextSeed */

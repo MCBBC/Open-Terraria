@@ -145,7 +145,7 @@ function candleFamilyLight(
 export function specialTileLight(
   sheet: number, frameX: number, frameY: number, flicker: FlickerClock,
   ctx?: SpecialLightCtx,
-): [number, number, number] | null {
+): [number, number, number] | [number, number, number, 'gb-override'] | null {
   switch (sheet) {
     case 42: {
       // 灯笼（TileLightScanner case 42）：frameX!=0（灭档 18）不发光；style=frameY/36。
@@ -301,11 +301,13 @@ export function specialTileLight(
       // 路灯顶行亮（frameY<=18 && frameX==0）
       return frameY <= 18 && frameX === 0 ? [1, 1, 1] : null;
     case 125: {
-      // 水晶球 G/B 闪烁（:2722-2728）——R 恒 0
+      // 水晶球 G/B 闪烁(:3065-3072)——★赋值语义 `G = (lightColor.Y = 0.3f*num)`:
+      // 直接覆写 G/B 通道(可把已亮通道压低),R 不经此 case——第 4 元 'gb-override'
+      // 标记由调用方走赋值而非 max
       const rnd = ctx?.localRand?.();
       if (!rnd) return null;
       const n = rnd.next(28, 42) * 0.01 + (270 - flicker.mouseTextColor) / 800;
-      return [0, 0.3 * n, 0.6 * n];
+      return [0, 0.3 * n, 0.6 * n, 'gb-override'];
     }
     case 129: {
       // 水晶碎晶 fx/18%3 三色（:2729-2746）
@@ -554,6 +556,8 @@ export class TileLightScanner {
   /** 挡阳表(Main.tileNoSunLight;ApplySurfaceLight :3170/ApplyHellLight :3270 天空/地狱放行)
    *  ——与挡光表是两张独立布尔表 */
   private noSunLight: Uint8Array;
+  /** 718(昼云)的内部 id——昼夜动态挡光覆写用(Main.cs:66134-66141) */
+  private cloud718Id = -1;
   private random = new FastRandom(0x9e3779b9);
   /** 每格局部随机(WithModifier(x,y);蜡烛闪烁) */
   private localRandom(x: number, y: number): FastRandom {
@@ -570,6 +574,7 @@ export class TileLightScanner {
       if (sheet >= 0) {
         if (TILE_BLOCK_LIGHT_SHEETS.has(sheet)) this.blocksLight[i] = 1;
         if (TILE_NO_SUN_LIGHT_SHEETS.has(sheet)) this.noSunLight[i] = 1;
+        if (sheet === 718) this.cloud718Id = i;
       }
     });
   }
@@ -598,40 +603,75 @@ export class TileLightScanner {
     return Mask.None;
   }
 
-  /** 该格是否暴露于"天空/地狱光"(ApplySurfaceLight :3170 / ApplyHellLight :3270
-   *  同构判定)。放行 = 满足下列任一 + 墙透光：
-   *    ① 非活动(空气/水) 或 非挡阳类型；② 坡面/半砖 且【四邻液量全为 0】
-   *  ——挡阳实心格（海底泥沙等）恒不放行：深水下海底不播天光，亮度只经水层
-   *  传播衰减而来。此前误植为"自身 liquid>=200 才挡"= 海底方块自身无液被放行
-   *  → 水底地面满天光自发光 */
-  private exposed(st: TileStore, x: number, y: number): boolean {
+  /** 墙透光门(ApplySurfaceLight :3165-3169 / ApplyHellLight :3273-3275 共用尾段):
+   *  wallLight[wall] || wall==73 || wall==227 || (invisibleWall 涂层 && !显示隐形) */
+  private wallPasses(st: TileStore, i: number): boolean {
+    const wall = st.wall[i];
+    if (wall === 0 || WALL_LIGHT.has(wall)) return true;
+    return (st.coat[i] & TileStore.COAT_INVISIBLE_WALL) !== 0 && !st.showInvisibleBlocks;
+  }
+
+  /** ApplySurfaceLight(:3152-3253)天空光支路:返回该格天空播种量(0=不播)。
+   *  ① AllowLightInWater 族(玻璃 54/回声 541/彩纸 328/降雪 459/水族馆 748/尖刺 750,
+   *  TileID.cs:363):活动即播,不限液量、不限半砖(:3160-3168);
+   *  ② 一般支路(:3170):非活动 || 非挡阳 || (坡/半砖/隐形 && 四邻全干) →
+   *     液量<200:半砖还要求上邻液<200;液量≥200 且微光水体:仅 B 通道淡蓝(:3181-3188) */
+  private surfaceSky(st: TileStore, x: number, y: number, sky: [number, number, number],
+                     rand: FastRandom): [number, number, number] {
     const i = st.idx(x, y);
     const type = st.type[i];
-    if (type !== 0) {
-      const actuated = (st.wire[i] & TileStore.WIRE_ACTUATED) !== 0;
-      // AllowLightInWater（TileID.cs:359：玻璃 54/回声 541/彩纸 328/降雪 459/
-      // 水族馆 748/尖刺 750）——水中也透天光（:3161 独立分支）
-      const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? -1;
-      if (sheet === 54 || sheet === 541 || sheet === 328 || sheet === 459 || sheet === 748 || sheet === 750) {
-        // 落到墙透光判定（原版此分支同样要求 wallLight）
-      } else if (!actuated && this.blocksLight[type]) {
-        // 回声涂层块放行天光（:3170/:3267 析取支 `(tile.invisibleBlock() &&
-        // !_drawInvisibleWalls)`——隐形块不算挡阳，显示态除外）
-        if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) {
-          // 落到墙透光判定（同玻璃族支）
-        } else if (st.slope[i] === 0 && st.half[i] === 0) return false;
-        // 坡面/半砖例外：四邻必须全干（:3170 第三析取支的邻格 liquid==0）
-        else if (st.liquid[st.idx(x, y - 1)] !== 0 || st.liquid[st.idx(x, y + 1)] !== 0
-          || st.liquid[st.idx(x - 1, y)] !== 0 || st.liquid[st.idx(x + 1, y)] !== 0) return false;
-      }
+    const sheet = type !== 0 ? (TILE_DEFS[type]?.vanilla?.sheet ?? -1) : -1;
+    const wallOk = this.wallPasses(st, i);
+    if (!wallOk) return [0, 0, 0];
+    if (type !== 0 && ALLOW_LIGHT_IN_WATER_SHEETS.has(sheet)) {
+      return sky;  // :3160-3168 无液量/半砖限制
     }
-    const wall = st.wall[i];
-    return wall === 0 || WALL_LIGHT.has(wall);
+    // :3170 一般放行门
+    if (type !== 0 && this.noSunLight[type]) {
+      const invisible = (st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks;
+      const sloped = st.slope[i] !== 0 || st.half[i] !== 0 || invisible;
+      if (!sloped) return [0, 0, 0];
+      if (st.liquid[st.idx(x, y - 1)] !== 0 || st.liquid[st.idx(x, y + 1)] !== 0
+        || st.liquid[st.idx(x - 1, y)] !== 0 || st.liquid[st.idx(x + 1, y)] !== 0) return [0, 0, 0];
+    }
+    const liq = st.liquid[i];
+    if (liq < 200) {
+      // :3174-3179 半砖要求上邻液<200
+      if (st.half[i] !== 0 && st.liquid[st.idx(x, y - 1)] >= 200) return [0, 0, 0];
+      return sky;
+    }
+    // :3181-3188 深水微光支路:num3 = B×0.175×(1+NextFloat×0.13)×liquidAlpha[13]
+    if (shimmerWaterAlpha > 0) {
+      return [0, 0, sky[2] * 0.175 * (1 + rand.nextFloat() * 0.13) * shimmerWaterAlpha];
+    }
+    return [0, 0, 0];
+  }
+
+  /** ApplyHellLight(:3261-3280)地狱光支路:无 AllowLightInWater 门(地狱水下玻璃不吃光)、
+   *  无 invisibleBlock 析取支;液量<200 + 半砖上邻<200 */
+  private hellSky(st: TileStore, x: number, y: number): boolean {
+    const i = st.idx(x, y);
+    const type = st.type[i];
+    if (!this.wallPasses(st, i)) return false;
+    if (type !== 0 && this.noSunLight[type]) {
+      const sloped = st.slope[i] !== 0 || st.half[i] !== 0;
+      if (!sloped) return false;
+      if (st.liquid[st.idx(x, y - 1)] !== 0 || st.liquid[st.idx(x, y + 1)] !== 0
+        || st.liquid[st.idx(x - 1, y)] !== 0 || st.liquid[st.idx(x + 1, y)] !== 0) return false;
+    }
+    if (st.liquid[i] >= 200) return false;
+    if (st.half[i] !== 0 && st.liquid[st.idx(x, y - 1)] >= 200) return false;
+    return true;
   }
 
   /** ExportTo(:17-43)+ GetTileLight(:89-108):向工作图播种 mask 与颜色 */
   exportTo(w: ScannerWorld, map: LightMap, rx: number, ry: number, perFrame: PerFrameLight[]): void {
         this.random.reseed(); // Update() :58-61 每周期换种子（恢复真闪烁）
+    // 718 昼云挡光昼夜动态(Main.cs:66134-66141 UpdateTime:dayTime→false/夜→true;
+    // 静态 Initialize 无该项,布尔表默认 false)
+    if (this.cloud718Id >= 0) {
+      this.blocksLight[this.cloud718Id] = (w.clock as { isDay?: boolean }).isDay === false ? 1 : 0;
+    }
     const st = w.store;
     map.clear();
     const [skyR, skyG, skyB] = skySeed(w.clock.timeOfDay, w.clock.dayCount, !!w.clock.eclipse,
@@ -655,47 +695,85 @@ export class TileLightScanner {
         map.mask[li] = this.getMask(st, i);
 
         let lr = 0, lg = 0, lb = 0;
-        // ★ 深度门 liquid<200（ApplySurfaceLight :3172 / ApplyHellLight :3270）：
-        //   仅液量 <200（表面 ~4/5 格）播满天空/地狱光；深层液体不播——亮度靠
-        //   表层向深水传播（水衰减逐格 0.88×0.91 系）→ 水体越深越暗。此前漏此门
-        //   整个水柱每层播满 = 深水自发光
-        const shallowLiquid = st.liquid[i] < 200;
-        // ① 天空 / 地狱(:94-101)
-        if (ty <= w.groundLevel) {
-          if (shallowLiquid && this.exposed(st, tx, ty)) { lr = skyR; lg = skyG; lb = skyB; }
-        } else if (ty > w.lavaLine) {
-          if (shallowLiquid && this.exposed(st, tx, ty)) { lr = Math.max(lr, hellR); lg = Math.max(lg, hellG); lb = Math.max(lb, hellB); }
-        }
-        // ② 发光墙(:102;大多要求 !LightIsBlocked——此处墙在实心块后不可见,实心格直接跳过)
+        // ① 天空/地狱 + 彩色玻璃墙(ApplySurfaceLight :3152-3253 / ApplyHellLight :3261-3340
+        //   整段,含微光渐灭乘区)——表面贡献先独立合成再 max-merge(原版函数序:
+        //   ApplySurface→ApplyWall→ApplyTile→ApplyLiquid 各自独立 max-raise)
         const wall = st.wall[i];
-        if (wall !== 0 && st.type[i] === 0) {
-          const we = WALL_EMISSIVE[wall];
-          if (we) { lr = Math.max(lr, we[0]); lg = Math.max(lg, we[1]); lb = Math.max(lb, we[2]); }
-        }
-        // 彩色玻璃墙（ApplySurfaceLight :3190-3242）——★乘区语义 1:1：原版先
-        // `num=num4`（回到天空分量）再逐通道乘染色系数；门 = (!active||半砖||!挡阳)
-        // && liquid<255——半砖/平台后的玻璃墙同样染色（故独立于上方 type==0 门）。
-        // 彩虹档（wall-88==5）= (0.7-0.2) + Disco/255×0.2 动态乘区。
-        // 非暴露格天空分量恒 0 → 乘后仍 0（与原版一致），后续发光 max-raise 照常叠加
-        if (((wall >= 88 && wall <= 93) || wall === 241) && st.liquid[i] < 255) {
-          const t = st.type[i];
-          const td = TILE_DEFS[t];
-          const tileOk = t === 0 || st.half[i] !== 0 || !(td && td.solid && !td.platform && td.opacity >= 0.9);
-          if (tileOk) {
-            const k = wall === 241 ? 6 : wall - 88;
-            const TINT: Array<[number, number, number]> = [
-              [0.9, 0.15, 0.9], [0.9, 0.9, 0.15], [0.15, 0.15, 0.9], [0.15, 0.9, 0.15],
-              [0.9, 0.15, 0.15], [0, 0, 0], [0.9, 0.5, 0],
-            ];
-            // 原版 switch：0 紫(0.9,0.15,0.9) 1 黄(0.9,0.9,0.15) 2 蓝(0.15,0.15,0.9)
-            // 3 绿(0.15,0.9,0.15) 4 红(0.9,0.15,0.15) 5 彩虹(动态) 6 橙(0.9,0.5,0)
-            let tint: [number, number, number];
-            if (k === 5) {
-              const dc = this.flicker.discoColor();  // Main.Disco 轮转（:3229-3233）
-              tint = [0.5 + dc[0] * 0.2, 0.5 + dc[1] * 0.2, 0.5 + dc[2] * 0.2];
-            } else tint = TINT[k];
-            lr *= tint[0]; lg *= tint[1]; lb *= tint[2];
+        {
+          let sr = 0, sg = 0, sb = 0;
+          const localRand = this.localRandom(tx, ty);
+          if (ty <= w.groundLevel) {
+            [sr, sg, sb] = this.surfaceSky(st, tx, ty, [skyR, skyG, skyB], localRand);
+          } else if (ty > w.lavaLine) {
+            if (this.hellSky(st, tx, ty)) { sr = hellR; sg = hellG; sb = hellB; }
           }
+          // 彩色玻璃墙(:3190-3242 表面 / :3282-3338 地狱)——★覆写语义:num=num4(回到
+          // 天空/地狱全量)再逐通道乘染色;门 = (!active||半砖||!挡阳) && liquid<255
+          if (((wall >= 88 && wall <= 93) || wall === 241) && st.liquid[i] < 255) {
+            const t = st.type[i];
+            const tileOk = t === 0 || st.half[i] !== 0 || !this.noSunLight[t];
+            if (tileOk) {
+              const k = wall === 241 ? 6 : wall - 88;
+              const TINT: Array<[number, number, number]> = [
+                [0.9, 0.15, 0.9], [0.9, 0.9, 0.15], [0.15, 0.15, 0.9], [0.15, 0.9, 0.15],
+                [0.9, 0.15, 0.15], [0, 0, 0], [0.9, 0.5, 0],
+              ];
+              // 原版 switch：0 紫(0.9,0.15,0.9) 1 黄(0.9,0.9,0.15) 2 蓝(0.15,0.15,0.9)
+              // 3 绿(0.15,0.9,0.15) 4 红(0.9,0.15,0.15) 5 彩虹(动态) 6 橙(0.9,0.5,0)
+              let tint: [number, number, number];
+              if (k === 5) {
+                const dc = this.flicker.discoColor();  // Main.Disco 轮转（:3229-3233）
+                tint = [0.5 + dc[0] * 0.2, 0.5 + dc[1] * 0.2, 0.5 + dc[2] * 0.2];
+              } else tint = TINT[k];
+              sr = ty <= w.groundLevel ? skyR : hellR;
+              sg = ty <= w.groundLevel ? skyG : hellG;
+              sb = ty <= w.groundLevel ? skyB : hellB;
+              sr *= tint[0]; sg *= tint[1]; sb *= tint[2];
+            }
+          }
+          if (ty <= w.groundLevel) {
+            // 微光域天光渐灭(ApplySurfaceLight :3243-3246):num11=1-shimmerDarken
+            // 只乘表面函数输出(ApplyHellLight 无此乘区)
+            const dk = 1 - shimmerDarken;
+            sr *= dk; sg *= dk; sb *= dk;
+          }
+          if (sr > lr) lr = sr;
+          if (sg > lg) lg = sg;
+          if (sb > lb) lb = sb;
+        }
+        // ② 发光墙(ApplyWallLight :167-342):宝石灯墙七条(153/154/155/156/164/165/166)
+        //   无 LightIsBlocked 门;其余各墙要求当前格非挡光块;137/44/346 动态;
+        //   175/357 涂装覆写(:206-220/:323-329 flag→paintColor/765)
+        if (wall !== 0) {
+          let wr = 0, wg = 0, wb = 0;
+          const we = WALL_EMISSIVE[wall];
+          if (we) {
+            if (!WALL_EMISSIVE_GATED.has(wall) || !this.lightIsBlocked(st, i)) {
+              wr = we[0]; wg = we[1]; wb = we[2];
+            }
+          } else if (wall === 137) {
+            // 岩浆瀑布墙动态闪烁(:229-239):num4=0.4+(270-mt)/1500+Next(0,50)×0.0005
+            if (!this.lightIsBlocked(st, i)) {
+              const n4 = 0.4 + (270 - osc) / 1500 + this.localRandom(tx, ty).next(0, 50) * 0.0005;
+              wr = n4; wg = 0.5 * n4; wb = 0.1 * n4;
+            }
+          } else if (wall === 44 || wall === 346) {
+            // 彩虹砖墙 ×0.15(:240-247)/彩虹苔砖墙 ×0.25(:314-321) Disco 动态
+            if (!this.lightIsBlocked(st, i)) {
+              const dc = this.flicker.discoColor();
+              const s = wall === 44 ? 0.15 : 0.25;
+              wr = dc[0] * s; wg = dc[1] * s; wb = dc[2] * s;
+            }
+          }
+          // 涂装覆写(:206-220 175 / :169-176+323-329 357):flag 且 wallColor!=0 →
+          // paintColor/765(R/765 = R/255/3)
+          if ((wall === 175 || wall === 357) && st.paintWall[i] !== 0 && !this.lightIsBlocked(st, i)) {
+            const pc = paintColor(st.paintWall[i]);
+            wr = pc[0] / 765; wg = pc[1] / 765; wb = pc[2] / 765;
+          }
+          if (wr > lr) lr = wr;
+          if (wg > lg) lg = wg;
+          if (wb > lb) lb = wb;
         }
         // ③ 发光 tile(:103-106)
         const type = st.type[i];
@@ -753,7 +831,13 @@ export class TileLightScanner {
             timeOfDay: w.clock.timeOfDay,
           });
           if (sp) {
-            lr = Math.max(lr, sp[0]); lg = Math.max(lg, sp[1]); lb = Math.max(lb, sp[2]);
+            if (sp.length > 3) {
+              // 水晶球 125 赋值语义(:3065-3072):G/B 直接覆写(可压暗),R 走 max
+              lg = sp[1]; lb = sp[2];
+              if (sp[0] > lr) lr = sp[0];
+            } else {
+              lr = Math.max(lr, sp[0]); lg = Math.max(lg, sp[1]); lb = Math.max(lb, sp[2]);
+            }
           }
         }
         // ④ 液体光(:107-151)：岩浆（:116-131 num=0.55+(270-mt)/900）与

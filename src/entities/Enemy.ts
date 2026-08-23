@@ -406,6 +406,11 @@ export class Enemy extends Entity {
   drawBehindMaster = false;
   /** 上一 tick 位置（段跟随用：段复制前一段的旧位置 = 经典贪吃蛇链） */
   prevX = 0;
+  /** AI_003 卡死计数专用"上一拍移动前 X"（1457 oldPosition 语义，:93748 在
+   *  position+=velocity 前采样）——fighterAI 移动前写、计数处读。★不可用 prevX：
+   *  其在 fixedUpdate 头快照（=上一拍移动后值），计数时点 x===prevX 恒真 →
+   *  计数恒 +1 永不衰减（R6-B 修正）。首值由 fromVanilla 置出生 x（首拍 +1=出生小跳） */
+  fighterPrevX = 0;
   /** 存活 tick 计数(侏儒石化等用) */
   gnomeAge = 0;
   prevY = 0;
@@ -1069,6 +1074,7 @@ export class Enemy extends Entity {
     const e = new Enemy(`v_${id}`, x, y);
     e.vanillaId = id;
     e.vanilla = v;
+    e.fighterPrevX = x;   // 原版 NewNPC 后 oldPosition==position（首 tick 计数 +1=出生小跳）
     const hit = vanillaSoundFiles(v.HitSound) ?? ['NPC_Hit_1'];
     // DeathSound 显式 null(246 头)=原版无声,不给 fallback(缺键=提取漏→通用档)
     const kill = v.DeathSound === null ? [] : vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'];
@@ -3792,7 +3798,7 @@ export class Enemy extends Entity {
     if (counterEligible) {
       const opposite = this.vy === 0
         && ((this.vx > 0 && this.facing < 0) || (this.vx < 0 && this.facing > 0)); // :57518-57521
-      if (this.x === this.prevX || this.ai3 >= num58F || opposite) this.ai3 += 1;
+      if (this.x === this.fighterPrevX || this.ai3 >= num58F || opposite) this.ai3 += 1;
       else if (Math.abs(this.vx) > 0.9 && this.ai3 > 0) this.ai3 -= 1;
       if (this.ai3 > num58F * 10) this.ai3 = 0;                // :57530-57533
       if (this.justHit) this.ai3 = 0;                          // :57534-57537
@@ -3877,6 +3883,14 @@ export class Enemy extends Entity {
     const fx = Math.floor((this.x + this.w / 2 + probeDist * dir) / TILE);
     const fy = Math.floor((this.y + this.h - 15) / TILE);
     const solidAt = (x: number, y: number) => x >= 0 && y >= 0 && x < st.w && y < st.h && st.isSolid(x, y);
+    // 门块/跳梯互斥探测（:60584 if(门) else 跳梯）：前方脚上一格是关闭的门
+    // （sheet 10）或高门（388）且 flag8 → 本 tick 走攻门、跳梯整体短路
+    let atDoorTile: number | null = null;              // 命中的门 sheet（10/388）
+    if (this.vanillaId != null && !FIGHTER_NO_DOOR.has(this.vanillaId)
+      && st.inBounds(fx, fy - 1) && st.flags[st.idx(fx, fy - 1)]) {
+      const sheet = TILE_DEFS[st.type[st.idx(fx, fy - 1)]]?.vanilla?.sheet;
+      if (sheet === 10 || sheet === 388) atDoorTile = sheet;
+    }
     // 沼泽怪 166 伏击（NPC.cs:56327-56360）：伏击态接管本 tick（原地减速，跳过行走）
     if (swampThingAmbushStep(this, !!player && this.canSeePlayer(st, player))) return;
     // 混沌元素 120（NPC.cs:57431-57460/:60679-60696）：ai[3] 卡死计数 + 传送。
@@ -3952,6 +3966,8 @@ export class Enemy extends Entity {
     }
     // 重力 + 碰撞（原版 SteepSlowing/WalkDownSlope 略）。471 术士飞行态（ai[3]<0，
     // F12）noGravity+noTileCollide——直积分（-4 下降态无 return，继续走本通用段）
+    // ★卡死计数采样点（:93748 oldPosition = position 前移动）——下一拍计数读
+    this.fighterPrevX = this.x;
     if (vidF === 471 && this.ai3 < 0) {
       this.x += this.vx;
       this.y += this.vy;
@@ -3962,7 +3978,9 @@ export class Enemy extends Entity {
     // ---- 四级跳判定（L24651-24733）：仅在朝移动方向撞到东西时 ----
     // 原版全部跳跃赋值都有 velocity.Y == 0f 前置（AI_003 内 44 处同款门）——
     // 缺失此门时空中贴墙每帧 vy=-8 → 沿墙飞天贴天花板（主角靠近才掉落）
-    const movingInto = jumpGate580 && vxSign === dir && vxSign !== 0 && this.vy === 0;
+    // ★门前短路（:60584 if/else 互斥）：攻门 tick 跳梯/卡死跳/专家梯整体不跑
+    const movingInto = atDoorTile === null && jumpGate580 && vxSign === dir
+      && vxSign !== 0 && this.vy === 0;
     if (movingInto) {
       if (this.h >= 32 && solidAt(fx, fy - 2)) {
         // 胸口前 2 格墙：上方再 1 格也堵 → -8，否则 -7
@@ -4047,13 +4065,8 @@ export class Enemy extends Entity {
     // 460 恒一击即开、10=OpenDoor、388=ShiftTallGate，失败 → ai[3]=num58（停索敌
     // 转游荡）。行进无障碍时跳梯尾 else if(flag8) 归零 ai[1]/ai[2]（:60735-60739）。
     // ★flag8=false 族（FIGHTER_NO_DOOR）整段短路（doorWarm/doorHit 不累计）。
-    let atDoorTile: number | null = null;              // 命中的门 sheet（10/388）
-    if (this.vanillaId != null && !FIGHTER_NO_DOOR.has(this.vanillaId) && this.vy === 0
-      && st.inBounds(fx, fy - 1) && st.flags[st.idx(fx, fy - 1)]) {
-      const sheet = TILE_DEFS[st.type[st.idx(fx, fy - 1)]]?.vanilla?.sheet;
-      if (sheet === 10 || sheet === 388) atDoorTile = sheet;
-    }
-    if (atDoorTile !== null && this.vanillaId != null) {
+    // atDoorTile 已在跳梯前探测（互斥门）；此处补 flag5 落地代理（vy==0）
+    if (atDoorTile !== null && this.vanillaId != null && this.vy === 0) {
       this.doorWarm += 1;                              // ai[2]++（:60586）
       this.ai3 = 0;                                    // ai[3]=0 保持索敌（:60587）
       if (this.doorWarm >= 60) {                       // :60588 每 60t 一击
@@ -4079,7 +4092,7 @@ export class Enemy extends Entity {
         let strike = this.doorHit >= 10;
         if (strike) this.doorHit = 10;                 // 钳 10（:60631-60635）
         if (this.vanillaId === 460) strike = true;     // 屠夫恒一击开门（:60636-60639）
-        game.playSfxWav?.('Dig', 1, this.cx, this.cy); // KillTile(fail:true)（:60640）敲门声
+        game.playSfx?.('dig', 1, this.cx, this.cy);   // KillTile(fail:true)（:60640）敲门声
         if (strike) {
           const dtx = fx, dty = fy - 1;
           if (this.vanillaId === 26) {
