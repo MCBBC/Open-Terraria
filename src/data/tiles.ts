@@ -72,7 +72,7 @@ def({ key: 'tallgrass', name: '草丛', decor: true, framed: true, opacity: 0, p
 def({ key: 'sand', name: '沙块', solid: true, opacity: 1, pick: 0, mapColor: '#BAA854', blend: true, drop: 169, vanilla: { sheet: 53, frame: 'blend' } });
 def({ key: 'snow', name: '雪块', solid: true, opacity: 1, pick: 0, mapColor: '#D3ECF1', blend: true, drop: 593, vanilla: { sheet: 147, frame: 'blend' } });
 def({ key: 'acorn_sapling', name: '树苗', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#A37451', drop: 27, vanilla: { sheet: 20, frame: 'style', fw: 1, fh: 2 } }); // fh:2=原版 TileObjectData Width1/Height2+frameSize[1,2](2026-08-13 atlas-lint ATL-06 裁决;此前 fh:1 错)
-def({ key: 'ash', name: '灰烬块', solid: true, opacity: 1, pick: 0, mapColor: '#44444C', blend: true, drop: 3, vanilla: { sheet: 57, frame: 'auto' } });
+def({ key: 'ash', name: '灰烬块', solid: true, opacity: 1, pick: 0, mapColor: '#44444C', blend: true, drop: 172, vanilla: { sheet: 57, frame: 'auto' } }); // 172=AshBlock 独立物品（1.4.4+ 变更,1457 KillTile case 57 :65211→172,曾误掉 3 石块）
 
 // ===================== 原版素材图块（terraria-assets + TEdit 数据） =====================
 // 4a：矿石 / 宝石 / 冰雪 / 沙漠 / 基础方块（1x1 实心，frame:'auto' 8 向贴合）
@@ -105,7 +105,10 @@ def({ key: 'gem_diamond', name: '钻石矿', solid: true, opacity: 1, pick: 30, 
 
 // ---- 冰雪 ----
 def({ key: 'ice', name: '冰块', solid: true, opacity: 1, pick: 0, mapColor: '#90C3E8', blend: true, drop: 664, vanilla: { sheet: 161, frame: 'auto' } });
-def({ key: 'thin_ice', name: '薄冰', solid: true, opacity: 1, pick: 0, mapColor: '#B8DBF0', blend: true, drop: 664, vanilla: { sheet: 162, frame: 'auto' } });
+// thin_ice drop:null=真无掉落（1457 no-drop 表 case 162 :66328,薄冰物品不可获得）——
+// 本 key 不带 v_ 前缀,breakTile 1×1 尾的 place_v_ 兜底（Game.ts `def.key.startsWith('v_')`）
+// 不会命中,null 即无掉落,与原版语义一致（勿改回 664）
+def({ key: 'thin_ice', name: '薄冰', solid: true, opacity: 1, pick: 0, mapColor: '#B8DBF0', blend: true, drop: null, vanilla: { sheet: 162, frame: 'auto' } });
 def({ key: 'ice_brick', name: '冰砖', solid: true, opacity: 1, pick: 0, mapColor: '#7CAFC9', blend: true, drop: 883, vanilla: { sheet: 206, frame: 'auto' } });
 def({ key: 'snow_brick', name: '雪砖', solid: true, opacity: 1, pick: 0, mapColor: '#D3ECF1', blend: true, drop: 594, vanilla: { sheet: 148, frame: 'auto' } });
 
@@ -150,8 +153,9 @@ def({ key: 'water_candle', name: '水蜡烛', decor: true, framed: true, opacity
 // 瓦罐（世界生成散布）：打破掉随机常用道具（breakTile 特判），不做放置物
 def({ key: 'pot', name: '瓦罐', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#974F50', drop: null, vanilla: { sheet: 28, frame: 'style', fw: 2, fh: 2 } });
 // ---- 玩家储物族（原版 Player.cs:32598 右键绑定：29→bank / 97→bank2 / 463→bank3 / 491→bank4）----
-// drop 不写 → 破坏走 place_v_ 回退回收（储物内容在玩家 bank 数据里，不随方块掉落——原版同语义）
-def({ key: 'v_29_piggy_bank', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#AF6980', vanilla: { sheet: 29, frame: 'style', fw: 2, fh: 1 } }); // 存钱罐（compat-report 补全：导入曾清空丢弃）
+// 储物内容在玩家 bank 数据里不随方块掉落；破坏掉【原版放置物品】（Check2x1 case 29 → 87 /
+// Check2x2 case 97 → 346，审计 E ❌12/13——曾走 place_v_ 合成件）
+def({ key: 'v_29_piggy_bank', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#AF6980', drop: 87, vanilla: { sheet: 29, frame: 'style', fw: 2, fh: 1 } }); // 存钱罐（compat-report 补全：导入曾清空丢弃）
 def({ key: 'v_463_defenders_forge', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#9BD6F0', light: [51, 102, 204], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 463, frame: 'style', fw: 3, fh: 4 } }); // 守护者熔炉（bank3）
 
 export const TILE_BY_KEY: Record<string, number> = {};
@@ -172,62 +176,62 @@ export const WALL_BY_KEY: Record<string, number> = {};
 // ===================== wld 导入全量补全（compat-report 驱动） =====================
 // 实心 1x1 方块（frame:auto 8 向贴合）
 def({ key: 'v_51_cobweb', name: '', solid: false, /* 原版非实心：蛛网减速不阻挡 */ opacity: 1, pick: 0, mapColor: '#C0CACB', blend: true, drop: null, vanilla: { sheet: 51, frame: 'auto' } });
-def({ key: 'v_368_granite_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#322E68', blend: true, drop: null, vanilla: { sheet: 368, frame: 'auto' } });
-def({ key: 'v_226_lihzahrd_brick', name: '', solid: true, opacity: 1, pick: 210, mapColor: '#8D3800', blend: true, drop: null, vanilla: { sheet: 226, frame: 'auto' } });
-def({ key: 'v_367_marble_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A8B2CC', blend: true, drop: null, vanilla: { sheet: 367, frame: 'auto' } });
-def({ key: 'v_633_ash_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D28C64', blend: true, drop: null, light: [83, 38, 13], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 633, frame: 'auto' } });
-def({ key: 'v_181_red_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#863B31', blend: true, drop: null, vanilla: { sheet: 181, frame: 'auto' } });
-def({ key: 'v_189_cloud_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DFFFFF', blend: true, drop: null, vanilla: { sheet: 189, frame: 'auto' } });
-def({ key: 'v_183_purple_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#793186', blend: true, drop: null, vanilla: { sheet: 183, frame: 'auto' } });
-def({ key: 'v_536_xenon_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00C5D0', blend: true, drop: null, light: [0, 41, 87], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 536, frame: 'auto' } });
+def({ key: 'v_368_granite_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#322E68', blend: true, drop: 3086, vanilla: { sheet: 368, frame: 'auto' } });
+def({ key: 'v_226_lihzahrd_brick', name: '', solid: true, opacity: 1, pick: 210, mapColor: '#8D3800', blend: true, drop: 1101, vanilla: { sheet: 226, frame: 'auto' } });
+def({ key: 'v_367_marble_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A8B2CC', blend: true, drop: 3081, vanilla: { sheet: 367, frame: 'auto' } });
+def({ key: 'v_633_ash_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D28C64', blend: true, drop: 172, light: [83, 38, 13], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 633, frame: 'auto' } }); // 灰烬草→灰烬块 172（1.4.4+ AshBlock，case 633 :64084）
+def({ key: 'v_181_red_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#863B31', blend: true, drop: 3, vanilla: { sheet: 181, frame: 'auto' } });
+def({ key: 'v_189_cloud_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DFFFFF', blend: true, drop: 751, vanilla: { sheet: 189, frame: 'auto' } });
+def({ key: 'v_183_purple_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#793186', blend: true, drop: 3, vanilla: { sheet: 183, frame: 'auto' } });
+def({ key: 'v_536_xenon_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00C5D0', blend: true, drop: 3, light: [0, 41, 87], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 536, frame: 'auto' } }); // 苔藓族→石块 3
 def({ key: 'v_225_hive_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E37D16', blend: true, drop: null, vanilla: { sheet: 225, frame: 'auto' } });
 def({ key: 'v_483_cracked_pink_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6B4463', blend: true, drop: null, vanilla: { sheet: 483, frame: 'auto' } });
-def({ key: 'v_224_slush_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6B848B', blend: true, drop: null, vanilla: { sheet: 224, frame: 'auto' } });
-def({ key: 'v_383_living_mahogany_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DD8890', blend: true, drop: null, vanilla: { sheet: 383, frame: 'auto' } });
-def({ key: 'v_179_green_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#318672', blend: true, drop: null, vanilla: { sheet: 179, frame: 'auto' } });
+def({ key: 'v_224_slush_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6B848B', blend: true, drop: 1103, vanilla: { sheet: 224, frame: 'auto' } });
+def({ key: 'v_383_living_mahogany_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DD8890', blend: true, drop: 620, vanilla: { sheet: 383, frame: 'auto' } }); // 生命红木→红木 620（case 383 :64189）
+def({ key: 'v_179_green_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#318672', blend: true, drop: 3, vanilla: { sheet: 179, frame: 'auto' } });
 def({ key: 'v_384_living_mahogany_leaves_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#83CE0C', blend: true, drop: null, vanilla: { sheet: 384, frame: 'auto' } });
-def({ key: 'v_273_stone_slab', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: null, vanilla: { sheet: 273, frame: 'auto' } });
-def({ key: 'v_381_lava_moss', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FE7902', blend: true, drop: null, light: [255, 120, 30], vanilla: { sheet: 381, frame: 'auto' } });
-def({ key: 'v_48_spike', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: null, vanilla: { sheet: 48, frame: 'auto' } });
+def({ key: 'v_273_stone_slab', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 2119, vanilla: { sheet: 273, frame: 'auto' } });
+def({ key: 'v_381_lava_moss', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FE7902', blend: true, drop: 3, light: [255, 120, 30], vanilla: { sheet: 381, frame: 'auto' } }); // 苔藓族→石块 3（case 381 :64060）
+def({ key: 'v_48_spike', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 147, vanilla: { sheet: 48, frame: 'auto' } });
 def({ key: 'v_192_living_leaf_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1AC454', blend: true, drop: null, vanilla: { sheet: 192, frame: 'auto' } });
 // ↑ solid:Main.cs:10167 初值 true,但 LivingTrees pass 收尾 `Main.tileSolid[192] = false`
 //   （WorldGen.cs:15789）——树叶块全程可穿行。生成+碰撞均按 false。
-def({ key: 'v_191_living_wood_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: null, vanilla: { sheet: 191, frame: 'auto' } });
-def({ key: 'v_196_rain_cloud_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#9390B2', blend: true, drop: null, vanilla: { sheet: 196, frame: 'auto' } });
-def({ key: 'v_118_pearlstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EEE1DA', blend: true, drop: null, vanilla: { sheet: 118, frame: 'auto' } });
-def({ key: 'v_321_boreal_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#604D40', blend: true, drop: null, vanilla: { sheet: 321, frame: 'auto' } });
-def({ key: 'v_152_ebonstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8085B8', blend: true, drop: null, vanilla: { sheet: 152, frame: 'auto' } });
-def({ key: 'v_158_rich_mahogany', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#915155', blend: true, drop: null, vanilla: { sheet: 158, frame: 'auto' } });
-def({ key: 'v_357_smooth_marble_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A8B2CC', blend: true, drop: null, vanilla: { sheet: 357, frame: 'auto' } });
-def({ key: 'v_272_cog_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#797765', blend: true, drop: null, vanilla: { sheet: 272, frame: 'auto' } });
-def({ key: 'v_229_honey_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FF9C0C', blend: true, drop: null, vanilla: { sheet: 229, frame: 'auto' } });
-def({ key: 'v_311_dynasty_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#753D19', blend: true, drop: null, vanilla: { sheet: 311, frame: 'auto' } });
-def({ key: 'v_130_active_stone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: null, vanilla: { sheet: 130, frame: 'auto' } });
-def({ key: 'v_193_slime_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#3879FF', blend: true, drop: null, vanilla: { sheet: 193, frame: 'auto' } });
-def({ key: 'v_190_glowing_mushroom_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B6AF82', blend: true, drop: null, light: [0, 51, 255], /* 原版 tileLighted 发光色（TileLightScanner.cs:2938 蘑菇组 R=0 G=0.2+ B=1） */ vanilla: { sheet: 190, frame: 'auto' } });
-def({ key: 'v_350_martian_conduit_plating', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#37619B', blend: true, drop: null, light: undefined /* 动态光 → specialTileLight case 350：火星导管板 cos 脉冲 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 350, frame: 'auto' } });
-def({ key: 'v_369_smooth_granite_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#322E68', blend: true, drop: null, vanilla: { sheet: 369, frame: 'auto' } });
-def({ key: 'v_137_traps', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#909490', drop: null, vanilla: { sheet: 137, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_117_pearlstone_block', name: '', solid: true, opacity: 1, pick: 65, mapColor: '#B5ACBE', blend: true, drop: null, vanilla: { sheet: 117, frame: 'blend' } });
-def({ key: 'v_112_ebonsand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#67627A', blend: true, drop: null, vanilla: { sheet: 112, frame: 'auto' } });
-def({ key: 'v_232_wooden_spike', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#915155', blend: true, drop: null, vanilla: { sheet: 232, frame: 'auto' } });
-def({ key: 'v_274_sandstone_slab', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#BEAB5E', blend: true, drop: null, vanilla: { sheet: 274, frame: 'auto' } });
-def({ key: 'v_322_palm_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C6AA68', blend: true, drop: null, vanilla: { sheet: 322, frame: 'auto' } });
-def({ key: 'v_109_hallowed_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4EC1E3', blend: true, drop: null, vanilla: { sheet: 109, frame: 'auto' } });
-def({ key: 'v_312_red_dynasty_shingles', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#CC5D49', blend: true, drop: null, vanilla: { sheet: 312, frame: 'auto' } });
-def({ key: 'v_422_conveyor_belt_ccw', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#414B5A', blend: true, drop: null, vanilla: { sheet: 422, frame: 'auto' } });
-def({ key: 'v_495_shell_pile_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FDE3D7', blend: true, drop: null, vanilla: { sheet: 495, frame: 'auto' } });
-def({ key: 'v_479_smooth_sandstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B27244', blend: true, drop: null, vanilla: { sheet: 479, frame: 'auto' } });
-def({ key: 'v_353_vine_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#1CD85E', blend: true, drop: null, rope: true, vanilla: { sheet: 353, frame: 'auto' } });
-def({ key: 'v_477_mowed_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1CD85E', blend: true, drop: null, vanilla: { sheet: 477, frame: 'auto' } });
+def({ key: 'v_191_living_wood_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: 9, vanilla: { sheet: 191, frame: 'auto' } });
+def({ key: 'v_196_rain_cloud_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#9390B2', blend: true, drop: 765, vanilla: { sheet: 196, frame: 'auto' } });
+def({ key: 'v_118_pearlstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EEE1DA', blend: true, drop: 412, vanilla: { sheet: 118, frame: 'auto' } });
+def({ key: 'v_321_boreal_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#604D40', blend: true, drop: 2503, vanilla: { sheet: 321, frame: 'auto' } });
+def({ key: 'v_152_ebonstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8085B8', blend: true, drop: 609, vanilla: { sheet: 152, frame: 'auto' } });
+def({ key: 'v_158_rich_mahogany', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#915155', blend: true, drop: 620, vanilla: { sheet: 158, frame: 'auto' } });
+def({ key: 'v_357_smooth_marble_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A8B2CC', blend: true, drop: 3066, vanilla: { sheet: 357, frame: 'auto' } });
+def({ key: 'v_272_cog_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#797765', blend: true, drop: 1344, vanilla: { sheet: 272, frame: 'auto' } });
+def({ key: 'v_229_honey_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FF9C0C', blend: true, drop: 1125, vanilla: { sheet: 229, frame: 'auto' } });
+def({ key: 'v_311_dynasty_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#753D19', blend: true, drop: 2260, vanilla: { sheet: 311, frame: 'auto' } });
+def({ key: 'v_130_active_stone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 511, vanilla: { sheet: 130, frame: 'auto' } });
+def({ key: 'v_193_slime_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#3879FF', blend: true, drop: 762, vanilla: { sheet: 193, frame: 'auto' } });
+def({ key: 'v_190_glowing_mushroom_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B6AF82', blend: true, drop: 183, light: [0, 51, 255], /* 原版 tileLighted 发光色（TileLightScanner.cs:2938 蘑菇组 R=0 G=0.2+ B=1） */ vanilla: { sheet: 190, frame: 'auto' } });
+def({ key: 'v_350_martian_conduit_plating', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#37619B', blend: true, drop: 2860, light: undefined /* 动态光 → specialTileLight case 350：火星导管板 cos 脉冲 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 350, frame: 'auto' } });
+def({ key: 'v_369_smooth_granite_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#322E68', blend: true, drop: 3087, vanilla: { sheet: 369, frame: 'auto' } });
+def({ key: 'v_137_traps', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#909490', drop: 539, vanilla: { sheet: 137, frame: 'style', fw: 1, fh: 1 } }); // TODO: 1457 掉落按 frameY/18 六档 0→539/1→1146/2→1147/3→1148/4→1149/5→5135（WorldGen.cs:65597-65619）+styles1-4 有 210 镐力门（Player.cs:53025-53104）——结构性缺口见 docs/audit/tile-audit-2026-08-23.md 分区 A,此处只回填最常见档 539
+def({ key: 'v_117_pearlstone_block', name: '', solid: true, opacity: 1, pick: 65, mapColor: '#B5ACBE', blend: true, drop: 409, vanilla: { sheet: 117, frame: 'blend' } });
+def({ key: 'v_112_ebonsand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#67627A', blend: true, drop: 370, vanilla: { sheet: 112, frame: 'auto' } });
+def({ key: 'v_232_wooden_spike', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#915155', blend: true, drop: 1150, vanilla: { sheet: 232, frame: 'auto' } });
+def({ key: 'v_274_sandstone_slab', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#BEAB5E', blend: true, drop: 2120, vanilla: { sheet: 274, frame: 'auto' } });
+def({ key: 'v_322_palm_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C6AA68', blend: true, drop: 2504, vanilla: { sheet: 322, frame: 'auto' } });
+def({ key: 'v_109_hallowed_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4EC1E3', blend: true, drop: 2, vanilla: { sheet: 109, frame: 'auto' } });
+def({ key: 'v_312_red_dynasty_shingles', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#CC5D49', blend: true, drop: 2261, vanilla: { sheet: 312, frame: 'auto' } });
+def({ key: 'v_422_conveyor_belt_ccw', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#414B5A', blend: true, drop: 3610, vanilla: { sheet: 422, frame: 'auto' } });
+def({ key: 'v_495_shell_pile_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FDE3D7', blend: true, drop: 4090, vanilla: { sheet: 495, frame: 'auto' } });
+def({ key: 'v_479_smooth_sandstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B27244', blend: true, drop: 4051, vanilla: { sheet: 479, frame: 'auto' } });
+def({ key: 'v_353_vine_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#1CD85E', blend: true, drop: 2996, rope: true, vanilla: { sheet: 353, frame: 'auto' } }); // D-6:case 353(:64170)→2996 Vine Rope（曾 place_v_ 兜底）
+def({ key: 'v_477_mowed_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1CD85E', blend: true, drop: 2, vanilla: { sheet: 477, frame: 'auto' } }); // 修剪草→泥土 2（case 0/2/109/199/477/492 组）
 def({ platform: true, key: 'v_380_planter_boxes', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#BF8E6F', blend: true, drop: null, vanilla: { sheet: 380, frame: 'auto' } });
-def({ key: 'v_230_crispy_honey_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#834F0D', blend: true, drop: null, vanilla: { sheet: 230, frame: 'auto' } });
-def({ key: 'v_562_bamboo_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A5A81A', blend: true, drop: null, vanilla: { sheet: 562, frame: 'auto' } });
-def({ key: 'v_371_pink_slime_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F965BD', blend: true, drop: null, vanilla: { sheet: 371, frame: 'auto' } });
-def({ key: 'v_668_the_dirtiest_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: null, vanilla: { sheet: 668, frame: 'auto' } });
-def({ key: 'v_398_corrupt_hardened_sand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#64527E', blend: true, drop: null, vanilla: { sheet: 398, frame: 'auto' } });
-def({ key: 'v_379_bubble', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#FBD1F0', blend: true, drop: null, vanilla: { sheet: 379, frame: 'auto' } });   // ★solid=false:原版静态表 true 但 DoUpdateInWorld(Main.cs:17675)每帧改 false——游戏内非实心;CheckSpawn 期间翻转实心由 Game.checkBedSpawn 的 extraSolid 同构
-def({ key: 'v_618_stone_accent_slab', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: null, vanilla: { sheet: 618, frame: 'auto' } });
+def({ key: 'v_230_crispy_honey_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#834F0D', blend: true, drop: 1127, vanilla: { sheet: 230, frame: 'auto' } });
+def({ key: 'v_562_bamboo_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A5A81A', blend: true, drop: 4564, vanilla: { sheet: 562, frame: 'auto' } });
+def({ key: 'v_371_pink_slime_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F965BD', blend: true, drop: 3113, vanilla: { sheet: 371, frame: 'auto' } });
+def({ key: 'v_668_the_dirtiest_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: 5400, vanilla: { sheet: 668, frame: 'auto' } });
+def({ key: 'v_398_corrupt_hardened_sand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#64527E', blend: true, drop: 3274, vanilla: { sheet: 398, frame: 'auto' } });
+def({ key: 'v_379_bubble', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#FBD1F0', blend: true, drop: 3214, vanilla: { sheet: 379, frame: 'auto' } });   // ★solid=false:原版静态表 true 但 DoUpdateInWorld(Main.cs:17675)每帧改 false——游戏内非实心;CheckSpawn 期间翻转实心由 Game.checkBedSpawn 的 extraSolid 同构
+def({ key: 'v_618_stone_accent_slab', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 4962, vanilla: { sheet: 618, frame: 'auto' } });
 
 // framed 物体（frame:style 显式 18px 帧）
 def({ key: 'v_165_cave_decos', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#73ADE5', drop: null, vanilla: { sheet: 165, frame: 'style', fw: 1, fh: 2 } });
@@ -261,7 +265,7 @@ def({ key: 'v_50_books', name: '', solid: false, framed: true, opacity: 0.05, pi
 def({ key: 'v_93_lamps', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#FDDD03', drop: null, light: undefined /* 动态光 → specialTileLight case 93：吊灯样式表 frameY/54 */, vanilla: { sheet: 93, frame: 'style', fw: 1, fh: 3 } }); // ★R12 定谳修：足迹 1×3（TileObjectData.cs:2394-2419 Style1xX Height=3/Place1xX cs:39203-39226 num2=3/ToggleLamp Wiring.cs:2954-2975 SendTileSquare(1,3)）；曾 1×6 系与 92 路灯柱（:2421-2424 Height=6）混同
 def({ key: 'v_549_seaweed', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#365314', drop: null, vanilla: { sheet: 549, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_254_pumpkin_plant', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#F89E5C', drop: null, vanilla: { sheet: 254, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_571_bamboo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#A5A81A', drop: null, vanilla: { sheet: 571, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_571_bamboo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#A5A81A', drop: 4564, vanilla: { sheet: 571, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_246_paintings_3x2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#63321E', drop: null, vanilla: { sheet: 246, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_245_paintings_2x3', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#63321E', drop: null, vanilla: { sheet: 245, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_586_emerald_tree', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 1, h: 1, mapColor: '#7F7F7F', drop: null, vanilla: { sheet: 586, frame: 'style', fw: 1, fh: 1 } });
@@ -278,7 +282,7 @@ def({ key: 'v_13_placed_bottles', name: '', solid: false, framed: true, opacity:
 def({ key: 'v_530_oasis_plants', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#6BB600', drop: null, vanilla: { sheet: 530, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_616_vanity_tree_yellow_willow', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 1, h: 1, mapColor: '#976B4B', drop: null, vanilla: { sheet: 616, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_215_campfires', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#FE7902', drop: null, light: undefined /* 动态光 → specialTileLight case 215：篝火样式表+flicker（frameY<36 门） */, vanilla: { sheet: 215, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_141_explosives', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#C03B3B', drop: null, vanilla: { sheet: 141, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_141_explosives', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#C03B3B', drop: 580 /* KillTile :64815（审计 E ❌17;镐挖不爆,爆炸仅电线支） */, vanilla: { sheet: 141, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_597_pylons', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#1CD85E', drop: null, light: undefined /* 动态光 → specialTileLight case 597：村庄传送塔八样式 ×0.75（frameX/54） */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 597, frame: 'style', fw: 3, fh: 4 } });
 def({ key: 'v_592_hanging_brazier', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#FE7902', drop: null, light: undefined /* 动态光 → specialTileLight case 592：吊火盆 frameY>0+闪烁（基色 1.35/0.45/0.15） */, vanilla: { sheet: 592, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_375_honey_drip', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#FF9C0C', drop: null, vanilla: { sheet: 375, frame: 'style', fw: 1, fh: 1 } });
@@ -288,12 +292,12 @@ def({ key: 'v_231_larva', name: '', solid: false, framed: true, opacity: 0.05, p
 def({ key: 'v_395_item_frame', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', vanilla: { sheet: 395, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_241_catacombs', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 3, mapColor: '#4D4A48', drop: null, vanilla: { sheet: 241, frame: 'style', fw: 4, fh: 3 } });
 def({ key: 'v_587_ruby_tree', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 1, h: 1, mapColor: '#7F7F7F', drop: null, vanilla: { sheet: 587, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_86_loom', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 86, frame: 'style', fw: 3, fh: 2 } });
+def({ key: 'v_86_loom', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 332 /* Check3x2 :49698（审计 E ❌18） */, vanilla: { sheet: 86, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_376_fishing_crates', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#A0785C', drop: null, vanilla: { sheet: 376, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_470_mannequins', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#BF8E6F', vanilla: { sheet: 470, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_324_seashells', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E4D5AD', drop: null, vanilla: { sheet: 324, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_81_coral', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#F585BF', drop: null, vanilla: { sheet: 81, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_136_switch', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#D5CBCC', drop: null, vanilla: { sheet: 136, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_81_coral', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#F585BF', drop: 275 /* KillTile :64770（审计 E ❌24;81 非 tileCut 走镐挖） */, vanilla: { sheet: 81, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_136_switch', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#D5CBCC', drop: 538 /* KillTile :64809（审计 E ❌16） */, vanilla: { sheet: 136, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_355_alchemy_table', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#8D6B59', drop: null, vanilla: { sheet: 355, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_354_bewitching_table', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#8D6B59', drop: null, light: [166, 89, 38], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 354, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_103_bowls', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#8D624D', drop: null, vanilla: { sheet: 103, frame: 'style', fw: 2, fh: 1 } });
@@ -322,11 +326,11 @@ def({ key: 'v_302_glass_kiln', name: '', solid: false, framed: true, opacity: 0.
 def({ key: 'v_306_ice_machine', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 306, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_247_autohammer', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#8C9696', drop: null, vanilla: { sheet: 247, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_491_void_vault', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#3C14A0', light: [128, 102, 179], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 491, frame: 'style', fw: 3, fh: 3 } }); // 虚空保险库（bank4；破坏回收见储物族注释）
-def({ key: 'v_106_sawmill', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 106, frame: 'style', fw: 3, fh: 3 } });
+def({ key: 'v_106_sawmill', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#BF8E6F', drop: 363 /* Check3x3 :53179（审计 E ❌19） */, vanilla: { sheet: 106, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_642_chlorophyte_extractinator', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#95D459', drop: null, vanilla: { sheet: 642, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_319_ship_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#604430', drop: null, vanilla: { sheet: 319, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_487_picnic_tables', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 487, frame: 'style', fw: 4, fh: 2 } });
-def({ key: 'v_97_safe', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', vanilla: { sheet: 97, frame: 'style', fw: 2, fh: 2 } }); // 保险箱（bank2；破坏回收见储物族注释）
+def({ key: 'v_97_safe', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: 346, vanilla: { sheet: 97, frame: 'style', fw: 2, fh: 2 } }); // 保险箱（bank2；破坏掉 346=Check2x2 :48688，见储物族注释）
 def({ key: 'v_320_seaweed_planter', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#CBB997', drop: null, vanilla: { sheet: 320, frame: 'style', fw: 2, fh: 3 } });
 def({ platform: true, key: 'v_405_fireplace', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#8C8C8C', drop: null, light: undefined /* 动态光 → specialTileLight case 405：壁炉样式表+flicker（frameX<54 门） */, vanilla: { sheet: 405, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_378_target_dummy', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#A07864', drop: null, vanilla: { sheet: 378, frame: 'style', fw: 2, fh: 3 } });
@@ -338,14 +342,14 @@ def({ key: 'v_110_hallow_short_plants', name: '', solid: false, framed: true, op
 def({ key: 'v_621_slice_of_cake', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#FAFAFA', drop: null, vanilla: { sheet: 621, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_387_trap_door_closed', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 1, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 387, frame: 'style', fw: 2, fh: 1 } });
 def({ key: 'v_316_blue_jellyfish_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#9DB0E2', drop: null, light: undefined /* 动态光 → specialTileLight case 316：水母笼态机（mode==2 高亮） */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 316, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_125_crystal_ball', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#8DAFFF', drop: null, light: undefined /* 动态光 → specialTileLight case 125：水晶球 G/B 闪烁（:2722-2728） */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 125, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_125_crystal_ball', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#8DAFFF', drop: 487 /* Check2x2 :48719（审计 E ❌14） */, light: undefined /* 动态光 → specialTileLight case 125：水晶球 G/B 闪烁（:2722-2728） */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 125, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_287_ammo_box', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#4F8011', drop: null, vanilla: { sheet: 287, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_294_zebra_swallowtail_butterfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 294, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_291_ulysses_butterfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 291, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_292_sulphur_butterfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 292, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_289_purple_emperor_butterfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 289, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_172_sinks', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 172, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_656_glow_tulip', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#157CD4', drop: null, light: [255, 185, 110], vanilla: { sheet: 656, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_656_glow_tulip', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#157CD4', drop: 5333, light: [255, 185, 110], vanilla: { sheet: 656, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_113_hallow_tall_plants', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#30D0EA', drop: null, vanilla: { sheet: 113, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_235_teleporter', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 3, h: 1, mapColor: '#D6B82E', drop: null, vanilla: { sheet: 235, frame: 'style', fw: 3, fh: 1 } });
 def({ key: 'v_567_garden_gnome', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#909490', drop: null, vanilla: { sheet: 567, frame: 'style', fw: 1, fh: 2 } });
@@ -354,20 +358,20 @@ def({ key: 'v_567_garden_gnome', name: '', solid: false, framed: true, opacity: 
 def({ key: 'v_638_ash_vines', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#C8784B', drop: null, light: [83, 38, 13], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 638, frame: 'auto' } });
 def({ key: 'v_528_mushroom_vines', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#B6AF82', drop: null, light: [0, 51, 255], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 528, frame: 'auto' } });
 def({ key: 'v_382_flower_vines', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#1CD85E', drop: null, vanilla: { sheet: 382, frame: 'auto' } });
-def({ key: 'v_124_wooden_beam', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#493324', drop: null, vanilla: { sheet: 124, frame: 'auto' } });
-def({ key: 'v_575_rich_mahogany_beam', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#7D3D41', drop: null, vanilla: { sheet: 575, frame: 'auto' } });
-def({ key: 'v_213_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#897843', drop: null, rope: true, vanilla: { sheet: 213, frame: 'auto' } });
+def({ key: 'v_124_wooden_beam', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#493324', drop: 480, /* D-6:case 124(:64608）→480 */  vanilla: { sheet: 124, frame: 'auto' } });
+def({ key: 'v_575_rich_mahogany_beam', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#7D3D41', drop: 4718, /* D-6:case 575(:64423）→4718 */  vanilla: { sheet: 575, frame: 'auto' } });
+def({ key: 'v_213_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#897843', drop: 965, /* D-6:case 213(:64518）→965 */  rope: true, vanilla: { sheet: 213, frame: 'auto' } });
 def({ key: 'v_636_corrupt_vines', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#7A74DA', drop: null, vanilla: { sheet: 636, frame: 'auto' } });
-def({ key: 'v_574_boreal_beam', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#4C392C', drop: null, vanilla: { sheet: 574, frame: 'auto' } });
+def({ key: 'v_574_boreal_beam', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#4C392C', drop: 4717, /* D-6:case 574(:64420）→4717 */  vanilla: { sheet: 574, frame: 'auto' } });
 def({ key: 'v_333_platinum_coin_pile', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#BEBEB2', drop: null, vanilla: { sheet: 333, frame: 'auto' } });
 def({ key: 'v_332_gold_coin_pile', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#CCB548', drop: null, vanilla: { sheet: 332, frame: 'auto' } });
-def({ key: 'v_577_sandstone_column', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#B2683A', drop: null, vanilla: { sheet: 577, frame: 'auto' } });
-def({ key: 'v_561_marble_column', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#949EB8', drop: null, vanilla: { sheet: 561, frame: 'auto' } });
-def({ key: 'v_576_granite_column', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#1E1A54', drop: null, vanilla: { sheet: 576, frame: 'auto' } });
+def({ key: 'v_577_sandstone_column', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#B2683A', drop: 4720, /* D-6:case 577(:64429）→4720 */  vanilla: { sheet: 577, frame: 'auto' } });
+def({ key: 'v_561_marble_column', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#949EB8', drop: 4554, /* D-6:case 561(:64417）→4554 */  vanilla: { sheet: 561, frame: 'auto' } });
+def({ key: 'v_576_granite_column', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#1E1A54', drop: 4719, /* D-6:case 576(:64426）→4719 */  vanilla: { sheet: 576, frame: 'auto' } });
 // rope 旗 = Main.tileRope（Main.cs:9223-9227：213 绳/214 链/353 藤蔓绳/365 丝绳/366 蛛网绳）——
 // 五族全部可攀爬且非实心（tileSolid 无一登记）；漏旗 = 链/丝/蛛网绳不可攀（2026-08-19 绳锚批补）
-def({ key: 'v_214_chain', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#676767', drop: null, rope: true, vanilla: { sheet: 214, frame: 'auto' } });
-def({ key: 'v_578_mushroom_beam', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#AC9B6E', drop: null, light: [0, 51, 255], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 578, frame: 'auto' } });
+def({ key: 'v_214_chain', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#676767', drop: 85, /* D-6:case 214(:64515）→85 */  rope: true, vanilla: { sheet: 214, frame: 'auto' } });
+def({ key: 'v_578_mushroom_beam', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#AC9B6E', drop: 4721, /* D-6:case 578(:64432）→4721 */  light: [0, 51, 255], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 578, frame: 'auto' } });
 
 // cleared 组补全（藤蔓/荆棘，原版 51/52/62/69）
 def({ key: 'v_52_vines', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#17B14C', drop: null, vanilla: { sheet: 52, frame: 'auto' } });
@@ -375,27 +379,27 @@ def({ key: 'v_62_jungle_vines', name: '', decor: true, opacity: 0, pick: 0, mapC
 def({ key: 'v_69_jungle_thorns', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#BE965C', drop: null, vanilla: { sheet: 69, frame: 'auto' } });
 
 // ===================== FTW_V2 兼容补全 =====================
-def({ key: 'v_625_neon_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DC0CED', blend: true, drop: null, light: [77, 0, 89], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 625, frame: 'auto' } });
-def({ key: 'v_151_sandstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#BEAB5E', blend: true, drop: null, vanilla: { sheet: 151, frame: 'auto' } });
-def({ key: 'v_234_crimsand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#352C29', blend: true, drop: null, vanilla: { sheet: 234, frame: 'auto' } });
-def({ key: 'v_182_blue_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#2B568C', blend: true, drop: null, vanilla: { sheet: 182, frame: 'auto' } });
+def({ key: 'v_625_neon_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DC0CED', blend: true, drop: 3, light: [77, 0, 89], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 625, frame: 'auto' } }); // 苔藓族→石块 3
+def({ key: 'v_151_sandstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#BEAB5E', blend: true, drop: 607, vanilla: { sheet: 151, frame: 'auto' } });
+def({ key: 'v_234_crimsand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#352C29', blend: true, drop: 1246, vanilla: { sheet: 234, frame: 'auto' } });
+def({ key: 'v_182_blue_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#2B568C', blend: true, drop: 3, vanilla: { sheet: 182, frame: 'auto' } });
 def({ key: 'v_205_crimson_vines', name: '', solid: false, /* 原版非实心 */ opacity: 1, pick: 0, mapColor: '#BA3234', blend: true, drop: null, vanilla: { sheet: 205, frame: 'auto' } });
-def({ key: 'v_45_gold_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9A417', blend: true, drop: null, vanilla: { sheet: 45, frame: 'auto' } });
-def({ key: 'v_399_crimson_hardened_sand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4D4C42', blend: true, drop: null, vanilla: { sheet: 399, frame: 'auto' } });
+def({ key: 'v_45_gold_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9A417', blend: true, drop: 141, vanilla: { sheet: 45, frame: 'auto' } });
+def({ key: 'v_399_crimson_hardened_sand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4D4C42', blend: true, drop: 3275, vanilla: { sheet: 399, frame: 'auto' } });
 def({ key: 'v_352_crimtane_thorns', name: '', solid: false, /* 原版非实心：荆棘只伤不挡 */ opacity: 1, pick: 0, mapColor: '#EE615E', blend: true, drop: null, vanilla: { sheet: 352, frame: 'auto' } });
-def({ key: 'v_248_palladium_column', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DB4726', blend: true, drop: null, vanilla: { sheet: 248, frame: 'auto' } });
-def({ key: 'v_340_living_cursed_fire_block', name: '', solid: false, /* 原版非实心：活性诅咒火可穿 */ opacity: 1, pick: 0, mapColor: '#60F802', blend: true, drop: null, light: [115, 255, 115], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 340, frame: 'auto' } });
+def({ key: 'v_248_palladium_column', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DB4726', blend: true, drop: 1589, vanilla: { sheet: 248, frame: 'auto' } });
+def({ key: 'v_340_living_cursed_fire_block', name: '', solid: false, /* 原版非实心：活性诅咒火可穿 */ opacity: 1, pick: 0, mapColor: '#60F802', blend: true, drop: 2751, light: [115, 255, 115], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 340, frame: 'auto' } });
 def({ key: 'v_207_water_fountains', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 4, mapColor: '#909490', drop: null, vanilla: { sheet: 207, frame: 'style', fw: 2, fh: 4 } });
 def({ key: 'v_144_timers', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#909490', drop: null, vanilla: { sheet: 144, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_475_hat_rack', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#BF8E6F', vanilla: { sheet: 475, frame: 'style', fw: 3, fh: 4 } });
-def({ key: 'v_175_tin_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#817D5D', blend: true, drop: null, vanilla: { sheet: 175, frame: 'auto' } });
-def({ key: 'v_132_lever', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: null, vanilla: { sheet: 132, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_175_tin_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#817D5D', blend: true, drop: 717, vanilla: { sheet: 175, frame: 'auto' } });
+def({ key: 'v_132_lever', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: 513 /* Check2x2 :48731（审计 E ❌15） */, vanilla: { sheet: 132, frame: 'style', fw: 2, fh: 2 } });
 
 // ===================== 不负责任的女妖啤酒厂 兼容补全 =====================
-def({ key: 'v_539_argon_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D0007E', blend: true, drop: null, light: [77, 0, 43], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 539, frame: 'auto' } });
+def({ key: 'v_539_argon_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D0007E', blend: true, drop: 3, light: [77, 0, 43], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 539, frame: 'auto' } }); // 苔藓族→石块 3
 def({ key: 'v_481_cracked_blue_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#42546D', blend: true, drop: null, vanilla: { sheet: 481, frame: 'auto' } });
-def({ key: 'v_119_iridescent_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6B5C6C', blend: true, drop: null, vanilla: { sheet: 119, frame: 'auto' } });
-def({ key: 'v_120_mudstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5C4449', blend: true, drop: null, vanilla: { sheet: 120, frame: 'auto' } });
+def({ key: 'v_119_iridescent_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6B5C6C', blend: true, drop: 413, vanilla: { sheet: 119, frame: 'auto' } });
+def({ key: 'v_120_mudstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5C4449', blend: true, drop: 414, vanilla: { sheet: 120, frame: 'auto' } });
 def({ key: 'v_714_spider_boulder', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#808080', drop: null, vanilla: { sheet: 714, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_752_chillet_egg', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7ad9e8', drop: null, vanilla: { sheet: 752, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_751_sleeping_digtoise', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#baa854', drop: null, vanilla: { sheet: 751, frame: 'style', fw: 2, fh: 2 } });
@@ -413,16 +417,16 @@ def({ key: 'v_716_friendly_boulder', name: '', solid: true, framed: true, opacit
 def({ key: 'v_713_lava_boulder', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#808080', drop: null, vanilla: { sheet: 713, frame: 'style', fw: 2, fh: 2 } });
 
 // ===================== wld 独立映射修复（原为错误复用） =====================
-def({ key: 'v_23_corrupt_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8D89DF', blend: true, drop: null, vanilla: { sheet: 23, frame: 'blend' } });
+def({ key: 'v_23_corrupt_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8D89DF', blend: true, drop: 2, vanilla: { sheet: 23, frame: 'blend' } });
 def({ key: 'v_31_orb_heart', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#8D78A8', drop: null, light: undefined /* 动态光 → specialTileLight case 31：祭坛双色态（余烬/暗紫，cs:2642-2659） */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 31, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_41_blue_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#42546D', blend: true, drop: null, vanilla: { sheet: 41, frame: 'auto' } });
-def({ key: 'v_75_obsidian_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1A1A1A', blend: true, drop: null, vanilla: { sheet: 75, frame: 'auto' } });
-def({ key: 'v_199_crimson_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D05050', blend: true, drop: null, vanilla: { sheet: 199, frame: 'blend' } });
-def({ key: 'v_60_jungle_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8FD71D', blend: true, drop: null, vanilla: { sheet: 60, frame: 'blend' } });
-def({ key: 'v_70_mushroom_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5D7FFF', blend: true, drop: null, light: [0, 51, 255], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 70, frame: 'blend' } });
+def({ key: 'v_41_blue_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#42546D', blend: true, drop: 134, vanilla: { sheet: 41, frame: 'auto' } });
+def({ key: 'v_75_obsidian_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1A1A1A', blend: true, drop: 192, vanilla: { sheet: 75, frame: 'auto' } });
+def({ key: 'v_199_crimson_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D05050', blend: true, drop: 2, vanilla: { sheet: 199, frame: 'blend' } });
+def({ key: 'v_60_jungle_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8FD71D', blend: true, drop: 176, vanilla: { sheet: 60, frame: 'blend' } });
+def({ key: 'v_70_mushroom_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5D7FFF', blend: true, drop: 176, light: [0, 51, 255], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 70, frame: 'blend' } });
 
-def({ key: 'v_25_ebonstone_block', name: '', solid: true, opacity: 1, pick: 65, mapColor: '#6D5A80', blend: true, drop: null, vanilla: { sheet: 25, frame: 'blend' } });
-def({ key: 'v_202_sunplate_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D5B21C', blend: true, drop: null, vanilla: { sheet: 202, frame: 'auto' } });
+def({ key: 'v_25_ebonstone_block', name: '', solid: true, opacity: 1, pick: 65, mapColor: '#6D5A80', blend: true, drop: 61, vanilla: { sheet: 25, frame: 'blend' } });
+def({ key: 'v_202_sunplate_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D5B21C', blend: true, drop: 824, vanilla: { sheet: 202, frame: 'auto' } });
 def({ key: 'v_71_mushroom_plant', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#B6AF82', drop: null, light: [0, 51, 255], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 71, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_24_corruption_short_plants', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#7A74DA', drop: null, vanilla: { sheet: 24, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_32_corruption_thorns', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#9787B7', drop: null, vanilla: { sheet: 32, frame: 'style', fw: 1, fh: 1 } });
@@ -442,9 +446,9 @@ def({ key: 'v_74_jungle_tall_plants', name: '', decor: true, framed: true, opaci
 def({ key: 'v_83_herbs_mature', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#F6C51A', drop: null, light: undefined /* 动态光 → specialTileLight case 83：药草双帧态（18 夜绽/90 黄昏，:2700-2712） */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 83, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_84_herbs_bloom', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#F6C51A', drop: null, vanilla: { sheet: 84, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_72_mushroom_tree', name: '', decor: true, framed: true, opacity: 0, pick: -1, axe: 0, mapColor: '#B6AF82', drop: null, light: [0, 51, 255], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 72, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_43_green_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#54643F', blend: true, drop: null, vanilla: { sheet: 43, frame: 'auto' } });
-def({ key: 'v_44_pink_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#6B4463', blend: true, drop: null, vanilla: { sheet: 44, frame: 'auto' } });
-def({ key: 'v_203_crimstone_block', name: '', solid: true, opacity: 1, pick: 65, mapColor: '#802C2D', blend: true, drop: null, vanilla: { sheet: 203, frame: 'blend' } });
+def({ key: 'v_43_green_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#54643F', blend: true, drop: 137, vanilla: { sheet: 43, frame: 'auto' } });
+def({ key: 'v_44_pink_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#6B4463', blend: true, drop: 139, vanilla: { sheet: 44, frame: 'auto' } });
+def({ key: 'v_203_crimstone_block', name: '', solid: true, opacity: 1, pick: 65, mapColor: '#802C2D', blend: true, drop: 836, vanilla: { sheet: 203, frame: 'blend' } });
 def({ key: 'v_201_crimson_short_plants', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#CB3D40', drop: null, vanilla: { sheet: 201, frame: 'style', fw: 1, fh: 1 } });
 
 // 所有 def() 注册完毕后统一回填 key→id 映射（必须位于文件末尾）
@@ -452,15 +456,15 @@ def({ key: 'v_201_crimson_short_plants', name: '', decor: true, framed: true, op
 def({ key: 'v_35_jackolanterns', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#E2911E', drop: null, light: undefined /* 动态光 → specialTileLight case 35：南瓜灯 frameX<36 亮档门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 35, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_92_lampposts', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 6, mapColor: '#D5E5ED', drop: null, light: undefined /* 动态光 → specialTileLight case 92：路灯 frameY<=18&&frameX==0 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 92, frame: 'style', fw: 1, fh: 6 } });
 def({ key: 'v_126_discoball', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#9FD1E5', drop: null, vanilla: { sheet: 126, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_131_inactivestoneblock', name: '', solid: false, /* 致动关闭态=inactive：不参与碰撞 */ opacity: 1, pick: 0, blend: true, mapColor: '#343434', drop: null, vanilla: { sheet: 131, frame: 'auto' } });
+def({ key: 'v_131_inactivestoneblock', name: '', solid: false, /* 致动关闭态=inactive：不参与碰撞 */ opacity: 1, pick: 0, blend: true, mapColor: '#343434', drop: 512 /* KillTile :64869（审计 E ❌23;130→511/131→512 相邻档） */, vanilla: { sheet: 131, frame: 'auto' } });
 def({ key: 'v_139_musicboxes', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 139, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_142_inletpump', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: null, vanilla: { sheet: 142, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_143_outletpump', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: null, vanilla: { sheet: 143, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_149_holidaylights', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#DC3232', drop: null, light: undefined /* 动态光 → specialTileLight case 149：节日灯 frameX/18 三色×抖动 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 149, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_173_platinumcandelabra', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#FDDD03', drop: null, light: undefined /* 动态光 → specialTileLight case 173：白金烛台样式表（与 100 共体） */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 173, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_174_platinumcandle', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#FDDD03', drop: null, light: undefined /* 动态光 → specialTileLight case 174：白金蜡烛 frameX==0 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 174, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_174_platinumcandle', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#FDDD03', drop: 713, /* D-6:case 174(:64689）→713 */  light: undefined /* 动态光 → specialTileLight case 174：白金蜡烛 frameX==0 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 174, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_209_cannon', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 4, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 209, frame: 'style', fw: 4, fh: 3 } });
-def({ key: 'v_210_landmine', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#C03B3B', drop: null, vanilla: { sheet: 210, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_210_landmine', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#C03B3B', drop: 937, /* D-6:case 210(:64863）→937 */  vanilla: { sheet: 210, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_212_snowballlauncher', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 212, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_216_firework', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 216, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_244_bubblemachine', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 3, h: 2, mapColor: '#C8F5FD', drop: null, vanilla: { sheet: 244, frame: 'style', fw: 3, fh: 2 } });
@@ -480,7 +484,7 @@ def({ key: 'v_267_diamondgemspark', name: '', solid: true, opacity: 1, pick: 0, 
 def({ key: 'v_268_ambergemspark', name: '', solid: true, opacity: 1, pick: 0, blend: true, mapColor: '#FF914F', drop: null, light: [191, 96, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 268, frame: 'auto' } });
 def({ key: 'v_335_fireworksbox', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#D9AE89', drop: null, vanilla: { sheet: 335, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_338_fireworkfountain', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 2, mapColor: '#55FFA0', drop: null, vanilla: { sheet: 338, frame: 'style', fw: 1, fh: 2 } });
-def({ key: 'v_372_peacecandle', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#FC80C9', drop: null, light: undefined /* 动态光 → specialTileLight case 372：和平蜡烛 frameX==0 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 372, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_372_peacecandle', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#FC80C9', drop: 3117, /* D-6:case 372(:64680）→3117 */  light: undefined /* 动态光 → specialTileLight case 372：和平蜡烛 frameX==0 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 372, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_386_trapdooropen', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 386, frame: 'style', fw: 2, fh: 2 } });
 // ⚠️5 并 def（2026-08-23）：本 def 已退役——唯一消费点 devices.ShiftTallGate 已改用
 // v_389_tall_gate_open（非 decor/opacity1 版,WldImport/Door.shiftTallGate 同款）,同一原版
@@ -491,38 +495,38 @@ def({ key: 'v_389_tallgateopen', name: '', decor: true, framed: true, opacity: 0
 def({ key: 'v_410_lunarmonolith', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 3, mapColor: '#4B8BA6', drop: null, vanilla: { sheet: 410, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_419_logicgatelamp', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#585F72', drop: null, vanilla: { sheet: 419, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_420_logicgate', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#63FF6B', drop: null, vanilla: { sheet: 420, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_421_conveyorbeltleft', name: '', solid: true, opacity: 1, pick: 0, blend: true, mapColor: '#414B5A', drop: null, vanilla: { sheet: 421, frame: 'auto' } });
+def({ key: 'v_421_conveyorbeltleft', name: '', solid: true, opacity: 1, pick: 0, blend: true, mapColor: '#414B5A', drop: 3609, vanilla: { sheet: 421, frame: 'auto' } });
 def({ key: 'v_423_logicsensor', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#F5C501', drop: null, vanilla: { sheet: 423, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_424_wirepipe', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#929BBB', drop: null, vanilla: { sheet: 424, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_424_wirepipe', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#929BBB', drop: 3616, /* D-6:case 424(:64311）→3616 */  vanilla: { sheet: 424, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_425_announcementbox', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#929BBB', drop: null, vanilla: { sheet: 425, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_428_weightedpressureplate', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#FFFFFF', drop: null, vanilla: { sheet: 428, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_429_wirebulb', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#DCDCDC', drop: null, vanilla: { sheet: 429, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_429_wirebulb', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#DCDCDC', drop: 3629, /* D-6:case 429(:64317）→3629 */  vanilla: { sheet: 429, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_440_gemlocks', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 3, h: 3, mapColor: '#EE3335', drop: null, vanilla: { sheet: 440, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_441_fakecontainers', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#AE815C', drop: null, vanilla: { sheet: 441, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_442_projectilepressurepad', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#0390C9', drop: null, vanilla: { sheet: 442, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_445_pixelbox', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#F0F0F0', drop: null, vanilla: { sheet: 445, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_442_projectilepressurepad', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#0390C9', drop: 3707, /* D-6:case 442(:64185）→3707 */  vanilla: { sheet: 442, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_445_pixelbox', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#F0F0F0', drop: 3725, /* D-6:case 445(:64314）→3725 */  vanilla: { sheet: 445, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_452_sillyballoonmachine', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 3, h: 3, mapColor: '#FF96B5', drop: null, vanilla: { sheet: 452, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_455_partymonolith', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 3, h: 3, mapColor: '#30E16E', drop: null, vanilla: { sheet: 455, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_468_fakecontainers2', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#FFFFFF', drop: null, vanilla: { sheet: 468, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_476_golfhole', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#A0A0A0', drop: null, vanilla: { sheet: 476, frame: 'style', fw: 1, fh: 1 } }); // 原版 tileSolid[476]=true
+def({ key: 'v_476_golfhole', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#A0A0A0', drop: 4040, vanilla: { sheet: 476, frame: 'style', fw: 1, fh: 1 } }); // 原版 tileSolid[476]=true
 def({ key: 'v_480_bloodmoonmonolith', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 3, mapColor: '#783232', drop: null, vanilla: { sheet: 480, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_497_toilets', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 497, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_509_voidmonolith', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 3, mapColor: '#32323C', drop: null, vanilla: { sheet: 509, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_531_boulderstatue', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 531, frame: 'style', fw: 2, fh: 3 } });
-def({ key: 'v_546_grate', name: '', solid: true, opacity: 1, pick: 0, blend: true, mapColor: '#3C3C3C', drop: null, vanilla: { sheet: 546, frame: 'auto' } });
-def({ key: 'v_557_grateclosed', name: '', solid: true, opacity: 1, pick: 0, blend: true, mapColor: '#3C3C3C', drop: null, vanilla: { sheet: 557, frame: 'auto' } });
+def({ key: 'v_546_grate', name: '', solid: true, opacity: 1, pick: 0, blend: true, mapColor: '#3C3C3C', drop: 4422, vanilla: { sheet: 546, frame: 'auto' } });
+def({ key: 'v_557_grateclosed', name: '', solid: true, opacity: 1, pick: 0, blend: true, mapColor: '#3C3C3C', drop: 4422, vanilla: { sheet: 557, frame: 'auto' } });
 def({ key: 'v_564_plasmalamp', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#577FDC', drop: null, light: undefined /* 动态光 → specialTileLight case 564：等离子灯 frameX<36 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 564, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_565_fogmachine', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#636363', drop: null, vanilla: { sheet: 565, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_593_volcanosmall', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#77694F', drop: null, light: undefined /* 动态光 → specialTileLight case 593：小火山 frameX<18 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 593, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_593_volcanosmall', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#77694F', drop: 4868, /* D-6:case 593(:64493）→4868 */  light: undefined /* 动态光 → specialTileLight case 593：小火山 frameX<18 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 593, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_594_volcanolarge', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#77694F', drop: null, light: undefined /* 动态光 → specialTileLight case 594：大火山 frameX<36 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 594, frame: 'style', fw: 2, fh: 2 } });
 
 def({ key: 'v_482_cracked_green_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#54643F', blend: true, drop: null, vanilla: { sheet: 482, frame: 'auto' } });
-def({ key: 'v_163_purple_ice_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#AE91D6', blend: true, drop: null, vanilla: { sheet: 163, frame: 'auto' } });
-def({ key: 'v_200_red_ice_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D89890', blend: true, drop: null, vanilla: { sheet: 200, frame: 'auto' } });
-def({ key: 'v_116_pearlsand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EEE1DA', blend: true, drop: null, vanilla: { sheet: 116, frame: 'auto' } });
-def({ key: 'v_76_hellstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8E4242', blend: true, drop: null, vanilla: { sheet: 76, frame: 'auto' } });
-def({ key: 'v_77_hellforge', name: '', solid: false, framed: true, opacity: 1, pick: 65, light: [255, 140, 70], mapColor: '#EE5546', drop: null, vanilla: { sheet: 77, frame: 'style', fw: 3, fh: 2 } }); // 地狱熔炉（原版专属表 Tiles_77；tileSolid 未设=可通行，火光同熔炉）
-def({ key: 'v_55_signs', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 55, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_163_purple_ice_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#AE91D6', blend: true, drop: 833, vanilla: { sheet: 163, frame: 'auto' } });
+def({ key: 'v_200_red_ice_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D89890', blend: true, drop: 835, vanilla: { sheet: 200, frame: 'auto' } });
+def({ key: 'v_116_pearlsand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EEE1DA', blend: true, drop: 408, vanilla: { sheet: 116, frame: 'auto' } });
+def({ key: 'v_76_hellstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8E4242', blend: true, drop: 214, vanilla: { sheet: 76, frame: 'auto' } });
+def({ key: 'v_77_hellforge', name: '', solid: false, framed: true, opacity: 1, pick: 65, light: [255, 140, 70], mapColor: '#EE5546', drop: 221 /* Check3x2 :49694（审计 E ❌20） */, vanilla: { sheet: 77, frame: 'style', fw: 3, fh: 2 } }); // 地狱熔炉（原版专属表 Tiles_77；tileSolid 未设=可通行，火光同熔炉）
+def({ key: 'v_55_signs', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: 171 /* CheckSign default :43792（审计 E ❌21;牌面注销链在 breakTile :12801） */, vanilla: { sheet: 55, frame: 'style', fw: 2, fh: 2 } });
 // 动画制作台补全（原版 AnimateTiles 300-308 组 + 499；TEdit 实名 301/307/308 曾在素材表提取缺口）
 def({ key: 'v_301_flesh_cloning_vat', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 301, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_307_steampunk_boiler', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 307, frame: 'style', fw: 3, fh: 3 } });
@@ -530,52 +534,52 @@ def({ key: 'v_308_honey_dispenser', name: '', solid: false, framed: true, opacit
 def({ key: 'v_499_decay_chamber', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#A0BB8E', drop: null, vanilla: { sheet: 499, frame: 'style', fw: 3, fh: 3 } });
 
 // ===================== TEdit 全量补齐（缺失 sheet 程序生成，勿手改） =====================
-def({ key: 'v_36_presents', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E6595C', drop: null, vanilla: { sheet: 36, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_46_silver_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9C2C3', blend: true, drop: null, vanilla: { sheet: 46, frame: 'auto' } });
-def({ key: 'v_47_copper_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: true, drop: null, vanilla: { sheet: 47, frame: 'auto' } });
+def({ key: 'v_36_presents', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E6595C', drop: 1869 /* KillTile :64548（审计 E ❌25） */, vanilla: { sheet: 36, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_46_silver_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9C2C3', blend: true, drop: 143, vanilla: { sheet: 46, frame: 'auto' } });
+def({ key: 'v_47_copper_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: true, drop: 145, vanilla: { sheet: 47, frame: 'auto' } });
 def({ key: 'v_99_trash_can', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: null, vanilla: { sheet: 99, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_102_throne', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#E5D449', drop: null, vanilla: { sheet: 102, frame: 'style', fw: 3, fh: 4 } });
+def({ key: 'v_102_throne', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#E5D449', drop: 355 /* Check3x4 :50162（审计 E ❌22） */, vanilla: { sheet: 102, frame: 'style', fw: 3, fh: 4 } });
 def({ key: 'v_115_hallowed_vines', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#21ABCF', blend: true, drop: null, vanilla: { sheet: 115, frame: 'auto' } });
-def({ key: 'v_121_cobalt_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0B508F', blend: true, drop: null, vanilla: { sheet: 121, frame: 'auto' } });
-def({ key: 'v_122_mythril_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5BA9A9', blend: true, drop: null, vanilla: { sheet: 122, frame: 'auto' } });
+def({ key: 'v_121_cobalt_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0B508F', blend: true, drop: 415, vanilla: { sheet: 121, frame: 'auto' } });
+def({ key: 'v_122_mythril_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5BA9A9', blend: true, drop: 416, vanilla: { sheet: 122, frame: 'auto' } });
 def({ key: 'v_127_ice_ice_rod', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#80CCE6', blend: true, drop: null, vanilla: { sheet: 127, frame: 'auto' } });
 def({ key: 'v_128_mannequin_legacy', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 128, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_133_forges', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#E73538', drop: null, light: [212, 153, 128], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 133, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_134_anvils_hardmode', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#A6BB99', drop: null, vanilla: { sheet: 134, frame: 'style', fw: 2, fh: 1 } });
-def({ key: 'v_140_demonite_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#625FA7', blend: true, drop: null, light: [31, 18, 82], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 140, frame: 'auto' } });
-def({ key: 'v_145_red_candy_cane_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C01E1E', blend: true, drop: null, vanilla: { sheet: 145, frame: 'auto' } });
-def({ key: 'v_146_green_candy_cane_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#2BC01E', blend: true, drop: null, vanilla: { sheet: 146, frame: 'auto' } });
-def({ key: 'v_150_adamantite_beam', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#801A34', blend: true, drop: null, vanilla: { sheet: 150, frame: 'auto' } });
-def({ key: 'v_153_red_stucco', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EF8D7E', blend: true, drop: null, vanilla: { sheet: 153, frame: 'auto' } });
-def({ key: 'v_154_yellow_stucco', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#BEAB5E', blend: true, drop: null, vanilla: { sheet: 154, frame: 'auto' } });
-def({ key: 'v_155_green_stucco', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#83A2A1', blend: true, drop: null, vanilla: { sheet: 155, frame: 'auto' } });
-def({ key: 'v_156_gray_stucco', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#AAAB9D', blend: true, drop: null, vanilla: { sheet: 156, frame: 'auto' } });
-def({ key: 'v_157_ebonwood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#68647E', blend: true, drop: null, vanilla: { sheet: 157, frame: 'auto' } });
-def({ key: 'v_159_pearlwood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#948562', blend: true, drop: null, vanilla: { sheet: 159, frame: 'auto' } });
-def({ key: 'v_160_rainbow_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0000C8', blend: true, drop: null, vanilla: { sheet: 160, frame: 'auto' } });
-def({ key: 'v_164_pink_ice_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DAB6CC', blend: true, drop: null, vanilla: { sheet: 164, frame: 'auto' } });
-def({ key: 'v_170_pine_tree_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1B6D45', blend: true, drop: null, vanilla: { sheet: 170, frame: 'auto' } });
+def({ key: 'v_140_demonite_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#625FA7', blend: true, drop: 577, light: [31, 18, 82], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 140, frame: 'auto' } });
+def({ key: 'v_145_red_candy_cane_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C01E1E', blend: true, drop: 586, vanilla: { sheet: 145, frame: 'auto' } });
+def({ key: 'v_146_green_candy_cane_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#2BC01E', blend: true, drop: 591, vanilla: { sheet: 146, frame: 'auto' } });
+def({ key: 'v_150_adamantite_beam', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#801A34', blend: true, drop: 604, vanilla: { sheet: 150, frame: 'auto' } });
+def({ key: 'v_153_red_stucco', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EF8D7E', blend: true, drop: 611, vanilla: { sheet: 153, frame: 'auto' } });
+def({ key: 'v_154_yellow_stucco', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#BEAB5E', blend: true, drop: 612, vanilla: { sheet: 154, frame: 'auto' } });
+def({ key: 'v_155_green_stucco', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#83A2A1', blend: true, drop: 613, vanilla: { sheet: 155, frame: 'auto' } });
+def({ key: 'v_156_gray_stucco', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#AAAB9D', blend: true, drop: 614, vanilla: { sheet: 156, frame: 'auto' } });
+def({ key: 'v_157_ebonwood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#68647E', blend: true, drop: 619, vanilla: { sheet: 157, frame: 'auto' } });
+def({ key: 'v_159_pearlwood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#948562', blend: true, drop: 621, vanilla: { sheet: 159, frame: 'auto' } });
+def({ key: 'v_160_rainbow_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0000C8', blend: true, drop: 662, vanilla: { sheet: 160, frame: 'auto' } });
+def({ key: 'v_164_pink_ice_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DAB6CC', blend: true, drop: 834, vanilla: { sheet: 164, frame: 'auto' } });
+def({ key: 'v_170_pine_tree_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1B6D45', blend: true, drop: 1872, vanilla: { sheet: 170, frame: 'auto' } });
 def({ key: 'v_171_christmas_tree', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 8, mapColor: '#218755', drop: null, vanilla: { sheet: 171, frame: 'style', fw: 4, fh: 8 } });
-def({ key: 'v_176_tungsten_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#849D7F', blend: true, drop: null, vanilla: { sheet: 176, frame: 'auto' } });
-def({ key: 'v_177_platinum_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#98ABC6', blend: true, drop: null, vanilla: { sheet: 177, frame: 'auto' } });
-def({ key: 'v_180_yellow_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7E8631', blend: true, drop: null, vanilla: { sheet: 180, frame: 'auto' } });
-def({ key: 'v_188_cactus_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#497811', blend: true, drop: null, vanilla: { sheet: 188, frame: 'auto' } });
+def({ key: 'v_176_tungsten_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#849D7F', blend: true, drop: 718, vanilla: { sheet: 176, frame: 'auto' } });
+def({ key: 'v_177_platinum_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#98ABC6', blend: true, drop: 719, vanilla: { sheet: 177, frame: 'auto' } });
+def({ key: 'v_180_yellow_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7E8631', blend: true, drop: 3, vanilla: { sheet: 180, frame: 'auto' } });
+def({ key: 'v_188_cactus_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#497811', blend: true, drop: 276, vanilla: { sheet: 188, frame: 'auto' } });
 def({ key: 'v_194_bone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#9D9D6B', blend: true, drop: null, vanilla: { sheet: 194, frame: 'auto' } });
-def({ key: 'v_195_flesh_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#861622', blend: true, drop: null, vanilla: { sheet: 195, frame: 'auto' } });
-def({ key: 'v_197_frozen_slime_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#61C8E1', blend: true, drop: null, vanilla: { sheet: 197, frame: 'auto' } });
-def({ key: 'v_198_asphalt_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#3E3D34', blend: true, drop: null, vanilla: { sheet: 198, frame: 'auto' } });
-def({ key: 'v_208_shadewood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#586976', blend: true, drop: null, vanilla: { sheet: 208, frame: 'auto' } });
+def({ key: 'v_195_flesh_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#861622', blend: true, drop: 763, vanilla: { sheet: 195, frame: 'auto' } });
+def({ key: 'v_197_frozen_slime_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#61C8E1', blend: true, drop: 767, vanilla: { sheet: 197, frame: 'auto' } });
+def({ key: 'v_198_asphalt_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#3E3D34', blend: true, drop: 775, vanilla: { sheet: 198, frame: 'auto' } });
+def({ key: 'v_208_shadewood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#586976', blend: true, drop: 911, vanilla: { sheet: 208, frame: 'auto' } });
 def({ key: 'v_217_blend_o_matic', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#909490', drop: null, vanilla: { sheet: 217, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_228_dye_vat', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 228, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_236_life_fruit_plant', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#95E857', drop: null, vanilla: { sheet: 236, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_238_plantera_s_bulb', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#E180CE', drop: null, vanilla: { sheet: 238, frame: 'style', fw: 2, fh: 2 } });
 def({ platform: true, key: 'v_239_ore_bars', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#E0C265', drop: null, vanilla: { sheet: 239, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_243_imbuing_station', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#C6C4AA', drop: null, vanilla: { sheet: 243, frame: 'style', fw: 3, fh: 3 } });
-def({ key: 'v_249_bubblegum_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EB26E7', blend: true, drop: null, vanilla: { sheet: 249, frame: 'auto' } });
-def({ key: 'v_250_titanstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#56555C', blend: true, drop: null, vanilla: { sheet: 250, frame: 'auto' } });
-def({ key: 'v_251_pumpkin_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EB9617', blend: true, drop: null, vanilla: { sheet: 251, frame: 'auto' } });
-def({ key: 'v_252_hay_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#99832C', blend: true, drop: null, vanilla: { sheet: 252, frame: 'auto' } });
-def({ key: 'v_253_spooky_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#393061', blend: true, drop: null, vanilla: { sheet: 253, frame: 'auto' } });
+def({ key: 'v_249_bubblegum_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EB26E7', blend: true, drop: 1591, vanilla: { sheet: 249, frame: 'auto' } });
+def({ key: 'v_250_titanstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#56555C', blend: true, drop: 1593, vanilla: { sheet: 250, frame: 'auto' } });
+def({ key: 'v_251_pumpkin_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EB9617', blend: true, drop: 1725, vanilla: { sheet: 251, frame: 'auto' } });
+def({ key: 'v_252_hay_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#99832C', blend: true, drop: 1727, vanilla: { sheet: 252, frame: 'auto' } });
+def({ key: 'v_253_spooky_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#393061', blend: true, drop: 1729, vanilla: { sheet: 253, frame: 'auto' } });
 def({ key: 'v_269_womannequin_legacy', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 269, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_270_firefly_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#BBFF6B', drop: null, light: [186, 255, 105], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 270, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_271_lightning_bug_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#6BFAFF', drop: null, light: [115, 242, 255], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 271, frame: 'style', fw: 1, fh: 2 } });
@@ -588,7 +592,7 @@ def({ platform: true, key: 'v_280_blue_jay_cage', name: '', solid: false, framed
 def({ platform: true, key: 'v_281_cardinal_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 281, frame: 'style', fw: 6, fh: 3 } });
 def({ key: 'v_282_fish_bowl', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 282, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_283_heavy_work_bench', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#808080', drop: null, vanilla: { sheet: 283, frame: 'style', fw: 3, fh: 3 } });
-def({ key: 'v_284_copper_plating', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: true, drop: null, vanilla: { sheet: 284, frame: 'auto' } });
+def({ key: 'v_284_copper_plating', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: true, drop: 2173, vanilla: { sheet: 284, frame: 'auto' } });
 def({ platform: true, key: 'v_285_snail_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 285, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_286_glowing_snail_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, light: [26, 51, 178], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 286, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_288_monarch_butterfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 288, frame: 'style', fw: 2, fh: 2 } });
@@ -601,30 +605,30 @@ def({ platform: true, key: 'v_298_frog_cage', name: '', solid: false, framed: tr
 def({ platform: true, key: 'v_299_mouse_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 299, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_309_penguin_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 309, frame: 'style', fw: 6, fh: 3 } });
 def({ platform: true, key: 'v_310_worm_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 310, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_313_blue_dynasty_shingles', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#57969A', blend: true, drop: null, vanilla: { sheet: 313, frame: 'auto' } });
-def({ key: 'v_315_coralstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EB7250', blend: true, drop: null, vanilla: { sheet: 315, frame: 'auto' } });
+def({ key: 'v_313_blue_dynasty_shingles', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#57969A', blend: true, drop: 2262, vanilla: { sheet: 313, frame: 'auto' } });
+def({ key: 'v_315_coralstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EB7250', blend: true, drop: 2435, vanilla: { sheet: 315, frame: 'auto' } });
 def({ key: 'v_317_green_jellyfish_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#76E381', drop: null, vanilla: { sheet: 317, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_318_pink_jellyfish_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#E376D7', drop: null, vanilla: { sheet: 318, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_325_tin_plating', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#817D5D', blend: true, drop: null, vanilla: { sheet: 325, frame: 'auto' } });
-def({ key: 'v_326_waterfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#093DBF', blend: true, drop: null, vanilla: { sheet: 326, frame: 'auto' } });
-def({ key: 'v_327_lavafall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FD2003', blend: true, drop: null, vanilla: { sheet: 327, frame: 'auto' } });
-def({ key: 'v_328_confetti_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C8F6FE', blend: true, drop: null, vanilla: { sheet: 328, frame: 'auto' } });
-def({ key: 'v_329_midnight_confetti_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0F0F0F', blend: true, drop: null, vanilla: { sheet: 329, frame: 'auto' } });
+def({ key: 'v_325_tin_plating', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#817D5D', blend: true, drop: 2692, vanilla: { sheet: 325, frame: 'auto' } });
+def({ key: 'v_326_waterfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#093DBF', blend: true, drop: 2693, vanilla: { sheet: 326, frame: 'auto' } });
+def({ key: 'v_327_lavafall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FD2003', blend: true, drop: 2694, vanilla: { sheet: 327, frame: 'auto' } });
+def({ key: 'v_328_confetti_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C8F6FE', blend: true, drop: 2695, vanilla: { sheet: 328, frame: 'auto' } });
+def({ key: 'v_329_midnight_confetti_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0F0F0F', blend: true, drop: 2697, vanilla: { sheet: 329, frame: 'auto' } });
 def({ key: 'v_330_copper_coin_pile', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#E2764C', drop: null, vanilla: { sheet: 330, frame: 'auto' } });
 def({ key: 'v_331_silver_coin_pile', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#A1ACAD', drop: null, vanilla: { sheet: 331, frame: 'auto' } });
 def({ key: 'v_334_weapon_rack_legacy_do_not_use', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 334, frame: 'style', fw: 3, fh: 3 } });
-def({ key: 'v_336_living_fire_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FD3E03', blend: true, drop: null, light: [217, 128, 76], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 336, frame: 'auto' } });
+def({ key: 'v_336_living_fire_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FD3E03', blend: true, drop: 2701, light: [217, 128, 76], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 336, frame: 'auto' } });
 def({ key: 'v_337_text_statue', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 337, frame: 'style', fw: 2, fh: 3 } });
 def({ platform: true, key: 'v_339_grasshopper_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 339, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_341_living_demon_fire_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#694ACA', blend: true, drop: null, vanilla: { sheet: 341, frame: 'auto' } });
-def({ key: 'v_342_living_frost_fire_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1DF0FF', blend: true, drop: null, light: [128, 128, 280], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 342, frame: 'auto' } });
-def({ key: 'v_343_living_ichor_fire_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FECA50', blend: true, drop: null, light: [217, 217, 76], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 343, frame: 'auto' } });
-def({ key: 'v_344_living_ultrabright_fire_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#83FCF5', blend: true, drop: null, light: [153, 262, 245], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 344, frame: 'auto' } });
-def({ key: 'v_345_honeyfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FF9C0C', blend: true, drop: null, vanilla: { sheet: 345, frame: 'auto' } });
-def({ key: 'v_346_chlorophyte_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#95D459', blend: true, drop: null, vanilla: { sheet: 346, frame: 'auto' } });
-def({ key: 'v_347_crimtane_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EC4A4F', blend: true, drop: null, light: [89, 0, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 347, frame: 'auto' } });
-def({ key: 'v_348_shroomite_plating', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#2C1AE9', blend: true, drop: null, light: [0, 51, 255], /* 原版 tileLighted[348]（Main.cs:9923）+ 蘑菇组发光色（TileLightScanner.cs:2938） */ vanilla: { sheet: 348, frame: 'auto' } });
-def({ key: 'v_351_smoke_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1F1F1F', blend: true, drop: null, vanilla: { sheet: 351, frame: 'auto' } });
+def({ key: 'v_341_living_demon_fire_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#694ACA', blend: true, drop: 2752, vanilla: { sheet: 341, frame: 'auto' } });
+def({ key: 'v_342_living_frost_fire_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1DF0FF', blend: true, drop: 2753, light: [128, 128, 280], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 342, frame: 'auto' } });
+def({ key: 'v_343_living_ichor_fire_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FECA50', blend: true, drop: 2754, light: [217, 217, 76], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 343, frame: 'auto' } });
+def({ key: 'v_344_living_ultrabright_fire_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#83FCF5', blend: true, drop: 2755, light: [153, 262, 245], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 344, frame: 'auto' } });
+def({ key: 'v_345_honeyfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FF9C0C', blend: true, drop: 2787, vanilla: { sheet: 345, frame: 'auto' } });
+def({ key: 'v_346_chlorophyte_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#95D459', blend: true, drop: 2792, vanilla: { sheet: 346, frame: 'auto' } });
+def({ key: 'v_347_crimtane_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EC4A4F', blend: true, drop: 2793, light: [89, 0, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 347, frame: 'auto' } });
+def({ key: 'v_348_shroomite_plating', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#2C1AE9', blend: true, drop: 2794, light: [0, 51, 255], /* 原版 tileLighted[348]（Main.cs:9923）+ 蘑菇组发光色（TileLightScanner.cs:2938） */ vanilla: { sheet: 348, frame: 'auto' } });
+def({ key: 'v_351_smoke_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1F1F1F', blend: true, drop: 2868, vanilla: { sheet: 351, frame: 'auto' } });
 def({ platform: true, key: 'v_358_gold_bird_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 358, frame: 'style', fw: 6, fh: 3 } });
 def({ platform: true, key: 'v_359_gold_bunny_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 359, frame: 'style', fw: 6, fh: 3 } });
 def({ key: 'v_360_gold_butterfly_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 360, frame: 'style', fw: 2, fh: 2 } });
@@ -634,87 +638,87 @@ def({ platform: true, key: 'v_363_gold_mouse_cage', name: '', solid: false, fram
 def({ platform: true, key: 'v_364_gold_worm_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 364, frame: 'style', fw: 3, fh: 2 } });
 // 丝绳/蛛网绳：原版同绳族（tileRope[365]/[366]，非实心不挡光——Main.cs tileSolid
 // 无 365/366 登记）——曾误标 solid: true（实心墙不可攀），2026-08-19 绳锚批对齐
-def({ key: 'v_365_silk_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#9288CD', blend: true, drop: null, rope: true, vanilla: { sheet: 365, frame: 'auto' } });
-def({ key: 'v_366_web_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#DFE8E9', blend: true, drop: null, rope: true, vanilla: { sheet: 366, frame: 'auto' } });
-def({ key: 'v_370_meteorite_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7F74C2', blend: true, drop: null, light: [82, 41, 31], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 370, frame: 'auto' } });
-def({ key: 'v_385_crystal_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#571590', blend: true, drop: null, vanilla: { sheet: 385, frame: 'auto' } });
+def({ key: 'v_365_silk_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#9288CD', blend: true, drop: 3077, /* D-6:case 365(:64173）→3077 */  rope: true, vanilla: { sheet: 365, frame: 'auto' } });
+def({ key: 'v_366_web_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#DFE8E9', blend: true, drop: 3078, /* D-6:case 366(:64176）→3078 */  rope: true, vanilla: { sheet: 366, frame: 'auto' } });
+def({ key: 'v_370_meteorite_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7F74C2', blend: true, drop: 3100, light: [82, 41, 31], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 370, frame: 'auto' } });
+def({ key: 'v_385_crystal_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#571590', blend: true, drop: 3234, vanilla: { sheet: 385, frame: 'auto' } });
 def({ key: 'v_390_lava_lamp', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FD2003', drop: null, light: [102, 51, 26], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 390, frame: 'style', fw: 1, fh: 2 } });
 def({ platform: true, key: 'v_391_cage_enchanted_nightcrawler', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, light: [76, 26, 64], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 391, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_392_buggy_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 392, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_393_grubby_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 393, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_394_sluggy_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 394, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_400_corrupt_sandstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#604475', blend: true, drop: null, vanilla: { sheet: 400, frame: 'auto' } });
-def({ key: 'v_401_crimson_sandstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#443C33', blend: true, drop: null, vanilla: { sheet: 401, frame: 'auto' } });
-def({ key: 'v_402_hallow_hardened_sand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#AEA8BA', blend: true, drop: null, vanilla: { sheet: 402, frame: 'auto' } });
-def({ key: 'v_403_hallow_sandstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#CD98BA', blend: true, drop: null, vanilla: { sheet: 403, frame: 'auto' } });
-def({ key: 'v_407_sturdy_fossil_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FFE384', blend: true, drop: null, vanilla: { sheet: 407, frame: 'auto' } });
-def({ key: 'v_408_luminite_ore', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#555352', blend: true, drop: null, vanilla: { sheet: 408, frame: 'auto' } });
-def({ key: 'v_409_luminite_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#555352', blend: true, drop: null, vanilla: { sheet: 409, frame: 'auto' } });
+def({ key: 'v_400_corrupt_sandstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#604475', blend: true, drop: 3276, vanilla: { sheet: 400, frame: 'auto' } });
+def({ key: 'v_401_crimson_sandstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#443C33', blend: true, drop: 3277, vanilla: { sheet: 401, frame: 'auto' } });
+def({ key: 'v_402_hallow_hardened_sand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#AEA8BA', blend: true, drop: 3338, vanilla: { sheet: 402, frame: 'auto' } });
+def({ key: 'v_403_hallow_sandstone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#CD98BA', blend: true, drop: 3339, vanilla: { sheet: 403, frame: 'auto' } });
+def({ key: 'v_407_sturdy_fossil_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FFE384', blend: true, drop: 3380, vanilla: { sheet: 407, frame: 'auto' } });
+def({ key: 'v_408_luminite_ore', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#555352', blend: true, drop: 3460, vanilla: { sheet: 408, frame: 'auto' } });
+def({ key: 'v_409_luminite_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#555352', blend: true, drop: 3461, vanilla: { sheet: 409, frame: 'auto' } });
 def({ key: 'v_412_lunar_crafting_station', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#4B8BA6', drop: null, vanilla: { sheet: 412, frame: 'style', fw: 3, fh: 3 } });
 def({ platform: true, key: 'v_413_red_squirrel_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 413, frame: 'style', fw: 6, fh: 3 } });
 def({ platform: true, key: 'v_414_gold_squirrel_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 414, frame: 'style', fw: 6, fh: 3 } });
-def({ key: 'v_415_solar_fragment_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F94B07', blend: true, drop: null, light: [178, 128, 26], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 415, frame: 'auto' } });
-def({ key: 'v_416_vortex_fragment_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00A0AA', blend: true, drop: null, light: [0, 153, 178], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 416, frame: 'auto' } });
-def({ key: 'v_417_nebula_fragment_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A057EA', blend: true, drop: null, light: [153, 51, 153], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 417, frame: 'auto' } });
-def({ key: 'v_418_stardust_fragment_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#16ADFE', blend: true, drop: null, light: [153, 153, 230], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 418, frame: 'auto' } });
-def({ key: 'v_426_red_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A8262F', blend: true, drop: null, vanilla: { sheet: 426, frame: 'auto' } });
+def({ key: 'v_415_solar_fragment_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F94B07', blend: true, drop: 3573, light: [178, 128, 26], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 415, frame: 'auto' } });
+def({ key: 'v_416_vortex_fragment_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00A0AA', blend: true, drop: 3574, light: [0, 153, 178], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 416, frame: 'auto' } });
+def({ key: 'v_417_nebula_fragment_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A057EA', blend: true, drop: 3575, light: [153, 51, 153], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 417, frame: 'auto' } });
+def({ key: 'v_418_stardust_fragment_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#16ADFE', blend: true, drop: 3576, light: [153, 153, 230], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 418, frame: 'auto' } });
+def({ key: 'v_426_red_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A8262F', blend: true, drop: 3621, vanilla: { sheet: 426, frame: 'auto' } });
 def({ platform: true, key: 'v_427_red_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#B7353E', drop: null, vanilla: { sheet: 427, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_430_green_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#27A860', blend: true, drop: null, vanilla: { sheet: 430, frame: 'auto' } });
-def({ key: 'v_431_blue_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#275EA8', blend: true, drop: null, vanilla: { sheet: 431, frame: 'auto' } });
-def({ key: 'v_432_yellow_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F2DD64', blend: true, drop: null, vanilla: { sheet: 432, frame: 'auto' } });
-def({ key: 'v_433_pink_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E064F2', blend: true, drop: null, vanilla: { sheet: 433, frame: 'auto' } });
-def({ key: 'v_434_white_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C5C1D8', blend: true, drop: null, vanilla: { sheet: 434, frame: 'auto' } });
+def({ key: 'v_430_green_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#27A860', blend: true, drop: 3633, vanilla: { sheet: 430, frame: 'auto' } });
+def({ key: 'v_431_blue_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#275EA8', blend: true, drop: 3634, vanilla: { sheet: 431, frame: 'auto' } });
+def({ key: 'v_432_yellow_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F2DD64', blend: true, drop: 3635, vanilla: { sheet: 432, frame: 'auto' } });
+def({ key: 'v_433_pink_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E064F2', blend: true, drop: 3636, vanilla: { sheet: 433, frame: 'auto' } });
+def({ key: 'v_434_white_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C5C1D8', blend: true, drop: 3637, vanilla: { sheet: 434, frame: 'auto' } });
 def({ platform: true, key: 'v_435_green_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#36B76F', drop: null, vanilla: { sheet: 435, frame: 'style', fw: 1, fh: 1 } });
 def({ platform: true, key: 'v_436_blue_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#366DB7', drop: null, vanilla: { sheet: 436, frame: 'style', fw: 1, fh: 1 } });
 def({ platform: true, key: 'v_437_yellow_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#FFEC73', drop: null, vanilla: { sheet: 437, frame: 'style', fw: 1, fh: 1 } });
 def({ platform: true, key: 'v_438_pink_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#EF73FF', drop: null, vanilla: { sheet: 438, frame: 'style', fw: 1, fh: 1 } });
 def({ platform: true, key: 'v_439_white_team_platform', name: '', solid: false, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#D4D0E7', drop: null, vanilla: { sheet: 439, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_446_silly_pink_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FF4298', blend: true, drop: null, vanilla: { sheet: 446, frame: 'auto' } });
-def({ key: 'v_447_silly_purple_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B384FF', blend: true, drop: null, vanilla: { sheet: 447, frame: 'auto' } });
-def({ key: 'v_448_silly_green_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00CEB4', blend: true, drop: null, vanilla: { sheet: 448, frame: 'auto' } });
-def({ key: 'v_449_blue_streamer', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5bbaf0', blend: true, drop: null, vanilla: { sheet: 449, frame: 'auto' } });
-def({ key: 'v_450_green_streamer', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5cf05b', blend: true, drop: null, vanilla: { sheet: 450, frame: 'auto' } });
-def({ key: 'v_451_pink_streamer', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#f05b93', blend: true, drop: null, vanilla: { sheet: 451, frame: 'auto' } });
+def({ key: 'v_446_silly_pink_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FF4298', blend: true, drop: 3736, vanilla: { sheet: 446, frame: 'auto' } });
+def({ key: 'v_447_silly_purple_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B384FF', blend: true, drop: 3737, vanilla: { sheet: 447, frame: 'auto' } });
+def({ key: 'v_448_silly_green_balloon_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00CEB4', blend: true, drop: 3738, vanilla: { sheet: 448, frame: 'auto' } });
+def({ key: 'v_449_blue_streamer', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5bbaf0', blend: true, drop: 3739, vanilla: { sheet: 449, frame: 'auto' } });
+def({ key: 'v_450_green_streamer', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5cf05b', blend: true, drop: 3740, vanilla: { sheet: 450, frame: 'auto' } });
+def({ key: 'v_451_pink_streamer', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#f05b93', blend: true, drop: 3741, vanilla: { sheet: 451, frame: 'auto' } });
 def({ key: 'v_453_silly_tied_balloon', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#B384FF', drop: null, vanilla: { sheet: 453, frame: 'style', fw: 1, fh: 3 } });
 def({ key: 'v_454_pigronata', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 3, mapColor: '#ae10b0', drop: null, vanilla: { sheet: 454, frame: 'style', fw: 4, fh: 3 } });
 def({ key: 'v_456_silly_tied_bundle_of_balloons', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#b384ff', drop: null, vanilla: { sheet: 456, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_457_party_presents', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#96A4CE', drop: null, vanilla: { sheet: 457, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_458_sandfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#d3c66f', blend: true, drop: null, vanilla: { sheet: 458, frame: 'auto' } });
-def({ key: 'v_459_snowfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#bedfe8', blend: true, drop: null, vanilla: { sheet: 459, frame: 'auto' } });
-def({ key: 'v_460_snow_cloud_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8da3b5', blend: true, drop: null, vanilla: { sheet: 460, frame: 'auto' } });
+def({ key: 'v_458_sandfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#d3c66f', blend: true, drop: 3754, vanilla: { sheet: 458, frame: 'auto' } });
+def({ key: 'v_459_snowfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#bedfe8', blend: true, drop: 3755, vanilla: { sheet: 459, frame: 'auto' } });
+def({ key: 'v_460_snow_cloud_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8da3b5', blend: true, drop: 3756, vanilla: { sheet: 460, frame: 'auto' } });
 def({ key: 'v_462_desert_spirit_lamp', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#E7B21C', drop: null, vanilla: { sheet: 462, frame: 'style', fw: 2, fh: 1 } });
 def({ key: 'v_464_war_table', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 5, h: 4, mapColor: '#E9B780', drop: null, vanilla: { sheet: 464, frame: 'style', fw: 5, fh: 4 } });
 def({ key: 'v_465_war_table_banner', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#3354C3', drop: null, vanilla: { sheet: 465, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_471_weapon_rack', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#BF8E6F', vanilla: { sheet: 471, frame: 'style', fw: 3, fh: 3 } });
-def({ key: 'v_472_iron_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#BEA08C', blend: true, drop: null, vanilla: { sheet: 472, frame: 'auto' } });
-def({ key: 'v_473_lead_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#55727B', blend: true, drop: null, vanilla: { sheet: 473, frame: 'auto' } });
-def({ key: 'v_474_lesion_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#745E61', blend: true, drop: null, vanilla: { sheet: 474, frame: 'auto' } });
-def({ key: 'v_478_crimstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6C2223', blend: true, drop: null, vanilla: { sheet: 478, frame: 'auto' } });
+def({ key: 'v_472_iron_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#BEA08C', blend: true, drop: 3951, vanilla: { sheet: 472, frame: 'auto' } });
+def({ key: 'v_473_lead_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#55727B', blend: true, drop: 3953, vanilla: { sheet: 473, frame: 'auto' } });
+def({ key: 'v_474_lesion_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#745E61', blend: true, drop: 3955, vanilla: { sheet: 474, frame: 'auto' } });
+def({ key: 'v_478_crimstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6C2223', blend: true, drop: 4050, vanilla: { sheet: 478, frame: 'auto' } });
 def({ key: 'v_486_drum_set', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 486, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_489_pin_wheel', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#FF1D88', drop: null, vanilla: { sheet: 489, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_490_weather_vane', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#D3D3D3', drop: null, vanilla: { sheet: 490, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_492_hallowed_mowed_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4EC1E3', blend: true, drop: null, vanilla: { sheet: 492, frame: 'auto' } });
+def({ key: 'v_492_hallowed_mowed_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4EC1E3', blend: true, drop: 2, vanilla: { sheet: 492, frame: 'auto' } }); // 神圣修剪草→泥土 2
 def({ key: 'v_493_pin_flags', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FAF9FC', drop: null, vanilla: { sheet: 493, frame: 'style', fw: 1, fh: 2 } });
-def({ key: 'v_494_golf_tee', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E0DBEC', drop: null, vanilla: { sheet: 494, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_496_anti_portal_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A59F99', blend: true, drop: null, vanilla: { sheet: 496, frame: 'auto' } });
-def({ key: 'v_498_spider_nest_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#CAAEA5', blend: true, drop: null, vanilla: { sheet: 498, frame: 'auto' } });
-def({ key: 'v_500_solar_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FE9E23', blend: true, drop: null, light: [134, 96, 19], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 500, frame: 'auto' } });
-def({ key: 'v_501_vortex_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#22DD97', blend: true, drop: null, light: [0, 115, 134], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 501, frame: 'auto' } });
-def({ key: 'v_502_nebula_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F9AAEC', blend: true, drop: null, light: [115, 38, 115], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 502, frame: 'auto' } });
-def({ key: 'v_503_stardust_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#23C8FE', blend: true, drop: null, light: [115, 115, 172], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 503, frame: 'auto' } });
+def({ key: 'v_494_golf_tee', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E0DBEC', drop: 4089, vanilla: { sheet: 494, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_496_anti_portal_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A59F99', blend: true, drop: 4091, vanilla: { sheet: 496, frame: 'auto' } });
+def({ key: 'v_498_spider_nest_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#CAAEA5', blend: true, drop: 4139, vanilla: { sheet: 498, frame: 'auto' } });
+def({ key: 'v_500_solar_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FE9E23', blend: true, drop: 4229, light: [134, 96, 19], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 500, frame: 'auto' } });
+def({ key: 'v_501_vortex_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#22DD97', blend: true, drop: 4230, light: [0, 115, 134], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 501, frame: 'auto' } });
+def({ key: 'v_502_nebula_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F9AAEC', blend: true, drop: 4231, light: [115, 38, 115], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 502, frame: 'auto' } });
+def({ key: 'v_503_stardust_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#23C8FE', blend: true, drop: 4232, light: [115, 115, 172], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 503, frame: 'auto' } });
 def({ key: 'v_504_mystic_snake_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#5C4B76', drop: null, vanilla: { sheet: 504, frame: 'auto' } });
 def({ key: 'v_505_gold_fish_bowl', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 505, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_507_gold_starry_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: null, vanilla: { sheet: 507, frame: 'auto' } });
-def({ key: 'v_508_blue_starry_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: null, vanilla: { sheet: 508, frame: 'auto' } });
+def({ key: 'v_507_gold_starry_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: 4277, vanilla: { sheet: 507, frame: 'auto' } });
+def({ key: 'v_508_blue_starry_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: 4278, vanilla: { sheet: 508, frame: 'auto' } });
 def({ key: 'v_510_arrow_sign', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 510, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_511_painted_arrow_sign', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BB444A', drop: null, vanilla: { sheet: 511, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_512_green_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#318672', blend: true, drop: null, vanilla: { sheet: 512, frame: 'auto' } });
-def({ key: 'v_513_brown_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7E8631', blend: true, drop: null, vanilla: { sheet: 513, frame: 'auto' } });
-def({ key: 'v_514_red_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#863B31', blend: true, drop: null, vanilla: { sheet: 514, frame: 'auto' } });
-def({ key: 'v_515_blue_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#2B568C', blend: true, drop: null, vanilla: { sheet: 515, frame: 'auto' } });
-def({ key: 'v_516_purple_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#793186', blend: true, drop: null, vanilla: { sheet: 516, frame: 'auto' } });
-def({ key: 'v_517_lava_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FE7902', blend: true, drop: null, light: [64, 26, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 517, frame: 'auto' } });
-def({ key: 'v_520_plate', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E0DBEC', vanilla: { sheet: 520, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_512_green_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#318672', blend: true, drop: 129, vanilla: { sheet: 512, frame: 'auto' } }); // 苔砖族 11 tile→灰砖 129（case 512-517 组 :64073）
+def({ key: 'v_513_brown_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7E8631', blend: true, drop: 129, vanilla: { sheet: 513, frame: 'auto' } }); // 苔砖→灰砖 129
+def({ key: 'v_514_red_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#863B31', blend: true, drop: 129, vanilla: { sheet: 514, frame: 'auto' } }); // 苔砖→灰砖 129
+def({ key: 'v_515_blue_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#2B568C', blend: true, drop: 129, vanilla: { sheet: 515, frame: 'auto' } }); // 苔砖→灰砖 129
+def({ key: 'v_516_purple_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#793186', blend: true, drop: 129, vanilla: { sheet: 516, frame: 'auto' } }); // 苔砖→灰砖 129
+def({ key: 'v_517_lava_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FE7902', blend: true, drop: 129, light: [64, 26, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 517, frame: 'auto' } }); // 苔砖→灰砖 129
+def({ key: 'v_520_plate', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E0DBEC', drop: 4326, vanilla: { sheet: 520, frame: 'style', fw: 1, fh: 1 } }); // 1457 case 520 :65282→4326（曾缺 drop 字段走 place_v_ 兜底）
 def({ key: 'v_521_black_dragonfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 521, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_522_blue_dragonfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 522, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_523_green_dragonfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 523, frame: 'style', fw: 2, fh: 2 } });
@@ -724,12 +728,12 @@ def({ key: 'v_526_yellow_dragonfly_jar', name: '', solid: false, framed: true, o
 def({ key: 'v_527_gold_dragonfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 527, frame: 'style', fw: 2, fh: 2 } });
 def({ platform: true, key: 'v_532_maggot_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 532, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_533_rat_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 533, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_534_krypton_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#72FE02', blend: true, drop: null, light: [0, 64, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 534, frame: 'auto' } });
-def({ key: 'v_535_krypton_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#72FE02', blend: true, drop: null, vanilla: { sheet: 535, frame: 'auto' } });
-def({ key: 'v_537_xenon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00C5D0', blend: true, drop: null, light: [0, 41, 87], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 537, frame: 'auto' } });
+def({ key: 'v_534_krypton_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#72FE02', blend: true, drop: 3, light: [0, 64, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 534, frame: 'auto' } }); // 苔藓族→石块 3
+def({ key: 'v_535_krypton_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#72FE02', blend: true, drop: 129, vanilla: { sheet: 535, frame: 'auto' } }); // 苔砖→灰砖 129
+def({ key: 'v_537_xenon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00C5D0', blend: true, drop: 129, light: [0, 41, 87], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 537, frame: 'auto' } }); // 苔砖→灰砖 129
 def({ platform: true, key: 'v_538_ladybug_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 538, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_540_argon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D0007E', blend: true, drop: null, vanilla: { sheet: 540, frame: 'auto' } });
-def({ key: 'v_541_echo_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#326BC5', blend: true, drop: null, vanilla: { sheet: 541, frame: 'auto' } });
+def({ key: 'v_540_argon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D0007E', blend: true, drop: 129, vanilla: { sheet: 540, frame: 'auto' } }); // 苔砖→灰砖 129
+def({ key: 'v_541_echo_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#326BC5', blend: true, drop: 4392, vanilla: { sheet: 541, frame: 'auto' } });
 def({ platform: true, key: 'v_542_owl_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 542, frame: 'style', fw: 6, fh: 3 } });
 def({ key: 'v_543_pupfish_bowl', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 543, frame: 'style', fw: 2, fh: 2 } });
 def({ platform: true, key: 'v_544_gold_ladybug_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 544, frame: 'style', fw: 3, fh: 2 } });
@@ -745,14 +749,14 @@ def({ platform: true, key: 'v_556_gold_water_strider_cage', name: '', solid: fal
 def({ platform: true, key: 'v_558_seahorse_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 558, frame: 'style', fw: 6, fh: 3 } });
 def({ platform: true, key: 'v_559_gold_seahorse_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 559, frame: 'style', fw: 6, fh: 3 } });
 def({ key: 'v_560_golf_trophies', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#964316', drop: null, vanilla: { sheet: 560, frame: 'style', fw: 2, fh: 3 } });
-def({ key: 'v_563_large_bamboo_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A5A81A', blend: true, drop: null, vanilla: { sheet: 563, frame: 'auto' } });
-def({ key: 'v_566_amber_stone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E9B45A', blend: true, drop: null, vanilla: { sheet: 566, frame: 'auto' } });
+def({ key: 'v_563_large_bamboo_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A5A81A', blend: true, drop: 4547, vanilla: { sheet: 563, frame: 'auto' } });
+def({ key: 'v_566_amber_stone_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E9B45A', blend: true, drop: 999, vanilla: { sheet: 566, frame: 'auto' } });
 def({ key: 'v_568_pink_fairy_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#F8CBE9', drop: null, light: [255, 156, 166], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 568, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_569_green_fairy_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#CBF8DA', drop: null, light: [31, 255, 168], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 569, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_570_blue_fairy_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#A0F2FF', drop: null, light: [145, 145, 255], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 570, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_572_souls_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FFBAD4', drop: null, vanilla: { sheet: 572, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_573_tattered_wood_sign', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 573, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_579_rock_golem_head', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#636363', drop: null, vanilla: { sheet: 579, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_579_rock_golem_head', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#636363', drop: 4761, vanilla: { sheet: 579, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_580_hell_butterfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, light: [178, 76, 51], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 580, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_581_lavafly_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FF9696', drop: null, light: [255, 191, 128], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 581, frame: 'style', fw: 1, fh: 2 } });
 def({ platform: true, key: 'v_582_magma_snail_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, light: [178, 51, 26], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 582, frame: 'style', fw: 3, fh: 2 } });
@@ -779,22 +783,22 @@ def({ platform: true, key: 'v_619_truffle_worm_cage', name: '', solid: false, fr
 def({ key: 'v_620_prismatic_lacewing_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 620, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_622_teapot', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#EBEBF9', drop: null, vanilla: { sheet: 622, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_623_potted_crystal_plants', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 5, mapColor: '#DCD2F5', drop: null, vanilla: { sheet: 623, frame: 'style', fw: 2, fh: 5 } });
-def({ key: 'v_624_abigail_s_flower', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#D25B4D', drop: null, vanilla: { sheet: 624, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_626_neon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DC0CED', blend: true, drop: null, vanilla: { sheet: 626, frame: 'auto' } });
-def({ key: 'v_627_helium_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FF4C4C', blend: true, drop: null, vanilla: { sheet: 627, frame: 'auto' } });
-def({ key: 'v_628_helium_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#858585', blend: true, drop: null, vanilla: { sheet: 628, frame: 'auto' } });
+def({ key: 'v_624_abigail_s_flower', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#D25B4D', drop: 5114, vanilla: { sheet: 624, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_626_neon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DC0CED', blend: true, drop: 129, vanilla: { sheet: 626, frame: 'auto' } }); // 苔砖→灰砖 129
+def({ key: 'v_627_helium_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FF4C4C', blend: true, drop: 3, vanilla: { sheet: 627, frame: 'auto' } }); // 苔藓族→石块 3
+def({ key: 'v_628_helium_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#858585', blend: true, drop: 129, vanilla: { sheet: 628, frame: 'auto' } }); // 苔砖→灰砖 129
 def({ platform: true, key: 'v_629_stinkbug_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 629, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_630_stinkbug_blocker', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#759149', drop: null, vanilla: { sheet: 630, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_631_ghostly_stinkbug_blocker', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#7AEAE1', drop: null, vanilla: { sheet: 631, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_630_stinkbug_blocker', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#759149', drop: 5137, vanilla: { sheet: 630, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_631_ghostly_stinkbug_blocker', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#7AEAE1', drop: 5138, vanilla: { sheet: 631, frame: 'style', fw: 1, fh: 1 } });
 def({ platform: true, key: 'v_632_scarlet_macaw_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 632, frame: 'style', fw: 6, fh: 3 } });
-def({ key: 'v_635_ash_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#917878', blend: true, drop: null, vanilla: { sheet: 635, frame: 'auto' } });
+def({ key: 'v_635_ash_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#917878', blend: true, drop: 5215, vanilla: { sheet: 635, frame: 'auto' } });
 def({ key: 'v_639_mana_crystal', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#6E69FF', drop: null, vanilla: { sheet: 639, frame: 'style', fw: 2, fh: 2 } });
 def({ platform: true, key: 'v_640_blue_macaw_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 640, frame: 'style', fw: 6, fh: 3 } });
-def({ key: 'v_641_reef_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EB7D96', blend: true, drop: null, vanilla: { sheet: 641, frame: 'auto' } });
+def({ key: 'v_641_reef_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EB7D96', blend: true, drop: 5306, vanilla: { sheet: 641, frame: 'auto' } });
 def({ platform: true, key: 'v_643_toucan_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 643, frame: 'style', fw: 6, fh: 3 } });
 def({ platform: true, key: 'v_644_yellow_cockatiel_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 644, frame: 'style', fw: 6, fh: 3 } });
 def({ platform: true, key: 'v_645_gray_cockatiel_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 645, frame: 'style', fw: 6, fh: 3 } });
-def({ key: 'v_646_shadow_candle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#6C858C', drop: null, vanilla: { sheet: 646, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_646_shadow_candle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#6C858C', drop: 5322, vanilla: { sheet: 646, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_647_large_rubble_3x2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#828268', drop: null, vanilla: { sheet: 647, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_648_large_rubble_3x2_group_2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#5F7A40', drop: null, vanilla: { sheet: 648, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_649_medium_rubble_2x1', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#5C5C5C', drop: null, vanilla: { sheet: 649, frame: 'style', fw: 2, fh: 1 } });
@@ -806,91 +810,91 @@ def({ key: 'v_654_tnt_barrel', name: '', solid: false, framed: true, opacity: 0.
 def({ key: 'v_655_plantera_thorns', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#E180CE', drop: null, vanilla: { sheet: 655, frame: 'auto' } });
 def({ key: 'v_657_echo_chamber', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#23CDD7', drop: null, vanilla: { sheet: 657, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_658_aether_monolith', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#C869E6', drop: null, vanilla: { sheet: 658, frame: 'style', fw: 2, fh: 3 } });
-def({ key: 'v_659_aetherium_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F7E4FE', blend: true, drop: null, vanilla: { sheet: 659, frame: 'auto' } });
+def({ key: 'v_659_aetherium_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F7E4FE', blend: true, drop: 5349, vanilla: { sheet: 659, frame: 'auto' } });
 def({ key: 'v_660_faeling_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FF9696', drop: null, vanilla: { sheet: 660, frame: 'style', fw: 1, fh: 2 } });
-def({ key: 'v_661_corrupt_jungle_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8D89DF', blend: true, drop: null, vanilla: { sheet: 661, frame: 'auto' } });
-def({ key: 'v_662_crimson_jungle_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D05050', blend: true, drop: null, vanilla: { sheet: 662, frame: 'auto' } });
+def({ key: 'v_661_corrupt_jungle_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8D89DF', blend: true, drop: 176, vanilla: { sheet: 661, frame: 'auto' } }); // 腐化丛林草→泥 176（case 661/662 :64990）
+def({ key: 'v_662_crimson_jungle_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D05050', blend: true, drop: 176, vanilla: { sheet: 662, frame: 'auto' } }); // 猩红丛林草→泥 176
 def({ key: 'v_663_enchanted_moondial', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#18CBE9', drop: null, vanilla: { sheet: 663, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_665_life_crystal_boulder', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#AE1845', drop: null, vanilla: { sheet: 665, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_666_poo', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#733C28', blend: true, drop: null, vanilla: { sheet: 666, frame: 'auto' } });
-def({ key: 'v_667_aetherium_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F7E4FE', blend: true, drop: null, vanilla: { sheet: 667, frame: 'auto' } });
-def({ key: 'v_669_lunar_rust_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#532E39', blend: true, drop: null, vanilla: { sheet: 669, frame: 'auto' } });
-def({ key: 'v_670_dark_celestial_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5B57A7', blend: true, drop: null, vanilla: { sheet: 670, frame: 'auto' } });
-def({ key: 'v_671_astra_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#172151', blend: true, drop: null, vanilla: { sheet: 671, frame: 'auto' } });
-def({ key: 'v_672_cosmic_ember_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#358567', blend: true, drop: null, vanilla: { sheet: 672, frame: 'auto' } });
-def({ key: 'v_673_cryocore_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0B4350', blend: true, drop: null, vanilla: { sheet: 673, frame: 'auto' } });
-def({ key: 'v_674_mercury_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#28313C', blend: true, drop: null, vanilla: { sheet: 674, frame: 'auto' } });
-def({ key: 'v_675_star_royale_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#150D4D', blend: true, drop: null, vanilla: { sheet: 675, frame: 'auto' } });
-def({ key: 'v_676_heavenforge_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C3C9D7', blend: true, drop: null, vanilla: { sheet: 676, frame: 'auto' } });
-def({ key: 'v_677_ancient_blue_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#42546D', blend: true, drop: null, vanilla: { sheet: 677, frame: 'auto' } });
-def({ key: 'v_678_ancient_green_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#54643F', blend: true, drop: null, vanilla: { sheet: 678, frame: 'auto' } });
-def({ key: 'v_679_ancient_pink_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6B4463', blend: true, drop: null, vanilla: { sheet: 679, frame: 'auto' } });
-def({ key: 'v_680_ancient_gold_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9A417', blend: true, drop: null, vanilla: { sheet: 680, frame: 'auto' } });
-def({ key: 'v_681_ancient_silver_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9C2C3', blend: true, drop: null, vanilla: { sheet: 681, frame: 'auto' } });
-def({ key: 'v_682_ancient_copper_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: true, drop: null, vanilla: { sheet: 682, frame: 'auto' } });
-def({ key: 'v_683_ancient_obsidian_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#645ABE', blend: true, drop: null, vanilla: { sheet: 683, frame: 'auto' } });
-def({ key: 'v_684_ancient_hellstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8E4242', blend: true, drop: null, vanilla: { sheet: 684, frame: 'auto' } });
-def({ key: 'v_685_ancient_cobalt_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0B508F', blend: true, drop: null, vanilla: { sheet: 685, frame: 'auto' } });
-def({ key: 'v_686_ancient_mythril_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5BA9A9', blend: true, drop: null, vanilla: { sheet: 686, frame: 'auto' } });
-def({ key: 'v_687_lava_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FE7902', blend: true, drop: null, light: [64, 26, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 687, frame: 'auto' } });
-def({ key: 'v_688_argon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D0007E', blend: true, drop: null, light: [76, 0, 43], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 688, frame: 'auto' } });
-def({ key: 'v_689_krypton_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#72FE02', blend: true, drop: null, light: [0, 64, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 689, frame: 'auto' } });
-def({ key: 'v_690_xenon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00C5D0', blend: true, drop: null, light: [0, 41, 87], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 690, frame: 'auto' } });
-def({ key: 'v_691_neon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DC0CED', blend: true, drop: null, light: [76, 0, 89], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 691, frame: 'auto' } });
-def({ key: 'v_692_helium_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: null, vanilla: { sheet: 692, frame: 'auto' } });
+def({ key: 'v_666_poo', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#733C28', blend: true, drop: 5395, vanilla: { sheet: 666, frame: 'auto' } });
+def({ key: 'v_667_aetherium_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F7E4FE', blend: true, drop: 5398, vanilla: { sheet: 667, frame: 'auto' } });
+def({ key: 'v_669_lunar_rust_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#532E39', blend: true, drop: 5401, vanilla: { sheet: 669, frame: 'auto' } });
+def({ key: 'v_670_dark_celestial_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5B57A7', blend: true, drop: 5402, vanilla: { sheet: 670, frame: 'auto' } });
+def({ key: 'v_671_astra_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#172151', blend: true, drop: 5403, vanilla: { sheet: 671, frame: 'auto' } });
+def({ key: 'v_672_cosmic_ember_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#358567', blend: true, drop: 5404, vanilla: { sheet: 672, frame: 'auto' } });
+def({ key: 'v_673_cryocore_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0B4350', blend: true, drop: 5405, vanilla: { sheet: 673, frame: 'auto' } });
+def({ key: 'v_674_mercury_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#28313C', blend: true, drop: 5406, vanilla: { sheet: 674, frame: 'auto' } });
+def({ key: 'v_675_star_royale_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#150D4D', blend: true, drop: 5407, vanilla: { sheet: 675, frame: 'auto' } });
+def({ key: 'v_676_heavenforge_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C3C9D7', blend: true, drop: 5408, vanilla: { sheet: 676, frame: 'auto' } });
+def({ key: 'v_677_ancient_blue_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#42546D', blend: true, drop: null, vanilla: { sheet: 677, frame: 'auto' } }); // 古砖=原版 tileDungeon[677]（Main.cs:7944）<100 不可挖,同 41/43/44 族 pick:100
+def({ key: 'v_678_ancient_green_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#54643F', blend: true, drop: null, vanilla: { sheet: 678, frame: 'auto' } }); // pick 100 同上（tileDungeon[678] Main.cs:7945）
+def({ key: 'v_679_ancient_pink_brick', name: '', solid: true, opacity: 1, pick: 100, mapColor: '#6B4463', blend: true, drop: null, vanilla: { sheet: 679, frame: 'auto' } }); // pick 100 同上（tileDungeon[679] Main.cs:7946）
+def({ key: 'v_680_ancient_gold_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9A417', blend: true, drop: 5423, vanilla: { sheet: 680, frame: 'auto' } });
+def({ key: 'v_681_ancient_silver_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9C2C3', blend: true, drop: 5425, vanilla: { sheet: 681, frame: 'auto' } });
+def({ key: 'v_682_ancient_copper_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: true, drop: 5427, vanilla: { sheet: 682, frame: 'auto' } });
+def({ key: 'v_683_ancient_obsidian_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#645ABE', blend: true, drop: 5433, vanilla: { sheet: 683, frame: 'auto' } });
+def({ key: 'v_684_ancient_hellstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8E4242', blend: true, drop: 5435, vanilla: { sheet: 684, frame: 'auto' } });
+def({ key: 'v_685_ancient_cobalt_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0B508F', blend: true, drop: 5429, vanilla: { sheet: 685, frame: 'auto' } });
+def({ key: 'v_686_ancient_mythril_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5BA9A9', blend: true, drop: 5431, vanilla: { sheet: 686, frame: 'auto' } });
+def({ key: 'v_687_lava_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FE7902', blend: true, drop: 5439, light: [64, 26, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 687, frame: 'auto' } });
+def({ key: 'v_688_argon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D0007E', blend: true, drop: 5440, light: [76, 0, 43], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 688, frame: 'auto' } });
+def({ key: 'v_689_krypton_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#72FE02', blend: true, drop: 5441, light: [0, 64, 0], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 689, frame: 'auto' } });
+def({ key: 'v_690_xenon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00C5D0', blend: true, drop: 5442, light: [0, 41, 87], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 690, frame: 'auto' } });
+def({ key: 'v_691_neon_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DC0CED', blend: true, drop: 5443, light: [76, 0, 89], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 691, frame: 'auto' } });
+def({ key: 'v_692_helium_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: 5444, vanilla: { sheet: 692, frame: 'auto' } });
 def({ key: 'v_693_mitey_titey', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#050505', drop: null, vanilla: { sheet: 693, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_694_stalactite_1x2_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#32323c', drop: null, vanilla: { sheet: 694, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_695_replica_demon_altar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#77657D', drop: null, vanilla: { sheet: 695, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_696_replica_shadow_orb', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#8D78A8', drop: null, vanilla: { sheet: 696, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_697_decorative_cobweb', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#C0CACB', drop: null, vanilla: { sheet: 697, frame: 'auto' } });
+def({ key: 'v_697_decorative_cobweb', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#C0CACB', drop: 5471, /* D-6:case 697(:64731）→5471 */  vanilla: { sheet: 697, frame: 'auto' } });
 def({ key: 'v_698_item_flask', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#C8C8C8', vanilla: { sheet: 698, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_699_alchemy_flask', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 4, mapColor: '#8D6B59', drop: null, light: [102, 51, 38], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 699, frame: 'style', fw: 4, fh: 4 } });
-def({ key: 'v_700_abigails_flower_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#D25B4D', drop: null, vanilla: { sheet: 700, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_701_glow_tulip_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#157CD4', drop: null, vanilla: { sheet: 701, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_700_abigails_flower_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#D25B4D', drop: 5114, vanilla: { sheet: 700, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_701_glow_tulip_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#157CD4', drop: 5333, vanilla: { sheet: 701, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_702_life_fruit_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#95E857', drop: null, vanilla: { sheet: 702, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_703_jungle_plants_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#87C41A', drop: null, vanilla: { sheet: 703, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_704_fallen_log_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 3, h: 2, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 704, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_705_oasis_plants_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#6BB600', drop: null, vanilla: { sheet: 705, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_706_terragrim_shrine_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#1cd86d', drop: null, vanilla: { sheet: 706, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_707_books_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#AA3072', drop: null, vanilla: { sheet: 707, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_708_shimmerfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EDDAF4', blend: true, drop: null, vanilla: { sheet: 708, frame: 'auto' } });
+def({ key: 'v_708_shimmerfall_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EDDAF4', blend: true, drop: 5493, vanilla: { sheet: 708, frame: 'auto' } });
 def({ key: 'v_709_magic_shimmer_dropper', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#F7E4FE', drop: null, vanilla: { sheet: 709, frame: 'style', fw: 1, fh: 1 } });
 def({ platform: true, key: 'v_710_pufferfish_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 710, frame: 'style', fw: 6, fh: 3 } });
 def({ key: 'v_712_poo_boulder', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#808080', drop: null, vanilla: { sheet: 712, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_717_lava_cloud', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7E6676', blend: true, drop: null, vanilla: { sheet: 717, frame: 'auto' } });
-def({ key: 'v_718_star_cloud', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F5D7C4', blend: true, drop: null, vanilla: { sheet: 718, frame: 'auto' } });
-def({ key: 'v_719_rainbow_cloud', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DFFFFF', blend: true, drop: null, vanilla: { sheet: 719, frame: 'auto' } });
+def({ key: 'v_717_lava_cloud', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7E6676', blend: true, drop: 5569, vanilla: { sheet: 717, frame: 'auto' } });
+def({ key: 'v_718_star_cloud', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F5D7C4', blend: true, drop: 5570, vanilla: { sheet: 718, frame: 'auto' } });
+def({ key: 'v_719_rainbow_cloud', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DFFFFF', blend: true, drop: 5571, vanilla: { sheet: 719, frame: 'auto' } });
 def({ key: 'v_720_crt_monolith', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#A4AFAF', drop: null, vanilla: { sheet: 720, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_721_retro_monolith', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#4DB090', drop: null, vanilla: { sheet: 721, frame: 'style', fw: 2, fh: 3 } });
-def({ key: 'v_722_fallen_star_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9BE14', blend: true, drop: null, vanilla: { sheet: 722, frame: 'auto' } });
+def({ key: 'v_722_fallen_star_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#B9BE14', blend: true, drop: 5622, vanilla: { sheet: 722, frame: 'auto' } });
 def({ key: 'v_723_kite_anchor', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#B9BE14', drop: null, vanilla: { sheet: 723, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_724_critter_anchor', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#B9BE14', drop: null, vanilla: { sheet: 724, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_725_film_projector', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#E54141', drop: null, vanilla: { sheet: 725, frame: 'style', fw: 2, fh: 3 } });
-def({ key: 'v_726_cannonball', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#1E1E24', drop: null, vanilla: { sheet: 726, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_727_dull_red_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#771634', blend: true, drop: null, vanilla: { sheet: 727, frame: 'auto' } });
-def({ key: 'v_728_dull_green_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#17774F', blend: true, drop: null, vanilla: { sheet: 728, frame: 'auto' } });
-def({ key: 'v_729_dull_blue_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#173677', blend: true, drop: null, vanilla: { sheet: 729, frame: 'auto' } });
-def({ key: 'v_730_dull_yellow_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#774417', blend: true, drop: null, vanilla: { sheet: 730, frame: 'auto' } });
-def({ key: 'v_731_dull_pink_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4A1777', blend: true, drop: null, vanilla: { sheet: 731, frame: 'auto' } });
-def({ key: 'v_732_dull_white_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4E526D', blend: true, drop: null, vanilla: { sheet: 732, frame: 'auto' } });
+def({ key: 'v_726_cannonball', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#1E1E24', drop: 929, vanilla: { sheet: 726, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_727_dull_red_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#771634', blend: true, drop: 5674, vanilla: { sheet: 727, frame: 'auto' } });
+def({ key: 'v_728_dull_green_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#17774F', blend: true, drop: 5675, vanilla: { sheet: 728, frame: 'auto' } });
+def({ key: 'v_729_dull_blue_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#173677', blend: true, drop: 5676, vanilla: { sheet: 729, frame: 'auto' } });
+def({ key: 'v_730_dull_yellow_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#774417', blend: true, drop: 5677, vanilla: { sheet: 730, frame: 'auto' } });
+def({ key: 'v_731_dull_pink_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4A1777', blend: true, drop: 5678, vanilla: { sheet: 731, frame: 'auto' } });
+def({ key: 'v_732_dull_white_team_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4E526D', blend: true, drop: 5679, vanilla: { sheet: 732, frame: 'auto' } });
 def({ key: 'v_733_radio_thing', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#73451B', drop: null, vanilla: { sheet: 733, frame: 'style', fw: 3, fh: 3 } });
-def({ key: 'v_734_feywood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A07350', blend: true, drop: null, vanilla: { sheet: 734, frame: 'auto' } });
-def({ key: 'v_735_hallowed_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EBC814', blend: true, drop: null, vanilla: { sheet: 735, frame: 'auto' } });
-def({ key: 'v_736_easter_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F082A0', blend: true, drop: null, vanilla: { sheet: 736, frame: 'auto' } });
-def({ key: 'v_737_gothic_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#414B41', blend: true, drop: null, vanilla: { sheet: 737, frame: 'auto' } });
-def({ key: 'v_738_flinx_fur_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D2AAD7', blend: true, drop: null, vanilla: { sheet: 738, frame: 'auto' } });
-def({ key: 'v_739_jellyfish_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5A7DEB', blend: true, drop: null, light: [89, 161, 178], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 739, frame: 'auto' } });
-def({ key: 'v_740_toybreaker_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7ad9e8', blend: true, drop: null, vanilla: { sheet: 740, frame: 'auto' } });
-def({ key: 'v_741_pine_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A05A32', blend: true, drop: null, vanilla: { sheet: 741, frame: 'auto' } });
-def({ key: 'v_742_harpy_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1A8DCC', blend: true, drop: null, vanilla: { sheet: 742, frame: 'auto' } });
-def({ key: 'v_743_moonplate_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E3E3E3', blend: true, drop: null, vanilla: { sheet: 743, frame: 'auto' } });
-def({ key: 'v_744_librarian_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6A6760', blend: true, drop: null, vanilla: { sheet: 744, frame: 'auto' } });
-def({ key: 'v_745_spike_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#78726C', blend: true, drop: null, vanilla: { sheet: 745, frame: 'auto' } });
-def({ key: 'v_746_office_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7A4E15', blend: true, drop: null, vanilla: { sheet: 746, frame: 'auto' } });
-def({ key: 'v_747_forbidden_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E7B21C', blend: true, drop: null, vanilla: { sheet: 747, frame: 'auto' } });
-def({ key: 'v_748_aquarium_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0272CE', blend: true, drop: null, vanilla: { sheet: 748, frame: 'auto' } });
-def({ key: 'v_749_boulder_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#797979', blend: true, drop: null, vanilla: { sheet: 749, frame: 'auto' } });
-def({ key: 'v_750_sharp_spike_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#797979', blend: true, drop: null, vanilla: { sheet: 750, frame: 'auto' } });
+def({ key: 'v_734_feywood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A07350', blend: true, drop: 5710, vanilla: { sheet: 734, frame: 'auto' } });
+def({ key: 'v_735_hallowed_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EBC814', blend: true, drop: 5733, vanilla: { sheet: 735, frame: 'auto' } });
+def({ key: 'v_736_easter_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F082A0', blend: true, drop: 5920, vanilla: { sheet: 736, frame: 'auto' } });
+def({ key: 'v_737_gothic_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#414B41', blend: true, drop: 5922, vanilla: { sheet: 737, frame: 'auto' } });
+def({ key: 'v_738_flinx_fur_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D2AAD7', blend: true, drop: 5924, vanilla: { sheet: 738, frame: 'auto' } });
+def({ key: 'v_739_jellyfish_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5A7DEB', blend: true, drop: 5926, light: [89, 161, 178], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 739, frame: 'auto' } });
+def({ key: 'v_740_toybreaker_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7ad9e8', blend: true, drop: 5928, vanilla: { sheet: 740, frame: 'auto' } });
+def({ key: 'v_741_pine_wood', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#A05A32', blend: true, drop: 5930, vanilla: { sheet: 741, frame: 'auto' } });
+def({ key: 'v_742_harpy_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1A8DCC', blend: true, drop: 5953, vanilla: { sheet: 742, frame: 'auto' } });
+def({ key: 'v_743_moonplate_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E3E3E3', blend: true, drop: 5996, vanilla: { sheet: 743, frame: 'auto' } });
+def({ key: 'v_744_librarian_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6A6760', blend: true, drop: 6019, vanilla: { sheet: 744, frame: 'auto' } });
+def({ key: 'v_745_spike_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#78726C', blend: true, drop: 6042, vanilla: { sheet: 745, frame: 'auto' } });
+def({ key: 'v_746_office_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7A4E15', blend: true, drop: 6065, vanilla: { sheet: 746, frame: 'auto' } });
+def({ key: 'v_747_forbidden_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E7B21C', blend: true, drop: 6088, vanilla: { sheet: 747, frame: 'auto' } });
+def({ key: 'v_748_aquarium_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#0272CE', blend: true, drop: 6109, vanilla: { sheet: 748, frame: 'auto' } });
+def({ key: 'v_749_boulder_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#797979', blend: true, drop: 6132, vanilla: { sheet: 749, frame: 'auto' } });
+def({ key: 'v_750_sharp_spike_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#797979', blend: true, drop: 6134, vanilla: { sheet: 750, frame: 'auto' } });
 TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));
 
 // ===================== 存档稳定 id(根治 TILE_DEFS 数组下标漂移;存档 v3 起生效) =====================

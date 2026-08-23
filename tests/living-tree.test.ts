@@ -38,6 +38,7 @@ function gsFor(w: number, h: number): GenState {
     beachDistance: Math.max(24, Math.floor(w * 0.06)),
     mCaveX: new Int32Array(1024), mCaveY: new Int32Array(1024), numMCaves: 0,
     crimson: false, oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
+    seedFlags: {},                          // 批4 BuriedChests seedFlags 门(空=falsy)
   } as unknown as GenState;
 }
 
@@ -259,13 +260,13 @@ describe('Living Trees 世界生成', () => {
     }
   });
 
-  it('破坏掉落：活木/树叶均为魔棒放置块,挖除无掉落（drop:null；vanilla tileWand 832/933）', () => {
+  it('破坏掉落：活木掉木材 9（KillTile case 191 :64584/1457 :65049→dropItem=9）/树叶无掉落（192 no-drop 表 :66336）', () => {
     const world = new World(64, 64, 1, 't');
     const st = world.store;
     st.setTileSilent(10, 10, LIVING_WOOD);
     st.setTileSilent(12, 10, LEAF);
-    expect(world.breakTileAt(10, 10)).toBeNull();   // 活木无掉落
-    expect(world.breakTileAt(12, 10)).toBeNull();   // 树叶无掉落
+    expect(world.breakTileAt(10, 10)).toBe('vi_9_Wood'); // 活木→木材 9（2026-08-23 方块审计 A 区回填;曾误 drop:null）
+    expect(world.breakTileAt(12, 10)).toBeNull();   // 树叶无掉落（192 在 no-drop 表）
     expect(st.get(10, 10)).toBe(0);
     // def 对齐：191/192 均实心（Main.cs:10159/:10167 初始 tileSolid=true；生成期
     // :15789/:16694 曾置 false 但被 generateWorld finally 的 tileSolidBackup 整表

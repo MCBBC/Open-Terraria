@@ -33,8 +33,7 @@ const TAU = Math.PI * 2;
 /** 通用命中（音效 + hurt + 飘字） */
 function strike(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean, kb: number, kdir: number, pen: number): void {
   playEnemyHitSound(game, e as never);
-  e.hurt(dmg, kdir * kb, 0, game, pen, crit);
-  game.addDamageNumber(e.x + e.w / 2, e.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
+  e.hurt(dmg, kdir * kb, 0, game, pen, crit);   // 音/飘值=单点
 }
 
 // ================= 星云烈焰弹 634/635（AI_001 :51577-51762） =================

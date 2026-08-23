@@ -58,7 +58,9 @@ function makeGame(world: World, extra: Partial<{
     fx,
     game: {
       world,
-      player: { x: -9999, y: -9999, w: 0, h: 0, dead: true },
+      // ★RV3 集成审查：银河珍珠批新增存档字段 luckState.usedGalaxyPearl——
+      // 手搓 player 桩须补 luckState（读档链 SaveFile:119 读取）
+      player: { x: -9999, y: -9999, w: 0, h: 0, dead: true, luckState: { usedGalaxyPearl: false } },
       enemies: () => extra.enemies ?? [],
       npcs: () => extra.npcs ?? [],
       critters: () => [],
@@ -524,7 +526,7 @@ describe('坐姿落存档语义（WorldFile.SaveNPCs :1703-1750 / LoadNPCs :2883
     }];
     expect(Object.keys(snap[0]).sort()).toEqual(['givenName', 'home', 'key', 'x', 'y']);
     // 存 → 读往返（共享 save 管线；sitting 不在序列化面 = 蒸发）
-    const json = saveGame(world, { hp: 100, x: 0, y: 0, inv: { slots: [], selected: 0 } } as never, 0, snap);
+    const json = saveGame(world, { hp: 100, x: 0, y: 0, luckState: { usedGalaxyPearl: false }, inv: { slots: [], selected: 0 } } as never, 0, snap);
     const { world: w2 } = loadSave(json);
     expect(w2.pendingTownNpcs).toHaveLength(1);
     const rec = w2.pendingTownNpcs![0];
@@ -548,7 +550,7 @@ describe('坐姿落存档语义（WorldFile.SaveNPCs :1703-1750 / LoadNPCs :2883
     // 存档前拆椅
     world.store.setTileSilent(SPOT_X, FLOOR - 2, 0);
     world.store.setTileSilent(SPOT_X, FLOOR - 1, 0);
-    const json = saveGame(world, { hp: 100, x: 0, y: 0, inv: { slots: [], selected: 0 } } as never, 0, [{
+    const json = saveGame(world, { hp: 100, x: 0, y: 0, luckState: { usedGalaxyPearl: false }, inv: { slots: [], selected: 0 } } as never, 0, [{
       key: npc.npcKey, x: Math.round(npc.x), y: Math.round(npc.y),
       home: [npc.home.x, npc.home.y] as [number, number], givenName: npc.givenName,
     }]);

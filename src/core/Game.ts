@@ -106,7 +106,7 @@ import {
 import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_TABLE_SHEETS, WALL_DEFS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
-import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS } from '../data/vanillaStyleDrops';
+import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
 import {
   FURNITURE_TILE_KIND, furnitureAnchor, furniturePlaceSingle, furniturePopSingle,
   furnitureTryBreak, furnitureTakeFirst, dollPlace, hatRackPlace, removeFurnitureAt,
@@ -275,7 +275,7 @@ import { Arrow, prefetchProjectiles, PIRANHA_PROJ, PIRANHA_LIFE } from '../entit
 import { XenoBubbleProj, xenoBubbleCount, xenoBubbleVelocity } from '../entities/XenoBubbleProj';
 import { resetCageAnim } from '../render/CritterCage';
 import { prefetchTrapProjectiles } from '../entities/Dart';
-import { hitPlayer, playerCanHitEnemy, statusPlayer, playEnemyHitSound, COLD_DAMAGE_NPCS } from '../entities/projTargets';
+import { hitPlayer, playerCanHitEnemy, statusPlayer, COLD_DAMAGE_NPCS } from '../entities/projTargets';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
@@ -487,6 +487,112 @@ const ACORN_ALT_BY_GROUND_SHEET: Record<number, number> = {
 // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366 的 createTile 表）——
 // 放置与 hasSupport 共用（书/水蜡/瓶等下方须 tileTable 桌面）
 const ON_TABLE_1X1_SHEETS = new Set([13, 33, 49, 50, 174, 372, 646]);
+// ===================== D-1 decor 失撑链（原版 TileFrameImportant :85703 Check* 族） =====================
+// 原版 decor 支撑亡杀全走 TileFrame 分派的 Check* 族（TileFrameImportant :85703 起）；
+// 本表按 vanilla sheet 记支撑语义种类，未列入的 decor（藤 52/62/382/528/636/638=checkVineAt、
+// 棘 32/69/655、绳 353/213/214/365/366、梁柱 124/561/574-578、钱币堆 330-333、蛛网 697、
+// 蛇绳 504、火把 4=checkTorchDetach、开态门 11=门链、树叶=自绘）原版本无支撑语义
+// （Main.tileFrameImportant=0 或他链承担）→ 悬空保留=原版同款，勿误修（审计 D-1）。
+// 'furniture'=复用下方家具失撑机制（hasSupport 底行/墙/桌面——Check2x2/Check3x2/Check3x3/
+// Check1xX/CheckMB/CheckCannon/CheckOnTable1x1/CheckTrapDoor/CheckTallGate/Check2xX/
+// Check3x3Wall/Check2x2Style 族的仓内同源近似,与非 decor 家具一致）。
+type DecorSupportKind =
+  | 'plant' | 'alch' | 'sunflower' | 'sapling' | 'shroomtree'
+  | 'ground1x1' | 'logic' | 'orb' | 'pot' | 'hangs' | 'furniture';
+const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
+  // PlantCheck（派发 :85970-85981 {3,24,61,71,73,74,110,113,201,637,703}）
+  3: 'plant', 24: 'plant', 61: 'plant', 71: 'plant', 73: 'plant', 74: 'plant',
+  110: 'plant', 113: 'plant', 201: 'plant', 637: 'plant', 703: 'plant',
+  // CheckAlch（tileAlch default 支 :86573-86577 {82,83,84}）
+  82: 'alch', 83: 'alch', 84: 'alch',
+  // CheckSunflower（case 27 :86800 附近）
+  27: 'sunflower',
+  // Check1x2（:43377，case 20 树苗——地基失配重帧/无地基杀）
+  20: 'sapling',
+  // case 72 蘑菇树（:86978 内联：下方须 72/70）
+  72: 'shroomtree',
+  // Check1x1（:45243，case 210/428/593——decor 子集;36/135/141/239/624/650/656/700/701 非 decor 他区）
+  210: 'ground1x1', 428: 'ground1x1', 593: 'ground1x1',
+  // CheckLogicTiles（:45288，case 419/420/423/424/429/445）
+  419: 'logic', 420: 'logic', 423: 'logic', 424: 'logic', 429: 'logic', 445: 'logic',
+  // CheckOrb（:54187）——仅水晶心 12（失撑塌+掉 29=原版 Item.NewItem(29)）。
+  // ★31 暗影珠/猩红之心不接：原版 CheckOrb 失撑塌【不置】smash 进度旗（只读
+  // shadowOrbSmashed 选掉落表）,本仓 smashOrbHeart 会置旗+计数+召 EoW=误推进,备案
+  12: 'orb',
+  // CheckPot（:56807，case 28/653——2×2 完整性+底行 SolidTile2）
+  28: 'pot',
+  // 吊挂族：CheckChand（:52826，34 顶行中列上方实心）/Check1x2Top（:46719，42 上方实心/平台/绳）
+  34: 'hangs', 42: 'hangs',
+  // 家具机制族（底行/墙/桌面近似）：烛 33/烛台 100/中骷灯笼 95/98/路灯 92/迪斯科球 126/
+  // 八音盒 139/泵 142/143/节日灯 149/白金烛台 173/白金烛 174/炮 209/雪球发射器 212/
+  // 烟花 216/泡泡机 244/烟花盒 335/烟花喷泉 338/和平烛 372/活板门 386/高门 389/天塔柱 410/
+  // 广播盒 425/宝石锁 440/假容器 441/气球机 452/派对石 455/假容器二 468/血月石 480/
+  // 马桶 497/虚空石 509/巨石像 531/等离子灯 564/雾机 565/大火山 594/陶盆 78(CheckOnTable1x1
+  // :43548 的 78 特支=底格 SolidTileAllowBottomSlope,ground1x1 同判据)/墓碑 85(CheckSign)
+  33: 'furniture', 49: 'furniture', 78: 'ground1x1', 85: 'furniture', 92: 'furniture',
+  95: 'furniture', 98: 'furniture', 100: 'furniture', 126: 'furniture', 139: 'furniture',
+  142: 'furniture', 143: 'furniture', 149: 'furniture', 173: 'furniture', 174: 'furniture',
+  209: 'furniture', 212: 'furniture', 216: 'furniture', 244: 'furniture', 335: 'furniture',
+  338: 'furniture', 372: 'furniture', 386: 'furniture', 389: 'furniture', 410: 'furniture',
+  425: 'furniture', 440: 'furniture', 441: 'furniture', 452: 'furniture', 455: 'furniture',
+  468: 'furniture', 480: 'furniture', 497: 'furniture', 509: 'furniture', 531: 'furniture',
+  564: 'furniture', 565: 'furniture', 594: 'furniture',
+};
+/** PlantCheck 换型目标（PlantCheck_TryGetNewType :81886 回写用,sheet→def key——
+ *  ★不能走 TILE_INTERNAL_BY_SHEET：sheet 3 首个 def 是 mushroom 非草丛本体） */
+const PLANT_CONVERT_KEY: Record<number, string> = {
+  3: 'v_3_forest_short_plants', 24: 'v_24_corruption_short_plants', 61: 'v_61_jungle_short_plants',
+  71: 'v_71_mushroom_plant', 73: 'v_73_forest_tall_plants', 74: 'v_74_jungle_tall_plants',
+  110: 'v_110_hallow_short_plants', 113: 'v_113_hallow_tall_plants', 201: 'v_201_crimson_short_plants',
+};
+/** CheckAlch 药草地基列（cs:45981,Main.tileAlch={82,83,84};键=frameX/18 列）——
+ *  与生成期 FinalCleanupPass.ALCH_GROUND 同表 */
+const ALCH_GROUND_RUNTIME: Record<number, Set<number>> = {
+  0: new Set([109, 2, 477, 492, 78, 380]),
+  1: new Set([60, 78, 380]),
+  2: new Set([0, 59, 78, 380]),
+  3: new Set([661, 662, 199, 203, 23, 25, 78, 380]),
+  4: new Set([53, 78, 380, 116]),
+  5: new Set([57, 633, 78, 380]),
+  6: new Set([78, 380, 147, 161, 163, 164, 200]),
+};
+/** CheckSunflower 地基草族（:53797-53802 {2,477,492,109,60,633}） */
+const SUNFLOWER_GROUND_SHEETS = new Set([2, 477, 492, 109, 60, 633]);
+/** PlantCheck 地基失配（cs:81421,与生成期 FinalCleanupPass.plantBadMatch 同式） */
+function plantBadMatch(down: number, type: number): boolean {
+  if ((type !== 3 || down === 2 || down === 477 || down === 78 || down === 380 || down === 579)
+    && (type !== 73 || down === 2 || down === 477 || down === 78 || down === 380 || down === 579)
+    && (type !== 24 || down === 23 || down === 661)
+    && (type !== 61 || down === 60 || down === 226)
+    && (type !== 74 || down === 60 || down === 226)
+    && (type !== 71 || down === 70)
+    && (type !== 110 || down === 109 || down === 492)
+    && (type !== 113 || down === 109 || down === 492)
+    && (type !== 201 || down === 199 || down === 662)) {
+    if (type === 637) return down !== 633;
+    return false;
+  }
+  return true;
+}
+/** PlantCheck_TryGetNewType（1457 cs:81886-81928,与生成期 FinalCleanupPass.plantNewType
+ *  同式）：按地基换型+帧折叠;spore=入口帧蘑菇株标记（回写 270/144） */
+function plantNewType(sheet: number, down: number, fx: number): { type: number; fx: number; spore: boolean } {
+  let type = sheet, nfx = fx;
+  let spore = false;
+  if (type === 3 || type === 61 || type === 110 || type === 24) spore = nfx === 144;
+  if (type === 201) spore = nfx === 270;
+  if ((type === 3 || type === 73) && down !== 2 && down !== 477 && nfx >= 162) nfx = 126;
+  if (type === 74 && down !== 60 && down !== 226 && nfx >= 162) nfx = 126;
+  switch (down) {
+    case 23: case 661: type = 24; if (nfx >= 162) nfx = 126; break;
+    case 2: case 477: type = type === 113 ? 73 : 3; break;
+    case 109: case 492: type = type === 73 ? 113 : 110; break;
+    case 199: case 662: type = 201; break;
+    case 60: case 226: type = 61; while (nfx > 126) nfx -= 126; break;
+    case 70: type = 71; while (nfx > 72) nfx -= 72; break;
+  }
+  return { type, fx: nfx, spore };
+}
 // 草族"转化"放置族（BlockPlacementForAssortedThings :40379-40440）：种子/法杖
 // 的 createTile 落在这些草 tile 上时，放置语义 = 转化【已有】块而非铺空格——
 // 草种 62/圣种→泥土(0)；腐化/猩红种→泥土或泥(59)；丛林/蘑菇/661/662 种→泥(59)；
@@ -504,8 +610,10 @@ function exposed8ForPlant(st: TileStore, x: number, y: number): boolean {
   }
   return false;
 }
-// 地牢砖族（Main.tileDungeon + 41/43/44 裂纹变体）：除数 /2 + 门槛 100
-const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 481, 482, 483]);
+// 地牢砖族（Main.tileDungeon，Main.cs:7941-7946：41/43/44/677/678/679）：除数 /2 +
+// 门槛 100（地下）。★481-483 裂砖不在 tileDungeon（肉前地牢薄弱墙设计,无镐门槛无 ÷2,
+// 2026-08-23 审计勘误——曾误收）；677-679 古砖在表（曾漏收）
+const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 677, 678, 679]);
 // Main.wallDungeon 墙表（Main.cs:10507-10515：7/8/9/94-99）——KillWall_CheckFailure
 // （WorldGen.cs:60436）未败骷髅王时地牢墙不可锤/不可被 TileReplacement 替换
 const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
@@ -609,8 +717,9 @@ export function accessoryVanillaIds(p: Player): number[] {
 }
 
 /** 星光斗篷族反击态（Player.cs:37826-37863）：active = 装备任一族件
- *  （starCloak 880 / starVeil 929 / beeCloak 1247 / manaCloak 982 / 蛇斗篷 6186——
- *  accfx 仅 880/1247 带 starCloak 位，929/982 会漏检，故并入装备 id 扫描）；
+ *  （starCloak 532 / starVeil 862 / beeCloak 1247 / manaCloak 4001 / 蛇斗篷 6186——
+ *  ★V6 勘误：旧注 929/982 系炮弹/魔力再生带错位;accfx starCloak 位恰在
+ *  532/862/1247/4001,并入装备 id 扫描兜底）；
  *  projType 按 override 链取【最后命中】（:38738-38753 顺序赋值后者覆盖前者）：
  *  starVeil 725 → beeCloak 724 → manaCloak 723 → snakeCloak 1133（最高档）> 726；
  *  6186 德鲁伊蛇斗篷 = 6157+星星斗篷合成品,case 6186 同时置 starCloakItem +
@@ -1817,10 +1926,8 @@ export class Game implements GameHooks {
         setPendingStrikeOwner(fromSlot);
         e.applyNetInteraction(fromSlot, this);
       }
-      e.hurt(rawDmg, kbx, kby, this);
+      e.hurt(rawDmg, kbx, kby, this);   // 音/飘值=StrikeNPC 单点(OthersDamagedHostile 灰)
       setPendingStrikeOwner(null);   // hurt 早退路径（iframes/已死）不残留——防串账
-      const dealt = Math.max(1, Math.round(rawDmg - (e.def.defense ?? 0) * 0.5));
-      this.addDamageNumber(e.cx, e.y, dealt, false, '#FF7060');
       return;
     }
   }
@@ -8761,15 +8868,18 @@ export class Game implements GameHooks {
       // useStyle 4 举持动画（5337-5342 诸矿晶 45/45、2756/4870 饮用 30、1326 挥 20
       // ——Item.cs SetDefaults 各 case；useStyle 数据在 itemfunc 表）——旧全程无动画。
       // 1133 例外：丛林门外整支不可用（Player.cs:51415-51417 !ZoneJungle → CanUse=
-      // false，无挥动/无冷却/无消耗/无提示）——挥动移入 case 成功分支（2026-08-22）
-      if (pvid !== 1133) this.useSwing(heldDef);
+      // false，无挥动/无冷却/无消耗/无提示）——挥动移入 case 成功分支（2026-08-22）。
+      // 3335 例外：经典世界 CanUse false（:51212≡1457:52689）整支不可用——挥动同样
+      // 移入 case 专家支（★RV2 #13：门在 switch 内拦不住前置 useSwing,动画曾漏拦）
+      if (pvid !== 1133 && pvid !== 3335) this.useSwing(heldDef);
       // UseSound：5337-5342 = Item92（Item.cs SetDefaults 各 case——旧全程无声）
       if (pvid >= 5337 && pvid <= 5342) this.playUseSound(pvid, 'pickup');
       switch (pvid) {
         case 3335: // 恶魔之心(:44575-44583):解锁第六配饰槽(专家)
           // ★V2a ⚠️f：经典世界 CanUse false（:51212,≡1457:52689）=整支不可用——
-          // 无动画/无音/不置 useTime（使用键完全无响应）;曾仍挥+响+置 30
+          // 无动画/无音/不置 useTime（使用键完全无响应）;挥动已随 1133 模式移入本支
           if (!(this.world.isExpert || this.world.isMaster)) break;
+          this.useSwing(heldDef);
           if (!p.inv.extraAccessory) flagOnce(() => { p.inv.extraAccessory = true; });
           p.useTime = 30;
           this.playUseSound(3335, 'pickup');   // UseSound Item4（Item.cs:30619）
@@ -8781,7 +8891,9 @@ export class Game implements GameHooks {
         case 5342: if (!p.usedAmbrosia) flagOnce(() => { p.usedAmbrosia = true; }); p.useTime = 45; break;
         case 5043: { // 火把之神眷顾（ItemCheck_UseTorchGodsFavor :44608-44625）
           // :44609 门 !unlockedBiomeTorches——已解锁再用的效果支整段跳过（置位/成就/
-          // 图鉴全不再走）;消耗独立于门（:42602 通用 consumable 语义,原版同样白吃）。
+          // 图鉴全不再走）。★RV2 勘误：ApplyItemTime 亦在门内（:45611-45628 [1457]
+          // 支内）→已解锁再用 itemTime=0 → 通用消耗门 :43612 永不触发=不耗;
+          // 曾注"原版同样白吃"并无条件 consume——与 5343 同族语义,消耗移入门内。
           // :44612 unlockedBiomeTorches=true;:44613 UsingBiomeTorches=true
           // （builderAccStatus[11]=0 群系炬选择器开——本仓无选装 UI,消费端由
           // unlockedBiomeTorches 派生等价,见 Torch.ts :114 注）。
@@ -8799,9 +8911,9 @@ export class Game implements GameHooks {
               const killCount = this.world.bestiary.registerKill(664);
               this.net?.sendBestiaryEvent({ sub: BestiarySub.Kill, netId: 664, count: killCount });
             }
+            consume();
+            p.useTime = 30; this.sfx.play('pickup');
           }
-          consume();
-          p.useTime = 30; this.sfx.play('pickup');
           break;
         }
         case 5573: { // 火把神药水（Item.cs:43868-43879：consumable+buffType 376+
@@ -11993,6 +12105,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       else if (sheet === 77 && power < 65 && ty >= (this.world.lavaLine || this.world.h - 200)) dmg = 0;
       else if (sheet === 58 && power < 65) dmg = 0;                            // 狱岩 65
       else if ((sheet === 226 || sheet === 237) && power < 210) dmg = 0;       // 蜥蜴砖 210
+      else if (sheet === 137 && power < 210) {                                 // 陷阱六档（Player.cs:54589-54596）
+        // styles 1-4（frameY/18∈[1,4]=超枪/火焰/尖球/长矛陷阱）需 210 镐力
+        //（Picksaw 档,(uint)(num2-1)<=3u 档域）;style 0 飞镖/5 毒镖任意镐可挖。
+        // 种子豁免=notTheBees+noTraps 且非十周年世界（:54589 条件取反）
+        const sf = this.world.seedFlags ?? {};
+        if (!(sf.notTheBees && sf.noTraps && !sf.tenthAnniversary)) {
+          const wst = this.world.store;
+          const style = Math.floor(wst.frameY[wst.idx(tx, ty)] / 18);
+          if (style >= 1 && style <= 4) dmg = 0;
+        }
+      }
       else if (TILE_DUNGEON_SHEETS.has(sheet) && power < 100 && underSurf) dmg = 0; // 地牢砖 100
     } else {
       // 斧/锤点在非斧族 tile：原版该分支无伤害（hammer 墙路径在上方已分流）
@@ -12005,6 +12128,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // CanKillTile 保护门（Player.cs:45045/:45108 `if (!WorldGen.CanKillTile) num2=0`）：
     // 上方保护族（干/棕榈干基/箱柜/蘑菇树/倒木/仙人掌底帽）→ 伤害归零不可挖
     if (dmg > 0 && this.tileAboveProtected(tx, ty)) dmg = 0;
+    // CanKillTile case 10（1457 :62781-62788 ≡ 1456 :62321-62328）：IsLockedDoor
+    // （神庙锁门,world/Door.ts isLockedDoor 同款 frameY∈[594,646] 且 fx<54 关闭态）
+    // → blockDamaged=true + return false → 伤害归零不可拆（Player.cs:46058 锤/
+    // :46104 斧/:54474 PickTile `if (!WorldGen.CanKillTile) num2=0`——每击仍播
+    // KillTile(fail:true) 击打音,永不积累;开锁后 frameY 移出锁段即恢复可拆）
+    if (dmg > 0 && isLockedDoor(this.world.store, tx, ty)) dmg = 0;
     return dmg;
   }
 
@@ -12335,13 +12464,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private killTileDropItems(x: number, y: number, def: { vanilla?: { sheet?: number } } | undefined): void {
     const sheet = def?.vanilla?.sheet;
     // 植物族全集：61/74/703 丛林 + 3/110/24/201/73 短高草 + 71/72 蘑菇 + 227 染料
+    //  + 51 蛛网（审计 E ❌2,2026-08-23 批）+ 52/62/382 藤 cordage（D-4,2026-08-23 批）
     if (sheet !== 61 && sheet !== 74 && sheet !== 703
       && sheet !== 3 && sheet !== 110 && sheet !== 24 && sheet !== 201
-      && sheet !== 73 && sheet !== 71 && sheet !== 72 && sheet !== 227) return;
+      && sheet !== 73 && sheet !== 71 && sheet !== 72 && sheet !== 227 && sheet !== 51
+      && sheet !== 52 && sheet !== 62 && sheet !== 382) return;
     const st = this.world.store;
     const fx = st.frameX[st.idx(x, y)];
     let dropId = 0, stack = 1;
-    if (sheet === 61) {
+    if (sheet === 51) {
+      // 蛛网（KillTile case 51 :64728 → 150;门 :63904 在 DropItems 之前——蛛网墙 62
+      // （Spider Nest）内 3/4 无掉落（Next(4)!=0 置 noItem）,墙外恒掉）。蛛网走
+      // TILE_CUT 割草支（无掉落档）,本表是唯一掉落出口
+      if (!(st.wall[st.idx(x, y)] === 62 && Math.floor(Math.random() * 4) !== 0)) dropId = 150;
+    } else if (sheet === 61) {
       if (fx === 144) { dropId = 331; stack = 2 + Math.floor(Math.random() * 2); }
       else if (fx === 162) dropId = 223;
       else if (fx >= 108 && fx <= 126) { if (Math.floor(Math.random() * 20) === 0) dropId = 208; }
@@ -12367,6 +12503,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       else if (Math.floor(Math.random() * 2) === 0) dropId = 183;
     } else if (sheet === 227) {
       dropId = 1107 + Math.floor(fx / 34);      // 染料植物 → 染料蘑菇族(:65812)
+    } else if (sheet === 52 || sheet === 62 || sheet === 382) {
+      // 割藤 cordage（D-4,case 52/62/382 :65087-65092）：Next(2)==0 且
+      // GetPlayerForTile.cordage（植物纤维绳索宝典 3068 装备位,UpdateEquips
+      // :14461-14463——本仓取破坏玩家 equipStats 近似,同 killTileShouldDropSeeds
+      // 取 this.player 口径）→ 掉藤绳 2996（藤绳=前期垂直通行获取链）。
+      // 无玩家（生成/读档装配期）语义=不掷（optional chain 短路）
+      if (Math.floor(Math.random() * 2) === 0 && this.player?.equipStats.cordage) dropId = 2996;
     }
     if (!dropId) return;
     const key = VANILLA_ITEM_KEY_BY_ID[dropId];
@@ -12595,8 +12738,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 开态 fx=72*列+(direction==-1?36:0)）——曾恒传 10：开态 style≥1 且 fx=72s+36
         // 时反推错带（style37 开门 fx=108 → 误反推 73 掉错材质门）。开态传 11 走开式
         const sv = styleDropVidOfFrames(doorOpen ? 11 : 10, dfx, dfy);
-        this.spawnDrop(doorAnchor[0] * TILE + 8, doorAnchor[1] * TILE,
-          sv > 0 ? (VANILLA_ITEM_KEY_BY_ID[sv] ?? VI(25)) : VI(25), 1);
+        // ★C-2（1457 :69935-69940 ≡ 1456 :69466-69471）：DropDoorItem 有
+        // `doorItem != 0` 门——style11 神庙锁门 GetDoorItem 落 0 → 整门清除【无掉落】;
+        // 曾回落 VI(25)（sv==0 也掉木门=变相刷门）
+        if (sv > 0) {
+          this.spawnDrop(doorAnchor[0] * TILE + 8, doorAnchor[1] * TILE,
+            VANILLA_ITEM_KEY_BY_ID[sv] ?? VI(25), 1);
+        }
         this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
         return;
       }
@@ -12738,10 +12886,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // Check* 帧检 → GetItemDrop_*(style)（WorldGen.cs:39766-43138/:49870/:58022）。
       // style=破坏前锚帧反推（vanillaStyleDrops.styleFromFrame 逐族锚行号），
       // 命中→掉对应材质档物品；未命中（无表族）→维持 place_v_ 兜底。
-      // 139/207/50 的帧带覆写在下方 if 链（优先级更高,本表不含这三 sheet）
+      // 139/207 的帧带覆写在下方 if 链（优先级更高,本表不含这两 sheet;50 书已入
+      // styleDropVidOfFrames 帧直读——旧 object 支特判随审计 E ❌3 移除,v_50_books
+      // def 1×1 本就到不了 object 支）
       {
         const sv = styleDropVidOfFrames(def.vanilla?.sheet ?? -1, preFrameX, preFrameY);
         if (sv > 0) dropKey = VANILLA_ITEM_KEY_BY_ID[sv] ?? dropKey;
+        // S2/D-7 接档（2026-08-23）：哨兵 -1=原版显式无掉落档（假容器 441/468 的
+        // GetItemDrop_FakeChests -1 档）——压 place_v_/def.drop 兜底,与 0「无表族」区分
+        else if (sv < 0) dropKey = '';
+      }
+      // D-8：活板门/高门开态 386/389 零返还补齐（CheckTrapDoor 1457 :52050/
+      // CheckTallGate :52111——两态恒掉关闭态物品 3239/3240;关门态 387/388 已由
+      // place_v_ 兜底,开态无放置物品 → multiTileDropKey 落空,见
+      // vanillaStyleDrops.openStateDoorDropVid 注）
+      {
+        const gd = openStateDoorDropVid(def.vanilla?.sheet ?? -1);
+        if (gd > 0) dropKey = VANILLA_ITEM_KEY_BY_ID[gd] ?? dropKey;
       }
       // TNT 桶 654（❌1 复核定谳勘误 2026-08-23）：无物品返还正确——KillTile 654 在
       // 共享 no-drop 表（:66114）+0 尘（:66664）,dropKey='' 保留。★爆炸链在（前判
@@ -12765,12 +12926,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       } else if (framedSheet === 207) {
         const fDrop = fountainDropItemOf(Math.floor(preFrameX / 36));
         if (fDrop > 0) dropKey = VANILLA_ITEM_KEY_BY_ID[fDrop] ?? dropKey;
-      } else if (framedSheet === 50) {
-        // 书（KillTile_DropItems case 50，WorldGen.cs:65709-65716）：水书伪装帧
-        // （frameX==90）掉 Water Bolt 法书 165，其余掉 Book 149——地牢书架书挖取/
-        // 水书怪之外的水术获取链本体
-        dropKey = preFrameX === 90 ? (VANILLA_ITEM_KEY_BY_ID[165] ?? '')
-          : (VANILLA_ITEM_KEY_BY_ID[149] ?? '');
       } else if (framedSheet === 488) {
         // 倒木 488（⚠️4 接档：Check3x2 case 488 :49561）——掉木头 9×Next(10,21)
         // （10..20 根,原版 genRand.Next 上开区间）；无放置物品返还（place_v_ 越权）
@@ -12782,6 +12937,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 掷串见 spawnCoinBand（段界 90/108 对 3 列 frameX 步 18 列间不变,任一格命中
         // 同带）;无放置物品返还
         this.spawnCoinBand(ax, ay, preFrameX);
+      } else if (framedSheet === 440) {
+        // 宝石锁 440 伴生钥匙档（S2/D-7 接档 2026-08-23：Check3x3Wall :44919-44933
+        // num8——`num8 != -1 && num2 == 1` 门,fy/54==1 带钥匙变体行第二件掉落;
+        // 锁体已由上方 styleDropVid 3644-3650 逐宝石档发放,此支只补钥匙）
+        const kv = gemLockKeyVid(preFrameX, preFrameY);
+        const kk = kv > 0 ? VANILLA_ITEM_KEY_BY_ID[kv] : undefined;
+        if (kk) this.spawnDrop(ax * TILE + 8, ay * TILE, kk, 1);
       } else if (ECHO_RESOURCE_SHEETS.has(framedSheet)) {
         // Echo 资源组 8 def（⚠️4 接档 2026-08-23）：647/648/651/652/694/702/704/705
         // 全在 KillTile 共享 no-drop 表（WorldGen.cs:66108-66129）,掉落全走 Check*
@@ -12908,11 +13070,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 703 丛林 Echo 植物：KillTile_DropItems case 703 只按帧掉 195/208/331/223
     // （killTileDropItems 已发放）——无放置物返还（曾双掉=帧表+place_v 自掉）；
     // 音效/粒子照走
-    if (def.vanilla?.sheet !== 703) {
+    if (def.vanilla?.sheet === 185) {
+      // 小堆饰 185（审计 E ❌11,2026-08-23 批）：CheckPile（:46940）只把 frameY==18 行
+      // 派发 Check2x1 → 掉钱币/宝石段（掷串见 spawnPileDecoDrops）;其余行（苔藓小饰）
+      // 原版无掉落（185 在共享 no-drop 表 :65844）——压 place_v_ 兜底（曾恒掉合成件）
+      this.spawnPileDecoDrops(x, y, fxHere, fyHere);
+    } else if (def.vanilla?.sheet !== 703) {
       // ★样式还原（审计补 A ⚠️2「1×1 版 6 族 45 件」）：KillTile_GetItemDrops 帧表——
       // 瓶 13(fx/18 :65587)/平台 19(fy/18 :65591)/烛 33(fy/22 :65595)/矿石条 239
       // (fx/18 :65166)/节日灯 149(:65571)/钱币堆 330-333(:64197)/骨块 194(:64652)。
       // 命中→掉原版真物品（此前恒掉 style0 档或 place_v_ 假物品）
+      // 2026-08-23 批新增档：书 50（fx==90→165/else 149）/水晶碎晶 129（fx≥324→4988/
+      // else 502）/熔炉 133（fx≥54→1221/else 524）/碗 103（fx/36 四档）/压板 135
+      // （fy/18 七档）/计时器 144（fx/18 五档）——全在 vanillaStyleDrops 表,失撑链同接
       const sv = styleDropVidOfFrames(def.vanilla?.sheet ?? -1, fxHere, fyHere);
       if (sv > 0) {
         const sk = VANILLA_ITEM_KEY_BY_ID[sv];
@@ -12922,6 +13092,44 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     this.killTileBreakSound(type, x, y);
     this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
+  }
+
+  /** 小堆饰 185 内容掉落（Check2x1 case 185 :47180-47232 逐条 Item.NewItem 1:1）：
+   *  铜堆 71 十二掷（2 恒掷 Next(10,100) + 门掷 2/3×2、1/2×2、1/3×2、1/4×2、1/5×2）、
+   *  银堆 72 三掷（恒 + 1/2、1/3）、金堆 73 三掷（恒 Next(1,6) + 1/2、1/3）、
+   *  六宝石段各一掷 Next(1,4)。段直查=vanillaStyleDrops.pileDecoDropVid（段外/fy!=18
+   *  行无档=原版不发）。生成侧同构掷序见 TrackPass.pileDropRolls（种子等价用） */
+  private spawnPileDecoDrops(x: number, y: number, fx: number, fy: number): void {
+    if (fy !== 18) return;   // CheckPile :46940 只派发 frameY==18 行
+    const vid = pileDecoDropVid(fx);
+    const key = vid > 0 ? VANILLA_ITEM_KEY_BY_ID[vid] : undefined;
+    if (!key) return;
+    const ri = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo));   // Next(lo,hi) 上开区间
+    const hit = (n: number) => Math.floor(Math.random() * n) === 0;
+    const drop = (stack: number) => this.spawnDrop(x * TILE + 8, y * TILE + 8, key, stack, 0, -2);
+    if (vid === 71) {
+      drop(ri(10, 100)); drop(ri(10, 100));
+      if (Math.floor(Math.random() * 3) !== 0) drop(ri(10, 100));
+      if (Math.floor(Math.random() * 3) !== 0) drop(ri(20, 100));
+      if (hit(2)) drop(ri(10, 100));
+      if (hit(2)) drop(ri(20, 100));
+      if (hit(3)) drop(ri(10, 100));
+      if (hit(3)) drop(ri(20, 100));
+      if (hit(4)) drop(ri(10, 100));
+      if (hit(4)) drop(ri(20, 100));
+      if (hit(5)) drop(ri(10, 100));
+      if (hit(5)) drop(ri(20, 100));
+    } else if (vid === 72) {
+      drop(ri(10, 100));
+      if (hit(2)) drop(ri(20, 100));
+      if (hit(3)) drop(ri(30, 100));
+    } else if (vid === 73) {
+      drop(ri(1, 6));
+      if (hit(2)) drop(ri(2, 6));
+      if (hit(3)) drop(ri(3, 6));
+    } else {
+      drop(ri(1, 4));   // 六宝石 181/180/177/179/178/182 同掷 ×Next(1,4)
+    }
   }
 
   /** 蜂巢块破坏（KillTile case 225 → world/hive.ts）：流蜜或掉物+出蜂 */
@@ -16548,14 +16756,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (en.hurt && Math.abs((en.cx ?? cx) - cx) < hb + (e.w >> 1)
         && Math.abs((en.cy ?? cy) - cy) < hb + (e.h >> 1)) {
         const hurt = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));   // Main.DamageVar ±15%
-        playEnemyHitSound(this, en);   // 命中音(StrikeNPC 链;曾静默=伤害无反馈)
-        en.hurt(hurt, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this, pen); // ⑥
+        en.hurt(hurt, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this, pen); // ⑥（音/飘值=StrikeNPC 单点)
         // 冰霜盔甲×爆炸（StatusNPC :11524-11527 `(melee||ranged) && frostBurn →
         // AddBuff(324, 60×Next(5,15))`）：爆炸结算同走 Damage→StrikeNPC→StatusNPC
         // 链，ranged 弹（火箭/炸弹族 SetDefaults ranged）与冰霜甲在身即触发——
         // 装备源 = 冰霜甲 frostBurn（备案遗留⑤）
         applyFrostBurn(this.player.equipStats.frostBurn, en as unknown as Record<string, number>);
-        this.addDamageNumber((en.cx ?? cx), (en.y ?? cy), hurt, false, '#FF8040');
       }
     }
     // 小动物并入爆炸(原版 Damage_PVE 遍历 Main.npc 全表 :11869——critters 桶一体;
@@ -16566,10 +16772,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (Math.abs((c.cx ?? cx) - cx) < hb + (cent.w >> 1)
         && Math.abs((c.cy ?? cy) - cy) < hb + (cent.h >> 1)) {
         const churt = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));
-        playEnemyHitSound(this, c);
-        // 全参 hurt(小动物桶已全 Enemy 化——一击死由 lifeMax=5 自然达成)
+        // 全参 hurt(小动物桶已全 Enemy 化——一击死由 lifeMax=5 自然达成;音/飘值=单点)
         c.hurt(churt, cx - (c.cx ?? cx), cy - (c.cy ?? cy), this, pen);
-        this.addDamageNumber((c.cx ?? cx), (cent.y ?? cy), churt, false, '#FF8040');
       }
     }
     // 城镇 NPC 爆炸窄门（Damage_PVE_Inner :11970-11972 同门：臭鸡蛋 318 非爆炸物
@@ -17578,7 +17782,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const bd = Math.hypot(smx - p.cx, smy - p.cy) || 1;
         const bee = new Arrow(bx + bw / 2, by + bh / 2,   // :42953-42954 判定盒中心
           (smx - p.cx) / bd * 6, (smy - p.cy) / bd * 6,   // DirectionTo(MouseWorld)*6
-          beeType === 566 ? 5 + Math.floor(Math.random() * 4) : roll.damage,
+          // 强蜂 566 伤 = beeDamage(5)=5+Next(1,4)=6..8（:12021 Next(1,4)=1..3;
+          // ★RV2 勘误：曾写 5+Next(4)=5..8 低端差 1）
+          beeType === 566 ? 6 + Math.floor(Math.random() * 3) : roll.damage,
           beeType === 566 ? 0.5 : 0, beeType, null, {});
         bee.critChance = p.critChance('melee');
         this.entities.add(bee, 'projectiles');
@@ -17664,15 +17870,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (e.vanillaId === 400) continue;
       if (!hitRect(e.x, e.y, e.w, e.h)) continue;
       this.swingHitSet.add(e.id);
-      // 怪物专属受击声（各家族不同）；播放失败回退通用 hit。
-      // 宠物史莱姆语音表优先（StrikeNPC :82255-82302）：type==1 且 ai[1]=语音
-      // 饰品物品 id → player_hit_* 直播替换（鸡 1/5 稀有变体在 petSlimeHitVoice 掷）
-      {
-        const pv = e.vanillaId === 1 ? petSlimeHitVoice(e.ai1) : null;
-        // WithPitchVariance(0.4) 全表（SoundID.cs:1115-1147）——±0.4 音高抖动
-        if (pv) this.sfx.playWavFile(pv.file, pv.vol, e.cx, e.cy, Math.random() * 0.8 - 0.4);
-        else if (!this.sfx.playFiles(e.def.hitSound, 1, e.cx, e.cy)) this.sfx.play('hit', 1, e.cx, e.cy);
-      }
+      // 受击音=Enemy.hurt 单点（StrikeNPC :82118 HitSound + :82255 宠物史莱姆语音族）
       let crit = Math.random() < 0.04 + this.player.critChance('melee') / 100
         // ★武器 item.crit(GetWeaponCrit:4 基础+武器+装备)——vi_ 数据驱动近战武器 crit
         // 字段此前未入链(挥砍侧全族只有装备 crit)
@@ -17703,8 +17901,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 1=无潜行 → ×1，仓内 Player.stealth 同语义）
       const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1) // 0.65 自造已摘（glove×2/Titan×1.5=P:52477-52498）
         * (swingVid === 3106 ? 1 + (1 - this.player.stealth) : 1);
-      const killed = e.hurt(dmg, kdir * kb, 0, this, this.player.equipStats.armorPen + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165)
-      this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
+      const killed = e.hurt(dmg, kdir * kb, 0, this, this.player.equipStats.armorPen + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165);音/飘值=StrikeNPC 单点
       // 武器浸剂（meleeEnchant 表 Player.cs:11604 → 敌 debuff :6141-6171 时长 Next(a,b) 秒）
       if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
       if (this.player.buffs.has(BuffType.ImbueCursed)) e.cursedT = Math.max(e.cursedT, 3 + Math.random() * 4);
@@ -21181,8 +21378,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 尘 6×30×3.7 爆闪。本仓以同参数 AoE 一次结算等价（160 盒半宽 80）
       const retaliation = Math.max(1, Math.round(150 * p.damageMult('melee')));
       attacker.hurt(retaliation, Math.sign(attacker.cx - p.cx) * 15, -3, this,
-        0, false, -1, true);
-      this.addDamageNumber(attacker.cx, attacker.y, retaliation, false, '#FFC040');
+        0, false, -1, true);   // 音/飘值=单点
       this.spawnParticles(p.cx, p.cy, '#FFD060', 30, 3.7, { life: 24 });
       this.spawnParticles(p.cx, p.cy, '#FF9040', 4, 1.5, { life: 20 });
       this.playSfxFiles(['Item_14'], 1, p.cx, p.cy);   // SoundID.Item14
@@ -21283,8 +21479,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (p.facing === facing) {
         p.shieldParryTimeLeft = 0;
         const reflect = Math.max(1, Math.round(dmg * 2));
-        attacker.hurt(reflect, -facing * 5, -2, this);
-        this.addDamageNumber(attacker.cx, attacker.y, reflect, false, '#FFD080');
+        attacker.hurt(reflect, -facing * 5, -2, this);   // 音/飘值=单点
         return 0;   // 完全免伤
       }
     }
@@ -21296,13 +21491,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // Main.DamageVar :65597-65620（±15% + luck 重掷——曾裸随机丢重掷段）
           // Player.cs:30929 DamageVar(dmg×mult, -luck)——负幸运劣化重掷（曾传 +luck 方向反）
           const reflect = Math.min(1000, damageVar(dmg * num2, -p.luck));
-          attacker.hurt(reflect, -num3 * 10 * 0.65, 0, this);
-          this.addDamageNumber(attacker.cx, attacker.y, reflect, false, '#80FF80');
+          attacker.hurt(reflect, -num3 * 10 * 0.65, 0, this);   // 音/飘值=单点
         }
         if (p.cactusSet) {
           const cactus = mainMasterMode(this.world) ? 45 : mainExpertMode(this.world) ? 30 : 15;
-          attacker.hurt(cactus, -num3 * 10 * 0.65, 0, this);
-          this.addDamageNumber(attacker.cx, attacker.y, cactus, false, '#A0FF60');
+          attacker.hurt(cactus, -num3 * 10 * 0.65, 0, this);   // 音/飘值=单点
         }
       }
       if (p.hp <= 0) {
@@ -23380,6 +23573,212 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** decor 失撑清除（D-1）：统一经 breakTile 走原版 KillTile 掉落/音效/粒子链
+   *  （植物帧表 killTileDropItems、药草 TILE_CUT 收获门、瓦罐 smashPot、向日葵/
+   *  水晶心 object 支 def.drop、逻辑件 1×1 尾 style 表全在 breakTile 内）。
+   *  级联（breakTile→setTile→onTileChanged→本链再触发）用队列+预算上限防递归
+   *  爆炸——原版 TileFrame 同构递归但 C# 栈深,JS 侧显式排队（同 breakTile 殉爆
+   *  队列 tntBarrelBlast 式）。 */
+  private _decorKillQueue: Array<[number, number]> = [];
+  private _decorKillDraining = false;
+  private killDecorTile(x: number, y: number): void {
+    const q = (this._decorKillQueue ??= []);   // ??=：Object.create 壳测试实例无构造器字段（同 _tntPending）
+    q.push([x, y]);
+    if (this._decorKillDraining) return;
+    this._decorKillDraining = true;
+    try {
+      let budget = 4096;   // 级联预算（超限弃置,防构造性无限级联）
+      while (q.length && budget-- > 0) {
+        const [qx, qy] = q.shift()!;
+        if (this.world.store.get(qx, qy) === 0) continue;   // 同件多格已被整件清掉
+        this.breakTile(qx, qy, false, false);
+      }
+      q.length = 0;
+    } finally {
+      this._decorKillDraining = false;
+    }
+  }
+
+  /** SolidTileAllowBottomSlope（WorldGen.cs:70211）：active+(solid|solidTop)+
+   *  非顶坡(slope 1/2)+非半砖+未致动。界外=原版 InWorld false → true（不杀） */
+  private solidAllowBottomSlopeAt(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (!st.inBounds(x, y)) return true;
+    if (!st.isActive(x, y)) return false;
+    const i = st.idx(x, y);
+    if (st.half[i]) return false;
+    const sl = st.slope[i];
+    if (sl === 1 || sl === 2) return false;
+    const d = TILE_DEFS[st.type[i]];
+    return !!(d && (d.solid || d.platform));
+  }
+
+  /** decor 支撑检查（D-1,原版 TileFrameImportant :85703 Check* 族运行期移植）：
+   *  按 DECOR_SUPPORT_KIND 分派——PlantCheck（地基失配→换型或杀,含腐化/蔓延过境
+   *  变型）/CheckAlch（列地基+岩浆枯杀）/CheckSunflower（2×4+草族实心底）/
+   *  Check1x2（树苗,地基失配重帧）/Check1x1/CheckLogicTiles/CheckOrb/CheckPot/
+   *  吊挂族（CheckChand/Check1x2Top 顶上实心）。失配 → killDecorTile（breakTile
+   *  链清除+掉落）。挂 onTileChanged(x,y)→checkFurnitureSupport(x,y-1) 同家具链。 */
+  private checkDecorSupport(x: number, y: number, def: (typeof TILE_DEFS)[number],
+    sheet: number, kind: DecorSupportKind): void {
+    const st = this.world.store;
+    const i = st.idx(x, y);
+    switch (kind) {
+      case 'plant': {
+        if (sheet === 703) {   // CheckStalactiteEcho 同款底质门（gen plantCheckSweep 703 支）
+          if (!this.solidAllowBottomSlopeAt(x, y + 1)) this.killDecorTile(x, y);
+          return;
+        }
+        // PlantCheck（:81280）：下格 active+非半砖+无坡 → down=sheet（否则 -1）
+        let down = -1;
+        const bi = st.idx(x, y + 1);
+        if (st.inBounds(x, y + 1) && st.isActive(x, y + 1)
+          && !st.half[bi] && st.slope[bi] === 0) {
+          down = TILE_DEFS[st.type[bi]]?.vanilla?.sheet ?? -1;
+        }
+        if (!plantBadMatch(down, sheet)) return;
+        // 地基失配 → 换型（TryGetNewType :81886——腐化/蔓延过境植物变型,原版不杀）
+        const r = plantNewType(sheet, down, st.frameX[i]);
+        if (r.type !== sheet) {
+          const nid = TILE_BY_KEY[PLANT_CONVERT_KEY[r.type]];
+          if (nid !== undefined) {
+            st.setTile(x, y, nid, r.spore ? (r.type === 201 ? 270 : 144) : r.fx, st.frameY[i]);
+            this.chunks.markDirtyArea(x - 1, y - 1, x + 1, y + 1);
+            return;
+          }
+        }
+        this.killDecorTile(x, y);
+        return;
+      }
+      case 'alch': {
+        // CheckAlch（:45981）：下格 nactive+非半砖；列=frameX/18 查地基表（列外恒活）；
+        // 本格岩浆枯杀（case 5 雪族阶段豁免 :46062-46065）。83↔84 岩浆熟转换略（备案）
+        const bi = st.idx(x, y + 1);
+        let bad = !st.inBounds(x, y + 1) || !st.isActive(x, y + 1) || !!st.half[bi];
+        const col = Math.trunc(st.frameX[i] / 18);
+        const isLava = (st.liquid[i] ?? 0) > 0 && st.liquidType[i] === LIQUID_TYPE.LAVA;
+        if (!bad) {
+          const g = ALCH_GROUND_RUNTIME[col];
+          if (g) {
+            if (!g.has(TILE_DEFS[st.type[bi]]?.vanilla?.sheet ?? -1)) bad = true;
+            if (isLava && col !== 5) bad = true;
+          }
+        }
+        if (bad) this.killDecorTile(x, y);
+        return;
+      }
+      case 'sunflower': {
+        // CheckSunflower（:53744）：2×4 完整性 + 底行逐列草族实心；失配整件杀
+        // （掉落经 breakTile object 支 → place_v_27 = item 63 ✓ 原版 Item.NewItem(63)）
+        const ax = x - (Math.floor(st.frameX[i] / 18) % 2);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % 4);
+        let bad = false;
+        for (let dx = 0; dx < 2 && !bad; dx++) {
+          for (let dy = 0; dy < 4; dy++) {
+            const qx = ax + dx, qy = ay + dy;
+            if (!st.inBounds(qx, qy) || !st.isActive(qx, qy) || st.get(qx, qy) !== st.type[i]) { bad = true; break; }
+          }
+          const gx = ax + dx, gy = ay + 4;
+          const gs = TILE_DEFS[st.get(gx, gy)]?.vanilla?.sheet ?? -1;
+          if (!SUNFLOWER_GROUND_SHEETS.has(gs) || !st.isSolid(gx, gy)) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'sapling': {
+        // Check1x2（:43377）type 20 支：1×2 完整性 + 底格 SolidTileAllowBottomSlope/
+        // 平台 + 地基族匹配（错族=重帧 :43483-43489;无地基/界外族=杀）
+        const top = (st.frameY[i] % 36 === 0) ? y : y - 1;
+        const below = top + 2;
+        if (!st.inBounds(x, below) || st.get(x, top) !== st.type[i]
+          || st.get(x, top + 1) !== st.type[i]) { this.killDecorTile(x, top); return; }
+        const gd = TILE_DEFS[st.get(x, below)];
+        const groundOk = this.solidAllowBottomSlopeAt(x, below) || !!gd?.platform;
+        const alt = ACORN_ALT_BY_GROUND_SHEET[gd?.vanilla?.sheet ?? -1];
+        if (!groundOk || alt === undefined) { this.killDecorTile(x, top); return; }
+        const curAlt = Math.floor(st.frameX[st.idx(x, top)] / 54);
+        if (alt / 3 !== curAlt) {
+          // 地基族变更 → 重帧（:43484-43488 num7=54*num6+Next(3)*18）
+          const nfx = (alt + Math.floor(Math.random() * 3)) * 18;
+          st.frameX[st.idx(x, top)] = nfx;
+          st.frameX[st.idx(x, top + 1)] = nfx;
+          this.chunks.markDirtyArea(x - 1, top - 1, x + 1, top + 2);
+        }
+        return;
+      }
+      case 'shroomtree': {
+        // case 72（:86978-86998 内联）：下方须 72（同型续接）/70（蘑菇草）→ 否则杀
+        const bs = TILE_DEFS[st.get(x, y + 1)]?.vanilla?.sheet ?? -1;
+        if (bs !== 72 && bs !== 70) this.killDecorTile(x, y);
+        return;
+      }
+      case 'ground1x1': {
+        // Check1x1（:45243）：下方 SolidTileAllowBottomSlope；下方巨石族 → 杀
+        //（:45266-45269 TileID.Sets.Boulders）。78 陶盆（CheckOnTable1x1 :43548 的
+        // 78 特支）同判据复用本支
+        if (this.solidAllowBottomSlopeAt(x, y + 1)
+          && !Game.BOULDER_SUPPORT_SHEETS.has(TILE_DEFS[st.get(x, y + 1)]?.vanilla?.sheet ?? -1)) return;
+        this.killDecorTile(x, y);
+        return;
+      }
+      case 'logic': {
+        // CheckLogicTiles（:45288）：419 灯座下方须 419/420;全体帧须 18 对齐
+        if (sheet === 419) {
+          const bs = TILE_DEFS[st.get(x, y + 1)]?.vanilla?.sheet ?? -1;
+          if (!st.isActive(x, y + 1) || (bs !== 419 && bs !== 420)) { this.killDecorTile(x, y); return; }
+        }
+        if (st.frameX[i] % 18 !== 0 || st.frameY[i] % 18 !== 0) this.killDecorTile(x, y);
+        return;
+      }
+      case 'orb': {
+        // CheckOrb（:54187）type 12 支：2×2 完整性 + 底行两列 SolidTileAllowBottomSlope
+        const ax = (st.frameX[i] === 0 || st.frameX[i] === 36) ? x : x - 1;
+        const ay = st.frameY[i] !== 0 ? y - 1 : y;
+        let bad = false;
+        for (let dx = 0; dx < 2 && !bad; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+          }
+          if (!this.solidAllowBottomSlopeAt(ax + dx, ay + 2)) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'pot': {
+        // CheckPot（:56807）：2×2 完整性 + 底行两列 SolidTile2（active+solid+无坡+
+        // 非半砖,:70178）→ 失配整罐碎（breakTile → smashPot 战利品链）
+        const ax = x - (Math.floor(st.frameX[i] / 18) % 2);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        let bad = false;
+        for (let dx = 0; dx < 2 && !bad; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+          }
+          const bi2 = st.idx(ax + dx, ay + 2);
+          if (!(st.isSolid(ax + dx, ay + 2) && st.slope[bi2] === 0 && !st.half[bi2])) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'hangs': {
+        // 吊挂族：CheckChand（:52891，34 顶行中列上方 active+solid+非 solidTop）/
+        // Check1x2Top（:46773，42 上方 solid/平台/绳——绳支 :46776 flag5）
+        const w = def.w ?? 1, h = def.h ?? 1;
+        const ax = x - (Math.floor(st.frameX[i] / 18) % w);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % h);
+        const hx = ax + (w >> 1), hy = ay - 1;
+        const hd = TILE_DEFS[st.get(hx, hy)];
+        const ok = sheet === 34
+          ? (!!hd?.solid && !hd.platform)
+          : st.isActive(hx, hy) && (!!hd?.solid || !!hd?.platform || !!hd?.rope);
+        if (!ok) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      default:
+        return;   // 'furniture'：不拦,落入下方家具失撑机制
+    }
+  }
+
   private checkTorchDetach(x: number, y: number) {
     const st = this.world.store;
     const TORCH_ID = T.TORCH;
@@ -23389,8 +23788,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const i = st.idx(tx, ty);
       if (st.type[i] !== TORCH_ID) continue;
       if (torchStillAnchored(st, tx, ty, st.frameX[i])) continue;
+      // ★D-3 样式还原（KillTile case 4 :65106-65164 style=frameY/22）：按档掉对应
+      // 火把物品——曾恒掉普通火把 8（咒火炬失撑掉回火把=刷炬漏洞兼 vid 错）
+      const vid = torchDropVid(Math.floor(Math.max(0, st.frameY[i]) / 22));
+      const dropKey = VANILLA_ITEM_KEY_BY_ID[vid] ?? VI_KEY.TORCH;
       st.setTile(tx, ty, 0);
-      this.spawnDrop(tx * TILE + 8, ty * TILE, VI_KEY.TORCH, 1);
+      this.spawnDrop(tx * TILE + 8, ty * TILE, dropKey, 1);
       this.sfx.play('dig', 1, tx * TILE + 8, ty * TILE + 8);
     }
   }
@@ -23421,7 +23824,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!st.inBounds(x, y)) return;
     const t = st.get(x, y);
     const def = TILE_DEFS[t];
-    if (!def?.framed || def.decor) return;
+    if (!def) return;
+    // ---- decor 支撑链（D-1,原版 TileFrameImportant :85703 → Check* 族派发）：
+    // 按 DECOR_SUPPORT_KIND 分派（PlantCheck/CheckAlch/CheckSunflower/Check1x2/
+    // Check1x1/CheckLogicTiles/CheckOrb/CheckPot/吊挂族/家具机制族）。曾 def.decor
+    // 早退整族排除 = 植物/药草/向日葵/树苗/decor 家具挖支撑格后悬空不塌（用户报
+    // "槽体上方草浮空",2026-08-23）。★未列入表的 decor（绳/梁/币堆/藤/棘/蛛网/
+    // 火把/开态门…）原版本无支撑语义 → 悬空保留=原版同款（审计 D-1 勿误修清单）----
+    const dSheet = def.vanilla?.sheet ?? -1;
+    const dKind = DECOR_SUPPORT_KIND[dSheet] as DecorSupportKind | undefined;
+    if (dKind && dKind !== 'furniture') {
+      this.checkDecorSupport(x, y, def, dSheet, dKind);
+      return;
+    }
+    if (def.decor && !dKind) return;
+    if (!def.framed) return;
     const sheet = def.vanilla?.sheet ?? -1;
     const isBoulder = Game.BOULDER_SUPPORT_SHEETS.has(sheet);
     const isTnt = sheet === 654;
@@ -23488,6 +23905,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       let dropKey = multiTileDropKey(def, vanillaPlaceableTileKeys());
       const sv = styleDropVidOfFrames(sheet, afx, afy);
       if (sv > 0) dropKey = VANILLA_ITEM_KEY_BY_ID[sv] ?? dropKey;
+      // S2/D-7 接档（2026-08-23）：哨兵 -1=假容器 441/468 -1 档压 place_ 兜底（同挖掉路）
+      else if (sv < 0) dropKey = '';
+      // 宝石锁 440 伴生钥匙档（S2/D-7：Check3x3Wall :44919-44933 num8,fy/54==1 行第二件
+      // 掉落;锁体走上方 styleDropVid）——失撑与挖掉同源 Check* 帧检,两件齐发
+      if (sheet === 440) {
+        const kv = gemLockKeyVid(afx, afy);
+        const kk = kv > 0 ? VANILLA_ITEM_KEY_BY_ID[kv] : undefined;
+        if (kk) this.spawnDrop(ax * TILE + 8, ay * TILE, kk, 1);
+      }
+      // D-8：活板门/高门开态 386/389 失撑同掉（原版失撑与挖掉同走 CheckTrapDoor/
+      // CheckTallGate 帧检,见 vanillaStyleDrops.openStateDoorDropVid 注）
+      {
+        const gd = openStateDoorDropVid(sheet);
+        if (gd > 0) dropKey = VANILLA_ITEM_KEY_BY_ID[gd] ?? dropKey;
+      }
       // Echo 资源组 8 def（⚠️4 接档）失撑同掉（原版失撑与挖掉同走 Check* 帧检
       // Item.NewItem 一次）;帧段无档=无掉落,压 place_ 兜底（同挖掉路,647 不还
       // Rubblemaker——见 vanillaStyleDrops.echoResourceDropVid 注）

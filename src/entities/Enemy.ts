@@ -4,7 +4,8 @@ import { Entity } from './Entity';
 import { entityNet } from '../net/entitySyncHooks';
 // M3 Boss 伤害统计漏斗（/boss伤害;NPC.StrikeNPC→NPCDamageTracker.AddDamage :82129-82130。
 // entityNet 同模式注入——entities 层不反向依赖聊天层,单机默认 null 零开销）
-import { bossDamageSink, consumePendingStrikeOwner } from '../chat/BossDamageTracker';
+import { bossDamageSink, consumePendingStrikeOwner, setPendingStrikeOwner } from '../chat/BossDamageTracker';
+import { playEnemyHitSound } from './projTargets';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { paintColor } from '../world/Paint';
 import { liquidCollision, drownCollision } from '../stats/TouchDamage';
@@ -48,7 +49,6 @@ import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
 import { daybreakStacks } from './WeaponProj';
 import { npcCheckArmorPenetration } from './projStatus';
-import { playEnemyHitSound } from './projTargets';
 import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, destroyerSegmentLight, spawnPart, addEnemy, shoot, losClear, mechProbeLock } from './bossAI';
 import { mechQueenUp } from './mechQueen';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
@@ -11506,19 +11506,6 @@ export class Enemy extends Entity {
     }
     if (this.dontTakeDamage) return false; // 原版 NPC.dontTakeDamage（StrikeNPC 早退）
     this.justHitT = 2; // 原版 justHit 单帧旗标（AI_023 飞行武器/陆龟受击回态消费）
-    // 训练假人（NPC 488，cs:83498 localAI 赋值）：immortal 永不死，
-    // 受击只记摇晃强度+方向（渲染帧端消费），掉血由 dummyAI 回满
-    if (this.vanillaId === 488) {
-      this.dummyShake = Math.max(20, Math.min(120, dmg));
-      this.dummyHitDir = Math.sign(kbx);   // cs:83506 localAI[1]=hitDirection 无条件写入（0=未定向）
-      this.iframes = 8;
-      // 受击反馈(2026-08-21 用户报"子弹射假人无命中效果"):原版假人是 immortal
-      // 非 dontTakeDamage——StrikeNPC 走完整反馈(NPCHit15 音+伤害数字)后 life 不减。
-      // 曾只记摇晃早退 = 无音无数字,观感"没命中"。
-      playEnemyHitSound(game, this);
-      game.addDamageNumber(this.cx, this.y - 6, Math.round(dmg), false, '#FFD060');
-      return true;
-    }
     // 猪鲨爆裂泡泡（NPC 371，StrikeNPC cs:82102-82107）：伤害清零(num=0)不扣血，
     // 直接转入爆炸态 ai[0]=1/ai[1]=4 + dontTakeDamage——"被击即爆"而非"被打死"；
     // aiStyle 70 (:35180-35194) 据此扩 100×100 并 EncourageDespawn(3) 消散
@@ -11545,11 +11532,44 @@ export class Enemy extends Entity {
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）
     if (this.takenDamageMultiplier > 1) dmg = Math.max(1, Math.round(dmg * this.takenDamageMultiplier));
+    // ---- 伤害飘值 + 受击音：原版 StrikeNPC 内【单点】发射（:82006-82015 CombatText、
+    // :82118 起 HitSound）——调用方零重复。曾调用方多点各发 + 假人分支再发 =
+    // 一次打击双份飘值+音效双播（2026-08-23 用户报）。
+    // 门（:81998-82000）：(takenDamageMultiplier>1 || Damage!=9999) && lifeMax>1
+    // ——DOT 致死的 hurt(9999) 不出飘值；lifeMax≤1 不出。
+    // 色（CombatText.cs:8-14）：friendly=DamagedFriendly(255,80,90)/暴击(255,100,30)；
+    // hostile=DamagedHostile(255,160,80)/暴击(255,100,30)；远端访客来源（msg42
+    // pendingStrikeOwner≥0）×0.4 灰（OthersDamagedHostile :15-16）。
+    // 位置=受击 NPC 锚点（原版 position 矩形）；数值=防后终值（原版 num 同）。
+    {
+      const remoteOwner = consumePendingStrikeOwner();
+      if ((this.takenDamageMultiplier > 1 || rawDmg !== 9999) && this.maxHp > 1) {
+        const friendly = this.def.friendly ?? false;
+        let col: string;
+        if (friendly) col = crit ? '#FF641E' : '#FF505A';
+        else if (remoteOwner !== null && remoteOwner >= 0) col = crit ? '#665A14' : '#664020';
+        else col = crit ? '#FF641E' : '#FFA050';
+        playEnemyHitSound(game, this);
+        game.addDamageNumber(this.cx, this.y, dmg, crit, col);
+      }
+      if (remoteOwner !== null) setPendingStrikeOwner(remoteOwner);
+    }
     // M3 Boss 伤害统计（NPC.StrikeNPC :82129-82130 → NPCDamageTracker.AddDamage：
     // min(dmg, life) 溢杀不膨胀;owner -1=本地/255=世界,远端访客由 pendingStrikeOwner
     // （netApplyStrike 置 msg42 fromSlot）覆写。须在扣血前取 life——原版同位）
     if (bossDamageSink.add) {
       bossDamageSink.add(this, consumePendingStrikeOwner() ?? (fromPlayer ? -1 : 255), dmg);
+    }
+    // 训练假人（NPC 488，cs:83498 localAI 赋值）：immortal=true 永不死——原版
+    // 走完整 StrikeNPC 管线（防御结算/飘值/受击音/击退全跑），仅 life 不减。
+    // 曾早退在管线前 = 无飘值无音；又曾在分支内自发反馈 = 与调用方双份
+    // （2026-08-23 用户报"一下双飘值"）。现对齐：全管线跑完在此只记摇晃+免扣血。
+    if (this.vanillaId === 488) {
+      this.dummyShake = Math.max(20, Math.min(120, dmg));
+      this.dummyHitDir = Math.sign(kbx);   // cs:83506 localAI[1]=hitDirection 无条件写入（0=未定向）
+      this.iframes = 8;
+      this.hpBarT = 240;
+      return true;
     }
     // realLife 共享生命（StrikeNPC :82132-82137）：伤害扣主段,本段 hp/maxHp 镜像
     // ——毁灭者族打任意节都扣头 80000 总血,节不可单独打死

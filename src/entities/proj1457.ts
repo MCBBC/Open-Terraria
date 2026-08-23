@@ -68,9 +68,8 @@ function dealContacts(
     const dmg = crit ? self.damage * 2 : self.damage;
     const kdir = Math.sign((e.x + e.w / 2) - self.cx) || 1;
     playEnemyHitSound(game, ent as Parameters<typeof playEnemyHitSound>[1]);
-    e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit);
+    e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit);   // 音/飘值=单点
     applyProjStatus(self.projId, ent as unknown as Record<string, number>);
-    game.addDamageNumber(self.cx, self.cy - 8, dmg, crit, crit ? '#FFD040' : '#FF7060');
     onHit?.(ent as unknown as HitTarget);
   }
 }

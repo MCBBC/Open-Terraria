@@ -159,7 +159,7 @@ export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, 
  *  魔法/召唤弹不吃。三挂点:挥砍(Game)/WeaponProj 近战四族/远程箭 */
 export function applyFrostBurn(frostBurn: boolean, enemy: StatusEnemy): void {
   if (!frostBurn) return;
-  const sec = 5 + Math.floor(Math.random() * 11); // 60×Next(5,15)t
+  const sec = 5 + Math.floor(Math.random() * 10); // 60×Next(5,15)t——XNA Next(min,max) 含头不含尾=[5,14]秒
   if (sec > (enemy.frostburn2T ?? 0)) enemy.frostburn2T = sec;
 }
 

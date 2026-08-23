@@ -130,8 +130,7 @@ export class MagicProj extends Entity {
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
         playEnemyHitSound(game, e);
         const crit = Math.random() < this.critChance; // 暴击链（P:52512——曾恒 false）
-        e.hurt(crit ? this.damage * 2 : this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);
-        game.addDamageNumber(this.x, this.y, this.damage, false, '#C080FF');
+        e.hurt(crit ? this.damage * 2 : this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
         this.dead = true;
         return;
       }

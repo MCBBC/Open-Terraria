@@ -222,7 +222,7 @@ describe('252 插孔锤持械弹（aiStyle20 同门）', () => {
     saw.fixedUpdate(1 / 60, hooks);
     const speedMod = Math.hypot(saw.vx, saw.vy);
     expect(speedMod).toBeGreaterThanOrEqual(46 * 1.1 * 0.97 - 1e-9);   // 抖动 ±3%（ε 容浮点）
-    expect(speedMod).toBeLessThanOrEqual(46 * 1.1 * 1.03 + 1e-9);
+    expect(speedMod).toBeLessThanOrEqual(46 * 1.1 * 1.05 + 1e-9);   // 含 X 抖动 ×(1+Next(−3,4)×0.01) 上界 :23932
   });
 
   it('帧动画 4 帧 4t/帧（:23840-23852；509 为 2 帧 2t :23853-23865）', () => {

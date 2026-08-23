@@ -560,14 +560,14 @@ describe('A4-7 风气球 AI_113（NPC.cs:48253-48430）', () => {
 // 8. 星光斗篷/蜂巢反击/幸运币（Player.cs:37826-37907 / :43892-43916）
 // ===========================================================================
 describe('A4-8 反击配饰纯函数（Player.cs:37826-37907 / :43892-43916）', () => {
-  it('starCloakStarInfo：无 override 件 → 726；929→725 / 1247→724 / 982→723（后者优先）', () => {
+  it('starCloakStarInfo：无 override 件 → 726；862→725 / 1247→724 / 4001→723（后者优先;★V6 勘误 vid：929=炮弹/982=魔力再生带非斗篷,真身 StarVeil=862/ManaCloak=4001）', () => {
     expect(starCloakStarInfo([], true)).toEqual({ active: true, projType: 726 });
-    expect(starCloakStarInfo([929], false)).toEqual({ active: true, projType: 725 });
+    expect(starCloakStarInfo([862], false)).toEqual({ active: true, projType: 725 });
     expect(starCloakStarInfo([1247], false)).toEqual({ active: true, projType: 724 });
-    expect(starCloakStarInfo([982], false)).toEqual({ active: true, projType: 723 });
+    expect(starCloakStarInfo([4001], false)).toEqual({ active: true, projType: 723 });
     // 优先级 manaCloak(723) > beeCloak(724) > starVeil(725)（:37848-37863 后判覆盖）
-    expect(starCloakStarInfo([929, 1247, 982], false).projType).toBe(723);
-    expect(starCloakStarInfo([929, 1247], false).projType).toBe(724);
+    expect(starCloakStarInfo([862, 1247, 4001], false).projType).toBe(723);
+    expect(starCloakStarInfo([862, 1247], false).projType).toBe(724);
     expect(starCloakStarInfo([], false).active).toBe(false);
   });
 

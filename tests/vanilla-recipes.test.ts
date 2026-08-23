@@ -18,9 +18,9 @@ describe('原版配方提取', () => {
   it('3342 条（1457:批B +33 新配方 6147-6195 段/Format:C/火把神药水;去重终态）+组 33(1457 +SilverBar/GoldBar)+继承 9', () => {
     // 3173（线性+生成器+模板22件套+小动物雕像+反向平台/墙）+ 137（for 循环段，tests/loop-recipes.test.ts
     // 对账）- 1（5547@114[3306x1] 循环残影，--append-loops 剔除）
-    expect(VANILLA_RECIPES.length).toBe(3342);
-    expect(Object.keys(RECIPE_GROUPS).length).toBe(33);   // 1457 批B:+SilverBar(31)/GoldBar(32)
-    expect(Object.keys(RECIPE_GROUP_ITEMS).length).toBe(33);
+    expect(VANILLA_RECIPES.length).toBe(3376);   // 1457 批B 3342 + 并行会话追加 34(增量推进)
+    expect(Object.keys(RECIPE_GROUPS).length).toBe(34);   // 1457 批B:+SilverBar/GoldBar;并行会话再 +1
+    expect(Object.keys(RECIPE_GROUP_ITEMS).length).toBe(34);
   });
 
   it('火把配方：1 木(组)+1 凝胶 徒手 出 3', () => {

@@ -5,7 +5,7 @@
 import { Entity } from './Entity';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
-import { hitCritters, hitPlayer, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
+import { hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { trySnapStrike } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
@@ -1525,8 +1525,7 @@ export class Arrow extends Entity {
             if (rec.hurt && !(tgt as unknown as { dead?: boolean }).dead) {
               const critN = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
               const dN = Math.max(1, Math.trunc(this.damage * 0.15)) * (critN ? 2 : 1);
-              rec.hurt(dN, 0, 0, game, this.settlePen, critN, 1, true);
-              game.addDamageNumber(this.cx, this.cy, Math.round(dN), critN, critN ? '#FF8040' : '#FFD060');
+              rec.hurt(dN, 0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
             }
           }
         }
@@ -2089,9 +2088,7 @@ export class Arrow extends Entity {
         if (((e as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;   // immune[owner] 门
         const critN = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
         const dN = Math.max(1, Math.trunc(this.damage)) * (critN ? 2 : 1);
-        playEnemyHitSound(game, e);
-        e.hurt(dN, 0, 0, game, this.settlePen, critN, 1, true);
-        game.addDamageNumber(this.cx, this.cy, Math.round(dN), critN, critN ? '#FF8040' : '#FFD060');
+        e.hurt(dN, 0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
         this.nailAi0 = -(e.id + 1);            // :13372-13373 ai[0] = -victimIndex-1
         this.nailAi1 = 0;                      // :13370 ai[1] = 0
         this.vx = e.cx - this.cx;              // :13374 velocity = targetNPC.Center - Center
@@ -2240,9 +2237,7 @@ export class Arrow extends Entity {
         //   直击)乘 SwirlTwins 0.6/CanBounce 0.8/ArPenSpread 0.5 取最小——曾只在
         //   AoeExplosion 爆伤消费,三系法杖本体直击虚高 25-67%(完整性审查 P1-1)
         if (this.gem) dmg = Math.max(1, Math.round(dmg * gemDamageMultiplier(this.gem)));
-        playEnemyHitSound(game, e);
-        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);
-        game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
+        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);   // 音/飘值=StrikeNPC 单点
         if (this.pierceInit >= 0) this.hitSet.add(e.id);   // 无限穿透不入表（iframes 门冷却再命中）
         // 502 喵刀弹命中：无特效音/无计数消亡（全库唯一 PlaySound(37) 在撞块
         // HandleMovement :16797——2026-08-13 实测复核修正：曾误接在命中链）。
@@ -2633,11 +2628,9 @@ export class Arrow extends Entity {
         applyFrostBurn((game.player as unknown as { equipStats?: { frostBurn?: boolean } })
           .equipStats?.frostBurn ?? false, e as unknown as Record<string, number>);
       }
-      playEnemyHitSound(game, e);
       // pierce=1 档：命中不设敌方免疫帧（:13154-13158 immune[owner]=0 语义），
-      // fromPlayer=true 走 DPS/掉落门链
+      // fromPlayer=true 走 DPS/掉落门链；音/飘值=StrikeNPC 单点
       e.hurt(dmg, Math.sign(e.cx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 1, true);
-      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
       this.pHitCd.set(e.id, PIRANHA_HIT_CD);                 // :13157 localNPCHitCooldown=14
       if (this.pAi1 === 0) { this.pAi1 = 1; this.pTarget = e; }   // :12447-12450 首咬 latch
     }

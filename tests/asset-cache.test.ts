@@ -42,7 +42,7 @@ describe('优先级清单枚举', () => {
     expect(urls.has('sprites/vanilla/Tree_Tops_0.png')).toBe(true);      // misc 烘焙族
     expect(urls.has('sprites/vanilla/Item_Atlas_0.png')).toBe(true);     // 图标图集
     const atlases = [...urls].filter((u) => /Item_Atlas_/.test(u));
-    expect(atlases.length).toBeLessThanOrEqual(3);
+    expect(atlases.length).toBeLessThanOrEqual(4);   // 1457 批B:+Item_Atlas_2(49 新物品追加页)
   });
   it('P2 其余贴图:assets-index 两桶,且不含 P1 的表族', () => {
     const urls = miscWarmUrls(assetsIndex as never);
@@ -51,7 +51,7 @@ describe('优先级清单枚举', () => {
     expect(urls.some((u) => /\/Wall_\d+\.png$/.test(u))).toBe(false);
   });
   it('P3 音效/P4 音乐:全量与 MUSIC 表对齐,无 Music_0', () => {
-    expect(soundsWarmUrls(assetsIndex as never).length).toBe(852);
+    expect(soundsWarmUrls(assetsIndex as never).length).toBe(863);   // 1457 批B:+11 新音效(Item_200-210 族)
     const music = musicWarmUrls();
     expect(music.some((u) => u.includes('Music_0.mp3'))).toBe(false);    // None=0 跳过
     expect(new Set(music).size).toBe(music.length);                      // 去重

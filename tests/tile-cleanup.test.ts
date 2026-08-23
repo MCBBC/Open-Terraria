@@ -20,8 +20,8 @@ const sid = (s: number): number => SHEET.get(s) ?? -1;
 
 const STONE = TILE_BY_KEY['stone']!;
 const DIRT = TILE_BY_KEY['dirt']!;
-const GS_TC = { worldSurface: 100, beachDistance: 380 } as unknown as GenState;
-const GS_FC = { worldSurface: 100, rockLevel: 140, beachDistance: 10 } as unknown as GenState;
+const GS_TC = { worldSurface: 100, beachDistance: 380, seedFlags: {} } as unknown as GenState;   // 批4 seedFlags 门(空=falsy=非种子世界)
+const GS_FC = { worldSurface: 100, rockLevel: 140, beachDistance: 10, seedFlags: {} } as unknown as GenState;
 
 const at = (st: TileStore, x: number, y: number) => st.type[st.idx(x, y)];
 const W = 200;

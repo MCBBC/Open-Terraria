@@ -52,6 +52,13 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     case 242: return [Math.floor(style / 27) * 108, (style % 27) * 72];
     case 245: return [style * 36, 0];
     case 246: return [0, style * 36];
+    // 216 烟花火箭 / 572 瓶装魂（S2/D-7 接档 2026-08-23,竖排 1×2 族）：原版
+    // Place1x2（cs:47055 `frameY=style*40`,216 CoordinateHeights{16,20}）/
+    // Place1x2Top（cs:47084 `frameY=style*36`）——曾落 default X 向（style*18）
+    // → 放置帧错带（渲染错档）+ 掉落反推（Check1x2 :43744 fy/40、Check1x2Top
+    // :47114 fy/36）恒落 style0（绿/蓝/黄火箭全掉红火箭、瓶装魂全掉光魂）
+    case 216: return [0, style * 40];
+    case 572: return [0, style * 36];
     // 187 Decos3x2 Group2：Place3x2 原文 `frameX = 54*style`（cs:52185）**无 wrap**
     // ——Tiles_187.png 实宽 1890（35 组），style≥35（活树叶下 47-49/叶顶 50-51,
     // cs:28695/28696）帧写到表宽外。★QQQQQ 定谳：vanilla 金标真值就是越界帧

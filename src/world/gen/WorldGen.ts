@@ -117,7 +117,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // （此前沉降只在管线末尾 → 唇缘基于未沉降水体漂移）。
     // 原版 SettleLiquidsPart2（cs:21051，管线尾二次沉降）由 generateWorld 之后
     // worker/Game 的 settleWorldLiquids('gen') 承担。
-    { name: '水体沉降', run: liquidSettlePass },
+    { name: '水体沉降', run: (ctx) => liquidSettlePass(ctx, true) },
     // 沙上清水（原版 RemoveSurfaceWaterAboveSand cs:16295-16326，注册序
     // SettleLiquids(16215) < 本 pass < Oasis(16327) < ShellPiles(16385)）：
     // 地表沙柱上方的悬空水清除——零掷骰纯扫描（2026-08-12 前整 pass 缺失）
@@ -266,7 +266,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // ——尾批 2-A rig #98 newLiq 16,534 的根因。与 #49 中途沉降复用同一实现
     //（liquidSettlePass：settle('gen') + 484 翻转;getGoodWorld tileSolid[56]
     // 与 notTheBees 分支为种子旗标,普通种子 no-op）。
-    { name: '二次沉降', run: liquidSettlePass },
+    { name: '二次沉降', run: (ctx) => liquidSettlePass(ctx, false) },
     // 仙人掌/棕榈/珊瑚（原版 CactusPalmTreesAndCoral cs:21115-21325，注册序
     // SettleLiquidsPart2(21051) < 本 pass < TileCleanup(21327)）：GrowCactus 全量
     //（PlantCactus 150 次邻域成簇）+两端海滩珊瑚 81/贝壳 324+中段水盒棕榈
@@ -426,9 +426,29 @@ import { runNotTheBees } from './vanilla/NotTheBeesPass';
 import { finalSeedCleanup } from './vanilla/FinalSeedCleanupPass';
 
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
-async function liquidSettlePass({ world, rng, store }: GenCtx) {
+// ★UUUUUU：oceanStrip 形参化——原版 cs:16221-16231 海洋带归水全扫只在 #49
+//   SettleLiquids 有（#97 SettleLiquidsPart2 cs:21051 无此前导），且**时序在
+//   NotTheBees()（cs:16237）之前**——曾打包在 settleWorldLiquids(oceanStrip=true)
+//   内=NTB 蜜转化后被归水（左缘洞穴 18,022 格蜜→水定罪），现拆到本函数体内
+//   NTB 调用位之前（普通种子该域无非水液体，先后序零差）。
+async function liquidSettlePass({ world, rng, store }: GenCtx, oceanStrip: boolean) {
   const gs = ctxGs[0];
   if (gs) {
+    if (oceanStrip) {
+      // cs:16221-16231：oceanDepths（y ≤ (groundLevel+rockLevel)/2+40 且
+      //   x<380 ∪ x>w-380）内液体>0 且类型≠水 → 归水（settle.ts 同源副本，
+      //   禁区文件不改动；零掷骰）
+      const st0 = world.store;
+      const oceanLevel = (world.groundLevel + world.rockLevel) / 2 + 40;
+      for (let x = 0; x < st0.w; x++) {
+        if (x >= 380 && x <= st0.w - 380) continue;
+        for (let y = 0; y < st0.h; y++) {
+          if (y > oceanLevel) break;
+          const i = y * st0.w + x;
+          if (st0.liquid[i] > 0 && st0.liquidType[i] !== 1) st0.liquidType[i] = 1;
+        }
+      }
+    }
     // ★UUUUUU：NotTheBees() 槽头（SettleLiquids cs:16237 / SettleLiquidsPart2
     //   cs:21064——两沉降 pass 头、QuickWater 之前的首掷消费者位；本函数被
     //   「水体沉降」与「二次沉降」两槽复用，与原版两次调用位一一对应）
@@ -450,7 +470,7 @@ async function liquidSettlePass({ world, rng, store }: GenCtx) {
         : { x0: mid, x1: world.w - edge, y0: Math.floor(gs.worldSurface) + 10, y1: (world.h - 200) - 10 };
     }
   }
-  await settleWorldLiquids(world, 'gen', undefined, rng, true);
+  await settleWorldLiquids(world, 'gen', undefined, rng, false);
   // ★SSSSSS：QuickWater 尾 tilesIgnoreWater(false) → SetBoulderSolidity(true)
   //   （Liquid.cs:74/141——巨石九族沉降毕回实心；noTraps 的 cs:111/141 条件支与
   //   tilesIgnoreWater 语义重合,冗余）。Piles 巨石段尾的 false 由此还原——普通种子

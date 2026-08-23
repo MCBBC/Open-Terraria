@@ -86,9 +86,12 @@ describe('① 城镇 NPC 微光/派对/狼人切表（TownNPCProfiles）', () =>
   });
 
   it('宠物三只/未知类型无档案 → null（渲染端回落 NPC_{id} 竖条）', () => {
-    for (const id of [637, 638, 656, 999]) {
-      expect(townNpcProfileSheet(id, 0, 0), `id ${id}`).toBeNull();
+    // 637/638/656 素材已随批B/C 补录(Cat_Default.png 在盘)→ profile 有档案;
+    // 999(未知类型)仍 null
+    for (const id of [637, 638, 656]) {
+      expect(townNpcProfileSheet(id, 0, 0), `id ${id}`).not.toBeNull();
     }
+    expect(townNpcProfileSheet(999, 0, 0)).toBeNull();
   });
 
   it('TownNPC.townSheet getter：微光 flag → 微光档；altTexture → 派对/狼人', () => {

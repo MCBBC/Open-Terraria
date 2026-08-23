@@ -67,8 +67,7 @@ export class FirstFractalSlash extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       playEnemyHitSound(game, e);
-      e.hurt(dmg, Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit);
-      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
+      e.hurt(dmg, Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit);   // 音/飘值=单点
       this.hitSet.add(e.id);
     }
   }

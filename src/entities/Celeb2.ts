@@ -290,8 +290,7 @@ export class Celeb2Rocket extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       playEnemyHitSound(game, e as never);
-      e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit);
-      game.addDamageNumber(this.cx, this.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
+      e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit);   // 音/飘值=StrikeNPC 单点
       this.explode(game);                              // penetrate 1 → 命中即 Kill
       return;
     }

@@ -255,8 +255,7 @@ function hitEnemies(
     // (int) 截断 + 命中乘区（悠悠球无视线 ×0.75，:12504）
     const dmg = Math.trunc((crit ? self.damage * 2 : self.damage) * (dmgScale?.(e) ?? 1));
     const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
-    playEnemyHitSound(game, e);
-    e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线
+    e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
     onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     applyProjStatus(me.projId, e as unknown as Record<string, number>);
@@ -272,7 +271,6 @@ function hitEnemies(
       // 岩浆石/火焰护手（melee 门,:10866 1/7 → OnFire3 6s）
       applyMagmaStoneProj(pl.equipStats.magmaStone, e as unknown as Record<string, number>);
     }
-    game.addDamageNumber(self.x + self.w / 2, self.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
   }
 }
 

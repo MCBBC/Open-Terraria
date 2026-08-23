@@ -57,19 +57,23 @@ export interface DesertDesc {
   surface2: Int16Array; surface2X: number;
 }
 
-/** RowHasInvalidTiles（DesertDescription.cs:96-110）：Bottom 行整列查 59/60/161/147 */
-function rowHasInvalidTiles(st: TileStore, startX: number, bottomY: number, width: number): boolean {
+/** RowHasInvalidTiles（DesertDescription.cs:96-110）：Bottom 行整列查 59/60/161/147
+ *  ★UUUUUU（:101 `(!notTheBees || remix)` 门）：NTB/Remix 豁免 59/60 泥/丛林草支
+ *  ——蜂蜜世界全域泥化，沙漠选址只拒冰雪带（缺门=沙漠被泥带顶飞重掷=全图漂移）。 */
+function rowHasInvalidTiles(st: TileStore, ntbSkipMud: boolean, startX: number, bottomY: number, width: number): boolean {
   for (let i = startX; i < startX + width; i++) {
     if (i < 0 || i >= st.w) continue;
     const t = st.type[st.idx(i, bottomY)];
-    if (t === MUD || t === JUNGLE_GRASS || t === ICE || t === SNOW) return true;
+    if (!ntbSkipMud && (t === MUD || t === JUNGLE_GRASS)) return true;
+    if (t === ICE || t === SNOW) return true;
   }
   return false;
 }
 
 /** DesertDescription.CreateFromPlacement + SandMound.Place（1:1，Sub-A）。
  *  返回 null = 无效（RowHasInvalidTiles 命中）——blockRows 掷骰已消耗（原版语义） */
-export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurface: number, skipCheck = false): DesertDesc | null {
+export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurface: number, skipCheck = false,
+  ntbSkipMud = false): DesertDesc | null {
   _wsRef = () => worldSurface;
   const { w, h } = st;
   const factor = w / 4200;
@@ -79,7 +83,7 @@ export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurfac
   const height = Math.trunc(2 * blockRows);  // BlockScale.Y=2
   const ox = x - Math.trunc(width / 2);      // origin.X -= num4/2（int 除）
   const sm = surfaceMapFromArea(st, ox - 5, width + 10);
-  if (!skipCheck && rowHasInvalidTiles(st, ox, sm.bottom, width)) return null;
+  if (!skipCheck && rowHasInvalidTiles(st, ntbSkipMud, ox, sm.bottom, width)) return null;
   // num6 = (int)(Average + Bottom) / 2 —— 先截断再 int 除（DesertDescription.cs:81）
   const topY = Math.trunc(sm.average + sm.bottom) / 2 | 0;
   const hiveTop = topY + rng.int(40, 59);    // Next(40,60)
@@ -184,11 +188,13 @@ export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): Deser
   // DesertBiome pass 放置循环（cs:12538-12562 1:1）：失败重掷**永不早退**，
   // 2 次换向后 skipDesertTileCheck 恒过（此前 tries>w/2 早退=可能整图无沙漠）
   let side = gs.dungeonSide, tries = 0, flips = 0, skipCheck = false;
+  // ★UUUUUU：RowHasInvalidTiles 的 NTB/Remix 泥豁免旗（DesertDescription.cs:101）
+  const ntbSkipMud = !!gs.seedFlags.notTheBees || !!gs.seedFlags.remix;
   let num4 = Math.trunc(rng.nextIntRange(0, half) / 8) + Math.trunc(half / 8);
   let x = half + num4 * -side;
   let desc: DesertDesc | null = null;
   for (;;) {
-    desc = desertPlaceMound(st, rng, x, gs.worldSurface);
+    desc = desertPlaceMound(st, rng, x, gs.worldSurface, false, ntbSkipMud);
     if (desc) break;
     num4 = Math.trunc(rng.nextIntRange(0, half) / 2) + Math.trunc(half / 8)
       + rng.nextIntRange(0, Math.trunc(tries / 12));

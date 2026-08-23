@@ -6,6 +6,7 @@
 //   可放置/弹药/消耗品 → 材料 → 容器/线触发 → 物品自带说明 → Buff 持续 →
 //   词缀差分行（绿/红）。
 import type { ITEM_DEFS } from '../data/items';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { statOfInternal } from '../data/vanillaItemStats';
@@ -65,12 +66,24 @@ type ItemDef = (typeof ITEM_DEFS)[number];
 const T = (key: string, ...args: (string | number)[]) => Lang.text(key, ...args) || key;
 
 /** 材料集（物品自带 material 旗的近似 = 出现任一配方原料；原版 material 标记的
- *  实际用途就是合成提示，原料反查覆盖面等价） */
+ *  实际用途就是合成提示，原料反查覆盖面等价）。
+ *  ★RV3 集成审查勘误：配方 json 的 items[].id 是【原版 vid 域】（首条=凝胶 23+
+ *  木材 9→火把 8），曾误当内部 id 与 slot.id（内部 id 域）直比——仅早期
+ *  "内部 id≡vid"巧合段命中，4 处重复注册平移 +4 后全面失配。归一：vid 同时
+ *  解析到【运行时】内部 id（VANILLA_ITEM_KEY_BY_ID→ITEM_BY_KEY，免疫 json
+ *  烘焙期与运行期的下标漂移），两域并集供 has() */
 let MATERIAL_IIDS: Set<number> | null = null;
 function materialIids(): Set<number> {
   if (MATERIAL_IIDS) return MATERIAL_IIDS;
   const s = new Set<number>();
-  for (const r of VANILLA_RECIPES) for (const ing of r.items) s.add(ing.id);
+  for (const r of VANILLA_RECIPES) {
+    for (const ing of r.items) {
+      s.add(ing.id);
+      const k = VANILLA_ITEM_KEY_BY_ID[ing.id];
+      const iid = k !== undefined ? ITEM_BY_KEY[k] : undefined;
+      if (iid !== undefined) s.add(iid);
+    }
+  }
   MATERIAL_IIDS = s;
   return s;
 }

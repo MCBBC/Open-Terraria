@@ -89,8 +89,11 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
   });
 
   it('功能站族：地狱熔炉 77/提取器 219/灌注台 243/染料缸 228/水晶球 125', () => {
-    // 77→221（Check3x2 :49692）/219→997、243、228（Check3x3 :53092）/125（Check2x2 :48716）
-    for (const k of ['v_77_hellforge', 'v_219_extractinator', 'v_243_imbuing_station', 'v_228_dye_vat', 'v_125_crystal_ball']) {
+    // 77→221（Check3x2 :49692）/219→997、243、228（Check3x3 :53092）/125→487（Check2x2 :48719）
+    // ★77/125 已接真物品（审计 E ❌14/❌20,2026-08-23 批 def.drop 直掉）——余三件仍 place_
+    expect(dropKeyOf('v_77_hellforge')).toBe(VI(221));
+    expect(dropKeyOf('v_125_crystal_ball')).toBe(VI(487));
+    for (const k of ['v_219_extractinator', 'v_243_imbuing_station', 'v_228_dye_vat']) {
       expect(dropKeyOf(k)).toBe('place_' + k);
     }
   });
@@ -104,7 +107,10 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
   });
 
   it('容器/桌/水槽/砧/碗/拉杆/引爆器/宝石锁/钓鱼箱/二类桌', () => {
-    for (const k of ['v_467_chests_group_2', 'v_469_tables_group_2', 'v_172_sinks', 'v_133_forges', 'v_134_anvils_hardmode', 'v_103_bowls', 'v_132_lever', 'v_411_detonator', 'v_440_gemlocks', 'v_376_fishing_crates']) {
+    // ★拉杆 132 已接真物品 513（审计 E ❌15,Check2x2 :48731,2026-08-23 批）;
+    // 碗 103/熔炉 133 的分档掉落走运行时 styleDropVidOfFrames（def 仍 null→place_ 基底）
+    expect(dropKeyOf('v_132_lever')).toBe(VI(513));
+    for (const k of ['v_467_chests_group_2', 'v_469_tables_group_2', 'v_172_sinks', 'v_133_forges', 'v_134_anvils_hardmode', 'v_103_bowls', 'v_411_detonator', 'v_440_gemlocks', 'v_376_fishing_crates']) {
       expect(dropKeyOf(k)).toBe('place_' + k);
     }
   });
@@ -146,7 +152,10 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
   });
 
   it('告示牌 55/模特 legacy 128/女模特 legacy 269（CheckSign :43731/CheckMan :46539）', () => {
-    for (const k of ['v_55_signs', 'v_128_mannequin_legacy', 'v_269_womannequin_legacy']) {
+    // ★告示牌 55 已接真物品 171（审计 E ❌21,CheckSign default :43792,2026-08-23 批;
+    // 牌面注销链在 breakTile framedSheet===55 分支不动）
+    expect(dropKeyOf('v_55_signs')).toBe(VI(171));
+    for (const k of ['v_128_mannequin_legacy', 'v_269_womannequin_legacy']) {
       expect(dropKeyOf(k)).toBe('place_' + k);
     }
   });

@@ -102,7 +102,7 @@ export const FRONT_NECK_LAYER_ALWAYS = new Set([13]);
 export const SITTING_LEG_SLICES: Array<[number, number]> = [[46, 10], [44, 2], [42, 2]];
 export const SITTING_LEG_SLICES_SPECIAL: Array<[number, number]> = [[2, 54], [0, 2]];
 /** 特例支 legs 集合（:1608 门 legIndex==169||!skin + case 217/:1703-1707 族） */
-export const SITTING_LEG_SPECIAL_LEGS = new Set([169, 177, 178, 181, 182, 206, 217]);
+export const SITTING_LEG_SPECIAL_LEGS = new Set([169, 177, 178, 181, 182, 200, 201, 206, 217]);   // ★RV2 补 200/201 GhostarShirtExtension（:1703-1710 同 case 组;今日 extension 未建模,集合自洽防日后咬人）
 
 // ---- 脸饰/胡须头盔条件层（1456 未建模细项批 2026-08-23）----
 

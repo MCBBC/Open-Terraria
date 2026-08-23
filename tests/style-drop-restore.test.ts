@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
-import { styleDropVid, styleDropVidOfFrames, styleFromFrame, holidayLightVid } from '../src/data/vanillaStyleDrops';
+import { styleDropVid, styleDropVidOfFrames, styleFromFrame, holidayLightVid, pileDecoDropVid, gemLockKeyVid } from '../src/data/vanillaStyleDrops';
 import { framedCellFrame, furnitureStyleBase } from '../src/world/FurnitureStyle';
 import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { ITEM_BY_KEY } from '../src/data/items';
@@ -159,10 +159,15 @@ describe('styleDropVid 逐族两档（⚠️2 15 族 + 同病 3 族 + 1×1 版�
   });
 
   it('全表 vid 均有真实物品键（VANILLA_ITEM_KEY_BY_ID 全覆盖,掉落可实例化）', () => {
-    const sheets = [13, 14, 15, 18, 19, 21, 33, 34, 42, 79, 85, 87, 88, 89, 90, 96, 100, 101, 104, 172, 194, 239, 330, 331, 332, 333, 467, 469, 487, 497];
+    const sheets = [13, 14, 15, 18, 19, 21, 33, 34, 42, 79, 85, 87, 88, 89, 90, 96, 100, 101, 104, 172, 194, 239, 330, 331, 332, 333, 467, 469, 487, 497,
+      // S2/D-7 批（2026-08-23）：画族 240/241/242/245/246 + 营火 215 + 炮 209 + 烟花 216 +
+      // 天塔柱 410 + 宝石锁 440 + 假容器 441/468 + 模特 470 + 盆栽树 547/548 + 瓶装魂 572 +
+      // 圣物底座 617 + 仿制祭坛/珠 695/696 + 宝石火花块 255-268
+      209, 215, 216, 240, 241, 242, 245, 246, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268,
+      410, 440, 441, 468, 470, 547, 548, 572, 617, 695, 696];
     let checked = 0;
     for (const s of sheets) {
-      for (let st = 0; st < 80; st++) {
+      for (let st = 0; st < 110; st++) {   // 240 有 101 档,上界抬到 110 全覆盖
         const v = styleDropVid(s, st);
         if (v <= 0) continue;
         checked++;
@@ -170,7 +175,118 @@ describe('styleDropVid 逐族两档（⚠️2 15 族 + 同病 3 族 + 1×1 版�
         expect(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[v]], `vid ${v} 应有 def`).toBeDefined();
       }
     }
-    expect(checked).toBeGreaterThan(900);   // 21 族×平均 45 档量级
+    expect(checked).toBeGreaterThan(1250);   // 旧 30 族 + S2/D-7 新增 ~420 档
+  });
+});
+
+// ============ A2. S2 多 style 家族 + D-7（审计 tile-audit-2026-08-23.md,2026-08-23 批） ============
+describe('S2/D-7 多 style 家族（画/营火/炮/烟花/天塔柱/宝石锁/假容器/模特/盆栽树/瓶装魂/圣物/仿制/宝石火花）', () => {
+  it('画 3×3 240（Check3x3Wall :44751 style=fx/54+fy/54*36）：0→1360 / 22→1440 / 40→1962 / 76→5218 / 100→5929', () => {
+    expect(styleDropVidOfFrames(240, 0, 0)).toBe(1360);
+    expect(styleDropVidOfFrames(240, 54, 54)).toBe(1856);     // style37=col1+row1*36（显式 case 37）
+    expect(styleDropVid(240, 22)).toBe(1440);
+    expect(styleDropVid(240, 40)).toBe(1962);
+    expect(styleDropVid(240, 76)).toBe(5218);
+    expect(styleDropVid(240, 100)).toBe(5929);
+  });
+
+  it('画 241 恒掉 1417（Check4x3Wall :45335 无 style 档）/ 画 6×4 242（:45399 27*(fx/108)+fy/72）', () => {
+    expect(styleDropVidOfFrames(241, 108, 0)).toBe(1417);
+    expect(styleDropVidOfFrames(241, 0, 54)).toBe(1417);
+    expect(styleDropVidOfFrames(242, 0, 0)).toBe(1421);
+    expect(styleDropVidOfFrames(242, 108, 72)).toBe(2866);   // style28=27*1+1（2865+s-27 档）
+    expect(styleDropVid(242, 74)).toBe(5636);
+  });
+
+  it('画 2×3 245（fx/36）/ 画 3×2 246（fy/36）：15-18 同掉 5247 / 21-36→5258+', () => {
+    expect(styleDropVidOfFrames(245, 72, 0)).toBe(1476);      // style2
+    expect(styleDropVid(245, 16)).toBe(5247);                 // 15-18 四档同值
+    expect(styleDropVid(245, 31)).toBe(5634);
+    expect(styleDropVidOfFrames(246, 0, 72)).toBe(1481);      // style2
+    expect(styleDropVid(246, 36)).toBe(5273);
+  });
+
+  it('营火 215（GetCampfireItemDrop :50481,KillTile :64497 fx/54）：0→966 / 8→4689 / 15→5357', () => {
+    expect(styleDropVidOfFrames(215, 0, 0)).toBe(966);
+    expect(styleDropVidOfFrames(215, 432, 18)).toBe(4689);    // style8（命中格 fy=18 同件）
+    expect(styleDropVid(215, 15)).toBe(5357);
+  });
+
+  it('D-7：炮 209（CheckCannon :51296 fx/72）/ 烟花 216（Check1x2 :43845 fy/40）/ 天塔柱 410（:38601 fx/36）', () => {
+    expect(styleDropVidOfFrames(209, 0, 0)).toBe(928);
+    expect(styleDropVidOfFrames(209, 216, 18)).toBe(3664);    // style3（4 宽,命中右列 fx=216+18 同档）
+    expect(styleDropVidOfFrames(209, 72, 0)).toBe(1337);
+    expect(styleDropVidOfFrames(216, 0, 80)).toBe(972);       // style2 蓝火箭
+    expect(styleDropVidOfFrames(216, 0, 120)).toBe(973);
+    expect(styleDropVidOfFrames(410, 108, 0)).toBe(3539);     // style3
+  });
+
+  it('D-7：宝石锁 440 锁体（Check3x3Wall :44917 fx/54）+ 伴生钥匙（gemLockKeyVid fy/54==1 行）', () => {
+    expect(styleDropVidOfFrames(440, 0, 0)).toBe(3644);
+    expect(styleDropVidOfFrames(440, 324, 0)).toBe(3650);
+    expect(gemLockKeyVid(0, 54)).toBe(1526);
+    expect(gemLockKeyVid(216, 54)).toBe(1522);                // style4→1522（:44927 case4）
+    expect(gemLockKeyVid(0, 0)).toBe(0);                      // 无钥匙变体行不掉钥匙
+  });
+
+  it('D-7：假容器 441/468（GetItemDrop_FakeChests :42234 fx/36）——0 表档=原版 -1 无掉落（哨兵 -1）', () => {
+    expect(styleDropVidOfFrames(441, 0, 0)).toBe(3665);
+    expect(styleDropVidOfFrames(441, 144, 18)).toBe(-1);      // style4 无掉落档
+    expect(styleDropVidOfFrames(441, 180, 0)).toBe(-1);       // style5 无掉落档
+    expect(styleDropVidOfFrames(441, 252, 0)).toBe(3668);     // style7（3668+s-7 档首档）
+    expect(styleDropVidOfFrames(468, 0, 0)).toBe(3886);
+    expect(styleDropVidOfFrames(468, 144, 0)).toBe(-1);       // style4 无掉落
+    expect(styleDropVidOfFrames(468, 36, 0)).toBe(3887);      // style1
+    expect(styleDropVidOfFrames(468, 72, 0)).toBe(3950);      // style2
+  });
+
+  it('模特 470（TEDisplayDoll.cs:317 fx/72）/ 盆栽树 547（:53806 fx/36）· 548（:53969 fx/54）', () => {
+    expect(styleDropVidOfFrames(470, 0, 0)).toBe(498);
+    expect(styleDropVidOfFrames(470, 72, 18)).toBe(1989);     // Womannequin（placeStyle2→fx=72）
+    expect(styleDropVidOfFrames(547, 144, 0)).toBe(4434);     // style4
+    expect(styleDropVidOfFrames(548, 378, 0)).toBe(4902);     // style7（≥7 段 4902+s-7）
+    expect(styleDropVidOfFrames(548, 216, 0)).toBe(4439);     // style4
+  });
+
+  it('瓶装魂 572（Check1x2Top :47214 fy/36）/ 圣物底座 617（Check3x4 :50594 fx/54,27→5110）', () => {
+    expect(styleDropVidOfFrames(572, 0, 108)).toBe(4698);     // style3
+    expect(styleDropVidOfFrames(617, 0, 0)).toBe(4924);
+    expect(styleDropVidOfFrames(617, 1458, 0)).toBe(5110);    // style27（fx=27*54）
+    expect(styleDropVidOfFrames(617, 108, 0)).toBe(4926);     // style2
+  });
+
+  it('仿制祭坛 695（Check3x2 :49892 fx/54）/ 仿制暗影珠 696（CheckOrb :54696 fx/36）', () => {
+    expect(styleDropVidOfFrames(695, 0, 0)).toBe(5467);
+    expect(styleDropVidOfFrames(695, 54, 18)).toBe(5468);
+    expect(styleDropVidOfFrames(696, 0, 0)).toBe(5469);
+    expect(styleDropVidOfFrames(696, 36, 18)).toBe(5470);
+  });
+
+  it('宝石火花块 255-268（KillTile :65433 on/off 两态同掉 1970+gem,1×1 无 style 档）', () => {
+    expect(styleDropVidOfFrames(255, 0, 0)).toBe(1970);
+    expect(styleDropVidOfFrames(261, 0, 0)).toBe(1976);
+    expect(styleDropVidOfFrames(262, 0, 0)).toBe(1970);
+    expect(styleDropVidOfFrames(268, 0, 0)).toBe(1976);
+  });
+
+  it('放置基 216/572 竖排改对（Place1x2 cs:47055 fy=style*40 / Place1x2Top cs:47084 fy=style*36）roundtrip', () => {
+    for (let s = 0; s < 4; s++) {
+      const [fx1, fy1] = framedCellFrame(216, 1, s, 0, 1);
+      expect(furnitureStyleBase(216, s, 1)).toEqual([0, s * 40]);
+      expect(styleFromFrame[216]!(fx1, fy1)).toBe(s);
+      const [fx2, fy2] = framedCellFrame(572, 1, s, 0, 1);
+      expect(furnitureStyleBase(572, s, 1)).toEqual([0, s * 36]);
+      expect(styleFromFrame[572]!(fx2, fy2)).toBe(s);
+    }
+    // 画族放置基（既有 case）与掉落反推互为反函数
+    for (const s of [0, 22, 40, 76, 100]) {
+      const [fx, fy] = framedCellFrame(240, 3, s, 1, 2);
+      expect(styleFromFrame[240]!(fx, fy)).toBe(s);
+    }
+    for (const s of [0, 28, 74]) {
+      const [fx, fy] = framedCellFrame(242, 6, s, 3, 2);
+      expect(styleFromFrame[242]!(fx, fy)).toBe(s);
+    }
   });
 });
 
@@ -307,6 +423,246 @@ describe('breakTile 按帧掉真物品（object 分支 + 1×1 分支 + 门）', 
     g.breakTile(10, 10, false);
     expect(drops).toEqual([]);
     expect(w.store.get(10, 10)).toBe(0);
+  });
+
+  // ---- S2/D-7 批（2026-08-23）：新家族 breakTile 端到端 ----
+  it('S2：画 3×3 240 style40（fx=216,fy=54）挖掉 → vi_1962（Check3x3Wall :44751,曾掉 place_v_）', () => {
+    const w = new World(40, 40, 7, 'sdr');
+    const drops: Drop[] = [];
+    const g = breakShell(w, drops);
+    const t = keyOf('v_240_wall_hangings_3x3');
+    const fx = 4 * 54, fy = 54;                     // style40 = col4+row1*36
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, t, fx + dx * 18, fy + dy * 18);
+    }
+    g.breakTile(11, 11, false);
+    expect(drops).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[1962], n: 1 }]);
+    expect(w.store.get(10, 10)).toBe(0);
+  });
+
+  it('S2：营火 215 style8（fx=432）挖掉 → vi_4689（GetCampfireItemDrop :50481,曾掉 place_v_）', () => {
+    const w = new World(40, 40, 7, 'sdr');
+    const drops: Drop[] = [];
+    const g = breakShell(w, drops);
+    const t = keyOf('v_215_campfires');
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, t, 432 + dx * 18, dy * 18);
+    }
+    g.breakTile(11, 10, false);
+    expect(drops).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[4689], n: 1 }]);
+  });
+
+  it('S2：宝石火花块 255/262（1×1）挖掉 → vi_1970（KillTile :65433 on/off 两态同档,曾掉 place_v_）', () => {
+    const w = new World(40, 40, 7, 'sdr');
+    const drops: Drop[] = [];
+    const g = breakShell(w, drops);
+    w.store.setTileSilent(10, 10, keyOf('v_255_amethystgemsparkoff'), 0, 0);
+    g.breakTile(10, 10, false);
+    expect(drops).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[1970], n: 1 }]);
+    w.store.setTileSilent(12, 10, keyOf('v_262_amethystgemspark'), 0, 0);
+    g.breakTile(12, 10, false);
+    expect(drops.length).toBe(2);   // on/off 两态同掉 1970（drops 累计两件）
+    expect(drops[1].key).toBe(VANILLA_ITEM_KEY_BY_ID[1970]);
+  });
+
+  it('D-7：宝石锁 440 style2 带钥匙行（fx=108,fy=54）挖掉 → vi_3646+vi_1525 两件（Check3x3Wall :44917 num7/num8）', () => {
+    const w = new World(40, 40, 7, 'sdr');
+    const drops: Drop[] = [];
+    const g = breakShell(w, drops);
+    const t = keyOf('v_440_gemlocks');
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, t, 108 + dx * 18, 54 + dy * 18);
+    }
+    g.breakTile(11, 11, false);
+    expect(drops.map((d) => d.key).sort()).toEqual(
+      [VANILLA_ITEM_KEY_BY_ID[3646], VANILLA_ITEM_KEY_BY_ID[1525]].sort());
+    // 无钥匙变体行（fy=0）只掉锁体
+    const drops2: Drop[] = [];
+    const w2 = new World(40, 40, 7, 'sdr');
+    const g2 = breakShell(w2, drops2);
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) {
+      w2.store.setTileSilent(10 + dx, 10 + dy, t, 108 + dx * 18, dy * 18);
+    }
+    g2.breakTile(11, 11, false);
+    expect(drops2).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[3646], n: 1 }]);
+  });
+
+  it('D-7：假容器 441 style4（fx=144）挖掉 → 无掉落（GetItemDrop_FakeChests -1 档哨兵,曾掉 place_v_）', () => {
+    const w = new World(40, 40, 7, 'sdr');
+    const drops: Drop[] = [];
+    const g = breakShell(w, drops);
+    const t = keyOf('v_441_fakecontainers');
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, t, 144 + dx * 18, dy * 18);
+    }
+    g.breakTile(10, 10, false);
+    expect(drops).toEqual([]);
+    expect(w.store.get(10, 10)).toBe(0);
+    // style0 → 3665 真物品
+    const drops2: Drop[] = [];
+    const w2 = new World(40, 40, 7, 'sdr');
+    const g2 = breakShell(w2, drops2);
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+      w2.store.setTileSilent(10 + dx, 10 + dy, t, dx * 18, dy * 18);
+    }
+    g2.breakTile(10, 10, false);
+    expect(drops2).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[3665], n: 1 }]);
+  });
+
+  it('D-7：炮 209 style3（fx=216）挖掉 → vi_3664（CheckCannon :51296,曾掉 place_v_）', () => {
+    const w = new World(40, 40, 7, 'sdr');
+    const drops: Drop[] = [];
+    const g = breakShell(w, drops);
+    const t = keyOf('v_209_cannon');
+    for (let dx = 0; dx < 4; dx++) for (let dy = 0; dy < 3; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, t, 216 + dx * 18, dy * 18);
+    }
+    g.breakTile(12, 11, false);   // 右下格命中（帧取命中格反推,fx/72 档不受列内偏移影响）
+    expect(drops).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[3664], n: 1 }]);
+  });
+});
+
+// ============ C2. 审计 E 批（2026-08-23）：22 项 vid + 129/50/51 三缺口 ============
+/** E 批 harness：breakShell 之上加「最近一次掉落缓冲 + 可选 Math.random 定值」——
+ *  rand 缺省 1=不 mock（自然掷）,传值则 mock 并在 breakTile 后还原 */
+let eDrops: Drop[] = [];
+function breakE(w: World, rand?: number) {
+  eDrops = [];
+  const g = breakShell(w, eDrops);
+  const spy = rand === undefined ? null : vi.spyOn(Math, 'random').mockReturnValue(rand);
+  return {
+    breakTile(x: number, y: number, byPlayer = false) {
+      try { g.breakTile(x, y, byPlayer); } finally { spy?.mockRestore(); }
+    },
+  };
+}
+const dropsOf = (_w?: World): Drop[] => eDrops;
+
+describe('审计 E 批：单档 vid 直掉 + 帧分档 + 蛛网/书/水晶碎晶（docs/audit/tile-audit-2026-08-23.md 分区 E）', () => {
+  it('数据层帧直读三支：书 50 / 水晶碎晶 129 / 熔炉 133', () => {
+    expect(styleDropVidOfFrames(50, 90, 0)).toBe(165);    // 水书伪装帧 → Water Bolt
+    expect(styleDropVidOfFrames(50, 0, 0)).toBe(149);     // 其余 → Book
+    expect(styleDropVidOfFrames(129, 0, 0)).toBe(502);    // 常规晶簇 → Crystal Shard
+    expect(styleDropVidOfFrames(129, 324, 0)).toBe(4988); // 大晶簇带 → Gelatin Crystal
+    expect(styleDropVidOfFrames(129, 342, 0)).toBe(4988);
+    expect(styleDropVidOfFrames(133, 0, 0)).toBe(524);    // 精金熔炉
+    expect(styleDropVidOfFrames(133, 54, 0)).toBe(1221);  // 钛金熔炉（fx≥54）
+    expect(styleDropVidOfFrames(133, 90, 18)).toBe(1221);
+  });
+
+  it('数据层表分档三族：碗 103（fx/36）/ 压板 135（fy/18 七档）/ 计时器 144（fx/18 五档）', () => {
+    expect(styleDropVid(103, 0)).toBe(356);
+    expect(styleDropVid(103, 1)).toBe(2235);
+    expect(styleDropVid(103, 2)).toBe(2242);
+    expect(styleDropVid(103, 3)).toBe(2243);
+    expect(styleDropVidOfFrames(103, 126, 0)).toBe(2243);   // 右列 fx=36s+18 同档
+    expect(styleDropVid(135, 0)).toBe(529);
+    expect(styleDropVid(135, 3)).toBe(543);
+    expect(styleDropVid(135, 6)).toBe(1151);
+    expect(styleDropVidOfFrames(135, 0, 108)).toBe(1151);
+    expect(styleDropVid(144, 0)).toBe(583);
+    expect(styleDropVid(144, 4)).toBe(4485);
+    expect(styleDropVidOfFrames(144, 72, 0)).toBe(4485);
+  });
+
+  it('pileDecoDropVid 段直查（Check2x1 case 185 :47180-47232）', () => {
+    expect(pileDecoDropVid(576)).toBe(71);   // 铜
+    expect(pileDecoDropVid(594)).toBe(71);   // 右列同段
+    expect(pileDecoDropVid(612)).toBe(72);   // 银
+    expect(pileDecoDropVid(648)).toBe(73);   // 金
+    expect(pileDecoDropVid(684)).toBe(181);  // 紫晶
+    expect(pileDecoDropVid(864)).toBe(182);  // 钻
+    expect(pileDecoDropVid(898)).toBe(182);
+    expect(pileDecoDropVid(900)).toBe(0);    // 段外无档
+    expect(pileDecoDropVid(0)).toBe(0);      // 苔藓小饰行
+  });
+
+  it('1×1 运行时：水晶碎晶 fx=0→502 / fx=324→4988；压板 fy=54→543；计时器 fx=72→4485', () => {
+    const w = new World(40, 40, 7, 'e-batch');
+    const shard = keyOf('v_129_crystal_shard');
+    w.store.setTileSilent(10, 10, shard, 0, 0);
+    breakE(w).breakTile(10, 10, false);
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[502]]);
+    w.store.setTileSilent(10, 10, shard, 324, 0);
+    breakE(w).breakTile(10, 10, false);
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[4988]]);
+
+    const plate = keyOf('v_135_pressure_plates');
+    w.store.setTileSilent(12, 10, plate, 0, 54);
+    breakE(w).breakTile(12, 10, false);
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[543]]);
+
+    const timer = keyOf('v_144_timers');
+    w.store.setTileSilent(14, 10, timer, 72, 0);
+    breakE(w).breakTile(14, 10, false);
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[4485]]);
+  });
+
+  it('书 50（fx=90 水书帧 → 165,fx=0 → 149）——特判自 object 死支移入共享表（审计 E ❌3）', () => {
+    const w = new World(40, 40, 7, 'e-book');
+    const book = keyOf('v_50_books');
+    w.store.setTileSilent(10, 10, book, 90, 0);
+    breakE(w).breakTile(10, 10, false);
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[165]]);
+    w.store.setTileSilent(10, 10, book, 0, 0);
+    breakE(w).breakTile(10, 10, false);
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[149]]);
+  });
+
+  it('蛛网 51：恒掉 150;蛛网墙 62 内 3/4 无掉落（KillTile 门 :63904,审计 E ❌2）', () => {
+    const w = new World(40, 40, 7, 'e-web');
+    const web = keyOf('v_51_cobweb');
+    // 墙外：恒掉
+    w.store.setTileSilent(10, 10, web, 0, 0);
+    breakE(w).breakTile(10, 10, false);
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[150]]);
+    // 墙 62 + 掷中 1/4（random=0 → Next(4)=0）→ 掉
+    w.store.setTileSilent(12, 10, web, 0, 0);
+    w.store.setWall(12, 10, 62);
+    breakE(w, 0).breakTile(12, 10, false);
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[150]]);
+    // 墙 62 + Next(4)!=0（random=0.75 → 3）→ 无掉落
+    w.store.setTileSilent(14, 10, web, 0, 0);
+    w.store.setWall(14, 10, 62);
+    breakE(w, 0.75).breakTile(14, 10, false);
+    expect(dropsOf(w)).toEqual([]);
+  });
+
+  it('object 分支：存钱罐 29→87 / 碗 103 style1→2235 / 熔炉 133 style1→1221', () => {
+    const w = new World(40, 40, 7, 'e-obj');
+    const pig = keyOf('v_29_piggy_bank');
+    for (let dx = 0; dx < 2; dx++) w.store.setTileSilent(10 + dx, 10, pig, dx * 18, 0);
+    breakE(w).breakTile(11, 10, false);   // 右列命中
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[87]]);
+
+    const bowl = keyOf('v_103_bowls');
+    for (let dx = 0; dx < 2; dx++) w.store.setTileSilent(10 + dx, 12, bowl, 36 + dx * 18, 0);
+    breakE(w).breakTile(10, 12, false);
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[2235]]);
+
+    const forge = keyOf('v_133_forges');
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 14 + dy, forge, 54 + dx * 18, dy * 18);
+    }
+    breakE(w).breakTile(12, 15, false);
+    expect(dropsOf(w).map((d) => d.key)).toEqual([VANILLA_ITEM_KEY_BY_ID[1221]]);
+  });
+
+  it('小堆饰 185：fy=18 铜段掷串（random=0.99 → 2 恒掷 + 2/3 门掷×2=4 条×99）/ 宝石段 ×3 / fy!=18 无掉落不兜底', () => {
+    const w = new World(40, 40, 7, 'e-pile');
+    const pile = keyOf('v_185_small_decos');
+    w.store.setTileSilent(10, 10, pile, 576, 18);
+    breakE(w, 0.99).breakTile(10, 10, false);
+    expect(dropsOf(w).length).toBe(4);   // 2 恒掷 + Next(3)!=0 两掷命中（0.99→Next=2）;1/2 以下门掷全未中
+    for (const d of dropsOf(w)) { expect(d.key).toBe(VANILLA_ITEM_KEY_BY_ID[71]); expect(d.n).toBe(99); }
+
+    w.store.setTileSilent(12, 10, pile, 684, 18);            // 紫晶段
+    breakE(w, 0.99).breakTile(12, 10, false);
+    expect(dropsOf(w)).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[181], n: 3 }]);   // Next(1,4)=3
+
+    w.store.setTileSilent(14, 10, pile, 0, 0);               // fy!=18 苔藓行
+    breakE(w).breakTile(14, 10, false);
+    expect(dropsOf(w)).toEqual([]);                          // 原版无掉落,压 place_v_ 兜底
   });
 });
 

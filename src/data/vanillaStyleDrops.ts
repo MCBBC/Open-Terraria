@@ -88,11 +88,167 @@ const Dressers: T = [334, 647, 648, 649, 918, 2386, 2387, 2388, 2389, 2390, 2391
 const Chests: T = [48, 306, 306, 328, 328, 343, 348, 625, 626, 627, 680, 681, 831, 838, 914, 952, 1142, 1298, 1528, 1529, 1530, 1531, 1532, 1528, 1529, 1530, 1531, 1532, 2230, 2249, 2250, 2526, 2544, 2559, 2574, 2612, 2612, 2613, 2613, 2614, 2614, 2615, 2616, 2617, 2618, 2619, 2620, 2748, 2814, 3180, 3125, 3181];
 const Chests_2: T = [3884, 3885, 3939, 3965, 3988, 4153, 4174, 4195, 4216, 4265, 4267, 4574, 4712, 4712, 5156, 5177, 5198, 5556, 5609, 5697, 5720, 5745, 5763, 5784, 5805, 5826, 5846, 5865, 5886, 5905, 5939, 5962, 5982, 6005, 6028, 6051, 6074, 6118];
 
-/** 门 10/11——GetDoorItem（WorldGen.cs:69257,DropDoorItem :69466 ← CheckDoorClosed
- *  :87159 关门/CheckDoorOpen :87253 开门）。style 反推分式：关门=fx/54*36+fy/54
- *  （:87159 段 num4）;开门=fy/54+fx/72*36（CheckDoorOpen :87093-87094——开态
- *  fx=72*列+(direction==-1?36:0),❌3 复核 2026-08-23：两式不可混用） */
-const Doors: T = [25, 650, 651, 652, 816, 817, 818, 819, 820, 837, 912, 0, 1137, 1138, 1139, 1140, 1411, 1412, 1413, 1458, 1709, 1710, 1711, 1712, 1793, 1815, 1924, 2044, 2265, 2528, 2561, 2576, 2815, 3129, 3131, 3130, 3888, 3941, 3967, 4155, 4176, 4197, 4218, 4307, 4415, 4576, 5158, 5179, 5200, 5558, 5611, 5699, 5722, 5747, 5765, 5786, 5807, 5828, 5867, 5907];
+/** 门 10/11——GetDoorItem（1456 :69257/1457 :69726,DropDoorItem 1456 :69466/1457
+ *  :69935 ← CheckDoorClosed :87159 关门/CheckDoorOpen :87253 开门）。style 反推
+ *  分式：关门=fx/54*36+fy/54（:87159 段 num4）;开门=fy/54+fx/72*36（CheckDoorOpen
+ *  :87093-87094——开态 fx=72*列+(direction==-1?36:0),❌3 复核 2026-08-23：两式不可混用）。
+ *  ★C-1（2026-08-23）：补 1.4.5 新门 9 档 style 60-68（5941 天鹫/5964 云/5984 暮色/
+ *  6007 馆员/6030 尖刺/6053 办公室/6076 禁忌/6098 水族/6120 巨石）——两版 GetDoorItem
+ *  case 0-68 逐档同值（1457 :69900-69926 ≡ 1456 :69400-69442）,旧转录漏抄尾 9 case */
+const Doors: T = [25, 650, 651, 652, 816, 817, 818, 819, 820, 837, 912, 0, 1137, 1138, 1139, 1140, 1411, 1412, 1413, 1458, 1709, 1710, 1711, 1712, 1793, 1815, 1924, 2044, 2265, 2528, 2561, 2576, 2815, 3129, 3131, 3130, 3888, 3941, 3967, 4155, 4176, 4197, 4218, 4307, 4415, 4576, 5158, 5179, 5200, 5558, 5611, 5699, 5722, 5747, 5765, 5786, 5807, 5828, 5867, 5907,
+  5941, 5964, 5984, 6007, 6030, 6053, 6076, 6098, 6120];   // style 60-68（1457 新门 9 件）
+
+// ===== S2 多 style 家族 + D-7（审计 docs/audit/tile-audit-2026-08-23.md S2 ❌×27 + D-7 ⚠️×7,
+// 2026-08-23 批）——1457 WorldGen.cs Check*/KillTile 逐 case 机械转录（行号=1457）。各族
+// 均在 KillTile 共享 no-drop 表（:66340-66650:209/215/216/240-246/410/440/441/468/470/
+// 547/548/572/617/695/696）→ 掉落全走 Check* 帧检;唯宝石火花块 255-268 有 KillTile 直掉
+// case（:65433-65448）。表内 0=原版 -1 档（该 style 无掉落,styleDropVidOfFrames 转哨兵 -1）。
+
+/** 画 3×3 240——Check3x3Wall case 240（WorldGen.cs:44690,style=num+num2*36 :44751,
+ *  num=fx/54、num2=fy/54）：0-17→1360+s / 22-25→1440+s-22 / 26-29→1496+s-26 /
+ *  30-32→1538+s-30 / 41-45→2114+s-41 / 46-53→2442+s-46 / 63-68→4626+s-63 /
+ *  76-91→5218+s-76 / 余显式档（101 档全收,越界回落 C# default 1360+s 档） */
+const Paintings3x3: T = [
+  1360, 1361, 1362, 1363, 1364, 1365, 1366, 1367, 1368, 1369, 1370, 1371, 1372, 1373, 1374, 1375, 1376, 1377, // style 0-17
+  1419, 1420, 1427, 1428,                                                   // style 18-21
+  1440, 1441, 1442, 1443,                                                   // style 22-25
+  1496, 1497, 1498, 1499,                                                   // style 26-29
+  1538, 1539, 1540, 1574, 1575, 1576,                                       // style 30-35
+  1855, 1856, 1960, 1961, 1962,                                             // style 36-40
+  2114, 2115, 2116, 2117, 2118,                                             // style 41-45
+  2442, 2443, 2444, 2445, 2446, 2447, 2448, 2449,                           // style 46-53
+  2489, 2589, 3357, 3358, 3359, 3595, 3867, 3866, 3868,                     // style 54-62
+  4626, 4627, 4628, 4629, 4630, 4631,                                       // style 63-68
+  4660, 4723, 4724, 4783, 4958, 5087, 5108,                                 // style 69-75
+  5218, 5219, 5220, 5221, 5222, 5223, 5224, 5225, 5226, 5227, 5228, 5229,   // style 76-87
+  5230, 5231, 5232, 5233, 5388, 5490,                                       // style 88-93
+  5527, 5528, 5529, 5632, 5631, 5633, 5929,                                 // style 94-100
+];
+
+/** 画 4×3 241——Check4x3Wall（WorldGen.cs:45284,:45335-45337）恒掉 1417（无 style 档） */
+const Paintings4x3: T = [1417];
+
+/** 画 6×4 242——Check6x4Wall case 242（WorldGen.cs:45377,style=27*(fx/108)+fy/72 :45399）:
+ *  0-5→1421+s / 6-12→1433+s-6 / 13-15→1500+s-13 / 17-21→1846+s-17 / 22-24→2281+s-22 /
+ *  27-29→2865+s-27 / 31-35→3055+s-31 / 37-42→4632+s-37 / 46-49→5121+s-46 /
+ *  50-61→5234+s-50 / 余显式档（75 档全收） */
+const Paintings6x4: T = [
+  1421, 1422, 1423, 1424, 1425, 1426,                                       // style 0-5
+  1433, 1434, 1435, 1436, 1437, 1438, 1439,                                 // style 6-12
+  1500, 1501, 1502, 1573,                                                   // style 13-16
+  1846, 1847, 1848, 1849, 1850,                                             // style 17-21
+  2281, 2282, 2283, 2495, 2497,                                             // style 22-26
+  2865, 2866, 2867, 2995,                                                   // style 27-30
+  3055, 3056, 3057, 3058, 3059, 3596,                                       // style 31-36
+  4632, 4633, 4634, 4635, 4636, 4637, 4658, 4725, 5085,                     // style 37-45
+  5121, 5122, 5123, 5124,                                                   // style 46-49
+  5234, 5235, 5236, 5237, 5238, 5239, 5240, 5241, 5242, 5243, 5244, 5245,   // style 50-61
+  5274, 5308, 5310, 5389, 5483, 5486, 5487, 5489, 5491, 5531, 5635, 5630, 5636, // style 62-74
+];
+
+/** 画 2×3 245——Check2x3Wall case 245（WorldGen.cs:44997,style=fx/36 :45013 段 num）:
+ *  0-4→1474+s / 15-18 同掉 5247 / 19-28→5248+s-19 / 余显式档（32 档全收） */
+const Paintings2x3: T = [
+  1474, 1475, 1476, 1477, 1478, 1495, 1577, 4638, 4639, 4659, 4726, 4727, 4728, 5086, 5246, // style 0-14
+  5247, 5247, 5247, 5247,                                                   // style 15-18（C# 15-18 同档）
+  5248, 5249, 5250, 5251, 5252, 5253, 5254, 5255, 5256, 5257,               // style 19-28
+  5488, 5530, 5634,                                                         // style 29-31
+];
+
+/** 画 3×2 246——Check3x2Wall case 246（WorldGen.cs:45154,style=fy/36 :45170 段 num）:
+ *  0-15→1479+s / 21-36→5258+s-21 / 余显式档（37 档全收） */
+const Paintings3x2: T = [
+  1479, 1480, 1481, 1482, 1483, 1484, 1485, 1486, 1487, 1488, 1489, 1490, 1491, 1492, 1493, 1494, // style 0-15
+  1541, 1542, 1908, 4661, 4729,                                             // style 16-20
+  5258, 5259, 5260, 5261, 5262, 5263, 5264, 5265, 5266, 5267, 5268, 5269, 5270, 5271, 5272, 5273, // style 21-36
+];
+
+/** 营火 215——GetCampfireItemDrop（WorldGen.cs:50481-50516;KillTile case 215 :64497
+ *  fx/54 + Check3x2 case 215 :49995 同函数）：0→966 / 1-5→3046+s-1 / 6→3723 / 7→3724 /
+ *  8-13→4689+s-8 / 14→5299 / 15→5357（16 档全收,越界回落 default 966） */
+const Campfires: T = [
+  966,
+  3046, 3047, 3048, 3049, 3050,                                             // style 1-5
+  3723, 3724,                                                               // style 6-7
+  4689, 4690, 4691, 4692, 4693, 4694,                                       // style 8-13
+  5299, 5357,                                                               // style 14-15
+];
+
+/** 炮 209——CheckCannon（WorldGen.cs:51232,style=num2=fx/72 :51239-51243 段;:51296-51313）:
+ *  0→928 / 1→1337 / 2→3369 / 3-4→3664（5 档,越界回落 default 928） */
+const Cannons: T = [928, 1337, 3369, 3664, 3664];
+
+/** 烟花火箭 216——Check1x2 case 216（WorldGen.cs:43728,:43845-43847 970+style,
+ *  style=num3=fy/40 :43744-43748 段;Place1x2 :47055 `frameY=style*40` 同步）4 档 */
+const FireworksBoxes: T = [970, 971, 972, 973];
+
+/** 天塔柱 410——Check2xX（WorldGen.cs:38376,:38601-38602 3536+frameX/36）4 档
+ *  （def key 'lunarmonolith' 名不副实:410=四柱天塔柱共用 tile,掉落逐柱区分） */
+const LunarMonoliths: T = [3536, 3537, 3538, 3539];
+
+/** 宝石锁 440——Check3x3Wall case 440（WorldGen.cs:44690,style=fx/54 :44745 段 num;
+ *  锁体 :44917-44935 num7=3644-3650 逐宝石档） */
+const GemLocks: T = [3644, 3645, 3646, 3647, 3648, 3649, 3650];
+
+/** 宝石锁伴生钥匙档——同 case num8 表（:44919-44933）,仅 fy/54==1（带钥匙变体行）第二件
+ *  掉落;消费=gemLockKeyVid（Game.breakTile object 分支/失撑链双接） */
+const GemLockKeys: T = [1526, 1524, 1525, 1523, 1522, 1527, 3643];
+
+/** 假容器 441——Check2x2Style case 441（WorldGen.cs:52753,:52869-52876）→
+ *  GetItemDrop_FakeChests(style,false)（:42234-42477 else 支）：0→3665 / 1→3666 /
+ *  3→3667 / 7-22→3668+s-7 / 28-35→3684+s-28 / 37→3692 / 39→3693 / 41-51→3694+s-41;
+ *  ★2/4/5/6/23-27/36/38/40→-1（表内记 0=无掉落,哨兵 -1 压 place_ 兜底） */
+const FakeChests: T = [
+  3665, 3666, 0, 3667, 0, 0, 0,                                             // style 0-6（2/4/5/6 无掉落）
+  3668, 3669, 3670, 3671, 3672, 3673, 3674, 3675, 3676, 3677, 3678, 3679,   // style 7-22
+  3680, 3681, 3682, 3683, 0, 0, 0, 0, 0,                                    // style 23-27（23-27 无掉落）
+  3684, 3685, 3686, 3687, 3688, 3689, 3690, 3691, 0, 3692, 0, 3693, 0,      // style 28-40（36/38/40 无掉落）
+  3694, 3695, 3696, 3697, 3698, 3699, 3700, 3701, 3702, 3703, 3704,         // style 41-51
+];
+
+/** 假容器二类 468——同函数 secondType 支（:52877-52884 → :42234 if 支）：0→3886 /
+ *  1→3887 / 2→3950 / 3→3976 / 5→4164 / 6→4185 / 7→4206 / 8→4227 / 9→4266 / 10→4268 /
+ *  11→4585 / 12→4713 / 14→5167 / 15→5188 / 16→5209 / 17→5567 / 18→5620 / 19→5708 /
+ *  20→5731 / 21→5754 / 22→5776 / 23→5797 / 24→5818 / 25→5839 / 26→5857 / 27→5878 /
+ *  28→5897 / 29→5918 / 30→5952 / 31→5974 / 32→5995 / 33→6018 / 34→6041 / 35→6064 /
+ *  36→6087 / 37→6131;★4/13→-1（表内记 0=无掉落） */
+const FakeChests2: T = [
+  3886, 3887, 3950, 3976, 0, 4164, 4185, 4206, 4227, 4266, 4268, 4585, 4713, // style 0-12（4 无掉落）
+  0, 5167, 5188, 5209, 5567, 5620, 5708, 5731, 5754, 5776, 5797, 5818,      // style 13-24（13 无掉落）
+  5839, 5857, 5878, 5897, 5918, 5952, 5974, 5995, 6018, 6041, 6064, 6087, 6131, // style 25-37
+];
+
+/** 模特 470——TEDisplayDoll.Framing_CheckTile（TEDisplayDoll.cs:285,:317-324
+ *  frameX/72!=1→498 / ==1→1989;Womannequin Item.cs:21292 placeStyle=2→fx=72） */
+const Mannequins: T = [498, 1989];
+
+/** 盆栽树 547——Check2x5 case 547（WorldGen.cs:53739,:53806-53809 4430+num3,
+ *  num3=fx/36 :53747-53752 段）5 档 */
+const PottedTrees: T = [4430, 4431, 4432, 4433, 4434];
+
+/** 盆栽树二组 548——Check3x6 case 548（WorldGen.cs:53904,:53969-53980）：num3=fx/54,
+ *  <7→4435+num3 / ≥7→4902+num3-7（9 档;≥7 段 C# 无上界,表收 9 档越界回落 4435） */
+const PottedTrees2: T = [4435, 4436, 4437, 4438, 4439, 4440, 4441, 4902, 4903];
+
+/** 瓶装魂 572——Check1x2Top case 572（WorldGen.cs:47109,:47214-47216 4695+num3,
+ *  num3=fy/36 :47114-47119 段;Place1x2Top :47084 `frameY=style*36` 同步）6 档 */
+const SoulsInBottles: T = [4695, 4696, 4697, 4698, 4699, 4700];
+
+/** 圣物底座 617——Check3x4 case 617（WorldGen.cs:50518,:50594-50604）：num3=fx/54
+ *  （:50530-50534 段;TileObjectData 617 Style3x4+Multiplier2 → fx=placeStyle*54）,
+ *  27→5110 / 其余→4924+num3（28 档全收） */
+const RelicBases: T = [
+  4924, 4925, 4926, 4927, 4928, 4929, 4930, 4931, 4932, 4933, 4934, 4935, 4936, 4937, // style 0-13
+  4938, 4939, 4940, 4941, 4942, 4943, 4944, 4945, 4946, 4947, 4948, 4949, 4950, 5110, // style 14-27
+];
+
+/** 仿制恶魔祭坛 695——Check3x2 case 695（WorldGen.cs:49617,:49892-49895）:
+ *  num6==0→5467 / 其余→5468（num6=fx/54 :49634-49640 段） */
+const ReplicaAltars: T = [5467, 5468];
+
+/** 仿制暗影珠 696——CheckOrb case 696（WorldGen.cs:54634,:54696-54698）:
+ *  frameX<36→5469 / ≥36→5470（:54642-54646 flag） */
+const ReplicaOrbs: T = [5469, 5470];
 
 
 /** 墓碑 85——CheckSign case 85（WorldGen.cs:43737-43744）：0→321 / 1-5→1173+st-1 /
@@ -103,6 +259,49 @@ const Tombstones: T = [321, 1173, 1174, 1175, 1176, 1177, 3229, 3230, 3231, 3232
 /** 汤锅 96——Check2x2Style case 96（WorldGen.cs:52430-52440）：0→345 / 1→1791;
  *  style=fx/36（:52334-52338 num4）。KillTile 96 共享 no-drop（:65834） */
 const CookingPots: T = [345, 1791];
+
+/** 火把 4——KillTile_GetItemDrops case 4（WorldGen.cs:65106-65164）:
+ *  style=frameY/22 → 显式档 {0=普通 8 / 8=咒火 523 / 9=冰雪 974 / 10=1245 / 11=灵液
+ *  1333 / 12=2274 / 13=骨 3004 / 14=3045 / 15=3114 / 16=沙漠 4383 / 17=珊瑚 4384 /
+ *  18=腐化 4385 / 19=猩红 4386 / 20=神圣 4387 / 21=丛林 4388 / 22=蘑菇 5293 /
+ *  23=微光 5353} / default（彩炬 style1-7）=426+style（427-433）。
+ *  ★D-3：破坏/失撑按档还炬——曾恒掉普通火把 8（咒火炬掉回火把=刷炬漏洞） */
+const TORCH_EXPLICIT: Record<number, number> = {
+  0: 8, 8: 523, 9: 974, 10: 1245, 11: 1333, 12: 2274, 13: 3004, 14: 3045, 15: 3114,
+  16: 4383, 17: 4384, 18: 4385, 19: 4386, 20: 4387, 21: 4388, 22: 5293, 23: 5353,
+};
+
+/** 火把 style → 原版物品 vid（default=彩炬 426+style 档,与 C# default 同构） */
+export function torchDropVid(style: number): number {
+  return TORCH_EXPLICIT[style] ?? 426 + style;
+}
+
+/** 逻辑件族 4 件（D-6 直掉档,1456≡1457）:
+ *  逻辑灯 419——case 419（:65348-65361）fx/18 → 0=3602 熄 / 1=3618 亮 / 2=3663 故障
+ *  逻辑门 420——case 420（:65380-65403）fy/18 → 3603-3608 六门
+ *  逻辑感应器 423——case 423（:65490-65510）fy/18 → 3613/3614/3615/3726-3729 七档
+ *  测重板 428——case 428（:65362-65378）fy/18 → 0=3630 橙 / 1=3632 青 / 2=3631 紫 / 3=3626 粉
+ *  （越界 style 原版=dropItem 保持初值 0 不掉;帧域内不可达,repo pick 回落 t[0] 系
+ *   C-4 备案口径） */
+const LogicLamp: T = [3602, 3618, 3663];
+const LogicGates: T = [3603, 3604, 3605, 3606, 3607, 3608];
+const LogicSensors: T = [3613, 3614, 3615, 3726, 3727, 3728, 3729];
+const WeightedPlates: T = [3630, 3632, 3631, 3626];
+
+/** 碗 103——Check2x1 case 103（WorldGen.cs:47260-47276）：0→356 木碗 / 1→2235 朝代碗 /
+ *  2→2242 精致餐具 / 3→2243 玻璃碗;style=num3=frameX/36（Check2x1 :47003 num2>>1,
+ *  右列 fx=36s+18 同档）。KillTile 103 共享 no-drop（:65838）;伴 Sound13（:47274,仓内
+ *  掉落音统一走 killTileBreakSound,不单放）。审计 E ❌9（2026-08-23 批） */
+const Bowls: T = [356, 2235, 2242, 2243];
+
+/** 压板 135——KillTile case 135（WorldGen.cs:65620-65645）：fy/18 七档
+ *  0→529 红 / 1→541 绿 / 2→542 灰 / 3→543 棕 / 4→852 蓝 / 5→853 黄 / 6→1151 丛林蜥。
+ *  审计 E ❌7（2026-08-23 批） */
+const PressurePlates: T = [529, 541, 542, 543, 852, 853, 1151];
+
+/** 计时器 144——KillTile case 144（WorldGen.cs:65646-65658）：fx 0/18/36/54/72 →
+ *  583 1秒 / 584 3秒 / 585 5秒 / 4484 0.5秒 / 4485 0.25秒。审计 E ❌8（2026-08-23 批） */
+const Timers: T = [583, 584, 585, 4484, 4485];
 
 /** 矿石条 239——KillTile_GetItemDrops case 239（WorldGen.cs:65166-65225）:
  *  逐档 if-链 23 档;style=fx/18 */
@@ -128,6 +327,7 @@ const BONE_BLOCK = 154;
  *  ★与 FurnitureStyle.furnitureStyleBase 的 style→帧 互为反函数（100 烛台/172 水槽
  *  的放置基已按原版 Place2x2 cs:51436-51446 竖排改对,见 FurnitureStyle.ts） */
 export const styleFromFrame: Record<number, (fx: number, fy: number) => number> = {
+  4: (_fx, fy) => Math.floor(fy / 22),                                // 火把（KillTile case 4 :65107 num=frameY/22）
   13: (fx) => Math.floor(fx / 18),
   14: (fx) => Math.floor(fx / 54),
   15: (_fx, fy) => Math.floor(fy / 40),
@@ -145,15 +345,41 @@ export const styleFromFrame: Record<number, (fx: number, fy: number) => number> 
   90: (_fx, fy) => Math.floor(fy / 36),
   93: (_fx, fy) => Math.floor(fy / 54),
   96: (fx) => Math.floor(fx / 36),
+  103: (fx) => Math.floor(fx / 36),
+  135: (_fx, fy) => Math.floor(fy / 18),
+  144: (fx) => Math.floor(fx / 18),
   100: (_fx, fy) => Math.floor(fy / 36),
   101: (fx) => Math.floor(fx / 54),
   104: (fx) => Math.floor(fx / 36),
   172: (_fx, fy) => Math.floor(fy / 38),
+  209: (fx) => Math.floor(fx / 72),                                   // 炮（CheckCannon :51239 num2）
+  215: (fx) => Math.floor(fx / 54),                                   // 营火（KillTile :64499/Check3x2 :49995）
+  216: (_fx, fy) => Math.floor(fy / 40),                              // 烟花火箭（Check1x2 :43744 num3）
+  240: (fx, fy) => Math.floor(fx / 54) + Math.floor(fy / 54) * 36,    // 画 3×3（Check3x3Wall :44751）
+  241: () => 0,                                                       // 画 4×3（Check4x3Wall :45335 恒掉 1417,无 style 档）
+  242: (fx, fy) => Math.floor(fx / 108) * 27 + Math.floor(fy / 72),   // 画 6×4（Check6x4Wall :45399）
+  245: (fx) => Math.floor(fx / 36),                                   // 画 2×3（Check2x3Wall :45013 num）
+  246: (_fx, fy) => Math.floor(fy / 36),                              // 画 3×2（Check3x2Wall :45170 num）
   239: (fx) => Math.floor(fx / 18),
+  410: (fx) => Math.floor(fx / 36),                                   // 天塔柱（Check2xX :38601 num13）
+  419: (fx) => Math.floor(fx / 18),                                   // 逻辑灯（case 419 :65349）
+  420: (_fx, fy) => Math.floor(fy / 18),                              // 逻辑门（case 420 :65381）
+  423: (_fx, fy) => Math.floor(fy / 18),                              // 逻辑感应器（case 423 :65492）
+  428: (_fx, fy) => Math.floor(fy / 18),                              // 测重板（case 428 :65363）
+  440: (fx) => Math.floor(fx / 54),                                   // 宝石锁（Check3x3Wall :44745 num）
+  441: (fx) => Math.floor(fx / 36),                                   // 假容器（Check2x2Style :52766 num4）
+  468: (fx) => Math.floor(fx / 36),                                   // 假容器二类（同上 :52880）
   467: (fx) => Math.floor(fx / 36),
   469: (fx) => Math.floor(fx / 54),
+  470: (fx) => Math.floor(fx / 72),                                   // 模特（TEDisplayDoll.cs:317）
   487: (fx) => Math.floor(fx / 72),
   497: (_fx, fy) => Math.floor(fy / 40),
+  547: (fx) => Math.floor(fx / 36),                                   // 盆栽树（Check2x5 :53747 num3）
+  548: (fx) => Math.floor(fx / 54),                                   // 盆栽树二组（Check3x6 :53914 num3）
+  572: (_fx, fy) => Math.floor(fy / 36),                              // 瓶装魂（Check1x2Top :47114 num3）
+  617: (fx) => Math.floor(fx / 54),                                   // 圣物底座（Check3x4 :50530 num3）
+  695: (fx) => Math.floor(fx / 54),                                   // 仿制祭坛（Check3x2 :49634 num6）
+  696: (fx) => Math.floor(fx / 36),                                   // 仿制暗影珠（CheckOrb :54642 flag）
 };
 
 const pick = (t: T, style: number): number => t[style] ?? t[0];
@@ -163,6 +389,7 @@ const pick = (t: T, style: number): number => t[style] ?? t[0];
  *  调用点 :58024 type==467、:49445 tables2） */
 export function styleDropVid(sheet: number, style: number): number {
   switch (sheet) {
+    case 4: return torchDropVid(style);
     case 13: return pick(Bottles, style);
     case 14: return pick(Tables, style);
     case 15: return pick(Chair, style);
@@ -180,13 +407,43 @@ export function styleDropVid(sheet: number, style: number): number {
     case 90: return pick(Bathtubs, style);
     case 93: return pick(Lamps, style);
     case 96: return pick(CookingPots, style);
+    case 103: return pick(Bowls, style);
+    case 135: return pick(PressurePlates, style);
+    case 144: return pick(Timers, style);
     case 100: return pick(Candelabras, style);
     case 101: return pick(Bookcases, style);
     case 104: return pick(Clocks, style);
     case 172: return pick(Sinks, style);
     case 239: return pick(OreBars, style);
+    case 209: return pick(Cannons, style);
+    case 215: return pick(Campfires, style);
+    case 216: return pick(FireworksBoxes, style);
+    case 240: return pick(Paintings3x3, style);
+    case 241: return pick(Paintings4x3, style);
+    case 242: return pick(Paintings6x4, style);
+    case 245: return pick(Paintings2x3, style);
+    case 246: return pick(Paintings3x2, style);
+    case 255: case 256: case 257: case 258: case 259: case 260: case 261:
+      return 1970 + sheet - 255;   // 宝石火花块 off（KillTile case 255-261 :65433-65441）
+    case 262: case 263: case 264: case 265: case 266: case 267: case 268:
+      return 1970 + sheet - 262;   // 宝石火花块 on（KillTile case 262-268 :65442-65448,同族同档）
     case 330: case 331: case 332: case 333: return CoinPiles[sheet] ?? 0;
     case 194: return BONE_BLOCK;
+    case 410: return pick(LunarMonoliths, style);
+    case 419: return pick(LogicLamp, style);
+    case 420: return pick(LogicGates, style);
+    case 423: return pick(LogicSensors, style);
+    case 428: return pick(WeightedPlates, style);
+    case 440: return pick(GemLocks, style);
+    case 441: return pick(FakeChests, style);
+    case 468: return pick(FakeChests2, style);
+    case 470: return pick(Mannequins, style);
+    case 547: return pick(PottedTrees, style);
+    case 548: return pick(PottedTrees2, style);
+    case 572: return pick(SoulsInBottles, style);
+    case 617: return pick(RelicBases, style);
+    case 695: return pick(ReplicaAltars, style);
+    case 696: return pick(ReplicaOrbs, style);
     case 467: return pick(Chests_2, style);
     case 469: return pick(Tables_2, style);
     case 487: return pick(PicnicTables, style);
@@ -195,18 +452,58 @@ export function styleDropVid(sheet: number, style: number): number {
   }
 }
 
-/** sheet+破坏前帧 → 原版物品 vid（0=无）。149 节日灯/194 骨块为帧直读特例;
+/** sheet+破坏前帧 → 原版物品 vid（0=无;**-1=原版显式无掉落档**——441/468 假容器 -1 档,
+ *  消费侧须压 place_v_/def.drop 兜底,与 0「无表」区分）。
+ *  149 节日灯/194 骨块/255-268 宝石火花块为帧/型直读特例;
  *  10/11 门走 Doors 表——10 关门 style=fx/54*36+fy/54（CheckDoorClosed :87159 段）、
  *  11 开门 style=fy/54+fx/72*36（CheckDoorOpen :87093-87094）——调用侧按 tile 型传
  *  10/11（Game.breakTile 门路径,❌3：曾恒传 10,开门 fx=72s+36 带反推错档） */
 export function styleDropVidOfFrames(sheet: number, fx: number, fy: number): number {
   if (sheet === 149) return holidayLightVid(fx);
   if (sheet === 194) return BONE_BLOCK;
+  if (sheet >= 255 && sheet <= 268) {   // 宝石火花块（KillTile case 255-268 :65433-65448）——
+    // on/off 两态同掉 1970+gem（1×1 'auto' 帧块,无 style 档,纯按 tile 型直掉）
+    return 1970 + (sheet <= 261 ? sheet - 255 : sheet - 262);
+  }
+  if (sheet === 50) return fx === 90 ? 165 : 149;   // 书（KillTile case 50 :65709-65716）——水书伪装帧 fx==90 → Water Bolt 165,其余 Book 149。审计 E ❌3：特判自 Game object 支移入（v_50_books def 1×1 永远到不了 object 支,旧分支死码）
+  if (sheet === 129) return fx >= 324 ? 4988 : 502; // 水晶碎晶基座（KillTile case 129 :65031-65039）——大晶簇帧带 fx≥324 → Gelatin Crystal 4988（女王史莱姆召唤物,原版 hardUpdateWorld 生长 pass 播种,本仓仅 wld 导入档可达）,常规簇 → Crystal Shard 502。审计 E ❌4
+  if (sheet === 133) return fx >= 54 ? 1221 : 524;  // 熔炉二档（Check3x2 case 133 :49716-49724）——fx≥54（style≥1）→ Titanium Forge 1221,else Adamantite Forge 524。审计 E ❌10
   if (sheet === 10) return pick(Doors, Math.floor(fx / 54) * 36 + Math.floor(fy / 54));
   if (sheet === 11) return pick(Doors, Math.floor(fx / 72) * 36 + Math.floor(fy / 54));
   const der = styleFromFrame[sheet];
   if (!der) return 0;
-  return styleDropVid(sheet, der(fx, fy));
+  const vid = styleDropVid(sheet, der(fx, fy));
+  if ((sheet === 441 || sheet === 468) && vid <= 0) return -1;   // 假容器 -1 档（表内 0）→ 哨兵
+  return vid;
+}
+
+/** 宝石锁 440 伴生钥匙档（Check3x3Wall :44919-44933 num8,`num8 != -1 && num2 == 1` 门）：
+ *  fy/54==1（带钥匙变体行）→ 按锁体 style（fx/54）掉对应钥匙 1522-1527/3643,否则 0。
+ *  消费=Game.breakTile object 分支 + checkFurnitureSupport 失撑链（第二件掉落,与锁体
+ *  styleDropVid 并行,非覆写） */
+export function gemLockKeyVid(fx: number, fy: number): number {
+  if (Math.floor(fy / 54) !== 1) return 0;
+  return GemLockKeys[Math.floor(fx / 54)] ?? 0;
+}
+
+/** 小堆饰 185 钱币/宝石段直查（Check2x1 case 185 :47180-47232,经 CheckPile :46940
+ *  只派发 frameY==18 行）：[576,610]铜 71 / [612,646]银 72 / [648,682]金 73 /
+ *  [684,718]紫晶 181 / [720,754]黄晶 180 / [756,790]蓝晶 177 / [792,826]翠晶 179 /
+ *  [828,862]红晶 178 / [864,898]钻 182;段外（苔藓等小饰行）无掉落（185 在共享
+ *  no-drop 表 :65844）。段界对 2 宽堆两列不变（左 36s / 右 36s+18 同段）。
+ *  掷串（铜堆 12 掷/银金堆各 3 掷/宝石 ×Next(1,4)）在 Game.spawnPileDecoDrops。
+ *  审计 E ❌11（2026-08-23 批） */
+export function pileDecoDropVid(fx: number): number {
+  if (fx < 576 || fx > 898) return 0;
+  if (fx <= 610) return 71;
+  if (fx <= 646) return 72;
+  if (fx <= 682) return 73;
+  if (fx <= 718) return 181;
+  if (fx <= 754) return 180;
+  if (fx <= 790) return 177;
+  if (fx <= 826) return 179;
+  if (fx <= 862) return 178;
+  return 182;
 }
 
 /** 丛林钱币带 186（⚠️4 接档,Check3x2 case 186 WorldGen.cs:49726-49836）：frameX 段
@@ -303,4 +600,20 @@ export function echoResourceDropVid(sheet: number, fx: number, fy: number): numb
     default:
       return 0;
   }
+}
+
+// ===== 活板门/高门开态返还（D-8 接档 2026-08-23）=====
+// 原版 KillTile 无 386-389 直掉项（KillTile_GetItemDrops 无该 case）,掉落全走
+// TileFrame 的 CheckTrapDoor（1457 :52050,386/387 两态恒掉 type2=3239 关闭态物品,
+// :52094-52097 point.Y 分支为恒值死码）/ CheckTallGate（1457 :52111,388/389 两态
+// 恒掉 3240,:52158-52161 同死码）。关闭态 387/388 有真实放置物品（item 3239/3240
+// createTile=387/388）→ multiTileDropKey place_v_ 兜底已返还;开态 386/389 无放置
+// 物品 → 兜底落空零返还,此处按 sheet 补齐（消费=Game.breakTile object 分支 +
+// checkFurnitureSupport 失撑链,与 Echo 资源组同批两路接法） */
+
+/** 活板门/高门开态 sheet → 关闭态物品 vid（0=非本族,不覆写兜底） */
+export function openStateDoorDropVid(sheet: number): number {
+  if (sheet === 386) return 3239;   // 活板门开态 → Trap Door（CheckTrapDoor :52094）
+  if (sheet === 389) return 3240;   // 高门开态 → Tall Gate（CheckTallGate :52158）
+  return 0;
 }

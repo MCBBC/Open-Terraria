@@ -73,8 +73,7 @@ type EnemyLike = {
  *  的 StatusNPC 走 Projectile.Damage 同门——此处统一接齐） */
 function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
   kb: number, kdir: number, pen: number): void {
-  playEnemyHitSound(game, e as never);
-  e.hurt(dmg, kdir * kb, 0, game, pen, crit);
+  e.hurt(dmg, kdir * kb, 0, game, pen, crit);   // 音/飘值=StrikeNPC 单点
 }
 
 /** 尘 31 火花（NewDustDirect box 抖动 + DirectionTo 反溅——707/709 通用近似） */
@@ -230,7 +229,6 @@ export class SkyDragonSpin extends Entity {
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || this.dir;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen);
-      game.addDamageNumber(this.cx, this.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       // 浸剂三链（netMode/测试态 player 可为 null——null 门跳过，原版单机恒有主）
       const pl = game.player as unknown as { buffs?: { has: (b: never) => boolean }; equipStats?: { frostBurn: boolean; magmaStone: boolean } } | null;
       if (pl?.buffs) applyMeleeImbue(pl.buffs, e as unknown as Record<string, number>,
@@ -367,7 +365,6 @@ export class SkyDragonSwing extends Entity {
       const dmg = crit ? this.damage * 2 : this.damage;
       hurtEnemy(game, e, dmg, crit, this.knockback,
         Math.sign((e.x + e.w / 2) - this.cx) || this.owner.facing, this.armorPen);
-      game.addDamageNumber(this.cx, this.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
     }
     if (at <= 2) { this.dead = true; }               // :66643-66647（anim≤2 Kill/reuseDelay2）
   }
@@ -451,7 +448,6 @@ export class SkyDragonShot extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       hurtEnemy(game, e, dmg, crit, this.knockback, Math.sign(this.vx) || 1, this.armorPen);
-      game.addDamageNumber(this.cx, this.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       this.explode(game);                            // penetrate 1 → 命中即 Kill
       return;
     }
@@ -586,7 +582,6 @@ export class SkyDragonCircle extends Entity {
       const dmg = crit ? this.damage * 2 : this.damage;
       hurtEnemy(game, e, dmg, crit, this.knockback,
         Math.sign((e.x + e.w / 2) - this.cx0) || 1, this.armorPen);
-      game.addDamageNumber(this.cx0, this.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
     }
   }
 

@@ -328,6 +328,10 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     magiluminescence: boolean;
     /** 冰冻护盾族（1253/3997 :14348-14351）：半血挂 buff 62 IceBarrier（fixedUpdate 消费） */
     iceBarrierAcc: boolean;
+    /** 植物纤维绳索宝典 3068（Player.cordage :1016,UpdateEquips :14461-14463 装备置位）：
+     *  割藤 52/62/382 时 1/2 掉藤绳 2996（WorldGen.cs:65087-65092 GetPlayerForTile
+     *  .cordage 门）——D-4 效果端（物品 3068 已注册,效果链曾全仓未接） */
+    cordage: boolean;
     /** 玫瑰族 lavaRose（1323/908/4003/4004/5000）：岩浆伤 80-45/OnFire 420-210（:27384-27387） */
     lavaRose: boolean;
     /** 浮漂饰品弹型覆写（Player.overrideFishingBobber :1920；-1=无，986-993=5139-5146） */
@@ -1050,6 +1054,7 @@ export class Player extends Entity {
     let manaCostOffAcc = 0, toolboxRange = 0, accDmgMinion = 0;
     let mechShowWires = false, autoActuator = false, magiluminescence = false;
     let iceBarrierAcc = false, lavaRose = false;
+    let cordage = false;   // 植物纤维绳索宝典 3068（:14461-14463,割藤掉藤绳 2996 效果端）
     let divingHelm = false, merman = false;
     let arcticDivingGear = false, jellyfishGlow = false;
     // ---- 1457 新配饰行为旗（ApplyEquipFunctional case 6166-6189 :14596-14739）----
@@ -1132,6 +1137,7 @@ export class Player extends Entity {
       if (AGGRO_NEG.has(accVid)) aggroAcc -= 400;
       else if (AGGRO_POS.has(accVid)) aggroAcc += 400;
       if (accVid === 4404) canFloat = true;   // 水上漂靴（ApplyEquipFunctional :12842-12846）
+      if (accVid === 3068) cordage = true;   // 绳索宝典（UpdateEquips :14461-14463 currentItem.type==3068 → cordage=true）
       if (accVid === 4341 || accVid === 5126) stepStool = true;   // 折叠凳/造物之手（:14077-14080，Player 侧 SetStats 非物品字段）
       // 月亮石 900（:14871-14874）：夜/日食档才授天界石复合（太阳石 899 的白天门
       // :14868-14870 本仓未建模——899 恒开为既有偏差，审计 ✅ 行，登记不并）
@@ -1643,6 +1649,7 @@ export class Player extends Entity {
       manaCostOff: (manaFlower ? 0.08 : 0) + manaCostOffAcc,   // 耗魔加算折扣（:14040+:14561）
       toolboxRange, mechShowWires, autoActuator, magiluminescence,
       iceBarrierAcc, lavaRose,
+      cordage,
       overrideFishingBobber: bobberOverride,   // 浮漂饰品弹型覆写（:1920/-1=无）
       runAccMul: setRunAccMul, maxRunMul: setMaxRunMul, runSlowMul: setRunSlowMul,
       enduranceEq: setEndurance, solarSet,

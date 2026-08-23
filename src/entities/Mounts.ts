@@ -2082,9 +2082,8 @@ export class MountShot extends TownShot {
           hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
             pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
         if (e.dead || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
-        if (e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, true)) {
+        if (e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, true)) {   // 音/飘值=单点
           playEnemyHitSound(game, e);
-          game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');
         }
         this.dead = true;   // penetrate 1 近似
         return;
