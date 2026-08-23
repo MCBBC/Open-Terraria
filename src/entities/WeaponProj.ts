@@ -1912,9 +1912,7 @@ export class YoyoShotProj extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
-      playEnemyHitSound(game, e as Parameters<typeof playEnemyHitSound>[1]);
-      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit);
-      game.addDamageNumber(this.cx, this.cy - 8, dmg, crit, crit ? '#FFD040' : '#FF7060');
+      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit);   // 音/飘值=单点
       if (this.projId === 1134) break;                       // penetrate 1（:10643）
     }
   }
@@ -2947,6 +2945,11 @@ export class GrenadeProj extends Entity {
     }
     if (this.stickPending) return;                                        // 贴墙待爆：vel=0 静止
     // ---- 位移（无重力）+ 撞块（:18339-18371 响应表）----
+    // ★撞块采样全部用【新位置 nx/ny】——曾 Y 轴第二项用旧 x 右缘(this.x+w-1):
+    //   出生盒与邻格实心(像素方块夹缝)重叠时该项恒真 → 无论朝哪都判竖向撞块
+    //   → 贴墙 timeLeft=3 原地爆(2026-08-23 用户报"站在像素方块地形火箭任何
+    //   角度都在脚下爆")。原版先移动后按新盒检查(:18342 系),离墙方向第一子步
+    //   即脱离重叠正常飞出
     const lastVx = this.vx, lastVy = this.vy;
     let nx = this.x + this.vx;
     let ny = this.y + this.vy;
@@ -2959,7 +2962,7 @@ export class GrenadeProj extends Entity {
     // Kill 内种植/掉落，oldVelocity = 入撞前速度）
     if (this.projId === 1088 && this.bouncePlantCheck
       && (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, ny + this.h - 1)
-        || solidAt(this.x + this.w - 1, ny + this.h - 1))
+        || solidAt(nx + this.w - 1, ny + this.h - 1))
       && this.bouncePlantCheck(this.cx, this.cy)) {
       this.dead = true;
       this.destroy();
@@ -2974,7 +2977,7 @@ export class GrenadeProj extends Entity {
       }
       nx = this.x;
     }
-    if (solidAt(nx + this.w / 2, ny + this.h - 1) || solidAt(this.x + this.w - 1, ny + this.h - 1)) {
+    if (solidAt(nx + this.w / 2, ny + this.h - 1) || solidAt(nx + this.w - 1, ny + this.h - 1)) {
       if (GrenadeProj.FIRED_STICK.has(this.projId)) {
         this.vx = 0; this.vy = 0; this.stickPending = true; this.fuse = Math.min(this.fuse, 3);
       } else if (lastVy > 0.7) {
@@ -3638,10 +3641,8 @@ export class DaybreakFlare extends Entity {
       if (!(this.x < rx + rw && this.x + this.w > rx && this.y < ry + rh && this.y + this.h > ry)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e as never);
       e.hurt(dmg, (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit);
       applyProjStatus(this.projId, e as unknown as Record<string, number>);   // :10691-10693
-      game.addDamageNumber(this.x + this.w / 2, this.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       // ---- 附着（:12421-12428）----
       this.ai0 = 1;
       this.ai1 = e.id;

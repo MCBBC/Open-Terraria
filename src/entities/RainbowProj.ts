@@ -81,9 +81,7 @@ export class RainbowSegment extends Entity {
       segImmuneUntil.set(e.id, nowMs() + IMMUNE_MS);
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.x - e.x) * this.knockback, 0, game, this.armorPen, crit);
-      game.addDamageNumber(this.cx, this.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
     }
   }
 

@@ -468,3 +468,83 @@ describe('回声腔扫描（SceneMetrics.cs:545-549 → echoMonolith）', () => 
     expect(scene.echoMonolith).toBe(false);
   });
 });
+
+// ==================== 合成侧叠回：drawCoatGlowGrid（RV1 登记补锁） ====================
+// Renderer.ts:11499（:2909 光照合成后调用、fullbright 跳过）——烘焙半边
+// （ChunkCache glow 叠层生成）已有用例，本段锁【合成叠回】半边：
+// 有 glow 的 chunk 才 drawImage、无 glow 跳过、越界 chunk 剔除。
+import { Renderer } from '../src/render/Renderer';
+import { Camera } from '../src/render/Camera';
+
+describe('drawCoatGlowGrid 合成侧叠回（Renderer.ts:11499；RV1 登记补锁）', () => {
+  /** 记录型 ctx + 最小 this 桩，原型直调私有方法（accessory-unmodeled 同法） */
+  function runGrid(chunks: Map<string, { glow?: HTMLCanvasElement }>, fullbright = false) {
+    const draws: Array<{ img: unknown; dx: number; dy: number; dw: number; dh: number }> = [];
+    const calls: string[] = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k) => {
+        calls.push(String(k));
+        if (k === 'drawImage') {
+          // drawCoatGlowGrid 用 9 参形式 (img,0,0,S,S,dx,dy,dw,dh)
+          draws.push({ img: arguments0[0], dx: arguments0[5], dy: arguments0[6], dw: arguments0[7], dh: arguments0[8] });
+        }
+        return () => undefined;
+        let arguments0: unknown[] = [];
+      },
+    }) as CanvasRenderingContext2D;
+    // Proxy get 无法捕获实参——改用显式桩
+    const draws2: Array<{ img: unknown; dx: number; dy: number; dw: number; dh: number }> = [];
+    const ctx2 = {
+      save: () => {}, restore: () => {}, setTransform: () => {},
+      imageSmoothingEnabled: false,
+      drawImage: (img: unknown, _a: number, _b: number, _c: number, _d: number,
+        dx: number, dy: number, dw: number, dh: number) => {
+        draws2.push({ img, dx, dy, dw, dh });
+      },
+    } as unknown as CanvasRenderingContext2D;
+    const cam = new Camera();
+    cam.x = 8 * 16 * 16; cam.y = 8 * 16 * 16; cam.zoom = 1;   // 视口中心≈chunk(8,8)
+    const world = { w: 40 * 16, h: 40 * 16 };   // 方法内 cx*CHUNK(像素域)对比——桩须同域
+    // 桩 get：命中返回 Map 值、未命中返回 {}（模拟 ChunkCache 惰性烘焙恒有返回——
+    // 方法内 p.glow 直读,undefined 会炸;生产链 get 恒返 pair）
+    const stubGet = (cx: number, cy: number) => chunks.get(`${cx},${cy}`) ?? {};
+    const fakeThis = { ctx: ctx2, fullbright, chunks: { get: stubGet } };
+    (Renderer.prototype as unknown as Record<string, (...a: unknown[]) => void>)
+      .drawCoatGlowGrid.call(fakeThis, { get: stubGet } as never,
+        cam, world, 16 * 16 * 4, 16 * 16 * 4, 1);
+    return draws2;
+  }
+
+  it('有 glow 的 chunk 恰一次 9 参 drawImage（img=glow 画布、屏矩形=chunk 世界矩形-相机）', () => {
+    const glow = { width: 256, height: 256 } as HTMLCanvasElement;
+    const draws = runGrid(new Map([['8,8', { glow }]]));
+    expect(draws.length).toBe(1);
+    expect(draws[0].img).toBe(glow);
+    expect(draws[0].dw).toBe(256);   // CHUNK*ts=16*16
+    expect(draws[0].dh).toBe(256);
+  });
+
+  it('无 glow 的 chunk 跳过（零开销路径）;fullbright 时调用方门短路（:2909 if !fullbright）', () => {
+    const draws = runGrid(new Map([['8,8', {}]]));
+    expect(draws.length).toBe(0);
+    // fullbright 门在调用点（:2909）——本方法被调用即画；门语义由调用点 if 保证,
+    // 此处锁方法本体无 fullbright 分支（传什么画什么）
+    const draws2 = runGrid(new Map([['8,8', { glow: { width: 256, height: 256 } as HTMLCanvasElement }]]), true);
+    expect(draws2.length).toBe(1);   // 方法本体无门——门在调用方（结构锁）
+  });
+
+  it('越界 chunk（<0 或 ≥world.w/h）剔除；多 chunk 各画各的 glow', () => {
+    const glowA = { width: 256, height: 256 } as HTMLCanvasElement;
+    const glowB = { width: 256, height: 256 } as HTMLCanvasElement;
+    const draws = runGrid(new Map([
+      ['-1,8', { glow: glowA }],      // 越界：方法内 continue
+      ['40,8', { glow: glowA }],      // ≥world.w=40 越界
+      ['8,8', { glow: glowA }],
+      ['9,8', { glow: glowB }],
+    ]));
+    expect(draws.length).toBe(2);
+    expect(draws[0].img).toBe(glowA);
+    expect(draws[1].img).toBe(glowB);
+    expect(draws[1].dx).toBeGreaterThan(draws[0].dx);   // 右侧 chunk 屏 x 更大
+  });
+});

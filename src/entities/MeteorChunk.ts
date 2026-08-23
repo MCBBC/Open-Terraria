@@ -62,7 +62,6 @@ export class MeteorChunk extends Entity {
       const cd = this.hitCd.get(e.id) ?? 0;
       if (cd > 0) continue;
       this.hitCd.set(e.id, 20);
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.vx) * 5, 0, game);
     }
     hitCritters(this, game);

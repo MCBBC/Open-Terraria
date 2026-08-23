@@ -197,10 +197,7 @@ export class TownShot extends Entity {
       // friendly 弹 × friendly 目标 → Damage_PVE_Inner :11898 return（城镇自卫弹
       // 穿越睡渔夫 376 等友好 NPC 不误伤；城镇弹 type 恒非 318，无臭鸡蛋例外）
       if (e.dead || e.def?.friendly || !projOverlap(ex, ey, ER, ER, e)) continue;
-      if (e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, false)) {
-        playEnemyHitSound(game, e);
-        game.addDamageNumber(e.x, e.y, this.damage, false, '#FFD060');
-      }
+      e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, false);   // 音/飘值=单点
     }
   }
 
@@ -265,10 +262,7 @@ export class TownShot extends Entity {
         hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[]; friendly?: boolean } };
       // friendly 弹 × friendly 目标 → Damage_PVE_Inner :11898 return（同 kill669 段）
       if (e.dead || e.def?.friendly || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
-      if (e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, false)) {
-        playEnemyHitSound(game, e);
-        game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');
-      }
+      e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, false);   // 音/飘值=单点
       this.dead = true; // 穿透 1(城镇自卫弹均为 penetrate 1 或 -1 特化弹,近似单发)
       if (this.projId === 669) this.kill669(game);  // Kill() 爆炸(同敌免疫帧拦双吃)
       return;

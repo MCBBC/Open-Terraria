@@ -290,6 +290,108 @@ describe('S2/D-7 多 style 家族（画/营火/炮/烟花/天塔柱/宝石锁/�
   });
 });
 
+// ============ A3. 雕像 105 + 旗帜 91（审计遗留 ❌#5/#6,2026-08-23 1457 全量转录批） ============
+describe('雕像 105 + 旗帜 91（❌#5/#6 全量转录）', () => {
+  it('雕像 83 档长度断言（StatueStyleToItem :38311 实域 0..82,防转录截断）', () => {
+    expect(styleDropVid(105, 0)).toBe(360);
+    expect(styleDropVid(105, 82)).toBe(5319);   // 尾档（鸡尾鹦鹉,1.4.5 新）
+    expect(styleDropVid(105, 83)).toBe(360);    // 越界首档回落 t[0]（表恰 83 档,素材槽 83..164 空白）
+  });
+
+  it('雕像首/中/尾抽查 ≥8 档（StatueStyleToItem :38315-38369 逐 case）', () => {
+    expect(styleDropVid(105, 1)).toBe(52);      // case 1 天使（:38318）
+    expect(styleDropVid(105, 2)).toBe(438);     // default 首档 星星（:38369）
+    expect(styleDropVid(105, 20)).toBe(456);
+    expect(styleDropVid(105, 34)).toBe(470);    // 蘑菇（掉落物 createTile=349,原版语义照抄）
+    expect(styleDropVid(105, 42)).toBe(478);    // default 尾档 食人鱼
+    expect(styleDropVid(105, 43)).toBe(1152);   // 蜥蜴神像（:38321）
+    expect(styleDropVid(105, 50)).toBe(2672);   // 鲨鱼（:38342）
+    expect(styleDropVid(105, 51)).toBe(3651);   // 松鼠（:38345-38357）
+    expect(styleDropVid(105, 62)).toBe(3662);
+    expect(styleDropVid(105, 63)).toBe(3708);   // default 63-75（:38360）
+    expect(styleDropVid(105, 75)).toBe(3720);
+    expect(styleDropVid(105, 76)).toBe(4397);   // 猫头鹰（:38362）
+    expect(styleDropVid(105, 77)).toBe(4360);   // 海鸥（:38363）
+    expect(styleDropVid(105, 78)).toBe(4342);   // 蜻蜓（:38364）
+    expect(styleDropVid(105, 79)).toBe(4466);   // 乌龟（:38365）
+    expect(styleDropVid(105, 80)).toBe(5317);   // 金刚鹦鹉（:38366,1.4.5 新）
+  });
+
+  it('雕像帧反推（Check2xX :38542-38545 fx/36+(fy/54%3)*55,右列/中行同档）', () => {
+    expect(styleDropVidOfFrames(105, 0, 0)).toBe(360);
+    expect(styleDropVidOfFrames(105, 18, 0)).toBe(360);     // 右列 fx+18 同档
+    expect(styleDropVidOfFrames(105, 1224, 0)).toBe(470);   // style34=34*36
+    expect(styleDropVidOfFrames(105, 1836, 0)).toBe(3651);  // style51
+    expect(styleDropVidOfFrames(105, 972, 54)).toBe(5319);  // style82=27+55*1
+    expect(styleDropVidOfFrames(105, 972, 72)).toBe(5319);  // 中行 fy+18 同组
+    expect(styleDropVidOfFrames(105, 0, 108)).toBe(360);    // fy/54=2→槽110 越界（素材空白）回落 t[0]
+  });
+
+  it('旗帜 316 档长度断言（CheckBanner :46566-46567 实域 0..315,防转录截断）', () => {
+    expect(styleDropVid(91, 0)).toBe(337);
+    expect(styleDropVid(91, 315)).toBe(5673);   // 尾档 水弹宝箱怪旗
+    expect(styleDropVid(91, 316)).toBe(337);    // 越界首档回落 t[0]（表恰 316 档）
+  });
+
+  it('旗帜 22 段首尾抽查（CheckBanner :46568-46654 else-if 链,行号=1457）', () => {
+    const segs: Array<[number, number, number, number]> = [
+      [0, 3, 337, 340],        // else :46652（337+style）
+      [4, 6, 789, 791],        // :46648（785+style）
+      [7, 9, 845, 847],        // :46644（838+style）
+      [10, 15, 1451, 1456],    // :46636（1441+style）
+      [16, 21, 1464, 1469],    // :46640（1448+style,非死码:>=22 先截）
+      [22, 108, 1615, 1701],   // :46632（1593+style）
+      [109, 206, 2897, 2994],  // :46628（2788+style）
+      [207, 269, 3390, 3452],  // :46624（3183+style）
+      [270, 271, 3593, 3594],  // :46620（3323+style）
+      [272, 272, 3780, 3780],  // :46616（恒值）
+      [273, 277, 3789, 3793],  // :46612（3516+style）
+      [278, 287, 3837, 3846],  // :46608（3559+style）
+      [288, 293, 4541, 4546],  // :46604（4253+style）
+      [294, 294, 4602, 4602],  // :46600（恒值）
+      [295, 296, 4687, 4688],  // :46596（4392+style）
+      [297, 309, 4965, 4977],  // :46592（4668+style）
+      [310, 310, 5352, 5352],  // :46588
+      [311, 311, 5497, 5497],  // :46584
+      [312, 312, 5498, 5498],  // :46580
+      [313, 313, 5651, 5651],  // :46576
+      [314, 314, 5672, 5672],  // :46572
+      [315, 315, 5673, 5673],  // :46568
+    ];
+    for (const [a, b, va, vb] of segs) {
+      expect(styleDropVid(91, a), `旗帜 style ${a}`).toBe(va);
+      expect(styleDropVid(91, b), `旗帜 style ${b}`).toBe(vb);
+    }
+  });
+
+  it('旗帜帧反推（:46566-46567 fx/18+(fy/54)*111,三行同档）', () => {
+    expect(styleDropVidOfFrames(91, 0, 0)).toBe(337);
+    expect(styleDropVidOfFrames(91, 0, 18)).toBe(337);      // 中行
+    expect(styleDropVidOfFrames(91, 0, 36)).toBe(337);      // 底行
+    expect(styleDropVidOfFrames(91, 0, 54)).toBe(2899);     // style111=0+111*1→2788+111
+    expect(styleDropVidOfFrames(91, 1674, 108)).toBe(5673); // style315=93+111*2
+  });
+
+  it('全 83+316 档 vid 均有真实物品键（VANILLA_ITEM_KEY_BY_ID 全覆盖,掉落可实例化=验图）', () => {
+    let n = 0;
+    for (let s = 0; s <= 82; s++) {
+      const v = styleDropVid(105, s);
+      expect(v, `雕像 style ${s}`).toBeGreaterThan(0);
+      expect(VANILLA_ITEM_KEY_BY_ID[v], `雕像 style ${s} → vid ${v}`).toBeTruthy();
+      expect(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[v]], `vid ${v} 应有 def`).toBeDefined();
+      n++;
+    }
+    for (let s = 0; s <= 315; s++) {
+      const v = styleDropVid(91, s);
+      expect(v, `旗帜 style ${s}`).toBeGreaterThan(0);
+      expect(VANILLA_ITEM_KEY_BY_ID[v], `旗帜 style ${s} → vid ${v}`).toBeTruthy();
+      expect(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[v]], `vid ${v} 应有 def`).toBeDefined();
+      n++;
+    }
+    expect(n).toBe(83 + 316);
+  });
+});
+
 // ============ B. 帧反推 style（与 furnitureStyleBase 互为反函数） ============
 describe('styleFromFrame 反推（放置帧→style roundtrip）', () => {
   it('烛台 100 / 水槽 172 新竖排基（Place2x2 cs:51436 frameY=style*36|38）roundtrip', () => {

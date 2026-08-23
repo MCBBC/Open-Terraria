@@ -161,7 +161,7 @@ describe('1133 蜜蜂分泌物丛林可用门', () => {
     // switch 前的无条件 useSwing 已改为排除 1133（挥动移入 case 成功分支）。
     // ★邻近查找（2026-08-22）：行偏移锚被后续批在 useSwing 行与 switch 之间插注释
     // （UseSound Item92 段）移位——改为窗口内找 switch 行,语义不变
-    const swingLine = lineOf('if (pvid !== 1133) this.useSwing(heldDef);');
+    const swingLine = lineOf('if (pvid !== 1133 && pvid !== 3335) this.useSwing(heldDef);');
     const nearSwitch = LINES.slice(swingLine + 1, swingLine + 6).findIndex((l) => l.includes('switch (pvid) {'));
     expect(nearSwitch).toBeGreaterThanOrEqual(0);
     // case 成功分支内补挥动

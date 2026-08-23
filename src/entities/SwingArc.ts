@@ -112,9 +112,7 @@ export class SwingArc extends Entity {
       if (!(ex - bw / 2 < e.x + e.w && ex + bw / 2 > e.x && ey - bh / 2 < e.y + e.h && ey + bh / 2 > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, this.ai0 * 6.5, 0, game, this.armorPen, crit);
-      game.addDamageNumber(ex, ey, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       this.hitSet.add(e.id);
       // ★1457 无头骑士剑 997 命中召南瓜弹 321（Projectile.cs:13728-13732：门 =
       // (!immortal|flag9) && !SpawnedFromStatue && !CountsAsCritter——flag9 仅调试
@@ -350,9 +348,7 @@ export class TrueNightsEdgeSlash extends Entity {
         if (!(ex - reach / 2 < e.x + e.w && ex + reach / 2 > e.x && ey - 30 * this.scaleCur < e.y + e.h && ey + 30 * this.scaleCur > e.y)) continue;
         const crit = Math.random() < this.critChance;
         const dmg = crit ? this.damage * 2 : this.damage;
-        playEnemyHitSound(game, e);
         e.hurt(dmg, this.ai0 * 6.5, 0, game, this.armorPen, crit);
-        game.addDamageNumber(ex, ey, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
         this.hitCd.set(e.id, 5);
       }
     }
@@ -478,9 +474,7 @@ export class NightsEdgeFly extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit);
-      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       this.hitCd.set(e.id, 9999);
     }
   }
@@ -749,9 +743,7 @@ export class ZenithSword extends Entity {
       const crit = Math.random() < this.critChance;
       // Main.DamageVar ±15% 浮动（同挥击侧公式）
       const dmg = Math.max(1, Math.round(this.damage * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
-      playEnemyHitSound(game, e);
       e.hurt(dmg, this.spriteDir * this.knockback, 0, game, this.armorPen, crit);
-      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       this.hitCd.set(e.id, 7);
     }
   }
@@ -962,9 +954,7 @@ export class LightsBaneSlash extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.dirX) * 6.5, 0, game, this.armorPen, crit);
-      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       this.hitCd.set(e.id, 10);
     }
   }
@@ -1062,9 +1052,7 @@ export class GrassSlash extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit);
-      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       this.hitCd.set(e.id, 10);
     }
   }
@@ -1182,9 +1170,7 @@ export class HorsemansPumpkin extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.vx || 1) * this.kb, 0, game, this.armorPen, crit);
-      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       // Kill 特效（Projectile.cs:77759-77773：SoundID.Item10 + 2×20 尘 6 反速 ×2）
       game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);
       for (let i = 0; i < 20; i++) {

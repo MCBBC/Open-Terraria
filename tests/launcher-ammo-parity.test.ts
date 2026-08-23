@@ -223,3 +223,36 @@ describe('GrenadeProj 接触引爆（Damage_PVE_Inner aiStyle16 :12330-12340）'
     expect(r.fuse).toBe(3600 - 20);                            // 引信未被钳
   });
 });
+
+describe('GrenadeProj 出生重叠实心格（像素方块夹缝,2026-08-23 用户报）', () => {
+  it('夹缝出生朝空档方向发射 → 正常飞出（Y 检查不得采样旧 x 右缘）', () => {
+    const w = emptyWorld();
+    // 夹缝:出生盒右缘跨入右侧实心 (21,40)/(21,39),左向为开阔地
+    w.store.setTileSilent(21, 40, 1, 0, 0);
+    w.store.setTileSilent(21, 39, 1, 0, 0);
+    const game = makeGame(w);
+    const booms: Array<[number, number, number]> = [];
+    // 出生在玩家中心 (20.5*16=328? 用格 20 中部),弹盒 14 宽 → 右缘跨入 (21,40)
+    const r = new GrenadeProj(20 * TILE + 10, 40 * TILE + 2, -10, 0, 100, 3600, 134,
+      (x, y, d) => { booms.push([x, y, d]); });
+    r.fired = true;
+    for (let t = 0; t < 12 && !r.dead; t++) r.fixedUpdate(1, game);
+    expect(r.dead).toBe(false);                      // 未引爆
+    expect(r.fuse).toBe(3600 - 12);                  // 引信未被钳(曾=贴墙 3t 原地爆)
+    expect(booms.length).toBe(0);
+    expect(r.x).toBeLessThan(20 * TILE);             // 已向左飞出夹缝
+  });
+
+  it('朝实心方向发射 → 贴墙 3t 爆（原版 :18365-18370 velocity×0+timeLeft=3）', () => {
+    const w = emptyWorld();
+    w.store.setTileSilent(22, 40, 1, 0, 0);
+    const game = makeGame(w);
+    const booms: Array<[number, number, number]> = [];
+    const r = new GrenadeProj(20 * TILE + 10, 40 * TILE + 2, 10, 0, 100, 3600, 134,
+      (x, y, d) => { booms.push([x, y, d]); });
+    r.fired = true;
+    let guard = 0;
+    while (!r.dead && guard++ < 200) r.fixedUpdate(1, game);
+    expect(booms.length).toBe(1);                    // 撞墙贴墙引爆
+  });
+});

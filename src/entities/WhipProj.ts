@@ -402,7 +402,6 @@ export class WhipProj extends Entity {
         if (WHIP_HIT_SIDEKICK[this.itemId] && owner) {
           this.spawnSidekick(game, owner, this.itemId, v2(e.x + e.w / 2, e.y + e.h / 2));
         }
-        game.addDamageNumber(p.x, p.y, dmg, false, '#FFD060');
       }
     }
   }

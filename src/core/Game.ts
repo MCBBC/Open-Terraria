@@ -498,7 +498,12 @@ const ON_TABLE_1X1_SHEETS = new Set([13, 33, 49, 50, 174, 372, 646]);
 // Check3x3Wall/Check2x2Style 族的仓内同源近似,与非 decor 家具一致）。
 type DecorSupportKind =
   | 'plant' | 'alch' | 'sunflower' | 'sapling' | 'shroomtree'
-  | 'ground1x1' | 'logic' | 'orb' | 'pot' | 'hangs' | 'furniture';
+  | 'ground1x1' | 'logic' | 'orb' | 'pot' | 'hangs' | 'furniture'
+  // —— 2026-08-23 二批：TileFrameImportant(:86241) 派发全量对照补齐（逐 case 对读
+  // docs/audit/tile-audit-2026-08-23.md「TileFrame 全量派发对照」）——
+  | 'jungleplant' | 'oasisplant' | 'wallhang' | 'stalactite' | 'moss'
+  | 'pile' | 'deco3x2' | 'deco3x1' | 'dyeplant' | 'waterplant' | 'sandplant'
+  | 'hangtop' | 'gnome' | 'treebase' | 'stinkbug' | 'xmas' | 'support2x2';
 const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // PlantCheck（派发 :85970-85981 {3,24,61,71,73,74,110,113,201,637,703}）
   3: 'plant', 24: 'plant', 61: 'plant', 71: 'plant', 73: 'plant', 74: 'plant',
@@ -537,6 +542,78 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   425: 'furniture', 440: 'furniture', 441: 'furniture', 452: 'furniture', 455: 'furniture',
   468: 'furniture', 480: 'furniture', 497: 'furniture', 509: 'furniture', 531: 'furniture',
   564: 'furniture', 565: 'furniture', 594: 'furniture',
+  // —— 2026-08-23 二批：多格植物/装饰/画族整族补齐（原为 def.decor 早退或家具
+  // hasSupport 墙锚近似=挖根悬空,用户实报 233 丛林大型植物）----
+  // CheckJunglePlant（派发 case 组 :86929-86934;函数 :48358）：233 双变体（3×2
+  // frameY<36 / 2×2 frameY>=36）+236 生命果/238 世花球茎/702 复制品 2×2——
+  // 完整性+逐列 SolidTile+丛林草 60（★墙不算支撑,曾走家具墙锚支=悬空根因）
+  233: 'jungleplant', 236: 'jungleplant', 238: 'jungleplant', 702: 'jungleplant',
+  // CheckOasisPlant（派发 :86935-86937;函数 :48026）：3×2,逐列 SolidTile+沙族
+  530: 'oasisplant',
+  // 画/武器架墙锚族（任一格 wall<=0 即整件塌）：Check3x3Wall :44690（240 墙挂 3×3;
+  // ★440 宝石锁同函数但维持 'furniture' 近似备案）/Check2x3Wall :44997（245）/
+  // Check3x2Wall :45154（246）/Check4x3Wall :45284（241）/Check6x4Wall :45377（242）/
+  // CheckWeaponsRack :46796（334）/TEWeaponsRack.Framing_CheckTile
+  // （TEWeaponsRack.cs:74,471）。★464/466 战争桌/长老晶座=Check5x4 :50617 立地
+  // （底行 SolidTileAllowBottomSlope,非墙锚）→ 家具近似,勿入本组
+  240: 'wallhang', 245: 'wallhang', 246: 'wallhang', 241: 'wallhang', 242: 'wallhang',
+  334: 'wallhang', 471: 'wallhang',
+  // CheckStalactite（:86557 派发 165;函数 :39389——fy72 吊顶 1 格/fy90 立地 1 格/
+  // fy36|54 立地 2 格/fy0|18 吊顶 2 格）/CheckStalactiteEcho（:86559-86562 693/694;
+  // 函数 :39267——fy<格数*18=上半吊顶 SolidTileAllowTopSlope,否则立地）
+  165: 'stalactite', 693: 'stalactite', 694: 'stalactite',
+  // 苔藓植物（case 184 :86463 内联）：四邻须苔藓色（GetTileMossColor :82492 非 -1）
+  184: 'moss',
+  // CheckPile（:86569-86571 派发 185;函数 :47281——fy18 走 Check2x1 :47379,余立地
+  // 1 格+style 生物群系地基表）/649 中碎砾 2×1（:87040-87047 直派 Check2x1 default 支
+  // :47429-47433 逐柱 SolidTileAllowBottomSlope）
+  185: 'pile', 649: 'pile',
+  // Check1x1（:87049-87062 派发组;函数 :45633）补 650 小碎砾/324 海贝（:86563-86570
+  // 内联同判据=SolidTileAllowBottomSlope+下方巨石族杀）
+  650: 'ground1x1', 324: 'ground1x1',
+  // Check3x2（:87342 case 14 组+goto case 14 链 :87340;函数 :49617）：186/187 装饰组
+  // （立地+style 生物群系地基）/647/648/651 大碎砾（:86899-86908 no-op break 组闭合
+  // 后 goto case 14 :87342→完整性校验【无】支撑行——原版即"碎砾自身不断即不塌"）
+  186: 'deco3x2', 187: 'deco3x2', 647: 'deco3x2', 648: 'deco3x2', 651: 'deco3x2',
+  // Check3x1（:86572-86574 派发 235;函数 :49541）：3×1 完整性+逐柱
+  // SolidTileAllowBottomSlope（传送器;杀走 breakTile 保护门=原版 CheckTileBreakability
+  // :49568-49574 豁免同源）
+  235: 'deco3x1',
+  // CheckDye（:86549-86551 派发 227;函数 :54257）：fx/34=7 吊挂（上实心）/6=仙人掌
+  // 寄生（下方 80）/其余立地（下实心）
+  227: 'dyeplant',
+  // 水生植物族（TileFrameImportant 顶派发 :86246-86256）：549 海草
+  // CheckUnderwaterPlant :59064（CanUnderwaterPlantGrowHere :59027——上 3 格全水+
+  // 下方同型或沙族+墙白名单）/571 竹 CheckBamboo :58933（下方 571/60）/
+  // 518 睡莲 CheckLilyPad :59694（非水型杀+下方非平台实体杀）/519 香蒲
+  // CheckCatTail :59231（水列柱序贯+地基族表+列长 catTailDistance=8 :4318）
+  518: 'waterplant', 519: 'waterplant', 549: 'waterplant', 571: 'waterplant',
+  // case 529 海燕麦（:86493-86510 内联）：下方 SolidTileAllowBottomSlope+沙族
+  // （单格写入 PlantSeaOat :58782——def fw1×fh2 是贴图帧高非占格）
+  529: 'sandplant',
+  // Check2xX 顶锚支（:87076-87083 派发组 42/270/271/572/581/660/698+465;函数
+  // :38376,465/531/591/592 吊挂支 :38464-38505——上方绳 380/平台/实心顶坡豁免）。
+  // ★591 吊盆/592 吊火盆/465 战争桌旗=吊顶族（曾走家具底行支=语义反向,备案 531 同支维持家具近似）
+  465: 'hangtop', 591: 'hangtop', 592: 'hangtop',
+  // CheckGnome（:87201-87204 派发 567;函数 :54400）：1×2（fy0|20）+下方
+  // SolidTileAllowBottomSlope/平台
+  567: 'gnome',
+  // 树基族（:87167-87190 派发）：583-589 宝石树/596 樱花树/616 黄柳（CheckTreeWithSettings
+  // :54877——基格 frameX0|22|44&fy<=130 地基失效杀+孤儿格 num4==-1 杀）/634 灰烬树/
+  // 323 棕榈 CheckPalmTree :54821（下方须沙族或同型续接）。地基测试 :30585-30616
+  583: 'treebase', 584: 'treebase', 585: 'treebase', 586: 'treebase', 587: 'treebase',
+  588: 'treebase', 589: 'treebase', 596: 'treebase', 616: 'treebase', 634: 'treebase',
+  323: 'treebase',
+  // CheckStinkbugBlocker（:87207-87210 派发 630/631;函数 :54373——锚向失效重定向,
+  // 全失效杀;ValidateOrAttemptReorientingAnchor :54299）
+  630: 'stinkbug', 631: 'stinkbug',
+  // CheckXmasTree（:87161-87164 派发 171;函数 :39998）：4×8 完整性+中两柱 SolidTile2
+  // （破坏/失撑整树清+掉 1873,掉落走 breakTile breakXmasTree 既有链）
+  171: 'xmas',
+  // Check2x2 通用支（goto case 132 链 :87336→:87338;函数 :48811——非巨石支 :48852-48857
+  // 逐柱下方 nactive+(solid||table)+非半砖）：652 中碎砾 2×2（:86949-86974 no-op break
+  // 组闭合后 goto case 132）/35 南瓜灯（CheckMB :51649 同判据,decor 曾早退漏检）
+  652: 'support2x2', 35: 'support2x2',
 };
 /** PlantCheck 换型目标（PlantCheck_TryGetNewType :81886 回写用,sheet→def key——
  *  ★不能走 TILE_INTERNAL_BY_SHEET：sheet 3 首个 def 是 mushroom 非草丛本体） */
@@ -558,6 +635,27 @@ const ALCH_GROUND_RUNTIME: Record<number, Set<number>> = {
 };
 /** CheckSunflower 地基草族（:53797-53802 {2,477,492,109,60,633}） */
 const SUNFLOWER_GROUND_SHEETS = new Set([2, 477, 492, 109, 60, 633]);
+/** TileID.Sets.Conversion 族（TileID.cs:18-40,1457 终值）——decor 支撑链地基测试用 */
+const CONV_SAND_SHEETS = new Set([53, 112, 116, 234]);            // :30 Conversion.Sand
+const CONV_STONE_SHEETS = new Set([1, 25, 117, 203]);             // :26 Conversion.Stone
+const CONV_MOSS_SHEETS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);   // :38
+const CONV_MOSSBRICK_SHEETS = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]); // :40
+const CONV_HARDENED_SAND_SHEETS = new Set([397, 398, 402, 399]);  // :32
+const CONV_SANDSTONE_SHEETS = new Set([396, 400, 403, 401]);      // :34
+const CONV_SNOW_SHEETS = new Set([147]);                          // :24
+const CONV_ICE_SHEETS = new Set([161, 163, 164, 200]);            // :28
+/** GemTreeGroundTest（WorldGen.cs:30585）= Stone∪Moss 转换族 */
+const GEM_TREE_GROUND_SHEETS = new Set([...CONV_STONE_SHEETS, ...CONV_MOSS_SHEETS]);
+/** VanityTreeGroundTest（:30598）= Grass 转换族去 23/199（TileID.cs:18 Grass） */
+const VANITY_TREE_GROUND_SHEETS = new Set([2, 109, 477, 492]);
+/** CheckCatTail 地基族→frameY 档（:59246-59262/:59130-59146 同表） */
+const CATTAIL_GROUND_FY: Record<number, number> = {
+  2: 0, 477: 0, 53: 18, 199: 54, 234: 54, 662: 54, 23: 72, 112: 72, 661: 72, 70: 90,
+};
+/** CheckStinkbugBlocker/CheckAnchor 锚向地基测试（ConsideredSolidTileForAnchor
+ *  :54352 的树干特支略——323/树干格视作锚点,备案） */
+const sheetAt = (st: { get(x: number, y: number): number }, x: number, y: number): number =>
+  TILE_DEFS[st.get(x, y)]?.vanilla?.sheet ?? -1;
 /** PlantCheck 地基失配（cs:81421,与生成期 FinalCleanupPass.plantBadMatch 同式） */
 function plantBadMatch(down: number, type: number): boolean {
   if ((type !== 3 || down === 2 || down === 477 || down === 78 || down === 380 || down === 579)
@@ -9284,7 +9382,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                       dmg2, kb2, fo.bonusAi1,
                       (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE),
                         edmg, er2, er2 > 0, 11, this.player.equipStats.armorPen + (ps?.arpen ?? 0), pid2));
-                    rk.critChance = this.player.critChance('ranged') + (bowC?.crit ?? 0) + (mC?.crit ?? 0);
+                    rk.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0) + (mC?.crit ?? 0)) / 100;   // 阈值=小数(Celeb2Rocket roll 直用;曾传百分点=恒暴击)
                     rk.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
                     this.entities.add(rk, 'projectiles');
                   }
@@ -23622,6 +23720,63 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return !!(d && (d.solid || d.platform));
   }
 
+  /** SolidTile（WorldGen.cs:70642）：active+solid+【非】solidTop+无坡+非半砖+未致动。
+   *  仓内 def.platform ⊇ 原版 tileSolidTop∪tileTable（平台 19/239/427+桌族同 flag）,
+   *  故严格实心=solid 且非 platform。界外=原版 tile==null → true（不杀） */
+  private solidTileStrictAt(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (!st.inBounds(x, y)) return true;
+    if (!st.isActive(x, y)) return false;
+    const i = st.idx(x, y);
+    if (st.half[i] || st.slope[i] !== 0) return false;
+    const d = TILE_DEFS[st.type[i]];
+    return !!(d && d.solid && !d.platform);
+  }
+
+  /** SolidTileAllowTopSlope（WorldGen.cs:70851）：吊顶锚判据——active+(solid|绳380)+
+   *  (非平台:非底坡 slope3/4 | 平台:半砖)+未致动。界外=原版 tile==null → true */
+  private solidAllowTopSlopeAt(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (!st.inBounds(x, y)) return true;
+    if (!st.isActive(x, y)) return false;
+    const i = st.idx(x, y);
+    const d = TILE_DEFS[st.type[i]];
+    if (!d) return false;
+    if ((d.vanilla?.sheet ?? -1) === 380) return true;   // :70856 tile.type==380 特支
+    const sl = st.slope[i];
+    if (d.platform) return !!st.half[i];
+    if (!d.solid) return false;
+    return sl !== 3 && sl !== 4;
+  }
+
+  /** SolidTileAllowLeftSlope（WorldGen.cs:70875）：左向锚判据——active+solid+非半砖
+   *  +非右坡（slope 2/4,Tile.cs leftSlope/rightSlope 编码）+非平台+未致动 */
+  private solidAllowLeftSlopeAt(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (!st.inBounds(x, y)) return true;
+    if (!st.isActive(x, y)) return false;
+    const i = st.idx(x, y);
+    if (st.half[i]) return false;
+    const d = TILE_DEFS[st.type[i]];
+    if (!d || !d.solid || d.platform) return false;
+    const sl = st.slope[i];
+    return sl !== 2 && sl !== 4;
+  }
+
+  /** SolidTileAllowRightSlope（WorldGen.cs:70893）：右向锚判据——active+solid+非半砖
+   *  +非左坡（slope 1/3）+非平台+未致动 */
+  private solidAllowRightSlopeAt(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (!st.inBounds(x, y)) return true;
+    if (!st.isActive(x, y)) return false;
+    const i = st.idx(x, y);
+    if (st.half[i]) return false;
+    const d = TILE_DEFS[st.type[i]];
+    if (!d || !d.solid || d.platform) return false;
+    const sl = st.slope[i];
+    return sl !== 1 && sl !== 3;
+  }
+
   /** decor 支撑检查（D-1,原版 TileFrameImportant :85703 Check* 族运行期移植）：
    *  按 DECOR_SUPPORT_KIND 分派——PlantCheck（地基失配→换型或杀,含腐化/蔓延过境
    *  变型）/CheckAlch（列地基+岩浆枯杀）/CheckSunflower（2×4+草族实心底）/
@@ -23784,6 +23939,452 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           ? (!!hd?.solid && !hd.platform)
           : st.isActive(hx, hy) && (!!hd?.solid || !!hd?.platform || !!hd?.rope);
         if (!ok) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'jungleplant': {
+        // CheckJunglePlant（WorldGen.cs:48358）：233 双变体——3×2（frameY<36,列
+        // frameX/18%3 商×54=style 基,行 frameY/18）/2×2（frameY>=36 或 236/238/702,
+        // 列%2 商×36,行%2,233 变体帧基 +36）。完整性+逐列 SolidTile+丛林草 60
+        // （:48424-48431/:48470-48474;★墙不算支撑——曾走家具 hasSupport 墙锚支=
+        // 丛林壁后植物挖根悬空,用户实报 233 fx54 fy0）。238 失配召世花/236·702 掉
+        // 1291 走 breakTile 特支（:12698 v_238/v_236 拦截段）
+        const two = sheet !== 233 || st.frameY[i] >= 36;
+        const cw = two ? 2 : 3;
+        let col = Math.floor(st.frameX[i] / 18);
+        let style = 0;
+        while (col >= cw) { col -= cw; style++; }
+        const ax = x - col, ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        const fyBase = (sheet === 233 && two) ? 36 : 0;
+        let bad = false;
+        for (let dx = 0; dx < cw && !bad; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            const qi = st.idx(ax + dx, ay + dy);
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
+              || st.frameX[qi] !== dx * 18 + style * cw * 18
+              || st.frameY[qi] !== dy * 18 + fyBase) { bad = true; break; }
+          }
+          // :48424-48431（2×2 变体 702 支 SolidTileAllowBottomSlope,余 SolidTile+60）
+          if (sheet === 702
+            ? !this.solidAllowBottomSlopeAt(ax + dx, ay + 2)
+            : !(this.solidTileStrictAt(ax + dx, ay + 2) && sheetAt(st, ax + dx, ay + 2) === 60)) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'oasisplant': {
+        // CheckOasisPlant（:48026）：3×2（列 frameX/18%3 商×54,行 frameY/18）+
+        // 逐列 SolidTile+沙族 Conversion.Sand（:48057-48059）
+        let col = Math.floor(st.frameX[i] / 18);
+        while (col >= 3) col -= 3;
+        const ax = x - col, ay = y - Math.floor(st.frameY[i] / 18);
+        let bad = false;
+        for (let dx = 0; dx < 3 && !bad; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+          }
+          if (!(this.solidTileStrictAt(ax + dx, ay + 2)
+            && CONV_SAND_SHEETS.has(sheetAt(st, ax + dx, ay + 2)))) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'wallhang': {
+        // 画/武器架墙锚族（Check3x3Wall :44690 / Check2x3Wall :44997 /
+        // Check3x2Wall :45154 / Check4x3Wall :45284 / Check6x4Wall :45377 /
+        // CheckWeaponsRack :46796 / TEWeaponsRack.Framing_CheckTile TEWeaponsRack.cs:74）：
+        // 整件 w×h 完整性+【逐格】wall>0——任一格失墙即整件塌（:44722-44727 等）。
+        // 锚=frameX/18%w、frameY/18%h（style 带基×w*18/h*18,支撑判定不消费 style 基）
+        const w = def.w ?? 1, h = def.h ?? 1;
+        const ax = x - (Math.floor(st.frameX[i] / 18) % w);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % h);
+        let bad = false;
+        for (let dx = 0; dx < w && !bad; dx++) {
+          for (let dy = 0; dy < h; dy++) {
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
+              || st.wall[st.idx(ax + dx, ay + dy)] <= 0) { bad = true; break; }
+          }
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'stalactite': {
+        // CheckStalactite（:39389）165：fy72 吊顶 1 格（上 StrictSolid :39403）/
+        // fy90 立地 1 格（下 StrictSolid :39434+非巨石 :39438）/fy36|54 立地 2 格
+        // （54=底格 num--,下 StrictSolid+同型同 fx 完整性+非巨石）/fy0|18 吊顶 2 格
+        // （18=底格 num--,上 StrictSolid+完整性）。
+        // CheckStalactiteEcho（:39267）693=1 格/694=2 格：fy<格数*18=上半（吊顶
+        // SolidTileAllowTopSlope :39281）,否则下半（SolidTileAllowBottomSlope :39281）。
+        // ★UpdateStalagtiteStyle（:39036）样式重帧略（cosmetic,不产杀,备案）
+        if (sheet === 165) {
+          const fy = st.frameY[i];
+          if (fy === 72) {
+            if (!this.solidTileStrictAt(x, y - 1)) this.killDecorTile(x, y);
+            return;
+          }
+          if (fy === 90) {
+            if (!this.solidTileStrictAt(x, y + 1)
+              || Game.BOULDER_SUPPORT_SHEETS.has(sheetAt(st, x, y + 1))) this.killDecorTile(x, y);
+            return;
+          }
+          const top = (fy === 54 || fy === 18) ? y - 1 : y;
+          const ceil = fy === 0 || fy === 18;
+          let bad = !st.isActive(x, top) || !st.isActive(x, top + 1)
+            || st.get(x, top + 1) !== st.type[i]
+            || st.frameX[st.idx(x, top + 1)] !== st.frameX[i];
+          if (ceil) { if (!this.solidTileStrictAt(x, top - 1)) bad = true; }
+          else {
+            if (!this.solidTileStrictAt(x, top + 2)) bad = true;
+            if (Game.BOULDER_SUPPORT_SHEETS.has(sheetAt(st, x, top + 2))) bad = true;
+          }
+          if (bad) this.killDecorTile(x, Math.max(0, top));
+          return;
+        }
+        // 693/694 Echo 凌柱（:39267）
+        const n = sheet === 694 ? 2 : 1;
+        const isTop = st.frameY[i] < n * 18;
+        const ay2 = y - (st.frameY[i] % (n * 18)) / 18;
+        let bad2 = false;
+        for (let dy = 0; dy < n; dy++) {
+          if (!st.isActive(x, ay2 + dy) || st.get(x, ay2 + dy) !== st.type[i]
+            || st.frameX[st.idx(x, ay2 + dy)] !== st.frameX[i]) { bad2 = true; break; }
+        }
+        if (!bad2) bad2 = !(isTop ? this.solidAllowTopSlopeAt(x, ay2 - 1)
+          : this.solidAllowBottomSlopeAt(x, ay2 + n));
+        if (bad2) this.killDecorTile(x, Math.max(0, ay2));
+        return;
+      }
+      case 'moss': {
+        // case 184（:86463 内联）：四邻（上 !bottomSlope/下 !half!topSlope/左/右,
+        // :86466-86489）须苔藓色 GetTileMossColor（:82492,Moss∪MossBrick 转换族）
+        // 非 -1,否则杀。样式重帧（:86500-86519）cosmetic 略
+        const mossy = (qx: number, qy: number): boolean => {
+          const s = sheetAt(st, qx, qy);
+          return CONV_MOSS_SHEETS.has(s) || CONV_MOSSBRICK_SHEETS.has(s);
+        };
+        if (!mossy(x, y - 1) && !mossy(x, y + 1) && !mossy(x - 1, y) && !mossy(x + 1, y)) {
+          this.killDecorTile(x, y);
+        }
+        return;
+      }
+      case 'pile': {
+        // CheckPile（:47281）：fy18 或 649 → Check2x1（:47379——2 格同型连续 fx+
+        // 逐柱 SolidTileAllowBottomSlope default 支 :47429-47433）;余立地 1 格
+        // SolidTileAllowBottomSlope（:47296-47298）+185 style 生物群系地基
+        // （:47313-47355——36-47 雪/冰/162/224,54-59+73-76 沙族三表,余任意）
+        if (st.frameY[i] === 18 || sheet === 649) {
+          const ax = x - (Math.floor(st.frameX[i] / 18) % 2);
+          let bad = st.get(ax, y) !== st.type[i] || st.get(ax + 1, y) !== st.type[i]
+            || st.frameX[st.idx(ax + 1, y)] !== st.frameX[i] + 18;
+          for (let dx = 0; dx < 2 && !bad; dx++) {
+            if (!this.solidAllowBottomSlopeAt(ax + dx, y + 1)) bad = true;
+          }
+          if (bad) this.killDecorTile(Math.max(0, ax), y);
+          return;
+        }
+        if (!this.solidAllowBottomSlopeAt(x, y + 1)) { this.killDecorTile(x, y); return; }
+        if (sheet !== 185) return;
+        const gs = sheetAt(st, x, y + 1);
+        const s = Math.floor(st.frameX[i] / 18);
+        if (s >= 36 && s <= 47) {
+          if (!CONV_SNOW_SHEETS.has(gs) && !CONV_ICE_SHEETS.has(gs) && gs !== 162 && gs !== 224) this.killDecorTile(x, y);
+        } else if ((s >= 54 && s <= 59) || (s >= 73 && s <= 76)) {
+          if (!CONV_SAND_SHEETS.has(gs) && !CONV_HARDENED_SAND_SHEETS.has(gs)
+            && !CONV_SANDSTONE_SHEETS.has(gs)) this.killDecorTile(x, y);
+        }
+        return;
+      }
+      case 'deco3x2': {
+        // Check3x2（:49617）：3×2 完整性（列 frameX/18%3 商×54,行 frameY/18%2）+
+        // 分型支撑——186（:49700-49726 立地+非巨石+style26-31 雪/冰/162/224、32-34
+        // 泥/70）/187（:49728-49790 立地+非巨石+style0-5 泥/60/226、6-8{57,58,75,76}、
+        // 29-34 沙族）/647/648/651 大碎砾（:86899-86908 no-op break 组闭合→goto
+        // case 14 :87342→【仅】完整性,无支撑行=原版"自身不断即不塌"）
+        let col = Math.floor(st.frameX[i] / 18);
+        let style = 0;
+        while (col >= 3) { col -= 3; style++; }
+        const ax = x - col, ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        let bad = false;
+        for (let dx = 0; dx < 3 && !bad; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+          }
+          if (bad) break;
+          if (sheet === 647 || sheet === 648 || sheet === 651) continue;   // 碎砾无支撑行
+          const below = sheetAt(st, ax + dx, ay + 2);
+          if (!this.solidAllowBottomSlopeAt(ax + dx, ay + 2)
+            || Game.BOULDER_SUPPORT_SHEETS.has(below)) { bad = true; continue; }
+          if (sheet === 186) {
+            if (style >= 26 && style <= 31) {
+              if (!CONV_SNOW_SHEETS.has(below) && !CONV_ICE_SHEETS.has(below) && below !== 162 && below !== 224) bad = true;
+            } else if (style >= 32 && style <= 34) {
+              if (below !== 59 && below !== 70) bad = true;
+            }
+          } else if (sheet === 187) {
+            if (style <= 5) {
+              if (below !== 59 && below !== 60 && below !== 226) bad = true;
+            } else if (style <= 8) {
+              if (below !== 57 && below !== 58 && below !== 75 && below !== 76) bad = true;
+            } else if (style >= 29 && style <= 34) {
+              if (!CONV_SAND_SHEETS.has(below) && !CONV_HARDENED_SAND_SHEETS.has(below)
+                && !CONV_SANDSTONE_SHEETS.has(below)) bad = true;
+            }
+          }
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'deco3x1': {
+        // Check3x1（:49541）235 传送器：3×1 完整性（列 frameX/18%3 商×54）+逐柱
+        // SolidTileAllowBottomSlope（:49561-49565）。原版 CheckTileBreakability 豁免
+        // （:49568-49574）由 breakTile 头保护门同源承担（tileAboveProtected/
+        // shouldTileSurviveAt）
+        let col = Math.floor(st.frameX[i] / 18);
+        while (col >= 3) col -= 3;
+        const ax = x - col;
+        let bad = false;
+        for (let dx = 0; dx < 3 && !bad; dx++) {
+          if (!st.isActive(ax + dx, y) || st.get(ax + dx, y) !== st.type[i]
+            || !this.solidAllowBottomSlopeAt(ax + dx, y + 1)) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), y);
+        return;
+      }
+      case 'dyeplant': {
+        // CheckDye（:54257）：fx/34=7 吊挂档（上方 StrictSolid :54262）/
+        // =6 仙人掌寄生档（下方 nactive+sheet80 :54266-54270）/其余立地（下方
+        // StrictSolid :54273-54277）
+        const band = Math.floor(st.frameX[i] / 34);
+        if (band === 7) {
+          if (!this.solidTileStrictAt(x, y - 1)) this.killDecorTile(x, y);
+        } else if (band === 6) {
+          if (!st.isActive(x, y + 1) || sheetAt(st, x, y + 1) !== 80) this.killDecorTile(x, y);
+        } else {
+          if (!this.solidTileStrictAt(x, y + 1)) this.killDecorTile(x, y);
+        }
+        return;
+      }
+      case 'waterplant': {
+        // 水生植物族（TileFrameImportant 顶派发 :86246-86256）
+        if (sheet === 549) {
+          // CheckUnderwaterPlant（:59064）→ CanUnderwaterPlantGrowHere（:59027,
+          // ignoreSelf）——上 3 格 (y-2..y) 全水（:59034-59039）;下方 nactive 且
+          // （同型 549 或（沙族+顶可附 TopEdgeCanBeAttachedTo :70911≈
+          // solidAllowBottomSlope））（:59043-59047）;墙白名单 {0,63-68,80,81}（:59049-59052）
+          let ok = st.inBounds(x, y);
+          for (let dy = 0; dy <= 2 && ok; dy++) {
+            const qi = st.idx(x, y - dy);
+            if (!st.inBounds(x, y - dy) || (st.liquid[qi] ?? 0) <= 0
+              || st.liquidType[qi] !== LIQUID_TYPE.WATER) ok = false;
+          }
+          if (ok) {
+            const bs = sheetAt(st, x, y + 1);
+            const belowOk = st.isActive(x, y + 1)
+              && (bs === 549 || (CONV_SAND_SHEETS.has(bs) && this.solidAllowBottomSlopeAt(x, y + 1)));
+            if (!belowOk) ok = false;
+          }
+          if (ok) {
+            const wl = st.wall[st.idx(x, y)];
+            if (wl !== 0 && !(wl >= 63 && wl <= 68) && wl !== 80 && wl !== 81) ok = false;
+          }
+          if (!ok) this.killDecorTile(x, y);
+          return;
+        }
+        if (sheet === 571) {
+          // CheckBamboo（:58933）：下方须 571 续接/60 丛林草（:58937-58941）
+          const bs = sheetAt(st, x, y + 1);
+          if (bs !== 571 && bs !== 60) this.killDecorTile(x, y);
+          return;
+        }
+        if (sheet === 518) {
+          // CheckLilyPad（:59694）：本格液体非水型 → 杀（:59700-59710）;下方 active
+          // 非平台且（非实心|solidTop 非平台）→ 杀（:59770-59779）。漂移重帧
+          // （:59712-59768）cosmetic 略
+          const li = st.idx(x, y);
+          if ((st.liquid[li] ?? 0) > 0 && st.liquidType[li] !== LIQUID_TYPE.WATER) {
+            this.killDecorTile(x, y);
+            return;
+          }
+          if (st.isActive(x, y + 1)) {
+            const bd = TILE_DEFS[st.get(x, y + 1)];
+            if (bd && !bd.platform && (!bd.solid || bd.platform)) this.killDecorTile(x, y);
+          }
+          return;
+        }
+        // 519 香蒲 CheckCatTail（:59231）：自 y 向下走非实心段——途中 active 非 519
+        // → 杀（:59240-59246）;首实心格地基须族表（:59264-59283）+nactive（:59285）;
+        // 再自其上向上走水段——active 非 519/非水型 → 杀（:59252-59262）;
+        // 水列长 > catTailDistance=8（:4318,:59288-59290）→ 杀。
+        // ★原版边界 maxTilesY-50/50（:59237/:59255）在小世界（h<56）为负=全杀,
+        // 改钳 inBounds 边（大世界行为等价——走查必先停在地面/水面）
+        let y2 = y;
+        let bad = false;
+        while (!st.isSolid(x, y2) && y2 < st.h - 1) {
+          if (st.isActive(x, y2) && sheetAt(st, x, y2) !== 519) bad = true;
+          if (!st.isActive(x, y2)) break;
+          y2++;
+        }
+        const groundY = y2;
+        const gs = sheetAt(st, x, groundY);
+        if (!st.isActive(x, groundY) || CATTAIL_GROUND_FY[gs] === undefined) bad = true;
+        let y3 = groundY - 1;
+        while (y3 > 0 && (st.liquid[st.idx(x, y3)] ?? 0) > 0) {
+          if ((st.isActive(x, y3) && sheetAt(st, x, y3) !== 519)
+            || st.liquidType[st.idx(x, y3)] !== LIQUID_TYPE.WATER) bad = true;
+          y3--;
+        }
+        y3++;
+        if (groundY - y3 > 8) bad = true;
+        if (bad) {
+          // 原版失配杀=整段水列（:59362-59373 自 num7-4 到 num2 逐格 KillTile）——
+          // 519 def 1×1 到不了 breakTile object 整件支,此处显式逐格入队
+          let top = y;
+          while (top > 0 && st.get(x, top - 1) === st.type[i]) top--;
+          for (let ky = top; ky < groundY; ky++) {
+            if (st.get(x, ky) === st.type[i]) this.killDecorTile(x, ky);
+          }
+        }
+        return;
+      }
+      case 'sandplant': {
+        // case 529 海燕麦（:86493-86510 内联）：下方 SolidTileAllowBottomSlope
+        // （:86497-86501）+沙族 Conversion.Sand（:86504-86509）。单格写入
+        // （PlantSeaOat :58782 frameY=0）——def fw1×fh2 为贴图帧高非占格
+        if (!this.solidAllowBottomSlopeAt(x, y + 1)
+          || !CONV_SAND_SHEETS.has(sheetAt(st, x, y + 1))) this.killDecorTile(x, y);
+        return;
+      }
+      case 'hangtop': {
+        // Check2xX 吊挂支（:38376;465/531/591/592 吊顶锚 :38464-38505）：2×h 完整性
+        // （fx 0|18 定左列,fy/18%h 定顶行）+逐列上方——绳 380（:38471-38473）/平台
+        // （:38474-38479）/SolidTileAllowTopSlope（:38480）任一,两列须同档
+        // （num7!=num8 → flag :38489-38493）
+        const h = def.h ?? 3;
+        const ax = x - (st.frameX[i] === 18 ? 1 : 0);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % h);
+        let bad = false;
+        let band = -1;
+        for (let dx = 0; dx < 2 && !bad; dx++) {
+          for (let dy = 0; dy < h; dy++) {
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]
+              || st.frameX[st.idx(ax + dx, ay + dy)] !== st.frameX[i] - (st.frameX[i] === 18 ? 1 : 0) + dx * 18
+              || st.frameY[st.idx(ax + dx, ay + dy)] !== (Math.floor(st.frameY[i] / 18) - (Math.floor(st.frameY[i] / 18) % h) + dy) * 18) {
+              bad = true; break;
+            }
+          }
+          const upSheet = sheetAt(st, ax + dx, ay - 1);
+          let myBand = -2;
+          if (upSheet === 380) myBand = 0;
+          else if (TILE_DEFS[st.get(ax + dx, ay - 1)]?.platform) myBand = 8;
+          else if (this.solidAllowTopSlopeAt(ax + dx, ay - 1)) myBand = 0;
+          else myBand = -1;
+          if (myBand === -1) bad = true;
+          else if (band === -1) band = myBand;
+          else if (band !== myBand) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'gnome': {
+        // CheckGnome（:54400）：1×2（fy0 顶格|20 底格定顶）+下方
+        // SolidTileAllowBottomSlope/平台（:54424-54426）
+        const top = st.frameY[i] === 0 ? y : y - 1;
+        if (!st.isActive(x, top) || st.get(x, top + 1) !== st.type[i]
+          || !(this.solidAllowBottomSlopeAt(x, top + 2)
+            || !!TILE_DEFS[st.get(x, top + 2)]?.platform)) this.killDecorTile(x, Math.max(0, top));
+        return;
+      }
+      case 'treebase': {
+        // 树基族：583-589/596/616/634 → CheckTreeWithSettings（:54877）杀支——
+        // 基格（frameX 0|22|44 且 fy<=130）地基失效且下方非同型 → 杀（:54916-54920）;
+        // 中段格（fy132-176 frameX0|66|88）地基失效 → 杀（:54951-54954）;
+        // 孤儿格（下方空 num4==-1 且前序支未接）→ 杀（:54975-54977）。
+        // 323 棕榈 → CheckPalmTree（:54821）——下方须沙族（53/112/116/234 归一 53）
+        // 或同型续接（:54848-54850）,基格帧（66/220）须真沙（:54851-54853）。
+        // ★分支重帧 cosmetic 略;地基测试 GemTree/VanityTree/AshTree :30585-30616
+        const up = sheetAt(st, x, y - 1);
+        const down = sheetAt(st, x, y + 1);
+        const downActive = st.isActive(x, y + 1);
+        if (sheet === 323) {
+          const sandOk = CONV_SAND_SHEETS.has(down);
+          if (downActive && down !== 323 && !sandOk) { this.killDecorTile(x, y); return; }
+          if (!downActive && up !== 323) { this.killDecorTile(x, y); return; }
+          return;
+        }
+        const groundOk = sheet === 634 ? down === 633
+          : sheet >= 583 && sheet <= 589 ? GEM_TREE_GROUND_SHEETS.has(down)
+            : VANITY_TREE_GROUND_SHEETS.has(down);
+        const fx = st.frameX[i], fy = st.frameY[i];
+        const sameBelow = downActive && down === sheet;
+        const sideSame = (sheetAt(st, x - 1, y) === sheet) || (sheetAt(st, x + 1, y) === sheet);
+        if (fx === 0 || fx === 22 || fx === 44) {
+          if (fy <= 130) { if (!groundOk && !sameBelow) { this.killDecorTile(x, y); return; } }
+          else if (fy >= 132 && fy <= 176 && !groundOk) { this.killDecorTile(x, y); return; }
+        } else if (fy >= 132 && fy <= 176 && (fx === 66 || fx === 88) && !groundOk) {
+          this.killDecorTile(x, y);
+          return;
+        }
+        if (!downActive && !sideSame) this.killDecorTile(x, y);
+        return;
+      }
+      case 'stinkbug': {
+        // CheckStinkbugBlocker（:54373）：锚向（fx/18=0 地板/1 天花/2 左壁/3 右壁）
+        // 失效 → 重定向（ValidateOrAttemptReorientingAnchor :54299,树干特支略）,
+        // 全失效 → 杀（:54403-54408）。重定向写帧走原版 style*18
+        const dirs: Array<[number, boolean]> = [
+          [0, this.solidAllowBottomSlopeAt(x, y + 1)],
+          [1, this.solidAllowTopSlopeAt(x, y - 1)],
+          [2, this.solidAllowLeftSlopeAt(x - 1, y)],
+          [3, this.solidAllowRightSlopeAt(x + 1, y)],
+        ];
+        let cur = Math.floor(st.frameX[i] / 18);
+        if (cur === 2 || cur === 3) cur = 5 - cur;   // :54385-54392 2/3 互换后比对
+        if (dirs.some(([d, ok]) => ok && d === cur)) return;
+        const alt = dirs.find(([, ok]) => ok);
+        if (!alt) { this.killDecorTile(x, y); return; }
+        st.frameX[i] = (alt[0] === 2 ? 3 : alt[0] === 3 ? 2 : alt[0]) * 18;
+        this.chunks.markDirtyArea(x - 1, y - 1, x + 1, y + 1);
+        return;
+      }
+      case 'xmas': {
+        // CheckXmasTree（:39998）：4×8 完整性（锚=frameX<10 格自反推 :40004-40008）
+        // +中两柱（ax+1/ax+2）SolidTile2（:40025-40027）。掉落走 breakTile
+        // breakXmasTree 既有链（:12666 拦截段）
+        const fx = st.frameX[i], fy = st.frameY[i];
+        const ax = fx < 10 ? x - fx : x;
+        const ay = fx < 10 ? y - fy : y;
+        let bad = false;
+        for (let dx = 0; dx < 4 && !bad; dx++) {
+          for (let dy = 0; dy < 8; dy++) {
+            if (st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+          }
+          if (!bad && (dx === 1 || dx === 2) && !this.solidTileStrictAt(ax + dx, ay + 8)) bad = true;
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'support2x2': {
+        // Check2x2 通用支（:48811;非巨石非 95/126/132 :48852-48857）：2×2 完整性
+        // （652 列号 fx%36/18 特支 :48833-48837,余 fx/18 反推）+逐柱下方 nactive+
+        // (solid|table)+非半砖。35 南瓜灯=CheckMB（:51649——2×2 完整性+下方
+        // nactive+(tileSolid|tileTable) :51686-51692,同判据归并）
+        const is652 = sheet === 652;
+        const ax = is652
+          ? x - (st.frameX[i] % 36) / 18
+          : x - (Math.floor(st.frameX[i] / 18) % 2);
+        const ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        let bad = false;
+        for (let dx = 0; dx < 2 && !bad; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
+          }
+          if (!bad) {
+            const bd = TILE_DEFS[st.get(ax + dx, ay + 2)];
+            if (!st.isActive(ax + dx, ay + 2) || !bd || (!bd.solid && !bd.platform)) bad = true;
+            // Check2x2 通用支有半砖杀（:48858-48860）;CheckMB（35）无（:51686-51692）
+            if (!bad && sheet !== 35 && st.half[st.idx(ax + dx, ay + 2)]) bad = true;
+          }
+        }
+        if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
         return;
       }
       default:

@@ -161,7 +161,6 @@ export class ChainsawProj extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit);   // 音/飘值=单点
       this.hitCd.set(e.id, 10);
     }

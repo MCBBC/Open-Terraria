@@ -13,7 +13,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy } from './projTargets';
 
 /** Daybreak（BuffType 189）——611/612 命中授予 300t（:10703-10708）；无 Buff 表直写计时 */
 function applyDaybreak(e: Record<string, number>): void {
@@ -58,10 +58,8 @@ export class SolarFlare extends Entity {
       if (!(this.cx - reach < e.x + e.w && this.cx + reach > e.x && this.cy - reach < e.y + e.h && this.cy + reach > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, 0, 0, game, this.armorPen, crit);
       applyDaybreak(e as unknown as Record<string, number>);
-      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       this.hitCd.set(e.id, 4);
     }
   }
@@ -140,10 +138,8 @@ export class SolarEruptionWhip extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.vx) * 2, 0, game, this.armorPen, crit);
       applyDaybreak(e as unknown as Record<string, number>);
-      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       this.hitCd.set(e.id, 4);
       if (this.lai1 <= 0) {                            // 612 节流（:13229-13236）
         this.lai1 = 4;

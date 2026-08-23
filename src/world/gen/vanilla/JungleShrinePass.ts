@@ -124,10 +124,15 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
           break;
         }
       }
-      // 底部入口:掏空壳底两行(cs:16152-16162)
+      // 底部入口:掏空壳底两行(cs:16160-16171)。★WWWWW 勘误：原版入口掏空=
+      //   `active(false)`（两段循环 cs:16160-16165+16167-16172,后者为前者子集）——
+      //   type/帧/slope/half 幽灵全保留;曾用 setTileSilent(0) 连带抹 slope/half+
+      //   清幽灵 type → 腔底残坡 S3/S4 被抹（notraps 链 #48 (914,516)/(918,516)/
+      //   (686,532)/(689,533) 四格实证,前坡=3/4、后坡=0）。改直写 flags=0（与上方
+      //   清腔同款幽灵语义）。
       for (let lx = x - halfW - 1; lx <= x + halfW + 1; lx++) {
         for (let ly = y + halfH - 2; ly <= y + halfH; ly++) {
-          if (st.inBounds(lx, ly)) st.setTileSilent(lx, ly, 0);
+          if (st.inBounds(lx, ly)) st.flags[st.idx(lx, ly)] = 0;
         }
       }
       // 泥地基:壳底向下最多 4 格填泥(cs:16164-16174)

@@ -429,9 +429,7 @@ export class TrapShot extends Entity {
         // Poison 600t / 超级镖 184 900t :11041/:11045;矛/尖球/巨石/喷泉等表内无条目
         // 天然空掷）。曾整类漏接 = 飞镖陷阱永不上毒（2026-08-19 补）
         if (trapProjId !== undefined) applyProjStatus(trapProjId, e as unknown as Record<string, number>);
-        if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true)) {   // 音/飘值=单点   // 音/飘值=单点
-          playEnemyHitSound(game, e);
-        }
+        e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
         if (!pierce) {
           if (st.shatterDust) this.shatter(game);
           this.dead = true;
@@ -488,9 +486,7 @@ export class TrapShot extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
-      if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true)) {   // 音/飘值=单点
-        playEnemyHitSound(game, e);
-      }
+      e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
     }
   }
 

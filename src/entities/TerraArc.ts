@@ -71,9 +71,7 @@ export class TerraArc extends Entity {
       if (!(ex - bw / 2 < e.x + e.w && ex + bw / 2 > e.x && ey - bh / 2 < e.y + e.h && ey + bh / 2 > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, this.ai0 * 6.5, 0, game, this.armorPen, crit);
-      game.addDamageNumber(ex, ey, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
       this.hitSet.add(e.id);
     }
     if (this.t >= this.ai1) this.dead = true;                                    // :39554-39557

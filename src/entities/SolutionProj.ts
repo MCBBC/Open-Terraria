@@ -238,8 +238,7 @@ export class WaterSplashProj extends Entity {
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
         const crit = Math.random() < this.critChance;
         const dmg = crit ? this.damage * 2 : this.damage;
-        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 1, true);
-        playEnemyHitSound(game, e);
+        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 1, true);   // 音/飘值=单点
         this.splash(game);
         return;
       }

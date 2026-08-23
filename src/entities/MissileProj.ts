@@ -455,7 +455,6 @@ export class MagicMissileProj extends Entity {
       const dmg = crit ? this.damage * 2 : this.damage;
       applyProjStatus(this.projId, e as unknown as Record<string, number>);
       if (this.nebulaCb) this.nebulaCb();
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);   // 音/飘值=单点
       // 命中清追踪（StrikeNPC :13260-13283：34 仅 ai[0]==-1 档清 / 79 恒清 + 彩虹粒子；
       // 34 的 ai[0]==-2 终段不再清——逐字对源码）
@@ -724,7 +723,6 @@ export class FlyingKnifeProj extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       applyProjStatus(this.projId, e as unknown as Record<string, number>);
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点
     }
   }
@@ -828,7 +826,6 @@ export class StarfuryStar extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      playEnemyHitSound(game, e);
       e.hurt(dmg, Math.sign(this.vx) * 5, 0, game, this.armorPen, crit, this.pierce, true);   // 音/飘值=单点
       if (--this.pierce <= 0) { this.killNow(game); return; }
     }

@@ -70,7 +70,10 @@ export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
 }
 
 /** 原版 pass 33 "Slush"（cs:6591-6624）：雪原带内 石→冰、泥/沙泥→雪泥(224)。
- *  泥转雪泥前查 ±3 无丛林草/蘑菇草族（60/70/71/72）。无 RNG 消耗（与原版一致）。 */
+ *  ★WWWWW 勘误：±3 丛林草/蘑菇草族（60/70/71/72）豁免**只挂 case 59（泥）**——
+ *  case 123（淤泥）是无条件直转 224（cs:14770-14777 无邻域扫描）。曾把淤泥并进
+ *  豁免支 → NTB 链 #31 Slush T224>123×1174（雪带内近丛林草的淤泥整片漏转）。
+ *  无 RNG 消耗（与原版一致）。 */
 export function runSlushPass(st: TileStore, gs: GenState): void {
   if (!gs.snowMinX || !gs.snowMaxX) return; // 雪原未生成（守卫）
   const ICE = TILE_BY_KEY['ice']!;
@@ -84,8 +87,11 @@ export function runSlushPass(st: TileStore, gs: GenState): void {
       const t = st.type[i];                       // ★原版 switch 不判 active（幽灵格一并转化）
       if (t === STONE) {
         st.type[i] = ICE;                         // 只写 type，保 active 态（原版语义）
-      } else if (t === MUD || t === SILT) {
-        let nearGrass = false;
+      } else if (t === SILT) {
+        st.type[i] = SLUSH;                       // case 123：无豁免直转（cs:14766-14775；surfaceIsDesert
+                                                  //   +noSurface 组合支 →53 不在纯链,备案）
+      } else if (t === MUD) {
+        let nearGrass = false;                    // case 59：±3 草族豁免（cs:14779-14803）
         for (let dy = -3; dy <= 3 && !nearGrass; dy++) {
           for (let dx = -3; dx <= 3; dx++) {
             if (!st.inBounds(x + dx, y + dy)) continue;

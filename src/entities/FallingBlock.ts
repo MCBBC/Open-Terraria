@@ -64,7 +64,6 @@ export class FallingBlock extends Entity {
       const cd = this.hitCd.get(e.id) ?? 0;
       if (cd > 0) continue;
       this.hitCd.set(e.id, 20);
-      playEnemyHitSound(game, e);
       e.hurt(FallingBlock.DAMAGE, 0, 0, game);
     }
     if (hitCritters(this, game)) { /* 小动物被砸即死,块继续坠 */ }
