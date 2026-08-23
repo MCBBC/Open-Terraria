@@ -5,6 +5,7 @@
 //   ItemCheck_GetMeleeHitboxParticles Player.cs:44429-44462（泡泡棒 1450 气泡 gore 掷骰）
 //   ItemCheck_ApplyUseStyle 1124 支 Player.cs:42946-42958（蜂巢挥动发蜂掷骰）
 //   ItemCheck_ApplyPetBuffs 425 支 Player.cs:52256-52272（仙灵铃三选一）
+//   ItemCheck_ApplyHoldStyle 968 支 Player.cs:50955-50994（棉花糖烤串烤制态机）
 //   Chest.Lock Chest.cs:409-473（金锁 5328 可锁样式表）
 //
 // 本模块纯函数化：全部状态走入参（随机源注入），不触 Game/World/Sfx。
@@ -95,6 +96,51 @@ export function hiveBeeRoll(rnd: () => number): HiveBeeRoll | null {
 export function fairyBellVariant(rnd: () => number): 27 | 101 | 102 {
   const r = Math.floor(rnd() * 3);                        // :52258 Next(3)
   return r === 1 ? 101 : r === 2 ? 102 : 27;              // :52259-52265
+}
+
+// ---------------------------------------------------------------------------
+// 棉花糖烤串 968 烤制（Player.cs:50955-50994 ItemCheck_ApplyHoldStyle 的
+//   sItem.type==968 支，1456 :49606-49645；态机字段 player.miscTimer :1339，
+//   1456 :1244——仅本链消费的运行时态）：
+//   探测格（:50960-50961）= (itemLocation.X + heldItemFrame.Width×0.8×dir)/16、
+//   (itemLocation.Y + mountOffset + frame.Height/2)/16；itemLocation 由
+//   holdStyle 1 链赋值：X = pos.X + w/2 + 8×dir（:50957）、Y = pos.Y + 24 +
+//   mountOffset（:51020，1456 :49671——holdStyle 1 链尾统一式）。heldItemFrame
+//   = Item.GetDrawHitbox(968)（:42701 AnimatePlayerAndGetItemFrame 传入）=
+//   Item_968.png 整图 32×10（非 IsFood 无动画，Renderer.drawUseItem 同源）。
+//   格为燃着篝火（TileID.Sets.Campfires={215} 且 frameY<54 点燃档，:50966）→
+//   miscTimer++（:50968）+ Next(5)==0 再 ++（:50969-50972，均值 1.2/tick）→
+//   >900t 烤成（:50973——均值 ≈750t=12.5s，上限 900t=15s）；否则归零（:50994）。
+//   ★烤成侧（QuickSpawnItem 969 + stack--）是 Game 层 IO，见 checkMarshmallowRoast。
+// ---------------------------------------------------------------------------
+/** Item_968.png 整图规格（GetDrawHitbox 968 非 IsFood 无动画 → 全图帧） */
+export const MARSHMALLOW_FRAME = { w: 32, h: 10 } as const;
+/** 烤制时长门（:50973 miscTimer > 900） */
+export const MARSHMALLOW_COOK_TICKS = 900;
+
+/** 烤制探测格（:50957/:51020/:50960-50961 1:1——原版 (int) 截断 + 整除 16 同为
+ *  向零截断，链式 Math.trunc 保负坐标语义一致；世界内坐标两式恒等） */
+export function marshmallowProbeTile(
+  px: number, py: number, pw: number, facing: number, mountOffset = 0,
+): { tx: number; ty: number } {
+  const ilx = px + pw / 2 + 8 * facing;                              // :50957
+  const ily = py + 24 + mountOffset;                                 // :51020
+  return {
+    tx: Math.trunc(Math.trunc(ilx + MARSHMALLOW_FRAME.w * 0.8 * facing) / 16),   // :50960
+    ty: Math.trunc(Math.trunc(ily + mountOffset + Math.trunc(MARSHMALLOW_FRAME.h / 2)) / 16),  // :50961
+  };
+}
+
+export interface MarshmallowRoastStep { timer: number; cooked: boolean }
+
+/** 烤制态机单步（:50966-50994）：离火 → 归零（:50994 else）；火上 → +1、
+ *  Next(5)==0 再 +1、>900 烤成归零（:50975）。rnd = Math.random 同源注入。 */
+export function marshmallowRoastStep(timer: number, overLitCampfire: boolean, rnd: () => number): MarshmallowRoastStep {
+  if (!overLitCampfire) return { timer: 0, cooked: false };   // :50992-50994
+  let t = timer + 1;                                          // :50968
+  if (Math.floor(rnd() * 5) === 0) t++;                       // :50969-50972
+  if (t > MARSHMALLOW_COOK_TICKS) return { timer: 0, cooked: true };  // :50973-50975
+  return { timer: t, cooked: false };
 }
 
 // ---------------------------------------------------------------------------

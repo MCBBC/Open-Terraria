@@ -10,7 +10,7 @@
 //      路径例外（:49962-49964）+ 召唤入口后置冷却（:48945 localAI[0]=30 /
 //      :50115 ai[0]=45）
 //   ⑤ 弹本体 AI 关键态（Projectile.cs:50014-52160 AI_067 flag8/flag9 +
-//      :59100+ AI_026 flag8 + :62573-62750 AI_062 射击段）
+//      :59100+ AI_026 flag8 + :62566-62753 AI_026 flag10 射击段）
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -224,7 +224,7 @@ describe('⑤ 帕鲁地面随从 1112/1118（AI_067 flag8/flag9）', () => {
     const m0 = mk(375);
     expect((m0 as { alphaFade: number }).alphaFade).toBe(0);
   });
-  it('索敌射程分档：敌 600px——1112（num2=800 :50030）朝敌移动，1118（500 :50052）不索', () => {
+  it('索敌射程分档：敌 600px——1112（num2=800 :50098）朝敌移动，1118（500 :50064）不索', () => {
     const ex = 60 * 16 + 600, ey = 90 * 16;
     {
       const { hooks } = makeHooks([mkEnemy(1, ex, ey)]);
@@ -241,7 +241,7 @@ describe('⑤ 帕鲁地面随从 1112/1118（AI_067 flag8/flag9）', () => {
       expect(Math.hypot(ex - m.cx, ey - m.cy)).toBeGreaterThan(500);
     }
   });
-  it('扑击态机：贴近敌入 ai[0]=2（num10 16/30 :50490/:50499），仅该段有接触伤（:50444/:50904）', () => {
+  it('扑击态机：贴近敌入 ai[0]=2（num10 16/30 :50492/:50498），仅该段有接触伤（:50867/:50904）', () => {
     for (const [projId, num10] of [[1112, 16], [1118, 30]] as const) {
       const groundCy = 100 * 16 - 12;   // 地表行 y=100 → 敌踏地
       const e = mkEnemy(1, 60 * 16 + 30, groundCy);
@@ -253,7 +253,7 @@ describe('⑤ 帕鲁地面随从 1112/1118（AI_067 flag8/flag9）', () => {
       const hp0 = e.hp;
       m.fixedUpdate(1, hooks);   // 扑击段 contact
       expect(e.hp).toBeLessThan(hp0);
-      // 扑击时长耗尽 → 回 0（num9=0 :50954-50956）→ 仍贴敌即重入扑击（原版循环：
+      // 扑击时长耗尽 → 回 0（num9=0 :50957-50960）→ 仍贴敌即重入扑击（原版循环：
       // ai[0]==0 索敌 → 距侧翼点 <20 再入 2），扑击链持续
       let reentered = false;
       for (let k = 0; k < num10 + 6; k++) {
@@ -273,7 +273,7 @@ describe('⑤ 帕鲁地面随从 1112/1118（AI_067 flag8/flag9）', () => {
     for (let k = 0; k < 19; k++) m.fixedUpdate(1, hooks);
     expect(sfx).toContain('pal_cattiva');
   });
-  it('归位门：距主 >500（num3 :50031）入 ai[0]=1；1118 常规飞回、1112 主肩硬锚（:50841-50853）', () => {
+  it('归位门：距主 >500（num3 :50050）入 ai[0]=1；1118 常规飞回、1112 主肩硬锚（:50841-50853）', () => {
     {
       const { hooks } = makeHooks();
       const m = new MinionProj(player.cx + 600, player.cy, 1118, 10, 2, false, 0, false, () => player);
@@ -295,8 +295,8 @@ describe('⑤ 帕鲁地面随从 1112/1118（AI_067 flag8/flag9）', () => {
   });
 });
 
-describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_062 射击段）', () => {
-  it('MINION_SHOOT 档：cd 30（:62573）/射程 1160（:62672）/弹 1097/地狱火（:11315-11318）', () => {
+describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_026 flag10 射击段）', () => {
+  it('MINION_SHOOT 档：cd 30（:62569）/射程 1160（:62677/:62691）/弹 1097/地狱火（:11315-11318）', () => {
     // 表驱动断言经行为测试间接覆盖（表为模块私有）——此处验证射击出口
     const e = mkEnemy(1, 60 * 16 + 200, 90 * 16);
     const { hooks, added } = makeHooks([e]);
@@ -307,7 +307,7 @@ describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_062 射击段）', () => {
     expect(shot!.projId).toBe(1097);
     expect((shot as unknown as { igniteHellfire: boolean }).igniteHellfire).toBe(true);
     expect((shot as unknown as { whipTagShot: boolean }).whipTagShot).toBe(true);
-    // cd=30：30t 内不再射（:62573 num135=30；递减/开火互斥分支——归零次 tick 才射）
+    // cd=30：30t 内不再射（:62569 num135=30；递减/开火互斥分支——归零次 tick 才射）
     added.length = 0;
     let secondShotAt = -1;
     for (let k = 1; k <= 40; k++) {

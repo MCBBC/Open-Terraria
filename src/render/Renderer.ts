@@ -2,6 +2,7 @@
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { TILE, CHUNK } from '../core/constants';
 import { TintAtlas, type TintRect } from './TintAtlas';
+import { tintedTex } from './StringLine';
 import { NPC_GRIDS } from '../remaster/NpcGridLayouts';
 import type { Camera } from './Camera';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
@@ -2360,6 +2361,7 @@ export class Renderer {
     if (this.gpuDegraded) return;
     this.animTick++;
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
+    this.whipFullbrightQueue.length = 0;   // 1034 星辰鞭线体全亮队列逐帧重建（WhipProj 收集）
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
     this._frameEntities = entities;   // _moonLordCore（月总滤镜）drawScreenFilterChain 消费
@@ -2968,6 +2970,10 @@ export class Renderer {
     // 7e. 全亮翅膀主纹理 + 叠画（mainGlow/overlay 队列——原版硬编码 DrawData 色
     //     不受光照；drawPlayer 收集、此处消费）
     this.flushWingGlow(cam, z);
+
+    // 7e'. 1034 星辰鞭线体全亮（flag3 :36747-36749 color2=color 免逐段取光——
+    //      固定色 (0,61,153,12) 不受光照合成;WhipProj 收集、此处 worldToScreen 直画）
+    this.flushWhipFullbright(cam, z);
 
     // 7a-bis. 图格网格（DrawInterface_6_TileGridOption Main.cs:45634-45671 1:1）：
     // 开关=Main.MouseShowBuildingGrid（IngameOptions.cs:745）；智能光标激活时不画；
@@ -8483,6 +8489,13 @@ export class Renderer {
   }> = [];
   /** 均一色调 scratch（叠画 tint 精确化：RGB×tint/255 + A×alpha/255） */
   private wingTintScratch: HTMLCanvasElement | null = null;
+  /** 1034 星辰鞭线体全亮队列（flag3 :36747-36749 color2=color 免逐段取光——
+   *  固定色不受光照合成;WhipProj 收集、flushWhipFullbright 消费） */
+  whipFullbrightQueue: Array<{
+    pts: Array<{ x: number; y: number }>;
+    tex: CanvasImageSource & { width: number; height: number };
+    color: [number, number, number, number];
+  }> = [];
 
   /** 队列消费（合成后调用）：局部变换 = worldToScreen(wx,wy) + scale(facing·z, z)。
    *  stealth 逐层公式（drawinfo.stealth = settled）：34/40×s、51 luna×s、44×s、
@@ -8490,6 +8503,40 @@ export class Renderer {
    *  43×s²、50×s²、38×s、47 A180 iff s==1、29 selfAdd×s²·0.5（:1071）、
    *  31 nebula×s（:1091/:1096）、32 glowAdd×s（:1100）、22 火焰逐次平方（:681 累乘）、
    *  extra38=Lerp(colorArmorBody,White,0.5) 光采样 */
+  /** 1034 星辰鞭线体全亮消费（7e'，compositeLight 后）：flag3（:36747-36749 color2=color）
+   *  = 线体固定色 (0,61,153,12) 不受光照——世界系控制点 worldToScreen 后逐段直画
+   *  （rot=atan2−π/2、scale=(1,(段长+2)/H)×z、origin=(W/2,2)，与 WhipProj 预合成同式） */
+  private flushWhipFullbright(cam: Camera, z: number): void {
+    if (!this.whipFullbrightQueue.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    for (const q of this.whipFullbrightQueue) {
+      const tex = q.tex;
+      const [r, g, b, a] = q.color;
+      const tinted = tintedTex(tex as never, [r, g, b], true);
+      if (!tinted) continue;
+      ctx.globalAlpha = a / 255;
+      for (let i = 0; i + 1 < q.pts.length; i++) {
+        const p0 = q.pts[i], p1 = q.pts[i + 1];
+        const dx = p1.x - p0.x, dy = p1.y - p0.y;
+        const len = Math.hypot(dx, dy);
+        const [sx, sy] = cam.worldToScreen(p0.x, p0.y);
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(Math.atan2(dy, dx) - Math.PI / 2);
+        ctx.scale(z, z);
+        ctx.drawImage(tinted, 0, 0, tex.width, tex.height,
+          -tex.width / 2, -2, tex.width, len + 2);
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    this.whipFullbrightQueue.length = 0;
+  }
+
   private flushWingGlow(cam: Camera, z: number): void {
     if (!this.wingGlowQueue.length) return;
     const atlas = this.atlas;
@@ -9817,6 +9864,9 @@ export class Renderer {
       // (vy≠0 && mount.CanUseWings)——本仓 mount.CanUseWings ≡ !ridingMount,
       // mnt 非空即骑乘;hidden 旗由聚合侧随翼记录,vy 项不入记忆化键故在此判）
       const wingAgg = p.equipStats.wing;
+      // 隐藏翼显形门（★1457 :15709-15717 改 `vy!=0 && !mount.Active`——1456 旧条件
+      // 是 vy!=0 && mount.CanUseWings;1457 下骑【任何】坐骑时隐藏翼 vy≠0 即显形,
+      // 不再要求坐骑能飞。V2b D6 差异登记转正）
       const wingVisible = !wingAgg?.hidden || (p.vy !== 0 && !mnt);
       const wingSlot = wingAgg && wingVisible && !mnt && !merfolkClearWings && !mntHidden ? wingAgg.logic : 0;
       if (wingSlot > 0 && this.atlas) {

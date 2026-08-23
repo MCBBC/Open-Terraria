@@ -485,6 +485,13 @@ export function drawTileFlames(
       if (!st.flags[i]) continue;
       const def = TILE_DEFS[st.type[i]];
       const sheet = def?.vanilla?.sheet ?? -1;
+      // 摆动族（草/藤/吊挂灯笼 42/吊灯 34 等 MultiTileVine/Basic/Vine 全家）：原版主循环
+      // AddSpecialPoint 后 continue——普通绘制路径（含 DrawSingleTile_Flames :1746）整体
+      // 跳过，摆动 tile【没有火焰叠画层】。曾照画 = 火焰用自身贴图 tint 副本钉在静态格位
+      // + 摆动层本体在摆动位 = 双影（2026-08-23 用户报地牢吊挂灯笼推晃重影，与假人
+      // 烘焙静止行透出同病）。swayBakeSkip 与烘焙摘除同源（例外帧 530/705/227 走普通
+      // 路径 = 原版也画火焰，门完全对称）
+      if (def?.vanilla && swayBakeSkip(st.type[i], st.frameX[i])) continue;
       const isCampfire = sheet === CAMPFIRE_FLAME.sheet;
       const isBrazier = !isCampfire && BRAZIER_FLAME_TILE[sheet] !== undefined;
       const flameIdx = isCampfire ? CAMPFIRE_FLAME.flame

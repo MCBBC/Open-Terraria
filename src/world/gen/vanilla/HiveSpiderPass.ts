@@ -796,6 +796,9 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
   //   （countTiles 的 SolidTile 洪泛不再被 379 阻断）。本仓生成期不放置 379,行为无差,
   //   存档时间线——原版由 UndergroundJungleTrees 头（cs:17956,本仓缺该 pass,备案）还原。
   flipGenSolid([379], false);
+  // ★UUUUUU（cs:17517 `if (notTheBees) Main.tileSolid[225] = true`）：蜂蜜块回实心——
+  //   蜂巢世界 SpiderNest 采样/countTiles 洪泛把 225 计实心；尾 cs:17519 翻回 false。
+  if (gs.seedFlags.notTheBees) flipGenSolid([225], true);
   const __m = (globalThis as { __swSpiderNest?: (s: string) => void }).__swSpiderNest;
   // QQQQQ：候选级采样日志（countTiles 门对拍用；无钩零开销）
   const __c = (globalThis as { __swSpiderCand?: (n: number, t: number, x: number, y: number, count: number, shroom: number) => void }).__swSpiderCand;
@@ -824,6 +827,8 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
   //   （FragileIce cs:16783 曾翻非实心）——此后 UndergroundHouses 头（cs:17077）与
   //   LihzahrdTemplePart2 头（cs:17813）会再各自翻转。本仓 SpiderNest 槽在薄冰之后,
   //   时序与原版一致（FragileIce 16756 < SpiderCaves 17455）。
+  // ★UUUUUU（cs:17519 `if (notTheBees) Main.tileSolid[225] = false`）：蜂蜜块还原非实心
+  if (gs.seedFlags.notTheBees) flipGenSolid([225], false);
   flipGenSolid([162], true);
 }
 

@@ -419,14 +419,20 @@ import { settleWorldLiquids, finalGenMergeScan } from '../liquid/settle';
 import vanillaJson from '../../../public/sprites/vanilla.json';
 import { runUndergroundJungleTreesPass } from './vanilla/UndergroundJungleTreesPass';
 import { runQuickCleanupPass } from './vanilla/QuickCleanupPass';
+// ★UUUUUU（2026-08-23）：not the bees 两大全域转化（六槽头 + FinalCleanup 尾）
+import { runNotTheBees } from './vanilla/NotTheBeesPass';
 // ★1457 对齐档 2（2026-08-23）复线：finalSeedCleanup import 恢复（1457 FinalizeSecretSeeds
 //   尾无条件终扫;KKKKKK 批曾撤,基准回 1457 后按 1457 WorldGen.cs:22666/:692 接回）。
 import { finalSeedCleanup } from './vanilla/FinalSeedCleanupPass';
 
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
-async function liquidSettlePass({ world, rng }: GenCtx) {
+async function liquidSettlePass({ world, rng, store }: GenCtx) {
   const gs = ctxGs[0];
   if (gs) {
+    // ★UUUUUU：NotTheBees() 槽头（SettleLiquids cs:16237 / SettleLiquidsPart2
+    //   cs:21064——两沉降 pass 头、QuickWater 之前的首掷消费者位；本函数被
+    //   「水体沉降」与「二次沉降」两槽复用，与原版两次调用位一一对应）
+    if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock) runNotTheBees(store, rng, gs);
     // ★落水越 waterLine 转岩浆接线（Liquid.cs:177-190；WorldGen.ts:383 旧禁改
     //   已解除）：水线=TerrainPass 的 GenVars.waterLine；地牢豁免盒=
     //   CreatePotentialDungeonBounds(percentInMiddle=0.1,percentOnEdges=0.05) 的
@@ -790,6 +796,8 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   // 18 Mud Caves To Grass（cs:12499-12530 原版精确版：全图递归洪水+散块清除；
   // 曾用近似 spreadGrassAll 中心限距+2 轮快照——caves-oracle 位级对账后替换）
   rng.reseed(gs.seed); // ▶MudCavesToJungleGrass cs:12499（零掷骰）
+  // ★UUUUUU：NotTheBees() 首槽（cs:12504——pass 头首掷消费者；纯 NTB 六槽之一）
+  if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock) runNotTheBees(store, rng, gs);
   runMudCavesPass(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
   runDesertPass(store, rng, gs); // 19 Full Desert（pass 头重播在 runDesertMoundOnly 内）
   rng.reseed(gs.seed); // ▶GlowingMushroomPatches cs:12581
@@ -981,6 +989,8 @@ export function vanillaCleanup({ store, rng }: GenCtx) {
 function vanillaLifeCrystals({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  // ★UUUUUU：NotTheBees() 槽头（LifeCrystals cs:16861——errorWorld/getGood 门后首掷位）
+  if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock) runNotTheBees(store, rng, gs);
   runLifeCrystalsPass(store, rng, gs);
 }
 
@@ -1006,9 +1016,11 @@ function surfaceWaterAboveSandPass({ store }: GenCtx) {
 }
 
 // 薄冰（FragileIceOverIceBiomeWater cs:16756）：零掷骰
-function fragileIcePass({ store }: GenCtx) {
+function fragileIcePass({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  // ★UUUUUU：NotTheBees() 槽头（cs:16762——pass 头首掷消费者位）
+  if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock) runNotTheBees(store, rng, gs);
   runFragileIcePass(store, gs);
 }
 
@@ -1050,6 +1062,9 @@ function vanillaSurfaceDecor({ store, rng, world }: GenCtx) {
 function gemCavesPass({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  // ★UUUUUU：GemCaves 整 pass NTB 跳过（cs:17530 `!Skyblock… && !notTheBees`——
+  //   宝石洞在蜂蜜世界里被蜂巢块取代；掷骰随整 pass 消失=原版语义）
+  if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock) return;
   runGemCavesPass(store, rng, gs);
 }
 
@@ -1203,6 +1218,10 @@ function caveWallVarietyPass({ store, rng }: GenCtx) {
 function vanillaMoss({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  // ★UUUUUU：Moss 整 pass NTB 跳过（cs:17581 `(!notTheBees || remix || dontStarve)`
+  //   ——纯 NTB 三者皆假=整 pass 跳过；掷骰随整 pass 消失=原版语义）
+  if (gs.seedFlags.notTheBees && !gs.seedFlags.remix && !gs.seedFlags.theConstant
+    && !gs.seedFlags.skyblock) return;
   runMossAndMossCavesPass(store, rng, gs);
 }
 
@@ -1254,6 +1273,8 @@ function quickCleanupSlot({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   rng.reseed(gs.seed); // ▶QuickCleanup cs:17987
+  // ★UUUUUU：NotTheBees() 槽头（cs:17993——progress 门后首掷消费者位）
+  if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock) runNotTheBees(store, rng, gs);
   runQuickCleanupPass(store, rng, gs);
 }
 
@@ -1491,7 +1512,12 @@ function surfacePass({ store, surface, world }: GenCtx) {
   //  段② 逐列 SpreadGrass 递归扩散（flag2 空气重置——洞穴口露土处也补草）。
   //  Trees/AlchemyHerbs/GrassPlants/GlowingMushroomPlants 曾内嵌于此（地表矿石/倒木/
   //  陷阱/矿骨堆/草墙之前）——2026-08-13 按 1456 注册序拆出独立槽归位（Batch D）
-  if (gs0) spreadingGrassPass(store, gs0);
+  //  ★UUUUUU：NTB 整 pass 跳过（cs:18351 `(!notTheBees || remix || tenth)`——蜂蜜
+  //  世界地表已是泥/丛林草，SpreadingGrass 不再跑；掷骰随整段消失=原版语义）
+  if (gs0 && !(gs0.seedFlags.notTheBees && !gs0.seedFlags.remix
+    && !gs0.seedFlags.tenthAnniversary && !gs0.seedFlags.skyblock)) {
+    spreadingGrassPass(store, gs0);
+  }
   void surface; void world;
 }
 

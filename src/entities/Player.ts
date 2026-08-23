@@ -45,6 +45,15 @@ import { journeyPowers } from '../world/JourneyPowers';
  *  对应原版 Player.creativeGodMode 每帧自 power 授予 Player.cs:25208） */
 function journeyGodmodeActive(): boolean { return journeyPowers().godmode; }
 
+/** 蘑菇矿潜行加成轴 = Utils.Remap(stealth, 1f, 0.75f, 1f, 0f)（1457 Player.cs:26015
+ *  num26；Utils.cs:345-348 Remap = Lerp(toMin,toMax,GetLerpValue(fromMin,fromMax,v,
+ *  clamped))，Utils.cs:315-342 反序轴钳制）——s=1（无潜行）→1、s=0.75→0、s<0.75 钳 0，
+ *  解析式 clamp(4s−3, 0, 1)。加成因子 (1−num26) 只在深潜行段升起、s≤0.75 起恒满，
+ *  非旧平铺 (1−s) 全程线性（:26016-26018 伤 +0.5/暴 +10/仇恨 -750 全走此轴） */
+function shroomiteStealthRemap(s: number): number {
+  return Math.min(1, Math.max(0, 4 * s - 3));
+}
+
 // ---- 1457 弹药轮换槽序（Player.cs:3175-3180 静态表 1:1）----
 /** AmmoSlotOrder_Default（:3175）：币槽 50-53 → 弹药槽 54-57 → 背包 0-53 */
 export const AMMO_SLOT_ORDER_DEFAULT: readonly number[] = Object.freeze([
@@ -764,8 +773,12 @@ export class Player extends Entity {
   private beetleCharge = 0;
   /** 近战续航窗口（onMeleeHit 刷新；fixedUpdate 内蓄能消费） */
   private lastMeleeTick = 0;
-  /** 潜行 0(可见)-1(满)：蘑菇矿=移动蓄/星璇=双击↓开关（:25500/:25542） */
-  stealth = 0;
+  /** 潜行度：1=无潜行(全可见)、0=满潜行——越低越隐（1457 Player.cs:1545 初值 1f；
+   *  消费式全走 (1−stealth) 加成：变态刀伤/暴 :25970-25971、星璇伤/暴/仇恨
+   *  :26043-26045、蘑菇矿 Remap :26015-26018）。此前误写 0=出生即"满潜行"，
+   *  变态刀/潜行装在首帧即吃满加成、渲染 s'=max(stealth,0.03) 近乎全隐。
+   *  蘑菇矿=移动蓄/星璇=双击↓开关（1457 :25981-26021/:26022-26068） */
+  stealth = 1;
   private stealthTimer = 0;
   vortexStealthActive = false;
   private prevDown = false;
@@ -1776,7 +1789,11 @@ export class Player extends Entity {
   rangedDamageMult(kind: 'arrow' | 'bullet' | 'rocket' | 'other'): number {
     const st = this.equipStats;
     const base = this.damageMult('ranged'); // rangedDamage 全链（装备+四系 buff）
-    const stealthBonus = 1 + (1 - this.stealth) * (st.vortexSet ? 0.8 : st.shroomiteSet ? 0.6 : 0);
+    // 潜行增伤：星璇平铺 (1−s)×0.8（:26043）；蘑菇矿走 Remap 轴 ×0.5（:26015-26016
+    //  num26=Remap(s,1,0.75,1,0)、rangedDamage += (1−num26)×0.5f——曾误平铺 ×0.6）
+    const stealthBonus = st.vortexSet ? 1 + (1 - this.stealth) * 0.8
+      : st.shroomiteSet ? 1 + (1 - shroomiteStealthRemap(this.stealth)) * 0.5
+      : 1;
     if (kind === 'arrow') {
       // 1457 Player.cs:3966 bowEffectiveDamage = (rangedDamage/rangedMultDamage
       //   + arrowDamageAdditiveStack) × rangedMultDamage × arrowDamage——箭袋 stack
@@ -1806,9 +1823,9 @@ export class Player extends Entity {
     // 逐源 += → 潜行装 :25494-25563 减）——本仓潜行三源互斥 if/else 近似 + 配饰
     // 轴 aggroAcc 并入（±400 七件,ApplyEquipFunctional :13992-14109）
     let a: number;
-    if (this.equipStats.vortexSet) a = -Math.round(1200 * s1);
-    else if (this.equipStats.shroomiteSet) a = -Math.round(750 * s1);
-    else if (this.heldPsychoKnife) a = -Math.round(750 * s1);
+    if (this.equipStats.vortexSet) a = -Math.round(1200 * s1);            // :26045 平铺 (1−s)
+    else if (this.equipStats.shroomiteSet) a = -Math.round(750 * (1 - shroomiteStealthRemap(this.stealth)));  // :26015/:26018 Remap 轴（曾误平铺 (1−s)）
+    else if (this.heldPsychoKnife) a = -Math.round(750 * s1);             // :25976 平铺 (1−s)
     else a = 0;
     a += this.equipStats.aggroAcc;
     // 隐身药水(10)：aggro 钳位（Player.cs:25437-25445）——未挥击钳 -750（索敌距离
@@ -1954,7 +1971,9 @@ export class Player extends Entity {
     if (kind === 'melee' && this.heldPsychoKnife) c = Math.min(100, c + Math.round((1 - this.stealth) * 30)); // 变态刀（:25489）
     if (kind === 'ranged') {
       if (this.equipStats.shroomiteType) c += 5; // 蘑菇矿头 rangedCrit+5（:13274+）
-      if (st.shroomiteSet || st.vortexSet) c += Math.round((1 - this.stealth) * (st.vortexSet ? 20 : 10)); // 潜行暴击
+      // 潜行暴击：星璇平铺 (1−s)×20（:26044）；蘑菇矿 Remap 轴 ×10（:26015/:26017）
+      if (st.vortexSet) c += Math.round((1 - this.stealth) * 20);
+      else if (st.shroomiteSet) c += Math.round((1 - shroomiteStealthRemap(this.stealth)) * 10);
     }
     c += this.buffs.wellFedCrit;    // 食物三档全系暴击 +2/3/4（:11525+）
     c += this.buffs.hungerCrit;     // 饥饿/极饿全系暴击 -2/-4（:11562+/:11585+）
@@ -2836,7 +2855,10 @@ export class Player extends Entity {
     // 无 dashDelay 门——冲刺滑行期举盾同样制动）。原版盾举态每帧 Update 重算
     if (this.shieldRaised && this.vy === 0 && Math.abs(this.vx) > 3) this.vx /= 2;
     const speedMult = this.buffs.moveSpeedMult * this.equipStats.moveMult * (this.inHoney ? 0.5 : 1)
-      * (this.vortexStealthActive && this.stealth > 0 ? 0.3 : 1)   // 星璇潜行移速（:25563）
+      * (this.vortexStealthActive ? 0.3 : 1)   // 星璇潜行移速 ×0.3（1457 Player.cs:26046-26047
+                                              // vortexStealthActive 全程生效,无 stealth 门——
+                                              // 旧 `&& stealth>0` 系 0/1 语义反写期产物,满潜行
+                                              // 后移速惩罚反而消失,1456 :25563-25564 同无门）
       * (duneBoost ? 1.75 : 1)
       * strongestSlow;
     // 冰冻 Frozen(47,Player.cs:9749 frozen=true) ∪ 微光化 buff 353（:11381-11388
@@ -3952,32 +3974,48 @@ export class Player extends Entity {
     })();
     if (heldVid === 3106) {
       if (this.useTime > 0) { this.stealthTimer = 15; if (this.stealth > 0) this.stealth = Math.min(1, this.stealth + 0.1); }
-      else if (Math.abs(this.vx) < 0.1 && Math.abs(this.vy) < 0.1 && this.stealthTimer === 0 && this.stealth > 0) {
-        this.stealth = Math.max(0, this.stealth - 0.015);
+      // :25940 静止衰减分支带 !mount.Active——骑乘不走衰减（落 else 回升段）
+      else if (Math.abs(this.vx) < 0.1 && Math.abs(this.vy) < 0.1 && !this.mount.active
+        && this.stealthTimer === 0 && this.stealth > 0) {
+        this.stealth = Math.max(0, this.stealth - 0.02);   // :25944 0.02f（曾误 0.015=蘑菇矿档）
       }
+      // :25955-25965 else 段（移动/骑乘）：回升 +0.1/t、骑坐骑 stealth 直归 1（曾整缺
+      // ——移动后潜行度冻结不回升、骑坐骑仍保持隐身加成）
+      else {
+        if (this.stealth > 0) this.stealth = Math.min(1, this.stealth + 0.1);   // :25957-25960
+        if (this.mount.active) this.stealth = 1;                                 // :25961-25964
+      }
+      if (this.stealth > 1) this.stealth = 1;   // :25966-25969 钳顶
       if (this.stealthTimer > 0) this.stealthTimer--;
     } else if (this.equipStats.shroomiteSet) {
       if (this.useTime > 0) this.stealthTimer = 5;
-      const still = Math.abs(this.vx) < 0.1 && Math.abs(this.vy) < 0.1;
+      // :25986 静止衰减分支带 !mount.Active——骑乘走 else 回升段
+      const still = Math.abs(this.vx) < 0.1 && Math.abs(this.vy) < 0.1 && !this.mount.active;
       if (still) {
         if (this.stealthTimer === 0 && this.stealth > 0) this.stealth = Math.max(0, this.stealth - 0.015);
       } else {
         this.stealth = Math.min(1, this.stealth + (Math.abs(this.vx) + Math.abs(this.vy)) * 0.0075);
+        if (this.mount.active) this.stealth = 1;   // :26010-26013 骑坐骑 stealth=1f（曾缺）
       }
       if (this.stealthTimer > 0) this.stealthTimer--;
     } else if (this.equipStats.vortexSet) {
-      // 双击↓检测（KeyDoubleTap :24740-24749 窗口 15t）
+      // 双击↓检测（KeyDoubleTap :24740-24749 窗口 15t）——:57444-57448 双击只翻
+      // vortexStealthActive 开关、不复位 stealth（衰减/回升段自然处理；曾强置 1 =
+      // 半潜行态双击开反而先回满再衰减）
       const downNow = this.inputDown;
       if (downNow && !this.prevDown && this.downTapT > 0) {
         this.vortexStealthActive = !this.vortexStealthActive;
-        if (this.vortexStealthActive) this.stealth = 1;
       }
       if (downNow && !this.prevDown) this.downTapT = 15;
       else if (this.downTapT > 0) this.downTapT--;
       this.prevDown = downNow;
       if (this.vortexStealthActive) this.stealth = Math.max(0, this.stealth - 0.04);
+      // 未潜行态回升 +0.04/t 至 1（1457 Player.cs:26052-26060 else 分支——缺此段则
+      // 关潜行后 stealth 恒 0：渲染 settled=s'≈0.03 近似永久隐身 + (1−s)×0.8 伤/
+      // ×20 暴恒满（:26043-26044）。2026-08-23 潜行语义统一批补）
+      else this.stealth = Math.min(1, this.stealth + 0.04);
     } else {
-      this.stealth = 0;
+      this.stealth = 1;   // 无潜行装=无潜行（1457 Player.cs:26094-26097 else 分支 stealth=1f；初值同 :1545）
       this.vortexStealthActive = false;
     }
     // 星云三族逐级衰减（:11660-11670：到时降 1 级并重挂 480t，非直接清零）
@@ -5111,6 +5149,10 @@ export class Player extends Entity {
   private wingFrameScratch: WingFrameState = { frame: 0, counter: 0 };
   /** Main.miscCounter 近似（每 tick +1；翅膀 28 绘制帧 miscCounter/5%4 消费） */
   miscCounter = 0;
+  /** 棉花糖烤串 968 烤制计时（player.miscTimer，Player.cs:1339，1456 :1244——
+   *  仅 ItemCheck_ApplyHoldStyle 968 支 :50955-50994 消费；运行时态不入档，
+   *  原版同；分支不进（换持/死亡/pulley）时冻结非清零） */
+  miscTimer = 0;
   /** AdvancedShadows 位置历史环（≤31 项，翅膀 45 彩虹拖尾 :2901 消费；每 tick 尾插） */
   advancedShadows: Array<{ x: number; y: number }> = [];
   /** itemFlame（LegacyPlayerRenderer :493-502：每 5t 重掷 7 组，仅翅膀 22 在用时更新；
@@ -5782,6 +5824,9 @@ export class Player extends Entity {
     }
     // 黑带/忍者大师装备 10% 闪避（Player.Hurt :9772 blackBelt 分支）
     if (eq.blackBelt && Math.random() < 0.1) return 0;
+    // 受击破潜行（Player.Hurt :38530 `stealth = 1f;`——闪避分支已全部早退,走到此处
+    // 即伤害落地,无条件复位；潜行装下一帧由更新段自然回蓄。曾缺=潜行态挨打不破隐）
+    this.stealth = 1;
     // 耐久药水(114)：endurance+0.1 → 受伤 ×0.9（Player.endurance 在 Hurt 结算）
     const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
       + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0)   // 甲虫壳每球 15%（buffs 95-97）

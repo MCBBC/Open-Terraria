@@ -5,8 +5,11 @@
 // ② AI_062 族（373/375/407/423/613，:62983-62990）velocity.X>0 →
 //    spriteDirection=-1——贴图朝左、右行才翻转 → facing=-sign(vx)
 //    （曾误 facing=sign(vx) 全族镜像）
-// ③ AI_026/AI_164 族（266/191-194/313/379/390/391/831/970/1094）原版零
-//    spriteDirection 赋值——恒不翻转（我们曾按 facing 翻转=错向）
+// ③ AI_026/AI_164 族（266/191-194/313/379/831/970/1094）原版零
+//    spriteDirection 赋值——恒不翻转（我们曾按 facing 翻转=错向）。
+//    2026-08-23 订正：390-392 蜘蛛有赋值（共享 :63316-63323 `type != 313` + flag7
+//    专属 :65162 spriteDirection=-direction）→ 已移出 MINION_NO_FLIP（见
+//    weapon-minion-ai.test.ts 蜘蛛镜像断言）
 // ④ 963 阿比盖尔特判 ×-1（:62992）贴图朝右——常规 facing=sign(目标方向) 不变
 import { describe, expect, it } from 'vitest';
 import { MinionProj } from '../src/entities/MinionProj';
@@ -93,6 +96,9 @@ function mkMinion(projId: number, ground: boolean, owner: Player): MinionProj {
   return new MinionProj(owner.cx, owner.cy - 40, projId, 10, 2, false, 0, ground,
     () => owner);
 }
+/** AI_062 私有态读口（a62A0=ai[0]/a62A1=ai[1]） */
+const priv = (m: MinionProj): { a62A0: number; a62A1: number } =>
+  m as unknown as { a62A0: number; a62A1: number };
 
 describe('召唤兽朝向/旋转语义（镜像修复回归）', () => {
   it('双子 387：交战中朝目标旋转 +π、恒不水平翻转（:28864-28868）', () => {
@@ -134,13 +140,34 @@ describe('召唤兽朝向/旋转语义（镜像修复回归）', () => {
     expect(mL.facing).toBe(1);                  // 左行不翻（:62986-62988）
   });
 
-  it('AI_062 族全表（373/375/407/423/613）右行 facing=-1', () => {
-    for (const id of [373, 375, 407, 423, 613]) {
+  it('AI_062 族全表（373/375/407/423/613）右行 facing=-1;423/613 冲刺触发拍冻结（:66562/:66600 return）', () => {
+    // 2026-08-23 冲刺真实化更新：423/613 在 600px 入冲刺门（:66555/:66593）→ 触发拍
+    // return 跳过姿态段（:66827 rotation/:66947-66954 spriteDirection）→ facing 冻结
+    // 初值;非冲刺拍照常 :66947-66954 右行 facing=-1
+    for (const id of [373, 375, 407]) {
       const { hooks, player } = makeHooks([mkEnemy(1, 60 * 16 + 600, 90 * 16 - 40)]);
       const m = mkMinion(id, false, player);
       m.fixedUpdate(1, hooks);
       expect(m.vx, `proj ${id} 应朝右目标移动`).toBeGreaterThan(0);
       expect(m.facing, `proj ${id} 右行应 facing=-1`).toBe(-1);
+    }
+    for (const id of [423, 613]) {
+      const far = makeHooks([mkEnemy(1, 60 * 16 + 600, 90 * 16 - 40)]);
+      const mF = mkMinion(id, false, far.player);
+      mF.fixedUpdate(1, far.hooks);
+      expect(priv(mF).a62A0, `proj ${id} 600px 应触发冲刺`).toBe(2);
+      expect(mF.facing, `proj ${id} 触发拍姿态冻结（初值 1）`).toBe(1);
+      // 非冲刺档：423 瞄准距 262（200<距≤300 门内不冲）、613 距 290（≤400）→
+      // >200 通用加速段 vx>0 → facing=-1。613 压射击冷却（:67116 门 a62A1≠0 不出手
+      // ——隔离 :67129 后坐 velocity-=向×速/3 对朝向断言的干扰）
+      const ex = id === 423 ? 250 : 350;
+      const near = makeHooks([mkEnemy(1, 60 * 16 + ex, 90 * 16 - 40)]);
+      const mN = mkMinion(id, false, near.player);
+      priv(mN).a62A1 = 1;
+      mN.fixedUpdate(1, near.hooks);
+      expect(priv(mN).a62A0, `proj ${id} 近距不冲`).toBe(0);
+      expect(mN.vx, `proj ${id} 应朝右目标移动`).toBeGreaterThan(0);
+      expect(mN.facing, `proj ${id} 右行应 facing=-1`).toBe(-1);
     }
   });
 

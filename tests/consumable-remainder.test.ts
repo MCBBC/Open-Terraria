@@ -188,9 +188,10 @@ describe('C 恶魔之心 3335 extraAccessory → 配饰槽容量（:44575-44581�
     expect(playerSrc.match(/accSlotMax/g)?.length).toBeGreaterThanOrEqual(4);
     expect(gameSrc).toContain('for (let acc = ACC_ARMOR_START; acc < p.inv.accSlotMax; acc++)');
   });
-  it('使用链：专家/大师门 + 已用整支不可用（:44575 !extraAccessory && Main.expertMode、'
-    + ':51212 CanUse 门——本仓 flagOnce 内隐含）', () => {
-    expect(gameSrc).toContain('if (this.world.isExpert || this.world.isMaster) flagOnce(() => { p.inv.extraAccessory = true; });');
+  it('使用链：专家/大师门 + 经典惰性 + 已用不重播（★V2a ⚠️f：经典 CanUse false :51212≡1457:52689'
+    + ' =整支不可用三无;已用 !extraAccessory 门防重播音）', () => {
+    expect(gameSrc).toContain("if (!(this.world.isExpert || this.world.isMaster)) break;");
+    expect(gameSrc).toContain("if (!p.inv.extraAccessory) flagOnce(() => { p.inv.extraAccessory = true; });");
   });
   it('★难度门偏差备案在案（:18139-18145 extraAccessorySlots 仅 expert/gameMenu 生效——'
     + '本仓玩家档与世界档同存亡,门结构不可达）', () => {

@@ -1,5 +1,6 @@
 // 补 C 审计（docs/audit/item-audit-2026-08-22.md「buffType 余量 / other 类全量补审计」）
-// 趣味件 ❌13 + ⚠️4 修复批回归锁。标杆 = ../Terarria1456/（行号均亲核反编译原文）：
+// 趣味件 ❌13 + ⚠️4 修复批回归锁。标杆 = ../Terarria1456/（行号均亲核反编译原文；
+// 1457 已核全同——各项行为/数值在 1457 逐条比对无差异,行号仍标 1456 口径）：
 //   507 铃 / 508 竖琴   Player.cs:45905-45936（ItemCheck_PlayInstruments——★纯音效
 //                       无弹体：PlaySound(Item26/35) + Main.musicPitch，审计"音效弹"系误记）
 //   4673 鼓槌           Player.cs:46003-46023（站鼓组 tile 486 才发声）+ PlayDrums :46106
@@ -11,20 +12,27 @@
 //                       IlluminantHook/WormHook 四钩爪（shoot 486-489 aiStyle 7），
 //                       本仓 grappleHooks.ts:136-139 已全量在表（钩爪放置=铺绳不成立）
 //   5328 金锁           Player.cs:40946-41010 PlaceThing_LockChest + Chest.Lock Chest.cs:409-473
-//   968 棉花糖          Player.cs:49604-49641（holdStyle 1 静持 + 燃着篝火 frameY<54 门，
-//                       miscTimer>900 → 掉 969 烤棉花糖）
+//   968 棉花糖          Player.cs:50955-50994（1456 :49606-49645；holdStyle 1 静持 +
+//                       燃着篝火 frameY<54 门，miscTimer>900 → 掉 969 烤棉花糖）
+//                       ——2026-08-23 实装转正：态机 FunItems.marshmallowRoastStep +
+//                       探测格 marshmallowProbeTile + Game.checkMarshmallowRoast
+//                       （miscTimer=Player 字段 :1339，1456 :1244）
 //   425 仙灵铃          Player.cs:52252-52272（左键直用三选一 27/101/102——QuickBuff 同入口）
 //   5343 货郎背包       Player.cs:44749-44762（一次性旗 → 旅商股票 +1，Chest.cs:1271）
 //   ⚠️ 星云图标 173-181 Player.cs:56091-56121 NebulaLevelup + :11660 UpdateBuffs_NebulaBuffs
 //   ⚠️ 3353 机械矿车     Mount.cs:1505-1506 frontTextureGlow=MinecartMechMount[1]
 //   ⚠️ 5644 占卜球       （Game.ts:9382 已实装批）回归锁
 //   ⚠️ 1450/4673/508    （FunItems.ts 已实装批）回归锁
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   instrumentUseSound, drumSoundFile, bubbleWandGoreRoll, hiveBeeRoll,
   fairyBellVariant, chestLockOf,
+  marshmallowRoastStep, marshmallowProbeTile, MARSHMALLOW_FRAME, MARSHMALLOW_COOK_TICKS,
 } from '../src/items/FunItems';
-import { FUN_USE_VIDS } from '../src/core/Game';
+import { FUN_USE_VIDS, Game } from '../src/core/Game';
+import { Inventory } from '../src/items/Inventory';
+import { Player } from '../src/entities/Player';
+import { World } from '../src/world/World';
 import { HOOK_ITEMS, HOOK_PROJ_STATS } from '../src/data/grappleHooks';
 import { BUFF_DEFS } from '../src/stats/Buffs';
 import { itemCombat } from '../src/data/vanillaItemCombat';
@@ -179,9 +187,60 @@ describe('❌5328 金锁可锁样式表（Chest.cs:419-462 1:1）', () => {
 });
 
 // ---------------------------------------------------------------------------
-// ❌968 棉花糖烤制（Player.cs:49604-49641 静持烤制门）
+// 968 棉花糖烤制（Player.cs:50955-50994 静持烤制门——实装转正：态机
+//   FunItems.marshmallowRoastStep / 探测格 marshmallowProbeTile /
+//   使用链 Game.checkMarshmallowRoast；miscTimer=Player 字段 :1339）
 // ---------------------------------------------------------------------------
-describe('❌968 火棍棉花糖（holdStyle 1 静持 + 燃着篝火门）', () => {
+/** 烤制桩：小世界 + 玩家中置（中心 (392,648)=格(24,40)）+ 手持 968 + 探测格布
+ *  篝火；Game 走原型桩（consumable-remainder 同式）——spawnDrop 捕获掉落、
+ *  miscTimer 直读 Player 字段（烤制态真身） */
+const ROAST_X = 382, ROAST_Y = 627;
+const mkRoast = (o: {
+  fireFrameY?: number | null;   // null=探测格不布块；数值=篝火 frameY（0 燃着/54 熄灭档边界）
+  heldKey?: string | null;      // undefined=968 / null=空手 / 其余=该键物品
+  stack?: number;
+  timer?: number;               // 预置 miscTimer（烤制态真身）
+  dead?: boolean;
+  pulley?: boolean;
+  facing?: number;
+} = {}) => {
+  const w = new World(64, 64, 32, 'roast');
+  const p = new Player(0, 0, new Inventory());
+  p.x = ROAST_X; p.y = ROAST_Y;
+  p.facing = o.facing ?? 1;
+  p.dead = !!o.dead;
+  p.pulley = !!o.pulley;
+  const { tx, ty } = marshmallowProbeTile(p.x, p.y, p.w, p.facing);
+  if (o.fireFrameY !== null) {
+    w.store.setTileSilent(tx, ty, TILE_BY_KEY['v_215_campfires'], 0, o.fireFrameY ?? 0);
+  }
+  const heldId = o.heldKey === null ? -1
+    : ITEM_BY_KEY[o.heldKey ?? 'vi_968_MarshmallowonaStick'];
+  p.inv.slots[0] = heldId >= 0 ? { id: heldId, stack: o.stack ?? 1 } : null;
+  p.miscTimer = o.timer ?? 0;
+  const drops: Array<{ x: number; y: number; key: string; stack: number }> = [];
+  let invChanged = 0;
+  const g = Object.create(Game.prototype) as unknown as
+    { checkMarshmallowRoast: () => void } & Record<string, unknown>;
+  g.world = w;
+  g.player = p;
+  g.cb = { onInventoryChanged: () => { invChanged++; } };
+  g.spawnDrop = (x: number, y: number, key: string, stack: number) => {
+    drops.push({ x, y, key, stack });
+    return null;
+  };
+  return {
+    w, p, drops, tx, ty,
+    tick: () => g.checkMarshmallowRoast(),
+    invChanged: () => invChanged,
+  };
+};
+
+describe('968 棉花糖烤制（holdStyle 1 静持 + 燃着篝火 frameY<54 门）', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('烤制门数据：篝火 tile 215 在库（TileID.Sets.Campfires）、点燃档 frameY<54 为代码常量', () => {
     const t = TILE_BY_KEY['v_215_campfires'];
     expect(t).toBeDefined();
@@ -194,9 +253,98 @@ describe('❌968 火棍棉花糖（holdStyle 1 静持 + 燃着篝火门）', () 
     expect(f.buffTime).toBe(36000);
     expect(f.consumable).toBeTruthy();
   });
-  it('手持物 968 holdStyle 1（:49546 静持分支门）在库', () => {
+  it('手持物 968 holdStyle 1（:50881 静持分支门，1456 :49532）在库', () => {
     expect(ITEM_BY_KEY['vi_968_MarshmallowonaStick']).toBeDefined();
     expect(itemFuncOfVid(968)?.holdStyle).toBe(1);
+  });
+  it('探测格几何 1:1（:50957/:51020/:50960-50961）：中心前 2 格下一行——32×10 整图帧 + 900t 门', () => {
+    expect(MARSHMALLOW_FRAME).toEqual({ w: 32, h: 10 });  // Item_968.png 整图（GetDrawHitbox 非 IsFood 无动画）
+    expect(MARSHMALLOW_COOK_TICKS).toBe(900);             // :50973 miscTimer > 900
+    // 中心 (392,648)=格(24,40)：facing=1 → 探测 (26,41)（+2 列 +1 行）、facing=-1 → (22,41)
+    expect(marshmallowProbeTile(382, 627, 20, 1)).toEqual({ tx: 26, ty: 41 });
+    expect(marshmallowProbeTile(382, 627, 20, -1)).toEqual({ tx: 22, ty: 41 });
+  });
+  it('燃着门：点燃档（frameY 0）累积、熄灭档（frameY 54 门界）与空格归零（:50966/:50994）', () => {
+    vi.spyOn(Math, 'random').mockImplementation(() => 0.9);   // Next(5)≠0 无加掷
+    const lit = mkRoast({ fireFrameY: 0 });
+    for (let i = 0; i < 10; i++) lit.tick();
+    expect(lit.p.miscTimer).toBe(10);
+    expect(lit.drops).toHaveLength(0);
+    const unlit = mkRoast({ fireFrameY: 54 });
+    unlit.p.miscTimer = 500;
+    unlit.tick();
+    expect(unlit.p.miscTimer).toBe(0);
+    const bare = mkRoast({ fireFrameY: null });
+    bare.p.miscTimer = 500;
+    bare.tick();
+    expect(bare.p.miscTimer).toBe(0);
+  });
+  it('时长累积：无加掷 +1/tick 恰 901t 烤成（900t 严格不烤）；Next(5)==0 加掷 +2/tick 恰 451t', () => {
+    const r09 = () => 0.9;
+    let t = 0, cooked = 0;
+    for (let i = 0; i < 901; i++) {
+      const s = marshmallowRoastStep(t, true, r09);
+      t = s.timer;
+      if (s.cooked) cooked++;
+    }
+    expect(cooked).toBe(1);
+    expect(t).toBe(0);                                    // 烤成即归零（:50975）
+    let u = 0;
+    for (let i = 0; i < 900; i++) u = marshmallowRoastStep(u, true, r09).timer;
+    expect(u).toBe(900);                                  // >900 严格门：900t 不烤
+    let v = 0, cooked2 = 0;
+    for (let i = 0; i < 451; i++) {
+      const s = marshmallowRoastStep(v, true, () => 0);   // Next(5)==0 恒加掷
+      v = s.timer;
+      if (s.cooked) cooked2++;
+    }
+    expect(cooked2).toBe(1);
+  });
+  it('产物 969 掉落 + 968 消耗：>900t 一 tick 掉 1 熟棉花糖、手持 stack-1；1 堆尽清格（TurnToAir）', () => {
+    vi.spyOn(Math, 'random').mockImplementation(() => 0.9);
+    const two = mkRoast({ timer: 900, stack: 2 });
+    two.tick();
+    expect(two.drops).toEqual([{
+      x: two.p.cx - 8, y: two.p.cy - 8,                   // QuickSpawnItem(969)（:50976）
+      key: 'vi_969_CookedMarshmallow', stack: 1,
+    }]);
+    expect(two.p.inv.slots[0]).toEqual({ id: ITEM_BY_KEY['vi_968_MarshmallowonaStick'], stack: 1 });  // 消耗 1 不清格
+    expect(two.p.miscTimer).toBe(0);                      // :50975
+    expect(two.invChanged()).toBe(1);
+    const one = mkRoast({ timer: 900, stack: 1 });
+    one.tick();
+    expect(one.p.inv.slots[0]).toBeNull();                // stack==0 → TurnToAir（:50978-50981）
+    const idle = mkRoast({ timer: 100, stack: 3 });       // 未烤成不掉不耗
+    idle.tick();
+    expect(idle.drops).toHaveLength(0);
+    expect(idle.p.inv.slots[0]).toEqual({ id: ITEM_BY_KEY['vi_968_MarshmallowonaStick'], stack: 3 });
+  });
+  it('离火中断：累积中挖火归零、回火从 0 重积（:50994 else 支）', () => {
+    vi.spyOn(Math, 'random').mockImplementation(() => 0.9);
+    const r = mkRoast({ fireFrameY: 0, timer: 500 });
+    r.tick();
+    expect(r.p.miscTimer).toBe(501);                      // 火上继续积
+    r.w.store.setTileSilent(r.tx, r.ty, 0, 0, 0);         // 挖掉篝火
+    r.tick();
+    expect(r.p.miscTimer).toBe(0);
+    expect(r.drops).toHaveLength(0);
+    r.w.store.setTileSilent(r.tx, r.ty, TILE_BY_KEY['v_215_campfires'], 0, 0);
+    r.tick();
+    expect(r.p.miscTimer).toBe(1);                        // 从 0 重积
+  });
+  it('分支外冻结（原版语义）：换持/空手/死亡/pulley 均不清 miscTimer（死亡不跑 ItemCheck、:50881 && !pulley）', () => {
+    vi.spyOn(Math, 'random').mockImplementation(() => 0.9);
+    for (const o of [
+      { heldKey: 'vi_969_CookedMarshmallow' as string | null },   // 换持非 968
+      { heldKey: null as string | null },                         // 空手
+      { dead: true },
+      { pulley: true },                                           // 绳端悬挂（onRope 攀爬不门——原版同）
+    ]) {
+      const r = mkRoast({ fireFrameY: 0, timer: 500, ...o });
+      r.tick();
+      expect(r.p.miscTimer).toBe(500);
+      expect(r.drops).toHaveLength(0);
+    }
   });
 });
 
@@ -246,7 +394,7 @@ describe('❌5343 货郎的背包（一次性旗 → 旅商每日股票 +1）', 
 describe('⚠️ 星云增益图标 173-181（Player.nebulaBuffIcons 档位映射）', () => {
   it('档位→原版 buff id：0=伤 179-181 / 1=命 173-175 / 2=魔 176-178（:56109/:56113/:56117）', async () => {
     const { Player } = await import('../src/entities/Player');
-    const p = new Player(0, 0);
+    const p = new Player(0, 0, new Inventory());
     p.nebulaLevelup(0);                                 // 伤 L1 → 179
     p.nebulaLevelup(0);
     p.nebulaLevelup(1);                                 // 命 L1 → 173
@@ -262,7 +410,7 @@ describe('⚠️ 星云增益图标 173-181（Player.nebulaBuffIcons 档位映�
   });
   it('等级 0 族不出块；nebulaCancel 清族（右键 DelBuff 等价）', async () => {
     const { Player } = await import('../src/entities/Player');
-    const p = new Player(0, 0);
+    const p = new Player(0, 0, new Inventory());
     expect(p.nebulaBuffIcons()).toEqual([]);
     p.nebulaLevelup(0);
     expect(p.nebulaBuffIcons()).toHaveLength(1);

@@ -1598,7 +1598,7 @@ export class MountInstance {
               this.idleTime = this.idleTimeNext; this.frame = d.idleFrameStart ?? 0;
               // 62-65（1457 Mount.cs:4246-4251）：idle 循环回卷时 1/20 直接打断回
               // 站立首帧（待机动画提前收尾；idleTimeNext 对 62-65 = 缺省 rand(900,1500)
-              // ——:4202-4204 显式分支与缺省同值，无差异）
+              // ——:4208-4210 显式分支与缺省 :4195 同值，无差异）
               if (this.type >= 62 && this.type <= 65 && Math.random() < 0.05) {
                 this.frameCounter = 0;
                 this.frame = d.standingFrameStart ?? 0;
@@ -1672,7 +1672,7 @@ export class MountInstance {
           || this.frame >= (d.inAirFrameStart ?? 0) + Math.max(1, d.inAirFrameCount ?? 1)) {
           this.frame = d.inAirFrameStart ?? 0;
         }
-        // 62-65 扇翼保持（1457 Mount.cs:4404-4417）：入空中时前置帧 <4（站立组）→
+        // 62-65 扇翼保持（1457 Mount.cs:4395-4411）：入空中时前置帧 <4（站立组）→
         // 计数器钉在 inAirFrameDelay-1（下拍不推进）；计数 <6 → 帧 5（扇翼），否则
         // 计数器钉 6（净效果：空中恒 inAirFrameStart=4 滑翔帧，扇翼支仅状态抖动沿可见）
         if (this.type >= 62 && this.type <= 65) {

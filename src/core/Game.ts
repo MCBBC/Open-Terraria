@@ -106,7 +106,7 @@ import {
 import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_TABLE_SHEETS, WALL_DEFS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
-import { styleDropVidOfFrames, coinBandVid } from '../data/vanillaStyleDrops';
+import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS } from '../data/vanillaStyleDrops';
 import {
   FURNITURE_TILE_KIND, furnitureAnchor, furniturePlaceSingle, furniturePopSingle,
   furnitureTryBreak, furnitureTakeFirst, dollPlace, hatRackPlace, removeFurnitureAt,
@@ -218,6 +218,7 @@ import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KE
 import {
   instrumentNotePitch, instrumentUseSound, drumSoundFile, bubbleWandGoreRoll,
   hiveBeeRoll, fairyBellVariant, chestLockOf,
+  marshmallowProbeTile, marshmallowRoastStep,
 } from '../items/FunItems';
 
 // 导入的原版树族 tile（fellImportedTree 整棵砍伐）：普通树 + 宝石树 + 装饰树 + 灰烬树
@@ -820,11 +821,16 @@ function vanillaMainTime(timeOfDay: number): number {
 }
 
 /** 随从槽位权重（Projectile.minionSlots，Projectile.cs:487 默认 1=0 表外全 1）：
- *  双子 387/388 各 0.5（:4434/:4450，一对=1 槽）。召唤腾位（FreeUpPetsAndMinions
- *  :51022）与每 tick 上限自裁（Projectile.cs:15370-15392，按实体序累加权重自裁）
- *  两处共用——勿改回实体计数（曾致 388 双子每 tick 被补杀）。 */
+ *  双子 387/388 各 0.5（:4434/:4450，一对=1 槽）；龙身段 626/627 各 0.5
+ *  （:6737-6739——再召唤每延伸 2 段=+1 槽,头 625/尾 628 恒 0 槽）。召唤腾位
+ *  （FreeUpPetsAndMinions :52335-52440）与每 tick 上限自裁（Projectile.cs:16812-16845,
+ *  按实体序累加权重自裁）两处共用——勿改回实体计数（曾致 388 双子每 tick 被补杀）。
+ *  基础龙链段（dragonHead 派生）noSlot 不入账、头 625 计 1 槽 = 与原版 0+0.5×2 总量
+ *  等价;延伸段（extendDragon）实账 0.5×2（见 MinionProj.extendDragon 注） */
 function minionSlotsOf(m: MinionProj): number {
-  return m.projId === 387 || m.projId === 388 ? 0.5 : 1;
+  if (m.projId === 387 || m.projId === 388) return 0.5;   // :4434/:4450
+  if (m.projId === 626 || m.projId === 627) return 0.5;   // :6737-6739
+  return 1;
 }
 
 /** ProjectileID.Sets.MinionSacrificable（Terraria.ID/ProjectileID.cs:401 全表，1457）：
@@ -952,19 +958,22 @@ export function maintainMinionBuffs(
   }
 }
 
-/** FreeUpPetsAndMinions 驱逐核（Player.cs:52335-52440，召唤出手时腾位）：
+/** FreeUpPetsAndMinions 驱逐核（Player.cs:52335-52458，召唤出手时腾位）：
  *  ① 帕鲁家族互清（:52340-52360——1093/1112 同族互清；1094↔1113 跨型互清，
  *     1457 扩为四件两对）；
  *  ② MinionSacrificable[sItem.shoot] 门（:52371）——新召弹不可牺牲则不动在场随从；
- *  ③ 池 = 在场 minion 弹按 minionSlots 升序稳定序（:50967-50988 严格升序插入排序，
- *     同权保插入序；本仓 Array.sort 稳定序等价）；
- *  ④ 逐杀至 used ≤ maxMinions − StaffMinionSlotsRequired（:51020 条件 num−num3 >
+ *  ③ 池 = 在场 minion 弹按 minionSlots 升序稳定序（:52381-52393 严格升序插入排序，
+ *     同权保插入序；本仓 Array.sort 稳定序等价）；龙身段整备（:52404-52426）：
+ *     626/627 全部移出普通池,仅「尾邻 627+其前驱 626」该延伸对追加到池尾
+ *     （最后才被逐、按对死,各携摘链 :52440-52452）；
+ *  ④ 逐杀至 used ≤ maxMinions − StaffMinionSlotsRequired（:52432 条件 num−num3 >
  *     max−num2；该表全件=1，ItemID.cs:1106 无覆写）——保护 625 龙头/628 龙尾/623
- *     星尘守护者（:51017）+ num4 双子交替门（:51001 初值 388；杀 387→护 387、杀
- *     388→护 388，:51018-51023 翻转——双子按对死，孤残单只不补杀）。
- *  本仓建模差：龙身段 626/627/628 与守护者 623 为 noSlot 不入池（原版入池但同受
- *  :51017 保护，净效果同）；龙头 625 计 1 槽（原版头 0 槽 + 段对 0.5×2=1，总量等价）
- *  ——故 625 是池内唯一需显式豁免的保护项。 */
+ *     星尘守护者（:52434）+ num4 双子交替门（:52429 初值 388；杀 387→护 387、杀
+ *     388→护 388，:52435-52440 翻转——双子按对死，孤残单只不补杀）。
+ *  本仓建模差：基础龙链段 626/627/628 与守护者 623 为 noSlot 不入池（原版入池但
+ *  626/627 走 ③' 尾邻对特道、628 受 :52434 保护,净效果同）；延伸段 626/627 实账
+ *  0.5/段（:6737-6739）入池走 ③' 特道；龙头 625 计 1 槽（原版头 0 槽 + 基础段对
+ *  0.5×2=1，总量等价）——故 625 是池内唯一需显式豁免的保护项。 */
 export function freeUpMinionsForSummon(
   shoot: number,
   minions: readonly MinionProj[],
@@ -986,19 +995,39 @@ export function freeUpMinionsForSummon(
   }
   // ② 可牺牲门（:50963）
   if (!MINION_SACRIFICABLE.has(shoot)) return;
-  const alive = minions.filter((m) => !m.dead);
-  // ③ 槽位总量 num（:50989）+ 升序稳定序（:50976-50988）
+  // 链扫描域（含 noSlot 段/尾——尾邻对判定/摘链需要）与账域（noSlot 不入账：
+  // 基础链段由头 625 的 1 槽等价覆盖,见 minionSlotsOf 注）
+  const chainAll = minions.filter((m) => !m.dead && !m.sentry);
+  const alive = chainAll.filter((m) => !m.noSlot);
+  // ③ 槽位总量 num（:52396 含 626/627 各 0.5）+ 升序稳定序（:52381-52393）
   let used = alive.reduce((s, m) => s + minionSlotsOf(m), 0);
   const pool = [...alive].sort((a, b) => minionSlotsOf(a) - minionSlotsOf(b));
-  // ④ 逐杀（:50999-51049）
-  let twinGuard = 388;                                   // num4（:51001）
-  for (const victim of pool) {
-    if (!(used > maxMinions - 1)) break;                 // :51020
+  // ③' 龙身段池整备（:52404-52426）：626/627 全部移出普通池——仅「尾邻 627」
+  //  （其子段=628 尾）连同其前驱 626（该延伸对）重新【追加到池尾】= 最后才被逐、
+  //  且按对死（先 627 后其前驱 626,各携摘链）
+  const isDragonSeg = (m: MinionProj) => m.projId === 626 || m.projId === 627;
+  const childOf = (m: MinionProj): MinionProj | null =>
+    (chainAll.find((c) => c !== m && !c.dead && c.parentRef?.() === m) as MinionProj | undefined) ?? null;
+  let tailPair: MinionProj[] = [];
+  const body = pool.filter((m) => !isDragonSeg(m));
+  const segs = pool.filter(isDragonSeg);
+  for (const s of segs) {
+    if (s.projId === 627 && childOf(s)?.projId === 628) {
+      const prev = chainAll.find((c) => !c.dead && c.projId === 626 && childOf(c) === s);
+      tailPair = prev ? [s, prev] : [s];               // :52418-52425（627 先、前驱 626 后）
+    }
+  }
+  const finalPool = [...body, ...tailPair];
+  // ④ 逐杀（:52428-52458）
+  let twinGuard = 388;                                   // num4（:52429）
+  for (const victim of finalPool) {
+    if (!(used > maxMinions - 1)) break;                 // :52432
     const t = victim.projId;
-    if (t === twinGuard || t === 625 || t === 628 || t === 623) continue;   // :51017
-    if (t === 388 && twinGuard === 387) twinGuard = 388; // :51018-51023
+    if (t === twinGuard || t === 625 || t === 628 || t === 623) continue;   // :52434
+    if (t === 388 && twinGuard === 387) twinGuard = 388; // :52435-52440
     if (t === 387 && twinGuard === 388) twinGuard = 387;
-    victim.dead = true;                                  // Kill（:51049）
+    if (t === 626 || t === 627) victim.unlinkFromChain(chainAll as unknown[]);   // :52440-52452 摘链
+    victim.dead = true;                                  // Kill（:52457）
     used -= minionSlotsOf(victim);
   }
 }
@@ -2513,7 +2542,7 @@ export class Game implements GameHooks {
   private tryDismountMount(): void {
     const p = this.player;
     if (!p.ridingMount) return;
-    if (p.petting.mount) p.stopPettingAnimal();   // Mount.Dismount :6219-6222（下坐即停抚摸）
+    if (p.petting.mount) p.stopPettingAnimal();   // Mount.Dismount :6229-6231（下坐即停抚摸）
     if (p.mount.tryDismount(p)) {
       this.mountNoSpaceCount = 0;
       return;
@@ -2528,7 +2557,7 @@ export class Game implements GameHooks {
       return;
     }
     this.mountNoSpaceCount = 0;
-    if (p.petting.mount) p.stopPettingAnimal();   // Mount.Dismount :6219-6222
+    if (p.petting.mount) p.stopPettingAnimal();   // Mount.Dismount :6229-6231
     p.mount.dismount(p);
     this.playerNoSpaceTeleport();
   }
@@ -4934,18 +4963,22 @@ export class Game implements GameHooks {
         this.renderer.golfPower = null;
       }
     }
-    // ---- 召唤上限缩水自裁（Projectile.cs:15370-15392：每帧每随从按实体序累加
+    // ---- 召唤上限缩水自裁（Projectile.cs:16812-16845：每帧每随从按实体序累加
     // 自己的 minionSlots，slotsMinions+own > maxMinions → 自裁 Kill——即"槽位
     // 权重制、末位先死"；双子 0.5+0.5=1 槽恰好成对存活，曾误按实体数计数把
-    // 388 补杀）。noSlot 实体（鞭伴生/虎·阿比盖尔本体、龙身、守护者）不参与。
+    // 388 补杀）。noSlot 实体（鞭伴生/虎·阿比盖尔本体、基础龙链段、守护者）不参与；
+    // 延伸段 626/627（0.5/段 :6737-6739）实账参与——超限自裁前先摘链
+    // （:16816-16830 proj.ai[0]/localAI[1] 互指改写=链缩短不断裂）。
     {
       let slotsUsed = 0;
       for (const e of this.entities.projectiles) {
         const m = e as MinionProj;
         if (!(m instanceof MinionProj) || m.dead || m.sentry || m.noSlot) continue;
         const w = minionSlotsOf(m);
-        if (slotsUsed + w > this.player.maxMinions) m.dead = true;   // :15377 自裁
-        else slotsUsed += w;
+        if (slotsUsed + w > this.player.maxMinions) {
+          if (m.projId === 626 || m.projId === 627) m.unlinkFromChain(this.entities.projectiles);   // :16816-16830
+          m.dead = true;   // :16844 自裁
+        } else slotsUsed += w;
       }
       let n = 0;
       for (const e of this.entities.projectiles) {
@@ -6666,10 +6699,16 @@ export class Game implements GameHooks {
    *  vi_ 取 vanilla-itemcombat.useAnimation；legacy 工具 def.tool.speed；
    *  无数据 → 30（原版绝大多数消耗品 useAnimation 15-45 的中位近似）。
    *  ★1457 下限 1（Player.cs:4438-4446 SetItemAnimation(base,mult)：val=(int)(base×mult)、
-   *  base>0 时 val=max(val,1)——base 本身无下限，此前误设 4） */
+   *  base>0 时 val=max(val,1)——base 本身无下限，此前误设 4）。
+   *  ★工具族 base=useAnimation 原值,无 max(10,·)（1457 Player.cs:4448-4480
+   *  ApplyItemAnimation → melee 工具走 SetItemAnimation(useAnimation,meleeSpeed)；
+   *  ItemCheck_StartActualUse :52290-52298 仅 toolTime=1,全文件无 10 下限——
+   *  实值见 Item.cs SetDefaults 逐件,如铜镐 3509 useAnimation=23 :31387-31395、
+   *  骨镐 882 =25 :11642-11656；本仓 35 件桥接工具 speed=itemCombat.useAnimation
+   *  全 ≥20（items.ts VANILLA_TOOL_POWERS 桥）,旧 max(10,·) 恒惰性但非 1457 语义） */
   private heldUseAnimation(def: (typeof ITEM_DEFS)[number] | null): number {
     if (!def) return 30;
-    if (def.tool?.speed) return Math.max(10, def.tool.speed);
+    if (def.tool?.speed) return def.tool.speed;   // 1457：base=useAnimation 原值（:4448-4480），下限 1 在 useSwing 侧
     const vid = def.vid ?? viIdFromKey(def.key);
     if (vid >= 0) {
       const ua = itemCombat(vid)?.useAnimation;
@@ -8728,7 +8767,10 @@ export class Game implements GameHooks {
       if (pvid >= 5337 && pvid <= 5342) this.playUseSound(pvid, 'pickup');
       switch (pvid) {
         case 3335: // 恶魔之心(:44575-44583):解锁第六配饰槽(专家)
-          if (this.world.isExpert || this.world.isMaster) flagOnce(() => { p.inv.extraAccessory = true; });
+          // ★V2a ⚠️f：经典世界 CanUse false（:51212,≡1457:52689）=整支不可用——
+          // 无动画/无音/不置 useTime（使用键完全无响应）;曾仍挥+响+置 30
+          if (!(this.world.isExpert || this.world.isMaster)) break;
+          if (!p.inv.extraAccessory) flagOnce(() => { p.inv.extraAccessory = true; });
           p.useTime = 30;
           this.playUseSound(3335, 'pickup');   // UseSound Item4（Item.cs:30619）
           break;
@@ -10452,7 +10494,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 见函数注释）;damage 传武器基伤——随从每 tick 按当时装备重算
         // （Projectile.cs:15368 live 刷新）
         const slotsOf = minionSlotsOf;
-        const minions = this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry && !(e as MinionProj).noSlot) as MinionProj[];
+        // 池域含 noSlot 实体（freeUpMinionsForSummon 内部再剥：账/池剥 noSlot,
+        // 链扫描保 628 尾——尾邻延伸对判定 :52406-52416 需要）
+        const minions = this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry) as MinionProj[];
         // 星尘龙：已有龙头 → 不出新头，尾前插 2 段（SpawnMinionOnCursor :47906-47963）
         if (cw.shoot === 625) {
           const head = minions.find((m) => m.projId === 625);
@@ -12683,7 +12727,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 3081/62/154）/651（:49679→195/331/62）/652（:48705-48707）/647（:49573 分档）/
       // 705（:49458→276/369/59/2171）/704（:49564→501）/488（:49561→木头 9×Next(10,21),
       // 已接）/694（CheckStalactiteEcho :38940 12+ 档）/702（:48037→1291）;186 钱币带
-      // （:49726-49836 fx 864-954→71/954-1062→72/1062-1170→73,已接）——余档登记待接）
+      // （:49726-49836 fx 864-954→71/954-1062→72/1062-1170→73,已接）——★余档已全接
+      // （2026-08-23 二批：647/648/651/652/694/702/704/705 走下方 Echo 资源组
+      // else 支 → vanillaStyleDrops.echoResourceDropVid 帧段直查,失撑链同接）
       let dropKey = multiTileDropKey(def, vanillaPlaceableTileKeys());
       let dropCount = 1;   // 488 倒木木头 Next(10,21) 等非 1 档覆写
       // ★样式还原（审计补 A ⚠️2，2026-08-22 批）：GetItemDrop_* 21 族按帧掉真物品——
@@ -12736,6 +12782,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 掷串见 spawnCoinBand（段界 90/108 对 3 列 frameX 步 18 列间不变,任一格命中
         // 同带）;无放置物品返还
         this.spawnCoinBand(ax, ay, preFrameX);
+      } else if (ECHO_RESOURCE_SHEETS.has(framedSheet)) {
+        // Echo 资源组 8 def（⚠️4 接档 2026-08-23）：647/648/651/652/694/702/704/705
+        // 全在 KillTile 共享 no-drop 表（WorldGen.cs:66108-66129）,掉落全走 Check*
+        // 帧检分支的资源直掉（非放置物品返还）——vanillaStyleDrops.echoResourceDropVid
+        // 帧段直查;帧段无档=原版无掉落,压 place_ 兜底（647 Rubblemaker 5324/5329/
+        // 5330 放置件挖掉也不返还 Rubblemaker,no-drop 表 :66108）
+        const ev = echoResourceDropVid(framedSheet, preFrameX, preFrameY);
+        dropKey = ev > 0 ? (VANILLA_ITEM_KEY_BY_ID[ev] ?? '') : '';
       }
       if (dropKey) this.spawnDrop(ax * TILE + 8, ay * TILE, dropKey, dropCount);
       // 告示牌族（Main.tileSign {55,85,425,573}，Main.cs:9990-9993）破坏 → 注销
@@ -17258,41 +17312,39 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  /** 棉花糖烤串（Player.cs:49604-49641 ItemCheck_ApplyHoldStyle 的 sItem.type==968
-   *  分支——holdStyle 1 静持即触发，无需动画）：
-   *  - itemLocation.X = pos.X + w/2 + 8×dir（:49605）；检测格 = (itemLocation.X +
-   *    heldItemFrame.Width×0.8×dir)/16、(itemLocation.Y + mountOffset + frame.Height/2)/16
-   *    （:49609-49610——heldItemFrame 取贴图帧，此处 18×18 近似 marshmallow 串贴图）
-   *  - 格为营火（TileID.Sets.Campfires={215}）且 frameY<54（点燃档）→ miscTimer++
-   *    （1/5 概率额外 ++，:49615-49618）→ >900t → 掉落熟棉花糖 969 + 手持 stack--
-   *    （:49622-49638）；否则 miscTimer 归零。selectedItem==58 的 mouseItem 同扣
-   *    档本仓无手持槽，登记 */
-  private marshmallowCookT = 0;
+  /** 棉花糖烤串烤制（Player.cs:50955-50994 ItemCheck_ApplyHoldStyle 的
+   *  sItem.type==968 支，1456 :49606-49645——holdStyle 1 静持即触发，无需动画；
+   *  分支门 :50881 holdStyle==1 && !pulley，1456 :49532）：
+   *  - itemLocation.X = pos.X + w/2 + 8×dir（:50957）、Y = pos.Y + 24（:51020，
+   *    1456 :49671——holdStyle 1 链尾统一式；mountOffset=0 备案）；探测格 =
+   *    (itemLocation.X + heldItemFrame.Width×0.8×dir)/16、(itemLocation.Y +
+   *    frame.Height/2)/16（:50960-50961）——heldItemFrame = GetDrawHitbox(968)
+   *    = Item_968.png 整图 32×10（非 IsFood 无动画），签尖 ≈ 玩家中心前 2 格
+   *  - 探测格为燃着篝火（TileID.Sets.Campfires={215} 且 frameY<54 点燃档，
+   *    :50966）→ 态机 marshmallowRoastStep（miscTimer 是 Player 字段 :1339，
+   *    1456 :1244）：+1/tick、Next(5)==0 再 +1（:50969-50972，均值 1.2/tick →
+   *    ≈750t=12.5s 烤成）→ >900t：QuickSpawnItem(969) + 手持 stack--（:50976-
+   *    50981）；离火 → miscTimer 归零（:50994）。★换持/死亡/pulley 分支不进 →
+   *    miscTimer 冻结非清零（原版同语义——死亡不跑 ItemCheck、holdStyle 门在支外）
+   *  - selectedItem==58 的 mouseItem 同扣档（:50982-50989）本仓无鼠标手持槽，登记 */
   private checkMarshmallowRoast(): void {
     const p = this.player;
     const held = p.inv.heldItem();
     const def = held ? ITEM_DEFS[held.id] : null;
-    if (!def || (def.vid ?? viIdFromKey(def.key)) !== 968 || p.dead || p.onRope) {
-      this.marshmallowCookT = 0;                                   // else miscTimer=0
-      return;
-    }
+    if (!def || (def.vid ?? viIdFromKey(def.key)) !== 968) return;   // :50955 支外冻结
+    if (p.dead || p.pulley) return;      // 死亡不跑 ItemCheck；:50881 && !pulley
     const st = this.world.store;
-    const ilx = p.x + p.w / 2 + 8 * p.facing;                      // :49605
-    const tx = Math.floor((ilx + 18 * 0.8 * p.facing) / TILE);
-    const ty = Math.floor((p.y + 18 / 2) / TILE);                  // mountOffset=0
-    if (!st.inBounds(tx, ty)) { this.marshmallowCookT = 0; return; }
+    const { tx, ty } = marshmallowProbeTile(p.x, p.y, p.w, p.facing);
+    if (!st.inBounds(tx, ty)) { p.miscTimer = 0; return; }   // 原版越界补空 tile → else 归零（:50962-50964/:50994）
     const ti = st.idx(tx, ty);
-    const lit = st.type[ti] !== 0 && TILE_DEFS[st.type[ti]].vanilla?.sheet === 215
-      && st.frameY[ti] < 54;                                       // Campfires && 燃着档
-    if (!lit) { this.marshmallowCookT = 0; return; }
-    this.marshmallowCookT++;                                       // miscTimer++
-    if (Math.random() * 5 < 1) this.marshmallowCookT++;            // :49615-49618
-    if (this.marshmallowCookT > 900) {
-      this.marshmallowCookT = 0;
-      this.spawnDrop(p.cx - 8, p.cy - 8, 'vi_969_CookedMarshmallow', 1, 0, -1);
-      p.inv.removeAt(p.inv.selected, 1);
-      this.cb.onInventoryChanged();
-    }
+    const lit = st.type[ti] !== 0 && TILE_DEFS[st.type[ti]]?.vanilla?.sheet === 215
+      && st.frameY[ti] < 54;                                       // Campfires && 燃着档（:50966）
+    const step = marshmallowRoastStep(p.miscTimer, lit, Math.random);
+    p.miscTimer = step.timer;
+    if (!step.cooked) return;
+    this.spawnDrop(p.cx - 8, p.cy - 8, 'vi_969_CookedMarshmallow', 1, 0, -1);   // QuickSpawnItem(969)（:50976）
+    p.inv.removeAt(p.inv.selected, 1);                             // stack--/TurnToAir（:50977-50981）
+    this.cb.onInventoryChanged();
   }
 
   /** 天顶剑族动画内续发边界（Player.cs:42880 flag4 = itemAnimation>0 &&
@@ -23434,6 +23486,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       let dropKey = multiTileDropKey(def, vanillaPlaceableTileKeys());
       const sv = styleDropVidOfFrames(sheet, afx, afy);
       if (sv > 0) dropKey = VANILLA_ITEM_KEY_BY_ID[sv] ?? dropKey;
+      // Echo 资源组 8 def（⚠️4 接档）失撑同掉（原版失撑与挖掉同走 Check* 帧检
+      // Item.NewItem 一次）;帧段无档=无掉落,压 place_ 兜底（同挖掉路,647 不还
+      // Rubblemaker——见 vanillaStyleDrops.echoResourceDropVid 注）
+      if (ECHO_RESOURCE_SHEETS.has(sheet)) {
+        const ev = echoResourceDropVid(sheet, afx, afy);
+        dropKey = ev > 0 ? (VANILLA_ITEM_KEY_BY_ID[ev] ?? '') : '';
+      }
       if (dropKey) this.spawnDrop(ax * TILE + 8, ay * TILE, dropKey, 1);
     }
     this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.4);

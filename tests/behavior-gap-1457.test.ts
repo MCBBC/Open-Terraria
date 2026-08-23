@@ -104,7 +104,7 @@ describe('460 充能爆破炮 ai[0] += GetSlowMagicUseRate()（Projectile.cs:674
     const beams = added.filter((a) => a instanceof BlasterBeam);
     expect(bolts.length).toBe(9);
     expect(beams.length).toBe(1);
-    expect(payLog.length).toBe(3);                       // flag3：80/180/200（:63454-63459）
+    expect(payLog.length).toBe(3);                       // flag3：80/180/200（:63454-63459 [1456] / :67414-67424 [1457]）
   });
 
   it('过载 0.4/t：满蓄 180→451 拍（2.5×）、459 只在瞄准拍 ∩ (int)ai0%10/%30 出（fround 实测 4 发）、461 双发（451/452,原版 (int)ai0==180 停 2 瞄准拍,无已发守卫）', () => {
@@ -185,7 +185,7 @@ describe('633 最后棱镜帧拍无 slowMagic（调查误标纠正：67202-67228
     const prism = new PrismProj(1, 0, 50, 2, () => true, () => ({ x: 0, y: 0 }), () => true);
     for (let i = 0; i < 10; i++) prism.fixedUpdate(1 / 60, hooks);
     expect(prism.charge).toBe(10);                       // 若 1457 有消费应 = 4（×0.4）
-    expect(added.filter((a) => a instanceof PrismProng).length).toBe(6);   // 6×632（:63702-63710）
+    expect(added.filter((a) => a instanceof PrismProng).length).toBe(6);   // 6×632（:63702-63710 [1456] / :67662-67673 [1457]）
   });
 });
 

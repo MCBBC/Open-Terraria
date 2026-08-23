@@ -26,8 +26,12 @@ const SNOW_OR_ICE = new Set([147, 161, 200, 163, 164]);
 
 /** RemoveSurfaceWaterAboveSand（cs:16295-16326）：
  *  x∈[400,w-400]，自 y=100 下扫到首个 active 格即停（break 在任何分支后），
- *  沙族 {53,396,397,404,407,151} → 向上清液体直到遇到 active。零掷骰。 */
+ *  沙族 {53,396,397,404,407,151} → 向上清液体直到遇到 active。零掷骰。
+ *  ★UUUUUU：NTB 跳过（cs:16329 头门 `!roundLandmasses && !noSurface &&
+ *  (!notTheBees || dontStarve)`——蜂蜜世界沙已变蜂蜜块，纯 NTB 恒跳过）。 */
 export function runRemoveSurfaceWaterAboveSandPass(st: TileStore, gs: GenState): void {
+  if (gs.seedFlags.notTheBees && !gs.seedFlags.theConstant
+    && !gs.seedFlags.roundLandmasses && !gs.seedFlags.noSurface && !gs.seedFlags.skyblock) return;
   for (let x = 400; x < st.w - 400; x++) {
     for (let y = 100; y < gs.worldSurface - 1; y++) {
       const i = st.idx(x, y);

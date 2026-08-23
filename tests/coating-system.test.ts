@@ -20,6 +20,9 @@ import {
   paintTile, paintCoatTile, paintCoatWall, coatingColor, coatingColorsOf, paintCoatDustColor,
 } from '../src/world/Paint';
 import { scanScene } from '../src/world/SceneMetrics';
+import { ChunkCache } from '../src/render/ChunkCache';
+import { Minimap } from '../src/render/Renderer';
+import type { VanillaWallTiler } from '../src/render/VanillaWallTiler';
 
 const DIRT = TILE_BY_KEY['dirt']!;
 const itemOf = (vid: number) => ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid]]];
@@ -325,6 +328,128 @@ describe('SmartCursor 涂层项（SmartCursorHelper.cs:683-692/:738/:781）', ()
     const st2 = new TileStore(220, 160);
     paintField(st2);
     expect(scRun(st2, mouseAt(100, 95), scraper())).toBeNull();
+  });
+});
+
+describe('涂层渲染门（烘焙叠层 + 隐形隐藏链）', () => {
+  /** recording ctx：捕 fillRect/drawImage 全参（不依赖真实画布，anim-furniture-frame
+   *  同款手法；drawImage 9 参源矩形用于荧光叠层断言） */
+  function recCtx() {
+    const fills: Array<{ x: number; y: number; w: number; h: number }> = [];
+    const draws: Array<{ src: unknown; sx: number; sy: number; sw: number; sh: number; dx: number; dy: number }> = [];
+    const ctx = {
+      fillStyle: '',
+      globalAlpha: 1,
+      imageSmoothingEnabled: false,
+      fillRect(x: number, y: number, w: number, h: number) { fills.push({ x, y, w, h }); },
+      drawImage(src: unknown, a: number, b: number, c?: number, d?: number, e?: number, f?: number) {
+        // 5 参（整图缩放）与 9 参（源矩形）统一记源/目标
+        if (c === undefined) draws.push({ src, sx: 0, sy: 0, sw: a, sh: b, dx: 0, dy: 0 });
+        else draws.push({ src, sx: a, sy: b, sw: c, sh: d!, dx: e!, dy: f! });
+      },
+      save() {}, restore() {},
+      beginPath() {}, rect() {}, clip() {}, translate() {}, clearRect() {},
+      putImageData() {},
+    } as unknown as CanvasRenderingContext2D;
+    return { ctx, fills, draws };
+  }
+
+  /** node 环境桩 document：createElement('canvas') → recording ctx 画布 */
+  function stubDocument(): Array<{ canvas: unknown; rec: ReturnType<typeof recCtx> }> {
+    const made: Array<{ canvas: unknown; rec: ReturnType<typeof recCtx> }> = [];
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => {
+        const rec = recCtx();
+        const canvas = { width: 0, height: 0, getContext: () => rec.ctx };
+        made.push({ canvas, rec });
+        return canvas;
+      },
+    };
+    return made;
+  }
+  const unstubDocument = () => { delete (globalThis as { document?: unknown }).document; };
+
+  const stubPage = () => {
+    const rec = recCtx();
+    return { page: { width: 256, height: 256, getContext: () => rec.ctx } as unknown as HTMLCanvasElement, rec };
+  };
+
+  it('黑暗中荧光涂层格光照覆写=全亮：烘焙出 glow 叠层（DrawTiles_GetLightOverride' +
+    ' fullbrightBlock→White，TileDrawing.cs:6728-6732 [1456]/:6736-6740 [1457]；' +
+    '本仓=ChunkCache.bakeChunkInto 荧光叠层，光照合成后叠回）', () => {
+    const made = stubDocument();
+    try {
+      const w = new World(40, 40, 3, 'coat-glow');
+      const st = w.store;
+      st.setTileSilent(2, 2, DIRT);                                    // 荧光块格
+      st.setTileSilent(5, 5, DIRT);
+      st.setWallSilent(5, 5, 4);
+      st.setCoatSilent(2, 2, TileStore.COAT_FULLBRIGHT_BLOCK, TileStore.COAT_FULLBRIGHT_BLOCK);
+      st.setCoatSilent(5, 5, TileStore.COAT_FULLBRIGHT_WALL, TileStore.COAT_FULLBRIGHT_WALL);   // 荧光墙格
+      const cc = new ChunkCache(w, new Map(), null, null);
+      const wall = stubPage(), tile = stubPage();
+      const pair = cc.bakeChunkInto(0, 0, wall.page, tile.page, -1);
+      // 有荧光位 → glow 叠层懒分配（createElement 恰一次：glow 画布）
+      expect(pair.glow).toBeDefined();
+      const glowRec = made.find((m) => m.canvas === pair.glow!)!.rec;
+      // 块位格：从 tile 页拷 (2,2) 格 16×16 进叠层（源=目标=格内局部坐标）
+      expect(glowRec.draws).toContainEqual(expect.objectContaining(
+        { src: tile.page, sx: 32, sy: 32, sw: 16, sh: 16, dx: 32, dy: 32 }));
+      // 墙位格：从墙页拷 (5,5) 格（墙先拷、tile 后拷=世界层序）
+      expect(glowRec.draws).toContainEqual(expect.objectContaining(
+        { src: wall.page, sx: 80, sy: 80, sw: 16, sh: 16, dx: 80, dy: 80 }));
+      // 无涂层格不进叠层（(3,3) 无拷贝）
+      expect(glowRec.draws.some((d) => d.dx === 48 && d.dy === 48)).toBe(false);
+
+      // 无荧光位的 chunk：零开销跳过（invisible 位不算荧光）
+      const w2 = new World(40, 40, 3, 'coat-noglow');
+      w2.store.setTileSilent(2, 2, DIRT);
+      w2.store.setCoatSilent(2, 2, TileStore.COAT_INVISIBLE_BLOCK, TileStore.COAT_INVISIBLE_BLOCK);
+      const cc2 = new ChunkCache(w2, new Map(), null, null);
+      const pair2 = cc2.bakeChunkInto(0, 0, stubPage().page, stubPage().page, -1);
+      expect(pair2.glow).toBeUndefined();
+    } finally {
+      unstubDocument();
+    }
+  });
+
+  it('隐形涂层格渲染隐藏门：无回声腔/4409/5345（showInvisibleBlocks=false）不画' +
+    '（IsVisible，TileDrawing.cs:1434-1452；墙段 :991 flag2 门；本仓 ChunkCache' +
+    ':648 墙/:687 块 + Renderer.colorFor :1521/:1544 小地图链）', () => {
+    const w = new World(40, 40, 3, 'coat-echo-hide');
+    const st = w.store;
+    st.setTileSilent(3, 3, DIRT);
+    st.setWallSilent(3, 3, 4);
+    st.setCoatSilent(3, 3, TileStore.COAT_INVISIBLE_BLOCK | TileStore.COAT_INVISIBLE_WALL,
+      TileStore.COAT_INVISIBLE_BLOCK | TileStore.COAT_INVISIBLE_WALL);
+    // 墙 tiler 用桩（真类要素材；门在 ChunkCache 侧，桩捕 draw 调用即可）
+    const wallCalls: Array<{ x: number; y: number }> = [];
+    const wallTiler = {
+      hasTexture: () => true,
+      draw: (_c: unknown, _s: unknown, x: number, y: number) => { wallCalls.push({ x, y }); },
+    } as unknown as VanillaWallTiler;
+    const cc = new ChunkCache(w, new Map(), null, wallTiler);
+    const wall = stubPage(), tile = stubPage();
+    cc.bakeChunkInto(0, 0, wall.page, tile.page, -1);
+    // 显示门关：墙不画（:648）、块不画（:687——无 autotiler 走 fillRect 兜底，无调用）
+    expect(wallCalls).toEqual([]);
+    expect(tile.rec.fills).toEqual([]);
+
+    // 显示门开（回声腔激活/幽灵护目镜 4409/回声腔物品 5345 → showInvisibleBlocks，
+    // Main.ShouldShowInvisibleBlocksAndWalls :57403-57408 [1456]/:58912-58917 [1457]）
+    st.showInvisibleBlocks = true;
+    cc.bakeChunkInto(0, 0, wall.page, tile.page, -1);
+    expect(wallCalls).toContainEqual({ x: 3, y: 3 });
+    expect(tile.rec.fills).toContainEqual({ x: 48, y: 48, w: 16, h: 16 });
+    st.showInvisibleBlocks = false;
+
+    // 小地图同链（Renderer.colorFor :1521 块按空气/:1544 墙不显示）
+    st.setTileSilent(8, 8, DIRT);                        // 对照：无涂层普通泥土格
+    const mm = new Minimap(w, true);
+    expect(mm.colorFor(3, 3)).toBe(mm.colorFor(9, 3));   // 涂层格 == 同排纯空气背景色
+    st.showInvisibleBlocks = true;
+    expect(mm.colorFor(3, 3)).toBe(mm.colorFor(8, 8));   // 显示态 == 普通泥土格色
+    st.showInvisibleBlocks = false;
   });
 });
 

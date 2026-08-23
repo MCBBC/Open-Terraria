@@ -4109,7 +4109,13 @@ export class Enemy extends Entity {
           // :60033-60036 CanHitLine(Top+(0,20) → 玩家)
           flag21 = canHitLine(st, this.cx, this.y + 20, 0, 0, player.cx, player.cy, 0, 0);
         }
-        if (player.useTime <= 0) flag21 = false;               // :60037-60040 idle 门
+        // :60233-60236（1456 :60037-60040）满潜行(stealth==0)且未挥击(itemAnimation==0)
+        // → CanHit=false：施法/射击族对满潜行玩家停火（不开瞄）。曾只转录
+        // itemAnimation 半边且反向（idle 即停火,潜行半边整缺）——黄蜂待机清零
+        // :51312 同款动画窗代理 = itemAnimTicks>0||useTime>0（Enemy.ts:6142 口径）
+        if (!(player.stealth > 0) && !(player.itemAnimTicks > 0 || player.useTime > 0)) {
+          flag21 = false;
+        }
         if (flag21) {
           const dx = player.cx - this.cx, dy = player.cy - this.cy;
           const dist = Math.hypot(dx, dy);

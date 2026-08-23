@@ -443,8 +443,15 @@ export class WhipProj extends Entity {
     }
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    // ① 鞭身渔线（DrawWhip :36732-36756）
-    if (lineTex) drawWhipLineBody(ctx, lineTex, this.projId, pts);
+    // ① 鞭身渔线（DrawWhip :36732-36756）;1034 flag3（:36747-36749 color2=color
+    //    免逐段取光）→ 线体收集进 Renderer 全亮队列、compositeLight 后固定色直画
+    if (lineTex && this.projId === 1034 && r.whipFullbrightQueue) {
+      r.whipFullbrightQueue.push({
+        pts: pts.map((p) => ({ x: p.x, y: p.y })),
+        tex: lineTex as never,
+        color: [...WHIP_1034_LINE] as [number, number, number, number],
+      });
+    } else if (lineTex) drawWhipLineBody(ctx, lineTex, this.projId, pts);
     // ② 鞭尖（DrawWhip switch :36759-36815 → WHIP_TIPS 分发表）
     const tip = WHIP_TIPS[this.projId];
     if (tip && img) {

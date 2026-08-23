@@ -219,3 +219,88 @@ export function coinBandVid(fx: number): number {
   if (fx <= 1170) return 73;
   return 0;
 }
+
+// ===== Echo 资源组 8 def（⚠️4 接档 2026-08-23,'无物'组剩余资源掉落,488/186 同批先例）=====
+// 8 sheet 全在 KillTile 共享 no-drop 表（WorldGen.cs:66108-66129 case 647/648/651/652/
+// 694/702/704/705 break）→ 无放置物品返还,掉落全走 Check* 帧检分支的资源直掉。
+// ★647 有真实放置物（Rubblemaker 5324/5329/5330,vanilla.json items.createTile）——
+// 挖掉/失撑也不返还 Rubblemaker（no-drop 表）,帧段无档=整件无掉落。
+// 帧几何:Check3x2 列号 num6=frameX/54（:49207-49213 while 减 3 计数）、变体行
+// num3=frameY/36（:49203-49204）;Check2x2 652 特例列号 num7=frameX/36（:48434-48440）。
+
+/** Echo 资源组 sheet 集:命中即整件掉落只由帧段直查决定（0 档=无掉落,压 place_ 兜底） */
+export const ECHO_RESOURCE_SHEETS: ReadonlySet<number> = new Set([
+  647, 648, 651, 652, 694, 702, 704, 705,
+]);
+
+/** Echo 资源组帧段直查:sheet → 原版物品 vid（0=该帧段无掉落,与 C# num=0 不发一致）。
+ *  消费=Game.breakTile object 分支 + checkFurnitureSupport 失撑链（两路同源 Check*） */
+export function echoResourceDropVid(sheet: number, fx: number, fy: number): number {
+  switch (sheet) {
+    case 647: {   // 大石堆 Echo——Check3x2 case 647（:49573-49617）列号分档;
+                  // :49580-49587 <13/<16 两支同掉 3 合并写
+      const s = Math.floor(fx / 54);
+      if (s < 7) return 154;
+      if (s < 16) return 3;
+      if (s < 18) return 71;
+      if (s < 20) return 72;
+      if (s < 22) return 73;
+      if (s < 26) return 9;
+      if (s < 32) return 593;
+      if (s < 35) return 183;
+      return 0;                       // ≥35 num13=0 不发（:49612 门）
+    }
+    case 648: {   // 大石堆 Echo·二——Check3x2 case 648（:49618-49675）num6+=num3*35
+      const s = Math.floor(fx / 54) + Math.floor(fy / 36) * 35;
+      if (s < 6) return 195;
+      if (s < 9) return 174;
+      if (s < 14) return 150;
+      if (s < 17) return 3;
+      if (s < 18) return 989;
+      if (s < 21) return 1101;
+      if (s < 29) return 9;
+      if (s < 35) return 3271;
+      if (s < 41) return 3086;
+      if (s < 47) return 3081;
+      if (s < 52) return 62;
+      if (s < 55) return 154;
+      return 0;                       // ≥55 num14=0 不发（:49670 门）
+    }
+    case 651:     // 植物碎屑 3x2 Echo——Check3x2 case 651（:49679-49688）列号三档
+      return Math.floor(fx / 54) < 3 ? 195 : Math.floor(fx / 54) >= 6 ? 331 : 62;
+    case 652:     // 植物碎屑 2x2 Echo——Check2x2 case 652（:48705-48708）num7=fx/36,同 651 三档
+      return Math.floor(fx / 36) < 3 ? 195 : Math.floor(fx / 36) >= 6 ? 331 : 62;
+    case 694: {   // 钟乳石 1x2 Echo——CheckStalactiteEcho :38940 → GetStalactiteEchoDrop
+                  // （:38947-39003）13 档,style=frameX/18（:38906）
+      const s = Math.floor(fx / 18);
+      if (s < 3) return 664;
+      if (s < 6) return 3;
+      if (s < 9) return 150;
+      if (s < 12) return 1124;
+      if (s < 15) return 409;
+      if (s < 18) return 61;
+      if (s < 21) return 836;
+      if (s < 24) return 3271;
+      if (s < 27) return 3086;
+      if (s < 30) return 3081;
+      if (s < 33) return 834;
+      if (s < 36) return 833;
+      if (s < 39) return 835;
+      return 0;
+    }
+    case 702:     // 生命果仿品——CheckJunglePlant case 702（:48037-48040）整件破坏恒掉 1291
+      return 1291;
+    case 704:     // 倒木 Echo——Check3x2 case 704（:49564-49566）恒掉 501
+      return 501;
+    case 705: {   // 绿洲植物 Echo——Check3x2 case 705（:49458-49465）num6+=num3*9;
+                  // 三元链:[0,8]→276/[9,17]→369/[18,26]→2171/其余(≥27)→59
+      const s = Math.floor(fx / 54) + Math.floor(fy / 36) * 9;
+      if (s <= 8) return 276;
+      if (s <= 17) return 369;
+      if (s <= 26) return 2171;
+      return 59;
+    }
+    default:
+      return 0;
+  }
+}

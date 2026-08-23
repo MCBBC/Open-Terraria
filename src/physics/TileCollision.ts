@@ -18,6 +18,10 @@ export interface Body {
   collideY?: boolean;
   /** 平台单向碰撞：仅当开启且下落时与平台碰撞 */
   dropThrough?: boolean;
+  /** Projectile.tileCollide 镜像（AI 逐态直写,如蜘蛛 :62843-62860 穿平台/归位飞行
+   *  :61410、蛙 :50648/:51266）——false 时 Collision.TileCollision 整段跳过、位移直写
+   *  （原版弹幕 Update :17000+ 同构）。缺省 true=照常碰撞 */
+  tileCollide?: boolean;
   /** 启用原版自动上台阶（Collision.StepUp）：行走实体（玩家/敌人/小动物/城镇NPC）置 true；
    *  掉落物/弹幕/墓碑等不参与（原版它们不调 StepUp） */
   stepUp?: boolean;
@@ -376,6 +380,14 @@ function slopeCollide(b: Body, world: World): void {
 
 /** 移动并碰撞。高速时分子步防穿透。 */
 export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
+  // tileCollide=false（Projectile.tileCollide 镜像,蜘蛛 :62852-62860 穿平台/归位飞行
+  // :61410、蛙 :50648 等 AI 逐态直写）→ 碰撞整段跳过,位移直写（原版 Update 逐子步
+  // `if (tileCollide) { TileCollision... } position += velocity` 同构）
+  if (b.tileCollide === false) {
+    b.x += dx; b.y += dy;
+    b.onGround = false; b.hitWall = false; b.hitHead = false; b.collideY = false;
+    return;
+  }
   // NPC Collision_MoveWhileWet（NPC.cs:93986）：wet 时位移 ×liquidMoveFactor（velocity 不变，
   // 只缩位移）。由 npcLiquid.updateNpcLiquid 每 tick 写入（dry=1 跳过）；实体基类缺省 1。
   const lf = b.liqFactor;

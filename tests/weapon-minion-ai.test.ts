@@ -13,6 +13,8 @@ import { Arrow, setProjSpriteOverride } from '../src/entities/Arrow';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
+import { TILE_BY_KEY } from '../src/data/tiles';
+import { freeUpMinionsForSummon } from '../src/core/Game';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 120;
@@ -64,8 +66,10 @@ function makeHooks(enemies: MockEnemy[] = []) {
 function mkMinion(projId: number, owner: Player, x?: number, y?: number): MinionProj {
   return new MinionProj(x ?? owner.cx, y ?? owner.cy - 40, projId, 10, 2, false, 0, false, () => owner);
 }
-const priv = (m: MinionProj): { a62A0: number; a62A1: number; a62Lai0: number; dA0: number; dA1: number; frA0: number } =>
-  m as unknown as { a62A0: number; a62A1: number; a62Lai0: number; dA0: number; dA1: number; frA0: number };
+const priv = (m: MinionProj): { a62A0: number; a62A1: number; a62Lai0: number; a62EU: number;
+  dA0: number; dA1: number; frA0: number; spLai1: number; spDir: number } =>
+  m as unknown as { a62A0: number; a62A1: number; a62Lai0: number; a62EU: number;
+    dA0: number; dA1: number; frA0: number; spLai1: number; spDir: number };
 
 describe('① AI_062 逐型速度曲线（1457 :66529-66677）', () => {
   it('373 黄蜂分段：>200 加速段 (v×40+向×6)/41;≤200 上浮段 vy-=0.1（:66616-66677）', () => {
@@ -338,5 +342,248 @@ describe('⑦ 随从绘制旋转枢 = 贴图宽/2（Main.cs:29601 化简,同 Wea
     // num145 = 30/2 = 15（曾 (30+16)/2=23 → 枢轴右偏 8px 绕偏心点公转）
     expect(t[0][0]).toBeCloseTo(m.cx - m.w / 2 + 15 + (-10), 6);
     expect(d[0][1]).toBeCloseTo(-15, 6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑧ 423/613 冲刺 extraUpdates 真子步（Update :16780-16783 numUpdates 循环;
+//    触发 :66556-66562/:66593-66600;曾"10px/t 摊 ai[1] 拍"折算退役）
+// ---------------------------------------------------------------------------
+describe('⑧ 423/613 冲刺真子步（:16780-16783/:66556-66600）', () => {
+  function dust423() {
+    // 随从盒左 (2000,1500)（心 2008,1508）;敌顶 (2508,1428) → 423 瞄准点 (2508,1348)
+    // → num23=√(500²+160²)=524.8 ∈ (300,800] → ai[1]=extraUpdates=52
+    const e = mkEnemy(1, 2508, 1440);                    // 顶 = cy-12 = 1428
+    const a = makeHooks([e]);
+    const dust: number[] = [];
+    (a.hooks as unknown as { spawnParticles: unknown }).spawnParticles =
+      (...args: unknown[]) => { void args; dust.push(1); };
+    const m = mkMinion(423, a.player, 2000, 1500);
+    return { a, m, dust, e };
+  }
+  it('423：触发拍位移恰 10px+extraUpdates=ai[1];次拍 52 子步一次走完（512px）→ 2 拍总位移 10N+2', () => {
+    const { a, m, dust } = dust423();
+    const nl = Math.hypot(500, 160);
+    const nx = 500 / nl, ny = -160 / nl;
+    const x0 = m.x, y0 = m.y;
+    m.fixedUpdate(1, a.hooks);                           // 触发拍（:66556-66562）
+    expect(priv(m).a62A0).toBe(2);
+    expect(priv(m).a62A1).toBe(52);                      // ai[1]=(int)(num23/10)
+    expect(priv(m).a62EU).toBe(52);                      // extraUpdates=(int)ai[1]（:66559）
+    expect(m.x - x0).toBeCloseTo(nx * 10, 6);            // 触发拍位移 = velocity×1 子步
+    expect(m.y - y0).toBeCloseTo(ny * 10, 6);
+    expect(dust.length).toBe(0);                         // 触发拍 return——冲刺尘块未入（:66158 在次拍起）
+    m.fixedUpdate(1, a.hooks);                           // 次拍：52 子步循环（归零子步终止）
+    expect(priv(m).a62A0).toBe(0);                       // 归零重置（:66174-66177）
+    expect(priv(m).a62A1).toBe(30);
+    expect(priv(m).a62EU).toBe(0);                       // extraUpdates=0（:66178）
+    // 总位移 = 触发 10 + 51×10 + 归零拍 2 = 522px（+归零拍后续 AI 微动 ~2px）
+    const proj = (m.x - x0) * nx + (m.y - y0) * ny;
+    expect(proj).toBeGreaterThan(520);                   // 旧折算 10px/t 两拍仅 20px
+    expect(proj).toBeLessThan(528);
+    // 冲刺尘：每子步 ai[1]>3 一粒（:66158-66166）→ 递减值 51..4 共 48 粒
+    expect(dust.length).toBe(48);
+  });
+  it('613：同构子步（44 子步）+ 归零拍 15+15 尘爆（:66249-66270）+ 每子步双尘调用（:66198-66226）', () => {
+    // 随从心 (2008,1508);敌心 (2508,1508)=正右 500 → 613 瞄准点 = 敌心+背向 60
+    // = (2448,1508) → num23=440 → ai[1]=44
+    const e = mkEnemy(1, 2508, 1508);
+    const a = makeHooks([e]);
+    const dust: number[] = [];
+    (a.hooks as unknown as { spawnParticles: unknown }).spawnParticles =
+      (...args: unknown[]) => { void args; dust.push(1); };
+    const m = mkMinion(613, a.player, 2000, 1500);
+    m.fixedUpdate(1, a.hooks);
+    expect(priv(m).a62A1).toBe(44);                      // (int)(440/10)
+    expect(m.x - 2000).toBeCloseTo(10, 6);               // 触发拍 10px
+    m.fixedUpdate(1, a.hooks);
+    expect(priv(m).a62A0).toBe(0);
+    expect(m.x - 2000).toBeGreaterThan(440);             // 10+43×10+2=442（+归零拍 AI 微动）
+    expect(m.x - 2000).toBeLessThan(448);
+    // 尘调用 = ai[1]>3 的子步（递减值 43..4 共 40 拍）×2 调用（3 粒群+2 环）+归零爆 2 = 82
+    expect(dust.length).toBe(40 * 2 + 2);
+  });
+  it('rotation 通道（:66827 rotation=vx×0.05 + :66947-66954 spriteDirection）：每拍终速写入、触发/冲刺拍冻结', () => {
+    const e = mkEnemy(1, 60 * 16 + 600, 90 * 16 - 40);
+    const a = makeHooks([e]);
+    const m = mkMinion(423, a.player, a.player.cx, 90 * 16 - 52);
+    m.fixedUpdate(1, a.hooks);                           // 600px → 触发冲刺
+    expect(priv(m).a62A0).toBe(2);
+    expect(m.rot).toBe(0);                               // 触发拍 return 冻结（:66562）
+    expect(m.facing).toBe(1);                            // spriteDirection 保持初值
+    // 非冲刺对照：407 无冲刺门 → 每拍 rot=终速×0.05（:66827）
+    const e2 = mkEnemy(1, 60 * 16 + 600, 90 * 16 - 40);
+    const b = makeHooks([e2]);
+    const m2 = mkMinion(407, b.player, b.player.cx, 90 * 16 - 52);
+    m2.fixedUpdate(1, b.hooks);
+    expect(m2.vx).toBeGreaterThan(0);
+    expect(m2.rot).toBeCloseTo(m2.vx * 0.05, 9);
+    expect(m2.facing).toBe(-1);                          // :66947-66954 右行=-1
+  });
+  it('渲染 rot+flip 复合（XNA 同 draw 调用,Main.cs:30529-30533）：407 rotate 后 scale(-1,1);387 旋转制恒不翻', () => {
+    // 407 走同一 :66827 通道（无 423 射击扇区微调 :67097 后置改速干扰）
+    const e = mkEnemy(1, 60 * 16 + 600, 90 * 16 - 40);
+    const a = makeHooks([e]);
+    const m = mkMinion(407, a.player, a.player.cx, 90 * 16 - 52);
+    m.fixedUpdate(1, a.hooks);
+    expect(m.vx).toBeGreaterThan(0);
+    expect(m.rot).toBeCloseTo(m.vx * 0.05, 9);
+    expect(m.facing).toBe(-1);
+    const calls: Array<{ op: string; a: unknown[] }> = [];
+    const ctx = {
+      set imageSmoothingEnabled(_: boolean) {}, get imageSmoothingEnabled() { return false; },
+      save() {}, restore() {}, translate() {},
+      rotate(...a: unknown[]) { calls.push({ op: 'rotate', a }); },
+      scale(...a: unknown[]) { calls.push({ op: 'scale', a }); },
+      drawImage() {}, fillRect() {}, strokeRect() {},
+      set fillStyle(_: string) {}, set strokeStyle(_: string) {}, set globalAlpha(_: number) {},
+    } as unknown as CanvasRenderingContext2D;
+    m.draw({ ctx } as never);
+    expect(calls[0]).toEqual({ op: 'rotate', a: [m.rot] });
+    expect(calls[1]).toEqual({ op: 'scale', a: [-1, 1] });   // facing=-1（右行翻转叠旋转）
+    // 旋转制对照（387 ∈ MINION_ROT_ONLY,原版 dir 恒 None）：rotate 后无 scale
+    const b = makeHooks([mkEnemy(1, 60 * 16 + 600, 90 * 16 - 40)]);
+    const twin = mkMinion(387, b.player, b.player.cx, 90 * 16 - 52);
+    twin.fixedUpdate(1, b.hooks);
+    calls.length = 0;
+    twin.draw({ ctx } as never);
+    expect(calls.filter((c) => c.op === 'rotate').length).toBe(1);
+    expect(calls.filter((c) => c.op === 'scale').length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑨ 蜘蛛/蛙地面 AI 四项清零（tileCollide 动态门 :62843-62860/:50648/:51266;
+//    撤退档 :14027-14030+:62958-63012;镜像 :63302-63323/:65162/:51647-51671）
+// ---------------------------------------------------------------------------
+describe('⑨ 蜘蛛/蛙地面 AI（tileCollide 门/撤退档/镜像）', () => {
+  it('蜘蛛 tileCollide 动态门：LOS 目标在下方+脚踩平台 → false 穿平台下落,清空后回 true（:62843-62860）', () => {
+    const PLAT = TILE_BY_KEY['platform'];
+    const { hooks, player, store } = makeHooks();
+    player.x = 60 * 16; player.y = 90 * 16 - 42;         // 主站平台上
+    for (let x = 58; x <= 63; x++) store.setTile(x, 90, PLAT);
+    const m = mkMinion(390, player, 60 * 16, 90 * 16 - 16);
+    for (let k = 0; k < 8; k++) m.fixedUpdate(1, hooks); // 落台
+    expect(m.onGround).toBe(true);
+    expect(m.y).toBe(90 * 16 - 16);
+    expect(m.tileCollide).toBe(true);                    // 盒无实心 → true（:62843-62845）
+    const below = mkEnemy(1, 60 * 16 + 8, 96 * 16);      // 平台下 6 格 LOS 目标
+    const b = makeHooks([below]);
+    (b.hooks as unknown as { world: { store: TileStore } }).world.store = store;
+    b.player.x = 60 * 16; b.player.y = 90 * 16 - 42;
+    const m2 = mkMinion(390, b.player, 60 * 16, 90 * 16 - 16);
+    for (let k = 0; k < 8; k++) m2.fixedUpdate(1, b.hooks);
+    expect(priv(m2).spLai1).toBe(0);
+    expect(m2.tileCollide).toBe(false);                  // 敌在下方+脚踩平台（:62852-62860）
+    for (let k = 0; k < 60 && m2.y + m2.h < 90 * 16 + 20; k++) m2.fixedUpdate(1, b.hooks);
+    expect(m2.y + m2.h).toBeGreaterThan(90 * 16 + 16);   // 已整体穿过平台行
+    expect(m2.tileCollide).toBe(true);                   // 脚下行离开平台 → 回 true（:62843）
+  });
+  it('蛙 tileCollide：归位飞行 false（:50648）/ 地面 true（:51266）——moveAndCollide 跳碰撞直写位移', () => {
+    const { hooks, player } = makeHooks();
+    player.y = 100 * 16 - 42;
+    const m = mkMinion(758, player, player.cx + 200, 90 * 16);
+    expect(m.tileCollide).toBe(true);
+    (priv(m) as { frA0: number }).frA0 = 1;              // 归位飞行态
+    m.fixedUpdate(1, hooks);
+    expect(m.tileCollide).toBe(false);
+  });
+  it('蜘蛛撤退档：命中置 localAI[1]=20（StatusNPC :14027-14030）→ 20t 不咬（friendly=false :63004）后复咬', () => {
+    const e = mkEnemy(1, 60 * 16 + 8, 100 * 16 - 20);    // 与随从盒重叠（扑咬窗）
+    const { hooks, player } = makeHooks([e]);
+    player.y = 100 * 16 - 42;
+    const m = mkMinion(390, player, 60 * 16, 100 * 16 - 16);
+    const hp0 = e.hp;
+    m.fixedUpdate(1, hooks);
+    expect(e.hp).toBeLessThan(hp0);                      // 首咬
+    expect(priv(m).spLai1).toBe(20);                     // localAI[1]=20（:14027-14030）
+    let bitten = 0;
+    for (let k = 0; k < 20; k++) {                       // 撤退 20t：hp 冻结
+      const before = e.hp;
+      m.fixedUpdate(1, hooks);
+      if (e.hp < before) bitten++;
+      expect(priv(m).spLai1).toBeGreaterThanOrEqual(0);
+    }
+    expect(bitten).toBe(0);
+    expect(priv(m).spLai1).toBe(0);
+    let resumed = false;
+    for (let k = 0; k < 80 && !resumed; k++) {           // 撤退结束后复咬（命中冷却 20t 内）
+      const before = e.hp;
+      m.fixedUpdate(1, hooks);
+      if (e.hp < before) resumed = true;
+    }
+    expect(resumed).toBe(true);
+  });
+  it('蜘蛛镜像：direction=sign(vx)+行走精化 → spriteDirection=-direction（:63302-63323/:65162）——右行 facing=-1', () => {
+    const { hooks, player } = makeHooks();
+    player.y = 100 * 16 - 42;
+    player.x = 60 * 16 + 200;                            // 玩家右移 → 行走意图向右
+    const m = mkMinion(390, player, 60 * 16 - 38, 100 * 16 - 16);
+    for (let k = 0; k < 12; k++) m.fixedUpdate(1, hooks);
+    expect(m.vx).toBeGreaterThan(0.4);                   // |vx|>num184=0.4
+    expect(priv(m).spDir).toBe(1);                       // direction=+1（:63310-63313）
+    expect(m.facing).toBe(-1);                           // spriteDirection=-direction（:65162）
+    player.x = 60 * 16 - 300;                            // 反向
+    for (let k = 0; k < 30; k++) m.fixedUpdate(1, hooks);
+    expect(priv(m).spDir).toBe(-1);
+    expect(m.facing).toBe(1);
+  });
+  it('蛙镜像：direction=sign(vx)/静止朝玩家/意图精化 → spriteDirection=+direction（:51647-51671）', () => {
+    const { hooks, player } = makeHooks();
+    player.y = 100 * 16 - 42;
+    player.x = 60 * 16 + 200;
+    const m = mkMinion(758, player, 60 * 16, 100 * 16 - 16);
+    for (let k = 0; k < 12; k++) m.fixedUpdate(1, hooks);
+    expect(m.facing).toBe(1);                            // +direction（蛙贴图朝右）
+    player.x = 60 * 16 - 300;
+    for (let k = 0; k < 30; k++) m.fixedUpdate(1, hooks);
+    expect(m.facing).toBe(-1);
+    // 静止朝玩家（:51655-51657）：锚达停驻 vx=0 → 朝玩家侧
+    player.x = 60 * 16 + 500;
+    for (let k = 0; k < 200; k++) m.fixedUpdate(1, hooks);
+    expect(m.vx).toBe(0);
+    expect(m.facing).toBe(player.cx > m.cx ? 1 : -1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑩ 龙延伸槽位（:6737-6739 每段 0.5;超限自裁 :16812-16845 摘链;
+//    驱逐池尾邻对 :52404-52426）
+// ---------------------------------------------------------------------------
+describe('⑩ 龙延伸槽位（:6737-6739/:16812-16845/:52404-52426）', () => {
+  function dragonScene() {
+    const { hooks, player, projectiles } = makeHooks();
+    const head = mkMinion(625, player);
+    head.noSlot = false;
+    projectiles.push(head);
+    head.fixedUpdate(1, hooks);                          // 首拍派生基础链 626/627/628
+    return { hooks, player, projectiles, head };
+  }
+  it('extendDragon：延伸段 626/627 noSlot=false（0.5 槽/段 :6737-6739）,链插入尾前', () => {
+    const { hooks, projectiles, head } = dragonScene();
+    expect(head.extendDragon(hooks)).toBe(true);
+    const segs = projectiles.filter((p): p is MinionProj => p instanceof MinionProj)
+      .map((p) => ({ id: p.projId, noSlot: p.noSlot, dead: p.dead }));
+    expect(segs.filter((s) => !s.noSlot && !s.dead).map((s) => s.id).sort())
+      .toEqual([625, 626, 627]);                         // 延伸对实账
+    const tail = projectiles.find((p) => p instanceof MinionProj && (p as MinionProj).projId === 628) as MinionProj;
+    expect(tail.parentRef?.()?.projId).toBe(627);        // 尾接延伸段 b
+  });
+  it('驱逐：超限先逐普通随从;龙身段只逐「尾邻 627+其前驱 626」且摘链不断链（:52404-52452）', () => {
+    const { hooks, projectiles, head } = dragonScene();
+    head.extendDragon(hooks);
+    const other = mkMinion(375, hooks.player);
+    projectiles.push(other);
+    // 池（noSlot 不入账）：625=1、延伸对=1、375=1 → used=3;max=2 → 须腾 1
+    const pool = (projectiles as MinionProj[]).filter((m) => !m.sentry);
+    freeUpMinionsForSummon(191, pool, 2);
+    expect(other.dead).toBe(true);                       // 1 槽普通随从先逐
+    const seg = (id: number) => projectiles.find((p) => p instanceof MinionProj && (p as MinionProj).projId === id) as MinionProj;
+    expect(seg(625).dead).toBe(false);
+    expect(seg(628).dead).toBe(false);                   // 尾豁免（:52434）+ 摘链存活
+    expect(seg(627).dead).toBe(true);                    // 尾邻 627 逐
+    expect(seg(626).dead).toBe(true);                    // 前驱 626 随对逐
+    expect(seg(628).parentRef?.()?.projId).toBe(627);    // 摘链后尾接回基础链段 627
+    expect(seg(627).dead).toBe(false);
   });
 });

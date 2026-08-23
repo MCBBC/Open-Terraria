@@ -8,9 +8,9 @@
 //      TrustyChillet/Ignis 坐骑物品实为 6150/6151（ItemID.cs:13846/:13848 +
 //      Mount.cs:6168-6171 cursorItemIconID 64→6150/65→6151 双确证）
 //   ③ buff 391/392（BuffID.cs:152 MountType 尾段 `391,64,392,65`）→ BUFF_TO_MOUNT
-//   ④ 62-65 家族行为（UpdateEffects :4862-4867 四系伤害 +0.1 / UpdateFrame :4202-4204
-//      待机档 :4246-4251 打断 :4404-4417 扇翼 :4541-4545 盾冲帧 / SetMount :6349-6352
-//      PalChillet / TryPettingMount :6137-6166 + PetMount Player.cs:33601-33620 PalChilletJoy）
+//   ④ 62-65 家族行为（UpdateEffects :4862-4867 四系伤害 +0.1 / UpdateFrame :4208-4210
+//      待机档 :4246-4251 打断 :4395-4411 扇翼 :4541-4545 盾冲帧 / SetMount :6349-6352
+//      PalChillet / TryPettingMount :6137-6189 + PetMount Player.cs:33601-33619 PalChilletJoy）
 //   ⑤ 帕鲁随从未折算两项接通：湿身 vy×2（Projectile.cs:51616-51619,1456 :51545）+
 //      抚摸 Joy 音计时（:50053-50113 AI_067 / :59101-59131 AI_026）;ai[0]=3 帮工意图
 //      （TryAssigningHelp :52208 依赖 IntentionGuesser）维持登记
@@ -197,7 +197,7 @@ describe('④ 62-65 家族行为', () => {
     m.updateFrame(p, FRAME_STANDING, 0, 0);
     expect(m.frame).not.toBe(5);
   });
-  it('空中扇翼保持（:4404-4417）：入空中帧钳 inAirFrameStart=4,计数钉 6 档', () => {
+  it('空中扇翼保持（:4395-4411）：入空中帧钳 inAirFrameStart=4,计数钉 6 档', () => {
     const p = view({ vy: 1 });
     const m = new MountInstance();
     m.setMount(64, p);
@@ -220,13 +220,13 @@ describe('⑤ 坐骑抚摸支（62-65 骑乘中右键）', () => {
     expect(p.petMount()).toBe(true);
     expect(p.petting.isPetting).toBe(true);
     expect(p.petting.mount).toBe(true);
-    expect(p.petting.isPetSmall).toBe(false);                    // isPetSmall:false（:6164）
+    expect(p.petting.isPetSmall).toBe(false);                    // isPetSmall:false（:6186）
     expect(p.petMount()).toBe(false);                            // 二次 = Stop
     expect(p.petting.isPetting).toBe(false);
     expect(p.petting.mount).toBe(false);
   });
-  it('下坐即停抚摸（Dismount :6219-6222）：tryDismountMount/强制下坐两路都清', () => {
-    expect(GAME_TS).toContain('Mount.Dismount :6219-6222');
+  it('下坐即停抚摸（Dismount :6229-6231）：tryDismountMount/强制下坐两路都清', () => {
+    expect(GAME_TS).toContain('Mount.Dismount :6229-6231');
     expect(GAME_TS).toContain('pal_chillet_joy');                // PetMount :33615-33618 音
     expect(GAME_TS).toContain('handleSpecialEvent(21');          // 成就 21（:33612）
   });

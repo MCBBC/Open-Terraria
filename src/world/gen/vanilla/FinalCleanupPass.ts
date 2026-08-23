@@ -43,6 +43,8 @@ import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
 import { runFinishNoTraps } from './FinishNoTrapsPass';
+// ★UUUUUU（2026-08-23）：notTheBees 终转化（调用位 cs:22602-22605——⑭ 之后）
+import { runNotTheBees, runFinishNotTheBees } from './NotTheBeesPass';
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0(空格)安全退化 */
 const SHEET_TO_INTERNAL = new Map<number, number>();
@@ -2733,6 +2735,7 @@ export function runFinalCleanupPass(
   //    对普通世界终态流零外溢（pass 结束）。
   if (rng) {
     const DIRT = TILE_BY_KEY['dirt']!;
+    const MUD_TILE = TILE_BY_KEY['mud']!;   // ★UUUUUU：TileID.Sets.Mud={59}（NTB 命中集扩展）
     const DIRTIEST = TILE_BY_KEY['v_668_the_dirtiest_block']!;
     const sizeId = st.w <= 4200 ? 0 : st.w <= 6400 ? 1 : 2;      // GetWorldSize（cs:6518）
     const target = sizeId === 1 ? 6 : sizeId === 2 ? 9 : 3;
@@ -2745,7 +2748,11 @@ export function runFinalCleanupPass(
       const y = rng.int(50, st.h - 201);  // Next(50, h-200)
       if (!st.inBounds(x, y)) continue;
       const t = st.idx(x, y);
-      if (st.flags[t] && (st.type[t] === DIRT || st.type[t] === DIRTIEST)) {
+      // ★UUUUUU：notTheBees 门扩展命中集（cs:22573-22576 `if (notTheBees) flag2 =
+      //   flag2 || TileID.Sets.Mud[tile7.type]`——Mud={59}；命中集变化直接改变
+      //   迭代数=后续 FinishNotTheBees 的掷流起点，勿删）
+      if (st.flags[t] && (st.type[t] === DIRT || st.type[t] === DIRTIEST
+        || (gs.seedFlags.notTheBees && st.type[t] === MUD_TILE))) {
         placed++;
         // ClearTile()：ClearSlope(slope=0,half=false)+active(false)+inActive(false)
         st.slope[t] = 0;
@@ -2764,6 +2771,16 @@ export function runFinalCleanupPass(
   //    在其后）——勿移动调用位。
   if (gs.seedFlags.noTraps && opts?.chests && rng) {
     runFinishNoTraps(st, rng, gs, opts.chests);
+  }
+
+  // ── NotTheBees + FinishNotTheBees（cs:22602-22605 调用位：⑭ 之后、
+  //    ShimmerCleanUp 之前；原版序=FinishNoTraps/Tenth/Drunk 之后、GG 之前）──
+  //    ★UUUUUU 批新增（实现体在 NotTheBeesPass.ts）：notTheBees 专属终转化
+  //    （NotTheBees 第七次全域重扫 + FinishNotTheBees 云线/雪冰带/幼虫/重种树/
+  //    OverGrownDungeon）。掷流位次敏感——勿移动调用位。
+  if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock && rng) {
+    runNotTheBees(st, rng, gs);
+    runFinishNotTheBees(st, rng, gs);
   }
 
   // ── ShimmerCleanUp（cs:22639→34750，⑭ 之后同 pass 尾段；ZZZ 批补）──
