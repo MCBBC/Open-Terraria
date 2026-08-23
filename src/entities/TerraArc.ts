@@ -8,7 +8,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy } from './projTargets';
 
 interface ArcOwner { cx: number; cy: number; x: number; y: number; w: number; h: number; facing: number; dead: boolean }
 

@@ -20,7 +20,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy } from './projTargets';
 
 /** 玩家侧挂点状态（RotatedRelativePoint 消费，Player.cs:4063-4089）：
  *  cx/cy = MountedCenter（:3189-3194；本仓不建模坐骑挂点偏移，恒等玩家中心）；

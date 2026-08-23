@@ -8,7 +8,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 
 export class FallingBlock extends Entity {

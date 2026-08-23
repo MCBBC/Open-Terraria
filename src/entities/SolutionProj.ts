@@ -17,7 +17,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy, playEnemyHitSound } from './projTargets';
+import { playerCanHitEnemy } from './projTargets';
 
 /** 溶液弹型号表（AI_031 switch，cs:25321-25358）：projId → [conv, dust]。
  *  conv = BiomeConversionID（cs:25366 Convert 第二参）；dust = NewDust 型号 */

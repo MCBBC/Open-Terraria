@@ -2915,6 +2915,23 @@ export function runDungeonPass(
       if ((chestTile === TILE_BY_KEY['chest'] && num9 >= 23 && num9 <= 27) || (chestTile === CHEST2 && num9 === 13)) {
         flag9 = true; flag10 = true;
       }
+      // ★NTB32（2026-08-23）：AddBuriedChest 的 notTheBees 蜂蜜箱带判定支（WG.cs:36104-36112
+      //   `if (notTheBees && !remixWorldGen && !dontStarveWorldGen)`）——Next(5)+Next(-2,3)
+      //   恒耗 2 颗；深度带（num13=ws+Next(-2,3)+35 门）命中再按 `i<beach+180-Next(-2,3)`
+      //   `|| i>maxX-beach-180+Next(-2,3)` 短路再耗 1-2 颗 Next(-2,3)。位置=SolidTile
+      //   行命中后、PlaceChest 前——**PlaceChest 败也照耗**（:37578 败即 return false，
+      //   但 NTB 支在其前；G 段 8 连败调用=8 连 quad 的 x86 span 实证 v[128164..195]）。
+      //   地牢/生物箱 num10>0 → flag21 下游 style-11 支恒不触发，纯掷流语义。缺此支 =
+      //   每次找到实心行的调用少耗 2-4 颗 → G 段起主流永久相移 → I/Pa/Ba 段灯笼/画作/
+      //   横幅全 displaced（NTB 链 #32 首差根因）。
+      if (gs.seedFlags.notTheBees && !gs.seedFlags.remix && !gs.seedFlags.theConstant) {
+        const num12 = gs.lavaLine + rn(5);
+        const num13 = Math.trunc(ws) + ri(-2, 2) + 35;
+        if (num7 > num13 && num7 <= num12
+          && (ix < BEACH + 180 - ri(-2, 2) || ix > w - BEACH - 180 + ri(-2, 2))) {
+          // flag21=true：蜂蜜箱带——本 pass 箱族 num10>0 无下游消费，仅掷流
+        }
+      }
       // —— PlaceChest（:57828）→ TileObject.CanPlace chest21/467 全链（TileObject.cs:174-857）——
       // ★U 批修正（oracle DGSEGHASH/宝箱落位实证，2026-08-17）：旧近似只查右列实心 +
       // 2×2 act==0——缺左腿锚定门/可切覆盖/边界 5 垫/巨石双腿门（读 type 不读 act）。

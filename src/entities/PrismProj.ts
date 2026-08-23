@@ -25,7 +25,7 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, Arrow } from './Arrow';
-import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy } from './projTargets';
 
 /** hslToRgb（原版 Main.hslToRgb 近似——S=1 L=0.5 时的纯色环） */
 function hueToRgb(h: number): [number, number, number] {

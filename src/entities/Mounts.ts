@@ -24,7 +24,7 @@ import { TILE_DEFS } from '../data/tiles';
 import { WALL_HOUSE } from '../world/Housing';
 import { TownShot } from './TownShot';
 import { TILE } from '../core/constants';
-import { playEnemyHitSound, playerCanHitEnemy, projOverlap } from './projTargets';
+import { playerCanHitEnemy, projOverlap } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import type { GameHooks } from './types';
 

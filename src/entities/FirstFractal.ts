@@ -9,7 +9,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { hitTownNpcs, playerCanHitEnemy } from './projTargets';
 
 export class FirstFractalSlash extends Entity {
   w = 32; h = 32;

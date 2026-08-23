@@ -16,7 +16,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy } from './projTargets';
 import { prettyStarSparkle } from '../render/Renderer';
 import { canHitLine } from '../physics/LineOfSight';
 

@@ -194,6 +194,13 @@ const PRE_POOLS: Record<string, number[]> = {
   magic: [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 52, 36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 59, 60, 61, 83],
   boom: [36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 59, 60, 61],
   acc: [62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80],
+  // ★TTTT 批（CONST #42 定罪）：PrefixLegacy.Prefixes.PrefixesForSummons（22 元,
+  //   PrefixLegacy.cs:39-43）——活树密室主件 4281 雀杖（Summon 集,cs:75）走此池。
+  //   曾缺登记 → prefixRolls(4281) 零掷 vs vanilla Prefix(-1) 五掷
+  //   （Next4→3/Next22→6[池6=91 TryGet 失败重环]/Next4→3/Next22→18[池18=40
+  //   Reduced→Next3→2 弃前缀]，x86 span /tmp/lt42b/vspan-lt.txt 掷 4280-4284 实测），
+  //   主树密室宝箱后全流 +5 相移 → patch 树相位选址全偏（CONST #42 首差根因）。
+  summons: [85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 55, 38, 54, 53, 57, 40, 56, 41, 39],
 };
 const PRE_CLASS: Record<number, string> = {
   280: 'spears', 281: 'guns', 284: 'boom', 946: 'swords', 3069: 'magic', 5011: 'spears',
@@ -223,6 +230,11 @@ Object.assign(PRE_CLASS, {
   950: 'acc', 987: 'acc', 1579: 'acc', 4055: 'acc', 4056: 'acc',
   211: 'acc', 212: 'acc', 3017: 'acc', 863: 'acc', 4404: 'acc', 187: 'acc',
   848: 'acc', 857: 'acc', 159: 'acc', 158: 'acc', 2219: 'acc',
+  // ★TTTT 批：4281 雀杖（PrefixLegacy.ItemSets.Summon 集 cs:75 含 4281）——
+  //   活树密室 1/3 主件（cs:29458 Next(3)==0）。stats：damage 7/ua 36/mana 0/
+  //   kb 4（Item.cs:36817-36836）。池内四失败门命中前缀：89/91（dmg .95：7×.95=6.65
+  //   →round 7==7 失败）+55（1.05：7.35→7==7 失败）；40 ∈ Reduced（Next3 弃前缀）。
+  4281: 'summons',
   // ★5010 宝藏磁铁（GG 尾案①）：CanGetPrefixes 默认 true、非排除表（ItemID.cs:175
   //   CreateBoolSet(true, 排除 90 件) 无 5010）→ acc 可前缀化【耗掷】——曾两处注释
   //   自相矛盾（cs:37173-37177 调用点已接、类表漏登记："调而不耗"系误判）。
@@ -254,6 +266,11 @@ const PRE_MULT: Record<number, readonly [number, number, number, number]> = {
   32: [1.1, 1, 1, 1.15], 33: [1, 1.1, 0.9, 1.1], 34: [1.1, 1.1, 1.1, 0.9],
   35: [1.15, 1.15, 1, 1.2], 52: [0.9, 1, 0.9, 0.9],
   81: [1.15, 1.15, 0.9, 1], 82: [1.15, 1.15, 0.9, 1], 83: [1.15, 1.15, 0.9, 0.9],
+  // ★TTTT 批：summon 前缀 85-97（Item.cs:882-931；95 仅 arpen/96 仅 tagdmg → 四元恒 1）
+  85: [1.15, 1.15, 1, 1], 86: [1.1, 1.05, 1, 1], 87: [1.15, 1, 1, 1], 88: [1.1, 1, 1, 1],
+  89: [0.95, 1, 1, 1], 90: [1.1, 0.9, 1, 1], 91: [0.95, 1, 1, 1], 92: [0.7, 1, 1, 1],
+  93: [1, 0.75, 1, 1], 94: [0.85, 0.9, 1, 1], 95: [1, 1, 1, 1], 96: [1, 1, 1, 1],
+  97: [1, 1.25, 1, 1],
   37: [1.1, 1.1, 1, 1], 38: [1, 1.15, 1, 1], 53: [1.1, 1, 1, 1],
   54: [1, 1.15, 1, 1], 55: [1.05, 1.15, 1, 1], 56: [1, 0.8, 1, 1],
   57: [1.18, 0.9, 1, 1], 59: [1.15, 1.15, 1, 1], 60: [1.15, 1, 1, 1],
@@ -280,6 +297,9 @@ const PRE_STATS: Record<number, { d: number; ua: number; mana: number; kb0: bool
   220: { d: 32, ua: 45, mana: 0, kb0: false }, 112: { d: 48, ua: 16, mana: 12, kb0: false },
   218: { d: 32, ua: 30, mana: 21, kb0: false }, 670: { d: 21, ua: 20, mana: 0, kb0: false },
   4061: { d: 14, ua: 28, mana: 0, kb0: false }, 4062: { d: 24, ua: 17, mana: 6, kb0: false },
+  // ★TTTT 批：4281 雀杖（Item.cs:36817-36836：damage 7/useAnimation 36/mana 缺省 0/
+  //   knockBack 4）——summon 池 89/91/55 三前缀触发四失败门（见 PRE_CLASS 处注）
+  4281: { d: 7, ua: 36, mana: 0, kb0: false },
   // ★批4 review 备案#12：6153 GlacierFang（1457 冰箱 7 元池新主件,Item.cs:47431-47441
   //   DefaultToMagicWeapon(1115,24,4f)+mana10/kb2f/dmg11）——曾缺登记致 prefixTryGetFails
   //   恒不重掷（经核算 magic 池四失败门对这套 stats 恒不触发,掷数等价）;补登记防未来

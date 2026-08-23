@@ -20,7 +20,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
-import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy } from './projTargets';
 import { canHit } from '../physics/LineOfSight';
 
 type EnemyLike = {

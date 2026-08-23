@@ -303,17 +303,22 @@ describe('breakTile object 分支 Echo 资源组掉落（挖掉路;无放置物�
     expect(w.store.get(20, 10)).toBe(0);
   });
 
-  it('失撑链同掉（checkFurnitureSupport else 支同接 echoResourceDropVid）——648 底掏空 → 195', () => {
+  it('648 底掏空 → 悬空保留（1457 勘误：case 组 :86841 break→goto case 14 :87239→Check3x2 对 648 【仅】完整性无支撑行;Echo 掉落只在挖掉路）', () => {
     const w = new World(60, 40, 7, 'lwd-sup');
     const drops: Drop[] = [];
     const g = dropShell(w, drops);
     place3x2(w, 'v_648_large_rubble_3x2_group_2', 10, 10, 0);
     for (let dx = 0; dx < 3; dx++) w.store.setTileSilent(10 + dx, 12, 1, 0, 0);   // 临时土撑
-    for (let dx = 0; dx < 3; dx++) w.store.setTileSilent(10 + dx, 12, 0, 0, 0);   // 掏空 → 失撑
+    for (let dx = 0; dx < 3; dx++) w.store.setTileSilent(10 + dx, 12, 0, 0, 0);   // 掏空
     g.checkFurnitureSupport(10, 11);   // onTileChanged (x, y-1) 注册语义
-    expect(w.store.get(10, 10)).toBe(0);
-    expect(w.store.get(12, 11)).toBe(0);
-    expect(drops.length).toBe(1);
-    expect(drops[0].key).toBe(VANILLA_ITEM_KEY_BY_ID[195]);
+    // 1457 TileFrameImportant：647/648/651 在 :86830-86846 no-op break 组,闭合后
+    // goto case 14（:87239）→ Check3x2（:49617）——支撑行判据列表（:49700-49716）
+    // 与内层 switch（:49717-49790）均不含 648 → 仅完整性校验,支撑掏空不塌不掉
+    //（旧断言"失撑同掉 195"系家具 hasSupport 近似期行为,2026-08-23 派发全量对照勘误）
+    const RUB648 = TILE_BY_KEY['v_648_large_rubble_3x2_group_2']!;
+    expect(w.store.get(10, 10)).toBe(RUB648);   // 整件保留
+    expect(w.store.get(12, 11)).toBe(RUB648);
+    expect(drops.length).toBe(0);
+    // 挖掉路（breakTile object 支）Echo 帧段掉落不受影响（上方 651/647 it 已对拍）
   });
 });

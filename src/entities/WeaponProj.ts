@@ -13,7 +13,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy, tryReflectProjectile } from './projTargets';
+import { hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile } from './projTargets';
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
@@ -3046,10 +3046,19 @@ export class GrenadeProj extends Entity {
     //   才写 timeLeft=3,本仓单机无此场景。
     {
       for (const ent of game.enemies()) {
-        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean };
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean;
+          hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean, pierce?: number, fp?: boolean) => boolean };
         if (e.dead) continue;
         if (this.x < e.x + e.w && this.x + this.w > e.x
-          && this.y < e.y + e.h && this.y + this.h > e.y) { this.fuse = Math.min(this.fuse, 3); break; }
+          && this.y < e.y + e.h && this.y + this.h > e.y) {
+          // 接触伤害同发射支（Damage_PVE 标准流程先于 aiStyle16 钳引信——曾只钳不结算
+          // = 投掷炸弹穿体后爆,接触目标零伤,同火箭双症状）
+          const dir = (e.x + e.w / 2) < this.x + this.w / 2 ? -1 : 1;
+          const crit = Math.random() < (this.critChance || 0.04);
+          e.hurt?.(this.damage, dir * this.contactKb, 0, game, this.contactPen, crit, 0, true);
+          this.fuse = Math.min(this.fuse, 3);
+          break;
+        }
       }
       // critters 桶同钳（Damage_PVE 全表遍历——碰小动物=弹体盒一击死+钳引信;
       // 与上方发射支接触段同语义,曾漏）

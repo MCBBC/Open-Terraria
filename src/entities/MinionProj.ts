@@ -1542,6 +1542,10 @@ export class MinionProj extends Entity {
               this.vy -= (ay - this.cy) / l * shooter.speed / 3;
             }
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');
+            // 出膛音(MINION_SHOT_SFX 表:376→Item_20 等;ai62Step 接管后通用块不再走,
+            //  曾漏接线=小鬼/黄蜂族出膛静音——sfx-wiring 抓出)
+            const shotSfx = MINION_SHOT_SFX[shooter.shot];
+            if (shotSfx) game.playSfxFiles?.(soundTrackFiles(shotSfx.track), shotSfx.vol, this.cx, this.cy);
           }
         }
       }

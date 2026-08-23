@@ -716,3 +716,128 @@ describe('D-1g 原版无支撑语义=悬空保留（负例,勿误修）', () => 
     expect(drops).toEqual([]);
   });
 });
+
+describe('D-1h 二批补遗（454/590/639/653/696/579/704-706/滴落族）', () => {
+  it('454 皮格纳塔 4×3 顶行第 2 列锚（CheckChand :53254 num3=4）——挖天花 → 塌', () => {
+    const w = new World(40, 40, 7, 'decor-support-pigronata');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const PG = idOfSheet(454), STONE = idOfSheet(1);
+    w.store.setTileSilent(11, 9, STONE, 0, 0);     // 第 2 列（ax+1）上方
+    for (let dx = 0; dx < 4; dx++) for (let dy = 0; dy < 3; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, PG, dx * 18, dy * 18);
+    }
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(PG);
+    w.store.setTile(11, 9, 0);
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(0);
+    expect(w.store.get(13, 12)).toBe(0);
+  });
+
+  it('590 宝石树苗=Check1x2 普通支（:43772）——黏土上活（无橡实地基族门）', () => {
+    const w = new World(40, 40, 7, 'decor-support-gemsap');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const GS = idOfSheet(590), CLAY = idOfSheet(57);
+    w.store.setTileSilent(10, 12, CLAY, 0, 0);
+    w.store.setTileSilent(10, 10, GS, 0, 0);
+    w.store.setTileSilent(10, 11, GS, 0, 18);
+    g.checkFurnitureSupport(10, 11);
+    expect(w.store.get(10, 10)).toBe(GS);          // 黏土非橡实地基族,普通支仍活
+    w.store.setTile(10, 12, 0);
+    g.checkFurnitureSupport(10, 11);
+    expect(w.store.get(10, 10)).toBe(0);
+  });
+
+  it('639 法力水晶复制品=CheckOrb 12/639 同支（:48240）——挖底 → 整件清', () => {
+    const w = new World(40, 40, 7, 'decor-support-manacrystal');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const MC = idOfSheet(639), STONE = idOfSheet(1);
+    for (let dx = 0; dx < 2; dx++) w.store.setTileSilent(10 + dx, 12, STONE, 0, 0);
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, MC, dx * 18, dy * 18);
+    }
+    g.checkFurnitureSupport(10, 11);
+    expect(w.store.get(10, 10)).toBe(MC);
+    w.store.setTile(10, 12, 0);
+    g.checkFurnitureSupport(10, 11);
+    expect(w.store.get(11, 11)).toBe(0);
+  });
+
+  it('653 复制花盆=CheckPot（:57273）2×2+底行 SolidTile2——挖底 → 整件清', () => {
+    const w = new World(40, 40, 7, 'decor-support-pot653');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const P = idOfSheet(653), STONE = idOfSheet(1);
+    for (let dx = 0; dx < 2; dx++) w.store.setTileSilent(10 + dx, 12, STONE, 0, 0);
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, P, dx * 18, dy * 18);
+    }
+    g.checkFurnitureSupport(10, 11);
+    expect(w.store.get(10, 10)).toBe(P);
+    w.store.setTile(11, 12, 0);
+    g.checkFurnitureSupport(10, 11);
+    expect(w.store.get(10, 10)).toBe(0);
+    expect(w.store.get(11, 11)).toBe(0);
+  });
+
+  it('696 影珠复制品=CheckOrb 仅完整性支（:48240 地基行仅 12/639）——悬空保留', () => {
+    const w = new World(40, 40, 7, 'decor-support-orb696');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const O = idOfSheet(696);
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, O, dx * 18, dy * 18);
+    }
+    g.checkFurnitureSupport(10, 11);               // 下方悬空 → 仍活（仅完整性）
+    expect(w.store.get(10, 10)).toBe(O);
+    expect(drops).toEqual([]);
+  });
+
+  it('579 石巨人头=下方 SolidTileAllowBottomSlope 单判据（CheckRockGolemHead :54282）', () => {
+    const w = new World(40, 40, 7, 'decor-support-golemhead');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const RH = idOfSheet(579), STONE = idOfSheet(1);
+    w.store.setTileSilent(10, 11, STONE, 0, 0);
+    w.store.setTileSilent(10, 10, RH, 0, 0);
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(RH);
+    w.store.setTile(10, 11, 0);
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(0);
+  });
+
+  it('373 水滴族=IsADripTile 顶锚（:86390）——上方实心活,挖顶 → 塌', () => {
+    const w = new World(40, 40, 7, 'decor-support-drip');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const DR = idOfSheet(373), STONE = idOfSheet(1);
+    w.store.setTileSilent(10, 9, STONE, 0, 0);
+    w.store.setTileSilent(10, 10, DR, 0, 0);
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(DR);
+    w.store.setTile(10, 9, 0);
+    g.checkFurnitureSupport(10, 10);
+    expect(w.store.get(10, 10)).toBe(0);
+  });
+
+  it('706 圣剑龛 3×2 完整性支（goto case 14 链）——挖支撑悬空保留,自身缺件才塌', () => {
+    const w = new World(40, 40, 7, 'decor-support-shrine706');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const SH = idOfSheet(706), STONE = idOfSheet(1);
+    for (let dx = 0; dx < 3; dx++) w.store.setTileSilent(10 + dx, 12, STONE, 0, 0);
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, SH, dx * 18, dy * 18);
+    }
+    for (let dx = 0; dx < 3; dx++) w.store.setTile(10 + dx, 12, 0);
+    g.checkFurnitureSupport(10, 11);
+    expect(w.store.get(10, 10)).toBe(SH);          // 支撑掏空不塌（无支撑行）
+    w.store.setTile(11, 10, 0);
+    g.checkFurnitureSupport(10, 11);
+    expect(w.store.get(10, 10)).toBe(0);           // 自身缺件 → 塌
+  });
+});

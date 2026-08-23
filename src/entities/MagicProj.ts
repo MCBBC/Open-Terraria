@@ -8,7 +8,7 @@
 //   其 Main.cs:32420-32442 的 lerp 缩放/拖尾专属分支【不在此实现】——本类只做
 //   通用贴图绘制,勿把那族特例搬进来。
 import { Entity } from './Entity';
-import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { projSprite, projFrameImg, projFrameCount, PROJ_ROT_RIGHT } from './Arrow';
 import { projectileData } from '../data/vanillaProjectiles';
 import { TILE } from '../core/constants';

@@ -22,7 +22,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import type { VDust } from '../fx/VanillaDust';

@@ -12,7 +12,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
-import { projOverlap, playEnemyHitSound } from './projTargets';
+import { projOverlap } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { BuffType } from '../stats/Buffs';
 

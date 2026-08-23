@@ -10,7 +10,7 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
-import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 
 export class MeteorChunk extends Entity {

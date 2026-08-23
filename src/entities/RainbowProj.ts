@@ -15,7 +15,7 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy } from './projTargets';
 
 /** 251 静态免疫表（原版 usesIDStaticNPCImmunity：按弹型共享，非每段独立）。
  *  表项 = 敌 id → 到期时刻（共享钟，多段同 tick 不会重复衰减冷却——

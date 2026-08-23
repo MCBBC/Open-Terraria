@@ -503,7 +503,7 @@ type DecorSupportKind =
   // docs/audit/tile-audit-2026-08-23.md「TileFrame 全量派发对照」）——
   | 'jungleplant' | 'oasisplant' | 'wallhang' | 'stalactite' | 'moss'
   | 'pile' | 'deco3x2' | 'deco3x1' | 'dyeplant' | 'waterplant' | 'sandplant'
-  | 'hangtop' | 'gnome' | 'treebase' | 'stinkbug' | 'xmas' | 'support2x2';
+  | 'hangtop' | 'gnome' | 'treebase' | 'stinkbug' | 'xmas' | 'support2x2' | 'drip';
 const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // PlantCheck（派发 :85970-85981 {3,24,61,71,73,74,110,113,201,637,703}）
   3: 'plant', 24: 'plant', 61: 'plant', 71: 'plant', 73: 'plant', 74: 'plant',
@@ -593,14 +593,17 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   529: 'sandplant',
   // Check2xX 顶锚支（:87076-87083 派发组 42/270/271/572/581/660/698+465;函数
   // :38376,465/531/591/592 吊挂支 :38464-38505——上方绳 380/平台/实心顶坡豁免）。
-  // ★591 吊盆/592 吊火盆/465 战争桌旗=吊顶族（曾走家具底行支=语义反向,备案 531 同支维持家具近似）
+  // ★591 吊盆/592 吊火盆/465 战争桌旗=吊顶族（TileObjectData 465 AnchorTop
+  // TileObjectData.cs:2981-2986;曾走家具底行支=语义反向,备案 531 同支维持家具近似）
   465: 'hangtop', 591: 'hangtop', 592: 'hangtop',
   // CheckGnome（:87201-87204 派发 567;函数 :54400）：1×2（fy0|20）+下方
   // SolidTileAllowBottomSlope/平台
   567: 'gnome',
   // 树基族（:87167-87190 派发）：583-589 宝石树/596 樱花树/616 黄柳（CheckTreeWithSettings
   // :54877——基格 frameX0|22|44&fy<=130 地基失效杀+孤儿格 num4==-1 杀）/634 灰烬树/
-  // 323 棕榈 CheckPalmTree :54821（下方须沙族或同型续接）。地基测试 :30585-30616
+  // 323 棕榈 CheckPalmTree :54821（下方须沙族或同型续接）。地基测试 :30585-30616。
+  // ★590/595/615 树【苗】不属本族——它们派发 Check1x2（:87055-87066）普通立地支
+  // （地基族重帧逻辑仅 type==20 支 :43781 门）→ 归 'sapling'
   583: 'treebase', 584: 'treebase', 585: 'treebase', 586: 'treebase', 587: 'treebase',
   588: 'treebase', 589: 'treebase', 596: 'treebase', 616: 'treebase', 634: 'treebase',
   323: 'treebase',
@@ -612,8 +615,31 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   171: 'xmas',
   // Check2x2 通用支（goto case 132 链 :87336→:87338;函数 :48811——非巨石支 :48852-48857
   // 逐柱下方 nactive+(solid||table)+非半砖）：652 中碎砾 2×2（:86949-86974 no-op break
-  // 组闭合后 goto case 132）/35 南瓜灯（CheckMB :51649 同判据,decor 曾早退漏检）
-  652: 'support2x2', 35: 'support2x2',
+  // 组闭合后 goto case 132）/35 南瓜灯（CheckMB :51649 同判据,decor 曾早退漏检）/
+  // 696 影珠复制品（CheckOrb :54187 的 696 支【仅】完整性无地基行 :48240-48246）
+  652: 'support2x2', 35: 'support2x2', 696: 'support2x2',
+  // CheckChand（:87067-87070 派发 34/454;函数 :53254——顶行第 2 列上方
+  // nactive+solid+非 solidTop :53318-53322,454 仅宽度 4 异）
+  454: 'hangs',
+  // Check1x2 普通立地支（:87055-87066 派发组 15/20/216/338/390/493/497/590/595/615;
+  // 函数 :43772-43774——完整性+下方 SolidTileAllowBottomSlope/平台;590 宝石树苗/
+  // 595 樱花苗/615 黄柳苗=普通支,无地基族重帧（该逻辑 :43781 仅 type==20））
+  590: 'sapling', 595: 'sapling', 615: 'sapling',
+  // CheckPot（:87153-87156 派发 28/653;函数 :57273）补 653 花盆复制组（2×2+底行 SolidTile2）
+  653: 'pot',
+  // CheckOrb（:86553-86556 派发 12/31/639/696;函数 :54187）补 639 法力水晶复制品
+  // （:48234-48246 12/639 同支=2×2+底行 SolidTileAllowBottomSlope;31 备案不接,
+  // 696 仅完整性归 support2x2）
+  639: 'orb',
+  // CheckRockGolemHead（:86552-86554 派发 579;函数 :54282——下方
+  // SolidTileAllowBottomSlope 单判据）与 529 海燕麦同 case（立地单格族）
+  579: 'sandplant',
+  // Check3x2 补 704/705（:49717-49720 支撑行 SolidTileAllowBottomSlope,无巨石门）/
+  // 706（完整性【无】支撑行,同 647 组;挖掉掉落 4144 走 breakShrineSword 既有链）
+  704: 'deco3x2', 705: 'deco3x2', 706: 'deco3x2',
+  // IsADripTile（TileID.cs:157 {373,374,375,461,709};TileFrameImportant :86390-86396
+  // 内联——上方 active+solid+非 solidTop+非底坡,失顶即杀）滴落族
+  373: 'drip', 374: 'drip', 375: 'drip', 461: 'drip', 709: 'drip',
 };
 /** PlantCheck 换型目标（PlantCheck_TryGetNewType :81886 回写用,sheet→def key——
  *  ★不能走 TILE_INTERNAL_BY_SHEET：sheet 3 首个 def 是 mushroom 非草丛本体） */
@@ -10603,7 +10629,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 爆炸尾段载荷（Projectile.Kill :74007-74244）：903-906 液体放置/吸收、
         // 910/911 泥土 flood-fill；旧爆炸族无载荷（undefined）
         const payload = Game.BOMB_PAYLOAD[cw.shoot];
-        this.entities.add(new GrenadeProj(px, py,
+        // ★2026-08-23 esbuild 快检修：并行会话在途编辑把本构造误改为
+        //  this.entities.add(new GrenadeProj(…)) 且丢闭合括号——恢复 const 句柄
+        //  （下方 contactPen/contactKb/critChance 与 add(thrownBomb) 四处引用依赖它）
+        const thrownBomb = new GrenadeProj(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           dmg, fuse, cw.shoot, (ex, ey, edmg) => {
             this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, this.player.equipStats.armorPen + (ps?.arpen ?? 0), cw.shoot);
@@ -10612,7 +10641,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 Math.floor(ex / TILE), Math.floor(ey / TILE));
               if (painted > 0) this.sfxAt('splash', ex, ey); // delegate 成功格尘/音近似（:74063-74100 族）
             }
-          }), 'projectiles'); // ⑥+⑧
+          });
+        // 接触伤害参数（同发射支——投掷炸弹碰 NPC 也走 Damage_PVE 结算）
+        // ★2026-08-23 esbuild 快检随修：cw 字段名/暴击源对齐上方重写后形态
+        //  （knockback 已词缀乘区;crit 走 critTotal 中心化式,见 :10575 起）
+        thrownBomb.contactPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+        thrownBomb.contactKb = cw.knockback;
+        thrownBomb.critChance = critTotal;
+        this.entities.add(thrownBomb, 'projectiles'); // ⑥+⑧
         consume();
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
@@ -23852,6 +23888,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'sapling': {
         // Check1x2（:43377）type 20 支：完整性 + 底格 SolidTileAllowBottomSlope/
         // 平台 + 地基族匹配（错族=重帧 :43483-43489;无地基/界外族=杀）。
+        // ★590/595/615 树苗=同函数普通支（:43772-43774 仅完整性+底格判据,
+        // 地基族逻辑 :43781 有 type==20 门）——不参与橡实地基族重帧/杀。
         // ★仓内双表示：玩家橡实种植=单格（placeAcornSapling :12398 frameY=0）、
         // wld 导入=1×2 两格（frameY 0/18）——按第二格是否同型分辨
         const top = (st.frameY[i] % 36 === 0) ? y : y - 1;
@@ -23861,6 +23899,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           || (twoCell && !st.isActive(x, top + 1))) { this.killDecorTile(x, top); return; }
         const gd = TILE_DEFS[st.get(x, below)];
         const groundOk = this.solidAllowBottomSlopeAt(x, below) || !!gd?.platform;
+        if (sheet !== 20) { if (!groundOk) this.killDecorTile(x, top); return; }
         const alt = ACORN_ALT_BY_GROUND_SHEET[gd?.vanilla?.sheet ?? -1];
         if (!groundOk || alt === undefined) { this.killDecorTile(x, top); return; }
         const curAlt = Math.floor(st.frameX[st.idx(x, top)] / 54);
@@ -23928,15 +23967,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
       }
       case 'hangs': {
-        // 吊挂族：CheckChand（:52891，34 顶行中列上方 active+solid+非 solidTop）/
-        // Check1x2Top（:46773，42 上方 solid/平台/绳——绳支 :46776 flag5）
+        // 吊挂族：CheckChand（:53254，34/454 顶行第 2 列上方 nactive+solid+非 solidTop
+        // :53318-53322——454 皮格纳塔仅宽 4 异,锚列同为第 2 列 num+1）/
+        // Check1x2Top（:47109，42 上方 solid/平台/绳——绳支 :47113）
         const w = def.w ?? 1, h = def.h ?? 1;
         const ax = x - (Math.floor(st.frameX[i] / 18) % w);
         const ay = y - (Math.floor(st.frameY[i] / 18) % h);
-        const hx = ax + (w >> 1), hy = ay - 1;
+        const hx = ax + (sheet === 454 ? 1 : (w >> 1)), hy = ay - 1;
         const hd = TILE_DEFS[st.get(hx, hy)];
-        const ok = sheet === 34
-          ? (!!hd?.solid && !hd.platform)
+        const ok = sheet === 34 || sheet === 454
+          ? st.isActive(hx, hy) && !!hd?.solid && !hd.platform
           : st.isActive(hx, hy) && (!!hd?.solid || !!hd?.platform || !!hd?.rope);
         if (!ok) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
         return;
@@ -24097,22 +24137,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // Check3x2（:49617）：3×2 完整性（列 frameX/18%3 商×54,行 frameY/18%2）+
         // 分型支撑——186（:49700-49726 立地+非巨石+style26-31 雪/冰/162/224、32-34
         // 泥/70）/187（:49728-49790 立地+非巨石+style0-5 泥/60/226、6-8{57,58,75,76}、
-        // 29-34 沙族）/647/648/651 大碎砾（:86899-86908 no-op break 组闭合→goto
-        // case 14 :87342→【仅】完整性,无支撑行=原版"自身不断即不塌"）
+        // 29-34 沙族）/704/705（:49717-49720 仅 SolidTileAllowBottomSlope,无巨石门）/
+        // 647/648/651/706（:86830-86846 no-op break 组闭合→goto case 14 :87239→
+        // 【仅】完整性,无支撑行=原版"自身不断即不塌"）
         let col = Math.floor(st.frameX[i] / 18);
         let style = 0;
         while (col >= 3) { col -= 3; style++; }
         const ax = x - col, ay = y - (Math.floor(st.frameY[i] / 18) % 2);
+        const integrityOnly = sheet === 647 || sheet === 648 || sheet === 651 || sheet === 706;
         let bad = false;
         for (let dx = 0; dx < 3 && !bad; dx++) {
           for (let dy = 0; dy < 2; dy++) {
             if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
           }
           if (bad) break;
-          if (sheet === 647 || sheet === 648 || sheet === 651) continue;   // 碎砾无支撑行
+          if (integrityOnly) continue;   // 碎砾/圣剑龛无支撑行
           const below = sheetAt(st, ax + dx, ay + 2);
-          if (!this.solidAllowBottomSlopeAt(ax + dx, ay + 2)
-            || Game.BOULDER_SUPPORT_SHEETS.has(below)) { bad = true; continue; }
+          if (!this.solidAllowBottomSlopeAt(ax + dx, ay + 2)) { bad = true; continue; }
+          if (sheet !== 704 && sheet !== 705 && Game.BOULDER_SUPPORT_SHEETS.has(below)) { bad = true; continue; }
           if (sheet === 186) {
             if (style >= 26 && style <= 31) {
               if (!CONV_SNOW_SHEETS.has(below) && !CONV_ICE_SHEETS.has(below) && below !== 162 && below !== 224) bad = true;
@@ -24250,9 +24292,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'sandplant': {
         // case 529 海燕麦（:86493-86510 内联）：下方 SolidTileAllowBottomSlope
         // （:86497-86501）+沙族 Conversion.Sand（:86504-86509）。单格写入
-        // （PlantSeaOat :58782 frameY=0）——def fw1×fh2 为贴图帧高非占格
+        // （PlantSeaOat :58782 frameY=0）——def fw1×fh2 为贴图帧高非占格。
+        // 579 石巨人头（CheckRockGolemHead :54282）=仅下方
+        // SolidTileAllowBottomSlope 单判据（无沙族门）
         if (!this.solidAllowBottomSlopeAt(x, y + 1)
-          || !CONV_SAND_SHEETS.has(sheetAt(st, x, y + 1))) this.killDecorTile(x, y);
+          || (sheet === 529 && !CONV_SAND_SHEETS.has(sheetAt(st, x, y + 1)))) {
+          this.killDecorTile(x, y);
+        }
         return;
       }
       case 'hangtop': {
@@ -24343,7 +24389,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (dirs.some(([d, ok]) => ok && d === cur)) return;
         const alt = dirs.find(([, ok]) => ok);
         if (!alt) { this.killDecorTile(x, y); return; }
-        st.frameX[i] = (alt[0] === 2 ? 3 : alt[0] === 3 ? 2 : alt[0]) * 18;
+        st.frameX[i] = alt[0] * 18;   // 写入=验证后锚向 style*18（:54395;2/3 互换仅用于免写比对）
         this.chunks.markDirtyArea(x - 1, y - 1, x + 1, y + 1);
         return;
       }
@@ -24368,7 +24414,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // Check2x2 通用支（:48811;非巨石非 95/126/132 :48852-48857）：2×2 完整性
         // （652 列号 fx%36/18 特支 :48833-48837,余 fx/18 反推）+逐柱下方 nactive+
         // (solid|table)+非半砖。35 南瓜灯=CheckMB（:51649——2×2 完整性+下方
-        // nactive+(tileSolid|tileTable) :51686-51692,同判据归并）
+        // nactive+(tileSolid|tileTable) :51686-51692,同判据归并,无半砖门）。
+        // 696 影珠复制品=CheckOrb（:54187）696 支【仅】完整性（地基行仅 12/639 有,
+        // :48240-48246 门）
         const is652 = sheet === 652;
         const ax = is652
           ? x - (st.frameX[i] % 36) / 18
@@ -24379,7 +24427,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           for (let dy = 0; dy < 2; dy++) {
             if (!st.isActive(ax + dx, ay + dy) || st.get(ax + dx, ay + dy) !== st.type[i]) { bad = true; break; }
           }
-          if (!bad) {
+          if (!bad && sheet !== 696) {
             const bd = TILE_DEFS[st.get(ax + dx, ay + 2)];
             if (!st.isActive(ax + dx, ay + 2) || !bd || (!bd.solid && !bd.platform)) bad = true;
             // Check2x2 通用支有半砖杀（:48858-48860）;CheckMB（35）无（:51686-51692）
@@ -24387,6 +24435,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
         }
         if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'drip': {
+        // IsADripTile（TileID.cs:157 {373,374,375,461,709}）内联支（:86390-86396）：
+        // 上方须 active+非底坡(slope3/4)+solid+【非】solidTop,失顶即杀
+        if (!st.inBounds(x, y - 1)) return;
+        if (!st.isActive(x, y - 1)) { this.killDecorTile(x, y); return; }
+        const ui = st.idx(x, y - 1);
+        const ud = TILE_DEFS[st.type[ui]];
+        const usl = st.slope[ui];
+        if (!ud || !ud.solid || ud.platform || usl === 3 || usl === 4) this.killDecorTile(x, y);
         return;
       }
       default:

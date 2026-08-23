@@ -928,8 +928,12 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
       if (!st.flags[st.idx(i, j - 1)] && noSwitchL && noSwitchR) {
         // 上方无块：对凸起顶端做半砖/削除（16520 还要求 CanBeClearedDuringGeneration）
         if (solidTile(st, i, j) && !NOT_CLEARABLE.has(t)) {
-          const li = st.idx(i - 1, j), ri = st.idx(i + 1, j);
-          if (!st.half[li] && !st.half[ri] && st.slope[li] === 0 && st.slope[ri] === 0) {
+          // 16520 旁格门 = `(!active || blockType()==0)`（Tile.cs:232 blockType 纯
+          //  half/slope 不查 active）⇒ 非活性邻格**短路通过**（残坡/残半砖幽灵格
+          //  不拦）——曾裸读 half/slope → 幽灵残坡邻格把整段凸起/立柱削除门误关
+          //  （NOTRAPS #53 (1258,1016) 首差：vanilla 16594 立柱削除照跑/JS 被右侧
+          //  幽灵 slope1 邻格拦截，尘 10 迭代零掷但状态差 → 后续掷流级联相移）。
+          if (fullOrEmpty(st, i - 1, j) && fullOrEmpty(st, i + 1, j)) {
             if (solidTile(st, i, j + 1)) {
               // 模式 A（16526-16535）：左凸 → slope2/半砖；模式 B（16537-16546）：右凸 → slope1/半砖
               if (!solidTile(st, i - 1, j) && !st.half[st.idx(i - 1, j + 1)]

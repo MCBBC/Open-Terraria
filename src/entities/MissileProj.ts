@@ -34,7 +34,7 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, projFrameImg, projFrameCount } from './Arrow';
 import { applyProjStatus } from './projStatus';
-import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { canHit } from '../physics/LineOfSight';
 import { projectileData } from '../data/vanillaProjectiles';
 

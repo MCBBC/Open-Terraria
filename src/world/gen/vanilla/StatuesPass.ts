@@ -305,6 +305,7 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (y >= h) { done = true; break; }
       y--;
       const ai = st.idx(x, y);
+      (globalThis as { __swStatTry?: (x: number, y: number, anchorSheet: number) => void }).__swStatTry?.(x, y, SHEET[st.type[ai]] ?? -1);
       // cs:17024-17028 flag2 双门：①锚格活性且 frameImportant 且非 tileCut → 拒
       //   （不放不清不扫）；②锚格 anyShimmer → 拒。均计 fail 重掷。
       const shimmer = st.liquid[ai] > 0 && st.liquidType[ai] === 4 /* LIQ_SHIMMER */;

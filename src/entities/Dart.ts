@@ -1,7 +1,7 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { hitPlayer, playEnemyHitSound, playerCanHitEnemy, projOverlap, tryReflectProjectile } from './projTargets';
+import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile } from './projTargets';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY } from '../data/tiles';

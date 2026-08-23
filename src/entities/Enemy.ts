@@ -11567,7 +11567,7 @@ export class Enemy extends Entity {
     if (this.vanillaId === 488) {
       this.dummyShake = Math.max(20, Math.min(120, dmg));
       this.dummyHitDir = Math.sign(kbx);   // cs:83506 localAI[1]=hitDirection 无条件写入（0=未定向）
-      this.iframes = 8;
+      this.iframes = 10;                   // 免疫帧与通用档一致（:13152 对全 NPC 含假人 10t；旧 8 偏差）
       this.hpBarT = 240;
       return true;
     }

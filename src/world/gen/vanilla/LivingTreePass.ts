@@ -148,8 +148,12 @@ function setLeaf(st: TileStore, x: number, y: number): void {
 }
 function deactivate(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
-  const i = st.idx(x, y);
-  st.type[i] = 0; st.flags[i] = 0; st.half[i] = 0; st.slope[i] = 0;
+  // ★WWWWW 勘误：原版竖井/树屋腔掏空 = `Main.tile[...].active(false)`（cs:29096/29361/
+  //  29393 等）——只清活性位，type/帧/half/slope 幽灵全保留。曾连 type/half/slope 一并
+  //  清零 → 竖井+房间腔幽灵态与原版分叉 → 房间陈设 PlaceTile 读幽灵态的成败搜索循环
+  //  掷数漂移（CONST 链 #42 patch 树相位整段位移的根因：主树逐字节同、patch 树
+  //  JS=左 1217/vanilla=右 ~1307）。改 flags=0（与 JungleShrinePass 清腔同款幽灵语义）。
+  st.flags[st.idx(x, y)] = 0;
 }
 
 /** WorldGen.PlaceTile(x, y, 19, …, style)（cs:28312/28741/29063/29103）：平台 1×1，
@@ -1157,7 +1161,7 @@ export function runLivingTreesPass(
                           if (CLOUD_SHEETS.has(sh)) { flag2 = false; break outer2; }
                         }
                       }
-                      if (flag2) { if (LT_TRACE) console.log(`LT patch x=${num7} j=${num10}`); growLivingTree(st, rng, gs, chests, num7, num10, true); }
+                      if (flag2) { if (LT_TRACE) console.log(`LT patch x=${num7} j=${num10} st=${ltStream()}`); const okP = growLivingTree(st, rng, gs, chests, num7, num10, true); if (LT_TRACE) console.log(`LT patchDone x=${num7} ok=${okP} st=${ltStream()}`); }
                     }
                   }
                 }

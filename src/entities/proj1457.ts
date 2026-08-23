@@ -15,7 +15,7 @@ import type { Camera } from '../render/Camera';
 import { TILE } from '../core/constants';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
-import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy } from './projTargets';
 import { applyProjStatus } from './projStatus';
 import { projSprite } from './Arrow';
 

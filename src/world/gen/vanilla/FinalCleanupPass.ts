@@ -43,6 +43,10 @@ import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
 import { runFinishNoTraps } from './FinishNoTrapsPass';
+// ★YYYYYY（2026-08-23）：KillTile 头部不可破坏门——NOTRAPS #58 神庙锁门三格拒毁
+// （cs:63579 `num==2 → return` 在尘段之前,零掷零写;1:1 实现已在 HalfBrickPass,
+//  TTTTTT 批移植含 isLockedDoorKT cs:69248 全同帧门/下方锁门门/HasReasonToReturnEarly 全支）
+import { checkTileBreakability } from './HalfBrickPass';
 // ★UUUUUU（2026-08-23）：notTheBees 终转化（调用位 cs:22602-22605——⑭ 之后）
 import { runNotTheBees, runFinishNotTheBees } from './NotTheBeesPass';
 
@@ -542,12 +546,17 @@ function makeTileDustRoll(ctx: SweepCtx, sheet: number, fx: number): void {
   }
 }
 
-/** KillTile 生成期语义（cs:63559：尘埃掷循环 cs:63747-51 + 击杀写 cs:63933-65
- *  + 尾部 SquareTileFrame cs:63967） */
+/** KillTile 生成期语义（cs:63559：CheckTileBreakability 头门 cs:63579 + 尘埃掷循环
+ *  cs:63747-51 + 击杀写 cs:63933-65 + 尾部 SquareTileFrame cs:63967） */
 function killTileGen(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (!st.flags[i]) return;
+  // ★YYYYYY（2026-08-23）NOTRAPS #58：cs:63579 `num==2 → return`（尘段之前,零掷零写）
+  //   ——神庙锁门三格拒毁（下方格活性锁门门 cs:62422-625 / HasReasonToReturnEarly
+  //   →IsLockedDoor cs:62433+62504-507）。只拒杀不加支：fail 支（num==1,锁门顶格
+  //   存活+级联）gen 域不可达于现绿链（构造保证）,备案残差见账本 YYYYY 批。
+  if (checkTileBreakability(st, x, y) === 2) return;
   const sheet = SWEEP_SHEET[st.type[i]];
   const fx = st.frameX[i]!;
   (globalThis as { __swKillCap?: (x: number, y: number, sheet: number) => void }).__swKillCap?.(x, y, sheet);
