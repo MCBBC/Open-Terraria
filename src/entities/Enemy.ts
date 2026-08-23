@@ -753,14 +753,17 @@ export class Enemy extends Entity {
       // |vx|<num46/2 时（零速先 −direction）vx×1.1，否则 vy>−num46 时 vy−=num47
       let flag8 = false;
       if (vidW === 87 || vidW === 454) {
-        const threshold = vidW === 454 ? 300 : 300;              // 87:300（:52603）/454:300（:52630）
         if (((this.vx > 0 && num49 < 0) || (this.vx < 0 && num49 > 0)
           || (this.vy > 0 && num50 < 0) || (this.vy < 0 && num50 > 0))
-          && Math.abs(this.vx) + Math.abs(this.vy) > num47 / 2 && distRaw < threshold) {
+          && Math.abs(this.vx) + Math.abs(this.vy) > num47 / 2 && distRaw < 300) {
           flag8 = true;
           if (Math.abs(this.vx) + Math.abs(this.vy) < num46) { this.vx *= 1.1; this.vy *= 1.1; }
         }
-        if (this.y > player.y || player.dead) {                  // :52611/:52643 position.Y 比较
+        // 87：Center.Y 比较或玩家在地表上（:52611-52612）；454：position.Y 比较（:52643）
+        const belowPlayer = vidW === 87
+          ? (this.cy > player.cy || player.y / TILE > game.world.groundLevel || player.dead)
+          : (this.y > player.y || player.dead);
+        if (belowPlayer) {
           flag8 = true;
           if (Math.abs(this.vx) < num46 / 2) {
             if (this.vx === 0) this.vx -= this.facing;
@@ -6658,20 +6661,22 @@ export class Enemy extends Entity {
       else if (num154 < 0) { this.facing = 1; this.visAngle = Math.atan2(num155, num154) + Math.PI; }
       if (isMimic) this.facing *= -1;
     }
-    // ---- 巨型诅咒颅 289 暗影焰（:21730-21761）：justHit 清态 + ≤500px 状态机
-    //      （0 累计 120t → 1 冲刺段 40t），冲刺段 ai[2]==20 发射暗影焰（速 6、伤 25）----
+    // ---- 巨型诅咒颅 289 暗影焰（1457 :21861-21918）：justHit 清态 + ≤500px 状态机
+    //      （0 累计 >120t → 1 攻击段 40t），攻击段 ai[2]==20 发射暗影焰（速 6、伤 25）；
+    //      ai[2]>40 → ai[3]=0 但 ai[2]【保留】继续计数（:21890-21897）→ 回态 0 后
+    //      只需再数到 121，稳态周期 = 80+40 = 120t（曾误归零 ai[2] → 160t 慢 33%）----
     if (this.vanillaId === 289) {
-      if (this.justHit) { this.ai2 = 0; this.ai3 = 0; }    // :21733-21735（受击打断蓄力）
+      if (this.justHit) { this.ai2 = 0; this.ai3 = 0; }    // :21863-21867（受击打断蓄力）
       dx = player ? player.cx - this.cx : this.facing * 100;
       dy = player ? player.cy - this.cy : -100;
       const d289 = Math.hypot(dx, dy) || 1;
       if (player && d289 <= 500) {
         this.ai2 += 1;
         if (this.ai3 === 0) {
-          if (this.ai2 > 120) { this.ai2 = 0; this.ai3 = 1; }
+          if (this.ai2 > 120) { this.ai2 = 0; this.ai3 = 1; }   // :21881-21886
         } else {
           if (this.ai2 === 20) this.shootDart(game, this.cx, this.cy, dx, dy, 6, 25, 299);
-          if (this.ai2 > 40) { this.ai3 = 0; this.ai2 = 0; }
+          if (this.ai2 > 40) this.ai3 = 0;                 // :21890-21897 ai[2] 不归零
         }
       } else { this.ai2 = 0; this.ai3 = 0; }
     }
@@ -7887,16 +7892,17 @@ export class Enemy extends Entity {
         game.playSfxWav?.('Pixie', 1, this.cx, this.cy);
       }
     }
-    // 蜗牛怪 122 充能机（cs:24823-24877）：待机 localAI[1] >120 且有视线 → 充能
-    // (ai[3]=1,受击清);充能出 700px 射程取消、满 64 归零;ai[3]==32 发粉激光 84
-    // （速 7、伤 25、RotatedByRandom(0.0785×2π) 散布）;深度 8
+    // 蜗牛怪 122 充能机（1457 :24922-24975）：待机 localAI[1] >120 且 AI_GlobalFiring
+    // DistanceCheck+视线 → 充能(ai[3]=1,受击清);充能满 64 归零;ai[3]==32 发粉激光 84
+    // （速 7、伤 25、RotatedByRandom 散布）——★充能中无距离取消、开火无距离门
+    // （1457 字面；曾自创 700px 取消/开火双门，R6-B 4-10 摘除）;深度 8
     const aimDX = player ? player.cx - this.cx : 0;
     const aimDY = player ? player.cy - this.cy : 0;
     const aimDist = Math.hypot(aimDX, aimDY) || 1;
     if (vid === 122) {
       num310 = 8;
       if (this.justHit) { this.ai3 = 0; this.lai1 = 0; }
-      if (this.ai3 === 32 && player && !player.dead && aimDist < 700) {
+      if (this.ai3 === 32 && player) {
         const ang = Math.atan2(aimDY, aimDX) + (Math.random() - 0.5) * 0.157;
         const laser = new Dart(this.cx, this.cy, Math.cos(ang) * 7, Math.sin(ang) * 7, 25, 84);
         laser.hostile = true;
@@ -7905,7 +7911,6 @@ export class Enemy extends Entity {
       }
       if (this.ai3 > 0) {
         this.ai3 += 1;
-        if (player && !player.dead && aimDist >= 700) this.ai3 = 0;
         if (this.ai3 >= 64) this.ai3 = 0;
       }
       if (this.ai3 === 0) {

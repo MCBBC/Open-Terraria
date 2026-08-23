@@ -2371,19 +2371,32 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
     if (e.vy !== 0 && e.ai0 < p.jumpMinT) e.ai0 = p.jumpMinT;
     if (e.ai0 === p.jumpT) e.vy = -p.jumpVy;
   }
-  // ---- 卡位/转向计数（cs:64431-64456,flag18=true 时推进;DD2 族 flag30=false 只计数） ----
+  // ---- 卡位/转向计数（1457 :64636-64659,flag18=true 时推进） ----
+  let teleported = false;
   if (!attacking) {
-    // position.X == oldPosition.X（:64437）= 上一拍水平位移为零 → w107NoMove 落盘
+    // position.X == oldPosition.X（:64641）= 上一拍水平位移为零 → w107NoMove 落盘
     const flag19 = e.vy === 0 && e.vx * e.facing < 0;
     if (w107NoMove.has(e) || flag19 || e.ai3 >= 30) e.ai3 += 1;
     else if (Math.abs(e.vx) > 0.9 && e.ai3 > 0) e.ai3 -= 1;
     if (e.ai3 > 300) e.ai3 = 0;            // num21*10
-    if (e.justHit) e.ai3 = 0;              // justHit && !flag30（:64449-64452）
+    if (e.justHit && id === 620) e.ai3 = 0;   // justHit && !flag30（:64648-64652；flag30=除 620 恒真）
     if (tgt && e.x < tgt.x + tgt.w && e.x + e.w > tgt.x
       && e.y < tgt.y + tgt.h && e.y + e.h > tgt.y) e.ai3 = 0;
+    // ---- 卡位传送（R6-B 5-1，:64660-64691）：ai[3]==num21(30) 且 flag30（除 620
+    // 全体）→ noGravity/noTileCollide + position.X += direction×width×2 + 20 尘 27
+    // + 本 tick 跳过余段——DD2 walker 卡墙 30t 穿墙瞬移（曾只计数无传送=永久滞留）。
+    // flag30 型下一 tick flag2 重估：仍失视且（同向‖已 noGravity 且距>50 在上方）
+    // → 保持相位；非 fade 型（flag29=false）下一 tick flag2=false 立即退出相位 ----
+    if (e.ai3 === 30 && id !== 620) {
+      teleported = true;
+      e.x += e.facing * e.w * 2;           // :64667
+      game.spawnParticles(e.cx, e.cy, '#C8B8D8', 8, 1.2, { life: 30, damp: 0.9, grav: 0 });
+      if (W107_PORTAL_FADE.has(id)) w107Phasing.add(e);   // noGravity/noTileCollide（:64665-64666）
+    }
   }
-  // ---- 嘶叫 + 重定向 / 静止折返（cs:64490-64536;flag20 刹车期整块跳过） ----
-  if (!windupBraking) {
+  // ---- 嘶叫 + 重定向 / 静止折返（1457 :64790-64836;flag20 刹车期整块跳过;
+  //      传送 tick 跳过余段 = 原版 :64689 return） ----
+  if (!windupBraking && !teleported) {
     if (e.ai3 < 30) {
       // flag21 = DD2Event.EnemiesShouldChasePlayers（DD2Event.cs:115-123 恒真）
       if (p.scream && p.screamOneIn > 0 && rnd(p.screamOneIn) === 0) {
@@ -2406,10 +2419,10 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
       if (e.facing === 0) e.facing = 1;
     }
   }
-  // ---- 走路加速（flag24=false 族;刹车期跳过,cs:64537-64550） ----
-  if (!p.noWalkAccel && !windupBraking) w107WalkAccel(e, p);
-  // ---- 远程循环（flag12,cs:64551-64679） ----
-  if (p.shooter) {
+  // ---- 走路加速（flag24=false 族;刹车期/传送 tick 跳过,1457 :64837-64850） ----
+  if (!p.noWalkAccel && !windupBraking && !teleported) w107WalkAccel(e, p);
+  // ---- 远程循环（flag12,cs:64851-64979） ----
+  if (p.shooter && !teleported) {
     if (e.ai1 > 0) e.ai1 -= 1;             // 先减后比（德拉肯多连拍依赖此序）
     if (e.justHit) { e.ai1 = 30; e.ai0 = 0; }   // num19=30（:64563-64567）
     const aimRetarget = e.ai1 > p.aimAbove;   // flag15（各族字面阈值,德拉肯不随连拍改写）
@@ -2445,8 +2458,13 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
     }
     if (e.ai0 <= 0) w107WalkAccel(e, p);   // 收招后走路加速（:64660-64678）
   }
-  // ---- 位移（原版由公共碰撞步承载;此处按引擎惯例自理） ----
-  if (phase) {
+  // ---- 位移（原版由公共碰撞步承载;此处按引擎惯例自理）。teleported → 本 tick
+  //      穿墙位移（:64689 return 后公共步以 noTileCollide 移动）----
+  if (phase || teleported) {
+    if (!phase && teleported && !W107_PORTAL_FADE.has(id)) {
+      fly(e);                              // 非 fade 型=单 tick 穿墙位移（下一 tick 退出相位）
+      return;
+    }
     // 穿墙飞行（cs:64846-64918）：水平 Lerp 朝目标 + 三档垂直伺服
     if (W107_PORTAL_FADE.has(id) && e.spawnAlpha < 60) e.spawnAlpha += 20;   // :64852-64858
     const wasGrounded = e.vy === 0;
@@ -2521,6 +2539,10 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
         e.vx *= 1.5;
         e.vy = -8;
       }
+      // 卡死小跳（R6-B 5-2，:65030-65034）：flag（tick 初 vx==vy==0 且未受击，
+      // :63614）+ 卡死计数恰 1 → vy=-5——与 AI_003 同款时序差活分支（flag 在 tick
+      // 初取零速、本段在走路加速后评估）
+      if (e.vy === 0 && flag107Stuck && e.ai3 === 1) e.vy = -5;
     }
   }
   const preX = e.x;

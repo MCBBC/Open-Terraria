@@ -165,7 +165,7 @@ export class TitleMenu {
         <div class="sw-title-btn" data-act="quit">${Lang.text('LegacyMenu.15')}</div>
       </div>
       <div class="sw-title-version">SandboxWorld v0.1.0</div>
-      <div style="position:fixed;right:30px;bottom:8px;font-size:13px;color:#fff;padding:0 16px;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;z-index:20;">由<b style="font-weight:700;-webkit-text-stroke:0.6px #fff;text-shadow:0.5px 0 0 #fff,-0.5px 0 0 #fff,0 0.5px 0 #fff,0 -0.5px 0 #fff;">GLM-5.3</b>与<b style="font-weight:700;-webkit-text-stroke:0.6px #fff;text-shadow:0.5px 0 0 #fff,-0.5px 0 0 #fff,0 0.5px 0 #fff,0 -0.5px 0 #fff;">OX-Alpha</b>共同协作复刻<br>仅用于AI学习研究禁止用于商业用途，原版请从官方渠道购买</div>
+      <div style="position:fixed;right:30px;bottom:8px;font-size:13px;color:#fff;padding:0 16px;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;z-index:20;">由<b style="font-weight:700;margin:0 5px;text-shadow:1px 0 0 #fff,1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;">GLM-5.3</b>与<b style="font-weight:700;margin:0 5px;text-shadow:1px 0 0 #fff,1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;">OX-Alpha</b>共同协作复刻<br>仅用于AI学习研究禁止用于商业用途，原版请从官方渠道购买</div>
     `;
     this.logoDay = this.root.querySelector('.logo-day') as unknown as HTMLImageElement;
     this.logoNight = this.root.querySelector('.logo-night') as unknown as HTMLImageElement;

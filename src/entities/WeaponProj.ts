@@ -1192,8 +1192,14 @@ export class CounterweightProj extends Entity {
       } else {
         this.ai0 = -1;   // 松手回收（:64643-64646）
       }
-      // 800px 内最近敌追踪（:64643-64717;flag 恒真——配重球全走 num8=800 档;
-      // num11=|dx|+|dy| 曼哈顿距;敌距玩家 <num×0.9 且对球有视线）
+      // 800px 内最近敌追踪（:68598-68658;1456 :64643-64717 同构;flag 恒真——配重球
+      //  全走 num8=800 档;num11=|dx|+|dy| 曼哈顿距;敌距玩家 <num×0.9 且对球有视线）。
+      //  ★蓝队 R7-29 勘误（误报）：1457 此段内的逐型半径/力度分支（549→200/554→400/
+      //  553→250/603→320、563 ×4/(14,15)/553 ×5/(12,13)/603 ×16/(9,10)/554 ×8/(6,7)、
+      //  563 贴身 200 排除）全部是【死代码】——本方法只被 `(aiStyle==99 && type>=556 &&
+      //  type<=561) || type==1079` 分派（:33767-33769）,549/553/554/563/603 是悠悠球
+      //  本体型（走 AI_099_2_Yoyos）,永不进入本 AI;活分支只有缺省 ×6/(7,8)/800,
+      //  与本仓单档 1:1。勿据死分支加表
       {
         let best = 800, tx = 0, ty = 0, found = false;
         for (const ent of game.enemies()) {
@@ -1210,7 +1216,7 @@ export class CounterweightProj extends Entity {
         if (found) {
           let cdx = tx - this.cx, cdy = ty - this.cy;
           const cd = Math.hypot(cdx, cdy) || 1;
-          cdx = cdx / cd * 6; cdy = cdy / cd * 6;   // v3 *= 6（:64710-64712）
+          cdx = cdx / cd * 6; cdy = cdy / cd * 6;   // v3 *= 6（:68652-68662 缺省档=唯一活档）
           this.vx = (this.vx * 7 + cdx) / 8;
           this.vy = (this.vy * 7 + cdy) / 8;
         }
@@ -1247,6 +1253,9 @@ export class CounterweightProj extends Entity {
       const dx = p.cx - this.cx, dy = p.cy - this.cy;
       const d = Math.hypot(dx, dy);
       if (d < 40 || Number.isNaN(d) || d > 2000) { this.dead = true; return; }
+      // 回收速 num13 = num3×1.5 = 18、惯性 num14 = 12（:68762-68776）。★蓝队 R7-33
+      //  勘误（误报）：同段 546 ×1.5/554 ×1.25/555 ×1.35/562 ×1.25 逐型乘子全在
+      //  AI_099_1_Counterweights 内（type 只可能 556-561/1079）= 死代码,活路径恒 18
       this.vx = (this.vx * 11 + (dx / (d || 1)) * 18) / 12;
       this.vy = (this.vy * 11 + (dy / (d || 1)) * 18) / 12;
       this.x += this.vx;
@@ -1557,7 +1566,11 @@ export class YoyoProj extends Entity {
     let range = YOYO_RANGE[this.projId] ?? 200;
     if (eq.yoyoString) range = range * 1.25 + 30;  // 线圈 yoyoString(:64971)
     range /= msRange;
-    let top = (YOYO_TOP[this.projId] ?? 10) / msRange;
+    let top = YOYO_TOP[this.projId] ?? 10;
+    // 554 双球在场顶速 ×0.75（:68944-68947 `(type == 554) & flag`——手套二号球防重叠;
+    //  蓝队 R7-31：曾缺,双 Kraken 顶速偏高 25%）
+    if (this.projId === 554 && flag) top *= 0.75;
+    top /= msRange;
     let inertia = Math.max(1, 14 - top / 2);   // num7(:64968-64971)
     const deadZone = 5 + top / 2 + (flag ? 20 : 0);  // num9 光标死区半径(:64972 + flag:64976-64978)
     // 寿命（:64827-64854）：localAI[0] += 1（flag 另加 rand(10,31)×0.1）→ 秒数
@@ -1728,11 +1741,13 @@ export class YoyoProj extends Entity {
       this.counterweight?.(ecx, ecy, this.damage, this.knockback);   // :12482
       this.dir = ecx < p.cx ? -1 : 1;   // :12484-12489
       if (this.ai0 >= 0) {
-        // 活跃态命中反弹（:12490-12500）：v×-0.5 + 离敌向 ×16
+        // 活跃态命中反弹（:12490-12500）：v×-0.5 + 离敌向 ×num25（缺省 16;554 Kraken
+        //  =4 :13300-13302——命中后贴敌续磨,连击率;蓝队 R7-32：曾恒 16,Kraken 命中即弹远）
+        const push = this.projId === 554 ? 4 : 16;
         let bx = this.cx - ecx, by = this.cy - ecy;
         const bd = Math.hypot(bx, by) || 1;
-        this.vx = this.vx * -0.5 + (bx / bd) * 16;
-        this.vy = this.vy * -0.5 + (by / bd) * 16;
+        this.vx = this.vx * -0.5 + (bx / bd) * push;
+        this.vy = this.vy * -0.5 + (by / bd) * push;
         // 寿命快捷烧（:12501-12505）：localAI[0] += 20;对玩家无视线再 +40
         const noLos = !canHit(game.world.store, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h);
         const vms = 1 / (p.attackSpeedMult || 1);

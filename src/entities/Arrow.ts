@@ -430,11 +430,22 @@ const PROJ_ALPHA0: Record<number, number> = {
   311: 255,                                                          // 糖果玉米（−50/t 渐显 :58117-58123）
 };
 
-/** 376 小鬼火球 IDStatic 免疫共享表（usesIDStaticNPCImmunity + idStaticNPCHitCooldown=6,
- *  SetDefaults :4612-4615）——【全场所有 376 共享】对同一敌 6t（=100ms）免疫,多只小鬼
- *  齐射不叠伤。蓝队 R7-24：曾走逐弹 hitSet（N 只同拍对同敌 N 连击）。墙钟实现
- *  （6t 窗口短,暂停/掉帧偏移可忽略;惰性过期,>512 项时清扫） */
-const ID_STATIC_376 = new Map<number, number>();   // enemyId → 到期 epoch ms
+/** usesIDStaticNPCImmunity 共享免疫表（全场同型一张表,非每弹一张）：
+ *  376 小鬼火球 cooldown 6t（SetDefaults :4612-4615）/ 604 孢子云 cooldown 10t
+ *  （:6081-6082）——蓝队 R7-24：376 曾走逐弹 hitSet（N 只同拍对同敌 N 连击）。
+ *  墙钟实现（窗口 ≤10t=167ms 短,暂停/掉帧偏移可忽略;惰性过期,>512 项时清扫） */
+const ID_STATIC_TABLES = new Map<number, Map<number, number>>();   // projType → (enemyId → 到期 ms)
+function idStaticCheck(projId: number, enemyId: number, cooldownMs: number): boolean {
+  let m = ID_STATIC_TABLES.get(projId);
+  if (!m) { m = new Map(); ID_STATIC_TABLES.set(projId, m); }
+  const now = Date.now();
+  if ((m.get(enemyId) ?? 0) > now) return false;
+  m.set(enemyId, now + cooldownMs);
+  if (m.size > 512) {
+    for (const [k, v] of m) if (v <= now) m.delete(k);
+  }
+  return true;
+}
 
 /** 直立族（aiStyle 29 全链 :24994-25207 零 rotation 赋值=恒不旋转）：宝石法杖箭
  *  121-126（739-744 六色杖）/521 水晶脉冲/597 琥珀箭——曾走默认 +π/2 对速度

@@ -6,7 +6,12 @@ import { TILE_DEFS } from '../data/tiles';
 import { lightIsOn } from '../world/wiring/devices';
 import { TileStore } from '../world/TileStore';
 import { FastRandom } from './FastRandom';
-import { CRACKED_SHEETS, FLICKER_SHEETS, MUSHROOM_GLOW_SHEETS, TORCH_COLORS, WALL_EMISSIVE, WALL_LIGHT } from './lightTables';
+import {
+  ALLOW_LIGHT_IN_WATER_SHEETS, CRACKED_SHEETS, FLICKER_SHEETS, MUSHROOM_GLOW_SHEETS,
+  TILE_BLOCK_LIGHT_SHEETS, TILE_NO_SUN_LIGHT_SHEETS, TORCH_COLORS,
+  WALL_EMISSIVE, WALL_EMISSIVE_GATED, WALL_LIGHT, shimmerDarken, shimmerWaterAlpha,
+} from './lightTables';
+import { paintColor } from '../world/Paint';
 import { FlickerClock, skySeed } from './SkyColor';
 import { LightMap, Mask } from './LightMap';
 
@@ -543,7 +548,12 @@ export function specialTileLight(
 }
 
 export class TileLightScanner {
+  /** 挡光表(Main.tileBlockLight,lightTables.TILE_BLOCK_LIGHT_SHEETS 按 sheet 展开;
+   *  LightIsBlocked :154-165)——718 昼云为昼夜动态,每帧在 exportTo 覆写(Main.cs:66134-66141) */
   private blocksLight: Uint8Array;
+  /** 挡阳表(Main.tileNoSunLight;ApplySurfaceLight :3170/ApplyHellLight :3270 天空/地狱放行)
+   *  ——与挡光表是两张独立布尔表 */
+  private noSunLight: Uint8Array;
   private random = new FastRandom(0x9e3779b9);
   /** 每格局部随机(WithModifier(x,y);蜡烛闪烁) */
   private localRandom(x: number, y: number): FastRandom {
@@ -551,25 +561,34 @@ export class TileLightScanner {
   }
 
   constructor(private flicker: FlickerClock) {
-    // 从 TILE_DEFS 派生 tileBlockLight 近似(原版 Main.tileBlockLight[]):
-    // 实心且近乎不透明才挡光——门(0.05)/平台(0.15)/树(0.1)/装饰(0.05)均不挡
+    // ★R8-28:原版是独立布尔表,与 tileSolid/opacity 无关(关门 10/蛛网 51/藤蔓 52 挡光;
+    // 回声块 541/546、云 189/196、尖刺 48、泡泡 379、气球 446-451 不挡)——机械提取替换推导
     this.blocksLight = new Uint8Array(TILE_DEFS.length);
+    this.noSunLight = new Uint8Array(TILE_DEFS.length);
     TILE_DEFS.forEach((d, i) => {
-      if (d && d.solid && !d.platform && d.opacity >= 0.9) this.blocksLight[i] = 1;
+      const sheet = d?.vanilla?.sheet ?? -1;
+      if (sheet >= 0) {
+        if (TILE_BLOCK_LIGHT_SHEETS.has(sheet)) this.blocksLight[i] = 1;
+        if (TILE_NO_SUN_LIGHT_SHEETS.has(sheet)) this.noSunLight[i] = 1;
+      }
     });
   }
 
-  /** GetTileMask(:68-87) */
+  /** LightIsBlocked(TileLightScanner.cs:154-165):active && tileBlockLight[type],
+   *  隐形涂层(invisibleBlock)按显示开关放行——不查坡度/致动(那在 GetTileMask 外层) */
+  private lightIsBlocked(st: TileStore, i: number): boolean {
+    const type = st.type[i];
+    if (type === 0 || !this.blocksLight[type]) return false;
+    if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) return false;
+    return true;
+  }
+
+  /** GetTileMask(:68-87):LightIsBlocked && type!=131 && !inActive && slope==0 */
   getMask(st: TileStore, i: number): Mask {
     const type = st.type[i];
     const actuated = (st.wire[i] & TileStore.WIRE_ACTUATED) !== 0;
-    if (type !== 0 && !actuated && this.blocksLight[type] && st.slope[i] === 0) {
-      // 回声涂层块不挡光传播（LightIsBlocked，TileLightScanner.cs:154-166：
-      // `if (tile.invisibleBlock()) return _drawInvisibleWalls;`——显示隐形块时才挡）
-      if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) {
-        return Mask.None;
-      }
-      // 注意 actuated 已在上条件排除(原版 !tile.inActive())
+    if (type !== 0 && this.lightIsBlocked(st, i) && !actuated && st.slope[i] === 0) {
+      // 注意 actuated 已在上条件排除(原版 !tile.inActive());隐形涂层门已并入 lightIsBlocked
       const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? -1;
       return CRACKED_SHEETS.has(sheet) ? Mask.CrackedBricks : Mask.Solid;
     }
