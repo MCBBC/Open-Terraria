@@ -1377,8 +1377,42 @@ export function runVinesPass(st: TileStore, rng: RNG, gs: GenState): void {
       const sk = sheetAt(st, i, k);
       if (activeAt(st, i, k) && (sk === 60 || sk === 226) && !bottomSlope(st, i, k)
         && growMoreVines(st, i, k)) {
+        // ★UUUUUU（cs:20404-20452）：NTB 蜂巢凹龛前哨支——上邻 (i,k-1)/(i+1,k-1)
+        //   双活性非底坡且类型 ∈ {60,444,230} 时尝试 2×2 蜂巢块（半径 Next(3,10)
+        //   近邻 444 计数门；命中失败落回常态藤）。此支条件为真时 1/40 支整段跳过
+        //   （else-if 短路——Next(40) 不掷）。
+        const ntbHive = !!gs.seedFlags?.notTheBees
+          && k < h - 10 && activeAt(st, i, k - 1) && !bottomSlope(st, i, k - 1)
+          && activeAt(st, i + 1, k - 1) && !bottomSlope(st, i + 1, k - 1)
+          && (sheetAt(st, i, k - 1) === 60 || sheetAt(st, i, k - 1) === 444 || sheetAt(st, i, k - 1) === 230);
+        if (ntbHive) {
+          let ok = true;
+          for (let a = i; a < i + 2 && ok; a++) {
+            for (let b = k + 1; b < k + 3 && ok; b++) {
+              if (!st.inBounds(a, b)) { ok = false; break; }
+              const kb = st.idx(a, b);
+              const sb = SHEET[st.type[kb]];
+              if (st.flags[kb] && (!TILE_CUT.has(sb) || sb === 444)) ok = false;
+              else if (st.liquid[kb] > 0 || WALL_HOUSE.has(st.wall[kb])) ok = false;
+            }
+          }
+          if (ok && countNearBlocksTypes(st, i, k, rng.int(3, 9), 444) > 0) ok = false;  // Next(3,10)
+          if (ok) {
+            for (let a = i; a < i + 2; a++) {
+              for (let b = k + 1; b < k + 3; b++) {
+                killTileVineCascade(st, rng, a, b);
+              }
+            }
+            for (let a = i; a < i + 2; a++) {
+              for (let b = k + 1; b < k + 3; b++) {
+                st.setTileSilent(a, b, HIVE, (a - i) * 18, (b - k - 1) * 18);
+              }
+            }
+            continue;
+          }
+        }
         // 蜂巢凹龛（cs:20453-20501）：右侧也是丛林草时 1/40 放 2×2 蜂巢块
-        if (i < w - 1 && k < h - 2 && activeAt(st, i + 1, k)
+        else if (i < w - 1 && k < h - 2 && activeAt(st, i + 1, k)
           && sheetAt(st, i + 1, k) === 60 && !bottomSlope(st, i + 1, k)
           && rng.int(0, 39) === 0) {                                    // Next(40)
           let ok = true;

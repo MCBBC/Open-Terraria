@@ -369,7 +369,7 @@ function fireTrap(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
     ctx.shootProjectile(x * 16 + 8 + 14 * sx, y * 16 + 8 + 14 * sy,
       4 * sx + jit(sx), 4 * sy + jit(sy), 40, 'spiky');
   } else if (kind === 4) {
-    // 长矛机关(1456 Wiring.cs:1859-1888 case 4;1457 :1859-1885 ≡ 1405 :1601-1634 同文):
+    // 长矛机关(1456 Wiring.cs:1859-1888 case 4;1457 :1859-1890 ≡ 1405 :1601-1634 同文):
     // CheckMech 90 → frameX/18 四向定向:case 0/1 下(+1)/case 2 上(−1)/
     // case 3 左(−1)/case 4 右(+1);速 8(:1884-1885)、伤 60(:1886)、弹 186(:1887)、
     // 出生偏移 18×dir(:1888)。

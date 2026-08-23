@@ -14,6 +14,9 @@
 import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
 import { drawVanillaCell, drawTreeCell, scanTreeType, type TreeStyleData } from './VanillaTiler';
+import { animYOffset } from './TileAnim';
+import { getTilePaintSettings } from '../world/Paint';
+import { tintRegion } from './TileTint';
 import { frameMergesWith } from './TileMergeFamily';
 import { natureParticles, getTreeLeaf, leafEmits, dripGoreFor } from './NatureParticles';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
@@ -298,6 +301,33 @@ export function isAlchemyPlantHarvestable(style: number, y: number): boolean {
 
 /** 单格绘制 + 变换（pivot=旋转轴心世界坐标；dest 相对偏移）。
  *  sway 全 0 时直绘；glow 回调在主贴图后同变换内执行（glowmask 叠画） */
+/** 摆动件油漆染色格缓存：(type,fx,fy,paint) → 16×16 染色画布。帧定内容
+ *  （auto/blend 邻居变化会重写 frameX/Y → 键变化自然失效）；scratch 画格 +
+ *  tintRegion 逐像素（与烘焙油漆 pass 同源，TileTint 共享模块）。 */
+const swayTintCache = new Map<string, HTMLCanvasElement | null>();
+function tintedSwayCell(
+  atlas: SpriteAtlas, st: TileStore, rec: SwayRec, x: number, y: number, type: number,
+  fx: number, fy: number, paint: number, trees?: TreeStyleData,
+): HTMLCanvasElement | null {
+  const key = `${type}|${fx}|${fy}|${paint}`;
+  const hit = swayTintCache.get(key);
+  if (hit !== undefined) return hit;
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = TILE; c.height = TILE;
+  const cctx = c.getContext('2d', { willReadFrequently: true });
+  if (!cctx) return null;
+  // 格内容画进 scratch（取帧的邻居查找用真实 st/x/y，仅 dest 落 scratch 原点）
+  drawVanillaCell(cctx, atlas, rec.sheet, rec.frame, rec.fw, rec.fh, st, x, y, type,
+    (t) => t === type || frameMergesWith(type, t), 0, 0, fx, fy, trees);
+  // 特判组分派与烘焙油漆 pass 同源：paint 1-12 ∧ getTilePaintSettings 表内
+  const special = paint >= 1 && paint <= 12 ? getTilePaintSettings(rec.sheet, 0) ?? undefined : undefined;
+  tintRegion(cctx, c, 0, 0, paint, 0, 0, false, special);
+  if (swayTintCache.size > 512) swayTintCache.clear();
+  swayTintCache.set(key, c);
+  return c;
+}
+
 function drawCell(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
   rec: SwayRec, x: number, y: number, type: number,
@@ -307,6 +337,30 @@ function drawCell(
 ): void {
   const fx = st.frameX[st.idx(x, y)], fy = st.frameY[st.idx(x, y)];
   const draw = (dpx: number, dpy: number) => {
+    // 592 吊火盆：原版 vine 绘制把 texture2D 整体换成 GlowMask[294]、color=
+    // (255,255,255,0)（TileDrawing.cs:9519-9522）——预乘 A=0 = 全额加算白（非透明，
+    // Canvas 等价 'lighter'），本体贴图不画、油漆色被覆写。源矩形同 GetTileDrawData
+    // （含 tileFrame[592] 动画行 addFrY，Main.cs:18483-18486 8 帧 ×54）
+    if (rec.sheet === 592) {
+      const g = atlas.ensureVImage('vanilla/Glow_294.png');
+      if (g) {
+        const gy = fy + animYOffset(592, (atlas.vmeta(592)?.rows ?? 0) * 18);
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(g, fx, gy, TILE, TILE, dpx, dpy, TILE, TILE);
+        ctx.restore();
+      }
+      return;
+    }
+    // 油漆件：原版 vine 路径经 GetTileDrawTexture（TilePaintSystemV2 按 tile.color()
+    // 出染色变体，TileDrawing.cs:9650 系）——摆动件不在烘焙层、油漆 pass 染不到，
+    // 须绘制时染色。scratch 画格 → tintRegion 逐像素 → 回贴；(type,fx,fy,paint)
+    // 缓存（帧定内容：auto/blend 邻居变化会重写 frameX/Y → 键变化自然失效）
+    const paint = st.paint[st.idx(x, y)];
+    if (paint > 0) {
+      const cell = tintedSwayCell(atlas, st, rec, x, y, type, fx, fy, paint, trees);
+      if (cell) { ctx.drawImage(cell, dpx, dpy); return; }
+    }
     drawVanillaCell(ctx, atlas, rec.sheet, rec.frame, rec.fw, rec.fh, st, x, y, type,
       (t) => t === type || frameMergesWith(type, t), dpx, dpy, fx, fy, trees);
   };

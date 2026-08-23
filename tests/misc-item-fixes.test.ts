@@ -305,7 +305,7 @@ describe('968 棉花糖烤制（holdStyle 1 静持 + 燃着篝火 frameY<54 门�
     const two = mkRoast({ timer: 900, stack: 2 });
     two.tick();
     expect(two.drops).toEqual([{
-      x: two.p.cx - 8, y: two.p.cy - 8,                   // QuickSpawnItem(969)（:50976）
+      x: two.p.cx, y: two.p.cy,                           // QuickSpawnItem(969)→RequestItemAt player.Center（:50976/:7202;RV1 复核：曾左上偏 8px）
       key: 'vi_969_CookedMarshmallow', stack: 1,
     }]);
     expect(two.p.inv.slots[0]).toEqual({ id: ITEM_BY_KEY['vi_968_MarshmallowonaStick'], stack: 1 });  // 消耗 1 不清格

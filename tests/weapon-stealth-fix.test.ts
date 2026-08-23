@@ -8,6 +8,8 @@
 //        蘑菇矿远程同向（Remap 档）    :26015-26018
 //        星璇移速 ×0.3 全程无 stealth 门 :26046-26047
 //        关潜行后回升 +0.04/t 至 1     :26052-26060
+//   ⑩-⑫ 收尾三微差（2026-08-23）：蘑菇矿静止阈 maxRunSpeed−0.1（:25985）/ 蘑菇矿
+//      stealthTimer=30 衰减拍语义、无 ==0 门（:25991/:26019-26021）/ 星璇双击 !mount.Active（:57445-57447）
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Player } from '../src/entities/Player';
@@ -321,5 +323,103 @@ describe('⑨ 施法族满潜行停火门（NPC.cs:60233）', () => {
 
   it('旧反向 idle 门已移除（useTime<=0 即停火 = 对未潜行玩家也哑火,非原版语义）', () => {
     expect(enemySrc()).not.toContain('if (player.useTime <= 0) flag21 = false;');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑩ 蘑菇矿静止阈 = maxRunSpeed−0.1（:25984-25986 `num24 = maxRunSpeed - 0.1f`）
+//    原版此执行点 maxRunSpeed 恒 = originalRunSpeed = 3f（Update 内序:reset :24562 →
+//    UpdateBuffs :25763 → 潜行块 :25982 → moveSpeed 乘区 :26206 → 装备链 :26707+），
+//    即阈 2.9/轴——曾写死 0.1 = 慢速漂移被误判"移动"走回升档
+// ---------------------------------------------------------------------------
+describe('⑩ 蘑菇矿静止阈 maxRunSpeed−0.1=2.9（:25985）', () => {
+  it('慢速漂移 vx=1（>旧阈 0.1、<2.9）仍判静止衰减 −0.015/t', () => {
+    const p = mkShroomite();
+    const hooks = makeHooks(p);
+    for (let i = 0; i < 40; i++) p.fixedUpdate(1, hooks);   // 落地站稳
+    p.stealth = 1;
+    p.vx = 1; p.vy = 0;                                     // 地面摩擦 −0.2 → 0.8,仍 <2.9
+    p.fixedUpdate(1, hooks);
+    expect(p.stealth).toBeCloseTo(0.985, 6);                // 旧码回升档 = min(1, 1+0.8×0.0075)=1
+  });
+
+  it('阈界 |vx|≥2.9 走回升档（+|v|×0.0075）——阈确取 2.9 非 0.1', () => {
+    const p = mkShroomite();
+    const hooks = makeHooks(p);
+    for (let i = 0; i < 40; i++) p.fixedUpdate(1, hooks);
+    p.stealth = 0.5;
+    p.vx = 3.2; p.vy = 0;                                   // 摩擦 −0.2 → 3.0 ≥ 2.9 → 回升
+    p.fixedUpdate(1, hooks);
+    expect(p.stealth).toBeCloseTo(0.5 + 3.0 * 0.0075, 6);   // 0.5225（衰减档则 0.485）
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑪ 蘑菇矿 stealthTimer 语义（:25991 衰减拍置 30 / :26019-26021 拍末递减）
+//    原版无 `stealthTimer == 0` 门、也无 useTime→5（timer 纯"衰减中"标记）
+// ---------------------------------------------------------------------------
+describe('⑪ 蘑菇矿 stealthTimer=30 衰减拍语义（:25991/:26019-26021）', () => {
+  const timerOf = (p: Player): number =>
+    (p as unknown as { stealthTimer: number }).stealthTimer;
+
+  it('静止衰减拍置 30、拍末递减 → 一拍后 timer=29（非旧 useTime→5→4）', () => {
+    const p = mkShroomite();
+    const hooks = makeHooks(p);
+    for (let i = 0; i < 40; i++) p.fixedUpdate(1, hooks);
+    p.stealth = 1; p.vx = 0; p.vy = 0;
+    p.fixedUpdate(1, hooks);
+    expect(p.stealth).toBeCloseTo(0.985, 6);
+    expect(timerOf(p)).toBe(29);
+  });
+
+  it('无 stealthTimer==0 门：timer 残值 >0 时静止照衰减（旧码被门挡住不散）', () => {
+    const p = mkShroomite();
+    const hooks = makeHooks(p);
+    for (let i = 0; i < 40; i++) p.fixedUpdate(1, hooks);
+    p.stealth = 0.5;
+    (p as unknown as { stealthTimer: number }).stealthTimer = 10;
+    p.vx = 0; p.vy = 0;
+    p.fixedUpdate(1, hooks);
+    expect(p.stealth).toBeCloseTo(0.485, 6);   // 旧码 0.5（门挡衰减）
+    expect(timerOf(p)).toBe(29);               // :25991 置 30 → :26019-26021 减 1
+  });
+
+  it('无 useTime→5 置值：攻击冷却中走回升档 timer 保持 0（旧码误置 5→4）', () => {
+    const p = mkShroomite();
+    const hooks = makeHooks(p);
+    for (let i = 0; i < 40; i++) p.fixedUpdate(1, hooks);
+    (p as unknown as { stealthTimer: number }).stealthTimer = 0;   // 清落定衰减期残值（回升档 :26019-26021 仍会递减）
+    p.useTime = 10;                            // 攻击冷却中（原版蘑菇矿段不读 itemAnimation/useTime）
+    p.stealth = 0.5;
+    p.vx = 3.2; p.vy = 0;                      // 摩擦 → 3.0 ≥2.9 → 回升档
+    p.fixedUpdate(1, hooks);
+    expect(p.stealth).toBeCloseTo(0.5225, 6);
+    expect(timerOf(p)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑫ 星璇双击开潜行 !mount.Active 门（:57445-57447 `if (setVortex && !mount.Active)`)
+// ---------------------------------------------------------------------------
+describe('⑫ 星璇双击 !mount.Active 门（:57445-57447）', () => {
+  const doubleTap = (p: Player, hooks: GameHooks): void => {
+    p.inputDown = true; p.fixedUpdate(1, hooks);    // 首按：登记双击窗 15t
+    p.inputDown = false; p.fixedUpdate(1, hooks);   // 松开
+    p.inputDown = true; p.fixedUpdate(1, hooks);    // 窗内再按 → 双击
+  };
+
+  it('骑乘中双击↓不切潜行（原版骑乘即断;曾缺门=骑乘可开潜行）', () => {
+    const p = mkVortex();
+    const hooks = makeHooks(p);
+    p.mount.active = true;
+    doubleTap(p, hooks);
+    expect(p.vortexStealthActive).toBe(false);
+  });
+
+  it('对照：未骑乘同序列照常翻转（门只挂坐骑,不破 ⑧ 开关语义）', () => {
+    const p = mkVortex();
+    const hooks = makeHooks(p);
+    doubleTap(p, hooks);
+    expect(p.vortexStealthActive).toBe(true);
   });
 });

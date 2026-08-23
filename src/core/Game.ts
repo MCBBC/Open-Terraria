@@ -3719,7 +3719,7 @@ export class Game implements GameHooks {
       }
       // 向导：存档无向导条目才按新世界语义出生（WorldGen.cs:20036）；吸血鬼种子世界
       // 起始 NPC 换动物学家（:19981-19986 vampireSeed → NewNPC 633 homeless）
-      const starterKey = this.world.seedFlags?.vampireSeed ? 'zoologist' : 'guide';
+      const starterKey = this.world.seedFlags?.vampireSeed ? 'zoologist' : this.world.seedFlags?.notTheBees ? 'merchant' : 'guide'; // ★UUUUUU：NTB 起始 NPC=商人 17（cs:20007-20014）
       if (!savedNpcs.some((n) => n.key === starterKey)) {
         this.entities.add(new TownNPC(starterKey, this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
       }
@@ -3734,7 +3734,7 @@ export class Game implements GameHooks {
       // 商人/护士等由 checkTownArrival 按原版条件 + 房屋系统入住(见 updateTownNpcArrival)。
       // 吸血鬼种子（vampireSeed）：起始 NPC = 动物学家 633（WorldGen.cs:19981-19986，
       // else-if 链在 infectedSeed 后截胡——替代向导出生、homeless、direction=1）
-      const starterNpcKey = this.world.seedFlags?.vampireSeed ? 'zoologist' : 'guide';
+      const starterNpcKey = this.world.seedFlags?.vampireSeed ? 'zoologist' : this.world.seedFlags?.notTheBees ? 'merchant' : 'guide'; // ★UUUUUU：NTB 起始 NPC=商人 17（cs:20007-20014，else-if 链在 vampire 后）
       if (!this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === starterNpcKey && !n.dead)) {
         this.entities.add(new TownNPC(starterNpcKey, this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
       }
@@ -17342,7 +17342,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const step = marshmallowRoastStep(p.miscTimer, lit, Math.random);
     p.miscTimer = step.timer;
     if (!step.cooked) return;
-    this.spawnDrop(p.cx - 8, p.cy - 8, 'vi_969_CookedMarshmallow', 1, 0, -1);   // QuickSpawnItem(969)（:50976）
+    // QuickSpawnItem(969)（:50976→RequestItemAt player.Center :7202）——掉落中心=玩家
+    // 中心（★RV1 复核：曾 (cx-8,cy-8) 左上偏 8px,测试断言同步）
+    this.spawnDrop(p.cx, p.cy, 'vi_969_CookedMarshmallow', 1, 0, -1);
     p.inv.removeAt(p.inv.selected, 1);                             // stack--/TurnToAir（:50977-50981）
     this.cb.onInventoryChanged();
   }

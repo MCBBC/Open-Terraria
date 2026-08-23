@@ -82,14 +82,16 @@ function oceanDepths(st: TileStore, gs: GenState, x: number, y: number): boolean
   return x < gs.beachDistance || x > st.w - gs.beachDistance;
 }
 
-/** SolidOrSlopedTile（cs:70046）：active && tileSolid && !solidTop && !inActive */
+/** SolidOrSlopedTile（cs:70046）：active && tileSolid && !solidTop && !inActive
+ *  ★vanGenSolidType 吃【内部 id】（TILE_DEFS[t] 索引）——曾误传 sheet id 致全表
+ *  漏判（NTB 首跑 41 万格 dirt 未泥化定罪）。 */
 function solidOrSloped(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
   if (((st.wire[i] >>> 5) & 1) !== 0) return false;   // inActive
-  const s = sheetOf(st.type[i]!);
-  return vanGenSolidType(s) && !SOLID_TOP.has(s);
+  const t = st.type[i]!;
+  return vanGenSolidType(t) && !SOLID_TOP.has(sheetOf(t));
 }
 
 const activeAt = (st: TileStore, x: number, y: number): boolean =>
@@ -114,6 +116,9 @@ const clearLava = (st: TileStore, i: number): void => {
 export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
   const sf = gs.seedFlags;
   if (sf.skyblock) return;                       // cs:25276
+  // 一次性探针钩（__swUwCap 同款惯例）：NotTheBees 入口/出口快照（phase='in'|'out'）
+  const g0 = globalThis as { __swNTBCap?: (phase: string, gs: GenState, st: TileStore) => void };
+  try { g0.__swNTBCap?.('in', gs, st); } catch { /* probe */ }
   const w = st.w, h = st.h;
   const numRemix = Math.floor(w / 7);            // cs:25278（仅 remix 支消费）
   if (!sf.notTheBees) return;                    // cs:25280
@@ -313,6 +318,7 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
   }
+  try { g0.__swNTBCap?.('out', gs, st); } catch { /* probe */ }
 }
 
 // ============================================================
@@ -586,8 +592,8 @@ function placeLarva(st: TileStore, rng: RNG, x: number, y: number): void {
   for (let a = x - 1; a <= x + 1; a++) {
     if (!st.inBounds(a, y + 1)) return;
     const bi = st.idx(a, y + 1);
-    const s = sheetOf(st.type[bi]!);
-    const solid2 = st.flags[bi] !== 0 && vanGenSolidType(s)
+    const tb = st.type[bi]!;
+    const solid2 = st.flags[bi] !== 0 && vanGenSolidType(tb)
       && (st.slope[bi] === 0) && !st.half[bi] && ((st.wire[bi] >>> 5) & 1) === 0;
     if (!solid2) return;
   }

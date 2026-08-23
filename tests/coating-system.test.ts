@@ -414,8 +414,8 @@ describe('涂层渲染门（烘焙叠层 + 隐形隐藏链）', () => {
   });
 
   it('隐形涂层格渲染隐藏门：无回声腔/4409/5345（showInvisibleBlocks=false）不画' +
-    '（IsVisible，TileDrawing.cs:1434-1452；墙段 :991 flag2 门；本仓 ChunkCache' +
-    ':648 墙/:687 块 + Renderer.colorFor :1521/:1544 小地图链）', () => {
+    '（IsVisible，TileDrawing.cs:1434-1452；墙段 :995-996 flag2 门；本仓 ChunkCache' +
+    ':648 墙/:687 块 + Renderer.colorFor :1522/:1545 小地图链）', () => {
     const w = new World(40, 40, 3, 'coat-echo-hide');
     const st = w.store;
     st.setTileSilent(3, 3, DIRT);

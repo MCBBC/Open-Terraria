@@ -9,7 +9,8 @@ import { TILE_ANIM_RATE, tileAnim, campfireYOffset } from './TileAnim';
 import { cageAnimRate, cageFamilyOf } from './CritterCage';
 import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
-import { applyPaintTint, applyPaintTintSpecial, getTilePaintSettings, type LeafPaintSettings } from '../world/Paint';
+import { getTilePaintSettings, type LeafPaintSettings } from '../world/Paint';
+import { tintRegion } from './TileTint';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
 import type { AutoTiler } from './AutoTiler';
 import { TileStore } from '../world/TileStore';
@@ -39,67 +40,39 @@ export interface ChunkPair {
   glow?: HTMLCanvasElement;
 }
 
-// ---- 油漆逐像素着色（ChunkCache 静态烘焙消费，world/Paint 字节码真值） ----
-// 原版走 GPU shader（TilePaintSystemV2.cs:69-82 PrepareShader → TileShader.cso 45 pass）；
-// Canvas 2D 等价 = applyPaintTint/applyPaintTintSpecial 逐像素调制（min/max 排序槽，
-// 2026-08-20 接线替换旧 multiply 乘色三段合成）。chunk 烘焙非每帧，ImageData 循环
-// 成本可接受；fround 序与 UNORM 取整已在函数内做，循环只搬运字节、不重算。
-const tintCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
-if (tintCanvas) { tintCanvas.width = TILE; tintCanvas.height = TILE; }
-const tintCtx = tintCanvas ? tintCanvas.getContext('2d', { willReadFrequently: true }) : null;  // 纯 CPU scratch:SHM 后备不占 IOSurface(第六场双开 16x16 失败的当事画布)
+// ---- 油漆逐像素着色：tintRegion 迁至共享模块 render/TileTint（2026-08-23：摆动件
+// 绘制时染色同源复用，防双实现漂移） ----
 
-/** 对 canvas 的 (readX,readY) 16×16 区域按 paint 逐像素着色,回写到 ctx 的 (writeX,writeY)。
- *  ★读/写坐标分离(2026-08-18 atlas 化 review 修):atlas 页路径读=页内绝对、写=cell 内
- *  局部(ctx 挂 translate(ox,oy));旧签名读写同参 → 回写落 (ox+px,oy+py) 双重偏移,
- *  ox>0 的 cell 油漆被 clip 挡掉 = 静默丢失(新世界无油漆的对拍探针抓不到)。
- *  isWall=true → 墙档(负相 30 走 Pass44 陡化反转;GetWallSettings 恒 DefaultNoSpecial
- *  Groups_ForWalls,墙无特判组);special=特判组设置(特判表类型 + paint 1-12 生效,
- *  函数内自带 paint 域守卫)。只写 RGB 不动 alpha:透明像素跳过 = 旧 destination-in
- *  裁回语义。putImageData 无视 transform/clip → 经 scratch 中转再 drawImage 回写。 */
-function tintRegion(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement, readX: number, readY: number, paint: number,
-  writeX = readX, writeY = readY, isWall = false, special?: LeafPaintSettings): void {
-  if (!tintCtx || !tintCanvas) return;
-  const img = (src.getContext('2d') as CanvasRenderingContext2D).getImageData(readX, readY, TILE, TILE);
-  const d = img.data;
-  if (special) {
-    for (let p = 0; p < d.length; p += 4) {
-      if (d[p + 3] === 0) continue;
-      const c = applyPaintTintSpecial(d[p], d[p + 1], d[p + 2], paint, special);
-      d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2];
-    }
-  } else {
-    for (let p = 0; p < d.length; p += 4) {
-      if (d[p + 3] === 0) continue;
-      const c = applyPaintTint(d[p], d[p + 1], d[p + 2], paint, isWall);
-      d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2];
-    }
-  }
-  tintCtx.putImageData(img, 0, 0);
-  // 不 clearRect 直接覆盖回写：着色像素与本区域原内容 alpha 完全一致，
-  // source-over 叠加即替换色值；clearRect 反而会打穿邻格溢出的跨格精灵
-  ctx.drawImage(tintCanvas, writeX, writeY);
-}
+/** GetTreeVariant（TileDrawing.cs:1801-1829）：树底地面型 → 树油漆 style。
+ *  8 地面型 + 丛林地表(1)/地下(5)分裂（y > worldSurface）+ 未激活/表外 -1。 */
+const TREE_GROUND_IDS = (() => {
+  const g = (k: string) => TILE_BY_KEY[k] ?? -1;
+  return {
+    corrupt: g('v_23_corrupt_grass_block'),          // :1809-1811 → 0（661 腐化丛林草同档）
+    corruptJungle: g('v_661_corrupt_jungle_grass_block'),
+    jungle: g('v_60_jungle_grass_block'),            // :1812-1817 地表 1 / 地下 5
+    mushroom: g('v_70_mushroom_grass_block'),        // :1818-1819 → 6
+    hallow: g('v_109_hallowed_grass_block'),         // :1820-1822 → 2（492 修剪神圣草同档）
+    hallowMowed: g('v_492_hallowed_mowed_grass_block'),
+    snow: g('snow'),                                 // :1823-1824 → 3（147 雪块）
+    crimson: g('v_199_crimson_grass_block'),         // :1825-1827 → 4（662 猩红丛林草同档）
+    crimsonJungle: g('v_662_crimson_jungle_grass_block'),
+  };
+})();
 
-// ---- 树干/棕榈油漆特判组 style 派生（TileDrawing.cs 1:1） ----
-// 原版 GetTileDrawTexture（TileDrawing.cs:1460-1478）只在 type 5/323 算 TileStyle
-// （5 → GetTreeBiome :1468 / 323 → GetPalmTreeBiome :1471），其余类型恒 0。
-
-/** GetTreeVariant（TileDrawing.cs:1801-1829）：树底第一格（非树格）类型 → 变体。
- *  地面格未激活/越界 → -1（:1803-1805 null/!active 门；-1 落 style switch 的 _ → WoodPurity）。
- *  worldSurface=Main.worldSurface（本仓 world.groundLevel，GenVars.worldSurface 落档） */
 export function treeGroundVariant(st: World['store'], x: number, y: number, worldSurface: number): number {
   if (!st.inBounds(x, y)) return -1;
   const i = st.idx(x, y);
-  if (!st.flags[i]) return -1;                                  // :1803-1805 !active
-  switch (TILE_DEFS[st.type[i]]?.vanilla?.sheet) {
-    case 23: case 661: return 0;                                // :1809-1811 腐化草
-    case 60: return y > worldSurface ? 5 : 1;                   // :1812-1817 丛林地表 1/地下 5
-    case 70: return 6;                                          // :1818-1819 蘑菇草
-    case 109: case 492: return 2;                               // :1820-1822 神圣草
-    case 147: return 3;                                         // :1823-1824 雪原
-    case 199: case 662: return 4;                               // :1825-1827 猩红草
-    default: return -1;                                         // :1828-1829
-  }
+  if (!st.flags[i]) return -1;                       // :1803-1805 未激活
+  const t = st.type[i];
+  const G = TREE_GROUND_IDS;
+  if (t === G.corrupt || t === G.corruptJungle) return 0;
+  if (t === G.jungle) return y > worldSurface ? 5 : 1;
+  if (t === G.mushroom) return 6;
+  if (t === G.hallow || t === G.hallowMowed) return 2;
+  if (t === G.snow) return 3;
+  if (t === G.crimson || t === G.crimsonJungle) return 4;
+  return -1;                                         // :1828-1829 表外地面
 }
 
 /** GetTreeBiome（TileDrawing.cs:1758-1798）：树干格帧 → 列修正 → 向下扫到树底 → 变体。

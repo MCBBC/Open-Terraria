@@ -3963,8 +3963,9 @@ export class Player extends Entity {
         if (Math.abs(en.cx - this.cx) < 300 && Math.abs(en.cy - this.cy) < 200) en.confusedT = 4;
       }
     }
-    // 潜行（1:1 改写 :25500-25567）：蘑菇矿套=移动蓄(|vx|+|vy|)×0.0075/t、静止散 0.015/t
-    // （攻击中 itemAnimation 门→近似 useTime>0 暂停 5t）；星璇套=双击↓开关 vortexStealthActive
+    // 潜行（1:1 改写 1457 :25930-26021）：蘑菇矿套=移动蓄(|vx|+|vy|)×0.0075/t、
+    // 静止散 0.015/t 且衰减拍 stealthTimer=30（:25991——原版无 useTime 置 5、无 ==0 门）；
+    // 星璇套=双击↓开关 vortexStealthActive
     // （开时 stealth 从满每 t -0.04、移速 ×0.3；再双击关）——星璇的增伤/暴在乘区读同一 stealth
     // ⑭ 变态刀 3106 单件潜行（:25448-25493：挥击中 stealth +0.1/t 且 timer=15；
     // 静止衰减同蘑菇矿；效果在 damageMult/critChance 消费）
@@ -3988,22 +3989,33 @@ export class Player extends Entity {
       if (this.stealth > 1) this.stealth = 1;   // :25966-25969 钳顶
       if (this.stealthTimer > 0) this.stealthTimer--;
     } else if (this.equipStats.shroomiteSet) {
-      if (this.useTime > 0) this.stealthTimer = 5;
-      // :25986 静止衰减分支带 !mount.Active——骑乘走 else 回升段
-      const still = Math.abs(this.vx) < 0.1 && Math.abs(this.vy) < 0.1 && !this.mount.active;
+      // :25984-25986 静止阈 = maxRunSpeed−0.1（原版此执行点 maxRunSpeed 恒 =originalRunSpeed=3f
+      // ——Update 内序:reset :24562 → UpdateBuffs :25763 → 潜行块 :25982-26021 → moveSpeed
+      // 乘区 :26206 → 装备/地板/坐骑链 :26707-26859 → HorizontalMovement :26889,乘区与装备
+      // 全在潜行块之后、不参与阈值;曾写死 0.1 = 慢速漂移也判"移动",原版 |v|<2.9 全算静止衰减档）
+      const num24 = PLAYER_WALK_MAX - 0.1;
+      const still = this.vx > -num24 && this.vx < num24 && this.vy > -num24 && this.vy < num24
+        && !this.mount.active;   // :25986 骑乘不走衰减,落 else 回升段
       if (still) {
-        if (this.stealthTimer === 0 && this.stealth > 0) this.stealth = Math.max(0, this.stealth - 0.015);
+        // :25988-25991 衰减拍:仅 stealth>0 门,每拍 −0.015 且 stealthTimer=30——原版无
+        // stealthTimer==0 门、也无 useTime→5（timer 纯"衰减中"标记,衰减停后自 30 递减 :26019-26021）
+        if (this.stealth > 0) {
+          this.stealth = Math.max(0, this.stealth - 0.015);   // :25990（≤0 钳 0 :25992-25994）
+          this.stealthTimer = 30;                             // :25991
+        }
       } else {
-        this.stealth = Math.min(1, this.stealth + (Math.abs(this.vx) + Math.abs(this.vy)) * 0.0075);
+        this.stealth = Math.min(1, this.stealth + (Math.abs(this.vx) + Math.abs(this.vy)) * 0.0075);   // :26004-26009
         if (this.mount.active) this.stealth = 1;   // :26010-26013 骑坐骑 stealth=1f（曾缺）
       }
-      if (this.stealthTimer > 0) this.stealthTimer--;
+      if (this.stealthTimer > 0) this.stealthTimer--;   // :26019-26021
     } else if (this.equipStats.vortexSet) {
       // 双击↓检测（KeyDoubleTap :24740-24749 窗口 15t）——:57444-57448 双击只翻
       // vortexStealthActive 开关、不复位 stealth（衰减/回升段自然处理；曾强置 1 =
       // 半潜行态双击开反而先回满再衰减）
       const downNow = this.inputDown;
-      if (downNow && !this.prevDown && this.downTapT > 0) {
+      // :57445-57447 KeyDoubleTap:`if (setVortex && !mount.Active)` 才翻转——骑乘中双击↓
+      // 不切潜行（曾缺门=骑乘可开潜行,移速 ×0.3 叠骑速且 stealth 照衰减,原版骑乘即断）
+      if (downNow && !this.prevDown && this.downTapT > 0 && !this.mount.active) {
         this.vortexStealthActive = !this.vortexStealthActive;
       }
       if (downNow && !this.prevDown) this.downTapT = 15;
