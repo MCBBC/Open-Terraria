@@ -11,6 +11,10 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 // ★1457 对齐档 2：砖线（makeTemple_GenerateBricks）从 1457 语义存档即插接线
 import { makeTempleGenerateBricks } from './rollback1457/TempleBricks.1457';
+// ★VVVVVV（2026-08-23）双态门（与 HellFortPass 同款）：缺省 1456 砖线=「全房对
+//   四角连线」（makeTempleCorridors,本文件尾,cs:33700-33760）服务七条 mile8 槽链
+//   认证线;SW_MB_1457=1 → 1457 GenerateBricks（存档即插,迁移战役线）。
+import { hfIs1457 } from './HellFortPass';
 
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { killTileWhole } from './TrapsPass';
@@ -156,8 +160,44 @@ function setBrick(st: TileStore, x: number, y: number): void {
 // （1456 cs:33700-33760,k×l×m×n 四重环+三坐标同步步进,零掷骰）。
 // ★2026-08-23 1457 对齐档 2：换回 1457 makeTemple_GenerateBricks（1457
 // cs:33864 调用位,实现在 rollback1457/TempleBricks.1457.ts 即插接线）。
+// ★2026-08-23 VVVVVV 批：双态门（SW_MB_1457,缺省 1456）——1457 接线保留在位,
+//   1456 形按本段 cs 行号原样重建为 makeTempleCorridors（下方,逐字对 cs:
+//   33700-33760;写入走 setBrick 五连=cs:33760-33763 房连线列同款）。两套基准并存。
 // 房间链布局/实心填/双遍挖腔/templePather/outerTempled/入口/清理/祭坛各段
 // 1456≡1457（源码 diff 仅变量改名与 `||`→`|` 无副作用改写），零改动。
+
+/** 1456 砖线「全房对四角连线」（cs:33700-33760）：k×l×m×n 四重环（房 k 左/右界
+ *  × 房 m 左/右界四配对）,三坐标（x/top/bot）同步步进靠拢,每步把 x 列 [top,bot)
+ *  段写 226 实心（setBrick 五连）。k==m∧l==n 时 while 零步。**零掷骰**——掷流与
+ *  布局环解耦。SW_MB_1457=1 时不走此函数（1457 GenerateBricks 接管）。 */
+function makeTempleCorridors(st: TileStore, rooms: Room[]): void {
+  const n2 = rooms.length;
+  for (let k = 0; k < n2; k++) {
+    for (let l = 0; l < 2; l++) {
+      for (let m = 0; m < n2; m++) {
+        for (let n = 0; n < 2; n++) {
+          let x = rooms[k].x;
+          if (l === 1) x += rooms[k].w - 1;
+          let top = rooms[k].y;
+          let bot = top + rooms[k].h;
+          let tx = rooms[m].x;
+          if (n === 1) tx += rooms[m].w - 1;
+          const ty = rooms[m].y;
+          const tb = ty + rooms[m].h;
+          while (x !== tx || top !== ty || bot !== tb) {
+            if (x < tx) x++;
+            if (x > tx) x--;
+            if (top < ty) top++;
+            if (top > ty) top--;
+            if (bot < tb) bot++;
+            if (bot > tb) bot--;
+            for (let y = top; y < bot; y++) setBrick(st, x, y);
+          }
+        }
+      }
+    }
+  }
+}
 
 /** SolidTile(i, j)（cs:70155）：active + tileSolid + !tileSolidTop + 非半砖 + slope 0。
  *  与 SolidTile2（cs:70178，祭坛锚点门用）差一个 tileSolidTop（平台）条件,勿合并。 */
@@ -285,10 +325,13 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     const f = (globalThis as { __swTmRooms?: (r: Room[], sx: number, sy: number) => void }).__swTmRooms;
     if (f) f(rooms.map((r) => ({ ...r })), sx, sy);
   }
-  // ---- ★1457 砖线（cs:33864 调用位,1456 是 cs:33700 全房对连线）：深度组并界 +
-  //      StrictAngles L 形线（零掷骰,掷流与布局环解耦）——1457 对齐档 2 按存档
-  //      rollback1457/TempleBricks.1457.ts 即插接线（makeTempleGenerateBricks）。
-  makeTempleGenerateBricks(st, rooms, depths);
+  // ---- ★VVVVVV 砖线双态门（SW_MB_1457,与 HellFortPass 同款）：缺省 1456=
+  //      「全房对四角连线」（makeTempleCorridors,本文件尾,cs:33700-33760,零掷骰）;
+  //      SW_MB_1457=1 → 1457 砖线（cs:33864 调用位,深度组并界+StrictAngles L 形线,
+  //      存档 rollback1457/TempleBricks.1457.ts 即插）——1457 对齐档 2 接线保留在位,
+  //      两套基准并存（七条 mile8 槽链=1456 认证线,2026-08-23 #46 神庙槽定罪后补门）。
+  if (hfIs1457()) makeTempleGenerateBricks(st, rooms, depths);
+  else makeTempleCorridors(st, rooms);
   // ---- 房间实心 + 双遍游走挖腔(L17280-17381)----
   for (const r of rooms) {
     for (let x = r.x; x < r.x + r.w; x++) {

@@ -213,6 +213,10 @@ function loadGolden(file: string) {
   return { golden, gold, goldStream };
 }
 
+// ★VVVVVV（2026-08-23）双态门配套：本文件金标=1457 oracle 再生线（shimmer-chain-*.json
+// 2026-08-23 03:44）——置 SW_MB_1457=1 使 JS 侧走 1457 形继续认证该线;1456 线由
+// mile8 槽链对拍认证（tools/_mile8,缺省 1456）。
+process.env.SW_MB_1457 = '1';
 describe('微光链逐段对账（vs C# caves-oracle Shimmer 段金标）', () => {
   const cases = [
     { file: 'shimmer-chain-9293480.json', seedText: '9293480', evil: 0 as const },

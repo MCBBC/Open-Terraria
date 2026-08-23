@@ -170,3 +170,56 @@ describe('液体火箭载荷表（Kill :74051-74244 四分发）', () => {
     }
   });
 });
+
+describe('GrenadeProj 接触引爆（Damage_PVE_Inner aiStyle16 :12330-12340）', () => {
+  it('碰 NPC → 立即结算接触伤害 + 钳 fuse=3（曾只钳引信不结算=穿体后才爆）', () => {
+    const w = emptyWorld();
+    const game = makeGame(w);
+    const hurts: Array<{ d: number; kx: number; pen: number; crit: boolean }> = [];
+    const nums: number[] = [];
+    const dummy = {
+      x: 30 * TILE, y: 40 * TILE - 40, w: 18, h: 40, dead: false,
+      hurt(d: number, kx: number, _ky: number, _g: unknown, pen: number, crit: boolean) {
+        hurts.push({ d, kx, pen, crit });
+        return false;
+      },
+    };
+    (game as unknown as { enemies: () => unknown[] }).enemies = () => [dummy];
+    const origNum = game.addDamageNumber;
+    (game as unknown as { addDamageNumber: unknown }).addDamageNumber = (x: number, y: number, n: number) => { nums.push(n); };
+    const booms: Array<[number, number, number]> = [];
+    const r = new GrenadeProj(26 * TILE, 40 * TILE - 20, 10, 0, 100, 3600, 134,
+      (x, y, d) => { booms.push([x, y, d]); });
+    r.contactPen = 7;
+    r.contactKb = 5.5;
+    r.critChance = 1;   // 必暴击（采样断言用）
+    r.fired = true;
+    // 飞向目标:10px/t,起点 26*16=416 → 目标左缘 480:~6t 接触
+    let guard = 0;
+    while (hurts.length === 0 && guard++ < 100) r.fixedUpdate(1, game);
+    expect(hurts.length).toBe(1);                              // 接触即结算(曾=0)
+    expect(hurts[0].d).toBe(100);                              // 弹体伤害
+    expect(hurts[0].pen).toBe(7);                              // 发射侧穿甲
+    expect(hurts[0].crit).toBe(true);                          // 暴击率注入
+    expect(hurts[0].kx).toBeLessThanOrEqual(0);                // 从右侧命中 → 击退向左
+    expect(r.fuse).toBe(3);                                    // 引信钳 3(:12331-12332)
+    expect(nums.length).toBe(1);                               // 飘值=StrikeNPC 单点 1 份
+    // 3t 后爆炸仍发生(溅射其他目标)
+    const t0 = guard;
+    while (!r.dead && guard++ < t0 + 10) r.fixedUpdate(1, game);
+    expect(booms.length).toBe(1);
+    (game as unknown as { addDamageNumber: unknown }).addDamageNumber = origNum;
+  });
+
+  it('未接触不结算、不钳引信（擦过继续飞）', () => {
+    const w = emptyWorld();
+    const game = makeGame(w);
+    const dummy = { x: 60 * TILE, y: 40 * TILE - 40, w: 18, h: 40, dead: false, hurt: () => true };
+    (game as unknown as { enemies: () => unknown[] }).enemies = () => [dummy];
+    const r = new GrenadeProj(10 * TILE, 40 * TILE - 20, 10, 0, 100, 3600, 134, () => {});
+    r.fired = true;
+    for (let t = 0; t < 20 && !r.dead; t++) r.fixedUpdate(1, game);
+    expect(r.dead).toBe(false);
+    expect(r.fuse).toBe(3600 - 20);                            // 引信未被钳
+  });
+});

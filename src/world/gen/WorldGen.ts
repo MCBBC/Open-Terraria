@@ -338,7 +338,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   //   cs:692 **无条件**调用 FinalSeedCleanup（:695-747）：悬空 Falling 块静态化
   //   （53/495→397、112→398、234→399、116→402、224→147、其余→1）+逐格
   //   FinalSeedCleanup_Paint。1456 无此调用（KKKKKK 批曾撤,基准回 1457 后复线）。
-  finalSeedCleanup(ctx.store, ctx.world.seedFlags ?? {}, world.chests);
+  //   ★VVVVVV 双态门：SW_MB_1457=1 才执行（1456 口径无此终扫; mile8 槽链窗口在
+  //   finalize 前,不受影响;world-final 域 1457 线经门后逐位不变）。
+  if (hfIs1457()) finalSeedCleanup(ctx.store, ctx.world.seedFlags ?? {}, world.chests);
   // ★终扫(finalize 之后):finalize 的幽灵 type 净化会把"flags=0 但 type 残留"
   // 的多格物体清成 0 → 在清扫 pass 之后【再造残片】(2026-08-13 缺位断言实锤:
   // 生成后 pot 残片 1 处,补扫即清零)。清扫幂等且廉价,此处兜底。
@@ -406,7 +408,7 @@ import { tileRunner } from './vanilla/TileRunner';
 import { runDungeonPass } from './vanilla/DungeonPass';
 import { runTemplePass, runTemplePart2Pass, runLihzahrdAltarPass } from './vanilla/TemplePass';
 import { runIslandHousePass } from './vanilla/IslandHousePass';
-import { runHellFortPass } from './vanilla/HellFortPass';
+import { runHellFortPass, hfIs1457 } from './vanilla/HellFortPass';
 import { runBuriedChestsPass, runUnderworldChestsPass, runSurfaceChestsPass, runWaterChestsPass } from './vanilla/BuriedChestsPass';
 import { runStatuesPass } from './vanilla/StatuesPass';
 import { runJungleShrinePass, runJungleChestsPass } from './vanilla/JungleShrinePass';

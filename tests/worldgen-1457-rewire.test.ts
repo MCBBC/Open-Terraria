@@ -13,6 +13,13 @@ import type { GenState } from '../src/world/gen/vanilla/GenState';
 const SRC = join(__dirname, '..', 'src', 'world', 'gen', 'vanilla');
 const read = (p: string): string => readFileSync(join(SRC, p), 'utf8');
 
+// ★VVVVVV（2026-08-23）双态门配套：worldgen 基准自本批起双态（HellFort/Temple/
+// BuriedChests 三文件,缺省 1456=七条 mile8 槽链认证线,SW_MB_1457=1=本文件所锁的
+// 1457 对齐档 2 线）。本文件全部断言（结构锁+nextJungleItem 行为锁）锚 1457 形
+// ——置门后运行,继续认证 1457 线;1456 线由 mile8 槽链对拍认证（tools/_mile8）。
+// 懒读取门（hfIs1457 首次调用 memoize）,此处模块体赋值先于用例执行,生效。
+process.env.SW_MB_1457 = '1';
+
 /** 掷计数 RNG（nextJungleItem 掷形断言用）：记录每次掷的界,值恒 0（命中各 1/N 门） */
 function countingRng(): { rng: RNG; rolls: string[] } {
   const rolls: string[] = [];

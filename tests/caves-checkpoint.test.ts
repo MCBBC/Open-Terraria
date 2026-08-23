@@ -382,6 +382,10 @@ function settlePart2ChainSync(world: World, st: TileStore, gs: GenState, rng: RN
 
 // SW_FREEZE_CAVES=1 时本对账 describe 让位给 _freeze-caves.test.ts（避免导入副作用
 // 把冻结跑挂——corruption 在冻结后持续 ✗ 是预期备案态）
+// ★VVVVVV（2026-08-23）双态门配套：本文件金标=1457 oracle 再生线（caves-chain-*.json
+// 2026-08-23 03:29）——置 SW_MB_1457=1 使 JS 侧走 1457 形继续认证该线;1456 线由
+// mile8 槽链对拍认证（tools/_mile8,缺省 1456）。
+process.env.SW_MB_1457 = '1';
 if (!process.env.SW_FREEZE_CAVES)
 describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
   const cases = [

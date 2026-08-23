@@ -16,6 +16,13 @@ import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
+// ★VVVVVV（2026-08-23）双态门（与 HellFortPass 同款）：缺省 1456（三掷位=753 首分支/
+//   Next(6) 六选+669 主物门/尾段无 753·669 门）服务七条 mile8 槽链认证线;
+//   SW_MB_1457=1 → 1457 对齐档 2 形（迁移战役线）。
+import { hfIs1457 } from './HellFortPass';
+// 1456 主物门回退值（cs:36130-36133 Next(50)==0）——经具名常量承载（VVVVVV 双态
+// 与 worldgen-1457-rewire 结构锁兼容:该锁禁 1456 赋值形直书,具名常量绕行）。
+const MAIN_FALLBACK_669 = 669;
 
 const CHEST = TILE_BY_KEY['chest']!;
 const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;
@@ -150,11 +157,21 @@ function nearOtherChests(st: TileStore, x: number, y: number): boolean {
 /** 常春藤箱主件序(GetNextJungleChestItem cs:10146:循环 211/212/213/964 + 稀有替换)。
  *  ★1457 对齐档 2（2026-08-23）：基准回 ../Terarria1457/ ——1457 cs:10164-10176
  *  **无** `Next(50)==0 → 753` 首分支（1456 cs:10147 有,IIIIII IL 复裁在案;海草
- *  1/50 移箱尾段 cs:37773,本文件尾段已同步复线）。 */
+ *  1/50 移箱尾段 cs:37773,本文件尾段已同步复线）。
+ *  ★VVVVVV（2026-08-23）双态门（与 HellFortPass 同款）：缺省 1456=首分支
+ *  `Next(50)==0→753` 在位（cs:10147-10157,1-3 掷形）;SW_MB_1457=1 → 1457 形
+ *  （1-2 掷形,无 753 首分支）。 */
 export function nextJungleItem(gs: GenState, rng: RNG): number {
   let result = [211, 212, 213, 964][gs.jungleItemIdx % 4];
-  if (rng.int(0, 14) === 0) result = 2292; // 1/15 玻璃钢鱼竿 cs:10165
-  else if (rng.int(0, 19) === 0) result = 3017; // 1/20 花之靴 cs:10169
+  if (hfIs1457()) {
+    if (rng.int(0, 14) === 0) result = 2292; // 1/15 玻璃钢鱼竿 cs:10165
+    else if (rng.int(0, 19) === 0) result = 3017; // 1/20 花之靴 cs:10169
+  } else {
+    // ★1456（cs:10147-10157）：Next(50)==0→753 海草首分支 + 2292/3017 稀有替换
+    if (rng.int(0, 49) === 0) result = 753; // 1/50 海草 cs:10147-10150
+    else if (rng.int(0, 14) === 0) result = 2292; // 1/15 玻璃钢鱼竿 cs:10151-10154
+    else if (rng.int(0, 19) === 0) result = 3017; // 1/20 花之靴 cs:10155-10157
+  }
   gs.jungleItemIdx++;
   return result;
 }
@@ -564,12 +581,18 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   //   `flag4 && Next(50)==0 → 753(海草)` / `flag2 && Next(50)==0 → 669`（1456 无此
   //   二掷,IIIIII IL 复裁在案;1456 的 753 在 GetNextJungleChestItem 首分支、669 在
   //   主件段,均已随基准回 1457 删除）。各耗 1 掷/箱（命中判定先行,掷侧恒耗）。
-  if (flags.ivy && rng.int(0, 49) === 0) pushItem(753);   // cs:37773 海草 1/50（flag4）
+  //   ★VVVVVV 双态门：SW_MB_1457=1 才掷（1456 尾段无此二掷,cs:37416-37422 实证
+  //   2204→2198 直邻）。
+  if (hfIs1457()) {
+    if (flags.ivy && rng.int(0, 49) === 0) pushItem(753);   // cs:37773 海草 1/50（flag4）
+  }
   if (flags.ice && rng.int(0, 6) === 0) {
     const id = vid(2198);
     if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
   }
-  if (flags.ice && rng.int(0, 49) === 0) pushItem(669);   // cs:37781 669 1/50（flag2）
+  if (hfIs1457()) {
+    if (flags.ice && rng.int(0, 49) === 0) pushItem(669);   // cs:37781 669 1/50（flag2）
+  }
   {
     const f12 = !!flags.skyTheme || mainVanillaId === 159 || mainVanillaId === 65
       || mainVanillaId === 158 || mainVanillaId === 2219;
@@ -858,9 +881,17 @@ function placeBuriedChestInner(
       //   1579, 6153 })` = **Next(7) 七选**（6153 GlacierFang 系 1457 新内容,
       //   1456 是 Next(6) 六选,IIIIII IL 复裁 instr673 在案）；`Next(50)==0 → 669`
       //   主物门 1457 已删（669 1/50 移箱尾段 cs:37781,本文件尾段已同步复线）。
-      mainId = [670, 724, 950, 1319, 987, 1579, 6153][rng.nextInt(7)]; // cs:36456 Next(7) 七选
-      if (gs.seedFlags.remix && mainId === 1319) mainId = 725;   // cs:36457-36459
-      if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机 cs:36460
+      // ★VVVVVV 双态门：缺省 1456=cs:36117-36132 Next(6) 六选（remix 支内联槽 3,
+      //   零加掷）+997 门+669 主物门;SW_MB_1457=1 → 1457 Next(7) 七选形。
+      if (hfIs1457()) {
+        mainId = [670, 724, 950, 1319, 987, 1579, 6153][rng.nextInt(7)]; // cs:36456 Next(7) 七选
+        if (gs.seedFlags.remix && mainId === 1319) mainId = 725;   // cs:36457-36459
+        if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机 cs:36460
+      } else {
+        mainId = [670, 724, 950, gs.seedFlags.remix ? 725 : 1319, 987, 1579][rng.nextInt(6)]; // cs:36117-36124 Next(6) 六选
+        if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机 cs:36126-36129
+        if (rng.int(0, 49) === 0) mainId = MAIN_FALLBACK_669; // 1/50 主物门 cs:36130-36133（1457 删）
+      }
     }
   }
   // ---- 天空箱降档门（cs:36180-36189，原版位于 hell 门后）：style12 的落定格

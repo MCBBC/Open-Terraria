@@ -148,7 +148,7 @@ describe('天气持久化', () => {
     world.weather.windSpeedTarget = 0.42;
     world.weather.sandstorm.happening = true;
     world.weather.sandstorm.severity = 0.5;
-    const json = saveGame(world, { hp: 100, x: 0, y: 0, inv: { slots: [], selected: 0 } } as never, 0);
+    const json = saveGame(world, { hp: 100, x: 0, y: 0, inv: { slots: [], selected: 0 }, luckState: { usedGalaxyPearl: false } } as never, 0);
     const { world: w2 } = loadSave(json);
     expect(w2.weather.raining).toBe(true);
     expect(w2.weather.maxRaining).toBeCloseTo(0.77, 5);

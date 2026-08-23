@@ -37,6 +37,10 @@ const CASES = [
   { seed: '1511931452', evil: 1, file: 'world-final-1511931452.json' },
 ];
 
+// ★VVVVVV（2026-08-23）双态门配套：本文件金标=1457 oracle 再生线（world-final-*.json
+// 2026-08-23 03:54,含 FinalSeedCleanup 1457 终扫）——置 SW_MB_1457=1 使 JS 侧走 1457
+// 形继续认证该线;1456 线由 mile8 槽链对拍认证（tools/_mile8,缺省 1456）。
+process.env.SW_MB_1457 = '1';
 describe('终态哈希金标门(全管线)', () => {
   for (const c of CASES) {
     it(`种子 ${c.seed}:generateWorld 终态四数组哈希恒定`, async () => {
