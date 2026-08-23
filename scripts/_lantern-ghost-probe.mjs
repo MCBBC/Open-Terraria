@@ -24,13 +24,13 @@ const setup = await page.evaluate(async () => {
     st.setTile(x, ty, DIRT);
     st.setTile(x, ty - 6, DIRT);
   }
-  st.setTile(tx, ty - 5, LANT, 0, 0);
-  st.setTile(tx, ty - 4, LANT, 0, 18);
+  st.setTile(tx, ty - 5, LANT, 0, 36);   // style 1(地牢灯笼,与用户现场同款 fy36/54)
+  st.setTile(tx, ty - 4, LANT, 0, 54);
   await new Promise((r) => setTimeout(r, 400));
   // 玩家站灯笼旁
   pl.x = (tx - 3) * 16; pl.y = (ty - 1) * 16 - pl.h; pl.vx = 0; pl.vy = 0;
   await new Promise((r) => setTimeout(r, 1000));
-  return { ok: true, lantern: [tx, ty - 5], lant: LANT, fxc: st.frameX[st.idx(tx, ty - 5)], fyc: st.frameY[st.idx(tx, ty - 5)] };
+  return { ok: true, lantern: [tx, ty - 5], lant: LANT, fyc: st.frameY[st.idx(tx, ty - 5)] };
 });
 if (!setup.ok) { console.log(JSON.stringify(setup)); process.exit(1); }
 // 静止帧
@@ -48,5 +48,7 @@ await page.evaluate(async () => {
 });
 const mid = await page.evaluate(() => window.__swGame.player.x);
 await page.screenshot({ path: '/tmp/lantern-swing.png' });
+await new Promise((r) => setTimeout(r, 120));
+await page.screenshot({ path: '/tmp/lantern-swing2.png' });
 console.log(JSON.stringify({ ...setup, playerXAfter: mid }));
 await browser.close();

@@ -1637,7 +1637,12 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     //   非 StructureMap 默认表,故传显式 forbid 集）。本地主题/岩浆/红线/宝箱判定
     //   仍是 HouseBuilder 自身的额外门,两者原版并存。
     const houseForbid = new Set<number>();
-    const houseSheets = new Set([225, 41, 43, 44, 226, 203, 112, 25, 151, 21, 467]);
+    // ★UUUUUU（HouseUtils.cs:280-286）：notTheBees 用 BeelistedTiles（:13——
+    //   {41,43,44,226,203,112,25,151,21,467}，**不含 225**）替代 BlacklistedTiles
+    //   （:11——多一个 225 蜂巢块）：蜂蜜世界的洞屋允许压在蜂巢块上。
+    const houseSheets = new Set(gs.seedFlags?.notTheBees
+      ? [41, 43, 44, 226, 203, 112, 25, 151, 21, 467]
+      : [225, 41, 43, 44, 226, 203, 112, 25, 151, 21, 467]);
     for (let id = 0; id < TILE_DEFS.length; id++) {
       const sh = TILE_DEFS[id]?.vanilla?.sheet;
       if (sh !== undefined && houseSheets.has(sh)) houseForbid.add(id);

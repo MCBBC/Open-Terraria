@@ -111,7 +111,10 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       const ud = gs.undergroundDesert;
       if (ud && ((cx > ud.x0 && cx < ud.x1) || (zLo > ud.x0 && zLo < ud.x1) || (zHi > ud.x0 && zHi < ud.x1))) ok = false;
       if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }   // cs:14006-14010（先雪后林）
-      if (zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
+      // ★UUUUUU（cs:14090 `(!notTheBees || remix)` 同款于 cs:14416 猩红侧）：
+      //   NTB 跳过丛林带收缩——蜂蜜世界邪恶带不避让丛林（泥带全域化）
+      if (!(gs.seedFlags.notTheBees && !gs.seedFlags.remix)
+        && zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
     }
     gs.evilZones.push({ x0: zLo, x1: zHi });
     __mark?.(`zone${g}:${zLo}-${zHi}:cx${cx}`);

@@ -34,6 +34,7 @@ import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
 import { flameTileTop } from './VanillaTiler';
+import { swayBakeSkip } from './WindSway';
 import { campfireYOffset, animYOffset } from './TileAnim';
 import type { FlickerClock } from '../lighting/SkyColor';
 

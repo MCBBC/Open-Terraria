@@ -217,7 +217,10 @@ export function runUnderwaterChestsPass(
         const i = st.idx(x, y);
         // liquidType 修 2026-08-12:同 BuriedChestsPass——本仓库 +1 编码,水=LIQUID_TYPE.WATER
         // (原 ===0 永假 → 海洋洞窟水中箱特性静默失效)
-        if (st.liquid[i] > 250 && st.liquidType[i] === LIQUID_TYPE.WATER) {
+        // ★UUUUUU（cs:17363 `liquidType()==0 || notTheBees || remix`）：NTB/Remix
+        //   接受任意液体类型（蜂蜜世界=蜜池水箱）
+        if (st.liquid[i] > 250 && (st.liquidType[i] === LIQUID_TYPE.WATER
+          || gs.seedFlags.notTheBees || gs.seedFlags.remix)) {
           if (placeBuriedChest(st, rng, gs, chests, x, y, {
             style: 17, loot: main, flags: { water: true }, trySlope: true,
           })) break;

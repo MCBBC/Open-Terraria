@@ -830,9 +830,22 @@ function placeBuriedChestInner(
   const iceDbg = (globalThis as { __swIceGate?: (i: number, gy: number, tBelow: number, mainId: number, style: number, fired: number) => void }).__swIceGate;
   if (iceDbg) iceDbg(i, gy, tBelow, mainId, style ?? -1, 0);
   // ★AAAAAA：cs:36112 冰系地基四元 {147,161,162,197}——197 冻胶块曾漏。
+  // ★UUUUUU（cs:36093-36101）：NTB 雪冰带支 flag21——Next(5)+Next(-2,3) **无条件先掷**
+  //   （ntb && !remix && !dstarve 时），带门内再 Next(-2,3)（短路）；命中=蜂蜜世界
+  //   雪冰带埋箱也走冰箱池（num12/num13 分界公式与 FinishNotTheBees 同源）。
+  let flag21 = false;
+  if (gs.seedFlags.notTheBees && !gs.seedFlags.remix && !gs.seedFlags.theConstant) {
+    const num12 = gs.lavaLine + rng.int(0, 4);
+    const num13 = Math.trunc(gs.worldSurface) + rng.int(-2, 2) + 35;
+    if (gy > num13 && gy <= num12) {
+      if (i < gs.beachDistance + 180 - rng.int(-2, 2) || i > st.w - gs.beachDistance - 180 + rng.int(-2, 2)) {
+        flag21 = true;
+      }
+    }
+  }
   if ((tile === CHEST && argStyle === 11) || (tile === CHEST2 && argStyle === 24)
     || (!mainId && gy >= gs.worldSurface + 25 && gy <= st.h - 205
-      && (tBelow === SNOW || tBelow === ICE || tBelow === THIN_ICE || tBelow === FROZEN_SLIME))) {
+      && (tBelow === SNOW || tBelow === ICE || tBelow === THIN_ICE || tBelow === FROZEN_SLIME || flag21))) {
     flags.ice = true;
     // ★AAAAAA：cs:36118 `if (chestTileType == 21) num9 = 11;`——冰箱帧（fx=36*11）
     //   曾漏（loot/掷流全对但帧写 style1）→ #101 DeadMans 金箱 style 过滤错位
@@ -1161,9 +1174,13 @@ export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests
         // cs:17425-17428/17441-17444：液体不足或非水 → 重掷。
         // liquidType 修 2026-08-12：本仓库 +1 编码(水=LIQUID_TYPE.WATER=1)——照抄原版
         // !==0(原版 Water=0) 会让水格恒不命中,拒绝采样死循环(世界生成卡"生物群系"根因)。
+        // ★UUUUUU（cs:17422/17440 `liquidType()!=0 && !notTheBees && !remixWorldGen`）：
+        //   NTB/Remix 接受任意液体类型（蜜池水箱）。
         // 守卫:100 万掷未命中 → 大声报错降级继续(防同类移植错位再变静默死循环)
         let __guard = 0;
-        while (st.liquid[st.idx(x, y)] < 250 || st.liquidType[st.idx(x, y)] !== LIQUID_TYPE.WATER) {
+        while (st.liquid[st.idx(x, y)] < 250
+          || (st.liquidType[st.idx(x, y)] !== LIQUID_TYPE.WATER
+            && !gs.seedFlags.notTheBees && !gs.seedFlags.remix)) {
           x = rng.int(50, w - 51);
           y = rng.int(yReLo, st.h - 201);
           if (++__guard >= 1_000_000) {

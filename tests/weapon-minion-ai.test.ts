@@ -374,9 +374,9 @@ describe('⑧ 423/613 冲刺真子步（:16780-16783/:66556-66600）', () => {
     expect(m.y - y0).toBeCloseTo(ny * 10, 6);
     expect(dust.length).toBe(0);                         // 触发拍 return——冲刺尘块未入（:66158 在次拍起）
     m.fixedUpdate(1, a.hooks);                           // 次拍：52 子步循环（归零子步终止）
-    expect(priv(m).a62A0).toBe(0);                       // 归零重置（:66174-66177）
-    expect(priv(m).a62A1).toBe(30);
-    expect(priv(m).a62EU).toBe(0);                       // extraUpdates=0（:66178）
+    expect(priv(m).a62EU).toBe(0);                       // extraUpdates=0（:66178）=冲刺终结
+    expect(priv(m).a62A1).toBeGreaterThanOrEqual(30);    // 归零重置 30（:66174）+归零拍冷却块
+    expect(priv(m).a62A1).toBeLessThanOrEqual(32);       //  +1..2（:67017,冲刺拍照走=原版不 return）
     // 总位移 = 触发 10 + 51×10 + 归零拍 2 = 522px（+归零拍后续 AI 微动 ~2px）
     const proj = (m.x - x0) * nx + (m.y - y0) * ny;
     expect(proj).toBeGreaterThan(520);                   // 旧折算 10px/t 两拍仅 20px
@@ -397,11 +397,12 @@ describe('⑧ 423/613 冲刺真子步（:16780-16783/:66556-66600）', () => {
     expect(priv(m).a62A1).toBe(44);                      // (int)(440/10)
     expect(m.x - 2000).toBeCloseTo(10, 6);               // 触发拍 10px
     m.fixedUpdate(1, a.hooks);
-    expect(priv(m).a62A0).toBe(0);
+    expect(priv(m).a62EU).toBe(0);                       // 归零重置（:66236）=冲刺终结
     expect(m.x - 2000).toBeGreaterThan(440);             // 10+43×10+2=442（+归零拍 AI 微动）
     expect(m.x - 2000).toBeLessThan(448);
-    // 尘调用 = ai[1]>3 的子步（递减值 43..4 共 40 拍）×2 调用（3 粒群+2 环）+归零爆 2 = 82
-    expect(dust.length).toBe(40 * 2 + 2);
+    // 尘调用：ai[1]>3 子步（递减值 43..4 共 40 拍）——numUpdates≥20 拍只出环 2 调用
+    // （25 拍）,<20 拍出 3 粒群+环 3 调用（15 拍,:66199-66226 门）+归零爆 2 = 97
+    expect(dust.length).toBe(25 * 2 + 15 * 3 + 2);
   });
   it('rotation 通道（:66827 rotation=vx×0.05 + :66947-66954 spriteDirection）：每拍终速写入、触发/冲刺拍冻结', () => {
     const e = mkEnemy(1, 60 * 16 + 600, 90 * 16 - 40);
@@ -578,12 +579,17 @@ describe('⑩ 龙延伸槽位（:6737-6739/:16812-16845/:52404-52426）', () => 
     const pool = (projectiles as MinionProj[]).filter((m) => !m.sentry);
     freeUpMinionsForSummon(191, pool, 2);
     expect(other.dead).toBe(true);                       // 1 槽普通随从先逐
-    const seg = (id: number) => projectiles.find((p) => p instanceof MinionProj && (p as MinionProj).projId === id) as MinionProj;
-    expect(seg(625).dead).toBe(false);
-    expect(seg(628).dead).toBe(false);                   // 尾豁免（:52434）+ 摘链存活
-    expect(seg(627).dead).toBe(true);                    // 尾邻 627 逐
-    expect(seg(626).dead).toBe(true);                    // 前驱 626 随对逐
-    expect(seg(628).parentRef?.()?.projId).toBe(627);    // 摘链后尾接回基础链段 627
-    expect(seg(627).dead).toBe(false);
+    const ext = (id: number) => projectiles.find((p) => p instanceof MinionProj
+      && (p as MinionProj).projId === id && !(p as MinionProj).noSlot) as MinionProj;
+    const base = (id: number) => projectiles.find((p) => p instanceof MinionProj
+      && (p as MinionProj).projId === id && (p as MinionProj).noSlot) as MinionProj;
+    const tail = projectiles.find((p) => p instanceof MinionProj && (p as MinionProj).projId === 628) as MinionProj;
+    expect(head.dead).toBe(false);                       // 龙头豁免（:52434）
+    expect(tail.dead).toBe(false);                       // 尾豁免 + 摘链存活
+    expect(ext(627).dead).toBe(true);                    // 尾邻 627 逐
+    expect(ext(626).dead).toBe(true);                    // 前驱 626 随对逐
+    expect(tail.parentRef?.()).toBe(base(627));          // 摘链后尾接回基础链段 627（链未断）
+    expect(base(627).dead).toBe(false);
+    expect(base(626).dead).toBe(false);
   });
 });

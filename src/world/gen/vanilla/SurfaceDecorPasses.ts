@@ -884,9 +884,12 @@ export function runFallenLogsPass(st: TileStore, rng: RNG, gs: GenState): void {
             }
           }
         }
-        const grassHere = sheetAt(st, x, j) === 2;
-        const grassL = sheetAt(st, x - 1, j) === 2;
-        const grassR = sheetAt(st, x + 1, j) === 2;
+        // ★UUUUUU（cs:18749）：NTB 基座族扩展——草 2 ∪ 丛林草 60（worldIsFrozen/
+        //   surfaceIsDesert 组合支本仓未建，备案）
+        const ntb = !!gs.seedFlags?.notTheBees;
+        const grassHere = sheetAt(st, x, j) === 2 || (ntb && sheetAt(st, x, j) === 60);
+        const grassL = sheetAt(st, x - 1, j) === 2 || (ntb && sheetAt(st, x - 1, j) === 60);
+        const grassR = sheetAt(st, x + 1, j) === 2 || (ntb && sheetAt(st, x + 1, j) === 60);
         const dryAbove = st.inBounds(x, j - 1) && (st.liquid[st.idx(x, j - 1)] === 0 || budget < relaxAt / 5);
         if (ok && dryAbove && grassHere && grassL && grassR) {
           j--;
