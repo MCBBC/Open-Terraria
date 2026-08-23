@@ -31,6 +31,16 @@
 //   =单发 AttemptToPlaceDoor（cs:33205-33211）；⑥右外门死分支删除=可触发
 //   （cs:33251-33283）；⑦新增塌墙阶段（cs:33347-33365/33383-33432）。门/塌墙
 //   helper 直接 import 自存档（存档即插式,已接线）。
+// ★2026-08-23 VVVVVV 批双态门（基准并存,非二选一覆盖）：UUUUUU 定谳 #28 全链阻塞
+//   =「1457 代码 vs 1456 槽链」基准错位——七条 mile8 槽链（/tmp/sw-slp/g* 认证线,
+//   run.log 实证 Terraria Server **v1.4.5.6**）是用户金标=1456 真值,而 1457 迁移
+//   是并行会话独立战役（caves/shimmer 检查点金标 08-23 03:29-03:54 已按 1457 oracle
+//   再生）。裁决=双态：**缺省 1456**（hellFort1456(),本文件尾,cs:32850-33310 1:1
+//   重建）服务槽链认证线;**SW_MB_1457=1** 走上方 1457 对齐档 2 主体服务迁移战役
+//   （与 oracle 侧 SW_MB_1457 门同款先例;oracle 后随「1456 口径退役」删门,JS 侧
+//   保留双态）。懒读取 env（首次 hellFort 调用时取）——测试/探针可在用例体前置
+//   process.env.SW_MB_1457='1' 切换。worldgen-1457-rewire.test.ts 的 HellFort 结构
+//   断言对双态兼容（1457 形文本全保留在位,1456 分支置文件尾不抢 indexOf 首现）。
 import type { TileStore } from '../../TileStore';   // KKKKKK:塌墙阶段回滚后无值消费,改 type-only
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -68,6 +78,15 @@ const PIC_245 = TILE_BY_KEY['v_245_paintings_2x3']!;
 const PIC_246 = TILE_BY_KEY['v_246_paintings_3x2']!;
 const T_DOOR = TILE_BY_KEY['door_closed']!;
 const T_STATUE = TILE_BY_KEY['v_105_statue']!;
+
+// ★VVVVVV 双态门：缺省 1456（槽链认证线）,SW_MB_1457=1 → 1457 对齐档 2（迁移战役）。
+//  懒读取+进程内 memo——env 在单进程内不中途切换;测试文件在用例体前置赋值即可生效
+//  （首次 hellFort 调用发生在用例执行期,晚于模块级赋值）。
+let hfMode1457: boolean | null = null;
+function hfIs1457(): boolean {
+  if (hfMode1457 === null) hfMode1457 = process.env.SW_MB_1457 === '1';
+  return hfMode1457;
+}
 
 /** PlaceDoor（cs:31938）1:1：门 gate（j-2 活性+tileSolid 且 SolidTile(j+2)）→
  *  三格门(type10) frameY=54*(style%36)+{0,18,36}、frameX 每格独立 Next(3)*18
@@ -748,6 +767,9 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState,
 //   → 首候选行即 break）=正常世界右外门从不放置且零掷；⑤ 无塌墙阶段。
 
 function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: number, wallType: number, tno = -1): void {
+  // ★VVVVVV 基准分派：缺省 1456（hellFort1456,文件尾）=七条 mile8 槽链认证线;
+  //  SW_MB_1457=1 → 下方 1457 对齐档 2 主体（sibling 迁移战役,caves/shimmer 检查点线）。
+  if (!hfIs1457()) { hellFort1456(st, rng, i, j, tileType, wallType, tno); return; }
   const { w, h } = st;
   const hellTop = h - 200;
   // ---- 列左右界(1457 cs:32996-33008):中央 ±4-9,其余依次外扩 8-19 ----
@@ -1009,4 +1031,272 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
       }
     }
   }
+}
+
+/** hellFort() 1456 真值分支（★VVVVVV 缺省路径,服务七条 mile8 槽链认证线）：
+ *  Terarria1456/Terraria/WorldGen.cs HellFort cs:32850-33310 1:1。与上方 1457
+ *  主体八处语义差（KKKKK 批清单+本批逐行源码复核）：
+ *  ① 列界掷序=右翼先（colL[3]/colR[3]→colL[4]/colR[4] 先掷,左翼 colR[1]/colL[1]→
+ *     colR[0]/colL[0] 后掷,cs:32872-32877）;
+ *  ② 翼行 Next(10) 直接扩 span [spanLo,spanHi]（cs:32903-32908/32919-32924,无 Clamp）;
+ *  ③ 中央跨度两掷 Next(10) 直接扩 span（cs:33003-33012）;
+ *  ④ 列间门=while 抽行命中即**单次无条件直写**（清 y-1..y-3+补墙 wallType+PlaceTile,
+ *     仅 InWorld(·,10) 门,cs:33082-33108）——无 AttemptToPlaceDoor 锚检查/失败重掷/
+ *     doorExists 记账;
+ *  ⑤ 1/3 门=无条件直写（cs:33148-33158）;
+ *  ⑥ 左外门=预检（3 格空+无液）+while 抽行无条件直写、**不打墙**（cs:33166-33204）;
+ *  ⑦ 右外门=**原版死分支原样保留**：预检环首占用行 `num37 < 20`（列号 0-4 恒真）→
+ *     即刻 break——门旗恒 false=右外门从不放置且预检后零掷（cs:33213-33219;1457 曾
+ *     "修复"为可触发,N 批实证+IIIIII 复裁维持 1456 原样）;
+ *  ⑧ **无塌墙阶段**（1457 cs:33347-33456 新增;1456 无 doorExists 账本）。
+ *  其余段（行界/列合法性/越界清除/绘制/平台口/顶层平台）1456≡1457 共享,与上方
+ *  主体逐字同（KKKKK 批 diff 实证零差段）。门落点走本文件 placeTileDoorHF
+ *  （PlaceTile(10) 语义锚,1456≡1457 同构）——1456 分支即其唯一 live 调用方。 */
+function hellFort1456(st: TileStore, rng: RNG, i: number, j: number, tileType: number,
+  wallType: number, tno = -1): void {
+  const { w, h } = st;
+  const hellTop = h - 200;
+  // ---- 列左右界（1456 cs:32871-32877）：中央 ±4-9,右翼先掷、左翼后掷 ----
+  const colL = new Array<number>(5), colR = new Array<number>(5);
+  colL[2] = i - rng.int(4, 9);
+  colR[2] = i + rng.int(4, 9);
+  colL[3] = colR[2]; colR[3] = colL[3] + rng.int(8, 19);   // ★1456 右翼先（掷 3-4）
+  colL[4] = colR[3]; colR[4] = colL[4] + rng.int(8, 19);
+  colR[1] = colL[2]; colL[1] = colR[1] - rng.int(8, 19);   // ★1456 左翼后（掷 5-6）
+  colR[0] = colL[1]; colL[0] = colR[0] - rng.int(8, 19);
+  // ---- 行上下界（cs:32878-32889,1456≡1457）----
+  const rowT = new Array<number>(10), rowB = new Array<number>(10);
+  rowT[3] = j - rng.int(6, 11); rowB[3] = j;
+  for (let r = 4; r < 10; r++) { rowT[r] = rowB[r - 1]; rowB[r] = rowT[r] + rng.int(6, 11); }
+  for (let r = 2; r >= 0; r--) { rowB[r] = rowT[r + 1]; rowT[r] = rowB[r] - rng.int(6, 11); }
+  // ---- 占用网格（1456 cs:32893-32952）：2 轮,每轮左翼门→右翼门;翼行 Next(10) 扩 span ----
+  const occ: boolean[][] = Array.from({ length: 5 }, () => new Array(10).fill(false));
+  let hasLWing = false, hasRWing = false;
+  let spanLo = 3, spanHi = 3;
+  for (let round = 0; round < 2; round++) {
+    if (rng.int(0, 2) === 0) {
+      hasLWing = true;
+      const r0 = rng.int(0, 9);
+      if (r0 < spanLo) spanLo = r0;      // ★1456 直接扩 span（无 Clamp）
+      if (r0 > spanHi) spanHi = r0;
+      let wingCol = 1;
+      if (rng.int(0, 1) === 0) { occ[0][r0] = true; occ[1][r0] = true; wingCol = 0; }
+      else occ[1][r0] = true;
+      let dir = rng.int(0, 1); if (dir === 0) dir = -1;
+      for (let steps = rng.int(0, 9), r = r0; steps > 0 && r >= 0 && r < 10; r += dir) occ[wingCol][r] = true;
+    }
+    if (rng.int(0, 2) === 0) {
+      hasRWing = true;
+      const r0 = rng.int(0, 9);
+      if (r0 < spanLo) spanLo = r0;
+      if (r0 > spanHi) spanHi = r0;
+      let wingCol = 3;
+      if (rng.int(0, 1) === 0) { occ[3][r0] = true; occ[4][r0] = true; wingCol = 4; }
+      else occ[3][r0] = true;
+      let dir = rng.int(0, 1); if (dir === 0) dir = -1;
+      for (let steps = rng.int(0, 9), r = r0; steps > 0 && r >= 0 && r < 10; r += dir) occ[wingCol][r] = true;
+    }
+  }
+  // ---- 列合法性（cs:32973-32995,1456≡1457）：出界或地狱层已有墙 → 整列弃用 ----
+  for (let c = 0; c < 5; c++) {
+    let bad = false;
+    if (colL[c] < 10 || colL[c] > w - 10) bad = true;
+    else {
+      for (let y = hellTop; y < h; y++) {
+        if (st.inBounds(colL[c], y) && st.wall[st.idx(colL[c], y)] > 0) { bad = true; break; }
+      }
+    }
+    if (bad) for (let r = 0; r < 10; r++) occ[c][r] = false;
+  }
+  // ---- 中央列跨度（1456 cs:33003-33012）：两掷 Next(10) 直接扩 span ----
+  {
+    const a = rng.int(0, 9); if (a < spanLo) spanLo = a;
+    const b = rng.int(0, 9); if (b > spanHi) spanHi = b;
+  }
+  if (!hasLWing && !hasRWing) {
+    while (spanHi - spanLo < 5) {
+      const a = rng.int(0, 9); if (a < spanLo) spanLo = a;
+      const b = rng.int(0, 9); if (b > spanHi) spanHi = b;
+    }
+  }
+  for (let r = spanLo; r <= spanHi; r++) occ[2][r] = true;
+  // ---- 越界单元清除（cs:33014-33027,1456≡1457）----
+  for (let c = 0; c < 5; c++) {
+    for (let r = 0; r < 10; r++) {
+      if (occ[c][r] && (rowT[r] < hellTop || rowB[r] > h - 20)) occ[c][r] = false;
+    }
+  }
+  if (hfTrace) {
+    tr(`T#${tno} colL=[${colL.join(',')}] colR=[${colR.join(',')}]`);
+    tr(`T#${tno} rowT=[${rowT.join(',')}] rowB=[${rowB.join(',')}]`);
+    for (let c = 0; c < 5; c++) tr(`T#${tno} occ[${c}]=${occ[c].map((v) => (v ? 1 : 0)).join('')}`);
+  }
+  // ---- 绘制（cs:33029-33063,1456≡1457）：四边实心砖,内部墙+清空 ----
+  for (let c = 0; c < 5; c++) {
+    for (let r = 0; r < 10; r++) {
+      if (!occ[c][r]) continue;
+      for (let x = colL[c]; x <= colR[c]; x++) {
+        if (x < 10 || x > w - 10) continue;
+        for (let y = rowT[r]; y <= rowB[r]; y++) {
+          if (!st.inBounds(x, y)) continue;
+          const ti = st.idx(x, y);
+          st.liquid[ti] = 0;
+          if (x === colL[c] || x === colR[c] || y === rowT[r] || y === rowB[r]) {
+            st.type[ti] = tileType; st.flags[ti] = 1;
+            st.half[ti] = 0; st.slope[ti] = 0;
+          } else {
+            st.wall[ti] = wallType;
+            st.flags[ti] = 0;
+          }
+        }
+      }
+    }
+  }
+  // ---- 列间门 style19（1456 cs:33082-33108）：每个列对 while 抽行,命中候选行即
+  //      单次无条件直写（清 3 格+补墙+PlaceTile,仅 InWorld 门;失败不重掷）----
+  for (let c = 0; c < 4; c++) {
+    const rows: boolean[] = new Array(10).fill(false);
+    let needDoor = false;
+    for (let r = 0; r < 10; r++) {
+      if (occ[c][r] && occ[c + 1][r]) { rows[r] = true; needDoor = true; }
+    }
+    while (needDoor) {
+      const r = rng.nextInt(10);
+      if (rows[r]) {
+        needDoor = false;
+        if (colR[c] >= 10 && colR[c] < w - 10 && rowB[r] >= 10 && rowB[r] < h - 10) {   // InWorld(·,10)
+          tr(`T#${tno} door c=${c} r=${r} x=${colR[c]} y=${rowB[r] - 1}`);
+          for (let k = 1; k <= 3; k++) {
+            const ti = st.idx(colR[c], rowB[r] - k);
+            st.flags[ti] = 0;
+            st.wall[ti] = wallType;
+          }
+          placeTileDoorHF(st, rng, colR[c], rowB[r] - 1, 19);
+        }
+      }
+    }
+  }
+  // ---- 层间平台口 + 列间 1/3 门（cs:33110-33158;平台段 1456≡1457）----
+  for (let c = 0; c < 5; c++) {
+    for (let r = 0; r < 10; r++) {
+      if (!occ[c][r]) continue;
+      if (!(colR[c] >= 10 && colR[c] < w - 10 && rowB[r] >= 10 && rowB[r] < h - 10)) continue;   // InWorld(...,10)
+      if (r > 0 && occ[c][r - 1]) {
+        // 平台口:列内 x 跨度 2-5
+        let x1 = rng.int(colL[c] + 2, colR[c] - 2);
+        let x2 = rng.int(colL[c] + 2, colR[c] - 2);
+        let tries = 0;
+        while ((x2 - x1 < 2 || x2 - x1 > 5) && tries <= 10000) {
+          x1 = rng.int(colL[c] + 2, colR[c] - 2);
+          x2 = rng.int(colL[c] + 2, colR[c] - 2);
+          tries++;
+        }
+        if (tries <= 10000) {
+          tr(`T#${tno} plat c=${c} r=${r} x=${x1}..${x2} y=${rowT[r]}`);
+          for (let x = x1; x <= x2; x++) {
+            if (x < 20 || x > w - 20 || !st.inBounds(x, rowT[r])) continue;
+            const ti = st.idx(x, rowT[r]);
+            st.flags[ti] = 0;
+            st.setTileSilent(x, rowT[r], PLATFORM, 0, 13 * 18);
+            st.wall[ti] = wallType;
+          }
+        } else break;
+      }
+      if (c < 4 && occ[c + 1][r] && rng.int(0, 2) === 0) {
+        // ★1456（cs:33148-33158）：1/3 门无条件直写（无锚检查/不重掷/不记账）
+        tr(`T#${tno} door13 c=${c} r=${r} x=${colR[c]} y=${rowB[r] - 1}`);
+        for (let k = 1; k <= 3; k++) {
+          const ti = st.idx(colR[c], rowB[r] - k);
+          st.flags[ti] = 0;
+          st.wall[ti] = wallType;
+        }
+        placeTileDoorHF(st, rng, colR[c], rowB[r] - 1, 19);
+      }
+    }
+  }
+  // ---- 左外门（1456 cs:33166-33204）：最左占用列,预检（外侧 3 格空+无液）→
+  //      while 抽行 → 无条件直写、**不打墙**（1456 无 doorExists 记账）----
+  for (let c = 0; c < 5; c++) {
+    const rows: boolean[] = new Array(10).fill(false);
+    let any = false;
+    for (let r = 0; r < 10; r++) {
+      if (occ[c][r]) { rows[r] = true; any = true; }
+    }
+    if (!any) continue;
+    let needDoor = false;
+    for (let r = 0; r < 10; r++) {
+      if (!rows[r]) continue;
+      const x = colL[c] - 1;
+      if (!st.inBounds(x, rowB[r] - 3)) { rows[r] = false; continue; }
+      if (!st.flags[st.idx(x, rowB[r] - 1)] && !st.flags[st.idx(x, rowB[r] - 2)] && !st.flags[st.idx(x, rowB[r] - 3)]
+        && st.liquid[st.idx(x, rowB[r] - 1)] === 0 && st.liquid[st.idx(x, rowB[r] - 2)] === 0
+        && st.liquid[st.idx(x, rowB[r] - 3)] === 0) needDoor = true;
+      else rows[r] = false;
+    }
+    while (needDoor) {
+      const r = rng.nextInt(10);
+      if (rows[r]) {
+        needDoor = false;
+        tr(`T#${tno} doorL c=${c} r=${r} x=${colL[c]} y=${rowB[r] - 1}`);
+        for (let k = 1; k <= 3; k++) st.flags[st.idx(colL[c], rowB[r] - k)] = 0;   // 不打墙
+        placeTileDoorHF(st, rng, colL[c], rowB[r] - 1, 19);
+      }
+    }
+    break;
+  }
+  // ---- 右外门（1456 cs:33205-33237）：**原版死分支原样保留**——最右占用列的
+  //      预检环首占用行 `num37 < 20`（列号 0-4 恒真）→ 即刻 break,门旗恒 false=
+  //      右外门从不放置、预检后零掷（1457 曾删死分支使可触发;维持 1456 原样）----
+  for (let c = 4; c >= 0; c--) {
+    const rows: boolean[] = new Array(10).fill(false);
+    let any = false;
+    for (let r = 0; r < 10; r++) {
+      if (occ[c][r]) { rows[r] = true; any = true; }
+    }
+    if (!any) continue;
+    break;   // ★1456 死分支：首个占用列即 break（cs:33216-33219）,零掷
+  }
+  // ---- 顶层平台口（cs:33239-33310,1456≡1457）：最上占用行,列内 2-5 跨,上方须净空 ----
+  for (let r = 0; r < 10; r++) {
+    const cols: boolean[] = new Array(5).fill(false);
+    let any = false;
+    for (let c = 0; c < 5; c++) {
+      if (occ[c][r]) { cols[c] = true; any = true; }
+    }
+    if (any) {
+      let searching = true;
+      while (searching) {
+        const c = rng.int(0, 4);
+        if (cols[c]) {
+          let x1 = rng.int(colL[c] + 2, colR[c] - 2);
+          let x2 = rng.int(colL[c] + 2, colR[c] - 2);
+          let tries = 0;
+          while ((x2 - x1 < 2 || x2 - x1 > 5) && tries <= 10000) {
+            x1 = rng.int(colL[c] + 2, colR[c] - 2);
+            x2 = rng.int(colL[c] + 2, colR[c] - 2);
+            tries++;
+          }
+          if (tries > 10000) break;
+          let clear = true;
+          for (let x = x1; x <= x2; x++) {
+            if (x < 10 || x > w - 10 || !st.inBounds(x, rowT[r] - 1)) continue;
+            const ti = st.idx(x, rowT[r] - 1);
+            if (st.flags[ti] || st.liquid[ti] > 0) { clear = false; break; }
+          }
+          if (clear) {
+            tr(`T#${tno} topPlat c=${c} r=${r} x=${x1}..${x2} y=${rowT[r]}`);
+            for (let x = x1; x <= x2; x++) {
+              if (x < 10 || x > w - 10 || !st.inBounds(x, rowT[r])) continue;
+              const ti = st.idx(x, rowT[r]);
+              st.flags[ti] = 0;
+              st.setTileSilent(x, rowT[r], PLATFORM, 0, 13 * 18);
+            }
+          }
+          searching = false;
+        }
+      }
+      break;
+    }
+  }
+  // （1456 无塌墙阶段——1457 cs:33347-33456 新增,见上方主体尾段）
 }

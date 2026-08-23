@@ -175,6 +175,42 @@ describe('D-1 decor 失撑链（PlantCheck/CheckAlch 族）', () => {
     g.checkFurnitureSupport(10, 9);
     expect(w.store.get(10, 9)).toBe(0);      // 灯座没了 → 塌
   });
+
+  it('树苗（玩家种植单格表示）挖支撑 → 塌;地基族变更 → 重帧（Check1x2 :43377）', () => {
+    const w = new World(40, 40, 7, 'decor-support');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const SAP = keyOf('acorn_sapling'), GRASS = keyOf('grass'), SAND = idOfSheet(53);
+    w.store.setTileSilent(10, 10, GRASS, 0, 0);
+    w.store.setTileSilent(10, 9, SAP, 0, 0);          // 单格表示（placeAcornSapling :12398）
+    g.checkFurnitureSupport(10, 9);
+    expect(w.store.get(10, 9)).toBe(SAP);             // 草在 → 活（草=档 0 地基）
+    w.store.setTile(10, 10, 0);
+    g.checkFurnitureSupport(10, 9);
+    expect(w.store.get(10, 9)).toBe(0);               // 支撑没了 → 塌
+    // 导入档 1×2 两格表示 + 地基族变更重帧（草→沙 档 6）
+    w.store.setTileSilent(20, 10, SAND, 0, 0);
+    w.store.setTileSilent(20, 8, SAP, 0, 0);
+    w.store.setTileSilent(20, 9, SAP, 0, 18);
+    g.checkFurnitureSupport(20, 9);
+    expect(w.store.get(20, 8)).toBe(SAP);             // 沙是合法地基（档 18=alt6）→ 重帧不杀
+    expect(Math.floor(w.store.frameX[w.store.idx(20, 8)] / 54)).toBe(6);
+    expect(w.store.frameX[w.store.idx(20, 8)]).toBe(w.store.frameX[w.store.idx(20, 9)]);
+  });
+
+  it('蘑菇树 72 下方须 72/70（case 72 :86978 内联）——挖蘑菇草 → 整段级联塌', () => {
+    const w = new World(40, 40, 7, 'decor-support');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const TREE = keyOf('v_72_mushroom_tree'), SHROOMGRASS = idOfSheet(70);
+    w.store.setTileSilent(10, 12, SHROOMGRASS, 0, 0);
+    w.store.setTileSilent(10, 11, TREE, 0, 0);
+    w.store.setTileSilent(10, 10, TREE, 18, 0);
+    w.store.setTile(10, 12, 0);
+    g.checkFurnitureSupport(10, 11);   // 底干格失基 → 塌
+    expect(w.store.get(10, 11)).toBe(0);
+    expect(w.store.get(10, 10)).toBe(0);   // 级联：上格下方空 → 连塌
+  });
 });
 
 describe('D-3 火把 style 掉落（KillTile case 4 :65106-65164）', () => {

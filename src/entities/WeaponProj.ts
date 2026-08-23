@@ -2726,6 +2726,12 @@ export class GrenadeProj extends Entity {
   vy: number;
   damage: number;
   projId: number;
+  /** 接触伤害穿甲+暴击率（发射侧注入——Damage_PVE 接触结算与爆炸同源；
+   *  曾接触只钳引信不结算伤害=火箭穿体 3t 后才在身后爆,目标零伤
+   *  (2026-08-23 用户报"火箭打不了假人/蝙蝠身边爆了没伤害") */
+  contactPen = 0;
+  contactKb = 0;
+  critChance = 0;
   /** 引信 timeLeft 1:1（SetDefaults :10348-10408）：炸弹/手雷族 180、炸药棍族
    *  {29,470,637}=300——此前误写 150/135/180 */
   fuse: number;
@@ -2832,10 +2838,21 @@ export class GrenadeProj extends Entity {
     // 一击死）。曾只扫 enemies 桶（2026-08-21 补 critters）
     if (this.fuse > 3) {
       for (const ent of game.enemies()) {
-        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean };
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean;
+          hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean, pierce?: number, fp?: boolean) => boolean };
         if (e.dead) continue;
         if (this.x < e.x + e.w && this.x + this.w > e.x
-          && this.y < e.y + e.h && this.y + this.h > e.y) { this.fuse = 3; break; }
+          && this.y < e.y + e.h && this.y + this.h > e.y) {
+          // Damage_PVE_Inner aiStyle16 分支（:12330-12340）只钳 timeLeft=3——接触伤害
+          // 已在标准 Damage_PVE 流程结算（StrikeNPC 全管线：飘值/音/免疫帧由单点给，
+          // 3t 后的爆炸被免疫帧挡住不双击）。曾只钳引信不结算 = 火箭以 ~10-15px/t
+          // 再飞 3t（30-45px）穿过目标才爆,接触目标零伤（假人/蝙蝠双症状根因）
+          const dir = (e.x + e.w / 2) < this.x + this.w / 2 ? -1 : 1;
+          const crit = Math.random() < (this.critChance || 0.04);
+          e.hurt?.(this.damage, dir * this.contactKb, 0, game, this.contactPen, crit, 0, true);
+          this.fuse = 3;
+          break;
+        }
       }
       if (this.fuse > 3) {
         for (const cent of game.critters?.() ?? []) {

@@ -13,6 +13,7 @@ function makeGame(counters: { killed: number; drops: number; sfx: number }) {
     playSfx: () => { counters.sfx++; },
     playSfxFiles: () => { counters.sfx++; },
     spawnParticles: () => {},
+    addDamageNumber: () => {},   // 飘字系统（Enemy.hurt :11553 调用,mock 补齐防 TypeError）
     onEnemyKilled: () => { counters.killed++; },
     cutTile: () => {},
     world: { flags: {} as Record<string, boolean>, difficulty: 0, isExpert: false },

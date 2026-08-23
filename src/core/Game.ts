@@ -505,7 +505,7 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   110: 'plant', 113: 'plant', 201: 'plant', 637: 'plant', 703: 'plant',
   // CheckAlch（tileAlch default 支 :86573-86577 {82,83,84}）
   82: 'alch', 83: 'alch', 84: 'alch',
-  // CheckSunflower（case 27 :86800 附近）
+  // CheckSunflower（case 27 派发 :86382,函数 :53744）
   27: 'sunflower',
   // Check1x2（:43377，case 20 树苗——地基失配重帧/无地基杀）
   20: 'sapling',
@@ -9417,6 +9417,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (projId === 1088) {
             rocket.bouncePlantCheck = (cx, cy) => this.canAcornPlant(cx, cy) !== null;
           }
+          // 接触伤害参数（Damage_PVE 接触结算与爆炸同源——曾缺=火箭穿体 3t 后才爆）。
+          // kb=武器值（原版火箭 SetDefaults 无 knockBack,发射时 NewProjectile 传武器 kb
+          // ——火箭炮 5.5,Projectile.cs:1966 无 knockBack 行=默认 0 再被发射侧覆盖）
+          rocket.contactPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          rocket.contactKb = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
+          rocket.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
           rocket.fired = true;
           this.entities.add(rocket, 'projectiles');
           // 段尾与 Arrow 路径共用（消耗→useTime→swing→音效→UI 刷新）
@@ -23686,12 +23692,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
       }
       case 'sapling': {
-        // Check1x2（:43377）type 20 支：1×2 完整性 + 底格 SolidTileAllowBottomSlope/
-        // 平台 + 地基族匹配（错族=重帧 :43483-43489;无地基/界外族=杀）
+        // Check1x2（:43377）type 20 支：完整性 + 底格 SolidTileAllowBottomSlope/
+        // 平台 + 地基族匹配（错族=重帧 :43483-43489;无地基/界外族=杀）。
+        // ★仓内双表示：玩家橡实种植=单格（placeAcornSapling :12398 frameY=0）、
+        // wld 导入=1×2 两格（frameY 0/18）——按第二格是否同型分辨
         const top = (st.frameY[i] % 36 === 0) ? y : y - 1;
-        const below = top + 2;
-        if (!st.inBounds(x, below) || st.get(x, top) !== st.type[i]
-          || st.get(x, top + 1) !== st.type[i]) { this.killDecorTile(x, top); return; }
+        const twoCell = st.get(x, top + 1) === st.type[i];
+        const below = top + (twoCell ? 2 : 1);
+        if (!st.inBounds(x, below) || !st.isActive(x, top)
+          || (twoCell && !st.isActive(x, top + 1))) { this.killDecorTile(x, top); return; }
         const gd = TILE_DEFS[st.get(x, below)];
         const groundOk = this.solidAllowBottomSlopeAt(x, below) || !!gd?.platform;
         const alt = ACORN_ALT_BY_GROUND_SHEET[gd?.vanilla?.sheet ?? -1];
@@ -23701,7 +23710,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 地基族变更 → 重帧（:43484-43488 num7=54*num6+Next(3)*18）
           const nfx = (alt + Math.floor(Math.random() * 3)) * 18;
           st.frameX[st.idx(x, top)] = nfx;
-          st.frameX[st.idx(x, top + 1)] = nfx;
+          if (twoCell) st.frameX[st.idx(x, top + 1)] = nfx;
           this.chunks.markDirtyArea(x - 1, top - 1, x + 1, top + 2);
         }
         return;
