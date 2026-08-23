@@ -12493,10 +12493,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     } else if (sheet === 703) {
       const seg = Math.floor(fx / 18);
       dropId = (seg === 6 || seg === 7) ? 208 : seg === 8 ? 331 : seg === 9 ? 223 : 195;
-    } else if (sheet === 3 || sheet === 110) {
-      // 森林/神圣短草（:65041/:65063）：frameX144 蘑菇株帧 → 蘑菇(5)
+    } else if (sheet === 3) {
+      // 森林短草（:65515-65520）：frameX144 蘑菇株帧 → 蘑菇(5);否则种子门 283
       if (fx === 144) dropId = 5;
       else if (this.killTileShouldDropSeeds()) dropId = 283;
+    } else if (sheet === 110) {
+      // 神圣短草（:65528-65535）——★仅蘑菇株帧→5,**无种子支**（曾并入 3 支误掉 283）
+      if (fx === 144) dropId = 5;
     } else if (sheet === 24) {
       if (fx === 144) dropId = 60;              // 腐化短草 → 腐化蘑菇(:65069)
     } else if (sheet === 201) {

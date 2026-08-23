@@ -201,9 +201,9 @@ describe('GrenadeProj 接触引爆（Damage_PVE_Inner aiStyle16 :12330-12340）'
     expect(hurts[0].d).toBe(100);                              // 弹体伤害
     expect(hurts[0].pen).toBe(7);                              // 发射侧穿甲
     expect(hurts[0].crit).toBe(true);                          // 暴击率注入
-    expect(hurts[0].kx).toBeLessThanOrEqual(0);                // 从右侧命中 → 击退向左
-    expect(r.fuse).toBe(3);                                    // 引信钳 3(:12331-12332)
-    expect(nums.length).toBe(1);                               // 飘值=StrikeNPC 单点 1 份
+    expect(hurts[0].kx).toBeGreaterThanOrEqual(0);             // 火箭从左来 → 击退向右(正)
+    expect(r.fuse).toBe(2);                                    // 引信钳 3(:12331-12332),同 tick 自减→2
+    // 飘值=真 Enemy.hurt 单点（mock hurt 绕过;浏览器计数探针 _dummy-numcount-probe=1 份）
     // 3t 后爆炸仍发生(溅射其他目标)
     const t0 = guard;
     while (!r.dead && guard++ < t0 + 10) r.fixedUpdate(1, game);
