@@ -61,6 +61,9 @@ export class PrismProng extends Entity {
   private hitCd = new Map<number, number>();
   dead = false;
   lightRGB: [number, number, number] | null = null;
+  /** ★1458 蓝空过载淡出快照（Main.cs:32832-32838 消费,draw 侧无 game 句柄故
+   *  fixedUpdate 每 tick 采样 owner slowMagicUse） */
+  private slowFade = false;
 
   constructor(idx: number, damage: number, knockback: number) {
     super();
@@ -71,6 +74,7 @@ export class PrismProng extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.slowFade = (game.player as unknown as { slowMagicUse?: boolean }).slowMagicUse === true;
     const p = this.parent;
     if (!p || p.dead) { this.dead = true; return; }
     const charge = p.charge;
@@ -163,18 +167,21 @@ export class PrismProng extends Entity {
     const ctx = r.ctx;
     if (!ctx || this.beamLen < 8) return;
     const [rr, gg, bb] = hueToRgb(this.idx / 6);
-    const a = Math.max(0, Math.min(1, this.opacity * 0.75));
+    // ★1458 蓝空过载淡出指示（Main.cs:32832-32838）：slowMagicUse → 束厚
+    // vector66.X×0.7 + 透明度 num296×0.25——"fades out to indicate its slow usage"
+    const th = this.slowFade ? 0.7 : 1;
+    const a = Math.max(0, Math.min(1, this.opacity * 0.75 * (this.slowFade ? 0.25 : 1)));
     if (a <= 0.02) return;
     const x2 = this.cx + this.vx * this.beamLen, y2 = this.cy + this.vy * this.beamLen;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     // 主束（26×scale×0.75 厚，hue 色）+ 内白半宽（Main.cs:32032-32040 双 pass）
     ctx.strokeStyle = `rgba(${rr},${gg},${bb},${a})`;
-    ctx.lineWidth = 26 * this.prongScale * 0.75;
+    ctx.lineWidth = 26 * this.prongScale * 0.75 * th;
     ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(this.cx, this.cy); ctx.lineTo(x2, y2); ctx.stroke();
     ctx.strokeStyle = `rgba(255,255,255,${a * 0.75})`;
-    ctx.lineWidth = 13 * this.prongScale * 0.75;
+    ctx.lineWidth = 13 * this.prongScale * 0.75 * th;
     ctx.beginPath(); ctx.moveTo(this.cx, this.cy); ctx.lineTo(x2, y2); ctx.stroke();
     ctx.restore();
   }

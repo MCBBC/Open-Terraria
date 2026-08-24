@@ -3259,12 +3259,12 @@ export class Arrow extends Entity {
         //  借 1458 门补齐；!npcProj=仅玩家弹（敌箭不走本敌伤路径,天然满足）
         applyProjStatus(this.projId, e as unknown as Record<string, number>,
           this.projId === 614 ? { ai1TargetId: this.stickerTgt }
-            : { catalystBand: (game.player as unknown as { equipStats?: { catalystBand?: boolean } }).equipStats?.catalystBand === true });
+            : { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
         // ★1458 毒刺 6165/6184/6185（StatusNPC :11182-11191,1458 加 !npcProj 门）：
         // 玩家箭体命中 100% Poisoned(20) 90t=1.5s——本仓 1457 漏接（equipStats 旗
         // 聚合于 Player.ts:1234-1259 但零消费）,借 1458 修复补齐
         if (VANILLA_ARROW_PROJS.has(this.projId)
-          && (game.player as unknown as { equipStats?: { accPoisonBarb?: boolean } }).equipStats?.accPoisonBarb) {
+          && ((game.player as unknown as { equipStats?: { accPoisonBarb?: boolean } } | null)?.equipStats?.accPoisonBarb)) {
           (e as unknown as { poisonT?: number }).poisonT =
             Math.max((e as unknown as { poisonT?: number }).poisonT ?? 0, 1.5);
         }

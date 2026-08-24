@@ -9669,6 +9669,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             (ex, ey, edmg, evx, evy) => {
               // 1088 橡实种弹（5629 橡实弹弓）：Kill 非爆炸——dig 音 + 尘 2×10 +
               // CanAcornPlant → PlaceTile(20) 苗 / 否则掉落橡实 27（:70507-70530）
+              // ★1458 Projectile.Kill :71784 `flag3 && type != 1088`：橡弹排除出
+              // aiStyle16 通用 Kill 爆炸支（PrepareBombToBlow+SelfHurt+Damage）——
+              // 1457 双路爆炸="collapsing the universe"修复。本仓分派本就早退
+              // 专属处理,天然=1458 修后行为（备案防回改）
               if (projId === 1088) { this.acornSeedDeath(ex, ey, evx ?? 0, evy ?? 0); return; }
               this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er16, er16 > 0,
                 hurtBox16, this.player.equipStats.armorPen + (ps?.arpen ?? 0), projId);

@@ -26,7 +26,7 @@ import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
 import { GLScreenFilters, type ScreenFxPass } from './GLScreenFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
-import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora } from '../lighting/SkyColor';
+import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora, setFrameAtmo } from '../lighting/SkyColor';
 import { SMART_CURSOR_DIRECTION_LOCKS, sheetOf } from '../player/SmartCursor';
 import { mobileUiScale } from '../ui/MobileControls';
 import { TEAM_COLORS } from '../stats/Pvp';
@@ -2551,6 +2551,10 @@ export class Renderer {
     // 退避/死亡期 acquireGL 返回 null → 当帧云走 2D cloudTint 兜底,自然恢复)
     this.sky.cloudGlLayer = !this.cpuRender && (this.bgGlEnabled || this.sky.useGLClouds)
       ? this.acquireGL() : null;
+    // ★海拔大气系数帧状态(Main.cs:62618 UpdateAtmosphereTransparencyToSkyColor,
+    // 61421 每帧以视口中心 Y 调用)——colorOfTheSkies/skySeed 尾段乘 atmo:
+    // 天空/远景/云/光种子同源变暗 = 太空场景本体 + 高空环境光下降
+    setFrameAtmo(this.sky.atmoValue(cam.y));
     // ColorOfTheSkies(Main.cs:63361 SetBackColor 曲线+月相地板+血月/日食+
     // 晨昏地平线渗入)——天空侧唯一色源(2026-08-20 原版化落地):
     // 天空贴图×本值 / 远景层×本值(:56194)/云 cloudColor/环境实体 GetColor bg。

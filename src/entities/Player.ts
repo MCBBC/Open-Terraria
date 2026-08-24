@@ -2252,10 +2252,13 @@ export class Player extends Entity {
     if (!this.slowMagicUse) return 1;
     return Player.SLOW_MAGIC_MULTIPLIER;
   }
-  /** UndoSlowMagicUse（:52593-52604）：喝蓝药时清标记（QuickMana :52585-52605 调用）。
-   *  ★原版函数体还会把 itemAnimation/itemAnimationMax/itemTime/itemTimeMax 各 ×2.5
-   *  （字面上是再拉长而非缩回——原版如此,照录）；本仓无 itemAnimationMax/itemTimeMax
-   *  窗字段（swing 模型不同）→ 只清标记,窗差登记 */
+  /** UndoSlowMagicUse（:52591-52604,★1458 修）：喝蓝药时清标记（QuickMana :52585
+   *  调用）。★1458 把窗缩回从 ×GetSlowMagicMultiplier()(2.5,越撤越慢=1457 bug,
+   *  "slow magic resetting when using Quick buff"修复半边)改为 ×GetSlowMagicUseRate()
+   *  (0.4,真正还原)+min 钳 2;零耗蓝物品路径 ItemCheck_ActuallyPayMana 早退
+   *  （:53278 sItem.mana==0 return true）不再副作用清标记=修复另半边。本仓无
+   *  itemAnimationMax/itemTimeMax 窗字段（swing 模型不同）→ 只清标记;零耗蓝物品
+   *  本就不入 checkMana 端口=两半边天然对齐 1458 终态 */
   undoSlowMagicUse(): void {
     this.slowMagicUse = false;
   }

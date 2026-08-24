@@ -113,10 +113,11 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (version < 210) {
     throw new WldParseError(`不支持的世界文件版本 ${version}（需要 1.4+，version >= 210）。请在游戏中重新保存该地图。`);
   }
-  // R4-11（WF57:197/:717/:3027/:3442 四处 `num > 325` 拒载同语义）：未来版本按
-  // 当前头布局静默错解比明确拒绝更危险——326+ 一律拒。
-  if (version > 325) {
-    throw new WldParseError(`不支持的世界文件版本 ${version}（本复刻最高支持 325 / 1.4.5）。`);
+  // R4-11（WF57:197/:717/:3027/:3442 四处 `num > 325` 拒载同语义；★1458 全部抬到
+  // `> 326`——GameVersionID.Terraria1458Release=326,头布局无新字段,326 与 325 同构）：
+  // 未来版本按当前头布局静默错解比明确拒绝更危险——327+ 一律拒。
+  if (version > 326) {
+    throw new WldParseError(`不支持的世界文件版本 ${version}（本复刻最高支持 326 / 1.4.5.8）。`);
   }
   // ★R16-7③（2026-08-24）：FileMetadata 门 = 135（WF57:1913），非 140——
   //  v135-139 旧档（1.3 中段）头魔数段存在,曾跳读 → 后续全乱

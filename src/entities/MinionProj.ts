@@ -102,6 +102,11 @@ const MINION_NO_FLIP = new Set([191, 192, 193, 194, 266, 313, 379, 831, 970,
   112, 959, 1003, 1004, 1095, 1096]);
 const MINION_ROT_ONLY = new Set([387, 388, 533, 917, 625, 626, 627, 628, 653]);
 
+/** 接触击退【玩家锚】方向族（Projectile.cs:13652-13660 switch,StrikeNPC num40 消费
+ *  :13683）：697/699/707/708/759 原版既有 + ★1458 新增 1118 Clay Bud——击退方向 =
+ *  玩家→敌（"always knocks enemies away from the player"）,非随从→敌 */
+const MINION_PLAYER_ANCHOR_KB = new Set([697, 699, 707, 708, 759, 1118]);
+
 /** 远程射击随从表（Projectile.cs AI_062/AI_026/aiStyle66 射击分支提取）：
  *  shot=射出弹幕 speed=弹速 cd=冷却 t range=射击门距（两者仅余通用路径族消费——
  *  AI_062 五型 373/375/407/423/613 已归 ai62Step 原版链：冷却=ai[1] 随机计数器

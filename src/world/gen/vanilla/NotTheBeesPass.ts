@@ -70,6 +70,8 @@ const CONV_GRASS = new Set([2, 23, 199, 109, 477, 492]);
 const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
 /** Main.wallDungeon（Main.cs:10507-10515） */
 const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** 玻璃墙族（★1458 WallID.Sets.Glass,WallID.cs:46——NTB 蜂巢墙转化豁免集） */
+const GLASS_WALLS = new Set([21, 88, 89, 90, 91, 92, 241, 93, 243, 242]);
 /** Main.tileSolidTop 生成期表（SolidOrSlopedTile 用；FinishNoTrapsPass 同源副本） */
 const SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
   285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
@@ -168,6 +170,15 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
           st.liquidType[idx] = LIQUID_TYPE.WATER;    // liquidType(0)
           st.liquid[idx] = 255;
         }
+        // ★1458 cs:25414-25421：本支补地牢漆——tileDungeon/CrackedBricks →
+        // paint 14、wallDungeon → wallPaint 14（"Fixed paint not applying to the
+        // dungeon in certain Not the Bees seed worlds"——地牢落在滩带/地表带时
+        // 1457 只有后段大转化支上漆,本支漏漆）
+        if (st.flags[idx]) {
+          const s0 = sheetOf(st.type[idx]!);
+          if (TILE_DUNGEON.has(s0) || CRACKED_BRICKS.has(s0)) st.paint[idx] = DUNGEON_PAINT;
+        }
+        if (WALL_DUNGEON.has(st.wall[idx]!)) st.wallPaint[idx] = DUNGEON_PAINT;
         continue;
       }
       // 中带草化（cs:25307-25327：tenth/dstarve/drunk 门——纯 NTB 恒假）
@@ -296,8 +307,11 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
           st.paintWall[idx] = DUNGEON_PAINT;
         } else if (
           // (remix || (!tenth && !dstarve && !drunk) || …Next(3) 短路)——纯 NTB 恒真不掷
+          // ★1458 cs:25582：`wall != 21` 扩为 `!WallID.Sets.Glass[wall]`（玻璃墙族
+          //  {21,88-93,241-243} 全豁免蜂巢墙转化——彩色玻璃墙不再被 NTB 覆写）
           (!dstarve || remix)
-          && wall !== 23 && wall !== 24 && wall !== 42 && wall !== 10 && wall !== 21
+          && wall !== 23 && wall !== 24 && wall !== 42 && wall !== 10
+          && !(wall > 0 && GLASS_WALLS.has(wall))
           && wall !== 82 && wall !== 187 && wall !== 216 && wall !== 34 && wall !== 244) {
           if (wall === 2 || wall === 196 || wall === 197 || wall === 198 || wall === 199) {
             // 原版自等赋 no-op 支（cs:25468-25481 字面）
