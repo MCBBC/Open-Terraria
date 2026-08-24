@@ -23,9 +23,10 @@ function recorder() {
   return { ctx, calls };
 }
 
-/** 贴图尺寸表:62/64 表面条 160×16;63/65 带体 160×96 */
+/** 贴图尺寸表:62/64 表面条 160×16;63/65 带体 160×96;1/2/3=128×96、4=128×16(森林/沙滩) */
 const SIZES: Record<number, [number, number]> = {
   62: [160, 16], 63: [160, 96], 64: [160, 16], 65: [160, 96],
+  1: [128, 96], 2: [128, 96], 3: [128, 96], 4: [128, 16],
 };
 
 function stubImgs(bg: BiomeBackground) {
@@ -182,5 +183,41 @@ describe('地下背景平铺几何(Main.cs DrawBackground :52217-53517)', () => 
       expect(dh).toBeLessThanOrEqual(16);
       expect(dy).toBe(100 * 16 - 16 - screenY + 16);
     }
+  });
+
+  it('style0(森林)slot3=BG_3 128 宽:越界源窗 clamp 拉伸补齐,行内目的地无缝', () => {
+    // 2026-08-24 用户实报"带层规则竖黑缝":XNA SpriteBatch 越界源矩形=edge-clamp
+    // (Main.cs:53910 源窗 16k+num4+16 最右 152 > BG_3 宽 128→UV clamp 右缘列拉伸);
+    // Canvas drawImage 越界=等比裁剪→每 128px 循环交界留 8-24px 竖缝。
+    // 回归:行内各段目的地必须连续覆盖 [dx0, dx0+n*128),且存在右缘 1px clamp 段。
+    const bg = new BiomeBackground();
+    stubImgs(bg);
+    stubHellNull(bg);
+    (bg as unknown as { ugStyle: number; ugOld: number; ugAlpha: number }).ugStyle = 0;
+    (bg as unknown as { ugStyle: number; ugOld: number; ugAlpha: number }).ugOld = 0;
+    (bg as unknown as { ugStyle: number; ugOld: number; ugAlpha: number }).ugAlpha = 1;
+    const { ctx, calls } = recorder();
+    const world = deepWorld();
+    const camY = 4600;
+    (bg as unknown as { drawUnderground(c: CanvasRenderingContext2D, w: World, cm: { x: number; y: number }, t: number, vw: number, vh: number, dt: number): void })
+      .drawUnderground(ctx, world, { x: 3200, y: camY }, camY - 400, 1280, 800, 16.7);
+    const rock = calls.filter(c => c.op === 'img' && c.tex === 3);
+    expect(rock.length).toBeGreaterThan(0);
+    // 行内无缝:按 dy 分组,组内按 dx 排序,相邻段首尾相接(间隙=黑缝)
+    const rows = new Map<number, Array<{ dx: number; dw: number }>>();
+    for (const c of rock) {
+      const [, , , , dx, dy, dw] = c.args as number[];
+      if (!rows.has(dy)) rows.set(dy, []);
+      rows.get(dy)!.push({ dx, dw });
+    }
+    expect(rows.size).toBeGreaterThan(0);
+    for (const segs of rows.values()) {
+      segs.sort((a, b) => a.dx - b.dx);
+      for (let i = 1; i < segs.length; i++) {
+        expect(segs[i].dx - (segs[i - 1].dx + segs[i - 1].dw)).toBe(0);
+      }
+    }
+    // clamp 段存在:源 = 右缘 1px 列(sx=width-1=127, sw=1)
+    expect(rock.some(c => { const [sx, , sw] = c.args as number[]; return sx === 127 && sw === 1; })).toBe(true);
   });
 });

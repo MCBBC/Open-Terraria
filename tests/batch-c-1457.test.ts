@@ -345,7 +345,7 @@ describe('1115 GlacierFangShot(AI_208 蓄力冰矛)', () => {
   });
   it('Game.ts 接线:chargeRate = player.getSlowMagicUseRate()（反相三元已删,R17 缺陷②回归锁）', () => {
     const src = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
-    expect(src).toMatch(/shoot === 1115[\s\S]{0,900}?chargeRate: \(\) => this\.player\.getSlowMagicUseRate\(\)/);
+    expect(src).toMatch(/shoot === 1115[\s\S]{0,1400}?chargeRate: \(\) => this\.player\.getSlowMagicUseRate\(\)/);
     expect(src.includes('slowMagicUse ? 1 : 0.4')).toBe(false);  // 反相形态不得复活
   });
 });

@@ -216,6 +216,9 @@ const STAFF_ITEMS = new Set([
   683, 723, 726, 739, 740, 741, 742, 743, 744, 788, 1296, 1308, 1326, 1444, 1445,
   1446, 1801, 1930, 1931, 2188, 2750, 3006, 3051, 3209, 3210, 3377, 3476, 3569,
   3571, 3787, 3852, 3870, 4062, 5065,
+  // ★1457 五杖（Main.cs:6930 staff 旗 diff 2026-08-24——缺=落枪弓持物支,法杖指向
+  //  不随瞄准镜像,用户实报太阳花法杖"指向后面"）
+  6152, 6153, 6154, 6155, 6173,
 ]);
 
 /** Main.DrawPlayerItemPos（Main.cs:3305-3663）1:1：useStyle 5 非法杖（枪/弓）握把。
@@ -12461,6 +12464,8 @@ export class Renderer {
     // 与信息列重复(2026-08-13 曾门禁化,今随信息列 +261 几何修正一并退役)。
     // ±/⛅ 沙盒调整面板保留(非原版,调试便利)。
     // ---- \u65f6\u95f4\u8c03\u6574\u6309\u94ae + \u9762\u677f\uff08\u00b1 \u5207\u6362\uff1b\u547d\u4e2d\u533a\u6574\u4f53\u4e0a\u62a5 timeUiHover \u4f9b Game \u541e\u70b9\u51fb\uff09 ----
+    // (\u66fe\u4f9d\u8d56\u4e0a\u65b9\u5df2\u9000\u5f79\u65f6\u95f4\u6587\u672c\u5757\u8bbe\u7f6e\u7684 textAlign='center'\u2014\u2014\u6309\u94ae/\u9762\u677f\u6587\u5b57\u9700\u5c45\u4e2d)
+    ctx.textAlign = 'center';
     const mx = lmX(this._mouseX), my = lmY(this._mouseY);
     const clicked = this._mouseDown && !this._uiPrevMouseDown; // \u6309\u4e0b\u8fb9\u6cbf\uff08\u4e0e\u7f29\u653e\u6309\u94ae\u7684\u6301\u7eed\u6309\u4f4f\u533a\u5206\uff09
     const hit = (x: number, y: number, w: number, h: number) =>

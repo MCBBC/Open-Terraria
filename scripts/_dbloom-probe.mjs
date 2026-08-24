@@ -63,6 +63,19 @@ const out = await page.evaluate((key) => {
   }
   g.input.mouseDown = false; g.input.mouseHeld = false;
   const p1114 = shots.filter((x) => x.projId === 1114);
+  // ---- 空蓝阶段:mana=0 继续按住 → 原版 ManaV2 照放+攻速×0.4(slowMagic) ----
+  p.mana = 0;
+  const slowShots0 = shots.length;
+  let slowTicks = 0;
+  for (let t = 0; t < 120; t++) {
+    g.input.mouseDown = t === 0;      // 首拍边沿
+    g.input.mouseHeld = true;
+    g.fixedUpdate(1 / 60);
+    slowTicks++;
+    const cur2 = snap();
+    for (const e of cur2) { if (!known.includes(e)) { known = cur2; shots.push({ cls: e.constructor.name, projId: e.projId ?? null }); } }
+  }
+  const slowShots = shots.length - slowShots0;
   g.useCombatWeapon = origUCW; g.useSwing = origUS;
   // 页内直查 use 链各门（combatWeapon 经 __swDiag 钩子）
   const DEFS = (window).__swITEM_DEFS ?? {};
@@ -82,6 +95,7 @@ const out = await page.evaluate((key) => {
     vid: heldDef?.vid ?? null, defVidField: heldDef ? ('vid' in heldDef ? heldDef.vid : 'no-field') : null,
     cw: cw === 'fn-missing' ? cw : (cw ? { kind: cw.kind, shoot: cw.shoot, mana: cw.mana, autoReuse: cw.autoReuse } : null),
     manual,
+    slowMagic: { slowShots, in120t: slowTicks, manaAfter: p.mana, slowUse: p.slowMagicUse ?? null },
     ladder: {
       potion: !!heldDef?.potion,
       pearl: (heldDef?.key || '').includes('5340'),

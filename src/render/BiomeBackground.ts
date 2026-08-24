@@ -900,8 +900,17 @@ export class BiomeBackground {
         if (w <= 0) return;
         const sh = Math.min(srcH, im.height - srcY);
         if (sh <= 0) return;
+        // ★XNA→Canvas 语义差（2026-08-24 用户实报"带层规则竖黑缝"）:原版 SpriteBatch
+        // 对越界源矩形做 edge-clamp 采样（Main.cs:53910 岩石带源窗 16k+num4+16 最右
+        // 到 num4+144=152,BG_3/BG_4 仅 128 宽→右越界 8-24px 被 UV clamp 拉伸右缘列,
+        // 无缝）;Canvas drawImage 对越界源矩形【等比裁剪】→ 目的地缩水 → 每个
+        // P=128 平铺循环交界留 8-24px 竖黑缝（仅 style0 森林/18-21 沙滩命中,
+        // 其余 36 张带层贴图全 160 宽不触发）。补一段右缘 1px 列拉伸=复刻 clamp。
+        const clampW = P - w;
         for (let i = 0; i < loops; i++) {
-          b.img(im, sx, srcY, w, sh, startX + P * i + diff, destY, w, sh, { alpha: a });
+          const dx = startX + P * i + diff;
+          b.img(im, sx, srcY, w, sh, dx, destY, w, sh, { alpha: a });
+          if (clampW > 0) b.img(im, im.width - 1, srcY, 1, sh, dx + w, destY, clampW, sh, { alpha: a });
         }
       };
       const im0 = slots[0] > 0 ? this.img(slots[0]) : null;

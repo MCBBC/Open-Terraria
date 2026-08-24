@@ -86,6 +86,25 @@ check('罗盘行存在(icon3;东西向英尺)', after.rows.some((r) => r.icon ==
 // 截图右上区域供目检(图标列+对角文本)
 await page.screenshot({ path: '/tmp/infoaccs-shot.png', clip: { x: 900, y: 0, width: 380, height: 320 } });
 
+// 几何:+261 偏移生效 → 首行图标在小地图框之下(Main.cs:46675 mapStyle==1 门)
+const geo = await page.evaluate(() => {
+  const g = window.__swGame;
+  const rects = g.renderer.infoAccs.state.iconRects;
+  const mm = g.renderer.minimapRect;
+  return { firstY: rects[0]?.y ?? -1, mmBottom: mm ? mm.y + mm.h : -1 };
+});
+check('首行图标在小地图框之下(+261)', geo.firstY > geo.mmBottom, JSON.stringify(geo));
+
+// DPS 端到端:addDPS 累计 → ctx.dps > 0 → 行文本出数值(停手 3s 后回「无」)
+const dps = await page.evaluate(async () => {
+  const g = window.__swGame;
+  g.player.addDPS(50); g.player.addDPS(50);
+  await new Promise((r) => setTimeout(r, 300));
+  const row = g.renderer.infoAccs.state.rows.find((r) => r.icon === 12);
+  return { ctxDps: g.renderer.infoAccCtx.dps, text: row?.text ?? '' };
+});
+check('DPS 行累计显示(100 伤 → ≥50/s)', dps.ctxDps >= 50 && /(\d+ ?DPS|每秒\s*\d+\s*伤害)/.test(dps.text), JSON.stringify(dps));
+
 // hideInfo 隐藏语义:全置真 → 行清空(背包关时隐藏行不画图标不画文本)
 const hidden = await page.evaluate(async () => {
   const g = window.__swGame;

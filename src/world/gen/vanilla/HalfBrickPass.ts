@@ -428,6 +428,94 @@ function checkBannerKT(st: TileStore, rng: RNG, x: number, j: number): void {
   // cs:46175+ 掉落支（num4==312..315 特殊旗）——生成期 noItem 且不掷 genRand,略
 }
 
+/** Check3x4（cs:50518）：书架族 101/102/463/617——3×4 帧完整性 + 底排 SolidTileAllowBottomSlope
+ *  支撑;破 → 整组杀。★KKKKKKK（2026-08-25）CONST #32 残差定罪：LavaLayerCaverer 带
+ *  杀书架底格（3646,759）→ SquareTileFrame→TileFrameImportant→本检查 → 整组级联
+ *  （x86 栈迹铁证）;JS 曾缺此臂 → 残留孤儿上半段（757-758 两行）。尘掷零消耗
+ *  （101 族 amount=10×per=0），流位中性。掉落 Item.NewItem 无 genRand 掷,略。 */
+function check3x4KT(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (destroyObject) return;
+  const i0 = st.idx(x, y);
+  const type = SHEET_OF[st.type[i0]] ?? -1;
+  let num3 = 0, num5 = Math.trunc(st.frameX[i0]! / 18);
+  let num4 = 0, num6 = Math.trunc(st.frameY[i0]! / 18);
+  while (num5 >= 3) { num3++; num5 -= 3; }
+  while (num6 >= 4) { num4++; num6 -= 4; }
+  const ox = x - num5, oy = y - num6;
+  let flag = false;
+  for (let k = ox; k < ox + 3; k++) {
+    for (let l = oy; l < oy + 4; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }   // null→new Tile()→!active
+      const qi = st.idx(k, l);
+      if (!st.flags[qi] || (SHEET_OF[st.type[qi]] ?? -1) !== type
+        || st.frameX[qi] !== num3 * 54 + (k - ox) * 18
+        || st.frameY[qi] !== num4 * 72 + (l - oy) * 18) flag = true;
+    }
+    if (!st.inBounds(k, oy + 4) || !solidTileAllowBottomSlope(st, k, oy + 4)) flag = true;
+  }
+  if (!flag) return;
+  destroyObject = true;
+  for (let m = ox; m < ox + 3; m++) {
+    for (let n = oy; n < oy + 4; n++) {
+      if (!st.inBounds(m, n)) continue;
+      const qi = st.idx(m, n);
+      if ((SHEET_OF[st.type[qi]] ?? -1) === type && st.flags[qi]) killTile(st, rng, m, n);
+    }
+  }
+  destroyObject = false;
+  // cs:50598 尾扩盒 TileFrame（[ox-1..ox+3]×[oy-1..oy+3]）
+  for (let n7 = ox - 1; n7 < ox + 4; n7++) {
+    for (let n8 = oy - 1; n8 < oy + 4; n8++) tileFrame(st, rng, n7, n8);
+  }
+}
+
+/** Check3x3Wall（cs:44690）/Check4x3Wall（cs:45284）/Check6x4Wall（cs:45377）：
+ *  墙饰画族 240/241/242——帧完整性 + 逐格 wall>0 门;破 → 整组杀。同上 KKKKKKK 定罪
+ *  （CONST #32 残画柱 (3277,752-755)=6×4 画被 caverer 半杀后的孤儿列）。尘掷零
+ *  消耗,流位中性。 */
+function checkWallDecorKT(st: TileStore, rng: RNG, x: number, y: number, kind: 'w3x3' | 'w4x3' | 'w6x4'): void {
+  if (destroyObject) return;
+  const i0 = st.idx(x, y);
+  const type = SHEET_OF[st.type[i0]] ?? -1;
+  let flag = false;
+  let ox = x, oy = y, fx0 = 0, fy0 = 0, cols = 3, rows = 3;
+  if (kind === 'w3x3') {
+    let num = 0, num3 = Math.trunc(st.frameX[i0]! / 18);
+    let num2 = 0, num5 = Math.trunc(st.frameY[i0]! / 18);
+    while (num3 >= 3) { num3 -= 3; num++; }
+    while (num5 >= 3) { num5 -= 3; num2++; }
+    ox = x - num3; oy = y - num5; fx0 = num * 54; fy0 = num2 * 54; cols = 3; rows = 3;
+  } else if (kind === 'w4x3') {
+    let num = 0, num2 = Math.trunc(st.frameY[i0]! / 18);
+    while (num2 >= 3) { num2 -= 3; num++; }
+    oy = y - num2; ox = x - Math.trunc(st.frameX[i0]! / 18); fy0 = num * 54; fx0 = 0; cols = 4; rows = 3;
+  } else {
+    const num2raw = Math.trunc(st.frameY[i0]! / 18), num3raw = Math.trunc(st.frameX[i0]! / 18);
+    const num = 27 * Math.trunc(num3raw / 6) + (num2raw >> 2);
+    oy = y - (num2raw % 4); ox = x - (num3raw % 6);
+    fx0 = Math.trunc(num / 27) * 108; fy0 = (num % 27) * 72; cols = 6; rows = 4;
+  }
+  for (let i = ox; i < ox + cols; i++) {
+    for (let j = oy; j < oy + rows; j++) {
+      if (!st.inBounds(i, j)) continue;                       // null tile → new Tile() 短路前跳过
+      const qi = st.idx(i, j);
+      if (!st.flags[qi] || (SHEET_OF[st.type[qi]] ?? -1) !== type || st.wall[qi]! <= 0
+        || st.frameY[qi] !== fy0 + (j - oy) * 18 || st.frameX[qi] !== fx0 + (i - ox) * 18) { flag = true; break; }
+    }
+    if (flag) break;
+  }
+  if (!flag) return;
+  destroyObject = true;
+  for (let k = ox; k < ox + cols; k++) {
+    for (let l = oy; l < oy + rows; l++) {
+      if (!st.inBounds(k, l)) continue;
+      const qi = st.idx(k, l);
+      if ((SHEET_OF[st.type[qi]] ?? -1) === type && st.flags[qi]) killTile(st, rng, k, l);
+    }
+  }
+  destroyObject = false;
+}
+
 /** TileFrame 生成期路径子集（cs:82067）：边界闸 + 非活性清 half/slope +
  *  巨石族 Check2x2。PaintClear 生成期无漆可清;液体/AddWater 段被
  *  !generatingWorld 门挡;基础块 TileFrameCosmetic 同门不跑。 */
@@ -450,6 +538,14 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
       check3x2PileKT(st, rng, x, y, sheet);                        // cs:86713 组→Check3x2
     } else if (CHECK3X2_SHEETS.has(sheet)) {
       check3x2KT(st, rng, x, y, sheet);                            // cs:87270 组→Check3x2（★祭坛族）
+    } else if (sheet === 101 || sheet === 102 || sheet === 463 || sheet === 617) {
+      check3x4KT(st, rng, x, y);                                   // cs:87030 组→Check3x4（★KKKKKKK 书架族）
+    } else if (sheet === 240) {
+      checkWallDecorKT(st, rng, x, y, 'w3x3');                     // cs:86765→Check3x3Wall
+    } else if (sheet === 241) {
+      checkWallDecorKT(st, rng, x, y, 'w4x3');                     // cs:86776→Check4x3Wall
+    } else if (sheet === 242) {
+      checkWallDecorKT(st, rng, x, y, 'w6x4');                     // cs:86778→Check6x4Wall
     } else if (ON_TABLE_1X1_S.has(sheet)) {
       checkOnTable1x1KT(st, rng, x, y);                            // cs:86348 组→CheckOnTable1x1
     } else if (sheet === 91) {

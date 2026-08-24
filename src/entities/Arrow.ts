@@ -1314,7 +1314,8 @@ export class Arrow extends Entity {
     }
     // ---- aiStyle 24 书族十份 oldPos 渐隐拖尾（Main.cs:35251 94/:35299 1114——
     //      ai[1]>6 起沿 oldPos[0..9] 绘制,缩放/RGBA 各 ×(9−i)/9,GetAlpha=(200,200,200,25)
-    //      本仓 200-RGB-as-alpha 口径 0.78×k;本体之下=先画）----
+    //      ★XNA AlphaBlend=预乘语义（飞灵终审同款）：RGB 全额加算、A=25 只衰背景
+    //      10%=加算发光观感——canvas 'lighter' 复刻,source-over 直译=半透灰（用户实报）----
     if ((this.projId === 94 || this.projId === 95 || this.projId === 1114) && this.age > 6
       && this.starTrail.length >= 4) {
       const imgT = projSprite(this.projId);
@@ -1323,6 +1324,8 @@ export class Arrow extends Entity {
         const pts = this.starTrail;
         const m = pts.length / 2;
         const sc = this.projId === 1114 ? 1.2 : 1;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
         for (let i = 0; i < Math.min(10, m - 1); i++) {
           const k = 1 - i / 10;                      // newest 1.0 → oldest 0.1
           const px = pts[(m - 1 - i) * 2], py = pts[(m - 1 - i) * 2 + 1];
@@ -1334,7 +1337,7 @@ export class Arrow extends Entity {
             imgT.width * sc * k, imgT.height * sc * k);
           ctx.restore();
         }
-        ctx.globalAlpha = 1;
+        ctx.restore();
       }
     }
     ctx.save();
@@ -1438,7 +1441,15 @@ export class Arrow extends Entity {
       const s = this.drawScale * (this.phantomOrb ? 1 - this.orbAlpha / 255 : 1);
       const iw = drawImg.width || (drawImg as HTMLImageElement).width;
       const ih = drawImg.height || (drawImg as HTMLImageElement).height;
-      ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
+      // aiStyle 24 书族本体加算（GetAlpha=(200,200,200,25) 预乘语义——RGB 全额加算,
+      // 同拖尾 2026-08-24；source-over 直译=半透灰,用户实报）
+      if (this.projId === 94 || this.projId === 95 || this.projId === 1114) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
+        ctx.globalCompositeOperation = 'source-over';
+      } else {
+        ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
+      }
       if (isXeno) {
         // 加算发光叠画（同矩形 lighter α0.45）——原版 GlowMask 214 族观感
         ctx.globalCompositeOperation = 'lighter';

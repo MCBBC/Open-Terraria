@@ -1780,7 +1780,8 @@ export class Game implements GameHooks {
       if (d.netPuppet || d.netLocalOnly) continue;
       if (!d.netId) {
         d.netId = makeNetId(net.mySlot, d.id);
-        net.sendItemOp(0, d.netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack, d.x, d.y, d.vx, d.vy);
+        net.sendItemOp(0, d.netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack, d.x, d.y, d.vx, d.vy,
+          d.shimmered, d.shimmerTime);
       }
       cur.set(d.netId, d);
     }
@@ -1799,7 +1800,8 @@ export class Game implements GameHooks {
         const netId = ids[this.netDropReassertIdx % ids.length];
         this.netDropReassertIdx = (this.netDropReassertIdx + 1) % ids.length;
         const d = cur.get(netId)!;
-        net.sendItemOp(0, netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack, d.x, d.y, d.vx, d.vy);
+        net.sendItemOp(0, netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack, d.x, d.y, d.vx, d.vy,
+          d.shimmered, d.shimmerTime);
       }
     }
     for (const netId of this.netDropSeen.keys()) {
@@ -1996,6 +1998,9 @@ export class Game implements GameHooks {
       }
       pup.d.x = op.x; pup.d.y = op.y;
       pup.d.vx = op.vx; pup.d.vy = op.vy;
+      // 145 尾段：微光态镜像（缺省=非微光——发送端无尾段即清，upsert 语义）
+      pup.d.shimmered = op.shimmered ?? false;
+      pup.d.shimmerTime = op.shimmerTime ?? 0;
       pup.seen = this.tickCount;
     } else {
       const pup = this.netDropPuppets.get(op.netId);
@@ -10120,10 +10125,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           : GUN_HANDGUN_VIDS.has(bowVid) ? 'gunHandgun' : 'gunShot');
         this.cb.onInventoryChanged();
       }
-    } else if (heldDef && ((cw as { autoReuse?: boolean }).autoReuse
+    } else if (heldDef && cw && ((cw as { autoReuse?: boolean }).autoReuse
       ? (inp.mouseDown || inp.mouseHeld)   // ★autoReuse=电平语义（mouseHeld）——mouseDown
       : inp.mouseDown)                     //   是边沿消费量,发射即被清=按住只出一发
-      && this.player.useTime === 0 && cw && cw.kind !== 'melee'
+      && this.player.useTime === 0 && cw.kind !== 'melee'
       && ((cw as { autoReuse?: boolean }).autoReuse || (inp.mouseDown && !this._prevMouseDown))) { // ⑩ autoReuse 门
       // vi_* 数据驱动武器（1456 aiStyle 家族）：回旋镖/长矛/悠悠球/连枷/手雷/魔法/直射兜底。
       // 必须排在 thrownCombat 之前——手雷(166 等)满足投掷判定但语义是 ai16 弹跳引信
@@ -11271,10 +11276,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 && gfOwner.inv.heldItem()?.id === gfItemId && !gfOwner.dead,
               aim: () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
               payMana: () => {
-                // CheckMana(pay:true)（:37613）——ManaV2 蓝不足照充（statMana=0）
-                const cost = cwCost;
-                if (this.player.mana >= cost) this.player.mana -= cost;
-                else { this.player.mana = 0; this.player.slowMagicUse = true; }
+                // CheckMana(pay:true)（:37613）走 Player.checkMana 单点端口
+                // （入口复位 slowMagicUse + 魔力花 + ManaV2 蓝不足照充）
+                this.player.checkMana(cwCost);
               },
               chargeRate: () => this.player.getSlowMagicUseRate(),   // GetSlowMagicUseRate :47434-47442（常态 1.0/空蓝 0.4）
             });
@@ -11544,15 +11548,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               && !blOwner.dead,
             () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
             () => {
+              // CheckMana :53215 全语义走 Player.checkMana 单点端口（同棱镜 payMana——
+              // 入口复位 slowMagicUse + 魔力花 + ManaV2 蓝不足放行,channel 期蓝尽不断）
               const cost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1))
                 * (1 - this.player.equipStats.manaCostOff) * this.player.equipStats.manaCostMul);
-              // 1457 ManaV2：CheckMana :53241-53256 蓝不足也放行（statMana=0+
-              // slowMagicUse=true）——channel 期蓝尽不再断（原版 439 每拍
-              // CheckMana(pay:true) :67235 同语义）
-              if (this.player.mana >= cost) { this.player.mana -= cost; return true; }
-              this.player.mana = 0;
-              this.player.slowMagicUse = true;
-              return true;
+              return this.player.checkMana(cost);
             });
           bl.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           bl.critChance = critTotal;
@@ -11576,14 +11576,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               && !prismOwner.dead,
             () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
             () => {
+              // CheckMana :53215 全语义走 Player.checkMana 单点端口（入口复位
+              // slowMagicUse :53217 + 蓝够扣魔 + 魔力花喝蓝复检 :53226-53239 +
+              // ManaV2 蓝不足也放行 statMana=0+slowMagicUse :53241-53256——蓝尽棱镜不断;
+              // 曾内联重写丢复位=空蓝一次束永久淡化/免疫窗永久 12t）
               const cost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1))
                 * (1 - this.player.equipStats.manaCostOff) * this.player.equipStats.manaCostMul);
-              // 1457 ManaV2：最后棱镜每拍 CheckMana(pay:true)（:67235）蓝不足也放行
-              // （statMana=0 + slowMagicUse=true :53241-53256）——蓝尽棱镜不断
-              if (this.player.mana >= cost) { this.player.mana -= cost; return true; }
-              this.player.mana = 0;
-              this.player.slowMagicUse = true;
-              return true;
+              return this.player.checkMana(cost);
             },
             // 伤害每拍刷新（Projectile.cs:63630）：damage=(int)(手持物 damage×
             // player.magicDamage)——手持物面板 = 基础×词缀 dmg（Item.Prefix :558 round），

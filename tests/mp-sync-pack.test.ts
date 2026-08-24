@@ -444,3 +444,92 @@ describe('module2 地图 ping（NetPingModule.cs / PingMapLayer.cs）', () => {
     expect(got).toEqual([[10, 20]]);
   });
 });
+
+// ============================================================================
+// 8. msg21/145 微光尾段（SyncItemsWithShimmer 升格语义）
+//    NetMessage.cs:88-92 `shimmerTime>0||shimmered` → msg21 升格 145；
+//    :646-651 尾段 = Write(shimmered)+Write(shimmerTime)。本协议在 SyncItem op0
+//    尾部条件携带（remaining 门，R16-13 prefix 尾读同构）；msg146 ShimmerActions
+//    不需要——微光转化产物经 SyncItem spawn 自然广播。
+// ============================================================================
+describe('msg21/145 微光尾段（op0 条件携带 + Room 中继透传）', () => {
+  const KEY = 'vi_50_MagicMirror';
+
+  /** 手搓 op0 帧（len/msgId 头内含）：tail=false 模拟旧端 */
+  function writeItemOp(netId: number, withTail: boolean, shimmerTime = 0.75): Uint8Array {
+    const w = new NetWriter(Msg.SyncItem);
+    w.u32(netId); w.u8(0);
+    w.str(KEY); w.u16(3);
+    w.f32(10.5); w.f32(20.25); w.f32(0.5); w.f32(-0.25);
+    if (withTail) { w.u8(1); w.f32(shimmerTime); }
+    return w.finish();
+  }
+
+  it('sendItemOp：微光态帧尾含 u8(1)+f32(shimmerTime)；非微光无尾段（旧端字节兼容）', () => {
+    const net = new ClientNet({ player: { appearance: null, hostile: false, team: 0, inv: { slots: [] } } } as never,
+      { onWorldReady: () => {} });
+    net.sendItemOp(0, 7, KEY, 3, 10.5, 20.25, 0.5, -0.25, true, 0.75);
+    const frames = (net as unknown as { pendingFrames: Uint8Array[] }).pendingFrames;
+    expect(frames).toHaveLength(1);
+    const r = new NetReader(frames[0].subarray(3));
+    expect(r.u32()).toBe(7);
+    expect(r.u8()).toBe(0);
+    expect(r.str()).toBe(KEY);
+    expect(r.u16()).toBe(3);
+    expect(r.f32()).toBeCloseTo(10.5, 5);   // x
+    r.f32(); r.f32(); r.f32();              // y / vx / vy
+    expect(r.remaining).toBe(5);            // u8+f32 尾段
+    expect(r.u8()).toBe(1);
+    expect(r.f32()).toBeCloseTo(0.75, 6);
+    // 非微光：vy 后即帧底
+    const net2 = new ClientNet({ player: { appearance: null, hostile: false, team: 0, inv: { slots: [] } } } as never,
+      { onWorldReady: () => {} });
+    net2.sendItemOp(0, 8, KEY, 1, 0, 0, 0, 0);
+    const r2 = new NetReader((net2 as unknown as { pendingFrames: Uint8Array[] }).pendingFrames[0]!.subarray(3));
+    r2.u32(); r2.u8(); r2.str(); r2.u16(); r2.f32(); r2.f32(); r2.f32(); r2.f32();
+    expect(r2.remaining).toBe(0);
+  });
+
+  it('接收端分发：带尾段帧 → onItemOp 携 shimmered/shimmerTime；旧端无尾段帧 → 缺省 undefined', () => {
+    const ops: Array<Record<string, unknown>> = [];
+    const net = new ClientNet({ player: { appearance: null, hostile: false, team: 0, inv: { slots: [] } } } as never,
+      { onWorldReady: () => {}, onItemOp: (o) => ops.push(o as unknown as Record<string, unknown>) });
+    feedNet(net, writeItemOp(9, true));
+    feedNet(net, writeItemOp(10, false));
+    expect(ops).toHaveLength(2);
+    expect(ops[0]!.shimmered).toBe(true);
+    expect(ops[0]!.shimmerTime).toBeCloseTo(0.75, 6);
+    expect(ops[1]!.shimmered).toBeUndefined();
+    expect(ops[1]!.shimmerTime).toBeUndefined();
+  });
+
+  it('Room 中继透传尾段（解析重建不丢 145 段）+ S6 非法浮点拒帧', async () => {
+    const { Room } = await import('../../server/src/room');
+    const world = new World(64, 32, 10, 'shim-relay');
+    const room = new Room(world);
+    const a = room.newClient(fakeWs() as never); a.slot = 0; a.state = 10;
+    const b = room.newClient(fakeWs() as never); b.slot = 1; b.state = 10;
+    room.clients.add(a); room.clients.add(b);
+
+    const relay = (frame: Uint8Array): void => {
+      (room as unknown as { handle(c: unknown, id: number, r: NetReader): void })
+        .handle(a, Msg.SyncItem, new NetReader(frame.subarray(3)));
+      (room as unknown as { flushOutbox(): void }).flushOutbox();
+    };
+    // 属主校验：slot0 的 netId 高 8 位须=0
+    relay(writeItemOp((0 << 24) | 42, true));
+    const got = parseFrames((b.ws as unknown as { sent: Uint8Array[] }).sent)
+      .filter((f) => f.msgId === Msg.SyncItem);
+    expect(got).toHaveLength(1);
+    const p = got[0]!.payload;
+    p.u32(); p.u8(); p.str(); p.u16(); p.f32(); p.f32(); p.f32(); p.f32();
+    expect(p.remaining).toBe(5);            // 尾段原样透传
+    expect(p.u8()).toBe(1);
+    expect(p.f32()).toBeCloseTo(0.75, 6);
+
+    // S6 同款：shimmerTime 非有限值 → 整帧拒（b 不再收到第二条）
+    relay(writeItemOp((0 << 24) | 43, true, NaN));
+    expect(parseFrames((b.ws as unknown as { sent: Uint8Array[] }).sent)
+      .filter((f) => f.msgId === Msg.SyncItem)).toHaveLength(1);
+  });
+});

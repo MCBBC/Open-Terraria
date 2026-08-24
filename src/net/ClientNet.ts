@@ -109,6 +109,9 @@ export interface ItemOpMsg {
   op: 0 | 1 | 2; netId: number;
   key: string; stack: number;
   x: number; y: number; vx: number; vy: number;
+  /** 原版 msg21→145 升格段（SyncItemsWithShimmer，NetMessage.cs:88-92/:646-651）：
+   *  微光态物品 spawn 附 shimmered+shimmerTime。尾读可选（旧发送端无此段） */
+  shimmered?: boolean; shimmerTime?: number;
 }
 
 export interface ClientNetHooks {
@@ -654,12 +657,24 @@ export class ClientNet {
         return;
       }
       case Msg.SyncItem: {
+        // 原版 msg21/145 双态（NetMessage.cs:88-92：微光物品升格 145 附尾段）——
+        // 本协议在 op0 尾段条件携带（下方 r.remaining>=5 读）。msg146 ShimmerActions
+        // 不需要：微光转化产物（decraft/变体/NPC 化）在本仓是拥有端实体化后经
+        // SyncItem spawn 自然广播，无独立动作面。
         const netId = r.u32();
         const op = r.u8() as 0 | 1 | 2;
         let key = '', stack = 0, x = 0, y = 0, vx = 0, vy = 0;
         if (op === 0) {
           key = r.str(); stack = r.u16();
           x = r.f32(); y = r.f32(); vx = r.f32(); vy = r.f32();
+          // 145 尾段（u8 shimmered + f32 shimmerTime）：条件尾读——旧端/非微光
+          // 发送无此段（同 StrikeNPC fromSlot 先例）
+          if (r.remaining >= 5) {
+            const shimmered = r.u8() !== 0;
+            const shimmerTime = r.f32();
+            this.hooks.onItemOp?.({ op, netId, key, stack, x, y, vx, vy, shimmered, shimmerTime });
+            return;
+          }
         }
         this.hooks.onItemOp?.({ op, netId, key, stack, x, y, vx, vy });
         return;
@@ -979,15 +994,18 @@ export class ClientNet {
     this.send(w.finish());
   }
 
-  /** 掉落物操作（msg21）：op 0=spawn / 1=take / 2=despawn。
-   *  P1.3 上行合帧：入 pending 攒批（netDropSweep 每 4 tick 可能逐条几十发），
-   *  tick() 冲洗时拼为单条 WS 消息；满 64 帧立即冲防延迟 */
-  sendItemOp(op: 0 | 1 | 2, netId: number, key = '', stack = 0, x = 0, y = 0, vx = 0, vy = 0) {
+  /** 掉落物操作（msg21；微光态升格原版 msg145 SyncItemsWithShimmer——NetMessage.cs:88-92
+   *  `shimmerTime>0||shimmered` → 附 Write(shimmered)+Write(shimmerTime)）：
+   *  op 0=spawn / 1=take / 2=despawn。P1.3 上行合帧：入 pending 攒批（netDropSweep
+   *  每 4 tick 可能逐条几十发），tick() 冲洗时拼为单条 WS 消息；满 64 帧立即冲防延迟 */
+  sendItemOp(op: 0 | 1 | 2, netId: number, key = '', stack = 0, x = 0, y = 0, vx = 0, vy = 0,
+    shimmered = false, shimmerTime = 0) {
     const w = new NetWriter(Msg.SyncItem);
     w.u32(netId); w.u8(op);
     if (op === 0) {
       w.str(key); w.u16(stack);
       w.f32(x); w.f32(y); w.f32(vx); w.f32(vy);
+      if (shimmered || shimmerTime > 0) { w.u8(1); w.f32(shimmerTime); }
     }
     this.pendingFrames.push(w.finish());
     if (this.pendingFrames.length >= 64) this.flushPending();

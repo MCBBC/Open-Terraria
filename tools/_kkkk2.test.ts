@@ -13,10 +13,11 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 (RUN ? it : it.skip)('grid diff', () => {
   const le16 = (p: string) => new Uint16Array(readFileSync(p).buffer, readFileSync(p).byteOffset, readFileSync(p).length >> 1);
   const b8 = (p: string) => readFileSync(p);
+  const DUMPJ = process.env.SW_K2_J ?? '/tmp/kkk-out/js32b';
   const xt = le16('/tmp/jjj-out/g1457-const/032_Dungeon.typ');
   const xa = b8('/tmp/jjj-out/g1457-const/032_Dungeon.act');
-  const jt = le16('/tmp/kkk-out/js32.typ');
-  const ja = b8('/tmp/kkk-out/js32.act');
+  const jt = le16(DUMPJ + '.typ');
+  const ja = b8(DUMPJ + '.act');
   let n = 0;
   for (let i = 0; i < W * H; i++) {
     const va = xa[i]!, jaa = ja[i]! & 1;

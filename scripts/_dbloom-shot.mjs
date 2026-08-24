@@ -36,6 +36,6 @@ const cam = await page.evaluate(() => {
   const [sx, sy] = g.camera.worldToScreen(p.cx, p.cy);
   return { sx, sy, count: g.entities.projectiles.length };
 });
-await page.screenshot({ path: '/tmp/dbloom-shot.png', clip: { x: Math.min(900, cam.sx + 60), y: Math.max(0, cam.sy - 140), width: 380, height: 280 } });
+await page.screenshot({ path: '/tmp/dbloom-shot.png', clip: { x: Math.min(1000, cam.sx - 200), y: Math.max(0, cam.sy - 200), width: 420, height: 300 } });
 console.log('saved', JSON.stringify(cam));
 process.exit(0);

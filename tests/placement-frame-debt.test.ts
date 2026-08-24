@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
+import { RNG } from '../src/core/rng';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { furnitureStyleBase, framedCellFrame } from '../src/world/FurnitureStyle';
 import { styleDropVid, styleDropVidOfFrames, styleFromFrame } from '../src/data/vanillaStyleDrops';
@@ -137,7 +138,9 @@ describe('CaveHousePass.placeFurniture Place2x2（cs:51433-51443 frameX=k*18 / f
     for (let dx = -1; dx <= 0; dx++) for (let dy = -1; dy <= 0; dy++) w.store.setTileSilent(x + dx, y + dy, 0, 0, 0);
     w.store.setTileSilent(x - 1, y + 1, idOfSheet(1), 0, 0);
     w.store.setTileSilent(x, y + 1, idOfSheet(1), 0, 0);
-    return placeFurniture(w.store, key, x, y, style);
+    // ★签名勘误：placeFurniture 第 2 位是 rng（尘掷流位）——曾按旧签名漏传，
+    //   运行时 key=数字 → TILE_BY_KEY[num]=undefined 恒 false（vitest 不做类型检查）
+    return placeFurniture(w.store, new RNG(1), key, x, y, style);
   }
   const framesOf = (w: World, x: number, y: number) => {
     const out: Array<[number, number]> = [];
