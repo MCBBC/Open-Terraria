@@ -78,7 +78,6 @@ describe('中核死亡掉物品（Player.cs:38254 DropItems(gemsOnly=false)）',
     // 5 件掉（含 Loadout 备份仓）——slots[10] 的 3509 镐走 TurnToAir 不掉
     // （:53414-53418 起始三件门【只在 inventory 主循环】；armor/dye/misc/loadouts
     //  无条件掉，故 armor[0] 的 3509 照掉）
-    console.log('DEBUG-dropped', JSON.stringify(dropped), 'V3509=', VANILLA_ITEM_KEY_BY_ID[3509]);
     expect(dropped.length).toBe(5);
     expect(dropped.some(([k, n]) => k === VANILLA_ITEM_KEY_BY_ID[8] && n === 30)).toBe(true);
     // ★键别名裁决：3509 双注册（桥接批 snake 'vi_3509_copper_pickaxe' + vanilla.json

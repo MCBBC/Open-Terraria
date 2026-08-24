@@ -395,7 +395,10 @@ describe('AI_026 charger + 620 陆地段', () => {
       e.y = 24 * 16 - e.h;
       e.vx = 4; e.vy = 0; e.facing = 1;
       drive(e, 'chargerAI', g, mkPlayer(e.x + 60, e.y));
-      expect(e.vy).toBeCloseTo(-4 + 0.1, 5);   // 扑跳 −4 + 本 tick 重力 0.1（低空档）
+      // 扑跳 −4 + 本 tick 重力：ENEMY_GRAVITY 0.3（NPC.cs:91997 gravity=0.3f）×
+      // 高空衰减下限 0.25（:92049-92052 num2<0.25 钳 0.25；测试世界 groundLevel=16
+      // → (23−60)/(16/6)<0 钳 0.25）= 0.075。旧值 0.1 = 玩家 GRAVITY 0.4 时代遗留
+      expect(e.vy).toBeCloseTo(-4 + 0.075, 5);
     }
     // 背向玩家侧不跳
     const wolf = mkEnemy(155, 40, 23);

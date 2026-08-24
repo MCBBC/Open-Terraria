@@ -190,42 +190,49 @@ export class SpriteAtlas {
   /** 人工标注（annotator.html 导出）：sheet → spriteName → 方位标签 */
   annotations: Record<string, Record<string, string>> = {};
 
+  /** 装载单张 atlas 表进 images（hardAlpha 二值化 + 异步 ImageBitmap 升格，
+   *  竞态守卫同旧内联版）。load() 启动预载与 preloadMaplesWorld() 共用 */
+  private loadAtlasFile(f: string): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        // 根源处理：整图硬 alpha —— 抗锯齿半透明像素（提取 PNG 的灰/黑镶边来源）
+        // 二值化为 0/255，所有消费方（tile/墙/图标/角色）统一获得干净像素
+        const hc = hardAlpha(img);
+        this.images.set(f, hc);
+        // ★异步升格 ImageBitmap(2026-08-19 双开 IOSurface 审计:hardAlpha 家族
+        // 18 张/窗持久 canvas 后备;bitmap = CPU 常驻+绘制同走硬件+GPU 拷贝
+        // 浏览器托管可驱逐 = 零持久面,与 vimages 350 张同形态)。烘焙源只在
+        // chunk 重烘时被 drawImage,转换无感;竞态守卫:仍是同一张才替换
+        if (typeof createImageBitmap === 'function') {
+          createImageBitmap(hc).then((b) => {
+            if (this.images.get(f) === hc) this.images.set(f, b);
+          }).catch(() => { /* 保持 canvas,形态等价 */ });
+        }
+        resolve();
+      };
+      img.onerror = () => resolve();
+      img.src = `sprites/${encodeURI(f)}`;
+    });
+  }
+
   async load(onProgress?: (p: number) => void): Promise<void> {
-    // 封面/Splash_*:Maples 源包的 1920×1080 启动插画(每张 ~17MB 解码 + hardAlpha
-    // canvas 拷贝),全仓无消费方(菜单用 vanilla-ui/Logo)——启动即死重,跳过
-    const files = Object.keys(this.data.files).filter((f) => !/封面\/Splash_/.test(f));
-    // 原版 vanilla 素材与 vanilla-ui 贴图全部不在启动预载(8550 请求/主菜单 2GB 根因):
-    // 图块/墙/NPC 表 → Game.newWorld/loadWorld 里 preloadVanillaWorld() 预载
-    // (onWorldReady 之前完成,首帧 chunk 烘焙无回退);物品图标 → vicon 按需
-    // 懒加载 + 进世界后 prefetchIcons() 后台补齐;UI 贴图 → vui() 按需
-    // 懒加载(全部 11 处消费方每帧重查,首帧 null 自兜底)
-    const vfiles: string[] = [];
-    const uifiles: string[] = [];
+    // 启动预载 = 空集(2026-08-24 用户报"菜单加载 地形/Tiles_0"):
+    //  · 封面/* 已删(Maples 启动插画,全仓无消费方——菜单用 vanilla-ui/Logo)
+    //  · 地形/*(AutoTiler 草皮/树/墙规则表)与角色/*(敌人/玩家 Maples 贴图)全是
+    //    进世界后才消费的活资产——菜单零消费,改由 preloadMaplesWorld() 在世界
+    //    入口预载(rect() 无懒载兜底 + enemyAnimCache 空结果永久缓存,不能纯懒载)
+    // 原版 vanilla 素材与 vanilla-ui 贴图同样不在启动预载(8550 请求/主菜单 2GB 根因):
+    // 图块/墙/NPC 表 → Game.preloadSceneAssets 里 preloadTileSheetsFor 预载;
+    // 物品图标 → vicon 按需懒加载 + 进世界后 prefetchIcons() 后台补齐;
+    // UI 贴图 → vui() 按需懒加载(全部 11 处消费方每帧重查,首帧 null 自兜底)
+    const files = Object.keys(this.data.files).filter((f) => !f.startsWith('地形/') && !f.startsWith('角色/'));
     let done = 0;
-    const total = files.length + vfiles.length + uifiles.length;
+    const total = files.length;
     await Promise.all([
-      ...files.map((f) => new Promise<void>((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-          // 根源处理：整图硬 alpha —— 抗锯齿半透明像素（提取 PNG 的灰/黑镶边来源）
-          // 二值化为 0/255，所有消费方（tile/墙/图标/角色）统一获得干净像素
-          const hc = hardAlpha(img);
-          this.images.set(f, hc);
-          // ★异步升格 ImageBitmap(2026-08-19 双开 IOSurface 审计:hardAlpha 家族
-          // 18 张/窗持久 canvas 后备;bitmap = CPU 常驻+绘制同走硬件+GPU 拷贝
-          // 浏览器托管可驱逐 = 零持久面,与 vimages 350 张同形态)。烘焙源只在
-          // chunk 重烘时被 drawImage,转换无感;竞态守卫:仍是同一张才替换
-          if (typeof createImageBitmap === 'function') {
-            createImageBitmap(hc).then((b) => {
-              if (this.images.get(f) === hc) this.images.set(f, b);
-            }).catch(() => { /* 保持 canvas,形态等价 */ });
-          }
-          done++;
-          onProgress?.(done / total);
-          resolve();
-        };
-        img.onerror = () => resolve();
-        img.src = `sprites/${encodeURI(f)}`;
+      ...files.map((f) => this.loadAtlasFile(f).then(() => {
+        done++;
+        onProgress?.(done / total);
       })),
     ]);
     // 人工标注（可选，缺失时回退）
@@ -459,6 +466,18 @@ export class SpriteAtlas {
       ),
       this.preloadMiscAndNpcs(),
     ]);
+  }
+
+  /** Maples 世界贴图预载（2026-08-24 自启动预载迁入）：地形 10 张（AutoTiler
+   *  草皮/杂草/树苗/墙规则数据表）+ 角色 5 张（敌人/玩家 Maples 贴图路径）。
+   *  ★必须在首帧 chunk 烘焙前就位——rect() 只读 images 无懒载兜底，且
+   *  Renderer.enemyAnimCache 会把空帧表永久缓存（懒载晚到=史莱姆/僵尸永不渲染） */
+  private _maplesPreloaded = false;
+  async preloadMaplesWorld(): Promise<void> {
+    if (this._maplesPreloaded) return;
+    this._maplesPreloaded = true;
+    const files = Object.keys(this.data.files).filter((f) => f.startsWith('地形/') || f.startsWith('角色/'));
+    await Promise.all(files.map((f) => this.loadAtlasFile(f)));
   }
   /** 按需加载 vanilla 单图(去重;失败静默)。命中返回元素,否则 null。
    *  渲染路径一律用此入口(经 vimg 别名)——直接 vimages.get 会绕过懒加载与

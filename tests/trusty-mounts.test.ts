@@ -282,7 +282,10 @@ describe('⑥ 湿身 vy×2（Projectile.cs:51616-51619,1456 :51545）', () => {
   // 敌在上方 50px → 高出差表 vy=-6（:51492-51527 d<60 档）；wet 支翻倍 → -12
   const jumpVy = (wet: boolean): number => {
     const { hooks, player } = makeHooks([mkEnemy(1, 60 * 16, 100 * 16 - 62)], wet);
-    const m = new MinionProj(60 * 16, 100 * 16 - 16, 1112, 10, 2, false, 0, false, () => player);
+    // 出生 y = 地板顶 −22：1112 盒 14×22（Projectile.cs:10365-10366,非 16 高）——
+    // 按 −16 生成为底 1606 嵌进 100 行地板 6px,Collision 落地门（:1610/:1631
+    // "上一位置在盒顶之上"才吸附）永不置 onGround → 跳档整段不跑
+    const m = new MinionProj(60 * 16, 100 * 16 - 22, 1112, 10, 2, false, 0, false, () => player);
     m.fixedUpdate(1, hooks);
     return (m as unknown as { vy: number }).vy;
   };

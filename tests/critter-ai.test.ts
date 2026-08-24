@@ -64,9 +64,10 @@ describe('小动物 AI 家族', () => {
       if (e.vy < jumpVy) jumpVy = e.vy;
     }
     // −5（1 格墙档）× 1.2（TownCritter 补偿，非湿身无 wet 档）= −6，跳起当 tick
-    // 末加 GRAVITY 0.4 → 采样值 −5.6
+    // 末加 ENEMY_GRAVITY 0.3（NPC.cs:91997 gravity=0.3f，非玩家 GRAVITY 0.4）
+    // → 采样值 −5.7（旧注释 0.4→−5.6 为 2026-08-20 重力换正前遗留）
     expect(jumpVy).toBeLessThanOrEqual(-5.5);
-    expect(jumpVy).toBeGreaterThan(-5.7);
+    expect(jumpVy).toBeCloseTo(-5.7, 5);
   });
 
   it('蚱蜢 377（aiStyle 1）：跳 machine 平静态照跑（R6-B 2-3，1457 :62135 门只看落地）；激愤才索敌转向', () => {

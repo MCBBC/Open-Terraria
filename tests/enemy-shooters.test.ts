@@ -107,7 +107,9 @@ describe('敌怪远程攻击（对照原版发射点）', () => {
     const { hooks, shots } = shooterWorld({ x: 42, y: 58 }); // 与史莱姆同层（地板上一格），视线不被地板挡
     const e = Enemy.fromVanilla(184, 40 * 16, 59 * 16)!;
     const t = runUntilShot(e, hooks, shots, 200);
-    expect(t).toBeGreaterThan(0);
+    // 首拍即射合法：localAI[0]==0 冷却初值 + 出生 vy==0 + <200px 有视线全过
+    // （NPC.cs:61796-61813 单发档无蓄力门）→ t=0；runUntilShot 超时返 −1 仍有区分度
+    expect(t).toBeGreaterThanOrEqual(0);
     expect(shots[0].damage).toBe(9);
   });
 

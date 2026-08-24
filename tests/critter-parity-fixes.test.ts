@@ -70,10 +70,12 @@ describe('台账 B：小动物族 1:1 修复批（2026-08-19）', () => {
       e.fixedUpdate(1 / 60, hooks);
       if (e.vy < jumpVy) jumpVy = e.vy;
     }
-    // −5（t4 档）无 ×1.2（鼠豁免）+ 当 tick 重力 0.4 → 采样 −4.6；
+    // −5（t4 档）无 ×1.2（鼠豁免=flag7，NPC.cs:54001 type==300||447||610 +
+    // :54754-54758 !flag7 才乘）+ 当 tick ENEMY_GRAVITY 0.3（:91997，非玩家 0.4）
+    // → 采样 −4.7（旧注释 0.4→−4.6 为重力换正前遗留）；
     // 旧实现 = −6×1.2 = −7.2（"鼠类 2 格墙仍跳 −6"审计项）
     expect(jumpVy).toBeLessThanOrEqual(-4.5);
-    expect(jumpVy).toBeGreaterThan(-4.7);
+    expect(jumpVy).toBeCloseTo(-4.7, 5);
   });
 
   it('1.4b 鼠类 300 四格墙：撞中心前一格实心 → 转身 vx=0（cs:54526-54534）', () => {

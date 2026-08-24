@@ -3351,6 +3351,7 @@ export class Game implements GameHooks {
     await Promise.all([
       a.preloadTileSheetsFor(tileSheets, wallIds),
       a.preloadMiscAndNpcs(),
+      a.preloadMaplesWorld(),   // 地形/角色 Maples 表(2026-08-24 自启动预载迁入)
     ]);
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadItemIcons'), 0.15);
     // 物品图标（6059 张/24MB）改为后台补齐——不再阻塞进图：渲染/道具栏走

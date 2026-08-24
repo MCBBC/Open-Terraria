@@ -249,6 +249,11 @@ export interface ArrowOpts {
    *  每 tick v=(v*(weight-1)+dirToPlayer*speed)/weight，速度 <floor 归一到 floor
    *  （277 用 cap：>cap 归一到 cap）。spawn 侧仅在专家模式注入。 */
   homing?: { speed: number; weight: number; floor?: number; cap?: number; axis?: 'x' | 'y' };
+  /** 电圈发射器导弹 442（aiStyle 1 + AI_001 type 段 :55689-55740）：锁定格
+   *  （原版 ai[0]/[1] = tileTargetX/Y = 发射时刻鼠标格，Player.cs:49905-49908 写入、
+   *  :25586-25604 钳 [5, maxTiles−5]）。★直线飞向锁定点（无逐帧转向——AI 段无
+   *  velocity 修正式，"追踪"观感 = ≤16px 到点即 Kill :55704-55710），非朝点 homing。 */
+  aimPoint?: { tx: number; ty: number };
   /** 原版 Projectile.extraUpdates（Projectile.cs:15331-15336 numUpdates 循环）：
    *  每逻辑帧把整段 AI/位移/碰撞/命中多跑 N 次——弹速视觉上 ×(N+1)，timeLeft
    *  同步按子步消耗（:15861 在循环内）。83 眼激光 SetDefaults=2（:1369）。 */
@@ -429,6 +434,7 @@ const PROJ_ALPHA0: Record<number, number> = {
   514: 255,                                                          // 钉（aiStyle 93 −25/t 渐显 :33427-33434）
   246: 255,                                                          // 刺炮弹（−20/t 渐显 :58106-58110）
   311: 255,                                                          // 糖果玉米（−50/t 渐显 :58117-58123）
+  442: 255,                                                          // 电圈导弹（−90/4t 渐显 :55691-55703，AI 段消费）
 };
 
 /** usesIDStaticNPCImmunity 共享免疫表（全场同型一张表,非每弹一张）：
@@ -515,6 +521,12 @@ export class Arrow extends Entity {
   dragAlways: number;
   /** 专家追踪参数（null=无） */
   homing: { speed: number; weight: number; floor?: number; cap?: number; axis?: 'x' | 'y' } | null;
+  /** 电圈导弹 442 锁定格（ai[0]/[1]，tile 坐标；null=非锁定弹）——subStepAI 442 段消费 */
+  aimPt: { tx: number; ty: number } | null = null;
+  /** localAI[0]（:55691-55703 渐显计数 + alpha==0 后 :55716 尘环节拍复用同槽） */
+  private aimCnt = 0;
+  /** localAI[1]（:55708-55712 alpha==0 后 120t 超时计数） */
+  private aimLife = 0;
   /** 原版 Projectile.extraUpdates：每帧额外子步数（0=普通 1 步） */
   extraUpdates: number;
   /** X 轴空气阻力/tick（1=无；投掷族 0.97） */
@@ -894,6 +906,7 @@ export class Arrow extends Entity {
     this.thornBounce = opts?.thornBounce ?? false;
     this.skullBoneT = opts?.skullBone ? 1 : 0;
     this.homing = opts?.homing ?? null;
+    if (opts?.aimPoint) this.aimPt = opts.aimPoint;
     this.extraUpdates = opts?.extraUpdates ?? pd0?.extraUpdates ?? 0;   // 子弹 14=1(2 步/tick)、高速弹 207=2
     this.localImmune = pd0?.localNPCHitCooldown ?? 0;
     // 311 糖果玉米 usesLocalNPCImmunity+localNPCHitCooldown=10（SetDefaults
@@ -963,6 +976,7 @@ export class Arrow extends Entity {
       // 163 族信号弹（SetDefaults alpha=255 :2523，AI_033 −50/t 渐显 :27428-27435
       // → 缺省路径同式，5 拍淡入）
       case 207: case 837: case 92: return (255 - this.alpha) / 255;
+      case 442: return (255 - this.alpha) / 255;   // 电圈导弹渐显（缺省 GetAlpha 路径同式 :76837-76850）
       case 114: return (255 - this.alpha) / 255;   // 邪恶三叉戟（缺省路径同式;AI 侧速度 Remap 改写）
       case 604: return (255 - this.alpha) / 255;   // 孢子云（aiStyle 115 alpha+10/t 淡出 :35062-35068）
       case 163: case 310: case 1008: case 1009: case 1010: case 1011:
@@ -2281,6 +2295,47 @@ export class Arrow extends Entity {
         if (this.homing.cap !== undefined && sp > this.homing.cap) {
           this.vx = this.vx / sp * this.homing.cap;
           this.vy = this.vy / sp * this.homing.cap;
+        }
+      }
+    }
+    // ---- 电圈发射器导弹 442（AI_001 type 段 Projectile.cs:55689-55740，1:1）----
+    // ① 渐显（:55691-55703）：alpha 255 起，localAI[0] 计数 ≥4 后每拍 −90（计数
+    //    复位仅发生在钳 0 拍 → 实际 4/5/6 三拍归零，非每 4 拍一步）；② 到点杀
+    //    （:55704-55710）：弹心与锁定格心 (ai×16+8) 距 ≤16 → Kill（Kill 特效/电球
+    //    443 生成在 Game.onProjectileDeath 442 分支——全消亡路径同 vanilla Kill()
+    //    单口）；③ alpha==0 期（:55708-55730）：localAI[1] ≥120 超时 Kill +
+    //    Lighting(0.3,0.45,0.8) 青蓝光 + localAI[0]==3 拍（每 3t）8 粒 135 尘旋转环
+    //    （scale 1.5/noGravity/绕 rotation−π/2=速度角，速度 = v×0.66）。
+    //    ★本段无 velocity 修正式——导弹直线飞行，"飞向锁定点"由初速方向 + 到点杀
+    //    组成（发射侧 Game 2796 分支传 aimPoint）。
+    if (this.projId === 442 && this.aimPt) {
+      if (this.alpha !== 0) {
+        this.aimCnt++;
+        if (this.aimCnt >= 4) {
+          this.alpha -= 90;
+          if (this.alpha < 0) { this.alpha = 0; this.aimCnt = 2; }
+        }
+      }
+      const px = this.aimPt.tx * 16 + 8, py = this.aimPt.ty * 16 + 8;
+      if (Math.hypot(this.cx - px, this.cy - py) <= 16) { this.killNow(game); return; }
+      if (this.alpha === 0) {
+        if (++this.aimLife >= 120) { this.killNow(game); return; }
+        this.lightRGB = [0.3, 0.45, 0.8];                    //（:55713）
+        if (++this.aimCnt >= 3) {                            //（:55714-55730）
+          this.aimCnt = 0;
+          const ang = Math.atan2(this.vy, this.vx);          // rotation − π/2（aiStyle1 通用姿态）
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          for (let i = 0; i < 8; i++) {
+            const a = i * Math.PI / 4;
+            const ox = -8 + Math.sin(a) * 2, oy = -Math.cos(a) * 4;   // UnitX·−8 + −UnitY.Rot(a)·(2,4)
+            const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 135, 0, 0, 0, null, 1.5, true);
+            if (d) {
+              d.x = this.cx + ox * ca - oy * sa;
+              d.y = this.cy + ox * sa + oy * ca;
+              d.vx = this.vx * 0.66;
+              d.vy = this.vy * 0.66;
+            }
+          }
         }
       }
     }
