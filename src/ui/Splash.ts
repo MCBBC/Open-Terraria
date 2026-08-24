@@ -85,9 +85,7 @@ export function showSplash(opts: {
 
   const set = pickSplashSet(rand);
   const base = `sprites/vanilla/SplashScreens_Splash_${set}_`;
-  back.style.backgroundImage = `url(${base}0.png)`;
-  tree.style.backgroundImage = `url(${base}1.png)`;
-  front.style.backgroundImage = `url(${base}2.png)`;
+  const splashUrls = [`${base}0.png`, `${base}1.png`, `${base}2.png`];
 
   // 时序（帧→ms；:53340-53346：默认 90/410/620/60，quickSplash 0/75/200/75）
   const [n3, n4, n5, n6] = quick
@@ -108,6 +106,28 @@ export function showSplash(opts: {
   let loadingDone = false;
   let removed = false;
   void Promise.resolve(opts.loading).then(() => { loadingDone = true; });
+
+  // ★首访过渡图等待(zip 发布形态,2026-08-25):三层图网络无散件(只在 assets-zip
+  //  分片缓存里),直接设 URL 首访必 404 → 过渡图永久空白、加载完"跳过"主菜单过渡。
+  //  改为轮询 CacheStorage 直到三条就位(SW 换控后 CSS url 走 cache-first 命中)再挂;
+  //  上限 25s 对齐 holdForAssetsReady 预算;caches 不可用(http/nosw/dev)立即现挂=旧行为。
+  void (async () => {
+    const t0w = performance.now();
+    if (typeof caches !== 'undefined') {
+      for (;;) {
+        try {
+          const ms = await Promise.all(splashUrls.map((u) => caches.match(u)));
+          if (ms.every(Boolean)) break;
+        } catch { break; }
+        if (removed || performance.now() - t0w > 25_000) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    }
+    if (removed) return;
+    back.style.backgroundImage = `url(${splashUrls[0]})`;
+    tree.style.backgroundImage = `url(${splashUrls[1]})`;
+    front.style.backgroundImage = `url(${splashUrls[2]})`;
+  })();
 
   const t0 = performance.now();
   let b = 0;            // white alpha 0..255

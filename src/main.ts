@@ -17,7 +17,7 @@ import { SpriteAtlas } from './assets/SpriteAtlas';
 import { AudioSystem } from './core/Audio';
 import { setDebugPool } from './data/vanillaNpcs';
 import { VUI } from './vui/VUI';
-import { initAssetCache, warmAllAssets } from './net/AssetCache';
+import { initAssetCache, primeBootAssets, warmAllAssets } from './net/AssetCache';
 import { holdForAssetsReady, mountAssetBadge } from './ui/AssetDownloadUI';
 import { UITextures } from './vui/assets/UITextures';
 import { UIFont } from './vui/draw/UIFont';
@@ -578,6 +578,23 @@ kvHas('sandboxworld.quicksave').then(async () => {
   await Lang.init(options.data.lang);
   const bootParams0 = new URLSearchParams(location.search);
   const bypassBoot = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo');
+  // ★首访资产前置(2026-08-25 用户要求):音频门出现前先把暖缓存跑起来并等标题曲
+  //   (Music_50/51,位于 p0 最前,到位即含过渡图族)入缓存——保证点击放行即有声、
+  //   过渡时间线有画。dev/?nosw/http 立即跳过;慢网 30s 上限降级放行不卡死。
+  if (!bypassBoot) {
+    const veil = document.createElement('div');
+    veil.id = 'sw-boot-prime';
+    veil.innerHTML = `<style>
+      #sw-boot-prime { position: fixed; inset: 0; z-index: 10002; background: #000;
+        display: flex; align-items: center; justify-content: center; }
+      #sw-boot-prime i { width: 14px; height: 14px; border-radius: 50%; background: #fff;
+        animation: swbootpulse 1s ease-in-out infinite; }
+      @keyframes swbootpulse { 0%,100% { opacity: .15; } 50% { opacity: .9; } }
+    </style><i></i>`;
+    document.body.appendChild(veil);
+    try { await primeBootAssets(30_000); } catch { /* 降级放行 */ }
+    veil.remove();
+  }
   if (!bypassBoot && shouldShowAudioGate() && audio.isAutoplayBlocked()) {
     await showAudioGate(() => audio.resumeNow());
   }

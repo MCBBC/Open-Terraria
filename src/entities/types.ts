@@ -78,6 +78,8 @@ export interface GameHooks {
   placePortal?(x: number, y: number, vx: number, vy: number, form: number): void;
   /** 破坏 tile（掉落+音效+帧刷新；Enemy 攻门拆门 = WorldGen.KillTile 语义） */
   breakTile?(x: number, y: number): void;
+  /** 仙人掌支撑复查+整株断根(CheckCactus :54132 级联)——沙落/邻格变化后触发 */
+  fellCactus?(x: number, y: number): void;
   /** 敌人死亡 */
   onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy): void;
   /** 成就系统（拾取通知等；仅 Game 本体注入） */

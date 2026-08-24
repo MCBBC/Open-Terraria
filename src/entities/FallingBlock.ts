@@ -78,6 +78,17 @@ export class FallingBlock extends Entity {
       if (tid !== undefined && st.type[st.idx(tx, ty)] === 0) {
         st.setTile(tx, ty, tid, 0, 0);
         game.playSfx?.('dig', 0.6);
+        // 沙堆到仙人掌旁 → 仙人掌支撑复查(原版 TileFrame case 80 → CheckCactus
+        // 级联;沙坡/沙堆改变邻接后悬托仙人掌须断根——用户实报"仙人掌悬在沙坡上")
+        const CAC = TILE_BY_KEY['v_80_cactus'];
+        if (CAC !== undefined) {
+          for (const [ax, ay] of [[tx, ty - 1], [tx - 1, ty], [tx + 1, ty], [tx - 1, ty - 1], [tx + 1, ty - 1]] as const) {
+            if (st.inBounds(ax, ay) && st.get(ax, ay) === CAC) {
+              game.fellCactus?.(ax, ay);
+              break;
+            }
+          }
+        }
       }
       this.dead = true;   // 中心格被占(落在草/仙人掌/任意非空格)→ 沙消失(原版同)
     }

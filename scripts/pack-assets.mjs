@@ -13,6 +13,16 @@ import { join, relative, sep } from 'node:path';
 import { zipSync } from 'fflate';
 
 const PUB = join(import.meta.dirname, '..', 'public');
+
+/** 启动关键资产前缀(2026-08-25):过渡图三层族(Splash.ts 首访即用,原排序落在
+ *  p2 ~8000 条目之后)+ 标题曲两首(Music.ts TitleIntro:50/Title:51,原在 p6/p7
+ *  几乎最后)。发布形态下这些文件网络无散件、唯一来源是分片缓存——排在尾部=
+ *  首访过渡图空白+无声。提到清单最前=随 p0(menu 相位)最先下载 */
+export const BOOT_FIRST_PREFIXES = [
+  'sprites/vanilla/SplashScreens_',
+  'audios/music/Music_50.mp3',
+  'audios/music/Music_51.mp3',
+];
 const OUT_DIR = join(PUB, 'assets-zip');
 const STATE_PATH = join(import.meta.dirname, '..', '.pack-assets-state.json');
 
@@ -44,7 +54,10 @@ export function scanInputs(pub = PUB) {
   };
   const files = [];
   for (const d of INPUT_DIRS) files.push(...walk(d).sort());
-  return files;
+  // 启动关键资产稳定前置(保持各自字典序;确定性不受影响)
+  const boot = [], rest = [];
+  for (const f of files) (BOOT_FIRST_PREFIXES.some((p) => f.startsWith(p)) ? boot : rest).push(f);
+  return [...boot, ...rest];
 }
 
 /** 确定性分片：顺序贪心填充（unzipped 字节目标 + 条目数上限） */
@@ -176,6 +189,9 @@ for (let i = 0; i < parts.length; i++) {
 }
 
 function phaseOf(firstEntry) {
+  // 启动关键资产（BOOT_FIRST 提前的过渡图/标题曲）恒标 menu 相位——否则首条目
+  // 是 sprites/vanilla 会被按目录误标成 game-sprites
+  if (BOOT_FIRST_PREFIXES.some((p) => firstEntry.startsWith(p))) return 'menu';
   const dir = firstEntry.startsWith('audios/') ? 'audios/music' : firstEntry.slice(0, firstEntry.lastIndexOf('/'));
   return DIR_PHASE[dir] ?? 'misc';
 }

@@ -1,18 +1,18 @@
 // 主菜单背景（1456 UpdateMenu 调度钟 2026-08-23；2026-08-26 层渲染外迁）。
-// 原版标题屏 = 森林背景（DrawBG gameMenu 分支），调度本体在 Main.cs:19678
-// UpdateMenu + :47582 DrawMenu：
-//  · 时间（:19768-19804）：昼 time+=33.88235294117647/帧、夜 +=30.857142857142858
+// 原版标题屏 = 森林背景（DrawBG gameMenu 分支），调度本体在 Main.cs:20011
+// UpdateMenu + :49011 DrawMenu（1458 反编译行号，下同；数值面与 1456 比对一致）：
+//  · 时间（cs:20106-20180）：昼 time+=33.88235294117647/帧、夜 +=30.857142857142858
 //    （60fps 定帧）→ 全昼夜 ≈44.1s 真实时间（昼 26.6s/夜 17.5s）。夜尽 time>32400
 //    → time=0/dayTime=true/moonPhase++(wrap 8)/bloodMoon=false；昼尽 >54000 → 入夜。
 //    初始 = 开局态 time 13500（8:15AM）/满月/moonType 0。
-//  · 背景组重掷（:19724-19762）：夜 time≥16200 每夜一次 RandomizeBackgrounds；
+//  · 背景组重掷（cs:20070-20100）：夜 time≥16200 每夜一次 RandomizeBackgrounds；
 //    昼 time≥27000 每日一次 moonType=Next(9)+重掷。173 守卫 ×2（treeBGSet1[0]==173
 //    连重掷两次）。lockMenuBGChange：生成/读档世界期 true，menuMode==0 解锁。
-//  · 森林样式池 RollRandomForestBGStyle（WorldGen.cs:7899）+ SetForestBGSet 全表
-//    （:7605-7726，样式 1-13+31/51/71/72/73）。
-//  · 星坠落：夜 rand(12)==0/帧 → 随机星 Fall（:19697-19703 LetStarsFallInMenu）。
-//  · 日月抓取（alreadyGrabbingSunOrMoon :19766）只冻结时间推进——重掷/坠星照跑。
-//  · MenuXMovement += 4/帧，wrap ±2^31（:47625-47631）。
+//  · 森林样式池 RollRandomForestBGStyle（WorldGen.cs:7983）+ SetForestBGSet 全表
+//    （:7589-7710，样式 1-13+31/51/71/72/73）。
+//  · 星坠落：夜 rand(12)==0/帧 → 随机星 Fall（cs:20048 LetStarsFallInMenu）。
+//  · 日月抓取（alreadyGrabbingSunOrMoon cs:20106）只冻结时间推进——重掷/坠星照跑。
+//  · MenuXMovement += 4/帧，wrap ±2^31（cs:49041-49050）。
 // 层渲染（远山/树层/腐化槽/tint 烘焙/173 动画/341 帧图）已于 2026-08-26 整体外迁
 // BiomeBackground 的 menuMode 分支（原版「菜单/游戏内同一 DrawSurfaceBG，仅
 // gameMenu 分支切差异」架构）——本类只剩调度钟 + sky.draw 接线，每 tick 经
@@ -59,20 +59,20 @@ export class MenuBackground {
   private moonPhase = 0;
   private moonType = 0;               // Main.moonType（:19759 每日 27000 后 Next(9) 重掷）
   private dayCount = 1;
-  private menuBGChangedDay = false;   // :1930/:1932
+  private menuBGChangedDay = false;   // cs:1949 字段/:20070 写点
   private menuBGChangedNight = false;
   private lockBG = false;             // lockMenuBGChange（生成/读档期）
-  private grabbing = false;           // alreadyGrabbingSunOrMoon（只冻时间 :19766）
+  private grabbing = false;           // alreadyGrabbingSunOrMoon（只冻时间 cs:20106）
   private grabUntil = 0;
   private starAcc = 0;                // 定帧累积器（坠星 1/12 每帧）
   /** 当前森林样式（WorldGen.treeBG1 菜单侧；初始 = 开局默认样式 1）。
    *  每 tick 经 biomeBg.setMenuStyles 注入渲染层 */
   style = 1;
-  /** WorldGen.corruptBG（夜晚菜单槽 bgStyle=1 = Corruption！DrawBG :63450——
-   *  UpdateMenu 的 setBG(1,style) 保它过午夜重掷 = 夜槽可见性铁证） */
+  /** WorldGen.corruptBG（夜晚菜单槽 bgStyle=1 = Corruption！DrawBG cs:64981——
+   *  UpdateMenu 的 setBG(1,style) cs:20085 保它过午夜重掷 = 夜槽可见性铁证） */
   private corruptStyle = 0;
   /** 层渲染宿主（menuMode 实例 = 原版 gameMenu 分支同栈）：双槽交叉淡化坡道
-   *  （backgroundLayerTransitionSpeed=0.02 :63448）、远山/树层/腐化槽绘制、
+   *  （backgroundLayerTransitionSpeed=0.02 cs:64978）、远山/树层/腐化槽绘制、
    *  tint 烘焙全在其内——本类只写样式与昼夜旗（原版菜单零硬切：重掷保留
    *  可见槽由 randomizeMenuBG 的保槽逻辑承担，切换全走其 alphaFront 淡化） */
   private biomeBg = new BiomeBackground(true);
@@ -117,7 +117,7 @@ export class MenuBackground {
     this.ctx = this.canvas.getContext('2d')!;
     this.resize();
     window.addEventListener('resize', this.resize);
-    // 菜单帧态清零（UpdateMenu :19693-19696 lightning=0/Graveyard=0 语义）——
+    // 菜单帧态清零（UpdateMenu cs:20041-20044 lightning=0/Graveyard=0 语义）——
     // 退盘回菜单时 Renderer 的帧状态残留会渗进 colorOfTheSkies
     setFrameBiome(null);
     setFrameAurora(null);
@@ -143,7 +143,7 @@ export class MenuBackground {
   /** 标题屏日月拖拽写时间（GOING_OLDSCHOOL B2，TitleMenu 反算 t01 抛出）。
    *  反解回 vanilla time/dayTime 供调度链继续；拖拽期时间冻结 = 本方法每次调用
    *  刷 grabUntil 300ms 尾窗（tick 里 grabbing=now<grabUntil ≈ 原版
-   *  alreadyGrabbingSunOrMoon 按住态 :19766——松手后 300ms 内恢复推进，无感） */
+   *  alreadyGrabbingSunOrMoon 按住态 cs:20106——松手后 300ms 内恢复推进，无感） */
   setClockT(time01: number): void {
     const t = ((time01 % 1) + 1) % 1;
     this.clock.timeOfDay = t;
@@ -157,7 +157,7 @@ export class MenuBackground {
     this.grabUntil = performance.now() + 300;
   }
 
-  /** 日月拖拽垂直跟手（Main.cs:62430/:62440 sunModY/moonModY）——透传 SkyRenderer */
+  /** 日月拖拽垂直跟手（Main.cs cs:63947/:63962 sunModY/moonModY）——透传 SkyRenderer */
   setCelestialModY(dayTime: boolean, modY: number): void {
     this.sky.setCelestialModY(dayTime, modY);
   }
@@ -165,9 +165,9 @@ export class MenuBackground {
   /** lockMenuBGChange（世界生成/读档期置 true，回标题解锁——mainFlow 接线点） */
   setBGLock(on: boolean): void { this.lockBG = on; }
 
-  /** RandomizeBackgrounds 的菜单侧（UpdateMenu :19741-19750：重掷 + 173 守卫 ×2）。
-   *  ★可见槽保留由调用方负责（:19744-19748 setBG(1,style) 夜保腐化 /
-   *  :19756-19761 setBG(0,treeBG) 昼保森林）——原版菜单零硬切的关键 */
+  /** RandomizeBackgrounds 的菜单侧（UpdateMenu cs:20070-20100：重掷 + 173 守卫 ×2）。
+   *  ★可见槽保留由调用方负责（cs:20085 setBG(1,style) 夜保腐化 /
+   *  cs:20097 setBG(0,treeBG) 昼保森林）——原版菜单零硬切的关键 */
   private randomizeMenuBG(): void {
     this.style = rollForestStyle();
     if (this.style === 6) this.style = rollForestStyle();      // treeBGSet1[0]==173
@@ -187,7 +187,7 @@ export class MenuBackground {
 
   tick(dtMs: number) {
     const frames = Math.min(8, dtMs / FRAME_MS);   // 后台标签回来防大步进雪崩
-    // 星坠落（:19697-19703）：夜 rand(12)==0/帧 → 随机星 Fall（抓取中照跑）
+    // 星坠落（cs:20048）：夜 rand(12)==0/帧 → 随机星 Fall（抓取中照跑）
     if (!this.dayTime) {
       this.starAcc += frames;
       while (this.starAcc >= 1) {
@@ -195,9 +195,9 @@ export class MenuBackground {
         if (nextInt(12) === 0) this.sky.starFallAt(Math.random() * 1000, 1000);
       }
     }
-    // 背景组重掷调度（:19724-19762，抓取中照跑）。★可见槽保留（原版菜单零硬切）：
-    //  夜重掷保 corruptBG（setBG(1,style) :19744-19748——夜槽=腐化正显示）、
-    //  昼重掷保 treeBG1（setBG(0,treeBG) :19756-19761——昼槽=森林正显示）
+    // 背景组重掷调度（cs:20070-20100，抓取中照跑）。★可见槽保留（原版菜单零硬切）：
+    //  夜重掷保 corruptBG（setBG(1,style) cs:20085——夜槽=腐化正显示）、
+    //  昼重掷保 treeBG1（setBG(0,treeBG) cs:20097——昼槽=森林正显示）
     if (!this.lockBG) {
       if (this.dayTime) {
         this.menuBGChangedDay = false;
@@ -211,19 +211,19 @@ export class MenuBackground {
         this.menuBGChangedNight = false;
       } else if (!this.menuBGChangedNight && this.vTime >= 27000) {
         this.menuBGChangedNight = true;
-        this.moonType = nextInt(9);                    // :19759 moonType=Next(9)
+        this.moonType = nextInt(9);                    // cs:20093 moonType=Next(9)
         this.sky.moonType = this.moonType;
         const keepForest = this.style;
         this.randomizeMenuBG();
         this.style = keepForest;
       }
     }
-    // 样式注入 + 昼夜 bgStyle 翻转（:63450 夜=1 Corruption/昼=0 Forest1）与双槽
-    // 0.02/帧交叉淡化（gameMenu transitionSpeed :63448 + FrontLayer 坡道 :63534-63551）
+    // 样式注入 + 昼夜 bgStyle 翻转（cs:64981 夜=1 Corruption/昼=0 Forest1）与双槽
+    // 0.02/帧交叉淡化（gameMenu transitionSpeed cs:64978 + FrontLayer 坡道 cs:65065）
     // ——状态机整体在 BiomeBackground.menuTick（menuMode 分支），本类只喂旗标
     this.biomeBg.setMenuStyles(this.style, this.corruptStyle);
     this.biomeBg.menuTick(this.dayTime, dtMs);
-    // 时间推进（:19768-19804；alreadyGrabbingSunOrMoon → 冻结 :19766）
+    // 时间推进（cs:20148-20180；alreadyGrabbingSunOrMoon → 冻结 cs:20106）
     this.grabbing = performance.now() < this.grabUntil;
     if (!this.grabbing) {
       if (this.dayTime) this.vTime += 33.88235294117647 * frames;
@@ -231,7 +231,7 @@ export class MenuBackground {
       if (!this.dayTime && this.vTime > 32400) {
         this.vTime = 0;
         this.dayTime = true;
-        this.moonPhase = (this.moonPhase + 1) % 8;     // :19793-19799
+        this.moonPhase = (this.moonPhase + 1) % 8;     // cs:20166-20170
         this.dayCount++;
       } else if (this.dayTime && this.vTime > 54000) {
         this.vTime = 0;
@@ -260,7 +260,7 @@ export class MenuBackground {
     this.biomeBg.drawMenu(this.ctx, W, H, this.layerTint(), this.camX);
   }
 
-  /** 层 tint = ColorOfTheSkies（:61409 菜单也跑 SetBackColor → :56194）。
+  /** 层 tint = ColorOfTheSkies（cs:64527 菜单也跑 SetBackColor → 层色 ×cots）。
    *  近白免烘（正昼）；量化烘焙与缓存约定在 BiomeBackground.menuTinted */
   private layerTint(): [number, number, number] | null {
     const c = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase, true);

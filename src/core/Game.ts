@@ -11135,11 +11135,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.input.mouseDown = false;
           return;
         }
-        // 6152 DaybloomStaff 停发窗（Player.cs flag 门:动画末 useTime×4=16t 不出手——
+        // 6152 DaybloomStaff 停发窗（Player.cs:43847 `itemAnimation < max − useTime×4
+        //  → flag=false`：动画【末】useTime×4=16t 静默——swing.t=倒计时(itemAnimation
+        //  同语义,t=dur 起始→0 结束),静默窗 = t < dur−16。★2026-08-24 勘误：曾写成
+        //  t > dur−16（条件反相）——起始帧 t=dur 恰落在吞窗内=第一发就被吞+mouseDown
+        //  被消费,autoReuse 再按也被门吃=「挥动没有任何效果」用户实报根因。
         //  门在扣魔【前】,停发 tick 不耗蓝;先于下方 CheckMana 段）
         if (critVid === 6152) {
           const swT0 = this.swing?.t ?? 0, swDur0 = this.swing?.dur ?? 40;
-          if (swDur0 > 0 && swT0 > swDur0 - 16) {
+          if (swDur0 > 0 && swT0 < swDur0 - 16) {
             this.player.useTime = 4;
             this.input.mouseDown = false;
             break;
@@ -13880,7 +13884,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  case 80 → CheckCactus 逐格上行；切口以下保留）；不动点迭代收敛（叠臂/
    *  干臂互撑也按三规则逐格解）。每格掉仙人掌 276 ×1（GetItemDrops case 80
    *  :64767，无 bonus 掷）——此前 1×1 通用路径掉 place_v_ 假物品且上方柱悬空 */
-  private fellCactus(x: number, y: number) {
+  fellCactus(x: number, y: number) {   // public:GameHooks 接口(FallingBlock 沙落触发仙人掌复查)
     const st = this.world.store;
     const CAC = TILE_BY_KEY['v_80_cactus'];
     const cactusKey = VANILLA_ITEM_KEY_BY_ID[276];

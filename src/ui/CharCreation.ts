@@ -864,6 +864,10 @@ export class CharCreation {
     this.syncHslFromPart();
     this.queueIconTint();
     this.buildContent();
+    // 随机后同步重烘当前页 sheet（buildLook/buildHair 尾部的 scheduleSheetBake(0)
+    // 走 setTimeout 异步+retry 链依赖贴图重载——contextlost 清缓存后 retry 期格子
+    // 全空（2026-08-24 用户实报）。同步烘一次立即出图，retry 链仍作兜底
+    this.bakeSheets();
   }
 
   // ================= 缩略图 sprite sheet（纸娃娃管线烘一张，格子切片消费） =================

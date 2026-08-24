@@ -33,8 +33,9 @@ const report = await page.evaluate(async (secs) => {
   };
   const origDraw = proto.draw;
   proto.draw = function (...a) { const t0 = performance.now(); const r = origDraw.apply(this, a); skyDrawMs += performance.now() - t0; return r; };
-  const origDF = Object.getPrototypeOf(mb).drawForest;
-  Object.getPrototypeOf(mb).drawForest = function (...a) { const t0 = performance.now(); const r = origDF.apply(this, a); forestMs += performance.now() - t0; return r; };
+  // 2026-08-26 层渲染外迁 BiomeBackground(menuMode 分支)——计时对象同步改
+  const origDF = mb.biomeBg.drawMenu.bind(mb.biomeBg);
+  mb.biomeBg.drawMenu = function (...a) { const t0 = performance.now(); const r = origDF(...a); forestMs += performance.now() - t0; return r; };
   // ---- drawImage 总数(主 ctx) ----
   const dctx = Object.getPrototypeOf(mb.ctx || mb.canvas.getContext('2d'));
   let diCalls = 0;

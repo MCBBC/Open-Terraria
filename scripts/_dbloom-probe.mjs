@@ -8,12 +8,12 @@ await page.goto(process.env.SW_ORIGIN ?? 'http://localhost:5199', { waitUntil: '
 await new Promise((r) => setTimeout(r, 2500));
 await page.waitForSelector('select', { timeout: 120000 });
 await page.evaluate(() => { const _s = document.querySelector('select'); _s.selectedIndex = 0; _s.parentElement.querySelector('button').click(); });
-await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swGame.player, { timeout: 300000 });
-const out = await page.evaluate(() => {
+await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swGame.player && window.__swItems, { timeout: 300000 });
+const KEY = process.env.SW_PROBE_ITEM ? 'vi_' + process.env.SW_PROBE_ITEM : 'vi_6152_DaybloomStaff';
+const out = await page.evaluate((key) => {
   const g = window.__swGame;
   const p = g.player;
-  // 给玩家 vi_6152 并选中
-  const key = 'vi_6152_DaybloomStaff';
+  // 给玩家目标杖并选中
   const id = g.constructor && null; // noop
   const items = window.__swItems ?? {};
   const vim = window.__swVANILLA_ITEM_KEY_BY_ID;
@@ -37,9 +37,19 @@ const out = await page.evaluate(() => {
   let known = snap();
   const shots = [];
   const manaTrace = [];
-  g.input.mouseDown = true; g.input.mouseHeld = true;
+  // 真实 DOM 按住:puppeteer 层 page.mouse.down() 由外层驱动;此处只装计数
+  // 猴补计数:useCombatWeapon / useSwing 调用观测
+  const calls = { useCombatWeapon: 0, useSwing: 0, err: null };
+  const origUCW = g.useCombatWeapon?.bind(g);
+  const origUS = g.useSwing?.bind(g);
+  if (origUCW) g.useCombatWeapon = (...a) => { calls.useCombatWeapon++; return origUCW(...a); };
+  if (origUS) g.useSwing = (...a) => { calls.useSwing++; if (calls.useSwing > 2 && calls.useSwing < 6) { calls['stack' + calls.useSwing] = new Error().stack.split('\n').slice(2, 5).join(' | ').slice(0, 400); } try { return origUS(...a); } catch (e) { calls.err = String(e).slice(0, 200); throw e; } };
+  const trace = [];
   for (let t = 0; t < 120; t++) {
+    g.input.mouseDown = true; g.input.mouseHeld = true;   // 模拟连续挥动(每 tick 重按)
+    if (t < 14) trace.push({ t, pre: { md: g.input.mouseDown, ut: g.player.useTime, swT: g.swing?.t ?? null, swDur: g.swing?.dur ?? null } });
     g.fixedUpdate(1 / 60);
+    if (t < 14) trace[t].post = { md: g.input.mouseDown, ut: g.player.useTime, swT: g.swing?.t ?? null, ucw: calls.useCombatWeapon, shots: shots.length };
     const cur = snap();
     for (const e of cur) {
       if (!known.includes(e)) {
@@ -51,18 +61,26 @@ const out = await page.evaluate(() => {
   }
   g.input.mouseDown = false; g.input.mouseHeld = false;
   const p1114 = shots.filter((x) => x.projId === 1114);
-  // 页内直查 use 链各门
-  const heldDef = p.inv.heldItem() ? (window).__swITEM_DEFS?.[p.inv.heldItem().id] ?? null : null;
+  g.useCombatWeapon = origUCW; g.useSwing = origUS;
+  // 页内直查 use 链各门（combatWeapon 经 __swDiag 钩子）
+  const DEFS = (window).__swITEM_DEFS ?? {};
+  const heldDef = p.inv.heldItem() ? DEFS[p.inv.heldItem().id] ?? null : null;
+  const cwFn = (window).__swCombatWeapon;
+  const cw = heldDef && cwFn ? cwFn(heldDef) : 'fn-missing';
   const diag = {
     heldId: p.inv.heldItem()?.id, heldDefKey: heldDef?.key ?? null,
-    vid: heldDef?.vid ?? null,
+    vid: heldDef?.vid ?? null, defVidField: heldDef ? ('vid' in heldDef ? heldDef.vid : 'no-field') : null,
+    cw: cw === 'fn-missing' ? cw : (cw ? { kind: cw.kind, shoot: cw.shoot, mana: cw.mana, autoReuse: cw.autoReuse } : null),
+    calls,
     mouseDown: g.input.mouseDown, mouseHeld: g.input.mouseHeld, useTime: p.useTime,
+    uiBlocking: g.input.uiBlocking ?? null,
+    silenced: p.buffs ? p.buffs.has(35) || p.buffs.has('Silenced') || p.buffs.has('silenced') : 'n/a',
   };
   return {
     heldKey: p.inv.heldItem() ? (p.inv.heldItem().id === itemId ? key : 'wrong') : 'none',
-    totalNew: shots.length, p1114Count: p1114.length,
+    totalNew: shots.length, p1114Count: p1114.length, trace,
     diag, manaTrace: manaTrace.slice(0, 4),
   };
-});
+}, KEY);
 console.log(JSON.stringify(out, null, 1));
 process.exit(0);

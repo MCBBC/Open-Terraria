@@ -6,7 +6,7 @@
 // → 表面过渡/泥土/岩石/岩浆分层（ugBackTransition 0.25/帧 新旧双绘）。
 // 贴图懒加载（vanilla/Background_N.png，不进 SpriteAtlas 常驻表）。
 // 主菜单：原版菜单与游戏内走同一 DrawSurfaceBG，只靠 gameMenu 分支切差异（DrawBG
-// :63446-63450 夜=Corruption/昼=Forest1 直设 + 过渡坡速 0.02/帧）——本类以 menuMode
+// cs:64976-64989 夜=Corruption/昼=Forest1 直设 + 过渡坡速 0.02/帧）——本类以 menuMode
 // 旗承载该分支（构造参数），menuTick/drawMenu 为菜单唯一入口，层几何见 drawMenu 注。
 import { upgradeToBitmap, loadBitmapOnly, SpriteAtlas } from '../assets/SpriteAtlas';
 import type { World } from '../world/World';
@@ -79,12 +79,12 @@ const CAVE_PARALLAX = 0.88;
 
 // ---- 菜单样式表（menuMode 专用，与上方游戏内数组分池）----
 // 游戏内 FOREST_STYLES/CORRUPT_STYLES 数组的键空间 = seedPick 档位(0..6/0..5)；
-// 菜单滚掷的是 WorldGen 样式【号】（RollRandomForestBGStyle :7899 加权重掷出
-// 31/51/71-73、RandomizeBackgrounds_Corruption :7979 掷出 51/52），故按号建全表。
+// 菜单滚掷的是 WorldGen 样式【号】（RollRandomForestBGStyle cs:7983 加权重掷出
+// 31/51/71-73、RandomizeBackgrounds_Corruption cs:7962 掷出 51/52），故按号建全表。
 // ★不合表：合并会改 seedPick 的取模长度 → 全世界背景档位重排（游戏内行为零改动
 // 红线）。MenuBackground.ts 的同名副本已删，唯一副本在此。
 interface MenuForestStyle { mnt: [number, number]; trees: [number, number, number] }
-/** SetForestBGSet 全表（WorldGen.cs:7605-7726）：mnt=treeMntBGSet、trees=treeBGSet */
+/** SetForestBGSet 全表（WorldGen.cs:7589-7710，1458 行号下同）：mnt=treeMntBGSet、trees=treeBGSet */
 const MENU_FOREST_STYLES: Record<number, MenuForestStyle> = {
   1: { mnt: [7, 8], trees: [50, 51, 52] },
   2: { mnt: [7, 8], trees: [53, 54, 55] },
@@ -105,8 +105,8 @@ const MENU_FOREST_STYLES: Record<number, MenuForestStyle> = {
   12: { mnt: [7, 336], trees: [335, 334, 333] },
   13: { mnt: [7, -1], trees: [343, 342, 341] },
 };
-/** 夜槽贴图集（WorldGen.setBG case 1 :7201-7240；RandomizeBackgrounds_Corruption
- *  :7979 = Next(6)，5→51/52）——夜晚菜单槽 bgStyle=1 = Corruption（DrawBG :63450） */
+/** 夜槽贴图集（WorldGen.setBG case 1，cs:7165 起；RandomizeBackgrounds_Corruption
+ *  cs:7962 = Next(6)，5→51/52）——夜晚菜单槽 bgStyle=1 = Corruption（DrawBG cs:64981） */
 const MENU_CORRUPT_STYLES: Record<number, [number, number, number]> = {
   0: [12, 13, 14], 1: [56, 57, 58], 2: [211, 212, 213], 3: [225, 226, 227],
   4: [240, 241, 242], 51: [324, 323, 322], 52: [324, 226, 322],
@@ -115,7 +115,7 @@ const MENU_CORRUPT_STYLES: Record<number, [number, number, number]> = {
  *  y = 目标分数×H − topRow×scale，使任何贴图的【内容】落在目标高度（176 内容在
  *  row466/942、94 在 row89/630……无补偿则样式间观感漂移——2026-08-24 第六轮定稿，
  *  用户 1.4.5.8 截图对拍：山脊 40/45%H、树线 72/79/86%H、重复周期 ≈ 窗宽）。
- *  ★原版等价物 = GetLayerYOffset 偏移表（Main.cs:59172-59220，93→−50/176→−760/
+ *  ★原版等价物 = GetLayerYOffset 偏移表（Main.cs cs:60687 起，93→−50/176→−760/
  *  177→−200…≈ −contentRow×2+常数的手工调平）+ 树逐槽像素偏移（:60764-60960）——
  *  本表为同目的的实测替代，两者不可叠加使用。实测法：zlib 手解 PNG 行滤波逐行
  *  数不透明像素；4% 阈值会抓到稀疏尖端（93 致密行实际 9/660） */
@@ -233,7 +233,7 @@ export class BiomeBackground {
   /** Main.cloudBGX[2]（:58796-58804/:58845-58852 风漂移累积，wrap ±w·scale） */
   private cloudBGX = new Float64Array(2);
   // ---- 主菜单分支（menuMode = 原版「菜单/游戏内同一 DrawSurfaceBG，仅 gameMenu
-  // 分支切差异」架构的旗面，Main.cs:63446-63450）。构造置 true 后本实例只服务
+  // 分支切差异」架构的旗面，Main.cs:64976-64989）。构造置 true 后本实例只服务
   // MenuBackground：menuTick/drawMenu 是唯一入口（内部再设 !menuMode 守卫），
   // update()/draw() 等游戏内路径永不触达——游戏内 Renderer 实例 menuMode=false，
   // 行为零改动 ----
@@ -1068,21 +1068,21 @@ export class BiomeBackground {
   // ---- 主菜单分支：调度入口 + DrawSurfaceBG gameMenu 层渲染 ----
   // （2026-08-26 自 MenuBackground.ts 整体迁入；几何 = 第六轮定稿「分数定位 +
   // TEX_TOPROW 内容行补偿」，用户 1.4.5.8 截图对拍态。原版对应物：
-  // 远山 BackMountainsStep1/2 gameMenu y=100/230+startX−500（:59274/:59316-59319）、
-  // 树层 y=320/400/480（:60759/:60846-60849/:60906-60910）、scale ×num4=2
-  // （num4 为常量 2f :58750，非屏宽派生）、腐化槽 DrawSurfaceBG_Corrupt :60544）
+  // 远山 BackMountainsStep1/2 gameMenu y=100/230+startX−500（cs:60766/:60830-60832）、
+  // 树层 y=320/400/480（cs:62273/:62365-62368/:62435-62437）、scale ×num4=2
+  // （num4 为常量 2f cs:60265，非屏宽派生）、腐化槽 DrawSurfaceBG_Corrupt cs:62059）
 
-  /** 菜单样式注入（UpdateMenu setBG 保可见槽语义：昼保 forestStyleNum=treeBG1、
-   *  夜保 corruptStyleNum——重掷只动隐藏槽，可见性归 alphaFront 坡道） */
+  /** 菜单样式注入（UpdateMenu setBG 保可见槽语义：昼保 forestStyleNum=treeBG1
+   *  cs:20097、夜保 corruptStyleNum cs:20085——重掷只动隐藏槽，可见性归坡道） */
   setMenuStyles(forestStyleNum: number, corruptStyleNum: number): void {
     this.menuForestStyle = forestStyleNum;
     this.menuCorruptStyle = corruptStyleNum;
   }
 
-  /** menuMode 每帧状态推进（DrawBG gameMenu 分支 :63446-63450 + UpdateBGVisibility_
-   *  FrontLayer :63535）：bgStyle 直设昼 Forest1(0)/夜 Corruption(1)，无 want 链/
+  /** menuMode 每帧状态推进（DrawBG gameMenu 分支 cs:64976-64989 + UpdateBGVisibility_
+   *  FrontLayer cs:65065）：bgStyle 直设昼 Forest1(0)/夜 Corruption(1)，无 want 链/
    *  bgDelay/instantBG/bgFlash——原版菜单零硬切，切换全靠双槽交叉淡化；坡速 =
-   *  gameMenu 专用 backgroundLayerTransitionSpeed 0.02/帧（:63448，非游戏内 0.05，
+   *  gameMenu 专用 backgroundLayerTransitionSpeed 0.02/帧（cs:64978，非游戏内 0.05，
    *  无沙漠变体互换豁免——0↔1 非沙漠族）。!menuMode 时 no-op（严格旗控） */
   menuTick(dayTime: boolean, dtMs: number): void {
     if (!this.menuMode) return;
@@ -1096,9 +1096,9 @@ export class BiomeBackground {
   }
 
   /** 主菜单地表背景绘制（sky.draw/drawMenuFlare 之后调）。ctx 直绘不走 BGBlit：
-   *  腐化 L1 恒水平翻转（:60596-60610 FlipHorizontally 无条件）与精确 tint 烘焙
+   *  腐化 L1 恒水平翻转（cs:62122 FlipHorizontally 无条件）与精确 tint 烘焙
    *  均为 ctx 侧能力，菜单本就 2D 合成。tint=null = 近白免烘；camX = MenuXMovement
-   *  累积器（+4/帧 wrap ±2^31，:47625-47631），横向视差锚 */
+   *  累积器（+4/帧 wrap ±2^31，cs:49041-49050），横向视差锚 */
   drawMenu(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
     tint: [number, number, number] | null, camX: number): void {
     if (!this.menuMode) return;
@@ -1118,13 +1118,13 @@ export class BiomeBackground {
       this.drawMenuTreeSlot(ctx, camX, viewW, 1, st.trees[1], viewH * 0.79, 1.31 * sc, 0.43, -80 * sc / 2, aF, tint);
       this.drawMenuTreeSlot(ctx, camX, viewW, 2, st.trees[2], viewH * 0.86, 1.34 * sc, 0.49, -120 * sc / 2, aF, tint);
     }
-    // 槽 Corruption（夜菜单，DrawSurfaceBG_Corrupt gameMenu 分支 :60544 起）
+    // 槽 Corruption（夜菜单，DrawSurfaceBG_Corrupt gameMenu 分支 cs:62059 起）
     const aC = this.alphaFront[Corruption];
     if (aC > 0.01) this.drawMenuCorruptTrees(ctx, camX, viewW, viewH, aC, tint, sc);
   }
 
-  /** 腐化三层（:60544 起：y/scale/dx 与森林槽同档、L1 恒水平翻转 :60596-60610；
-   *  56 套三层全 −100——:60563/:60589/:60634 三处都查 bgTexIndexes[0]==56） */
+  /** 腐化三层（cs:62059 起：y/scale/dx 与森林槽同档、L1 恒水平翻转 cs:62122；
+   *  56 套三层全 −100——cs:62078/:62104/:62149 三处都查 bgTexIndexes[0]==56） */
   private drawMenuCorruptTrees(ctx: CanvasRenderingContext2D, camX: number,
     viewW: number, viewH: number,
     a: number, tint: [number, number, number] | null, sc: number): void {
@@ -1141,7 +1141,7 @@ export class BiomeBackground {
       viewH * 0.86 + y56 - (TEX_TOPROW[set[2]] ?? 0) * sc, 1.34 * sc, -120 * sc / 2, a);
   }
 
-  /** 单树层（DrawSurfaceBG_Forest :60708-60960 逐槽位规格/特例；逐贴图像素偏移
+  /** 单树层（DrawSurfaceBG_Forest cs:62223-62470 逐槽位规格/特例；逐贴图像素偏移
    *  已被 TEX_TOPROW 内容行补偿替代——见表注） */
   private drawMenuTreeSlot(ctx: CanvasRenderingContext2D, camX: number, viewW: number,
     slot: 0 | 1 | 2, tex: number, y: number, scale: number,
@@ -1153,27 +1153,27 @@ export class BiomeBackground {
     let flip = false;
     let n = tex;
     if (slot === 0) {
-      // :60712-60733 逐贴图 scale/par 覆写（×num4=2 常量，:58750）
+      // cs:62225-62250 逐贴图 scale/par 覆写（×num4=2 常量，cs:60265）
       if (tex === 91) { pr = 0.27; sc = 1.2 * 2; }
       else if (tex === 173) { pr = 0.25; sc = 1.3 * 2; }
       else if (tex === 178) { pr = 0.3; sc = 1.2 * 2; }
       else if (tex === 184) { pr = 0.25; }
       else if (tex === 282) { sc = 1.4 * 2; }
       if (tex === 173) {
-        // :60817-60824 动画四帧 251-254（GetBackgroundCounter/10%4；gameMenu
-        // counter = GlobalTimeWrappedHourly×40 :60699-60706）
+        // cs:62322-62330 动画四帧 251-254（GetBackgroundCounter/10%4；gameMenu
+        // counter = GlobalTimeWrappedHourly×40 cs:62220）
         n = 251 + (Math.floor(this.menuBgCounter() / 10) % 4);
       }
       y -= (TEX_TOPROW[tex] ?? 0) * sc;   // 内容行补偿
     } else if (slot === 1) {
-      if (tex === 51 || tex === 54) flip = true;      // :60884 FlipHorizontally
+      if (tex === 51 || tex === 54) flip = true;      // cs:62393 FlipHorizontally
       y -= (TEX_TOPROW[tex] ?? 0) * sc;
     } else {
-      // :60901-60904 槽0=91 → 本层 sc1.3×2/par0.42
+      // cs:62409-62412 槽0=91 → 本层 sc1.3×2/par0.42
       if (MENU_FOREST_STYLES[this.menuForestStyle]?.trees[0] === 91) { sc = scale * 1.3 / 1.34; pr = 0.42; }
       y -= (TEX_TOPROW[tex] ?? 0) * sc;
       if (tex === 341) {
-        // GetBackgroundRect :60674-60680：2×2 帧（counter/15%4）+ Inflate(0,-2)
+        // GetBackgroundRect cs:62199-62202：2×2 帧（counter/15%4）+ Inflate(0,-2)
         const im = this.img(341);
         if (!im) return;
         const idx = Math.floor(this.menuBgCounter() / 15) % 4;
@@ -1222,7 +1222,7 @@ export class BiomeBackground {
     ctx.restore();
   }
 
-  /** GetBackgroundCounter gameMenu 分支（:60699-60706 = GlobalTimeWrappedHourly×40） */
+  /** GetBackgroundCounter gameMenu 分支（cs:62214-62220 = GlobalTimeWrappedHourly×40） */
   private menuBgCounter(): number {
     return (performance.now() / 1000 % 3600) * 40;
   }

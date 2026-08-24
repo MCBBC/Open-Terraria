@@ -251,6 +251,30 @@ function postToSw(msg: Record<string, unknown>): void {
   sw?.postMessage({ version: state.version, ...msg });
 }
 
+/** 启动关键资产前置等待(2026-08-25 用户要求):音频门出现前确保标题曲已入分片缓存。
+ *  Music_50/51 位于 p0 清单最前(BOOT_FIRST),到位即代表同片的过渡图族也已就位。
+ *  内部自起 initAssetCache+warm;不满足运行条件(dev/?nosw/非安全上下文/无 caches)
+ *  立即返回 false;超时返回 false(降级放行,不卡死启动)。 */
+export async function primeBootAssets(timeoutMs = 30_000): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return false;
+  const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
+  if (q.has('nosw')) return false;
+  if (!import.meta.env.PROD) return false;
+  if (typeof isSecureContext !== 'undefined' && !isSecureContext) return false;
+  if (typeof caches === 'undefined') return false;
+  void initAssetCache().then(() => warmAllAssets());
+  const want = ['audios/music/Music_50.mp3', 'audios/music/Music_51.mp3'];
+  const t0 = Date.now();
+  for (;;) {
+    try {
+      const ms = await Promise.all(want.map((u) => caches.match(u)));
+      if (ms.every(Boolean)) return true;
+    } catch { return false; }
+    if (Date.now() - t0 >= timeoutMs) return false;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
 /** 注册 SW 并启动(仅生产构建;?sw=1 强制开、?nosw 关)。幂等。 */
 export async function initAssetCache(): Promise<void> {
   if (state.enabled || typeof navigator === 'undefined' || !navigator.serviceWorker) return;

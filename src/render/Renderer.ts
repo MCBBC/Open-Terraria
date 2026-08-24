@@ -2455,6 +2455,7 @@ export class Renderer {
     this.animTick++;
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
     this.whipFullbrightQueue.length = 0;   // 1034 星辰鞭线体全亮队列逐帧重建（WhipProj 收集）
+    this.prismCrystalQueue.length = 0;   // 终极棱镜晶体队列逐帧重建（PrismProj 收集,drawPlayer 后冲刷）
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
     this._frameEntities = entities;   // _moonLordCore（月总滤镜）drawScreenFilterChain 消费
@@ -8861,6 +8862,13 @@ export class Renderer {
     tex: CanvasImageSource & { width: number; height: number };
     color: [number, number, number, number];
   }> = [];
+
+  /** 终极棱镜晶体(633)延迟绘制队列:drawLayer=7 弹体在原版走【玩家绘制层组】
+   *  (PlayerDrawLayers.cs:3154 DrawPlayer_27_HeldItem 记 projectileDrawPosition →
+   *  :4318 RenderAllLayers 在持物层位置插入 DrawHeldProj)= 画在玩家身体【前】。
+   *  实体循环先于 drawPlayer → 直画会被纸娃娃盖住(2026-08-24 用户报"身上没棱镜")。
+   *  PrismProj.draw 登记 → drawPlayer 后冲刷(世界变换仍活,世界坐标闭包直画) */
+  prismCrystalQueue: Array<() => void> = [];
 
   /** 队列消费（合成后调用）：局部变换 = worldToScreen(wx,wy) + scale(facing·z, z)。
    *  stealth 逐层公式（drawinfo.stealth = settled）：34/40×s、51 luna×s、44×s、
