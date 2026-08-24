@@ -54,7 +54,9 @@ const uiOut = await page.evaluate(async () => {
     if (it && inv.armorAccepts(3, it.id) && it.stack === 99) { accSlot = i; break; }
   }
   if (accSlot < 0) return { fail: '未找到 99 叠配饰' };
-  const srcEl = slots[accSlot];
+  inv.armor[3] = null;   // 清目标槽（dev 档可能预置配饰——语义验证需空槽）
+  // DOM 槽序 ≠ inv 槽序（创建顺序差异）——按 data-idx 精确映射
+  const srcEl = slots.find((s2) => s2.dataset.idx === String(accSlot));
   if (!srcEl) return { fail: '源槽 DOM 缺失' };
   const accEl = [...document.querySelectorAll('.sw-slot[data-where="armor"]')].find((s2) => s2.dataset.idx === '3');
   if (!accEl) return { fail: '配饰槽 DOM 缺失' };
@@ -67,9 +69,14 @@ const uiOut = await page.evaluate(async () => {
   document.dispatchEvent(new MouseEvent('mousemove', { clientX: ar.x + 10, clientY: ar.y + 10, bubbles: true }));
   document.dispatchEvent(new MouseEvent('mouseup', { button: 0, clientX: ar.x + 10, clientY: ar.y + 10, bubbles: true }));
   await new Promise((r) => setTimeout(r, 300));
+  // 余量守恒：光标 98 拖回源槽（普通背包格可整叠合并）→ 源槽应 98
+  document.dispatchEvent(new MouseEvent('mousemove', { clientX: r.x + 10, clientY: r.y + 10, bubbles: true }));
+  srcEl.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: r.x + 10, clientY: r.y + 10, bubbles: true }));
+  document.dispatchEvent(new MouseEvent('mouseup', { button: 0, clientX: r.x + 10, clientY: r.y + 10, bubbles: true }));
+  await new Promise((r2) => setTimeout(r2, 300));
   return {
     armor3: inv.armor[3] ? { stack: inv.armor[3].stack } : null,
-    cursorLeft: inv.slots[accSlot]?.stack ?? 0,
+    sourceLeft: inv.slots[accSlot]?.stack ?? 0,
   };
 });
 console.log(JSON.stringify({ uiOut, errs: errs.slice(0, 3) }, null, 1));
@@ -77,7 +84,7 @@ const A = (c, m) => { if (!c) { console.error('FAIL: ' + m); process.exitCode = 
 A(uiOut.fail === undefined, `探针失败: ${uiOut.fail}`);
 if (uiOut.fail === undefined) {
   A(uiOut.armor3?.stack === 1, `装备槽应恰 1 件: ${uiOut.armor3?.stack}`);
-  A(uiOut.cursorLeft === 98, `余量应 98 留原格: ${uiOut.cursorLeft}`);
+  A(uiOut.sourceLeft === 98, `余量应 98 回源格: ${uiOut.sourceLeft}`);
 }
 A(errs.length === 0, `页面异常: ${errs[0] ?? ''}`);
 console.log(process.exitCode ? 'PROBE FAILED' : 'PROBE OK');

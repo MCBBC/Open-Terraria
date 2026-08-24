@@ -371,6 +371,16 @@ export function trackVolumeFor(file: string, ambientVol: number, masterVol: numb
 /** Main.musicFade[i] + AudioTrack.IsPlaying 等价态 */
 export interface AmbientCueState { fade: number; playing: boolean; }
 
+/** 环境 cue 载体层（XACT AudioTrack 等价物）：增益面 + 解码缓冲 + 源节点 + 斜坡态。
+ *  src 非空 ⇔ cue 在播（Reuse+Play 建新源 / Stop 停拆）——真起停语义非静音常驻 */
+export interface CueLayer {
+  gain: GainNode | null;
+  buf: AudioBuffer | null;
+  loading: boolean;
+  src: AudioBufferSourceNode | null;
+  cue: AmbientCueState;
+}
+
 /**
  * 单步推进环境 cue（每 tick 调用，60Hz）——UpdateAmbientCueState(:236-250) /
  * UpdateAmbientCueTowardStopping(:253-273) 逐分支同构：
@@ -555,42 +565,69 @@ export class Sfx {
     for (const n of names) for (const f of WAV_MAP[n] ?? []) this.ensureBuffer(f);
   }
 
-  // ---- 雨声层：原版 RainAmbience（Music_28.mp3，XACT Wave Bank 同源提取）循环 ----
-  private rainGain: GainNode | null = null;
-  private rainSrc: AudioBufferSourceNode | null = null;
-  private rainLoaded = false;
-  /** 设置雨声强度（每帧调用）：level = case28 公式值 num11（不含 ambient），
-   *  gate = ZoneRain && !ZoneSnow（Main.cs:11713）。静音不拆节点——重启有冷启动开销 */
+  // ---- 环境 cue 双层（风 cue45 / 雨 cue28）：XACT AudioTrack 载体面 1:1 ----
+  //  每层 = 增益节点 + 解码缓冲 + 源节点 + musicFade 状态机。★播放态转写：
+  //  Reuse()+Play() = 新建 BufferSource 从头起播（XACT cue 重播语义，非"静音常驻"）；
+  //  Stop(Immediate) = 源节点真停拆。波 bank 未备（buf 未解码）= LegacyAudioSystem
+  //  :220 IsPrepared 早退 → 状态机整帧冻结（fade 不进不退）。加载失败静默。
+  private cueLayers = {
+    /** WindAmbience cue45（Main.cs:11723-11749）。★可闻边界 = worldSurface（最深谷列
+     *  +25,TerrainPass.cs:206）非本地草皮线——高原山下挖矿仍判「地表」继续播风 */
+    wind: { gain: null, buf: null, loading: false, src: null, cue: { fade: 0, playing: false } } as CueLayer,
+    /** RainAmbience cue28（Main.cs:11700-11720 case28；基线 num11=0.5 是原版真态） */
+    rain: { gain: null, buf: null, loading: false, src: null, cue: { fade: 0, playing: false } } as CueLayer,
+  };
+
+  /** 设置风声强度（每帧驱动）：level = case45 公式值 num7（含 shimmer/atmo⁴,不含
+   *  ambient）;gate = |wind|≥20/50 && SurfaceAtmospherics */
+  setWind(level: number, gate: boolean) {
+    const ctx = this.ensure(true);
+    if (!ctx) return;
+    this.stepCue(this.cueLayers.wind, ctx, 'audios/music/Music_45.mp3', level, gate);
+  }
+
+  /** 设置雨声强度（每帧驱动）：level = case28 公式值 num11;gate = ZoneRain && !ZoneSnow */
   setRain(level: number, gate: boolean) {
     const ctx = this.ensure(true);
     if (!ctx) return;
-    if (!this.rainGain) {
+    this.stepCue(this.cueLayers.rain, ctx, 'audios/music/Music_28.mp3', level, gate);
+  }
+
+  /** 单层推进（LegacyAudioSystem.UpdateAmbientCueState/TowardStopping 的载体半边） */
+  private stepCue(L: CueLayer, ctx: AudioContext, file: string, level: number, gate: boolean): void {
+    if (!L.gain) {
       const g = ctx.createGain();
       g.gain.value = 0;
       g.connect(ctx.destination);
-      this.rainGain = g;
-      // 原版雨环境音轨（RainAmbience）懒加载循环；加载失败静默（雨声可选）
-      fetch('audios/music/Music_28.mp3')
-        .then((r) => (r.ok ? r.arrayBuffer() : null))
-        .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
-        .then((buf) => {
-          if (!buf) return;
-          const src = ctx.createBufferSource();
-          src.buffer = buf;
-          src.loop = true;
-          src.connect(this.rainGain!);
-          src.start();
-          this.rainSrc = src;
-          this.rainLoaded = true;
-        })
-        .catch(() => {});
+      L.gain = g;
+      this.loadCueBuffer(ctx, L, file);
     }
-    // RainAmbience 是 XACT Ambient cue（Main.cs:11700-11720 case28：audible =
-    // musicFade[28] × ambientVolume × num11，num11 基线 0.5 由 Weather 侧算好传入，
-    // 无额外系数——旧 ×0.6 配近似式已随 case28 对齐移除）——走 ambient 轨不走 master。
-    // level/ gate 语义与 setWind 同（stepAmbientCue 状态机）
-    const v = stepAmbientCue(this.rainCue, level, this.ambient, gate);
-    if (v !== null) this.setGainNow(this.rainGain.gain, v);
+    if (!L.buf) return;                       // :220 !WaveBank.IsPrepared → 整机冻结
+    const was = L.cue.playing;
+    const v = stepAmbientCue(L.cue, level, this.ambient, gate);
+    if (!was && L.cue.playing) {              // :237-239 Reuse()+Play() 从头起播
+      const src = ctx.createBufferSource();
+      src.buffer = L.buf;
+      src.loop = true;
+      src.connect(L.gain!);
+      src.start();
+      L.src = src;
+    } else if (was && !L.cue.playing && L.src) {   // :232/:269 Stop(Immediate) 停拆
+      try { L.src.stop(); } catch { /* 已停 */ }
+      L.src = null;
+    }
+    if (v !== null) this.setGainNow(L.gain.gain, v);
+  }
+
+  /** 波 bank 后台取齐（失败静默：buf 恒 null = 冻结无声，雨/风均为可选层） */
+  private loadCueBuffer(ctx: AudioContext, L: CueLayer, file: string): void {
+    if (L.loading) return;
+    L.loading = true;
+    fetch(file)
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
+      .then((buf) => { if (buf) L.buf = buf; })
+      .catch(() => {});
   }
 
   /** 每帧 SetVariable("Volume") 同构：清调度后瞬时赋值（原版逐帧直写音量无平滑） */
@@ -600,55 +637,18 @@ export class Sfx {
     p.value = Math.max(0, v);
   }
 
-  // ---- 风声层：原版 WindAmbience cue45（Music_45.mp3,Main.cs:11723-11749）循环 ----
-  //  原版 audible = musicFade[45] × ambientVolume × num7；num7 由 Game.applyWeatherLoops
-  //  按 case45 公式算好传入（含 shimmer 抑制项），gate = |wind|≥20/50 && SurfaceAtmospherics。
-  //  斜坡 = musicFade 线性状态机本体（stepAmbientCue，LegacyAudioSystem.cs:219-274 1:1），
-  //  非指数近似。★风声可闻边界 = worldSurface(最深谷列+25,TerrainPass.cs:206),非本地
-  //  草皮线——高原/山下挖矿仍判「地表」继续播风声，与原版 IsSurfaceForAtmospherics 同构。
-  private windGain: GainNode | null = null;
-  /** Main.musicFade[45] + IsPlaying 等价态 */
-  private windCue: AmbientCueState = { fade: 0, playing: false };
-  /** Main.musicFade[28] + IsPlaying 等价态 */
-  private rainCue: AmbientCueState = { fade: 0, playing: false };
-  /** 设置风声强度（每帧调用）：level = case45 公式值 num7（不含 ambient），
-   *  gate = |wind|≥0.4 && SurfaceAtmospherics */
-  setWind(level: number, gate: boolean) {
-    const ctx = this.ensure(true);
-    if (!ctx) return;
-    if (!this.windGain) {
-      const g = ctx.createGain();
-      g.gain.value = 0;
-      g.connect(ctx.destination);
-      this.windGain = g;
-      fetch('audios/music/Music_45.mp3')
-        .then((r) => (r.ok ? r.arrayBuffer() : null))
-        .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
-        .then((buf) => {
-          if (!buf) return;
-          const src = ctx.createBufferSource();
-          src.buffer = buf;
-          src.loop = true;
-          src.connect(this.windGain!);
-          src.start();
-        })
-        .catch(() => { /* 风声可选,加载失败静默 */ });
-    }
-    // cue45 走 music bank 的 ambient 面（UpdateAmbientCueState × ambientVolume）——ambient 轨
-    const v = stepAmbientCue(this.windCue, level, this.ambient, gate);
-    if (v !== null && this.windGain) this.setGainNow(this.windGain.gain, v);
-  }
-
-  /** 环境音 cue 双轨全停（退世界/销毁时调用）：Immediate 静音 + 状态机归零。
-   *  ★review 修（2026-08-24）：stopWeatherLoops 原单次 setRain(0,false) 只走一帧
+  /** 环境音 cue 双轨全停（退世界/销毁时调用）：源节点停拆 + Immediate 静音 + 状态机
+   *  归零。★review 修（2026-08-24）：stopWeatherLoops 原单次 setRain(0,false) 只走一帧
    *  渐熄步进、天气链已停更 → gain 滞留近满幅漏进菜单；风层此前更无退出静音路径
    *  （既有泄漏，大风天退世界风声长鸣）。跨世界不复用 fade（destroy「防下个世界
-   *  复用旧状态」同语义）——新世界从 fade=0 重斜坡，与原版 Stop 后 Reuse 起播一致 */
+   *  复用旧状态」同语义）；解码缓冲保留（WaveBank 备妥态跨世界成立），下次起播
+   *  从头开始——与原版 Stop 后 Reuse 一致 */
   stopAmbientCues(): void {
-    this.windCue = { fade: 0, playing: false };
-    this.rainCue = { fade: 0, playing: false };
-    if (this.windGain) this.setGainNow(this.windGain.gain, 0);
-    if (this.rainGain) this.setGainNow(this.rainGain.gain, 0);
+    for (const L of [this.cueLayers.wind, this.cueLayers.rain]) {
+      L.cue = { fade: 0, playing: false };
+      if (L.src) { try { L.src.stop(); } catch { /* 已停 */ } L.src = null; }
+      if (L.gain) this.setGainNow(L.gain.gain, 0);
+    }
   }
 
 

@@ -217,6 +217,45 @@ import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha,
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
 import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS } from '../items/Inventory';
+import vanillaRareJson from '../data/vanilla-itemrare.json';
+
+/** 物品稀有度表（vanilla-itemrare.json：vid → rare；同 UI.ts/Bobber.ts 惯例） */
+const ITEM_RARE = vanillaRareJson as Record<string, number>;
+
+/** 拾取飘字稀有度色（Item.GetPopupRarityColor Item.cs:633-696 1:1） */
+const POPUP_RARITY_COLORS: Record<number, string> = {
+  1: '#9696FF', 2: '#96FF96', 3: '#FFC896', 4: '#FF9696', 5: '#FF96FF',
+  [-11]: '#FFAF00', [-1]: '#828282', 6: '#D2A0FF', 7: '#96FF0A', 8: '#FFFF0A',
+  9: '#05C8FF', 10: '#FF2864',
+};
+const POPUP_RARITY_COLOR_11PLUS = '#B428FF';   // ≥11（Item.cs:692-694）
+/** 稀有度 → 飘字色（表查 + ≥11 档） */
+function popupRarityColor(rare: number): string {
+  return POPUP_RARITY_COLORS[rare] ?? (rare >= 11 ? POPUP_RARITY_COLOR_11PLUS : '#FFFFFF');
+}
+
+/** 钱币飘字档位（PopupText.cs:233-247/:352-366）：面值 → [色, 最短寿命] */
+function popupCoinTier(value: number): [string, number] {
+  if (value >= 1000000) return ['#DCDCC6', 300];   // 铂 (220,220,198)
+  if (value >= 10000) return ['#E0C95C', 240];     // 金 (224,201,92)
+  if (value >= 100) return ['#B5C0C1', 180];       // 银 (181,192,193)
+  return ['#F68A60', 120];                         // 铜 (246,138,96)
+}
+
+/** 钱币面值文本（PopupText.ValueToName :543-583 1:1：贪心除档，空档跳过，
+ *  空格连接——"1 金币 50 银币"） */
+function popupCoinText(value: number): string {
+  const parts: string[] = [];
+  let v = Math.max(0, value);
+  for (let i = COIN_KEYS.length - 1; i >= 0; i--) {
+    const n = Math.floor(v / COIN_VALUES[i]);
+    if (n > 0) {
+      parts.push(`${n} ${Lang.itemNameByKey(String(COIN_KEYS[i]))}`);
+      v -= n * COIN_VALUES[i];
+    }
+  }
+  return parts.join(' ') || `0 ${Lang.itemNameByKey(String(COIN_KEYS[0]))}`;
+}
 import { isDyeItem } from '../data/vanillaEquip';
 import {
   instrumentNotePitch, instrumentUseSound, drumSoundFile, bubbleWandGoreRoll,
@@ -1371,6 +1410,8 @@ export class Game implements GameHooks {
   running = false;
   paused = false;
   private acc = 0;
+  /** 环境 cue 斜坡独立累加器（60Hz;暂停不停——UpdateAudio Main.cs:17222 同语义） */
+  private audioAcc = 0;
   private lastTime = 0;
   /** 最近 60 个 rAF 帧间隔（ms）——F5 调试报告 fps 的唯一数据源 */
   private frameDts: number[] = [];
@@ -2475,6 +2516,7 @@ export class Game implements GameHooks {
       if (Array.isArray(rec.inv)) p.inv.slots = rec.inv;
       if (Array.isArray(rec.armor)) p.inv.armor = rec.armor;
       if (Array.isArray(rec.dye)) p.inv.dye = rec.dye;
+      Inventory.sanitizeEquipStacks(p.inv);   // 装备族单件钳（远端数据不信任）
       this.cb.onInventoryChanged?.();
       this.net?.tick(); // 重 dump：服务器累积快照与本端对齐
     } catch { /* 损坏档忽略，保持本地角色 */ }
@@ -4453,6 +4495,21 @@ export class Game implements GameHooks {
         steps++;
       }
     }
+    // 环境音 cue 斜坡步进（★差异对齐 2026-08-24）：原版 UpdateAudio 在 XNA 固定
+    // 60Hz Update 内无条件执行（Main.cs:17222 DoUpdate 主流程，gamePaused 不门控）
+    // ——暂停照走（下矿即暂停时风声渐熄继续）、与渲染帧率解耦（高刷屏不双倍斜坡）。
+    // 独立累加器 + ≤5 步钳（切 tab 回来防追帧风暴）。★已知边界：隐藏标签页 rAF
+    // 停转=斜坡冻结，但在播源节点继续发声（Web 后台音频放行,全仓循环轨同此,
+    // 非 cue 层独有;原版失焦停机+XACT 引擎暂停无 Web 对应物,登记未接）
+    if (this.world) {
+      this.audioAcc += elapsed;
+      let asteps = 0;
+      while (this.audioAcc >= FIXED_DT && asteps < 5) {
+        this.driveAmbientCues();
+        this.audioAcc -= FIXED_DT;
+        asteps++;
+      }
+    }
     // 跳帧（原版 FrameSkipMode 三态，Main.cs:16950-16975 1456 实况）：
     //  ★原版"落后跳帧"分支是【死代码】——num3=0 使 ++successiveSkippedDraws<=0
     //    永假（:16967-16973），任何档位都【不因渲染落后而跳过绘制】。本仓曾把
@@ -4557,11 +4614,13 @@ export class Game implements GameHooks {
     w.clock.tick(dt * 1000 * w.dayRate());
     // ---- 天气系统推进（原版 UpdateWeather/UpdateTime 每帧；60Hz tick 语义） ----
     this.updateWeather();
-    // 昼夜切换：公告走原版消息列（Main.NewText→LegacyChatMonitor；ChatColors.World 50,255,130）
+    // 昼夜切换：原版无任何通用公告文本——UpdateTime_StartNight/StartDay
+    // （1457 Main.cs:66189/:66344）只在满足条件时广播事件消息
+    // （血月 Lang.misc[8]、眼球 misc[9]、日食 misc[20]、入侵等），普通晨昏静默。
+    // 此处同样不发消息，只驱动回调与逻辑感应器。
     const isDay = w.clock.isDay;
     if (isDay !== this.lastWasDay) {
       if (this.lastWasDay !== null) {
-        this.newText(isDay ? Lang.text('Mods.SandboxWorld.Toast.DayStart') : Lang.text('Mods.SandboxWorld.Toast.NightFall'), 50, 255, 130);
         this.cb.onDayNight?.(isDay);
         // 昼/夜逻辑感应器(423)触发
         this.triggerDayNightSensors();
@@ -6949,6 +7008,9 @@ export class Game implements GameHooks {
         // 水平漂移（AdvancedPopupRequest velocity：露西台词 (dir*7,-7)）对称衰减
         d.x += d.vx ?? 0;
         d.vx = (d.vx ?? 0) * 0.94;
+        // 弹出缩放（PopupText.Update :736-740：scale=0 起每 t +0.1 至目标——
+        // 新建/合并重弹共链；拾取飘字目标 1）
+        d.scale = Math.min(1, (d.scale ?? 1) + 0.1);
         if (d.life > 0) this.dmgNumbers[wn++] = d;
         continue;
       }
@@ -8116,7 +8178,12 @@ export class Game implements GameHooks {
       ty = this.smartCursor.y;
     }
 
-    if (!inp.mouseDown || this.annotateMode) {
+    // ★autoReuse 按住连发（2026-08-24 用户实报太阳花法杖"只能单发"）：mouseDown 是
+    //  边沿消费量（发射路径用完置 false,物理按住不回填）——按住电平在 mouseHeld。
+    //  早退门曾只认 mouseDown=autoReuse 武器一发即断。非 autoReuse 件语义不变。
+    const cwEarly = heldDef ? combatWeapon(heldDef) : null;
+    const holdOk = !!((cwEarly as { autoReuse?: boolean } | null)?.autoReuse && inp.mouseHeld && !this.annotateMode);
+    if ((!inp.mouseDown && !holdOk) || this.annotateMode) {
       this.mining = null;
       return;
     }
@@ -8127,7 +8194,7 @@ export class Game implements GameHooks {
     //  本分支 return 会把挖掘链(tryMine)整个截胡 = 镐斧无法挖掘/砍树(2026-08-13 实锤:
     //  铜镐 tryMine 调用数 0)。工具优先落工具分支(自带低伤挥击打怪),仅无工具的
     //  纯近战(剑/vi_ melee)与本仓库 legacy sword 走本分支
-    const cw = heldDef ? combatWeapon(heldDef) : null;
+    const cw = cwEarly;
     const cwMelee = cw?.kind === 'melee' ? cw : null;
     // 帕鲁钻地龟 5667/6174 左键召唤（2026-08-23 内容缺口批；ItemCheck_Shoot 专支
     // Player.cs:48687-48752——combatWeapon 对该两件落 'shot' 兜底会发空箭，此处
@@ -9427,7 +9494,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.cb.onInventoryChanged();
         }
       }
-    } else if (heldDef && inp.mouseDown && this.player.useTime === 0
+    } else if (heldDef && ((itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse === true)
+      ? (inp.mouseDown || inp.mouseHeld)   // ★autoReuse=电平语义（同 cw 门 2026-08-24）
+      : inp.mouseDown) && this.player.useTime === 0
       && (heldDef.ranged || rangedAmmoWeapon(heldDef))
       // ⑩ autoReuse 边沿门（ItemCheck :42058 controlUseItem && releaseUseItem +
       //  ItemCheck_AutoReuseLogic :52011-52037——非 autoReuse 件必须真实松开重按）：
@@ -10051,7 +10120,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           : GUN_HANDGUN_VIDS.has(bowVid) ? 'gunHandgun' : 'gunShot');
         this.cb.onInventoryChanged();
       }
-    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && cw && cw.kind !== 'melee'
+    } else if (heldDef && ((cw as { autoReuse?: boolean }).autoReuse
+      ? (inp.mouseDown || inp.mouseHeld)   // ★autoReuse=电平语义（mouseHeld）——mouseDown
+      : inp.mouseDown)                     //   是边沿消费量,发射即被清=按住只出一发
+      && this.player.useTime === 0 && cw && cw.kind !== 'melee'
       && ((cw as { autoReuse?: boolean }).autoReuse || (inp.mouseDown && !this._prevMouseDown))) { // ⑩ autoReuse 门
       // vi_* 数据驱动武器（1456 aiStyle 家族）：回旋镖/长矛/悠悠球/连枷/手雷/魔法/直射兜底。
       // 必须排在 thrownCombat 之前——手雷(166 等)满足投掷判定但语义是 ai16 弹跳引信
@@ -11175,7 +11247,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const bvx = (Math.cos(ang) * cw.shootSpeed) * jc - (Math.sin(ang) * cw.shootSpeed) * js;
           const bvy = (Math.cos(ang) * cw.shootSpeed) * js + (Math.sin(ang) * cw.shootSpeed) * jc;
           const bloom = new Arrow(px + jx, py + jy, bvx, bvy, cw.damage, cw.knockback, 1114, null,
-            { grav: 0, dragAlways: 0.985, life: 600, pierce: 1 });
+            { grav: 0, dragAlways: 0.985, life: 146, pierce: 1, bounce: true });
           bloom.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
           bloom.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           bloom.frostEligible = false;   // magic 弹不吃冰霜引擎
@@ -16694,29 +16766,32 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /**
-   * 天气环境音循环音量跟随（weather.update 的 onAmbience 每帧回调）：
-   *  rain → sfx.setRain（MusicID 28，audios/music/Music_28.mp3 循环层）；
+   * 天气环境音驱动量刷新（weather.update 的 onAmbience 每 tick 回调；★2026-08-24
+   * 起本方法不再直调 Sfx——雨/风 cue 的 level/gate 写入 cueDrive 缓存，由 frame()
+   * 的 audioAcc 独立累加器逐帧步进 driveAmbientCues→sfx.setWind/setRain，
+   * 暂停照走 = 原版 UpdateAudio Main.cs:17222 无条件执行语义）：
+   *  rain → cueDrive.rain（MusicID 28 case28 层,Sfx.cueLayers.rain 真 Stop/Reuse）；
    *  blizzardStrong/blizzardInside → Sfx.playLoop 常驻轨（blizzard_strong_loop /
-   *  blizzard_inside_building_loop，SceneState.cs:247/:270 PlayTrackedSound）；
-   *  sandstorm → playLoop 恒 null（素材缺失登记，wav 入库后自动生效）。
-   *  轨懒建（首帧音量>0 时）且不拆——与原版 SlotId 常驻 + 每帧改 Volume 同构。
+   *  blizzard_inside_building_loop，SceneState.cs:247/:270 PlayTrackedSound；
+   *  ★此二轨原版本就是 Volume=0 常驻不拆(:284-294),与 cue28/45 的显式 Stop 分属
+   *  两套语义,勿混改）；sandstorm → playLoop 恒 null（素材缺失登记）。
    */
   private applyWeatherLoops(v: import('../world/weather/Weather').WeatherLoopVolumes, atmo = 1): void {
-    // 雨层 cue28（Main.cs:11700-11720）：level=num11 由 Weather.loopVolumes 算好
-    // （含 (1-shimmer) 抑制项与 atmo⁴）；gate 位透传给 Sfx 状态机分叉
-    // UpdateAmbientCueState/TowardStopping 两分支
-    this.sfx.setRain(v.rain, v.rainGate);
+    // 雨/风 cue 驱动量刷新（每 tick；实际音频步进在 frame() 的 audioAcc 累加器——
+    // 暂停期间天气链冻结,但 level/gate 输入本就只依赖冻结的世界态,斜坡照走=原版
+    // UpdateAudio 无条件执行语义）
+    // 雨 cue28：level=num11 由 Weather.loopVolumes 算好（含 (1-shimmer) 与 atmo⁴）；
+    // gate 位透传给状态机分叉 UpdateAmbientCueState/TowardStopping 两分支
+    this.cueDrive.rain = { level: v.rain, gate: v.rainGate };
     // ★R22 风声 cue45（Main.cs:11723-11749）：num7 = |wind|×0.7+0.3 ×(1-shimmer)
     // →clamp ≤1 →×0.9 →×atmo⁴（shimmer 乘在 clamp 前，:11725-11731 次序）；
-    // 门 |wind|≥0.4(=20/50) && SurfaceAtmospherics(SceneMetrics.cs:695)。
-    // level/gate 分参——门开但公式值 0（如太空 atmo⁴=0）= Immediate 停 fade 冻结，
-    // 门关 = musicFade −0.005/帧渐熄，两分支语义在 Sfx.stepAmbientCue 分叉
+    // 门 |wind|≥0.4(=20/50) && SurfaceAtmospherics(SceneMetrics.cs:695)
     const windAbs = Math.abs(this.world.weather?.windSpeedCurrent ?? 0);
     const atmoC = Math.max(0, Math.min(1, atmo));
     const shimmer = this.renderer?.monoFilters?.shimmerAlpha ?? 0;
     const num7 = Math.min(1, (windAbs * 0.7 + 0.3) * (shimmer > 0 ? 1 - shimmer : 1))
       * 0.9 * atmoC ** 4;
-    this.sfx.setWind(num7, windAbs >= 0.4 && !!this.scene?.surfaceAtmospherics);
+    this.cueDrive.wind = { level: num7, gate: windAbs >= 0.4 && !!this.scene?.surfaceAtmospherics };
     const vols: Record<import('./Sfx').WeatherLoopName, number> = {
       blizzardStrong: v.blizzardStrong,
       blizzardInside: v.blizzardInside,
@@ -16755,8 +16830,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.weatherLoops = {};
     this.weatherLoopVol = {};
     // 风/雨 cue 双轨 Immediate 静音（★review 修：单帧状态机步进不会归零，天气链
-    // 停更后 gain 滞留漏进菜单；风层此前无任何退出静音路径）
+    // 停更后 gain 滞留漏进菜单；风层此前无任何退出静音路径）+ 驱动量复位
     this.sfx.stopAmbientCues();
+    this.cueDrive.wind = { level: 0, gate: false };
+    this.cueDrive.rain = { level: 0, gate: false };
+  }
+
+  /** 环境 cue 驱动缓存（applyWeatherLoops 每 tick 刷新;frame() 的 audioAcc 累加器
+   *  以此逐帧步进 Sfx 状态机——暂停期间输入不变、斜坡继续逼近目标=原版语义） */
+  private cueDrive = {
+    wind: { level: 0, gate: false },
+    rain: { level: 0, gate: false },
+  };
+  /** 每 60Hz 步进环境 cue 斜坡（UpdateAudio Main.cs:17222 无条件执行同位；
+   *  world 空=菜单态,双轨已被 stopAmbientCues 归零,无需驱动） */
+  private driveAmbientCues(): void {
+    if (!this.world) return;
+    this.sfx.setWind(this.cueDrive.wind.level, this.cueDrive.wind.gate);
+    this.sfx.setRain(this.cueDrive.rain.level, this.cueDrive.rain.gate);
   }
 
   /** 全图扫描测重板/感应器/间歇泉登记(读档/生成后一次);增量维护见 onTileChanged */
@@ -24013,19 +24104,76 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     LanternNight.lanternNightsOnCooldown = ev.lanternCooldown ?? 0;
   }
 
-  /** 拾取物品飘名（主角旁浅白文本）。同一时间只保留一个，
-   * 新拾取直接替换旧的 —— 不产生拖影，不会误读为多个物品 */
-  showPickupLabel(itemKey: string) {
+  /** 拾取物品飘名（PopupText.NewText Item 分支 PopupText.cs:194-367 对齐）。
+   *  ★同名合并计数（用户实报"土块(5)没有计数"）：扫描现有飘字找同名（钱币跨
+   *  面额按 coinText 合并）→ stack += 本次拾取数、寿命补足 60、scale=0 重新
+   *  弹出、速度重启、位置重定心（:213-247）；文本 "名 (N)"（PrepareDisplayText
+   *  :415-420，N>1 才带计数）。钱币（71-74）按面值合并成 "N 铜币 / 1 金币 50
+   *  银币" 式文本 + 档位色/寿命（:222-247 ValueToName :543），stack 恒 1。
+   *  不同名各自独立飘字（20 槽上限，满员替换 position.Y 最小者 = FindNextItem
+   *  TextSlot :770-784）。颜色 = 稀有度（PrepareEffects :370-380 GetPopupRarity
+   *  Color Item.cs:633-696；vi_ 物品查 vanilla-itemrare.json，同 UI.ts 惯例）。
+   *  登记近似：①抗重叠推离（Update :683-703 命中盒互推+寿命延长）未移植——同帧
+   *  拾取多种物品可能短暂重叠；②文本样式/运动阻尼沿用仓内 13px 描边白系。 */
+  showPickupLabel(itemKey: string, picked = 1) {
     // Main.showItemText（IngameOptions.cs:705 → PopupText.NewText 族 PopupText.cs:120）：
     // 关 = 拾取名飘字整链不触发
     if (!options.data.showItemText) return;
     const def = ITEM_DEFS[ITEM_BY_KEY[itemKey]];
-    if (!def) return;
-    this.dmgNumbers = this.dmgNumbers.filter((d) => !d.label);
+    if (!def || picked <= 0) return;
+    const name = Lang.itemNameByKey(def.key);
+    const coinIdx = COIN_KEYS.indexOf(def.key as (typeof COIN_KEYS)[number]);   // :201 flag
+    const rare = def.key.startsWith('vi_') ? ITEM_RARE[String(parseInt(def.key.slice(3), 10))] ?? 0 : 0;
+    // ---- 合并扫描（:202-247）----
+    for (const d of this.dmgNumbers) {
+      if (!d.label) continue;
+      const coinMatch = coinIdx >= 0 && !!d.coinText;
+      if (!coinMatch && d.pickupKey !== def.key) continue;
+      if (d.life < 60) d.life = 60;                          // :218-221
+      d.stack = (d.stack ?? 1) + picked;                     // :241
+      if (coinMatch) {
+        d.coinValue = Math.min(9999999999, (d.coinValue ?? 0) + COIN_VALUES[coinIdx] * picked);
+        d.label = popupCoinText(d.coinValue);                // ValueToName :543
+        d.color = popupCoinTier(d.coinValue)[0];             // :233-247 档位色
+        d.life = Math.max(d.life, popupCoinTier(d.coinValue)[1]);
+        d.stack = 1;                                         // :244-246 文本即面值
+      } else {
+        d.label = (d.stack ?? 1) > 1 ? `${name} (${d.stack})` : name;
+        d.color = popupRarityColor(rare);                    // PrepareEffects :380
+      }
+      d.scale = 0;                                           // :241 重新弹出
+      d.vy = -0.7;                                           // :243 velocity.Y=-7（仓内标度）
+      d.x = this.player.cx; d.y = this.player.y - 8;         // :242-243 位置重定心
+      return;
+    }
+    // ---- 新建（:250-367）----
+    let label: string;
+    let color: string;
+    let life = 60;
+    let coinValue: number | undefined;
+    if (coinIdx >= 0) {
+      coinValue = COIN_VALUES[coinIdx] * picked;
+      label = popupCoinText(coinValue);
+      [color, life] = popupCoinTier(coinValue);
+    } else {
+      label = picked > 1 ? `${name} (${picked})` : name;
+      color = popupRarityColor(rare);
+    }
     this.dmgNumbers.push({
       x: this.player.cx, y: this.player.y - 8, vy: -0.7,
-      value: 0, crit: false, color: '#F0F0F0', life: 55, label: Lang.itemNameByKey(def.key),
+      value: 0, crit: false, color, life, label,
+      stack: coinIdx >= 0 ? 1 : picked, pickupKey: def.key,
+      coinText: coinIdx >= 0, coinValue, scale: 0,
     });
+    // 槽上限（FindNextItemTextSlot :770-784）：满 20 替换 position.Y 最小（最上方）
+    let labelCount = 0, topIdx = -1, topY = Infinity;
+    for (let i = 0; i < this.dmgNumbers.length; i++) {
+      const d = this.dmgNumbers[i];
+      if (!d.label) continue;
+      labelCount++;
+      if (d.y < topY) { topY = d.y; topIdx = i; }
+    }
+    if (labelCount > 20 && topIdx >= 0) this.dmgNumbers.splice(topIdx, 1);
   }
 
   playSfx(name: string, vol?: number, x?: number, y?: number) {

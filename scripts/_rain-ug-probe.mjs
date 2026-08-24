@@ -37,8 +37,8 @@ const out = await page.evaluate(async () => {
     gl: +g.world.groundLevel.toFixed(1),
     surfaceAtmospherics: !!g.scene?.surfaceAtmospherics,
     raining: wd.raining, cloudAlpha: +wd.cloudAlpha.toFixed(3),
-    windGain: sfx.windGain ? +sfx.windGain.gain.value.toFixed(4) : null,
-    rainGain: sfx.rainGain ? +sfx.rainGain.gain.value.toFixed(4) : null,
+    windGain: sfx.cueLayers.wind.gain ? +sfx.cueLayers.wind.gain.gain.value.toFixed(4) : null,
+    rainGain: sfx.cueLayers.rain.gain ? +sfx.cueLayers.rain.gain.gain.value.toFixed(4) : null,
   });
   const visit = (tileY) => {
     g.player.x = g.world.spawnX * 16 + 8; g.player.y = tileY * 16;
@@ -55,8 +55,8 @@ const out = await page.evaluate(async () => {
   // 退出路径验证（destroy→stopWeatherLoops→stopAmbientCues 等价直调）：双轨应瞬时归零
   sfx.stopAmbientCues();
   res.afterStop = {
-    windGain: sfx.windGain ? +sfx.windGain.gain.value.toFixed(4) : null,
-    rainGain: sfx.rainGain ? +sfx.rainGain.gain.value.toFixed(4) : null,
+    windGain: sfx.cueLayers.wind.gain ? +sfx.cueLayers.wind.gain.gain.value.toFixed(4) : null,
+    rainGain: sfx.cueLayers.rain.gain ? +sfx.cueLayers.rain.gain.gain.value.toFixed(4) : null,
   };
   return res;
 });

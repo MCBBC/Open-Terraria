@@ -1432,6 +1432,13 @@ export function deerclopsNextFrame(
 export interface DamageNumber {
   x: number; y: number; vy: number; value: number; crit: boolean; color: string; life: number;
   label?: string;
+  /** 拾取飘字（PopupText.NewText Item 分支）专属：合并身份键 = item key */
+  pickupKey?: string;
+  /** 累计计数（同名拾取合并 stack+=picked；PrepareDisplayText >1 时 "名 (N)"） */
+  stack?: number;
+  /** 钱币飘字（71-74）：跨面额合并、文本 = ValueToName 面值、stack 恒 1 */
+  coinText?: boolean;
+  coinValue?: number;
   /** 水平漂移（暴击 NewText ±1.25）;缺省 0 */
   vx?: number;
   /** dot 飘字（HurtLifeRegen/中毒族 DoT:更小更短,带重力） */
@@ -3231,14 +3238,16 @@ export class Renderer {
       // gravDir=−1 飘字 Y 屏幕镜像（Main.cs:63339-63343:num23 = screenHeight −
       // (position.Y − screenPosition.Y)——重力倒置(重力地球等)时飘字翻到对侧）
       const sy = player.gravDir === -1 ? viewH - sy0 : sy0;
-      // 物品名飘字：带阴影浅白文本（非原版链,保持旧样式）
+      // 物品名飘字：带阴影文本（非原版链,保持旧样式;色 = 稀有度/钱币档位——
+      // showPickupLabel 写入 d.color,缩放 = 弹出动画 PopupText scale 链）
       if (d.label) {
+        const sc = d.scale ?? 1;
         ctx.globalAlpha = Math.min(1, d.life / 30);
-        ctx.font = '13px sans-serif';
+        ctx.font = `${Math.max(1, Math.round(13 * sc))}px sans-serif`;
         ctx.strokeStyle = 'rgba(0,0,0,0.75)';
         ctx.lineWidth = 3;
         ctx.strokeText(d.label, sx, sy);
-        ctx.fillStyle = '#F0F0F0';
+        ctx.fillStyle = d.color;
         ctx.fillText(d.label, sx, sy);
         continue;
       }
@@ -3311,13 +3320,15 @@ export class Renderer {
     // 9. 小地图
     this.drawMinimap(ctx, cam, world, player, clock, entities);
     // 9.45 信息饰品列(DrawInfoAccs;main 系列资源文本,原版右上 X=W-280)
+    //  纵向 +261 偏移门 = mapStyle==1 && mapEnabled(Main.cs:46675 GetInfoAccIconPosition
+    //  ——小地图可见时信息列整体下移到小地图框之下;曾误传 fullMap.open,列压在小地图上)
     if (this.infoAccCtx && this.infoAccs.canShow(
       !!((player as unknown as { talking?: boolean }).talking),
       !!((this as unknown as { chestOpen?: boolean }).chestOpen),
       false,
     )) {
       this.infoAccs.draw(ctx, viewW, viewH, this.infoAccCtx, player.hideInfo,
-        this.playerInventory, !!this.fullMap.open && !!this.minimap,
+        this.playerInventory, this.mapStyle === 1 && !!this.minimap,
         this.infoAccHover, this._mouseX, this._mouseY);
     }
     // 9.5 全屏地图
@@ -12444,41 +12455,11 @@ export class Renderer {
       y: uiS === 1 ? oy - 2 : (oy - 2) * uiS,
       w: (size + 4) * uiS, h: (size + 4) * uiS,
     };
-    // 时间/天气显示【门禁化 2026-08-13】:原版语义 = InfoAccs 列(DrawInfoAccs),
-    // 无表(accWatch)/无天气电台(accWeatherRadio)不显示——此前常显文本退役;
-    // 完整 12 行信息列由 render/InfoAccsLayer 在 minimap 之后绘制(右侧列)。
-    const gates = player.equipStats.infoAccs;
-    ctx.font = 'bold 14px monospace';
-    ctx.fillStyle = '#FFF';
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 3;
-    ctx.textAlign = 'center';
-    if (gates.accWatch > 0) {
-      const hFloat = clock.hourFloat;
-      const hh = String(Math.floor(hFloat)).padStart(2, '0');
-      const mm2 = String(Math.floor((hFloat % 1) * 60)).padStart(2, '0');
-      // 原版怀表显示 = Game.Time("时间: {0}")官译 12 语言(Main.cs 信息饰品链)
-      const timeText = Lang.text('Game.Time', `${hh}:${mm2}`);
-      ctx.strokeText(timeText, ox + size / 2, oy + 253 + 14);
-      ctx.fillText(timeText, ox + size / 2, oy + 253 + 14);
-    }
-    if (world.weather && gates.accWeatherRadio) {
-      const ZH: Record<string, string> = {
-        SlimeRain: '\u53f2\u83b1\u59c6\u96e8', Storm: '\u98ce\u66b4', HeavyRain: '\u5927\u96e8', Rain: '\u96e8', LightRain: '\u5c0f\u96e8',
-        Overcast: '\u9634\u5929', MostlyCloudy: '\u591a\u4e91', Cloudy: '\u5c11\u4e91', Clear: '\u6674\u6717', PartlyCloudy: '\u5c40\u90e8\u591a\u4e91',
-      };
-      const w = world.weather;
-      let wt = ZH[w.statusText()] ?? '';
-      const wind = Math.round(w.windSpeedCurrent * 50);
-      if (wind !== 0) wt += ` ${wind > 0 ? '\u897f\u98ce' : '\u4e1c\u98ce'}${Math.abs(wind)}`;
-      // \u6c99\u66b4\u95ea\u53e5\uff08Main.cs:46252 GlobalTimeWrappedHourly%10\u22655 \u2192 5 \u79d2\u5236,\u66fe\u8bef 500ms \u95ea\uff09
-      const sand = w.sandstorm.happening ? (Math.floor(performance.now() / 1000) % 10 >= 5 ? ' +\u6c99\u5c18\u66b4' : ' +') : '';
-      ctx.font = 'bold 12px sans-serif';
-      const wtText = wt + sand;
-      ctx.strokeText(wtText, ox + size / 2, oy + 253 + 32);
-      ctx.fillText(wtText, ox + size / 2, oy + 253 + 32);
-    }
-
+    // 时间/天气文本【全量退役 2026-08-24】:原版小地图下无任何常驻文本——
+    // 时间/天气行由信息饰品列(render/InfoAccsLayer = DrawInfoAccs)按表/天气电台
+    // 门禁逐行显示(原版格式+图标,列位在小地图框之下)。此处的自造时间/天气行
+    // 与信息列重复(2026-08-13 曾门禁化,今随信息列 +261 几何修正一并退役)。
+    // ±/⛅ 沙盒调整面板保留(非原版,调试便利)。
     // ---- \u65f6\u95f4\u8c03\u6574\u6309\u94ae + \u9762\u677f\uff08\u00b1 \u5207\u6362\uff1b\u547d\u4e2d\u533a\u6574\u4f53\u4e0a\u62a5 timeUiHover \u4f9b Game \u541e\u70b9\u51fb\uff09 ----
     const mx = lmX(this._mouseX), my = lmY(this._mouseY);
     const clicked = this._mouseDown && !this._uiPrevMouseDown; // \u6309\u4e0b\u8fb9\u6cbf\uff08\u4e0e\u7f29\u653e\u6309\u94ae\u7684\u6301\u7eed\u6309\u4f4f\u533a\u5206\uff09

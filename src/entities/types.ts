@@ -175,8 +175,8 @@ export interface GameHooks {
   /** 强制雨滴（Rain.NewRainForced Rain.cs:134-171——眼球伞 5101 滴水用；
    *  Game 实现 = renderer.weatherFx.newRainForced） */
   spawnRainForced?(x: number, y: number, vx: number, vy: number): void;
-  /** 拾取物品时在主角旁飘出物品名 */
-  showPickupLabel(itemKey: string): void;
+  /** 拾取物品时在主角旁飘出物品名（picked = 本次入包数；同名合并计数） */
+  showPickupLabel(itemKey: string, picked?: number): void;
   /** 掉落系统补充上下文（灵魂/钥匙/风筝等条件）：Game 实现，缺省则这些条件按 false */
   dropContext?(): import('../drops/NpcDrops').DropExtras;
   /** 月事件上下文（南瓜月/霜月 wave-gate 掉落条件）：Game 实现，缺省按无事件（恒 false） */

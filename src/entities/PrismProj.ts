@@ -26,6 +26,7 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, Arrow } from './Arrow';
 import { playerCanHitEnemy } from './projTargets';
+import { tintedTex } from '../render/StringLine';
 
 /** hslToRgb（原版 Main.hslToRgb 近似——S=1 L=0.5 时的纯色环） */
 function hueToRgb(h: number): [number, number, number] {
@@ -218,16 +219,41 @@ export class PrismProng extends Entity {
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     const ctx = r.ctx;
     if (!ctx || this.beamLen < 8) return;
-    const [rr, gg, bb] = hueToRgb(this.idx / 6);
     // ★1458 蓝空过载淡出指示（Main.cs:32832-32838）：slowMagicUse → 束厚
     // vector66.X×0.7 + 透明度 num296×0.25——"fades out to indicate its slow usage"
     const th = this.slowFade ? 0.7 : 1;
-    const a = Math.max(0, Math.min(1, this.opacity * 0.75 * (this.slowFade ? 0.25 : 1)));
-    if (a <= 0.02) return;
+    const opacity = Math.max(0, Math.min(1, this.opacity * (this.slowFade ? 0.25 : 1)));
+    if (opacity <= 0.02) return;
+    const img = projSprite(632);
+    // ---- 贴图激光（Utils.DrawLaser Utils.cs:2797 + Main.cs:32827-32838 1:1）----
+    // 起点 = Center + vel×scale×10.5、长 = localAI[1] − 14.5×scale²（:32828-32833）
+    // ——起点帽三角画在光棱环上(原版可见"棱镜"即此帽,非 633 晶体;2026-08-24 用户报
+    // "半径错了"根因:旧线条近似无帽=可见三角只剩盒心晶体)。双 pass:hue 全宽+
+    // 白(127)半宽,各 ×0.75×Opacity
+    if (img && (img.width > 0) && img.width > 0 && typeof document !== 'undefined') {
+      const sx = this.cx + this.vx * this.prongScale * 10.5;
+      const sy = this.cy + this.vy * this.prongScale * 10.5;
+      const len = this.beamLen - 14.5 * this.prongScale * this.prongScale;
+      if (len > 4) {
+        const [rr, gg, bb] = hueToRgb(this.idx / 6);
+        const rotAdj = Math.atan2(this.vy, this.vx) - Math.PI / 2;   // 贴图纵向→束向(Utils.cs:2804)
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.imageSmoothingEnabled = false;
+        const hueTex = tintedTex(img, [rr, gg, bb], true);
+        const whiteTex = tintedTex(img, [255, 255, 255], true);
+        if (hueTex) this.drawLaserTex(ctx, hueTex, sx, sy, rotAdj, len, this.prongScale * th, 0.75 * opacity);
+        if (whiteTex) this.drawLaserTex(ctx, whiteTex, sx, sy, rotAdj, len, this.prongScale * 0.5 * th, 0.75 * (127 / 255) * opacity);
+        ctx.restore();
+        return;
+      }
+    }
+    // 回退：贴图未就绪/非 DOM 环境——旧线条近似
+    const [rr, gg, bb] = hueToRgb(this.idx / 6);
+    const a = opacity * 0.75;
     const x2 = this.cx + this.vx * this.beamLen, y2 = this.cy + this.vy * this.beamLen;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    // 主束（26×scale×0.75 厚，hue 色）+ 内白半宽（Main.cs:32032-32040 双 pass）
     ctx.strokeStyle = `rgba(${rr},${gg},${bb},${a})`;
     ctx.lineWidth = 26 * this.prongScale * 0.75 * th;
     ctx.lineCap = 'round';
@@ -235,6 +261,50 @@ export class PrismProng extends Entity {
     ctx.strokeStyle = `rgba(255,255,255,${a * 0.75})`;
     ctx.lineWidth = 13 * this.prongScale * 0.75 * th;
     ctx.beginPath(); ctx.moveTo(this.cx, this.cy); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Utils.DrawLaser（Utils.cs:2797-2833）1:1：stage0 起点帽帧(0,0,26,22)
+   *  origin=帧心(13,11)、distCovered 33（消耗 33×sc 但只前进 (22−11)×sc——帽 art
+   *  与身重叠）；stage1 身帧(0,25,26,28) origin(13,0) 平铺、末段截高；
+   *  stage2 尾帽帧(0,56,26,22) origin(13,1)。rotAdj 已含 −π/2（贴图纵向=束向） */
+  private drawLaserTex(ctx: CanvasRenderingContext2D, tex: CanvasImageSource & { width: number; height: number },
+    sx: number, sy: number, rotAdj: number, len: number, sc: number, alpha: number): void {
+    const advX = Math.cos(rotAdj + Math.PI / 2), advY = Math.sin(rotAdj + Math.PI / 2);
+    let px = sx, py = sy;
+    let remain = len;
+    // stage 0 起点帽
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(rotAdj);
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(tex, 0, 0, 26, 22, -13 * sc, -11 * sc, 26 * sc, 22 * sc);
+    ctx.restore();
+    remain -= 33 * sc;
+    px += advX * 11 * sc;
+    py += advY * 11 * sc;
+    // stage 1 身（平铺,末段截高——推进量随截断,尾帽精确落在束端）
+    let travelled = 0;
+    while (travelled + 1 < remain) {
+      let fh = 28;
+      if (remain - travelled < 28) fh = remain - travelled;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(rotAdj);
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(tex, 0, 25, 26, fh, -13 * sc, 0, 26 * sc, fh * sc);
+      ctx.restore();
+      const adv = fh * sc;
+      travelled += adv;
+      px += advX * adv;
+      py += advY * adv;
+    }
+    // stage 2 尾帽
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(rotAdj);
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(tex, 0, 56, 26, 22, -13 * sc, -1 * sc, 26 * sc, 22 * sc);
     ctx.restore();
   }
 }
@@ -368,8 +438,15 @@ export class PrismProj extends Entity {
       // 633 块无覆写,595/735 才置 0）。贴图锥尖朝上(−y),+π/2 后锥尖=瞄准向;
       // 曾漏 +π/2 = 锥尖偏 90°
       const rot = Math.atan2(this.dirY, this.dirX) + Math.PI / 2;
+      // ★持握半径（2026-08-24 用户实机对照两次报）：晶体【绘制位】=角色中心+
+      // 瞄准向×16——瞄准扫动时晶体沿角色圆周走(用户:"持握位置围绕角色的一个
+      // 圆周走,不是贴在中心点转朝向");满充时与汇聚起点帽重叠=实机只见一个三角。
+      // 逻辑中心(碰撞盒/632 光棱锚定 projectile2.Center)不动,仅绘制偏移
+      const al = Math.hypot(this.dirX, this.dirY) || 1;
+      const dx = this.cx + this.dirX / al * 16;
+      const dy = this.cy + this.dirY / al * 16;
       ctx.save();
-      ctx.translate(this.cx, this.cy);
+      ctx.translate(dx, dy);
       ctx.rotate(rot);
       ctx.drawImage(img, 0, Math.round(f * fh), img.width, Math.round(fh),
         -img.width / 2, -fh / 2, img.width, fh);

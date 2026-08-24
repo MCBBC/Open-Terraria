@@ -12,6 +12,7 @@ import { upgradeToBitmap, loadBitmapOnly, SpriteAtlas } from '../assets/SpriteAt
 import type { World } from '../world/World';
 import type { SceneFlags } from '../world/SceneMetrics';
 import { atmoOf } from './SkyRenderer';
+import { texReady } from './texId';
 
 // ---- SurfaceBackgroundID（Terraria.ID/SurfaceBackgroundID.cs） ----
 const Forest1 = 0, Corruption = 1, Desert = 2, Jungle = 3, Ocean = 4, CorruptDesert = 5,
@@ -1262,6 +1263,9 @@ export class BiomeBackground {
   private menuTinted(n: number, im: HTMLImageElement | ImageBitmap,
     t: [number, number, number] | null): HTMLImageElement | ImageBitmap | HTMLCanvasElement {
     if (!t) return im;
+    // ★半加载窗守卫（2026-08-24 光斑方片竞态同洞加固）：元数据已到但主体未完时
+    //  drawImage 画不出内容,平色矩形会按量化桶缓存复用——未就绪本帧画原图
+    if (!texReady(im)) return im;
     let e = this.menuTintBufs.get(n);
     if (!e || e.cv.width !== im.width || e.cv.height !== im.height) {
       const cv = document.createElement('canvas');

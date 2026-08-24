@@ -51,8 +51,8 @@ function collectBuffs(node: unknown, out: number[] = []): number[] {
 const sec = (player: Player, bt: BuffType): number | undefined => player.buffs.active.get(bt);
 
 describe('StatusPlayer 表完整性（Projectile.cs:11450-11722）', () => {
-  it('48 弹型全量入表', () => {
-    expect(Object.keys(TABLE)).toHaveLength(48);
+  it('49 弹型全量入表（1127=叶绿孢子云，r15 批新增）', () => {
+    expect(Object.keys(TABLE)).toHaveLength(49);
     // 三族抽样：区间族 399-402 / 双型族 55·719 / 双块族 285(!hostile 二次授予)
     for (const t of [1078, 285, 1048, 348, 349, 399, 400, 401, 402, 55, 719, 174, 177, 257]) {
       expect(TABLE[String(t)], `type ${t}`).toBeDefined();
@@ -60,7 +60,8 @@ describe('StatusPlayer 表完整性（Projectile.cs:11450-11722）', () => {
   });
   it('表内全部 buff id 已映射 BuffType（防静默跳过）', () => {
     const ids = [...new Set(Object.values(TABLE).flatMap((v) => collectBuffs(v)))].sort((a, b) => a - b);
-    expect(ids).toEqual([20, 22, 23, 24, 31, 32, 39, 44, 46, 47, 69, 70, 80, 120, 144, 149, 164, 196, 323, 324]);
+    // 397=叶绿孢子 DoT（Buffs.ts ChlorophyteSpore，r15 R15-19 接入）
+    expect(ids).toEqual([20, 22, 23, 24, 31, 32, 39, 44, 46, 47, 69, 70, 80, 120, 144, 149, 164, 196, 323, 324, 397]);
     for (const id of ids) expect(buffTypeByVanilla(id), `vanilla buff ${id}`).toBeDefined();
   });
 });

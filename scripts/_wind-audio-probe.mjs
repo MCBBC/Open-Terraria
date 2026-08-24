@@ -30,7 +30,8 @@ const out = await page.evaluate(async () => {
   wd.windSpeedCurrent = 0.7;
 
   const sfx = g.sfx;
-  sfx.setWind(0, false); sfx.setRain(0, false); // 触发 ctx/windGain 懒建（门关=状态机空转）
+  sfx.setWind(0, false); sfx.setRain(0, false); // 触发 ctx/cue 层懒建（门关=状态机空转）
+  let windSrcAtSurface = null;
   if (sfx.ctx && sfx.ctx.state === 'suspended') { try { await sfx.ctx.resume(); } catch { /* ignore */ } }
 
   // Game.applyWeatherLoops 同式复算（Game.ts:16706-16712）
@@ -57,7 +58,8 @@ const out = await page.evaluate(async () => {
       wind: +g.world.weather.windSpeedCurrent.toFixed(3),
       atmo: ev.atmo,
       expectVol: ev.vol,
-      gain: sfx.windGain ? +sfx.windGain.gain.value.toFixed(4) : null,
+      gain: sfx.cueLayers.wind.gain ? +sfx.cueLayers.wind.gain.gain.value.toFixed(4) : null,
+      srcAlive: !!sfx.cueLayers.wind.src,
       ambient: sfx.ambient,
       acState: sfx.ctx ? sfx.ctx.state : null,
     };
@@ -72,6 +74,7 @@ const out = await page.evaluate(async () => {
   visit(g.world.spawnY - 6);
   await sleep(3000);
   res.surface = await snap('surface');
+  windSrcAtSurface = sfx.cueLayers.wind.src;   // 起播语义验证锚：地表在播的源节点
   // 斜坡中段采样（验证线性：+1s → fade +0.3）
   res.surface4s = await snap('surface+4s');
   // 2) 地下（岩石层下 120 格）：门关 → musicFade −0.005/帧 渐熄,200 帧(3.33s)归零停
@@ -79,7 +82,7 @@ const out = await page.evaluate(async () => {
   await sleep(1000);
   res.deep1s = await snap('deep+1s');
   await sleep(4000);
-  res.deep5s = await snap('deep+5s');
+  res.deep5s = await snap('deep+5s');   // 此处 src 应已停拆(srcAlive=false)
   // 3) 边界：y=groundLevel（≤ → true）/ y=gl+3（> → false）
   visit(Math.round(g.world.groundLevel));
   await sleep(1500);
@@ -87,10 +90,27 @@ const out = await page.evaluate(async () => {
   visit(Math.round(g.world.groundLevel) + 3);
   await sleep(1500);
   res.boundaryGLp3 = await snap('boundary y=gl+3');
-  // 4) 恢复强地表风：gain 应回升（fade-in 方向验证）
+  // 4) 恢复强地表风：gain 回升 + 源节点重建（Reuse+Play 从头起播,非静音常驻）
   visit(g.world.spawnY - 6);
   await sleep(3000);
   res.backSurface = await snap('back surface');
+  res.srcRestarted = !!windSrcAtSurface && sfx.cueLayers.wind.src !== windSrcAtSurface;
+
+  // 5) 暂停对齐（★本轮差异对齐核心）：paused=true 冻结世界 tick,但 cue 斜坡照走
+  //    （原版 UpdateAudio Main.cs:17222 在 DoUpdate 无条件执行）——fade 应继续爬升
+  sfx.stopAmbientCues();
+  visit(g.world.spawnY - 6);
+  await sleep(300);
+  g.paused = true;                     // 天气链停更：level/gate 保持地表值不变
+  const f0 = sfx.cueLayers.wind.cue.fade;
+  await sleep(1500);                   // 90 tick → 预期 fade += 0.45
+  res.pausedRamp = {
+    f0: +f0.toFixed(3),
+    f1: +sfx.cueLayers.wind.cue.fade.toFixed(3),
+    deltaExpected: 0.45,
+    gain: sfx.cueLayers.wind.gain ? +sfx.cueLayers.wind.gain.gain.value.toFixed(4) : null,
+  };
+  g.paused = false;
 
   // 额外：windSpeedCurrent 自然值分布快照（探针改过 target，读回自然漂移前的 current）
   res.windTarget = wd.windSpeedTarget;

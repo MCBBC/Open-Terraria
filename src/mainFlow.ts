@@ -343,6 +343,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         };
       }
     }
+    // 装备族栈消毒（旧档可携带多叠装备——两次入槽门修复前产生；钳 1）
+    Inventory.sanitizeEquipStacks(g.player.inv);
     if (player.currentLoadout !== undefined) g.player.inv.currentLoadout = player.currentLoadout;
     g.player.inv.selected = player.selected;
     // 玩家储物×4 回填（29/97/463/491；旧档缺省全空）
@@ -380,7 +382,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   /** 角色随身态应用(原版 .plr 语义:背包/装备/储物/buff 等便携字段随角色跨世界;
-   *  位置不随身——保留世界档位置,新世界=出生点)。
+   *  位置不随身——★进世界恒落出生点(Main.cs:6800 Spawn(SpawningIntoWorld)→
+   *  FindSpawn :37133,存档位置不用于落点;世界时间随世界档续),新世界同理)。
    *  无角色态(新角色/旧角色未玩过/角色已删)→ 回退世界档内嵌 player。
    *  备案:①联机房间路径只带外观不带随身态(服务器权威库存是独立系统);
    *  ②journeyPowers 字段随态存储但 applyPlayer 不应用(本仓旅程力量落世界档,
@@ -394,15 +397,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // 维持旧共享桶，首个加载角色一次性收编旧桶）
     g.research.usePlayerProfile(cid);
     const cs = cid != null ? await charStore.getState(cid) : null;
-    // 位置取世界档内嵌 player(worker 路径 loadWorld 的 playerAt 已同值;主线程
-    // 回退路径无 playerAt,取 g.player 会被钉在出生点——统一以 worldPlayer 为准)
-    const px = worldPlayer ? worldPlayer.x : g.player.x;
-    const py = worldPlayer ? worldPlayer.y : g.player.y;
+    // ★位置恒出生点(loadWorld 的 playerAt 已钉出生点,此处取 g.player 保持同值;
+    //  曾以世界档内嵌位置为准——原版 .plr 位置不用于进世界落点,2026-08-24 校正)
+    const px = g.player.x;
+    const py = g.player.y;
     if (cs) {
       applyPlayer(g, { ...playerFromDiskForm(cs), x: px, y: py });
       applyCharJourney(g, cs);
     } else if (worldPlayer) {
-      applyPlayer(g, worldPlayer);
+      applyPlayer(g, { ...worldPlayer, x: px, y: py });
     }
   }
 
@@ -458,7 +461,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           });
           const g = makeGame();
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
-          await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: (player as { x?: number }).x ?? world.spawnX * 16, y: (player as { y?: number }).y ?? world.spawnY * 16 } });
+          // ★进世界恒出生点(Main.cs:6800 Spawn(SpawningIntoWorld),存档位置不用于落点)
+          await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: world.spawnX * 16, y: world.spawnY * 16 } });
           await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
@@ -492,7 +496,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           });
           const g = makeGame();
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
-          await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: (player as { x?: number }).x ?? world.spawnX * 16, y: (player as { y?: number }).y ?? world.spawnY * 16 } });
+          // ★进世界恒出生点(Main.cs:6800 Spawn(SpawningIntoWorld),存档位置不用于落点)
+          await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: world.spawnX * 16, y: world.spawnY * 16 } });
           await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
@@ -936,7 +941,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
         else {
           quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
-          // ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved', where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : Lang.text('Mods.SandboxWorld.Save.Local')));
+          // 保存成功提示（2026-08-24 用户要求;曾因 Toast.Saved 键缺失注释——键已补）
+          ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved',
+            where === 'idb' ? mb.toFixed(1) + ' MB · IndexedDB' : 'localStorage'));
         }
       }).catch((e) => {
         console.error('kvSet failed', e);

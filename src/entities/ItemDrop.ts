@@ -207,10 +207,16 @@ export class ItemDrop extends Entity {
           // 音量略低（0.75）：拾取与挖掘声同时触发时两者都可闻，不被 Grab 盖住
           game.playSfx(coinIndexOf(this.itemId) >= 0 ? 'coin' : 'pickup', 0.75);
           const def = ITEM_DEFS[this.itemId];
-          if (def) game.showPickupLabel(def.key);
+          // 飘字计数（PopupText.NewText :38609）：picked = 实际入包数
+          if (def) game.showPickupLabel(def.key, before);
           return;
         }
-        if (left !== before) game.notifyInventoryChanged();
+        if (left !== before) {
+          game.notifyInventoryChanged();
+          // 部分拾取（背包该堆被填满）同样飘字（:38623——picked = 填入的差额）
+          const def = ITEM_DEFS[this.itemId];
+          if (def) game.showPickupLabel(def.key, before - left);
+        }
         this.stack = left;
       } else if (inGrabRange) {
         // PullItem_Common(:34533-34584):每轴 0.45 步进、钳 4(水平含 player.vx),

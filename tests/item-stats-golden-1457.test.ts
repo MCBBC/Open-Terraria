@@ -93,6 +93,10 @@ describe('Item 数值三方对账金标(json × 1456 × 1457)', () => {
       // 局部免疫帧列（usesLocalNPCImmunity+localNPCHitCooldown,提取器不展开的直写/恒走臂）
       'proj[76].localNPCHitCooldown', 'proj[77].localNPCHitCooldown', 'proj[78].localNPCHitCooldown',
       'proj[301].localNPCHitCooldown', 'proj[309].localNPCHitCooldown',
+      // ★R25-⑤ 免疫帧闸门扩面（债 9）：<1111 的两发旧弹入 NON_LITERAL_57 断言面
+      // （提取器 NUM_FIELDS 无该列→classB 以"1456=null→1457=N"形态出现,须在此锚定;
+      //   ≥1111 新弹族由 NEW_ID_FLOOR.proj 豁免,无需逐条列出）
+      'proj[639].localNPCHitCooldown', 'proj[932].localNPCHitCooldown',
     ]);
     const unexpected: string[] = [];
     for (const line of r.classB) {

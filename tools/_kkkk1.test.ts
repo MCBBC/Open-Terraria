@@ -85,6 +85,12 @@ function labelOf(file: string, line: number): string {
       armed = false;
       // KKKKKKK 网格窗快照：SW_K1_WIN=x0:y0:x1:y1 → 打印 sheet/act（post-Dungeon 态）
       const win = (process.env.SW_K1_WIN ?? '').split(':').map(Number);
+      if (process.env.SW_K1_DUMP && storeRef) {
+        const st2 = storeRef as unknown as { type: Uint16Array; flags: Uint8Array };
+        writeFileSync(process.env.SW_K1_DUMP + '.typ', Buffer.from(st2.type.buffer.slice(0)));
+        writeFileSync(process.env.SW_K1_DUMP + '.act', Buffer.from(st2.flags.slice(0)));
+        console.log(`[k1] grid dump → ${process.env.SW_K1_DUMP}.{typ,act}`);
+      }
       if (win.length === 4 && storeRef && win.every(Number.isFinite)) {
         const [x0, y0, x1, y1] = win as [number, number, number, number];
         for (let y = y0; y <= y1; y++) {

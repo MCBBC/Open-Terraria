@@ -46,8 +46,10 @@ const out = await page.evaluate((key) => {
   if (origUS) g.useSwing = (...a) => { calls.useSwing++; if (calls.useSwing > 2 && calls.useSwing < 6) { calls['stack' + calls.useSwing] = new Error().stack.split('\n').slice(2, 5).join(' | ').slice(0, 400); } try { return origUS(...a); } catch (e) { calls.err = String(e).slice(0, 200); throw e; } };
   const trace = [];
   for (let t = 0; t < 120; t++) {
-    g.input.mouseDown = true; g.input.mouseHeld = true;   // 模拟连续挥动(每 tick 重按)
-    if (t < 14) trace.push({ t, pre: { md: g.input.mouseDown, ut: g.player.useTime, swT: g.swing?.t ?? null, swDur: g.swing?.dur ?? null } });
+    // 真实按住语义:mouseDown 仅首拍真(链上发射即消费),mouseHeld 电平保持
+    if (t > 0) g.input.mouseDown = false;
+    g.input.mouseHeld = true;
+    if (t < 14) trace.push({ t, pre: { md: g.input.mouseDown, mh: g.input.mouseHeld, ut: g.player.useTime, swT: g.swing?.t ?? null, swDur: g.swing?.dur ?? null } });
     g.fixedUpdate(1 / 60);
     if (t < 14) trace[t].post = { md: g.input.mouseDown, ut: g.player.useTime, swT: g.swing?.t ?? null, ucw: calls.useCombatWeapon, shots: shots.length };
     const cur = snap();

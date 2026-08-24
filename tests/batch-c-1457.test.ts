@@ -371,6 +371,7 @@ describe('YoyoShotProj(EverySomeYoyoHits 伴生弹,Projectile.cs:10530-10670 Set
     const e = mkEnemy(1, 795, 795);
     const g = makeHooks([e]);
     const a = new YoyoShotProj({ x: 800, y: 800, vx: 1, vy: 0, projId: 1125, dmg: 100, kb: 2, scale: 1.2 });
+    a.critChance = 0;   // 钉死确定性（默认 0.04 暴击 ×2 伤害=4% 偶发 200≠100）
     let ticks = 0;
     while (!a.dead && ticks < 40) { a.fixedUpdate(1 / 60, g); ticks++; }
     expect(ticks).toBeLessThanOrEqual(11);

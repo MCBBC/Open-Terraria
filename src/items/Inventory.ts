@@ -574,6 +574,25 @@ export class Inventory {
   }
 
   /** 旧布局（≤53 槽 + 盔甲/时装/配饰内嵌）→ 新布局迁移（读档调用） */
+  /** 装备族槽栈消毒（读档/联机快照恢复用，2026-08-24）：装备/时装/染料/杂项/
+   *  配装数组恒容 1 件——旧档（2026-08-13 右键门/今日拖放门前产生）可携带多叠
+   *  装备，切换配装/GetEffectiveArmor 共享会整叠上身。原版存档不可能出现该形态
+   *  （ItemSlot case1/2 全链封顶），钳 1 无损 */
+  static sanitizeEquipStacks(inv: {
+    armor: Array<InvItem | null>; dye: Array<InvItem | null>;
+    miscEquips: Array<InvItem | null>; miscDyes: Array<InvItem | null>;
+    loadouts: Array<{ armor: Array<InvItem | null>; dye: Array<InvItem | null>; hide?: boolean[] }>;
+  }): void {
+    const clamp = (arr: Array<InvItem | null>) => {
+      for (let i = 0; i < arr.length; i++) {
+        const it = arr[i];
+        if (it && it.stack > 1) it.stack = 1;
+      }
+    };
+    clamp(inv.armor); clamp(inv.dye); clamp(inv.miscEquips); clamp(inv.miscDyes);
+    for (const lo of inv.loadouts) { clamp(lo.armor); clamp(lo.dye); }
+  }
+
   static migrateLegacy(legacy: Array<{ id: number; stack: number } | null>): {
     slots: Array<InvItem | null>; armor: Array<InvItem | null>;
   } {

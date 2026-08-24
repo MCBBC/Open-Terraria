@@ -264,6 +264,33 @@ export async function recon() {
       '125': { friendly: true, timeLeft: 300, localNPCHitCooldown: 60 },
       '126': { friendly: true, timeLeft: 300, localNPCHitCooldown: 60 },
       '597': { friendly: true, timeLeft: 300, localNPCHitCooldown: 60 },
+      // ★R25-⑤ 闸门扩面（红队债 9）：1457 免疫帧列手补族入断言面。提取器 NUM_FIELDS
+      //   不含 localNPCHitCooldown/idStaticNPCHitCooldown——裸重跑即整列抹除,此前仅
+      //   台账自保无自动化护栏。值已对照 Terarria1457 与 Terarria1458 双树 SetDefaults
+      //   逐条核对一致（行号=1457 P.cs,与 src/data/vanillaProjectiles.ts 手补台账同源）。
+      //   三元组的 usesLocalNPCImmunity/usesIDStaticNPCImmunity 布尔腿在本仓数据模型中
+      //   以冷却列【在场】编码（ProjectileData 头注）,且 vanilla 每处 uses*=true 均伴随
+      //   显式冷却字面量（双树全查实证）→ 钉数值列 = 同锁布尔腿,列被抹即 DRIFT 爆红。
+      '639': { localNPCHitCooldown: -1 },      // :6594-6610 MaxUpdates=2/timeLeft=MaxUpdates*45 永久局部免疫
+      '932': { localNPCHitCooldown: 60 },      // :8570-8572
+      '1112': { localNPCHitCooldown: 9 },      // :10375-10376
+      '1115': { localNPCHitCooldown: -1 },     // :10412-10413
+      '1116': { localNPCHitCooldown: -1 },     // :10425-10426
+      '1118': { localNPCHitCooldown: 30 },     // :10462-10463
+      '1119': { localNPCHitCooldown: 30 },     // :10477-10478
+      '1120': { localNPCHitCooldown: 60 },     // :10487-10488
+      '1121': { localNPCHitCooldown: 60 },     // :10498-10499
+      '1122': { idStaticNPCHitCooldown: 10 },  // :10449-10450（全场同型一张表→ID_STATIC_1122）
+      '1125': { localNPCHitCooldown: -1 },     // :10543-10544
+      '1126': { localNPCHitCooldown: -1 },     // :10554
+      '1127': { localNPCHitCooldown: -1 },     // :10559
+      '1128': { idStaticNPCHitCooldown: 30 },  // :10569
+      '1129': { localNPCHitCooldown: -1 },     // :10583
+      '1130': { localNPCHitCooldown: -1 },     // :10614
+      '1131': { localNPCHitCooldown: 60 },     // :10625
+      '1132': { localNPCHitCooldown: 60 },     // :10636
+      '1134': { idStaticNPCHitCooldown: 20 },  // :10668
+      '1135': { idStaticNPCHitCooldown: 10 },  // :10679
     },
   };
   const seenSurface = new Set(surfaces.map((s) => `${s.file}:${s.id}:${s.field}`));

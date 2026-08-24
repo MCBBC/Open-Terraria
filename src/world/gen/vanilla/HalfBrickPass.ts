@@ -764,6 +764,9 @@ function shouldTileSurviveKT(st: TileStore, x: number, y: number): boolean {
  *  LavaLayerCaverer（cs:74066 KillTile）的雕刻支同模型——尘掷流位+尾
  *  SquareTileFrame 级联必须一致，勿在新 pass 重写近似版。 */
 export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
+  // ★KKKKKKK 诊断钩（用后即删）：killTile 尝试日志
+  const kkp = (globalThis as { __kkkKT?: (x: number, y: number) => void }).__kkkKT;
+  if (kkp) kkp(x, y);
   const i = st.idx(x, y);
   if (!st.flags[i]) return;                    // cs:63568 !active 早退（零掷零写）
   const sheet = SHEET_OF[st.type[i]] ?? -1;

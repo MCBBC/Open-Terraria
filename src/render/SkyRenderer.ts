@@ -26,6 +26,7 @@ function eventTintedSprite(
   tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number, family: string,
 ): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
+  if (!texReady(tex)) return null;   // ★半加载窗守卫（2026-08-24 方片竞态同洞加固）
   const key = `${family}:${texId(tex as object)}:${r >> 4},${g >> 4},${b >> 4}`;
   const hit = EVENT_TINT_CACHE.get(key);
   if (hit) {
@@ -59,7 +60,7 @@ import { shade, mix } from '../assets/Palette';
 import { LanternNight } from '../world/LanternNight';
 import { UnifiedRandom } from '../core/rng';
 import type { GLSpriteLayer } from './GLSpriteLayer';
-import { texId } from './texId';
+import { texId, texReady } from './texId';
 import { horizonPhaseOf, sunColorOf, moonDrawColor } from '../lighting/Horizon';
 import { applyBiomeToSun, applyBiomeToMoon } from '../lighting/SkyColor';
 import { AuroraSky } from './AuroraSky';
@@ -760,6 +761,10 @@ const SUNFLARE_TEX_FILE: Record<SunflareTex, string> = {
 const flareTintCache = new Map<string, HTMLCanvasElement>();
 function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
+  // ★半加载窗守卫（2026-08-24 方片竞态）：元数据已到（width>0）但主体未完时
+  //  drawImage 画不出内容——不守卫会把平色矩形烘进下方缓存永久复用（用户实报
+  //  "光斑变方片,刷新自愈"）。未就绪本帧跳过,就绪后自然重烘。
+  if (!texReady(tex)) return null;
   const key = `${texId(tex)}|${r},${g},${b}`;
   const hit = flareTintCache.get(key);
   if (hit) return hit;
@@ -778,12 +783,19 @@ function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: nu
   // 黑背景加性=不可见）；canvas drawImage+lighter 下黑背景不透明=巨大"方片"
   // （用户三份报告）。加性语义的 canvas 等价：α=max(rgb)（黑=透明，亮=不透明），
   // lighter 只加 RGB 与原版逐位等价。逐像素一次烘焙进缓存，运行时零开销。
+  // ★平色拒烘（2026-08-24 竞态第二道闸）：全图 max(rgb) 恒定 = 贴图根本没画上
+  //  （半加载残余/解码失败）——真实光斑贴图全是径向渐变必有 0..255 方差,平色
+  //  一律弃（不入缓存返回 null,下帧重试）
   const img = cx.getImageData(0, 0, c.width, c.height);
   const d = img.data;
+  let mMin = 255, mMax = 0;
   for (let i = 0; i < d.length; i += 4) {
     const m = d[i] > d[i + 1] ? (d[i] > d[i + 2] ? d[i] : d[i + 2]) : (d[i + 1] > d[i + 2] ? d[i + 1] : d[i + 2]);
     d[i + 3] = m;
+    if (m < mMin) mMin = m;
+    if (m > mMax) mMax = m;
   }
+  if (mMin === mMax) return null;
   cx.putImageData(img, 0, 0);
   flareTintCache.set(key, c);
   if (flareTintCache.size > 24) {
@@ -1300,7 +1312,7 @@ export class SkyRenderer {
   horizonPhase = 0;
   /** 通用染色缓存(multiply+destination-in 三步,键=用途+纹理id+8 量化色) */
   private tintCache2 = new Map<string, HTMLCanvasElement>();
-  private tintTex(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number, use: string): HTMLCanvasElement | HTMLImageElement {
+  private tintTex(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number, use: string): HTMLCanvasElement | HTMLImageElement | ImageBitmap {
     // ★键 = 4 单位量化（2026-08-24 canvas 哨兵实报雪崩：晨昏时间流动使 r/g/b
     //  每 tick 微变 → 精确键永不命中 → 每帧 createElement + 64 满清 clear-all
     //  = 32/s 分配率）。4/255≈1.6% 亮度差肉眼不可辨；64 上限 clear-all 改
@@ -1308,6 +1320,9 @@ export class SkyRenderer {
     const key = `${use}:${texId(tex as object)}:${(r | 0) & ~3},${(g | 0) & ~3},${(b | 0) & ~3}`;
     let c = this.tintCache2.get(key);
     if (c) return c;
+    // ★半加载窗守卫（2026-08-24 同洞加固）：未就绪本帧退回原贴图（调用方本就
+    //  有原图快路径,一帧原色自愈），绝不把平色矩形烘进缓存
+    if (!texReady(tex)) return tex;
     c = document.createElement('canvas');
     c.width = tex.width; c.height = tex.height;
     const tc = c.getContext('2d')!;
@@ -3294,10 +3309,11 @@ export class SkyRenderer {
 
   /** GetVisibilities（NextHorizonRenderer.cs:199-239 一比一）：
    *  atmo ×(1-cloudAlpha)² ×(1-蘑菇光影响[无→1])；日出窗 = time∈(0,2700)↑·(3600,10800)↓；
-   *  日落窗 = 54000−10800..−3600 ↑ 与 −3600..54000 ↓²；夜/日食清零 */
+   *  日落窗 = 54000−10800..−3600 ↑ 与 −3600..54000 ↓²；夜/日食清零。
+   *  nightTicks = 夜段独立计数（Main.time 夜间 dusk→dawn 走 0..32400） */
   private sunVisibilities(dayTimeTicks: number, isDay: boolean, eclipse: boolean, atmo: number,
-    cloudAlpha: number, mushroom = 0): { sunset: number; sunrise: number; celestial: number } {
-    const celestial = this.celestialEffectPower(dayTimeTicks, isDay);   // :315-325
+    cloudAlpha: number, mushroom = 0, nightTicks = 0): { sunset: number; sunrise: number; celestial: number } {
+    const celestial = this.celestialEffectPower(dayTimeTicks, isDay, nightTicks);   // :315-325
     let vis = atmo * (1 - cloudAlpha) * (1 - cloudAlpha);               // :205-209
     vis *= 1 - mushroom;                                                // :210(蘑菇影响)
     let sunrise = vis, sunset = vis;
@@ -3314,12 +3330,16 @@ export class SkyRenderer {
     return { sunset, sunrise, celestial };
   }
 
-  /** GetCelestialEffectPower（:315-325）：天体高度驱动的整体强度 */
-  private celestialEffectPower(dayTimeTicks: number, isDay: boolean): number {
+  /** GetCelestialEffectPower（NextHorizonRenderer.cs:315-325）：天体高度驱动的整体强度。
+   *  ★夜支的 Main.time 是夜段独立计数（dusk→dawn 0..32400,cs:324）——曾误传昼 ticks
+   *  （夜间恒 0 → remap(0,0,3600)=0）→ 夜间天体强度恒 0,月亮照云
+   *  （CloudsEnd :342 uColor=moonColor / :350 intensity≥celestial×0.15）整链失效,
+   *  云天体光照只剩白天支（2026-08-24 用户实报"月亮没有照云"探针定谳） */
+  private celestialEffectPower(dayTimeTicks: number, isDay: boolean, nightTicks = 0): number {
     if (isDay) {
       return remap(dayTimeTicks, 0, 3600, 0, 1) * remap(dayTimeTicks, 54000 - 1800, 54000, 1, 0);
     }
-    return remap(dayTimeTicks, 0, 3600, 0, 1) * remap(dayTimeTicks, 32400 - 1800, 32400, 1, 0);
+    return remap(nightTicks, 0, 3600, 0, 1) * remap(nightTicks, 32400 - 1800, 32400, 1, 0);
   }
 
   private sunflareTexLoad(key: SunflareTex): ImageBitmap | HTMLImageElement | null {
@@ -3439,7 +3459,7 @@ export class SkyRenderer {
     ];
     for (const [key, repeat, scaleStart, scaleOver, distStart, distStep, rgb, mul, ioi, rot] of sets) {
       const tex = this.sunflareTexLoad(key);
-      if (!tex || !(tex.width > 0) || !tex.width) continue;
+      if (!tex || !texReady(tex)) continue;   // ★texReady：width>0 挡不住半加载窗（方片竞态）
       const sprite = tintedFlareSprite(tex, rgb[0], rgb[1], rgb[2]);   // Color 乘子（lighter 下呈色相）
       if (!sprite) continue;
       for (let i = 0; i < repeat; i++) {
@@ -3617,10 +3637,12 @@ export class SkyRenderer {
     const dayTimeTicks = isDay ? ((t - ClockVal.DAWN) / 0.625) * 54000 : 0;
     // 晨昏可见性(GetVisibilities :217-256,复用既有 sunVisibilities 单实现)
     // +调色板相位(Main.HorizonPhase)——日/月绘制、晨昏渐变与 Renderer.
-    // setFrameHorizon(光种渗入)共用;镜头光斑走 drawWorldFx 链不变
+    // setFrameHorizon(光种渗入)共用;镜头光斑走 drawWorldFx 链不变。
+    // nightTicks = 夜段独立计数(Main.time 夜间语义,celestialEffectPower 夜支吃这个)
+    const nightTicks = isDay ? 0 : ((((t - ClockVal.DUSK) + 1) % 1) / 0.375) * 32400;
     this.horizonVisCache = this.sunVisibilities(dayTimeTicks, isDay, !!clock.eclipse,
       this.atmoValue(camY), this.weatherRef?.cloudAlpha ?? 0,
-      this.frameCtx?.scene?.biomeLightInfluence?.mushroom ?? 0);
+      this.frameCtx?.scene?.biomeLightInfluence?.mushroom ?? 0, nightTicks);
     this.horizonPhase = horizonPhaseOf(Math.max(0, Math.min(7, clock.moonPhase ?? 0)), isDay, dayTimeTicks);
     // CloudsEnd(HorizonClouds shader)输入态缓存:月相/昼夜(SkyRenderer.drawCloudPass 区消费)
     this.lastMoonPhase = Math.max(0, Math.min(7, clock.moonPhase ?? 0));

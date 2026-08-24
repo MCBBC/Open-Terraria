@@ -394,6 +394,7 @@ const PROJ_SPIN: Record<number, (a: Arrow) => number> = {
   772: a => Math.sign(a.vx) * (Math.abs(a.vx) + Math.abs(a.vy)) * 0.05,
   94: a => a.vx * 0.2,
   95: a => 0.3 * (a.vx < 0 ? -1 : 1),
+  1114: a => a.vx * 0.2,                                             // 日耀花弹（AI_024 :26285 rotation += vx×0.2 全族）
   424: a => a.vx * 2,
   90: a => a.vx * 0.2,
   92: a => Math.sign(a.vx || 1) * (Math.abs(a.vx) + Math.abs(a.vy)) * 0.01,
@@ -706,6 +707,9 @@ export class Arrow extends Entity {
   private gemTrail: number[] = [];
   /** oldPos 拖尾环（彩虹拖尾 Main.cs:32495-32513 沿 oldPos 逐段绘制，N=10） */
   private meowTrail: number[] = [];
+  /** aiStyle 24 书族 oldPos 环（94 水晶风暴/95 诅咒之焰/1114 日耀花——Main.cs:35251/
+   *  :35299 十份渐隐拷贝沿 oldPos 绘制,缩放/色各 ×(9−i)/9,N=10） */
+  private starTrail: number[] = [];
   /** 迪斯科 RGB（DoUpdate_AnimateDiscoRGB Main.cs:19441 六段 ±7/帧；初值 R=255） */
   private discoR = 255;
   private discoG = 0;
@@ -1308,6 +1312,31 @@ export class Arrow extends Entity {
         }
       }
     }
+    // ---- aiStyle 24 书族十份 oldPos 渐隐拖尾（Main.cs:35251 94/:35299 1114——
+    //      ai[1]>6 起沿 oldPos[0..9] 绘制,缩放/RGBA 各 ×(9−i)/9,GetAlpha=(200,200,200,25)
+    //      本仓 200-RGB-as-alpha 口径 0.78×k;本体之下=先画）----
+    if ((this.projId === 94 || this.projId === 95 || this.projId === 1114) && this.age > 6
+      && this.starTrail.length >= 4) {
+      const imgT = projSprite(this.projId);
+      if (imgT && (imgT.width > 0)) {
+        const baseA = this.drawGlobalAlpha() ?? 1;
+        const pts = this.starTrail;
+        const m = pts.length / 2;
+        const sc = this.projId === 1114 ? 1.2 : 1;
+        for (let i = 0; i < Math.min(10, m - 1); i++) {
+          const k = 1 - i / 10;                      // newest 1.0 → oldest 0.1
+          const px = pts[(m - 1 - i) * 2], py = pts[(m - 1 - i) * 2 + 1];
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, Math.min(1, baseA * k));
+          ctx.translate(px + this.w / 2, py + this.h / 2);
+          ctx.rotate(this.spinRot);
+          ctx.drawImage(imgT, -imgT.width * sc * k / 2, -imgT.height * sc * k / 2,
+            imgT.width * sc * k, imgT.height * sc * k);
+          ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
     // alpha 通道（修复4）：GetAlpha 近似 → globalAlpha（present/phantasm/piranha 等
@@ -1665,6 +1694,16 @@ export class Arrow extends Entity {
       this.vy = Math.min(this.vy + this.grav2, this.maxFall);
     }
     if (this.dragAlways !== 0) this.vx *= this.dragAlways;
+    // ---- aiStyle 24 书族（94/95/1114）oldPos 环推进（Main.cs:35251/:35299 消费）----
+    if (this.projId === 94 || this.projId === 95 || this.projId === 1114) {
+      this.starTrail.push(this.x, this.y);
+      if (this.starTrail.length > 20) this.starTrail.splice(0, this.starTrail.length - 20);   // oldPos 10 点
+    }
+    // 1114 尘迹（AI_024 :26322-26330）：1/4 tick 尘 57 noGravity 速度×0.5 缩×0.9
+    //（金色星光=日耀花视觉主体；noLight 尘不进光照,spawnParticles 近似）
+    if (this.projId === 1114 && this.age % 4 === 0) {
+      game.spawnParticles(this.cx, this.cy, '#FFD966', 1, 0.5, { life: 18, grav: 0 });
+    }
     // ---- 沙球族（aiStyle 10，AI_010 :54890-55160）：沙枪 266 无 channel 旗
     //      （Item.cs:4486-4502 case 266 全段无 channel）→ 出生即 ai[0]=1 直飞档，
     //      ai[1]≥60 update 后 vy+0.2/update（:55066-55075，42/65/68/354 专属——
@@ -3809,5 +3848,11 @@ export function harpyCharmEffect(game: GameHooks, player: HarpyCharmPlayer): voi
       : player.equipStats.accSeraphNecklace ? 6180 : 6166;
     best.applyHarpyCharm(target.cx, target.cy, itemVid);
     player.accHarpyCharmCooldown = cd;
+    // ★R25-⑦ 音效段先行（Spawn_HarpyCharm,ParticleOrchestrator1458.cs:477-504）：
+    //   默认 SoundID.Item39（6166 鹰妖护符/6180 炽天使项链）、flag=6181 凤凰箭袋→
+    //   SoundID.Item20；SoundEngine.PlaySound(type, 弹体位置, pitch 0/vol 1)。
+    //   粒子族（FadingParticle 双环带 num2×4/num3×3、6181/6180 ×2 与 PrettySparkle）
+    //   待 FadingParticle 原语另批（R15-17 登记维持）。
+    game.playSfxWav?.(itemVid === 6181 ? 'Item_20' : 'Item_39', 1, best.cx, best.cy);
   }
 }

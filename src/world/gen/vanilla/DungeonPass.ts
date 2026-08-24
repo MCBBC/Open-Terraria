@@ -266,8 +266,14 @@ interface DPlat { x: number; y: number; hall: boolean; hf: number;
 
 /** #32 Dungeon pass（1456 1:1，与 caves-oracle.cs 同构）。snap 回调用于逐段检查点。 */
 export function runDungeonPass(
-  st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, snap: SnapFn = () => {},
+  st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, snapRaw: SnapFn = () => {},
 ): void {
+  // ★KKKKKKK 段级网格观察钩（诊断用，常态零开销）：globalThis.__dgSegWatch=(name,st)=>…
+  const segWatch = (globalThis as { __dgSegWatch?: (name: string, s2: TileStore) => void }).__dgSegWatch;
+  const snap: SnapFn = (name) => {
+    snapRaw(name);
+    if (segWatch) segWatch(name, st);
+  };
   // ★MakeDungeon 头 SetCrackedBrickSolidity(false)（DungeonCrawler.cs:344）——裂纹砖族
   //   481/482/483 自本 pass 起恒非实心（还原点 SmoothWorld 头 cs:16510 在 Beaches 之后，
   //   不在本段覆盖范围；oracle 同构内联 SOLID.Remove 于 caves-oracle.cs）。CaveWallsPass

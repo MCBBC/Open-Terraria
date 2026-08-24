@@ -110,8 +110,7 @@ const result = await page.evaluate(async (md) => {
     const wx = cam.x + (s.sx - W / 2) / cam.zoom;
     return { ...s, tx: Math.floor(wx / 16) };
   });
-  return { seamCount: outSeams.length, seams: outSeams.slice(0, 10), player: [Math.floor(pl.cx / 16), Math.floor(pl.cy / 16)], gy, sampled };
-  return { seamCount: outSeams.length, seams: outSeams.slice(0, 10), player: [Math.floor(pl.cx / 16), Math.floor(pl.cy / 16)], gy };
+  return { seamCount: outSeams.length, seams: outSeams.slice(0, 10), player: [Math.floor(pl.cx / 16), Math.floor(pl.cy / 16)], sampled };
 }, MAPDATA);
 console.log(JSON.stringify(result));
 await page.screenshot({ path: '/tmp/userworld.png' });
