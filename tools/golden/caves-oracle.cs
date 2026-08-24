@@ -6314,6 +6314,19 @@ if (dgEntKind != 0)
             }
         }
     }
+    // ★GGGGGGGG ②R11-D3 对齐（2026-08-24；DC.cs:337-341，1456 :322-323 同构——两版皆有，
+    //   oracle/JS 曾双缺）：precalc 搜索失败 → 原版回退 Legacy：
+    //   `preGenDungeonEntranceSettings = MakeDungeon_GetEntranceSettings(Legacy, styleData, null)`
+    //   + `dungeonEntrancePosition = Zero`。data==null 支（DC.cs:856）消耗
+    //   `RandomSeed = genRand.Next()` 1 掷=【新 entSeed】（入口构建 :816 取
+    //   preSettings.RandomSeed=此值，Dunes 旧 entSeed 弃用）。★JS R11-D3 此处
+    //   `raw();` 丢弃掷值仍传旧 entSeed=回退路径种子偏差（precalc 成功路径零差，
+    //   备案移交）。失败仍建 Tower/Dome 入口=整栋错型（R11-D3 定性沿用）。
+    if (!dgPrecalcOK)
+    {
+        dgEntSeed = (int)r.Next();
+        dgEntKind = 0;                               // LegacyDungeonEntrance
+    }
 }
 int dgDoorStyle = dungeonTheme == 0 ? 16 : dungeonTheme == 1 ? 17 : 18;        // Item 1411/1412/1413 placeStyle（Item.cs:17460/17472/17484）
 bool dgShadowKey = false, dgRamRune = false;                   // GenVars.generatedShadowKey/RamRune（AddBuriedChest 用）
@@ -7148,7 +7161,58 @@ if (Environment.GetEnvironmentVariable("DGBA_DUMP") != null) {
     File.WriteAllText(Environment.GetEnvironmentVariable("DGBA_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
     return;
 }
-// Late 双地牢特征（Default 无 BiomeDungeonRoom/BrickGrass → 纯空转）
+// Late 双地牢特征（DungeonGlobalLateDualDungeonFeatures）——
+// ★GGGGGGGG ⑥（1457 真值，:49-69 style==0 支新增；1456 该段普通世界纯空转）：
+//   扫 outerProgressionBounds[0]（=LegacyDungeonLayoutProvider.cs:97 布局末回写的
+//   data.dungeonBounds=本 oracle dgBounds）内「门底格」（tile10 活性且下格非 10）
+//   且墙∈[94,105] → KillTile+PlaceTile(10,mute,forced:false,-1,53)=GOTHIC 门替换。
+//   掷流：KillTile 尘掷（门 sheet10=FcDustAmount 默认 10 掷）+尾 SquareTileFrame 九格
+//   派发；PlaceTile 门支锚定成功 → PlaceDoor 3×Next(3)（败则 0 掷）+SquareTileFrame。
+//   命中数 DG_GOTHIC_DOOR_TRACE=1 打点（stderr）。
+{
+    int dggHits = 0;
+    var dggAll = new List<int>();
+    for (int lg = dgBounds.L; lg <= dgBounds.R; lg++)
+        for (int mg = dgBounds.T; mg <= dgBounds.B; mg++)
+        {
+            if (mg + 1 >= H) continue;
+            int ig = mg * W + lg;
+            if (act[ig] == 0 || typ[ig] != 10) continue;
+            int ig2 = (mg + 1) * W + lg;
+            if (act[ig2] != 0 && typ[ig2] == 10) continue;
+            if (wal[ig] >= 94 && wal[ig] <= 105)
+            {
+                dggHits++;
+                dggAll.Add(ig);
+                if (Environment.GetEnvironmentVariable("DG_GOTHIC_DOOR_TRACE") != null && dggAll.Count <= 24)
+                    Console.Error.WriteLine($"DG-GOTHIC-DOOR hit ({lg},{mg}) wal={wal[ig]} belowTyp={typ[ig2]} belowAct={act[ig2]}");
+            }
+        }
+    Console.Error.WriteLine($"DG-GOTHIC-DOOR hits={dggHits}");
+    foreach (int ig in dggAll)
+    {
+            int lg = ig % W, mg = ig / W;
+            FcKillTile(lg, mg);
+            // PlaceTile(l,m,10,mute:true,forced:false,-1,53) 门支（WorldGen.cs:60335-60373）：
+            // 上锚（m-1/m-2 净空+m-3 实心）→ PlaceDoor(l,m-1,53)；否则下锚（m+1/m+2 净空
+            // +m+3 实心）→ PlaceDoor(l,m+1,53)；两锚皆败=return false（零掷）。PlaceDoor
+            // 本体（:32062）：nactive(j-2)实心+SolidTile(j+2) 才落 3 格 3×Next(3)，败=0 掷。
+            bool dggPlaced = false;
+            if (DgInWorld(lg, mg - 1, 0) && act[(mg - 1) * W + lg] == 0 && DgInWorld(lg, mg - 2, 0) && act[(mg - 2) * W + lg] == 0
+                && DgInWorld(lg, mg - 3, 0) && act[(mg - 3) * W + lg] != 0 && SOLID.Contains(typ[(mg - 3) * W + lg]))
+            {
+                dggPlaced = DgPlaceDoorRaw(lg, mg - 1, 53);
+            }
+            else if (DgInWorld(lg, mg + 1, 0) && act[(mg + 1) * W + lg] == 0 && DgInWorld(lg, mg + 2, 0) && act[(mg + 2) * W + lg] == 0
+                && DgInWorld(lg, mg + 3, 0) && act[(mg + 3) * W + lg] != 0 && SOLID.Contains(typ[(mg + 3) * W + lg]))
+            {
+                dggPlaced = DgPlaceDoorRaw(lg, mg + 1, 53);
+            }
+            FcSquareTileFrame(lg, mg);   // PlaceTile 门支尾 SquareTileFrame(i,j)（:60363/:60372 无条件）
+            if (Environment.GetEnvironmentVariable("DG_GOTHIC_DOOR_TRACE") != null)
+                Console.Error.WriteLine($"DG-GOTHIC-DOOR placed ({lg},{mg}) ok={dggPlaced}");
+    }
+}
 Checkpoint("dungeon"); DgFlow("END");   // #32 转录落地（原 slush 同态占位已替换）
 // —— Dungeon pass 流指纹（passchain 第 6 列口径：pass 末 Main.rand 态 FNV-1a
 //    over SeedArray[56]+inext；x86 真值 f890f8a6，seed 9293480/evil0）——
@@ -7333,7 +7397,13 @@ void DgRoom(DRoom s)
             {
                 int i = y * W + x;
                 liq[i] = 0;
-                if (!DgIsDW(wal[i])) DgChTile(i, (ushort)dgBrick, true);   // IsHigherOrEqualTieredDungeonWall
+                // ★GGGGGGGG ③（LegacyDungeonRoom.cs:263-268，1457 重构）：resetTile 计算化——
+                //   盒缘格（x==x0||x==x1-1||y==y0||y==y1-1）ChangeTileType(resetTile:false)
+                //   =砖覆盖但【墙保留】；1456 恒 resetTile:true=ClearEverything 墙清零
+                //   （walls 通道真实差，1456→1457 行为变更清单④）。内部格两版同（reset:true）。
+                //   CanPlaceTileAt 的 wall==350 门普通世界无操作（地牢域无微光保护墙）。
+                bool dgReset = x >= x0 + 1 && x < x1 - 1 && y >= y0 + 1 && y < y1 - 1;
+                if (!DgIsDW(wal[i])) DgChTile(i, (ushort)dgBrick, dgReset);   // IsHigherOrEqualTieredDungeonWall
             }
         for (int x = x0 + 1; x < x1 - 1; x++)
             for (int y = y0 + 1; y < y1 - 1; y++)
@@ -7583,7 +7653,12 @@ void DgHall(DHall s)
                 if (prot == 3) continue;
                 bool f16 = prot != 1;
                 liq[i] = 0;
-                if (f16 && y <= (H - 200) + 7 && DgCanPlaceTileAt(i)) DgChTile(i, (ushort)dgBrick, true);
+                // ★GGGGGGGG ④（LegacyDungeonHall.cs:756-759，1457）：resetTile 计算化——
+                //   走廊砖盒缘格 resetTile:false=墙保留（1456 恒 true=ClearEverything 墙清零）。
+                //   与房间③同款语义；入口走廊（LegacyEntranceDungeonHall）1457 无此改
+                //   （ex-IL diff 零差实证）不套用。
+                bool dgReset = x >= x0 + 1 && x < x1 - 1 && y >= y0 + 1 && y < y1 - 1;
+                if (f16 && y <= (H - 200) + 7 && DgCanPlaceTileAt(i)) DgChTile(i, (ushort)dgBrick, dgReset);
             }
         for (int x = x0 + 1; x < x1 - 1; x++)
             for (int y = y0 + 1; y < y1 - 1; y++)
@@ -9227,6 +9302,25 @@ void DgPlaceDoorAt(int i2, int j2, int style)
         frY[ti] = (ushort)(54 * (style % 36) + (k + 1) * 18);
     }
 }
+// ★GGGGGGGG ⑥：PlaceDoor 裸转录（WorldGen.cs:32062-32092）——nactive(j-2) 实心 +
+//   SolidTile(j+2) 门，落 3 格各 1×Next(3)（败=0 掷零写）；尾 SquareTileFrame 由
+//   PlaceTile 门支调用点无条件派发（:60363/:60372），故本函数不含。与 DgPlaceDoorAt
+//   差异=本函数带 PlaceDoor 本体的 nactive(+!inActive) 腿与 bool 返回（Late 门替换用）。
+bool DgPlaceDoorRaw(int i2, int j2, int style)
+{
+    if (!DgInWorld(i2, j2 - 2, 0) || !DgInWorld(i2, j2 + 2, 0)) return false;
+    if (!(act[(j2 - 2) * W + i2] != 0 && inAct[(j2 - 2) * W + i2] == 0 && SOLID.Contains(typ[(j2 - 2) * W + i2]))) return false;
+    if (!DgSolid(i2, j2 + 2)) return false;
+    int dgn3 = 54 * (style / 36), dgn4 = 54 * (style % 36);
+    for (int k = -1; k <= 1; k++)
+    {
+        int ti = (j2 + k) * W + i2;
+        act[ti] = 1; typ[ti] = 10;
+        frX[ti] = (ushort)(dgn3 + r.Next(3) * 18);
+        frY[ti] = (ushort)(dgn4 + (k + 1) * 18);
+    }
+    return true;
+}
 // —— DungeonGlobalWallVariants（:1149-1252）——
 void DgWallVariants()
 {
@@ -9929,11 +10023,16 @@ void DgLights()
                     bool blocked = false;
                     for (int k = 0; k < 15; k++) if (DgInWorld(x, cy + k, 0) && DgSolid(x, cy + k)) { blocked = true; break; }
                     if (lgTr) Console.WriteLine($"DG CH x={x} cy={cy} blocked={(blocked ? 1 : 0)}");
-                    // ★2026-08-16 审计 B4：cs:77-78 吊灯支要求 GetStyleForWall!=null ——
-                    //   Default 样式 WallIsInStyle 仅 wall==主砖墙命中，变体墙(94-99)
-                    //   返 null → 跳过吊灯直接落灯笼。曾变体墙也试吊灯（Next(7) 掷序
-                    //   两侧一致，仅放置集分叉）。
-                    if (!blocked && wal[cy * W + x] == dgWall && DgPlaceChand(x, cy))
+                    // ★2026-08-16 审计 B4：cs:77-78 吊灯支要求 GetStyleForWall!=null。
+                    // ★GGGGGGGG ⑤（1457 真值，DungeonGenerationStyles.GetStyleForWall:745-766
+                    //   重构）：Style==0 快路径 `Main.wallDungeon[wall]` 全族命中（7/8/9/94-99，
+                    //   Main.cs:10737-10745）——1456 仅 WallIsInStyle=主砖墙。⇒ 吊灯资格门
+                    //   `wal==dgWall` → `DgIsDW(wal)`（变体墙 94-99 新获资格，零掷差仅放置集）。
+                    //   且 Lights.cs:81-87：Style==0 支 num9=chandelierItemType 后
+                    //   `wall∈[94,105] → num9=5744(GothicChandelier)`=PlaceChand(34,53)
+                    //   （Item.cs:45030 DefaultToPlaceableTile(34,53)）。JS 侧仍 1456 门
+                    //   （R11 未含此项，禁区只交 diff——见报告）。
+                    if (!blocked && DgIsDW(wal[cy * W + x]) && DgPlaceChand(x, cy, (wal[cy * W + x] >= 94 && wal[cy * W + x] <= 105) ? 53 : 27 + dungeonTheme))
                     {
                         placed = true; num2 = 0; num4++;
                         DgSwitch(x, cy);
@@ -9985,7 +10084,9 @@ void DgLights()
 }
 // PlaceChand（WorldGen.cs:52753）：3×3 净空 + 上方实心 → type 34
 // ★MMMM 批（NNNN 镜像）：nactive()（:52769）——致动柱格不可挂吊灯 + JGS 口径（JS :3263 同源）
-bool DgPlaceChand(int x, int y)
+// ★GGGGGGGG ⑤：style 参数化（1457 GOTHIC 吊灯 53 走同式帧公式；PlaceChand 本体
+//   1456≡1457 diff 零差，帧公式 num2=style/36*108、num3=style*54-54*(num2/108)*37 通用）
+bool DgPlaceChand(int x, int y, int chStyleIn)
 {
     for (int a = x - 1; a < x + 2; a++)
         for (int b = y; b < y + 3; b++)
@@ -9996,7 +10097,7 @@ bool DgPlaceChand(int x, int y)
     // ★GGGGGG：PlaceChand 帧式补齐（cs:52753-52824；JS placeChand 同源）——样式=
     //   蓝/绿/粉地牢吊灯 placeStyle 27/28/29；页列 num2=108*(style/36)（27-29 无分页=0）、
     //   行基 num3=style*54（分页修正同式）；三列 fx=num2+{0,18,36}、三行 fy=num3+{0,18,36}。
-    int chStyle = 27 + dungeonTheme;
+    int chStyle = chStyleIn;   // ★GGGGGGGG ⑤：GOTHIC(53)/主题档(27+theme) 由调用点按墙判定（Lights.cs:81-87）
     int chN2 = chStyle / 36 * 108;
     int chN3 = chStyle * 54;
     if (chN2 >= 108) chN3 -= 54 * (chN2 / 108) * 37;

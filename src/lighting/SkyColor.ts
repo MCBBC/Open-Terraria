@@ -118,6 +118,27 @@ let frameLightning = 0;
 export function setFrameLightning(v: number): void {
   frameLightning = v;
 }
+// 海拔大气系数帧状态(Main.cs:62618 UpdateAtmosphereTransparencyToSkyColor——
+// 全局 ColorOfTheSkies ×atmo,atmo≤0.01 置纯黑;atmo = (视口中心Y/16−(65+10×
+// (maxTilesX/4200)²))/(worldSurface/5) 钳 [0,1])。消费链=天空贴图/远景层/云色/
+// 环境光种子 skySeed(读同一被暗化的全局=高空环境光同步下降)。★太空场景的本体:
+// 相机升入 65+ 格后天空渐黑、星星暗度门(:62491 读 ColorOfTheSkies.R)自动打开
+// = 白天太空见星。Renderer 每帧写入;菜单不写=1(原版 gameMenu 强制 atmo=1 :62633)
+let frameAtmo = 1;
+export function setFrameAtmo(v: number): void {
+  frameAtmo = v;
+}
+/** atmo 终段乘(UpdateAtmosphereTransparencyToSkyColor :62628-62638 1:1——
+ *  byte 截断语义 = Math.floor;≤0.01 纯黑) */
+function applyAtmo(bg: [number, number, number]): [number, number, number] {
+  if (frameAtmo >= 0.99) return bg;
+  if (frameAtmo <= 0.01) return [0, 0, 0];
+  return [
+    Math.floor(bg[0] * frameAtmo),
+    Math.floor(bg[1] * frameAtmo),
+    Math.floor(bg[2] * frameAtmo),
+  ];
+}
 // ---- 极光渗入帧状态(AuroraSky.ModifyTileColor,SetBackColor 尾 Main.cs:63360;
 // 调用序:HorizonRenderer.ModifyHorizonLight(:63356)→ ModifyTileColor(:63360)→
 // ColorOfTheSkies 赋值(:63361),即晨昏地平线渗入【之后】。intensity=0.08 调用点
@@ -252,7 +273,7 @@ export function skySeed(timeOfDay: number, dayCount: number, eclipse = false, bl
     bg = modifyHorizonLight([bg[0], bg[1], bg[2]], frameHorizon.sunrise, frameHorizon.sunset, frameHorizon.phase);
   }
   if (frameAurora) applyAuroraTileColor(bg, frameAurora);   // :63360(ModifyHorizonLight 后)
-  return tileColor(bg);
+  return tileColor(applyAtmo(bg));   // :62618 atmo 乘在全局色上(光种子读暗化值)
 }
 
 /** ColorOfTheSkies(Main.cs:63361)——天空侧唯一色源(2026-08-20 原版化落地):
@@ -283,7 +304,7 @@ export function colorOfTheSkies(
     bg = modifyHorizonLight([bg[0], bg[1], bg[2]], frameHorizon.sunrise, frameHorizon.sunset, frameHorizon.phase);
   }
   if (frameAurora) applyAuroraTileColor(bg, frameAurora);   // :63360(ModifyHorizonLight 后)
-  return [bg[0], bg[1], bg[2]];
+  return applyAtmo(bg);   // :62618 atmo 乘在全局色上(天空/远景/云同源变暗)
 }
 
 // ---- 全局闪烁驱动(火把动态时钟源,由引擎每 tick 推进) ----

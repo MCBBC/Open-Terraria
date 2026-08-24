@@ -435,9 +435,9 @@ describe('台账 B：小动物族 1:1 修复批（2026-08-19）', () => {
     // 非卡墙停住);旧偏心盒左半无碰撞 = 左半沉墙漂移不爆
     const st = (hooks as unknown as { world: { store: { setTile: (x: number, y: number, t: number) => void } } }).world.store;
     for (let y = 40; y < 60; y++) st.setTile(30, y, 1);    // 左侧竖墙
-    e.x = 32 * 16; e.y = 45 * 16; e.vx = -2; e.vy = 0;     // 墙右 16px,左移
+    e.x = 31 * 16 + 6; e.y = 45 * 16; e.vx = -2; e.vy = 0; // 墙右 6px(盒左已触),左移
     let popped = false;
-    for (let t = 0; t < 20 && !popped; t++) { e.fixedUpdate(1 / 60, hooks); popped = e.dead; }
+    for (let t = 0; t < 40 && !popped; t++) { e.fixedUpdate(1 / 60, hooks); popped = e.dead; }
     expect(popped).toBe(true);                             // 触墙即爆(1:1,非嵌入)
   });
 

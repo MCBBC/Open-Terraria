@@ -34,6 +34,7 @@ const PROBES = [
   { name: 'projstatus', file: 'scripts/_projstatus-probe.mjs', timeoutMs: 360_000 },   // 弹药命中 debuff(火矢/毒镖表驱动+实体链)
   { name: 'bomb-dmg', file: 'scripts/_bomb-chain-probe.mjs', timeoutMs: 560_000 }, // 爆炸物全链(雷管/手雷 hurtBox+飘字)
   { name: 'bomb-effects', file: 'scripts/_bomb-effects-probe.mjs', timeoutMs: 400_000 }, // 爆炸五维(小动物/玩家自伤/地形)
+  { name: 'npc-anchor', file: 'scripts/_npc-anchor-probe.mjs', timeoutMs: 300_000 }, // NPC 通用绘制锚(鸟妖 48 add32/僵尸 3 add0/蝙蝠 49 add4,SW_PROBE_NPC 切换)
 ];
 
 const argv = process.argv.slice(2);

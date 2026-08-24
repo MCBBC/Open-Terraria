@@ -3665,23 +3665,23 @@ export class SkyRenderer {
 
     const isNight = t < 0.27 || t > 0.78;
     // 星星(DrawStarsInBackground :62467-62606 + DrawStar :62481-62604,2026-08-20
-    // 全量 1:1——贴图/亮度公式/位置映射/坠星尾迹;旧方块近似退役)
-    if (isNight) {
+    // 全量 1:1——贴图/亮度公式/位置映射/坠星尾迹;旧方块近似退役)。
+    // ★无昼夜门(2026-08-24 修正):原版调用点 :61527 无条件(仅 shimmerAlpha 门),
+    //   唯一可见性门 = 暗度门 visGate>0(读 atmo 暗化后的 ColorOfTheSkies.R)——
+    //   白天地表 cots.R 高 → 门关;相机升入太空 atmo→0 → cots.R→0 → 门开
+    //   = 白天太空见星(本仓 isNight 门曾挡死该链)
+    {
       // 墓园雾吞(:62471-62479):×(1−1.4·I),≤0 整群跳过
       const starDim = Math.max(0, 1 - gyIntensity * 1.4);
       // 可见性门(:62491-62493):天空够暗才画(remixWorld 恒画)——
       // 255·(1−cloudAlpha·atmo) − ColorOfTheSkies.R − 25 > 0
       const cotsR = this.cots ? this.cots[0] : 255;
       const visGate = 255 * (1 - (this.weatherRef?.cloudAlpha ?? 0) * this.atmoValue(camY)) - cotsR - 25;
-      if (starDim > 0 && visGate > 0) {
-        const dayRate = this.frameCtx?.world?.dayRate?.() ?? 1;
-        this.updateStars(dayRate, isDay, dayTimeTicks);
-        for (let i = 0; i < this.numStars; i++) this.drawStar(ctx, i, starDim, viewW, viewH, skyBgTopY);
-      }
-    } else {
-      // 昼间也推进(昼 time≥27000 重生 hidden 星,UpdateStars :148-155)
       const dayRate = this.frameCtx?.world?.dayRate?.() ?? 1;
       this.updateStars(dayRate, isDay, dayTimeTicks);
+      if (starDim > 0 && visGate > 0) {
+        for (let i = 0; i < this.numStars; i++) this.drawStar(ctx, i, starDim, viewW, viewH, skyBgTopY);
+      }
     }
 
     // ---- 月塔天空装饰层（Nebula/Solar/Stardust/Vortex Sky：远景段黑幕盖星，
