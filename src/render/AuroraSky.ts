@@ -218,14 +218,16 @@ export function auroraNoiseUV(t0x: number, t0y: number, t0z: number,
 }
 
 /** 强度链(:3145-3166,n1/n2=Extra_286 两路 R 通道、n3=Extra_287 R 通道,均 0..1):
- *  A = 1−0.7·n1³ → B = lrp(A,1,grad+0.1) → C = lrp(lrp(B,1,sdY),1,grad·sdY)
+ *  A = sat(1−0.7·n1³)(★#15 mad r0.x_sat) → B = lrp(A,1,grad+0.1) → C = lrp(lrp(B,1,sdY),1,grad·sdY)
  *  E = max(1−n2⁴,0) → F = lrp(E,1,sdY) → G = lrp(F,1,grad·sdY)
- *  intensity = (0.1+0.9·C)·(0.3+0.7·G)·(3·grad)·n3^1.2
- *  (lrp 无钳:grad+0.1 可到 1.1 → 外插,:3149)。 */
+ *  intensity = (0.1+0.9·C)·(0.3+0.7·G)·sat(3·grad)·n3^1.2(★#37 mul r0.y_sat)
+ *  (lrp 无钳:grad+0.1 可到 1.1 → 外插,:3149;两处 sat = 2026-08-24 r15 _sat
+ *   判据修复后字节码实证,此前镜像按无钳旧解释器校准)。 */
 export function auroraIntensity(n1: number, n2: number, n3: number,
   grad: number, sdY: number): number {
+  const sat01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
   const n1sq = n1 * n1;                          // :3145
-  const a = AURORA_F32.nz * (n1 * n1sq) * -1 + 1; // :3146-3147 mad r0·(−c6.z)+c6.w
+  const a = sat01(AURORA_F32.nz * (n1 * n1sq) * -1 + 1); // :3146-3147 mad r0.x_sat
   const f1 = grad + AURORA_F32.add01;            // :3148 mad t0.y,r0.z,c7.x
   const b = f1 + (1 - f1) * a;                   // :3149 lrp(1, A, f1)
   const b2 = sdY * (1 - b) + b;                  // :3150-3151 mad c4.y,1−B,+B
@@ -238,16 +240,20 @@ export function auroraIntensity(n1: number, n2: number, n3: number,
   const f = sdY * (1 - e) + e;                   // :3158-3159 mad c4.y,1−E,+E
   const g = f2 + (1 - f2) * f;                   // :3160 lrp(1, F, f2)
   const t16 = AURORA_F32.add03 + AURORA_F32.mul07 * g;   // :3161 mad c7.y,c7.z
-  return (t15 * t16) * ((grad * AURORA_F32.mul3) * Math.pow(n3, AURORA_F32.pow1_2));  // :3162-3166
+  const band = sat01(grad * AURORA_F32.mul3);    // :3165 mul r0.y_sat
+  return (t15 * t16) * (band * Math.pow(n3, AURORA_F32.pow1_2));  // :3162-3166
 }
 
-/** 完整像素输出(:3167-3171):oC0.rgb = sat(intensity·v0.rgb·(1+sd.x)),α=c6.x=0
- *  (UNORM 钳 0..1)。v0=插值后的顶点色(Color×num28 已 byte 截断/255)。 */
+/** 完整像素输出(:3167-3171):oC0.rgb = sat(intensity·(v0.rgb + sat(v0.rgb·sd.x))),
+ *  α=c6.x=0(UNORM 钳 0..1)。v0=插值后的顶点色(Color×num28 已 byte 截断/255)。
+ *  ★#52 mul r0.yzw_sat = 逐通道 v+sat(v·sd.x)(2026-08-24 r15);v·sd.x≤1 时
+ *  等价旧式 intensity·(1+sd.x)·v,sd.x>1/v 高位时旧式高估(现按字节码精确形)。 */
 export function auroraPixel(n1: number, n2: number, n3: number, grad: number,
   sdX: number, sdY: number, vr: number, vg: number, vb: number): [number, number, number] {
-  const k = auroraIntensity(n1, n2, n3, grad, sdY) * (1 + sdX);  // :3167-3169
+  const k = auroraIntensity(n1, n2, n3, grad, sdY);              // :3162-3166
   const sat = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v); // :3171 oC0 UNORM
-  return [sat(k * vr), sat(k * vg), sat(k * vb)];
+  const ch = (v: number): number => v + Math.min(1, Math.max(0, v * sdX)); // :3168 mul r0.yzw_sat + :3169 add
+  return [sat(k * ch(vr)), sat(k * ch(vg)), sat(k * ch(vb))];
 }
 
 // ---- 噪声面(Extra_286/287 R 通道,LinearWrap 双线性 → 红通道平面浮点缓存) ----

@@ -102,7 +102,7 @@ void main() {
   vec4 rt = texture(uTex, vUv + vec2(0.035, 0.0));
   vec4 cc = texture(uTex, vUv);
   float coverage = 1.0 - 0.2 * (up.a + dn.a + lf.a + rt.a + cc.a);   // :2950-2954
-  float thickness = 1.0 - 4.0 * (cc.r - 0.62);                       // :2955-2957
+  float thickness = 1.0 - 4.0 * clamp(cc.r - 0.62, 0.0, 1.0);        // :2955-2957(★#25 _sat)
   float A = max(thickness, coverage);                                // :2958
   vec2 d1 = vScreen - uDrawPos;                                      // :2959
   float l1 = dot(d1, d1);
@@ -114,9 +114,9 @@ void main() {
   float B = max(dot(n1, n2), 1.0 - (dist * 0.0166667) * (dist * 0.0166667));  // :2968-2971 (d/60)²
   float R = length(vUv * 2.0 - 1.0);                                 // :2972-2975
   float distTerm = dist <= 50.0 ? dist / 50.0 - 1.0 : 0.0;           // :2979+2982 cmp(else 分支=c3.x=0 非 −1!)
-  float inner = (B * R - 0.05) * A + 0.6 * A + B * R - 0.3 + distTerm;  // :2976-2984 (#47 用 r1.x=A)
+  float inner = clamp(B * R - 0.05, 0.0, 1.0) * A + 0.6 * A + B * R - 0.3 + distTerm;  // :2976-2984(★#45 _sat)
   float D = max(0.3, 1.3 - dist * 0.000555556);                      // :2980-2981 (c4.x=1/1800)
-  float shade = inner * uCelestial.z * D * D * D;                    // :2985-2988
+  float shade = clamp(inner * uCelestial.z, 0.0, 1.0) * D * D * D;   // :2985-2988(★#57 _sat)
   vec4 r1 = mix(uVertColor, vec4(uCelestialCol, 1.0), 0.5) * cc.a;   // :2989-2992
   vec4 r2 = cc * uVertColor;                                          // :2993
   vec4 col = r2 + shade * (r1 * uVertColor.a - r2);                   // :2994-2995

@@ -31,6 +31,40 @@ export class AudioSystem {
 
   constructor() {
     this.startLoop();
+    this.armUnlock();
+  }
+
+  /** 首次手势解锁监听（见 armUnlock）；null = 未挂/已摘 */
+  private unlockBound: Array<[string, EventListener]> | null = null;
+
+  /** 浏览器自动播放策略：标题曲在无手势时起播 → AudioContext 挂起（audio() 里的
+   *  resume 被拒后无人重试），已起的源静默空转。首次用户手势（点击/按键/触摸，
+   *  capture 捕获不与页面 stopPropagation 互斥）恢复上下文即出声——源持续跑
+   *  无需重播；成功恢复即自摘监听（用户激活后浏览器不会再挂起）。
+   *  上下文尚未建立时保持监听：play('title') 建上下文后若仍挂起，下次手势兜底 */
+  private armUnlock(): void {
+    const w = typeof window !== 'undefined' ? window : null;
+    if (!w || typeof w.addEventListener !== 'function' || this.unlockBound) return;
+    const tryResume = () => {
+      const ac = this.ac;
+      if (!ac) return; // 尚未建上下文：建时 audio() 自带 resume 尝试
+      if (ac.state !== 'suspended') { this.disarmUnlock(); return; }
+      void ac.resume().then(() => {
+        if (this.ac && this.ac.state === 'running') this.disarmUnlock();
+      }).catch(() => { /* 恢复被拒：下次手势再试 */ });
+    };
+    this.unlockBound = (['pointerdown', 'keydown', 'touchstart'] as const).map((type) => {
+      const fn = tryResume as EventListener;
+      w.addEventListener(type, fn, true);
+      return [type, fn] as [string, EventListener];
+    });
+  }
+
+  private disarmUnlock(): void {
+    const w = typeof window !== 'undefined' ? window : null;
+    if (!w || !this.unlockBound) return;
+    for (const [type, fn] of this.unlockBound) w.removeEventListener(type, fn, true);
+    this.unlockBound = null;
   }
 
   private audio(): AudioContext | null {

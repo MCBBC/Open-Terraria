@@ -733,12 +733,18 @@ export class LiquidSim {
     } else {
       // 水格：唤醒岩浆邻居，让对方自己的 Update 处理交互（Liquid.cs:342-349）。
       // 标量展开(2026-08 审计 G4):元组数组+迭代器在此热路径 ≈2.5M 对象/s
+      // ★DDDDDDD（2026-08-24）受理门对齐：原版唤醒门=tile.lava() 裸型位
+      //   （Tile.cs:375 `(bTileHeader&0x60)==32`，无 liquid>0 前置）——JS 曾多加
+      //   `liquid>0` 门 → 干格残型（液退净型位保留,BBBBBBB 同族）的唤醒调用整段
+      //   缺席。世界效应=零（AddWater 头 `tile.liquid==0` 早退,Liquid.cs:1171），
+      //   但 acceptance 对拍流里 vanilla 侧恒多 120 条拒收调用（CCCC 批 87 次漂移
+      //   的主源）→ 对齐后双流逐行可比。
       for (let t = 0; t < 4; t++) {
         const nx = x + (t === 0 ? -1 : t === 1 ? 1 : 0);
         const ny = y + (t === 2 ? -1 : t === 3 ? 1 : 0);
         if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
         const ni = this.idx(nx, ny);
-        if (st.liquid[ni] > 0 && st.liquidType[ni] === 2) this.addWater(nx, ny);
+        if (st.liquidType[ni] === 2) this.addWater(nx, ny);
       }
       if (myType === 3) {
         this.honeyCheck(x, y);
@@ -747,13 +753,13 @@ export class LiquidSim {
           e.delay = 0;
         }
       } else {
-        // 唤醒蜂蜜邻居（Liquid.cs:365-372）——标量展开,同上
+        // 唤醒蜂蜜邻居（Liquid.cs:365-372）——标量展开,同上（裸型位,见上注）
         for (let t = 0; t < 4; t++) {
           const nx = x + (t === 0 ? -1 : t === 1 ? 1 : 0);
           const ny = y + (t === 2 ? -1 : t === 3 ? 1 : 0);
           if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
           const ni = this.idx(nx, ny);
-          if (st.liquid[ni] > 0 && st.liquidType[ni] === 3) this.addWater(nx, ny);
+          if (st.liquidType[ni] === 3) this.addWater(nx, ny);
         }
         if (myType === 4) {
           // 微光格：自检交互（Liquid.cs:543-546 tile5.shimmer() → ShimmerCheck），
@@ -761,12 +767,13 @@ export class LiquidSim {
           this.shimmerCheck(x, y);
         } else {
           // 水格：唤醒微光邻居，让对方自己的 Update 处理交互（Liquid.cs:549-564）
+          // （裸型位,见上注）
           for (let t = 0; t < 4; t++) {
             const nx = x + (t === 0 ? -1 : t === 1 ? 1 : 0);
             const ny = y + (t === 2 ? -1 : t === 3 ? 1 : 0);
             if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
             const ni = this.idx(nx, ny);
-            if (st.liquid[ni] > 0 && st.liquidType[ni] === 4) this.addWater(nx, ny);
+            if (st.liquidType[ni] === 4) this.addWater(nx, ny);
           }
         }
       }

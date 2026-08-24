@@ -104,6 +104,11 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     taxMoney: player.taxMoney ?? 0,         // PL:53839
     golferScoreAccumulated: player.golferScoreAccumulated ?? 0, // PL:1792
     deathsPve: player.deathsPve ?? 0,       // PL:53840
+    // ★R16-14（2026-08-24）：SavePlayer 缺失字段补落（PL57:55404-55588 序）
+    deathsPvp: player.deathsPvp ?? 0,       // numberOfDeathsPVP（PL:55444;msg16 尾段已在跑中继,存档侧曾只落 Pve）
+    team: player.team ?? 0,                 // PvP 队伍（PL:55411;0 无/1-5 队色）
+    dead: player.dead ?? false,             // 死亡态（PL:55558——死亡瞬存档曾=免死复活满状态）
+    respawnTimer: player.respawnTimer ?? 0, // PL:55559-55562
     // 旅程力量·玩家侧（IPersistentPerPlayerContent，CreativePowerManager.cs:183-195
     // SaveToPlayer 等价——单人共用 World.journeyPowers 存储，落盘拆到 player 段）
     journeyPowers: {
@@ -254,9 +259,10 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
     it && v3 ? { ...it, id: it.id === 0 ? 0 : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
   // v3 稳定 id → 内部 id(含 locked 透传);★曾未接线直接用 data.chests——
   // 现有物品 stable≡internal 掩盖,自定义物品进箱即错
-  const v3Chests = v3
-    ? data.chests.map((c) => ({ x: c.x, y: c.y, locked: c.locked, items: c.items.map(mapItem) }))
-    : data.chests;
+  const v3Chests = (data.chests ?? [])   // ★R16-16 缺段守卫（截断 JSON 曾 .map 即抛）
+    .map((c) => (v3
+      ? { x: c.x, y: c.y, locked: c.locked, items: c.items.map(mapItem) }
+      : c));
   if (v3 && data.player) {
     data.player = remapPlayerSlots(data.player, v3, v4);
   }
@@ -279,7 +285,9 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   if (data.header.dungeonY !== undefined && data.header.dungeonY > 0) world.dungeonY = data.header.dungeonY;
   else world.dungeonY = world.groundLevel;
   if (data.header.jungleX !== undefined) world.jungleX = data.header.jungleX;
-  world.clock.timeOfDay = data.clock.timeOfDay;
+  // ★R16-16（2026-08-24）：三必填段缺省守卫（手编/截断 JSON 曾 undefined 直赋 →
+  //  首个旗标访问即抛;与 wire/blocks/paint/coat/explored 的缺段容忍同口径）
+  world.clock.timeOfDay = Number.isFinite(data.clock?.timeOfDay) ? data.clock.timeOfDay : 0.1875;
   world.clock.dayCount = data.clock.dayCount;
   // 原版 header _temp 三件套（WF:1276-1278）;旧档缺省=无血月/无日食/满月
   if (data.clock.bloodMoon !== undefined) world.clock.bloodMoon = data.clock.bloodMoon;
@@ -315,6 +323,13 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   if (data.header.moondialCooldown !== undefined) world.moondialCooldown = data.header.moondialCooldown;
   if (data.header.fastForwardTimeToDawn !== undefined) world.fastForwardTimeToDawn = data.header.fastForwardTimeToDawn;
   if (data.header.fastForwardTimeToDusk !== undefined) world.fastForwardTimeToDusk = data.header.fastForwardTimeToDusk;
+  // ★R16-5：背景样式落盘值回填（setBG 0-12；旧档缺省=undefined → BiomeBackground
+  //  按 seed 派生不变。underworldBG 有既有 World 消费端，其余走 world.bgStyles
+  //  由 BiomeBackground.seedFor 优先取用）
+  if (data.header.bgStyles) {
+    world.bgStyles = { ...data.header.bgStyles, cave: [...data.header.bgStyles.cave] };
+    if (Number.isFinite(data.header.bgStyles.underworld)) world.underworldBG = data.header.bgStyles.underworld;
+  }
   if (data.invasion) { // 入侵五元组回填（旧档缺省=无入侵）
     world.invasionType = data.invasion.type;
     world.invasionSize = data.invasion.size;
@@ -344,9 +359,9 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   if (data.shadowOrbCount != null) world.shadowOrbCount = data.shadowOrbCount;      // 旧档缺省 0
   world.applyBestiary(data.bestiary); // 图鉴三桶（旧档缺省=空）
   if (data.bannerKills) world.bannerKills = data.bannerKills;   // 旗击杀计数（旧档缺省=空）
-  world.chests = v3Chests;      // v3 id 翻译+locked 透传
+  world.chests = v3Chests ?? [];   // v3 id 翻译+locked 透传（★R16-16 缺段守卫）
   if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）
-  world.flags = data.flags;
+  world.flags = data.flags ?? {};   // ★R16-16
   // 星璇塔运行时态回填（WorldFile.cs:2220-2255 尾段：downedTower*/towerActive*/lunarApocalypseUp
   // 三类 bool 走 flags 落盘；盾值不存——TowerActive=true 读档重置满盾）
   applyLunarSave(world);

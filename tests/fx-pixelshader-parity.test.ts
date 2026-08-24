@@ -84,17 +84,19 @@ describe('HorizonClouds 字节码锚（逐像素 shade 公式）', () => {
     uv: [number, number], intensity: number) => horizonCloudShade(
     texSumA, texR, frag[0], frag[1], draw[0], draw[1], cel[0], cel[1], uv[0], uv[1], intensity);
 
-  it('锚1:实心云/远天体(d=80.16) → shade −0.03459,尾式输出 (0.596,0.617,0.680,0.902)', () => {
+  it('锚1:实心云/远天体(d=80.16) → inner<0 被 #57 _sat 钳 0,shade=0,输出=贴图×v0', () => {
     const v0 = [0.6, 0.62, 0.68, 0.9];
     const out = runHC(solid, v0, [100, 50], [200, 60, 0.8], [0.4, 0.4], [120, 55])!;
-    expect(out[0]).toBeCloseTo(0.5958, 3);
-    expect(out[1]).toBeCloseTo(0.6168, 3);
-    expect(out[2]).toBeCloseTo(0.6805, 3);
-    expect(out[3]).toBeCloseTo(0.9016, 3);
+    // shade=sat(inner·0.8)·D³:solid→A=0、inner=0.983·0.283−0.3=−0.0219<0 → shade=0
+    // (2026-08-24 r15 _sat 修复:旧镜像无钳得 −0.0346 负 shade——字节码恒 ≥0)
+    expect(out[0]).toBeCloseTo(0.6, 6);
+    expect(out[1]).toBeCloseTo(0.62, 6);
+    expect(out[2]).toBeCloseTo(0.68, 6);
+    expect(out[3]).toBeCloseTo(0.9, 6);
     // 手算公式对拍(实心:texSumA=5/texR=1)
     const shade = shadeOf(5, 1, [120, 55], [100, 50], [200, 60], [0.4, 0.4], 0.8);
-    expect(shade).toBeCloseTo(-0.0346025906, 9);
-    // 尾式:out = r2 + shade·(r1·v.a − r2),r2 = tex·v,r1 = lerp(v,(uColor,1),0.5)·tex.a
+    expect(shade).toBe(0);
+    // 尾式:out = r2 + shade·(r1·v.a − r2),shade=0 → out=r2=tex·v
     const r1 = [(0.6 + 1) / 2, (0.62 + 0.9647) / 2, (0.68 + 0.8) / 2, (0.9 + 1) / 2];
     for (const k of [0, 1, 2] as const) {
       expect(v0[k] + shade * (r1[k] * 0.9 - v0[k])).toBeCloseTo(out[k], 6);
@@ -114,13 +116,15 @@ describe('HorizonClouds 字节码锚（逐像素 shade 公式）', () => {
       expect(v[k] + shade * (r1[k] * 0.8 - v[k])).toBeCloseTo(out[k], 6);
     }
   });
-  it('锚3:稀疏云(texSumA=2 → coverage 0.6)+密集(texR 高)的 A 项分流', () => {
-    // 半透明云:α=0.4 → texSumA=2(coverage=0.6);texR=0.4(thickness=1+0.88=1.88)
+  it('锚3:稀疏云(texSumA=2 → coverage 0.6)+thickness #25 _sat 钳(texR=0.4→sat(−0.22)=0)', () => {
+    // 半透明云:α=0.4 → texSumA=2(coverage=0.6);texR=0.4 → thickness=1−4·sat(−0.22)=1
+    // (旧无钳值 1.88;A=max(1,0.6)=1)inner=0+0.6−0.3−0.553<0 → shade=0 → out=r2
     const sparse: SM2Sampler = () => [0.4, 0.4, 0.4, 0.4];
     const frag: [number, number] = [130, 60];
     const out = runHC(sparse, [0.5, 0.5, 0.5, 0.7], [100, 50], [150, 70, 0.9],
       [0.5, 0.5], frag)!;
     const shade = shadeOf(2, 0.4, frag, [100, 50], [150, 70], [0.5, 0.5], 0.9);
+    expect(shade).toBe(0);
     const v = [0.5, 0.5, 0.5, 0.7];
     const texR = 0.4, texA = 0.4;                          // 稀疏云贴图值
     const r1 = [(0.5 + 1) / 2, (0.5 + 0.9647) / 2, (0.5 + 0.8) / 2, 0.85];
@@ -129,13 +133,13 @@ describe('HorizonClouds 字节码锚（逐像素 shade 公式）', () => {
       expect(r2 + shade * (r1[k] * texA * 0.7 - r2)).toBeCloseTo(out[k], 6);
     }
   });
-  it('distTerm d>50 恒 0(非 −1):#51 第三源 = c3.x=0', () => {
-    // d=200:远云。若误用 −1,shade 会显著更负——用公式对拍锁语义
-    const shade = shadeOf(5, 1, [120, 55], [100, 50], [320, 60], [0.4, 0.4], 1);
-    // dist=200.06:D=max(0.3,1.3−0.111)=1.189,D³=1.68;B=max(dot,1−(200/60)² 负)=dot≈0.983
-    // inner = (0.983·0.283−0.05)·0 + 0 + 0.278 − 0.3 + 0 = −0.022
-    expect(shade).toBeCloseTo(-0.022 * 1.68, 2);   // ≈ −0.037(若 distTerm=−1 → ≈ −1.7)
-    expect(shade).toBeGreaterThan(-0.2);
+  it('distTerm d>50 恒 0(非 −1):#51 第三源 = c3.x=0(正 shade 域判别)', () => {
+    // d=55(刚过 50):B=R=1、A=0 → inner=1−0.3+distTerm;distTerm=0→0.7,
+    // 若误用 −1 → inner=−0.3 被 #57 _sat 钳 0——用正 shade 域锁语义
+    const shade = shadeOf(5, 1, [160, 50], [100, 50], [215, 50], [1.0, 0.5], 1);
+    // D=max(0.3,1.3−55/1800)=1.269444,D³=2.045696;shade=sat(0.7)·D³
+    expect(shade).toBeCloseTo(1.4319872063614545, 9);
+    expect(shade).toBeGreaterThan(1);
   });
   it('GetMoonStrength = |4−phase|/4(GetCelestialBodyColors 月色乘子)', () => {
     // HorizonHelper.cs:134-136 Remap(|4−phase|,0,4,0,1)
@@ -158,10 +162,11 @@ describe('GLSpriteLayer HorizonClouds GLSL 守卫(源码级)', () => {
     expect(SRC).toContain('vUv + vec2(-0.035, 0.0)');      // #12 左
     expect(SRC).toContain('vUv + vec2(0.035, 0.0)');       // #13 右
     expect(SRC).toContain('1.0 - 0.2 * (up.a + dn.a + lf.a + rt.a + cc.a)');  // #23
-    expect(SRC).toContain('4.0 * (cc.r - 0.62)');          // #24-26
+    expect(SRC).toContain('4.0 * clamp(cc.r - 0.62, 0.0, 1.0)');           // #24-26(★#25 _sat)
     expect(SRC).toContain('1.0 - (dist * 0.0166667) * (dist * 0.0166667)');   // #38-39 (d/60)²
     expect(SRC).toContain('dist <= 50.0 ? dist / 50.0 - 1.0 : 0.0');         // #51(else=0)
-    expect(SRC).toContain('(B * R - 0.05) * A + 0.6 * A + B * R - 0.3 + distTerm');  // #45-53
+    expect(SRC).toContain('clamp(B * R - 0.05, 0.0, 1.0) * A + 0.6 * A + B * R - 0.3 + distTerm');  // #45-53(★#45 _sat)
+    expect(SRC).toContain('clamp(inner * uCelestial.z, 0.0, 1.0) * D * D * D');       // #54-57(★#57 _sat)
     expect(SRC).toContain('1.3 - dist * 0.000555556');     // #49 (c4.x=1/1800)
     expect(SRC).toContain('mix(uVertColor, vec4(uCelestialCol, 1.0), 0.5) * cc.a');   // #60-61
     expect(SRC).toContain('r2 + shade * (r1 * uVertColor.a - r2)');                   // #63-64
@@ -220,23 +225,25 @@ describe('WaterDistortionObject 字节码锚（洗掠形状 washShapeValue）', 
     const u = defaultUniforms();
     return execPixel(pass, u, [], t0, vColor);
   };
-  it('内圈 r<2π:max(r,2π) 钳 → 恒弱尾迹(金标 0.0025483,解释器直跑)', () => {
+  it('内圈 r<2π:max(r,2π) 钳 → φ≈−0.0032 恒小负角,cosφ>0 → 恒零', () => {
     // vColor=(0,0.5,1):flowSigned=(−0.5,0);t0=(0.6,0.5):uvc=(0.1,0),r=2.512<6.28
+    // (2026-08-24 r15 sincos 修:obj50 `sincos r2.x`=cos 非 sin——钳后常值角
+    //  cos(−0.0032)≈1>0 → 内圈恒 0;旧 sin 校准值 0.0025483 弱尾迹作废)
     const out = runWash([0, 0.5, 1], [0.6, 0.5])!;
-    expect(out[0]).toBeCloseTo(0.0025482763, 9);
+    expect(out[0]).toBe(0);
     expect(out[3]).toBeCloseTo(out[0], 12);      // 输出 (s,0,0,s)
     expect(out[1]).toBe(0);
-    expect(washShapeValue(0.1, 0, -0.5, 0, 1)).toBeCloseTo(0.0025482763, 6);   // float32 常量舍入 1e-7
+    expect(washShapeValue(0.1, 0, -0.5, 0, 1)).toBe(0);
   });
-  it('中圈 2π≤r<4π 与外圈 r≥4π:逐点一致(0.35/0.45/外缘)', () => {
-    // r=8.79: dot 全对齐但 sinφ≥0 → 0
-    expect(runWash([-0.5 + 0.5, 0 + 0.5, 1], [0.85, 0.5])![0]).toBe(0);
-    expect(washShapeValue(0.35, 0, -0.5, 0, 1)).toBe(0);
-    // r=11.3,strength 0.5
+  it('中圈 2π≤r<4π 与外圈 r≥4π:逐点一致(cos 负半波域 0.35/正域 0.45/外缘)', () => {
+    // r=8.79 → φ≈2.507:cosφ=−0.8056<0 → −cosφ·0.8 = 0.6451(sin 旧校准此点=0)
+    expect(runWash([-0.5 + 0.5, 0 + 0.5, 1], [0.85, 0.5])![0]).toBeCloseTo(0.6451102190623945, 9);
+    expect(washShapeValue(0.35, 0, -0.5, 0, 1)).toBeCloseTo(0.6451102190623945, 6);   // float32 常量舍入
+    // r=11.3 → φ≈−1.263:cosφ=0.3035≥0 → 0(旧 sin 值 0.3811 作废)
     const a = runWash([0, 0.5, 0.5], [0.95, 0.5])![0];
-    expect(a).toBeCloseTo(0.3811250681, 6);
-    expect(washShapeValue(0.45, 0, -0.5, 0, 0.5)).toBeCloseTo(a, 6);   // float32 常量舍入
-    // 角点 r≈15.7 ≥ 4π:恒 φ=−0.00637111
+    expect(a).toBe(0);
+    expect(washShapeValue(0.45, 0, -0.5, 0, 0.5)).toBeCloseTo(a, 6);
+    // 角点 r≈15.7 ≥ 4π:恒 φ=−0.00637111,cos>0 → 0
     const b = runWash([0, 0.5, 0.5], [0.98, 0.9])![0];
     expect(washShapeValue(0.48, 0.4, -0.5, 0, 0.5)).toBeCloseTo(b, 6);
   });

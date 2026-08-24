@@ -81,6 +81,8 @@ export interface SaveData {
     sundialCooldown?: number; fastForwardTimeToDawn?: boolean;
     /** 月晷冷却/快进到黄昏（WorldFile.cs:1416-1417；旧档缺省 0/false） */
     moondialCooldown?: number; fastForwardTimeToDusk?: boolean;
+    /** ★R16-5：背景样式 13 档（setBG 0-12；旧档缺省 undefined=seed 派生） */
+    bgStyles?: BgStylesSave;
   };
   clock: {
     timeOfDay: number; dayCount: number;
@@ -166,6 +168,12 @@ export interface SaveData {
     hideVisibleAccessory?: boolean[];
     /** PVE 死亡计数（Player.numberOfDeathsPVE,PL:53840;旧档缺省 0） */
     deathsPve?: number;
+    /** ★R16-14：PvP 死亡计数/队伍/死亡态+重生计时（PL:55444/55411/55558-55562;
+     *  旧档缺省 0/0/false/0——与原版缺省同形） */
+    deathsPvp?: number;
+    team?: number;
+    dead?: boolean;
+    respawnTimer?: number;
     /** 发色剂染料 shaderId 1..12（Player.hairDye byte,PL:53805-53808 写/:54214-54216
      *  读；0=无。旧档缺省 0=无染料） */
     hairDye?: number;
@@ -230,6 +238,16 @@ export interface SaveStoreView {
   explored?: Uint8Array;
 }
 /** 序列化所需的世界元数据(全部可结构化克隆) */
+/** ★R16-5：背景样式 13 档存档投影（原版 Main.bgStyle/caveBackStyle[4]/bg8-12；
+ *  WorldGen.setBG 写 WorldGen 结构、随 .wld 头落盘——本仓独立字段随存档） */
+export interface BgStylesSave {
+  cave: number[];            // setBG(0-3) caveBackStyle[4]
+  ice: number; jungle: number; hell: number;   // setBG(4-6)
+  mushroom: number;          // setBG(8)（v>194）
+  underworld: number;        // setBG(9)（v>=215）
+  bg10: number; bg11: number; bg12: number;    // setBG(10-12)（v>195）
+}
+
 export interface SaveMeta {
   name: string; seed: number; w: number; h: number;
   spawnX: number; spawnY: number; spawnX0?: number; spawnY0?: number; groundLevel: number; rockLevel: number; lavaLine?: number;
@@ -248,6 +266,9 @@ export interface SaveMeta {
   /** 日晷/月晷快进四件套（WorldFile.cs:1311/1342/1416-1417；旧档缺省 0/0/false/false） */
   sundialCooldown?: number; moondialCooldown?: number;
   fastForwardTimeToDawn?: boolean; fastForwardTimeToDusk?: boolean;
+  /** ★R16-5：背景样式落盘值（WF57 setBG 0-12 的存档投影；旧档缺省=undefined →
+   *  BiomeBackground 按 seed 重派生。导入原版 .wld 时由 WldImport 回填） */
+  bgStyles?: BgStylesSave;
   chests: SaveData['chests']; signs?: SaveData['signs']; furniture?: FurnitureSaveEntry[]; flags: Record<string, boolean>;
   weather?: WeatherSave;
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
@@ -358,6 +379,7 @@ export function serializeSave(
       journeyPowers: meta.journeyPowers,
       sundialCooldown: meta.sundialCooldown ?? 0,
       moondialCooldown: meta.moondialCooldown ?? 0,
+      bgStyles: meta.bgStyles,
       fastForwardTimeToDawn: meta.fastForwardTimeToDawn ?? false,
       fastForwardTimeToDusk: meta.fastForwardTimeToDusk ?? false,
     },

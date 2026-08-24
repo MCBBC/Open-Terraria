@@ -105,11 +105,11 @@ const W = Number(process.env.SW_DDD_W ?? 4200), H = Number(process.env.SW_DDD_H 
     return oUpl.call(this);
   };
 
-  // delWater：dw0 行 + 分支账（dwb:0=<2 清邻,1=<20 清自,2=早退保留,3=真出列）
+  // delWater：dw0 行（含 N=numLiquid@head,与织入侧 Z49DW 同构）+ 分支账
   P.delWater = function (this: Sim, l: number) {
     S.dww = open(S.dww, `${OUT}/dw0.txt`);
     const e = this.liquids[l];
-    S.dwBuf.push(`${l} ${e.x} ${e.y} k${e.kill} d${e.delay}\n`);
+    S.dwBuf.push(`${l} ${e.x} ${e.y} k${e.kill} d${e.delay} N${this.numLiquid}\n`);
     if (S.dwBuf.length >= 1024) flush(S.dww, S.dwBuf);
     if (process.env.SW_DDD_DWB === '1') {
       const st = this.world.store;

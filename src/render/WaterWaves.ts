@@ -163,8 +163,10 @@ export function waterDistortionIntensity(
  *  uvcX/uvcY = quad 局部 uv − 0.5；flowX/flowY = vColor.xy − 0.5；strength = vColor.z。
  *  ★内圈 max(r, 2π) 钳(2026-08-20 字节码复核)：obj50 #27 `max r1.z, r0.z, c1.x(6.28)`
  *  在 frac 前钳 r——r<2π(内圈 |uvc|<0.25)的 φ 恒 ≈ −0.0039（frac(2π·0.159155+0.5)），
- *  旧实现直接用原 r 算 frac → 内圈 φ 全域摆动 → 洗掠图案内圈错形（SM2 解释器
- *  执行字节码探针定罪：r=2.512 处 interp=0.00255 vs 旧公式=0）。 */
+ *  旧实现直接用原 r 算 frac → 内圈 φ 全域摆动 → 洗掠图案内圈错形。
+ *  ★sincos 分量序(2026-08-24 r15 复核)：obj50 `sincos r2.x` 按 ps_2_0 语义写
+ *  **cos**(MSDN sincos-ps:x=cos/y=sin)——曾写 sin(随旧解释器 `sin→x` 错校准),
+ *  cos(−0.0039)≈1>0 → 内圈恒 0(非旧值 0.0039 弱尾迹);负半波取 cos。 */
 export function washShapeValue(
   uvcX: number, uvcY: number, flowX: number, flowY: number, strength: number,
 ): number {
@@ -185,8 +187,8 @@ export function washShapeValue(
     if (frac < 0) frac += 1;
     phi = frac * 6.28318548202515 - 3.14159274101257;       // ·2π − π(c2.x/c2.y float32)
   }
-  const sinPhi = Math.sin(phi);
-  return strength * dotTerm * (sinPhi >= 0 ? 0 : -sinPhi);  // min(sin,0) 取负半波
+  const cosPhi = Math.cos(phi);
+  return strength * dotTerm * (cosPhi >= 0 ? 0 : -cosPhi);  // min(cos,0) 取负半波
 }
 
 /** 涟漪形状（RippleShape.cs enum + RIPPLE_SHAPE_SOURCE_RECTS :18-23） */

@@ -5,6 +5,7 @@ import { TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
 import { TILE_BY_KEY, T, TILE_DEFS } from '../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { translateSeed } from '../core/rng';
 
 /** wld NPC spriteId → 存档 key（正常态反查 TOWN_NPC_IDS；bound 型单独映射，id-maps 核实：
  *  105 BoundGoblin→goblin_tinkerer、106 BoundWizard→wizard、123 BoundMechanic→mechanic、
@@ -355,7 +356,11 @@ const TILE_MAP: Record<number, MapEntry> = {
   // 清空的装饰/不可表示物
   11: { key: 'door_open', copyFrame: true },  // Open Door（原版变体帧）
   28: { key: 'pot', copyFrame: true }, 29: { key: 'v_29_piggy_bank', copyFrame: true }, 30: 'wood',  // Pots(原版) / Piggy Bank(2×1 framed) / Wood→木材
-  52: 'v_52_vines', 55: null,  // 藤蔓 / 乐器架
+  52: 'v_52_vines',
+  // ★R16-2（2026-08-24）：55=Signs（TileID.cs:547）非"乐器架"——显式 null 曾把导入图的
+  //  每一块牌物理删除（不是丢文本是丢 tile）；引擎侧 v_55_signs 注册齐全（tiles.ts:529
+  //  framed 2×2 drop 171）且 Game.ts:16839 有完整牌编辑器。文本随 signs 段回填 save.signs
+  55: { key: 'v_55_signs', copyFrame: true },
   62: 'v_62_jungle_vines', 69: 'v_69_jungle_thorns', // 丛林藤蔓/荆棘（61/74 丛林草在下行）
   61: 'v_61_jungle_short_plants', 74: 'v_74_jungle_tall_plants', 76: 'v_76_hellstone_brick', 77: { key: 'v_77_hellforge', copyFrame: true }, 80: 'v_80_cactus', // plants2→草 / 76=狱石砖 / 77=地狱熔炉(专属表) / 仙人掌
   83: { key: 'v_83_herbs_mature', copyFrame: true },  // Herbs (Mature)
@@ -511,8 +516,12 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     paintWallArr[i] = wld.tiles.paintWall[i];
     coatArr[i] = wld.tiles.coat[i];   // 涂层四位（WF:2659-2677 header4）
     // 废弃荧光漆迁移（ConvertIlluminantPaintToNewField，WorldFile.cs:2806-2825）
-    if (paintArr[i] === 31) { paintArr[i] = 0; coatArr[i] |= 8; }
-    if (paintWallArr[i] === 31) { paintWallArr[i] = 0; coatArr[i] |= 16; }
+    // ★R16-11：迁移门 = wldVersion < 258（WF57:1864-1866）——1457 里 31 仍是现行
+    //  IlluminantPaint（PaintID.cs:67/69）,v258+ 档合法持有 31 曾被无条件改写
+    if (wld.version < 258) {
+      if (paintArr[i] === 31) { paintArr[i] = 0; coatArr[i] |= 8; }
+      if (paintWallArr[i] === 31) { paintWallArr[i] = 0; coatArr[i] |= 16; }
+    }
   }
   if (unmapped > 0) warnings.push(`${unmapped} 个未知 tile 已降级为石块`);
 
@@ -528,6 +537,12 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     if (c.y + 1 < h) { type[(c.y + 1) * w + c.x] = TILE_BY_KEY['chest']; frameX[(c.y + 1) * w + c.x] = 0; frameY[(c.y + 1) * w + c.x] = 18; }
     if (c.x + 1 < w && c.y + 1 < h) { type[(c.y + 1) * w + c.x + 1] = TILE_BY_KEY['chest']; frameX[(c.y + 1) * w + c.x + 1] = 18; frameY[(c.y + 1) * w + c.x + 1] = 18; }
     const items: Array<{ id: number; stack: number } | null> = [];
+    // ★R16-6（2026-08-24）：原版箱 maxItems=40（Chest.cs:58 DefaultMaxItems;世界箱
+    //  CreateWorldChest 全 40 槽）——slice(0,10) 截断曾静默丢第 11-40 格物品且不计数
+    //  （itm 只记未映射 id 不记截断）;现把截断非空格数计入 warnings（扩箱模型到
+    //  20/40 档另案——内部箱模型恒 10 槽,Game.ts:14637/server room.ts 同构）
+    const dropped = c.items.slice(10).filter(Boolean).length;
+    if (dropped > 0) warnings.push(`宝箱(${c.x},${c.y}) 第 11-40 格 ${dropped} 件物品超出内部箱容量被丢弃`);
     for (const it of c.items.slice(0, 10)) {
       if (!it) { items.push(null); continue; }
       const key = VANILLA_ITEM_KEY_BY_ID[it.id];
@@ -542,12 +557,16 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     chests.push({ x: c.x, y: c.y, items });
   }
 
-  // 时间换算：wld time 0 = 4:30AM（白天起点）
+  // 时间换算（★R16-4 2026-08-24）：Main.time 是逐帧 +1/60 的**小数量纲**
+  //  （MN57:1250/1252 dayLength=54000/nightLength=32400,昼起点 4:30AM=time 0）——
+  //  昼 0.1875 + time/54000×0.5、夜 0.6875 + time/32400×0.5。旧 `% 1` 只取小数部分
+  //  （把 54000 量纲当 0..1 比例）→ 昼档恒落 4:30AM±30 游戏分、**夜档回绕进白天**
+  //  （存档时黑夜进游戏变白天,血月/夜行怪判定全错）
   let timeOfDay: number;
   if (wld.dayTime) {
-    timeOfDay = 0.1875 + (wld.time % 1) * 0.5;
+    timeOfDay = 0.1875 + (wld.time / 54000) * 0.5;
   } else {
-    timeOfDay = 0.6875 + (wld.time % 1) * 0.5;
+    timeOfDay = 0.6875 + (wld.time / 32400) * 0.5;
   }
   timeOfDay = timeOfDay % 1;
 
@@ -556,7 +575,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     version: 2, // 墙已是原版 id 语义——不能低于 2，否则 loadSave 触发旧墙值迁移翻转
     header: {
       name: wld.title || '导入的地图',
-      seed: 0,
+      // ★R16-5：数值种子 = seed 文本经 TranslateSeed 派生（rng.ts:199 与原版
+      //  WorldFileData.TranslateSeed 1:1）——旧 header.seed=0 → 洞穴背景四区/树冠
+      //  变体等一切 seed 派生视觉与原档不一致
+      seed: translateSeed(wld.seed),
       width: w,
       height: h,
       spawn: [wld.spawnX, wld.spawnY],
@@ -582,6 +604,14 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       moondialCooldown: wld.moondialCooldown,
       fastForwardTimeToDawn: wld.fastForwardTimeToDawn,
       fastForwardTimeToDusk: wld.fastForwardTimeToDusk,
+      // ★R16-5：背景样式 13 档全量（setBG 0-12）——曾读位即弃 → 腐化/丛林/雪原/
+      //  地狱/蘑菇背景样式全部回退 seed-0 默认
+      bgStyles: {
+        cave: [...wld.caveBackStyle],
+        ice: wld.iceBackStyle, jungle: wld.jungleBackStyle, hell: wld.hellBackStyle,
+        mushroom: wld.bgMushroom, underworld: wld.bgUnderworld,
+        bg10: wld.bg10, bg11: wld.bg11, bg12: wld.bg12,
+      },
     },
     // 拜月教石碑重生倒计时（WF:2185-2192，SaveData 顶层字段）——2026-08-13 前
     // 导入路直接丢弃（回退 86400 缺省）
@@ -635,7 +665,15 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       const home = n.homeX >= 0 && n.homeY >= 0 ? [n.homeX, n.homeY] as [number, number] : null;
       return [{ key: entry.key, x: n.x, y: n.y, home, bound: entry.bound, givenName: n.name || undefined }];
     }),
-    flags: { downedEyeOfCthulhu: false },
+    // ★R16-1（2026-08-24）：LoadWorldFlags 全量旗标透传（WldParser.flags ~40 位：
+    //  downedBoss 族/downed_ 双键/saved*/入侵四连/四塔 downed+active/lunarApocalypseUp/
+    //  DD2 四 bool/史莱姆与城镇 NPC 解锁族/forceHalloween*/XMas*/combatBook/2/
+    //  shadowOrbSmashed/spawnMeteor/vampire/infected/teamBasedSpawnsSeed）——
+    //  曾硬编码 {downedEyeOfCthulhu:false} → 导入肉后世界=肉前玩法
+    // ★R16-2：signs 段文本回填（world.signs 是牌/墓碑共用位置键表——Sign.ReadSign
+    //  锚=2×2 左上,与 openSignEditor 反解锚同口径）
+    signs: wld.signs.map((sg) => ({ x: sg.x, y: sg.y, text: sg.text })),
+    flags: { downedEyeOfCthulhu: false, ...wld.flags },
   };
   const toEntries = (m: Map<number, number>, names: Record<string, string>): CompatEntry[] =>
     [...m.entries()].map(([id, count]) => ({ id, name: names[String(id)] ?? null, count, action: '' }))

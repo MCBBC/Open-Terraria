@@ -128,7 +128,10 @@ function decodeProgram(tokens: number[]): Inst[] {
     }));
     out.push({
       op,
-      dstMask: (raw[0] >> 16) & 0xF, dstSat: ((raw[0] >> 20) & 0xF) === 2,
+      // _sat 判据:d3d9types.h:513-515 D3DSPDM_NONE=0 / SATURATE=1<<D3DSP_DSTMOD_SHIFT /
+      // PARTIALPRECISION=2——(tok>>20)&0xF==1 才是饱和(2026-08-24 r15 复核定谳;
+      // 曾写 ===2 致全库 54 处 _sat/34 pass 静默丢弃,染料烘焙色大幅偏差)
+      dstMask: (raw[0] >> 16) & 0xF, dstSat: ((raw[0] >> 20) & 0xF) === 1,
       srcs,
       dstFile: fileOf(raw[0]), dstReg: regOf(raw[0]),
     });
@@ -366,7 +369,11 @@ export class SM2Pass {
           const l = Math.hypot(S(0, 0), S(0, 1), S(0, 2)) || 1;
           write(S(0, 0) / l, S(0, 1) / l, S(0, 2) / l, 0); break;
         }
-        case 0x25: write(Math.sin(S(0, 0)), Math.cos(S(0, 0)), S(0, 2), S(0, 3)); break;
+        // sincos ps_2_0(MSDN "sincos - ps"):掩码 .x→dest.x=cos(V)、.y→dest.y=sin(V)、
+        // .xy→x=cos/y=sin(ps_3_0 同序;src1/src2=D3DSINCOSCONST1/2 多项式展开系数,
+        // 直接算 sin/cos 即精确值)。2026-08-24 r15 复核:曾写 sin→x/cos→y(互换),
+        // 17 pass/22 site 波形相位 90° 翻转。
+        case 0x25: write(Math.cos(S(0, 0)), Math.sin(S(0, 0)), S(0, 2), S(0, 3)); break;
         case 0x41: { // texkill：引用寄存器任一分量 < 0 → 丢弃
           if (S(0, 0) < 0 || S(0, 1) < 0 || S(0, 2) < 0) return null;
           break;

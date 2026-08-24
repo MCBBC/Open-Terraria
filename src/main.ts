@@ -2,6 +2,7 @@
 // 流程编排见 mainFlow.ts；本文件只做装配 + 游戏内键盘/开发者工具接线。
 import { Game } from './core/Game';
 import { showSplash } from './ui/Splash';
+import { showLogoIntro } from './ui/LogoIntro';
 import { UI } from './ui/UI';
 import { kvHas } from './save/KvStore';
 import { saveGame } from './save/SaveFile';
@@ -556,6 +557,13 @@ kvHas('sandboxworld.quicksave').then(async () => {
   // 启动加载画面（Main.DrawSplash :51908：随机三件套+淡入淡出时序+LoadingSunflower）
   const splashGate: { resolve: () => void } = { resolve: () => {} };
   const splash = showSplash({ loading: new Promise<void>((r) => { splashGate.resolve = r; }) });
+  // 进入画面 logo 卡（logo_1..8 随机一张）：t=0 即显、至少 2s——vanilla splash
+  // 在暖缓存下被下方 done() 秒切（可见 ~0.2s，用户报告"直接跳过去"）；本卡盖在
+  // 其上覆盖整个加载/初始化期，finish 后淡出进标题。旁路路由不陪跑。
+  const bootParams0 = new URLSearchParams(location.search);
+  const intro = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo')
+    ? null
+    : showLogoIntro();
   await loadAssets();
   splashGate.resolve();
   splash.done();
@@ -578,7 +586,7 @@ kvHas('sandboxworld.quicksave').then(async () => {
 
   // 旁路路由：?play[=small|medium|large] 跳过主菜单直接生成世界进游戏
   // （主菜单 UI 改造期间绕行用；也可 ?quickload 直接读快速存档）
-  const bootParams = new URLSearchParams(location.search);
+  const bootParams = bootParams0;
   if (bootParams.has('quickload')) {
     void flow.quickLoad();
     return;
@@ -590,5 +598,6 @@ kvHas('sandboxworld.quicksave').then(async () => {
     return;
   }
 
+  if (intro) await intro.finish(); // logo 卡补满 ≥2s → 淡出（资源慢时已顺带覆盖加载期）
   flow.showTitle();
 });

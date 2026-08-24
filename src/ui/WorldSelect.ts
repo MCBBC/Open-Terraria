@@ -1,11 +1,14 @@
 // 世界存档列表（DOM 版 1:1 原版 UIWorldSelect/UIWorldListItem 结构）：
 //  容器/标题/列表面板/底部双钮同 UICharacterSelect；行 = 图标位 + 信息 +
 //  底缘图标钮 Play/Favorite/Copy + Delete 右下 + 悬停标签。
-//  ★偏差登记：原版行内为世界缩略图标（UIWorldListItem._worldIcon，世界生成时
-//  落盘的 map 快照）——本仓 WorldMeta 无图标数据，以名称/规格文本代替。
+//  行首世界图标 = 原版 GetSeedIcon 映射 1:1（AWorldListItem.cs:186-201）：
+//  "Icon"+(困难?"Hallow":"")+(腐化?"Corruption":"Crimson")+秘密种子后缀
+//  （HasCorruption 默认 true=每个世界必有邪恶，无中性森林图标——46 张全集恰配）；
+//  多秘密种子原版 UICyclingImage 轮播，此处取首匹配（轮播登记未接）。
 import { WorldStore, type WorldMeta } from '../save/WorldStore';
 import { ensureStyle } from './CharSelect';
 import { Lang } from '../i18n/Lang';
+import { parseSeed } from '../world/gen/SeedEasterEggs';
 
 export interface WorldSelectFlow {
   onPlay(meta: WorldMeta): void;
@@ -17,6 +20,26 @@ const SIZE_LABEL = (m: WorldMeta) => Lang.text(m.w >= 8400 ? 'UI.WorldSizeLarge'
 const DIFF_LABEL = () => [Lang.text('UI.Normal'), Lang.text('GameUI.Expert'), Lang.text('UI.Master'), Lang.text('UI.Creative')];
 
 const BTN_SRC = (n: string): string => `sprites/vanilla-ui/${n}.png`;
+
+/** 世界图标贴图名（AWorldListItem.GetSeedIcon :186-201 1:1）：
+ *  "Icon"+(困难?"Hallow":"")+(腐化?"Corruption":"Crimson")+秘密种子后缀；
+ *  drunk=CorruptionCrimson(evilVariants:false)、skyblock 无前后缀变体。
+ *  多秘密种子原版轮播（UICyclingImage）——取 vanilla 优先序首匹配（登记未轮播） */
+function worldIconName(m: WorldMeta): string {
+  const f = parseSeed(m.seed).flags;
+  const hard = m.hardMode ? 'Hallow' : '';
+  const evil = m.evil === 1 ? 'Crimson' : 'Corruption';
+  let seed = '';
+  if (f.drunkWorld) seed = 'CorruptionCrimson';
+  else if (f.getGoodWorld) seed = 'FTW';
+  else if (f.notTheBees) seed = 'NotTheBees';
+  else if (f.tenthAnniversary) seed = 'Anniversary';
+  else if (f.theConstant) seed = 'DontStarve';
+  else if (f.remix) seed = 'Remix';
+  else if (f.noTraps) seed = 'Traps';
+  else if (f.skyblock) return 'UI_IconSkyblock';
+  return `UI_Icon${hard}${evil}${seed}`;
+}
 
 export class WorldSelectPanel {
   private panel: HTMLElement;
@@ -65,8 +88,13 @@ export class WorldSelectPanel {
     const list = this.store.list();
     for (const meta of list) {
       const el = document.createElement('div');
-      el.className = 'sw-vitem sw-vpanel-item noicon';
+      el.className = 'sw-vitem sw-vpanel-item';
       const m = meta;
+      // 行首世界图标（60×58 原版贴图；UIWorldListItem.cs:68 GetIconElement）
+      const icon = document.createElement('img');
+      icon.className = 'sw-vitem-icon';
+      icon.src = BTN_SRC(worldIconName(m));
+      icon.alt = '';
       // 信息块（名称 + 规格；★图标位缺数据——见头注偏差登记；布局=行绝对分区
       //  .sw-vitem-info,与角色行同构,按钮区在底缘不再压文本）
       const info = document.createElement('div');
@@ -104,7 +132,7 @@ export class WorldSelectPanel {
       label.className = 'sw-vitem-label';
       const delLabel = document.createElement('div');
       delLabel.className = 'sw-vitem-del-label';
-      el.append(info, btns, del, label, delLabel);
+      el.append(icon, info, btns, del, label, delLabel);
       // 整行点击/双击 = 进入（图标钮已 stopPropagation）
       const enter = () => this.close(() => this.flow.onPlay(m));
       el.addEventListener('click', enter);

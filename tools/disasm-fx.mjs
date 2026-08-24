@@ -273,7 +273,8 @@ function regName(tok) {
 }
 function dstStr(tok) {
   const wm = (tok >> 16) & 0xF;
-  const sat = ((tok >> 20) & 0xF) === 2 ? '_sat' : '';
+  // _sat = D3DSPDM_SATURATE = 1<<20(d3d9types.h:514;PARTIALPRECISION 才是 2)
+  const sat = ((tok >> 20) & 0xF) === 1 ? '_sat' : '';
   const mask = '.' + ['x', 'y', 'z', 'w'].filter((_, i) => wm & (1 << i)).join('');  // D3DSP_WRITEMASK_0=1<<16(.x)…_3=1<<19(.w)
   return regName(tok) + mask + sat;
 }

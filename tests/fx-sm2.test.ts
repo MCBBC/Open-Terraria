@@ -5,6 +5,7 @@ import {
   defaultUniforms, getPass, runPassOnImageData, passNames, type SM2Sampler,
 } from '../src/fx/SM2Effect';
 import { dyeApplyOf, dyeCount, dyeEntryOf } from '../src/data/vanillaDyes';
+import fxJson from '../src/data/fxPixelShader.json';
 
 const near = (a: number, b: number, eps = 1e-3) => Math.abs(a - b) <= eps;
 const rgba = (data: Uint8ClampedArray) =>
@@ -179,5 +180,66 @@ describe('t0 子矩形映射（SpriteBatch UV 语义）', () => {
         || Math.abs(b.data[i + 1] - withRect.data[i + 1]) > 8) diff++;
     }
     expect(diff).toBeGreaterThan(0);   // 证明位置依赖 pass 对 t0 映射敏感（映射真实生效）
+  });
+});
+
+// ================= _sat / sincos 解码锁(2026-08-24 r15 复核批) =================
+// 背景:dst 修饰位判据曾写 (tok>>20)&0xF===2(实为 PARTIALPRECISION)——SDK
+// d3d9types.h:513-515 D3DSPDM_NONE=0/SATURATE=1<<20/PARTIALPRECISION=2,致全库
+// 54 处 _sat/34 pass 静默丢弃;sincos 曾写 sin→x/cos→y(MSDN sincos-ps:ps_2_0
+// 掩码 .x→cos/.y→sin)。本组锁解码判据,防回退(执行语义由 fx-pixelshader-
+// parity(HorizonClouds/WaterDistortion 镜像对拍)与 aurora-sky(交叉对拍)锁定。
+describe('SM2 解码锁:_sat 位与 sincos 分量序(r15)', () => {
+  // dst token 判定:opcode 表(operand token 数)同 SM2Effect.decodeProgram
+  const OPS: Record<number, number> = {
+    0x00: 0, 0x01: 2, 0x02: 3, 0x03: 3, 0x04: 4, 0x05: 3, 0x06: 2, 0x07: 2,
+    0x08: 3, 0x09: 3, 0x0A: 3, 0x0B: 3, 0x0C: 3, 0x0D: 3, 0x0E: 2, 0x0F: 2,
+    0x12: 4, 0x13: 2, 0x1F: 2, 0x20: 3, 0x21: 3, 0x23: 2, 0x24: 2, 0x25: 4,
+    0x41: 1, 0x42: 3, 0x51: 5, 0x58: 4, 0x5A: 4,
+  };
+  interface PassJson { pass: string; tokens: number[] }
+  const scan = (): { sat: Map<string, number>; sincos: Map<string, number> } => {
+    const j = fxJson as unknown as { passes: PassJson[] };
+    const sat = new Map<string, number>(), sincos = new Map<string, number>();
+    for (const p of j.passes) {
+      let i = 0, ns = 0, nc = 0;
+      while (i < p.tokens.length) {
+        const op = p.tokens[i++] & 0xFFFF;
+        if (op === 0xFFFF) break;
+        const n = OPS[op];
+        if (n === undefined) break;
+        const raw = p.tokens.slice(i, i + n); i += n;
+        if (op === 0x1F || op === 0x51) continue;      // dcl/def 的首 token 非 dst
+        if (((raw[0] >> 20) & 0xF) === 1) ns++;        // D3DSPDM_SATURATE
+        if (op === 0x25) nc++;
+      }
+      if (ns) sat.set(p.pass, ns);
+      if (nc) sincos.set(p.pass, nc);
+    }
+    return { sat, sincos };
+  };
+  it('_sat 位:34 pass/54 site(判据 ===1;回退 ===2 → 全零即红)', () => {
+    const { sat } = scan();
+    expect([...sat.values()].reduce((a, b) => a + b, 0)).toBe(54);
+    expect(sat.size).toBe(34);
+    expect(sat.get('ArmorPlaid')).toBe(3);
+    expect(sat.get('ArmorTwilight')).toBe(3);
+    expect(sat.get('ArmorSolar')).toBe(3);
+    expect(sat.get('RainbowTownSlime')).toBe(4);
+    expect(sat.get('ForceField')).toBe(2);
+    expect(sat.get('HorizonClouds')).toBe(3);
+    expect(sat.get('Aurora')).toBe(3);
+    expect(sat.get('LitNature')).toBe(2);
+    expect(sat.get('QueenSlime')).toBe(2);
+    expect(sat.get('ArmorGel')).toBe(1);
+    expect(sat.has('ArmorColored')).toBe(false);     // 金标旧锚 pass 无 _sat(曾致漏检)
+  });
+  it('sincos site:16 pass/22 site;写掩码全为单分量(.x/.y)', () => {
+    const { sincos } = scan();
+    expect([...sincos.values()].reduce((a, b) => a + b, 0)).toBe(22);
+    expect(sincos.size).toBe(16);
+    expect(sincos.get('WaterDistortionObject')).toBe(1);
+    expect(sincos.get('QueenSlime')).toBe(2);
+    expect(sincos.get('ArmorForceField')).toBe(3);
   });
 });

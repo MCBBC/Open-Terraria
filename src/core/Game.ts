@@ -1570,7 +1570,7 @@ export class Game implements GameHooks {
       for (let i = 0; i < wch.chest.items.length; i++) {
         const a = wch.chest.items[i], b = wch.last[i];
         if ((a?.id ?? 0) !== (b?.id ?? 0) || (a?.stack ?? 0) !== (b?.stack ?? 0)) {
-          net.sendChestSlot(wch.idx, wch.chest.x, wch.chest.y, i, a?.id ?? 0, a?.stack ?? 0);
+          net.sendChestSlot(wch.idx, wch.chest.x, wch.chest.y, i, a?.id ?? 0, a?.stack ?? 0, a?.prefix ?? 0);   // ★R16-13
           wch.last[i] = a ? { ...a } : null;
         }
       }
@@ -2451,9 +2451,10 @@ export class Game implements GameHooks {
     try {
       const rec = JSON.parse(recordJson) as {
         hp: number; maxHp: number; x: number; y: number;
-        inv: Array<{ id: number; stack: number } | null>;
-        armor: Array<{ id: number; stack: number } | null>;
-        dye: Array<{ id: number; stack: number } | null>;
+        /** ★R16-13：三表带 prefix（重铸词缀跨会话存活） */
+        inv: Array<{ id: number; stack: number; prefix?: number } | null>;
+        armor: Array<{ id: number; stack: number; prefix?: number } | null>;
+        dye: Array<{ id: number; stack: number; prefix?: number } | null>;
       };
       const p = this.player;
       if (rec.hp > 0) p.hp = rec.hp;

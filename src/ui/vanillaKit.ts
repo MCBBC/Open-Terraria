@@ -53,6 +53,7 @@ export function ensureVanillaKit(): void {
   background: rgb(44, 57, 106);
   image-rendering: pixelated;
   box-sizing: border-box;
+  border-radius: 10px;   /* 背景色裁圆——PanelBorder 白模弧角外透明区不再露方角 */
 }
 .sw-vpanel:hover {
   border-image: var(--sw-vpanel-border-hover) 12 fill stretch;
@@ -65,6 +66,7 @@ export function ensureVanillaKit(): void {
   background: rgb(44, 57, 106);
   image-rendering: pixelated;
   box-sizing: border-box;
+  border-radius: 10px;
   color: #fff; cursor: pointer; user-select: none;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
@@ -97,6 +99,7 @@ export function ensureVanillaKit(): void {
   background: rgb(44, 57, 106);
   image-rendering: pixelated;
   box-sizing: border-box;
+  border-radius: 10px;
 }
 .sw-vpanel-item:hover {
   border-image: var(--sw-vpanel-border-hover) 12 fill stretch;

@@ -238,6 +238,8 @@ export class World {
   /** 地狱多层背景风格（WorldGen.underworldBG,WF:1376;0/1/2 → Underworld 贴图集;
    *  本仓由种子确定性派生(seedPick),同 [[RandomizeBackgrounds]] 其余背景风格同策略） */
   underworldBG = 0;
+  /** ★R16-5：背景样式落盘值（setBG 0-12；undefined=无落盘值 → seed 派生） */
+  bgStyles?: import('../save/serialize').BgStylesSave;
   shimmerY = 0;
   /** 世界级生物群系常量(原版 header,生成期 Reset pass 掷出) */
   crimson = false;          // true=猩红 false=腐化

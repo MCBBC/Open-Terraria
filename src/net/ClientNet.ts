@@ -896,11 +896,12 @@ export class ClientNet {
   }
 
   /** 槽位编辑上报（每槽一条消息；服务器权威+广播，编辑者本地已乐观生效） */
-  sendChestSlot(chestIdx: number, x: number, y: number, slot: number, itemId: number, stack: number) {
+  sendChestSlot(chestIdx: number, x: number, y: number, slot: number, itemId: number, stack: number, prefix = 0) {
     const w = new NetWriter(Msg.SyncChestItem);
     w.u16(chestIdx); w.i32(x); w.i32(y);
     w.u16(1);
     w.u8(slot); w.u16(itemId); w.u16(stack);
+    w.u8(prefix);   // ★R16-13：尾段 prefix（原版 msg32 NM57:865-878 stack→prefix→type 同域）
     this.send(w.finish());
   }
 
@@ -911,10 +912,13 @@ export class ClientNet {
     const chestIdx = r.u16();
     const x = r.i32(), y = r.i32();
     const n = r.u16();
-    const items: Array<{ id: number; stack: number } | null> = [];
+    // ★R16-13：prefix 尾段兼容门——旧端每条 5 字节（1+2+2）,新端 6 字节
+    const withPrefix = r.remaining >= n * 6;
+    const items: Array<{ id: number; stack: number; prefix?: number } | null> = [];
     for (let i = 0; i < n; i++) {
       const slot = r.u8(), itemId = r.u16(), stack = r.u16();
-      items[slot] = itemId ? { id: itemId, stack } : null;
+      const prefix = withPrefix ? r.u8() : undefined;
+      items[slot] = itemId ? { id: itemId, stack, prefix } : null;
     }
     this.hooks.onChestSync?.(chestIdx, x, y, items);
   }

@@ -326,6 +326,17 @@ export class BiomeBackground {
     const w = world.store.w;
     this.caveBackX = [Math.floor(w * 0.22), Math.floor(w * 0.42), Math.floor(w * 0.65)];
     this.caveBackStyle = [0, 1, 2, 3].map((i) => seedPick(s, 41 + i, 7));
+    // ★R16-5（2026-08-24）：存档落盘值优先（WF57 setBG 0-12 随 .wld 头/本仓
+    //  SaveData.header.bgStyles 落盘）——导入档/重开档不再按 seed 重掷回默认
+    const bg = world.bgStyles;
+    if (bg) {
+      if (Array.isArray(bg.cave) && bg.cave.length === 4) this.caveBackStyle = [...bg.cave];
+      this.iceBack = bg.ice;
+      this.jungleBack = bg.jungle;
+      this.hellBack = bg.hell;
+      this.mushroomStyle = bg.mushroom;
+      this.underworldStyle = bg.underworld;
+    }
   }
 
   /** GetPreferredBGStyleForPlayer :63658-63705 优先级链 */

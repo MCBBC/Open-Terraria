@@ -68,9 +68,11 @@ const CSS = `
   color: #ffe; text-shadow: 1px 1px 0 #000; pointer-events: none; }
 .sw-vsel-footer { display: flex; gap: 10px; margin-top: 14px; }
 .sw-vsel-footer .sw-vbtn { flex: 1; height: 50px; font-size: 17px; }
-/* 无图标行变体(世界列表无缩略图数据):信息/钮区左移对齐 */
-.sw-vitem.noicon .sw-vitem-info { left: 26px; }
-.sw-vitem.noicon .sw-vitem-btns { left: 26px; }
+/* 世界行图标（60×58 原版 Icon* 贴图,左区与娃娃位同构） */
+.sw-vitem-icon {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  width: 60px; height: 58px; image-rendering: pixelated; pointer-events: none;
+}
 `;
 
 export function ensureStyle() {

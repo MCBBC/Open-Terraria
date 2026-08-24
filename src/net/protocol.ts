@@ -442,6 +442,9 @@ export interface ItemSyncEntry {
   itemSlot: number;
   itemId: number;   // 0 = 空
   stack: number;
+  /** ★R16-13（2026-08-24）：重铸词缀（原版 msg5 SyncEquipment armor 段 PL:55466-55471
+   *  同构带 prefix）——曾缺 → 远端装备显示/SSC 角色词缀全归零 */
+  prefix?: number;
 }
 
 export const INV_SYNC_SIZES = [58, 20, 10];
@@ -455,12 +458,15 @@ export function writePlayerItems(entries: Array<ItemSyncEntry & { playerSlot: nu
     w.u8(e.itemSlot);
     w.u16(e.itemId & 0xffff);
     w.u16(e.stack & 0xffff);
+    w.u8(e.prefix ?? 0);   // ★R16-13：尾段 prefix（旧端按 remaining 门兼容读）
   }
   return w.finish();
 }
 
 export function readPlayerItems(r: NetReader): Array<ItemSyncEntry & { playerSlot: number }> {
   const n = r.u16();
+  // ★R16-13：prefix 尾段兼容门——旧端每条 7 字节（1+1+1+2+2）,新端 8 字节
+  const withPrefix = r.remaining >= n * 8;
   const out: Array<ItemSyncEntry & { playerSlot: number }> = [];
   for (let i = 0; i < n; i++) {
     const playerSlot = r.u8();
@@ -468,7 +474,8 @@ export function readPlayerItems(r: NetReader): Array<ItemSyncEntry & { playerSlo
     const itemSlot = r.u8();
     const itemId = r.u16();
     const stack = r.u16();
-    out.push({ playerSlot, container, itemSlot, itemId, stack });
+    const prefix = withPrefix ? r.u8() : undefined;
+    out.push({ playerSlot, container, itemSlot, itemId, stack, prefix });
   }
   return out;
 }

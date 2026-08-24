@@ -46,7 +46,7 @@ void main() {
     // 强度链 :3145-3166(逐步码 1:1)
     float r0 = n1 * n1;
     r0 = n1 * r0;                       // n1³
-    r0 = r0 * -0.7 + 1.0;               // A = 1−0.7·n1³
+    r0 = clamp(r0 * -0.7 + 1.0, 0.0, 1.0);  // A = sat(1−0.7·n1³)(★#15 _sat)
     float f1 = grad + 0.1;              // grad+0.1(可到 1.1,lrp 外插不钳)
     float b = f1 + (1.0 - f1) * r0;
     b = sdY * (1.0 - b) + b;
@@ -59,10 +59,11 @@ void main() {
     float f = sdY * (1.0 - e) + e;
     float g = f2 + (1.0 - f2) * f;
     float t16 = 0.3 + 0.7 * g;
-    float k = (t15 * t16) * ((grad * 3.0) * pow(n3, 1.2));
-    k *= 1.0 + sdX;                     // :3167-3169
-    // oC0 = sat(v0.rgb·k),α≡c6.x=0(:3170-3171)
-    fragColor = vec4(min(vColor.r * k, 1.0), min(vColor.g * k, 1.0), min(vColor.b * k, 1.0), 0.0);
+    float k = (t15 * t16) * (clamp(grad * 3.0, 0.0, 1.0) * pow(n3, 1.2));  // ★#37 _sat
+    // :3167-3169 逐通道 v + sat(v·sd.x)(★#52 _sat;v·sd.x≤1 时 ≡ (1+sd.x)·v)
+    vec3 fac = vColor + clamp(vColor * sdX, 0.0, 1.0);
+    // oC0 = sat(fac·k),α≡c6.x=0(:3170-3171)
+    fragColor = vec4(min(fac.r * k, 1.0), min(fac.g * k, 1.0), min(fac.b * k, 1.0), 0.0);
 }`;
 
 export class GLAurora {

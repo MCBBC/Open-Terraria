@@ -12,6 +12,7 @@ import { canHit, canHitLine } from '../physics/LineOfSight';
 import { LIQUID_TYPE } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
+import { PROJ_ALPHA_MOD, type ProjAlphaMod } from '../data/vanillaProjAlpha';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -998,6 +999,70 @@ export class Arrow extends Entity {
     }
   }
 
+  /** GetAlpha 全量表调制（vanillaProjAlpha.ts ← Projectile.cs:75940-76850 全分支 307 id）。
+   *  在 drawGlobalAlpha（现有专属档）之后消费——返回 null = 无覆写。
+   *  语义约定（表头注释详述）：RGB 乘子折进 globalAlpha；Lerp(白,k) 用
+   *  brightness/saturate 滤镜近似（复用 drawXenoFilter 模式）；off=1 的登记项不消费。 */
+  private drawTableAlpha(): { ga: number; filter: string | null } | null {
+    const m: ProjAlphaMod | undefined = PROJ_ALPHA_MOD[this.projId];
+    if (!m || m.off) return null;
+    const a = this.alpha;
+    const fade = 1 - a / 255;
+    // 固定色 rgb 滤镜：纯白=无；灰阶=brightness(r/255)；彩色=亮度近似（色相偏移未建模）
+    const rgbFilter = (rgb: readonly number[] | undefined): string | null => {
+      if (!rgb) return null;
+      const [r, g, b] = rgb;
+      if (r === 255 && g === 255 && b === 255) return null;
+      if (r === g && g === b) return `brightness(${(r / 255).toFixed(3)})`;
+      return `brightness(${(((r + g + b) / 3) / 255).toFixed(3)})`;
+    };
+    // Lerp(newColor,White,k) 白化近似：brightness 使中灰 128 → 128(1−k)+255k，
+    // saturate 随 k 去色（k=1 全白剪影，与 drawXenoFilter 440/449/606 档同式）
+    const lerpFilter = (k: number): string =>
+      k >= 0.999 ? 'brightness(2.2) saturate(0)'
+        : `brightness(${(1 - k + (k * 255) / 128).toFixed(2)}) saturate(${Math.max(0, 1 - k * 0.8).toFixed(2)})`;
+    switch (m.kind) {
+      case 'invisible': return { ga: 0, filter: null };
+      case 'fade':
+        return { ga: fade * (m.mul ?? 1), filter: m.bright ? `brightness(${m.bright})` : null };
+      case 'fade2': return { ga: fade * fade * (m.mul ?? 1), filter: null };
+      case 'fixed': return { ga: ((m.rgba?.[3] ?? 255) / 255) * (m.mul ?? 1), filter: rgbFilter(m.rgba) };
+      case 'fixedfade':
+        return { ga: ((m.rgba?.[3] ?? 255) / 255) * fade * (m.mul ?? 1), filter: rgbFilter(m.rgba) };
+      case 'afade': {
+        // tail 门（575/596/659）：life<tail → α=255−255·life/tail（GetAlpha :76233-76238）
+        let ae = a;
+        if (m.tail && this.life < m.tail) ae = 255 - (255 * this.life) / m.tail;
+        let ga = Math.max(0, ((m.rgba?.[3] ?? 255) - ae * (m.slope ?? 1)) / 255) * (m.mul ?? 1);
+        if (m.inv) ga *= fade;                       // rgb 侧 (255−α) 衰减折进 ga
+        return { ga, filter: rgbFilter(m.rgba) };
+      }
+      case 'lerp': return { ga: fade * (m.mul ?? 1), filter: lerpFilter(m.k ?? 1) };
+      case 'lerpkeep': return { ga: m.mul ?? 1, filter: lerpFilter(m.k ?? 1) };
+      case 'lerpblack': return { ga: 1, filter: `brightness(${1 - (m.k ?? 0.25)})` };
+      case 'lerpcolor':
+        // Lerp(newColor,(255,200,60),0.5) 橙化：亮度近似（色相偏移未建模）
+        return {
+          ga: fade,
+          filter: `brightness(${((((m.rgba?.[0] ?? 255) + (m.rgba?.[1] ?? 200) + (m.rgba?.[2] ?? 60)) / 3 / 128) * 0.5 + 0.5).toFixed(2)}) saturate(1.2)`,
+        };
+      case 'lerpalphain': return { ga: (a / 255) * (m.mul ?? 1), filter: lerpFilter(m.k ?? 1) };
+      case 'alpha0': return { ga: a === 0 ? (m.rgba?.[3] ?? 200) / 255 : 0, filter: null };
+      case 'alphaLt': return { ga: a < (m.lt ?? 140) ? (m.rgba?.[3] ?? 100) / 255 : 0, filter: rgbFilter(m.rgba) };
+      case 'alpha255hide': return { ga: a >= 255 ? 0 : 1, filter: null };
+      case 'random': return { ga: a > 0 ? 0 : 200 / 255, filter: null };
+      case 'disco': return { ga: 70 / 255, filter: null };
+      case 'pulse40': {
+        // WrappedLerp(0,255,t)=三角波（Utils.cs:273-281：num=2t,>1 折返）——40t 周期 0→255→0
+        const t40 = (((this.life % 40) + 40) % 40) / 40;
+        return { ga: t40 <= 0.5 ? t40 * 2 : 2 - t40 * 2, filter: null };
+      }
+      case 'life': return { ga: Math.min(1, this.life / 255), filter: null };
+      case 'life2': return { ga: (100 / 255) * Math.min(1, (3 * this.life) / 255), filter: null };
+      default: return null;
+    }
+  }
+
   draw(r: Renderer, _cam: Camera): void {
     // 世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标——
     // 曾双变换把箭甩出屏幕,表现为"箭隐形但能命中")
@@ -1103,11 +1168,21 @@ export class Arrow extends Entity {
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
     // alpha 通道（修复4）：GetAlpha 近似 → globalAlpha（present/phantasm/piranha 等
-    // 专属档在下方各自覆写，id 集不相交）
+    // 专属档在下方各自覆写，id 集不相交）；drawGlobalAlpha 未接的 id 落全量表
+    // （vanillaProjAlpha.ts ← Projectile.cs:75940-76850，off=1 登记项不消费）
     const ga = this.drawGlobalAlpha();
+    let tableFilter: string | null = null;
     if (ga !== null) ctx.globalAlpha = Math.max(0, Math.min(1, ga));
+    else {
+      const mod = this.drawTableAlpha();
+      if (mod) {
+        ctx.globalAlpha = Math.max(0, Math.min(1, mod.ga));
+        tableFilter = mod.filter;
+      }
+    }
     const xenoFilter = this.drawXenoFilter();
     if (xenoFilter) ctx.filter = xenoFilter;
+    else if (tableFilter) ctx.filter = tableFilter;
     // 329 焰镰（aiStyle 56）：rotation 恒自旋（不对齐速度）；spriteDirection<0 水平镜像
     if (this.scytheRot !== null) {
       ctx.rotate(this.spinRot);

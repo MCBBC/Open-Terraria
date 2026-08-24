@@ -351,6 +351,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (player.taxMoney !== undefined) g.player.taxMoney = player.taxMoney;   // PL:53839
     if (player.golferScoreAccumulated) g.player.golferScoreAccumulated = player.golferScoreAccumulated; // PL:1792
     if (player.deathsPve !== undefined) g.player.deathsPve = player.deathsPve; // PL:53840
+    // ★R16-14：PvP 死亡计数/队伍/死亡态+重生计时回填（PL:55444/55411/55558-55562;
+    //  旧档缺省 undefined=原版缺省值 0/0/false/0）
+    if (player.deathsPvp !== undefined) g.player.deathsPvp = player.deathsPvp;
+    if (player.team !== undefined) g.player.team = player.team;
+    if (player.dead !== undefined) g.player.dead = player.dead;
+    if (player.respawnTimer !== undefined) g.player.respawnTimer = player.respawnTimer;
     if (player.anglerQuestsFinished !== undefined) g.player.anglerQuestsFinished = player.anglerQuestsFinished; // PL:1790
     // 旅程力量·玩家侧（IPersistentPerPlayerContent）已在 loadSaveData 内合并进
     // world.journeyPowers（SaveFile.ts 统一路径），此处无需重复回填
@@ -531,6 +537,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         name, seed: seedText || String(save.header.seed),
         w: save.header.width, h: save.header.height,
         difficulty: gameMode, evil: save.header.crimson ? 1 : 0,
+        hardMode: !!(game?.world.flags.hardMode),   // 导入档 header 无此字段,读已载世界(空档兜 false)
       });
       doSave();
       // 兼容报告：有降级/跳过内容时弹窗
@@ -591,9 +598,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         currentWorld = await worldStore.register({
           name: game.world.name, seed: String(game.world.seed), w: game.world.w, h: game.world.h,
           difficulty: 0, evil: game.world.crimson ? 1 : 0,
+          hardMode: !!game.world.flags.hardMode,
         });
       }
       const json = saveGame(game.world, game.player, Date.now() - playStart, game.townNpcsForSave(), game.eventsForSave());
+      if (currentWorld) currentWorld.hardMode = !!game.world.flags.hardMode;   // 图标 Hallow 前缀随肉山刷新
       await worldStore.save(currentWorld, json, Date.now() - playStart);
       const lobbyPort = addr.includes(':') ? parseInt(addr.split(':')[1], 10) : 7778;
       const host = addr.includes(':') ? addr.split(':')[0] : addr;
@@ -924,7 +933,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
       });
       // 多世界槽位（M3）：登记到 WorldStore
-      if (currentWorld) {
+      if (currentWorld && game) {
+        currentWorld.hardMode = !!game.world.flags.hardMode;
         void worldStore.save(currentWorld, json, Date.now() - playStart).catch((e) => console.error('worldStore.save failed', e));
       }
       // 角色随身态同步（原版 .plr 语义）：存档 JSON 的 player 段即磁盘稳定 id 形,

@@ -920,17 +920,20 @@ export function flareShadowTerm(shadows: ReadonlyArray<{ x: number; y: number }>
 // tests/fx-pixelshader-parity.test.ts）:
 //   采样: up(0,−0.035) dn(0,+0.14) lf(−0.035,0) rt(+0.035,0) 中(t0)      #10-18
 //   coverage  = 1 − 0.2·Σα₅                                             #19-23
-//   thickness = 1 − 4·(C.r − 0.62)                                       #24-26
+//   thickness = 1 − 4·sat(C.r − 0.62)                                    #24-26(★#25 _sat)
 //   A = max(thickness, coverage)                                         #27
 //   n1 = normalize(frag−云中心) n2 = normalize(天体−frag) d=|天体−frag|  #28-36
 //   B = max(dot(n1,n2), 1−(d/60)²)                                       #37-40
 //   R = |t0·2−1|                                                          #41-44
 //   distTerm = d≤50 ? d/50−1 : 0   ← #51 的第三源 = c3.x=0(非 c3.z=1!)    #48+51
-//   inner = (B·R−0.05)·A + 0.6·A + B·R − 0.3 + distTerm   ← #47 乘 A 非 B #45-53
+//   inner = sat(B·R−0.05)·A + 0.6·A + B·R − 0.3 + distTerm               #45-53
+//           (★#45 _sat 钳 BR−0.05;#52 乘 A 非 B)
 //   D = max(0.3, 1.3 − d/1800)                                            #49-50
-//   shade = inner · intensity · D³                                        #54-57
+//   shade = sat(inner·intensity)·D³                                       #54-57(★#57 _sat)
 //   r2 = tex·vColor; r1 = lerp(vColor, (uColor,1), 0.5)·tex.a             #58-62
 //   out = r2 + shade·(r1·vColor.a − r2)                                   #63-65
+//   (★三处 sat = 2026-08-24 r15 _sat 判据修复后字节码实证;此前镜像按无钳旧
+//    解释器校准,密核 texR>0.87/BR>1.05/inner·intensity>1 三域偏差)
 
 /** HorizonHelper.cs:28-36 MoonColors（moonType 0-8;夜 uColor = 表×GetMoonStrength） */
 export const MOON_COLORS: ReadonlyArray<readonly [number, number, number]> = [
@@ -946,8 +949,9 @@ export function horizonCloudShade(
   fragX: number, fragY: number, drawX: number, drawY: number,
   celX: number, celY: number, uvX: number, uvY: number, intensity: number,
 ): number {
+  const sat01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
   const coverage = 1 - 0.2 * texSumA;
-  const thickness = 1 - 4 * (texR - 0.62);
+  const thickness = 1 - 4 * sat01(texR - 0.62);              // #25 mul r0.y_sat
   const A = Math.max(thickness, coverage);
   let d1x = fragX - drawX, d1y = fragY - drawY;
   const l1 = Math.hypot(d1x, d1y);
@@ -958,9 +962,9 @@ export function horizonCloudShade(
   const B = Math.max(d1x * n2x + d1y * n2y, 1 - (dist / 60) ** 2);
   const R = Math.hypot(uvX * 2 - 1, uvY * 2 - 1);
   const distTerm = dist <= 50 ? dist / 50 - 1 : 0;
-  const inner = (B * R - 0.05) * A + 0.6 * A + B * R - 0.3 + distTerm;
+  const inner = sat01(B * R - 0.05) * A + 0.6 * A + B * R - 0.3 + distTerm;  // #45 mad r0.x_sat
   const D = Math.max(0.3, 1.3 - dist / 1800);
-  return inner * intensity * D * D * D;
+  return sat01(inner * intensity) * D * D * D;               // #57 mul r0.x_sat
 }
 
 /** 2D 兜底单探针近似（GL 主路径逐像素精确;此处 Canvas2D 无逐像素通道）:

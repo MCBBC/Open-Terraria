@@ -298,7 +298,8 @@ export function parseWld(buf: Uint8Array): WldWorld {
     if (r.boolean()) flags.towerActiveVortex = true;
     if (r.boolean()) flags.towerActiveNebula = true;
     if (r.boolean()) flags.towerActiveStardust = true;
-  } else { for (let i = 0; i < 8; i++) r.boolean(); }
+  }
+  // （v<140 原版在此 return 终读——本解析器只支持 >=210,else 不补读）
   if (r.boolean()) flags.lunarApocalypseUp = true;                                         // apocalypse
   if (version >= 170) {
     r.boolean(); r.boolean(); r.i32();

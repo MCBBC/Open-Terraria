@@ -13,7 +13,10 @@ export interface WorldMeta {
   seed: string;          // 用户输入的 seed 文本（原样保存）
   w: number; h: number;
   difficulty: number;    // 0 经典 1 专家 2 大师 3 旅程
-  evil: -1 | 0 | 1;      // -1 随机 0 腐化 1 猩红
+  evil: -1 | 0 | 1;      // -1 随机 0 腐化 1 猩红（注册时已解析实际值）
+  /** 困难模式（肉山后；选择列表世界图标 Hallow 前缀用——AWorldListItem.cs:190
+   *  GetSeedIcon 的 IsHardMode 分支）。随存档原地刷新（save 流 currentWorld 变更） */
+  hardMode?: boolean;
   createdAt: number;
   lastPlayed: number;
   playTimeMs: number;
