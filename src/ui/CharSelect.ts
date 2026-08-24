@@ -81,6 +81,28 @@ const CSS = `
   position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
   width: 60px; height: 58px; image-rendering: pixelated; pointer-events: none;
 }
+/* ---- 手机适配(2026-08-25,加法式覆盖,桌面 1280×800 全不命中)----
+   A 竖屏窄(max-width:560):面板吃满宽度、列表改 flex 撑满剩余高度(替代 52vh);
+   B 矮横屏(max-height:500):压 footer 钮高;C 触控(hover:none+coarse):
+   图标钮外包 .sw-vico 扩触控热区(margin 抵消 → 视觉零位移) */
+@media (max-width: 560px) {
+  .sw-vsel { width: min(94vw, 650px); max-height: 92vh; max-height: 92dvh; }
+  .sw-vsel-panel { flex: 1 1 auto; display: flex; min-height: 120px; }
+  .sw-vsel-list { max-height: none; flex: 1 1 auto; overscroll-behavior: contain; }
+  .sw-vsel-footer { margin-top: 10px; }
+  .sw-vsel-footer .sw-vbtn { height: 46px; }
+}
+@media (max-height: 500px) {
+  .sw-vsel { max-height: 94vh; }
+  .sw-vsel-title { margin-bottom: 8px; }
+  .sw-vsel-panel { flex: 1 1 auto; display: flex; }
+  .sw-vsel-list { max-height: none; flex: 1 1 auto; overscroll-behavior: contain; }
+  .sw-vsel-footer { margin-top: 8px; }
+  .sw-vsel-footer .sw-vbtn { height: 40px; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .sw-vico { display: inline-flex; padding: 6px; margin: -6px; }
+}
 `;
 
 export function ensureStyle() {
@@ -94,6 +116,11 @@ export function ensureStyle() {
 }
 
 const BTN_SRC = (n: string): string => `sprites/vanilla-ui/${n}.png`;
+
+/** 触屏(无 hover)设备:行标签无法悬停唤出,构建时预填主行动文案。
+ *  与 CSS C 档断点同源(hover:none+pointer:coarse),桌面恒 false 零差异 */
+const TOUCH_LABELS = typeof matchMedia === 'function'
+  && matchMedia('(hover: none) and (pointer: coarse)').matches;
 
 export class CharSelectPanel {
   private panel: HTMLElement;
@@ -131,13 +158,18 @@ export class CharSelectPanel {
   private unsubLang: (() => void) | null = null;
 
   private iconBtn(parent: HTMLElement, src: string, label: string, fn: () => void): void {
+    // 24px 图标外包 .sw-vico 触控热区层(C 档 padding 6/margin -6 → 36² 热区,
+    // 桌面无样式盒尺寸=img 几何零变化);click 挂热区层,img 点击冒泡仍触发
+    const wrap = document.createElement('span');
+    wrap.className = 'sw-vico';
     const img = document.createElement('img');
     img.src = BTN_SRC(src);
     img.title = label;
     img.addEventListener('mouseenter', () => { this.setLabel(label, false); });
     img.addEventListener('mouseleave', () => { this.setLabel('', false); });
-    img.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
-    parent.appendChild(img);
+    wrap.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+    wrap.appendChild(img);
+    parent.appendChild(wrap);
   }
 
   private setLabel(text: string, del: boolean): void {
@@ -228,6 +260,7 @@ export class CharSelectPanel {
       }
       const label = document.createElement('div');
       label.className = 'sw-vitem-label';
+      if (TOUCH_LABELS) label.textContent = Lang.text('UI.Play');
       const delLabel = document.createElement('div');
       delLabel.className = 'sw-vitem-del-label';
       btns.append(label); // 同 WorldSelect：标签入按钮流（见彼处注）

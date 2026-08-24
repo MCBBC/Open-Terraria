@@ -329,6 +329,12 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     const f = (globalThis as { __swTmRooms?: (r: Room[], sx: number, sy: number) => void }).__swTmRooms;
     if (f) f(rooms.map((r) => ({ ...r })), sx, sy);
   }
+  // ★LLL 批（2026-08-25）#46 定罪探针通道：深度组账本（1457 GenerateBricks 输入）
+  //   ——只读钩,无消费者时零开销;旧消费者（__swTmRooms 两参签名）不受影响。
+  {
+    const f = (globalThis as { __swTmDepths?: (d: number[], rooms: Room[], sx: number, sy: number) => void }).__swTmDepths;
+    if (f) f(depths.slice(), rooms.map((r) => ({ ...r })), sx, sy);
+  }
   // ---- ★VVVVVV 砖线双态门（SW_MB_1457,与 HellFortPass 同款）：缺省 1456=
   //      「全房对四角连线」（makeTempleCorridors,本文件尾,cs:33700-33760,零掷骰）;
   //      SW_MB_1457=1 → 1457 砖线（cs:33864 调用位,深度组并界+StrictAngles L 形线,

@@ -71,6 +71,19 @@ const CSS = `
   color: #e8e8f4; padding: 8px 22px; cursor: pointer; font-family: inherit;
   font-size: 15px;
 }
+/* ---- 手机适配(2026-08-25,加法式覆盖,桌面 ≥1024×768 全不命中)----
+   窄屏(≤700,含 640 宽小屏横屏):预览侧栏从右侧列改为叠在主列上方一行
+   (column-reverse 保持 DOM 序=侧栏在后),选项钮标签缩号防挤压;
+   input 16px 防 iOS 聚焦自动放大。矮横屏(max-height:500):面板内滚兜底 */
+@media (max-width: 700px) {
+  .sw-wc-body { flex-direction: column-reverse; }
+  .sw-wc-side { width: 100%; flex-direction: row; justify-content: center; }
+  .sw-wc-opt span { font-size: 13px; }
+  .sw-wc-row input[type=text] { font-size: 16px; }
+}
+@media (max-height: 500px) {
+  .sw-wc-panel { max-height: 96vh; overflow-y: auto; overscroll-behavior: contain; }
+}
 `;
 
 const SEED_ICON: Record<string, string> = {

@@ -9,10 +9,15 @@
     html, body {
       margin: 0; padding: 0; width: 100%; height: 100%;
       overflow: hidden; background: #000;
+      overscroll-behavior: none; /* 防触摸橡皮筋/下拉刷新(菜单列表自身滚动不受影响) */
       font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       user-select: none;
     }
-    #game-root { position: fixed; inset: 0; touch-action: none; }
+    /* touch-action 不设在 #game-root:touch-action 沿祖先链取交集会连带禁掉
+       菜单面板(.sw-vsel-list/.sw-cc-hairgrid)的原生触摸滚动。世界区触摸手势
+       由 canvas 自身的 touch-action:none + Input.ts(canvas 监听)preventDefault
+       双保险禁用——若把 Input 监听迁到 root,须同步在此恢复 none。 */
+    #game-root { position: fixed; inset: 0; }
     canvas { display: block; image-rendering: pixelated; touch-action: none; }
   </style>
 </head>

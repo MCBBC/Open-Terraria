@@ -21,6 +21,11 @@ const DIFF_LABEL = () => [Lang.text('UI.Normal'), Lang.text('GameUI.Expert'), La
 
 const BTN_SRC = (n: string): string => `sprites/vanilla-ui/${n}.png`;
 
+/** 触屏(无 hover)设备:行标签无法悬停唤出,构建时预填主行动文案(与 CharSelect
+ *  的 TOUCH_LABELS 同源断点 hover:none+pointer:coarse,桌面恒 false 零差异) */
+const TOUCH_LABELS = typeof matchMedia === 'function'
+  && matchMedia('(hover: none) and (pointer: coarse)').matches;
+
 /** 世界图标贴图名（AWorldListItem.GetSeedIcon :186-201 1:1）：
  *  "Icon"+(困难?"Hallow":"")+(腐化?"Corruption":"Crimson")+秘密种子后缀；
  *  drunk=CorruptionCrimson(evilVariants:false)、skyblock 无前后缀变体。
@@ -116,13 +121,18 @@ export class WorldSelectPanel {
   private unsubLang: (() => void) | null = null;
 
   private iconBtn(parent: HTMLElement, src: string, label: string, fn: () => void): void {
+    // 24px 图标外包 .sw-vico 触控热区层(C 档 padding 6/margin -6 → 36² 热区,
+    // 桌面无样式盒尺寸=img 几何零变化);click 挂热区层,img 点击冒泡仍触发
+    const wrap = document.createElement('span');
+    wrap.className = 'sw-vico';
     const img = document.createElement('img');
     img.src = BTN_SRC(src);
     img.title = label;
     img.addEventListener('mouseenter', () => { this.setLabel(label, false); });
     img.addEventListener('mouseleave', () => { this.setLabel('', false); });
-    img.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
-    parent.appendChild(img);
+    wrap.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+    wrap.appendChild(img);
+    parent.appendChild(wrap);
   }
 
   private setLabel(text: string, del: boolean): void {
@@ -195,6 +205,7 @@ export class WorldSelectPanel {
       }
       const label = document.createElement('div');
       label.className = 'sw-vitem-label';
+      if (TOUCH_LABELS) label.textContent = Lang.text('UI.Play');
       const delLabel = document.createElement('div');
       delLabel.className = 'sw-vitem-del-label';
       // 悬停标签入按钮流（跟随末钮）——原钉死 left:182px 是旧 3 钮布局，4 钮后

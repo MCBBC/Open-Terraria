@@ -118,6 +118,21 @@ const CSS = `
 }
 .sw-title-celestial.grabbing .body { visibility: visible; }  /* 抓取中:跟手可见反馈 */
 .sw-title-celestial.night .body { background-size: 100% 800%; } /* 月相竖条 8 帧 */
+/* ---- 手机适配(2026-08-25,加法式覆盖,桌面 ≥1024×768 全不命中)----
+   A 竖屏窄(max-width:560):压缩纵向节奏;B 矮横屏(max-height:500):
+   手机横屏 ~390 高,13vh+486logo+5钮列 ≈470 会溢出 → 缩 logo + 收紧间距 */
+@media (max-width: 560px) {
+  .sw-title-logo { margin-top: 10vh; }
+  .sw-title-btns { gap: 6px; margin-top: 4vh; }
+  .sw-title-btn { font-size: 19px; padding: 7px 18px; letter-spacing: 2px;
+    touch-action: manipulation; }
+}
+@media (max-height: 500px) {
+  .sw-title-logo { width: min(340px, 46vw); margin-top: 3vh; }
+  .sw-title-btns { margin-top: 2vh; gap: 4px; }
+  .sw-title-btn { font-size: 16px; padding: 4px 16px; letter-spacing: 2px;
+    touch-action: manipulation; }
+}
 `;
 
 export class TitleMenu {
