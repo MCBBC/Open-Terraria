@@ -216,9 +216,9 @@ export function mountAssetBadge(): void {
       txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Failed', st.failed);
       return;
     }
-    // 徽标文案就一句"资源加载中"(2026-08-24 用户要求,"素材包 0% · 菜单"很怪);
-    // 百分比/字节数/阶段挪进悬停 tooltip
-    txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Loading');
+    // 徽标文案"资源加载中 · N%"(2026-08-24 用户要求,"素材包 0% · 菜单"很怪);
+    // 字节数/阶段挪进悬停 tooltip
+    txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Loading', fmtPct(st));
     if (st.phase === 'done' && !badgeFading) {
       badgeFading = true;
       badgeEl.style.opacity = '0';

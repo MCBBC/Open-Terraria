@@ -190,14 +190,19 @@ export interface RolledFlags {
  *  remix ocean 掷骰。notTheBees 分支（:19462-19465）本仓无该彩蛋种子，恒跳过；
  *  remix 分支（:19466-19470/:19491）remix 恒 false 时不可达。 */
 export function prepareFishingContext(
-  zones: ZoneInput, heightLevel: number, y: number, rockLayer: number,
+  zones: ZoneInput, heightLevel: number, y: number, rockLevel: number,
   rng: Rng = mathRng,
+  /** R14-E13②：Main.notTheBeesWorld（PRJ57:20989-20992,在腐化/雪掷之前） */
+  notTheBees = false,
 ): RolledFlags {
-  void heightLevel; void y; void rockLayer;    // remix 分支专用（:19466/:19491），remix 恒 false 不参与
+  const remix = false;                          // 本仓无颠倒世界（remix 分支不可达）
+  void y; void rockLevel;                      // remix 分支专用（:19466/:19491）
   let corrupt = zones.corrupt;                 // flag  :19453
   let crimson = zones.crimson;                 // flag2 :19454
-  const jungle = zones.jungle;                 // flag3 :19455（notTheBees 抑制不适用）
+  let jungle = zones.jungle;                   // flag3 :19455
   let snow = zones.snow;                       // flag4 :19456
+  // R14-E13②：NTB 1/2 弃丛林（:20989-20992,先于腐化/雪二掷——掷序敏感）
+  if (notTheBees && !remix && rng.next(2) === 0) jungle = false;
   // 腐化∩猩红 → 二选一（:19471-19481）
   if (corrupt && crimson) {
     if (rng.next(2) === 0) crimson = false; else corrupt = false;

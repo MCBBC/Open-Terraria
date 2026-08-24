@@ -1389,7 +1389,10 @@ export class SkyRenderer {
    *  BiomeBackground.tintCache;贴图仅 48×1400,重烘成本可忽略) */
   private tintSkyTex(tex: ImageBitmap | HTMLImageElement): HTMLCanvasElement {
     const c = this.cots!;
-    const key = `${(c[0] / 8) | 0},${(c[1] / 8) | 0},${(c[2] / 8) | 0}`;
+    // ★键 = 逐单位截断(曾 1/8 量化=32 档)——晨昏 cots 扫过数百单位时天空底色
+    //  按 8 单位台阶跳变 = 用户实报"光照顿挫/肉眼可见亮度跌落"(2026-08-24)。
+    //  bake 本体(贴图尺寸 multiply+destination-in,画布复用)≈1ms,逐帧可承受
+    const key = `${c[0] | 0},${c[1] | 0},${c[2] | 0}`;
     if (this.skyBgTinted?.key === key) return this.skyBgTinted.canvas;
     const cv = document.createElement('canvas');
     cv.width = tex.width; cv.height = tex.height;

@@ -20471,7 +20471,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // :41546 `canFloatInWater && wet`——canFloatInWater=装备 4404 水行靴族(:12845)或
     // 药水 buff 265(:9595)每帧重扫；wet=WetCollision 只认水/蜂蜜(排岩浆/微光)。
     // 坐椅钓鱼 +5（:41549-41551 sitting.TryGetSittingBlock——2026-08-15 坐椅系统落地接通）
-    if ((p.equipStats.waterWalk || p.buffs.has(BuffType.WaterWalking))
+    // R14-E11：canFloatInWater 两源（4404 甲件 :13366 ∪ buff265 脚蹼药水 :9984）
+    // 且 wet（水/蜜,WetCollision 语义）——曾用 waterWalk/WaterWalking 族（错物品族）
+    if ((p.equipStats.canFloat || p.buffs.has(BuffType.FlipperPotion))
       && (p.inWater || p.inHoney)) bonus += 5;
     if (p.sitting) {
       const scx = Math.floor(p.cx / TILE), scy = Math.floor((p.y + p.h - 2) / TILE);
@@ -22136,15 +22138,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const beeDmg = makeStrong ? Math.trunc(num20) + 1 + Math.floor(Math.random() * 3)
             : Math.trunc(num20) + Math.floor(Math.random() * 2);
           const beeKb = makeStrong ? 0.5 : 0;
-          const tgt = this.entities.enemies.find((e) => {
-            const en = e as Enemy;
-            return !en.dead && Math.abs(en.cx - p.cx) < 500;
-          }) as Enemy | undefined;
-          const ang = tgt
-            ? Math.atan2(tgt.cy - p.cy, tgt.cx - p.cx)
-            : -Math.PI / 2 + (Math.random() - 0.5);
-          const spd = 3.4; // aiStyle 36 追踪档出速占位（真值 ±0.7 抖动由追踪 AI 接管）
-          this.entities.add(new Arrow(p.x, p.y, Math.cos(ang) * spd, Math.sin(ang) * spd,
+          // 出速 = Next(-35,36)×0.02 = ±0.7 双轴随机（Player.cs:38810-38812）——
+          // 原版蜂出生近零速全靠 aiStyle 36 追踪 AI 携带索敌（追踪弹全族批已建模，
+          // 撤此前"瞄敌近似 3.4 速"占位）
+          const bvx = (Math.floor(Math.random() * 71) - 35) * 0.02;
+          const bvy = (Math.floor(Math.random() * 71) - 35) * 0.02;
+          this.entities.add(new Arrow(p.x, p.y, bvx, bvy,
             beeDmg, beeKb, beeType, null), 'projectiles');
         }
         p.buffs.apply(BuffType.Honey, 5);

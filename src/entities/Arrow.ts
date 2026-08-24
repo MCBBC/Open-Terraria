@@ -1983,7 +1983,7 @@ export class Arrow extends Entity {
         }
         if (bestId659 >= 0) {
           this.sf659Ai0 = bestId659;
-          this.life = Math.max(this.life, 420);            //（:36896-36898 timeLeft=420）
+          this.life = 420;                                 //（:36896-36898 timeLeft = 420 直写）
         }
       }
       if (this.sf659Ai0 >= 0) {

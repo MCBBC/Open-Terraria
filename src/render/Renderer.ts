@@ -2897,6 +2897,13 @@ export class Renderer {
     // heldProj 账本:帧首清账,实体自带 draw 分支登记活体投射物中心;
     // 同帧 drawPlayer 消费(实体先画玩家后画 → 无跨帧陈旧)。见 heldProj.ts 头注
     heldProjFrameBegin();
+    // ★r15 R15-6:isLockedToATile 玩家(坐椅/睡床,Player.cs:4004-4012 = sitting||
+    //    sleeping)先于全部实体绘制(RefreshPlayerDrawOrder :22465-22498 两档制 →
+    //    DrawPlayers_BehindNPCs :64261 在 NPC 层之前)——NPC 走过坐椅玩家时遮住玩家
+    for (const rp of this.remotePlayers) {
+      if ((rp.sitting || rp.sleeping) && !rp.dead) this.drawPlayer(rp, world, rp.swingNet, flicker);
+    }
+    if ((player.sitting || player.sleeping) && !player.dead) this.drawPlayer(player, world, swing, flicker);
     for (const e of sorted) {
       if (e instanceof Enemy) {
         if (this.isBehindTilesEnemy(e)) { this.drawHealthBar(e, world.isExpert); continue; }
@@ -2904,8 +2911,9 @@ export class Renderer {
         if (e.vanilla?.hide) { this.drawHealthBar(e, world.isExpert); continue; }
         this.drawEnemy(e, world, entities); this.drawHealthBar(e, world.isExpert);
       }
-      else if (e instanceof ItemDrop) this.drawDrop(e);
-      else if (e instanceof TownNPC) { this.drawTownNPC(e, world); this.drawHealthBar(e); }
+      // ★r15 R15-5:掉落物摘出排序循环——原版 DrawItems(:63226)在
+      //    DrawPlayers_AfterProjectiles(:63204)之后=物品盖玩家;移至 drawPlayer 后
+      else if (!(e instanceof ItemDrop) && e instanceof TownNPC) { this.drawTownNPC(e, world); this.drawHealthBar(e); }
       else if (e instanceof Tombstone) this.drawTombstone(e);
       else if (typeof (e as { draw?: unknown }).draw === 'function') {
         // 投射物等自带 draw 的实体(飞镖/陷阱弹/箭/法弹):世界变换内绘制
@@ -2956,6 +2964,14 @@ export class Renderer {
       ctx.fillRect(x - 1, y - 1, 40, 2);
       ctx.fillStyle = `rgb(${r},${g},0)`;
       ctx.fillRect(x, y, 38 * fill, 4);
+    }
+
+    // 4.35 掉落物（★r15 R15-5：原版 DrawItems(M57:63226) 在
+    //     DrawPlayers_AfterProjectiles(:63204) 与 DrawCachedNPCs(OverPlayers)
+    //     (:63213) 之后——物品精灵盖在玩家身上；曾进实体 y 排序=玩家盖物品。
+    //     磁吸/拾取逻辑在更新侧不受影响）
+    for (const e of sorted) {
+      if (e instanceof ItemDrop) this.drawDrop(e);
     }
 
     // 4.4 雨（★2026-08-24 r15 R15-1：原版 DrawRain 在 DrawItems/全部实体之后

@@ -395,6 +395,17 @@ function tryRoll(ctx: NpcDropCtx, rule: Rule): boolean {
     if (denom <= 1) return true;
     return ctx.rng.int(0, denom - 1) < num;
   }
+  // R14-A1：CommonDropScalingWithOnlyBadLuck（CommonDropScalingWithOnlyBadLuck.cs:21-35
+  // → Luck.RollOnlyBadLuck LUK57:31-36）——仅 luck<0 时掷 NextFloat()<-luck 进内掷
+  // Next(Next(denom/2,denom))（更易中）；luck>=0 就是裸 Next(denom)（正运无加成）。
+  // 曾记成普通 common → 幸运玩家白吃加成/负运玩家反被惩罚（双向都反）
+  if ((rule as { onlyBadLuck?: number }).onlyBadLuck) {
+    if (denom <= 1) return true;
+    if (ctx.luck < 0 && ctx.rng.next() < -ctx.luck) {
+      return ctx.rng.int(0, Math.floor(ctx.rng.int(Math.floor(denom / 2), denom - 1))) < num;
+    }
+    return ctx.rng.int(0, denom - 1) < num;
+  }
   return rollLuck(ctx, denom, num);
 }
 

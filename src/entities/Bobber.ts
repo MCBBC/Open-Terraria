@@ -137,7 +137,9 @@ export class Bobber extends Entity {
   private fishingPower(p: Player, game?: GameHooks): number {
     let base = this.polePower + this.baitPower + (p.buffs.has(BuffType.Fishing) ? 15 : 0)
       + p.equipStats.fishingSkill;
-    if (p.equipStats.waterWalk) base += 5;  // canFloatInWater 漂浮态（:41546-41549;waterWalk 族=漂浮资格）
+    // R14-E11：canFloatInWater（4404 水上漂/buff265 脚蹼药水）且 wet（水/蜜）才 +5
+    // （:41546-41549）——曾用 waterWalk 族无 wet 门（陆地也加,且物品族错位）
+    if (p.equipStats.canFloat && (p.inWater || p.inHoney)) base += 5;
     if ((p as unknown as { isSitting?: boolean }).isSitting) base += 5;  // 坐姿（:41550-41553）   // 装备侧渔力（钓具族+渔夫甲+软糖虫,:12549-12556/:13022-13027/:12451）
     if (p.buffs.has(BuffType.Tipsy)) base += 5;                  // buff 25 :41542-41545
     if (game) {
@@ -239,7 +241,12 @@ export class Bobber extends Entity {
     const w = game.world as World;
     const st = w.store;
     const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+    // R14-E12：玩家湿身且浮标高于玩家中心 → 不可钓（TryBuildFishingContext 首门
+    // PRJ57:20710-20714 `player.wet && !(Center.Y >= player.Center.Y)`）
+    if (p.inWater && this.cy < p.cy) return;
     const pond = getFishingPondState(game, tx, ty);   // GetFishingPondState :20170-20201
+    // R14-E13①：NotTheBees 世界 1/2 掷把蜂蜜池当水（PRJ57:20730-20732,在 <75 门之前）
+    if (w.seedFlags?.notTheBees && Math.floor(Math.random() * 2) === 0) pond.honey = false;
     if (pond.waterTilesCount < 75) return;            // :19206-19210 NotEnoughWater
     // 松露虫（:19212-19224）：永不出鱼；两侧海洋带（X<380||>w-380，浮标格）且池液>1000
     // 且场上无 Duke → 开咬钩窗（-280..-160，localAI[1]=1 "有咬"）
@@ -305,11 +312,13 @@ export class Bobber extends Entity {
         if (!w.flags.unlockedSlimeRedSpawn && Math.floor(Math.random() * 5) === 0) {
           this.catchEnemy = 682;                      // :19413-19416
         } else if (w.flags.hardMode) {
+          // R14-E14 掷序对齐（PRJ57:20947-20950）：先 SelectRandom 池(1 掷)再 1/10 覆写 618
           const poolE = [620, 621, 586, 587];
-          this.catchEnemy = Math.floor(Math.random() * 10) === 0 ? 618   // :19420-19423
-            : poolE[Math.floor(Math.random() * poolE.length)];
+          this.catchEnemy = poolE[Math.floor(Math.random() * poolE.length)];
+          if (Math.floor(Math.random() * 10) === 0) this.catchEnemy = 618;
         } else {
-          this.catchEnemy = Math.random() < 0.5 ? 586 : 587;             // :19427
+          // :20955 SelectRandom({586,587}) = 1 掷均匀
+          this.catchEnemy = [586, 587][Math.floor(Math.random() * 2)];
         }
       }
     }
@@ -325,7 +334,8 @@ export class Bobber extends Entity {
       rockLayer: w.rockLevel, maxTilesX: st.w, heightLevel, questFish,
       hardMode: !!w.flags.hardMode, bloodMoon: !!w.clock.bloodMoon,
       combatBookWasUsed: !!w.flags.combatBookWasUsed, remix: false,
-      zones, rolled: prepareFishingContext(zones, heightLevel, ty, w.rockLevel),   // :19451-19502
+      zones, rolled: prepareFishingContext(zones, heightLevel, ty, w.rockLevel,
+        undefined, !!w.seedFlags?.notTheBees),   // :19451-19502（R14-E13② NTB 弃丛林掷）
     });
     if (this.catchId > 0 || this.catchEnemy > 0) {
       this.openBiteWindow(level);                     // :19348/:19362

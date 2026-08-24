@@ -29,7 +29,7 @@ const RUN = process.env.SW_FFF === '1';
       seedFlags: { noTraps: true },
       onWorldPartial: (_w, i, name) => {
         if (name === '雕像宝箱') on = false;
-        else if (i === 4) on = true;
+        else if (i === 17) on = true;
       },
     });
   } finally {

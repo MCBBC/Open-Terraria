@@ -241,8 +241,10 @@ export enum BuffType {
   //      Player.cs:6507/6537——新弹/新饰品未移植部分登记）----
   PotentAcid = 113,        // 强酸(395,1457 新)：90 HP/s DoT（DOTTally.AddPoison(180,60)，
                            //   NPC.cs:92751——可被 398 加速；中毒式染色 R×0.65 B×0.75）
-  ChlorophyteSpore = 114,  // 叶绿孢子(397,1457 新)：90 HP/s DoT（:92755 同款）+
-                           //   孢子云粒子 1/60/t（:92878）+ 叶尘 157 4/5（:92315）
+  ChlorophyteSpore = 114,  // 叶绿孢子(397,1457 新)：玩家侧 DoT 15 HP/s（PL57:19082
+                           //   lifeRegen-30;NPC 侧 DOTTally 90 HP/s :92755 不同轴）+
+                           //   孢子云粒子 1/60/t（PL57:26178 玩家/NPC57:92878）+
+                           //   叶尘 157 4/5（:92315）
   AcceleratePoisons = 115, // 毒素加速(398,1457 新)：毒/流血/火焰族"可加速"DoT ×2
                            //   （DOTTally.SupportAcceleration NPC.cs:127-131——只加成
                            //   AddPoison/AddBloodLoss/AddFlamable，不加成裸 Add）
@@ -664,6 +666,10 @@ const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
   [BuffType.Burning, -30],    // lifeRegen-60（:18875，另 moveSpeed×0.5 在 strongestMoveSpeedDebuff）
   [BuffType.Suffocation, -20], // lifeRegen-40（:18889）
   [BuffType.Electrified, -4], // lifeRegen-8（:18899）；移动加成见 ELECTRIFIED_MOVE_EXTRA
+  // 叶绿孢子 397 玩家侧 DoT（★2026-08-24 r15 R15-19：PL57:19082-19090
+  //  lifeRegen -= 30 = 15 HP/s——与 NPC 侧 DOTTally 90 HP/s（:92755）不同轴,
+  //  勿互搬；孢子云 1/60 发射器在 Player.fixedUpdate（需 game 钩子,不入本表）
+  [BuffType.ChlorophyteSpore, -15],
 ];
 /** Electrified 移动惩罚（Player.cs:18900-18903：controlLeft||controlRight 时
  *  lifeRegen 额外 -32 → +16 HP/s）——tick 前由 Player.fixedUpdate 写入开关 */
