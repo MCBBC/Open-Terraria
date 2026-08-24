@@ -375,6 +375,8 @@ export interface AnglerRewardOpts {
   /** 本次交付的任务鱼 id（GetAnglerReward questItemType，:55351 入参） */
   questItemType: number;
   hardMode: boolean;
+  /** Main.expertMode（:55611-55614 金钱段再 ×2）——R14-E8 补（1456 同款,曾缺=专家/大师金钱少一倍） */
+  expertMode?: boolean;
   /** 玩家持有的物品类型全集（inventory/armor/bank×4/loadouts，DropAnglerAccByMissing :55647-55685） */
   ownedTypes: Set<number>;
   /** currentShoppingSettings.PriceAdjustment（:55356）——本仓无快乐度议价，缺省 0 */
@@ -467,6 +469,7 @@ export function rollAnglerRewards(opts: AnglerRewardOpts): AnglerRewardGrant[] {
     money = Math.floor(money * rng.range(50, 201) * 0.015);      // :55603
     money = Math.floor(money * 1.5);                             // :55604
     if (opts.hardMode) money *= 2;                               // :55605-55608
+    if (opts.expertMode) money *= 2;                             // :55611-55614（R14-E8）
     if (money > 100) {                                           // :55613-55626 金币
       money = Math.floor(money / 100);
       if (money > 10) money = 10;

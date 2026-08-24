@@ -140,6 +140,18 @@ export class LuckState {
     return 0.025;
   }
 
+  /** LadyBugKilled（NPC.cs:82403-82434）——瓢虫饵 4361/4362 消耗钩与瓢虫击杀共用：
+   *  距离 <400px 才生效（<100px 视为 0 距离），坏运量 = (int)(-10800 × (1−d/400)) ×
+   *  (金瓢虫 ×2)，仅当比当前更坏（num3 < timeLeft）才覆写。
+   *  Main.ladyBugRainBoost += 1800 钳 18000（:82405-82409）由 Weather 侧承接 */
+  applyLadyBugKilled(distPx: number, goldLadyBug = false): void {
+    if (distPx >= 400) return;
+    const v = distPx < 100 ? 0 : distPx;                       // :82416-82419
+    const num2 = 1 - v / 400;                                  // :82421
+    const num3 = Math.trunc(-10800 * num2) * (goldLadyBug ? 2 : 1);  // :82422-82425
+    if (num3 < this.ladyBugLuckTimeLeft) this.ladyBugLuckTimeLeft = num3;  // :82430-82432
+  }
+
   /** AddCoinLuck（:17943-17955）：距离 <1000px 才累计，cap 1e6 */
   addCoinLuck(distPx: number, coinAmount: number): void {
     if (distPx >= 1000) return;

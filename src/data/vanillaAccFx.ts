@@ -86,6 +86,7 @@ export interface AccFx {
   jellyfishGlow?: number;    // 1860 水母潜水装备：浸水发光 1.8/0.4/1.2（:14682-14688）
   // ---- 配饰审计 P0 批（2026-08-22 审计 docs/audit/item-audit-2026-08-22.md）----
   fishingTackle?: number;   // accTackleBox（2375/3721/5064 :14123-14140）：鱼饵消耗分母 +1（:51645）
+  fishingLine?: number;     // accFishingLine（2373/3721/5064 :14759/:14779/:14785）：1/7 断线免疫（:53076）
   lavaFishing?: number;     // accLavaFishing（4881/5064 :14127-14140）：岩浆钓门（:19230）
   dmgMinion?: number;       // minionDamage += X（召唤伤加算乘区；935/1301/3015 :14900/:14431/:14105）
   endurance?: number;       // endurance += X（受伤减免加算；蠕虫围巾 3224 :14532-14535）

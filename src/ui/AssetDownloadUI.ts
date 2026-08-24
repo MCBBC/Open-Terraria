@@ -209,14 +209,16 @@ export function mountAssetBadge(): void {
   const txt = badgeEl.querySelector('.txt') as HTMLElement;
   const update = (st: AssetCacheState) => {
     if (!badgeEl) return;
-    badgeEl.title = `${fmtProgress(st)} · ${phaseText(st)}`;
+    badgeEl.title = `${fmtPct(st)} · ${fmtProgress(st)} · ${phaseText(st)}`;
     // 失败终态(3 轮自动重试后仍有缺):不淡出,常显失败数——菜单上就能看到
     // 异常,不必点单人游戏才发现(2026-08-13 可靠性 review)
     if (st.phase === 'done' && st.failed > 0) {
       txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Failed', st.failed);
       return;
     }
-    txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Summary', fmtPct(st), phaseText(st));
+    // 徽标文案就一句"资源加载中"(2026-08-24 用户要求,"素材包 0% · 菜单"很怪);
+    // 百分比/字节数/阶段挪进悬停 tooltip
+    txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Loading');
     if (st.phase === 'done' && !badgeFading) {
       badgeFading = true;
       badgeEl.style.opacity = '0';

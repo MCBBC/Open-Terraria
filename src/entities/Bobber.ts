@@ -23,8 +23,12 @@ import {
   type ZoneInput,
 } from '../data/vanillaFishing';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import vanillaRareJson from '../data/vanilla-itemrare.json';
 import { ITEM_DEFS } from '../data/items';
 import { VI_ID } from '../data/itemKeys';
+
+/** 原版 rare 表（vanilla-itemrare.json,extract-itemrare.mjs）——垃圾渔获 rare<0 判定 */
+const ITEM_RARE = vanillaRareJson as Record<string, number>;
 import type { World } from '../world/World';
 import { BuffType } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
@@ -392,7 +396,7 @@ export class Bobber extends Entity {
     const p = this.ownerRef();
     if (!p) return 0;
     // 声呐药水（buff 122）：咬钩时已掷——由 Game 侧显示（本实体的 catchId 预存）
-    this.consumeBait(p);
+    this.consumeBait(p, game);
     if (this.truffleBite) {
       // 松露虫咬钩（PullBobber :51563-51576）：必耗饵 + 召 Duke——-1 哨兵交 Game 侧
       this.truffleBite = false;
@@ -403,20 +407,40 @@ export class Bobber extends Entity {
     const caught = this.catchId;
     this.catchId = 0;
     this.dead = true;
+    // R14-E6：收竿 1/7 断线（PullBobber :53076-53079 `Next(7)==0 && !accFishingLine`
+    // → ai[0]=2 渔获作废）——仅物品渔获支（敌怪/松露虫支无断线掷）;饵已在上文消耗
+    // （ConsumeBait 先于 PullBobber,:53031-53033）。高测钓线族 equipStats.fishingLine 免疫
+    if (caught > 0
+      && !(p as unknown as { equipStats?: { fishingLine?: boolean } }).equipStats?.fishingLine
+      && Math.floor(Math.random() * 7) === 0) {
+      return 0;
+    }
     void game;
     return caught;
   }
 
-  /** 鱼饵消耗（:51640：1/(1+bait/6)，钓具箱 +1 分母） */
-  private consumeBait(p: Player): boolean {
+  /** 鱼饵消耗（ItemCheck_CheckFishingBobber_ConsumeBait PLA57:53106-53165 全支 1:1）：
+   *  ① 基础掷 NextFloat()×num2<1（num2=max(1,1+bait/6)+钓具箱）→ ② 松露虫标记
+   *  localAI[1]==-1 必耗 → ③ 渔获 rare<0（垃圾三件 2337/2338/2339,ITM57:23488-23490）
+   *  flag=false 不耗 → ④ 金蠕虫 2895 改掷 Next(20)==0（1/20）→ ⑤ 瓢虫饵 2673 必耗；
+   *  消耗时瓢虫饵触发 LadyBugKilled 坏运（NPC.cs:82403,距离<400 门+金瓢虫×2）+
+   *  Main.ladyBugRainBoost += 1800 钳 18000（:82405-82409）。R14-E5 */
+  private consumeBait(p: Player, game?: GameHooks): boolean {
     const slot = p.inv.slots[this.baitSlot];
     if (!slot) return false;
-    if (this.baitVid === 2673) {           // :51671-51674 松露虫必耗
+    let flag = Math.random() < 1 / (1 + this.baitPower / 6 + (this.tackleBox(p) ? 1 : 0));
+    if (this.truffleBite) flag = true;                                   // :53144-53147
+    else if (this.catchId > 0 && (ITEM_RARE[String(this.catchId)] ?? 0) < 0) flag = false;  // :53148-53156
+    if (this.baitVid === 2895) flag = Math.floor(Math.random() * 20) === 0;  // :53160-53162
+    if (this.baitVid === 2673) flag = true;                              // :53163-53165
+    if (flag) {
+      if (this.baitVid === 4361 || this.baitVid === 4362) {
+        p.luckState.applyLadyBugKilled(Math.hypot(this.cx - p.cx, this.cy - p.cy), this.baitVid === 4362);
+        const w = game?.world as World | undefined;
+        if (w) w.ladyBugRainBoost = Math.min(18000, w.ladyBugRainBoost + 1800);
+      }
       p.inv.removeAt(this.baitSlot, 1);
-      return true;
     }
-    const chance = 1 / (1 + this.baitPower / 6 + (this.tackleBox(p) ? 1 : 0));
-    if (Math.random() < chance) p.inv.removeAt(this.baitSlot, 1);
     return true;
   }
 

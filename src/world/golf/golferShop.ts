@@ -2,7 +2,7 @@
 // （Chest.cs:3135-3245；本文件只收 extract-shops.mjs 未捕获的 golferScoreAccumulated
 //  门槛条目，常驻条目在 vanilla-shopstock.json）。
 // 行号注释对准 /Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria/Chest.cs
-//   >500  四杆族 4039/4094/4093/4092   :3147-3162
+//   >=500 四杆族 4039/4094/4093/4092   :3163-3177（R14-C27:曾 >500 少一档,1456/1457 同 >=）
 //   >500  高尔夫球箱 4265              :3183-3186
 //   >500  铜奖杯 4599                  :3190-3193
 //   >1000 金级四杆族 4591/4594/4593/4592 :3169-3178
@@ -19,7 +19,7 @@ export function golferShopScoreGates(
   const out: number[] = [];
   const add = (...ids: number[]) => out.push(...ids);
   const gs = golferScoreAccumulated;
-  if (gs > 500) add(4039, 4094, 4093, 4092);        // :3147-3162
+  if (gs >= 500) add(4039, 4094, 4093, 4092);       // :3163-3177
   if (gs > 1000) add(4591, 4594, 4593, 4592);       // :3169-3178
   if (gs > 500) add(4265);                          // :3183-3186
   if (gs > 2000) {                                  // :3202-3213

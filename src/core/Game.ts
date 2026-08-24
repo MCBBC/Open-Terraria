@@ -11725,11 +11725,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           break;
         }
         const gsS = projGravSpec(cw.shoot);
+        // 追踪族穿透/寿命按 SetDefaults 表终值（追踪弹全族批）：通用兜底曾硬编码
+        // pierce 1——蜂枪 181/黄蜂枪 189 表值 3、巨蜂 566 表值 4、幽灵法杖弹 297 表值 3、
+        // 灵魂之焰 659 表值 −1（命中侧走全局 immune 帧冷却再命中）全被压成 1
+        const HOMING_FAMILY_PIERCE = new Set([181, 189, 307, 316, 566, 297, 659]);
         const shotArrow = new Arrow(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
           { grav: gsS.grav, gravDelay: gsS.delay, grav2: gsS.grav2, grav2At: gsS.grav2At,
-            dragAlways: gsS.drag, life: pd?.timeLeft ?? 3600, pierce: 1 });
+            dragAlways: gsS.drag, life: pd?.timeLeft ?? 3600,
+            pierce: HOMING_FAMILY_PIERCE.has(cw.shoot) ? (pd?.penetrate ?? 1) : 1 });
         shotArrow.frostEligible = dmgKind !== 'magic'; // melee/ranged 兜底弹吃冰霜引擎
         // 暴击链:装备 critChance(dmgKind) + 武器 item.crit(GetWeaponCrit)
         shotArrow.critBonus = this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee')
@@ -20402,6 +20407,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       questsDone: p.anglerQuestsFinished,
       questItemType,
       hardMode: !!this.world.flags.hardMode,
+      expertMode: this.world.isExpert,   // R14-E8：Main.expertMode 金钱 ×2
       ownedTypes: owned,
     })) {
       const key = VI(g.id);
@@ -25782,7 +25788,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.cb.onInventoryChanged?.();
     } else if (caught > 0) {
       const key = VANILLA_ITEM_KEY_BY_ID[caught];
-      if (key) this.spawnDrop(bobber.cx, bobber.cy - 8, key, 1, 0, -2);
+      // R14-E7：炸弹鱼 3196/冰霜飞鱼 3197 按渔力堆叠（AI_061_FishingBobber_GiveItemToPlayer
+      // PRJ57:54852-54904）——3196 min=(L/20+3)/2 max=(L/10+6)/2、3197 min=(L/4+15)/2
+      // max=(L/2+40)/2,Next(50/100/150/200)<L 各 +1(3197 各 +6),stack=Next(min,max+1);
+      // 渔力 = GetFishingConditions 现算(:54856/:54878)
+      let stack = 1;
+      if (caught === 3196 || caught === 3197) {
+        const L = this.playerFishingConditions().level;
+        const step = caught === 3196 ? 1 : 6;
+        const min = caught === 3196 ? (Math.floor(L / 20) + 3) >> 1 : (Math.floor(L / 4) + 15) >> 1;
+        let max = caught === 3196 ? (Math.floor(L / 10) + 6) >> 1 : (Math.floor(L / 2) + 40) >> 1;
+        for (const d of [50, 100, 150, 200]) {
+          if (Math.floor(Math.random() * d) < L) max += step;
+        }
+        stack = min + Math.floor(Math.random() * (max + 1 - min));
+      }
+      if (key) this.spawnDrop(bobber.cx, bobber.cy - 8, key, stack, 0, -2);
       this.cb.onInventoryChanged?.();
     } else if (bobber.catchEnemy > 0) {
       const id = bobber.catchEnemy;

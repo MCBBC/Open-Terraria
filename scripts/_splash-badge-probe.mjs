@@ -41,6 +41,7 @@ for (;;) {
 const A = (c, m) => { if (!c) { console.error('FAIL: ' + m); process.exitCode = 1; } };
 A(badgeText !== null, '下载徽标未出现（等待期应挂出）');
 A(!/Mods\.SandboxWorld/.test(badgeText ?? ''), `徽标文案未翻译: ${badgeText}`);
+A((badgeText ?? '').includes('资源加载中') || (badgeText ?? '').includes('Loading resources'), `徽标文案应为"资源加载中": ${badgeText}`);
 A(badgeAboveSplash, '徽标层级未浮于 splash 之上');
 A(badgeOffset !== null && Math.abs(badgeOffset) <= 40, `徽标未居中(偏移 ${badgeOffset}px)`);
 console.log(process.exitCode ? 'PROBE FAILED' : 'PROBE OK');

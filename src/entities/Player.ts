@@ -311,6 +311,9 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     fishingSkill: number;  // fishingSkill 合计（钓具+渔夫甲+软糖虫）
     /** 钓具箱族 accTackleBox（2375/3721/5064 :14123-14140）：鱼饵消耗分母 +1（:51645，Bobber 消费） */
     fishingTackle: boolean;
+    /** accFishingLine（2373 高测钓线/3721 渔具袋/5064 防熔渔具袋 :14759/:14779/:14785）——
+     *  收竿 1/7 断线免疫（PLA57:53076-53079）R14-E6 */
+    fishingLine: boolean;
     /** 岩浆钓族 accLavaFishing（4881/5064 :14127-14140）：岩浆钓门（:19230，Bobber 消费） */
     lavaFishing: boolean;
     /** 皇家凝胶 3090（:14144-14168）：23 类史莱姆 npcTypeNoAggro（Enemy 索敌门消费） */
@@ -1058,7 +1061,7 @@ export class Player extends Entity {
     let manaMagnet = false, magicCuffs = false, manaFlower = false;
     let manaCostMul = 1;
     // 配饰审计 P0 批（2026-08-22）聚合位
-    let fishingTackle = false, lavaFishing = false, royalGel = false;
+    let fishingTackle = false, lavaFishing = false, royalGel = false, fishingLine = false;
     let manaCostOffAcc = 0, toolboxRange = 0, accDmgMinion = 0;
     let mechShowWires = false, autoActuator = false, magiluminescence = false;
     let iceBarrierAcc = false, lavaRose = false;
@@ -1358,6 +1361,7 @@ export class Player extends Entity {
         if (fx.manaRegenDelayBonus) manaRegenDelayBonus += fx.manaRegenDelayBonus; // 982（:14382）
         // ---- 配饰审计 P0 批（2026-08-22）消费 ----
         if (fx.fishingTackle) fishingTackle = true;   // 钓具箱族 2375/3721/5064（:14123-14140）
+        if (fx.fishingLine) fishingLine = true;       // 高测钓线族 2373/3721/5064（R14-E6）
         if (fx.lavaFishing) lavaFishing = true;       // 防熔钓族 4881/5064（:14127-14140）
         if (fx.dmgMinion) accDmgMinion += fx.dmgMinion;   // 召唤伤 935/1301/3015（:14900/:14431/:14105）
         if (fx.endurance) setEndurance += fx.endurance;   // 蠕虫围巾 3224（:14532-14535）
@@ -1539,6 +1543,11 @@ export class Player extends Entity {
       else if (tier === 'cost80') ammoSaveCost80 = true;
       else if (tier === 'cost75') ammoSaveCost75 = true;
     }
+    // 渔夫套/升级渔夫套单件 fishingSkill +5（ApplyEquipFunctional :13549-13552：
+    // 2367/2368/2369 + 5591/5592/5593 各 +5,三件套共 +15）——R14-E9 补（此前整套少 15 渔力）
+    for (const v of [hVid, bVid, lVid]) {
+      if (v === 2367 || v === 2368 || v === 2369 || v === 5591 || v === 5592 || v === 5593) fish += 5;
+    }
     const sb = activeArmorSetBonus(this);
     if (sb) {
       if (sb.def) def += sb.def;
@@ -1658,7 +1667,7 @@ export class Player extends Entity {
       manaMagnet, magicCuffs, manaFlower,
       manaRegenBonus, manaRegenDelayBonus,
       fishingSkill: fish + (this.usedGummyWorm ? 3 : 0),   // +软糖虫(:12451)
-      fishingTackle, lavaFishing,   // 钓具箱族/防熔钓族（Bobber :51645/:19230 消费）
+      fishingTackle, lavaFishing, fishingLine,   // 钓具箱族/防熔钓族/断线免疫（R14-E6）
       royalGel,                     // 皇家凝胶 23 类史莱姆不索敌（Enemy 索敌门消费）
       manaCostOff: (manaFlower ? 0.08 : 0) + manaCostOffAcc,   // 耗魔加算折扣（:14040+:14561）
       toolboxRange, mechShowWires, autoActuator, magiluminescence,

@@ -83,19 +83,18 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     const { hooks } = makeHooks([e]);
     // 出生向右平飞（敌在右侧 300px）——蜂枪初速 = shootSpeed 5（Item.cs:14482）
     const bee = new Arrow(60 * 16, 90 * 16, 5, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3, extraUpdates: 3 });
-    // 前 30 update（≈8 tick）无转向：vy 恒 0
+    // 前 30 update 无转向：vy 恒 0（alpha 淡入 6 update 后 extraUpdates 3→0，
+    // 30 update 延迟实际跨 ~26 tick——原版同拍）
     step(bee, 7, hooks);
     expect(bee.dead).toBe(false);
     expect(bee.vy).toBe(0);
-    // 继续跑：转向激活后向敌收敛（敌在正右，vx 保持向右、vy 仍≈0——
-    // 用斜向敌验证转向：另开一支向左飞、敌在右后）
+    // 斜向敌验证转向：向左飞、敌在左下（−200,+100）——延迟后 vy 朝下偏
     const e2 = mkEnemy(2, 60 * 16 - 200, 90 * 16 + 100);
     const { hooks: h2 } = makeHooks([e2]);
     const bee2 = new Arrow(60 * 16, 90 * 16, -5, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3, extraUpdates: 3 });
-    step(bee2, 40, hooks);
+    step(bee2, 60, h2);
     expect(bee2.dead).toBe(false);
-    // 转向后 vx 反号（朝右追敌）或至少 vy 朝敌下偏
-    expect(bee2.vx > 0 || bee2.vy > 0).toBe(true);
+    expect(bee2.vy).toBeGreaterThan(0);        // :27823-27862 逐轴步进转向已激活
   });
 
   it('aiStyle 36 蜂族：入水即消亡（181）/ 307 豁免', () => {
@@ -117,24 +116,24 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
   it('307 friendly 门：锁定前穿敌不结算，锁定后可伤', () => {
     const e = mkEnemy(1, 60 * 16 + 60, 90 * 16);
     const { hooks } = makeHooks([e]);
-    // 背向敌出生（向左飞，敌在右 60px）——30 update 延迟内穿过敌盒不造成伤害
+    // 背向敌出生（向左飞，敌在右 60px）——锁定前（friendly=false）穿过敌盒不结算
     const eater = new Arrow(60 * 16, 90 * 16, -4, 0, 10, 1, 307, null, { grav: 0, life: 600, pierce: 1, extraUpdates: 3 });
     step(eater, 5, hooks);
     expect(e.hits.length).toBe(0);             // 未锁定 friendly=false 不结算
-    // 转向锁定后（延迟 30 update ≈ 8 tick）再接触敌盒 → 伤害落地
-    step(eater, 60, hooks);
+    // 锁定（~26 tick）+ 折返（逐轴步进 0.35/update）→ 回到敌盒造成伤害
+    step(eater, 150, hooks);
     expect(e.hits.length).toBeGreaterThan(0);
   });
 
   it('616 涡旋弹：20 update 延迟 + 800 曼哈顿距离门 + 失效不复锁', () => {
-    // 距离门外（900px）不锁敌——直飞
-    const far = mkEnemy(1, 60 * 16 + 900, 90 * 16);
+    // 距离门外：敌在身后 900px（飞行远离,曼哈顿恒 >800）→ 不锁敌直飞
+    const far = mkEnemy(1, 60 * 16 - 900, 90 * 16);
     const { hooks: hFar } = makeHooks([far]);
     const a616far = new Arrow(60 * 16, 90 * 16, 8, 0, 20, 1, 616, null, { grav: 0, life: 270, pierce: 1, extraUpdates: 2 });
     step(a616far, 30, hFar);
     expect(a616far.dead).toBe(false);
     expect(a616far.vy).toBe(0);                // 无目标保持直飞（前瞻点 = v×100）
-    // 距离门内（300px）→ 20 update 后锁敌转向（敌在上方 → vy 变负）
+    // 距离门内（300px）→ 20 update（≈7 tick）后锁敌转向（敌在上方 → vy 变负）
     const near = mkEnemy(2, 60 * 16 + 300, 90 * 16 - 200);
     const { hooks: hNear } = makeHooks([near]);
     const a616 = new Arrow(60 * 16, 90 * 16, 8, 0, 20, 1, 616, null, { grav: 0, life: 270, pierce: 1, extraUpdates: 2 });
@@ -142,13 +141,14 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     expect(a616.vy).toBe(0);                   // 延迟期内不转
     step(a616, 30, hNear);
     expect(a616.vy).toBeLessThan(0);           // 锁敌后向上收敛
-    // 失效不复锁：锁敌后杀目标 → 保持末速直飞（不重搜新目标）
-    const t1 = mkEnemy(3, 60 * 16 + 300, 90 * 16 - 200);
-    const t2 = mkEnemy(4, 60 * 16 + 300, 90 * 16 + 200);
+    // 失效不复锁：锁敌后杀目标 → 保持末速直飞（不重搜新目标）。
+    // t1 放更近（上 120px）确保锁 t1；t2 放远（下 320px）
+    const t1 = mkEnemy(3, 60 * 16 + 300, 90 * 16 - 120);
+    const t2 = mkEnemy(4, 60 * 16 + 300, 90 * 16 + 320);
     const { hooks: h3 } = makeHooks([t1, t2]);
     const a3 = new Arrow(60 * 16, 90 * 16, 8, 0, 20, 1, 616, null, { grav: 0, life: 270, pierce: 1, extraUpdates: 2 });
     step(a3, 40, h3);
-    expect(a3.vy).toBeLessThan(0);             // 已锁 t1（上方）
+    expect((a3 as unknown as { vx616Ai1: number }).vx616Ai1).toBe(3);   // 锁 t1（近者）
     t1.dead = true;
     const vyHold = a3.vy;
     step(a3, 30, h3);
@@ -187,15 +187,14 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     expect(f2.life).toBeLessThanOrEqual(2);
   });
 
-  it('306 消亡撒 307 小吞噬者：2-4 只、伤 ×0.75、速度 ±0.7', async () => {
-    const { Game } = await import('../src/core/Game');
-    void Game;   // Game 侧分支由 e2e 覆盖（onProjectileDeath 306 分支）——此处直测 307 参数
-    // 307 出生参数：grav 0 / life 600 / pierce 1 / extraUpdates 3（SetDefaults :3996-4004）
+  it('306 消亡撒 307 小吞噬者：锁定后命中（Kill 链参数 grav0/life600/pierce1）', () => {
+    // 307 出生参数（Game.onProjectileDeath 306 分支按 :78052-78062 掷）：
+    // grav 0 / life 600 / pierce 1 / extraUpdates 3（SetDefaults :3996-4004）
     const e = mkEnemy(1, 60 * 16 + 80, 90 * 16);
     const { hooks } = makeHooks([e]);
     const eater = new Arrow(60 * 16, 90 * 16, 0.5, -0.3, 22, 1, 307, null,
       { grav: 0, life: 600, pierce: 1, extraUpdates: 3 });
-    step(eater, 40, hooks);
+    step(eater, 150, hooks);
     expect(e.hits.length).toBeGreaterThan(0);  // 锁定后命中
     expect(eater.damage).toBe(22);
   });
