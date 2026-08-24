@@ -483,7 +483,10 @@ export function findFreeHouse(
       if (isDoorType(t)) {
         room = checkRoom(st, x, y);
       } else if (COUNTS_AS_DOOR.has(sheetOf(t))) {
-        if (st.inBounds(x, y - 1) && !tileSolidLike(st.type[st.idx(x, y - 1)])) {
+        // 水平长平台只从【左端】探针一次（左邻同 sheet = 长条中段），
+        // 且上方格须非实心（房内侧）才值得泛洪
+        const leftSame = st.inBounds(x - 1, y) && sheetOf(st.type[st.idx(x - 1, y)]) === sheetOf(t);
+        if (!leftSame && st.inBounds(x, y - 1) && !tileSolidLike(st.type[st.idx(x, y - 1)])) {
           room = floodRoom(st, x, y - 1);
         }
       }

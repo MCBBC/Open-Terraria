@@ -68,17 +68,18 @@ export class FallingBlock extends Entity {
     }
     if (hitCritters(this, game)) { /* 小动物被砸即死,块继续坠 */ }
 
-    // ---- 落地:变回 tile(原版 Kill 时 ai[0] 的 tile 类型放回世界) ----
-    if (st.isSolid(tx, ty)) {
-      // 本格实心 → 放到上方第一格空位(落在一叠沙/实体顶上)
-      let py = ty;
-      while (py > 0 && st.type[st.idx(tx, py)] !== 0) py--;
+    // ---- 落地:变回 tile(原版 Projectile.Kill aiStyle==10 段 :75362-75530)----
+    // ★原版语义:放置格 = 投射物【中心格】且必须为空(!active),被占 → 【直接消失
+    // 不放置】(碰撞停在实心顶,中心格自然在实心上方空格)。曾"向上扫第一个空位":
+    // 沙落到草/仙人掌上会被抬到草上方悬空叠放、甚至顶进仙人掌臂位断掉仙人掌
+    // (用户实报"蚁狮沙堆叠在草上/仙人掌断缝")。
+    if (st.isSolid(tx, ty) || st.isPlatform(tx, ty)) {
       const tid = TILE_BY_KEY[this.tileKey];
-      if (tid !== undefined && st.type[st.idx(tx, py)] === 0) {
-        st.setTile(tx, py, tid, 0, 0);
+      if (tid !== undefined && st.type[st.idx(tx, ty)] === 0) {
+        st.setTile(tx, ty, tid, 0, 0);
         game.playSfx?.('dig', 0.6);
       }
-      this.dead = true;
+      this.dead = true;   // 中心格被占(落在草/仙人掌/任意非空格)→ 沙消失(原版同)
     }
   }
 

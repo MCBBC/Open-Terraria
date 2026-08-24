@@ -434,6 +434,16 @@ export interface CompatReport {
 }
 export interface ImportResult { save: SaveData; warnings: string[]; report: CompatReport; seedText: string; gameMode: number }
 
+/** Chest.IsLocked（Chest.cs:295-310）帧区间判定：tile21 六段锁定带 + tile467
+ *  style13（沙漠锁箱）。导入侧按锚帧推导 locked 旗——QuickStacking/vanillaRecipes/
+ *  Extractinator 三处把 c.locked 当门（R21-chest §5 偏差②的导入面）。 */
+export function vanillaChestIsLocked(sheet: number, fx: number): boolean {
+  return sheet === 21
+    ? (fx >= 72 && fx <= 106) || (fx >= 144 && fx <= 178) || (fx >= 828 && fx <= 1006)
+      || (fx >= 1296 && fx <= 1330) || (fx >= 1368 && fx <= 1402) || (fx >= 1440 && fx <= 1474)
+    : sheet === 467 && Math.floor(fx / 36) === 13;
+}
+
 export function parseWldToSave(buf: Uint8Array): ImportResult {
   const wld: WldWorld = parseWld(buf);
   const warnings: string[] = [];
@@ -536,12 +546,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   //  cs:295-310 六段帧区间+467 style13)——QuickStacking/vanillaRecipes/Extractinator
   //  三处消费 c.locked 当门,导入锁箱不再白给。
   const CHEST_TILE = TILE_BY_KEY['chest'];
-  const isLockedChestFrame = (sheet: number, fx: number): boolean =>
-    sheet === 21
-      ? (fx >= 72 && fx <= 106) || (fx >= 144 && fx <= 178) || (fx >= 828 && fx <= 1006)
-        || (fx >= 1296 && fx <= 1330) || (fx >= 1368 && fx <= 1402) || (fx >= 1440 && fx <= 1474)
-      : sheet === 467 && Math.floor(fx / 36) === 13;
   const chests: SaveData['chests'] = [];
+
   for (const c of wld.chests) {
     const anchor = c.y * w + c.x;
     if (type[anchor] !== CHEST_TILE) {
@@ -566,7 +572,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     }
     while (items.length < CHEST_MAX_ITEMS) items.push(null);
     const anchorSheet = TILE_DEFS[type[anchor]]?.vanilla?.sheet ?? -1;
-    const locked = isLockedChestFrame(anchorSheet, frameX[anchor]) || undefined;
+    const locked = vanillaChestIsLocked(anchorSheet, frameX[anchor]) || undefined;
     chests.push({ x: c.x, y: c.y, items, locked });
   }
 
