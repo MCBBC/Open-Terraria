@@ -4,6 +4,7 @@
 // musicFade[id] ±0.005/帧 逼近目标曲（:295 UpdateCommonTrack / :323 TowardStopping,1458 行号）。
 // audios/music/Music_<id>.mp3（tools/xwb-extract.mjs 提取）。
 import { MUSIC } from '../data/Music';
+import { Sfx } from './Sfx';
 
 const TITLE_ID = MUSIC.TitleIntro; // 50
 
@@ -108,8 +109,14 @@ export class AudioSystem {
       const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AC) return null;
       this.ac = new AC();
+      // 失焦音频闸登记（Sfx.setAudioSuspension 统一 suspend/resume,Main.cs:11193-11202 同构）
+      Sfx.registerAudioContext(this.ac);
     }
-    if (this.ac.state === 'suspended') this.ac.resume().catch(() => { /* 手势前恢复被拒，播放时重试 */ });
+    // ★失焦闸配合：隐藏期间禁止自动 resume（手势恢复走 resumeNow/armUnlock,均由
+    //  用户输入触发、隐藏态不可达）
+    if (this.ac.state === 'suspended' && !document.hidden) {
+      this.ac.resume().catch(() => { /* 手势前恢复被拒，播放时重试 */ });
+    }
     return this.ac;
   }
 

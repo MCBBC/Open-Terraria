@@ -450,8 +450,25 @@ describe('6152 DaybloomStaff 停发窗/autoReuse（用户实报"挥动没效果"
   it('停发窗语义=倒计时末 16t 静默（Player.cs:43847 itemAnimation < max−useTime×4）', () => {
     // 源码守卫:门条件必须是 t < dur−16（曾反相 t > dur−16=起始帧即吞=挥动无效果）
     const src = readFileSync('src/core/Game.ts', 'utf8');
-    const gate = src.match(/if \(swDur0 > 0 && (swT0 [<>] swDur0 - 16)\)/);
-    expect(gate, '6152 停发窗门存在').toBeTruthy();
-    expect(gate![1], '静默窗=倒计时末段 t < dur−16（反相则起始帧被吞）').toBe('swT0 < swDur0 - 16');
+    // 门已泛化为 TAIL_SILENCE_WIN 表（{3852:4, 4952:4, 6152:4},win=useTime×N）——
+    // 守卫两点：①静默窗方向必须是 t < dur−win（反相则起始帧被吞）②6252 在表内 ×4
+    const gate = src.match(/if \(swDur0 > 0 && swT0 < swDur0 - win\)/);
+    expect(gate, '停发窗门存在且方向=倒计时末段（t < dur−win）').toBeTruthy();
+    const tbl = src.match(/TAIL_SILENCE_WIN[^=]*= \{([^}]*)\}/);
+    expect(tbl, 'TAIL_SILENCE_WIN 表存在').toBeTruthy();
+    expect(tbl![1]).toContain('6152: 4');
+    expect(tbl![1]).toContain('3852: 4');
+    expect(tbl![1]).toContain('4952: 4');
+  });
+});
+
+describe('1457 五杖 STAFF_ITEMS 持法（Main.cs:6930 staff 旗 diff,用户实报"指向后面"）', () => {
+  it('6152/6153/6154/6155/6173 全在 Renderer.STAFF_ITEMS（缺=落枪弓支,指向不随瞄准）', () => {
+    const src = readFileSync('src/render/Renderer.ts', 'utf8');
+    const m = src.match(/STAFF_ITEMS = new Set\(\[([^\]]*)\]\)/);
+    expect(m, 'STAFF_ITEMS 表存在').toBeTruthy();
+    for (const vid of [6152, 6153, 6154, 6155, 6173]) {
+      expect(m![1]).toContain(String(vid));
+    }
   });
 });

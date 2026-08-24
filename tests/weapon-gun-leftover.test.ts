@@ -209,6 +209,7 @@ describe('备案遗留④b 新枪弹体行为（AI_093 :33425-33487 / AI_001 :58
     e.hurt = (d: number) => { hits.push(d); return true; };
     const game = makeGame(emptyWorld(), [e]);
     const n = new Arrow(20 * TILE - 40, 40 * TILE - 4, 4, 0, 100, 0, 514, null, {});
+    n.critChance = 0;   // 钉死确定性（默认 0.04 暴击 ×2 DoT=4% 偶发 30≠15）
     expect(n.nail93).toBe(true);
     for (let t = 0; t < 20 && n.nailAi0 === 0; t++) n.fixedUpdate(1, game);
     expect(n.nailAi0).toBe(-6);                       // -(5+1)

@@ -84,7 +84,7 @@ check('DPS 行存在(icon12;0 值 = NoDPS「无」)', after.rows.some((r) => r.i
 check('罗盘行存在(icon3;东西向英尺)', after.rows.some((r) => r.icon === 3), '');
 
 // 截图右上区域供目检(图标列+对角文本)
-await page.screenshot({ path: '/tmp/infoaccs-shot.png', clip: { x: 900, y: 0, width: 380, height: 320 } });
+await page.screenshot({ path: '/tmp/infoaccs-shot.png', clip: { x: 900, y: 0, width: 380, height: 500 } });
 
 // 几何:+261 偏移生效 → 首行图标在小地图框之下(Main.cs:46675 mapStyle==1 门)
 const geo = await page.evaluate(() => {

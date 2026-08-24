@@ -430,6 +430,11 @@ const FLARE_DUST: Record<number, number> = { 163: 127, 310: 187, 1008: 169, 1009
  *  207 叶绿弹 255(:2680-2691，AI −25/t 渐显 :53937-53943)/837 骷髅头法书弹
  *  255(:7842-7851，同段消费)/92 坠星 0 起 aiStyle5 通用闪烁档（:22222-22238
  *  alpha ±25/t 在 0..200 间振荡 = 星光闪烁） */
+/** GetAlpha=(200,200,200,25) 加算族（Projectile.cs:81007——15 火球/34 火焰鞭/93 魔法
+ *  匕首/94 水晶风暴/95 诅咒之焰/96 敌诅咒火/1114 日耀花/253 霜球/258 火球/102 Prime
+ *  炸弹）：XNA AlphaBlend=预乘语义,RGB 全额加算 A 只衰背景=发光观感。canvas 'lighter'
+ *  复刻（2026-08-24 清零批,source-over 直译=半透灰） */
+const ADDITIVE_GLOW_PROJS = new Set([15, 34, 93, 94, 95, 96, 1114, 253, 258, 102]);
 const PROJ_ALPHA0: Record<number, number> = {
   5: 100, 94: 50, 95: 100, 280: 255, 477: 255, 478: 255, 521: 255, 639: 255, 932: 0,
   207: 255, 837: 255,
@@ -1316,7 +1321,7 @@ export class Arrow extends Entity {
     //      ai[1]>6 起沿 oldPos[0..9] 绘制,缩放/RGBA 各 ×(9−i)/9,GetAlpha=(200,200,200,25)
     //      ★XNA AlphaBlend=预乘语义（飞灵终审同款）：RGB 全额加算、A=25 只衰背景
     //      10%=加算发光观感——canvas 'lighter' 复刻,source-over 直译=半透灰（用户实报）----
-    if ((this.projId === 94 || this.projId === 95 || this.projId === 1114) && this.age > 6
+    if ((this.projId === 94 || this.projId === 1114) && this.age > 6
       && this.starTrail.length >= 4) {
       const imgT = projSprite(this.projId);
       if (imgT && (imgT.width > 0)) {
@@ -1441,9 +1446,11 @@ export class Arrow extends Entity {
       const s = this.drawScale * (this.phantomOrb ? 1 - this.orbAlpha / 255 : 1);
       const iw = drawImg.width || (drawImg as HTMLImageElement).width;
       const ih = drawImg.height || (drawImg as HTMLImageElement).height;
-      // aiStyle 24 书族本体加算（GetAlpha=(200,200,200,25) 预乘语义——RGB 全额加算,
-      // 同拖尾 2026-08-24；source-over 直译=半透灰,用户实报）
-      if (this.projId === 94 || this.projId === 95 || this.projId === 1114) {
+      // GetAlpha=(200,200,200,25) 加算族（Projectile.cs:81007：15 火球/34 火焰鞭/
+      // 93 魔法匕首/94 水晶风暴/95 诅咒之焰/96 敌诅咒火/1114 日耀花/253 霜球/258 火球
+      // /102 Prime 炸弹(alpha<255)）——XNA 预乘语义 RGB 全额加算（2026-08-24 清零批
+      // 扩族；source-over 直译=半透灰/死板不透明两态皆非）
+      if (ADDITIVE_GLOW_PROJS.has(this.projId)) {
         ctx.globalCompositeOperation = 'lighter';
         ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
         ctx.globalCompositeOperation = 'source-over';
@@ -1705,8 +1712,9 @@ export class Arrow extends Entity {
       this.vy = Math.min(this.vy + this.grav2, this.maxFall);
     }
     if (this.dragAlways !== 0) this.vx *= this.dragAlways;
-    // ---- aiStyle 24 书族（94/95/1114）oldPos 环推进（Main.cs:35251/:35299 消费）----
-    if (this.projId === 94 || this.projId === 95 || this.projId === 1114) {
+    // ---- aiStyle 24 书族（94/1114）oldPos 环推进（Main.cs:35251/:35299 消费）----
+    // ★95 诅咒之焰无 oldPos 拖尾块（其绿尘即尾,Main.cs 只画 94/1114 两支）——曾误入
+    if (this.projId === 94 || this.projId === 1114) {
       this.starTrail.push(this.x, this.y);
       if (this.starTrail.length > 20) this.starTrail.splice(0, this.starTrail.length - 20);   // oldPos 10 点
     }

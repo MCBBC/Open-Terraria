@@ -675,14 +675,66 @@ export class Sfx {
     return Math.max(-1, Math.min(1, (x - this.lx) / Sfx.PAN_HALF_VIEW));
   }
 
+  // ---- 失焦音频闸（★缺口补齐 2026-08-25,最小对齐形态）----
+  //  原版 UpdateAudio 头部(Main.cs:11193-11202):allowMusic=false → audioSystem.PauseAll()
+  //  + SoundEngine.StopAmbientSounds();AllowMusic(FocusHelper.cs:85-91)=失焦时取
+  //  Main.SettingPlayWhenUnfocused(Main.cs:268 默认 false)=失焦全静、后台播放是主动
+  //  开关。Web 同构 = 全部 AudioContext suspend/resume(XACT Pause/Resume 与 WebAudio
+  //  suspend 同为「冻结+原地续播」)。★PlayWhenUnfocused 设置项登记未接(最小形态,
+  //  后台听歌需求落地时补 Options+Settings+l10n)。
+  private static ctxRegistry = new Set<AudioContext>();
+  private static visHooked = false;
+
+  /** 各 AudioContext 创建点登记(Sfx.ensure / AudioSystem.audio)。短命实例(Game 级
+   *  sfx)销毁时必须 releaseAudioContext 摘除,防死 ctx 被 Set 钉死(HMR 双实例/
+   *  连续读档内存教训);长命实例(BGM/菜单)随 app 存活无需摘 */
+  static registerAudioContext(c: AudioContext): void {
+    Sfx.ctxRegistry.add(c);
+  }
+
+  /** 销毁时从失焦闸注册表摘除（Game.destroy 调用） */
+  releaseAudioContext(): void {
+    if (this.ctx) Sfx.ctxRegistry.delete(this.ctx);
+  }
+
+  private static liveCtxs(): AudioContext[] {
+    return [...Sfx.ctxRegistry];
+  }
+
+  /** 失焦闸总开关：hidden=true 全部挂起(等价 PauseAll),false 续播(ResumeAll)。
+   *  resume 被拒(iOS 低电量模式/无手势历史)时挂下一次 pointerdown 重试——
+   *  AudioSystem.armUnlock 手势兜底同款 */
+  static setAudioSuspension(hidden: boolean): void {
+    for (const c of Sfx.liveCtxs()) {
+      if (hidden) {
+        if (c.state === 'running') void c.suspend().catch(() => {});
+      } else if (c.state === 'suspended') {
+        void c.resume().catch(() => {
+          window.addEventListener('pointerdown', () => { void c.resume().catch(() => {}); }, { once: true });
+        });
+      }
+    }
+  }
+  /** 页面级监听只挂一次(多实例/HMR 重跑防重);首个 ctx 创建时接线 */
+  private static hookVisibilityOnce(): void {
+    if (Sfx.visHooked) return;
+    Sfx.visHooked = true;
+    document.addEventListener('visibilitychange', () => {
+      Sfx.setAudioSuspension(document.hidden);
+    });
+  }
+
   private ensure(silent = false): AudioContext | null {
     if (this.muted && !silent) return null;
     if (!this.ctx) {
       const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (!AC) return null;
       this.ctx = new AC();
+      Sfx.registerAudioContext(this.ctx);
+      Sfx.hookVisibilityOnce();
     }
-    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    // ★失焦闸配合：隐藏期间禁止自动 resume(否则网络回调等触发的 ensure 会拆闸)
+    if (this.ctx.state === 'suspended' && !document.hidden) this.ctx.resume().catch(() => {});
     this.warmup();
     return this.ctx;
   }

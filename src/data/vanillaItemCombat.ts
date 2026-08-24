@@ -325,7 +325,10 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
     if (c.magic || c.mana) return { kind: 'magic', shoot, mana: c.mana ?? 0, ...base,
       autoReuse: !!c.autoReuse, useAnimation: c.useAnimation ?? base.useTime };
     // 其余 melee/ranged+shoot（附魔剑光束等）：直射弹兜底
-    if (c.melee || c.ranged || c.noMelee) return { kind: 'shot', shoot, ...base };
+    // 'shot' 兜底同样随行 autoReuse/useAnimation（2026-08-24 清零批：779/5134 连发
+    // 镖枪等 noMelee+autoReuse 件走本支,曾丢=按住单发）
+    if (c.melee || c.ranged || c.noMelee) return { kind: 'shot', shoot, ...base,
+      autoReuse: !!c.autoReuse, useAnimation: c.useAnimation ?? base.useTime };
     return null;
   }
   // 纯近战（剑等：melee 且非 noMelee；无 shootSpeed 语义）。

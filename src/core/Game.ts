@@ -891,6 +891,11 @@ const PERMANENT_USE_VIDS = new Set([
  *  PlaceThing_LockChest+Chest.Lock :409）、5343 货郎背包（:44749-44762）、
  *  1345 彩带（★原版零使用效果——仅 :42602 通用消耗,审计"彩纸弹"系误记） */
 export const FUN_USE_VIDS = new Set([508, 4673, 856, 1450, 507, 425, 1124, 5328, 5343, 1345]);
+/** 停发窗族（Player.cs:43820-43852 同式族,vid → useTime 倍数）：动画末 useTime×N
+ *  静默（itemAnimation < max − useTime×N → flag=false）。3852 书杖/4952 夜光书 ×4、
+ *  6152 日耀花法杖 ×4；4956/5669 ×3=zenithFireCycle cycle≤2 帽、4953 ×5=定数 5 连发
+ *  ——后两族已由专属状态机承载不入本表 */
+const TAIL_SILENCE_WIN: Record<number, number> = { 3852: 4, 4952: 4, 6152: 4 };
 /** 迷你核弹弹体（Kill :74246-74263 八型共段 Resize(50,50)→伤害盒半宽 25；
  *  音效 794/797=Item62 炮声、余 Item14——:74247-74251） */
 const MINI_NUKE_16 = new Set([793, 794, 795, 796, 797, 798, 808, 809]);
@@ -4409,6 +4414,8 @@ export class Game implements GameHooks {
     this.running = false;
     // 天气：雨声层静音 + 环境循环轨停拆 + 渲染器 detach（防下个世界复用旧状态）
     this.stopWeatherLoops();
+    // 失焦闸注册表摘除（防死实例 ctx 被 Set 钉死——Sfx.setAudioSuspension 文档）
+    this.sfx.releaseAudioContext();
     // 吸血鬼炽灼音环拆轨（Player 实例弃用前必经——防菜单/下个世界残留嘶声）
     this.player?.stopSizzleLoop();
     this.renderer.weatherFxActive = false;
@@ -11218,10 +11225,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  t > dur−16（条件反相）——起始帧 t=dur 恰落在吞窗内=第一发就被吞+mouseDown
         //  被消费,autoReuse 再按也被门吃=「挥动没有任何效果」用户实报根因。
         //  门在扣魔【前】,停发 tick 不耗蓝;先于下方 CheckMana 段）
-        if (critVid === 6152) {
+        if (TAIL_SILENCE_WIN[critVid] !== undefined) {
+          // 停发窗族（Player.cs:43847 同式族）：3852 书杖/4952 夜光书 ×4、6152 ×4
+          //（4956/5669 ×3=zenith cycle≤2 帽已接、4953 ×5=定数 5 连发已接）
           const swT0 = this.swing?.t ?? 0, swDur0 = this.swing?.dur ?? 40;
-          if (swDur0 > 0 && swT0 < swDur0 - 16) {
-            this.player.useTime = 4;
+          const win = TAIL_SILENCE_WIN[critVid] * (cw.useTime || 4);
+          if (swDur0 > 0 && swT0 < swDur0 - win) {
+            this.player.useTime = cw.useTime || 4;
             this.input.mouseDown = false;
             break;
           }

@@ -1,7 +1,8 @@
 // DrawInfoAccs 渲染层(Main.cs:46142-46665 的绘制半段;数据/门禁在 stats/InfoAccs.ts)。
 // 几何(GetInfoAccIconPosition :46668-46710):屏幕右上一列 X=screenWidth-280,
-// Y=-32(+261 大地图开时);图标 (X, Y+74+22*row+52)、文本 (X+20, Y+74+22*row+48)
-// → 图标左、文本右 20px;行距 22(矮屏 20,:46534)。
+// Y=-32(+261 小地图开时 mapStyle==1);文本锚 (X+20, Y+74+22*row+48)、图标顶 =
+// 文本顶+4 → (X, 锚-3);图标原生 14×14、高亮框 18×18(贴图实测,原版不缩放);
+// 行距 22(矮屏 20,:46534)。
 // 背包开(:46555-46593):只画图标横排(X=W-280+20*k-10, Y=94(+261)),文本不画。
 // 交互:悬停 tooltip=行标签;点击切 hideInfo(:46547-46573);隐藏态图标
 // rgba(80,80,80,70);悬停叠 InfoIcon_13 高亮框。
@@ -122,13 +123,14 @@ export class InfoAccsLayer {
     ctx.imageSmoothingEnabled = false;
     ctx.textBaseline = 'middle';
     if (inventoryOpen) {
-      // 背包横排(:46681):X = W-280+20*k-10, Y = 94(+261 大地图)
+      // 背包横排(:46681):X = W-280+20*k-10, Y = 94(+261 大地图);图标原生 14×14
       const y = 94 + (bigMapOpen ? 261 : 0);
       let k = 0;
       for (const r of rows) {
         const x = canvasW - 280 + 20 * k - 10;
-        this.drawIcon(ctx, iconTex(r.icon), x, y, hidden[r.hideIndex], r.row === hoveredRow, iconTex(13));
-        this.state.iconRects.push({ x, y, w: 20, h: 20, row: r });
+        const t = iconTex(r.icon);
+        this.drawIcon(ctx, t, x, y, hidden[r.hideIndex], r.row === hoveredRow, iconTex(13));
+        this.state.iconRects.push({ x, y, w: t ? t.sw : 14, h: t ? t.sh : 14, row: r });
         k++;
       }
     } else {
@@ -136,10 +138,13 @@ export class InfoAccsLayer {
       const Y = -32 + (bigMapOpen ? 261 : 0);
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
-        const iy = Y + 74 + pitch * i + 52;
+        // 文本锚 ty = 行基(中线上);图标顶 = 文本顶(ty-7) + 4(:46557 icon 52 vs 文本 48,
+        // DrawString 左上原点) → ty-3。图标原生 14×14(InfoIcon_N 实测),高亮框 18×18
         const ty = Y + 74 + pitch * i + 48;
-        this.drawIcon(ctx, iconTex(r.icon), X, iy, false, r.row === hoveredRow, iconTex(13));
-        this.state.iconRects.push({ x: X, y: iy, w: 20, h: 20, row: r });
+        const iy = ty - 3;
+        const t = iconTex(r.icon);
+        this.drawIcon(ctx, t, X, iy, false, r.row === hoveredRow, iconTex(13));
+        this.state.iconRects.push({ x: X, y: iy, w: t ? t.sw : 14, h: t ? t.sh : 14, row: r });
         if (!inventoryOpen) {
           // 文本(:46594-46639):宽 >215 缩 X;scaleX<0.58 缩 Y;4 遍黑描边+正文;
           // "附近无 X"行文字降灰(:46328/:46388/:46414 等 infoTextColor=Color(100,100,100));
@@ -172,7 +177,9 @@ export class InfoAccsLayer {
     return rows.length;
   }
 
-  /** 单图标(20×20;隐藏态 rgba(80,80,80,70);悬停叠 InfoIcon_13) */
+  /** 单图标(原生 14×14 直出——InfoIcon_N 贴图实测 14×14,原版 spriteBatch.Draw
+   *  不缩放,曾拉到 20×20 致图标臃肿+相对文本下坠一行;隐藏态 α≈Color(80,80,80,70);
+   *  悬停叠 InfoIcon_13 18×18 @pos-(2,2) 原生外扩 2px) */
   private drawIcon(
     ctx: CanvasRenderingContext2D,
     tex: ReturnType<typeof UITextures.get>,
@@ -182,10 +189,10 @@ export class InfoAccsLayer {
     if (!tex) return;
     ctx.save();
     if (hidden) ctx.globalAlpha = 0.27;
-    ctx.drawImage(tex.img, tex.sx, tex.sy, tex.sw, tex.sh, x, y, 20, 20);
+    ctx.drawImage(tex.img, tex.sx, tex.sy, tex.sw, tex.sh, x, y, tex.sw, tex.sh);
     ctx.restore();
     if (hovered && hlTex) {
-      ctx.drawImage(hlTex.img, hlTex.sx, hlTex.sy, hlTex.sw, hlTex.sh, x - 2, y - 2, 24, 24);
+      ctx.drawImage(hlTex.img, hlTex.sx, hlTex.sy, hlTex.sw, hlTex.sh, x - 2, y - 2, hlTex.sw, hlTex.sh);
     }
   }
 

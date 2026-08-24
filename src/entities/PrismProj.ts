@@ -286,6 +286,8 @@ export class PrismProng extends Entity {
     // stage 1 身（平铺,末段截高——推进量随截断,尾帽精确落在束端）
     let travelled = 0;
     while (travelled + 1 < remain) {
+      // Utils.cs:2818 段距×scale<2px 即停铺（低充能 scale→0 防万段刷屏）
+      if (28 * sc < 2) break;
       let fh = 28;
       if (remain - travelled < 28) fh = remain - travelled;
       ctx.save();
