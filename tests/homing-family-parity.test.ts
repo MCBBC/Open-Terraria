@@ -218,6 +218,63 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     expect(Math.abs(angAfter - angBefore)).toBeLessThan(0.01);   // 无目标保持直飞
   });
 
+  it('451 涌流剑：命中后淡出瞬移重射第二目标，循环耗尽后淡出消亡', () => {
+    // 第一敌在弹道上（命中）→ 淡出 → 瞬移到 250 内第二敌周围重射
+    const e1 = mkEnemy(1, 60 * 16 + 120, 90 * 16);
+    const e2 = mkEnemy(2, 60 * 16 + 260, 90 * 16 + 40);
+    const { hooks } = makeHooks([e1, e2]);
+    const iw = new Arrow(60 * 16, 90 * 16, 11, 0, 100, 4.5, 451, null,
+      { grav: 0, life: 3600, pierce: 3 });
+    step(iw, 20, hooks);
+    expect(e1.hits.length).toBeGreaterThan(0);          // 飞行态命中 e1
+    expect((iw as unknown as { iwAi0: number }).iwAi0).toBe(3);   // :14117 首中 ai[0] += pen
+    step(iw, 10, hooks);
+    // 淡出瞬移重射（ai[0] → 6 末段）→ 末段可伤命中 e2 → 命中钩回环
+    // （ai[0] −= pen+1 → 再淡出重射；本仓 hitSet 恒久同敌免伤近似 → 循环无伤可结算
+    // → 末段 alpha 满 Kill（:31700-31702）——原版同支同 Kill，差异仅在重击同敌窗）
+    step(iw, 130, hooks);
+    expect(e2.hits.length).toBeGreaterThan(0);
+    expect(iw.dead).toBe(true);                // 循环耗尽淡出消亡
+  });
+
+  it('617 星璇秘术：减速段归一 4 速 + 慢速段锁敌追踪 + 掷 618 隐形火花', () => {
+    const e = mkEnemy(1, 60 * 16 + 200, 90 * 16 - 120);
+    const { hooks } = makeHooks([e]);
+    const orb = new Arrow(60 * 16, 90 * 16, 7, 0, 70, 5, 617, null,
+      { grav: 0, life: 3600, pierce: 3 });
+    // makeHooks 的 entities.add 不落桶——重接以捕获 618
+    const spawned: Arrow[] = [];
+    (hooks as unknown as { entities: { add: (x: unknown) => void } }).entities.add =
+      (x: unknown) => { spawned.push(x as Arrow); };
+    // 火花与母弹同拍步进（骑乘语义要求 618 每 update 消费父位移）
+    const stepAll = (ticks: number) => {
+      for (let i = 0; i < ticks && !orb.dead; i++) {
+        orb.fixedUpdate(1, hooks);
+        for (const s of spawned) if (!s.dead) s.fixedUpdate(1, hooks);
+      }
+    };
+    stepAll(80);
+    expect(orb.dead).toBe(false);
+    const sp80 = Math.hypot(orb.vx, orb.vy);
+    expect(sp80).toBeLessThanOrEqual(4.01);    // :35353-35357 归一 4 速
+    expect(sp80).toBeGreaterThanOrEqual(3.4);  // 慢速段追踪 lerp 可短时 <4（无下限钳）
+    // 慢速段锁敌（敌在上方）→ vy 向上收敛（:35443-35441 v=(v×7+dir×4)/8）
+    stepAll(120);
+    expect(orb.vy).toBeLessThan(0);
+    // 618 火花已掷（慢速段 ai[0] 清零重计，每 30 update 一枚）
+    const sparks = spawned.filter((s) => s.projId === 618);
+    expect(sparks.length).toBeGreaterThanOrEqual(3);
+    const s0 = sparks[0];
+    expect(s0.naParent).toBe(orb);             // ai[1] = 父引用
+    expect(Math.hypot(s0.vx, s0.vy)).toBeLessThanOrEqual(6.01);   // :35493-35495 速帽 6
+    // 618 骑乘：单 update 位移 ≈ 父位移 + 速度项（≤10px）
+    const px0 = s0.cx;
+    const pox = orb.cx;
+    s0.fixedUpdate(1, hooks);
+    orb.fixedUpdate(1, hooks);
+    expect(Math.abs((s0.cx - px0) - (orb.cx - pox))).toBeLessThan(10);   // 骑乘主导
+  });
+
   it('442 电圈导弹：到点 ≤16px Kill + alpha 归零后 120t 超时', () => {
     const { hooks } = makeHooks([]);
     // 锁定格 = 出生点右侧 240px（15 格）——12 速直线 20 tick 到点

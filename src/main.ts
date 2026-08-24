@@ -2,6 +2,7 @@
 // 流程编排见 mainFlow.ts；本文件只做装配 + 游戏内键盘/开发者工具接线。
 import { Game } from './core/Game';
 import { showSplash } from './ui/Splash';
+import { shouldShowAudioGate, showAudioGate } from './ui/AudioGate';
 import { UI } from './ui/UI';
 import { kvHas } from './save/KvStore';
 import { saveGame } from './save/SaveFile';
@@ -554,24 +555,31 @@ setInterval(() => {
 
 // ---- 启动 ----
 kvHas('sandboxworld.quicksave').then(async () => {
-  // 启动加载画面（Main.DrawSplash :53297：随机三件套+淡入淡出时序+LoadingSunflower）。
-  // RE-LOGIC 字样烘在每组 Splash_N_2 前景层（透明底 PNG，透出 back 场景）——
-  // vanilla-ui/logo_1..8.png 是死资产（AssetInitializer.cs:84 加载后无任何绘制点）。
-  // 时序全程 ~10.3s 不快进（2026-08-24 用户要求"按原版时间渐入渐出"）；资源
-  // 下载等待 = splashGate 迟解（时序尽转全暗+向日葵+徽标，下载完才自收场）。
+  // ① 音频开启拦截（所有流程前置，2026-08-24 用户要求）：AC 被自动播放策略
+  //    挂起 → 纯黑幕+白色耳机图标+两行提示，点击/按键任意位置恢复音频放行；
+  //    未拦截（AC running）或调试旁路/探针（navigator.webdriver）直通
+  // ② splash（原时序不变）：RE-LOGIC 字样烘在每组 Splash_N_2 前景层（透明底
+  //    PNG，透出 back 场景）；vanilla-ui/logo_1..8.png 是死资产不使用。
+  //    时序全程 ~10.3s 不快进；资源下载等待 = splashGate 迟解
+  // options/语言先行（音频门文案需要 Lang；mainFlow 内 options.load() 幂等）
+  await options.load();
+  await Lang.init(options.data.lang);
+  const bootParams0 = new URLSearchParams(location.search);
+  const bypassBoot = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo');
+  if (!bypassBoot && shouldShowAudioGate() && audio.isAutoplayBlocked()) {
+    await showAudioGate(() => audio.resumeNow());
+  }
+  // 素材装载与音频门并行（门期间后台预载，点击放行即有图可显）
+  const assetsP = loadAssets();
   const splashGate: { resolve: () => void } = { resolve: () => {} };
   const splash = showSplash({
     loading: new Promise<void>((r) => { splashGate.resolve = r; }),
     quick: audio.muted || audio.volume === 0,   // 原版 quickSplash（musicVolume==0）
   });
   void audio.play('title');   // ★标题曲随 splash 出现即起（用户要求，非进标题才播；
-                              // AC 挂起由首次手势解锁恢复；showTitle 内重调幂等）
-  const bootParams0 = new URLSearchParams(location.search);
-  const bypassBoot = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo');
-  await loadAssets();
+                              // 音频门/首次手势解锁已保 AC running）
+  await assetsP;
   if (atlas) UITextures.setAtlas(atlas);
-  // options/语言先行（角标/徽标文案需要 Lang；mainFlow 内 options.load() 幂等）
-  await options.load();
   await Promise.all([UIFont.load(), Lang.init(options.data.lang)]);
   VUI.init(root);
   VUI.startLoop(); // 自愈帧循环（HMR 杀不死，看门狗 1s 内重启）

@@ -558,6 +558,25 @@ export class TileLightScanner {
   private noSunLight: Uint8Array;
   /** 718(昼云)的内部 id——昼夜动态挡光覆写用(Main.cs:66134-66141) */
   private cloud718Id = -1;
+  // ---- 热路径扁平表(2026-08-24 JS 红利批:原每格 TILE_DEFS 属性链查找与 Set.has,
+  //      烘焙为按 type/wall id 索引的 typed array,构造期一次;值与原查表逐项同源,
+  //      越界 id 读出 undefined=falsy 与原「d 不存在/sheet=-1 不命中」语义一致,
+  //      位级由 tests/lighting-scan-blur-golden 锁定)----
+  private readonly sheetById: Int16Array;            // 内部 id → vanilla sheet(-1=无)
+  private readonly crackedById: Uint8Array;          // sheet∈CRACKED_SHEETS
+  private readonly allowWaterById: Uint8Array;       // sheet∈ALLOW_LIGHT_IN_WATER_SHEETS
+  private readonly mushroomById: Uint8Array;         // sheet∈MUSHROOM_GLOW_SHEETS
+  private readonly flickerById: Uint8Array;          // sheet∈FLICKER_SHEETS
+  private readonly hasLightById: Uint8Array;         // d.light 存在
+  private readonly lightRById: Float32Array;         // d.light/255 三通道
+  private readonly lightGById: Float32Array;
+  private readonly lightBById: Float32Array;
+  private readonly wallLightTbl: Uint8Array;         // WALL_LIGHT ∪ {73,227}(wallPasses)
+  private readonly wallEmHas: Uint8Array;            // WALL_EMISSIVE 键存在
+  private readonly wallEmR: Float32Array;            // WALL_EMISSIVE 三通道
+  private readonly wallEmG: Float32Array;
+  private readonly wallEmB: Float32Array;
+  private readonly wallEmGated: Uint8Array;          // WALL_EMISSIVE_GATED
   private random = new FastRandom(0x9e3779b9);
   /** 每格局部随机 scratch(2026-08-24 零分配重写:原每格 withModifier 分配一实例
    *  (每 scan ≈2-6 万次),现原地 reseedWithModifier 值等价。生命周期安全:各调用点
@@ -581,14 +600,53 @@ export class TileLightScanner {
   constructor(private flicker: FlickerClock) {
     // ★R8-28:原版是独立布尔表,与 tileSolid/opacity 无关(关门 10/蛛网 51/藤蔓 52 挡光;
     // 回声块 541/546、云 189/196、尖刺 48、泡泡 379、气球 446-451 不挡)——机械提取替换推导
-    this.blocksLight = new Uint8Array(TILE_DEFS.length);
-    this.noSunLight = new Uint8Array(TILE_DEFS.length);
+    const n = TILE_DEFS.length;
+    this.blocksLight = new Uint8Array(n);
+    this.noSunLight = new Uint8Array(n);
+    this.sheetById = new Int16Array(n).fill(-1);
+    this.crackedById = new Uint8Array(n);
+    this.allowWaterById = new Uint8Array(n);
+    this.mushroomById = new Uint8Array(n);
+    this.flickerById = new Uint8Array(n);
+    this.hasLightById = new Uint8Array(n);
+    this.lightRById = new Float32Array(n);
+    this.lightGById = new Float32Array(n);
+    this.lightBById = new Float32Array(n);
+    const WN = 512;   // 墙 id 域(0-366)上界;越界读 undefined=falsy 与原 Set 不命中一致
+    this.wallLightTbl = new Uint8Array(WN);
+    this.wallEmHas = new Uint8Array(WN);
+    this.wallEmR = new Float32Array(WN);
+    this.wallEmG = new Float32Array(WN);
+    this.wallEmB = new Float32Array(WN);
+    this.wallEmGated = new Uint8Array(WN);
+    for (const w of WALL_LIGHT) if (w >= 0 && w < WN) this.wallLightTbl[w] = 1;
+    this.wallLightTbl[73] = 1;   // 云墙/降雪墙特例(wallPasses 原析取支)
+    this.wallLightTbl[227] = 1;
+    for (const [k, v] of Object.entries(WALL_EMISSIVE)) {
+      const w = Number(k);
+      if (w >= 0 && w < WN) {
+        this.wallEmHas[w] = 1;
+        this.wallEmR[w] = v[0]; this.wallEmG[w] = v[1]; this.wallEmB[w] = v[2];
+      }
+    }
+    for (const w of WALL_EMISSIVE_GATED) if (w >= 0 && w < WN) this.wallEmGated[w] = 1;
     TILE_DEFS.forEach((d, i) => {
       const sheet = d?.vanilla?.sheet ?? -1;
       if (sheet >= 0) {
+        this.sheetById[i] = sheet;
         if (TILE_BLOCK_LIGHT_SHEETS.has(sheet)) this.blocksLight[i] = 1;
         if (TILE_NO_SUN_LIGHT_SHEETS.has(sheet)) this.noSunLight[i] = 1;
         if (sheet === 718) this.cloud718Id = i;
+        if (CRACKED_SHEETS.has(sheet)) this.crackedById[i] = 1;
+        if (ALLOW_LIGHT_IN_WATER_SHEETS.has(sheet)) this.allowWaterById[i] = 1;
+        if (MUSHROOM_GLOW_SHEETS.has(sheet)) this.mushroomById[i] = 1;
+        if (FLICKER_SHEETS.has(sheet)) this.flickerById[i] = 1;
+      }
+      if (d?.light) {
+        this.hasLightById[i] = 1;
+        this.lightRById[i] = d.light[0] / 255;
+        this.lightGById[i] = d.light[1] / 255;
+        this.lightBById[i] = d.light[2] / 255;
       }
     });
   }
@@ -608,8 +666,7 @@ export class TileLightScanner {
     const actuated = (st.wire[i] & TileStore.WIRE_ACTUATED) !== 0;
     if (type !== 0 && this.lightIsBlocked(st, i) && !actuated && st.slope[i] === 0) {
       // 注意 actuated 已在上条件排除(原版 !tile.inActive());隐形涂层门已并入 lightIsBlocked
-      const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? -1;
-      return CRACKED_SHEETS.has(sheet) ? Mask.CrackedBricks : Mask.Solid;
+      return this.crackedById[type] ? Mask.CrackedBricks : Mask.Solid;
     }
     if (st.liquidType[i] !== 2 && st.liquid[i] > 128) { // 岩浆 mask=None 只发光
       return st.liquidType[i] === 3 ? Mask.Honey : Mask.Water;
@@ -618,10 +675,11 @@ export class TileLightScanner {
   }
 
   /** 墙透光门(ApplySurfaceLight :3165-3169 / ApplyHellLight :3273-3275 共用尾段):
-   *  wallLight[wall] || wall==73 || wall==227 || (invisibleWall 涂层 && !显示隐形) */
+   *  wallLight[wall] || wall==73 || wall==227 || (invisibleWall 涂层 && !显示隐形)
+   *  ——三支已烘焙进 wallLightTbl(2026-08-24) */
   private wallPasses(st: TileStore, i: number): boolean {
     const wall = st.wall[i];
-    if (wall === 0 || WALL_LIGHT.has(wall)) return true;
+    if (wall === 0 || this.wallLightTbl[wall]) return true;
     return (st.coat[i] & TileStore.COAT_INVISIBLE_WALL) !== 0 && !st.showInvisibleBlocks;
   }
 
@@ -634,10 +692,9 @@ export class TileLightScanner {
                      rand: FastRandom): [number, number, number] {
     const i = st.idx(x, y);
     const type = st.type[i];
-    const sheet = type !== 0 ? (TILE_DEFS[type]?.vanilla?.sheet ?? -1) : -1;
     const wallOk = this.wallPasses(st, i);
     if (!wallOk) return this.ret(0, 0, 0);
-    if (type !== 0 && ALLOW_LIGHT_IN_WATER_SHEETS.has(sheet)) {
+    if (type !== 0 && this.allowWaterById[type]) {
       return sky;  // :3160-3168 无液量/半砖限制
     }
     // :3170 一般放行门
@@ -773,10 +830,9 @@ export class TileLightScanner {
         //   175/357 涂装覆写(:206-220/:323-329 flag→paintColor/765)
         if (wall !== 0) {
           let wr = 0, wg = 0, wb = 0;
-          const we = WALL_EMISSIVE[wall];
-          if (we) {
-            if (!WALL_EMISSIVE_GATED.has(wall) || !this.lightIsBlocked(st, i)) {
-              wr = we[0]; wg = we[1]; wb = we[2];
+          if (this.wallEmHas[wall]) {
+            if (!this.wallEmGated[wall] || !this.lightIsBlocked(st, i)) {
+              wr = this.wallEmR[wall]; wg = this.wallEmG[wall]; wb = this.wallEmB[wall];
             }
           } else if (wall === 137) {
             // 岩浆瀑布墙动态闪烁(:229-239):num4=0.4+(270-mt)/1500+Next(0,50)×0.0005
@@ -807,12 +863,11 @@ export class TileLightScanner {
         // ★原版门是 tile.active()（:103）——致动只置 inActive 不清 type → 致动火把/
         // 蜡烛仍发光；曾加 !actuated 门致致动即熄灭
         if (type !== 0) {
-          const d = TILE_DEFS[type];
-          const sheet = d?.vanilla?.sheet ?? -1;
+          const sheet = this.sheetById[type];
           // 蘑菇雕像 349 门控(:2940):frameX<36 的 style 完全不发光——
           // 同时压制组公式与 def.light 静态兜底,故提到入口处判
           const shroomGateOk = !(sheet === 349 && st.frameX[i] < 36);
-          if (d && (d.light || MUSHROOM_GLOW_SHEETS.has(sheet)) && shroomGateOk) {
+          if ((this.hasLightById[type] || this.mushroomById[type]) && shroomGateOk) {
             // 接线灯门控:关帧不发光(LIGHT_TOGGLE)
             const on = sheet < 0 || lightIsOn(sheet, st.frameX[i], st.frameY[i]);
             if (on) {
@@ -829,15 +884,15 @@ export class TileLightScanner {
                 }
                 // ★火把原版无闪烁（:1536-1542 纯 TorchColor）——曾误加 /700 系
                 // 抬亮 0.16~0.32（照明半径 +3 格）
-              } else if (MUSHROOM_GLOW_SHEETS.has(sheet)) {
+              } else if (this.mushroomById[type]) {
                 // 蘑菇组发光（TileLightScanner.cs:2938-2960 case 70/71/72/190/348/349/528/578）：
                 //   R=0、B=1，G=0.2+num11/2；num11=Next(28,42)*0.005+(270-mouseTextColor)/1000
                 //   ——只抬 G（与 FLICKER_SHEETS 的三通道叠加不同）
                 const num11 = this.localRandom(tx, ty).next(28, 42) * 0.005 + (270 - osc) / 1000;
                 er = 0; eg = 0.2 + num11 / 2; eb = 1;
               } else {
-                er = d.light![0] / 255; eg = d.light![1] / 255; eb = d.light![2] / 255;
-                if (FLICKER_SHEETS.has(sheet)) {
+                er = this.lightRById[type]; eg = this.lightGById[type]; eb = this.lightBById[type];
+                if (this.flickerById[type]) {
                   const f = this.localRandom(tx, ty).next(28, 42) * 0.005 + (270 - osc) / 700;
                   er += f; eg += f; eb += f;
                 }
@@ -846,9 +901,8 @@ export class TileLightScanner {
             }
           }
           // ③b 动态发光特例（原版 ApplyTileLight 帧条件/动态色 case，def.light 静态表无法表达）
-          const spSheet = d?.vanilla?.sheet ?? -1;
           sctx.x = tx; sctx.y = ty;
-          const sp = specialTileLight(spSheet, st.frameX[i], st.frameY[i], this.flicker, sctx);
+          const sp = specialTileLight(sheet, st.frameX[i], st.frameY[i], this.flicker, sctx);
           if (sp) {
             if (sp.length > 3) {
               // 水晶球 125 赋值语义(:3065-3072):G/B 直接覆写(可压暗),R 走 max

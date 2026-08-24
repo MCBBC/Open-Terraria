@@ -378,7 +378,7 @@ const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023, 485]);
  *  光束角度偏"）。成员：114 邪恶三叉戟弹(683)/115 敌侧/116 光束剑波(723)/
  *  132 泰拉刃波/156 光束/173 附魔剑波(989)。例外 157 夜波=direction×0.4 旋转体
  *  （1.4.5 已无武器射出，未移植登记） */
-const PROJ_ROT_DIAG = new Set([114, 115, 116, 132, 156, 173, 660]);
+const PROJ_ROT_DIAG = new Set([114, 115, 116, 132, 156, 173, 660, 451]);   // 451 涌流剑 rotation=vel+π/4（:31594/:31636）
 export { PROJ_ROT_DIAG };
 
 /** 恒旋族（AI_001 尾链 :54741-54749/:54822-54825：rotation 每帧累加、不对齐速度）：
@@ -397,6 +397,9 @@ const PROJ_SPIN: Record<number, (a: Arrow) => number> = {
   424: a => a.vx * 2,
   90: a => a.vx * 0.2,
   92: a => Math.sign(a.vx || 1) * (Math.abs(a.vx) + Math.abs(a.vy)) * 0.01,
+  // 617 星璇秘术（aiStyle 118 :35295/:35301/:35350/:35358）：恒 rotation −= π/30，
+  // 快速段 ai[0]≥30 追加 −= π/180（慢速段无追加）
+  617: a => -(Math.PI / 30) - (Math.hypot(a.vx, a.vy) > 4 && a.na617Ai0 >= 30 ? Math.PI / 180 : 0),
   // 沙球族（AI_010 尾链 :55149-55154 非 736-738 支）：rotation += 0.1/update 恒滚
   42: () => 0.1, 65: () => 0.1, 68: () => 0.1, 354: () => 0.1,
 };
@@ -435,6 +438,8 @@ const PROJ_ALPHA0: Record<number, number> = {
   246: 255,                                                          // 刺炮弹（−20/t 渐显 :58106-58110）
   311: 255,                                                          // 糖果玉米（−50/t 渐显 :58117-58123）
   442: 255,                                                          // 电圈导弹（−90/4t 渐显 :55691-55703，AI 段消费）
+  451: 255,                                                          // 涌流剑（SetDefaults alpha=255 :5237；飞行期 0↔75 脉动 :31620-31640）
+  617: 255,                                                          // 星璇秘术（SetDefaults alpha=255 :7106-7116；−15/t 渐显 :35290-35295）
   181: 255, 189: 255, 307: 255, 316: 255, 566: 255,                  // aiStyle 36 蜂族（−50/update 渐显 :27690-27697）
   616: 255,                                                          // 星旋涡旋弹（−25/t 渐显 :58378-58384）
   297: 255,                                                          // 幽灵法杖弹（SetDefaults :5685-5695 alpha=255，AI 不消费恒全显）
@@ -753,6 +758,78 @@ export class Arrow extends Entity {
   private ty409Ai0 = 0;
   /** localAI[0] 锁敌冷却（未锁时 30 update 一搜，:30907-30910） */
   private ty409Cd = 0;
+  // ---- 451 涌流剑（aiStyle 81 :31541-31760，2880 涌流剑）----
+  /** ai[0] 状态机：0=飞行（0↔75 alpha 脉动）/[1,1+pen)=命中后淡出+寻的瞬移/
+   *  [1+pen,1+2pen)=末段淡出可伤（ai[1]<5 期豁免）。命中钩：0→+pen，否则 −(pen+1) */
+  iwAi0 = 0;
+  /** localAI[0]：飞行期节拍（>7 起脉动）/淡出期清零 */
+  private iwL0 = 0;
+  /** localAI[1]：飞行期脉动相（0=渐隐 1=渐显） */
+  private iwL1 = 0;
+  /** ai[1]：末段 15 update 计数（命中/撞块钩清零，:14121/:18225） */
+  private iwAi1 = 0;
+  /** 451 淡出期骑乘目标（≤250 无视线最近敌，position += npc.velocity :31682） */
+  private iwRide: { id: number; vx: number; vy: number } | null = null;
+  /** 451 骑乘目标中心（瞬移重射用） */
+  private iwRideTarget: { cx: number; cy: number } | null = null;
+  // ---- 617 星璇秘术（aiStyle 118 :35283-35455，3476 星璇秘术）----
+  /** ai[0] 相位计数（减速段 ≥30 起 ×0.98；速度 <4.1 归一 4 并清零重计；
+   *  慢速段 %30==0 且 <241 掷 618、≥600 Kill） */
+  na617Ai0 = 0;
+  /** ai[1] 锁敌（本仓存 Enemy.id，0 未锁；失效清锁重搜 :35417-35427） */
+  private na617Ai1 = 0;
+  // ---- 618 星璇火花（aiStyle 119 :35458-35540，617 伴生隐形伤弹）----
+  /** 父 617 引用（null = 非 618 路径）；父亡即 Kill（:35475-35478） */
+  naParent: Arrow | null = null;
+  /** 父中心上一 update 快照（骑乘位移 = 父位移 :35483-35486） */
+  private naLastPX = 0;
+  private naLastPY = 0;
+  /** ai[0]（≥420 停止骑乘，:35479-35481） */
+  private naAi0 = 0;
+
+  /** 451 ≤250 寻的 + 骑乘（:31649-31661/:31707-31725）：无视线门最近 CanBeChasedBy，
+   *  命中即 position += npc.velocity（随敌漂移）；存中心供瞬移重射 */
+  private iwSeek451(game: GameHooks, range: number): void {
+    let best = range;
+    let found: { id: number; cx: number; cy: number; vx: number; vy: number } | null = null;
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean; vx?: number; vy?: number };
+      if (e.dead) continue;
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+      const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
+      const d = Math.hypot(cx - this.cx, cy - this.cy);
+      if (d >= best) continue;
+      best = d;
+      found = { id: e.id, cx, cy, vx: e.vx ?? 0, vy: e.vy ?? 0 };
+    }
+    if (found) {
+      this.iwRide = { id: found.id, vx: found.vx, vy: found.vy };
+      this.iwRideTarget = { cx: found.cx, cy: found.cy };
+      this.x += found.vx;                                  //（:31682/:31722 position += npc.velocity）
+      this.y += found.vy;
+    } else {
+      this.iwRide = null;
+      this.iwRideTarget = null;
+    }
+  }
+
+  /** 451 命中钩（Damage :14115-14121）：ai[0]==0 → += pen，否则 −= pen+1；ai[1]=0 */
+  private iwOnHit(): void {
+    const pen451 = Math.max(1, this.pierceInit);
+    if (this.iwAi0 === 0) this.iwAi0 += pen451;
+    else this.iwAi0 -= pen451 + 1;
+    this.iwAi1 = 0;
+  }
+
+  /** 451 可伤门（Damage_CanDealDamage :12463 `451 && ((ai[0]-1)/pen==0 || ai[1]<5)
+   *  && ai[0]!=0` → 豁免）：飞行态恒可伤；淡出态 [1,1+pen) 恒豁免；末段前 5 拍豁免 */
+  private iwCanDamage(): boolean {
+    if (this.iwAi0 === 0) return true;
+    const pen451 = Math.max(1, this.pierceInit);
+    if (this.iwAi0 >= 1 && this.iwAi0 < 1 + pen451) return false;
+    if (this.iwAi0 >= 1 + pen451 && this.iwAi0 < 1 + 2 * pen451) return this.iwAi1 >= 5;
+    return true;
+  }
   // ---- 92 坠星（aiStyle 5 + Kill 91/92 共段）----
   /** ai[1] 命中线 Y（弹顶越过才恢复撞块；-Infinity = 非坠星路径） */
   starFallLine = -Infinity;
@@ -1033,6 +1110,8 @@ export class Arrow extends Entity {
       // 659 灵魂之焰（−12/t :36901-36903）
       case 181: case 189: case 307: case 316: case 566:
       case 616: case 659: return (255 - this.alpha) / 255;
+      case 617: return (255 - this.alpha) / 255;   // 星璇秘术渐显（:35290-35295）
+      case 618: return 0;                          // 星璇火花恒隐身（alpha 恒 255 :35533）
       // ---- Xenopopper 子弹族（GetAlpha :81040-81100 区段）——白化档走 drawXenoFilter ----
       case 445: return (128 / 255) * (1 - this.alpha / 255);   // (255,255,255,128)×(1-α/255)
       case 446: return 1 - this.alpha / 255;                   // Lerp(白,0.8)×(1-α/255)
@@ -2070,6 +2149,176 @@ export class Arrow extends Entity {
           this.vy = (this.vy / sp409b) * (sp409b + 0.0025);
         }
       }
+    } else if (this.projId === 451) {
+      // ---- 451 涌流剑（aiStyle 81，Projectile.cs:31541-31760，2880 涌流剑）----
+      // num645=penetrate(3)、num647=max(1,|v|/11)。三态：
+      // ① ai[0]==0 飞行（:31574-31640）：7 update 后 alpha 0↔75 脉动（scale ±0.01
+      //   同步）；② [1,1+pen) 命中/撞块淡出（:31642-31690）：tileCollide=false、
+      //   alpha += 15×num647、v ×= 0.98/num647、≤250 无视线最近敌骑乘
+      //   （position += npc.velocity :31682）；alpha≥255 → ai[0]==1 Kill /
+      //   有目标 → 瞬移至目标周围 100px 随机点 + v=归一(目标−新位)×15 +
+      //   ai[0] += pen（:31661-31681）/ 无目标 Kill；③ [1+pen,1+2pen) 末段
+      //   （:31691-31725）：scale 0.9、前 15 update alpha −125 + v×0.98（可伤门
+      //   :12463 ai[1]<5 豁免）、之后 alpha += 51 + v×0.8 至 255 Kill。
+      // 命中钩（Damage :14115-14121）：ai[0]==0 → += pen，否则 −= pen+1；ai[1]=0。
+      // 撞块钩（:18222-18227）：ai[0]=1、ai[1]=0、v = lastVelocity/2。
+      const sp451 = Math.hypot(this.vx, this.vy);
+      const num647 = Math.max(1, sp451 / 11);
+      const pen451 = Math.max(1, this.pierceInit);
+      if (this.iwAi0 === 0) {
+        this.iwL0++;
+        if (this.iwL0 > Math.min(7, 7 * num647)) {          //（:31616 num664）
+          if (this.iwL1 === 0) {
+            this.drawScale -= 0.01;                          //（:31621 num660）
+            this.alpha += 5;                                 //（:31622 num661）
+            if (this.alpha > 75) { this.alpha = 75; this.iwL1 = 1; }   //（:31623-31626）
+          } else {
+            this.drawScale += 0.01;                          //（:31631）
+            this.alpha -= 5;
+            if (this.alpha <= 0) { this.alpha = 0; this.iwL1 = 0; }    //（:31633-31636）
+          }
+        }
+      } else if (this.iwAi0 >= 1 && this.iwAi0 < 1 + pen451) {
+        this.noTileCollide = true;                           //（:31643）
+        this.alpha += 15 * num647;                           //（:31645 num665）
+        this.vx *= 0.98 / num647;                            //（:31646 num666）
+        this.vy *= 0.98 / num647;
+        this.iwL0 = 0;                                       //（:31647）
+        this.iwSeek451(game, 250);
+        if (this.alpha >= 255) {
+          this.alpha = 255;
+          if (this.iwAi0 === 1) { this.killNow(game); return; }        //（:31667-31669）
+          if (this.iwRide) {
+            // 瞬移至目标周围 100px 随机点 + 重射（:31671-31679）
+            const t451 = this.iwRideTarget;
+            if (t451) {
+              const a451 = Math.random() * Math.PI * 2;
+              this.x = t451.cx + Math.cos(a451) * 100 - this.w / 2;
+              this.y = t451.cy + Math.sin(a451) * 100 - this.h / 2;
+              const dx451 = t451.cx - this.cx, dy451 = t451.cy - this.cy;
+              const dl451 = Math.hypot(dx451, dy451) || 1;
+              this.vx = (dx451 / dl451) * 15;
+              this.vy = (dy451 / dl451) * 15;
+              this.iwAi0 += pen451;                          //（:31678）
+              this.iwRide = null;
+            } else {
+              this.killNow(game); return;
+            }
+          } else {
+            this.killNow(game); return;                      //（:31682-31684 无目标）
+          }
+        }
+      } else if (this.iwAi0 >= 1 + pen451 && this.iwAi0 < 1 + 2 * pen451) {
+        this.drawScale = 0.9;                                //（:31693）
+        this.noTileCollide = true;                           //（:31694）
+        this.iwAi1++;                                        //（:31696）
+        if (this.iwAi1 >= 15) {                              //（:31697）
+          this.alpha += 51;                                  //（:31698）
+          this.vx *= 0.8; this.vy *= 0.8;                    //（:31699）
+          if (this.alpha >= 255) { this.killNow(game); return; }       //（:31700-31702）
+        } else {
+          this.alpha -= 125;                                 //（:31704）
+          if (this.alpha < 0) this.alpha = 0;
+          this.vx *= 0.98; this.vy *= 0.98;                  //（:31706）
+        }
+        this.iwSeek451(game, 250);                           //（:31707-31725 骑乘）
+      }
+    } else if (this.naParent) {
+      // ---- 618 星璇火花（aiStyle 119，Projectile.cs:35458-35540，617 伴生）----
+      // 隐形伤弹（alpha 恒 255 :35533）：①父亡即 Kill（:35475-35478 proj4==null →
+      // ai[0]=420 + Kill）；②骑乘（:35483-35486 position += 父位移）；③速度向父
+      // 符号步进 ±0.15/轴、|v|>6 归一 6（:35490-35495）；④ai[0] ≥ 420 停骑乘
+      // （:35479-35481 直飞到 timeLeft 420 自然亡）。
+      this.naAi0++;
+      const parent = this.naParent;
+      if (parent.dead) { this.killNow(game); return; }       //（:35475-35478）
+      if (this.naAi0 < 420) {
+        this.x += parent.cx - this.naLastPX;                 //（:35483-35486 骑乘）
+        this.y += parent.cy - this.naLastPY;
+        this.vx += Math.sign(parent.cx - this.cx) * 0.15;    //（:35490-35492）
+        this.vy += Math.sign(parent.cy - this.cy) * 0.15;
+        const s618 = Math.hypot(this.vx, this.vy);
+        if (s618 > 6) { this.vx *= 6 / s618; this.vy *= 6 / s618; }   //（:35493-35495）
+      }
+      this.naLastPX = parent.cx;
+      this.naLastPY = parent.cy;
+      this.alpha = 255;                                      //（:35533 恒隐身）
+    } else if (this.projId === 617) {
+      // ---- 617 星璇秘术（aiStyle 118，Projectile.cs:35283-35455，3476 星璇秘术）----
+      // 两段：①快速段（|v|>4）：ai[0]≥30 起 v×0.98 + scale→1.3，|v|<4.1 归一 4 并
+      //   ai[0] 清零（:35345-35352）；②慢速段（|v|≤4）：每 30 update（<241）掷一枚
+      //   618 隐形火花（随机向×12、伤 = 本弹/2 int 截断 :35379-35383）+ 锁敌追踪
+      //   （800 欧氏 + CanHit 盒心锁 ai[1]、<1000 保持、v=(v×7+dir×4)/8
+      //   :35386-35441）+ ai[0]≥600 Kill（:35453-35455）。alpha −15/t 渐显。
+      this.na617Ai0++;
+      if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 15);
+      if (Math.hypot(this.vx, this.vy) > 4) {
+        if (this.na617Ai0 >= 30) {
+          this.vx *= 0.98; this.vy *= 0.98;                  //（:35347-35348）
+          this.drawScale = Math.min(1.3, this.drawScale + 0.0074468083);   //（:35349-35352）
+        }
+        const sp617 = Math.hypot(this.vx, this.vy);
+        if (sp617 > 0 && sp617 < 4.1) {                      //（:35353-35357）
+          this.vx = (this.vx / sp617) * 4;
+          this.vy = (this.vy / sp617) * 4;
+          this.na617Ai0 = 0;
+        }
+      } else {
+        // 慢速段：618 掷骰（:35379-35383）
+        if (this.na617Ai0 % 30 === 0 && this.na617Ai0 < 241) {
+          const ents617 = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
+          if (ents617?.add) {
+            const a618 = Math.random() * Math.PI * 2;        // UnitY.RotatedByRandom(2π)
+            const spark = new Arrow(this.cx, this.cy,
+              -Math.sin(a618) * 12, Math.cos(a618) * 12,
+              Math.max(1, Math.trunc(this.damage / 2)), 0, 618, null,
+              { grav: 0, life: 420, pierce: -1 });
+            spark.naParent = this;                           // ai[1] = ProjectileKey
+            spark.naLastPX = this.cx;
+            spark.naLastPY = this.cy;
+            spark.critChance = this.critChance;
+            spark.armorPen = this.armorPen;
+            ents617.add(spark, 'projectiles');
+          }
+        }
+        // 锁敌追踪（:35386-35441）
+        if (this.na617Ai1 === 0) {
+          let best617 = 800;
+          let bestId617 = 0;
+          for (const ent of game.enemies()) {
+            const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean };
+            if (e.dead) continue;
+            if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+            const d617 = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
+            if (d617 >= best617) continue;
+            if (!canHitLine(world.store, this.cx, this.cy, 0, 0, e.x + e.w / 2, e.y + e.h / 2, 0, 0)) continue;
+            best617 = d617;
+            bestId617 = e.id;
+          }
+          if (bestId617 !== 0) this.na617Ai1 = bestId617;    //（:35417-35427）
+        }
+        let steer617 = false;
+        let tx617 = 0, ty617 = 0;
+        if (this.na617Ai1 !== 0) {
+          const t617 = (game.enemies() as Array<{ id: number; x: number; y: number; w: number; h: number; dead?: boolean }>)
+            .find((e) => e.id === this.na617Ai1);
+          //（:35429-35436）active + CanBeChasedBy(ignoreDontTakeDamage) + <1000 欧氏
+          if (t617 && !t617.dead
+            && Math.hypot(t617.x + t617.w / 2 - this.cx, t617.y + t617.h / 2 - this.cy) < 1000) {
+            steer617 = true;
+            tx617 = t617.x + t617.w / 2; ty617 = t617.y + t617.h / 2;
+          } else {
+            this.na617Ai1 = 0;                               // 失效清锁重搜
+          }
+        }
+        if (steer617) {                                      //（:35443-35441 v=(v×7+dir×4)/8）
+          const dx617 = tx617 - this.cx, dy617 = ty617 - this.cy;
+          const dl617 = Math.hypot(dx617, dy617) || 1;
+          this.vx = (this.vx * 7 + (dx617 / dl617) * 4) / 8;
+          this.vy = (this.vy * 7 + (dy617 / dl617) * 4) / 8;
+        }
+        if (this.na617Ai0 >= 600) { this.killNow(game); return; }   //（:35453-35455）
+      }
     } else if (this.projId === 92) {
       // 92 坠星（aiStyle 5，Projectile.cs:22152-22156 + :22222-22245，圣箭 Kill 链）：
       // 无重力直飞（aiStyle5 无重力段）；弹顶越过 ai[1] 命中线才恢复撞块（:22152-22156，
@@ -2789,6 +3038,15 @@ export class Arrow extends Entity {
         // ai[1] 计数（首跳伤 ×0.66 :17131-17134）、第 4 撞 Kill（:17135-17139）、
         // 全速反 lastVelocity + FindTargetWithLineOfSight 归巢（:17140-17150）
         if (this.projId === 225 && this.chloroBounceOff(game)) return;
+        // 451 涌流剑撞块（HandleMovement type 段 :18222-18227）：ai[0]=1、ai[1]=0、
+        // v = lastVelocity/2 → 走命中后淡出支（ai[0]==1 → alpha 满即 Kill）
+        if (this.projId === 451) {
+          this.iwAi0 = 1;
+          this.iwAi1 = 0;
+          this.vx *= 0.5;
+          this.vy *= 0.5;
+          return;
+        }
         // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落），然后消失
         if (this.dropKey && Math.random() < 1 / 3) game.spawnDrop(this.x, this.y, this.dropKey, 1);
         this.killNow(game);
@@ -2823,6 +3081,9 @@ export class Arrow extends Entity {
     // 瞬间 friendly=true :27789-27792）——锁定前穿过敌怪不结算（原版非 friendly
     // 弹 Damage_PVE 整段不进）
     if (this.projId === 307 && !this.friendly307) return;
+    // 451 涌流剑可伤门（Damage_CanDealDamage :12463）：淡出态 [1,1+pen) 恒豁免、
+    // 末段前 5 拍（ai[1]<5）豁免——淡出/瞬移期穿过敌怪不结算
+    if (this.projId === 451 && !this.iwCanDamage()) return;
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     // 飞龙剑气 684 命中盒 = 垂直线 ±40px 厚 16（CanHitWithOwnBody :14693-14701，
     // 非通用 16×16 盒——巨剑气横扫判定）
@@ -3062,6 +3323,8 @@ export class Arrow extends Entity {
         }
         // 穿透递减（−1 = 无限穿透不递减不消亡，修复1）
         if (this.pierce > 0 && --this.pierce <= 0) { this.killNow(game); return; }
+        // 451 涌流剑命中钩（Damage :14115-14121）：状态机推进（淡出→瞬移重射）
+        if (this.projId === 451) this.iwOnHit();
       }
     }
     }   // 钉 514 命中专管 else 收口

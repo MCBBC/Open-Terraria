@@ -162,8 +162,8 @@ describe('怪物掉落采样（行为）', () => {
     }
     expect(hearts).toBeGreaterThan(50);  // 1/6×1/2×2/3 ≈ 5.5%
     expect(stars).toBeGreaterThan(30);   // 1/6×1/2×(mana未满) + 1/2 额外星
-    // 母史莱姆 16 排除
-    const none = rollHeartsAndStars(mkCtx({ type: 16, lifeMax: 60, damage: 15 }));
+    // 母史莱姆 16 排除（R14-A7：原版按 netID 16/121/81 整段跳过,零掷）
+    const none = rollHeartsAndStars(mkCtx({ type: 16, netId: 16, lifeMax: 60, damage: 15 }));
     expect(none.length).toBe(0);
   });
 

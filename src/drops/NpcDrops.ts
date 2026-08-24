@@ -807,12 +807,19 @@ export function rollBossPotionsAndHearts(ctx: NpcDropCtx): ResolvedDrop[] {
 // 曾写成 [-40,-15] 差 0.1）；:49330-49333 859/4743 恒零速；:49334-49337 520/521/星云拾取
 // 族（ItemID.cs:1110 NebulaPickup={3453,3454,3455}）双向 Next(-30,31)
 const NEBULA_PICKUP = new Set([3453, 3454, 3455]);
+/** ItemID.Sets.ItemNoGravity（ItemID.cs:1108,17 项机械提取）——掉落初速双向飘 */
+const ITEM_NO_GRAVITY = new Set([520, 521, 575, 549, 548, 547, 3453, 3454, 3455, 3456,
+  3457, 3458, 3459, 3580, 3581, 4143]);
+
 export function dropVelocity(rng: RNG, id?: number): { vx: number; vy: number } {
-  if (id === 859 || id === 4743) return { vx: 0, vy: 0 };
-  if (id === 520 || id === 521 || (id !== undefined && NEBULA_PICKUP.has(id))) {
+  // R14-A6：ITM57:49746-49756 三分支——①velocity.HasValue（调用方显式给,不走此函数）
+  // ②ItemNoGravity[type] → 双向 Next(-30,31)×0.1；③默认 vx Next(-30,31)/vy Next(-40,-15)。
+  // 1456 的 859/4743 零速特判已删（二者不在 ItemNoGravity 集 → 走默认下坠）;
+  // 双向族补全 547/548/549/575/3456-3459/3580/3581/4143（曾仅 520/521+3453-3455）
+  if (id !== undefined && ITEM_NO_GRAVITY.has(id)) {
     return { vx: rng.int(-30, 30) * 0.1, vy: rng.int(-30, 30) * 0.1 };
   }
-  return { vx: rng.int(-30, 30) * 0.1, vy: rng.int(-40, -16) * 0.1 };
+  return { vx: rng.int(-30, 30) * 0.1, vy: rng.int(-40, -15) * 0.1 };
 }
 
 export { SLIME_BODY };

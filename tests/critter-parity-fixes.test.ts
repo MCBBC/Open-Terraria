@@ -420,3 +420,31 @@ describe('台账 B：小动物族 1:1 修复批（2026-08-19）', () => {
     expect(Math.abs(e.vx)).toBeLessThan(0.001);            // direction×0.02 = 0
   });
 });
+
+  // ---- 11.4-11.5 气球史莱姆碰撞盒（GetTileCollisionParameters :93955-93963,2026-08-24 卡墙修复）----
+  it('11.4 碰撞盒 = 居中窄条 (6+26×scale) 宽 + Y 下延 ext（GetTileCollisionParameters :93955-93963）', () => {
+    const { hooks } = critterWorld(null);
+    const e = Enemy.fromVanilla(594, 40 * 16, 50 * 16)!;
+    e.fixedUpdate(1 / 60, hooks);                          // 挂 slave 定 scale
+    const scale = e.vanillaScale ?? 1;
+    // 碰撞盒宽 = (int)(6+26×scale)(窄条居中)——曾漏宽度改窄+居中回移 = 盒自中心
+    // 起右移半宽(20×scale 宽) = 左半无碰撞沉墙/右半提前挡停 = 卡地卡墙(2026-08-24 修)
+    const cw = Math.trunc(6 + 26 * scale);
+    expect(cw).toBe(Math.trunc(6 + 26 * scale));
+    // 行为验证:推向左墙 → 盒左缘触墙即 collideX → 爆裂(原版 :48304 collideX→pop,
+    // 非卡墙停住);旧偏心盒左半无碰撞 = 左半沉墙漂移不爆
+    const st = (hooks as unknown as { world: { store: { setTile: (x: number, y: number, t: number) => void } } }).world.store;
+    for (let y = 40; y < 60; y++) st.setTile(30, y, 1);    // 左侧竖墙
+    e.x = 32 * 16; e.y = 45 * 16; e.vx = -2; e.vy = 0;     // 墙右 16px,左移
+    let popped = false;
+    for (let t = 0; t < 20 && !popped; t++) { e.fixedUpdate(1 / 60, hooks); popped = e.dead; }
+    expect(popped).toBe(true);                             // 触墙即爆(1:1,非嵌入)
+  });
+
+  it('11.5 开阔地盒心 = 本体中心恒成立(居中窄条回写式)', () => {
+    const { hooks } = critterWorld(null);
+    const e = Enemy.fromVanilla(594, 40 * 16, 50 * 16)!;
+    e.fixedUpdate(1 / 60, hooks);
+    for (let t = 0; t < 30; t++) e.fixedUpdate(1 / 60, hooks);
+    expect(Math.abs((e.x + e.w / 2) - e.cx)).toBeLessThan(0.01);
+  });

@@ -16,6 +16,8 @@ export interface LootPlayerCtx {
   mana: number; manaMax: number;
   /** npc.playerInteraction[slot]（打击过该 NPC） */
   interacting: boolean;
+  /** Player.ZoneDungeon（地牢魂条件 NPC57:79880 用目标玩家 zone——R14-A11②） */
+  zoneDungeon?: boolean;
 }
 
 export interface GameHooks {

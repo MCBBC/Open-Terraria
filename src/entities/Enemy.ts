@@ -9732,18 +9732,22 @@ export class Enemy extends Entity {
       this.vx = Math.max(-4, Math.min(4, this.vx + wind * 0.3));
       if (collideX || collideY) { pop(true); return; }
     }
-    // ---- 瓦片碰撞积分（:94013-94018 扩展盒 + :93808 共享段）----
-    // 盒 = (x+w/2, y+ext, w, h+ext)，ext = 44+20×scale——罩吊挂史莱姆区；
-    // scratch Body 探测，受阻轴速度归零（TileCollision 语义），旗标留存本体供下 tick
+    // ---- 瓦片碰撞积分（GetTileCollisionParameters :93955-93963 + :93808 共享段）----
+    // 盒 = Y+ext/Height+ext（ext = 44+20×scale,罩吊挂史莱姆区）+ **X 移中心后宽度改
+    // (6+26×scale) 居中窄条**（cPosition.X += cWidth/2; cWidth = (int)(6f+26f*ai[1]);
+    // cPosition.X -= cWidth/2）——曾漏宽度改窄且漏居中回移 = 盒自中心起右移半宽
+    // （左半无碰撞沉墙/右半提前挡停 = 气球史莱姆卡地卡墙,2026-08-24 用户报）；
+    // scratch Body 探测,受阻轴速度归零（TileCollision 语义）,旗标留存本体供下 tick
     const ext = 44 + 20 * scale;
+    const cw = Math.trunc(6 + 26 * scale);
     const probe = {
-      x: this.x + this.w / 2, y: this.y + ext, w: this.w, h: this.h + ext,
+      x: this.cx - cw / 2, y: this.y + ext, w: cw, h: this.h + ext,
       vx: this.vx, vy: this.vy, onGround: false, hitWall: false, hitHead: false,
     };
     this.lai2 = this.vx;
     this.lai1 = this.vy;
     moveAndCollide(probe, game.world, this.vx, this.vy);
-    this.x = probe.x - this.w / 2;
+    this.x = probe.x + cw / 2 - this.w / 2;
     this.y = probe.y - ext;
     this.vx = probe.vx;
     this.vy = probe.vy;
@@ -12231,7 +12235,10 @@ export class Enemy extends Entity {
           isExpert: w.isExpert, isMaster: w.isMaster,
           hardMode: !!w.flags.hardMode, crimson: !!w.crimson,
           flags: w.flags,
-          x: this.cx, y: this.cy,
+          // R14-A12①：位置条件半格语义——X 用 Center（cx），Y 用顶缘 position.Y
+          // （PirateMap CND57:392 `(position.Y/16) < worldSurface+10` 与 Center.X/16;
+          // 高个怪 Y 向差 ~0.7 格,近界偶发翻转）
+          x: this.cx, y: this.y,
           worldSurfaceTile: w.groundLevel, rockLayerTile: w.rockLevel,
           underworldTileY: w.lavaLine || w.h - 200,
           maxTilesX: w.w, maxTilesY: w.h,
@@ -12331,7 +12338,10 @@ export class Enemy extends Entity {
         // 此前缺墙门=误在砖外刷魂）→ 原地刷 288
         if (this.vanillaId !== 288 && ctx.lifeMax > 100 && ctx.value > 0 && ctx.hasPlayerTarget
           && ctx.hardMode && ctx.flags['downed_262']
-          && (game as unknown as { scene?: { zoneDungeon?: boolean } }).scene?.zoneDungeon
+          && (lootPlayers
+            ? (closest.zoneDungeon
+              ?? (game as unknown as { scene?: { zoneDungeon?: boolean } }).scene?.zoneDungeon)
+            : (game as unknown as { scene?: { zoneDungeon?: boolean } }).scene?.zoneDungeon)
           && rollLuck(ctx.luck ?? 0, ctx.isExpert ? 9 : 13, () => rng.next()) === 0) {
           const st2 = game.world.store;
           const wx = Math.floor(this.cx / TILE), wy = Math.floor(this.cy / TILE);
@@ -12347,6 +12357,11 @@ export class Enemy extends Entity {
             return e !== this && !e.dead
               && e.vanillaId === (this.vanillaId === 125 ? 126 : 125);
           });
+        // Boss 药水+心（DoDeathEvents_DropBossPotionsAndHearts,boss 门 :80322）——
+        // R14-A11①：原版在 DoDeathEvents(:79669) 内、先于 NPCLoot_DropMoney(:79712);
+        // 曾排在钱币+心星后=同击杀 RNG 消费序不同（对拍漂）。EoW 中间段
+        // killBossFlag=false 不出（仅最后一段）
+        if (this.killBossFlag && !twinSuppressed) for (const b of rollBossPotionsAndHearts(ctx)) spawn(b.id, b.n);
         // 钱币（规则未清零 value 时走 NPCLoot_DropMoney 管线）
         // R14-A3：extraValue（怪吸收钱累计）并入钱币基数（NPC.cs:80497 `num += extraValue`,
         // 六级乘区/血月掷之后、拆币之前）
@@ -12357,9 +12372,6 @@ export class Enemy extends Entity {
         for (const h of rollHeartsAndStars(ctx)) spawn(h.id, h.n);
         // 按 type 额外心（NPCLoot_DropHeals :79913-80010,钱币后调用）——R14-A4
         for (const h of rollTypeHearts(ctx)) spawn(h.id, h.n);
-        // Boss 药水+心（DoDeathEvents_DropBossPotionsAndHearts，boss 门 :80307）——
-        // EoW 中间段 killBossFlag=false 不出（仅最后一段）
-        if (this.killBossFlag && !twinSuppressed) for (const b of rollBossPotionsAndHearts(ctx)) spawn(b.id, b.n);
         }
       } else {
         for (const d of this.def.drops) {

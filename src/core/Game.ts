@@ -1976,6 +1976,7 @@ export class Game implements GameHooks {
       luck: this.player.luck, hp: this.player.hp, hpMax: this.player.maxHp,
       mana: this.player.mana, manaMax: this.player.maxMana,
       interacting: enemy.interactionSlots.has(net.mySlot),
+      zoneDungeon: !!this.scene?.zoneDungeon,   // R14-A11②（远端代理无此镜像,消费侧回退本地）
     }];
     for (const [slot, rp] of net.players) {
       if (!rp.active) continue;
@@ -25818,7 +25819,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         stack = min + Math.floor(Math.random() * (max + 1 - min));
       }
-      if (key) this.spawnDrop(bobber.cx, bobber.cy - 8, key, stack, 0, -2);
+      // R14-E15：渔获直接入包（AI_061_FishingBobber_GiveItemToPlayer PRJ57:54850
+      // → QuickSpawnItem :73241）——曾掉落在浮标处（可能落回水里/被冲走）;
+      // 满包回落玩家脚下（QuickSpawnItem 无空位时落点=玩家）
+      if (key) {
+        const left = this.player.inv.add(ITEM_BY_KEY[key]!, stack);
+        if (left > 0) this.spawnDrop(this.player.cx, this.player.y, key, left, 0, -2);
+      }
       this.cb.onInventoryChanged?.();
     } else if (bobber.catchEnemy > 0) {
       const id = bobber.catchEnemy;

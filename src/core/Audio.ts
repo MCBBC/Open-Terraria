@@ -67,6 +67,21 @@ export class AudioSystem {
     this.unlockBound = null;
   }
 
+  /** 自动播放拦截探测（音频门前置用，2026-08-24）：惰性建 AC 并读状态——
+   *  挂起 = 浏览器拦截。建 AC 本身无源无增益不发声，安全 */
+  isAutoplayBlocked(): boolean {
+    const ac = this.audio();
+    return ac ? ac.state === 'suspended' : false;
+  }
+
+  /** 手势恢复（音频门点击放行）：resume 并回是否已 running（armUnlock 兜底并行） */
+  async resumeNow(): Promise<boolean> {
+    const ac = this.audio();
+    if (!ac) return false;
+    try { await ac.resume(); } catch { /* 被拒由 armUnlock 下次手势再试 */ }
+    return ac.state === 'running';
+  }
+
   private audio(): AudioContext | null {
     if (!this.ac) {
       const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;

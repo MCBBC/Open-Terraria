@@ -15,7 +15,9 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 // SW_TREE（2026-08-22 增量对拍用）：缺省 Terarria1456 不变；`SW_TREE=Terarria1457` 换树
 // 只读对比。配 `--out <path>` 落 /tmp，禁止直接覆盖现库（现库含手工修复，全量重跑=回滚）。
-const TREE = process.env.SW_TREE || 'Terarria1456';
+// R14-B5②：默认树切 1457（2026-08-23 基准）——曾缺省 1456,裸重跑即静默回退
+// （drops 提取器有 apply1457DropPatches 防回退,本文件以默认树对齐）
+const TREE = process.env.SW_TREE || 'Terarria1457';
 if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
 const src = readFileSync(`${ROOT}/${TREE}/Terraria/Recipe.cs`, 'utf8');
 
