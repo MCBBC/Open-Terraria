@@ -24,7 +24,7 @@ export function cycleMinimapFrame(current: string): MinimapFrameSkin {
 }
 
 export interface OptionsData {
-  musicVol: number;   // 0..1
+  musicVol: number;   // 0..1（默认 = Main.cs:1432 musicVolume = 1f）
   sfxVol: number;     // 0..1
   /** Ambient 环境音轨音量 0..1（Main.ambientVolume，Main.cs:1413 默认 1f；
    *  config.json 键 "VolumeAmbient"，Main.cs:4159/4383）——13+ 环境音独立轨 */
@@ -35,8 +35,12 @@ export interface OptionsData {
   // 智能光标（对齐原版 Player.SmartCursorSettings + IngameOptions/Main.cs:49705 设置结构）
   smartCursorMode: 'toggle' | 'hold';  // Main.cSmartCursorModeIsToggleAndNotHold（默认 Toggle）
   smartAxeAfterPickaxe: boolean;       // UseSmartAxeAfterSmartPickaxe（默认 false）
-  smartBlocksEnabled: boolean;         // SmartBlocksEnabled（默认 true）
-  smartHoldCanReleaseMidUse: boolean;  // SmartCursorHoldCanReleaseMidUse（默认 true）
+  smartBlocksEnabled: boolean;         // Player.SmartCursorSettings.SmartBlocksEnabled（static bool 默认 false，Player.cs:326）
+  smartHoldCanReleaseMidUse: boolean;  // SmartCursorSettings.SmartCursorHoldCanReleaseMidUse（static bool 默认 false，Player.cs:330）
+  /** Game Zoom（Main.GameZoomTarget，Main.cs:256 默认 1f；config 键 "Zoom"
+   *  Main.cs:4284/4575；域 [1,2] 钳 Main.cs:16986-16990/:62953；设置滑条
+   *  IngameOptions.cs:521-561 杆值 = zoom-1）。消费：Camera.zoomTarget 基线 */
+  gameZoom: number;
   backgrounds: boolean;                // Main.BackgroundEnabled（Main.cs:790，config.json 持久化；默认 true）
   swayInWind: boolean;                 // Main.SettingsEnabled_TilesSwayInWind（图块在风中摆动；默认 true）
   resourceBarStyle: 'classic' | 'fancy'; // 资源条样式（PlayerResourceSetsManager2：'New' Fancy 金框为原版 1.4.4+ 默认 / 'Default' Classic 朴素）
@@ -139,7 +143,7 @@ const KEY = 'sandboxworld.options';
 
 export class OptionsStore {
   data: OptionsData = {
-    musicVol: 0.35,
+    musicVol: 1,      // Main.cs:1432 musicVolume = 1f（R24 勘误：曾 0.35）
     sfxVol: 1,
     ambientVol: 1,    // Main.cs:1413 ambientVolume = 1f（旧存档无此键走默认）
     uiScale: 1,
@@ -153,8 +157,10 @@ export class OptionsStore {
     lang: DEFAULT_LANG,
     smartCursorMode: 'toggle',
     smartAxeAfterPickaxe: false,
-    smartBlocksEnabled: true,
-    smartHoldCanReleaseMidUse: true,
+    smartBlocksEnabled: false,        // Player.cs:326 static bool 默认 false（R24 勘误）
+    smartHoldCanReleaseMidUse: false, // Player.cs:330 static bool 默认 false（R24 勘误）
+    gameZoom: 1.25,                   // Main.cs:256 默认 1f；本仓相机基线 1.25（Camera.ts
+                                      // 视野补偿档）为既有行为，域钳 [1,2]
     backgrounds: true,
     swayInWind: true,
     resourceBarStyle: 'fancy',
@@ -207,6 +213,12 @@ export class OptionsStore {
       if (typeof this.data.waveQuality !== 'number'
         || !Number.isFinite(this.data.waveQuality)) this.data.waveQuality = 3;
       this.data.waveQuality = Math.min(3, Math.max(0, Math.round(this.data.waveQuality)));
+      // Game Zoom 钳 [1,2]（Main.cs:16986-16990 键调整钳/:62953 消费端钳同款；
+      // 旧档无键走默认，NaN/越界回默认）
+      if (typeof this.data.gameZoom !== 'number' || !Number.isFinite(this.data.gameZoom)) {
+        this.data.gameZoom = 1.25;
+      }
+      this.data.gameZoom = Math.min(2, Math.max(1, this.data.gameZoom));
       // R4-13：PanControl 档位钳 [0,3]（PlayerInputProfile.cs:194-201 读回卫门同语义）
       if (typeof this.data.panControlMode !== 'number'
         || !Number.isFinite(this.data.panControlMode)) this.data.panControlMode = 0;

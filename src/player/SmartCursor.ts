@@ -126,17 +126,18 @@ export interface SmartCursorSettings {
   toggleMode: boolean;
   /** 斧优先级排后（默认 false：斧在镐之前） */
   smartAxeAfterPickaxe: boolean;
-  /** 方块智能填充/铺线（默认 true） */
+  /** 方块智能填充/铺线（默认 false——Player.SmartCursorSettings.SmartBlocksEnabled
+   *  是 static bool 无写点，Player.cs:326；R24 勘误：曾标 true） */
   smartBlocksEnabled: boolean;
-  /** Hold 模式下使用中松开即关（默认 true） */
+  /** Hold 模式下使用中松开即关（默认 false——同上 Player.cs:330 static bool；R24 勘误） */
   holdCanReleaseMidUse: boolean;
 }
 
 export const DEFAULT_SMART_CURSOR_SETTINGS: SmartCursorSettings = {
   toggleMode: true,
   smartAxeAfterPickaxe: false,
-  smartBlocksEnabled: true,
-  holdCanReleaseMidUse: true,
+  smartBlocksEnabled: false,   // Player.cs:326
+  holdCanReleaseMidUse: false, // Player.cs:330
 };
 
 // ===================== 输入上下文 =====================

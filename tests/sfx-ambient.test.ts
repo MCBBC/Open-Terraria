@@ -86,8 +86,8 @@ describe('Ambient 环境音轨', () => {
     expect(store.data.ambientVol).toBe(1);       // Main.cs:1413 同款默认
     await store.set('ambientVol', 0.35);
     expect(store.data.ambientVol).toBe(0.35);
-    // 音量互不串轨
+    // 音量互不串轨（musicVol 默认 = Main.cs:1432 musicVolume = 1f，R24 勘误）
     expect(store.data.sfxVol).toBe(1);
-    expect(store.data.musicVol).toBe(0.35);
+    expect(store.data.musicVol).toBe(1);
   });
 });

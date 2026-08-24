@@ -312,6 +312,19 @@ export class SettingsPanel {
       );
     } else if (this.cat === 'ui') {
       this.content.append(
+        // Game Zoom（原版 IngameOptions.cs:521-561「缩放」组：杆值 = zoom-1，域
+        // [1.0,2.0]；Main.cs:16986-16990 键调整同钳/:62953 消费。读态优先相机实时
+        // zoomTarget（ViewZoomIn/Out 键与滚轮直改相机），写态落 options + 相机。
+        // 标签 = GameUI.GameZoom 融合串去值段；步进 0.01 = 原版百分比整数口径）
+        this.slider(
+          Lang.text('GameUI.GameZoom').replace(/[:：].*$/, ''),
+          1, 2, 0.01,
+          () => (window as unknown as { __swGame?: { camera?: { zoomTarget: number } } }).__swGame?.camera?.zoomTarget ?? d.gameZoom,
+          (v) => {
+            void options.set('gameZoom', v);
+            (window as unknown as { __swGame?: { setZoom(z: number): void } }).__swGame?.setZoom(v);
+          },
+        ),
         this.slider(Lang.text('Mods.SandboxWorld.Settings.UiScale'), 0.75, 1.5, 0.05, () => d.uiScale, (v) => void options.set('uiScale', v).then(() => this.applyUi())),
         // 资源条样式（原版 PlayerResourcesDisplaySet 两主样式：'New'=FancyClassic
         // 金框分格（1.4.4+ 默认）/ 'Default'=Classic 朴素心星）。样式名 = 原版键

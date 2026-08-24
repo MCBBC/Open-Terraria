@@ -73,7 +73,8 @@ describe('状态机（Player.cs:28344-28374 TryToToggleSmartCursor）', () => {
 
   it('Hold（可中途松开）：wanted 直接跟随 Ctrl', () => {
     const sc = new SmartCursor();
-    const s: SmartCursorSettings = { ...DEFAULT_SMART_CURSOR_SETTINGS, toggleMode: false };
+    // R24：默认值勘误后 holdCanReleaseMidUse 缺省 false——本用例显式开
+    const s: SmartCursorSettings = { ...DEFAULT_SMART_CURSOR_SETTINGS, toggleMode: false, holdCanReleaseMidUse: true };
     sc.updateWanted(true, false, s);
     expect(sc.wanted).toBe(true);
     sc.updateWanted(false, true, s);   // 使用中松开 → 关
@@ -173,9 +174,12 @@ describe('方块填充/铺线（Step_BlocksFilling :2692 / Step_BlocksLines :809
   });
 
   it('单邻居的洞：Filling(≥2) 不命中 → 落到 Lines(≥1) 选该格（原版策略链穿透）', () => {
+    // R24：DEFAULT 勘误后 smartBlocksEnabled 缺省 false（Player.cs:326）——
+    // 本组用例专测 Filling/Lines 策略链，显式开
     const st = new TileStore(W, H);
     st.setTile(104, 99, T.STONE); // (104,98) 只有下方 1 个实心邻居
-    expect(run(mkEnv(st, mouseAt(104, 95), dirtItem()))).toEqual({ x: 104, y: 98 });
+    const on = { settings: { ...DEFAULT_SMART_CURSOR_SETTINGS, smartBlocksEnabled: true } };
+    expect(run(mkEnv(st, mouseAt(104, 95), dirtItem(), on))).toEqual({ x: 104, y: 98 });
   });
 
   it('原版死门：SmartBlocksEnabled 打开时 Filling 恒不产生目标（:2694-2697 + :2714）', () => {
@@ -186,7 +190,8 @@ describe('方块填充/铺线（Step_BlocksFilling :2692 / Step_BlocksLines :809
     const st = new TileStore(W, H);
     st.setTile(104, 99, T.STONE);
     st.setTile(103, 98, T.STONE); // (104,98) 下方 + 左侧 = 2 个实心邻居
-    expect(run(mkEnv(st, mouseAt(104, 95), dirtItem()))).toEqual({ x: 103, y: 97 });
+    expect(run(mkEnv(st, mouseAt(104, 95), dirtItem(),
+      { settings: { ...DEFAULT_SMART_CURSOR_SETTINGS, smartBlocksEnabled: true } }))).toEqual({ x: 103, y: 97 });
   });
 
   it('洞照补：Lines（≥1 邻居）在 Filling 死门后仍铺方块', () => {
@@ -194,7 +199,8 @@ describe('方块填充/铺线（Step_BlocksFilling :2692 / Step_BlocksLines :809
     st.setTile(103, 98, T.STONE);
     st.setTile(104, 98, T.STONE);
     st.setTile(104, 99, T.STONE); // (104,97) 下方实心 → Lines 候选且离鼠标最近
-    expect(run(mkEnv(st, mouseAt(104, 95), dirtItem()))).toEqual({ x: 104, y: 97 });
+    expect(run(mkEnv(st, mouseAt(104, 95), dirtItem(),
+      { settings: { ...DEFAULT_SMART_CURSOR_SETTINGS, smartBlocksEnabled: true } }))).toEqual({ x: 104, y: 97 });
   });
 
   it('SmartBlocksEnabled 关闭 → 两策略都不生效', () => {

@@ -312,7 +312,10 @@ export class PrismProj extends Entity {
       if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
       const fh = img.height / 5;
       const f = this.crystalFrame;
-      const rot = Math.atan2(this.dirY, this.dirX);
+      // rotation = velocity.ToRotation() + num（:68379；num=π/2 AI_075 头 :67172——
+      // 633 块无覆写,595/735 才置 0）。贴图锥尖朝上(−y),+π/2 后锥尖=瞄准向;
+      // 曾漏 +π/2 = 锥尖偏 90°
+      const rot = Math.atan2(this.dirY, this.dirX) + Math.PI / 2;
       ctx.save();
       ctx.translate(this.cx, this.cy);
       ctx.rotate(rot);

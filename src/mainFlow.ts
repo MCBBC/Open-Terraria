@@ -136,6 +136,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       try { game.destroy(); } catch (e) { console.warn('[mainFlow] 旧实例清理异常(忽略):', e); }
     }
     game = g;
+    // Game Zoom 基线（Main.GameZoomTarget 持久化键 "Zoom" Main.cs:4284/4575；
+    // 相机在 loadWorld 内已建，onWorldReady 后此处生效——ViewZoomIn/Out 键与
+    // 滚轮仍直调 setZoom 动态改，设置页读态优先相机实时值）
+    g.setZoom(options.data.gameZoom);
     // 指针图标门桥(DrawInterface_40 :44476 MouseDisplayItem 非空 → 图层隐藏;
     // DrawInterface_38 :44628 拖拽物出现 → 住房光标取消)
     g.uiHeldStack = () => !!ui.heldStack;

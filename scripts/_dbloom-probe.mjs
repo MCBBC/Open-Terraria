@@ -67,10 +67,25 @@ const out = await page.evaluate((key) => {
   const heldDef = p.inv.heldItem() ? DEFS[p.inv.heldItem().id] ?? null : null;
   const cwFn = (window).__swCombatWeapon;
   const cw = heldDef && cwFn ? cwFn(heldDef) : 'fn-missing';
+  // 手动驱动 case 本体 ×5:直接调 useCombatWeapon,数 1114 产出
+  const manual = { fired: 0, manaBefore: p.mana };
+  if (cw && cw !== 'fn-missing' && origUCW) {
+    const before = new Set(g.entities.projectiles);
+    for (let k = 0; k < 5; k++) { p.useTime = 0; origUCW(cw, heldDef); }
+    for (const e of g.entities.projectiles) if (!before.has(e) && e.projId === 1114) manual.fired++;
+  }
+  manual.manaAfter = p.mana;
   const diag = {
     heldId: p.inv.heldItem()?.id, heldDefKey: heldDef?.key ?? null,
     vid: heldDef?.vid ?? null, defVidField: heldDef ? ('vid' in heldDef ? heldDef.vid : 'no-field') : null,
     cw: cw === 'fn-missing' ? cw : (cw ? { kind: cw.kind, shoot: cw.shoot, mana: cw.mana, autoReuse: cw.autoReuse } : null),
+    manual,
+    ladder: {
+      potion: !!heldDef?.potion,
+      pearl: (heldDef?.key || '').includes('5340'),
+      consumableGate: g.consumableFuncGate ? g.consumableFuncGate(heldDef) : 'n/a',
+      ranged: !!(heldDef?.ranged) || (window.__swRangedAmmo ? window.__swRangedAmmo(heldDef) > 0 : 'n/a'),
+    },
     calls,
     mouseDown: g.input.mouseDown, mouseHeld: g.input.mouseHeld, useTime: p.useTime,
     uiBlocking: g.input.uiBlocking ?? null,

@@ -8,7 +8,7 @@
 // 产物 public/assets-zip/manifest.json + p*.zip；状态 game/.pack-assets-state.json
 // （★不放 public/——vite 全量拷 dist 会泄漏）。
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { zipSync } from 'fflate';
 
@@ -147,7 +147,8 @@ const contentHash = sha1(Object.entries(hashes).map(([p, h]) => `${p}:${h}\n`).j
 //   （2026-08-25 启动小片切分曾因 contentHash 不变被此门跳过）
 const prevP0 = prevManifest?.parts?.[0]?.entries ?? [];
 const planUpToDate = prevP0.length > 0
-  && prevP0.every((e) => BOOT_FIRST_PREFIXES.some((p) => e.startsWith(p)));
+  && prevP0.every((e) => BOOT_FIRST_PREFIXES.some((p) => e.startsWith(p)))
+  && (prevManifest.parts.every((p, i) => p.file.startsWith(`p${i}-`)));   // 片名序位对齐(复用重命名后)
 const allPartsExist = prevManifest?.parts?.every((p) => existsSync(join(OUT_DIR, p.file)));
 if (prevManifest && planUpToDate && prevManifest.contentHash === contentHash && allPartsExist && prevManifest.algoVersion === ALGO_VERSION) {
   // 同步 manifest 的 generatedAt 不动（内容寻址，无意义）；state 落盘保 mtime 漂移稳定
@@ -180,7 +181,15 @@ for (let i = 0; i < parts.length; i++) {
   const inputHash = partInputHash(entries);
   const prev = prevByEntries.get(entries.join('\n'));
   if (prev && prev.inputHash === inputHash && existsSync(join(OUT_DIR, prev.file))) {
-    partsMeta.push({ ...prev, entries, inputHash });
+    // 复用片重命名对齐新序位(内容寻址后缀不变;改名=拷贝物理文件,旧名交 GC 清)
+    // ——否则计划变更后出现两个 p3-*(2026-08-25 启动小片切分实测)
+    let file = prev.file;
+    const want = `p${i}-${file.split('-')[1] ?? ''}`;
+    if (file !== want) {
+      copyFileSync(join(OUT_DIR, file), join(OUT_DIR, want));
+      file = want;
+    }
+    partsMeta.push({ ...prev, file, entries, inputHash });
     reusedParts++;
     zipBytesTotal += prev.zipBytes;
     continue;
