@@ -570,19 +570,9 @@ kvHas('sandboxworld.quicksave').then(async () => {
   const bypassBoot = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo');
   await loadAssets();
   if (atlas) UITextures.setAtlas(atlas);
-  // options/语言先行（下载徽标挂载文案需要 Lang；mainFlow 内 options.load() 幂等）
+  // options/语言先行（角标/徽标文案需要 Lang；mainFlow 内 options.load() 幂等）
   await options.load();
   await Promise.all([UIFont.load(), Lang.init(options.data.lang)]);
-  if (!bypassBoot) {
-    // 资源预载提前到 splash 期（原 showTitle 内调用，幂等）：有下载就停在 splash
-    // 上等完（右下角徽标 z40 浮于 splash z30 之上）；splashGate 在下载完才解——
-    // 时序 10.3s 内下完则自然收场，下不完则时序尽转全暗+向日葵续等
-    await initAssetCache();
-    warmAllAssets();
-    mountAssetBadge();
-    await holdForAssetsReady({ minMs: 0, timeoutMs: 30000 });
-  }
-  splashGate.resolve();
   VUI.init(root);
   VUI.startLoop(); // 自愈帧循环（HMR 杀不死，看门狗 1s 内重启）
   flow = createFlow(root, atlas, ui, audio);
@@ -610,6 +600,18 @@ kvHas('sandboxworld.quicksave').then(async () => {
     return;
   }
 
-  flow.showTitle();            // 标题在 splash 幕后建好（音乐/预载/徽标调用皆幂等）
-  if (!bypassBoot) await splash.finished;   // 原版时序（含渐出）走完才揭幕
+  // 菜单在 splash 幕后提前建好（2026-08-24 用户要求）：
+  //  ① 版本号/署名角标层(z35) 浮于 splash(z30) 之上——渐显期(1.5s 起)即可见；
+  //  ② 渐隐段(num5-num6 起)splash 底转透明——场景淡出直接透出菜单，不渐隐到
+  //     黑再跳切揭幕；
+  //  ③ 有下载停在 splash 等完（徽标 z40 浮于其上；splashGate 迟解=时序尽转全
+  //     暗+向日葵续等，下完才自收场）
+  await initAssetCache();
+  flow.showTitle();            // 菜单+角标文字幕后就位（音乐/预载调用幂等）
+  splash.revealBehind();
+  warmAllAssets();
+  mountAssetBadge();
+  await holdForAssetsReady({ minMs: 0, timeoutMs: 30000 });
+  splashGate.resolve();        // 下载完才解 splash"加载完成"门（时序尽自收场）
+  await splash.finished;       // 渐隐到菜单后揭幕
 });

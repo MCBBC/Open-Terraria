@@ -574,7 +574,7 @@ export class TileLightScanner {
   /** 每格局部随机(WithModifier(x,y);蜡烛闪烁)——scratch 复用,零分配。
    *  底种=主 random.seed(原语义 this.random.withModifier(m),非 scratch 自身) */
   private localRandom(x: number, y: number): FastRandom {
-    this.scratch.reseedWithModifierFrom((y * 2654435761 + x) | 0, this.random.seed);
+    this.scratch.reseedWithModifierFrom((y * 2654435761 + x) | 0, this.random.getSeed());
     return this.scratch;
   }
 

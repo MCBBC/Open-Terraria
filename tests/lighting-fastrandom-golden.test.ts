@@ -96,12 +96,11 @@ describe('FastRandom f64 重写 vs BigInt 参考逐位一致', () => {
     // ——本用例钉死「底种显式」语义:等价 baseInstance.withModifier(m) 的序列
     for (const seed of SEEDS) {
       for (const m of MODS) {
-        const base = new FastRandom(seed);
         const refBase = new RefFastRandom(seed);
         const scratch = new FastRandom(0);   // scratch 自身 seed 与底无关,故意错开
         const derived = refBase.withModifier(m);
+        scratch.reseedWithModifierFrom(m, seed);   // 派生一次,之后两侧同速前进
         for (let i = 0; i < 500; i++) {
-          scratch.reseedWithModifierFrom(m, seed);
           if (scratch.next(0, 50) !== derived.next(0, 50)) {
             throw new Error(`reseedWithModifierFrom(${m}, base=${seed}) 第${i}掷分歧`);
           }
@@ -109,7 +108,6 @@ describe('FastRandom f64 重写 vs BigInt 参考逐位一致', () => {
             throw new Error(`reseedWithModifierFrom(${m}, base=${seed}).nextFloat 第${i}掷分歧`);
           }
         }
-        void base;
       }
     }
   });

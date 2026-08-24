@@ -111,7 +111,7 @@ export class LightMap {
         } else if (m === Mask.Water) {
           // 逐格随机 [98,100)/100(L221-237)——scratch 原地重播 WithModifier(i),零分配
           // (底种=this.random.seed,原语义 this.random.withModifier(i))
-          this.scratch.reseedWithModifierFrom(i, this.random.seed);
+          this.scratch.reseedWithModifierFrom(i, this.random.getSeed());
           const flick = this.scratch.next(98, 100) / 100;
           if (!dr) zr *= DECAY_WATER[0] * flick;
           if (!dg) zg *= DECAY_WATER[1] * flick;

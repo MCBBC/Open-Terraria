@@ -1178,21 +1178,27 @@ export class SkyRenderer {
     ctx.imageSmoothingEnabled = true;   // 星为软边贴图
     const size = tex.width * s.scale;
     if (s.falling) {
-      // 尾迹(:62574-62595):fallTime 钳 30,逐段 fallSpeed·j·0.4 位移+scale/alpha 衰减
-      let ft = Math.min(s.fallTime, 30);
+      // 尾迹(:62574-62595):fallTime 钳 30,逐段 fallSpeed·j·0.4 位移+scale/alpha
+      // 衰减+rotation。★位移乘视口变换(×viewW/1920,×viewH/1200)——原版 1920×1200
+      // 全屏 1:1 混用天/屏空间,窗口缩放下不乘则尾迹比头部运动拉长 1.5 倍显脱节
+      const ft = Math.min(s.fallTime, 30);
+      const sx = viewW / 1920, sy = viewH / 1200;
       for (let j = 1; j < ft; j++) {
-        const tx = px - s.fvx * j * 0.4, ty = py - s.fvy * j * 0.4;
+        const tx = px - s.fvx * j * 0.4 * sx, ty = py - s.fvy * j * 0.4 * sy;
         const sc = s.scale * (1 - j / 30);
         const a = alpha * (1 - j / 30);
         ctx.save();
         ctx.globalAlpha = a;
         ctx.translate(tx, ty);
+        ctx.rotate(s.rot);
         ctx.drawImage(tex, -tex.width * sc / 2, -tex.height * sc / 2, tex.width * sc, tex.height * sc);
         ctx.restore();
       }
     }
     ctx.globalAlpha = alpha;
-    ctx.drawImage(tex, -size / 2, -size / 2, size, tex.height * s.scale);
+    // 主星尺寸 ×twinkle(:62600 theStar.scale * theStar.twinkle——脉动语义)
+    const tw = size * s.twinkle;
+    ctx.drawImage(tex, -tw / 2, -tw / 2, tw, tex.height * s.scale * s.twinkle);
     ctx.restore();
     ctx.globalAlpha = 1;
   }

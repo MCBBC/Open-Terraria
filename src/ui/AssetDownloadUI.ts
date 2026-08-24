@@ -20,7 +20,9 @@ const CSS = `
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
 }
 .sw-asset-badge {
-  position: fixed; right: 14px; bottom: 14px; z-index: 40;
+  /* 底部居中(2026-08-24 用户要求):左下版本号/右下署名角标已占位,避让;
+     与 LoadingSunflower(底 50px)上下错开不叠 */
+  position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 40;
   display: flex; align-items: center; gap: 8px;
   background: #141028; border: 2px solid #7d92d6;
   box-shadow: 0 0 0 2px #0a0e1e;

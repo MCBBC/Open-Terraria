@@ -172,7 +172,7 @@ describe('442 Kill（:74919-74945）：Item94 + 135 尘爆 + 电球 443 生成/�
     const near = new ElectroSphereProj(1030, 1007, 40);   // 心距 23 <40
     const far = new ElectroSphereProj(1200, 1007, 40);
     g.spawned.push(near, far);
-    (g.entities as unknown as { projectiles: unknown[] }).projectiles = g.spawned;
+    (g as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles = g.spawned;
     g.onProjectileDeath!(442, 1000, 1000, 14, 14, 8, 0, 40, { hostile: false });
     expect(near.replaced).toBe(true);
     expect(near.vx).toBeCloseTo((1007 - 1030) / 5, 6);

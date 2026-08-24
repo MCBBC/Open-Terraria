@@ -424,21 +424,31 @@ export function consumeMaterials(
   // ---- 第一阶段：可用性校验（不扣）——CraftingRequests.cs:86-102 每次迭代重查、
   // 永不过扣。旧实现"边扣边查、不足 return false 不回滚"=材料部分销毁零产出
   // （shift ×10 合成时整批蒸发,2026-08-13 修）----
+  // R14-B2：炼金台折扣按【每次合成迭代独立掷】（CraftItem CRQ57:96-103 循环 qty 次、
+  // 每次调 GetIngredientsForOneCraft → GetIngredientCraftingDiscount REC57:214-227
+  // 对每材料掷 stack 次 Next(3)==0）——曾 times===1 才折扣,shift×10 整批跳过=材料差 1.5 倍。
+  // 此处先一次性掷完全部迭代的折扣（期望/分布与逐次一致;掷流序备案 B9）
+  const needOf = new Map<object, number>();
   for (const req of r.items) {
-    const need = req.stack * times;
+    let total = 0;
+    for (let k = 0; k < times; k++) {
+      let need = req.stack;
+      if (r.alchemy && alchemyTable) {
+        let discounted = 0;
+        for (let i = 0; i < req.stack; i++) if (Math.random() < 1 / 3) discounted++;
+        need -= discounted;
+      }
+      total += Math.max(0, need);   // :206-208 stack-=discount; >0 才入列
+    }
+    needOf.set(req, total);
+  }
+  for (const req of r.items) {
+    const need = needOf.get(req)!;
     if (countReqAcross(r, req.id, inv, sources) < need) return false;
   }
   // ---- 第二阶段：执行扣除（校验已过,理论不触不足;保持原折扣/组扣语义）----
   for (const req of r.items) {
-    let need = req.stack * times;
-    // 炼金折扣（GetIngredientCraftingDiscount Recipe.cs:213-227：alchemy 配方且 alchemyTable
-    // 时每个材料独立掷 1/3 概率该份免费——按"每份独立掷骰"逐个扣）
-    if (r.alchemy && alchemyTable && times === 1) {
-      let discounted = 0;
-      for (let k = 0; k < need; k++) if (Math.random() < 1 / 3) discounted++;
-      need -= discounted;
-      if (need <= 0) continue;
-    }
+    let need = needOf.get(req)!;
     // 组材料（groupOf:占位 id/哨兵 id 统一判定,ConsumeFromInventory :451 语义——
     // 组槽可扣组内任一成员,依序补足）
     const gid2 = groupOf(r, req.id);

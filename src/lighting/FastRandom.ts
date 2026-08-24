@@ -60,6 +60,11 @@ export class FastRandom {
     this.seed = FastRandom.modifiedSeedOf(m, baseSeed);
   }
 
+  /** 当前 48 位种子(f64 精确整数)——scratch 派生的底种读取口(seed 私有) */
+  getSeed(): number {
+    return this.seed;
+  }
+
   /** modifiedSeed = NextSeed(m mod 2^48) ^ baseSeed;异或按 24 位拆半(f64 无 48 位位域) */
   private static modifiedSeedOf(m: number | bigint, baseSeed: number): number {
     const base = nextSeed48(typeof m === 'bigint' ? Number(m & 0xffffffffffffn) : m);

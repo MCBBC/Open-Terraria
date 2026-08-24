@@ -25,6 +25,17 @@ const clouds = await page.evaluate(() => {
   };
 });
 console.log('CLOUDS:', JSON.stringify(clouds));
+  // 夜空连拍:切深夜(vTime=16200)等坠星,三帧间隔 250ms 截天空区
+  await page.evaluate(() => {
+    const mb = window.__swMenuBg;
+    mb.vTime = 16200; mb.dayTime = false;
+  });
+  await new Promise((r) => setTimeout(r, 1500));
+  for (let k = 0; k < 3; k++) {
+    await page.screenshot({ path: `/tmp/meteor-${k}.png`, clip: { x: 0, y: 0, width: 1280, height: 500 } });
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  console.log('meteor shots saved');
   const vals = await page.evaluate(() => {
     const sky = window.__swMenuBg.sky;
     const cv = window.__swMenuBg.canvas;
@@ -37,6 +48,26 @@ console.log('CLOUDS:', JSON.stringify(clouds));
         if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200) lit++;
       }
     }
+    // 隔离测试:独立画布手动调 drawVanillaClouds,数非透明像素
+    const iso = await new Promise((res) => {
+      const cv = document.createElement('canvas');
+      cv.width = 1280; cv.height = 800;
+      const ctx = cv.getContext('2d');
+      const sky2 = window.__swMenuBg.sky;
+      sky2['drawVanillaClouds'](ctx, 1280, 800, false, 16.7, 0, 3500);
+      const d = ctx.getImageData(0, 0, 1280, 800).data;
+      let opaque = 0; const rows = {};
+      for (let y = 0; y < 800; y += 8) {
+        let n = 0;
+        for (let x = 0; x < 1280; x += 8) {
+          if (d[(y * 1280 + x) * 4 + 3] > 40) n++;
+        }
+        if (n > 0) rows[y] = n;
+        opaque += n;
+      }
+      res({ opaque, rows });
+    });
+    console.log('ISO:', JSON.stringify(iso));
     const types = {};
     for (const c of sky.vclouds) types[c.type] = (types[c.type] || 0) + 1;
     const texReady = sky.cloudTexs.map((t) => (t && t.width > 0) ? 1 : 0);

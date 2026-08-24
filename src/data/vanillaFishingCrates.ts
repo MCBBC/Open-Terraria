@@ -236,9 +236,9 @@ export function openFishingCrate(
       }
     }
     if ((crateItemID === 4405 || crateItemID === 4406) && flag5 && rnd.next(maxValue) === 0) {
-      // :8353-8364 冰冻匣六选一（remixWorld 第 4 支 1319→725）
-      const i = rnd.next(6);
-      give([670, 724, 950, ctx.remixWorld ? 725 : 1319, 987, 1579][i]);
+      // PLA57:8736-8741 冰冻匣七选一（1456 六项 → 1457 +6153 GlacierFang；remix 第 4 支 1319→725）
+      const i = rnd.next(7);
+      give([670, 724, 950, ctx.remixWorld ? 725 : 1319, 987, 1579, 6153][i]);
       flag5 = false;
     }
     if (crateItemID === 4407 || crateItemID === 4408) {

@@ -435,6 +435,10 @@ const PROJ_ALPHA0: Record<number, number> = {
   246: 255,                                                          // 刺炮弹（−20/t 渐显 :58106-58110）
   311: 255,                                                          // 糖果玉米（−50/t 渐显 :58117-58123）
   442: 255,                                                          // 电圈导弹（−90/4t 渐显 :55691-55703，AI 段消费）
+  181: 255, 189: 255, 307: 255, 316: 255, 566: 255,                  // aiStyle 36 蜂族（−50/update 渐显 :27690-27697）
+  616: 255,                                                          // 星旋涡旋弹（−25/t 渐显 :58378-58384）
+  297: 255,                                                          // 幽灵法杖弹（SetDefaults :5685-5695 alpha=255，AI 不消费恒全显）
+  659: 255,                                                          // 灵魂之焰（SetDefaults :8571-8580 alpha=255，−12/t 渐显 :36901-36903）
 };
 
 /** usesIDStaticNPCImmunity 共享免疫表（全场同型一张表,非每弹一张）：
@@ -711,6 +715,39 @@ export class Arrow extends Entity {
   chloAi1 = 0;
   /** localAI[0] 初速（首次 AI 取 |v|，此后恒为转向基准速度——转向不清速） */
   chloSpeed = 0;
+  // ---- aiStyle 36 蜂族（AI() 派发器 :27683-27862）----
+  /** ai[0] 索敌延迟计数（>30 后每 update 重搜最近敌，:27762-27764 钳 30） */
+  private bee36Delay = 0;
+  /** 本拍锁定目标（每拍重搜，不持久锁——原版无 ai 锁存） */
+  private bee36Aim: { cx: number; cy: number } | null = null;
+  /** 本拍是否锁到真实敌（false = 无目标前瞻点；316 速度档/307 friendly 消费） */
+  private bee36AimLocked = false;
+  /** 307 小吞噬者 friendly 旗（SetDefaults 无 friendly :3986-3995；锁定瞬间置位
+   *  :27789-27792——锁定前穿敌不结算，命中环按此门禁） */
+  friendly307 = false;
+  /** frameCounter（316 6 拍/帧 2 帧循环 :27699-27706 / 其余 3 拍/帧 3 帧 :27720-27727）*/
+  bee36Frame = 0;
+  private bee36FrameT = 0;
+  /** 蜂族姿态角（draw 消费；null = 非蜂族）：307 = atan2(vy,vx)−π/2（:27698）/
+   *  其余 = velocity.X×0.1（:27716）——每 AI 步刷新 */
+  bee36Tilt: number | null = null;
+  /** 蜂族 alpha 归零后 extraUpdates→0 挂起（:27693-27695——原版 numUpdates 每 tick
+   *  头读取,当拍已入循环的子步数不变,下一 tick 起 1 子步/tick） */
+  private bee36EU0 = false;
+  // ---- 616 星旋机枪涡旋弹（AI_001 重力链 616 支 :58383-58465）----
+  /** ai[0] 索敌延迟（>20 后激活，:58403-58405 自减钳 20） */
+  private vx616Delay = 0;
+  /** ai[1] 锁敌（npc 索引+1；本仓存 Enemy.id；0=未锁；失效不复锁 :58421-58437） */
+  private vx616Ai1 = 0;
+  /** localAI[0] 初速快照（转向基准，:58371-58377） */
+  private vx616Speed = 0;
+  // ---- 297 幽灵法杖弹（aiStyle 51 :28825-28927）----
+  // （无持久态——每拍全量重搜）
+  // ---- 659 灵魂之焰（aiStyle 129 :36861-36970）----
+  /** ai[0] 锁定目标（vanilla npc 索引，负数 = 无/失效态；本仓存 Enemy.id，−1 无） */
+  private sf659Ai0 = -1;
+  /** localAI[0] 重索敌节拍（每 5 update 一搜，:36878-36882） */
+  private sf659Cd = 0;
   // ---- 92 坠星（aiStyle 5 + Kill 91/92 共段）----
   /** ai[1] 命中线 Y（弹顶越过才恢复撞块；-Infinity = 非坠星路径） */
   starFallLine = -Infinity;
@@ -986,6 +1023,11 @@ export class Arrow extends Entity {
         return (255 - this.alpha) / 255;
       case 514: return (255 - this.alpha) / 255;   // 钉 aiStyle 93 渐显（:33427-33434）
       case 246: case 311: return (255 - this.alpha) / 255;   // 刺炮弹/糖果玉米渐显
+      // aiStyle 36 蜂族（SetDefaults alpha=255，AI −50/update 渐显 :27690-27697——
+      // GetAlpha 缺省路径 r=g=b=255−alpha 同式）/ 616 涡旋弹（−25/t :58378-58384）/
+      // 659 灵魂之焰（−12/t :36901-36903）
+      case 181: case 189: case 307: case 316: case 566:
+      case 616: case 659: return (255 - this.alpha) / 255;
       // ---- Xenopopper 子弹族（GetAlpha :81040-81100 区段）——白化档走 drawXenoFilter ----
       case 445: return (128 / 255) * (1 - this.alpha / 255);   // (255,255,255,128)×(1-α/255)
       case 446: return 1 - this.alpha / 255;                   // Lerp(白,0.8)×(1-α/255)
@@ -1238,13 +1280,18 @@ export class Arrow extends Entity {
       /* 直立族（aiStyle 29 零 rotation）：恒不旋转 */
     } else if (this.projId === 477 && this.dartRot !== null) {
       ctx.rotate(this.dartRot);      // 477 水晶镖平滑姿态（:54802-54812，AI 侧维护）
-    } else {
+    } else if (this.bee36Tilt !== null) {
+      ctx.rotate(this.bee36Tilt);    // aiStyle 36 蜂族（:27716 rotation = velocity.X*0.1f
+    } else {                         //   ——微倾不振转；307 小吞噬者 = atan2−π/2（:27698）
       ctx.rotate(rightArt ? ang
         : PROJ_ROT_DIAG.has(this.projId) ? ang + Math.PI / 4   // aiStyle 27 剑气 +45°（:24860）
           : ang + Math.PI / 2);
     }
     // 469 蜂箭（:54789-54798）：vx>0 → spriteDirection=-1（贴图朝左，源翻转语义）
     if (this.projId === 469 && this.vx > 0) ctx.scale(-1, 1);
+    // 316 蝙蝠杖蝠（:27704-27710）：vx>0 → spriteDirection=-1（蝠贴图朝左）——
+    // 其余蜂族 spriteDirection=sign(vx) 与贴图原生朝向一致不翻转（:27699-27715）
+    if (this.projId === 316 && this.vx > 0) ctx.scale(-1, 1);
     // 502 朝向（:22659-22665）：spriteDirection=sign(vx)——贴图在旋转坐标系内水平镜像
     if (this.projId === 502 && this.vx < 0) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
@@ -1259,7 +1306,8 @@ export class Arrow extends Entity {
         : this.martianRocket ? this.rkFrame   // 448 帧：3t/帧 3 帧循环（:29862-29868）
           : this.present ? this.presentStage    // 351 礼盒帧 0/1 随两段重力态（:27736/:27749）
             : this.projId === 485 ? this.hwFrame   // 485 狱翼扇翅帧：2 拍/帧 5 帧循环（:54834-54843）
-              : Math.floor(this.age / 5) % frames;
+              : this.bee36Tilt !== null ? this.bee36Frame   // aiStyle 36 蜂族：3/6 拍/帧（:27699/:27720）
+                : Math.floor(this.age / 5) % frames;
     const frameImg = frames > 1 ? projFrameImg(this.projId, fIdx) : null;
     let drawImg: CanvasImageSource | null = frameImg ?? img;
     // R4-32（GetAlpha,Projectile.cs:80604-80613）：aiStyle1 且 PhoenixQuivered||
@@ -1479,6 +1527,9 @@ export class Arrow extends Entity {
     // extraUpdates 子步循环（Projectile.cs:15331-15336）：numUpdates = extraUpdates，
     // while(numUpdates>=0) 跑完整 AI/位移/命中体——timeLeft 也在循环内逐子步消耗
     //（:15861），故弹体寿命同步缩短为 1/(N+1)。
+    // aiStyle 36 蜂族：alpha 归零拍 extraUpdates=0（:27693-27695）——挂起到 tick 头
+    // 生效（原版 numUpdates 每 tick 读取一次，当拍子步数不变）
+    if (this.bee36EU0) { this.bee36EU0 = false; this.extraUpdates = 0; }
     for (let u = 0; u <= this.extraUpdates; u++) {
       this.subStep(game);
       if (this.dead) return;
@@ -1739,6 +1790,224 @@ export class Arrow extends Entity {
           this.vy = (this.vy * (w - 1) + (dy / dl) * sp) / w;
         }
       }
+    } else if (this.projId === 181 || this.projId === 189 || this.projId === 307
+      || this.projId === 316 || this.projId === 566) {
+      // ---- aiStyle 36 蜂族（AI() 派发器 Projectile.cs:27683-27862）----
+      // 181 蜂枪蜂(1121)/566 巨蜂(beeType 强蜂 20%)/189 黄蜂枪蜂(1155)/
+      // 316 蝙蝠杖蝠(1801)/307 腐化者天罚小吞噬者(1571 命中 Kill 链 :78052-78062 掷)：
+      // ① 入水消亡（307 豁免——:27685 `type != 307 && wet && !honeyWet && !shimmerWet`）；
+      // ② alpha −50/update 渐显，归零后 extraUpdates=0（:27690-27697，SetDefaults 3 →
+      //    淡入期 4 子步/帧、全显后 1——速度观感先快后常）；
+      // ③ 30 update 索敌延迟（:27762-27764 ai[0]++ 钳 30）后【每 update 重搜】最近敌
+      //   （800 曼哈顿 + CanHit 全盒视线；湿敌豁免表：Duke Fishron 370 或 307 自身，
+      //    :27769）——无持久锁，每拍重选最近；
+      // ④ 无目标 → 瞄准点 = 弹心 + v×100（保持直飞，:27784-27788）；307 锁到目标瞬间
+      //    friendly = true（:27789-27792——出生非 friendly，锁定才可伤敌）；
+      // ⑤ 逐轴步进转向（:27823-27862）：目标速度向量 = 归一(目标−弹心)×speed，
+      //    v.x < 目标 → +accel（变号再 +2×accel），反之 −accel——蜂群"振翅折线"观感。
+      //    逐型 speed/accel：181 6/0.1、189 9/0.2、307 13/0.35、316 13/0.325(锁定)
+      //    或 10/0.25(自由)、566 6.8/0.14（:27793-27822）。
+      const st36 = world.store;
+      {
+        const bx36 = Math.floor(this.cx / TILE), by36 = Math.floor(this.cy / TILE);
+        if (st36.inBounds(bx36, by36) && st36.liquid[st36.idx(bx36, by36)] > 0) {
+          const lt36 = st36.liquidType[st36.idx(bx36, by36)];
+          if ((lt36 === LIQUID_TYPE.WATER || lt36 === LIQUID_TYPE.LAVA) && this.projId !== 307) {
+            this.killNow(game); return;                    //（:27685-27688）
+          }
+        }
+      }
+      if (this.alpha > 0) {
+        this.alpha = Math.max(0, this.alpha - 50);         //（:27690-27692）
+        if (this.alpha === 0) this.bee36EU0 = true;        //（:27693-27695，下一 tick 生效
+      }                                                    //   ——原版 numUpdates 每 tick
+                                                           //   头读取,当拍子步数不变）
+      // 姿态/帧（:27697-27727）：307 rotation=atan2(vy,vx)−π/2、6 拍/帧 2 帧；
+      // 其余 rotation=vx×0.1、3 拍/帧 3 帧（draw 侧消费 bee36Frame/bee36Tilt）
+      this.bee36Tilt = this.projId === 307
+        ? Math.atan2(this.vy, this.vx) - Math.PI / 2
+        : this.vx * 0.1;
+      // 307 尘尾（:27707-27716）：每 update 3×184 尘（scale 0.5、速度 0、
+      // 位置 = 弹心 − v/3×i 沿弹道后向排布）
+      if (this.projId === 307) {
+        for (let i = 0; i < 3; i++) {
+          const d307 = game.spawnDust?.(this.cx - (this.vx / 3) * i - 2,
+            this.cy - (this.vy / 3) * i - 2, 4, 4, 184, 0, 0, 0, null, 0.5);
+          if (d307) { d307.vx = 0; d307.vy = 0; }
+        }
+      }
+      if (++this.bee36FrameT >= (this.projId === 307 ? 6 : 3)) {
+        this.bee36FrameT = 0;
+        const maxF = this.projId === 307 ? 2 : 3;
+        this.bee36Frame = (this.bee36Frame + 1) % maxF;
+      }
+      // 索敌（:27762-27792）
+      this.bee36Aim = null;
+      this.bee36AimLocked = false;
+      if (++this.bee36Delay > 30) {
+        this.bee36Delay = 30;                              //（:27763-27764 钳）
+        let best36 = 800;
+        for (const ent of game.enemies()) {
+          const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean; wet?: boolean };
+          if (e.dead) continue;
+          if (!playerCanHitEnemy(ent, game, this.projId)) continue;      // CanBeChasedBy
+          // 湿敌豁免（:27769）：Duke Fishron 370 或 307 自身可追湿敌
+          if (e.wet && this.projId !== 307 && e.id !== 370) continue;
+          const d36 = Math.abs(this.cx - (e.x + e.w / 2)) + Math.abs(this.cy - (e.y + e.h / 2));
+          if (d36 >= best36) continue;
+          if (!canHitLine(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+          best36 = d36;
+          this.bee36Aim = { cx: e.x + e.w / 2, cy: e.y + e.h / 2 };
+          this.bee36AimLocked = true;
+        }
+        if (this.bee36AimLocked && this.projId === 307) this.friendly307 = true;  //（:27789-27792）
+      }
+      if (!this.bee36Aim) {
+        this.bee36Aim = { cx: this.cx + this.vx * 100, cy: this.cy + this.vy * 100 };  //（:27784-27788）
+      }
+      // 逐轴步进转向（:27823-27862）
+      const P36: Record<number, [number, number]> = {
+        181: [6, 0.1], 189: [9, 0.2], 307: [13, 0.35],
+        316: this.bee36AimLocked ? [13, 0.325] : [10, 0.25], 566: [6.8, 0.14],
+      };
+      const [spd36, acc36] = P36[this.projId];
+      {
+        const dx36 = this.bee36Aim.cx - this.cx, dy36 = this.bee36Aim.cy - this.cy;
+        const dl36 = Math.hypot(dx36, dy36) || 1;
+        const wantX = (dx36 / dl36) * spd36, wantY = (dy36 / dl36) * spd36;
+        if (this.vx < wantX) { this.vx += acc36; if (this.vx < 0 && wantX > 0) this.vx += acc36 * 2; }
+        else if (this.vx > wantX) { this.vx -= acc36; if (this.vx > 0 && wantX < 0) this.vx -= acc36 * 2; }
+        if (this.vy < wantY) { this.vy += acc36; if (this.vy < 0 && wantY > 0) this.vy += acc36 * 2; }
+        else if (this.vy > wantY) { this.vy -= acc36; if (this.vy > 0 && wantY < 0) this.vy -= acc36 * 2; }
+      }
+    } else if (this.projId === 616) {
+      // ---- 616 星旋机枪涡旋弹（AI_001 重力链 616 支，Projectile.cs:58383-58465）----
+      // 3475 星旋机枪(615 持械弹)每 7 轮附赠（Game 侧已接 :68011-68025 伤+20/kb×1.25/
+      // 速 8）：① alpha −25/update 渐显（:58378-58384）；② <170 期 3×229 尘尾迹
+      // （:58385-58394）；③ localAI[0]=初速快照（:58371-58377，转向不清速）；
+      // ④ 20 update 延迟（:58403-58405 ai[0]++ >20 自减钳 20）后锁敌：800 曼哈顿
+      //   + CanHit（:58407-58420）锁 ai[1]=敌+1——【失效不复锁】（:58421-58437 无
+      //   清锁支，与 207/837 的失效重锁不同）；⑤ 1000px 保持圈（:58438-58441）；
+      // ⑥ 转向 v=(v×7+dir×初速)/8（:58448-58452 num249=8）；!friendly 不追踪
+      //   （:58442-58444）。
+      if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 25);
+      if (this.alpha < 170) {
+        for (let k = 0; k < 3; k++) {
+          const d616 = game.spawnDust?.(
+            this.cx - (this.vx / 3) * k, this.cy - (this.vy / 3) * k,
+            1, 1, 229, 0, 0, 200, null, 0.5, true);
+          if (d616) { d616.vx = 0; d616.vy = 0; }
+        }
+      }
+      if (this.vx616Speed === 0) this.vx616Speed = Math.hypot(this.vx, this.vy);
+      if (++this.vx616Delay > 20) {
+        this.vx616Delay = 20;                              //（:58403-58405 钳）
+        if (this.vx616Ai1 === 0) {
+          let best616 = 800;
+          let bestId616 = 0;
+          for (const ent of game.enemies()) {
+            const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean };
+            if (e.dead) continue;
+            if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+            const d616 = Math.abs(this.cx - (e.x + e.w / 2)) + Math.abs(this.cy - (e.y + e.h / 2));
+            if (d616 >= best616) continue;
+            if (!canHitLine(world.store, this.cx, this.cy, 0, 0, e.x, e.y, e.w, e.h)) continue;
+            best616 = d616;
+            bestId616 = e.id;
+          }
+          if (bestId616 !== 0) this.vx616Ai1 = bestId616;  //（:58418-58420）
+        }
+        if (this.vx616Ai1 !== 0) {
+          const t616 = (game.enemies() as Array<{ id: number; x: number; y: number; w: number; h: number; dead?: boolean }>)
+            .find((e) => e.id === this.vx616Ai1);
+          //（:58423-58437）active + CanBeChasedBy(ignoreDontTakeDamage) + 1000px 内
+          if (t616 && !t616.dead && playerCanHitEnemy(t616, game, this.projId)
+            && Math.abs(this.cx - (t616.x + t616.w / 2)) + Math.abs(this.cy - (t616.y + t616.h / 2)) < 1000) {
+            const dx616 = t616.x + t616.w / 2 - this.cx, dy616 = t616.y + t616.h / 2 - this.cy;
+            const dl616 = Math.hypot(dx616, dy616) || 1;
+            this.vx = (this.vx * 7 + (dx616 / dl616) * this.vx616Speed) / 8;   //（:58448-58452）
+            this.vy = (this.vy * 7 + (dy616 / dl616) * this.vx616Speed) / 8;
+          }
+        }
+      }
+    } else if (this.projId === 297) {
+      // ---- 297 幽灵法杖弹（aiStyle 51，Projectile.cs:28825-28927，1446 幽灵法杖）----
+      // 每拍重搜最近敌（400 曼哈顿 + Distance<400 欧氏双门 + CanHit 盒心 1×1→敌心，
+      // :28861-28880）→ 转向 v=(v×20+dir×6)/21（:28913-28916 num384=6/num=21）；
+      // 无目标保持直飞。293 敌对失魂同支追玩家（:28881-28901，speed 3/权重 101）——
+      // 敌对弹由 NPC AI 侧生成，本仓走 Enemy 弹幕路径不在此接（登记）。
+      let b297 = 400;
+      let ax297 = 0, ay297 = 0, got297 = false;
+      for (const ent of game.enemies()) {
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean };
+        if (e.dead) continue;
+        if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+        const dE = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
+        if (dE >= b297) continue;                          // Distance < 400（:28865）
+        if (!canHitLine(world.store, this.cx, this.cy, 0, 0, e.x + e.w / 2, e.y + e.h / 2, 0, 0)) continue;
+        const dM = Math.abs(this.cx - (e.x + e.w / 2)) + Math.abs(this.cy - (e.y + e.h / 2));
+        if (dM >= b297) continue;                          // 曼哈顿 < 400（:28879）
+        b297 = dM;
+        ax297 = e.x + e.w / 2; ay297 = e.y + e.h / 2; got297 = true;
+      }
+      if (got297) {
+        const dx297 = ax297 - this.cx, dy297 = ay297 - this.cy;
+        const dl297 = Math.hypot(dx297, dy297) || 1;
+        this.vx = (this.vx * 20 + (dx297 / dl297) * 6) / 21;   //（:28913-28916）
+        this.vy = (this.vy * 20 + (dy297 / dl297) * 6) / 21;
+      }
+    } else if (this.projId === 659) {
+      // ---- 659 灵魂之焰（aiStyle 129，Projectile.cs:36861-36970，3779 灵魂之焰）----
+      // ① 每 5 update 重索敌（:36878-36882 localAI[0] 节拍）：400 欧氏 +
+      //   CanHitLine(弹心→敌心 或 敌顶)（:36888-36893）取最近锁 ai[0]，锁到即
+      //   timeLeft=420（:36896-36899）；② 追踪 v=(v×2+dir×7.5)/3（:36954-36959，
+      //   距离 >1 才转）；③ 目标失效 → ai[0]=−1 且 timeLeft 钳 5（:36963-36966）；
+      // ④ 埋入实心格 → timeLeft 钳 2（:36945-36948）；⑤ alpha −12/t 渐显
+      //   （:36901-36903）、timeLeft<30 停渐显。
+      if (this.sf659Cd > 0) this.sf659Cd--;
+      if (this.sf659Cd === 0 && this.sf659Ai0 < 0) {
+        this.sf659Cd = 5;                                  //（:36881 localAI[0]=5f）
+        let best659 = 400;
+        let bestId659 = -1;
+        for (const ent of game.enemies()) {
+          const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean };
+          if (e.dead) continue;
+          if (!playerCanHitEnemy(ent, game, this.projId)) continue;      // CanBeChasedBy
+          const d659 = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
+          if (d659 >= best659) continue;                   //（:36890 < 400f）
+          const hitC = canHitLine(world.store, this.cx, this.cy, 0, 0, e.x + e.w / 2, e.y + e.h / 2, 0, 0);
+          const hitT = canHitLine(world.store, this.cx, this.cy, 0, 0, e.x + e.w / 2, e.y, 0, 0);
+          if (!hitC && !hitT) continue;                    //（:36892-36893 心|顶双门）
+          best659 = d659;
+          bestId659 = e.id;
+        }
+        if (bestId659 >= 0) {
+          this.sf659Ai0 = bestId659;
+          this.life = Math.max(this.life, 420);            //（:36896-36898 timeLeft=420）
+        }
+      }
+      if (this.sf659Ai0 >= 0) {
+        const t659 = (game.enemies() as Array<{ id: number; x: number; y: number; w: number; h: number; dead?: boolean }>)
+          .find((e) => e.id === this.sf659Ai0);
+        if (t659 && !t659.dead) {
+          const dx659 = t659.x + t659.w / 2 - this.cx, dy659 = t659.y + t659.h / 2 - this.cy;
+          if (Math.hypot(dx659, dy659) > 1) {              //（:36952 Distance > num1008=1）
+            const dl659 = Math.hypot(dx659, dy659);
+            this.vx = (this.vx * 2 + (dx659 / dl659) * 7.5) / 3;   //（:36954-36959）
+            this.vy = (this.vy * 2 + (dy659 / dl659) * 7.5) / 3;
+          }
+        } else {
+          this.sf659Ai0 = -1;
+          this.life = Math.min(this.life, 5);              //（:36963-36966）
+        }
+      }
+      if (this.life > 2) {
+        const bx659 = Math.floor(this.cx / TILE), by659 = Math.floor(this.cy / TILE);
+        if (world.store.inBounds(bx659, by659) && world.store.isSolid(bx659, by659)) {
+          this.life = 2;                                   //（:36945-36948）
+        }
+      }
+      if (this.life > 30 && this.alpha > 0) this.alpha = Math.max(0, this.alpha - 12);  //（:36901-36903）
     } else if (this.projId === 92) {
       // 92 坠星（aiStyle 5，Projectile.cs:22152-22156 + :22222-22245，圣箭 Kill 链）：
       // 无重力直飞（aiStyle5 无重力段）；弹顶越过 ai[1] 命中线才恢复撞块（:22152-22156，
@@ -2488,6 +2757,10 @@ export class Arrow extends Entity {
     // 自家部件上（月总 454 附手随行 30t 若走此环会在手心爆掉）；城镇 NPC 侧已在
     // 上方 hitTownNpcs('hostile') 走"敌方弹恒命中"档，反射弹也已在上方拦截）
     if (this.hostile) return;
+    // 307 腐化者小吞噬者 friendly 门（SetDefaults 无 friendly :3986-3995；锁定敌怪
+    // 瞬间 friendly=true :27789-27792）——锁定前穿过敌怪不结算（原版非 friendly
+    // 弹 Damage_PVE 整段不进）
+    if (this.projId === 307 && !this.friendly307) return;
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     // 飞龙剑气 684 命中盒 = 垂直线 ±40px 厚 16（CanHitWithOwnBody :14693-14701，
     // 非通用 16×16 盒——巨剑气横扫判定）

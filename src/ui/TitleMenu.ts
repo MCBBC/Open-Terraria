@@ -122,6 +122,8 @@ const CSS = `
 
 export class TitleMenu {
   private root: HTMLElement;
+  /** 角标文字层（版本号+署名，body 级 z35——splash 之上，见构造器注） */
+  private chrome!: HTMLElement;
   private logoDay!: ImageBitmap | HTMLImageElement;
   private logoNight!: ImageBitmap | HTMLImageElement;
   private celestial!: HTMLDivElement;
@@ -164,9 +166,23 @@ export class TitleMenu {
         <div class="sw-title-btn" data-act="buy">${Lang.text('Mods.SandboxWorld.Menu.BuyTerraria')}</div>
         <div class="sw-title-btn" data-act="quit">${Lang.text('LegacyMenu.15')}</div>
       </div>
-      <div class="sw-title-version">SandboxWorld v0.1.0</div>
-      <div data-credit style="position:fixed;right:30px;bottom:8px;font-size:13px;color:#fff;padding:0 16px;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;z-index:20;"></div>
     `;
+    // 角标文字层（版本号+署名）：body 级独立层 z35——splash(z30) 之上、下载徽标
+    // (z40) 之下。2026-08-24 用户要求两处文字随 splash 渐显渐隐期可见（原在标题
+    // 根 z15 内被 splash 盖住、进菜单才现身）。pointer-events:none 纯展示。
+    this.chrome = document.createElement('div');
+    this.chrome.id = 'sw-title-chrome';
+    this.chrome.innerHTML = `
+      <style>
+        /* 渐显入场与 splash 图片同曲线（--sw-splash-alpha 由 Splash 单调广播，
+           揭幕/回菜单时变量摘除=回满亮） */
+        #sw-title-chrome { position: fixed; inset: 0; z-index: 35; pointer-events: none;
+          opacity: var(--sw-splash-alpha, 1); }
+      </style>
+      <div class="sw-title-version">SandboxWorld v0.1.0</div>
+      <div data-credit style="position:fixed;right:30px;bottom:8px;font-size:13px;color:#fff;padding:0 16px;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;"></div>
+    `;
+    document.body.appendChild(this.chrome);
     this.logoDay = this.root.querySelector('.logo-day') as unknown as HTMLImageElement;
     this.logoNight = this.root.querySelector('.logo-night') as unknown as HTMLImageElement;
     // 日/月命中层 + 可见体（GOING_OLDSCHOOL）——置于按钮之下、天空画布之上
@@ -303,7 +319,7 @@ export class TitleMenu {
     set('buy', t('Mods.SandboxWorld.Menu.BuyTerraria'));
     set('quit', t('LegacyMenu.15'));
     // 右下署名两行（多语化：{0}/{1} = 加粗名，b 样式含像素字体复制法加粗+左右 margin）
-    const credit = this.root.querySelector('[data-credit]');
+    const credit = this.chrome.querySelector('[data-credit]');
     if (credit) {
       const bs = 'font-weight:700;margin:0 5px;text-shadow:1px 0 0 #fff,1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000';
       credit.innerHTML = `${t('Mods.SandboxWorld.Credits.Line1', `<b style="${bs}">GLM-5.3</b>`, `<b style="${bs}">OX-Alpha</b>`)}<br>${t('Mods.SandboxWorld.Credits.Line2')}`;
@@ -341,6 +357,7 @@ export class TitleMenu {
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
     this.unsubLang?.();
+    this.chrome.remove();
     this.root.remove();
   }
 }

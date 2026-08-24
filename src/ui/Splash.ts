@@ -13,6 +13,10 @@ export interface SplashHandle {
   /** 旁路立即收场（?play/?quickload 调试入口不陪跑时序）；正常路径不调用——
    *  时序自然走完自收场 */
   done(): void;
+  /** 标记菜单已在幕后建好：渐隐段（num5-num6 起）splash 底色转透明，场景淡出
+   *  直接透出菜单——不渐隐到黑再跳切（2026-08-24 用户要求）。渐隐已开始则立即
+   *  转透明（下载等待跨过渐隐段的补课路径） */
+  revealBehind(): void;
   /** resolve 于 splash 完全移除（时序尽自收场或 done()）——主流程等它再揭幕 */
   finished: Promise<void>;
 }
@@ -70,6 +74,10 @@ export function showSplash(opts: {
     <canvas class="flower" width="52" height="53"></canvas>
   `;
   document.body.appendChild(root);
+  // 角标文字渐显驱动变量【构造即置 0】——若等首帧 b>0 才写，TitleMenu 更早挂载
+  // 时 var() 回退值 1 = 文字在黑场期全亮、渐显开始才骤隐（2026-08-24 用户实报）；
+  // 先置 0 则黑场期文字隐藏、随场景同曲线渐显。remove() 摘除=菜单态回满亮
+  document.documentElement.style.setProperty('--sw-splash-alpha', '0');
   const back = root.querySelector('.back') as HTMLDivElement;
   const tree = root.querySelector('.tree') as HTMLDivElement;
   const front = root.querySelector('.front') as HTMLDivElement;
@@ -96,7 +104,19 @@ export function showSplash(opts: {
   const t0 = performance.now();
   let b = 0;            // white alpha 0..255
   let timelineOver = false;
+  /** 角标文字（版本/署名）渐显驱动：单调广播 --sw-splash-alpha（只升不降）——
+   *  文字渐显与图片同曲线（2026-08-24 用户要求）；渐隐段不回写（文字保持可见，
+   *  揭幕无 0→1 跳变）；下载等待全暗段同理不回写。remove() 时摘除变量=菜单态 */
+  let chromeSent = 0;
+  /** 渐隐透出菜单（revealBehind × 渐隐段起点，见接口注） */
+  let menuBehind = false;
+  let fadeOutStarted = false;
+  const goTransparent = () => { root.style.background = 'transparent'; };
   const apply = () => {
+    if (b > chromeSent) {
+      chromeSent = b;
+      document.documentElement.style.setProperty('--sw-splash-alpha', String(b / 255));
+    }
     back.style.opacity = front.style.opacity = String(b / 255);
     tree.style.opacity = String(Math.min(1, b / 255));
     // LoadingSunflower 显隐（Main.cs:53417-53422 1:1）：时序走完且未加载完 →
@@ -112,6 +132,12 @@ export function showSplash(opts: {
     const a = splashAlphaAt(t, quick);
     if (a < 0) { if (!loadingDone) { b = 0; timelineOver = true; } else { remove(); return; } }
     else b = Math.round(a);
+    // 渐隐段起点（alpha 开始下降处）：幕后有菜单 → 底色转透明，场景淡出直接
+    // 透出菜单（黑底会在揭幕瞬间跳切，2026-08-24 用户反馈）
+    if (!fadeOutStarted && t >= n5 - n6) {
+      fadeOutStarted = true;
+      if (menuBehind) goTransparent();
+    }
     apply();
     // LoadingSunflower（:52041-52060：Frame(1,19,0,(帧/3+10)%19)，53px/帧=1007/19）
     if ((flowerImg.width > 0) && flowerImg.width) {
@@ -129,10 +155,15 @@ export function showSplash(opts: {
     if (removed) return;
     removed = true;
     root.remove();
+    document.documentElement.style.removeProperty('--sw-splash-alpha'); // 角标回满亮(菜单态)
     resolveFinished();
   };
   return {
     done: remove, // 旁路立即收场（正常路径不调——时序尽自收场）
+    revealBehind: () => {
+      menuBehind = true;
+      if (fadeOutStarted) goTransparent(); // 渐隐已开始（下载等待跨段）→ 立即补课
+    },
     finished,
   };
 }

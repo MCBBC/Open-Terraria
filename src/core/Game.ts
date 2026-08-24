@@ -9567,7 +9567,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                     const cl3 = Math.hypot(fvx, fvy) || 1;
                     const bvx3 = (fvx / cl3) * 8, bvy3 = (fvy / cl3) * 8;
                     const b2 = new Arrow(fx, fy, bvx3 * c3 - bvy3 * s3, bvx3 * s3 + bvy3 * c3,
-                      dmg2 + 20, kb2 * 1.25, 616, null, {});
+                      dmg2 + 20, kb2 * 1.25, 616, null,
+                      // timeLeft = 90×MaxUpdates = 270（:5157 表达式,提取器漏——
+                      // extraUpdates 2 → 3 子步/帧 = 90 tick 实寿命）
+                      { life: 270 });
                     b2.critBonus = b1.critBonus;
                     b2.armorPen = b1.armorPen;
                     this.entities.add(b2, 'projectiles');
@@ -22299,6 +22302,37 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       return;
     }
+    // 腐化者天罚 306（Scourge of the Corruptor 1571，aiStyle 2 投掷）消亡撒小吞噬者
+    // （Projectile.cs:78023-78062 Kill 306 支）：legacy PlaySound(3) + 尘 184×20
+    // （scale×1.1）/ ×30（速度×2.5、scale×0.8，均 noGravity）+ owner 本机 →
+    // Next(2,5)（1% Next(1,101)==100 → 15）只 307 小吞噬者：速度 = Next(-35,36)
+    // ×0.02×10 = ±0.7 双轴、伤 ×0.75（int 截断）、kb ×0.35——307 为 aiStyle 36
+    // 追踪弹（锁定瞬间 friendly=true，Arrow 36 族块消费）
+    if (projId === 306) {
+      const cx = x + w / 2, cy = y + h / 2;
+      for (let i = 0; i < 20; i++) {
+        this.spawnDust(x, y, w, h, 184, 0, 0, 0, null, 1.1, true);   // scale×1.1（:78028-78033）
+      }
+      for (let i = 0; i < 30; i++) {
+        const d = this.spawnDust(x, y, w, h, 184, 0, 0, 0, null, 0.8, true);
+        if (d) { d.vx *= 2.5; d.vy *= 2.5; }
+      }
+      if (!flags?.hostile) {
+        let n307 = 2 + Math.floor(Math.random() * 3);            // Next(2,5) = 2..4
+        if (Math.floor(Math.random() * 100) === 99) n307 = 15;   // Next(1,101)==100
+        for (let i = 0; i < n307; i++) {
+          const vx307 = (Math.floor(Math.random() * 71) - 35) * 0.2;   // Next(-35,36)×0.02×10
+          const vy307 = (Math.floor(Math.random() * 71) - 35) * 0.2;
+          const eater = new Arrow(cx, cy, vx307, vy307,
+            Math.max(1, Math.trunc(dmg * 0.75)), Math.trunc((flags?.kb ?? 0) * 0.35),
+            307, null, { grav: 0, life: 600, pierce: 1, extraUpdates: 3 });
+          eater.critBonus = this.player.critChance('melee');
+          eater.armorPen = this.player.equipStats.armorPen;
+          this.entities.add(eater, 'projectiles');
+        }
+      }
+      return;
+    }
     // 臭味药水弹 371（Foul Potion，物品 2353 投掷）消亡恶臭（Projectile.cs:75203-75228
     // Kill 段 owner==myPlayer 门）：80px 内全部玩家 + NPC AddBuff(120 Stinky, 1800t=30s)
     // ——同族 370→119 恋爱/936→320 凝胶（纯视觉 buff 未实装,不接）。
@@ -25416,7 +25450,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.player.buffs.deadCells = false;   // DeadCellsPotionStation(:5206)
     const st = this.world.store;
     const out = new Set<number>();
-    const px = Math.floor(this.player.cx / TILE), py = Math.floor(this.player.cy / TILE);
     const ALCHEMY = new Set<number>(); // 炼金台 sheet 355/699
     for (const k of ['v_355_alchemy_table', 'v_699_deadcellspotionstation']) {
       const t = TILE_BY_KEY[k];
@@ -25425,9 +25458,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 液体源（Player.cs:35235-35243：liquid>200 且 liquidType 0水/2蜜/1岩浆；
     // CountsAsWaterForCrafting tile 172 水槽/207 也算水）
     this._nearLiquid = { water: false, honey: false, lava: false };
-    for (let dx = -20; dx <= 20; dx++) {
-      for (let dy = -15; dy <= 15; dy++) {
-        const x = px + dx, y = py + dy;
+    // R14-B1：扫描盒 = TileReachCheckSettings.Simple.GetTileRegion（TRS57:44-62）——
+    // 玩家盒外扩 (tileRangeX=5, tileRangeY=3)（Player.cs:2475/2477，仅 Journey 远放置
+    // 创意力可增）；LX=⌊px/16⌋−5、HX=⌈(px+w)/16⌉−1+5、LY/HY 同构 ±3，AdjTiles 循环
+    // Left..Right(=HX−1)。曾误用 ±20/±15 = 41×31 盒（横 4 倍/纵 3.4 倍）→ 远距合成/
+    // 液体源/炼金台折扣/每帧扫描量全偏。ateArtisanBread 再 +4（:35247，本仓未跟踪）
+    const reach = this.tileReach(0);
+    const LX = Math.floor(this.player.x / TILE) - reach.x;
+    const RX = Math.ceil((this.player.x + this.player.w) / TILE) - 1 + reach.x - 1;
+    const LY = Math.floor(this.player.y / TILE) - reach.y;
+    const BY = Math.ceil((this.player.y + this.player.h) / TILE) - 1 + reach.y - 1;
+    for (let x = LX; x <= RX; x++) {
+      for (let y = LY; y <= BY; y++) {
         if (!st.inBounds(x, y)) continue;
         const ii = st.idx(x, y);
         if (st.isActive(x, y)) {
