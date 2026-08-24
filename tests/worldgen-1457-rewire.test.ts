@@ -163,8 +163,11 @@ describe('1457 对齐档 2：Temple 砖线 + FinalSeedCleanup 复线', () => {
     expect(tp).toContain("from './rollback1457/TempleBricks.1457'");
     expect(tp).toContain('makeTempleGenerateBricks(st, rooms, depths);');
     expect(tp).not.toContain('templeCorridors1456');   // 1456 全房对连线已退役
-    // 深度组记账（1457 cs:33852-33859）：末房 num13+1,换向后 num13++
-    expect(tp).toContain('depths.push(n === roomCount - 1 ? depthGroup + 1 : depthGroup);');
+    // 深度组记账（1457 cs:33852-33859）：换向后 num13++。★R3-8 定谳:原文三元
+    //   `i==num2 ? num13+1 : num13` 的 +1 臂是死代码（末房门 W57:33815-33817 把
+    //   num2 收成 i+1 → 判定恒 i<num2）→ 终态=无条件记 depthGroup（TemplePass.ts
+    //   :313-320 死代码证明）。曾断言三元表面形态=锁了 R3-8 修正前旧值。
+    expect(tp).toContain('depths.push(depthGroup);');
     expect(tp).toContain('if (runStep > runLen) { runLen++; runStep = 1; depthGroup++; }');
     const arch = readFileSync(join(SRC, 'rollback1457', 'TempleBricks.1457.ts'), 'utf8');
     expect(arch).toContain('export function makeTempleGenerateBricks(');
