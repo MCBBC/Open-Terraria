@@ -464,7 +464,10 @@ describe('AI_026 charger + 620 陆地段', () => {
     expect(g.__projectiles.filter((x) => x.projId === 811)).toHaveLength(2);
     const shot = g.__projectiles[0];
     const spd = Math.hypot(shot.vx, shot.vy);
-    expect(spd).toBeGreaterThan(11);
+    // 下界 10.7 = 水平射击时原版散布合法下限 hypot(13−2.5, −2.5)≈10.79(±2.5 双轴
+    //   散布,Enemy.ts:7212/cs:64136)再让 1 tick 重力——旧界 11 切掉合法低速掷=天生
+    //   flaky(实测 10.891 触发)
+    expect(spd).toBeGreaterThan(10.7);
     expect(spd).toBeLessThan(16);                  // 13 ± 散布
   });
 

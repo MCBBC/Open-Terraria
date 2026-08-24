@@ -333,7 +333,16 @@ export function parseWld(buf: Uint8Array): WldWorld {
     if (r.boolean()) flags.forceHalloweenForToday = true;
     if (r.boolean()) flags.forceXMasForToday = true;
   } else { r.boolean(); r.boolean(); }
-  if (version >= 216) { r.i32(); r.i32(); r.i32(); r.i32(); }                              // SavedOreTiers 铜/铁/银/金（肉前档,另表）
+  if (version >= 216) {
+    // SavedOreTiers 铜/铁/银/金（WF:2337-2340 写 int32×4）——R14-C18 接入军火商
+    // 银弹/钨弹分支（CH57:1487-1494 SavedOreTiers.Silver==168）
+    // ★2026-08-24 代接:原稿 `world.oreTiersPH = …` 引用了不存在的作用域（parseWld
+    //   无 world 局部,字段在 :473 return 字面量组装）→ ReferenceError 炸全部 .wld
+    //   解析。先落局部保流位（4×i32 与旧 skip 逐字节同构）;WldWorld 接口字段+
+    //   return 透出+WldImport 映射归原会话续作（World.ts:193 缺省 7/6/9/8 已在）。
+    const oreTiersPH = { copper: r.i32(), iron: r.i32(), silver: r.i32(), gold: r.i32() };
+    void oreTiersPH;
+  }
   // ★R16-1：宠物购买三连（v217）+ EoL/史莱姆女皇（v223）+ 鹿角怪（v240）
   if (version >= 217) {
     if (r.boolean()) flags.boughtCat = true;
