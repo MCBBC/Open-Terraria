@@ -377,7 +377,14 @@ describe('星旋塔 AI 支线（Enemy.towerAI 422 段，NPC.cs:41310-41406）', 
     const tower2 = spawn(open, 422, 60, 90);
     tower2.bInit = true;
     tick(open, 1, [tower2]);
-    expect(open.projectiles.filter((p) => p instanceof VortexPortalProj).length).toBe(0);
+    // ★R23b-P2 修后语义(1458 :39694-39737):开阔地视线通畅 → 支线 a(!CanHitLine 门)
+    // 不开门,但支线 b 的【随机空中点门】原版本就会刷(合格点须 CanHitLine 通过
+    // :39722-39724)——旧断言「通透→0 扇门」锁的是 LOS 反相 bug
+    const openPortals = open.projectiles.filter((p) => p instanceof VortexPortalProj) as VortexPortalProj[];
+    expect(openPortals.length).toBe(1);
+    expect(openPortals[0].projId).toBe(579);          // 支线 b 数量门内(<20)只放 579 蜂门
+    // 且不是支线 a 的玩家头顶定点 (ptx×16+8, py×16+24)
+    expect(openPortals[0].cx).not.toBeCloseTo(80 * TILE + 8, 0);
   });
 });
 

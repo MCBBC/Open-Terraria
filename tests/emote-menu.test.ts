@@ -126,14 +126,22 @@ const anchor = (n = 1) => ({ cx: 100 * n, y: 50, w: 20, facing: 1 });
 beforeEach(() => { for (let i = 0; i < 400 && emoteCount(); i++) tickEmotes(); });
 
 describe('spawnEmote / OnBubbleChange（EmoteBubble.cs:116-132/:263-277）', () => {
-  it('同实体新泡将旧泡压到 6t（闭合消隐动画）而非拒绝', () => {
+  it('Player 锚新泡将旧泡压到 6t（闭合消隐动画）而非拒绝', () => {
     const a = anchor();
-    spawnEmote(a, 0, 360);
-    spawnEmote(a, 15, 360);
+    spawnEmote(a, 0, 360, { isPlayer: true });
+    spawnEmote(a, 15, 360, { isPlayer: true });
     expect(emoteCount()).toBe(2);                       // 两泡并存（原版 byID 各自独立）
     // 旧泡 lifeTime=6：7 tick 后先于新泡（360t）消亡
     for (let i = 0; i < 7; i++) tickEmotes();
     expect(emoteCount()).toBe(1);
+  });
+  it('NPC 锚不触发 OnBubbleChange（R24 勘误 E1：原版门 is Player，同 NPC 可多泡并存）', () => {
+    const a = anchor(3);
+    spawnEmote(a, 0, 360);
+    spawnEmote(a, 15, 360);
+    expect(emoteCount()).toBe(2);
+    for (let i = 0; i < 7; i++) tickEmotes();
+    expect(emoteCount()).toBe(2);                       // 无淡出——两泡都满寿命在场
   });
   it('tickEmotes 帧动画（8t/帧,2 帧循环）+ 寿命递减', () => {
     const a = anchor(2);

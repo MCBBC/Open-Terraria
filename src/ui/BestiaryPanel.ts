@@ -642,7 +642,7 @@ const CSS = `
 .sw-bst-cell:hover { background:rgba(42,52,100,1); outline:1px solid #8fa0e0; }
 .sw-bst-cell.sel { outline:2px solid #ffd76e; }
 .sw-bst-cell canvas { width:44px; height:44px; image-rendering:pixelated; }
-.sw-bst-cell.sw-bst-lock canvas { filter:brightness(0) opacity(0.55); }
+/* R24：锁定格改画 Icon_Locked ×0.15（drawLockedIcon）——剪影滤镜退役（泄露轮廓） */
 .sw-bst-name { font-size:10px; line-height:1.1; max-width:68px; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis; color:#cfd6f2; }
 .sw-bst-cell.sw-bst-lock .sw-bst-name { color:#586088; }
@@ -969,8 +969,12 @@ export class BestiaryPanel {
    *  负 netID 变体（史莱姆配色 -1..-10 / 世吞段 -11..-13）无独立贴图文件，
    *  原版共用母体表 → 分别回落 NPC_1 / NPC_14。
    *  已解锁条目先铺 MapBG 出没环境底图（UIBestiaryEntryButton 网格 / NPCPortraitInfoElement
-   *  详情各取一套推导），着色按原版 bgColor 乘算（multiply）。 */
+   *  详情各取一套推导），着色按原版 bgColor 乘算（multiply）。
+   *  未解锁（NotKnown）：R24 修复——只画 Icon_Locked 锁形图 ×alpha0.15
+   *  （UIBestiaryEntryIcon.DrawSelf :52-70 `Color.White*0.15f`），完全不画 NPC 表；
+   *  曾画黑影剪影 = 泄露轮廓（brightness0 剪影仍暴露体型/姿态）。 */
   private drawPortrait(canvas: HTMLCanvasElement, npcId: number, bgMode: 'grid' | 'portrait', unlocked: boolean) {
+    if (!unlocked) { this.drawLockedIcon(canvas); return; }
     const sheetId = npcId > 0 ? npcId : (npcId >= -10 ? 1 : 14);
     const crimson = this.flow.isCrimson?.() ?? false;
     const bg = unlocked
@@ -1078,6 +1082,30 @@ export class BestiaryPanel {
     });
   }
 
+  /** 未解锁占位：Icon_Locked 锁形图居中 ×alpha0.15（UIBestiaryEntryIcon.DrawSelf
+   *  :64-69 `spriteBatch.Draw(_notUnlockedTexture, dimensions.Center(), null,
+   *  Color.White * 0.15f, ...)` 1:1——零轮廓泄露）。贴图 = Images/UI/Bestiary/
+   *  Icon_Locked（本仓扁平化 UI_Bestiary_Icon_Locked.png） */
+  private drawLockedIcon(canvas: HTMLCanvasElement): void {
+    const cx = canvas.getContext('2d');
+    if (!cx) return;
+    cx.imageSmoothingEnabled = false;
+    cx.clearRect(0, 0, canvas.width, canvas.height);
+    const size = canvas.width;
+    const img = new Image();
+    img.src = 'sprites/vanilla-ui/UI_Bestiary_Icon_Locked.png';
+    img.addEventListener('load', () => {
+      if (!canvas.isConnected) return;
+      // 原版 scale=1 原尺寸画（锁图 44px 级）——超画布才等比缩
+      const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+      const s = Math.min(1, size / iw, size / ih);
+      const w = iw * s, h = ih * s;
+      cx.globalAlpha = 0.15;
+      cx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+      cx.globalAlpha = 1;
+    });
+  }
+
   /** 掉落行物品小图标（atlas.vicon 懒载未就绪时仅文字） */
   private itemIcon(itemId: number): HTMLCanvasElement | null {
     const atlas = this.flow.atlas ?? null;
@@ -1152,11 +1180,10 @@ export class BestiaryPanel {
         this.infoEl.appendChild(wrap);
       }
     }
-    // 大头像(NotKnown = 原版黑影语义:brightness 0 opacity 0.55)
+    // 大头像（NotKnown = 原版 Icon_Locked ×0.15，drawPortrait 内分流；零轮廓泄露）
     const canvas = document.createElement('canvas');
     canvas.width = 96; canvas.height = 96;
     canvas.style.cssText = 'width:96px;height:96px;image-rendering:pixelated;display:block;margin:0 auto 6px;';
-    if (st === UnlockState.NotKnown) canvas.style.filter = 'brightness(0) opacity(0.55)';
     canvas.addEventListener('contextlost', (e) => e.preventDefault());
     canvas.addEventListener('contextrestored', () => {
       this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);

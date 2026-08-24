@@ -1,16 +1,19 @@
 // 悬停气泡行构建器（Main.MouseText_DrawItemTooltip_GetLinesInfo，Main.cs:20488-20920 1:1）。
 // 纯函数：UI 传入物品格与玩家统计快照，产出 {text, color?, tag?} 行数组；
 // tag 供测试断言行类（l10n 未载时文案回退键名）。
-// 行序（原版）：名(稀有度色/×N/★) → 伤害[+类型后缀] → 暴击 → 速度档 → 击退档 →
-//   渔力/鱼饵 → 可装备 → 时装 → 防御 → 镐/斧/锤力 → 恢复生命/魔力 → 耗魔 →
-//   可放置/弹药/消耗品 → 材料 → 容器/线触发 → 物品自带说明 → Buff 持续 →
-//   词缀差分行（绿/红）。
+// 行序（原版 GetLinesInfo :20816-21540）：名(稀有度色/×N/★) → 伤害[+类型后缀] →
+//   暴击 → 速度档 → 击退档 → 渔力/鱼饵 → 可装备 → 时装 → 防御 → 镐/斧/锤力 →
+//   恢复生命/魔力 → 分类行(Buffs/Healing/ManaHealing/Mount) → 耗魔 →
+//   可放置/弹药/消耗品 → 材料 → 可接线 → 容器/线触发 → 物品自带说明 → Buff 持续 →
+//   yoyo 商标位 → 专家/大师行 → 词缀差分行(绿/红，尾接 62-80 硬编码档) → 套装奖励 →
+//   研究行。
 import type { ITEM_DEFS } from '../data/items';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { equipKindOfInternal } from '../data/vanillaEquip';
+import { petInfoOfVid } from '../data/vanillaPets';
 import { prefixStat, prefixLines, type PrefixStat } from '../data/vanillaPrefixes';
 import { VANILLA_RECIPES } from '../data/vanillaRecipes';
 import whipsJson from '../data/vanilla-whips.json';
@@ -102,6 +105,33 @@ const TILE_WAND_CONSUME: Record<number, number> = {
 };
 
 /** 击退档（:20602-20632） */
+/** 接线集（TileID.cs:132-134 Wiring.IsAMechanism/IsATrigger + ItemID.cs:1422
+ *  IsWireableStatue，Factory.CreateBoolSet 列表成员 = true）：
+ *  createTile ∈ 机制/触发器 且（createTile≠105 或物品 ∈ 可接线雕像集）→ tip Wireable */
+const WIRE_MECHANISM_TILES = new Set([420, 419, 411, 4, 33, 100, 93, 42, 34, 215, 405, 92, 35, 126, 95,
+  149, 593, 594, 564, 10, 11, 387, 386, 388, 389, 137, 443, 141, 130, 131, 546, 557, 421, 422, 209,
+  212, 216, 338, 335, 497, 406, 244, 452, 565, 139, 506, 105, 349, 531, 429, 142, 143, 235, 210,
+  425, 21, 467, 219, 642, 356, 663, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266,
+  267, 268, 207, 480, 455, 509, 657, 658, 720, 721, 725, 733, 314]);
+const WIRE_TRIGGER_TILES = new Set([135, 136, 132, 144, 411, 423, 476, 440, 441, 468]);
+const WIREABLE_STATUE_ITEMS = new Set([441, 449, 466, 471, 3651, 3652, 3653, 3654, 3655, 3656, 3657,
+  3658, 3659, 3660, 3661, 3662, 3708, 3709, 3710, 3711, 3712, 3713, 3714, 3715, 3716, 3717, 3718,
+  3719, 3720, 4397, 4360, 4342, 4466, 5317, 5318, 5319, 440, 443, 444, 445, 446, 452, 454, 459,
+  463, 464, 478, 473, 2672, 438, 453, 476, 477, 470, 4355, 4276]);
+
+/** 配饰前缀 62-80 硬编码差分行（Main.cs:21355-21460：62..65→+1..+4 防御 tip25 /
+ *  66→+20 魔力 tip31 / 67-68→+2/+4% 暴击 tip5 / 69..72→+1..+4% 伤害 tip39 /
+ *  73..76→+1..+4% 移动速度 tip46 / 77..80→+1..+4% 近战速度 tip47；全绿 color2。
+ *  这些词缀的 stat 表全为 multiplier=1 档——差分链不产行，只有此处硬编码行） */
+const PREFIX_FIXED_ROWS: Record<number, [string, number]> = {
+  62: ['+1', 25], 63: ['+2', 25], 64: ['+3', 25], 65: ['+4', 25],
+  66: ['+20 ', 31],
+  67: ['+2', 5], 68: ['+4', 5],
+  69: ['+1', 39], 70: ['+2', 39], 71: ['+3', 39], 72: ['+4', 39],
+  73: ['+1', 46], 74: ['+2', 46], 75: ['+3', 46], 76: ['+4', 46],
+  77: ['+1', 47], 78: ['+2', 47], 79: ['+3', 47], 80: ['+4', 47],
+};
+
 /** tileBoost 表（Item.cs 各 case：扳手 509/510/511=20、多彩扳手 851=20、
  *  工具腰带 852=1、矿车轨 2340=5/2341=2、The Axe 1305=1——itemfunc 无该字段） */
 const TILE_BOOST: Record<number, number> = {
@@ -139,9 +169,11 @@ export interface TooltipBody {
   durationLine: TooltipLine | null;
   prefixDiff: TooltipLine[];
   yoyoLogoLine: TooltipLine | null;
-  /** 套装奖励行（:21138-21143） */
+  /** 套装奖励行（:21463-21511——原版行序在 prefix 差分之后） */
   setBonusLine: TooltipLine | null;
-  /** 专家/大师物品行（:21146-21157——原版行序在 prefix 差分之后） */
+  /** 专家/大师物品行（:21254-21262——1458 原版行序在 prefix 差分【之前】：
+   *  buffTime → yoyoLogo → expert → master → prefix 链。R24 勘误：头注曾引
+   *  旧基线行号断言"在 prefix 之后"） */
   expertMasterLines: TooltipLine[];
   researchLine: TooltipLine | null;
 }
@@ -255,6 +287,25 @@ export function buildTooltipBody(
   }
   if ((f?.healMana ?? 0) > 0) lines.push({ text: T('CommonItemTooltip.RestoresMana', f!.healMana!), tag: 'healmana' });
 
+  // ── 分类行链（:21087-21103 if/else-if）：buffType>0 且非召唤/非光宠/非时装宠
+  //    → Buffs；elif healLife>0 → Healing；elif healMana>0 → ManaHealing；
+  //    elif mountType>0 且非矿车 → Mount。R24 补（T4：整块曾缺失）。
+  //    光宠/时装宠门：vanilla 按 Main.lightPet/vanityPet[buffType] 查——物品侧
+  //    等价于「是宠物（无论光宠与否）即排除」，用宠物表反查
+  {
+    const pet = petInfoOfVid(vid);
+    const isSummon = !!f2?.summon;
+    if ((f?.buffType ?? 0) > 0 && !isSummon && !pet) {
+      lines.push({ text: T('CommonItemTooltip.Buffs'), tag: 'category' });
+    } else if ((f?.healLife ?? 0) > 0) {
+      lines.push({ text: T('CommonItemTooltip.Healing'), tag: 'category' });
+    } else if ((f?.healMana ?? 0) > 0) {
+      lines.push({ text: T('CommonItemTooltip.ManaHealing'), tag: 'category' });
+    } else if (equipKind === 'mount') {   // equipKind 已分立 'cart'，互斥即非矿车
+      lines.push({ text: T('CommonItemTooltip.Mount'), tag: 'category' });
+    }
+  }
+
   // ── 耗魔（:20744-20751：×玩家 manaCost；太空枪族豁免略）──
   if ((f?.mana ?? 0) > 0) {
     const mc = Math.round(f!.mana! * pm('mcst') * (player ? player.manaCostMul : 1));
@@ -275,7 +326,18 @@ export function buildTooltipBody(
   // ── 材料（:20782-20786；material 旗=配方原料反查近似）──
   if (materialIids().has(slot.id)) lines.push({ text: T('LegacyTooltip.36'), tag: 'material' });
 
-  // ── 容器/线触发（:20795-20810）──
+  // ── 可接线（:21127-21131）：createTile ∈ 触发器/机制集 且（≠105 或物品 ∈
+  //    可接线雕像集）→ CommonItemTooltip.Wireable。R24 补（T5：机关类放置物
+  //    雕像/泵/蜡烛等整族曾缺行）
+  {
+    const ct2 = f?.createTile ?? -1;
+    if (ct2 > -1 && (WIRE_TRIGGER_TILES.has(ct2) || WIRE_MECHANISM_TILES.has(ct2))
+      && (ct2 !== 105 || WIREABLE_STATUE_ITEMS.has(vid))) {
+      lines.push({ text: T('CommonItemTooltip.Wireable'), tag: 'wireable' });
+    }
+  }
+
+  // ── 容器/线触发（:21135-21142）──
   if (f?.createTile === 21 || f?.createTile === 467) lines.push({ text: T('CommonItemTooltip.Container'), tag: 'container' });
   if (f?.createTile === 441 || f?.createTile === 468) lines.push({ text: T('CommonItemTooltip.WireTrigger'), tag: 'wiretrigger' });
 
@@ -322,16 +384,23 @@ export function buildTooltipBody(
       : { text: T('CommonItemTooltip.MinuteDuration', Math.round(secs / 60)), tag: 'duration' };
   }
 
-  // ── 词缀差分行（:20856+，绿/红——复用 prefixLines 表）──
+  // ── 词缀差分行（:21264+，绿/红——复用 prefixLines 表；尾接 62-80 硬编码档，
+  //    :21355-21460 全绿 color2。R24 补 T7：62..80 stat 表全为 multiplier=1 档，
+  //    差分链不产行，守护/秘术/幸运/暴烈等配饰词缀悬停零差分行）──
   const prefixDiff: TooltipLine[] = ps
     ? prefixLines(slot.prefix!).map((ln) => ({ text: ln.text, color: ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)', tag: 'prefix' }))
     : [];
+  {
+    const fixed = slot.prefix ? PREFIX_FIXED_ROWS[slot.prefix] : undefined;
+    if (fixed && vid >= 0) prefixDiff.push({ text: fixed[0] + T(`LegacyTooltip.${fixed[1]}`), color: 'rgb(120,190,120)', tag: 'prefix' });
+  }
 
-  // ── 套装奖励行（:21138-21143：悬停护甲 + player.setBonus 非空 → tip48）──
+  // ── 套装奖励行（:21463-21511：悬停护甲 + 套装奖励 → ArmorSetBonus 块；
+  //    原版行序在 prefix 差分之后）──
   const setBonusLine: TooltipLine | null = (isArmor && player?.setBonusText)
     ? { text: `${T('LegacyTooltip.48')} ${player.setBonusText}`, tag: 'setbonus' } : null;
 
-  // ── 专家/大师物品行（:21146-21157——原版行序在 prefix 差分之后）──
+  // ── 专家/大师物品行（:21254-21262——1458 行序在 prefix 差分【之前】）──
   const expertMasterLines: TooltipLine[] = [];
   if (ctx?.expert) expertMasterLines.push({ text: T('GameUI.Expert'), tag: 'expert' });
   if (ctx?.master) expertMasterLines.push({ text: T('GameUI.Master'), tag: 'master' });
@@ -340,8 +409,11 @@ export function buildTooltipBody(
 }
 
 /** 完整装配（静态说明 + 持续行按原版序并入 + 研究行/悠悠球位 + 商店价格行 +
- *  差分收尾）——UI 侧消费。行序尾段（原版）：ToolTip → 特殊种子行(略) →
- *  buffTime → yoyoLogo → prefix 差分 → 商店价格行（AddShopLines 在全部之后）*/
+ *  差分收尾）——UI 侧消费。行序尾段（原版 :21195-21540）：ToolTip → 特殊种子行(略)
+ *  → buffTime → yoyoLogo → expert → master(rare==-13) → prefix 差分(含 62-80 档)
+ *  → 套装奖励 → 研究行（白名单门略）→ BestiaryNotes(略) → 商店价格行
+ *  （AddShopLines 在 GetLinesInfo 全部之后）。R24 勘误 T3：曾把 expert/master
+ *  排在差分之后、setBonus 排在差分之前——均与 1458 行序相反 */
 export function assembleTooltipLines(
   def: ItemDef, slot: TooltipSlot, player: TooltipPlayerStats | null,
   staticTipText: string | null, ctx: TooltipContext = {},
@@ -351,9 +423,9 @@ export function assembleTooltipLines(
   if (staticTipText) for (const ln of staticTipText.split('\n')) out.push({ text: ln, tag: 'static' });
   if (body.durationLine) out.push(body.durationLine);
   if (body.yoyoLogoLine) out.push(body.yoyoLogoLine);
+  out.push(...body.expertMasterLines);
   out.push(...body.prefixDiff);
   if (body.setBonusLine) out.push(body.setBonusLine);
-  out.push(...body.expertMasterLines);
   if (body.researchLine) out.push(body.researchLine);
   // 商店价格行（:20309-20402）：买入 tip[50]/卖出 tip[49]，币种四档着色
   // （:20380-20397 铂 220,220,198 / 金 224,201,92 / 银 181,192,193 / 铜 246,138,96；

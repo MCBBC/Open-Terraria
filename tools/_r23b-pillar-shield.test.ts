@@ -53,9 +53,10 @@ function stubGame(): unknown {
 
 (RUN ? it : it.skip)('R23b-P2 旁证: 星旋支线 b 点位 LOS 门方向(静态断言)', () => {
   // 只钉字符串,防回归时注释与实现再次反向:
-  // 原版 NPC.cs:39722-39724 = !CanHitLine → 弃点(合格点须视线通畅);
-  // 我方 Enemy.ts:11838 = losClear → continue(保留视线被阻点)= 反相。
+  // 原版 NPC.cs:39722-39724 = !CanHitLine → 弃点(合格点须视线通畅)。
+  // ★2026-08-24 蓝队修复:曾钉 `if (losClear(...)) continue`(保留视线被阻点=反相),
+  // 现改为 `!losClear(...) continue`,本断言随修复翻转为钉正确行。
   const { readFileSync } = require('node:fs') as typeof import('node:fs');
   const src = readFileSync('src/entities/Enemy.ts', 'utf8');
-  expect(src).toContain('if (losClear(game, this.cx, this.cy, player.cx, player.cy)) continue;');
+  expect(src).toContain('if (!losClear(game, this.cx, this.cy, player.cx, player.cy)) continue;');
 });

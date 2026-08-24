@@ -1200,10 +1200,10 @@ export class Enemy extends Entity {
     // 690 雕像宝箱怪 SetDefaults :17615-17627 immortal+dontTakeDamage=true——伪装态
     // 不可击；AI_126 唤醒段 :43873 解除（ai[0] 0→1）
     if (id === 690) e.dontTakeDamage = true;
-    // 392 火星飞碟核心 SetDefaults :13925-13942 dontTakeDamage=true——永不掉血的
-    // 纯平台部件（曾缺=可磨死 100HP 核心 → slots 失效 → 全灭判定真 → 母碟直接
-    // 自毁/死光=整场战斗被短路,2026-08-19 终审修）
     if (id === 392) e.dontTakeDamage = true;
+    // 395 火星飞碟 SetDefaults(1458 :14055-14074)dontTakeDamage=true——出生首拍前
+    // 的无敌兜底（AI 内按 ai0==1 解除闩锁维护,bossAI_martian.ts）
+    if (id === 395) e.dontTakeDamage = true;
     // 328 南瓜王之刃 SetDefaults :13092 dontTakeDamage=true——恒不可击的表情节拍体
     // （曾缺=可被玩家打死,2026-08-19 终审修）
     if (id === 328) e.dontTakeDamage = true;
@@ -11243,8 +11243,10 @@ export class Enemy extends Entity {
     let num4 = 20;
     if (flag3) num4 = 10;
 
-    // num7（:19927-19934）：脸向角 = atan2(player→NPC) + π/2 ≡ atan2(NPC→player) − π/2
-    const face = Math.atan2(dy, dx) - Math.PI * 0.5;
+    // num7（:20024-20034）：脸向角 = atan2(NPC→player) − π/2；Y 锚 = 底边上方 59px
+    // （position.Y + height − 59——EoC 高 110,与几何中心差 4px≈2° 瞄准偏角;
+    // 曾用 cy,R23a 低偏差修;bossAI.ts 双子核同款 −59 写法早已保留）
+    const face = Math.atan2(player.cy - (this.y + this.h - 59), dx) - Math.PI * 0.5;
 
     // ---- 旋转追踪速率表（:19939-19966）：默认 0；专家 ×1.5；狂暴归 0 锁脸 ----
     // 此前恒 0.02 起步 + 悬浮 40t 抬 0.05——与原版分档表不符（悬浮 40t 档属冲刺态）
@@ -11413,6 +11415,8 @@ export class Enemy extends Entity {
           }
         }
       }
+      // :20434 变身期每 tick 掉 1 颗 5 号尘（±3 初速;曾缺=外观级缺失,R23a 补）
+      game.spawnParticles(this.cx, this.cy, '#FF3030', 1, 2);
       // 速度 0.98/t 阻尼 + 小值清零（:20333-20343）
       this.vx *= 0.98; this.vy *= 0.98;
       if (this.vx > -0.1 && this.vx < 0.1) this.vx = 0;
@@ -11672,7 +11676,10 @@ export class Enemy extends Entity {
       this.vy = spd;
       if (this.vy < 0.25) this.vy += 0.02;
       if (this.vy > 0.25) this.vy -= 0.02;
-      this.iframes = 2;                                  // dontTakeDamage = true（:41042）
+      // ★须用真 dontTakeDamage 而非 iframes——hurt 的免疫门有 pierce!==1 豁免
+      // （单发弹绕过 iframes），原版死亡演出期是全通道 dontTakeDamage（1458 :39368）
+      this.iframes = 2;
+      this.dontTakeDamage = true;
       this.ai1++;
       if (this.ai1 > 120) {
         // Opacity = 1-(ai1-120)/60（:41046）→ 本仓 spawnAlpha（0..255，越大越透明）
@@ -11701,7 +11708,9 @@ export class Enemy extends Entity {
       this.y += this.vy;
       if (this.ai1 >= 180) {
         // life=0 + HitEffect + checkDead（:41122-41127）→ 真死（碎片 3456-3459 + 塔灭公告）
+        // 先清 dontTakeDamage 再走标准死亡管线（同 golem 先例，hurt 门会早退该旗）
         this.iframes = 0;
+        this.dontTakeDamage = false;
         this.hurt(1e9, 0, 0, game);
       }
       return;
@@ -11713,9 +11722,14 @@ export class Enemy extends Entity {
       this.ai3++;
       if (this.ai3 > 120) this.ai3 = 0;
     }
-    // ---- 3. 盾判定（:41162-41176）：dontTakeDamage = 本塔 ShieldStrength>0（每帧重算）----
+    // ---- 3. 盾判定（1458 :39493-39501）：dontTakeDamage = 本塔 ShieldStrength>0（每帧重算）----
+    // ★R23b-P1 修：曾用 iframes=2 每 tick 刷新近似，但 Enemy.hurt 免疫门是
+    // `pierce!==1 && iframes>0`——pierce===1 单发弹（箭/枪弹/多数随从）完全绕过，
+    // 盾 100 层期间可被弓/枪直接磨塔血。原版是全通道闸 dontTakeDamage
+    // （NPC.cs:39493-39501 switch 四塔逐 id 重算），改法同 golem 先例
+    // （bossAI_golem.ts:334）；盾扣到 0 的下一 tick 本式自动清旗=解封。
     // （盾破瞬间的 NPCDeath58 音效由 Game.onEnemyKilled 扣盾归零处播放——等价 :41148-41151）
-    if (le.shield[key] > 0) this.iframes = 2;
+    this.dontTakeDamage = le.shield[key] > 0;
 
     // ---- 4. 远离自愈（:41177-41191）----
     if (player && distTo(player.cx, player.cy) > 2000) this.lai0++;
@@ -11760,8 +11774,14 @@ export class Enemy extends Entity {
     if (this.cx > limX - m) this.x = limX - m - 80 - this.w / 2;
     if (this.cy < m) this.y = m + 80 - this.h / 2;
     if (this.cy > limY - m) this.y = limY - m - 80 - this.h / 2;
-    // 普通世界塔底 ≤ worldSurface*16-100（:41247-41250）
-    if (this.y + this.h > w.groundLevel * TILE - 100) {
+    // 塔底地表钳（1458 :39566-39571）：isThereAWorldSurface(=worldSurface>50) 为假
+    // （remix 系无地表）→ Y<640 提到 rockLayer*16；否则仅 !remix && !getGood 才执行
+    // 「塔底 > worldSurface*16-100 → 提到线下 100」（R23b-P3：曾无条件钳制，
+    // FTW/remix 种子下塔被错误按地表钳位）
+    if (w.groundLevel <= 50) {
+      if (this.y < 640) this.y = w.rockLevel * TILE;
+    } else if (!w.seedFlags?.remix && !w.seedFlags?.getGoodWorld
+      && this.y + this.h > w.groundLevel * TILE - 100) {
       this.y = w.groundLevel * TILE - this.h - 100;
     }
 
@@ -11804,8 +11824,8 @@ export class Enemy extends Entity {
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } })
           .entities.add(portal, 'projectiles');
       }
-      // 支线 b（:41362-41406）：1080px 内且低于塔顶 400px、n427+n426*3+n428<20 →
-      // 玩家 ±20 格随机空中点 579 门（塔→玩家视线被阻时才有合格点，:41388-41392）
+      // 支线 b（1458 :39694-39737）：1080px 内且低于塔顶 400px、n427+n426*3+n428<20 →
+      // 玩家 ±20 格随机空中点 579 门（合格点须塔→玩家视线通畅 :39722-39724）
       if (this.ai1 <= 0 && player && !player.dead
         && distTo(player.cx, player.cy) < 1080 && player.y - this.y < 400
         && count(427) + count(426) * 3 + count(428) < 20) {
@@ -11831,7 +11851,11 @@ export class Enemy extends Entity {
               }
             }
             if (solid5) continue;
-            if (losClear(game, this.cx, this.cy, player.cx, player.cy)) continue;   // :41388 须视线被阻
+            // ★R23b-P2 修：原版合格点要求塔→玩家 CanHitLine【通过】
+            // （1458 :39722-39724 `if (flag105 && !CanHitLine(...)) flag105=false`——
+            // 视线被阻则弃点）。曾写反成保留视线被阻点=开阔地形原版会刷的空中门
+            // 永不出现、掩体场景与支线 a 重叠
+            if (!losClear(game, this.cx, this.cy, player.cx, player.cy)) continue;   // :39722-39724
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } })
               .entities.add(new VortexPortalProj(mx * TILE + 8, my * TILE + 8, 579),   // :41400
                 'projectiles');

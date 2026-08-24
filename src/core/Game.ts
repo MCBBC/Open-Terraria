@@ -3654,7 +3654,7 @@ export class Game implements GameHooks {
         this.dmgNumbers.push({ x, y, vx, vy, value: 0, crit: false, color: '#D46E71', label: text, life: 420, scale: 1, alpha: 1 });
       },
       talk: (x, y) => this.playSfxFiles(soundTrackFiles('lucyaxe_talk'), 0.4, x, y),
-      emote: () => spawnEmote(this.player, 149),      // EmoteBubble.MakeLocalPlayerEmote(149)
+      emote: () => spawnEmote(this.player, 149, undefined, { isPlayer: true }),   // MakeLocalPlayerEmote(149)：Player 锚 OnBubbleChange 门
       top: () => ({ x: this.player.cx, y: this.player.y }),
       direction: () => this.player.facing,
     });
@@ -16573,6 +16573,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       expertMode: w.isExpert,   // Main.expertMode（Main.cs:2775）：史莱姆雨自然触发门（:64373-64409 就绪||专家）
       zoneRain: !!this.scene?.zoneRain,        // ZoneRain 派生位（SceneMetrics.cs:700——暴风雪门 SceneState.cs:102）
       atmo,
+      // Main.shimmerAlpha 同源值（SceneState.UpdateShimmer :327-358；渲染端逐帧推进，
+      // 音频侧只读）——雨 cue28 (1-shimmer) 抑制项
+      shimmerAlpha: this.renderer?.monoFilters?.shimmerAlpha ?? 0,
       aboveRockLayer: pty < rl,
       graveyardIntensity: this.graveyardIntensity,
       hardMode: !!w.flags.hardMode,
@@ -16699,15 +16702,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  轨懒建（首帧音量>0 时）且不拆——与原版 SlotId 常驻 + 每帧改 Volume 同构。
    */
   private applyWeatherLoops(v: import('../world/weather/Weather').WeatherLoopVolumes, atmo = 1): void {
-    // 雨层（既有实现：Music_28 解码循环，音量 cloudAlpha×atmo×0.6）
-    this.sfx.setRain(v.rain);
-    // ★R22 风声 cue45（Main.cs:11723-11749）：clamp(|wind|×0.7+0.3,0,1)×0.9×atmo⁴,
-    // 门 |wind|≥0.4(=20/50) && SurfaceAtmospherics(SceneMetrics.cs:695)
+    // 雨层 cue28（Main.cs:11700-11720）：level=num11 由 Weather.loopVolumes 算好
+    // （含 (1-shimmer) 抑制项与 atmo⁴）；gate 位透传给 Sfx 状态机分叉
+    // UpdateAmbientCueState/TowardStopping 两分支
+    this.sfx.setRain(v.rain, v.rainGate);
+    // ★R22 风声 cue45（Main.cs:11723-11749）：num7 = |wind|×0.7+0.3 ×(1-shimmer)
+    // →clamp ≤1 →×0.9 →×atmo⁴（shimmer 乘在 clamp 前，:11725-11731 次序）；
+    // 门 |wind|≥0.4(=20/50) && SurfaceAtmospherics(SceneMetrics.cs:695)。
+    // level/gate 分参——门开但公式值 0（如太空 atmo⁴=0）= Immediate 停 fade 冻结，
+    // 门关 = musicFade −0.005/帧渐熄，两分支语义在 Sfx.stepAmbientCue 分叉
     const windAbs = Math.abs(this.world.weather?.windSpeedCurrent ?? 0);
-    this.sfx.setWind(
-      windAbs >= 0.4 && !!this.scene?.surfaceAtmospherics
-        ? Math.min(1, windAbs * 0.7 + 0.3) * 0.9 * Math.max(0, Math.min(1, atmo)) ** 4
-        : 0);
+    const atmoC = Math.max(0, Math.min(1, atmo));
+    const shimmer = this.renderer?.monoFilters?.shimmerAlpha ?? 0;
+    const num7 = Math.min(1, (windAbs * 0.7 + 0.3) * (shimmer > 0 ? 1 - shimmer : 1))
+      * 0.9 * atmoC ** 4;
+    this.sfx.setWind(num7, windAbs >= 0.4 && !!this.scene?.surfaceAtmospherics);
     const vols: Record<import('./Sfx').WeatherLoopName, number> = {
       blizzardStrong: v.blizzardStrong,
       blizzardInside: v.blizzardInside,
@@ -16745,7 +16754,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     this.weatherLoops = {};
     this.weatherLoopVol = {};
-    this.sfx.setRain(0);
+    // 风/雨 cue 双轨 Immediate 静音（★review 修：单帧状态机步进不会归零，天气链
+    // 停更后 gain 滞留漏进菜单；风层此前无任何退出静音路径）
+    this.sfx.stopAmbientCues();
   }
 
   /** 全图扫描测重板/感应器/间歇泉登记(读档/生成后一次);增量维护见 onTileChanged */
@@ -26885,10 +26896,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // onSSC 不再即用——msg201 改暂存（net.pendingSSC），loadWorld 完成后应用（终审 H1 竞态）
         onStrike: (netId, dmg, kbx, kby, fromSlot) => this.netApplyStrike(netId, dmg, kbx, kby, fromSlot),
         // M4 msg120：其他端玩家表情——锚到对应远端代理头顶出泡 360t
+        // （原版锚实体是 Player → OnBubbleChange Player 门适用）
         onEmoteBubble: (slot, emoteId) => {
           const proxy = this.remotePlayerProxies.find(
             (pr) => (pr as unknown as { __netSlot?: number }).__netSlot === slot);
-          if (proxy) spawnEmote(proxy, emoteId, 360);
+          if (proxy) spawnEmote(proxy, emoteId, 360, { isPlayer: true });
         },
         onStrikePlayer: (fromSlot, _targetSlot, dmg, _kbx, _kby, weaponId, flags) =>
           this.netApplyStrikePlayer(fromSlot, dmg, weaponId, flags),

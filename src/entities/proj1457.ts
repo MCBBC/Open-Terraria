@@ -651,18 +651,24 @@ export class StormLightning extends Entity {
         this.doKill(game); return;
       }
     }
-    // 索敌（:40397-40421）：仅无目标时扫（1117 需 CanBeChasedBy 口径≈非 friendly/小动物）
+    // 索敌（:40397-40421）：仅无目标时扫（1117 需 CanBeChasedBy 口径≈非 friendly/小动物）。
+    // ★R25-②a 对齐两处：vanilla 按 NPC 槽序取【首个】入半径者（:40400-40403
+    //   `if (entity != null) break`——非最近者）；距离口径 =
+    //   Distance(npc.Hitbox.ClosestPointInRect(Center))（到目标【盒】最近点,:40405,
+    //   大体型判定圈不缩水）。门 !dontTakeDamage 与 CanBeChasedBy 三近似维持登记
     if (this.targetIdx < 0) {
-      let best = -1;
-      let bd = this.searchR;
       const list = game.enemies();
       for (let i = 0; i < list.length; i++) {
-        const e = list[i] as { cx: number; cy: number; dead: boolean; maxHp: number; def?: { friendly?: boolean; critter?: boolean } };
+        const e = list[i] as { cx: number; cy: number; x: number; y: number; w: number; h: number; dead: boolean; maxHp: number; def?: { friendly?: boolean; critter?: boolean } };
         if (e.dead || e.maxHp <= 5 || e.def?.friendly || e.def?.critter) continue;
-        const d = Math.hypot(e.cx - this.cx, e.cy - this.cy);
-        if (d < bd) { bd = d; best = i; }
+        // ClosestPointInRect(Center)：Center 钳入目标盒后的最近点距离
+        const px = Math.min(Math.max(this.cx, e.x), e.x + e.w);
+        const py = Math.min(Math.max(this.cy, e.y), e.y + e.h);
+        if (Math.hypot(px - this.cx, py - this.cy) <= this.searchR) {
+          this.targetIdx = i;                                   // ai[0]=PackTargetIndex（槽序首中即定）
+          break;                                                // :40401-40403 entity!=null → break
+        }
       }
-      if (best >= 0) this.targetIdx = best;                     // ai[0]=PackTargetIndex
     }
     if (this.targetIdx >= 0) {
       // :40443 MoveTowards(center,32)

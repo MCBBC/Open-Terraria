@@ -177,13 +177,22 @@ export class WorldSelectPanel {
         await this.store.rename(m.id, name.trim());
         await this.reload();
       });
+      // 删除钮（收藏防删，UIWorldListItem.cs:151-157 原版仅 !IsFavorite 挂
+      // 处理器：收藏行禁用态 + 悬停显 UI.CannotDeleteFavorited）
       const del = document.createElement('div');
       del.className = 'sw-vitem-del';
-      this.iconBtn(del, 'UI_ButtonDelete', Lang.text('UI.Delete'), async () => {
+      const delFn: (() => void) | null = m.favorite ? null : async () => {
         if (!confirm(Lang.text('Mods.SandboxWorld.WorldSelect.ConfirmDelete', m.name))) return;
         await this.store.delete(m.id);
         await this.reload();
-      });
+      };
+      this.iconBtn(del, 'UI_ButtonDelete',
+        m.favorite ? Lang.text('UI.CannotDeleteFavorited') : Lang.text('UI.Delete'),
+        () => { if (delFn) void delFn(); });
+      if (m.favorite) {
+        const img = del.querySelector('img');
+        if (img) { img.style.opacity = '0.35'; img.style.cursor = 'not-allowed'; }
+      }
       const label = document.createElement('div');
       label.className = 'sw-vitem-label';
       const delLabel = document.createElement('div');

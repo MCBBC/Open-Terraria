@@ -206,8 +206,12 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     e.hurt(9999, 0, 0, game);   // StrikeNPCNoInteraction(9999) → 标准死亡管线(掉落/记账)
     return;
   }
-  // ---- 无敌（SetDefaults dontTakeDamage=true,:13992;仅 expert ai0=1 态解除 :36636）----
-  if (e.ai0 !== 1 && e.ai0 !== 2) e.iframes = 2;
+  // ---- 无敌（SetDefaults dontTakeDamage=true,1458 :14069;唯一解除点 ai0==1
+  //      （:36738）且**不置回**——经 1 进 2 后保持可击;0→-1/-2 与 -2→2 未经过 1
+  //      则全程无敌。★R23b 系统性修:改真旗标(pierce===1 单发弹绕过 iframes 免疫门),
+  //      顺带修正红队 martian §1.3 登记的「-2/2 态我方重新可击」轻偏差=闩锁语义）----
+  if (e.ai0 === 1) e.dontTakeDamage = false;
+  else if (e.ai0 === 0 || e.ai0 < 0) e.dontTakeDamage = true;
 
   const center = { x: e.cx, y: e.cy };
   const RANGE = 5600;   // :36363
@@ -218,20 +222,36 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     if (e.ai0 === 0) e.ai0 = -1;
     else if (e.ai0 === 2) e.ai0 = -2;
   }
+  // ---- 出界钳制 + 消散（1458 :36844-36859，flag94 在 aiStyle 76 块【末尾】对全态生效：
+  //      四向越界 → position=Clamp + active=false（零掉落零计分直消散））----
+  const st = game.world.store;
+  const outOfBoundsKill = (): boolean => {
+    if (e.y < -100 || e.x < -100 || e.y > st.h * TILE + 100 || e.x > st.w * TILE + 100) {
+      e.x = clamp(e.x, -100, st.w * TILE + 100);
+      e.y = clamp(e.y, -100, st.h * TILE + 100);
+      e.dead = true;
+      return true;
+    }
+    return false;
+  };
   if (e.ai0 === -1 || e.ai0 === -2) {
     e.vy -= 0.4;
     e.encourageDespawn(10);
     if (player && !player.dead) {
-      e.despawnTimer = 300;                       // timeLeft = 300（:36387）
+      e.despawnTimer = 300;                       // timeLeft = 300（:36486）
       // ★-1 态恢复语义（证据链）：1456 反编译 NPC.cs:36392-36395 为
       //   `if (this.ai[0] == 0f) { this.ai[0] = 0f; }`——此处置身 -1/-2 分支内
       //   恒为 no-op;1405 反编译（NPC.145.cs:36392-36395）逐字相同 → 两代独立
       //   反编译一致,IL 即如此。结论：-1（巡航转场）飞碟玩家回场**不回巡航**,
-      //   持续 vy−0.4/t 爬升到出界钳制消散（:36751-36772）;仅 -2（expert 死光
-      //   转场）按 :36388-36391 回 2 态。曾误按对称性把 -1 也回 0 态。
+      //   持续 vy−0.4/t 爬升到出界钳制消散（1458 :36844-36859）;仅 -2（expert 死光
+      //   转场）按 :36488-36491 回 2 态。曾误按对称性把 -1 也回 0 态。
       if (e.ai0 === -2) e.ai0 = 2;
       e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
     }
+    // ★R23b-T1 修：本分支早退曾跳过块末的出界钳制——despawnTimer=300 又逐帧回填
+    // 废掉 encourageDespawn(10)，普通模式玩家跑出 5600px 即得永久无敌爬升体
+    // （既不归位也不消散）。原版唯一出口就是这条对全态生效的越界杀。
+    if (outOfBoundsKill()) return;
     frameTick395();
     fly(e);
     return;
@@ -348,14 +368,8 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     }
     e.visAngle = 0;
   }
-  // ---- 出界钳制 + 消散（:36751-36772）----
-  const st = game.world.store;
-  if (e.y < -100 || e.x < -100 || e.y > st.h * TILE + 100 || e.x > st.w * TILE + 100) {
-    e.x = clamp(e.x, -100, st.w * TILE + 100);
-    e.y = clamp(e.y, -100, st.h * TILE + 100);
-    e.dead = true;
-    return;
-  }
+  // ---- 出界钳制 + 消散（1458 :36844-36859；helper 见函数头，-1/-2 分支同享）----
+  if (outOfBoundsKill()) return;
   frameTick395();
   fly(e);
 }

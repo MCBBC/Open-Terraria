@@ -1336,16 +1336,19 @@ export class UI {
       if (where === 'misc' && !inv.miscAccepts(i, this.heldStack.id)) return;
       if (where === 'miscDye' && !inv.dyeAccepts(this.heldStack.id)) return;
       const cur = arr[i];
+      // 装备族槽单件语义（ItemSlot.LeftClick case1/2 :1004-1058）：装备/时装/染料/
+      // 杂项槽恒容 1 件——空槽多叠只放 1 件余量留光标（Clone+stack--）；占用槽仅
+      // 光标单件且异型可交换（IsNotTheSameAs 门）；同型叠入/多叠交换均无动作。
+      // 此前整叠入槽+同型合并 = 99 翅膀全上身（2026-08-24 用户截图实报）
       if (!cur) {
-        arr[i] = this.heldStack;
-        this.heldStack = null;
-      } else if (cur.id === this.heldStack.id) {
-        const max = ITEM_DEFS[cur.id].maxStack;
-        const put = Math.min(max - cur.stack, this.heldStack.stack);
-        cur.stack += put;
-        this.heldStack.stack -= put;
-        if (this.heldStack.stack <= 0) this.heldStack = null;
-      } else {
+        if (this.heldStack.stack === 1) {
+          arr[i] = this.heldStack;
+          this.heldStack = null;
+        } else {
+          arr[i] = { ...this.heldStack, stack: 1 };
+          this.heldStack.stack--;
+        }
+      } else if (this.heldStack.stack === 1 && cur.id !== this.heldStack.id) {
         // 交换前反向校验（取出的物品总是合法的，防御性保留）
         if (where === 'armor' && !inv.armorAccepts(i, cur.id)) return;
         arr[i] = this.heldStack;
@@ -1354,6 +1357,8 @@ export class UI {
         // ∈换型表（含 1457 新 6168/6169/6193/6194）→ SoundID 22(Unlock),否则 7(Grab)
         const nv = vanillaIdOfItemKey(ITEM_DEFS[this.heldStack.id]?.key ?? '');
         this.game.sfx.play(nv > 0 && AFTER_ITEM_SWAP.has(nv) ? 'unlock' : 'pickup', 1);
+      } else {
+        return; // 同型叠入 / 光标多叠对占用槽：原版无动作
       }
       this.refreshAll();
       // 成就：装备态检查（拖拽落装备位 = HandleOnEquip 同义路径）
@@ -3512,7 +3517,11 @@ export class UI {
       row.addEventListener('mouseenter', () => {
         // 悬停预选（2026-08-21 用户两段定案：hover 显示该配方材料格，但【不得】
         // 触发列表滚动——滚动只由滚轮驱动）。hoverFocus 只作材料格预览源，
-        // craftFocus（=渲染窗锚点/鱼眼中心）不被 hover 触碰 → 窗口纹丝不动
+        // craftFocus（=渲染窗锚点/鱼眼中心）不被 hover 触碰 → 窗口纹丝不动。
+        // 2026-08-24 用户报：滚轮滚动过程中鼠标扫过行会连环触发 hover 重选+
+        // refreshAll 抖动——滚动期（craftWheelLast 120ms 内有事件）临时屏蔽
+        // hover，静默 120ms 后恢复（与 craftWheelStep 的 fresh 判定同口径）
+        if (performance.now() - this.craftWheelLast < 120) return;
         if (this.hoverFocus !== idx) {
           this.hoverFocus = idx;
           this.refreshAll();

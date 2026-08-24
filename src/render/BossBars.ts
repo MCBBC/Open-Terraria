@@ -75,12 +75,14 @@ export interface BossHeadNpc {
 }
 
 /** 拜月教徒仪式隐身窗（439/440 的 alpha==255 判定）。原版 GetBossHeadTextureIndex
- *  读 alpha，而 AI_084 仪式态 alpha 是 ai1 的确定函数（NPC.cs:65586-65716）：
- *  ai1∈[0,30) 渐隐 (int)(ai1/30*255)→0..246 / [30,90) 恒 255 / [90,120) 渐显
- *  255→0（ai1=90 恰 255）/ [120,420) 恒 0（被打断 justHit 归零重来 :65012-65015）。
- *  故 alpha==255 ⟺ ai1∈[30,90]——经 (ai0,ai1) 表达与逐帧读 alpha 等价。 */
+ *  读 alpha，而 BarNpc 投影不含 alpha → 以 AI_084 写点反推（NPC.cs 实测）：
+ *  ai0==5 仪式态 [0,30) 渐隐 (int)(ai1/30*255)=0..246 / [30,90) 【无写点保持 246】/
+ *  [90,120) 渐显 255→0（仅 ai1==90 恰为 255）/ [120,420) 恒 0。
+ *  故仪式态 alpha==255 ⟺ ai1==90（单 tick）——R24 勘误：曾断言 ai1∈[30,90]⟺255，
+ *  把「无写点」误当「恒 255」，净效应仪式中段 60t 条整段消失而原版仍显示。
+ *  登记：ai0≠5 的瞬移闪烁态另有 alpha=255 写点，投影无法表达（不可表达项）。 */
 function cultistRitualInvisible(ai1: number): boolean {
-  return ai1 >= 30 && ai1 <= 90;
+  return ai1 === 90;
 }
 
 /** GetBossHeadTextureIndex（NPC.cs:7536-7584）：基表 + 动态覆写。

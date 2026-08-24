@@ -1,8 +1,12 @@
 // 角色列表（DOM 版 1:1 原版 UICharacterSelect/UICharacterListItem 结构）：
 //  容器 80%(max 650) 居中 + 标题面板 + 列表面板(滚动) + 底部 Back/New 双钮
 //  （UICharacterSelect.cs:38-82）；行 = 娃娃(PlayerBackground 背板 + 行走动画) +
-//  底缘图标钮 Play/Rename/Copy + Delete 右下 + 悬停标签——★原版行内无名字文本
-//  （UICharacterListItem 全量 Append 扫描定谳），识别靠娃娃外观。
+//  底缘图标钮 Play/Favorite/Rename + Delete 右下 + 悬停标签。原版行内【有】名字
+//  文本（DrawSelf :324-331 DrawBorderString(_data.Name)+生命/魔法/难度/时长四面板）
+//  ——R24 勘误：头注曾断言"原版行内无名字文本"，系旧版全量扫描漏了 DrawSelf 段。
+//  收藏防删（UICharacterListItem.cs:114-116）：仅 !IsFavorite 才挂 Delete 处理器，
+//  收藏行悬停删除钮显 UI.CannotDeleteFavorited（本仓禁用态+悬停标签，简化登记：
+//  原版另有 Yes/No 确认页 UICharacterSelect.DeleteConfirmation）。
 import { CharacterStore, type CharacterMeta } from '../save/CharacterStore';
 import { type Appearance, DIFFICULTY_INFO } from '../player/Appearance';
 import { compositePaperDoll, dollFrame, walkFrame } from '../player/PaperDoll';
@@ -201,14 +205,27 @@ export class CharSelectPanel {
         await this.store.update(meta.id, a);
         await this.reload();
       });
+      // 删除钮（收藏防删，UICharacterListItem.cs:114-116 原版仅 !IsFavorite 挂
+      // 处理器：收藏行禁用态 + 悬停显 UI.CannotDeleteFavorited）
       const del = document.createElement('div');
       del.className = 'sw-vitem-del';
-      this.iconBtn(del, 'UI_ButtonDelete', Lang.text('UI.Delete'), async () => {
+      const delLabelKey = meta.favorite
+        ? () => Lang.text('UI.CannotDeleteFavorited')
+        : () => Lang.text('UI.Delete');
+      const delFn: (() => void) | null = meta.favorite ? null : async () => {
         if (!confirm(Lang.text('Mods.SandboxWorld.CharSelect.ConfirmDelete',
           a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed')))) return;
         await this.store.delete(meta.id);
         await this.reload();
+      };
+      this.iconBtn(del, 'UI_ButtonDelete', delLabelKey(), () => {
+        if (delFn) void delFn();
       });
+      // 收藏行删除钮禁用态（原版不挂处理器 = 点了没反应；这里再压透明度提示）
+      if (meta.favorite) {
+        const img = del.querySelector('img');
+        if (img) { img.style.opacity = '0.35'; img.style.cursor = 'not-allowed'; }
+      }
       const label = document.createElement('div');
       label.className = 'sw-vitem-label';
       const delLabel = document.createElement('div');

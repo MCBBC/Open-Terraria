@@ -482,11 +482,14 @@ export function flyingDutchmanAI(e: Enemy, game: GameHooks, player: Player | nul
   }
   if (!anyAlive) {
     e.iframes = 0;
+    e.dontTakeDamage = false;   // 先清无敌旗(StrikeNPCNoInteraction 走 hurt 管线)
     e.hp = 0;
     e.hurt(9999, 0, 0, game);   // StrikeNPCNoInteraction(9999) → 标准死亡管线
     return;
   }
-  e.iframes = 2;   // SetDefaults dontTakeDamage=true（:14581）：炮在世恒无敌
+  // ★R23b 系统性修:iframes=2 近似改真旗标(SetDefaults :14581→1458 :14676,
+  // pierce===1 单发弹曾可直伤「恒无敌」船体)
+  e.dontTakeDamage = true;   // 炮在世恒无敌
   // ---- 海盗跳舱（:40951-40958）：1/300t 从船口弹射 212-215。
   //      出生位 = Center + ((rand−0.5)×(w−70), (rand−0.5)×20 − h/2 − 20) 随船 rotation 旋转
   //      （曾直接落船心 = 视觉瞬移）;速度 = ((rand−0.5)×5, −8.01) + 船速 ----
@@ -989,7 +992,8 @@ export function eterniaCrystalAI(e: Enemy, game: GameHooks, player: Player | nul
     }
   } else if (e.ai1 === 2) {
     // ---- 胜利演出（:42846-42958,依赖 DD2Event 置 ai[1]=2） ----
-    e.iframes = 2;                                 // dontTakeDamageFromHostiles + 满血
+    // ★R23b 系统性修:iframes=2 近似改真旗标(pierce===1 单发弹绕过 iframes 免疫门)
+    e.dontTakeDamage = true;                       // dontTakeDamageFromHostiles + 满血
     e.hp = e.maxHp;
     if (e.ai0 === 3) {
       // :42851 胜利演出音（DD2_WinScene）——曾缺
@@ -1017,12 +1021,13 @@ export function eterniaCrystalAI(e: Enemy, game: GameHooks, player: Player | nul
     if (e.ai0 >= 600) {
       DD2_EVENT_HOOKS.stopInvasion?.(game, true);  // DD2Event.StopInvasion(win:true)
       e.iframes = 0;
+      e.dontTakeDamage = false;                    // 先清旗再走 hurt 死亡管线
       e.hp = 0;
       e.hurt(9999, 0, 0, game);
     }
   } else if (e.ai1 === 1) {
     // ---- 败北演出（:42959-43061,依赖 DD2Event.ReportLoss） ----
-    e.iframes = 2;
+    e.dontTakeDamage = true;   // ★同上:真旗标
     e.hp = e.maxHp;
     if (e.ai0 === 0) {
       for (const n of game.enemies() as Enemy[]) {
@@ -1044,6 +1049,7 @@ export function eterniaCrystalAI(e: Enemy, game: GameHooks, player: Player | nul
     if (e.ai0 >= 600) {
       DD2_EVENT_HOOKS.stopInvasion?.(game, false);
       e.iframes = 0;
+      e.dontTakeDamage = false;                    // 先清旗再走 hurt 死亡管线
       e.hp = 0;
       e.hurt(9999, 0, 0, game);
     }
@@ -1062,10 +1068,11 @@ export function lanePortalAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.spawnAlpha === 0) e.lightRGB = [0.5, 0.1, 0.3];   // :43066-43068
   void player;
   const crystal = findCrystal(game);
-  // SetDefaults dontTakeDamage=true（:15987）：开门期水晶在世恒无敌（:43119）;
+  // SetDefaults dontTakeDamage=true（1458 :16068-16085）：开门期水晶在世恒无敌（:43119）;
   // 水晶亡转消散态时**继续无敌**（:43124 dontTakeDamage=true 进 ai[1]=1）直至
-  // 550t 才解除（:43145）——消散全程可被玩家打的窗口不存在
-  e.iframes = 2;
+  // 550t 才解除（:43145）——消散全程可被玩家打的窗口不存在。
+  // ★R23b 系统性修:iframes=2 近似改真旗标(pierce===1 单发弹绕过 iframes 免疫门)
+  e.dontTakeDamage = true;
   if (e.ai1 === 0) {
     // ---- 开门出怪（:43071-43116） ----
     if (x[0] === 0) {
@@ -1094,6 +1101,7 @@ export function lanePortalAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.vanillaScale = lerp(1, 0.05, lerpValue(500, 600, e.ai0));
     if (e.ai0 >= 550) {
       e.iframes = 0;
+      e.dontTakeDamage = false;                    // :43145 解除无敌 → 自杀走 hurt 管线
       e.hp = 0;
       e.hurt(9999, 0, 0, game);
     }
@@ -1381,10 +1389,15 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.ai0 = prev === 0 ? -20 : -120;
     }
   }
-  // ---- 招式选择（:66476-66484,ai[0]==0 且出生 60t 后） ----
+  // ---- 招式选择（1458 :66651-66684,ai[0]==0 且出生 60t 后） ----
   if (e.ai0 === 0 && x[3] >= 60) {
-    let next = 0;
-    // ±600×±200 内受伤友军 <2 → 强制召骷髅（1457 :66642-66656）——原版扫 Main.npc
+    // ★R23b-G1 修：曾 `let next = 0` 硬编码——把 ai[1] 的轮换值整个丢弃，next 永
+    // ∈{0,2} → ai[1]==1（治疗 127/40/48/56 三连出 674 幽灵）成死内容，战斗中
+    // （受伤友军≥2 常态）每招退化为暗影矢。原版仅「±600×±200 内受伤友军<2」才
+    // 覆盖 ai[1]=2（:66654-66656），否则沿施法后推进的轮换值（0 矢→1 治疗→2 骷髅）
+    // 自然出招。
+    let next = e.ai1;
+    // ±600×±200 内受伤友军 <2 → 强制召骷髅（1458 :66653-66656）——原版扫 Main.npc
     // 全体（城镇 NPC 受伤同样触发召骷髅），本仓补 entities.npcs（R6-B 5-10）
     let hurt = 0;
     for (const n of game.enemies() as Enemy[]) {
@@ -1578,7 +1591,8 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
   const INTRO_T = 10, FLY_ACC = 0.45, FLY_SPD = 7.5;
   const HOVER_T = 30, WIND_T = 30, DIVE_SPD = 23;
   const FLAME_OFF = 600, FLAME_APPR = 12, FLAME_T0 = 40, FLAME_T1 = 80;
-  const BOMB_OFF = 1500, BOMB_APR_T = 60, BOMB_ACC = 1 / 30, BOMB_SPD = 12;
+  // num18=13 空袭接位 / num19=12 俯冲突进(★R23b-D8:两段曾共用 12=接位慢 1/t)
+  const BOMB_OFF = 1500, BOMB_APR_T = 60, BOMB_ACC = 1 / 30, BOMB_SPD = 12, POSN_SPD = 13;
   const FIREBALL_EVERY = 10, FIREBALL_N = 6 * FIREBALL_EVERY, TAIL_T = 60;
   const BOMB_TOTAL = BOMB_APR_T + FIREBALL_N + TAIL_T;
   const SPIN_T = 60, SPIN_RATE = TAU / SPIN_T, SPIN_RISE = 0.1, SKYDIVE_SPD = 32;
@@ -1681,8 +1695,9 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
       // 高位接位（:62493-62509）：反向 1500px、-350 上空
       const dx = txc - e.ai2 * BOMB_OFF, dy = tyc - 350;
       const d = dirTo(e, dx, dy);
-      e.vx = lerp(e.vx, d.x * BOMB_SPD, BOMB_ACC);
-      e.vy = lerp(e.vy, d.y * BOMB_SPD, BOMB_ACC);
+      // DirectionTo(vector6) * num18（:62504,num18=13）——接位段与突进段(num19=12)分速
+      e.vx = lerp(e.vx, d.x * POSN_SPD, BOMB_ACC);
+      e.vy = lerp(e.vy, d.y * POSN_SPD, BOMB_ACC);
       e.facing = e.cx < txc ? 1 : -1;
       if (Math.hypot(dx - e.cx, dy - e.cy) < 16) e.ai1 = BOMB_APR_T - 1;
       timeScale = 1.5;

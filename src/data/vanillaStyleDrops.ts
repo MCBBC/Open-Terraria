@@ -259,7 +259,9 @@ const ReplicaOrbs: T = [5469, 5470];
  *  5 行,槽 83..164 空白无物品;越界回落 t[0] 系本仓口径）。StatueStyleToItem 全档命中
  *  真实 vid → 本表无 -1 档;style 34→470 蘑菇雕像系原版语义（掉落物 470 createTile=349
  *  专属 tile 非 105,照抄不掉 place_v_）。段注释=StatueStyleToItem 1457 行号 */
-const STATUES: T = [
+/** ★R25-A10 导出（原 const）：690 雕像宝箱怪掉落（StatueMimicItemDropRule.cs:31
+ *  StatueStyleToItem((int)ai[1])）复用本表——NpcDrops.ts 'statueMimic' 案查表 */
+export const STATUES: T = [
   360, 52,   // case 0 :38315 / case 1 :38318
   438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449,   // style 2-42 default :38369（438+style-2）
   450, 451, 452, 453, 454, 455, 456, 457, 458, 459, 460, 461,

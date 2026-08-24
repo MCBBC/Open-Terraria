@@ -433,3 +433,24 @@ describe('1457 批 C 武器分流(combatWeapon)', () => {
     expect(combatWeapon({ key: 'vi_6164_ForbiddenMinion' })).toMatchObject({ kind: 'summon', shoot: 1119, sentry: false });
   });
 });
+
+// ================= 6152 停发窗+autoReuse 随行（2026-08-24 用户实报双根因） =================
+
+describe('6152 DaybloomStaff 停发窗/autoReuse（用户实报"挥动没效果"双根因）', () => {
+  it('分类器 magic 分支随行 autoReuse/useAnimation（门 (cw.autoReuse||fresh) 消费）', () => {
+    const cw = combatWeapon({ key: 'vi_6152_DaybloomStaff' }) as Record<string, unknown>;
+    expect(cw.autoReuse).toBe(true);      // 曾丢=恒 undefined=按住不连发
+    expect(cw.useAnimation).toBe(40);
+    // 非 autoReuse 魔法件语义不变（false 显式,门走 fresh-edge）
+    const cw2 = combatWeapon({ key: 'vi_4062_thunder_zapper' }) as Record<string, unknown>;
+    expect(typeof cw2.autoReuse).toBe('boolean');
+  });
+
+  it('停发窗语义=倒计时末 16t 静默（Player.cs:43847 itemAnimation < max−useTime×4）', () => {
+    // 源码守卫:门条件必须是 t < dur−16（曾反相 t > dur−16=起始帧即吞=挥动无效果）
+    const src = readFileSync('src/core/Game.ts', 'utf8');
+    const gate = src.match(/if \(swDur0 > 0 && (swT0 [<>] swDur0 - 16)\)/);
+    expect(gate, '6152 停发窗门存在').toBeTruthy();
+    expect(gate![1], '静默窗=倒计时末段 t < dur−16（反相则起始帧被吞）').toBe('swT0 < swDur0 - 16');
+  });
+});

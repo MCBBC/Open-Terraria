@@ -73,6 +73,10 @@ export interface WeatherCtx {
   /** 旅程力量·冻结雨情（CreativePowers.FreezeRainPower.Enabled，CreativePowers.cs:1516；
    *  消费 Main.cs:64329/:64357——true 时雨不停/不换挡/不新开）。缺省 false */
   freezeRain?: boolean;
+  /** Main.shimmerAlpha（SceneState.UpdateShimmer :327-358；本仓渲染端
+   *  Renderer.monoFilters.shimmerAlpha 同源逐帧值）——雨 cue28 (1-shimmer) 抑制项。
+   *  缺省 0（无微光态） */
+  shimmerAlpha?: number;
   /** 天气环境音循环音量下发（每帧；Sfx 常驻轨 setVolume 跟随） */
   onAmbience?: (v: WeatherLoopVolumes) => void;
   /** 金币雨玩家锚定（WorldGen.cs:71825 FindClosest 的单机等价；active/dead 门在 Weather 内判） */
@@ -92,8 +96,13 @@ export const RAIN_MAX = 0.5;
  *  sandstorm 轨原版无专属 wav（Sandstorm 只有视觉 shader + 风场 BGM）——音量照算，
  *  素材侧 Sfx.playLoop('sandstormWind') 恒 null，登记待素材 */
 export interface WeatherLoopVolumes {
-  /** 雨环境音：cloudAlpha×atmo（cloudAlpha 向 maxRaining 缓动 Main.cs:17142-17168 → 随雨强） */
+  /** 雨环境音（Main.cs case28 :11700-11720）：门 ZoneRain&&!ZoneSnow 成立时
+   *  num11 = min(1, (cloudAlpha×(10/9)×0.5+0.5)×(1-shimmer))×atmo⁴，否则 0
+   *  （渐熄斜坡在 Sfx.setRain 状态机）。ZoneRain 已含 SurfaceAtmospherics → 地下恒 0
+   *  （旧式 cloudAlpha×atmo 无地表门，雨声漏进地底，2026-08-24 用户报+探针实证后按原版修） */
   rain: number;
+  /** 雨 cue28 门位（:11713 num12 = ZoneRain && !ZoneSnow）——setRain 第二参 */
+  rainGate: boolean;
   /** blizzard_strong_loop（室外强暴风雪轨）= min(1,cloudAlpha×2)×室外强度×blizzardSoundVolume（SceneState.cs:253） */
   blizzardStrong: number;
   /** blizzard_inside_building_loop（墙内掩蔽轨）= (1-上式)×blizzardSoundVolume（:276） */
@@ -334,16 +343,30 @@ export class WeatherState {
     const blizzard = (ctx.zoneRain ?? this.raining) && (ctx.zoneSnow ?? false);
     this.blizzardSoundVolume = WeatherState.moveTowards(
       this.blizzardSoundVolume, blizzard ? 1 : 0, 0.01 * dayRate);
-    ctx.onAmbience?.(this.loopVolumes(ctx.atmo));
+    // 雨 cue28 门（Main.cs:11713 num12 = ZoneRain && !ZoneSnow）——ZoneRain 已含
+    // SurfaceAtmospherics → 地下恒假；缺省回退 this.raining 与暴风雪门同源
+    const rainGate = (ctx.zoneRain ?? this.raining) && !(ctx.zoneSnow ?? false);
+    ctx.onAmbience?.(this.loopVolumes(ctx.atmo, rainGate, ctx.shimmerAlpha ?? 0));
   }
 
-  /** 各循环轨目标音量（纯读状态；Sfx 侧常驻轨 setVolume 跟随） */
-  loopVolumes(atmo = 1): WeatherLoopVolumes {
+  /** 各循环轨目标音量（纯读状态；Sfx 侧常驻轨 setVolume 跟随）。
+   *  rainGate：雨 cue28 的 ZoneRain&&!ZoneSnow 门（Main.cs:11713），缺省 true 保旧签名；
+   *  shimmerAlpha：Main.shimmerAlpha（SceneState.UpdateShimmer :327-358 驱动，渲染端
+   *  Renderer.monoFilters 同源）——case45/case28 的 (1-shimmer) 抑制项乘在 clamp 前 */
+  loopVolumes(atmo = 1, rainGate = true, shimmerAlpha = 0): WeatherLoopVolumes {
     // SceneState.cs:253 num13 = min(1, cloudAlpha×2) × outsideWeatherEffectIntensity
     const num13 = Math.min(1, this.cloudAlpha * 2) * this.outsideWeatherEffect;
+    // Main.cs case28 :11702-11706：num11 = cloudAlpha/9×10×0.5 + (1-0.5)，
+    // ×(1-shimmer)（>0 时）→ clamp ≤1 → ×atmo⁴——次序与原版一致
+    const shimMul = shimmerAlpha > 0 ? 1 - shimmerAlpha : 1;
+    const n28 = Math.min(1, (this.cloudAlpha * (10 / 9) * 0.5 + 0.5) * shimMul)
+      * Math.max(0, Math.min(1, atmo)) ** 4;
     return {
-      // 雨环境音（MusicID 28）：随 cloudAlpha（→maxRaining 缓动）× 露天可见度
-      rain: Math.max(0, Math.min(1, this.cloudAlpha * Math.max(0, Math.min(1, atmo)))),
+      // 雨环境音（MusicID 28）：门不成立恒 0（渐熄斜坡在 Sfx.setRain 状态机）
+      rain: rainGate ? n28 : 0,
+      // 门位透传（Game.applyWeatherLoops → setRain 第二参；Main.cs:11712-11720
+      // 门开/门关走 UpdateAmbientCueState/TowardStopping 两分支的语义差）
+      rainGate,
       blizzardStrong: num13 * this.blizzardSoundVolume,
       blizzardInside: (1 - num13) * this.blizzardSoundVolume,
       // 沙暴：severity 0-1（Sandstorm.UpdateSeverity :115-130）×室外强度——素材侧缺 wav

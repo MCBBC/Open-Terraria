@@ -90,8 +90,12 @@ const enemies = (game: GameHooks): Enemy[] => game.enemies() as Enemy[];
 const countNpc = (game: GameHooks, id: number): number =>
   enemies(game).filter((n) => !n.dead && n.vanillaId === id).length;
 
-/** 矩形区域含实心(Collision.SolidTiles 近似) */
-function solidRect(game: GameHooks, x0: number, y0: number, x1: number, y1: number): boolean {
+/** 矩形区域含实心——签名 1:1 对齐 C# `Collision.SolidTiles(x0, x1, y0, y1)`
+ *  的【区间序】(xMin,xMax,yMin,yMax)。★R23b-L1 修:曾用角点序 (x0,y0,x1,y1),
+ *  而 :429-432/:491 按 C# 区间序传参 → 被解释成对角巨域(左侧地牢世界巨域必含
+ *  实心 → 石碑出生首帧自毁、自然邪教徒链断;右侧地牢恒"净空"校验失效)。
+ *  同仓 RuntimeEvents.ts 另有一份同名区间序实现,语义一致(未合并=避免跨层依赖) */
+function solidRect(game: GameHooks, x0: number, x1: number, y0: number, y1: number): boolean {
   const st = game.world.store;
   for (let x = x0; x <= x1; x++) {
     for (let y = y0; y <= y1; y++) {
@@ -100,17 +104,6 @@ function solidRect(game: GameHooks, x0: number, y0: number, x1: number, y1: numb
     }
   }
   return false;
-}
-/** 身体完全埋入实心(Collision.SolidCollision 近似) */
-function inSolidBody(game: GameHooks, e: Enemy): boolean {
-  const st = game.world.store;
-  for (let tx = Math.floor(e.x / TILE); tx <= Math.floor((e.x + e.w - 0.01) / TILE); tx++) {
-    for (let ty = Math.floor(e.y / TILE); ty <= Math.floor((e.y + e.h - 0.01) / TILE); ty++) {
-      if (tx < 0 || ty < 0 || tx >= st.w || ty >= st.h) return false;
-      if (!st.isSolid(tx, ty)) return false;
-    }
-  }
-  return true;
 }
 function solidTileAt(game: GameHooks, x: number, y: number): boolean {
   const st = game.world.store;
@@ -342,7 +335,10 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
         e.ai2 = (ang + Math.PI * 3) * n;                      // :38649 扫射编码角
       }
       x[1] = Math.min(1, x[1] + 0.05);
-      // :38656-38663 编码角逐 t 解码步进(瞳角跟踪扫射束)
+      // ★R23b-F5 修:扫射窗口原版每 tick velocity×0.93 渐停(1458 :43329-43331
+      // `else if (num3 < num-15f) { velocity *= 0.93f; ...}`)——曾全程匀速直线漂移
+      e.vx *= 0.93; e.vy *= 0.93;
+      // :43336-43343 编码角逐 t 解码步进(瞳角跟踪扫射束)
       const s = e.ai2 >= 0 ? 1 : -1;
       const a = Math.abs(e.ai2) - Math.PI * 3 + (s * TAU) / 540;
       x[0] = a;
@@ -724,11 +720,16 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
     grounded();
   } else if (e.ai0 === 3) {
-    // ---- 蓄能无敌 180t(:39623-39637;expert ReflectProjectiles 不可达) ----
+    // ---- 蓄能无敌 180t（1458 :37964-37981）。★R23b-F3 修：态 3 由 roll pick==0
+    //      全难度进入（:37941），「expert 弹反不可达」注释系误读——只有弹反是 expert 门；
+    //      且 dontTakeDamage 改真旗标（iframes 近似被 pierce===1 单发弹绕过）。
+    //      反射走本仓 reflectsProjectiles 旗标（Arrow 命中前反射,419 先例;
+    //      ReflectProjectile 反向归属管线未接=登记依赖），原版闩锁不清=离态后仍置位 ----
     e.vx *= 0.85;
-    e.iframes = 2;
+    e.dontTakeDamage = true;
     e.ai1 += 1;
     if (e.ai1 >= 180) { e.ai0 = 2; e.ai1 = 0; }
+    if (expertMode(game)) e.reflectsProjectiles = true;   // :37978-37981
     grounded();
   } else if (e.ai0 === 4) {
     // ---- 飞天(:39639-39677):悬玩家上方 350px → ai[2]=1 短瞄 6t → 4.1 俯冲 ----
@@ -755,11 +756,13 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
     fly(e);
   } else if (e.ai0 === 4.1) {
     // ---- 俯冲下坠(:39679-39709):过玩家 Y 或弹起 → 10t 后回 2(埋块则 5) ----
-    if (e.ai2 === 0 && p && losClear(game, e.cx, e.cy, p.cx, p.cy) && !inSolidBody(game, e)) e.ai2 = 1;
+    // ★R23b-F4 修:原版三处均 Collision.SolidCollision(包围盒与任一实心重叠=ANY),
+    // 曾用 inSolidBody(全格实心=ALL)= 部分嵌墙时该走态5 穿墙归位却回态2 贴地跳扑可卡地形
+    if (e.ai2 === 0 && p && losClear(game, e.cx, e.cy, p.cx, p.cy) && !touchesSolid(game, e)) e.ai2 = 1;
     if (!p || e.y + e.h >= p.y || e.vy <= 0) {
       e.ai1 += 1;
       if (e.ai1 > 10) {
-        e.ai0 = inSolidBody(game, e) ? 5 : 2;
+        e.ai0 = touchesSolid(game, e) ? 5 : 2;
         e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
       }
     } else if (e.ai2 === 0) {
@@ -775,7 +778,7 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.noGravity = true;                                    // :39743 整态置位
     if (p) e.facing = e.vx > 0 ? 1 : -1;
     let dx = p ? p.cx - e.cx : 0, dy = (p ? p.cy : e.cy) - 4 - e.cy;
-    if (p && Math.hypot(dx, dy) < 200 && !inSolidBody(game, e)) {
+    if (p && Math.hypot(dx, dy) < 200 && !touchesSolid(game, e)) {   // SolidCollision(:38084)
       e.ai0 = 2; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
     }
     const d = Math.hypot(dx, dy);
@@ -890,7 +893,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
     // ---- 穿墙追击(:39994-40028):7+距/100 速,近 300px 且不埋块 → 0 ----
     let dx = p.cx - e.cx, dy = p.cy - e.cy;
     const d = Math.hypot(dx, dy);
-    if (d < 300 && !inSolidBody(game, e)) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
+    if (d < 300 && !touchesSolid(game, e)) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
     const spd = 7 + d / 100;
     e.vx = (e.vx * 24 + (dx / (d || 1)) * spd) / 25;
     e.vy = (e.vy * 24 + (dy / (d || 1)) * spd) / 25;
@@ -952,7 +955,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.ai2 += 1 / 30;
       e.vx = (16 + e.ai2) * e.ai1;
       if ((e.ai1 > 0 && e.cx > p.cx + 260) || (e.ai1 < 0 && e.cx < p.cx - 260)) {
-        if (!inSolidBody(game, e)) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
+        if (!touchesSolid(game, e)) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
         else if (Math.abs(e.cx - p.cx) > 800) { e.ai0 = 1; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
       }
       e.spin = (e.spin * 4 + e.vx * 0.07) / 5;
@@ -1013,7 +1016,8 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
   let dx = gx - e.cx, dy = gy - e.cy;
   const d = Math.hypot(dx, dy);
   if (d < 4) {
-    const hatchT = expertMode(game) ? Math.round(70 * 0.75) : 70;   // :40367-40370 ×0.75
+    // (int) 截断 =52(R23b-F6:Math.round 曾得 53)
+    const hatchT = expertMode(game) ? Math.trunc(70 * 0.75) : 70;   // :40367-40370 ×0.75
     e.ai3 += 1;
     if (e.ai3 === hatchT) {
       const egg = spawnPart(game, e, 478);
@@ -1021,7 +1025,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
     } else if (e.ai3 === hatchT * 2) {
       e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
       if (countNpc(game, 478) + countNpc(game, 479) < eggCap && rnd(3) !== 0) e.ai0 = 4;
-      else if (inSolidBody(game, e)) e.ai0 = 1;
+      else if (touchesSolid(game, e)) e.ai0 = 1;
     }
   }
   if (d > 4) { dx = (dx / d) * 4; dy = (dy / d) * 4; }
@@ -1135,7 +1139,7 @@ export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) 
     // ---- 穿墙追击(:40579-40613):5.5+ai[2]+距/150 速;近 300px 且不埋块 → 0 ----
     const dx = p.cx - e.cx, dy = p.cy - e.cy;
     const d = Math.hypot(dx, dy);
-    if (d < 300 && !inSolidBody(game, e)) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
+    if (d < 300 && !touchesSolid(game, e)) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
     e.ai2 += 1 / 60;
     const spd = 5.5 + e.ai2 + d / 150;
     e.vx = (e.vx * 34 + (dx / (d || 1)) * spd) / 35;
@@ -1166,7 +1170,7 @@ export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) 
   e.vx *= 1.01; e.vy *= 1.01;
   e.ai1 += 1;
   if (e.ai1 > 45) {
-    if (!inSolidBody(game, e)) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; }
+    if (!touchesSolid(game, e)) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; }
     else if (e.ai1 > 90) { e.ai0 = 1; e.ai1 = 0; e.ai2 = 0; }
   }
   fly(e);
@@ -1251,7 +1255,7 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
     e.vx = (e.vx * 3 + (dx / (d || 1)) * 2) / 4;
     e.vy = (e.vy * 3 + (dy / (d || 1)) * 2) / 4;
     fly(e);
-    if (d < 600 && !inSolidBody(game, e)) e.ai0 = 0;
+    if (d < 600 && !touchesSolid(game, e)) e.ai0 = 0;
     return;
   } else if (e.ai0 === 3) {
     // ---- 锚点侧移(:40785-40801):1 速(3 步进);撞轴→4;到点/超 800px/通视线→0 ----
@@ -1281,7 +1285,7 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
     moveAndCollide(e, game.world, e.vx, e.vy);
     // ---- 每 5t 重试中转锚(:40858-40870) ----
     x[0] += 1;
-    if (x[0] >= 5 && !inSolidBody(game, e)) {
+    if (x[0] >= 5 && !touchesSolid(game, e)) {
       x[0] = 0;
       // 先试列锚 (px, selfY)(需三方视线),再试行锚 (selfX, py)
       if (losClear(game, e.cx, e.cy, p.cx, e.cy) && losClear(game, p.cx, p.cy, p.cx, e.cy)) {
@@ -1307,17 +1311,12 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
 //   不生怪。407/408 共用 aiStyle 96,本实现对其一视同仁。
 // ---------------------------------------------------------------------------
 
-/** Collision.SolidCollision 近似(矩形内 ANY 实心)——AI_085 态 2 出墙判定(:39090) */
+/** Collision.SolidCollision 近似(矩形内 ANY 实心)——收口到 solidRect 单一实现
+ *  (R23b-L1 同批:同文件曾并存两套实心扫描) */
 function touchesSolid(game: GameHooks, e: Enemy, inflate = 0): boolean {
-  const st = game.world.store;
-  const x0 = Math.floor((e.x - inflate) / TILE), x1 = Math.floor((e.x + e.w - 0.01 + inflate) / TILE);
-  const y0 = Math.floor((e.y - inflate) / TILE), y1 = Math.floor((e.y + e.h - 0.01 + inflate) / TILE);
-  for (let tx = x0; tx <= x1; tx++) {
-    for (let ty = y0; ty <= y1; ty++) {
-      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) return true;
-    }
-  }
-  return false;
+  return solidRect(game,
+    Math.floor((e.x - inflate) / TILE), Math.floor((e.x + e.w - 0.01 + inflate) / TILE),
+    Math.floor((e.y - inflate) / TILE), Math.floor((e.y + e.h - 0.01 + inflate) / TILE));
 }
 
 /** 星细胞族尾段:405 旋转清零 / 421 旋转=vx×0.1(:39104-39119) + 同族排斥(:39106-39131) */
@@ -1546,7 +1545,7 @@ function findTeleportSpot(game: GameHooks, e: Enemy, p: Player): { x: number; y:
       const li = st.idx(tx, ty - 1);
       if (st.liquid[li] > 0 && st.liquidType[li] === 2) continue;
     }
-    if (solidRect(game, tx - 1, ty - 1, tx + 1, ty + 1)) continue;   // 3×3 净空
+    if (solidRect(game, tx - 1, tx + 1, ty - 1, ty + 1)) continue;   // 3×3 净空(区间序)
     // telefrag:落点 tile 外扩 12 tile vs 玩家 hitbox∪(hitbox+vel*20)
     const inf = 12 * 16;
     const rx0 = tx * 16 - inf, ry0 = ty * 16 - inf;

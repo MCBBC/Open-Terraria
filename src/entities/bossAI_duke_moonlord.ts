@@ -15,7 +15,9 @@
 // 经典模式主链 1:1;getGoodWorld 分支已实装(月总头死亡之光收束尾 30 连射 1021,
 // :37940-37950;猪鲨 AI_069 与月总手/核心 1456 无 g 分支);expert 分支保留注释;
 // netcode 跳过。
-// 无敌语义:dontTakeDamage 用 e.iframes=2 每 tick 刷新近似(同 bossAI.ts 克脑一阶段)。
+// 无敌语义:R23b(2026-08-24)起手/头/核心各态改写真旗标 dontTakeDamage
+// (iframes=2 近似被 hurt 免疫门的 pierce!==1 豁免绕过——单发弹直伤无敌期;
+// 同 golem/四柱先例);猪鲨 371 泡泡与旋冲 invuln 段仍为 iframes 近似(登记)。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -1289,6 +1291,10 @@ export class MLDeathray extends Entity {
     // ★victim-settles：命中判定恒本地玩家（damagePlayer 只结算本地血；kind7 傀儡
     //  在访客端本地重建各查各的 game.player）——与上方 LOS 钳制的索敌目标分离
     const p = game.player;
+    // ★R23b-K3 修:1458 Colliding 有 20t 武装延迟(Projectile.cs:16078-16081
+    // `num44=20; if (localAI[0] < num44) return false;`)——束体出生前 20t 无敌不判伤,
+    // 发射瞬间贴脸即吃束曾变相加强死光
+    if (this.age < 20) return;
     if (p && !p.dead && segHitsRect(this.cx, this.cy, dirX * this.len, dirY * this.len, wSq, p)) {
       game.damagePlayer(
         hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2,
@@ -1474,7 +1480,7 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
     const parts = (game.enemies() as Enemy[]).filter(
       (n) => !n.dead && (n.vanillaId === 396 || n.vanillaId === 397) && n.ai3 === e.id);
     if (e.ai0 === 0) {
-      e.iframes = 2; // dontTakeDamage(:36856)
+      e.dontTakeDamage = true; // :41701(★R23b 系统性修:真旗标,iframes 近似被 pierce===1 绕过)
       // 部件缺失 → 核心即毁(:41682-41701 flag:任一 397/396 失效 → life=0 +
       // HitEffect + active=false 直清,**不经 checkDead**——无击败公告/不写
       // downedBoss3/无掉落,与 ai0=3 玩家全灭离场同语义。★bossFled 置位:
@@ -1502,7 +1508,7 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
       }
     }
   } else if (e.ai0 === 2) { // 死亡演出(:36925-37064)
-    e.iframes = 2;
+    e.dontTakeDamage = true;   // PrepareForDeathAnimation(真旗标,同上)
     // :36928 命名参数陷阱——Lerp(value1: velocity, value2: (0,-0.5), amount: 0.98):
     // 反编译显示参数序颠倒,实语义 = velocity = Lerp(velocity, (0,-0.5), 0.98),
     // 即每 tick 98% 逼近 (0,-0.5)(曾误读 0.02 = 缓飘 50t 才到位)
@@ -1537,11 +1543,12 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
     if (e.ai1 >= 600) { // :37053-37063 真死 → life=0+checkDead 走完整 NPCLoot
       // ★须 die() 而非直写 dead——hurt 对 398 放行(血尽转演出),直写=标准
       // 死亡管线永不触发:boss 袋/夜明矿/武器池/白金全部不出(零掉落,终审修)
+      e.dontTakeDamage = false;   // 先清无敌旗再走 hurt 管线(die() 内部经 hurt)
       e.die(game);
       return;
     }
   } else if (e.ai0 === 3) { // 玩家全灭离场(:37065-37135)
-    e.iframes = 2;
+    e.dontTakeDamage = true;   // 同死亡演出(真旗标)
     // :37068 同款命名参数陷阱:Lerp(velocity, (direction,-0.5), 0.98)——
     // vx 目标 = direction(TargetClosest 持久朝向,由上方 0/1 态持续写入 facing)
     e.vx = lerp(e.vx, e.facing, 0.98);
@@ -1717,10 +1724,13 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
   }
   let frameT = 0; // num1234(帧目标=frameT*7)
 
-  if (e.ai0 === -2) { // 闭眼残肢(:37252-37280)
+  if (e.ai0 === -2) { // 闭眼残肢(1458 :42062-42074)
     frameT = 0;
-    e.def.damage = 80; // :37254
-    if (e.ai1 >= 32) e.ai1 = 0;
+    // ★R23b-K1 修：残肢接触伤 1456=80 → **1458=0**(NPC.cs:42066),摸断手不再白挨触碰伤。
+    // 手的 ai[1] 推进在原版整体被 `ai[0] != -2` 门住(:42028)= 残肢期冻结(与头相反),
+    // 本分支只保持无敌近似 + 归位悬停。
+    e.def.damage = 0;
+    e.iframes = 2;                    // dontTakeDamage = true（:42068）
     handHover(e, core, side);
   } else if (e.ai0 === 0) { // 闭眼悬停(:37281-37303)
     frameT = 3;
@@ -1824,8 +1834,11 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
   e.x = nx - e.w / 2;
   e.y = ny - e.h / 2;
 
-  // 无敌:闭眼(frame>=21)或残肢态;可受击时不写 iframes,保留 hurt() 的 8t 受击免疫
-  if (x.frame >= 21 || e.ai0 === -2) e.iframes = 2;
+  // 无敌:闭眼(frame>=21)或残肢态。★R23b 系统性修:改真旗标 dontTakeDamage
+  // (原版 :42024 每 tick 重算 `dontTakeDamage = frameCounter >= 21f`,残肢支再置 true)
+  // ——iframes 免疫门有 pierce!==1 豁免,单发弹(箭/枪弹)会绕过近似直伤无敌期;
+  // 可受击时显式清旗,保留 hurt() 的 8t 受击免疫通道
+  e.dontTakeDamage = x.frame >= 21 || e.ai0 === -2;
   e.spin = x.l0; // 手部眼球角度(渲染朝向)
 }
 
@@ -1915,40 +1928,42 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
   e.x = core.cx - e.w / 2; // :37726 恒定在核心上方 400px
   e.y = core.cy - 400 - e.h / 2;
 
-  // 攻击表推进(:37732-37762;ai0<0 不参与)
+  // 攻击表推进(1458 :42536-42559)。★R23b-D4 修:`ai[1]++` 与表回卷在原版是
+  // 【无条件】执行(:42544 在全部态分支之前),只有 ai[0]=槽攻击号的赋值被
+  // `if (ai[0] >= 0f)` 门住(:42553)——残肢期头时钟继续走,后死部件召出的真眼
+  // 以「活的」头 ai1 为相位基准(spawnTrueEye num4);曾仅 ai0>=0 推进 → 残肢后
+  // 冻结、后续召出的真眼与先召真眼整体错相。
   let inSlot = 0, dur = 0;
+  e.ai1 += 1;
+  const s = attackSlot(e, ML_HEAD_ATTACKS);
   if (e.ai0 >= 0) {
-    e.ai1 += 1;
-    const s = attackSlot(e, ML_HEAD_ATTACKS);
-    e.ai0 = s.atk; // :37756 原版 ai[0] 即攻击号(亦为头部状态)
+    e.ai0 = s.atk; // :42558 原版 ai[0] 即攻击号(亦为头部状态)
     inSlot = s.inSlot; dur = s.dur;
   }
   let f2T = 0, f3T = 0; // num1262/num1263(帧目标 = f2T*7 / f3T*5)
 
-  if (e.ai0 === -3) { // 核心死亡后永闭(:37763-37781;由 -2 分支转入 :37784-37788)
+  if (e.ai0 === -3) { // 核心死亡后永闭(1458 :42560-42580;由 -2 分支转入 :42583-42587)
     e.def.damage = 0;
     e.spin = lerp(e.spin, Math.PI / 12, 0.07);
-    if (e.ai1 >= 32) e.ai1 = 0;
-    if (x.f2 < 14) x.f2 += 1;
-    e.iframes = 2;
+    e.ai2 += 1;                                   // :42568 永闭期 ai[2] 时钟(wrap 32)
+    if (e.ai2 >= 32) e.ai2 = 0;
+    if (x.f2 < 14) x.f2 += 1;                     // localAI[2] < 14（:42576-42579）
+    e.dontTakeDamage = true;                      // :42562(真旗标)
     return;
   }
-  if (e.ai0 === -2) { // 闭眼残肢(:37782-37844)
-    if (core.ai0 === 2) { e.ai0 = -3; return; } // :37784-37788 转入永闭(仅此 tick 跳帧推进)
-    e.def.damage = 80;
-    e.iframes = 2;
-    if (e.ai1 >= 32) e.ai1 = 0;
+  if (e.ai0 === -2) { // 闭眼残肢(1458 :42581-42600)
+    if (core.ai0 === 2) { e.ai0 = -3; return; } // :42583-42587 转入永闭(仅此 tick 跳帧推进)
+    // ★R23b-K1/K2 修(1456 残留两处):
+    // ①接触伤 1456=80 → **1458=0**(NPC.cs:42589),摸断眼不再白挨触碰伤;
+    // ②整段「残肢月噬循环」(ai[2] 555 大循环 + ai2≥120 发 456/召 401,
+    //   1456 :37782-37844)已被 1458 删除——1458 本支仅剩 damage=0 +
+    //   dontTakeDamage + `ai[2]++ wrap 32`(:42589-42599),月噬只存在于
+    //   攻击表槽 2(已实现)。曾保留=断眼期多出一整套吸血相位且 wrap 值不符。
+    e.def.damage = 0;
+    e.dontTakeDamage = true;                      // :42590(真旗标)
     e.ai2 += 1;
-    if (e.ai2 >= 555) e.ai2 = 0;
-    if (e.ai2 >= 120 && player) { // :37805-37843 残肢期月噬循环
-      const lt = e.ai2 - 120;
-      if (lt === 0) { // :37811-37827 从额前 216px 发月噬 456(0 伤,纯吸血视觉→MoonLeechProj)
-        addProj(game, new MoonLeechProj(e, player));
-      }
-      // :37828-37842 lt=120/180/240 于玩家处召 401 月噬怪(门禁说明见 spawnMoonLeech)
-      if ((lt === 120 || lt === 180 || lt === 240)) spawnMoonLeech(game, e, player);
-    }
-    // ★原版本分支无 return(:37782-37844 后直落帧推进)——曾提前 return 令
+    if (e.ai2 >= 32) e.ai2 = 0;
+    // ★原版本分支无 return(后直落帧推进)——曾提前 return 令
     // f2/f3 帧目标(0)永不收敛 = 残肢冻帧(2026-08-19 台账 E 修)
   }
 
@@ -2038,7 +2053,7 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
   x.f2 = clamp(x.f2, 0, 14);
   if (f3Target > x.f3) x.f3 += 1; else if (f3Target < x.f3) x.f3 -= 1;
   x.f3 = clamp(x.f3, 0, 15);
-  if (x.f3 >= 15) e.iframes = 2; // dontTakeDamage = localAI[3]>=15(闭眼无敌)
+  if (x.f3 >= 15) e.dontTakeDamage = true; // :42532 dontTakeDamage = localAI[3]>=15(闭眼无敌;真旗标,同手部)
 
   // ---- 渲染镜像(Renderer.drawMoonLordHead 直读)----
   // 瞳孔角/睁眼度 → lai0/lai1(原版 localAI[0]/[1],Main.cs:24464 椭圆 (27,59)×[1]);

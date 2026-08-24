@@ -144,6 +144,10 @@ const DG_PRE_CLASS: Record<number, string> = {
   155: 'swords', 156: 'acc', 157: 'magic', 163: 'spears', 113: 'magic', 3317: 'boom',
   164: 'guns', 1156: 'guns', 1571: 'boom', 1569: 'boom', 1260: 'magic', 1572: 'summon',
   4607: 'summon', 5465: 'acc',
+  // ★KKKKKKK（2026-08-24）：6156 银护腕（1.4.5 新饰品，Item.cs:47452 DefaultToAccessory）
+  //   ——1457 地牢箱 flag9 组第三掷（WG.cs:37252 金支 :36951/中深支）Next(4)==0→
+  //   SetDefaults(6156)+Prefix(-1)。缺此掷=G 段起主流永久相移（七链 #32 首差共同根因）。
+  6156: 'acc',
   // ★BBBBB 勘误：327=Golden Key（ItemID.cs:2193）——非 accessory/无任何前缀类
   //   （Item.cs case 327 仅 width/height）→ GetRollablePrefixes=null → Prefix(-1) 零掷。
   //   水覆写箱（num2<ws+50 → itemType=327）的 loot 修正点在 surf 支门（见 dgChestLoot），
@@ -3044,8 +3048,10 @@ export function runDungeonPass(
       if (num10 > 0) {
         prefixRolls(num10);
         if (flag9 && !flag10) {
+          // ★KKKKKKK：金支同款第三掷（WG.cs:36951-36958）——Next(4)==0→6156+Prefix(-1)。
           if (!shadowKey || rn(3) === 0) shadowKey = true;
           if (!ramRune || rn(8) === 0) { ramRune = true; prefixRolls(5465); dgLoot.push(5465); }
+          if (rn(4) === 0) { prefixRolls(6156); dgLoot.push(6156); }
         }
       } else {
         rn(6);
@@ -3069,6 +3075,8 @@ export function runDungeonPass(
         if (flag9 && !flag10) {
           if (!shadowKey || rn(3) === 0) { shadowKey = true; dgLoot.push(329); }
           if (!ramRune || rn(8) === 0) { ramRune = true; prefixRolls(5465); dgLoot.push(5465); }
+          // ★KKKKKKK：中深支第三掷（WG.cs:37252-37258）——Next(4)==0→6156+Prefix(-1)
+          if (rn(4) === 0) { prefixRolls(6156); dgLoot.push(6156); }
         }
       } else {
         rn(7);

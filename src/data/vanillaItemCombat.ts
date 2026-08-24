@@ -202,6 +202,10 @@ export type CombatWeapon =
       shootSpeed: number;
       mana?: number;
       sentry?: boolean;
+      /** ★magic 分支随行（2026-08-24）：门 `(cw.autoReuse || fresh-edge)` 消费——
+       *  曾缺省=恒 undefined=按住不连发（用户实报太阳花法杖第二根因） */
+      autoReuse?: boolean;
+      useAnimation?: number;
     };
 
 /** 物品定义的最小形状（items.ts 的 ItemDef 满足之） */
@@ -313,7 +317,13 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
         shoot, shootSpeed: base.shootSpeed,
       };
     }
-    if (c.magic || c.mana) return { kind: 'magic', shoot, mana: c.mana ?? 0, ...base };
+    // ★autoReuse/useAnimation 必须随行（2026-08-24 用户实报"太阳花法杖挥动没效果"
+    //  第二根因）：门 `(cw.autoReuse || fresh-edge)` 吃 cw.autoReuse——曾只展开 base
+    // （damage/knockback/useTime/shootSpeed）丢 autoReuse → 恒 undefined → 按住不连发
+    // （全部 magic 武器共性,非 autoReuse 件语义不变）。useAnimation 同理（挥动动画
+    // 时长,useSwing heldUseAnimation 消费）
+    if (c.magic || c.mana) return { kind: 'magic', shoot, mana: c.mana ?? 0, ...base,
+      autoReuse: !!c.autoReuse, useAnimation: c.useAnimation ?? base.useTime };
     // 其余 melee/ranged+shoot（附魔剑光束等）：直射弹兜底
     if (c.melee || c.ranged || c.noMelee) return { kind: 'shot', shoot, ...base };
     return null;

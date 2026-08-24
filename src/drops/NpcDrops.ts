@@ -27,6 +27,7 @@
 // InWorld（ctx.noAltarsInWorld 读档祭坛普查）均接真值（2026-08-20，注释见 evalCond）。
 import dropData from '../data/vanilla-npcdrops.json';
 import npcValueJson from '../data/vanilla-npcvalue.json';
+import { STATUES } from '../data/vanillaStyleDrops';
 import type { RNG } from '../core/rng';
 import { Lang } from '../i18n/Lang';
 
@@ -578,8 +579,20 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
       break;
     }
     case 'statueMimic': {
-      // StatueMimicItemDropRule：依赖雕像产怪携带物——我们无雕像产怪 → 恒不触发
-      state = 'failedCond';
+      // StatueMimicItemDropRule.cs（1458 同名文件）1:1——R25-A10 接通：
+      // CanDrop(:15-22) = ai[1]>0 && ai[1]<ItemID.Count(=6147)；
+      // TryDroppingItem(:29-37) = WorldGen.StatueStyleToItem((int)ai[1]) →
+      // CommonCode.DropItemFromNPC(npc, itemId, 1)。注册仅 690
+      // （ItemDropDatabase.cs:1134 RegisterToNPC(690,…)），故无需类型门。
+      // 墓地自然刷（NPC.cs:1571 SpawnNPC(…,690)）不置 SpawnedFromStatue（仅
+      // Wiring.cs:2480 雕像通电置位），且 690 不在 StatueSpawnedDropRarity
+      // （NPCID.cs:4799 缺省 -1）/NoEarlymodeLootWhenSpawnedFromStatue
+      // （:4801={480,82,86,170,180,171}）两限制集 → 原版掉落无雕像减损。
+      // 映射表复用 vanillaStyleDrops.STATUES（StatueStyleToItem 全量转录，83 档）
+      const style = Math.floor(ctx.ai1 ?? 0);
+      if (style <= 0 || style >= 6147) { state = 'failedCond'; break; }
+      pushDrop(out, STATUES[style] ?? STATUES[0], 1);   // 表外 style 回落 default 档=style0（本表口径）
+      state = 'success';
       break;
     }
     case 'dropOneByOne': {

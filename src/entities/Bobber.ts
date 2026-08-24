@@ -24,7 +24,7 @@ import {
 } from '../data/vanillaFishing';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
-import { ITEM_DEFS } from '../data/items';
+import { chumsInTile } from './chumBucket';
 import { VI_ID } from '../data/itemKeys';
 
 /** 原版 rare 表（vanilla-itemrare.json,extract-itemrare.mjs）——垃圾渔获 rare<0 判定 */
@@ -54,11 +54,13 @@ export function bobberProjIdFor(poleVid: number): number {
   return 360;
 }
 
-interface PondState { lava: boolean; honey: boolean; waterTilesCount: number }
+interface PondState { lava: boolean; honey: boolean; waterTilesCount: number; chums: number }
 
-/** GetFishingPondState（Projectile.cs:20170-20201）1:1：
- *  先横向扩到水体边缘（GetFishingPondWidth :20203-20213，越界停于 10 / W-10），
- *  再逐列向下数液格（solid 或无液即停，越界停于 H-10）；蜂蜜池 ×1.5。 */
+/** GetFishingPondState（Projectile.cs:20170-20201；1458 :21699-21730 同构+chum 累计）
+ *  1:1：先横向扩到水体边缘（GetFishingPondWidth :20203-20213，越界停于 10 / W-10），
+ *  再逐列向下数液格（solid 或无液即停，越界停于 H-10）；蜂蜜池 ×1.5。
+ *  ★R25-E10：逐水格累计 chum 注册面计数（:21721-21722
+ *  `chumCount += GetChumsInLocation(tileCoords)`）——弹体 820 落点表见 chumBucket.ts。 */
 function getFishingPondState(game: GameHooks, x: number, y: number): PondState {
   const st = (game.world as World).store;
   const liquidAt = (i: number, j: number) =>
@@ -66,17 +68,18 @@ function getFishingPondState(game: GameHooks, x: number, y: number): PondState {
   let minX = x, maxX = x;                                     // :20205-20212
   while (minX > 10 && liquidAt(minX, y) > 0 && !st.isSolid(minX, y)) minX--;
   while (maxX < st.w - 10 && liquidAt(maxX, y) > 0 && !st.isSolid(maxX, y)) maxX++;
-  let lava = false, honey = false, numWaters = 0;             // :20174-20177
+  let lava = false, honey = false, numWaters = 0, chums = 0;  // :21701-21704
   for (let i = minX; i <= maxX; i++) {                        // :20180-20194
     for (let j = y; st.inBounds(i, j) && liquidAt(i, j) > 0 && !st.isSolid(i, j) && j < st.h - 10; j++) {
       numWaters++;
       const lt = st.liquidType[st.idx(i, j)];
       if (lt === 2) lava = true;                              // tile.lava()
       else if (lt === 3) honey = true;                        // tile.honey()
+      chums += chumsInTile(i, j);                             // :21722 池内逐格累计
     }
   }
   if (honey) numWaters = Math.floor(numWaters * 1.5);         // :20197-20200
-  return { lava, honey, waterTilesCount: numWaters };
+  return { lava, honey, waterTilesCount: numWaters, chums };
 }
 
 export class Bobber extends Entity {
@@ -247,10 +250,16 @@ export class Bobber extends Entity {
     const pond = getFishingPondState(game, tx, ty);   // GetFishingPondState :20170-20201
     // R14-E13①：NotTheBees 世界 1/2 掷把蜂蜜池当水（PRJ57:20730-20732,在 <75 门之前）
     if (w.seedFlags?.notTheBees && Math.floor(Math.random() * 2) === 0) pond.honey = false;
-    if (pond.waterTilesCount < 75) return;            // :19206-19210 NotEnoughWater
+    if (pond.waterTilesCount < 75) {
+      // R25-E16：渔情文本（:20735-20740 displayedFishingInfo=NotEnoughWater）——
+      // 显示侧 Game.tickInfoAccs 浮标在场只读粘性缓存,本处即写入口
+      p.displayedFishingInfo = Lang.text('GameUI.NotEnoughWater');
+      return;
+    }
     // 松露虫（:19212-19224）：永不出鱼；两侧海洋带（X<380||>w-380，浮标格）且池液>1000
     // 且场上无 Duke → 开咬钩窗（-280..-160，localAI[1]=1 "有咬"）
     if (this.baitVid === 2673) {
+      p.displayedFishingInfo = Lang.text('GameUI.FishingWarning');   // :20743-20745
       if ((tx < 380 || tx > st.w - 380) && pond.waterTilesCount > 1000
         && !(game.enemies() as Array<{ vanillaId?: number }>)
           .some((e) => !((e as { dead?: boolean }).dead) && e.vanillaId === 370)) {
@@ -259,22 +268,15 @@ export class Bobber extends Entity {
       }
       return;   // :19223 松露虫钓鱼恒不出鱼
     }
-    // Chum Bucket(:19231-19242):池内每只 4608 掉落物 +11/+6/+3——
-    // 简化:抛竿时扫浮标 15 格内的 4608 掉落物计数,2026-08-13
-    let chums = 0;
-    for (const d of (game as unknown as { entities?: { drops?: Array<{ itemId?: number; x: number; y: number; dead: boolean }> } })
-      .entities?.drops ?? []) {
-      if (d.dead || d.itemId === undefined) continue;
-      const _d = d as { itemId: number; dead: boolean; x: number; y: number };
-      const _key = ITEM_DEFS[_d.itemId]?.key ?? '';
-      if (_key !== 'vi_4608_chum_bucket') continue;
-      const key = _key;
-      if (key !== 'vi_4608_chum_bucket') continue;
-      if (Math.abs(d.x - this.cx) < 15 * 16 && Math.abs(d.y - this.cy) < 15 * 16) chums++;
-    }
     let level = this.fishingPower(p, game);           // :19225 FinalFishingLevel
     if (level === 0) return;                          // :19226-19229
-    if (chums > 0) level += chums > 2 ? 11 : chums > 1 ? 6 : 3;   // :19231-19242
+    // Chum Bucket（:20759-20770）：池内 chum 标记（弹体 820 注册面,chumBucket.ts）
+    // 累进加成——>0:+11 / >1:+6 / >2:+3 三段【叠加】(曾误写单档取一,最高只 +11;
+    // 亦曾错扫地面掉落物 4608 当计数源=桶扔地上白吃加成,R25-E10 双修)
+    if (pond.chums > 0) level += 11;
+    if (pond.chums > 1) level += 6;
+    if (pond.chums > 2) level += 3;
+    p.displayedFishingInfo = Lang.text('GameUI.FishingPower', level);   // :20771-20772
     const canFishInLava = CAN_FISH_IN_LAVA_POLES.has(this.poleVid)   // :19230 三源
       || IS_LAVA_BAIT.has(this.baitVid) || this.ownerLavaOk();
     // 水量缩放（:19244-19261）：atmo = (Y/16 - (60 + 10·(W/4200)²)) / (地表/6) 截 [0.25,1]
@@ -284,7 +286,13 @@ export class Bobber extends Entity {
     if (atmo > 1) atmo = 1;
     const waterNeeded = Math.floor(300 * atmo);       // :19256 waterNeededToFish = 300 × atmo
     if (pond.waterTilesCount / waterNeeded < 1) {
-      level = Math.floor(level * (pond.waterTilesCount / waterNeeded));   // :19258-19261
+      level = Math.floor(level * (pond.waterTilesCount / waterNeeded));   // :20787-20790
+    }
+    // 池水不足额 → FullFishingPower 覆写（:20792-20795）：q=count/needed 缩放后
+    // q=1−q,显示 −Round(q×100)（如半池水 → "X（-50%）渔力"）
+    if (pond.waterTilesCount < waterNeeded) {
+      p.displayedFishingInfo = Lang.text('GameUI.FullFishingPower', level,
+        -Math.round((1 - pond.waterTilesCount / waterNeeded) * 100));
     }
     // 幸运度（:19267-19277）：负运 ×(0.9-rand*0.3) / 正运 ×(1.1+rand*0.3)，掷中才乘
     const luck = p.luck;

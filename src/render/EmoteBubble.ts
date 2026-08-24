@@ -28,11 +28,16 @@ if (typeof window !== 'undefined') {
 }
 
 /** NewBubble(emoticon, anchor, time)（:116-132）：默认存活 180 tick。
- *  OnBubbleChange（:263-277）：同一实体旧气泡 lifeTime=6（6t 内播闭合动画消隐）
- *  ——不是拒绝新泡（旧"同实体只一泡"为近似,2026-08-20 按原版更正） */
-export function spawnEmote(npc: EmoteBubbleInstance['npc'], emote: number, time = 180): void {
-  for (const b of bubbles) {
-    if (b.npc === npc) b.lifeTime = 6;
+ *  OnBubbleChange 淡出旧泡门（:263-277）：原版仅当【新泡锚是 Player】才把同锚
+ *  旧泡 lifeTime=6（6t 内播闭合动画消隐）——NPC 锚气泡不触发，同一 NPC 可多泡
+ *  并存。R24 勘误（E1）：曾对任意实体杀旧泡并把注释写成"按原版更正"，实为把
+ *  Player 专属规则扩大到全体；现 isPlayer 门恢复原版语义。 */
+export function spawnEmote(npc: EmoteBubbleInstance['npc'], emote: number, time = 180,
+  opts?: { isPlayer?: boolean }): void {
+  if (opts?.isPlayer) {
+    for (const b of bubbles) {
+      if (b.npc === npc) b.lifeTime = 6;
+    }
   }
   bubbles.push({ npc, emote, lifeTime: time, lifeStart: time, frame: 0, frameCounter: 0 });
 }
@@ -94,7 +99,7 @@ export function makeLocalPlayerEmote(
   opts: { dead: boolean; sendEmote?: (emoteId: number) => void; reactToNpcs?: () => void },
 ): void {
   if (opts.dead) return;
-  spawnEmote(anchor, emoteId, 360);
+  spawnEmote(anchor, emoteId, 360, { isPlayer: true });   // OnBubbleChange Player 锚门
   opts.reactToNpcs?.();
   opts.sendEmote?.(emoteId);
 }

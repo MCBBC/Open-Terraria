@@ -218,3 +218,75 @@ describe('终极棱镜晶体层级(drawLayer=7 → prismCrystalQueue)', () => {
     expect(calls.find((c) => c.m === 'drawImage')).toBeTruthy();
   });
 });
+
+// ============================================================ 光束末端粒子
+// 2026-08-24 用户报"粒子位置固定不对,光束打到的位置才冒粒子":
+//   1456 AI_084 :30622-30660 = 632 束端彩色尘(2×267+1/5×31,位置=Center+
+//   velocity×(localAI[1]−14.5×scale),门 |localAI[1]−num734|<100 && scale>0.15)。
+//   ★1457 已删此段(AI_084 只剩 455/642/461/537)——按用户要求以 1456 恢复(备案)。
+//   曾"简化"成固定 min(beamLen,200) 处撒 1 粒合成粒子=位置错+形态错。
+describe('终极棱镜光束末端粒子(1456 :30622-30660 恢复)', () => {
+  function makeDustGame(dust: Array<{ x: number; y: number; type: number }>) {
+    const projectiles: unknown[] = [];
+    const sfx: string[][] = [];
+    const game = makeGame(projectiles, sfx) as unknown as Record<string, unknown>;
+    game.spawnDust = (x: number, y: number, _w: number, _h: number, type: number) => {
+      dust.push({ x, y, type });
+      return null;
+    };
+    return game as unknown as GameHooks;
+  }
+  it('⑦ 267 号尘落在束端(cx+vx×(beamLen−14.5×scale)),稳定束期每 tick 2 粒', () => {
+    const dust: Array<{ x: number; y: number; type: number }> = [];
+    const game = makeDustGame(dust);
+    const prism = new PrismProj(1, 0, 100, 0.25,
+      () => true, () => ({ x: 0, y: 0 }), () => true);
+    (game as unknown as { entities: { add: (e: unknown) => void } }).entities.add(prism);
+    // 充能至稳定期(≥30t friendly 门、scale>0.15),棱先步进 60t
+    for (let i = 0; i < 60; i++) prism.fixedUpdate(1, game);
+    for (const pr of prism.prongs) {
+      // 尘由 PrismProng 自身 fixedUpdate 生成——逐棱步进至束长收敛
+      // (beamLen lerp 0.75/t,数 tick 后 |beamLen−scanLen|<100 门开;地形世界
+      //  scanLen 未知,故不预设束长)
+      for (let i = 0; i < 12; i++) pr.fixedUpdate(1, game);
+      const before = dust.length;
+      pr.fixedUpdate(1, game);
+      const spawned = dust.slice(before).filter((d) => d.type === 267);
+      expect(spawned.length).toBeGreaterThanOrEqual(2);
+      // 每粒位置=束端(用更新后的 vx/beamLen/prongScale——与实现同源)
+      const ex = pr.cx + pr.vx * (pr.beamLen - 14.5 * pr.prongScale);
+      const ey = pr.cy + pr.vy * (pr.beamLen - 14.5 * pr.prongScale);
+      for (const d of spawned) {
+        expect(Math.hypot(d.x - ex, d.y - ey)).toBeLessThan(1);
+      }
+    }
+  });
+  it('⑧ 门:束长未收敛(|beamLen−scanLen|≥100)或充能初期(scale≤0.15)不撒', () => {
+    const dust: Array<{ x: number; y: number; type: number }> = [];
+    const game = makeDustGame(dust);
+    const prism = new PrismProj(1, 0, 100, 0.25,
+      () => true, () => ({ x: 0, y: 0 }), () => true);
+    (game as unknown as { entities: { add: (e: unknown) => void } }).entities.add(prism);
+    prism.fixedUpdate(1, game);                // charge=1,prong 出生
+    for (const pr of prism.prongs) {
+      for (let i = 0; i < 10; i++) pr.fixedUpdate(1, game);   // 束长收敛
+      pr.beamLen = pr.beamLen + 500;            // 人为拉开 ≥100 → 门关
+      const before = dust.length;
+      pr.fixedUpdate(1, game);
+      expect(dust.slice(before).filter((d) => d.type === 267).length).toBe(0);
+    }
+    // scale 门:charge=1(棱不再步进 → prongScale=1.4×1/180≈0.008 ≤0.15),束长收敛也不撒
+    const dust2: Array<{ x: number; y: number; type: number }> = [];
+    const game2 = makeDustGame(dust2);
+    const prism2 = new PrismProj(1, 0, 100, 0.25,
+      () => true, () => ({ x: 0, y: 0 }), () => true);
+    (game2 as unknown as { entities: { add: (e: unknown) => void } }).entities.add(prism2);
+    prism2.fixedUpdate(1, game2);
+    for (const pr of prism2.prongs) {
+      for (let i = 0; i < 12; i++) pr.fixedUpdate(1, game2);  // 束长收敛,charge 恒 1
+      const before = dust2.length;
+      pr.fixedUpdate(1, game2);
+      expect(dust2.slice(before).filter((d) => d.type === 267).length).toBe(0);
+    }
+  });
+});

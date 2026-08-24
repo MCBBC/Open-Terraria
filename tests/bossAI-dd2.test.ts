@@ -97,7 +97,9 @@ describe('AI_093 荷兰飞盗船 491', () => {
     expect(cannons.map((c) => c.ai3)).toEqual([0, 60, 120, 180]);   // 出生错峰
     expect(ship.ai0).toBe(cannons[0].id);                            // ai[0..3]=炮位引用
     tick(h, 30, [ship]);
-    expect(ship.iframes).toBeGreaterThan(0);                         // dontTakeDamage
+    // ★R23b 系统性修后无敌走真旗标 dontTakeDamage(SetDefaults :14676),
+    // iframes 近似退役(pierce===1 单发弹曾绕过)
+    expect(ship.dontTakeDamage).toBe(true);
     expect(ship.dead).toBe(false);
   });
 
@@ -189,7 +191,8 @@ describe('AI_105 永恒水晶 548 / AI_106 神秘传送门 549', () => {
     expect(portals.length).toBe(2);
     expect(portals.some((p) => p.ai2 === 0)).toBe(true);     // 左门
     expect(portals.some((p) => p.ai2 === 1)).toBe(true);     // 右门
-    for (const p of portals) expect(p.iframes).toBeGreaterThan(0);   // dontTakeDamage
+    // ★R23b 系统性修后无敌走真旗标 dontTakeDamage(SetDefaults :16068)
+    for (const p of portals) expect(p.dontTakeDamage).toBe(true);
     expect(crystal.lightRGB).toEqual([1.3, 0.5, 1.5]);       // 点光
   });
 

@@ -364,14 +364,35 @@ const wctx = (over: Partial<WeatherCtx> = {}): WeatherCtx => ({
 });
 
 describe('天气环境音循环（Weather.updateAmbienceLoops）', () => {
-  it('雨量 → rain 轨音量 = cloudAlpha×atmo；沙暴轨 severity 驱动', () => {
+  it('雨 cue28 音量 = min(1,(cloudAlpha×10/9×0.5+0.5)×(1-shimmer))×atmo⁴（Main.cs case28 :11702-11706）', () => {
     const w = new WeatherState(7);
     w.startRain(true, 0.6);   // instant：cloudAlpha = maxRaining
     const v: WeatherLoopVolumes = w.loopVolumes(1);
-    expect(v.rain).toBeCloseTo(0.6, 5);
+    // num11 = min(1, 0.6×(10/9)×0.5+0.5)×1⁴ = min(1, 0.8333…) = 0.8333…（基线 0.5 为原版真态）
+    expect(v.rain).toBeCloseTo(0.6 * (10 / 9) * 0.5 + 0.5, 5);
+    expect(v.rainGate).toBe(true);   // 门位透传（setRain 第二参）
+    // 地表门关（ZoneRain&&!ZoneSnow 假，Main.cs:11713——地下 ZoneRain 恒假）→ 0
+    expect(w.loopVolumes(1, false).rain).toBe(0);
+    expect(w.loopVolumes(1, false).rainGate).toBe(false);
+    // atmo⁴ 深度衰减：atmo=0.5 → ×0.0625
+    expect(w.loopVolumes(0.5).rain).toBeCloseTo((0.6 * (10 / 9) * 0.5 + 0.5) * 0.5 ** 4, 5);
+    // shimmer 抑制项乘在 clamp 前（:11703-11705）：高雨强裸值超 1 时次序可见
+    w.changeRain(true, 1.0);   // cloudAlpha=1 → base=10/9×0.5+0.5=1.0556 裸值超 1
+    expect(w.loopVolumes(1, true, 0).rain).toBeCloseTo(1, 5);                                  // 无微光：clamp 到 1
+    expect(w.loopVolumes(1, true, 0.2).rain).toBeCloseTo((10 / 9 * 0.5 + 0.5) * 0.8, 5);       // ×0.8 后 <1 不再钳
     expect(v.blizzardStrong).toBe(0);   // 非雪原带
     expect(v.blizzardInside).toBe(0);
     expect(v.sandstorm).toBe(0);
+  });
+
+  it('雨 cue28 地下门：ctx.zoneRain=false → onAmbience 下发 rain=0（SurfaceAtmospherics 门）', () => {
+    const w = new WeatherState(19);
+    w.startRain(true, 0.6);
+    const seen: WeatherLoopVolumes[] = [];
+    for (let i = 0; i < 5; i++) w.update(wctx({ zoneRain: false, zoneSnow: false, onAmbience: (v) => seen.push(v) }));
+    expect(seen[seen.length - 1].rain).toBe(0);          // 地下：门假
+    for (let i = 0; i < 5; i++) w.update(wctx({ zoneRain: true, zoneSnow: false, onAmbience: (v) => seen.push(v) }));
+    expect(seen[seen.length - 1].rain).toBeGreaterThan(0.5);   // 地表：n28 ≥ 0.5 基线
   });
 
   it('暴风雪双轨：blizzardSoundVolume 0.01/tick 渐入（SceneState.cs:252）；室内/室外互切', () => {

@@ -5,14 +5,18 @@
 import { MOON_FLOOR } from './lightTables';
 import { modifyHorizonLight } from './Horizon';
 
-/** timeOfDay → 原版 Main.time(0-86400) */
+/** timeOfDay → 原版 Main.time(0-86400)。★昼夜锚 = Clock.DAWN/DUSK(0.1875/0.8125
+ *  = 4:30AM-7:30PM ↔ Main.time 0..54000,Main.cs:64460 SetBackColor dayTime 窗)——
+ *  曾用 (0.25,0.75) 旧锚:isDay 窗已对齐 0.8125 而映射仍压在 0.75 → t≥0.773 即
+ *  钳到 54000 全黑,原版 19:00-19:30 的橙红黄昏被吞成夜地板(2026-08-24 菜单/游戏内
+ *  云光照 A/B 实测 cots=[35,35,35]@t=0.773,同源偏差双侧共有;正午/午夜映射不变) */
 export function toVanillaTime(timeOfDay: number, isDay: boolean): number {
   if (isDay) {
-    // 0.25(6:00 日出边界)→0,0.75(18:00)→54000,向两端外延钳制
-    const p = (timeOfDay - 0.25) / 0.5;
+    // 0.1875(4:30AM 日出)→0,0.8125(7:30PM)→54000,向两端外延钳制
+    const p = (timeOfDay - 0.1875) / 0.625;
     return Math.max(0, Math.min(1, p)) * 54000;
   }
-  const p = ((timeOfDay - 0.75 + 1) % 1) / 0.5;
+  const p = ((timeOfDay - 0.8125 + 1) % 1) / 0.375;
   return 54000 + Math.max(0, Math.min(1, p)) * 32400;
 }
 

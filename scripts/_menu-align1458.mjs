@@ -14,7 +14,7 @@ for (let i = 0; i < 100 && !menuReady; i++) {
 if (!menuReady) { console.log('FAIL: menu handle missing'); process.exit(1); }
 for (let i = 0; i < 120; i++) {
   const gone = await page.evaluate(() => !document.querySelector('.layer.back')).catch(() => true);
-  if (!gone) break;
+  if (gone) break;
   await new Promise((r) => setTimeout(r, 1000));
 }
 await new Promise((r) => setTimeout(r, 1500));

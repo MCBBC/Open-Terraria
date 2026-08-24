@@ -39,6 +39,19 @@ function hueToRgb(h: number): [number, number, number] {
   return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
 
+/** rgb→hue（Main.rgbToHsl 的 .X 分量——1456 :30632 disco 扰动色相用） */
+function rgbToHue([r, g, b]: [number, number, number]): number {
+  const R = r / 255, G = g / 255, B = b / 255;
+  const mx = Math.max(R, G, B), mn = Math.min(R, G, B);
+  if (mx === mn) return 0;
+  const d = mx - mn;
+  let h: number;
+  if (mx === R) h = ((G - B) / d) % 6;
+  else if (mx === G) h = (B - R) / d + 2;
+  else h = (R - G) / d + 4;
+  return ((h / 6) % 1 + 1) % 1;
+}
+
 export class PrismProng extends Entity {
   w = 18; h = 18;
   /** ai[0] 棱序 0-5 */
@@ -153,13 +166,52 @@ export class PrismProng extends Entity {
         }
       }
     }
-    // ---- 光棱点光 + 彩色尘（:30622-30660 简化）----
+    // ---- 光棱点光 + 光束末端彩色尘 ----
     const [lr, lg, lb] = hueToRgb(this.idx / 6);
     this.lightRGB = [lr / 255 * 0.5, lg / 255 * 0.5, lb / 255 * 0.5];
-    if (Math.random() < 0.5) {
-      game.spawnParticles(this.cx + this.vx * Math.min(this.beamLen, 200),
-        this.cy + this.vy * Math.min(this.beamLen, 200),
-        `rgb(${lr},${lg},${lb})`, 1, 1.2, { life: 16 });
+    // 彩虹激光尘（1456 :30622-30660 1:1）。★1457 已删此段（AI_084 只剩
+    // 455/642/461/537 的束端尘,632 无）——1458 增量面亦无 632 变更；按用户要求
+    // "光束打到的位置才冒粒子"以 1456 公式恢复,备案 docs/weapon-audit-2026-08-22。
+    // 门（:30622）：|localAI[1]−num734|<100（平滑束长贴近原始扫描=束稳定期,
+    // 出生展开瞬间不撒）&& scale>0.15（充能初期不撒）
+    if (Math.abs(this.beamLen - scanLen) < 100 && this.prongScale > 0.15) {
+      // vector76 = Center + velocity×(localAI[1] − 14.5×scale)（:30631）= 光束命中点
+      const ex = this.cx + this.vx * (this.beamLen - 14.5 * this.prongScale);
+      const ey = this.cy + this.vy * (this.beamLen - 14.5 * this.prongScale);
+      const vr = Math.atan2(this.vy, this.vx);
+      // 终色 = Lerp(hue 色, disco 扰动色(hue+rand×0.4,1,0.75), scale/1.4)（:30655）
+      // ——满充(scale 1.4)全 disco 化;disco 时钟缺省回退激光自身色相
+      const disco = (game as unknown as {
+        lighting?: { clock?: { discoColor?: () => [number, number, number] } };
+      }).lighting?.clock?.discoColor?.();
+      const discoHue = disco ? rgbToHue(disco) : this.idx / 6;
+      const t = Math.min(1, this.prongScale / 1.4);
+      const [mr, mg, mb] = hueToRgb((discoHue + Math.random() * 0.4) % 1);
+      const cr = Math.round(lr + (mr - lr) * t);
+      const cg = Math.round(lg + (mg - lg) * t);
+      const cb = Math.round(lb + (mb - lb) * t);
+      for (let i = 0; i < 2; i++) {
+        // 2× 267 号彩虹尘：垂直束向 ±π/2 随机侧、速 1..1.8（:30634-30638）
+        const ang = vr + (Math.random() < 0.5 ? -1 : 1) * Math.PI / 2;
+        const spd = Math.random() * 0.8 + 1;
+        let dvx = Math.cos(ang) * spd, dvy = Math.sin(ang) * spd;
+        let dscale = 1.2;
+        if (this.prongScale > 1) { dvx *= this.prongScale; dvy *= this.prongScale; dscale *= this.prongScale; }   // :30641-30644
+        game.spawnDust?.(ex, ey, 0, 0, 267, dvx, dvy, 0,
+          { r: cr, g: cg, b: cb, a: 255 }, dscale, true);
+        // CloneDust 白色半尺（:30646-30651,scale≠1.4 充能期才出;6000 池满守卫略）
+        if (this.prongScale !== 1.4) {
+          game.spawnDust?.(ex, ey, 0, 0, 267, dvx, dvy, 0,
+            { r: 255, g: 255, b: 255, a: 255 }, dscale / 2, true);
+        }
+      }
+      // 1/5 烟尘 31：垂直偏移 (rand−0.5)×width(18) −(4,4)、8×8、scale 1.5;
+      // 原版速度 0,0 → ×0.5/vy=−|vy| 均为恒零无操作（:30656-30663）
+      if (Math.floor(Math.random() * 5) === 0) {
+        const off = (Math.random() - 0.5) * 18;
+        game.spawnDust?.(ex - Math.sin(vr) * off - 4, ey + Math.cos(vr) * off - 4,
+          8, 8, 31, 0, 0, 100, null, 1.5);
+      }
     }
   }
 

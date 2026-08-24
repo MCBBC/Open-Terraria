@@ -70,7 +70,9 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
   const DMG_HANDS = 15;   // 主线影手/咆哮段伤害（外层 num）
   const far = p != null && !p.dead && Math.hypot(p.cx - e.cx, p.cy - e.cy) >= 450;
   // :44346-44347 lai3 远距爬升 + 免伤（下界 -10 供入场段清零语义）
-  e.lai3 = Math.max(-10, Math.min(30, e.lai3 + (far ? 1 : -1)));
+  // ★R23b 勘误(轻):原版 Clamp 下界=0(:44486),出 -1 态首拍即回 0——
+  // 曾自注「下界 -10 供入场清零语义」系误读,红雾/免伤 ramp 晚 ~10t
+  e.lai3 = Math.max(0, Math.min(30, e.lai3 + (far ? 1 : -1)));
   e.dontTakeDamage = e.lai3 >= 30;
   if (e.lai3 > 0) {
     // :44352-44360 红雾（dust 109）密度随 lai3/30
@@ -625,18 +627,24 @@ export class InsanityShadowProj extends Entity {
     if (variation === 0) {                       // :39847-39856 减速滑行
       this.vx *= 0.98; this.vy *= 0.98;
       this.rotation = Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0);
-    } else if (variation === 1) {                // :39857-39874 绕轴摆荡
+    } else if (variation === 1) {                // :43327-43346 绕轴摆荡
       const t = fc / len;
+      const dir = this.vx > 0 ? 1 : -1;          // :43329 侧别在阻尼前取(0 → -1 同原版)
       if (Math.hypot(this.vx, this.vy) > 0.1) { this.vx *= 0.95; this.vy *= 0.95; }
-      const pivotD = 70 * (this.vx >= 0 ? 1 : -1);
+      const pivotD = 70 * dir;
       const a1 = remap(t, 0.3, 0.5, 0, 1) * remap(t, 0.45, 0.5, 1, 0);
       const a2 = remap(t, 0.5, 0.55, 0, 1) * remap(t, 0.5, 1, 1, 0);
-      this.rotation += (a1 * (Math.PI / 60) + a2 * (-Math.PI * 8 / 60)) * -(this.vx >= 0 ? 1 : -1);
+      // ★R23b-D2 修：枢轴必须用【旧】rotation 定位(:43333 vector=Center−rotVec·d),
+      // 再转 rotation、用【新】rotation 落点(:43345 Center=vector+新 rotVec·d)
+      // ——曾先转再用同一新值算枢轴与落点 → x=cx−cos r·d+cos r·d≡cx,
+      // 整段 120t 位置冻结只自转,变体 1 摆荡轨迹完全丧失。
       const px = this.cx - Math.cos(this.rotation) * pivotD;
       const py = this.cy - Math.sin(this.rotation) * pivotD;
+      this.rotation += (a1 * (Math.PI / 60) + a2 * (-Math.PI * 8 / 60)) * -dir;
+      this.rotation = wrapAngle(this.rotation);                       // :43344 WrapAngle
       this.x = px + Math.cos(this.rotation) * pivotD - this.w / 2;
       this.y = py + Math.sin(this.rotation) * pivotD - this.h / 2;
-    } else if (variation === 2) {                // :39875-39888 俯冲（0.4 处峰值速）
+    } else if (variation === 2) {                // :43348-43361 俯冲（0.4 处峰值速）
       const t = fc / len;
       const v1 = remap(t, 0, 0.4, 1, 0);
       const v2 = remap(t, 0.3, 0.4, 0, 1) * remap(t, 0.4, 1, 1, 0);
@@ -688,6 +696,13 @@ function remap(x: number, a: number, b: number, c: number, d: number): number {
   if (x < a) return c;
   if (x > b) return d;
   return c + (d - c) * ((x - a) / (b - a));
+}
+
+/** MathHelper.WrapAngle（[-π,π] 归一,:43344 消费） */
+function wrapAngle(a: number): number {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
 }
 
 /** 弹幕入桶（与 duke 系同款：hostile 类自管运动,dead 由桶清理） */

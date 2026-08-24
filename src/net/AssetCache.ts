@@ -245,6 +245,9 @@ export function assetsCompleteFast(): boolean {
   try { return !!localStorage.getItem(COMPLETE_FLAG + state.version); } catch { return false; }
 }
 
+/** 与 public/sw.js 的 CACHE_PREFIX 手工同步(缓存名前缀;改须双侧) */
+const CACHE_PREFIX = 'sw-assets-v';
+
 function postToSw(msg: Record<string, unknown>): void {
   const sw = typeof navigator !== 'undefined' ? navigator.serviceWorker?.controller : undefined;
   // version 随消息走:SW 被浏览器击杀重启后内存版本丢失,靠消息里的 version 选对缓存
@@ -309,6 +312,19 @@ export async function initAssetCache(): Promise<void> {
     const sw = navigator.serviceWorker.controller ?? reg.active ?? null;
     if (!sw) return;
     state.enabled = true;
+    // ★首访主壳补登记(2026-08-25):首次加载早于 SW 控制权(claim 传播有竞态),
+    //   主 chunk 未经 SW 缓存 → 第二次访问仍回源一次。此处直写版本缓存
+    //   (http 缓存吸收重复字节);dev 下 import.meta.url 为 /src/*.ts,
+    //   由上方 PROD 门天然排除
+    try {
+      if (import.meta.url.endsWith('.js')) {
+        const shellCache = await caches.open(CACHE_PREFIX + state.version);
+        if (!(await shellCache.match(import.meta.url))) {
+          const res = await fetch(import.meta.url);
+          if (res && res.ok) await shellCache.put(import.meta.url, res.clone());
+        }
+      }
+    } catch { /* 非关键路径 */ }
     (globalThis as unknown as { __swAssetCache?: unknown }).__swAssetCache = {
       state: assetCacheState, warm: warmAllAssets, complete: assetsComplete,
     }; // 调试/探针句柄

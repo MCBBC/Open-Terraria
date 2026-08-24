@@ -104,17 +104,20 @@ describe('分派表 BOSS_BARS_BY_NPC_NET_ID（:44-72）', () => {
     // 266 克脑：ai0<0（二阶段）→ -1（localAI2 投影未含恒 0；BoC 条走静态基表不受影响）
     expect(h({ type: 266, ai0: 0 })).toBe(23);
     expect(h({ type: 266, ai0: -1 })).toBe(-1);
-    // 439 教徒：仪式态(ai0==5)全隐身窗（alpha==255 ⟺ ai1∈[30,90]，AI_084 :65586-65716
-    // alpha 是 ai1 确定函数）→ -1 = Common 条消失；渐隐/渐显/施法段条仍在
+    // 439 教徒：仪式态(ai0==5)隐身窗。R24 勘误（AI_084 写点实测）：[30,90) 无 alpha
+    // 写点【保持 246】非恒 255——alpha==255 仅 ai1==90 单 tick 成立（:65890-65891
+    // 渐显首帧恰 255）；渐隐/施法/中段条均可见，仅单 tick 消失（原版怪癖保留）
     expect(h({ type: 439, ai0: 4, ai1: 0 })).toBe(24);
     expect(h({ type: 439, ai0: 5, ai1: 29 })).toBe(24);
-    expect(h({ type: 439, ai0: 5, ai1: 30 })).toBe(-1);
+    expect(h({ type: 439, ai0: 5, ai1: 30 })).toBe(24);
+    expect(h({ type: 439, ai0: 5, ai1: 89 })).toBe(24);
     expect(h({ type: 439, ai0: 5, ai1: 90 })).toBe(-1);
     expect(h({ type: 439, ai0: 5, ai1: 91 })).toBe(24);
     expect(h({ type: 439, ai0: 5, ai1: 300 })).toBe(24);
     // 440 克隆体：仅仪式可显态（ai0==5 且未全隐）有头像；条链走 NeverValid 不受影响
     expect(h({ type: 440, ai0: 5, ai1: 200 })).toBe(24);
-    expect(h({ type: 440, ai0: 5, ai1: 50 })).toBe(-1);
+    expect(h({ type: 440, ai0: 5, ai1: 50 })).toBe(24);
+    expect(h({ type: 440, ai0: 5, ai1: 90 })).toBe(-1);
     expect(h({ type: 440, ai0: 0, ai1: 0 })).toBe(-1);
     // 基表缺项 → -1
     expect(h({ type: 17 })).toBe(-1);
@@ -125,8 +128,10 @@ describe('分派表 BOSS_BARS_BY_NPC_NET_ID（:44-72）', () => {
 // 动态头像 → 条显隐链（CommonBossBigProgressBar.cs:23-27 的 -1 即 validate 失败）
 // ---------------------------------------------------------------------------
 describe('动态头像驱动条显隐（bossHeadIndexOf 消费端）', () => {
-  it('教徒仪式隐身窗：Common 条消失；可见段条在', () => {
+  it('教徒仪式隐身窗（R24 勘误后）：中段条可见；ai1==90 单 tick 消失', () => {
     const c = npc({ type: 439, life: 4000, lifeMax: 8000, ai0: 5, ai1: 50 });
+    expect(COMMON_BAR.validateAndCollect(c, makeCtx({ npcs: [c] }))!.headIndex).toBe(24);
+    c.ai1 = 90;                                             // 渐显首帧恰 alpha==255
     expect(COMMON_BAR.validateAndCollect(c, makeCtx({ npcs: [c] }))).toBeNull();
     c.ai1 = 200;                                            // 施法段（可见）
     const r = COMMON_BAR.validateAndCollect(c, makeCtx({ npcs: [c] }))!;

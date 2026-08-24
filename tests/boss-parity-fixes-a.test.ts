@@ -625,7 +625,7 @@ describe('月总核心 Lerp/清弹/兜底 + 头 -2 帧推进(2026-08-19 台账 E
     head.spin = 5;
     moonLordHeadAI(head, h.hooks, h.player as never);
     expect(head.ai0).toBe(-2);
-    expect(head.def.damage).toBe(80);
+    expect(head.def.damage).toBe(0);          // ★R23b-K1:残肢接触伤 1456=80 → 1458=0(:42589)
     expect(head.spin).not.toBe(5);            // = x.l0(0)——曾提前 return 冻住
     // 核心死亡演出中 → -2 转 -3(此 tick 允许 return)
     core.ai0 = 2;

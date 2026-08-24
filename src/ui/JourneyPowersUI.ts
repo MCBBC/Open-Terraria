@@ -30,15 +30,17 @@ import {
 
 /** 背包内物品点击给 1 / shift 给整组（原版 cursorOverride==7 抓取：整组 =
  *  maxStack，ItemSlot.cs:750-762 经 Player.GetItem 入包——合并/空格全程 maxStack
- *  钳制，溢出落地。R24 修复：曾 s.stack+=stack 直加可造 1099/999 超限堆叠入档） */
-function giveItem(game: Game, internalId: number, stack: number): void {
+ *  钳制，溢出落地。R24 修复：曾 s.stack+=stack 直加可造 1099/999 超限堆叠入档）。
+ *  export 供 redblue 回归直测钳制语义 */
+export function giveItem(game: Game, internalId: number, stack: number): void {
   const inv = game.player.inv;
   const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
   const want = Math.min(stack, Math.max(1, def?.maxStack ?? 999));
   const left = inv.add(internalId, want);
-  if (left > 0) {
+  const key = def?.key;
+  if (left > 0 && key) {
     game.spawnDrop(game.player.cx, game.player.cy,
-      ITEM_DEFS[internalId].key, left, 0, -2);   // 溢出落地（GetItem 溢出语义）
+      key, left, 0, -2);   // 溢出落地（GetItem 溢出语义）
   }
   game.cb.onInventoryChanged?.();
 }

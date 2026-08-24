@@ -100,6 +100,10 @@ export class WorldStore {
 
   async delete(id: number) {
     await this.ensureLoaded();
+    // 收藏防删（UIWorldListItem.cs:151-157：!IsFavorite 才挂删除处理器；
+    // 数据层守门防 UI 漏接/竞态——收藏世界不可逆丢档）
+    const m = this.index.find((x) => x.id === id);
+    if (m?.favorite) return;
     this.index = this.index.filter((x) => x.id !== id);
     await this.saveIndex();
     await kvDelete(dataKey(id));

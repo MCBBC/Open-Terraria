@@ -2265,21 +2265,29 @@ export class SkyRenderer {
     this.cloudCelestial = { posX: body.x, posY: body.y, intensity: num, r: r / 255, g: g / 255, b: b / 255 };
   }
   /** DrawClouds_Closer + _Closest（:58871/:58942——群系背景层之后）：
-   *  pass2 scale∈[1,1.15)：cY = y×(H/600)+bgTopY+150；pass3 ≥1.15：cY = y×(H/600)−100+bgTopY×1.01−150 */
-  drawCloudsNear(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camY: number) {
+   *  pass2 scale∈[1,1.15)：cY = y×(H/600)+bgTopY+150；pass3 ≥1.15：cY = y×(H/600)−100+bgTopY×1.01−150。
+   *  which 分 pass 选择（2026-08-24 菜单插层：原版 DrawSurfaceBG 层序 cs:60386/:60457
+   *  把两 pass 夹在远山 Step1/Step2 与树层之间——菜单经 BiomeBackground.drawMenu 的
+   *  near 回调分次调用；游戏内 Renderer 缺省 'both' 行为零改动 */
+  drawCloudsNear(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camY: number,
+    which: 'both' | 'closer' | 'closest' = 'both') {
     const camTop = camY - viewH / 2;
     if (camTop >= this.fx.surfaceY + 16) return;
     const { bgTopY } = this.cloudBgTop(camY, viewH);
     const sH = viewH / 600;
     const scratch = this.cloudScratch;   // 两 pass 同步消费,单 scratch 顺序复用
-    scratch.length = 0;
-    for (const c of this.vclouds) if (c.scale >= 1 && c.scale < 1.15) scratch.push(c);
-    this.drawCloudPass(ctx, scratch, 2, camY,
-      (c) => c.y * sH + bgTopY + 150);
-    scratch.length = 0;
-    for (const c of this.vclouds) if (c.scale >= 1.15) scratch.push(c);
-    this.drawCloudPass(ctx, scratch, 3, camY,
-      (c) => c.y * sH - 100 + bgTopY * 1.01 - 150);
+    if (which !== 'closest') {
+      scratch.length = 0;
+      for (const c of this.vclouds) if (c.scale >= 1 && c.scale < 1.15) scratch.push(c);
+      this.drawCloudPass(ctx, scratch, 2, camY,
+        (c) => c.y * sH + bgTopY + 150);
+    }
+    if (which !== 'closer') {
+      scratch.length = 0;
+      for (const c of this.vclouds) if (c.scale >= 1.15) scratch.push(c);
+      this.drawCloudPass(ctx, scratch, 3, camY,
+        (c) => c.y * sH - 100 + bgTopY * 1.01 - 150);
+    }
     void viewW;
   }
   /** 单通道绘制（云色链 NextHorizonRenderer.DrawCloud :246-268 1:1）：

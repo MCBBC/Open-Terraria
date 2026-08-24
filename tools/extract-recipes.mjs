@@ -527,6 +527,38 @@ const doc = {
 // --out <path>（2026-08-22）：对拍产物落 /tmp，缺省仍写现库路径（保持原行为）
 const outIdx = process.argv.indexOf('--out');
 const OUT_PATH = outIdx >= 0 ? process.argv[outIdx + 1] : JSON_PATH;
+
+// ---- ★R25-B5② 强制门（2026-08-24）：手工补丁防清零 ----
+// 缺省全量重跑=整文件覆盖现库，而现库含大量提取器不产出的 stored 独有手工补丁
+// （红队 r25 债 6-B5② 干跑实测 357 条会被抹：3376 vs 3342）。凡目标=现库路径且
+// 重生成集盖不住存量（stored-only>0）→ 中止退出(1)，显式 --force 才放行；
+// --out 落别处（对拍/对比流）与 --append-loops 追加模式不受此门限制。
+if (OUT_PATH === JSON_PATH) {
+  try {
+    const existing = JSON.parse(readFileSync(JSON_PATH, 'utf8'));
+    const existingRecipes = Array.isArray(existing.recipes) ? existing.recipes : [];
+    const existingKeys = new Set(existingRecipes.map(dedupKey));
+    const freshKeys = new Set(out.map(dedupKey));
+    const storedOnly = existingRecipes.filter((r) => !freshKeys.has(dedupKey(r)));
+    if (storedOnly.length > 0) {
+      const freshOnly = out.filter((r) => !existingKeys.has(dedupKey(r))).length;
+      if (process.argv.includes('--force')) {
+        console.error(`[extract-recipes] --force 放行：将抹掉 ${storedOnly.length} 条存量独有配方`
+          + `（现库 ${existingRecipes.length} → 新 ${out.length}，fresh-only ${freshOnly}）`);
+      } else {
+        console.error(`[extract-recipes] 强制门中止：全量重生成将抹掉 ${storedOnly.length} 条存量独有配方`
+          + `（现库 ${existingRecipes.length} 条 vs 重生成 ${out.length} 条，fresh-only ${freshOnly}）`);
+        console.error('  存量样例:', JSON.stringify(storedOnly.slice(0, 3)));
+        console.error('  确认覆盖请显式 --force；只把差集追加进现库用 --append-loops；'
+          + '对拍产物落别处用 --out <path>。');
+        process.exit(1);
+      }
+    }
+  } catch (e) {
+    if (e && e.code !== 'ENOENT') throw e;   // 现库不存在（首产）不受门限
+  }
+}
+
 writeFileSync(OUT_PATH, JSON.stringify(doc));
 console.error(`[${TREE}] 配方 ${out.length} 条 / 组 ${Object.keys(GROUP_ID).length} / 站点继承 ${Object.keys(TILE_COUNTS_AS).length} → ${OUT_PATH}`);
 console.error('样例:', JSON.stringify(out[0]), JSON.stringify(out[1] ?? null));

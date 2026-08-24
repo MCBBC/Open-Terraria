@@ -65,26 +65,39 @@ const result = await page.evaluate(async (md) => {
   st.liquid.set(decPairs(md.liquid));
   g.chunks.invalidateAll?.();
   const pl = g.player;
-  pl.x = md.px; pl.y = md.py - pl.h / 2; pl.vx = 0; pl.vy = 0;
+  // 落地定位:从 (md.px, md.py) 向下找第一个实心格,站其上
+  const pin = () => { pl.x = md.px; pl.y = md.py - pl.h / 2; pl.vx = 0; pl.vy = 0; };   // map player = 像素坐标直用
+  pin();
   // 手持火把照明
   pl.inv.slots[pl.inv.selected] = { id: 8, stack: 1 };
   g.cb.onInventoryChanged?.();
-  await new Promise((r) => setTimeout(r, 3000));
-  // ---- 孤立暗列检测 ----
+  // 等烘焙+固定玩家
+  for (let i = 0; i < 50; i++) { pin(); await new Promise((r) => setTimeout(r, 50)); }
+  // ---- 孤立暗列检测(pin 后同步采样,物理不跑) ----
   const cv = g.renderer.canvas;
   const c2 = document.createElement('canvas'); c2.width = cv.width; c2.height = cv.height;
   const ctx2 = c2.getContext('2d');
-  ctx2.drawImage(cv, 0, 0);
-  const full = ctx2.getImageData(0, 0, cv.width, cv.height).data;
+  const full = ctx2.createImageData(cv.width, cv.height);
   const W = cv.width, H = cv.height;
-  const bright = (x, y) => full[(y * W + x) * 4] + full[(y * W + x) * 4 + 1] + full[(y * W + x) * 4 + 2] > 45;
   const seams = [];
-  for (let sx = 60; sx < W - 60; sx++) {
-    let isolated = 0;
-    for (let sy = 60; sy < H - 4; sy++) {
-      if (!bright(sx, sy) && bright(sx - 24, sy) && bright(sx + 24, sy)) isolated++;
+  let sampled = false;
+  for (let i = 0; i < 60; i++) {
+    pin();
+    await new Promise((r) => setTimeout(r, 50));
+    if (i < 30) continue;   // 前 1.5s 等烘焙/光照稳定
+    pin();
+    ctx2.drawImage(cv, 0, 0);
+    full.data.set(ctx2.getImageData(0, 0, cv.width, cv.height).data);
+    const bright = (x, y) => full[(y * W + x) * 4] + full[(y * W + x) * 4 + 1] + full[(y * W + x) * 4 + 2] > 45;
+    seams.length = 0;
+    for (let sx = 60; sx < W - 60; sx++) {
+      let isolated = 0;
+      for (let sy = 60; sy < H - 4; sy++) {
+        if (!bright(sx, sy) && bright(sx - 24, sy) && bright(sx + 24, sy)) isolated++;
+      }
+      if (isolated > 25) seams.push({ sx, isolated });
     }
-    if (isolated > 25) seams.push({ sx, isolated });
+    sampled = true;
   }
   const merged = [];
   for (const s of seams) {
@@ -97,8 +110,8 @@ const result = await page.evaluate(async (md) => {
     const wx = cam.x + (s.sx - W / 2) / cam.zoom;
     return { ...s, tx: Math.floor(wx / 16) };
   });
-  await page.screenshot;
-  return { seamCount: outSeams.length, seams: outSeams.slice(0, 8), player: [Math.floor(pl.cx / 16), Math.floor(pl.cy / 16)] };
+  return { seamCount: outSeams.length, seams: outSeams.slice(0, 10), player: [Math.floor(pl.cx / 16), Math.floor(pl.cy / 16)], gy, sampled };
+  return { seamCount: outSeams.length, seams: outSeams.slice(0, 10), player: [Math.floor(pl.cx / 16), Math.floor(pl.cy / 16)], gy };
 }, MAPDATA);
 console.log(JSON.stringify(result));
 await page.screenshot({ path: '/tmp/userworld.png' });

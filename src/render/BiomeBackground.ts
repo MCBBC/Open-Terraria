@@ -1105,7 +1105,9 @@ export class BiomeBackground {
     }
   }
 
-  /** 主菜单地表背景绘制（sky.draw/drawMenuFlare 之后调）。ctx 直绘不走 BGBlit：
+  /** 主菜单地表背景绘制（sky.draw 之后调；晨昏光斑由 MenuBackground 在本方法
+   *  之后画 = 原版 DrawLensFlare cs:63074 在 DrawBG cs:63061 后的层序）。
+   *  ctx 直绘不走 BGBlit：
    *  腐化 L2 恒水平翻转（cs:62122 FlipHorizontally 无条件）与精确 tint 烘焙
    *  均为 ctx 侧能力，菜单本就 2D 合成。tint=null = 近白免烘；camX = MenuXMovement
    *  累积器（+4/帧 wrap ±2^31，cs:49041-49050），横向视差锚。

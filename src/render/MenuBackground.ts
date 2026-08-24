@@ -197,7 +197,9 @@ export class MenuBackground {
     }
     // 背景组重掷调度（cs:20070-20100，抓取中照跑）。★可见槽保留（原版菜单零硬切）：
     //  夜重掷保 corruptBG（setBG(1,style) cs:20085——夜槽=腐化正显示）、
-    //  昼重掷保 treeBG1（setBG(0,treeBG) cs:20097——昼槽=森林正显示）
+    //  昼重掷保 treeBG1（setBG(0,treeBG) cs:20097——昼槽=森林正显示）。
+    //  锁定期两旗恒 true（cs:20096-20098 else 分支）——解锁后当夜/当日不再补掷，
+    //  曾缺 = 解锁瞬间立即补掷一次（与原版时序差一拍）
     if (!this.lockBG) {
       if (this.dayTime) {
         this.menuBGChangedDay = false;
@@ -217,6 +219,9 @@ export class MenuBackground {
         this.randomizeMenuBG();
         this.style = keepForest;
       }
+    } else {
+      this.menuBGChangedDay = true;                    // cs:20096-20098
+      this.menuBGChangedNight = true;
     }
     // 样式注入 + 昼夜 bgStyle 翻转（cs:64981 夜=1 Corruption/昼=0 Forest1）与双槽
     // 0.02/帧交叉淡化（gameMenu transitionSpeed cs:64978 + FrontLayer 坡道 cs:65065）
@@ -253,11 +258,19 @@ export class MenuBackground {
     // 云 GL 层每帧注入(Renderer 帧路径同款;不可用/退避期 null = 2D 兜底)
     this.sky.cloudGlLayer = this.acquireCloudGL();
     this.sky.draw(this.ctx, this.clock, W, H, this.camX, dtMs, camY);
-    // 晨昏镜头光斑（DoDraw 菜单路径 :61550 DrawLensFlare——落日/朝阳径向辉光）
-    this.sky.drawMenuFlare(this.ctx, W, H, camY);
     // 层渲染委托（远山/树层/腐化槽，BiomeBackground menuMode 分支）：
-    // tint = ColorOfTheSkies 单源（:61409 菜单也跑 SetBackColor → :56194），近白免烘
-    this.biomeBg.drawMenu(this.ctx, W, H, this.layerTint(), this.camX);
+    // tint = ColorOfTheSkies 单源（:61409 菜单也跑 SetBackColor → :56194），近白免烘。
+    // near = 云三通插层（原版 DrawSurfaceBG 层序 cs:60384-60457：Step1 远山 →
+    // DrawClouds_Closer → Step2 远山 → DrawClouds_Closest → 树层）——菜单此前
+    // 只画 sky 层内的 distant pass，closer/closest 两 pass 缺失
+    this.biomeBg.drawMenu(this.ctx, W, H, this.layerTint(), this.camX, {
+      closer: () => this.sky.drawCloudsNear(this.ctx, W, H, camY, 'closer'),
+      closest: () => this.sky.drawCloudsNear(this.ctx, W, H, camY, 'closest'),
+    });
+    // 晨昏镜头光斑（DoDraw 菜单路径 cs:63074 DrawLensFlare——★层序在 DrawBG
+    // cs:63061 之后 = 光斑画在背景层【上】；曾画在 drawMenu 之前 = 被山/树压住）。
+    // 游戏内侧 cs:63274 另有调用点（Renderer 自管，未动）
+    this.sky.drawMenuFlare(this.ctx, W, H, camY);
   }
 
   /** 层 tint = ColorOfTheSkies（cs:64527 菜单也跑 SetBackColor → 层色 ×cots）。

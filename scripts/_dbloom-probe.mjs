@@ -42,7 +42,7 @@ const out = await page.evaluate((key) => {
   const calls = { useCombatWeapon: 0, useSwing: 0, err: null };
   const origUCW = g.useCombatWeapon?.bind(g);
   const origUS = g.useSwing?.bind(g);
-  if (origUCW) g.useCombatWeapon = (...a) => { calls.useCombatWeapon++; return origUCW(...a); };
+  if (origUCW) g.useCombatWeapon = (...a) => { calls.useCombatWeapon++; try { return origUCW(...a); } catch (e) { calls.ucwErr = String(e).slice(0, 300); calls.ucwStack = new Error().stack.split('\n').slice(2, 4).join(' | ').slice(0, 300); } };
   if (origUS) g.useSwing = (...a) => { calls.useSwing++; if (calls.useSwing > 2 && calls.useSwing < 6) { calls['stack' + calls.useSwing] = new Error().stack.split('\n').slice(2, 5).join(' | ').slice(0, 400); } try { return origUS(...a); } catch (e) { calls.err = String(e).slice(0, 200); throw e; } };
   const trace = [];
   for (let t = 0; t < 120; t++) {

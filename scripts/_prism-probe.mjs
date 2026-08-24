@@ -49,6 +49,26 @@ await new Promise((r) => setTimeout(r, 2000));
 const run = await page.evaluate(async () => {
   const g = window.__swGame;
   const log = { sfx: [], prismSpawned: false, charge: [], dead: false };
+  // 挂 playSfxFiles 计数 + spawnDust 记 267 号尘
+  const dustLog = [];
+  const origDust = g.spawnDust?.bind(g);
+  if (origDust) g.spawnDust = (x, y, w, h, type, ...rest) => {
+    if (type === 267) {
+      dustLog.push({ x, y, t: performance.now() });
+      // 同帧即时比对:尘位置 vs 此刻全部光棱的期望束端(生成棱的必 ≤1px)
+      const prongsNow = g.entities.projectiles.filter((q) => q.constructor.name === 'PrismProng');
+      let min = Infinity;
+      for (const p2 of prongsNow) {
+        const ex = p2.cx + p2.vx * (p2.beamLen - 14.5 * p2.prongScale);
+        const ey = p2.cy + p2.vy * (p2.beamLen - 14.5 * p2.prongScale);
+        const d = Math.hypot(x - ex, y - ey);
+        if (d < min) min = d;
+      }
+      dustLog[dustLog.length - 1].spawnDist = Number.isFinite(min) ? Math.round(min * 100) / 100 : -1;
+    }
+    return origDust(x, y, w, h, type, ...rest);
+  };
+  window.__dustLog = dustLog;
   // 挂 playSfxFiles 计数
   const origSfx = g.playSfxFiles.bind(g);
   window.__origSfx = origSfx;
@@ -76,6 +96,12 @@ const run = await page.evaluate(async () => {
       log.prismSpawned = true;
       log.charge.push(Math.round(pr.charge));
       log.dead = pr.dead;
+      const prongsNow = g.entities.projectiles.filter((q) => q.constructor.name === 'PrismProng');
+      if (prongsNow.length) {
+        const tNow = performance.now();
+        log.beamEnd = { x: prongsNow[0].cx + prongsNow[0].vx * prongsNow[0].beamLen, y: prongsNow[0].cy + prongsNow[0].vy * prongsNow[0].beamLen, beamLen: Math.round(prongsNow[0].beamLen) };
+        (window.__endsLog = window.__endsLog || []).push({ t: tNow, ends: prongsNow.map((p2) => ({ x: p2.cx + p2.vx * (p2.beamLen - 14.5 * p2.prongScale), y: p2.cy + p2.vy * (p2.beamLen - 14.5 * p2.prongScale) })) });
+      }
     }
   }
   window.__prismLog = log;
@@ -87,11 +113,20 @@ const run2 = await page.evaluate(() => {
   g.input.mouseDown = false;
   const log = window.__prismLog;
   log.crystal = window.__prismCap.length;
+  const dl = window.__dustLog;
+  log.dust267 = dl.length;
+  log.dustSample = dl.slice(-3);
+  // 断言:每粒 267 尘到【当前】光棱束端距离(束稳定期 aim 固定,beamLen 变化缓)
+  const dists = dl.map((d) => d.spawnDist).filter((v) => typeof v === 'number' && v >= 0);
+  if (dists.length) {
+    dists.sort((a, b) => a - b);
+    log.dustSpawnDist = { max: dists[dists.length - 1], p95: dists[Math.floor(dists.length * 0.95)], median: dists[Math.floor(dists.length / 2)] };
+  }
   log.crystalSample = window.__prismCap[0] ?? null;
   g.playSfxFiles = window.__origSfx;
-  return { crystal: log.crystal, crystalSample: log.crystalSample };
+  return { crystal: log.crystal, crystalSample: log.crystalSample, dust267: log.dust267, dustSample: log.dustSample, beamEnd: log.beamEnd, dustSpawnDist: log.dustSpawnDist };
 });
-console.log('实测:', JSON.stringify({ ...run, crystal: run2.crystal, crystalSample: run2.crystalSample }, null, 1));
+console.log('实测:', JSON.stringify({ ...run, ...run2 }, null, 1));
 const expectSfx = run.sfx?.length ?? 0;
 console.log(`${expectSfx >= 5 ? 'PASS' : 'FAIL'}: 充能音 Item_15 播放 ${expectSfx} 次(2.5s 充能预期 ≥5)`);
 const cr = run2.crystal ?? 0;

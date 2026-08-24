@@ -29,6 +29,11 @@ self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
     await self.clients.claim();
+    // ★版本未知(currentVersion='')时禁止 GC(2026-08-25 OSS 首访 404 风暴根因):
+    //   首访 claim 落地可能晚于页面建缓存/开暖——此处按 keep='' 清扫会把暖缓存的
+    //   sw-assets-v* 当孤儿整仓删掉(put 全部写进被删句柄=静默假完成)。GC 移交
+    //   init 消息处的 gcOldCaches()(那时 version 已由消息带入)
+    if (!currentVersion) return;
     const keep = cacheName();
     for (const name of await caches.keys()) {
       if (name.startsWith(CACHE_PREFIX) && name !== keep) await caches.delete(name);
@@ -45,11 +50,16 @@ self.addEventListener('fetch', (e) => {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   if (req.method !== 'GET' || !currentVersion) return;
   const path = url.pathname;
-  // ② 应用壳(vite 内容寻址 JS/CSS + 文档):网络优先+离线回退——真断网也能进游戏
-  //    (JS 带 hash,旧缓存仅在离线时兜底,在线永远走网络=更新不卡壳)
+  // ② 应用壳(拆双策略,2026-08-25):
+  //    a) 内容寻址资产(/assets/ 下 js/css/woff2 均为 vite 哈希名,不可变):
+  //       cache-first——老用户重复访问零重下(实测省主 chunk 2.2MB gz/次)。
+  //       新版本经 index.html(文档仍网络优先)引用新哈希名自然更新,不存在
+  //       "更新卡壳":2026-08-13 的顾虑基于当时未依赖纯哈希寻址,现 /assets/
+  //       下全部为内容寻址名,旧条目随版本换代(gcOldCaches)自然清理。
+  //    b) 文档(index.html 等):网络优先+离线回退——版本发现入口,语义不变。
   const isShellJs = /^\/assets\/.+\.(js|css|woff2?)$/.test(path);
   const isDoc = req.destination === 'document' || path === '/' || path.endsWith('.html');
-  if (isShellJs || isDoc) {
+  if (isDoc) {
     e.respondWith((async () => {
       const cache = await getCache();
       try {
@@ -61,6 +71,20 @@ self.addEventListener('fetch', (e) => {
         if (hit) return hit;
         throw err;
       }
+    })());
+    return;
+  }
+  if (isShellJs) {
+    e.respondWith((async () => {
+      const cache = await getCache();
+      const hit = await cache.match(req);
+      if (hit) return hit;
+      try {
+        const res = await fetch(req);
+        if (res && res.ok) { await cache.put(req, res.clone()); return res; }
+        if (res) return res;   // 非 ok(404 等)直通不缓存
+      } catch (err) { /* 离线且无缓存 → 504 */ }
+      return new Response('', { status: 504, statusText: 'offline' });
     })());
     return;
   }

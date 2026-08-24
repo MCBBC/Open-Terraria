@@ -530,7 +530,8 @@ describe('dd2：索敌 / 食人魔 / AI_107 刹车 / AI_108 击退 / 炮与门',
     const portal = spawn(h, 549, 100, 60);
     portal.bInit = true; portal.ai1 = 1; portal.ai0 = 100;
     lanePortalAI(portal, h.hooks, h.player);
-    expect(portal.iframes).toBeGreaterThan(0);   // 消散期不可击（曾可被玩家击杀）
+    // ★R23b 系统性修后无敌走真旗标 dontTakeDamage(:43124),iframes 近似退役
+    expect(portal.dontTakeDamage).toBe(true);   // 消散期不可击（曾可被玩家击杀）
     portal.ai0 = 549;
     lanePortalAI(portal, h.hooks, h.player);     // 550 → 解除并自灭
     expect(portal.dead).toBe(true);

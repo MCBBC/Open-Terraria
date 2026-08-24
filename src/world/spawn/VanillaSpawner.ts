@@ -19,6 +19,8 @@ import { TileStore, LIQUID_TYPE } from '../TileStore';
 import { mainExpertMode, netIdSpawnScale, scaleStatsWorld } from '../../stats/ScaleStats';
 import { spawnRateMultiplier } from '../JourneyPowers';
 import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollBadLuck, rollLuck } from '../../stats/Luck';
+import { canHit } from '../../physics/LineOfSight';
+import { chumSpots } from '../../entities/chumBucket';
 
 /** 星璇塔刷怪上下文（Game 每帧随 setPlayerFlags 传入；null=事件未开启/不在任何塔区） */
 export interface LunarSpawnCtx {
@@ -1755,11 +1757,23 @@ export class VanillaSpawner {
       }
       // 海鸥 602（L1762-1765）：干隙线存在 + !xRange + 1/10 → 落在水面线 num17
       if (num17 > 0 && !this.xRange && N(10)) return this.spawnNPC(x, num17 * TILE, 602, rng);
-      // 鲨鱼 65（L1766-1769）：1/SharkSpawnChance。原版 SharkSpawnChance（L5458-5475）
-      //  基础 10，落点水面上方可命中弹体 820（血腥诱饵 Chum，Chum Caster 鱼竿施放）时降为 2。
-      //  依赖链未实装：items.ts 无 Chum 物品注册、无弹体 820 → 恒 10（依赖：
-      //  Chum Bucket/Chum Caster 物品 + 鱼竿弹体系统）
-      const sharkChance = 10;
+      // 鲨鱼 65（L1766-1769）：1/SharkSpawnChance。SharkSpawnChance（NPC1458.cs:5558-5576）
+      //  基础 10；从落点上一格向上走水柱至水面（y-- while !SolidTile3 && liquid>0,y++），
+      //  水面点 Collision.CanHit(活体弹体 820 矩形) 命中 → 2。本仓 820 走 chumBucket
+      //  注册面（实体未实装,现恒空表 → 恒 10,与 vanilla 无 chum 投掷时同态;R25-E10 接线）
+      let sharkChance = 10;
+      {
+        let syw = this.spawnTileY - 1;
+        while (st.inBounds(this.spawnTileX, syw) && !st.isSolid(this.spawnTileX, syw)
+          && st.liquid[st.idx(this.spawnTileX, syw)] > 0) syw--;
+        syw++;
+        if (st.inBounds(this.spawnTileX, syw)) {
+          const px1 = this.spawnTileX * TILE + 8, py1 = syw * TILE;   // :5569 CanHit 起点(x*16+8,y*16) 1×1
+          for (const s of chumSpots()) {
+            if (canHit(st, px1, py1, 1, 1, s.x, s.y, s.w, s.h)) { sharkChance = 2; break; }
+          }
+        }
+      }
       if (N(sharkChance)) return D(65);
       // 鲨鱼龙 692（L1770-1773，困难）：json 已有条目（1:1 虎鲸属性，aiStyle 16 游泳族）
       if (hardMode && N(sharkChance)) return D(692);

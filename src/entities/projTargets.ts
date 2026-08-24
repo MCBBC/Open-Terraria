@@ -109,10 +109,17 @@ export function playerCanHitEnemy(
   game: GameHooks,
   projId = 0,
 ): boolean {
-  const t = e as { vanillaId?: number | null; def?: { friendly?: boolean } } | null | undefined;
+  const t = e as { vanillaId?: number | null; def?: { friendly?: boolean }; immortal?: boolean } | null | undefined;
+  // CanBeChasedBy 的 !immortal / chaseable 门（NPC.cs:91141-91147，1457 全表提取）：
+  //  immortal=true：488 训练假人 / 690 伪装雕像 / 133 巡游之眼（事件眼非本体重生态）
+  //  chaseable=false：399 火星探测 probe / 416 日耀骑手骑体 / 437 教徒祭坛石板 /
+  //  438 教徒信徒 / 440 教主克隆体 / 523 远古末日球——均不可被**索敌瞄准**
+  //  （玩家手动攻击走直接命中不受限。2026-08-24 用户报"召唤宠物追打假人"）
+  const vid = t?.vanillaId;
+  if (vid !== undefined && vid !== null && (vid === 488 || vid === 690 || vid === 133 || vid === 399
+    || vid === 416 || vid === 437 || vid === 438 || vid === 440 || vid === 523)) return false;
   if (!t?.def?.friendly) return true;
   if (projId === 318) return true;
-  const vid = t.vanillaId ?? -1;
   const eq = (game.player as unknown as { equipStats?: { killGuide?: boolean; killClothier?: boolean } } | null)
     ?.equipStats;
   if (vid === 22 && eq?.killGuide) return true;

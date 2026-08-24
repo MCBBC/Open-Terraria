@@ -38,7 +38,9 @@ export class CharacterStore {
 
   list(): CharacterMeta[] { return [...this.index]; }
 
-  /** 收藏切换（原版 FavoriteButtonClick；收藏行不可删除为原版语义，本作未接） */
+  /** 收藏切换（原版 FavoriteButtonClick）。
+   *  收藏行禁删 = 原版语义：UICharacterListItem.cs:114-116 仅 !IsFavorite 才挂
+   *  DeleteButtonClick（R24 起本仓同构——数据层再兜一道门） */
   async setFavorite(id: number, v: boolean) {
     const m = this.index.find((x) => x.id === id);
     if (!m) return;
@@ -78,6 +80,10 @@ export class CharacterStore {
 
   async delete(id: number) {
     await this.ensureLoaded();
+    // 收藏防删（UICharacterListItem.cs:114-116：!IsFavorite 才挂删除处理器；
+    // 数据层守门防 UI 漏接/竞态——收藏行不可逆丢档）
+    const m = this.index.find((x) => x.id === id);
+    if (m?.favorite) return;
     this.index = this.index.filter((x) => x.id !== id);
     await this.saveIndex();
     await kvDelete(dataKey(id));

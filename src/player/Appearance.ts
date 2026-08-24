@@ -174,6 +174,8 @@ export function scaledLuminosity(l: number): number {
   return l * 0.85 + 0.15;
 }
 
+/** 反向缩放（RgbToScaledHsl :2364-2369）——入参 r/g/b 取 0-255 域（同原版 Color），
+ *  返回 HSL 0-1（亮度已逆缩放并钳位）。 */
 export function rgbToScaledHsl(r: number, g: number, b: number): [number, number, number] {
   const [h, s, l] = rgbToHsl(r, g, b);
   const z = Math.max(0, Math.min(1, (l - 0.15) / 0.85));
