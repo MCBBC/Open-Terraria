@@ -11229,6 +11229,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           const bolt6155 = new StormLightning(1117, sx6155, sy6155,
             Math.max(1, Math.round(cw.damage * 0.8)), cw.knockback);
+          bolt6155.seed = (Math.random() * 0x80000000) | 0;   // ai2=rand(MaxFloatInt+1)（:49661）
           bolt6155.critChance = critTotal;
           bolt6155.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           bolt6155.mouseWorld = () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; };
@@ -11256,6 +11257,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           sx6173 += (Math.random() * 2 - 1) * 20; sy6173 += (Math.random() * 2 - 1) * 20;  // Circular(20,20)
           const drop6173 = (bx: number, by: number) => {
             const b = new StormLightning(1122, bx, by, cw.damage, cw.knockback);
+            b.seed = (Math.random() * 0x80000000) | 0;   // ai2（:49678/:49692 每颗独立掷）
             b.critChance = critTotal;
             b.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
             this.entities.add(b, 'projectiles');

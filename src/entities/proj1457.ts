@@ -18,6 +18,8 @@ import { canHit } from '../physics/LineOfSight';
 import { playerCanHitEnemy } from './projTargets';
 import { applyProjStatus } from './projStatus';
 import { projSprite } from './Arrow';
+import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
+  type Bolt } from '../fx/LightningGenerator';
 
 /** 同敌命中去重/冷却表（WeaponProj.HitCooldown 同构——该类模块私有，此处独立一份） */
 class HitCdImpl {
@@ -550,14 +552,22 @@ export class PetalstormShot extends Entity {
 
 /** 6155 LightningStrike（1117）出手（Player.cs:49686-49703）：落点 = 鼠标位钳可达区,
  *  出手沿 aim 步进至距鼠标 <20+|vx|+|vy| 吸附；再沿 aim 反向退出实心块（≤16 步）；
- *  ai0=−1 / ai2=rand 种子。6173 ArcSurge（1122）（:49704-49745）：鼠标位钳可达 + 距离
+ *  ai0=−1 / ai2=rand 种子。6173 ArcSurge（1122）（:49670-49703）：鼠标位钳可达 + 距离
  *  <shootSpeed×20 外推 + ±20px 抖动,再向 GetSparkleGuitarTarget 前 2 个有效目标
  *  各补一颗（Game 侧实现）。AI_203（:40360-40560）：
  *  - 1117：寿命 30、索敌门 CanBeChasedBy、搜索半径 12、无目标跟鼠标（v=鼠标−中心
  *    钳 16,撞实心停）；1122：寿命 240、半径 32、无鼠标跟随、玩家侧 localAI[2] 5 次
  *    豁免计数后可选中玩家（自伤链,本仓玩家弹不伤主——登记）
+ *  - 目标锁定（ai[0] Pack/Unpack :40508-40560）：锁定后每帧校验,失效即 Kill
  *  - 中心 MoveTowards(目标,32)；ai[1]++≥寿命 Kill；ai[1]==寿命×0.15 播 NPCHit34
- *  - 命中：接触盒结算（1117 local 免疫 −1 :10481 段 / 1122 IDStatic 10 :10567 段）
+ *  - ★命中模型（Colliding :15962 aiStyle 203 支 → StormLightningCollisionCheck
+ *    :16205）：飞行期【无普通接触盒】——仅 Kill 帧 GenerateMainBoltPath 折线 +
+ *    customHitbox=MultiPointHitbox(16×16, bolt.positions) → Damage() 沿整条闪电
+ *    一次性结算（:71904-71930 1122 手→雷 / :71931-71975 1117 天降 bolt+64×64 爆
+ *    炸域+液体链 localAI[0]=3）
+ *  - Kill 帧编排（P57 Spawn_ArcLightning :1245-1345 / StormLightningParticle）：
+ *    bolt 折线视觉（StormLightningDrawer 波前扫掠）+ 沿线 278/226 光尘
+ *    （EmitSpawnDust :78-135）+ steadyLight 沿线点光 + Item15/ArcSurge(203) 双音
  *  - 1117 Damage() 伤 ×0.8（:13581-13586）——Game 侧出生伤已折算 */
 export class StormLightning extends Entity {
   damage: number;
@@ -567,11 +577,21 @@ export class StormLightning extends Entity {
   dead = false;
   magicProj = true;
   declare readonly projId: number;
+  /** ai[2] 出手种子（Player.cs :49678/:49642 Main.rand.Next(MaxFloatInt+1)；Game 注入） */
+  seed = 0;
   private readonly life: number;
   private readonly searchR: number;
   private t = 0;
   private hitCd = new HitCdImpl();
   private sharedCd: HitCdImpl | null;
+  /** ai[0] 目标锁（≥0=NPC 桶序；本仓无玩家目标链——登记） */
+  private targetIdx = -1;
+  /** Kill 帧 bolt 折线（视觉 + 命中域）；visualT>0 = 尸检期（弹已停 AI,仅画 bolt） */
+  private bolt: Bolt | null = null;
+  private boltForks: Bolt[] = [];
+  private boltColor: [number, number, number] = [1, 1, 1];
+  private visualT = 0;
+  private readonly visualTotal = 16;
   /** 跟鼠标回调（1117 无目标态；Game 注入） */
   mouseWorld?: () => { x: number; y: number };
 
@@ -586,27 +606,70 @@ export class StormLightning extends Entity {
     this.life = projId === 1117 ? 30 : 240;
     this.searchR = projId === 1117 ? 12 : 32;
     this.sharedCd = projId === 1122 ? ID_STATIC_1122 : null;     // 1122 IDStatic 10（全场同型一张表）
+    this.boltColor = projId === 1117 ? [60 / 255, 120 / 255, 1] : [1, 60 / 255, 60 / 255]; // GetLightningColor :40566
+  }
+
+  /** TileCollision（LightningGenerator.cs:209-226）：实心/斜坡 或 液体浸没 */
+  private tileProbe(game: GameHooks): (x: number, y: number) => boolean {
+    return (x: number, y: number): boolean => {
+      const tx = Math.trunc(x / 16), ty = Math.trunc(y / 16);
+      const st = game.world.store;
+      if (!st.inBounds(tx, ty)) return false;
+      if (st.isSolid(tx, ty)) return true;
+      const liq = typeof game.world.liquidAt === 'function' ? game.world.liquidAt(x, y) : 0;
+      return liq > 0 && (Math.trunc(y) % 16) > (16 * (255 - liq)) / 255;
+    };
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    this.t++;
-    if (this.t >= this.life) { this.dead = true; return; }      // :40445-40448 ai[1]>=num Kill
-    // 索敌（:40399-40421）：搜索半径内最近可追敌（1117 需 CanBeChasedBy 口径）
-    let best: { cx: number; cy: number } | null = null;
-    let bd = this.searchR;
-    for (const q of game.enemies()) {
-      const e = q as { cx: number; cy: number; dead: boolean; maxHp: number; def?: { friendly?: boolean; critter?: boolean; noTileCollide?: boolean } };
-      if (e.dead || e.maxHp <= 5 || e.def?.friendly || e.def?.critter) continue;
-      const d = Math.hypot(e.cx - this.cx, e.cy - this.cy);
-      if (d < bd) { bd = d; best = e; }
+    // ---- Kill 帧后：bolt 视觉余命（弹本体已死,原版由 StormLightningParticle 承接）----
+    if (this.visualT > 0) {
+      this.visualT--;
+      // steadyLight（StormLightningParticle.Update :157-165）：沿线每 20 点加光,
+      // 强度 = Remap(progress,0,0.3,0,1)×Remap(progress,0.7,1,1,0)
+      if (this.bolt && game.addLightAt) {
+        const prog = 1 - this.visualT / this.visualTotal;
+        const k = remapL(prog, 0, 0.3, 0, 1) * remapL(prog, 0.7, 1, 1, 0);
+        const pos = this.bolt.positions;
+        const [r, g, b] = this.boltColor;
+        for (let i = 0; i < pos.length; i += 20) {
+          game.addLightAt(pos[i].x, pos[i].y, r * k, g * k, b * k);
+        }
+      }
+      if (this.visualT === 0) this.dead = true;
+      return;
     }
-    if (best) {
+    this.t++;
+    // :40445-40448 ai[1]>=num → Kill（Kill 帧内结算 bolt 伤害,见 doKill）
+    if (this.t >= this.life) { this.doKill(game); return; }
+    // 目标锁校验（:40372-40392）：锁定后失效（死亡/超距 600）即 Kill
+    if (this.targetIdx >= 0) {
+      const e = this.enemyAt(game, this.targetIdx);
+      if (!e || e.dead || Math.hypot(e.cx - this.cx, e.cy - this.cy) > 600) {
+        this.doKill(game); return;
+      }
+    }
+    // 索敌（:40397-40421）：仅无目标时扫（1117 需 CanBeChasedBy 口径≈非 friendly/小动物）
+    if (this.targetIdx < 0) {
+      let best = -1;
+      let bd = this.searchR;
+      const list = game.enemies();
+      for (let i = 0; i < list.length; i++) {
+        const e = list[i] as { cx: number; cy: number; dead: boolean; maxHp: number; def?: { friendly?: boolean; critter?: boolean } };
+        if (e.dead || e.maxHp <= 5 || e.def?.friendly || e.def?.critter) continue;
+        const d = Math.hypot(e.cx - this.cx, e.cy - this.cy);
+        if (d < bd) { bd = d; best = i; }
+      }
+      if (best >= 0) this.targetIdx = best;                     // ai[0]=PackTargetIndex
+    }
+    if (this.targetIdx >= 0) {
       // :40443 MoveTowards(center,32)
-      const d = Math.hypot(best.cx - this.cx, best.cy - this.cy) || 1;
+      const e = this.enemyAt(game, this.targetIdx)!;
+      const d = Math.hypot(e.cx - this.cx, e.cy - this.cy) || 1;
       const step = Math.min(32, d);
-      this.x += (best.cx - this.cx) / d * step;
-      this.y += (best.cy - this.cy) / d * step;
+      this.x += (e.cx - this.cx) / d * step;
+      this.y += (e.cy - this.cy) / d * step;
     } else if (this.projId === 1117 && this.mouseWorld) {
       // :40423-40436（1117 无目标跟鼠标：v=鼠标−中心钳 16,撞实心停）
       const m = this.mouseWorld();
@@ -619,35 +682,250 @@ export class StormLightning extends Entity {
       this.x += vx; this.y += vy;
       game.spawnParticles(this.cx, this.cy, '#3C78FF', 1, 1.2, { life: 14, grav: 0, damp: 0.92 });
     }
+    const prog = this.t / this.life;
     if (this.t === Math.floor(this.life * 0.15)) {
       game.playSfxAt?.('hit', this.cx, this.cy);                // NPCHit34（:40459,本仓近似）
       game.spawnParticles(this.cx, this.cy, this.projId === 1117 ? '#3C78FF' : '#FF3C3C', 6, 2.2, { life: 18, grav: -0.02, damp: 0.93 });
     }
-    if (this.projId === 1117) game.addLightAt?.(this.cx, this.cy, 0.24, 0.47, 1);
-    else game.addLightAt?.(this.cx, this.cy, 1, 0.24, 0.24);
-    // 命中：1117 local 免疫（每弹一张,cooldown −1）；1122 IDStatic 10（同型共享）
-    dealContacts(this, game, this.sharedCd ?? this.hitCd, this.projId === 1122 ? 10 : -1);
+    // :40450-40455 num9=√(1−(num8−1)²)×0.3 光强包络（num8=Remap(prog,0,0.5,0,1)）
+    const num8 = Math.min(1, Math.max(0, (prog - 0) / 0.5));
+    const num9 = Math.sqrt(Math.max(0, 1 - (num8 - 1) * (num8 - 1))) * 0.3;
+    const [cr, cg, cb] = this.boltColor;
+    game.addLightAt?.(this.cx, this.cy, cr * num9, cg * num9, cb * num9);
   }
 
+  private enemyAt(game: GameHooks, idx: number): { cx: number; cy: number; dead: boolean } | null {
+    const e = game.enemies()[idx] as { cx: number; cy: number; dead: boolean } | undefined;
+    return e ?? null;
+  }
+
+  // ---- Kill 帧（Projectile.Kill :71904-71975 type 1122 / 1091||1117 支） ----
+  private doKill(game: GameHooks): void {
+    const probe = this.tileProbe(game);
+    const center = { x: this.cx, y: this.cy };
+    const gen = this.projId === 1122
+      ? arcSurgeWeaponGenerator(this.handAnchor(game), center, probe)
+      : lightningStrikeWeaponGenerator(probe);
+    // 1122：direction = center − hand（:71913-71914）；1117：direction 缺省 UnitY
+    // （Generate(null,seed,target,direction??UnitY) → 天降 bolt,start=目标上方 750px）
+    const dir = this.projId === 1122
+      ? { x: center.x - this.handAnchor(game).x, y: center.y - this.handAnchor(game).y }
+      : null;
+    const bolt = gen.generateMainBoltPath(this.seed >>> 0, center, dir);
+    this.bolt = bolt;
+    this.boltForks = [];
+    // 1117：撞块 → 中心吸附 bolt 末点（:71945-71949）；液体 → localAI[0]=3
+    if (this.projId === 1117) {
+      if (bolt.collidedWithTile) {
+        const last = bolt.positions[bolt.positions.length - 1];
+        this.x = last.x - this.w / 2; this.y = last.y - this.h / 2;
+      }
+      // localAI[0]=3 液体链导电（SelfHurtPlayers 玩家自伤——本仓玩家弹不伤主,登记）
+      void (typeof game.world.liquidAt === 'function' ? game.world.liquidAt(this.cx, this.cy) : 0);
+    }
+    // ---- MultiPointHitbox 16×16 沿 bolt 折线一次性结算（:71918-71919/:71957-71962）----
+    this.damageAlongBolt(game, bolt);
+    // ---- 编排视觉（Spawn_ArcLightning P57:1245-1345）----
+    this.emitBoltFx(game, bolt);
+    // 弹本体死,bolt 视觉余命 16f（StormLightningParticle lifeTimeTotal=num2）
+    this.visualT = this.visualTotal;
+  }
+
+  /** StormLightningParticle.GetPlayerAnchorPos（:137-140）：RotatedRelativePoint
+   *  (HandPosition ?? MountedCenter)——本仓无 HandPosition 缓存,取 RRP(MountedCenter)；
+   *  mock/缺省回退玩家中心 */
+  private handAnchor(game: GameHooks): { x: number; y: number } {
+    const p = game.player as unknown as {
+      mountedCenter?: { x: number; y: number };
+      rotatedRelativePoint?: (x: number, y: number) => { x: number; y: number };
+      cx: number; cy: number;
+    };
+    const mc = p.mountedCenter ?? { x: p.cx, y: p.cy };
+    return p.rotatedRelativePoint ? p.rotatedRelativePoint(mc.x, mc.y) : mc;
+  }
+
+  /** MultiPointHitbox.Intersects（MultiPointHitbox.cs:26-38）：目标盒 ±8px 膨胀后
+   *  含任一 bolt 点 → 命中。逐敌结算（crit/击退/StatusNPC 同 dealContacts 管线；
+   *  1117 local 免疫 −1 / 1122 IDStatic 10） */
+  private damageAlongBolt(game: GameHooks, bolt: Bolt): void {
+    const cd = this.sharedCd ?? this.hitCd;
+    cd.tick();
+    const pts = bolt.positions;
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as HitTarget & { vanillaId?: number };
+      if (!e || e.dead) continue;
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+      // 膨胀盒含点判定（BoundingRect 粗筛省略——敌量小,逐点直测）
+      let hit = false;
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        if (p.x >= e.x - 8 && p.x < e.x + e.w + 8 && p.y >= e.y - 8 && p.y < e.y + e.h + 8) {
+          hit = true; break;
+        }
+      }
+      // 1117 附加爆炸域（Colliding :15955-15961 localAI[0]==1 → myRect.Inflate(60)；
+      // 64×64 爆炸矩形为其子域）——本仓 localAI 恒按"未撞块"档处理
+      if (!hit && this.projId === 1117 && !bolt.collidedWithTile) {
+        hit = Math.abs(e.x + e.w / 2 - this.cx) <= 8 + 60 && Math.abs(e.y + e.h / 2 - this.cy) <= 8 + 60;
+      }
+      if (!hit) continue;
+      if (!cd.ready(e.id, this.projId === 1122 ? 10 : -1)) continue;
+      const crit = Math.random() < this.critChance;
+      const dmg = crit ? this.damage * 2 : this.damage;
+      const kdir = Math.sign(e.x + e.w / 2 - this.cx) || 1;
+      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit);
+      applyProjStatus(this.projId, ent as unknown as Record<string, number>);
+    }
+  }
+
+  /** Spawn_ArcLightning（P57:1245-1345）+ StormLightningParticle.EmitSpawnDust
+   *  （:78-135）：沿线 278（1122 锚手档）/226（1117 天雷档）光尘双画 + 枪口/雷尾
+   *  粒子 + Item15/ArcSurge(Item_203) 双音。bolt 折线本体由 draw() 波前扫掠呈现。 */
+  private emitBoltFx(game: GameHooks, bolt: Bolt): void {
+    const pts = bolt.positions;
+    if (pts.length < 2) return;
+    const [r, g, b] = this.boltColor;
+    const color = { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255), a: 0 };
+    // EmitSpawnDust（flag=AnchorToPlayerHand≥0 → 1122 档）：type 278、num4=Remap(
+    // 线长,100,500,2,5)、num3=2、num=1.2、color×1.2；1117 档 type 226/num4=10/
+    // num3=6/num=1。rotations=null → velocity=UnitY 回退（:103-106）
+    const anchored = this.projId === 1122;
+    const lineLen = Math.hypot(pts[pts.length - 1].x - pts[0].x, pts[pts.length - 1].y - pts[0].y);
+    const num4 = anchored ? Math.max(2, Math.min(5, 2 + (lineLen - 100) * (5 - 2) / (500 - 100))) : 10;
+    const velMul = anchored ? 1.2 : 1;
+    const baseScale = anchored ? 0.7 : 0.4;
+    const back = anchored ? 2 : 6;
+    const dustType = anchored ? 278 : 226;
+    const maxValue = Math.ceil(pts.length / num4);
+    // 种子 RNG（EmitSpawnDust :80 new LCG32Random(seed)——与折线同种子独立流）
+    const rng = new LCG32(this.seed >>> 0);
+    for (let i = 5; i < pts.length - 5; i++) {
+      if (rng.next(maxValue) !== 0) continue;
+      const p = pts[i];
+      const spd = (3 + rng.nextFloat() * 6.5) * velMul;
+      const d = game.spawnDust?.(p.x, p.y, 0, 0, dustType, 0, spd, 0, color, baseScale + rng.nextFloat() * 0.5);
+      if (d) {
+        d.x = p.x; d.y = p.y;                    // NewDustPerfect（:107）
+        d.vx = 0; d.vy = spd;                    // velocity=UnitY×spd
+        d.fadeIn = 0;
+        d.noGravity = true;
+        d.noLight = true; d.noLightEmittance = true;   // steadyLight（:115-118）
+        d.x -= d.vx * back; d.y -= d.vy * back;        // position −= velocity×num3
+        const d2 = game.vanillaDust?.clone(d);         // CloneDust 白核副画（:124-132）
+        if (d2) {
+          if (anchored) { d2.vx = d.vx; d2.scale = d.scale * 0.66; d2.color = { r: 255, g: 255, b: 255, a: 0 }; }
+          else { d2.vx *= 0.5; d2.scale -= 0.3; }
+        }
+      }
+    }
+    // 枪口光斑 + 雷尾电弧（FadingParticle/RandomizedFrameParticle 916 帧近似——
+    // 本仓粒子池无 916 贴图帧链,用加算火花近似形态）
+    const hand = this.handAnchor(game);
+    const end = pts[pts.length - 1];
+    game.spawnParticles(hand.x, hand.y, this.projId === 1117 ? '#3C78FF' : '#FF3C3C', 6, 1.6,
+      { life: 14, grav: 0, damp: 0.9 });
+    game.spawnParticles(end.x, end.y, this.projId === 1117 ? '#3C78FF' : '#FF3C3C', 10, 2.4,
+      { life: 20, grav: 0, damp: 0.92 });
+    // 双音效（:1306-1307）：Item15 + ArcSurge=LegacySoundStyle(2,203)=Item_203.wav,
+    // 后者 pitch=NextFloatDirection×0.2−0.05、vol 0.6
+    game.playSfxWav?.('Item_15', 1, hand.x, hand.y);
+    game.playSfxWav?.('Item_203', 0.6, hand.x, hand.y, (Math.random() * 2 - 1) * 0.2 - 0.05);
+  }
+
+  /** StormLightningDrawer（:69-115）Canvas 折线近似：逐段梯形带 + 波前扫掠 α。
+   *  StripWidth：w×Remap(s,0.5,1,1,0.5)×Remap(progress,0.5,1,1,0.5)(+taperEnd)；
+   *  StripColors：waveIn×waveOut 双波门（ArcSurge 参数 :57-67）。加算合成。 */
   draw(r: Renderer, _cam: Camera): void {
     const ctx = r.ctx;
     if (!ctx) return;
-    const img = projSprite(this.projId);
-    const T = this.t / this.life;
-    // :40450-40455 num9=√(1−(num8−1)²)×0.3 光强包络（视觉亮度近似）
-    const glow = Math.sqrt(Math.max(0, 1 - Math.pow(2 * Math.min(1, T / 0.5) - 1, 2))) * 0.3 + 0.4;
     ctx.save();
-    ctx.globalAlpha = Math.max(0.15, Math.min(1, glow));
-    ctx.translate(this.cx, this.cy);
-    ctx.imageSmoothingEnabled = false;
-    if (img && img.width > 0) {
-      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    if (this.bolt && this.visualT > 0) {
+      const progress = 1 - this.visualT / this.visualTotal;
+      this.drawBolt(ctx, this.bolt, 1, progress);
     } else {
-      ctx.fillStyle = this.projId === 1117 ? '#3C78FF' : '#FF3C3C';
-      ctx.fillRect(-8, -24, 16, 48);
+      // 飞行期本体贴图（:40450-40455 光强包络近似亮度）
+      const img = projSprite(this.projId);
+      const T = this.t / this.life;
+      const glow = Math.sqrt(Math.max(0, 1 - Math.pow(2 * Math.min(1, T / 0.5) - 1, 2))) * 0.3 + 0.4;
+      ctx.globalAlpha = Math.max(0.15, Math.min(1, glow));
+      ctx.translate(this.cx, this.cy);
+      ctx.imageSmoothingEnabled = false;
+      if (img && img.width > 0) {
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      } else {
+        ctx.fillStyle = this.projId === 1117 ? '#3C78FF' : '#FF3C3C';
+        ctx.fillRect(-8, -24, 16, 48);
+      }
     }
     ctx.restore();
   }
+
+  private drawBolt(ctx: CanvasRenderingContext2D, bolt: Bolt,
+    intensity: number, progress: number): void {
+    const pts = bolt.positions;
+    if (pts.length < 2) return;
+    const W = 12;                                          // Prepare width 12f
+    // StripColors（:93-102）：ArcSurge 参数 FadeStart 0.1/FadeMid 0.4/FadeEnd 1/
+    // Final 0.3 + 波前 In 0.3/Out 0.5/Length 0.3
+    const opacity = remapL(progress, 0.1, 0.4, 0.5, 1) * remapL(progress, 0.4, 1, 1, 0.3);
+    const waveIn = Math.min(1, Math.max(0, progress / 0.3));
+    const waveOut = Math.min(1, Math.max(0, (progress - (1 - 0.5)) / 0.5));
+    const taperEnd = bolt.progressRange.max < 1;
+    const [cr, cg, cb] = this.boltColor;
+    const range = bolt.progressRange;
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < pts.length - 1; i++) {
+      const s0 = range.min + (range.max - range.min) * (i / (pts.length - 1));
+      const s1 = range.min + (range.max - range.min) * ((i + 1) / (pts.length - 1));
+      // 波前双门（WaveTransition :88-91）
+      const a0 = waveGate(s0, waveIn, 0.3, 0, 1) * waveGate(s0, waveOut, 0.3, 1, 0);
+      const a1 = waveGate(s1, waveIn, 0.3, 0, 1) * waveGate(s1, waveOut, 0.3, 1, 0);
+      if (a0 <= 0.004 && a1 <= 0.004) continue;
+      const w0 = stripWidthAt(s0, W, progress, taperEnd, bolt) * intensity;
+      const w1 = stripWidthAt(s1, W, progress, taperEnd, bolt) * intensity;
+      const dx = pts[i + 1].x - pts[i].x, dy = pts[i + 1].y - pts[i].y;
+      const l = Math.hypot(dx, dy) || 1;
+      const px = -dy / l, py = dx / l;
+      const am = (a0 + a1) / 2 * opacity;
+      if (am <= 0.004) continue;
+      ctx.fillStyle = `rgba(${(cr * 255) | 0},${(cg * 255) | 0},${(cb * 255) | 0},${Math.min(1, am).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(pts[i].x + px * w0 / 2, pts[i].y + py * w0 / 2);
+      ctx.lineTo(pts[i + 1].x + px * w1 / 2, pts[i + 1].y + py * w1 / 2);
+      ctx.lineTo(pts[i + 1].x - px * w1 / 2, pts[i + 1].y - py * w1 / 2);
+      ctx.lineTo(pts[i].x - px * w0 / 2, pts[i].y - py * w0 / 2);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+}
+
+/** StripWidth（:104-115）单点宽度 */
+function stripWidthAt(s: number, width: number, progress: number,
+  taperEnd: boolean, bolt: Bolt): number {
+  let w = width;
+  w *= remapL(s, 0.5, 1, 1, 0.5);
+  w *= remapL(progress, 0.5, 1, 1, 0.5);
+  if (taperEnd) {
+    w *= remapL(bolt.progressRange.max - s, 0.1, 0, 1, bolt.isMainBolt ? 0.5 : 0);
+  }
+  return Math.max(0.5, w);
+}
+
+/** WaveTransition（:88-91）＝Remap(progressOnStrip, lerp(−len,1,waveProgress),
+ *  lerp(0,1+len,waveProgress), to, from) */
+function waveGate(s: number, waveProgress: number, len: number, from: number, to: number): number {
+  const a = -len + (1 + len) * waveProgress;
+  const b = 0 + (1 + len) * waveProgress;
+  return remapL(s, a, b, to, from);
+}
+
+/** Utils.Remap（clamp 版,本文件局部用——LightningGenerator.remap 不导出重复） */
+function remapL(fromValue: number, fromMin: number, fromMax: number,
+  toMin: number, toMax: number): number {
+  const t = Math.min(1, Math.max(0, (fromValue - fromMin) / ((fromMax - fromMin) || 1e-9)));
+  return toMin + (toMax - toMin) * t;
 }
 
 // ================= 1115 冰川之牙蓄力弹（AI_208_GlacierFangShot） =================

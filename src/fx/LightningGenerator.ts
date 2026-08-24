@@ -106,7 +106,7 @@ export class LightningGenerator {
       { x: targetPosition.x - dir.x, y: targetPosition.y - dir.y },
       targetPosition, this.rotationStrength, this.stepSize, floatRange(0, 1));
     if (calcRotations && bolts) {
-      for (const b of bolts) b.rotations = calcRotations(b.positions);
+      for (const b of bolts) b.rotations = boltRotations(b.positions);
     }
     return result;
   }
@@ -117,8 +117,9 @@ export class LightningGenerator {
     const rng = new LCG32(seed);
     let num = 0;                                        // 累计角偏移
     const layerAngles = new Float64Array(this.layers);  // float[] array
-    const targetTileX = Math.floor(targetPos.x / 16);
-    const targetTileY = Math.floor(targetPos.y / 16);   // ToTileCoordinates（正坐标 floor）
+    // ToTileCoordinates = (int)(pos/16)（正坐标域 floor≡trunc；负坐标取 C# 截断语义）
+    const targetTileX = Math.trunc(targetPos.x / 16);
+    const targetTileY = Math.trunc(targetPos.y / 16);
     let vector: V2 = { x: startPos.x, y: startPos.y };
     let value: V2 = { x: targetPos.x - startPos.x, y: targetPos.y - startPos.y };
     const num2 = Math.hypot(value.x, value.y);
@@ -143,7 +144,7 @@ export class LightningGenerator {
       if (num5 < stepSize) break;
       const num6 = clamp(1 - num5 / num2, 0, 1);                  // 归一进度
       if (this.solidTileCollision && this.tileProbe
-        && (Math.floor(vector.x / 16) !== targetTileX || Math.floor(vector.y / 16) !== targetTileY)
+        && (Math.trunc(vector.x / 16) !== targetTileX || Math.trunc(vector.y / 16) !== targetTileY)
         && this.tileProbe(vector.x, vector.y)) {
         bolt.progressRange = floatRange(progressRange.min, rangeLerp(progressRange, num6));
         bolt.collidedWithTile = true;
@@ -245,7 +246,7 @@ function pickHighLayerToReroll(r: number, chance: number, layers: number, layer:
 }
 
 /** CalcRotations（:251-274）：相邻段角 + 中点平滑 + SmoothRotations */
-export function calcRotations(positions: V2[]): number[] {
+export function boltRotations(positions: V2[]): number[] {
   const rotations = new Array<number>(positions.length).fill(0);
   calcRotationsInto(positions, rotations);
   return rotations;

@@ -265,24 +265,34 @@ describe('StormLightning(AI_203_StormLightning)', () => {
     for (let i = 0; i < 5; i++) near.fixedUpdate(1 / 60, g2);
     expect(Math.abs(near.cx - e2.cx)).toBeLessThanOrEqual(32);
   });
-  it('1117 30t 消亡 / 1122 240t(:40363 num 缺省 240)', () => {
+  it('1117 30t Kill→bolt 视觉余命 16f / 1122 240t(:40363 num 缺省 240)', () => {
+    // 2026-08-24 r15 命中模型重写：ai[1]>=num → Kill 帧 doKill(bolt+伤害),
+    // 弹本体转 bolt 视觉余命（StormLightningParticle lifeTimeTotal=num2=16）后再死
     const g = makeHooks();
     const a = new StormLightning(1117, 800, 800, 120, 10);
     for (let i = 0; i < 30; i++) a.fixedUpdate(1 / 60, g);
-    expect(a.dead).toBe(true);
+    expect(a.dead).toBe(false);                                  // Kill 帧 → 视觉期
+    for (let i = 0; i < 16; i++) a.fixedUpdate(1 / 60, g);
+    expect(a.dead).toBe(true);                                   // 视觉余命耗尽
     const b = new StormLightning(1122, 800, 800, 180, 4);
     for (let i = 0; i < 239; i++) b.fixedUpdate(1 / 60, g);
     expect(b.dead).toBe(false);
     b.fixedUpdate(1 / 60, g);                                    // ai[1]>=240 Kill(:40445)
+    expect(b.dead).toBe(false);                                  // → bolt 视觉期
+    for (let i = 0; i < 16; i++) b.fixedUpdate(1 / 60, g);
     expect(b.dead).toBe(true);
   });
-  it('1122 IDStatic 10(:10567 段)同型共享 → 双雷同帧同敌只结算一次', () => {
+  it('1122 IDStatic 10(:10567 段)同型共享 → 双雷同帧 Kill 只结算一次', () => {
+    // Kill 帧 MultiPointHitbox 沿 bolt 一次性结算（:71918-71919）；双雷同帧 Kill
+    // → IDStatic 共享表去重
     const e = mkEnemy(1, 795, 795);
     const g = makeHooks([e]);
     const a = new StormLightning(1122, 800, 800, 180, 4);
     const b = new StormLightning(1122, 802, 802, 180, 4);
-    a.fixedUpdate(1 / 60, g);
-    b.fixedUpdate(1 / 60, g);
+    for (let i = 0; i < 240; i++) {
+      a.fixedUpdate(1 / 60, g);
+      b.fixedUpdate(1 / 60, g);
+    }
     expect(e.hurtLog.length).toBe(1);
   });
 });

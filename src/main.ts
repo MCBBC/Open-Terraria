@@ -2,7 +2,6 @@
 // 流程编排见 mainFlow.ts；本文件只做装配 + 游戏内键盘/开发者工具接线。
 import { Game } from './core/Game';
 import { showSplash } from './ui/Splash';
-import { showLogoIntro } from './ui/LogoIntro';
 import { UI } from './ui/UI';
 import { kvHas } from './save/KvStore';
 import { saveGame } from './save/SaveFile';
@@ -17,6 +16,7 @@ import { AudioSystem } from './core/Audio';
 import { setDebugPool } from './data/vanillaNpcs';
 import { VUI } from './vui/VUI';
 import { initAssetCache } from './net/AssetCache';
+import { holdForAssetsReady, mountAssetBadge } from './ui/AssetDownloadUI';
 import { UITextures } from './vui/assets/UITextures';
 import { UIFont } from './vui/draw/UIFont';
 import { Lang } from './i18n/Lang';
@@ -554,18 +554,25 @@ setInterval(() => {
 
 // ---- 启动 ----
 kvHas('sandboxworld.quicksave').then(async () => {
-  // 启动加载画面（Main.DrawSplash :51908：随机三件套+淡入淡出时序+LoadingSunflower）
+  // 启动加载画面（Main.DrawSplash :53297：随机三件套+淡入淡出时序+LoadingSunflower）。
+  // RE-LOGIC 字样烘在每组 Splash_N_2 前景层（透明底 PNG，透出 back 场景）——
+  // vanilla-ui/logo_1..8.png 是死资产（AssetInitializer.cs:84 加载后无任何绘制点）。
+  const splashT0 = performance.now();
   const splashGate: { resolve: () => void } = { resolve: () => {} };
   const splash = showSplash({ loading: new Promise<void>((r) => { splashGate.resolve = r; }) });
-  // 进入画面 logo 卡（logo_1..8 随机一张）：t=0 即显、至少 2s——vanilla splash
-  // 在暖缓存下被下方 done() 秒切（可见 ~0.2s，用户报告"直接跳过去"）；本卡盖在
-  // 其上覆盖整个加载/初始化期，finish 后淡出进标题。旁路路由不陪跑。
   const bootParams0 = new URLSearchParams(location.search);
-  const intro = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo')
-    ? null
-    : showLogoIntro();
+  const bypassBoot = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo');
   await loadAssets();
   splashGate.resolve();
+  if (!bypassBoot) {
+    // 资源预载提前到 splash 期（原 showTitle 内调用，幂等）：有下载就停在 splash
+    // 上等完（右下角徽标 z40 浮于 splash z30 之上），无下载至少保持 2s——
+    // 此前 splash 在暖缓存下被 done() 秒切（可见 ~0.2s，用户报告"直接跳过去"）
+    await initAssetCache();
+    warmAllAssets();
+    mountAssetBadge();
+    await holdForAssetsReady({ minMs: 2000, sinceMs: performance.now() - splashT0 });
+  }
   splash.done();
   if (atlas) UITextures.setAtlas(atlas);
   // options 先行(语言设置在 options 里),Lang.init 按 options.data.lang 加载语言包;
@@ -586,18 +593,16 @@ kvHas('sandboxworld.quicksave').then(async () => {
 
   // 旁路路由：?play[=small|medium|large] 跳过主菜单直接生成世界进游戏
   // （主菜单 UI 改造期间绕行用；也可 ?quickload 直接读快速存档）
-  const bootParams = bootParams0;
-  if (bootParams.has('quickload')) {
+  if (bootParams0.has('quickload')) {
     void flow.quickLoad();
     return;
   }
-  if (bootParams.has('play')) {
-    const sz = bootParams.get('play') || 'medium';
+  if (bootParams0.has('play')) {
+    const sz = bootParams0.get('play') || 'medium';
     const [w, h] = sz === 'small' ? [4200, 1200] : sz === 'large' ? [8400, 2400] : [6400, 1800];
     void flow.newWorld('', w, h);
     return;
   }
 
-  if (intro) await intro.finish(); // logo 卡补满 ≥2s → 淡出（资源慢时已顺带覆盖加载期）
   flow.showTitle();
 });
