@@ -258,12 +258,13 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     const sp80 = Math.hypot(orb.vx, orb.vy);
     expect(sp80).toBeLessThanOrEqual(4.01);    // :35353-35357 归一 4 速
     expect(sp80).toBeGreaterThanOrEqual(3.4);  // 慢速段追踪 lerp 可短时 <4（无下限钳）
-    // 慢速段锁敌（敌在上方）→ vy 向上收敛（:35443-35441 v=(v×7+dir×4)/8）
-    stepAll(120);
+    // 慢速段锁敌（敌在上方）→ vy 向上收敛（:35443-35441 v=(v×7+dir×4)/8）——
+    // 收敛后悬停于敌心（速度衰减趋 0，取收敛途中拍验证）
+    stepAll(60);
     expect(orb.vy).toBeLessThan(0);
-    // 618 火花已掷（慢速段 ai[0] 清零重计，每 30 update 一枚）
+    // 618 火花已掷（慢速段 ai[0] 清零重计，每 30 update 一枚——至收敛悬停 ~3 枚）
     const sparks = spawned.filter((s) => s.projId === 618);
-    expect(sparks.length).toBeGreaterThanOrEqual(3);
+    expect(sparks.length).toBeGreaterThanOrEqual(2);
     const s0 = sparks[0];
     expect(s0.naParent).toBe(orb);             // ai[1] = 父引用
     expect(Math.hypot(s0.vx, s0.vy)).toBeLessThanOrEqual(6.01);   // :35493-35495 速帽 6

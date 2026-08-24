@@ -24,7 +24,7 @@ export function moonPhase(dayCount: number): number {
 /** SetBackColor 五段昼夜曲线(Main.cs:62889-63362 主体)→ [R,G,B] 0-255。
  *  cloudDim(缺省 1)= 云量压暗 :62990-62999 num3=1−cloudAlpha·0.9·atmo,
  *  施加位置在月相地板【之前】(地板保证月亮穿云,原版序:曲线→云暗→地板) */
-export function setBackColor(mainTime: number, isDay: boolean, phase: number, bloodMoon = false, cloudDim = 1, biome: BiomeInfluence | null = null): [number, number, number] {
+export function setBackColor(mainTime: number, isDay: boolean, phase: number, bloodMoon = false, cloudDim = 1, biome: BiomeInfluence | null = null, inMenuNight = false): [number, number, number] {
   let r: number, g: number, b: number;
   if (isDay) {
     if (mainTime < 13500) {
@@ -45,13 +45,14 @@ export function setBackColor(mainTime: number, isDay: boolean, phase: number, bl
   } else {
     const t = mainTime - 54000;
     if (bloodMoon) {
-      // ★血月夜曲线（Main.cs:62945-62961）：R=75→35 红移夜
+      // ★血月夜曲线（Main.cs:62945-62961）：R=75−40p（午夜 75 最红）、G/B=20p+15
+      //  （午夜 15 最暗）——曾误写 75p+5 反向衰减（2026-08-24 校勘）
       if (t < 16200) {
         const p = 1 - t / 16200;
-        r = 75 * p + 5; g = 30 * p + 5; b = 30 * p + 5;
+        r = 75 - 40 * p; g = 20 * p + 15; b = 20 * p + 15;
       } else {
         const p = (t / 32400 - 0.5) * 2;
-        r = 35 * p + 5; g = 30 * p + 5; b = 30 * p + 5;
+        r = 75 - 40 * p; g = 20 * p + 15; b = 20 * p + 15;
       }
     } else if (t < 16200) {
       // 入夜(18:00-23:00)
@@ -65,6 +66,10 @@ export function setBackColor(mainTime: number, isDay: boolean, phase: number, bl
   }
   // 云量压暗(:62990-62999,三通道同乘;地板之前)
   if (cloudDim < 1) { r *= cloudDim; g *= cloudDim; b *= cloudDim; }
+  // ★菜单/服务器夜地板(:63000-63006 isInGameMenuOrIsServer&&!dayTime → 硬钉
+  //  35,35,35)——原版菜单夜色恒定不随夜间曲线扫动;曾缺失 → 菜单午夜(19,19,19)
+  //  比原版暗 45%(用户实报"夜晚比原版暗得多",2026-08-24)
+  if (inMenuNight && !isDay) { r = 35; g = 35; b = 35; }
   // 群系块(:63002-63228,云暗后/地板前;帧状态)
   if (biome) {
     const bg2: [number, number, number] = [r, g, b];
@@ -255,12 +260,13 @@ export function skySeed(timeOfDay: number, dayCount: number, eclipse = false, bl
  *  · 环境天空实体 GetColor bg · 天空光种子 skySeed = tileColor(本值)(:62608)
  *  含月相地板/血月/日食/晨昏地平线渗入(帧状态)。返回 0-255。 */
 export function colorOfTheSkies(
-  timeOfDay: number, dayCount: number, eclipse = false, bloodMoon = false, moonPhaseNow?: number,
+  timeOfDay: number, dayCount: number, eclipse = false, bloodMoon = false,
+  moonPhaseNow?: number, inMenuNight = false,
 ): [number, number, number] {
   const isDay = timeOfDay > 0.1875 && timeOfDay < 0.8125;
   const t = toVanillaTime(timeOfDay, isDay);
   void dayCount;
-  let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon, frameCloudDim, frameBiome);
+  let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon, frameCloudDim, frameBiome, inMenuNight);
   if (eclipse && isDay) {
     const L = Math.min(1, t / 1242);
     bg = [

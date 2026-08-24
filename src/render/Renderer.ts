@@ -4226,11 +4226,12 @@ export class Renderer {
     const vid = e.vanillaId ?? 0;
     const scale = Renderer.HB_BIG_SCALE.has(vid) ? 1.5 : 1;
     const x = e.cx - 18 * scale;
-    // 原版条位 = 盒底+10+NPCAddHeight（其前提是贴图底≈盒底+4）。中心锚+显式
-    // 下移的贴图（EoC +23/+30 等）底边远低于盒底 → 取 max(盒底基准, 贴图底+6)
-    // 保持原版"条悬在贴图底下方 ~6px"的相对关系（2026-08-13 "血条在眼球内"修复）
+    // 原版条位 = 盒底+10+NPCAddHeight（num47 已含该类型贴图下沉量,鸟妖 32/双子 30…
+    // ——2026-08-24 中心锚勘误后贴图底=盒底+num47+帧半高,若仍对全体取 max(贴图底+6)
+    // 会把条推到帧底透明边距之下=比原版低 20-40px）。max 兜底只服务【校准偏差族】
+    // （EoC 4:+23/+30 用户校准下移,num47=0 原版公式够不着眼球底）
     const y = Math.max(e.y + e.h + 10 + (Renderer.HB_ADD_H[vid] ?? 0),
-      e.spriteBottomWorld ? e.spriteBottomWorld + 6 : -Infinity);
+      (vid === 4 && e.spriteBottomWorld) ? e.spriteBottomWorld + 6 : -Infinity);
     const fill = Math.max(0, Math.min(36, Math.floor((36 * hp) / maxHp)));  // num2
     // 光照 alpha（Brightness = 中心格最大通道/255；8 档量化控 tint 缓存规模）
     let aQ = 1;
@@ -5051,7 +5052,6 @@ export class Renderer {
         : e.vanillaId === 246 && e.ai3 === 1 ? 249 : e.vanillaId;
       const r = this.atlas.vnpc(drawId, frameIdx);
       if (r) {
-        const flying = !!e.vanilla?.noGravity; void flying; // 中心锚后地面/飞行统一,仅保留语义注释
         // 原版 NPC.scale（SetDefaults base × netID scale × 专家档体型系数）——作用于渲染。
         // 专家系数（Tweaks :18187/:18198/:18300/:18309：世吞 13-15 ×1.2、克脑 266/
         // 爬行者 267/毁灭者 134-136/探针 139 ×1.05）只乘 npc.scale 不回写宽高
@@ -5060,18 +5060,25 @@ export class Renderer {
         const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale
           * expertRenderScale(e.vanillaId ?? 0);
         ctx.save();
-        // 锚点:飞行型=帧中心(原版默认分支 Main.cs:23635 语义);地面型=底锚+原版恒
-        // +4 下沉(Main.cs:24741 通用公式:可见贴图底=盒底+4,帧底透明边距一并沉入
-        // 地面——原版脚部本就压住地表 ~2px;2026-08-17 前按透明行"贴地"补偿,
-        // 视觉上恒高 2-4px=悬空感的根因,全家族改 1:1)
-        const grounded = !flying;
+        // 锚点（Main.cs:23658-23660 通用尾段 1:1）：position = Center −
+        // frameSize×scale/2 + halfSize×scale + (0, num46+num47+gfxOffY)，origin =
+        // halfSize（帧中心,:23418）→ 化简 = **帧中心钉 (Center.X, Center.Y+num46+num47+gfxOffY)**。
+        // num47=NPCAddHeight（:22208 封闭表,与血条 HB_ADD_H 同源）逐类型下沉
+        // （鸟妖 48=32/双子 30/EoW 26/史莱姆 7-9=13…）。★2026-08-24 勘误：曾误读
+        // type==94 骷髅专属绘制（:25483 "+4"）为通用公式,把全体 NPC 画成"帧底=盒底+4"
+        // 底锚——帧高=盒高+8 的紧裁剪行走族（僵尸等）恰与原版重合故未露馅,带底边距
+        // 的飞行族整体上飘（用户实报"鸟妖碰撞盒不对":体底悬盒顶,原版体底=盒底+29、
+        // 帧中心=盒中心+32）。旋转枢轴随之从盒底修正为帧中心（XNA origin=halfSize
+        // 绕帧中心转,546 怒滚虫的手工枢轴补偿随之删）
+        // num46（:23227-23235）：108/124/625=+2、357=localAI[0]（357 走蠕虫链专用,略）
+        const addY = (e.vanillaId === 108 || e.vanillaId === 124 || e.vanillaId === 625 ? 2 : 0)
+          + (Renderer.HB_ADD_H[e.vanillaId ?? -1] ?? 0);
         // 416 日耀掠兽骑手（Main.cs:24508-24515 case 416 独占）：绘制位置吸附坐骑
         // 415 的 Bottom（AI 锚 Center+(-spriteDir*10,-30) 只喂碰撞盒——骑手视觉上
-        // 双脚踩在掠兽脚平面，+4px 是帧底透明边距，与地面族 pad 同义）。
-        // 其余 aiStyle 75 骑手（390）原版无此绘制覆写，仍用 AI 位
+        // 双脚踩在掠兽脚平面）。其余 aiStyle 75 骑手（390）原版无此绘制覆写，仍用 AI 位
         const snapMount = e.vanillaId === 416 && e.master && !e.master.dead ? e.master : null;
         ctx.translate(snapMount ? snapMount.cx : e.cx,
-          snapMount ? snapMount.y + snapMount.h : (grounded ? e.y + e.h : e.cy));
+          snapMount ? snapMount.y + snapMount.h : e.cy);
         // 旋转族:整体随自转角旋转(原版 npc.rotation;朝向翻转不适用)。
         // 4=克眼 visAngle;35/68=骷髅王头 spin;125/126=双子;127-131=Prime 头+部件;134-136=毁灭者链
         const rotId = ROTATION_NPC.has(e.vanillaId);
@@ -5147,15 +5154,12 @@ export class Renderer {
           // 394 spriteDirection=±1 按 ai[1](:35886)仍翻面→不进 rotationDriven;392/393 随主体恒 -1 不翻。
         else if (stR === 26 && idR === 546) {
           // 546 怒滚虫(AI_026 cs:63365-63369):rotation += vx×0.05 持续滚转累积(chargerAI 尾写 visAngle)。
-          // 原版 generic draw origin=halfSize=帧中心 → 枢轴在帧中心;本仓地面型 translate=盒底,
-          // 故先把枢轴平移到帧中心(−sh/2+4/scale)→rotate→平回(滚转球枢轴差半帧高,不修=绕触地点公转观感)。
+          // 原版 generic draw origin=halfSize=帧中心 → 枢轴在帧中心;中心锚(2026-08-24)后
+          // 本仓 translate=盒中心、绘制 −sh/2 → 枢轴天然=帧中心,直转即可
+          // （曾因底锚需手工平移枢轴 −sh·scale/2+4,锚点勘误后删除）。
           // 【台账勘误】台账"DrawNPC :62640-62741 态机(case 3 朝 0/π/越阈 0.05/AngleTowards)"
           // 实为 AI_110_Betsy(cs:62640-62741)段误归属——546 真身无态机,仅此一行累积式+镜像取反。
-          // （平移在 ctx.scale 之前=世界系:帧中心世界偏移 = −sh·scale/2 + 4）
-          const pc546 = 4 - (r.sh * scale) / 2;
-          ctx.translate(0, pc546);
           ctx.rotate(e.visAngle);
-          ctx.translate(0, -pc546);
         }
         else if (idR === 664) ctx.rotate(e.visAngle);  // 火把神(FindFrame :75558 rotation=vx×0.1,findFrameRotation 层喂值)。
           // 原版/本仓均无 664 生成路径(事件本体=弹幕 949,664 仅图鉴记账 Player.cs:37109-37116)——
@@ -5215,11 +5219,9 @@ export class Renderer {
         // 帧中心 83——原版通用锚点(帧中心==碰撞盒中心)会让 100×110 的盒偏在
         // 血管尾/眼球上方。碰撞盒尺寸保持原版,绘制整体下移 (质心−帧中心)
         // 让眼球主体居中于盒(用户 2026-08-11 拍板;张嘴帧偏移略大)
-        // 地面型:底锚 + 原版恒 +4 下沉(Main.cs:24741 通用分支:Y=盒底−帧高×scale/2
-        // +4+半帧高×scale → 可见贴图底=盒底+4,帧底透明边距一并沉入地面——原版人物
-        // 脚部本就压住地表 2px,曾按透明行"贴地"补偿反而悬空 1-2px,2026-08-17 改 1:1);
-        // 飞行型:中心锚。EoC 额外 +23/+30 眼球修正
-        const anchorY = grounded ? -r.sh + 4 / scale : -r.sh / 2;
+        // 通用锚:帧中心钉盒中心(+num46/num47 下沉,见上方 translate 注)。
+        // EoC 额外 +23/+30 眼球修正（用户校准偏差,叠加在通用锚上）
+        const anchorY = -r.sh / 2 + addY / scale;
         const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
         // 393 飞碟炮塔绘制 origin+UnitY×(−8)（Main.cs:24208-24213 num225=-8 仅 393;
         // 台账登记偏差本批清偿）：XNA origin 上移 8 纹素 = 精灵整体下移 8×scale 世界 px,
@@ -5228,7 +5230,7 @@ export class Renderer {
         // 台账旧注"需通用锚点管线"不成立:单 id 常量偏移即可
         const bodyY = anchorY + eocOff + (e.vanillaId === 393 ? 8 : 0);
         // 回填实际贴图底边（世界 y），供 drawHealthBar 定位兜底（见 Enemy.spriteBottomWorld 注释）
-        e.spriteBottomWorld = (grounded ? e.y + e.h : e.cy) + (bodyY + r.sh);
+        e.spriteBottomWorld = e.cy + (bodyY + r.sh) * scale;
         if (e.vanillaId === 50) {
           // 史莱姆王体内忍者（Main.cs:22798-22817）：★画在本体【之前】=忍者
           //  在史莱姆下层——原版忍者绘制 :22817 先于通用本体绘制 :22852，
@@ -5239,7 +5241,7 @@ export class Renderer {
             const zeroY = -e.vy + (r.sy === 120 ? 2 : r.sy === 360 ? -2 : r.sy === 480 ? -6 : 0);
             const zeroX = -e.vx * 2;
             ctx.save();
-            ctx.translate(zeroX, -e.h / 2 + zeroY);   // 当前原点=KS 底心 → 中心=(0,-h/2)
+            ctx.translate(zeroX, zeroY);   // 中心锚后原点=KS 盒中心（原版忍者锚 KS Center :22812）
             ctx.rotate(e.vx * 0.05);
             ctx.drawImage(ninja.img, -ninja.sw / 2, -ninja.sh / 2, ninja.sw, ninja.sh);
             ctx.restore();
@@ -5292,7 +5294,7 @@ export class Renderer {
           //   ③ lighter(tinted, ga=1) → +T·a·color.rgb 预乘加法贡献
           // （GetColor rgb 不乘 color.A——ga=colorA/255 会把贡献也乘 0.392）
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, drawColor);
-          const anchorY2 = grounded ? -r.sh + 4 / scale : -r.sh / 2;
+          const anchorY2 = -r.sh / 2 + addY / scale;
           const anchorY = anchorY2 + eocOff;
           if (tinted) {
             ctx.globalCompositeOperation = 'destination-out';

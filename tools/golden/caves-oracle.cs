@@ -1,5 +1,11 @@
-// Caves-chain oracle：独立复刻原版 1456「Reset + Terrain + Dunes→…→SurfaceCaves」
-// 普通世界全链（4200×1200），UnifiedRandom 反射真·Terraria.exe（零转写风险）。
+// Caves-chain oracle：独立复刻原版「Reset + Terrain + Dunes→…→SurfaceCaves」
+// 普通世界全链（4200×1200）。
+// ★GGGGGGGG（2026-08-24 终局⑨·1457 真值定版）：UnifiedRandom 改【源级转录】
+//   （Terarria1457/Terraria.Utilities/UnifiedRandom.cs 逐行转录=文末 class
+//   UnifiedRandom；与 1456 版逐字节相同 diff 实证）——不再 Assembly.LoadFrom
+//   Steam exe（该 exe 08-24 10:36 已升 1.4.5.8，反射加载即 1458 真值=污染）。
+//   零外部依赖，oracle 输出=1457 真值。字段 SeedArray/inext 由 private 放宽
+//   public（仅 oracle 内部态指纹 StreamHash/STATE_DUMP 自省消费，掷流语义不变）。
 // 每 pass 后输出 type/active/wall/liquid 的 FNV-1a 哈希 → JSON，
 // 与 JS 侧 tests/pass-hash.test.ts 的洞穴链检查点对账。
 // 用法：dotnet run tools/golden/caves-oracle.cs <seedInt> <evil:0|1> <out.json>
@@ -20,8 +26,8 @@ int H = worldSize == 1 ? 1800 : worldSize == 2 ? 2400 : 1200;
 DBnd.WMax = W; DBnd.HMax = H;
 const int BEACH_DISTANCE = 380; // WorldGen.beachDistance（cs:4102）
 
-var asm = Assembly.LoadFrom("/Users/vinlic/Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Terraria.exe");
-dynamic r = Activator.CreateInstance(asm.GetType("Terraria.Utilities.UnifiedRandom")!, seed)!;
+// ★GGGGGGGG：反射加载退役（Steam exe=1458 污染源）→ 源级转录 class UnifiedRandom（文末）
+dynamic r = new UnifiedRandom(seed);
 // ★FFFFFF：KILL_TRACE 逐杀账（诊断专用；须在一切 pass 前声明——statues 段 FC 引擎已活）
 System.IO.StreamWriter KILLW = null!;
 if (Environment.GetEnvironmentVariable("KILL_TRACE") is string kts0)
@@ -39,11 +45,11 @@ if (Environment.GetEnvironmentVariable("KILL_TRACE") is string kts0)
 // （对照 AddGenerationPass 注册序 WorldGen.cs:11540-15887）。pass 内多检查点段
 // （Desert 的 mound/entrance/hive、Dungeon 的 17 段、Shimmer 的 shell/pillars/
 // open）是【一个 pass 的内部段】，只在 pass 头重播一次。
-Type URType = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+// ★GGGGGGGG：URType 反射柄退役——Replay 直建转录类
 // ★FFFFFF：ROLL_TRACE 逐掷账（诊断专用，默认关）——QRollWrap 包装在追踪窗内跨 Replay 保持
 void Replay()
 {
-    var nr = (dynamic)Activator.CreateInstance(URType, seed)!;
+    var nr = (dynamic)new UnifiedRandom(seed);
     if (QRollWrap.On) { QRollWrap.Line("RESEED"); r = new QRollWrap { inner = nr }; }
     else r = nr;
 }
@@ -121,9 +127,8 @@ void Checkpoint(string name)
         string p2 = sd.Split(':')[1];
         using var fs = File.Create(p2);
         using var bw = new BinaryWriter(fs);
-        var urt = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
-        var usa = (int[])urt.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r)!;
-        var uix = (uint)urt.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r)!;
+        var usa = ((UnifiedRandom)r).SeedArray;
+        var uix = ((UnifiedRandom)r).inext;
         bw.Write(W); bw.Write(H); bw.Write(uix);
         for (int q = 0; q < 56; q++) bw.Write(usa[q]);
         bw.Write(act, 0, act.Length);
@@ -326,7 +331,7 @@ SOLID.Remove((ushort)659);
 // 故 TerrainPass（所有 GenPass）从 stream(seed) 第 0 掷开始——与 Reset 期消费无关。
 // 此前把 Reset 流续进 terrain 是 rockLayer Δrl≠0 的根因（探针实测 9293480：
 // 原版 num4init=464.808=(434.4)*1.07 即 N1=108/N2=107=第 0/1 掷；续流则 385.648）。
-r = (dynamic)Activator.CreateInstance(asm.GetType("Terraria.Utilities.UnifiedRandom")!, seed)!;
+r = (dynamic)new UnifiedRandom(seed);
 var TraceCols = new List<string>();   // （Tier B 对拍工具，2026-08-16 保留）
 // ================= TerrainPass（cs:56-244）=================
 int feature = 0, counter = leftBeachEnd + flatBeachPadding();
@@ -5952,21 +5957,20 @@ if (Environment.GetEnvironmentVariable("DG_ROLL_SEARCH2") != null)
     var parts2 = Environment.GetEnvironmentVariable("DG_ROLL_SEARCH2")!.Split(':');
     var targets2 = new HashSet<uint>(parts2[0].Split(',').Select(s => uint.Parse(s, System.Globalization.NumberStyles.HexNumber)));
     int from2 = int.Parse(parts2[1]), to2 = int.Parse(parts2[2]);
-    var probe2 = Activator.CreateInstance(asm.GetType("Terraria.Utilities.UnifiedRandom")!, seed)!;
-    for (int k = 0; k < from2; k++) probe2.GetType().GetMethod("Next", Type.EmptyTypes)!.Invoke(probe2, null);
+    var probe2 = new UnifiedRandom(seed);
+    for (int k = 0; k < from2; k++) probe2.Next();
     for (int k = from2; k <= to2; k++)
     {
         uint fv2 = FnvState2(probe2);
         if (targets2.Contains(fv2)) Console.Error.WriteLine($"DG_ROLL_SEARCH2 {fv2:x8} hit at k={k}");
-        probe2.GetType().GetMethod("Next", Type.EmptyTypes)!.Invoke(probe2, null);
+        probe2.Next();
     }
     Console.Error.WriteLine("DG_ROLL_SEARCH2 done");
 }
 uint FnvState2(object o)
 {
-    var urtRS2 = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
-    var usa2 = (int[])urtRS2.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(o)!;
-    uint uix2 = (uint)urtRS2.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(o)!;
+    var usa2 = ((UnifiedRandom)o).SeedArray;
+    uint uix2 = ((UnifiedRandom)o).inext;
     uint fh2 = 2166136261u;
     for (int q = 0; q < 56; q++) { uint v = (uint)usa2[q]; for (int s = 0; s < 32; s += 8) fh2 = (fh2 ^ ((v >> s) & 0xffu)) * 16777619u; }
     for (int s = 0; s < 32; s += 8) fh2 = (fh2 ^ ((uix2 >> s) & 0xffu)) * 16777619u;
@@ -5974,24 +5978,23 @@ uint FnvState2(object o)
 }
 if (Environment.GetEnvironmentVariable("DG_ROLL_SEARCH") != null)
 {
-    var urtRS = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
     dynamic mkState = null;
-    var probe = Activator.CreateInstance(urtRS, seed)!;
+    var probe = new UnifiedRandom(seed);
     uint FnvState(object o)
     {
-        var usa = (int[])urtRS.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(o)!;
-        uint uix = (uint)urtRS.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(o)!;
+        var usa = ((UnifiedRandom)o).SeedArray;
+        uint uix = ((UnifiedRandom)o).inext;
         uint fh = 2166136261u;
         for (int q = 0; q < 56; q++) { uint v = (uint)usa[q]; for (int s = 0; s < 32; s += 8) fh = (fh ^ ((v >> s) & 0xffu)) * 16777619u; }
         for (int s = 0; s < 32; s += 8) fh = (fh ^ ((uix >> s) & 0xffu)) * 16777619u;
         return fh;
     }
-    for (int k = 0; k < 200000; k++) probe.GetType().GetMethod("Next", Type.EmptyTypes)!.Invoke(probe, null);
+    for (int k = 0; k < 200000; k++) probe.Next();
     for (int k = 200000; k <= 300000; k++)
     {
         uint fv = FnvState(probe);
         if (fv == 0xf890f8a6u) Console.Error.WriteLine($"DG_ROLL_SEARCH truth at k={k}");
-        probe.GetType().GetMethod("Next", Type.EmptyTypes)!.Invoke(probe, null);
+        probe.Next();
     }
     Console.Error.WriteLine("DG_ROLL_SEARCH done");
 }
@@ -6016,10 +6019,9 @@ int DgRolls() => ((object)r) is DgCR dc ? dc.n : -1;
 // 主流态 FNV（SeedArray[56]+inext——与 vanilla PassChainProbe.StreamHash 同构；III 批取证）
 uint DgStreamFNV()
 {
-    var urtF = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
     var innerRF = ((object)r) is DgCR dcF ? dcF.inner : r;
-    var usaF = (int[])urtF.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(innerRF)!;
-    uint uixF = (uint)urtF.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(innerRF)!;
+    var usaF = (int[])innerRF.SeedArray;
+    uint uixF = (uint)innerRF.inext;
     uint fhF = 2166136261u;
     for (int qF = 0; qF < 56; qF++) { uint vF = (uint)usaF[qF]; for (int sF = 0; sF < 32; sF += 8) fhF = (fhF ^ ((vF >> sF) & 0xffu)) * 16777619u; }
     for (int sF = 0; sF < 32; sF += 8) fhF = (fhF ^ ((uixF >> sF) & 0xffu)) * 16777619u;
@@ -6032,10 +6034,9 @@ void DgFlow(string tag)
     Console.Error.WriteLine($"DGFLOWSEC {tag} rolls={DgRolls()}");
     if (Environment.GetEnvironmentVariable("DG_SEG_HASH") != null)
     {
-        var urtSH = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
         var innerR = ((object)r) is DgCR dc2 ? dc2.inner : r;
-        var usaSH = (int[])urtSH.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(innerR)!;
-        uint uixSH = (uint)urtSH.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(innerR)!;
+        var usaSH = (int[])innerR.SeedArray;
+        uint uixSH = (uint)innerR.inext;
         uint fhSH = 2166136261u;
         for (int q = 0; q < 56; q++) { uint v = (uint)usaSH[q]; for (int s = 0; s < 32; s += 8) fhSH = (fhSH ^ ((v >> s) & 0xffu)) * 16777619u; }
         for (int s = 0; s < 32; s += 8) fhSH = (fhSH ^ ((uixSH >> s) & 0xffu)) * 16777619u;
@@ -6227,7 +6228,8 @@ bool DgChestLegOK(int lx, int ly)
 // 原版在 **Dunes pass 头**消耗（cs:11542）——现已随每 pass 重播改造归位 Dunes 头（两侧同步），本注释留档；本 oracle 与 JS 侧
 // 同步**延后到本 pass 头**（相对序保持 A→B→Seed→shelf→lantern→skewed）——
 // pre-dungeon 检查点哈希保持现状，两端口径一致。
-var dgUR = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+// ★GGGGGGGG：dgUR 反射柄退役——结构子流直建转录类（DgRoom/DgHall 等 Activator.CreateInstance(dgUR,…) 同步改写）
+Func<int, dynamic> dgUR = s => new UnifiedRandom(s);
 // ★DC:344 MakeDungeon 头 `Main.tileSolid[481/482/483] = false`（裂纹砖族，Main.cs:7865-69
 //   初值 true）——JS 侧 TILE_DEFS 已预翻 solid:false（数据不可动）+ WorldGen 接线时间线
 //   存档；生成期实心查询自本 pass 起恒非实心（还原点 SmoothWorld 头 cs:16510 在
@@ -6475,7 +6477,7 @@ bool GrowTreeT(int i, int y, bool ignoreWalls)
 void DgDomeEntrance(int i, int j, int preSeed)
 {
     dgWriter = "DOME";
-    dynamic hr = Activator.CreateInstance(dgUR, preSeed)!;
+    dynamic hr = dgUR(preSeed);
     bool flag2 = (int)hr.Next(4) != 0;                 // 树饰开关（cs:52）
     int windowType = (int)hr.Next(3);                  // 0=Regular 1=Skeletron 2=MoonLord
     bool leftSide = !dungeonRight;                     // flag = dungeonSide==Left（drunk 翻转=特典）
@@ -7152,9 +7154,8 @@ Checkpoint("dungeon"); DgFlow("END");   // #32 转录落地（原 slush 同态�
 //    over SeedArray[56]+inext；x86 真值 f890f8a6，seed 9293480/evil0）——
 {
     object rTarget = ((object)r) is DgCR dcr ? dcr.inner : (object)r;
-    var urt2 = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
-    var usa2 = (int[])urt2.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rTarget)!;
-    var uix2 = (uint)urt2.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rTarget)!;
+    var usa2 = ((UnifiedRandom)rTarget).SeedArray;
+    var uix2 = ((UnifiedRandom)rTarget).inext;
     uint fh = 2166136261u;
     for (int q = 0; q < 56; q++)
     {
@@ -7291,7 +7292,7 @@ void DgLayout(int steps)
 void DgRoom(DRoom s)
 {
     dgWriter = $"R{dgRooms.Count}";
-    dynamic rr = Activator.CreateInstance(dgUR, s.Seed)!;
+    dynamic rr = dgUR(s.Seed);
     double num = 1.0 * 1.0;                                   // roomStrengthScalar（StartingRoom→1）
     double num2 = (int)(15.0 * num) + (int)rr.Next(15);
     // ★III 终清（2026-08-18）：LegacyDungeonRoom.cs:135-137 原文是 **float 算术**
@@ -7355,7 +7356,7 @@ void DgRoom(DRoom s)
 void DgHall(DHall s)
 {
     dgWriter = $"H{dgHalls.Count}";
-    dynamic rr = Activator.CreateInstance(dgUR, s.Seed)!;
+    dynamic rr = dgUR(s.Seed);
     double vx = 0, vy = 0;
     int num = (int)(4.0 * 1.0) + (int)rr.Next(2);             // hallStrengthScalar=1
     double px = dgPosX, py = dgPosY;
@@ -7638,7 +7639,7 @@ void DgHall(DHall s)
 void DgEntHall(int seed)
 {
     dgWriter = "EH";
-    dynamic rr = Activator.CreateInstance(dgUR, seed)!;
+    dynamic rr = dgUR(seed);
     double px = dgPosX, py = dgPosY;
     double sx = px, sy = py;
     int num = (int)rr.Next(5, 9);
@@ -7757,7 +7758,7 @@ void DgEntHall(int seed)
 void DgEntHallPrecalc(int seed, double sx0, double sy0, double tgx, double tgy)
 {
     dgWriter = "EHP";
-    dynamic rr = Activator.CreateInstance(dgUR, seed)!;
+    dynamic rr = dgUR(seed);
     int num = (int)rr.Next(5, 9);                 // strength（存活）
     int stepsRolled = (int)rr.Next(10, 30);       // 覆写弃值保位
     _ = stepsRolled;
@@ -8192,7 +8193,7 @@ void DgClrAll(int i)
 void DgTowerEntrance(int i, int j, int preSeed)
 {
     dgWriter = "TWR";
-    dynamic rr = Activator.CreateInstance(dgUR, preSeed)!;
+    dynamic rr = dgUR(preSeed);
     int windowType = (int)rr.Next(3);
     bool leftSide = !dungeonRight;                  // flag = dungeonSide==Left
     for (int x = i - 60; x < i + 60; x++)
@@ -8417,7 +8418,7 @@ void DgTowerEntrance(int i, int j, int preSeed)
 void DgEntrance(int seed, int preSeed)
 {
     dgWriter = "ENT";
-    dynamic rr = Activator.CreateInstance(dgUR, preSeed)!;
+    dynamic rr = dgUR(preSeed);
     int i = dgPosX, j = dgPosY;
     for (int x = i - 60; x < i + 60; x++)
         for (int y = j - 60; y < j + 60; y++)
@@ -9239,10 +9240,9 @@ void DgWallVariants()
         var snap = (ushort[])wal.Clone();
         int k0 = DgRolls();
         Console.Error.WriteLine($"DG_W_SEARCH k0={k0} bounds={dgBounds.L},{dgBounds.T},{dgBounds.R},{dgBounds.B}");
-        var urtW = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
         void setInnerAt(int offset)
         {
-            dynamic nr = Activator.CreateInstance(urtW, seed)!;
+            dynamic nr = new UnifiedRandom(seed);
             for (int q = 0; q < offset; q++) nr.Next();
             if (((object)r) is DgCR dc2) { dc2.inner = nr; dc2.n = offset; }
             else r = nr;
@@ -9252,7 +9252,7 @@ void DgWallVariants()
         int maxK = k0 + 40000 + 64;
         var smp = new int[maxK + 1];
         {
-            dynamic sr = Activator.CreateInstance(urtW, seed)!;
+            dynamic sr = new UnifiedRandom(seed);
             for (int q = 0; q <= maxK; q++) smp[q] = sr.Next();
         }
         const double C = 4.656612875245797E-10;
@@ -10875,13 +10875,12 @@ Checkpoint("beaches");
 var streamPts = new List<string>();
 uint StreamHash()
 {
-    var t = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
     // ★WWWWW（HHHHH 移交）：dungeon 段 r 已被换 DgCR 计数包装（:5759）——直读其
     //   SeedArray/inext 会 ArgumentException（STREAM_PRINT 在 dungeonL 首崩）。
-    //   解包 inner 后再反射=DgStreamFNV/DgFlow 同款口径（零 DgCR 时行为不变）。
+    //   解包 inner 后直读=DgStreamFNV/DgFlow 同款口径（零 DgCR 时行为不变）。
     var rtS = ((object)r) is DgCR dcS ? dcS.inner : (((object)r) is QRollWrap qwS ? qwS.inner : (object)r);
-    var sa = (int[])t.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rtS)!;
-    var ix = (uint)t.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rtS)!;
+    var sa = ((UnifiedRandom)rtS).SeedArray;
+    var ix = ((UnifiedRandom)rtS).inext;
     uint h = 0x811c9dc5;
     foreach (var v in sa) { for (int b = 0; b < 4; b++) h = (h ^ (uint)((v >> (8 * b)) & 0xff)) * 16777619u; }
     for (int b = 0; b < 4; b++) h = (h ^ (uint)((ix >> (8 * b)) & 0xff)) * 16777619u;

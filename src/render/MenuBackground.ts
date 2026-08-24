@@ -266,7 +266,7 @@ export class MenuBackground {
     menuTimeInfo.dayFactor = this.clock.dayFactor;
     // 云色单源（= Renderer 帧内 this.sky.cots 同款）：ColorOfTheSkies——菜单不喂
     //  则云回落 lastSkyTop(天空顶色深蓝)→深蓝云画在深蓝天上隐形（实测 lit=0）
-    this.sky.cots = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase);
+    this.sky.cots = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase, true);
     // MenuXMovement（:47625-47631：+4/帧，wrap ±2^31）
     this.camX = (this.camX + 4 * frames) % MENU_X_WRAP;
 
@@ -280,7 +280,7 @@ export class MenuBackground {
   /** 层 tint = ColorOfTheSkies（:61409 菜单也跑 SetBackColor → :56194）。
    *  近白免烘（正昼）；量化 1/255 变化才重烘（tint 缓动不抖帧） */
   private layerTint(): [number, number, number] | null {
-    const c = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase);
+    const c = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase, true);
     if (c[0] >= 254.5 && c[1] >= 254.5 && c[2] >= 254.5) return null;
     return [c[0] / 255, c[1] / 255, c[2] / 255];
   }

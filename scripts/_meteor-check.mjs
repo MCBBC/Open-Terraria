@@ -15,6 +15,7 @@ for (let i = 0; i < 120; i++) {
   await new Promise((r) => setTimeout(r, 1000));
 }
 await new Promise((r) => setTimeout(r, 1500));
+await page.screenshot({ path: '/tmp/title-day.png' });
 await page.evaluate(() => {
   const mb = window.__swMenuBg;
   mb.vTime = 16200;

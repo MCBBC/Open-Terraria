@@ -51,7 +51,7 @@ const out = await page.evaluate(async () => {
   proto.drawImage = orig;
   if (!h) return { err: 'harpy not spawned' };
   // 屏空间对拍:draws 已是屏坐标(CTM 含相机);盒三角投影同空间
-  const cam = g.renderer.cam;
+  const cam = g.camera;
   const proj = (wx, wy) => { const [sx, sy] = cam.worldToScreen(wx, wy); return { x: sx, y: sy }; };
   return {
     boxScreen: {
