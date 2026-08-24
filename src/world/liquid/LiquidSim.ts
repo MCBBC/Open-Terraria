@@ -516,22 +516,36 @@ export class LiquidSim {
 
   /** 格子是否阻挡液体（原版 nactive() && tileSolid && !tileSolidTop）。
    *  nactive() 要求 active 位——生成期 TileRunner 会在空气格写幽灵 type（flags=0），
-   *  无 active 的一律视为空气（否则微光池会被 waterCheck 当实心格清零泄流） */
+   *  无 active 的一律视为空气（否则微光池会被 waterCheck 当实心格清零泄流）。
+   *  ★EEEEEEE（2026-08-24）补 checking 半边：原版 nactive()=`(sTileHeader&0x60)==32`
+   *  （Tile.cs:270-277）= **active && !checkingLiquid**（skip 位不在掩码）——在列/
+   *  缓冲格（checking=1）对一切通行性谓词视为「可通行」。活动列表格在 AddWater 时
+   *  置位、DelWater 尾清位，故 Update/DelWater 全部邻格谓词读到的在列格恒 nactive=
+   *  false：Update 头实心格 kill=999 分支对在列格**恒不可达**（cs:458）、下灌可灌入
+   *  在列实心格（cs:568）、DelWater 早退支自格腿恒真（cs:1516）。JS 曾只看 active 位
+   *  → 在列实心格（岩浆烧除泥化 59 等在列入列后变实心的格）被当墙：下灌拒灌/侧流
+   *  截断/DelWater 误删——列表内容 ±1 与尾元置换（dw0 #10666 (1954,896) 槽位
+   *  v3292/j3296 族）的谓词面根因 */
   private blocksLiquid(x: number, y: number): boolean {
     const st = this.world.store;
     if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
     const i = this.idx(x, y);
     if (!st.flags[i]) return false;
+    if (this.checking[i]) return false; // nactive() = active && !checkingLiquid（Tile.cs:270）
     return this.solidNP[st.type[i]] === 1;
   }
 
-  /** WorldGen.SolidTile 语义（WorldGen.cs:42370）：实心 && !平台 && !半砖 && !坡面。
-   *  仅 LavaCheck/HoneyCheck/ShimmerCheck 入口使用——半砖格允许发生交互（Liquid.cs:898/1020） */
+  /** WorldGen.SolidTile 语义（1456 WorldGen.cs:70155-70176）：实心 && !solidTop &&
+   *  !半砖 && !坡面 && **!inActive**（致动位；null/越界=真）。仅 LavaCheck/HoneyCheck/
+   *  ShimmerCheck 入口使用——半砖格允许发生交互（Liquid.cs:898/1020）。★EEEEEEE 补
+   *  inActive 半边（wire bit5=WIRE_ACTUATED）：生成期无常驻致动格=零世界效应，
+   *  运行期电路致动格不再被交互检查当实心墙 */
   private solidTileFull(x: number, y: number): boolean {
     const st = this.world.store;
     if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
     const i = this.idx(x, y);
     if (!st.flags[i]) return false;
+    if (st.wire[i] & 32) return false; // !inActive()（Tile.cs:672-674 sTileHeader bit8）
     return this.solidNP[st.type[i]] === 1 && !st.half[i] && st.slope[i] === 0;
   }
 

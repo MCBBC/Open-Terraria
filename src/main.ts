@@ -15,7 +15,7 @@ import { SpriteAtlas } from './assets/SpriteAtlas';
 import { AudioSystem } from './core/Audio';
 import { setDebugPool } from './data/vanillaNpcs';
 import { VUI } from './vui/VUI';
-import { initAssetCache } from './net/AssetCache';
+import { initAssetCache, warmAllAssets } from './net/AssetCache';
 import { holdForAssetsReady, mountAssetBadge } from './ui/AssetDownloadUI';
 import { UITextures } from './vui/assets/UITextures';
 import { UIFont } from './vui/draw/UIFont';
@@ -564,6 +564,11 @@ kvHas('sandboxworld.quicksave').then(async () => {
   const bypassBoot = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo');
   await loadAssets();
   splashGate.resolve();
+  if (atlas) UITextures.setAtlas(atlas);
+  // options/语言先行（原在 splash 收场后——提前到保持期前：下载徽标挂载文案
+  // 需要 Lang；mainFlow 内的 options.load() 幂等，此处已加载则直接返回）
+  await options.load();
+  await Promise.all([UIFont.load(), Lang.init(options.data.lang)]);
   if (!bypassBoot) {
     // 资源预载提前到 splash 期（原 showTitle 内调用，幂等）：有下载就停在 splash
     // 上等完（右下角徽标 z40 浮于 splash z30 之上），无下载至少保持 2s——
@@ -574,15 +579,9 @@ kvHas('sandboxworld.quicksave').then(async () => {
     await holdForAssetsReady({ minMs: 2000, sinceMs: performance.now() - splashT0 });
   }
   splash.done();
-  if (atlas) UITextures.setAtlas(atlas);
-  // options 先行(语言设置在 options 里),Lang.init 按 options.data.lang 加载语言包;
-  // mainFlow 内的 options.load() 幂等,此处已加载则直接返回
-  await options.load();
-  await Promise.all([UIFont.load(), Lang.init(options.data.lang)]);
   VUI.init(root);
   VUI.startLoop(); // 自愈帧循环（HMR 杀不死，看门狗 1s 内重启）
-  // SW 资产持久缓存(仅生产构建;dev 需 ?sw=1):注册后由 mainFlow.showTitle 驱动全量预载
-  void initAssetCache();
+  // SW 资产持久缓存注册已提前到 splash 期(上方 await initAssetCache,幂等)
   flow = createFlow(root, atlas, ui, audio);
 
   // M0 验收入口：?vuidemo=1 只跑 VUI 框架演示

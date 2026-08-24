@@ -260,7 +260,9 @@ export class MenuBackground {
     this.camX = (this.camX + 4 * frames) % MENU_X_WRAP;
 
     const W = this.canvas.width, H = this.canvas.height;
-    this.sky.draw(this.ctx, this.clock, W, H, this.camX, dtMs);
+    // 相机 Y = surface·16 − 屏高（DrawMenu :47620）——云 num3 视差/atmo 归位
+    this.sky.draw(this.ctx, this.clock, W, H, this.camX, dtMs,
+      this.sky.vanillaMenuCamY(H));
     this.drawForest();
   }
 

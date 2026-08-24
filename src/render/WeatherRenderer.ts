@@ -373,44 +373,56 @@ export class WeatherRenderer {
     return n;
   }
 
-  /** Rain.Draw（Main.cs:38238-38266）：2×40 条 × type 偏移，光照着色 ×0.85；
-   *  + 雪粒（Dust.png dust76 源矩形 760,0，光照着色不 ×0.85——雪花本色白亮） */
-  draw(r: Renderer, world: World) {
+  /** Rain.Draw（Main.cs:38238-38266）：2×40 条 × type 偏移，光照着色 ×0.85。
+   *  ★2026-08-24 r15 R15-1 拆分：原版雨在 DrawItems/全部实体之后（Main.cs:63226→
+   *  :63227）、DrawGore 之前——Renderer 在实体循环后调用本方法（雨幕盖角色/敌怪）。 */
+  drawRain(r: Renderer, world: World) {
     const w = this.weather;
     const hooks = this.hooks;
     if (!w || !hooks) return;
+    if (w.cloudAlpha <= 0) return;
     const ctx = r.ctx;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    if (w.cloudAlpha > 0) {
-      const tex = getRainTex();
-      const texOk = tex && (tex.width > 0) && tex.width > 0;
-      for (const d of this.pool) {
-        if (!d.active) continue;
-        const tx = Math.floor((d.x + 4) / TILE);
-        const ty = Math.floor((d.y + 4) / TILE);
-        const [lr, lg, lb] = hooks.lightAt(tx, ty);
-        ctx.save();
-        // DrawRain（:38246-38256）1:1：position=左上角、origin=(0,0)（绕【顶点】旋转，
-        // 雨条自 position 向速度方向垂落）——★曾中心锚（整体低 20px+旋转心错）
-        ctx.translate(d.x, d.y);
-        ctx.rotate(d.rotation);
-        if (texOk) {
-          // 光照着色（原版 GetColor×0.85）：量化 8 级 × 3 型预烘焙乘色条（multiply+destination-in），
-          // 每滴一次 drawImage——精确到 1/8 亮度量化，替代旧黑罩近似
-          const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
-          const v = Math.round((lvl / 7) * 0.85 * 255);
-          const tinted = tintedRainStrip(tex!, d.type, v);
-          if (tinted) {
-            ctx.drawImage(tinted, 0, 0, 2, 40, 0, 0, 2 * d.scale, 40 * d.scale);
-          }
+    const tex = getRainTex();
+    const texOk = tex && (tex.width > 0) && tex.width > 0;
+    for (const d of this.pool) {
+      if (!d.active) continue;
+      const tx = Math.floor((d.x + 4) / TILE);
+      const ty = Math.floor((d.y + 4) / TILE);
+      const [lr, lg, lb] = hooks.lightAt(tx, ty);
+      ctx.save();
+      // DrawRain（:38246-38256）1:1：position=左上角、origin=(0,0)（绕【顶点】旋转，
+      // 雨条自 position 向速度方向垂落）——★曾中心锚（整体低 20px+旋转心错）
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rotation);
+      if (texOk) {
+        // 光照着色（原版 GetColor×0.85）：量化 8 级 × 3 型预烘焙乘色条（multiply+destination-in），
+        // 每滴一次 drawImage——精确到 1/8 亮度量化，替代旧黑罩近似
+        const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
+        const v = Math.round((lvl / 7) * 0.85 * 255);
+        const tinted = tintedRainStrip(tex!, d.type, v);
+        if (tinted) {
+          ctx.drawImage(tinted, 0, 0, 2, 40, 0, 0, 2 * d.scale, 40 * d.scale);
         }
-        ctx.restore();
       }
+      ctx.restore();
     }
-    // ---- 雪粒（晴天雪原也有：w.cloudAlpha 无关，只看池）----
+    ctx.restore();
+    void world;
+  }
+
+  /** 雪/沙尘 precip（★r15 R15-1 拆分：原版雪=dust 76、沙尘=dust 268 走 DrawDust
+   *  :63241——碎块后、前景水前；Renderer 在 gore 后调用本方法）。
+   *  雪粒 Dust.png dust76 源矩形 760,0，光照着色不 ×0.85——雪花本色白亮。 */
+  drawPrecipDust(r: Renderer, world: World) {
+    const hooks = this.hooks;
+    if (!hooks) return;
+    const ctx = r.ctx;
     const dTex = getDustTex();
     if (dTex && (dTex.width > 0) && dTex.width > 0) {
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
       for (const f of this.snow) {
         if (!f.active) continue;
         const tx = Math.floor((f.x + 5) / TILE);
@@ -436,9 +448,16 @@ export class WeatherRenderer {
         if (base) ctx.drawImage(base, dx, dy, sz, sz);
         if (over) ctx.drawImage(over, dx, dy, sz, sz);
       }
+      ctx.restore();
     }
-    ctx.restore();
     void world;
+  }
+
+  /** 全量绘制（雨+雪沙同窗）——兼容旧调用方；Renderer 主路径已拆 drawRain/
+   *  drawPrecipDust 分层 */
+  draw(r: Renderer, world: World) {
+    this.drawRain(r, world);
+    this.drawPrecipDust(r, world);
   }
 }
 

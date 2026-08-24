@@ -3424,6 +3424,13 @@ export class SkyRenderer {
     return atmoOf(camY, this.fx.worldW, this.fx.surfaceY);
   }
 
+  /** 菜单相机 Y（Main.cs:47620 DrawMenu：screenPosition.Y = worldSurface·16 −
+   *  screenHeight）——云三通道 num3 视差/大气系数按此归位（曾传 0 → num3 把
+   *  云推到屏外树后、atmo 钳 0 染色全暗） */
+  vanillaMenuCamY(viewH: number): number {
+    return this.fx.surfaceY - viewH;
+  }
+
   // ================= SunVisibilityPixel 遮挡采样（HorizonHelper.cs:42-80） =================
 
   /** 上一帧采样值（DrawLensFlare 消费；= 原版 _pixelTarget 1×1 alpha） */
@@ -3524,8 +3531,11 @@ export class SkyRenderer {
     const zQ = this.frameCtx?.z ?? 1;
     const screenTopWorld = camY - viewH / 2 / zQ;
     // bgTopY(Main.cs:61483:−screenPosition.Y/(worldSurface·16−600)·200;worldSurface≤30 → 0)
-    const skyBgTopY = this.fx.surfaceY > 30
-      ? -screenTopWorld / Math.max(1, this.fx.surfaceY - 600) * 200 : 0;
+    // ★gameMenu 门(:61481-82 gameMenu||netMode==2 → bgTopY=0)——菜单传原版
+    //  screenPosition.Y(=surface−屏高)后此门必须生效,否则日月/云整体偏移
+    const skyBgTopY = !this.frameCtx ? 0
+      : this.fx.surfaceY > 30
+        ? -screenTopWorld / Math.max(1, this.fx.surfaceY - 600) * 200 : 0;
     // 镜头光斑可见性复用（drawWorldFx）
     this.lastDayTimeTicks = isDay ? dayTimeTicks : 0;
     this.lastEclipse = !!clock.eclipse;

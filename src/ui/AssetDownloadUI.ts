@@ -344,3 +344,42 @@ export function gateAssetsOrRun(action: () => void): void {
   pct.textContent = `${fmtPct(s)} · ${phaseText(s)} · ${fmtProgress(s)}`;
   if (s.failed > 0 && !s.warming) retry.style.display = '';
 }
+
+// ---- 启动 splash 保持期(2026-08-24) ----
+
+export interface HoldDeps {
+  now(): number;
+  state(): AssetCacheState;
+  completeFast(): boolean;
+  complete(): boolean;
+}
+
+/** 启动 splash 保持：无下载概念（SW 未启用或上轮完成标志在）→ 补满 minMs；
+ *  有下载 → 等下载完（或失败终态放行，徽标在菜单上继续示警）；timeoutMs 兜底
+ *  防下载链挂死卡死启动。sinceMs = splash 已显示时长（loadAssets 期计入）。
+ *  轮询 250ms（SW 消息驱动状态，无需订阅式精确唤醒）。 */
+export function holdForAssetsReady(opts: {
+  minMs: number;
+  sinceMs?: number;
+  timeoutMs?: number;
+  deps?: HoldDeps;
+}): Promise<void> {
+  const { minMs, sinceMs = 0, timeoutMs = 30000 } = opts;
+  const d = opts.deps ?? {
+    now: () => performance.now(),
+    state: assetCacheState,
+    completeFast: assetsCompleteFast,
+    complete: assetsComplete,
+  };
+  const t0 = d.now();
+  const needWait = d.state().enabled && !d.completeFast();
+  return new Promise((resolve) => {
+    const finish = () => { clearInterval(iv); clearTimeout(to); resolve(); };
+    const iv = setInterval(() => {
+      const elapsed = sinceMs + (d.now() - t0);
+      if (elapsed < minMs) return;
+      if (!needWait || d.complete() || d.state().failed > 0) finish();
+    }, 250);
+    const to = setTimeout(finish, Math.max(0, timeoutMs - sinceMs));
+  });
+}

@@ -2772,6 +2772,13 @@ export class Renderer {
     // 2c. 前景 tile/物体层（drawChunkGrid 整数设备矩形——见 2b 注释）
     drawChunkGrid('tile');
 
+    // 3.7 血肉墙墙身/肌腱链/舌头（★2026-08-24 r15 R15-8 搬移：原版 DrawWoF 在
+    //     DoDraw_WallsTilesNPCs 内紧随 DrawWalls(:64233→:64235)、在非实心 tile/
+    //     瀑布(:64241-64242)之前——墙身垫在瀑布/火把格之下。本仓单烘焙层无法插进
+    //     墙/块之间,取"tile 层后、瀑布前"最近似位;嘴(113)/眼(114)/饥饿者(115)
+    //     仍留实体层（注释备案不受影响）;墙死透时的全屏血尘崩落近似也在此触发）
+    this.drawWoF(player, entities, world, camRY, viewW, viewH, z);
+
     // 2c'.0 火苗叠画（原版 DrawSingleTile_Flames，TileDrawing.cs:1746 在本体绘制之后
     //   调用）：火把/蜡烛/烛台/吊灯/篝火等 Flame_N 平行表逐帧种子化抖动——动态层
     //   不能进 ChunkCache 静态烘焙（TileFrameSeed 每 5 帧推进，Main.cs:61156-61159）。
@@ -2826,10 +2833,11 @@ export class Renderer {
       this.drawDummyTileAnim(ctx, world, entities, cam, viewW, viewH, z);
     }
 
-    // 2c'. 导线覆盖层(原版画在水之上实体之下,Main.cs:46721;手持电路工具或 F7 时可见)
-    this.drawWires(world, cam, viewW, viewH, z);
-    // 2c''. 宏伟蓝图拖拽预览(锚点→悬停格的 L 路径,与 massWireOperation 同构:先纵后横+端点)
-    this.drawGrandPreview();
+    // 2c'. 导线覆盖层（★2026-08-24 r15 R15-2 搬移：原版实机路径 DrawWires 唯二调用
+    //     Main.cs:63251/:63259,均在 DrawWaters()【前景水之后】(:63248);capture 路径
+    //     :57896 亦在 DrawLiquid 后——导线恒在水体/实体之上。曾注"水之上实体之下,
+    //     Main.cs:46721"系错位引用(:46721 实为毁灭者血条追踪代码)。现画在 4.5 前景
+    //     水之后;手持电路工具或 F7 时可见）
 
     // 2d. 瀑布贴图（原版画在 tile 层后、实体前，Main.cs:47460，被地形遮挡）
     this.drawWaterfalls(world, cam, viewW, viewH, z);
@@ -2837,12 +2845,14 @@ export class Renderer {
     // 2d'. 挂物族存放物叠画（原版 TE*.Draw / 模特走 PlayerRenderer——本作画物品图标）
     this.drawFurnitureItems(world, cam, viewW, viewH, z);
 
-    // 2d'. 天气层（雨滴+雪粒池更新+绘制；沙尘粒子发射——Game 每帧已 attach 状态与 hooks）
+    // 2d'. 天气层【物理更新】（★2026-08-24 r15 R15-1 绘制搬移：原版雨在
+    //     DrawItems/全部实体之后(Main.cs:63226→63227)、雪/沙尘走 DrawDust(:63241,
+    //     碎块后前景水前)——本仓雨移到实体循环后 drawRain、雪/沙移到碎块后
+    //     drawPrecipDust;此处仅保留池物理 update）
     if (this.weatherFxActive) {
       // ★暂停门(2026-08-14 终审:render 每帧跑,weatherFx.update 含雨滴物理+
       // 池管理+雪/沙出生——暂停时继续跑=池持续填满/对象持续累积,原版暂停世界全冻结)
       if (!this._worldPaused) this.weatherFx.update(world, viewW, viewH, cam.x - viewW / 2, cam.y - viewH / 2, player.vx, player.vy);
-      this.weatherFx.draw(this, world);
     }
 
     // 2d''.7 天空深化批世界内绘制：雨点落水涟漪（世界坐标）
@@ -2854,11 +2864,6 @@ export class Renderer {
     // 3.5 入驻旗帜（Main.cs:40152 DrawNPCHousesInWorld：有家 NPC 在家坐标上方
     // 挂 House_Banner 旗布 + 叠画 NPC 头像；实体层之前画，让 NPC 从旗前走过）
     this.drawHouseBanners(entities, world, cam);
-
-    // 3.7 血肉墙墙身/肌腱链/舌头（Main.cs DrawWoF :37811-37966，DoDraw_WallsTilesNPCs
-    //     :62709 在墙/方块之后、NPC 缓存之前调用 → 墙身垫在嘴(113)/眼(114)/饥饿者(115)
-    //     精灵之下，本仓在实体层之前画等价；墙死透时的全屏血尘崩落近似也在此触发）
-    this.drawWoF(player, entities, world, camRY, viewW, viewH, z);
 
     // 3.8 拴绳实体（LeashedEntity.DrawEntities，Main.cs:22163——DrawNPCs 起手调用；
     //     各实体以 behindTiles:true 入 NPC 层 = 方块后实体前，与 2b'/实体段之间同档）。
@@ -2936,15 +2941,38 @@ export class Renderer {
       ctx.fillRect(x, y, 38 * fill, 4);
     }
 
-    // 4.5 液体前景 pass（原版 waterTarget 在玩家/掉落物之后合成，Main.cs:46720）：
-    //     水 0.6 半透明盖在实体上——水中角色带水色
+    // 4.4 雨（★2026-08-24 r15 R15-1：原版 DrawRain 在 DrawItems/全部实体之后
+    //     （Main.cs:63226→:63227）、DrawGore 之前——雨幕盖在角色/敌怪/掉落物上）
+    if (this.weatherFxActive) this.weatherFx.drawRain(this, world);
+
+    // 4.45 Gore 死亡碎块（原版 DrawGore Main.cs:21712-21742：DrawItems/Rain 之后、
+    //     DrawDust 之前；Main.DrawGore 帧路径 :21728-21737 多帧源矩形，非帧路径
+    //     :21741-21742 整张贴图，均中心锚 + rotation + scale，透明度 =
+    //     (255-alpha)/255（Gore.GetAlpha :1486）。★r15 R15-7 搬移：原版序
+    //     gore→dust→水(:63230→:63241→:63248)——碎块/尘在前景水【之下】受水色罩）
+    this.drawGorePieces(ctx, cam, viewW, viewH);
+
+    // 4.47 雪/沙尘 precip（★r15 R15-1：原版雪=dust 76、沙尘=dust 268 走 DrawDust
+    //     :63241——碎块后、前景水前）
+    if (this.weatherFxActive) this.weatherFx.drawPrecipDust(this, world);
+
+    // 4.48 原版 Dust lit pass（DrawDust :38266；★r15 R15-7 搬移：gore 之后、前景水
+    //     之前——水中尘受水色罩压色。屏空间直画：setTransform 复位世界变换,
+    //     仍在 worldLayer 内 → compositeLight 照常乘光）
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.drawVanillaDustPass(false, cam, player);
+    ctx.restore();
+
+    // 4.5 液体前景 pass（原版 waterTarget 在玩家/掉落物之后合成，Main.cs:46720；
+    //     ★r15 R15-7：在 gore/尘【之后】= 水 0.6 半透明罩住碎块与尘——水中爆炸
+    //     碎块/尘带水色,原版语义）：
     this.drawLiquids(world, cam, viewW, viewH, z, false);
 
-    // 4.6 Gore 死亡碎块（原版 DrawGore Main.cs:21712-21742：DrawItems/Rain 之后、
-    //     DrawDust 之前——实体与液体前景之后、尘粒之前；Main.DrawGore 帧路径 :21728-
-    //     21737 多帧源矩形，非帧路径 :21741-21742 整张贴图，均中心锚 + rotation +
-    //     scale，透明度 = (255-alpha)/255（Gore.GetAlpha :1486））
-    this.drawGorePieces(ctx, cam, viewW, viewH);
+    // 4.55 导线覆盖层 + 宏伟蓝图预览（★r15 R15-2：原版 DrawWires 唯二调用
+    //     Main.cs:63251/:63259,均在 DrawWaters() 前景水之后——导线恒在水体/实体上）
+    this.drawWires(world, cam, viewW, viewH, z);
+    this.drawGrandPreview();
 
     // 5. 粒子
     for (const p of particles) {
@@ -2980,12 +3008,8 @@ export class Renderer {
 
     ctx.restore();
 
-    // 5c. 原版 Dust lit pass（DrawDust :38266——DrawGore 之后；乘光族画在
-    //     合成前，全屏 compositeLight 逐像素乘光 ≈ 原版逐尘 Lighting.GetColor）。
-    //     ★必须在世界变换块【外】（restore 之后）调用——本 pass 以
-    //     cam.worldToScreen 屏幕坐标直画，块内调用会被世界变换二次平移+缩放
-    //     （尘埃错位+放大；与 :1446 全亮孪生 pass 同坐标系）
-    this.drawVanillaDustPass(false, cam, player);
+    // 5c. 原版 Dust lit pass 已上移至 4.48（★r15 R15-7：gore/precip 之后、前景水
+    //     之前——setTransform 复位世界变换的屏空间窗,仍在 worldLayer 内乘光）
 
     // ==== 世界层收口：恢复主画布 ctx，光照在 worldCanvas 上成形后叠回 ====
     this.endWorldLayer(mainCtx);

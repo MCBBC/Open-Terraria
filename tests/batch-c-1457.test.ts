@@ -284,8 +284,8 @@ describe('StormLightning(AI_203_StormLightning)', () => {
   });
   it('1122 IDStatic 10(:10567 段)同型共享 → 双雷同帧 Kill 只结算一次', () => {
     // Kill 帧 MultiPointHitbox 沿 bolt 一次性结算（:71918-71919）；双雷同帧 Kill
-    // → IDStatic 共享表去重
-    const e = mkEnemy(1, 795, 795);
+    // → IDStatic 共享表去重。（bolt 折线有横向游走,用 96×96 大敌保几何命中）
+    const e = mkEnemy(1, 795, 795, 96, 96);
     const g = makeHooks([e]);
     const a = new StormLightning(1122, 800, 800, 180, 4);
     const b = new StormLightning(1122, 802, 802, 180, 4);

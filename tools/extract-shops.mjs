@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from 'fs';
 
 // SW_TREE（2026-08-22 增量对拍用）：缺省 Terarria1456 不变；配 --out 落 /tmp（禁直接覆盖现库）
-const TREE = process.env.SW_TREE || 'Terarria1456';
+const TREE = process.env.SW_TREE || 'Terarria1457';
 if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
 const SRC = `/Users/vinlic/Project/GLM/SandboxWorld/${TREE}/Terraria`;
 const itemSrc = readFileSync(`${SRC}/Item.cs`, 'utf8');
@@ -16,86 +16,281 @@ const chestSrc = readFileSync(`${SRC}/Chest.cs`, 'utf8');
 // 定义在外层 case 的内层 switch 里，深度过滤又整段漏收）。现按花括号深度建标签表：
 // 每个 case 标签的段 = 到【同深度或更浅的下一个标签 / 所在块闭合】为止；段内做
 // C# 序模拟：共享体 value 赋值 + 更深层 `case <自身id>:` 块内覆写，晚写胜出。
+// ---- ① 物品 value:事件回放模型(2026-08-24 R14-C2/C3 重写) ----
+// 旧版"case 段迷你求值"三缺陷(蓝队 R14 定谳):
+//   a) 只评 `case N:` 直属段——switch 外共享分支族(制作站台 2192-2204/染发剂
+//      1977-1986/配重 3309-3314/建造工具 2214-2217/披风 2284-2287/画作
+//      1479-1494/派对食物 3739-3741 等)整族漏采 → 货架价塌 100 铜/卖价 0;
+//   b) 段内 `if (type == N)`/`if (Variant...)` 守卫不建模,晚写胜出——
+//      变体价冒充默认价(3069/517/725/1319/1325/5147)、细分价互相覆盖
+//      (5222-5245 画族/2290-2321 海报族/2827-2855 灯笼族);
+//   c) SetDefaults 分派器(:48694-48715)不建模——五段按 id 区间五选一
+//      (非顺序链),IsFood 走 SetFoodDefaults 替代,尾段(:48716-48929)对全体生效。
+// 新模型:作用域栈(switch/case/default/guard)+ 事件回放,逐 id 独立求终值。
+//   - case N 事件只对 id==N 生效(fall-through 连续标签并组);
+//   - default 对"所属 switch 全量 case 之外"的 id 生效(caseIds 回放时已完整);
+//   - 守卫 if(type==N / >=a&&<=b / <a||>b / <=N / >N)收窄,else/else if 取
+//     【刚闭合守卫在父约束内的补集】;if(Variant..) 丢弃(商店恒默认变体);
+//   - `goto case N`(全文件唯一 Chest 无关,Item.cs:30003)桥接到目标 case 组;
+//   - DefaultToXxx 助手调用=按位赋值(源码序,后续 value/SetShopValues 可覆写);
+//   - 只读价字段 hellPrice 等 7 个(:71-83)机械换算。
 const values = {};
 {
-  // 1457 起 SetDefaults1-5 改 private（1456=public）——按可见性无关匹配（2026-08-22）
-  const sd1 = itemSrc.match(/(public|private|internal) void SetDefaults1\(/);
-  const body = itemSrc.slice(sd1.index, itemSrc.indexOf('public void SetDefaults(int Type'));
-  const lines = body.split('\n');
-  // 全深度收集 case 标签（含嵌套 switch 内层——蜂王族 2883+/石头人族等整段住在里面）
-  const marks = [];
-  let depth = 0; // 首行 'public void…' 无花括号，方法体 '{' 在第二行
-  for (let li = 0; li < lines.length; li++) {
-    const line = lines[li];
-    const cm = line.match(/^\t+case (\d+):$/);
-    if (cm) marks.push({ id: Number(cm[1]), li, depth });
-    for (const ch of line) {
-      if (ch === '{') depth++;
-      else if (ch === '}') depth--;
-    }
-  }
-  const valueOf = (seg) => {
-    let v;
-    let innerCase = 0;   // 0=共享体；>0=更深层 case 对应 id
-    let d = 0;
-    for (const line of seg.split('\n')) {
-      const ic = line.match(/^\t+case (\d+):$/);
-      if (ic && d >= 1) innerCase = Number(ic[1]);
-      if (line.includes('break;') && d >= 1) innerCase = 0; // 简化：块结束回落共享体
-      const v1 = line.match(/value = (\d+)[fL]?;/);
-      const v2 = line.match(/value = (?:Item\.)?(buyPrice|sellPrice)\(([\d\s,]*)\)/);
-      const v3 = line.match(/SetShopValues\([^,]+, (?:(\d+)|(?:Item\.)?(buyPrice|sellPrice)\(([\d\s,]*)\))\)/);
-      let got;
-      if (v1) got = Number(v1[1]);
-      else if (v2) {
-        const args = v2[2] ? v2[2].split(',').map((x) => Number(x.trim())) : [];
-        got = args.reduce((a, x) => a * 100 + x, 0) * 100 ** (4 - args.length);
-        if (v2[1] === 'sellPrice') got *= 5;   // Item.cs:49019-49022 sellPrice = ×5
-      } else if (v3) {
-        if (v3[1] !== undefined) got = Number(v3[1]);
-        else {
-          const args = v3[3] ? v3[3].split(',').map((x) => Number(x.trim())) : [];
-          got = args.reduce((a, x) => a * 100 + x, 0) * 100 ** (4 - args.length);
-          if (v3[2] === 'sellPrice') got *= 5;
-        }
-      }
-      if (got !== undefined && (innerCase === 0 || innerCase === seg.__id)) v = got;
-      for (const ch of line) {
-        if (ch === '{') d++;
-        else if (ch === '}') { d--; if (d <= 0) innerCase = 0; }
-      }
-    }
-    if (v === undefined && /DefaultToTorch\(/.test(seg)) v = 60; // Item.cs:48094
+  const MAXID = 6250;
+  const allLines = itemSrc.split('\n');
+  const priceOf = (fn, argStr) => {
+    const a = argStr && argStr.trim() ? argStr.split(',').map((x) => Number(x.trim())) : [];
+    let v = a.reduce((acc, x) => acc * 100 + x, 0) * 100 ** (4 - a.length);
+    if (fn === 'sellPrice') v *= 5;   // Item.cs:49019-49022 sellPrice = ×5
     return v;
   };
-  // 段边界：从标签行起，到「下一个【同深度或更浅】标签」或「所在块闭合（深度跌
-  // 破标签深度）」为止——更深的标签是段内嵌套 switch，留给 valueOf 以 __id 分流
-  const segEndOf = (i) => {
-    const d0 = marks[i].depth;
-    let d = d0;
-    for (let li = marks[i].li + 1; li < lines.length; li++) {
-      const line = lines[li];
-      const cm = line.match(/^\t+case (\d+):$/);
-      if (cm && d <= d0) return li;              // 同/浅层标签 = 兄弟块起点
-      for (const ch of line) {
-        if (ch === '{') d++;
-        else if (ch === '}') { d--; if (d < d0) return li; } // 所在块闭合
+  const PRICE_VARS = {   // Item.cs:71-83
+    shadowOrbPrice: 75000, dungeonPrice: 87500, queenBeePrice: 100000,
+    hellPrice: 125000, eclipsePrice: 375000, eclipsePostPlanteraPrice: 500000,
+    eclipseMothronPrice: 625000,
+  };
+  const valOfLine = (line) => {
+    let m = line.match(/value = (\d+)[fFlL]?;/);
+    if (m) return Number(m[1]);
+    m = line.match(/value = (?:Item\.)?(buyPrice|sellPrice)\(([\d\s,]*)\)/);
+    if (m) return priceOf(m[1], m[2]);
+    m = line.match(/SetShopValues\(ItemRarityColor\.\w+,\s*(?:(\d+)|(?:Item\.)?(buyPrice|sellPrice)\(([\d\s,]*)\))\)/);
+    if (m) return m[1] !== undefined ? Number(m[1]) : priceOf(m[2], m[3]);
+    m = line.match(/value = (\w+);/);
+    if (m && PRICE_VARS[m[1]] !== undefined) return PRICE_VARS[m[1]];
+    return undefined;
+  };
+  function findMethod(name) {
+    const re = new RegExp(`\\n\\t(?:public|private|internal) void ${name}\\(`);
+    const mm = itemSrc.match(re);
+    if (!mm) return null;
+    const startLine = itemSrc.slice(0, mm.index).split('\n').length + 1;
+    let d = 0; let started = false;
+    for (let i = startLine; i <= allLines.length; i++) {
+      for (const ch of allLines[i - 1]) { if (ch === '{') { d++; started = true; } else if (ch === '}') d--; }
+      if (started && d <= 0) return { from: startLine, to: i };
+    }
+    return null;
+  }
+  function parseTypeGuard(cond) {
+    const c = cond.trim();
+    if (/^Variant/.test(c) || /ItemID\.Count/.test(c)) return 'never';
+    if (/^type == /.test(c) && c.includes('||')) {
+      return { discrete: [...c.matchAll(/== (\d+)/g)].map((x) => Number(x[1])) };
+    }
+    let m = c.match(/^type == (\d+)$/); if (m) return { min: Number(m[1]), max: Number(m[1]) };
+    m = c.match(/^type >= (\d+) && type <= (\d+)$/); if (m) return { min: Number(m[1]), max: Number(m[2]) };
+    m = c.match(/^type <= (\d+)$/); if (m) return { min: 1, max: Number(m[1]) };
+    m = c.match(/^type < (\d+)$/); if (m) return { min: 1, max: Number(m[1]) - 1 };
+    m = c.match(/^type > (\d+)$/); if (m) return { min: Number(m[1]) + 1, max: MAXID };
+    m = c.match(/^type >= (\d+)$/); if (m) return { min: Number(m[1]), max: MAXID };
+    m = c.match(/^type < (\d+) \|\| type > (\d+)$/); if (m) return { complement: { min: Number(m[1]), max: Number(m[2]) } };
+    return 'unknown';
+  }
+  function complementOf(r) {
+    if (r === 'never') return null;
+    if (r.discrete) {
+      const ids = [];
+      for (let i = 1; i <= MAXID; i++) if (!r.discrete.includes(i)) ids.push(i);
+      return { discrete: ids };
+    }
+    if (r.complement) return { min: r.complement.min, max: r.complement.max };
+    return { complement: { min: r.min, max: r.max } };
+  }
+  function intersectDiscreteRange(discrete, r) {
+    const ranges = r.complement ? [[1, r.complement.min - 1], [r.complement.max + 1, MAXID]] : [[r.min, r.max]];
+    const ids = discrete.filter((x) => ranges.some(([lo, hi]) => x >= lo && x <= hi));
+    return ids.length ? { discrete: ids } : null;
+  }
+  function intersect(a, b) {
+    if (!a || !b) return null;
+    if (a === 'never' || b === 'never') return 'never';
+    if (a.discrete && b.discrete) { const s = a.discrete.filter((x) => b.discrete.includes(x)); return s.length ? { discrete: s } : null; }
+    if (a.discrete) return intersectDiscreteRange(a.discrete, b);
+    if (b.discrete) return intersectDiscreteRange(b.discrete, a);
+    const rangesA = a.complement ? [[1, a.complement.min - 1], [a.complement.max + 1, MAXID]] : [[a.min, a.max]];
+    const rangesB = b.complement ? [[1, b.complement.min - 1], [b.complement.max + 1, MAXID]] : [[b.min, b.max]];
+    const segs = [];
+    for (const [x1, x2] of rangesA) for (const [y1, y2] of rangesB) {
+      const lo = Math.max(x1, y1), hi = Math.min(x2, y2);
+      if (lo <= hi) segs.push([lo, hi]);
+    }
+    if (!segs.length) return null;
+    if (segs.length === 1) return { min: segs[0][0], max: segs[0][1] };
+    return { multi: segs };
+  }
+  // 单方法体事件表(作用域栈:switch/case/default/guard)
+  function buildEvents(from, to) {
+    const events = [];
+    const stack = [];
+    let depth = 0;
+    let pendingIds = null;
+    let prevWasLabel = false;
+    let pendingElse = null;
+    let pendingGoto = null;
+    const innermostSw = () => { for (let i = stack.length - 1; i >= 0; i--) if (stack[i].kind === 'switch') return stack[i]; return null; };
+    for (let ln = from; ln <= to; ln++) {
+      const line = allLines[ln - 1];
+      const closes = (line.match(/\}/g) || []).length;
+      const opens = (line.match(/\{/g) || []).length;
+      if (closes > 0 && /^\t+\}/.test(line)) {
+        while (stack.length && stack[stack.length - 1].depth >= depth) {
+          const p = stack.pop();
+          if (p.kind === 'guard' && p.r && p.r !== 'never') pendingElse = p.r;
+        }
+        depth--;
+      }
+      const cm = line.match(/^\t+case (\d+):\s*$/);
+      if (cm) {
+        const sw = innermostSw();
+        if (sw) sw.caseIds.add(Number(cm[1]));
+        if (prevWasLabel && pendingIds) pendingIds.push(Number(cm[1]));
+        else pendingIds = [Number(cm[1])];
+        prevWasLabel = true;
+        continue;
+      }
+      prevWasLabel = false;
+      if (/^\t+switch \(type\)\s*$/.test(line) && /^\t+\{\s*$/.test(allLines[ln] || '')) {
+        if (pendingIds) flushCase(false);   // 嵌套 switch 在外层 case 体内:不弹兄弟
+        stack.push({ kind: 'switch', caseIds: new Set(), depth: depth + 1 });
+        continue;   // 深度由下一行 { 递增(避免双计)
+      }
+      const elseM = line.match(/^\t+\}?\s*else if \(([^)]*)\)\s*\{?\s*$/) || line.match(/^\t+\}?\s*else\s*\{?\s*$/);
+      const gotoM = line.match(/^\t+goto case (\d+);\s*$/);
+      if (gotoM) {
+        // goto case N(Item.cs 全文件唯一 :30003):可达路径 = 刚闭合守卫的补集
+        const ranges = pendingElse ? [complementOf(pendingElse)].filter(Boolean) : [];
+        pendingGoto = { target: Number(gotoM[1]), ranges };
+        pendingElse = null;
+        continue;
+      }
+      if (elseM && pendingElse) {
+        const comp = complementOf(pendingElse);
+        let r = comp;
+        if (elseM[1]) {
+          const g = parseTypeGuard(elseM[1]);
+          r = intersect(g === 'never' ? null : g, comp);
+          if (!r) r = 'never';
+        }
+        pendingElse = null;
+        const blockBrace = /\{\s*$/.test(line) || /^\t+\{\s*$/.test(allLines[ln] || '');
+        if (r !== 'never' && blockBrace) stack.push({ kind: 'guard', r, depth: depth + 1 });
+        continue;   // 深度由本行/下一行 { 递增
+      }
+      if (!elseM && closes === 0) pendingElse = null;   // 真实语句行清除(} 行刚设的补集留给 else/goto)
+      function flushCase(popSiblings = true) {
+        const sw = innermostSw();
+        if (popSiblings) while (stack.length && (stack[stack.length - 1].kind === 'case' || stack[stack.length - 1].kind === 'default') && stack[stack.length - 1].depth >= depth) stack.pop();
+        let alsoIds = null;
+        if (pendingGoto && pendingIds && pendingIds.includes(pendingGoto.target)) {
+          alsoIds = pendingGoto.ranges.length ? pendingGoto.ranges : null;
+          pendingGoto = null;
+        }
+        stack.push({ kind: 'case', ids: new Set(pendingIds), depth, sw, alsoIds });
+        pendingIds = null;
+      }
+      if (/^\t+default:\s*$/.test(line)) {
+        const sw = innermostSw();
+        while (stack.length && (stack[stack.length - 1].kind === 'case' || stack[stack.length - 1].kind === 'default') && stack[stack.length - 1].depth >= depth) stack.pop();
+        stack.push({ kind: 'default', sw, depth });
+      } else {
+        if (pendingIds) flushCase();
+      }
+      {
+        if (/^\t+if \(/.test(line)) {
+          const condM = line.match(/^\t+if \(([^)]*)\)\s*\{?\s*$/);
+          const blockBrace = /\{\s*$/.test(line) || /^\t+\{\s*$/.test(allLines[ln] || '');
+          if (condM) {
+            const g = parseTypeGuard(condM[1]);
+            if (g === 'never' || g === 'unknown') {
+              if (blockBrace) stack.push({ kind: 'guard', r: 'never', depth: depth + 1 });
+            } else if (blockBrace) {
+              stack.push({ kind: 'guard', r: g, depth: depth + 1 });
+            }
+          } else if (blockBrace) {
+            stack.push({ kind: 'guard', r: 'never', depth: depth + 1 });  // 复杂多条件:保守不计
+          }
+        }
+        const v = valOfLine(line);
+        if (v !== undefined) events.push({ ln, value: v, stack: stack.map((s) => ({ ...s })) });
+        for (const hm of line.matchAll(/(?:^|[^.\w])(DefaultTo\w+)\(/g)) {
+          events.push({ ln, helper: hm[1], stack: stack.map((s) => ({ ...s })) });
+        }
+        if (/^\t+return;\s*$/.test(line)) events.push({ ln, ret: true, stack: stack.map((s) => ({ ...s })) });
+      }
+      depth += opens;
+    }
+    return events;
+  }
+  function inRanges(ranges, id) {
+    return ranges.every((r) => {
+      if (r === 'never') return false;
+      if (r.discrete) return r.discrete.includes(id);
+      if (r.complement) return id < r.complement.min || id > r.complement.max;
+      if (r.multi) return r.multi.some(([lo, hi]) => id >= lo && id <= hi);
+      return id >= r.min && id <= r.max;
+    });
+  }
+  function scopeApplies(st, id) {
+    if (st.kind === 'case') return st.ids.has(id) || (st.alsoIds && inRanges(st.alsoIds, id));
+    if (st.kind === 'default') return st.sw ? !st.sw.caseIds.has(id) : true;
+    if (st.kind === 'guard') {
+      if (st.r === 'never') return false;
+      if (st.r.discrete) return st.r.discrete.includes(id);
+      if (st.r.complement) return id < st.r.complement.min || id > st.r.complement.max;
+      if (st.r.multi) return st.r.multi.some(([lo, hi]) => id >= lo && id <= hi);
+      return id >= st.r.min && id <= st.r.max;
+    }
+    return true;
+  }
+  const helperCache = new Map();
+  const helperVisiting = new Set();
+  function evalHelper(name, id) {
+    const key = `${name}:${id}`;
+    if (helperCache.has(key)) return helperCache.get(key);
+    if (helperVisiting.has(key)) return undefined;   // 环:断开
+    helperVisiting.add(key);
+    const r = findMethod(name);
+    let v;
+    if (r) {
+      for (const ev of buildEvents(r.from, r.to)) {
+        if (!ev.stack.every((s) => scopeApplies(s, id))) continue;
+        if (ev.ret) break;
+        if (ev.helper) { const hv = evalHelper(ev.helper, id); if (hv !== undefined) v = hv; }
+        else v = ev.value;
       }
     }
-    return lines.length;
-  };
-  const segTextOf = (i) => lines.slice(marks[i].li, segEndOf(i)).join('\n');
-  // fall-through 组求值：纯标签 mark（`case A: case B: … 共用体`）借用组尾块的
-  // 代码段、以【自己的 id】求值——嵌套 switch(type) 的 `case <自身id>:` 覆写对
-  // 每件各自生效（DD2 杖族 T1/T2/T3 三档价即出自此结构）
-  const eff = marks.map(() => -1);
-  for (let i = marks.length - 1; i >= 0; i--) {
-    eff[i] = /^\t+case \d+:\s*$/.test(segTextOf(i)) ? (eff[i + 1] ?? i) : i;
+    helperVisiting.delete(key);
+    helperCache.set(key, v);
+    return v;
   }
-  for (let i = 0; i < marks.length; i++) {
-    const seg = Object.assign(segTextOf(eff[i]), { __id: marks[i].id });
-    const v = valueOf(seg);
-    if (v !== undefined) values[marks[i].id] = v;
+  // SetDefaults 分派(:48694-48715):IsFood→SetFoodDefaults【替代】;否则 id 段五选一
+  const IS_FOOD = new Set([353, 357, 1787, 1911, 1912, 1919, 1920, 2266, 2267, 2268, 2425, 2426, 2427, 3195, 3532, 4009, 4010, 4011, 4012, 4013, 4014, 4015, 4016, 4017, 4018, 4019, 4020, 4021, 4022, 4023, 4024, 4025, 4026, 4027, 4028, 4029, 4030, 4031, 4032, 4033, 4034, 4035, 4036, 4037, 967, 969, 4282, 4283, 4284, 4285, 4286, 4287, 4288, 4289, 4290, 4291, 4292, 4293, 4294, 4295, 4296, 4297, 4403, 4411, 4614, 4615, 4616, 4617, 4618, 4619, 4620, 4621, 4622, 4623, 4624, 4625, 5009, 5042, 5041, 5092, 5093, 5275, 5277, 5278, 5537, 5645]);  // ItemID.cs:264
+  const methodEvents = {};
+  for (const n of ['SetDefaults1', 'SetDefaults2', 'SetDefaults3', 'SetDefaults4', 'SetDefaults5', 'SetFoodDefaults']) {
+    const r = findMethod(n);
+    methodEvents[n] = r ? buildEvents(r.from, r.to) : [];
+  }
+  const sdTail = findMethod('SetDefaults');
+  const tailEvents = sdTail ? buildEvents(sdTail.to - 213, sdTail.to) : [];   // 尾段=分派后(~:48716 起)
+  const ownerMethod = (id) => IS_FOOD.has(id) ? 'SetFoodDefaults'
+    : id <= 1000 ? 'SetDefaults1' : id <= 2001 ? 'SetDefaults2'
+      : id <= 3000 ? 'SetDefaults3' : id <= 3989 ? 'SetDefaults4' : 'SetDefaults5';
+  for (let id = 1; id <= MAXID; id++) {
+    let v;
+    for (const ev of methodEvents[ownerMethod(id)]) {
+      if (!ev.stack.every((s) => scopeApplies(s, id))) continue;
+      if (ev.ret) break;
+      if (ev.helper) { const hv = evalHelper(ev.helper, id); if (hv !== undefined) v = hv; }
+      else v = ev.value;
+    }
+    for (const ev of tailEvents) {
+      if (!ev.stack.every((s) => scopeApplies(s, id))) continue;
+      if (ev.ret) break;
+      if (ev.helper) { const hv = evalHelper(ev.helper, id); if (hv !== undefined) v = hv; }
+      else v = ev.value;
+    }
+    if (v !== undefined) values[id] = v;
   }
 }
 

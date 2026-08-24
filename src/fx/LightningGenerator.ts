@@ -49,11 +49,11 @@ export const remap = (fromValue: number, fromMin: number, fromMax: number,
   const t = clamp((fromValue - fromMin) / (fromMax - fromMin || 1e-9), 0, 1);
   return toMin + (toMax - toMin) * t;
 };
-/** MathHelper.WrapAngle：弧度规约到 (−π,π] */
+/** MathHelper.WrapAngle（FNA）：while 双向规约,边界 ±π 原样返回 */
 export const wrapAngle = (a: number): number => {
   let x = a % (Math.PI * 2);
   if (x > Math.PI) x -= Math.PI * 2;
-  else if (x <= -Math.PI) x += Math.PI * 2;
+  else if (x < -Math.PI) x += Math.PI * 2;
   return x;
 };
 

@@ -10,6 +10,21 @@ for (let i = 0; i < 100 && !menuReady; i++) {
   if (!menuReady) await new Promise((r) => setTimeout(r, 1000));
 }
 await new Promise((r) => setTimeout(r, 1200));
+await new Promise((r) => setTimeout(r, 1500));
+const clouds = await page.evaluate(() => {
+  const sky = window.__swMenuBg.sky;
+  const v = sky.vclouds;
+  return {
+    count: v.length,
+    scales: v.slice(0, 8).map((c) => +c.scale.toFixed(2)),
+    ys: v.slice(0, 8).map((c) => Math.round(c.y)),
+    xs: v.slice(0, 8).map((c) => Math.round(c.x)),
+    alphas: v.slice(0, 4).map((c) => +c.alpha.toFixed(2)),
+    surfaceY: sky.fx.surfaceY,
+    weatherRef: !!sky.weatherRef,
+  };
+});
+console.log('CLOUDS:', JSON.stringify(clouds));
 await page.evaluate(() => {
   const el = [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && e.textContent.trim() === '单人模式');
   el?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); el?.click();
