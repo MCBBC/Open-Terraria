@@ -157,6 +157,11 @@ export class World {
    *  生成期灌入 + 存档 header.seedFlags 持久化；wld 导入自 S0-3 起按头九位回填
    *  （WldImport→SaveData.header.seedFlags→SaveFile.ts:281），普通档={}） */
   seedFlags: import('./gen/SeedEasterEggs').SeedFlags = {};
+  /** FTW 克脑重力倒置锚（原版 NPC.brainOfGravity 静态槽）：克脑 266 二阶段每 tick
+   *  写实体 id（NPC.cs:32650-32653，bossAI.brainOfCthulhuAI）；消费端 Player.fixedUpdate
+   *  距脑 <4000px → gravDir=-1（Player.cs:26489-26496 forcedGravity）；锚失效/非 266
+   *  由消费端清除（Main.cs:18127）。瞬态运行时位,不入档;-1 = 无 */
+  brainOfGravity = -1;
   name: string;
   seed: number;
   spawnX = 0; spawnY = 0;

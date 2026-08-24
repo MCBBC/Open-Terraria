@@ -142,9 +142,14 @@ for (const k of Object.keys(state.files)) if (!(k in hashes)) delete state.files
 
 const contentHash = sha1(Object.entries(hashes).map(([p, h]) => `${p}:${h}\n`).join(''));
 
-// 2) 快路径：内容未变 + 产物齐全 + vendor 就位 → 秒退
+// 2) 快路径：内容未变 + 产物齐全 + 分片计划未变 + vendor 就位 → 秒退。
+//    ★计划校验:p0 必须【纯】BOOT_FIRST 条目——否则为旧排序产物,须重排
+//   （2026-08-25 启动小片切分曾因 contentHash 不变被此门跳过）
+const prevP0 = prevManifest?.parts?.[0]?.entries ?? [];
+const planUpToDate = prevP0.length > 0
+  && prevP0.every((e) => BOOT_FIRST_PREFIXES.some((p) => e.startsWith(p)));
 const allPartsExist = prevManifest?.parts?.every((p) => existsSync(join(OUT_DIR, p.file)));
-if (prevManifest && prevManifest.contentHash === contentHash && allPartsExist && prevManifest.algoVersion === ALGO_VERSION) {
+if (prevManifest && planUpToDate && prevManifest.contentHash === contentHash && allPartsExist && prevManifest.algoVersion === ALGO_VERSION) {
   // 同步 manifest 的 generatedAt 不动（内容寻址，无意义）；state 落盘保 mtime 漂移稳定
   writeFileSync(STATE_PATH, JSON.stringify(state));
   console.log(`[pack-assets] 无变化，跳过（${files.length} 文件 / ${reusedHashes} hash 复用 / 重哈希 ${(hashedBytes / 1048576).toFixed(1)}MB / ${Date.now() - t0}ms）`);
@@ -155,7 +160,13 @@ if (prevManifest && prevManifest.contentHash === contentHash && allPartsExist &&
 mkdirSync(OUT_DIR, { recursive: true });
 const sizes = {};
 for (const f of files) sizes[f] = statSync(join(PUB, f)).size;
-const parts = planParts(files, sizes);
+// 启动资产独立小片(2026-08-25 用户定调:"门出现前只需要初始音效+一张过渡图"):
+// BOOT_FIRST 块(过渡图族+标题曲 ~67 文件)单独成 tiny p0,音频门前只需下载它;
+// 字体/vanilla-ui 与全量暖缓存改在点击后后台进行,不再挤占启动窗口带宽。
+// 拆成两次贪心切分=强制片边界,phaseOf 对首片首条目恒标 menu。
+const bootFiles = files.filter((f) => BOOT_FIRST_PREFIXES.some((p) => f.startsWith(p)));
+const restFiles = files.filter((f) => !bootFiles.includes(f));
+const parts = [...planParts(bootFiles, sizes), ...planParts(restFiles, sizes)];
 const prevByEntries = new Map();
 for (const p of prevManifest?.parts ?? []) prevByEntries.set(p.entries.join('\n'), p);
 /** 逐片输入指纹 = sha1(条目路径:文件hash 行) —— 复用必须内容与清单双不变

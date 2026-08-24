@@ -28,25 +28,19 @@ import {
   type JourneyFilterKey,
 } from './JourneyBrowser';
 
-/** 背包内物品点击给 1 / shift 给整堆（原版 UIItemSlot 抓取语义的 UI 近似） */
+/** 背包内物品点击给 1 / shift 给整组（原版 cursorOverride==7 抓取：整组 =
+ *  maxStack，ItemSlot.cs:750-762 经 Player.GetItem 入包——合并/空格全程 maxStack
+ *  钳制，溢出落地。R24 修复：曾 s.stack+=stack 直加可造 1099/999 超限堆叠入档） */
 function giveItem(game: Game, internalId: number, stack: number): void {
   const inv = game.player.inv;
-  // 与 ResearchUI.consumeOne 对称：找同类堆叠加，否则找空槽
-  for (let i = 0; i < inv.slots.length; i++) {
-    const s = inv.slots[i];
-    if (s && s.id === internalId) {
-      s.stack += stack;
-      game.cb.onInventoryChanged?.();
-      return;
-    }
+  const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
+  const want = Math.min(stack, Math.max(1, def?.maxStack ?? 999));
+  const left = inv.add(internalId, want);
+  if (left > 0) {
+    game.spawnDrop(game.player.cx, game.player.cy,
+      ITEM_DEFS[internalId].key, left, 0, -2);   // 溢出落地（GetItem 溢出语义）
   }
-  for (let i = 0; i < inv.slots.length; i++) {
-    if (!inv.slots[i]) {
-      inv.slots[i] = { id: internalId, stack };
-      game.cb.onInventoryChanged?.();
-      return;
-    }
-  }
+  game.cb.onInventoryChanged?.();
 }
 
 /** 原版 id → 内部 item id（懒建反向表；vanilla id 空间经 vi_ 前缀/vid 字段桥接） */

@@ -8,7 +8,7 @@
 //      num35≥1 → (int)(damage×2.5)——曾原伤直发）
 //   ⑤ 460 魔耗节拍（P.cs:63454-63459 flag3 = 80t/180t/满蓄后每 20t，结算
 //      :63562-63563 flag6 = !flag3 || CheckMana(pay:true)——曾每发小弹扣）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { PrismProj, ChargedBlaster } from '../src/entities/PrismProj';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
@@ -166,5 +166,55 @@ describe('充能爆破炮 459/460 修复（AI_075 :63442-63620）', () => {
     ok = false;
     bl.fixedUpdate(1, game);                    // 80t flag3 扣魔失败
     expect(bl.dead).toBe(true);
+  });
+});
+
+// ============================================================ 晶体绘制层级
+// 2026-08-24 用户报"使用时角色身上没有出现棱镜贴图":
+//   633 SetDefaults drawLayer=7(P.cs:6800)——原版【跳过】世界弹幕 pass
+//   (Main.cs:22405 drawLayer!=0 门),改在玩家绘制层组内画:DrawPlayer_27_HeldItem
+//   记 projectileDrawPosition(PlayerDrawLayers.cs:3154)→ RenderAllLayers 在持物层
+//   位置插入 DrawHeldProj(:4318)= 身体【前】。本仓实体循环先于 drawPlayer,直画
+//   被纸娃娃盖住 → PrismProj.draw 登记 Renderer.prismCrystalQueue,drawPlayer 后冲刷。
+describe('终极棱镜晶体层级(drawLayer=7 → prismCrystalQueue)', () => {
+  function makeRecCtx() {
+    const calls: Array<{ m: string; a: unknown[] }> = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k) => (k === 'canvas' ? undefined : (...a: unknown[]) => { calls.push({ m: String(k), a }); }),
+    });
+    return { calls, ctx };
+  }
+  beforeAll(() => {
+    vi.stubGlobal('Image', class {
+      width = 26; height = 120; naturalWidth = 26; naturalHeight = 120; complete = true;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_v: string) { this.onload?.(); }
+    });
+  });
+  it('⑥ 有队列:登记闭包不直画;冲刷时按 5 帧竖条切片画(26×120→帧 26×24)', () => {
+    const prism = new PrismProj(1, 0, 100, 0.25,
+      () => true, () => ({ x: 0, y: 0 }), () => true);
+    const { calls, ctx } = makeRecCtx();
+    const queue: Array<() => void> = [];
+    prism.draw({ canvas: {} as HTMLCanvasElement, ctx: ctx as unknown as CanvasRenderingContext2D, prismCrystalQueue: queue } as never);
+    expect(queue.length).toBe(1);
+    expect(calls.find((c) => c.m === 'drawImage')).toBeUndefined();   // 实体循环期不直画
+    queue[0]();                                                       // Renderer drawPlayer 后冲刷
+    const di = calls.find((c) => c.m === 'drawImage');
+    expect(di, '冲刷闭包应执行晶体绘制').toBeTruthy();
+    expect(di!.a[1] as number).toBe(0);                               // sx=0
+    expect(di!.a[2] as number).toBe(0);                               // sy=帧 0
+    expect(di!.a[3] as number).toBe(26);                              // sw=整宽
+    expect(di!.a[4] as number).toBe(24);                              // sh=120/5 帧高
+    expect(di!.a[7] as number).toBe(26);                              // dw=原生宽(与判定盒 14 解耦)
+    expect(di!.a[8] as number).toBe(24);                              // dh=帧高
+  });
+  it('⑥b 无队列环境(旧桩/测试):保持直画不崩', () => {
+    const prism = new PrismProj(1, 0, 100, 0.25,
+      () => true, () => ({ x: 0, y: 0 }), () => true);
+    const { calls, ctx } = makeRecCtx();
+    prism.draw({ canvas: {} as HTMLCanvasElement, ctx: ctx as unknown as CanvasRenderingContext2D } as never);
+    expect(calls.find((c) => c.m === 'drawImage')).toBeTruthy();
   });
 });

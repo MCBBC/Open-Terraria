@@ -27,9 +27,13 @@
 //     DryadText_Do_StardewValleyBit（给树妖 Joja Cola 5275 的星露谷彩蛋）
 //     → NotifyProgressionEvent(46)——勿接进本内核。
 //
-// 持久化：localStorage 键 sbw.research.v1（原版走 .wld CreativeTracker 二进制；
-// 计数按「解析后 id」存，语义同 _sacrificesCountByItemIdCache，只是键型数字而非
-// persistentId 字符串——override 映射确定性，二者等价【偏差登记】）。
+// 持久化：localStorage 按玩家档案分键（R24 勘误+修复：原版 creativeTracker 是
+// Player 字段（Player.cs:777），随 .plr 档存取（Player.cs:55569 creativeTracker.Save）
+// ——【不是】此前注释所写的 ".wld CreativeTracker"，也【不应】是浏览器全局单桶；
+// 旧实现 sbw.research.v1 全局共享 = 跨角色串档。现键 sbw.research.v2.p<id> 随角色，
+// usePlayerProfile(cid) 在进世界装配时切换；旧全局桶由首个加载角色一次性收编
+// （防多角色各拷一份）。计数按「解析后 id」存，语义同 _sacrificesCountByItemIdCache，
+// 只是键型数字而非 persistentId 字符串——override 映射确定性，二者等价【偏差登记】）。
 import raw from '../data/vanilla-research.json';
 
 export interface ResearchStore {
@@ -48,13 +52,16 @@ const DATA = raw as Json as unknown as ResearchData;
 
 export const RESEARCH_STORE_KEY = 'sbw.research.v1';
 
-function localStorageStore(): ResearchStore {
-  return {
-    load: () => {
-      try { return localStorage.getItem(RESEARCH_STORE_KEY); } catch { return null; }
-    },
-    save: (s) => { try { localStorage.setItem(RESEARCH_STORE_KEY, s); } catch { /* 满/无 DOM 忽略 */ } },
-  };
+/** 玩家档案键（原版 creativeTracker 随 .plr；本仓随角色槽位 id 分键） */
+export function playerResearchKey(playerId: number): string {
+  return `sbw.research.v2.p${playerId}`;
+}
+
+function lsGet(k: string): string | null {
+  try { return localStorage.getItem(k); } catch { return null; }
+}
+function lsSet(k: string, v: string): void {
+  try { localStorage.setItem(k, v); } catch { /* 满/无 DOM 忽略 */ }
 }
 
 /** 原版 CountFullyResearchedItems 的返回对（ItemsSacrificedUnlocksTracker.cs:59-74） */
@@ -67,6 +74,8 @@ export class Research {
    *  IsNewlyResearched 供旅程浏览器 ByUnlockStatus 首序位 + 图标高亮；
    *  不持久化——原版亦仅会话态（Save 只写 _sacrificeCountByItemPersistentId） */
   private newly = new Set<number>();
+  /** 当前持久化键（usePlayerProfile 切换；初始 = 旧全局桶） */
+  private storeKey = RESEARCH_STORE_KEY;
   private _lastEditId = 0;
   /** AchievementsHelper._lastResearchVersion（cs:385） */
   private achVersion = -1;
@@ -74,9 +83,39 @@ export class Research {
   onProgressionEvent: ((eventId: number) => void) | null = null;
 
   constructor(
-    private store: ResearchStore = localStorageStore(),
+    private store?: ResearchStore,
     private data: ResearchData = DATA,
   ) {
+    this.load();
+  }
+
+  /** 生效存储：注入 store（测试）直用；缺省走 localStorage，键随档案切换 */
+  private get effStore(): ResearchStore {
+    return this.store ?? {
+      load: () => lsGet(this.storeKey),
+      save: (s: string) => lsSet(this.storeKey, s),
+    };
+  }
+
+  /**
+   * 按玩家档案切换持久化（原版 creativeTracker 随角色，Player.cs:777/:55569）。
+   * null = 无角色上下文（直载存档/联机房间等），维持旧共享桶语义。
+   * 迁移：目标档案尚无存档且旧全局桶 sbw.research.v1 有数据 → 收编为该角色的
+   * 基线并清空全局桶（一次性；防多角色各拷一份）。注入自定义 store 时仅重载。
+   */
+  usePlayerProfile(playerId: number | null): void {
+    const key = playerId != null ? playerResearchKey(playerId) : RESEARCH_STORE_KEY;
+    if (key === this.storeKey) return;
+    if (!this.store) {
+      const legacy = lsGet(RESEARCH_STORE_KEY);
+      if (playerId != null && !lsGet(key) && legacy) {
+        lsSet(key, legacy);
+        try { localStorage.removeItem(RESEARCH_STORE_KEY); } catch { /* 忽略 */ }
+      }
+    }
+    this.storeKey = key;
+    this.counts.clear();
+    this.newly.clear();
     this.load();
   }
 
@@ -196,7 +235,7 @@ export class Research {
 
   // ---- 持久化 ----
   private load(): void {
-    const raw2 = this.store.load();
+    const raw2 = this.effStore.load();
     if (!raw2) return;
     try {
       const data = JSON.parse(raw2) as { v?: number; c?: Record<string, number> };
@@ -212,7 +251,7 @@ export class Research {
   private save(): void {
     const c: Record<string, number> = {};
     for (const [id, v] of this.counts) c[String(id)] = v;
-    this.store.save(JSON.stringify({ v: 1, c }));
+    this.effStore.save(JSON.stringify({ v: 1, c }));
   }
 
   /** Reset（cs:205-213）：清计数并置脏 */

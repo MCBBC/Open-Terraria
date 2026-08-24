@@ -37,8 +37,10 @@ describe('FallingBlock', () => {
       fb.fixedUpdate(1 / 60, game);
     }
     expect(fb.dead).toBe(true);
-    // 落地点:y=20 实心 → 放 y=19
-    expect(world.store.get(32, 19)).toBe(SAND);
+    // 落地点:原版 Kill aiStyle10(:75362-75530)语义 = 中心格被实心占 → 【不放置】
+    // (曾"向上扫空位"会把沙悬空叠在草/仙人掌上——2026-08-24 用户实报)
+    expect(world.store.get(32, 19)).toBe(0);
+    expect(world.store.get(32, 20)).toBe(TILE_BY_KEY['dirt']!);
   });
 
   it('穿过空隙落到更低地面', () => {
@@ -50,7 +52,9 @@ describe('FallingBlock', () => {
       fb.fixedUpdate(1 / 60, game);
     }
     expect(fb.dead).toBe(true);
-    expect(world.store.get(33, 23)).toBe(TILE_BY_KEY['sand']!);
+    // 原版语义:中心格(y24 石)被占 → 不放置,沙消失
+    expect(world.store.get(33, 23)).toBe(0);
+    expect(world.store.get(33, 24)).toBe(TILE_BY_KEY['stone']!);
   });
 
   it('命中玩家:EVP 链经典 20（基础 10×乘区1×2）且每块只结算一次', () => {

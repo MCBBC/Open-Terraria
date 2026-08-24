@@ -385,6 +385,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   async function applyPlayerWithCharacter(g: Game, worldPlayer: ReturnType<typeof loadSaveData>['player'] | null) {
     const cid = charContextId();
     rememberCharId(cid);
+    // Journey 研究按玩家档案持久化（原版 creativeTracker 是 Player 字段随 .plr，
+    // Player.cs:777/:55569——R24 修复：曾全局单桶跨角色串档；null=无角色上下文
+    // 维持旧共享桶，首个加载角色一次性收编旧桶）
+    g.research.usePlayerProfile(cid);
     const cs = cid != null ? await charStore.getState(cid) : null;
     // 位置取世界档内嵌 player(worker 路径 loadWorld 的 playerAt 已同值;主线程
     // 回退路径无 playerAt,取 g.player 会被钉在出生点——统一以 worldPlayer 为准)

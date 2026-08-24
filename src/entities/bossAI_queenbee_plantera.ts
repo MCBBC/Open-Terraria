@@ -12,6 +12,7 @@ import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE } from '../core/constants';
+import { TILE_BY_KEY } from '../data/tiles';
 import { getAttackDamageScaledByDifficulty, getAttackDamageForProjectiles } from '../stats/ScaleStats';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
@@ -37,6 +38,41 @@ const step2 = (v: number, target: number, a: number): number => {
   return v;
 };
 
+/** WorldGen.SpawnPlanteraThorns(WorldGen.cs:76875-76917)1:1:FTW 钩蔓抵锚瞬间以落点为
+ *  起点撒 Next(3,6)=3..5 条世纪之花荆棘(tile 655)随机游走线——每条 Next(15,31)=15..30
+ *  步、初始方向横竖各半随机、每步 1/5 概率横竖换向;只铺空格(vanilla 循环体
+ *  `!active() → PlaceTile(655)` 门,:76899-76903),出界整轮即止(InWorld :76908)。
+ *  调用点 = 钩蔓 AI_052 抵锚分支(NPC.cs:32462-32466)。tile 655 触碰伤 100 +
+ *  触碰即毁(TouchDamage TOUCH_IMMEDIATE/TOUCH_DESTROY 已接),tileCut 可清除 */
+function spawnPlanteraThorns(game: GameHooks, px: number, py: number): void {
+  const st = game.world.store;
+  const thorn = TILE_BY_KEY['v_655_plantera_thorns'] ?? -1;
+  if (thorn < 0) return;
+  const strands = rndRange(3, 6);
+  for (let i = 0; i < strands; i++) {
+    let steps = rndRange(15, 31);
+    let tx = Math.floor(px / TILE);
+    let ty = Math.floor(py / TILE);
+    let dx = 0, dy = 0;
+    if (rnd(2) !== 0) dy = rnd(2) === 0 ? 1 : -1;
+    else dx = rnd(2) === 0 ? 1 : -1;
+    while (steps > 0) {
+      steps--;
+      if (st.inBounds(tx, ty)) {
+        const idx = st.idx(tx, ty);
+        if (st.flags[idx] === 0) st.setTile(tx, ty, thorn);   // PlaceTile !active() 门
+      }
+      tx += dx;
+      ty += dy;
+      if (!st.inBounds(tx, ty)) return;
+      if (rnd(5) === 0) {
+        if (dy === 0) { dx = 0; dy = rnd(2) === 0 ? 1 : -1; }
+        else { dy = 0; dx = rnd(2) === 0 ? 1 : -1; }
+      }
+    }
+  }
+}
+
 // ============================================================================
 // AI_043 蜂后 222(NPC.cs:30312-30998)
 // ai[0] 状态:-1 选下一招 / 0 悬浮-俯冲循环 / 2 飞至玩家上方 / 1 机枪蜜蜂 /
@@ -61,7 +97,9 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!game.scene?.zoneJungle) num658 += 1;
   if (game.world.seedFlags?.getGoodWorld) num658 += 0.5;
   const num659 = player ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : 1e9;
-  // timeLeft 维持 ≥60(:30330-30334)由共享 Despawn 系统承担,不在此重复
+  // timeLeft 保活地板(:30419-30421):ai[0]!=5 时 timeLeft<60 → 60——despawnTimer=
+  // 原版 timeLeft,长距风筝离屏时消散倒数不低于 60t(2026-08-24 R23a 补)
+  if (e.ai0 !== 5 && e.despawnTimer < 60) e.despawnTimer = 60;
   if (e.ai0 !== 5 && num659 > 3000) e.ai0 = 4;   // :30336-30341 远距追赶
   if (dead4) e.ai0 = 5;                           // :30342-30345
 
@@ -509,12 +547,16 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
     for (const th of [0.9, 0.8, 0.7, 0.6]) if (e.hp < e.maxHp * th) l[1] += 1;
     if (flag50) l[1] += 3;                     // :32059-32062 暴怒蓄力 +3
     if (expert) l[1] += 1;                     // :32058-32060 expert 蓄力 +1
+    // :32144-32147 专家受击强发掷:justHit && Next(2)==0 → localAI[3]=1(下次蓄力满
+    //   无视视线强发一次;掷在每 tick 蓄力段,R23a 补——曾注释自认未建模)
+    if (expert && e.justHit && rnd(2) === 0) l[3] = 1;
     if (ftw) l[1] += 1;                        // :32066-32068
-    // expert justHit 1/2 蓄力越过视线(:32061-32064/:32077-32081)——justHit 未建模,登记
     if (l[1] > 80) {
       l[1] = 0;
       // 视线检查(:32069-32078):Collision.CanHit(position,w,h,player,...) 近似
-      const flag52 = losClear(game, e.x, e.y, p.x, p.y);
+      let flag52 = losClear(game, e.x, e.y, p.x, p.y);
+      // :32158-32162 localAI[3]>0 → 无视视线强发并清旗
+      if (l[3] > 0) { flag52 = true; l[3] = 0; }
       if (flag52) {
         // 种子 275 / 毒种 276 / 刺球 277(:32080-32133)
         const num802 = expert ? 17 : 15;      // :32088-32097
@@ -707,10 +749,15 @@ export function planteraTentacleAI(e: Enemy, game: GameHooks, player: Player | n
   const num835 = e.ai0 * TILE - 8 - e.cx;
   const num836 = e.ai1 * TILE - 8 - e.cy;
   const num837 = Math.hypot(num835, num836);
+  const ftwHook = !!game.world.seedFlags?.getGoodWorld;
   if (num837 < 12 + num834) {
+    // :32462-32466 FTW:飞行中(localAI[3]=1)抵锚瞬间撒荆棘(SpawnPlanteraThorns,
+    //   WorldGen.cs:76875——tile 655 随机游走线;R23a 补)
+    if (ftwHook && l[3] === 1) { l[3] = 0; spawnPlanteraThorns(game, e.cx, e.cy); }
     e.vx = num835;
     e.vy = num836;
   } else {
+    if (ftwHook) l[3] = 1;                     // :32471-32474 飞行中每 tick 置旗
     const s = num834 / num837;
     e.vx = num835 * s;
     e.vy = num836 * s;
@@ -729,6 +776,10 @@ export function planteraTentacleAI(e: Enemy, game: GameHooks, player: Player | n
 // ============================================================================
 export function planteraTentacle2AI(e: Enemy, game: GameHooks, player: Player | null) {
   const l = la(e);
+  // :32487-32497 FTW:每 tick 1/10 掷反射玩家弹幕(reflectsProjectiles;消费端
+  //   projTargets.tryReflectProjectile——WeaponProj/Arrow/Dart 命中管线已接。
+  //   非 FTW 世界不触该字段恒 false,R23a 补)
+  if (game.world.seedFlags?.getGoodWorld) e.reflectsProjectiles = rnd(10) === 0;
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; l[0] = 0; }
   const boss = (game.enemies() as Enemy[]).find((n) => !n.dead && n.vanillaId === 262) ?? null;
   if (!boss) { e.hp -= 9999; if (e.hp <= 0) e.dead = true; return; }
@@ -744,14 +795,16 @@ export function planteraTentacle2AI(e: Enemy, game: GameHooks, player: Player | 
     e.ai0 = rndRange(-100, 101);
     e.ai1 = rndRange(-100, 101);
   }
-  // 环绕半径随本体血量(:32442-32451);expert 动态半径 +300×(1-血比) + 加速度 0.5
-  // (:32454-32459);getGoodWorld 加速度 +4(:32460-32463)
+  // 环绕半径随本体血量(:32442-32451);expert 动态半径 num843=1-life/lifeMax 用
+  // 【触须自身】血量(NPC.cs:32531-32535,触须 lifeMax1000——被打残的触须轨道变宽;
+  // 曾误用本体血量=全体触须随本体掉血同步外扩,R23a 修)+ 加速度 0.5(:32454-32459);
+  // getGoodWorld 加速度 +4(:32460-32463)
   const expertTen = mainExpertMode(game.world);
   const ftwTen = !!game.world.seedFlags?.getGoodWorld;
   let orbit = 200;
   if (boss.hp < boss.maxHp * 0.25) orbit += 100;
   if (boss.hp < boss.maxHp * 0.1) orbit += 100;
-  if (expertTen) orbit += 300 * (1 - boss.hp / boss.maxHp);
+  if (expertTen) orbit += 300 * (1 - e.hp / e.maxHp);
   const accTen = 0.2 + (expertTen ? 0.3 : 0) + (ftwTen ? 4 : 0);
   // 目标点 = 锚点 + 归一化偏移×半径;步进 accTen,符号翻转 0.9 阻尼(:32467-32509)
   let dx = anchor.cx + e.ai0 - anchor.cx;

@@ -698,6 +698,9 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
 
   if (e.ai0 < 0) {
     // ---- 二阶段（:32569-32699）----
+    // :32650-32653 FTW:二阶段每 tick 置位重力倒置锚(消费端 Player.fixedUpdate:
+    //   距脑<4000px → gravDir=-1;Main.cs:18127 锚失效清除。R23a 补——曾整缺)
+    if (game.world.seedFlags?.getGoodWorld) game.world.brainOfGravity = e.id;
     // :32575-32588 入场演出一次性（localAI[2] 门）：SoundID 3（Zombie_1）+
     //   血块 gore 392-395（position 左上角出、初速 Next(-30,31)*0.2 各自独立掷，
     //   NewGore 尾段另有 :1347-1348 扰动）+ 尘 5 号 ×20 + SoundID 15

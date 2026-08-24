@@ -1,7 +1,9 @@
-// Journey 研究（献祭）需求表提取（1.4.5.6 = Terarria1456）→ src/data/vanilla-research.json。
+// Journey 研究（献祭）需求表提取（基线 = Terarria1458，1.4.5.8；SW_RESEARCH_BASE 可覆盖）
+// → src/data/vanilla-research.json。（R24 2026-08-24：默认档由 1456 切 1458——补
+// ids 6147..6195 共 49 条新物品 + override 两组 {6169,6193,6194}→6168 / 6195→6190）
 //
 // 权威来源（反编译）：
-//   1. Terarria1456/Terraria.GameContent.Creative.Content.Sacrifices.tsv（6195 行）
+//   1. <BASE>/Terraria.GameContent.Creative.Content.Sacrifices.tsv（1458=6243 行）
 //      —— CreativeItemSacrificesCatalog.Initialize（CreativeItemSacrificesCatalog.cs:14-69）
 //      内嵌资源原文。逐行规则 1:1：
 //        · 行首 "//" 跳过（:30-32）
@@ -11,13 +13,13 @@
 //            ""/"a"=50  "b"=25  "c"=5  "d"=1  "e"=剔除(flag)  "f"=2  "g"=3
 //            "h"=10  "i"=15  "j"=30  "k"=99  "l"=100  "m"=200  "n"=20  "o"=400
 //            其余 → 原版直接 throw（:56）——提取器同样 fail fast。
-//   2. Terarria1456/Terraria.ID/ContentSamples.cs FillResearchItemOverrides（:884-892）
+//   2. <BASE>/Terraria.ID/ContentSamples.cs FillResearchItemOverrides（:884-897，10 组）
 //      —— CreativeResearchItemPersistentIdOverride（ContentSamples.cs:823）。
 //      AddItemResearchOverride(itemTypeToUnlock, params itemsThatWillResearchIt)
 //      （:896-902）语义：献祭 params 里的物品 → 计入 unlock 物品的研究。
 //      运行时三处（GetSacrificeCount :40 / TryGetSacrificeNumbers :78 / RegisterItemSacrifice
 //      :117）都先走 override 再查 need 表，因此计数器按「解析后 id」共享。
-//   3. Terarria1456/Terraria.ID/ItemID.cs（:1443-13833，public const short NAME = id;）
+//   3. <BASE>/Terraria.ID/ItemID.cs（public const short NAME = id;）
 //      —— 名称 → net id；Count = 6147（:13833）。
 //        CountFullyResearchedItems（ItemsSacrificedUnlocksTracker.cs:59-74）按
 //        0..ItemID.Count-1 逐 id 调 TryGetSacrificeNumbers 计 allItems（override
@@ -27,6 +29,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+// 基线档（2026-08-24 R24：默认随基准切到 Terarria1458；SW_RESEARCH_BASE 可覆盖）
+const BASE = process.env.SW_RESEARCH_BASE ?? 'Terarria1458';
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
 
 /** 类别字母 → 需求数量（CreativeItemSacrificesCatalog.cs:25-58 switch 1:1）。
@@ -37,7 +41,7 @@ const CATEGORY = {
 };
 
 // ---- ItemID.cs：名称 → id（public const short NAME = id;）----
-const itemidSrc = read('Terarria1456/Terraria.ID/ItemID.cs');
+const itemidSrc = read(`${BASE}/Terraria.ID/ItemID.cs`);
 const idByName = new Map();
 const idRe = /public const short ([A-Za-z0-9_]+) = (-?\d+);/g;
 for (const m of itemidSrc.matchAll(idRe)) {
@@ -49,7 +53,7 @@ if (!countMatch) throw new Error('ItemID.Count not found');
 const ITEM_COUNT = parseInt(countMatch[1], 10);
 
 // ---- Sacrifices.tsv：need 表 ----
-const tsv = read('Terarria1456/Terraria.GameContent.Creative.Content.Sacrifices.tsv');
+const tsv = read(`${BASE}/Terraria.GameContent.Creative.Content.Sacrifices.tsv`);
 const need = {};
 const hist = {};
 let dataRows = 0, commentRows = 0, shortRows = 0, unknownNames = 0, excluded = 0;
@@ -71,7 +75,7 @@ for (const rawLine of tsv.split(/\r\n|\r|\n/)) {
 }
 
 // ---- ContentSamples.cs：研究 id 覆盖表（FillResearchItemOverrides :884-892）----
-const csSrc = read('Terarria1456/Terraria.ID/ContentSamples.cs');
+const csSrc = read(`${BASE}/Terraria.ID/ContentSamples.cs`);
 const fnMatch = csSrc.match(
   /private static void FillResearchItemOverrides\(\)\s*\{([\s\S]*?)\n\t\}/,
 );
@@ -90,10 +94,10 @@ for (const m of fnMatch[1].matchAll(/AddItemResearchOverride\((\d+),\s*([\d,\s]+
 const out = {
   v: 1,
   meta: {
-    source: 'Terarria1456 1.4.5.6',
+    source: `${BASE}（SW_RESEARCH_BASE 可覆盖）`,
     tsv: 'Terraria.GameContent.Creative.Content.Sacrifices.tsv',
     catalog: 'CreativeItemSacrificesCatalog.cs:14-69',
-    overrideSrc: 'ContentSamples.cs FillResearchItemOverrides:884-892',
+    overrideSrc: 'ContentSamples.cs FillResearchItemOverrides:884-897',
     tracker: 'ItemsSacrificedUnlocksTracker.cs',
     rows: { data: dataRows, comment: commentRows, short: shortRows, unknownName: unknownNames, excluded },
   },

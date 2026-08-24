@@ -2284,6 +2284,11 @@ export class Player extends Entity {
     //      Game.simulateRemotePlayers 同门补掷（原版各端对全部 Main.player 跑此尘）。
     //      fixedUpdate 本身只在非暂停时跑 ----
     this.updateHairDyeDust(game);
+    // ---- FTW 克脑重力倒置消费端（NPC.brainOfGravity → Player.forcedGravity）：
+    //      克脑 266 二阶段每 tick 写 world.brainOfGravity=实体 id（NPC.cs:32650-32653），
+    //      距脑 <4000px → forcedGravity=10 → gravDir=-1（Player.cs:26489-26496）；
+    //      锚失效/非 266 清除 = Main.cs:18127。仅 FTW 种子会有锚写入,普通世界零行为 ----
+    consumeBrainOfGravity(this, game);
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
     this.miscCounter++;
@@ -5827,6 +5832,11 @@ export class Player extends Entity {
   /** 重力方向（R7：1 普通 / -1 倒置——重力药水 buff 18 激活时按 Up 切换，Player.gravDir）
    *  倒置 = 重力/跳跃/落点起点全部取反；onGround 由 hitHead 近似（天花板当地板） */
   gravDir: 1 | -1 = 1;
+  /** FTW 克脑重力倒置计数（Player.forcedGravity）：距脑<4000px 每 tick 置 10
+   *  （Player.cs:26489-26493）、每 tick 衰减（:18496-18498）；>0 强制 gravDir=-1
+   *  （:26494-26496）。Producer = bossAI.brainOfCthulhuAI 二阶段写 world.brainOfGravity；
+   *  求值入口 = fixedUpdate 头部 consumeBrainOfGravity */
+  forcedGravityT = 0;
   /** 世界边界钳制（原版 Player.BordersMovement，Player.cs:23771-23844；
    *  碰撞积分后调用，调用点对应原版 :27968）。
    *  边界 = 世界边缘内缩 640px（=40 格 = offLimitBorderTiles×16，Main.cs:433）：
@@ -6802,4 +6812,29 @@ export function solidCollisionBox(
     }
   }
   return false;
+}
+
+/** FTW 克脑重力倒置求值（NPC.brainOfGravity → Player.forcedGravity 消费端；
+ *  从 fixedUpdate 抽出便于单测）：
+ *  - Producer：克脑 266 二阶段每 tick 写 world.brainOfGravity=实体 id
+ *    （NPC.cs:32650-32653，bossAI.brainOfCthulhuAI；仅 getGoodWorld 种子）。
+ *  - 本端：锚有效且距脑 <4000px → forcedGravityT=10（Player.cs:26489-26493，
+ *    Vector2.Distance 中心距）；计数 >0 强制 gravDir=-1（:26494-26496），每 tick
+ *    衰减（:18496-18498）；计数尽时归位 gravDir=1——原版由 :26933 else 支每 tick
+ *    复位（无重力药水时），此处等价在倒置结束 tick 复位；带重力药水（gravControl）
+ *    时原版药水分支接管不复位,同款跳过。
+ *  - 锚失效（死亡/非 266）→ 清 -1（Main.cs:18127 每帧校验）。
+ *  普通世界 brainOfGravity 恒 -1 → 整段零行为。 */
+export function consumeBrainOfGravity(p: Player, game: GameHooks): void {
+  const bgId = game.world.brainOfGravity;
+  if (bgId >= 0) {
+    const bg = (game.enemies() as Array<{ id: number; dead: boolean; vanillaId?: number; cx: number; cy: number }>)
+      .find((n) => !n.dead && n.id === bgId && n.vanillaId === 266);
+    if (!bg) game.world.brainOfGravity = -1;
+    else if (Math.hypot(bg.cx - p.cx, bg.cy - p.cy) < 4000) p.forcedGravityT = 10;
+  }
+  if (p.forcedGravityT > 0) {
+    p.gravDir = -1;
+    if (--p.forcedGravityT === 0 && !p.buffs.has(BuffType.Gravitation)) p.gravDir = 1;
+  }
 }

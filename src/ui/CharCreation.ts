@@ -40,7 +40,7 @@
 // .sw-char-row input[type=text]、创建按钮保留 [data-act=create]。
 import {
   type Appearance, type RGBColor, randomAppearance, DIFFICULTY_INFO,
-  VALID_CLOTH_STYLES, CHAR_CREATION_HAIRS, hslToRgb, rgbToHsl,
+  VALID_CLOTH_STYLES, CHAR_CREATION_HAIRS, hslToRgb, rgbToScaledHsl, scaledLuminosity,
 } from '../player/Appearance';
 import { compositePaperDoll, dollFrame, walkFrame, IDLE_FRAME } from '../player/PaperDoll';
 import { Lang } from '../i18n/Lang';
@@ -1105,14 +1105,17 @@ export class CharCreation {
 
   // ---- 颜色页（部位 = 当前颜色页签） ----
 
+  /** 取色器 HSL 走原版缩放域（ScaledHslToRgb :2359-2362 l×0.85+0.15 / RgbToScaledHsl
+   *  :2364-2369 (l-0.15)/0.85 钳 [0,1]）——滑杆亮度全域映射实际亮度 [0.15,1]，
+   *  七取色器色彩域/滑块位置/HEX 读数与原版一致。R24 修复：曾直用未缩放 HSL。 */
   private syncHslFromPart(): void {
     const c = this.appearance[this.colorPart] as RGBColor;
-    this.hsl = rgbToHsl(c.r, c.g, c.b);
+    this.hsl = rgbToScaledHsl(c.r, c.g, c.b);
   }
 
   private applyHslToPart(): void {
     const [h, s, l] = this.hsl;
-    const [r, g, b] = hslToRgb(h, s, l);
+    const [r, g, b] = hslToRgb(h, s, scaledLuminosity(l));
     (this.appearance[this.colorPart] as RGBColor) = {
       r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255),
     };
@@ -1169,12 +1172,14 @@ export class CharCreation {
     this.redrawColorPage();
   }
 
-  /** 滑杆渐变色（GetHSLSliderColorAt :1130-1141：饱和/亮度杆随当前 HSL 联动） */
+  /** 滑杆渐变色（GetHSLSliderColorAt :1128-1141：三支全走 ScaledHslToRgb——
+   *  色相杆 = (t,1,0.5)（实际亮度 0.5×0.85+0.15=0.575）；饱和/亮度杆随当前
+   *  HSL 联动，亮度分量同样过 ×0.85+0.15 缩放） */
   private sliderColorAt(kind: 0 | 1 | 2, t: number): RGBColor {
     const [h, s, l] = this.hsl;
-    const [r, g, b] = kind === 0 ? hslToRgb(t, 1, 0.5)
-      : kind === 1 ? hslToRgb(h, t, l)
-      : hslToRgb(h, s, t);
+    const [r, g, b] = kind === 0 ? hslToRgb(t, 1, scaledLuminosity(0.5))
+      : kind === 1 ? hslToRgb(h, t, scaledLuminosity(l))
+      : hslToRgb(h, s, scaledLuminosity(t));
     return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
   }
 

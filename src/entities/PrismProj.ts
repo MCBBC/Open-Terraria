@@ -301,18 +301,28 @@ export class PrismProj extends Entity {
   draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     // 晶体本体（Projectile_633.png 26×120 = 5 帧；帧速 :63686-63694 [1456] / :67637-67645 [1457]——充能 4t/帧、
     // ≥120t 后 1t/帧，由 fixedUpdate 推进 crystalFrame）
-    const img = projSprite(633);
-    const ctx = r.ctx;
-    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
-    const fh = img.height / 5;
-    const f = this.crystalFrame;
-    const rot = Math.atan2(this.dirY, this.dirX);
-    ctx.save();
-    ctx.translate(this.cx, this.cy);
-    ctx.rotate(rot);
-    ctx.drawImage(img, 0, Math.round(f * fh), img.width, Math.round(fh),
-      -img.width / 2, -fh / 2, img.width, fh);
-    ctx.restore();
+    // ★drawLayer=7（SetDefaults :6800）= 原版在【玩家绘制层组内】画（PlayerDrawLayers.cs:3154
+    //   DrawPlayer_27_HeldItem 记 projectileDrawPosition → :4318 RenderAllLayers 在持物层
+    //   位置插入 DrawHeldProj）= 身体【前】。实体循环先于 drawPlayer，直画会被纸娃娃
+    //   盖住（2026-08-24 用户报"身上没棱镜"）→ 登记 Renderer.prismCrystalQueue，
+    //   drawPlayer 后冲刷（世界变换仍活，闭包世界坐标直画）；无队列环境（测试）直画
+    const paint = () => {
+      const img = projSprite(633);
+      const ctx = r.ctx;
+      if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+      const fh = img.height / 5;
+      const f = this.crystalFrame;
+      const rot = Math.atan2(this.dirY, this.dirX);
+      ctx.save();
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(rot);
+      ctx.drawImage(img, 0, Math.round(f * fh), img.width, Math.round(fh),
+        -img.width / 2, -fh / 2, img.width, fh);
+      ctx.restore();
+    };
+    const queue = (r as unknown as { prismCrystalQueue?: Array<() => void> }).prismCrystalQueue;
+    if (queue) { queue.push(paint); return; }
+    paint();
   }
 }
 

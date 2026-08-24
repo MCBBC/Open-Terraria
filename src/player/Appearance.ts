@@ -166,6 +166,20 @@ export function hslToRgb(h: number, s: number, l: number): [number, number, numb
   return [f(0), f(8), f(4)];
 }
 
+/** 角色创建取色器缩放域（UICharacterCreation.ScaledHslToRgb/RgbToScaledHsl :2354-2369）：
+ *  原版滑杆 HSL 的亮度分量不直接进 hslToRgb，而是 l×0.85+0.15——滑杆全域 [0,1]
+ *  映射到实际亮度 [0.15,1]，拖不出原版不可能的近黑色；反向读档 (l-0.15)/0.85 后
+ *  钳 [0,1]。七取色器色彩域/三滑杆渐变/HEX 读数全走此映射。 */
+export function scaledLuminosity(l: number): number {
+  return l * 0.85 + 0.15;
+}
+
+export function rgbToScaledHsl(r: number, g: number, b: number): [number, number, number] {
+  const [h, s, l] = rgbToHsl(r, g, b);
+  const z = Math.max(0, Math.min(1, (l - 0.15) / 0.85));
+  return [h, s, z];
+}
+
 export function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   const rr = r / 255, gg = g / 255, bb = b / 255;
   const max = Math.max(rr, gg, bb), min = Math.min(rr, gg, bb);

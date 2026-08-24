@@ -2962,6 +2962,12 @@ export class Renderer {
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致；
     // 挥舞动画 = msg13 useItem 位派生的 swingNet（对齐本地 swing 参数形状））
     for (const rp of this.remotePlayers) { this.drawPlayer(rp, world, rp.swingNet, flicker); }
+    // 终极棱镜晶体(633 drawLayer=7)冲刷:原版在玩家绘制层组内持物层位置插入
+    // (PlayerDrawLayers.cs:3154→:4318)= 身体【前】——实体循环直画被纸娃娃盖住
+    if (this.prismCrystalQueue.length) {
+      for (const paint of this.prismCrystalQueue) paint();
+      this.prismCrystalQueue.length = 0;
+    }
     // PvP 头顶血条（备案偏差：原版无玩家头顶名/血条——仅悬停提示与地图头像边框；
     // 真联机 PvP 下"谁是可攻击目标"是核心信息，按计划以头顶条替代）。
     // 仅 hostile 目标显示（同队/非 hostile 玩家无条），队伍色描边 + 原版血条同款

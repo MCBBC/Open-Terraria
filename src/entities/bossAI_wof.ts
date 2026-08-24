@@ -217,10 +217,11 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
         leech.x = e.cx - leech.w / 2;
         leech.y = e.y + e.h / 2 + 20 - leech.h;
         leech.vx = e.facing * 8; // :25820 沿推进方向甩出
-        // 体节链（AI_006 :51706-51749）：头生成时 ai[2]=Next(3,6) → 3-5 节身 118
-        // + 尾节 119（身节 ai[2]>0 逐节克隆、归零换尾）——spawnWormChainFor 即
-        // "body×n + 尾"结构，n 取同一掷骰区间（Enemy 为 type-only 导入，经代理出口）
-        spawnWormChainFor(game, leech, 3 + Math.floor(Math.random() * 3));
+        // 体节链（AI_006 :51883-51902）：水蛭头 ai[2]=Next(3,6)∈{3,4,5} 是【身节数】
+        // （118 身节 ai[2]>0 逐节递减克隆、归零转尾 119）→ 身{3,4,5}+尾=全链{4,5,6}段。
+        // spawnWormChainFor(n)="body×(n-1)+尾"——曾把 Next(3,6) 当"身+尾总数"传
+        // 3+rnd(3)，身节只剩{2,3,4}短一节（off-by-one,R23a 修）
+        spawnWormChainFor(game, leech, 4 + Math.floor(Math.random() * 3));
       }
     }
   }

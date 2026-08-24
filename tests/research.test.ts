@@ -41,11 +41,18 @@ describe('need 表抽样（Sacrifices.tsv → vanilla-research.json）', () => {
     expect(r.getNeed(999999)).toBe(0);
     expect(r.tryGetSacrificeNumbers(999999)).toBeNull();
   });
-  it('need 表规模对账（6089 条 + MusicBoxOWHallow 原版重复行合并）', () => {
-    // 提取器对账：6193 数据行 - 103 个 E = 6090 行写入，5040（MusicBoxOWHallow，
-    // tsv :5091/:5125 原版重复且同值）合并 → 6089 键
-    expect(r.totalItems()).toBe(6089);
+  it('need 表规模对账（6138 条 = 1458 基线；含 R24 补的 ids 6147..6195）', () => {
+    // 提取器对账：1458 tsv 6242 数据行 - 103 个 E = 6139 行写入，5040（MusicBoxOWHallow，
+    // 原版重复且同值）合并 → 6138 键（1456 旧值 6089 + 新物品 49）
+    expect(r.totalItems()).toBe(6138);
     expect(r.completedCount()).toBe(0);
+    // R24：新物品族抽样（GiantTiki D=1 / PalworldLittleKinshipPeach H=10）
+    expect(r.getNeed(6147)).toBe(1);
+    expect(r.getNeed(6191)).toBe(10);
+    // override 两组（ContentSamples.cs:891-892）：献祭 6169/6193/6194 计入 6168；
+    // 献祭 6195 计入 6190
+    expect(r.getNeed(6169)).toBe(r.getNeed(6168));
+    expect(r.getNeed(6195)).toBe(r.getNeed(6190));
   });
 });
 
