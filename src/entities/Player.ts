@@ -2539,11 +2539,13 @@ export class Player extends Entity {
       this.applyManaRegenerationDelay(smm);
     }
     // manaRegenBonus/manaRegenDelayBonus（:18481-18482 每帧清零后由 buff 158 :9629-9632
-    // 与魔力斗篷 982 :14379-14383 重算）
+    // 与魔力斗篷 982 :14379-14383 重算）。★1458：瓶中星 buff 158 的 delayBonus+0.5
+    // 已删（1458 Player.cs:10020——手环族堆叠致惩罚期衰减溢出=用武器也满速回蓝的
+    // 修复半边;regen+10 保留）;手环族 982/6188/6189 的 delayBonus++ 同批删除
+    // （1458 :15044）——本仓手环族本就未实装 delay 项,终态天然一致
     const mRegenBonus = this.equipStats.manaRegenBonus
       + (this.buffs.has(BuffType.StarInBottle) ? 10 : 0);
-    const mDelayBonus = this.equipStats.manaRegenDelayBonus
-      + (this.buffs.has(BuffType.StarInBottle) ? 0.5 : 0);
+    const mDelayBonus = this.equipStats.manaRegenDelayBonus;
     if (this.manaRegenDelay > 0) {
       // 惩罚期衰减（:19545-19557）：基础 1 + delayBonus；静止/抓钩/魔力再生再 −1
       //（R5-F8：原版静止判定 = IsConsideredStandingStill || grappling[0] >= 0,

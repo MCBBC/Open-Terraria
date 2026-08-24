@@ -3254,8 +3254,20 @@ export class Arrow extends Entity {
         }
         // 命中 debuff（StatusNPC:10555 表驱动——火枪弹 2 33% OnFire 180t 等,按型号掷骰）
         // 614 传 ai1TargetId：表内 183 条目带 gate 'ai1==i'（:11381-11383 只上绑定目标）
+        // ★1458：催化指环 ctx 接通（StatusNPC :11192-11196 `!npcProj && catalystBand`
+        //  → 398 300t 任意命中）——本仓 1457 箭命中路径漏传 ctx（旗聚合零消费）,
+        //  借 1458 门补齐；!npcProj=仅玩家弹（敌箭不走本敌伤路径,天然满足）
         applyProjStatus(this.projId, e as unknown as Record<string, number>,
-          this.projId === 614 ? { ai1TargetId: this.stickerTgt } : undefined);
+          this.projId === 614 ? { ai1TargetId: this.stickerTgt }
+            : { catalystBand: (game.player as unknown as { equipStats?: { catalystBand?: boolean } }).equipStats?.catalystBand === true });
+        // ★1458 毒刺 6165/6184/6185（StatusNPC :11182-11191,1458 加 !npcProj 门）：
+        // 玩家箭体命中 100% Poisoned(20) 90t=1.5s——本仓 1457 漏接（equipStats 旗
+        // 聚合于 Player.ts:1234-1259 但零消费）,借 1458 修复补齐
+        if (VANILLA_ARROW_PROJS.has(this.projId)
+          && (game.player as unknown as { equipStats?: { accPoisonBarb?: boolean } }).equipStats?.accPoisonBarb) {
+          (e as unknown as { poisonT?: number }).poisonT =
+            Math.max((e as unknown as { poisonT?: number }).poisonT ?? 0, 1.5);
+        }
         // 信号枪族点燃（StatusNPC :11687-11696：163/310/1008/1010/1011 →
         //   OnFire(24) Next(3)==0?600:300t = 10s/5s；1009 诅咒信号弹 →
         //   Cursed Inferno(39) 600t=10s（:11702-11705））

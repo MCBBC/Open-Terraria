@@ -194,7 +194,7 @@ describe('挂手锚 RotatedRelativePoint(MountedCenter)（:23879 → Player.cs:4
     saw.fixedUpdate(1 / 60, hooks);
     const speedMod = Math.hypot(saw.vx, saw.vy);
     expect(speedMod).toBeGreaterThanOrEqual(48 * 1.2 * 0.97 - 1e-9);   // 57.6×(1±Next(3)×0.01)
-    expect(speedMod).toBeLessThanOrEqual(48 * 1.2 * 1.03 + 1e-9);
+    expect(speedMod).toBeLessThanOrEqual(48 * 1.2 * 1.05 + 1e-9);      // 抖动上界 ×(1+4×0.01)=1.04 :23932
     expect(saw.vy).toBeCloseTo(0, 6);                            // 水平瞄准
     expect(saw.vx).toBeGreaterThan(0);
   });

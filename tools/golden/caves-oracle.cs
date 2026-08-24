@@ -9940,6 +9940,14 @@ void DgLights()
                     }
                 }
                 if (placed) break;
+                // ★GGGGGGGG ①R11-D2 对齐（2026-08-24；DungeonGlobalLights.cs:128，1457 新增，
+                //   1456 同位无此掷——FFF 批源码对读+本批复核）：灯笼支补 Next(3) 主流掷。
+                //   `genRand.Next(3)==0 && wall>=94 && wall<=105` Next(3) 在 && 左侧【恒掷】：
+                //   Default style（普通世界唯一档）每次进入灯笼段必耗 1 掷，与锚定成败无关
+                //   ——故掷点在锚定预检【之前】（JS R11-D2 同位）。命中且墙∈[94,105]（变体墙）
+                //   → GOTHIC 灯笼 53 覆写三档查表值（cs:128-132 在三档之后）。曾缺=每盏灯笼
+                //   少 1 颗主流掷，dungeonI 起全链流位移（caves-checkpoint dungeonI 首差根因）。
+                int dgGothicRoll = (int)r.Next(3);
                 // 灯笼（Place1x2Top：上方实心且下方净空 → 42 两格）——实心=genSolidType
                 // 语义（裂纹砖 481-483 非实心，DC:344；JS :253 消费端同源）
                 // ★MMMM 批（NNNN 镜像）：nactive()（active&&!inActive，:46705）——致动柱
@@ -9955,10 +9963,12 @@ void DgLights()
                     // ★GGGGGG：Place1x2Top 帧式补齐（cs:46711-46717；JS dgLights 同源）——
                     //   frameY=style*36（下格 +18）、frameX=0（亮档；灭档 frameX=18 由
                     //   DgSwitch 2/3 掷写）。灯笼样式按墙变体三档（Lights:109-118）。
+                    //   ★GGGGGGGG ①：gothic 命中（1/3 × 变体墙）→ 53 覆写（Lights.cs:128-132）。
                     //   曾不写帧=残留砖帧，样式全丢。
                     {
                         int wl = wal[cy * W + x];
-                        int lStyle = wl == dgWallVariants[1] ? dgLantern[1] : wl == dgWallVariants[2] ? dgLantern[2] : dgLantern[0];
+                        int lStyle = (dgGothicRoll == 0 && wl >= 94 && wl <= 105) ? 53
+                            : wl == dgWallVariants[1] ? dgLantern[1] : wl == dgWallVariants[2] ? dgLantern[2] : dgLantern[0];
                         frY[cy * W + x] = (ushort)(lStyle * 36);
                         frY[(cy + 1) * W + x] = (ushort)(lStyle * 36 + 18);
                         frX[cy * W + x] = 0;
@@ -11395,9 +11405,8 @@ if (Environment.GetEnvironmentVariable("SW_DUMP_SHIMMER") == "1")
 {
     using var fs = File.Create(outPath + ".shimstate");
     using var bw = new BinaryWriter(fs);
-    var urt = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
-    var usa = (int[])urt.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r)!;
-    var uix = (uint)urt.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r)!;
+    var usa = ((UnifiedRandom)r).SeedArray;
+    var uix = ((UnifiedRandom)r).inext;
     bw.Write(W); bw.Write(H);
     bw.Write(uix);
     for (int q = 0; q < 56; q++) bw.Write(usa[q]);
@@ -22056,4 +22065,165 @@ static class TOD
     static TodSub S(int style, int dl, int dw, params TodAlt[] alts)
         => new TodSub { DL = dl, DW = dw, Alts = alts.Length > 0 ? alts : Array.Empty<TodAlt>() };
     static TodAlt A(int a0, int a1, int dl, int dw) => new TodAlt { A0 = a0, A1 = a1, DL = dl, DW = dw };
+}
+
+// ═════════ ★GGGGGGGG（2026-08-24 终局⑨）：UnifiedRandom 源级转录 ═════════
+// 来源：Terarria1457/Terraria.Utilities/UnifiedRandom.cs 全文逐行转录（1.4.5.7 真值）。
+// 与 1456 版（Terarria1456/Terraria.Utilities/UnifiedRandom.cs）diff=零差异——
+// 即本转录对 1456/1457 双版同为真值；退役的 Assembly.LoadFrom(Steam exe) 在
+// 08-24 10:36 后已是 1.4.5.8，继续反射加载会产出 1458 掷流（污染真值源）。
+// 唯一偏离：SeedArray/inext 由 private 放宽 public——仅供 oracle 内部态指纹
+// （StreamHash/DgStreamFNV/STATE_DUMP/SW_DUMP_SHIMMER）自省，掷流语义零改动。
+// 行号注（1457=1456 同构）：SetSeed cs:28-61 / Sample cs:63-66 / InternalSample
+// cs:68-89 / Peek cs:91-104 / Next cs:106-142 / NextDouble cs:144-147 / NextBytes cs:149-159。
+sealed class UnifiedRandom
+{
+    private const int MBIG = int.MaxValue;
+    private const int MSEED = 161803398;
+    private const int MZ = 0;
+    public uint inext;
+    public int[] SeedArray = new int[56];
+
+    public UnifiedRandom()
+        : this(Environment.TickCount)
+    {
+    }
+
+    public UnifiedRandom(int Seed)
+    {
+        SetSeed(Seed);
+    }
+
+    public void SetSeed(int Seed)
+    {
+        for (int i = 0; i < SeedArray.Length; i++)
+        {
+            SeedArray[i] = 0;
+        }
+        int num = ((Seed == int.MinValue) ? int.MaxValue : Math.Abs(Seed));
+        int num2 = 161803398 - num;
+        SeedArray[55] = num2;
+        int num3 = 1;
+        for (int j = 1; j < 55; j++)
+        {
+            int num4 = 21 * j % 55;
+            SeedArray[num4] = num3;
+            num3 = num2 - num3;
+            if (num3 < 0)
+            {
+                num3 += int.MaxValue;
+            }
+            num2 = SeedArray[num4];
+        }
+        for (int k = 1; k < 5; k++)
+        {
+            for (int l = 1; l < 56; l++)
+            {
+                SeedArray[l] -= SeedArray[1 + (l + 30) % 55];
+                if (SeedArray[l] < 0)
+                {
+                    SeedArray[l] += int.MaxValue;
+                }
+            }
+        }
+        inext = 0u;
+    }
+
+    protected double Sample()
+    {
+        return (double)InternalSample() * 4.656612875245797E-10;
+    }
+
+    private int InternalSample()
+    {
+        uint num = inext + 1;
+        if (num > 55)
+        {
+            num = 1u;
+        }
+        uint num2 = num + 21;
+        if (num2 > 55)
+        {
+            num2 -= 55;
+        }
+        int[] seedArray = SeedArray;
+        int num3 = seedArray[num] - seedArray[num2];
+        if (num3 == int.MaxValue)
+        {
+            num3--;
+        }
+        num3 = (seedArray[num] = num3 + ((num3 >> 31) & 0x7FFFFFFF));
+        inext = num;
+        return num3;
+    }
+
+    public int Peek()
+    {
+        uint num = inext + 1;
+        if (num > 55)
+        {
+            num = 1u;
+        }
+        uint num2 = num + 21;
+        if (num2 > 55)
+        {
+            num2 -= 55;
+        }
+        return SeedArray[num] - SeedArray[num2];
+    }
+
+    public int Next()
+    {
+        return InternalSample();
+    }
+
+    private double GetSampleForLargeRange()
+    {
+        int num = InternalSample();
+        if (InternalSample() % 2 == 0)
+        {
+            num = -num;
+        }
+        return ((double)num + 2147483646.0) / 4294967293.0;
+    }
+
+    public int Next(int minValue, int maxValue)
+    {
+        if (minValue > maxValue)
+        {
+            throw new ArgumentOutOfRangeException("minValue", "minValue must be less than maxValue");
+        }
+        long num = (long)maxValue - (long)minValue;
+        if (num <= int.MaxValue)
+        {
+            return (int)(Sample() * (double)num) + minValue;
+        }
+        return (int)((long)(GetSampleForLargeRange() * (double)num) + minValue);
+    }
+
+    public int Next(int maxValue)
+    {
+        if (maxValue < 0)
+        {
+            throw new ArgumentOutOfRangeException("maxValue", "maxValue must be positive.");
+        }
+        return (int)(Sample() * (double)maxValue);
+    }
+
+    public double NextDouble()
+    {
+        return Sample();
+    }
+
+    public void NextBytes(byte[] buffer)
+    {
+        if (buffer == null)
+        {
+            throw new ArgumentNullException("buffer");
+        }
+        for (int i = 0; i < buffer.Length; i++)
+        {
+            buffer[i] = (byte)(InternalSample() % 256);
+        }
+    }
 }

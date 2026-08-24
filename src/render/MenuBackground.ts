@@ -350,46 +350,48 @@ export class MenuBackground {
   }
 
   /** 地表背景全栈：远山（跨槽共用，bgAlphaFarBackLayer 驱动）+ 双槽树层按
-   *  bgAlphaFrontLayer 交叉淡化（昼 Forest1 / 夜 Corruption） */
+   *  bgAlphaFrontLayer 交叉淡化（昼 Forest1 / 夜 Corruption）。
+   *  ★几何 = 绝对 backbuffer 像素（原版菜单层常量不经 UIScaleMatrix 缩放，
+   *  DrawSurfaceBG 直接以 backbuffer 尺寸画）——曾按 canvasH/1080 缩放,高层
+   *  窗口覆盖比例虚增到 ~90%（用户实报"占屏 70-80% 比原版靠上",2026-08-24） */
   private drawForest(): void {
     const st = FOREST_STYLES[this.style] ?? FOREST_STYLES[1];
-    const k = this.canvas.height / REF_H;
     const tint = this.layerTint();
     // 远山两带（Step1 :59246-59257 y=100 / Step2 :59316-59319 y=230 startX−500；
     // scale=1×num4=2、par 0.15 共用）
     const m0 = this.img(st.mnt[0]);
-    if (m0) this.drawLayer(this.tinted(st.mnt[0], m0, tint), 0.15, 100 * k, 2 * k, 0);
+    if (m0) this.drawLayer(this.tinted(st.mnt[0], m0, tint), 0.15, 100, 2, 0);
     const m1 = this.img(st.mnt[1]);
-    if (m1) this.drawLayer(this.tinted(st.mnt[1], m1, tint), 0.15, 230 * k, 2 * k, -500 * k);
+    if (m1) this.drawLayer(this.tinted(st.mnt[1], m1, tint), 0.15, 230, 2, -500);
     // 槽 Forest1（bgStyle 0）：树三层（_Forest gameMenu：y=320/400/480）
     if (this.alphaF[0] > 0.01) {
       const a = this.alphaF[0];
-      this.drawTreeSlot(0, st.trees[0], 320 * k, 1.25 * 2 * k, 0.4, 0, a, tint, k);
-      this.drawTreeSlot(1, st.trees[1], 400 * k, 1.31 * 2 * k, 0.43, -80 * k, a, tint, k);
-      this.drawTreeSlot(2, st.trees[2], 480 * k, 1.34 * 2 * k, 0.49, -120 * k, a, tint, k);
+      this.drawTreeSlot(0, st.trees[0], 320, 1.25 * 2, 0.4, 0, a, tint);
+      this.drawTreeSlot(1, st.trees[1], 400, 1.31 * 2, 0.43, -80, a, tint);
+      this.drawTreeSlot(2, st.trees[2], 480, 1.34 * 2, 0.49, -120, a, tint);
     }
     // 槽 Corruption（bgStyle 1 = 夜菜单）：DrawSurfaceBG_Corrupt gameMenu 分支
-    if (this.alphaF[1] > 0.01) this.drawCorruptTrees(this.alphaF[1], tint, k);
+    if (this.alphaF[1] > 0.01) this.drawCorruptTrees(this.alphaF[1], tint);
   }
 
   /** 腐化三层（DrawSurfaceBG_Corrupt gameMenu：y=320/400/480、scale 2.5/2.62/2.68、
    *  L1 恒水平翻转 :60750；56 套三层全 −100 :60722-60724/:60766/:60800——L1/L2
    *  也查 indexes[0]==56） */
-  private drawCorruptTrees(a: number, tint: [number, number, number] | null, k: number): void {
+  private drawCorruptTrees(a: number, tint: [number, number, number] | null): void {
     const set = CORRUPT_STYLES[this.corruptStyle] ?? CORRUPT_STYLES[0];
-    const y56 = set[0] === 56 ? -100 * k : 0;
+    const y56 = set[0] === 56 ? -100 : 0;
     const l0 = this.img(set[0]);
-    if (l0) this.drawLayer(this.tinted(set[0], l0, tint), 0.4, 320 * k + y56, 1.25 * 2 * k, 0, a);
+    if (l0) this.drawLayer(this.tinted(set[0], l0, tint), 0.4, 320 + y56, 1.25 * 2, 0, a);
     const l1 = this.img(set[1]);
-    if (l1) this.drawLayer(this.tinted(set[1], l1, tint), 0.43, 400 * k + y56, 1.31 * 2 * k, -80 * k, a, undefined, true);
+    if (l1) this.drawLayer(this.tinted(set[1], l1, tint), 0.43, 400 + y56, 1.31 * 2, -80, a, undefined, true);
     const l2 = this.img(set[2]);
-    if (l2) this.drawLayer(this.tinted(set[2], l2, tint), 0.49, 480 * k + y56, 1.34 * 2 * k, -120 * k, a);
+    if (l2) this.drawLayer(this.tinted(set[2], l2, tint), 0.49, 480 + y56, 1.34 * 2, -120, a);
   }
 
-  /** 单树层（:60708-60960 逐槽位规格/偏移/特例 1:1） */
+  /** 单树层（:60708-60960 逐槽位规格/偏移/特例 1:1；绝对像素） */
   private drawTreeSlot(slot: 0 | 1 | 2, tex: number, y: number, scale: number,
     par: number, dx: number, alpha: number,
-    tint: [number, number, number] | null, k: number): void {
+    tint: [number, number, number] | null): void {
     if (tex < 0) return;
     let sc = scale, pr = par;
     let src: [number, number, number, number] | undefined;
@@ -397,36 +399,36 @@ export class MenuBackground {
     let n = tex;
     if (slot === 0) {
       // :60712-60733 逐贴图 scale/par 覆写
-      if (tex === 91) { pr = 0.27; sc = 1.2 * 2 * k; }
-      else if (tex === 173) { pr = 0.25; sc = 1.3 * 2 * k; }
-      else if (tex === 178) { pr = 0.3; sc = 1.2 * 2 * k; }
+      if (tex === 91) { pr = 0.27; sc = 1.2 * 2; }
+      else if (tex === 173) { pr = 0.25; sc = 1.3 * 2; }
+      else if (tex === 178) { pr = 0.3; sc = 1.2 * 2; }
       else if (tex === 184) { pr = 0.25; }
-      else if (tex === 282) { sc = 1.4 * 2 * k; }
+      else if (tex === 282) { sc = 1.4 * 2; }
       if (tex === 173) {
         // :60817-60824 动画四帧 251-254（counter/10%4）
         n = 251 + (Math.floor(this.bgCounter() / 10) % 4);
       }
       // :60826-60842 Y 微调
-      if (tex === 50) y -= 50 * k;
-      else if (tex === 53) y -= 100 * k;
-      else if (tex === 91 || tex === 173) y += 200 * k;
-      else if (tex === 178) y += 75 * k;
-      else if (tex === 330 || tex === 335) y -= 150 * k;
-      else if (tex === 343) y -= 300 * k;
+      if (tex === 50) y -= 50;
+      else if (tex === 53) y -= 100;
+      else if (tex === 91 || tex === 173) y += 200;
+      else if (tex === 178) y += 75;
+      else if (tex === 330 || tex === 335) y -= 150;
+      else if (tex === 343) y -= 300;
     } else if (slot === 1) {
       if (tex === 51 || tex === 54) flip = true;      // :60884 FlipHorizontally
-      if (tex === 51) y -= 50 * k;
-      else if (tex === 54) y -= 100 * k;
-      else if (tex === 329 || tex === 334) y -= 150 * k;
-      else if (tex === 342) y -= 300 * k;
+      if (tex === 51) y -= 50;
+      else if (tex === 54) y -= 100;
+      else if (tex === 329 || tex === 334) y -= 150;
+      else if (tex === 342) y -= 300;
     } else {
       // :60901-60904 槽0=91 → 本层 sc1.3×2/par0.42
-      if (FOREST_STYLES[this.style]?.trees[0] === 91) { sc = 1.3 * 2 * k; pr = 0.42; }
-      if (tex === 52) y -= 50 * k;
-      else if (tex === 55) y -= 100 * k;
-      else if (tex === 92) y += 150 * k;
-      else if (tex === 328 || tex === 333) y -= 150 * k;
-      else if (tex === 341) y -= 50 * k;
+      if (FOREST_STYLES[this.style]?.trees[0] === 91) { sc = 1.3 * 2; pr = 0.42; }
+      if (tex === 52) y -= 50;
+      else if (tex === 55) y -= 100;
+      else if (tex === 92) y += 150;
+      else if (tex === 328 || tex === 333) y -= 150;
+      else if (tex === 341) y -= 50;
       if (tex === 341) {
         // GetBackgroundRect :60674-60680：2×2 帧（counter/15%4）+ Inflate(0,-2)
         const im = this.img(341);

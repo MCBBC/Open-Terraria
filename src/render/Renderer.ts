@@ -10146,16 +10146,17 @@ export class Renderer {
       // (vy≠0 && mount.CanUseWings)——本仓 mount.CanUseWings ≡ !ridingMount,
       // mnt 非空即骑乘;hidden 旗由聚合侧随翼记录,vy 项不入记忆化键故在此判）
       const wingAgg = p.equipStats.wing;
-      // 隐藏翼显形门（★1457 :15709-15717 改 `vy!=0 && !mount.Active`——1456 旧条件
-      // 是 vy!=0 && mount.CanUseWings;1457 下骑【任何】坐骑都不再显形,仅"空中且
-      // 未骑乘"一途（R4-24 勘误:此前注释把方向写反,代码一直是对的——勿按旧注释
-      // "对齐"。与 Player.ts:3419-3425 正确注释一致）。V2b D6 差异登记转正）
-      const wingVisible = !wingAgg?.hidden || (p.vy !== 0 && !mnt);
       // R4-23（P57:26824-26834 + Mount.cs:572-580/:2550-2585）：MountData.CanUseWings
       // 是 C# bool 字段【缺省 false】,仅 SetAsRollerSkate(57-60) 置 true;未骑乘恒 true。
       // 本仓曾骑任何坐骑恒清翼（过严）。vanilla-mounts.json 仅 57-60 带该键(=true),
       // 其余缺省=false。滚轴鞋滑行分支未实装（备案）
       const mountCanWings = !mnt || MOUNT_DATA[String(mnt.type)]?.CanUseWings === true;
+      // 隐藏翼显形门（★1457 :15709-15717 改 `vy!=0 && !mount.Active`——1456 旧条件
+      // 是 vy!=0 && mount.CanUseWings;★1458 :15712 再扩为
+      // `vy!=0 && (!mount.Active || MountID.Sets.DoesNotOverrideWings[mount.Type])`
+      // ——DoesNotOverrideWings={57,58,59,60}=滚轴鞋族(MountID.cs 1458 新表),
+      // 与 CanUseWings 同集 → 骑滚轴鞋腾空时隐藏翼恢复显形（Roller Skates 翅膀修复））
+      const wingVisible = !wingAgg?.hidden || (p.vy !== 0 && mountCanWings);
       const wingSlot = wingAgg && wingVisible && mountCanWings && !merfolkClearWings && !mntHidden ? wingAgg.logic : 0;
       if (wingSlot > 0 && this.atlas) {
         const d = wingDrawOf(wingSlot);

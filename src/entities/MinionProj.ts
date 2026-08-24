@@ -2270,8 +2270,16 @@ export class MinionProj extends Entity {
       const mkb = (o0?.equipStats?.minionKB ?? 0) + (o0?.buffs?.minionKbBonus ?? 0);
       const pen0 = ((owner0 as unknown as { equipStats?: { armorPen?: number } } | null)?.equipStats?.armorPen ?? 0)
         + (projectileData(this.projId)?.armorPenetration ?? 0); // StrikeNPC :12068:玩家AP+弹幕AP 两源
+      // 击退方向（StrikeNPC 第 3 参 num40,Projectile.cs:13648-13677）：缺省=随从→敌
+      // sign;★方向表族（:13652-13660 switch 697/699/707/708/759 + ★1458 新增 1118
+      // Clay Bud"always knocks enemies away from the player"）= 玩家→敌 sign
+      // （owner.Center.X < target.Center.X ? 1 : -1,相等取 -1）。本仓 1457 曾全族
+      // 随从锚（登记项）,借 1458 批补齐 switch 族;aiStyle 15/188-191 同段族登记
+      const kbDir = MINION_PLAYER_ANCHOR_KB.has(this.projId) && owner0
+        ? (owner0.cx < en.cx ? 1 : -1)
+        : Math.sign(en.cx - this.cx);
       en.hurt(golemCrit ? res.dmg * 2 : res.dmg,
-        Math.sign(en.cx - this.cx) * (this.knockback + mkb), 0, game, pen0); // 裸kb+minionKB(:52477)——0.5 自造已摘
+        kbDir * (this.knockback + mkb), 0, game, pen0); // 裸kb+minionKB(:52477)——0.5 自造已摘
       applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
       this.attackFlash = 24;
       anyHit = true;
