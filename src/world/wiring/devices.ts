@@ -53,6 +53,9 @@ export interface DeviceCtx {
   dropItemStack(vanillaItemId: number, stack: number, px: number, py: number): void;
   /** worldSurface(部分器件判定) */
   worldSurface: number;
+  /** 魔幻日晷/月晷快进（Wiring.cs:1150/:1168 → Main.Sundialing/Moondialing :6304/:6319：
+   *  fastForwardTimeToDawn/Dusk=true + cooldown=8；冷却中/已在快进则静默） */
+  timeSkip?(kind: 'dawn' | 'dusk'): void;
 }
 
 /** 宝石块 off/on id 对(255-261 off ↔ 262-268 on,±7;Wiring.cs:863-873) */
@@ -569,6 +572,20 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 4: // 火把 frameX ±66(:1207-1213)
       flipCell(w, x, y, 66);
       return true;
+    case 356: { // 魔幻日晷（WR57:1137-1157,R8-48）：2×3 SkipWire + Sundialing()
+      const ax = x - Math.floor(st.frameX[i] % 36 / 18);
+      const ay = y - Math.floor(st.frameY[i] % 54 / 18);
+      for (let k = ax; k < ax + 2; k++) for (let l = ay; l < ay + 3; l++) w.skipCell(k, l);
+      ctx.timeSkip?.('dawn');
+      return true;
+    }
+    case 663: { // 魔幻月晷（WR57:1158-1175,R8-48）：同构 Moondialing()
+      const ax = x - Math.floor(st.frameX[i] % 36 / 18);
+      const ay = y - Math.floor(st.frameY[i] % 54 / 18);
+      for (let k = ax; k < ax + 2; k++) for (let l = ay; l < ay + 3; l++) w.skipCell(k, l);
+      ctx.timeSkip?.('dusk');
+      return true;
+    }
     case 10: // 关门 → 开(随机方向+反向,原版 :1171-1188)
       ctx.doorOpen(x, y);
       return true;

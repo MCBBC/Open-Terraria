@@ -858,14 +858,13 @@ function placeBuriedChestInner(
     // wooden flag（cs:36060-36064：tile21 && (chestStyle==0 || (chestStyle==-1 && num9==0))）
     if (tile === CHEST && (argStyle === 0 || (argStyle === undefined && num9 === 0))) flags.wooden = true;
   }
-  // 地狱门（cs:36158-36171）：tile21 && (style4 显式 || 深层无主件) → num9=4 +
-  //   地狱武器序。★同门置 flag13（cs:36167 反编译命名——消费点 = 尾段 2195
-  //   蜥蜴炉恒给 + 日耀碑 1/5 门，cs:37428/37479）
-  if (tile === CHEST && (argStyle === 4 || (gy > st.h - 205 && mainId === 0))) {
-    style = 4;
-    flags.hell = true;
-    if (!mainId) mainId = nextHellItem(gs);
-  }
+  // ★BBBBBBB（2026-08-24）NTB #59 定罪修复：门序勘误——1457 原版门序（AddBuriedChest
+  //   cs:36416 沙漠 → cs:36433 NTB 蜂箱带(flag21) → cs:36445 冰箱 → cs:36496 地狱 →
+  //   cs:36515 天空降档 → cs:36544 地牢 → cs:36582 noTraps）——JS 曾按 1456 反编译
+  //   行号排成 地狱→带→冰→天空→沙漠，沙漠池掷（SelectRandom Next(3/4)）与带掷
+  //   （Next(5)+N(-2,3)×3）**顺序颠倒** → NTB 链沙漠带交叠箱（chest4 (1604,676)）
+  //   r24 起全流相移 → 洞屋 loop③ 提炼机错位（T0>219×9）。现序=沙漠→带→冰→地狱→
+  //   天空→地牢→noTraps（地狱门体在冰门块后,见下）。
   // ---- 冰箱门（cs:36107-36130 1:1）：三析取——(tile21&&style11) ||
   // (tile467&&style24) || (无主件 && 位置 && 脚下冰系)。★原版显式传 style 11
   // 也进本池（HouseBuilder 冰屋正是此路径）——旧实现 style===undefined 单门漏此
@@ -873,6 +872,40 @@ function placeBuriedChestInner(
   // CCCCCC 诊断钩:记冰箱门判定输入+结果（i,gy,tBelow,mainId,style,fired)
   const iceDbg = (globalThis as { __swIceGate?: (i: number, gy: number, tBelow: number, mainId: number, style: number, fired: number) => void }).__swIceGate;
   if (iceDbg) iceDbg(i, gy, tBelow, mainId, style ?? -1, 0);
+  // ---- 沙漠箱门（cs:36066-36091 1:1）：三析取——(tile467&&style10) ||
+  // (tile21&&style42&&flag16) || (无主件 && ≤h-205 && IsUndergroundDesert)。
+  //  ★IsUndergroundDesert（cs:35798-35824）= y≥worldSurface && x∈[0.15W,0.85W] &&
+  //   **±15 邻域扫描 wall∈{187,216}**——曾用 gs.undergroundDesert 矩形近似：
+  //   沙漠边缘（墙带内外 ±15）矩形判定与扫描判定不同 → 漏掷沙漠主件骰
+  //   （vanilla (2783,605) 实证：邻墙 187 → 掷 1 骰后 PlaceChest 拒 =1 耗掷，
+  //   旧 JS 矩形外 0 耗掷——流分叉，2026-08-17 箱族批）。
+  const inUd = !mainId && gy >= gs.worldSurface && i > st.w * 0.15 && i < st.w * 0.85
+    && (() => {
+      if (gy > st.h - 205) return false;
+      const num = 15;
+      for (let x = i - num; x <= i + num; x++) {
+        for (let y = gy - num; y <= gy + num; y++) {
+          if (!st.inBounds(x, y)) continue;
+          const wl = st.wall[st.idx(x, y)];
+          if (wl === 187 || wl === 216) return true;
+        }
+      }
+      return false;
+    })();
+  if ((tile === CHEST2 && argStyle === 10) || inUd) {
+    tile = CHEST2;
+    style = 10;
+    flags.desert = true;
+    // cs:36084：分位点用蜂巢**实际雕刻范围**（desertHiveHigh/Low，PlaceClustersArea
+    // 逐点收缩），非静态矩形 ±10（曾用 ud.y0/y1 → 分层界偏移）
+    const deep = gy > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7;
+    if (!mainId) {
+      mainId = deep
+        ? [4061, 4062, 4276][rng.int(0, 2)]
+        : [4056, 4055, 4262, 4263][rng.int(0, 3)];
+    }
+  }
+
   // ★AAAAAA：cs:36112 冰系地基四元 {147,161,162,197}——197 冻胶块曾漏。
   // ★UUUUUU（cs:36093-36101）：NTB 雪冰带支 flag21——Next(5)+Next(-2,3) **无条件先掷**
   //   （ntb && !remix && !dstarve 时），带门内再 Next(-2,3)（短路）；命中=蜂蜜世界
@@ -915,6 +948,15 @@ function placeBuriedChestInner(
       }
     }
   }
+  // ---- 地狱门（1457 cs:36496）：tile21 && (style4 显式 || 深层无主件) → num9=4 +
+  //   地狱武器序。★同门置 flag13（消费点 = 尾段 2195 蜥蜴炉恒给 + 日耀碑 1/5 门）。
+  //   ★原版位在冰门后（num10 已可能被冰/沙漠池占用 → 深层箱若 flag21 命中则冰池
+  //   先占,地狱门 num10==0 失败不发地狱物——1:1 保持此 quirky 语义）。
+  if (tile === CHEST && (argStyle === 4 || (gy > st.h - 205 && mainId === 0))) {
+    style = 4;
+    flags.hell = true;
+    if (!mainId) mainId = nextHellItem(gs);
+  }
   // ---- 天空箱降档门（cs:36180-36189，原版位于 hell 门后）：style12 的落定格
   //   （i-1, gy-1）邻墙非 244 → num9=0 + num10=0 + wooden flag（地表蓄水池支的
   //   天空箱坠到地表土墙带走此门——(532,234) 金标 sty0/木制回旋镖 loot vs 本仓
@@ -929,39 +971,7 @@ function placeBuriedChestInner(
       flags.sky = true;
     }
   }
-  // ---- 沙漠箱门（cs:36066-36091 1:1）：三析取——(tile467&&style10) ||
-  // (tile21&&style42&&flag16) || (无主件 && ≤h-205 && IsUndergroundDesert)。
-  //  ★IsUndergroundDesert（cs:35798-35824）= y≥worldSurface && x∈[0.15W,0.85W] &&
-  //   **±15 邻域扫描 wall∈{187,216}**——曾用 gs.undergroundDesert 矩形近似：
-  //   沙漠边缘（墙带内外 ±15）矩形判定与扫描判定不同 → 漏掷沙漠主件骰
-  //   （vanilla (2783,605) 实证：邻墙 187 → 掷 1 骰后 PlaceChest 拒 =1 耗掷，
-  //   旧 JS 矩形外 0 耗掷——流分叉，2026-08-17 箱族批）。
-  const inUd = !mainId && gy >= gs.worldSurface && i > st.w * 0.15 && i < st.w * 0.85
-    && (() => {
-      if (gy > st.h - 205) return false;
-      const num = 15;
-      for (let x = i - num; x <= i + num; x++) {
-        for (let y = gy - num; y <= gy + num; y++) {
-          if (!st.inBounds(x, y)) continue;
-          const wl = st.wall[st.idx(x, y)];
-          if (wl === 187 || wl === 216) return true;
-        }
-      }
-      return false;
-    })();
-  if ((tile === CHEST2 && argStyle === 10) || inUd) {
-    tile = CHEST2;
-    style = 10;
-    flags.desert = true;
-    // cs:36084：分位点用蜂巢**实际雕刻范围**（desertHiveHigh/Low，PlaceClustersArea
-    // 逐点收缩），非静态矩形 ±10（曾用 ud.y0/y1 → 分层界偏移）
-    const deep = gy > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7;
-    if (!mainId) {
-      mainId = deep
-        ? [4061, 4062, 4276][rng.int(0, 2)]
-        : [4056, 4055, 4262, 4263][rng.int(0, 3)];
-    }
-  }
+
 
   // ---- 位置地牢门（cs:36211-36213）：tile21 && style≠0 && IsDungeon(i,gy)
   //   （cs:35798 同款：y≥worldSurface && wallDungeon[wall(落定格)]）→ flag9 地牢战利品

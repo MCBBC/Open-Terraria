@@ -113,7 +113,7 @@ export function genSolidType(t: number): boolean {
  *  （碰撞语义），凡语义上要读「生成期 Main.tileSolid」的调用方（Pots 首实心门/
  *  PlacePot 地面门、SpreadGrass 3×3 实心扫描等）须经由本包装——尾部清剿批
  *  2026-08-17。 */
-const VAN_TILE_SOLID_EXTRA = new Set([19, 239, 380, 427, 435, 436, 437, 438, 439]);
+export const VAN_TILE_SOLID_EXTRA = new Set([19, 239, 380, 427, 435, 436, 437, 438, 439]);
 const SHEET_OF_TYPE = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;

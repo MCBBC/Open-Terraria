@@ -3805,6 +3805,8 @@ export class Game implements GameHooks {
     // 电路系统(Wiring.cs 移植):器件表 + 触发源登记(测重板 428/感应器 423)
     this.wiring = new Wiring(w.store);
     this.wiring.worldSurface = w.groundLevel;
+    // HitSwitch 触发音（Wiring.cs 每支 PlaySound(28);R8-51 接触触发不再静音）
+    this.wiring.hitSwitchSound = (hx, hy) => this.sfx.play('tink', 1, hx * TILE, hy * TILE);
     // NPC.downedPlantBoss（Wiring 蜥蜴砖致动/神庙传送器限制解除门，Wiring.cs:3216/:1554）
     this.wiring.planteraDowned = !!w.flags['downed_262'];
     attachDevices(this.wiring, this.makeDeviceCtx());
@@ -3889,7 +3891,9 @@ export class Game implements GameHooks {
                                     // 交运行时收敛时，前几秒合并事件集中爆发，不限流会连成轰鸣
     this.liquid.liquidChangeSound = (x, y, a, b) => {
       if (lcTick !== this.tickCount) { lcTick = this.tickCount; lcCount = 0; }
-      if (++lcCount > 2) return;    // 每 tick 最多 2 声（载入窗另有 suppress 门，此处管运行期）
+      // ★R8-26:vanilla 运行期无频控（Liquid.cs:1366-1369 每次合并都响）——节流仅限
+      // 载入静音窗未解除的收敛期（suppress 解除后运行期不吞声）
+      if (++lcCount > 2 && this.sfx.suppress) return;
       const lo = Math.min(a, b), hi = Math.max(a, b);
       if (lo < 1 || hi > 4 || lo === hi) return; // 同类/越界不发声
       const px = x * TILE + 8, py = y * TILE + 8;   // :4582 x*16+count*8（count 取 1）
@@ -5448,6 +5452,9 @@ export class Game implements GameHooks {
     // 联机访客不本地模拟（原版 netMode==1 客户端同语义）：权威端（中继房房主/
     // 服务器房 SimHost）跑模拟经 module0 广播，本端 netApplyLiquid 直写收敛
     if (this.tickCount % 2 === 0 && (!this.net || this.net.policy.isHost)) {
+      // 服务器档调参（Liquid.cs:995-1013 netMode==2）：房主/SimHost 按活跃玩家数
+      // 刷新 cycles=10+n/3、curMaxLiquid=25000−n×250、kill 阈=10+n/3（R8-25）
+      if (this.net?.policy.isHost) this.liquid.applyServerTuning(1 + this.net.players.size);
       this.liquid.step();
       // 液体直接写数组绕过 store 监听：有活动液体时手动通知光照衰减变化
       if (this.liquid.numLiquid > 0) this.lighting.liquidDirty = true;
@@ -15761,8 +15768,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  拉杆 132 等），再 tripWire 沿四色导线 BFS 传播信号触发沿线器件 */
   private toggleSwitch(x: number, y: number, type: number): void {
     void type;
-    this.wiring?.hitSwitch(x, y);
-    this.sfx.play('tink');
+    this.wiring?.hitSwitch(x, y);   // 音效由 hitSwitchSound 钩统一播（vanilla HitSwitch 内播）
     this.input.rightDown = false;
   }
 
@@ -16131,9 +16137,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     DD2_EVENT_HOOKS.difficulty = () => this.world.oldOnesArmy.ongoingDifficulty;
   }
 
-  /** 压力板 135:踩上瞬间 HitSwitch(Collision.SwitchTiles objType=5,Player.cs:28485) */
+  /** 压力板 135:踩上瞬间 HitSwitch(Collision.SwitchTiles objType=5,Player.cs:28485)
+   *  ——门 whoAmI==myPlayer && !shimmering(:28484):微光化态不触板 */
   private checkPressurePlates(): void {
     const p = this.player;
+    if (p.shimmering) return;
     // 复用 Set(2026-08 审计 G9:此前每 tick new Set + [...spread],60Hz 恒定分配)
     const pressed = this._platePressed; pressed.clear();
     this.switchTilesScan(p, 5, this.plateLatch, pressed);
@@ -16292,8 +16300,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (const en of this.entities.enemies) npcScan(en);
     // 弹幕:巨石族(vid 99 ∈ 白名单)走 objType 3(可触发风格 5 板);
     // 其余 tileCollide 弹幕走 objType 4(地雷 210/感应垫板 442;Projectile.cs:19978
-    // HandleMovement 全量,owner==myPlayer 单机恒真)
+    // HandleMovement 全量,owner==myPlayer 单机恒真;:19977 tileCollide 门——
+    // 穿墙弹 noTileCollide 不扫)
     for (const p of this.entities.projectiles) {
+      const pe = p as unknown as { noTileCollide?: boolean; noTile?: boolean };
+      if (pe.noTileCollide || pe.noTile) continue;
       const kind = (p as TrapShot).kind;
       if (kind === 'boulder') {
         this.switchTilesScan(p as { x: number; y: number; w: number; h: number; id: number }, 3, latch, pressed);
@@ -16670,6 +16681,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private makeDeviceCtx() {
     return {
       worldSurface: this.world.groundLevel,
+      // 魔幻日晷/月晷导线触发（Wiring.cs:1150/:1168 → Main.Sundialing :6304 /
+      // Moondialing :6319;R8-48）——门与右键路径（:15391）同款
+      timeSkip: (kind: 'dawn' | 'dusk') => {
+        if (kind === 'dawn') {
+          if (this.world.fastForwardTimeToDawn || this.world.sundialCooldown !== 0) return;
+          this.world.fastForwardTimeToDawn = true;
+          this.world.sundialCooldown = 8;
+        } else {
+          if (this.world.fastForwardTimeToDusk || this.world.moondialCooldown !== 0) return;
+          this.world.fastForwardTimeToDusk = true;
+          this.world.moondialCooldown = 8;
+        }
+        this.sfx.play('drink'); // SoundID.Item4（右键路径同款）
+      },
       dropItem: (vanillaItemId: number, px: number, py: number) => {
         const key = VANILLA_ITEM_KEY_BY_ID[vanillaItemId];
         if (!key) return;

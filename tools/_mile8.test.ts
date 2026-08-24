@@ -21,8 +21,23 @@ const W = Number(process.env.SW_M8_W ?? 4200), H = Number(process.env.SW_M8_H ??
 const NOCACHE = process.env.SW_M8_NOCACHE === '1';
 // PPPPP 批旁路参：彩蛋种子旗标直注（S0-1 seedFlags 通道）——逗号分隔旗标名
 // （如 SW_M8_FLAGS=theConstant），与 SW_M8_SEED 数字种子配套（对拍秘密种子链用）
+// ★BBBBBBB（2026-08-24）键勘误：值必须是 SeedFlags **字段名**（驼峰），直注无解析——
+//   曾用触发词 'notraps'（≠noTraps）键不存在被静默忽略 → NOTRAPS 链 mile8 恒跑
+//   普通世界（0..57 假绿、#58 雕像×15 全缺）。别名表把常用触发词映射到字段名；
+//   精确字段名（theConstant/notTheBees 等）不受影响。getfixedboi 是组合触发词
+//   （置 7 件），不在此表——组合链请直接传全字段。
+const FLAG_ALIAS: Record<string, string> = {
+  notraps: 'noTraps',
+  constant: 'theConstant', theconstant: 'theConstant',
+  notthebees: 'notTheBees', ntb: 'notTheBees',
+  tenthanniversary: 'tenthAnniversary', celebrationmk10: 'tenthAnniversary',
+  fortheworthy: 'getGoodWorld', ftw: 'getGoodWorld',
+  dontdigup: 'remix', drunkworld: 'drunkWorld',
+};
 const M8_FLAGS: Record<string, boolean> = {};
-for (const f of (process.env.SW_M8_FLAGS ?? '').split(',').filter(Boolean)) M8_FLAGS[f] = true;
+for (const f of (process.env.SW_M8_FLAGS ?? '').split(',').filter(Boolean)) {
+  M8_FLAGS[FLAG_ALIAS[f.toLowerCase()] ?? f] = true;
+}
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;

@@ -26,6 +26,7 @@
 // 蜂蜜交互阈值 32→24（LiquidCheck 统一），AddWater/WaterCheck 的水死/岩浆死表
 // （Main.cs:7182+ 提取），panic 模式（Liquid.cs:1040-1070），岩浆 3×3 烧草精确 type 映射
 import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
+import { UnifiedRandom } from '../../core/rng';
 import type { World } from '../World';
 import type { RNG } from '../../core/rng';
 import { genSquareTileFrame } from '../gen/vanilla/FinalCleanupPass';
@@ -155,6 +156,8 @@ export class LiquidSim {
    * round0 更新次序/侧流事件全漂移（#97 x86 实证 wc 后首分叉） */
   private cycles = 10;
   private curMaxLiquid = 25000;
+  /** kill 阈（单机 8;服务器 10+玩家/3,applyServerTuning 刷新——Liquid.cs:995/1008） */
+  private serverKillThreshold = 8;
   private wetCounter = 0;
   /** 读档沉降：quickSettle=true 时 cycles=1 全量处理、下灌快速补满（WorldFile.cs:365-389 / Main.cs:12251） */
   quickSettle = false;
@@ -451,8 +454,6 @@ export class LiquidSim {
     this.worldGenIgnoreIds = bySheet(new Set([10, 190, 191, 192]));
     this.id546 = bySheet(new Set([546])).values().next().value ?? -1;
     this.id379 = bySheet(new Set([379])).values().next().value ?? -1;
-    // genRand 初态：world.seed 派生（避免与生成管线的 genRand 状态纠缠，仅求双路径一致）
-    this.genState = (world.seed ^ 0x9e3779b9) | 0;
     // 挖掘/放置唤醒：原版 SquareTileFrame 会对 3×3 内每格 TileFrame→AddWater
     // （TileFrame cs:82083-82086）。★该 AddWater 带 !generatingWorld 门——
     //  生成期两次沉降（#49/#97）里烧除/落块/睡莲的 setTile 一律不唤醒液体；
@@ -494,6 +495,15 @@ export class LiquidSim {
   /** 运行期画质档分片数（Main.cs:12240-12243：17-10*gfxQuality；高质量单机=7）。
    *  生成/读档沉降保持 ReInit 态 10（构造默认）——Game 在创建运行实例后调用 */
   setRuntimeCycles(c = 7): void { this.cycles = c; }
+
+  /** 服务器档调参（Liquid.cs:995-1013 netMode==2）：cycles=10+玩家/3、
+   *  curMaxLiquid=25000−玩家×250、kill 阈=10+玩家/3。单机保持 7/25000/8
+   *  （Main.cs:17256-17257）。SimHost 房主按活跃玩家数每 tick 刷新 */
+  applyServerTuning(activePlayers: number): void {
+    this.cycles = 10 + Math.floor(activePlayers / 3);
+    this.curMaxLiquid = 25000 - activePlayers * 250;
+    this.serverKillThreshold = 10 + Math.floor(activePlayers / 3);
+  }
 
   /** 丢弃模拟器：预沉降临时实例调用，停止响应唤醒 */
   dispose() {
@@ -576,7 +586,8 @@ export class LiquidSim {
 
   updateLiquid() {
     const st = this.world.store;
-    const killThreshold = 8; // 单机 num（1456 Liquid.cs:995）
+    // 单机 num=8（1456 Liquid.cs:995）；服务器档由 applyServerTuning 刷新（:999-1012）
+    const killThreshold = this.serverKillThreshold;
     // Liquid.cs:993：整个调度首尾 tilesIgnoreWater(true/false)——巨石家族/546 在
     // 轮期内可通行（含快速沉降轮；panic 早退路径原版不恢复,靠下次调用入口自愈）
     this.tilesIgnoreWater(true);
@@ -589,7 +600,7 @@ export class LiquidSim {
 
   private updateLiquidInner() {
     const st = this.world.store;
-    const killThreshold = 8;
+    const killThreshold = this.serverKillThreshold;
     // panic 模式（1456 Liquid.cs:1019-1070）：缓冲 ≥45000 持续 3600 次未解 →
     // 自底向上逐行 QuickWater 强制沉降，每次调用处理 5 行，到顶后 WaterCheck 退出
     if (!this.quickSettle) {
@@ -1015,8 +1026,12 @@ export class LiquidSim {
       // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill
       const act = st.flags[i5] !== 0;
       if (act && !this.obsidianKillIds.has(st.type[i5])) return;
+      // ★BBBBBBB（CONST #49 定罪修复）：vanilla 合并支只清 liquid **不清 liquidType**
+      //   （Liquid.cs:1271 `tile5.liquid = 0`，无 liquidType(0)）——干格残型是原版
+      //   动力学输入（Update 邻居唤醒门 `tile.lava()` 裸读型位,Liquid.cs:497-510）。
+      //   JS 曾清型 → 干格残型丢失 → 唤醒集/交互集分歧（ul0 beat1161 (689,786)
+      //   v t1/j t0 首差）→ 队列 ±1（ql0 row82 v4920/j4919）→ 沉降级联。
       st.liquid[i5] = 0;
-      st.liquidType[i5] = 0;
       this.createMergeTile(x, y, type, 1, mergeType);
     } else {
       if (dq <= 0 || dt === 1) return;
@@ -1031,8 +1046,9 @@ export class LiquidSim {
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
       const type = dt === 4 ? AETHERIUM : dt === 3 ? HONEY_BLOCK : OBSIDIAN;
-      st.liquid[i5] = 0; st.liquidType[i5] = 0;
-      st.liquid[id] = 0; st.liquidType[id] = 0;
+      // ★BBBBBBB 同修 1：合并支类型保留（Liquid.cs:1319-1320 只清 liquid）
+      st.liquid[i5] = 0;
+      st.liquid[id] = 0;
       this.createMergeTile(x, y + 1, type, 1, dt);
     }
   }
@@ -1081,8 +1097,8 @@ export class LiquidSim {
       // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill（火把/植物被顶掉，非 decor 近似）
       const act = st.flags[i5] !== 0;
       if (act && !this.obsidianKillIds.has(st.type[i5])) return;
+      // ★BBBBBBB 同 lavaCheck：合并支类型保留（Liquid.cs:1271 只清 liquid）
       st.liquid[i5] = 0;
-      st.liquidType[i5] = 0;
       this.createMergeTile(x, y, type, 2, mergeType);
     } else {
       if (dq <= 0 || dt === 2) return;
@@ -1100,8 +1116,9 @@ export class LiquidSim {
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
       const type = dt === 4 ? AETHERIUM : dt === 3 ? CRISPY_HONEY : OBSIDIAN;
-      st.liquid[i5] = 0; st.liquidType[i5] = 0;
-      st.liquid[id] = 0; st.liquidType[id] = 0;
+      // ★BBBBBBB 同 lavaCheck：合并支类型保留（Liquid.cs:1319-1320 只清 liquid）
+      st.liquid[i5] = 0;
+      st.liquid[id] = 0;
       this.createMergeTile(x, y + 1, type, 2, dt);
     }
   }
@@ -1130,8 +1147,8 @@ export class LiquidSim {
       // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill
       const act = st.flags[i5] !== 0;
       if (act && !this.obsidianKillIds.has(st.type[i5])) return;
+      // ★BBBBBBB 同 lavaCheck：合并支类型保留（Liquid.cs:1271 只清 liquid）
       st.liquid[i5] = 0;
-      st.liquidType[i5] = 0;
       this.createMergeTile(x, y, type, 3, mergeType);
     } else {
       if (dq <= 0 || dt === 3) return;
@@ -1146,8 +1163,9 @@ export class LiquidSim {
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; } // 1456 统一 24
       const type = dt === 4 ? AETHERIUM : dt === 2 ? CRISPY_HONEY : HONEY_BLOCK;
-      st.liquid[i5] = 0; st.liquidType[i5] = 0;
-      st.liquid[id] = 0; st.liquidType[id] = 0;
+      // ★BBBBBBB 同 lavaCheck：合并支类型保留（Liquid.cs:1319-1320 只清 liquid）
+      st.liquid[i5] = 0;
+      st.liquid[id] = 0;
       this.createMergeTile(x, y + 1, type, 3, dt);
     }
   }
@@ -1178,8 +1196,8 @@ export class LiquidSim {
       // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill
       const act = st.flags[i5] !== 0;
       if (act && !this.obsidianKillIds.has(st.type[i5])) return;
+      // ★BBBBBBB 同 lavaCheck：合并支类型保留（Liquid.cs:1271 只清 liquid）
       st.liquid[i5] = 0;
-      st.liquidType[i5] = 0;
       this.createMergeTile(x, y, AETHERIUM, 4, hNear ? 3 : lNear ? 2 : 1);
     } else {
       if (dq <= 0 || dt === 4) return;
@@ -1194,8 +1212,9 @@ export class LiquidSim {
       if (belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
-      st.liquid[i5] = 0; st.liquidType[i5] = 0;
-      st.liquid[id] = 0; st.liquidType[id] = 0;
+      // ★BBBBBBB 同 lavaCheck：合并支类型保留（Liquid.cs:1319-1320 只清 liquid）
+      st.liquid[i5] = 0;
+      st.liquid[id] = 0;
       this.createMergeTile(x, y + 1, AETHERIUM, 4, dt);
     }
   }

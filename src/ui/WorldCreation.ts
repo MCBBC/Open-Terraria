@@ -3,6 +3,7 @@
 import { parseSeed } from '../world/gen/SeedEasterEggs';
 import { randomWorldName } from '../i18n/RandomText';
 import { Lang } from '../i18n/Lang';
+import { ensureVanillaKit } from './vanillaKit';
 
 export interface WorldCreationFlow {
   onCreate(cfg: { name: string; seed: string; w: number; h: number; /** 尺寸档 0 小/1 中/2 大（SIZES 下标；GenConfig.size 直传，W/H 与之同源派生） */ size: number; difficulty: number; evil: -1 | 0 | 1 }): void;
@@ -35,10 +36,8 @@ const CSS = `
 .sw-wc-panel {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 620px; max-width: 96vw; z-index: 20; cursor: auto;
-  background: linear-gradient(160deg, #2b3664, #1c2444);
-  border: 2px solid #7d92d6; border-radius: 6px; padding: 14px 16px; color: #e8e8f4;
+  color: #e8e8f4; padding: 10px 4px;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
-  box-shadow: 0 8px 40px rgba(0,0,0,.6);
 }
 .sw-wc-title { text-align: center; font-size: 18px; color: #ffe8a0; margin-bottom: 10px;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
@@ -57,21 +56,21 @@ const CSS = `
 .sw-wc-opts { display: flex; gap: 8px; }
 .sw-wc-opt {
   display: flex; align-items: center; gap: 6px; flex: 1; justify-content: center;
-  background: #232c52; border: 1px solid #3a4680; border-radius: 4px;
-  padding: 6px 4px; cursor: pointer; font-family: inherit; color: #e8e8f4;
+  background: rgb(44, 57, 106); border: 2px solid #3e5195;
+  padding: 4px 4px; cursor: pointer; font-family: inherit; color: #e8e8f4;
 }
 .sw-wc-opt img { width: 32px; height: 32px; image-rendering: pixelated; }
-.sw-wc-opt.active { outline: 2px solid #ffd76e; background: #2c3768; }
+.sw-wc-opt:hover { background: rgb(73, 94, 171); border-color: #ffe745; }
+.sw-wc-opt.active { outline: 2px solid #ffe745; background: rgb(73, 94, 171); }
 .sw-wc-desc { min-height: 34px; color: #9aa2cc; font-size: 12px; }
 .sw-wc-side { width: 132px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .sw-wc-preview { width: 120px; height: 120px; image-rendering: pixelated;
   background: #10142c; border: 2px solid #4a5aa0; border-radius: 4px; }
 .sw-wc-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 .sw-wc-footer button {
-  background: #3a4680; color: #e8e8f4; border: 1px solid #7d92d6; border-radius: 4px;
-  padding: 6px 20px; cursor: pointer; font-family: inherit;
+  color: #e8e8f4; padding: 8px 22px; cursor: pointer; font-family: inherit;
+  font-size: 15px;
 }
-.sw-wc-footer button.primary { background: #5a6ac0; color: #fff; }
 `;
 
 const SEED_ICON: Record<string, string> = {
@@ -91,6 +90,7 @@ export class WorldCreationPanel {
   private sel = { ...WorldCreationPanel.lastSel };
 
   constructor(parent: HTMLElement, private flow: WorldCreationFlow) {
+    ensureVanillaKit();
     if (!document.getElementById('sw-wc-style')) {
       const style = document.createElement('style');
       style.id = 'sw-wc-style';
@@ -98,7 +98,7 @@ export class WorldCreationPanel {
       document.head.appendChild(style);
     }
     this.panel = document.createElement('div');
-    this.panel.className = 'sw-wc-panel';
+    this.panel.className = 'sw-wc-panel sw-vpanel';
     this.panel.innerHTML = `
       <div class="sw-wc-title">${Lang.text('LegacyMenu.47')}</div>
       <div class="sw-wc-body">
@@ -112,7 +112,7 @@ export class WorldCreationPanel {
         </div>
         <div class="sw-wc-side"><canvas class="sw-wc-preview" width="84" height="84"></canvas></div>
       </div>
-      <div class="sw-wc-footer"><button data-act="back">${Lang.text('Mods.SandboxWorld.WorldCreation.Back')}</button><button data-act="create" class="primary">${Lang.text('Mods.SandboxWorld.WorldCreation.Create')}</button></div>
+      <div class="sw-wc-footer"><button data-act="back" class="sw-vbtn">${Lang.text('UI.Back')}</button><button data-act="create" class="sw-vbtn">${Lang.text('UI.Create')}</button></div>
     `;
     (this.panel.querySelector('[data-f=name]') as HTMLInputElement).value = randomWorldName();
     this.desc = this.panel.querySelector('.sw-wc-desc')!;

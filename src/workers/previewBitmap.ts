@@ -5,8 +5,11 @@ import type { TileStore } from '../world/TileStore';
 import { mapColor24 } from '../render/MapColors';
 
 /** 降采样：每个输出像素取源格 (x*fx, y*fy) 的 mapColor24（tile>liquid>wall 优先级，
- *  MapColors.mapColor24 已封装）。中世界 6400×1800 → 640×180×4 ≈ 460KB/帧 */
-export function renderPreviewBitmap(st: TileStore, maxW = 640): {
+ *  MapColors.mapColor24 已封装）。bg = 世界面上下文（对齐游戏内小地图背景分层）。
+ *  中世界 6400×1800 → 640×180×4 ≈ 460KB/帧（maxW 1024 ≈ 1.2MB/帧——DPR2 下
+ *  显示宽 ~1040 设备像素，640 源会被放大糊掉；微光湖等小地物也靠分辨率保住） */
+export function renderPreviewBitmap(st: TileStore, maxW = 1024,
+  bg?: { groundLevel: number; rockLevel: number }): {
   width: number; height: number; rgba: Uint8ClampedArray;
 } {
   const fx = Math.max(1, Math.ceil(st.w / maxW));
@@ -16,7 +19,7 @@ export function renderPreviewBitmap(st: TileStore, maxW = 640): {
   const rgba = new Uint8ClampedArray(width * height * 4);
   for (let oy = 0; oy < height; oy++) {
     for (let ox = 0; ox < width; ox++) {
-      const c = mapColor24(st, ox * fx, oy * fy);
+      const c = mapColor24(st, ox * fx, oy * fy, bg);
       const i = (oy * width + ox) * 4;
       rgba[i] = (c >> 16) & 255;
       rgba[i + 1] = (c >> 8) & 255;

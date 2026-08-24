@@ -26,6 +26,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
+import { genSolidType } from './GenSolid';
 import { matureHerbPlants } from './StructuresPass';
 import { growTree } from './TreePass';
 import { genSquareTileFrame, genTileFrame, genKillTile } from './FinalCleanupPass';
@@ -70,8 +71,9 @@ const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
 /** WallID.Sets.AllowsPlantsToGrow（WallID.cs:58）——PlaceTile(3) 的墙门（含 0=无墙） */
 const WALL_ALLOWS_PLANTS = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317,
   63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80]);
-/** Main.wallHouse（Main.cs 全量，含 153-166 循环段）——Vines 444 凹龛墙门 */
-const WALL_HOUSE = new Set([
+/** Main.wallHouse（Main.cs 全量，含 153-166 循环段）——Vines 444 凹龛墙门 /
+ *  CaveWallsInEnclosedSpaces 重试门（cs:17940,R8-2） */
+export const WALL_HOUSE = new Set([
   224, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340,
   341, 342, 343, 344, 345, 346, 60, 225, 226, 227, 231, 232, 233, 235, 234, 312, 313, 237, 238,
   239, 240, 173, 183, 179, 184, 181, 186, 168, 169, 142, 143, 144, 149, 151, 150, 152, 145, 148,
@@ -164,9 +166,18 @@ const bottomSlope = (st: TileStore, x: number, y: number): boolean => {
   const s = st.slope[st.idx(x, y)];
   return s === 3 || s === 4;
 };
-/** 生成期 KillTile（cs:63559）：仅清除活性/类型（noItem=true），保留液体 */
-const killTile = (st: TileStore, x: number, y: number): void => {
+/** 生成期 KillTile（cs:63559）：仅清除活性/类型（noItem=true），保留液体。
+ *  ★CCCC 批（2026-08-24）补 cs:63904 掷：蛛网(51)带蜘蛛墙(62) → 1×Next(4)
+ *  （结果只改 noItem,生成期恒 noItem——纯流位掷）。本文件 killTile 消费方=
+ *  藤蔓 pass 蜂巢凹龛 2×2 击杀（NTB 丛林蛛网带高发,(189,784-785)/(190,784-785)
+ *  四连掷实证,vanilla span A3 与 a4 交错）与 CheckVines 失锚级联（杀藤族,
+ *  type 恒非 51 → 掷门恒假,零扰动）。尘段/裂砖链/404/ShouldTileSurvive 对本
+ *  文件击杀族（藤/蛛网/植物/蜂巢）全零掷,维持简化;HalfBrickPass.killTile 全
+ *  分派引擎另在（勿混用——本文件级联走 genSquareTileFrame 显式补）。 */
+const killTile = (st: TileStore, x: number, y: number, rng?: RNG): void => {
   if (!activeAt(st, x, y)) return;
+  // cs:63904（rng 缺省=CheckVines 藤族级联路径——藤 type 恒非 51,掷门不可达）
+  if (rng && SHEET[st.type[st.idx(x, y)]] === 51 && st.wall[st.idx(x, y)] === 62) rng.nextInt(4);
   st.setTileSilent(x, y, 0);
 };
 
@@ -231,7 +242,13 @@ function checkVinesAt(st: TileStore, x: number, y: number): void {
  *  m20260811 #89 残 5 格实证：凹龛击杀 2×2 陶罐一角 → vanilla case 28 CheckPot
  *  整组杀（(4889,744-745) 三格 + (4741,778-779) 藤入清位），vines-only 级联漏。 */
 function killTileVineCascade(st: TileStore, rng: RNG, x: number, y: number): void {
-  killTile(st, x, y);
+  // ★CCCC 批（2026-08-24）：vanilla KillTile 头门 `!tile.active() → return`（cs:63568）
+  //   =非活性格零写零级联——旧实现 killTile 早退后仍无条件 genSquareTileFrame，
+  //   九宫 TileFrame 把邻域**非活性残格**的坡位清掉（cs:82080-84 !active 清坡），
+  //   而原版蜂巢凹龛压在残格上时残格坡位保留（NTB 链 #89 S3>0×51 等 77 格：
+  //   444/225/60 活性块带残格坡位,vanilla 保留 JS 清零）。
+  if (!activeAt(st, x, y)) return;
+  killTile(st, x, y, rng);
   genSquareTileFrame(st, rng, x, y);
 }
 
@@ -777,7 +794,10 @@ function stonePatch(st: TileStore, rng: RNG, gs: GenState, X: number, Y: number)
         }
         if (d < n4) {
           const t = st.type[kk];
-          if (TILE_DEFS[t]?.solid) st.type[kk] = stone;                // 仅实心格转石
+          // ★R8-11:原版读可变 Main.tileSolid（cs:10299）——本 pass 时点 162/232 已被
+          // CaveWallsInEnclosedSpaces 头翻转（17821-17823），静态 TILE_DEFS.solid 会把
+          // 薄冰/木刺误转石。genSolidType=GenSolid 可变表（本文件其余判定同口径）
+          if (genSolidType(t)) st.type[kk] = stone;                    // 仅实心格转石
         }
       }
     }

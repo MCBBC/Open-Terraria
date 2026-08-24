@@ -4120,9 +4120,12 @@ export class Renderer {
     let aQ = 1;
     if (this.lighting) {
       const [lr, lg, lb] = this.lighting.lightAt(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE));
-      aQ = Math.round((Math.max(lr, lg, lb) / 255) * 7) / 7;
+      // ★R8-40:vanilla Brightness = GlobalBrightness×(X+Y+Z)/3（LT57:118-122 三通道
+      // 平均,非 max 通道）——蓝火把 (0,0.1,1.3) 下原版 ≈0.56、max 读法 ≈1.56
+      aQ = Math.round(((lr + lg + lb) / (3 * 255)) * 7) / 7;
     }
-    if (aQ <= 0) aQ = 0.15; // 全黑也留一点可见度（光照区外 lightAt=0 的兜底）
+    // 全黑也留一点可见度（光照区外 lightAt=0 的兜底）——自造辅助,登记（原版全黑暗条）
+    if (aQ <= 0) aQ = 0.15;
     // 颜色（:21766-21778）：n=hp%-0.1；>0.5 绿满红减，否则红满绿增
     let n = hp / maxHp - 0.1;
     n = Math.max(0, Math.min(1, n));

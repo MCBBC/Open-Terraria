@@ -16,6 +16,7 @@ import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
 import { spreadWall2 } from './GrassWallPass';
+import { WALL_HOUSE } from './SurfaceDecorPasses';
 import { flipGenSolid, genSolidType } from './GenSolid';
 
 const STONE = TILE_BY_KEY['stone']!;
@@ -24,7 +25,12 @@ const SHROOM = TILE_BY_KEY['v_70_mushroom_grass_block']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const ICE = idsByVanillaSheet(147, 161);
 const SANDY = idsByVanillaSheet(53, 396, 397);
-/** CaveWallVariety 的 IsTouching 无效集（cs:16826-16835：冰/沙/蘑菇草/191） */
+/** CaveWallVariety 的 IsTouching 无效集（cs:16826-16835：冰/沙/蘑菇草/191）。
+ *  ★R8-1 复核**驳回**（蓝队）：石支两级 IsTouching 是 Chain=AND 串联
+ *  （GenAction.UnitApply 成功才接 NextAction,Modifiers.cs:283-321/Actions.cs:624），
+ *  而第二级六元素集 ⊂ 第一级七元素集 → 复合谓词恒等价于六元素集,
+ *  **第一级的 60 是原版死代码**——石/丛两支有效无效集相同,勿补 60
+ *  （曾试补 → 石腔斑误否决 + PlaceWall 掷流移位全图漂） */
 const INVALID_TOUCH = idsByVanillaSheet(147, 161, 396, 397, 70, 191);
 /** ModShapes.OuterOutline POINT_OFFSETS 顺序（cs:ModShapes.cs:30-34） */
 const OUTLINE_OFFSETS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const;
@@ -175,7 +181,10 @@ export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState): void {
       x = rng.int(200, st.w - 201);
       y = rng.int(gs.worldSurface, maxY2 - 1);
       const wl = st.wall[st.idx(x, y)];
-      if (wl !== 244) c = wl === 64 ? countTiles(st, x, y, true, false).count : 0;
+      // ★R8-2:补 !wallHouse 门（cs:17940）——房屋墙（UndergroundHouses :17081 先行
+      // 已建）既不清零也不重计数,num13 保持上一轮值(上一轮合法即立即退出并在
+      // 房屋墙处 Spread.Wall2);曾漏门 → 房屋墙被当普通墙清零续掷
+      if (!WALL_HOUSE.has(wl) && wl !== 244) c = wl === 64 ? countTiles(st, x, y, true, false).count : 0;
     }
     if (tries < 1000) spreadWall2(st, x, y, 15);
   }
@@ -273,10 +282,13 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
         cells.add(qi);
         quota--;
         // IsTouching(8 向，cs:16828-16833)：触碰无效集 → foundInvalidTile
+        // （★R8-1 复核驳回:石支两级 IsTouching=AND 且六元素集 ⊂ 七元素集,
+        //   有效谓词=六元素集,两支同表——见文件头 INVALID_TOUCH 注释）
         if (!invalid) {
+          const touch = INVALID_TOUCH;
           for (const [dx, dy] of [[0, -1], [1, 0], [-1, 0], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
             const ni = st.idx(qx + dx, qy + dy);
-            if (st.flags[ni] && INVALID_TOUCH.has(st.type[ni])) { invalid = true; break; }
+            if (st.flags[ni] && touch.has(st.type[ni])) { invalid = true; break; }
           }
         }
         if (qx + 1 < st.w - 1) queue.push([qx + 1, qy]);

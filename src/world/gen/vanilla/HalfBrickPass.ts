@@ -233,6 +233,87 @@ function check3x2PileKT(st: TileStore, rng: RNG, x: number, y: number, sheet: nu
   }
 }
 
+/* ── Check3x2 非堆积家族（cs:49617；TileFrameImportant case 14/17/26/77/86/89/114/
+ * 133/215/217/218/237/244/285/286/298/299/310/339/361-364/377/469/538 派发,cs:87240-70）
+ * ★BBBBBBB（2026-08-24）NTB #53 定罪补件：恶魔祭坛(26)组校验整支缺失——猩红转化
+ * 把祭坛 3×2 组的中间/底行格转成 25/203（残组=组内只剩角格），邻格被杀时
+ * SquareTileFrame 级联 TileFrame(26) → vanilla Check3x2 判 flag → 整组活性祭坛格
+ * KillTile（NTB 链 (2985,417)/(2987,417)/(2987,418) 三连杀,各 10 尘掷 Next(2)——
+ * JS 无此支 → 祭坛残组滞留 + 流位差 30 掷 → #53 起 2.5 万坡度差级联）。
+ * 186/187 堆积族仍走 check3x2PileKT（其 187 材质表/降帧支已批内验证,勿并轨）。 */
+const CHECK3X2_SHEETS = new Set([
+  14, 17, 26, 77, 86, 87, 88, 89, 114, 133, 215, 217, 218, 237, 244,
+  285, 286, 298, 299, 310, 339, 361, 362, 363, 364, 377, 469, 538,
+]);
+/** cs:49703 首组（宽底座族）：SolidTileAllowBottomSlope ∨ 下方 solidTop 整帧 ∨ 平台 */
+const CHECK3X2_WIDE_BASE = new Set([285, 286, 298, 299, 310, 339, 538, 361, 362, 363, 364, 532, 544, 533, 555, 556, 582, 619, 629]);
+/** 原版 Main.tileSolidTop 全表（Main.cs tileSolidTop[X]=true 全量+435-439 循环）——
+ *  与 TILE_TABLE_S(tileTable)是两张表（差 101/16/134/239/435-439），勿互用 */
+const TILE_SOLID_TOP_S = new Set([
+  14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376,
+  380, 391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439, 469, 532,
+  533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601,
+  602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643,
+  644, 645, 710,
+]);
+
+function check3x2KT(st: TileStore, rng: RNG, x: number, y: number, sheet: number): void {
+  if (destroyObject) return;                                          // cs:49621
+  const k0 = st.idx(x, y);
+  const num3 = Math.floor(st.frameY[k0]! / 36);
+  const num4 = st.frameY[k0]! % 36;
+  const num = y - Math.floor(num4 / 18);                              // 组顶行
+  let num5 = Math.floor(st.frameX[k0]! / 18);
+  let num6 = 0;
+  while (num5 > 2) { num5 -= 3; num6++; }
+  num5 = x - num5;
+  const num7 = num6 * 54;
+  let num8 = num + 2;
+  if (sheet === 14 && num6 === 25) num8--;                            // cs:49640 flag2
+  let flag = false;
+  for (let k = num5; k < num5 + 3; k++) {
+    for (let l = num; l < num8; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }              // null→非活性→flag
+      const kk = st.idx(k, l);
+      if (!st.flags[kk] || SHEET_OF[st.type[kk]] !== sheet
+        || st.frameX[kk] !== (k - num5) * 18 + num7 || st.frameY[kk] !== (l - num) * 18 + num3 * 36) flag = true;
+    }
+    if (!st.inBounds(k, num8)) continue;                              // 越界=支撑真（cs:70214）
+    const bi = st.idx(k, num8);
+    const bs = SHEET_OF[st.type[bi]] ?? -1;
+    const below = !!st.flags[bi];
+    const nactive = below && ((st.wire[bi] >>> 5) & 1) === 0;         // active && !inActive
+    if (CHECK3X2_WIDE_BASE.has(sheet)) {
+      // cs:49703-49712：!底坡实心 && !(nactive&&solidTop&&frameY==0) && !(active&&平台) → flag
+      const solidTopFrame0 = nactive && TILE_SOLID_TOP_S.has(bs) && st.frameY[bi] === 0;
+      const platformOk = below && !!TILE_DEFS[st.type[bi]]?.platform;
+      if (!solidTileAllowBottomSlope(st, k, num8) && !solidTopFrame0 && !platformOk) flag = true;
+    } else if (sheet === 26 || sheet === 695) {
+      // cs:49736-49744：底行须 SolidTileAllowBottomSlope 且非巨石族（★本批祭坛主靶）
+      if (!solidTileAllowBottomSlope(st, k, num8)
+        || (below && BOULDERS.has(bs))) flag = true;
+    } else {
+      // default（14/17/77/86/88/89/114/133/215/217/218/237/244/377/469）+
+      // 704/705（cs:49716,不在派发族,防御同款）——底行须 SolidTileAllowBottomSlope
+      if (!solidTileAllowBottomSlope(st, k, num8)) flag = true;       // cs:49840
+    }
+  }
+  if (!flag) return;
+  destroyObject = true;                                               // cs:49856
+  for (let m = num5; m < num5 + 3; m++) {
+    for (let l = num; l < num8; l++) {
+      if (!st.inBounds(m, l)) continue;
+      const kk = st.idx(m, l);
+      if (st.flags[kk] && SHEET_OF[st.type[kk]] === sheet) killTile(st, rng, m, l);
+    }
+  }
+  destroyObject = false;                                              // cs:50283
+  for (let m = num5 - 1; m < num5 + 4; m++) {
+    for (let l = num - 1; l < num + 4; l++) tileFrame(st, rng, m, l); // cs:50284-90 5×5 复扫
+  }
+}
+
 /* ── CheckOnTable1x1（cs:43548）/ CheckBanner（cs:46103）级联支（TTTTTT 批）────
  * CONST 链定罪：Caverer 雕掉地牢书架/旗锚 → vanilla KillTile 尾级联经
  * TileFrameImportant case 50（书）/91（旗）链杀,JS 漏派发 → 7 格残存。 */
@@ -367,6 +448,8 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
       destroyObject = false;
     } else if (sheet === 186 || sheet === 187) {
       check3x2PileKT(st, rng, x, y, sheet);                        // cs:86713 组→Check3x2
+    } else if (CHECK3X2_SHEETS.has(sheet)) {
+      check3x2KT(st, rng, x, y, sheet);                            // cs:87270 组→Check3x2（★祭坛族）
     } else if (ON_TABLE_1X1_S.has(sheet)) {
       checkOnTable1x1KT(st, rng, x, y);                            // cs:86348 组→CheckOnTable1x1
     } else if (sheet === 91) {

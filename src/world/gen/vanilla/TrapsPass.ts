@@ -1105,6 +1105,15 @@ export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): bo
  *  ③TNT 桶 W*3 次（tenth W/3；remix y∈[ws,(H-350+rock)/2] 否则 [rock,H-200]）；
  *  ④沙陷阱 ×5；⑤pass 尾 SetBoulderSolidity(true)。 */
 export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Array<{ x: number; y: number; items: unknown[] }>): void {
+  // ★BBBBBBB（2026-08-24）NTB #76 定罪修复（SSSSS ⑤.3 备案清偿）：pass 头门
+  //   （1457 cs:18789）`!denySome && !actuallyNoTraps && (!ntb || noTraps || remix)`
+  //   ——**纯 NTB（ntb&&!noTraps&&!remix）整段跳过**：头尾 tileSolid[379] 翻转、
+  //   boulderPetsPlaced 清零、全部掷骰都在门内。JS 曾恒跑 → NTB 链 #76 起
+  //   T0>135×216（JS 多放的飞镖/巨石/ TNT）+T59>1×995（门内 379/巨石实心窗
+  //   未开 → 后续 pass 读实心差异）级联。skyblock(denySome)/actuallyNoTraps 同门。
+  const nf0 = gs.seedFlags;
+  if (gs.seedFlags.skyblock || gs.seedFlags.actuallyNoTraps
+    || (nf0.notTheBees && !nf0.noTraps && !nf0.remix)) return;
   // ★pass 头 tileSolid 翻转（cs:18773 `Main.tileSolid[379] = false`）：
   //   本仓生成期不放置 379,行为无差,存档时间线。pass 尾 cs:18897 还原 true。
   flipGenSolid([379], false);

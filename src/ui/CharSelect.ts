@@ -1,8 +1,13 @@
-// 角色列表（DOM 版，替代 VUI UICharacterSelectState）：纸娃娃预览 + 名称/难度色 + 管理
+// 角色列表（DOM 版 1:1 原版 UICharacterSelect/UICharacterListItem 结构）：
+//  容器 80%(max 650) 居中 + 标题面板 + 列表面板(滚动) + 底部 Back/New 双钮
+//  （UICharacterSelect.cs:38-82）；行 = 娃娃(PlayerBackground 背板 + 行走动画) +
+//  底缘图标钮 Play/Rename/Copy + Delete 右下 + 悬停标签——★原版行内无名字文本
+//  （UICharacterListItem 全量 Append 扫描定谳），识别靠娃娃外观。
 import { CharacterStore, type CharacterMeta } from '../save/CharacterStore';
 import { type Appearance, DIFFICULTY_INFO } from '../player/Appearance';
 import { compositePaperDoll, dollFrame, walkFrame } from '../player/PaperDoll';
 import { Lang } from '../i18n/Lang';
+import { ensureVanillaKit } from './vanillaKit';
 
 export interface CharSelectFlow {
   /** id = CharacterMeta.id（流程层硬核消亡回写角色存档用；旧调用方可忽略） */
@@ -12,43 +17,54 @@ export interface CharSelectFlow {
 }
 
 const CSS = `
-.sw-list-panel {
+.sw-vsel {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
-  width: 600px; max-width: 96vw; z-index: 20; cursor: auto;
-  background: linear-gradient(160deg, #2b3664, #1c2444);
-  border: 2px solid #7d92d6; border-radius: 6px; padding: 14px 16px; color: #e8e8f4;
+  width: min(80%, 650px); max-height: 86vh; z-index: 20;
+  display: flex; flex-direction: column;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
-  box-shadow: 0 8px 40px rgba(0,0,0,.6);
+  color: #fff; cursor: auto;
 }
-.sw-list-title { text-align: center; font-size: 18px; color: #ffe8a0; margin-bottom: 10px;
-  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
-.sw-list-body { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
-  background: #1a2140; border: 1px solid #3a4680; border-radius: 4px; padding: 8px; }
-.sw-list-empty { color: #8a90b8; text-align: center; padding: 40px 0; }
-.sw-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px;
-  background: #232c52; border: 1px solid #3a4680; border-radius: 4px; cursor: pointer; }
-.sw-item:hover { background: #2c3768; }
-.sw-item canvas { width: 44px; height: 58px; image-rendering: pixelated; background: #10142c;
-  border-radius: 3px; flex-shrink: 0; }
-.sw-item .name { flex: 1; font-size: 15px; }
-.sw-item .sub { color: #8a90b8; font-size: 12px; }
-.sw-item .ops { display: flex; gap: 6px; }
-.sw-item .ops button {
-  background: #3a4680; color: #e8e8f4; border: 1px solid #7d92d6; border-radius: 4px;
-  padding: 4px 10px; cursor: pointer; font-family: inherit; font-size: 12px;
+.sw-vsel-title {
+  align-self: center; padding: 8px 26px; margin-bottom: 14px;
+  font-size: 20px; white-space: nowrap;
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
 }
-.sw-item .ops button:hover { background: #4a5aa0; }
-.sw-item .ops button.primary { background: #5a6ac0; color: #fff; }
-.sw-list-footer { display: flex; justify-content: space-between; margin-top: 12px; }
-.sw-list-footer button {
-  background: #3a4680; color: #e8e8f4; border: 1px solid #7d92d6; border-radius: 4px;
-  padding: 6px 18px; cursor: pointer; font-family: inherit;
+.sw-vsel-panel { position: relative; flex: 1; min-height: 200px; padding: 5px; }
+.sw-vsel-list {
+  height: 100%; max-height: 52vh; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; gap: 5px;
+  scrollbar-width: thin; scrollbar-color: #ffe745 #2c396a;
 }
-.sw-list-footer button:hover { background: #4a5aa0; }
-.sw-list-footer .primary { background: #5a6ac0; color: #fff; }
+.sw-vsel-list::-webkit-scrollbar { width: 12px; }
+.sw-vsel-list::-webkit-scrollbar-track { background: #1c2444; }
+.sw-vsel-list::-webkit-scrollbar-thumb { background: #ffe745; border: 2px solid #2c396a; }
+.sw-vsel-empty { color: #cfd6f4; text-align: center; padding: 48px 0; font-size: 15px;
+  text-shadow: 1px 1px 0 #000; }
+.sw-vitem { position: relative; height: 96px; flex-shrink: 0; padding: 6px;
+  display: flex; align-items: center; }
+.sw-vitem.dead { opacity: 0.45; }
+.sw-vitem-doll {
+  width: 66px; height: 66px; flex-shrink: 0; margin-left: 2px;
+  image-rendering: pixelated; pointer-events: none;
+}
+.sw-vitem-btns { position: absolute; left: 78px; bottom: 4px; display: flex; gap: 2px;
+  align-items: flex-end; }
+.sw-vitem-btns img, .sw-vitem-del img {
+  width: 24px; height: 24px; image-rendering: pixelated; cursor: pointer;
+  opacity: 0.8;
+}
+.sw-vitem-btns img:hover, .sw-vitem-del img:hover { opacity: 1; transform: scale(1.08); }
+.sw-vitem-del { position: absolute; right: 8px; bottom: 4px; }
+.sw-vitem-label { position: absolute; left: 182px; bottom: 7px; font-size: 13px;
+  color: #ffe; text-shadow: 1px 1px 0 #000; pointer-events: none; }
+.sw-vitem-del-label { position: absolute; right: 38px; bottom: 7px; font-size: 13px;
+  color: #ffe; text-shadow: 1px 1px 0 #000; pointer-events: none; }
+.sw-vsel-footer { display: flex; gap: 10px; margin-top: 14px; }
+.sw-vsel-footer .sw-vbtn { flex: 1; height: 50px; font-size: 17px; }
 `;
 
 export function ensureStyle() {
+  ensureVanillaKit();
   if (!document.getElementById('sw-list-style')) {
     const style = document.createElement('style');
     style.id = 'sw-list-style';
@@ -56,6 +72,8 @@ export function ensureStyle() {
     document.head.appendChild(style);
   }
 }
+
+const BTN_SRC = (n: string): string => `sprites/vanilla-ui/${n}.png`;
 
 export class CharSelectPanel {
   private panel: HTMLElement;
@@ -67,30 +85,45 @@ export class CharSelectPanel {
   constructor(parent: HTMLElement, private store: CharacterStore, private flow: CharSelectFlow) {
     ensureStyle();
     this.panel = document.createElement('div');
-    this.panel.className = 'sw-list-panel';
+    this.panel.className = 'sw-vsel';
     this.panel.innerHTML = `
-      <div class="sw-list-title">${Lang.text('UI.SelectPlayer')}</div>
-      <div class="sw-list-body"></div>
-      <div class="sw-list-footer">
-        <button data-act="back">${Lang.text('UI.Back')}</button>
-        <button data-act="new" class="primary">${Lang.text('Mods.SandboxWorld.CharSelect.New')}</button>
+      <div class="sw-vsel-title sw-vbtn">${Lang.text('UI.SelectPlayer')}</div>
+      <div class="sw-vsel-panel sw-vpanel"><div class="sw-vsel-list"></div></div>
+      <div class="sw-vsel-footer">
+        <button class="sw-vbtn" data-act="back">${Lang.text('UI.Back')}</button>
+        <button class="sw-vbtn" data-act="new">${Lang.text('UI.New')}</button>
       </div>
     `;
-    this.body = this.panel.querySelector('.sw-list-body')!;
+    this.body = this.panel.querySelector('.sw-vsel-list')!;
     this.panel.querySelector('[data-act=back]')!.addEventListener('click', () => this.close(flow.onBack));
     this.panel.querySelector('[data-act=new]')!.addEventListener('click', () => this.close(flow.onNew));
     parent.appendChild(this.panel);
     void this.reload();
     this.loop();
     this.unsubLang = Lang.onChange(() => {
-      (this.panel.querySelector('.sw-list-title') as HTMLElement).textContent = Lang.text('UI.SelectPlayer');
+      (this.panel.querySelector('.sw-vsel-title') as HTMLElement).textContent = Lang.text('UI.SelectPlayer');
       (this.panel.querySelector('[data-act=back]') as HTMLElement).textContent = Lang.text('UI.Back');
-      (this.panel.querySelector('[data-act=new]') as HTMLElement).textContent = Lang.text('Mods.SandboxWorld.CharSelect.New');
+      (this.panel.querySelector('[data-act=new]') as HTMLElement).textContent = Lang.text('UI.New');
       void this.reload();
     });
   }
 
   private unsubLang: (() => void) | null = null;
+
+  private iconBtn(parent: HTMLElement, src: string, label: string, fn: () => void): void {
+    const img = document.createElement('img');
+    img.src = BTN_SRC(src);
+    img.title = label;
+    img.addEventListener('mouseenter', () => { this.setLabel(label, false); });
+    img.addEventListener('mouseleave', () => { this.setLabel('', false); });
+    img.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+    parent.appendChild(img);
+  }
+
+  private setLabel(text: string, del: boolean): void {
+    const el = this.panel.querySelector(del ? '.sw-vitem-del-label' : '.sw-vitem-label');
+    if (el) el.textContent = text;
+  }
 
   private async reload() {
     await this.store.ensureLoaded();
@@ -100,87 +133,84 @@ export class CharSelectPanel {
       const appearance = await this.store.get(meta.id);
       if (!appearance) continue;
       const el = document.createElement('div');
-      el.className = 'sw-item';
-      const canvas = document.createElement('canvas');
-      canvas.width = 40; canvas.height = 56;
-      const ctx = canvas.getContext('2d')!;
-      ctx.imageSmoothingEnabled = false;
-      const dc = DIFFICULTY_INFO[appearance.difficulty]?.color ?? { r: 255, g: 255, b: 255 };
-      const info = document.createElement('div');
-      info.style.flex = '1';
-      const name = document.createElement('div');
-      name.className = 'name';
-      name.textContent = appearance.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed');
-      name.style.color = `rgb(${dc.r},${dc.g},${dc.b})`;
-      const sub = document.createElement('div');
-      sub.className = 'sub';
-      sub.textContent = appearance.hardcoreDead
-        ? Lang.text('Mods.SandboxWorld.CharSelect.HardcoreDead')
-        : DIFFICULTY_INFO[appearance.difficulty]?.label ?? '';
-      info.append(name, sub);
-      // 操作
-      const ops = document.createElement('div');
-      ops.className = 'ops';
-      const mk = (label: string, primary: boolean, fn: () => void) => {
-        const b = document.createElement('button');
-        b.textContent = label;
-        if (primary) b.className = 'primary';
-        b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
-        ops.appendChild(b);
-      };
+      el.className = 'sw-vitem sw-vpanel-item';
       const a = appearance;
       // 硬核角色已消亡（hardcoreDead 标记；原版死亡即删 .plr 档）：灰显 + 禁止进入
       const dead = !!a.hardcoreDead;
-      if (dead) {
-        el.style.opacity = '0.45';
-        el.style.cursor = 'not-allowed';
-      }
-      mk(Lang.text('Mods.SandboxWorld.WorldSelect.Enter'), true, () => {
-        if (a.hardcoreDead) return;
+      if (dead) el.classList.add('dead');
+      // 娃娃（PlayerBackground 背板 + 行走动画；UICharacter.cs:97-107 hasBackPanel）
+      const doll = document.createElement('canvas');
+      doll.className = 'sw-vitem-doll';
+      doll.width = 66; doll.height = 66;
+      const dctx = doll.getContext('2d')!;
+      dctx.imageSmoothingEnabled = false;
+      const bg = new Image();
+      bg.src = BTN_SRC('UI_PlayerBackground');
+      bg.addEventListener('load', () => dctx.drawImage(bg, 3, 4));
+      // 信息（悬停行时显示名字——原版行内无名字文本，识别靠娃娃；此处仅 title 提示）
+      const dc = DIFFICULTY_INFO[a.difficulty]?.color ?? { r: 255, g: 255, b: 255 };
+      el.title = `${a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed')} · ${DIFFICULTY_INFO[a.difficulty]?.label ?? ''}`;
+      el.style.setProperty('--doll-tint', `rgb(${dc.r},${dc.g},${dc.b})`);
+      // 操作钮（底缘行：Play/Rename/Copy；Delete 右下——UICharacterListItem.cs:73-121）
+      const btns = document.createElement('div');
+      btns.className = 'sw-vitem-btns';
+      this.iconBtn(btns, 'UI_ButtonPlay', Lang.text('UI.Play'), () => {
+        if (dead) return;
         this.close(() => this.flow.onPlay(a, meta.id));
       });
-      mk(Lang.text('Mods.SandboxWorld.CharSelect.Rename'), false, async () => {
-        const name2 = prompt(Lang.text('Mods.SandboxWorld.CharSelect.RenamePrompt'), a.name);
+      this.iconBtn(btns, 'UI_ButtonRename', Lang.text('UI.Rename'), async () => {
+        const name2 = prompt(Lang.text('Mods.SandboxWorld.CharSelect.RenamePrompt'),
+          a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed'));
         if (name2 == null) return;
         a.name = name2.slice(0, 20);
         await this.store.update(meta.id, a);
         await this.reload();
       });
-      mk(Lang.text('Mods.SandboxWorld.WorldSelect.Copy'), false, async () => { await this.store.copy(meta.id); await this.reload(); });
-      mk(Lang.text('UI.Delete'), false, async () => {
-        if (!confirm(Lang.text('Mods.SandboxWorld.CharSelect.ConfirmDelete', a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed')))) return;
+      this.iconBtn(btns, 'UI_CharCreation_Copy', Lang.text('Mods.SandboxWorld.WorldSelect.Copy'), async () => {
+        await this.store.copy(meta.id);
+        await this.reload();
+      });
+      const del = document.createElement('div');
+      del.className = 'sw-vitem-del';
+      this.iconBtn(del, 'UI_ButtonDelete', Lang.text('UI.Delete'), async () => {
+        if (!confirm(Lang.text('Mods.SandboxWorld.CharSelect.ConfirmDelete',
+          a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed')))) return;
         await this.store.delete(meta.id);
         await this.reload();
       });
-      el.append(canvas, info, ops);
-      // 整行点击/双击 = 进入（操作按钮已 stopPropagation；硬核消亡角色禁入）
+      const label = document.createElement('div');
+      label.className = 'sw-vitem-label';
+      const delLabel = document.createElement('div');
+      delLabel.className = 'sw-vitem-del-label';
+      el.append(doll, btns, del, label, delLabel);
+      // 整行点击/双击 = 进入（图标钮已 stopPropagation；硬核消亡禁入）
       const enter = () => {
-        if (a.hardcoreDead) return;
+        if (dead) return;
         this.close(() => this.flow.onPlay(a, meta.id));
       };
       el.addEventListener('click', enter);
       el.addEventListener('dblclick', enter);
       this.body.appendChild(el);
-      this.items.push({ meta, appearance, canvas });
+      this.items.push({ meta, appearance: a, canvas: doll });
     }
     if (!this.items.length) {
       const empty = document.createElement('div');
-      empty.className = 'sw-list-empty';
+      empty.className = 'sw-vsel-empty';
       empty.textContent = Lang.text('Mods.SandboxWorld.CharSelect.Empty');
       this.body.appendChild(empty);
     }
   }
 
-  /** 行走动画预览 */
+  /** 行走动画预览（娃娃居中于 PlayerBackground 背板） */
   private loop = () => {
     this.time += 1 / 60;
     for (const it of this.items) {
       const doll = compositePaperDoll(it.appearance);
       if (!doll) continue;
       const ctx = it.canvas.getContext('2d')!;
-      ctx.clearRect(0, 0, 40, 56);
+      ctx.clearRect(0, 0, 66, 66);
       const f = dollFrame(doll, walkFrame(this.time));
-      ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, 0, 0, 40, 56);
+      ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, 13, 5, 40, 56);
     }
     this.raf = requestAnimationFrame(this.loop);
   };

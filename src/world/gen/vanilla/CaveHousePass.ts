@@ -15,7 +15,7 @@ import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { doorClosedFrame } from '../../Door';
 import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
-import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
+import { flipGenSolid, genSolidType, vanGenSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { placeTight, checkStalactite } from './ShimmerPass';
 import { genFrameNeighbors } from './FinalCleanupPass';
 import { killTileChest } from './BuriedChestsPass';
@@ -82,8 +82,28 @@ const SC397 = TILE_BY_KEY['hardened_sand']!;
 const SC368 = TILE_BY_KEY['v_368_granite_block']!;
 const SC367 = TILE_BY_KEY['v_367_marble_block']!;
 
+// ★BBBBBBB（2026-08-24）NOTRAPS #59 定罪修复：solidAt 曾用裸 genSolidType（碰撞
+//   语义,平台=非实心）——而本 pass 全部扫描谓词的原版真身是 **Conditions.IsSolid**
+//   （Conditions.cs:84）= `active && Main.tileSolid[type]`，**Main.tileSolid[19]=true
+//   （Main.cs:7842/1457:8032,平台在原版表里是实心）** → 原版的 Down/Left/Right/Up
+//   搜索把平台列当地面停。裸 genSolidType 会穿台 → 房间锚点下坠（notraps 链
+//   house(2537,349)：vanilla 停在 (2537,361) 平台→房 (2522,356,15,8)，JS 穿到
+//   (2537,412) 沙层→房 (2522,407,15,8)，整屋 51 行位漂+流相移 19+22 掷）。
+//   修=改走 vanGenSolidType（GenSolid 的「生成期 Main.tileSolid」包装）。
+//   ★solidPct 例外：原版 GetRoomSolidPrecentage 走 Modifiers.IsSolid（Modifiers.cs:551）
+//   → WorldGen.SolidOrSlopedTile（:70515）= tileSolid && **!tileSolidTop**（平台
+//   族 19/239/380/427/435-439 恰= tileSolid∩tileSolidTop 全集）→ 平台【不】计实心
+//   ——roomSolidPct 用 roomSolidAt（独立谓词），勿与 solidAt 混用。
 const solidAt = (st: TileStore, x: number, y: number) =>
-  st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && genSolidType(st.type[st.idx(x, y)]);
+  st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && vanGenSolidType(st.type[st.idx(x, y)]);
+/** GetRoomSolidPrecentage 专用（SolidOrSlopedTile 1:1）：平台族不计实心+inActive 拒 */
+const roomSolidAt = (st: TileStore, x: number, y: number) => {
+  if (!st.inBounds(x, y) || !st.flags[st.idx(x, y)]) return false;
+  const t = st.type[st.idx(x, y)];
+  if (!vanGenSolidType(t)) return false;
+  if (VAN_TILE_SOLID_EXTRA.has(TILE_DEFS[t]?.vanilla?.sheet ?? -1)) return false;  // tileSolidTop 族
+  return ((st.wire[st.idx(x, y)] >>> 5) & 1) === 0;                                 // !inActive
+};
 const activeAt = (st: TileStore, x: number, y: number) => st.inBounds(x, y) && !!st.flags[st.idx(x, y)];
 
 /** 关门三连写（WorldGen.PlaceDoor cs:31949-31960 1:1）：三格 frameX 各取独立
@@ -119,10 +139,12 @@ function findRoom(st: TileStore, ox: number, oy: number): Rect {
   return rect;
 }
 
+/** GetRoomSolidPrecentage（HouseUtils.cs:212）：Modifiers.IsSolid→SolidOrSlopedTile
+ *  =tileSolid && !tileSolidTop && !inActive——平台族【不】计（roomSolidAt）。 */
 function solidPct(st: TileStore, r: Rect): number {
   let n = 0;
   for (let x = r.x; x < r.x + r.w; x++) {
-    for (let y = r.y; y < r.y + r.h; y++) if (solidAt(st, x, y)) n++;
+    for (let y = r.y; y < r.y + r.h; y++) if (roomSolidAt(st, x, y)) n++;
   }
   return n / (r.w * r.h);
 }

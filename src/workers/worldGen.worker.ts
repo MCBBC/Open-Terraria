@@ -42,7 +42,11 @@ ctx.onmessage = async (e) => {
           // 生成期实时预览：worker 侧降采样 RGBA → transfer（替代旧 onWorldPartial 整 world 回调）
           onWorldPartial: req.cfg.preview
             ? (w, passIndex, passName) => {
-              const f = renderPreviewBitmap(w.store);
+              // 背景分层上下文（对齐游戏内小地图；生成早期世界面未定 → 兜底浅蓝）
+              const bg = w.groundLevel > 0
+                ? { groundLevel: w.groundLevel, rockLevel: w.rockLevel }
+                : undefined;
+              const f = renderPreviewBitmap(w.store, 1024, bg);
               ctx.postMessage(
                 { id: req.id, type: 'preview', passIndex, passName, width: f.width, height: f.height, rgba: f.rgba.buffer as ArrayBuffer },
                 [f.rgba.buffer],

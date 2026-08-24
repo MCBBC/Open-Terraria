@@ -67,21 +67,36 @@ describe('小动物行走族 vs 弹跳族（aiStyle 7 vs 1）', () => {
     const e = Enemy.fromVanilla(377, 40 * 16, 59 * 16)!;
     let hops = 0;
     let prevAir = false;
-    let farWalk = 0;
     const pl = (hooks as { player: { x: number; cx: number; cy: number } }).player;
     for (let t = 0; t < 2000; t++) {
       e.fixedUpdate(1 / 60, hooks);
       const air = e.vy < -1;
       if (air && !prevAir) hops++;
       prevAir = air;
-      // 激愤逃跳两跳脱离 200px 圈后：转被动慢爬（vx 恒 ≤0.2，仓内走路档）
-      if (t > 400 && Math.abs(e.vx) > 0 && Math.abs(e.vx) <= 0.21 && e.onGround) farWalk++;
       // 玩家跟随（模拟真实追击）：每 200t 传送回蚱蜢旁 1.5 格——否则一跳即出
       // 200px 激愤圈（跳距 ~180px,1:1 冲量）永不回圈,场景几何只容 1 跳
       if (t > 0 && t % 200 === 0) { pl.x = e.cx - 24; pl.cx = e.cx - 24; pl.cy = e.cy; }
+      // R6-B 2-3 后激愤逃跳冲量会把蚱蜢甩出 80 格窄板（原版同几何同坠）——
+      // 场景钳制：出 [8,72] 格拉回玩家旁，防永久坠落伪影
+      if (e.cx < 8 * 16 || e.cx > 72 * 16) {
+        e.x = pl.cx + 24; e.y = 59 * 16 - e.h; e.vx = 0; e.vy = 0;
+      }
     }
     expect(hops).toBeGreaterThanOrEqual(2);          // 圈内周期抛物线逃跳（跟随下 ≥2 跳）
-    expect(farWalk).toBeGreaterThan(0);              // 出圈段被动慢爬（原版激愤门语义）
+    // R6-B 2-3：平静态（flag3=false）跳 machine 照跑（1457 :62135 贴地门不含
+    // flag3；:62245 只门 TargetClosest）——蚱蜢 ai0 +3/t（:62205-62208）→ 平静
+    // 节奏 ~373t/跳（曾自造"0.2 慢爬不进跳循环"档已删）
+    pl.x = e.cx + 400; (pl as { cx: number }).cx = e.cx + 400;   // 拉出 200px 激愤圈
+    let calmHops = 0;
+    prevAir = false;
+    for (let t = 0; t < 900; t++) {
+      e.fixedUpdate(1 / 60, hooks);
+      const air = e.vy < -1;
+      if (air && !prevAir) calmHops++;
+      prevAir = air;
+      if (e.cx < 8 * 16 || e.cx > 72 * 16) { e.x = 40 * 16; e.y = 59 * 16 - e.h; e.vx = 0; e.vy = 0; }
+    }
+    expect(calmHops).toBeGreaterThanOrEqual(2);      // 平静态照常蹦跳（不索敌）
   });
 
   it('神秘青蛙 687 可 Enemy 出生且走 aiStyle 7 行走族（侧信道退役前提）', () => {

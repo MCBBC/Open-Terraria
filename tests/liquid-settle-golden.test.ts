@@ -55,11 +55,14 @@ describe('液体沉降 golden(优化等价性闸门)', () => {
     const st = world.store;
     const hash = [st.liquid, st.liquidType, st.type, st.flags].map((a) =>
       fnv1a(new Uint8Array(a.buffer, a.byteOffset, a.byteLength))).join(' ');
-    expect(hash).toBe('05d92427 0ea8b4ae b6f70ec5 e84ee6b5');
-    // golden 更新（蓝队 r8 批 2026-08-24）：shimmerCheck 情形 A 的 mergeType!=this 门
-    // 由误译"三邻有微光则弃"改为 vanilla 真值"三邻有水/岩浆/蜂蜜(带 liquid>0 门)才产块"
-    // （GetLiquidMergeTypes Liquid.cs:1386-1454;R8-19）——夹具微光腔残型字节场景
-    // 旧门吞合并,新门按 vanilla 补产 Aetherium。type/flags 通道不变,liquid/liquidType
-    // 随合并清零差异更新。旧哈希 3675701a 为误译版快照;更早 f4f6614e 为轮上限下限版。
+    expect(hash).toBe('1719c78f 86f60b22 b6f70ec5 e84ee6b5');
+    // golden 更新（蓝队 r8 批 2026-08-24）两连：
+    // ① R8-19 shimmerCheck 情形 A 的 mergeType!=this 门由误译"三邻有微光则弃"改为
+    //    vanilla 真值"三邻有水/岩浆/蜂蜜(带 liquid>0 门)才产块"（GetLiquidMergeTypes
+    //    Liquid.cs:1386-1454）——夹具微光腔残型字节场景旧门吞合并（3675701a→05d92427）。
+    // ② R8-20 缺省回退流 mulberry32 → UnifiedRandom(world.seed)（vanilla 运行期
+    //    SwapRandom("UpdateLiquid")=Main.cs:3300-3311 专用持久流同构;本测试未传
+    //    passRand 走回退流）→ 05d92427→1719c78f。type/flags 通道两步均不变。
+    // 更早 f4f6614e 为轮上限下限版快照。
   }, 120000);
 });

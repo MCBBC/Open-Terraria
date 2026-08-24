@@ -135,6 +135,13 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
   // 树冠标记帧（cs:30372-30395）：Next(13)!=0 → fx=22，否则 fx=0；fy=198+22*k
   const crownFx = rng.int(0, 12) !== 0 ? 22 : 0;
   st.setTileSilent(i, index1 - height, TREE, crownFx, 198 + rng.int(0, 2) * 22);
+  // ★CCCC 批（2026-08-24）：尾段 RangeFrame(i-2, j-num2-1, i+2, j+1)（GrowTree
+  //  cs:30410 / GrowEpicTree cs:27807 同款）——JS 曾缺：RangeFrame→TileFrame 对
+  //  盒内**非活性残格**清 half/slope/块漆（TileFrame cs:82080-84 `!active()` 分支）。
+  //  NTB 蜂蜜世界杀格多、坡面残格落树盒概率高 → NTB 链 #82 S0>1×1 (746,258) 首差
+  //  实证（树 (744,257) 盒 [742..746]×[247..258] 内残格坡位未清）。主链无此残格
+  //  组合故未显形。genRangeFrame 与 growTreeWithSettings 尾扫（cs:30999）同源。
+  genRangeFrame(st, rng, i - 2, index1 - height - 1, i + 2, index1 + 1);
   gs.genTrees.push({ x: i, y: index1 - height, h: height }); // 砍伐整棵判定用
   return true;
 }
@@ -153,9 +160,14 @@ export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: nu
   // 上格墙 ∈ AllowsPlantsToGrow / 至少一侧邻格 active+适树——
   // ★侧格门只查 active+IsTileTypeFitForTree（cs:29949），不查半砖/坡面！
   //  旧实现照搬基座整砖检查到侧格→坡地邻列全拒（数量差主根因之一）
-  if (st.liquid[st.idx(i - 1, index1 - 1)] > 0 || st.liquid[st.idx(i, index1 - 1)] > 0 || st.liquid[st.idx(i + 1, index1 - 1)] > 0) return false;
+  // ★CCCC 批（2026-08-24）NTB 双豁免（not the bees 蜂蜜世界树支，cs:29930/29937）：
+  //  ①液体门带 `&& !notTheBees`——蜂蜜世界树可贴液体种（NTB 链 #82 T5>0×1794 主根因）；
+  //  ②墙门 `(remix&&j>ws) || notTheBeesWorld || wall==0 || flag`——NTB 免墙检。
+  //  两门皆 GrowTree 独有（GrowPalmTree/GrowEpicTree/GrowTreeWithSettings 无 NTB 支）。
+  const ntb = !!gs.seedFlags?.notTheBees;
+  if (!ntb && (st.liquid[st.idx(i - 1, index1 - 1)] > 0 || st.liquid[st.idx(i, index1 - 1)] > 0 || st.liquid[st.idx(i + 1, index1 - 1)] > 0)) return false;
   if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !FIT.has(st.type[gi])) return false;
-  if (!ignoreWalls && !TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)])) return false;
+  if (!ignoreWalls && !ntb && !TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)])) return false;
   const fitSide = (dx: number) => {
     if (!st.inBounds(i + dx, index1)) return false;
     const si = st.idx(i + dx, index1);

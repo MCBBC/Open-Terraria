@@ -54,6 +54,8 @@ export class Wiring {
   teleportPair: ((a: [number, number], b: [number, number]) => void) | null = null;
   /** 世界地表行(蜥蜴砖致动限制 Wiring.cs:2375) */
   worldSurface = 0;
+  /** HitSwitch 触发音钩（vanilla 每支 PlaySound(28)（Wiring.cs:267-375 共 7 处）——
+   *  R8-51:压板/测重板/感应器接触触发此前静音;Game 接 sfx.play('tink') */
   /** 世世纪杀花已击败(同上) */
   planteraDowned = false;
 
@@ -201,8 +203,10 @@ export class Wiring {
 
   // ============ HitSwitch(Wiring.cs:163-252)============
 
+  hitSwitchSound?: (x: number, y: number) => void;
   hitSwitch(i: number, j: number): void {
     if (!this.st.inBounds(i, j)) return;
+    this.hitSwitchSound?.(i, j);   // 每支分支都播（:267/:272/:285/:310/:323/:339/:375）
     const sh = this.sheetAt(i, j);
     const ti = this.p2i(i, j);
     // 压板/轨道/感应器/测重板/垫板/高尔夫(:167-171)与宝石锁(:172-176):直接 Trip
@@ -385,8 +389,9 @@ export class Wiring {
     const sheet = this.sheetAt(x, y);
     // :833-834 先致动(active 检查之前,空格上的致动线也会翻)
     if (st.wire[i] & TileStore.WIRE_ACTUATOR) this.actuateForced(x, y);
-    // :835 raw active = type≠0(致动态也继续)
-    if (type === 0) return;
+    // ★R8-49:原版门是 tile.active()（WR57:1006-1008,switch 前,对全部 case 生效）
+    // ——本仓 flags=0 时 type 幽灵保留,残型格(被击杀的器件)须照常短路
+    if (st.flags[i] === 0) return;
     // 核心 case(牵扯 Wiring 内部状态),其余全表委托 devices.ts
     switch (sheet) {
       case 144: // 计时器:信号 = 打开并重置计时(:839-843)
@@ -461,19 +466,21 @@ export class Wiring {
       const ii = st.idx(i1, j1);
       let liquid1 = st.liquid[ii];
       if (liquid1 > 0) {
-        const lava = st.liquidType[ii] === 2, honey = st.liquidType[ii] === 3;
+        // ★R8-46:类型按单字节四值精确匹配（WR57:486-501 liquidType()）——双布尔
+        // (lava/honey) 比较把微光(4)与水(1)混同:水泵抽走微光、微光泵入水格;
+        // 空目标格继承来型（:494 b2=b）;转移后 out.liquidType(b)（:507）
+        const typeIn = st.liquidType[ii];
         for (let b = 0; b < this.numOutPump; b++) {
           const i2 = this.outPumpX[b], j2 = this.outPumpY[b];
           if (!st.inBounds(i2, j2)) continue;
           const oi = st.idx(i2, j2);
-          let liquid2 = st.liquid[oi];
+          const liquid2 = st.liquid[oi];
           if (liquid2 < 255) {
-            let flag1 = st.liquidType[oi] === 2, flag2 = st.liquidType[oi] === 3;
-            if (liquid2 === 0) { flag1 = lava; flag2 = honey; }
-            if (lava === flag1 && honey === flag2) {
+            const typeOut = liquid2 === 0 ? typeIn : st.liquidType[oi];
+            if (typeOut === typeIn) {
               let move = liquid1;
               if (move + liquid2 > 255) move = 255 - liquid2;
-              st.setLiquid(i2, j2, liquid2 + move, lava ? 2 : honey ? 3 : 1);
+              st.setLiquid(i2, j2, liquid2 + move, typeIn);
               st.setLiquid(i1, j1, liquid1 - move, st.liquidType[ii] || 1);
               liquid1 = st.liquid[ii];
               if (st.liquid[ii] === 0) break;
@@ -492,10 +499,11 @@ export class Wiring {
       const x = this.i2x(key), y = this.i2y(key);
       if (!st.inBounds(x, y)) continue;
       const i = this.p2i(x, y);
-      if (v === 1) {
-        if (st.frameX[i] !== 0) st.setTile(x, y, st.type[i], 0, st.frameY[i]);
-      } else if (v === 3) {
+      // ★R8-47:原版只处理双向触发值 3（WR57:670-680）——单侧 1/2 不翻帧;
+      // 曾自造 v===1 水平支致水平单触发被错误归零
+      if (v === 3) {
         if (st.frameX[i] !== 18) st.setTile(x, y, st.type[i], 18, st.frameY[i]);
+        else st.setTile(x, y, st.type[i], 0, st.frameY[i]);
       }
     }
     this.pixelBoxTriggers.clear();
@@ -545,7 +553,8 @@ export class Wiring {
     for (let y = lampY; y < st.h; y++) {
       if (!st.inBounds(lampX, y)) break;
       const i = this.p2i(lampX, y);
-      if (st.type[i] === 0) break;
+      // ★R8-49:WR57:729-731 `if (!tile.active()) break`——残型格(flags=0)即断
+      if (st.flags[i] === 0) break;
       const sh = this.sheetAt(lampX, y);
       if (sh === 420) {
         const wasDone = this.gatesDone.get(i) ?? false;

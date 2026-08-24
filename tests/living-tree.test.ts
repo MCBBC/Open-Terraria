@@ -256,7 +256,11 @@ describe('Living Trees 世界生成', () => {
     for (const { key, vid, camel } of keyCases) {
       const loot = rollChestLoot(ctx(key), vid).filter((it): it is { id: number; stack: number } => !!it);
       expect(loot.some((it) => it.id === ITEM_BY_KEY[key])).toBe(true);   // 显式键入箱
-      expect(loot.some((it) => it.id === camel)).toBe(false);             // 驼峰键那份已剔除
+      // 2026-08-24 蓝队 r8 批注：items.ts 键归并后 vi_832_LivingWoodWand 与
+      // vi_832_living_wood_wand 同映 183（camel===snake）——"驼峰键那份已剔除"
+      // 退化为同 id 计数断言：同物恰一份（去重语义不变,双份仍拦截）
+      const sameId = camel === ITEM_BY_KEY[key];
+      expect(loot.filter((it) => it.id === camel).length).toBe(sameId ? 1 : 0);
     }
   });
 

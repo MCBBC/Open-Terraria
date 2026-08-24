@@ -1391,9 +1391,12 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (n.dead || n.hp >= n.maxHp) continue;
       if (Math.abs(n.cx - e.cx) <= 600 && Math.abs(n.cy - e.cy) <= 200) hurt++;
     }
-    for (const n of (game as unknown as { entities: { npcs: Array<{ dead: boolean; hp: number; maxHp: number; cx: number; cy: number }> } }).entities.npcs) {
-      if (n.dead || n.hp >= n.maxHp) continue;
-      if (Math.abs(n.cx - e.cx) <= 600 && Math.abs(n.cy - e.cy) <= 200) hurt++;
+    const townNpcs = (game as unknown as { entities?: { npcs?: Array<{ dead: boolean; hp: number; maxHp: number; cx: number; cy: number }> } }).entities?.npcs;
+    if (townNpcs) {
+      for (const n of townNpcs) {
+        if (n.dead || n.hp >= n.maxHp) continue;
+        if (Math.abs(n.cx - e.cx) <= 600 && Math.abs(n.cy - e.cy) <= 200) hurt++;
+      }
     }
     if (hurt < 2) next = 2;
     if (next === 2 && !DD2_EVENT_HOOKS.canRaiseGoblinsHere(game, e.cx, e.cy)) next = 0;
@@ -2500,8 +2503,10 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
     fly(e);
     return;
   }
-  // ---- 常规:重力 + 台阶 + 跳梯（公共 gravity :91519-91525 + StepUp/跳梯 :64703-64832） ----
-  e.vy = Math.min(e.vy + 0.3, 10);
+  // ---- 常规:台阶 + 跳梯（StepUp/跳梯 :64703-64832）——★先于公共重力：原版跳梯
+  //      在 AI 内以 velocity.Y==0（上一拍碰撞后）判贴地，公共重力 :91519-91525 在
+  //      AI 之后才加——曾把重力提到梯前（vy=0.3 → 贴地扫描恒假）= 跳梯/卡死跳
+  //      全灭死代码（R6-B 5-2 修）----
   {
     const st = game.world.store;
     const solidAtT = (tx: number, ty: number): boolean =>
@@ -2552,6 +2557,7 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
       if (e.vy === 0 && flag107Stuck && e.ai3 === 1) e.vy = -5;
     }
   }
+  e.vy = Math.min(e.vy + 0.3, 10);          // 公共重力（:91519-91525，AI 后）
   const preX = e.x;
   oldVel.set(e, { x: e.vx, y: e.vy });
   moveAndCollide(e, game.world, e.vx, e.vy);

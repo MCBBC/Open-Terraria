@@ -149,6 +149,8 @@ export function tileRunner(
   // 原版 num3 液体类型掷骰（1456 cs:77163-77176）：notTheBees&&dontStarve 分支
   // 普通世界短路不掷；else if (Next(4)==0) 的 Next(4) **每次调用必掷**（普通世界
   // 结果弃用，num3 恒 0=水）。缺失则每次调用流偏 1 格——种子等价致命。
+  // ★BBBBBBB A/B 实证：摘除此掷 → NTB #3 Sand_Patches 即爆（T53>0×68193）——
+  //   本掷为流位必需，ZZZZ 批「#53 系本块新增所致」归因证伪（该块正确）。
   rng.nextIntRange(0, 4);
 
 

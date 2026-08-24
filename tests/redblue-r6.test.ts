@@ -32,6 +32,7 @@ type Proj = { x: number; y: number; vx: number; vy: number; damage: number; proj
 
 function makeHooks(w: World, playerAt: { x: number; y: number } | null) {
   const enemies: Enemy[] = [];
+  const wst = w.store;
   const projectiles: Proj[] = [];
   const em = {
     nextId: 1,
@@ -62,7 +63,7 @@ function makeHooks(w: World, playerAt: { x: number; y: number } | null) {
     playSfxFiles: () => {},
     showPickupLabel: () => {},
     cutTile: () => {},
-    breakTile: () => {},
+    breakTile: (bx: number, by: number) => wst.setTile(bx, by, 0),   // 26 拆门走真清除
     scene: { zoneGraveyard: false, zoneCorrupt: false, zoneCrimson: false, zoneSandstorm: false, zoneUndergroundDesert: false },
     entities: em,
   } as unknown as GameHooks;
@@ -141,10 +142,14 @@ describe('R6-B F1-1 攻门状态机', () => {
   });
 
   it('攻门期 ai[3] 每 tick 归零保持索敌（:60587）；击退脉冲 vx=0.5×−direction（:60610）', () => {
-    const { h, e } = doorScene(31);
-    settle(h, e, 70);                                      // 越过首次 60t 击
+    const { h, e } = doorScene(3);                         // 白名单型普通夜永不开门（敲不停）
+    let sawPulse = false;
+    for (let i = 0; i < 100; i++) {
+      e.fixedUpdate(1 / 60, h.hooks);
+      if (e.vx === 0.5 * -e.facing) sawPulse = true;       // 击帧 vx 恰为 0.5×−direction
+    }
     expect(e.ai3).toBe(0);                                 // 攻门期保持索敌（曾饱和游荡）
-    expect(e.vx).toBeCloseTo(-0.5 * e.facing, 6);          // 击退脉冲
+    expect(sawPulse).toBe(true);
   });
 });
 
@@ -206,26 +211,25 @@ describe('R6-B F1-2/F1-3 跳梯与卡死小跳', () => {
 // 1-5 宽探针 / 1-4 291 弹速
 // ===========================================================================
 describe('R6-B 探针与弹速表', () => {
-  it('宽探针 19 型：109 探测点 = width/2+16（比 15 远 ~10px，墙在远端才跳）', () => {
+  it('宽探针 19 型：109 探测点 = width/2+16（比 15 远 ~10px，2 格外墙提前跳）', () => {
+    // 怪在 40（盒 640-658）、墙在 42 行 58（脚上一行）：中心 649 → 窄探针 664→格 41 空、
+    // 宽探针 649+25=674→格 42 命中
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
     const e = spawn(h, 109, 40, FLOOR - 2);
-    e.y = FLOOR * TILE - e.h;
+    e.y = FLOOR * TILE - e.h;                              // 恰落地（不 settle——防走到墙边）
     const st = w.store;
-    // 墙放在 15px 探测打不到、width/2+16 探测打得到的格（109 w=18 → 探测 25px → 2 格外）
-    st.setTile(42, FLOOR - 1, 1);                          // 脚上一格远墙
-    settle(h, e, 10);
+    st.setTile(42, FLOOR - 2, 1);
     e.vx = 1;
     drive(e, 'fighterAI').call(e, h.hooks, h.hooks.player);
     expect(e.vy).toBe(-6);                                 // 宽探针命中 → 1 格墙跳档
     // 对照：僵尸 3（15px 探针）同场景不跳
-    const h2 = makeHooks(makeWorld(), { x: 70, y: FLOOR - 3 });
+    const w2 = makeWorld();
+    const h2 = makeHooks(w2, { x: 70, y: FLOOR - 3 });
     const z = spawn(h2, 3, 40, FLOOR - 2);
     z.y = FLOOR * TILE - z.h;
-    h2.enemies.pop();
-    h2.enemies.push(z);
+    w2.store.setTile(42, FLOOR - 2, 1);
     z.vx = 1;
-    settle(h2, z, 10);
     drive(z, 'fighterAI').call(z, h2.hooks, h2.hooks.player);
     expect(z.vy).toBe(0);
   });
@@ -245,13 +249,15 @@ describe('R6-B 尖刺/彩虹史莱姆', () => {
   it('专家 184 中距 150px：走单发档（else-if :61796）而非不射/五连扇', () => {
     const w = makeWorld();
     w.difficulty = 1;
-    const h = makeHooks(w, { x: 41, y: FLOOR - 2 });
+    const h = makeHooks(w, { x: 40, y: FLOOR - 2 });
+    h.hooks.player.x = 40 * TILE + 150;                    // 恰 150px ∈ (120, 200)
+    h.hooks.player.y = (FLOOR - 2) * TILE;
     const e = spawn(h, 184, 40, FLOOR - 2);
     e.y = FLOOR * TILE - e.h;
     settle(h, e, 10);
-    tick(h, 120, [e]);
+    tick(h, 200, [e]);
     expect(h.projectiles.length).toBeGreaterThan(0);       // 曾完全不射击
-    expect(h.projectiles.length).toBeLessThan(3);          // 单发节奏（非 5 连扇）
+    expect(h.projectiles.length).toBeLessThan(8);          // 单发节奏（50t 冷却；5 连扇会 ~30 发）
   });
 
   it('专家 184 近距 80px：五连扇（:61783-61793）', () => {
@@ -331,8 +337,12 @@ describe('R6-B 蠕虫两态与速度表', () => {
     const e = spawn(h, 454, 50, FLOOR - 3);
     e.y = (FLOOR - 3) * TILE;
     e.vx = 10; e.vy = 0;
-    for (let i = 0; i < 80; i++) drive(e, 'wormAI').call(e, h.hooks, h.hooks.player);
-    expect(Math.hypot(e.vx, e.vy)).toBeGreaterThan(14);    // 向 20 收敛（曾钳 8）
+    let maxSpd = 0;
+    for (let i = 0; i < 40; i++) {                         // 40t 内到达玩家前（超过则折返臂接管）
+      drive(e, 'wormAI').call(e, h.hooks, h.hooks.player);
+      maxSpd = Math.max(maxSpd, Math.hypot(e.vx, e.vy));
+    }
+    expect(maxSpd).toBeGreaterThan(14);                    // 向 20 收敛（曾钳 8）
   });
 
   it('87/454 折返增速（flag8 :52600-52659）：背向且 |v|>num47/2 → ×1.1', () => {
@@ -382,7 +392,7 @@ describe('R6-B 289/122', () => {
 describe('R6-B AI_107 walker', () => {
   it('卡位 30t → 侧移 width×2 穿墙（:64660-64691，曾只计数无传送）', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 40, y: FLOOR - 3 });
+    const h = makeHooks(w, { x: 90, y: FLOOR - 3 });       // 玩家远处（AABB 相交会清 ai3）
     const e = spawn(h, 552, 40, FLOOR - 2);
     e.y = FLOOR * TILE - e.h;
     settle(h, e, 6);
@@ -391,17 +401,17 @@ describe('R6-B AI_107 walker', () => {
     const x0 = e.x;
     ai107ImprovedWalkers(e, h.hooks, h.hooks.player);
     expect(e.ai3).toBe(30);
-    expect(e.x).toBeCloseTo(x0 + e.w * 2, 4);              // 传送侧移
+    expect(e.x).toBeGreaterThan(x0 + e.w * 1.5);           // 传送侧移 ~2×width（相位伺服另移 ≤1px）
   });
 
   it('卡死小跳：tick 初静止 + ai3==1 → vy=-5（:65030-65034）', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
+    const h = makeHooks(w, { x: 90, y: FLOOR - 3 });
     const e = spawn(h, 552, 40, FLOOR - 2);
     e.y = FLOOR * TILE - e.h;
     settle(h, e, 6);
-    e.vx = 0; e.vy = 0; e.ai3 = 1;
-    ai107ImprovedWalkers(e, h.hooks, h.hooks.player);
-    expect(e.vy).toBe(-5);
+    e.vx = 0; e.vy = 0; e.ai3 = 1;                         // 卡死计数恰 1（settle 末拍在移动 →
+    ai107ImprovedWalkers(e, h.hooks, h.hooks.player);      //  w107NoMove 已删 → 计数器不再进位）
+    expect(e.vy).toBeCloseTo(-5 + 0.3, 6);                 // -5 起跳 + 尾段公共重力 0.3
   });
 });

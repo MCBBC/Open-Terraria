@@ -3,7 +3,10 @@
 // 注意：游戏内小地图（Renderer.colorFor/redrawAll LUT）是独立实现，未走本函数——
 // 两份语义需保持一致（活性 tile > 液体 >32 > 墙 > 天空, MapHelper.cs GetWallType）。
 import { TILE_DEFS, WALL_DEFS , TILE_BY_KEY } from '../data/tiles';
-import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor } from '../data/vanillaMapColors';
+import {
+  vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor,
+  vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG,
+} from '../data/vanillaMapColors';
 import type { TileStore } from '../world/TileStore';
 
 function hexToRgb24(hex: string | undefined, fallback: number): number {
@@ -33,8 +36,12 @@ const liqColor = (lt: number): number => pack(vanillaLiquidColor(lt >= 1 && lt <
 /** tile → 0xRRGGBB。优先级：活性 tile > 液体 > 墙 > 背景（MapHelper 模型）。
  *  必须判 flags（=原版 tile.active()）：生成期 TileRunner 会在空气格写"幽灵 type"
  *  （原版 1:1 语义，数据层保留、finalize 净化）——不判 flags 会把幽灵画成实体，
- *  生成预览的天空就是被它们显形成"杂块"（游戏内渲染 ChunkCache 已判 flags） */
-export function mapColor24(st: TileStore, x: number, y: number): number {
+ *  生成预览的天空就是被它们显形成"杂块"（游戏内渲染 ChunkCache 已判 flags）。
+ *  bg：世界面上下文（groundLevel/rockLevel，tile 单位）——与游戏内小地图
+ *  Renderer.colorFor 尾段同式：y<groundLevel 天空渐变 / y<rockLevel 土层底 /
+ *  其余石层底（MapHelper GetBackgroundType）。缺省 = 浅蓝兜底（无世界面早期） */
+export function mapColor24(st: TileStore, x: number, y: number,
+  bg?: { groundLevel: number; rockLevel: number }): number {
   const i = st.idx(x, y);
   const t = st.flags[i] ? st.type[i] : 0;
   if (t !== 0) {
@@ -61,7 +68,12 @@ export function mapColor24(st: TileStore, x: number, y: number): number {
     const c = WALL_COLORS.get(w);
     return c !== undefined ? c : UNKNOWN_WALL;
   }
-  // 背景：天空渐变（需 worldSurface，预览期 world.groundLevel 传入前用浅蓝兜底）
+  // 背景：天空渐变 / 土层底 / 石层底（对齐 colorFor；无世界面时浅蓝兜底）
+  if (bg && bg.groundLevel > 0) {
+    if (y < bg.groundLevel) return pack(vanillaSkyColor(y, bg.groundLevel));
+    if (y < bg.rockLevel) return pack(VANILLA_DIRT_BG);
+    return pack(VANILLA_ROCK_BG);
+  }
   return SKY_FALLBACK;
 }
 const SKY_FALLBACK = 0x91b9ff; // vanillaSkyColor(浅 y) 近似（生成预览无世界面时的兜底）

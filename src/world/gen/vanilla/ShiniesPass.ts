@@ -72,7 +72,9 @@ export function runGemsPass(st: TileStore, rng: RNG, gs: GenState): void {
   ];
   for (const [key, density] of gems) {
     const type = TILE_BY_KEY[key]!;
-    const count = Math.floor(st.w * density * 0.2);
+    // ★R8-17:原版循环界是 double（cs:15152 `j < num` 无截断）——非整数计数跑
+    // ceil 次。官方三宽度(4200/6400/8400)×六密度恰为整数,自定义宽度曾少 1 发
+    const count = Math.ceil(st.w * density * 0.2 - 1e-9);
     for (let i = 0; i < count; i++) {
       // cs:15144-15152:do-while 至多 3 轮采样(num2 从 3 递减,命中即停);
       // 3 轮全 miss 则 num2==0 跳过 TileRunner。命中判定 = active() && type==1

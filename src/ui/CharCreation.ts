@@ -7,6 +7,7 @@ import {
 } from '../player/Appearance';
 import { compositePaperDoll, dollFrame, walkFrame, IDLE_FRAME } from '../player/PaperDoll';
 import { Lang } from '../i18n/Lang';
+import { ensureVanillaKit } from './vanillaKit';
 import { formatCopper } from './NpcDialog';
 import { randomPlayerName } from '../i18n/RandomText';
 
@@ -43,11 +44,8 @@ const CSS = `
 .sw-char-panel {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 620px; max-width: 96vw; z-index: 20; cursor: auto;
-  background: linear-gradient(160deg, #2b3664, #1c2444);
-  border: 2px solid #7d92d6; border-radius: 6px;
-  padding: 14px 16px; color: #e8e8f4;
+  color: #e8e8f4; padding: 10px 4px;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
-  box-shadow: 0 8px 40px rgba(0,0,0,.6);
 }
 .sw-char-title { text-align: center; font-size: 18px; color: #ffe8a0; margin-bottom: 10px;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
@@ -56,19 +54,21 @@ const CSS = `
 .sw-char-preview { background: #10142c; border: 2px solid #4a5aa0; border-radius: 4px; image-rendering: pixelated; }
 .sw-char-leftbtns { display: flex; gap: 6px; }
 .sw-char-leftbtns button, .sw-char-footer button, .sw-char-diffs button {
-  background: #3a4680; color: #e8e8f4; border: 1px solid #7d92d6; border-radius: 4px;
+  background: rgb(44, 57, 106); color: #e8e8f4; border: 2px solid #3e5195;
   padding: 4px 10px; cursor: pointer; font-family: inherit;
 }
-.sw-char-leftbtns button:hover, .sw-char-footer button:hover, .sw-char-diffs button:hover { background: #4a5aa0; }
+.sw-char-leftbtns button:hover, .sw-char-footer button:hover, .sw-char-diffs button:hover {
+  background: rgb(73, 94, 171); border-color: #ffe745; }
 .sw-char-right { flex: 1; min-width: 0; }
 .sw-char-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
 .sw-char-tabs button {
-  background: #232c52; color: #c8c8e0; border: 1px solid #4a5aa0; border-radius: 4px;
+  background: rgb(44, 57, 106); color: #c8c8e0; border: 2px solid #3e5195;
   padding: 4px 12px; cursor: pointer; font-family: inherit;
 }
-.sw-char-tabs button.active { background: #5a6ac0; color: #fff; }
-.sw-char-content { height: 320px; overflow-y: auto; background: #1a2140; border: 1px solid #3a4680;
-  border-radius: 4px; padding: 10px; }
+.sw-char-tabs button:hover { background: rgb(73, 94, 171); border-color: #ffe745; }
+.sw-char-tabs button.active { background: rgb(73, 94, 171); color: #fff; border-color: #ffe745; }
+.sw-char-content { height: 320px; overflow-y: auto; background: rgba(16, 20, 44, 0.85);
+  border: 1px solid #3a4680; padding: 10px; }
 .sw-char-section { display: flex; flex-direction: column; gap: 8px; }
 .sw-char-row { display: flex; align-items: center; gap: 10px; }
 .sw-char-row span { width: 52px; }
@@ -117,6 +117,7 @@ export class CharCreation {
   private colorInputs = new Map<keyof Appearance, HTMLInputElement>();
 
   constructor(private root: HTMLElement, private cb: CharCreationCallbacks, opts: CharCreationOptions = {}) {
+    ensureVanillaKit();
     this.dresser = opts.dresser === true;
     this.salon = opts.hairSalon === true;
     this.priceOf = opts.priceOf ?? null;
@@ -132,7 +133,7 @@ export class CharCreation {
     }
 
     this.panel = document.createElement('div');
-    this.panel.className = 'sw-char-panel';
+    this.panel.className = 'sw-char-panel sw-vpanel';
     const tabs = this.dresser
       ? `<button data-tab="look">${Lang.text('Mods.SandboxWorld.CharCreate.Appearance')}</button>`
         + `<button data-tab="color">${Lang.text('Mods.SandboxWorld.CharCreate.Colors')}</button>`

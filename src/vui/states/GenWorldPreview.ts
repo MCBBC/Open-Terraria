@@ -89,8 +89,11 @@ export class GenWorldPreview extends UIElement {
     let n = COLUMNS_PER_FRAME;
     while (n-- > 0) {
       const x = this.sweepCol;
+      const bg = world.groundLevel > 0
+        ? { groundLevel: world.groundLevel, rockLevel: world.rockLevel }
+        : undefined;
       for (let y = 0; y < h; y++) {
-        const c = mapColor24(st, x, y);
+        const c = mapColor24(st, x, y, bg);
         const i = y * 4;
         data[i] = (c >> 16) & 255;
         data[i + 1] = (c >> 8) & 255;
