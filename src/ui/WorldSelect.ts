@@ -25,20 +25,68 @@ const BTN_SRC = (n: string): string => `sprites/vanilla-ui/${n}.png`;
  *  "Icon"+(困难?"Hallow":"")+(腐化?"Corruption":"Crimson")+秘密种子后缀；
  *  drunk=CorruptionCrimson(evilVariants:false)、skyblock 无前后缀变体。
  *  多秘密种子原版轮播（UICyclingImage）——取 vanilla 优先序首匹配（登记未轮播） */
-function worldIconName(m: WorldMeta): string {
+export function worldIconName(m: WorldMeta): string {
   const f = parseSeed(m.seed).flags;
   const hard = m.hardMode ? 'Hallow' : '';
   const evil = m.evil === 1 ? 'Crimson' : 'Corruption';
   let seed = '';
-  if (f.drunkWorld) seed = 'CorruptionCrimson';
-  else if (f.getGoodWorld) seed = 'FTW';
+  let evilVariants = true;
+  if (f.drunkWorld) {
+    // 原版 GetSeedIcon("CorruptionCrimson", evilVariants:false)（AWorldListItem.cs:133）
+    // ——drunk 图标名【不含邪恶段】，"CorruptionCrimson" 即完整后缀；此前 evil 段
+    // 照拼 → UI_IconCorruptionCorruptionCrimson 404（2026-08-24 用户报）
+    seed = 'CorruptionCrimson';
+    evilVariants = false;
+  } else if (f.getGoodWorld) seed = 'FTW';
   else if (f.notTheBees) seed = 'NotTheBees';
   else if (f.tenthAnniversary) seed = 'Anniversary';
   else if (f.theConstant) seed = 'DontStarve';
   else if (f.remix) seed = 'Remix';
   else if (f.noTraps) seed = 'Traps';
   else if (f.skyblock) return 'UI_IconSkyblock';
-  return `UI_Icon${hard}${evil}${seed}`;
+  return `UI_Icon${hard}${evilVariants ? evil : ''}${seed}`;
+}
+
+/** 完整种子串（WorldFileData.GetFullSeedText 1:1）：
+ *  "{尺寸}.{难度+1}.{邪恶}.{秘密种子和}.{seed文本}"——原版种子按钮复制的就是它，
+ *  粘贴进世界创建即可复现同参数世界（WorldGen.cs:11095 TryApplyingCopiedSeed）。
+ *  尺寸 1/2/3 = 4200×1200/6400×1800/8400×2400；邪恶 1 腐化 2 猩红；
+ *  种子和 = drunk1/bees2/ftw4/anniv8/dontstarve16/remix32/notraps64/skyblock256
+ *  （WorldFileData.GetSerializedSeedsSum；zenith 128 未接） */
+export function fullSeedText(m: WorldMeta): string {
+  const size = m.w === 4200 && m.h === 1200 ? 1 : m.w === 6400 && m.h === 1800 ? 2 : m.w === 8400 && m.h === 2400 ? 3 : 0;
+  const evilNum = m.evil === 0 ? 1 : m.evil === 1 ? 2 : 0;
+  const f = parseSeed(m.seed).flags;
+  let sum = 0;
+  if (f.drunkWorld) sum += 1;
+  if (f.notTheBees) sum += 2;
+  if (f.getGoodWorld) sum += 4;
+  if (f.tenthAnniversary) sum += 8;
+  if (f.theConstant) sum += 16;
+  if (f.remix) sum += 32;
+  if (f.noTraps) sum += 64;
+  if (f.skyblock) sum += 256;
+  return `${size}.${m.difficulty + 1}.${evilNum}.${sum}.${m.seed}`;
+}
+
+/** 剪贴板写入（原版 Platform.Get<IClipboard>().Value；clipboard API 失败回退
+ *  隐藏 textarea + execCommand——非安全上下文 http 下 clipboard API 不可用） */
+function copyToClipboard(text: string): void {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => copyFallback(text));
+  } else {
+    copyFallback(text);
+  }
+}
+function copyFallback(text: string): void {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch { /* 无剪贴板环境静默 */ }
+  ta.remove();
 }
 
 export class WorldSelectPanel {
@@ -117,8 +165,16 @@ export class WorldSelectPanel {
           await this.store.setFavorite(m.id, !m.favorite);
           await this.reload();
         });
-      this.iconBtn(btns, 'UI_CharCreation_Copy', Lang.text('Mods.SandboxWorld.WorldSelect.Copy'), async () => {
-        await this.store.duplicate(m);
+      // 原版按钮序（UIWorldListItem.cs:95-158）：Play/Favorite/Seed/Rename/Delete——
+      // 种子钮复制完整种子串（SeedButtonClick :127-131），非"复制世界"
+      this.iconBtn(btns, 'UI_ButtonSeed', Lang.text('UI.CopySeed', fullSeedText(m)), () => {
+        copyToClipboard(fullSeedText(m));
+        this.setLabel(Lang.text('UI.SeedCopied'), false);
+      });
+      this.iconBtn(btns, 'UI_ButtonRename', Lang.text('UI.Rename'), async () => {
+        const name = prompt(Lang.text('UI.Rename'), m.name);
+        if (name == null || name.trim() === '') return;
+        await this.store.rename(m.id, name.trim());
         await this.reload();
       });
       const del = document.createElement('div');

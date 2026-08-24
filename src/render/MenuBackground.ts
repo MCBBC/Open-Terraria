@@ -80,6 +80,15 @@ const CORRUPT_STYLES: Record<number, [number, number, number]> = {
   4: [240, 241, 242], 51: [324, 323, 322], 52: [324, 226, 322],
 };
 
+/** DrawSurfaceBG_GetLayerYOffset（:59172-59220）山层逐贴图 Y 偏移——
+ *  补偿各贴图内容行位置差异（176 内容在 row466/942 → −760 拉回视觉带） */
+const MNT_YOFF: Record<number, number> = {
+  59: -550, 93: -50, 168: -50, 169: -50, 170: -50, 171: -100, 172: 130,
+  176: -760, 177: -200, 179: -100, 180: -350, 181: -350, 182: -350, 183: -350,
+  246: -150, 247: -150, 263: -700, 269: -600, 270: -50, 271: -300, 272: -380,
+  277: -260, 278: -120, 280: -170, 281: -300, 283: -800, 332: -25, 340: -25,
+};
+
 /** 供 TitleMenu 读取的菜单时间状态（LogoA/LogoB 昼夜交叉淡化用） */
 export const menuTimeInfo = { timeOfDay: 13500 / 54000 * 0.625 + 0.1875, dayFactor: 1 };
 
@@ -351,19 +360,21 @@ export class MenuBackground {
 
   /** 地表背景全栈：远山（跨槽共用，bgAlphaFarBackLayer 驱动）+ 双槽树层按
    *  bgAlphaFrontLayer 交叉淡化（昼 Forest1 / 夜 Corruption）。
-   *  ★几何 = 绝对 backbuffer 像素（原版菜单层常量不经 UIScaleMatrix 缩放，
-   *  DrawSurfaceBG 直接以 backbuffer 尺寸画）——曾按 canvasH/1080 缩放,高层
-   *  窗口覆盖比例虚增到 ~90%（用户实报"占屏 70-80% 比原版靠上",2026-08-24） */
+   *  ★几何 = 原版系统 1:1：gameMenu Y 常量（山 100/230、树 320/400/480）+
+   *  num4=2 + 逐贴图 Y 偏移表（MNT_YOFF，补偿各贴图内容行差异——176 内容在
+   *  row466/942，无 −760 偏移会画到屏幕外=用户实报"浮空岛孤层"根因,
+   *  2026-08-24）。此前分数拟合版假设内容从贴图顶开始,只对 93 族成立 */
   private drawForest(): void {
     const st = FOREST_STYLES[this.style] ?? FOREST_STYLES[1];
     const tint = this.layerTint();
-    // 远山两带（Step1 :59246-59257 y=100 / Step2 :59316-59319 y=230 startX−500；
-    // scale=1×num4=2、par 0.15 共用）
+    // 远山两带（Step1 y=100 / Step2 y=230 startX−500；scale=1×num4=2、par 0.15）
     const m0 = this.img(st.mnt[0]);
-    if (m0) this.drawLayer(this.tinted(st.mnt[0], m0, tint), 0.15, 100, 2, 0);
+    if (m0) this.drawLayer(this.tinted(st.mnt[0], m0, tint), 0.15,
+      100 + (MNT_YOFF[st.mnt[0]] ?? 0), 2, 0);
     const m1 = this.img(st.mnt[1]);
-    if (m1) this.drawLayer(this.tinted(st.mnt[1], m1, tint), 0.15, 230, 2, -500);
-    // 槽 Forest1（bgStyle 0）：树三层（_Forest gameMenu：y=320/400/480）
+    if (m1) this.drawLayer(this.tinted(st.mnt[1], m1, tint), 0.15,
+      230 + (MNT_YOFF[st.mnt[1]] ?? 0), 2, -500);
+    // 槽 Forest1（bgStyle 0）：树三层（y=320/400/480，scale 1.25/1.31/1.34 ×num4）
     if (this.alphaF[0] > 0.01) {
       const a = this.alphaF[0];
       this.drawTreeSlot(0, st.trees[0], 320, 1.25 * 2, 0.4, 0, a, tint);

@@ -80,7 +80,9 @@ function dealContacts(
     const dmg = crit ? self.damage * 2 : self.damage;
     const kdir = Math.sign((e.x + e.w / 2) - self.cx) || 1;
     e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit);   // 音/飘值=单点
-    applyProjStatus(self.projId, ent as unknown as Record<string, number>);
+    // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t;同 Arrow.ts:3260 先例）
+    applyProjStatus(self.projId, ent as unknown as Record<string, number>,
+      { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
     // 命中回写共享表（StrikeNPC :14343 SetMeleeHitCooldown——玩家挥击弧同帧不再结算）
     gate?.sharedHits?.add(e.id);
     onHit?.(ent as unknown as HitTarget);
@@ -772,7 +774,9 @@ export class StormLightning extends Entity {
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign(e.x + e.w / 2 - this.cx) || 1;
       e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit);
-      applyProjStatus(this.projId, ent as unknown as Record<string, number>);
+      // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
+      applyProjStatus(this.projId, ent as unknown as Record<string, number>,
+        { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
     }
   }
 
@@ -932,7 +936,7 @@ function remapL(fromValue: number, fromMin: number, fromMax: number,
  *  AI_208（:37576-37750）两态：
  *  - 蓄力态（ai1==0）：挂玩家 RotatedRelativePoint(MountedCenter)、每 3t 朝鼠标转向
  *    （速 Remap(ai0,0,60,4,15)）、每 20t 播 GlacierFang_Charging + CheckMana 扣蓝
- *    （ai0≤60）、ai0 += GetSlowMagicUseRate()（0.4/1.0）；ai0≥60 强制松手（:37628）
+ *    （ai0≤60）、ai0 += GetSlowMagicUseRate()（1.0 常态/0.4 空蓝,Player.cs:47434-47442）；ai0≥60 强制松手（:37628）
  *  - 释放态（ai1==1 首帧）：伤 ×Remap(charge,0,60,1,4)、kb ×4、penetrate 1→3、
  *    Muzzle 音 + 15 组尘；此后 extraUpdates 1-2、重力 Remap(charge,0,45,0.15,0.025)
  *    钳 vy 16、tileCollide=true
@@ -945,7 +949,7 @@ export interface GlacierFangCtl {
   aim: () => { x: number; y: number };
   /** CheckMana(pay:true)（每 20t 蓄力扣蓝；ManaV2 蓝不足照充） */
   payMana: () => void;
-  /** GetSlowMagicUseRate()（0.4 正常 / 1.0 空蓝过载） */
+  /** GetSlowMagicUseRate()（1.0 正常 / 0.4 空蓝过载,Player.cs:47434-47442） */
   chargeRate: () => number;
 }
 

@@ -1358,7 +1358,9 @@ export class Player extends Entity {
           if (accVid === 3991) { critMagic += 5; dmgMagic += 0.05; }
         }
         if (fx.manaRegenBonus) manaRegenBonus += fx.manaRegenBonus;           // 魔力斗篷 982（:14383）
-        if (fx.manaRegenDelayBonus) manaRegenDelayBonus += fx.manaRegenDelayBonus; // 982（:14382）
+        // 1458 已删 982/6188/6189 的 delayBonus++（:15044）,数据面 vanilla-accfx 三键已清——
+        // 此消费行恒 0,保留仅为 equipStats 字段完整性
+        if (fx.manaRegenDelayBonus) manaRegenDelayBonus += fx.manaRegenDelayBonus;
         // ---- 配饰审计 P0 批（2026-08-22）消费 ----
         if (fx.fishingTackle) fishingTackle = true;   // 钓具箱族 2375/3721/5064（:14123-14140）
         if (fx.fishingLine) fishingLine = true;       // 高测钓线族 2373/3721/5064（R14-E6）
@@ -2545,7 +2547,8 @@ export class Player extends Entity {
     // 与魔力斗篷 982 :14379-14383 重算）。★1458：瓶中星 buff 158 的 delayBonus+0.5
     // 已删（1458 Player.cs:10020——手环族堆叠致惩罚期衰减溢出=用武器也满速回蓝的
     // 修复半边;regen+10 保留）;手环族 982/6188/6189 的 delayBonus++ 同批删除
-    // （1458 :15044）——本仓手环族本就未实装 delay 项,终态天然一致
+    // （1458 :15044）——1458 删除,数据面已同步清零（vanilla-accfx.json 三键已删,
+    // equipStats.manaRegenDelayBonus 恒 0,惩罚期衰减恒 1/tick）
     const mRegenBonus = this.equipStats.manaRegenBonus
       + (this.buffs.has(BuffType.StarInBottle) ? 10 : 0);
     const mDelayBonus = this.equipStats.manaRegenDelayBonus;

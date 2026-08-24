@@ -2,6 +2,7 @@
 // 冰牙 1115/悠悠球 per-hit 伴生弹 1125·1130·1134·1135/骨弹 1111 数据面/禁戒魂灵 1119)。
 // 锚定 Terarria1457 反编译源码终值(行号见各用例);实体实现在 src/entities/proj1457.ts。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { TileStore } from '../src/world/TileStore';
 import type { GameHooks } from '../src/entities/types';
 import {
@@ -11,6 +12,8 @@ import {
 } from '../src/entities/proj1457';
 import { YoyoShotProj } from '../src/entities/WeaponProj';
 import { MinionProj } from '../src/entities/MinionProj';
+import { Player } from '../src/entities/Player';
+import { Inventory } from '../src/items/Inventory';
 import { combatWeapon } from '../src/data/vanillaItemCombat';
 
 type HurtArgs = [number, number, number, unknown, number?, boolean?, number?, boolean?];
@@ -330,6 +333,20 @@ describe('1115 GlacierFangShot(AI_208 蓄力冰矛)', () => {
     expect(gf.dead).toBe(false);
     for (let i = 0; i < 200 && !gf.dead; i++) gf.fixedUpdate(1 / 60, g);
     expect(gf.dead).toBe(true);
+  });
+  // R17 蓝队回归（红队缺陷②）:chargeRate 曾反相（slowMagicUse?1:0.4）——常态蓄力慢 2.5×、
+  // 空蓝反而全速,与原版 ai[0]+=GetSlowMagicUseRate()（Projectile.cs:37626;Player.cs:47434-47442
+  // 常态 1.0/空蓝 1/2.5=0.4）正好颠倒。现 Game.ts 接线 = player.getSlowMagicUseRate()（同 460 充能爆破炮先例）
+  it('chargeRate 两态:常态 1/t、空蓝过载(slowMagicUse) 0.4/t（GetSlowMagicUseRate :47434-47442）', () => {
+    const p = new Player(0, 0, new Inventory());
+    expect(p.getSlowMagicUseRate()).toBe(1);                     // !slowMagicUse → 1f（:47436-47438）
+    p.slowMagicUse = true;
+    expect(p.getSlowMagicUseRate()).toBeCloseTo(0.4);            // 1/2.5（:47439-47441）
+  });
+  it('Game.ts 接线:chargeRate = player.getSlowMagicUseRate()（反相三元已删,R17 缺陷②回归锁）', () => {
+    const src = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/shoot === 1115[\s\S]{0,900}?chargeRate: \(\) => this\.player\.getSlowMagicUseRate\(\)/);
+    expect(src.includes('slowMagicUse ? 1 : 0.4')).toBe(false);  // 反相形态不得复活
   });
 });
 

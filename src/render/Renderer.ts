@@ -3055,6 +3055,21 @@ export class Renderer {
     // 7. 光照合成
     this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
+    // 7-死亡灰化（★用户需求 2026-08-24 修订：灰化只作用于【世界画面】——地形/实体/
+    //    弹幕；右上 UI（小地图/信息饰品）、左下信息列表、死亡文字（保持偏红）不生效。
+    //    原实现挂 13 段整帧自绘 = HUD/文字全被去饱和，与需求冲突已挪此。
+    //    immuneAlpha ramp → grayscale 滤镜自绘主画布（此时画布=世界+光照,HUD 未画）。
+    //    原版无此全屏效果（GetDeathAlpha 只作用于死亡 UI 文字）=本仓视觉增强；
+    //    filter 不支持的环境静默跳过）
+    if (player.dead && player.immuneAlpha > 0 && 'filter' in ctx) {
+      const k = (Math.min(255, player.immuneAlpha) / 255) * 0.85;   // 上限 85% 灰度
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.filter = `grayscale(${k.toFixed(3)})`;
+      ctx.drawImage(ctx.canvas, 0, 0);
+      ctx.restore();
+    }
+
     // 7-涂层. 荧光涂层叠层（TileDrawing.cs:6727-6731 DrawTiles_GetLightOverride →
     //    Color.White；:4425-4427 GetTileLight 同；9/4-slice 档 _glowPaintColorSlices
     //    :160-172 全 1 同效）——涂层格在乘光后原样叠回 = "无视光照全亮"。
@@ -3333,21 +3348,9 @@ export class Renderer {
     //      100px 屏幕 10 气泡；岩浆宽限耗损时换火焰条）
     this.breathMeter.draw(ctx, player, cam, viewH, this.atlas, this.playerInventory);
 
-    // 12. 死亡画面（DrawInterface_35_YouDied Main.cs:44765 + 1457 跳过提示）
+    // 12. 死亡画面（DrawInterface_35_YouDied Main.cs:44765 + 1457 跳过提示）——
+    //     文字保持偏红原色（灰化已挪 7 段只作用世界画面,2026-08-24 用户修订）
     if (player.dead) this.drawDeathScreen(ctx, player, viewW, viewH);
-
-    // 13. 死亡色调（★用户需求：整帧色调变灰如"遗照"——非加遮罩；immuneAlpha ramp
-    //     → grayscale 滤镜自绘整帧（含世界+HUD+死亡文字全部去饱和）。原版无此
-    //     全屏效果（GetDeathAlpha 只作用于死亡 UI 文字）=本仓视觉增强。
-    //     filter 不支持的环境（旧 Safari）静默跳过=保持彩色，不回退遮罩）
-    if (player.dead && player.immuneAlpha > 0 && 'filter' in ctx) {
-      const k = (Math.min(255, player.immuneAlpha) / 255) * 0.85;   // 上限 85% 灰度（保留微弱色相更近"遗照"）
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.filter = `grayscale(${k.toFixed(3)})`;
-      ctx.drawImage(ctx.canvas, 0, 0);
-      ctx.restore();                                                 // restore 复位 filter
-    }
   }
 
   /** 死亡 UI（原版 DrawInterface_35_YouDied :44765-44801 1:1 + 1457 跳过提示）：
@@ -4210,6 +4213,7 @@ export class Renderer {
     87: 56, 88: 56, 89: 56, 90: 56, 91: 56, 92: 56, 134: 30, 135: 30, 136: 30, 169: 8,
     174: 6, 369: 2, 376: 6, 579: -2, 612: 2, 613: 2,
     269: -2, 270: -2, 271: -2, 274: -2, 277: -2,
+    671: 10, 672: 10, 673: 10, 674: 10, 675: 10,   // 笼中鸟族（switch 尾 :22385-22389,曾漏）
   };
 
   /** 受伤实体血条（DrawInterface_14_EntityHealthBars Main.cs:45203 + DrawHealthBar :21748）：
@@ -5224,8 +5228,11 @@ export class Renderer {
         // 血管尾/眼球上方。碰撞盒尺寸保持原版,绘制整体下移 (质心−帧中心)
         // 让眼球主体居中于盒(用户 2026-08-11 拍板;张嘴帧偏移略大)
         // 通用锚:帧中心钉盒中心(+num46/num47 下沉,见上方 translate 注)。
+        // addY 保持纹理单位（XNA `return num * npc.scale` :22393——偏移随 npc.scale
+        // 缩放,ctx.scale(scale) 天然乘回;曾误 /scale 除反,专家档 13-15/134-136
+        // ×1.2/×1.05 时与原版差 5-6px）。
         // EoC 额外 +23/+30 眼球修正（用户校准偏差,叠加在通用锚上）
-        const anchorY = -r.sh / 2 + addY / scale;
+        const anchorY = -r.sh / 2 + addY;
         const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
         // 393 飞碟炮塔绘制 origin+UnitY×(−8)（Main.cs:24208-24213 num225=-8 仅 393;
         // 台账登记偏差本批清偿）：XNA origin 上移 8 纹素 = 精灵整体下移 8×scale 世界 px,
@@ -5298,7 +5305,7 @@ export class Renderer {
           //   ③ lighter(tinted, ga=1) → +T·a·color.rgb 预乘加法贡献
           // （GetColor rgb 不乘 color.A——ga=colorA/255 会把贡献也乘 0.392）
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, drawColor);
-          const anchorY2 = -r.sh / 2 + addY / scale;
+          const anchorY2 = -r.sh / 2 + addY;
           const anchorY = anchorY2 + eocOff;
           if (tinted) {
             ctx.globalCompositeOperation = 'destination-out';

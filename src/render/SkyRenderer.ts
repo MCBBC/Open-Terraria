@@ -3557,6 +3557,17 @@ export class SkyRenderer {
       if (m.t >= m.life) this.meteor = null;
       void dtMs;
     }
+    // 原版天空贴图深度门（Main.cs:61492 `screenPosition.Y < worldSurface*16+16`）：
+    // 相机【顶】低于地表线+16px 时天空整层不画——由（受光的）地下分层背景全覆盖,
+    // 无墙/透明区露出的是暗色洞穴背景。曾无门=地底透出未衰减亮蓝天(用户实报:
+    // "地底下没有背景墙体的远景没有光衰减")。状态更新(晨昏/极光/天气罩)仍照跑
+    // 供光种/帧状态消费,只跳过绘制并以黑打底(原版 skyTarget Clear(Transparent)
+    // 合成底=黑同效;地下带层缝隙兜底)。
+    if (screenTopWorld >= this.fx.surfaceY + 16) {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, viewW, viewH);
+      return;
+    }
     const [top, bottom] = this.skyColors(t);
     // 天空实体 GetColor 的 bgColor（Main.ColorOfTheSkies）近似源——本帧色缓存
     this.lastSkyTop = top;

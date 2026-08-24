@@ -264,7 +264,10 @@ function hitEnemies(
     e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
     onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
-    applyProjStatus(me.projId, e as unknown as Record<string, number>);
+    // + 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意命中;
+    //   本环仅玩家弹路径可达=天然 !npcProj,同 Arrow.ts:3260 先例）
+    applyProjStatus(me.projId, e as unknown as Record<string, number>,
+      { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
     // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
     // 时长 Player.cs:6141-6171;挥砍侧同表在 Game 挥击结算）
     if (me.meleeProj) {
@@ -3723,7 +3726,9 @@ export class DaybreakFlare extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       e.hurt(dmg, (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit);
-      applyProjStatus(this.projId, e as unknown as Record<string, number>);   // :10691-10693
+      // :10691-10693 + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
+      applyProjStatus(this.projId, e as unknown as Record<string, number>,
+        { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
       // ---- 附着（:12421-12428）----
       this.ai0 = 1;
       this.ai1 = e.id;

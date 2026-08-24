@@ -11186,7 +11186,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 if (this.player.mana >= cost) this.player.mana -= cost;
                 else { this.player.mana = 0; this.player.slowMagicUse = true; }
               },
-              chargeRate: () => (this.player.slowMagicUse ? 1 : 0.4),   // GetSlowMagicUseRate :47434-47440
+              chargeRate: () => this.player.getSlowMagicUseRate(),   // GetSlowMagicUseRate :47434-47442（常态 1.0/空蓝 0.4）
             });
           gf.critChance = critTotal;
           gf.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);

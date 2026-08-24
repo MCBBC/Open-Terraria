@@ -41,7 +41,7 @@ export enum BuffType {
   // ---- 环境光环 + 工作站 buff（SceneMetrics 扫描 / Player.cs:25235-25266 授予链）----
   Sunflower = 19,    // 向日葵(146,光环)：moveSpeed +0.1 再 ×1.1（两步复合 ≈×1.21,Player.cs:10598）
   CatBast = 20,      // 猫堡垒(215,光环)：statDefense +5（:9778）
-  StarInBottle = 21, // 瓶中星(158,光环)：manaRegenDelayBonus+0.5 + manaRegenBonus+10（:9629-9632）
+  StarInBottle = 21, // 瓶中星(158,光环)：manaRegenBonus+10（:9629-9632;★1458 已删 delayBonus+0.5,Player.cs:10020）
   PeaceCandle = 22,  // 和平蜡烛(157,光环)：刷怪 spawnRate×1.3/max×0.7（NPC.cs:645）
   Clairvoyance = 23, // 预见(29,水晶球右键,1800s)：manaMax+20/magicDmg+5%/crit+2/manaCost-2%（:11481）
   Sharpened = 24,    // 磨刀石(159,右键)：近战穿甲 +12（:9625→Player.armorPenBase:1090）

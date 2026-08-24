@@ -63,12 +63,12 @@ describe('配饰审计 P0：魔力四件 statManaMax2（★1457 基准 Player.cs
     }
   });
 
-  it('982 魔力再生手环：equipStats.mana 40 + manaRegenBonus 60 + manaRegenDelayBonus 1（1457 :15042-15046,与 6188/6189 同档）', () => {
+  it('982 魔力再生手环：equipStats.mana 40 + manaRegenBonus 60,delayBonus 恒 0（★1458 :15037-15046 已删 delayBonus++,数据面 vanilla-accfx 三键同步删,与 6188/6189 同档）', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.armor[3] = { id: _iid(982), stack: 1 };
     expect(p.equipStats.mana).toBe(40);
     expect(p.equipStats.manaRegenBonus).toBe(60);
-    expect(p.equipStats.manaRegenDelayBonus).toBe(1);
+    expect(p.equipStats.manaRegenDelayBonus).toBe(0);
   });
 });
 

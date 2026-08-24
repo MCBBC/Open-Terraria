@@ -402,8 +402,11 @@ export class WhipProj extends Entity {
         e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068
         // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）。
         //  1104：Slimed(137) 照表;OnFire(24) 表项抑制、按上方窗口直投（:11255-11272）
+        // 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意
+        // 玩家弹命中,鞭亦在其列——IsAWhip 不设门）
+        const bandCtx = { catalystBand: wpOwner?.equipStats.catalystBand === true };
         if (this.projId === 1104) {
-          applyProjStatus(this.projId, e as unknown as Record<string, number>, { suppressBuff: 24 });
+          applyProjStatus(this.projId, e as unknown as Record<string, number>, { suppressBuff: 24, ...bandCtx });
           if (spark1104 && tipBox1104
             && tipBox1104.x < e.x + e.w && tipBox1104.x + tipBox1104.w > e.x
             && tipBox1104.y < e.y + e.h && tipBox1104.y + tipBox1104.h > e.y) {
@@ -411,7 +414,7 @@ export class WhipProj extends Entity {
               60 * (3 + Math.floor(Math.random() * 3)));   // 60×Next(3,6)=180-300t
           }
         } else {
-          applyProjStatus(this.projId, e as unknown as Record<string, number>);
+          applyProjStatus(this.projId, e as unknown as Record<string, number>, bandCtx);
         }
         // 武器浸剂(StatusNPC:10559 门含 whip:IsAWhip)——鞭命中同享药剂 debuff
         applyMeleeImbue((game.player as unknown as { buffs: { has: (b: never) => boolean } }).buffs,

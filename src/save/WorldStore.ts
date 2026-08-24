@@ -113,6 +113,15 @@ export class WorldStore {
     return copy;
   }
 
+  /** 重命名（原版 UIWorldListItem.RenameButtonClick → UIVirtualKeyboard；
+   *  本作用 prompt 等价交互）——仅改索引元数据，存档文件不动 */
+  async rename(id: number, name: string) {
+    const m = this.index.find((x) => x.id === id);
+    if (!m) return;
+    m.name = name;
+    await this.saveIndex();
+  }
+
   async setFavorite(id: number, v: boolean) {
     const m = this.index.find((x) => x.id === id);
     if (!m) return;

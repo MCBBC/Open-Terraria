@@ -18,6 +18,8 @@ export interface CharSelectFlow {
 
 const CSS = `
 .sw-vsel {
+  /* 95% 微半透(2026-08-24 用户要求"只要一点点")——世界/角色选择面板同族 */
+  opacity: 0.95;
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: min(80%, 650px); max-height: 86vh; z-index: 20;
   display: flex; flex-direction: column;

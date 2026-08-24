@@ -428,7 +428,10 @@ export class TrapShot extends Entity {
         // StatusNPC 命中 debuff（Projectile.cs:10555 表驱动——毒飞镖 98 掷中必染
         // Poison 600t / 超级镖 184 900t :11041/:11045;矛/尖球/巨石/喷泉等表内无条目
         // 天然空掷）。曾整类漏接 = 飞镖陷阱永不上毒（2026-08-19 补）
-        if (trapProjId !== undefined) applyProjStatus(trapProjId, e as unknown as Record<string, number>);
+        // 陷阱弹 owner=Main.myPlayer（SetupProjectile :49353 owner==255→myPlayer）,
+        // 催化指环 6185 同样生效（StatusNPC :11192-11196）
+        if (trapProjId !== undefined) applyProjStatus(trapProjId, e as unknown as Record<string, number>,
+          { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
         e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
         if (!pierce) {
           if (st.shatterDust) this.shatter(game);

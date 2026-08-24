@@ -453,7 +453,9 @@ export class MagicMissileProj extends Entity {
       }
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      applyProjStatus(this.projId, e as unknown as Record<string, number>);
+      // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
+      applyProjStatus(this.projId, e as unknown as Record<string, number>,
+        { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
       if (this.nebulaCb) this.nebulaCb();
       e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);   // 音/飘值=单点
       // 命中清追踪（StrikeNPC :13260-13283：34 仅 ai[0]==-1 档清 / 79 恒清 + 彩虹粒子；
@@ -722,7 +724,9 @@ export class FlyingKnifeProj extends Entity {
       this.hitCd.set(e.id, 10);
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      applyProjStatus(this.projId, e as unknown as Record<string, number>);
+      // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
+      applyProjStatus(this.projId, e as unknown as Record<string, number>,
+        { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
       e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点
     }
   }

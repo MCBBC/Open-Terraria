@@ -2616,7 +2616,9 @@ export class MinionProj extends Entity {
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
                 en.hurt(dmgOf(), Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, false, 1); // 单发弹语义
                 applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
-                applyProjStatus(boomProj, en as unknown as Record<string, number>, { setHuntressT2: ownerH });
+                // 爆炸弹 694 族同属玩家弹——催化指环 6185 亦生效（StatusNPC :11192-11196）
+                applyProjStatus(boomProj, en as unknown as Record<string, number>, { setHuntressT2: ownerH,
+                  catalystBand: this.ownerRef()?.equipStats.catalystBand });
                 boom++;
               }
             }
