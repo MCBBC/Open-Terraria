@@ -94,8 +94,16 @@ export function showSplash(opts: {
     ? [0, 75, 200, 75].map((v) => v * 16.67)
     : [90, 410, 620, 60].map((v) => v * 16.67);
   const flowerImg = new Image();
-  flowerImg.src = 'sprites/vanilla-ui/UI_Sunflower_Loading.png';   // UI/ 子目录展平在 vanilla-ui/
+  // 懒加载(2026-08-24 用户报菜单白载):向日葵只在"时序尽+未加载完"的等待期
+  // 显示,快路径(资源秒开)整场不出现——首帧不设 src,等待期首次需要时才拉
   const fctx = flower.getContext('2d')!;
+  let flowerSrcSet = false;
+  const ensureFlowerSrc = () => {
+    if (!flowerSrcSet) {
+      flowerSrcSet = true;
+      flowerImg.src = 'sprites/vanilla-ui/UI_Sunflower_Loading.png'; // UI/ 子目录展平在 vanilla-ui/
+    }
+  };
 
   let loadingDone = false;
   let removed = false;
@@ -122,9 +130,11 @@ export function showSplash(opts: {
     // LoadingSunflower 显隐（Main.cs:53417-53422 1:1）：时序走完且未加载完 →
     // Color.White 全亮（num==1 分支）；时序内但已超 10s（num2>num）→ 随 b 淡显；
     // 前 10s 不画。加载完 → 隐（收场在即）
+    const flowerVisible = !loadingDone && (timelineOver || (performance.now() - t0) > 10000);
+    if (flowerVisible) ensureFlowerSrc();
     flower.style.opacity = loadingDone ? '0'
       : timelineOver ? '1'
-        : ((performance.now() - t0) > 10000 ? String(b / 255) : '0');
+        : (flowerVisible ? String(b / 255) : '0');
   };
   const step = () => {
     if (removed) return;

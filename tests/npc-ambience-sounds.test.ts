@@ -49,7 +49,8 @@ describe('环境声三表数据对账', () => {
     expect(CRITTER_SOUNDS[362]?.denom).toBe(200);
     expect(CRITTER_SOUNDS[362]?.gate).toBe('day');
     expect(CRITTER_SOUNDS[361]?.gate).toBe('still');
-    expect(CRITTER_SOUNDS[74]?.pool).toEqual(['Zombie_14', 'Zombie_18']);
+    // 鸟 74：原版 Next(3)!=0→style14(2/3) else style18(1/3)——重复项表达精确权重(R22)
+    expect(CRITTER_SOUNDS[74]?.pool).toEqual(['Zombie_14', 'Zombie_14', 'Zombie_18']);
     expect(CRITTER_SOUNDS[611]?.gate).toBe('night');
   });
   it('引用的 wav 全部在库（防键拼错静默）', () => {

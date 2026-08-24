@@ -140,14 +140,15 @@ async function loadAssets() {
     //  · 'Inventory_' 前缀移除——Inventory_Back1-15/Tick 全是游戏内背包 UI，菜单
     //    零消费；进游戏后 vui 懒载自愈（首帧 null 下帧补）
     //  · 排除表增补：UI_UI_BossBar/UI_MapPing（游戏内 HUD，绘制路径 vui 懒载）、
-    //    UI_TitleLinkButtons（原版标题链接钮，本作无消费方）
+    //    UI_TitleLinkButtons（原版标题链接钮，本作无消费方）、
+//    UI_Sunflower_Loading（splash 向日葵已改等待期懒载直拉，不走 atlas）
     await atlas.preloadUiPrefix(
       ['UI_', 'Logo'], undefined,
       ['UI_Bestiary', 'UI_Minimap', 'UI_WorldCreation', 'UI_CharCreation',
        'UI_PlayerResourceSets', 'UI_Workshop', 'UI_Creative', 'UI_Wires',
        'UI_DisplaySlots', 'UI_Achievement', 'UI_Craft', 'UI_InfoIcon',
        'UI_Settings', 'UI_Camera', 'UI_UI_BossBar', 'UI_MapPing',
-       'UI_TitleLinkButtons'],
+       'UI_TitleLinkButtons', 'UI_Sunflower_Loading'],
     );
   } catch {
     atlas = null; // 素材缺失时回退程序化生成

@@ -15,9 +15,12 @@ export function bitmapize(map: Map<string, Baked>, key: string): void {
   }).catch(() => { /* 保持 canvas */ });
 }
 
-/** 淘汰/清空缓存时按类型释放:canvas width=0 即还回后备;bitmap close() 释放 */
+/** 淘汰/清空缓存时按类型释放:canvas width=0 即还回后备。
+ *  ★ImageBitmap 不 close()（2026-08-24 用户实报）：close 后位图 detach，而缓存条目
+ *  可能仍被外部持有（角色创建预览 rAF 持 compositePaperDoll 返回值——拖色触发
+ *  tintCache 满清/close → 预览每帧 drawImage 爆 InvalidStateError + 人物消失）。
+ *  弃引用交 GC 释放即可（ImageBitmap 无显式 close 也可回收，仅延迟） */
 export function freeBaked(v: Baked | undefined | null): void {
   if (!v) return;
   if (v instanceof HTMLCanvasElement) { v.width = 0; v.height = 0; }
-  else v.close();
 }

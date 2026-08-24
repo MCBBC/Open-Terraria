@@ -43,18 +43,17 @@ describe('Audio buffers LRU(批次二)', () => {
     expect([...p.buffers.keys()]).toEqual([11, 12, 13]);
   });
 
-  it('失败哨兵 null 不参与淘汰(清了会重发 404)', () => {
+  it('解码失败不再写入永久 null 哨兵(R22:改限时负缓存,不占缓存位)', () => {
     const sys = new AudioSystem();
-    const p = priv(sys);
-    p.buffers.set(10, null);
-    p.buffers.set(11, fakeBuf());
-    p.buffers.set(12, fakeBuf());
-    p.buffers.set(13, fakeBuf());
+    const p = priv(sys) as ReturnType<typeof priv> & { failed: Set<number>; markFailed: (id: number) => void };
+    p.markFailed(10);
+    expect(p.failed.has(10)).toBe(true);
+    // buffers 只存真实解码结果——失败走 failed/failedAt 集,evictOld 无需跳过 null
+    for (const id of [11, 12, 13, 14]) p.buffers.set(id, fakeBuf());
     p.evictOld();
-    // 总数 4>3:可淘汰的是 11-13,删最旧的 11;null 10 保留
-    expect(p.buffers.get(10)).toBeNull();
-    expect(p.buffers.has(11)).toBe(false);
-    expect(p.buffers.size).toBe(3);
+    expect(p.buffers.get(10)).toBeUndefined();   // 失败曲目从未入缓存
+    expect(p.buffers.has(11)).toBe(false);       // 最旧真实缓存被淘汰
+    expect([...p.buffers.keys()]).toEqual([12, 13, 14]);
   });
 
   it('pool 播放中的曲目跳过(不使 track() 失源)', () => {

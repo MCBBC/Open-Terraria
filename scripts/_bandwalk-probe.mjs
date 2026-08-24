@@ -26,10 +26,10 @@ const out = await page.evaluate(async () => {
   const st = g.world.store;
   // 挖竖井(清墙清块)+放火把照明
   const cx = 341, cy = 422;
-  for (let y = cy - 14; y <= cy + 6; y++)
+  for (let y = cy - 14; y <= cy + 12; y++)
     for (let x = cx - 3; x <= cx + 3; x++) { st.setTileSilent(x, y, 0); st.setWallSilent(x, y, 0); }
   const TORCH = window.__swTileByKey?.('torch') ?? 4;
-  for (const y of [cy - 12, cy - 6, cy, cy + 5]) st.setTileSilent(cx + 3, y, TORCH);
+  for (const y of [cy - 12, cy - 6, cy, cy + 5, cy + 10]) st.setTileSilent(cx + 3, y, TORCH);
   const samples = [];
   const cv = g.renderer.canvas;
   const c2 = document.createElement('canvas'); c2.width = cv.width; c2.height = cv.height;

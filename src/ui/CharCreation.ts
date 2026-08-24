@@ -743,7 +743,12 @@ export class CharCreation {
     const doll = compositePaperDoll(this.appearance);
     if (!doll) return;
     const f = dollFrame(doll, walkFrame(this.time));
-    ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, 0, 0, 60, 84);
+    // 双保险（2026-08-24）：缓存条目可能被 tintCache 满清/contextlost 清理释放——
+    // detached 位图 drawImage 会抛 InvalidStateError 炸掉 rAF 帧（预览人物消失）
+    try {
+      if (f.img instanceof ImageBitmap && f.img.width === 0) return;
+      ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, 0, 0, 60, 84);
+    } catch { /* 本帧跳过，下帧缓存重建后自愈 */ }
   }
 
   /** 面板底九宫（Utils.DrawInvBG；尺寸固定，打开时合成一次） */

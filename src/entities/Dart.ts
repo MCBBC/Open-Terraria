@@ -25,7 +25,8 @@ import { applyProjStatus } from './projStatus';
 //   5 剧毒飞镖机关(5135,1.4.5 新)→980 VenomDartTrap(★R20-H2;10×28 贴图,毒 300t)
 // 187/654 的 PNG 是官方占位空桩(xnb 像素全零,经字节级同 stub 证实),isBlankTex 检出后
 // 走色块回退 + 粒子拖尾——与原版"隐形弹体+尘埃视觉"一致(Projectile.cs:24222 188 同族 dust 驱动)
-const TRAP_SHOT_STYLE: Record<string, {
+/** 弹种样式表(★R20-F5 起 export:kb 分档回归测试消费) */
+export const TRAP_SHOT_STYLE: Record<string, {
   w: number; h: number; color: string; grav: number;
   proj?: string; fw?: number; fh?: number;
   /** 烟花族：同 kind 多色变体贴图（form 0-3 → 167-170 / 415-418 / 419-422） */
@@ -62,9 +63,9 @@ const TRAP_SHOT_STYLE: Record<string, {
   // ★R20-H2:980 VenomDartTrap（SetDefaults :9332-9340:10×10 aiStyle1 penetrate-1 trap;
   //  贴图 10×28 同 98;命中 NPC/玩家均 Venom 300t——projstatus 表 980 已接）
   venomdart: { w: 8, h: 4, color: '#9AC860', grav: 0, proj: 'vanilla/Projectile_980.png', fw: 10, fh: 28, rotOff: Math.PI / 2, kb: 2 },
-  flame: { w: 10, h: 10, color: '#FF8030', grav: 0, proj: 'vanilla/Projectile_187.png', fw: 16, fh: 16,
+  flame: { w: 10, h: 10, color: '#FF8030', grav: 0, proj: 'vanilla/Projectile_187.png', fw: 16, fh: 16, kb: 2,
     trail: { colors: ['#FF8030', '#FFC040', '#FF5010'], count: 2, life: 16, grav: -0.03 } },
-  spear: { w: 6, h: 14, color: '#B8B8C0', grav: 0, proj: 'vanilla/Projectile_186.png', fw: 10, fh: 16, rotOff: Math.PI / 2 },
+  spear: { w: 6, h: 14, color: '#B8B8C0', grav: 0, proj: 'vanilla/Projectile_186.png', fw: 10, fh: 16, rotOff: Math.PI / 2, kb: 2 },
   // 185 尖刺球(SetDefaults 1405:2255/1456:2449):14×14 aiStyle14 penetrate-1 timeLeft 900
   spiky: { w: 14, h: 14, color: '#8A8F96', grav: 0.3, proj: 'vanilla/Projectile_185.png', fw: 16, fh: 16, spin: true, spinK: 0.14, kb: 2 },
   // 99 巨石(SetDefaults :1561-1568):31×31 aiStyle25 penetrate-1 trap;物理全在
@@ -96,32 +97,32 @@ const TRAP_SHOT_STYLE: Record<string, {
   // 601 传送门弹（SetDefaults Projectile.cs:3408 族：10×10 friendly，无重力直线；
   // AI :51174-51242：门色拖尾尘 + alpha 递减；撞块 :16672-16686 → PortalHelper.TryPlacingPortal
   // + Kill）。贴图 20×38 竖条 = 2 帧 20×19（frameCounter 4tick 步进）
-  portalbolt: { w: 10, h: 10, color: '#B069FF', grav: 0,
+  portalbolt: { w: 10, h: 10, color: '#B069FF', grav: 0, kb: 0,
     proj: 'vanilla/Projectile_601.png', fw: 20, fh: 19, friendly: true, life: 3600 },
   // ---- 烟花三件套 + 马桶水花（Wiring.cs:1492-1553；WorldGen.LaunchRocket/LaunchRocketSmall）----
   // 167-170 烟花火箭（SetDefaults Projectile.cs:2291-2300）：14×14 aiStyle34 friendly ranged
   // timeLeft45，damage 150 / kb 7（WorldGen.cs:62197-62199）；AI（:25677-25739）无重力直线 + 尾烟；
   // Kill（:73435-73921）：Item14 + 按色爆尘 + 192×192 Damage()。贴图 14×28 = 2 帧 14×14（取帧 0）
-  fireworkRocket: { w: 14, h: 14, color: '#FF8066', grav: 0, friendly: true, blast: 96, life: 45,
+  fireworkRocket: { w: 14, h: 14, color: '#FF8066', grav: 0, friendly: true, blast: 96, life: 45, kb: 7,
     projs: ['vanilla/Projectile_167.png', 'vanilla/Projectile_168.png',
       'vanilla/Projectile_169.png', 'vanilla/Projectile_170.png'],
     fw: 14, fh: 14, rotOff: Math.PI / 2 },
   // 415-418 烟花盒火箭（SetDefaults Projectile.cs:4669-4676）：14×14 aiStyle34 friendly timeLeft45
   // damage 0（WorldGen.cs:62213-62215）——纯视觉弹，Kill 同样 192×192 Damage() 但伤害为 0
-  fireworksBoxRocket: { w: 14, h: 14, color: '#66FF99', grav: 0, friendly: true, blast: 96, life: 45,
+  fireworksBoxRocket: { w: 14, h: 14, color: '#66FF99', grav: 0, friendly: true, blast: 96, life: 45, kb: 0,
     projs: ['vanilla/Projectile_415.png', 'vanilla/Projectile_416.png',
       'vanilla/Projectile_417.png', 'vanilla/Projectile_418.png'],
     fw: 14, fh: 14, rotOff: Math.PI / 2 },
   // 419-422 烟花喷泉（SetDefaults Projectile.cs:4679-4686）：4×4 aiStyle73 friendly timeLeft3600（默认值），
   // 锚点 tile 338 消失即 Kill（AI :29369-29377）；每 tick 2 粒火花 × 60 秒
-  fireworkFountain: { w: 4, h: 4, color: '#FFE85A', grav: 0, friendly: true, life: 3600,
+  fireworkFountain: { w: 4, h: 4, color: '#FFE85A', grav: 0, friendly: true, life: 3600, kb: 0,
     projs: ['vanilla/Projectile_419.png', 'vanilla/Projectile_420.png',
       'vanilla/Projectile_421.png', 'vanilla/Projectile_422.png'],
     fw: 8, fh: 8 },
   // 733 马桶水花（SetDefaults Projectile.cs:7434-7441）：2×2 aiStyle153 tileCollide=false alpha=255
   // ——全隐形纯发射器；AI_153_ToiletPop（:49278-49314）ai[0]==0 → 6 尘 + 1 gore，
   // ai[0] 1..10 → 2 尘 + 1/5 gore，ai[0]>10 → Kill
-  toiletPop: { w: 2, h: 2, color: '#8AC7F0', grav: 0, life: 3600, invisible: true },
+  toiletPop: { w: 2, h: 2, color: '#8AC7F0', grav: 0, life: 3600, invisible: true, kb: 0 },
 };
 
 /** 电路机关弹幕全族预热(2026-08-13,用户问"电路触发有没有风险"):机关弹幕全部
@@ -140,14 +141,14 @@ export function prefetchTrapProjectiles(): void {
 }
 
 /** TrapShot 弹种（DeviceCtx.shootProjectile kind 共用） */
-export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball' | 'portalbolt'
+export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'venomdart' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball' | 'portalbolt'
   | 'fireworkRocket' | 'fireworksBoxRocket' | 'fireworkFountain' | 'toiletPop';
 
 /** TrapShot kind → 原版 projectile id（反射门禁用：Projectile.CanBeReflected 按
  *  type/aiStyle 查表——162 炮弹 aiStyle2 / 166 雪球 aiStyle2 可反射，烟花族
  *  aiStyle 34/73/153 与 281 aiStyle49 不在白名单故不列） */
 const TRAP_PROJ_ID: Partial<Record<TrapShotKind, number>> = {
-  dart: 98, superdart: 184, flame: 187, spear: 186, spiky: 185, boulder: 99,
+  dart: 98, superdart: 184, flame: 187, venomdart: 980, spear: 186, spiky: 185, boulder: 99,
   geyser: 654, cannonball: 162, bunny: 281, snowball: 166, portalbolt: 601,
 };
 
@@ -428,6 +429,7 @@ export class TrapShot extends Entity {
     // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 门禁）
     if (!this.reflected) {
       const trapProjId = TRAP_PROJ_ID[this.kind];
+      const kb = st.kb ?? 2;   // ★R20-F5:逐型击退（Wiring 各 NewProjectile 实参）
       for (const ent of game.enemies()) {
         if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
@@ -442,7 +444,8 @@ export class TrapShot extends Entity {
         // StatusNPC :11192-11196 的 catalystBand 门对陷阱镖同样生效
         if (trapProjId !== undefined) applyProjStatus(trapProjId, e as unknown as Record<string, number>,
           { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
-        e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
+        // 击退方向 = 弹 direction（Projectile.cs:13652 num40=direction,水平 ±1）
+        e.hurt(this.damage, Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
         if (!pierce) {
           if (st.shatterDust) this.shatter(game);
           this.dead = true;
@@ -465,7 +468,7 @@ export class TrapShot extends Entity {
       // 城镇 NPC（TownNPC.hurt：防御减伤+无敌帧+死亡移除）
       for (const n of buckets.npcs) {
         if (n.dead || !overlaps(n)) continue;
-        n.hurt(this.damage, Math.sign(this.vx) * 2, 0, game);
+        n.hurt(this.damage, Math.sign(this.vx) * (st.kb ?? 2), 0, game);
         if (!pierce) { this.dead = true; return; }
       }
     }
@@ -499,7 +502,7 @@ export class TrapShot extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
-      e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
+      e.hurt(this.damage, Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);   // 音/飘值=单点
     }
   }
 

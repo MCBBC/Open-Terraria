@@ -56,6 +56,9 @@ export interface DeviceCtx {
   worldSurface: number;
   /** 派对进行中（★R20-G4 兔子雕像派对变体 Wiring.cs:2306-2317 BirthdayParty.PartyIsUp） */
   partyIsUp?(): boolean;
+  /** ★R20-I8:格区无实体(Collision.EmptyTile ignoreTiles 等价——活板门/高门关门
+   *  前查目标格,WorldGen.cs:51931-51932/:51955-51956;实体占位拒换) */
+  areaEmpty?(x: number, y: number, w: number, h: number): boolean;
   /** 魔幻日晷/月晷快进（Wiring.cs:1150/:1168 → Main.Sundialing/Moondialing :6304/:6319：
    *  fastForwardTimeToDawn/Dusk=true + cooldown=8；冷却中/已在快进则静默） */
   timeSkip?(kind: 'dawn' | 'dusk'): void;
@@ -102,6 +105,9 @@ function flipBlock(
    *  （Wiring.cs:1071-1091:num22=54,anchor.frameY>=108 → -108）= 0→54→108→0 三态;
    *  统一 -delta 会走 108→54 死循环,永回不到关态 */
   deltaNeg?: number,
+  /** ★R20-I11:整块同型校验(WorldGen.ValidateTileSquareIsActiveAndOfType——
+   *  篝火 ToggleCampFire Wiring.cs:3025 / 巴斯特 :2526 先验后翻,残块/混型不动) */
+  requireUniform = false,
 ): void {
   const st = w.st;
   const i = st.idx(x, y);
@@ -110,6 +116,15 @@ function flipBlock(
   let d = delta;
   const ai = st.idx(ox, oy);
   if (axis === 'y' ? st.frameY[ai] >= threshold : st.frameX[ai] >= threshold) d = deltaNeg ?? -delta;
+  if (requireUniform) {
+    const sh0 = w.sheetOf(ox, oy);
+    for (let ix = ox; ix < ox + tilesW; ix++) {
+      for (let iy = oy; iy < oy + tilesH; iy++) {
+        const ii = st.inBounds(ix, iy) ? st.idx(ix, iy) : -1;
+        if (ii < 0 || st.flags[ii] === 0 || w.sheetOf(ix, iy) !== sh0) return;
+      }
+    }
+  }
   for (let ix = ox; ix < ox + tilesW; ix++) {
     for (let iy = oy; iy < oy + tilesH; iy++) {
       if (!st.inBounds(ix, iy)) continue;
@@ -680,13 +695,16 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 105:
       fireStatue(w, ctx, x, y);
       return true;
-    case 130: { // 通电石→断电石(:1426-1434):上方未激活或非 PreventsActuationUnder
-      // ★R20-I6:原版门 = `!active || !PreventsActuationUnder[type]`（TileID.cs:313
-      // 11 型全表:21/467/26/77/88/470/475/237/597/441/468）且 WorldGen.CanKillTile——
-      // 曾用 3 型子集{21,88,467}且漏 CanKillTile(树干/棕榈/箱族上方拒缩)
-      const ai = st.idx(x, y - 1);
-      const aboveActive = y > 0 && st.inBounds(x, y - 1) && st.flags[ai] !== 0;
-      if (aboveActive && PREVENTS_ACTUATION_UNDER.has(w.sheetOf(x, y - 1))) return true;
+    case 130: { // 通电石→断电石(:1426-1434)。★R20-I6:原版门(C# 优先级 &&先于||):
+      //   tile[i,j-1]!=null && ( !active || ( !PreventsActuationUnder[type] && CanKillTile ) )
+      // ——11 型全表(TileID.cs:313);曾用 3 型子集{21,88,467}且漏 CanKillTile。
+      // 上方未激活时【不查】CanKillTile 直接过(B 支短路)
+      const aboveActive = y > 0 && st.inBounds(x, y - 1) && st.flags[st.idx(x, y - 1)] !== 0;
+      if (!aboveActive) {
+        swapTile(w, x, y, 'v_130_active_stone_block', 'v_131_inactivestoneblock');
+        return true;
+      }
+      if (PREVENTS_ACTUATION_UNDER.has(w.sheetOf(x, y - 1))) return true;
       if (!canKillTileAt(w, x, y)) return true;
       swapTile(w, x, y, 'v_130_active_stone_block', 'v_131_inactivestoneblock');
       return true;
@@ -850,8 +868,8 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       ctx.shootProjectile(px, py, (dx * speed) / len, (dy * speed) / len, 35, 'snowball');
       return true;
     }
-    case 215: // 篝火 3×2 frameY ±36(:1003-1020)
-      flipBlock(w, x, y, 3, 2, 'y', 36, 36);
+    case 215: // 篝火 3×2 frameY ±36(:1003-1020)——★R20-I11 整块同型校验(ToggleCampFire :3025)
+      flipBlock(w, x, y, 3, 2, 'y', 36, 36, undefined, true);
       return true;
     case 216: { // 烟花火箭（Wiring.cs:1492-1495 → WorldGen.LaunchRocket WorldGen.cs:62184-62206）
       // LaunchRocket：行 = frameY/40（0-3 → 弹 167-170 红/绿/蓝/黄）；frameY%40==18 说明
@@ -913,11 +931,14 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       return true;
     }
     case 386: case 387: { // 活板门开/关互换(ShiftTrapdoor;帧近似)
+      // ★R20-I8:关门(→387)前查目标格实体占位(Collision.EmptyTile ignoreTiles,
+      //  WorldGen.cs:51931-51956——实体在格拒换,曾可把实体关进实心格)
       const openK = 'v_386_trapdooropen', closedK = 'v_387_trap_door_closed';
       const toOpen = sheet === 387;
       const target = TILE_BY_KEY[toOpen ? openK : closedK] ?? 0;
       if (!target) return true;
       const ox = x - Math.floor(st.frameX[i] % 36 / 18);
+      if (!toOpen && ctx.areaEmpty && !ctx.areaEmpty(ox, y, 2, 1)) return true;
       for (let ix = ox; ix < ox + 2; ix++) {
         if (!st.inBounds(ix, y)) continue;
         const ii = st.idx(ix, y);
@@ -933,6 +954,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       if (!target) return true;
       const ox = x - Math.floor(st.frameX[i] % 20 / 18);
       const oy = y - Math.floor(st.frameY[i] % 90 / 18);
+      if (!toOpen && ctx.areaEmpty && !ctx.areaEmpty(ox, oy, 1, 5)) return true;  // ★R20-I8
       for (let ix = ox; ix < ox + 1; ix++) {
         for (let iy = oy; iy < oy + 5; iy++) {
           if (!st.inBounds(ix, iy)) continue;
@@ -988,8 +1010,8 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 497: // 马桶（Wiring.cs:1498-1509，与 tile 15 马桶样式共用分支）
       fireworkToilet(w, ctx, x, y);
       return true;
-    case 506: // 巴斯特雕像 2×3 frameX ±72(:2239-2261)
-      flipBlock(w, x, y, 2, 3, 'x', 72, 72);
+    case 506: // 巴斯特雕像 2×3 frameX ±72(:2516-2545)——★R20-I11 整块同型校验(:2526)
+      flipBlock(w, x, y, 2, 3, 'x', 72, 72, undefined, true);
       return true;
     case 531:
       fireBoulderStatue(w, ctx, x, y);

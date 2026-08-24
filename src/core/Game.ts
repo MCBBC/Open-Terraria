@@ -91,6 +91,7 @@ import {
   musicBoxRecordItem, musicBoxDropItemOf, fountainDropItemOf, announcementBoxMessage,
   MUSIC_BOX_EMPTY_VID,
 } from '../world/wiring/devices';
+import { LOGIC_SENSOR_MODE, logicSensorMode, playerAboveSensorState, liquidSensorState, dayNightSensorState } from '../world/wiring/logicSensor';
 import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, partyNaturalAttempt, type PartyState } from '../world/wiring/party';
 import { LanternNight } from '../world/LanternNight';
 import {
@@ -2975,6 +2976,8 @@ export class Game implements GameHooks {
   private geyserTiles = new Set<number>();
   private geyserCd = new Map<number, number>();
   triggerTiles423 = new Set<number>();
+  /** 感应器 423 液体档关断宽限计数（TELogicSensor.CountedData:15t,★R20-D3;键=tile idx） */
+  private sensorLiquidGrace = new Map<number, number>();
   /** 实体踩板去重键(实体id|格):小动物触发压板 + 巨石触发压板/弹幕垫板 */
   private entityPlateLatch = new Set<string>();
   /** 传送族引导态（Player.cs:42297-42516）：useTime 倒数到 triggerAt 时触发传送 */
@@ -13320,6 +13323,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const fxHere = st.frameX[st.idx(x, y)];
     const fyHere = st.frameY[st.idx(x, y)];
     st.setTile(x, y, 0);
+    // 逻辑门灯 419 拆除即重算下方门（★R20-C7,KillTile WorldGen.cs:64430-64432
+    // tile.type==419 → Wiring.PokeLogicGate(i, j+1);支撑失杀/挖除/爆炸同漏斗）
+    if (def.vanilla?.sheet === 419) this.wiring?.pokeLogicGate(x, y + 1);
     // 挂物族 1×1（食物盘 520）：破坏 → 移除存放记录（TileEntityType.Kill）
     if (FURNITURE_TILE_KIND.has(type)) removeFurnitureAt(this.world.furnitureItems, x, y);
     // 宝石暴露晶簇（KillTile_GetItemDrops case 178，:65545-65569）：
@@ -14747,6 +14753,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (def.vanilla?.sheet === 137 && this.player.facing === 1) {
       const ti = st.idx(tx, ty);
       st.setTile(tx, ty, tileId, st.frameX[ti] + 18, st.frameY[ti]);
+    }
+    // 逻辑门灯 419 放置即重算下方门（★R20-C7,PlaceThing_Tiles_PlaceIt_TriggerLogicLamp
+    // :41145-41158 → Wiring.PokeLogicGate(tileTargetX,tileTargetY)——曾死代码,拆/放灯
+    // 后门保持旧输出）
+    if (def.vanilla?.sheet === 419) this.wiring?.pokeLogicGate(tx, ty);
+    // 感应器 423 放置即校准（★R20-D3 附带,TELogicSensor.Hook_AfterPlacement
+    // :322-331 FigureCheckState+GetFrame:1:1——frameX = 当前态?18:0;曾恒 0）
+    if (def.vanilla?.sheet === 423) {
+      const mode = logicSensorMode(st.frameY[st.idx(tx, ty)]);
+      const on = (mode === LOGIC_SENSOR_MODE.DAY || mode === LOGIC_SENSOR_MODE.NIGHT)
+        ? dayNightSensorState(mode, this.world.clock.isDay)
+        : false;
+      if (on) st.setTile(tx, ty, tileId, 18, st.frameY[st.idx(tx, ty)]);
     }
     // 椅子(15)朝向同款（Player.cs:40193 PlaceThing_Tiles_PlaceIt_SpinChairs）：
     // direction==1 → 上下两格 frameX 各 += 18（1×2 两行都要）
@@ -16300,30 +16319,56 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         w.hitSwitch(idx % st.w, (idx / st.w) | 0);
       }
     }
-    // 感应器 423:玩家上方(frameY 0=昼 36=夜 72=玩家出入上方,placeStyle 0-2 → frameY/18%3)
-    const ptx = Math.floor(p.cx / TILE), pty = Math.floor((p.y + p.h) / TILE);
+    // 感应器 423(★R20-D3/D4/D5/D6,TELogicSensor.cs 全档 1:1):
+    //   frameY/18 全值分派(TELogicSensor.cs:169-186)0昼/1夜/2玩家上方/3水/4岩浆/
+    //   5蜂蜜/6任意液——曾 `frameY/18 % 3` 错路由:水→昼、岩浆→夜、蜂蜜→玩家。
+    //   On 锁存 = frameX 18(ChangeState/GetFrame :129-141/:296-315)。
+    //   玩家上方:双沿触发,判定框 82×162(x*16-33, y*16-161,:177-186;曾单列≤8格);
+    //   液体档:自身格 liquid>0 边沿 + 关断宽限 15t(CountedData :247-262,水排除
+    //   岩浆/蜂蜜/微光);昼/夜:上升沿触发/下降沿静默(见 triggerDayNightSensors)。
+    //   触发置 blockPlayerTeleportationForOneIteration = 玩家上方档(tripPoints
+    //   Item2 :146-152),HitSwitch 后由 TripWire→LogicGatePass 尾清
     for (const idx of this.triggerTiles423) {
       const x = idx % st.w, y = (idx / st.w) | 0;
-      const mode = Math.floor(st.frameY[idx] / 18) % 3;
-      if (mode === 2 && x === ptx && pty > y && pty - y <= 8) {
-        w.hitSwitch(x, y);
+      const mode = logicSensorMode(st.frameY[idx]);
+      let state: boolean;
+      if (mode === LOGIC_SENSOR_MODE.PLAYER_ABOVE) {
+        state = playerAboveSensorState(p.x, p.y, p.w, p.h, x, y);
+      } else if (mode >= LOGIC_SENSOR_MODE.WATER && mode <= LOGIC_SENSOR_MODE.LIQUID) {
+        const r = liquidSensorState(st.liquid[idx], st.liquidType[idx], mode,
+          st.frameX[idx] === 18, this.sensorLiquidGrace.get(idx) ?? 0);
+        this.sensorLiquidGrace.set(idx, r.grace);
+        state = r.state;
+      } else {
+        continue;   // 昼/夜由 triggerDayNightSensors + 下方兜底扫描驱动
       }
-      // 昼/夜感应由 onDayNight 回调驱动(见 triggerDayNightSensors)
+      const on = st.frameX[idx] === 18;
+      if (on === state) continue;
+      st.setTile(x, y, st.type[idx], state ? 18 : 0, st.frameY[idx]);
+      w.blockPlayerTeleportationForOneIteration = mode === LOGIC_SENSOR_MODE.PLAYER_ABOVE;
+      w.hitSwitch(x, y);
     }
+    // 昼/夜档兜底(载入时 frameX 与实际昼夜脱钩 → 下一 tick 对齐;正常翻转沿
+    // 已由昼夜切换钩处理,锁存对齐后此处恒跳过)
+    this.triggerDayNightSensors();
   }
 
-  /** 昼/夜切换时触发全部对应感应器(原版逻辑在 Projectile.LogicSensor 驱动) */
+  /** 昼/夜感应器(TELogicSensor.Update :107-116 1:1):★R20-D4 On 锁存(frameX 18)
+   *  ——上升沿(off→on)才 hitSwitch,下降沿仅翻 frameX 静默(曾无差别重复触发)。
+   *  幂等:翻转沿由昼夜切换钩与每 tick 兜底双路调用,锁存对齐后恒跳过 */
   triggerDayNightSensors() {
     const w = this.wiring;
     if (!w) return;
     const st = this.world.store;
     const isDay = this.world.clock.isDay;
     for (const idx of this.triggerTiles423) {
-      const mode = Math.floor(st.frameY[idx] / 18) % 3;
-      // mode 0=昼感应器:日出触发;1=夜:日落触发
-      if ((mode === 0 && isDay) || (mode === 1 && !isDay)) {
-        w.hitSwitch(idx % st.w, (idx / st.w) | 0);
-      }
+      const mode = logicSensorMode(st.frameY[idx]);
+      if (mode !== LOGIC_SENSOR_MODE.DAY && mode !== LOGIC_SENSOR_MODE.NIGHT) continue;
+      const state = dayNightSensorState(mode, isDay);
+      const on = st.frameX[idx] === 18;
+      if (on === state) continue;
+      st.setTile(idx % st.w, (idx / st.w) | 0, st.type[idx], state ? 18 : 0, st.frameY[idx]);
+      if (state) w.hitSwitch(idx % st.w, (idx / st.w) | 0);   // 仅上升沿(:109-112)
     }
   }
 
@@ -16691,6 +16736,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const st = this.world.store;
     this.triggerTiles428.clear();
     this.triggerTiles423.clear();
+    this.sensorLiquidGrace.clear();
     this.geyserTiles.clear();
     this.geyserCd.clear(); // 冷却表一并清——geyserTiles 不清则会残留上一世界的索引
     const s428 = TILE_BY_KEY['v_428_weightedpressureplate'] ?? 0;
@@ -16707,7 +16753,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (t === s428) this.triggerTiles428.add(i);
       else this.triggerTiles428.delete(i);
       if (t === s423) this.triggerTiles423.add(i);
-      else this.triggerTiles423.delete(i);
+      else { this.triggerTiles423.delete(i); this.sensorLiquidGrace.delete(i); }
       // 间歇泉:放置/移除即时跟进(此前漏此分支——放置的 geyser 永不喷发)
       if (t === s443) this.geyserTiles.add(i);
       else { this.geyserTiles.delete(i); this.geyserCd.delete(i); }
@@ -16840,20 +16886,34 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       doorClose: (x: number, y: number) => closeDoor(this.world.store, x, y),
       teleportPair: (a: [number, number], b: [number, number]) => this.teleportPairImpl(a, b),
       relocateTownNpc: (group: 0 | 1, px: number, py: number) => {
-        // 雕像 40/41 城镇 NPC 白名单(原版两组;此处按 NPC 图鉴顺序取前几个存在的)
-        const groups: Array<Array<string>> = [
-          ['guide', 'merchant', 'nurse', 'demolitionist', 'dyer', 'arms_dealer'],
-          ['dryad', 'painter', 'golfer', 'zoologist', 'pirate', 'stylist'],
+        // ★R20-G12:雕像 40/41 城镇搬迁白名单按 vanilla id 全量展开 + 在场者随机抽一
+        // （Wiring.cs:2418-2473:组0=19 型/组1=8 型,Main.rand.Next(count);曾 6 键定表取首个）
+        const groups: number[][] = [
+          [17, 19, 22, 38, 54, 107, 108, 142, 160, 207, 209, 227, 228, 229, 368, 369, 550, 441, 588],
+          [18, 20, 124, 178, 208, 353, 633, 663],
         ];
-        for (const key of groups[group]) {
-          const npc = this.entities.npcs.find((n) => (n as TownNPC).npcKey === key);
-          if (npc) {
-            npc.x = px - npc.w / 2;
-            npc.y = py - npc.h - 1;
-            return true;
-          }
+        const pool = this.entities.npcs.filter((n) => {
+          const vid = (n as TownNPC).vanillaId ?? -1;
+          return vid > 0 && groups[group].includes(vid);
+        });
+        if (!pool.length) return false;
+        const npc = pool[Math.floor(Math.random() * pool.length)];
+        npc.x = px - npc.w / 2;
+        npc.y = py - npc.h - 1;
+        return true;
+      },
+      // ★R20-G4:兔子雕像派对变体（Wiring.cs:2306-2317 BirthdayParty.PartyIsUp）
+      partyIsUp: () => partyIsUp(this.partyState),
+      // ★R20-I8:Collision.EmptyTile(x,y,ignoreTiles) 等价——格区内无任何实体
+      areaEmpty: (x: number, y: number, w2: number, h2: number) => {
+        const rx = x * TILE, ry = y * TILE, rw = w2 * TILE, rh = h2 * TILE;
+        const hit = (e: { x: number; y: number; w: number; h: number }) =>
+          e.x < rx + rw && e.x + e.w > rx && e.y < ry + rh && e.y + e.h > ry;
+        if (hit(this.player)) return false;
+        for (const b of [this.entities.enemies, this.entities.npcs, this.entities.critters, this.entities.projectiles]) {
+          for (const e of b) { if (hit(e as unknown as { x: number; y: number; w: number; h: number })) return false; }
         }
-        return false;
+        return true;
       },
       explode: (tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean, projId?: number) =>
         this.explodeAt(tx, ty, damage, radius, destroyTiles, undefined, 0, projId ?? 108),
@@ -16900,6 +16960,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     sign.text = text;
   }
 
+  /** NPCID.Sets.TeleportationImmune（NPCID.cs:4775）：传送机不搬的城镇宠物/史莱姆族 */
+  private static readonly TELEPORT_IMMUNE = new Set([552, 553, 554, 561, 562, 563, 555, 556, 557, 558, 559, 560, 576, 577, 568, 569, 566, 567, 570, 571, 572, 573, 548, 549, 564, 565, 574, 575, 551, 578]);
+
   /** 传送器对(Wiring.cs:2314-2365):板上 48×48 判定框内实体双向搬迁 */
   private teleportPairImpl(a: [number, number], b: [number, number]) {
     // 太近的竖叠板拒绝(:2316)
@@ -16916,7 +16979,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!p.dead && hit(ra, p)) { p.x += dx; p.y += dy; p.vx = 0; p.vy = 0; this.sfx.play('tink'); }
       else if (!p.dead && hit(rb, p)) { p.x -= dx; p.y -= dy; p.vx = 0; p.vy = 0; this.sfx.play('tink'); }
     }
-    for (const e of this.entities.enemies) {
+    // ★R20-E4(缺失·中):原版遍历 Main.npc 全表（Wiring.cs:3175-3186,敌怪/城镇 NPC
+    // /小动物同表）。门 = lifeMax>5（小动物 5 天然排除）/!boss/!noTileCollide/
+    // !TeleportationImmune[NPCID.cs:4775 城镇宠物史莱姆族 30 型]——曾只搬 enemies 桶
+    // 且无 boss/noTileCollide 门
+    for (const e of [...this.entities.enemies, ...this.entities.npcs, ...this.entities.critters]) {
+      const en = e as unknown as { maxHp?: number; hp?: number; dead?: boolean; def?: { boss?: boolean }; noTileCollide?: boolean; vanillaId?: number };
+      if (en.dead) continue;
+      if ((en.maxHp ?? en.hp ?? 0) <= 5) continue;
+      if (en.def?.boss) continue;
+      if (en.noTileCollide) continue;
+      const vid = en.vanillaId ?? -1;
+      if (vid > 0 && Game.TELEPORT_IMMUNE.has(vid)) continue;
       if (hit(ra, e)) { e.x += dx; e.y += dy; }
       else if (hit(rb, e)) { e.x -= dx; e.y -= dy; }
     }
@@ -25261,11 +25335,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 巨石滚石弹（Check2x2 :48766-48801 逐 sheet 弹种/伤害表；弹种贴图 TrapShot
-   *  'boulder' 恒 99,伤害按原版逐档）。生成点=锚格+(15.5,16)≈2×2 中心（与
-   *  devices.ts boulderFall 同式——弹 31×31 盒不嵌残块）。消费=失撑链+挖掉路径
-   *  （❌2：原版巨石永不返还物品,滚落压人是唯一后果）。★原版整段有
-   *  !isGeneratingOrLoadingWorld 门（cs:48764）——生成/读档装配期 player 未建,
-   *  以 this.player 判同门（killTileDropBait :11998 同款近似） */
+   *  'boulder' 恒 99,伤害按原版逐档）。生成点=锚格+(15.5,16)≈2×2 中心——弹
+   *  31×31 盒不嵌残块。消费=失撑链+挖掉路径（❌2：原版巨石永不返还物品,滚落压人
+   *  是唯一后果）。★R20-I4:这是巨石→弹 99 的【唯一】通道——致动缩入支撑不构成
+   *  失撑(Check2x2 判据不含 inActive 位),旧 Wiring.deActive 巨石钩子已摘除。
+   *  ★原版整段有 !isGeneratingOrLoadingWorld 门（cs:48764）——生成/读档装配期
+   *  player 未建,以 this.player 判同门（killTileDropBait :11998 同款近似） */
   private spawnBoulderRoll(ax: number, ay: number, sheet: number): void {
     if (!this.player) return;
     const dmgOf: Record<number, number> = { 138: 70, 484: 35, 664: 70, 665: 70, 711: 100, 712: 50, 713: 70, 714: 50, 715: 70, 716: 70 };

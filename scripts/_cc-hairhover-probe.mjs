@@ -1,7 +1,8 @@
-// 一次性：发型格悬停态复检（元素级截图 + 像素统计，经 tools/run-diag.mjs 运行）
+// 一次性：发型格悬停态复检（元素级截图 + pngjs 像素统计，经 tools/run-diag.mjs 运行）
 // 用法：SW_ORIGIN=http://localhost:5203 node tools/run-diag.mjs scripts/_cc-hairhover-probe.mjs
 import puppeteer from 'puppeteer-core';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { PNG } from 'pngjs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5203';
 const OUT = '/tmp/sw-cc-hairsel';
@@ -49,27 +50,24 @@ const hoverState = await page.evaluate(() => {
     scrollY: window.scrollY,
   };
 });
+console.log(JSON.stringify({ errs: errs.slice(0, 5), hoverState }, null, 1));
 
-// 元素级截图（不受 clip 坐标系影响）+ 像素统计：悬停底板应全亮(73,85,186)、黄框(255,231,69)应现
-const b64 = await target.screenshot({ encoding: 'base64' });
-const pix = await page.evaluate(async (d) => {
-  const img = new Image();
-  img.src = 'data:image/png;base64,' + d;
-  await img.decode();
-  const cv = document.createElement('canvas');
-  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
-  const c = cv.getContext('2d', { willReadFrequently: true });
-  c.drawImage(img, 0, 0);
-  const { data, width: w, height: h } = c.getImageData(0, 0, cv.width, cv.height);
-  const near = (i, r, g, b, tol) => Math.abs(data[i] - r) < tol && Math.abs(data[i + 1] - g) < tol && Math.abs(data[i + 2] - b) < tol && data[i + 3] > 200;
-  let baseBright = 0, yellow = 0, head = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    if (near(i, 73, 85, 186, 30)) baseBright++;
-    if (near(i, 255, 231, 69, 40)) yellow++;
-    if (data[i + 3] > 200 && !near(i, 73, 85, 186, 30) && !near(i, 255, 231, 69, 40)) head++;
-  }
-  return { w, h, baseBrightPx: baseBright, yellowBorderPx: yellow, otherPx: head };
-});
-await page.screenshot({ path: `${OUT}/hair-hover2.png`, clip: { x: bb.x - 8, y: bb.y - 8, width: bb.width + 16, height: bb.height + 16 } });
-console.log(JSON.stringify({ errs: errs.slice(0, 5), hoverState, pix }, null, 1));
+// 元素级截图落盘 + pngjs 像素统计：
+//   悬停底板应全亮(73,85,186)、黄框(255,231,69)应现、头像像素(其余)应盖在最上
+const file = `${OUT}/hair-hover-el.png`;
+await target.screenshot({ path: file });
+const png = PNG.sync.read(await (await import('node:fs')).promises.readFile(file));
+const { width: w, height: h, data } = png;
+const near = (i, r, g, b, tol) => Math.abs(data[i] - r) < tol && Math.abs(data[i + 1] - g) < tol && Math.abs(data[i + 2] - b) < tol && data[i + 3] > 200;
+let baseBright = 0, yellow = 0, head = 0;
+for (let i = 0; i < data.length; i += 4) {
+  if (near(i, 73, 85, 186, 30)) baseBright++;
+  else if (near(i, 255, 231, 69, 40)) yellow++;
+  else if (data[i + 3] > 200) head++;
+}
+console.log(JSON.stringify({ pix: { w, h, baseBrightPx: baseBright, yellowBorderPx: yellow, headPx: head } }, null, 1));
+
+// 4x 放大供报告
+const { execSync } = await import('node:child_process');
+execSync(`sips -z ${h * 4} ${w * 4} ${file} --out ${OUT}/hair-hover-el-4x.png`);
 await browser.close();

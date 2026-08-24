@@ -48,13 +48,15 @@ export class UIGenProgressBar extends UIElement {
     const x = Math.round(d.x);
     const y = Math.round(d.y);
 
-    // 外框（随邪恶类型；Outer 画在 (x-8,y)，Outer_Lower 画在 (x+44,y+60)）
+    // 外框（随邪恶类型；vanilla :100-106：r.X-=8 后 Outer 画在 r.TopLeft()=(x-8,y)，
+    //  Outer_Lower 画在 r.TopLeft()+(44,60)=(x+36,y+60)——此前误写 x+44 右移 8px
+    //  （2026-08-24 用户截图实报下条框未对齐））
     const outerKey = this.randomEvil ? 'UI_WorldGen_Outer_Random'
       : this.crimson ? 'UI_WorldGen_Outer_Crimson' : 'UI_WorldGen_Outer_Corrupt';
     const outer = UITextures.get(outerKey);
     if (outer) batch.draw(outer, x - 8, y);
     const lower = UITextures.get('UI_WorldGen_Outer_Lower');
-    if (lower) batch.draw(lower, x + 44, y + 60);
+    if (lower) batch.draw(lower, x + 36, y + 60);
 
     // 长条空槽 + 填充
     batch.fillRect(x + 20, y + 40, LONG_BAR_WIDTH, 16, EMPTY_LONG);

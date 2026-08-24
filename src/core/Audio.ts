@@ -1,7 +1,7 @@
 // 原版 BGM 系统（LegacyAudioSystem.cs 交叉淡化语义 1:1）：
 // WebAudio AudioBufferSourceNode 无缝循环（loop=true，解码后内存播放，零接缝）——
 // 修复 <audio loop> 播 mp3 的循环点卡顿 + 切曲冷启动顿挫（原版 XACT 同为解码循环）。
-// musicFade[id] ±0.005/帧 逼近目标曲（:281 UpdateCommonTrack / :309 TowardStopping）。
+// musicFade[id] ±0.005/帧 逼近目标曲（:295 UpdateCommonTrack / :323 TowardStopping,1458 行号）。
 // audios/music/Music_<id>.mp3（tools/xwb-extract.mjs 提取）。
 import { MUSIC } from '../data/Music';
 
@@ -19,8 +19,29 @@ export class AudioSystem {
   /** 解码 PCM 常驻上限:每首 mp3 解码后 30-45MB,104 首全驻 = GB 级;
    *  保留最近 MAX_BUFFERS 首(Map 迭代序=LRU),超限淘汰最旧并重解码(可接受) */
   private static readonly MAX_BUFFERS = 3;
-  private buffers = new Map<number, AudioBuffer | null>();
+  private buffers = new Map<number, AudioBuffer>();
   private decoding = new Set<number>();
+  /** 取回失败曲目（限时负缓存,2026-08-24 R22）：与 Sfx.ts 同款 15s 窗口重试——
+   *  旧实现 buffers.set(id,null) 永久哨兵且 evictOld 永不清除,一次 SW cache-miss/
+   *  瞬时网络失败（vite 重启/SW 版本切换清缓存窗）= 该 BGM 整场哑。真 404 每
+   *  15s 多一次 fetch,代价可忽略 */
+  private failed = new Set<number>();
+  private failedAt = new Map<number, number>();
+  private static FAILED_RETRY_MS = 15_000;
+  private failedFresh(id: number): boolean {
+    if (!this.failed.has(id)) return false;
+    const at = this.failedAt.get(id) ?? 0;
+    if (performance.now() - at >= AudioSystem.FAILED_RETRY_MS) {
+      this.failed.delete(id);
+      this.failedAt.delete(id);
+      return false;
+    }
+    return true;
+  }
+  private markFailed(id: number): void {
+    this.failed.add(id);
+    this.failedAt.set(id, performance.now());
+  }
   /** 目标曲目（≈原版 Main.curMusic；0 = 静音） */
   curMusic = 0;
   muted = false;
@@ -92,28 +113,32 @@ export class AudioSystem {
     return this.ac;
   }
 
-  /** 解码缓存（每曲一次；解码失败标记 null 防重复请求;LRU 上限 MAX_BUFFERS） */
+  /** 解码缓存（每曲一次；LRU 上限 MAX_BUFFERS。失败走限时负缓存,不占缓存位） */
   private async buffer(id: number): Promise<AudioBuffer | null> {
     const hit = this.buffers.get(id);
     if (hit !== undefined) return hit;
     if (this.decoding.has(id)) return null; // 解码中：本帧跳过，就绪后 track() 会补建
+    if (this.failedFresh(id)) return null;  // 负缓存窗口内：快速短路,过期自动放行重取
     this.decoding.add(id);
     try {
       const r = await fetch(`audios/music/Music_${id}.mp3`);
       if (!r.ok) throw new Error(String(r.status));
       const buf = await this.ac!.decodeAudioData(await r.arrayBuffer());
       this.buffers.set(id, buf);
+      this.failed.delete(id);
+      this.failedAt.delete(id);
       this.evictOld();
       return buf;
     } catch {
-      this.buffers.set(id, null); // 永久失败标记(体积零,不参与淘汰)
+      this.markFailed(id);   // 限时负缓存（15s 窗口,见字段注释）——不再永久哨兵
       return null;
     } finally {
       this.decoding.delete(id);
     }
   }
 
-  /** LRU 淘汰:超限后删最旧的可淘汰条目(非失败哨兵、非 pool 播放中)。
+  /** LRU 淘汰:超限后删最旧的可淘汰条目(非 pool 播放中)。失败曲目不入 buffers
+   *  （限时负缓存在 failed/failedAt 集),故无需再跳过 null 哨兵。
    *  一轮全扫收集候选再删,避免 refresh-continue 式死循环(全部不可淘汰时);
    *  只删 Map 条目,已建的 AudioBufferSourceNode 仍引用旧 buffer(播放不受影响),
    *  之后 track() 重建才需重解码。pool 只存交叉淡化中的曲目(tickFade 停播即
@@ -121,8 +146,7 @@ export class AudioSystem {
   private evictOld(): void {
     if (this.buffers.size <= AudioSystem.MAX_BUFFERS) return;
     const evictable: number[] = [];
-    for (const [id, buf] of this.buffers) {
-      if (buf === null) continue;        // 失败哨兵:零体积,清了会重发 404
+    for (const [id] of this.buffers) {
       if (this.pool.has(id)) continue;   // 播放/淡化中:track() 不可失源
       evictable.push(id);
     }
@@ -149,6 +173,26 @@ export class AudioSystem {
     this.pool.set(id, { src, gain, fade: 0 });
   }
 
+  /** 月总召唤倒计时音乐压制（Main.cs:11646-11664,R22 接线,Game 每帧调用）：
+   *  num=(countdown/max)²,countdown>max×0.2 时生效、否则归零（60s 倒计时末段
+   *  渐熄至静默）;countdown==1 且有当前曲时把该曲 fade 清 0（下曲硬起）。
+   *  v<=0 复位。注：原版此处还置 curMusic=0 停轨;本仓选曲链事件驱动（lastMusic
+   *  未变不回调）,置 0 后无人恢复——以乘 num 静音等效,倒计时结束由 Boss 曲
+   *  （38 ≠ lastMusic 必换曲）从 fade 0 硬起自然恢复 */
+  private moonNum = 1;
+  setMoonLordCountdown(countdown: number, max = 3600): void {
+    if (!countdown || countdown <= 0 || max <= 0) { this.moonNum = 1; return; }
+    if (countdown > max * 0.2) {
+      this.moonNum = Math.max(0, Math.min(1, (countdown / max) ** 2));
+    } else {
+      this.moonNum = 0;
+    }
+    if (countdown === 1 && this.curMusic >= 1) {
+      const t = this.pool.get(this.curMusic);
+      if (t) { t.fade = 0; t.gain.gain.value = 0; }
+    }
+  }
+
   /** rAF 驱动淡化（原版按游戏帧 ±0.005，这里按 60fps 归一时间步进） */
   private startLoop() {
     if (this.rafId) return;
@@ -162,7 +206,12 @@ export class AudioSystem {
     this.rafId = requestAnimationFrame(step);
   }
 
-  /** 步进淡化量 d（0.005/帧）：目标曲 fade+=d 至 1，其余 -=d 至 0 并停播 */
+  /** 步进淡化量 d（0.005/帧）：目标曲 fade+=d 至 1，其余 -=d 至 0 并停播。
+   *  R22 补齐两处原版细节（LegacyAudioSystem.cs:330-345 + Main.cs:11697-11705）：
+   *  ① 非主曲只在主曲可闻(fade>0.25)时渐熄、curMusic=0 时立即归零硬停
+   *     （旧实现恒 200 帧线性拖尾——切静音/音乐盒静音时多 3.3s 尾巴）；
+   *  ② 曲目级音量修正：TOW 族 62-88 ×0.9、风暴 52 ×1.15 钳 1。 */
+  private static readonly MAIN_AUDIBLE_FADE = 0.25;
   private tickFade(d: number) {
     if (this.muted) {
       for (const [id, t] of this.pool) {
@@ -170,20 +219,28 @@ export class AudioSystem {
       }
       return;
     }
+    const mainFade = this.curMusic > 0 ? this.pool.get(this.curMusic)?.fade ?? 0 : 0;
     for (const [id, t] of this.pool) {
       const target = id === this.curMusic ? 1 : 0;
       if (t.fade < target) {
         t.fade = Math.min(target, t.fade + d);
         // AudioContext 挂起态（浏览器手势前）：gain 无声但源持续跑，恢复后即出声
       } else if (t.fade > target) {
-        t.fade = Math.max(target, t.fade - d);
+        if (this.curMusic === 0) {
+          t.fade = 0;                       // 原版 :338-340 curMusic==0 → 立即归零硬停
+        } else if (mainFade > AudioSystem.MAIN_AUDIBLE_FADE) {
+          t.fade = Math.max(target, t.fade - d);   // 主曲可闻才渐熄(:335-337)
+        }
         if (t.fade === 0) {
           t.src.stop();
           this.pool.delete(id);
           continue;
         }
       }
-      t.gain.gain.value = Math.min(1, t.fade) * this.volume;
+      let v = Math.min(1, t.fade) * this.volume * this.moonNum;
+      if (id >= 62 && id <= 88) v *= 0.9;   // TOW 族曲目音量修正(Main.cs:11701-11702)
+      else if (id === 52) v *= 1.15;        // Storm ×1.15(:11703-11705)
+      t.gain.gain.value = Math.min(1, v);
     }
   }
 

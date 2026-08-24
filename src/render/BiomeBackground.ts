@@ -110,10 +110,14 @@ function ugSlots(style: number, iceBack: number, jungleBack: number, hellBack: n
     case 15: return [40, 33, 34, 200, 128 + hellBack, t[5], t[6]];
     case 16: return [40, 33, 34, 201 + worldID % 2, 128 + hellBack, t[5], t[6]];
     case 17: return [40, 33, 34, 203 + worldID % 4, 128 + hellBack, t[5], t[6]];
-    case 18: return [290, 291, 0, 0, 0, t[5], t[6]];
-    case 19: return [292, 293, 0, 0, 0, t[5], t[6]];
-    case 20: return [294, 295, 0, 0, 0, t[5], t[6]];
-    case 21: return [296, 297, 0, 0, 0, t[5], t[6]];
+    // ★原版 case 18-21 只赋 [0]/[1]（[2]岩石过渡 [3]岩石带 Clear=0）——沙滩风格
+    //   在 oceanLevel(425) 深度门下沿、岩石带入镜的窗口（高地形丛林贴海洋处）
+    //   会出现"泥土带以下纯黑"穿帮（2026-08-24 用户实报）。补 4(岩石过渡条)/
+    //   3(通用岩石带) = 修复性偏离：黑块 → 通用岩石背景。
+    case 18: return [290, 291, 4, 3, 0, t[5], t[6]];
+    case 19: return [292, 293, 4, 3, 0, t[5], t[6]];
+    case 20: return [294, 295, 4, 3, 0, t[5], t[6]];
+    case 21: return [296, 297, 4, 3, 0, t[5], t[6]];
     default: return [1, 2, 4, 3, 6, t[5], t[6]];  // 同上统一覆写
   }
 }

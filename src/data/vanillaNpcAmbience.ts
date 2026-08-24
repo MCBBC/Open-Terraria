@@ -6,7 +6,7 @@
 //   PlaySound(29, style) 的逐 type 掷骰（denom = Main.rand.Next(denom)==0）。
 //   style 为 [lo,hi) 左闭右开区间（原版 Next(lo,hi)）。
 // 【表二 CHATTER】AI_003 尾段 :57735-57764（战士族闲话,TargetClosest 前）。
-// 【表三 CRITTER】UpdateNPC_CritterSounds :93420-93517（鸭/蛙/鸟/鼠/鸥/枭）。
+// 【表三 CRITTER】UpdateNPC_CritterSounds :93365-93468（鸭/蛙/鸟/鼠/鸥/枭;1457 同行号）。
 // 【表四 PET_SLIME_HIT_VOICES】StrikeNPC 受击段 :82255-82302——type==1（史莱姆）
 //   且 ai[1]=语音饰品物品 id 时受击音按表替换（语音史莱姆 = 派对/天空盒特殊
 //   生成的蓝史莱姆,ai[1] 赋值点 :60828-60852）。
@@ -99,40 +99,57 @@ export const CHATTER_SOUNDS: Record<number, ChatterSpec> = (() => {
   return m;
 })();
 
-/** 小动物声（:93420-93517）——门控较杂,逐 type 显式函数式描述 */
+/** 小动物声（UpdateNPC_CritterSounds :93365-93468,1457 同行号）——逐 type 对拍
+ *  SoundEngine.PlaySound(SoundID 号)：46 枭 / 44 海鸥 / 30 鸭 / 31 蛙 / 32 鸟 /
+ *  67 鹦鹉(Cockatiel) / 68 金刚鹦鹉(Macaw) / 69 巨嘴鸟(Toucan) / 33 鼠。
+ *  ★2026-08-24 R22 蓝队修正：旧表把 SoundID 类型号当 wav 变体号（枭→Zombie_46、
+ *  海鸥→Zombie_44、鹦鹉族→Zombie_67/68/69、鼠→Zombie_33 全是 24-87 怪物语音库文件）
+ *  ——按 LegacySoundPlayer 各 case 的真实 bank 变体号改回：
+ *   case46(:1074) → Zombie_110/111（1/300 稀有掷 {112,113,114} 均分,见登记）
+ *   case44(:1054) → Zombie_106-108 均匀池 ×0.2 音高 -0.70..0
+ *   case30(:1105) → Zombie_10/11 均匀（1/300 稀有换 Zombie_12,登记）
+ *   case31(:1128) → Zombie_13 ×0.35
+ *   case32(:1136) → style 14-19 = Zombie_14-19 ×0.15 音高 -0.70..+0.25
+ *   case67/68/69(:1147/:1159/:1171) → Zombie_118-120 / 126-128 / 129-130 均匀池
+ *   case33(:1203) → Zombie_15 ×0.2 音高 -0.10..+0.30
+ *  音量档在 Sfx.FILE_CASE_VOL、音高档在 Sfx.PITCH_CASE（R22 新增两表）。 */
 export interface CritterSoundSpec {
   denom: number;
   file: string;
   /** day=仅白天 night=仅夜 dawn=白天且 time<18000(清晨) nightOrUG=夜或地下 still=|vx|<0.5 */
   gate?: 'day' | 'night' | 'dawn' | 'nightOrUnderground' | 'still';
-  /** 特殊:鸟 74/298/442 的多变体池（PlaySound 32 style 表） */
+  /** 多变体池（消费方均匀随机;权重用重复项表达——鸟 74 是原版 Next(3)!=0 的 2/3:1/3） */
   pool?: string[];
 }
 export const CRITTER_SOUNDS: Record<number, CritterSoundSpec> = {
-  611: { denom: 700, file: 'Zombie_46', gate: 'night' },   // 猫头鹰(:93425,(46))
-  689: { denom: 700, file: 'Zombie_46', gate: 'night' },   // 灰猫头鹰
-  602: { denom: 1200, file: 'Zombie_44', gate: 'day' },    // 海鸥(:93430,(44))
-  603: { denom: 1200, file: 'Zombie_44', gate: 'day' },
-  // 鸭族 362-365(:93435,(30)→case30 = Next(10,12) 池 1/300 换 Zombie_12(:1101-1122)）
-  362: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11', 'Zombie_12'] },
-  363: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11', 'Zombie_12'] },
-  364: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11', 'Zombie_12'] },
-  365: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11', 'Zombie_12'] },
-  361: { denom: 200, file: 'Zombie_13', gate: 'still' },   // 青蛙族(:93441,夜或地下+|vx|<0.5)
+  611: { denom: 700, file: 'Zombie_110', gate: 'night', pool: ['Zombie_110', 'Zombie_111'] },  // 猫头鹰(:93371,(46))
+  689: { denom: 700, file: 'Zombie_110', gate: 'night', pool: ['Zombie_110', 'Zombie_111'] },  // 灰猫头鹰
+  602: { denom: 1200, file: 'Zombie_106', gate: 'day', pool: ['Zombie_106', 'Zombie_107', 'Zombie_108'] },  // 海鸥(:93375,(44))
+  603: { denom: 1200, file: 'Zombie_106', gate: 'day', pool: ['Zombie_106', 'Zombie_107', 'Zombie_108'] },
+  // 鸭族 362-365(:93379,(30))——case30 常规 Next(10,12)=10/11 均匀,Zombie_12 仅 1/300
+  //   稀有掷(消费方无权重面,稀有变体登记待接,勿再并回均匀池=R22 前的"鸭 12 均匀化"偏差)
+  362: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'] },
+  363: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'] },
+  364: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'] },
+  365: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'] },
+  361: { denom: 200, file: 'Zombie_13', gate: 'still' },   // 青蛙族(:93386,(31),夜或地下+|vx|<0.5)
   445: { denom: 200, file: 'Zombie_13', gate: 'still' },
   687: { denom: 200, file: 'Zombie_13', gate: 'still' },
-  74: { denom: 400, gate: 'dawn', file: 'Zombie_14', pool: ['Zombie_14', 'Zombie_18'] },  // 鸟(:93457,2/3→14,1/3→18)
-  297: { denom: 400, gate: 'dawn', file: 'Zombie_16' },   // 金雀(:93466)
-  298: { denom: 400, gate: 'dawn', file: 'Zombie_17', pool: ['Zombie_17', 'Zombie_19'] }, // 红雀
-  671: { denom: 400, gate: 'dawn', file: 'Zombie_68' },   // 金鹦鹉族(:93484,67/68/69)
-  672: { denom: 400, gate: 'dawn', file: 'Zombie_68' },
-  673: { denom: 400, gate: 'dawn', file: 'Zombie_69' },
-  674: { denom: 400, gate: 'dawn', file: 'Zombie_67' },
-  675: { denom: 400, gate: 'dawn', file: 'Zombie_67' },
-  442: { denom: 400, gate: 'dawn', file: 'Zombie_16', pool: ['Zombie_16', 'Zombie_17', 'Zombie_19', 'Zombie_14', 'Zombie_18'] }, // 玛瑙蝶身鸟(:93501 五掷)
-  300: { denom: 1800, file: 'Zombie_33' },                 // 鼠族(:93512,(33))
-  447: { denom: 1800, file: 'Zombie_33' },
-  610: { denom: 1800, file: 'Zombie_33' },
+  // 鸟(:93393-93429,(32))：74 = Next(3)!=0→style14(2/3) else 18(1/3)——重复项表达精确权重
+  74: { denom: 400, gate: 'dawn', file: 'Zombie_14', pool: ['Zombie_14', 'Zombie_14', 'Zombie_18'] },
+  297: { denom: 400, gate: 'dawn', file: 'Zombie_16' },   // 金雀(:93415,恒 style16)
+  298: { denom: 400, gate: 'dawn', file: 'Zombie_17', pool: ['Zombie_17', 'Zombie_17', 'Zombie_19'] }, // 红雀 2/3:1/3
+  // 金鹦鹉三族(:93430-93441)：674/675→(67) Cockatiel、671/672→(68) Macaw、673→(69) Toucan
+  674: { denom: 400, gate: 'dawn', file: 'Zombie_118', pool: ['Zombie_118', 'Zombie_119', 'Zombie_120'] },
+  675: { denom: 400, gate: 'dawn', file: 'Zombie_118', pool: ['Zombie_118', 'Zombie_119', 'Zombie_120'] },
+  671: { denom: 400, gate: 'dawn', file: 'Zombie_126', pool: ['Zombie_126', 'Zombie_127', 'Zombie_128'] },
+  672: { denom: 400, gate: 'dawn', file: 'Zombie_126', pool: ['Zombie_126', 'Zombie_127', 'Zombie_128'] },
+  673: { denom: 400, gate: 'dawn', file: 'Zombie_129', pool: ['Zombie_129', 'Zombie_130'] },
+  // 玛瑙蝶身鸟(:93442-93462,(32) 五掷均分 16/17/19/14/18)
+  442: { denom: 400, gate: 'dawn', file: 'Zombie_16', pool: ['Zombie_16', 'Zombie_17', 'Zombie_19', 'Zombie_14', 'Zombie_18'] },
+  300: { denom: 1800, file: 'Zombie_15' },                 // 鼠族(:93464,(33)→case33 固定 num=15)
+  447: { denom: 1800, file: 'Zombie_15' },
+  610: { denom: 1800, file: 'Zombie_15' },
 };
 
 /** :82255-82302 宠物史莱姆受击语音——SoundID.cs CreateTrackable().WithVolume 档

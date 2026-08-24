@@ -99,10 +99,10 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   pickup: ['Grab'],
   dig: ['Dig_0', 'Dig_1', 'Dig_2'],
   chop: ['Grass'],
-  tink: ['Tink_0', 'Tink_1'],
-  place: ['Dig_1', 'Dig_2'],
+  tink: ['Tink_0', 'Tink_1', 'Tink_2'],   // case21 Next(3) 全 3 变体(:927-939)
+  place: ['Dig_0', 'Dig_1', 'Dig_2'],     // PlaySound(0)=Dig 全 3 变体(WorldGen.cs 放块)
   shatter: ['Shatter'],
-  coin: ['Coin_0', 'Coin_1', 'Coins'],
+  coin: ['Coin_0', 'Coin_1', 'Coin_2', 'Coin_3', 'Coin_4'],   // case38 Next(5)(:1354);Coins.wav 是 type18 掉落叮当(case18)勿混
   door_open: ['Door_Opened'],
   door_close: ['Door_Closed'],
   splash: ['Splash_0', 'Splash_1', 'Splash_2', 'Splash_3', 'Splash_4', 'Splash_5'],
@@ -111,7 +111,7 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   // 菜单 UI（原版 id 10=Menu_Open / id 11=Menu_Close / id 12=Menu_Tick）
   menuOpen: ['Menu_Open'],
   menuClose: ['Menu_Close'],
-  unlock: ['Unlock'],   // SoundID 22 Unlock（神庙钥匙开锁 WorldGen.cs:37627/金钥匙:37628）
+  unlock: ['Unlock'],   // SoundID 22 Unlock（箱解锁 Chest.cs:402/:476;神庙钥匙开锁同号）
   menuTick: ['Menu_Tick'],
   throw: ['Item_1'],
   explosion: ['Item_14'],
@@ -148,15 +148,15 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   mirror: ['Item_6'],
   bombFuse: ['Fuse'],   // Content/Sounds/Custom/fuse.xnb → Fuse.wav（自提取，1.42s 循环）
   conch: ['Item_64'],
-  // Item bank cue 29（case 2 无专属音量/音高修正——LegacySoundPlayer.cs:519-643，
-  // 仅默认 ±0.06 音高抖动，playWavFile 的 0.92+rand×0.16 已覆盖）
+  // Item bank cue 29（case 2 无专属音量修正——LegacySoundPlayer.cs:519-643，
+  // 默认 ±0.06 音高抖动由 PITCH_CASE.Item_ 表达,R22 前的全局 0.92+rand×0.16≈±0.115 过抖已废）
   manaCrystal: ['Item_29'],
   // ---- 天气环境音循环（Sounds/Custom/ 提取拍平；SceneState.cs:235-297 双轨管理）----
   blizzardStrong: ['blizzard_strong_loop'],
   blizzardInside: ['blizzard_inside_building_loop'],
   sandstormWind: [],    // ★无素材（见 SfxName 注释）——playWav/playLoop 均安全短路
   // 以下无原版素材，走合成
-  drink: ['Item_3'],  // SoundID.Item3(药水饮用/回忆药水起始音;素材曾缺走合成兜底)
+  drink: ['Item_3'],  // SoundID.Item3(药水饮用/回忆药水起始音;Item_3.wav 在盘,合成兜底仅剩硬失败路径)
 };
 
 /** 高频预热清单（Sfx 首次取得 AudioContext 时经 preloadNames 批量 decode，
@@ -221,11 +221,101 @@ export const FILE_CASE_VOL: Record<string, number> = (() => {
   for (let s = 93; s <= 99; s++) m[`Zombie_${s}`] = 0.4;
   m.Zombie_100 = 0.25; m.Zombie_101 = 0.25;
   m.Zombie_102 = 0.4; m.Zombie_103 = 0.4; m.Zombie_104 = 0.55;
-  // case 26 Mummy（:968-976）Zombie_3/4 ×0.9；case 30 Duck（:1101-1122）Zombie_10-12 ×0.75
+  // case 26 Mummy（:968-976）Zombie_3/4 ×0.9；case 30 Duck（:1105-1126）Zombie_10-12 ×0.75
   m.Zombie_3 = 0.9; m.Zombie_4 = 0.9;
   m.Zombie_10 = 0.75; m.Zombie_11 = 0.75; m.Zombie_12 = 0.75;
+  // ---- R22 小动物/海鸟族十组档（2026-08-24 对拍 LegacySoundPlayer 各 case,1457 同行号）----
+  //   此前整族缺档 → 小动物环境声响 3-7 倍（红队 R22 定罪高项）
+  m.Zombie_13 = 0.35;                                        // case31 Frog(:1128-1134)
+  for (let s = 14; s <= 19; s++) m[`Zombie_${s}`] = 0.15;    // case32 Bird(:1136-1148)
+  m.Zombie_15 = 0.2;                                         // case33 鼠(:1203-1213)——覆盖上行的 15
+  for (let s = 106; s <= 108; s++) m[`Zombie_${s}`] = 0.2;   // case44 Seagull(:1054-1061)
+  for (let s = 110; s <= 114; s++) m[`Zombie_${s}`] = 0.9;   // case46 Owl(:1074-1092)
+  for (let s = 115; s <= 117; s++) m[`Zombie_${s}`] = 0.5;   // case65(:1400-1411)
+  for (let s = 118; s <= 120; s++) m[`Zombie_${s}`] = 0.3;   // case67 Cockatiel(:1147-1158)
+  for (let s = 121; s <= 123; s++) m[`Zombie_${s}`] = 0.45;  // case66(:1183-1198)
+  for (let s = 126; s <= 128; s++) m[`Zombie_${s}`] = 0.22;  // case68 Macaw(:1159-1170)
+  for (let s = 129; s <= 130; s++) m[`Zombie_${s}`] = 0.2;   // case69 Toucan(:1171-1182)
   return m;
 })();
+
+/** 原版逐类型音高抖动表（LegacySoundPlayer.PlaySound 各 case 的 Pitch 随机式;
+ *  R22 修复:旧实现全局一档 playbackRate=0.92+rand×0.16≈±0.115,与原版逐类型档
+ *  系统性偏差——门 ±0.20/草 ±0.30/Item ±0.06/鸟 -0.70..+0.25/受击咆哮菜单等不抖）。
+ *  键 = wav 文件名;值 = [lo,hi]（单位 0.01,含端点,XNA Next(lo,hi+1)*0.01 等价）。
+ *  未登记文件 = 不抖（原版无 Pitch 赋值的 case 与现代 trackable 路径默认 PitchVariance=0 同语义;
+ *  player_hit_* 宠物语音按 SoundID.cs WithPitchVariance(0.4) 登记 ±40）。
+ *  显式 pitch 参数（乐器 musicPitch 直传,Player.cs:45928）仍优先于本表。 */
+export const PITCH_CASE: Record<string, [number, number] | null> = (() => {
+  const m: Record<string, [number, number] | null> = {};
+  const put = (files: string[], v: [number, number] | null) => { for (const f of files) m[f] = v; };
+  const rng = (prefix: string, lo: number, hi: number): string[] =>
+    Array.from({ length: hi - lo + 1 }, (_, k) => `${prefix}${lo + k}`);
+  // —— 无音高族（对应 case 无 Pitch 赋值）——
+  put(['Player_Hit_0', 'Player_Hit_1', 'Player_Hit_2', 'Player_Killed',   // case1(:506)/case5(:699)
+    'Menu_Open', 'Menu_Close', 'Menu_Tick',                               // case10/11/12(:753/:763/:773)
+    'Shatter',                                                            // case13(:786)
+    'Roar_0', 'Roar_1',                                                   // case15(:829-845)
+    'Coins',                                                              // case18(:868)
+    'Tink_0', 'Tink_1', 'Tink_2',                                         // case21(:927-939)
+    'Unlock',                                                             // case22(:940-949)
+    'Drown'], null);                                                      // case23(:950)
+  put(['Zombie_0', 'Zombie_1', 'Zombie_2',                                // case14 ZombieMoan(:796-827)
+    'Zombie_7', 'Zombie_21', 'Zombie_22', 'Zombie_23'], null);
+  put(['Zombie_115', 'Zombie_116', 'Zombie_117'], null);                  // case65(:1400)
+  put(['Female_Hit_0', 'Female_Hit_1', 'Female_Hit_2'], null);            // case20(:914-926)
+  // —— ±0.10 档 Next(-10,11)×0.01 ——
+  put(rng('Dig_', 0, 2), [-10, 10]);              // case0(:453)
+  put(rng('NPC_Hit_', 1, 58), [-10, 10]);         // case3(:673)
+  put(rng('NPC_Killed_', 1, 68), [-10, 10]);      // case4(:696)
+  put(rng('Thunder_', 0, 5), [-10, 10]);          // case43(:479)
+  put(['Grab',                                    // case7(:728)
+    'Zombie_3', 'Zombie_4',                       // case26 Mummy(:978)
+    'Mech_0',                                     // case28(:1008)
+    'Zombie_109'], [-10, 10]);                    // case45 Dolphin(:1071)
+  put(rng('Zombie_', 24, 104), [-10, 10]);        // case29 怪物语音库(:1051)
+  put(rng('Zombie_', 110, 114), [-10, 10]);       // case46 Owl(:1091)
+  put(['Splash_0', 'Splash_1', 'Splash_2', 'Splash_3'], [-10, 10]);  // case19 style0-3(:891)
+  put(['Splash_4', 'Splash_5'], [-20, 0]);        // case19 style4/5 微光对(:887 低音高)
+  put(['Grass'], [-30, 30]);                      // case6 chop(:717)
+  put(['Door_Opened', 'Door_Closed'], [-20, 20]); // case8/9(:739/:750)
+  put(rng('Coin_', 0, 4), [-8, 8]);               // case38 拾币(:1354 ±0.08)
+  // —— 小动物/海鸟族（R22 随映射修正一并接入）——
+  put(rng('Zombie_', 106, 108), [-70, 0]);        // case44 Seagull(:1059 -0.70..0)
+  put(['Zombie_10', 'Zombie_11'], [-70, 0]);      // case30 Duck 常规(:1120)
+  put(['Zombie_12'], [-40, 20]);                  // case30 Duck 稀有 12(:1124)
+  put(['Zombie_13'], [-40, 20]);                  // case31 Frog(:1133)
+  put(rng('Zombie_', 14, 19), [-70, 25]);         // case32 Bird(:1144 -0.70..+0.25)
+  put(['Zombie_15'], [-10, 30]);                  // case33 鼠(:1212 -0.10..+0.30)
+  put([...rng('Zombie_', 118, 120), ...rng('Zombie_', 126, 128), ...rng('Zombie_', 129, 130)],
+    [-5, 5]);                                     // case67/68/69 鹦鹉族(:1156/:1168/:1180 ±0.05)
+  put(['Zombie_121', 'Zombie_122', 'Zombie_123'], [-15, 15]);  // case66(:1200)
+  // —— Item 音库：case2 默认 ±0.06（:635）;特例逐条 ——
+  put(rng('Item_', 1, 211), [-6, 6]);
+  m.Item_53 = [-40, -22];    // :616 Next(-20,-11)×0.02
+  m.Item_55 = [22, 40];      // :619 反相档
+  m.Item_132 = [-2, 2];      // :622 ×0.001
+  m.Item_153 = [-15, 15];    // :625 ×0.003
+  m.Item_156 = [-10, 10];    // :628 ×0.002
+  m.Item_169 = [-86, -74];   // :642 默认档后 Pitch -= 0.8
+  m.Item_26 = null; m.Item_35 = null; m.Item_47 = null;   // :634-637 Pitch=Main.musicPitch(乐器直传不随机)
+  // —— 宠物史莱姆受击语音（SoundID.cs WithPitchVariance(0.4),vanillaNpcAmbience 表注同源）——
+  put(['player_hit_balloon', 'player_hit_cat', 'player_hit_chicken', 'player_hit_chicken_rare',
+    'player_hit_crow', 'player_hit_dog', 'player_hit_fairy', 'player_hit_frog',
+    'player_hit_goat', 'player_hit_goblin', 'player_hit_retro', 'player_hit_turkey',
+    'player_hit_undead', 'player_hit_vampire'], [-40, 40]);
+  return m;
+})();
+
+/** PITCH_CASE 单点消费：返回该文件的播放速率倍率（2^pitch）。
+ *  显式 pitch 直传跳过;表项 null → 恒 1（不抖）;缺省 → 恒 1（未登记=原版无抖动） */
+export function pitchRateFor(file: string, explicitPitch?: number): number {
+  if (explicitPitch != null) return 2 ** explicitPitch;
+  const t = PITCH_CASE[file];
+  if (!t) return 1;
+  const roll = t[0] + Math.floor(Math.random() * (t[1] - t[0] + 1));
+  return 2 ** (roll / 100);
+}
 
 // ---------------------------------------------------------------------------
 // Ambient 环境音轨（独立音量轨）
@@ -274,6 +364,19 @@ export const AMBIENT_FILES: ReadonlySet<string> = new Set([
  *  播放链单点消费（playWavFile / startLoopFile / setRain），测试可直断言 */
 export function trackVolumeFor(file: string, ambientVol: number, masterVol: number): number {
   return AMBIENT_FILES.has(file) ? ambientVol : masterVol;
+}
+
+/** 声像接线单点：g → StereoPanner(pan) → destination（不支持时直连=中心）。
+ *  pan ∈ [-1,1]（panOf 已钳）;恒过 panner 节点避免"后补 panner 双路出声" */
+function connectPan(ctx: AudioContext, g: GainNode, pan: number): void {
+  if (typeof ctx.createStereoPanner === 'function') {
+    const p = ctx.createStereoPanner();
+    p.pan.value = Math.max(-1, Math.min(1, pan));
+    g.connect(p);
+    p.connect(ctx.destination);
+  } else {
+    g.connect(ctx.destination);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -446,6 +549,39 @@ export class Sfx {
     this.rainGain.gain.setTargetAtTime(v, ctx.currentTime, 0.4);
   }
 
+  // ---- 风声层：原版 WindAmbience cue45（Music_45.mp3,Main.cs:11723-11749）循环 ----
+  //  原版音量 = ambient × clamp(|wind|×0.7+0.3,0,1) × 0.9 × atmo⁴ ×(1-shimmerAlpha),
+  //  门 |wind|≥20/50=0.4 && SurfaceAtmospherics,不满足时 fade ±0.005/帧 渐熄——
+  //  目标值由调用方按公式算好传入（R22 蓝队接线 Sfx 侧;Game.applyWeatherLoops 驱动待接,
+  //  见 /tmp/recon/blue-team-r22.md 登记）。
+  private windGain: GainNode | null = null;
+  /** 设置风声强度 0-1（每帧调用;0 时静音不拆节点——重启有冷启动开销） */
+  setWind(vol: number) {
+    const ctx = this.ensure(true);
+    if (!ctx) return;
+    if (!this.windGain) {
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      g.connect(ctx.destination);
+      this.windGain = g;
+      fetch('audios/music/Music_45.mp3')
+        .then((r) => (r.ok ? r.arrayBuffer() : null))
+        .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
+        .then((buf) => {
+          if (!buf) return;
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.loop = true;
+          src.connect(this.windGain!);
+          src.start();
+        })
+        .catch(() => { /* 风声可选,加载失败静默 */ });
+    }
+    // cue45 走 music bank 的 ambient 面（UpdateAmbientCueState × ambientVolume）——ambient 轨
+    this.windGain.gain.setTargetAtTime(Math.max(0, Math.min(1, vol)) * this.ambient, ctx.currentTime, 0.4);
+  }
+
+
   /** 世界声距离衰减（LegacySoundPlayer.cs:160 SoundAttenuationDistance = 2500px） */
   static readonly ATTEN = 2500;
   /** 监听器（原版 Main.Camera.Center，相机中心非玩家）；Game 每帧更新。未进世界=(0,0) */
@@ -458,6 +594,15 @@ export class Sfx {
     const d = Math.hypot(x - this.lx, y - this.ly);
     if (d >= Sfx.ATTEN) return 0;
     return vol * (1 - d / Sfx.ATTEN);
+  }
+
+  /** 原版声像（LegacySoundPlayer.cs:398）：pan = dx/(MaxWorldViewSize.X/2) 钳 ±1。
+   *  MaxWorldViewSize=(1920,1200) 是恒常量（Main.cs:754-758），分母 = 960 非窗口宽。
+   *  R22 补齐：旧实现全程无声像（单声道定位）。 */
+  static readonly PAN_HALF_VIEW = 960;
+  private panOf(x?: number, y?: number): number {
+    if (x == null || y == null) return 0;
+    return Math.max(-1, Math.min(1, (x - this.lx) / Sfx.PAN_HALF_VIEW));
   }
 
   private ensure(silent = false): AudioContext | null {
@@ -510,15 +655,26 @@ export class Sfx {
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.loop = true;
-    src.playbackRate.value = 0.92 + Math.random() * 0.16;
+    src.playbackRate.value = pitchRateFor(list[0]);
     const g = ctx.createGain();
     g.gain.value = this.atten(vol, x, y) * this.master;
-    src.connect(g).connect(ctx.destination);
+    src.connect(g);
+    // 声像跟随（原版跟踪轨每次 PlaySound 重设 Pan=num3 同语义）
+    let panner: StereoPannerNode | null = null;
+    if (typeof ctx.createStereoPanner === 'function') {
+      panner = ctx.createStereoPanner();
+      panner.pan.value = this.panOf(x, y);
+      g.connect(panner);
+      panner.connect(ctx.destination);
+    } else {
+      g.connect(ctx.destination);
+    }
     src.start();
     return {
-      stop: () => { try { src.stop(); } catch { /* 已停 */ } g.disconnect(); },
+      stop: () => { try { src.stop(); } catch { /* 已停 */ } g.disconnect(); panner?.disconnect(); },
       setPos: (px: number, py: number) => {
         g.gain.value = this.atten(vol, px, py) * this.master;
+        if (panner) panner.pan.value = this.panOf(px, py);
       },
     };
   }
@@ -623,17 +779,18 @@ export class Sfx {
   }
 
   /** 缓冲起振（playWavFile 即时路径与 deferPlay 补播共用的出声单点）：
-   *  音高（pitch 直传跳过抖动）+ 音轨分派（LegacySoundPlayer.cs:420-429：
-   *  ambient 成员 ×ambientVolume，其余 ×soundVolume(master)——替换而非叠加）+
+   *  音高（PITCH_CASE 逐类型档,pitch 直传跳过）+ 音轨分派（LegacySoundPlayer.cs:420-429：
+   *  ambient 成员 ×ambientVolume，其余 ×soundVolume(master)——替换而非叠加）+ 声像 +
    *  单实例占槽（onended=自然播完/stop 均触发,清槽后可重播） */
-  private startBuffer(file: string, buf: AudioBuffer, vol: number, pitch?: number): void {
+  private startBuffer(file: string, buf: AudioBuffer, vol: number, pitch?: number, pan = 0): void {
     const ctx = this.ctx!;
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.playbackRate.value = pitch != null ? 2 ** pitch : 0.92 + Math.random() * 0.16;
+    src.playbackRate.value = pitchRateFor(file, pitch);
     const g = ctx.createGain();
     g.gain.value = Math.min(1, vol * trackVolumeFor(file, this.ambient, this.master));
-    src.connect(g).connect(ctx.destination);
+    src.connect(g);
+    connectPan(ctx, g, pan);
     src.start();
     if (Sfx.SINGLE_INSTANCE.has(file)) {
       this.singlePlaying.set(file, src);
@@ -652,7 +809,7 @@ export class Sfx {
     void this.ensureBufferAsync(file, ctx).then((buf) => {
       if (!buf || this.suppress) return;
       if (!replace && Sfx.SINGLE_INSTANCE.has(file) && this.singlePlaying.has(file)) return;
-      const fire = () => this.startBuffer(file, buf, vol, pitch);
+      const fire = () => this.startBuffer(file, buf, vol, pitch, this.panOf(x, y));
       if (ctx.state === 'suspended') void ctx.resume().then(fire, fire);
       else fire();
     });
@@ -685,7 +842,7 @@ export class Sfx {
       this.deferPlay(file, ctx, vol, x, y, pitch, replace);   // ★首播不丢
       return true;
     }
-    this.startBuffer(file, buf, vol, pitch);
+    this.startBuffer(file, buf, vol, pitch, this.panOf(x, y));
     return true;
   }
 
