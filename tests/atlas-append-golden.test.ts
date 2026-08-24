@@ -7,8 +7,14 @@
 // ④新页像素抽查:6147-6195 全量 49 键矩形内完全不透明像素数 > 0
 //   (源图全透明的原版件可豁免——当前 49 键无一件豁免,若未来新增全透明件,
 //    把 vid 加进 TRANSPARENT_EXEMPT 并注明源图证据)
+// ⑤PNG 像素 md5 锚(2026-08-24 事故补):vanilla-atlas.mjs 全量重排曾把 Atlas_0/1 重生成
+//   (0042c846)而 vanilla.json 仍是旧坐标——①-④ 全部只读 json,抓不到 PNG 侧变化,
+//   工具栏/背包全量贴图错位。本层直接对 16 个锚点物品从 PNG 裁矩形算 md5 与冻结值比对:
+//   追加通道不动既有像素 → 恒绿;任何全量重排/重生成 → 立即爆红。
+//   合法重排须 consciously 更新 PIXEL_ANCHORS(并走 CLAUDE.md 的 SW 缓存链评估)。
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -109,6 +115,55 @@ describe('atlas 追加保护闸门: 既有键锚定快照(防全量重排)', () 
       if (!cur) { bad.push(`${idStr} HEAD 缺键`); continue; }
       const got: [string, number, number, number, number] = [cur.icon, cur.ix, cur.iy, cur.iw, cur.ih];
       if (got.some((v, i) => v !== want[i])) bad.push(`${idStr}: HEAD ${JSON.stringify(got)} vs 冻结 ${JSON.stringify(want)}`);
+    }
+    expect(bad).toEqual([]);
+  });
+});
+
+describe('atlas 追加保护闸门: PNG 像素 md5 锚(防 PNG 侧重排)', () => {
+  /** 16 锚点 → [页号, md5(矩形 RGBA 前 12 位)]。2026-08-24 自恢复后(09732dc7 版
+   *  Atlas_0/1 + 在册 json)抓取;覆盖 0/1/3 三页 + 伪装箱族/星旋工具/常规武器散点。 */
+  const PIXEL_ANCHORS: Record<number, [number, string]> = {
+    1: [0, 'f52de9838028'],     // IronPickaxe(本次事故的定谳锚)
+    99: [0, 'db9ae007c5d4'],    // IronBow
+    168: [1, '16fafef49831'],   // Torch
+    756: [0, 'b751fc7584f8'],   // MushroomSpear
+    2772: [3, '8e1fc7003902'],  // VortexAxe(Atlas_3 追加页)
+    2773: [3, '3213c3e4a949'],  // VortexChainsaw
+    2775: [3, 'bab8a6a3e09f'],  // VortexHammer
+    3013: [0, '2bc636bf6de2'],
+    3665: [0, '6274706a8035'],  // TrappedChest(伪装箱族首件)
+    3679: [0, 'f6bd56f2ccd5'],  // TrappedJungleChest
+    4364: [0, '7fc3408f202f'],  // MaggotCage
+    5092: [0, 'be9ed870b818'],  // MonsterLasagna
+    5567: [0, '23999ba5c20e'],  // TrappedAetheriumChest
+    6018: [1, 'b5205e841b74'],  // TrappedLibrarianChest
+    6064: [1, '180fe8435269'],  // TrappedOfficeChest
+    6087: [0, '7c5550c53ea9'],  // TrappedForbiddenChest
+  };
+
+  it('16 锚点 PNG 矩形 md5 与冻结值逐项相等(PNG 被重排/重生成立即爆红)', () => {
+    const pages = new Map<number, ReturnType<typeof PNG.sync.read>>();
+    const readPage = (n: number) => {
+      if (!pages.has(n)) pages.set(n, PNG.sync.read(readFileSync(join(ROOT, `public/sprites/vanilla/Item_Atlas_${n}.png`))));
+      return pages.get(n)!;
+    };
+    const bad: string[] = [];
+    for (const [idStr, [page, want]] of Object.entries(PIXEL_ANCHORS)) {
+      const e = items[idStr];
+      if (!e) { bad.push(`${idStr} json 缺键`); continue; }
+      const png = readPage(page);
+      const buf = Buffer.alloc(e.iw * e.ih * 4);
+      for (let y = 0; y < e.ih; y++) {
+        for (let x = 0; x < e.iw; x++) {
+          const si = ((e.iy + y) * png.width + (e.ix + x)) * 4;
+          const di = (y * e.iw + x) * 4;
+          buf[di] = png.data[si]; buf[di + 1] = png.data[si + 1];
+          buf[di + 2] = png.data[si + 2]; buf[di + 3] = png.data[si + 3];
+        }
+      }
+      const got = createHash('md5').update(buf).digest('hex').slice(0, 12);
+      if (got !== want) bad.push(`item ${idStr}@Atlas_${page}(${e.ix},${e.iy},${e.iw}×${e.ih}): md5 ${got} ≠ 冻结 ${want}`);
     }
     expect(bad).toEqual([]);
   });
