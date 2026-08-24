@@ -311,19 +311,22 @@ describe('弹 949 生成与行为（AI_184）', () => {
     expect(h.sfx, '首帧 Item8（localAI[0]==0 :40109-40111）').toContain('Item_8');
   });
 
-  it('命中玩家：未解锁真伤+Kill;已解锁 damage=0 直穿（AI_184 :40103-40105）', () => {
+  it('命中玩家：未解锁真伤+穿透续飞;已解锁无伤直穿（AI_184 :43575-43579）', () => {
     const locked = makeProjHarness(false);
     const p1 = new TorchGodProj(90, 118, 8, 0, 1000, 6, locked.dust);
     p1.fixedUpdate(1 / 60, locked.game);
-    expect(locked.dmgCalls.length, '未解锁 → 真伤（本仓 1457 语义 :43575）').toBe(1);
+    expect(locked.dmgCalls.length, '未解锁 → 真伤（1457 :43575-43579 SelfHurtPlayers）').toBe(1);
     expect(locked.dmgCalls[0]).toBe(40);   // ★V5 复核补强：经典档基伤 40（hostileProjectileDamage(40,classic);曾只断 >0,回归 20 不红）
-    expect(p1.dead).toBe(true);
+    // ★1457 裁决：AI_184 命中走 SelfHurtPlayers（:15104-15152）——该方法不杀弹
+    // （无 Kill/active=false,immune 门静默、无敌帧结束再判,穿透续飞）;1456 语义
+    // （owner=255 假伤）已退役。旧断言 dead=true 锁 1456 前行为,按原版改。
+    expect(p1.dead, 'SelfHurtPlayers 不杀弹（:15104-15152）→ 穿透续飞').toBe(false);
     expect(locked.player.lastDamageCause).toMatchObject({ kind: 'projectile' });
 
     const unlockedH = makeProjHarness(true);
     const p2 = new TorchGodProj(90, 118, 8, 0, 1000, 6, unlockedH.dust);
     p2.fixedUpdate(1 / 60, unlockedH.game);
-    expect(unlockedH.dmgCalls, 'unlockedBiomeTorches → damage=0 假伤直穿（:40104-40106）')
+    expect(unlockedH.dmgCalls, 'unlockedBiomeTorches → SelfHurtPlayers 整段不进（:43576）')
       .toHaveLength(0);
     expect(p2.dead).toBe(false);
   });

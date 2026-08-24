@@ -138,6 +138,14 @@ export class MenuBackground {
     setFrameLightning(0);
     setFrameHorizon(null);
     this.sky.moonType = 0;
+    // 菜单地表默认值（小世界 surface≈4300px）：★原版 Main.worldSurface 无启动
+    //  初始化（仅生成/读档/联机写入）——冷启动标题 num3=(300-屏Y)/max(1,0) 爆表，
+    //  云/大气全废（vanilla 自身怪癖）；玩过一局回标题才有正常云。本仓菜单恒给
+    //  小世界地表 → 云带/atmo 恒归位（优于原版冷启动态）
+    if (this.sky.fx.surfaceY <= 0) {
+      this.sky.fx.surfaceY = 4300;
+      this.sky.fx.worldW = 4200;
+    }
   }
 
   private resize = () => {
@@ -256,6 +264,9 @@ export class MenuBackground {
     this.syncClock();
     menuTimeInfo.timeOfDay = this.clock.timeOfDay;
     menuTimeInfo.dayFactor = this.clock.dayFactor;
+    // 云色单源（= Renderer 帧内 this.sky.cots 同款）：ColorOfTheSkies——菜单不喂
+    //  则云回落 lastSkyTop(天空顶色深蓝)→深蓝云画在深蓝天上隐形（实测 lit=0）
+    this.sky.cots = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase);
     // MenuXMovement（:47625-47631：+4/帧，wrap ±2^31）
     this.camX = (this.camX + 4 * frames) % MENU_X_WRAP;
 

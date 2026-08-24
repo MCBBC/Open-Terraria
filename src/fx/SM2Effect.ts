@@ -12,7 +12,15 @@
 // - 采样策略：s0=被染贴图（像素中心对齐,双线性=原像素）；s1/s2 由调用方提供,
 //   寻址策略按 vanilla：染料走 SpriteBatch LinearClamp（clamp），
 //   Misc HallowBoss 烘焙的 uImage1 走 MiscShaderData.Apply 默认 LinearWrap（wrap）。
-// - v0（顶点色=光照）在烘焙期恒白：光照由合成管线后乘，与着色器尾段 ×v0 可交换。
+// - v0（顶点色=光照）在烘焙期恒白：光照由合成管线后乘。★仅对"v0 只出现在
+//   尾段乘法"的 pass 可交换（字节码扫描:尾乘族 30 pass）；**16 pass 存在 v0
+//   中段非线性消费**（max/lrp/mad/add/mul 位）——烘焙(白)×合成光 ≠ 逐帧
+//   v0=光照色 的原版输出,暗处/明暗过渡带染料响应有偏差（2026-08-24 r15
+//   R15-14 定谳;染料侧受累 13:ArmorMartian/LivingRainbow/LivingFlame/Wisp/
+//   HighContrastGlow/Hades/Acid/Mushroom/Solar/ShiftingSands/ShiftingPearlsands/
+//   Fog/Loki;非染料 3:WaterDistortionObject/HorizonClouds(两者走手写 JS 镜像,
+//   不经本解释器)/Aurora(自研光栅化逐像素 v0,不受此限)）。逐帧带 v0 烘焙需
+//   逐像素重跑 SM2=架构级改动,登记为已知偏差;亮处 v0≡白时等价故地表难察觉。
 import fxJson from '../data/fxPixelShader.json';
 
 export interface SM2Uniforms {

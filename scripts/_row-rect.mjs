@@ -25,6 +25,22 @@ const clouds = await page.evaluate(() => {
   };
 });
 console.log('CLOUDS:', JSON.stringify(clouds));
+  const vals = await page.evaluate(() => {
+    const sky = window.__swMenuBg.sky;
+    const cv = window.__swMenuBg.canvas;
+    const g = cv.getContext('2d');
+    const d = g.getImageData(0, 150, cv.width, 300).data;
+    let lit = 0;
+    for (let y = 0; y < 300; y += 4) {
+      for (let x = 0; x < cv.width; x += 4) {
+        const i = (y * cv.width + x) * 4;
+        if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200) lit++;
+      }
+    }
+    return { cots: sky.cots, lastSkyTop: sky.lastSkyTop, atmo: sky.atmoValue(3500), lit,
+      useGL: sky.useGLClouds, glLayer: !!sky.cloudGlLayer, towerMul: sky.towerCloudMul };
+  });
+  console.log('VALS:', JSON.stringify(vals));
 await page.evaluate(() => {
   const el = [...document.querySelectorAll('*')].find((e) => e.children.length === 0 && e.textContent.trim() === '单人模式');
   el?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); el?.click();

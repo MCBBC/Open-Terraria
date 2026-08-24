@@ -11,7 +11,13 @@ for (let i = 0; i < 100 && !menuReady; i++) {
   menuReady = await page.evaluate(() => !!window.__swMenuBg).catch(() => false);
   if (!menuReady) await new Promise((r) => setTimeout(r, 1000));
 }
-await new Promise((r) => setTimeout(r, 1200));
+// 等 splash 退场(轮询标题按钮)+云铺开
+for (let i = 0; i < 60; i++) {
+  const has = await page.evaluate(() => !!document.querySelector('.sw-title-btn')).catch(() => false);
+  if (has) break;
+  await new Promise((r) => setTimeout(r, 1000));
+}
+await new Promise((r) => setTimeout(r, 2500));
 
 const visibleTexts = () => page.evaluate(() =>
   [...document.querySelectorAll('*')]

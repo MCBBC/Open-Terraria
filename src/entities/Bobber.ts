@@ -15,6 +15,7 @@ import { projFrameImg } from './Arrow';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { GRAVITY, TILE } from '../core/constants';
+import { Clock } from '../world/World';
 import { moveAndCollide } from '../physics/TileCollision';
 import {
   fishingPowerMultiplier, rollDropLevels, rollJunk, heightLevelOf, prepareFishingContext,
@@ -141,9 +142,14 @@ export class Bobber extends Entity {
       const isDay = w.clock.isDay; // 昼夜边界以 Clock 为准（4:30/19:30）
       base = Math.floor(base * fishingPowerMultiplier({          // :41555-41556
         raining: !!w.weather?.raining,
-        cloudBGAlpha: w.weather?.cloudAlpha ?? 0,
+        // R14-E2：cloudBGAlpha（阴天层常驻>0,Main.cs:60291-60302 缓动）——曾误读
+        // 雨强 cloudAlpha,非雨天恒缺 ×1.1
+        cloudBGAlpha: w.weather?.cloudBGAlpha ?? 0,
         dayTime: isDay,
-        time: isDay ? ((t - 0.25) / 0.5) * 54000 : ((((t - 0.75) + 1) % 1) / 0.5) * 32400,
+        // R14-E1：Main.time 轴 = 昼 0..54000(昼长 0.625 圈,起点 4:30)/夜 0..32400
+        // (0.375 圈)——曾按昼起点 0.25/昼长 0.5 映射,晨昏 ×1.3/正午 ×0.8 窗整体
+        // 平移 1-1.5 小时;与 Game.playerFishingConditions(:20456)同式对齐
+        time: isDay ? ((t - Clock.DAWN) / 0.625) * 54000 : ((((t - Clock.DUSK) + 1) % 1) / 0.375) * 32400,
         moonPhase: w.clock.moonPhase,
         bloodMoon: !!w.clock.bloodMoon,
       }));

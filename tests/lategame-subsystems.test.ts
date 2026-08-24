@@ -212,13 +212,17 @@ describe('史后仆从 658/659 射击', () => {
       e.fixedUpdate(1 / 60, hooks);
       if (shots.length) fired = t;
     }
-    expect(fired).toBeGreaterThan(0);
+    // ★1457 裁决：射门（:61900-61903）= |ΔX|<500 && |ΔY|<550 && CanHit &&
+    //   velocity.Y==0 && localAI[0]==0——无最小存活 tick;且 UpdateNPC 先 AI()（:91533）
+    //   后重力 → 新生成史莱姆首 tick velocity.Y==0 恒真 = 原版首帧即可射。
+    //   旧断言 fired>0 锁"先落地再射"旧 tick 序,按原版改 ≥0（只断"会射"）。
+    expect(fired).toBeGreaterThanOrEqual(0);
     expect(shots[0].projId).toBe(920);
     expect(shots[0].damage).toBe(15);        // MultiLerp(15,17,20) 经典档
     expect(shots[0].hostile).toBe(true);
   });
 
-  it('659：同门 → 921 粉（cs:61746-61795）', () => {
+  it('659：同门 → 921 粉（:61951-61995）', () => {
     const { hooks, shots } = minionWorld({ x: 40, y: 58 });
     const e = Enemy.fromVanilla(659, 36 * TILE, 59 * TILE - 18)!;
     let fired = -1;
@@ -226,7 +230,8 @@ describe('史后仆从 658/659 射击', () => {
       e.fixedUpdate(1 / 60, hooks);
       if (shots.length) fired = t;
     }
-    expect(fired).toBeGreaterThan(0);
+    // 同 658：首 tick velocity.Y==0 即满足门（AI 先于重力,:91533）→ fired 可为 0
+    expect(fired).toBeGreaterThanOrEqual(0);
     expect(shots[0].projId).toBe(921);
     expect(shots[0].damage).toBe(15);
   });

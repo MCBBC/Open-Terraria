@@ -588,7 +588,6 @@ export class StormLightning extends Entity {
   private targetIdx = -1;
   /** Kill 帧 bolt 折线（视觉 + 命中域）；visualT>0 = 尸检期（弹已停 AI,仅画 bolt） */
   private bolt: Bolt | null = null;
-  private boltForks: Bolt[] = [];
   private boltColor: [number, number, number] = [1, 1, 1];
   private visualT = 0;
   private readonly visualTotal = 16;
@@ -713,7 +712,6 @@ export class StormLightning extends Entity {
       : null;
     const bolt = gen.generateMainBoltPath(this.seed >>> 0, center, dir);
     this.bolt = bolt;
-    this.boltForks = [];
     // 1117：撞块 → 中心吸附 bolt 末点（:71945-71949）；液体 → localAI[0]=3
     if (this.projId === 1117) {
       if (bolt.collidedWithTile) {

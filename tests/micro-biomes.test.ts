@@ -110,7 +110,10 @@ describe('placeLavaTrap(WorldGen.cs:8648-8732)', () => {
 describe('DeadMansChestBiome(DeadMansChestBiome.cs)', () => {
   function caveWorld(): TileStore {
     const st = dirtWorld(140, 120);
-    for (let x = 44; x <= 57; x++) for (let y = 54; y <= 58; y++) st.setTileSilent(x, y, 0);
+    // 腔体含 y=53 行:1457 FindBoulderTrapSpot_CheckSpot 新增门(cs:265-269,1456 无)——
+    // 巨石锚位正下两格 (x,y+1)/(x+1,y+1) 均实心即弃位;全实心地板下扫描列(锚 y=52,
+    // 下探 53)全被此门拒 → boulders=0 → AreThereEnoughTraps 恒 false。上扩一行给门留空气。
+    for (let x = 44; x <= 57; x++) for (let y = 53; y <= 58; y++) st.setTileSilent(x, y, 0);
     // 金箱锚点 (50,57):2×2 style 1 帧
     st.setTileSilent(50, 57, CHEST, 36, 0);
     st.setTileSilent(51, 57, CHEST, 54, 0);

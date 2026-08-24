@@ -160,12 +160,16 @@ describe('1457 复活跳过五门', () => {
   });
   it('结构锚:fixedUpdate 跳过链含 幽灵相/PvP/90t 锁/活值四门(防门被拆)', () => {
     const src = readFileSync(join(ROOT, 'src/core/Game.ts'), 'utf8');
-    const i = src.indexOf('jumpEdge && player.respawnTimer >= 90');
+    // 2026-08-24 重构:门链提取为 respawnSkipUi 赋值(Main.cs:46104-46136 同门,
+    // 死亡 UI"按SPACE跳过"提示淡入与此位联动,Renderer 消费)→ 跳过消费点变为
+    // `jumpEdge && player.respawnSkipUi`。四门语义未动(=Player.cs:39264-39291)。
+    const i = src.indexOf('player.respawnSkipUi = player.respawnTimer >= 90');
     expect(i).toBeGreaterThan(-1);
-    const chain = src.slice(i, i + 220);   // if 链体(跨行条件)
+    const chain = src.slice(i, i + 260);   // 赋值链体(跨行条件)+ jumpEdge 消费点
     expect(chain).toContain('isGhostPhase');
     expect(chain).toContain('lastPvpDeath');
     expect(chain).toContain('allowsRespawnTimerSkip');
     expect(chain).toContain('respawnTimer >= 90');   // DeadSkipLockoutTime(:1627)
+    expect(chain).toContain('jumpEdge');             // JustBecameTrue(Jump) 消费点
   });
 });

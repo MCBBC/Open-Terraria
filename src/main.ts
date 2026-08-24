@@ -557,51 +557,59 @@ kvHas('sandboxworld.quicksave').then(async () => {
   // 启动加载画面（Main.DrawSplash :53297：随机三件套+淡入淡出时序+LoadingSunflower）。
   // RE-LOGIC 字样烘在每组 Splash_N_2 前景层（透明底 PNG，透出 back 场景）——
   // vanilla-ui/logo_1..8.png 是死资产（AssetInitializer.cs:84 加载后无任何绘制点）。
-  const splashT0 = performance.now();
+  // 时序全程 ~10.3s 不快进（2026-08-24 用户要求"按原版时间渐入渐出"）；资源
+  // 下载等待 = splashGate 迟解（时序尽转全暗+向日葵+徽标，下载完才自收场）。
   const splashGate: { resolve: () => void } = { resolve: () => {} };
-  const splash = showSplash({ loading: new Promise<void>((r) => { splashGate.resolve = r; }) });
+  const splash = showSplash({
+    loading: new Promise<void>((r) => { splashGate.resolve = r; }),
+    quick: audio.muted || audio.volume === 0,   // 原版 quickSplash（musicVolume==0）
+  });
+  void audio.play('title');   // ★标题曲随 splash 出现即起（用户要求，非进标题才播；
+                              // AC 挂起由首次手势解锁恢复；showTitle 内重调幂等）
   const bootParams0 = new URLSearchParams(location.search);
   const bypassBoot = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo');
   await loadAssets();
-  splashGate.resolve();
   if (atlas) UITextures.setAtlas(atlas);
-  // options/语言先行（原在 splash 收场后——提前到保持期前：下载徽标挂载文案
-  // 需要 Lang；mainFlow 内的 options.load() 幂等，此处已加载则直接返回）
+  // options/语言先行（下载徽标挂载文案需要 Lang；mainFlow 内 options.load() 幂等）
   await options.load();
   await Promise.all([UIFont.load(), Lang.init(options.data.lang)]);
   if (!bypassBoot) {
     // 资源预载提前到 splash 期（原 showTitle 内调用，幂等）：有下载就停在 splash
-    // 上等完（右下角徽标 z40 浮于 splash z30 之上），无下载至少保持 2s——
-    // 此前 splash 在暖缓存下被 done() 秒切（可见 ~0.2s，用户报告"直接跳过去"）
+    // 上等完（右下角徽标 z40 浮于 splash z30 之上）；splashGate 在下载完才解——
+    // 时序 10.3s 内下完则自然收场，下不完则时序尽转全暗+向日葵续等
     await initAssetCache();
     warmAllAssets();
     mountAssetBadge();
-    await holdForAssetsReady({ minMs: 2000, sinceMs: performance.now() - splashT0 });
+    await holdForAssetsReady({ minMs: 0, timeoutMs: 30000 });
   }
-  splash.done();
+  splashGate.resolve();
   VUI.init(root);
   VUI.startLoop(); // 自愈帧循环（HMR 杀不死，看门狗 1s 内重启）
-  // SW 资产持久缓存注册已提前到 splash 期(上方 await initAssetCache,幂等)
   flow = createFlow(root, atlas, ui, audio);
 
   // M0 验收入口：?vuidemo=1 只跑 VUI 框架演示
-  if (new URLSearchParams(location.search).has('vuidemo')) {
+  if (bootParams0.has('vuidemo')) {
+    splash.done();
     VUI.setState(new VuiDemoState());
     return;
   }
 
   // 旁路路由：?play[=small|medium|large] 跳过主菜单直接生成世界进游戏
-  // （主菜单 UI 改造期间绕行用；也可 ?quickload 直接读快速存档）
+  // （主菜单 UI 改造期间绕行用；也可 ?quickload 直接读快速存档）——调试入口
+  // 不陪跑 10.3s 时序，立即收场
   if (bootParams0.has('quickload')) {
+    splash.done();
     void flow.quickLoad();
     return;
   }
   if (bootParams0.has('play')) {
+    splash.done();
     const sz = bootParams0.get('play') || 'medium';
     const [w, h] = sz === 'small' ? [4200, 1200] : sz === 'large' ? [8400, 2400] : [6400, 1800];
     void flow.newWorld('', w, h);
     return;
   }
 
-  flow.showTitle();
+  flow.showTitle();            // 标题在 splash 幕后建好（音乐/预载/徽标调用皆幂等）
+  if (!bypassBoot) await splash.finished;   // 原版时序（含渐出）走完才揭幕
 });

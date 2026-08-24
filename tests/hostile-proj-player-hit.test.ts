@@ -6,7 +6,7 @@
 //  3. 玩家自己的弹（hostile=false 默认）不伤玩家；
 //  4. 348 FrostWave 命中 → Chilled/Frozen 授予（Projectile.StatusPlayer :11554-11567）。
 import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -35,6 +35,9 @@ function makeGame(p: Player, log: { dmg: number[] }): GameHooks {
 
 describe('敌弹命中玩家（Damage_EVP）', () => {
   it('hostile 弹命中:掉血 + damagePlayer 调用 + 弹体存活（穿透不消耗）', () => {
+    // ★播种：R5-F21 起 Damage_EVP 首段 Main.DamageVar ±15% 掷骰（1457 :14912,
+    //   先掷后吃难度缩放/×2）。裸玩家 luck=0 只掷 1 次,rnd()=0.5 → ×1.00 确定性
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const p = new Player(30 * 16, 10 * 16, new Inventory());
     const hp0 = p.hp;
     const log = { dmg: [] as number[] };

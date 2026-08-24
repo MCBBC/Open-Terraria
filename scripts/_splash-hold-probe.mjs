@@ -12,6 +12,17 @@ const origin = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 const errs = [];
+// 标题曲起播时刻（AudioContext 创建时间 vs 标题菜单出现时刻）
+await page.evaluateOnNewDocument(() => {
+  window.__acCreated = null;
+  const Orig = window.AudioContext;
+  window.AudioContext = class extends Orig {
+    constructor(...a) {
+      super(...a);
+      if (window.__acCreated === null) window.__acCreated = performance.now();
+    }
+  };
+});
 page.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
 
 await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -27,6 +38,8 @@ for (;;) {
     const back = el?.querySelector('.back');
     return {
       present: !!el,
+      acCreated: window.__acCreated,
+      titleAt: window.__titleSeenAt ?? null,
       z: el ? getComputedStyle(el).zIndex : null,
       treePos: tree ? getComputedStyle(tree).backgroundPosition : null,
       treeSize: tree ? getComputedStyle(tree).backgroundSize : null,
@@ -61,5 +74,10 @@ A(styles.treePos === '100% 100%', `tree 应锚右下: ${styles.treePos}`);
 A(styles.treeSize === 'contain', `tree 应 contain: ${styles.treeSize}`);
 A(styles.frontSize === 'contain', `front 应 contain(原版 min 缩放,非 cover): ${styles.frontSize}`);
 A(styles.backSize === 'cover', `back 应 cover: ${styles.backSize}`);
+A((styles.acCreated ?? Infinity) < 3000, `标题曲 AC 应随 splash 出现即建(<3s): ${styles.acCreated}`);
+if (first !== null && last !== null) {
+  // 原版完整时序 ~10.3s（90f 黑场+320f 渐入+150f 持满+60f 渐出）——资源就绪也不快进
+  A(last - first >= 9000, `splash 可见 ${(last - first)}ms < 9000ms（未走满原版时序）`);
+}
 console.log(process.exitCode ? 'PROBE FAILED' : 'PROBE OK');
 await browser.close();

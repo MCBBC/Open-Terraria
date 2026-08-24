@@ -250,6 +250,10 @@ describe('Warmth(124)：寒冷系敌怪接触/敌弹受击 ×0.7', () => {
     expect(normal.seen).toEqual([100]);
   });
   it('弹幕侧：敌弹 109（冰雪弹,coldDamage）100 → 经典档 140=trunc(70)×2;非表弹 200', () => {
+    // ★播种：R5-F21 起 Damage_EVP 首段 Main.DamageVar ±15% 掷骰（1457 :14912,
+    //   先掷后吃 resistCold/难度缩放）。luck=0（裸玩家）只掷 1 次,
+    //   rnd()=0.5 → floor(0.5×31)-15=0 → ×1.00 确定性,断言回到钉值
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const mkHitGame = (warmth: boolean) => {
       const p = mkPlayer();
       if (warmth) p.buffs.apply(BuffType.Warmth, 60);

@@ -20,7 +20,7 @@ import {
 import { emoteCount } from '../src/render/EmoteBubble';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { VANILLA_NPCS } from '../src/data/vanillaNpcs';
-import { GRAVITY } from '../src/core/constants';
+import { ENEMY_GRAVITY } from '../src/core/constants';
 
 const DIRT = TILE_BY_KEY['dirt']!;
 const STONE = TILE_BY_KEY['stone']!;
@@ -404,7 +404,7 @@ describe('P1-7 越障三档跳 + 转身/逼停/卡墙折返（NPC.cs:54514-54611
       npc.fixedUpdate(1 / 60, game);
       if (npc.vy < 0) jumpV = npc.vy;
     }
-    expect(jumpV).toBe(-5 + GRAVITY);
+    expect(jumpV).toBe(-5 + ENEMY_GRAVITY); // NPC 重力=0.3(NPC.cs:6026),勿用玩家 GRAVITY 0.4
   });
 
   it('两格上障碍（t5+t4 实心，矮身门）→ vy=−6（:54522-54526）', () => {
@@ -417,7 +417,7 @@ describe('P1-7 越障三档跳 + 转身/逼停/卡墙折返（NPC.cs:54514-54611
       npc.fixedUpdate(1 / 60, game);
       if (npc.vy < 0) jumpV = npc.vy;
     }
-    expect(jumpV).toBe(-6 + GRAVITY);
+    expect(jumpV).toBe(-6 + ENEMY_GRAVITY);
   });
 
   it('净空被堵 → 不跳、转身折返（flag26 :54604-54608）', () => {

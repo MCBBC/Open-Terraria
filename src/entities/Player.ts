@@ -1898,6 +1898,33 @@ export class Player extends Entity {
   /** Update_AmmoCycler + Update_SentryBackpack + Update_HarpyCharm + Update_TimerCrit
    *  （Player.cs:24760-24763 四连调,本体 :28632-28659/:28521-28562/:28661-28704）。
    *  fixedUpdate 每 tick 调（原版 Update 同位）。 */
+  /** 冷却回充三连尘（Spawn_SnappingStoneRecharge P57:454-470 / Pyroclastic :437-452 /
+   *  ArmletOfRuin :418-435 共用形态）：NewDust(position,w,h,type,0,0,α) 后置字段
+   *  noLight/noGravity/scale/fadeIn/y=半高/customData=player/noLightEmittance。
+   *  pull 系（226/15）velocity×0.5 再 vy×3；circular 系（6）v=Circular(2,4)。 */
+  private emitRechargeDust(game: GameHooks, type: number, count: number,
+    scale: number, alpha: number, pull: boolean): void {
+    for (let i = 0; i < count; i++) {
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, type, 0, 0, alpha, null, scale);
+      if (!d) continue;
+      d.noLight = true;
+      d.noGravity = true;
+      d.scale = scale;
+      d.fadeIn = 1.1;
+      d.y = this.y + this.h / 2;
+      if (pull) {
+        d.vx *= 0.5;
+        d.vy *= 3;
+      } else {
+        d.vx = (Math.random() * 2 - 1) * 2;               // NextVector2Circular(2,4)
+        d.vy = (Math.random() * 2 - 1) * 4;
+      }
+      d.alpha = alpha;
+      d.followPlayer = true;                              // customData=player
+      d.noLightEmittance = true;
+    }
+  }
+
   private update1457AccBodies(game: GameHooks): void {
     // Update_AmmoCycler（:28632-28638）：冷却走完归 0 拍把轮换偏移复位
     if (this.ammoCyclingCooldown > 0 && --this.ammoCyclingCooldown === 0) {
@@ -4178,8 +4205,29 @@ export class Player extends Entity {
     if (this.repeatWhipsResetCooldown > 0 && --this.repeatWhipsResetCooldown === 0) {
       this.repeatWhipSwings = -1;
     }
-    // 拍击石系冷却递减（Update :28603——0 档回充音效登记未接）
-    if (this.accSnappingStoneCooldown > 0) this.accSnappingStoneCooldown--;
+    // 拍击石系冷却递减（Update_SnappingStone :28595-28621）——归零帧按在身饰品
+    // 三选一回充反馈（★2026-08-24 r15 R15-16 补齐：三段纯 Dust + 三音效）：
+    //   accSnappingStone  → Item30(pitch −0.9,vol 0.08) + Spawn_SnappingStoneRecharge
+    //   (P57:454-470:10×dust 226,scale .9/fadeIn 1.1/α255→显形,y=半高,v×0.5 再
+    //    vy×3,customData=player,noLight/noGravity/noLightEmittance)
+    //   accPyroclast      → Item20 + Spawn_PyroclasticStoneRecharge(:437-452:
+    //    15×dust 6,scale 1.5/fadeIn 1.1,v=Circular(2,4))
+    //   accArmletOfRuin   → Item28(pitch −0.9,vol 0.08) + Spawn_ArmletOfRuinRecharge
+    //    (:418-435:10×dust 15,scale .9/fadeIn 1.1/α60,v×0.5 再 vy×3)
+    if (this.accSnappingStoneCooldown > 0 && --this.accSnappingStoneCooldown === 0) {
+      const es = this.equipStats;
+      const cx = this.mountedCenter.x, cy = this.mountedCenter.y;
+      if (es.accSnappingStone) {
+        game.playSfxWav?.('Item_30', 0.08, cx, cy, -0.9);
+        this.emitRechargeDust(game, 226, 10, 0.9, 255, true);
+      } else if (es.accPyroclast) {
+        game.playSfxWav?.('Item_20', 1, cx, cy);
+        this.emitRechargeDust(game, 6, 15, 1.5, 255, false);
+      } else if (es.accArmletOfRuin) {
+        game.playSfxWav?.('Item_28', 0.08, cx, cy, -0.9);
+        this.emitRechargeDust(game, 15, 10, 0.9, 60, true);
+      }
+    }
     // ---- 1457 配饰四件运行态（Update_AmmoCycler :28632 / Update_SentryBackpack
     //      :28640 / Update_HarpyCharm :28648 / Update_TimerCrit :28521——原版
     //      Update :24760-24763 同段连排）----

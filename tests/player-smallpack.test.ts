@@ -318,18 +318,22 @@ describe('饥饿链（UpdateHungerBuffs :11686 + UpdateStarvingState :11743）',
     expect(b.hungerPickSpeed).toBe(0.15);
   });
 
-  it('极饿双重掉血：常驻流失 max(4,120·maxHp/3000)/2 HP/s + 每 2s 直伤 maxHp/50（×2 沙/雪）', () => {
+  it('极饿流干单通道：lifeRegen=-max(4,120·maxHp/3000)（半HP/s）,每 120·max(2,maxHp/50) 一跳 maxHp/50（×2 沙/雪）', () => {
     const b = new BuffState();
     b.dontStarveWorld = true;          // 非 constant 世界三态被 UpdateHungerBuffs 即刻剥离
     b.apply(BuffType.Starving, 10);
-    b.starvingMaxHp = 500;              // num2 = 20 → 10 HP/s 常驻
+    b.starvingMaxHp = 500;              // num2 = 20 → 10 HP/s;num12 = 10 → 60t 一跳
     b.starvingZoneBoost = false;
-    // 2 秒：流失 20 HP + 周期直伤 500/50 = 10
+    // ★1457 裁决（R5-F7）：极饿是【单通道流干】——:19255-19276 lifeRegen=-num2
+    //   喂 :19384 lifeRegenCount,:19458-19477 每 -120×num12 一跳 HurtLifeRegen(num12)。
+    //   500HP：num2=20（半HP/s）=10HP/s,num12=10,num13=1200 → 每 60t 一跳 10。
+    //   2 秒 = 2 跳 = 20。旧断言 30（流失 20 + 周期直伤 10 双通道并行）系 R5-F7
+    //   前旧模型,按原版改。
     let dmg = 0;
     for (let t = 0; t < 120; t++) dmg += -b.tick(1 / 60);
-    expect(dmg).toBeGreaterThanOrEqual(30);
-    expect(dmg).toBeLessThan(31);
-    // 沙/雪 ×2 直伤（每 2s 20）
+    expect(dmg).toBeGreaterThanOrEqual(20);
+    expect(dmg).toBeLessThan(21);
+    // 沙/雪 ×2（:19462-19463 dmg = num12×2,流速不变）→ 2s = 2 跳 × 20 = 40
     const b2 = new BuffState();
     b2.dontStarveWorld = true;
     b2.apply(BuffType.Starving, 10);

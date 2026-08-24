@@ -1899,6 +1899,21 @@ function mlMoonLordChargeSparkle(
   }
 }
 
+/** DrawDust 速度拖影链族判定（M57:39537-39658 if/else-if）：返回残影段数
+ *  （0=无拖影）。130-134/278 无门；219-223/264/226||272/331 要求 fadeIn==0。
+ *  通式 min(10,(|vx|+|vy|)·0.3·10)；264 特例无 0.3 系数（|v|·10）。 */
+function dustTrailCount(d: { type: number; vx: number; vy: number; fadeIn: number }): number {
+  const t = d.type;
+  let n = 0;
+  if (t >= 130 && t <= 134) n = (Math.abs(d.vx) + Math.abs(d.vy)) * 3;
+  else if (t === 278) n = (Math.abs(d.vx) + Math.abs(d.vy)) * 3;
+  else if (t >= 219 && t <= 223 && d.fadeIn === 0) n = (Math.abs(d.vx) + Math.abs(d.vy)) * 3;
+  else if (t === 264 && d.fadeIn === 0) n = (Math.abs(d.vx) + Math.abs(d.vy)) * 10;
+  else if ((t === 226 || t === 272) && d.fadeIn === 0) n = (Math.abs(d.vx) + Math.abs(d.vy)) * 3;
+  else if (t === 331 && d.fadeIn === 0) n = (Math.abs(d.vx) + Math.abs(d.vy)) * 3;
+  return n > 10 ? 10 : n;
+}
+
 export class Renderer {
   /** GL 合成层(#1 背景族 + #2 全屏地图共用;docs/webgl2-migration-plan.md) */
   glfx: GLSpriteLayer | null = null;
@@ -2632,17 +2647,6 @@ export class Renderer {
     const worldLayer = this.beginWorldLayer(viewW, viewH);
     if (worldLayer) ctx = worldLayer;
 
-    // 1.5b 地下分层背景画进世界层(★2026-08-20 光照修复):原版 Main.cs:52327+
-    //  地下背景逐 16px 段 Lighting.GetColor 采光(暗段跳过/部分亮段 9-slice 渐变)
-    //  ——与本层 lightCanvas 乘法等价(屏空间同源)。此前画在主画布 = worldLayer
-    //  分层后不吃光:洞里恒亮且与时间无关(用户实报"地底下远景背景居然是亮的")。
-    //  地表层仍在主画布(天空侧,只吃 cots 染,原版 ColorOfSurfaceBackgrounds 语义)。
-    //  旧路径(?worldlayer=0)此处画主画布,其后的全屏乘光天然把它压暗=原行为。
-    if (this.scene) {
-      const mainCtx2 = this.ctx;   // 世界层 ctx(或主画布)
-      this.biomeBg.draw(mainCtx2, world, this.scene, cam, viewW, viewH, [1, 1, 1], 0, 'underground');
-    }
-
     ctx.save();
     // 世界变换：平移 + 缩放（以屏幕中心为相机中心）
     // 像素风关键：tile/实体用最近邻采样保持锐利（光照层单独用平滑）
@@ -2669,6 +2673,19 @@ export class Renderer {
     //     不透明水画在墙/方块之前——方块贴图透明像素处露出这层水 = 浸润，
     //     有墙的水格由墙盖住、只留前景 0.6 层 → 墙在水中可见
     this.drawLiquids(world, cam, viewW, viewH, z, true);
+
+    // 1.5b 地下分层背景画进世界层(★2026-08-20 光照修复):原版 Main.cs:52327+
+    //  地下背景逐 16px 段 Lighting.GetColor 采光(暗段跳过/部分亮段 9-slice 渐变)
+    //  ——与本层 lightCanvas 乘法等价(屏空间同源)。此前画在主画布 = worldLayer
+    //  分层后不吃光:洞里恒亮且与时间无关(用户实报"地底下远景背景居然是亮的")。
+    //  地表层仍在主画布(天空侧,只吃 cots 染,原版 ColorOfSurfaceBackgrounds 语义)。
+    //  旧路径(?worldlayer=0)此处画主画布,其后的全屏乘光天然把它压暗=原行为。
+    //  ★2026-08-24 r15 R15-9 序修正:原版背景水(DrawWaters isBackground:true
+    //  :63140)先于地下分层背景(DrawBackground :63157)——两 pass 换序对齐。
+    if (this.scene) {
+      const mainCtx2 = this.ctx;   // 世界层 ctx(或主画布)
+      this.biomeBg.draw(mainCtx2, world, this.scene, cam, viewW, viewH, [1, 1, 1], 0, 'underground');
+    }
 
     // 2b/2c. chunk 拼装（背景墙层 + 前景 tile 层共用）
     // ★整数设备矩形绘制（2026-08-18 修复"非整数 zoom 下树冠/仙人掌-地形接缝"）：
@@ -3144,7 +3161,10 @@ export class Renderer {
     ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'center';
     for (const d of dmgNumbers) {
-      const [sx, sy] = cam.worldToScreen(d.x, d.y);
+      const [sx, sy0] = cam.worldToScreen(d.x, d.y);
+      // gravDir=−1 飘字 Y 屏幕镜像（Main.cs:63339-63343:num23 = screenHeight −
+      // (position.Y − screenPosition.Y)——重力倒置(重力地球等)时飘字翻到对侧）
+      const sy = player.gravDir === -1 ? viewH - sy0 : sy0;
       // 物品名飘字：带阴影浅白文本（非原版链,保持旧样式）
       if (d.label) {
         ctx.globalAlpha = Math.min(1, d.life / 30);
@@ -3921,6 +3941,62 @@ export class Renderer {
         id.data[i + 3] = id.data[i + 3] * a;
       }
       c1.putImageData(id, 0, 0);
+      // 速度拖影链（★2026-08-24 r15 R15-20：M57:39537-39658 if/else-if 六族——
+      //   本体绘制前的残影带,通式 i<min(10,(|vx|+|vy|)·0.3·10)、位置−velocity·i、
+      //   scale×(1−i/10)、origin(4,4)）：
+      //   130-134(:39537)/278(:39553) 无门；219-223(:39570)/264(:39592)/
+      //   226||272(:39614)/331(:39639) 要求 fadeIn==0。264 特例:计数无 0.3 系数
+      //   (|v|·10)、色=GetAlpha×0.3 再 GetColor 双画、origin(5,5)；226||272 带
+      //   customData Color 档色=GetColor(GetAlpha(light))（=本仓 colorPass 画布）；
+      //   331 色=GetColor(GetAlpha(White)) 不取光照（本仓 331 本体已按 lit 管线
+      //   近似——头注登记,拖影随本体同管线）
+      const trailN = dustTrailCount(d);
+      if (trailN > 0) {
+        const trailCp = (d.type === 226 || d.type === 272) && d.color
+          ? VanillaDust.colorPass(d, rgb, a) : null;
+        for (let j = 0; j < trailN; j++) {
+          const [tx, ty] = cam.worldToScreen(d.x - d.vx * j, d.y - d.vy * j);
+          const sc = d.scale * (1 - j / 10);
+          ctx.save();
+          ctx.translate(tx, ty);
+          if (d.rotation) ctx.rotate(d.rotation);
+          ctx.scale(sc, sc);
+          if (d.type === 264) {
+            ctx.globalAlpha = 0.3;               // GetAlpha(light)×0.3 基画
+            ctx.drawImage(s1, -5, -5);
+            ctx.globalAlpha = 1;
+            const cp264 = VanillaDust.colorPass(d, rgb, a);
+            if (cp264 && cp264.a > 0.004) {
+              c2.clearRect(0, 0, 8, 8);
+              c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
+              const idt = c2.getImageData(0, 0, 8, 8);
+              for (let i = 0; i < idt.data.length; i += 4) {
+                idt.data[i] = idt.data[i] * cp264.r;
+                idt.data[i + 1] = idt.data[i + 1] * cp264.g;
+                idt.data[i + 2] = idt.data[i + 2] * cp264.b;
+                idt.data[i + 3] = idt.data[i + 3] * cp264.a;
+              }
+              c2.putImageData(idt, 0, 0);
+              ctx.drawImage(s2, -5, -5);         // GetColor 叠画
+            }
+          } else if (trailCp) {
+            c2.clearRect(0, 0, 8, 8);
+            c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
+            const idt = c2.getImageData(0, 0, 8, 8);
+            for (let i = 0; i < idt.data.length; i += 4) {
+              idt.data[i] = idt.data[i] * trailCp.r;
+              idt.data[i + 1] = idt.data[i + 1] * trailCp.g;
+              idt.data[i + 2] = idt.data[i + 2] * trailCp.b;
+              idt.data[i + 3] = idt.data[i + 3] * trailCp.a;
+            }
+            c2.putImageData(idt, 0, 0);
+            ctx.drawImage(s2, -4, -4);
+          } else {
+            ctx.drawImage(s1, -4, -4);
+          }
+          ctx.restore();
+        }
+      }
       ctx.save();
       ctx.translate(px, py);
       if (d.rotation) ctx.rotate(d.rotation);

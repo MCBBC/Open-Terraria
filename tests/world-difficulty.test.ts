@@ -78,9 +78,15 @@ describe('中核死亡掉物品（Player.cs:38254 DropItems(gemsOnly=false)）',
     // 5 件掉（含 Loadout 备份仓）——slots[10] 的 3509 镐走 TurnToAir 不掉
     // （:53414-53418 起始三件门【只在 inventory 主循环】；armor/dye/misc/loadouts
     //  无条件掉，故 armor[0] 的 3509 照掉）
+    console.log('DEBUG-dropped', JSON.stringify(dropped), 'V3509=', VANILLA_ITEM_KEY_BY_ID[3509]);
     expect(dropped.length).toBe(5);
     expect(dropped.some(([k, n]) => k === VANILLA_ITEM_KEY_BY_ID[8] && n === 30)).toBe(true);
-    expect(dropped.some(([k, n]) => k === VANILLA_ITEM_KEY_BY_ID[3509] && n === 1)).toBe(true);
+    // ★键别名裁决：3509 双注册（桥接批 snake 'vi_3509_copper_pickaxe' + vanilla.json
+    //   自动注册 Pascal 别名 'vi_3509_CopperPickaxe'）同指同一内部 def——
+    //   dropInventoryOnDeath 按 def 权威键（Game.ts:991 ITEM_DEFS[s.id]?.key）落键，
+    //   断言须按内部 def id 等价比对，勿锁别名表字符串
+    const pickDef = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3509]];
+    expect(dropped.some(([k, n]) => ITEM_BY_KEY[k] === pickDef && n === 1)).toBe(true);
     // 槽位清空
     expect(inv.slots.every((s) => s === null)).toBe(false);   // [0-2] 被发还起始三件
     expect(inv.slots.slice(3).every((s) => s === null)).toBe(true);

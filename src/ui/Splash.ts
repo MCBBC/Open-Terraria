@@ -1,22 +1,30 @@
 // 启动加载画面（1457 Main.DrawSplash :53297-53430 1:1，DOM 覆盖层实现）：
 //  每次启动 UnifiedRandom.Next(1,11) 随机一组三件套 {Back 1920×1080 cover /
-//  Tree 512×512 contain 锚右下 / Front 1920×1080 contain 中心}；Splash_1 是
-//  16:9 快淡入变体（num3/4/5/6/7 = 0/75/200/75/75，其余 90/410/620/60/120——
-//  单位帧≈16.67ms）。淡入 [num3..num4] → 持满至 num5-num6 → num6 内淡出；
-//  异步加载未完则全暗 + LoadingSunflower（52×1007 竖条，19 帧环形取
+//  Tree 512×512 contain 锚右下 / Front 1920×1080 contain 中心}；淡入
+//  [num3..num4] → 持满至 num5-num6 → num6 内淡出，全程 ~10.3s（90/410/620/60，
+//  单位帧≈16.67ms）——资源就绪也不快进（2026-08-24 用户要求"按原版时间渐入渐
+//  出"）；快档 quick（0/75/200/75/75）= 原版 quickSplash：musicVolume==0
+//  （:53311-53314；曾误绑 Splash_1 组——16x9 只是贴图名，与快慢无关）。
+//  异步加载未完则时序尽后全暗 + LoadingSunflower（52×1007 竖条，19 帧环形取
 //  (t/3+10)%19，底中锚缩放；:53417-53422 显隐门 1:1）。
 //  RE-LOGIC 字样烘在 Splash_N_2 前景层（透明底 PNG）；vanilla-ui/logo_1..8.png
 //  是死资产（AssetInitializer.cs:84 加载后无绘制点），不使用。
-export interface SplashHandle { done(): void }
+export interface SplashHandle {
+  /** 旁路立即收场（?play/?quickload 调试入口不陪跑时序）；正常路径不调用——
+   *  时序自然走完自收场 */
+  done(): void;
+  /** resolve 于 splash 完全移除（时序尽自收场或 done()）——主流程等它再揭幕 */
+  finished: Promise<void>;
+}
 
 /** 每次启动随机一组（Main.cs：UnifiedRandom.Next(1,11)） */
 export function pickSplashSet(rand: () => number): number {
   return 1 + Math.floor(rand() * 10);
 }
 
-/** 淡入淡出 alpha 曲线（:51963-51985，帧→ms；wide169=Splash_1 特例档） */
-export function splashAlphaAt(tMs: number, wide169: boolean): number {
-  const [n3, n4, n5, n6] = wide169 ? [0, 75, 200, 75] : [90, 410, 620, 60];
+/** 淡入淡出 alpha 曲线（:53340-53362，帧→ms；quick=quickSplash 快档） */
+export function splashAlphaAt(tMs: number, quick: boolean): number {
+  const [n3, n4, n5, n6] = quick ? [0, 75, 200, 75] : [90, 410, 620, 60];
   const t = tMs / 16.67;
   if (t < n3) return 0;
   if (t <= n4) return ((t - n3) / (n4 - n3)) * 255;
@@ -26,15 +34,19 @@ export function splashAlphaAt(tMs: number, wide169: boolean): number {
 }
 
 export function showSplash(opts: {
-  /** 异步加载完成信号（Promise resolve 后进入淡出） */
+  /** 异步加载完成信号（resolve 后时序尽即自收场；未 resolve 则时序尽转全暗
+   *  + LoadingSunflower 等待——资源下载等待期即此态） */
   loading: Promise<unknown> | null;
+  /** 原版 quickSplash（musicVolume==0 → 快档时序；Main.cs:53311-53314） */
+  quick?: boolean;
   /** 随机源（默认 Math.random——原版 UnifiedRandom） */
   rand?: () => number;
 }): SplashHandle {
   const rand = opts.rand ?? Math.random;
+  const quick = opts.quick ?? false;
   const root = document.createElement('div');
   root.id = 'sw-splash';
-  // 三件套层级：Back(cover 铺满) / Tree(contain) / Front(front 铺满)
+  // 三件套层级：Back(cover 铺满) / Tree(contain 锚右下) / Front(contain 中心)
   root.innerHTML = `
     <style>
       /* z=30：资源下载徽标(40)/门槛弹窗(60)须浮于本层之上——启动保持期
@@ -64,14 +76,15 @@ export function showSplash(opts: {
   const flower = root.querySelector('.flower') as HTMLCanvasElement;
 
   const set = pickSplashSet(rand);
-  const wide169 = set === 1;
   const base = `sprites/vanilla/SplashScreens_Splash_${set}_`;
   back.style.backgroundImage = `url(${base}0.png)`;
   tree.style.backgroundImage = `url(${base}1.png)`;
   front.style.backgroundImage = `url(${base}2.png)`;
 
-  // 时序（帧→ms；:51947-51965：默认 90/410/620/60/120，16:9 路径 0/75/200/75/75）
-  const [n3, n4, n5, n6] = wide169 ? [0, 75, 200, 75].map((v) => v * 16.67) : [90, 410, 620, 60].map((v) => v * 16.67);
+  // 时序（帧→ms；:53340-53346：默认 90/410/620/60，quickSplash 0/75/200/75）
+  const [n3, n4, n5, n6] = quick
+    ? [0, 75, 200, 75].map((v) => v * 16.67)
+    : [90, 410, 620, 60].map((v) => v * 16.67);
   const flowerImg = new Image();
   flowerImg.src = 'sprites/vanilla-ui/UI_Sunflower_Loading.png';   // UI/ 子目录展平在 vanilla-ui/
   const fctx = flower.getContext('2d')!;
@@ -83,10 +96,6 @@ export function showSplash(opts: {
   const t0 = performance.now();
   let b = 0;            // white alpha 0..255
   let timelineOver = false;
-  /** 提前收场（done() 于保持期满调用）：起点时刻与当时 alpha——400ms 快淡出
-   *  替代原版 num6=60f≈1s（保持期常在淡入中途，全速淡出会硬切） */
-  let fadeoutAt = -1;
-  let fadeoutB = 0;
   const apply = () => {
     back.style.opacity = front.style.opacity = String(b / 255);
     tree.style.opacity = String(Math.min(1, b / 255));
@@ -100,14 +109,9 @@ export function showSplash(opts: {
   const step = () => {
     if (removed) return;
     const t = performance.now() - t0;
-    if (fadeoutAt >= 0) {
-      b = Math.max(0, Math.round(fadeoutB * (1 - (t - fadeoutAt) / 400)));
-      if (b === 0) { remove(); return; }
-    } else {
-      const a = splashAlphaAt(t, wide169);
-      if (a < 0) { if (!loadingDone) { b = 0; timelineOver = true; } else { remove(); return; } }
-      else b = Math.round(a);
-    }
+    const a = splashAlphaAt(t, quick);
+    if (a < 0) { if (!loadingDone) { b = 0; timelineOver = true; } else { remove(); return; } }
+    else b = Math.round(a);
     apply();
     // LoadingSunflower（:52041-52060：Frame(1,19,0,(帧/3+10)%19)，53px/帧=1007/19）
     if ((flowerImg.width > 0) && flowerImg.width) {
@@ -119,16 +123,16 @@ export function showSplash(opts: {
   };
   requestAnimationFrame(step);
 
+  let resolveFinished: () => void = () => {};
+  const finished = new Promise<void>((r) => { resolveFinished = r; });
   const remove = () => {
+    if (removed) return;
     removed = true;
     root.remove();
+    resolveFinished();
   };
   return {
-    /** 收场：保持期满调用——400ms 快淡出后移除（幂等；时序已自然走完则立即移除） */
-    done: () => {
-      if (removed || fadeoutAt >= 0) return;
-      fadeoutAt = performance.now() - t0;
-      fadeoutB = b;
-    },
+    done: remove, // 旁路立即收场（正常路径不调——时序尽自收场）
+    finished,
   };
 }

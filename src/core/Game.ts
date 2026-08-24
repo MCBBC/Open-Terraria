@@ -75,12 +75,13 @@ import {
 import {
   scanPylons, pylonAnchorAt, mapFocusRect, checkPylonTeleport,
   pylonItemTypeFromStyle, pylonStyleFromFrame, hasPylonOfType,
+  positionHasEnoughNpcs,
   type TeleportPylonInfo, type NpcHomeLike, type PylonTeleportCheck,
 } from '../world/TeleportPylons';
 import { DD2_EVENT_HOOKS, checkArenaScore } from '../entities/bossAI_dd2';
 import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonStations';
 import shopstockJson from '../data/vanilla-shopstock.json';
-import { dryadMoonPhaseStock, skeletonMerchantMoonPriceMul, rollTownPetVariant, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
+import { dryadMoonPhaseStock, rollTownPetVariant, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore, LIQUID_TYPE } from '../world/TileStore';
 import { paintTile, paintWall, paintDustColor, paintCoatTile, paintCoatWall, type PaintDustHook, type CoatDustHook } from '../world/Paint';
@@ -20625,8 +20626,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 第三位 = shopCustomPrice（勋章枚数）；铜币 price 位保留 item.value 备案
     const out: Array<[number, number] | [number, number, number]> =
       stock.filter((s) => this.shopCondOk(s.cond)).map((s) => (s.currency === 'DefenderMedals'
-        ? [s.id, s.price ?? 100, s.customPrice ?? 0] as [number, number, number]
-        : [s.id, s.price ?? 100] as [number, number]));
+        ? [s.id, s.price ?? 0, s.customPrice ?? 0] as [number, number, number]
+        : [s.id, s.price ?? 0] as [number, number]));
     // 永恒水晶 3828 三档 shopCustomPrice（Chest.cs:2947-2959 if/else-if：石人已败
     // 4 铂 / 任一机械王 1 铂 / 前机械 25 银）——提取器不表条件变价（多档赋值留空），
     // 此处直判覆盖铜币价（无币种标记，走快乐度/折扣主链）
@@ -20636,7 +20637,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         && (this.world.flags['downed_125'] || this.world.flags['downed_126']
           || this.world.flags['downed_127'] || this.world.flags['downed_134']));
       for (const e of out) {
-        if (e[0] === 3828) e[1] = golem ? 4000000 : mech ? 1000000 : 2500;
+        // R14-C5：CH57:2962-2971 三档 = buyPrice(0,4)=4 金(石人后)/buyPrice(0,1)=1 金
+        // （任一机械王后）/buyPrice(0,0,25)=25 银——曾放大 100 倍(4 铂/1 铂)
+        if (e[0] === 3828) e[1] = golem ? 40000 : mech ? 10000 : 2500;
       }
     }
     // 派对女孩灯笼夜专柜（Chest.cs:2282：LanternNight.LanternsUp → 上架 4702 放飞灯笼；
@@ -20652,20 +20655,39 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ---- 月相分档专柜（extract-shops.mjs 只记 cond:'moonPhase' 未捕获 case 值——
     //      剔除恒真条目，按 Chest.cs switch 实表补 8 相位档）----
     const phase = this.world.clock.moonPhase;
-    const price = (id: number) => ITEM_VALUES[String(id)] ?? 100;
+    const price = (id: number) => ITEM_VALUES[String(id)] ?? 0;   // R14-C2:缺表=value 0(原版语义),不再 100 铜兜底吞错价
     const day = this.world.clock.isDay;
     const add = (ids: number[]) => { for (const id of ids) out.push([id, price(id)] as [number, number]); };
     if (npc.npcKey !== 'travelling_merchant') {
       // 上述条目按相位重排（JSON 无 moonPhase 条目的 NPC 也进——分档表是权威）
       switch (npc.vanillaId) {
-        case 453: { // 骷髅商（Chest.cs:2780-2940）
+        case 453: { // 骷髅商（Chest.cs:2805-2960；R14-C8 取反链修正+6 处补齐）
           add([[284], [946], [3069], [4341], [285], [953], [3068], [3084]][phase]);
-          add(phase % 2 === 0 ? [3001] : this.world.flags.hardMode ? [188] : [28]);
-          add(!day || phase === 0 ? [3002] : [282]);
+          // :2856-2866 奇相位 28 与（困难）188 并卖（曾只卖 188 丢 28）
+          if (phase % 2 === 0) add([3001]);
+          else { add([28]); if (this.world.flags.hardMode) add([188]); }
+          // :2867-2886 夜/满月 3002(+持信号枪 930 → 5377) else 昼 282
+          if (!day || phase === 0) {
+            add([3002]);
+            if (this.playerHasVanillaItem(930)) add([5377]);
+          } else add([282]);
+          // :2879-2886 时段切换：Main.time%21600<=10800 → 3004 else 8
+          {
+            const ck = this.world.clock;
+            const tt = ck.isDay
+              ? ((ck.timeOfDay - Clock.DAWN) / 0.625) * 54000
+              : ((((ck.timeOfDay - Clock.DUSK) + 1) % 1) / 0.375) * 32400;
+            add((tt % 21600) <= 10800 ? [3004] : [8]);
+          }
           add(phase === 0 || phase === 1 || phase === 4 || phase === 5 ? [3003] : [40]);
           add([[3310], [3313], [3312], [3311]][phase % 4]);
-          add(phase === 1 || phase === 2 ? [5640] : phase === 3 || phase === 5 ? [5641] : [5642]);
+          // :2905-2921 相 0/4 无 5640-5642（曾 else 落 5642=相 0/4 多卖）
+          if (phase === 1 || phase === 2) add([5640]);
+          else if (phase === 3 || phase === 5) add([5641]);
+          else if (phase === 6 || phase === 7) add([5642]);
           if (phase === 0 && !day) add([3043]); // 满月夜魔法灯笼（:2930-2934）
+          // :2952-2955 !ateArtisanBread && 相 3-5 → 5326（本仓未跟踪吃面包旗,恒未吃）
+          if (phase >= 3 && phase <= 5) add([5326]);
           break;
         }
         case 20: { // 树妖月相轮换货（Chest.cs:1650-1697；NPCInteractions.cs:491
@@ -20761,7 +20783,53 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       add([[1481], [1482], [1483], [1484]][Math.floor(phase / 2)]);
       if (this.player.golferScoreAccumulated > 500) add([4743]); // :2250 橄榄球画
     }
+    // ---- 晶塔尾段（Chest.cs:3466-3533 SetupShop 末尾，除军火商 19/树妖 20/向导 21
+    //      外全城镇商店通用）——R14-C4：此前整段缺失=晶塔无处可买 ----
+    // 门：DoesPositionHaveEnoughNPCs(2, 玩家中心格)（TeleportPylonsSystem.cs:224-247，
+    // 复用 positionHasEnoughNpcs 同款 169×124 窗扫描）+ 玩家不在腐化/猩红；
+    // 群系分支逐条 num<39 上限（num=货架已入条数）。remix 分支（:3472-3484/:3499-3516）
+    // 本仓无颠倒世界不接（登记 R14-C33 同批）。
+    if (npc.vanillaId !== 19 && npc.vanillaId !== 20 && npc.vanillaId !== 21 && this.scene) {
+      const sc = this.scene;
+      const ptx = Math.floor(this.player.cx / TILE);
+      const pty = Math.floor(this.player.cy / TILE);
+      const npcs: NpcHomeLike[] = (this.entities.npcs as TownNPC[])
+        .filter((n) => n instanceof TownNPC && !n.dead && !n.bound && n.home)
+        .map((n) => ({
+          homeX: n.home!.x, homeY: n.home!.y,
+          x: Math.floor(n.cx / TILE), y: Math.floor(n.cy / TILE),
+        }));
+      if (positionHasEnoughNpcs(2, ptx, pty, npcs) && !sc.zoneCorrupt && !sc.zoneCrimson) {
+        const pylon = (id: number) => {
+          if (out.length < 39 && !out.some((e) => e[0] === id)) {
+            out.push([id, ITEM_VALUES[String(id)] ?? 0] as [number, number]);
+          }
+        };
+        // 4876 纯净：!remix 分支 = 非地下（ShoppingZone_BelowSurface :3479）
+        if (!sc.zoneSnow && !sc.zoneDesert && !sc.zoneBeach && !sc.zoneJungle
+          && !sc.zoneHallow && !sc.zoneGlowshroom && !sc.belowSurface) pylon(4876);
+        if (sc.zoneSnow) pylon(4920);                              // :3484-3487
+        if (sc.zoneDesert) pylon(4919);                            // :3488-3491
+        if (sc.zoneUnderworldHeight) pylon(5652);                  // :3492-3498
+        else if (!sc.zoneSnow && !sc.zoneDesert && !sc.zoneBeach && !sc.zoneJungle
+          && !sc.zoneHallow && !sc.zoneGlowshroom && sc.belowSurface) pylon(4917); // :3506-3509
+        // 4918 海洋：ZoneBeach && position.Y < worldSurface*16（:3510；remix 分支不接）
+        if (sc.zoneBeach && this.player.y / TILE < this.world.groundLevel) pylon(4918);
+        if (sc.zoneJungle) pylon(4875);                            // :3521-3524
+        if (sc.zoneHallow) pylon(4916);                            // :3525-3528
+        if (sc.zoneGlowshroom) pylon(4921);                        // :3529-3532
+      }
+    }
     return out;
+  }
+
+  /** 玩家背包含原版 id 物品（HasItem 语义,PLA57:56551-56561 扫 inventory[0..58)）——
+   *  商店补货门(军火商 4824-4827/骷髅商 5377/巫医 1836/1261 等)与合成附近材料共用 */
+  private playerHasVanillaItem(vid: number): boolean {
+    const key = VANILLA_ITEM_KEY_BY_ID[vid];
+    const id = key ? ITEM_BY_KEY[key] : undefined;
+    if (id === undefined) return false;
+    return this.player.inv.slots.some((sl) => sl && sl.id === id && sl.stack > 0);
   }
 
   /** 商店上架门（Chest.SetupShop if 门 → 本作状态映射；未实现事件门不上架） */
@@ -20812,6 +20880,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'crimson': return this.world.crimson;
       case 'bloodMoon': return this.world.clock.bloodMoon;
       case 'xMas': return this.world.clock.xMas;
+      case 'halloween': return this.world.clock.halloween;   // R14-C7:15 件万圣货曾错标 xMas(两季互换)
       case 'eclipse': return !!this.world.clock.eclipse; // 日食（电子人 774 等）
       case 'party': return partyIsUp(this.partyState);   // 派对进行中（派对商品族）
       case 'lanternNight': return LanternNight.lanternsUp; // 灯笼夜（派对女孩 4702 放飞灯笼）
@@ -20981,15 +21050,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 快乐度价格乘子：Player.SetTalkNPC（Player.cs:4189-4193）在开对话时快照
     // currentShoppingSettings，开店/购买/心情报告共用同一份——本仓 openNpcDialog 缓存
     let mul = this.dialogHappiness?.priceMul ?? 1;
-    // 骷髅商(453)月相定价（ShopHelper.cs:64-88 GetSkeletonMerchantPrices 逐分支抄，
-    // 系数在 townNpcProfiles.skeletonMerchantMoonPriceMul）：相0=1.0 → 1/7=1.1 →
-    // 2/6=1.2 → 3/5=1.3 → 相4=1.4（新月最贵），白天再 +0.1。
-    // ★1456 考古：该方法在 1.4.5.6 全源零调用点——ProcessMood（ShopHelper.cs:107）
-    // 对 npc.type==453 提前 return，PriceAdjustment 恒 1f；按任务要求复现该表，
-    // 回退 1456 死码语义删下面一行即可。
-    if (npc.vanillaId === 453) {
-      mul = skeletonMerchantMoonPriceMul(this.world.clock.moonPhase, this.world.clock.isDay);
-    }
+    // R14-C9：骷髅商(453)月相定价【删除】——GetSkeletonMerchantPrices（ShopHelper.cs:64-88）
+    // 在 1457 全源零调用，ProcessMood（:107）对 368/453/城镇宠物提前 return，
+    // PriceAdjustment 恒 1f（仅 loveStruck ×0.9）。此前实装使骷髅商价格最高虚高 50%；
+    // 表函数保留在 townNpcProfiles.skeletonMerchantMoonPriceMul 备案。
     this.shopHappinessMul = mul;
     this.npcShopOpen = true;    // Main.npcShop = npc 槽位（开店门，ItemSlot.cs:187）
     // 显示价 = GetItemExpectedPrice 的 calcForBuying（商店条目悬停 tooltip 同链：
@@ -21463,17 +21527,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (rollZero(32)) num++;
     if (this.world.isExpert && rollZero(2)) num++; // Chest.cs:1263 Main.expertMode（世界难度）
     if (this.world.flags.peddlersSatchelUsed) num++;   // :1271-1273 货郎背包一次性 +1
-    // 首件（Player.cs:55747-55785）：hardMode 时走**显式清单**单次随机
-    // （非 GetItem 池 RollLuck——此前误用池+重试环）。世纪之花后 +4 妖火染料
-    // （2878/2879/2884/2885）；三机械/火星/月总各加成段同块
+    // 首件（仅困难模式，Chest.cs:1314-1328）：**标准池 minimumRarity=2 重试环**
+    // （R14-C1 定谳：此前误搬染料商 GetDyeTraderReward 奖励表 PLA57:57351-57389
+    // ——原版旅行商从不卖染料；正确形态 = AdjustSlotRarities 降档 + GetItem(min 2)
+    // + CanAdd 重试，候选=tier≥2 全池 3309/3314/1987/2270/4760/2278/2271/2223…）
     if (this.world.flags.hardMode) {
-      const f = this.world.flags;
-      const list = [3039, 3038, 3598, 3597, 3600, 3042, 3533, 3561];
-      if (!!(f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134'])) list.push(2883, 2869, 2873, 2870);
-      if (f['downed_262']) list.push(2878, 2879, 2884, 2885);
-      if (f['downedMartians']) list.push(2864, 3556);
-      if (f['downed_398']) list.push(3024);
-      stock.push(list[Math.floor(Math.random() * list.length)]);
+      let num2 = 0;
+      while (num2 < 5000) {                     // :1317 while (num2 < 5000)
+        num2++;
+        adjustSlotRarities(num2);               // :1320 降档（rarity 与 array 同引用,持久）
+        const it = pick(TRAVEL_POOL.items, 2);  // :1321 GetItem(minimumRarity=2)
+        if (canAdd(it)) { stock.push(it); break; }  // :1322-1326 CanAdd→Add+break
+      }
     }
     // 主件环（:1300-1308）：added<num 且无尝试上限——原版同（概率上必然终止，
     // 此处仅挂防死循环护栏，正常永不可达）
@@ -21491,7 +21556,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const it = pick(TRAVEL_POOL.paintings, 0);
       if (canAdd(it)) { stock.push(it); break; }
     }
-    return stock.map((id) => [id, ITEM_VALUES[String(id)] ?? 100]);
+    return stock.map((id) => [id, ITEM_VALUES[String(id)] ?? 0]);
   }
 
   /** 黎明自然 roll 命中后的静默开入侵（Main.cs:64933/:64944 直呼 StartInvasion：
