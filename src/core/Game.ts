@@ -275,6 +275,7 @@ import { TrapShot, TowerBolt } from '../entities/Dart';
 import type { TrapShotKind } from '../entities/Dart';
 import { Arrow, prefetchProjectiles, PIRANHA_PROJ, PIRANHA_LIFE } from '../entities/Arrow';
 import { XenoBubbleProj, xenoBubbleCount, xenoBubbleVelocity } from '../entities/XenoBubbleProj';
+import { ElectroSphereProj } from '../entities/ElectroSphereProj';
 import { resetCageAnim } from '../render/CritterCage';
 import { prefetchTrapProjectiles } from '../entities/Dart';
 import { hitPlayer, playerCanHitEnemy, statusPlayer, COLD_DAMAGE_NPCS } from '../entities/projTargets';
@@ -374,8 +375,8 @@ const POWDER_PROJ_BY_ITEM: Record<number, number> = { 66: 10, 67: 11, 2886: 463 
 // (LEGACY_USE_STYLE 本地键表已随本地物品退役移除:vi_ 全量走 itemfunc.useStyle)
 /** 旅行商人动态商店池（Chest.SetupTravelShop_GetItem/GetPainting 提取，tools/extract-travelshop.mjs） */
 const TRAVEL_POOL = travelshopJson as {
-  items: Array<{ id: number; tier: number; cond: string | null }>;
-  paintings: Array<{ id: number; tier: number; cond: string | null }>;
+  items: Array<{ id?: number; ids?: number[]; tier: number; cond: string | null; hardModeUp?: number }>;
+  paintings: Array<{ id?: number; ids?: number[]; tier: number; cond: string | null; hardModeUp?: number }>;
 };
 /** 物品 value 表（vanilla-shopstock.json 附带；旅行商定价用） */
 const ITEM_VALUES = (shopstockJson as { values: Record<string, number> }).values;
@@ -9945,6 +9946,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         bowArrow.frostEligible = true; // 冰霜盔甲引擎(ranged 门)
         bowArrow.critBonus = critTotal;
         bowArrow.armorPen = arpenTotal;
+        // 电圈发射器 2796 → 导弹 442 锁定格（Player.cs:49905-49908 ai12/ai13 =
+        // tileTargetX/Y = 发射时刻鼠标格；:25586-25604 钳 [5, maxTiles−5]）——
+        // AI_001 442 段（Projectile.cs:55689-55740）到点 ≤16px Kill + 120t 超时
+        // + 135 尘环/青蓝光（Arrow.aimPoint 消费；Kill 特效/电球 443 见
+        // onProjectileDeath 442 分支）。此前裸 Arrow 直飞无锁定无特效（2026-08-24 补）
+        if (bowVid2 === 2796) {
+          const st2796 = this.world.store;
+          bowArrow.aimPt = {
+            tx: Math.max(5, Math.min(st2796.w - 5, Math.floor(mwx / 16))),
+            ty: Math.max(5, Math.min(st2796.h - 5, Math.floor(mwy / 16))),
+          };
+        }
         // 气喇叭 968 随机起始帧 ai[1]=Next(Main.projFrames[968]=24)（Player.cs:46596-46599
         // NewProjectile 第 9 参）——Arrow 帧号 = ⌊age/5⌋%frames，置 age 相位即等价起始帧
         if (bowVid2 === 5117) bowArrow.age = Math.floor(Math.random() * 24) * 5;
@@ -20643,10 +20656,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (e[0] === 3828) e[1] = golem ? 40000 : mech ? 10000 : 2500;
       }
     }
-    // 派对女孩灯笼夜专柜（Chest.cs:2282：LanternNight.LanternsUp → 上架 4702 放飞灯笼；
-    // extract-shops.mjs 未捕获该 if 门——与 moonPhase 同类缺口，此处直接补）。
-    // 原版 SetDefaults(4702) 无价格覆盖 → 按 item value 100 铜出售
-    if (npc.vanillaId === 208 && LanternNight.lanternsUp) out.push([4702, 100] as [number, number]);
     // 油漆师基础 12 色（Chest.cs:2424-2428 `for (int j = 1073; j <= 1084; j++)` 循环上架——
     // extract-shops.mjs 不展开 for 循环，vanilla-shopstock.json 缺 1073-1084，
     // 与 4702/moonPhase 同类提取缺口，此处按原版循环直补；价格 25 = Item.value（Item.cs:13374））
@@ -20689,6 +20698,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (phase === 0 && !day) add([3043]); // 满月夜魔法灯笼（:2930-2934）
           // :2952-2955 !ateArtisanBread && 相 3-5 → 5326（本仓未跟踪吃面包旗,恒未吃）
           if (phase >= 3 && phase <= 5) add([5326]);
+          break;
+        }
+        case 19: { // 军火商银弹/钨弹（Chest.cs:1487-1494 bloodMoon||hardMode →
+          // SavedOreTiers.Silver==168 钨弹 4915 else 银弹 278；R14-C18+oreTiersPH 持久化）
+          if (this.world.flags.hardMode || this.world.clock.bloodMoon) {
+            add([this.world.oreTiersPH.silver === 168 ? 4915 : 278]);
+          }
           break;
         }
         case 20: { // 树妖月相轮换货（Chest.cs:1650-1697；NPCInteractions.cs:491
@@ -20782,7 +20798,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (npc.vanillaId === 227) {
       add([1490]);
       add([[1481], [1482], [1483], [1484]][Math.floor(phase / 2)]);
-      if (this.player.golferScoreAccumulated > 500) add([4743]); // :2250 橄榄球画
+      // R14-C12：4743 橄榄球画移回派对女孩(208, Chest.cs:2271-2274 case 13)——曾错挂
+      // 画家(227)且门 >500(原版 >=500)；JSON shop 208 golfer500 承接
     }
     // ---- 晶塔尾段（Chest.cs:3466-3533 SetupShop 末尾，除军火商 19/树妖 20/向导 21
     //      外全城镇商店通用）——R14-C4：此前整段缺失=晶塔无处可买 ----
@@ -20846,7 +20863,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // = 非墓地白天）：Chest.SetupShop 的 else-if 分支只在全部前支不成立时执行。
     // 未知 token 取反同样 false（无法证明成立 → 保守不上架，与正向 default 同策略）
     if (cond.startsWith('!')) return !this.shopCondOk(cond.slice(1));
+    // 带参 token（R14-C10/C14/C17-C25 补货门族）：has:<原版物品id> = 玩家背包含该物
+    // （HasItem,PLA57:56551）；anyNpc:<原版npcid> = 该城镇 NPC 在镇（NPC.AnyNPCs）
+    if (cond.startsWith('has:')) return this.playerHasVanillaItem(Number(cond.slice(4)));
+    if (cond.startsWith('anyNpc:')) {
+      const vid = Number(cond.slice(7));
+      return (this.entities.npcs as TownNPC[]).some((n) => n instanceof TownNPC && !n.dead && n.vanillaId === vid);
+    }
     const f = this.world.flags;
+    // 通用 downed_<vanillaId> 旗（downed_50 史王/downed_657 史莱姆女皇/downed_398 月总…）
+    if (cond.startsWith('downed_')) return !!f[cond];
     switch (cond) {
       case 'hardMode': return !!f.hardMode;
       case 'downedBoss1': return !!(f['downed_4'] || f.downedEyeOfCthulhu);
@@ -20878,6 +20904,52 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'zoneGraveyard': return !!this.scene?.zoneGraveyard;
       case 'zoneMeteor': return !!this.scene?.zoneMeteor;
       case 'zoneUnderworld': return !!this.scene?.zoneUnderworldHeight;
+      // R14-C11/C20/C22 画家/树妖/海盗群系门补齐
+      case 'zoneBeach': return !!this.scene?.zoneBeach;
+      case 'zoneCrimson': return !!this.scene?.zoneCrimson;
+      case 'zoneCorrupt': return !!this.scene?.zoneCorrupt;
+      case 'zoneHallow': return !!this.scene?.zoneHallow;
+      case 'zoneGlowshroom': return !!this.scene?.zoneGlowshroom;
+      case 'zoneDesert': return !!this.scene?.zoneDesert;
+      case 'zoneSkyHeight': return !!this.scene?.zoneSkyHeight;
+      // ShoppingZone_Forest（Player.cs:3821 = !AnyBiome && !BelowSurface;AnyBiome
+      // :3807 = dungeon|corrupt|crimson|glowshroom|hallow|jungle|snow|beach|desert）
+      case 'zoneForest': {
+        const s2 = this.scene;
+        if (!s2 || s2.belowSurface) return false;
+        return !s2.zoneDungeon && !s2.zoneCorrupt && !s2.zoneCrimson && !s2.zoneGlowshroom
+          && !s2.zoneHallow && !s2.zoneJungle && !s2.zoneSnow && !s2.zoneBeach && !s2.zoneDesert;
+      }
+      // R14-C11 画家暴雨画（Main.IsItStorming = _shouldUseStormMusic,Main.cs:3001）
+      case 'storming': return !!this.world.weather?.shouldUseStormMusic;
+      // R14-C19 商人风日车菊（Main.IsItAHappyWindyDay = _shouldUseWindyDayMusic）
+      case 'windyDay': return !!this.world.weather?.shouldUseWindyDayMusic;
+      case 'notTheBees': return !!this.world.seedFlags?.notTheBees;
+      case 'tenthNotBees': return !!this.world.seedFlags?.tenthAnniversary && !!this.world.seedFlags?.notTheBees;
+      case 'downedClown': return !!f['downed_109'];     // NPC.cs:80195 case 109
+      case 'downedFrost': return !!f['downedFrost'];
+      case 'downedAncientCultist': return !!f['downed_439'];
+      case 'downedMartians': return !!f['downedMartians'];
+      // R14-C10 裁缝猎人斗篷 4744（golferScoreAccumulated>=2000,Chest.cs:1973-1976）
+      case 'golfer2000': return this.player.golferScoreAccumulated >= 2000;
+      // R14-C12 橄榄球画 4743 → 派对女孩（Chest.cs:2271-2274 case 13,golfer>=500）
+      case 'golfer500': return this.player.golferScoreAccumulated >= 500;
+      // R14-C17 造型师染发剂门（statLifeMax>=400/:2700、statManaMax>=200/:2705、
+      // 持币>=1 铂/:2726-2752 钱币扫描 71-74）
+      case 'life400': return this.player.maxHp >= 400;
+      case 'mana200': return this.player.maxMana >= 200;
+      case 'coins1pt': {
+        let coins = 0;
+        for (const sl of this.player.inv.slots) {
+          if (!sl || sl.stack <= 0) continue;
+          const vid = vanillaIdOfItem(sl.id);
+          coins += vid === 74 ? sl.stack * 1000000 : vid === 73 ? sl.stack * 10000
+            : vid === 72 ? sl.stack * 100 : vid === 71 ? sl.stack : 0;
+        }
+        return coins >= 1000000;
+      }
+      // R14-C13 蒸汽朋克人喷气背包（moonPhase>=4 && hardMode,Chest.cs:2135-2143）
+      case 'moonPhase4': return this.world.clock.moonPhase >= 4;
       case 'crimson': return this.world.crimson;
       case 'bloodMoon': return this.world.clock.bloodMoon;
       case 'xMas': return this.world.clock.xMas;
@@ -21506,19 +21578,38 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         case 'hardMode': return !!f.hardMode;
         case 'downedBoss3': return !!(f['downed_35'] || f.downedSkeletron);
         case 'shadowOrbSmashed': return !!f.shadowOrbSmashed;
-        default: return false; // hardModeMech/moonlord/martians/frost/pirates/dontStarve 未达
+        // R14-C26 ②③④⑤ 门补齐（CH57:1016/:1195-1241/:819-890）
+        case 'hardModeMech': return !!f.hardMode && !!f['downed_134'] && !!f['downed_125'] && !!f['downed_127'];
+        case 'downed_4': return !!(f['downed_4'] || f.downedEyeOfCthulhu);
+        case 'downedMechBossAny': return !!(f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134']);
+        case 'downedFrost': return !!f['downedFrost'];
+        case 'downedMartians': return !!f['downedMartians'];
+        case 'downed_398': return !!f['downed_398'];
+        // 4347 门 = downedDeerclops||downedSlimeKing||downedBoss1/2/3||downedQueenBee||hardMode
+        case 'anyBossKill': return !!(f['downed_668'] || f['downed_50'] || f['downed_4']
+          || f['downed_13'] || f['downed_266'] || f['downed_35'] || f['downed_222'] || f.hardMode);
+        default: return false; // dontStarve/pirates 未达
       }
     };
-    const pick = (pool: Array<{ id: number; tier: number; cond: string | null }>, minimumRarity: number): number => {
+    const pick = (pool: ReadonlyArray<{ id?: number; ids?: number[]; tier: number; cond: string | null; hardModeUp?: number }>, minimumRarity: number): number => {
       let it = 0;
       for (const e of pool) {
         if (e.tier < minimumRarity || e.cond === 'skip' || !condOk(e.cond)) continue;
-        if (rollZero(rarity[e.tier])) it = e.id;  // SetupTravelShop_GetItem RollLuck(rarity[t])==0
+        if (rollZero(rarity[e.tier])) {  // SetupTravelShop_GetItem RollLuck(rarity[t])==0
+          // 单掷组条目（`it = 2281 + Main.rand.Next(3)`,:1232-1234）——一掷后组内均选
+          it = e.ids ? e.ids[Math.floor(Math.random() * e.ids.length)] : e.id!;
+          if (e.hardModeUp && this.world.flags.hardMode) it = e.hardModeUp;  // :1227-1229
+        }
       }
       return it;
     };
     const stock: number[] = [];
-    const canAdd = (id: number) => id > 0 && !stock.includes(id);
+    // CanAddItemToShop（:791-806）:去重 + 3637 与 3621/3622、3633-3641 皮肤族互斥
+    const canAdd = (id: number) => {
+      if (id <= 0 || stock.includes(id)) return false;
+      if (id === 3637 && stock.some((s) => (s >= 3621 && s <= 3622) || (s >= 3633 && s <= 3641))) return false;
+      return true;
+    };
     // 件数：4-6 基础 + 运气/专家加件（SetupTravelShop :1245-1280——原版先掷 num 再进
     // 首件环，掷骰次序即 RNG 消费次序，1:1 保持此序）
     let num = 4 + Math.floor(Math.random() * 3);
@@ -21528,6 +21619,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (rollZero(32)) num++;
     if (this.world.isExpert && rollZero(2)) num++; // Chest.cs:1263 Main.expertMode（世界难度）
     if (this.world.flags.peddlersSatchelUsed) num++;   // :1271-1273 货郎背包一次性 +1
+    // :1301-1308 十周年世界 +1（!getGood 再 +1）——R14-C26 ⑦
+    if (this.world.seedFlags?.tenthAnniversary) {
+      if (!this.world.seedFlags?.getGoodWorld) num++;
+      num++;
+    }
     // 首件（仅困难模式，Chest.cs:1314-1328）：**标准池 minimumRarity=2 重试环**
     // （R14-C1 定谳：此前误搬染料商 GetDyeTraderReward 奖励表 PLA57:57351-57389
     // ——原版旅行商从不卖染料；正确形态 = AdjustSlotRarities 降档 + GetItem(min 2)
@@ -22176,6 +22272,33 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （luck −0.25 档，UpdateBrokenMirrorLuck :28700-28711 衰减） */
   onProjectileDeath(projId: number, x: number, y: number, w = 0, h = 0, oldVx = 0, oldVy = 0, dmg = 0,
     flags?: { hostile?: boolean; ai0?: number; kb?: number; arpen?: number }) {
+    // 电圈导弹 442 消亡（Projectile.cs:74919-74945 Kill 段）：Item94 音 + 尘 135×
+    // Next(3,7)（scale 2.1/alpha 100/noGravity/速度 ×2）；owner 本机 → 80×80 盒内
+    // 旧 443 置替换态（ai[1]=1 + velocity=(新心−旧心)/5，:74933-74940）+ 心部生成
+    // 电球 443（伤 = 导弹伤、kb 0，:74944）。全消亡路径（到点/超时/撞块/命中敌/
+    // 600t 寿命）同走此口 = 原版 Kill() 单口语义
+    if (projId === 442) {
+      const cx = x + w / 2, cy = y + h / 2;
+      this.playSfxFiles(['Item_94'], 1, cx, cy);
+      const n442 = 3 + Math.floor(Math.random() * 4);            // Next(3,7) = 3..6
+      for (let i = 0; i < n442; i++) {
+        const d = this.spawnDust(x, y, w, h, 135, 0, 0, 100, null, 2.1);
+        if (d) { d.noGravity = true; d.vx *= 2; d.vy *= 2; }
+      }
+      if (!flags?.hostile) {                                    // owner == Main.myPlayer 门
+        for (const o of this.entities.projectiles) {
+          const s = o as ElectroSphereProj;
+          if (s.dead || !(s instanceof ElectroSphereProj)) continue;
+          if (cx - 40 < s.x + s.w && cx + 40 > s.x && cy - 40 < s.y + s.h && cy + 40 > s.y) {
+            s.replaced = true;                                  // ai[1] = 1（:74936）
+            s.vx = (cx - s.cx) / 5;                             //（:74937）
+            s.vy = (cy - s.cy) / 5;
+          }
+        }
+        this.entities.add(new ElectroSphereProj(cx, cy, Math.max(1, Math.trunc(dmg))), 'projectiles');
+      }
+      return;
+    }
     // 臭味药水弹 371（Foul Potion，物品 2353 投掷）消亡恶臭（Projectile.cs:75203-75228
     // Kill 段 owner==myPlayer 门）：80px 内全部玩家 + NPC AddBuff(120 Stinky, 1800t=30s)
     // ——同族 370→119 恋爱/936→320 凝胶（纯视觉 buff 未实装,不接）。
@@ -22538,6 +22661,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // M3 Boss 伤害统计：Boss 击杀置 killed（DoDeathEvents_CelebrateBossDeath →
     // NPCDamageTracker.BossKilled :79821——报告文案"被击杀"而非"逃脱"）
     if (enemy?.def?.boss) bossDamageKilled(enemy);
+    // 小丑(109)击杀记账（checkDead case 109 :80194-80195 downedClown=true）——
+    // 裁缝小丑套装 503-505 上架门（R14-C10；此前旗仅存档解析,击杀不置位）
+    if (enemy?.vanillaId === 109 && !this.world.flags['downed_109']) {
+      this.world.flags['downed_109'] = true;
+    }
     // 骷髅王红帽变体死亡调侃（NPC.checkDead :78835-78837：type 35 且 ai[3]==1 →
     // SkeletronText.Taunt1 红字广播，Chippy 彩蛋"<骷髅王>今天就到此为止…"）
     if (enemy?.vanillaId === 35 && enemy.ai3 === 1) {

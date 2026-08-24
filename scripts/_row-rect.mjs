@@ -37,8 +37,11 @@ console.log('CLOUDS:', JSON.stringify(clouds));
         if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200) lit++;
       }
     }
-    return { cots: sky.cots, lastSkyTop: sky.lastSkyTop, atmo: sky.atmoValue(3500), lit,
-      useGL: sky.useGLClouds, glLayer: !!sky.cloudGlLayer, towerMul: sky.towerCloudMul };
+    const types = {};
+    for (const c of sky.vclouds) types[c.type] = (types[c.type] || 0) + 1;
+    const texReady = sky.cloudTexs.map((t) => (t && t.width > 0) ? 1 : 0);
+    return { cots: sky.cots, lit, types, texReady: texReady.join(''),
+      useGL: sky.useGLClouds, glLayer: !!sky.cloudGlLayer };
   });
   console.log('VALS:', JSON.stringify(vals));
 await page.evaluate(() => {

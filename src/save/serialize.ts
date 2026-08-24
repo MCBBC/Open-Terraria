@@ -112,6 +112,7 @@ export interface SaveData {
   angler?: { quest: number; whoFinishedToday: string[] };
   /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307；旧档缺省 -1 = 未砸过） */
   savedOreTiers?: { cobalt: number; mythril: number; adamantite: number };
+  oreTiersPH?: { copper: number; iron: number; silver: number; gold: number };
   /** 已砸暗影珠/猩红之心计数（WorldGen.shadowOrbCount，WF:1302/2099；旧档缺省 0） */
   shadowOrbCount?: number;
   tiles: string;   // base64 RLE
@@ -289,6 +290,7 @@ export interface SaveMeta {
   angler?: { quest: number; whoFinishedToday: string[] };
   /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307；旧档缺省 -1 = 未砸过） */
   savedOreTiers?: { cobalt: number; mythril: number; adamantite: number };
+  oreTiersPH?: { copper: number; iron: number; silver: number; gold: number };
   /** 已砸暗影珠/猩红之心计数（WorldGen.shadowOrbCount，WF:1302/2099；旧档缺省 0） */
   shadowOrbCount?: number;
   /** 图鉴三桶（杀数/遇数/聊天）——data/Bestiary.ts BestiarySave */
@@ -395,6 +397,7 @@ export function serializeSave(
     cultistDelay: meta.cultistDelay ?? 86400,   // 缺省 = delayStart（新世界 WF:1018 / v108 前旧档 WF:2188）
     angler: meta.angler ?? { quest: 0, whoFinishedToday: [] },   // WF:1329-1335（旧档缺省）
     savedOreTiers: meta.savedOreTiers ?? { cobalt: -1, mythril: -1, adamantite: -1 },
+    oreTiersPH: meta.oreTiersPH ?? { copper: 7, iron: 6, silver: 9, gold: 8 },
     shadowOrbCount: meta.shadowOrbCount ?? 0,
     tiles: bytesToB64(rleTiles(st, TILE_STABLE_OF_INTERNAL)),
     walls: bytesToB64(rlePairs(st.wall)),

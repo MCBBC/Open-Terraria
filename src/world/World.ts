@@ -187,6 +187,10 @@ export class World {
    *  每档矿种全世界二选一固定——钴 107/钯 221、秘银 108/山铜 222、精金 111/钛 223。
    *  -1 = 尚未砸过该档（SmashAltar 首砸 roll 一次并锁定）；存 sheet id */
   savedOreTiers = { cobalt: -1, mythril: -1, adamantite: -1 };
+  /** 肉前矿四档锁定（WorldGen.SavedOreTiers.Copper/Iron/Silver/Gold，WF:11294-11320）：
+   *  值=原版 tile id（7 铜/6 铁/9 银/8 金；166 锡/167 铅/168 钨/169 铂）。
+   *  军火商银弹/钨弹分支（CH57:1487-1494 Silver==168）与世界生成矿种一致性消费 */
+  oreTiersPH = { copper: 7, iron: 6, silver: 9, gold: 8 };
   /** 已砸暗影珠/猩红之心计数（WorldGen.shadowOrbCount，WF:1302/2099 随存档持久化）：
    *  满 3 召 EoW/BoC 后归零（CheckOrb :54321-54352）；哥布林军队自然 roll 的
    *  shadowOrbSmashed 门独立于此计数 */

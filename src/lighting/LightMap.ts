@@ -21,6 +21,9 @@ export class LightMap {
   nonVisiblePadding = 0;
   /** 水 flicker 随机源(每格 WithModifier(i)) */
   private random = new FastRandom((Math.random() * 1e9) | 0);
+  /** 水 flicker scratch(2026-08-24 零分配重写:原每水格 withModifier 分配一实例,
+   *  现原地 reseedWithModifier 值等价;金标 tests/lighting-scan-blur-golden 锁位级) */
+  private scratch = new FastRandom(0);
   /** 周期索引(引擎每 Present 递增;掺进水随机种子 → 每 4 tick 换一批微光) */
   cycleIndex = 0;
 
@@ -106,8 +109,10 @@ export class LightMap {
           if (!dg) zg *= DECAY_CRACKED;
           if (!dbb) zb *= DECAY_CRACKED;
         } else if (m === Mask.Water) {
-          // 逐格随机 [98,100)/100(L221-237)
-          const flick = this.random.withModifier(i).next(98, 100) / 100;
+          // 逐格随机 [98,100)/100(L221-237)——scratch 原地重播 WithModifier(i),零分配
+          // (底种=this.random.seed,原语义 this.random.withModifier(i))
+          this.scratch.reseedWithModifierFrom(i, this.random.seed);
+          const flick = this.scratch.next(98, 100) / 100;
           if (!dr) zr *= DECAY_WATER[0] * flick;
           if (!dg) zg *= DECAY_WATER[1] * flick;
           if (!dbb) zb *= DECAY_WATER[2] * flick;

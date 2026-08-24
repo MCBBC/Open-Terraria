@@ -907,6 +907,9 @@ export class Arrow extends Entity {
     this.skullBoneT = opts?.skullBone ? 1 : 0;
     this.homing = opts?.homing ?? null;
     if (opts?.aimPoint) this.aimPt = opts.aimPoint;
+    // 442 缺省 ai[0]/[1] = 0（NewProjectile 缺省实参）→ 锁定点 (8,8)——原版语义
+    // （发射侧 2796 恒显式传 tileTarget，此兜底仅覆盖非常规来源）
+    if (projId === 442 && !this.aimPt) this.aimPt = { tx: 0, ty: 0 };
     this.extraUpdates = opts?.extraUpdates ?? pd0?.extraUpdates ?? 0;   // 子弹 14=1(2 步/tick)、高速弹 207=2
     this.localImmune = pd0?.localNPCHitCooldown ?? 0;
     // 311 糖果玉米 usesLocalNPCImmunity+localNPCHitCooldown=10（SetDefaults

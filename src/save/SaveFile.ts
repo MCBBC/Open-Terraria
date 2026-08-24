@@ -81,6 +81,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:1340 写/:2192 读）
     angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
     savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
+    oreTiersPH: { ...world.oreTiersPH },        // 肉前四档（WF:11294-11320,军火商钨弹门）
     shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
     bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
     bannerKills: world.bannerKills,   // BannerSystem.killCount（BannerSystem.cs:32 随存档）
@@ -186,6 +187,7 @@ export function buildSaveParts(world: World): {
     cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:1340 写/:2192 读）
     angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
     savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
+    oreTiersPH: { ...world.oreTiersPH },        // 肉前四档（WF:11294-11320,军火商钨弹门）
     shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
     sundialCooldown: world.sundialCooldown, moondialCooldown: world.moondialCooldown,
     fastForwardTimeToDawn: world.fastForwardTimeToDawn,
@@ -356,6 +358,7 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
     world.anglerWhoFinishedToday = [...(data.angler.whoFinishedToday ?? [])];
   }
   if (data.savedOreTiers != null) world.savedOreTiers = { ...data.savedOreTiers }; // 旧档缺省 -1 未砸过
+  if (data.oreTiersPH != null) world.oreTiersPH = { ...data.oreTiersPH };          // 旧档缺省 7/6/9/8
   if (data.shadowOrbCount != null) world.shadowOrbCount = data.shadowOrbCount;      // 旧档缺省 0
   world.applyBestiary(data.bestiary); // 图鉴三桶（旧档缺省=空）
   if (data.bannerKills) world.bannerKills = data.bannerKills;   // 旗击杀计数（旧档缺省=空）

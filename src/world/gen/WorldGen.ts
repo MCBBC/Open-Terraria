@@ -553,6 +553,14 @@ function vanillaTerrain(ctx: GenCtx) {
     silver: rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_tungsten']! : TILE_BY_KEY['ore_silver']!,
     gold: !constOreLock && rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_platinum']! : TILE_BY_KEY['ore_gold']!,
   };
+  // SavedOreTiers 肉前四档（cs:11294-11320）：tile id 记原版 sheet（7/6/9/8 与 166-169）
+  const vanillaSheetOf = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+  world.oreTiersPH = {
+    copper: vanillaSheetOf(gs.oreTiers.copper),
+    iron: vanillaSheetOf(gs.oreTiers.iron),
+    silver: vanillaSheetOf(gs.oreTiers.silver),
+    gold: vanillaSheetOf(gs.oreTiers.gold),
+  };
   // ⑪ crimson（cs:11321）+ UI 覆盖（骰照掷仅覆盖结果，cs:11326-11332）
   gs.crimson = rng.nextIntRange(0, 2) === 0;
   if (cfg.evil === 0) gs.crimson = false;

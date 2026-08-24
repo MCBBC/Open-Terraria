@@ -3,35 +3,78 @@
 // 用于水波纹逐格随机(LightMap.Blur)与蜡烛/篝火闪烁(TileLightScanner)。
 // 注意：本文件是光照系统专用副本——世界生成侧（DesertHive 等）请用
 // src/core/rng.ts 的 FastRandom（同一原版类，带 Next(max)/NextDouble/WithModifier(x,y)）。
-const MULTIPLIER = 25214903917n;
-const ADD = 11n;
-const MASK = 0xffffffffffffn; // 2^48 - 1
+//
+// 2026-08-24 性能重写(BigInt→f64):48 位状态与全部中间量 < 2^53 可被 f64 精确表示。
+// 乘法拆 hi/lo 24 位(seed*M = Sh*Mh*2^48 + (Sh*Ml+Sl*Mh)*2^24 + Sl*Ml,首项 mod 2^48
+// 消失,余两项各自精确);异或拆 24 位半逐段。掷值序列与 BigInt 版逐位一致,
+// tests/lighting-fastrandom-golden.test.ts 以 BigInt 参考实现对拍锁定。
+// 热路径(reseedWithModifier/next/nextFloat)零分配零 BigInt;构造与 withModifier
+// (每 blur 周期一次)保留兼容形态,分配可忽略。
+const MASK48 = 281474976710656;   // 2^48
+const TWO24 = 16777216;           // 2^24
+const MUL_HI = 1502;              // 25214903917 = 1502*2^24 + 15525485
+const MUL_LO = 15525485;
+const ADD = 11;
+
+/** nextSeed(seed mod 2^48) f64 精确版。入参:int32(负数按 mod 2^48)或 [0,2^48) 整数。 */
+function nextSeed48(seed: number): number {
+  const m = seed < 0 ? seed + MASK48 : seed;
+  const sh = Math.floor(m / TWO24);
+  const sl = m - sh * TWO24;
+  // X = Sh*Ml + Sl*Mh(< 2^49 精确),取 mod 2^24;Y = Sl*Ml(< 2^48 精确)全量保留
+  const mid = (sh * MUL_LO + sl * MUL_HI) % TWO24;
+  let s = mid * TWO24 + sl * MUL_LO;
+  s += ADD;
+  return s >= MASK48 ? s - MASK48 : s;
+}
 
 export class FastRandom {
-  private seed: bigint;
+  private seed: number;
 
   constructor(seed: bigint | number) {
-    this.seed = (typeof seed === 'bigint' ? seed : BigInt(seed)) & MASK;
+    // 构造非热路径:直接走 BigInt 保全部语义(非整数抛错/负数/超宽截断与原版一致)
+    this.seed = Number((typeof seed === 'bigint' ? seed : BigInt(seed)) & 0xffffffffffffn);
   }
 
-  /** NextSeed(L85-88) */
+  /** NextSeed(L85-88)——bigint 公开静态,非热路径保留原实现 */
   static nextSeed(seed: bigint): bigint {
-    return (seed * MULTIPLIER + ADD) & MASK;
+    return (seed * 25214903917n + 11n) & 0xffffffffffffn;
   }
 
-  /** WithModifier(m)(L27-30):新实例种子 = NextSeed(m) ^ 原 Seed */
+  /** WithModifier(m)(L27-30):新实例种子 = NextSeed(m) ^ 原 Seed(兼容保留,分配一实例) */
   withModifier(m: number | bigint): FastRandom {
-    const mod = typeof m === 'bigint' ? m : BigInt(m);
-    return new FastRandom(FastRandom.nextSeed(mod) ^ this.seed);
+    const r = new FastRandom(0);
+    r.seed = FastRandom.modifiedSeedOf(m, this.seed);
+    return r;
   }
 
-/** 仅推进种子不取值（TileLightScanner.Update :58-61 每周期 NextSeed 语义） */
-  reseed(): void { this.seed = FastRandom.nextSeed(this.seed); }
+  /** ★热路径:原地重播 WithModifier(m) 语义(零分配,底种=自身)——链式推进专用 */
+  reseedWithModifier(m: number): void {
+    this.seed = FastRandom.modifiedSeedOf(m, this.seed);
+  }
 
-  /** NextBits(b)(L47-51):前进一步并取高 b 位 */
+  /** ★热路径:scratch 复用形态——派生种子 = NextSeed(m) ^ baseSeed(底种显式)。
+   *  语义等价 baseInstance.withModifier(m) 的产物,但零分配;scanner/blur 的
+   *  「每格从主 random 派生局部随机」都走这里(底=主 random.seed,非 scratch 自身!) */
+  reseedWithModifierFrom(m: number, baseSeed: number): void {
+    this.seed = FastRandom.modifiedSeedOf(m, baseSeed);
+  }
+
+  /** modifiedSeed = NextSeed(m mod 2^48) ^ baseSeed;异或按 24 位拆半(f64 无 48 位位域) */
+  private static modifiedSeedOf(m: number | bigint, baseSeed: number): number {
+    const base = nextSeed48(typeof m === 'bigint' ? Number(m & 0xffffffffffffn) : m);
+    const bh = Math.floor(base / TWO24), bl = base - bh * TWO24;
+    const sh = Math.floor(baseSeed / TWO24), sl = baseSeed - sh * TWO24;
+    return (bh ^ sh) * TWO24 + (bl ^ sl);
+  }
+
+  /** 仅推进种子不取值（TileLightScanner.Update :58-61 每周期 NextSeed 语义） */
+  reseed(): void { this.seed = nextSeed48(this.seed); }
+
+  /** NextBits(b)(L47-51):前进一步并取高 b 位(除 2^k 对整数精确) */
   private nextBits(bits: number): number {
-    this.seed = FastRandom.nextSeed(this.seed);
-    return Number(this.seed >> BigInt(48 - bits));
+    this.seed = nextSeed48(this.seed);
+    return Math.floor(this.seed / 2 ** (48 - bits));
   }
 
   /** Next(31) → int */

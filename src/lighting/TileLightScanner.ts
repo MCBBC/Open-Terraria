@@ -559,9 +559,23 @@ export class TileLightScanner {
   /** 718(昼云)的内部 id——昼夜动态挡光覆写用(Main.cs:66134-66141) */
   private cloud718Id = -1;
   private random = new FastRandom(0x9e3779b9);
-  /** 每格局部随机(WithModifier(x,y);蜡烛闪烁) */
+  /** 每格局部随机 scratch(2026-08-24 零分配重写:原每格 withModifier 分配一实例
+   *  (每 scan ≈2-6 万次),现原地 reseedWithModifier 值等价。生命周期安全:各调用点
+   *  (天空 704/墙 757/tile 809·814/特例 ctx.localRand)对 scratch 的使用互不嵌套,
+   *  顺序消费完即弃;位级由 tests/lighting-scan-blur-golden 锁定) */
+  private scratch = new FastRandom(0);
+  /** surfaceSky 返回值暂存(原每调用分配 [0,0,0] 三元数组;消费方全部同步解构) */
+  private retBuf: [number, number, number] = [0, 0, 0];
+  private ret(r: number, g: number, b: number): [number, number, number] {
+    const t = this.retBuf;
+    t[0] = r; t[1] = g; t[2] = b;
+    return t;
+  }
+  /** 每格局部随机(WithModifier(x,y);蜡烛闪烁)——scratch 复用,零分配。
+   *  底种=主 random.seed(原语义 this.random.withModifier(m),非 scratch 自身) */
   private localRandom(x: number, y: number): FastRandom {
-    return this.random.withModifier((y * 2654435761 + x) | 0);
+    this.scratch.reseedWithModifierFrom((y * 2654435761 + x) | 0, this.random.seed);
+    return this.scratch;
   }
 
   constructor(private flicker: FlickerClock) {
@@ -622,7 +636,7 @@ export class TileLightScanner {
     const type = st.type[i];
     const sheet = type !== 0 ? (TILE_DEFS[type]?.vanilla?.sheet ?? -1) : -1;
     const wallOk = this.wallPasses(st, i);
-    if (!wallOk) return [0, 0, 0];
+    if (!wallOk) return this.ret(0, 0, 0);
     if (type !== 0 && ALLOW_LIGHT_IN_WATER_SHEETS.has(sheet)) {
       return sky;  // :3160-3168 无液量/半砖限制
     }
@@ -630,21 +644,21 @@ export class TileLightScanner {
     if (type !== 0 && this.noSunLight[type]) {
       const invisible = (st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks;
       const sloped = st.slope[i] !== 0 || st.half[i] !== 0 || invisible;
-      if (!sloped) return [0, 0, 0];
+      if (!sloped) return this.ret(0, 0, 0);
       if (st.liquid[st.idx(x, y - 1)] !== 0 || st.liquid[st.idx(x, y + 1)] !== 0
-        || st.liquid[st.idx(x - 1, y)] !== 0 || st.liquid[st.idx(x + 1, y)] !== 0) return [0, 0, 0];
+        || st.liquid[st.idx(x - 1, y)] !== 0 || st.liquid[st.idx(x + 1, y)] !== 0) return this.ret(0, 0, 0);
     }
     const liq = st.liquid[i];
     if (liq < 200) {
       // :3174-3179 半砖要求上邻液<200
-      if (st.half[i] !== 0 && st.liquid[st.idx(x, y - 1)] >= 200) return [0, 0, 0];
+      if (st.half[i] !== 0 && st.liquid[st.idx(x, y - 1)] >= 200) return this.ret(0, 0, 0);
       return sky;
     }
     // :3181-3188 深水微光支路:num3 = B×0.175×(1+NextFloat×0.13)×liquidAlpha[13]
     if (shimmerWaterAlpha > 0) {
-      return [0, 0, sky[2] * 0.175 * (1 + rand.nextFloat() * 0.13) * shimmerWaterAlpha];
+      return this.ret(0, 0, sky[2] * 0.175 * (1 + rand.nextFloat() * 0.13) * shimmerWaterAlpha);
     }
-    return [0, 0, 0];
+    return this.ret(0, 0, 0);
   }
 
   /** ApplyHellLight(:3261-3280)地狱光支路:无 AllowLightInWater 门(地狱水下玻璃不吃光)、
@@ -677,6 +691,19 @@ export class TileLightScanner {
     const [skyR, skyG, skyB] = skySeed(w.clock.timeOfDay, w.clock.dayCount, !!w.clock.eclipse,
       !!(w.clock as { bloodMoon?: boolean }).bloodMoon,
       (w.clock as { moonPhase?: number }).moonPhase);
+    // 天空播种三元组每扫描一个(原每格分配 [skyR,skyG,skyB];值全扫描恒定)
+    const skyTriple: [number, number, number] = [skyR, skyG, skyB];
+    // 动态特例 ctx 每扫描一个(原每非空格分配对象+闭包 ≈1.8 万次/scan;字段逐格改写,
+    // localRand 闭包读 sctx.x/y 与原捕获循环变量在调用时点等价——特例 case 全同步消费)
+    const sctx: SpecialLightCtx = {
+      x: 0, y: 0, st,
+      localRand: () => this.localRandom(sctx.x, sctx.y),
+      sundialCooldown: (w as { sundialCooldown?: number }).sundialCooldown,
+      moondialCooldown: (w as { moondialCooldown?: number }).moondialCooldown,
+      isDay: (w.clock as { isDay?: boolean }).isDay,
+      raining: !!(w as { weather?: { raining?: boolean } }).weather?.raining,
+      timeOfDay: w.clock.timeOfDay,
+    };
     // 地狱脉动(ApplyHellLight:3266-3271:0.55 + Sin(GlobalTimeWrappedHourly×2f)×0.08
     // ——周期 π 秒的呼吸;曾误写 now×0.002 = 周期 87 分钟恒静,2026-08-20 校勘)
     const hellV = 0.55 + Math.sin(this.flicker.globalTimeWrappedHourly * 2) * 0.08;
@@ -703,7 +730,7 @@ export class TileLightScanner {
           let sr = 0, sg = 0, sb = 0;
           const localRand = this.localRandom(tx, ty);
           if (ty <= w.groundLevel) {
-            [sr, sg, sb] = this.surfaceSky(st, tx, ty, [skyR, skyG, skyB], localRand);
+            [sr, sg, sb] = this.surfaceSky(st, tx, ty, skyTriple, localRand);
           } else if (ty > w.lavaLine) {
             if (this.hellSky(st, tx, ty)) { sr = hellR; sg = hellG; sb = hellB; }
           }
@@ -820,16 +847,8 @@ export class TileLightScanner {
           }
           // ③b 动态发光特例（原版 ApplyTileLight 帧条件/动态色 case，def.light 静态表无法表达）
           const spSheet = d?.vanilla?.sheet ?? -1;
-          const sp = specialTileLight(spSheet, st.frameX[i], st.frameY[i], this.flicker, {
-            x: tx, y: ty,
-            st,
-            localRand: () => this.localRandom(tx, ty),
-            sundialCooldown: (w as { sundialCooldown?: number }).sundialCooldown,
-            moondialCooldown: (w as { moondialCooldown?: number }).moondialCooldown,
-            isDay: (w.clock as { isDay?: boolean }).isDay,
-            raining: !!(w as { weather?: { raining?: boolean } }).weather?.raining,
-            timeOfDay: w.clock.timeOfDay,
-          });
+          sctx.x = tx; sctx.y = ty;
+          const sp = specialTileLight(spSheet, st.frameX[i], st.frameY[i], this.flicker, sctx);
           if (sp) {
             if (sp.length > 3) {
               // 水晶球 125 赋值语义(:3065-3072):G/B 直接覆写(可压暗),R 走 max
