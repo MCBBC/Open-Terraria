@@ -93,6 +93,8 @@ const le16 = (p: string): Uint16Array => {
   return new Uint16Array(b.buffer, b.byteOffset, b.length >> 1);
 };
 interface Ch { t: Uint16Array; a: Uint8Array; w: Uint16Array; l: Uint8Array; hf: Uint8Array; sl: Uint8Array; lt: Uint8Array; ia: Uint8Array }
+/** 8 通道完备集（.typ 名表之外必须齐备的 7 通道）——HHHHHHH 第 4 坑免疫基准 */
+const CHAN_FILES = ['act', 'wal', 'liq', 'half', 'slope', 'lty', 'inact'] as const;
 const cache = new Map<number, Ch>();
 function chans(idx: number): Ch | null {
   const hit = cache.get(idx);
@@ -100,7 +102,15 @@ function chans(idx: number): Ch | null {
   const nm = DUMPNAME.get(idx);
   if (!nm) return null;
   const pre = `${G2}/${String(idx).padStart(3, '0')}_${nm}`;
-  if (!existsSync(`${pre}.half`)) return null;
+  if (!existsSync(`${pre}.typ`)) return null;
+  // ★HHHHHHH（2026-08-24）假绿免疫第 4 坑·逐槽通道完备性：GGG 批实证 g-s22222/
+  // g-m20260811 为 4 通道 dump（缺 half/slope/lty/inact）→ 旧门只查 .half 存在性,
+  // 整链 '(no dump)' 全零=假绿（AAAAA「s22222/m 106/106 满绿」作废）。缺任一通道
+  // 即 throw,禁止静默零差。
+  const miss = CHAN_FILES.filter((c) => !existsSync(`${pre}.${c}`));
+  if (miss.length > 0) {
+    throw new Error(`mile8 假绿免疫(通道完备性): #${idx}_${nm} 缺通道 [${miss.join(',')}] —— dump 目录(${G2})非 8 通道完整产物,禁止静默零差对拍`);
+  }
   const c: Ch = {
     t: le16(`${pre}.typ`), a: readFileSync(`${pre}.act`), w: le16(`${pre}.wal`), l: readFileSync(`${pre}.liq`),
     hf: readFileSync(`${pre}.half`), sl: readFileSync(`${pre}.slope`), lt: readFileSync(`${pre}.lty`), ia: readFileSync(`${pre}.inact`),
@@ -178,6 +188,23 @@ function labelOf(file: string, line: number): string {
   //  8 通道 dump 目录取——SW_M8_VG 应与 SW_M8_G2 同目录。
   if (DUMPNAME.size < 100) {
     throw new Error(`mile8 假绿免疫：dump names=${DUMPNAME.size} <100——SW_M8_VG(${VG}) 缺 8 通道名表,应指向 dump 目录（与 SW_M8_G2 相同）`);
+  }
+  // ★HHHHHHH 假绿免疫第 4 坑·全量预检（fail-fast,不烧 2min 生成才炸）：逐槽校验
+  // 8 通道齐备——4 通道 dump（如 GGG 批 g-s22222/g-m20260811）曾致整链 '(no dump)'
+  // 假绿。任何槽缺 act/wal/liq/half/slope/lty/inact 任一即 throw。
+  {
+    const incomplete: string[] = [];
+    for (const [idx, nm] of DUMPNAME) {
+      const pre = `${G2}/${String(idx).padStart(3, '0')}_${nm}`;
+      const miss = CHAN_FILES.filter((c) => !existsSync(`${pre}.${c}`));
+      if (miss.length > 0) incomplete.push(`#${idx}_${nm}[${miss.join(',')}]`);
+    }
+    if (incomplete.length > 0) {
+      throw new Error(`mile8 假绿免疫(通道完备性): ${incomplete.length}/${DUMPNAME.size} 槽通道不全 → ` +
+        `${incomplete.slice(0, 6).join(' ')}${incomplete.length > 6 ? ` …共${incomplete.length}槽` : ''} —— ` +
+        `dump 目录(${G2})非 8 通道完整产物（4 通道 dump=整链 '(no dump)' 假绿,GGG 批实证）,请重产或换目录`);
+    }
+    console.log(`channel completeness: ${DUMPNAME.size}/${DUMPNAME.size} 槽 8 通道齐全 ✓`);
   }
   const rows: Row[] = [];
   let curStore: Parameters<typeof cmp>[2] | null = null;

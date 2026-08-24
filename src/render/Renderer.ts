@@ -5790,12 +5790,6 @@ export class Renderer {
     return (t - from) / (to - from);
   }
 
-  /** 飞行型判定（与 drawEnemy 调用方同式：vanilla.noGravity）——轨道族/指示灯
-   *  需要在 drawNpcGlow 内把"碰撞盒中心"换算进本地系（飞行型原点即中心、
-   *  地面型原点在盒底需 -e.h/2） */
-  private static glowFlying(e: Enemy): boolean {
-    return !!e.vanilla?.noGravity;
-  }
 
   /** 568/569 出生态紫雾参数（Main.cs:25899-25907 对轨道族的出生覆写）：
    *  localAI[3]<60 期间 num299=3 / num301=8 / num300=1−(lai3/60)²（拷贝随出生收敛到
@@ -6182,8 +6176,9 @@ export class Renderer {
         const spGlow = this.atlas.ensureVImage(g.spinner.glow);
         if (sp && spGlow) {
           // zero6 = Top + (0,20)（:25434，Top=盒左上角而非中心；zero6.X*=−1 对零向量空操作）
+          // ——中心锚(2026-08-24)后原点=盒心,Top 局部 y=−h/2（曾按底锚写 −e.h）
           const sx0 = -e.w / 2 / scale;
-          const sy0 = ((Renderer.glowFlying(e) ? 0 : -e.h) + g.spinner.dy) / scale;
+          const sy0 = -e.h / 2 / scale + g.spinner.dy / scale;
           const rot = -(e.lai3) - Math.PI;               // 镜像系：mirror∘rot(θ+π) = rot(-θ-π)
           ctx.save();
           ctx.translate(sx0, sy0);

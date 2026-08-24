@@ -277,7 +277,8 @@ const CSS = `
 .sw-cc-tint { visibility: hidden; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
   -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-position: 0 0; mask-position: 0 0; }
 .sw-char-panel.ready .sw-cc-tint { visibility: visible; }
-.sw-cc-m-cc { -webkit-mask-size: 26px 238px; mask-size: 26px 238px; }
+.sw-cc-m-cc { -webkit-mask-image: url(sprites/vanilla-ui/UI_CharCreation_ColorCharacter.png); mask-image: url(sprites/vanilla-ui/UI_CharCreation_ColorCharacter.png);
+  -webkit-mask-size: 26px 238px; mask-size: 26px 238px; }
 ${PART_MASK_CSS}
 /* 页签条下分隔线（UIHorizontalSeparator：Separator1 边 2 拉伸） */
 .sw-char-sep { width: 100%; height: 4px; margin-bottom: 4px; box-sizing: border-box;

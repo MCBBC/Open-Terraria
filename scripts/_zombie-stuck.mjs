@@ -43,6 +43,7 @@ const r = await page.evaluate(async () => {
     ['from-right-top', 512 * 16, (gy - 4) * 16 - 20, -1],
     ['from-left', 502 * 16, (gy - 4) * 16 - 20, 1],
     ['from-above', 508 * 16, (gy - 10) * 16, 0],
+    ['embedded-spawn', 508 * 16 + 4, (gy - 1) * 16 + 4, 0],
   ];
   for (const [tag, sx, sy, dirForce] of spawns) {
     const z = Enemy.fromVanilla(3, sx, sy);

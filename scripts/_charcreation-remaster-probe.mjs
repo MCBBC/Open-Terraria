@@ -141,18 +141,43 @@ const geo = await page.evaluate(() => {
   };
 });
 
-// ---- 更衣窗形态（dresser）冒烟：页签应为 外观+颜色 ----
-const dresserTabs = await page.evaluate(async () => {
-  const g = window.__swGame;
-  const ui = window.__swUI;
-  if (!g || !ui) return 'in-game-only';
-  return 'skip';
+// ---- 更衣窗/理发窗形态（dresser/salon）：页内直构模块冒烟 ----
+const modeInfo = await page.evaluate(async () => {
+  const { CharCreation } = await import('/src/ui/CharCreation.ts');
+  const root = document.getElementById('game-root');
+  const base = { name: 't', hair: 3, skinVariant: 0,
+    hairColor: { r: 200, g: 60, b: 60 }, skinColor: { r: 255, g: 125, b: 90 }, eyeColor: { r: 105, g: 90, b: 75 },
+    shirtColor: { r: 175, g: 165, b: 140 }, undershirtColor: { r: 160, g: 180, b: 215 },
+    pantsColor: { r: 255, g: 230, b: 175 }, shoeColor: { r: 160, g: 105, b: 60 }, difficulty: 0 };
+  const out = {};
+  const newest = () => [...document.querySelectorAll('.sw-char-panel')].pop();
+  const d = new CharCreation(root, { onCreate() {}, onCancel() {} }, { dresser: true, initial: { ...base } });
+  const dPanel = newest();
+  out.dresserTabs = [...dPanel.querySelectorAll('.sw-cc-tab')].map((b) => b.dataset.tab);
+  dPanel.querySelector('.sw-cc-tab[data-tab=color]').click();
+  await new Promise((r) => setTimeout(r, 150));
+  out.dresserParts = dPanel.querySelectorAll('.sw-cc-part').length;        // 6（无头发）
+  out.dresserBack = dPanel.querySelector('[data-act=back]').textContent;
+  out.dresserCreate = dPanel.querySelector('[data-act=create]').textContent;
+  d.close();
+  const s = new CharCreation(root, { onCreate() {}, onCancel() {} }, { hairSalon: true, initial: { ...base }, priceOf: () => 1234 });
+  const sPanel = newest();
+  out.salonTabs = [...sPanel.querySelectorAll('.sw-cc-tab')].map((b) => b.dataset.tab);
+  sPanel.querySelector('.sw-cc-tab[data-tab=color]').click();
+  await new Promise((r) => setTimeout(r, 150));
+  out.salonParts = sPanel.querySelectorAll('.sw-cc-part').length;          // 1（仅发色）
+  out.salonBack = sPanel.querySelector('[data-act=back]').textContent;
+  out.salonPriceBtn = sPanel.querySelector('[data-act=create]').textContent;
+  window.__ccSalon = s;   // 保持打开供截图
+  return out;
 });
+await new Promise((r) => setTimeout(r, 900));
+await shot('5-salon');
 
 console.log(JSON.stringify({
   errs: errs.slice(0, 8),
   diffInfo, lookInfo, hairInfo,
   colorInfo0, colorInfo1, colorInfo2,
-  nameInfo, geo, dresserTabs,
+  nameInfo, geo, modeInfo,
 }, null, 1));
 await browser.close();

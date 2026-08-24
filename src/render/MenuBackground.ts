@@ -80,13 +80,15 @@ const CORRUPT_STYLES: Record<number, [number, number, number]> = {
   4: [240, 241, 242], 51: [324, 323, 322], 52: [324, 226, 322],
 };
 
-/** DrawSurfaceBG_GetLayerYOffset（:59172-59220）山层逐贴图 Y 偏移——
- *  补偿各贴图内容行位置差异（176 内容在 row466/942 → −760 拉回视觉带） */
-const MNT_YOFF: Record<number, number> = {
-  59: -550, 93: -50, 168: -50, 169: -50, 170: -50, 171: -100, 172: 130,
-  176: -760, 177: -200, 179: -100, 180: -350, 181: -350, 182: -350, 183: -350,
-  246: -150, 247: -150, 263: -700, 269: -600, 270: -50, 271: -300, 272: -380,
-  277: -260, 278: -120, 280: -170, 281: -300, 283: -800, 332: -25, 340: -25,
+/** 各层贴图内容首行（PNG 实测：首个 >4% 不透明行/贴图高）——分数定位的
+ *  补偿项：y = 目标分数×H − topRow×scale，使任何贴图的【内容】落在目标高度
+ *  （176 内容在 row466/942、94 在 row89/630……无补偿则样式间观感漂移） */
+const TEX_TOPROW: Record<number, number> = {
+  7: 12, 8: 9, 50: 37, 51: 37, 52: 37, 53: 7, 54: 7, 55: 7, 90: 9, 91: 68,
+  92: 36, 11: 9, 93: 4, 94: 89, 171: 42, 172: 5, 173: 21, 176: 466, 177: 156,
+  178: 18, 179: 65, 180: 126, 184: 14, 277: 153, 278: 26, 279: 16, 280: 140,
+  281: 75, 282: 92, 331: 18, 328: 36, 329: 160, 330: 172, 335: 123, 334: 151,
+  333: 8, 336: 5, 343: 28, 342: 38, 341: 63,
 };
 
 /** 供 TitleMenu 读取的菜单时间状态（LogoA/LogoB 昼夜交叉淡化用） */
@@ -360,29 +362,32 @@ export class MenuBackground {
 
   /** 地表背景全栈：远山（跨槽共用，bgAlphaFarBackLayer 驱动）+ 双槽树层按
    *  bgAlphaFrontLayer 交叉淡化（昼 Forest1 / 夜 Corruption）。
-   *  ★几何 = 原版系统 1:1：gameMenu Y 常量（山 100/230、树 320/400/480）+
-   *  num4=2 + 逐贴图 Y 偏移表（MNT_YOFF，补偿各贴图内容行差异——176 内容在
-   *  row466/942，无 −760 偏移会画到屏幕外=用户实报"浮空岛孤层"根因,
-   *  2026-08-24）。此前分数拟合版假设内容从贴图顶开始,只对 93 族成立 */
+   *  ★几何 = 分数定位 + 内容行补偿（2026-08-24 定稿）：1.4.5.8 原版截图实测
+   *  山脊 40/45%H、树线 72/79/86%H、贴图重复周期 ≈ 窗宽（scale=W/1024）——
+   *  1.4.5.6 反编译的绝对常量（y=100/230/320…+num4=2）在 1.4.5.8 截图对不上
+   *  （菜单 UI 也重做了：7 按钮）。y = 目标分数×H − TEX_TOPROW×scale：任何
+   *  贴图的【内容】落在目标高度（176 内容 row466、94 row89……全样式统一观感） */
   private drawForest(): void {
     const st = FOREST_STYLES[this.style] ?? FOREST_STYLES[1];
     const tint = this.layerTint();
-    // 远山两带（Step1 y=100 / Step2 y=230 startX−500；scale=1×num4=2、par 0.15）
+    const H = this.canvas.height;
+    const sc = this.canvas.width / 1024;   // 贴图重复周期 ≈ 窗口宽
+    // 远山两带：脊线 40%/45%H（内容行补偿后）
     const m0 = this.img(st.mnt[0]);
     if (m0) this.drawLayer(this.tinted(st.mnt[0], m0, tint), 0.15,
-      100 + (MNT_YOFF[st.mnt[0]] ?? 0), 2, 0);
+      H * 0.40 - (TEX_TOPROW[st.mnt[0]] ?? 0) * sc, sc, 0);
     const m1 = this.img(st.mnt[1]);
     if (m1) this.drawLayer(this.tinted(st.mnt[1], m1, tint), 0.15,
-      230 + (MNT_YOFF[st.mnt[1]] ?? 0), 2, -500);
-    // 槽 Forest1（bgStyle 0）：树三层（y=320/400/480，scale 1.25/1.31/1.34 ×num4）
+      H * 0.45 - (TEX_TOPROW[st.mnt[1]] ?? 0) * sc, sc, -500 * sc / 2);
+    // 槽 Forest1（bgStyle 0）：树三层（树线 72/79/86%H）
     if (this.alphaF[0] > 0.01) {
       const a = this.alphaF[0];
-      this.drawTreeSlot(0, st.trees[0], 320, 1.25 * 2, 0.4, 0, a, tint);
-      this.drawTreeSlot(1, st.trees[1], 400, 1.31 * 2, 0.43, -80, a, tint);
-      this.drawTreeSlot(2, st.trees[2], 480, 1.34 * 2, 0.49, -120, a, tint);
+      this.drawTreeSlot(0, st.trees[0], H * 0.72, 1.25 * sc, 0.4, 0, a, tint);
+      this.drawTreeSlot(1, st.trees[1], H * 0.79, 1.31 * sc, 0.43, -80 * sc / 2, a, tint);
+      this.drawTreeSlot(2, st.trees[2], H * 0.86, 1.34 * sc, 0.49, -120 * sc / 2, a, tint);
     }
     // 槽 Corruption（bgStyle 1 = 夜菜单）：DrawSurfaceBG_Corrupt gameMenu 分支
-    if (this.alphaF[1] > 0.01) this.drawCorruptTrees(this.alphaF[1], tint);
+    if (this.alphaF[1] > 0.01) this.drawCorruptTrees(this.alphaF[1], tint, sc);
   }
 
   /** 腐化三层（DrawSurfaceBG_Corrupt gameMenu：y=320/400/480、scale 2.5/2.62/2.68、
@@ -420,26 +425,14 @@ export class MenuBackground {
         n = 251 + (Math.floor(this.bgCounter() / 10) % 4);
       }
       // :60826-60842 Y 微调
-      if (tex === 50) y -= 50;
-      else if (tex === 53) y -= 100;
-      else if (tex === 91 || tex === 173) y += 200;
-      else if (tex === 178) y += 75;
-      else if (tex === 330 || tex === 335) y -= 150;
-      else if (tex === 343) y -= 300;
+      y -= (TEX_TOPROW[tex] ?? 0) * sc;   // 内容行补偿(替代旧逐贴图像素偏移)
     } else if (slot === 1) {
       if (tex === 51 || tex === 54) flip = true;      // :60884 FlipHorizontally
-      if (tex === 51) y -= 50;
-      else if (tex === 54) y -= 100;
-      else if (tex === 329 || tex === 334) y -= 150;
-      else if (tex === 342) y -= 300;
+      y -= (TEX_TOPROW[tex] ?? 0) * sc;
     } else {
       // :60901-60904 槽0=91 → 本层 sc1.3×2/par0.42
-      if (FOREST_STYLES[this.style]?.trees[0] === 91) { sc = 1.3 * 2; pr = 0.42; }
-      if (tex === 52) y -= 50;
-      else if (tex === 55) y -= 100;
-      else if (tex === 92) y += 150;
-      else if (tex === 328 || tex === 333) y -= 150;
-      else if (tex === 341) y -= 50;
+      if (FOREST_STYLES[this.style]?.trees[0] === 91) { sc = scale * 1.3 / 1.34; pr = 0.42; }
+      y -= (TEX_TOPROW[tex] ?? 0) * sc;
       if (tex === 341) {
         // GetBackgroundRect :60674-60680：2×2 帧（counter/15%4）+ Inflate(0,-2)
         const im = this.img(341);
