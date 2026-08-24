@@ -27,7 +27,11 @@ function anchorValid(st: TileStore, x: number, y: number): boolean {
   if (solid && !solidTop && bt === 0) return true;
   // SolidWithTop（cs:51870）：平台帧合法 或 tileSolid&&tileSolidTop
   if (PLATFORMS) {
-    const num = st.frameX[i] / 36 | 0;
+    // ★R11-H2（2026-08-24）：平台帧除数 36→18——PlatformFrameWidth()=
+    //   TileObjectData._data[19].CoordinateFullWidth=**18**（TileObjectData.cs:5122-25;
+    //   FinalCleanupPass.ts:375 同表 /18 并注释钉死）。/36 为仓内自不一致
+    //   （frameX∈{144,180,288,432} 四档判定两版相反）。地狱域无平台,零现症,口径债。
+    const num = Math.trunc(st.frameX[i] / 18);
     if ((!st.half[i] && num >= 0 && num <= 7) || (num >= 12 && num <= 16) || (num >= 25 && num <= 26)) return true;
   } else if (solid && solidTop) return true;
   // SolidSide（cs:51889）：tileSolid && !solidTop && blockType∈{4,5}
@@ -56,7 +60,13 @@ export function runHellforgesPass(st: TileStore, rng: RNG): void {
         //   左对齐 x..x+2 放置 → 全部熔炉右移一列（#72 干净基座 86+86 格自因，
         //   WWW 批 2026-08-18 修）。净空门 + 3 列底锚 AnchorValid（半砖/坡面地板
         //   会被原版拒收——SmoothWorld 后地狱满坡面，曾漏检 8 座熔炉错位）。
-        if (y < 2 || !st.inBounds(x + 1, y - 1) || !st.inBounds(x - 1, y)) { fail++; }
+        // ★R11-H1（2026-08-24）：Place3x2 头边距门（cs:52528-52530）`x < 5 ||
+        //   x > maxTilesX - 5 || y < 5 || y > maxTilesY - 5 → return`（不放置→
+        //   num3++ 重掷,烧 2 掷）——合法域 x∈[5,w-5]。曾缺 → 我方接受 x∈[1,w-2],
+        //   宽出 7 列;命中宽出带时我方放置成功（少烧 2 掷）原版重掷 → ~13%/世界
+        //   掷流分歧。（y 域 [h-252,h-33] 实际不可达,门照补全形。）
+        if (x < 5 || x > w - 5 || y < 5 || y > h - 5) { fail++; }
+        else if (y < 2 || !st.inBounds(x + 1, y - 1) || !st.inBounds(x - 1, y)) { fail++; }
         else {
           let ok = true;
           for (let dx = -1; dx <= 1 && ok; dx++) {

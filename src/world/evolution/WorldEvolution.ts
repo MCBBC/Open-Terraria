@@ -610,9 +610,18 @@ export class WorldEvolution {
     }
   }
 
+  /** 五族藤蔓支撑扫描（cs:73897-73905 丛林 60/62 / :73947-73955 灰烬 633/638 /
+   *  :74000± 蘑菇 70/528 / :74020± 腐化 661/636 / :74055-74063 猩红 662/205 同构）。
+   *  ★R12-13（2026-08-24）补 bottomSlope 双腿：①途中（含幽灵格）遇下坡沿
+   *  （slope 3/4,Tile.cs:302-306）即败——坡面上不长藤;②锚格须非坡（①已拦,
+   *  原版 `!bottomSlope()` 为冗余双写,保真）。曾只查 active+同型 → 坡面灰烬/
+   *  丛林/蘑菇块挂藤。 */
   private hasSupportMulti(i: number, j: number, sheets: number[]): boolean {
+    const st = this.host.store;
     for (let y = j; y > j - 10; y--) {
-      if (!this.host.store.inBounds(i, y)) break;
+      if (!st.inBounds(i, y)) break;
+      const sl = st.slope[st.idx(i, y)];
+      if (sl === 3 || sl === 4) return false;          // ① bottomSlope 即败（不查 active）
       if (this.active(i, y) && sheets.includes(sheetOf(this.typeAt(i, y)))) return true;
     }
     return false;
@@ -1344,8 +1353,25 @@ export class WorldEvolution {
           this.convert(x, y, 8);
         }
       }
-      // 叶绿砖/矿扩散退化周围邪恶块（cs:69733-69755：211/346 → 周围 6 格 Convert 9）
+      // 叶绿砖/矿扩散（cs:70179-70227：211/346 双臂）——★R12-9（2026-08-24）补
+      //  **自增殖臂**：Next(3)!=0（2/3）→ Next(4) 四向一步 → 目标 active 且
+      //  泥(59)/丛林草(60) 且 CanChlorophyteGrow → Convert(8)=转叶绿 211。
+      //  这是叶绿在泥/丛林草中蔓延的主机制（叶绿农场/自然增殖全靠它）——曾整缺,
+      //  叶绿只被消耗（挖/退化）永不增殖,长期世界存量单调递减。退化臂（Convert 9,
+      //  ±6 随机格单次,Main.rand 流）原样保留。
       if (sheet === 211 || sheet === 346) {
+        if (Math.random() >= 1 / 3) {                    // genRand.Next(3) != 0
+          const d = Math.floor(Math.random() * 4);       // genRand.Next(4)
+          const nx = i + (d === 0 ? 1 : d === 1 ? -1 : 0);
+          const ny = j + (d === 2 ? 1 : d === 3 ? -1 : 0);
+          const s2 = sheetOf(this.typeAt(nx, ny));
+          // InWorld(num8,num9,2)（cs:70217）——2 格边距
+          if (nx >= 2 && nx < st.w - 2 && ny >= 2 && ny < st.h - 2
+            && this.active(nx, ny) && (s2 === 59 || s2 === 60)
+            && this.canChlorophyteGrow(nx, ny)) {
+            this.convert(nx, ny, 8);
+          }
+        }
         const x = i + Math.floor(Math.random() * 13) - 6;
         const y = j + Math.floor(Math.random() * 13) - 6;
         if (this.active(x, y)) this.convert(x, y, 9);
@@ -1376,13 +1402,20 @@ export class WorldEvolution {
       const x = i + Math.floor(Math.random() * 7) - 3;
       const y = j + Math.floor(Math.random() * 7) - 3;
       if (!st.inBounds(x, y)) continue;
-      // nearbyChlorophyte → 防御退化（cs:69768-69770；ChlorophyteDefense 非 remix 无操作）
-      let chlor = 0;
-      for (let k = x - 5; k <= x + 5; k++) for (let l = y - 5; l <= y + 5; l++) {
-        const s = sheetOf(this.typeAt(k, l));
-        if (this.active(k, l) && (s === 211 || s === 346)) chlor++;
+      // nearbyChlorophyte → 防御退化（cs:69768-69770；ChlorophyteDefense 非 remix 无操作）。
+      // ★R12-10（2026-08-24）：补 1-2 矿**概率防御臂**（cs:70068-70082）——count>0 时
+      //  非 remix 走 `genRand.Next(-1,4) < count`（Next(-1,4)∈{-1..3} 5 值 →
+      //  count=1→2/5、count=2→3/5 概率 true）→ 本次蔓延尝试被跳过（叶绿对邪恶的
+      //  软光环）;曾只有 ≥3 硬挡。世界边 10 格内 nearbyChlorophyte 恒 false（cs:70051
+      //  -70059）=不拦蔓延（勿写成 return——那是"跳过蔓延",方向相反）。
+      if (!(x <= 10 || x >= st.w - 10 || y <= 10 || y >= st.h - 10)) {
+        let chlor = 0;
+        for (let k = x - 5; k <= x + 5; k++) for (let l = y - 5; l <= y + 5; l++) {
+          const s = sheetOf(this.typeAt(k, l));
+          if (this.active(k, l) && (s === 211 || s === 346)) chlor++;
+        }
+        if (chlor >= 3 || (chlor > 0 && Math.random() < (chlor + 1) / 5)) return;
       }
-      if (chlor >= 3) return;
       // 向日葵 2 格内（CountNearBlocksTypes(x,y,2,cap1,27)）→ 中止本次
       let sunflower = false;
       for (let k = x - 2; k <= x + 2 && !sunflower; k++) for (let l = y - 2; l <= y + 2; l++) {

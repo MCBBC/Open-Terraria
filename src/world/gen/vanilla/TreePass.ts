@@ -84,7 +84,8 @@ function emptyTileCheck(st: TileStore, x0: number, x1: number, y0: number, y1: n
  *  ★cs:29983-29986 掷序：先 num4=Next(3)（干身变体）**再** num5=Next(10)（枝型），
  *    强制直干/重投只作用在 num5——旧实现枝型先掷致流值互换（1405 反编译的
  *    frameNumber 位已废弃，1456 无该掷）。growTreeWithSettings 掷序相同（cs:30595）。 */
-function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: number, height: number): boolean {
+function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: number, height: number,
+  flag3 = false): boolean {
   let flagL = false, flagR = false; // 侧枝去重（num5 5/7 左、6/7 右不同帧连续限制）
   for (let y = index1 - height; y < index1; y++) {
     const num4 = rng.int(0, 2);                     // 干身变体（Next(3)，先掷）
@@ -98,15 +99,20 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
     if (num5 === 6 || num5 === 7) flagR = true;
     const [fx, fy] = TRUNK[num5][num4];
     st.setTileSilent(i, y, TREE, fx, fy);
-    // 侧枝帧（cs:30201-30247）：变体骰先掷，Next(3)<2 走 198+ 行（贴干枝）
+    // 侧枝帧（cs:30201-30247）：变体骰先掷，Next(3)<2 走 198+ 行（贴干枝）。
+    // ★R13-4（2026-08-24）：flag3=remix&&j<worldSurface（cs:30095）时左枝恒走
+    //  else 帧 (66,k*22)、右枝恒走 (88,66+k*22)（cs:30269/30314）——remix 地表树
+    //  帧形分支。★Next(3) 在 `&& !flag3` 之前无条件消耗（先掷后判，勿短路跳掷）。
     if (num5 === 5 || num5 === 7) {
       const k = rng.int(0, 2);
-      const [bfx, bfy] = rng.int(0, 2) < 2 ? [44, 198 + k * 22] : [66, k * 22];
+      const branchRoll = rng.int(0, 2);
+      const [bfx, bfy] = !flag3 && branchRoll < 2 ? [44, 198 + k * 22] : [66, k * 22];
       st.setTileSilent(i - 1, y, TREE, bfx, bfy);
     }
     if (num5 === 6 || num5 === 7) {
       const k = rng.int(0, 2);
-      const [bfx, bfy] = rng.int(0, 2) < 2 ? [66, 198 + k * 22] : [88, 66 + k * 22];
+      const branchRoll = rng.int(0, 2);
+      const [bfx, bfy] = !flag3 && branchRoll < 2 ? [66, 198 + k * 22] : [88, 66 + k * 22];
       st.setTileSilent(i + 1, y, TREE, bfx, bfy);
     }
   }
@@ -132,8 +138,10 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
   const baseFx = num7 === 0 ? 88 : num7 === 1 ? 0 : num7 === 2 ? 66 : -1;
   const k8 = rng.int(0, 2);
   if (baseFx >= 0) st.setTileSilent(i, index1 - 1, TREE, baseFx, 132 + k8 * 22);
-  // 树冠标记帧（cs:30372-30395）：Next(13)!=0 → fx=22，否则 fx=0；fy=198+22*k
-  const crownFx = rng.int(0, 12) !== 0 ? 22 : 0;
+  // 树冠标记帧（cs:30372-30395）：Next(13)!=0 且 !flag3 → fx=22（flag3 时恒 fx=0，
+  //  cs:30491——Next(13) 照掷，先掷后判勿短路）；fy=198+22*k
+  const crownRoll = rng.int(0, 12);
+  const crownFx = !flag3 && crownRoll !== 0 ? 22 : 0;
   st.setTileSilent(i, index1 - height, TREE, crownFx, 198 + rng.int(0, 2) * 22);
   // ★CCCC 批（2026-08-24）：尾段 RangeFrame(i-2, j-num2-1, i+2, j+1)（GrowTree
   //  cs:30410 / GrowEpicTree cs:27807 同款）——JS 曾缺：RangeFrame→TileFrame 对
@@ -183,7 +191,10 @@ export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: nu
   if (MUSHROOM_GRASS.has(st.type[gi]) && emptyTileCheck(st, i - 2, i + 2, index1 - clear, index1 - 3, 20) && emptyTileCheck(st, i - 1, i + 1, index1 - 2, index1 - 1, 20)) flag2 = true;
   if (emptyTileCheck(st, i - 2, i + 2, index1 - clear, index1 - 1, 20)) flag2 = true;
   if (!flag2) return false;
-  return growTrunk(st, rng, gs, i, index1, height);
+  // ★R13-4：flag3=remixWorld && j<worldSurface（cs:30095）——remix 地表树侧枝/树冠
+  //  恒走 else 帧。GrowEpicTree/GrowTreeWithSettings 无此分支（裸掷，勿补）。
+  return growTrunk(st, rng, gs, i, index1, height,
+    !!gs.seedFlags?.remix && index1 < gs.worldSurface);
 }
 
 /** GrowEpicTree（1456 cs:27361-27760）：巨型树。基座严格草(2)、邻格草族、
@@ -202,7 +213,7 @@ function growEpicTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: numbe
     && st.flags[st.idx(i + dx, index1)] && family.has(st.type[st.idx(i + dx, index1)]);
   if (!fitSide(-1) && !fitSide(1)) return false;
   if (!emptyTileCheck(st, i - 2, i + 2, index1 - 55, index1 - 1, 20)) return false;
-  return growTrunk(st, rng, gs, i, index1, rng.int(20, 29)); // Next(20,30)
+  return growTrunk(st, rng, gs, i, index1, rng.int(20, 29), false); // Next(20,30)；epic 无 flag3（cs:27672/27891 裸掷）
 }
 
 
@@ -543,20 +554,35 @@ export function growAshTree(st: TileStore, rng: RNG, x: number, y: number): bool
   return growTreeWithSettings(st, rng, x, y, ASH_PROFILE);
 }
 
-/** AddTrees（1456 cs:31523-31578）1:1：逐列尝试（~1.6 列间距）；沙滩棕榈按每侧固定概率；
- *  草上 1/20 观赏树（type==2 且 Next(20)==0 → Next(2)==0 ? 柳 616 : 樱 596），否则普通树 5 */
+/** AddTrees（1456 cs:31523-31578 / 1457 cs:31647-31733）1:1：逐列尝试（~1.6 列间距）；
+ *  沙滩棕榈按每侧固定概率；草上观赏树（type==2 且 Next(num5)==0 → Next(2)==0 ?
+ *  柳 616 : 樱 596），否则普通树 5。★R13-3（2026-08-24）三处秘密种子分支：
+ *  ①num5 是变量 20：drunk /=3（6）、remix /=2（10）（cs:31670-31674）；
+ *  ②tenth 短路恒真——观赏树门 Next(num5) 不掷（cs:31677）；
+ *  ③remix 尾段地下循环 [ws, h-300)、Next(7) 分母（cs:31705-31732，无棕榈/无跳列掷）。
+ *  epic 林区挂 !drunk && !tenth 双门（Trees pass cs:20108）。 */
 export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
-  // EpicTree 林区（pass 82 头段，L9656-9666）：w*0.003 个 25-50 半宽林区逐格尝试
-  for (let n = 0; n < st.w * 0.003; n++) {
-    const cx = rng.int(50, st.w - 51);            // Next(50, maxTilesX-50)
-    const hw = rng.int(25, 49);                  // Next(25, 50)
-    for (let x = cx - hw; x < cx + hw; x++) {
-      for (let y = 20; y < gs.worldSurface; y++) growEpicTree(st, rng, gs, x, y);
+  const f = gs.seedFlags ?? {};
+  // EpicTree 林区（pass 82 头段，L9656-9666）：w*0.003 个 25-50 半宽林区逐格尝试。
+  // ★R13-3①：drunk/十周年世界不跑巨树林区（cs:20108 `!drunkWorldGen &&
+  //  !Main.tenthAnniversaryWorld`）——曾无门，drunk/celebrationmk10 世界多出整片巨树
+  if (!f.drunkWorld && !f.tenthAnniversary) {
+    for (let n = 0; n < st.w * 0.003; n++) {
+      const cx = rng.int(50, st.w - 51);            // Next(50, maxTilesX-50)
+      const hw = rng.int(25, 49);                  // Next(25, 50)
+      for (let x = cx - hw; x < cx + hw; x++) {
+        for (let y = 20; y < gs.worldSurface; y++) growEpicTree(st, rng, gs, x, y);
+      }
     }
   }
   const palmL = 0.1 + rng.next() * 0.35;          // 每侧棕榈概率（L15644-45）
   const palmR = 0.1 + rng.next() * 0.35;
   const GRASS_TILE = T.GRASS;                     // tile 2（vanilla 草）
+  // ★R13-3②：观赏树分母变量 num5=20，drunk /=3、remix /=2（cs:31670-31674；
+  //  原版在格内重算但恒定，提出等价）——★int 除法链：20/3=6、6/2=3（非 20/6）
+  let num5 = 20;
+  if (f.drunkWorld) num5 = Math.floor(num5 / 3);
+  if (f.remix) num5 = Math.floor(num5 / 2);
   for (let x = 1; x < st.w - 1; x++) {
     for (let y = 20; y < gs.worldSurface; y++) {
       if (x < 380) {
@@ -564,9 +590,11 @@ export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
       } else if (x > st.w - 380) {
         if (rng.next() < palmR && st.liquid[st.idx(x, y)] === 0) growPalmTree(st, rng, x, y, gs);
       }
-      // 1/20 观赏树（cs:31558-31566）：active 且 type==2 且 Next(20)==0 → 柳/樱对半
+      // 观赏树门（cs:31676-31679）：active 且 type==2 且（tenth 恒真‖Next(num5)==0，
+      //  tenth 短路不掷）→ 柳/樱对半
       const yi = st.idx(x, y);
-      if (st.flags[yi] && st.type[yi] === GRASS_TILE && rng.int(0, 19) === 0) {
+      if (st.flags[yi] && st.type[yi] === GRASS_TILE
+        && (f.tenthAnniversary || rng.int(0, num5 - 1) === 0)) {
         growVanityTree(st, rng, x, y, rng.int(0, 1) === 0);
         continue;
       }
@@ -574,6 +602,23 @@ export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
     }
     if (rng.int(0, 2) === 0) x++;                 // Next(3)==0 跳列
     if (rng.int(0, 3) === 0) x++;                 // Next(4)==0 跳列
+  }
+  // ★R13-3③：remix 尾段地下树循环（cs:31705-31732）：带 [ws, h-300)、分母 7、
+  //  同 616/596 对半；无棕榈支、无跳列掷。remix 倒置世界的地下树全靠本段。
+  //  （FinishRemixWorld cs:26900 的 AddTrees(undergroundOnly:true) 第二实例随
+  //  FinishRemixWorld 整 pass 缺失另案登记——remix 域债。）
+  if (f.remix) {
+    for (let x = 1; x < st.w - 1; x++) {
+      for (let y = gs.worldSurface; y < st.h - 300; y++) {
+        const yi = st.idx(x, y);
+        if (st.flags[yi] && st.type[yi] === GRASS_TILE
+          && (f.tenthAnniversary || rng.int(0, 6) === 0)) {
+          growVanityTree(st, rng, x, y, rng.int(0, 1) === 0);
+        } else {
+          growTree(st, rng, gs, x, y);
+        }
+      }
+    }
   }
 }
 

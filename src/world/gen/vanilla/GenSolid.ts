@@ -124,6 +124,20 @@ export function vanGenSolidType(t: number): boolean {
   return genSolidType(t);
 }
 
+/** WorldGen.SolidOrSlopedTile（cs:70515-70547）1:1：active && 生成期 tileSolid &&
+ *  !tileSolidTop && !inActive——名为 OrSloped 实不查坡/半砖;tileSolidTop 族
+ *  （平台 19/239/380/427/435-439=VAN_TILE_SOLID_EXTRA 全集）不计实心。
+ *  ★R12-4 消费方：肉后回填泛洪 IsNotSolid 修饰符（Modifiers.cs:563-571）。 */
+export function vanSolidOrSloped(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  if ((st.wire[i] >>> 5) & 1) return false;                       // inActive
+  const sh = SHEET_OF_TYPE[st.type[i]] ?? -1;
+  if (VAN_TILE_SOLID_EXTRA.has(sh)) return false;                 // tileSolidTop
+  return vanGenSolidType(st.type[i]);
+}
+
 /** 生成期实心查询（供消费端替代裸 `TILE_DEFS[t]?.solid`）：
  *  active && 生成期 tileSolid。half/slope/platform 等衍生语义由调用方自行叠加
  *  （各 pass 的 SolidTile 近似口径不一,不在此处收敛）。 */

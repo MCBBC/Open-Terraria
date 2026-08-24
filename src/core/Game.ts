@@ -395,14 +395,15 @@ export function travelAdjustSlotRarities(rarity: number[], slotItemAttempts: num
  *  均匀采样（地下 (w×h)×1.5e-05 格 :71622-71631；地表 (w×h)×3e-05 格 :71549-71555，
  *  worldUpdateRate=1）——单苗每 tick 被采中概率 = rate×(w×h)/区格数。本仓 300 tick
  *  一轮、按列切片轮转（每轮预算 cellsPerRound 格，K 轮覆盖全图），每苗每轮命中概率
- *  gemP/sapP = K×300×rate×(w×h)/区格数（×590 命中再掷 1/5、20 苗命中掷 1/20），
+ *  gemP/sapP/underSapP = K×300×rate×(w×h)/区格数（×590/地下苗命中再掷 1/5、
+ *  地表 20 苗命中掷 1/20；underSapP=地下带档，无雨天倍率——R13-2），
  *  单 tick 期望 = gemP/(K×300) 与原版逐点相等——数值等价实现（等价推导登记于
  *  growSaplings 函数头），空间上不再限域玩家附近 */
 export function saplingScanPlan(wTiles: number, hTiles: number, groundLevel: number,
   round: number, cellsPerRound = 120000, raining = false): {
   K: number; sliceW: number; x0: number; x1: number;
   underY0: number; underY1: number; overY0: number; overY1: number;
-  gemP: number; sapP: number;
+  gemP: number; sapP: number; underSapP: number;
 } {
   // 采样区格数（原版 y 取值域宽度 × w）：地下 j∈[worldSurface-1, h-20)，
   // 地表 j∈[10, worldSurface-1)（WorldGen.cs:71553-71555/:71627-71629）
@@ -421,9 +422,14 @@ export function saplingScanPlan(wTiles: number, hTiles: number, groundLevel: num
     underY0: Math.floor(groundLevel) - 1, underY1: hTiles - 20,   // [gl-1, h-21]
     overY0: 10, overY1: Math.floor(groundLevel) - 1,              // [10, gl-2]
     // 每苗每轮命中概率（K 轮一访 × 300 tick/轮 × 原版单 tick 采样率 × 命中掷骰）
+    // ★R13-2（2026-08-24）：双采样带分档——地表带 3e-05（UpdateWorld cs:72079）×
+    //  雨天 1.5（cs:72106-72108，仅地表带）× 苗 Next(20)（cs:73009）；地下带
+    //  1.5e-05（cs:72081）**无雨天倍率** × 苗 Next(5)（cs:74349，590/595/615 同档）。
+    //  地下灰烬苗（tile20 档10）曾误套地表公式 → 实算偏快 ≈1.22×(无雨)/1.83×(雨)。
     gemP: Math.min(1, K * 300 * 1.5e-05 * (wTiles * hTiles) / underTiles * 0.2),
     sapP: Math.min(1, K * 300 * 3e-05 * (wTiles * hTiles) / overTiles * (1 / 20)
       * (raining ? 1.5 : 1)),
+    underSapP: Math.min(1, K * 300 * 1.5e-05 * (wTiles * hTiles) / underTiles * 0.2),
   };
 }
 
@@ -23457,6 +23463,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       Math.floor(this.tickCount / 300));
     const gemP = plan.gemP;
     const sapP = Math.min(1, plan.sapP * (this.world.weather.raining ? 1.5 : 1)); // :71557-71559
+    const underSapP = plan.underSapP;   // 地下带：无雨天倍率（cs:72159-72165 无 ×1.5 支）
     // 宝石树苗 590（AttemptToGrowTreeFromSapling case 590，:72924-72960）：必须地下
     // （y>worldSurface）；frameX/54 = 宝石序号 → 对应树 583-589；growGemTree 自带
     // 石/苔基座 + 洞穴墙 + 净空全套判定
@@ -23516,15 +23523,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     // 地下区 tile 20 灰烬档（case 10 无 underground 门，:72861-72863；其余档
-    // underground=true 拒绝 :72876-72883——宝石苗 590 已在上段）
+    // underground=true 拒绝 :72876-72883——宝石苗 590 已在上段）。
+    // ★R13-2：概率用地下带 underSapP（1.5e-05×Next(5)，无雨天倍率）——曾误套
+    //  地表带 sapP（3e-05×Next(20)×rain）→ 灰烬树再生偏快 1.22×/雨天 1.83×。
     for (let x = plan.x0; x < plan.x1; x++) {
       for (let y = plan.underY0; y < plan.underY1; y++) {
         if (st.get(x, y) !== T.SAPLING) continue;
         if (Math.floor(st.frameX[st.idx(x, y)] / 54) !== 10) continue;
-        if (Math.random() >= sapP) continue;
+        if (Math.random() >= underSapP) continue;
         if (growAshTree(st, new RNG((Math.random() * 1e9) | 0), x, y)) {
           this.chunks.markDirtyArea(x - 6, y - 14, x + 6, y + 2);
           this.treeGrowFX(x, y, 10);
+        }
+      }
+    }
+    // 地下区 595/615 观赏苗（cs:74359-74371：Next(5)==0 同灰烬档；分发无 underground
+    // 拒门 :73436-73455，GroundTest=草族去 23/199 :30598-30606——洞内草基座罕见但
+    // 合法，原版可成树）。曾整支缺失。
+    for (let x = plan.x0; x < plan.x1; x++) {
+      for (let y = plan.underY0; y < plan.underY1; y++) {
+        const t = st.get(x, y);
+        if (t !== SAK && t !== WIL) continue;
+        if (Math.random() >= underSapP) continue;
+        const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+        if (tryGrow(x, y, sheet, st.frameX[st.idx(x, y)])) {
+          this.chunks.markDirtyArea(x - 6, y - 14, x + 6, y + 2);
         }
       }
     }

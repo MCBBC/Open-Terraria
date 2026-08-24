@@ -65,17 +65,18 @@ export class WorldSelectPanel {
     const list = this.store.list();
     for (const meta of list) {
       const el = document.createElement('div');
-      el.className = 'sw-vitem sw-vpanel-item';
+      el.className = 'sw-vitem sw-vpanel-item noicon';
       const m = meta;
-      // 信息块（名称 + 规格；★图标位缺数据——见头注偏差登记）
+      // 信息块（名称 + 规格；★图标位缺数据——见头注偏差登记；布局=行绝对分区
+      //  .sw-vitem-info,与角色行同构,按钮区在底缘不再压文本）
       const info = document.createElement('div');
-      info.style.cssText = 'flex:1;margin-left:6px;pointer-events:none;';
+      info.className = 'sw-vitem-info';
       const name = document.createElement('div');
-      name.style.cssText = 'font-size:16px;text-shadow:1px 1px 0 #000;';
+      name.className = 'name';
       name.textContent = (meta.favorite ? '★ ' : '') + (meta.name || Lang.text('Mods.SandboxWorld.WorldSelect.Unnamed'));
       if (meta.favorite) name.style.color = '#ffe745';
       const sub = document.createElement('div');
-      sub.style.cssText = 'font-size:12px;color:#cfd6f4;text-shadow:1px 1px 0 #000;';
+      sub.className = 'sub';
       const mins = Math.floor(meta.playTimeMs / 60000);
       sub.textContent = `${SIZE_LABEL(meta)} · ${meta.w}×${meta.h} · ${DIFF_LABEL()[meta.difficulty] ?? '?'} · ${Lang.text('Mods.SandboxWorld.WorldSelect.PlayTimeMins', mins)}`;
       info.append(name, sub);

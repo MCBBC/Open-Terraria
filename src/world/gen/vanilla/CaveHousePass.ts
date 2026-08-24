@@ -1522,11 +1522,17 @@ function placeChests(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, r
   const tryAt = (x: number, y: number): boolean => {
     const underground = y > gs.worldSurface;
     // 冰屋：显式 style 11 直入冰箱门（cs:36107 第一析取）→ 主件池 + 1/20 提炼机 +
-    // 1/50 鱼覆盖块自动生效（旧实现显式 loot 绕过覆盖——审计三.4 修复）
+    // 1/50 鱼覆盖块自动生效（旧实现显式 loot 绕过覆盖——审计三.4 修复）。
+    // ★R11-A1（2026-08-24）：ice 旗**条件化**——原版 chestStyle=underground?ChestStyle:0
+    //  （HouseBuilder.cs:676-678），地表箱 style=0 → 冰门三析取全假（cs:36445：
+    //  (21∧11)∨(467∧24)∨(无主件∧y≥ws+25∧冰系)）→ flag2=false → 尾段 2198(Next(7))/
+    //  669(Next(50)) 与金箱支 `flags.ice?974:8` 全部零掷。旧实现 ice 旗对所有冰屋箱
+    //  预置 → 地表支每箱恒多掷 1-2 颗 + 火把 8→974/43→5120 错配。地下冰屋 style=11
+    //  由 placeBuriedChestInner 的 (CHEST∧argStyle11) 析取支自动置旗,勿在此预置。
     return placeBuriedChest(st, rng, gs, chests, x, y, {
       style: underground ? def.chestStyle : 0,
       tile: underground && def.chestTile2 ? CHEST2 : undefined,
-      flags: theme === 'ice' ? { ice: true } : (!underground ? { wooden: true } : {}),
+      flags: !underground ? { wooden: true } : {},
     });
   };
   // 级联 1:各房底行随机 10 次

@@ -316,7 +316,12 @@ export function runDungeonPass(
   const entSeed = gs.dungeonEntSeed ?? raw(); // preGenDungeonEntranceSettings.RandomSeed
   const entA = gs.dungeonEntA ?? rn(3);       // 入口类型掷①（Dome 候选）
   const entB = gs.dungeonEntB ?? rn(3);       // 入口类型掷②（Tower 覆盖）
-  const entKind = entB === 0 ? 2 : entA === 0 ? 1 : 0;
+  // ★R11-D3（2026-08-24）：precalc 搜索失败 → 原版回退 Legacy（DC.cs:332-341
+  //  `preGenDungeonEntranceSettings = MakeDungeon_GetEntranceSettings(Legacy, …, null)`
+  //  + `dungeonEntrancePosition = Zero`）——data==null 支（DC.cs:856）消耗
+  //  `RandomSeed = genRand.Next()` 1 掷（新 entSeed）。曾缺：失败仍建 Tower/Dome
+  //  入口（整栋错型）+ 少 1 掷。let 化以支持失败回退。
+  let entKind = entB === 0 ? 2 : entA === 0 ? 1 : 0;
   const shelf = [ri(9, 12), 0, 0];    // SetupDungeonDataVariables（cs:243-254）
   do { shelf[1] = ri(9, 12); } while (shelf[1] === shelf[0]);
   shelf[2] = ri(9, 12);
@@ -380,6 +385,14 @@ export function runDungeonPass(
           break;
         }
       }
+    }
+    // ★R11-D3：失败支（DC.cs:337-341）——回退 Legacy + data==null 支 1 掷
+    //  （MakeDungeon_GetEntranceSettings(Legacy,…,null) 的 RandomSeed=Next()，
+    //  DC.cs:856；后续 MakeDungeon :467 的 (preSettings,data) 重载再掷 1 颗弃用、
+    //  RandomSeed 取 preSettings 值——即下方入口构建处的 raw()，三支同位已对齐）。
+    if (!precalcOK) {
+      raw();
+      entKind = 0;                             // LegacyDungeonEntrance
     }
   }
   // —— 状态（DungeonData/GenVars）——
@@ -3355,6 +3368,12 @@ export function runDungeonPass(
             }
           }
           if (placed) break;
+          // ★R11-D2（2026-08-24）：灯笼支补 Next(3) 主流掷（DungeonGlobalLights.cs:128
+          //  ——`genRand.Next(3) == 0 && wall >= 94 && wall <= 105`，**Next(3) 在 && 左侧
+          //  恒掷**：Default style（普通世界唯一档）每次进入灯笼段必耗 1 掷,与锚定成败
+          //  无关——故掷点在锚定预检**之前**。命中且墙∈[94,105]（变体墙）→ GOTHIC
+          //  灯笼 53 覆写三档查表值。曾缺 → 每盏灯笼少 1 颗主流掷,dungeon 段尾起全链流位移。
+          const gothicRoll = rn(3);
           // 灯笼（Place1x2Top :46694：上方实心且下方净空 → 42 两格）
           const aboveSheet = TILE_DEFS[typAt(x, cy - 1)]?.vanilla?.sheet ?? -1;
           // 上格实心判定走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344），
@@ -3365,9 +3384,11 @@ export function runDungeonPass(
           if (inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && aboveSolid && !abvInact && !DG_SOLID_TOP.has(aboveSheet)
             && inW(x, cy + 1, 0) && actAt(x, cy + 1) === 0) {
             if (lgTr) console.log(`DG LP x=${x} cy=${cy} typAbv=${aboveSheet}`);
-            // 灯笼样式按墙变体三档（Lights :109-118）：wall==variants[1]/[2] 换档,余用 [0]
+            // 灯笼样式按墙变体三档（Lights :109-118）：wall==variants[1]/[2] 换档,余用 [0]；
+            // ★R11-D2：gothic 命中（1/3 × 变体墙）→ 53 覆写（cs:128-132 在三档之后）
             const wl = wallAt(x, cy);
-            const lStyle = wl === wallVariants[1] ? lantern[1] : wl === wallVariants[2] ? lantern[2] : lantern[0];
+            const lStyle = (gothicRoll === 0 && wl >= 94 && wl <= 105) ? 53
+              : wl === wallVariants[1] ? lantern[1] : wl === wallVariants[2] ? lantern[2] : lantern[0];
             chTile(st.idx(x, cy), LANTERN, false);
             chTile(st.idx(x, cy + 1), LANTERN, false);
             // Place1x2Top 帧式（:46711-46717）：frameY=style*36（下格 +18）、frameX=0（亮档；

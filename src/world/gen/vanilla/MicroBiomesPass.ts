@@ -1246,13 +1246,16 @@ export class DeadMansChestBiome {
   private readonly st: TileStore;
   private readonly rng: RNG;
   private readonly gs: GenState;
-  private readonly chestList: Array<{ x: number; y: number }>;
+  /** chest sink 条目（带 items）——TurnGoldChestIntoDeadMansChest 的 FindChest/右移
+   *  消费（★R11-M1：曾只收 {x,y} 丢 items → 5007 全游戏不可得） */
+  private readonly chestList: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>;
   private readonly darts: DartSpot[] = [];
   private readonly wires: WireSpot[] = [];
   private readonly boulders: BoulderSpot[] = [];
   private readonly explosives: Array<{ x: number; y: number }> = [];
 
-  constructor(st: TileStore, rng: RNG, gs: GenState, chestList: Array<{ x: number; y: number }>) {
+  constructor(st: TileStore, rng: RNG, gs: GenState,
+    chestList: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>) {
     this.st = st; this.rng = rng; this.gs = gs; this.chestList = chestList;
   }
 
@@ -1519,8 +1522,18 @@ export class DeadMansChestBiome {
         st.frameY[idx] = j * 18;
       }
     }
-    // 1/3 战利品前插(Item 5007):掷骰保留(1 次 Next(3));本 pass 无 chest sink,写入跳过
-    this.rng.int(0, 2);
+    // ★R11-M1（2026-08-24）：1/3 战利品前插（DeadMansChestBiome.cs:487-513）——
+    //  Next(3) 恒耗（1/3 继续）→ Chest.FindChest(锚点) → item 自 Length-2 向 1 逐槽
+    //  右移一格（stack!=0 才移）→ item[1] = Dead Man's Sweater 5007。世界箱
+    //  maxItems=40（Chest.cs:58 DefaultMaxItems）→ 本仓紧凑 items 等价于 idx1 插入、
+    //  超 40 尾丢。旧实现"无 chest sink 写入跳过"判断有误——runMicroBiomesPass
+    //  传入的正是带 items 的 sink → 5007 曾全游戏不可得（每世界 3-7 箱缺件）。
+    if (this.rng.int(0, 2) !== 0) return;
+    const ch = this.chestList.find((c) => c.x === x && c.y === y);   // Chest.FindChest
+    if (!ch) return;
+    const items = ch.items;
+    if (items.length >= 40) items.length = 39;     // item[Length-1] 被右移覆盖丢弃
+    items.splice(1, 0, { id: 5007, stack: 1 });    // item[1] = SetDefaults(5007)
   }
 
   /** ActuallyPlaceDartTrap(cs:516-532) */

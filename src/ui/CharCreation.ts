@@ -67,8 +67,8 @@ const CSS = `
 }
 .sw-char-tabs button:hover { background: rgb(73, 94, 171); border-color: #ffe745; }
 .sw-char-tabs button.active { background: rgb(73, 94, 171); color: #fff; border-color: #ffe745; }
-.sw-char-content { height: 320px; overflow-y: auto; background: rgba(16, 20, 44, 0.85);
-  border: 1px solid #3a4680; padding: 10px; }
+.sw-char-content { min-height: 230px; max-height: 46vh; overflow-y: auto;
+  background: rgba(16, 20, 44, 0.85); border: 1px solid #3a4680; padding: 10px; }
 .sw-char-section { display: flex; flex-direction: column; gap: 8px; }
 .sw-char-row { display: flex; align-items: center; gap: 10px; }
 .sw-char-row span { width: 52px; }

@@ -66,7 +66,12 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
         if (badOceanCaveTiles(st, x, y)) continue;
-        const dist = Math.hypot(Math.abs(x - vx), Math.abs(y - vy));
+        // ★R9-1（2026-08-24）：Math.hypot → Math.sqrt(dx²+dy²)（Vector2D.Length，
+        //  cs:77353-77354；hypot 按规约做无溢出稳定计算，与 sqrt 可差 1 ulp——
+        //  本仓"禁 hypot"约定 StructuresPass.ts:68 同款）。dist 进 4 个阈值比较
+        //  （腔体 ×0.5+1/壳层 ×1.5+1/硬化沙 ×1.1+1/灌水 ×1.3+1），阈值落在两实现
+        //  结果之间时该格判定翻转 → 单格级位差。
+        const dist = Math.sqrt(Math.abs(x - vx) * Math.abs(x - vx) + Math.abs(y - vy) * Math.abs(y - vy));
         const ti = st.idx(x, y);
         // 腔体(cs:76817-76821):flag5 门内,写 type=264+active=false(幽灵标记)
         if (big && dist < radius * 0.5 + 1) {

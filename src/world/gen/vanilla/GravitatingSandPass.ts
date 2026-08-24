@@ -23,22 +23,32 @@ const FALLING = new Set<number>([
   TILE_BY_KEY['v_495_shell_pile_block'] ?? 0,  // 495
 ].filter((v) => v !== 0));
 
-/** Tile.ResetToType（1456 Tile.cs:279-289）：liquid 清零 + 仅 active 位的 header +
- *  frame 清零 + 换 type；wall 不动（wall 为独立 ushort 字段，不在 header 里） */
+/** Tile.ResetToType（1456 Tile.cs:251-260）：liquid=0 + sTileHeader=32（仅 active 位
+ *  ——★同时清块漆 sTileHeader 低 5 位与 inActive 位）+ bTileHeader=0（★墙漆+
+ *  liquidType）+ bTileHeader2/3=0（★coat 位/帧元数据）+ frame 清零 + 换 type；
+ *  wall 不动（wall 为独立 ushort 字段，不在 header 里）。
+ *  ★R13-5（2026-08-24）补 paint/paintWall/coat 三通道清零——本 pass 注册位
+ *  cs:15210 在一切油漆 pass 之前普通世界不可达，但与原版字段面对齐（潜伏缺口）。 */
 function resetToType(st: TileStore, x: number, y: number, type: number): void {
   const i = st.idx(x, y);
   st.type[i] = type;
   st.flags[i] = 1;          // sTileHeader = 32（active 位）
   st.liquid[i] = 0;
-  st.liquidType[i] = 0;     // bTileHeader3 = 0
+  st.liquidType[i] = 0;     // liquidType 位（bTileHeader 5-6 位）
   st.half[i] = 0;
   st.slope[i] = 0;
   st.frameX[i] = 0;
   st.frameY[i] = 0;
-  st.wire[i] = 0;           // bTileHeader/bTileHeader2 = 0（电线/致动位清零）
+  st.wire[i] = 0;           // bTileHeader/bTileHeader2 电路位（电线/致动位清零）
+  st.paint[i] = 0;          // sTileHeader & 0x1F（块漆）
+  st.paintWall[i] = 0;      // bTileHeader & 0x1F（墙漆）
+  st.coat[i] = 0;           // bTileHeader3 coat 位（echo/fullbright）
 }
 
 export function runGravitatingSandPass(st: TileStore, gs: GenState): void {
+  // ★R13-5①：门 `!Skyblock.denyAllGeneration && !SecretSeed.roundLandmasses.Enabled`
+  //  （cs:15212）——planetoids 世界跳过整 pass（曾缺门）
+  if (gs.seedFlags?.roundLandmasses) return;
   for (let x = 0; x < st.w; x++) {
     let flag = false;
     let num = 0;

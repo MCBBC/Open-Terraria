@@ -61,15 +61,18 @@ export function runRemoveSurfaceWaterAboveSandPass(st: TileStore, gs: GenState):
   void SAND; void SAND_HARD; void SANDSTONE;
 }
 
-/** MakeWateryIceThing（cs:80206-80246）1:1：水柱底为雪/冰族 → 沿水面线左右铺薄冰 162。
- *  门禁：上格无液无块、前进侧邻格非半砖；越界即止。 */
-function makeWateryIceThing(st: TileStore, i: number, j: number): void {
+/** MakeWateryIceThing（1457 cs:80744-80790）1:1：水柱底为雪/冰族 → 沿水面线左右铺薄冰 162。
+ *  门禁：上格无液无块、前进侧邻格非半砖；越界即止。
+ *  ★R9-5（2026-08-24）：函数门补 `&& !remix`（cs:80746 `|| (lava() && !Main.remixWorld)`）
+ *  ——remix 世界岩浆柱两道门都放行（调用门 cs:16791 同款），岩浆面照样铺薄冰；
+ *  旧注释"remix 分支不触发"判断有误。 */
+function makeWateryIceThing(st: TileStore, i: number, j: number, remix = false): void {
   const inWorld = (x: number, y: number): boolean =>
     x >= 1 && y >= 1 && x < st.w - 1 && y < st.h - 1;
   if (!inWorld(i, j)) return;
   const start = st.idx(i, j);
   if (st.liquid[start] <= 0 || st.flags[start]) return;
-  if (st.liquidType[start] === 2) return;          // 岩浆跳过（remix 分支不触发）
+  if (st.liquidType[start] === 2 && !remix) return; // 岩浆跳过（remix 放行，cs:80746）
   let num = j;
   while (!st.flags[st.idx(i, num)] && st.liquid[st.idx(i, num)] > 0) {
     num++;
@@ -118,10 +121,13 @@ export function runFragileIcePass(st: TileStore, gs: GenState): void {
   flipGenSolid([226, 162], false);
   const y0 = Math.floor(gs.worldSurface);
   const y1 = st.h - 100;
+  // ★R9-5：调用门 `liquid>0 && (!lava || remix)`（cs:16791）——remix 世界岩浆格
+  //  照样进 MakeWateryIceThing（倒置世界冰原岩浆袋表面铺薄冰）。
+  const remix = !!gs.seedFlags?.remix;
   for (let x = 10; x < st.w - 10; x++) {
     for (let y = y0; y < y1; y++) {
       const i = st.idx(x, y);
-      if (st.liquid[i] > 0 && st.liquidType[i] !== 2) makeWateryIceThing(st, x, y);
+      if (st.liquid[i] > 0 && (st.liquidType[i] !== 2 || remix)) makeWateryIceThing(st, x, y, remix);
     }
   }
 }

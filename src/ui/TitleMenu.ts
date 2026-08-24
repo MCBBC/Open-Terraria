@@ -165,7 +165,7 @@ export class TitleMenu {
         <div class="sw-title-btn" data-act="quit">${Lang.text('LegacyMenu.15')}</div>
       </div>
       <div class="sw-title-version">SandboxWorld v0.1.0</div>
-      <div style="position:fixed;right:30px;bottom:8px;font-size:13px;color:#fff;padding:0 16px;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;z-index:20;">由<b style="font-weight:700;margin:0 5px;text-shadow:1px 0 0 #fff,1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;">GLM-5.3</b>与<b style="font-weight:700;margin:0 5px;text-shadow:1px 0 0 #fff,1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;">OX-Alpha</b>共同协作复刻<br>仅用于AI学习研究禁止用于商业用途，原版请从官方渠道购买</div>
+      <div data-credit style="position:fixed;right:30px;bottom:8px;font-size:13px;color:#fff;padding:0 16px;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;z-index:20;"></div>
     `;
     this.logoDay = this.root.querySelector('.logo-day') as unknown as HTMLImageElement;
     this.logoNight = this.root.querySelector('.logo-night') as unknown as HTMLImageElement;
@@ -195,6 +195,7 @@ export class TitleMenu {
     parent.appendChild(this.root);
     this.startLogoFade();
     this.unsubLang = Lang.onChange(() => this.renderTexts());
+    this.renderTexts(); // 初始填充（署名 div 是空容器，仅靠 onChange 永不落字）
   }
 
   // ---- 日/月抓取（GOING_OLDSCHOOL，Main.cs:62420-62453 1:1）----
@@ -291,7 +292,7 @@ export class TitleMenu {
 
   /** 按钮文案按当前语言重取(M8 语言切换刷新) */
   private renderTexts() {
-    const t = (k: string) => Lang.text(k);
+    const t = (k: string, ...args: (string | number)[]) => Lang.text(k, ...args);
     const set = (act: string, text: string) => {
       const el = this.root.querySelector(`[data-act=${act}]`);
       if (el) el.textContent = text;
@@ -301,6 +302,12 @@ export class TitleMenu {
     set('set', t('LegacyMenu.14'));
     set('buy', t('Mods.SandboxWorld.Menu.BuyTerraria'));
     set('quit', t('LegacyMenu.15'));
+    // 右下署名两行（多语化：{0}/{1} = 加粗名，b 样式含像素字体复制法加粗+左右 margin）
+    const credit = this.root.querySelector('[data-credit]');
+    if (credit) {
+      const bs = 'font-weight:700;margin:0 5px;text-shadow:1px 0 0 #fff,1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000';
+      credit.innerHTML = `${t('Mods.SandboxWorld.Credits.Line1', `<b style="${bs}">GLM-5.3</b>`, `<b style="${bs}">OX-Alpha</b>`)}<br>${t('Mods.SandboxWorld.Credits.Line2')}`;
+    }
   }
 
   /** LogoA/LogoB 昼夜交叉淡化（1456 Main.cs:47773-47799 一比一）：

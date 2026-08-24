@@ -29,7 +29,7 @@ const CSS = `
   font-size: 20px; white-space: nowrap;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
 }
-.sw-vsel-panel { position: relative; flex: 1; min-height: 200px; padding: 5px; }
+.sw-vsel-panel { position: relative; flex: 0 1 auto; min-height: 120px; padding: 5px; }
 .sw-vsel-list {
   height: 100%; max-height: 52vh; overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 5px;
@@ -40,14 +40,21 @@ const CSS = `
 .sw-vsel-list::-webkit-scrollbar-thumb { background: #ffe745; border: 2px solid #2c396a; }
 .sw-vsel-empty { color: #cfd6f4; text-align: center; padding: 48px 0; font-size: 15px;
   text-shadow: 1px 1px 0 #000; }
-.sw-vitem { position: relative; height: 96px; flex-shrink: 0; padding: 6px;
-  display: flex; align-items: center; }
+/* 行高 112:边12+info(顶15+名21+隙3+副16=55→内容底67)+钮区(底6,高24→顶66)
+   ——96 档副行与钮区重叠 13px(实测 _row-rect),原版 96 无文本行不适用 */
+.sw-vitem { position: relative; height: 112px; flex-shrink: 0; padding: 6px; display: block; }
 .sw-vitem.dead { opacity: 0.45; }
 .sw-vitem-doll {
-  width: 66px; height: 66px; flex-shrink: 0; margin-left: 2px;
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  width: 66px; height: 66px;
   image-rendering: pixelated; pointer-events: none;
 }
-.sw-vitem-btns { position: absolute; left: 78px; bottom: 4px; display: flex; gap: 2px;
+.sw-vitem-info { position: absolute; left: 104px; top: 15px; right: 56px; pointer-events: none; }
+.sw-vitem-info .name { font-size: 17px; line-height: 1.25;
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
+.sw-vitem-info .sub { font-size: 12px; color: #cfd6f4; margin-top: 3px;
+  text-shadow: 1px 1px 0 #000; }
+.sw-vitem-btns { position: absolute; left: 104px; bottom: 6px; display: flex; gap: 2px;
   align-items: flex-end; }
 .sw-vitem-btns img, .sw-vitem-del img {
   width: 24px; height: 24px; image-rendering: pixelated; cursor: pointer;
@@ -61,6 +68,9 @@ const CSS = `
   color: #ffe; text-shadow: 1px 1px 0 #000; pointer-events: none; }
 .sw-vsel-footer { display: flex; gap: 10px; margin-top: 14px; }
 .sw-vsel-footer .sw-vbtn { flex: 1; height: 50px; font-size: 17px; }
+/* 无图标行变体(世界列表无缩略图数据):信息/钮区左移对齐 */
+.sw-vitem.noicon .sw-vitem-info { left: 26px; }
+.sw-vitem.noicon .sw-vitem-btns { left: 26px; }
 `;
 
 export function ensureStyle() {
@@ -149,8 +159,20 @@ export class CharSelectPanel {
       bg.addEventListener('load', () => dctx.drawImage(bg, 3, 4));
       // 信息（悬停行时显示名字——原版行内无名字文本，识别靠娃娃；此处仅 title 提示）
       const dc = DIFFICULTY_INFO[a.difficulty]?.color ?? { r: 255, g: 255, b: 255 };
-      el.title = `${a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed')} · ${DIFFICULTY_INFO[a.difficulty]?.label ?? ''}`;
-      el.style.setProperty('--doll-tint', `rgb(${dc.r},${dc.g},${dc.b})`);
+      // 信息块（名字=难度色 + 难度/消亡副行；★用户定策:行内显示名字,偏离原版
+      //  无名字行——原版识别靠娃娃,本仓按用户要求补文本区）
+      const info = document.createElement('div');
+      info.className = 'sw-vitem-info';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'name';
+      nameEl.textContent = a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed');
+      nameEl.style.color = `rgb(${dc.r},${dc.g},${dc.b})`;
+      const subEl = document.createElement('div');
+      subEl.className = 'sub';
+      subEl.textContent = a.hardcoreDead
+        ? Lang.text('Mods.SandboxWorld.CharSelect.HardcoreDead')
+        : DIFFICULTY_INFO[a.difficulty]?.label ?? '';
+      info.append(nameEl, subEl);
       // 操作钮（底缘行：Play/Rename/Copy；Delete 右下——UICharacterListItem.cs:73-121）
       const btns = document.createElement('div');
       btns.className = 'sw-vitem-btns';
@@ -182,7 +204,7 @@ export class CharSelectPanel {
       label.className = 'sw-vitem-label';
       const delLabel = document.createElement('div');
       delLabel.className = 'sw-vitem-del-label';
-      el.append(doll, btns, del, label, delLabel);
+      el.append(doll, info, btns, del, label, delLabel);
       // 整行点击/双击 = 进入（图标钮已 stopPropagation；硬核消亡禁入）
       const enter = () => {
         if (dead) return;

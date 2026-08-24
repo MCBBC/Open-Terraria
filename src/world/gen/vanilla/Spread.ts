@@ -316,19 +316,30 @@ function squareTileFrameGen(st: TileStore, x: number, y: number): void {
  *    是自创近似。
  *  enclosed 判定（cs:75251）只查 active && tileSolid（无 half/slope/solidTop），
  *  与 SolidTile 不同族，勿"顺手统一"。
- *  cs:75223-75244 邪恶草族滩带门 / dirt==0 地表门：本入口调用方（MossPass 苔藓、
- *  GrassWallPass/WorldGen 草皮）dirt 恒非 0、grass 恒非邪恶草族（邪恶草走
- *  MushroomPass.spreadGrassOnce，含该门），零影响故不复制。 */
-export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, grass: number, repeat = true, wsSurface = Number.POSITIVE_INFINITY): void {
+ *  ★R9-2（2026-08-24）：补 cs:75755-75763 生成期邪恶草（199/23）滩带/中央 10% 门——
+ *  原版为 **if / else-if** 结构：grass∈{199,23} 时只走专属门（中央 (0.45w,0.55w]
+ *  tenth 豁免 + 滩带 ±beachDistance=380 禁长），**不再**走 dirt==0 地表门（第二门
+ *  被 else 短路）；其余草才走 dirt==0 地表门。当前调用方（MossPass 苔藓、GrassWall
+ *  草皮、MudCaves 蘑菇/丛林草）无人传 199/23 → 零现症；但 1457 生成期确有 0→199
+ *  （cs:14205）/0→23（cs:14531）转换，日后谁把邪恶草改走本入口即静默丢门（邪恶草
+ *  长进出生点/滩带）。tenth 经可选参透传（本函数无 gs 访问；现调用方恒 false）。 */
+const CRIMSON_GRASS_S = TILE_BY_KEY['v_199_crimson_grass_block'];
+const CORRUPT_GRASS_S = TILE_BY_KEY['v_23_corrupt_grass_block'];
+export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, grass: number, repeat = true, wsSurface = Number.POSITIVE_INFINITY, tenth = false): void {
   // InWorld(i,j,10)（cs:75218）
   if (x < 10 || x >= st.w - 10 || y < 10 || y >= st.h - 10) return;
   const i = st.idx(x, y);
   if (!st.flags[i] || st.type[i] !== dirt) return;   // active && type==dirt（cs:75218）
-  // ★VVVVV（cs:75224-29 生成期早退门）：dirt==0（原版泥 id——本仓 T.DIRT）时
-  //   j ≥ worldSurface 拒转（growGrassUnderground 生成期恒 false；s22222 #79 残
-  //   10 格=GrassWall 段② ws=325 域内 j≥325 泥块 vanilla 拒转、本仓缺门误转）。
-  //   dirt≠泥调用方（MossPass 石族）零影响。
-  if (dirt === T.DIRT && y >= wsSurface) return;
+  // ★R9-2：邪恶草专属门（cs:75756-75763）——if / else-if 与原版同构，勿合并
+  if (grass === CRIMSON_GRASS_S || grass === CORRUPT_GRASS_S) {
+    if ((!tenth && x > st.w * 0.45 && x <= st.w * 0.55) || x < 380 || x >= st.w - 380) return;
+  } else if (dirt === T.DIRT && y >= wsSurface) {
+    // ★VVVVV（cs:75764-75768 生成期早退门）：dirt==0（原版泥 id——本仓 T.DIRT）时
+    //   j ≥ worldSurface 拒转（growGrassUnderground 生成期恒 false；s22222 #79 残
+    //   10 格=GrassWall 段② ws=325 域内 j≥325 泥块 vanilla 拒转、本仓缺门误转）。
+    //   dirt≠泥调用方（MossPass 石族）零影响。
+    return;
+  }
   // 3×3 窗口 clamp 到世界界（cs:75240-75247）
   const x0 = Math.max(0, x - 1), x1 = Math.min(st.w, x + 2);
   const y0 = Math.max(0, y - 1), y1 = Math.min(st.h, y + 2);

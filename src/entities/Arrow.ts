@@ -968,6 +968,32 @@ export class Arrow extends Entity {
         return (255 - this.alpha) / 255;
       case 514: return (255 - this.alpha) / 255;   // 钉 aiStyle 93 渐显（:33427-33434）
       case 246: case 311: return (255 - this.alpha) / 255;   // 刺炮弹/糖果玉米渐显
+      // ---- Xenopopper 子弹族（GetAlpha :81040-81100 区段）——白化档走 drawXenoFilter ----
+      case 445: return (128 / 255) * (1 - this.alpha / 255);   // (255,255,255,128)×(1-α/255)
+      case 446: return 1 - this.alpha / 255;                   // Lerp(白,0.8)×(1-α/255)
+      case 447: return 200 / 255;                              // (255,255,255,200) 恒
+      case 450: return (255 - this.alpha) / 255;               // (200,200,200,255-α)
+      case 451: case 684: return (255 - this.alpha) / 255;     // 白×((255-α)/255)
+      case 452: case 454: return 1 - this.alpha / 255;         // 白×(1-α/255)
+      case 440: case 449: case 606: return (255 - this.alpha) / 255;  // r=g=b=255-α 纯白剪影
+      default: return null;
+    }
+  }
+
+  /** Xenopopper 子弹族加算发光（原版 GlowMask 214 族 + 泡泡残余光观感——
+   *  442/445-447/449-451 等破裂弹在原版带青紫光晕，缺层=弹体暗淡偏色） */
+  private static readonly XENO_GLOW = new Set([435, 436, 437, 439, 440, 442, 445, 446, 447, 449, 450, 451, 452, 454]);
+
+  /** Xenopopper 子弹族白化滤镜（GetAlpha Lerp(白,k) 的 Canvas 近似——
+   *  446 向白混 0.8 / 447-454 全白化 / 440/449/606 纯白剪影。
+   *  brightness 提亮 + saturate 去色近似 Lerp 白；返回 null = 无调制） */
+  private drawXenoFilter(): string | null {
+    switch (this.projId) {
+      case 446: return 'brightness(1.8) saturate(0.35)';
+      case 447: case 451: case 684: case 452: case 454: return 'brightness(1.6) saturate(0.3)';
+      case 445: return 'brightness(1.5) saturate(0.4)';
+      case 450: return 'brightness(1.25) saturate(0.5)';
+      case 440: case 449: case 606: return 'brightness(2.2) saturate(0)';   // 纯白剪影
       default: return null;
     }
   }
@@ -1080,6 +1106,8 @@ export class Arrow extends Entity {
     // 专属档在下方各自覆写，id 集不相交）
     const ga = this.drawGlobalAlpha();
     if (ga !== null) ctx.globalAlpha = Math.max(0, Math.min(1, ga));
+    const xenoFilter = this.drawXenoFilter();
+    if (xenoFilter) ctx.filter = xenoFilter;
     // 329 焰镰（aiStyle 56）：rotation 恒自旋（不对齐速度）；spriteDirection<0 水平镜像
     if (this.scytheRot !== null) {
       ctx.rotate(this.spinRot);
@@ -1150,6 +1178,7 @@ export class Arrow extends Entity {
     }
     if (drawImg && (drawImg as HTMLImageElement).complete !== false
       && (drawImg.width > 0 || (drawImg as HTMLImageElement).width > 0)) {
+      const isXeno = Arrow.XENO_GLOW.has(this.projId);
       // 原生尺寸 × SetDefaults scale（与判定盒 w/h 解耦）：子弹 14 = 2×20×1.2
       // 曳光条；箭 1 = 14×32 贴图 × 1。曾统一拉成 w×w 宽 → 100px 巨型子弹/箭偏小
       // 454 随 alpha 伸展（:30244-30245 scale = 1−alpha/255）
@@ -1157,6 +1186,14 @@ export class Arrow extends Entity {
       const iw = drawImg.width || (drawImg as HTMLImageElement).width;
       const ih = drawImg.height || (drawImg as HTMLImageElement).height;
       ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
+      if (isXeno) {
+        // 加算发光叠画（同矩形 lighter α0.45）——原版 GlowMask 214 族观感
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha *= 0.45;
+        ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = Math.max(0, Math.min(1, ga ?? 1));
+      }
     } else {
       // 贴图未就绪：短线兜底
       ctx.strokeStyle = this.projId === 2 ? '#FFB060' : '#D8C8A0';

@@ -288,13 +288,23 @@ function solidTileAt(st: TileStore, x: number, y: number): boolean {
 
 export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const g0 = globalThis as { __swGcCap?: (site: number, sx: number, sy: number, tries: number, x: number, y: number, air: number, lava: number, ice: number, rock: number) => void };
-  // 裸 double 比较（cs:17534：`for i < w*0.003`）——不取整，12.6 也进 13 次
-  const num = st.w * 0.003;
+  // 裸 double 比较（cs:17534：`for i < w*0.003`）——不取整，12.6 也进 13 次。
+  // ★R13-10（2026-08-24）：tenth ×1.5（cs:17551-17554）；starGame 倍率
+  //  `×starGameMath(0.2)`=1.0+min(1,hit/200)×0.2（Main.cs:63791）是玩家点星交互量、
+  //  生成期零击=1.0，非种子确定量不建模（zenith 域）。曾缺 tenth 档 → 十周年宝石洞少 1/3。
+  const num = st.w * 0.003 * (gs.seedFlags?.tenthAnniversary ? 1.5 : 1);
   // nextCount（WorldGen.cs:9506-9581）：洪泛连通空气腔；wall!=0 即封顶；lavaOk=false
   // 时岩浆格 lavaCount++ 且立即封顶（含空气格岩浆）；ice 只认 147/161
   // ★零风险优化(2026-08-13):原 Set<number>+元组数组 → 平坦 Int32Array 栈 +
-  // Uint8Array seen(visited 列表局部清除)。push 四邻顺序与 pop 语义逐点保持
-  // (DFS 下邻优先),掷骰/判定序列不变。
+  // Uint8Array seen(visited 列表局部清除)。★R13-11 备案（2026-08-24）：本实现
+  // 对**全部**访格（含实心）去重——实心格只计一次；原版 nextCount 的 CountedTiles.Add
+  // 只在 !SolidTile 支内（cs:9581），实心格被 k 个空气邻格推入时重复访问、rock/ice
+  // 计数器重复累加 k 次；且本栈式 DFS 出序 (y+1)(y-1)(x+1)(x-1) 与原版递归序
+  // (x-1)(x+1)(y-1)(y+1) 相反（头注旧称"逐点保持"不准确）。不改的理由：本消费点
+  // 只读 air∈[50,300)/lava==0/ice==0/rock>0 四个零阶谓词——air 计数两语义恒同
+  // （空气格两边都去重），lava 格即返，rock/ice 只辨零/非零——accept/reject 逐点
+  // 不变。若未来新消费点依赖 rock/ice 的**计数值**，须改回原版"实心可重复计数"
+  // 语义（CaveWallsPass 同原语即原版语义，勿互搬）。
   const seenArr = new Uint8Array(st.w * st.h);
   const visited: number[] = [];
   const stackX = new Int32Array(4096);
@@ -357,11 +367,16 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   };
   for (let i = 0; i < num; i++) {
     // 选点（:17547-17565）：x∈[200,w-200)、y∈[rockLevel+30, h-230)、
-    // countTiles∈[50,300) 且 lavaCount==0 && iceCount==0 && rockCount>0（1000 次上限）
+    // countTiles∈[50,300) 且 lavaCount==0 && iceCount==0 && rockCount>0（1000 次上限）。
+    // ★R13-10：remix 世界 y 带 = [worldSurface+30, rockLevel-30)（cs:17564-17578，
+    //  初选与重试同式——本循环单点选位天然覆盖两处）
+    const remixY = !!gs.seedFlags?.remix;
     let sx = -1, sy = -1;
     for (let tries = 0; tries < 1000; tries++) {
       const x = rng.nextIntRange(200, st.w - 200);
-      const y = rng.nextIntRange(gs.rockLevel + 30, st.h - 230);
+      const y = remixY
+        ? rng.nextIntRange(gs.worldSurface + 30, gs.rockLevel - 30)
+        : rng.nextIntRange(gs.rockLevel + 30, st.h - 230);
       const c = countTiles(x, y);
       g0.__swGcCap?.(i, x, y, tries, x, y, c.air, c.lava, c.ice, c.rock);
       if (c.air >= 50 && c.air < 300 && c.lava === 0 && c.ice === 0 && c.rock > 0) { sx = x; sy = y; break; }

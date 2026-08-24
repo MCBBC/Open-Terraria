@@ -21,6 +21,7 @@ import type { GenState } from './GenState';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid } from './GenSolid';
+import { genRangeFrame } from './FinalCleanupPass';
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0（空格）安全退化 */
 const SHEET_TO_INTERNAL = new Map<number, number>();
@@ -139,6 +140,13 @@ export function growUndergroundTree(st: TileStore, rng: RNG, gs: GenState, i: nu
   // 树冠标记帧（cs:31414-31451）：Next(8)!=0 → fx=22（GrowTree 是 Next(13)，勿搬）
   const crownFx = rng.int(0, 7) !== 0 ? 22 : 0;
   st.setTileSilent(i, y - num2, TREE, crownFx, 198 + rng.int(0, 2) * 22);
+  // ★R13-1（2026-08-24）：尾段 RangeFrame(i-2, y-num2-1, i+2, y+1)（GrowUndergroundTree
+  //  唯一出口 cs:31576；GrowTree cs:30529/GrowEpicTree cs:27929/GrowPalmTree cs:27471/
+  //  GrowTreeWithSettings cs:30999 同款尾扫——六个树种植原语最后一个补齐件）。
+  //  RangeFrame→TileFrame 对盒内每格：①死格(!active)清 half/slope/块漆（cs:82078-82082）；
+  //  ②盒内 184 苔芽每访恒掷 Next(3)（MossAndMossCaves cs:17588 在本 pass cs:17967 之前
+  //  运行，苔芽真实存在）→ 掷流位级对拍依赖此扫；③盒内 596/616/583-589 苗重帧。
+  genRangeFrame(st, rng, i - 2, y - num2 - 1, i + 2, y + 1);
   // 砍伐整棵判定登记（TreePass 同形：y=树顶,h=干高,t.y+t.h=基座行）
   gs.genTrees.push({ x: i, y: y - num2, h: num2 });
 }

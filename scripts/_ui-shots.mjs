@@ -48,15 +48,20 @@ await wait(1500);
 console.log('[2] visible:', JSON.stringify(await visibleTexts()));
 await shot('charcreate');
 
-// [3] 创建角色(默认外观) → 回角色选择 → 点行进入 → 世界选择
-console.log('[3] click 创建:', await page.evaluate(() => {
+// 再建一个角色(两行更真实)
+await wait(600);
+await page.evaluate(() => {
+  const b = [...document.querySelectorAll('.sw-vsel-footer .sw-vbtn')].find((x) => !x.textContent.includes('返回'));
+  b?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); b?.click();
+});
+await wait(1200);
+await page.evaluate(() => {
   const b = document.querySelector('.sw-char-panel [data-act=create]');
-  if (!b) return false;
-  b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  b.click();
-  return true;
-}));
-await wait(1800);
+  b?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); b?.click();
+});
+await wait(1500);
+await shot('charselect');
+// [3] 点第一个角色行 → 世界选择
 await page.evaluate(() => {
   const row = document.querySelector('.sw-vsel-list .sw-vitem');
   row?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -64,36 +69,45 @@ await page.evaluate(() => {
 });
 await wait(1500);
 console.log('[3] visible:', JSON.stringify(await visibleTexts()));
-await shot('worldselect');
-// [4] 世界选择 footer 新建 → 世界创建页(精确选 footer,避开 legacy shim 同文案钮)
-console.log('[4] click 新建:', await page.evaluate(() => {
+await shot('worldselect-empty');
+// [3b] 创建世界(小档最快) → 等生成完成进游戏
+console.log('[3b] click 创建世界:', await page.evaluate(() => {
   const b = [...document.querySelectorAll('.sw-vsel-footer .sw-vbtn')].find((x) => !x.textContent.includes('返回'));
   if (!b) return false;
-  b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  b.click();
+  b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); b.click();
   return b.textContent.trim();
 }));
 await wait(1500);
-console.log('[4] visible:', JSON.stringify(await visibleTexts()));
-await shot('worldcreate');
-// [5] 创建世界 → 生成期预览(等微光 pass 后截图)
-console.log('[5] click 创建:', await page.evaluate(() => {
+await page.evaluate(() => {
   const b = document.querySelector('.sw-wc-footer [data-act=create]');
-  if (!b) return false;
-  b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  b.click();
-  return true;
-}));
-await wait(1200);
-const genState = await page.evaluate(() => {
-  const cvs = [...document.querySelectorAll('canvas')].filter((c) => c.width > 200 && c.height > 40 && c.height < c.width);
-  return { canvases: cvs.length, texts: [...document.querySelectorAll('*')].filter((e) => e.children.length === 0 && /生成|微光|%./.test(e.textContent)).map((e) => e.textContent.trim().slice(0, 20)).slice(0, 6) };
+  b?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); b?.click();
 });
-console.log('[5] gen:', JSON.stringify(genState));
-await wait(15000);
-await shot('genpreview');
-const genState2 = await page.evaluate(() =>
-  [...document.querySelectorAll('*')].filter((e) => e.children.length === 0 && /生成|微光/.test(e.textContent || '')).map((e) => e.textContent.trim().slice(0, 20)).slice(0, 6));
-console.log('[5] gen-late:', JSON.stringify(genState2));
+// 小世界生成 ~40-70s,轮询进游戏
+let inGame = false;
+for (let i = 0; i < 90 && !inGame; i++) {
+  inGame = await page.evaluate(() => !!(window.__swGame && window.__swGame.renderer && window.__swGame.world?.store)).catch(() => false);
+  if (!inGame) await new Promise((r) => setTimeout(r, 1000));
+}
+console.log('[3b] inGame:', inGame);
+// Esc → 退出到标题(找游戏内菜单按钮)
+await page.keyboard.press('Escape');
+await wait(1200);
+console.log('[3b] esc visible:', JSON.stringify(await visibleTexts()));
+await shot('ingamemenu');
+
+// [4] 回到主菜单 → 标题 → 单人 → 点角色行 → 世界选择(此时有已生成世界)
+console.log('[4] click 回到主菜单:', await clickVisible('回到主菜单'));
+await wait(2500);
+console.log('[5] click 单人模式:', await clickVisible('单人模式'));
+await wait(1500);
+await shot('charselect');
+await page.evaluate(() => {
+  const row = document.querySelector('.sw-vsel-list .sw-vitem');
+  row?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  row?.click();
+});
+await wait(1500);
+console.log('[5] visible:', JSON.stringify(await visibleTexts()));
+await shot('worldselect');
 if (errors.length) console.log('ERRORS:', errors.slice(0, 5).join('\n'));
 await browser.close();

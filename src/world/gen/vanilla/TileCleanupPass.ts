@@ -290,7 +290,13 @@ export function runTileCleanupPass(
             st.flags[ni2] = 0;   // 原版 active(false)——type 残留（八通道不可见）
           }
         }
-      } else if (st.flags[i] && st.type[i] === sheetId(162) && st.liquid[st.idx(k, l + 1)] === 0 && canKillTile(st, k, l)) {
+      } else if (st.flags[i] && st.type[i] === sheetId(162)
+        // ★R12-19（2026-08-24）：补双邻门（cs:21851-21857 `!tile3.active() &&
+        //  !tile4.active() && tile4.liquid == 0`，tile3=(k,l-1)/tile4=(k,l+1)）——
+        //  原版只杀"上下格都空且下方无液"的**孤立悬空**薄冰;曾缺双邻腿 → 贴冰岸/
+        //  叠层薄冰被误失活,finalize 幽灵净化后成可见冰面破洞（162 生成量 ~10³ 格）。
+        && !st.flags[st.idx(k, l - 1)] && !st.flags[st.idx(k, l + 1)]
+        && st.liquid[st.idx(k, l + 1)] === 0 && canKillTile(st, k, l)) {
         st.flags[i] = 0;
       }
       // ⑦ 31/12/639/箱 21·467/28/26 帧规范化重建段（cs:21484-21741，UUUU 批落地：

@@ -85,6 +85,24 @@ export interface WldWorld {
   /** 彩蛋种子旗标九位（WorldFile.cs:1242-1250 写/:1988-2014 读，版本门逐位；
    *  仅真值落键——普通世界为 {} 空对象。S0-3：导入原版特殊种子档即激活特性） */
   seedFlags: SeedFlags;
+  /** ★R16-1（2026-08-24）：LoadWorldFlags 全量旗标（WF57:2088-2517 ~40 位）——
+   *  downed_<vid> 双键族按本仓 Game.ts 现行键约定回填（downed_4/13/266/35/50/222/
+   *  134/125/127/262/245/439/398/668 + downedEyeOfCthulhu/downedSkeletron 等命名键）、
+   *  saved*\/downedGoblins/downedFrost/downedPirates/downedMartians、四塔
+   *  downedTower*\/towerActive*+lunarApocalypseUp、DD2 dd2DownedT1-T3/Any、
+   *  史莱姆/城镇 NPC 解锁族 unlocked*Spawn、forceHalloween*\/XMas*（含 Forever）、
+   *  combatBook/2、shadowOrbSmashed、spawnMeteor、vampireSeed/infectedSeed、
+   *  teamBasedSpawnsSeed。曾读位即弃 → 导入肉后世界=肉前玩法。 */
+  flags: Record<string, boolean>;
+  /** ★R16-2：signs 段（pointers[3]，WF57:2841-2885 LoadSigns：i16 数量 ×
+   *  {string text, i32 x, i32 y}）——坐标=2×2 牌左上锚（Sign.ReadSign :24-31 同款
+   *  frameX/18 反解）。曾整段跳过 → 导入图牌全灭（连同 tile 55 被 null 清空）。 */
+  signs: Array<{ text: string; x: number; y: number }>;
+  /** ★R16-5：背景样式 13 档全量（setBG 0-12；caveBackStyle[4]/ice/jungle/hell 之外
+   *  补 8=蘑菇(v>194)/9=地狱(v>=215)/10-12(v>195)——曾读位即弃 → seed 派生重掷） */
+  bgMushroom: number;
+  bgUnderworld: number;
+  bg10: number; bg11: number; bg12: number;
 }
 
 export class WldParseError extends Error {}
@@ -100,7 +118,9 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (version > 325) {
     throw new WldParseError(`不支持的世界文件版本 ${version}（本复刻最高支持 325 / 1.4.5）。`);
   }
-  if (version >= 140) {
+  // ★R16-7③（2026-08-24）：FileMetadata 门 = 135（WF57:1913），非 140——
+  //  v135-139 旧档（1.3 中段）头魔数段存在,曾跳读 → 后续全乱
+  if (version >= 135) {
     // header magic（中文版为不同常量，这里宽放校验）
     const magic = new TextDecoder().decode(r.bytes(7));
     const fileType = r.byte();
@@ -153,6 +173,8 @@ export function parseWld(buf: Uint8Array): WldWorld {
   //   v241 notTheBees / v249 remix / v266 noTraps / v267 zenith(everything) / v302 skyblock
   // S0-3：曾读位即弃——导入原版特殊种子档丢全部特性，现回填 seedFlags
   const seedFlags: SeedFlags = {};
+  // ★R16-1：LoadWorldFlags 全量旗标捕获（键=本仓 Game.ts 现行约定）
+  const flags: Record<string, boolean> = {};
   if (version >= 209) {
     gameMode = r.i32();
     if (version >= 222 && r.boolean()) seedFlags.drunkWorld = true;
@@ -164,8 +186,12 @@ export function parseWld(buf: Uint8Array): WldWorld {
     if (version >= 266 && r.boolean()) seedFlags.noTraps = true;
     if (version >= 267 && r.boolean()) seedFlags.everything = true;
     if (version >= 302 && r.boolean()) seedFlags.skyblock = true;
-  } else if (version === 208 || version >= 112) {
+  } else if (version >= 112) {
+    // ★R16-7④：v112-207 gameMode 位读 bool；v208 额外多 1 个 bool
+    //  （WF57:2036-2047——208 特判双 bool,真值=大师档 gameMode=2,曾只读 1 个
+    //  且丢真值 → v208 档头错位+难度丢）
     r.boolean();
+    if (version === 208 && r.boolean()) gameMode = 2;
   }
   if (version >= 141) r.i64(); // creationTime
   if (version >= 284) r.i64(); // lastPlayed
@@ -189,14 +215,34 @@ export function parseWld(buf: Uint8Array): WldWorld {
   const eclipse = r.boolean(); // eclipse
   const dungeonX = r.i32(), dungeonY = r.i32(); // 地牢入口坐标（dungeonX/Y）
   const isCrimson = r.boolean();
-  for (let i = 0; i < 10; i++) r.boolean(); // downed bosses
-  if (version >= 118) r.boolean(); // slime king
-  for (let i = 0; i < 7; i++) r.boolean(); // saved goblin etc
-  r.boolean(); r.boolean(); // orb smashed / spawn meteor
+  // ★R16-1：downedBoss 族十连（WF57:2088-2097）——按本仓 downed_<vid> 双键约定回填
+  //  （EmoteMenu/SkyRenderer/NpcDrops 消费口径:downed_4‖downedEyeOfCthulhu 等）
+  if (r.boolean()) { flags.downed_4 = true; flags.downedEyeOfCthulhu = true; }             // downedBoss1 EoC
+  if (r.boolean()) { flags.downed_13 = true; flags.downed_266 = true; }                    // downedBoss2 EoW|BoC（单旗双键,消费端 OR 口径）
+  if (r.boolean()) { flags.downed_35 = true; flags.downedSkeletron = true; }               // downedBoss3 骷髅王
+  if (r.boolean()) flags.downed_222 = true;                                                // downedQueenBee
+  if (r.boolean()) flags.downed_134 = true;                                                // downedMechBoss1 毁灭者
+  if (r.boolean()) flags.downed_125 = true;                                                // downedMechBoss2 双子魔眼
+  if (r.boolean()) flags.downed_127 = true;                                                // downedMechBoss3 铁骷髅王
+  if (r.boolean()) flags.downedMechBossAny = true;                                         // downedMechBossAny
+  if (r.boolean()) flags.downed_262 = true;                                                // downedPlantBoss 世纪之花
+  if (r.boolean()) flags.downed_245 = true;                                                // downedGolemBoss 石巨人
+  if (version >= 118 && r.boolean()) flags.downed_50 = true;                               // downedSlimeKing 史莱姆王
+  // saved 城镇 NPC 七连 + downed 入侵四连（WF57:2102-2108）
+  if (r.boolean()) flags.savedGoblin = true;
+  if (r.boolean()) flags.savedWizard = true;
+  if (r.boolean()) flags.savedMech = true;
+  if (r.boolean()) flags.downedGoblins = true;
+  if (r.boolean()) flags.downedClown = true;
+  if (r.boolean()) flags.downedFrost = true;
+  if (r.boolean()) flags.downedPirates = true;
+  if (r.boolean()) flags.shadowOrbSmashed = true;                                          // shadowOrbSmashed
+  if (r.boolean()) flags.spawnMeteor = true;                                               // spawnMeteor
   const shadowOrbCount = r.u8(); // WF:1302 shadowOrbCount(byte)
   const altarCount = r.i32(); // WF:1303 altarCount(int32)
   const hardMode = r.boolean();
-  if (version >= 257) r.boolean(); // party of doom
+  if (hardMode) flags.hardMode = true;
+  if (version >= 257 && r.boolean()) flags.afterPartyOfDoom = true;                        // party of doom
   r.i32(); r.i32(); r.i32(); r.f64(); // invasion
   const slimeRainTime = version >= 118 ? r.f64() : 0; // slime rain（Main.slimeRainTime：>0 进行中 <0 冷却）
   if (version >= 113) sundialCooldown = r.u8(); // WF:2120 Main.sundialCooldown
@@ -210,11 +256,12 @@ export function parseWld(buf: Uint8Array): WldWorld {
     const n = r.i32();
     for (let i = 0; i < n; i++) r.string();
   }
-  r.boolean(); // savedAngler
+  if (r.boolean()) flags.savedAngler = true;
   r.i32(); // anglerQuest
-  r.boolean(); // savedStylist
-  if (version >= 140) r.boolean(); // tax collector
-  if (version >= 201) r.boolean(); // golfer
+  if (r.boolean()) flags.savedStylist = true;
+  // ★R16-7①：tax collector 门 = 129（WF57:2179），非 140
+  if (version >= 129 && r.boolean()) flags.savedTaxCollector = true;
+  if (version >= 201 && r.boolean()) flags.savedGolfer = true;
   if (version >= 107) r.i32(); // invasionSizeStart
   const cultistDelay = version >= 108 ? r.i32() : 86400; // WF:2185-2192（缺省=delayStart，同 CultistRitual.cs:7）
 
@@ -227,50 +274,112 @@ export function parseWld(buf: Uint8Array): WldWorld {
       for (let i = 0; i < m; i++) r.u16();
     }
   }
-  if (version >= 140) fastForwardTimeToDawn = r.boolean(); // WF:2203
-  r.boolean(); // fishron
-  if (version >= 140) { r.boolean(); r.boolean(); r.boolean(); } // martians/cultist/moonlord
-  for (let i = 0; i < 5; i++) r.boolean(); // holiday bosses
-  for (let i = 0; i < 4; i++) r.boolean(); // celestial downed
-  for (let i = 0; i < 4; i++) r.boolean(); // celestial active
-  r.boolean(); // apocalypse
+  // ★R16-7②：fastForwardTimeToDawn 门 = 128（WF57:2211-2215 `version < 128 return`），非 140
+  if (version >= 128) fastForwardTimeToDawn = r.boolean(); // WF:2203
+  if (r.boolean()) flags.downedFishron = true;                                             // 猪龙鱼公爵
+  if (version >= 131) {                                                                    // martians/cultist/moonlord
+    if (r.boolean()) flags.downedMartians = true;
+    if (r.boolean()) flags.downed_439 = true;                                              // downedAncientCultist 拜月教邪教徒
+    if (r.boolean()) flags.downed_398 = true;                                              // downedMoonlord 月总
+  } else { r.boolean(); r.boolean(); r.boolean(); }
+  // 五节日 Boss（WF57:2224-2228）
+  if (r.boolean()) flags.downedHalloweenKing = true;
+  if (r.boolean()) flags.downedHalloweenTree = true;
+  if (r.boolean()) flags.downedChristmasIceQueen = true;
+  if (r.boolean()) flags.downedChristmasSantank = true;
+  if (r.boolean()) flags.downedChristmasTree = true;
+  // 四塔 downed（v140 门,WF57:2233-2236）+ 四塔 active（:2237-2240）+ 天界入侵
+  if (version >= 140) {
+    if (r.boolean()) flags.downedTowerSolar = true;
+    if (r.boolean()) flags.downedTowerVortex = true;
+    if (r.boolean()) flags.downedTowerNebula = true;
+    if (r.boolean()) flags.downedTowerStardust = true;
+    if (r.boolean()) flags.towerActiveSolar = true;
+    if (r.boolean()) flags.towerActiveVortex = true;
+    if (r.boolean()) flags.towerActiveNebula = true;
+    if (r.boolean()) flags.towerActiveStardust = true;
+  } else { for (let i = 0; i < 8; i++) r.boolean(); }
+  if (r.boolean()) flags.lunarApocalypseUp = true;                                         // apocalypse
   if (version >= 170) {
     r.boolean(); r.boolean(); r.i32();
     const n = r.i32();
     for (let i = 0; i < n; i++) r.i32();
   }
   if (version >= 174) { r.boolean(); r.i32(); r.f32(); r.f32(); }
-  if (version >= 178) { r.boolean(); r.boolean(); r.boolean(); r.boolean(); }
-  if (version > 194) r.u8(); // mushroom bg
-  if (version >= 215) r.u8(); // underworld bg
-  if (version >= 195) { r.u8(); r.u8(); r.u8(); }
-  if (version >= 204) r.boolean(); // combat book
-  if (version >= 207) { r.i32(); r.boolean(); r.boolean(); r.boolean(); }
+  // ★R16-1：DD2 四 bool（v178,WF57:2266-2269 + DD2Event.cs:166-169 Load）
+  if (version >= 178) {
+    if (r.boolean()) flags.dd2DownedT1 = true;
+    if (r.boolean()) flags.dd2DownedT2 = true;
+    if (r.boolean()) flags.dd2DownedT3 = true;
+    if (r.boolean()) flags.dd2DownedAny = true;
+  }
+  // ★R16-5：背景样式 8/9/10-12（WF57:2294-2312 setBG(8..12)——曾读位即弃）
+  const bgMushroom = version > 194 ? r.u8() : 0;
+  const bgUnderworld = version >= 215 ? r.u8() : 0;
+  // ★R16-7⑤：bg10-12 门 = `version > 195`（WF57:2309 严格大于）,非 >= 195
+  let bg10 = 0, bg11 = 0, bg12 = 0;
+  if (version > 195) { bg10 = r.u8(); bg11 = r.u8(); bg12 = r.u8(); }
+  if (version >= 204 && r.boolean()) flags.combatBook = true;                              // combat book
+  if (version >= 207) { r.i32(); r.boolean(); r.boolean(); r.boolean(); }                  // 灯笼夜四件套（运行时态,不落 flags）
   if (version >= 211) {
     // TreeTops 变体表（WorldGen.TreeTops.Load：13 个区域树样式，v≥211 世界用这个）
     const n = r.i32();
     treeTops = [];
     for (let i = 0; i < n; i++) treeTops.push(r.i32());
   }
-  if (version >= 212) { r.boolean(); r.boolean(); }
-  if (version >= 216) { r.i32(); r.i32(); r.i32(); r.i32(); }
-  if (version >= 217) { r.boolean(); r.boolean(); r.boolean(); }
-  if (version >= 223) { r.boolean(); r.boolean(); }
-  if (version >= 240) r.boolean();
-  if (version >= 250) r.boolean();
-  if (version >= 251) { for (let i = 0; i < 8; i++) r.boolean(); }
-  if (version >= 259) r.boolean();
-  if (version >= 260) r.boolean();
-  if (version >= 261) { for (let i = 0; i < 7; i++) r.boolean(); }
+  // ★R16-1：forceHalloween/XMas ForToday（v212,WF57:2341-2342）
+  if (version >= 212) {
+    if (r.boolean()) flags.forceHalloweenForToday = true;
+    if (r.boolean()) flags.forceXMasForToday = true;
+  } else { r.boolean(); r.boolean(); }
+  if (version >= 216) { r.i32(); r.i32(); r.i32(); r.i32(); }                              // SavedOreTiers 铜/铁/银/金（肉前档,另表）
+  // ★R16-1：宠物购买三连（v217）+ EoL/史莱姆女皇（v223）+ 鹿角怪（v240）
+  if (version >= 217) {
+    if (r.boolean()) flags.boughtCat = true;
+    if (r.boolean()) flags.boughtDog = true;
+    if (r.boolean()) flags.boughtBunny = true;
+  } else { r.boolean(); r.boolean(); r.boolean(); }
+  if (version >= 223) {
+    if (r.boolean()) flags.downed_636 = true;                                              // downedEmpressOfLight 光之女皇
+    if (r.boolean()) flags.downed_657 = true;                                              // downedQueenSlime 史莱姆女皇
+  } else { r.boolean(); r.boolean(); }
+  if (version >= 240) { if (r.boolean()) flags.downed_668 = true; } else r.boolean();      // downedDeerclops 鹿角怪
+  // ★R16-1：史莱姆/城镇 NPC 解锁族（v250/251/261——ItemDrop.ts:93 等直接消费）
+  if (version >= 250) { if (r.boolean()) flags.unlockedSlimeBlueSpawn = true; } else r.boolean();
+  if (version >= 251) {
+    if (r.boolean()) flags.unlockedMerchantSpawn = true;
+    if (r.boolean()) flags.unlockedDemolitionistSpawn = true;
+    if (r.boolean()) flags.unlockedPartyGirlSpawn = true;
+    if (r.boolean()) flags.unlockedDyeTraderSpawn = true;
+    if (r.boolean()) flags.unlockedTruffleSpawn = true;
+    if (r.boolean()) flags.unlockedArmsDealerSpawn = true;
+    if (r.boolean()) flags.unlockedNurseSpawn = true;
+    if (r.boolean()) flags.unlockedPrincessSpawn = true;
+  } else { for (let i = 0; i < 8; i++) r.boolean(); }
+  if (version >= 259) { if (r.boolean()) flags.combatBook2 = true; } else r.boolean();     // combatBookVolumeTwo
+  if (version >= 260) { if (r.boolean()) flags.peddler = true; } else r.boolean();         // peddlersSatchel
+  if (version >= 261) {
+    if (r.boolean()) flags.unlockedSlimeGreenSpawn = true;
+    if (r.boolean()) flags.unlockedSlimeOldSpawn = true;
+    if (r.boolean()) flags.unlockedSlimePurpleSpawn = true;
+    if (r.boolean()) flags.unlockedSlimeRainbowSpawn = true;
+    if (r.boolean()) flags.unlockedSlimeRedSpawn = true;
+    if (r.boolean()) flags.unlockedSlimeYellowSpawn = true;
+    if (r.boolean()) flags.unlockedSlimeCopperSpawn = true;
+  } else { for (let i = 0; i < 7; i++) r.boolean(); }
   if (version >= 264) { fastForwardTimeToDusk = r.boolean(); moondialCooldown = r.u8(); } // WF:2449-2450
-  if (version >= 287) { r.boolean(); r.boolean(); }
-  if (version >= 288) r.boolean();
-  if (version >= 296) r.boolean();
+  // ★R16-1：forceHalloween/XMas Forever（v287,WF57:2471-2472）+ 吸血鬼/感染（v288/296）
+  if (version >= 287) {
+    if (r.boolean()) flags.forceHalloweenForever = true;
+    if (r.boolean()) flags.forceXMasForever = true;
+  } else { r.boolean(); r.boolean(); }
+  if (version >= 288) { if (r.boolean()) flags.vampire = true; } else r.boolean();         // vampireSeed
+  if (version >= 296) { if (r.boolean()) flags.infected = true; } else r.boolean();        // infectedSeed
   if (version >= 291) { r.i32(); r.i32(); }
   if (version >= 297) {
-    r.boolean();
+    if (r.boolean()) flags.teamBasedSpawnsSeed = true;                                     // WF57:2507
     const n = r.u8();
-    for (let i = 0; i < n; i++) { r.i16(); r.i16(); }
+    for (let i = 0; i < n; i++) { r.i16(); r.i16(); }                                      // ExtraSpawnPointManager
   }
   if (version >= 304 && r.boolean()) seedFlags.dualDungeons = true; // WF57:1432 写/:2515 读
   // v323 起尾接 moreLightning/noLightning 两布尔（WF57:1433-1434 写/:2516-2517 读）——
@@ -305,11 +414,30 @@ export function parseWld(buf: Uint8Array): WldWorld {
           const id = r.i32();
           r.u8(); // prefix
           items.push({ id, stack });
+        } else if (stack < 0) {
+          // ★R16-8（WF57:2776-2781）：负 stack 分支仍消费 type+prefix 两段
+          //  （vanilla 写侧恒钳 stack>=1 不产生;TEdit/第三方工具可能写出——
+          //  曾不消费 → 本箱之后所有箱子错位解析）。netDefaults+Prefix,stack=1。
+          const id = r.i32();
+          r.u8(); // prefix
+          items.push({ id, stack: 1 });
         } else {
           items.push(null);
         }
       }
       chests.push({ x, y, name, items });
+    }
+  }
+
+  // ---- signs（★R16-2：pointers[3] LoadSigns WF57:2841-2885——曾直 seek pointers[4]）----
+  r.seek(pointers[3]);
+  const signs: Array<{ text: string; x: number; y: number }> = [];
+  {
+    const n = r.i16();
+    for (let i = 0; i < n; i++) {
+      const text = r.string();
+      const x = r.i32(), y = r.i32();
+      signs.push({ text, x, y });
     }
   }
 
@@ -345,7 +473,8 @@ export function parseWld(buf: Uint8Array): WldWorld {
     shadowOrbCount, altarCount, savedOreTiers,
     sundialCooldown, cultistDelay, fastForwardTimeToDawn, fastForwardTimeToDusk, moondialCooldown,
     treeX, treeStyle, treeTops,
-    tiles, chests, npcs,
+    tiles, chests, npcs, signs, flags,
+    bgMushroom, bgUnderworld, bg10, bg11, bg12,
     weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },
     seedFlags,
   };
@@ -398,6 +527,8 @@ function decodeTiles(
         if (isFramed) {
           fx = r.u16();
           fy = r.u16();
+          // ★R16-9②（WF57:2575-2578）：tile 144（Timers）frameY 强制归 0
+          if (tileType === 144) fy = 0;
         }
         if (header3 & 0x08) tilePaint = r.u8(); // tile color（WorldFile.cs:2571-2574）
       }
@@ -409,6 +540,9 @@ function decodeTiles(
         if (version >= 222 && header3 & 0x40) {
           wl |= r.u8() << 8;
         }
+        // ★R16-9①（WF57:2593-2596/2667-2670）：墙 id 越界归 0（WallID.Count=367）——
+        //  脏档/第三方工具写出越界 id 曾直存 → 渲染/存档侧未定义行为
+        if (wl >= 367) wl = 0;
       }
       // 电路位（1456/1405 同布局,WorldFile.cs:2610-2656）：header2 0x02红/0x04蓝/0x08绿,
       // header3 0x02致动器/0x04已致动/0x20黄线（1.4 起致动器与黄线在 header3;
@@ -425,7 +559,11 @@ function decodeTiles(
       let lqAmount = 0, lqKind = 0;
       if (lqType !== 0) {
         lqAmount = r.u8();
-        lqKind = (version >= 269 && header3 & 0x80) ? 1 : lqType;
+        // ★R16-3（2026-08-24）：微光位（header3 0x80,WF57:2606-2609 读侧
+        //  `(b2 & 0x80)==128 → tile.shimmer(true)`,液型位保持 1=水）→ 本仓
+        //  store 编码 4=微光（serialize.ts:118）——曾折成 1(水)丢弃 → 1.4.4+
+        //  存档微光池导入后全变普通水且不可逆（再存档即真水）。
+        lqKind = (version >= 269 && header3 & 0x80) ? 4 : lqType;
       }
       // RLE 计数
       const rleStorage = (header1 & 0xC0) >> 6;

@@ -16,6 +16,7 @@ import { RNG } from '../../../core/rng';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import type { World } from '../../World';
 import type { TileStore } from '../../TileStore';
+import { vanSolidOrSloped } from './GenSolid';
 
 /** sheet id → 内部 tile id（反向查；多个 def 同 sheet 取首个——转化表目标均为
  *  唯一实体方块（109 草/117 珍珠岩/…），无歧义） */
@@ -179,7 +180,14 @@ export function initializeHardMode(world: World, rng: RNG): void {
         const [qx, qy] = queue.shift()!;
         const qi = st.idx(qx, qy);
         if (cells.has(qi)) continue;
-        if (st.flags[qi]) continue;                      // IsNotSolid
+        // ★R12-4（2026-08-24）：IsNotSolid（Modifiers.cs:563-571）=
+        //  `!active || !SolidOrSlopedTile`——**活性但非实心**的装饰格（火把/藤/平台/
+        //  草丛）计入 shape 且继续向外泛洪;旧实现 `flags→continue` 把它们当墙:
+        //  ①回填墙斑在装饰处开洞;②shape 计数与 1000 配额消耗漂移 → 后续片落点
+        //  全链偏移。改 active && SolidOrSlopedTile 才跳过（vanSolidOrSloped,
+        //  GenSolid.cs:70515 1:1）。OnlyWalls 失败仍不扩邻（Chain 短路,ShapeFloodFill
+        //  UnitApply false 不入队）——结构保持。
+        if (st.flags[qi] && vanSolidOrSloped(st, qx, qy)) continue;   // IsNotSolid
         if (!BACKFILL_WALLS.has(st.wall[qi])) continue;  // OnlyWalls
         cells.add(qi);
         quota--;
