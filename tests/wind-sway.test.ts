@@ -309,12 +309,13 @@ describe('litNatureVisibility（NextNatureRenderer :117-147）', () => {
     const mk = (t: number) => { const c = new Clock(60000); c.timeOfDay = t; return c; };
     expect(litNatureVisibility(mk(0.5))).toBe(0);           // 正午
     expect(litNatureVisibility(mk(0.1))).toBe(0);           // 夜
-    // 晨窗：time=1200-7200 → t = 0.25 + time/54000*0.5；取 time=3000 → t≈0.278
-    expect(litNatureVisibility(mk(0.25 + 3000 / 54000 * 0.5))).toBeGreaterThan(0);
-    // 昏窗：time=43200-53400；取 48000 → t≈0.694
-    expect(litNatureVisibility(mk(0.25 + 48000 / 54000 * 0.5))).toBeGreaterThan(0);
+    // 晨窗：DAWN 基勘正 0.1875(★曾 0.25 基差 1.5h)→ t = 0.1875 + time/54000*0.625;
+    //   取 time=3000 → t≈0.2222(dawn=0.5×0.7×0.3>0)
+    expect(litNatureVisibility(mk(0.1875 + 3000 / 54000 * 0.625))).toBeGreaterThan(0);
+    // 昏窗：time=43200-53400；取 48000 → t≈0.7431(dusk² ×0.4 >0)
+    expect(litNatureVisibility(mk(0.1875 + 48000 / 54000 * 0.625))).toBeGreaterThan(0);
     // 日食清零
-    const ec = mk(0.25 + 3000 / 54000 * 0.5); ec.eclipse = true;
+    const ec = mk(0.1875 + 3000 / 54000 * 0.625); ec.eclipse = true;
     expect(litNatureVisibility(ec)).toBe(0);
   });
 });

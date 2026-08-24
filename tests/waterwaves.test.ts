@@ -111,34 +111,36 @@ describe('washShapeValue（WaterDistortionObject obj50 复原）', () => {
   it('flow 零向量 → 0', () => {
     expect(washShapeValue(0.2, 0, 0, 0, 0.5)).toBe(0);
   });
-  it('顺流方向且 sinφ<0 的点产生正强度', () => {
+  it('顺流方向内圈（r<2π 钳域）→ cosφ>0 恒零', () => {
     // radial=(1,0) 方向、flow=(−1,0)+0.5 → flowSigned=(−0.5,0) → dot(−f,rad)=1 → 1−0.2=0.8
-    // r=0.2·25.12=5.024 < 2π → max(r,2π) 钳（obj50 #27）→ φ≈−0.0039 → 弱正尾迹。
-    // ★金标 = SM2 解释器直跑 obj50 字节码同探针输出 0.0025482763275909716
-    //  （旧公式无内圈钳 → φ 全域摆动 → 0.76 错值，2026-08-20 复核定罪）
+    // r=0.2·25.12=5.024 < 2π → max(r,2π) 钳（obj50 #27）→ φ≈−0.0039。
+    // ★R15-13 勘正:D3D9 sincos 指令 .x=cos/.y=sin（MSDN+ps_2_0 版本 token 双证,
+    //   54 site/34 pass 全量复活）——旧断言按 sin 解释器探针金标 0.002548… 已废;
+    //   cos(−0.0039)>0 → min(cos,0)=0 → 内圈恒零
     const v = washShapeValue(0.2, 0, -0.5, 0, 1);
-    expect(v).toBeCloseTo(0.0025482763275909716, 7);   // float32 常量(1/2π)舍入 ±1e-7
+    expect(v).toBe(0);
   });
-  it('内圈 max(r,2π) 钳：r<2π 各点 φ 恒定（obj50 #27 字节码锚）', () => {
-    // |uvc|=0.1/0.2/0.24 全部 → φ = frac(2π·0.159155+0.5)·2π−π 同值 → 同强度
+  it('内圈 max(r,2π) 钳：r<2π 各点 φ 恒定 → 同为零（obj50 #27 字节码锚）', () => {
+    // |uvc|=0.1/0.2/0.24 全部 → φ = frac(2π·0.159155+0.5)·2π−π 同值 → cos>0 同零
     const a = washShapeValue(0.1, 0, -0.5, 0, 1);
     const b = washShapeValue(0.2, 0, -0.5, 0, 1);
     const c = washShapeValue(0.24, 0, -0.5, 0, 1);
-    expect(a).toBeCloseTo(b, 12);
-    expect(b).toBeCloseTo(c, 12);
-    expect(a).toBeCloseTo(0.0025482763275909716, 7);
+    expect(a).toBe(0);
+    expect(b).toBe(0);
+    expect(c).toBe(0);
   });
-  it('中圈（2π≤r<4π）不钳：φ 随 r 变化（字节码 #28 frac 链）', () => {
-    // r=8.79（|uvc|=0.35）与 r=11.3（0.45）强度不同且均与解释器探针一致
+  it('中圈（2π≤r<4π）不钳：cos<0 扇区出正强度、cos≥0 扇区为零（#28 frac 链）', () => {
+    // r=8.79（|uvc|=0.35）→ φ=frac 链≈+2.507 → cos≈−0.806 → −cosφ×0.8×1
+    // r=11.3（0.45）→ φ≈−1.266 → cos>0 → 0（旧 sin 公式下两值互换,同源勘正）
     const v1 = washShapeValue(0.35, 0, -0.5, 0, 1);
     const v2 = washShapeValue(0.45, 0, -0.5, 0, 0.5);
-    expect(v1).toBe(0);                                       // interp 探针 = 0
-    expect(v2).toBeCloseTo(0.3811250681947874, 8);            // interp 直跑金标(float32 舍入 ±2e-8)
+    expect(v1).toBeCloseTo(0.6451102224781842, 10);
+    expect(v2).toBe(0);
   });
-  it('远处（r≥4π）恒小负角 → 微弱尾迹', () => {
-    // |uvc|=0.6 → r=15.07 ≥ 4π → φ=−0.00637111 → −sinφ = +0.0063711
+  it('远处（r≥4π）恒小负角 → cosφ>0 恒零', () => {
+    // |uvc|=0.6 → r=15.07 ≥ 4π → φ=−0.00637111 → cos>0 → 0（旧 −sinφ 尾迹已废）
     const v = washShapeValue(0.6, 0, -0.5, 0, 1);
-    expect(v).toBeCloseTo(0.0063711 * 0.8, 3);
+    expect(v).toBe(0);
   });
 });
 
