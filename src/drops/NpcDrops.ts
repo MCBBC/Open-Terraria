@@ -732,13 +732,54 @@ function splitCoins(num: number, rng: RNG): ResolvedDrop[] {
 // :80334/:80345 closestPlayer.RollLuck(6/2)——带幸运双掷（曾用裸随机丢 luck 语义）
 export function rollHeartsAndStars(ctx: NpcDropCtx): ResolvedDrop[] {
   const drops: ResolvedDrop[] = [];
-  if (ctx.type !== 16 && ctx.type !== 81 && ctx.type !== 121
-    && ctx.lifeMax > 1 && ctx.damage > 0) {
-    if (rollLuck(ctx, 6, 1)) {
+  // R14-A7：NPC57:80345-80370 1:1——①排除集按【netID】16/121（num=1 整段跳过,零掷）
+  // /81（num=1）;②两支都是「num==0 && RollLuck 先掷 && lifeMax>1 && damage>0」短路序
+  // （damage=0 的小动物也消耗 RollLuck 掷）;③第二支(星)同样带 lifeMax/damage 门
+  // （曾缺=无伤怪也能出星）
+  const num = (ctx.netId === 16 || ctx.netId === 121 || ctx.netId === 81) ? 1 : 0;
+  if (num === 0) {
+    if (rollLuck(ctx, 6, 1) && ctx.lifeMax > 1 && ctx.damage > 0) {
       if (ctx.rng.int(0, 1) === 0 && ctx.mana < ctx.manaMax) drops.push({ id: 184, n: 1 });
       else if (ctx.rng.int(0, 1) === 0 && ctx.hp < ctx.hpMax) drops.push({ id: 58, n: 1 });
     }
-    if (rollLuck(ctx, 2, 1) && ctx.mana < ctx.manaMax) drops.push({ id: 184, n: 1 });
+    if (rollLuck(ctx, 2, 1) && ctx.lifeMax > 1 && ctx.damage > 0
+      && ctx.mana < ctx.manaMax) drops.push({ id: 184, n: 1 });
+  }
+  return drops;
+}
+
+// ============ 按 type 额外心掉落（NPCLoot_DropHeals :79913-80010 switch 1:1） ============
+// 南瓜月小怪 305-314/329/330 RollLuck(4)、树精 326 RollLuck(6)、无头骑士 315 必掉、
+// 341 Next(5,11) 颗、338-340 RollLuck(5)、342 Next(3)!=0、月事件 Boss 325/327/344/345/346
+// Next(6)+6 颗、267 Next(2)&&未满血、13-15 EoW Next(4)&&未满血、116-119 WoF 族
+// !expert||Next(5)==0、139 Next(2)==0。R14-A4（此前整支缺失）
+export function rollTypeHearts(ctx: NpcDropCtx): ResolvedDrop[] {
+  const drops: ResolvedDrop[] = [];
+  const t = ctx.type;
+  const heart = (n = 1) => { for (let i = 0; i < n; i++) drops.push({ id: 58, n: 1 }); };
+  const inSet = (set: number[]) => set.includes(t);
+  if (inSet([305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 329, 330])) {
+    if (rollLuck(ctx, 4, 1)) heart();                       // :79939-79943
+  } else if (t === 326) {
+    if (rollLuck(ctx, 6, 1)) heart();                       // :79946-79950
+  } else if (t === 315) {
+    heart();                                                // :79953-79955 必掉
+  } else if (t === 341) {
+    heart(ctx.rng.int(5, 10));                              // :79958-79964 Next(5,11)
+  } else if (inSet([338, 339, 340])) {
+    if (rollLuck(ctx, 5, 1)) heart();                       // :79967-79971
+  } else if (t === 342) {
+    if (ctx.rng.int(0, 2) !== 0) heart();                   // :79974-79978
+  } else if (inSet([325, 327, 344, 345, 346])) {
+    heart(ctx.rng.int(0, 5) + 6);                           // :79981-79990 Next(6)+6
+  } else if (t === 267) {
+    if (ctx.rng.int(0, 1) === 0 && ctx.hp < ctx.hpMax) heart();   // :79993-79997
+  } else if (inSet([13, 14, 15])) {
+    if (ctx.rng.int(0, 3) === 0 && ctx.hp < ctx.hpMax) heart();   // :80000-80004
+  } else if (inSet([116, 117, 118, 119])) {
+    if (!ctx.isExpert || ctx.rng.int(0, 4) === 0) heart();        // :80007-80011
+  } else if (t === 139) {
+    if (ctx.rng.int(0, 1) === 0) heart();                   // :80014-80018
   }
   return drops;
 }

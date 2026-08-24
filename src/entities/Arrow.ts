@@ -748,6 +748,11 @@ export class Arrow extends Entity {
   private sf659Ai0 = -1;
   /** localAI[0] 重索敌节拍（每 5 update 一搜，:36878-36882） */
   private sf659Cd = 0;
+  // ---- 409 剃刀台风（aiStyle 71 :30848-30951，2622 剃刀台风）----
+  /** ai[0] 一次性锁敌（npc 索引+1；0 = 未锁；本仓存 Enemy.id，0 未锁） */
+  private ty409Ai0 = 0;
+  /** localAI[0] 锁敌冷却（未锁时 30 update 一搜，:30907-30910） */
+  private ty409Cd = 0;
   // ---- 92 坠星（aiStyle 5 + Kill 91/92 共段）----
   /** ai[1] 命中线 Y（弹顶越过才恢复撞块；-Infinity = 非坠星路径） */
   starFallLine = -Infinity;
@@ -2008,6 +2013,63 @@ export class Arrow extends Entity {
         }
       }
       if (this.life > 30 && this.alpha > 0) this.alpha = Math.max(0, this.alpha - 12);  //（:36901-36903）
+    } else if (this.projId === 409) {
+      // ---- 409 剃刀台风（aiStyle 71，Projectile.cs:30848-30951，2622 剃刀台风）----
+      // ① 一次性锁敌（ai[0]==0 且 localAI[0]==0，:30883-30906）：500 欧氏 +
+      //   CanHit 全盒最近敌 → ai[0]=敌+1；无目标 → localAI[0]=30（30 update 后再掷）；
+      // ② 保持（:30912-30931）：目标 active+!dontTakeDamage+immune[owner]==0 且
+      //   1000 曼哈顿内 → 追踪；失效/超距 → ai[0]=0（等冷却重锁）；
+      // ③ 转向（:30933-30947）：角差 wrap 后 ×0.1 旋转（rotateTowards 档）；
+      // ④ 速度 +0.0025/update 无帽（:30949-30951）。
+      if (this.ty409Cd > 0) this.ty409Cd--;
+      if (this.ty409Ai0 === 0 && this.ty409Cd === 0) {
+        let best409 = 500;
+        let bestId409 = 0;
+        for (const ent of game.enemies()) {
+          const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean; iframes?: number };
+          if (e.dead) continue;
+          if (!playerCanHitEnemy(ent, game, this.projId)) continue;      // CanBeChasedBy
+          const d409 = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
+          if (d409 >= best409) continue;
+          if (!canHitLine(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+          best409 = d409;
+          bestId409 = e.id;
+        }
+        if (bestId409 !== 0) this.ty409Ai0 = bestId409;
+        else this.ty409Cd = 30;                    //（:30907-30910）
+      }
+      let steer409 = false;
+      let tx409 = 0, ty409 = 0;
+      if (this.ty409Ai0 !== 0) {
+        const t409 = (game.enemies() as Array<{ id: number; x: number; y: number; w: number; h: number; dead?: boolean; iframes?: number; dontTakeDamage?: boolean }>)
+          .find((e) => e.id === this.ty409Ai0);
+        //（:30912-30931）active + !dontTakeDamage + immune[owner]==0 + 1000px 曼哈顿
+        if (t409 && !t409.dead && !t409.dontTakeDamage && !((t409.iframes ?? 0) > 0)
+          && Math.abs(this.cx - (t409.x + t409.w / 2)) + Math.abs(this.cy - (t409.y + t409.h / 2)) < 1000) {
+          steer409 = true;
+          tx409 = t409.x + t409.w / 2; ty409 = t409.y + t409.h / 2;
+        } else {
+          this.ty409Ai0 = 0;                       //（:30925-30929 失效清锁等冷却）
+        }
+      }
+      if (steer409) {
+        const want409 = Math.atan2(ty409 - this.cy, tx409 - this.cx);
+        const cur409 = Math.atan2(this.vy, this.vx);
+        let diff409 = want409 - cur409;
+        while (diff409 > Math.PI) diff409 -= Math.PI * 2;   //（:30937-30941 wrap）
+        while (diff409 < -Math.PI) diff409 += Math.PI * 2;
+        const na409 = cur409 + diff409 * 0.1;               //（:30947 RotatedBy(diff×0.1)）
+        const sp409 = Math.hypot(this.vx, this.vy);
+        this.vx = Math.cos(na409) * sp409;
+        this.vy = Math.sin(na409) * sp409;
+      }
+      {
+        const sp409b = Math.hypot(this.vx, this.vy);        //（:30949-30951 速度爬升无帽）
+        if (sp409b > 0) {
+          this.vx = (this.vx / sp409b) * (sp409b + 0.0025);
+          this.vy = (this.vy / sp409b) * (sp409b + 0.0025);
+        }
+      }
     } else if (this.projId === 92) {
       // 92 坠星（aiStyle 5，Projectile.cs:22152-22156 + :22222-22245，圣箭 Kill 链）：
       // 无重力直飞（aiStyle5 无重力段）；弹顶越过 ai[1] 命中线才恢复撞块（:22152-22156，

@@ -27,7 +27,11 @@ const CSS = `
   background: #141028; border: 2px solid #7d92d6;
   box-shadow: 0 0 0 2px #0a0e1e;
   padding: 6px 12px; color: #e8ecf8; font-size: 13px;
-  cursor: pointer; transition: opacity .6s;   /* 可点开下载详情面板(2026-08-19) */
+  cursor: pointer;
+  /* 渐显入场与 splash 图片同曲线(2026-08-24 用户要求)——--sw-splash-alpha 由
+     Splash 单调广播,揭幕后变量摘除=回满亮。★transition 不能挂基类:逐帧变量
+     更新会被 .6s 过渡拖拽成滞后追踪;淡出过渡在 unmount 处内联挂 */
+  opacity: var(--sw-splash-alpha, 1);
   image-rendering: pixelated;
 }
 .sw-asset-badge:hover { border-color: #ffd76e; }
@@ -221,6 +225,7 @@ export function mountAssetBadge(): void {
     txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Loading', fmtPct(st));
     if (st.phase === 'done' && !badgeFading) {
       badgeFading = true;
+      badgeEl.style.transition = 'opacity .6s';   // 淡出过渡仅此刻内联挂(基类挂会拖拽渐显变量)
       badgeEl.style.opacity = '0';
       setTimeout(() => { unmountAssetBadge(); }, 700);
     }

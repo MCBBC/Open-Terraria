@@ -180,7 +180,7 @@ export class TitleMenu {
           opacity: var(--sw-splash-alpha, 1); }
       </style>
       <div class="sw-title-version">SandboxWorld v0.1.0</div>
-      <div data-credit style="position:fixed;right:30px;bottom:8px;font-size:13px;color:#fff;padding:0 16px;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;"></div>
+      <div data-credit style="position:fixed;right:10px;bottom:8px;font-size:13px;color:#fff;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;"></div>
     `;
     document.body.appendChild(this.chrome);
     this.logoDay = this.root.querySelector('.logo-day') as unknown as HTMLImageElement;

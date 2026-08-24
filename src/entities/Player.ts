@@ -2347,6 +2347,20 @@ export class Player extends Entity {
     // Game 侧扫描每帧清零再 ++，无 3006 邻域供给即熄）
     if (this.soulDrain > 0) this.buffs.apply(BuffType.SoulDrain, 2);
     const buffHeal = this.buffs.tick(dt);
+    // 叶绿孢子 397 玩家侧孢子云发射器（★2026-08-24 r15 R15-19：PL57:26178-26193
+    //  chlorophyteSpore && Next(60)==0 → 盒内 Inflated(−2,−2) 掷点,v=velocity×0.5
+    //  钳 5 的 SporeCloud 编排；DoT 15 HP/s 已入 Buffs ENV_DOTS。buff 来源 =
+    //  敌对/反弹 1127 命中（PC57:12015-12018 StatusPvP,vanilla-statusplayer.json
+    //  "1127" 叶子）。粒子形态 spawnParticles 方块近似（与 Enemy.ts:2185 同登记））
+    if (this.buffs.active.has(BuffType.ChlorophyteSpore) && Math.floor(Math.random() * 60) === 0) {
+      const svx = Math.min(5, Math.hypot(this.vx, this.vy) * 0.5);
+      game.spawnParticles(
+        this.x + 2 + Math.random() * Math.max(1, this.w - 4),
+        this.y + 2 + Math.random() * Math.max(1, this.h - 4),
+        '#A8D060', 3, svx || 0.5,
+        { life: 40, grav: -0.02, damp: 0.95 },
+      );
+    }
     if (buffHeal > 0 && this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + buffHeal);
     else if (buffHeal < 0 && this.hp > 0) {
       this.hp = Math.max(0, this.hp + buffHeal);

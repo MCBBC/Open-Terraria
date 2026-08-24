@@ -1288,9 +1288,10 @@ export class SkyRenderer {
   /** 通用染色缓存(multiply+destination-in 三步,键=用途+纹理id+8 量化色) */
   private tintCache2 = new Map<string, HTMLCanvasElement>();
   private tintTex(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number, use: string): HTMLCanvasElement | HTMLImageElement {
-    // /16 量化+64 上限:日/月小贴图,晨昏漂移期组合数有界,防 clear-all 雪崩
-    // (biomeBg tintCache 教训)
-    const key = `${use}:${texId(tex as object)}:${(r / 16) | 0},${(g / 16) | 0},${(b / 16) | 0}`;
+    // ★键 = 逐单位截断(曾 1/16 量化)——日/月是晨昏核心大精灵,16 单位染色台阶
+    //  肉眼可见(同天空底色 1/8 档病灶);贴图仅 114²/50²,精确键 + 64 上限的
+    //  clear-all 每帧至多数次小 bake,无雪崩风险(2026-08-24)
+    const key = `${use}:${texId(tex as object)}:${r | 0},${g | 0},${b | 0}`;
     let c = this.tintCache2.get(key);
     if (c) return c;
     c = document.createElement('canvas');

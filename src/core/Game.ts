@@ -11727,8 +11727,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const gsS = projGravSpec(cw.shoot);
         // 追踪族穿透/寿命按 SetDefaults 表终值（追踪弹全族批）：通用兜底曾硬编码
         // pierce 1——蜂枪 181/黄蜂枪 189 表值 3、巨蜂 566 表值 4、幽灵法杖弹 297 表值 3、
-        // 灵魂之焰 659 表值 −1（命中侧走全局 immune 帧冷却再命中）全被压成 1
-        const HOMING_FAMILY_PIERCE = new Set([181, 189, 307, 316, 566, 297, 659]);
+        // 灵魂之焰 659/剃刀台风 409 表值 −1（命中侧走全局 immune 帧冷却再命中）全被压成 1
+        const HOMING_FAMILY_PIERCE = new Set([181, 189, 307, 316, 566, 297, 659, 409]);
         const shotArrow = new Arrow(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
@@ -25549,7 +25549,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const outKey = recipeItemKey(r.create);
     if (!outKey) return;
     const outId = ITEM_BY_KEY[outKey];
-    const left = this.player.inv.add(outId, r.createStack * times);
+    // R14-B3：合成成品随机词缀（CreateResult CRQ57:126-133 `stack<=1 → Prefix(-1)`）
+    // ——单件产出配方（武器/工具/饰品）每件按词缀池 roll（1/4 无词缀+Reduced 池降档,
+    // rollPrefix(pool,false) 同构）;批量/多件产出不 roll（原版 stack>1 不进分支）
+    let prefix: number | undefined;
+    if (outId !== undefined && r.createStack === 1 && times === 1) {
+      const def = ITEM_DEFS[outId];
+      const vid = def?.vid ?? (def?.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+      const pool = vid >= 0 ? rollablePrefixes(vid, !!def?.accessory) : null;
+      if (pool && pool.length) prefix = rollPrefix(pool, false);
+    }
+    // R14-B4：钱币互转配方（REC57:15121-15147,71↔72↔73↔74）产物走 NoCoinMerge
+    // （CraftItem_GrantItem → GetItem(ReturnItemShowAsNewNoCoinMerge),GetItemSettings.cs:25
+    // 禁 DoCoins）——曾直接 inv.add 跑 doCoins 把 100 铜瞬时合回 1 银=净变化零的死合成
+    const outVid0 = vanillaIdOfItem(outId);
+    const left = (outVid0 >= 71 && outVid0 <= 74 && r.createStack === 1 && times === 1)
+      ? this.player.inv.addNoCoinMerge(outId, r.createStack * times)
+      : this.player.inv.add(outId, r.createStack * times, prefix);
     if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left); // 背包装不下→掉落
     // R4-18（HandleWeirdCrafts,M57:43354-43364）：合成 6148/6149（Trusty 件）即杀
     // 场上旧代帕鲁弹 1093/1094（KillProjectilesOfTypeForLocalPlayer）——召唤侧互清

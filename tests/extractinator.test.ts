@@ -359,8 +359,11 @@ describe('箱子查找（Wiring.cs:2596-2622 TryFindChestForExtractinator）', (
     expect(findExtractinatorChest([mk(ax - 2, ay - 2)], ax, ay)).toBeDefined(); // 近角含
     expect(findExtractinatorChest([mk(ax + 7, ay)], ax, ay)).toBeUndefined();   // 越界（占位 ax+7/ax+8）
     expect(findExtractinatorChest([mk(ax - 4, ay)], ax, ay)).toBeUndefined();   // 越界（占位 ax-4/ax-3）
-    // 占位延伸：锚点在框外一格，但 2×2 占位伸进框内 → 命中（FindChest 语义）
-    expect(findExtractinatorChest([mk(ax - 3, ay)], ax, ay)).toBeDefined();
+    // R14-D1：FindChest 只认左上角格——锚点在框外一格、占位伸进框内不命中
+    // （原版 _chestsByCoords 只注册 (x,y) 左上角,占位延伸格查不到）
+    expect(findExtractinatorChest([mk(ax - 3, ay)], ax, ay)).toBeUndefined();
+    // 左上角格本身在框内 → 命中
+    expect(findExtractinatorChest([mk(ax - 2, ay)], ax, ay)).toBeDefined();
   });
 
   it('上锁箱跳过；行扫描序（先小 y）优先', () => {

@@ -291,16 +291,16 @@ export interface ExtractChest {
 
 /**
  * TryFindChestForExtractinator（Wiring.cs:2596-2622）1:1：行扫描锚点邻域
- * (ax-2..ax+5)×(ay-2..ay+5)（:2603-2606 num=3/num2=3/num3=2），Chest.FindChest
- * 为 2×2 占位判定（命中占位内任意格都算）；上锁箱跳过（:2613）。
+ * (ax-2..ax+5)×(ay-2..ay+5)（:2603-2606 num=3/num2=3/num3=2）。R14-D1：Chest.FindChest
+ * （CH57:507-514）只认箱【左上角格】精确命中（_chestsByCoords 注册亦只左上角,
+ * CH57:109）——曾按 2×2 占位判定（左/上两边各外扩一圈）。上锁箱跳过（:2613）。
  */
 export function findExtractinatorChest<C extends ExtractChest>(
   chests: readonly C[], ax: number, ay: number,
 ): C | undefined {
   for (let cy = ay - 2; cy <= ay + 5; cy++) {
     for (let cx = ax - 2; cx <= ax + 5; cx++) {
-      const c = chests.find((ch) =>
-        !ch.locked && cx >= ch.x && cx <= ch.x + 1 && cy >= ch.y && cy <= ch.y + 1);
+      const c = chests.find((ch) => !ch.locked && cx === ch.x && cy === ch.y);
       if (c) return c;
     }
   }

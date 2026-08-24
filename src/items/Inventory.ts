@@ -397,7 +397,13 @@ export class Inventory {
    *  ① 钱币先进 50-53；② 弹药进 54-57（先合并已有再空格）；
    *  ③ 合并 0-49 已有堆（先于空槽）；④ 空槽【降序】从背包末尾填（原版非收藏物降序）
    *  ⑤ 钱币满 100 自动合大（DoCoins :38573-38589） */
-  add(id: number, count: number, prefix?: number, placeStyle?: number): number { // prefix/placeStyle 随新放置槽写入（合并已有堆保留现有）
+  /** noCoinMerge（R14-B4）：钱币入包跳过 doCoins 自动升面额（GetItemSettings.cs:25
+   *  ReturnItemShowAsNewNoCoinMerge——合成 1 银→100 铜不被瞬时合回） */
+  addNoCoinMerge(id: number, count: number): number {
+    return this.add(id, count, undefined, undefined, true);
+  }
+
+  add(id: number, count: number, prefix?: number, placeStyle?: number, noCoinMerge = false): number { // prefix/placeStyle 随新放置槽写入（合并已有堆保留现有）
     // 未知 id 守卫(2026-08-18):裸 .maxStack 曾让一个不在定义表的掉落物在拾取瞬间
     // TypeError 炸掉整个帧循环(用户实报:砍树掉落自动收集时崩溃)——拒绝入包并
     // 留栈取证,定位是谁产出了这个 id
@@ -414,7 +420,7 @@ export class Inventory {
       while (count > 0 && guard++ < 100000) {   // 上限仅防呆;无进展 break 已保证收敛
         const before = count;
         count = this.fillRange(COIN_START, COIN_SLOTS, id, count, max);
-        this.doCoins();
+        if (!noCoinMerge) this.doCoins();
         if (count === before) break;   // 无进展（格满且不再转换）→ 溢出走背包
       }
       if (count > 0) {

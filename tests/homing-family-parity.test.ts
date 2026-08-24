@@ -199,6 +199,25 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     expect(eater.damage).toBe(22);
   });
 
+  it('409 剃刀台风：500 视距锁敌 + rotateTowards 0.1 收敛 + 速度爬升', () => {
+    const e = mkEnemy(1, 60 * 16 + 250, 90 * 16 - 180);
+    const { hooks } = makeHooks([e]);
+    // 2622 剃刀台风：shootSpeed 6、extraUpdates 2、penetrate −1、timeLeft 300
+    const ty = new Arrow(60 * 16, 90 * 16, 6, 0, 85, 5, 409, null,
+      { grav: 0, life: 300, pierce: -1, extraUpdates: 2 });
+    step(ty, 40, hooks);
+    expect(ty.dead).toBe(false);
+    expect(ty.vy).toBeLessThan(0);             // :30933-30947 向敌收敛
+    // 速度爬升（+0.0025/update 无帽）——40 tick ≈ 120 update → ≥6.3
+    expect(Math.hypot(ty.vx, ty.vy)).toBeGreaterThan(6.2);
+    // 锁敌失效（目标死亡）→ ai[0]=0 等冷却（不再转向）
+    e.dead = true;
+    const angBefore = Math.atan2(ty.vy, ty.vx);
+    step(ty, 10, hooks);
+    const angAfter = Math.atan2(ty.vy, ty.vx);
+    expect(Math.abs(angAfter - angBefore)).toBeLessThan(0.01);   // 无目标保持直飞
+  });
+
   it('442 电圈导弹：到点 ≤16px Kill + alpha 归零后 120t 超时', () => {
     const { hooks } = makeHooks([]);
     // 锁定格 = 出生点右侧 240px（15 格）——12 速直线 20 tick 到点

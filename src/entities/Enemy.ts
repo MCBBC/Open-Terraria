@@ -90,7 +90,7 @@ import { canHit, canHitLine } from '../physics/LineOfSight';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { ItemDrop } from './ItemDrop';
 import {
-  resolveDrops, rollCoins, rollHeartsAndStars, rollBossPotionsAndHearts,
+  resolveDrops, rollCoins, rollHeartsAndStars, rollTypeHearts, rollBossPotionsAndHearts,
   dropVelocity, npcValueOf, type NpcDropCtx,
 } from '../drops/NpcDrops';
 import { isNpcShimmerImmune, npcShimmerTransformTo, npcShimmerTransformToItem } from '../stats/Shimmer';
@@ -421,6 +421,9 @@ export class Enemy extends Entity {
   /** 击杀时生效的 npc.boss 位（DropEoWLoot :79212-79228：场上再无 13/14/15 才置位；
    *  掉落门/图鉴/Boss 药水心共用。仅 EoW 三段非恒 true，其余 = def.boss） */
   killBossFlag = false;
+  /** 被吸收钱币累计（WorldItem.GetPickedUpByMonsters_Money :1127-1219 写入;
+   *  死亡掉钱时并入 NPC.cs:80497 `num += extraValue`）——R14-A3 */
+  extraValue = 0;
 
   // ===================== 原版 npc.oldPos/oldRot 历史缓冲（DrawNPC 拖尾族） =====================
   // 原版 NPC.oldPos/oldRot 容量 10，UpdateNPC 头部整体后移一格 → oldPos[i] = i tick 前
@@ -2197,13 +2200,40 @@ export class Enemy extends Entity {
         this.x + Math.random() * this.w, this.y + Math.random() * this.h,
         '#C8E8A0', 1, 0.2, { life: 24, grav: -0.05, damp: 0.97 });
     }
-    if (this.blueLightningT > 0 && Math.floor(Math.random() * 10) === 0) {
-      // BlueLightningSmall 1/10（:92274-92280;本仓无 ParticleOrchestrator → 粒子近似）
-      game.spawnParticles(this.cx, this.cy, '#60A0FF', 2, 1.2, { life: 18, grav: 0, damp: 0.9 });
-    }
-    if (this.redLightningT > 0 && Math.floor(Math.random() * 10) === 0) {
-      // RedLightningSmall 1/10（:92281-92287）
-      game.spawnParticles(this.cx, this.cy, '#FF5050', 2, 1.2, { life: 18, grav: 0, damp: 0.9 });
+    if ((this.blueLightningT > 0 || this.redLightningT > 0) && Math.floor(Math.random() * 10) === 0) {
+      // Blue/RedLightningSmall 1/10（NPC57:92272-92294 → Spawn_LightningSmall
+      //   P57:3617-3672;★2026-08-24 r15 R15-18 接 1457 升级:红雷档
+      //   UniqueInfoPiece=GetLightningColor(1122)=(255,60,60) → ①色对覆写
+      //   color=PackedValue/value=color×0.75 ②伴生光尘 226→**331 自色**+
+      //   noLight(:3654-3670)。916 帧电弧粒子无编排器池 → spawnParticles 近似
+      //   (形态差异登记);尘侧按原版参数直生)
+      const red = this.redLightningT > 0;
+      // 色对(:3619-3627):蓝 (133,255,255)/(15,100,155);红 = 1122 色 / ×0.75
+      const cr = red ? 255 : 133, cg = red ? 60 : 255, cb = red ? 60 : 255;
+      const vr = red ? 191 : 15, vg = red ? 45 : 100, vb = red ? 45 : 155;
+      const n = 1 + (Math.random() < 0.5 ? 1 : 0);            // Next(1,3)(:3619)
+      for (let i = 0; i < n; i++) {
+        const px = this.x + Math.random() * this.w, py = this.y + Math.random() * this.h;
+        game.spawnParticles(px, py, red ? '#FF3C3C' : '#85FFFF', 1, 1.0,
+          { life: 14, grav: 0, damp: 0.92 });
+        // 1/2 概率伴生光尘(:3661-3672):蓝 226 / 红 331(色=lerp(color,value))
+        if (Math.random() < 0.5) {
+          const t = Math.random();
+          const col = {
+            r: Math.round(cr + (vr - cr) * t), g: Math.round(cg + (vg - cg) * t),
+            b: Math.round(cb + (vb - cb) * t), a: 0,
+          };
+          const d = game.spawnDust?.(px, py, 0, 0, red ? 331 : 226, 0, 0, 0, col, 1);
+          if (d) {
+            d.noGravity = true;
+            d.vx = (Math.random() * 2 - 1) * 4;              // NextVector2Circular(4,4)
+            d.vy = (Math.random() * 2 - 1) * 4;
+            d.scale = 1;                                     // 0.8×1.25(:3665/:3668)
+            d.noLight = true;                                // :3669
+          }
+        }
+      }
+      game.addLightAt?.(this.cx, this.cy, 0.28, 0.56, 0.7);  // (0.4,0.8,1)×0.7(:3633)
     }
 
     // 接触伤害（带上攻击者引用，供荆棘反伤）。damage=0（小动物等友好生物）不触发——
@@ -12142,6 +12172,17 @@ export class Enemy extends Entity {
       // 自己的 netDropSweep 当作本端掉落二次广播 → 幽灵物品+重复掉落）
       const rng = new RNG(Math.floor(Math.random() * 1e9));
       if (this.vanillaId && !this.netPuppet) {
+        // R14-A2：FTW（getGoodWorld）肉前骷髅族"杀之无掉落"早退门（NPCLoot 首行
+        // NPC57:79645 `(getGoodWorld || !isThereAWorldSurface) && !downedBoss3 &&
+        // !onlyShimmerOceanWorlds && type∈{31,294,296,295,32,34,71,693,694}` → 整次
+        // NPCLoot return（无钱无物无心星）——FTW 肉前打骷髅零收益补偿机制。
+        // !isThereAWorldSurface（无地表世界）/onlyShimmerOcean 本仓无对应世界形态不接
+        const FTW_NO_LOOT_SKELETONS = new Set([31, 294, 296, 295, 32, 34, 71, 693, 694]);
+        if (game.world.seedFlags?.getGoodWorld
+          && !(game.world.flags['downed_35'] || game.world.flags.downedSkeletron)
+          && FTW_NO_LOOT_SKELETONS.has(this.vanillaId)) {
+          return;
+        }
         // 雕像产怪战利品门（NPCLoot :79648-79654）：肉前集合 / StatueSpawnedDropRarity
         // 概率门外 → 整单不出（连钱带心星一起跳过，原版直接 return）
         const statueSkip = this.spawnedFromStatue && (() => {
@@ -12307,10 +12348,15 @@ export class Enemy extends Entity {
               && e.vanillaId === (this.vanillaId === 125 ? 126 : 125);
           });
         // 钱币（规则未清零 value 时走 NPCLoot_DropMoney 管线）
-        const value = res.zeroValue || twinSuppressed ? 0 : ctx.value;
+        // R14-A3：extraValue（怪吸收钱累计）并入钱币基数（NPC.cs:80497 `num += extraValue`,
+        // 六级乘区/血月掷之后、拆币之前）
+        const value = res.zeroValue || twinSuppressed ? 0 : ctx.value + this.extraValue;
+        this.extraValue = 0;
         if (value > 0) for (const c of rollCoins(value, ctx, !!ctx.extras?.bloodMoon, this.midasT > 0)) spawn(c.id, c.n);
         // 心/星（NPCLoot_DropCommonLifeAndMana）
         for (const h of rollHeartsAndStars(ctx)) spawn(h.id, h.n);
+        // 按 type 额外心（NPCLoot_DropHeals :79913-80010,钱币后调用）——R14-A4
+        for (const h of rollTypeHearts(ctx)) spawn(h.id, h.n);
         // Boss 药水+心（DoDeathEvents_DropBossPotionsAndHearts，boss 门 :80307）——
         // EoW 中间段 killBossFlag=false 不出（仅最后一段）
         if (this.killBossFlag && !twinSuppressed) for (const b of rollBossPotionsAndHearts(ctx)) spawn(b.id, b.n);

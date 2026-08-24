@@ -14,6 +14,11 @@ import {
 } from '../stats/Shimmer';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { VANILLA_ITEM_COLOR } from '../data/vanillaItemColor';
+
+/** CantTakeLunchMoney（NPCID.cs:4468,39 型）——专家模式怪捡钱豁免表（R14-A3） */
+const CANT_TAKE_LUNCH_MONEY = new Set([394, 393, 392, 690, 492, 491, 662, 384, 478, 535,
+  658, 659, 660, 128, 131, 129, 130, 139, 267, 247, 248, 246, 249, 245, 409, 410,
+  397, 396, 401, 400, 440, 68, 534, 316, 259, 260, 43, 175, 101]);
 import { liquidCollision } from '../stats/TouchDamage';
 import itemRareJson from '../data/vanilla-itemrare.json';
 import { spawnWOF } from './bossAI_wof';
@@ -81,6 +86,45 @@ export class ItemDrop extends Entity {
     this.age++;
     // 寿命（10 分钟）
     if (this.age > 60 * 600) { this.dead = true; return; }
+
+    // R14-A3：专家模式怪捡钱币（WorldItem.GetPickedUpByMonsters_Money :1127-1219,
+    // Update 入口 :412-416 `if (Main.expertMode && IsACoin)`）——命中合格怪吸收
+    // 50-75%（铜 +0-50%、银 +0-25%,钳 1）入 enemy.extraValue,死亡并入钱币掉落
+    // （NPC.cs:80497 num += extraValue）;CantTakeLunchMoney 39 型豁免(NPCID.cs:4468)。
+    // 此前整链缺失=专家"怪偷钱→杀怪夺回"经济循环缺位
+    if ((this.age & 3) === 0) {
+      const mVid = vanillaIdOfItem(this.itemId);
+      if (mVid >= 71 && mVid <= 74) {
+        const w = game.world as unknown as { isExpert?: boolean; flags?: Record<string, boolean> };
+        if (w?.isExpert) {
+          for (const n of game.enemies()) {
+            const e = n as unknown as {
+              dead?: boolean; vanillaId?: number; x: number; y: number; w: number; h: number;
+              lifeMax?: number; friendly?: boolean; spawnedFromStatue?: boolean; extraValue?: number;
+              immortal?: boolean; dontTakeDamage?: boolean;
+            };
+            if (e.dead || e.vanillaId == null) continue;
+            if ((e.lifeMax ?? 0) <= 5 || e.friendly || e.immortal || e.dontTakeDamage
+              || e.spawnedFromStatue) continue;
+            if (CANT_TAKE_LUNCH_MONEY.has(e.vanillaId)) continue;
+            if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+            // 吸收比（:1178-1190）：Next(50,76)×0.01 基础；铜 71 再 +Next(51)×0.01、
+            // 银 72 再 +Next(26)×0.01；钳 1；吸收量 = stack×ratio（不足 1 不吸收）
+            let ratio = (50 + Math.floor(Math.random() * 26)) * 0.01;
+            if (mVid === 71) ratio += Math.floor(Math.random() * 51) * 0.01;
+            if (mVid === 72) ratio += Math.floor(Math.random() * 26) * 0.01;
+            if (ratio > 1) ratio = 1;
+            const take = Math.floor(this.stack * ratio);
+            if (take < 1) break;
+            e.extraValue = (e.extraValue ?? 0) + take * (mVid === 74 ? 1000000 : mVid === 73 ? 10000 : mVid === 72 ? 100 : 1);
+            this.stack -= take;
+            if (this.stack <= 0) { this.stack = 0; this.dead = true; }
+            game.spawnParticles?.(e.x + e.w / 2, e.y + e.h / 2, '#FFD966', 6, 1.2, { life: 18 });   // moneyPing 尘近似
+            break;
+          }
+        }
+      }
+    }
 
     // 铜物品落在可转化史莱姆上（WorldItem.GetPickedUpByMonsters_Special :1160-1191）：
     // 铜盔 89 / 铜短剑 3507 且未解锁 → 命中 {1 蓝史莱姆, 302 蒙面, 333-336 缎带} →
