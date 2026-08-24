@@ -5,17 +5,27 @@ const URL = (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', protocolTimeout: 300000, defaultViewport: { width: 1280, height: 900 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', e.message.slice(0, 200)));
+await page.evaluateOnNewDocument(() => {
+  window.btnByText2 = (t) => [...document.querySelectorAll('button')].find((b) => b.textContent?.includes(t));
+});
 await page.goto(URL, { waitUntil: 'networkidle0' });
+await page.evaluate(() => { void 0; });
 await page.waitForSelector('select', { timeout: 120000 });
-await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; });
-await page.click('button');
+await page.evaluate(() => { window.btnByText2?.('单人模式')?.click(); });
+await new Promise((r) => setTimeout(r, 1000));
+await page.evaluate(() => {
+    const inp = document.querySelector('.sw-panel input');
+    if (inp) { inp.value = '12345'; inp.dispatchEvent(new Event('input', { bubbles: true })); }
+});
+await page.evaluate(() => { window.btnByText2?.('创建新世界')?.click(); });
+await new Promise((r) => setTimeout(r, 1200));
 await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 });
 await new Promise((r) => setTimeout(r, 2500));
 const out = await page.evaluate(async () => {
   const g = window.__swGame, pl = g.player;
   const st = g.world.store;
-  // 深地下(岩石层下 60 格)挖 24×14 无墙空腔
-  const cx = Math.floor(pl.cx / 16), cy = Math.floor(st.h / 2);
+  // 用户报障位置(tile 341,422 蜂窝区):带层交界复现
+  const cx = 341, cy = 422;
   const x0 = cx - 12, y0 = cy - 7;
   for (let y = y0; y < y0 + 14; y++)
     for (let x = x0; x < x0 + 24; x++) { st.setTileSilent(x, y, 0); st.setWallSilent(x, y, 0); }

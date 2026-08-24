@@ -32,24 +32,15 @@ const MAX_MECH = 1000; // Wiring.cs:41(MaxMech=1000,注册上限 999)
 
 /** TileID.Sets.PreventsActuationUnder（TileID.cs:313）：下方不可被致动器缩入的承载物。
  *  旧表只列宝箱族/祭坛（21/88/467/237），漏音乐盒 26/花盆 77/垃圾桶 470/475/
- *  茶壶 597/饼干 441/望远镜 468 */
-const PREVENTS_ACTUATION_UNDER = new Set([21, 467, 26, 77, 88, 470, 475, 237, 597, 441, 468]);
+ *  茶壶 597/饼干 441/望远镜 468。★R20-I6:devices.ts case 130 同表消费（导出） */
+export const PREVENTS_ACTUATION_UNDER = new Set([21, 467, 26, 77, 88, 470, 475, 237, 597, 441, 468]);
 /** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 树干承载检查用 */
 const IS_A_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
-
-/** TileID.Sets.Boulders（1456 TileID.cs:195）：138 巨石/484 滚动仙人掌/664 弹跳巨石/
- *  665 生命水晶巨石/711 彩虹/712 屎/713 岩浆/714 蜘蛛/715 地牢/716 友好 */
-const BOULDER_SHEETS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
 
 export class Wiring {
   readonly st: TileStore;
   /** 器件表(P3 注入) */
   device: DeviceHandler | null = null;
-  /** 巨石失撑下落钩子（devices.ts 装配）：致动缩入后上格为 Boulders 族 tile 时调用。
-   *  原版数据点：巨石 tile 被杀 → Projectile 99（1456 cs:48765-48769：spawn
-   *  (x*16+15.5, y*16+16)、初速 0/0、伤害 70、击退 10）。引擎按"失撑即坠"接——
-   *  原版由 KillTile 触发该转换，巨石陷阱（压板→致动石栅→巨石坠下）观测行为一致 */
-  boulderFall: ((x: number, y: number, sheet: number) => void) | null = null;
   /** 传送器对执行(引擎侧搬迁玩家/敌人;P3 注入) */
   teleportPair: ((a: [number, number], b: [number, number]) => void) | null = null;
   /** 世界地表行(蜥蜴砖致动限制 Wiring.cs:2375) */
@@ -138,8 +129,13 @@ export class Wiring {
     for (let i = this.numMechs - 1; i >= 0; i--) {
       this.mechTime[i]--;
       const mx = this.mechX[i], my = this.mechY[i];
+      // ★R20-B3:原版出界/tile 空当场 _numMechs--（:165-176,不搬运数组=残槽下 tick
+      // 重复处理的原版怪癖;仅世界边缘 1 格可达）——我方曾等 mechTime 耗尽
+      if (!this.st.inBounds(mx, my)) { this.numMechs--; continue; }
       const sh = this.sheetAt(mx, my);
-      const raw = this.st.type[this.p2i(mx, my)] !== 0;
+      // ★R20-B4:原版门是 tile.active()（:178/:214/:219）——被拆的计时器/引爆器若
+      // type 幽灵保留（flags=0）不得再走计时/复位分支
+      const raw = this.st.flags[this.p2i(mx, my)] !== 0;
       if (raw && sh === 144) {
         const ti = this.p2i(mx, my);
         if (this.st.frameY[ti] === 0) {
@@ -162,17 +158,19 @@ export class Wiring {
           this.st.setTile(mx, my, this.st.type[ti], this.st.frameX[ti], 0);
         }
         if (raw && sh === 411) {
-          // 引爆器 2×2 帧复位(:135-151)
+          // 引爆器 2×2 帧复位(:135-151)——★R20-B5:原版对 2×2 四格【无条件】加帧
+          // （:231-243 仅 InWorld 门,无同型判定;同格异型 tile 的 frameX 一起改=原版怪癖）
           const ti = this.p2i(mx, my);
           const num1 = Math.floor(this.st.frameX[ti] % 36 / 18);
           const num2 = Math.floor(this.st.frameY[ti] % 36 / 18);
           const tileX = mx - num1, tileY = my - num2;
           let num3 = 36;
-          if (this.st.frameX[this.p2i(tileX, tileY)] >= 36) num3 = -36;
+          if (this.st.inBounds(tileX, tileY) && this.st.frameX[this.p2i(tileX, tileY)] >= 36) num3 = -36;
           for (let ix = tileX; ix < tileX + 2; ix++) {
             for (let iy = tileY; iy < tileY + 2; iy++) {
+              if (!this.st.inBounds(ix, iy)) continue; // :236-243 InWorld(i,j,1)
               const ii = this.p2i(ix, iy);
-              if (this.sheetAt(ix, iy) === 411) this.st.setTile(ix, iy, this.st.type[ii], this.st.frameX[ii] + num3, this.st.frameY[ii]);
+              this.st.setTile(ix, iy, this.st.type[ii], this.st.frameX[ii] + num3, this.st.frameY[ii]);
             }
           }
         }
@@ -206,8 +204,9 @@ export class Wiring {
   hitSwitchSound?: (x: number, y: number) => void;
   hitSwitch(i: number, j: number): void {
     if (!this.st.inBounds(i, j)) return;
-    this.hitSwitchSound?.(i, j);   // 每支分支都播（:267/:272/:285/:310/:323/:339/:375）
     const sh = this.sheetAt(i, j);
+    // ★R20-B7:210 地雷支原版无 PlaySound(28)（:288-291 直落 ExplodeMine,爆音由弹 164 自带）
+    if (sh !== 210) this.hitSwitchSound?.(i, j);   // 每支分支都播（:267/:272/:285/:310/:323/:339/:375）
     const ti = this.p2i(i, j);
     // 压板/轨道/感应器/测重板/垫板/高尔夫(:167-171)与宝石锁(:172-176):直接 Trip
     if (sh === 135 || sh === 314 || sh === 423 || sh === 428 || sh === 442 || sh === 476) {
@@ -221,6 +220,13 @@ export class Wiring {
     if (sh === 136) { // 开关 frameY 0↔18(:177-182)
       this.st.setTile(i, j, this.st.type[ti], this.st.frameX[ti], this.st.frameY[ti] !== 0 ? 0 : 18);
       this.tripWire(i, j, 1, 1);
+      return;
+    }
+    if (sh === 210) {
+      // ★R20-B7(缺失·高):地雷 ExplodeMine(Wiring.cs:288-291)。踩踏路径必经此门
+      // （Collision.SwitchTiles :3374 HitSwitch→case 210;导线 :2045 同）——此前无此支
+      // = 放置的地雷被踩永不爆。devices.ts case 210 = KillTile(noItem)+弹 164(250 伤)
+      this.device?.(this, 210, i, j);
       return;
     }
     if (sh === 443) { // 热喷泉(:183-184)
@@ -411,7 +417,9 @@ export class Wiring {
         if (st.wall[i] === 87 && y > this.worldSurface && !this.planteraDowned) return;
         const halfOff = st.half[i] ? 0.5 : 0;
         if (this.tp[0][0] === -1) { this.tp[0] = [tx, y + halfOff]; return; }
-        if (this.tp[0][0] === tx && this.tp[0][1] === y + halfOff) return;
+        // ★R20-E2:原版第二槽判等比较的是【不带半砖偏移】的 j（:1567
+        // `_teleport[0].Y != j`）——同一块半砖板二次捕获会把两槽填成同点(原版即如此)
+        if (this.tp[0][0] === tx && this.tp[0][1] === y) return;
         this.tp[1] = [tx, y + halfOff];
         return;
       }
@@ -562,12 +570,13 @@ export class Wiring {
         const flag2 = st.frameX[i] === 18;  // 当前输出 ON
         const flag3 = st.frameX[i] === 36;  // 故障输出态
         if (num1 < 0) break;
-        // 向上数灯(:614-629)
+        // 向上数灯(:614-629)——★R20-C5:原版门是 tile.active()（:729-731）,
+        // 残型幽灵灯（flags=0）不计入也不中断计数链
         let num2 = 0, num3 = 0;
         let faulty = false;
         for (let y2 = y - 1; y2 > 0; y2--) {
           const j = this.p2i(lampX, y2);
-          if (st.type[j] !== 0 && this.sheetAt(lampX, y2) === 419) {
+          if (st.flags[j] !== 0 && this.sheetAt(lampX, y2) === 419) {
             if (st.frameX[j] === 36) { faulty = true; break; }
             num2++;
             if (st.frameX[j] === 18) num3++;
@@ -592,7 +601,10 @@ export class Wiring {
         if (faulty) st.setTile(lampX, y, st.type[i], 36, st.frameY[i]);
         this.skipWire(lampX, y);
         let fire: boolean = !faulty || flag7;
-        if (flag7 && num2 > 0) fire = Math.random() < num3 / num2;
+        // ★R20-C4:原版 flag6 支是无条件覆盖 `flag7 = Main.rand.Next(num2) < num3`
+        // （:812-817;前面的 num2==0 早退是死代码）——num2==0(故障灯上无灯)时
+        // Next(0)=0<0=false 不发;我方曾以 `flag7 && num2>0` 短路 → num2==0 时照发
+        if (flag7) fire = num2 > 0 ? Math.floor(Math.random() * num2) < num3 : false;
         if (flag6) fire = false;
         if (!fire) break;
         if (!wasDone) {
@@ -645,42 +657,23 @@ export class Wiring {
       if (!this.canKillTile(i, j)) return;
     }
     st.setActuated(i, j, true);
-    // 支撑缩入 → 上格巨石失撑下落（巨石陷阱演出；数据点见 boulderFall 注释）
-    if (st.inBounds(i, j - 1)) {
-      const up = st.idx(i, j - 1);
-      if (st.flags[up]) {
-        const ush = TILE_DEFS[st.type[up]]?.vanilla?.sheet ?? -1;
-        if (BOULDER_SHEETS.has(ush)) {
-          // 巨石是 2×2 多格对象(帧 (0,0)/(18,0)/(0,18)/(18,18),锚=帧(0,0) 左上)。
-          // 原版 KillTile 任一格 → **整对象清除** + 生成一颗 Projectile 99。
-          // 曾只清单格:残余 3/4 贴图留原地(用户报"左下角透明缺块"),且弹 99 在
-          // 残余实心格内生成即判撞碎裂("没有巨石落下",2026-08-14 修)
-          let ax = i, ay = j - 1;
-          if (st.frameX[up] > 0) ax -= 1;
-          if (st.frameY[up] > 0) ay -= 1;
-          for (let oy = 0; oy <= 1; oy++) {
-            for (let ox = 0; ox <= 1; ox++) {
-              const bi = st.idx(ax + ox, ay + oy);
-              const bsh = TILE_DEFS[st.type[bi]]?.vanilla?.sheet ?? -1;
-              if (st.flags[bi] && BOULDER_SHEETS.has(bsh)) {
-                // ★必须走 setTile 唯一写入入口:裸写数组绕过 listeners → 渲染
-                // chunk 不失效 → 贴图残留(与下落弹体成双)
-                st.setTile(ax + ox, ay + oy, 0);
-              }
-            }
-          }
-          // 弹生成点 = 锚格 + (15.5, 16)(cs:48766 语义,≈2×2 中心)
-          this.boulderFall?.(ax, ay, ush);
-        }
-      }
-    }
+    // ★R20-I4(造行为摘除,2026-08-24):原版 DeActive（Wiring.cs:3208-3236）无任何
+    // 巨石逻辑——Check2x2 失撑判据（WorldGen.cs:48937-48944）只查
+    // active()+tileSolid/tileSolidTop/halfBrick/slope,**不含 inActive 位**,
+    // 致动缩入的支撑块在原版仍算"有支撑"→ 巨石不会因下方被致动而滚出。
+    // 巨石→弹 99 只发生在支撑被【真实破坏】的 Check2x2 链（失撑+无墙→KillTile
+    // 整件+弹;失撑+有墙→frameX+72 隐没,WorldGen.cs:48945-48984）——该链由
+    // Game.breakTile 的 BOULDER_SUPPORT_SHEETS 支承担（spawnBoulderRoll）。
+    // 我方曾在致动缩入后强清上方巨石并生成弹 99("压板→致动石栅→巨石坠"演出)
+    // = 自造行为,摘除。
   }
 
   /** WorldGen.CanKillTile 结构子集（WorldGen.cs:62249-62358，致动缩入门用）：
    *  未激活/魔法冰墙 350 → false；上方是异种树干/宝箱族/棕榈/雕像承载位 → false。
    *  Boulders+CheckBoulderChest/IsLockedDoor/Chest.CanDestroyChest（容器战利品）
    *  依赖容器内容与门锁系统，未接入——恒按"可杀"处理（注释登记） */
-  private canKillTile(i: number, j: number): boolean {
+  /** WorldGen.CanKillTile 结构子集——★R20-I6 起 devices.ts case 130 亦消费（公开） */
+  canKillTile(i: number, j: number): boolean {
     const st = this.st;
     if (!st.inBounds(i, j)) return false;
     const t = this.p2i(i, j);
@@ -765,12 +758,15 @@ export class Wiring {
    * 宏伟蓝图/五彩扳手 L 形批量操作。
    * mode: TOOL_* 位组合;consume 回调返回剩余可用数(false=耗尽),
    * 返回实际消耗 {wire, actuator}。
+   * dirFirstVertical: 原版 `dir = player.direction == 1`（Wiring.cs:3259/:436）——
+   * ★R20-A11:曾恒 true(先垂直段),玩家朝左时 L 形走向与原版相反
    */
   massWireOperation(
     ps: [number, number], pe: [number, number], mode: number,
     wires: number, actuators: number,
+    dirFirstVertical = true,
   ): { wire: number; actuator: number; aborted: boolean } {
-    const dir = true; // 原版 dir = player.direction==1;先垂直段。false 时先水平
+    const dir = dirFirstVertical;
     let wireLeft = wires, actuatorLeft = actuators;
     let aborted = false;
     const step = (x: number, y: number): boolean => {

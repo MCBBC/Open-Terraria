@@ -1,27 +1,38 @@
-// 角色创建页（DOM 版，M2.5 重写；2026-08 布局层对齐原版 UICharacterCreation 1.4.5.6）：
+// 角色创建页（DOM 版；2026-08 二轮重制——页签条恢复原版 10 个一级页签 + 图标贴图直出 +
+// 几何 1:1 对齐 UICharacterCreation（Terarria1457 Terraria.GameContent.UI.States，1.4.5.6/7 同构））：
 //  · 面板底 = Inventory_Back13 九宫染色（Utils.DrawInvBG :2672-2691，同暂停菜单 invBgDataUrl）
-//  · 角色预览移出面板，站立在面板上沿世界背景中（MakeCharPreview :236-250，UICharacter
-//    Top=-70 悬于面板上方 + 行走动画；本仓放大 3x）——全页唯一 canvas（角色渲染管线）
-//  · 顶部图标页签条 = UIColoredImageButton 44×44（MakeCategoriesBar :732-770）：
-//    CategoryPanel 底常态 0.4 暗、悬停 CategoryPanelBorder 金框、选中 CategoryPanelHighlight
-//    亮底；条下 UIHorizontalSeparator 分隔线（:772-781，Separator1 × Lerp(White,(63,65,151),.85)*.9）
-//    ——原版 10 页签（7 色钮+服装+发型+信息），本仓把 7 个颜色页签合并为 1 个颜色页
-//    （页内一行部位选择钮，语义不变）；页签图标 = CSS mask 贴图 + background-color 染色
-//    （外观页签 = ColorCharacter 七层剪影逐层染色，同 _clothingStylesCategoryButton_OnUpdate :803-812）
-//  · 信息页 = 名字条（UICharacterNameButton :848-867，CategoryPanel×White*.5 长条）+
-//    竖排四难度钮（UIDifficultyButton :871-935，PanelGrayscale × Lerp(Black,color,.8)*.5，
-//    选中内衬 Lerp(color,White,.7)*.5）+ 右侧描述气泡（CategoryPanelHighlight×LightGray*.7
-//    :880-890，文案 LegacyMenu.29/30/31 + UI.CreativeDescriptionPlayer :949-967）+
-//    性别两钮（本仓自有——原版性别走服装页签）
-//  · 外观页 = UIClothStyleButton 44×80 十连排（:311-335）+ 复制/粘贴/随机外观模板小钮
-//    （:396-430，SmallPanel 底 + Copy/Paste/Randomize 20×20 图标）
-//  · 发型页 = UIHairStyleButton 44×44 网格 10 列 46px 栅格（MakeHairstylesMenu :254-304）+
-//    滚动条；下沿 翻页箭头（TexturePackButtons 下排两帧，原版语音箭头位）+ 音符随机发型
-//    （Voice 图标；本仓语义：箭头=上一个/下一个发型、音符=随机发型）
-//  · 颜色页 = 部位选择行（原版为页签条七色钮 ColorHair/ColorEye/... 染当前色）+ HSL 三滑杆
-//    （UIColoredSlider.DrawValueBar :107-164：ColorBar 框 + 167×ColorBlip 渐变条 + ColorSlider
-//    滑块；渐变随当前 HSL 联动 :1130-1141——DOM 实现：ColorBar 底 + linear-gradient 填充 +
-//    ColorSlider 滑块 img）+ HEX 显示 + 复制/粘贴 HEX/随机（Click_CopyHex :1337 等）
+//  · 角色预览 = 面板上方居中（MakeCharPreview :252-270：UICharacter 80×80 Top=-70 悬于面板上沿、
+//    characterScale 1.5 → 纸娃娃 40×56 源帧 1.5x = 60×84，脚踩进面板上沿 ~2px）——全页唯一 canvas
+//  · 页签条 = UIColoredImageButton 44×44 十连一级平铺（MakeCategoriesBar :732-796）：
+//    原版顺序 信息/服装/发型/发色/眼睛/皮肤/衬衫/内衣/裤装/鞋子，Left = id*48（面板内 x10 起，
+//    间距 48 = 44 宽 + 4 缝）；底 = CategoryPanel 常态 0.4 暗（_visibilityInactive :17）、
+//    悬停 CategoryPanelBorder 金框、选中 CategoryPanelHighlight 亮底（36×36 居中）；
+//    条下 UIHorizontalSeparator（Separator1 6×4 边 2 拉伸，宽 475 = 100%-25，:779-788）
+//  · 页签图标 = 原版贴图直出（<img> 静态层 / tintedDataUrl 乘色 dataURL 底图层，禁 CSS mask）：
+//    UIColoredImageButton.DrawSelf :52-76 层序 = 底板→悬停框→选中框→中贴图→主贴图(乘 _color)，
+//    SetColor = SpriteBatch 乘色 → 本仓 canvas multiply 同式：
+//      信息 = CharInfo（素贴图）；服装 = ColorCharacter 七帧剪影逐层乘当前七色
+//       （:749-763 七层 UIImageFramed + _clothingStylesCategoryButton_OnUpdate :798-806）；
+//      发型 = HairStyle_Arrow（中贴图，在下）+ HairStyle_Hair 乘发色（主贴图，在上）；
+//      眼睛 = ColorEyeBack（中贴图，在下，:744）+ ColorEye 乘眼色；
+//      其余五色钮 = ColorHair/ColorSkin/ColorShirt/ColorUndershirt/ColorPants/ColorShoes 乘当前部位色
+//  · 几何（BuildPage :203-247）= 外层 500×384：面板 UIPanel 500×230（Top 50）+ 底部
+//    UITextPanel 返回/创建 240×50（50%-10，VAlign 1 Top -45 → 面板下沿 9px）；
+//    页签容器高 50（padding-top 4）+ 分隔线（+2）+ 中部容器 160（padding-top 3）
+//  · 信息页（MakeInfoMenu :845-935）= 名字条 480×40（UICharacterNameButton CategoryPanel×White*.5）
+//    + 竖排四难度钮 188×27.5 ×4（Width 40%-4、Height 1/4 无缝平铺，:886-921 追加序 旅程/经典/中核/硬核）
+//    + 右侧描述气泡 280×110（CategoryPanelHighlight×LightGray*.7 :880-890，文案 LegacyMenu.29/30/31
+//    + UI.CreativeDescriptionPlayer :949-967；正文 Top 15 左右 padding 20 左对齐）——
+//    原版无性别行（性别走服装页签十样式），本仓同删
+//  · 服装页（MakeClothStylesMenu :297-311）= UIClothStyleButton 44×80 十连
+//    Left = i*46 + (i<5 ? 11 : 29)（男女组间 20px 空档）+ 组下分隔线（宽 442 @y89）+ 复制/粘贴/随机
+//  · 发型页（MakeHairstylesMenu :272-304）= UIHairStyleButton 44×44 网格 10 列 46/48 栅格 + 滚动条；
+//    下沿翻页箭头（TexturePackButtons 下排两帧）+ 音符随机（本仓语义：箭头=上/下一个发型、音符=随机）
+//  · 颜色页（MakeHSLMenu :936-1006）= UIPanel 220×104（Top 10）内三根 HSL 滑杆（行距 30、
+//    UIColoredSlider.DrawValueBar :107-164：ColorBar 178×16 @行内(22,18) + 167 枚 ColorBlip 2×8 渐变条
+//    @(27,22) + ColorSlider 11×25 滑块中心 @(27+167*v, 26) + 悬停 Slider_Highlight×OurFavoriteColor
+//    (255,231,69)；取值矩形 = 杆内缩 (3,4,174,8)）+ 右下 HEX 框 100×32（UIPanel 底
+//    PanelBackground×(63,82,151)*.7 + PanelBorder 黑）+ 左下 复制/粘贴/随机三小钮（间距 40）
 //  · 缩略图（发型 213 格/外观 10 格）= 纸娃娃管线烘一张 sprite sheet（dataURL）→
 //    格子用 CSS background-position 切片（组件本身零 canvas；色变防抖 250ms 重烘）
 // 数据流与回调（onCreate/onCancel/dresser 更衣窗/salon 理发窗/priceOf 报价/appearance 字段/
@@ -44,34 +55,50 @@ export interface CharCreationCallbacks {
 }
 
 /** 面板形态：
- *  - 默认 = 角色创建（LegacyMenu.16 标题 + 信息/外观/发型/颜色四页签）；
- *  - dresser = 梳妆台更衣窗（Main.OpenClothesWindow Main.cs:43568——只改衣服样式与
- *    六色，不含姓名/难度/发型；发型原版归造型师）。initial 必填（以现外观为底稿）。 */
+ *  - 默认 = 角色创建（原版 10 一级页签全量）；
+ *  - dresser = 梳妆台更衣窗（Main.OpenClothesWindow Main.cs:44886——只改衣服样式与六色，
+ *    不含姓名/难度/发型；发型原版归造型师）→ 页签 = 服装 + 六色（无发色）；
+ *  - salon = 造型师理发窗（Main.OpenHairWindow Main.cs:44391——快照 oldHairStyle/oldHairColor）
+ *    → 页签 = 发型 + 发色，确认=购买（付费改名目走 priceOf 实时显示，GameUI.BuyWithValue）；
+ *    priceOf = 当前改动报价（铜币；Main.cs:43198-43211 逐行） */
 export interface CharCreationOptions {
   initial?: Appearance;
   dresser?: boolean;
-  /** 造型师理发窗（Main.OpenHairWindow Main.cs:43073-43081）：仅发型+发色两页签，
-   *  确认=购买（付费改名目走 priceOf 实时显示，GameUI.BuyWithValue）；取消回退。
-   *  priceOf = 当前改动报价（铜币；Main.cs:43198-43211 逐行） */
   hairSalon?: boolean;
   priceOf?: (a: Appearance) => number;
 }
 
-const COLOR_ROWS: Array<{ key: keyof Appearance; labelKey: string; dresser?: boolean }> = [
-  { key: 'hairColor', labelKey: 'UI.PlayerCreateCategoryHairColor' },   // 发型颜色=造型师域，梳妆台不提供
-  { key: 'eyeColor', labelKey: 'UI.PlayerCreateCategoryEyeColor', dresser: true },
-  { key: 'skinColor', labelKey: 'UI.PlayerCreateCategorySkinColor', dresser: true },
-  { key: 'shirtColor', labelKey: 'UI.PlayerCreateCategoryShirtColor', dresser: true },
-  { key: 'undershirtColor', labelKey: 'UI.PlayerCreateCategoryUndershirtColor', dresser: true },
-  { key: 'pantsColor', labelKey: 'UI.PlayerCreateCategoryPantsColor', dresser: true },
-  { key: 'shoeColor', labelKey: 'UI.PlayerCreateCategoryShoesColor', dresser: true },
-];
+/** 页签 → 编辑部位（七色页签即部位页：点页签 = 选中该部位，页内三滑杆编辑它的颜色） */
+const TAB_PART: Partial<Record<string, keyof Appearance>> = {
+  hairColor: 'hairColor', eye: 'eyeColor', skin: 'skinColor', shirt: 'shirtColor',
+  undershirt: 'undershirtColor', pants: 'pantsColor', shoes: 'shoeColor',
+};
 
-/** 部位 → 页签条七色钮贴图（MakeCategoriesBar :737-743；兼作 CSS mask 类生成表） */
-const PART_TEX: Array<[keyof Appearance, string]> = [
-  ['hairColor', 'ColorHair'], ['eyeColor', 'ColorEye'], ['skinColor', 'ColorSkin'],
-  ['shirtColor', 'ColorShirt'], ['undershirtColor', 'ColorUndershirt'],
-  ['pantsColor', 'ColorPants'], ['shoeColor', 'ColorShoes'],
+/** 页签悬停提示（UpdateHoverText :1944-1978 的 UI.PlayerCreateCategory* 族） */
+const TAB_TIP: Record<string, string> = {
+  info: 'UI.PlayerCreateCategoryInfo',
+  look: 'UI.PlayerCreateCategoryBodyStyle',
+  hair: 'UI.PlayerCreateCategoryHairStyle',
+  hairColor: 'UI.PlayerCreateCategoryHairColor',
+  eye: 'UI.PlayerCreateCategoryEyeColor',
+  skin: 'UI.PlayerCreateCategorySkinColor',
+  shirt: 'UI.PlayerCreateCategoryShirtColor',
+  undershirt: 'UI.PlayerCreateCategoryUndershirtColor',
+  pants: 'UI.PlayerCreateCategoryPantsColor',
+  shoes: 'UI.PlayerCreateCategoryShoesColor',
+};
+
+/** 页签图标贴图名（Images/UI/CharCreation/*；素材树 terraria-assets/Images/UI/CharCreation
+ *  已 1:1 镜像进 public/sprites/vanilla-ui/UI_CharCreation_*.png，md5 同源） */
+const TAB_ICON_TEX: Partial<Record<string, string>> = {
+  info: 'CharInfo', hair: 'HairStyle_Hair', hairColor: 'ColorHair', eye: 'ColorEye',
+  skin: 'ColorSkin', shirt: 'ColorShirt', undershirt: 'ColorUndershirt',
+  pants: 'ColorPants', shoes: 'ColorShoes',
+};
+
+/** 服装页签七层剪影的层序 = 部位顺序（_clothingStylesCategoryButton_OnUpdate :798-806） */
+const LOOK_LAYERS: Array<keyof Appearance> = [
+  'hairColor', 'eyeColor', 'skinColor', 'shirtColor', 'undershirtColor', 'pantsColor', 'shoeColor',
 ];
 
 // ================= 原版贴图小工具 =================
@@ -95,29 +122,52 @@ function loadImg(src: string): Promise<Img> {
   return p;
 }
 
+/** 页签/滑杆用贴图缓存（prepareAssets 预载；未就绪时取 null，就绪后重刷） */
+const iconImgs = new Map<string, Img>();
+function iconImg(name: string): Img | null {
+  const img = iconImgs.get(name);
+  return img && img.complete && img.naturalWidth ? img : null;
+}
+
 /** 白模染色（multiply + destination-in 半透明回贴 = XNA Color*float 同乘 RGBA）→ dataURL。
- *  仅用于生成 CSS 变量里的静态染色底板（面板条/气泡/分隔线/难度钮），不落组件 canvas */
+ *  仅用于生成 CSS 变量/图标底图的静态染色位（面板条/气泡/分隔线/难度钮/页签图标），不落组件 canvas */
 const tintDataCache = new Map<string, string>();
 function tintedDataUrl(img: Img, r: number, g: number, b: number, aMul = 1): string {
   const key = `${img.src}|${r},${g},${b},${aMul}`;
   const hit = tintDataCache.get(key);
   if (hit) return hit;
-  const cv = document.createElement('canvas');
-  cv.width = img.width; cv.height = img.height;
-  const c = cv.getContext('2d', { willReadFrequently: true })!;
-  c.imageSmoothingEnabled = false;
-  c.drawImage(img, 0, 0);
-  c.globalCompositeOperation = 'multiply';
-  c.fillStyle = `rgb(${r},${g},${b})`;
-  c.fillRect(0, 0, cv.width, cv.height);
-  c.globalCompositeOperation = 'destination-in';
-  c.globalAlpha = aMul;
-  c.drawImage(img, 0, 0);
-  c.globalAlpha = 1;
-  c.globalCompositeOperation = 'source-over';
-  const url = cv.toDataURL();
+  const url = bakeTint(img, 0, 0, img.naturalWidth, img.naturalHeight, r, g, b, aMul);
   tintDataCache.set(key, url);
   return url;
+}
+
+/** 帧裁剪版染色（ColorCharacter 七帧剪影逐层乘色用；同缓存键空间） */
+function tintedCropDataUrl(img: Img, sx: number, sy: number, sw: number, sh: number,
+  r: number, g: number, b: number): string {
+  const key = `${img.src}|${sx},${sy},${sw},${sh}|${r},${g},${b}`;
+  const hit = tintDataCache.get(key);
+  if (hit) return hit;
+  const url = bakeTint(img, sx, sy, sw, sh, r, g, b, 1);
+  tintDataCache.set(key, url);
+  return url;
+}
+
+function bakeTint(img: Img, sx: number, sy: number, sw: number, sh: number,
+  r: number, g: number, b: number, aMul: number): string {
+  const cv = document.createElement('canvas');
+  cv.width = sw; cv.height = sh;
+  const c = cv.getContext('2d', { willReadFrequently: true })!;
+  c.imageSmoothingEnabled = false;
+  c.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  c.globalCompositeOperation = 'multiply';
+  c.fillStyle = `rgb(${r},${g},${b})`;
+  c.fillRect(0, 0, sw, sh);
+  c.globalCompositeOperation = 'destination-in';
+  c.globalAlpha = aMul;
+  c.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  c.globalAlpha = 1;
+  c.globalCompositeOperation = 'source-over';
+  return cv.toDataURL();
 }
 
 /** XNA Color.Lerp（逐通道 Round） */
@@ -134,28 +184,43 @@ function injectVars(entries: Array<[string, string]>): void {
   st.textContent = ':root{' + entries.map(([k, v]) => `${k}:${v};`).join('') + '}';
 }
 
-/** 按钮 chrome 所需的染色底板（幂等；完成后给面板盖 ready 章 → 显形 mask 染色图标） */
+/** 页签图标贴图清单（MakeCategoriesBar 引用全量 + UIPanel/滑杆 chrome） */
+const ICON_TEX_NAMES = [
+  'CharInfo', 'ColorCharacter', 'HairStyle_Hair', 'HairStyle_Arrow', 'ColorEyeBack',
+  'ColorEye', 'ColorHair', 'ColorSkin', 'ColorShirt', 'ColorUndershirt', 'ColorPants', 'ColorShoes',
+];
+
+/** 按钮 chrome 所需的染色底板 + 图标贴图预载（幂等；完成后给面板盖 ready 章） */
 let assetsPromise: Promise<void> | null = null;
 function prepareAssets(): Promise<void> {
   if (assetsPromise) return assetsPromise;
   assetsPromise = (async () => {
-    const [cat, hl, gray, small, sep] = await Promise.all(
-      ['CategoryPanel', 'CategoryPanelHighlight', 'PanelGrayscale', 'SmallPanel', 'Separator1']
-        .map((n) => loadImg(UI_TEX(n))));
+    const [cat, hl, gray, small, sep, panelBg, panelBorder, sliderHl] = await Promise.all(
+      ['CategoryPanel', 'CategoryPanelHighlight', 'PanelGrayscale', 'SmallPanel', 'Separator1',
+        'UI_PanelBackground', 'UI_PanelBorder', 'UI_Slider_Highlight']
+        .map((n) => loadImg(n.startsWith('UI_')
+          ? `sprites/vanilla-ui/${n}.png`
+          : UI_TEX(n))));
+    await Promise.all(ICON_TEX_NAMES.map(async (n) => {
+      try { iconImgs.set(n, await loadImg(UI_TEX(n))); } catch { /* 贴图缺失时图标留空 */ }
+    }));
     const v: Array<[string, string]> = [
       ['--cc-catpanel', `url(${UI_TEX('CategoryPanel')})`],
       ['--cc-catborder', `url(${UI_TEX('CategoryPanelBorder')})`],
       ['--cc-cathl', `url(${UI_TEX('CategoryPanelHighlight')})`],
       ['--cc-smallpanel', `url(${UI_TEX('SmallPanel')})`],
       ['--cc-smallborder', `url(${UI_TEX('SmallPanelBorder')})`],
-      // 名字条/性别钮/外观钮：CategoryPanel × White*0.5（UICharacterNameButton.DrawSelf :62）
+      // 名字条/外观钮：CategoryPanel × White*0.5（UICharacterNameButton.DrawSelf :62）
       ['--cc-namebar', `url(${tintedDataUrl(cat, 255, 255, 255, 0.5)})`],
       // 难度描述气泡：CategoryPanelHighlight × LightGray(211,211,211)*0.7（MakeInfoMenu :889）
       ['--cc-bubble', `url(${tintedDataUrl(hl, Math.round(211 * 0.7), Math.round(211 * 0.7), Math.round(211 * 0.7), 0.7)})`],
-      // 页签条下分隔线：Separator1 × Lerp(White,(63,65,151),.85)*.9（MakeCategoriesBar :779）
+      // 页签条下分隔线：Separator1 × Lerp(White,(63,65,151),.85)*.9（MakeCategoriesBar :786）
       ['--cc-sep', `url(${tintedDataUrl(sep, lerpC(255, 63, 0.85), lerpC(255, 65, 0.85), lerpC(255, 151, 0.85), 0.9)})`],
-      // HEX 面板：SmallPanel × White*0.55
-      ['--cc-hexbg', `url(${tintedDataUrl(small, 255, 255, 255, 0.55)})`],
+      // UIPanel 底（HEX 框/HSL 面板）：PanelBackground × (63,82,151)*0.7 + PanelBorder 黑（UIPanel.cs:15-16）
+      ['--cc-panelbg', `url(${tintedDataUrl(panelBg, Math.round(63 * 0.7), Math.round(82 * 0.7), Math.round(151 * 0.7), 0.7)})`],
+      ['--cc-panelborder', `url(${tintedDataUrl(panelBorder, 0, 0, 0, 1)})`],
+      // 滑杆悬停亮框：Slider_Highlight × OurFavoriteColor(255,231,69)（Main.cs:886 / UIColoredSlider :159）
+      ['--cc-sliderhl', `url(${tintedDataUrl(sliderHl, 255, 231, 69, 1)})`],
     ];
     // 四难度钮：PanelGrayscale × Lerp(Black,color,.8)*.5 / 选中内衬 Lerp(color,White,.7)*.5
     // （UIDifficultyButton.DrawSelf :51-60；颜色表 = DIFFICULTY_INFO 同 UIDifficultyButton 传参）
@@ -233,9 +298,16 @@ function fromHex(s: string): RGBColor {
   return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
 }
 
-/** 部位 mask 染色图标类（贴图 alpha 作蒙版 + background-color 染色——纯 DOM） */
-const PART_MASK_CSS = PART_TEX.map(([k, t]) =>
-  `.sw-cc-m-${k}{-webkit-mask-image:url(${UI_TEX(t)});mask-image:url(${UI_TEX(t)});}`).join('');
+/** 静态贴图图标层（<img> 直出原版贴图，禁 mask 染色） */
+function staticIcon(tex: string, w: number, h: number): HTMLImageElement {
+  const img = document.createElement('img');
+  img.src = UI_TEX(tex);
+  img.draggable = false;
+  img.className = 'sw-cc-tabimg';
+  img.width = w;
+  img.height = h;
+  return img;
+}
 
 const CSS = `
 :where(.sw-char-panel) :where(button) { font-family: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
@@ -248,47 +320,49 @@ const CSS = `
 }
 .sw-char-title { font-size: 16px; color: #ffe8a0; margin-bottom: 4px;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
-/* 角色预览：面板上方世界背景中（MakeCharPreview Top=-70；pointer-events none 防挡页签）
+/* 角色预览：面板上方居中（MakeCharPreview :252-270，1.5x → 60×84；脚踩面板上沿 ~2px）
    ——全页唯一 canvas（纸娃娃渲染管线） */
-.sw-char-preview { image-rendering: pixelated; pointer-events: none; margin-bottom: -6px; position: relative; z-index: 1; }
-/* Inventory_Back13 九宫面板底（Utils.DrawInvBG）；素材未载时退纯色 */
+.sw-char-preview { width: 60px; height: 84px; image-rendering: pixelated; pointer-events: none;
+  margin-bottom: -2px; position: relative; z-index: 1; }
+/* Inventory_Back13 九宫面板底（Utils.DrawInvBG）；素材未载时退纯色。
+   面板 = 500×230（BuildPage :210-222：UIPanel 500×230 Top 50） */
 .sw-char-body {
-  width: 100%; box-sizing: border-box; padding: 2px 10px 12px;
+  width: 500px; height: 230px; box-sizing: border-box; padding: 0 10px 14px;
   background-color: #241a56; background-repeat: no-repeat; background-size: 100% 100%;
   image-rendering: pixelated;
 }
-/* ---- 图标页签条（UIColoredImageButton 44×44）---- */
-.sw-char-tabs { display: flex; justify-content: center; gap: 4px; height: 50px; padding-top: 3px; box-sizing: border-box; }
-.sw-cc-tab { position: relative; width: 44px; height: 44px; image-rendering: pixelated; }
+/* ---- 图标页签条（UIColoredImageButton 44×44 十连；容器高 50 含 padding-top 4，
+        Left = id*48 → 面板内 x10 起、间距 48）---- */
+.sw-char-tabs { position: relative; height: 50px; }
+.sw-cc-tab { position: absolute; top: 4px; width: 44px; height: 44px; image-rendering: pixelated; }
 .sw-cc-tab::before { content: ''; position: absolute; inset: 0; z-index: 0;
   background: var(--cc-catpanel) center / 100% 100% no-repeat; opacity: 0.4; }
 .sw-cc-tab:hover::before { opacity: 1; }
 .sw-cc-tab::after { content: ''; position: absolute; inset: 0; z-index: 1; opacity: 0;
-  background: var(--cc-catborder) center / 100% 100% no-repeat; }
+  background: var(--cc-catborder) center / 100% 100% no-repeat; pointer-events: none; }
 .sw-cc-tab:hover::after { opacity: 1; }
-.sw-cc-tab .hl { position: absolute; inset: 0; z-index: 2; display: none;
+.sw-cc-tab .hl { position: absolute; inset: 0; z-index: 2; display: none; pointer-events: none;
   background: var(--cc-cathl) center / 36px 36px no-repeat; }
 .sw-cc-tab.active .hl { display: block; }
+/* 图标层：静态 <img> 与乘色底图层同位叠放（DrawSelf :52-76 层序 = 中贴图在下、主贴图在上） */
 .sw-cc-tabimg { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 3; image-rendering: pixelated; }
-/* CSS mask 染色图标（贴图 alpha 蒙版 + background-color；ready 前隐防色块闪现） */
-.sw-cc-ico { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 3; }
-.sw-cc-ico > i, .sw-cc-ico > img { position: absolute; inset: 0; width: 100%; height: 100%; }
-.sw-cc-ico > img { image-rendering: pixelated; }
-.sw-cc-tint { visibility: hidden; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
-  -webkit-mask-size: 100% 100%; mask-size: 100% 100%; -webkit-mask-position: 0 0; mask-position: 0 0; }
-.sw-char-panel.ready .sw-cc-tint { visibility: visible; }
-.sw-cc-m-cc { -webkit-mask-image: url(sprites/vanilla-ui/UI_CharCreation_ColorCharacter.png); mask-image: url(sprites/vanilla-ui/UI_CharCreation_ColorCharacter.png);
-  -webkit-mask-size: 26px 238px; mask-size: 26px 238px; }
-${PART_MASK_CSS}
-/* 页签条下分隔线（UIHorizontalSeparator：Separator1 边 2 拉伸） */
-.sw-char-sep { width: 100%; height: 4px; margin-bottom: 4px; box-sizing: border-box;
+.sw-cc-tinted { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 4;
+  width: 30px; height: 30px; background-repeat: no-repeat; background-size: 100% 100%;
+  image-rendering: pixelated; pointer-events: none; }
+/* 页签条下分隔线（UIHorizontalSeparator：Separator1 边 2 拉伸；宽 475 = 100%-25） */
+.sw-char-sep { height: 4px; margin-top: 2px; width: calc(100% - 5px); box-sizing: border-box;
   border: 2px solid transparent; border-image: var(--cc-sep) 2 fill stretch; image-rendering: pixelated; }
-.sw-char-content { height: 240px; overflow: hidden; position: relative; }
-/* ---- 底部宽按钮（UITextPanel：50%-10 × 50px 并排）---- */
-.sw-char-footer { display: flex; justify-content: center; gap: 20px; width: 100%; margin-top: 6px; }
-.sw-char-footer .sw-vbtn { width: calc(50% - 10px); height: 44px; font-size: 15px; letter-spacing: 2px; }
-/* ---- 信息页 ---- */
-.sw-cc-info { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; padding-top: 2px; }
+/* 中部容器（BuildPage :223-231：高 160、padding-top 3） */
+.sw-char-content { height: 160px; padding-top: 3px; box-sizing: border-box; position: relative; }
+/* ---- 底部宽按钮（UITextPanel：50%-10 × 50px 并排，VAlign 1 Top -45 → 面板下沿 9px）---- */
+.sw-char-footer { display: flex; justify-content: space-between; width: 100%; margin-top: 9px; }
+.sw-char-footer .sw-vbtn { width: calc(50% - 10px); height: 50px; font-size: 15px; letter-spacing: 2px; }
+/* ---- UIPanel 九宫底（PanelBackground × (63,82,151)*.7 + PanelBorder 黑；角 12 条 4）---- */
+.sw-cc-panelbg::before, .sw-cc-panelbg::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+  border: 12px solid transparent; border-image: var(--cc-panelbg) 12 fill stretch; }
+.sw-cc-panelbg::after { border-image: var(--cc-panelborder) 12 fill stretch; }
+/* ---- 信息页（MakeInfoMenu :845-935）---- */
+.sw-cc-info { position: relative; height: 100%; }
 .sw-cc-namebar { position: relative; height: 40px; box-sizing: border-box; flex: none;
   display: flex; align-items: center; gap: 8px; padding: 0 4px 0 10px; cursor: text;
   border: 10px solid transparent; border-image: var(--cc-namebar) 10 fill stretch; }
@@ -301,36 +375,34 @@ ${PART_MASK_CSS}
 .sw-cc-nameval-text.empty { color: #8b93b8; }
 .sw-cc-nameval input[type=text] { position: absolute; inset: 0; width: 100%; height: 100%;
   opacity: 0; border: none; padding: 0; margin: 0; background: none; cursor: text; }
-.sw-cc-infolow { display: flex; gap: 8px; margin-top: 8px; flex: 1; min-height: 0; }
-.sw-cc-diffs { width: 42%; flex: none; display: flex; flex-direction: column; gap: 3px; }
+/* 中段：难度列 188×110（Width 40%-4，VAlign 1）+ 气泡 280×110（Width 60%-8，右缩 4） */
+.sw-cc-infolow { position: absolute; left: 0; right: 0; bottom: 0; height: 110px; }
+.sw-cc-diffs { position: absolute; left: 0; top: 0; width: 188px; height: 110px;
+  display: flex; flex-direction: column; }
 /* 底板走 ::before（元素本身无边框）——绝对定位子层(.sel/文字)按 padding box
  *  解析,元素带 border-image 边框会把子层整体挤偏 10px（实测勘误） */
-.sw-cc-diff, .sw-cc-gbtn { position: relative; box-sizing: border-box; image-rendering: pixelated; text-align: center; }
-.sw-cc-diff { flex: 1; }
+.sw-cc-diff { position: relative; flex: 1; box-sizing: border-box; image-rendering: pixelated; text-align: center; }
 .sw-cc-diff::before { content: ''; position: absolute; inset: 0;
   border: 10px solid transparent; border-image: var(--cc-diffbase) 10 fill stretch; }
-.sw-cc-gbtn::before { content: ''; position: absolute; inset: 0;
-  border: 10px solid transparent; border-image: var(--cc-namebar) 10 fill stretch; }
-.sw-cc-diff::after, .sw-cc-gbtn::after { content: ''; position: absolute; inset: 0; opacity: 0; pointer-events: none;
+.sw-cc-diff::after { content: ''; position: absolute; inset: 0; opacity: 0; pointer-events: none;
   border: 10px solid transparent; border-image: var(--cc-catborder) 10 fill stretch; }
-.sw-cc-diff:hover::after, .sw-cc-gbtn:hover::after { opacity: 1; }
-.sw-cc-diff .sel, .sw-cc-gbtn .sel { position: absolute; inset: 7px; display: none; pointer-events: none; box-sizing: border-box;
+.sw-cc-diff:hover::after { opacity: 1; }
+/* 选中内衬：UIDifficultyButton num=7(高<30 取 5) → x+5 y+3 w-10 h-10（:56-58） */
+.sw-cc-diff .sel { position: absolute; inset: 3px 5px 5px; display: none; pointer-events: none; box-sizing: border-box;
   border: 10px solid transparent; border-image: var(--cc-diffsel) 10 fill stretch; }
-.sw-cc-gbtn .sel { border-image: var(--cc-cathl) 10 fill stretch; }
-.sw-cc-diff.active .sel, .sw-cc-gbtn.active .sel { display: block; }
-.sw-cc-difftxt, .sw-cc-gbtntxt { position: absolute; left: 0; right: 0; top: 4px; z-index: 1;
+.sw-cc-diff.active .sel { display: block; }
+.sw-cc-difftxt { position: absolute; left: 0; right: 0; top: 4px; z-index: 1;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
-.sw-cc-diffdesc { flex: 1; min-width: 0; box-sizing: border-box; display: flex; align-items: center;
+/* 描述气泡（UISlicedImage CategoryPanelHighlight×LightGray*.7；正文 Top 15 左右 20、
+ *  UIText TextOriginX=0.5 水平居中 :84-85） */
+.sw-cc-diffdesc { position: absolute; right: 4px; top: 0; width: 280px; height: 110px; box-sizing: border-box;
   border: 10px solid transparent; border-image: var(--cc-bubble) 10 fill stretch;
-  padding: 2px 4px; font-size: 12px; line-height: 1.6; color: #fff;
+  padding: 13px 20px 0; font-size: 12px; line-height: 1.6; color: #fff; text-align: center;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
-.sw-cc-gender { flex: none; height: 30px; margin-top: 8px; display: flex; align-items: stretch; gap: 8px; }
-.sw-cc-genderlbl { flex: none; align-self: center; color: #cfd6f4; }
-.sw-cc-gbtn { width: 90px; }
-/* ---- 外观页（UIClothStyleButton 44×80 十连排）---- */
-.sw-cc-look { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; height: 100%; }
-.sw-cc-styles { display: flex; gap: 2px; }
-.sw-cc-stylebtn { position: relative; width: 44px; height: 80px; image-rendering: pixelated; }
+/* ---- 服装页（MakeClothStylesMenu :297-311：44×80 十连 Left=i*46+(i<5?11:29)）---- */
+.sw-cc-look { position: relative; height: 100%; }
+.sw-cc-styles { position: absolute; left: 0; top: 0; width: 100%; height: 80px; }
+.sw-cc-stylebtn { position: absolute; top: 0; width: 44px; height: 80px; image-rendering: pixelated; }
 .sw-cc-stylebtn::before { content: ''; position: absolute; inset: 0;
   border: 10px solid transparent; border-image: var(--cc-namebar) 10 fill stretch; }
 .sw-cc-stylebtn::after { content: ''; position: absolute; inset: 0; z-index: 2; opacity: 0; pointer-events: none;
@@ -338,27 +410,25 @@ ${PART_MASK_CSS}
 .sw-cc-stylebtn:hover::after { opacity: 1; }
 .sw-cc-stylebtn .hl { position: absolute; inset: 3px; z-index: 1; display: none; pointer-events: none; box-sizing: border-box;
   border: 10px solid transparent; border-image: var(--cc-cathl) 10 fill stretch; }
-.sw-cc-stylebtn .sw-cc-thumb { z-index: 3; }
 .sw-cc-stylebtn.active .hl { display: block; }
 /* 缩略图 = 烘焙 sprite sheet 的 background-position 切片（组件零 canvas） */
 .sw-cc-thumb { position: absolute; inset: 0; background-repeat: no-repeat; image-rendering: pixelated; }
-.sw-cc-looklow { display: flex; gap: 10px; }
-/* ---- 小方钮（UIColoredImageButton isSmall：SmallPanel 32×32 底）---- */
-.sw-cc-small, .sw-cc-part { position: relative; width: 32px; height: 32px; image-rendering: pixelated; }
-.sw-cc-small::before, .sw-cc-part::before { content: ''; position: absolute; inset: 0; z-index: 0;
-  background: var(--cc-smallpanel) center / 100% 100% no-repeat; opacity: 0.5; }
-.sw-cc-small:hover::before, .sw-cc-part:hover::before { opacity: 1; }
-.sw-cc-small::after, .sw-cc-part::after { content: ''; position: absolute; inset: 0; z-index: 1; opacity: 0;
+.sw-cc-stylebtn .sw-cc-thumb { z-index: 3; }
+.sw-cc-looksep { position: absolute; left: 19px; top: 89px; width: 442px; height: 4px; box-sizing: border-box;
+  border: 2px solid transparent; border-image: var(--cc-sep) 2 fill stretch;
+  image-rendering: pixelated; pointer-events: none; }
+.sw-cc-looklow { position: absolute; left: 0; right: 0; top: 106px; display: flex; justify-content: center; }
+/* ---- 小方钮（UIColoredImageButton isSmall：SmallPanel 32×32 底，常态 0.4 暗）---- */
+.sw-cc-small { position: relative; width: 32px; height: 32px; image-rendering: pixelated; }
+.sw-cc-small::before { content: ''; position: absolute; inset: 0; z-index: 0;
+  background: var(--cc-smallpanel) center / 100% 100% no-repeat; opacity: 0.4; }
+.sw-cc-small:hover::before { opacity: 1; }
+.sw-cc-small::after { content: ''; position: absolute; inset: 0; z-index: 1; opacity: 0; pointer-events: none;
   background: var(--cc-smallborder) center / 100% 100% no-repeat; }
-.sw-cc-small:hover::after, .sw-cc-part:hover::after { opacity: 1; }
-.sw-cc-part .hl { position: absolute; inset: 0; z-index: 2; display: none;
-  background: var(--cc-cathl) center / 36px 36px no-repeat; }
-.sw-cc-part.active .hl { display: block; }
-.sw-cc-small > img, .sw-cc-part > i { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 3; }
-.sw-cc-small > img { image-rendering: pixelated; }
-.sw-cc-part > i { width: 30px; height: 30px; }
+.sw-cc-small:hover::after { opacity: 1; }
+.sw-cc-small > img { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 3; image-rendering: pixelated; }
 /* ---- 发型页（UIHairStyleButton 44×44 网格 + 滚动）---- */
-.sw-cc-hair { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; padding-top: 2px; }
+.sw-cc-hair { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
 .sw-cc-hairgrid { flex: 1; min-height: 0; overflow-y: auto; display: grid;
   grid-template-columns: repeat(10, 44px); gap: 4px 2px; justify-content: center; align-content: start;
   padding: 2px 14px 4px 2px; scrollbar-width: thin; scrollbar-color: #4a5aa0 rgba(10, 14, 40, 0.6); }
@@ -369,32 +439,43 @@ ${PART_MASK_CSS}
 .sw-cc-hairbtn::before { content: ''; position: absolute; inset: 0; z-index: 0;
   background: var(--cc-catpanel) center / 100% 100% no-repeat; opacity: 0.4; }
 .sw-cc-hairbtn:hover::before { opacity: 1; }
-.sw-cc-hairbtn::after { content: ''; position: absolute; inset: 0; z-index: 3; opacity: 0;
-  background: var(--cc-catborder) center / 100% 100% no-repeat; }
-.sw-cc-hairbtn:hover::after { opacity: 1; }
-.sw-cc-hairbtn .hl { position: absolute; inset: 0; z-index: 2; display: none;
+/* 层序对齐 UIHairStyleButton.DrawSelf :56-76 = 底板(::before) → 选中亮底(.hl，
+ *  CategoryPanelHighlight 36×36 不透明圆角块，居中) → 悬停框(::after) → 头像最后画在最上。
+ *  亮底必须在头像之下：原版亮块不透明，画在头像上会把缩略图整个盖死（2026-08 实测勘误） */
+.sw-cc-hairbtn .hl { position: absolute; inset: 0; z-index: 1; display: none; pointer-events: none;
   background: var(--cc-cathl) center / 36px 36px no-repeat; }
 .sw-cc-hairbtn.active .hl { display: block; }
-.sw-cc-hairbtn .sw-cc-thumb { z-index: 1; }
+.sw-cc-hairbtn::after { content: ''; position: absolute; inset: 0; z-index: 2; opacity: 0; pointer-events: none;
+  background: var(--cc-catborder) center / 100% 100% no-repeat; }
+.sw-cc-hairbtn:hover::after { opacity: 1; }
+.sw-cc-hairbtn .sw-cc-thumb { z-index: 3; }
 .sw-cc-hairlow { flex: none; height: 34px; display: flex; justify-content: center; align-items: center; gap: 12px; }
 .sw-cc-arrow { position: relative; width: 32px; height: 32px; image-rendering: pixelated; }
 .sw-cc-arrow:hover { outline: 2px solid #ffe745; }
 .sw-cc-arrowico { position: absolute; inset: 0; image-rendering: pixelated;
   background-image: url(sprites/vanilla-ui/UI_TexturePackButtons.png); background-repeat: no-repeat; }
-/* ---- 颜色页（部位选择 + HSL 三滑杆 + HEX；全 DOM）---- */
-.sw-cc-color { display: flex; flex-direction: column; align-items: center; justify-content: space-between; height: 100%; box-sizing: border-box; padding-top: 2px; }
-.sw-cc-parts { display: flex; gap: 5px; }
-.sw-cc-sliders { display: flex; flex-direction: column; }
-.sw-cc-slider { position: relative; width: 356px; height: 52px; cursor: pointer; touch-action: none; }
-.sw-cc-sliderbar { position: absolute; left: 0; top: 10px; width: 356px; height: 32px; image-rendering: pixelated;
+/* ---- 颜色页（MakeHSLMenu :936-1006；容器 220 宽居中，滑杆面板 220×104 Top 10）---- */
+.sw-cc-color { position: relative; width: 220px; height: 100%; margin: 0 auto; }
+.sw-cc-hslpanel { position: absolute; left: 0; top: 10px; width: 220px; height: 104px; }
+/* 三根 HSL 滑杆（行距 30；杆 = ColorBar 178×16 @行内(22,18)，渐变条 167×2×8 @(27,22)） */
+.sw-cc-slider { position: absolute; left: 0; width: 210px; height: 30px; cursor: pointer; touch-action: none; }
+.sw-cc-sliderbar { position: absolute; left: 22px; top: 18px; width: 178px; height: 16px; image-rendering: pixelated;
   background: url(sprites/vanilla/ColorBar.png) 0 0 / 100% 100% no-repeat; }
-.sw-cc-sliderfill { position: absolute; left: 10px; top: 18px; width: 334px; height: 16px; }
-.sw-cc-sliderknob { position: absolute; top: 1px; width: 22px; height: 50px; image-rendering: pixelated; pointer-events: none; }
-.sw-cc-colorlow { display: flex; align-items: center; gap: 10px; }
-.sw-cc-hex { width: 112px; height: 32px; box-sizing: border-box; display: flex; align-items: center; justify-content: center;
-  border: 8px solid transparent; border-image: var(--cc-hexbg) 8 fill stretch;
+.sw-cc-sliderhl { position: absolute; left: 22px; top: 18px; width: 178px; height: 16px; image-rendering: pixelated;
+  background: var(--cc-sliderhl) 0 0 / 100% 100% no-repeat; opacity: 0; pointer-events: none; }
+.sw-cc-slider:hover .sw-cc-sliderhl { opacity: 1; }
+.sw-cc-sliderfill { position: absolute; left: 27px; top: 22px; width: 167px; height: 8px; }
+/* 滑块 ColorSlider 11×25：中心 @(27+167*v, 26)（DrawValueBar :160-162 origin=中心） */
+.sw-cc-sliderknob { position: absolute; top: 13.5px; width: 11px; height: 25px; margin-left: -5.5px;
+  image-rendering: pixelated; pointer-events: none; }
+/* HEX 框 100×32（UIPanel 底）右下 + 三小钮左下（间距 40） */
+.sw-cc-hex { position: absolute; right: 0; bottom: 0; width: 100px; height: 32px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
   font-size: 14px; letter-spacing: 1px; color: #fff; user-select: text; cursor: text;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
+.sw-cc-hex > span { position: relative; z-index: 1; }
+.sw-cc-colorlow { position: absolute; left: 0; bottom: 0; width: 112px; height: 32px; }
+.sw-cc-colorlow .sw-cc-small { position: absolute; bottom: 0; }
 `;
 
 export class CharCreation {
@@ -407,20 +488,18 @@ export class CharCreation {
   private time = 0;
   private content: HTMLElement;
   private tab = 'info';
-  private dresser = false;   // 梳妆台更衣窗形态（无信息/发型页签，确认=更改）
+  private dresser = false;   // 梳妆台更衣窗形态（服装+六色页签，确认=更改）
   private salon = false;     // 造型师理发窗形态（发型+发色，确认=付费购买）
   private priceOf: ((a: Appearance) => number) | null = null;
-  /** 颜色页当前编辑部位（原版为页签条七色钮选中态；本仓合并为页内选择行） */
+  /** 当前颜色页编辑的部位 = 所选颜色页签（原版 _selectedPicker） */
   private colorPart: keyof Appearance = 'hairColor';
   private hsl: [number, number, number] = [0, 0, 0];
   private hexLabel: HTMLElement | null = null;
   private sliderFills: Array<HTMLElement | null> = [null, null, null];
   private sliderKnobs: Array<HTMLElement | null> = [null, null, null];
-  /** 页签染色图标层（CSS mask + background-color，随外观刷新） */
-  private lookTabLayers: HTMLElement[] = [];
-  private hairTabLayer: HTMLElement | null = null;
-  private colorTabLayer: HTMLElement | null = null;
-  private partTints = new Map<keyof Appearance, HTMLElement>();
+  /** 页签乘色图标层登记表（贴图 + 部位 + 可选帧裁剪；颜色变化时重烘 dataURL） */
+  private tintLayers: Array<{ elm: HTMLElement; tex: string; part: keyof Appearance; crop?: [number, number, number, number] }> = [];
+  private iconTintRaf = 0;
   /** 烘焙缩略图 sprite sheet（dataURL；格子 background-position 切片） */
   private hairSheetUrl: string | null = null;
   private lookSheetUrl: string | null = null;
@@ -435,8 +514,8 @@ export class CharCreation {
     this.appearance = opts.initial
       ? { ...structuredClone(opts.initial) }        // 更衣/理发窗：现外观为底稿（确认才生效）
       : randomAppearance();
-    const firstColor = COLOR_ROWS.find((r) => !(this.dresser && !r.dresser) && !(this.salon && r.key !== 'hairColor'));
-    this.colorPart = firstColor ? firstColor.key : 'hairColor';
+    // 初始颜色页部位 = 各形态第一个颜色页签（更衣窗六色无发色；理发窗仅发色）
+    this.colorPart = this.dresser ? 'eyeColor' : 'hairColor';
     this.syncHslFromPart();
 
     if (!document.getElementById('sw-char-style')) {
@@ -452,7 +531,7 @@ export class CharCreation {
     this.panel.className = 'sw-char-panel';
     this.panel.innerHTML = `
       ${title ? `<div class="sw-char-title">${title}</div>` : ''}
-      <canvas class="sw-char-preview" width="120" height="168"></canvas>
+      <canvas class="sw-char-preview" width="60" height="84"></canvas>
       <div class="sw-char-body">
         <div class="sw-char-tabs"></div>
         <div class="sw-char-sep"></div>
@@ -502,10 +581,11 @@ export class CharCreation {
     requestAnimationFrame(() => this.applyPanelBg());
     const bg = invBgEnsure();
     if (bg && !bg.complete) bg.addEventListener('load', () => this.applyPanelBg(), { once: true });
-    // 按钮 chrome 染色底板就绪 → 盖 ready 章（显形 mask 图标）+ 重画内容
+    // 按钮 chrome 染色底板 + 页签图标贴图就绪 → 盖 ready 章 + 重刷图标/内容
     void prepareAssets().then(() => {
       if (!this.panel.isConnected) return;
       this.panel.classList.add('ready');
+      this.refreshColorIcons();
       this.buildContent();
       this.applyPanelBg();
     });
@@ -515,97 +595,114 @@ export class CharCreation {
 
   // ================= 框架 =================
 
-  /** 页签定义（原版 10 页签；本仓 7 色页签合并为 1 个颜色页） */
-  private tabDefs(): Array<{ key: string; tip: string }> {
-    if (this.dresser) return [
-      { key: 'look', tip: Lang.text('Mods.SandboxWorld.CharCreate.Appearance') },
-      { key: 'color', tip: Lang.text('Mods.SandboxWorld.CharCreate.Colors') },
-    ];
-    if (this.salon) return [
-      { key: 'hair', tip: Lang.text('UI.PlayerCreateCategoryHairStyle') },
-      { key: 'color', tip: Lang.text('Mods.SandboxWorld.CharCreate.Colors') },
-    ];
+  /** 页签定义（MakeCategoriesBar :732-768 原版顺序；dresser/salon 按窗口域裁剪） */
+  private tabDefs(): Array<{ key: string; part?: keyof Appearance }> {
+    if (this.dresser) {
+      return [
+        { key: 'look' },
+        { key: 'eye', part: 'eyeColor' },
+        { key: 'skin', part: 'skinColor' },
+        { key: 'shirt', part: 'shirtColor' },
+        { key: 'undershirt', part: 'undershirtColor' },
+        { key: 'pants', part: 'pantsColor' },
+        { key: 'shoes', part: 'shoeColor' },
+      ];
+    }
+    if (this.salon) {
+      return [
+        { key: 'hair' },
+        { key: 'hairColor', part: 'hairColor' },
+      ];
+    }
     return [
-      { key: 'info', tip: Lang.text('UI.PlayerCreateCategoryInfo') },
-      { key: 'look', tip: Lang.text('Mods.SandboxWorld.CharCreate.Appearance') },
-      { key: 'hair', tip: Lang.text('UI.PlayerCreateCategoryHairStyle') },
-      { key: 'color', tip: Lang.text('Mods.SandboxWorld.CharCreate.Colors') },
+      { key: 'info' },
+      { key: 'look' },
+      { key: 'hair' },
+      { key: 'hairColor', part: 'hairColor' },
+      { key: 'eye', part: 'eyeColor' },
+      { key: 'skin', part: 'skinColor' },
+      { key: 'shirt', part: 'shirtColor' },
+      { key: 'undershirt', part: 'undershirtColor' },
+      { key: 'pants', part: 'pantsColor' },
+      { key: 'shoes', part: 'shoeColor' },
     ];
   }
 
-  /** 页签图标（DOM：静态贴图 img / CSS mask 染色层，无 canvas）：
-   *  信息=CharInfo、外观=ColorCharacter 七层剪影逐层染当前色（:803-812）、
-   *  发型=HairStyle_Hair 染发色 + HairStyle_Arrow 叠层、颜色=ColorShirt 染衣色 */
+  /** 页签条（图标 = 原版贴图直出：静态 <img> 层 + 乘色 dataURL 底图层，禁 CSS mask）。
+   *  全 10 页签按原版 Left=id*48（面板内 x10 起）；更衣/理发窗的短页签组居中（原版该二窗
+   *  为独立 legacy UI 无此条，居中为本仓取齐面板中轴的呈现约定） */
   private buildTabs(): void {
     const bar = this.panel.querySelector('.sw-char-tabs')!;
     bar.innerHTML = '';
-    this.lookTabLayers = [];
-    this.hairTabLayer = null;
-    this.colorTabLayer = null;
-    for (const def of this.tabDefs()) {
+    this.tintLayers = [];
+    const defs = this.tabDefs();
+    const fullBar = defs.length >= 10;
+    const start = fullBar ? 0 : Math.round((480 - (defs.length * 48 - 4)) / 2);
+    defs.forEach((def, i) => {
       const b = el('button', 'sw-cc-tab');
       b.dataset.tab = def.key;
-      b.title = def.tip;
+      b.title = Lang.text(TAB_TIP[def.key] ?? def.key);
+      b.style.left = `${start + i * 48}px`;    // 面板内 x10 起、间距 48（CreateColorPicker :827-837）
       b.appendChild(el('span', 'hl'));
       if (def.key === 'info') {
-        const img = document.createElement('img');
-        img.src = UI_TEX('CharInfo');
-        img.draggable = false;
-        img.className = 'sw-cc-tabimg';
-        img.width = 30; img.height = 30;
-        b.appendChild(img);
+        b.appendChild(staticIcon('CharInfo', 30, 30));
       } else if (def.key === 'look') {
-        const ico = el('span', 'sw-cc-ico');
-        ico.style.width = '26px'; ico.style.height = '34px';
-        const layers: Array<keyof Appearance> = ['hairColor', 'eyeColor', 'skinColor', 'shirtColor', 'undershirtColor', 'pantsColor', 'shoeColor'];
-        layers.forEach((k, i) => {
-          const lay = el('i', 'sw-cc-tint sw-cc-m-cc');
-          lay.style.maskPosition = `0px ${-i * 34}px`;
-          lay.dataset.c = k;
-          ico.appendChild(lay);
-          this.lookTabLayers.push(lay);
+        // 七层剪影逐层乘当前七色（:749-763 七帧 UIImageFramed 同位叠放）
+        LOOK_LAYERS.forEach((part, fi) => {
+          const lay = el('i', 'sw-cc-tinted');
+          lay.style.width = '26px';
+          lay.style.height = '34px';
+          b.appendChild(lay);
+          this.tintLayers.push({ elm: lay, tex: 'ColorCharacter', part, crop: [0, fi * 34, 26, 34] });
         });
-        b.appendChild(ico);
       } else if (def.key === 'hair') {
-        const ico = el('span', 'sw-cc-ico');
-        ico.style.width = '30px'; ico.style.height = '30px';
-        const hair = el('i', 'sw-cc-tint sw-cc-m-hairColor');
-        const arrow = document.createElement('img');
-        arrow.src = UI_TEX('HairStyle_Arrow');
-        arrow.draggable = false;
-        ico.append(hair, arrow);
-        b.appendChild(ico);
-        this.hairTabLayer = hair;
+        // 中贴图在下（HairStyle_Arrow）、主贴图乘发色在上（DrawSelf :69-76 层序）
+        b.appendChild(staticIcon('HairStyle_Arrow', 30, 30));
+        const lay = el('i', 'sw-cc-tinted');
+        b.appendChild(lay);
+        this.tintLayers.push({ elm: lay, tex: 'HairStyle_Hair', part: 'hairColor' });
       } else {
-        const ico = el('span', 'sw-cc-ico');
-        ico.style.width = '30px'; ico.style.height = '30px';
-        const shirt = el('i', 'sw-cc-tint sw-cc-m-shirtColor');
-        ico.appendChild(shirt);
-        b.appendChild(ico);
-        this.colorTabLayer = shirt;
+        if (def.key === 'eye') b.appendChild(staticIcon('ColorEyeBack', 30, 30));   // 中贴图（:744）
+        const lay = el('i', 'sw-cc-tinted');
+        b.appendChild(lay);
+        this.tintLayers.push({ elm: lay, tex: TAB_ICON_TEX[def.key]!, part: def.part! });
       }
       b.addEventListener('click', () => {
         if (this.tab === def.key) return;
         this.tab = def.key;
+        if (def.part) {                          // 颜色页签 = 选中该部位
+          this.colorPart = def.part;
+          this.syncHslFromPart();
+        }
         UISfx.click();
         this.buildContent();
       });
       bar.appendChild(b);
-    }
+    });
     this.refreshColorIcons();
   }
 
-  /** 页签/部位染色图标随当前外观刷新（只写 background-color，无重绘） */
+  /** 页签/部位乘色图标随当前外观刷新（重烘 30×30 级小图 dataURL；贴图未就绪的格子
+   *  留空，由 constructor 的 prepareAssets().then 统一补刷） */
   private refreshColorIcons(): void {
-    const setTint = (elm: HTMLElement | null, key: keyof Appearance) => {
-      if (!elm) return;
-      const c = this.appearance[key] as RGBColor;
-      elm.style.backgroundColor = `rgb(${c.r},${c.g},${c.b})`;
-    };
-    for (const lay of this.lookTabLayers) setTint(lay, lay.dataset.c as keyof Appearance);
-    setTint(this.hairTabLayer, 'hairColor');
-    setTint(this.colorTabLayer, 'shirtColor');
-    for (const [key, elm] of this.partTints) setTint(elm, key);
+    for (const lay of this.tintLayers) {
+      const img = iconImg(lay.tex);
+      if (!img) continue;
+      const c = this.appearance[lay.part] as RGBColor;
+      const url = lay.crop
+        ? tintedCropDataUrl(img, lay.crop[0], lay.crop[1], lay.crop[2], lay.crop[3], c.r, c.g, c.b)
+        : tintedDataUrl(img, c.r, c.g, c.b);
+      lay.elm.style.backgroundImage = `url(${url})`;
+    }
+  }
+
+  /** 拖色等高频路径的合帧刷新（每帧至多重烘一次图标层） */
+  private queueIconTint(): void {
+    if (this.iconTintRaf) return;
+    this.iconTintRaf = requestAnimationFrame(() => {
+      this.iconTintRaf = 0;
+      if (this.panel.isConnected) this.refreshColorIcons();
+    });
   }
 
   /** 语言切换：框架文案重取 + 内容区重建（保留 appearance 与页签） */
@@ -616,8 +713,7 @@ export class CharCreation {
         : Lang.text('GameUI.HairStyle');
     }
     for (const b of Array.from(this.panel.querySelectorAll('.sw-cc-tab')) as HTMLElement[]) {
-      const def = this.tabDefs().find((d) => d.key === b.dataset.tab);
-      if (def) b.title = def.tip;
+      b.title = Lang.text(TAB_TIP[b.dataset.tab ?? ''] ?? '');
     }
     this.refreshFooterTexts();
     this.buildContent();
@@ -640,14 +736,14 @@ export class CharCreation {
     this.raf = requestAnimationFrame(this.loop);
   };
 
-  /** 预览：站立在面板上沿（MakeCharPreview :236-250），3x 放大 40×56 → 120×168 */
+  /** 预览：面板上方居中（MakeCharPreview :252-270），1.5x = 60×84（原版 UICharacter characterScale） */
   private drawPreview() {
     const ctx = this.previewCtx;
-    ctx.clearRect(0, 0, 120, 168);
+    ctx.clearRect(0, 0, 60, 84);
     const doll = compositePaperDoll(this.appearance);
     if (!doll) return;
     const f = dollFrame(doll, walkFrame(this.time));
-    ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, 0, 0, 120, 168);
+    ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, 0, 0, 60, 84);
   }
 
   /** 面板底九宫（Utils.DrawInvBG；尺寸固定，打开时合成一次） */
@@ -662,6 +758,7 @@ export class CharCreation {
    *  2026-08-13 泄露 review——孤儿 rAF/keydown/Lang 订阅即源于无法外部关) */
   close(fn?: () => void) {
     cancelAnimationFrame(this.raf);
+    if (this.iconTintRaf) cancelAnimationFrame(this.iconTintRaf);
     if (this.sheetTimer) clearTimeout(this.sheetTimer);
     if (this.thumbTimer) clearTimeout(this.thumbTimer);
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
@@ -690,14 +787,13 @@ export class CharCreation {
     });
     if (this.salon) this.updateSalonPrice();
     this.content.innerHTML = '';
-    this.partTints.clear();
     this.sliderFills = [null, null, null];
     this.sliderKnobs = [null, null, null];
     this.hexLabel = null;
     if (this.tab === 'info') this.buildInfo();
     else if (this.tab === 'look') this.buildLook();
     else if (this.tab === 'hair') this.buildHair();
-    else this.buildColor();
+    else this.buildColor();                    // hairColor/eye/skin/shirt/undershirt/pants/shoes
     this.refreshColorIcons();
   }
 
@@ -761,6 +857,7 @@ export class CharCreation {
       this.appearance = randomAppearance(this.appearance.name);
     }
     this.syncHslFromPart();
+    this.queueIconTint();
     this.buildContent();
   }
 
@@ -839,7 +936,7 @@ export class CharCreation {
 
   private buildInfo() {
     const box = el('div', 'sw-cc-info');
-    // 名字条（UICharacterNameButton：长条 + 左标签 + 值区；输入走隐藏 input 捕获）
+    // 名字条（UICharacterNameButton：480×40 长条 + 左标签 + 值区；输入走隐藏 input 捕获）
     const bar = el('div', 'sw-cc-namebar sw-char-row');
     bar.appendChild(el('span', 'sw-cc-namelbl', Lang.text('UI.PlayerNameSlot')));
     const valWrap = el('div', 'sw-cc-nameval');
@@ -869,7 +966,8 @@ export class CharCreation {
       input.focus();
     });
     box.appendChild(bar);
-    // 中段：竖排四难度钮（上→下 = 旅程/经典/中核/硬核，:932-935 追加序）+ 描述气泡
+    // 中段：竖排四难度钮（上→下 = 旅程/经典/中核/硬核，:886-921 追加序）+ 描述气泡
+    // （原版四钮 1/4 高无缝平铺，无性别行——性别走服装页签十样式）
     const low = el('div', 'sw-cc-infolow');
     const diffs = el('div', 'sw-cc-diffs');
     const bubble = el('div', 'sw-cc-diffdesc');
@@ -893,35 +991,10 @@ export class CharCreation {
     bubble.textContent = this.diffDesc(this.appearance.difficulty);
     low.append(diffs, bubble);
     box.appendChild(low);
-    // 性别（本仓自有行；皮肤变体男/女组切换，原版性别走服装页签）
-    const grow = el('div', 'sw-cc-gender');
-    grow.appendChild(el('span', 'sw-cc-genderlbl', Lang.text('Mods.SandboxWorld.CharCreate.Gender')));
-    const MALE = [0, 1, 2, 3, 8, 10];
-    const FEMALE = [4, 5, 6, 7, 9, 11];
-    const gBtns: HTMLButtonElement[] = [];
-    for (const [label, pool] of [['Mods.SandboxWorld.CharCreate.Male', MALE], ['Mods.SandboxWorld.CharCreate.Female', FEMALE]] as Array<[string, number[]]>) {
-      const b = el('button', 'sw-cc-gbtn');
-      b.appendChild(el('span', 'sw-cc-gbtntxt', Lang.text(label)));
-      b.appendChild(el('span', 'sel'));
-      b.classList.toggle('active', pool.includes(this.appearance.skinVariant));
-      b.addEventListener('click', () => {
-        // 同性别的样式索引尽量保留（0↔4, 1↔5, 2↔6, 3↔7, 8↔9, 10↔11）
-        const other = pool === MALE ? FEMALE : MALE;
-        const idx = Math.max(0, other.indexOf(this.appearance.skinVariant));
-        this.appearance.skinVariant = pool[idx] ?? pool[0];
-        gBtns.forEach((x) => x.classList.toggle('active', x === b));
-        this.refreshColorIcons();
-        this.scheduleSheetBake(0);
-        UISfx.click();
-      });
-      gBtns.push(b);
-      grow.appendChild(b);
-    }
-    box.appendChild(grow);
     this.content.appendChild(box);
   }
 
-  // ---- 外观页 ----
+  // ---- 服装页 ----
 
   private buildLook() {
     const box = el('div', 'sw-cc-look');
@@ -929,6 +1002,7 @@ export class CharCreation {
     VALID_CLOTH_STYLES.forEach((styleId, i) => {
       const b = el('button', 'sw-cc-stylebtn');
       b.title = Lang.text('Mods.SandboxWorld.CharCreate.StyleId', styleId);
+      b.style.left = `${i * 46 + (i < 5 ? 11 : 29)}px`;   // 男女组间 20px 空档（MakeClothStylesMenu :303-309）
       b.classList.toggle('active', this.appearance.skinVariant === styleId);
       // 原版层序：面板 < 高亮 < 人偶（DrawSelf 先于子层 UICharacter）→ hl 在 thumb 前
       b.appendChild(el('span', 'hl'));
@@ -940,7 +1014,8 @@ export class CharCreation {
       grid.appendChild(b);
     });
     box.appendChild(grid);
-    // 复制/粘贴/随机外观模板（原版外观页下沿小钮 :396-430）
+    // 组下分隔线（:452-460 宽 442 @y89）+ 复制/粘贴/随机外观模板（:405-430）
+    box.appendChild(el('i', 'sw-cc-looksep'));
     const low = el('div', 'sw-cc-looklow');
     low.append(
       this.smallBtn('Copy', 'Mods.SandboxWorld.CharCreate.CopyTemplate', () => { this.clipboard = { ...this.appearance }; }),
@@ -948,6 +1023,7 @@ export class CharCreation {
         if (!this.clipboard) return;
         this.appearance = { ...this.clipboard, name: this.appearance.name };
         this.syncHslFromPart();
+        this.queueIconTint();
         this.buildContent();
       }),
       this.smallBtn('Randomize', 'Mods.SandboxWorld.CharCreate.Random', () => this.randomizeAppearance()),
@@ -968,12 +1044,12 @@ export class CharCreation {
       b.title = Lang.text('Mods.SandboxWorld.CharCreate.HairId', hairId);
       b.dataset.hair = String(hairId);
       b.classList.toggle('active', this.appearance.hair === hairId);
-      // 原版层序：面板 < 发型 < 高亮（UIHairStyleButton.DrawSelf）
+      // 原版层序（UIHairStyleButton.DrawSelf :56-76）：面板 < 选中亮底 < 悬停框 < 头像（最后画，最上）
+      b.appendChild(el('span', 'hl'));
       const thumb = el('i', 'sw-cc-thumb');
       thumb.style.backgroundPosition = `-${(i % cols) * 44}px -${Math.floor(i / cols) * 44}px`;
       if (this.hairSheetUrl) thumb.style.backgroundImage = `url(${this.hairSheetUrl})`;
       b.appendChild(thumb);
-      b.appendChild(el('span', 'hl'));
       b.addEventListener('click', () => { this.setHair(hairId); UISfx.click(); });
       grid.appendChild(b);
     });
@@ -997,7 +1073,7 @@ export class CharCreation {
     this.content.querySelectorAll('.sw-cc-hairbtn').forEach((x) => {
       x.classList.toggle('active', Number((x as HTMLElement).dataset.hair) === id);
     });
-    this.refreshColorIcons();
+    this.queueIconTint();
   }
 
   private stepHair(dir: 1 | -1): void {
@@ -1007,7 +1083,7 @@ export class CharCreation {
     this.setHair(list[next]);
   }
 
-  // ---- 颜色页 ----
+  // ---- 颜色页（部位 = 当前颜色页签） ----
 
   private syncHslFromPart(): void {
     const c = this.appearance[this.colorPart] as RGBColor;
@@ -1024,32 +1100,14 @@ export class CharCreation {
 
   private buildColor() {
     const box = el('div', 'sw-cc-color');
-    // 部位选择行（原版=页签条七色钮；本仓合并为页内一行，语义不变）
-    const parts = el('div', 'sw-cc-parts');
-    for (const row of COLOR_ROWS) {
-      if (this.dresser && !row.dresser) continue;   // 更衣窗六色（Main.cs:43579-43585 备份的六色）
-      if (this.salon && row.key !== 'hairColor') continue;   // 理发窗仅发色（OpenHairWindow 域）
-      const b = el('button', 'sw-cc-part');
-      b.title = Lang.text(row.labelKey);
-      b.classList.toggle('active', this.colorPart === row.key);
-      const tint = el('i', `sw-cc-tint sw-cc-m-${row.key}`);
-      b.appendChild(el('span', 'hl'));
-      b.appendChild(tint);
-      this.partTints.set(row.key, tint);
-      b.addEventListener('click', () => {
-        this.colorPart = row.key;
-        this.syncHslFromPart();
-        this.buildContent();
-        UISfx.click();
-      });
-      parts.appendChild(b);
-    }
-    box.appendChild(parts);
-    // HSL 三滑杆（UIColoredSlider：ColorBar 框 + 渐变条 + ColorSlider 滑块，全 DOM）
-    const sliders = el('div', 'sw-cc-sliders');
+    // HSL 三滑杆面板（UIPanel 220×104 Top 10；三杆行距 30，全 DOM）
+    const panel = el('div', 'sw-cc-hslpanel sw-cc-panelbg');
+    const sliders = el('div');
     for (const kind of [0, 1, 2] as const) {
       const track = el('div', 'sw-cc-slider');
+      track.style.top = `${3 + kind * 30}px`;
       track.appendChild(el('i', 'sw-cc-sliderbar'));
+      track.appendChild(el('i', 'sw-cc-sliderhl'));
       const fill = el('i', 'sw-cc-sliderfill');
       const knob = document.createElement('img');
       knob.src = VAN_TEX('ColorSlider');
@@ -1061,24 +1119,31 @@ export class CharCreation {
       this.wireSlider(track, kind);
       sliders.appendChild(track);
     }
-    box.appendChild(sliders);
-    // HEX + 复制/粘贴/随机（Click_CopyHex :1337 / Click_PasteHex :1343 / 随机单色）
-    const low = el('div', 'sw-cc-colorlow');
+    panel.appendChild(sliders);
+    box.appendChild(panel);
+    // HEX 框（UIPanel 100×32 右下；Click_CopyHex :1337）+ 复制/粘贴/随机（左下间距 40）
     const hexEl = el('div', 'sw-cc-hex');
+    hexEl.appendChild(el('span', undefined, 'FFFFFF'));
     hexEl.title = Lang.text('Mods.SandboxWorld.CharCreate.CopyHex');
     this.hexLabel = hexEl;
     hexEl.addEventListener('click', () => this.copyHex());
-    low.appendChild(hexEl);
-    low.append(
-      this.smallBtn('Copy', 'Mods.SandboxWorld.CharCreate.CopyHex', () => this.copyHex()),
-      this.smallBtn('Paste', 'Mods.SandboxWorld.CharCreate.PasteHex', () => void this.pasteHex()),
-      this.smallBtn('Randomize', 'Mods.SandboxWorld.CharCreate.RandomColor', () => {
+    box.appendChild(hexEl);
+    const low = el('div', 'sw-cc-colorlow');
+    const hexBtns: Array<[string, string, () => void]> = [
+      ['Copy', 'Mods.SandboxWorld.CharCreate.CopyHex', () => this.copyHex()],
+      ['Paste', 'Mods.SandboxWorld.CharCreate.PasteHex', () => void this.pasteHex()],
+      ['Randomize', 'Mods.SandboxWorld.CharCreate.RandomColor', () => {
         // 原版随机单色 = HSL 三分量均匀掷（GetRandomColorVector :1794）
         this.hsl = [Math.random(), Math.random(), Math.random()];
         this.applyHslToPart();
         this.redrawColorPage();
-      }),
-    );
+      }],
+    ];
+    hexBtns.forEach(([icon, tip, fn], i) => {
+      const b = this.smallBtn(icon, tip, fn);
+      b.style.left = `${i * 40}px`;
+      low.appendChild(b);
+    });
     box.appendChild(low);
     this.content.appendChild(box);
     this.redrawColorPage();
@@ -1106,19 +1171,24 @@ export class CharCreation {
         }
         fill.style.background = `linear-gradient(90deg, ${stops.join(',')})`;
       }
-      if (knob) knob.style.left = `${Math.round((5 + 167 * this.hsl[kind]) * 2) - 11}px`;
+      // 滑块中心 x = 27 + 167*v（DrawValueBar :160-162）；CSS margin-left -5.5 已含半宽
+      if (knob) knob.style.left = `${(27 + 167 * this.hsl[kind]).toFixed(2)}px`;
     }
-    if (this.hexLabel) this.hexLabel.textContent = hex(this.appearance[this.colorPart] as RGBColor).toUpperCase();
-    this.refreshColorIcons();
+    if (this.hexLabel) {
+      (this.hexLabel.firstElementChild as HTMLElement).textContent =
+        hex(this.appearance[this.colorPart] as RGBColor).toUpperCase();
+    }
+    this.queueIconTint();
     this.scheduleSheetBake();
   }
 
   private wireSlider(track: HTMLElement, kind: 0 | 1 | 2): void {
+    // 取值矩形 = 杆内缩 (3,4,174,8)（DrawValueBar :150-153）→ value = (mouseX - 杆左 - 3)/174
     const apply = (e: PointerEvent) => {
       const rect = track.getBoundingClientRect();
       if (!rect.width) return;
-      const x = ((e.clientX - rect.left) / rect.width) * 178;   // 画布坐标 = 原版 178 宽条
-      this.hsl[kind] = Math.max(0, Math.min(1, (x - 5) / 167));
+      const v = (e.clientX - (rect.left + 22) - 3) / 174;
+      this.hsl[kind] = Math.max(0, Math.min(1, v));
       this.applyHslToPart();
       this.redrawColorPage();
     };

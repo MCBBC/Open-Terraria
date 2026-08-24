@@ -313,7 +313,12 @@ export function runDungeonPass(
   // ★XX 批（2026-08-18）：②==0→Tower、①==0→Dome＝PrecalculateEntrancePosition 路径
   //   （MakeDungeon_GetEntranceSettings data==null 支 DC.cs:802-838：Dome/Tower 置
   //   precalc=true，RoughHeight=Legacy40/Dome55/Tower120）。entKind: 0=Legacy 1=Dome 2=Tower。
-  const entSeed = gs.dungeonEntSeed ?? raw(); // preGenDungeonEntranceSettings.RandomSeed
+  // ★HHHHHHH（2026-08-24）⑥掷值修正：let 化——precalc 失败回退支（DC.cs:337-341）
+  //   的 data==null 支掷（DC.cs:856 `RandomSeed = genRand.Next()`）= **新 entSeed**
+  //   （入口构建 MakeDungeon_GetEntranceSettings(preSettings,data) :812-816 取
+  //   preSettings.RandomSeed）。曾 `raw();` 丢弃掷值仍传旧 entSeed → 回退路径
+  //   （precalc 3000 试全败的种子）入口私有流种子偏差。precalc 成功路径零差。
+  let entSeed = gs.dungeonEntSeed ?? raw(); // preGenDungeonEntranceSettings.RandomSeed
   const entA = gs.dungeonEntA ?? rn(3);       // 入口类型掷①（Dome 候选）
   const entB = gs.dungeonEntB ?? rn(3);       // 入口类型掷②（Tower 覆盖）
   // ★R11-D3（2026-08-24）：precalc 搜索失败 → 原版回退 Legacy（DC.cs:332-341
@@ -390,8 +395,10 @@ export function runDungeonPass(
     //  （MakeDungeon_GetEntranceSettings(Legacy,…,null) 的 RandomSeed=Next()，
     //  DC.cs:856；后续 MakeDungeon :467 的 (preSettings,data) 重载再掷 1 颗弃用、
     //  RandomSeed 取 preSettings 值——即下方入口构建处的 raw()，三支同位已对齐）。
+    // ★HHHHHHH ⑥：该掷=**新 entSeed**（:812 RandomSeed=preSettings.RandomSeed），
+    //  捕获传入口构建（曾丢弃=回退路径种子偏差）。
     if (!precalcOK) {
-      raw();
+      entSeed = raw();
       entKind = 0;                             // LegacyDungeonEntrance
     }
   }
@@ -619,11 +626,24 @@ export function runDungeonPass(
         for (let y = y0; y < y1; y++) {
           const i = st.idx(x, y);
           st.liquid[i] = 0;
-          if (!isDW(st.wall[i])) chTile(i, brick, true);
+          // ★HHHHHHH（2026-08-24）③ 房砖环缘 resetTile 计算化（LegacyDungeonRoom.cs
+          //  :263-268）：1456 恒 resetTile:true（ChangeTileType→ClearEverything=墙清零）,
+          //  1457=内域判定（k≥num7+1&&k<num8-1&&l≥num9+1&&l<num10-1）——环缘格保留
+          //  既有墙（walls 通道真实差,GGG 三方 ONLY-oracle ③④ 墙体）。门 1457
+          //  CanPlaceTileAt（DungeonRoom.cs:365）=wall350 拒+tier 判定,普通世界 tier
+          //  支与 1456 单行公式等价（dungeon-1457 批 B6/B19 全 id 断言在案）→ 门补
+          //  wall350 卫士即可。曾恒 true → 环缘墙被抹。
+          const resetTile = x >= x0 + 1 && x < x1 - 1 && y >= y0 + 1 && y < y1 - 1;
+          if (st.wall[i] !== 350 && !isDW(st.wall[i])) chTile(i, brick, resetTile);
         }
       }
       for (let x = x0 + 1; x < x1 - 1; x++) {
-        for (let y = y0 + 1; y < y1 - 1; y++) chWall(st.idx(x, y), wall, false);
+        for (let y = y0 + 1; y < y1 - 1; y++) {
+          // 1457 内域墙写加 CanRemoveTileAt 门（DungeonRoom.cs:374,wall350 拒——
+          //  普通世界地牢域无 350=零行为差,转录保真）
+          const wi = st.idx(x, y);
+          if (st.wall[wi] !== 350) chWall(wi, wall, false);
+        }
       }
       for (let x = ix0; x < ix1; x++) {
         for (let y = iy0; y < iy1; y++) chWall(st.idx(x, y), wall, true);
@@ -816,7 +836,10 @@ export function runDungeonPass(
           if (p === 3) continue;
           const f16 = p !== 1;
           st.liquid[i] = 0;
-          if (f16 && y <= h - 200 + 7 && canPlaceTileAt(i)) chTile(i, brick, true);
+          // ★HHHHHHH（2026-08-24）④ 廊砖环缘 resetTile 计算化（LegacyDungeonHall.cs
+          //  :756-759）——与 ③ 同语义：1456 恒 true,1457=内域判定,环缘格墙保留。
+          const resetTile = x >= x0 + 1 && x < x1 - 1 && y >= y0 + 1 && y < y1 - 1;
+          if (f16 && y <= h - 200 + 7 && canPlaceTileAt(i)) chTile(i, brick, resetTile);
         }
       }
       for (let x = x0 + 1; x < x1 - 1; x++) {
@@ -3353,10 +3376,16 @@ export function runDungeonPass(
           const r7 = rn(7);
           if (lgTr) console.log(`DG R7 x=${x} cy=${cy} v=${r7}`);
           if (r7 === 0) {
-            // ★2026-08-16 审计：吊灯支要求 GetStyleForWall != null（Lights.cs:77-78）
-            //   ——Default 样式表 WallIsInStyle = wall==brickWallType，即**主砖墙才有
-            //   吊灯资格**；变体墙(94-99)返 null 直接跳过吊灯落灯笼。曾变体墙也试吊灯。
-            const chGate = wallAt(x, cy) === wall;
+            // ★HHHHHHH（2026-08-24）② 吊灯资格门 1457 化（DungeonGlobalLights.cs:81-87
+            //   + DungeonGenerationStyles.GetStyleForWall :745-766）：1456 门
+            //   `wall==brickWallType`（Default 样式 WallIsInStyle 仅主砖墙）；1457
+            //   GetStyleForWall 加 `Style==0 && Main.wallDungeon[wall]` 快路径——
+            //   wallDungeon 全族 {7,8,9,94-99}（Main.cs:10737-10745）全有吊灯资格
+            //   （JS isDW≡该表）。Default 路径零掷差（ChandelierItemTypes=空数组,
+            //   Next(7) 在门之前）→ 纯放置集扩宽。
+            //   命中且墙∈[94,105] → GOTHIC 吊灯 item 5744（Lights.cs:85-88）=
+            //   DerivedPlacementDetails[5744]=tile34 style53（Item.cs:45030）。
+            const chGate = isDW(wallAt(x, cy));
             let blocked = !chGate;
             for (let k = 0; k < 15 && !blocked; k++) {
               if (inW(x, cy + k, 0) && dgSolid(x, cy + k)) { blocked = true; break; }
@@ -3419,9 +3448,13 @@ export function runDungeonPass(
       && genSolidType(typAt(x, y - 1)) && !DG_SOLID_TOP.has(sheet))) return false;
     // PlaceChand 帧式（:52753-52824）：样式=蓝/绿/粉地牢吊灯 placeStyle 27/28/29
     //（Item.cs:25748-25757 `27 + type - 2652`，chandelierItemType 2652+theme）。
+    // ★HHHHHHH ②：墙∈[94,105] → GOTHIC 吊灯 item 5744（Lights.cs:85-88）→
+    //   DerivedPlacementDetails[5744]=PlaceChand(34,53)（Item.cs:45030）——样式 53。
     // 页列 num2=108*(style/36)（27-29 无分页=0）、行基 num3=style*54（分页修正同式）；
     // 三列 fx=num2+{0,18,36}、三行 fy=num3+{0,18,36}。★此前不写帧=残留砖帧
-    const style = 27 + theme;
+    //（53 档：num2=108、num3=53*54-54*1*37=864——分页修正式对 53 同构,公式通用）
+    const wl = wallAt(x, y);
+    const style = (wl >= 94 && wl <= 105) ? 53 : 27 + theme;
     const n2 = Math.floor(style / 36) * 108;
     let n3 = style * 54;
     if (n2 >= 108) n3 -= 54 * Math.floor(n2 / 108) * 37;
@@ -4340,6 +4373,41 @@ export function runDungeonPass(
       placeBannerD(x, y, BANNER, bannerStyles[num8]);   // ★PlaceBanner（cs:46270 竖 3 格）
     }
   }
+  // ============ DungeonGlobalLateDualDungeonFeatures（:20-69，Default style==0 支）============
+  // ★HHHHHHH（2026-08-24）⑤ Late GOTHIC 门替换：1456 该段普通世界纯空转（style==0
+  //   扫描域内无 GOTHIC 变体墙语义），1457 扫 outerProgressionBounds[0]（Legacy
+  //   provider :97 布局尾改写 =dungeonBounds）内门底格（活性 tile10 且下格非 10，
+  //   :57-60）墙∈[94,105] → KillTile+PlaceTile(10,mute,forced:false,-1,53)（:64-65）。
+  //   掷流=每门 PlaceDoor 3×Next(3)（败 0 掷）；KillTile→SquareTileFrame 级联
+  //   CheckDoorClosed（WorldGen.cs:87714：门三格任一失活/上下非实心→destroyObject
+  //   整列 KillTile）→PlaceTile case A（:60360 上两格净空+上三格实心）重挂同位。
+  //   9293480 实测命中 22 门 +66 掷（GGG 三方 ONLY-oracle ⑤ 级联主体）。
+  function dgLate(): void {
+    for (let x = bounds.L; x <= bounds.R; x++) {
+      for (let y = bounds.T; y <= bounds.B; y++) {
+        if (!inW(x, y, 1)) continue;
+        const ti = st.idx(x, y);
+        if (st.flags[ti] === 0 || st.type[ti] !== DOOR) continue;
+        const bi = st.idx(x, y + 1);
+        if (st.flags[bi] !== 0 && st.type[bi] === DOOR) continue;   // 下格仍门=非底格
+        const wl = st.wall[ti];
+        if (wl < 94 || wl > 105) continue;
+        // KillTile(x,y)（:64）尾段语义（WorldGen.cs:4441-4447）：active=false、
+        //   halfBrick=false、frameX/Y=-1、type=0——随后 SquareTileFrame 级联把
+        //   门三格整列灭（此处直写终态,级联无掷无额外写）
+        for (let k = -2; k <= 0; k++) {
+          const di = st.idx(x, y + k);
+          if (st.flags[di] !== 0 && st.type[di] === DOOR) {
+            st.flags[di] = 0; st.type[di] = 0; st.half[di] = 0;
+            st.frameX[di] = -1; st.frameY[di] = -1;
+          }
+        }
+        // PlaceTile(x,y,10,mute,forced:false,-1,53)（:65）——dgPlaceDoor=PlaceTile(10)
+        //   case A/B 谓词+PlaceDoor 3×Next(3)+帧写 1:1（败支 0 掷同构）
+        dgPlaceDoor(x, y, 53);
+      }
+    }
+  }
   posX = x0; posY = y0;
   bounds.set(x0, y0, x0, y0);
   const isDW = (v: number): boolean => v > 0 && DG_DUNGEON_WALLS.has(v);   // 墙 id 即原版 id
@@ -4438,6 +4506,9 @@ export function runDungeonPass(
   dgFurniture(); snap('dungeonF');
   dgPaintings(); snap('dungeonPa');
   dgBanners(); snap('dungeonBa');
+  // ★HHHHHHH ⑤：DungeonGlobalLateDualDungeonFeatures（DungeonCrawler.cs:522-523,
+  //   progress 0.99 DungeonLate）——Banners 之后、pass 收尾前
+  dgLate(); snap('dungeonLate');
   snap('dungeon');
   // —— GenState 回填（消费端：Pyramids 回避带 / 刷怪门槛 / 老头锚）——
   // ★2026-08-16 审计：generatingDungeonPositionX 的**终值**是爬升入口走廊的终点

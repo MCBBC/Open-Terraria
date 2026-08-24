@@ -30,6 +30,7 @@
 //  · MenuXMovement += 4/帧，wrap ±2^31（:47625-47631）。
 import { loadBitmapOnly } from '../assets/SpriteAtlas';
 import { SkyRenderer } from './SkyRenderer';
+import { GLSpriteLayer } from './GLSpriteLayer';
 import { Clock } from '../world/World';
 import {
   colorOfTheSkies, setFrameAurora, setFrameBiome, setFrameCloudDim,
@@ -133,6 +134,37 @@ export class MenuBackground {
   private imgs = new Map<number, ImageBitmap | HTMLImageElement>();
   /** 层 tint 烘焙缓冲（tex → 画布+上次 tint；tint 变化 >1/255 才重烘） */
   private tintBufs = new Map<number, { cv: HTMLCanvasElement; tr: number; tg: number; tb: number }>();
+
+  // ---- 菜单云 GL 层(2026-08-24 trace 热点修复) ----
+  // 旧状:cloudGlLayer 只有 Renderer 帧路径注入(Renderer.ts:2552),菜单 tick 直调
+  //  sky.draw 恒 null → 菜单云永远走 2D cloudTint 兜底 = 每云每帧染色缓存查+
+  //  重烘+合成 drawImage(trace:云合成 2.4s+重烘 2.0s+cloudTint self 2.8s/54s,
+  //  是菜单主线程第一热点)。GL 主路径(游戏内同款)逐精灵顶点色零副本。
+  //  获取语义与 Renderer.acquireGL 1:1:活实例直取;上下文死亡 5s 退避;
+  //  初始化失败 30s 闩(SwiftShader/--disable-gpu 下 GLSpriteLayer 自标
+  //  unavailable → 恒走 2D 兜底,与旧菜单行为一致)。?cloudgl=0 逃生门同享。
+  private glCloud: GLSpriteLayer | null = null;
+  private glCloudRetryAt = 0;
+
+  private acquireCloudGL(): GLSpriteLayer | null {
+    if (!this.sky.useGLClouds) return null;
+    const g = this.glCloud;
+    if (g) {
+      if (!g.unavailable) return g;
+      if (performance.now() - g.diedAt < 5000) { this.glCloud = null; return null; }
+      g.dispose();
+      this.glCloud = null;
+    }
+    if (performance.now() < this.glCloudRetryAt) return null;
+    const inst = new GLSpriteLayer();
+    if (inst.unavailable) {
+      inst.dispose();
+      this.glCloudRetryAt = performance.now() + 30_000;
+      return null;
+    }
+    this.glCloud = inst;
+    return inst;
+  }
 
   constructor(parent: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -283,8 +315,12 @@ export class MenuBackground {
 
     const W = this.canvas.width, H = this.canvas.height;
     // 相机 Y = surface·16 − 屏高（DrawMenu :47620）——云 num3 视差/atmo 归位
-    this.sky.draw(this.ctx, this.clock, W, H, this.camX, dtMs,
-      this.sky.vanillaMenuCamY(H));
+    const camY = this.sky.vanillaMenuCamY(H);
+    // 云 GL 层每帧注入(Renderer 帧路径同款;不可用/退避期 null = 2D 兜底)
+    this.sky.cloudGlLayer = this.acquireCloudGL();
+    this.sky.draw(this.ctx, this.clock, W, H, this.camX, dtMs, camY);
+    // 晨昏镜头光斑（DoDraw 菜单路径 :61550 DrawLensFlare——落日/朝阳径向辉光）
+    this.sky.drawMenuFlare(this.ctx, W, H, camY);
     this.drawForest();
   }
 
@@ -393,15 +429,17 @@ export class MenuBackground {
   /** 腐化三层（DrawSurfaceBG_Corrupt gameMenu：y=320/400/480、scale 2.5/2.62/2.68、
    *  L1 恒水平翻转 :60750；56 套三层全 −100 :60722-60724/:60766/:60800——L1/L2
    *  也查 indexes[0]==56） */
-  private drawCorruptTrees(a: number, tint: [number, number, number] | null): void {
+  private drawCorruptTrees(a: number, tint: [number, number, number] | null, sc: number): void {
     const set = CORRUPT_STYLES[this.corruptStyle] ?? CORRUPT_STYLES[0];
-    const y56 = set[0] === 56 ? -100 : 0;
+    const H = this.canvas.height;
+    // 内容行补偿(56 套额外 −100:60722-60724)
+    const y56 = set[0] === 56 ? -100 * sc : 0;
     const l0 = this.img(set[0]);
-    if (l0) this.drawLayer(this.tinted(set[0], l0, tint), 0.4, 320 + y56, 1.25 * 2, 0, a);
+    if (l0) this.drawLayer(this.tinted(set[0], l0, tint), 0.4, H * 0.72 + y56 - (TEX_TOPROW[set[0]] ?? 0) * sc, 1.25 * sc, 0, a);
     const l1 = this.img(set[1]);
-    if (l1) this.drawLayer(this.tinted(set[1], l1, tint), 0.43, 400 + y56, 1.31 * 2, -80, a, undefined, true);
+    if (l1) this.drawLayer(this.tinted(set[1], l1, tint), 0.43, H * 0.79 + y56 - (TEX_TOPROW[set[1]] ?? 0) * sc, 1.31 * sc, -80 * sc / 2, a, undefined, true);
     const l2 = this.img(set[2]);
-    if (l2) this.drawLayer(this.tinted(set[2], l2, tint), 0.49, 480 + y56, 1.34 * 2, -120, a);
+    if (l2) this.drawLayer(this.tinted(set[2], l2, tint), 0.49, H * 0.86 + y56 - (TEX_TOPROW[set[2]] ?? 0) * sc, 1.34 * sc, -120 * sc / 2, a);
   }
 
   /** 单树层（:60708-60960 逐槽位规格/偏移/特例 1:1；绝对像素） */
@@ -456,6 +494,9 @@ export class MenuBackground {
     this.canvas.width = 0; this.canvas.height = 0;   // 立刻还回后备(不等 GC;双开预算紧)
     for (const e of this.tintBufs.values()) { e.cv.width = 0; e.cv.height = 0; }
     this.tintBufs.clear();
+    this.glCloud?.dispose();   // 菜单云 GL 层随菜单销毁(上下文/纹理全释放)
+    this.glCloud = null;
+    this.sky.cloudGlLayer = null;
   }
 
   /** 调试探针 */

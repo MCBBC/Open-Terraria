@@ -3,6 +3,7 @@
 // 其余 case 在此按原版逐条移植;NetMessage 跳过(单机)。
 // 行为无对应引擎系统的器件(音乐盒/派对/天塔柱等)按"帧翻转 + toast 占位"处理,注释标明。
 import type { Wiring } from '../Wiring';
+import { PREVENTS_ACTUATION_UNDER } from '../Wiring';
 import type { TrapShotKind } from '../../entities/Dart';
 import { TILE_BY_KEY } from '../../data/tiles';
 import { flipSwitchTrack } from '../MinecartTrack';
@@ -53,6 +54,8 @@ export interface DeviceCtx {
   dropItemStack(vanillaItemId: number, stack: number, px: number, py: number): void;
   /** worldSurface(部分器件判定) */
   worldSurface: number;
+  /** 派对进行中（★R20-G4 兔子雕像派对变体 Wiring.cs:2306-2317 BirthdayParty.PartyIsUp） */
+  partyIsUp?(): boolean;
   /** 魔幻日晷/月晷快进（Wiring.cs:1150/:1168 → Main.Sundialing/Moondialing :6304/:6319：
    *  fastForwardTimeToDawn/Dusk=true + cooldown=8；冷却中/已在快进则静默） */
   timeSkip?(kind: 'dawn' | 'dusk'): void;
@@ -75,6 +78,11 @@ function swapTile(w: Wiring, x: number, y: number, fromKey: string, toKey: strin
   else if (cur === to) st.setTile(x, y, from, st.frameX[i], st.frameY[i]);
 }
 
+/** case 130 门用 CanKillTile（Wiring.canKillTile 公开转发;R20-I6） */
+function canKillTileAt(w: Wiring, x: number, y: number): boolean {
+  return w.canKillTile(x, y);
+}
+
 /** 多格器件整体翻帧(篝火/壁炉/吊灯等通用模式,Wiring.cs:1003-1052 等):
  *  锚点 = (x - frameX%blockW/18, y - frameY%blockH/18);delta 由锚点帧阈值定;整体 SkipWire */
 /** 多格块锚点归一 + 整块帧翻转。
@@ -90,6 +98,10 @@ function flipBlock(
   w: Wiring, x: number, y: number,
   tilesW: number, tilesH: number,
   axis: 'x' | 'y', threshold: number, delta: number,
+  /** 越阈值时的反向步长(缺省 = -delta)。★R20-I13:烟囱 406 原版越 108 时 -108
+   *  （Wiring.cs:1071-1091:num22=54,anchor.frameY>=108 → -108）= 0→54→108→0 三态;
+   *  统一 -delta 会走 108→54 死循环,永回不到关态 */
+  deltaNeg?: number,
 ): void {
   const st = w.st;
   const i = st.idx(x, y);
@@ -97,7 +109,7 @@ function flipBlock(
   const oy = y - Math.floor(st.frameY[i] % (tilesH * 18) / 18);
   let d = delta;
   const ai = st.idx(ox, oy);
-  if (axis === 'y' ? st.frameY[ai] >= threshold : st.frameX[ai] >= threshold) d = -delta;
+  if (axis === 'y' ? st.frameY[ai] >= threshold : st.frameX[ai] >= threshold) d = deltaNeg ?? -delta;
   for (let ix = ox; ix < ox + tilesW; ix++) {
     for (let iy = oy; iy < oy + tilesH; iy++) {
       if (!st.inBounds(ix, iy)) continue;
@@ -251,10 +263,12 @@ export function bloodMoonMonolithOf(sheet: number, frameY: number): boolean {
   return sheet === 480 && frameY >= 54;
 }
 
-/** SwitchMB（WorldGen.cs:50977-51021 1:1）：八音盒 139 / 南瓜灯 35 共用。
+/** SwitchMB（WorldGen.cs:51413-51456 1:1）：八音盒 139 / 南瓜灯 35 共用。
  *  锚点：num3 = frameY/18 对 2 取余（行内偏移）、num4 = frameX/18 ≥2 再减 2（列内偏移）；
  *  2×2 区内 139/35 格 frameX ±36（<36 → +36，否则 -36），整体 SkipWire。
- *  电路触发（Wiring.cs:2019-2022）与右键（Player.cs:31759-31764，多播 SoundID 28）共用 */
+ *  ★R20-A9:SkipWire 有 `if (Wiring.running)` 门（:51449-51455）——右键路径
+ *  （running=false）不得写 skip,否则残留 4 格吞掉下一次 BFS 的信号。
+ *  ★R20-I19:翻帧格须 active()（:51436 幽灵格照翻=原版不翻） */
 export function switchMB(w: Wiring, x: number, y: number): void {
   const st = w.st;
   const i = st.idx(x, y);
@@ -266,19 +280,22 @@ export function switchMB(w: Wiring, x: number, y: number): void {
   for (let k = ox; k < ox + 2; k++) {
     for (let l = oy; l < oy + 2; l++) {
       if (!st.inBounds(k, l)) continue;
-      const sh = w.sheetOf(k, l);
-      if (sh !== 139 && sh !== 35) continue;
       const ii = st.idx(k, l);
+      const sh = w.sheetOf(k, l);
+      if (st.flags[ii] === 0 || (sh !== 139 && sh !== 35)) continue;
       const fx = st.frameX[ii] < 36 ? st.frameX[ii] + 36 : st.frameX[ii] - 36;
       st.setTile(k, l, st.type[ii], fx, st.frameY[ii]);
     }
   }
-  w.skipCell(ox, oy); w.skipCell(ox + 1, oy);
-  w.skipCell(ox, oy + 1); w.skipCell(ox + 1, oy + 1);
+  if (w.running) {
+    w.skipCell(ox, oy); w.skipCell(ox + 1, oy);
+    w.skipCell(ox, oy + 1); w.skipCell(ox + 1, oy + 1);
+  }
 }
 
-/** SwitchFountain（WorldGen.cs:51171-51209 1:1）：喷泉 207，2×4 区 frameY ±72。
- *  锚点：num3 = frameX/18 对 2 取余、num4 = frameY/18 ≥4 再减 4 */
+/** SwitchFountain（WorldGen.cs:51607-51660 1:1）：喷泉 207，2×4 区 frameY ±72。
+ *  锚点：num3 = frameX/18 对 2 取余、num4 = frameY/18 ≥4 再减 4。
+ *  ★R20-A9:SkipWire 有 running 门（:51643-51653）;★R20-I19:翻帧格须 active() */
 export function switchFountain(w: Wiring, x: number, y: number): void {
   const st = w.st;
   const i = st.idx(x, y);
@@ -290,23 +307,30 @@ export function switchFountain(w: Wiring, x: number, y: number): void {
   for (let k = ox; k < ox + 2; k++) {
     for (let l = oy; l < oy + 4; l++) {
       if (!st.inBounds(k, l)) continue;
-      w.skipCell(k, l);   // 原版 2×4 全区 SkipWire（:51200-51207，先于类型判定）
-      if (w.sheetOf(k, l) !== 207) continue;
       const ii = st.idx(k, l);
-      const fy = st.frameY[ii] < 72 ? st.frameY[ii] + 72 : st.frameY[ii] - 72;
-      st.setTile(k, l, st.type[ii], st.frameX[ii], fy);
+      if (st.flags[ii] !== 0 && w.sheetOf(k, l) === 207) {
+        const fy = st.frameY[ii] < 72 ? st.frameY[ii] + 72 : st.frameY[ii] - 72;
+        st.setTile(k, l, st.type[ii], st.frameX[ii], fy);
+      }
+    }
+  }
+  // 原版 2×4 全区 SkipWire（:51643-51653，后于翻帧、先于返回）
+  if (w.running) {
+    for (let k = ox; k < ox + 2; k++) {
+      for (let l = oy; l < oy + 4; l++) w.skipCell(k, l);
     }
   }
 }
 
-/** SwitchMonolith（WorldGen.cs:51023-51169 1:1）：天塔柱族 frameY 翻转。
+/** SwitchMonolith（WorldGen.cs:51459-51605 1:1）：天塔柱族 frameY 翻转。
  *  区块 2×3（733 为 3×3）；410 阈值 56，其余 54；658 为 +54 对 162 取模循环（三态）。
- *  电路触发（Wiring.cs:2032-2036）与右键（Player.cs:31801-31808）共用 */
+ *  ★R20-A9:SkipWire 有 running 门（:51595-51604,后于翻帧）;★R20-I19:翻帧格须 active()
+ *  （:51485-51488 !active() continue） */
 export function switchMonolith(w: Wiring, x: number, y: number): void {
   const st = w.st;
   const i = st.idx(x, y);
   const sheet = w.sheetOf(x, y);
-  const bw = sheet === 733 ? 3 : 2;   // :51026-51028
+  const bw = sheet === 733 ? 3 : 2;   // :51462-51465
   const bh = 3;
   let num3 = Math.floor(st.frameX[i] / 18);
   while (num3 >= bw) num3 -= bw;
@@ -316,36 +340,47 @@ export function switchMonolith(w: Wiring, x: number, y: number): void {
   for (let k = ox; k < ox + bw; k++) {
     for (let l = oy; l < oy + bh; l++) {
       if (!st.inBounds(k, l)) continue;
-      w.skipCell(k, l);   // 原版全区 SkipWire（:51156-51166，先于类型判定）
+      const ii = st.idx(k, l);
+      if (st.flags[ii] === 0) continue;
       const sh = w.sheetOf(k, l);
       if (sh < 0) continue;
-      const ii = st.idx(k, l);
       let fy = st.frameY[ii];
       if (sh === 410) fy = fy < 56 ? fy + 56 : fy - 56;
-      else if (sh === 658) fy = (fy + 54) % 162;   // :51131-51140
+      else if (sh === 658) fy = (fy + 54) % 162;   // :51568-51577
       else if (sh === 480 || sh === 509 || sh === 657 || sh === 720 || sh === 721 || sh === 725 || sh === 733) {
         fy = fy < 54 ? fy + 54 : fy - 54;
       } else continue;
       st.setTile(k, l, st.type[ii], st.frameX[ii], fy);
     }
   }
+  if (w.running) {
+    for (let k = ox; k < ox + bw; k++) {
+      for (let l = oy; l < oy + bh; l++) w.skipCell(k, l);
+    }
+  }
 }
 
-/** 陷阱(137)发射(1457 Wiring.cs:1764-1890 case 137 + Item.cs placeStyle)。frameY/18=种类:
- *  0飞镖(98) 1超级飞镖(184) 2烈焰(187,隐形+尘埃) 3尖刺球(185) 4长矛(186) */
+/** 陷阱(137)发射(1458 Wiring.cs:1764-1890 case 137 + Item.cs placeStyle)。frameY/18=种类:
+ *  0飞镖(98) 1超级飞镖(184) 2烈焰(187,隐形+尘埃) 3尖刺球(185) 4长矛(186) 5剧毒飞镖(980) */
 function fireTrap(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
   const st = w.st;
   const i = st.idx(x, y);
   const kind = Math.floor(st.frameY[i] / 18);
-  if (kind === 0 || kind === 1 || kind === 2) {
+  if (kind === 0 || kind === 1 || kind === 2 || kind === 5) {
     if (!w.checkMech(x, y, 200)) return;
     // 方向:frameX 0=左 18=右;frameY<36 平置 / ≥36 竖置(上下)
     const dirX = st.frameX[i] === 0 ? -1 : st.frameX[i] === 18 ? 1 : 0;
     const dirY = st.frameX[i] < 36 ? 0 : st.frameX[i] < 72 ? -1 : 1;
-    const speed = kind === 0 ? 12 : kind === 1 ? 12 : 5;
-    const dmg = kind === 0 ? 20 : 40;
+    const speed = kind === 0 ? 12 : kind === 1 ? 12 : kind === 5 ? 12 : 5;
+    const dmg = kind === 0 ? 20 : kind === 5 ? 30 : 40;
     const px = x * 16 + 8 + 10 * dirX, py = y * 16 + 8 + 10 * dirY;
-    ctx.shootProjectile(px, py, dirX * speed, dirY * speed, dmg, kind === 0 ? 'dart' : kind === 1 ? 'superdart' : 'flame');
+    // ★R20-H2(缺失·高):1.4.5 新陷阱剧毒飞镖机关(物品 5135,Item.cs:41146-41158
+    // createTile 137 placeStyle 5 → frameY=90)。原版 case 5 与 0/1/2 同支
+    // （Wiring.cs:1777-1810）:弹 980 VenomDartTrap / 伤 30 / 速 12;980 SetDefaults
+    // （Projectile.cs:9332-9340）10×10 aiStyle1 penetrate-1 trap,命中 NPC/玩家
+    // 均 AddBuff(70=Venom,300t)（:11714/:12353——projstatus 表已含 980→毒 300t）
+    ctx.shootProjectile(px, py, dirX * speed, dirY * speed, dmg,
+      kind === 0 ? 'dart' : kind === 1 ? 'superdart' : kind === 5 ? 'venomdart' : 'flame');
   } else if (kind === 3) {
     // 尖刺球(1457 Wiring.cs:1812-1857 case 3;1456 :1812-1856 同文——两版活跃分支逐字节一致):
     // CheckMech 300 → frameX 四向定向(:1833-1852 frameX/18:case0/1 下+1/case2 上−1/
@@ -417,26 +452,35 @@ const STATUE_NPC: Record<number, number | number[]> = {
 /** flag7（生成区实心 → poof 不生成）的 style（:2270-2282；64=小丑? 71=史莱姆王组） */
 const STATUE_SOLID_CHECK = new Set([64, 71]);
 /** 单独分支的雕像 style（Wiring.cs :2290-2440）。dx/dy 为生成点偏移、
- *  solid=生成区实心时 poof、pool=随机池（28 蛇三色等） */
-const STATUE_NPC_DIRECT: Record<number, { npc: number | number[]; dx?: number; dy?: number; solid?: boolean }> = {
+ *  solid=生成区实心时 poof、pool=随机池（28 蛇三色等）、
+ *  area=实心判定区覆盖（缺省 6×3 spawnAreaSolid）、
+ *  quota=MechSpawn 配额查的 id（缺省按抽中 id）、party=派对态换刷（R20-G4） */
+const STATUE_NPC_DIRECT: Record<number, { npc: number | number[]; dx?: number; dy?: number; solid?: boolean; area?: [number, number, number, number]; quota?: number; party?: [number, number] }> = {
   4: { npc: 1, dy: -12 },
   7: { npc: 49, dx: -4, dy: -6 },
   8: { npc: 55, dy: -12 },
-  9: { npc: 46, dy: -12 },
+  // ★R20-G4:兔子雕像派对变体（:2306-2317 PartyIsUp → 540 PartyBunny;
+  //  MechSpawn 等价组 [46,540,303,337] 已在 NPC_MECH_GROUPS）
+  9: { npc: 46, dy: -12, party: [46, 540] },
   10: { npc: 21 },
-  16: { npc: 42, dy: -12, solid: true },
+  // ★R20-G6:雕像 16 实心判定区 = SolidTiles(ax-1..ax+1, ay..ay+1)（:2325-2336 3×2,
+  //  曾误用 6×3 spawnAreaSolid）
+  16: { npc: 42, dy: -12, solid: true, area: [-1, 0, 1, 1] },
   18: { npc: 67, dy: -12 },
   23: { npc: 63, dy: -12 },
   27: { npc: 85, dx: -9 },
-  28: { npc: [74, 297, 298], dy: -12 },
+  // ★R20-G7:蛇雕像配额查 74（:2356-2361 MechSpawn 只查 74,生成随机 74/297/298）
+  28: { npc: [74, 297, 298], dy: -12, quota: 74 },
   42: { npc: 58, dy: -12 },
-  50: { npc: 65, solid: true }, // 史莱姆王雕像（:2385-2399）
+  // ★R20-G5:史莱姆王雕像生成 Y = num143-12（:2393-2404,曾漏 dy）
+  50: { npc: 65, solid: true, dy: -12 },
 };
 /** 物品雕像 style → [原版 item id, ...MechSpawn 配额同查的等价 id]
- *  （2 星 184/1735/1868、17 炸弹 166、37 心 58/1734/1867；:2408-2420） */
-const STATUE_ITEM: Record<number, { item: number; mechIds: number[] }> = {
+ *  （2 星 184/1735/1868、17 炸弹 166、37 心 58/1734/1867；:2408-2420）
+ *  dy=掉落点 Y 偏移（★R20-G8:炸弹雕像 num143-20,:2412-2416,曾 -16） */
+const STATUE_ITEM: Record<number, { item: number; mechIds: number[]; dy?: number }> = {
   2: { item: 184, mechIds: [184, 1735, 1868] },
-  17: { item: 166, mechIds: [166] },
+  17: { item: 166, mechIds: [166], dy: -20 },
   37: { item: 58, mechIds: [58, 1734, 1867] },
 };
 
@@ -458,10 +502,13 @@ function fireStatue(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
   w.skipCell(ax, ay); w.skipCell(ax, ay + 1); w.skipCell(ax, ay + 2);
   w.skipCell(ax + 1, ay); w.skipCell(ax + 1, ay + 1); w.skipCell(ax + 1, ay + 2);
   const px = ax * 16 + 16, py = (ay + 3) * 16;
-  // 生成区实心判定（:2274 SolidTiles(num139-2..num139+3, num138..num138+2)；flag7/部分直刷用）
-  const spawnAreaSolid = () => {
-    for (let sx = ax - 2; sx <= ax + 3; sx++) {
-      for (let sy = ay; sy <= ay + 2; sy++) {
+  // 生成区实心判定（:2274 SolidTiles(num139-2..num139+3, num138..num138+2)；flag7/部分直刷用。
+  //  ★R20-G6:直刷支可带 area=[dx0,dy0,dx1,dy1] 覆盖（雕像 16 = ax-1..ax+1, ay..ay+1）
+  const spawnAreaSolid = (area?: [number, number, number, number]) => {
+    const x0 = area ? ax + area[0] : ax - 2, y0 = area ? ay + area[1] : ay;
+    const x1 = area ? ax + area[2] : ax + 3, y1 = area ? ay + area[3] : ay + 2;
+    for (let sx = x0; sx <= x1; sx++) {
+      for (let sy = y0; sy <= y1; sy++) {
         if (st.inBounds(sx, sy) && st.isSolid(sx, sy)) return true;
       }
     }
@@ -480,12 +527,15 @@ function fireStatue(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
     }
     return;
   }
-  // 单独分支 NPC 雕像（各自偏移/实心判定；:2290-2440）
+  // 单独分支 NPC 雕像（各自偏移/实心判定/配额/派对变体；:2290-2440）
   const direct = STATUE_NPC_DIRECT[num79];
   if (direct !== undefined) {
-    const npcId = Array.isArray(direct.npc) ? pick(direct.npc) : direct.npc;
-    if (w.checkMech(ax, ay, 30) && ctx.mechSpawnOk(px, py, npcId)) {
-      if (!direct.solid || !spawnAreaSolid()) {
+    // ★R20-G4:兔子雕像 PartyIsUp → 540 PartyBunny（:2306-2317）
+    let npcId = Array.isArray(direct.npc) ? pick(direct.npc) : direct.npc;
+    if (direct.party && ctx.partyIsUp?.()) npcId = direct.party[1];
+    // ★R20-G7:配额查 quota（缺省按抽中 id;蛇雕像 MechSpawn 只查 74）
+    if (w.checkMech(ax, ay, 30) && ctx.mechSpawnOk(px, py, direct.quota ?? npcId)) {
+      if (!direct.solid || !spawnAreaSolid(direct.area)) {
         ctx.spawnNpc(npcId, px + (direct.dx ?? 0), py + (direct.dy ?? 0));
       } else {
         ctx.sfx('tink', px, py);
@@ -498,7 +548,8 @@ function fireStatue(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
   if (itemEntry !== undefined) {
     const ok = w.checkMech(ax, ay, 600)
       && itemEntry.mechIds.every((mid) => ctx.itemSpawnOk(px, py, mid));
-    if (ok) ctx.dropItem(itemEntry.item, px, py - 16);
+    // ★R20-G8:掉落点 Y = num143-20（炸弹雕像,:2412-2416;星/心 -16 不变）
+    if (ok) ctx.dropItem(itemEntry.item, px, py + (itemEntry.dy ?? -16));
     return;
   }
   switch (num79) {
@@ -534,7 +585,8 @@ function fireworkToilet(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
   ctx.shootProjectile(x * 16 + 8, num68 * 16 + 12, 0, 0, 0, 'toiletPop'); // :1505
 }
 
-/** 巨石雕像 531(Wiring.cs:1747-1762) */
+/** 巨石雕像 531(Wiring.cs:1997-2016)。★R20-G9:生成点 = ((num90+1)*16, num91*16+28)
+ *  （:2004-2006 vector2=(num90+1,num91)*16 后 Y+=28f）——曾写成 (oy+1)*16=+16 */
 function fireBoulderStatue(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
   const st = w.st;
   const i = st.idx(x, y);
@@ -542,7 +594,7 @@ function fireBoulderStatue(w: Wiring, ctx: DeviceCtx, x: number, y: number): voi
   const oy = y - Math.floor(st.frameY[i] % 36 / 18);
   if (!w.checkMech(ox, oy, 900)) return;
   w.skipCell(ox, oy); w.skipCell(ox + 1, oy); w.skipCell(ox, oy + 1); w.skipCell(ox + 1, oy + 1);
-  ctx.shootProjectile(ox * 16 + 16, (oy + 1) * 16, 0, 0, 70, 'boulder');
+  ctx.shootProjectile(ox * 16 + 16, oy * 16 + 28, 0, 0, 70, 'boulder');
 }
 
 /** 可接线灯器件的开关帧判定(Wiring.cs 翻帧 delta 推导):on = frame%(2δ) < δ。
@@ -597,7 +649,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       fireworkToilet(w, ctx, x, y);
       return true;
     }
-    case 33: case 174: case 49: case 372: // 蜡烛族 frameX ±18(:1472-1480)
+    case 33: case 174: case 49: case 372: case 646: // 蜡烛族 frameX ±18(:1754-1759 ToggleCandle;★R20-I14 补 646 影烛)
       flipCell(w, x, y, 18);
       return true;
     case 34: // 吊灯 3×3 frameX ±54(:1405-1428)
@@ -628,9 +680,14 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 105:
       fireStatue(w, ctx, x, y);
       return true;
-    case 130: { // 通电石:上方有宝箱则不缩(:878-884)
-      const above = y > 0 ? w.sheetOf(x, y - 1) : -1;
-      if (above === 21 || above === 88 || above === 467) return true;
+    case 130: { // 通电石→断电石(:1426-1434):上方未激活或非 PreventsActuationUnder
+      // ★R20-I6:原版门 = `!active || !PreventsActuationUnder[type]`（TileID.cs:313
+      // 11 型全表:21/467/26/77/88/470/475/237/597/441/468）且 WorldGen.CanKillTile——
+      // 曾用 3 型子集{21,88,467}且漏 CanKillTile(树干/棕榈/箱族上方拒缩)
+      const ai = st.idx(x, y - 1);
+      const aboveActive = y > 0 && st.inBounds(x, y - 1) && st.flags[ai] !== 0;
+      if (aboveActive && PREVENTS_ACTUATION_UNDER.has(w.sheetOf(x, y - 1))) return true;
+      if (!canKillTileAt(w, x, y)) return true;
       swapTile(w, x, y, 'v_130_active_stone_block', 'v_131_inactivestoneblock');
       return true;
     }
@@ -710,7 +767,10 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       // 全局冷却门（Wiring.cs:1312-1314/1321-1323：冷却中直接返回）
       if (num36 === 0 && w.cannonCoolDown > 0) return true;
       if (num36 === 1 && w.bunnyCannonCoolDown > 0) return true;
-      if (!flag2 || !w.checkMech(ox, oy, time)) return true;
+      // ★R20-F2:原版 `CheckMech(...) & flag2`（:1330）非短路——flag2=false（左向低
+      // 仰角）时仍登记 CheckMech 冷却；曾 `!flag2 ||` 短路不登记
+      const mechOk = w.checkMech(ox, oy, time);
+      if (!(mechOk && flag2)) return true;
       // WorldGen.ShootFromCannon（WorldGen.cs:50606-50718 1:1）
       // 弹种（:50611-50631）：ammo=num36+1 → 0→162 炮弹 / 1→281 爆炸兔兔 / 3·4→601（速度 3）
       const speed = num36 === 3 || num36 === 4 ? 3 : 14; // :50608 num=14f；601 时 num=3f(:50623/50628)
@@ -886,8 +946,8 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 405: // 壁炉 3×2 frameX ±54(:1021-1038)
       flipBlock(w, x, y, 3, 2, 'x', 54, 54);
       return true;
-    case 406: // 烟囱 3×3 frameY +54/-108(:1039-1056)
-      flipBlock(w, x, y, 3, 3, 'y', 108, 54);
+    case 406: // 烟囱 3×3 三态循环 +54 / 越阈 -108（Wiring.cs:1071-1091）= 0→54→108→0
+      flipBlock(w, x, y, 3, 3, 'y', 108, 54, -108);
       return true;
     case 411: // 引爆器 2×2 frameX ±36(:1057-1074)
       flipBlock(w, x, y, 2, 2, 'x', 36, 36);
@@ -946,18 +1006,32 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 594: // 大火山 2×2 frameX ±36(Wiring.cs:1711-1741;同上零声音)
       flipBlock(w, x, y, 2, 2, 'x', 36, 36);
       return true;
+    case 349: { // ★R20-I15(缺失·低):蘑菇雕像块导线翻帧（Wiring.cs:2485-2514）
+      // 2×3 整块 frameX ±216（锚 frameX/18 折 2 / frameY/18%3）;临时动画(视觉级)未接
+      const n113 = Math.floor(st.frameY[i] / 18) % 3;
+      const ay2 = y - n113;
+      let n115 = Math.floor(st.frameX[i] / 18);
+      while (n115 >= 2) n115 -= 2;
+      const ax2 = x - n115;
+      const d = st.frameX[st.idx(ax2, ay2)] !== 0 ? -216 : 216;   // :2504 翻转前读锚帧
+      for (let dx = 0; dx < 2; dx++) {
+        for (let dy = 0; dy < 3; dy++) {
+          const ii = st.idx(ax2 + dx, ay2 + dy);
+          w.skipCell(ax2 + dx, ay2 + dy);
+          st.setTile(ax2 + dx, ay2 + dy, st.type[ii], st.frameX[ii] + d, st.frameY[ii]);
+        }
+      }
+      return true;
+    }
   }
   return false;
 }
 
-/** 装配:把器件表挂到 Wiring(器件 case 之外的默认落点) */
+/** 装配:把器件表挂到 Wiring(器件 case 之外的默认落点)。
+ *  ★R20-I4:boulderFall 钩子已摘除——原版致动缩入不构成巨石失撑
+ *  （Check2x2 判据不含 inActive 位,WorldGen.cs:48937-48944）,
+ *  巨石滚出只挂"支撑被真实破坏"链（Game.breakTile spawnBoulderRoll） */
 export function attachDevices(w: Wiring, ctx: DeviceCtx): void {
   w.device = (ww, sheet, x, y) => deviceTable(ww, ctx, sheet, x, y);
   w.teleportPair = (a, b) => ctx.teleportPair(a, b);
-  // 巨石失撑下落（Wiring.boulderFall）：KillTile(138) → Projectile 99 的数据点
-  // （1456 cs:48766：spawn (x*16+15.5, y*16+16)、初速 0/0、伤害 70）。
-  // x,y = 2×2 对象锚格(清除侧已归一)——生成点 ≈ 巨石中心,弹 31×31 盒不嵌残块
-  w.boulderFall = (x, y, _sheet) => {
-    ctx.shootProjectile(x * 16 + 15.5, y * 16 + 16, 0, 0, 70, 'boulder');
-  };
 }

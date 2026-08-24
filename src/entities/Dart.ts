@@ -18,10 +18,11 @@ import { applyProjStatus } from './projStatus';
 /** 电路陷阱投射物(Wiring.cs:1495-1743)。贴图 = 原版 projectile id;
  *  帧尺寸按实际解包 PNG 整图(素材为完整单帧:98 竖镖 10×28 / 184 竖火舌 10×18 /
  *  185 尖刺球 16×16 / 99 巨石 32×32)——勿按 SetDefaults 碰撞盒裁剪,否则只画残片 */
-// tile 137 kind ↔ projectile 对应(Wiring.cs:1495-1743 + Item.cs placeStyle 核实):
+// tile 137 kind ↔ projectile 对应(Wiring.cs:1764-1890 + Item.cs placeStyle 核实):
 //   0 飞镖机关(539)→98 | 1 超级飞镖机关(1146)→184(毒镖样式,有图) |
 //   2 烈焰机关(1147)→187(FlamethrowerTrap,官方空桩贴图,视觉=火焰尘埃) |
 //   3 尖球机关(1148)→185 | 4 长矛机关(1149)→186(有图)
+//   5 剧毒飞镖机关(5135,1.4.5 新)→980 VenomDartTrap(★R20-H2;10×28 贴图,毒 300t)
 // 187/654 的 PNG 是官方占位空桩(xnb 像素全零,经字节级同 stub 证实),isBlankTex 检出后
 // 走色块回退 + 粒子拖尾——与原版"隐形弹体+尘埃视觉"一致(Projectile.cs:24222 188 同族 dust 驱动)
 const TRAP_SHOT_STYLE: Record<string, {
@@ -50,18 +51,26 @@ const TRAP_SHOT_STYLE: Record<string, {
   /** 发射音（Projectile.AI 首帧 SoundID.Item14：162=Projectile.cs:21542 / 281=26830） */
   launchSfx?: string;
   life?: number;
+  /** 击退（★R20-F5:Wiring 各 NewProjectile 实参逐型分档——曾统一 sign(vx)*2:
+   *  镖族 2(Wiring.cs:1983)/炮弹 162·爆炸兔兔 281 8(:1317/:1326)/巨石 99 10(:2010·
+   *  WorldGen.cs:49180)/雪球 166 3.5(:1399)/喷泉 654 2(:3128)/烟花火箭 167 7
+   *  (WorldGen.cs:62672)/其余 0） */
+  kb?: number;
 }> = {
-  dart: { w: 8, h: 4, color: '#C8B89A', grav: 0, proj: 'vanilla/Projectile_98.png', fw: 10, fh: 28, rotOff: Math.PI / 2 },
-  superdart: { w: 6, h: 6, color: '#8FBF6A', grav: 0, proj: 'vanilla/Projectile_184.png', fw: 10, fh: 18, rotOff: Math.PI / 2 },
+  dart: { w: 8, h: 4, color: '#C8B89A', grav: 0, proj: 'vanilla/Projectile_98.png', fw: 10, fh: 28, rotOff: Math.PI / 2, kb: 2 },
+  superdart: { w: 6, h: 6, color: '#8FBF6A', grav: 0, proj: 'vanilla/Projectile_184.png', fw: 10, fh: 18, rotOff: Math.PI / 2, kb: 2 },
+  // ★R20-H2:980 VenomDartTrap（SetDefaults :9332-9340:10×10 aiStyle1 penetrate-1 trap;
+  //  贴图 10×28 同 98;命中 NPC/玩家均 Venom 300t——projstatus 表 980 已接）
+  venomdart: { w: 8, h: 4, color: '#9AC860', grav: 0, proj: 'vanilla/Projectile_980.png', fw: 10, fh: 28, rotOff: Math.PI / 2, kb: 2 },
   flame: { w: 10, h: 10, color: '#FF8030', grav: 0, proj: 'vanilla/Projectile_187.png', fw: 16, fh: 16,
     trail: { colors: ['#FF8030', '#FFC040', '#FF5010'], count: 2, life: 16, grav: -0.03 } },
   spear: { w: 6, h: 14, color: '#B8B8C0', grav: 0, proj: 'vanilla/Projectile_186.png', fw: 10, fh: 16, rotOff: Math.PI / 2 },
   // 185 尖刺球(SetDefaults 1405:2255/1456:2449):14×14 aiStyle14 penetrate-1 timeLeft 900
-  spiky: { w: 14, h: 14, color: '#8A8F96', grav: 0.3, proj: 'vanilla/Projectile_185.png', fw: 16, fh: 16, spin: true, spinK: 0.14 },
+  spiky: { w: 14, h: 14, color: '#8A8F96', grav: 0.3, proj: 'vanilla/Projectile_185.png', fw: 16, fh: 16, spin: true, spinK: 0.14, kb: 2 },
   // 99 巨石(SetDefaults :1561-1568):31×31 aiStyle25 penetrate-1 trap;物理全在
   // boulderStep(AI_025 :24662-24723 + 撞块 :17530-17551)——grav/vCap 值仅表占位
-  boulder: { w: 31, h: 31, color: '#9A8C72', grav: 0, proj: 'vanilla/Projectile_99.png', fw: 32, fh: 32, spin: true, spinK: 0.06 },
-  geyser: { w: 10, h: 14, color: '#B8E8F0', grav: 0.02, proj: 'vanilla/Projectile_654.png', fw: 16, fh: 16,
+  boulder: { w: 31, h: 31, color: '#9A8C72', grav: 0, proj: 'vanilla/Projectile_99.png', fw: 32, fh: 32, spin: true, spinK: 0.06, kb: 10 },
+  geyser: { w: 10, h: 14, color: '#B8E8F0', grav: 0.02, proj: 'vanilla/Projectile_654.png', fw: 16, fh: 16, kb: 2,
     trail: { colors: ['#E8F4F8', '#C8E4EE'], count: 1, life: 26, grav: -0.015 } },
   // ---- 炮弹族（Wiring.cs case 209/212 → WorldGen.ShootFromCannon / 直接 NewProjectile）----
   // 162 炮弹（SetDefaults Projectile.cs:2239-2246）：16×16 aiStyle2 friendly penetrate4；
@@ -69,20 +78,20 @@ const TRAP_SHOT_STYLE: Record<string, {
   // :21978-21981，2026-08-14 补）；Kill（:72768-72831）：64×64→144×144
   // 两段 Damage() 纯伤害（不在 ExplodeTiles 表 = 不破坏地形）
   cannonball: { w: 16, h: 16, color: '#33333C', grav: 0.28, gravDelay: 18, xDamp: 0.99, vCap: 32,
-    proj: 'vanilla/Projectile_162.png', fw: 18, fh: 18, spin: 'roll', friendly: true, blast: 72,
+    proj: 'vanilla/Projectile_162.png', fw: 18, fh: 18, spin: 'roll', friendly: true, blast: 72, kb: 8,
     launchSfx: 'explosion', life: 3600 },
   // 281 爆炸兔兔（SetDefaults Projectile.cs:3408-3418）：28×28 aiStyle49 friendly timeLeft600；
   // AI（:26822-26913）同炮弹弧线（18 tick 后 vy+=0.28/vx*=0.99，vy 上限 15.9）；
   // Kill（:72704-72758）：128×128 Damage() 纯伤害
   bunny: { w: 28, h: 28, color: '#E8E2D8', grav: 0.28, gravDelay: 18, xDamp: 0.99, vCap: 15.9,
-    proj: 'vanilla/Projectile_281.png', fw: 28, fh: 28, spin: 'bunny', friendly: true, blast: 64,
+    proj: 'vanilla/Projectile_281.png', fw: 28, fh: 28, spin: 'bunny', friendly: true, blast: 64, kb: 8,
     launchSfx: 'explosion', life: 600 },
   // 166 雪球（SetDefaults Projectile.cs:2282-2289）：14×14 aiStyle2 friendly ranged coldDamage；
   // AI（:21862-21892）：玩家射出（ai1==1）时命中城镇 NPC 即消散清伤；20 tick 直线后
   // vy+=0.3/vx*=0.98（专属分支，勿改默认档 0.4/0.97——166 不落 else）；终端 32
   // （:21978 通用钳，2026-08-14 补）；Kill（:71758-71767）：碎裂尘无 AoE
   snowball: { w: 14, h: 14, color: '#F2F8FF', grav: 0.3, gravDelay: 20, xDamp: 0.98, vCap: 32,
-    proj: 'vanilla/Projectile_166.png', fw: 14, fh: 14, spin: 'roll', friendly: true,
+    proj: 'vanilla/Projectile_166.png', fw: 14, fh: 14, spin: 'roll', friendly: true, kb: 3.5,
     shatterDust: true, life: 3600 },
   // 601 传送门弹（SetDefaults Projectile.cs:3408 族：10×10 friendly，无重力直线；
   // AI :51174-51242：门色拖尾尘 + alpha 递减；撞块 :16672-16686 → PortalHelper.TryPlacingPortal

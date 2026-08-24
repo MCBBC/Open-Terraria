@@ -3101,21 +3101,35 @@ export class Renderer {
     // 7a''. LitNature 晨昏光晕（NextNatureRenderer :105-170：原版像素着色器
     //       后处理——从世界层内挪出到光照合成后;曾画在世界层内被乘光:晨昏
     //       时光照暗 → 加性光晕被乘成不可见,与耀斑同类错误 2026-08-20 审计）
+    //       ★深度/遮挡双门（2026-08-24 用户实报"地底出现日出日落光晕"）:
+    //       原版三重门合一——①NextNatureRenderer.cs:96-99
+    //       !ShouldDrawSurfaceBackground||!SunVisibilityEnabled → num=0;
+    //       ②太阳只在 screenPosition.Y/16 < worldSurface+2 时入场景
+    //       (Main.cs:61529,天空块本体 :61492 <+1)——屏顶入地太阳即不在;
+    //       ③shader 乘 SunVisibilityPixel 采样(HorizonHelper :46-80,太阳屏幕
+    //       矩形的场景不透明度)——地下该区=不透明洞穴背景 → 0。本仓近似:
+    //       屏顶低于 worldSurface+2 整门关 + 强度乘 sunOcclusion(与镜头光斑
+    //       同源的 tile 遮挡采样,洞口/悬崖下同步衰减)
     const litVis = litNatureVisibility(clock);
     if (litVis > 0.003) {
-      const ft = ((clock.timeOfDay - 0.1875) / 0.625);   // =Main.time/54000(★时基校正)
-      const sunX = Math.max(0, Math.min(1, ft)) * viewW;
-      const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
-      const sunY = dip * 250 + 180;
-      const r = viewW * 0.55;
-      const grad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, r);
-      grad.addColorStop(0, `rgba(255,206,130,${(litVis * 0.85).toFixed(3)})`);
-      grad.addColorStop(1, 'rgba(255,206,130,0)');
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, viewW, viewH);
-      ctx.restore();
+      const screenTopY = cam.y - viewH / 2 / z;
+      if (screenTopY / TILE < world.groundLevel + 2 && this.sky.sunOcclusionReady
+        && this.sky.sunOcclusion > 0.003) {
+        const occ = this.sky.sunOcclusion;
+        const ft = ((clock.timeOfDay - 0.1875) / 0.625);   // =Main.time/54000(★时基校正)
+        const sunX = Math.max(0, Math.min(1, ft)) * viewW;
+        const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
+        const sunY = dip * 250 + 180;
+        const r = viewW * 0.55;
+        const grad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, r);
+        grad.addColorStop(0, `rgba(255,206,130,${(litVis * occ * 0.85).toFixed(3)})`);
+        grad.addColorStop(1, 'rgba(255,206,130,0)');
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, viewW, viewH);
+        ctx.restore();
+      }
     }
 
     // 7c. 食人怪 259/260 茎蔓强制亮彩（Main.cs:22467-22477）：光照合成后绘制——
@@ -8395,6 +8409,9 @@ export class Renderer {
    *  11773 WebbedStylist=354 / 12243 GolferRescue=589；税务官则是地狱敌怪
    *  DemonTaxCollector(酷刑者)=534（净化粉命中 Transform 441，Projectile.cs:13651））。
    *  各表为单帧捆绑姿态（534 是 8 帧敌怪表、589 是 13 帧表），FindFrame 无专属 case → 恒帧 0 */
+  /** NPCID.Sets.IsTownSlime（NPCID.cs:4448 Factory.CreateBoolSet）——坐姿 num47 再 −10 档 */
+  private static readonly TOWN_SLIME_IDS = new Set([670, 678, 679, 680, 681, 682, 683, 684]);
+
   private static readonly BOUND_NPC_SHEET: Record<string, number> = {
     goblin_tinkerer: 105, wizard: 106, mechanic: 123, stylist: 354, golfer: 589, tax_collector: 534,
     town_slime_old: 685, town_slime_clumsy: 686,   // 抖动的旧宝箱 / 笨笨气球史莱姆（绑缚态单帧）
@@ -8530,11 +8547,12 @@ export class Renderer {
     const stateX = Renderer.hatStateOffsetX(n.vanillaId, ai0);
     const cell = Renderer.partyHatCell(n.givenName, n.id, world.clock.moonPhase ?? 0, world.clock.isDay);
     const W = 38, H = 34; // Extra_72 格 40×36 −2 边缘（:26840-26841）
-    // vector 装配（:26961-27065）：-(0,h)+(-2*num5,0) → +num3*num5 → +array[num] → +HatOffsetY
+    // vector 装配（:26961-27065）：原版 -(0,h) 自 Bottom=盒顶;中心锚(2026-08-24)后
+    //   局部顶=−h/2。(-2*num5,0) → +num3*num5 → +array[num] → +HatOffsetY
     //   → +num6（坐姿 Y 链） → +态修正×num5 → +num7*num5 → +4*num5
     const vx = -2 * num5 + hatNum3 * num5
       + stateX * num5 + Renderer.hatXOffset(n.vanillaId) * num5 + 4 * num5;
-    const vy = -(n.h) + (group[num] ?? group[0]) + num4 + (Renderer.HAT_OFFSET_Y[n.vanillaId] ?? 0)
+    const vy = -(n.h / 2) + (group[num] ?? group[0]) + num4 + (Renderer.HAT_OFFSET_Y[n.vanillaId] ?? 0)
       + (n.sitting ? sittingHatY(n.vanillaId) : 0);   // num6 链（:26965-26987：默认 −4，
     // 637 猫 −12 / 663 公主 −8 / 38 −8 / 124 −2 / 108·178 −6；550/588 原版显式 −4=默认）
     // origin = (W/2, H-12)（:27009）→ drawImage 左上 = (vx − W/2, vy − (H−12))
@@ -8583,10 +8601,16 @@ export class Renderer {
       }
       if (r) {
         ctx.save();
-        // 底锚 + 原版恒 +4 下沉（Main.cs:24741——NPC 通用公式，见怪物主路径注；
-        // 2026-08-17 前按透明行贴地补偿恒高 2-4px=悬空感根因）
-        const pad = 4;
-        ctx.translate(n.cx, n.y + n.h); // 脚底中心
+        // 中心锚（2026-08-24 勘误,同 drawEnemy）：城镇 NPC 原版走同一 DrawNPC 通用
+        // 尾段（帧中心钉盒中心+NPCAddHeight :23658）——曾按误读的"底锚+4"画,城镇族
+        // 52/60 帧带底边距偏差 2-8px（巫师/染料商/旅行商 −8、城镇史莱姆 −7~8）。
+        // num46:108 巫师 +2（:23227）;坐姿运行时减档（NPCAddHeight 尾 :22377-22386
+        // townNPC&&ai[0]==5：−4,124 再 −2,637 猫/656 兔/城镇史莱姆 670+678-684 再 −10）
+        const nidT = n.vanillaId ?? -1;
+        const addYT = (nidT === 108 ? 2 : 0) + (Renderer.HB_ADD_H[nidT] ?? 0)
+          + (n.sitting ? -4 + (nidT === 124 ? -2 : 0)
+            + (nidT === 637 || nidT === 656 || Renderer.TOWN_SLIME_IDS.has(nidT) ? -10 : 0) : 0);
+        ctx.translate(n.cx, n.cy); // 盒中心
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
         // 微光转化渐显/渐隐（GetAlpha NPC.cs:94874-94878：CurrentlyShimmerTransparent
         // → 全通道 ×(1−shimmerTransparency)）——st 由 TownNPC 微光链驱动（浸微光
@@ -8594,7 +8618,7 @@ export class Renderer {
         // 恰好等价原版帽档 num8 = 1−st（Main.cs:27073-27075）
         ctx.globalAlpha = shimmerBodyAlpha(n.shimmerTransparency);
         if (n.iframes > 0 && n.iframes % 4 < 2) ctx.filter = 'brightness(2.5)'; // 受击闪白
-        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh + pad, r.sw, r.sh);
+        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2 + addYT, r.sw, r.sh);
         // ---- 160/209 Glow 变体档（Main.cs:25769-25799，S 备案 npcGlowVariantTex 接通）----
         //      城镇 NPC 不经 drawNpcGlow → 本体后挂同档 Glow：Color(128−α/2,×3,0)
         //      A=0 → 'lighter' 加性（'128a2' 同款表达式）；160 松露人微光态 Glow_352、
@@ -8615,7 +8639,7 @@ export class Renderer {
             ctx.globalCompositeOperation = 'lighter';
             ctx.globalAlpha = shimmerGlowAlpha(128 / 255, n.vanillaId === 160 ? n.shimmerTransparency : 0);
             // (128 − α/2)/255 × (1−st)（α=0；st 衰减仅 160，:25771-25776）
-            ctx.drawImage(gi, 0, gIdx * gfh, gi.width, gfh, -r.sw / 2, -r.sh + pad, r.sw, r.sh);
+            ctx.drawImage(gi, 0, gIdx * gfh, gi.width, gfh, -r.sw / 2, -r.sh / 2 + addYT, r.sw, r.sh);
             ctx.globalCompositeOperation = op;
             ctx.globalAlpha = ga;
           }

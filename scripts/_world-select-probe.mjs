@@ -72,6 +72,14 @@ const waitFor = async (sel, timeout = 15000) => {
   return false;
 };
 A(await waitFor('.sw-vsel .sw-vitem'), '角色行未渲染');
+const charBtns = await page.evaluate(() =>
+  [...document.querySelectorAll('.sw-vsel .sw-vitem')][0]
+    ? [...document.querySelectorAll('.sw-vsel .sw-vitem')[0].querySelectorAll('.sw-vitem-btns img')]
+        .map((b) => (b.getAttribute('src') ?? '').split('/').pop())
+    : []);
+console.log(JSON.stringify({ charBtns }, null, 1));
+A(charBtns[0] === 'UI_ButtonPlay.png' && charBtns[1] === 'UI_ButtonFavoriteInactive.png' && charBtns[2] === 'UI_ButtonRename.png',
+  `角色行按钮序应为 Play/收藏/重命名: ${JSON.stringify(charBtns)}`);
 await page.evaluate(() => {
   document.querySelector('.sw-vsel .sw-vitem')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 });

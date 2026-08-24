@@ -342,8 +342,31 @@ export class Sfx {
   /** 在途解码（Promise 去重：ensureBuffer 同步面 / deferPlay 补播 / 循环轨
    *  共用的单一加载管线，防并发重复 fetch） */
   private bufferPromises = new Map<string, Promise<AudioBuffer | null>>();
-  /** 取回失败/不存在的文件（负缓存，防 404 每次重试） */
+  /** 取回失败/不存在的文件（负缓存，防 404 每次重试）。
+   *  ★限时而非永久（2026-08-24 秃鹫死音报障）：SW cache-miss + 瞬时网络失败
+   *  （vite 重启/SW 版本切换清缓存窗口）会把文件打进 failed → 该文件【整场】
+   *  回退合成音（低频音效如秃鹫 NPC_Killed_31 首次请求即踩空的典型场景）。
+   *  失败时刻入 failAt，超过 RETRY 窗口后放行重新加载。真 404（数据错名）
+   *  每 15s 多一次 fetch，代价可忽略。 */
   private failed = new Set<string>();
+  private failedAt = new Map<string, number>();
+  /** 负缓存重试窗口（ms） */
+  private static FAILED_RETRY_MS = 15_000;
+  /** 负缓存是否仍有效（窗口内 true；过期自动解除） */
+  private failedFresh(file: string): boolean {
+    if (!this.failed.has(file)) return false;
+    const at = this.failedAt.get(file) ?? 0;
+    if (performance.now() - at >= Sfx.FAILED_RETRY_MS) {
+      this.failed.delete(file);
+      this.failedAt.delete(file);
+      return false;
+    }
+    return true;
+  }
+  private markFailed(file: string): void {
+    this.failed.add(file);
+    this.failedAt.set(file, performance.now());
+  }
   muted = false;
   /** 主音量 0..1（M6 设置页） */
   master = 1;
@@ -371,7 +394,7 @@ export class Sfx {
   private ensureBuffer(file: string): AudioBuffer | null {
     const buf = this.buffers.get(file);
     if (buf) return buf;
-    if (this.failed.has(file)) return null;
+    if (this.failedFresh(file)) return null;
     const ctx = this.ensure(true);
     if (!ctx) return null;
     void this.ensureBufferAsync(file, ctx);   // 后台加载（bufferPromises 去重）
@@ -508,7 +531,7 @@ export class Sfx {
   private ensureBufferAsync(file: string, ctx: AudioContext): Promise<AudioBuffer | null> {
     const hit = this.buffers.get(file);
     if (hit) return Promise.resolve(hit);
-    if (this.failed.has(file)) return Promise.resolve(null);
+    if (this.failedFresh(file)) return Promise.resolve(null);
     const pending = this.bufferPromises.get(file);
     if (pending) return pending;
     const p = (async () => {
@@ -518,11 +541,11 @@ export class Sfx {
           ? override.slice().buffer
           : await fetch(`sounds/${file}.wav`).then((r) => (r.ok ? r.arrayBuffer() : null));
         const decoded = ab ? await ctx.decodeAudioData(ab) : null;
-        if (decoded) { this.buffers.set(file, decoded); this.failed.delete(file); return decoded; }
-        this.failed.add(file);
+        if (decoded) { this.buffers.set(file, decoded); this.failed.delete(file); this.failedAt.delete(file); return decoded; }
+        this.markFailed(file);
         return null;
       } catch {
-        this.failed.add(file);
+        this.markFailed(file);
         return null;
       } finally {
         this.bufferPromises.delete(file);
@@ -658,7 +681,7 @@ export class Sfx {
     vol = v * (FILE_CASE_VOL[file] ?? 1);
     const buf = this.ensureBuffer(file);
     if (!buf) {
-      if (this.failed.has(file)) return false;   // 已知缺失→合成兜底（负缓存语义不变）
+      if (this.failedFresh(file)) return false;   // 负缓存窗口内→合成兜底（过期自动重载）
       this.deferPlay(file, ctx, vol, x, y, pitch, replace);   // ★首播不丢
       return true;
     }

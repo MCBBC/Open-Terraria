@@ -404,7 +404,7 @@ describe('546 亮核叠画（Extra[76],rotation=Clamp(vx×0.1,±π/8)）', () =>
     const { calls, sets } = drawRec(e, w, { sw: 30, sh: 30 });
     const imgs = calls.filter((c) => c.m === 'drawImage' && (c.a as unknown[]).length === 9);
     expect(imgs.length, '本体+亮核削底+亮核加色 = 3 张 9 参 drawImage').toBe(3);
-    const by = -30 + 4;                         // 地面型 anchorY=-sh+4/scale（scale=1）
+    const by = -30 / 2;                         // 中心锚 anchorY=-sh/2（2026-08-24 勘误,同本体）
     for (const im of imgs) {
       const a = im.a as number[];
       expect(a[4], '亮核取本体同帧矩形（rCurrentNPC.frame :26158）').toBe(30);

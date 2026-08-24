@@ -1050,6 +1050,19 @@ export class SkyRenderer {
   private stars: SkyStar[] = [];
   private numStars = 0;
   private starTexs: Array<ImageBitmap | HTMLImageElement | null> = new Array(4).fill(null);
+  /** 星绘制矩阵折叠(2026-08-24):base × translate(x,y) × rotate(rot) × scale(sc)
+   *  一次 setTransform 完成——替代 save/translate/rotate(/scale)/restore 状态机往返 */
+  private starXform(
+    ctx: CanvasRenderingContext2D, bt: DOMMatrix,
+    cs: number, sn: number, sc: number, x: number, y: number,
+  ): void {
+    const a = cs * sc, b = sn * sc;
+    ctx.setTransform(
+      bt.a * a - bt.b * b, bt.a * b + bt.b * a,
+      bt.c * a - bt.d * b, bt.c * b + bt.d * a,
+      bt.e + bt.a * x + bt.c * y, bt.f + bt.b * x + bt.d * y,
+    );
+  }
   /** Star.SpawnStars(:86-135):数量 200-400(FastRandom 随机种子=每次进图重掷),
    *  位置 X Next(1921)/Y Next(1201)、type Next(0,4)、1/40 概率 scale×2+速度减半 */
   private spawnStar(s: number): void {
@@ -1144,10 +1157,17 @@ export class SkyRenderer {
   /** Main.DrawStar(:62481-62604)逐式:亮度=(255−bg.R−100)·twinkle·(1−fadeIn)
    *  三通道均值×1.4 钳 255;位置 (pos/1920,·/1200)×屏+(0,bgTopY),X/Y 环绕;
    *  坠星带 8 段尾迹(fallTime 钳 30,逐段 ×0.4 位移衰减)。shimmer 分支
-   *  (:62521-62542)依赖 shimmerAlpha>0——本仓无微光天空态,恒 0=原版跳过=1:1 */
+   *  (:62521-62542)依赖 shimmerAlpha>0——本仓无微光天空态,恒 0=原版跳过=1:1
+   *  ★变换走 setTransform(2026-08-24 trace 热点修复):夜空 ~300 星 ×
+   *  save/translate/rotate/restore 每星 4 次状态机往返(trace:save 187ms+
+   *  rotate 129+restore 91+translate 90 ≈ 0.5s/54s)——改为调用方(draw 星环)
+   *  save/getTransform 一次,逐星 setTransform 折叠旋转+缩放+平移,尾迹同式;
+   *  光栅结果逐像素一致(同一 CTM 语义),状态机往返全消。imageSmoothingEnabled
+   *  同步提升到环外(原每星设一次) */
   private drawStar(
     ctx: CanvasRenderingContext2D, i: number, starOpacity: number,
     viewW: number, viewH: number, bgTopY: number,
+    bt: DOMMatrix,
   ): void {
     const s = this.stars[i];
     if (!s || s.hidden) return;
@@ -1172,11 +1192,7 @@ export class SkyRenderer {
     }
     const tex = this.starTex(s.type);
     if (!tex) return;
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(s.rot);
-    ctx.imageSmoothingEnabled = true;   // 星为软边贴图
-    const size = tex.width * s.scale;
+    const cs = Math.cos(s.rot), sn = Math.sin(s.rot);
     if (s.falling) {
       // 尾迹(:62574-62595):fallTime 钳 30,逐段 fallSpeed·j·0.4 位移+scale/alpha
       // 衰减+rotation。★位移乘视口变换(×viewW/1920,×viewH/1200)——原版 1920×1200
@@ -1186,21 +1202,16 @@ export class SkyRenderer {
       for (let j = 1; j < ft; j++) {
         const tx = px - s.fvx * j * 0.4 * sx, ty = py - s.fvy * j * 0.4 * sy;
         const sc = s.scale * (1 - j / 30);
-        const a = alpha * (1 - j / 30);
-        ctx.save();
-        ctx.globalAlpha = a;
-        ctx.translate(tx, ty);
-        ctx.rotate(s.rot);
-        ctx.drawImage(tex, -tex.width * sc / 2, -tex.height * sc / 2, tex.width * sc, tex.height * sc);
-        ctx.restore();
+        ctx.globalAlpha = alpha * (1 - j / 30);
+        this.starXform(ctx, bt, cs, sn, sc, tx, ty);
+        ctx.drawImage(tex, -tex.width / 2, -tex.height / 2, tex.width, tex.height);
       }
     }
+    // 主星尺寸 ×twinkle(:62600 theStar.scale * theStar.twinkle——脉动语义;
+    // 原式 dest = 宽×scale×twinkle / 高×scale×twinkle = 均匀缩放,折叠进矩阵)
     ctx.globalAlpha = alpha;
-    // 主星尺寸 ×twinkle(:62600 theStar.scale * theStar.twinkle——脉动语义)
-    const tw = size * s.twinkle;
-    ctx.drawImage(tex, -tw / 2, -tw / 2, tw, tex.height * s.scale * s.twinkle);
-    ctx.restore();
-    ctx.globalAlpha = 1;
+    this.starXform(ctx, bt, cs, sn, s.scale * s.twinkle, px, py);
+    ctx.drawImage(tex, -tex.width / 2, -tex.height / 2, tex.width, tex.height);
   }
   private cloudTexs: Array<ImageBitmap | HTMLImageElement | null> = new Array(41).fill(null);
   private vclouds: VanillaCloud[] = [];
@@ -1224,7 +1235,9 @@ export class SkyRenderer {
     // 风暴云(18-21)无雨天气永不出现,白载;且 SkyRenderer 在菜单+进图各构造一次,
     // 急载翻倍
     this.sunTex = onBitmap(loadTex('Sun.png'), (b) => { this.sunTex = b; });
-    for (let i = 0; i <= 8; i++) this.moonTexs[i] = onBitmap(loadTex(`Moon_${i}.png`), (b) => { this.moonTexs[i] = b; });
+    // 月相竖条懒加载(2026-08-24 HAR 审计:菜单恒满月帧 0,Moon_1-8 菜单白载;
+    // 与上方云贴图同款首用自愈——绘制分支 ensureMoonTex 未就绪跳帧)
+    this.moonTexs[0] = onBitmap(loadTex('Moon_0.png'), (b) => { this.moonTexs[0] = b; });
     // 事件月亮(Main.cs:62400-62408):南瓜月 kind=2 / 霜月 kind=1,50×400 相位竖条
     // ——只在对应月亮事件进行时才画,改首用懒加载(月亮绘制分支内 ensure)
     // 风场初值(Main.cs:10800):current = ±0.8 随机,计数 7200-28800 帧
@@ -1387,7 +1400,11 @@ export class SkyRenderer {
     return this.skyBgTex.width > 0 ? this.skyBgTex : null;
   }
   /** 贴图×cots 染色缓存(tint 8/255 量化——晨昏连续漂移期间缓存打爆教训同
-   *  BiomeBackground.tintCache;贴图仅 48×1400,重烘成本可忽略) */
+   *  BiomeBackground.tintCache;贴图仅 48×1400,重烘成本可忽略)
+   *  ★画布复用(2026-08-24 trace 热点修复):键 = 逐单位截断,晨昏漂移期逐帧
+   *  换键 → 旧实现每帧 createElement('canvas') 一张 48×1400 = 漂移期每帧
+   *  一次 IOSurface 出生+旧张弃 GC(GC 突发与漂移秒同相,trace 实测)。
+   *  改单画布原位重烘(尺寸不变即零分配),键仍逐单位(无视觉台阶回归) */
   private tintSkyTex(tex: ImageBitmap | HTMLImageElement): HTMLCanvasElement {
     const c = this.cots!;
     // ★键 = 逐单位截断(曾 1/8 量化=32 档)——晨昏 cots 扫过数百单位时天空底色
@@ -1395,22 +1412,34 @@ export class SkyRenderer {
     //  bake 本体(贴图尺寸 multiply+destination-in,画布复用)≈1ms,逐帧可承受
     const key = `${c[0] | 0},${c[1] | 0},${c[2] | 0}`;
     if (this.skyBgTinted?.key === key) return this.skyBgTinted.canvas;
-    const cv = document.createElement('canvas');
-    cv.width = tex.width; cv.height = tex.height;
+    let cv = this.skyBgTinted?.canvas;
+    if (!cv) {
+      cv = document.createElement('canvas');
+      this.skyBgTinted = { key: '', canvas: cv };
+    }
+    if (cv.width !== tex.width || cv.height !== tex.height) { cv.width = tex.width; cv.height = tex.height; }
     const tc = cv.getContext('2d')!;
+    tc.globalCompositeOperation = 'copy';   // 池化复用双坑同 cloudTint:清残留+归位状态
     tc.drawImage(tex as CanvasImageSource, 0, 0);
     tc.globalCompositeOperation = 'multiply';
     tc.fillStyle = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
     tc.fillRect(0, 0, cv.width, cv.height);
     tc.globalCompositeOperation = 'destination-in';
     tc.drawImage(tex as CanvasImageSource, 0, 0);
-    this.skyBgTinted = { key, canvas: cv };
+    this.skyBgTinted!.key = key;
     return cv;
   }
   moonTexs: Array<ImageBitmap | HTMLImageElement | null> = [null, null, null, null, null, null, null, null, null];
   /** 事件月亮（kind 1=霜月 Snow / 2=南瓜月 Pumpkin,Main.cs:62400-62408）——
    *  事件进行时才需要,首用懒加载(绘制分支 ensureEventMoonTex) */
   private eventMoonTexs: Array<ImageBitmap | HTMLImageElement | null> = [null, null]; // [1]=Snow [2]=Pumpkin
+  /** 常规月相竖条首用懒加载（Moon_0 构造期即载=菜单恒满月帧；1-8 进游戏
+   *  首用触发，未就绪调用方跳帧自愈——2026-08-24 HAR 审计菜单白载修复） */
+  private ensureMoonTex(i: number): ImageBitmap | HTMLImageElement | null {
+    const t = this.moonTexs[i];
+    if (!t) this.moonTexs[i] = onBitmap(loadTex(`Moon_${i}.png`), (b) => { this.moonTexs[i] = b; });
+    return this.moonTexs[i];
+  }
   /** 事件月亮贴图(首用懒加载,未就绪调用方跳帧) */
   private ensureEventMoonTex(kind: 1 | 2): ImageBitmap | HTMLImageElement | null {
     const t = this.eventMoonTexs[kind];
@@ -2147,6 +2176,10 @@ export class SkyRenderer {
    *  distant（scale<1）画在群系背景【后】= sky 层内（DrawSurfaceBG 层间 :58755-58758）；
    *  closer/closest 画在背景【前】（drawCloudsNear，Renderer 于 biomeBg.draw 后调）。
    *  地表上门 = camTop < worldSurface×16+16（:59119） */
+  /** drawCloudPass 实参 scratch(2026-08-24:替代每帧 filter()+[...spread] 双分配;
+   *  drawCloudPass 契约 = 可原地 sort 的副本,同步消费完即弃) */
+  private cloudScratch: VanillaCloud[] = [];
+
   private drawVanillaClouds(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, isNight: boolean, dtMs: number, camX = 0, camY = 0) {
     this.updateClouds(dtMs, viewW, camX);
     this.maintainClouds(viewW, viewH);
@@ -2155,7 +2188,10 @@ export class SkyRenderer {
     this.updateCloudCelestial(camY - viewH / 2);
     const { num3 } = this.cloudBgTop(camY, viewH);
     const distY = num3 * 750 + 830;                          // :59115（scAdj/pushBGTopHack=0）
-    this.drawCloudPass(ctx, this.vclouds.filter((c) => c.scale < 1), 1, camY,
+    const scratch = this.cloudScratch;
+    scratch.length = 0;
+    for (const c of this.vclouds) if (c.scale < 1) scratch.push(c);
+    this.drawCloudPass(ctx, scratch, 1, camY,
       (c) => c.y + distY);
     void isNight;
   }
@@ -2227,15 +2263,26 @@ export class SkyRenderer {
     if (camTop >= this.fx.surfaceY + 16) return;
     const { bgTopY } = this.cloudBgTop(camY, viewH);
     const sH = viewH / 600;
-    this.drawCloudPass(ctx, this.vclouds.filter((c) => c.scale >= 1 && c.scale < 1.15), 2, camY,
+    const scratch = this.cloudScratch;   // 两 pass 同步消费,单 scratch 顺序复用
+    scratch.length = 0;
+    for (const c of this.vclouds) if (c.scale >= 1 && c.scale < 1.15) scratch.push(c);
+    this.drawCloudPass(ctx, scratch, 2, camY,
       (c) => c.y * sH + bgTopY + 150);
-    this.drawCloudPass(ctx, this.vclouds.filter((c) => c.scale >= 1.15), 3, camY,
+    scratch.length = 0;
+    for (const c of this.vclouds) if (c.scale >= 1.15) scratch.push(c);
+    this.drawCloudPass(ctx, scratch, 3, camY,
       (c) => c.y * sH - 100 + bgTopY * 1.01 - 150);
     void viewW;
   }
   /** 单通道绘制（云色链 NextHorizonRenderer.DrawCloud :246-268 1:1）：
    *  cloudColor = ColorOfTheSkies×(scale×Alpha) → pass1 压暗 → ×atmo（二次）→ α×globalCloudAlpha
-   *  （:58752 = max(cloudAlpha,墓园×.92)×atmo；ColorOfTheSkies 源 = 本帧天空色,存储侧已×atmo） */
+   *  （:58752 = max(cloudAlpha,墓园×.92)×atmo；ColorOfTheSkies 源 = 本帧天空色,存储侧已×atmo）
+   *  ★clouds 实参契约(2026-08-24 热点修复):调用方必须传可复用 scratch 副本
+   *  (cloudScratch)——本函数原地 sort,不再 [...clouds] 每帧双分配;
+   *  ★屏外裁剪(2026-08-24):视口外云(含旋转余量)跳过染色+绘制——原版 XNA
+   *  SpriteBatch 照画但 GPU 裁剪零成本,Canvas2D 每朵是真实 drawImage+烘焙,
+   *  菜单 200 云实测 ~1/3 完全屏外(trace:云合成 2.4s+重烘 2.0s/54s 里的
+   *  白耗部分)。视口内渲染结果逐像素不变 */
   private drawCloudPass(
     ctx: CanvasRenderingContext2D, clouds: VanillaCloud[], pass: 1 | 2 | 3,
     camY: number, yOf: (c: VanillaCloud) => number,
@@ -2256,7 +2303,9 @@ export class SkyRenderer {
     const sky = this.cots
       ? [this.cots[0] * atmo, this.cots[1] * atmo, this.cots[2] * atmo]
       : hexRGB(this.lastSkyTop, atmo);
-    const sorted = [...clouds].sort((a, b) => b.scale - a.scale);   // scale 交换序等价
+    clouds.sort((a, b) => b.scale - a.scale);   // scale 交换序等价(原地,scratch 契约)
+    const viewW = ctx.canvas.width, viewH = ctx.canvas.height;
+    const cullM = 64;   // 旋转(≤0.1rad)+半屏外渐入余量;超出即完全不可见
     // GL 主路径(2026-08-18):逐精灵顶点色 = 原版 Draw(Color) 语义,精确色零副本;
     // 不可用(WebGL2 缺失/上下文死亡退避/cpuRender/?cloudgl=0)→ 2D cloudTint 兜底
     // #A 合并(2026-08-19):云不再持有独立 WebGL 上下文——与背景层共用
@@ -2266,10 +2315,14 @@ export class SkyRenderer {
     if (gl) { gl.resize(ctx.canvas.width, ctx.canvas.height); gl.begin(); }
     ctx.save();
     ctx.imageSmoothingEnabled = true; // 原版云为软边贴图，平滑缩放(2D 兜底路径)
-    for (const c of sorted) {
+    for (const c of clouds) {
       const tex = this.cloudTex(c.type);
       if (!tex || !(tex.width > 0) || tex.width === 0) continue;
       const w = tex.width * c.scale, h = tex.height * c.scale;
+      const cx = c.x + w / 2, cyPx = yOf(c) + h / 2;         // uDrawPosition = 云中心(DrawData.position,origin=半尺寸)
+      // ★屏外裁剪(先于染色/GL 提交;旋转 ≤0.1rad 的 bbox 膨胀 < 64px 余量)
+      if (cx + w / 2 < -cullM || cx - w / 2 > viewW + cullM ||
+          cyPx + h / 2 < -cullM || cyPx - h / 2 > viewH + cullM) continue;
       const k = Math.min(1, c.scale * c.alpha);              // cloudColor num（:203-215）
       let r = sky[0] * k, g = sky[1] * k, b = sky[2] * k;
       if (pass === 1) {                                      // OriginalColorsForCloud（:259-268）
@@ -2282,7 +2335,6 @@ export class SkyRenderer {
       // GL 主路径 = 逐像素字节码公式(GLSpriteLayer.cloudQuad);2D 兜底 = 同公式
       // 单探针标量近似(horizonCloudShadeApprox:几何/强度/衰减精确,A/R 固定)
       const cel = this.cloudCelestial;
-      const cx = c.x + w / 2, cyPx = yOf(c) + h / 2;         // uDrawPosition = 云中心(DrawData.position,origin=半尺寸)
       if (gl) {
         const gtex = gl.texFromImage(`cloud:${c.type}`, tex);
         if (gtex) {
@@ -2341,7 +2393,7 @@ export class SkyRenderer {
     this.cloudGlLayer = null;
   }
 
-  private cloudTintCache = new Map<string, HTMLCanvasElement>();
+  private cloudTintCache = new Map<number, HTMLCanvasElement>();
   /** GPU contextlost 后云染缓存内容归零且不会自动重画——失效清空
    *  (Renderer.onLost 统一扫;GL 云路径下通常为空,零成本) */
   clearCloudTintCache(): void {
@@ -2364,22 +2416,22 @@ export class SkyRenderer {
    *  Math.round(r,g,b) → 每帧每云 miss → ~340 张/秒 createElement('canvas'),
    *  是移动期 IOSurface churn 主源;量化后键只在天色跨桶时换,churn 趋零。
    *  步进 8 = 通道 3% 内误差,软边低对比云上不可感知)
-   *  ★真 LRU + cap 24(2026-08-18 二轮):实测工作集 = 同屏云色桶 ~10-16,
-   *  旧 FIFO+64 会把历史冷桶全留下(cap 打满 64 张常驻画布)。命中重插到
-   *  Map 尾 = 冷桶先走;miss 重染成本 = 3 次 ~200×100 drawImage,即使偶发
-   *  超工作集也无感。总画布上限 = cap 24 + free 池 8 = 32 */
+   *  ★数字键(2026-08-24 trace 热点修复):旧键 = 每次调用模板字符串 `${tid}|${r},${g},${b}`
+   *  新建串 → 主菜单 200 云 × 60/120fps 的持续小分配,MinorGC 暂停全记在
+   *  cloudTint self 上(trace 实测 2.8s/54s,漂移期 40-70ms/s)。改 15bit 定点
+   *  数字键(r/g/b 各 5bit 桶号)零分配,Map 数字键哈希也快于串。
+   *  ★cap 24→64 + 淘汰改插入序(2026-08-24):大窗口(用户 trace)可见云
+   *  ~80-120,量化色工作集 > 24 → LRU 抖动 = 几乎每调用必 miss(重烘
+   *  3 次 drawImage,trace 实测重烘路径 2.0s/54s)。64 覆盖可见云工作集;
+   *  命中不再 delete+set 重插(2 次 Map 操作 × 每云每帧纯浪费)——淘汰按
+   *  插入序取最旧 = 最陈旧烘焙色,漂移期正是该被换掉的桶。总画布上限
+   *  = cap 64 + free 池 8 = 72 */
   private cloudTint(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement {
     let tid = this.cloudTexIds.get(tex);
     if (tid === undefined) { tid = ++this.cloudTexIdSeq; this.cloudTexIds.set(tex, tid); }
-    const key = `${tid}|${r & ~7},${g & ~7},${b & ~7}`;
+    const key = ((tid * 32 + ((r & ~7) >> 3)) * 32 + ((g & ~7) >> 3)) * 32 + ((b & ~7) >> 3);
     const hit = this.cloudTintCache.get(key);
-    if (hit) {
-      // 真 LRU:命中重插到 Map 尾——旧 FIFO 不认热,历史冷桶赖着不走,曾把 cap
-      // 塞满 64 张常驻画布(实测工作集只有 ~10-16 色桶)
-      this.cloudTintCache.delete(key);
-      this.cloudTintCache.set(key, hit);
-      return hit;
-    }
+    if (hit) return hit;
     // ★画布池复用(2026-08-18):同屏多云色桶并存,纯量化仍 ~55 张/秒;
     // 逐桶弃旧新建 = createElement churn(曾 340 张/秒)。改为 LRU 淘汰的画布
     // 进 free 池,miss 时原位重画——零画布出生,活集恒 ≤64(与 chunk atlas 同哲学)
@@ -2399,12 +2451,12 @@ export class SkyRenderer {
     cx.globalCompositeOperation = 'destination-in';
     cx.drawImage(tex, 0, 0);
     this.cloudTintCache.set(key, c);
-    if (this.cloudTintCache.size > 24) {
+    if (this.cloudTintCache.size > 64) {
       const first = this.cloudTintCache.keys().next().value;   // Map 头 = 最久未用(LRU)
       if (first !== undefined) {
         const evicted = this.cloudTintCache.get(first);
         this.cloudTintCache.delete(first);
-        // 归池复用,不弃;封顶 8——总画布上限 = 24 cap + 8 池 = 32
+        // 归池复用,不弃;封顶 8——总画布上限 = 64 cap + 8 池 = 72
         if (evicted && this.cloudTintFree.length < 8) this.cloudTintFree.push(evicted);
       }
     }
@@ -3419,6 +3471,20 @@ export class SkyRenderer {
   /** 上帧屏顶世界 Y(LensFlareElement :49 baseRot 微扰用) */
   private lastScreenTopY = 0;
 
+  /** 菜单晨昏镜头光斑（DoDraw 菜单路径 :61550 DrawLensFlare——原版菜单也画）：
+   *  无 frameCtx/无世界瓦片 → 无遮挡采样（sunVisibility=1）、无残影项；
+   *  horizonVisCache 由 sky.draw 本帧算好，sunScreen 同 */
+  drawMenuFlare(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
+    camY: number): void {
+    if (!this.sunScreen) return;
+    const v = this.horizonVisCache;
+    if (!v) return;
+    this.sunVisSampled = true;
+    this.sunVisibility = 1;
+    this.lastScreenTopY = camY - viewH / 2;
+    this.drawLensFlare(ctx, viewW, viewH, v.sunset, v.sunrise, v.celestial);
+  }
+
   /** 月总死亡白闪帧尾出口（MoonlordDeathDrama.DrawWhite Main.cs:61763：ScreenDarkness
    *  .DrawFront 之后、ScreenObstruction.Draw 之前 = 几乎帧末）。2026-08-13 挪正：此前
    *  挂在 drawWorldFx（Renderer 2d' 世界变换段 = tile 上实体下），白闪被实体/光照合成
@@ -3445,6 +3511,13 @@ export class SkyRenderer {
 
   /** 上一帧采样值（DrawLensFlare 消费；= 原版 _pixelTarget 1×1 alpha） */
   private sunVisibility = 1;
+  /** 最近一次太阳遮挡采样值（= 原版 HorizonHelper._pixelTarget 1×1 alpha 的
+   *  可见度语义；镜头光斑与 LitNature 晨昏光晕共用同一采样——原版两 shader
+   *  同吃 UseImage1(SunVisibilityPixel)，NextNatureRenderer.cs:135） */
+  get sunOcclusion(): number { return this.sunVisibility; }
+  /** 采样是否就绪（= _targetUpToDate / HorizonHelper.SunVisibilityEnabled :42；
+   *  太阳不在场景/首帧 false → 消费方按原版语义整体门关） */
+  get sunOcclusionReady(): boolean { return this.sunVisSampled; }
   /** 采样就绪标记（= 原版 _targetUpToDate / SunVisibilityEnabled；首帧 false → 不画光斑） */
   private sunVisSampled = false;
 
@@ -3691,7 +3764,13 @@ export class SkyRenderer {
       const dayRate = this.frameCtx?.world?.dayRate?.() ?? 1;
       this.updateStars(dayRate, isDay, dayTimeTicks);
       if (starDim > 0 && visGate > 0) {
-        for (let i = 0; i < this.numStars; i++) this.drawStar(ctx, i, starDim, viewW, viewH, skyBgTopY);
+        // ★环外一次性状态(2026-08-24):save/getTransform/smoothing 各一次,
+        //   逐星 setTransform(见 drawStar 注)——restore 收尾还原全部
+        ctx.save();
+        ctx.imageSmoothingEnabled = true;   // 星为软边贴图
+        const bt = ctx.getTransform();
+        for (let i = 0; i < this.numStars; i++) this.drawStar(ctx, i, starDim, viewW, viewH, skyBgTopY, bt);
+        ctx.restore();
       }
     }
 
@@ -3810,7 +3889,7 @@ export class SkyRenderer {
       this.sunScreen = null;
       const tex = this.fx.moonEventKind === 2 ? this.ensureEventMoonTex(2)
         : this.fx.moonEventKind === 1 ? this.ensureEventMoonTex(1)
-          : this.moonTexs[Math.max(0, Math.min(8, this.moonType))];
+          : this.ensureMoonTex(Math.max(0, Math.min(8, this.moonType)));
       if (tex && (tex.width > 0) && tex.width > 0) {
         const mw = tex.width; // 相位帧宽(50)
         const ft = nightTime / 32400;

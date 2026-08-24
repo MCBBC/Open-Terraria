@@ -156,7 +156,7 @@ def({ key: 'pot', name: '瓦罐', decor: true, framed: true, opacity: 0, pick: 0
 // 储物内容在玩家 bank 数据里不随方块掉落；破坏掉【原版放置物品】（Check2x1 case 29 → 87 /
 // Check2x2 case 97 → 346，审计 E ❌12/13——曾走 place_v_ 合成件）
 def({ key: 'v_29_piggy_bank', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#AF6980', drop: 87, vanilla: { sheet: 29, frame: 'style', fw: 2, fh: 1 } }); // 存钱罐（compat-report 补全：导入曾清空丢弃）
-def({ key: 'v_463_defenders_forge', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#9BD6F0', light: [51, 102, 204], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 463, frame: 'style', fw: 3, fh: 4 } }); // 守护者熔炉（bank3）
+def({ key: 'v_463_defenders_forge', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#9BD6F0', light: [51, 102, 204], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ drop: 3813, vanilla: { sheet: 463, frame: 'style', fw: 3, fh: 4 } }); // 守护者熔炉（bank3）——Check3x4 case 463 :50591 恒掉 3813（no-drop 表 :66340）
 
 export const TILE_BY_KEY: Record<string, number> = {};
 // 注意：构建必须放在文件末尾（所有 def() 之后），v_ 批量补全定义在下方，
@@ -289,7 +289,7 @@ def({ key: 'v_375_honey_drip', name: '', solid: false, framed: true, opacity: 0.
 def({ key: 'v_227_dye_plants', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#4AC59B', drop: null, vanilla: { sheet: 227, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_584_amethyst_tree', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 1, h: 1, mapColor: '#7F7F7F', drop: null, vanilla: { sheet: 584, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_231_larva', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#E0C265', drop: null, vanilla: { sheet: 231, frame: 'style', fw: 3, fh: 3 } });
-def({ key: 'v_395_item_frame', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', vanilla: { sheet: 395, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_395_item_frame', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: 3270, vanilla: { sheet: 395, frame: 'style', fw: 2, fh: 2 } }); // CheckSign case 395 :44141 恒掉 3270（no-drop 表 :66340）
 def({ key: 'v_241_catacombs', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 3, mapColor: '#4D4A48', drop: null, vanilla: { sheet: 241, frame: 'style', fw: 4, fh: 3 } });
 def({ key: 'v_587_ruby_tree', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 1, h: 1, mapColor: '#7F7F7F', drop: null, vanilla: { sheet: 587, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_86_loom', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 332 /* Check3x2 :49698（审计 E ❌18） */, vanilla: { sheet: 86, frame: 'style', fw: 3, fh: 2 } });
@@ -327,7 +327,7 @@ def({ key: 'v_306_ice_machine', name: '', solid: false, framed: true, opacity: 0
 def({ key: 'v_247_autohammer', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#8C9696', drop: null, vanilla: { sheet: 247, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_491_void_vault', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#3C14A0', light: [128, 102, 179], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 491, frame: 'style', fw: 3, fh: 3 } }); // 虚空保险库（bank4；破坏回收见储物族注释）
 def({ key: 'v_106_sawmill', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#BF8E6F', drop: 363 /* Check3x3 :53179（审计 E ❌19） */, vanilla: { sheet: 106, frame: 'style', fw: 3, fh: 3 } });
-def({ key: 'v_642_chlorophyte_extractinator', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#95D459', drop: null, vanilla: { sheet: 642, frame: 'style', fw: 3, fh: 3 } });
+def({ key: 'v_642_chlorophyte_extractinator', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#95D459', drop: 5296, vanilla: { sheet: 642, frame: 'style', fw: 3, fh: 3 } }); // Check3x3 case 642 :53634 恒掉 5296（TileFrame 派发 :86797 排除组→Check3x3;Check3x2 :49970 同 vid 死路）
 def({ key: 'v_319_ship_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#604430', drop: null, vanilla: { sheet: 319, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_487_picnic_tables', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 487, frame: 'style', fw: 4, fh: 2 } });
 def({ key: 'v_97_safe', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: 346, vanilla: { sheet: 97, frame: 'style', fw: 2, fh: 2 } }); // 保险箱（bank2；破坏掉 346=Check2x2 :48688，见储物族注释）
@@ -498,7 +498,7 @@ def({ key: 'v_420_logicgate', name: '', decor: true, framed: true, opacity: 0, p
 def({ key: 'v_421_conveyorbeltleft', name: '', solid: true, opacity: 1, pick: 0, blend: true, mapColor: '#414B5A', drop: 3609, vanilla: { sheet: 421, frame: 'auto' } });
 def({ key: 'v_423_logicsensor', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#F5C501', drop: null, vanilla: { sheet: 423, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_424_wirepipe', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#929BBB', drop: 3616, /* D-6:case 424(:64311）→3616 */  vanilla: { sheet: 424, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_425_announcementbox', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#929BBB', drop: null, vanilla: { sheet: 425, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_425_announcementbox', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#929BBB', drop: 3617, vanilla: { sheet: 425, frame: 'style', fw: 2, fh: 2 } }); // CheckSign case 425 :44145 恒掉 3617（no-drop 表 :66340）
 def({ key: 'v_428_weightedpressureplate', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#FFFFFF', drop: null, vanilla: { sheet: 428, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_429_wirebulb', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#DCDCDC', drop: 3629, /* D-6:case 429(:64317）→3629 */  vanilla: { sheet: 429, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_440_gemlocks', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 3, h: 3, mapColor: '#EE3335', drop: null, vanilla: { sheet: 440, frame: 'style', fw: 3, fh: 3 } });
@@ -694,7 +694,7 @@ def({ key: 'v_472_iron_brick', name: '', solid: true, opacity: 1, pick: 0, mapCo
 def({ key: 'v_473_lead_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#55727B', blend: true, drop: 3953, vanilla: { sheet: 473, frame: 'auto' } });
 def({ key: 'v_474_lesion_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#745E61', blend: true, drop: 3955, vanilla: { sheet: 474, frame: 'auto' } });
 def({ key: 'v_478_crimstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6C2223', blend: true, drop: 4050, vanilla: { sheet: 478, frame: 'auto' } });
-def({ key: 'v_486_drum_set', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 486, frame: 'style', fw: 3, fh: 2 } });
+def({ key: 'v_486_drum_set', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 4063, vanilla: { sheet: 486, frame: 'style', fw: 3, fh: 2 } }); // Check3x2 case 486 :49985 恒掉 4063（no-drop 表 :66340;派发 :86829 no-op 组闭合→goto case 14 :87239）
 def({ key: 'v_489_pin_wheel', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#FF1D88', drop: null, vanilla: { sheet: 489, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_490_weather_vane', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#D3D3D3', drop: null, vanilla: { sheet: 490, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_492_hallowed_mowed_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#4EC1E3', blend: true, drop: 2, vanilla: { sheet: 492, frame: 'auto' } }); // 神圣修剪草→泥土 2
@@ -710,8 +710,8 @@ def({ key: 'v_504_mystic_snake_rope', name: '', decor: true, opacity: 0, pick: 0
 def({ key: 'v_505_gold_fish_bowl', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 505, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_507_gold_starry_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: 4277, vanilla: { sheet: 507, frame: 'auto' } });
 def({ key: 'v_508_blue_starry_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#050505', blend: true, drop: 4278, vanilla: { sheet: 508, frame: 'auto' } });
-def({ key: 'v_510_arrow_sign', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 510, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_511_painted_arrow_sign', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BB444A', drop: null, vanilla: { sheet: 511, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_510_arrow_sign', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: 4319, vanilla: { sheet: 510, frame: 'style', fw: 2, fh: 2 } }); // CheckSign case 510 :44154 恒掉 4319（no-drop 表 :66340）
+def({ key: 'v_511_painted_arrow_sign', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BB444A', drop: 4320, vanilla: { sheet: 511, frame: 'style', fw: 2, fh: 2 } }); // CheckSign case 511 :44151 恒掉 4320
 def({ key: 'v_512_green_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#318672', blend: true, drop: 129, vanilla: { sheet: 512, frame: 'auto' } }); // 苔砖族 11 tile→灰砖 129（case 512-517 组 :64073）
 def({ key: 'v_513_brown_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7E8631', blend: true, drop: 129, vanilla: { sheet: 513, frame: 'auto' } }); // 苔砖→灰砖 129
 def({ key: 'v_514_red_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#863B31', blend: true, drop: 129, vanilla: { sheet: 514, frame: 'auto' } }); // 苔砖→灰砖 129
@@ -755,10 +755,10 @@ def({ key: 'v_568_pink_fairy_jar', name: '', solid: false, framed: true, opacity
 def({ key: 'v_569_green_fairy_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#CBF8DA', drop: null, light: [31, 255, 168], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 569, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_570_blue_fairy_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#A0F2FF', drop: null, light: [145, 145, 255], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 570, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_572_souls_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FFBAD4', drop: null, vanilla: { sheet: 572, frame: 'style', fw: 1, fh: 2 } });
-def({ key: 'v_573_tattered_wood_sign', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 573, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_573_tattered_wood_sign', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: 4710, vanilla: { sheet: 573, frame: 'style', fw: 2, fh: 2 } }); // CheckSign case 573 :44148 恒掉 4710（no-drop 表 :66340）
 def({ key: 'v_579_rock_golem_head', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#636363', drop: 4761, vanilla: { sheet: 579, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_580_hell_butterfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, light: [178, 76, 51], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 580, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_581_lavafly_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FF9696', drop: null, light: [255, 191, 128], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 581, frame: 'style', fw: 1, fh: 2 } });
+def({ key: 'v_581_lavafly_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FF9696', drop: 4848, light: [255, 191, 128], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 581, frame: 'style', fw: 1, fh: 2 } }); // Check1x2Top case 581 :47208 恒掉 4848（no-drop 表 :66340）
 def({ platform: true, key: 'v_582_magma_snail_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, light: [178, 51, 26], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 582, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_590_gem_saplings', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#7F7F7F', drop: null, vanilla: { sheet: 590, frame: 'style', fw: 3, fh: 2 } }); // fw3 = 带宽 54px（原版 frameX/54 宝石序号，:72924 树苗成长判定）
 def({ key: 'v_591_hanging_pots', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#725138', drop: null, vanilla: { sheet: 591, frame: 'style', fw: 2, fh: 3 } });
@@ -811,7 +811,7 @@ def({ key: 'v_655_plantera_thorns', name: '', decor: true, opacity: 0, pick: 0, 
 def({ key: 'v_657_echo_chamber', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#23CDD7', drop: null, vanilla: { sheet: 657, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_658_aether_monolith', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#C869E6', drop: null, vanilla: { sheet: 658, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_659_aetherium_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F7E4FE', blend: true, drop: 5349, vanilla: { sheet: 659, frame: 'auto' } });
-def({ key: 'v_660_faeling_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FF9696', drop: null, vanilla: { sheet: 660, frame: 'style', fw: 1, fh: 2 } });
+def({ key: 'v_660_faeling_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FF9696', drop: 5351, vanilla: { sheet: 660, frame: 'style', fw: 1, fh: 2 } }); // Check1x2Top case 660 :47211 恒掉 5351（no-drop 表 :66340）
 def({ key: 'v_661_corrupt_jungle_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8D89DF', blend: true, drop: 176, vanilla: { sheet: 661, frame: 'auto' } }); // 腐化丛林草→泥 176（case 661/662 :64990）
 def({ key: 'v_662_crimson_jungle_grass_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D05050', blend: true, drop: 176, vanilla: { sheet: 662, frame: 'auto' } }); // 猩红丛林草→泥 176
 def({ key: 'v_663_enchanted_moondial', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#18CBE9', drop: null, vanilla: { sheet: 663, frame: 'style', fw: 2, fh: 3 } });
@@ -847,7 +847,7 @@ def({ key: 'v_694_stalactite_1x2_echo', name: '', solid: false, framed: true, op
 def({ key: 'v_695_replica_demon_altar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#77657D', drop: null, vanilla: { sheet: 695, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_696_replica_shadow_orb', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#8D78A8', drop: null, vanilla: { sheet: 696, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_697_decorative_cobweb', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#C0CACB', drop: 5471, /* D-6:case 697(:64731）→5471 */  vanilla: { sheet: 697, frame: 'auto' } });
-def({ key: 'v_698_item_flask', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#C8C8C8', vanilla: { sheet: 698, frame: 'style', fw: 1, fh: 2 } });
+def({ key: 'v_698_item_flask', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#C8C8C8', drop: 5472, vanilla: { sheet: 698, frame: 'style', fw: 1, fh: 2 } }); // Check1x2Top case 698 :47198 恒掉 5472（no-drop 表 :66340;TEDeadCellsDisplayJar 有物先行 DropItem :47181）
 def({ key: 'v_699_alchemy_flask', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 4, mapColor: '#8D6B59', drop: null, light: [102, 51, 38], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 699, frame: 'style', fw: 4, fh: 4 } });
 def({ key: 'v_700_abigails_flower_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#D25B4D', drop: 5114, vanilla: { sheet: 700, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_701_glow_tulip_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#157CD4', drop: 5333, vanilla: { sheet: 701, frame: 'style', fw: 1, fh: 1 } });

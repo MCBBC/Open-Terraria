@@ -9,7 +9,8 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DIST = join(import.meta.dirname, '..', 'dist');
+// 输出目录:默认 dist(单独跑行为不变);build:release 链经 SW_DIST_DIR 指向 dist-release
+const DIST = join(import.meta.dirname, '..', process.env.SW_DIST_DIR ?? 'dist');
 const PRUNE_DIRS = ['sprites/vanilla', 'sounds', 'audios/music'];
 
 if (process.env.PRUNE_DIST === '0') {
@@ -43,11 +44,11 @@ for (const rel of PRUNE_DIRS) {
   rmSync(dir, { recursive: true, force: true });
 }
 
-// RELEASE=1 档(anti-decompile-plan-v2 B0-2;build:release 专用):裁调试工作台。
-// 这些是 public/ 静态拷贝的独立调试页(vite build 入口只有 index.html,游戏本体
-// 零引用——src 内命中全是注释;唯一运行时 fetch 是 DebugLinePage 拉 debug-save,
-// 属调试功能,release 缺文件只影响该调试函数)。缺省(非 RELEASE)不裁,行为不变。
-if (process.env.RELEASE === '1') {
+// 调试页裁剪(2026-08-24 用户定案二次澄清:**发布包默认裁调试页**——保留的是
+// 游戏内 F6/F2/F5 等调试功能(在主 chunk 里,与此无关);9 个独立调试 HTML 工作台
+// +调试存档不进发布包。dev 服务器不受影响(页面活在 public/,此处只裁 dist 拷贝)。
+// build:release 链默认带 STRIP_DEBUG=1;显式 STRIP_DEBUG=0 可保留;普通 build 不设=保留。
+if (process.env.STRIP_DEBUG === '1') {
   const RELEASE_FILES = [
     'annotator.html', 'faeling-frames.html', 'hitbox-lab.html', 'sheet-probe.html',
     'tree-inspect.html', 'water-audit.html', 'remaster.html',
@@ -61,7 +62,9 @@ if (process.env.RELEASE === '1') {
     rCount++;
     rmSync(p, { force: true });
   }
-  console.log(`[prune-dist] RELEASE 档:裁调试工作台 ${rCount} 文件(${(rFreed / 1048576).toFixed(1)}MB)`);
+  console.log(`[prune-dist] STRIP_DEBUG=1:裁调试页 ${rCount} 文件(${(rFreed / 1048576).toFixed(1)}MB)`);
+} else {
+  console.log('[prune-dist] 调试页保留(STRIP_DEBUG 未设或=0;游戏内调试功能不受影响)');
 }
 
 console.log(`[prune-dist] 裁 ${PRUNE_DIRS.join('+')}(${files} 文件/${(freed / 1048576).toFixed(0)}MB) → dist ≈ ${(du(DIST) / 1048576).toFixed(0)}MB`);

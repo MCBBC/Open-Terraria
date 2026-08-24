@@ -107,19 +107,20 @@ describe('546 怒滚草：滚转累积 + 派发 + 反翻镜像', () => {
     expect(e.visAngle).toBeCloseTo(0.4, 5);     // 累积（rotation 从不复位——滚转语义）
   });
 
-  it('派发门：rotate(visAngle) 生效,且枢轴平移到帧中心（−sh/2+4/scale 往返对）', () => {
+  it('派发门：rotate(visAngle) 直转生效（中心锚后枢轴天然=帧中心,无往返平移）', () => {
     const w = makeWorld();
     const h = makeHooks(w, null);
     const e = spawn(h, 546, 40, FLOOR - 1);
     e.visAngle = 1.25;
-    const calls = drawWithFake(e, w, { sw: 30, sh: 30 });   // 帧高 30 → 枢轴偏移 = −15+4 = −11
+    const calls = drawWithFake(e, w, { sw: 30, sh: 30 });
     const rot = rotOf(calls);
     expect(rot, '应有 rotate(visAngle)——aiStyle 26 曾无门').toBeTruthy();
     expect((rot!.a as number[])[0]).toBeCloseTo(1.25, 5);
+    // 2026-08-24 中心锚勘误：原点=盒中心=帧中心,XNA origin=halfSize 枢轴天然对齐,
+    // 曾按底锚写的往返平移（−sh/2+4/scale 对）已删——断言无 0-x translate 残留
     const trs = calls.filter((c) => c.m === 'translate' && (c.a as number[])[0] === 0)
       .map((c) => (c.a as number[])[1]);
-    expect(trs, '帧中心枢轴往返平移（地面型 translate=盒底,原版 origin=halfSize）')
-      .toEqual(expect.arrayContaining([-11, 11]));
+    expect(trs, '枢轴往返平移应已删（中心锚后直转）').toEqual([]);
   });
 
   it('镜像门归属：spriteDirection=−direction（cs:63368）→ facing<0 才翻（反翻档,不进 rotationDriven）', () => {

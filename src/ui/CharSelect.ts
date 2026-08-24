@@ -186,16 +186,19 @@ export class CharSelectPanel {
         if (dead) return;
         this.close(() => this.flow.onPlay(a, meta.id));
       });
+      // 收藏钮（原版 UICharacterListItem.cs:80 收藏钮；本行无复制钮——复制是
+      // 世界列表种子钮的误植，2026-08-24 用户对齐指正）
+      this.iconBtn(btns, meta.favorite ? 'UI_ButtonFavoriteActive' : 'UI_ButtonFavoriteInactive',
+        meta.favorite ? Lang.text('UI.Unfavorite') : Lang.text('UI.Favorite'), async () => {
+          await this.store.setFavorite(meta.id, !meta.favorite);
+          await this.reload();
+        });
       this.iconBtn(btns, 'UI_ButtonRename', Lang.text('UI.Rename'), async () => {
         const name2 = prompt(Lang.text('Mods.SandboxWorld.CharSelect.RenamePrompt'),
           a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed'));
         if (name2 == null) return;
         a.name = name2.slice(0, 20);
         await this.store.update(meta.id, a);
-        await this.reload();
-      });
-      this.iconBtn(btns, 'UI_CharCreation_Copy', Lang.text('Mods.SandboxWorld.WorldSelect.Copy'), async () => {
-        await this.store.copy(meta.id);
         await this.reload();
       });
       const del = document.createElement('div');

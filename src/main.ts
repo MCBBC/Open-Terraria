@@ -135,12 +135,19 @@ async function loadAssets() {
     //   面板专属子族(图鉴/小地图/世界创建/角色创建/创意/工坊/成就…)只在各自
     //   面板打开时才需要,vui 消费方每帧重查 ensureUiImage 缺图自愈——
     //   收窄到菜单/加载页 chrome,请求 426→~170,零闪烁风险
+    // 2026-08-24 HAR 审计收窄（用户报 logo_1..8 菜单白载）：
+    //  · 'logo' 前缀整组移除——logo_1..8 是死资产（AssetInitializer 加载后无绘制点）
+    //  · 'Inventory_' 前缀移除——Inventory_Back1-15/Tick 全是游戏内背包 UI，菜单
+    //    零消费；进游戏后 vui 懒载自愈（首帧 null 下帧补）
+    //  · 排除表增补：UI_UI_BossBar/UI_MapPing（游戏内 HUD，绘制路径 vui 懒载）、
+    //    UI_TitleLinkButtons（原版标题链接钮，本作无消费方）
     await atlas.preloadUiPrefix(
-      ['UI_', 'Inventory_', 'logo', 'Logo'], undefined,
+      ['UI_', 'Logo'], undefined,
       ['UI_Bestiary', 'UI_Minimap', 'UI_WorldCreation', 'UI_CharCreation',
        'UI_PlayerResourceSets', 'UI_Workshop', 'UI_Creative', 'UI_Wires',
        'UI_DisplaySlots', 'UI_Achievement', 'UI_Craft', 'UI_InfoIcon',
-       'UI_Settings', 'UI_Camera'],
+       'UI_Settings', 'UI_Camera', 'UI_UI_BossBar', 'UI_MapPing',
+       'UI_TitleLinkButtons'],
     );
   } catch {
     atlas = null; // 素材缺失时回退程序化生成

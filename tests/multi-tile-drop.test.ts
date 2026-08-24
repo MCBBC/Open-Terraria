@@ -32,7 +32,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import {
   vanillaPlaceableTileKeys, CAGE_ITEM_SHEET, VANILLA_ITEM_KEY_BY_ID,
 } from '../src/data/items';
-import { coinBandVid } from '../src/data/vanillaStyleDrops';
+import { coinBandVid, styleDropVid, styleDropVidOfFrames } from '../src/data/vanillaStyleDrops';
 import { VI } from '../src/data/itemKeys';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
 import funcJson from '../src/data/vanilla-itemfunc.json';
@@ -271,7 +271,9 @@ describe('系统性对拍：多格 drop:null 全量 def vs 原版 createTile 数
       expect(multiTileDropKey(d, placeable), `${d.key}(sheet ${d.vanilla!.sheet})`).toBe(expected);
       has ? withItem++ : withoutItem++;
     }
-    expect(withItem).toBeGreaterThan(240);   // 审计 ⚠️1 主体（雕像/画/旗/功能站/笼缸…）
+    expect(withItem).toBeGreaterThan(230);   // 审计 ⚠️1 主体（雕像/画/旗/功能站/笼缸…）
+    // ★H.4 批（2026-08-24）后基数 239：11 站（463/395/425/486/510/511/573/581/642/660/698）
+    // 已定谳 Check* 锚点真掉落、补 def.drop 移出本集（见 G 段）
     expect(withoutItem).toBeGreaterThan(20); // 纯装饰 27 族
   });
 
@@ -410,5 +412,135 @@ describe('锚点单次掉落与 1×1 路径隔离', () => {
     const d = TILE_DEFS[keyOf('v_529_sea_oats')]!;
     expect(d.w).toBe(1); expect(d.h).toBe(2);
     expect(multiTileDropKey(d, placeable)).toBe('');
+  });
+});
+
+// ============ G. H.4 Check* 锚点 18 站点定谳（2026-08-24 终审收官） ============
+// docs/audit/tile-audit-2026-08-23.md H.4：真缺 11 站补 def.drop / 专属链 2 站 /
+// 误报 5 站（Check2x3Wall/Check3x3Wall 的 case 号=245/240 的 style 档,非 tile 派发——
+// TileFrame :86767-86770 两函数只派发 240/440 与 245）。
+describe('H.4 Check* 锚点 18 站点：真缺 11 补 drop / 专属链 2 / 误报 5', () => {
+  it('真缺 11 站 def.drop → multiTileDropKey 直掉原版 vid（vid 均有注册键）', () => {
+    const cases: Array<[string, number]> = [
+      ['v_463_defenders_forge', 3813],            // Check3x4 case 463 :50591（派发 :87031）
+      ['v_395_item_frame', 3270],                 // CheckSign case 395 :44141（派发 :87049）
+      ['v_425_announcementbox', 3617],            // CheckSign case 425 :44145
+      ['v_510_arrow_sign', 4319],                 // CheckSign case 510 :44154
+      ['v_511_painted_arrow_sign', 4320],         // CheckSign case 511 :44151
+      ['v_573_tattered_wood_sign', 4710],         // CheckSign case 573 :44148
+      ['v_581_lavafly_in_a_bottle', 4848],        // Check1x2Top case 581 :47208（派发 :87040）
+      ['v_660_faeling_in_a_bottle', 5351],        // Check1x2Top case 660 :47211
+      ['v_698_item_flask', 5472],                 // Check1x2Top case 698 :47198
+      ['v_486_drum_set', 4063],                   // Check3x2 case 486 :49985（:86829 裸 break 组→goto case 14 :87239）
+      ['v_642_chlorophyte_extractinator', 5296],  // Check3x3 case 642 :53634（:86797 排除组→goto case 106;Check3x2 :49970 同 vid 死路）
+    ];
+    for (const [k, vid] of cases) {
+      const d = TILE_DEFS[keyOf(k)]!;
+      expect(d.drop, k).toBe(vid);
+      expect(VI(vid), `${k} vid ${vid} 须有注册键`).not.toBe('');
+      expect(dropKeyOf(k), k).toBe(VI(vid));
+    }
+  });
+
+  it('运行时：11 站逐件挖掉 → 锚点掉原版物品一次（object 支;395/698 过挂物族空记录 break 门）', () => {
+    const w = new World(80, 80, 7, 'mtd-h4');
+    const drops: Drop[] = [];
+    const g = boulderShell(w, drops, []);
+    const cases: Array<[string, number]> = [
+      ['v_463_defenders_forge', 3813],
+      ['v_395_item_frame', 3270],
+      ['v_425_announcementbox', 3617],
+      ['v_510_arrow_sign', 4319],
+      ['v_511_painted_arrow_sign', 4320],
+      ['v_573_tattered_wood_sign', 4710],
+      ['v_581_lavafly_in_a_bottle', 4848],
+      ['v_660_faeling_in_a_bottle', 5351],
+      ['v_698_item_flask', 5472],
+      ['v_486_drum_set', 4063],
+      ['v_642_chlorophyte_extractinator', 5296],
+    ];
+    let row = 4;
+    for (const [k, vid] of cases) {
+      const t = keyOf(k);
+      const d = TILE_DEFS[t]!;
+      const ow = d.w ?? 1, oh = d.h ?? 1;
+      for (let dx = 0; dx < ow; dx++) for (let dy = 0; dy < oh; dy++) {
+        w.store.setTileSilent(4 + dx, row + dy, t, dx * 18, dy * 18);
+      }
+      drops.length = 0;
+      g.breakTile(4 + ow - 1, row + oh - 1, false);   // 右下格命中（非锚格）
+      expect(drops.length, `${k} 恰一次`).toBe(1);
+      expect(drops[0].key, k).toBe(VI(vid));
+      expect(drops[0].n, k).toBe(1);
+      expect(w.store.get(4, row), `${k} 整件清`).toBe(0);
+      row += oh + 2;
+    }
+  });
+
+  it('已有专属链 2 站不回归：704→501 仙尘 / 706→4144 泰拉魔刃（def.drop 保持 null 防双掉）', () => {
+    expect(TILE_DEFS[keyOf('v_704_fallen_log_echo')]!.drop).toBeNull();
+    expect(TILE_DEFS[keyOf('v_706_terragrim_shrine_echo')]!.drop).toBeNull();
+    const w = new World(60, 40, 7, 'mtd-h4b');
+    const drops: Drop[] = [];
+    const g = boulderShell(w, drops, []);
+    // 704 3×2：echoResourceDropVid case 704 恒 501（Check3x2 :49991）
+    const log = keyOf('v_704_fallen_log_echo');
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, log, dx * 18, dy * 18);
+    }
+    g.breakTile(10, 10, false);
+    expect(drops.length).toBe(1);
+    expect(drops[0].key).toBe(VI(501));
+    // 706 3×2：breakShrineSword 恒 4144（Check3x2 :50103;object 支前拦截 :12958）
+    const shrine = keyOf('v_706_terragrim_shrine_echo');
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(20 + dx, 10 + dy, shrine, dx * 18, dy * 18);
+    }
+    drops.length = 0;
+    g.breakTile(20, 10, false);
+    expect(drops.length).toBe(1);
+    expect(drops[0].key).toBe(VI(4144));
+  });
+
+  it('失撑链同掉（checkFurnitureSupport 尾同源 multiTileDropKey）——486 鼓组/581 瓶 representatives', () => {
+    const w = new World(60, 40, 7, 'mtd-h4c');
+    const drops: Drop[] = [];
+    const g = boulderShell(w, drops, []);
+    // 486 鼓组 3×2 悬空放置 → 底行格失撑检查 → 整件清+掉 4063
+    const drum = keyOf('v_486_drum_set');
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) {
+      w.store.setTileSilent(10 + dx, 10 + dy, drum, dx * 18, dy * 18);
+    }
+    (g as unknown as { checkFurnitureSupport: (x: number, y: number) => void }).checkFurnitureSupport(10, 11);
+    expect(drops.length).toBe(1);
+    expect(drops[0].key).toBe(VI(4063));
+    expect(w.store.get(10, 10)).toBe(0);
+    // 581 瓶 1×2（无墙无底撑）→ 失撑掉 4848
+    const bottle = keyOf('v_581_lavafly_in_a_bottle');
+    w.store.setTileSilent(20, 10, bottle, 0, 0);
+    w.store.setTileSilent(20, 11, bottle, 0, 18);
+    drops.length = 0;
+    (g as unknown as { checkFurnitureSupport: (x: number, y: number) => void }).checkFurnitureSupport(20, 11);
+    expect(drops.length).toBe(1);
+    expect(drops[0].key).toBe(VI(4848));
+    expect(w.store.get(20, 10)).toBe(0);
+  });
+
+  it('误报 5 站定谳：:44811/:44829/:44832/:45084/:45108 的 case 号=240/245 style 档（画族表同 vid 铁证）', () => {
+    // 原版派发事实：Check3x3Wall 只接 240/440（TileFrame :86767-86768）、
+    // Check2x3Wall 只接 245（:86769）——五站行号的 case 全是画族 style：
+    expect(styleDropVid(245, 13)).toBe(5086);   // Paintings2x3[13] = :45084 case 13
+    expect(styleDropVid(245, 5)).toBe(1495);    // Paintings2x3[5]  = :45108 case 5
+    expect(styleDropVid(240, 61)).toBe(3866);   // Paintings3x3[61] = :44811 case 61
+    expect(styleDropVid(240, 73)).toBe(4958);   // Paintings3x3[73] = :44829 case 73
+    expect(styleDropVid(240, 74)).toBe(5087);   // Paintings3x3[74] = :44832 case 74
+    // 五 def 不加 drop：原版真掉落在 KillTile 帧表/树链且本仓已接
+    // （13 瓶 :66050 GetItemDrop_Bottles / 61/74 :66142 帧表 / 73 :65546 种子 /
+    //  5 树 :65730 GetTreeDrops）
+    for (const k of ['v_13_placed_bottles', 'v_5_trees', 'v_61_jungle_short_plants', 'v_73_forest_tall_plants', 'v_74_jungle_tall_plants']) {
+      expect(TILE_DEFS[keyOf(k)]?.drop ?? null, k).toBeNull();
+    }
+    // 13 瓶 1×1 尾帧表直掉仍在（KillTile case 13 :66050 fx/18；Bottles[2]=110 灰瓶）
+    expect(styleDropVidOfFrames(13, 36, 0)).toBe(110);
   });
 });

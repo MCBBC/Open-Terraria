@@ -13389,7 +13389,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const sk = VANILLA_ITEM_KEY_BY_ID[sv];
         if (sk) this.spawnDrop(x * TILE + 8, y * TILE + 8, sk, 1);
       } else if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, typeof def.drop === 'number' ? VI(def.drop) : def.drop, 1);
-      else if (def.key.startsWith('v_')) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
+      // place_v_ 兜底与 object 支 multiTileDropKey 同语义（:808 注）：判据=存在真实
+      // 原版放置物品——无门时 no-drop 组 1×1 件（藤/滴落饰/苔叶块等）也走此支,虽然
+      // spawnDrop 未知键静默 null 无实害,语义上与"真无掉落"相悖（2026-08-24 终审对齐）
+      else if (def.key.startsWith('v_') && vanillaPlaceableTileKeys().has(def.key)) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
     }
     this.killTileBreakSound(type, x, y);
     this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
@@ -13939,7 +13942,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const mode = this.wireToolMode;
       const wires = mode & TOOL_CUTTER ? 9999 : inv.countOf(VI_ID(530));
       const actuators = mode & TOOL_CUTTER ? 9999 : inv.countOf(VI_ID(849));
-      const res = w.massWireOperation(a, [tx, ty], mode, wires, actuators);
+      // ★R20-A11:dir = player.direction == 1（Wiring.cs:3259）——先垂直段与否随玩家朝向
+      const res = w.massWireOperation(a, [tx, ty], mode, wires, actuators, this.player.facing === 1);
       if (!(mode & TOOL_CUTTER)) {
         if (res.wire > 0) inv.remove(VI_ID(530), res.wire);
         if (res.actuator > 0) inv.remove(VI_ID(849), res.actuator);

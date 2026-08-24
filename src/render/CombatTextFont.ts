@@ -35,17 +35,22 @@ FONT_KEYS.forEach((key, i) => {
   FONTS[key].characters.forEach((c, k) => CHAR_INDEX[i].set(c, k));
 });
 
-(function load() {
-  if (typeof Image === 'undefined') return;
+// 首用懒载(2026-08-24 HAR 审计:飘字是游戏内特性,菜单期三张字表白载)——
+// 消费方 drawText 前调 ensureFonts(),未就绪帧跳过(combatFontReady 门既有语义)
+let fontLoadStarted = false;
+function ensureFonts(): void {
+  if (fontLoadStarted || typeof Image === 'undefined') return;
+  fontLoadStarted = true;
   FONT_KEYS.forEach((key, i) => {
     const p = FONTS[key];
     const img = new Image();
     img.onload = () => upgradeToBitmap(img, (b) => { TEX[i] = b; READY[i] = true; });
     img.src = `sprites/${p.texture}`;
   });
-})();
+}
 
 export function combatFontReady(crit: boolean): boolean {
+  ensureFonts();
   return READY[crit ? 1 : 0];
 }
 

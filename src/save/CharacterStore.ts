@@ -9,7 +9,9 @@ const dataKey = (id: number) => `sandboxworld.player.${id}`;
 /** 随身态键(与外观记录分离,避免大 JSON 混写) */
 const stateKey = (id: number) => `sandboxworld.playerstate.${id}`;
 
-export interface CharacterMeta { id: number; name: string; difficulty: number; createdAt: number; }
+export interface CharacterMeta { id: number; name: string; difficulty: number; createdAt: number;
+  /** 收藏（原版 UICharacterListItem 收藏钮；收藏行 ★ 前缀显示） */
+  favorite?: boolean; }
 
 let nextId = 1;
 
@@ -35,6 +37,14 @@ export class CharacterStore {
   }
 
   list(): CharacterMeta[] { return [...this.index]; }
+
+  /** 收藏切换（原版 FavoriteButtonClick；收藏行不可删除为原版语义，本作未接） */
+  async setFavorite(id: number, v: boolean) {
+    const m = this.index.find((x) => x.id === id);
+    if (!m) return;
+    m.favorite = v;
+    await this.saveIndex();
+  }
 
   async get(id: number): Promise<Appearance | null> {
     if (!await kvHas(dataKey(id))) return null;

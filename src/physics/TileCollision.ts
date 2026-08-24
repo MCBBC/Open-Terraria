@@ -456,24 +456,39 @@ function unembedPass(b: Body, world: World): void {
   if (!st.inBounds(cx, cy)) return;
   const ci = st.idx(cx, cy);
   if (!st.isSolid(cx, cy) || st.slope[ci] > 0 || st.half[ci] || st.isPlatform(cx, cy)) return;
-  // ① 向上:头顶连续净空(≤3 格)则上移到净空区底部
-  const top = Math.ceil(b.h / TILE) + 1;
+  // ① 向上:从盒顶行上方起找连续净空(≤3 格),上移到盒顶达净空区
+  const topRow = Math.floor(b.y / TILE);
   let clear = 0;
   for (let k = 1; k <= 3; k++) {
-    const ty = cy - k;
+    const ty = topRow - k;
     if (!st.inBounds(cx, ty) || st.isSolid(cx, ty)) break;
     clear = k;
   }
   if (clear > 0) {
-    const lift = Math.min(clear * TILE, (b.y + b.h / 2) - cy * TILE + TILE * (clear - 1) + 1);
-    const ny = b.y - Math.max(2, lift);
-    // 目标位中心格必须非实心
-    const ncy = Math.floor((ny + b.h / 2) / TILE);
-    const ni = st.inBounds(cx, ncy) ? st.idx(cx, ncy) : -1;
-    if (ni >= 0 && (!st.isSolid(cx, ncy) || st.slope[ni] > 0 || st.half[ni])) {
-      b.y = ny;
-      if (b.vy > 0) b.vy = 0;
-      return;
+    // 上移量 = 盒顶到净空区底部(顶行上方第 clear 格的底) + 2px 余量
+    const lift = Math.min(clear * TILE, b.y - (topRow - clear) * TILE + 2);
+    if (lift > 0) {
+      const ny = b.y - lift;
+      // ★整盒验证(2026-08-24 review 加固):上移后盒占的所有格非实心
+      // (中心格单点验证不够——盒高 2.6 格,顶/底格可能撞进别的实心)
+      const nx0 = Math.floor(b.x / TILE), nx1 = Math.floor((b.x + b.w - 0.01) / TILE);
+      const ny0 = Math.floor(ny / TILE), ny1 = Math.floor((ny + b.h - 0.01) / TILE);
+      let fits = true;
+      for (let tx = nx0; tx <= nx1 && fits; tx++) {
+        for (let ty = ny0; ty <= ny1; ty++) {
+          if (!st.inBounds(tx, ty)) continue;
+          const ti = st.idx(tx, ty);
+          if (st.isSolid(tx, ty) && st.slope[ti] === 0 && !st.half[ti] && !st.isPlatform(tx, ty)) {
+            fits = false;
+            break;
+          }
+        }
+      }
+      if (fits) {
+        b.y = ny;
+        if (b.vy > 0) b.vy = 0;
+        return;
+      }
     }
   }
   // ② 水平:左右各探 2 格,取连续净空更宽的一侧平移
@@ -491,9 +506,21 @@ function unembedPass(b: Body, world: World): void {
   const dir = r >= l ? 1 : -1;
   const push = Math.max(l, r) * TILE;
   const nx = b.x + dir * push;
-  const ncx = Math.floor((nx + b.w / 2) / TILE);
-  const ni = st.inBounds(ncx, cy) ? st.idx(ncx, cy) : -1;
-  if (ni >= 0 && (!st.isSolid(ncx, cy) || st.slope[ni] > 0 || st.half[ni])) {
+  // 整盒验证(同上移支)
+  const nx0 = Math.floor(nx / TILE), nx1 = Math.floor((nx + b.w - 0.01) / TILE);
+  const nyc = Math.floor((b.y + b.h / 2) / TILE);
+  let fits = true;
+  for (let tx = nx0; tx <= nx1 && fits; tx++) {
+    for (let ty = Math.floor(b.y / TILE); ty <= Math.floor((b.y + b.h - 0.01) / TILE); ty++) {
+      if (!st.inBounds(tx, ty)) continue;
+      const ti = st.idx(tx, ty);
+      if (st.isSolid(tx, ty) && st.slope[ti] === 0 && !st.half[ti] && !st.isPlatform(tx, ty)) {
+        fits = false;
+        break;
+      }
+    }
+  }
+  if (fits) {
     b.x = nx;
     b.vx = 0;
   }

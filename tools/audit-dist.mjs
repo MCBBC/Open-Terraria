@@ -10,7 +10,8 @@
 import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const DIST = join(import.meta.dirname, '..', 'dist');
+// 输出目录:默认 dist(单独跑行为不变);build:release 链经 SW_DIST_DIR 指向 dist-release
+const DIST = join(import.meta.dirname, '..', process.env.SW_DIST_DIR ?? 'dist');
 const RELEASE = process.env.RELEASE === '1';
 
 const errors = [];
@@ -35,17 +36,24 @@ for (const f of jsFiles) {
   if (/\/Users\/|\/home\//.test(s) || /[A-Z]:\\\\/.test(s)) errors.push(`源码绝对路径泄漏: ${f}`);
 }
 
-// ③ 调试工作台残留
+// ③ 调试页残留(2026-08-24 用户定案:发布包默认裁调试页,游戏内调试功能保留)。
+// STRIP_DEBUG=1(发布链缺省):文件存在=违规(prune 应已裁);=0:显式保留;未设:仅记台账。
 const DEBUG_FILES = [
   'annotator.html', 'faeling-frames.html', 'hitbox-lab.html', 'sheet-probe.html',
   'tree-inspect.html', 'water-audit.html', 'remaster.html',
   'debug-save.sbw.json', 'hitbox-names.json',
 ];
+const stripDebug = process.env.STRIP_DEBUG;
+let debugKept = 0;
 for (const f of DEBUG_FILES) {
   if (existsSync(join(DIST, f))) {
-    const msg = `调试工作台残留: ${f}`;
-    (RELEASE ? errors : warns).push(msg + (RELEASE ? '' : '(非 RELEASE 档,仅警告)'));
+    debugKept++;
+    if (stripDebug === '1') errors.push(`调试页残留(STRIP_DEBUG=1): ${f}`);
   }
+}
+if (debugKept) {
+  const why = stripDebug === '0' ? '(显式 STRIP_DEBUG=0)' : '(非发布链,仅记台账)';
+  console.log(`[audit-dist] 调试页保留 ${debugKept}/${DEBUG_FILES.length} ${why}`);
 }
 
 // ④ 体积台账

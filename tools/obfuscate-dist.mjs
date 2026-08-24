@@ -25,7 +25,10 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import JavaScriptObfuscator from 'javascript-obfuscator';
 
-const DIST = join(import.meta.dirname, '..', 'dist');
+// 输出目录:默认 dist(单独跑行为不变);build:release 链经 SW_DIST_DIR 指向
+// dist-release(独立目录,免疫并行会话对共享 dist 的反复重建——2026-08-24 实测
+// 发布包曾在共享 dist 里 3 分钟内被冲掉两次)
+const DIST = join(import.meta.dirname, '..', process.env.SW_DIST_DIR ?? 'dist');
 const ASSETS = join(DIST, 'assets');
 
 if (process.env.OBFUSCATE === '0') {
