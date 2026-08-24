@@ -17,7 +17,7 @@ import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass'
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType, vanGenSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { placeTight, checkStalactite } from './ShimmerPass';
-import { genFrameNeighbors } from './FinalCleanupPass';
+import { genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';
 import { killTileChest } from './BuriedChestsPass';
 
 type Rect = { x: number; y: number; w: number; h: number };
@@ -332,7 +332,7 @@ function killUnsupportedFurniture(st: TileStore, rng: RNG, cx: number, cy: numbe
 
 /** WorldGen.PlaceTile 派发到各型放置器（FillRooms/cascadePlace 用到的型别全收）。
  *  export 仅供 tests/placement-frame-debt.test.ts 带向单测（Place2x2 竖排带） */
-export function placeFurniture(st: TileStore, key: string, x: number, y: number, style = 0, _anchor?: string): boolean {
+export function placeFurniture(st: TileStore, rng: RNG, key: string, x: number, y: number, style = 0, _anchor?: string): boolean {
   const t = TILE_BY_KEY[key];
   if (t === undefined) return false;
   const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
@@ -369,6 +369,9 @@ export function placeFurniture(st: TileStore, key: string, x: number, y: number,
         }
       }
       regHouseObj(st, x - 1, y, 3, 3, 'chand');
+      // ★IIIIIII：PlaceTile(34) 成功尾 SquareTileFrame 九格派发（FFF ③ 落刀；
+      //   PlaceChand 成功 → cs:60748 尾派发，中心=(x,y)）
+      genSquareTileFrame(st, rng, x, y);
       return true;
     }
     case 14: case 26: case 86: case 87: case 88: case 89: case 114: case 187: case 215: case 217: case 218:
@@ -1223,12 +1226,12 @@ function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme
       // （TileObject.cs:792）永不达——且 genRand=>Main.rand（WorldGen.cs:4391）单流下
       // houseprobe4 PT(240) 事件 Δ0 掷实锤。旧「245 补 Next(4)」系误判 PlaceTile→
       // PlaceObject 派发，已撤。
-      placeFurniture(st, key, x, y, style);
+      placeFurniture(st, rng, key, x, y, style);
     } else {
       // 烛台:PlaceChand(34)吊灯——key=chandelier(sheet 34;旧误用 'candelabra'
       // =sheet 100 的独立件,case 34 永不命中 → 吊灯从未放置,room1 实锤)
       const y = r.y + 1;
-      placeFurniture(st, 'chandelier', x, y, rng.int(0, 5));
+      placeFurniture(st, rng, 'chandelier', x, y, rng.int(0, 5));
     }
   }
   // 装饰循环:W/8+3 件
@@ -1256,14 +1259,14 @@ function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme
         break;
       }
       case 1: // 骨堆 186
-        placeFurniture(st, 'v_186_decos_3x2', x, y, rng.int(22, 25));
+        placeFurniture(st, rng, 'v_186_decos_3x2', x, y, rng.int(22, 25));
         break;
       case 2: // 雕像(statueList[Next(2, len)],陷阱雕像照接)
         placeStatue(st, rng, x, y, rng.int(2, STATUE_LIST.length - 1), gs);
         break;
       case 3: {
         const [key, style] = choices[rng.int(0, choices.length - 1)];
-        placeFurniture(st, key, x, y, style);
+        placeFurniture(st, rng, key, x, y, style);
         break;
       }
     }
@@ -1294,6 +1297,11 @@ function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): voi
       //   证伪:jungle house3 ① ③ 的 OnlyTiles(158) 通道数+6=vanilla 顶/底竖直
       //   出口平台照写壳行(该语境 tileSolid[19] 表值对门不可见/门恒过),恢复恒写。
       st.setTileSilent(sx, sy, PLATFORM, 0, def.platformStyle * 18);
+      // ★IIIIIII（2026-08-24）FFF ③ 落刀：PlaceTile(19) 成功尾 SquareTileFrame 九格
+      //   派发（1457 cs:60748-60753/1456 cs:60278-60286；中心 reset=true+8 邻 false；
+      //   苔 184 每触一粒活性苔掷 Next(3)——屋环帧窗唯一大变量）。链序=PlaceTile
+      //   （含尾派发）→SetSlope→SetFrames，故派发在坡写之前。
+      genSquareTileFrame(st, rng, sx, sy);
       st.slope[st.idx(sx, sy)] = dir === 1 ? 1 : 2;
       // ★AAAAAA：HouseBuilder.cs:518 SetSlope 后 SetFrames(frameNeighbors:true)——
       //   中心+四邻 TileFrame（平台连接码写入 frameX；引擎 framePlatformSweep）
@@ -1311,6 +1319,9 @@ function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): voi
       st.liquidType[st.idx(cx, cy)] = 0;
       placeWallRolled(st, rng, cx, cy, def.wall);
       st.setTileSilent(cx, cy, PLATFORM, 0, def.platformStyle * 18);
+      // ★IIIIIII：PlaceTile(19) 成功尾九格派发（链序 Clear→PlaceWall→PlaceTile→
+      //   SetFrames——同上，FFF ③ 落刀）
+      genSquareTileFrame(st, rng, cx, cy);
       // HouseBuilder.cs:519 尾 SetFrames(frameNeighbors:true)——AAAAAA 补
       genFrameNeighbors(st, rng, cx, cy, 'setTile');
     }
@@ -1355,12 +1366,16 @@ function placeDoors(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): void
     //   ④成门：3 格 frameX 各独立 Next(3)（variant 逐行独立——曾弃掷值全写 variant0，
     //     SSS 批 (3706,699) [18,0]vs[0,0] 帧差实锤）。
     const tryDoor = (x: number, exitY: number) => {
+      // ★IIIIIII：vanilla 门洞=Actions.ClearTile(frameNeighbors:true)（HouseBuilder.cs:547
+      //   Shapes.Rectangle(1,3) 逐格清+四邻 TileFrame(reset=false)）——JS 曾只清不帧,
+      //   四邻活性苔 184 掷整缺（FFF ③ 同族,掷侧零近似）
       for (let dy = 0; dy < 3; dy++) {
         if (!st.inBounds(x, exitY + dy)) continue;
         const i = st.idx(x, exitY + dy);
         st.flags[i] = 0;                 // Tile.ClearTile()：留 type/wall/liquid
         st.slope[i] = 0;
         st.half[i] = 0;
+        genFrameNeighbors(st, rng, x, exitY + dy, 'clearTile');
       }
       const actAt = (yy: number) => st.inBounds(x, yy) && st.flags[st.idx(x, yy)] !== 0;
       const tableSolidAt = (yy: number) => {   // Main.tileSolid[type]（生成期翻转表）
@@ -1383,6 +1398,9 @@ function placeDoors(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): void
       if (!solidTileAt(exitY + 3)) return;                          // PlaceDoor floor
       const v0 = rng.int(0, 2), v1 = rng.int(0, 2), v2 = rng.int(0, 2);
       placeDoorClosedRows(st, x, exitY, def.door, [v0, v1, v2]);
+      // ★IIIIIII：PlaceTile(10) 成功尾 SquareTileFrame 九格派发（FFF ③ 落刀；
+      //   PlaceTile(item.X,item.Y,10) :549——中心=门洞顶格 (x,exitY)）
+      genSquareTileFrame(st, rng, x, exitY);
     };
     // 右侧扫描起点 = room.X+W（墙体列外一格,HouseBuilder.cs:562 wall=(X+W,Y+1,1,H-2)）
     // ——曾误用墙体列 X+W-1 → 扫描窗含恒实心墙列,门外洞穴 4×3 极易命中 → 门滥发
@@ -1421,6 +1439,8 @@ function placePlatforms(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): 
   const tryPlatform = (x: number, y: number) => {
     if (st.inBounds(x, y)) {
       st.setTileSilent(x, y, PLATFORM, 0, def.platformStyle * 18);
+      // ★IIIIIII：PlaceTile(19) 成功尾九格派发（FFF ③ 落刀，链序 PlaceTile→SetFrames）
+      genSquareTileFrame(st, rng, x, y);
       // ★AAAAAA：HouseBuilder.cs:574 链尾 SetFrames(frameNeighbors:true)——
       //   平台连接码（引擎 framePlatformSweep）写入 frameX。
       genFrameNeighbors(st, rng, x, y, 'setTile');
@@ -1494,7 +1514,7 @@ function placeSupportBeams(st: TileStore, rooms: Rect[], def: ThemeDef): void {
 function cascadePlace(st: TileStore, rng: RNG, rooms: Rect[], key: string, ceilingFallback: boolean): boolean {
   const tryRow = (r: Rect, y: number): boolean => {
     for (let t = 0; t < 10; t++) {
-      if (placeFurniture(st, key, rng.int(2, r.w - 3) + r.x, y)) return true;
+      if (placeFurniture(st, rng, key, rng.int(2, r.w - 3) + r.x, y)) return true;
     }
     // 扫描段「成功」= PlaceTile 返回值 = 锚格 active(★任意件——含既有家具!
     //   PlaceTile 尾段 `if (tile.active()) result=true`(cs:60279-60286)读的是
@@ -1502,7 +1522,7 @@ function cascadePlace(st: TileStore, rng: RNG, rooms: Rect[], key: string, ceili
     //   house10 磨刀站 sweep 踩工作台 87 上 → flag=true 计数+1 而实际未放置
     //   ——SharpenerCount 与 JS 分歧 → house33 丛林门翻转(3<4 vs 4≥4)实锤)
     for (let x = r.x + 2; x <= r.x + r.w - 2; x++) {
-      placeFurniture(st, key, x, y);
+      placeFurniture(st, rng, key, x, y);
       if (activeAt(st, x, y)) return true;
     }
     return false;

@@ -353,6 +353,5 @@ describe('R22 附带修正（同域数据面）', () => {
   it('风声 cue45 循环层入口就位(setWind,驱动侧 Game.applyWeatherLoops 待接线)', () => {
     const s = new Sfx();
     expect(typeof s.setWind).toBe('function');
-    expect(typeof s.setMoonLordCountdown === 'undefined').toBe(true);  // 该 API 在 AudioSystem
   });
 });

@@ -6,7 +6,7 @@ import { shouldShowAudioGate, showAudioGate } from './ui/AudioGate';
 import { UI } from './ui/UI';
 import { kvHas } from './save/KvStore';
 import { saveGame } from './save/SaveFile';
-import { ITEM_BY_KEY } from './data/items';
+import { ITEM_BY_KEY , VANILLA_ITEM_KEY_BY_ID } from './data/items';
 import { TILE_BY_KEY, T, TILE_DEFS, WALL_DEFS } from './data/tiles';
 import { liveGorePieces } from './entities/GorePiece';
 import { parseWldToSave } from './wld/WldImport';
@@ -205,6 +205,7 @@ function enterGameHooks() {
   inGame = true;
   (window as unknown as { __swTiles: typeof TILE_BY_KEY }).__swTiles = TILE_BY_KEY;
   (window as unknown as { __swItems: typeof ITEM_BY_KEY }).__swItems = ITEM_BY_KEY;
+  (window as unknown as { __swVANILLA_ITEM_KEY_BY_ID: typeof VANILLA_ITEM_KEY_BY_ID }).__swVANILLA_ITEM_KEY_BY_ID = VANILLA_ITEM_KEY_BY_ID;
   (window as unknown as { __swSetPool?: (p: number[] | null) => void }).__swSetPool = setDebugPool;
   // gore 池只读视图（模块级 livePool 不经 Game 实例——探针断言气泡族/碎块推进用）
   (window as unknown as { __swGore?: typeof liveGorePieces }).__swGore = liveGorePieces;

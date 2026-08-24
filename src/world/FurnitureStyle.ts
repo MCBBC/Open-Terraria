@@ -82,10 +82,22 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     //  frameY/36 = 曲目 style）：StyleHorizontal=false 竖排 Y 步 36；开关档 X 0/36
     // （Wiring SwitchMB :50977）。此前走 default X 向 → 唱片全放成曲目 0
     case 139: return [0, style * 36];
-    // ★备案（未加专属 case，勿一刀切）：388/389 高门（TallGate）与 617 遗物座的
-    // TileObjectData 均 StyleHorizontal=false（变体竖排），default 的 X 向 style*fw*18
-    // 对它们是错的——当前生成/放置链无 placeStyle>0 实例不触发，一旦引入多变体
-    // 须按表补竖排 case（参考 15/79/139 的写法）
+    // ★R21 备案修订：default X 向对【竖排/特殊布局】族的盲区清单——已补专属 case 的
+    // 有 423 感应器 / 10 门；仍走 default 但布局不符的仅剩 388/389 高门与 617 遗物座
+    // （TileObjectData 均 StyleHorizontal=false 竖排，现行物品无 placeStyle>0 实例，
+    // 一旦引入多变体须按表补竖排 case，参考 15/79/139 写法）。
+    // —— R21 实证 default 盲区并非"仅 388/389/617"：门(10)已有 placeStyle>0 物品流入
+    // （石门 vi_4415 style44 等 32 件），感应器 423 与晶塔族 placeStyle 全缺也曾同根。
+    // 423 逻辑感应器（PlaceLogicTiles WorldGen.cs:45718-45721 else 支 `frameX=0;
+    //  frameY=18*style`——样式档在 Y 轴：0昼/1夜/2玩家上方/3水/4岩浆/5蜂蜜/6任意液；
+    //  frameX 留给 TELogicSensor.GetFrame 写 On 态 0/18。曾落 default 写 frameX=style*18
+    //  → 自放七件全退化昼档、打掉反推 fy/18 恒返 3613）
+    case 423: return [0, style * 18];
+    // 10 关门（PlaceDoor WorldGen.cs:32070-32090：frameX=54*(style/36)+变体*18、
+    //  frameY=54*(style%36)+行*18——每 36 样式换一列，列内 54px 块三档变体。
+    //  曾落 default 写 style*18 → 石门(style44)/活木·骨·血肉门等 style>0 全渲染错区+
+    //  doorStyleOf 反推错乱污染开关门链。开门 tile11 无放置物品不经此路径）
+    case 10: return [54 * Math.floor(style / 36), 54 * (style % 36)];
     default: return [style * fw * 18, 0];
   }
 }

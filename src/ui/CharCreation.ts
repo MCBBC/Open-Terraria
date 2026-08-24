@@ -1041,6 +1041,17 @@ export class CharCreation {
   // ---- 发型页 ----
 
   private buildHair() {
+    // ★网格复用（2026-08-24 用户报"切到发型列表卡一下"）：213 格 DOM 一次性构建，
+    //  再入页只更新选中态+重烘贴图（content.innerHTML='' 全量重建=每次切页签卡顿）
+    const prev = this.panel.querySelector('.sw-cc-hair') as HTMLElement | null;
+    if (prev) {
+      this.content.appendChild(prev);
+      prev.querySelectorAll('.sw-cc-hairbtn').forEach((b) => {
+        b.classList.toggle('active', this.appearance.hair === Number((b as HTMLElement).dataset.hair));
+      });
+      this.scheduleSheetBake(0);
+      return;
+    }
     const box = el('div', 'sw-cc-hair');
     const grid = el('div', 'sw-cc-hairgrid');
     const cols = 10;

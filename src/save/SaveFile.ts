@@ -2,7 +2,7 @@
 // 序列化纯核心在 ./serialize(无 DOM/World 依赖,主线程与 save.worker.ts 共用同一实现);
 // 本文件保留 SaveData 类型/读档解码与主线程同步 saveGame(兼容入口,worker 不可用时回退)。
 import type { World } from '../world/World';
-import { World as WorldClass } from '../world/World';
+import { World as WorldClass, CHEST_MAX_ITEMS } from '../world/World';
 import type { Player } from '../entities/Player';
 import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
@@ -261,10 +261,17 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
     it && v3 ? { ...it, id: it.id === 0 ? 0 : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
   // v3 稳定 id → 内部 id(含 locked 透传);★曾未接线直接用 data.chests——
   // 现有物品 stable≡internal 掩盖,自定义物品进箱即错
+  // R21：旧档箱恒 10 槽 → 读档统一补齐到 CHEST_MAX_ITEMS=40（原版 Chest.cs:58
+  //  DefaultMaxItems=40;旧档零迁移——补的全是 null,存档回写自然带满）
+  const padChestItems = (items: Array<SavedItemT | null>): Array<SavedItemT | null> => {
+    const out = items.slice(0, CHEST_MAX_ITEMS);
+    while (out.length < CHEST_MAX_ITEMS) out.push(null);
+    return out;
+  };
   const v3Chests = (data.chests ?? [])   // ★R16-16 缺段守卫（截断 JSON 曾 .map 即抛）
     .map((c) => (v3
-      ? { x: c.x, y: c.y, locked: c.locked, items: c.items.map(mapItem) }
-      : c));
+      ? { x: c.x, y: c.y, locked: c.locked, items: padChestItems(c.items.map(mapItem)) }
+      : { x: c.x, y: c.y, locked: c.locked, items: padChestItems(c.items) }));
   if (v3 && data.player) {
     data.player = remapPlayerSlots(data.player, v3, v4);
   }

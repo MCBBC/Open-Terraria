@@ -15,12 +15,13 @@ export function bitmapize(map: Map<string, Baked>, key: string): void {
   }).catch(() => { /* 保持 canvas */ });
 }
 
-/** 淘汰/清空缓存时按类型释放:canvas width=0 即还回后备。
- *  ★ImageBitmap 不 close()（2026-08-24 用户实报）：close 后位图 detach，而缓存条目
- *  可能仍被外部持有（角色创建预览 rAF 持 compositePaperDoll 返回值——拖色触发
- *  tintCache 满清/close → 预览每帧 drawImage 爆 InvalidStateError + 人物消失）。
- *  弃引用交 GC 释放即可（ImageBitmap 无显式 close 也可回收，仅延迟） */
+/** 淘汰/清空缓存：**纯弃引用**，交 GC 释放（2026-08-24 二次修）。
+ *  ①ImageBitmap 不 close()：close 后位图 detach，而缓存条目可能仍被外部持有
+ *   （角色创建预览 rAF 持 compositePaperDoll 返回值——拖色触发 tintCache 满清 →
+ *   预览每帧 drawImage 爆 InvalidStateError + 人物消失，用户实报）；
+ *  ②canvas 也不置 width=0：置 0 清空内容，外部持引用时 drawImage 画出**空白**
+ *   （静默同症状，不抛错更难查）。GC 对两者均可回收，仅释放延迟。 */
 export function freeBaked(v: Baked | undefined | null): void {
-  if (!v) return;
-  if (v instanceof HTMLCanvasElement) { v.width = 0; v.height = 0; }
+  /* 纯弃引用——调用方只需从缓存 Map 移除条目 */
+  void v;
 }

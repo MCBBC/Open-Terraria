@@ -3,8 +3,9 @@
 //   房间 = 门内侧非实心区域泛洪填充，60 ≤ 格数 ≤ 750（maxRoomTiles），包围盒 < 100
 //   （maxRoomSize，WorldGen.cs:4210/4214）；纯空气格必须有"房墙"（Main.wallHouse 表），
 //   家具格（实标记非实心 tile）豁免墙判定；门/平台算边界不穿透；
-//   需求（CountsAsDoor/Table/Chair/Light，WorldGen.RoomNeeds）：
-//   ≥1 门（扫描锚即门）+ ≥1 桌（含工作台）+ ≥1 椅 + ≥1 光源。
+//   需求（CountsAsDoor/Table/Chair/Light 四表,TileID.cs:88-127——R21 起逐表 1:1）：
+//   ≥1 门（含平台 19——houseTile 在 tileSolid 短路前登记,平台地板即门）+
+//   ≥1 桌（含工作台）+ ≥1 椅 + ≥1 光源（CountsAsTorch 26 项表）。
 //   站位评分 = ScoreRoom 1:1（WorldGen.cs:5804-5940）：
 //   ① 占用：他人 home 与 home-1 同在房内 → 整房作废（hiScore=-1）；
 //   ② 邪恶度：房间包围盒向外扩 46 格（Housing_GetTestedRoomBounds ±40+6）扫 tile 计数，
@@ -36,14 +37,25 @@ export const WALL_HOUSE = new Set([
   311,
 ]);
 
-/** 桌家族（CountsAsTable 近似：键名 + 原版 sheet 双保险；工作台计入） */
-function countsAsTable(key: string, sheet: number | undefined): boolean {
-  return key.includes('table') || key === 'workbench' || sheet === 14 || sheet === 18;
-}
-/** 椅家族（CountsAsChair 近似：椅子/王座；sheet 15=椅 21=王座） */
-function countsAsChair(key: string, sheet: number | undefined): boolean {
-  return key.includes('chair') || key.includes('throne') || sheet === 15 || sheet === 21;
-}
+// ================= TileID.Sets.RoomNeeds 四表（TileID.cs:88-127,1458 实读） =================
+// R21：曾用「渲染发光 def.light 当住房光源」+ 键名近似桌椅 + 门只认 10/11——
+// 光源漏 15 项（南瓜灯 35/吊挂灯笼 42/路灯 92/灯 93/彩灯 149/白金烛台蜡 173·174/
+// 水母笼 316-318/和平蜡烛 372/壁炉 405/灵魂瓶 572/吊火盆 592/暗影蜡烛 646/飞灵瓶 660）、
+// 反向发光矿石（魔矿 22 等）白得光源；王座实为 102（旧 sheet===21 把宝箱当椅）；
+// 平台 19 是合法"门"（CheckRoom :6090 houseTile 在 tileSolid 短路【前】登记——
+// 平台地板格即满足 door 需求,平台入口房原版合格）。
+/** CountsAsTorchTypes（TileID.cs:112-119,26 项=住房光源权威表） */
+const COUNTS_AS_TORCH = new Set<number>([
+  4, 33, 34, 35, 42, 49, 93, 95, 98, 100,
+  149, 173, 174, 270, 271, 316, 317, 318, 92, 372,
+  646, 405, 592, 572, 581, 660,
+]);
+/** CountsAsDoorTypes（TileID.cs:121-127,13 项：木门/开门/平台/翻板/高门/队伍平台） */
+const COUNTS_AS_DOOR = new Set<number>([10, 11, 19, 387, 386, 388, 389, 436, 435, 438, 427, 439, 437]);
+/** CountsAsTableTypes（TileID.cs:101-108,12 项） */
+const COUNTS_AS_TABLE = new Set<number>([14, 18, 87, 88, 90, 101, 354, 355, 464, 469, 487, 699]);
+/** CountsAsChairTypes（TileID.cs:94-97,6 项：15 椅/79 床/89 浴缸/102 王座/487/497 马桶） */
+const COUNTS_AS_CHAIR = new Set<number>([15, 79, 89, 102, 487, 497]);
 
 const isDoorType = (t: number) => t === T.DOOR_CLOSED || t === T.DOOR_OPEN;
 
@@ -336,6 +348,15 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
   const extraSolid = opts.extraSolid;
   const tiles = new Set<number>();
   let hasTable = false, hasChair = false, hasLight = false, hasDoor = false;
+  // houseTile 登记（CheckRoom :6089-6090 `if nactive → houseTile[type]=true` 在
+  // tileSolid 短路前执行——房内家具格与【边界实心/平台格】都入表,RoomNeeds 四表按
+  // sheet 查（vanilla 用独立 if 非互斥链:487 同在桌/椅两表）
+  const markHouseTile = (sheet: number): void => {
+    if (COUNTS_AS_DOOR.has(sheet)) hasDoor = true;
+    if (COUNTS_AS_TORCH.has(sheet)) hasLight = true;
+    if (COUNTS_AS_TABLE.has(sheet)) hasTable = true;
+    if (COUNTS_AS_CHAIR.has(sheet)) hasChair = true;
+  };
   let minX = sx, maxX = sx, minY = sy, maxY = sy;
   let head = 0;
   const queue: number[] = [st.idx(sx, sy)];
@@ -362,10 +383,7 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       return null;
     }
     if (st.flags[i] && def) {
-      if (isDoorType(t)) { hasDoor = true; }
-      else if (def.light) hasLight = true;
-      else if (countsAsTable(def.key, def.vanilla?.sheet)) hasTable = true;
-      else if (countsAsChair(def.key, def.vanilla?.sheet)) hasChair = true;
+      markHouseTile(def.vanilla?.sheet ?? -1);
     }
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
       const nx = x + dx, ny = y + dy;
@@ -384,7 +402,9 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       // ScoreRoom 的 Housing_CheckIfInRoom(地板格) 依赖这一点
       if (tileSolidLike(nt) || isDoorType(nt) || (extraSolid !== undefined && nt !== 0
         && extraSolid.has(sheetOf(nt)))) {
-        if (isDoorType(nt)) hasDoor = true;
+        // 边界格同样登记 houseTile（原版在 tileSolid 短路前 :6090）——平台 19
+        // 地板即"门"（R21:平台入口房不再一律 notValid）
+        if (ndef) markHouseTile(ndef.vanilla?.sheet ?? -1);
         tiles.add(ni);
         if (nx < minX) minX = nx;
         if (nx > maxX) maxX = nx;
@@ -456,8 +476,17 @@ export function findFreeHouse(
     const row = y * st.w;
     for (let x = x0; x <= x1; x++) {
       const t = st.type[row + x];
-      if (!isDoorType(t)) continue;
-      const room = checkRoom(st, x, y);
+      // 候选入口：竖向门（10/11，左右探腔）+ 平台族"门"（CountsAsDoorTypes 的
+      //   19/386/387/427/435-439——水平入口,房内在平台格上方,R21 补:原版
+      //   CheckRoom 自任意非实心点泛洪,平台入口房合格,枚举侧须给等价入口探针）
+      let room: Room | null = null;
+      if (isDoorType(t)) {
+        room = checkRoom(st, x, y);
+      } else if (COUNTS_AS_DOOR.has(sheetOf(t))) {
+        if (st.inBounds(x, y - 1) && !tileSolidLike(st.type[st.idx(x, y - 1)])) {
+          room = floodRoom(st, x, y - 1);
+        }
+      }
       if (!room) continue;
       // ScoreRoom：占用/邪恶度/站位打分一体（占用返回 -1）
       const s = scoreRoom(st, room, occupied, askingNpcId);

@@ -22,7 +22,7 @@ import { stepConveyor, conveyorCarriesEnemy } from '../physics/Conveyor';
 import { RNG } from './rng';
 import { Input } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
-import { Clock, World, ChestData, deathCoinKeepFraction } from '../world/World';
+import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { generateWorld } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor } from '../world/Door';
@@ -1070,6 +1070,8 @@ export interface GameCallbacks {
   onDayNight?: (isDay: boolean) => void;
   /** 环境选曲变化（MusicID；0=静音）。原版 UpdateAudio_DecideOnNewMusic 驱动 */
   onMusic?: (musicId: number) => void;
+  /** 月总召唤倒计时（LunarEvent.moonLordCountdown;Main.cs:11646-11664 音乐渐熄+曲首硬切驱动）★R22 */
+  onMoonCountdown?: (countdown: number, max: number) => void;
   /** 硬核角色死亡消亡（Player.cs:38255 HardcoreDeathPenalty）：外观已标 hardcoreDead，
    *  由流程层回写 CharacterStore 持久化（原版 KillMeForGood :38173+ 直接删 .plr 档） */
   onHardcoreDeath?: (appearance: import('../player/Appearance').Appearance) => void;
@@ -1544,7 +1546,7 @@ export class Game implements GameHooks {
     const w = this.world;
     let chest = w.chests.find((ch) => ch.x === x && ch.y === y);
     if (!chest) {
-      chest = { x, y, items: Array(10).fill(null) };
+      chest = { x, y, items: Array(CHEST_MAX_ITEMS).fill(null) };   // R21：原版统一 40 槽（Chest.cs:58/:185-188）
       w.chests.push(chest);
     }
     for (let i = 0; i < items.length; i++) {
@@ -2149,7 +2151,8 @@ export class Game implements GameHooks {
       // ★走 damagePlayer 而非直调 p.damage：死亡结算块（pvpDeath 计数/不掉钱/复活
       // 计时）挂在 damagePlayer 尾部——直调会绕过,_pvp-e2e 实抓"炸死无计数"）
       if (this.damagePlayer(rolled, rp.x, rp.y, undefined, false, pvpHit)) {
-        this.playSfx('hit', 1, p.cx, p.cy);
+        // ★R22:删第二声 'hit'（NPC_Hit_1-5=怪物受击库）——原版玩家受伤只有
+        // Player_Hit(case1),damagePlayer 内已播,此处叠声
         // ★hostile=false（爆炸无敌我门 :13979-13980——!hostile 分支（285 二块/253/
         // 399-402）唯一可触发路径）
         if (!p.dead && p.hp > 0) statusPlayer(this, projType, false);
@@ -2201,7 +2204,7 @@ export class Game implements GameHooks {
       magmaStone: ownerCtx.magmaStone,
     });
     this.damagePlayer(dmg, rp.x, rp.y, undefined, false, true);
-    this.playSfx('hit', 1, rp.x, rp.y);
+    // ★R22:删第二声 'hit'（damagePlayer 内 Player_Hit 已播,原版无第二声）
   }
 
   /** 圣骑士盾 938 装备检测（Player.defendedByPaladin——配饰槽 vid 扫描） */
@@ -2568,7 +2571,7 @@ export class Game implements GameHooks {
         }
         if (hitPlayer(pr, this, rolled, false, true)) {
           pup.pvpImmuneT = 40;   // :13618 每弹×每玩家独立冷却
-          this.playSfx('hit', 1, pr.cx, pr.cy);
+          // ★R22:删第二声 'hit'（damagePlayer 内 Player_Hit 已播）
         }
         continue;
       }
@@ -4004,6 +4007,8 @@ export class Game implements GameHooks {
     this.camera.y = this.player.cy;
     this.sfx.suppress = false;                            // 解除载入静音门
     this.sfx.setListener(this.player.cx, this.player.cy); // 相机/玩家就位即校正 listener（fixedUpdate 每帧兜底）
+    // ★R22 月总召唤倒计时（Main.cs:11646-11664：num² 渐熄+==1 曲首硬切,AudioSystem 侧已实现）
+    this.cb.onMoonCountdown?.(this.world.lunarEvent.moonLordCountdown, this.world.lunarEvent.moonLordCountdownMax || 3600);
     this.boss = null;
     // ---- 历史存档索引帧修复 ----
     // 旧版生成代码曾把多格家具的格内偏移写成【格索引】(0/1)而非【像素】(0/18)，
@@ -4664,9 +4669,10 @@ export class Game implements GameHooks {
       // 群系背景预测性预热:进入新群系前把该群系视差贴图后台取齐
       // (否则跨群系旅行首帧背景闪空;仅 fire-and-forget,不阻塞主循环)
       this.renderer.biomeBg.warm(this.scene);
-      // ★事件曲 flag 链（Main.cs:12150-12566 全 1:1）：屏盒内 NPC 逐个经 type→num3
-      //  槽位置位**独立 flag**（多 Boss 并存各置各 flag,非首/末取一——曾 break 首个
-      //  =近似,已废）,再由 SLOT_MUSIC_CHAIN 固定 else-if 序裁决。
+      // ★事件曲 flag 链（Main.cs:12150-12566 全 1:1）：屏盒内 NPC 按**数组序**逐个
+      //  判定，首个盒命中者置 flag 后立即 break（Main.cs:12612）——每帧至多一个
+      //  flag、取首个命中 NPC 的槽独占（first-wins）;resolveEventMusic 已按输入序
+      //  取首个（★R22 勘误：旧注释"各置各 flag+链优先级"与原文相反）。
       //  规则（:12162-12291）：
       //  ① type 表 MUSIC_SLOT 命中即得槽（世吞段/骷髅王手/WoF 眼/毁灭者链/世花钩蔓
       //    等非 boss 段同触发）；438/379 需仪式态（ai[1]==1 / ai[3]>=0）且盒半径
@@ -9089,7 +9095,7 @@ export class Game implements GameHooks {
                 }
               }
               this.chunks.markDirtyArea(cx0 - 1, cy0 - 1, cx0 + 2, cy0 + 2);
-              this.sfx.play('tink');                    // Sound 22（Chest.cs:468）
+              this.sfx.play('unlock', 1, cx0 * TILE, cy0 * TILE);   // SoundID 22 Unlock（Chest.cs:402/:476 PlaySound(22,X*16,Y*16) 带坐标衰减+pan;旧 tink 误）
               if (spec.ach > 0) this.achievements.notifyProgressionEvent(spec.ach);
               p.inv.removeAt(p.inv.selected, 1);        // :40993-40997 stack--
               this.cb.onInventoryChanged();
@@ -14686,7 +14692,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  21/467/88 三族（此前只登 21 → 放置的梳妆台/二类箱成"孤儿",悬停文本支误进）
     const placedSheet = def?.vanilla?.sheet;
     if (placedSheet === 21 || placedSheet === 467 || placedSheet === 88) {
-      this.world.chests.push({ x: tx, y: ty, items: Array(10).fill(null) });
+      this.world.chests.push({ x: tx, y: ty, items: Array(CHEST_MAX_ITEMS).fill(null) });   // R21：40 槽（Chest.cs:58）
     }
     // 挂物族放置登记（原版 TileLoader.PlaceTile → TE*.Hook_AfterPlacement：
     //  TEItemFrame.cs:15 / TEWeaponsRack.cs:40 / TEDisplayDoll.cs:123 / TEHatRack.cs:31 /
@@ -16591,7 +16597,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const ptx = Math.floor(this.player.cx / TILE);
         return st.inBounds(ptx, pty) && st.wall[st.idx(ptx, pty)] !== 0;
       })(),
-      onAmbience: (v) => this.applyWeatherLoops(v),
+      onAmbience: (v) => this.applyWeatherLoops(v, atmo),
       // 金币雨玩家锚定（WorldGen.cs:71825 FindClosest 单机等价）
       playerForCoinRain: { x: this.player.cx, active: true, dead: this.player.dead },
       onCoinRain: (x, y, type, stack) => {
@@ -16688,9 +16694,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  sandstorm → playLoop 恒 null（素材缺失登记，wav 入库后自动生效）。
    *  轨懒建（首帧音量>0 时）且不拆——与原版 SlotId 常驻 + 每帧改 Volume 同构。
    */
-  private applyWeatherLoops(v: import('../world/weather/Weather').WeatherLoopVolumes): void {
+  private applyWeatherLoops(v: import('../world/weather/Weather').WeatherLoopVolumes, atmo = 1): void {
     // 雨层（既有实现：Music_28 解码循环，音量 cloudAlpha×atmo×0.6）
     this.sfx.setRain(v.rain);
+    // ★R22 风声 cue45（Main.cs:11723-11749）：clamp(|wind|×0.7+0.3,0,1)×0.9×atmo⁴,
+    // 门 |wind|≥0.4(=20/50) && SurfaceAtmospherics(SceneMetrics.cs:695)
+    const windAbs = Math.abs(this.world.weather?.windSpeedCurrent ?? 0);
+    this.sfx.setWind(
+      windAbs >= 0.4 && !!this.scene?.surfaceAtmospherics
+        ? Math.min(1, windAbs * 0.7 + 0.3) * 0.9 * Math.max(0, Math.min(1, atmo)) ** 4
+        : 0);
     const vols: Record<import('./Sfx').WeatherLoopName, number> = {
       blizzardStrong: v.blizzardStrong,
       blizzardInside: v.blizzardInside,
@@ -26504,8 +26517,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     p.respawnTimer = 0;
     p.immuneAlpha = 0;
     this.lostCoins = 0;
-    p.x = this.world.spawnX * TILE + 8;
-    p.y = (this.world.spawnY - 3) * TILE;
+    // 床重生点复验（Player.Spawn :37853-37856 `FindSpawn(); if (!CheckSpawn(SpawnX,SpawnY))
+    //  SpawnX=SpawnY=-1` → :37913 落世界出生点）——床被拆/房间破坏后原样复活在失效床点
+    //  可嵌墙(R21-5)。存档位不清（原版 spN 表同样保留,下次重生再验）;checkBedSpawn
+    //  返回 null 才算通过（''/文案键都是失败,原版 CheckSpawn 只回 bool 静默）
+    let spawnX = this.world.spawnX, spawnY = this.world.spawnY;
+    if ((spawnX !== this.world.spawnX0 || spawnY !== this.world.spawnY0)
+      && this.checkBedSpawn(spawnX, spawnY) !== null) {
+      spawnX = this.world.spawnX0;
+      spawnY = this.world.spawnY0;
+    }
+    p.x = spawnX * TILE + 8;
+    p.y = (spawnY - 3) * TILE;
     // ★1457 出生扫位链未移植（Spawn_GetPositionAtSpawn :38008-38040 X±1 逐格找
     // Spawn_IsAreaValidSpawn :38042+ 有效落位;IsAreaValidSpawn 含压板 135/CanTileHurt/
     // InWorld(5) 三检）——本仓出生 = worldgen 固定 spawn（无运行时扫位/校验链,出生点

@@ -1301,10 +1301,11 @@ export class SkyRenderer {
   /** 通用染色缓存(multiply+destination-in 三步,键=用途+纹理id+8 量化色) */
   private tintCache2 = new Map<string, HTMLCanvasElement>();
   private tintTex(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number, use: string): HTMLCanvasElement | HTMLImageElement {
-    // ★键 = 逐单位截断(曾 1/16 量化)——日/月是晨昏核心大精灵,16 单位染色台阶
-    //  肉眼可见(同天空底色 1/8 档病灶);贴图仅 114²/50²,精确键 + 64 上限的
-    //  clear-all 每帧至多数次小 bake,无雪崩风险(2026-08-24)
-    const key = `${use}:${texId(tex as object)}:${r | 0},${g | 0},${b | 0}`;
+    // ★键 = 4 单位量化（2026-08-24 canvas 哨兵实报雪崩：晨昏时间流动使 r/g/b
+    //  每 tick 微变 → 精确键永不命中 → 每帧 createElement + 64 满清 clear-all
+    //  = 32/s 分配率）。4/255≈1.6% 亮度差肉眼不可辨；64 上限 clear-all 改
+    //  删最旧一半（保热键）；贴图仅 114²/50² 小图
+    const key = `${use}:${texId(tex as object)}:${(r | 0) & ~3},${(g | 0) & ~3},${(b | 0) & ~3}`;
     let c = this.tintCache2.get(key);
     if (c) return c;
     c = document.createElement('canvas');
@@ -1316,7 +1317,14 @@ export class SkyRenderer {
     tc.fillRect(0, 0, c.width, c.height);
     tc.globalCompositeOperation = 'destination-in';
     tc.drawImage(tex as CanvasImageSource, 0, 0);
-    if (this.tintCache2.size > 64) this.tintCache2.clear();
+    if (this.tintCache2.size > 256) {
+      // 删最旧一半（Map 保插入序）——曾 clear-all 连热键一起清=晨昏期每帧重烘
+      let n = 0;
+      for (const k of this.tintCache2.keys()) {
+        if (n++ > 128) break;
+        this.tintCache2.delete(k);
+      }
+    }
     this.tintCache2.set(key, c);
     return c;
   }

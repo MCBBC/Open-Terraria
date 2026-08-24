@@ -225,6 +225,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onEditSign: (x, y, text) => ui.editSign(x, y, text),
       onDayNight: (isDay) => audio.setDayNight(isDay),
       onMusic: (id) => audio.playMusic(id),
+      // ★R22 月总召唤倒计时音乐压制（Main.cs:11646-11664 渐熄+曲首硬切）
+      onMoonCountdown: (cd, max) => audio.setMoonLordCountdown(cd, max),
       // 硬核角色死亡消亡（Player.cs:38255 HardcoreDeathPenalty）：标记回写角色存档，
       // 重进角色列表即灰显禁入（原版 KillMeForGood :38173+ 直接删 .plr 档）
       onHardcoreDeath: async (appearance) => {

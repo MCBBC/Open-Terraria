@@ -179,7 +179,10 @@ export function pylonAcceptsTeleportation(
     case PYLON.Victory:
       return true;                                    // :300
     case PYLON.Underworld:
-      return y >= (world.lavaLine || world.store.h - 200);   // :302 Main.UnderworldLayer
+      // Main.UnderworldLayer = maxTilesY-200（Main.cs:2886;System:305-306）——
+      // ★R21-D2：曾用 GenVars.lavaLine（=waterLine+rng(50,79),gen 侧变量）当门 →
+      // 中小世界提前数百格放行。SceneMetrics.ts:250 同款误用已修,此处补齐
+      return y >= world.store.h - 200;
     case PYLON.Shimmer:
       // :304-306 EnoughTilesForShimmer：窗口微光液格计数 ≥300
       // （SceneMetrics.cs:37 ShimmerTileThreshold；曾以微光腔中心距 125 近似）

@@ -294,6 +294,16 @@ export async function initAssetCache(): Promise<void> {
     // SW 被击杀重启后 controller 会换新实例——重新对齐版本并触发看门狗续传
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       postToSw({ type: 'status' });
+      // ★首访竞态(2026-08-24 OSS 部署实锤,本地 dist-release 复现):SW activate 的
+      //   clients.claim() 触发的换控事件可能【晚于】zip 暖缓存启动落地——此处盲目
+      //   清 warming 会让后续所有 files 批次被 (!state.warming) 门整批丢弃,
+      //   'done' 又免检盖章 done=total → 假完成、真丢件、页面海量 404。
+      //   暖缓存进行中改为整体重启(startZipWarm 的 have-set 只补缺,幂等续传);
+      //   空闲态维持旧语义。
+      if (state.enabled && zipPlan && state.warming) {
+        warmAllAssets(true);
+        return;
+      }
       state.warming = false;
     });
     startWatchdog();
@@ -362,6 +372,7 @@ function sendChunk(): void {
 let zipWorker: Worker | null = null;
 
 async function startZipWarm(): Promise<void> {
+
   if (!zipPlan || state.warming) return;
   state.warming = true;
   state.phase = zipPhaseAt(zipPlan.parts, state.done);
@@ -487,7 +498,9 @@ function startWatchdog(): void {
  *  重试耗尽后 done>=total 恒真,不绕过则按钮点了没反应=用户永久卡死,2026-08-13) */
 export function warmAllAssets(force = false): void {
   if (!state.enabled) return;
-  if (state.warming) return;
+  // ★force 必须能打断进行中的暖(controllerchange 重启路径依赖此语义),
+  //   否则换控重启被 warming 守卫吞掉 = 修复失效
+  if (!force && state.warming) return;
   const finished = zipPlan ? state.phase === 'done' : chunkCursor >= plan.urls.length;
   if (!force && state.done >= state.total && finished) return; // 已完成(幂等)
   if (force) {

@@ -1,4 +1,4 @@
-// 主菜单背景（1456 UpdateMenu/DrawSurfaceBG 1:1 调度版 2026-08-23）。
+// 主菜单背景（1456 UpdateMenu 调度钟 2026-08-23；2026-08-26 层渲染外迁）。
 // 原版标题屏 = 森林背景（DrawBG gameMenu 分支），调度本体在 Main.cs:19678
 // UpdateMenu + :47582 DrawMenu：
 //  · 时间（:19768-19804）：昼 time+=33.88235294117647/帧、夜 +=30.857142857142858
@@ -8,57 +8,23 @@
 //  · 背景组重掷（:19724-19762）：夜 time≥16200 每夜一次 RandomizeBackgrounds；
 //    昼 time≥27000 每日一次 moonType=Next(9)+重掷。173 守卫 ×2（treeBGSet1[0]==173
 //    连重掷两次）。lockMenuBGChange：生成/读档世界期 true，menuMode==0 解锁。
-//    ★1456 backgroundLayerTransitionSpeed(:2564) 全工程只写不读=死字段 → 切换瞬时。
 //  · 森林样式池 RollRandomForestBGStyle（WorldGen.cs:7899）+ SetForestBGSet 全表
 //    （:7605-7726，样式 1-13+31/51/71/72/73）。
-//  · 层规格（gameMenu 分支，1080 backbuffer 基准，num4=2）：
-//    远山0 y=100 scale2 par0.15（:59246-59257）；远山1 y=230 startX−500（:59316-59319）
-//    树层0 y=320 scale2.5 par0.4（:60710-60733 逐贴图：91 par.27/sc1.2、173 par.25/
-//    sc1.3、178 par.3/sc1.2、184 par.25、282 sc1.4）
-//    树层1 y=400 startX−80 scale2.62 par0.43（:60846-60853；51/54 水平翻转 :60884）
-//    树层2 y=480 startX−120 scale2.68 par0.49（:60907-60910；槽0=91 时 sc2.6/par.42）
-//  · 逐槽位 Y 微调（:60826-60960）：槽0 50→−50/53→−100/91·173→+200/178→+75/
-//    330·335→−150/343→−300；槽1 51→−50/54→−100/329·334→−150/342→−300；
-//    槽2 52→−50/55→−100/92→+150/328·333→−150/341→−50
-//  · 173 树动画 = Background 251-254 四帧（GetBackgroundCounter=GlobalTimeWrapped
-//    Hourly×40，/10%4，:60817-60824）；341 = 2×2 帧图（GetBackgroundRect :60655，
-//    counter/15%4，Frame 高 −4 收缩）。
-//  · 层色 = ColorOfSurfaceBackgroundsModified = ColorOfTheSkies——菜单也跑
-//    SetBackColor（:61409 isInGameMenuOrIsServer=gameMenu）→ 层乘天空色（非叠罩）。
 //  · 星坠落：夜 rand(12)==0/帧 → 随机星 Fall（:19697-19703 LetStarsFallInMenu）。
 //  · 日月抓取（alreadyGrabbingSunOrMoon :19766）只冻结时间推进——重掷/坠星照跑。
 //  · MenuXMovement += 4/帧，wrap ±2^31（:47625-47631）。
-import { loadBitmapOnly } from '../assets/SpriteAtlas';
+// 层渲染（远山/树层/腐化槽/tint 烘焙/173 动画/341 帧图）已于 2026-08-26 整体外迁
+// BiomeBackground 的 menuMode 分支（原版「菜单/游戏内同一 DrawSurfaceBG，仅
+// gameMenu 分支切差异」架构）——本类只剩调度钟 + sky.draw 接线，每 tick 经
+// biomeBg.setMenuStyles/menuTick 驱动、biomeBg.drawMenu 出图。
 import { SkyRenderer } from './SkyRenderer';
+import { BiomeBackground } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { Clock } from '../world/World';
 import {
   colorOfTheSkies, setFrameAurora, setFrameBiome, setFrameCloudDim,
   setFrameLightning, setFrameHorizon,
 } from '../lighting/SkyColor';
-
-/** SetForestBGSet 全表（WorldGen.cs:7605-7726）：mnt=treeMntBGSet、trees=treeBGSet */
-interface ForestStyle { mnt: [number, number]; trees: [number, number, number] }
-const FOREST_STYLES: Record<number, ForestStyle> = {
-  1: { mnt: [7, 8], trees: [50, 51, 52] },
-  2: { mnt: [7, 8], trees: [53, 54, 55] },
-  3: { mnt: [7, 90], trees: [91, -1, 92] },
-  31: { mnt: [7, 90], trees: [91, -1, 11] },
-  4: { mnt: [93, 94], trees: [-1, -1, -1] },
-  5: { mnt: [93, 94], trees: [-1, -1, 55] },
-  51: { mnt: [93, 94], trees: [-1, -1, 11] },
-  6: { mnt: [171, 172], trees: [173, -1, -1] },
-  7: { mnt: [176, 177], trees: [178, -1, -1] },
-  71: { mnt: [176, 177], trees: [178, -1, 11] },
-  72: { mnt: [176, 177], trees: [178, -1, 52] },
-  73: { mnt: [176, 177], trees: [178, -1, 55] },
-  8: { mnt: [179, 180], trees: [184, -1, -1] },
-  9: { mnt: [277, 278], trees: [279, -1, -1] },
-  10: { mnt: [280, 281], trees: [282, -1, -1] },
-  11: { mnt: [7, 331], trees: [330, 329, 328] },
-  12: { mnt: [7, 336], trees: [335, 334, 333] },
-  13: { mnt: [7, -1], trees: [343, 342, 341] },
-};
 
 /** Main.rand 菜单侧替身（UnifiedRandom Next 语义：Next(n) ∈ 0..n-1） */
 function nextInt(n: number): number { return Math.floor(Math.random() * n); }
@@ -74,29 +40,9 @@ function rollForestStyle(): number {
   return n;
 }
 
-/** 腐化背景样式表（WorldGen.setBG case 1 :7201-7240；RandomizeBackgrounds_
- *  Corruption :7979 = Next(6)，5→51/52）——夜晚菜单槽（bgStyle=1）的绘制集 */
-const CORRUPT_STYLES: Record<number, [number, number, number]> = {
-  0: [12, 13, 14], 1: [56, 57, 58], 2: [211, 212, 213], 3: [225, 226, 227],
-  4: [240, 241, 242], 51: [324, 323, 322], 52: [324, 226, 322],
-};
-
-/** 各层贴图内容首行（PNG 实测：首个 >4% 不透明行/贴图高）——分数定位的
- *  补偿项：y = 目标分数×H − topRow×scale，使任何贴图的【内容】落在目标高度
- *  （176 内容在 row466/942、94 在 row89/630……无补偿则样式间观感漂移） */
-const TEX_TOPROW: Record<number, number> = {
-  7: 12, 8: 9, 50: 37, 51: 37, 52: 37, 53: 7, 54: 7, 55: 7, 90: 9, 91: 68,
-  92: 36, 11: 9, 93: 4, 94: 89, 171: 42, 172: 5, 173: 21, 176: 466, 177: 156,
-  178: 18, 179: 65, 180: 126, 184: 14, 277: 153, 278: 26, 279: 16, 280: 140,
-  281: 75, 282: 92, 331: 18, 328: 36, 329: 160, 330: 172, 335: 123, 334: 151,
-  333: 8, 336: 5, 343: 28, 342: 38, 341: 63,
-};
-
 /** 供 TitleMenu 读取的菜单时间状态（LogoA/LogoB 昼夜交叉淡化用） */
 export const menuTimeInfo = { timeOfDay: 13500 / 54000 * 0.625 + 0.1875, dayFactor: 1 };
 
-/** 1080 backbuffer 基准 → 当前画布（原版菜单 Y/尺度常量所在空间） */
-const REF_H = 1080;
 const FRAME_MS = 1000 / 60;          // 原版定帧步长（速度常量按帧计）
 const MENU_X_WRAP = 2147483647;      // :47626 screenPosition.X wrap 边界
 
@@ -119,21 +65,19 @@ export class MenuBackground {
   private grabbing = false;           // alreadyGrabbingSunOrMoon（只冻时间 :19766）
   private grabUntil = 0;
   private starAcc = 0;                // 定帧累积器（坠星 1/12 每帧）
-  /** 当前森林样式（WorldGen.treeBG1 菜单侧；初始 = 开局默认样式 1） */
-  private style = 1;
+  /** 当前森林样式（WorldGen.treeBG1 菜单侧；初始 = 开局默认样式 1）。
+   *  每 tick 经 biomeBg.setMenuStyles 注入渲染层 */
+  style = 1;
   /** WorldGen.corruptBG（夜晚菜单槽 bgStyle=1 = Corruption！DrawBG :63450——
    *  UpdateMenu 的 setBG(1,style) 保它过午夜重掷 = 夜槽可见性铁证） */
   private corruptStyle = 0;
-  /** bgAlphaFrontLayer 菜单双槽 [Forest1, Corruption]——昼/夜翻转 0.02/帧
-   *  交叉淡化（backgroundLayerTransitionSpeed=0.02 gameMenu :63448 +
-   *  UpdateBGVisibility_FrontLayer :63534-63551）。★原版菜单零硬切：重掷保
-   *  留可见槽（昼保 treeBG1/夜保 corruptBG），切换全走淡化 */
-  private alphaF = [1, 0];
+  /** 层渲染宿主（menuMode 实例 = 原版 gameMenu 分支同栈）：双槽交叉淡化坡道
+   *  （backgroundLayerTransitionSpeed=0.02 :63448）、远山/树层/腐化槽绘制、
+   *  tint 烘焙全在其内——本类只写样式与昼夜旗（原版菜单零硬切：重掷保留
+   *  可见槽由 randomizeMenuBG 的保槽逻辑承担，切换全走其 alphaFront 淡化） */
+  private biomeBg = new BiomeBackground(true);
 
   private camX = 0;
-  private imgs = new Map<number, ImageBitmap | HTMLImageElement>();
-  /** 层 tint 烘焙缓冲（tex → 画布+上次 tint；tint 变化 >1/255 才重烘） */
-  private tintBufs = new Map<number, { cv: HTMLCanvasElement; tr: number; tg: number; tb: number }>();
 
   // ---- 菜单云 GL 层(2026-08-24 trace 热点修复) ----
   // 旧状:cloudGlLayer 只有 Renderer 帧路径注入(Renderer.ts:2552),菜单 tick 直调
@@ -195,13 +139,6 @@ export class MenuBackground {
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
   };
-
-  private img(n: number): ImageBitmap | HTMLImageElement | null {
-    if (n < 0) return null;
-    if (this.imgs.has(n)) return this.imgs.get(n) ?? null;
-    loadBitmapOnly(`vanilla/Background_${n}.png`, () => this.imgs.has(n), (x) => this.imgs.set(n, x));
-    return null;
-  }
 
   /** 标题屏日月拖拽写时间（GOING_OLDSCHOOL B2，TitleMenu 反算 t01 抛出）。
    *  反解回 vanilla time/dayTime 供调度链继续；拖拽期时间冻结 = 本方法每次调用
@@ -281,14 +218,11 @@ export class MenuBackground {
         this.style = keepForest;
       }
     }
-    // 昼夜 bgStyle 翻转（:63450 夜=1 Corruption/昼=0 Forest1）+ 双槽 0.02/帧
-    // 交叉淡化（gameMenu transitionSpeed :63448 + FrontLayer 坡道 :63534-63551）
-    const targetSlot = this.dayTime ? 0 : 1;
-    for (let s = 0; s < 2; s++) {
-      const tv = s === targetSlot ? 1 : 0;
-      const d = tv - this.alphaF[s];
-      this.alphaF[s] += Math.sign(d) * Math.min(0.02 * frames, Math.abs(d));
-    }
+    // 样式注入 + 昼夜 bgStyle 翻转（:63450 夜=1 Corruption/昼=0 Forest1）与双槽
+    // 0.02/帧交叉淡化（gameMenu transitionSpeed :63448 + FrontLayer 坡道 :63534-63551）
+    // ——状态机整体在 BiomeBackground.menuTick（menuMode 分支），本类只喂旗标
+    this.biomeBg.setMenuStyles(this.style, this.corruptStyle);
+    this.biomeBg.menuTick(this.dayTime, dtMs);
     // 时间推进（:19768-19804；alreadyGrabbingSunOrMoon → 冻结 :19766）
     this.grabbing = performance.now() < this.grabUntil;
     if (!this.grabbing) {
@@ -321,179 +255,24 @@ export class MenuBackground {
     this.sky.draw(this.ctx, this.clock, W, H, this.camX, dtMs, camY);
     // 晨昏镜头光斑（DoDraw 菜单路径 :61550 DrawLensFlare——落日/朝阳径向辉光）
     this.sky.drawMenuFlare(this.ctx, W, H, camY);
-    this.drawForest();
+    // 层渲染委托（远山/树层/腐化槽，BiomeBackground menuMode 分支）：
+    // tint = ColorOfTheSkies 单源（:61409 菜单也跑 SetBackColor → :56194），近白免烘
+    this.biomeBg.drawMenu(this.ctx, W, H, this.layerTint(), this.camX);
   }
 
   /** 层 tint = ColorOfTheSkies（:61409 菜单也跑 SetBackColor → :56194）。
-   *  近白免烘（正昼）；量化 1/255 变化才重烘（tint 缓动不抖帧） */
+   *  近白免烘（正昼）；量化烘焙与缓存约定在 BiomeBackground.menuTinted */
   private layerTint(): [number, number, number] | null {
     const c = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase, true);
     if (c[0] >= 254.5 && c[1] >= 254.5 && c[2] >= 254.5) return null;
     return [c[0] / 255, c[1] / 255, c[2] / 255];
   }
 
-  /** tint 烘焙（multiply + destination-in 保 α；CanvasBgBlit.drawTiledTinted 同技法） */
-  private tinted(n: number, im: HTMLImageElement | ImageBitmap,
-    t: [number, number, number] | null): HTMLImageElement | ImageBitmap | HTMLCanvasElement {
-    if (!t) return im;
-    let e = this.tintBufs.get(n);
-    if (!e || e.cv.width !== im.width || e.cv.height !== im.height) {
-      const cv = document.createElement('canvas');
-      cv.width = im.width; cv.height = im.height;
-      e = { cv, tr: -1, tg: -1, tb: -1 };
-      this.tintBufs.set(n, e);
-    }
-    if (Math.abs(e.tr - t[0]) > 0.004 || Math.abs(e.tg - t[1]) > 0.004 || Math.abs(e.tb - t[2]) > 0.004) {
-      const g = e.cv.getContext('2d')!;
-      g.globalCompositeOperation = 'source-over';
-      g.clearRect(0, 0, e.cv.width, e.cv.height);
-      g.drawImage(im, 0, 0);
-      g.globalCompositeOperation = 'multiply';
-      g.fillStyle = `rgb(${Math.round(t[0] * 255)},${Math.round(t[1] * 255)},${Math.round(t[2] * 255)})`;
-      g.fillRect(0, 0, e.cv.width, e.cv.height);
-      g.globalCompositeOperation = 'destination-in';
-      g.drawImage(im, 0, 0);
-      g.globalCompositeOperation = 'source-over';
-      e.tr = t[0]; e.tg = t[1]; e.tb = t[2];
-    }
-    return e.cv;
-  }
-
-  /** 单层横滚平铺（原版 bgStartX = −IEEERemainder(screenX·par, w) − w/2 + dx） */
-  private drawLayer(im: HTMLImageElement | ImageBitmap | HTMLCanvasElement,
-    par: number, y: number, scale: number, dx: number, alpha = 1,
-    src?: [number, number, number, number], flip = false): void {
-    const w = (src ? src[2] : im.width) * scale;
-    const h = (src ? src[3] : im.height) * scale;
-    if (w <= 0 || h <= 0 || alpha <= 0.01) return;
-    const startX = -(((this.camX * par) % w) + w) % w - w / 2 + dx;
-    const loops = Math.ceil(this.canvas.width / w) + 2;
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    // 接缝修复：取整 + 每张 +1px 重叠（浮点平铺亚像素缝，背景层无感知）
-    const yR = Math.round(y);
-    for (let i = 0; i < loops; i++) {
-      const x = Math.round(startX + i * w);
-      if (flip) {
-        ctx.save();
-        ctx.translate(x + w, yR);
-        ctx.scale(-1, 1);
-        if (src) ctx.drawImage(im, src[0], src[1], src[2], src[3], 0, 0, w, h);
-        else ctx.drawImage(im, 0, 0, w, h);
-        ctx.restore();
-      } else if (src) {
-        ctx.drawImage(im, src[0], src[1], src[2], src[3], x, yR, w, h);
-      } else {
-        ctx.drawImage(im, x, yR, Math.ceil(w) + 1, h);
-      }
-    }
-    ctx.restore();
-  }
-
-  /** GetBackgroundCounter（:60700-60706 gameMenu 分支 = GlobalTimeWrappedHourly×40） */
-  private bgCounter(): number {
-    return (performance.now() / 1000 % 3600) * 40;
-  }
-
-  /** 地表背景全栈：远山（跨槽共用，bgAlphaFarBackLayer 驱动）+ 双槽树层按
-   *  bgAlphaFrontLayer 交叉淡化（昼 Forest1 / 夜 Corruption）。
-   *  ★几何 = 分数定位 + 内容行补偿（2026-08-24 定稿）：1.4.5.8 原版截图实测
-   *  山脊 40/45%H、树线 72/79/86%H、贴图重复周期 ≈ 窗宽（scale=W/1024）——
-   *  1.4.5.6 反编译的绝对常量（y=100/230/320…+num4=2）在 1.4.5.8 截图对不上
-   *  （菜单 UI 也重做了：7 按钮）。y = 目标分数×H − TEX_TOPROW×scale：任何
-   *  贴图的【内容】落在目标高度（176 内容 row466、94 row89……全样式统一观感） */
-  private drawForest(): void {
-    const st = FOREST_STYLES[this.style] ?? FOREST_STYLES[1];
-    const tint = this.layerTint();
-    const H = this.canvas.height;
-    const sc = this.canvas.width / 1024;   // 贴图重复周期 ≈ 窗口宽
-    // 远山两带：脊线 40%/45%H（内容行补偿后）
-    const m0 = this.img(st.mnt[0]);
-    if (m0) this.drawLayer(this.tinted(st.mnt[0], m0, tint), 0.15,
-      H * 0.40 - (TEX_TOPROW[st.mnt[0]] ?? 0) * sc, sc, 0);
-    const m1 = this.img(st.mnt[1]);
-    if (m1) this.drawLayer(this.tinted(st.mnt[1], m1, tint), 0.15,
-      H * 0.45 - (TEX_TOPROW[st.mnt[1]] ?? 0) * sc, sc, -500 * sc / 2);
-    // 槽 Forest1（bgStyle 0）：树三层（树线 72/79/86%H）
-    if (this.alphaF[0] > 0.01) {
-      const a = this.alphaF[0];
-      this.drawTreeSlot(0, st.trees[0], H * 0.72, 1.25 * sc, 0.4, 0, a, tint);
-      this.drawTreeSlot(1, st.trees[1], H * 0.79, 1.31 * sc, 0.43, -80 * sc / 2, a, tint);
-      this.drawTreeSlot(2, st.trees[2], H * 0.86, 1.34 * sc, 0.49, -120 * sc / 2, a, tint);
-    }
-    // 槽 Corruption（bgStyle 1 = 夜菜单）：DrawSurfaceBG_Corrupt gameMenu 分支
-    if (this.alphaF[1] > 0.01) this.drawCorruptTrees(this.alphaF[1], tint, sc);
-  }
-
-  /** 腐化三层（DrawSurfaceBG_Corrupt gameMenu：y=320/400/480、scale 2.5/2.62/2.68、
-   *  L1 恒水平翻转 :60750；56 套三层全 −100 :60722-60724/:60766/:60800——L1/L2
-   *  也查 indexes[0]==56） */
-  private drawCorruptTrees(a: number, tint: [number, number, number] | null, sc: number): void {
-    const set = CORRUPT_STYLES[this.corruptStyle] ?? CORRUPT_STYLES[0];
-    const H = this.canvas.height;
-    // 内容行补偿(56 套额外 −100:60722-60724)
-    const y56 = set[0] === 56 ? -100 * sc : 0;
-    const l0 = this.img(set[0]);
-    if (l0) this.drawLayer(this.tinted(set[0], l0, tint), 0.4, H * 0.72 + y56 - (TEX_TOPROW[set[0]] ?? 0) * sc, 1.25 * sc, 0, a);
-    const l1 = this.img(set[1]);
-    if (l1) this.drawLayer(this.tinted(set[1], l1, tint), 0.43, H * 0.79 + y56 - (TEX_TOPROW[set[1]] ?? 0) * sc, 1.31 * sc, -80 * sc / 2, a, undefined, true);
-    const l2 = this.img(set[2]);
-    if (l2) this.drawLayer(this.tinted(set[2], l2, tint), 0.49, H * 0.86 + y56 - (TEX_TOPROW[set[2]] ?? 0) * sc, 1.34 * sc, -120 * sc / 2, a);
-  }
-
-  /** 单树层（:60708-60960 逐槽位规格/偏移/特例 1:1；绝对像素） */
-  private drawTreeSlot(slot: 0 | 1 | 2, tex: number, y: number, scale: number,
-    par: number, dx: number, alpha: number,
-    tint: [number, number, number] | null): void {
-    if (tex < 0) return;
-    let sc = scale, pr = par;
-    let src: [number, number, number, number] | undefined;
-    let flip = false;
-    let n = tex;
-    if (slot === 0) {
-      // :60712-60733 逐贴图 scale/par 覆写
-      if (tex === 91) { pr = 0.27; sc = 1.2 * 2; }
-      else if (tex === 173) { pr = 0.25; sc = 1.3 * 2; }
-      else if (tex === 178) { pr = 0.3; sc = 1.2 * 2; }
-      else if (tex === 184) { pr = 0.25; }
-      else if (tex === 282) { sc = 1.4 * 2; }
-      if (tex === 173) {
-        // :60817-60824 动画四帧 251-254（counter/10%4）
-        n = 251 + (Math.floor(this.bgCounter() / 10) % 4);
-      }
-      // :60826-60842 Y 微调
-      y -= (TEX_TOPROW[tex] ?? 0) * sc;   // 内容行补偿(替代旧逐贴图像素偏移)
-    } else if (slot === 1) {
-      if (tex === 51 || tex === 54) flip = true;      // :60884 FlipHorizontally
-      y -= (TEX_TOPROW[tex] ?? 0) * sc;
-    } else {
-      // :60901-60904 槽0=91 → 本层 sc1.3×2/par0.42
-      if (FOREST_STYLES[this.style]?.trees[0] === 91) { sc = scale * 1.3 / 1.34; pr = 0.42; }
-      y -= (TEX_TOPROW[tex] ?? 0) * sc;
-      if (tex === 341) {
-        // GetBackgroundRect :60674-60680：2×2 帧（counter/15%4）+ Inflate(0,-2)
-        const im = this.img(341);
-        if (!im) return;
-        const idx = Math.floor(this.bgCounter() / 15) % 4;
-        const fw = im.width / 2, fh = im.height / 2;
-        src = [(idx % 2) * fw, Math.floor(idx / 2) * fh + 2, fw, fh - 4];
-        const tim = this.tinted(341, im, tint);
-        this.drawLayer(tim, pr, y, sc, dx, alpha, src, flip);
-        return;
-      }
-    }
-    const im = this.img(n);
-    if (!im) return;
-    this.drawLayer(this.tinted(n, im, tint), pr, y, sc, dx, alpha, undefined, flip);
-  }
-
   destroy() {
     window.removeEventListener('resize', this.resize);
     this.canvas.remove();
     this.canvas.width = 0; this.canvas.height = 0;   // 立刻还回后备(不等 GC;双开预算紧)
-    for (const e of this.tintBufs.values()) { e.cv.width = 0; e.cv.height = 0; }
-    this.tintBufs.clear();
+    this.biomeBg.dispose();    // 菜单层渲染宿主(烘焙画布/贴图缓存随菜单释放)
     this.glCloud?.dispose();   // 菜单云 GL 层随菜单销毁(上下文/纹理全释放)
     this.glCloud = null;
     this.sky.cloudGlLayer = null;

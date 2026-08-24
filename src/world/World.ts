@@ -11,6 +11,10 @@ import { BestiaryTracker, type BestiarySave } from '../data/Bestiary';
 import { createJourneyPowers, type JourneyPowersState } from './JourneyPowers';
 import { mainDifficulty, GDL } from '../stats/ScaleStats';
 
+/** 世界箱/银行统一槽位（Chest.cs:58 DefaultMaxItems=40、:185-188 构造器全 40——
+ *  1.4 起原版无 10 槽箱；曾用 10 = 容量 1/4 + wld 导入静默丢第 11-40 格,R21-3） */
+export const CHEST_MAX_ITEMS = 40;
+
 export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number; prefix?: number } | null>; locked?: boolean; }
 
 /** 世界尺寸档（原版 WorldGen.GetWorldSize cs:6518）：≤4200→0 小 / ≤6400→1 中 / 其余→2 大。

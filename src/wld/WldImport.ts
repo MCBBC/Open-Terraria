@@ -3,6 +3,7 @@
 import { parseWld, WldWorld } from './WldParser';
 import { TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
+import { CHEST_MAX_ITEMS } from '../world/World';
 import { TILE_BY_KEY, T, TILE_DEFS } from '../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { translateSeed } from '../core/rng';
@@ -525,25 +526,35 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   }
   if (unmapped > 0) warnings.push(`${unmapped} 个未知 tile 已降级为石块`);
 
-  // 宝箱：转内部格式（锚点 + 战利品）。帧统一 18px 像素偏移（vanilla style 规范语义，
-  // 与 tryPlace / breakTile 的 floor(f/18) 归一化一致）
+  // 宝箱：转内部格式（锚点 + 战利品）。
+  // ★R21（2026-08-24）：帧【保留原样】——tile 循环(:486-489 framed 直拷)已按原版
+  //  像素帧写入（wld 存的就是 style*36 带 + 0/18 格偏移,parser :590 直拷）,
+  //  此段曾强写 style0 木箱四格帧 → 金箱/暗影箱/群系锁箱/神庙箱全变无锁木箱:
+  //  IsLocked 帧区间、破坏掉落表(vanillaStyleDrops.Doors 同款 Chests 表)、渲染三链
+  //  同错(tile467 却 copyFrame:true 同族两种待遇,R21-chest §9)。仅当登记箱坐标处
+  //  tile 循环没产出 chest 时兜底补 type(帧不动)。锁态按锚帧推导(Chest.IsLocked
+  //  cs:295-310 六段帧区间+467 style13)——QuickStacking/vanillaRecipes/Extractinator
+  //  三处消费 c.locked 当门,导入锁箱不再白给。
+  const CHEST_TILE = TILE_BY_KEY['chest'];
+  const isLockedChestFrame = (sheet: number, fx: number): boolean =>
+    sheet === 21
+      ? (fx >= 72 && fx <= 106) || (fx >= 144 && fx <= 178) || (fx >= 828 && fx <= 1006)
+        || (fx >= 1296 && fx <= 1330) || (fx >= 1368 && fx <= 1402) || (fx >= 1440 && fx <= 1474)
+      : sheet === 467 && Math.floor(fx / 36) === 13;
   const chests: SaveData['chests'] = [];
   for (const c of wld.chests) {
-    // 在 chest 周围找锚点（wld chest 坐标可能是左上）
-    type[c.y * w + c.x] = TILE_BY_KEY['chest'];
-    frameX[c.y * w + c.x] = 0;
-    frameY[c.y * w + c.x] = 0;
-    if (c.x + 1 < w) { type[c.y * w + c.x + 1] = TILE_BY_KEY['chest']; frameX[c.y * w + c.x + 1] = 18; frameY[c.y * w + c.x + 1] = 0; }
-    if (c.y + 1 < h) { type[(c.y + 1) * w + c.x] = TILE_BY_KEY['chest']; frameX[(c.y + 1) * w + c.x] = 0; frameY[(c.y + 1) * w + c.x] = 18; }
-    if (c.x + 1 < w && c.y + 1 < h) { type[(c.y + 1) * w + c.x + 1] = TILE_BY_KEY['chest']; frameX[(c.y + 1) * w + c.x + 1] = 18; frameY[(c.y + 1) * w + c.x + 1] = 18; }
+    const anchor = c.y * w + c.x;
+    if (type[anchor] !== CHEST_TILE) {
+      // 兜底：登记箱与图格脱节（罕见——tile 被降级/清空）才补 type，不覆写帧
+      type[anchor] = CHEST_TILE;
+      if (c.x + 1 < w && type[c.y * w + c.x + 1] === 0) type[c.y * w + c.x + 1] = CHEST_TILE;
+      if (c.y + 1 < h && type[(c.y + 1) * w + c.x] === 0) type[(c.y + 1) * w + c.x] = CHEST_TILE;
+      if (c.x + 1 < w && c.y + 1 < h && type[(c.y + 1) * w + c.x + 1] === 0) type[(c.y + 1) * w + c.x + 1] = CHEST_TILE;
+    }
     const items: Array<{ id: number; stack: number } | null> = [];
-    // ★R16-6（2026-08-24）：原版箱 maxItems=40（Chest.cs:58 DefaultMaxItems;世界箱
-    //  CreateWorldChest 全 40 槽）——slice(0,10) 截断曾静默丢第 11-40 格物品且不计数
-    //  （itm 只记未映射 id 不记截断）;现把截断非空格数计入 warnings（扩箱模型到
-    //  20/40 档另案——内部箱模型恒 10 槽,Game.ts:14637/server room.ts 同构）
-    const dropped = c.items.slice(10).filter(Boolean).length;
-    if (dropped > 0) warnings.push(`宝箱(${c.x},${c.y}) 第 11-40 格 ${dropped} 件物品超出内部箱容量被丢弃`);
-    for (const it of c.items.slice(0, 10)) {
+    // ★R21 续 R16-6：原版箱 maxItems=40（Chest.cs:58/:185-188）——内部箱模型本批已扩到
+    //  40 槽（CHEST_MAX_ITEMS,Game.ts 放置/联机同批），导入全量接收不再截断
+    for (const it of c.items.slice(0, CHEST_MAX_ITEMS)) {
       if (!it) { items.push(null); continue; }
       const key = VANILLA_ITEM_KEY_BY_ID[it.id];
       if (key && ITEM_BY_KEY[key] !== undefined) {
@@ -553,8 +564,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         items.push(null);
       }
     }
-    while (items.length < 10) items.push(null);
-    chests.push({ x: c.x, y: c.y, items });
+    while (items.length < CHEST_MAX_ITEMS) items.push(null);
+    const anchorSheet = TILE_DEFS[type[anchor]]?.vanilla?.sheet ?? -1;
+    const locked = isLockedChestFrame(anchorSheet, frameX[anchor]) || undefined;
+    chests.push({ x: c.x, y: c.y, items, locked });
   }
 
   // 时间换算（★R16-4 2026-08-24）：Main.time 是逐帧 +1/60 的**小数量纲**

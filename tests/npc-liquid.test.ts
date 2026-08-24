@@ -429,7 +429,7 @@ describe('水母 lurk（aiStyle 18 cs:24215-24269，专家 63/64/103/242）', ()
 
 describe('溅落声统一衰减（2026-08-13 修复批：删手写 45 格/0.12 门 → Sfx.atten 2500px；'
   + '2026-08-18 批：分液体 wav——PlaySound(19,style) 水 0/蜜与岩浆 1/微光入 4 出 5）', () => {
-  it('入水 Splash_0 传实体中心坐标且 vol=0.9（非 boss）；玩家再远也无 0.12 下限残留', () => {
+  it('入水 Splash_0 传实体中心坐标且 vol=1（:94297 volumeScale 缺省恒 1,R22 去 0.9/boss×1.2 无据档）', () => {
     const w = liquidWorld();
     const rec: Array<{ n: string; v?: number; x?: number; y?: number }> = [];
     const fake = {
@@ -448,13 +448,13 @@ describe('溅落声统一衰减（2026-08-13 修复批：删手写 45 格/0.12 �
     expect(b.wet).toBe(true);
     expect(rec).toHaveLength(1);
     expect(rec[0].n).toBe('Splash_0');              // 水入水 style 0（:94306）
-    expect(rec[0].v).toBe(0.9);                     // 旧实现远距会塌到 0.9×0.12≈0.108
+    expect(rec[0].v).toBe(1);                       // R22：音量恒 1（旧 0.9/boss×1.2 无原版依据）
     expect(rec[0].x).toBe(b.cx);                    // 坐标交 Sfx.atten 统一 2500px 衰减
     expect(rec[0].y).toBe(b.cy);
     updateNpcLiquid(b, fake, w.store);              // 第二 tick 已湿：去抖不重播
     expect(rec).toHaveLength(1);
   });
-  it('boss 档 vol=1.2 且带坐标', () => {
+  it('boss 溅落同样 vol=1 且带坐标（:94297 无 boss 特档,R22 去 ×1.2）', () => {
     const w = liquidWorld();
     const rec: Array<{ n: string; v?: number; x?: number; y?: number }> = [];
     const fake = {
@@ -472,7 +472,7 @@ describe('溅落声统一衰减（2026-08-13 修复批：删手写 45 格/0.12 �
     updateNpcLiquid(b, fake, w.store);
     expect(rec).toHaveLength(1);
     expect(rec[0].n).toBe('Splash_0');
-    expect(rec[0].v).toBe(1.2);
+    expect(rec[0].v).toBe(1);                     // R22：boss 无 ×1.2 特档
     expect(rec[0].x).toBe(b.cx);
     expect(rec[0].y).toBe(b.cy);
   });

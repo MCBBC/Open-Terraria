@@ -1115,6 +1115,44 @@ for (const [fnVid, fnStyle] of FOUNTAIN_ITEM_STYLE) {
   fnDef.placeStyle = fnStyle;
   // maxStack 不覆写：喷泉 case 无 maxStack 赋值 → 1456/1457 同值默认 9999
 }
+
+// ---- DefaultTo* 双参 helper 提取盲区回填（R21 系统性缺口，2026-08-24）----
+//  Item.cs 的 DefaultToPlaceableTile(tileID, style)/共享 case 算式（placeStyle=type-N）
+//  不在 vanilla-itemfunc.json 单值提取面内 → 这些物品 placeStyle 全缺=0：
+//  ① 七件逻辑感应器（:32542-32555 `placeStyle=type-3613`、:33032-33046
+//     `placeStyle=type-3726+3`；3615/3729 有 createTile=423 无 placeStyle）；
+//  ② 十一座传送晶塔（Item.cs:39691-44406 DefaultToPlaceableTile(597,N) 全表）——
+//     曾全放成 frameX=0 纯净帧 → 唯一性门只查 style0=全世界只能立一座任何晶塔、
+//     群系门按纯净判、破坏恒返 4876；
+//  ③ 门族 32 件无 itemfunc 条目（DefaultToPlaceableTile((ushort)10,N)，N=33..68，
+//     石门 4415→44 起）——曾连 tile 都缺=无法放置。其余 32 件老门 itemfunc 已带
+//     placeStyle 不在表内。放置帧轴 = FurnitureStyle case 10/423（同批修）。
+//  仅填 undefined/0 缺口（手写字段优先），与上方 createTile 双源回填同口径。
+const PLACE_STYLE_BACKFILL_1458: ReadonlyArray<readonly [number, string, number]> = [
+  // 逻辑感应器 423（style=frameY/18 档位）
+  [3613, 'v_423_logicsensor', 0], [3614, 'v_423_logicsensor', 1], [3615, 'v_423_logicsensor', 2],
+  [3726, 'v_423_logicsensor', 3], [3727, 'v_423_logicsensor', 4],
+  [3728, 'v_423_logicsensor', 5], [3729, 'v_423_logicsensor', 6],
+  // 传送晶塔 597（style=frameX/54 型号）
+  [4876, 'v_597_pylons', 0], [4875, 'v_597_pylons', 1], [4916, 'v_597_pylons', 2],
+  [4917, 'v_597_pylons', 3], [4918, 'v_597_pylons', 4], [4919, 'v_597_pylons', 5],
+  [4920, 'v_597_pylons', 6], [4921, 'v_597_pylons', 7], [4951, 'v_597_pylons', 8],
+  [5652, 'v_597_pylons', 9], [5653, 'v_597_pylons', 10],
+  // 门 10（style 列带 = PlaceDoor 54*(style/36)+54*(style%36)）
+  ...([3129, 3130].map((vid) => [vid, 'door_closed', 33] as const)),
+  ...([[4155, 39], [4176, 40], [4197, 41], [4218, 42], [4307, 43], [4415, 44], [4576, 45],
+    [5158, 46], [5179, 47], [5200, 48], [5558, 49], [5611, 50], [5699, 51], [5722, 52],
+    [5747, 53], [5765, 54], [5786, 55], [5807, 56], [5828, 57], [5867, 58], [5907, 59],
+    [5941, 60], [5964, 61], [5984, 62], [6007, 63], [6030, 64], [6053, 65], [6076, 66],
+    [6098, 67], [6120, 68]] as const).map(([vid, st]) => [vid, 'door_closed', st] as const),
+];
+for (const [vid, tk, ps] of PLACE_STYLE_BACKFILL_1458) {
+  const k = VANILLA_ITEM_KEY_BY_ID[vid];
+  const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
+  if (!d) continue;
+  if (d.tile === undefined && tk !== undefined) d.tile = tk;
+  if (!d.placeStyle) d.placeStyle = ps;
+}
 void 0;
 
 // ---- 放置块 tile 回填补遗（2026-08-13 实装缺口扫描 §3）：vanilla.json
