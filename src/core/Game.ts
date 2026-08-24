@@ -1534,10 +1534,12 @@ export class Game implements GameHooks {
   /** 待开箱（msg31 已发、等回包后自动开面板） */
   private netPendingChest: { x: number; y: number } | null = null;
   /** 已登记箱子差分基准（postUpdate 轮询 → msg32 槽位编辑上报） */
-  private netChestWatch: Array<{ chest: ChestData; idx: number; last: Array<{ id: number; stack: number } | null> }> = [];
+  private netChestWatch: Array<{ chest: ChestData; idx: number; last: Array<{ id: number; stack: number; prefix?: number } | null> }> = [];
 
-  /** msg32 回包：登记/更新 world.chests（服务器权威），待开箱自动开面板 */
-  private netApplyChest(chestIdx: number, x: number, y: number, items: Array<{ id: number; stack: number } | null>) {
+  /** msg32 回包：登记/更新 world.chests（服务器权威），待开箱自动开面板。
+   *  ★R17：items 带 prefix（R16-13 上行/解析已带,此处签名对齐;spread 落 chest.items
+   *  本就透传——ChestData.items 自带 prefix?: 字段,tooltip 消费端 itemTooltip.ts:156 直读） */
+  private netApplyChest(chestIdx: number, x: number, y: number, items: Array<{ id: number; stack: number; prefix?: number } | null>) {
     const w = this.world;
     let chest = w.chests.find((ch) => ch.x === x && ch.y === y);
     if (!chest) {
@@ -1571,7 +1573,10 @@ export class Game implements GameHooks {
     for (const wch of this.netChestWatch) {
       for (let i = 0; i < wch.chest.items.length; i++) {
         const a = wch.chest.items[i], b = wch.last[i];
-        if ((a?.id ?? 0) !== (b?.id ?? 0) || (a?.stack ?? 0) !== (b?.stack ?? 0)) {
+        // ★R17：prefix 入差分键（词缀-only 变更也重发;原版 msg32 消费端
+        //  MessageBuffer.cs:1478/1519 `if (prefix != item.prefix) Prefix(prefix)` 同域）
+        if ((a?.id ?? 0) !== (b?.id ?? 0) || (a?.stack ?? 0) !== (b?.stack ?? 0)
+          || (a?.prefix ?? 0) !== (b?.prefix ?? 0)) {
           net.sendChestSlot(wch.idx, wch.chest.x, wch.chest.y, i, a?.id ?? 0, a?.stack ?? 0, a?.prefix ?? 0);   // ★R16-13
           wch.last[i] = a ? { ...a } : null;
         }
@@ -13247,7 +13252,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           else num13 = Math.max(1, Math.floor(num13 / spawnRateMultiplier(jp.spawnRateSlider)));
         }
         if (num13 > 0 && Math.random() < 1 / num13
-          && this.entities.enemies.filter((e) => !e.dead && e.vanillaId === 316).length < 2) {
+          && this.entities.enemies.filter((e): e is import("../entities/Enemy").Enemy => !e.dead && (e as import("../entities/Enemy").Enemy).vanillaId === 316).length < 2) {
           const ghost = Enemy.fromVanilla(316, this.player.cx + (Math.random() - 0.5) * 64, this.player.y - 32);
           if (ghost) {
             ghost.id = this.entities.nextId++;
@@ -16201,7 +16206,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  135 命中即 return(每实体每帧至多一块板),210/443 continue。
    *  边沿触发经 latch(原版 oldPosition 全格带判定同构:入带触发/离带复位) */
   private switchTilesScan(e: { x: number; y: number; w: number; h: number; id: number },
-                          objType: 2 | 3 | 4 | 5, latch: Set<string>, pressed?: Set<string>): void {
+                          objType: 1 | 2 | 3 | 4 | 5, latch: Set<string>, pressed?: Set<string>): void {
     const w = this.wiring;
     if (!w) return;
     const st = this.world.store;

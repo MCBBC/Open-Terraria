@@ -16,8 +16,15 @@ const out = await page.evaluate(async ([NID, ADD]) => {
   g.debugSpawnNpc(NID, 1, false);
   // 等真实渲染帧让 NPC_N 懒加载落地(首帧绘制尝试触发加载)
   await new Promise((res) => { let n = 0; const t = () => { if (++n >= 30) res(); else requestAnimationFrame(t); }; requestAnimationFrame(t); });
-  const npc48 = g.renderer.atlas.vnpc(NID, 0);
-  if (!npc48) return { err: 'atlas vnpc(${NID}) null(懒加载未落地)' };
+  let npc48 = null;
+  for (let i = 0; i < 120 && !npc48; i++) {
+    await new Promise((res) => requestAnimationFrame(() => res()));
+    npc48 = g.renderer.atlas.vnpc(NID, 0);
+  }
+  if (!npc48) {
+    const h = g.entities.enemies.find((n) => !n.dead && n.vanillaId === NID);
+    return { err: `atlas vnpc(${NID}) null(懒加载未落地)`, entityAlive: !!h, imgFailed: g.renderer.atlas.vImageFailed?.(`vanilla/NPC_${NID}.png`) ?? 'n/a' };
+  }
   const npc48Img = npc48.img;
   const samples = [];
   const proto = CanvasRenderingContext2D.prototype;
@@ -31,7 +38,7 @@ const out = await page.evaluate(async ([NID, ADD]) => {
           const [bx, by] = g.camera.worldToScreen(h.cx, h.cy);
           samples.push({
             dx: rest[4], dy: rest[5], dw: rest[6], dh: rest[7],   // 9-arg: [sx,sy,sw,sh,dx,dy,dw,dh]
-            scaleY: m.d, originX: m.e, originY: m.f,
+            scaleY: m.d, originX: m.e, originY: m.f, frameH: npc48.sh,
             boxCy: by, zoom: g.camera.zoom,
           });
         }
@@ -60,7 +67,8 @@ for (const [i, d] of out.samples.entries()) {
   const okCenter = Math.abs(frameCenterY - expectCenterY) < 2;
   console.log(`#${i} 帧中心 ${frameCenterY.toFixed(1)} 期望 ${expectCenterY.toFixed(1)} (add=${ADD})`);
   if (i === 0) {
-    check('帧高=86×zoom(6 帧切片正确)', Math.abs(d.dh * d.scaleY - 86 * d.zoom) < 1.5, `实测 ${(d.dh * d.scaleY).toFixed(1)}`);
+    const expectFH = d.frameH * d.zoom;
+    check(`帧高=${d.frameH}×zoom(切片正确)`, Math.abs(d.dh * d.scaleY - expectFH) < 1.5, `实测 ${(d.dh * d.scaleY).toFixed(1)} 期望 ${expectFH.toFixed(1)}`);
   }
   check(`#${i} 帧中心=盒中心+32px(NPCAddHeight :22263)`, okCenter);
   }

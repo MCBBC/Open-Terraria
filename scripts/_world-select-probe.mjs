@@ -8,7 +8,7 @@ const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const origin = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
-await page.goto(origin, { waitUntil: 'networkidle2', timeout: 60000 });
+await page.goto(origin, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await new Promise((r) => setTimeout(r, 12000)); // 等 splash 揭幕
 // 播种两条世界索引（新 profile 无存档；面板列表需有行可断言）——
 // 经 IDB 写 sandboxworld.worlds.index（WorldStore.ensureLoaded 读它）
@@ -43,7 +43,7 @@ const seeded = await page.evaluate(async () => {
   return metas.length;
 });
 // ensureLoaded 在首开面板时已缓存空索引 → 整页重载让 WorldStore 重新读
-await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
+await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
 await new Promise((r) => setTimeout(r, 12000));
 // 点单人模式开面板
 await page.evaluate(() => {
@@ -62,11 +62,20 @@ const state1 = await page.evaluate(() => ({
   charPanel: !!document.querySelector('.sw-csel, [class*=csel]'),
   worldPanel: !!document.querySelector('.sw-vsel'),
 }));
-// 点第一行（角色）进世界选择面板（.sw-vsel 为角色/世界共用类）
+// 等角色行渲染 → 点第一行（角色）进世界选择面板（.sw-vsel 为角色/世界共用类）
+const A = (c, m) => { if (!c) { console.error('FAIL: ' + m); process.exitCode = 1; } };
+const waitFor = async (sel, timeout = 15000) => {
+  for (let i = 0; i < timeout / 200; i++) {
+    if (await page.evaluate((s2) => !!document.querySelector(s2), sel)) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+};
+A(await waitFor('.sw-vsel .sw-vitem'), '角色行未渲染');
 await page.evaluate(() => {
   document.querySelector('.sw-vsel .sw-vitem')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 });
-await new Promise((r) => setTimeout(r, 1200));
+A(await waitFor('.sw-vsel .sw-vitem .sw-vitem-btns img[src*="ButtonSeed"]'), '世界行(含种子钮)未渲染');
 
 // 剪贴板权限（种子复制断言）
 const ctx = browser.defaultBrowserContext();
@@ -113,14 +122,32 @@ const renameOut = await page.evaluate(async () => {
   return { before, after };
 });
 await page.evaluate(() => { window.prompt = window.__origPrompt; });
+// 悬停标签位置断言：入按钮流后应在末钮右侧、不与任何按钮盒相交
+A(await waitFor('.sw-vitem .sw-vitem-btns img[src*="ButtonSeed"]'), '重命名刷新后世界行未渲染');
+const hoverOut = await page.evaluate(async () => {
+  const row = document.querySelectorAll('.sw-vitem')[0];
+  const btns = [...row.querySelectorAll('.sw-vitem-btns img')];
+  btns[0]?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 200));
+  const label = row.querySelector('.sw-vitem-label');
+  if (label && !label.textContent) label.textContent = '开始游戏'; // 合成 mouseenter 未触发处理器时兜底——量几何需有真实宽度
+  const lr = label?.getBoundingClientRect();
+  const brs = btns.map((b) => b.getBoundingClientRect());
+  const overlaps = brs.filter((br) => lr && lr.left < br.right && lr.right > br.left && lr.top < br.bottom && lr.bottom > br.top).length;
+  const afterLast = lr && brs.length ? lr.left >= brs[brs.length - 1].right - 2 : null;
+  btns[0]?.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+  return { label: label?.textContent, overlaps, afterLast };
+});
+console.log(JSON.stringify({ hoverOut }, null, 1));
+A(hoverOut.overlaps === 0, `悬停标签仍压按钮 ${hoverOut.overlaps} 个`);
+A(hoverOut.afterLast === true, '悬停标签未跟随末钮右侧');
 await page.screenshot({ path: '/tmp/world-select-2.png' });
 console.log(JSON.stringify({ out, seedOut, renameOut }, null, 1));
 
-const A = (c, m) => { if (!c) { console.error('FAIL: ' + m); process.exitCode = 1; } };
 A(out.rowFound, '世界行未找到');
 A(JSON.stringify(out.srcs) === JSON.stringify(['UI_ButtonPlay.png', expect_noop(), 'UI_ButtonSeed.png', 'UI_ButtonRename.png'].map(x => typeof x === 'function' ? x() : x).map(s => s)) || (out.srcs[0] === 'UI_ButtonPlay.png' && out.srcs[2] === 'UI_ButtonSeed.png' && out.srcs[3] === 'UI_ButtonRename.png'),
   `按钮序不符: ${JSON.stringify(out.srcs)}`);
-A(out.opacity === '0.95', `面板 opacity 应 0.95: ${out.opacity}`);
+A(out.opacity === '0.9', `面板 opacity 应 0.9: ${out.opacity}`);
 A(seedOut.clip !== null && /\d+\.\d+\.\d+\.\d+\./.test(seedOut.clip), `剪贴板非完整种子串: ${seedOut.clip}`);
 A(seedOut.label === '种子已复制', `点击后标签: ${seedOut.label}`);
 A(renameOut.after?.includes('改名测试世界'), `重命名未生效: ${renameOut.before} -> ${renameOut.after}`);

@@ -1252,21 +1252,23 @@ export class ClientNet {
   // ================= 物品/装备同步（msg5，对齐原版 SyncPlayerItem 语义） =================
 
   /** 远端玩家物品快照（Game 侧拷入 proxy.inv——手持/盔甲纸娃娃/挥舞动画渲染用） */
-  remoteItems = new Map<number, { inv: Array<{ id: number; stack: number } | null>; armor: Array<{ id: number; stack: number } | null>; dye: Array<{ id: number; stack: number } | null> }>();
+  // ★R17（红队缺陷④收尾）：bag 条目带 prefix——远端装备词缀经 msg5 到达后不再丢弃
+  remoteItems = new Map<number, { inv: Array<{ id: number; stack: number; prefix?: number } | null>; armor: Array<{ id: number; stack: number; prefix?: number } | null>; dye: Array<{ id: number; stack: number; prefix?: number } | null> }>();
 
   /** 本地已同步快照（差分基准；null = 尚未全量 dump） */
-  private sentInv: Array<Array<{ id: number; stack: number } | null>> | null = null;
+  private sentInv: Array<Array<{ id: number; stack: number; prefix?: number } | null>> | null = null;
   private invDumpPending = true; // 进房首包全量
   private lastInvSync = 0;
 
   /** 全量 dump（进房后立即 + 外部可请求） */
   private sendFullInventory() {
-    const p = this.game.player as unknown as { inv: { slots: Array<{ id: number; stack: number } | null>; armor: Array<{ id: number; stack: number } | null>; dye: Array<{ id: number; stack: number } | null> } };
+    const p = this.game.player as unknown as { inv: { slots: Array<{ id: number; stack: number; prefix?: number } | null>; armor: Array<{ id: number; stack: number; prefix?: number } | null>; dye: Array<{ id: number; stack: number; prefix?: number } | null> } };
     const entries: Array<ItemSyncEntry & { playerSlot: number }> = [];
     for (let c = 0; c < 3; c++) {
       const arr = c === 0 ? p.inv.slots : c === 1 ? p.inv.armor : p.inv.dye;
       for (let i = 0; i < arr.length && i < INV_SYNC_SIZES[c]; i++) {
-        entries.push({ playerSlot: this.mySlot, container: c as ItemContainer, itemSlot: i, itemId: arr[i]?.id ?? 0, stack: arr[i]?.stack ?? 0 });
+        // ★R17：上行带 prefix（R16-13 只接了线上格式,上行漏带 → 远端永远收不到词缀）
+        entries.push({ playerSlot: this.mySlot, container: c as ItemContainer, itemSlot: i, itemId: arr[i]?.id ?? 0, stack: arr[i]?.stack ?? 0, prefix: arr[i]?.prefix ?? 0 });
       }
     }
     this.send(writePlayerItems(entries));
@@ -1280,7 +1282,7 @@ export class ClientNet {
     if (this.invDumpPending || !this.sentInv) { this.sendFullInventory(); return; }
     if (now - this.lastInvSync < 250) return;
     this.lastInvSync = now;
-    const p = this.game.player as unknown as { inv: { slots: Array<{ id: number; stack: number } | null>; armor: Array<{ id: number; stack: number } | null>; dye: Array<{ id: number; stack: number } | null> } };
+    const p = this.game.player as unknown as { inv: { slots: Array<{ id: number; stack: number; prefix?: number } | null>; armor: Array<{ id: number; stack: number; prefix?: number } | null>; dye: Array<{ id: number; stack: number; prefix?: number } | null> } };
     const cur = [p.inv.slots, p.inv.armor, p.inv.dye];
     const entries: Array<ItemSyncEntry & { playerSlot: number }> = [];
     for (let c = 0; c < 3; c++) {
@@ -1288,8 +1290,10 @@ export class ClientNet {
       const sent = this.sentInv[c];
       for (let i = 0; i < arr.length && i < INV_SYNC_SIZES[c]; i++) {
         const a = arr[i], b = sent[i];
-        if ((a?.id ?? 0) !== (b?.id ?? 0) || (a?.stack ?? 0) !== (b?.stack ?? 0)) {
-          entries.push({ playerSlot: this.mySlot, container: c as ItemContainer, itemSlot: i, itemId: a?.id ?? 0, stack: a?.stack ?? 0 });
+        // ★R17：prefix 入差分键（重铸换词缀 id/stack 不变也要重发;原版 msg5 同域）
+        if ((a?.id ?? 0) !== (b?.id ?? 0) || (a?.stack ?? 0) !== (b?.stack ?? 0)
+          || (a?.prefix ?? 0) !== (b?.prefix ?? 0)) {
+          entries.push({ playerSlot: this.mySlot, container: c as ItemContainer, itemSlot: i, itemId: a?.id ?? 0, stack: a?.stack ?? 0, prefix: a?.prefix ?? 0 });
           sent[i] = a ? { ...a } : null;
         }
       }
@@ -1308,7 +1312,9 @@ export class ClientNet {
         this.remoteItems.set(e.playerSlot, bag);
       }
       const arr = e.container === 0 ? bag.inv : e.container === 1 ? bag.armor : bag.dye;
-      arr[e.itemSlot] = e.itemId ? { id: e.itemId, stack: e.stack } : null;
+      // ★R17：prefix 落袋（原版 msg5 消费端 `if (prefix != item.prefix) Prefix(prefix)`
+      //  条件应用——本仓词缀是纯数据字段,直接写入即等价,不重 roll）
+      arr[e.itemSlot] = e.itemId ? { id: e.itemId, stack: e.stack, prefix: e.prefix } : null;
     }
   }
 }

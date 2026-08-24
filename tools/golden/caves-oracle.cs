@@ -6258,6 +6258,7 @@ do { dgShelf[1] = (int)r.Next(9, 13); } while (dgShelf[1] == dgShelf[0]);
 dgShelf[2] = (int)r.Next(9, 13);
 while (dgShelf[2] == dgShelf[0] || dgShelf[2] == dgShelf[1]) dgShelf[2] = (int)r.Next(9, 13);
 var dgLantern = new int[3];         // cs:255-266 灯笼样式
+int dgGothicCount = 0;              // ★GGGGGGGG：灯笼段进入计数（1457 Next(3) 掷次实测;随 DG-GOTHIC-DOOR 行打点）
 dgLantern[0] = (int)r.Next(7);
 do { dgLantern[1] = (int)r.Next(7); } while (dgLantern[1] == dgLantern[0]);
 dgLantern[2] = (int)r.Next(7);
@@ -9983,7 +9984,6 @@ void DgBookshelves()
 void DgLights()
 {
     bool lgTr = Environment.GetEnvironmentVariable("DG_LIGHTS_TRACE") != null;
-    int dgGothicCount = 0;   // ★GGGGGGGG：灯笼段进入计数（DG_GOTHIC_COUNT 打点用）
     if (lgTr)
     {
         Console.WriteLine($"DG LG n5={(int)(28f * (W / 4200f) * 1.0)} bnd={dgBounds.L},{dgBounds.T},{dgBounds.R},{dgBounds.B} ent={(dgEntExists ? 1 : 0)} eb={dgEntBounds.L},{dgEntBounds.T},{dgEntBounds.R},{dgEntBounds.B}");
@@ -10048,7 +10048,7 @@ void DgLights()
                 //   → GOTHIC 灯笼 53 覆写三档查表值（cs:128-132 在三档之后）。曾缺=每盏灯笼
                 //   少 1 颗主流掷，dungeonI 起全链流位移（caves-checkpoint dungeonI 首差根因）。
                 int dgGothicRoll = (int)r.Next(3);
-                if (Environment.GetEnvironmentVariable("DG_GOTHIC_COUNT") != null) dgGothicCount++;
+                dgGothicCount++;   // ★GGGGGGGG：灯笼段进入计数（1457 Next(3) 掷次实测）
                 // 灯笼（Place1x2Top：上方实心且下方净空 → 42 两格）——实心=genSolidType
                 // 语义（裂纹砖 481-483 非实心，DC:344；JS :253 消费端同源）
                 // ★MMMM 批（NNNN 镜像）：nactive()（active&&!inActive，:46705）——致动柱

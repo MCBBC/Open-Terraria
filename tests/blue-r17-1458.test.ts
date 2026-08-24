@@ -5,6 +5,7 @@
 //   （任意玩家弹命中,无弹型门;300t=5s）。本文件跨族断言：近战弹（回旋镖 6,表外型号
 //   =唯一可见效应即 398）+ 鞭（841,同表外）两族 × 有/无指环两态。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
@@ -12,6 +13,7 @@ import { ITEM_BY_KEY } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { Boomerang } from '../src/entities/WeaponProj';
 import { WhipProj } from '../src/entities/WhipProj';
+import { writePlayerItems, readPlayerItems, ItemContainer, NetReader } from '../src/net/protocol';
 import type { GameHooks } from '../src/entities/types';
 
 const iid = (vid: number): number => {
@@ -88,5 +90,30 @@ describe('R17 缺陷③：催化指环 6185 → 398 AcceleratePoisons 跨族（S
     };
     expect(run(true)).toBe(5);
     expect(run(false)).toBeUndefined();
+  });
+});
+
+// ================= R17 缺陷④：R16-13 prefix 消费端（原版 MessageBuffer.cs:1478/1519
+//  `if (prefix != item.prefix) Prefix(prefix)` 条件应用——R16-13 只接了线上格式,
+//  上行漏带 + 下行丢弃 → 远端装备/箱子词缀归零） =================
+describe('R17 缺陷④：msg5/msg32 prefix 全链（上行带/下行存）', () => {
+  it('线上格式：writePlayerItems→readPlayerItems 往返保 prefix（R16-13 线格式回归锁）', () => {
+    const frame = writePlayerItems([
+      { playerSlot: 1, container: ItemContainer.Armor, itemSlot: 3, itemId: 6185, stack: 1, prefix: 66 },
+      { playerSlot: 1, container: ItemContainer.Slots, itemSlot: 0, itemId: 0, stack: 0, prefix: 0 },
+    ]);
+    const back = readPlayerItems(new NetReader(frame.subarray(3)));   // 剥 [u16 len][u8 id] 头
+    expect(back[0]).toMatchObject({ itemId: 6185, stack: 1, prefix: 66 });
+    expect(back[1]).toMatchObject({ itemId: 0, stack: 0, prefix: 0 });
+  });
+
+  it('消费端接线：applyRemoteItems 落袋带 prefix / 上行两路（全量+差分）带 prefix / 差分键含 prefix', () => {
+    const src = readFileSync(new URL('../src/net/ClientNet.ts', import.meta.url), 'utf8');
+    expect(src).toMatch(/arr\[e\.itemSlot\] = e\.itemId \? \{ id: e\.itemId, stack: e\.stack, prefix: e\.prefix \} : null/);
+    expect(src).toMatch(/prefix: arr\[i\]\?\.prefix \?\? 0/);                       // sendFullInventory
+    expect(src).toMatch(/\(a\?\.prefix \?\? 0\) !== \(b\?\.prefix \?\? 0\)/);        // syncInventory 差分键
+    const game = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
+    expect(game).toMatch(/netApplyChest\(chestIdx: number, x: number, y: number, items: Array<\{ id: number; stack: number; prefix\?: number \} \| null>\)/);
+    expect(game).toMatch(/chest\.items\[i\] = items\[i\] \? \{ \.\.\.items\[i\]! \} : null/);  // spread 透传
   });
 });

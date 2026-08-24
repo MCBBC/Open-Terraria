@@ -1,0 +1,35 @@
+{
+ "at": "2026-08-24T06:43:56.145Z",
+ "release": true,
+ "totalJsMb": 14.6,
+ "chunks": [
+  {
+   "file": "assets/index-CI_b2Vw6.js",
+   "kb": 8908.4
+  },
+  {
+   "file": "assets/worldGen.worker-CTfiVv33.js",
+   "kb": 4099.3
+  },
+  {
+   "file": "assets/save.worker-L8rNaMcw.js",
+   "kb": 1904.9
+  },
+  {
+   "file": "sw.js",
+   "kb": 10.2
+  },
+  {
+   "file": "assets/asset-warm.worker-CazYtB30.js",
+   "kb": 9.4
+  },
+  {
+   "file": "assets/RemasterPanel-BU37PK1f.js",
+   "kb": 8.3
+  },
+  {
+   "file": "assets/HousingPanel-ezJlyJl2.js",
+   "kb": 6.8
+  }
+ ]
+}

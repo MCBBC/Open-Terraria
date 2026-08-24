@@ -188,7 +188,10 @@ export class WorldSelectPanel {
       label.className = 'sw-vitem-label';
       const delLabel = document.createElement('div');
       delLabel.className = 'sw-vitem-del-label';
-      el.append(icon, info, btns, del, label, delLabel);
+      // 悬停标签入按钮流（跟随末钮）——原钉死 left:182px 是旧 3 钮布局，4 钮后
+      // 压住按钮（2026-08-24 用户报）；按钮数角色/世界行不同，钉死必错位
+      btns.append(label);
+      el.append(icon, info, btns, del, delLabel);
       // 整行点击/双击 = 进入（图标钮已 stopPropagation）
       const enter = () => this.close(() => this.flow.onPlay(m));
       el.addEventListener('click', enter);

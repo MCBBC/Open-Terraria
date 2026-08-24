@@ -2688,7 +2688,17 @@ export class Renderer {
     //  :63140)先于地下分层背景(DrawBackground :63157)——两 pass 换序对齐。
     if (this.scene) {
       const mainCtx2 = this.ctx;   // 世界层 ctx(或主画布)
+      // ★drawUnderground 的 destX/destY 全是【屏幕空间】数学(bgTopY-screenY 系,
+      //   CanvasBgBlit 不补偿相机)——本调用在世界变换内,须逆变换回屏幕空间,
+      //   否则带层画到世界 y≈0-862(世界顶部,屏外 3600px)=地下远景整体消失
+      //   (2026-08-20 搬入世界层吃光时坐标未换算的回归,用户实报"夜空光照改造
+      //   后地底远景全没了";逆变换后仍在世界层画布内=光照乘法照常吃)
+      mainCtx2.save();
+      mainCtx2.translate(camRX, camRY);
+      mainCtx2.scale(1 / z, 1 / z);
+      mainCtx2.translate(-Math.round(viewW / 2), -Math.round(viewH / 2));
       this.biomeBg.draw(mainCtx2, world, this.scene, cam, viewW, viewH, [1, 1, 1], 0, 'underground');
+      mainCtx2.restore();
     }
 
     // 2b/2c. chunk 拼装（背景墙层 + 前景 tile 层共用）
@@ -4202,6 +4212,16 @@ export class Renderer {
     245, 246, 247, 248, 249, 564, 565, 551, 576, 577, 87, 510, 454, 621, 439, 370,
   ]);
   /** NPCAddHeight（Main.cs:21840-22005）：血条在脚底 +10 之上的额外下沉（视觉修正） */
+  /** DrawNPC switch 内的绘制侧 num47 覆写（Main.cs:23445-23477,覆盖 NPCAddHeight 值;
+   *  血条直接调 NPCAddHeight 不经过此段 → 只入绘制路径不入 HB_ADD_H） */
+  private static readonly DRAW_NUM47_OVERRIDE: Record<number, number> = {
+    555: -5, 556: -5, 557: -5,
+    561: -8, 562: -8, 563: -8,
+    568: -3, 569: -3,
+    570: -2, 571: -2,
+    572: -4, 573: -4,
+  };
+
   private static readonly HB_ADD_H: Record<number, number> = {
     125: 30, 126: 30, 54: 2, 205: 8, 182: 24, 178: 2, 6: 26, 173: 26, 94: 14,
     7: 13, 8: 13, 9: 13, 98: 13, 99: 13, 100: 13, 95: 13, 96: 13, 97: 13,
@@ -5078,9 +5098,38 @@ export class Renderer {
         // 的飞行族整体上飘（用户实报"鸟妖碰撞盒不对":体底悬盒顶,原版体底=盒底+29、
         // 帧中心=盒中心+32）。旋转枢轴随之从盒底修正为帧中心（XNA origin=halfSize
         // 绕帧中心转,546 怒滚虫的手工枢轴补偿随之删）
-        // num46（:23227-23235）：108/124/625=+2、357=localAI[0]（357 走蠕虫链专用,略）
-        const addY = (e.vanillaId === 108 || e.vanillaId === 124 || e.vanillaId === 625 ? 2 : 0)
-          + (Renderer.HB_ADD_H[e.vanillaId ?? -1] ?? 0);
+        // num46 链全量（:23226-23277）+ num47 覆写尾（:23278-23341）——运行时档用
+        // Enemy.wet/ai2/ai3（原版 wet=中心盒液体命中、ai[] 同源）。halfSize 覆写组
+        // （4/125/126/262/264/63/64/103/69）在锚点公式中 origin 位移与 position 位移
+        // 恒相消（frame center = Center+(0,off) 与 halfSize 无关）——只改旋转枢轴,
+        // 4/125/126 属 EoC/双子校准偏差域不在此接。num45（694 X 分量）赋值后无消费=死码
+        const idA = e.vanillaId ?? -1;
+        let addY = (idA === 108 || idA === 124 || idA === 625) ? 2
+          : idA === 467 ? 7
+          : idA === 537 ? 2
+          : idA === 490 ? 4
+          : idA === 484 ? 2
+          : idA === 483 ? 14
+          : (idA === 478 || idA === 606 || idA === 612 || idA === 613) ? -2
+          : (idA === 469 && e.ai2 === 1) ? 14
+          : idA === 692 ? (e.wet ? 10 : 6)
+          : (idA === 626 || idA === 627) ? (e.wet ? -2 : 2)
+          : idA === 688 ? 10
+          : 0;
+        if (idA === 477) addY = 22;                       // num47= 覆写（非 +=,:23278）
+        else if (idA === 262) addY += 26;                 // switch 尾 += 档
+        else if (idA === 264) addY += 2;
+        else if (idA === 268) addY += 16;
+        else if (idA === 288) addY += 6;
+        else if (idA === 694) {                           // ai3==4 按帧渐隐（:23336-23343,帧距 40）
+          if (e.ai3 === 3) addY += 16;
+          else if (e.ai3 === 4) addY += Math.trunc(16 * Math.max(0, Math.min(1, 1 - (frameIdx * r.sh) / 40 / 17)));
+          else addY += -2;
+        }
+        addY += Renderer.HB_ADD_H[idA] ?? 0;              // NPCAddHeight num47（:22208-22394）
+        // DrawNPC switch 内的【绘制侧】num47 覆写（:23445-23477）——血条不走此段,
+        // 故不入 HB_ADD_H（覆盖语义,非累加）
+        addY = Renderer.DRAW_NUM47_OVERRIDE[idA] ?? addY;
         // 416 日耀掠兽骑手（Main.cs:24508-24515 case 416 独占）：绘制位置吸附坐骑
         // 415 的 Bottom（AI 锚 Center+(-spriteDir*10,-30) 只喂碰撞盒——骑手视觉上
         // 双脚踩在掠兽脚平面）。其余 aiStyle 75 骑手（390）原版无此绘制覆写，仍用 AI 位
@@ -5342,7 +5391,10 @@ export class Renderer {
           if (crown) {
             const frameIdx2 = Math.round(r.sy / r.sh);
             const num223 = [2, -6, 2, 10, 2, 0][frameIdx2] ?? 0;
-            ctx.drawImage(crown.img, -crown.sw / 2, -e.h / 2 - (70 - num223) * scale - crown.sh / 2, crown.sw, crown.sh);
+            // 原版锚 = KS Center − (70−num307)×scale（:26476-26478,origin=冠图中心,
+            // scale=1f）——中心锚(2026-08-24)后原点即盒中心,曾按底锚写的 −e.h/2
+            // 补偿已双重偏移,删
+            ctx.drawImage(crown.img, -crown.sw / 2, -(70 - num223) * scale - crown.sh / 2, crown.sw, crown.sh);
           }
         }
         // NPC GlowMask 发光叠画（Main.cs DrawNPC 内硬编码 switch，见 drawNpcGlow 表）
@@ -5901,14 +5953,13 @@ export class Renderer {
     const tex = this.atlas?.vmisc('vanilla/Extra_76.png');   // 懒加载（首帧 null 次帧生效）
     if (!tex) return;
     const ctx = this.ctx;
-    const pc = 4 - (r.sh * scale) / 2;
     const theta = Math.max(-Math.PI / 8, Math.min(Math.PI / 8, e.vx * 0.1));   // :26158
     ctx.save();
     ctx.scale(1 / scale, 1 / scale);
     ctx.scale(mirrored ? -1 : 1, 1);
-    ctx.translate(0, pc);
+    // 中心锚(2026-08-24)后原点=帧中心,曾按底锚写的枢轴平移 pc=4−sh·scale/2 已双重
+    // 补偿（同主 546 旋转支的删除）,直转
     ctx.rotate(theta - e.visAngle);
-    ctx.translate(0, -pc);
     ctx.scale(scale, scale);
     ctx.scale(mirrored ? -1 : 1, 1);
     ctx.globalCompositeOperation = 'destination-out';
@@ -5992,7 +6043,9 @@ export class Renderer {
       if (prm) {
         const cfg = Renderer.NPC_GLOW_ORBIT[e.vanillaId ?? -1]!;
         const dyo = (cfg.dy ?? 0) / scale;                     // num47（568/569=-3 :25898）
-        const ocy = ((Renderer.glowFlying(e) ? 0 : -e.h / 2)) / scale + dyo;
+        // 中心锚(2026-08-24)后本地原点恒=盒心,曾按底锚写的 glowFlying?0:-e.h/2 换算
+        // 已双重偏移（568/569 noGravity=None 走 -e.h/2 支=轨道整体高半盒）,删
+        const ocy = dyo;
         const ox = -r.sw / 2, oy = ocy - r.sh / 2;             // 帧左上（盒心 − 半帧）
         const base = (127 - alphaRaw) / 255;                   // Color(127-α,…,0) 基底
         const t = performance.now() / 1000;
@@ -7628,7 +7681,7 @@ export class Renderer {
     const prm = Renderer.npcWitherBirthParams(witherBeastLocal(e)[1]);
     if (!prm) return;
     const mist = this.tintedSprite(`npc${e.vanillaId}:birth`, r, [127, 0, 255]);
-    const cy = -e.h / 2 / scale - 3 / scale;   // 盒心（地面型原点在盒底）+ num47(-3)
+    const cy = -3 / scale;   // num47=-3（DrawNPC switch :23474-23476 绘制侧覆写）;中心锚后原点即盒心
     const prevOp = ctx.globalCompositeOperation;
     const prevA = ctx.globalAlpha;
     ctx.globalCompositeOperation = 'lighter';

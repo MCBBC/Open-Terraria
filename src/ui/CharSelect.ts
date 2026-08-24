@@ -19,7 +19,7 @@ export interface CharSelectFlow {
 const CSS = `
 .sw-vsel {
   /* 95% 微半透(2026-08-24 用户要求"只要一点点")——世界/角色选择面板同族 */
-  opacity: 0.95;
+  opacity: 0.9;
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: min(80%, 650px); max-height: 86vh; z-index: 20;
   display: flex; flex-direction: column;
@@ -64,8 +64,10 @@ const CSS = `
 }
 .sw-vitem-btns img:hover, .sw-vitem-del img:hover { opacity: 1; transform: scale(1.08); }
 .sw-vitem-del { position: absolute; right: 8px; bottom: 4px; }
-.sw-vitem-label { position: absolute; left: 182px; bottom: 7px; font-size: 13px;
+.sw-vitem-label { font-size: 13px;
   color: #ffe; text-shadow: 1px 1px 0 #000; pointer-events: none; }
+/* 流内态（label 已 append 进 .sw-vitem-btns）：跟随末钮右缘 */
+.sw-vitem-btns .sw-vitem-label { align-self: center; margin-left: 6px; white-space: nowrap; }
 .sw-vitem-del-label { position: absolute; right: 38px; bottom: 7px; font-size: 13px;
   color: #ffe; text-shadow: 1px 1px 0 #000; pointer-events: none; }
 .sw-vsel-footer { display: flex; gap: 10px; margin-top: 14px; }
@@ -208,7 +210,8 @@ export class CharSelectPanel {
       label.className = 'sw-vitem-label';
       const delLabel = document.createElement('div');
       delLabel.className = 'sw-vitem-del-label';
-      el.append(doll, info, btns, del, label, delLabel);
+      btns.append(label); // 同 WorldSelect：标签入按钮流（见彼处注）
+      el.append(doll, info, btns, del, delLabel);
       // 整行点击/双击 = 进入（图标钮已 stopPropagation；硬核消亡禁入）
       const enter = () => {
         if (dead) return;

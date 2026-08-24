@@ -7,6 +7,7 @@
     "dev": "vite",
     "l10n": "node scripts/build-l10n.mjs",
     "build": "node scripts/build-l10n.mjs && node scripts/pack-assets.mjs && tsc && vite build && node scripts/prune-dist.mjs",
+    "build:release": "npm run test:audit && node scripts/build-l10n.mjs && node scripts/pack-assets.mjs && vite build && RELEASE=1 node scripts/prune-dist.mjs && node --max-old-space-size=6144 tools/obfuscate-dist.mjs && RELEASE=1 node tools/audit-dist.mjs",
     "preview": "vite preview",
     "test": "vitest run",
     "start": "vite build && vite preview",
@@ -20,11 +21,12 @@
     "play2": "node scripts/play.mjs --isolate"
   },
   "dependencies": {
-    "simplex-noise": "^4.0.3",
-    "fflate": "^0.8.3"
+    "fflate": "^0.8.3",
+    "simplex-noise": "^4.0.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "javascript-obfuscator": "^5.6.0",
     "pngjs": "^7.0.0",
     "typescript": "^5.6.0",
     "vite": "^5.4.0",

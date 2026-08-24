@@ -439,4 +439,62 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     if (dx === 0 && dy === 0) break;
   }
   slopeCollide(b, world);
+  unembedPass(b, world);
+}
+
+/** 嵌入自救 pass(2026-08-24 僵尸卡地形终案):盒【中心格】为实心(非坡/半砖/平台)
+ *  = 真嵌入(正常站立/贴墙时中心必在空中)——坡面贴合/StepUp/生成期残留在极端
+ *  地形(坡格上压实心盖等)下会把实体楔进实心,此后 X/Y 碰撞互相锁死(移动后仍
+ *  与实心相交=恒拦),AI 跳跃(vy=-7)在实心顶盖下无效 → 永久卡死(用户实报:
+ *  火把僵尸半嵌土丘,vy=-7 反复跳不出)。
+ *  脱出:向上找最近连续净空(≤3 格)直接上移(重力场景天然出口);上方封死 →
+ *  测左右 2 格净空宽的一侧平移。每 tick 至多一次,脱出后交还常规碰撞。 */
+function unembedPass(b: Body, world: World): void {
+  const st = world.store;
+  const cx = Math.floor((b.x + b.w / 2) / TILE);
+  const cy = Math.floor((b.y + b.h / 2) / TILE);
+  if (!st.inBounds(cx, cy)) return;
+  const ci = st.idx(cx, cy);
+  if (!st.isSolid(cx, cy) || st.slope[ci] > 0 || st.half[ci] || st.isPlatform(cx, cy)) return;
+  // ① 向上:头顶连续净空(≤3 格)则上移到净空区底部
+  const top = Math.ceil(b.h / TILE) + 1;
+  let clear = 0;
+  for (let k = 1; k <= 3; k++) {
+    const ty = cy - k;
+    if (!st.inBounds(cx, ty) || st.isSolid(cx, ty)) break;
+    clear = k;
+  }
+  if (clear > 0) {
+    const lift = Math.min(clear * TILE, (b.y + b.h / 2) - cy * TILE + TILE * (clear - 1) + 1);
+    const ny = b.y - Math.max(2, lift);
+    // 目标位中心格必须非实心
+    const ncy = Math.floor((ny + b.h / 2) / TILE);
+    const ni = st.inBounds(cx, ncy) ? st.idx(cx, ncy) : -1;
+    if (ni >= 0 && (!st.isSolid(cx, ncy) || st.slope[ni] > 0 || st.half[ni])) {
+      b.y = ny;
+      if (b.vy > 0) b.vy = 0;
+      return;
+    }
+  }
+  // ② 水平:左右各探 2 格,取连续净空更宽的一侧平移
+  const sideClear = (dir: number): number => {
+    let n = 0;
+    for (let k = 1; k <= 2; k++) {
+      const tx = cx + dir * k;
+      if (!st.inBounds(tx, cy) || st.isSolid(tx, cy)) break;
+      n = k;
+    }
+    return n;
+  };
+  const l = sideClear(-1), r = sideClear(1);
+  if (l === 0 && r === 0) return;
+  const dir = r >= l ? 1 : -1;
+  const push = Math.max(l, r) * TILE;
+  const nx = b.x + dir * push;
+  const ncx = Math.floor((nx + b.w / 2) / TILE);
+  const ni = st.inBounds(ncx, cy) ? st.idx(ncx, cy) : -1;
+  if (ni >= 0 && (!st.isSolid(ncx, cy) || st.slope[ni] > 0 || st.half[ni])) {
+    b.x = nx;
+    b.vx = 0;
+  }
 }
