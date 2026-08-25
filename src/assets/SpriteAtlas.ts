@@ -808,6 +808,8 @@ export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | nul
         }
         return atlas.vframeAt(td.vanilla.sheet, 0, 0) ?? atlas.vframe(td.vanilla.sheet, 0, 0);
       }
+      // 无 tile def（阿比盖尔花 517 等召唤植物件）:首格直取(1×1 假设)
+      return atlas.vframeAt(sheet, 0, 0);
     }
   }
   return null;

@@ -141,7 +141,7 @@ import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, r
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
-import { CaptureInterface, CaptureSettings } from './CaptureMode';
+import { CaptureInterface } from './CaptureMode';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { GLWorldLight } from './GLWorldLight';
@@ -3869,8 +3869,8 @@ export class Renderer {
     //    RockLayer/BloodMoon 的水色走深度/昼夜派生链,合成 scene 表达不了——
     //    捕获重渲通道直接取所选群系水色（原版 DrawCapture 直改 Main.waterStyle）
     if (this._capturePass) {
-      const cb = this.captureMode.settings?.biome;
-      if (cb && CaptureSettings.biomeChoiceIndex >= 0) {
+      const cb = this.captureMode.activeBiome();
+      if (cb) {
         this.waterStyle = cb.waterStyle;
         this.wsDelay = 0;
         return;
@@ -5303,7 +5303,7 @@ export class Renderer {
         else if (stR === 115 && idR === 603) ctx.rotate(e.visAngle);  // 海鸥2(FindFrame :74550+ 空中 vx×0.1/水面与静止 0)
         else if (stR === 7 && (idR === 230 || idR === 593)) ctx.rotate(e.visAngle);  // 走路金鱼/金色走路金鱼(FindFrame :76585+ 高速下落 −=vy×0.01 抬头、落地归零)
         else if (stR === 3 && (idR === 461 || idR === 469)) ctx.rotate(e.visAngle);  // 深渊来客(空中 (rot×4+瞄准)/5 平滑+翻面取反 :76025+)/被附身者(冲刺态 atan2+π/2 :76365+)
-        else if (stR === 2) ctx.rotate(e.visAngle);   // AI_002 眼族:全族 tilt=vy×0.1×direction(cs:52906);游荡眼/火把神由 FindFrame 覆写为速度角(:74860/:75628,左行 +π)
+        else if (stR === 2 && idR === 133) ctx.rotate(e.visAngle);   // 游荡眼(FindFrame :74760+ 随速度角、左行 +π;其余 aiStyle2 恶魔眼族不旋转)
         else if (e.vanilla?.aiStyle === 13) ctx.rotate(e.visAngle); // AI_013 植物族:头随朝玩家伸展方向旋转(cs:22778-22794);spriteDirection 仍翻转→不进 rotationDriven
         else if (stR === 93) ctx.rotate(e.visAngle);   // AI_093 荷兰飞盗船:rotation=vx*0.025(cs:41011);spriteDirection=-sign(vx) 仍镜像
         else if (stR === 102 || stR === 109) ctx.rotate(e.visAngle); // AI_102/109 沙尘精/黑暗魔法师:rotation=vx*0.04(cs:42249/:66415)
@@ -5362,16 +5362,8 @@ export class Renderer {
         // 蜗牛 aiStyle67 spriteDirection 走象限表(上方旋转分支自带局部翻面)——
         // 通用 facing 镜像禁用,否则与象限翻面叠加成恒翻
         const snailMirror = stR === 67;
-        // AI_002 飘浮眼族：AI_002 全段无 spriteDirection 写点→恒默认 -1 不镜像
-        // （恶魔眼 5/猪龙 170-180 等）；例外 133/664 FindFrame 按速度写 ±1
-        // （:74860/:75628）——曾按 AI 朝向镜像=俯冲过顶后速度反向仍朝玩家,
-        // 虹膜拖在身后（"眼球在屁股后面走",2026-08-25 用户实报）
-        const eyeFam = stR === 2;
-        const eyeVelMirror = eyeFam && (e.vanillaId === 133 || e.vanillaId === 664) && e.vx > 0;
-        if (!rotationDriven && !owlMirror && !sdirNeg546 && !wormMirror && !snailMirror
-          && !eyeFam && e.facing > 0) ctx.scale(-1, 1);
+        if (!rotationDriven && !owlMirror && !sdirNeg546 && !wormMirror && !snailMirror && e.facing > 0) ctx.scale(-1, 1);
         if (!rotationDriven && (owlMirror || sdirNeg546) && e.facing < 0) ctx.scale(-1, 1);
-        if (eyeVelMirror) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐

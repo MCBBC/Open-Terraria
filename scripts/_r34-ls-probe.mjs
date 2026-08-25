@@ -1,0 +1,244 @@
+// R34 插队:闪电之击 6155→天雷 1117 实机对照探针（用户实报"使用效果不对"）。
+// 私有实例 SW_PORT=5231。六项:
+//   (a) 悬浮期光球可见性(canvas 像素差分)
+//   (b) bolt 天降形态(折线首点在末点上方≥300px)
+//   (c) 沿线伤害结算 tick(假人受伤 vs 出手,期望 ~30t Kill 帧)
+//   (d) 音效序列(cast=Item43/windup 雷声/kill bolt 音——spy 三通道)
+//   (e) 节奏(autoReuse 持按,出手间隔≈55t)
+//   (f) 落点=鼠标世界坐标(<32px)
+import puppeteer from 'puppeteer-core';
+
+const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5231';
+const browser = await puppeteer.launch({
+  protocolTimeout: 500000,
+  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  headless: true, args: ['--no-sandbox'],
+  defaultViewport: { width: 988, height: 862, deviceScaleFactor: 1 },
+});
+const page = await browser.newPage();
+const errs = [];
+page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
+await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' });
+await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
+await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
+await new Promise((r) => setTimeout(r, 800));
+await page.click('[data-act=sp]');
+await page.waitForSelector('.sw-vsel', { timeout: 10000 });
+await new Promise((r) => setTimeout(r, 600));
+if (!(await page.$('.sw-vsel .sw-vitem'))) {
+  await page.click('.sw-vsel [data-act=new]');
+  await page.waitForSelector('.sw-char-row input[type=text]', { timeout: 10000 });
+  await new Promise((r) => setTimeout(r, 400));
+  await page.click('.sw-char-row input[type=text]');
+  await page.keyboard.type('LS');
+  await new Promise((r) => setTimeout(r, 200));
+  await page.click('[data-act=create]');
+  await page.waitForSelector('.sw-vsel .sw-vitem', { timeout: 10000 });
+  await new Promise((r) => setTimeout(r, 500));
+}
+await page.click('.sw-vsel .sw-vitem .sw-vitem-btns img');
+await page.waitForFunction(() => (document.querySelector('.sw-vsel-title')?.textContent ?? '').includes('世界'), { timeout: 10000 });
+await new Promise((r) => setTimeout(r, 600));
+if (!(await page.$('.sw-vsel .sw-vitem'))) {
+  await page.click('.sw-vsel [data-act=new]');
+  await page.waitForSelector('[data-f=seed]', { timeout: 10000 });
+  await new Promise((r) => setTimeout(r, 400));
+  await page.click('[data-f=seed]');
+  await page.keyboard.type('12345');
+  await new Promise((r) => setTimeout(r, 200));
+  await page.evaluate(() => {
+    const opts = [...document.querySelectorAll('[data-g=size] .sw-wc-opt')];
+    opts[0]?.click();
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  await page.click('[data-act=create]');
+} else {
+  await page.click('.sw-vsel .sw-vitem .sw-vitem-btns img');
+}
+await page.waitForFunction(() => window.__swGame?.world?.store?.w > 0 && window.__swGame?.player, { timeout: 300000, polling: 1000 });
+await new Promise((r) => setTimeout(r, 2500));
+
+const out = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const TILE = 16;
+  const items = await import('/src/data/items.ts');
+  const R = { fatal: null, checks: [], dbg: {} };
+  const ck = (name, ok, detail) => R.checks.push({ name, ok, detail });
+
+  if (g.world.journeyPowers) g.world.journeyPowers.godmode = true;
+  g.world.clock.timeOfDay = 0.5; g.world.clock.dayTime = true;
+
+  const p = g.player;
+  const sy = g.world.groundLevel;
+  const px = Math.floor(p.x / TILE);
+  p.x = px * TILE; p.y = sy * TILE - p.h; p.vx = 0; p.vy = 0;
+
+  const giveItem = (vid, slot) => {
+    const key = items.VANILLA_ITEM_KEY_BY_ID[vid];
+    const id = items.ITEM_BY_KEY[key] ?? items.ITEM_BY_KEY[`vi_${vid}_`];
+    p.inv.slots[slot] = { id, stack: 1 };
+    return id;
+  };
+  const settle = async (n) => {
+    for (let i = 0; i < n; i++) g.fixedUpdate(1 / 60);
+    for (const q of g.entities.projectiles) q.dead = true;
+    for (const q of [...g.entities.enemies]) q.dead = true;
+    g.entities.enemies.length = 0;
+    p.useTime = 0; p.itemTime = 0;
+    await new Promise((r) => requestAnimationFrame(r));
+  };
+  const ticks = async (n) => {
+    for (let i = 0; i < n; i++) g.fixedUpdate(1 / 60);
+    await new Promise((r) => requestAnimationFrame(r));
+  };
+  const aimAt = (wx, wy) => {
+    const [sx, syp] = g.camera.worldToScreen(wx, wy);
+    g.input.mouseX = sx / (g.renderer.dpr || 1);
+    g.input.mouseY = syp / (g.renderer.dpr || 1);
+  };
+  const release = () => { g.input.mouseDown = false; g.input.mouseHeld = false; };
+
+  // ---- 音效 spy(三通道全钩,R32 教训:playSfxFile 单数通道曾漏采) ----
+  const sfxLog = [];
+  const wrap = (obj, key) => {
+    if (!obj || typeof obj[key] !== 'function') return;
+    const orig = obj[key].bind(obj);
+    obj[key] = (...a) => { sfxLog.push({ ch: key, name: String(a[0]).slice(0, 40) }); return orig(...a); };
+  };
+  wrap(g, 'playSfx'); wrap(g, 'playSfxFiles'); wrap(g, 'playSfxFile'); wrap(g, 'playSfxAt'); wrap(g, 'playSfxWav');
+
+  // ---- 场景:玩家平地,目标点 = 右方 240px 空中(无墙) ----
+  giveItem(6155, 2); p.inv.selected = 2;
+  await settle(6);
+  p.statManaMax2 = 400; p.manaMax = 400; p.mana = 400;
+
+  // 假人(盒 ×6 悬空防窒息,R33/R34 装置先例):钉在目标点上
+  const { Enemy } = await import('/src/entities/Enemy.ts');
+  const foe = Enemy.fromVanilla(3, (px + 15) * TILE, sy * TILE - 48);
+  g.entities.add(foe, 'enemies');
+  foe.x -= foe.w * 2.5; foe.y -= foe.h * 2.5; foe.w *= 6; foe.h *= 6;
+  foe.y = sy * TILE - 130 - foe.h / 2;
+  foe.hpMax = 999999; foe.hp = 999999;
+  const homeF = { x: foe.x + foe.w / 2, y: foe.y + foe.h / 2 };
+  const foeHits = [];
+  const baseHurt = foe.hurt.bind(foe);
+  foe.hurt = (dmg, kx, ky, game, pen, crit) => { foeHits.push({ dmg }); return baseHurt(dmg, 0, 0, game, pen, crit); };
+  const unfreeze = () => { foe.x = homeF.x - foe.w / 2; foe.y = homeF.y - foe.h / 2; foe.vx = 0; foe.vy = 0; };
+
+  const targetX = homeF.x, targetY = homeF.y;
+  aimAt(targetX, targetY);
+
+  // ---- (f)+(a) 出手一击:记录出生点/光球可见性 ----
+  const mouseWorldBefore = (() => { const [wx, wy] = g.camera.screenToWorld(g.input.mouseX, g.input.mouseY); return { x: wx, y: wy }; })();
+  let spawnPos = null, castTick = -1, ftick = 0;
+  const origAdd = g.entities.add.bind(g.entities);
+  g.entities.add = (e, b) => {
+    if (e && e.projId === 1117 && castTick < 0) { castTick = ftick; spawnPos = { x: e.cx, y: e.cy }; }
+    return origAdd(e, b);
+  };
+
+  // 基线像素采样区(目标点屏幕域 ±28px)
+  const dpr = g.renderer.dpr || 1;
+  const [bsx, bsy] = g.camera.worldToScreen(targetX, targetY);
+  const sampleBox = (tag) => {
+    try {
+      const cv = g.renderer.canvas;
+      const cx2 = g.renderer.ctx || cv.getContext('2d');
+      const x0 = Math.max(0, Math.round(bsx * dpr) - 28 * dpr), y0 = Math.max(0, Math.round(bsy * dpr) - 28 * dpr);
+      const wq = 56 * dpr, hq = 56 * dpr;
+      const im = cx2.getImageData(Math.round(x0), Math.round(y0), Math.round(wq), Math.round(hq));
+      let lit = 0, blue = 0;
+      for (let i = 0; i < im.data.length; i += 4) {
+        const rr = im.data[i], gg = im.data[i + 1], bb = im.data[i + 2];
+        if (rr + gg + bb > 140) lit++;
+        if (bb > rr + 24 && bb > 70) blue++;
+      }
+      R.dbg[tag] = { lit, blue };
+      return { lit, blue };
+    } catch (e) { R.dbg[tag] = 'err:' + e.message; return null; }
+  };
+  for (let i = 0; i < 3; i++) { unfreeze(); await ticks(1); }
+  const baseline = sampleBox('pixBase');
+
+  g.input.mouseDown = true; g.input.mouseHeld = false;
+  // 手动步进计数
+  for (let i = 0; i < 12; i++) { ftick++; unfreeze(); g.fixedUpdate(1 / 60); }
+  release();
+
+  ck('(f) 落点=鼠标世界坐标(<32px)', !!spawnPos &&
+    Math.hypot(spawnPos.x - mouseWorldBefore.x, spawnPos.y - mouseWorldBefore.y) < 32,
+    `spawn=(${spawnPos ? Math.round(spawnPos.x) : '?'},${spawnPos ? Math.round(spawnPos.y) : '?'}) ` +
+    `mouse=(${Math.round(mouseWorldBefore.x)},${Math.round(mouseWorldBefore.y)})`);
+
+  // (a) 悬浮期采样(t≈8-14):等渲染帧后取像素
+  for (let i = 0; i < 4; i++) { unfreeze(); await ticks(1); }
+  const orb = g.entities.projectiles.find((q) => q.projId === 1117 && !q.dead);
+  if (orb) {
+    const [osx, osy] = g.camera.worldToScreen(orb.cx, orb.cy);
+    R.dbg.orbScreen = { x: Math.round(osx), y: Math.round(osy) };
+  }
+  await ticks(1);                       // 让渲染帧跑一拍
+  await new Promise((r) => requestAnimationFrame(r));
+  const during = sampleBox('pixDuring');
+  ck('(a) 悬浮期光球可见(目标域蓝像素较基线显著增多)',
+    !!during && !!baseline && during.blue > baseline.blue + 30,
+    `blue ${baseline ? baseline.blue : '?'} → ${during ? during.blue : '?'}`);
+
+  // ---- (c) 伤害结算 tick + (b) bolt 形态 ----
+  let hurtTick = -1, boltInfo = null;
+  while (ftick < castTick + 90) {
+    ftick++; unfreeze(); g.fixedUpdate(1 / 60);
+    if (hurtTick < 0 && foeHits.length > 0) hurtTick = ftick;
+    const b = g.entities.projectiles.find((q) => q.projId === 1117);
+    if (b && !boltInfo && b.bolt && b.bolt.positions && b.bolt.positions.length >= 2) {
+      const pts = b.bolt.positions;
+      boltInfo = { n: pts.length, topY: pts[0].y, endY: pts[pts.length - 1].y,
+        collided: !!b.bolt.collidedWithTile,
+        spanPx: Math.round(pts[pts.length - 1].y - pts[0].y) };
+    }
+  }
+  ck('(b) bolt 天降形态(折线 ≥8 点且首点在末点上方 ≥300px)', !!boltInfo &&
+    boltInfo.n >= 8 && (boltInfo.endY - boltInfo.topY) >= 300,
+    boltInfo ? JSON.stringify(boltInfo) : 'no-bolt-captured');
+
+  // (d) 音效序列
+  const names = sfxLog.map((x) => `${x.ch}:${x.name}`).slice(0, 14);
+  const hasCast = sfxLog.some((x) => /Item_43|Item43/.test(x.name));
+  const hasThunder = sfxLog.some((x) => /thunder|hit|NPCHit|lightning/i.test(x.name));
+  ck('(d) 音效序列:cast Item43 在场', hasCast, names.join(' , ').slice(0, 220));
+  ck('(d2) windup/kill 有雷声或打击音', hasThunder, names.join(' , ').slice(0, 160));
+
+  // (c) 结算时序
+  const delay = hurtTick - castTick;
+  ck('(c) 沿线伤害结算于悬浮期末(Kill 帧,25-40t)', delay >= 20 && delay <= 45,
+    `hurtTick=${hurtTick} castTick=${castTick} delay=${delay} hits=${foeHits.length}`);
+
+  // ---- (e) 节奏:autoReuse 持按三窗 ----
+  await settle(6);
+  sfxLog.length = 0;
+  const casts = [];
+  let t2 = 0;
+  g.entities.add = (e, b) => {
+    if (e && e.projId === 1117) casts.push(t2);
+    return origAdd(e, b);
+  };
+  aimAt(homeF.x, homeF.y);
+  g.input.mouseDown = true; g.input.mouseHeld = true;
+  for (; t2 < 210; t2++) { g.fixedUpdate(1 / 60); }
+  g.entities.add = origAdd;
+  release();
+  const gaps = casts.slice(1).map((v, i) => v - casts[i]);
+  R.dbg.castTicks = casts; R.dbg.gaps = gaps;
+  ck('(e) 节奏:持按连发间隔≈55t(ut=ua=55 一窗一发)', casts.length >= 3 && gaps.every((x) => x >= 50 && x <= 62),
+    `casts=${JSON.stringify(casts)} gaps=${JSON.stringify(gaps)}`);
+
+  void baseline;
+  return R;
+});
+
+console.log(JSON.stringify(out, null, 1));
+if (errs.length) console.log('pageerrors:', errs.slice(0, 5));
+await browser.close();
+const bad = out.checks.filter((c) => !c.ok);
+console.log(`\n== PROBE RESULT: ${out.checks.length - bad.length}/${out.checks.length} passed ==`);
+process.exit(bad.length ? 1 : 0);

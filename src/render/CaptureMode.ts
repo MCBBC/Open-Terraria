@@ -412,6 +412,14 @@ export class CaptureInterface {
    *  DrawTick 的空队收尾在帧 4 前不会误伤——activeSettings 尚 null） */
   private cameraSettings: CaptureSettingsInst | null = null;
   private settings: CaptureSettingsInst | null = null;   // _activeSettings
+
+  /** 拍摄中的手动群系档（Renderer.updateWaterStyle 捕获水色直供消费）：
+   *  手动档（biomeChoiceIndex ≥ 0）→ settings.biome；自动档/未在拍摄 → null。
+   *  ★封装替代暴露私有 settings——"是否手动档"的判定也内聚在此。 */
+  activeBiome(): CaptureBiomeInst | null {
+    if (!this.settings || CaptureSettings.biomeChoiceIndex < 0) return null;
+    return this.settings.biome;
+  }
   private queue: ChunkPlan[] = [];                       // _renderQueue
   private tilesProcessed = 0;                            // _tilesProcessed
   private totalTiles = 1;                                // _totalTiles

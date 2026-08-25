@@ -3741,7 +3741,7 @@ export class Player extends Entity {
         const bhw = this.w + 8, bhh = this.h + 8;
         for (const e of game.enemies()) {
           const en = e as { id?: number; x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
-            dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown) => boolean };
+            dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean };
           if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
           // friendly 门（原版 :20793 !nPC.friendly continue——冲撞对睡渔夫 376 等友好 NPC 无效）
           if (!playerCanHitEnemy(e, game)) continue;
@@ -3851,7 +3851,7 @@ export class Player extends Entity {
         const bhw3 = this.w + 8, bhh3 = this.h + 8;
         for (const e of game.enemies()) {
           const en = e as { id?: number; x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
-            dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown) => boolean;
+            dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
             iframes?: number };
           if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
           // friendly 门（原版 :21299 !nPC2.friendly continue——同克盾冲撞）+

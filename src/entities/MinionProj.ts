@@ -1416,12 +1416,10 @@ export class MinionProj extends Entity {
     const num4 = num3 % total;
     const misc = ((this.age % 3600) / 3600);
     const wob = Math.PI * 2 * (misc * (2 + num4) + num4 * 0.5 + dir * 1.3);
-    const wx = Math.cos(wob) * 0;                     // (0,0.5).RotatedBy(...)→x=−0.5 sin
-    const wy = Math.sin(wob) * 0.5 * 4;
-    void wx;
+    // 微摆向量 = (0,0.5).RotatedBy(wob)×4 = (−sin(wob)×2, cos(wob)×2)
     const spot = {
-      x: p.cx + Math.cos(irot) * 10 + dir * (num3 * -6 - 16) + (-Math.sin(wob) * 0.5 * 4),
-      y: p.cy + Math.sin(irot) * 10 + p.gravDir * -15 + wy,
+      x: p.cx + Math.cos(irot) * 10 + dir * (num3 * -6 - 16) - Math.sin(wob) * 2,
+      y: p.cy + Math.sin(irot) * 10 + p.gravDir * -15 + Math.cos(wob) * 2,
     };
     irot = wrapAngle(irot + Math.PI / 2);
     return [spot, irot];
