@@ -13,7 +13,7 @@ import { World } from '../src/world/World';
 import { TileStore } from '../src/world/TileStore';
 import { Player } from '../src/entities/Player';
 import { Inventory, ACC_ARMOR_START } from '../src/items/Inventory';
-import { ITEM_BY_KEY } from '../src/data/items';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { Bobber } from '../src/entities/Bobber';
 import { Enemy } from '../src/entities/Enemy';
 import {
@@ -195,6 +195,10 @@ function fishingHooks(opts: {
     }
   }
   const player = new Player(64 * TILE, (opts.bobberTileY ?? 95) * TILE - 60, new Inventory());
+  // R32：AI_061 存活门（:54606）要求手持竿——mock 玩家快捷栏 5 格持木竿
+  //（shoot 360 = 浮漂默认弹；不占 0 格=部分用例以 0 格作鱼饵槽）
+  player.inv.selected = 5;
+  player.inv.slots[5] = { id: ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[2289]!]!, stack: 1 };
   const hooks = {
     world: {
       store,
@@ -269,6 +273,8 @@ describe('钓鱼咬钩（AI_061 :50897-50934 / FishingCheck :19179-19184 / :1933
 
   it('海洋判定 = 边缘 380 格 && 地表以上 && 水体 >1000（:19886）——大池边缘咬出海洋池渔获', () => {
     const { hooks, player } = fishingHooks({ pool: { x: 2, w: 75 }, depth: 20, bobberTileY: 95 });
+    // R32：距离门 900px（AI_061 :54703-54705）——玩家须站浮漂 900px 内（原版抛程内）
+    player.x = 8 * TILE;
     const b = new Bobber(4 * TILE, 90 * TILE, 0, 2, 50, 0, 50, () => player);   // 落在边缘 380 格内
     expect(land(b, hooks)).toBe(true);
     // 连续收 6 次：渔获必须出自海洋池（鱼/匣/垃圾），不许出现普通地表池独有鱼
@@ -285,6 +291,7 @@ describe('钓鱼咬钩（AI_061 :50897-50934 / FishingCheck :19179-19184 / :1933
       catches.push(got);
       b.reel(hooks);
       b.dead = false;   // 复用同一浮标继续统计池归属
+      b.retract = 0;    // R32：断线掷命中时 reel 已置收线态——复用统计须一并复位
     }
     // 全量规则表语义（Populate :10-30 注册序 + Stopper 只在本组命中时生效 :108）：
     // Junk/Crate/Rare 组先于 Ocean 可先命中；Ocean 各档掷空时 stopper 不触发，

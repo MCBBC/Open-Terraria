@@ -22,6 +22,7 @@ import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
+import { damageVar } from '../stats/ScaleStats';
 
 /** 玩家侧挂点状态（RotatedRelativePoint 消费，Player.cs:4063-4089）：
  *  cx/cy = MountedCenter（:3189-3194；本仓不建模坐骑挂点偏移，恒等玩家中心）；
@@ -112,13 +113,14 @@ export class ChainsawProj extends Entity {
     // 不乘 scale：屠夫锯盒虚小 28%、金属钻类（59 等 22×0.9→19）反向虚大。
     // vanillaProjectiles.ts "scale 非判定盒宽"系误注——源码即乘，随批勘误登记（blue-r33）。
     const pd = projectileData(pid);
-    const sc = pd?.scale ?? (pid === 252 ? 1.1 : 1.2);
+    // 弹表无 scale 键 = 原版 ResetDefaults 缺省 1（509=1.2/252=1.1 为显式值在册）
+    const sc = pd?.scale ?? 1;
     this.drawScale = sc;
-    this.w = Math.max(1, Math.trunc((pd?.width ?? (pid === 252 ? 18 : 22)) * sc));
-    this.h = Math.max(1, Math.trunc((pd?.height ?? (pid === 252 ? 18 : 22)) * sc));
+    this.w = Math.max(1, Math.trunc((pd?.width ?? 20) * sc));
+    this.h = Math.max(1, Math.trunc((pd?.height ?? 20) * sc));
     // 出膛速度模 = shootSpeed×proj.scale（AI_020 :23852 num157=item.shootSpeed*scale；
     // 五档 0.9~1.2——proj59 类曾按 1.2 算 +33% 偏快）
-    this.speed = (opts?.shootSpeed ?? (pid === 252 ? 46 : 48)) * sc;
+    this.speed = (opts?.shootSpeed ?? (pid === 252 ? 46 : pid === 509 ? 48 : 40)) * sc;
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -159,8 +161,9 @@ export class ChainsawProj extends Entity {
     this.x = anchor.x - this.w / 2;
     this.y = anchor.y - this.h / 2;
     // velocity.X 抖动（:23932）：×(1+Next(−3,4)×0.01)——原版在旋转/尘之前，
-    // 每帧被 channel 直写覆盖，实际只影响下方尘的前向偏移
-    this.vx *= 1 + (Math.floor(Math.random() * 8) - 3) * 0.01;
+    // 每帧被 channel 直写覆盖，实际只影响下方尘的前向偏移。
+    // ★ai75 无此段（AI_075 共用尾 :68404-68411 前无抖动行）——laser 分支跳过
+    if (!this.laser) this.vx *= 1 + (Math.floor(Math.random() * 8) - 3) * 0.01;
     // ai75 相位灯串（:67300-67320）：localAI[0]++ ≥60 归零；num12=phase/60 三角折返
     // （>0.5 取 1−num12）；vector5=Lerp(青(0,1,.7),蓝(0,.7,1),1−num12×2)×0.5——
     // 弹心点光经 lightRGB 通道结算（PlotTileLine 线光带未建模，登记）
@@ -175,7 +178,7 @@ export class ChainsawProj extends Entity {
     // 尘 31 火花（:23933-23941）：1/6、出生 = position+velocity×Next(6,10)×0.1
     // （单掷同乘双轴 → 前向偏移 0.6-0.9）、position.X−4、noGravity、
     // velocity×0.2 后 vy = −Next(7,13)×0.15（向上反溅）
-    if (Math.floor(Math.random() * 6) === 0) {
+    if (!this.laser && Math.floor(Math.random() * 6) === 0) {   // ai75 无火花尘段
       const k = (6 + Math.floor(Math.random() * 4)) * 0.1;   // Next(6,10) ∈ [6,9]
       const dx = this.x + this.vx * k, dy = this.y + this.vy * k;
       const d = game.spawnDust?.(dx, dy, this.w, this.h, 31, 0, 0, 80, null, 1.4);
@@ -200,7 +203,12 @@ export class ChainsawProj extends Entity {
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
-      const dmg = crit ? this.damage * 2 : this.damage;
+      // ★DamageVar ±15%+luck 重掷（r33-④；Damage_PVE :14719 num=Main.DamageVar(damage,
+      // luck)）→ StrikeNPC 内 crit ×2（:82118 区段）——方差在基伤上掷、暴击翻倍在后,
+      // 与挥击侧 Game.ts 同序
+      const owner = game as unknown as { player?: { luck?: number } };
+      const raw = damageVar(this.damage, -(owner.player?.luck ?? 0));
+      const dmg = crit ? raw * 2 : raw;
       e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit);   // 音/飘值=单点
       this.hitCd.set(e.id, 10);
     }

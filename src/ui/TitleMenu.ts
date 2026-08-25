@@ -127,8 +127,8 @@ const CSS = `
   .sw-title-btn { font-size: 19px; padding: 7px 18px; letter-spacing: 2px;
     touch-action: manipulation; }
   /* 署名/免责两行(right:10 bottom:8,高 ~42px)窄屏下左延到版本号位置 →
-     版本号上移避让(桌面两角分居不重叠,不动) */
-  .sw-title-version { bottom: 58px; }
+     版本号上移并右对齐,与署名/免责排成一列(桌面左下角分居不动) */
+  .sw-title-version { bottom: 58px; left: auto; right: 10px; }
 }
 @media (max-height: 500px) {
   .sw-title-logo { width: min(340px, 46vw); margin-top: 3vh; }

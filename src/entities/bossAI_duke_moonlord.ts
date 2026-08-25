@@ -2053,7 +2053,13 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
   x.f2 = clamp(x.f2, 0, 14);
   if (f3Target > x.f3) x.f3 += 1; else if (f3Target < x.f3) x.f3 -= 1;
   x.f3 = clamp(x.f3, 0, 15);
-  if (x.f3 >= 15) e.dontTakeDamage = true; // :42532 dontTakeDamage = localAI[3]>=15(闭眼无敌;真旗标,同手部)
+  // :42532 dontTakeDamage = localAI[3]>=15f——原版每 tick【双向赋值】(眼睑全闭
+  // 才无敌,睁开即恢复可击)。★曾单向只写 true:状态 0(f3T=3)眼睑合拢过一次即
+  // 永久无敌 → 双手眼毁后头无法受击、核心锁死 phase0、叶绿弹全图无可索目标 =
+  // "月总血量卡 9500 打不死"(2026-08-25 用户实报,探针复现 head.dont=true 卡死)。
+  // -2 残肢/-3 永闭态的无敌已在上方分支显式置 true(原版序:眼睑赋值先、分支
+  // 覆盖后;本仓分支在前,故此处限常规态 ai0>=0 双向)
+  if (e.ai0 >= 0) e.dontTakeDamage = x.f3 >= 15;
 
   // ---- 渲染镜像(Renderer.drawMoonLordHead 直读)----
   // 瞳孔角/睁眼度 → lai0/lai1(原版 localAI[0]/[1],Main.cs:24464 椭圆 (27,59)×[1]);

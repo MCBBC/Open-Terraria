@@ -9,6 +9,7 @@ import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { Dart } from '../src/entities/Dart';
+import { TILE_BY_KEY, VANILLA_TILE_ID } from '../src/data/tiles';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
 import type { World as WorldT } from '../src/world/World';
@@ -83,7 +84,7 @@ describe('沙球物理（AI_010 ai[0]==2 档 :55081-55100）', () => {
 });
 
 describe('沙球落地放沙 + 沿途击碎（:75430-75536 / :55106-55136）', () => {
-  it('落地在空格上 → 放沙 53', () => {
+  it('落地在空格上 → 放沙（★本仓 id 域:原版 53 → TILE_BY_KEY.sand,曾硬编码 53=本仓第53号注册位）', () => {
     const w = makeWorld();
     const st = w.store;
     const { hooks } = makeHooks(w);
@@ -91,27 +92,27 @@ describe('沙球落地放沙 + 沿途击碎（:75430-75536 / :55106-55136）', (
     step(d, hooks, 30);
     expect(d.dead).toBe(true);
     const cy = FLOOR - 1;   // 落点上一格
-    expect(st.get(60, cy)).toBe(53);
+    expect(st.get(60, cy)).toBe(TILE_BY_KEY['sand']);
   });
 
-  it('下方是轨道 314 → 不放沙', () => {
+  it('下方是轨道（原版 314 → 本仓 id）→ 不放沙', () => {
     const w = makeWorld();
     const st = w.store;
-    st.setTile(60, FLOOR - 1, 314);   // 轨道占落点下方
-    st.setTile(60, FLOOR, 1);
+    st.setTile(60, FLOOR - 1, VANILLA_TILE_ID.get(314)!);   // 轨道占落点下方（本仓 id 域）
+    st.setTile(60, FLOOR, TILE_BY_KEY['stone']!);
     const { hooks } = makeHooks(w);
     const d = new Dart(60 * TILE, (FLOOR - 5) * TILE, 0, 2, 10, 31);
     step(d, hooks, 30);
     expect(st.get(60, FLOOR - 2)).toBe(0);   // 未放沙
   });
 
-  it('沿途击碎水晶 12 / 雕像 105 / 小石堆 185', () => {
+  it('沿途击碎水晶/雕像/小石堆（原版 12/105/185 → 本仓 id,曾直比=真实世界永不命中）', () => {
     const w = makeWorld();
     const st = w.store;
-    // 弹道路径上摆靶（x=60 列，从上往下穿过）
-    st.setTile(60, 10, 12);
-    st.setTile(60, 15, 105);
-    st.setTile(60, 20, 185);
+    // 弹道路径上摆靶（x=60 列，从上往下穿过；★用本仓 id 摆放=真实世界真身）
+    st.setTile(60, 10, VANILLA_TILE_ID.get(12)!);
+    st.setTile(60, 15, VANILLA_TILE_ID.get(105)!);
+    st.setTile(60, 20, VANILLA_TILE_ID.get(185)!);
     const { hooks, rec } = makeHooks(w);
     const d = new Dart(60 * TILE, 8 * TILE, 0, 3, 10, 31);
     step(d, hooks, 60);

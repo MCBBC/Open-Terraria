@@ -98,7 +98,7 @@ for (let chunk = 0; chunk < 6; chunk++) {
           else if (st.half[i]) s += 'H';
           else if (st.isPlatform(tx, ty)) s += '=';
           else if (st.isSolid(tx, ty)) s += '#';
-          else s += '?';
+          else s += `<${st.type[i]}>`;
         }
         rows.push(`${ty}:${s}`);
       }
@@ -108,18 +108,23 @@ for (let chunk = 0; chunk < 6; chunk++) {
     for (let t = 0; t < 900; t++) {
       tel.ticks++;
       for (const e of zs) {
-        const px = e.x, py = e.y;
-        g.enemyFixedUpdateForProbe ? null : null;
+        const px = e.x, py = e.y, vyPre = e.vy;
         e.fixedUpdate(1 / 60, g);
         const dx = e.x - px, dy = e.y - py;
         const key = e.id;
         const prev = tel.last.get(key) ?? { x: e.x, y: e.y, floatN: 0 };
-        // 传送事件
+        // 传送事件（带归因：瞬移前中心格实心性 + vy 是否保留——StepUp 不动速度、
+        // unembed①/slopeCollide 会清 vy）
         if (Math.hypot(dx, dy) >= 12) {
+          const pcx = Math.floor((px + e.w / 2) / TILE), pcy = Math.floor((py + e.h / 2) / TILE);
+          const pci = st.inBounds(pcx, pcy) ? st.idx(pcx, pcy) : -1;
+          const centerWasSolid = pci >= 0 && st.flags[pci] ? st.isSolid(pcx, pcy) : false;
+          const centerType = pci >= 0 && st.flags[pci] ? st.type[pci] : -1;
           tel.events.push({
             kind: 'teleport', tick: tel.ticks, id: e.id,
             from: [Math.round(px), Math.round(py)], to: [Math.round(e.x), Math.round(e.y)],
-            vx: +e.vx.toFixed(2), vy: +e.vy.toFixed(2), onG: e.onGround, ctx: dump(e),
+            vx: +e.vx.toFixed(2), vy: +e.vy.toFixed(2), vyPre: +vyPre.toFixed(2),
+            onG: e.onGround, centerWasSolid, centerType, ctx: dump(e),
           });
         }
         // 漂浮行走

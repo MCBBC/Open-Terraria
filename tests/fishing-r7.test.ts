@@ -1,5 +1,5 @@
 // R7 钓鱼回归：钓竿/鱼饵数据、渔获规则表结算、浮标状态机（mock 驱动）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
 import { FISH_DROP_RULES, tryGetItemDrop, ANGLER_QUEST_ITEMS, type FishingRollCtx } from '../src/data/vanillaFishing';
 import { Bobber } from '../src/entities/Bobber';
@@ -7,7 +7,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
 import type { GameHooks } from '../src/entities/types';
-import { ITEM_BY_KEY } from '../src/data/items';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 
 function makeHooks(waterAt?: { x: number; y: number; w?: number }) {
   const store = new TileStore(200, 120);
@@ -20,6 +20,10 @@ function makeHooks(waterAt?: { x: number; y: number; w?: number }) {
     }
   }
   const player = new Player(60 * 16, 90 * 16, new Inventory());
+  // R32：AI_061 存活门（:54606）要求手持竿——mock 玩家快捷栏 5 格持木竿
+  //（shoot 360 = 浮漂默认弹；不占 0-3 格=用例的鱼饵槽）
+  player.inv.selected = 5;
+  player.inv.slots[5] = { id: ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[2289]!]!, stack: 1 };
   const hooks: GameHooks = {
     world: {
       store,
@@ -120,8 +124,10 @@ describe('Bobber 状态机', () => {
     for (let k = 0; k < 2000; k++) { b.fixedUpdate(1, hooks); if (b.biteT > 0) { bit = true; break; } }
     expect(bit).toBe(true);
     expect(b.catchId).toBeGreaterThan(0);
-    // 收竿
+    // 收竿（压 Math.random≥1/7：排除 R14-E6 的 1/7 断线掷——本用例测命中支）
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const caught = b.reel(hooks);
+    rnd.mockRestore();
     expect(caught).toBe(b.catchId || caught); // reel 后 catchId 清零——用返回值
     expect(caught).toBeGreaterThan(0);
     expect(b.dead).toBe(true);

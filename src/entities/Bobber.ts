@@ -546,8 +546,10 @@ export class Bobber extends Entity {
     if (flag) {
       if (this.baitVid === 4361 || this.baitVid === 4362) {
         p.luckState.applyLadyBugKilled(Math.hypot(this.cx - p.cx, this.cy - p.cy), this.baitVid === 4362);
+        // Main.ladyBugRainBoost 承接在 Weather 侧（Weather.ts:210）——曾写 World 根对象
+        // （类型错误+运行时挂垃圾属性，雨调度读不到；2026-08-25 R32 顺手修）
         const w = game?.world as World | undefined;
-        if (w) w.ladyBugRainBoost = Math.min(18000, w.ladyBugRainBoost + 1800);
+        if (w?.weather) w.weather.ladyBugRainBoost = Math.min(18000, w.weather.ladyBugRainBoost + 1800);
       }
       p.inv.removeAt(this.baitSlot, 1);
     }
