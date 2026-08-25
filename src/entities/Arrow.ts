@@ -12,7 +12,7 @@ import { trySnapStrike } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { LIQUID_TYPE } from '../world/TileStore';
 import { TILE } from '../core/constants';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { PROJ_ALPHA_MOD, type ProjAlphaMod } from '../data/vanillaProjAlpha';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -20,6 +20,11 @@ import type { Camera } from '../render/Camera';
 
 /** 原版投射物贴图懒加载（Projectile_1.png = 木箭、Projectile_2.png = 燃烧箭，泛用所有 id） */
 const spriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
+/** 绳索线圈弹→绳 tile key（aiStyle35 撞块铺绳,AI_035 :27655-27662 num274 映射:
+ *  475→353 藤/506→366 蛛网/505→365 丝/default→213——3005 藤蔓绳圈等线圈件共用） */
+const ROPE_COIL_TILE: Record<number, string> = {
+  475: 'v_353_vine_rope', 476: 'v_213_rope', 505: 'v_365_silk_rope', 506: 'v_366_web_rope',
+};
 /** 在飞去重 + 失败 10s 冷却(2026-08-19 前把未加载完的 Image 先塞缓存:一次失败
  *  = 坏 Image(width 0)永久驻缓存,该弹幕本会话隐形且无重试——与 ensureVImage
  *  的 TTL 语义对齐;失败顺带驱逐 SW 缓存同路径条目防重吃坏字节) */
@@ -4620,6 +4625,29 @@ export class Arrow extends Entity {
               this.sbAx, this.sbAy, Math.round(Math.hypot(this.vx, this.vy) * 1000));
           }
           this.sbAx = this.cx; this.sbAy = this.cy;
+          return;
+        }
+        // ---- 绳索线圈弹 475 藤/476/505 丝/506 蛛网（aiStyle35 :27581-27720）：
+        //      撞块 → 自撞点列向下先滑过既有绳(WorldGen.IsRope),再向空格铺 ≤10 格
+        //      绳(num274 映射 475→353/506→366/505→365/default213;平台翻门 flag15/
+        //      斩草 KillTile 分支未建模登记),铺完 Kill。飞行物理=AI1_GRAV[0.2@30]----
+        if (ROPE_COIL_TILE[this.projId] !== undefined) {
+          const stRc = game.world.store;
+          const rtKey = ROPE_COIL_TILE[this.projId];
+          const rtId = TILE_BY_KEY[rtKey];
+          let rcx = Math.floor(this.cx / TILE);
+          let rcy = Math.floor(this.cy / TILE);
+          while (stRc.inBounds(rcx, rcy) && TILE_DEFS[stRc.get(rcx, rcy)]?.rope) rcy++;   // IsRope 下滑
+          let placedRc = 0;
+          for (let n = 0; n < 10; n++, rcy++) {
+            if (!stRc.inBounds(rcx, rcy) || stRc.isActive(rcx, rcy)) break;
+            stRc.setTile(rcx, rcy, rtId, 0, 0);
+            placedRc++;
+          }
+          if (placedRc > 0) {
+            game.recLog?.('tile', { x: rcx, y: rcy, from: 0, to: TILE_DEFS[rtId]?.key ?? rtKey, cause: 'ropeCoil', n: placedRc });
+          }
+          this.killNow(game);
           return;
         }
         // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落），然后消失

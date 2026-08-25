@@ -13,7 +13,8 @@
 // 逐帧动态绘制（等价原版 AddSpecialPoint 特殊绘制路径）。光照合成在其后，自动受光。
 import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
-import { drawVanillaCell, drawTreeCell, scanTreeType, type TreeStyleData } from './VanillaTiler';
+import { drawVanillaCell, drawTreeCell, scanTreeType, treeTrunkPaintStyle, palmTreePaintStyle,
+  type TreeStyleData } from './VanillaTiler';
 import { animYOffset } from './TileAnim';
 import { getTilePaintSettings } from '../world/Paint';
 import { tintRegion } from './TileTint';
@@ -28,6 +29,7 @@ import { options } from '../core/Options';
 /** 帧级环境（drawWindSwayTiles 每帧构建，贯穿全部绘制分支） */
 export interface SwayEnv {
   worldSurface: number;        // Main.worldSurface（tile 行）
+  worldW: number;              // Main.maxTilesX（palm 油漆 style 绿洲列门 :3534）
   remix: boolean;              // Main.remixWorld（"don't dig up" 种子；风门/药草判定翻转）
   worldH: number;              // Main.maxTilesY（remix 药草判定用）
   dayTime: boolean;            // Main.dayTime
@@ -279,7 +281,7 @@ function inAPlaceWithWind(st: TileStore, x: number, y: number, w: number, h: num
 
 /** 帧级环境（drawWindSwayTiles 每帧注入；单线程渲染下模块态直读） */
 let ENV: SwayEnv = {
-  worldSurface: 99999, remix: false, worldH: 0, dayTime: true, moonPhase: 0,
+  worldSurface: 99999, worldW: 8400, remix: false, worldH: 0, dayTime: true, moonPhase: 0,
   bloodMoon: false, raining: false, cloudAlpha: 0, mainTime: 0, waterStyle: 0,
   zones: { corrupt: false, crimson: false, hallow: false },
 };
@@ -308,8 +310,11 @@ const swayTintCache = new Map<string, HTMLCanvasElement | null>();
 function tintedSwayCell(
   atlas: SpriteAtlas, st: TileStore, rec: SwayRec, x: number, y: number, type: number,
   fx: number, fy: number, paint: number, trees?: TreeStyleData,
+  /** 树油漆 style（GetTreeBiome/GetPalmTreeBiome 派生；r33-shader 补——此前恒 0，
+   *  腐地/丛林/雪原/神圣/血腥树与绿洲棕榈涂漆时特判组选错 = 全落 style0 组） */
+  style = 0,
 ): HTMLCanvasElement | null {
-  const key = `${type}|${fx}|${fy}|${paint}`;
+  const key = `${type}|${fx}|${fy}|${paint}|${style}`;
   const hit = swayTintCache.get(key);
   if (hit !== undefined) return hit;
   if (typeof document === 'undefined') return null;
@@ -320,8 +325,10 @@ function tintedSwayCell(
   // 格内容画进 scratch（取帧的邻居查找用真实 st/x/y，仅 dest 落 scratch 原点）
   drawVanillaCell(cctx, atlas, rec.sheet, rec.frame, rec.fw, rec.fh, st, x, y, type,
     (t) => t === type || frameMergesWith(type, t), 0, 0, fx, fy, trees);
-  // 特判组分派与烘焙油漆 pass 同源：paint 1-12 ∧ getTilePaintSettings 表内
-  const special = paint >= 1 && paint <= 12 ? getTilePaintSettings(rec.sheet, 0) ?? undefined : undefined;
+  // 特判组分派与烘焙油漆 pass 同源：paint 1-12 ∧ getTilePaintSettings 表内；
+  // ★style 同源派生（ChunkCache 烘焙层 :805-806 同款两函数）——sheet5=GetTreeBiome、
+  // sheet323=GetPalmTreeBiome，其余表项无 style 维度传 0
+  const special = paint >= 1 && paint <= 12 ? getTilePaintSettings(rec.sheet, style) ?? undefined : undefined;
   tintRegion(cctx, c, 0, 0, paint, 0, 0, false, special);
   if (swayTintCache.size > 512) swayTintCache.clear();
   swayTintCache.set(key, c);
@@ -358,7 +365,11 @@ function drawCell(
     // 缓存（帧定内容：auto/blend 邻居变化会重写 frameX/Y → 键变化自然失效）
     const paint = st.paint[st.idx(x, y)];
     if (paint > 0) {
-      const cell = tintedSwayCell(atlas, st, rec, x, y, type, fx, fy, paint, trees);
+      // style 派生同烘焙层（ChunkCache :805-806）：仅 5/323 有 style 维度
+      let pstyle = 0;
+      if (rec.sheet === 5) pstyle = treeTrunkPaintStyle(st, x, y, fx, fy, ENV.worldSurface);
+      else if (rec.sheet === 323) pstyle = palmTreePaintStyle(st, x, y, ENV.worldW);
+      const cell = tintedSwayCell(atlas, st, rec, x, y, type, fx, fy, paint, trees, pstyle);
       if (cell) { ctx.drawImage(cell, dpx, dpy); return; }
     }
     drawVanillaCell(ctx, atlas, rec.sheet, rec.frame, rec.fw, rec.fh, st, x, y, type,
@@ -899,6 +910,7 @@ export function drawWindSwayTiles(
   const isDay = t > ClockVal.DAWN && t < ClockVal.DUSK;
   ENV = {
     worldSurface: world.groundLevel,
+    worldW: world.w,
     remix: !!(world as { remixWorld?: boolean }).remixWorld,
     worldH: world.h,
     dayTime: isDay,

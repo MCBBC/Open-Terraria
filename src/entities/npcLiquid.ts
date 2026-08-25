@@ -35,7 +35,7 @@ import { NPC_LAVA_IMMUNE } from '../data/npcLavaImmune';
 /** Collision.WetCollision（Collision.cs:1575-1656）1:1：中心小盒 + 液面收缩 + 坡上液体。 */
 export function wetCollision(
   st: TileStore, px: number, py: number, pw: number, ph: number,
-): { wet: boolean; honey: boolean; shimmer: boolean; surfY?: number } {
+): { wet: boolean; honey: boolean; shimmer: boolean } {
   const TS = TILE;
   let num = 10;                       // 盒宽（>Width 时取 Width）
   let num2 = Math.floor(ph / 2);      // 盒高（>Height 时取 Height）
@@ -61,7 +61,7 @@ export function wetCollision(
         if (vx + num > i * TS && vx < i * TS + TS && vy + num2 > surfY && vy < surfY + effH) {
           if (st.liquidType[idx] === 3) honey = true;
           if (st.liquidType[idx] === 4) shimmer = true;
-          return { wet: true, honey, shimmer, surfY };
+          return { wet: true, honey, shimmer };
         }
       } else {
         // 坡面格 + 上方格有液体 → 整格按满高 16 计（:1635-1654）
@@ -71,7 +71,7 @@ export function wetCollision(
         if (vx + num > i * TS && vx < i * TS + TS && vy + num2 > j * TS && vy < j * TS + TS) {
           if (st.liquidType[above] === 3) honey = true;
           else if (st.liquidType[above] === 4) shimmer = true;
-          return { wet: true, honey, shimmer, surfY: j * TS };
+          return { wet: true, honey, shimmer };
         }
       }
     }
@@ -143,8 +143,6 @@ export interface NpcLiquidHost {
   onFire3T: number;
   inWater: boolean;
   liqFactor: number;
-  /** ★偏离实验 v2：入水翻转 tick 液面 Y（涟漪+洗掠入水窗口钳位用） */
-  wetEntrySurfaceY?: number;
   def: { boss?: boolean };
   hurt(dmg: number, kx: number, ky: number, game: GameHooks): void;
 }
@@ -221,13 +219,11 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
   // ---- 2. 水湿（Collision_WaterCollision :94250）----
   const skip = skipsWet(b);
   let flag = false;
-  let wetSurfY: number | undefined;
   if (skip) {
     b.wetCount = 0;
   } else {
     const r = wetCollision(st, b.x, b.y, b.w, b.h);
     flag = r.wet;
-    wetSurfY = r.surfY;
     // 原版只置 true 不清零（:94265-94272），清位统一在 !wet 段（:93729-93732，
     // 在本函数步骤 3）——出水 tick 的湿型残留旗（Splash_5 出水微光档）依赖此序
     if (r.honey) b.honeyWet = true;
@@ -236,7 +232,6 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
   const wasWet = b.wet;
   if (flag && !wasWet && b.wetCount === 0) {
     b.wetCount = 10;                                      // 入水去抖（:94290）
-    b.wetEntrySurfaceY = wetSurfY;   // ★偏离实验 v2：液面 Y 记录
     if (player && !player.dead) {
       // 按分支选 wav+静音名单（:94233-94311）；音量恒 1（:94297 volumeScale 缺省）
       const f = splashDecision(b, true, lava);

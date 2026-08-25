@@ -3,6 +3,9 @@ import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
+import { treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
+// 树油漆 style 派生已迁 VanillaTiler（2026-08-25：WindSway 同源消费防环）——re-export 保既有引用面
+export { treeGroundVariant, treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
 import { frameMergesWith } from './TileMergeFamily';
 import { swayBakeSkip } from './WindSway';
 import { TILE_ANIM_RATE, tileAnim, campfireYOffset } from './TileAnim';
@@ -43,92 +46,6 @@ export interface ChunkPair {
 // ---- 油漆逐像素着色：tintRegion 迁至共享模块 render/TileTint（2026-08-23：摆动件
 // 绘制时染色同源复用，防双实现漂移） ----
 
-/** GetTreeVariant（TileDrawing.cs:1801-1829）：树底地面型 → 树油漆 style。
- *  8 地面型 + 丛林地表(1)/地下(5)分裂（y > worldSurface）+ 未激活/表外 -1。 */
-const TREE_GROUND_IDS = (() => {
-  const g = (k: string) => TILE_BY_KEY[k] ?? -1;
-  return {
-    corrupt: g('v_23_corrupt_grass_block'),          // :1809-1811 → 0（661 腐化丛林草同档）
-    corruptJungle: g('v_661_corrupt_jungle_grass_block'),
-    jungle: g('v_60_jungle_grass_block'),            // :1812-1817 地表 1 / 地下 5
-    mushroom: g('v_70_mushroom_grass_block'),        // :1818-1819 → 6
-    hallow: g('v_109_hallowed_grass_block'),         // :1820-1822 → 2（492 修剪神圣草同档）
-    hallowMowed: g('v_492_hallowed_mowed_grass_block'),
-    snow: g('snow'),                                 // :1823-1824 → 3（147 雪块）
-    crimson: g('v_199_crimson_grass_block'),         // :1825-1827 → 4（662 猩红丛林草同档）
-    crimsonJungle: g('v_662_crimson_jungle_grass_block'),
-  };
-})();
-
-export function treeGroundVariant(st: World['store'], x: number, y: number, worldSurface: number): number {
-  if (!st.inBounds(x, y)) return -1;
-  const i = st.idx(x, y);
-  if (!st.flags[i]) return -1;                       // :1803-1805 未激活
-  const t = st.type[i];
-  const G = TREE_GROUND_IDS;
-  if (t === G.corrupt || t === G.corruptJungle) return 0;
-  if (t === G.jungle) return y > worldSurface ? 5 : 1;
-  if (t === G.mushroom) return 6;
-  if (t === G.hallow || t === G.hallowMowed) return 2;
-  if (t === G.snow) return 3;
-  if (t === G.crimson || t === G.crimsonJungle) return 4;
-  return -1;                                         // :1828-1829 表外地面
-}
-
-/** GetTreeBiome（TileDrawing.cs:1758-1798）：树干格帧 → 列修正 → 向下扫到树底 → 变体。
- *  列修正是枝/顶标记帧的枝干在邻列（:1763-1793 frameX/frameY 四段 switch）。 */
-export function treeTrunkPaintStyle(st: World['store'], x: number, y: number, tileFrameX: number, tileFrameY: number,
-  worldSurface: number): number {
-  let col = x;
-  if (tileFrameX === 66 && tileFrameY <= 45) col++;             // :1763-1765
-  if (tileFrameX === 88 && tileFrameY >= 66 && tileFrameY <= 110) col--; // :1767-1769
-  if (tileFrameY >= 198) {
-    if (tileFrameX === 66) col--;                               // :1771-1777
-    else if (tileFrameX === 44) col++;                          // :1778-1780
-  } else if (tileFrameY >= 132) {
-    if (tileFrameX === 22) col--;                               // :1783-1789
-    else if (tileFrameX === 44) col++;                          // :1790-1792
-  }
-  let row = y; // :1795 扫描：当前列自本行向下走到第一个非树格（越界=不激活，同 C# OOB 空格）
-  for (; st.inBounds(col, row); row++) {
-    const i = st.idx(col, row);
-    if (!st.flags[i] || st.type[i] !== TREE_VANILLA.trunk) break;
-  }
-  return treeGroundVariant(st, col, row, worldSurface);         // :1798
-}
-
-/** GetPalmTreeBiome+GetPalmTreeVariant（TileDrawing.cs:1749-1756/:3519-3543）：
- *  向下扫到棕榈底 → 沙型(0/1/2/3) → 绿洲列 +4（★-1 也 +4 成 3 的原版行为 1:1 保留）。 */
-export function palmTreePaintStyle(st: World['store'], x: number, y: number, worldW: number): number {
-  let row = y; // :1752 扫描：type == 323 连续段
-  for (; st.inBounds(x, row); row++) {
-    const i = st.idx(x, row);
-    if (!st.flags[i] || st.type[i] !== TREE_VANILLA.palm) break;
-  }
-  let variant = -1;                                             // :3520
-  const gi = st.inBounds(x, row) ? st.idx(x, row) : -1;
-  if (gi >= 0 && st.flags[gi]) {
-    switch (TILE_DEFS[st.type[gi]]?.vanilla?.sheet) {
-      case 53: variant = 0; break;                              // :3522-3524 沙
-      case 234: variant = 1; break;                             // :3525-3527 猩红沙
-      case 116: variant = 2; break;                             // :3528-3530 珍珠沙
-      case 112: variant = 3; break;                             // :3531-3533 腐化沙
-    }
-  }
-  if (x >= 380 && x <= worldW - 380) variant += 4;              // :3534-3537 IsPalmOasisTree(:27352-27359)
-  return variant;                                               // :3538
-}
-
-/** 树干(5)/棕榈(323) 内部 id 解析（按 vanilla.sheet 反查；模块加载时一次） */
-const TREE_VANILLA = (() => {
-  let trunk = -1, palm = -1;
-  for (let id = 0; id < TILE_DEFS.length; id++) {
-    const s = TILE_DEFS[id]?.vanilla?.sheet;
-    if (s === 5 && trunk < 0) trunk = id;
-    else if (s === 323 && palm < 0) palm = id;
-  }
-  return { trunk, palm };
-})();
 
 export class ChunkCache {
   chunks = new Map<number, ChunkPair>();

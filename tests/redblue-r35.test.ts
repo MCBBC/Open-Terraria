@@ -70,10 +70,29 @@ describe('R35-C 1168 烟雾弹弹跳真值(aiStyle14)', () => {
   });
   it('C-2 Arrow 拖尾=每 tick 1-2×d31 烟(:25200-25211 三元组)', () => {
     const arrowSrc = readFileSync(new URL('../src/entities/Arrow.ts', import.meta.url), 'utf8');
-    const m = arrowSrc.match(/projId === 196 && game\.spawnDust[\s\S]{0,600}?}/);
+    const m = arrowSrc.match(/projId === 196 && game\.spawnDust[\s\S]{0,800}?}/);
     expect(m).toBeTruthy();
     expect(m![0]).toContain('31');
-    expect(m![0]).toContain('- (0.4 +');   // vy 上飘 −(0.4..2.35)
+    expect(m![0]).toContain('-(0.4 +');     // vy 上飘 −(0.4..2.35)
     expect(m![0]).toContain('* 0.025');     // vx ±Next(-10,11)×0.025
+  });
+});
+
+describe('R35-D 3005 绳索线圈弹道化(aiStyle35)', () => {
+  it('D-1 飞行期延迟重力 [0.2@30] 入 AI1_GRAV(:27581-27590)', () => {
+    const cs = readFileSync(new URL('../src/data/vanillaItemCombat.ts', import.meta.url), 'utf8');
+    expect(cs).toMatch(/475: \[0\.2, 30\], 476: \[0\.2, 30\], 505: \[0\.2, 30\], 506: \[0\.2, 30\]/);
+  });
+  it('D-2 Arrow 撞块铺绳:≤10 格向下+IsRope 滑过+四弹映射(:27655-27720)', () => {
+    const as = readFileSync(new URL('../src/entities/Arrow.ts', import.meta.url), 'utf8');
+    expect(as).toMatch(/ROPE_COIL_TILE\[this\.projId\] !== undefined/);
+    expect(as).toContain("475: 'v_353_vine_rope'");
+    expect(as).toContain("506: 'v_366_web_rope'");
+    expect(as).toContain("505: 'v_365_silk_rope'");
+    const blk = as.match(/ROPE_COIL_TILE\[this\.projId\] !== undefined[\s\S]{0,900}?killNow/);
+    expect(blk).toBeTruthy();
+    expect(blk![0]).toContain('n < 10');
+    expect(blk![0]).toContain('TILE_DEFS[stRc.get(rcx, rcy)]?.rope');   // IsRope 下滑
+    expect(blk![0]).toContain('setTile');
   });
 });

@@ -467,8 +467,6 @@ export class Player extends Entity {
   /** 出入水 10t 去抖（Player.wetCount，Player.cs:27464/27558 置 10、:27651 每tick 递减、
    *  :37203 重生清零）——水波涟漪尺寸因子（WaterShaderData.cs:263 h·wetCount/9） */
   wetCount = 0;
-  /** ★偏离实验 v2：入水翻转 tick 液面 Y（渲染端涟漪/洗掠钳位用；离水清） */
-  wetEntrySurfaceY: number | undefined;
   headUnderwater = false;
   /** 税务员累积税款（Player.cs:792 taxMoney，铜币；对话「收集」领取） */
   taxMoney = 0;
@@ -2685,8 +2683,6 @@ export class Player extends Entity {
       // :1418 wet 只认 !lava && !shimmer(蜜算 wet);岩浆里不能"游泳"
       this.inWater = r.wet && !this.inLava;
       this.inHoney = r.honey;
-      if (this.inWater && !wasInWater) this.wetEntrySurfaceY = r.surfY;
-      else if (!this.inWater) this.wetEntrySurfaceY = undefined;
     }
     // 入水/出水瞬间：水花尘 + 水花声（Player.cs:27464-27636,2026-08-20 补齐——
     // 曾只播入水声、零粒子=用户报"入水出水效果非常轻微且出水几乎没有"）

@@ -73,6 +73,10 @@ const RUN = process.env.SW_QQQBC === '1';
   };
   const shimmer = (x: number, y: number) => lt[I(x, y)] === 3;
 
+  // 帧/半砖通道（137 雕像规则用，来自 JS 管线 slot50 末快照——与 vanilla 前态逐格同）
+  const fxJ = new Uint16Array(readFileSync('/tmp/qqq-out/js099.fx').buffer, 0, N);
+  const fyJ = new Uint16Array(readFileSync('/tmp/qqq-out/js099.fy').buffer, 0, N);
+
   const TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
   const UP_PROT = new Set([21, 26, 72, 77, 88, 467, 488]);
   const canKillTile = (x: number, y: number): boolean => {
@@ -165,11 +169,20 @@ const RUN = process.env.SW_QQQBC === '1';
       }
       // ⑥
       if (wal[i] === 13 || wal[i] === 14 || wal[i] === 87) liq[i] = 0;
-      // ⑦162（1457 双邻门；137 雕像邻清需帧通道，跳过——校验暴露再补）
-      if (act[i] && typ[i] === 162
-        && !act[I(k, l - 1)] && !act[I(k, l + 1)] && liq[I(k, l + 1)] === 0
-        && canKillTile(k, l)) {
-        act[i] = 0;
+      // ⑦（137 雕像邻清 + 162 薄冰双邻门）
+      if (act[i]) {
+        if (typ[i] === 137) {
+          const fy18 = Math.floor(fyJ[i]! / 18);
+          if (fy18 <= 2 || fy18 === 5) {
+            const dir = fxJ[i]! >= 18 ? 1 : -1;
+            const ni = I(k + dir, l);
+            if (hf[ni] === 1 || sl[ni] !== 0) { act[ni] = 0; ev(`ST ${k} ${l} -> ${k + dir},${l}`); }
+          }
+        } else if (typ[i] === 162
+          && !act[I(k, l - 1)] && !act[I(k, l + 1)] && liq[I(k, l + 1)] === 0
+          && canKillTile(k, l)) {
+          act[i] = 0;
+        }
       }
       // ⑪
       if (act[i] && typ[i] === 237 && typ[I(k, l + 1)] === 232) typ[I(k, l + 1)] = 226;

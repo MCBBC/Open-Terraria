@@ -40,7 +40,8 @@ const RUN = process.env.SW_QQQB === '1';
       width: 4200, height: 1200, seedText: '22222', evil: 1,
       onWorldPartial: (w, i, nm) => {
         marks.push(`P ${i} ${nm}@${n}`);
-        if (nm === '瓦片清理' && process.env.SW_QQQB_SNAP === '1') {
+        if ((nm === '瓦片清理' || nm === '仙人掌珊瑚') && process.env.SW_QQQB_SNAP === '1') {
+          const tag = nm === '瓦片清理' ? 'js100' : 'js099';
           const st = w.store;
           const W = st.w, H = st.h;
           const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
@@ -54,11 +55,20 @@ const RUN = process.env.SW_QQQB === '1';
             typ[i] = act[i] ? (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!]! : 9999) : 0;
           }
           const dump = (nm2: string, arr: Uint8Array | Uint16Array) =>
-            writeSync(openSync(`/tmp/qqq-out/js100.${nm2}`, 'w'), Buffer.from(arr.buffer, arr.byteOffset, arr.length * arr.BYTES_PER_ELEMENT));
+            writeSync(openSync(`/tmp/qqq-out/${tag}.${nm2}`, 'w'), Buffer.from(arr.buffer, arr.byteOffset, arr.length * arr.BYTES_PER_ELEMENT));
           dump('act', act);
           dump('typ', typ);
-          marks.push(`SNAP done@${n} N=${W * H}`);
-          throw new Error('QQQB snap-abort after TileCleanup');
+          if (tag === 'js099') {
+            // 帧通道（137 雕像规则用）——内部 id 直接存，重放端只查 137 的内部 id
+            dump('fx', st.frameX);
+            dump('fy', st.frameY);
+            dump('half', st.half);
+            dump('slope', st.slope);
+            dump('inact', new Uint8Array(st.wire.buffer, st.wire.byteOffset, st.wire.length)); // bit5=inActive 原样
+          }
+          marks.push(`SNAP ${tag} done@${n}`);
+          if (tag === 'js100') throw new Error('QQQB snap-abort after TileCleanup');
+          return;
         }
       },
     });

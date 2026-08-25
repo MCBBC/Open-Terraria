@@ -19,13 +19,13 @@ await p.evaluate(() => {
   g.input.mouseX = sx + 60; g.input.mouseY = sy - 60;
   g.input.mouseDown = true; g.input.mouseHeld = true;
 });
-await sleep(900);   // 蓄力中(charge≈30+)
+await sleep(2000);   // 蓄力中(charge≈60 满档,远超旧 24t swing 窗)
 const crop = await p.evaluate(() => {
   const g = window.__swGame;
   const [sx, sy] = g.camera.worldToScreen(g.player.cx, g.player.cy);
   return { x: Math.max(0, Math.round(sx - 70)), y: Math.max(0, Math.round(sy - 90)), width: 140, height: 150 };
 });
-await p.screenshot({ path: '/tmp/mooncloud-probe/gf-charging.png', clip: crop });
+await p.screenshot({ path: '/tmp/mooncloud-probe/gf-charging-full.png', clip: crop });
 const st = await p.evaluate(() => {
   const g = window.__swGame;
   const orbs = (g.entities?.all?.() ?? []).filter((e) => e && e.projId === 1115);

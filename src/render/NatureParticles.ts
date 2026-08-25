@@ -84,8 +84,9 @@ export class NatureParticles {
   private st: TileStore | null = null;
   maxLeaves = 220;
   maxDrips = 90;
-  /** 云雾池上限（原版共用 600 格 gore 池；云雾独占上限防挤占视效预算） */
-  maxClouds = 160;
+  /** 云雾池上限（原版 Gore.NewGore 池 600 格,墓地雾饱和时占满;曾 160=明显偏稀疏
+   *  2026-08-25 用户报对齐复查） */
+  maxClouds = 600;
   /** 滴水溅落音钩子（Game 注入 Sfx；Gore.cs :971-984：SoundID 39=Drip，
    *  落地 variant rand(0,1) / 入水 variant 2，位置 +8,+8；flag4 水型本模块内静音） */
   onDripSplash: ((x: number, y: number, wet: boolean) => void) | null = null;
@@ -325,15 +326,27 @@ export class NatureParticles {
     return st.type[st.idx(x, y)] === 0 || !st.isSolid(x, y);
   }
 
+  /** Gore.NewGore 无条件随机初速踢（Gore.cs:1350-1351）：vy -= Next(10,31)×0.1
+   *  （上踢 1.0-3.0）、vx += Next(-20,21)×0.1（±2.0）——墓地雾「上腾蒸散」视觉
+   *  的来源（UpdateAmbientFloorCloud 只归一 X,踢出的 vy 永久保留）；曾漏做 =
+   *  雾贴地平漂不上升（2026-08-25 对齐复查） */
+  private goreKick(vx: number, vy: number): { vx: number; vy: number } {
+    return {
+      vx: vx + (Math.floor(Math.random() * 41) - 20) * 0.1,
+      vy: vy - (10 + Math.floor(Math.random() * 21)) * 0.1,
+    };
+  }
+
   /** SpawnFloorCloud（:121-133）：(x,y-1) 格中心出生，上浮 0-16px；
    *  上浮 <4px 换贴地皮型 1090，否则 1087-1089；vx = 0.4×视觉风 */
   private spawnFloorCloud(x: number, y: number): void {
     if (this.clouds.length >= this.maxClouds) return;
     const lift = 16 * Math.random();
     const type = lift < 4 ? 1090 : 1087 + Math.floor(Math.random() * 3);
+    const kick = this.goreKick(0, 0);                  // NewGore 传入 Velocity=UnitX×0.4×wind
     this.clouds.push({
       x: x * TILE + 8, y: (y - 1) * TILE + 8 - lift,
-      vx: 0, vy: 0, alpha: 0, timeLeft: 600,          // NewGore 初始（Gore.cs:1347-1352）
+      vx: kick.vx, vy: kick.vy, alpha: 0, timeLeft: 600,   // NewGore 初始（Gore.cs:1345-1354）
       scale: 0.8 + Math.random() * 0.2, type, rotation: 0, airborne: false, dead: false,
     });
   }
@@ -354,16 +367,19 @@ export class NatureParticles {
     turn -= step * n * 0.5;                            // :89
     let px = x * TILE + 8, py = y * TILE + 8;
     for (let i = 0; i < n; i++) {
-      if (Math.random() < 0.1) step *= Math.random() * 2 - 1;   // :94-97
-      const jx = (Math.random() * 2 - 1) * 4, jy = (Math.random() * 2 - 1) * 4;  // NextVector2Circular(4,4)
+      if (Math.random() < 0.1) step *= Math.random() < 0.5 ? -1 : 1;   // :94-97 NextFloatDirection=±1
+      // NextVector2Circular(4,4)=圆盘均匀（角度均匀+半径√rand）,非方阵均匀
+      const ca = Math.random() * Math.PI * 2, cr = Math.sqrt(Math.random()) * 4;
+      const jx = Math.cos(ca) * cr, jy = Math.sin(ca) * cr;
       const type = 1091 + (Math.random() < 0.5 ? 0 : 2);        // 1091 + Next(2)*2
       const scale = baseScale + Math.random() * varScale;
       const ang = turn + step;
       const dx = Math.cos(ang) * 1.4, dy = Math.sin(ang) * 1.4; // UnitX.RotatedBy(num9)*1.4
       if (this.clouds.length < this.maxClouds) {
+        const kick = this.goreKick(dx * wind, dy * wind);       // vector4 × WindForVisuals + NewGore 踢
         this.clouds.push({
           x: px + jx - 10, y: py + jy,                // vector2 + vector3 - (10,0)
-          vx: dx * wind, vy: dy * wind,               // vector4 * WindForVisuals
+          vx: kick.vx, vy: kick.vy,
           alpha: 0, timeLeft: 600, scale, type, rotation: ang, airborne: true, dead: false,
         });
       }

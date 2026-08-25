@@ -427,13 +427,14 @@ class WaterWaveSystem {
     //   2D bob 路径与 GL 全屏路径表现一致。只放大缓冲偏差=扰动响应，不动噪声底噪）
     const h = this._readR(px, py);
     //   默认 2=2026-08-25 用户校准"刚刚好"（1×入水扰动 ~1-2px 被环境噪声淹没）
-    const waveAmp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 2; } catch { return 2; } })();
+    const waveAmp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 1; } catch { return 1; } })();
     const hClamp = Math.min(0.3, Math.max(-0.3, (h - 0.5) * waveAmp));
     const I = this.intensity;
     const dispx = gx * 0.1 * I;
     const dispy = gy * 0.1 * I - hClamp;
-    out[0] = dispx * 0.1 * 32;   // c14.x=0.1 × c5=32/res × res
-    out[1] = dispy * 32;         // c14.y=1.0
+    // ★0.1 因子两项统一（:73 合成后 ×c14；c5=32/res）——曾漏乘波场项 10 倍
+    out[0] = dispx * 3.2;   // dispx·0.1·32
+    out[1] = dispy * 3.2;   // dispy·0.1·32
   }
 
   /** 波光 tint 量（obj19 :106-111 精确解码，2026-08-25 反汇编订正）：
@@ -643,7 +644,6 @@ export interface WaveEntitySample {
   rotation?: number;
   /** ★偏离实验 v2：入水翻转 tick 液面 Y——wet 窗口内涟漪+洗掠 Y 钳此线
    *  （原版跟身沉底，高速落入时扰动全部在水下=水面线无感，用户实测定罪） */
-  entrySurfaceY?: number;
   /** 弹幕侧预筛：CanDistortWater[type] && !NoLiquidDistortion[type] &&（wet ||
    *  ignoreWater 现场复查）——调用方算好放 projDistort && wet */
   projDistort?: boolean;
@@ -705,18 +705,16 @@ export function injectEntity(e: WaveEntitySample, camX: number, camY: number,
     const [b, fx, fy] = npcWashParams(e.vx, e.vy, ov ? ov[0] : e.vx, ov ? ov[1] : e.vy,
       e.w, e.h, e.rotation ?? 0, viscous, e.honeyWet || e.lavaWet);
     if (ov) { ov[0] = e.vx; ov[1] = e.vy; } else _oldVel.set(key, [e.vx, e.vy]);
-    // ★偏离实验 v2：wet 窗口内洗掠+涟漪 Y 钳入水液面线（原版跟身沉底）
-    const pinY = (e.wet && e.entrySurfaceY !== undefined) ? e.entrySurfaceY : null;
     if (e.wet) {
       // quad @ Center − v̂·10（:201/:210），流方向 = vColor.xy（含 +0.5 编码）
-      waterWaves.injectWash(cx0 - vnx * 10, pinY ?? cy0 - vny * 10, e.w * 2, e.h * 2, fx, fy, b);
+      waterWaves.injectWash(cx0 - vnx * 10, cy0 - vny * 10, e.w * 2, e.h * 2, fx, fy, b);
     }
     if (e.wetCount !== 0) {
       // raw Color 重载（:228）：Color(0.5, (wet?num:−num)·0.5+0.5, 0,1)×0.5
       const n2 = npcRippleStrength(velLen);
       const g = ((e.wet ? n2 : -n2) * 0.5 + 0.5) * 0.5;
       const k = Math.min(1, Math.max(0, n2 * 10));
-      queueRippleRaw(cx0 + vnx * (e.wet ? 5 : -20), pinY ?? cy0 + vny * (e.wet ? 5 : -20),
+      queueRippleRaw(cx0 + vnx * (e.wet ? 5 : -20), cy0 + vny * (e.wet ? 5 : -20),
         e.w * k, e.h * (e.wetCount / 9) * k, 0.25, g, 0.5, RippleShape.Circle, 0);
     }
     return;
@@ -727,17 +725,15 @@ export function injectEntity(e: WaveEntitySample, camX: number, camY: number,
     // :242-263：num3 = 0.05·√|vel|；quad @ Center − v̂·10；流方向 = v̂（+0.5 编码）
     let num3 = 0.05 * Math.sqrt(velLen);
     if (!viscous && (e.honeyWet || e.lavaWet)) num3 *= 0.3;
-    // ★偏离实验 v2：同 NPC 分支——wet 窗口内洗掠+涟漪 Y 钳入水液面线
-    const pinY = (e.wet && e.entrySurfaceY !== undefined) ? e.entrySurfaceY : null;
     if (e.wet) {
-      waterWaves.injectWash(cx0 - vnx * 10, pinY ?? cy0 - vny * 10, e.w * 2, e.h * 2,
+      waterWaves.injectWash(cx0 - vnx * 10, cy0 - vny * 10, e.w * 2, e.h * 2,
         vnx * 0.5 + 0.5, vny * 0.5 + 0.5, 0.5 * num3);
     }
     if (e.wetCount !== 0) {
       // (strength,size) 重载（:263）：num3 ×= 3 → s3；尺寸 (w, h·wetCount/9)·clamp(s3·10)
       const s3 = num3 * 3;
       const k = Math.min(1, Math.max(0, s3 * 10));
-      queueRippleSized(cx0 + vnx * (e.wet ? 5 : -20), pinY ?? cy0 + vny * (e.wet ? 5 : -20),
+      queueRippleSized(cx0 + vnx * (e.wet ? 5 : -20), cy0 + vny * (e.wet ? 5 : -20),
         e.wet ? s3 : -s3, e.w * k, e.h * (e.wetCount / 9) * k, RippleShape.Circle, 0);
     }
     return;

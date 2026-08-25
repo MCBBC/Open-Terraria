@@ -1644,8 +1644,6 @@ export class Enemy extends Entity {
    *  默认 -1 = 不翻（与原版 spriteDirection 缺省一致） */
   snailSdir = -1;
   inWater = false;       // 入水检测（溅落声用）
-  /** ★偏离实验 v2：入水翻转 tick 液面 Y（npcLiquid 写，Renderer 消费） */
-  wetEntrySurfaceY?: number;
   /** Boss 专属初始化标记(部件生成等一次性动作;aiN 默认值有歧义故独立字段) */
   bInit = false;
   /** 部件 → 主体引用（骷髅王手 36 → 头：渲染臂骨 IK 与存活判定用） */

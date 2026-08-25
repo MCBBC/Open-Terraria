@@ -5067,7 +5067,7 @@ export class Game implements GameHooks {
     }
     // ---- 标注模式：点击标记方块（优先于挖掘/放置/使用；同款按下边沿门——
     //      annotateMode 下 updateUse 不消费点击，电平按住扫过新格会误标） ----
-    if (this.annotateMode && inp.mouseDown && !this._prevMouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open && !this.renderer.timeUiHover && !this.renderer.weatherUiHover) {
+    if (this.annotateMode && inp.mouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open && !this.renderer.timeUiHover && !this.renderer.weatherUiHover) {
       this._annoLatch = true;
       const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
       if (this.fixTexMode) {
@@ -25692,10 +25692,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 单 wav 直播（环境声三表专用,失败静默——与 playSfxFiles 不同,不回退合成音） */
   /** channel 蓄力期手持动画续期（Player.ItemCheck channel 分支 itemAnimation 钉满——
    *  手持法杖全程举向鼠标不脱落；GlacierFangShot/PrismProj 蓄力态逐 tick 调用。
-   *  swing 窗（=useAnimation 24t）远短于蓄力（60+ 拍），不续则法杖中途消失） */
+   *  ★必须钉 t=dur：postUpdate 每帧 t-- 归零即 swing=null（法杖消失）——曾用
+   *  max(t,1) 弱钉,1→0 一帧后照样清,用户实报"蓄力时法杖放下压根没有手持"） */
   refreshChannelItem() {
-    if (this.swing) this.swing.t = Math.max(this.swing.t, 1);
-    this.player.useTime = Math.max(this.player.useTime, 1);
+    if (this.swing) this.swing.t = Math.max(this.swing.t, this.swing.dur);
+    this.player.useTime = Math.max(this.player.useTime, 10);   // SetDummyItemTime(10)（:37609）
   }
 
   playSfxWav(file: string, vol?: number, x?: number, y?: number, pitch?: number, replace?: boolean) {
