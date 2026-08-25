@@ -109,7 +109,10 @@ export function showSplash(opts: {
 
   let loadingDone = false;
   let removed = false;
-  void Promise.resolve(opts.loading).then(() => { loadingDone = true; });
+  void Promise.resolve(opts.loading).then(() => {
+    loadingDone = true;
+    revealWhenReady();   // 下载完成:HOLD/渐隐段中到达 → 揭幕;时序尚早 → 自然路径
+  });
 
   // ★首访过渡图等待(zip 发布形态,2026-08-25):三层图网络无散件(只在 assets-zip
   //  分片缓存里),直接设 URL 首访必 404 → 过渡图永久空白、加载完"跳过"主菜单过渡。
@@ -123,7 +126,9 @@ export function showSplash(opts: {
           const ms = await Promise.all(splashUrls.map((u) => caches.match(u)));
           if (ms.every(Boolean)) break;
         } catch { break; }
-        if (removed || performance.now() - t0w > 25_000) break;
+        // ★无时限(2026-08-25 用户实报"某些环境纯黑"):原 25s 上限放弃后 URL 挂上
+        //   即 404 定局=全程无图。HOLD 态下过渡页长存,图到即显示,轮询到 removed 为止
+        if (removed) break;
         await new Promise((r) => setTimeout(r, 250));
       }
     }
@@ -133,7 +138,7 @@ export function showSplash(opts: {
     front.style.backgroundImage = `url(${splashUrls[2]})`;
   })();
 
-  const t0 = performance.now();
+  let t0 = performance.now();   // ★let(2026-08-25 跳过快进):trySkip 前移时间轴用
   let b = 0;            // white alpha 0..255
   let timelineOver = false;
   /** 角标文字（版本/署名）渐显驱动：单调广播 --sw-splash-alpha（只升不降）——
@@ -144,14 +149,16 @@ export function showSplash(opts: {
   let menuBehind = false;
   let fadeOutStarted = false;
   const goTransparent = () => { root.style.background = 'transparent'; };
-  // ★跳过(2026-08-25 用户要求):点击/空格立即收场揭幕——双门条件:
-  //   ①菜单已在幕后(revealBehind 已调,否则移除=揭幕闪黑)②资源下载空闲
-  //  (canSkip 谓词=assetsDownloadIdle,底部指示器工作期间禁止)。不满足时
-  //  输入忽略(不排队不加速);监听随 remove() 摘除
+  // ★跳过(2026-08-25 用户要求+澄清):点击/空格【快进至渐隐段起点】——不硬切
+  //  移除,淡出自然播完透出幕后菜单。双门条件:①菜单已在幕后(revealBehind 已调)
+  //  ②资源下载空闲(canSkip 谓词=assetsDownloadIdle,底部指示器工作期间禁止)。
+  //  不满足时输入忽略;已处渐隐段则无操作;监听随 remove() 摘除
   const canSkipNow = (): boolean => menuBehind && (opts.canSkip ? opts.canSkip() : loadingDone);
   const trySkip = (): void => {
     if (removed || !canSkipNow()) return;
-    remove();
+    const fadeStart = n5 - n6;          // 渐隐段起点(ms)
+    const now = performance.now();
+    if (now < fadeStart) t0 = now - fadeStart;   // 时间轴前移=立即进入渐隐态
   };
   const onSkipPointer = (): void => trySkip();
   const onSkipKey = (e: KeyboardEvent): void => {
@@ -175,17 +182,32 @@ export function showSplash(opts: {
       : timelineOver ? '1'
         : (flowerVisible ? String(b / 255) : '0');
   };
+  // ★下载等待冻结态(2026-08-25 用户实报"指示器还在过渡图早退"+"某些环境纯黑"):
+  //   原时序尽即 b=0 置黑+向日葵=过渡图早退。改为 HOLD:冻结过渡图可见(保底亮度
+  //   160)+向日葵,直到 loadingDone → revealWhenReady 快速渐隐揭幕
+  let holding = false;
+  let holdB = 0;
+  let revealing = false;
   const step = () => {
-    if (removed) return;
+    if (removed || revealing) return;
     const t = performance.now() - t0;
     const a = splashAlphaAt(t, quick);
-    if (a < 0) { if (!loadingDone) { b = 0; timelineOver = true; } else { remove(); return; } }
+    if (a < 0) {
+      if (!loadingDone) {
+        if (!holding) { holding = true; holdB = Math.max(b, 160); }
+        b = holdB;
+        timelineOver = true;
+      } else { remove(); return; }
+    }
+    else if (!loadingDone && t >= n5 - n6) {
+      // 渐隐段但下载未完:同样冻结亮度(不随曲线衰减、不透出菜单)
+      if (!holding) { holding = true; holdB = Math.max(Math.round(a), 160); }
+      b = holdB;
+    }
     else b = Math.round(a);
-    // 渐隐段起点（alpha 开始下降处）：幕后有菜单 → 底色转透明，场景淡出直接
-    // 透出菜单（黑底会在揭幕瞬间跳切，2026-08-24 用户反馈）
     if (!fadeOutStarted && t >= n5 - n6) {
       fadeOutStarted = true;
-      if (menuBehind) goTransparent();
+      if (menuBehind && loadingDone) goTransparent();   // ★仅加载完成才透出菜单
     }
     apply();
     // LoadingSunflower（:52041-52060：Frame(1,19,0,(帧/3+10)%19)，53px/帧=1007/19）
@@ -208,6 +230,25 @@ export function showSplash(opts: {
     root.remove();
     document.documentElement.style.removeProperty('--sw-splash-alpha'); // 角标回满亮(菜单态)
     resolveFinished();
+  };
+  /** 下载完成揭幕(HOLD 态/渐隐段中 loadingDone 到达):透出菜单+快速渐隐移除。
+   *  时序尚早(自然路径会处理)则不动。revealing 抑制 step 的免检移除 */
+  const revealWhenReady = () => {
+    if (removed || revealing || !menuBehind) return;
+    if (!holding && performance.now() - t0 < n5 - n6) return;
+    revealing = true;
+    goTransparent();
+    const startB = Math.max(b, 40);
+    const t0r = performance.now();
+    const fadeStep = () => {
+      if (removed) return;
+      const k = Math.min(1, (performance.now() - t0r) / 400);
+      b = Math.round(startB * (1 - k));
+      apply();
+      if (k < 1) requestAnimationFrame(fadeStep);
+      else remove();
+    };
+    requestAnimationFrame(fadeStep);
   };
   return {
     done: remove, // 旁路立即收场（正常路径不调——时序尽自收场）

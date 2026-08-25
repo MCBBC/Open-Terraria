@@ -805,13 +805,13 @@ export function clampToDeadZone(
 }
 
 /** Hover 贴地探针（Mount.cs:3443-3448 Collision.TileCollision(position, UnitY*gravDir,…)
- *  的本仓等价）：脚底下一行任一列实心 = 下方有地面（探针残量=0 → 免疲劳坐骑不起落）。
+ *  的本仓等价）：重力方向下一行任一列实心 = 有地面（探针残量=0 → 免疲劳坐骑不起落）。
  *  原版 fallThrough:false 平台亦拦——isSolid 含平台档（TileStore.isSolid 语义）。
  *  无世界缓存（探针合成视图）按有地面=不起落 */
 export function groundBelowProbe(p: MountedPlayerView): boolean {
   const st = p.store;
   if (!st) return true;
-  const ty = Math.floor((p.y + p.h + 1) / 16);
+  const ty = p.gravDir === -1 ? Math.floor((p.y - 1) / 16) : Math.floor((p.y + p.h + 1) / 16);
   const x0 = Math.floor(p.x / 16), x1 = Math.floor((p.x + p.w - 0.01) / 16);
   for (let tx = x0; tx <= x1; tx++) {
     if (st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty)) return true;

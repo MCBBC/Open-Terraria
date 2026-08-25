@@ -17487,7 +17487,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (!playerCanHitEnemy(en, this)) continue;
         if (Math.hypot(en.cx - this.player.cx, en.cy - this.player.cy) > 200) continue;
         en.cursedT = Math.max(en.cursedT, 2); // AddBuff(323,120) 灼烧 2s
-        if (hitTick) en.hurt(Math.max(1, Math.round(20 * this.player.damageMult('melee'))), 0, 0, this);
+        if (hitTick) en.hurt(Math.max(1, Math.round(20 * this.player.damageMult('melee'))), 0, 0, this, 0, false, 0, true);   // 玩家伤害源(:9896)=DPS 计
       }
       // PvP 半边（Player.cs:9931-9946）：hostile 时 200px 内敌对玩家 60t 一跳 20 直伤
       // （死因 16 inferno）+ 地狱火 323 2s——经 msg44 bit6 广播意向、被击端本地结算
@@ -18101,7 +18101,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (en.hurt && Math.abs((en.cx ?? cx) - cx) < hb + (e.w >> 1)
         && Math.abs((en.cy ?? cy) - cy) < hb + (e.h >> 1)) {
         const hurt = Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100)));   // Main.DamageVar ±15%
-        en.hurt(hurt, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this, pen); // ⑥（音/飘值=StrikeNPC 单点)
+        en.hurt(hurt, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this, pen, false, 0, true); // ⑥（音/飘值=StrikeNPC 单点);fromPlayer=DPS 计
         // 冰霜盔甲×爆炸（StatusNPC :11524-11527 `(melee||ranged) && frostBurn →
         // AddBuff(324, 60×Next(5,15))`）：爆炸结算同走 Damage→StrikeNPC→StatusNPC
         // 链，ranged 弹（火箭/炸弹族 SetDefaults ranged）与冰霜甲在身即触发——
@@ -23402,7 +23402,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const critE = Math.random() < (this.player.critChance('ranged') / 100);
             e.hurt(dmg, Math.sign(ecx - cx286) * (flags?.kb ?? 0), 0,
               this as unknown as import('../entities/types').GameHooks,
-              flags?.arpen ?? 0, critE);
+              flags?.arpen ?? 0, critE, 0, true);   // !hostile=玩家弹=DPS 计
           }
         }
       }

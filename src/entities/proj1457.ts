@@ -47,7 +47,7 @@ interface HitTarget {
   x: number; y: number; w: number; h: number;
   id: number;
   dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
 }
 
 /** 通用命中结算：盒相交 → 暴击掷 → hurt + StatusNPC + 飘字。
@@ -79,7 +79,7 @@ function dealContacts(
     const crit = Math.random() < self.critChance;
     const dmg = crit ? self.damage * 2 : self.damage;
     const kdir = Math.sign((e.x + e.w / 2) - self.cx) || 1;
-    e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit);   // 音/飘值=单点
+    e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计(Projectile.cs:13709)
     // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t;同 Arrow.ts:3260 先例）
     applyProjStatus(self.projId, ent as unknown as Record<string, number>,
       { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
@@ -831,7 +831,7 @@ export class StormLightning extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign(e.x + e.w / 2 - this.cx) || 1;
-      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit);
+      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, ent as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });

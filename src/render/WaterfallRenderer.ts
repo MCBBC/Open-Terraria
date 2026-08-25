@@ -51,6 +51,17 @@ export class WaterfallRenderer {
   private lastFind = -1;
   private findFrame = 0;
 
+  /** 环境音累积（Main.cs:2285-2289 ambientWaterfall* + WaterfallManager.cs:962-964）：
+   *  绘制期逐瀑布格按屏心距离衰减累积强度（:713-719 num42=1−dist/(screenWidth×0.75)），
+   *  Main.Ambience(:13636) 每 15t 消费 → SoundID 34/35 循环音（强度=音量档） */
+  ambWf = { x: -1, y: -1, strength: 0 };
+  ambLava = { x: -1, y: -1, strength: 0 };
+
+  /** 环境音状态消费口（Game 每 15t 读） */
+  ambienceState(): { wf: { x: number; y: number; strength: number }; lava: { x: number; y: number; strength: number } } {
+    return { wf: this.ambWf, lava: this.ambLava };
+  }
+
   /** CheckForWaterfall(WaterfallManager.cs:95):活动瀑布格线性查——
    *  浸润带的"半砖+侧液>160+瀑布→让位"门消费(:3906) */
   checkForWaterfall(x: number, y: number): boolean {
@@ -137,6 +148,8 @@ export class WaterfallRenderer {
     }
     if (this.falls.length === 0) return;
     this.litCells.length = 0; // 岩浆光照格每帧重建(防无岩浆帧残留旧光)
+    this.ambWf.strength = 0;  // 环境音强度逐帧重建（Main.Ambience 消费,同 litCells 语义）
+    this.ambLava.strength = 0;
     const tex = SHEET.map((s) => atlas.ensureVImage(s) ?? null);
     // 水体瀑布按群系水色换贴图(通道表偏移;未知样式回退 0)
     const STYLE_TEX: Record<number, number> = {

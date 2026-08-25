@@ -2843,7 +2843,7 @@ export class UI {
     this.craftSearchEl = el('input') as HTMLInputElement;
     this.craftSearchEl.placeholder = Lang.text('Mods.SandboxWorld.Craft.SearchHint');
     this.craftSearchEl.style.cssText = 'flex:1; padding:4px 8px; background:#241e38; color:#fff; border:1px solid #6a5a8a; border-radius:4px; font-size:12px;';
-    this.craftSearchEl.addEventListener('input', () => { this.craftFocus = 0; this.craftScroll = 0; this.refreshVanillaCrafting(); });
+    this.craftSearchEl.addEventListener('input', () => { this.craftFocus = -1; this.craftScroll = 0; this.refreshVanillaCrafting(); });
     modernRow.appendChild(this.craftSearchEl);
     this.craftGridEl = el('div');
     this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:520px;';
@@ -3624,8 +3624,9 @@ export class UI {
   }
 
   /** 合成列表选中配方（材料格数据源；★仅点击行设置——2026-08-25 用户定案：
-   *  滚动只滚列表不换选中，材料格/详情不随滚动切换。搜索重置归零） */
-  private craftFocus = 0;
+   *  滚动只滚列表不换选中，材料格/详情不随滚动切换。-1=未选中（初始/搜索
+   *  重置）→ 材料格空,不默认显示第一个配方(2026-08-25 用户定案) */
+  private craftFocus = -1;
   /** 渲染窗滚动锚（滚轮/滚动条驱动；原与 craftFocus 同体——拆离后滚动不再
    *  改选中配方。窗起点 start=craftScroll-4，钳制/滑块几何同旧） */
   private craftScroll = 0;
@@ -3808,10 +3809,10 @@ export class UI {
   /** 现代合成网格材料行（1.4.5 CraftingGrid：左键=放入/右键=取回/合成=格子优先） */
   private refreshCraftGrid(avail: Array<{ r: VanillaRecipeLike; count: number }>): void {
     if (!this.craftGridEl) return;
-    // 材料格显示源：hover 预选行 > 滚轮焦点行（hover 不动渲染窗，见行 mouseenter 注）
-    const focusR = avail[this.hoverFocus >= 0
-      ? this.hoverFocus
-      : Math.min(this.craftFocus, avail.length - 1)]?.r ?? null;
+    // 材料格显示源：hover 预选行 > 点击选中的行 > 无（★不默认第一个配方,
+    // 2026-08-25 用户定案）。srcIdx 越界(搜索后 avail 缩短)同样视为无
+    const srcIdx = this.hoverFocus >= 0 ? this.hoverFocus : this.craftFocus;
+    const focusR = (srcIdx >= 0 && srcIdx < avail.length) ? avail[srcIdx]?.r ?? null : null;
     // 焦点配方变更：归还旧格内容
     if (focusR !== this.craftGridRecipe) {
       this.returnCraftGrid();

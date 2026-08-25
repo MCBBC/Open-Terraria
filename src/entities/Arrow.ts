@@ -794,7 +794,7 @@ export class Arrow extends Entity {
       if (Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
         e.hurt(crit ? this.damage * 2 : this.damage,
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit);
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       }
     }
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
@@ -835,7 +835,7 @@ export class Arrow extends Entity {
       if (Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
         e.hurt(crit ? this.damage * 2 : this.damage,
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit);
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       }
     }
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
@@ -872,7 +872,7 @@ export class Arrow extends Entity {
       if (Math.abs(ecx - this.cx) < R661 + e.w / 2 && Math.abs(ecy - this.cy) < R661 + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
         e.hurt(crit ? this.damage * 2 : this.damage,
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit);
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // fromPlayer=DPS 计
       }
     }
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
@@ -4572,7 +4572,7 @@ export class Arrow extends Entity {
         if (this.whipTagShot) {
           const en2 = e as unknown as import('./WhipTag').WhipTagged;
           // 黑收成 OnTaggedHit 直伤通道（916 等价：额外一跳落在被命中敌上）
-          en2.hurtFx = (d: number) => { e.hurt(d, Math.sign(this.vx) * 2, -2, game); };
+          en2.hurtFx = (d: number) => { e.hurt(d, Math.sign(this.vx) * 2, -2, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
           const res = resolveWhipTagHit(en2, dmg, game,
             (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
             SUMMON_TAG_MUL[this.projId] ?? 1, e.x + e.w / 2, e.y + e.h / 2);

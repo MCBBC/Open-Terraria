@@ -12,34 +12,12 @@ const browser = await puppeteer.launch({ executablePath: '/Applications/Google C
 const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
-await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' });
-await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
-await page.click('[data-act=sp]');
-await page.waitForSelector('.sw-list-panel', { timeout: 10000 });
-await new Promise(r => setTimeout(r, 600));
-if (!(await page.evaluate(() => !!document.querySelector('.sw-item')))) {
-  await page.click('.sw-list-footer [data-act=new]');
-  await page.waitForSelector('.sw-char-panel', { timeout: 10000 });
-  await new Promise(r => setTimeout(r, 400));
-  await page.click('.sw-char-row input[type=text]');
-  await page.keyboard.type('坐骑链审');
-  await new Promise(r => setTimeout(r, 200));
-  await page.click('[data-act=create]');
-  await page.waitForSelector('.sw-item', { timeout: 10000 });
-  await new Promise(r => setTimeout(r, 500));
-}
-await page.click('.sw-item');
-await page.waitForFunction(() => document.querySelector('.sw-list-title')?.textContent === '选择世界', { timeout: 10000 });
-await new Promise(r => setTimeout(r, 600));
-if (!(await page.evaluate(() => !!document.querySelector('.sw-list-panel .sw-item')))) {
-  await page.click('.sw-list-footer [data-act=new]');
-  await page.waitForSelector('.sw-wc-panel', { timeout: 10000 });
-  await new Promise(r => setTimeout(r, 400));
-  await page.click('[data-g=size] .sw-wc-opt');
-  await new Promise(r => setTimeout(r, 200));
-  await page.click('[data-act=create]');
-}
-await page.waitForFunction(() => window.__swGame?.player, { timeout: 180000 });
+await page.goto(ORIGIN, { waitUntil: 'networkidle0', timeout: 120000 });
+await page.waitForFunction(() => !document.getElementById('sw-splash'), { timeout: 300000, polling: 500 });
+await page.waitForSelector('select', { timeout: 120000 });
+await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; });
+await page.click('button');
+await page.waitForFunction(() => window.__swGame?.player, { timeout: 420000, polling: 1000 });
 await new Promise(r => setTimeout(r, 2000));
 
 const out = await page.evaluate(async () => {

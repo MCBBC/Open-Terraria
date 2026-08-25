@@ -2582,7 +2582,7 @@ export class MinionProj extends Entity {
           if (!this.hitCd.ready(en.id, 5)) continue; // localNPCHitCooldown=5（:6433）
           const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy,
             this.ownerRef());
-          en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, false, 1); // 随从=单发弹语义(不设敌方帧)
+          en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, false, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
           applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           this.attackFlash = 24;
         }
@@ -2635,7 +2635,7 @@ export class MinionProj extends Entity {
         && this.y - pad < en.y + en.h && this.y + this.h + pad > en.y)) continue;
       if (!this.hitCd.ready(en.id, cd)) continue;
       // 黑收成 OnTaggedHit 直伤通道（916 等价）
-      en.hurtFx = (d: number) => { en.hurt(d, Math.sign(en.cx - this.cx), -1, game); };
+      en.hurtFx = (d: number) => { en.hurt(d, Math.sign(en.cx - this.cx), -1, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
       const res = resolveWhipTagHit(en, dmg, game,
         (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy,
         this.ownerRef());
@@ -2661,7 +2661,7 @@ export class MinionProj extends Entity {
         ? (owner0.cx < en.cx ? 1 : -1)
         : Math.sign(en.cx - this.cx);
       en.hurt(golemCrit ? res.dmg * 2 : res.dmg,
-        kbDir * (this.knockback + mkb), 0, game, pen0); // 裸kb+minionKB(:52477)——0.5 自造已摘
+        kbDir * (this.knockback + mkb), 0, game, pen0, false, 0, true); // 裸kb+minionKB(:52477);fromPlayer=DPS 计
       applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
       this.attackFlash = 24;
       anyHit = true;
@@ -2966,7 +2966,7 @@ export class MinionProj extends Entity {
             const res = resolveWhipTagHit(en, dmgOf(), game,
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
               SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerRef());
-            en.hurt(res.dmg, 0, 0, game, 0, false, 1, false, 1); // 哨兵射击=单发弹语义;penPercent=1(:12443)
+            en.hurt(res.dmg, 0, 0, game, 0, false, 1, true, 1); // 哨兵射击=单发弹语义;penPercent=1(:12443);fromPlayer=DPS 计
             applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           }
           // 原版是 tracked 循环声（每 tick 场内有敌即续播）——单次 wav 按命中节拍近似，
@@ -2997,7 +2997,7 @@ export class MinionProj extends Entity {
               const en = ent as EnemyLike & { dead: boolean };
               if (en.dead) continue;
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
-                en.hurt(dmgOf(), Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, false, 1); // 单发弹语义
+                en.hurt(dmgOf(), Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, false, 1, true); // 单发弹语义;fromPlayer=DPS 计
                 applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 // 爆炸弹 694 族同属玩家弹——催化指环 6185 亦生效（StatusNPC :11192-11196）
                 applyProjStatus(boomProj, en as unknown as Record<string, number>, { setHuntressT2: ownerH,
@@ -3112,7 +3112,7 @@ export class MinionProj extends Entity {
                 const en = ent as EnemyLike & { dead: boolean };
                 if (en.dead) continue;
                 if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
-                  en.hurt(dmgOf(), Math.sign(en.cx - px) * this.knockback, -2, game, 0, false, 1); // 单发弹语义
+                  en.hurt(dmgOf(), Math.sign(en.cx - px) * this.knockback, -2, game, 0, false, 1, true); // 单发弹语义;fromPlayer=DPS 计
                   applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 }
               }
@@ -3839,10 +3839,10 @@ export class TigerPounce extends Entity {
       if (this.x >= en.x + en.w || this.x + this.w <= en.x
         || this.y >= en.y + en.h || this.y + this.h <= en.y) continue;
       this.hitSet.add(en.id);
-      en.hurtFx = (d: number) => { en.hurt(d, 0, -1, game); };
+      en.hurtFx = (d: number) => { en.hurt(d, 0, -1, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
       const res = resolveWhipTagHit(en, Math.max(1, Math.round(this.damage * mul)), game,
         add, SUMMON_TAG_MUL[818] ?? 1, en.cx, en.cy, this.ownerRef());
-      en.hurt(res.dmg, 0, -1, game); // knockBack=0（:46470 生成传 0）
+      en.hurt(res.dmg, 0, -1, game, 0, false, 0, true); // knockBack=0（:46470 生成传 0）;fromPlayer=DPS 计
     }
     void this.ownerRef;
   }

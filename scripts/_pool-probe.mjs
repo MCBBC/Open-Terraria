@@ -5,12 +5,17 @@ const page = await browser.newPage();
 await page.goto(process.env.SW_ORIGIN ?? 'http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await new Promise((r) => setTimeout(r, 2500));
 await page.waitForSelector('select', { timeout: 120000 });
-// 种子重建氙奇葩(12345 确定性)
-await page.waitForFunction(() => window.__swGame && window.__swGame.newWorld, { timeout: 300000 });
-await page.evaluate(async () => {
-  await window.__swGame.newWorld('12345', 4200, 1200);
+// 世界清单
+const worlds = await page.evaluate(() => {
+  const s = document.querySelector('select');
+  return Array.from(s.options).map((o, i) => ({ i, text: o.text }));
 });
-await page.waitForFunction(() => window.__swGame.world && window.__swGame.world.name, { timeout: 300000 });
+console.log('WORLD LIST:', JSON.stringify(worlds));
+const xen = worlds.find((w) => w.text.includes('氙奇葩'));
+const idx = xen ? xen.i : 0;
+console.log('picking index', idx, xen ? '(氙奇葩)' : '(fallback first)');
+await page.evaluate((i) => { const s = document.querySelector('select'); s.selectedIndex = i; s.parentElement.querySelector('button').click(); }, idx);
+await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swGame.player && window.__swItems, { timeout: 300000 });
 // 传送到 (2076,231)
 const out = await page.evaluate(() => {
   const g = window.__swGame;

@@ -456,7 +456,16 @@ export class Minecart extends Entity {
       if (this.vx !== 0) {
         const headX = Math.floor((this.x + this.w / 2 + Math.sign(this.vx) * this.w / 2) / 16);
         const feetY = Math.floor((this.y + this.h - 4) / 16);
-        if (st.inBounds(headX, feetY) && st.isSolid(headX, feetY)) {
+        // ★转角爬阶豁免(2026-08-25 用户实报"特殊转角正常速度上不去,极高冲劲才行,
+        //  下坡顺畅"):上台阶转角处,上排轨的正下方格(feetY 行)是台阶实心块——矿车
+        //  爬到角格中段时 feet 探针格=该实心块 → vx 每帧清零 → 永久卡死(真实世界
+        //  复现:x=2603 角格 vx 归零;行走 trace 证明 trackCollision 本身能爬上)。
+        //  豁免 = 前方格或其上一格是轨道(正在爬的台阶轨)→ 放行;纯墙(无轨)仍急停。
+        const headTrack =
+          st.inBounds(headX, feetY) && st.get(headX, feetY) === TRACK_TILE
+          ? true
+          : st.inBounds(headX, feetY - 1) && st.get(headX, feetY - 1) === TRACK_TILE;
+        if (!headTrack && st.inBounds(headX, feetY) && st.isSolid(headX, feetY)) {
           this.x -= this.vx;
           this.vx = 0;
         }
@@ -537,7 +546,7 @@ export class Minecart extends Entity {
           const e = ent as unknown as {
             x: number; y: number; w: number; h: number; dead: boolean;
             iframes: number; dontTakeDamage?: boolean; vanillaId?: number; friendly?: boolean;
-            hurt: (d: number, kx: number, ky: number, g: GameHooks, ap: number, c: boolean, p: number) => boolean;
+            hurt: (d: number, kx: number, ky: number, g: GameHooks, ap: number, c: boolean, p: number, fp?: boolean) => boolean;
           };
           if (e.dead || e.dontTakeDamage || !playerCanHitEnemy(e, game)) continue;   // friendly 门（e.friendly 是空字段 no-op——真旗在 def.friendly）
           if (!(rx < e.x + e.w && rx + rw > e.x && ry < e.y + e.h && ry + rh > e.y)) continue;
@@ -725,7 +734,7 @@ export class Minecart extends Entity {
       const e = ent as unknown as {
         x: number; y: number; w: number; h: number; dead: boolean;
         iframes: number; dontTakeDamage?: boolean; friendly?: boolean;
-        hurt: (d: number, kx: number, ky: number, g: GameHooks, ap: number, c: boolean, pi: number) => boolean;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, ap: number, c: boolean, pi: number, fp?: boolean) => boolean;
       };
       // CanBeChasedBy 口径（城镇/友好排除，同撞怪段 :27253）+ 玩家免疫门（:5218）
       if (e.dead || e.dontTakeDamage || !playerCanHitEnemy(e, game)) continue;   // friendly 门（同上，CanHit 门修空字段）
@@ -747,7 +756,7 @@ export class Minecart extends Entity {
         dirX: Math.sign(this.vx), age: 0,
       });
       // damage=60 → Damage()（无 melee/ranged/magic 旗 → 永不暴击；kb 0）
-      e.hurt(SUPER_CART_LASER_DMG, 0, 0, game, 0, false, 0);
+      e.hurt(SUPER_CART_LASER_DMG, 0, 0, game, 0, false, 0, true);   // 玩家矿车激光=DPS 计
     }
   }
 

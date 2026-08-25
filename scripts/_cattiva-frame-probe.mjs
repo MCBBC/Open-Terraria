@@ -16,19 +16,18 @@ const out = await page.evaluate(() => {
   g.setupDevMode();
   // 找捣蛋猫召唤物（1112 的持有物品）——扫背包 vi_389_/vi_6148_（Trusty Cattiva 物品）
   const inv = g.player.inv;
-  let staffIid = null;
-  for (let i = 0; i < 50; i++) {
-    const it = inv.slots[i];
-    if (!it) continue;
-    // 召唤杖 def.shoot = 随从弹 id（ItemDef.shoot 字段，items.ts:64）
-    if (it.def?.shoot === 1112) { staffIid = it.id; break; }
-  }
+  // 召唤杖 = vi_6148_*（Trusty Cattiva 杖，vid 6148 → shoot 1112）
+  const items = window.__swItems;
+  const staffKey = Object.keys(items).find((k) => /^vi_6148_/.test(k));
+  if (!staffKey) return { fail: 'vi_6148_* 未注册' };
+  const staffIid = items[staffKey];
+  inv.slots[10] = { id: staffIid, stack: 1 };
   if (staffIid === null) {
     // 兜底：直接扫 ITEM_DEFS 找 useProjectile 1112 的物品 id
     return { fail: '未找到捣蛋猫召唤物' };
   }
   // 选中该格并按住左键召唤
-  inv.selected = inv.slots.findIndex((s2) => s2 && s2.id === staffIid);
+  inv.selected = 10;
   return { staffIid, sel: inv.selected };
 });
 console.log(JSON.stringify(out));

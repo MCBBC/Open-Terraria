@@ -25,7 +25,7 @@ const remap = (v: number, a: number, b: number, c: number, d: number): number =>
 interface EnemyLike {
   cx: number; cy: number; x: number; y: number; w: number; h: number; id: number;
   dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
 }
 
 export interface InsanitySpawnParams {
@@ -171,7 +171,7 @@ export class InsanityShadowFriendly extends Entity {
       if (this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y) {
         this.hitEnemies.add(e.id);
-        e.hurt(this.dmg, 0, 0, game, 20);
+        e.hurt(this.dmg, 0, 0, game, 20, false, 0, true);   // fromPlayer=DPS 计
         if (--this.pierceLeft <= 0) {
           this.dead = true;
           game.onProjectileDeath?.(964, this.x, this.y);

@@ -745,8 +745,17 @@ export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | nul
     const tid = TILE_BY_KEY[tk];
     if (tid !== undefined) {
       const td = TILE_DEFS[tid];
-      // vframeAt 而非 vframe:窄条表(如压板 135 的 16×200 竖条)cols=0 会让 vframe 判越界
-      if (td?.vanilla) return atlas.vframeAt(td.vanilla.sheet, 0, 0) ?? atlas.vframe(td.vanilla.sheet, 0, 0);
+      if (td?.vanilla) {
+        // ★多格 tile 整脚印取图（(0,0,w×16,h×16)——首风格块在表原点,vanilla 帧
+        // 表 2px 边距不含）：曾 vframeAt 单格 16×16 = 多格放置物图标缺损
+        // （2026-08-25 用户报向日葵只显示左上角碎片）。单格 tile 维持 vframeAt
+        // （窄条表如压板 135 的 16×200 竖条 cols=0 会让 vframe 判越界）
+        if ((td.w ?? 1) > 1 || (td.h ?? 1) > 1) {
+          return atlas.vrect(td.vanilla.sheet, 0, 0, (td.w ?? 1) * 16, (td.h ?? 1) * 16)
+            ?? atlas.vframeAt(td.vanilla.sheet, 0, 0) ?? atlas.vframe(td.vanilla.sheet, 0, 0);
+        }
+        return atlas.vframeAt(td.vanilla.sheet, 0, 0) ?? atlas.vframe(td.vanilla.sheet, 0, 0);
+      }
     }
   }
   return null;

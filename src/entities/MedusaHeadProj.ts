@@ -28,7 +28,7 @@ import { prefixStat } from '../data/vanillaPrefixes';
 
 type MedusaEnemy = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
 };
 
 /** 凝视束存续（localAI[0] 20t：alpha Lerp(0,255,t/20) 渐显、≥20 Kill :33783-33790） */
@@ -182,7 +182,7 @@ export class MedusaHeadProj extends Entity {
       const tcx = t.x + t.w / 2, tcy = t.y + t.h / 2;
       angSum += Math.atan2(tcy - hy, tcx - hx);
       const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-      t.hurt(crit ? this.damage * 2 : this.damage, 0, 0, game, this.armorPen, crit);
+      t.hurt(crit ? this.damage * 2 : this.damage, 0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.beams.push({ x2: tcx, y2: tcy, age: 0, mag: 1 });
     }
     // ---- 4 条随机向散逸束（:45439-45446：1/4 全圆随机,其余 UnitX.RotatedByRandom(π)

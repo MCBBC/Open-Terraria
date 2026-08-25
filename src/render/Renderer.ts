@@ -8703,10 +8703,10 @@ export class Renderer {
         if (this.scene?.partyUp && world) this.drawPartyHat(ctx, n, world);
         ctx.filter = 'none';
         ctx.restore();
-        // ---- AttackType1 持械（DrawNPCExtras Main.cs:27121-27195）：弓/枪族攻击态
+        // ---- AttackType1 持械（DrawNPCExtras :27598-27695）：弓/枪族攻击态
         //      ai[0]==12 全程手持武器图标——旋转 = ai[2]×90°×朝向；228/229/209 原版
-        //      提前 return 无持械（:27124-27126,表里不列即同效）
-        if (!n.bound && n.attackState === 12) this.drawTownHoldout(ctx, n);
+        //      提前 return 无持械（表里不列即同效）。传本体帧几何供 Extra_52/53 overlay
+        if (!n.bound && n.attackState === 12) this.drawTownHoldout(ctx, n, r, addYT);
         return;
       }
       // 贴图条懒加载首帧未就绪：落入下方程序化兜底，本帧后懒加载完成
@@ -8720,19 +8720,25 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** AttackType1（弓/枪族）攻击态持械（DrawNPCExtras Main.cs:27121-27195 1:1）。
+  /** AttackType1（弓/枪族）攻击态持械（DrawNPCExtras :27598-27695 1:1）。
    *  触发 = AttackType==1 && ai[0]==12（攻击态全程）；228/229/209 原版提前 return
-   *  （:27124-27126）——TOWN_HOLDOUT 不列即同效。
-   *  锚 = Bottom − OffsetsNPCOffhand[2](14,26)，spriteDirection==1 时偏移 X 取负(:27102)；
-   *  旋转 = ai[2]×90°×spriteDirection(:27109)；握位 num12=floor(W/2)−grip（DrawPlayerItemPos
-   *  .X 恒 =W/2，:27164-27168）——右向 dx=num12、左向经 scale(-1,1) 镜像（=原版
-   *  origin=(W+num12,H/2)+Flip 的等价几何；旋转先绕锚后镜像的次序差 ≤2px 不再追）。
-   *  微光 alpha 与本体同档（GetShimmerColor 经 npcColor 通道）。 */
-  private drawTownHoldout(ctx: CanvasRenderingContext2D, n: TownNPC): void {
+   *  ——TOWN_HOLDOUT 不列即同效。
+   *  锚 = Bottom − OffsetsNPCOffhand[2](14,26)，spriteDirection==1 时偏移 X 取负；
+   *  旋转 = ai[2]×90°×spriteDirection（ai[2]=目标方向 Y 分量,连续值 ±0.5 门控
+   *  :56052-56054——非 90° 整数倍是原版本相）；握位 num12 = DrawPlayerItemPos.X − num11
+   *  （★DrawPlayerItemPos 尾 `result.X = num` = per-item 常量 ITEM_POS_NUM,默认 10
+   *  ——曾误用帧宽/2 → 旅商左轮 num12 差 24px 持枪浮空,2026-08-25 用户实报）。
+   *  368 特例：hm&&aim>-0.1 锚 Y+4 / !hm&&aim<-0.1 锚 Y-8（:27612-27618）；
+   *  22/368 攻帧行≥21 再画 Extra_52/53（微光 264/265）五帧持枪手 overlay——帧锚定
+   *  本体帧中心+4+addY,origin=本体帧半尺寸,原生尺寸不缩放（:27676-27695）。
+   *  右向 dx=num12、左向经 scale(-1,1) 镜像（=原版 origin=(W+num12,H/2)+Flip 等价）。 */
+  private drawTownHoldout(ctx: CanvasRenderingContext2D, n: TownNPC,
+    frame: { sw: number; sh: number }, addY: number): void {
     const ho = TOWN_HOLDOUT[n.vanillaId];
     if (!ho || !this.atlas) return;
     const hm = n.hardMode && ho.hm !== undefined;
-    const icon = this.atlas.vicon(hm ? ho.hm! : ho.pre);
+    const itemId = hm ? ho.hm! : ho.pre;
+    const icon = this.atlas.vicon(itemId);
     if (!icon) return;
     const iconImg = icon.img as HTMLImageElement;   // vicon 恒 Image 背书（atlas 懒加载）
     if (!(iconImg.width > 0) || !iconImg.width) return;
@@ -8740,15 +8746,17 @@ export class Renderer {
     const sd = n.facing;                                    // spriteDirection（+1 右 / −1 左）
     let ax = n.cx - (sd === 1 ? -14 : 14);                  // Bottom − OffsetsNPCOffhand[2]
     let ay = n.y + n.h - 26;
-    if (n.vanillaId === 22 && aim > -0.1) ay += 4;          // :27107 向导扶弓
-    if (n.vanillaId === 19 && hm) { ax -= 10 * sd; ay += 4; } // :27127-27131 爆破专家霰弹枪
+    if (n.vanillaId === 22 && aim > -0.1) ay += 4;          // 向导扶弓
+    if (n.vanillaId === 19 && hm) { ax -= 10 * sd; ay += 4; } // 爆破专家霰弹枪
+    if (n.vanillaId === 368 && hm && aim > -0.1) ay += 4;   // :27612-27614
+    if (n.vanillaId === 368 && !hm && aim < -0.1) ay -= 8;  // :27615-27617 旅商下瞄抬枪
     let grip = ho.grip ?? 4;
     let sc = ho.scale ?? 1;
-    if (n.vanillaId === 368) {                              // :27148-27162 高尔夫球手
+    if (n.vanillaId === 368) {                              // :27645-27659 旅商
       if (hm) grip = 18;
       else { if (aim < -0.1) grip = ho.preGripAimDown ?? 4; sc = ho.preScale ?? 1; }
     }
-    const num12 = Math.floor(icon.sw / 2) - grip;           // DrawPlayerItemPos.X − num11
+    const num12 = (ITEM_POS_NUM[itemId] ?? 10) - grip;      // DrawPlayerItemPos.X − num11
     ctx.save();
     ctx.globalAlpha = shimmerBodyAlpha(n.shimmerTransparency);
     ctx.translate(Math.round(ax), Math.round(ay));
@@ -8757,6 +8765,26 @@ export class Renderer {
     ctx.drawImage(iconImg, icon.sx, icon.sy, icon.sw, icon.sh,
       num12, -icon.sh / 2, icon.sw * sc, icon.sh * sc);
     ctx.restore();
+    // ---- 22/368 持枪手 overlay（:27676-27695）：攻帧行≥21,Extra_52/53 竖 5 帧
+    //      （微光 264/265）,帧锚 = 本体帧中心+(0,4+addY),origin=本体帧半尺寸,
+    //      原生尺寸（n.scale=1）,镜像随本体,rotation=n.rotation（城镇 NPC 恒 0）----
+    if ((n.vanillaId === 22 || n.vanillaId === 368) && n.frame >= 21) {
+      const tex = n.vanillaId === 22
+        ? (n.shimmered ? 'Extra_264' : 'Extra_52')
+        : (n.shimmered ? 'Extra_265' : 'Extra_53');
+      const img = this.atlas.ensureVImage(`vanilla/${tex}.png`);
+      if (img && img.width > 0) {
+        const eh = Math.max(1, Math.floor(img.height / 5));
+        const fi = Math.min(4, Math.max(0, n.frame - 21));
+        ctx.save();
+        ctx.globalAlpha = shimmerBodyAlpha(n.shimmerTransparency);
+        ctx.translate(n.cx, n.cy + 4 + addY);
+        if (n.facing > 0) ctx.scale(-1, 1);
+        ctx.drawImage(img, 0, fi * eh, img.width, eh,
+          -frame.sw / 2, -frame.sh / 2, img.width, eh);
+        ctx.restore();
+      }
+    }
   }
 
   /** swing 形状（Game.swing / 远端 swingNet 同构）。
@@ -10070,6 +10098,10 @@ export class Renderer {
     // 此前静持不显示）；7 无持位分支（仅 bodyFrame 行 11）不画
     let staticHoldStyle = 0;
     let holdStyleRaw = 0;   // 未置零的静持档（holdStyle 7 无持位绘制但身体行 11 :36042-36045）
+    /** 静持绘制载荷（段 A 算参数、本体层之后消费——DrawPlayer_27_HeldItem 层位
+     *  = BehindFrontArm 本体之上；曾整段画在本体之前=被身体挡住,用户实报） */
+    let heldDraw: { vid: number; hs: number; ar: DrawRect | null; icon: HTMLImageElement | null;
+      fw: number; fh: number; offX: number; offY: number; rot: number } | null = null;
     if (!swing) {
       const held = p.inv.heldItem();
       const def = held ? ITEM_DEFS[held.id] : undefined;
@@ -10161,49 +10193,10 @@ export class Renderer {
                 else { offX += m.dx; offY += m.dy; }
               }
             }
-            ctx.save();
-            // 静持物随躺转（原版手持层在 DrawDataCache 内,TransformDrawData 整组
-            // 旋转——睡中持火把等也横躺;世界空间直接施加,无镜像纠缠）
-            if (p.sleeping) {
-              const bo = this.sleepingBedOffset(world, p);
-              const sleepIdx = (p as unknown as { __sleepIdx?: number }).__sleepIdx ?? 0;
-              ctx.translate(bo[0] * p.facing, bo[1] * p.gravDir - 4 * sleepIdx * p.gravDir);
-              const ccx = p.cx, ccy = p.y + p.h / 2;
-              ctx.translate(ccx, ccy);
-              ctx.rotate(Math.PI / 2 * -p.facing);
-              ctx.translate(-ccx, -ccy);
-            }
-            ctx.translate(p.cx + p.facing * offX, p.y + offY);
-            ctx.scale(p.facing, 1);
-            ctx.rotate(rot);
-            if (ar) {
-              ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -fh, ar.sw, ar.sh);
-            } else if (icon) {
-              ctx.drawImage(icon, 0, -icon.height * 0.6, icon.width * 0.6, icon.height * 0.6);
-            }
-            // 手持火苗（PlayerDrawLayers.cs:3519-3561）：flame 物品在武器贴图之上叠
-            // ItemFlame_{id} 单帧 × itemFlamePos 7 槽抖动（每 5 绘制帧重掷）。
-            // 与本体同变换（本 save 块内），dest 即本体矩形。水下熄灭门在本体上方
-            // （FLAME_ITEMS ⊄ NO_WET_ITEMS——12/16/23/33/49 等武器火苗无 noWet，
-            // 但多为 holdStyle=0 走挥舞路径不进本分支；523/1333/4384 水火把
-            // 有意水下带火苗——与本体同生共死）
-            if (ar && vid >= 0 && FLAME_ITEMS.has(vid) && this.atlas) {
-              drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: 0, y: -fh, w: ar.sw, h: ar.sh }, flicker);
-            }
-            ctx.restore();
+            heldDraw = { vid, hs: staticHoldStyle, ar, icon, fw, fh, offX, offY, rot };
           }
         }
       }
-    }
-    // 挥舞动画（手持物统一层）：人物身后图层。原版 weaponDrawOrder 恒
-    // BehindFrontArm（PlayerDrawSet.cs:354 默认档；4952 头侧持/高尔夫收势两特例除外）
-    // = DrawPlayer_27_HeldItem 画在躯干之后、前臂 28_ArmOverItem 之前
-    // （LegacyPlayerRenderer.cs:233-235）——本仓身体为单层合成（前臂无独立绘制层），
-    // "前臂层之下"收敛为身体后图层：工具与武器挥舞统一画在身后（此前工具身后/
-    // 武器身前两套层序分裂）。noGraphic 族（noUseGraphic，矛/炸弹/鞭/短剑等 381 件）
-    // 不画物品贴图——投射物即本体
-    if (swing && swing.item >= 0 && !swing.noGraphic) {
-      this.drawUseItem(ctx, p, swing, flicker);
     }
     if (mrot) ctx.restore();   // 段 A 收口（手持层随机身旋转；TransformDrawData 同转）
 
@@ -10603,6 +10596,49 @@ export class Renderer {
         ctx.restore();
       }
     }
+    // ---- 手持物层（DrawPlayer_27_HeldItem）：weaponDrawOrder 默认 BehindFrontArm
+    //      （PlayerDrawSet.cs:358）= 躯干/头/盾(26)【之上】、仅前臂 28_ArmOverItem 之下
+    //      （LegacyPlayerRenderer.cs:233-235；4952 BehindBackArm/高尔夫收势
+    //      OverFrontArm 两特例未分档,登记）——本仓身体单层合成,收敛为本体之上。
+    //      ★曾整段画在段 A（本体之前）= 武器被身体贴图挡住,用户实报
+    //      "原版的贴图是在角色层级之上"。mrot/坐椅偏移随原变换
+    //      （TransformDrawData 手持层整组随转;坐椅 save 在本位仍未收口） ----
+    if (mrot) { ctx.save(); applyPlayerMountRotation(ctx, mrot); }
+    if (heldDraw) {
+      const { vid, ar, icon, fw, fh, offX, offY, rot } = heldDraw;
+      ctx.save();
+      // 静持物随躺转（原版手持层在 DrawDataCache 内,TransformDrawData 整组
+      // 旋转——睡中持火把等也横躺;世界空间直接施加,无镜像纠缠）
+      if (p.sleeping) {
+        const bo = this.sleepingBedOffset(world, p);
+        const sleepIdx = (p as unknown as { __sleepIdx?: number }).__sleepIdx ?? 0;
+        ctx.translate(bo[0] * p.facing, bo[1] * p.gravDir - 4 * sleepIdx * p.gravDir);
+        const ccx = p.cx, ccy = p.y + p.h / 2;
+        ctx.translate(ccx, ccy);
+        ctx.rotate(Math.PI / 2 * -p.facing);
+        ctx.translate(-ccx, -ccy);
+      }
+      ctx.translate(p.cx + p.facing * offX, p.y + offY);
+      ctx.scale(p.facing, 1);
+      ctx.rotate(rot);
+      if (ar) {
+        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -fh, ar.sw, ar.sh);
+      } else if (icon) {
+        ctx.drawImage(icon, 0, -icon.height * 0.6, icon.width * 0.6, icon.height * 0.6);
+      }
+      // 手持火苗（PlayerDrawLayers.cs:3519-3561）：flame 物品在武器贴图之上叠
+      // ItemFlame_{id} 单帧 × itemFlamePos 7 槽抖动（每 5 绘制帧重掷）
+      if (ar && vid >= 0 && FLAME_ITEMS.has(vid) && this.atlas) {
+        drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: 0, y: -fh, w: ar.sw, h: ar.sh }, flicker);
+      }
+      ctx.restore();
+    }
+    // 挥舞动画（手持物统一层）。noGraphic 族（noUseGraphic，矛/炸弹/鞭/短剑等
+    // 381 件）不画物品贴图——投射物即本体
+    if (swing && swing.item >= 0 && !swing.noGraphic) {
+      this.drawUseItem(ctx, p, swing, flicker);
+    }
+    if (mrot) ctx.restore();
     // ---- 眼球伞云盖（DrawPlayer_38_EyebrellaCloud PlayerDrawLayers.cs:4139-4186）：
     //      Projectile_238 竖 6 帧条、frame = miscCounter%18/6；pos = MountedCenter −
     //      (0,h/2)+(0,−70)；两枚 ±3px 绕行拷贝（miscCounter%50/50×2π×±1）×0.65 +
@@ -10863,7 +10899,7 @@ export class Renderer {
         // 原版 RGB 逐通道调制（色偏随光色）此处以贴图原色 + 标量 alpha 近似（登记）
         {
           const glowTex = layer === 'back' ? d.backTextureGlow : d.frontTextureGlow;
-          const gi = glowTex && this.atlas ? this.atlas.ensureVImage(glowTex) : null;
+          const gi = glowTex && this.atlas ? this.atlas.ensureVImage(`vanilla/${glowTex}`) : null;
           if (gi) {
             const lt = this.lighting?.lightAt(Math.floor((p.x + p.w / 2) / 16), Math.floor((p.y + p.h / 2) / 16));
             const lum = lt ? Math.max(lt[0], lt[1], lt[2]) / 255 : 1;
@@ -10910,7 +10946,7 @@ export class Renderer {
               // Mount_Glow_DrillDiode；Draw :5848-5852 同位二次 Draw，色同上主层公式）
               {
                 const dg = d.frontTextureExtraGlow && this.atlas
-                  ? this.atlas.ensureVImage(d.frontTextureExtraGlow) : null;
+                  ? this.atlas.ensureVImage(`vanilla/${d.frontTextureExtraGlow}`) : null;
                 if (dg) {
                   const lt = this.lighting?.lightAt(Math.floor((p.x + p.w / 2) / 16), Math.floor((p.y + p.h / 2) / 16));
                   const lum = lt ? Math.max(lt[0], lt[1], lt[2]) / 255 : 1;
