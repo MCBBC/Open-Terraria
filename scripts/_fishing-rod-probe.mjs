@@ -26,7 +26,10 @@ await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' });
 // 整帧跳过 = 世界层全黑，像素断言失效；CPU 模式无 GL 上下文不受熔断影响）
 await page.evaluate(async () => {
   const options = await import('/src/core/Options.ts');
-  options.data.renderMode = 'cpu';
+  for (let i = 0; i < 100; i++) {
+    if (options.data) { options.data.renderMode = 'cpu'; return; }
+    await new Promise((r) => setTimeout(r, 50));
+  }
 });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
@@ -209,10 +212,27 @@ const out = await page.evaluate(async () => {
   const dpr = g.renderer.dpr || 1;
   const cv = g.renderer.canvas;
   const W = cv.width, H = cv.height;
-  const snap = () => cv.getContext('2d').getImageData(0, 0, W, H).data.slice();
-
-  const shotA = snap();
-  R.pngDataURL = cv.toDataURL('image/png');              // 用户要求截图（A 态全景）
+  R.gpuDegraded = g.renderer.gpuDegraded ?? null;
+  // 渲染循环活性：animTick 每 render() +1，500ms 两次采样
+  const at0 = g.renderer.animTick;
+  await new Promise((r) => setTimeout(r, 500));
+  R.renderAlive = g.renderer.animTick > at0;
+  R.animTickDelta = g.renderer.animTick - at0;
+  R.renderMode = (await import('/src/core/Options.ts')).data.renderMode;
+  // 区域快照（只读小窗，降低 canvas 读回压力；CPU 渲染模式下 getImageData 稳定）
+  const snapRegion = ([x0, y0, x1, y1]) => ({
+    x0, y0, w: x1 - x0, h: y1 - y0,
+    d: cv.getContext('2d').getImageData(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)).data.slice(),
+  });
+  const diffRegion = (a, b) => {
+    if (a.w !== b.w || a.h !== b.h) return -1;
+    let n = 0;
+    for (let px = 0, i = 0; px < a.w * a.h; px++, i += 4) {
+      const d = Math.abs(a.d[i] - b.d[i]) + Math.abs(a.d[i + 1] - b.d[i + 1]) + Math.abs(a.d[i + 2] - b.d[i + 2]);
+      if (d > 24) n++;
+    }
+    return n;
+  };
 
   // 手部/竿体差分窗（静持锚 offX=trunc(fw*0.18)、offY=28；±8px 放宽贴图框误差）
   const fw = 40, fh = 28, offX = Math.trunc(fw * 0.18);
@@ -225,53 +245,52 @@ const out = await page.evaluate(async () => {
     Math.min(H, Math.round(Math.max(by0, by1))),
   ];
   R.box = box;
+  // 线走廊窗（tip→浮漂 包围盒 + 24px 余量）
+  const cx0 = Math.min(tip.x, bbC.x) - 24, cy0 = Math.min(tip.y, bbC.y) - 24;
+  const cx1 = Math.max(tip.x, bbC.x) + 24, cy1 = Math.max(tip.y, bbC.y) + 24;
+  const [lx0, ly0] = w2s(cx0, cy0);
+  const [lx1, ly1] = w2s(cx1, cy1);
+  const corr = [
+    Math.max(0, Math.round(Math.min(lx0, lx1))),
+    Math.max(0, Math.round(Math.min(ly0, ly1))),
+    Math.min(W, Math.round(Math.max(lx0, lx1))),
+    Math.min(H, Math.round(Math.max(ly0, ly1))),
+  ];
+
+  const shotA = { hand: snapRegion(box), corr: snapRegion(corr) };
+  R.pngDataURL = cv.toDataURL('image/png');              // 用户要求截图（A 态全景）
 
   // ---- B 态：撤竿（存活门杀浮漂 → 竿/线/浮漂全消）----
   p.inv.slots[2] = null;
   for (let i = 0; i < 120; i++) { await ticks(1); if (!liveBobber()) break; }
   await ticks(10);
   R.gateActiveB = g.renderer.bobberOwners.has(p);
-  const shotB = snap();
-
-  const diffCountBox = (dx, dy) => {
-    let n = 0;
-    for (let yy = box[1]; yy < box[3]; yy++) {
-      for (let xx = box[0]; xx < box[2]; xx++) {
-        const i = (yy * W + xx) * 4;
-        const d = Math.abs(dx[i] - dy[i]) + Math.abs(dx[i + 1] - dy[i + 1]) + Math.abs(dx[i + 2] - dy[i + 2]);
-        if (d > 24) n++;
-      }
-    }
-    return n;
-  };
-  const buildMask = (dx, dy) => {
-    const m = new Uint8Array(W * H);
-    for (let px = 0, i = 0; px < m.length; px++, i += 4) {
-      const d = Math.abs(dx[i] - dy[i]) + Math.abs(dx[i + 1] - dy[i + 1]) + Math.abs(dx[i + 2] - dy[i + 2]);
-      m[px] = d > 24 ? 1 : 0;
-    }
-    return m;
-  };
-  const maskAB = buildMask(shotA, shotB);
-  const hitNear = (wx, wy, r) => {
-    const [cx, cyy] = w2s(wx, wy);
-    const rr = Math.round(r * dpr);
-    for (let yy = Math.max(0, Math.round(cyy) - rr); yy <= Math.min(H - 1, Math.round(cyy) + rr); yy++)
-      for (let xx = Math.max(0, Math.round(cx) - rr); xx <= Math.min(W - 1, Math.round(cx) + rr); xx++)
-        if (maskAB[yy * W + xx]) return true;
-    return false;
-  };
+  const shotB = { hand: snapRegion(box), corr: snapRegion(corr) };
 
   // (a) 竿贴图像素（差分窗内变化像素数）
-  R.rodPixels = diffCountBox(shotA, shotB);
+  R.rodPixels = diffRegion(shotA.hand, shotB.hand);
 
-  // (b) 线首段起点 ≈ 竿尖：tip→浮漂前 16px 每 2px 步进查 5×5 邻域命中
+  // (b) 线首段起点 ≈ 竿尖：tip→浮漂前 16px 每 2px 步进查走廊差分命中
+  const corrDiff = (wx, wy, r) => {
+    const [scx, scy] = w2s(wx, wy);
+    const px = Math.round(scx) - corr[0], py = Math.round(scy) - corr[1];
+    const rr = Math.round(r * dpr);
+    for (let yy = Math.max(0, py - rr); yy <= Math.min(corr[3] - corr[1] - 1, py + rr); yy++)
+      for (let xx = Math.max(0, px - rr); xx <= Math.min(corr[2] - corr[0] - 1, px + rr); xx++) {
+        const i = (yy * (corr[2] - corr[0]) + xx) * 4;
+        const d = Math.abs(shotA.corr.d[i] - shotB.corr.d[i])
+          + Math.abs(shotA.corr.d[i + 1] - shotB.corr.d[i + 1])
+          + Math.abs(shotA.corr.d[i + 2] - shotB.corr.d[i + 2]);
+        if (d > 24) return true;
+      }
+    return false;
+  };
   const segLen = Math.hypot(bbC.x - tip.x, bbC.y - tip.y) || 1;
   const ux = (bbC.x - tip.x) / segLen, uy = (bbC.y - tip.y) / segLen;
   let hits = 0, samples = 0;
   for (let s = 0; s <= 16; s += 2) {
     samples++;
-    if (hitNear(tip.x + ux * s, tip.y + uy * s, 3)) hits++;
+    if (corrDiff(tip.x + ux * s, tip.y + uy * s, 3)) hits++;
   }
   R.lineHits = `${hits}/${samples}`;
 
@@ -288,14 +307,14 @@ const out = await page.evaluate(async () => {
   await ticks(1);
   R.dbg.afterReel = { dead: bob2.dead, retract: bob2.retract, live: !!liveBobber() };
   R.reelGateActive = g.renderer.bobberOwners.has(p);
-  const shotC = snap();
-  R.reelRodPixels = diffCountBox(shotC, shotB);          // 收线飞行中手部仍有竿像素
+  const shotC = snapRegion(box);
+  R.reelRodPixels = diffRegion(shotC, shotB.hand);       // 收线飞行中手部仍有竿像素
   let arrived = false;
   for (let i = 0; i < 600; i++) { await ticks(1); if (!liveBobber()) { arrived = true; break; } }
   await ticks(10);
-  const shotD = snap();
+  const shotD = snapRegion(box);
   R.reelArrived = arrived;
-  R.afterArrivalRodPixels = diffCountBox(shotD, shotB);  // 到达后竿消失（原版 HackHoldStyles）
+  R.afterArrivalRodPixels = diffRegion(shotD, shotB.hand);  // 到达后竿消失（原版 HackHoldStyles）
 
   // ================= E/D 态：锚定 + 距离断线 =================
   p.inv.slots[2] = { id: rodId, stack: 1 };

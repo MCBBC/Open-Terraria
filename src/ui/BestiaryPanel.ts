@@ -571,8 +571,11 @@ export function bestiaryGridBackground(npcId: number, crimson = false): string |
 const bstSheetCache = new Map<string, ImageBitmap | HTMLImageElement>();
 const bstSheetPending = new Map<string, Array<(img: ImageBitmap | HTMLImageElement | null) => void>>();
 /** 404 负缓存(2026-08-13 泄露 review):缺表时此前每次 refresh 都重新 fetch+
- * 解码(pending 去重只挡并发不挡串行)——登记终态,不再重发 */
-const bstSheetFailed = new Set<string>();
+ * 解码(pending 去重只挡并发不挡串行)——登记终态,不再重发。
+ * ★TTL 化(2026-08-25 同类扫描):原永久 Set=冷缓存窗口一次失败整会话缺图鉴表;
+ * 10s 过期重试,暖缓存到位即自愈 */
+const bstSheetFailed = new Map<string, number>();
+const BST_FAIL_TTL = 10_000;
 const BST_SHEET_CACHE_MAX = 160;
 
 function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: ImageBitmap | HTMLImageElement | null) => void): void {
@@ -585,7 +588,13 @@ function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: ImageBi
     cb(atlasHit);
     return;
   }
-  if (bstSheetFailed.has(file)) { cb(null); return; }  // 已知 404:不重发
+  {
+    const f = bstSheetFailed.get(file);
+    if (f !== undefined) {
+      if (Date.now() - f < BST_FAIL_TTL) { cb(null); return; }  // TTL 内:已知失败不重发
+      bstSheetFailed.delete(file);                              // 过期:重试(暖缓存到位即自愈)
+    }
+  }
   let q = bstSheetPending.get(file);
   if (q) { q.push(cb); return; }  // 在途去重:同一张表并发只取一次
   q = [cb];
@@ -596,7 +605,7 @@ function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: ImageBi
     if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
     // bitmap 就绪才入缓存+回调(Image 窗口期每格每帧发 LazyPixelRef,trace⑨)
     const land = (x: ImageBitmap | HTMLImageElement) => {
-      if (bstSheetFailed.has(file)) return;
+      if (bstSheetFailed.has(file)) bstSheetFailed.delete(file);   // 重试成功:撤销负缓存
       if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
       bstSheetCache.set(file, x);
       for (const c of q!) c(x);
@@ -606,7 +615,7 @@ function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: ImageBi
   };
   im.onerror = () => {
     bstSheetPending.delete(file);
-    bstSheetFailed.add(file);
+    bstSheetFailed.set(file, Date.now());
     for (const c of q!) c(null);   // 负终结:失败也回调(画底色),队列不积压
   };
   im.src = `sprites/${file}`;

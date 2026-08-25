@@ -109,9 +109,9 @@ describe('矿车转角矩阵(placeTrack+frameTrackArea 真实铺轨产物)', () 
       const minX = Math.min(...xs), maxX = Math.max(...xs);
       const left = cells.find((c) => c[0] === minX)!;
       const right = cells.find((c) => c[0] === maxX)!;
-      const fwd = drive(st, minX * 16 - 2, left[1] * 16 - 42, 3);
+      const fwd = drive(st, minX * 16 - 2, left[1] * 16 - 42, 3, (maxX - 1) * 16);
       expect(fwd.stuck, `${name} 右行卡死 tick=${fwd.stuckTick} endX=${fwd.endX}`).toBe(false);
-      const back = drive(st, maxX * 16 - 2, right[1] * 16 - 42, -3);
+      const back = drive(st, maxX * 16 - 2, right[1] * 16 - 42, -3, (minX + 1) * 16);
       expect(back.stuck, `${name} 左行卡死 tick=${back.stuckTick} endX=${back.endX}`).toBe(false);
     });
   }

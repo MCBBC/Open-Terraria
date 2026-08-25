@@ -22680,7 +22680,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const w = this.world;
     if (!canStartInvasion(w, this.player.maxHp, ignoreDelay)) {
       if (this.player.maxHp < 200) this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.Need200Hp'));
-      else this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
+      else this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.InvasionActive'));
       return false;
     }
     const misc = startInvasion(w, type);

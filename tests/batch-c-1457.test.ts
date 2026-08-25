@@ -235,21 +235,35 @@ describe('1129 ChloroBladeSlam(AI_209)', () => {
 // ================= 1116 花瓣风暴弹(AI_196 1116 支 :41192-41290) =================
 
 describe('1116 PetalstormShot(AI_196 1116 支)', () => {
-  it('前 20t 减速 ×0.95(:41220-41227);索敌 400px 无 LOS 门(:41246-41249)追踪 v=(v×30+dir×6)/31', () => {
-    const e = mkEnemy(1, 1000, 1440);                            // 200px < 400
+  it('前 20t 减速 ×0.95(:41220-41227);索敌 400px + CanHit 视线门恒须(:41257-41258,R34-① 勘误旧注「无 LOS 门」)追踪 v=(v×30+dir×6)/31', () => {
+    const e = mkEnemy(1, 1000, 1440);                            // 200px < 400,无遮挡
     const p = new PetalstormShot(800, 1440, 4, 0, 20, 3.5, 0);
     const g = makeHooks([e]);
     for (let i = 0; i < 30; i++) p.fixedUpdate(1 / 60, g);
     expect(p.cx).toBeGreaterThan(830);                           // 朝敌推进
   });
-  it('寿命 120(:10419 timeLeft);命中 penetrate 1 + 每敌一次(:10421-10423)', () => {
+  it('隔墙不追踪(R34-①):墙挡视线 → 无目标漂移,不穿墙追', () => {
+    const st = new TileStore(200, 120);
+    for (let y = 0; y < 120; y++) st.setTileSilent(56, y, 1);    // x=896 竖墙
+    const e = mkEnemy(1, 1000, 1432);                            // 墙另一侧 104px < 400
+    const p = new PetalstormShot(800, 1440, 3, 0, 20, 3.5, 0);
+    const g = makeHooks([e], st);
+    for (let i = 0; i < 40; i++) p.fixedUpdate(1 / 60, g);
+    expect(p.cx).toBeLessThan(900);                              // 未穿墙逼近目标
+  });
+  it('寿命 120(:10419 timeLeft);命中 penetrate=1 → 首次伤害即 Kill(:10422,R34-① 补总数帽)', () => {
+    const p0 = new PetalstormShot(800, 1440, 1, 0, 20, 3.5, 0);
+    const g0 = makeHooks();
+    let ticks0 = 0;
+    while (!p0.dead && ticks0 < 200) { p0.fixedUpdate(1 / 60, g0); ticks0++; }
+    expect(ticks0).toBe(120);
     const e = mkEnemy(1, 805, 1435);
     const p = new PetalstormShot(800, 1440, 1, 0, 20, 3.5, 0);
     const g = makeHooks([e]);
     let ticks = 0;
     while (!p.dead && ticks < 200) { p.fixedUpdate(1 / 60, g); ticks++; }
-    expect(ticks).toBe(120);
     expect(e.hurtLog.length).toBe(1);
+    expect(ticks).toBeLessThan(10);                              // 命中拍即亡
   });
 });
 
@@ -268,9 +282,11 @@ describe('StormLightning(AI_203_StormLightning)', () => {
     for (let i = 0; i < 5; i++) near.fixedUpdate(1 / 60, g2);
     expect(Math.abs(near.cx - e2.cx)).toBeLessThanOrEqual(32);
   });
-  it('1117 30t Kill→bolt 视觉余命 16f / 1122 240t(:40363 num 缺省 240)', () => {
+  it('1117 30t Kill→bolt 视觉余命 16f / ★R34-② 勘误:1122 timeLeft=1 出生首拍即落雷(SetDefaults :10447 + Update :17308 Kill 先于 AI)', () => {
     // 2026-08-24 r15 命中模型重写：ai[1]>=num → Kill 帧 doKill(bolt+伤害),
-    // 弹本体转 bolt 视觉余命（StormLightningParticle lifeTimeTotal=num2=16）后再死
+    // 弹本体转 bolt 视觉余命（StormLightningParticle lifeTimeTotal=num2=16）后再死。
+    // 1122 的 ai[1] 帽 240 仅敌意 1091 消费——1122 出生首拍即 Kill（旧断言「240t 悬浮」
+    // 系漏读 SetDefaults timeLeft=1,R34-② 修正）
     const g = makeHooks();
     const a = new StormLightning(1117, 800, 800, 120, 10);
     for (let i = 0; i < 30; i++) a.fixedUpdate(1 / 60, g);
@@ -278,21 +294,19 @@ describe('StormLightning(AI_203_StormLightning)', () => {
     for (let i = 0; i < 16; i++) a.fixedUpdate(1 / 60, g);
     expect(a.dead).toBe(true);                                   // 视觉余命耗尽
     const b = new StormLightning(1122, 800, 800, 180, 4);
-    for (let i = 0; i < 239; i++) b.fixedUpdate(1 / 60, g);
-    expect(b.dead).toBe(false);
-    b.fixedUpdate(1 / 60, g);                                    // ai[1]>=240 Kill(:40445)
+    b.fixedUpdate(1 / 60, g);                                    // 首拍即 Kill 落雷(:10447)
     expect(b.dead).toBe(false);                                  // → bolt 视觉期
     for (let i = 0; i < 16; i++) b.fixedUpdate(1 / 60, g);
     expect(b.dead).toBe(true);
   });
-  it('1122 IDStatic 10(:10567 段)同型共享 → 双雷同帧 Kill 只结算一次', () => {
+  it('1122 IDStatic 10(:10567 段)同型共享 → 双雷首拍同帧落雷只结算一次(R34-② 时序)', () => {
     // Kill 帧 MultiPointHitbox 沿 bolt 一次性结算（:71918-71919）；双雷同帧 Kill
     // → IDStatic 共享表去重。（bolt 折线有横向游走,用 96×96 大敌保几何命中）
     const e = mkEnemy(1, 795, 795, 96, 96);
     const g = makeHooks([e]);
     const a = new StormLightning(1122, 800, 800, 180, 4);
     const b = new StormLightning(1122, 802, 802, 180, 4);
-    for (let i = 0; i < 240; i++) {
+    for (let i = 0; i < 20; i++) {                               // 首拍结算后仅剩视觉余命
       a.fixedUpdate(1 / 60, g);
       b.fixedUpdate(1 / 60, g);
     }

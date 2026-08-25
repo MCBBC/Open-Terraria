@@ -11404,15 +11404,16 @@ export class Renderer {
 
   /** Extra_48 表情总表（272×1092）懒加载——原版 TextureAssets.Extra[48] */
   private emoteSheetImg: ImageBitmap | HTMLImageElement | null = null;
-  private emoteSheetFailed = false;
+  private emoteSheetFailedAt = 0;   // ★TTL 化(2026-08-25 同类扫描):原布尔终态=一次失败
+                                    // 整会话无表情气泡;10s 过期重试,暖缓存到位即自愈
   private emoteSheet(): ImageBitmap | HTMLImageElement | null {
-    if (this.emoteSheetFailed) return null; // 404 终态:不重发(2026-08-13 前无 onerror=坏图滞留永久)
+    if (this.emoteSheetFailedAt && Date.now() - this.emoteSheetFailedAt < 10_000) return null;
     if (!this.emoteSheetImg) {
       const im = new Image();
       // bitmap 桥(2026-08-18 review 漏网站):此处曾完全裸 Image——表情气泡
       // 激活期间每帧绘制,压力窗口期解码逐出 = LazyPixelRef 流同族
       im.onload = () => upgradeToBitmap(im, (b) => { this.emoteSheetImg = b; });
-      im.onerror = () => { this.emoteSheetFailed = true; this.emoteSheetImg = null; };
+      im.onerror = () => { this.emoteSheetFailedAt = Date.now(); this.emoteSheetImg = null; };
       im.src = 'sprites/vanilla/Extra_48.png';
       this.emoteSheetImg = im;
     }

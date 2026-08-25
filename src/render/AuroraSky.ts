@@ -259,35 +259,47 @@ export function auroraPixel(n1: number, n2: number, n3: number, grad: number,
 // ---- 噪声面(Extra_286/287 R 通道,LinearWrap 双线性 → 红通道平面浮点缓存) ----
 let tex286: Float32Array | null = null;   // 256×256
 let tex287: Float32Array | null = null;   // 128×128
-let noiseState = 0;                       // 0 未启动 / 1 在途或失败 / 2 就绪
+let noiseState = 0;                       // 0 未启动/失败待重试 / 1 在途 / 2 就绪
+let noiseFailAt = 0;                      // 失败时刻(TTL 内不重发,2026-08-25 同类扫描:
+                                          // 原状态机 onerror 未接线,失败闩死在 1=极光永不渲染)
+const NOISE_FAIL_TTL = 10_000;
 
-function loadRedPlane(src: string, w: number, done: (p: Float32Array) => void): void {
+function loadRedPlane(src: string, w: number, done: (p: Float32Array) => void, onFail: () => void): void {
   const img = new Image();
   img.onload = (): void => {
     try {
       const c = document.createElement('canvas');
       c.width = w; c.height = w;
       const g = c.getContext('2d', { willReadFrequently: true });
-      if (!g) return;
+      if (!g) { onFail(); return; }
       g.drawImage(img, 0, 0);
       const d = g.getImageData(0, 0, w, w).data;
       const plane = new Float32Array(w * w);
       for (let i = 0; i < plane.length; i++) plane[i] = d[i * 4] / 255;
       done(plane);
-    } catch { /* 保持未就绪 */ }
+    } catch { onFail(); }
   };
+  img.onerror = (): void => { onFail(); };
   img.src = src;
 }
 
 /** 首次 draw 触发噪声面懒加载(同源静态资源;remaster 热替换不追踪,备案) */
 function ensureNoise(): void {
   if (noiseState !== 0) return;
+  if (noiseFailAt && Date.now() - noiseFailAt < NOISE_FAIL_TTL) return;   // 失败 TTL 内不重发
   if (typeof Image === 'undefined' || typeof document === 'undefined') { noiseState = 1; return; }
   noiseState = 1;
   let pending = 2;
-  const one = (): void => { if (--pending === 0) noiseState = 2; };
-  loadRedPlane('sprites/vanilla/Extra_286.png', 256, (p) => { tex286 = p; one(); });
-  loadRedPlane('sprites/vanilla/Extra_287.png', 128, (p) => { tex287 = p; one(); });
+  let failed = false;
+  const finish = (p: Float32Array | null): void => {
+    void p;
+    if (--pending === 0) {
+      if (failed) { noiseState = 0; noiseFailAt = Date.now(); }
+      else noiseState = 2;
+    }
+  };
+  loadRedPlane('sprites/vanilla/Extra_286.png', 256, (p) => { tex286 = p; finish(p); }, () => finish(null));
+  loadRedPlane('sprites/vanilla/Extra_287.png', 128, (p) => { tex287 = p; finish(p); }, () => finish(null));
 }
 
 /** 噪声面是否就绪(探针/测试用) */

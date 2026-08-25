@@ -3585,6 +3585,7 @@ export class UI {
         cl.addEventListener('mouseleave', () => {
           this.craftMouseInList = false;
           this.craftHoverIdx = -1;
+          this.craftHoverEl?.classList.remove('hov');   // ★必须摘类:hoverFocus 已 -1 时不会重建,漏摘=高亮残留
           this.craftHoverEl = null;
           if (this.hoverFocus !== -1) { this.hoverFocus = -1; this.refreshAll(); }
         });

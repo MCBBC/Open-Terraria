@@ -74,15 +74,20 @@ const setup = await page.evaluate(async (dump) => {
 }, area);
 console.log('setup:', JSON.stringify(setup));
 
-// 泵 1800 tick，每 30 tick 采样两只僵尸状态
+// 泵 1800 tick，每 30 tick 采样两只僵尸状态 + 脚下 tile（捕捉运行中地形变化）
 for (let c = 0; c < 6; c++) {
   await page.evaluate(() => {
     const g = window.__swGame;
     const rp = window.__replay;
+    const st = g.world.store;
     const sample = () => {
+      const under = (tx, ty) => {
+        const i = st.inBounds(tx, ty) ? st.idx(tx, ty) : -1;
+        return i < 0 ? '?' : (st.flags[i] ? `${st.type[i]}${st.half[i] ? 'H' : ''}${st.slope[i] ? 'S' : ''}` : '.');
+      };
       for (const e of g.entities.enemies) {
         if (!rp.ids.includes(e.id) || e.dead) continue;
-        rp.trace.push({ t: rp.t, id: e.id, x: Math.round(e.x), y: Math.round(e.y), vx: +e.vx.toFixed(2), vy: +e.vy.toFixed(2), onG: e.onGround, face: e.facing, ai3: Math.round(e.ai3), dead: e.dead });
+        rp.trace.push({ t: rp.t, id: e.id, x: Math.round(e.x), y: Math.round(e.y), vx: +e.vx.toFixed(2), vy: +e.vy.toFixed(2), onG: e.onGround, face: e.facing, ai3: Math.round(e.ai3), dead: e.dead, under: [under(2088, 240), under(2089, 240), under(2088, 241), under(2088, 242)] });
       }
     };
     for (let t = 0; t < 300; t++) {

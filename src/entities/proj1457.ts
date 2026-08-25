@@ -493,43 +493,48 @@ export class PetalstormShot extends Entity {
       this.frame = (this.frame + 1) % 8;
     }
     this.rot += (this.vx + this.vy) * 0.1;                      // :41225
-    if (this.t < 20) {                                          // :41220-41227（ai0<20 减速段）
+    if (this.t < 20) {
+      // :41220-41227（ai0<20 减速段）;光照 ai[0]≥10 门(:41232-41236)
       this.vx *= 0.95; this.vy *= 0.95;
-      this.moveWithBounce(game);
-      if (this.t >= 10) game.addLightAt?.(this.cx, this.cy, 0, 0.6, 0.6);   // :41232-41236 ai[0]≥10 门
-      return;
-    }
-    // 索敌 400px。★R34-① 勘误（原注释「无 LOS 门」系误读）：1116 num4=0 时
-    //   条件 `!(dist>0)||CanHit` 的左支恒假 → CanHit 对一切目标必选（:41257-41258）。
-    //   隔墙敌不追踪；候选命中即 num3 收缩=最近者胜（与下方 bd 收缩同构）
-    let best: { cx: number; cy: number } | null = null;
-    let bd = 400;
-    const st = game.world.store;
-    for (const q of game.enemies()) {
-      const e = q as { x?: number; y?: number; w?: number; h?: number; cx: number; cy: number; dead: boolean; maxHp: number; def?: { friendly?: boolean; critter?: boolean } };
-      if (e.dead || e.maxHp <= 5 || e.def?.friendly || e.def?.critter) continue;
-      const d = Math.hypot(e.cx - this.cx, e.cy - this.cy);
-      if (d >= bd) continue;
-      // Collision.CanHit(this, npc)（弹盒→目标盒逐格视线,:388-480）
-      const ex = e.x ?? e.cx, ey = e.y ?? e.cy, ew = e.w ?? 16, eh = e.h ?? 16;
-      if (!canHit(st, this.x, this.y, this.w, this.h, ex, ey, ew, eh)) continue;
-      bd = d; best = e as { cx: number; cy: number };
-    }
-    if (best) {
-      // :41263-41270（1116：num6=6/num7=30）v = (v×30 + dir×6)/31
-      const d = Math.hypot(best.cx - this.cx, best.cy - this.cy) || 1;
-      const hx = (best.cx - this.cx) / d * 6;
-      const hy = (best.cy - this.cy) / d * 6;
-      this.vx = (this.vx * 30 + hx) / 31;
-      this.vy = (this.vy * 30 + hy) / 31;
     } else {
-      // :41274-41276（1116 漂移档：sin(ai0×0.1)×1.5 / 0.3）
-      this.vx += (Math.sin((this.t + this.phase * 100) * 0.1) * 1.5 - this.vx) * 0.1;
-      this.vy += (0.3 - this.vy) * 0.1;
+      // 索敌 400px。★R34-① 勘误（原注释「无 LOS 门」系误读）：1116 num4=0 时
+      //   条件 `!(dist>0)||CanHit` 的左支恒假 → CanHit 对一切目标必选（:41257-41258）。
+      //   隔墙敌不追踪；候选命中即 num3 收缩=最近者胜（与下方 bd 收缩同构）
+      let best: { cx: number; cy: number } | null = null;
+      let bd = 400;
+      const st = game.world.store;
+      for (const q of game.enemies()) {
+        const e = q as { x?: number; y?: number; w?: number; h?: number; cx: number; cy: number; dead: boolean; maxHp: number; def?: { friendly?: boolean; critter?: boolean } };
+        if (e.dead || e.maxHp <= 5 || e.def?.friendly || e.def?.critter) continue;
+        const d = Math.hypot(e.cx - this.cx, e.cy - this.cy);
+        if (d >= bd) continue;
+        // Collision.CanHit(this, npc)（弹盒→目标盒逐格视线,:388-480）
+        const ex = e.x ?? e.cx, ey = e.y ?? e.cy, ew = e.w ?? 16, eh = e.h ?? 16;
+        if (!canHit(st, this.x, this.y, this.w, this.h, ex, ey, ew, eh)) continue;
+        bd = d; best = e as { cx: number; cy: number };
+      }
+      if (best) {
+        // :41263-41270（1116：num6=6/num7=30）v = (v×30 + dir×6)/31
+        const d = Math.hypot(best.cx - this.cx, best.cy - this.cy) || 1;
+        const hx = (best.cx - this.cx) / d * 6;
+        const hy = (best.cy - this.cy) / d * 6;
+        this.vx = (this.vx * 30 + hx) / 31;
+        this.vy = (this.vy * 30 + hy) / 31;
+      } else {
+        // :41274-41276（1116 漂移档：sin(ai0×0.1)×1.5 / 0.3）
+        this.vx += (Math.sin((this.t + this.phase * 100) * 0.1) * 1.5 - this.vx) * 0.1;
+        this.vy += (0.3 - this.vy) * 0.1;
+      }
     }
     this.moveWithBounce(game);
-    game.addLightAt?.(this.cx, this.cy, 0, 0.6 * Math.max(0, Math.min(1, (this.life - this.t) / 120)), 0.6 * Math.max(0, Math.min(1, (this.life - this.t) / 120)));
-    // penetrate=1（:10422）——首次伤害结算即 Kill（原注释漏了总数帽）
+    if (this.t >= 10) {
+      const fade = Math.max(0, Math.min(1, (this.life - this.t) / 120));
+      game.addLightAt?.(this.cx, this.cy, 0,
+        0.6 * (this.t < 20 ? 1 : fade),                         // 相1 恒 (0,.6,.6)/相2 ×Remap(timeLeft)
+        0.6 * (this.t < 20 ? 1 : fade));
+    }
+    // penetrate=1（:10422）——首次伤害结算即 Kill（原注释漏了总数帽）。
+    // ★命中结算全周期有效（原版碰撞循环每拍跑,非仅相 2）
     dealContacts(this, game, this.hitCd, -1, () => { this.dead = true; });
   }
 
@@ -1661,7 +1666,7 @@ export class PrincessMagicCircle extends Entity {
     super();
     this.x = x - this.w / 2; this.y = y - this.h / 2;
     this.vx = 0; this.vy = 0;                                   // 零速定点放置（Player.cs:48183）
-    this.damage = Math.max(1, Math.round(damage * 0.98));       // Damage() 折价(:13575)
+    this.damage = Math.max(1, Math.trunc(damage * 0.98));       // Damage() 折价 (int)(dmg×0.98)(:13575)
     this.knockback = knockback;
   }
 

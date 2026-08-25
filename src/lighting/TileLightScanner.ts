@@ -562,6 +562,7 @@ export class TileLightScanner {
   //      烘焙为按 type/wall id 索引的 typed array,构造期一次;值与原查表逐项同源,
   //      越界 id 读出 undefined=falsy 与原「d 不存在/sheet=-1 不命中」语义一致,
   //      位级由 tests/lighting-scan-blur-golden 锁定)----
+  private readonly pixelBlockId = -1;                // 自研像素方块内部 id(-1=无)
   private readonly sheetById: Int16Array;            // 内部 id → vanilla sheet(-1=无)
   private readonly crackedById: Uint8Array;          // sheet∈CRACKED_SHEETS
   private readonly allowWaterById: Uint8Array;       // sheet∈ALLOW_LIGHT_IN_WATER_SHEETS
@@ -630,6 +631,9 @@ export class TileLightScanner {
       }
     }
     for (const w of WALL_EMISSIVE_GATED) if (w >= 0 && w < WN) this.wallEmGated[w] = 1;
+    // 自研像素方块（F1 图片导入）内部 id——vanilla.sheet=0 与泥土同表，
+    // 发光不能按 sheet 键派发，按 type 直判
+    this.pixelBlockId = TILE_BY_KEY['pixel_block'] ?? -1;
     TILE_DEFS.forEach((d, i) => {
       const sheet = d?.vanilla?.sheet ?? -1;
       if (sheet >= 0) {
@@ -867,12 +871,21 @@ export class TileLightScanner {
           // 蘑菇雕像 349 门控(:2940):frameX<36 的 style 完全不发光——
           // 同时压制组公式与 def.light 静态兜底,故提到入口处判
           const shroomGateOk = !(sheet === 349 && st.frameX[i] < 36);
-          if ((this.hasLightById[type] || this.mushroomById[type]) && shroomGateOk) {
+          if ((this.hasLightById[type] || this.mushroomById[type] || type === this.pixelBlockId) && shroomGateOk) {
             // 接线灯门控:关帧不发光(LIGHT_TOGGLE)
-            const on = sheet < 0 || lightIsOn(sheet, st.frameX[i], st.frameY[i]);
+            const on = type === this.pixelBlockId || sheet < 0 || lightIsOn(sheet, st.frameX[i], st.frameY[i]);
             if (on) {
               let er: number, eg: number, eb: number;
-              if (sheet === 4) {
+              if (type === this.pixelBlockId) {
+                // 自研像素方块（F1 图片导入）自发光：按自身 RGB 发光（用户需求：
+                // 暗处内部方块缺光照看不清）。emission = min(1, c/255×2.5)——
+                // 亮色通道到 1（真彩呈现）、暗色可见、纯黑不发光（靠邻格溢光勾勒）。
+                // RGB 解码同 drawPixelBlock：r=fx>>8、g=fx&255、b=fy
+                const fx = st.frameX[i], fy = st.frameY[i];
+                er = Math.min(1, ((fx >> 8) & 255) / 255 * 2.5);
+                eg = Math.min(1, (fx & 255) / 255 * 2.5);
+                eb = Math.min(1, (fy & 255) / 255 * 2.5);
+              } else if (sheet === 4) {
                 // 火把:24 色动态(TorchID;frameY/22 = style)
                 const style = Math.floor(st.frameY[i] / 22) % 24;
                 if (style === 7) [er, eg, eb] = this.flicker.demonTorchColor();

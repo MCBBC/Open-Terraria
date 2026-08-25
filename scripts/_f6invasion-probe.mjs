@@ -73,7 +73,7 @@ const again = await page.evaluate(() => {
   g.cb.onToast = orig;
   return { err, toasts };
 });
-check('重复触发提示已有入侵', again.err?.includes('已有入侵') && again.toasts.some((t) => t.includes('Boss') || t.includes('入侵')), JSON.stringify(again));
+check('重复触发提示已有入侵(toast 不再误报 Boss)', again.err?.includes('已有入侵') && again.toasts.some((t) => t.includes('入侵')), JSON.stringify(again));
 
 check('无页面错误', errors.length === 0, errors.join('|').slice(0, 160));
 console.log(`\n${pass} PASS / ${fail} FAIL`);

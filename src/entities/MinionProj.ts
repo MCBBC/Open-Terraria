@@ -3639,6 +3639,9 @@ export class MinionProj extends Entity {
     } else if (this.projId === 1112 || this.projId === 1118) {
       // 帕鲁地面随从（AI_067 flag8/flag9）：palGroundStep 原版帧机直写
       frame = Math.min(this.palFrame, Math.max(0, frames - 1));
+    } else if (this.projId === 963) {
+      // 阿比盖尔一阶（AI_062 963 档 :66843-66868）：abigailBody 帧机直写
+      frame = Math.min(this.a963Frame, Math.max(0, frames - 1));
     } else if (MINION_FRAMES[this.projId]) {
       // 帧表族（源码各 AI 提取）：每帧 tick 循环帧表；
       // 小鬼 375 攻击帧门 = ai[1]∈(0,24)（:66910-66913——a62A1 冷却计数器直读,
