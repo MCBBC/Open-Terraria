@@ -123,6 +123,29 @@ const gapOk = await page.evaluate(() => {
 });
 check('textAlign 泄漏免疫(图标/文本缝 4px 净空)', gapOk === true, '');
 
+// 悬停行标签(MouseTextNoOverride → cursorItemIconText 管线):真实鼠标移到首行
+// 图标上 → 光标文本 = 行标题(Lang.inter 95「时间」)且下一行被压暗
+const rect0 = await page.evaluate(() => {
+  const r = window.__swGame.renderer.infoAccs.state.iconRects[0];
+  return r ? { x: r.x + 5, y: r.y + 5 } : null;
+});
+let label2 = { text: '(no rect)', label: '', hover: -1 };
+if (rect0) {
+  await page.mouse.move(rect0.x, rect0.y);
+  await new Promise((r) => setTimeout(r, 300));
+  label2 = await page.evaluate(() => {
+    const g = window.__swGame;
+    return {
+      text: g.player.cursorItemIconText,
+      label: g.renderer.infoAccs.state.rows[0]?.label ?? '',
+      hover: g.renderer.infoAccHover,
+    };
+  });
+}
+check('悬停行标签(时间)上光标', label2.text === label2.label && label2.text !== '', JSON.stringify(label2));
+check('悬停行压暗下一行(hover=0)', label2.hover === 0, `hover=${label2.hover}`);
+await page.mouse.move(rect0 ? rect0.x - 200 : 10, rect0 ? rect0.y + 200 : 10);
+
 // hideInfo 隐藏语义:全置真 → 行清空(背包关时隐藏行不画图标不画文本)
 const hidden = await page.evaluate(async () => {
   const g = window.__swGame;
@@ -134,12 +157,19 @@ const hidden = await page.evaluate(async () => {
 });
 check('hideInfo 全隐藏 → 0 行(背包关)', hidden === 0, `n=${hidden}`);
 
-// canShow 门:NPC 对话/开箱时不画(Main.cs:3099-3110)
+// canShow 门(Main.cs:3099-3110):只压「对话中且未开箱」+ 告示牌;开箱本身不隐藏
 const canShow = await page.evaluate(() => {
-  const layer = window.__swGame.renderer.infoAccs;
-  return { talk: layer.canShow(true, false, false), chest: layer.canShow(false, true, false), ok: layer.canShow(false, false, false) };
+  const L = window.__swGame.renderer.infoAccs;
+  return {
+    talkNoChest: L.canShow(true, false, false),   // 对话+未开箱 → 隐藏
+    talkChest: L.canShow(true, true, false),      // 对话+开箱 → 显示(原版怪门)
+    chestOnly: L.canShow(false, true, false),     // 仅开箱 → 显示
+    sign: L.canShow(false, false, true),          // 告示牌 → 隐藏
+    ok: L.canShow(false, false, false),
+  };
 });
-check('canShow 门:NPC 对话/开箱抑制', !canShow.talk && !canShow.chest && canShow.ok, JSON.stringify(canShow));
+check('canShow 门(原版真值表)', !canShow.talkNoChest && canShow.talkChest && canShow.chestOnly && !canShow.sign && canShow.ok,
+  JSON.stringify(canShow));
 
 check('无页面错误', errors.filter((e) => !e.includes('[worldGen]')).length === 0, errors.join('|').slice(0, 200));
 console.log(`\n${pass} PASS / ${fail} FAIL`);

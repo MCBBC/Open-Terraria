@@ -1116,6 +1116,271 @@ export class SpearProj extends Entity {
   }
 }
 
+// ================= 锚定族（aiStyle 13,AI_013,1458 Projectile.cs:24928-25121） =================
+// 四件:23 鱼叉(物品160)/262 石巨人之拳(1297)/271 KO加农(1314)/273 链刀(1325)。
+// 481 断头台链刃(3012)不走本类——已在 SpearProj 内专支(R30 §1,行为已对拍锁定)。
+// 状态机(每型号差异入 ANCHORED_PROJ 表):
+//   出膛 ai0=0:恒速直线;超射程门(:24987-25005)→转返回;ai[1]>5 显形(alpha255→0);
+//     23 无 ai[1] 钳→ai[1]>=17 重力弧 vy+=0.6/vx*=0.995(:25027-25033);
+//     262/271/273 ai[1] 钳 8=永不坠速(:25011-25026)
+//   返回 ai0=1:tileCollide=false 穿墙(:25081);速度=朝玩家×retSpeed(262=30,:25076-25079);
+//     距玩家<50 Kill(:25087);262 spriteDirection 反相(:25096-25101)
+//   三触发:撞块(:19627-19663 aiStyle13 支→HitTiles 尘+Sound0+ai0=1)/
+//     命中 NPC(Damage_PVE_Inner :14223-14229→ai0=1;23 特支 penetrate3 次才回收 :14213-14224)/
+//     玩家死亡或距>2000 Kill(:24929-24940)
+export interface AnchoredParams {
+  w: number; h: number;
+  maxDist: number;          // 出膛回收距离门(:24989-25004)
+  retSpeed: number;         // 回收制速(:25077-25079)
+  cap8: boolean;            // ai[1] 钳 8(禁坠速支)
+  chainTex: string;         // 链索贴图(Main.cs DrawProjDirect 各型支)
+  drawScale?: number;       // 弹体贴图 scale(271 SetDefaults scale=1.2)
+  boom?: boolean;           // 262 返回起手 200×200 一帧冲击盒+Item14(:25064-25074/:15057)
+}
+const ANCHORED_PROJ: Record<number, AnchoredParams> = {
+  // Projectile.cs:1059-1067(4×4,penetrate=3,ranged,usesLocalNPCImmunity cd12)
+  23: { w: 4, h: 4, maxDist: 1000, retSpeed: 20, cap8: false, chainTex: 'Chain' },
+  // :3465-3474(30×30,extraUpdates=1,melee)
+  262: { w: 30, h: 30, maxDist: 500, retSpeed: 30, cap8: true, chainTex: 'Chain22', boom: true },
+  // :3569-3576(20×20,scale1.2,melee)
+  271: { w: 20, h: 20, maxDist: 200, retSpeed: 20, cap8: true, chainTex: 'Chain18', drawScale: 1.2 },
+  // :3590-3597(26×26,melee);maxDist remix 世界 300(:25005 Main.remixWorld 门)
+  273: { w: 26, h: 26, maxDist: 150, retSpeed: 20, cap8: true, chainTex: 'Chain23' },
+};
+/** 同型在场门（SetDummyItemTime(5) 每 tick 续期 :24942-24947——itemTime>0 阻再用,
+ *  效果 = 拳未回手不能再次开火;481 不设此门故不在本类）。Game 发射前查 */
+export function anchoredActive(projectiles: readonly unknown[], projId: number): boolean {
+  return projectiles.some((e) => e instanceof AnchoredProj && e.projId === projId && !e.dead);
+}
+
+export class AnchoredProj extends Entity {
+  w: number;
+  h: number;
+  damage: number;
+  knockback: number;
+  projId: number;
+  /** GetWeaponCrit 合并值（Game 侧传入） */
+  critChance = 0.04;
+  /** ⑥ 护甲穿透（Game 注入） */
+  armorPen = 0;
+  /** 近战系（吃武器浸剂）——23 鱼叉原版 ranged=true 不吃近战浸剂 */
+  meleeProj: boolean;
+  tileCollide = true;
+  private prm: AnchoredParams;
+  /** ai[0]:-1 未出生 / 0 出膛 / 1 返回 */
+  a0 = -1;
+  /** ai[1] 出膛计数 */
+  private a1 = 0;
+  /** 显形镜像（alpha 255→0,a1>5） */
+  shown = false;
+  /** localAI[0]:0 未爆 / 200 冲击盒待消费 / -1 已消费或豁免(:15057 Damage_GetHitbox) */
+  private localA0 = 0;
+  /** 23 鱼叉穿透计数(penetrate=3,Damage_PVE_Inner :14199-14210 泛式自减) */
+  private hits = 0;
+  /** 23 出膛重力弧计数(ai[1]>=17 起 vy+=0.6/vx*=0.995) */
+  private gravT = 0;
+  private hitCd = new HitCooldown();
+  /** 绘制期玩家中心快照（链条锚,fixedUpdate 续约） */
+  private owner: { cx: number; cy: number } | null = null;
+
+  constructor(dirX: number, dirY: number, spd: number, damage: number, knockback: number, projId: number) {
+    super();
+    const n = Math.hypot(dirX, dirY) || 1;
+    this.prm = ANCHORED_PROJ[projId] ?? ANCHORED_PROJ[262];
+    this.w = this.prm.w; this.h = this.prm.h;
+    this.projId = projId;
+    this.damage = damage;
+    this.knockback = knockback;
+    this.meleeProj = projId !== 23;
+    // 初速 = 朝鼠标单位向 × shootSpeed(出膛恒速,首子步落位玩家中心)
+    this.vx = dirX / n * spd;
+    this.vy = dirY / n * spd;
+    this.spawnSpd = spd;
+    // 出生态 ai[0]=-1 → 首子步置 0 并落位(与 481 模板同构)
+    this.a0 = -1;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.dead) return;
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.hitCd.tick();   // 逐敌私账冷却递减(23 localNPCHitCooldown=12 到期可复中)
+    const p = game.player;
+    const prm = this.prm;
+    if (!prm) { this.dead = true; return; }
+    if (this.a0 < 0) {
+      this.a0 = 0;
+      this.x = p.cx - this.w / 2;
+      this.y = p.cy - this.h / 2;
+    }
+    this.owner = p;
+    // 玩家死亡/超远Kill(:24929-24940)
+    const pdx = p.cx - this.cx, pdy = p.cy - this.cy;
+    let dist = Math.hypot(pdx, pdy);
+    if (p.dead || dist > 2000) { this.dead = true; return; }
+    // 显形后玩家面向弹体(:24949-24958 alpha==0 → ChangeDir)
+    if (this.shown) p.facing = this.cx >= p.cx ? 1 : -1;
+    if (this.a0 === 0) {
+      // 超程回收门(:24987-25005;273 remix 世界 300——:25005 Main.remixWorld 门)
+      const remix = !!(game.world as unknown as { seedFlags?: { remix?: boolean } } | undefined)?.seedFlags?.remix;
+      const maxDist = this.projId === 273 && remix ? 300 : prm.maxDist;
+      if (dist > maxDist) this.a0 = 1;
+      this.a1++;
+      if (this.a1 > 5) this.shown = true;               // :25016-25018 alpha=0 显形
+      if (prm.cap8 && this.a1 > 8) this.a1 = 8;         // :25023-25026 钳 8
+      if (!prm.cap8) {
+        // 23 重力弧(:25027-25033):ai[1]>=17 → vy+=0.6,vx*=0.995
+        this.gravT++;
+        if (this.gravT >= 17) { this.vy += 0.6; this.vx *= 0.995; }
+      }
+      // 位移+撞块(HandleMovement :19627-19663):HitTiles 尘+Sound0+ai0=1;23 先 velocity*=0
+      if (this.tileCollide) {
+        moveAndCollide(this, game.world, this.vx, this.vy);
+        if (this.hitWall || this.hitHead || this.onGround) {
+          if (this.projId === 23) { this.vx = 0; this.vy = 0; }
+          this.tileCollide = false;
+          this.a0 = 1;
+          game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
+          game.playSfx('dig', 1, this.cx, this.cy);
+        }
+      } else {
+        this.x += this.vx; this.y += this.vy;
+      }
+      dist = Math.hypot(p.cx - this.cx, p.cy - this.cy);
+      // 旋转(:25006-25008 rotation=atan2(v)+1.57 在 draw 侧求值)
+    }
+    if (this.a0 === 1) {
+      // 返回相当帧重算玩家向量(出膛末位移后落位为准)
+      const rdx = p.cx - this.cx, rdy = p.cy - this.cy;
+      const rdist = Math.hypot(rdx, rdy);
+      // 262 返回起手冲击(:25064-25074):localAI[0]==0 → dist<150 豁免(-1),
+      // 否则 localAI[0]=200 + HitTilesInACircle + Item14;下一伤害查询消费 200×200 盒(:15057)
+      if (this.localA0 === 0) {
+        if (prm.boom) {
+          if (rdist < 150) {
+            this.localA0 = -1;
+          } else {
+            this.localA0 = 200;
+            this.hitTilesInCircle(game, this.cx, this.cy, 100);
+            game.playSfx('explosion', 1, this.cx, this.cy);
+            // 一帧 200×200 冲击盒(Damage_GetHitbox :15057-15061 缩点 Inflate(localAI0/2))
+            hitEnemies(this, game, this.hitCd, 9999, this.vx > 0 ? 1 : -1, this.armorPen,
+              undefined, undefined, true,
+              { x: this.cx - 100, y: this.cy - 100, w: 200, h: 200 });
+            this.localA0 = -1;
+          }
+        } else {
+          this.localA0 = -1;
+        }
+      }
+      // 穿墙回收(:25081 tileCollide=false)+制速朝玩家(:25082-25096)
+      this.tileCollide = false;
+      const sp = prm.retSpeed;
+      const n = rdist || 1;
+      this.vx = rdx / n * sp;
+      this.vy = rdy / n * sp;
+      this.x += this.vx;
+      this.y += this.vy;
+      if (rdist < 50) { this.dead = true; return; }      // :25087-25089 近手 Kill
+    }
+    // 命中结算:
+    //   23 = 私账 12t(usesLocalNPCImmunity/localNPCHitCooldown=12,:1066-1067)+
+    //     penetrate=3 次后才回收(:14213-14224)
+    //   262/271/273 = 全局免疫档(playerImmune,DefaultTo 族无私账)+命中即回收(:14226-14229)
+    if (this.projId === 23) {
+      hitEnemies(this, game, this.hitCd, 12, this.vx > 0 ? 1 : -1, this.armorPen,
+        () => {
+          this.hits++;
+          if (this.hits >= 3) this.a0 = 1;   // 第 3 击 velocity*=0+penetrate=-1+ai0=1(等价)
+        }, undefined, false);
+    } else {
+      hitEnemies(this, game, this.hitCd, 10, this.vx > 0 ? 1 : -1, this.armorPen,
+        () => { this.a0 = 1; }, undefined, true);
+    }
+  }
+
+  /** Collision.HitTilesInACircle 近似(Collision.cs:3029-3075):圆内实格 effect-only
+   *  KillTile 尘——本仓 spawnDust 逐格冒烟,上限 32 格防刷屏(观感等价,登记近似) */
+  private hitTilesInCircle(game: GameHooks, cx: number, cy: number, r: number): void {
+    const st = game.world.store;
+    const t0x = Math.floor((cx - r) / TILE), t1x = Math.floor((cx + r) / TILE);
+    const t0y = Math.floor((cy - r) / TILE), t1y = Math.floor((cy + r) / TILE);
+    let n = 0;
+    for (let ty = t0y; ty <= t1y && n < 32; ty++) {
+      for (let tx = t0x; tx <= t1x && n < 32; tx++) {
+        if (!st.inBounds(tx, ty) || !st.isSolid(tx, ty)) continue;
+        const dx = tx * TILE + 8 - cx, dy = ty * TILE + 8 - cy;
+        if (dx * dx + dy * dy > r * r) continue;
+        game.spawnDust?.(tx * TILE, ty * TILE, TILE, TILE, 14, 0, 0, 150, null, 1);
+        n++;
+      }
+    }
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    if (this.a0 < 0) return;   // 未出生不画
+    // 链条在弹体下层(Main.cs DrawProjDirect 链先于本体)
+    this.drawChain(r);
+    // 本体角(:25006-25007 出膛 atan2(v)+1.57 / :25082 返回 atan2(向玩家)-1.57);
+    // spriteDirection:262 出膛 vx<0?-1:+1(:25041-25046)/返回反相(:25096-25101);
+    // 271 同式;23/273 无 sd 支(贴图对称)。alpha:a1>5 前 255(隐形)
+    const p = this.owner;
+    const out = this.a0 === 0;
+    const ang = out
+      ? Math.atan2(this.vy, this.vx) + Math.PI / 2
+      : Math.atan2((p?.cy ?? this.cy) - this.cy, (p?.cx ?? this.cx) - this.cx) - Math.PI / 2;
+    const sdFlip = (this.projId === 262 || this.projId === 271)
+      ? ((out ? this.vx < 0 : this.vx > 0) ? -1 : 1)
+      : 0;
+    const e = this as unknown as { facing?: number };
+    e.facing = sdFlip;
+    drawProj(r, cam, this, this.projId, ang, '#B0B0C0', this.shown ? 1 : 0, -1, sdFlip < 0, false,
+      this.prm.drawScale ?? 1);
+  }
+
+  /** 玩家→拳链索(Main.cs DrawProjDirect 各型支):
+   *  262 :29688-29736 Chain22 / 271 :29914-29959 Chain18 / 273 :29737-29800 Chain23 /
+   *  23 兜底组 :29961-30175 TextureAssets.Chain。共同几何:
+   *  链起点 = 弹心 ∓ v×(4/|v|)(出膛−/返回+;23 兜底支为 position+(8,2) 与 40/|v|,
+   *  此处统一 4/|v| 中心式——23 的 ±16px 差登记近似);步长 12px;距玩家<25 停;
+   *  rot=atan2(向玩家)-1.57;逐节光照着色 */
+  private drawChain(r: Renderer): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = chainImg(this.prm.chainTex);
+    if (!img || !(img.width > 0)) return;
+    const armX = this.owner?.cx ?? this.cx;
+    const armY = this.owner?.cy ?? this.cy;
+    const vmag = Math.hypot(this.vx, this.vy) || 1;
+    const off = 4 / vmag;
+    const sgn = this.a0 === 0 ? -1 : 1;
+    let ox = this.cx + this.vx * off * sgn;
+    let oy = this.cy + this.vy * off * sgn;
+    const lighting = (r as unknown as { lighting?: { lightAt: (tx: number, ty: number) => [number, number, number] } | null }).lighting;
+    const lightAt = (wx: number, wy: number): number => {
+      if (!lighting) return 1;
+      const [lr, lg, lb] = lighting.lightAt(Math.floor(wx / TILE), Math.floor(wy / TILE));
+      return Math.min(1, (lr * 0.3 + lg * 0.5 + lb * 0.2) / 255);
+    };
+    for (let i = 0; i < 999; i++) {
+      const dx = armX - ox, dy = armY - oy;
+      const d = Math.hypot(dx, dy);
+      if (!Number.isFinite(d) || d < 25) break;           // :29722 num126<25f 停
+      const k = 12 / d;
+      ox += dx * k; oy += dy * k;                          // 步长 12px(:29728-29731)
+      ctx.save();
+      ctx.translate(ox, oy);
+      ctx.rotate(Math.atan2(armY - oy, armX - ox) - Math.PI / 2);   // :29724 rotation18
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalAlpha = lightAt(ox, oy);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      ctx.restore();
+    }
+  }
+
+  /** 出生速度模长(Game 注入——构造后写,首子步消费) */
+  spawnSpd = 14;
+}
+
 // ---- AI_019 尾段 per-type 拖尾尘（1458 Projectile.cs:46796-46920,R30 §3.2 P1）----
 // 真值表（每 AI tick 一次;v = (dx,dy)×spd 弹速向量;dir = direction=玩家朝向）：
 //  46 Dark Lance:Next(5)==0 → d14(alpha150,scale1.4) + d27(v×0.2+dir×3,alpha100,

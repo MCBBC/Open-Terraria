@@ -296,7 +296,9 @@ export function loadExtraSprite(n: number): ImageBitmap | HTMLImageElement | nul
 const sparkleTintCache = new Map<string, HTMLCanvasElement>();
 function sparkleTintedTex(rgb: readonly [number, number, number]): HTMLCanvasElement | null {
   const img = loadExtraSprite(98);
-  if (!img || !(img.width > 0) || !(img.height > 0)) return null;
+  // ★texReady（2026-08-25 同类扫描）：loadExtraSprite 半加载窗返回 width>0 的
+  //  未完 Image——该窗烘焙平色矩形按 rgb 键永久入缓存（星尘闪光变淡色方片）
+  if (!img || !texReady(img)) return null;
   const key = rgb.join(',');
   const hit = sparkleTintCache.get(key);
   if (hit) return hit;
@@ -411,6 +413,7 @@ import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
 import { MapPingStore } from '../net/syncModules';
 import { leashedBubbleVisible } from '../entities/LeashedCritter';
 import { applyHeldProjPointing, heldProjFrameBegin, noteHeldProjEntity } from './heldProj';
+import { texReady } from './texId';
 import { PAINT_TOOLS, paintToolOffset } from './CursorItemIcon';
 import type { Entity } from '../entities/Entity';
 import {
@@ -3241,11 +3244,14 @@ export class Renderer {
       // gravDir=−1 飘字 Y 屏幕镜像（Main.cs:63339-63343:num23 = screenHeight −
       // (position.Y − screenPosition.Y)——重力倒置(重力地球等)时飘字翻到对侧）
       const sy = player.gravDir === -1 ? viewH - sy0 : sy0;
-      // 物品名飘字：带阴影文本（非原版链,保持旧样式;色 = 稀有度/钱币档位——
-      // showPickupLabel 写入 d.color,缩放 = 弹出动画 PopupText scale 链）
+      // 物品名飘字：带阴影文本（色 = 稀有度/钱币档位；alpha = PopupText 呼吸、
+      // scale = 弹出/收缩动画链均已按 PopupText.Update 对齐）。★不走 drawCombatText
+      // 位图字体——combat-font.json 仅 10 个数字字形（伤害数字专用），拉丁/CJK
+      // 全缺（"土块"只剩"(5)"）；全量 MouseText+CJK 字体提取是独立资产任务，
+      // 登记后维持 sans-serif 描边
       if (d.label) {
         const sc = d.scale ?? 1;
-        ctx.globalAlpha = Math.min(1, d.life / 30);
+        ctx.globalAlpha = d.alpha ?? 1;
         ctx.font = `${Math.max(1, Math.round(13 * sc))}px sans-serif`;
         ctx.strokeStyle = 'rgba(0,0,0,0.75)';
         ctx.lineWidth = 3;

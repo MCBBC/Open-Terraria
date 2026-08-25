@@ -1194,6 +1194,207 @@ export class MinionProj extends Entity {
    *  · 未折算:localAI[1] 出场淡入淡出（:66475-66493 纯渲染 alpha）、攻击帧 8-12
    *    映射（:66841-66901,本仓 963 走 age 兜底循环）、原版 963 无射击弹型
    *    （num48=0 :67051,ai[1] 自增无复位=至多一次 type-0 空弹,净效果无弹,不建模） */
+  // ---- 泰拉棱镜 946（AI_156_BatOfLight 946 支 :52425-52760 1:1）----
+  // ai[0]:−1 归位 / 0 待机 / 41-79 跃空段 / 0-39 弧刀段（攻击倒计时;起手恒 80、
+  // 链式 NextFromList(40,80)——起手处 rand 被 num3=80 覆写为死代码 :52570-52571）
+  private tA0 = 0;
+  private tA1 = 0;            // ai[1] 目标敌 id
+  private tSX = 0; tSY = 0;   // localAI[0/1] 攻击起点（跃空段记录）
+  private tHit = new Map<number, number>();   // localNPCHitImmunity（StartAttack 清=每轮每敌一次）
+  private tInit = false;
+
+  /** AI_GetMyGroupIndexAndFillBlackList（:52505-52520，仅计数——blacklist 实际
+   *  不填,TryAttackingNPCs 的黑名单门为空操作） */
+  private tGroup(game: GameHooks): { index: number; total: number } {
+    let index = 0, total = 0;
+    for (const e of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+      const m = e as MinionProj;
+      if (m instanceof MinionProj && !m.dead && m.projId === 946) {
+        if (this.id > m.id) index++;
+        total++;
+      }
+    }
+    return { index, total };
+  }
+
+  /** AI_156_TryAttackingNPCs（:52694-52725）：距玩家心 1000 内最近敌 + 视线
+   *  （CanHitWithOwnBody :12428 ≈ canHitLine 本仓 LOS 单点近似） */
+  private tTarget(game: GameHooks, pcx: number, pcy: number): EnemyLike | null {
+    let best: EnemyLike | null = null;
+    let bestD = 1000;
+    for (const e of game.enemies()) {
+      const en = e as never as EnemyLike & { dead: boolean };
+      if (!playerCanHitEnemy(e, game) || !en || en.dead) continue;
+      const d = Math.hypot(en.cx - pcx, en.cy - pcy);
+      if (d > 1000) continue;
+      if (!canHitLine(game.world.store, this.x, this.y, this.w, this.h, en.x, en.y, en.w, en.h)) continue;
+      if (best === null || d < bestD) { best = en; bestD = d; }
+    }
+    return best;
+  }
+
+  private terraprismaBody(game: GameHooks, p: Player, dmg0: number): void {
+    // SetDefaults scale=0.75（:8932）→ 命中盒 (int)(10×0.75)=7（SetDefaults 尾段统一缩放）
+    if (!this.tInit) { this.tInit = true; this.w = 7; this.h = 7; }
+    const st = game.world.store;
+    // >2000px 状态重置（:52516-52520 ai0=0/ai1=0——位置不瞬移,Idle SmoothStep 归位）
+    if (Math.hypot(p.cx - this.cx, p.cy - this.cy) > 2000) { this.tA0 = 0; this.tA1 = 0; }
+    const num = 40, num2 = 39, num3 = 80, num4 = 79, num5 = 41;
+    const tgt = this.tA1 ? this.findEnemyById(game, this.tA1) : null;
+
+    // ---- ai[0] == −1：归位（:52523-52534 MoveTowards 32 + AngleLerp 0.2）----
+    if (this.tA0 === -1) {
+      const g = this.tGroup(game);
+      const [spot, irot] = this.tIdleSpot(game, p, g.index, g.total);
+      this.vx = 0; this.vy = 0;
+      const dx = spot.x - this.cx, dy = spot.y - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      const mv = Math.min(32, d);
+      this.x += dx / d * mv;
+      this.y += dy / d * mv;
+      this.rot = angleLerp(this.rot, irot, 0.2);
+      if (d < 2) this.tA0 = 0;
+      this.tHitTick(game, p, dmg0);
+      return;
+    }
+    // ---- ai[0] == 0：待机（:52535-52574 SmoothStep 0.45 + AngleLerp 0.45 + 1/20 起手）----
+    if (this.tA0 === 0) {
+      const g = this.tGroup(game);
+      const [spot, irot] = this.tIdleSpot(game, p, g.index, g.total);
+      this.vx = 0; this.vy = 0;
+      const t = 0.45, s = t * t * (3 - 2 * t);   // Vector2.SmoothStep
+      this.x += (spot.x - this.cx) * s;
+      this.y += (spot.y - this.cy) * s;
+      this.rot = angleLerp(this.rot, irot, 0.45);
+      if (Math.floor(Math.random() * 20) === 0) {
+        const en = this.tTarget(game, p.cx, p.cy);
+        if (en) {
+          this.tHit.clear();                       // AI_156_StartAttack = ResetLocalNPCHitImmunity
+          this.tA0 = num3;                         // :52570-52571 rand 被 num3 覆写=恒 80
+          this.tA1 = en.id;
+        }
+      }
+      this.tHitTick(game, dmg0);
+      return;
+    }
+    // ---- 攻击（ai[0] > 0）：目标校验（:52648-52676）----
+    if (!tgt || tgt.dead || !playerCanHitEnemy(tgt as never, game)) {
+      const en = this.tTarget(game, p.cx, p.cy);
+      if (en) {
+        this.tA0 = Math.random() < 0.5 ? num : num3;   // 链式 NextFromList(40,80) :52666
+        this.tA1 = en.id;
+        this.tHit.clear();
+      } else { this.tA0 = -1; this.tA1 = 0; }
+      return;
+    }
+    // 相位判定（:52677-52687 预递减）：ai0≥41 → 跃空段(79→41);否则弧刀段(39→0)
+    const preLeap = this.tA0 >= num5;
+    const num15 = preLeap ? num4 : num2;
+    const num16 = preLeap ? num5 : 0;
+    this.tA0--;
+    if (this.tA0 >= num15) {
+      this.facing = this.cx < tgt.cx ? 1 : -1;         // :52682 direction
+      if (this.tA0 === num15) { this.tSX = this.cx; this.tSY = this.cy; }  // :52684-52686 记起点
+    }
+    const lerp2 = clamp01((num15 - this.tA0) / (num15 - num16));   // GetLerpValue(num15,num16,ai0)
+    if (!preLeap) {
+      // ---- 弧刀段（:52689-52710 num14==0）：绕敌半圆弧 + 切向朝向 ----
+      let vx0 = this.tSX, vy0 = this.tSY;
+      if (lerp2 >= 0.5) {
+        vx0 = tgt.cx + (p.cx - tgt.cx) * 0.5;          // 后半程枢轴=敌-玩家中点
+        vy0 = tgt.cy + (p.cy - tgt.cy) * 0.5;
+      }
+      const num20 = Math.atan2(tgt.cy - vy0, tgt.cx - vx0);
+      const num21 = this.facing === 1 ? -Math.PI : Math.PI;
+      const num22 = num21 + (-num21) * lerp2 * 2;
+      let spx = Math.cos(num22), spy = Math.sin(num22);
+      spy *= 0.5;
+      spy *= 0.8 + Math.sin(this.id * 2.3) * 0.2;      // IndexForVisuals 摆相(:52698-52699)
+      const n20 = Math.atan2(spy, spx) + num20;        // .RotatedBy(num20)
+      const rl = Math.hypot(spx, spy);
+      spx = Math.cos(n20) * rl; spy = Math.sin(n20) * rl;
+      const radius = Math.hypot(tgt.cx - vx0, tgt.cy - vy0) / 2;
+      this.x = vx0 + (tgt.cx - vx0) * 0.5 + spx * radius - this.w / 2;
+      this.y = vy0 + (tgt.cy - vy0) * 0.5 + spy * radius - this.h / 2;
+      const num24 = wrapAngle(num20 + num22);
+      this.rot = num24 + Math.PI / 2;
+      this.vx = Math.cos(num24) * 10; this.vy = Math.sin(num24) * 10;
+    } else {
+      // ---- 跃空段（:52712-52727 num14==1）：升空→扑向敌并越过 ----
+      let vx0 = this.tSX, vy0 = this.tSY;
+      vx0 += 0;
+      vy0 += clamp01(lerp2 / 0.4) * -100;              // GetLerpValue(0,0.4,lerp2)×−100
+      const vx = tgt.cx - vx0, vy = tgt.cy - vy0;
+      const vl = Math.hypot(vx, vy) || 1;
+      const cl = Math.min(150, Math.max(60, vl));
+      const ox = tgt.cx + vx / vl * cl, oy = tgt.cy + vy / vl * cl;
+      const l3 = clamp01((lerp2 - 0.4) / 0.2);         // GetLerpValue(0.4,0.6,...)
+      const l4 = clamp01((lerp2 - 0.6) / 0.4);         // GetLerpValue(0.6,1,...)
+      const tRot = Math.atan2(vy, vx) + Math.PI / 2;
+      this.rot = angleTowards(this.rot, tRot, Math.PI / 5);
+      this.cx = vx0 + (tgt.cx - vx0) * l3;
+      this.cy = vy0 + (tgt.cy - vy0) * l3;
+      if (l4 > 0) { this.cx = tgt.cx + (ox - tgt.cx) * l4; this.cy = tgt.cy + (oy - tgt.cy) * l4; }
+    }
+    // ---- 体触伤害（Damage_PVE：10×10×0.75 盒,每轮每敌一次）----
+    this.tHitTick(game, dmg0);
+    // ---- 链式/收尾（:52729-52742 ai0==num16）----
+    if (this.tA0 === num16) {
+      const en = this.tTarget(game, p.cx, p.cy);
+      if (en) {
+        this.tA0 = Math.random() < 0.5 ? num : num3;
+        this.tA1 = en.id;
+        this.tHit.clear();
+      } else { this.tA0 = -1; this.tA1 = 0; }
+    }
+  }
+
+  /** 体触结算：攻击期盒相交 → hurt（每敌每轮一次,tHit 于 StartAttack 清） */
+  private tHitTick(game: GameHooks, dmg0: number): void {
+    for (const [k, v] of this.tHit) {
+      if (v <= 1) this.tHit.delete(k); else this.tHit.set(k, v - 1);
+    }
+    for (const e of game.enemies()) {
+      const en = e as never as EnemyLike & { dead: boolean; id: number };
+      if (!en || en.dead || !playerCanHitEnemy(e, game)) continue;
+      if (this.tHit.has(en.id)) continue;
+      if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
+      this.tHit.set(en.id, 60);
+      const crit = Math.random() < 0.04;
+      const owner = this.ownerRef() as unknown as { equipStats?: { armorPen?: number } } | null;
+      const pen = owner?.equipStats?.armorPen ?? 0;
+      en.hurt?.(crit ? Math.round(dmg0 * 2) : dmg0, this.facing * this.knockback, 0,
+        game, pen, crit);
+    }
+  }
+
+  /** AI_156_GetIdlePosition 946 支（:52551-52565）：肩上一字排开 + miscCounter 椭圆微摆 */
+  private tIdleSpot(game: GameHooks, p: Player, index: number, total: number): [{ x: number; y: number }, number] {
+    const num3 = index + 1;
+    const dir = p.facing || 1;
+    let irot = wrapAngle(num3 * Math.PI * 2 * (1 / 60) * dir + Math.PI / 2);
+    const num4 = num3 % total;
+    const misc = ((this.age % 3600) / 3600);
+    const wob = Math.PI * 2 * (misc * (2 + num4) + num4 * 0.5 + dir * 1.3);
+    const wx = Math.cos(wob) * 0;                     // (0,0.5).RotatedBy(...)→x=−0.5 sin
+    const wy = Math.sin(wob) * 0.5 * 4;
+    void wx;
+    const spot = {
+      x: p.cx + Math.cos(irot) * 10 + dir * (num3 * -6 - 16) + (-Math.sin(wob) * 0.5 * 4),
+      y: p.cy + Math.sin(irot) * 10 + p.gravDir * -15 + wy,
+    };
+    irot = wrapAngle(irot + Math.PI / 2);
+    return [spot, irot];
+  }
+
+  private findEnemyById(game: GameHooks, id: number): EnemyLike | null {
+    for (const e of game.enemies()) {
+      const en = e as never as EnemyLike & { dead: boolean; id: number };
+      if (en && !en.dead && en.id === id) return en;
+    }
+    return null;
+  }
+
   private abigailBody(game: GameHooks, p: Player, dmg0: number): void {
     const n = Math.max(1, this.peerCount(game, 970));
     const num2 = n - 1;
@@ -2842,6 +3043,7 @@ export class MinionProj extends Entity {
     if (this.projId === 625) { this.dragonHead(game, p, dmg0); return; }
     if (this.projId === 831 || this.projId === 970) { this.counterHover(game, p, dmg0); return; }
     if (this.projId >= 833 && this.projId <= 835) { this.tigerBody(game, p, dmg0); return; }
+    if (this.projId === 946) { this.terraprismaBody(game, p, dmg0); return; }
     if (this.projId === 963) { this.abigailBody(game, p, dmg0); return; }
     // AI_062 五射手 1:1 速度曲线/随机冷却/射击门（:66067-67166,备案项①③）
     if (ai62) { this.ai62Step(game, p, dmg0, tgt); return; }
@@ -3539,3 +3741,20 @@ function angleTowards(cur: number, target: number, maxAngle: number): number {
   const step = Math.max(-maxAngle, Math.min(maxAngle, d));
   return cur + step;
 }
+
+/** MathHelper.AngleLerp（AI_156 归位转向 :52527/:52547 用）：最短弧插值 */
+function angleLerp(cur: number, target: number, amount: number): number {
+  let d = target - cur;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return cur + d * amount;
+}
+
+/** MathHelper.WrapAngle：钳到 (−π, π] */
+function wrapAngle(a: number): number {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a <= -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+const clamp01 = (v: number): number => v < 0 ? 0 : v > 1 ? 1 : v;

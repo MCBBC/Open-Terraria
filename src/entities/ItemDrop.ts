@@ -208,14 +208,14 @@ export class ItemDrop extends Entity {
           game.playSfx(coinIndexOf(this.itemId) >= 0 ? 'coin' : 'pickup', 0.75);
           const def = ITEM_DEFS[this.itemId];
           // 飘字计数（PopupText.NewText :38609）：picked = 实际入包数
-          if (def) game.showPickupLabel(def.key, before);
+          if (def) game.showPickupLabel(def.key, before, this.prefix);
           return;
         }
         if (left !== before) {
           game.notifyInventoryChanged();
           // 部分拾取（背包该堆被填满）同样飘字（:38623——picked = 填入的差额）
           const def = ITEM_DEFS[this.itemId];
-          if (def) game.showPickupLabel(def.key, before - left);
+          if (def) game.showPickupLabel(def.key, before - left, this.prefix);
         }
         this.stack = left;
       } else if (inGrabRange) {

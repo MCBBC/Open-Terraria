@@ -208,7 +208,7 @@ export type CombatWeapon =
   | { kind: 'summon'; shoot: number; sentry: boolean; damage: number; knockback: number; useTime: number; shootSpeed: number }
   | { kind: 'whip'; shoot: number; damage: number; knockback: number; useTime: number; shootSpeed: number; itemId: number }
   | {
-      kind: 'boomerang' | 'spear' | 'yoyo' | 'flail' | 'grenade' | 'glowstick' | 'magic' | 'shot' | 'summon';
+      kind: 'boomerang' | 'spear' | 'anchored' | 'yoyo' | 'flail' | 'grenade' | 'glowstick' | 'magic' | 'shot' | 'summon';
       shoot: number;
       damage: number;
       knockback: number;
@@ -280,9 +280,19 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
     //   meleeSpeed 节奏/397 孢子侵染/挥击音尘），不能落通用 SpearProj——归 'shot'
     //   交 Game 专支（同 1226 归 melee 专支先例）
     if (vid === 1227 && ai === AI_SHORTSWORD) return { kind: 'shot', shoot, ...base };
-    if (ai === AI_SPEAR || ai === AI_SHORTSWORD || ai === AI_ANCHORED) return { kind: 'spear', shoot, ...base };
-    // AI_ANCHORED(13):鱼叉 160/Golem拳 1297/KO加农 1314/链刀 1325/链斩 3012——
-    // 原版锚在角色上伸缩(AI_013),归长矛前刺族近似;此前落入 shot 兜底=子弹射飞
+    if (ai === AI_SPEAR || ai === AI_SHORTSWORD) return { kind: 'spear', shoot, ...base };
+    // AI_ANCHORED(13) 四件已实装专支（entities/WeaponProj.ts AnchoredProj,
+    // AI_013 全状态机 Projectile.cs:24928-25121）：出膛恒速→超程门回收
+    // （23>1000/262>500/271>200/273>150）/撞块·命中敌即转回收/返回段穿墙制速
+    // （262=30）/玩家→拳 Chain22·18·23·Chain 链索绘制。鱼叉 160(弹23)带
+    // penetrate=3 三击才回收+私账免疫 12t；Golem 拳 1297(262)返回起手 200×200
+    // 一帧冲击盒+爆炸音(:25064-25074/:15057)。此前整族落 'spear' 长矛前刺近似
+    // （用户实报"石巨人之拳不对,缺少部件"=无伸缩三段形态、无链条）；
+    // ★481 断头台链刃(3012)保留走 'spear'——SpearProj 内 R30 专支行为已对拍锁定
+    if (ai === AI_ANCHORED) {
+      if (shoot === 481) return { kind: 'spear', shoot, ...base };
+      return { kind: 'anchored', shoot, ...base };
+    }
     if (ai === AI_YOYO) return { kind: 'yoyo', shoot, ...base };
     if (c.summon) {
       // 召唤武器（31 件）：按投射物 AI 分流哨兵与随从。哨兵 aiStyle 集合 = 53（冰九头蛇

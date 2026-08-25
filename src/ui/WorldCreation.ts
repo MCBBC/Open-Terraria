@@ -85,18 +85,21 @@ const CSS = `
 @media (max-height: 500px) {
   .sw-wc-panel { max-height: 96vh; overflow-y: auto; overscroll-behavior: contain;
     translate: 0 var(--kb-shift, 0px); transition: translate .15s; }
-  /* 矮横屏(~390 高)纵向体量压缩——目标:全面板一屏放下(Create 钮不被折叠),
-   * overflow-y 仅作极端字号/语言下的兜底 */
+  /* 矮横屏(375-430 高)纵向体量压缩——★保持双列(覆盖 A 档堆叠:矮屏双列更矮,
+   * SE 横屏 375 实测堆叠会把邪恶组+footer 折叠出屏),目标全面板一屏放下,
+   * overflow-y 仅作极端字号/语言兜底 */
+  .sw-wc-body { flex-direction: row; }
+  .sw-wc-side { width: 118px; flex-direction: column; }
+  .sw-wc-preview { width: 88px; height: 88px; }
   .sw-wc-title { margin-bottom: 4px; font-size: 16px; }
-  .sw-wc-main { gap: 6px; }
-  .sw-wc-row input[type=text] { padding: 4px 8px; }
+  .sw-wc-main { gap: 5px; }
+  .sw-wc-row input[type=text] { padding: 3px 8px; font-size: 16px; }
   .sw-wc-grouplabel { font-size: 12px; }
   .sw-wc-opt { padding: 2px 4px; }
-  .sw-wc-opt img { width: 26px; height: 26px; }
-  .sw-wc-desc { min-height: 18px; font-size: 11px; }
-  .sw-wc-preview { width: 88px; height: 88px; }
-  .sw-wc-footer { margin-top: 6px; }
-  .sw-wc-footer button { padding: 5px 16px; font-size: 14px; }
+  .sw-wc-opt img { width: 24px; height: 24px; }
+  .sw-wc-desc { min-height: 14px; font-size: 11px; }
+  .sw-wc-footer { margin-top: 5px; }
+  .sw-wc-footer button { padding: 4px 14px; font-size: 14px; }
 }
 `;
 
@@ -118,12 +121,14 @@ export class WorldCreationPanel {
 
   constructor(parent: HTMLElement, private flow: WorldCreationFlow) {
     ensureVanillaKit();
-    if (!document.getElementById('sw-wc-style')) {
-      const style = document.createElement('style');
+    // 样式表每次挂载都刷新(★HMR 期守卫只建不更,旧 CSS 驻留吞变更——同 TitleMenu)
+    let style = document.getElementById('sw-wc-style') as HTMLStyleElement | null;
+    if (!style) {
+      style = document.createElement('style');
       style.id = 'sw-wc-style';
-      style.textContent = CSS;
       document.head.appendChild(style);
     }
+    style.textContent = CSS;
     this.panel = document.createElement('div');
     this.panel.className = 'sw-wc-panel sw-vpanel';
     this.panel.innerHTML = `

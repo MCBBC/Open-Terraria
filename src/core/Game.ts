@@ -218,6 +218,7 @@ import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
 import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS } from '../items/Inventory';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
+import { combatMeasure } from '../render/CombatTextFont';
 
 /** 物品稀有度表（vanilla-itemrare.json：vid → rare；同 UI.ts/Bobber.ts 惯例） */
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
@@ -232,6 +233,16 @@ const POPUP_RARITY_COLOR_11PLUS = '#B428FF';   // ≥11（Item.cs:692-694）
 /** 稀有度 → 飘字色（表查 + ≥11 档） */
 function popupRarityColor(rare: number): string {
   return POPUP_RARITY_COLORS[rare] ?? (rare >= 11 ? POPUP_RARITY_COLOR_11PLUS : '#FFFFFF');
+}
+
+/** 词缀显示名（Item.AffixName Item.cs:1195-1203：prefix≤0 → 本名；否则
+ *  Lang.GetPrefixedItemName——本仓 l10n 键 Prefix.{ConstName}，同 UI.ts 惯例） */
+function popupAffixName(prefix: number | undefined, baseName: string): string {
+  if (!prefix) return baseName;
+  const key = PREFIX_NAMES[String(prefix)];
+  if (!key) return baseName;
+  const t = Lang.text(`Prefix.${key}`);
+  return (t && t !== `Prefix.${key}` ? t : key) + baseName;
 }
 
 /** 钱币飘字档位（PopupText.cs:233-247/:352-366）：面值 → [色, 最短寿命] */
@@ -322,7 +333,7 @@ import { hitPlayer, playerCanHitEnemy, statusPlayer, COLD_DAMAGE_NPCS } from '..
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
-import { Boomerang, SpearProj, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, TorchGodHelperProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare, counterweightDecision, YoyoShotProj, meleeThrowSpeed, placeAtShootSpawn, type CounterweightCtx, type CounterweightPlayView } from '../entities/WeaponProj';
+import { Boomerang, SpearProj, AnchoredProj, anchoredActive, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, TorchGodHelperProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare, counterweightDecision, YoyoShotProj, meleeThrowSpeed, placeAtShootSpawn, type CounterweightCtx, type CounterweightPlayView } from '../entities/WeaponProj';
 // 1457 批 C 新弹实体（叶绿双剑 1126-1129/花瓣 1116/天雷 1117·1122/冰牙 1115 + 孢子云生成器）
 import { ChloroClaymoreBlade, ChloroSaberStab, ChloroSporeCloud, ChloroBladeSlam,
   PetalstormShot, StormLightning, GlacierFangShot,
@@ -2455,14 +2466,15 @@ export class Game implements GameHooks {
   }
 
   /** CanDeathSpectate（Player.cs:3933-3943）：dead && !ghost && deadTime ≥
-   *  DeadSpectatingLockoutTime(60)（:1526）。本仓映射：deadTime = respawnTimer
-   *  （死亡起每 tick 递增、respawnPlayer 归零——同源计时）、ghost = isGhostPhase
-   *  （硬核幽灵相）。适用域 = 联机（原版 UpdateDead 尾 :16921 Main.netMode==1 门；
-   *  单机死亡走死亡画面无观战——SpectateNextPlayer :17044 netMode==0 恒 false） */
+   *  DeadSpectatingLockoutTime(60)（:1526）。deadTime = 独立正计计数器
+   *  （:16780 死亡起递增、Spawn 归零 :37182——2026-08-25 双计数器改造后与
+   *  respawnTimer 分立）、ghost = isGhostPhase（硬核幽灵相）。适用域 = 联机
+   *  （原版 UpdateDead 尾 :16921 Main.netMode==1 门；单机死亡走死亡画面无
+   *  观战——SpectateNextPlayer :17044 netMode==0 恒 false） */
   private canDeathSpectate(): boolean {
     return !!this.net?.active && !!this.player?.dead
       && !this.player.isGhostPhase(this.world)
-      && this.player.respawnTimer >= 60;
+      && this.player.deadTime >= 60;
   }
 
   /** 观战退出键族判定（HandleSpectatingControls :16933 的键盘半边——原版为
@@ -5495,26 +5507,34 @@ export class Game implements GameHooks {
       if (!this._deathHandled) {
         this._deathHandled = true;
         this.handlePlayerDeath();
+        // GetRespawnTime（Player.cs:38384-38422）：600t=10s 基准 → boss 在场 +600
+        //（:38388-38398 boss 扫描 `!pvp` 门——PvP 死亡不延迟）→ 【之后】专家 ×1.5
+        //（:38402——(600+600)×1.5=1800，旧式 900+600=1500 乘加序反了）。
+        // ★1456 respawnTimer =【倒计数】：死亡置满值（:38303）、每 tick 递减
+        //（:16896-16907）、≤0 重生（:16908）；显示 :44788 1+timer/60 自然倒数；
+        // .plr 存剩余值（:53956）。boss 扫描在死亡时刻一次定值（原版 GetRespawnTime
+        // 内联扫描），死亡后到场 boss 不延长（曾逐 tick 重扫=非原版）
+        player.bossNearOnDeath = !player.lastPvpDeath
+          && this.entities.enemies.some((en) => (en as unknown as { def?: { boss?: boolean } }).def?.boss && !en.dead);
+        player.respawnTimer = (600 + (player.bossNearOnDeath ? 600 : 0))
+          * (mainExpertMode(this.world) ? 1.5 : 1);
+        player.deadTime = 0;
       }
       // 死亡画面淡入 ramp（Player.cs:16873 immuneAlpha += 2 钳 255）
       if (player.immuneAlpha < 255) player.immuneAlpha = Math.min(255, player.immuneAlpha + 2);
-      // 重生计时
-      player.respawnTimer++;
-      // GetRespawnTime（Player.cs:38384-38422）：600t=10s 基准 → boss 在场 +600
-      //（:38388-38398 boss 扫描 `!pvp` 门——PvP 死亡不延迟）→ 【之后】专家 ×1.5
-      //（:38402——(600+600)×1.5=1800，旧式 900+600=1500 乘加序反了）。
-      // 扫描结果同步写 player.bossNearOnDeath（硬核幽灵 isGhostPhase 同阈值门，
-      // 渲染/逻辑同源——2026-08-17 补齐幽灵相 boss 延迟）
-      player.bossNearOnDeath = !player.lastPvpDeath
-        && this.entities.enemies.some((en) => (en as unknown as { def?: { boss?: boolean } }).def?.boss && !en.dead);
+      // 双计数器：deadTime 正计（:16780，观战/跳过锁的 elapsed 语义）+
+      // respawnTimer 倒计（:16896-16907 Clamp 递减，respawnTimerMax=3600 上限）
+      player.deadTime++;
+      if (player.respawnTimer > 0) {
+        player.respawnTimer = Math.max(0, player.respawnTimer - 1);
+      }
       // 1457: 死亡界面按跳跃跳过复活倒计时（Main.cs:46124-46134 JustBecameTrue(Jump)
-      // → LocalPlayer.SkipRespawnTime()；门 = Player.AllowsRespawnTimerSkip :39264-39291，
-      // DeadSkipLockoutTime=90 :1627）。本仓 respawnTimer 计数向上（与原版 deadTime
-      // 同源递增）→ 跳过 = 计时到点直接 respawnPlayer。幽灵相/PvP 死亡/deadTime<90
-      // 三门内联；其余四门在 allowsRespawnTimerSkip()。
+      // → LocalPlayer.SkipRespawnTime()；门 = Player.AllowsRespawnTimerSkip，
+      // DeadSkipLockoutTime=90 :1627——elapsed 语义走 deadTime）。幽灵相/PvP 死亡/
+      // deadTime<90 三门内联；其余四门在 allowsRespawnTimerSkip()。
       // ★全门结果同步写 player.respawnSkipUi——死亡 UI 的"按SPACE跳过"提示
       //   淡入/滑移（Main.cs:46104-46134 同门）与此位联动（Renderer 消费）
-      player.respawnSkipUi = player.respawnTimer >= 90
+      player.respawnSkipUi = player.deadTime >= 90
         && !player.isGhostPhase(this.world) && !player.lastPvpDeath
         && this.allowsRespawnTimerSkip();
       const jumpEdge = !!player.inputJump && !this._prevRespawnSkipJump;
@@ -5522,8 +5542,7 @@ export class Game implements GameHooks {
       if (jumpEdge && player.respawnSkipUi) {
         this.respawnPlayer();
       }
-      if (player.respawnTimer > (600 + (player.bossNearOnDeath ? 600 : 0))
-        * (mainExpertMode(this.world) ? 1.5 : 1)) this.respawnPlayer();
+      if (player.respawnTimer <= 0) this.respawnPlayer();   // :16908
     } else {
       this._deathHandled = false;
       player.respawnSkipUi = false;   // 复活后 UI 位复位（提示淡出计数随 Renderer 归零）
@@ -7071,18 +7090,60 @@ export class Game implements GameHooks {
     //  旧 0.5/t+0.8 封顶是 monospace 时代自造近似,位图字体对齐时一并归位）→
     //  寿命归零后 scale 收缩至 0.1 才消亡（暴击每 t 先 +0.07 补偿=净 -0.03,收尾更久,且 alphaDir=-1 淡出）
     let wn = 0;
-    for (const d of this.dmgNumbers) {
+    // numActive（UpdateItemText :760-773）：本场活跃 label 数（帧首快照）
+    let labelActiveCount = 0;
+    for (const d of this.dmgNumbers) if (d.label) labelActiveCount++;
+    for (let di = 0; di < this.dmgNumbers.length; di++) {
+      const d = this.dmgNumbers[di];
       if (d.label) {
-        d.life--;
-        d.y += d.vy;
-        d.vy *= 0.94;
-        // 水平漂移（AdvancedPopupRequest velocity：露西台词 (dir*7,-7)）对称衰减
+        // ---- PopupText.Update（PopupText.cs:651-748）1:1（1458 同文）----
+        // alpha 呼吸（:659-669 ±0.01 钳 0.7-1.0）
+        d.alpha = (d.alpha ?? 1) + (d.alphaDir ?? -1) * 0.01;
+        if (d.alpha <= 0.7) { d.alpha = 0.7; d.alphaDir = 1; }
+        if (d.alpha >= 1) { d.alpha = 1; d.alphaDir = -1; }
+        // 抗重叠推离（:683-703）：文本命中盒（Measure×scale,高×0.8）相交且自身
+        // 在上（y 小 / 同 y 槽序在前）→ 双方寿命 = activeTime + 15×num（num =
+        // numActive 全场活跃数钳 3，:688-691——非相交对计数！UpdateItemText :760
+        // 先算 numActive 再逐个 Update）
+        const m0 = combatMeasure(d.label, false);
+        const hw = m0.w * (d.scale ?? 1), hh = m0.h * 0.8 * (d.scale ?? 1);
+        let overlapped = false;
+        for (let oi = 0; oi < this.dmgNumbers.length; oi++) {
+          const o = this.dmgNumbers[oi];
+          if (o === d || !o.label) continue;
+          const mo = combatMeasure(o.label, false);
+          const ow = mo.w * (o.scale ?? 1), oh = mo.h * 0.8 * (o.scale ?? 1);
+          if (d.x + hw / 2 <= o.x - ow / 2 || d.x - hw / 2 >= o.x + ow / 2) continue;
+          if (d.y + hh / 2 <= o.y - oh / 2 || d.y - hh / 2 >= o.y + oh / 2) continue;
+          if (d.y < o.y || (d.y === o.y && di < oi)) {
+            overlapped = true;
+            const ext = 60 + 15 * Math.min(labelActiveCount, 3);
+            o.life = ext;
+            d.life = ext;
+          }
+        }
+        // 运动分链（:705-714）：无重叠 0.86 衰减（scale 达标再 ×0.4 急停）；
+        // 有重叠且仍在上升 → 额外 -0.2 上推分离
+        if (!overlapped) {
+          d.vy *= 0.86;
+          if ((d.scale ?? 1) === 1) d.vy *= 0.4;
+        } else if (d.vy > -6) {
+          d.vy -= 0.2;
+        } else {
+          d.vy *= 0.86;
+        }
+        d.vx = (d.vx ?? 0) * 0.93;
         d.x += d.vx ?? 0;
-        d.vx = (d.vx ?? 0) * 0.94;
-        // 弹出缩放（PopupText.Update :736-740：scale=0 起每 t +0.1 至目标——
-        // 新建/合并重弹共链；拾取飘字目标 1）
-        d.scale = Math.min(1, (d.scale ?? 1) + 0.1);
-        if (d.life > 0) this.dmgNumbers[wn++] = d;
+        d.y += d.vy;
+        // 寿命（:715-731）：≤0 进收缩期 scale -0.03/t，<0.1 消亡；>0 生长 +0.1 至 1
+        d.life--;
+        if (d.life <= 0) {
+          d.scale = (d.scale ?? 1) - 0.03;
+          if ((d.scale ?? 1) >= 0.1) this.dmgNumbers[wn++] = d;
+        } else {
+          d.scale = Math.min(1, (d.scale ?? 1) + 0.1);
+          this.dmgNumbers[wn++] = d;
+        }
         continue;
       }
       d.alpha = (d.alpha ?? 1) + (d.alphaDir ?? -1) * 0.05;
@@ -9053,7 +9114,7 @@ export class Game implements GameHooks {
     //  useSwing 的 noGraphic 抑制——投射物即唯一的剑）
     if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool
       && cw?.kind !== 'summon' && cw?.kind !== 'yoyo'
-      && cw?.kind !== 'flail' && cw?.kind !== 'boomerang'
+      && cw?.kind !== 'flail' && cw?.kind !== 'boomerang' && cw?.kind !== 'anchored'
       && !(cw?.kind === 'spear' && projectileData(cw.shoot)?.aiStyle === 19)) {
       // aim 朝鼠标角——useStyle 13(短剑突刺持位)/5 静持需方向化(Renderer case 13)
       // 捕获小动物释放（ItemCheck_ReleaseCritter :43377-43396 + NPC.ReleaseNPC
@@ -11166,7 +11227,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const ps = this.heldPrefixStat();
     const dmgKind = cwIn.kind === 'magic' ? 'magic'
       : (cwIn.kind === 'boomerang' || cwIn.kind === 'spear' || cwIn.kind === 'yoyo' || cwIn.kind === 'flail'
-        || (cwIn.kind === 'shot' && !!itemCombat(def.vid ?? viIdFromKey(def.key))?.melee))
+        || (cwIn.kind === 'shot' && !!itemCombat(def.vid ?? viIdFromKey(def.key))?.melee)
+        // 锚定族按物品伤害类分流（Item.cs 各 case）：23 鱼叉 ranged=true → ranged 乘区,
+        // 1297/1314/1325 melee=true → melee
+        || (cwIn.kind === 'anchored' && !!itemCombat(def.vid ?? viIdFromKey(def.key))?.melee))
         ? 'melee' as const : 'ranged' as const;
     const cw = {
       ...cwIn,
@@ -11202,7 +11266,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   noMelee=true（同表）也让 updateSwingHits 的近战判定盒整体跳过（:42962 门），
     //   不会与投射物伤害双算。链球（flail）仍不加——原版 channel 持械另有持位
     if (cw.kind === 'grenade' || cw.kind === 'magic' || cw.kind === 'shot' || cw.kind === 'summon'
-      || cw.kind === 'spear' || cw.kind === 'boomerang' || cw.kind === 'yoyo') {
+      || cw.kind === 'spear' || cw.kind === 'boomerang' || cw.kind === 'yoyo' || cw.kind === 'anchored') {
       this.useSwing(def, ang);
       // 炸弹族 noUseGraphic=true（炸弹 166:3398/雷管 167:3413/手雷 168:3428 等 381 件
       // 全量列）——useSwing 内按 vanilla-itemcombat 置 noGraphic，投射物即本体
@@ -11318,6 +11382,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.entities.add(spear, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
+        this.input.mouseDown = false;
+        break;
+      }
+      case 'anchored': {
+        // AI_013 锚定族四件（Projectile.cs:24928-25121,WeaponProj.AnchoredProj 全状态机）：
+        // 鱼叉 160(弹23)/石巨人之拳 1297(262)/KO加农 1314(271)/链刀 1325(273)。
+        // 同型在场门 = SetDummyItemTime(5) 每 tick 续期(:24942-24947,itemTime>0
+        // 阻再用)——拳未回手不能再开火;481 不设门且不走本支(R30 专支)
+        if (anchoredActive(this.entities.projectiles, cw.shoot)) return;
+        const throwSpd = meleeThrowSpeed(cw.shootSpeed * (ps?.size ?? 1), this.player.attackSpeedMult);
+        const anchored = new AnchoredProj(Math.cos(ang), Math.sin(ang), throwSpd,
+          cw.damage, cw.knockback, cw.shoot);
+        placeAtShootSpawn(anchored, this.player.cx, this.player.cy);   // 盒心=玩家中心(:47588/:10878)
+        anchored.critChance = critTotal;
+        anchored.armorPen = this.player.equipStats.armorPen + (dmgKind === 'melee' ? this.player.meleeArmorPen : 0);
+        this.entities.add(anchored, 'projectiles');
+        this.player.useTime = cw.useTime;
+        // UseSound 数据驱动链（Item10/Item174/Item1——vanilla-itemusesound.json）
+        this.playUseSound(critVid, 'throw');
         this.input.mouseDown = false;
         break;
       }
@@ -21372,8 +21455,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 重装备时立即重扫(CritterGuide 无此重置——保持原版不对称)
     if (!gates.accThirdEye) p.accThirdEyeCounter = 0;
     // 悬停行;背包内点图标切换 hideInfo(Main.cs:46547-46573:Sound 12 + 翻转;
-    // num==8 已在 buildInfoAccRows 归并 7)
-    r.infoAccHover = r.infoAccs.hitTest(this.input.mouseX, this.input.mouseY);
+    // num==8 已在 buildInfoAccRows 归并 7)。
+    // ★悬停门 = 无其它光标文本(原版 !mouseText,:46578/:46627)——tickCursorIcon
+    //  先行(:5546)已写入箱名等 tooltip 时本层不 claim(不压暗下一行、不出标签)
+    r.infoAccHover = p.cursorItemIconText === ''
+      ? r.infoAccs.hitTest(this.input.mouseX, this.input.mouseY) : -1;
+    // 行标签 tooltip(Main.cs:46636 MouseTextNoOverride(text3)):悬停图标 →
+    // 行标题(Lang.inter 95-106「时间/深度/…」)随光标,复用 cursorItemIconText
+    // 管线(锚 mouse+14 + 屏缘收边,Main.cs:20032 MouseTextInner 同语义)
+    if (r.infoAccHover >= 0 && p.cursorItemIconText === '') {
+      const hr = r.infoAccs.state.rows[r.infoAccHover];
+      if (hr) p.cursorItemIconText = hr.label;
+    }
     const hovering = r.infoAccHover >= 0 && r.infoAccs.state.inventoryOpen;
     if (hovering) {
       // 吞挖掘/放置点击(与 timeUiHover 同语义)
@@ -22986,6 +23079,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (p.lastPvpDeath) p.deathsPvp++;
         else p.deathsPve++;         // numberOfDeathsPVE（PL:53840,存档持久化）
         p.respawnTimer = 0;
+        p.deadTime = 0;             // :37182 Spawn 归零（双计数器分立）
         // 死亡文本/墓碑由 handlePlayerDeath 统一处理（此处不再 toast「你死了」）
         // ==== 死亡惩罚按【角色难度】（Player.difficulty：0 软核 1 中核 2 硬核 3 旅程）====
         // 世界难度不参与死亡惩罚（只管掉落/伤害倍率等），曾两轴混接
@@ -24883,31 +24977,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     LanternNight.lanternNightsOnCooldown = ev.lanternCooldown ?? 0;
   }
 
-  /** 拾取物品飘名（PopupText.NewText Item 分支 PopupText.cs:194-367 对齐）。
-   *  ★同名合并计数（用户实报"土块(5)没有计数"）：扫描现有飘字找同名（钱币跨
-   *  面额按 coinText 合并）→ stack += 本次拾取数、寿命补足 60、scale=0 重新
-   *  弹出、速度重启、位置重定心（:213-247）；文本 "名 (N)"（PrepareDisplayText
-   *  :415-420，N>1 才带计数）。钱币（71-74）按面值合并成 "N 铜币 / 1 金币 50
+  /** 拾取物品飘名（PopupText.NewText Item 分支 PopupText.cs:194-367 对齐；
+   *  1458 与 1456 此文件字节级相同）。★同名合并计数（用户实报"土块(5)没有
+   *  计数"）：扫描现有飘字按 AffixName（词缀+本名，prefix 参数区分身份）匹配
+   *  （钱币跨面额按 coinText 合并）→ stack += 本次拾取数、寿命补足 60、scale=0
+   *  重新弹出、速度重启（vy=-7）、位置重定心（:213-247）；文本 "名 (N)"
+   *  （PrepareDisplayText :415-420，N>1 才带计数）。钱币（71-74）按面值合并成 "N 铜币 / 1 金币 50
    *  银币" 式文本 + 档位色/寿命（:222-247 ValueToName :543），stack 恒 1。
    *  不同名各自独立飘字（20 槽上限，满员替换 position.Y 最小者 = FindNextItem
    *  TextSlot :770-784）。颜色 = 稀有度（PrepareEffects :370-380 GetPopupRarity
    *  Color Item.cs:633-696；vi_ 物品查 vanilla-itemrare.json，同 UI.ts 惯例）。
    *  登记近似：①抗重叠推离（Update :683-703 命中盒互推+寿命延长）未移植——同帧
    *  拾取多种物品可能短暂重叠；②文本样式/运动阻尼沿用仓内 13px 描边白系。 */
-  showPickupLabel(itemKey: string, picked = 1) {
+  showPickupLabel(itemKey: string, picked = 1, prefix?: number) {
     // Main.showItemText（IngameOptions.cs:705 → PopupText.NewText 族 PopupText.cs:120）：
     // 关 = 拾取名飘字整链不触发
     if (!options.data.showItemText) return;
     const def = ITEM_DEFS[ITEM_BY_KEY[itemKey]];
     if (!def || picked <= 0) return;
-    const name = Lang.itemNameByKey(def.key);
+    // 合并身份 = AffixName（Item.cs:1195-1203：词缀名+本名；同词缀才合并——
+    // 不同词缀的同名装备各飘一条）
+    const name = popupAffixName(prefix, Lang.itemNameByKey(def.key));
+    const mergeKey = prefix ? `${itemKey}#${prefix}` : itemKey;
     const coinIdx = COIN_KEYS.indexOf(def.key as (typeof COIN_KEYS)[number]);   // :201 flag
     const rare = def.key.startsWith('vi_') ? ITEM_RARE[String(parseInt(def.key.slice(3), 10))] ?? 0 : 0;
     // ---- 合并扫描（:202-247）----
     for (const d of this.dmgNumbers) {
       if (!d.label) continue;
       const coinMatch = coinIdx >= 0 && !!d.coinText;
-      if (!coinMatch && d.pickupKey !== def.key) continue;
+      if (!coinMatch && d.pickupKey !== mergeKey) continue;
       if (d.life < 60) d.life = 60;                          // :218-221
       d.stack = (d.stack ?? 1) + picked;                     // :241
       if (coinMatch) {
@@ -24921,7 +25019,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         d.color = popupRarityColor(rare);                    // PrepareEffects :380
       }
       d.scale = 0;                                           // :241 重新弹出
-      d.vy = -0.7;                                           // :243 velocity.Y=-7（仓内标度）
+      d.vy = -7;                                             // :243 velocity.Y=-7
       d.x = this.player.cx; d.y = this.player.y - 8;         // :242-243 位置重定心
       return;
     }
@@ -24938,13 +25036,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       label = picked > 1 ? `${name} (${picked})` : name;
       color = popupRarityColor(rare);
     }
-    this.dmgNumbers.push({
-      x: this.player.cx, y: this.player.y - 8, vy: -0.7,
-      value: 0, crit: false, color, life, label,
-      stack: coinIdx >= 0 ? 1 : picked, pickupKey: def.key,
-      coinText: coinIdx >= 0, coinValue, scale: 0,
-    });
     // 槽上限（FindNextItemTextSlot :770-784）：满 20 替换 position.Y 最小（最上方）
+    // ★先逐出后写入（原版槽选择在写入前——新弹窗自身不可成为逐出受害者）
     let labelCount = 0, topIdx = -1, topY = Infinity;
     for (let i = 0; i < this.dmgNumbers.length; i++) {
       const d = this.dmgNumbers[i];
@@ -24952,7 +25045,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       labelCount++;
       if (d.y < topY) { topY = d.y; topIdx = i; }
     }
-    if (labelCount > 20 && topIdx >= 0) this.dmgNumbers.splice(topIdx, 1);
+    if (labelCount >= 20 && topIdx >= 0) this.dmgNumbers.splice(topIdx, 1);
+    this.dmgNumbers.push({
+      x: this.player.cx, y: this.player.y - 8, vy: -7,       // :259 velocity.Y=-7
+      value: 0, crit: false, color, life, label,
+      stack: coinIdx >= 0 ? 1 : picked, pickupKey: mergeKey,
+      coinText: coinIdx >= 0, coinValue, scale: 0,
+    });
   }
 
   playSfx(name: string, vol?: number, x?: number, y?: number) {
@@ -27466,6 +27565,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     p.dead = false;
     p.iframes = wasPvpDeath ? 300 : 180;
     p.respawnTimer = 0;
+    p.deadTime = 0;   // :37182 Spawn 归零
     p.immuneAlpha = 0;
     this.lostCoins = 0;
     // 床重生点复验（Player.Spawn :37853-37856 `FindSpawn(); if (!CheckSpawn(SpawnX,SpawnY))

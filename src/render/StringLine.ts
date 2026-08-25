@@ -23,6 +23,7 @@
 // （Lighting.cs:202-209，三参 Vector3 构造 A 恒 255）——钓线/悠悠球线非 29 路径的
 // A×0.4（:34948）在消费端被整段重置为 255，仅 29（免取光）保留原 alpha。1:1 复刻。
 import { paintColor } from '../world/Paint';
+import { texReady } from './texId';
 
 // ===================== 线色（Main.cs:34912-34965 1:1） =====================
 
@@ -115,7 +116,9 @@ const tintCache = new WeakMap<Tex, Map<string, HTMLCanvasElement>>();
 export function tintedTex(tex: Tex, rgb: readonly [number, number, number], flatten: boolean): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;   // node 单测/非 DOM 环境无画布可染（消费端跳笔）
   const w = (tex as { width: number }).width, h = (tex as { height: number }).height;
-  if (!w || !h) return null;
+  // ★texReady 半加载窗守卫（2026-08-25 同类扫描）：!w||!h 挡不住元数据窗——鞭/渔线
+  //  源贴图该窗烘焙平色条带按 (tex|rgb|flatten) 键永久入 WeakMap 缓存
+  if (!w || !h || !texReady(tex)) return null;
   let m = tintCache.get(tex);
   if (!m) { m = new Map(); tintCache.set(tex, m); }
   const key = `${rgb[0]},${rgb[1]},${rgb[2]}|${flatten ? 1 : 0}`;

@@ -185,11 +185,12 @@ describe('地下背景平铺几何(Main.cs DrawBackground :52217-53517)', () => 
     }
   });
 
-  it('style0(森林)slot3=BG_3 128 宽:越界源窗 clamp 拉伸补齐,行内目的地无缝', () => {
-    // 2026-08-24 用户实报"带层规则竖黑缝":XNA SpriteBatch 越界源矩形=edge-clamp
-    // (Main.cs:53910 源窗 16k+num4+16 最右 152 > BG_3 宽 128→UV clamp 右缘列拉伸);
-    // Canvas drawImage 越界=等比裁剪→每 128px 循环交界留 8-24px 竖缝。
-    // 回归:行内各段目的地必须连续覆盖 [dx0, dx0+n*128),且存在右缘 1px clamp 段。
+  it('style0(森林)slot3=BG_3 128 宽:按设计周期 96 平铺,行内无缝且永不越界', () => {
+    // 2026-08-24 用户实报"带层规则竖黑缝":带层贴图统一 16+核心+16 翼结构——
+    // 160宽=周期128、128宽 BG_2/3/4=周期96(PNG 逐列实证:左右翼==核心环绕拷贝零差)。
+    // ★曾硬编码 P=128:对 128 宽贴图源窗 [16+diff,144+diff) 越界——XNA=edge-clamp
+    // (无缝),Canvas drawImage=等比裁剪→每周期交界竖黑缝;中间方案"右缘 1px 列
+    // 拉伸"有可见竖纹(用户复核否决)。正解=按设计周期 per=min(P,width-32)=96 平铺。
     const bg = new BiomeBackground();
     stubImgs(bg);
     stubHellNull(bg);
@@ -203,6 +204,13 @@ describe('地下背景平铺几何(Main.cs DrawBackground :52217-53517)', () => 
       .drawUnderground(ctx, world, { x: 3200, y: camY }, camY - 400, 1280, 800, 16.7);
     const rock = calls.filter(c => c.op === 'img' && c.tex === 3);
     expect(rock.length).toBeGreaterThan(0);
+    // 永不越界:源窗 [16+diff, 16+diff+96) ⊂ [8,120] ⊂ [0,128)
+    for (const c of rock) {
+      const [sx, , sw] = c.args as number[];
+      expect(sx).toBeGreaterThanOrEqual(8);
+      expect(sx + sw).toBeLessThanOrEqual(128);
+      expect(sw).toBe(96);   // 设计周期 96(非 128 硬编码)
+    }
     // 行内无缝:按 dy 分组,组内按 dx 排序,相邻段首尾相接(间隙=黑缝)
     const rows = new Map<number, Array<{ dx: number; dw: number }>>();
     for (const c of rock) {
@@ -217,7 +225,7 @@ describe('地下背景平铺几何(Main.cs DrawBackground :52217-53517)', () => 
         expect(segs[i].dx - (segs[i - 1].dx + segs[i - 1].dw)).toBe(0);
       }
     }
-    // clamp 段存在:源 = 右缘 1px 列(sx=width-1=127, sw=1)
-    expect(rock.some(c => { const [sx, , sw] = c.args as number[]; return sx === 127 && sw === 1; })).toBe(true);
+    // 无 clamp 拉伸段(用户否决的中间方案):右缘 1px 列采样不得出现
+    expect(rock.some(c => { const [sx, , sw] = c.args as number[]; return sw === 1; })).toBe(false);
   });
 });

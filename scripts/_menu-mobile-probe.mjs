@@ -91,14 +91,6 @@ async function openCharSelect(page) {
   throw new Error('openCharSelect: 重试后仍未打开角色列表');
 }
 
-/** 点击含指定文本的标题按钮（evaluate 合成，与现役探针同款） */
-async function clickTitleBtn(page, re) {
-  await page.evaluate((src) => {
-    const btn = [...document.querySelectorAll('.sw-title-btn')].find((b) => new RegExp(src).test(b.textContent ?? ''));
-    btn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  }, re.source);
-}
-
 const results = [];
 let browser;
 try {

@@ -11,6 +11,7 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { waterWaves } from './WaterWaves';
+import { texId, texReady } from './texId';
 
 const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜（微光 vt=3 走 ?? 3 兜底——原版微光无瀑布拖尾分支，DrawShimmer 单独绘制）
 const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微光——原版 oldDrawWater num17:
@@ -145,7 +146,9 @@ function hslToRgb(hue: number, sat: number, lum: number): [number, number, numbe
 // 绘制沿用原版源矩形 (sx+48, sy+80*fr)（在副本内即 −48），一条带覆盖全部
 // 帧行/变体子矩形——避免逐帧×hue 的 16×16 变体随 sx/sy 爆炸，单 hue 一份即可。
 const SPARKLE_HUE_STEPS = 16;
-const _sparkleTintCache = new Map<number, HTMLCanvasElement>();
+/** 键含 texId（2026-08-25 同类扫描）：曾只按 hueIdx——模块级缓存跨世界持久,
+ *  不同 waterStyle 的 shimmer 表换world后旧条带钉死（texId.ts 头注键碰撞同款） */
+const _sparkleTintCache = new Map<string, HTMLCanvasElement>();
 
 /** sparkle 变体逐像素重造：灰度亮度 → alpha（黑底归零），RGB → HSL 彩虹色。 */
 export function tintSparkleBand(data: Uint8ClampedArray, r: number, g: number, b: number): void {
@@ -158,7 +161,11 @@ export function tintSparkleBand(data: Uint8ClampedArray, r: number, g: number, b
 }
 
 function shimmerSparkleTint(tex: ImageBitmap | HTMLImageElement, hueIdx: number): HTMLCanvasElement | null {
-  let c = _sparkleTintCache.get(hueIdx);
+  // ★texReady 半加载窗守卫（2026-08-25 同类扫描）：atlas 源本安全,守卫为纵深——
+  //  该窗 getImageData 全 0 → 全透明条带按 hue 键钉死（微光彩虹整条消失）
+  if (!texReady(tex)) return null;
+  const ck = `${texId(tex)}|${hueIdx}`;
+  let c = _sparkleTintCache.get(ck);
   if (c) return c;
   const bandX = 48;                     // :721 sparkle 带 X 偏移（water_14 第 4-6 列 16px 带）
   const bandW = tex.width - bandX;
@@ -173,7 +180,7 @@ function shimmerSparkleTint(tex: ImageBitmap | HTMLImageElement, hueIdx: number)
   const img = cc.getImageData(0, 0, bandW, tex.height);
   tintSparkleBand(img.data, Math.round(r * 255), Math.round(g * 255), Math.round(b * 255));
   cc.putImageData(img, 0, 0);
-  _sparkleTintCache.set(hueIdx, c);
+  _sparkleTintCache.set(ck, c);
   return c;
 }
 

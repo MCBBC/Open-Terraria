@@ -308,6 +308,25 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '多格残片清扫', run: multitileSweepPass },
   ];
 
+  // ★OOOOOOO（2026-08-25）1457 执行序迁移：1.4.5.7 把 MicroBiomes 从
+  //   LihzahrdAltar 之后（1456 cs:21785，JS 原位=「蜥蜴祭坛」与「水生植物」之间）
+  //   前移到 SettleLiquidsPart2 **之前**（1457 rig WorldGen.cs:21078 <
+  //   SettleLiquidsPart2 :21433 < Cactus :21497 < TileCleanup :21709 <
+  //   LihzahrdAltar :22140）。SW_MB_1457=1 时把「微群系」槽搬到「二次沉降」前，
+  //   mile8 尾段槽表 [49,97]..[53,101] 随之逐槽对齐（此前 JS 槽 49..53 跑的是
+  //   {settle2,cactus,tclean,altar} 对 x86 {micro,settle2,cactus,tclean} ——
+  //   整体错一位，#97 起大残差（删液 20k=JS 已沉降而 x86 未沉）的主因）。
+  //   五段 pass 体 1456↔1457 diff 仅 micro 头尾 tileSolid[56](getGood 门) 与
+  //   tclean 162 双邻门（后者 JS R12-19 已按 1457 形落地）；1456 缺省线零改动。
+  if (hfIs1457()) {
+    const mi = passes.findIndex((p) => p.name === '微群系');
+    const si = passes.findIndex((p) => p.name === '二次沉降');
+    if (mi >= 0 && si >= 0 && mi > si) {
+      const [mb] = passes.splice(mi, 1);
+      passes.splice(si, 0, mb!);
+    }
+  }
+
   for (let i = 0; i < passes.length; i++) {
     onProgress?.(passes[i].name, i / passes.length);
     await nextFrame();

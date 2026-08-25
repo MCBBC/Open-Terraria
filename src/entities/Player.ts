@@ -543,7 +543,15 @@ export class Player extends Entity {
    *  允许移动改朝向的唯一豁免（:19546-19556） */
   itemUseTurn = false;
   dead = false;
+  /** 重生倒计时（Player.cs:1522 1456 语义=【倒计数】：死亡时置满值
+   *  GetRespawnTime(:38303)，每 tick 递减(:16896/:16907)，≤0 重生(:16908)；
+   *  显示 :44788 1+timer/60 自然倒数；.plr 存剩余值(:53956)。曾移植为正计数
+   *  （deadTime 语义）→ 死亡界面秒数往上数，2026-08-25 校正为双计数器 */
   respawnTimer = 0;
+  /** 死亡经过时间（Player.cs:1518 deadTime，死亡起每 tick 递增 :16780、
+   *  Spawn 归零 :37182）——观战门 CanDeathSpectate(:3939 ≥60) 与跳过锁
+   *  (DeadSkipLockoutTime 90) 的 elapsed 语义计数器，与 respawnTimer 分立 */
+  deadTime = 0;
   /** sunScorchCounter（Player.cs:2228）：吸血鬼种子"阳光炽灼"蓄能 0-300（每 tick
    *  updateSunScorchValues 推进；写入端 vampireSeedSunlightExposure 已接，见
    *  updateSunScorch——非吸血鬼世界恒 0）。消费：耀斑强度 AdjustIntensity
@@ -6437,14 +6445,14 @@ export class Player extends Entity {
    *  分支每帧写入；死亡 UI 的"按SPACE跳过"提示淡入/滑移与此位联动，运行时态） */
   respawnSkipUi = false;
   /** 硬核幽灵态（Player.cs:16894-16901 difficulty==2 → respawn 计时到点 ghost=true；
-   *  本仓 Game.respawnPlayer 对 hardcoreDead 拒绝重生 → 计时越过阈值即幽灵相。
-   *  阈值 = GetRespawnTime（:38384-38422）：600t 基准 + boss 在场 600（:38398
+   *  本仓 Game.respawnPlayer 对 hardcoreDead 拒绝重生 → 计时到期即幽灵相。
+   *  满值 = GetRespawnTime（:38384-38422）：600t 基准 + boss 在场 600（:38398
    *  `if (flag) num += 600`）→ 【之后】专家 ×1.5（:38402-38404——boss 在场专家
-   *  = (600+600)×1.5 = 1800，非 900+600） */
+   *  = (600+600)×1.5 = 1800，非 900+600）——死亡置值时刻在 Game 死亡分支 */
   isGhostPhase(world: import('../world/World').World): boolean {
-    return this.dead && this.appearance?.difficulty === 2
-      && this.respawnTimer > (600 + (this.bossNearOnDeath ? 600 : 0))
-      * (mainExpertMode(world) ? 1.5 : 1);
+    // ★倒计数语义（2026-08-25）：respawnTimer 已改死亡置满值递减（:38303/:16896），
+    //  硬核幽灵相 = 计时到期（≤0）而非"越过阈值"。阈值判断已前移到死亡置值时刻
+    return this.dead && this.appearance?.difficulty === 2 && this.respawnTimer <= 0;
   }
 
   // ============ 眼睑状态机（PlayerEyeHelper.cs 全文 1:1） ============

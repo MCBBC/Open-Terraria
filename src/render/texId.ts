@@ -18,8 +18,8 @@ export function texId(img: object): number {
  *  α=max(rgb) 全图平色"，平色矩形被按 texId 键**永久缓存**：镜头光斑每元素
  *  一个淡色方片（方片尺寸=各元素贴图矩形,位置沿太阳↔屏心轴,刷新自愈=二次
  *  进页贴图已有磁盘缓存）。凡"烘焙染色副本进缓存"的路径入口一律先过本守卫；
- *  位图（ImageBitmap）构造即解码完成,查 width 即可。 */
-export function texReady(tex: ImageBitmap | HTMLImageElement): boolean {
+ *  位图（ImageBitmap）构造即解码完成、画布内容同步,查 width 即可。 */
+export function texReady(tex: ImageBitmap | HTMLImageElement | HTMLCanvasElement): boolean {
   if (tex instanceof HTMLImageElement) return tex.complete && tex.naturalWidth > 0;
   return tex.width > 0;
 }

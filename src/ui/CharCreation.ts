@@ -535,12 +535,14 @@ export class CharCreation {
     this.colorPart = this.dresser ? 'eyeColor' : 'hairColor';
     this.syncHslFromPart();
 
-    if (!document.getElementById('sw-char-style')) {
-      const style = document.createElement('style');
+    // 样式表每次挂载都刷新(★HMR 期守卫只建不更,旧 CSS 驻留吞变更——同 TitleMenu)
+    let style = document.getElementById('sw-char-style') as HTMLStyleElement | null;
+    if (!style) {
+      style = document.createElement('style');
       style.id = 'sw-char-style';
-      style.textContent = CSS;
       document.head.appendChild(style);
     }
+    style.textContent = CSS;
 
     const title = this.dresser ? Lang.text('Mods.SandboxWorld.ClothesWindow.Title')
       : this.salon ? Lang.text('GameUI.HairStyle') : '';

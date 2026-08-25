@@ -50,6 +50,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
 import { vanGenSolidType } from './GenSolid';
+import { hfIs1457 } from './HellFortPass';
 import { genTileFrame, genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';   // UUUU：ActuallyPlace*/SetTile(setSelfFrames) 的 TileFrame(resetFrame:true) 镜像
 
 /** Main.wallLargeFrames 非零墙（Main.cs:9653-9787；余皆 0）——Framing.WallFrame
@@ -216,6 +217,80 @@ function place2x2Direct(st: TileStore, x: number, y: number, type: number): bool
     }
   }
   return true;
+}
+
+/** ---- WorldGen.CanKillTile(i,j)（1457 rig cs:62719-62830 全量可达分支）----
+ *  MiningExplosives 141 前置门消费（★OOOOOOO：1457 新增门，见 placeMiningExplosives）。
+ *  TrackPass.canKillTile 同构镜像；sheet 空间常量本文件局部重建。 */
+const SHEET_OF_MB = new Int16Array(TILE_DEFS.length).fill(-1);
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const s = TILE_DEFS[i]?.vanilla?.sheet;
+  if (typeof s === 'number') SHEET_OF_MB[i] = s;
+}
+const TREE_TRUNK_MB = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+const UP_PROTECT_MB = new Set([21, 26, 72, 77, 88, 467, 488]);
+function canKillTileMB(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;                        // cs:62745 !active
+  if (st.wall[i] === 350) return false;                  // cs:62749
+  const sh = SHEET_OF_MB[st.type[i]!] ?? -1;
+  const up = st.inBounds(x, y - 1) ? st.idx(x, y - 1) : -1;
+  if (up >= 0 && st.flags[up]) {
+    const tUp = st.type[up]!;
+    const shUp = SHEET_OF_MB[tUp] ?? -1;
+    const fxu = st.frameX[up]!, fyu = st.frameY[up]!;
+    // IsATreeTrunk 族（cs:62757 单条件合并形——与 TileCleanup 子集的分型写法等价）
+    if (TREE_TRUNK_MB.has(shUp) && st.type[i] !== tUp
+      && !(fxu === 66 && fyu >= 0 && fyu <= 44)
+      && !(fxu === 88 && fyu >= 66 && fyu <= 110) && fyu < 198) return false;
+    if (shUp === 323 && st.type[i] !== tUp && (fxu === 66 || fxu === 220)) return false;
+    if (UP_PROTECT_MB.has(shUp) && st.type[i] !== tUp) return false;
+    if (shUp === 80 && st.type[i] !== tUp) {             // case 80 仙人掌帧位门
+      const num = Math.trunc(fxu / 18);
+      if (num <= 1 || (num >= 4 && num <= 5)) return false;
+    }
+  }
+  if (BOULDER_TILES.has(st.type[i]!) && checkBoulderChestMB(st, x, y)) return false;
+  if (sh === 10 && isLockedDoorMB(st, x, y)) return false;
+  if (sh === 235) {                                      // 音乐盒 3×1 上邻扫(cs:62322-62335)
+    const num2 = x - Math.trunc((st.frameX[i]! % 54) / 18);
+    for (let k = 0; k < 3; k++) {
+      const ui = st.inBounds(num2 + k, y - 1) ? st.idx(num2 + k, y - 1) : -1;
+      if (ui >= 0 && st.flags[ui] && st.type[ui] !== st.type[i]) return false;
+    }
+  }
+  return true;
+}
+/** WorldGen.CheckBoulderChest(i,j)（cs:48810-48833）——巨石帧锚反解+上两格
+ *  HasReasonToReturnEarly（生成期 hardMode 假、容器/桌族真）。 */
+function checkBoulderChestMB(st: TileStore, i: number, j: number): boolean {
+  const ii = st.idx(i, j);
+  let num = Math.trunc(st.frameX[ii]! / 18) * -1;
+  if (num < -1) num += 2;
+  num += i;
+  let num2 = st.frameY[ii]!;
+  while (num2 >= 36) num2 -= 36;
+  num2 = j - Math.trunc(num2 / 18);
+  for (const dx of [0, 1]) {
+    const ui = st.inBounds(num + dx, num2 - 1) ? st.idx(num + dx, num2 - 1) : -1;
+    if (ui >= 0 && st.flags[ui]) {
+      const shU = SHEET_OF_MB[st.type[ui]!] ?? -1;
+      // HasReasonToReturnEarly(ownType, tile)：异型且(桌 19/防拆族)→真；锁门→真；容器→真
+      if (st.type[ui] !== st.type[ii] && (shU === 19 || PREVENTS_REMOVAL_MB.has(shU))) return true;
+      if (isLockedDoorMB(st, num + dx, num2 - 1)) return true;
+      if ([21, 467, 88].includes(shU)) return true;
+    }
+  }
+  return false;
+}
+/** TileID.Sets.PreventsTileRemovalIfOnTop（TrackPass 同表）+桌 19 */
+const PREVENTS_REMOVAL_MB = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
+function isLockedDoorMB(st: TileStore, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  if ((SHEET_OF_MB[st.type[i]!] ?? -1) !== 10) return false;
+  const fy = st.frameY[i]!;
+  return fy >= 594 && fy <= 646 && st.frameX[i]! < 54;
 }
 
 /** 诊断段钩子(CCCC 批):SW_CCCC 探针消费,零开销可选调用 */
@@ -797,14 +872,22 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
     st.slope[gi] = 0; st.half[gi] = 0;
   }
   // 起爆器下方 3 列整平(cs:58-70):ClearTile + 非实心补石 + slope/half 复位
+  // ★OOOOOOO 1457（MiningExplosivesBiome.cs:60-63）：掏空扩为 5 行（detTop..detTop-4）
+  //   ——1456 仅 detTop 单行 ⇒ Place2x2 上行常被埋 → 起爆器空置门败
+  //   （s22222 #97 T411>0×11 实证）。★ClearTile 缺省 frameNeighbors:false（WorldUtils.cs:55）
+  //   = 纯格清（ClearSlope+inactive+inActive，wall/liquid/type 不动）零掷——两版同。
   for (let i = -1; i <= 1; i++) {
-    const px = detX + i, py = detTop;
-    if (st.inBounds(px, py)) {
+    const px = detX + i;
+    const rows: number[] = hfIs1457() ? [0, -1, -2, -3, -4] : [0];
+    for (const dy of rows) {
+      const py = detTop + dy;
+      if (!st.inBounds(px, py)) continue;
       const ci = st.idx(px, py);
       st.flags[ci] = 0; st.slope[ci] = 0; st.half[ci] = 0;
       st.wire[ci] &= ~WIRE_ACTUATOR;
     }
-    const below = detTop + 1;
+    {
+      const below = detTop + 1;
     if (st.inBounds(px, below)) {
       const bi = st.idx(px, below);
       if (!solidOrSlopedAt(st, px, below)) {
@@ -822,6 +905,14 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
       //   （cs:70）= 中心+四邻五连 TileFrame(resetFrame:true)
       genFrameNeighbors(st, rng, px, below, 'setTile');
     }
+    }
+  }
+  // ★OOOOOOO 1457 前置门（MiningExplosivesBiome.cs:74-78）：炸药桶锚格**活性且**
+  //   !CanKillTile → 整个 Place 失败（跳过 141/411/WireLine/保护图）。1456 无此门。
+  //   （CanKillTile 对非活性格恒 false——门必须先验活性,与 vanilla 短路序一致。）
+  if (hfIs1457() && st.inBounds(barX, barGround)) {
+    const ai0 = st.idx(barX, barGround);
+    if (st.flags[ai0] !== 0 && !canKillTileMB(st, barX, barGround)) return false;
   }
   // PlaceTile(result, 141)(cs:71)——前奏 Clear(锚格 Tile|TilePaint|Slope,cs:59501)+
   //   Place1x1 门(Wiring.IsAMechanism[141]→下方非巨石族 && SolidTile2(地) && 锚格非活性)

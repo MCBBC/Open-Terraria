@@ -161,8 +161,9 @@ export function formatWeatherText(w: InfoAccCtx['weather']): string {
   else if (w.numClouds > 55) s = Lang.text('GameUI.Cloudy');
   else if (w.numClouds <= 15) s = Lang.text('GameUI.Clear');
   else s = Lang.text('GameUI.PartlyCloudy');
-  const mph = Math.round(w.windSpeedCurrent * 50);   // :46252(1 mph = 0.02)
-  if (mph !== 0) s += ` (${Math.abs(mph)} mph ${mph < 0 ? 'E' : 'W'})`; // :46255-46258
+  const mph = Math.trunc(w.windSpeedCurrent * 50);   // :46252 `(int)(windSpeedCurrent*50f)` 截断
+  if (mph < 0) s += Lang.text('GameUI.EastWind', Math.abs(mph));      // :46255-46258 官译键
+  else if (mph > 0) s += Lang.text('GameUI.WestWind', mph);
   if (w.sandstorm) {
     // :46247-46251:沙尘暴中文字按真实墙钟 %10 ≥5 才显示(5s 亮 5s 灭)," +" 恒附
     if ((w.globalTimeSec % 3600) % 10 >= 5) s = Lang.text('GameUI.Sandstorm') + ' +';
@@ -180,19 +181,22 @@ export function formatMoonPhase(moonPhase: number, bloodMoon: boolean, eclipse: 
   return { icon, text: Lang.text(names[moonPhase & 7]) };
 }
 
-/** Position 行(Main.cs:46504-46509):1 格 = 2 英尺 */
+/** Position 行(Main.cs:46504-46509):1 格 = 2 英尺。
+ *  ★`(int)` 截断的是**整个表达式**(px/8 − maxTilesX)——负值向零截断,floor 会
+ *  在地表以西多算 1 英尺(2026-08-25 对账勘误) */
 export function formatCompassText(centerXpx: number, maxTilesX: number): string {
-  const feet = Math.floor((centerXpx * 2) / 16) - maxTilesX;
+  const feet = Math.trunc((centerXpx * 2) / 16 - maxTilesX);
   if (feet === 0) return Lang.text('GameUI.CompassCenter');
   return Lang.text(feet > 0 ? 'GameUI.CompassEast' : 'GameUI.CompassWest', Math.abs(feet));
 }
 
-/** Depth 行(Main.cs:46512-46539):feet + 四地层 */
+/** Depth 行(Main.cs:46512-46539):feet + 四地层。截断语义同罗盘——
+ *  `(int)(bottom/8 − worldSurface×2)` 整式截断(负 = 地表以上,向零靠) */
 export function formatDepthText(
   bottomYpx: number, centerYpx: number,
   worldSurface: number, rockLevel: number, maxTilesX: number, maxTilesY: number,
 ): string {
-  let feet = Math.floor((bottomYpx * 2) / 16) - worldSurface * 2;
+  let feet = Math.trunc((bottomYpx * 2) / 16 - worldSurface * 2);
   const k = (maxTilesX / 4200) ** 2;
   const spaceRatio = (centerYpx / 16 - (65 + 10 * k)) / (worldSurface / 5);
   const layer =

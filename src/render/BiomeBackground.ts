@@ -893,28 +893,23 @@ export class BiomeBackground {
         if (diff === -8) diff = 8;
         return { startX, diff, loops: Math.trunc(viewW / P) + 2 };
       };
-      /** 单带一行绘制（切片几何合并:src/dst 同 +diff,源取中间 P 列） */
+      /** 单带一行绘制（周期自适应:per=min(P,width-32)。带层贴图统一 16+核心+16 翼
+       *  结构——160宽=周期128、128宽 BG_2/3/4=周期96,左右翼==核心环绕拷贝(PNG 逐列
+       *  实证零差),窗口 [16+diff,16+diff+per) ⊂ [8,152] 永不越界=无缝。
+       *  ★曾硬编码 P=128:对 128 宽贴图越界——XNA 越界源=edge-clamp(无缝),Canvas
+       *  drawImage=等比裁剪→每周期交界竖黑缝(2026-08-25 用户实报);中间方案"右缘
+       *  1px 列拉伸 clamp"有可见竖纹,按贴图设计周期平铺才是无缝正解 */
       const bandRow = (
-        im: ImageBitmap | HTMLImageElement, P: number, startX: number, diff: number,
-        loops: number, destY: number, srcY: number, srcH: number,
+        im: ImageBitmap | HTMLImageElement, P: number, destY: number, srcY: number, srcH: number,
       ) => {
-        // 源窗越界钳制（128 宽老贴图 style0 tex3 原版靠 UV clamp 吃掉,Canvas 需手钳）
-        const sx = 16 + diff;
-        const w = Math.min(P, im.width - sx);
-        if (w <= 0) return;
+        const per = Math.min(P, im.width - 32);
+        if (per <= 0) return;
         const sh = Math.min(srcH, im.height - srcY);
         if (sh <= 0) return;
-        // ★XNA→Canvas 语义差（2026-08-24 用户实报"带层规则竖黑缝"）:原版 SpriteBatch
-        // 对越界源矩形做 edge-clamp 采样（Main.cs:53910 岩石带源窗 16k+num4+16 最右
-        // 到 num4+144=152,BG_3/BG_4 仅 128 宽→右越界 8-24px 被 UV clamp 拉伸右缘列,
-        // 无缝）;Canvas drawImage 对越界源矩形【等比裁剪】→ 目的地缩水 → 每个
-        // P=128 平铺循环交界留 8-24px 竖黑缝（仅 style0 森林/18-21 沙滩命中,
-        // 其余 36 张带层贴图全 160 宽不触发）。补一段右缘 1px 列拉伸=复刻 clamp。
-        const clampW = P - w;
+        const { startX, diff, loops } = scroll(per);
+        const sx = 16 + diff;
         for (let i = 0; i < loops; i++) {
-          const dx = startX + P * i + diff;
-          b.img(im, sx, srcY, w, sh, dx, destY, w, sh, { alpha: a });
-          if (clampW > 0) b.img(im, im.width - 1, srcY, 1, sh, dx + w, destY, clampW, sh, { alpha: a });
+          b.img(im, sx, srcY, per, sh, startX + per * i + diff, destY, per, sh, { alpha: a });
         }
       };
       const im0 = slots[0] > 0 ? this.img(slots[0]) : null;
@@ -928,15 +923,11 @@ export class BiomeBackground {
         !!im && im.width > 0;
       // ---- slot0 表面过渡条（:53137-53170: bgTopY = ws*16-16-screenY+16,行 0,16px）----
       if (ok(im0)) {
-        const P = im0.width - 32;
-        const s = scroll(P);
         const topY = surfacePx - 16 - screenY + 16;
-        if (topY > -32 && topY < viewH) bandRow(im0, P, s.startX, s.diff, s.loops, topY, 0, 16);
+        if (topY > -32 && topY < viewH) bandRow(im0, im0.width, topY, 0, 16);
       }
       // ---- slot1 泥土带（:52826 起: bgTopY = ws*16-screenY+16 → rockTP 截止）----
       if (ok(im1) && surfacePx <= screenY + viewH + 64) {
-        const P = im1.width - 32;
-        const s = scroll(P);
         const bgTopY = surfacePx - screenY + 16;
         const deep = surfacePx < screenY - 16;
         const startY = deep ? Math.trunc(ieeeRem(bgTopY, 96) - 96) : Math.trunc(bgTopY);
@@ -945,19 +936,17 @@ export class BiomeBackground {
           : Math.trunc((viewH - bgTopY) / 96) + 1;
         if (rockTP < screenY + viewH - 16) loopsY = Math.trunc((rockTP - screenY - startY) / 96);
         for (let j = 0; j < loopsY; j++) {
-          bandRow(im1, P, s.startX, s.diff, s.loops, startY + im1.height * j, 0, im1.height);
+          bandRow(im1, im1.width, startY + im1.height * j, 0, im1.height);
         }
       }
       // ---- slot2 岩石上过渡条（DirtBackground 尾段 :53155-53189: @rockTP-16,P=128,行 0）----
       if (ok(im2)) {
-        const s = scroll(128);
         const topY = rockTP - screenY - 16;
-        if (topY > -32 && topY < viewH) bandRow(im2, 128, s.startX, s.diff, s.loops, topY, 0, 16);
+        if (topY > -32 && topY < viewH) bandRow(im2, 128, topY, 0, 16);
       }
       // ---- slot3 岩石带主体（DrawRockLayer :52523 起;底 = magmaLayer*16+600 行边界）----
       let rockStartY = 0, rockLoopsY = 0;
       if (ok(im3) && rockTP <= screenY + viewH) {
-        const s = scroll(128);
         const bgTopY = rockTP - screenY;
         const deep = rockTP + viewH < screenY - 16;
         const startY = deep ? Math.trunc(ieeeRem(bgTopY, 96) - 96) : Math.trunc(bgTopY);
@@ -967,18 +956,16 @@ export class BiomeBackground {
         if (magmaPx < screenY + viewH) loopsY = Math.trunc((magmaPx + 600 - startY - screenY) / 96);
         rockStartY = startY; rockLoopsY = loopsY;
         for (let j = 0; j < loopsY; j++) {
-          bandRow(im3, 128, s.startX, s.diff, s.loops, startY + im3.height * j, 0, im3.height);
+          bandRow(im3, 128, startY + im3.height * j, 0, im3.height);
         }
       }
       // ---- slot4 岩浆过渡条（DrawMagmaTransition :52765: @岩石带底行边界,行 = frame*16）----
       const magmaTransition = rockTP <= screenY + viewH && magmaPx < screenY + viewH;
       if (ok(im4) && magmaTransition && rockLoopsY > 0) {
-        const s = scroll(128);
-        bandRow(im4, 128, s.startX, s.diff, s.loops, rockStartY + rockLoopsY * 96, magmaFrame * 16, 16);
+        bandRow(im4, 128, rockStartY + rockLoopsY * 96, magmaFrame * 16, 16);
       }
       // ---- slot5 岩浆体 + slot6 表面波纹条（DrawMagmaLayer :52276 起）----
       if (ok(im5) && magmaPx <= screenY + viewH) {
-        const s = scroll(128);
         const bgTopY = magmaPx - screenY + 16 + 600 - 8;
         const deep = magmaPx + viewH < screenY - 16;
         const startY = deep ? Math.trunc(ieeeRem(bgTopY, 96) - 96) : Math.trunc(bgTopY);
@@ -992,10 +979,10 @@ export class BiomeBackground {
         }
         const frameH = im5.height / 3;   // 160×288 = 3 帧 × 96px
         for (let j = 0; j < loopsY; j++) {
-          bandRow(im5, 128, s.startX, s.diff, s.loops, startY + 96 * j, Math.min(2, magmaFrame) * frameH, frameH);
+          bandRow(im5, 128, startY + 96 * j, Math.min(2, magmaFrame) * frameH, frameH);
         }
         if (ripple && ok(im6)) {
-          bandRow(im6, 128, s.startX, s.diff, s.loops, startY + loopsY * 96, magmaFrame * 16, 16);
+          bandRow(im6, 128, startY + loopsY * 96, magmaFrame * 16, 16);
         }
       }
     };

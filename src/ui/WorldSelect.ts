@@ -97,6 +97,7 @@ function copyFallback(text: string): void {
 export class WorldSelectPanel {
   private panel: HTMLElement;
   private body: HTMLElement;
+  private closed = false;
 
   constructor(parent: HTMLElement, private store: WorldStore, private flow: WorldSelectFlow) {
     ensureStyle();
@@ -227,6 +228,12 @@ export class WorldSelectPanel {
   }
 
   close(fn?: () => void) {
+    // ★防重入门（2026-08-25 用户报偶发竞态）：行同时挂 click+dblclick → enter，
+    //   双击时 dblclick 仍派发到已拆离行 → 二次 close 曾重跑 fn——角色行双击即
+    //   连建两层世界列表（像素级重叠），点顶层进游戏后底层浮在加载页/游戏画面上
+    //   （DOM z-20 在 VUI 画布之上）；本行双击也会并发跑两次 loadWorldFlow。
+    if (this.closed) return;
+    this.closed = true;
     this.unsubLang?.();
     this.panel.remove();
     fn?.();

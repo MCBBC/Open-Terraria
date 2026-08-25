@@ -15,7 +15,7 @@
 //  · tint 为 uniform 乘法(canvas multiply+destination-in 的等价,零离屏)
 //  · WebGL2 NPOT 纹理可 REPEAT(地下带横向平铺)
 import type { DrawRect } from '../assets/SpriteAtlas';
-import { texId } from './texId';
+import { texId, texReady } from './texId';
 
 export interface QuadOpts {
   alpha?: number;                                    // 整体透明度(默认 1)
@@ -353,7 +353,11 @@ export class GLSpriteLayer {
     const gl = this.gl;
     const w = (img as { width: number }).width;
     const h = (img as { height: number }).height;
-    if (!w || !h) return null;
+    // ★texReady 半加载窗守卫（2026-08-25 同类扫描补强）：!w||!h 挡不住"元数据已到
+    //  (width>0)但主体未完"窗——texImage2D 该窗上传空内容且按 key **永久入
+    //  this.texs**（GL 纹理无重烘焙自愈,比 canvas 毒化更狠）。本方法是全部 GL
+    //  贴图（背景层 bg:*/云 cloud:*/小地图/atlas 矩形）的唯一上传口,守卫收口在此
+    if (!w || !h || !texReady(img as ImageBitmap | HTMLImageElement | HTMLCanvasElement)) return null;
     const tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     // ★预乘上传:mip 层平均的是预乘像素(能量正确)——直 Alpha 会让 mip 把

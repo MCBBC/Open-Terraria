@@ -238,7 +238,8 @@ export class PrismProng extends Entity {
         const [rr, gg, bb] = hueToRgb(this.idx / 6);
         const rotAdj = Math.atan2(this.vy, this.vx) - Math.PI / 2;   // 贴图纵向→束向(Utils.cs:2804)
         ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
+        // ★混合=原版 AlphaBlend（Main.DrawProjectiles spriteBatch.Begin(AlphaBlend)）
+        // ——曾 'lighter' 加法:光晕外扩显粗+hue 冲白=用户报"比原版粗/色调不对"
         ctx.imageSmoothingEnabled = false;
         const hueTex = tintedTex(img, [rr, gg, bb], true);
         const whiteTex = tintedTex(img, [255, 255, 255], true);
@@ -248,12 +249,11 @@ export class PrismProng extends Entity {
         return;
       }
     }
-    // 回退：贴图未就绪/非 DOM 环境——旧线条近似
+    // 回退：贴图未就绪/非 DOM 环境——旧线条近似（同 AlphaBlend）
     const [rr, gg, bb] = hueToRgb(this.idx / 6);
     const a = opacity * 0.75;
     const x2 = this.cx + this.vx * this.beamLen, y2 = this.cy + this.vy * this.beamLen;
     ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
     ctx.strokeStyle = `rgba(${rr},${gg},${bb},${a})`;
     ctx.lineWidth = 26 * this.prongScale * 0.75 * th;
     ctx.lineCap = 'round';

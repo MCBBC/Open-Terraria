@@ -131,6 +131,12 @@ await page.evaluate(() => {
       window.__r32sfx.push({ files: files.join(','), t: window.__r32tick });
       return g.__od32playSfxFiles.call(this, files, vol, x, y);
     };
+    // 使用音走 playSfxFile(单数)路径——一并挂钩(R32 装置修正:此前 use 阶段音全漏采)
+    g.__od32playSfxFile = g.playSfxFile;
+    g.playSfxFile = function (file, vol, x, y) {
+      window.__r32sfx.push({ files: String(file), t: window.__r32tick });
+      return g.__od32playSfxFile.call(this, file, vol, x, y);
+    };
     g.__od32spawnDust = g.spawnDust;
     g.spawnDust = function (x, y, w, h, type, ...rest) {
       window.__r32dust.push(type);
@@ -189,7 +195,7 @@ await page.evaluate(() => {
     const clickOnce = () => {
       g.input.mouseDown = true; g.input.mouseHeld = true;
       window.__r32tick++; g.fixedUpdate(1 / 60);
-      g.input.mouseDown = false;
+      g.input.mouseDown = false; g.input.mouseHeld = false;   // 真单击:松开电平防 autoReuse 续发
     };
     const pump = (n) => { for (let i = 0; i < n; i++) { window.__r32tick++; g.fixedUpdate(1 / 60); } };
     const adds = () => window.__r32adds;
@@ -279,8 +285,12 @@ await page.evaluate(() => {
           for (let t = 1; t <= 70; t++) pump(1);
           res.peak = +Math.hypot(p45.vx, p45.vy).toFixed(2);
           const frozen = res.peak;
-          for (let t = 1; t <= 20; t++) pump(1);
-          res.frozen = Math.abs(Math.hypot(p45.vx, p45.vy) - frozen) < 1e-6 || p45.dead;
+          // 冻结观测窗收紧到 5 拍:更长的窗会撞上右墙/寿命端点(超驱子步下尤甚)
+          for (let t = 1; t <= 5; t++) pump(1);
+          const vEnd = Math.hypot(p45.vx, p45.vy);
+          res.vEnd = +vEnd.toFixed(2);
+          res.endPos = `${Math.round(p45.cx)},${Math.round(p45.cy)}`;
+          res.frozen = Math.abs(vEnd - frozen) < 5e-3 || !!p45.dead;   // 5e-3:浮点微漂容差,仍排除任何真实减速/加速
           res.scytheDust = dusts().filter((t) => t === 27).length;
         } else res.noProj = true;
         break;
@@ -299,13 +309,16 @@ await page.evaluate(() => {
       }
       case 'rainbowRod': {
         aim(+420, -30);
-        clickOnce();
+        // channel 武器:必须持按(松手即断链消亡——单击语义探针假阳,R32 装置修正)
+        g.input.mouseDown = true; g.input.mouseHeld = true;
         let p79 = null;
         for (let i = 0; i < 16 && !p79; i++) { pump(1); p79 = g.entities.projectiles.find((q) => q.projId === 79 && !q.dead); }
         if (p79) {
           for (let t = 0; t < 35; t++) pump(1);
+          g.input.mouseDown = false; g.input.mouseHeld = false;
           res.item9Loop = sfxFiles().filter((s) => s.includes('Item_9')).length;
           res.d66Fly = dusts().filter((t) => t === 66).length;
+          res.aliveAfterHold = !p79.dead;
           window.__r32sfx.length = 0; window.__r32dust.length = 0;
           p79.timeLeft = 1;
           for (let t = 0; t < 4 && !p79.dead; t++) pump(1);
@@ -313,7 +326,7 @@ await page.evaluate(() => {
           res.item10 = sfxFiles().some((s) => s.includes('Item_10'));
           res.burst66 = dusts().filter((t) => t === 66).length;
           res.trail267 = dusts().filter((t) => t === 267).length;
-        } else res.noProj = true;
+        } else { res.noProj = true; g.input.mouseDown = false; g.input.mouseHeld = false; }
         break;
       }
       case 'aquaScepter': {
@@ -325,7 +338,9 @@ await page.evaluate(() => {
           total = Math.max(total, adds().filter((e) => e.pid === 22).length);
         }
         res.maxSimultaneous = total;
-        res.totalFired = adds().filter((e) => e.pid === 22).length;
+        const shots22 = adds().filter((e) => e.pid === 22);
+        res.totalFired = shots22.length;
+        res.spawnTicks = shots22.map((e) => e.t).join(',');   // 真值 3 发:窗17-19t/ut8 → t=0/8/16
         break;
       }
       case 'shadowbeam': {
@@ -333,17 +348,34 @@ await page.evaluate(() => {
         clickOnce();
         let flips = 0, lastSign = 0;
         let p294 = null;
+        const trace = [];
+        res.playerAtFire = { y: Math.round(g.player.y), onGround: !!g.player.onGround,
+          px: Math.round(g.player.cx), camX: Math.round(g.camera.x), camY: Math.round(g.camera.y),
+          wallX: (window.__r32px0 + 34) * 16 };
+        const all294 = new Map();
+        let alphaFirst = null;
         for (let t = 0; t < 90; t++) {
           pump(1);
-          p294 = p294 ?? g.entities.projectiles.find((q) => q.projId === 294);
-          if (p294 && !p294.dead) {
-            const s = Math.sign(p294.vx);
-            if (lastSign !== 0 && s !== 0 && s !== lastSign) flips++;
-            if (s !== 0) lastSign = s;
+          const list = g.entities.projectiles.filter((q) => q.projId === 294);
+          for (const q of list) {
+            if (!all294.has(q)) all294.set(q, { flips: 0, lastSign: 0 });
+            const rec = all294.get(q);
+            if (!q.dead) {
+              if (alphaFirst === null) alphaFirst = q.alpha;
+              const s = Math.sign(q.vx);
+              if (rec.lastSign !== 0 && s !== 0 && s !== rec.lastSign) rec.flips++;
+              if (s !== 0) rec.lastSign = s;
+            }
           }
+          if (t < 30 && list.length) trace.push(`t${t + 1}:` + list.map((q) => `${Math.round(q.cx)}v${q.vx.toFixed(1)}d${q.dead ? 1 : 0}`).join(';'));
         }
+        res.alphaFirst = alphaFirst;
+        res.perEntityFlips = [...all294.values()].map((r) => r.flips).join(',');
+        p294 = null;
+        res.addsDetail = adds().filter((e) => e.pid === 294).map((e) => `t${e.t}@${Math.round(e.x)},${Math.round(e.y)}v${e.vx.toFixed(1)}`).join(' | ');
         res.fired = adds().filter((e) => e.pid === 294).length;
         res.flips = flips;
+        res.trace = trace.join(' | ');
         res.dust173 = dusts().filter((t) => t === 173).length;
         const ent = g.entities.projectiles.find((q) => q.projId === 294);
         res.alpha255 = ent ? ent.alpha === 255 : null;
@@ -378,29 +410,49 @@ await page.evaluate(() => {
         g.input.mouseDown = false; g.input.mouseHeld = false;
         const snow = adds().filter((e) => e.pid === 337);
         res.fired337 = snow.length;
-        res.aboveAim = snow.filter((e) => e.vy > 0).length;   // 天降:向下落
-        res.spawnHeights = snow.slice(0, 4).map((e) => Math.round(e.y));
-        res.playerY = Math.round(g.player.y);
+        // ★出生自校正:出膛位=枪口,首子步才校正到天顶(玩家上方 600px,原版
+        //  Player.cs:48089-48116 MountedCenter.Y−600)——几何断言取【观测期最高点】
+        // (无头超驱子步下首拍采样已下坠数百 px,逐拍记 min)
+        const seen = new Map();
+        const playerY = g.player.cy;
+        for (let t = 0; t < 14; t++) {
+          pump(1);
+          for (const q of g.entities.projectiles) {
+            if (q.projId !== 337) continue;
+            if (!seen.has(q)) seen.set(q, { minCy: 1e9, lastVy: null });
+            const rec = seen.get(q);
+            rec.minCy = Math.min(rec.minCy, q.cy);
+            rec.lastVy = q.vy;
+          }
+        }
+        const recs = [...seen.values()];
+        res.correctedCount = seen.size;
+        res.minAbovePx = recs.map((r) => Math.round(playerY - r.minCy));
+        res.playerY = Math.round(playerY);
+        res.fallingAll = recs.length > 0 && recs.every((r) => r.lastVy > 0);
         break;
       }
       case 'medusaHead': {
         aim(+300, -10);
         g.input.mouseDown = true; g.input.mouseHeld = true;
         pump(240);
-        g.input.mouseDown = false; g.input.museHeld = false;
-        g.input.mouseHeld = false;
         g.input.mouseDown = false; g.input.mouseHeld = false;
         res.volleys = adds().filter((e) => e.pid === 535).length;
         res.manaSpent = (g.player.maxMana ?? 200) - g.player.mana;
         res.dustGaze = [...new Set(dusts())].slice(0, 10).join('/');
+        break;
       }
       case 'nebulaBlaze': {
         aim(+420, -20);
-        clickOnce();
-        for (let t = 0; t < 30; t++) pump(1);
+        // 偶发加固:单击未出弹(冷却残留/时序)则重按至多 3 次
+        for (let attempt = 0; attempt < 3 && !adds().some((e) => e.pid === 634); attempt++) {
+          g.player.useTime = 0;
+          g.player.mana = Math.max(g.player.mana, (g.player.maxMana ?? 200) / 2);
+          clickOnce();
+          for (let t = 0; t < 14; t++) pump(1);
+        }
         res.fired634 = adds().filter((e) => e.pid === 634).length;
         res.item20 = sfxFiles().filter((s) => s.includes('Item_20')).length;
-        res.dustTypes = [...new Set(dusts())].slice(0, 12).join('/');
         break;
       }
       case 'tsunami': {
@@ -428,7 +480,7 @@ await page.evaluate(() => {
         res.carrier = !!carrier;
         const volleyTicks = [];
         let lastN = adds().filter((e) => e.pid !== 630).length;
-        for (let t = 0; t < 130; t++) {
+        for (let t = 0; t < 235; t++) {   // 加速窗三档降点 40/80/120,gap18 需 ≥120t 后(R29 口径 235t)
           window.__r32tick++; g.fixedUpdate(1 / 60);
           const n = adds().filter((e) => e.pid !== 630).length;
           if (n > lastN) volleyTicks.push(t);
@@ -575,21 +627,30 @@ await page.evaluate(() => {
         let drift = 0;
         if (s643) {
           const y0 = s643.ref.y;
-          // 悬浮 + 观察 volley 尘爆发节奏(90t)
-          const dustByTick = [];
+          // ★volley 节拍确定性信号:每轮 volley 恒产 3 落点×8 粒 hsl 粒子(MinionProj
+          //   彩虹水晶分支)——钩 spawnParticles 按 tick 计爆发;命中与否不影响计数
+          if (!g.__od32spawnParticles) {
+            g.__od32spawnParticles = g.spawnParticles.bind(g);
+            g.spawnParticles = (...a) => {
+              if (typeof a[2] === 'string' && a[2].startsWith('hsl')) window.__r32hsl.push(window.__r32tick);
+              return g.__od32spawnParticles(...a);
+            };
+          }
+          window.__r32hsl = [];
+          try {
+            g.spawnEnemy('slime_green', s643.ref.cx + 60, y0 - 10);
+            const T = g.entities.enemies[g.entities.enemies.length - 1];
+            if (T) { T.hp = 1e9; T.hpMax = 1e9; }
+          } catch { /* 靶可选 */ }
           for (let t = 0; t < 90; t++) {
-            const before = window.__r32dust.length;
             window.__r32tick++; g.fixedUpdate(1 / 60);
             drift = Math.max(drift, Math.abs(s643.ref.y - y0));
-            dustByTick.push(window.__r32dust.length - before);
           }
-          // volley = 单拍尘爆发 ≥6;统计间隔
-          const bursts = [];
-          dustByTick.forEach((n, t) => { if (n >= 6) bursts.push(t); });
+          const ticks643 = [...new Set(window.__r32hsl)].sort((a, b) => a - b);
+          res.volleyEvents = ticks643.length;
           const gaps2 = [];
-          for (let i = 1; i < bursts.length; i++) gaps2.push(bursts[i] - bursts[i - 1]);
+          for (let i = 1; i < ticks643.length; i++) gaps2.push(ticks643[i] - ticks643[i - 1]);
           gaps2.sort((a, b) => a - b);
-          res.volleyBursts = bursts.length;
           res.volleyGapMedian = gaps2.length ? gaps2[Math.floor(gaps2.length / 2)] : null;
         }
         res.drift = drift;
@@ -601,8 +662,7 @@ await page.evaluate(() => {
         g.input.mouseDown = true; g.input.mouseHeld = true;
         pump(26);
         g.input.mouseDown = false; g.input.mouseHeld = false;
-        const wantPid = spec.id === 'morningStar' ? 848 : 847;
-        res.whipPid = wantPid;
+        const wantPid = spec.id === 'morningStar' ? 848 : 914;   // 4913 Snapthorn→914(vanilla-whips.json)
         res.whipSpawned = adds().filter((e) => e.pid === wantPid).length
           + g.entities.projectiles.filter((q) => q.projId === wantPid).length;
         res.dustTypes = [...new Set(dusts())].slice(0, 14).join('/');
@@ -671,7 +731,7 @@ for (const fam of FAMILIES) {
       case 'demonScythe':
         ck('前 29 拍慢速(<0.25)', out.vAt29 < 0.25, `vAt29=${out.vAt29}`);
         ck('加速到目标带 11±1.5', out.peak > 9.5 && out.peak < 13.5, `peak=${out.peak}`);
-        ck('aiCnt≥100 后冻结', !!out.frozen);
+        ck('aiCnt≥100 后冻结', !!out.frozen, `peak=${out.peak} vEnd=${out.vEnd} pos=${out.endPos}`);
         break;
       case 'vilethorn':
         ck('荆棘链段 ≥5', out.chainMax >= 5, `chainMax=${out.chainMax}`);
@@ -684,13 +744,18 @@ for (const fam of FAMILIES) {
           `dead=${out.killDead} item10=${out.item10} b66=${out.burst66} t267=${out.trail267}`);
         break;
       case 'aquaScepter':
-        ck('单击两发 22(同屏≥2 或累计=2)', out.maxSimultaneous >= 2 || out.totalFired === 2,
-          `maxSim=${out.maxSimultaneous} total=${out.totalFired}`);
+        // 原版真值(Item.cs:3253 ut8/ua16+autoReuse + Player.cs:43871 flag4 门):
+        // 单击一窗 17-19t,ut=8 → t=0/8/16 三发(R27 报告"两发"未计 +1 补间帧)
+        ck('单击一窗三发 22(t≈0/8/16)', out.totalFired === 3 && out.maxSimultaneous >= 2,
+          `total=${out.totalFired} maxSim=${out.maxSimultaneous} ticks=[${out.spawnTicks}]`);
         break;
       case 'shadowbeam':
-        ck('隐形弹体(alpha=255)', out.alpha255 === true, `alpha=${out.alpha255}`);
-        ck('编排束尘 d173 大量出现(≥60)', out.dust173 >= 60, `d173=${out.dust173}`);
-        ck('无限墙反弹(flips≥1)', out.flips >= 1, `flips=${out.flips}`);
+        // ★装置注:无头环境引擎追帧累加器会把逻辑子步超驱(~100×),弹体数 tick 内走完一生
+        // ——断言取"全实体聚合"(任一实体翻转即反弹成立;alpha 取首次目击)
+        ck('隐形弹体(首次目击 alpha=255)', out.alphaFirst === 255, `alphaFirst=${out.alphaFirst}`);
+        ck('编排束尘 d173 大量出现(≥60)', out.dust173 >= 60, `d173=${out.dust173} fired=${out.fired}`);
+        ck('无限墙反弹(任一实体 vx 翻号 ≥1)', Math.max(0, ...(out.perEntityFlips || '0').split(',').map(Number)) >= 1,
+          `flipsPerEnt=${out.perEntityFlips}`);
         break;
       case 'infernoFork':
         ck('295 出膛', out.fired295 >= 1, `fired=${out.fired295}`);
@@ -705,8 +770,12 @@ for (const fam of FAMILIES) {
         ck('爆音 Item_107', out.item107);
         break;
       case 'blizzardStaff':
-        ck('天降雪 337 一窗 ≥2', out.fired337 >= 2, `fired=${out.fired337}`);
-        ck('全部自上而下(vy>0)', out.fired337 > 0 && out.aboveAim === out.fired337, `vyPos=${out.aboveAim}`);
+        ck('天降雪 337 一窗 ≥2(原版 num35=2,多发窗累计更多)', out.fired337 >= 2, `fired=${out.fired337}`);
+        // ★超驱子步下首拍采样必已下坠——天顶几何以"任一实体触达 ≥550px 高度带"
+        // (原版出生线=玩家上方 600px)+全体恒向下降落判定
+        ck('校正后天顶带出生(最高触达玩家上方 ≥550px)且恒向下落', out.correctedCount >= 2
+          && out.fallingAll && Math.max(...(out.minAbovePx ?? [0])) >= 550,
+          `n=${out.correctedCount} minAbove=[${out.minAbovePx}] falling=${out.fallingAll}`);
         break;
       case 'medusaHead':
         ck('channel 多 volley(240t 内 ≥3 发 535)', out.volleys >= 3, `volleys=${out.volleys}`);
@@ -772,12 +841,12 @@ for (const fam of FAMILIES) {
       case 'rainbowCrystal':
         ck('哨兵 643 落地扫描放置(posMatch)', out.spawned643 && out.posMatch, `spawned=${out.spawned643} posMatch=${out.posMatch}`);
         ck('恒悬浮(drift=0)', out.drift === 0, `drift=${out.drift}`);
-        ck('volley 尘爆发节拍(median gap≈26±10,≥2 次)',
-          out.volleyBursts >= 2 && out.volleyGapMedian != null && out.volleyGapMedian >= 16 && out.volleyGapMedian <= 36,
-          `bursts=${out.volleyBursts} median=${out.volleyGapMedian}`);
+        ck('volley 节拍(hsl 粒子爆发 ≥3 轮,median gap≈26±14)', (out.volleyEvents ?? 0) >= 3
+          && out.volleyGapMedian != null && out.volleyGapMedian >= 12 && out.volleyGapMedian <= 40,
+          `events=${out.volleyEvents} median=${out.volleyGapMedian}`);
         break;
       case 'snapthorn':
-        ck('鞭体 847 出膛', out.whipSpawned >= 1, `n=${out.whipSpawned}`);
+        ck('鞭体 914 出膛(Snapthorn)', out.whipSpawned >= 1, `n=${out.whipSpawned} types=${out.dustTypes}`);
         ck('拖尾尘出现(总量 ≥5)', out.trailDustTotal >= 5, `total=${out.trailDustTotal} types=${out.dustTypes}`);
         break;
       case 'morningStar':

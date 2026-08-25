@@ -82,21 +82,29 @@ const CSS = `
   width: 60px; height: 58px; image-rendering: pixelated; pointer-events: none;
 }
 /* ---- 手机适配(2026-08-25,加法式覆盖,桌面 1280×800 全不命中)----
-   A 竖屏窄(max-width:560):面板吃满宽度、列表改 flex 撑满剩余高度(替代 52vh);
+   A 竖屏窄(max-width:560):面板吃满宽度、行内长名/副行省略号(换行会压按钮行);
    B 矮横屏(max-height:500):压 footer 钮高;C 触控(hover:none+coarse):
-   图标钮外包 .sw-vico 扩触控热区(margin 抵消 → 视觉零位移) */
+   图标钮外包 .sw-vico 扩触控热区(margin 抵消 → 视觉零位移)。
+   ★list 上限必须用视口 calc 硬帽、不能靠 flex 撑满:.sw-vsel 高度=auto+max-height
+   钳制,非 definite → panel 的 flex 后高度对 list 的 height:100%/stretch 均不可
+   用,list 保持内容高直冲屏底、footer 被顶出屏(2026-08-25 真机实报,实测 list
+   931px 溢出 panel 639px;base 的 max-height:52vh 视口帽曾兼职此保险) */
 @media (max-width: 560px) {
   .sw-vsel { width: min(94vw, 650px); max-height: 92vh; max-height: 92dvh; }
   .sw-vsel-panel { flex: 1 1 auto; display: flex; min-height: 120px; }
-  .sw-vsel-list { max-height: none; flex: 1 1 auto; overscroll-behavior: contain; }
+  .sw-vsel-list { max-height: calc(92vh - 170px); max-height: calc(92dvh - 170px);
+    flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
   .sw-vsel-footer { margin-top: 10px; }
   .sw-vsel-footer .sw-vbtn { height: 46px; }
+  .sw-vitem-info { overflow: hidden; right: 44px; }   /* 右缘收窄(删除钮 32px 足够)给长名/副行多点空间 */
+  .sw-vitem-info .name, .sw-vitem-info .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-height: 500px) {
   .sw-vsel { max-height: 94vh; }
   .sw-vsel-title { margin-bottom: 8px; }
   .sw-vsel-panel { flex: 1 1 auto; display: flex; }
-  .sw-vsel-list { max-height: none; flex: 1 1 auto; overscroll-behavior: contain; }
+  .sw-vsel-list { max-height: calc(94vh - 150px);
+    flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
   .sw-vsel-footer { margin-top: 8px; }
   .sw-vsel-footer .sw-vbtn { height: 40px; }
 }
@@ -107,12 +115,15 @@ const CSS = `
 
 export function ensureStyle() {
   ensureVanillaKit();
-  if (!document.getElementById('sw-list-style')) {
-    const style = document.createElement('style');
+  // 每次调用都刷新内容(★HMR/迭代期 getElementById 守卫只建不更,旧 <style>
+  // 驻留会吞掉 CSS 变更——手机适配断点全靠这份表,与 TitleMenu 同款修法)
+  let style = document.getElementById('sw-list-style') as HTMLStyleElement | null;
+  if (!style) {
+    style = document.createElement('style');
     style.id = 'sw-list-style';
-    style.textContent = CSS;
     document.head.appendChild(style);
   }
+  style.textContent = CSS;
 }
 
 const BTN_SRC = (n: string): string => `sprites/vanilla-ui/${n}.png`;
@@ -127,6 +138,7 @@ export class CharSelectPanel {
   private body: HTMLElement;
   private raf = 0;
   private time = 0;
+  private closed = false;   // ★close 防重入（同 WorldSelectPanel——行 click+dblclick 双挂）
   private items: Array<{ meta: CharacterMeta; appearance: Appearance; canvas: HTMLCanvasElement }> = [];
 
   constructor(parent: HTMLElement, private store: CharacterStore, private flow: CharSelectFlow) {
@@ -298,6 +310,11 @@ export class CharSelectPanel {
   };
 
   close(fn?: () => void) {
+    // ★防重入门（2026-08-25）：行 click+dblclick 双挂，双击时 dblclick 派发到已
+    //   拆离行 → 二次 close 重跑 fn → showWorldSelect 连建两层世界列表（像素级
+    //   重叠），点顶层进游戏后底层浮在加载页/游戏画面上（用户报偶发竞态）。
+    if (this.closed) return;
+    this.closed = true;
     cancelAnimationFrame(this.raf);
     this.unsubLang?.();
     this.panel.remove();
