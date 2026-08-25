@@ -89,7 +89,8 @@ const CSS = `
   touch-action:manipulation; backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px); }
 .sw-mrotate { position:absolute; left:50%; top:calc(42px + env(safe-area-inset-top)); transform:translateX(-50%);
   background:rgba(20,26,52,0.82); color:#ffe8a0; font-size:12px; padding:5px 14px;
-  border-radius:8px; border:1px solid #7d92d6; display:none; pointer-events:none; }
+  border-radius:8px; border:1px solid #7d92d6; display:none; pointer-events:none;
+  white-space:nowrap;   /* absolute+left:50% 的收缩盒被右缘截半 → 长文案断行难看;文案 ~250px < 最窄屏 320 */ }
 @media (orientation: portrait) { .sw-mobile .sw-mrotate { display:block; } }
 `;
 

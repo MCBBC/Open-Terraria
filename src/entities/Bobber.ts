@@ -62,6 +62,10 @@ function nextInt(min: number, max: number): number {
 export function bobberProjIdFor(poleVid: number): number {
   if (poleVid >= 2291 && poleVid <= 2296) return 361 + (poleVid - 2291);
   if (poleVid === 2289) return 360;
+  // 血肉抛竿 2421 / 热线 2422（Item.cs:23074 共享块 shoot = 381 + type - 2421）
+  // ——曾漏映射落到缺省 360（浮漂贴图/配对错竿，2026-08-25 R32 补）
+  if (poleVid === 2421) return 381;
+  if (poleVid === 2422) return 382;
   if (poleVid === 4325) return 760;
   if (poleVid === 4442) return 775;
   return 360;

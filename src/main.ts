@@ -581,17 +581,34 @@ kvHas('sandboxworld.quicksave').then(async () => {
   // ★首访资产前置(2026-08-25 用户要求):音频门出现前先把暖缓存跑起来并等标题曲
   //   (Music_50/51,位于 p0 最前,到位即含过渡图族)入缓存——保证点击放行即有声、
   //   过渡时间线有画。dev/?nosw/http 立即跳过;慢网 30s 上限降级放行不卡死。
+  //   等待指示=原版 LoadingSunflower 帧动画(UI_Sunflower_Loading.png 52×1007
+  //   竖条 19 帧,帧序 :52041-52060 同款 Frame(1,19,0,(帧/3+10)%19),2026-08-25
+  //   用户要求替换脉冲点)
   if (!bypassBoot) {
     const veil = document.createElement('div');
     veil.id = 'sw-boot-prime';
     veil.innerHTML = `<style>
       #sw-boot-prime { position: fixed; inset: 0; z-index: 10002; background: #000;
         display: flex; align-items: center; justify-content: center; }
-      #sw-boot-prime i { width: 14px; height: 14px; border-radius: 50%; background: #fff;
-        animation: swbootpulse 1s ease-in-out infinite; }
-      @keyframes swbootpulse { 0%,100% { opacity: .15; } 50% { opacity: .9; } }
-    </style><i></i>`;
+    </style><canvas width="52" height="53"></canvas>`;
     document.body.appendChild(veil);
+    const cv = veil.querySelector('canvas') as HTMLCanvasElement;
+    const cctx = cv.getContext('2d')!;
+    const sfImg = new Image();
+    let sfOk = false;
+    sfImg.onload = () => { sfOk = true; };
+    sfImg.src = 'sprites/vanilla-ui/UI_Sunflower_Loading.png';   // vanilla-ui 散件常驻,首访即可得
+    const sfT0 = performance.now();
+    const sfStep = () => {
+      if (!veil.isConnected) return;   // 撤除即停
+      if (sfOk && sfImg.width > 0) {
+        const row = (Math.floor((performance.now() - sfT0) / 50) + 10) % 19;
+        cctx.clearRect(0, 0, 52, 53);
+        cctx.drawImage(sfImg, 0, row * 53, 52, 53, 0, 0, 52, 53);
+      }
+      requestAnimationFrame(sfStep);
+    };
+    requestAnimationFrame(sfStep);
     try { await primeBootAssets(30_000); } catch { /* 降级放行 */ }
     veil.remove();
   }

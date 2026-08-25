@@ -248,6 +248,29 @@ export function assetsCompleteFast(): boolean {
 /** 与 public/sw.js 的 CACHE_PREFIX 手工同步(缓存名前缀;改须双侧) */
 const CACHE_PREFIX = 'sw-assets-v';
 
+/** 懒加载 worker 预取(2026-08-25 review#2):worldGen(4MB)/save(1.9MB)worker
+ *  原为首次进世界/首次存档才懒下载——利用音频门等待窗口后台 fetch 填充 SW 缓存,
+ *  真正使用时走 cache-first 秒开。URL 经 new URL(asset, import.meta.url) 由 vite
+ *  解析到与 spawn 点相同的哈希产物;缓存键=绝对 URL 与 SW 回填口径一致。 */
+function prefetchLazyWorkers(): void {
+  if (!import.meta.env.PROD || typeof caches === 'undefined') return;
+  const urls = [
+    new URL('../workers/worldGen.worker.ts', import.meta.url),
+    new URL('../workers/save.worker.ts', import.meta.url),
+  ];
+  void (async () => {
+    try {
+      const cache = await caches.open(CACHE_PREFIX + state.version);
+      for (const u of urls) {
+        const key = String(u);
+        if (await cache.match(key)) continue;
+        const res = await fetch(u);
+        if (res && res.ok) await cache.put(key, res.clone());
+      }
+    } catch { /* 非关键路径 */ }
+  })();
+}
+
 function postToSw(msg: Record<string, unknown>): void {
   const sw = typeof navigator !== 'undefined' ? navigator.serviceWorker?.controller : undefined;
   // version 随消息走:SW 被浏览器击杀重启后内存版本丢失,靠消息里的 version 选对缓存
@@ -271,11 +294,17 @@ export async function primeBootAssets(timeoutMs = 30_000): Promise<boolean> {
   for (;;) {
     try {
       const ms = await Promise.all(want.map((u) => caches.match(u)));
-      if (ms.every(Boolean)) return true;
-    } catch { return false; }
-    if (Date.now() - t0 >= timeoutMs) return false;
+      if (ms.every(Boolean)) break;
+    } catch { break; }
+    if (Date.now() - t0 >= timeoutMs) break;
     await new Promise((r) => setTimeout(r, 250));
   }
+  // 哨兵就位(或超时降级)后:利用音频门等待窗口预取两个懒加载 worker
+  prefetchLazyWorkers();
+  try {
+    const ms = await Promise.all(want.map((u) => caches.match(u)));
+    return ms.every(Boolean);
+  } catch { return false; }
 }
 
 /** 注册 SW 并启动(仅生产构建;?sw=1 强制开、?nosw 关)。幂等。 */

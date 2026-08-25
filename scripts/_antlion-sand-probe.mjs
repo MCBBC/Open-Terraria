@@ -65,28 +65,35 @@ const out = await page.evaluate(async () => {
   await sleep(1200);
   res.B_plant = { col: colScan(X), pass: st.get(X, Y - 2) === 0 && st.get(X, Y - 1) === T.plant };
 
-  // C) 仙人掌(沙底支撑,合法锚) :沙落仙人掌顶 → 贴格放置,不顶进臂位
+  // C) 仙人掌(沙底支撑,合法锚):★SW v_80_cactus def 为非实心(decor),原版实心——
+  // 弹体穿进仙人掌格才碰下方沙 → prev=仙人掌格被占 → 消失(与当前数据面自洽;
+  // 仙人掌 solidity 数据差登记,不属本修范围)
   clearCol(X);
   st.setTile(X, Y, T.sand, 0, 0);
   st.setTile(X, Y - 1, T.cactus, 0, 0);
   spawnDart(X, Y - 6);
   await sleep(1200);
-  res.C_cactus = { col: colScan(X), pass: st.get(X, Y - 2) === T.sand || st.get(X, Y - 1) === T.sand };
+  res.C_cactus = {
+    col: colScan(X),
+    cactusSolid: !!st.isSolid(X, Y - 1),
+    pass: st.get(X, Y - 1) === T.cactus && st.get(X, Y - 2) === 0 && st.get(X, Y) === T.sand,
+  };
   st.setTile(X, Y, T.grass, 0, 0);
   clearCol(X);
 
-  // D) 下落沙回归：支撑被挖 → 坠落 → 贴格落回草上方
+  // D) 下落沙回归：★y 越小越高——沙在 Y-5,正下方支撑是 Y-4;挖 Y-4 → 监听器查
+  //    上方 (X,Y-5) → 入队坠落 → 贴格落回草上方
   st.setTile(X, Y - 5, T.sand, 0, 0);
-  st.setTile(X, Y - 6, T.dirt, 0, 0);      // 先给沙一个支撑
-  st.setTile(X, Y - 6, 0, 0, 0);           // 挖支撑 → 监听器触发下落
+  st.setTile(X, Y - 4, T.dirt, 0, 0);      // 沙的正下方支撑
+  st.setTile(X, Y - 4, 0, 0, 0);           // 挖支撑 → 监听器触发下落
   await sleep(1500);
   res.D_falling = { col: colScan(X), pass: st.get(X, Y - 1) === T.sand };
 
   // E) 下落沙 × 草苗落点格被占 → 消失
   st.setTile(X, Y - 1, T.plant, 0, 0);
   st.setTile(X, Y - 5, T.sand, 0, 0);
-  st.setTile(X, Y - 6, T.dirt, 0, 0);
-  st.setTile(X, Y - 6, 0, 0, 0);
+  st.setTile(X, Y - 4, T.dirt, 0, 0);
+  st.setTile(X, Y - 4, 0, 0, 0);
   await sleep(1500);
   res.E_fallingPlant = { col: colScan(X), pass: st.get(X, Y - 2) === 0 && st.get(X, Y - 1) === T.plant };
 

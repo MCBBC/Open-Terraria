@@ -1491,6 +1491,13 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
       // 三部件全部闭眼残肢(ai0=-2)→ 解除无敌进二阶段(:36891-36909 flag85)
       if (parts.every((p) => p.ai0 === -2)) { e.ai0 = 1; e.ai1 = 0; }
     }
+    if (e.ai0 === 1) {
+      // :36913 phase1 分支首句 dontTakeDamage=false——原版每 tick 清无敌。
+      // ★曾缺失:phase0 每 tick 置 true 后无人复位 → 三残肢解锁后核心仍永久
+      // 无敌(与头部眼睑单向阀同批"只写 true 不复位"类,2026-08-25 用户实报
+      // "血量卡 9500 永远打不死"的第二处根因)
+      e.dontTakeDamage = false;
+    }
     if (player) {
       mlCoreHover(e, player);
       // TargetClosest(faceTarget:false) 的 direction 语义(离场态 vx 目标用)

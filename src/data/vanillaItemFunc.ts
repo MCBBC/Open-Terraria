@@ -44,6 +44,13 @@ for (const yoyoVid of [3262, 3278, 3279, 3280, 3281, 3282, 3283, 3284, 3285, 328
   FUNC[String(yoyoVid)].useStyle = 5;
 }
 
+// R32（2026-08-25）：血肉抛竿 2421 提取缺口——Item.cs:23071-23100 `type >= 2421 &&
+// type <= 2422` 共享 SetDefaults 块（useStyle 1 / useAnimation 8 / useTime 8 /
+// shoot = 381 + type - 2421），提取器只落了 2422。2421 数值支：fishingPole=22 /
+// shootSpeed 13.5 / rare 1（物品本体暂未入库 items.ts，功能画像先补全=钓竿族判定/
+// 浮漂弹配对/静持门在册即生效）。
+FUNC['2421'] = { useStyle: 1, shoot: 381, fishingPole: 22 };
+
 /** 内部 item id（vi_ key）→ 功能画像 */
 export function itemFuncOfInternal(id: number, key: string): ItemFunc | null {
   const m = /^vi_(\d+)_/.exec(key);

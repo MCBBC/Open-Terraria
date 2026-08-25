@@ -6,15 +6,16 @@
 //  ⑤ 发光（mount 8 emitsLight 光照注入 → 玩家格光照值 > 0）
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1360, height: 860 } });
+const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, protocolTimeout: 600000, args: ['--no-sandbox'], defaultViewport: { width: 1360, height: 860 } });
 const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
 await page.goto(ORIGIN, { waitUntil: 'networkidle0', timeout: 120000 });
+await page.waitForFunction(() => !document.getElementById('sw-splash'), { timeout: 300000, polling: 500 });
 await page.waitForSelector('select', { timeout: 120000 });
 await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; });
 await page.click('button');
-await page.waitForFunction(() => window.__swGame?.player, { timeout: 300000 });
+await page.waitForFunction(() => window.__swGame?.player, { timeout: 800000, polling: 1000 });
 await new Promise(r => setTimeout(r, 2000));
 
 const out = await page.evaluate(async () => {
