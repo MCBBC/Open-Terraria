@@ -84,20 +84,37 @@ const out = await page.evaluate(async () => {
   const R = { fatal: null, dbg: {} };
 
   if (g.world.journeyPowers) g.world.journeyPowers.godmode = true;
-  // 白天：世界默认 8:30 开局即昼——不手动改 clock（此前置 0.5 伴生世界层全黑，弃用）
+  // 白天：世界默认 8:30 开局即昼——不手动改 clock；★不做任何 setTileSilent/setLiquid
+  // （批量改地形曾伴生世界层渲染全黑——疑似与光照 worker 竞态；探针只用天然水池）
 
-  // ---- 自建石砌水池（出生点右侧地表，保证露天+白天光照）----
-  const stone = tiles.TILE_BY_KEY['stone'];   // 石块（键名无 _block 后缀）
-  const bx = Math.floor(g.player.x / TILE) + 4;
-  const sy = g.world.groundLevel;         // 地表行
-  for (let dx = 0; dx < 36; dx++) {
-    for (let dy = -6; dy <= 0; dy++) st.setTileSilent(bx + dx, sy + dy, 0);      // 开挖露天
-    for (let dy = 1; dy <= 4; dy++) st.setTileSilent(bx + dx, sy + dy, stone);   // 填石
+  // ---- 找天然露天水池（地表带 ≥20 列液面 + 上方 40 格无实心）----
+  let runStart = -1, surfY = -1;
+  const y0 = Math.max(10, g.world.groundLevel - 25), y1 = Math.min(st.h - 12, g.world.groundLevel + 25);
+  outer:
+  for (let y = y0; y < y1; y++) {
+    let x = 60;
+    while (x < st.w - 60) {
+      if (st.liquid[st.idx(x, y)] > 60) {
+        let e = x;
+        while (e < st.w - 60 && st.liquid[st.idx(e, y)] > 60) e++;
+        if (e - x >= 20) {
+          const mid = (x + e) >> 1;
+          let sky = true;
+          for (let yy = y - 1; yy >= Math.max(0, y - 40); yy--) {
+            if (st.isSolid(mid, yy)) { sky = false; break; }
+          }
+          if (sky) { runStart = x; surfY = y; break outer; }
+        }
+        x = e + 1;
+      } else x++;
+    }
   }
-  for (let dy = 1; dy <= 3; dy++) {
-    for (let dx = 2; dx <= 33; dx++) st.setLiquid(bx + dx, sy + dy, 200, 1);     // 水 32×3
-  }
-  const waterCX = (bx + 6) * TILE, waterCY = (sy + 1) * TILE;   // 近岸水面（屏幕点居中，避开小地图）
+  if (runStart < 0) { R.fatal = 'no-open-sky-pool'; return R; }
+  const bx = runStart, sy = surfY;
+  const waterCX = (bx + 8) * TILE, waterCY = (sy + 1) * TILE;
+  // 岸点：池左界向左找无液柱（玩家站岸上）
+  let shoreX = bx - 1;
+  while (shoreX > 10 && st.liquid[st.idx(shoreX, sy)] > 0) shoreX--;
 
   // ---- 装备木竿+鱼饵；站池左壁顶 ----
   const rodId = items.ITEM_BY_KEY[items.VANILLA_ITEM_KEY_BY_ID[2289]];
@@ -106,7 +123,7 @@ const out = await page.evaluate(async () => {
   p.inv.selected = 2;
   p.inv.slots[2] = { id: rodId, stack: 1 };
   if (!p.inv.slots.some((s) => s && s.id === baitId)) p.inv.slots[6] = { id: baitId, stack: 5 };
-  p.x = (bx + 1) * TILE; p.y = (sy + 1) * TILE - p.h; p.vx = 0; p.vy = 0;
+  p.x = shoreX * TILE; p.y = (sy - 3) * TILE; p.vx = 0; p.vy = 0;
   await ticks(30);
 
   const w2s = (wx, wy) => {

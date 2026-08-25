@@ -169,6 +169,9 @@ export interface MountedPlayerView {
   inputX: number; inputJump: boolean; inputUp: boolean; inputDown: boolean;
   /** 上一 tick 是否按下跳跃（releaseJump 语义：松开后才可重触发飞行/起跳） */
   prevInputJump: boolean;
+  /** 上一 tick 尾快照的跳跃键（Player.jumpEdgePrev——tryStartHover 的 releaseUp
+   *  边沿门 :26939 消费；prevInputJump 在 tick 头快照且输入已更新=恒等不可用） */
+  jumpEdgePrev: boolean;
   /** 盾冲滑行态（Player.dashDelay：<0 = 滑行中；62-65 冲刺帧门 Mount.cs:4541-4545） */
   dashDelay?: number;
   gravDir: number;
@@ -798,6 +801,21 @@ export function clampToDeadZone(
     if (Number.isFinite(s)) { dx *= s; dy *= s; }
   }
   return { x: dx + centerX, y: dy + centerY };
+}
+
+/** Hover 贴地探针（Mount.cs:3443-3448 Collision.TileCollision(position, UnitY*gravDir,…)
+ *  的本仓等价）：脚底下一行任一列实心 = 下方有地面（探针残量=0 → 免疲劳坐骑不起落）。
+ *  原版 fallThrough:false 平台亦拦——isSolid 含平台档（TileStore.isSolid 语义）。
+ *  无世界缓存（探针合成视图）按有地面=不起落 */
+export function groundBelowProbe(p: MountedPlayerView): boolean {
+  const st = p.store;
+  if (!st) return true;
+  const ty = Math.floor((p.y + p.h + 1) / 16);
+  const x0 = Math.floor(p.x / 16), x1 = Math.floor((p.x + p.w - 0.01) / 16);
+  for (let tx = x0; tx <= x1; tx++) {
+    if (st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty)) return true;
+  }
+  return false;
 }
 
 /** Mount.cs Hover 尾段（:3468-3521）机身倾斜角 1:1（player.fullRotation）：
@@ -1445,20 +1463,6 @@ export class MountInstance {
       p.vy -= -0.001;   // :3452-3456 字面（-0.001 - (-0.001) = 0）
     }
     return true;
-  }
-
-  /** Hover 贴地探针（:3443-3448 Collision.TileCollision(position, UnitY*gravDir, …)
-   *  的本仓等价）：脚底下一行（gravDir=1）任一列实心 = 下方有地面（残量=0）。
-   *  原版 fallThrough:false 平台亦拦——isSolid 含平台档（TileStore.isSolid 语义） */
-  function groundBelowProbe(p: MountedPlayerView): boolean {
-    const st = p.store;
-    if (!st) return true;   // 无世界缓存（探针合成视图）按有地面=不起落
-    const ty = Math.floor((p.y + p.h + 1) / 16);
-    const x0 = Math.floor(p.x / 16), x1 = Math.floor((p.x + p.w - 0.01) / 16);
-    for (let tx = x0; tx <= x1; tx++) {
-      if (st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty)) return true;
-    }
-    return false;
   }
 
   /** 起跳瞬间向上的 hover 触发（Player.cs:26939：vy==0 且 CanHover 且 controlUp

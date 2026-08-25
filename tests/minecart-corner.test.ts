@@ -18,7 +18,6 @@ const connOf = (frame: number, side: 'L' | 'R'): number => {
   // 用 frameTrack 的定型结果反推不可靠——这里直接 import 表
   return side === 'L' ? LCONN[frame] : RCONN[frame];
 };
-// @ts-expect-error 运行时填充(下方 import 桥)
 let LCONN: number[] = [], RCONN: number[] = [];
 
 function makeWorld(): World {

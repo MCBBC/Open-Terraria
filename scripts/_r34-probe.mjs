@@ -93,11 +93,14 @@ const out = await page.evaluate(async () => {
   };
   const { Enemy } = await import('/src/entities/Enemy.ts');
   let foeLog = null;
-  const makeFoe = (tx0, scaleBox) => {
+  const makeFoe = (tx0, opts) => {
     const e = Enemy.fromVanilla(3, tx0 * TILE, sy * TILE - 48);
     g.entities.add(e, 'enemies');
     if (!e) return null;
-    if (scaleBox) { e.x -= e.w * 2.5; e.y -= e.h * 2.5; e.w *= 6; e.h *= 6; }   // 几何采样装置
+    if (opts?.scaleBox) {                       // 几何采样装置：盒 ×6 并悬空防地形窒息
+      e.x -= e.w * 2.5; e.y -= e.h * 2.5; e.w *= 6; e.h *= 6;
+      e.y = sy * TILE - 120 - e.h / 2;
+    }
     e.hpMax = e.hpMax ?? 99999;
     const home = { x: e.x + e.w / 2, y: e.y + e.h / 2 };
     foeLog = { hits: [], baseHurt: e.hurt.bind(e), home, e };
@@ -119,7 +122,7 @@ const out = await page.evaluate(async () => {
   try {
     giveItem(6173, 2); p.inv.selected = 2;
     await settle(5);
-    const foe = makeFoe(px + 3, true);
+    const foe = makeFoe(px + 3, { scaleBox: true });
     await ticks(2); foeLog.unfreeze();
     aimAt(foeLog.home.x, foeLog.home.y);
     g.input.mouseDown = true; g.input.mouseHeld = false;
@@ -221,7 +224,7 @@ const out = await page.evaluate(async () => {
   try {
     giveItem(5065, 2); p.inv.selected = 2;
     await settle(5);
-    const foe = makeFoe(px + 4, true);
+    const foe = makeFoe(px + 4);   // 魔法阵自带 104 盒,敌无需放大
     await ticks(2); foeLog.unfreeze();
     aimAt(foeLog.home.x, foeLog.home.y);
     g.input.mouseDown = true; g.input.mouseHeld = false;

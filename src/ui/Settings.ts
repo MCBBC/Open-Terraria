@@ -504,7 +504,10 @@ export class SettingsPanel {
           Lang.text('Mods.SandboxWorld.Settings.ShowManual'),
           () => String(!d.manualHidden),
           () => Lang.menu(!d.manualHidden ? 69 : 70),
-          () => void options.set('manualHidden', !d.manualHidden),
+          () => {
+            void options.set('manualHidden', !d.manualHidden);
+            (window as unknown as { __swUI?: { refreshManualBtn(): void } }).__swUI?.refreshManualBtn();
+          },
         ),
         // 激活套装奖励键上下反转（:647 Main.ReversedUpDownArmorSetBonuses；
         // 消费=Lang 替换键 ToggleArmorSetBonusKey）

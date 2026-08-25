@@ -959,6 +959,20 @@ export class UI {
     return row;
   }
 
+  /** 设置页"显示说明书按钮"开关的实时刷新（buildHud 之外的重开/撤除路径;
+   *  经 window.__swUI 调——UI 单例句柄,构造器已挂） */
+  refreshManualBtn(): void {
+    const g = this.game;
+    if (!g) return;
+    if (options.data.manualHidden) {
+      this.manualBtn?.remove();
+      this.manualBtn = null;
+    } else if (!this.manualBtn?.isConnected) {
+      this.manualBtn?.remove();
+      this.buildManualBtn(g);
+    }
+  }
+
   private buildManualBtn(game: Game) {
     if (options.data.manualHidden) return;
     const btn = el('button', 'sw-manual-btn', '?');
