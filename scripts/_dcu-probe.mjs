@@ -10,6 +10,7 @@ const browser = await puppeteer.launch({ executablePath: '/Applications/Google C
 const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
+page.on('console', (m) => { const t = m.text(); if (t.startsWith('[dcu]')) console.log(t); });
 await page.goto(ORIGIN, { waitUntil: 'networkidle0', timeout: 120000 });
 console.log('[boot] page loaded');
 await page.waitForFunction(() => !document.getElementById('sw-splash'), { timeout: 300000, polling: 500 });
@@ -29,6 +30,7 @@ const out = await page.evaluate(async () => {
   const res = { steps: [], data: {} };
   const ok = (name, cond, extra) => {
     res.steps.push(`${cond ? 'PASS' : 'FAIL'} ${name}${extra !== undefined ? ` (${extra})` : ''}`);
+    console.log(`[dcu] ${cond ? 'PASS' : 'FAIL'} ${name}${extra !== undefined ? ` (${extra})` : ''}`);
     return cond;
   };
   // ---- 开放平台 ----
@@ -49,9 +51,10 @@ const out = await page.evaluate(async () => {
   res.data.dcuKey = dcuKey ?? '(none)';
   ok('DCU 物品键存在', !!dcuKey);
   inv.add(items[dcuKey], 1);
+  const dcuId = items[dcuKey];
   let heldOk = false;
-  for (let i = 0; i < inv.slots.length; i++) if (inv.slots[i] && String(inv.slots[i].id).includes('2768')) { inv.selected = i; heldOk = true; break; }
-  ok('DCU 入包选中', heldOk);
+  for (let i = 0; i < inv.slots.length; i++) if (inv.slots[i] && inv.slots[i].id === dcuId) { inv.selected = i; heldOk = true; break; }
+  ok('DCU 入包选中', heldOk, `id=${dcuId}`);
   g.input.mouseDown = true;
   await sleep(300);
   g.input.mouseDown = false;
@@ -61,18 +64,19 @@ const out = await page.evaluate(async () => {
   // ---- ① 舱体贴图：静止 vs 移动 截图对比 ----
   const grabMountPixels = async () => {
     const cv = document.querySelector('canvas');
-    const sx = (p.x + p.w / 2 - g.camera.x) * (cv.width / cv.clientWidth);
-    const sy = (p.y - 30 - g.camera.y) * (cv.height / cv.clientHeight);
-    const w = 100 * (cv.width / cv.clientWidth), h = 80 * (cv.height / cv.clientHeight);
+    const [sxCss, syCss] = g.camera.worldToScreen(p.cx, p.y - 10);
+    const kx = cv.width / cv.clientWidth, ky = cv.height / cv.clientHeight;
+    const sx = sxCss * kx, sy = syCss * ky;
+    const w = 60 * kx, h = 50 * ky;
     const c2 = document.createElement('canvas');
     c2.width = Math.max(1, Math.round(w)); c2.height = Math.max(1, Math.round(h));
     const cx2 = c2.getContext('2d');
     cx2.drawImage(cv, sx - w / 2, sy - h / 2, w, h, 0, 0, c2.width, c2.height);
     const d = cx2.getImageData(0, 0, c2.width, c2.height).data;
-    // 非纯黑/非天空蓝像素数（舱体金属灰/橙）
+    // 非近黑像素数（地下/夜晚舱体金属灰与发光件均亮于阈值）
     let n = 0;
     for (let i = 0; i < d.length; i += 4) {
-      if (d[i + 3] > 40 && !(d[i] < 18 && d[i + 1] < 18 && d[i + 2] < 24)) n++;
+      if (d[i + 3] > 40 && (d[i] + d[i + 1] + d[i + 2]) > 90) n++;
     }
     return n;
   };
@@ -110,14 +114,14 @@ const out = await page.evaluate(async () => {
 
   // ---- ③ 地底垂直移动 ----
   // 挖一个地下封闭室并传送进去
-  const uy = Math.floor(g.world.worldSurface) + 40;
+  const uy = Math.floor(g.world.groundLevel) + 40;
   const ux = Math.floor(p.cx / 16);
   for (let dx = -6; dx <= 6; dx++) for (let dy = -4; dy <= 4; dy++) st.setTile(ux + dx, uy + dy, 0);
   for (let dx = -7; dx <= 7; dx++) { st.setTile(ux + dx, uy + 5, 1, 0, 0); st.setTile(ux + dx, uy - 5, 1, 0, 0); }
   for (let dy = -4; dy <= 4; dy++) { st.setTile(ux - 7, uy + dy, 1, 0, 0); st.setTile(ux + 7, uy + dy, 1, 0, 0); }
   p.x = ux * 16; p.y = uy * 16; p.vx = 0; p.vy = 0; p.fallStartY = null;
   await sleep(600);
-  ok('③ 已入地底', Math.floor(p.cy / 16) > Math.floor(g.world.worldSurface), `cyTile=${Math.floor(p.cy / 16)} surface=${Math.floor(g.world.worldSurface)}`);
+  ok('③ 已入地底', Math.floor(p.cy / 16) > Math.floor(g.world.groundLevel), `cyTile=${Math.floor(p.cy / 16)} surface=${Math.floor(g.world.groundLevel)}`);
   const y0 = p.y;
   g.input.keys.add('Space');
   let roseMin = y0, fsSeen = [];
@@ -148,16 +152,25 @@ const out = await page.evaluate(async () => {
   ok('④ 束长钳制 ≤256px(min(距,224)+32)', distTiles >= 0 && distTiles <= 257, `dist=${distTiles.toFixed(1)}px`);
   p.mount.abilityActive = false;
 
-  // ---- ⑤ 发光 ----
+  // ---- ⑤ 发光（mount 8 emitsLight 0.3/0.3/0.4 → 骑乘时中心格光照显著高于下坐后）----
   const lightOf = () => {
-    const tx = Math.floor(p.cx / 16), ty = Math.floor(p.cy / 16);
-    const L = g.renderer?.lighting || g.lighting;
+    const L = g.renderer?.lighting;
     if (!L) return -1;
-    return L.brightness ? L.brightness(tx, ty) : (L.getLight ? L.getLight(tx, ty) : -2);
+    const [r, gg, bb] = L.lightAt(Math.floor(p.cx / 16), Math.floor(p.cy / 16));
+    return Math.round(Math.max(r, gg, bb));
   };
-  const lv = lightOf();
-  res.data.lightProbe = lv;
-  ok('⑤ 坐骑光照通道存在（探测接口可得或光照>0）', lv !== -2, `probe=${lv}`);
+  for (let i = 0; i < 30; i++) await sleep(50);   // 等光照引擎数周期收敛
+  const lvMounted = lightOf();
+  g.input.keys.add('KeyR');
+  await sleep(280);
+  g.input.keys.delete('KeyR');
+  await sleep(300);
+  const dismounted = !p.ridingMount;
+  for (let i = 0; i < 30; i++) await sleep(50);
+  const lvBare = lightOf();
+  res.data.lightMounted = lvMounted; res.data.lightBare = lvBare;
+  ok('⑤ 下坐成功（对照可用）', dismounted);
+  ok('⑤ 骑乘自带光照（骑乘亮度 > 下坐后 +20）', lvMounted > lvBare + 20, `mounted=${lvMounted} bare=${lvBare}`);
 
   return res;
 });

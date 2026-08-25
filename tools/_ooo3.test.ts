@@ -17,8 +17,9 @@ const FLAGS = (process.env.SW_O3_FLAGS ?? '').split(',').filter(Boolean);
   let on = false;
   const mpLog: string[] = [];
   const raws: number[] = [];
-  const g0 = globalThis as { __swMpLog?: (x: number, y: number, ok: boolean) => void };
+  const g0 = globalThis as { __swMpLog?: (x: number, y: number, ok: boolean) => void; __swMpStat?: (l: number, ok: boolean) => void };
   g0.__swMpLog = (x, y, ok) => { if (on) mpLog.push(`${cur}\t${x},${y}\tok=${ok}`); };
+  g0.__swMpStat = (l, ok) => { if (on) mpLog.push(`STAT ${cur}\tl=${l}\tok=${ok}`); };
   const URp = UnifiedRandom.prototype as unknown as Record<string, unknown>;
   const oIS = URp.internalSample as (this: unknown) => number;
   URp.internalSample = function (this: unknown) {

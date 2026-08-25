@@ -80,7 +80,7 @@ const out = await page.evaluate(async () => {
   g.world.clock.dayTime = true;
 
   // ---- 自建石砌水池（出生点右侧地表，保证露天+白天光照）----
-  const stone = tiles.TILE_BY_KEY['stone_block'];
+  const stone = tiles.TILE_BY_KEY['stone'];   // 石块（键名无 _block 后缀）
   const bx = Math.floor(g.player.x / TILE) + 4;
   const sy = g.world.groundLevel;         // 地表行
   for (let dx = 0; dx < 36; dx++) {
@@ -90,7 +90,7 @@ const out = await page.evaluate(async () => {
   for (let dy = 1; dy <= 3; dy++) {
     for (let dx = 2; dx <= 33; dx++) st.setLiquid(bx + dx, sy + dy, 200, 1);     // 水 32×3
   }
-  const waterCX = (bx + 18) * TILE, waterCY = (sy + 2) * TILE;
+  const waterCX = (bx + 6) * TILE, waterCY = (sy + 1) * TILE;   // 近岸水面（屏幕点居中，避开小地图）
 
   // ---- 装备木竿+鱼饵；站池左壁顶 ----
   const rodId = items.ITEM_BY_KEY[items.VANILLA_ITEM_KEY_BY_ID[2289]];
@@ -113,8 +113,17 @@ const out = await page.evaluate(async () => {
   };
   const cast = async (tag) => {
     let attempts = 0, pre = null, post = null;
+    // 施法前补水（液面模拟可能沉降）+ 玩家归位池左壁顶
+    const refill = () => {
+      for (let dy = 1; dy <= 3; dy++) {
+        for (let dx = 2; dx <= 33; dx++) st.setLiquid(bx + dx, sy + dy, 200, 1);
+      }
+      p.x = (bx + 1) * TILE; p.y = (sy + 1) * TILE - p.h; p.vx = 0; p.vy = 0;
+      for (let i = 0; i < 10; i++) g.fixedUpdate(1 / 60);
+    };
     while (attempts < 6) {
       attempts++;
+      refill();
       g.player.inv.selected = 2;   // 撤竿空手后游戏会自动跳选中格——每次施法强制回竿格
       aim();
       const elAt = document.elementFromPoint(g.input.mouseX, g.input.mouseY);
@@ -168,6 +177,23 @@ const out = await page.evaluate(async () => {
   const bobber = await cast(1);
   if (!bobber) { R.fatal = 'cast-failed'; return R; }
   await ticks(30);
+  // 场景诊断：玩家位置/地表关系 + 玩家格光照 + 屏中心格
+  {
+    const ptx = Math.floor(p.cx / TILE), pty = Math.floor(p.cy / TILE);
+    const lightOf = (tx, tyy) => {
+      const L = g.lighting ?? g.renderer.lighting;
+      try { return L?.light?.[L.light ? (tyy * st.w + tx) : 0] ?? null; } catch { return null; }
+    };
+    R.scene = {
+      groundLevel: g.world.groundLevel,
+      playerTile: [ptx, pty],
+      camY: Math.round(g.camera.y),
+      tileAtPlayer: st.type[st.idx(ptx, pty)],
+      tileBelowPlayer: st.type[st.idx(ptx, pty + 1)],
+      liquidAtPlayer: st.liquid[st.idx(ptx, pty)],
+      skyVisible: !st.isSolid(ptx, pty - 3),
+    };
+  }
   const tip = bobMod.fishingPoleTipStart(p, 2289);       // 线起点计算值（竿尖）
   const bbC = { x: bobber.cx, y: bobber.cy };
   R.gateActiveA = g.renderer.bobberOwners.has(p);        // HackHoldStyles 渲染门快照

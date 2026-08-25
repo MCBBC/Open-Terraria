@@ -1431,6 +1431,98 @@ export class MinionProj extends Entity {
     return null;
   }
 
+  // ---- 血红蝙蝠杖 755（AI_156_BatOfLight 755 支 :52425-52647,与 946 同族）----
+  // 常数 num=66/num2=65/num3=126/num4=125/num5=67;待机=头顶弧列(-UnitY.RotatedBy(
+  // 4.398/total×(idx−mid))×40,idleRotation=0);攻击=减速段(ai0 66→65 vel×0.8 记起点)
+  // +绕敌半圆弧(枢轴后半程移玩家心,无 946 的 Y 摆相——Y×=sin(IndexForVisuals×2.3)×0.5
+  // 直接乘);链式失败回 ai0=0(无 −1 归位态,:52640-52647)
+  private bA0 = 0;
+  private bA1 = 0;
+  private bSX = 0; bSY = 0;
+  private bHit = new Map<number, number>();
+
+  private batOfLightBody(game: GameHooks, p: Player, dmg0: number): void {
+    const num = 66, num2 = 65, num3 = 126;
+    if (Math.hypot(p.cx - this.cx, p.cy - this.cy) > 2000) { this.bA0 = 0; this.bA1 = 0; }
+    const tgt = this.bA1 ? this.findEnemyById(game, this.bA1) : null;
+
+    if (this.bA0 === 0) {
+      // 待机（:52537-52548 flag 支）：头顶弧列 SmoothStep 0.45 + 1/20 起手
+      // idleSpot = Center + (−UnitY).RotatedBy(θ)×40,θ=4.3982296/total×(idx−mid)
+      // （(−UnitY).RotatedBy(θ) = (sinθ, −cosθ)——单只 θ=0 → 正上方 40px）
+      const g = this.tGroup(game);
+      const mid = (g.total - 1) / 2;
+      const th = (4.3982296 / g.total) * (g.index - mid);
+      const ix = p.cx + Math.sin(th) * 40;
+      const iy = p.cy - Math.cos(th) * 40;
+      this.vx = 0; this.vy = 0;
+      const t = 0.45, s = t * t * (3 - 2 * t);
+      this.x += (ix - this.cx) * s;
+      this.y += (iy - this.cy) * s;
+      this.rot = angleLerp(this.rot, 0, 0.2);   // idleRotation=0（755 支 :52556）
+      if (Math.floor(Math.random() * 20) === 0) {
+        const en = this.tTarget(game, p.cx, p.cy);
+        if (en) { this.bHit.clear(); this.bA0 = num; this.bA1 = en.id; }
+      }
+      this.bHitTick(game, p, dmg0);
+      return;
+    }
+    // 攻击（:52577-52647）
+    if (!tgt || tgt.dead || !playerCanHitEnemy(tgt as never, game)) { this.bA0 = 0; this.bA1 = 0; return; }
+    this.bA0--;
+    if (this.bA0 >= num2) {
+      // 减速段（:52590-52596）：velocity×0.8,至 65 记起点
+      this.vx *= 0.8; this.vy *= 0.8;
+      this.x += this.vx; this.y += this.vy;
+      if (this.bA0 === num2) { this.bSX = this.cx; this.bSY = this.cy; }
+      this.bHitTick(game, p, dmg0);
+      return;
+    }
+    const lerpV = clamp01((num2 - this.bA0) / num2);   // GetLerpValue(65,0,ai0)
+    let vx0 = this.bSX, vy0 = this.bSY;
+    if (lerpV >= 0.5) { vx0 = p.cx; vy0 = p.cy; }      // 后半程枢轴=玩家心
+    const num9 = Math.atan2(tgt.cy - vy0, tgt.cx - vx0);
+    const num10 = tgt.cx > vx0 ? -Math.PI : Math.PI;
+    const num11 = num10 + (-num10) * lerpV * 2;
+    let spx = Math.cos(num11), spy = Math.sin(num11);
+    spy *= Math.sin(this.id * 2.3) * 0.5;              // :52614 Y 摆相（无 0.8+0.2 底）
+    const n20 = Math.atan2(spy, spx) + num9;
+    const rl = Math.hypot(spx, spy);
+    spx = Math.cos(n20) * rl; spy = Math.sin(n20) * rl;
+    const radius = Math.hypot(tgt.cx - vx0, tgt.cy - vy0) / 2;
+    this.x = vx0 + (tgt.cx - vx0) * 0.5 + spx * radius - this.w / 2;
+    this.y = vy0 + (tgt.cy - vy0) * 0.5 + spy * radius - this.h / 2;
+    const num24 = wrapAngle(num9 + num11);
+    // ★755 攻击段不更新 rotation（:52615-52630 仅 Center/velocity——与 946 弧刀段
+    //   rotation=num24+π/2 不同),rotation 保持待机值(0 附近)
+    this.vx = Math.cos(num24) * 10; this.vy = Math.sin(num24) * 10;
+    this.bHitTick(game, p, dmg0);
+    if (this.bA0 === 0) {
+      // 链式（:52640-52647）：有目标续攻,无则回待机（755 无 −1 归位态）
+      const en = this.tTarget(game, p.cx, p.cy);
+      if (en) { this.bA0 = num; this.bA1 = en.id; this.bHit.clear(); }
+      else { this.bA1 = 0; }
+    }
+  }
+
+  /** 755 体触结算（同 tHitTick,bHit 于起手/链式清） */
+  private bHitTick(game: GameHooks, p: Player, dmg0: number): void {
+    for (const [k, v] of this.bHit) {
+      if (v <= 1) this.bHit.delete(k); else this.bHit.set(k, v - 1);
+    }
+    for (const e of game.enemies()) {
+      const en = e as never as EnemyLike & { dead: boolean; id: number };
+      if (!en || en.dead || !playerCanHitEnemy(e, game)) continue;
+      if (this.bHit.has(en.id)) continue;
+      if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
+      this.bHit.set(en.id, 60);
+      const crit = Math.random() < 0.04;
+      const owner = this.ownerRef() as unknown as { equipStats?: { armorPen?: number } } | null;
+      en.hurt?.(crit ? Math.round(dmg0 * 2) : dmg0, this.facing * this.knockback, 0,
+        game, owner?.equipStats?.armorPen ?? 0, crit);
+    }
+  }
+
   private abigailBody(game: GameHooks, p: Player, dmg0: number): void {
     const n = Math.max(1, this.peerCount(game, 970));
     const num2 = n - 1;
@@ -3080,6 +3172,7 @@ export class MinionProj extends Entity {
     if (this.projId === 831 || this.projId === 970) { this.counterHover(game, p, dmg0); return; }
     if (this.projId >= 833 && this.projId <= 835) { this.tigerBody(game, p, dmg0); return; }
     if (this.projId === 946) { this.terraprismaBody(game, p, dmg0); return; }
+    if (this.projId === 755) { this.batOfLightBody(game, p, dmg0); return; }
     if (this.projId === 963) { this.abigailBody(game, p, dmg0); return; }
     // AI_062 五射手 1:1 速度曲线/随机冷却/射击门（:66067-67166,备案项①③）
     if (ai62) { this.ai62Step(game, p, dmg0, tgt); return; }
@@ -3550,9 +3643,6 @@ export class MinionProj extends Entity {
       frame = Math.floor(this.age / tickPer) % count;
       if (atkOff && (this.projId === 375
         ? (this.a62A1 > 0 && this.a62A1 < 24) : this.attackFlash > 0)) frame += atkOff;
-    } else if (this.projId === 1112 || this.projId === 1118) {
-      // 帕鲁地面随从（AI_067 flag8/flag9）：palGroundStep 原版帧机直写
-      frame = Math.min(this.palFrame, Math.max(0, frames - 1));
     } else if (this.projId === 1094 || this.projId === 1113) {
       // 火绒狐帧态机（AI_026 flag8 帧段 :64729-64826 折算,foxAnimTick 每 tick 维护）。
       // 贴图 = 6 列×9 行网格（1457 Main.cs:33734-33737 X=(frame/9)*64、

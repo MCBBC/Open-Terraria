@@ -259,6 +259,9 @@ const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2,
 // canvas 等价 = lighter + 染色 alpha 拉满（Extra_98 为白形状带 alpha 渐变：预乘语义
 // 下边缘 RGB 也全量加 → 染色时 destination-in 填 255 把 alpha 摊平，非保留原 alpha）。
 const extraSpriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
+/** 失败负缓存 TTL(2026-08-25):过期后重试,暖缓存到位即自愈 */
+const extraSpriteFailAt = new Map<number, number>();
+const EXTRA_FAIL_TTL_MS = 10_000;
 /** Extra_N 贴图懒加载（sprites/vanilla/Extra_N.png；Image→Bitmap 升级同 projSprite） */
 /** 全屏地图虫洞头像命中纯函数（Main.cs:55376-55440 头像环）：命中盒 =
  *  28×28×UIScale（:55400-55404 num83-86），中心 = 本仓头像绘制中心
@@ -281,12 +284,23 @@ export function loadExtraSprite(n: number): ImageBitmap | HTMLImageElement | nul
   if (typeof Image === 'undefined') return null;
   const hit = extraSpriteCache.get(n);
   if (hit !== undefined) return hit;
+  // ★失败负缓存带 TTL(2026-08-25 同类扫描):原 onerror 永久置 null——冷缓存窗口
+  //   (暖缓存未到 sprites/vanilla)一次失败=整会话缺贴图。改为 10s 过期后允许
+  //   重试(暖缓存到位即自愈),重试频率有界不刷屏(逐帧重试=Cloud 族 404 刷屏前科)
+  const failAt = extraSpriteFailAt.get(n);
+  if (failAt !== undefined) {
+    if (Date.now() - failAt < EXTRA_FAIL_TTL_MS) return null;
+    extraSpriteFailAt.delete(n);
+  }
   const im = new Image();
   // 共享升级链(2026-08-18 review):曾裸 createImageBitmap 静默 catch——失败
   // 永久停在 Image 且无警告无重试;改走 upgradeToBitmap(失败可见+退避重试,
   // 失败回退 Image 已在下方 set 过,重试成功原地替换)
   im.onload = () => upgradeToBitmap(im, (b) => { extraSpriteCache.set(n, b); });
-  im.onerror = () => extraSpriteCache.set(n, null as unknown as ImageBitmap);
+  im.onerror = () => {
+    extraSpriteCache.delete(n);
+    extraSpriteFailAt.set(n, Date.now());
+  };
   im.src = `sprites/vanilla/Extra_${n}.png`;
   extraSpriteCache.set(n, im);
   return im;

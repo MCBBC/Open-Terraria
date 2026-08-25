@@ -448,8 +448,10 @@ export class ChloroBladeSlam extends Entity {
  *  ai0=−1 / ai1=(itemAnimation/itemAnimationMax×0.66+miscCounter)%1（相位）；
  *  出生点 = MountedCenter+(dir×15, gravDir×3)（挂墙则回 MountedCenter）。
  *  AI_196（:41192-41290）1116 支：光 (0,0.6,0.6)、alpha=Remap(timeLeft,30,0,0,255)、
- *  scale×0.75、索敌 400px 无 LOS 门、追踪 v=(v×30+dir×6)/31、无目标漂移
- *  vx→sin(ai0×0.1)×1.5 / vy→0.3；前 20t 减速 ×0.95（:41220-41227）。
+ *  scale×0.75、索敌 400px【CanHit 视线门恒须——num4=0 时 !(dist>0) 恒假,:41257-41258,
+ *  ★R34-① 勘误旧注「无 LOS 门」】、追踪 v=(v×30+dir×6)/31、无目标漂移
+ *  vx→sin(ai0×0.1)×1.5 / vy→0.3；前 20t 减速 ×0.95（:41220-41227）;撞块软反弹 ×0.25
+ *  （:18178-18187）/penetrate=1 命中即亡/Kill 尘 306×4（:72202）。
  *  SetDefaults（:10415-10426）：18×18、timeLeft 120、penetrate 1、
  *  usesLocalNPCImmunity + cooldown −1（每敌一次）、magic、ignoreWater。 */
 export class PetalstormShot extends Entity {
@@ -485,7 +487,7 @@ export class PetalstormShot extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
-    if (this.t >= this.life) { this.dead = true; return; }      // timeLeft 120 → 120t 消亡
+    if (this.t >= this.life) { this.die(game); return; }        // timeLeft 120 → 120t 消亡
     if (++this.frameCounter >= 4) {                             // :41218-41223
       this.frameCounter = 0;
       this.frame = (this.frame + 1) % 8;
@@ -493,18 +495,25 @@ export class PetalstormShot extends Entity {
     this.rot += (this.vx + this.vy) * 0.1;                      // :41225
     if (this.t < 20) {                                          // :41220-41227（ai0<20 减速段）
       this.vx *= 0.95; this.vy *= 0.95;
-      this.x += this.vx; this.y += this.vy;
-      game.addLightAt?.(this.cx, this.cy, 0, 0.6, 0.6);
+      this.moveWithBounce(game);
+      if (this.t >= 10) game.addLightAt?.(this.cx, this.cy, 0, 0.6, 0.6);   // :41232-41236 ai[0]≥10 门
       return;
     }
-    // 索敌 400px（1116：num3=400/num4=0 → 无 LOS 门,:41246-41249）
+    // 索敌 400px。★R34-① 勘误（原注释「无 LOS 门」系误读）：1116 num4=0 时
+    //   条件 `!(dist>0)||CanHit` 的左支恒假 → CanHit 对一切目标必选（:41257-41258）。
+    //   隔墙敌不追踪；候选命中即 num3 收缩=最近者胜（与下方 bd 收缩同构）
     let best: { cx: number; cy: number } | null = null;
     let bd = 400;
+    const st = game.world.store;
     for (const q of game.enemies()) {
-      const e = q as { cx: number; cy: number; dead: boolean; maxHp: number; def?: { friendly?: boolean; critter?: boolean } };
+      const e = q as { x?: number; y?: number; w?: number; h?: number; cx: number; cy: number; dead: boolean; maxHp: number; def?: { friendly?: boolean; critter?: boolean } };
       if (e.dead || e.maxHp <= 5 || e.def?.friendly || e.def?.critter) continue;
       const d = Math.hypot(e.cx - this.cx, e.cy - this.cy);
-      if (d < bd) { bd = d; best = e; }
+      if (d >= bd) continue;
+      // Collision.CanHit(this, npc)（弹盒→目标盒逐格视线,:388-480）
+      const ex = e.x ?? e.cx, ey = e.y ?? e.cy, ew = e.w ?? 16, eh = e.h ?? 16;
+      if (!canHit(st, this.x, this.y, this.w, this.h, ex, ey, ew, eh)) continue;
+      bd = d; best = e as { cx: number; cy: number };
     }
     if (best) {
       // :41263-41270（1116：num6=6/num7=30）v = (v×30 + dir×6)/31
@@ -518,9 +527,42 @@ export class PetalstormShot extends Entity {
       this.vx += (Math.sin((this.t + this.phase * 100) * 0.1) * 1.5 - this.vx) * 0.1;
       this.vy += (0.3 - this.vy) * 0.1;
     }
-    this.x += this.vx; this.y += this.vy;
+    this.moveWithBounce(game);
     game.addLightAt?.(this.cx, this.cy, 0, 0.6 * Math.max(0, Math.min(1, (this.life - this.t) / 120)), 0.6 * Math.max(0, Math.min(1, (this.life - this.t) / 120)));
-    dealContacts(this, game, this.hitCd, -1);
+    // penetrate=1（:10422）——首次伤害结算即 Kill（原注释漏了总数帽）
+    dealContacts(this, game, this.hitCd, -1, () => { this.dead = true; });
+  }
+
+  /** HandleMovement tileCollide 段（:18178-18187 type==1116 支）：撞实心双轴翻号×0.25
+   *  软反弹、弹体不亡（原版由通用碰撞解算翻轴后本支再阻尼;此处两轴同翻=近似登记）。
+   *  Colliding() 1116 盒 Inflate(+5,+5)（:15521）以中心探测近似 */
+  private moveWithBounce(game: GameHooks): void {
+    const nx = this.x + this.vx, ny = this.y + this.vy;
+    const st = game.world.store;
+    const tx = Math.floor((nx + this.w / 2) / TILE), ty = Math.floor((ny + this.h / 2) / TILE);
+    if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) {
+      this.vx = -this.vx * 0.25;
+      this.vy = -this.vy * 0.25;
+      return;                                                   // 反弹拍不位移
+    }
+    this.x = nx; this.y = ny;
+  }
+
+  /** Kill() 1116 尘（:72202-72217）：306×4（Center±Circular(10,10)×scale,scale
+   *  1.5+0.25rand,noGravity,color(50,170,255),vel=v×0.4)+白克隆 scale×0.3×alphaRemap。
+   *  本仓 spawnParticles 近似（蓝白两组,alphaRemap 折入 size） */
+  private die(game: GameHooks): void {
+    if (this.dead) return;
+    this.dead = true;
+    const a = Math.max(0, Math.min(1, (30 - (this.life - this.t)) / 30));
+    const remap = 1 - a;                                        // Remap(alpha,0,255,1,0)
+    if (remap <= 0) return;                                     // 全透明期消亡不出尘
+    for (let i = 0; i < 4; i++) {
+      game.spawnParticles(this.cx, this.cy, '#32AAFF', 1, 1.5,
+        { life: 18, grav: 0, damp: 0.94, size: (1.5 + Math.random() * 0.25) * remap });
+      game.spawnParticles(this.cx, this.cy, '#FFFFFF', 1, 1.2,
+        { life: 12, grav: 0, damp: 0.94, size: (1.5 + Math.random() * 0.25) * 0.3 * remap });
+    }
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -558,8 +600,9 @@ export class PetalstormShot extends Entity {
  *  <shootSpeed×20 外推 + ±20px 抖动,再向 GetSparkleGuitarTarget 前 2 个有效目标
  *  各补一颗（Game 侧实现）。AI_203（:40360-40560）：
  *  - 1117：寿命 30、索敌门 CanBeChasedBy、搜索半径 12、无目标跟鼠标（v=鼠标−中心
- *    钳 16,撞实心停）；1122：寿命 240、半径 32、无鼠标跟随、玩家侧 localAI[2] 5 次
- *    豁免计数后可选中玩家（自伤链,本仓玩家弹不伤主——登记）
+ *    钳 16,撞实心停）；1122：★寿命=1 拍（SetDefaults timeLeft=1 :10447 → Update
+ *    :17308 Kill 先于 AI,出生首拍即落雷;ai[1] 帽 240 仅敌意 1091 消费）、半径 32、
+ *    玩家侧 localAI[2] 5 次豁免计数后可选中玩家（自伤链,本仓玩家弹不伤主——登记）
  *  - 目标锁定（ai[0] Pack/Unpack :40508-40560）：锁定后每帧校验,失效即 Kill
  *  - 中心 MoveTowards(目标,32)；ai[1]++≥寿命 Kill；ai[1]==寿命×0.15 播 NPCHit34
  *  - ★命中模型（Colliding :15962 aiStyle 203 支 → StormLightningCollisionCheck
@@ -604,7 +647,11 @@ export class StormLightning extends Entity {
     this.damage = Math.max(1, Math.round(damage));
     this.knockback = knockback;
     // :40363-40370（1117：num=30/num2=12；1122：缺省 240/32）
-    this.life = projId === 1117 ? 30 : 240;
+    // ★R34-② 勘误：1122 SetDefaults `timeLeft = 1`（:10447）——Update 循环
+    //   `timeLeft--; if(≤0) Kill()`（:17308-17312）先于 AI 派发 → 出生首拍即 Kill，
+    //   AI_203 的 ai[1]≥240 帽全程死代码（仅敌意 1091 用到）。bolt 整线伤害在 Kill 帧
+    //   （:71895-71921），故实体寿命=1 拍：本拍 fixedUpdate 走 doKill 落雷。
+    this.life = projId === 1117 ? 30 : 1;
     this.searchR = projId === 1117 ? 12 : 32;
     this.sharedCd = projId === 1122 ? ID_STATIC_1122 : null;     // 1122 IDStatic 10（全场同型一张表）
     this.boltColor = projId === 1117 ? [60 / 255, 120 / 255, 1] : [1, 60 / 255, 60 / 255]; // GetLightningColor :40566
@@ -971,6 +1018,9 @@ export class GlacierFangShot extends Entity {
   private charge = 0;        // ai[0]
   private released = false;  // ai[1]==1
   private frame = 0;
+  /** ★R34-③：penetrate=(int)Remap(charge/60,0,1,1,3)（:37651）命中总数帽（1..3 档） */
+  private penTier = 1;
+  private hits = 0;
   private hitCd = new HitCdImpl();
   private ctl: GlacierFangCtl;
 
@@ -1034,19 +1084,27 @@ export class GlacierFangShot extends Entity {
       return;
     }
     game.addLightAt?.(this.cx, this.cy, 0.2, 0.5, 0.8);
-    dealContacts(this, game, this.hitCd, -1);
+    // ★R34-③：释放穿透档 penetrate=(int)Remap(num5,0,1,1,3)（:37651）——命中总数帽
+    dealContacts(this, game, this.hitCd, -1, () => {
+      this.hits++;
+      if (this.hits >= this.penTier) this.dead = true;          // penetrate 耗尽 → Kill
+    });
   }
 
-  /** 释放帧（:37632-37660）：伤 ×Remap(charge,0,60,1,4)/kb ×4/pen 1→3（pen 通道
-   *  在本类 cooldown −1 已等价"每敌一次",×3 穿透档登记）+ 出膛抖动 */
+  /** 释放帧（:37632-37660）：伤 ×Remap(charge,0,60,1,4)/kb ×4/pen 1→3
+   *  （★R34-③ 已接：penTier=hits 总帽,cooldown −1 维持每敌一次）+ 出膛抖动 */
   private release(game: GameHooks, p: { cx: number; cy: number }): void {
     this.released = true;
     const c = Math.min(1, Math.max(0, this.charge / 60));
     if (this.charge >= 10) {                                   // ai[0]<10 → num5=0（:37638-37640）
       this.damage = Math.max(1, Math.round(this.damage * (1 + 3 * c)));
       this.knockback *= 4;
+      // num7=(int)Remap(charge/60,0,1,1,3)（:37648-37650）——C# 截断,1..3 档
+      const n5 = Math.min(1, Math.max(0, this.charge / 60));
+      this.penTier = Math.max(1, Math.trunc(1 + (3 - 1) * n5));
     } else {
       this.knockback *= 1;
+      this.penTier = 1;                                        // ai[0]<10 → num5=0 → pen=1
     }
     // 出膛抖动（:37641）+ 无 LOS 门消亡（:37652-37654）
     const jx = (Math.random() * 2 - 1) * (1 - c);

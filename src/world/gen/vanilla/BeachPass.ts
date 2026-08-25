@@ -404,12 +404,16 @@ function marblePileWithStatues(st: TileStore, rng: RNG, X: number, Y: number, wo
   for (let l = X - w5; l <= X + w5; l++) {
     if (statues >= 3) break;
     if (l % 2 !== 1 && (statues <= 0 || rng.nextInt(5) === 0)) {
+      const gS = globalThis as { __swMpStat?: (l: number, ok: boolean) => void };
+      let okSt = false;
       let sy = Math.trunc(vy) - 20;                         // num13（cs:10529）
       while (sy < st.h && !st.flags[st.idx(l, sy)]) sy++;   // 下扫首个活性（原版无上界,实践速达）
       if (sy > 0 && sy < st.h && st.type[st.idx(l, sy)] === MARBLE_367
         && !st.flags[st.idx(l, sy - 1)] && statueMarble(st, rng, l, sy - 1, 26)) {
         statues++;
+        okSt = true;
       }
+      try { gS.__swMpStat?.(l, okSt); } catch { /* probe */ }
     }
   }
   return true;

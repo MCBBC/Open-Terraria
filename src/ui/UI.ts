@@ -3526,7 +3526,7 @@ export class UI {
       row.addEventListener('mouseenter', () => {
         // 悬停预选（2026-08-21 用户两段定案：hover 显示该配方材料格，但【不得】
         // 触发列表滚动——滚动只由滚轮驱动）。hoverFocus 只作材料格预览源，
-        // craftFocus（=渲染窗锚点/鱼眼中心）不被 hover 触碰 → 窗口纹丝不动。
+        // 渲染窗锚 craftScroll 不被 hover 触碰 → 窗口纹丝不动。
         // 2026-08-24 用户报：滚轮滚动过程中鼠标扫过行会连环触发 hover 重选+
         // refreshAll 抖动——滚动期（craftWheelLast 120ms 内有事件）临时屏蔽
         // hover，静默 120ms 后恢复（与 craftWheelStep 的 fresh 判定同口径）。
