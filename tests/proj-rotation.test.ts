@@ -2,7 +2,7 @@
 // (用户报"食人鱼枪的鱼要转 90 度"——根因 = 通用绘制恒 +π/2)
 // 数据锚:scripts/_projrot-audit.mjs 扫 AI_001 type 链 + 各 AI 的 rotation 赋值
 import { describe, it, expect } from 'vitest';
-import { PROJ_ROT_RIGHT, PROJ_ROT_DIAG, PROJ_NO_ROT } from '../src/entities/Arrow';
+import { PROJ_ROT_RIGHT, PROJ_ROT_DIAG, PROJ_NO_ROT, PROJ_ROT_ASIS } from '../src/entities/Arrow';
 import { Arrow } from '../src/entities/Arrow';
 
 describe('PROJ_ROT_RIGHT 朝右贴图族(原版 rotation=ToRotation,非 +π/2)', () => {
@@ -52,11 +52,33 @@ describe('PROJ_ROT_DIAG 剑气族(aiStyle 27,rotation=atan2+0.785 即 +45°,:248
 });
 
 describe('武器弹幕旋转全审计（AI_001 异常分支 ∩ 武器可达，2026-08-17 复查批）', () => {
-  // 直立族：宝石法杖箭恒不旋转（aiStyle 29 :24994-25207 零 rotation 赋值）
-  it('NO_ROT：121-126/521/597（六色宝石杖 739-744）恒直立', () => {
-    for (const id of [121, 122, 123, 124, 125, 126, 521, 597]) {
-      expect(PROJ_NO_ROT.has(id), `proj ${id}`).toBe(true);
+  // ★R27 勘误（红队 R27 §1 P1）：宝石法杖弹 121-126/597 曾被断言"恒直立"——原注释引
+  // "aiStyle 29 全链 :24994-25207 零 rotation 赋值"与源码不符，AI_029_GemStaffs_
+  // ActuallyGemStaffs 尾部显式 rotation = velocity.ToRotation()（1457:38644/1458:38691）
+  // ——已移出 NO_ROT，走默认 atan2 对齐速度角
+  it('R27：宝石法杖弹 121-126/597 移出 NO_ROT（rotation=velocity.ToRotation(),:38691）', () => {
+    for (const id of [121, 122, 123, 124, 125, 126, 597]) {
+      expect(PROJ_NO_ROT.has(id), `proj ${id}`).toBe(false);
     }
+    // 留表项：521 水晶脉冲（同函数尾行也应旋转,消费面未核对,登记）/79 由 MissileProj 绘制
+    expect(PROJ_NO_ROT.has(521)).toBe(true);
+    expect(PROJ_NO_ROT.has(79)).toBe(true);
+  });
+
+  it('121 宝石珠水平飞行 → 绘制旋转 = 0（速度向摆放,非 +π/2）', () => {
+    expect(PROJ_ROT_ASIS.has(121)).toBe(true);
+    const a = new Arrow(0, 0, 8, 0, 10, 1, 121, null, { grav: 0 });
+    const rotate: number[] = [];
+    const ctx = {
+      save() {}, restore() {}, translate() {}, rotate(r: number) { rotate.push(r); },
+      scale() {}, drawImage() {}, fillRect() {}, strokeRect() {},
+      set imageSmoothingEnabled(_: boolean) {}, set fillStyle(_: string) {},
+      set strokeStyle(_: string) {}, set globalAlpha(_: number) {}, set lineWidth(_: number) {},
+      beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
+    } as unknown as CanvasRenderingContext2D;
+    a.draw({ ctx } as never, {} as never);
+    expect(rotate).toHaveLength(1);
+    expect(rotate[0]).toBeCloseTo(Math.atan2(0, 8), 5);   // = 0（速度角本身）
   });
 
   it('660 天穹碎裂 → DIAG(+45°)；485 地狱之翼 → RIGHT(朝右+flip)', () => {

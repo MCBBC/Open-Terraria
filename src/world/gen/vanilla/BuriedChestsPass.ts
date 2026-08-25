@@ -206,6 +206,10 @@ const PRE_CLASS: Record<number, string> = {
   280: 'spears', 281: 'guns', 284: 'boom', 946: 'swords', 3069: 'magic', 5011: 'spears',
   49: 'acc', 53: 'acc', 54: 'acc', 285: 'acc', 906: 'acc', 953: 'acc', 975: 'acc',
   3068: 'acc', 3084: 'acc', 4341: 'acc', 4978: 'acc', 5465: 'acc',
+  // ★MMMMMMM：6165（1457 新饰品,表面箱主物池第 11 位,cs(1457):36714-36718）——
+  //   Item.cs:47524 DefaultToAccessory → acc 类（同 6156 银护腕案）。仅 SW_MB_1457=1
+  //   线可达（1456 池十选无此位）
+  6165: 'acc',
 };
 // ---- 主件 Prefix(-1)（尾批 2-C）：四分支头 SetDefaults(num10)+Prefix(-1) 无条件调用
 //   （surface cs:36287 / gold cs:36554 / cave cs:36841 / hell cs:37167）——可前缀化
@@ -392,9 +396,23 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (rng.int(0, 2) !== 0) push(5528);
       }
     } else {
-      const m = pick([280, 281, 284, 285, 953, 946, 3068, 3069, 3084, 4341]);
+      // ★MMMMMMM（2026-08-25）#60 定罪修复：表面箱主物池**双态门**——
+      //   1457 = **Next(11) 十一选**（cs:36656-36718:num15==10 → **6165**,1.4.5 新
+      //   饰品 Item.cs:47524 DefaultToAccessory）;1456 = Next(10) 十选（1456
+      //   cs:36322,无 6165）。JS 曾恒十选 → SW_MB_1457=1 下首只表面木箱 loot 首掷
+      //   即偏,ntb/notraps/12345 三链 #60 Surface_Chests 同签名箱位移（ntb 掷流对拍
+      //   实锤:@162 x86 B[0,11] vs JS B[0,10]）。num15==7 的 remix 支（517 替
+      //   3069,两版同款 1456 cs:36358-36366 / 1457 cs:36688-36694）一并补齐——
+      //   非 remix 认证线池形零影响。
+      const m = pick(hfIs1457()
+        ? (gs.seedFlags.remix
+          ? [280, 281, 284, 285, 953, 946, 3068, 517, 3084, 4341, 6165]
+          : [280, 281, 284, 285, 953, 946, 3068, 3069, 3084, 4341, 6165])
+        : (gs.seedFlags.remix
+          ? [280, 281, 284, 285, 953, 946, 3068, 517, 3084, 4341]
+          : [280, 281, 284, 285, 953, 946, 3068, 3069, 3084, 4341]));
       push(m);
-      prefixRolls(rng, m);   // cs:36322-36415：十选一 SetDefaults+Prefix(-1)
+      prefixRolls(rng, m);   // SetDefaults+Prefix(-1)（十/十一选按版本门）
     }
     if (rng.int(0, 5) === 0) push(282, rng.int(40, 75));   // 1/6 荧光棒
     if (rng.int(0, 5) === 0) push(279, rng.int(150, 300)); // 1/6 飞刀

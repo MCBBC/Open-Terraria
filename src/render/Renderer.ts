@@ -3414,6 +3414,10 @@ export class Renderer {
     const a = player.immuneAlpha / 255; // 0→1 缓升（约 2.1s 走满）
     // 文字色（GetDeathAlpha 公式）
     const col = `rgba(${Math.round(230 * 0.9 * a)},${Math.round(230 * 0.5 * a)},${Math.round(230 * 0.5 * a)},${(a * 0.4 + a * 0.6).toFixed(3)})`;
+    // ★save/restore 包体(2026-08-25):本函数曾裸设 textAlign='center' 不还原——
+    //  canvas 状态跨帧持久,泄漏给其后每帧的信息饰品列(文本被居中左移半宽,
+    //  图标相对"扎进"文本,用户实报)。函数尾的 textBaseline 手工回设一并退役
+    ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const cx = viewW / 2;
@@ -3461,7 +3465,7 @@ export class Renderer {
     const cdY = viewH / 2 + (player.respawnSkipUi ? 26 + slide + 40 : 36);
     ctx.strokeText(cd, cx, cdY);
     ctx.fillText(cd, cx, cdY);
-    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
   }
   /** Game 每帧注入：本次死亡掉落钱数（LocalPlayer.lostCoins） */
   deathLostCoins = 0;

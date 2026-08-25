@@ -44,7 +44,7 @@ import {
 } from '../player/Appearance';
 import { compositePaperDoll, dollFrame, walkFrame, IDLE_FRAME } from '../player/PaperDoll';
 import { Lang } from '../i18n/Lang';
-import { ensureVanillaKit } from './vanillaKit';
+import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
 import { formatCopper } from './NpcDialog';
 import { randomPlayerName } from '../i18n/RandomText';
 import { UISfx } from '../vui/UISfx';
@@ -317,6 +317,7 @@ const CSS = `
   display: flex; flex-direction: column; align-items: center;
   color: #e8e8f4; user-select: none;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
+  --cc-fit: 1;   /* 手机窄/矮屏整体缩放因子(fitPanel 实测写入;桌面恒 1) */
 }
 .sw-char-title { font-size: 16px; color: #ffe8a0; margin-bottom: 4px;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
@@ -476,6 +477,22 @@ const CSS = `
 .sw-cc-hex > span { position: relative; z-index: 1; }
 .sw-cc-colorlow { position: absolute; left: 0; bottom: 0; width: 112px; height: 32px; }
 .sw-cc-colorlow .sw-cc-small { position: absolute; bottom: 0; }
+/* ---- 手机适配(2026-08-25,加法式覆盖,桌面 ≥1024×768 全不命中)----
+   内部全部绝对定位像素常量(页签 48 pitch/发型网格 10 列/滑杆 178),逐元素重排
+   回归风险高 → 窄屏(max-width:700)或矮屏(max-height:560,横屏手机 ~390 高)
+   整体 transform scale(--cc-fit,JS 按布局尺寸实测);max-width:none 放开 96vw
+   让布局恒 500 宽、缩放全权交给 --cc-fit。input 16px 防 iOS 聚焦自动放大。
+   translate(独立属性)消费键盘遮挡补偿 --kb-shift(vanillaKit.bindKeyboardShift),
+   先于 transform 叠加、互不打架 */
+@media (max-width: 700px), (max-height: 560px) {
+  .sw-char-panel {
+    transform: translate(-50%, -50%) scale(var(--cc-fit));
+    transform-origin: center; max-width: none;
+    translate: 0 var(--kb-shift, 0px);
+    transition: translate .15s;
+  }
+  .sw-char-panel input[type=text] { font-size: 16px; }
+}
 `;
 
 export class CharCreation {
@@ -576,6 +593,12 @@ export class CharCreation {
     };
     window.addEventListener('keydown', this.escHandler);
     this.unsubLang = Lang.onChange(() => this.refreshTexts());
+    // 手机窄/矮屏整体等比缩放(--cc-fit;桌面断点外恒 1 逐像素不变)+键盘遮挡补偿
+    requestAnimationFrame(() => this.fitPanel());
+    window.addEventListener('resize', this.fitPanel);
+    window.addEventListener('orientationchange', this.fitPanel);
+    window.visualViewport?.addEventListener('resize', this.fitPanel);
+    this.unsubKb = bindKeyboardShift(this.panel);
 
     // 面板底九宫：素材懒加载竞态（首次打开未就绪）时保留兜底纯色，就绪后回补
     requestAnimationFrame(() => this.applyPanelBg());
@@ -592,6 +615,20 @@ export class CharCreation {
   }
 
   private unsubLang: (() => void) | null = null;
+  private unsubKb: (() => void) | null = null;
+
+  /** 手机窄/矮屏整体等比缩放因子(媒体查询门内消费,见 CSS 尾注):
+   *  offsetWidth/Height 是布局尺寸不含 transform → 测量稳定;下限 0.55 防过小。
+   *  桌面 ≥断点时 s=min(1, …) ≡ 1,写同值无副作用 */
+  private fitPanel = () => {
+    const vv = window.visualViewport;
+    const s = Math.min(
+      1,
+      (window.innerWidth - 16) / Math.max(1, this.panel.offsetWidth),
+      ((vv?.height ?? window.innerHeight) - 16) / Math.max(1, this.panel.offsetHeight),
+    );
+    this.panel.style.setProperty('--cc-fit', String(Math.max(0.55, s)));
+  };
 
   // ================= 框架 =================
 
@@ -767,6 +804,10 @@ export class CharCreation {
     if (this.sheetTimer) clearTimeout(this.sheetTimer);
     if (this.thumbTimer) clearTimeout(this.thumbTimer);
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
+    window.removeEventListener('resize', this.fitPanel);
+    window.removeEventListener('orientationchange', this.fitPanel);
+    window.visualViewport?.removeEventListener('resize', this.fitPanel);
+    this.unsubKb?.();
     this.unsubLang?.();
     this.panel.remove();
     fn?.();
@@ -1208,11 +1249,17 @@ export class CharCreation {
   }
 
   private wireSlider(track: HTMLElement, kind: 0 | 1 | 2): void {
-    // 取值矩形 = 杆内缩 (3,4,174,8)（DrawValueBar :150-153）→ value = (mouseX - 杆左 - 3)/174
+    // 取值矩形 = 杆内缩 (3,4,174,8)（DrawValueBar :150-153）→ value=(localX-3)/174。
+    // localX 由 .sw-cc-sliderbar 自身 rect 归一化回本地 178 域:未缩放时 bar.left
+    // =track.left+22、width=178 ⇒ 与旧式 (clientX-track.left-22-3)/174 数值严格
+    // 相同;面板缩放(--cc-fit)后 rect 随之缩小,直减屏幕像素常数会错位,rect 化
+    // 两态通用(knob left=27+167v 与渐变 stops 均为本地域,指针↔滑块保持一致)
     const apply = (e: PointerEvent) => {
-      const rect = track.getBoundingClientRect();
+      const bar = track.querySelector<HTMLElement>('.sw-cc-sliderbar');
+      const rect = (bar ?? track).getBoundingClientRect();
       if (!rect.width) return;
-      const v = (e.clientX - (rect.left + 22) - 3) / 174;
+      const localX = ((e.clientX - rect.left) / rect.width) * 178;
+      const v = (localX - 3) / 174;
       this.hsl[kind] = Math.max(0, Math.min(1, v));
       this.applyHslToPart();
       this.redrawColorPage();

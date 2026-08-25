@@ -121,6 +121,10 @@ export class InfoAccsLayer {
     const iconTex = (n: number) => UITextures.get(`UI_InfoIcon_${n}`);
     ctx.save();
     ctx.imageSmoothingEnabled = false;
+    // ★文本态自钉(textAlign/baseline)——canvas 状态跨帧持久,帧内更早的 HUD
+    //  (死亡画面/Boss 条等)裸设 textAlign='center' 不还原时,本层文本会以
+    //  (X+20) 为中心左移半宽、图标相对"扎进"文本(2026-08-25 用户实报二度错位)
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     if (inventoryOpen) {
       // 背包横排(:46681):X = W-280+20*k-10, Y = 94(+261 大地图);图标原生 14×14
@@ -138,25 +142,31 @@ export class InfoAccsLayer {
       const Y = -32 + (bigMapOpen ? 261 : 0);
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
-        // 文本锚 ty = 行基(中线上);图标顶 = 文本顶(ty-7) + 4(:46557 icon 52 vs 文本 48,
-        // DrawString 左上原点) → ty-3。图标原生 14×14(InfoIcon_N 实测),高亮框 18×18
+        // 文本锚 ty = 行基(中线上)。图标原生 14×14(InfoIcon_N 实测),高亮框 18×18
         const ty = Y + 74 + pitch * i + 48;
-        const iy = ty - 3;
-        const t = iconTex(r.icon);
-        this.drawIcon(ctx, t, X, iy, false, r.row === hoveredRow, iconTex(13));
-        this.state.iconRects.push({ x: X, y: iy, w: t ? t.sw : 14, h: t ? t.sh : 14, row: r });
         if (!inventoryOpen) {
           // 文本(:46594-46639):宽 >215 缩 X;scaleX<0.58 缩 Y;4 遍黑描边+正文;
           // "附近无 X"行文字降灰(:46328/:46388/:46414 等 infoTextColor=Color(100,100,100));
           // 悬停行的**下一行**压暗 1/3(:46629-46632:i>num2 && i<num2+2,无悬停恒不暗)
           const dim = hoveredRow >= 0 && i === hoveredRow + 1 ? 0.34 : 1;
-          const fontPx = 14;
-          ctx.font = `${fontPx}px monospace`;
-          const w = ctx.measureText(r.text).width;
+          ctx.font = '14px monospace';
+          const m = ctx.measureText(r.text);
+          const w = m.width;
           let scaleX = 1;
           if (w > 215) scaleX = 215 / w;
           let scaleY = 1;
           if (scaleX < 0.58) scaleY = 1 - scaleX / 3;
+          // 图标纵向对齐 = 实测字形盒垂直居中 + 2px 低偏(原版图标顶=文本顶+4,
+          // MouseText 字形在行盒内偏上 → 原版观感即图标中心略低于字形中心);
+          // 字形盒量测不可用(旧浏览器)回退 锚-3
+          const t = iconTex(r.icon);
+          const ih = t ? t.sh : 14;
+          const asc = m.actualBoundingBoxAscent, desc = m.actualBoundingBoxDescent;
+          const iy = Number.isFinite(asc) && asc > 0
+            ? ty - (asc - desc) / 2 - ih / 2 + 2
+            : ty - 3;
+          this.drawIcon(ctx, t, X, iy, false, r.row === hoveredRow, iconTex(13));
+          this.state.iconRects.push({ x: X, y: iy, w: t ? t.sw : 14, h: ih, row: r });
           ctx.save();
           ctx.translate(X + 20, ty);
           ctx.scale(scaleX, scaleY);

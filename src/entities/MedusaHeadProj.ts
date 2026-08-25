@@ -1,0 +1,256 @@
+// 美杜莎之首 3269 → 弹 535（挂首）/ 536（凝视束）整套模型。
+// 原版链：Item.cs:30314-30331（channel=true/autoReuse/reuseDelay10/UseSound=null/
+//   mana15）+ ItemCheck_PayMana_ShouldSkipManaUse Player.cs:53329-53331
+//   （type==3269 直接 return true =【使用时不扣魔】——魔在 AI 每 volley 经
+//   CheckMana(pay:true) 扣）+ AI_100_Medusa Projectile.cs:45296-45454：
+//   · 挂首：zero 偏移 (dir×6, −14×gravDir)、timeLeft=3 维持、帧 0-7 待机 /
+//     ai[0]>0 转 8-11 发射组帧@5t、direction 跟鼠标、Center 吸附玩家手持位、
+//     player.heldProj=whoAmI、SetDummyItemTime(2)、!player.channel → Kill；
+//   · volley 门：!flag2(冷却完) 或 ai[0]%num==0，num=(int)(60×GetSlowMagicScalar)/4
+//     ——蓝空削弱(slowMagicUse → ×2.5)直接拉长喷吐间隔（:45301/:47444-47451）；
+//   · 320px 内 CanHitLine 敌取最近 ≤3 目标 → 每目标生成 536 束（NewProjectile 于
+//     头位、Center 直写敌心、Damage() 立即结算后 damage=0 = 束为纯视觉载体，
+//     伤害在生成瞬间落账）+ 4 条随机向散逸 536；ai[0]=60 重臂；无目标不扣魔；
+//   · Lighting(0.9,0.75,0.1)（R18 光照域,登记不实施）。
+// ★文件边界：发射链挂点/扣魔点在 Game.ts case 'magic'（R26 蓝队分区）——本类由
+//   Arrow 出生自校正把通用 Arrow-535 首子步转换为本实体；上游误扣魔以"首轮已预付"
+//   +重复施法退款两机制在实体侧收敛到原版经济（见 MEDUSA_REFUND_LEGACY_CHARGE）。
+import { Entity } from './Entity';
+import type { GameHooks } from './types';
+import type { Renderer } from '../render/Renderer';
+import type { Camera } from '../render/Camera';
+import type { Player } from './Player';
+import { projSprite, projFrameCount } from './Arrow';
+import { playerCanHitEnemy } from './projTargets';
+import { canHitLine } from '../physics/LineOfSight';
+import { itemCombat } from '../data/vanillaItemCombat';
+import { prefixStat } from '../data/vanillaPrefixes';
+
+type MedusaEnemy = {
+  x: number; y: number; w: number; h: number; id: number; dead: boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean;
+};
+
+/** 凝视束存续（localAI[0] 20t：alpha Lerp(0,255,t/20) 渐显、≥20 Kill :33783-33790） */
+const BEAM_LIFE = 20;
+
+/** 在场唯一挂首（Game autoReuse 持按每 useTime 重发一枚通用 Arrow-535——转换时
+ *  已有活首则新弹让位自杀，并把该笔重复上游扣魔退还，等价原版 channel 单例语义）*/
+let activeMedusa: MedusaHeadProj | null = null;
+
+export class MedusaHeadProj extends Entity {
+  readonly projId = 535;
+  w = 18; h = 18;                                    // SetDefaults :6096-6108
+  damage: number;
+  knockback: number;
+  critChance: number;
+  armorPen: number;
+  /** 暴击加成百分点（critChance=0 时按 (4+critBonus)/100 兜底,同 Arrow 命中环） */
+  private critBonus: number;
+  dead = false;
+
+  /** ★R28 接线开关：Game.ts case 'magic' 的 3269 ShouldSkipManaUse 分流已落地
+   *  （:11310 medusaFree——上游不再扣蓝）→ 置 false,退款/预付两机制全部旁路 */
+  static MEDUSA_REFUND_LEGACY_CHARGE = false;
+
+  private readonly owner: Player;
+  /** 冷却计数 ai[0]（volley 后 60；>0 = flag2 发射组帧 + soundDelay 循环 :45304） */
+  private ai0 = 0;
+  private frame = 0;
+  private frameCtr = 0;
+  private direction = 1;
+  /** timeLeft=3 维持（!player.dead 直写 :45310；channel 断/死亡 3t 后消亡） */
+  private life = 3;
+  /** 首轮 volley 视为已付（上游 Game.ts 通用链已扣本次施法魔——ShouldSkipManaUse
+   *  :53329 缺位的等价补偿；R26 分流落地后构造传 false） */
+  private prepaidFirstVolley = true;
+  /** 536 凝视束视觉态（头→目标端点；伤害已在生成拍经 hurt 即时落账） */
+  private beams: Array<{ x2: number; y2: number; age: number; mag: number }> = [];
+
+  constructor(owner: Player, damage: number, knockback: number,
+    critChance: number, critBonus: number, armorPen: number) {
+    super();
+    this.owner = owner;
+    this.damage = damage;
+    this.knockback = knockback;
+    this.critChance = critChance;
+    this.critBonus = critBonus;
+    this.armorPen = armorPen;
+    if (activeMedusa && activeMedusa.owner !== owner) {
+      activeMedusa = null;                           // 旧世界/旧主人残留 → 失效清位
+    }
+    if (activeMedusa && !activeMedusa.dead) {
+      // 重复转换：退还本次 autoReuse 重扣的上游魔（同公式），自身让位
+      if (MedusaHeadProj.MEDUSA_REFUND_LEGACY_CHARGE) {
+        activeMedusa.refundLegacyCharge();
+      }
+      this.dead = true;                              // 不接管，旧首继续 channel
+      return;
+    }
+    activeMedusa = this;
+    this.prepaidFirstVolley = MedusaHeadProj.MEDUSA_REFUND_LEGACY_CHARGE;
+    void critBonus;
+  }
+
+  /** 上游扣魔精确复算并退还（Game.ts :11243 同式：词缀 mcst(I:562 round) +
+   *  饰品加算折扣 + 乘区；base= itemCombat(3269).mana=15） */
+  private refundLegacyCharge(): void {
+    const base = itemCombat(3269)?.mana ?? 15;
+    const held = this.owner.inv.heldItem();
+    const mcst = held?.prefix ? prefixStat(held.prefix).mcst : 1;
+    const eq = this.owner.equipStats as { manaCostOff?: number; manaCostMul?: number };
+    const cost = Math.max(0, Math.trunc(Math.round(base * mcst)
+      * (1 - (eq?.manaCostOff ?? 0)) * (eq?.manaCostMul ?? 1)));
+    this.owner.mana += cost;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.dead) return;
+    const p = this.owner;
+    // ---- 消亡门（:45310 timeLeft=3 维持 / :45417 !player.channel → Kill）----
+    // channel 代理双信号：inputUseItem（Game :5026 注入的左键电平——★实测为边沿量,
+    // 首击消费后即回落）OR useTime>0（autoReuse 持按期每周期重置、松手后归 0 恒定
+    // ——持按时零档 ≤1 tick < timeLeft 3 不累积；松手后恒零 → 3t 消亡,近似原版
+    // 松手即断）
+    const channelAlive = !p.dead
+      && (p.inputUseItem === true || ((p as unknown as { useTime?: number }).useTime ?? 0) > 0);
+    if (channelAlive) {
+      this.life = 3;
+      p.onChannelManaHold?.();                       // channel 期回蓝惩罚窗钉住（:1895）
+    } else if (--this.life <= 0) {
+      this.retire();
+      return;
+    }
+    // ---- 凝视束老化（localAI[0]++ ≥20 Kill :33783-33790）----
+    for (let i = this.beams.length - 1; i >= 0; i--) {
+      if (++this.beams[i].age >= BEAM_LIFE) this.beams.splice(i, 1);
+    }
+    // ---- 冷却计数 + 帧（:45312-45340）----
+    const flag2 = this.ai0 > 0;                      // flag2 取自减前态（:45303）
+    if (this.ai0 > 0) this.ai0--;
+    if (flag2) {
+      if (this.frame < 8) this.frame = 8;
+      if (++this.frameCtr >= 5) { this.frameCtr = 0; if (++this.frame > 11) this.frame = 8; }
+    } else if (++this.frameCtr >= 5) {
+      this.frameCtr = 0;
+      if (++this.frame > 7) this.frame = 0;
+    }
+    // ---- 挂首吸附（:45443 Center=RotatedRelativePoint(...)−velocity；body-frame
+    //      全式依赖 OffsetsPlayerOnhand,本仓以 MountedCenter+zero 偏移近似,登记）----
+    this.direction = Math.abs(p.aimWX - p.cx) > 2 ? Math.sign(p.aimWX - p.cx)
+      : (p.facing ?? 1);                             //（:45343-45348 direction 跟鼠标）
+    const gd = (p.gravDir ?? 1);
+    this.x = p.cx + this.direction * 6 - this.w / 2;
+    this.y = p.cy - 14 * gd - this.h / 2;
+    // ---- volley 门（:45399 `!flag2 || ai[0] % num == 0`）----
+    // num = (int)(60×GetSlowMagicScalar)/4（:45301）——slowMagicUse 时 ×2.5 =
+    // 37t 间隔（蓝空削弱直接拉长喷吐节奏）;可选链容忍 R26 重构中的通道
+    const scalar = (p as { getSlowMagicScalar?: () => number }).getSlowMagicScalar?.() ?? 1;
+    const num = Math.max(1, Math.floor((60 * scalar) / 4));
+    if (!(this.ai0 === 0 || this.ai0 % num === 0)) return;
+    // ---- 目标搜集（:45387-45397 门 + :45408-45419 列表排序取近 ≤3）----
+    const hx = this.cx, hy = this.cy;
+    const cands: Array<{ e: MedusaEnemy; d: number }> = [];
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as MedusaEnemy;
+      if (e.dead) continue;
+      const d = Math.hypot(e.x + e.w / 2 - hx, e.y + e.h / 2 - hy);
+      if (d >= 320) continue;                        // Distance(nPC.Center) < 320f
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // CanBeChasedBy
+      if (!canHitLine(game.world.store, e.x, e.y, e.w, e.h, hx, hy, 0, 0)) continue;
+      cands.push({ e, d });
+    }
+    if (cands.length === 0) return;                  // 无目标不进计费段（:45393 flag3）
+    cands.sort((a, b) => a.d - b.d);                 // _medusaTargetComparer 距离序
+    // ---- 计费（:45391 CheckMana(mana, pay:true)）----
+    // ManaV2 语义走 Player.checkMana 端口：蓝够扣魔;不足 statMana=0+slowMagicUse=true
+    // （下一拍 GetSlowMagicScalar ×2.5 → 间隔拉长 = 原版蓝空削弱闭环）
+    if (this.prepaidFirstVolley) this.prepaidFirstVolley = false;
+    else {
+      const base = itemCombat(3269)?.mana ?? 15;
+      const held = p.inv.heldItem();
+      const mcst = held?.prefix ? prefixStat(held.prefix).mcst : 1;
+      const eq = p.equipStats as { manaCostOff?: number; manaCostMul?: number };
+      const cost = Math.max(0, Math.trunc(Math.round(base * mcst)
+        * (1 - (eq?.manaCostOff ?? 0)) * (eq?.manaCostMul ?? 1)));
+      p.checkMana(cost);
+    }
+    // ---- 凝视束 + 即时伤害落账（:45420-45435：Damage() 立即结算后 damage=0）----
+    let angSum = 0;
+    for (let k = 0; k < cands.length && k < 3; k++) {
+      const t = cands[k].e;
+      const tcx = t.x + t.w / 2, tcy = t.y + t.h / 2;
+      angSum += Math.atan2(tcy - hy, tcx - hx);
+      const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+      t.hurt(crit ? this.damage * 2 : this.damage, 0, 0, game, this.armorPen, crit);
+      this.beams.push({ x2: tcx, y2: tcy, age: 0, mag: 1 });
+    }
+    // ---- 4 条随机向散逸束（:45439-45446：1/4 全圆随机,其余 UnitX.RotatedByRandom(π)
+    //      再旋 avgAngle;×(200,50) 椭圆 ×(0.3..1)) ----
+    const avgAng = angSum > 0 || cands.length > 0 ? angSum / Math.min(3, cands.length)
+      : (this.direction === 1 ? 0 : Math.PI);
+    for (let l = 0; l < 4; l++) {
+      let ax: number, ay: number;
+      if (Math.random() < 0.25) {
+        const full = Math.random() * Math.PI * 2;
+        ax = Math.cos(full); ay = Math.sin(full);
+      } else {
+        const half = (Math.random() * 2 - 1) * Math.PI;
+        const bx = Math.cos(half), by = Math.sin(half);       // UnitX.RotatedByRandom(π)
+        const ca = Math.cos(avgAng), sa = Math.sin(avgAng);
+        ax = bx * ca - by * sa; ay = bx * sa + by * ca;
+      }
+      const m = 0.3 + Math.random() * 0.7;
+      this.beams.push({ x2: hx + ax * 200 * m, y2: hy + ay * 50 * m, age: 0, mag: 0.55 });
+    }
+    this.ai0 = 60;                                   //（:45434 尾重臂,180 覆盖语义同值）
+  }
+
+  private retire(): void {
+    this.dead = true;
+    if (activeMedusa === this) activeMedusa = null;
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    // ---- 536 凝视束（DrawProj :32444-32462：贴图沿速度向拉伸 |v| 长,alpha 渐显;
+    //      ★反编译几何字面上把条带画在 head−v 侧,游戏实感为头→目标连线——按实感
+    //      实现,登记两说）----
+    if (this.beams.length > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = 'rgba(150, 230, 120, 0.85)';
+      ctx.lineWidth = 3;
+      for (const b of this.beams) {
+        const fadeIn = Math.min(1, b.age / 5);                 // alpha Lerp(0,255,t/20) 近似
+        const fadeOut = Math.max(0, 1 - Math.max(0, b.age - BEAM_LIFE + 8) / 8);
+        ctx.globalAlpha = 0.75 * fadeIn * fadeOut * (b.mag < 1 ? 0.6 : 1);
+        ctx.beginPath();
+        ctx.moveTo(this.cx, this.cy);
+        ctx.lineTo(b.x2, b.y2);
+        ctx.stroke();
+        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = 'rgba(230, 255, 200, 0.9)';
+        ctx.stroke();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(150, 230, 120, 0.85)';
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+    // ---- 535 挂首本体（frame 0-7 待机 / 8-11 发射组,spriteDirection ±direction）----
+    const img = projSprite(this.projId);
+    if (!img || !(img.width > 0)) return;
+    const frames = projFrameCount(this.projId);
+    const fh = img.height / Math.max(1, frames);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(this.cx, this.cy);
+    if ((this.owner.gravDir ?? 1) < 0) ctx.rotate(Math.PI);     //（:45444-45446）
+    if (this.direction < 0) ctx.scale(-1, 1);                   // spriteDirection 镜像
+    ctx.drawImage(img, 0, this.frame * fh, img.width, fh,
+      -img.width / 2, -fh / 2, img.width, fh);
+    ctx.restore();
+  }
+}

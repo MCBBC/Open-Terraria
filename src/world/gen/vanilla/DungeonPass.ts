@@ -20,6 +20,9 @@ import { runLavaLayerCaverer } from './LavaLayerCavererPass';
 // 1457 地牢域对齐（docs/worldgen/dungeon-1457-alignment.md）：双地牢旗→行为接线
 // （trap 窗口/潜在界域回填）+ GOTHIC 平台档（DungeonGlobalPlatforms.cs:42-45,仅帧通道）。
 import { dualDungeonState, dualDungeonTrapWindow } from './DungeonStyles1457';
+// ★LLL 批（2026-08-25）：placeTrap0 补 noTraps 巨石非实心窗（WorldGen.SetBoulderSolidity
+//   经 GenSolid 全局表翻转,dgSolid/genSolidType 即见）——与 TrapsPass 同源单实现。
+import { setBoulderSolidity } from './TrapsPass';
 // node:fs 动态导入（探针落盘 SW_DG_LIGHTS_GRID 才用）——顶层静态导入会进
 // worker bundle 被 vite 外部化炸构建（2026-08-18 实锤：writeFileSync is not
 // exported by "__vite-browser-external"）。改运行时 require，浏览器恒 false 门
@@ -3615,34 +3618,88 @@ export function runDungeonPass(
     }
     dualDungeonTrapWindow.allowTrapGenerationInDungeon = false;
   }
+  // PlatformProperTopFrame（cs:70197）：帧列号 ∈[0,7]∪[12,16]∪[25,26]
+  function platformProperFrameDg(fx: number): boolean {
+    const col = Math.floor(fx / 18);
+    if ((col < 0 || col > 7) && (col < 12 || col > 16)) {
+      if (col >= 25) return col <= 26;
+      return false;
+    }
+    return true;
+  }
   // placeTrap type=0（WorldGen.cs:8875-9150 飞镖分支）
+  // ★LLL 批（2026-08-25）NOTRAPS #32 残差 A=131 定罪清偿——本函数此前缺
+  //   noTrapsWorldGen 分支与两处 vanilla 拒门：
+  //   ①深扫 flag2（cs:8889/:8899-8902 标记 + :8975-8977 `flag2 && type!=3` 拒）
+  //     ——下扫触及 h-300 以下时 vanilla 拒而 JS 受理 → 多掷+错位陷阱（KKK 批
+  //     掷流窗②「JS 已到压板偏移 ri(0,2) 而 x86 仍在采样」的主犯,方向吻合）；
+  //   ②巨石非实心窗#1（cs:8892-8894 开 / :8913 关）——noTraps 下扫穿巨石；
+  //   ③蘑菇草 70 回避的 `!noTrapsWorldGen &&` 跳过位（cs:8911-8914）；
+  //   ④下扫步进 CanContinue（cs:8896-8898；dgTraps 窗口期内 dual 支恒放行→仅 wall350 可达）；
+  //   ⑤九格净空门 nactive() 位（active && !inActive,cs:8963-8973）——曾只查 active；
+  //   ⑥CanGeneratePressurePlateAt 精确形（cs:11054-11071）：InWorld(3) +
+  //     SolidTileAllowBottomSlope(i,j+1)（允许 solidTop/平台 proper 帧!非 SolidTile）。
+  //   早退路径不还原窗#1=原版同款泄漏语义（TrapsPass 同款备案）。①③⑤⑥对六条
+  //   非 notraps 链为经验无操作（链 #32..45 全绿 ⇒ 差异路径未被触达）。
   function placeTrap0(x2: number, y2: number): boolean {
+    const nfNoTraps = !!gs.seedFlags?.noTraps;
+    let flag2 = false;                                        // cs:8889
+    if (nfNoTraps) setBoulderSolidity(false);                 // 窗#1 开（cs:8892-8894）
     let num = y2;
     while (!dgSolid(x2, num)) {
       num++;
       if (num > h - 10) return false;
+      if (wallAt(x2, num) === 350) return false;              // cs:8896-8898 步进门
+      if (num >= h - 300) flag2 = true;                       // cs:8899-8902
     }
+    if (nfNoTraps) setBoulderSolidity(true);                  // 窗#1 闭（cs:8913-8915）
     num--;
     if (!inW(x2, num, 3)) return false;
-    for (let a = x2 - 20; a <= x2 + 20; a++) {
-      for (let b = num - 20; b <= num + 20; b++) {
-        if (inW(a, b, 0) && actAt(a, b) !== 0 && typAt(a, b) === TILE_BY_KEY['v_70_mushroom_grass_block']) return false;
+    if (!nfNoTraps) {                                         // cs:8911-8914 noTraps 跳过
+      for (let a = x2 - 20; a <= x2 + 20; a++) {
+        for (let b = num - 20; b <= num + 20; b++) {
+          if (inW(a, b, 0) && actAt(a, b) !== 0 && typAt(a, b) === TILE_BY_KEY['v_70_mushroom_grass_block']) return false;
+        }
       }
     }
     if (wallAt(x2, num) === 87 || wallAt(x2, num) === 350) return false;
     const lava = st.liquid[st.idx(x2, num)] > 0 && st.liquidType[st.idx(x2, num)] === 2;
-    if (lava) return false;
+    if (lava) return false;                                   // cs:8921-8925 flag+type!=3 合并（type=0）
+    if (flag2) return false;                                  // cs:8975-8977（type 0≠3）
+    // 九格净空门：nactive()（WG:70086 active&&!inActive）——cs:8963-8973
+    const nactOffs = (x: number, y: number): boolean => {
+      if (!st.inBounds(x, y)) return false;
+      const i = st.idx(x, y);
+      return st.flags[i] !== 0 && ((st.wire[i] >>> 5) & 1) === 0;
+    };
     const offs: Array<[number, number]> = [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1], [0, -2], [-1, -2], [1, -2]];
     for (const [ax, ay] of offs) {
-      if (inW(x2 + ax, num + ay, 0) && actAt(x2 + ax, num + ay) !== 0) return false;
+      if (nactOffs(x2 + ax, num + ay)) return false;
     }
     if (inW(x2, num + 1, 0) && (typAt(x2, num + 1) === SPIKE || typAt(x2, num + 1) === TILE_BY_KEY['v_232_wooden_spike'])) return false;
-    if (!inW(x2, num + 1, 0) || !dgSolid(x2, num + 1)) return false;   // CanGeneratePressurePlateAt
+    // CanGeneratePressurePlateAt（cs:11054-11071）精确形：InWorld(i,j,3) +
+    //   SolidTileAllowBottomSlope(i,j+1)（cs:70211：tileSolid||solidTop、顶坡须平台
+    //   proper 帧、非半砖、!inActive——**非** SolidTile,曾误用 dgSolid 漏 solidTop 地面）
     {
-      const bt = typAt(x2, num + 1);
+      const px2 = x2, py2 = num;
+      if (!(px2 >= 3 && px2 < w - 3 && py2 >= 3 && py2 < h - 3)) return false;   // InWorld(i,j,3)
+      const fi = st.inBounds(px2, py2 + 1) ? st.idx(px2, py2 + 1) : -1;
+      let allowBottom = false;
+      if (fi >= 0 && st.flags[fi]) {
+        const ft = st.type[fi]!;
+        const fsheet = TILE_DEFS[ft]?.vanilla?.sheet ?? -1;
+        const fd = TILE_DEFS[ft];
+        const topSlope = st.slope[fi] === 1 || st.slope[fi] === 2;
+        allowBottom = (genSolidType(ft) || DG_SOLID_TOP.has(fsheet))
+          && (!topSlope || ((fd?.platform ?? false) && platformProperFrameDg(st.frameX[fi]!)))
+          && !st.half[fi]
+          && ((st.wire[fi] >>> 5) & 1) === 0;
+      }
+      if (!allowBottom) return false;                       // SolidTileAllowBottomSlope
+      const bt = typAt(px2, py2 + 1);
       const sheet = TILE_DEFS[bt]?.vanilla?.sheet ?? -1;
-      if (sheet === 138 || sheet === 484 || sheet === 664 || sheet === 665 || (sheet >= 711 && sheet <= 716)) return false;
-      if (wallAt(x2, num + 1) === 350) return false;
+      if (sheet === 138 || sheet === 484 || sheet === 664 || sheet === 665 || (sheet >= 711 && sheet <= 716)) return false;   // Boulders
+      if (wallAt(px2, py2 + 1) === 350) return false;
     }
     const num27 = num - ri(0, 2);
     const anchorOK = (xx: number, yy: number): boolean =>
@@ -3879,7 +3936,7 @@ export function runDungeonPass(
           if (place4x2D(num3, j, DG_ITEM_TILE[iTub], dir)) { dgFurnResult = 'ok'; return; }
         }
       } else if (num18 === 10) {
-        if (iLamp > -1 && place1xXD(num3, j, DG_ITEM_TILE[iLamp], 3)) { dgFurnResult = 'ok'; return; }
+        if (iLamp > -1 && place1xXD(num3, j, DG_ITEM_TILE[iLamp], 3, DG_ITEM_STYLE[iLamp] ?? 0)) { dgFurnResult = 'ok'; return; }
       } else if (num18 === 11) {
         if (iCand > -1 && place2x2D(num3, j, DG_ITEM_TILE[iCand])) { dgFurnResult = 'ok'; return; }
       } else if (num18 === 12) {
@@ -3997,11 +4054,21 @@ export function runDungeonPass(
     }
     return true;
   }
-  // Place1xX（cs:39203 路灯93 h3）
-  function place1xXD(x: number, y: number, t: number, hgt: number): boolean {
+  // Place1xX（cs:39570 路灯93 h3；92 吊灯族 h6）
+  // ★NNN 帧补（cs:39595-39600）：frameY=j*18+hgt*style*18（hgt=3 → style*54）、
+  //   frameX=0。曾裸写零帧——帧不在 mile8 八通道内潜伏，const #49 残 ×1 定罪：
+  //   水淹灯 Check1xX 整组杀依赖六格帧一致（LiquidSim.check1xXGen 级联），零帧灯
+  //   杀后留孤儿（MMM 批 ×2→×1,本批归零）。
+  function place1xXD(x: number, y: number, t: number, hgt: number, style = 0): boolean {
     for (let j = y - hgt + 1; j <= y; j++) if (!dgClr(x, j) || st.liquid[st.idx(x, j)] > 0) return false;
     if (!solidTile2D(x, y + 1)) return false;
-    for (let j = y - hgt + 1; j <= y; j++) dgWr(x, j, t);
+    for (let j2 = 0; j2 < hgt; j2++) {
+      const yy = y - hgt + 1 + j2;
+      dgWr(x, yy, t);
+      const fi = st.idx(x, yy);
+      st.frameX[fi] = 0;
+      st.frameY[fi] = j2 * 18 + hgt * style * 18;
+    }
     return true;
   }
   // Place3x4（cs:51943 书架101）

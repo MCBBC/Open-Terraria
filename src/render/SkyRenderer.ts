@@ -1420,7 +1420,9 @@ export class SkyRenderer {
     if (!this.skyBgTex) {
       this.skyBgTex = onBitmap(loadTex('Background_0.png'), (b) => { this.skyBgTex = b; this.skyBgTinted = null; });
     }
-    return this.skyBgTex.width > 0 ? this.skyBgTex : null;
+    // ★texReady：width>0 挡不住半加载窗——该窗内 tintSkyTex 会把平色矩形烘进
+    //  skyBgTinted 缓存（整幅天空底变平色）。未就绪回落渐变分支一帧自愈
+    return texReady(this.skyBgTex) ? this.skyBgTex : null;
   }
   /** 贴图×cots 染色缓存(tint 8/255 量化——晨昏连续漂移期间缓存打爆教训同
    *  BiomeBackground.tintCache;贴图仅 48×1400,重烘成本可忽略)
@@ -2907,7 +2909,11 @@ export class SkyRenderer {
     ctx.imageSmoothingEnabled = false;
     for (const e of this.ambEntities) {
       const tex = this.ambTex(e.texKey);
-      if (!tex || !(tex.width > 0) || tex.width === 0) continue;
+      // ★texReady 半加载窗守卫（2026-08-25 用户实报鸟群白闪循环）：元数据已到
+      //  （width>0）但主体未完时下方 AMB_TINT_CACHE 烘焙 = 平色矩形入缓存——
+      //  鸟动画循环 4 帧反复重访毒化帧键（白闪）、cots 漂移换色桶后新键烘出
+      //  正常 → "一会正常一会白"循环往复。未就绪本帧跳过，就绪后自然恢复
+      if (!tex || !texReady(tex)) continue;
       // GetDrawPositionByDepth :85-88：(Position-相机中心)×(1/depth, 0.9/depth)+相机中心
       const wx = (e.x - camX) / e.depth + camX;
       const wy = (e.y - camY) * 0.9 / e.depth + camY;

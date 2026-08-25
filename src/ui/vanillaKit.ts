@@ -108,3 +108,33 @@ export function ensureVanillaKit(): void {
 `;
   document.head.appendChild(extra);
 }
+
+/** 键盘遮挡补偿（移动端）：系统键盘压缩 visualViewport 时把面板上移半量遮挡
+ *  （写 --kb-shift 变量，由各面板窄屏 @media 档的 translate:0 var(--kb-shift)
+ *  消费——独立 translate 属性，与占用的 transform 居中/缩放叠加不打架）。
+ *  仅当焦点在本面板的文本输入内且遮挡 >80px 才生效；桌面键盘不缩 vv ⇒ 恒零。
+ *  返回解绑函数（close() 时调用） */
+export function bindKeyboardShift(panel: HTMLElement): () => void {
+  const update = () => {
+    const v = window.visualViewport;
+    const active = document.activeElement;
+    const isText = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
+    if (!v || !active || !isText || !panel.contains(active)) {
+      panel.style.removeProperty('--kb-shift');
+      return;
+    }
+    const overlap = window.innerHeight - (v.height + v.offsetTop);
+    if (overlap > 80) panel.style.setProperty('--kb-shift', `${Math.round(-overlap / 2)}px`);
+    else panel.style.removeProperty('--kb-shift');
+  };
+  const onFocusOut = () => setTimeout(update, 0);   // focusout 时 activeElement 尚未切换完
+  window.visualViewport?.addEventListener('resize', update);
+  window.addEventListener('focusin', update);
+  window.addEventListener('focusout', onFocusOut);
+  return () => {
+    window.visualViewport?.removeEventListener('resize', update);
+    window.removeEventListener('focusin', update);
+    window.removeEventListener('focusout', onFocusOut);
+    panel.style.removeProperty('--kb-shift');
+  };
+}

@@ -803,6 +803,10 @@ export class BiomeBackground {
     ctx: CanvasRenderingContext2D, im: ImageBitmap | HTMLImageElement,
     tr: number, tg: number, tb: number, dx: number, dy: number, dw: number, dh: number,
   ) {
+    // ★texReady 半加载窗守卫（2026-08-25 同洞加固，鸟群白闪竞态同款）：元数据已到
+    //  但主体未完时烘焙 = 平色矩形按 (贴图|量化色桶) 键永久入缓存。未就绪本帧
+    //  跳过该层（进世界加载窗内 1-2 帧，就绪后自然恢复）
+    if (!texReady(im)) return;
     let tid = this.tintTexIds.get(im);
     if (tid === undefined) { tid = ++this.tintTexIdSeq; this.tintTexIds.set(im, tid); }
     const key = `${tid}|${Math.round(tr * 255) & ~7},${Math.round(tg * 255) & ~7},${Math.round(tb * 255) & ~7}`;

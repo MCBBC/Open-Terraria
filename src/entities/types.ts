@@ -124,9 +124,10 @@ export interface GameHooks {
   /** 弹幕消亡钩子（Projectile.Kill 按弹型分发；x/y/w/h = 弹体命中盒，
    *  oldVx/oldVy = 消亡时速度——碎镜 1085 的 Kill 特效链消费；
    *  flags = 弹体态补充：hostile（Damage() 结算方向）/ ai0（92 坠星代际链）/
-   *  kb+arpen（41 狱炎箭 64×64 重结算的击退/穿甲，取自弹体）） */
+   *  kb+arpen（41 狱炎箭 64×64 重结算的击退/穿甲，取自弹体）/
+   *  sc（弹体 SetDefaults scale——R27：95 诅咒之焰 Kill 尘 scale×scale 消费） */
   onProjectileDeath?(projId: number, x: number, y: number, w?: number, h?: number, oldVx?: number, oldVy?: number, dmg?: number,
-    flags?: { hostile?: boolean; ai0?: number; kb?: number; arpen?: number }): void;
+    flags?: { hostile?: boolean; ai0?: number; kb?: number; arpen?: number; sc?: number }): void;
   /** 粉末云实效（净化粉 proj 10 / 邪恶粉 11 / 猩红粉 463，Projectile.cs:22399-22533
    *  AI_006 每帧回调）：命中盒内逐格 WorldGen.Convert + Damage_TryUsingPowders（:13646）
    *  NPC 转化。Game 实现（evolution.convert + bound 税务官 Transform 链） */

@@ -184,11 +184,12 @@ function check3x2PileFull(st: TileStore, i: number, j: number, pileSheet: number
 
 /** SquareTileFrame 语境的 TileFrame 子集（cs:82067+）：界内 5 格 padding（cs:82069）、
  *  非活跃清 half/slope/块漆（cs:82077-82082）、frameImportant 中 186/187 大石堆
- *  （Check3x2）与 185 小堆（CheckPile/Check2x1，QQQQQ 补——12345 链 #73 活树房
- *  蛙卵石堆孤儿半 T0>185 实证 NNNN"其余分支零可观测写"论断对 185 不成立）有
- *  清除语义；其余 frameImportant/仙人掌/藤蔓分支在本管线触发时点（树未生成/沙上
- *  无草/藤悬于草下）不产生 8 通道可观测写——LivingTreePass.squareTileFrameGen 同
- *  款口径。 */
+ *  （Check3x2）、26 祭坛（Check3x2,NNN 批补——2 宽物体按 3 宽盒校验恒败,邻格转化
+ *  的 SquareTileFrame 即整组杀,12345 #65 实证）与 185 小堆（CheckPile/Check2x1，
+ *  QQQQQ 补——12345 链 #73 活树房蛙卵石堆孤儿半 T0>185 实证 NNNN"其余分支零可观测
+ *  写"论断对 185 不成立）有清除语义；其余 frameImportant/仙人掌/藤蔓分支在本管线
+ *  触发时点（树未生成/沙上无草/藤悬于草下）不产生 8 通道可观测写——
+ *  LivingTreePass.squareTileFrameGen 同款口径。 */
 function tileFrameScoped(st: TileStore, x: number, y: number): void {
   if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return;
   const i = st.idx(x, y);
@@ -200,6 +201,7 @@ function tileFrameScoped(st: TileStore, x: number, y: number): void {
   }
   const sh = SHEET_OF[st.type[i]];
   if (sh === 186 || sh === 187) check3x2PileFull(st, x, y, sh);
+  else if (sh === 26) check3x2AltarFull(st, x, y);
   else if (sh === 185) checkPileGen(st, x, y);
 }
 
@@ -295,6 +297,71 @@ function check2x1Gen(st: TileStore, x: number, y: number, sheet: number): void {
   destroyObjectP = false;                          // cs:47366
   squareTileFrameGen(st, num, y);                  // cs:47367-47368 尾复扫
   squareTileFrameGen(st, num + 1, y);
+}
+
+/** ★NNN 批（2026-08-25）：TileFrameImportant 派发表 case **26**（DemonAltar,Main.cs:7800
+ *  frameImportant）→ Check3x2（cs:87270）——祭坛是 **2 宽**物体却按 3 宽×2 高一致性盒
+ *  校验（cs:49617 起）：幻影第三列恒非本类 → flag 必真；支承行 case 26/695 支
+ *  （cs:49744-49752）三列全查 SolidTileAllowBottomSlope+邻巨石。⇒ **任何**触及祭坛格的
+ *  TileFrame（=邻格转化的 SquareTileFrame ±1 扫）都整组 KillTile。
+ *  12345 链 #65 首差实证：Moss pass 苔藓洪水转 (1038,576) 石→539,SquareTileFrame 覆盖
+ *  祭坛右下格 (1037,575) → 六格一致性失败 → 整组杀除（vanilla 064→065 T26>0×4 @
+ *  (1036..1037,574..575),液体保留、全七链唯一活体;g/s22222/m/nt/ntb/const 该 pass
+ *  零祭坛损失=无此邻接转化）。JS 曾只挂 185/186/187 → 祭坛永生 → T0>26×4。
+ *  杀除语义=killTileGenPile（cs:64029 生成态：inactive+half=false+frame=-1+清漆+
+ *  type=0;液体不动——KillTile 只在 58/230/FTW冰 族改液体）;CheckTileBreakability(26)
+ *  =非实心早退 0 不护;SmashAltar/drop 全被 generatingWorld 门挡=零掷。 */
+function check3x2AltarFull(st: TileStore, i: number, j: number): boolean {
+  if (destroyObjectP) return false;                // cs:49620 头门
+  if (!st.inBounds(i, j)) return false;
+  const ii = st.idx(i, j);
+  if (!st.flags[ii] || SHEET_OF[st.type[ii]] !== 26) return false;
+  const frameX = st.frameX[ii] | 0;
+  const frameY = st.frameY[ii] | 0;
+  const num3 = Math.trunc(frameY / 36);                    // cs:49628
+  const num4 = frameY % 36;
+  const num = j - Math.trunc(num4 / 18);                   // 组顶行
+  let n5 = Math.trunc(frameX / 18);
+  let n6 = 0;
+  while (n5 > 2) { n5 -= 3; n6++; }                        // cs:49632-49638
+  n5 = i - n5;
+  const num7 = n6 * 54;
+  const num8 = num + 2;
+  let flag = false;
+  for (let k = n5; k < n5 + 3; k++) {
+    for (let l = num; l < num8; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }
+      const idx = st.idx(k, l);
+      if (!st.flags[idx] || SHEET_OF[st.type[idx]] !== 26
+        || st.frameX[idx] !== (k - n5) * 18 + num7
+        || st.frameY[idx] !== (l - num) * 18 + num3 * 36) {
+        flag = true;                                       // cs:49649 六格一致
+      }
+    }
+    // case 26/695 支承行（cs:49744-49752）：!SolidTileAllowBottomSlope ‖ 下格巨石
+    if (!solidTileAllowBottomSlope(st, k, num8)) { flag = true; continue; }
+    if (st.inBounds(k, num8)) {
+      const bi = st.idx(k, num8);
+      if (st.flags[bi] && BOULDER_SHEETS.has(SHEET_OF[st.type[bi]])) flag = true;
+    }
+  }
+  if (!flag) return false;                                 // cs:49848
+  destroyObjectP = true;                                   // cs:49852
+  for (let k = n5; k < n5 + 3; k++) {
+    for (let l = num; l < num8; l++) {
+      if (!st.inBounds(k, l)) continue;
+      const idx = st.idx(k, l);
+      if (st.flags[idx] && SHEET_OF[st.type[idx]] === 26) killTileGenPile(st, k, l);
+    }
+  }
+  destroyObjectP = false;
+  // cs:49856-49862 尾复扫 5×5（可连锁杀邻组）
+  for (let x = n5 - 1; x < n5 + 4; x++) {
+    for (let y = num - 1; y < num + 4; y++) {
+      tileFrameScoped(st, x, y);
+    }
+  }
+  return true;
 }
 
 /** SquareTileFrame（cs:80924-80934）：列优先 3×3 调用序。 */

@@ -30,6 +30,7 @@ import { UnifiedRandom } from '../../core/rng';
 import type { World } from '../World';
 import type { RNG } from '../../core/rng';
 import { genSquareTileFrame } from '../gen/vanilla/FinalCleanupPass';
+import { genSolidType } from '../gen/vanilla/GenSolid';
 
 interface LiquidEntry { x: number; y: number; kill: number; delay: number; }
 
@@ -125,6 +126,16 @@ const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let q = 0; q < TILE_DEFS.length; q++) {
   const s = TILE_DEFS[q]?.vanilla?.sheet;
   if (typeof s === 'number') SHEET_OF[q] = s;
+}
+/** PlatformProperTopFrame（cs:70197）：帧列号 ∈[0,7]∪[12,16]∪[25,26]
+ *  （Check1xXGen 地基锚的平台特例用；TrapsPass 同款副本） */
+function platformProperTopFrameL(fx: number): boolean {
+  const num = Math.floor(fx / 18);
+  if ((num < 0 || num > 7) && (num < 12 || num > 16)) {
+    if (num >= 25) return num <= 26;
+    return false;
+  }
+  return true;
 }
 
 /* ── gen 期 KillTile 尾 SquareTileFrame 锚点级联 ──────────────────────────────
@@ -315,6 +326,9 @@ export class LiquidSim {
         if (nx < 0 || ny < 0 || nx >= st.w || ny >= st.h) continue;
         const ni = this.idx(nx, ny);
         if ((st.flags[ni]! & 1) && SHEET_OF[st.type[ni]!] === 91) this.checkBannerGen(nx, ny, st.type[ni]!);
+        // ★MMMMMMM：case 92/93/453 → Check1xX（cs:87030）——FCP 引擎缺臂过渡前置扫
+        else if ((st.flags[ni]! & 1) && (SHEET_OF[st.type[ni]!] === 92 || SHEET_OF[st.type[ni]!] === 93
+          || SHEET_OF[st.type[ni]!] === 453)) this.check1xXGen(nx, ny, st.type[ni]!);
       }
     }
     // 签名要求 RNG 非空但 SweepCtx.rng 实为 RNG|undefined（null 路径=掷骰占位 0）
@@ -375,6 +389,62 @@ export class LiquidSim {
     }
     this.destroyObj = false;
     // cs:86491+ 的 type==91 掉落支（Item.NewItem 5673/...）：生成期不产实体，备案
+  }
+
+  /** ★MMMMMMM（2026-08-25）const #49 定罪修复：Check1xX（cs:38169,派发 cs:87030
+   *  case 92/93/453）——吊灯92(6 行)/灯93·武器架453(3 行) 的 1×N 竖排家具完整性：
+   *  组帧逐格校验 + 底格下 SolidTileAllowBottomSlope(cs:70698) 地基锚 → 任一破
+   *  destroyObject 整组杀。FCP 引擎"未移植族"备案含 92/93/453（引擎只 import 禁区,
+   *  按 CheckBanner 前置扫同款惯例就地保留;引擎补臂后可撤）。
+   *  const 链 #49 Settle_Liquids (3335,772)：水淹灯93 底格 → vanilla Check1xX
+   *  整组三格全杀,JS 曾只杀浸水单格 → 孤儿两格 T0>93×2。零掷骰（KillTile 尘掷
+   *  由 killTileGen 常规承载）。 */
+  private check1xXGen(x: number, j: number, type: number): void {
+    if (this.destroyObj) return;                                     // cs:38171 头闸
+    const st = this.world.store;
+    const num = type === 92 ? 6 : 3;                                 // cs:38177（吊灯 6 行）
+    const i0 = this.idx(x, j);
+    const fy = st.frameY[i0] ?? 0;
+    const seg = Math.trunc(fy / (18 * num));                         // 样式段（C# while 减法同构）
+    const rem = fy - seg * 18 * num;
+    const top = j - Math.trunc(rem / 18);                            // num5 = j - num2/18
+    const frameX = st.frameX[i0] ?? 0;
+    let bad = false;
+    for (let k = 0; k < num; k++) {
+      const yy = top + k;
+      if (yy < 0 || yy >= st.h) { bad = true; continue; }            // 越界=null Tile→失配
+      const q = this.idx(x, yy);
+      if (st.flags[q] === 0 || st.type[q] !== type
+        || st.frameY[q] !== k * 18 + seg * 18 * num
+        || st.frameX[q] !== frameX) bad = true;                      // cs:38195-38208
+    }
+    if (!this.solidAllowBottomSlopeGen(x, top + num)) bad = true;    // cs:38213 地基锚
+    if (!bad) return;
+    this.destroyObj = true;
+    for (let k = 0; k < num; k++) {
+      const yy = top + k;
+      if (yy < 0 || yy >= st.h) continue;
+      if (st.type[this.idx(x, yy)] === type) this.killTileGen(x, yy); // cs:38220-38225
+    }
+    this.destroyObj = false;
+  }
+
+  /** SolidTileAllowBottomSlope（cs:70698）：越界/null=true；active && tileSolid∪solidTop
+   *  && (!topSlope ∨ 平台正顶帧) && !half && !inActive。tileSolid 用 genSolidType
+   *  （生成期动态表）、solidTop/平台按 UUU 口径 d.platform 近似（与上方 banner 锚同款）。 */
+  private solidAllowBottomSlopeGen(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
+    const i = this.idx(x, y);
+    if (!st.flags[i]) return false;
+    const t = st.type[i]!;
+    const d = TILE_DEFS[t];
+    const sheet = SHEET_OF[t] ?? -1;
+    const topSlope = st.slope[i] === 1 || st.slope[i] === 2;
+    const isPlatform = !!d?.platform;
+    return (genSolidType(t) || isPlatform)
+      && (!topSlope || (isPlatform && platformProperTopFrameL(st.frameX[i] ?? 0)))
+      && !st.half[i] && ((st.wire[i] >>> 5) & 1) === 0;
   }
 
   // ---- panic 模式（Liquid.cs:975-1070）：缓冲长期超限 → 逐行 QuickWater 强制收敛 ----

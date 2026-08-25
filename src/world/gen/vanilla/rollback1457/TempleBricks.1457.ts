@@ -34,13 +34,16 @@ function setBrickClearAll(st: TileStore, x: number, y: number): void {
   st.wire[i] = 0; st.paint[i] = 0; st.paintWall[i] = 0;
 }
 
-/** 砖线活动格判定（`!tile.active() || tile.type != 226` 的反谓词,FillX/FillY 用）
- *  （存档注：live 版走 TemplePass.sheetOfTP——本仓 tile id 与 vanilla sheet 在 226
- *  处同值,存档副本直接比 type,语义同。） */
+/** 砖线活动格判定（`!tile.active() || tile.type != 226` 的反谓词,FillX/FillY 用）。
+ *  ★LLL 批（2026-08-25）#46 定罪修：必须比对 **JS tile id**（TILE_BY_KEY[
+ *  'v_226_lihzahrd_brick']=87,id=注册序非 vanilla sheet 号!）。曾直比字面量 226
+ *  ——本仓 id 226=v_300_bone_welder、砖 id=87 → 谓词恒假,FillY/FillX 探柱扫描
+ *  永不命中既有砖 → count 恒跑到 ≥300/出界 → 整段 return **零填柱**；细线基格
+ *  再被 templeCleaner(≤1 邻砖) 清光 → #46 缺 ~4.6k 砖格形状差（六链同签名）。 */
 function isActiveBrick226(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
-  return !!st.flags[i] && st.type[i]! === 226;
+  return !!st.flags[i] && st.type[i]! === BRICK;
 }
 
 /** C# Math.Round（银行家舍入,ToEven）——JS Math.round 是 half-away,轴对齐整数

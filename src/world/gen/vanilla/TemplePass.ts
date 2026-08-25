@@ -342,6 +342,10 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   //      两套基准并存（七条 mile8 槽链=1456 认证线,2026-08-23 #46 神庙槽定罪后补门）。
   if (hfIs1457()) makeTempleGenerateBricks(st, rooms, depths);
   else makeTempleCorridors(st, rooms);
+  {
+    const f = (globalThis as { __swTmMark?: (s: string) => void }).__swTmMark;
+    if (f) f('bricks');
+  }
   // ---- 房间实心 + 双遍游走挖腔(L17280-17381)----
   for (const r of rooms) {
     for (let x = r.x; x < r.x + r.w; x++) {

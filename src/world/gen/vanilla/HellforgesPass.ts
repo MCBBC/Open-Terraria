@@ -4,41 +4,32 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { vanGenSolidType } from './GenSolid';
 
 const HELLFORGE = TILE_BY_KEY['v_77_hellforge']!;
 
-/** AnchorValid（WorldGen.cs:51851+）Hellforge 锚类型 = SolidTile|SolidWithTop|SolidSide
- *  （TileObjectData.Style3x2 基类 AnchorBottom，cs:3165——3 列底锚全列须过）。
- *  blockType: 0 整砖 / 1 半砖 / 2-5 坡面（half?1:slope，slope 通道即原版 slope()）。
- *  tileNoAttach 生成态恒 false（该集=藤蔓/蛛网类装饰，地狱地板不涉及）。 */
+/** ★NNN 批（2026-08-25）勘误：Hellforge 底锚谓词=**SolidTile2**（cs:71024）而非
+ *  AnchorValid 三连并集——1457 PlaceTile case 17/77/133 → Place3x2（cs:52526）default
+ *  支逐列 `SolidTile2(i, y+1)`。cs:8049-8050 `tileSolid[19]=true`（1.4.5 平台转实心）
+ *  ⇒ SolidTile2=active && tileSolid && ((plat&&(half‖topSlope)) ‖ slope==0) && !half
+ *  && !inActive——平台**无帧检查**（PlatformProperTopFrame 不参与！）、239/380 等
+ *  tileSolid 族全过。
+ *  曾用 cs:51851 AnchorValid 三连并集（含平台帧门）→ 平台桥中段帧（frameX 档外）
+ *  被误拒：ntb #72 首差链实证——(2035,1109) 锚行 {19,76,76} vanilla 收 JS 拒 →
+ *  该座成功后掷流错位 → JS 多出一座 (2090,1092) T0>77×6。 */
+const HF_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]); // TileID.Sets.Platforms
 function anchorValid(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
-  if (!st.flags[i] || ((st.wire[i] >>> 5) & 1) === 1) return false;   // nactive()
+  if (!st.flags[i] || ((st.wire[i] >>> 5) & 1) === 1) return false;   // active && !inActive
   const t = st.type[i];
   const d = TILE_DEFS[t];
   if (!d) return false;
   const sheet = d.vanilla?.sheet ?? -1;
-  const PLATFORMS = sheet === 19 || sheet === 427 || (sheet >= 435 && sheet <= 439); // TileID.Sets.Platforms（TileID.cs:243）
-  const solid = !!d.solid;
-  const solidTop = PLATFORMS || sheet === 239 || sheet === 380;   // tileSolidTop 家族
-  const bt = st.half[i] ? 1 : st.slope[i];
-  // SolidTile（cs:51857）：tileSolid && !solidTop && blockType==0
-  if (solid && !solidTop && bt === 0) return true;
-  // SolidWithTop（cs:51870）：平台帧合法 或 tileSolid&&tileSolidTop
-  if (PLATFORMS) {
-    // ★R11-H2（2026-08-24）：平台帧除数 36→18——PlatformFrameWidth()=
-    //   TileObjectData._data[19].CoordinateFullWidth=**18**（TileObjectData.cs:5122-25;
-    //   FinalCleanupPass.ts:375 同表 /18 并注释钉死）。/36 为仓内自不一致
-    //   （frameX∈{144,180,288,432} 四档判定两版相反）。地狱域无平台,零现症,口径债。
-    const num = Math.trunc(st.frameX[i] / 18);
-    if ((!st.half[i] && num >= 0 && num <= 7) || (num >= 12 && num <= 16) || (num >= 25 && num <= 26)) return true;
-  } else if (solid && solidTop) return true;
-  // SolidSide（cs:51889）：tileSolid && !solidTop && blockType∈{4,5}
-  if (solid && !solidTop && (bt === 4 || bt === 5)) return true;
-  return false;
+  const plat = HF_PLATFORM_SHEETS.has(sheet);
+  const topSlope = st.slope[i] === 1 || st.slope[i] === 2;
+  return !!vanGenSolidType(t) && ((plat && topSlope) || st.slope[i] === 0) && st.half[i] === 0;
 }
-
 export function runHellforgesPass(st: TileStore, rng: RNG): void {
   const { w, h } = st;
   const count = Math.floor(w / 200);
@@ -81,8 +72,13 @@ export function runHellforgesPass(st: TileStore, rng: RNG): void {
                 st.setTileSilent(x + dx, y - 1 + dy, HELLFORGE, (dx + 1) * 18, dy * 18);
               }
             }
-            done = true;
-          } else fail++;
+          }
+          // ★NNN：成功判据=PlaceTile 后头格 type==77（cs:18326-18327）——**含重叠幂等**：
+          //   落点恰为本 pass 早前熔炉格时，Place3x2 净空门拒写但头格已是 77 → vanilla
+          //   仍算成功（ntb 实证：#20 座 (2090,1092) 前的 (2035,1109) 重叠重放置，
+          //   JS 曾要求全新净空 → 多滚出一座多余熔炉 T0>77×6）。失败才 num3++。
+          done = st.type[st.idx(x, y)] === HELLFORGE;
+          if (!done) fail++;
         }
         if (fail >= 10000) done = true;
       }

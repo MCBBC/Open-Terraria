@@ -537,10 +537,44 @@ export class Sfx {
   /** 原版单实例"播着跳过"族(LegacySoundPlayer.cs case 15 :825-841:实例 State==Playing
    *  时 return null 不重触发)——仅 Roar:多段蠕虫(毁灭者 80 段各自掷 soundDelay)靠
    *  同槽互斥收敛为单声,否则每 10-20t 满响吼叫叠成音墙。NPC_Hit(case3)是 Stop-重播、
-   *  NPC_Killed(case4)/僵尸族(case14/26/29)每次都播,均不在此列 */
+   *  NPC_Killed(case4)/僵尸族(case14/26/29)每次都播,均不在此列(R22 登记面维持) */
   private static readonly SINGLE_INSTANCE = new Set(['Roar_0', 'Roar_1', 'NPC_Killed_10']);
+  /** ★R26 GAP-05:Item 音库(case 2 LegacySoundPlayer.cs:519-643)三组实例槽语义——
+   *  原版每个 style 一条 SoundInstanceItem[num] 槽,快速连发时:
+   *  · SKIP_IF_PLAYING(styles 53/55/159,:555-561/:587-591):在播 → return null 不重触发;
+   *  · OVERLAP_OK(例外不停播清单 styles 9/10/24/26/34/43/103/156/162/205,:604-615):
+   *    不停旧实例自由叠响(Crystal Storm Item_9 连发多层音墙=原版真态!);
+   *  · 其余全部 default(:600-603):**先 .Stop() 上一实例再建新实例**(Stop-then-play)
+   *    ——快速连发的魔法杖(Item_13/20/21/8…)原版是单实例替换非多层叠响。
+   *  键=wav 文件名(Item_N 与槽号 num 一一对应);case 1 的 Item_1→18/19 轮换发生在
+   *  槽判定之前(playWavFile 头),轮换后的文件按自身组别管理(:556 重赋值 num 后再走槽) */
+  private static readonly ITEM_SKIP_IF_PLAYING = new Set(['Item_53', 'Item_55', 'Item_159']);
+  private static readonly ITEM_OVERLAP_OK = new Set([
+    'Item_9', 'Item_10', 'Item_24', 'Item_26', 'Item_34', 'Item_43',
+    'Item_103', 'Item_156', 'Item_162', 'Item_205',
+  ]);
+  /** 单实例槽分类('skip'=在播跳过 / 'stop'=先停后播 / 'none'=不管理可自由叠响):
+   *  Item_N 全体入槽管理(槽引用照记,default 组停旧、例外组只换绑),Roar 族维持 skip */
+  private static slotAction(file: string): 'skip' | 'stop' | 'none' {
+    if (Sfx.SINGLE_INSTANCE.has(file)) return 'skip';
+    if (/^Item_\d+$/.test(file)) {
+      if (Sfx.ITEM_SKIP_IF_PLAYING.has(file)) return 'skip';
+      if (Sfx.ITEM_OVERLAP_OK.has(file)) return 'none';
+      return 'stop';
+    }
+    return 'none';
+  }
   /** 单实例槽:file → 正在播的 source(onended 清) */
   private singlePlaying = new Map<string, AudioBufferSourceNode>();
+  /** Stop-then-play 的"先停"半边(default 分支 :600-603 SoundInstanceItem[num].Stop()):
+   *  立即停旧源并清槽,新实例随后入槽。幂等(空槽静默) */
+  private stopSingleSlot(file: string): void {
+    const prev = this.singlePlaying.get(file);
+    if (prev) {
+      try { prev.stop(); } catch { /* 已停 */ }
+      this.singlePlaying.delete(file);
+    }
+  }
 
   /** 按需取缓冲（同步面）：命中返回缓冲；未命中触发后台加载并同步返回 null。
    *  资源包覆盖优先（M13，AssetSourceController.UseResourcePacks 的音频源同语义）：
@@ -903,7 +937,9 @@ export class Sfx {
   /** 缓冲起振（playWavFile 即时路径与 deferPlay 补播共用的出声单点）：
    *  音高（PITCH_CASE 逐类型档,pitch 直传跳过）+ 音轨分派（LegacySoundPlayer.cs:420-429：
    *  ambient 成员 ×ambientVolume，其余 ×soundVolume(master)——替换而非叠加）+ 声像 +
-   *  单实例占槽（onended=自然播完/stop 均触发,清槽后可重播） */
+   *  单实例占槽（onended=自然播完/stop 均触发,清槽后可重播）。★R26：Item_N 全体
+   *  入槽（SoundInstanceItem[num] 每播重绑——例外组旧实例不 stop 自然播完但槽已换绑,
+   *  下一次 default 组播放只停最新绑定的那个,:604-615 语义保真） */
   private startBuffer(file: string, buf: AudioBuffer, vol: number, pitch?: number, pan = 0): void {
     const ctx = this.ctx!;
     const src = ctx.createBufferSource();
@@ -914,7 +950,7 @@ export class Sfx {
     src.connect(g);
     connectPan(ctx, g, pan);
     src.start();
-    if (Sfx.SINGLE_INSTANCE.has(file)) {
+    if (Sfx.slotAction(file) !== 'none') {
       this.singlePlaying.set(file, src);
       src.onended = () => {
         if (this.singlePlaying.get(file) === src) this.singlePlaying.delete(file);
@@ -926,11 +962,17 @@ export class Sfx {
    *  后台加载，解码完成后按原触发参数补播一次。门/互斥在补播时点重判
    *  （suppress 置位后排队的补播被拦——与即时路径同一门语义）；ctx 仍 suspended
    *  则挂 resume 后起振。加载失败（负缓存）则本次保持静默，后续触发经
-   *  playWavFile false 走合成兜底（WAV_MAP 全 98 文件在盘，实际不达）。 */
+   *  playWavFile false 走合成兜底（WAV_MAP 全 98 文件在盘，实际不达）。
+   *  ★R26：互斥重判扩为三组槽语义——skip 组在播丢弃;stop 组先停旧实例再补播
+   *  （连发首拍未命中缓存、第二拍已命中并播出的场景,槽序与即时路径一致）。 */
   private deferPlay(file: string, ctx: AudioContext, vol: number, x: number | undefined, y: number | undefined, pitch: number | undefined, replace: boolean | undefined): void {
     void this.ensureBufferAsync(file, ctx).then((buf) => {
       if (!buf || this.suppress) return;
-      if (!replace && Sfx.SINGLE_INSTANCE.has(file) && this.singlePlaying.has(file)) return;
+      if (!replace) {
+        const act = Sfx.slotAction(file);
+        if (act === 'skip' && this.singlePlaying.has(file)) return;
+        if (act === 'stop') this.stopSingleSlot(file);
+      }
       const fire = () => this.startBuffer(file, buf, vol, pitch, this.panOf(x, y));
       if (ctx.state === 'suspended') void ctx.resume().then(fire, fire);
       else fire();
@@ -950,9 +992,24 @@ export class Sfx {
    *  旧实例在 _trackedInstances 里继续自然播完）——无视互斥每次都播、槽位换绑
    *  新实例（旧 onended 因槽已换绑不误删）。case 15 调用勿传（保持播着跳过） */
   playWavFile(file: string, vol = 1, x?: number, y?: number, pitch?: number, replace?: boolean): boolean {
+    // ★R26 GAP-06:case 2 style 1 三变体轮换(LegacySoundPlayer.cs:556-563):
+    // `num11=Main.rand.Next(3); num11==1→num=18; num11==2→num=19`——**随机**三选一
+    // (非顺序轮换),近战挥砍嘶声 Item_1 有 2/3 概率换播 Item_18/Item_19。库层单点拦截:
+    // 所有 PlaySound(2,1) 调用面(挥剑/投掷/回旋镖/链锤 UseSound…)统一轮换;后续音量/
+    // 音高/槽互斥全按轮换后文件计(原版 num 重赋值后再建实例同序,PITCH/FILE 表已含 18/19)
+    if (file === 'Item_1') {
+      const roll = Math.floor(Math.random() * 3);
+      if (roll === 1) file = 'Item_18';
+      else if (roll === 2) file = 'Item_19';
+    }
     if (this.suppress) return false;         // 载入期静音门（见字段注释）
-    // 单实例互斥（case 15 Roar 播着跳过——见 SINGLE_INSTANCE 注释；case36 replace 豁免）
-    if (!replace && Sfx.SINGLE_INSTANCE.has(file) && this.singlePlaying.has(file)) return false;
+    // 单实例互斥(R26 GAP-05 扩为三组:skip 在播跳过 / stop 先停旧实例再播 / none 自由叠响;
+    // 见 slotAction 注释——case 15 Roar 维持 skip、case36 replace 豁免一切)
+    if (!replace) {
+      const act = Sfx.slotAction(file);
+      if (act === 'skip' && this.singlePlaying.has(file)) return false;
+      if (act === 'stop') this.stopSingleSlot(file);
+    }
     const ctx = this.ensure();
     if (!ctx) return false;
     const v = this.atten(vol, x, y);

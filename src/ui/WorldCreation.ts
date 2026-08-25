@@ -3,7 +3,7 @@
 import { parseSeed } from '../world/gen/SeedEasterEggs';
 import { randomWorldName } from '../i18n/RandomText';
 import { Lang } from '../i18n/Lang';
-import { ensureVanillaKit } from './vanillaKit';
+import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
 
 export interface WorldCreationFlow {
   onCreate(cfg: { name: string; seed: string; w: number; h: number; /** 尺寸档 0 小/1 中/2 大（SIZES 下标；GenConfig.size 直传，W/H 与之同源派生） */ size: number; difficulty: number; evil: -1 | 0 | 1 }): void;
@@ -80,9 +80,23 @@ const CSS = `
   .sw-wc-side { width: 100%; flex-direction: row; justify-content: center; }
   .sw-wc-opt span { font-size: 13px; }
   .sw-wc-row input[type=text] { font-size: 16px; }
+  .sw-wc-panel { translate: 0 var(--kb-shift, 0px); transition: translate .15s; }
 }
 @media (max-height: 500px) {
-  .sw-wc-panel { max-height: 96vh; overflow-y: auto; overscroll-behavior: contain; }
+  .sw-wc-panel { max-height: 96vh; overflow-y: auto; overscroll-behavior: contain;
+    translate: 0 var(--kb-shift, 0px); transition: translate .15s; }
+  /* 矮横屏(~390 高)纵向体量压缩——目标:全面板一屏放下(Create 钮不被折叠),
+   * overflow-y 仅作极端字号/语言下的兜底 */
+  .sw-wc-title { margin-bottom: 4px; font-size: 16px; }
+  .sw-wc-main { gap: 6px; }
+  .sw-wc-row input[type=text] { padding: 4px 8px; }
+  .sw-wc-grouplabel { font-size: 12px; }
+  .sw-wc-opt { padding: 2px 4px; }
+  .sw-wc-opt img { width: 26px; height: 26px; }
+  .sw-wc-desc { min-height: 18px; font-size: 11px; }
+  .sw-wc-preview { width: 88px; height: 88px; }
+  .sw-wc-footer { margin-top: 6px; }
+  .sw-wc-footer button { padding: 5px 16px; font-size: 14px; }
 }
 `;
 
@@ -152,11 +166,13 @@ export class WorldCreationPanel {
     this.panel.querySelector('[data-act=create]')!.addEventListener('click', () => this.submit());
     this.escHandler = (e: KeyboardEvent) => { if (e.code === 'Escape') this.close(flow.onCancel); };
     window.addEventListener('keydown', this.escHandler);
+    this.unsubKb = bindKeyboardShift(this.panel);   // 移动端键盘遮挡补偿
     this.unsubLang = Lang.onChange(() => this.rebuild());
     parent.appendChild(this.panel);
   }
 
   private unsubLang: (() => void) | null = null;
+  private unsubKb: (() => void) | null = null;
 
   /** 语言切换 → 重建面板(保留 sel/世界名/种子输入) */
   private rebuild() {
@@ -265,6 +281,7 @@ export class WorldCreationPanel {
 
   private close(fn: () => void) {
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
+    this.unsubKb?.();
     this.unsubLang?.();
     this.panel.remove();
     fn();

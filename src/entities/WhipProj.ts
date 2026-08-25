@@ -338,6 +338,25 @@ export class WhipProj extends Entity {
       echo.ai2 = 1000 + echoAnim * 2;   // ai6=1000+itemAnimationMax×2（Player.cs:49171）
       (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(echo, 'projectiles');
     }
+    // ---- AI_165 尾段逐鞭拖尾尘（WHIP_TRAIL_DUST 表,R31 §B② P1）——原版每 update
+    // 跑一次（:48660 switch 在 AI_165 内）,此处随命中循环同拍逐 update 调用;
+    // 曲线取该 update 快照（FillWhipControlPoints getActualCollisionPoints=false 视觉曲线）
+    const fn = WHIP_TRAIL_DUST[this.projId];
+    if (fn) {
+      const facing = owner?.facing ?? this.spriteDir;
+      for (let s = 1; s <= this.maxUpdates; s++) {
+        const ai0s = prevAi0 + s;
+        fn({
+          game,
+          pts: this.pointsAt(ai0s, false),
+          env: whipSwingEnvelope(ai0s / this.timeToFlyOut),
+          t: ai0s / this.timeToFlyOut,
+          facing,
+          pvx: owner?.vx ?? 0, pvy: owner?.vy ?? 0,
+          vx: this.vx, vy: this.vy,
+        });
+      }
+    }
   }
 
   /** CutTiles（Projectile.cs:15292-15300 `Sets.IsAWhip[type]` 支）：FillWhipControlPoints
@@ -535,6 +554,353 @@ export class WhipProj extends Entity {
     ctx.restore();
   }
 }
+
+// ===================== AI_165 尾段逐鞭拖尾尘（1458 Projectile.cs:48660-49145,R31 §B② P1） =====================
+// 挥鞭火花尘 switch 真值表——挥动包络门（whipSwingEnvelope）+ per-type 粒型/掷域/速度式。
+// 掷域盒 = Utils.CenteredRectangle(控制点,(30,30)) → spawnDust(x-15,y-15,30,30,…);
+// 段向 = DirectionTo(points[n-1],points[n]) 归一。命中瞬间原版无尘（正确不作为）。
+// ★R31 报告对 1104 的描述（15×d6+6×d31 tip 爆）与源码 :49096 支不符——该支实为
+// d4 蓝火花沿鞭撒布；其"中段溅火"在 StatusNPC 命中窗（:11255-11272,本仓 tryHit
+// spark1104 已接）。按反编译源码实现（CLAUDE.md 纪律）。
+interface WhipDustCtx {
+  game: GameHooks;
+  /** 视觉控制点（getActualCollisionPoints=false,首元素=锚点） */
+  pts: V2[];
+  /** 挥动包络 GetLerpValue(0.1,0.7,t)×GetLerpValue(0.9,0.7,t) */
+  env: number;
+  /** 原始进度 ai[0]/timeToFlyOut（849 用裸 t 门非 env） */
+  t: number;
+  /** player.direction */
+  facing: number;
+  /** 玩家速度（1030 血鞭掺入）与弹体速度（1104 掺入） */
+  pvx: number; pvy: number; vx: number; vy: number;
+}
+/** DirectionTo 归一（a→b）;零距返零向量（SafeNormalize(Vector2.Zero) 同态） */
+const whipSegDir = (a: V2, b: V2): V2 => {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const d = Math.hypot(dx, dy);
+  return d > 0 ? v2(dx / d, dy / d) : v2(0, 0);
+};
+const whipRot90 = (s: V2, quarterTurns: number): V2 => {
+  const ang = quarterTurns * Math.PI / 2;
+  const c = Math.cos(ang), sn = Math.sin(ang);
+  return v2(s.x * c - s.y * sn, s.x * sn + s.y * c);
+};
+const WHIP_TRAIL_DUST: Record<number, (c: WhipDustCtx) => void> = {
+  // 848 晨星鞭（:48660-48677）：env>0.1 且 rand<env/2 → 鞭尖 30 盒 d172(alpha100,
+  //    scale1.5,noGravity,v÷2)
+  848: (c) => {
+    if (!(c.env > 0.1) || Math.random() >= c.env / 2) return;
+    const tip = c.pts[c.pts.length - 1];
+    const d = c.game.spawnDust?.(tip.x - 15, tip.y - 15, 30, 30, 172, 0, 0, 100, null, 1.5);
+    if (d) { d.noGravity = true; d.vx /= 2; d.vy /= 2; }
+  },
+  // 847 杜兰达尔剑鞭（:48678-48707）：env>0.5 且 Next(3)!=0 → 末 10 点随机段 30 盒,
+  //    d57（1/3→d43）White,fadeIn0.3,noGravity,v=×0.5+段向.RotBy(dir×π/2) 再 ×0.5
+  847: (c) => {
+    if (!(c.env > 0.5) || Math.floor(Math.random() * 3) === 0) return;
+    const n = c.pts.length;
+    const idx = (n - 10) + Math.floor(Math.random() * 10);
+    if (idx < 1 || idx >= n) return;
+    const p = c.pts[idx];
+    const type = Math.floor(Math.random() * 3) === 0 ? 43 : 57;
+    const d = c.game.spawnDust?.(p.x - 15, p.y - 15, 30, 30, type, 0, 0, 100,
+      { r: 255, g: 255, b: 255, a: 255 });
+    if (!d) return;
+    d.x = p.x; d.y = p.y;             // dust.position = points[idx]
+    d.fadeIn = 0.3; d.noGravity = true;
+    d.vx *= 0.5; d.vy *= 0.5;
+    const s = whipRot90(whipSegDir(c.pts[idx - 1], p), c.facing);
+    d.vx += s.x; d.vy += s.y;
+    d.vx *= 0.5; d.vy *= 0.5;
+  },
+  // 849 黑收成（:48708-48740）：裸 t>0.4 且 Next(9)!=0 → 尖端 d191(scale1.3,noGr,
+  //    v+=段向×2)+1/2 黑电编排粒子近似;AddLight(0.2,0,0.4)=R18 光照域登记不接
+  849: (c) => {
+    if (!(c.t > 0.4) || Math.floor(Math.random() * 9) === 0) return;
+    const n = c.pts.length;
+    const tip = c.pts[n - 1];
+    const dir = whipSegDir(c.pts[n - 2], tip);
+    const d = c.game.spawnDust?.(tip.x - 15, tip.y - 15, 30, 30, 191, 0, 0, 0, null, 1.3);
+    if (d) { d.noGravity = true; d.vx += dir.x * 2; d.vy += dir.y * 2; }
+    if (Math.random() < 0.5) {
+      c.game.spawnParticles(tip.x, tip.y, '#2A104A', 2, 2.2, { life: 20 }); // BlackLightningSmall 编排近似
+    }
+  },
+  // 915 万花筒（:48741-48776）：env>0.1 → 尖端 d267(hue=miscCounterNormalized×9%1——
+  //    本仓 whipHueClock 时钟档,scale0.9+r×0.9,fadeIn r×0.9,v×r×0.8+段向×2)+
+  //    白影 CloneDust(scale÷2,fadeIn×0.85)
+  915: (c) => {
+    if (!(c.env > 0.1)) return;
+    const n = c.pts.length;
+    const tip = c.pts[n - 1];
+    const dir = whipSegDir(c.pts[n - 2], tip);
+    const [r, g, b] = hslToRgb255((whipHueClock() * 9) % 1, 1, 0.5, 255);
+    const d = c.game.spawnDust?.(tip.x - 15, tip.y - 15, 30, 30, 267, 0, 0, 0,
+      { r, g, b, a: 255 }, 1.3);
+    if (!d) return;
+    const m = Math.random() * 0.8;
+    d.vx *= m; d.vy *= m;
+    d.noGravity = true;
+    d.scale = 0.9 + Math.random() * 0.9;
+    d.fadeIn = Math.random() * 0.9;
+    d.vx += dir.x * 2; d.vy += dir.y * 2;
+    const w = c.game.spawnDust?.(d.x - 15, d.y - 15, 30, 30, 267, d.vx, d.vy, 0,
+      { r: 255, g: 255, b: 255, a: 255 }, d.scale / 2);
+    if (w) w.fadeIn = d.fadeIn * 0.85;
+  },
+  // 914 荆棘鞭（:48777-48800）：env>0.1 且 rand<env/2 → d39(scale1.2,noGr 1/3,v+=段向×2)
+  914: (c) => {
+    if (!(c.env > 0.1) || Math.random() >= c.env / 2) return;
+    const n = c.pts.length;
+    const tip = c.pts[n - 1];
+    const dir = whipSegDir(c.pts[n - 2], tip);
+    const d = c.game.spawnDust?.(tip.x - 15, tip.y - 15, 30, 30, 39, 0, 0, 0, null, 1.2);
+    if (d) { d.noGravity = Math.floor(Math.random() * 3) === 0; d.vx += dir.x * 2; d.vy += dir.y * 2; }
+  },
+  // 952 骨鞭（:48801-48823）：env>0.15 且 rand<env → d26(scale0.7,noGr 1/3 时 +0.4,
+  //    v+=段向×2)
+  952: (c) => {
+    if (!(c.env > 0.15) || Math.random() >= c.env) return;
+    const n = c.pts.length;
+    const tip = c.pts[n - 1];
+    const dir = whipSegDir(c.pts[n - 2], tip);
+    const d = c.game.spawnDust?.(tip.x - 15, tip.y - 15, 30, 30, 26, 0, 0, 0, null, 0.7);
+    if (!d) return;
+    d.noGravity = Math.floor(Math.random() * 3) === 0;
+    if (d.noGravity) d.scale += 0.4;
+    d.vx += dir.x * 2; d.vy += dir.y * 2;
+  },
+  // 1034 星座鞭（:48824-48852）：同 847 式,d135(White,alpha100,scale1.5);旋转符号
+  //    ×Sign(value)(value=外层局部,取 spriteDir 符号近似,登记)
+  1034: (c) => {
+    if (!(c.env > 0.5) || Math.floor(Math.random() * 3) === 0) return;
+    const n = c.pts.length;
+    const idx = (n - 10) + Math.floor(Math.random() * 10);
+    if (idx < 1 || idx >= n) return;
+    const p = c.pts[idx];
+    const d = c.game.spawnDust?.(p.x - 15, p.y - 15, 30, 30, 135, 0, 0, 100,
+      { r: 255, g: 255, b: 255, a: 255 }, 1.5);
+    if (!d) return;
+    d.x = p.x; d.y = p.y;
+    d.fadeIn = 0.3; d.noGravity = true;
+    d.vx *= 0.5; d.vy *= 0.5;
+    const s = whipRot90(whipSegDir(c.pts[idx - 1], p), c.facing);
+    d.vx += s.x; d.vy += s.y;
+    d.vx *= 0.5; d.vy *= 0.5;
+  },
+  // 1035 月主鞭（:48853-48893）：env>0.5 且 Next(3)!=0 → 末 8 点随机段 20 盒
+  //    d306(Color(147,255,220),alpha100,scale1.6,半数 noGr 半数 scale×0.5,
+  //    v=弹向归一×段长×0.5 再 RotBy(rand±0.2π))+d229 同点(v 继承,scale0.3-1.4 递减)
+  1035: (c) => {
+    if (!(c.env > 0.5) || Math.floor(Math.random() * 3) === 0) return;
+    const n = c.pts.length;
+    const idx = (n - 8) + Math.floor(Math.random() * 8);
+    if (idx < 1 || idx >= n) return;
+    const p = c.pts[idx];
+    const segLen = Math.hypot(p.x - c.pts[idx - 1].x, p.y - c.pts[idx - 1].y);
+    const d = c.game.spawnDust?.(p.x - 10, p.y - 10, 20, 20, 306, 0, 0, 100,
+      { r: 147, g: 255, b: 220, a: 255 }, 1.6);
+    if (!d) return;
+    d.x = p.x; d.y = p.y;
+    d.noGravity = Math.floor(Math.random() * 2) === 0;
+    if (!d.noGravity) d.scale *= 0.5;
+    const vl = Math.hypot(c.vx, c.vy) || 1;
+    let dvx = c.vx / vl * segLen * 0.5, dvy = c.vy / vl * segLen * 0.5;
+    const ra = (Math.random() * 2 - 1) * Math.PI * 2 * 0.1;
+    const rc = Math.cos(ra), rs = Math.sin(ra);
+    d.vx = dvx * rc - dvy * rs; d.vy = dvx * rs + dvy * rc;
+    const d2 = c.game.spawnDust?.(p.x, p.y, 0, 0, 229, d.vx, d.vy, 0, null, 0.3 + 1.1 * Math.random());
+    if (d2) { d2.noGravity = true; d2.vx *= d2.scale * Math.random(); d2.vy *= d2.scale * Math.random(); }
+  },
+  // 1028 麻花鞭（:48894-48917）：env>0.15 且 rand<env 且 1/2 → d30(scale0.7,noGr 1/3
+  //    +0.3,v+=段向×2)
+  1028: (c) => {
+    if (!(c.env > 0.15) || Math.random() >= c.env || Math.floor(Math.random() * 2) !== 0) return;
+    const n = c.pts.length;
+    const tip = c.pts[n - 1];
+    const dir = whipSegDir(c.pts[n - 2], tip);
+    const d = c.game.spawnDust?.(tip.x - 15, tip.y - 15, 30, 30, 30, 0, 0, 0, null, 0.7);
+    if (!d) return;
+    d.noGravity = Math.floor(Math.random() * 3) === 0;
+    if (d.noGravity) d.scale += 0.3;
+    d.vx += dir.x * 2; d.vy += dir.y * 2;
+  },
+  // 912 酷鞭（:48918-48960）：env>0.1 且 rand<env/2 → 3×d16(noGr)+1×d13(scale0.8)
+  //    +3×(1/2)d261(透明,scale0.8,v×0.3,noGr) 均 v+=段向×2;AddLight 登记不接
+  912: (c) => {
+    if (!(c.env > 0.1) || Math.random() >= c.env / 2) return;
+    const n = c.pts.length;
+    const tip = c.pts[n - 1];
+    const dir = whipSegDir(c.pts[n - 2], tip);
+    const emit = (type: number, scale: number, col: { r: number; g: number; b: number; a: number } | null): void => {
+      const d = c.game.spawnDust?.(tip.x - 15, tip.y - 15, 30, 30, type, 0, 0, 0, col, scale);
+      if (!d) return;
+      d.noGravity = true;
+      d.vx += dir.x * 2; d.vy += dir.y * 2;
+      return;
+    };
+    for (let i = 0; i < 3; i++) emit(16, 1.2, null);
+    emit(13, 0.8, null);
+    for (let i = 0; i < 3; i++) {
+      if (Math.random() < 0.5) {
+        const d = c.game.spawnDust?.(tip.x - 15, tip.y - 15, 30, 30, 261, 0, 0, 0,
+          { r: 0, g: 0, b: 0, a: 0 }, 0.8);
+        if (d) { d.vx = (d.vx + dir.x * 2) * 0.3; d.vy = (d.vy + dir.y * 2) * 0.3; d.noGravity = true; }
+      }
+    }
+  },
+  // 913 火鞭（:48961-48992）：env>0.1 且 rand<env → 3 循环（1/3 跳过）：
+  //    1/7→d31 烟(fadeIn1-1.6,noGr,v=v÷2+段向×2) 否则 d6(scale1.2,v+=段向×2,
+  //    2/3 档 fadeIn0.7-1.6/scale0.6/noGr)
+  913: (c) => {
+    if (!(c.env > 0.1) || Math.random() >= c.env) return;
+    const n = c.pts.length;
+    const tip = c.pts[n - 1];
+    const dir = whipSegDir(c.pts[n - 2], tip);
+    for (let i = 0; i < 3; i++) {
+      if (Math.floor(Math.random() * 3) !== 0) continue;
+      if (Math.floor(Math.random() * 7) === 0) {
+        const d = c.game.spawnDust?.(tip.x - 10, tip.y - 10, 20, 20, 31);
+        if (d) { d.vx = d.vx / 2 + dir.x * 2; d.vy = d.vy / 2 + dir.y * 2; d.fadeIn = 1 + Math.random() * 0.6; d.noGravity = true; }
+      } else {
+        const d = c.game.spawnDust?.(tip.x - 10, tip.y - 10, 20, 20, 6, 0, 0, 0, null, 1.2);
+        if (!d) continue;
+        d.vx += dir.x * 2; d.vy += dir.y * 2;
+        if (Math.floor(Math.random() * 3) !== 0) {
+          d.fadeIn = 0.7 + Math.random() * 0.9; d.scale = 0.6; d.noGravity = true;
+        }
+      }
+    }
+  },
+  // 1033 电鳗鞭（:48993-49036）：沿第 10..末控制点每段 1/5 掷且 rand<t：
+  //    1/3→d217(scale1.4,alpha100,noGr,noLight,v=±(π/2..π) 向×Next(3,8)×2 ÷4+段向×3)
+  //    其余 1/4→d226(scale0.7,noGr 1/3+0.3,v+=段向±0.196rad×2)
+  1033: (c) => {
+    const n = c.pts.length;
+    for (let k = 10; k < n - 1; k++) {
+      if (Math.floor(Math.random() * 5) === 0 && Math.random() <= c.t) {
+        const seg = whipSegDir(c.pts[k], c.pts[k + 1]);
+        if (Math.floor(Math.random() * 3) === 0) {
+          const ang = Math.random() * Math.PI - Math.PI / 2;
+          const mag = (3 + Math.floor(Math.random() * 5)) * 2;   // Next(3,8)
+          const d = c.game.spawnDust?.(c.pts[k + 1].x - 15, c.pts[k + 1].y - 15, 30, 30, 217,
+            Math.cos(ang) * mag, Math.sin(ang) * mag, 100, null, 1.4);
+          if (d) { d.noGravity = true; d.noLight = true; d.vx /= 4; d.vy /= 4; d.vx += seg.x * 3; d.vy += seg.y * 3; }
+        } else {
+          if (Math.floor(Math.random() * 4) !== 0) continue;
+          const ra = (Math.random() * 2 - 1) * 0.19634954631328583;
+          const rc = Math.cos(ra), rs = Math.sin(ra);
+          const d = c.game.spawnDust?.(c.pts[k + 1].x - 15, c.pts[k + 1].y - 15, 30, 30, 226, 0, 0, 0, null, 0.7);
+          if (!d) continue;
+          d.noGravity = Math.floor(Math.random() * 3) === 0;
+          if (d.noGravity) d.scale += 0.3;
+          d.vx += (seg.x * rc - seg.y * rs) * 2;
+          d.vy += (seg.x * rs + seg.y * rc) * 2;
+        }
+      }
+    }
+  },
+  // 1029 恶魔鞭（:49037-49059）：env>0.6 且 1/2 → 2×(d18|d184 各半,scale0.7,
+  //    noGr=184 或 1/3 时 +0.3,v+=段向×2)
+  1029: (c) => {
+    if (!(c.env > 0.6) || Math.floor(Math.random() * 2) !== 0) return;
+    const n = c.pts.length;
+    const tip = c.pts[n - 1];
+    const dir = whipSegDir(c.pts[n - 2], tip);
+    for (let k = 0; k < 2; k++) {
+      const type = Math.random() < 0.5 ? 18 : 184;
+      const d = c.game.spawnDust?.(tip.x - 15, tip.y - 15, 30, 30, type, 0, 0, 0, null, 0.7);
+      if (!d) continue;
+      d.noGravity = type === 184 || Math.floor(Math.random() * 3) === 0;
+      if (d.noGravity) d.scale += 0.3;
+      d.vx += dir.x * 2; d.vy += dir.y * 2;
+    }
+  },
+  // 1030 血鞭（:49060-49094）：env>0.6 且 Next(4)!=0 → 后半控制点逐点 1/6(末点恒出):
+  //    末点 4 枚否则 1;d115|d5 各半(scale0.3-0.6,v+=段向×3×r 再 ×0.5+vX×dir×2+
+  //    玩家速×r,fadeIn=scale×1.1,次枚起 alpha=r(200))
+  1030: (c) => {
+    if (!(c.env > 0.6) || Math.floor(Math.random() * 4) === 0) return;
+    const n = c.pts.length;
+    for (let k = Math.floor(n / 2); k < n; k++) {
+      if (Math.floor(Math.random() * 6) !== 0 && k !== n - 1) continue;
+      const cnt = k === n - 1 ? 4 : 1;
+      const seg = whipSegDir(c.pts[k - 1], c.pts[k]);
+      for (let m = 0; m < cnt; m++) {
+        const type = Math.random() < 0.5 ? 115 : 5;
+        const sc = 0.3 + 0.3 * Math.random();
+        const r01 = Math.random();
+        const d = c.game.spawnDust?.(c.pts[k].x - 15, c.pts[k].y - 15, 30, 30, type, 0, 0, 0, null, sc);
+        if (!d) continue;
+        d.vx += seg.x * 3 * r01; d.vy += seg.y * 3 * r01;
+        d.vx *= 0.5; d.vy *= 0.5;
+        d.vx += c.facing * 2;
+        d.vx += c.pvx * Math.random(); d.vy += c.pvy * Math.random();
+        d.fadeIn = d.scale * 1.1;
+        if (m > 0) d.alpha = Math.floor(Math.random() * 200);
+      }
+    }
+  },
+  // 1031（:49095-49121）：env>0.1 且 rand<env → 4 循环（1/3 跳过）d6(v+=段向×1.5;
+  //    2/3 再 +段向,fadeIn0.7-1.6,scale0.7,noGr)
+  1031: (c) => {
+    if (!(c.env > 0.1) || Math.random() >= c.env) return;
+    const n = c.pts.length;
+    const tip = c.pts[n - 1];
+    const dir = whipSegDir(c.pts[n - 2], tip);
+    for (let i = 0; i < 4; i++) {
+      if (Math.floor(Math.random() * 3) === 0) {
+        const d = c.game.spawnDust?.(tip.x - 10, tip.y - 10, 20, 20, 6);
+        if (!d) continue;
+        d.vx += dir.x * 1.5; d.vy += dir.y * 1.5;
+        if (Math.floor(Math.random() * 3) !== 0) {
+          d.vx += dir.x; d.vy += dir.y;
+          d.fadeIn = 0.7 + Math.random() * 0.9; d.scale = 0.7; d.noGravity = true;
+        }
+      }
+    }
+  },
+  // 1032（:49122-49145）：env>0.6 且 rand<env 且 Next(3)!=0 → 偶数点 l(概率 (l/n)²):
+  //    2×(d167|d166 半)+1×d166+1×d167(noGr 2/3 时 +0.2,v+=段向×2)
+  1032: (c) => {
+    if (!(c.env > 0.6) || Math.random() >= c.env || Math.floor(Math.random() * 3) === 0) return;
+    const n = c.pts.length;
+    for (let l = 0; l < n - 1; l += 2) {
+      const prob = l / n;
+      if (Math.random() >= prob * prob) continue;
+      const seg = whipSegDir(c.pts[l], c.pts[l + 1]);
+      const emit = (): void => {
+        const type = Math.random() < 0.5 ? 167 : 166;
+        const d = c.game.spawnDust?.(c.pts[l + 1].x - 15, c.pts[l + 1].y - 15, 30, 30, type);
+        if (!d) return;
+        d.noGravity = Math.floor(Math.random() * 3) !== 0;
+        if (d.noGravity) d.scale += 0.2;
+        d.vx += seg.x * 2; d.vy += seg.y * 2;
+      };
+      emit(); emit();
+      emit();   // decompiled 三连：循环 2 次 + d166 + d167 各一（粒率等价）
+      emit();
+    }
+  },
+  // 1104 史莱姆鞭（:49146-49145 支）：env>0.15 且 rand<env 且 1/2 → 沿鞭每 3 点
+  //    （末点恒出,余 1/20）d4 蓝(color(78,136,255,127),alpha84,scale1+r×0.3,
+  //    v+=段向×r×5;3/4→noGr,否则 v×0.3+弹速×0.5,scale−0.4)
+  1104: (c) => {
+    if (!(c.env > 0.15) || Math.random() >= c.env || Math.floor(Math.random() * 2) !== 0) return;
+    const n = c.pts.length;
+    for (let k = n - 1; k >= 1; k -= 3) {
+      if (k !== n - 1 && Math.floor(Math.random() * 20) !== 0) continue;
+      const seg = whipSegDir(c.pts[k - 1], c.pts[k]);
+      const d = c.game.spawnDust?.(c.pts[k].x - 15, c.pts[k].y - 15, 30, 30, 4, 0, 0, 84,
+        { r: 78, g: 136, b: 255, a: 127 }, 1 + Math.random() * 0.3);
+      if (!d) continue;
+      d.vx += seg.x * Math.random() * 5; d.vy += seg.y * Math.random() * 5;
+      if (Math.floor(Math.random() * 4) === 0) d.noGravity = true;
+      else { d.vx = d.vx * 0.3 + c.vx * 0.5; d.vy = d.vy * 0.3 + c.vy * 0.5; d.scale -= 0.4; }
+    }
+  },
+};
 
 // ===================== 鞭渲染（1457 Main.cs:36656-37670 DrawWhip 族 1:1） =====================
 // DrawWhip（:36656-36816）两层：

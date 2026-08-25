@@ -21,7 +21,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
 import { playerCanHitEnemy } from './projTargets';
-import { canHit } from '../physics/LineOfSight';
+import { canHit, canHitLine } from '../physics/LineOfSight';
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -54,6 +54,8 @@ export class NebulaBlazeBolt extends Entity {
   private ai0 = 0;
   /** localAI[0]：尘椭圆相位（−Next(48) 起步，48 回绕） */
   private lai0: number;
+  /** ★R28 出手散射补掷门（首帧一次,见 fixedUpdate 注） */
+  private birthSpreadDone = false;
   private alphaI = 255;
   private frame = 0;
   private frameCtr = 0;
@@ -80,6 +82,28 @@ export class NebulaBlazeBolt extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // ★R28 §5 出手散射（Player.cs:49282-49296,3542 专支）：num179 =
+    //   (rand−0.5)×(π/4)×0.7 ≈ ±15.75°,CanHit 失败重掷至多 10 次;vector56 =
+    //   基准向.RotatedBy(num179)×(0.95+rand×0.3)。发射挂点在 Game.ts（R26 蓝队
+    //   分区）→ 首帧在此对出膛向量补掷（本弹即原版该发）
+    if (!this.birthSpreadDone) {
+      this.birthSpreadDone = true;
+      const spd0 = Math.hypot(this.vx, this.vy);
+      if (spd0 > 0.01) {
+        let rot = (Math.random() - 0.5) * (Math.PI / 4) * 0.7;
+        for (let t = 0; t < 10; t++) {
+          const ux = Math.cos(rot), uy = Math.sin(rot);
+          if (canHitLine(game.world.store, this.x, this.y, 0, 0,
+            this.x + ux * 100, this.y + uy * 100, 0, 0)) break;
+          rot = (Math.random() - 0.5) * (Math.PI / 4) * 0.7;       // 重掷
+        }
+        const c = Math.cos(rot), s = Math.sin(rot);
+        const nvx = (this.vx * c - this.vy * s) * (0.95 + Math.random() * 0.3);
+        const nvy = (this.vx * s + this.vy * c) * (0.95 + Math.random() * 0.3);
+        this.vx = nvx; this.vy = nvy;
+        this.rot = Math.atan2(nvy, nvx);
+      }
+    }
     for (let i = 0; i < 3 && !this.dead; i++) this.step(game);   // extraUpdates=2（MaxUpdates 3）
   }
 
@@ -316,6 +340,12 @@ export class LunarFlareStar extends Entity {
   private updInTick = 0;
   /** 爆炸相每敌一次（localNPCHitCooldown=−1） */
   private hitSet = new Set<number>();
+  /** ★R28 §7 命中线重估门：原版 ai[2] = num5+pointPosition.Y = 出生 Y + 钳后
+   *  |dy|(|dy|≥20) 恒在出生点【下】方;Game.ts :11466 曾用原始 dy(可负) → 高打低
+   *  lineY 为负过线门永不触发。首帧按 player.aimWY 重估（发射挂点在 Game.ts,
+   *  R26 分区）——同帧 aimWY 即发射时鼠标世界坐标 */
+  private lineYFixed = false;
+  private startY = 0;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number, lineY: number) {
     super();
@@ -323,7 +353,9 @@ export class LunarFlareStar extends Entity {
     this.vx = vx; this.vy = vy;
     this.damage = damage;
     this.knockback = knockback;
-    this.ai1 = lineY;
+    // 兜底钳门：lineY < 出生 Y+20（原版恒 ≥）时先钳到最小值,首帧再按 aimWY 精确重估
+    this.ai1 = Math.max(lineY, y + 20);
+    this.startY = y;
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -334,6 +366,13 @@ export class LunarFlareStar extends Entity {
 
   private step(game: GameHooks): void {
     const st = game.world.store;
+    // ★R28 §7：首帧按鼠标世界 Y 精确重估目标线（原版 ai[2]=出生Y+max(20,|dy|)）
+    if (!this.lineYFixed) {
+      this.lineYFixed = true;
+      const aimY = (game.player as { aimWY?: number } | null | undefined)?.aimWY
+        ?? (this.startY + 20);
+      this.ai1 = Math.max(this.ai1, this.startY + Math.max(20, Math.abs(aimY - this.startY)));
+    }
     const collide = this.ai1 !== -1 && this.y > this.ai1;   // :54079-54082 过线开碰撞
     // 尘 229 尾（每 update；体内实心时 noLight）:54089-54096
     const pool = game.vanillaDust;

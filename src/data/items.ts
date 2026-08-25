@@ -2120,6 +2120,21 @@ if (VANILLA_ITEM_KEY_BY_ID[6153] === undefined) {
   item({ key: ik, name: '', value: ITEMS_1457_VALUE[6153] ?? 1 });
 }
 
+// ---- R29 移交注册项收尾（R30/R31 合并批,2026-08-25）：4058 骷髅弓（Skeleton Bow,
+// Terraria.ID/ItemID.cs:9662；骷髅商人 10 金出售,Item.cs:35653-35657 DefaultToBow(17,11f)
+// +SetWeaponValues(8,5f)——combat 数值已补 vanillaItemCombat.EXTRACT_PATCH['4058'],
+// 换弹支 resolveBowProjOverride 木箭→骨箭 117 已由 R29 落地）。★vanilla.json
+// （TEdit items.json 快照）无此件 → 自动注册循环没有 def = 全链死路径;此处按 6153
+// 同款兜底注册（文件尾追加零下标平移;显示名走 vi_<id>_ 前缀 id-maps 解析不受
+// 键名影响;图标无 atlas 条目走 drawProj 兜底色块——素材到位后可删本段交自动循环）。
+// R30/R31 审计其余 ~65 件近战投掷/召唤杖经查 vanilla.json 全量自动注册已在
+// （items.ts:1061-1077 循环）,掉落/配方/装备链全通,无需逐件手注。----
+if (VANILLA_ITEM_KEY_BY_ID[4058] === undefined) {
+  const sk = 'vi_4058_SkeletonBow';
+  VANILLA_ITEM_KEY_BY_ID[4058] = sk;
+  item({ key: sk, name: '', value: 100000 }); // buyPrice(0,10)=10 金=100000 铜（buyPrice 不 ×5,:49421-49429 同 6147 档式）
+}
+
 // ---- 可放置物品 → 图块/墙 sheet 解析（合成/入包预取用,2026-08-21）----
 // 用户报"合成工作台后放置:音效即响、贴图过一会才显示"——放置物 tile sheet 走
 // 出生点扫描预载 + 烘焙懒取（ChunkCache bakeTracker）,合成产出时该表多半未载

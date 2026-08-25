@@ -266,12 +266,21 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     //  旧衬衫 3878、ammoCost75 1/4 星旋胸 2758。旧单 denom 聚合会漏并戴时的第二次掷）
     ammoSaveHuntress: boolean; ammoSaveChloro: boolean; ammoSaveCost80: boolean; ammoSaveCost75: boolean;
     magmaStone: boolean;   // 近战命中点燃（岩浆石/火焰护手；StatusNPC:10866/Player.cs:6184）
+    /** 蜂巢背包 3333（ApplyEquipFunctional :15457-15459 currentItem.type==3333 →
+     *  strongBees）——beeType() 50% 弹 566 巨蜂/beeDamage 强蜂 +Next(1,3)/
+     *  beeKB 0.5+KB×1.1（:12505-12531）；消费端 Game.ts 1121 蜂枪 volley 分支 */
+    strongBees: boolean;
     quiver: boolean;
     moltenQuiver: boolean;
     arrowStack: number;      // 箭袋 additiveStack（仅箭，:14785）
     shroomiteType: 'arrow' | 'bullet' | 'rocket' | null;
     shroomiteSet: boolean; vortexSet: boolean; nebulaSet: boolean; beetleOff: boolean;
     beetleDef: boolean;
+    /** R27：陨石套 spaceGun（ArmorSetBonuses.Add :436 "ArmorSetBonus.Meteor" =
+     *  头123/胸124/腿125 → player.spaceGun :266-270）——Space Gun/Zapinator/钉枪
+     *  无限蓝（ItemCheck_PayMana_ShouldSkipManaUse :53331 + ApplyManaRegenDelay
+     *  :51198 两消费门） */
+    spaceGun: boolean;
     wolfAcc: boolean; boc: boolean;
     tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
     autoPaint: boolean;    // 喷漆器族 2216/3061/5126：放置后自动上漆（:14720-14734）
@@ -1030,6 +1039,7 @@ export class Player extends Entity {
     const jumpSet = new Set<string>();
     let wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean; hidden: boolean } | null = null;
     let dash = 0, blackBelt = false, bees = false, carpet = false;
+    let strongBees = false;   // 蜂巢背包 3333（:15457-15459，消费 beeType()/beeDamage()/beeKB()）
     let jumpSpd = 0, arrowDmg = 0;
     let equipHasQuiver = false;
     let wolfAcc = false, boc = false;
@@ -1037,6 +1047,7 @@ export class Player extends Entity {
     let shroomiteType: 'arrow' | 'bullet' | 'rocket' | null = null;
     let shroomiteSet = false, vortexSet = false, nebulaSet = false, beetleOff = false;
     let beetleDef = false;
+    let spaceGun = false;   // R27：陨石套（123/124/125,ArmorSetBonuses :436）
     let flipper = false, longInvince = false, spikedBoots = false;
     let canFloat = false;   // canFloatInWater（4404 甲件；buff265 在消费侧并集）
     let bobberOverride = -1;   // Player.overrideFishingBobber（:1920 初值 -1；浮漂饰品覆写）
@@ -1224,6 +1235,7 @@ export class Player extends Entity {
       //    Projectile.cs:37818/:37998 + AI_Sentries_HeavySlingReposition :37822/:31969）
       //    未接,旗+6176 暴击生效
       if (accVid === 3337) shinyStone = true;                                      // 闪亮石（:14874-14876）
+      else if (accVid === 3333) strongBees = true;                                 // 蜂巢背包（:15457-15459 strongBees）
       else if (accVid === 6166) { accHarpyCharm = true; critRanged += 5; }         // 鹰妖护符（:14596-14599）
       else if (accVid === 4002) moltenQuiver = true;                               // 熔火箭袋（:14049-14052 hasMoltenQuiver——
                                                                                    //   accfx 表缺标 moltenQuiver 旗,此处补：
@@ -1497,6 +1509,7 @@ export class Player extends Entity {
     shroomiteSet = (hVid >= 1546 && hVid <= 1548) && bVid === 1549 && lVid === 1550;
     vortexSet = hVid === 2757 && bVid === 2758 && lVid === 2759;
     nebulaSet = hVid === 2760 && bVid === 2761 && lVid === 2762;
+    spaceGun = hVid === 123 && bVid === 124 && lVid === 125;   // R27：Meteor 套（:436）
     beetleOff = hVid === 2199 && bVid === 2200 && lVid === 2202; // 进攻甲
     beetleDef = hVid === 2199 && bVid === 2201 && lVid === 2202; // 防御甲（壳：beetleEndurance 15%/球）
     for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) sumFx(effArmor(i));   // R4-19
@@ -1647,6 +1660,7 @@ export class Player extends Entity {
       waterWalk, jumpBoost, panic, starCloak,
       jumpOpts,
       wing, dash, blackBelt, bees, carpet,
+      strongBees,   // 蜂巢背包 3333（beeType 566 档/强蜂伤/kb——Game 1121 蜂枪分支消费）
       jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots, canFloat,
       treasureMagnet, goldRing, luckyCoin, discount,
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
@@ -1662,6 +1676,7 @@ export class Player extends Entity {
     moltenQuiver, // 箭袋族：箭速/击退 ×1.1（Player.cs:52711-52715）
       arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,
       beetleDef,
+      spaceGun,   // R27：陨石套无限蓝（Game case 'magic'/Player 回蓝豁免消费）
       wolfAcc, boc,
       tileSpeed, wallSpeed, tileRange, autoPaint, chiselSpeed, toolbelt, pStone, counterWeight, vanityCounterWeight, yoyoBag,
       yoyoGlove, magicString,   // 悠悠球袋族（UpdateEquips :14174-14226）
@@ -2541,12 +2556,18 @@ export class Player extends Entity {
     const smm = this.maxMana;                       // statManaMax2（buff+装备后上限）
     if (this.manaAnimTicks > 0) {
       // 用魔物品动画期：每帧重置 delay（ItemCheck :42131-42137 → ApplyManaRegenDelay
-      // :49851-49856；spaceGun+太空枪族 127/4347/4348/514 豁免项本仓无该配饰，恒重置）
+      // ★R27 接上 spaceGun 豁免门（ItemCheck_ApplyManaRegenDelay :51198-51202）：
+      // 陨石套在手持 127 太空枪/4347 灰 zapinator/4348 橙 zapinator/514 钉枪时不重置
+      // delay = 无限施放的后半边;曾恒重置=套装主收益缺失,Player.ts 自认处）
       // 1457: 三处置 delay 改调 ApplyManaRegenerationDelay()（:19515-19540）——
       // 内联同公式但带 manaRegenBuff 钳 20f（1456 只在 UpdateManaRegen 每帧钳，
       // 1457 把钳挪到置值时点 → 回蓝 buff 期间施法/快捷 buff 的惩罚期变短）
       this.manaAnimTicks--;
-      this.applyManaRegenerationDelay(smm);
+      const heldDef = ITEM_DEFS[this.inv.heldItem()?.id ?? -1];
+      const heldVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key) ?? -1) : -1;
+      if (!(this.equipStats.spaceGun && (heldVid === 127 || heldVid === 4347 || heldVid === 4348 || heldVid === 514))) {
+        this.applyManaRegenerationDelay(smm);
+      }
     }
     // manaRegenBonus/manaRegenDelayBonus（:18481-18482 每帧清零后由 buff 158 :9629-9632
     // 与魔力斗篷 982 :14379-14383 重算）。★1458：瓶中星 buff 158 的 delayBonus+0.5

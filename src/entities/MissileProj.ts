@@ -358,13 +358,13 @@ export class MagicMissileProj extends Entity {
   /** 尘/音/光（:40687-40750 + ProjLight :14808-15160） */
   private fxStep(game: GameHooks): void {
     if (this.projId === 16) {
-      // :40689-40693 Item9 周期音（soundDelay=10，|vx|+|vy|>2 门）
-      if (this.soundDelay <= 0) {
-        if (Math.abs(this.vx) + Math.abs(this.vy) > 2) {
-          this.soundDelay = 10;
-          game.playSfxFiles(['Item_9'], 0.5, this.cx, this.cy);
-        }
-      } else this.soundDelay--;
+      // :40689-40693 Item9 周期音（soundDelay=10，|vx|+|vy|>2 门）——原版 soundDelay
+      // 在 Update 头递减、AI 判 ==0（R27 对齐十拍节拍：曾"判<=0 再减"=11 拍/响）
+      if (this.soundDelay > 0) this.soundDelay--;
+      if (this.soundDelay === 0 && Math.abs(this.vx) + Math.abs(this.vy) > 2) {
+        this.soundDelay = 10;
+        game.playSfxFiles(['Item_9'], 0.5, this.cx, this.cy);
+      }
       // :40694-40702 尘 15（1/9 概率无重力漂尘）
       if (Math.random() < 1 / 9) game.spawnParticles(this.cx, this.cy, '#9CD8FF', 1, 1.1, { life: 20 });
       this.lightRGB = [0.08, 0.32, 1.0];   // :15006-15010（light0.8 × (0.1,0.4,1)）
@@ -376,7 +376,25 @@ export class MagicMissileProj extends Entity {
       }
       this.lightRGB = [0.8, 0.8, 0.8];     // 无覆盖档（:14815-14817 白 × light）
     } else if (this.projId === 79) {
-      // 79 新 AI 无尘无音（:40717 提前 return）——视觉全在彩虹拖尾（RainbowRodDrawer）
+      // ★1458 变更面（AI_009_MagicMissiles 新增 type==79 块 :44390-44406；红队 R27 §12，
+      // R26 归属质疑已复核维持原判——块体逐行确认在 AI_009 方法体内、`if (type != 34)
+      // return`(:44196) 之后）：soundDelay==0 且 |vx|+|vy|>2 → PlaySound(Item9)+
+      // soundDelay=10（十拍循环啸声——Update 头递减/AI 判==0 的原版节拍）;
+      // 每拍 1×d66 Disco 色(scale2.5,alpha100,noGravity,初速×0.1 后 +=弹速×0.2,
+      // 位置=中心+4±rand(-2..2))——飞行期彩虹尘迹
+      if (this.soundDelay > 0) this.soundDelay--;
+      if (this.soundDelay === 0 && Math.abs(this.vx) + Math.abs(this.vy) > 2) {
+        this.soundDelay = 10;
+        game.playSfxFiles(['Item_9'], 0.5, this.cx, this.cy);
+      }
+      const dd79 = game.spawnDust?.(this.x, this.y, this.w, this.h, 66, 0, 0, 100,
+        { r: this.discoR, g: this.discoG, b: this.discoB, a: 255 }, 2.5, true);
+      if (dd79) {
+        dd79.vx = dd79.vx * 0.1 + this.vx * 0.2;
+        dd79.vy = dd79.vy * 0.1 + this.vy * 0.2;
+        dd79.x = this.x + this.w / 2 + 4 + Math.floor(Math.random() * 5) - 2;
+        dd79.y = this.y + this.h / 2 + Math.floor(Math.random() * 5) - 2;
+      }
       const n = 7;                          // Main.cs:19441 六段 ±7/帧
       switch (this.discoStyle) {
         case 0: this.discoG = Math.min(255, this.discoG + n); if (this.discoG >= 255) this.discoStyle++; break;
@@ -475,7 +493,56 @@ export class MagicMissileProj extends Entity {
       && --this.pierce <= 0) { this.killNow(game); return; }
   }
 
+  /** 统一消亡出口。★R27：79 彩虹魔杖补 Kill 爆（Projectile.cs:72426-72503，1458 同）：
+   *  Resize(128,128) → maxPenetrate=−1 → Damage()（128px 死亡 AoE 二次结算）→
+   *  Item10 音 + 沿 oldPos 全程彩虹 d267 尾迹迸散（逐点 hue 相位/数量按距离衰减/
+   *  白影 CloneDust）+ RainbowRodHit 编排粒子×2 + 14×d66 随机色 vel×3 */
   private killNow(game: GameHooks): void {
+    if (this.projId === 79 && !this.dead) {
+      // Resize(128,128) 死亡 AoE（:72428-72434）：以弹心为心 128px 盒重结算一次伤害
+      const R = 64;
+      for (const ent of game.enemies()) {
+        const e = ent as MissileEnemyView;
+        if (e.dead) continue;
+        const ecx = (e.cx ?? e.x + e.w / 2), ecy = (e.cy ?? e.y + e.h / 2);
+        if (!(Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2)) continue;
+        if (!playerCanHitEnemy(e, game, this.projId)) continue;
+        const crit = Math.random() < this.critChance;
+        e.hurt(crit ? this.damage * 2 : this.damage, Math.sign(this.vx) * this.knockback,
+          0, game, this.armorPen, crit, 0, true);
+      }
+      game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);
+      // 沿 oldPos 尾迹迸散（:72436-72487）：逐点 hue 相位、数量按点序衰减（≥0.3 −1、
+      // ≥0.65 再 −2、≥0.85 再 −3）、白影 CloneDust 以半尺白尘近似
+      const N = this.trail.length / 2;
+      const hue0 = Math.random();
+      for (let i = 0; i < N; i++) {
+        const px = this.trail[i * 2], py = this.trail[i * 2 + 1];
+        const t = N <= 1 ? 0 : i / (N - 1);                 // GetLerpValue(oldPos.Length,0,i)
+        let count = 1 + Math.floor(Math.random() * 3);
+        if (t >= 0.3) count--;
+        if (t >= 0.65) count -= 2;
+        if (t >= 0.85) count -= 3;
+        const [rr, gg, bb] = hueToRgb((hue0 + t) % 1);
+        for (let k = 0; k < Math.max(count, 0); k++) {
+          const sc = lerp(0.3, 1, t) * (0.9 + Math.random() * 1.2);   // Lerp(0.3,1,lerpValue2) :72448
+          game.spawnDust?.(px, py, 4, 4, 267, 0, 0, 0,
+            { r: rr, g: gg, b: bb, a: 255 }, sc, true);
+          game.spawnDust?.(px, py, 4, 4, 267, 0, 0, 0,
+            { r: 255, g: 255, b: 255, a: 255 }, sc / 2, true);   // CloneDust 白影
+        }
+      }
+      // RainbowRodHit 编排粒子 ×2（:72488-72495——本仓无编排器池,spawnParticles 近似）
+      game.spawnParticles(this.cx, this.cy, '#FFB0FF', 8, 2.2, { life: 22 });
+      game.spawnParticles(this.cx, this.cy, '#FFFFFF', 6, 1.8, { life: 18 });
+      // 14×d66 随机色 vel×3（:72496-72502）
+      for (let i = 0; i < 14; i++) {
+        const [rr, gg, bb] = hueToRgb(Math.random());
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 66, 0, 0, 100,
+          { r: rr, g: gg, b: bb, a: 255 }, 1.7, true);
+        if (d) { d.vx *= 3; d.vy *= 3; }
+      }
+    }
     this.dead = true;
     const i = ALIVE.indexOf(this);
     if (i >= 0) ALIVE.splice(i, 1);

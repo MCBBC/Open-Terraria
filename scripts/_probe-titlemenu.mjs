@@ -15,7 +15,17 @@ const origin = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 await page.goto(origin, { waitUntil: 'networkidle2', timeout: 60000 });
-await new Promise((r) => setTimeout(r, 3000));
+// 等 splash 揭幕（固定 3s 在现揭幕时序下 splash(z30) 仍全屏拦截
+// elementFromPoint → hitCenter 恒假；2026-08-25 改为轮询等 splash 移除）
+for (let i = 0; i < 300; i++) {
+  const gone = await page.evaluate(() => {
+    const s = document.querySelector('#sw-splash');
+    return !s || getComputedStyle(s).pointerEvents === 'none';
+  });
+  if (gone) break;
+  await new Promise((r) => setTimeout(r, 100));
+}
+await new Promise((r) => setTimeout(r, 700));
 
 const out = await page.evaluate(async () => {
   const res = {};

@@ -12,6 +12,14 @@ const SUNPLATE = TILE_BY_KEY['v_202_sunplate_block']!;
 const TABLE = TILE_BY_KEY['table']!;
 const CHAIR = TILE_BY_KEY['chair']!;
 const BANNER = TILE_BY_KEY['v_91_banners']!;
+/** cs:79869 叶族豁免（tile.type != 192/191/384）。★MMMMMMM 同型审计（#46 家族）：
+ *  必须比对 **JS tile id**——原版字面量是 vanilla sheet 号,本仓 id=注册序
+ *  （sheet192→id103/sheet191→id104/sheet384→id99;曾直比 192/191/384 实际命中的是
+ *  sheet584/227/509 三件无关物）。浮空岛时点生命树尚未生成 → 谓词恒不触发,
+ *  修复 RNG 中性零行为差（预防性定谳,与 TempleBricks isActiveBrick226 同案）。 */
+const LEAF = TILE_BY_KEY['v_192_living_leaf_block']!;
+const LIVINGWOOD = TILE_BY_KEY['v_191_living_wood_block']!;
+const MAHOGANY_LEAF = TILE_BY_KEY['v_384_living_mahogany_leaves_block']!;
 
 /** WorldGen.SolidTile(cs:42370):active && tileSolid && !tileSolidTop && !halfBrick && slope==0。
  *  与 TileCleanupPass.solidTile 同口径(tileSolidTop 近似为 platform;379 泡泡
@@ -67,7 +75,7 @@ function islandHouse(
     if (!st.inBounds(probeX, y)) continue;
     const ti = st.idx(probeX, y);
     if (st.wall[ti] > 0 && st.flags[ti] && solidTile(st, probeX, y)
-      && st.type[ti] !== 192 && st.type[ti] !== 191 && st.type[ti] !== 384) {
+      && st.type[ti] !== LEAF && st.type[ti] !== LIVINGWOOD && st.type[ti] !== MAHOGANY_LEAF) {
       floorY = y - 1;
       break;
     }

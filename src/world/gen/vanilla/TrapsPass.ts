@@ -11,6 +11,8 @@ import type { GenState } from './GenState';
 import { TILE_DEFS } from '../../../data/tiles';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
+// ★MMMMMMM：巨石支受理门双态门（1456/1457 分叉实证,见 placeTrap case1 注）
+import { hfIs1457 } from './HellFortPass';
 // ★dungeon-1457 批：placeTrap 双地牢界拒门（WorldGen.cs:8865）三因子承载
 import { placeTrapDualDungeonReject } from './DungeonStyles1457';
 
@@ -141,6 +143,7 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng?: RNG): void {
     if (!st.flags[ui]) { st.half[ui] = 0; st.slope[ui] = 0; st.paint[ui] = 0; continue; }
     const sh = sheetOf(ut);
     if (sh === 165 && rng) { checkStalactite(st, rng, ux, uy); continue; }
+    if (ut === GEM178) { check178Gen(st, ux, uy, rng); continue; }
     if (CHECK1X1_SHEETS.has(sh)) { check1x1Gen(st, ux, uy, rng); continue; }
     if (CHEST_SHEETS.has(sh)) { checkChestGen(st, ux, uy, rng); continue; }
     if (CHECK2X2_SHEETS.has(sh)) { check2x2Gen(st, ux, uy, rng); continue; }
@@ -296,6 +299,7 @@ function failConvertT(st: TileStore, x: number, y: number): void {
 /** Check1x1 分派族（TileFrameImportant cs:86300-86308：36/135/141/210/239/428/
  *  593/624/650/656/700/701 → Check1x1）——1×1 落地物 */
 const CHECK1X1_SHEETS = new Set([36, 135, 141, 210, 239, 428, 593, 624, 650, 656, 700, 701]);
+const GEM178 = sheetId(178);
 /** Check2x2 分派族（cs:86402 {335,411,490,564,565,594} + cs:86672-86688
  *  {132,138,142,143,288-295,484,664,665,711,712}）。★713-716（熔岩/蜘蛛/地牢
  *  巨石）在 cs:86410 break 列表=零分派，不在本族 */
@@ -323,6 +327,95 @@ function check1x1Gen(st: TileStore, x: number, y: number, rng?: RNG): void {
   if (!solidTileAllowBottomSlope(st, x, y + 1)) { killTileWholeCore(st, x, y, rng); return; }
   const gi = st.idx(x, y + 1);
   if (st.inBounds(x, y + 1) && st.type[gi]! >= 0 && isBoulderType(st.type[gi]!)) killTileWholeCore(st, x, y, rng);
+}
+
+// ---- ★NNN 批（2026-08-25）：case 178 宝石籽分派（12345 #76 首差 T0>178×1 定罪）----
+// KillTile 尾 SquareTileFrame 级联帧到僵尸宝石（四邻全失锚）→ CheckAndAdjustMulti-
+// DirectionalTile 失败 → KillTile。实证站点 (2134,789)：巨石陷阱掏腔 KillTile(2135,789)
+// 石→级联帧到左邻 178 残籽（#075 基线两侧同态、四邻全 air）→ vanilla 杀 JS 曾无派发
+// 分支 → 存活。成功支 resetFrame=true 时 1×Next(3) 重掷 frameY 偏移（cs:86384，掷流敏感；
+// FinalCleanupPass.frame178Sweep 同源镜像）。slope 助手语义：topSlope={1,2}/bottomSlope=
+// {3,4}/leftSlope={2,4}/rightSlope={1,3}（Tile.cs:292-331）。
+///** SolidTileAllowTopSlope（cs:70851）：active && (tileSolid‖380) && ((!platform&&!bottomSlope)‖(platform&&half)) && !inActive */
+function solidTileAllowTopSlopeT(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;                       // null tile → true（cs try 语义）
+  const i = st.idx(x, y);
+  const t = st.type[i]!;
+  const sh = sheetOf(t);
+  if (st.flags[i] === 0) return false;
+  const bottomSlope = st.slope[i] === 3 || st.slope[i] === 4;
+  return (vanGenSolidType(t) || sh === 380)
+    && ((!PLATFORM_SHEETS.has(sh) && !bottomSlope) || (PLATFORM_SHEETS.has(sh) && st.half[i] === 1))
+    && ((st.wire[i] >>> 5) & 1) === 0;
+}
+/** SolidTileAllowLeftSlope（cs:70871）：active && tileSolid && !half && !rightSlope({1,3}) && !platform */
+function solidTileAllowLeftSlopeT(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  const t = st.type[i]!;
+  if (st.flags[i] === 0) return false;
+  const rightSlope = st.slope[i] === 1 || st.slope[i] === 3;
+  return vanGenSolidType(t) && st.half[i] === 0 && !rightSlope
+    && !PLATFORM_SHEETS.has(sheetOf(t)) && ((st.wire[i] >>> 5) & 1) === 0;
+}
+/** SolidTileAllowRightSlope（cs:70891）：active && tileSolid && !half && !leftSlope({2,4}) && !platform */
+function solidTileAllowRightSlopeT(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  const t = st.type[i]!;
+  if (st.flags[i] === 0) return false;
+  const leftSlope = st.slope[i] === 2 || st.slope[i] === 4;
+  return vanGenSolidType(t) && st.half[i] === 0 && !leftSlope
+    && !PLATFORM_SHEETS.has(sheetOf(t)) && ((st.wire[i] >>> 5) & 1) === 0;
+}
+
+/** ValidAnchorForMultiDirectionalTile（cs:60788）：邻格非空/非巨石/非门 且按方向过
+ *  SolidTileAllow*Slope；CheckAndAdjustMultiDirectionalTile（cs:60805）锚优先序
+ *  下(0)>左(2)>右(3)>上(1)，命中还须 tileSolid&&!tileSolidTop 复核（平台/桌族不锚）*/
+function multiDirAnchor178(st: TileStore, x: number, y: number): number {
+  if (!(x >= 2 && y >= 2 && x < st.w - 2 && y < st.h - 2)) return -1;   // InWorld(i,j,2)
+  const anchorOk = (ax: number, ay: number, dir: number): boolean => {
+    if (!st.inBounds(ax, ay)) return false;
+    const k = st.idx(ax, ay);
+    const t = st.type[k]!;
+    if (t < 0 || isBoulderType(t) || t === DOOR10) return false;
+    if (dir === 0) return solidTileAllowTopSlopeT(st, ax, ay);
+    if (dir === 1) return solidTileAllowBottomSlope(st, ax, ay);
+    if (dir === 2) return solidTileAllowLeftSlopeT(st, ax, ay);
+    return solidTileAllowRightSlopeT(st, ax, ay);
+  };
+  // num=下锚 type / num3=左 / num4=右 / num2=上（ValidAnchor 过了才记 type）
+  const probe = (ax: number, ay: number, dir: number): number => {
+    if (!st.inBounds(ax, ay)) return -1;
+    return anchorOk(ax, ay, dir) ? st.type[st.idx(ax, ay)]! : -1;
+  };
+  const below = probe(x, y + 1, 1), leftT = probe(x - 1, y, 2);
+  const rightT = probe(x + 1, y, 3), up = probe(x, y - 1, 0);
+  const solidNS = (t: number): boolean => vanGenSolidType(t) && !SOLID_TOP.has(sheetOf(t));
+  if (below >= 0 && solidNS(below)) return 0;
+  if (leftT >= 0 && solidNS(leftT)) return 2;
+  if (rightT >= 0 && solidNS(rightT)) return 3;
+  if (up >= 0 && solidNS(up)) return 1;
+  return -1;
+}
+
+/** TileFrameImportant case 178（cs:86380-86420）：锚查失败杀；成功且 resetFrame=true 时
+ *  Next(3)*18 重掷带基（无论是否越带——num22<0 也已掷），越带才重写 frameY。
+ *  ★resetFrame 语义（cs:80924 SquareTileFrame 仅中心 true）：cascade3x3T 九格外环恒
+ *  false（零掷）——中心=被杀格自身，杀后失活早退永不派发。故本语境 178 分派
+ *  **从不耗掷**（首版误挂成功即掷 → 巨石变体掷流漂移 T138>713 实证后修正）。 */
+function check178Gen(st: TileStore, x: number, y: number, rng?: RNG, reset = false): void {
+  const i = st.idx(x, y);
+  const frameY2 = st.frameY[i]!;
+  const dir = multiDirAnchor178(st, x, y);
+  if (dir < 0) { killTileWholeCore(st, x, y, rng); return; }
+  const num21 = reset && rng ? rng.int(0, 2) * 18 : frameY2 % 54;   // bug-for-bug：C# 负模保号
+  let num22 = -1;
+  if (dir === 0 && (frameY2 < 0 || frameY2 > 36)) num22 = 0;
+  else if (dir === 1 && (frameY2 < 54 || frameY2 > 90)) num22 = 54;
+  else if (dir === 2 && (frameY2 < 108 || frameY2 > 144)) num22 = 108;
+  else if (dir === 3 && (frameY2 < 162 || frameY2 > 198)) num22 = 162;
+  if (num22 > -1) st.frameY[i] = (num22 + num21) as never;
 }
 
 /** CheckChest（cs:81400+）1:1：帧锚 2×2 + 完整性（列模 2/行 18 帧位）+ 逐列支撑门
@@ -747,8 +840,15 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     if (nf.noTraps) setBoulderSolidity(true);
     let colX = x2 + rng.int(-1, 1);                                   // num4（cs:9166 Next(-1,2)）
     let top = py - 8;                                                 // num5（cs:9165）
-    // ★noTraps（cs:9168-9177）：邻巨石检查半径 6（普通 10）
-    if (anyBoulderNearby(st, colX, top, nf.noTraps ? 6 : 10)) return false;
+    // ★MMMMMMM（2026-08-25）#76 定罪修复（双态门）：巨石支受理门两版真分叉——
+    //   1456（cs:9171-9183）= 邻巨石检查**前置**（初始 top=num-8 位,noTraps 半径6/普通10）
+    //   + 扫描逐格拒 wall350、无 actuator/巨石拒;
+    //   1457（cs:9181-9237）= 无前置门 + 扫描逐格拒 **actuator∪Boulders**（wall350 移入
+    //   CanContinue）+ 邻巨石检查后置到 chest IsTileNearby 之后。JS 曾按 1456 形恒跑
+    //   → SW_MB_1457=1 下扫窗内有巨石/致动器时 vanilla 拒而 JS 受理,g/s22222 两链
+    //   #76 沙穴带级联位移（g 链掷流对拍 @41741 实锤:JS 多走进变体四连掷）。
+    const dg1457 = hfIs1457();
+    if (!dg1457 && anyBoulderNearby(st, colX, top, nf.noTraps ? 6 : 10)) return false;   // 1456 前置门
     for (;;) {
       let allSolid = true, n2 = 0;
       for (let m = colX - 2; m <= colX + 3; m++) {
@@ -759,8 +859,13 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
           const ii = st.idx(m, n);
           if (st.flags[ii]) {
             const sh = sheetOf(st.type[ii]!);
-            if (sh === 226 || TILE_DUNGEON.has(sh)) return false;     // cs:9194 神庙砖/地牢砖
-            if (st.wall[ii] === 350) return false;                    // cs:9199
+            if (sh === 226 || TILE_DUNGEON.has(sh)) return false;     // cs(两版同): 神庙砖/地牢砖
+            if (dg1457) {
+              // 1457 cs:9196-9198：actuator ∪ Boulders 逐格拒（wall350 已由 CanContinue 承载）
+              if ((st.wire[ii] & TileStore.WIRE_ACTUATOR) !== 0 || isBoulderType(st.type[ii]!)) return false;
+            } else {
+              if (st.wall[ii] === 350) return false;                  // 1456 cs:9200 原位 wall350 拒
+            }
             if (sh === 0 || sh === 1 || sh === 59) n2++;              // cs:9204 泥/石/泥块
           }
         }
@@ -771,6 +876,8 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     }
     if (py - top <= 5 || py - top >= 40) return false;                // cs:9222
     if (isTileNearby(st, colX, top, 21, 4) || isTileNearby(st, colX, top, 467, 4)) return false;  // cs:9227
+    // 1457 后置邻巨石门（cs:9229-9237）：收敛后的 top 位判定；半径 noTraps?6:10 保持
+    if (dg1457 && anyBoulderNearby(st, colX, top, nf.noTraps ? 6 : 10)) return false;
     // 掏 2 宽竖井 top..py（cs:9232-9240；379 免杀）。★PPPP 定罪修正：井杀对巨石
     //   **照杀**（vanilla type!=379 门无巨石豁免）——巨石的存活语义在 KillTile 尾
     //   SquareTileFrame→TileFrame→Check2x2(48405) 的 2×2 完整性级联：井杀先杀巨石

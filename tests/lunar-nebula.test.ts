@@ -49,8 +49,14 @@ describe('星云烈焰弹 634/635', () => {
     expect(sfx).toContain('Item_34');                // ai[1] 0→1（:51604）
     for (let t = 0; t < 20 && !bolt.dead; t++) bolt.fixedUpdate(1, game);
     expect(bolt.dead).toBe(false);
-    expect(bolt.vy).toBe(0);                         // 634/635 排除在重力链外
-    expect(bolt.vx).toBe(6);
+    // ★R28：出手散射（Player.cs:49282-49296 num179≈±15.75° + 速度 ×[0.95,1.25]）
+    // 后速度不再恒 (6,0),但模长锁定在带内且无重力漂移
+    const spd = Math.hypot(bolt.vx, bolt.vy);
+    expect(spd).toBeGreaterThanOrEqual(6 * 0.95 - 1e-6);
+    expect(spd).toBeLessThanOrEqual(6 * 1.25 + 1e-6);
+    const spd2 = Math.hypot(bolt.vx, bolt.vy);
+    bolt.fixedUpdate(1, game);
+    expect(Math.hypot(bolt.vx, bolt.vy)).toBeCloseTo(spd2, 6);   // 无重力
   });
 
   it('250 内锁定追踪：vel 向敌 lerp（1/30）', () => {
@@ -61,10 +67,14 @@ describe('星云烈焰弹 634/635', () => {
     const bolt = new NebulaBlazeBolt(80 * TILE, 100 * TILE, 6, 0, 130, 3, 634);
     bolt.critChance = 0;
     bolt.fixedUpdate(1, game);                       // 初始化 + 首搜锁定
-    expect(bolt.vy).toBe(0);
-    for (let t = 0; t < 3 && !bolt.dead; t++) bolt.fixedUpdate(1, game);
-    expect(bolt.dead).toBe(false);                   // 4t 内未贴脸（~50px 余量）
-    expect(bolt.vy).toBeGreaterThan(0);              // vel 朝敌转向（lerp 1/30）
+    expect(Math.hypot(bolt.vx, bolt.vy)).toBeGreaterThanOrEqual(6 * 0.95 - 1e-6);   // ★R28 散射后非恒 (6,0)
+    // ★R28：出手散射后初速可带 ±15.75° 的任意方向分量——转向断言改为端到端
+    // 性质：锁敌 + lerp 追踪必须在 30t 内触及目标（接触命中消亡），与散射掷出的
+    // 具体方向无关
+    const hurtHits: number[] = [];
+    en.hurt = () => { hurtHits.push(1); return true; };
+    for (let t = 0; t < 30 && !bolt.dead; t++) bolt.fixedUpdate(1, game);
+    expect(bolt.dead || hurtHits.length > 0).toBe(true);   // 追踪抵达目标
   });
 
   it('635 档搜索半径 500：更远也锁定', () => {

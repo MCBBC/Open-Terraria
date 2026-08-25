@@ -430,7 +430,10 @@ function runMarblePilesSection(st: TileStore, rng: RNG, gs: GenState): void {
       if (x >= avoidL && x <= avoidR) continue;             // cs:16373-16379
     }
     const y = Math.floor(gs.worldSurface / 2);              // (int)Main.worldSurface / 2
-    if (marblePileWithStatues(st, rng, x, y, gs.worldSurface)) {
+    const ok = marblePileWithStatues(st, rng, x, y, gs.worldSurface);
+    // NNN debug（用毕删）
+    if (typeof process !== 'undefined' && process.env?.SW_BP_DBG) console.log(`[bpdbg] try x=${x} ok=${ok} placed=${placed} smp=${(globalThis as { __smpCount?: number }).__smpCount ?? '?'} y0=${Math.floor(gs.worldSurface/2)}`);
+    if (ok) {
       placed++;
       if (placed >= target) break;                          // cs:16384-16387
     }

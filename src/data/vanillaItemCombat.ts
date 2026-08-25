@@ -140,6 +140,20 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //   1782 糖果玉米步枪 crit+6（2026-08-23 备案遗留④；Item.cs:19755 `crit += 6`
   //     复合赋值提取器不解析 → json 缺 crit。GetWeaponCrit 消费 :25230-25232）----
   '1782': { crit: 6 },
+  // ---- R29 移交注册项两弓（R30/R31 合并批 2026-08-25；Item.cs 1458 实测行号）：
+  //   DefaultToBow(singleShotTime, shotVelocity, hasAutoReuse)（:48425-48432）=
+  //   DefaultToRangedWeapon(1, AmmoID.Arrow=40, …)+width14/height30+UseSound Item5
+  //   ——辅助方法形参赋值提取器不解析 → json 两键全缺 = combatWeapon 返 null 死路径。
+  //   ★红队移交单曾写"Star Cannon 955/Super Star Cannon 728"系型号误记：1458
+  //   Terraria.ID/ItemID.cs:1940 StarCannon=197（json 已有 shoot955/useAmmo75 全条目）、
+  //   :9666 SuperStarCannon=4060（EXTRACT_PATCH '4060' 已在）；955/728 实为
+  //   Ancient Gold Helmet/Wood Breastplate 盔甲——无需修。
+  //   4058 骷髅弓（:35653-35657 DefaultToBow(17,11f)+SetWeaponValues(8,5f)+buyPrice(0,10)）
+  //   4381 血雨弓（:38154-38158 DefaultToBow(19,9f,hasAutoReuse:true)+SetWeaponValues(14,3f)
+  //     +rare3——多矢天降散布本体在 Player.cs:47766/:47877 专支,弹链归 R29 弓域,
+  //     本表只补"可用性"数值面）----
+  '4058': { shoot: 1, useAmmo: 40, useTime: 17, useAnimation: 17, shootSpeed: 11, damage: 8, knockBack: 5, noMelee: true, ranged: true },
+  '4381': { shoot: 1, useAmmo: 40, useTime: 19, useAnimation: 19, shootSpeed: 9, damage: 14, knockBack: 3, noMelee: true, ranged: true, autoReuse: true },
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };
@@ -379,7 +393,10 @@ const AI1_NO_DROP = new Set<number>([
   484, 485, 498, 576, 577, 585, 592, 593, 601, 606, 616, 634, 635, 638, 639, 660, 661, 682,
   684, 706, 709, 710, 712, 876, 980, 981, 1073,
   // 顶层行为链命中（分支自管速度，重力链不达）
-  357, 207, 837, 962, 337, 645, 424, 425, 426, 344, 336, 345, 246, 311, 1023, 312,
+  // ★R28：336 摘除——原版 AI_001 `type == 336 || type == 345` 分支（1458 :58098-58107，
+  // 与 1457 :57920 区间同构）有延迟重力支 ai[0]≥50 → vy+=0.5（松针手枪 1930 的
+  // 标志性"半秒平飞后下坠抛洒"），并非无重力；改走 AI1_GRAV 表 [0.5,50] 档
+  357, 207, 837, 962, 337, 645, 424, 425, 426, 344, 345, 246, 311, 1023, 312,
   // 链尾排除 + 无重力分支（437 仅淡出 / 477 分支内豁免）
   239, 264, 675, 437, 477,
 ]);
@@ -396,6 +413,11 @@ const AI1_GRAV: Record<number, [number, number]> = {
   195: [0.15, 40], 1097: [0.15, 40],                                     // :54381-54408
   267: [0.075, 20], 478: [0.075, 20], 479: [0.075, 20],                  // :54409-54423
   408: [0.05, 45], 495: [0.04, 30], 498: [0.15, 50],                     // :54482/:54597/:54608
+  // ★R28：336 松针弹（1930 松针手枪）/345（AI_001 type 段 :58098-58107）——
+  // ai[0]≥50 后 vy+=0.5/update（ai[0] 同时钳 50，恒定加速档）；336 extraUpdates=1
+  // → ai[0] 按子步自增，50 子步 = 25t ≈ 半秒平飞。发射侧每发 ai[0] 随机初值
+  // rand(0,10(i+1)) 由 Arrow 出生自校正折算成 gravDelay 前移（见 Arrow rp30 段）
+  336: [0.5, 50],
   // 507 族原版门为严格 `> 60`（:54589-54596）——Arrow 门已统一 `>=`，存 61 等价
   507: [0.3, 61], 508: [0.3, 61], 662: [0.3, 61], 680: [0.3, 61], 685: [0.3, 61],  // :54589-54596
   // 1006 微光箭 flag4 上飘（:54686-54696，ai[0] 正常自增——不在 flag3 表）；
@@ -536,6 +558,14 @@ export function resolveBowProjOverride(bowVid: number, projId: number,
   if (bowVid === 3019 && p === 1) p = 485;   // 炼狱天弓：木箭→狱翼箭（:52660-52663）
   if (bowVid === 3052) p = 495;              // 暗影焰弓恒 495（:52664-52667）
   if (bowVid === 4953 && p === 1) p = 932;   // 暮夕：木箭→月总矢（:52668-52670）
+  // ★R29：血雨弓恒换血箭 819（1458 PickAmmo :54148-54150 `if (sItem.type == 4381)
+  //   projToShoot = 819`——【无视弹药品种】无条件换体；819 alpha255+hide 隐形弹体,
+  //   视觉全靠血迹拖尾（Arrow 819 支）。位于蜂膝/熔火箭袋之前=熔火箭袋对它无效（同原版序））
+  if (bowVid === 4381) p = 819;
+  // ★R29：骷髅弓骨箭换弹支（1458 :54152-54154 `if (sItem.type == 4058 &&
+  //   projToShoot == 474) projToShoot = 117`——仅骨箭弹药 3003(shoot 474) 生效,
+  //   其他弹药照常;保持 p===474 门。117 死亡双骨片链 Game.ts 已备）
+  if (bowVid === 4058 && p === 474) p = 117;
   if (bowVid === 2888 && p === 1) p = 469;   // 蜂膝弓：木箭→蜂箭（:52698-52701）
   if (hasMoltenQuiver && p === 1) { p = 2; ammoBonus = 2; }   // 熔火箭袋族（:52702-52705）
   if (p === 1 && bowVid === 120) p = 2;      // 熔岩之怒：仅木箭→火矢（:46525-46528）
@@ -609,6 +639,13 @@ export const GUN_AMMO_SAVE: Record<number, [number, boolean]> = {
   2270: [2, true],   // 加特利托（:52763-52765）
   1553: [3, false],  // SDMG 仅耗 1/3（:52775-52777）
   1929: [3, false],  // 链式机枪 仅耗 1/3（:52771-52773）
+  // ★R29 三档（PickAmmo 省弹旗链 1458 :54200-54210）：星旋机枪 3475 Next(3)!=0
+  //   即省=仅耗 1/3、庆祝 MK2 3930 Next(2)==0 省 1/2、幻象弓 3540 Next(3)!=0 即省
+  //   =本体出手与 volley 内每发各掷 1/3（Celeb2 muzzle 回调此前绕过 roll 口=耗弹
+  //   ×3/×2,红队 §13）
+  3475: [3, false],  // 星旋机枪（:54200-54202）
+  3930: [2, true],   // 庆祝 MK2（:54203-54205）
+  3540: [3, false],  // 幻象弓（:54206-54208）
 };
 
 /** 逐枪省弹判定（rand01 = Math.random()，等价 Main.rand.Next(denom) 商值）：

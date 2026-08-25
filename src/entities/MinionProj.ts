@@ -155,36 +155,66 @@ const SENTRY53: Record<number, { shot: number; speed: number; cd: number }> = {
   966: { shot: 967, speed: 12.5, cd: 90 }, // 猎犬（Houndius）→ 967
 };
 /** aiStyle 123 哨兵射击表（:33819-34020 提取；射程门 1000）：
- *  641 月门→642 传送门弹 CD30；643 彩虹水晶→644×3 目标区随机落点 CD50
- *  （:34005 三连，距离越远散布越大） */
-const SENTRY_SHOOT: Record<number, { shot: number; speed: number; cd: number; volley?: number }> = {
+ *  641 月门→642 传送门弹 CD30；643 彩虹水晶→644×3 目标区随机落点。
+ *  ★643 真值节奏（1458 AI_123 :37726-34020,R31 §C③）：ai[0] −20→0 冷却 20t + 锁定 1t
+ *  + num8=5t 计满 → **~26t 一轮**——旧值 50 = 射速减半（R31 P1 一行止血）
+ */
+export const SENTRY_SHOOT: Record<number, { shot: number; speed: number; cd: number; volley?: number }> = {
   641: { shot: 642, speed: 9, cd: 30 },
-  643: { shot: 644, speed: 0, cd: 50, volley: 3 },
+  643: { shot: 644, speed: 0, cd: 26, volley: 3 },
 };
 
+/** 悬浮哨兵三件（R31 §C①：原版放置即定桩,tileCollide=false 恒悬浮于放置点）：
+ *  641 月门/643 彩虹水晶（AI_123 首行 velocity=Zero,:37726 区块）+
+ *  1025 悬空毒眼球（物品 5463 放置速度=(0,0) 原地浮现,Player.cs:48687-48689;
+ *  AI_197_CeilingAndHoverTurret 悬浮炮台）。此前走通用哨兵重力段 vy+=0.2 落地,
+ *  "空中炮台"站位语义丢失 */
+const FLOATING_SENTRIES = new Set<number>([641, 643, 1025]);
+
+/** 哨兵放置落地扫描（PickSentryLandingSpot Player.cs:50043-50059 1:1 纯函数,
+ *  R31 §C①——Game.ts case 'summon' 接线见落点清单;本导出先落可测实现）：
+ *  非悬浮件从鼠标格向下扫到"本格及左右邻均非实心"终止的行 i,取 i−1;
+ *  spawnX=鼠标世界 X、spawnY=i×16−24。悬浮三件(3571/3569/5463)免扫描直取鼠标格
+ *  （5463 另在 Player.cs:48687 把 spawnY 覆写为裸 mouseY、vy=0）。 */
+export function pickSentryLandingSpot(
+  store: { inBounds(x: number, y: number): boolean; isSolid(x: number, y: number): boolean },
+  mouseWX: number, mouseWY: number, itemId: number, maxTilesY: number,
+): { x: number; y: number } {
+  const floating = itemId === 3571 || itemId === 3569 || itemId === 5463;
+  const tx = Math.floor(mouseWX / 16);
+  let ty = Math.floor(mouseWY / 16);
+  if (!floating) {
+    const solidRow = (row: number): boolean =>
+      store.inBounds(tx - 1, row) && store.isSolid(tx - 1, row)
+      || store.inBounds(tx, row) && store.isSolid(tx, row)
+      || store.inBounds(tx + 1, row) && store.isSolid(tx + 1, row);
+    for (; ty < maxTilesY - 10 && !solidRow(ty); ty++) { }
+    ty--;
+  }
+  return { x: mouseWX, y: ty * 16 - 24 };
+}
+
 /** 随从/哨兵专属召唤音（生成后首帧起按 at 节拍各播一次）——原版来源：
- *  · 970 阿比盖尔计数：物品 5114 UseSound=AbigailSummon（Item.cs:40946）
- *  · 1022 蘑菇随从：物品 5456 UseSound=DeadCellsMushroomSummon（音量 0.35，:1081）
  *  · 1093/1094/1112/1113 Pal 随从：弹幕 AI soundDelay 双声（Projectile.cs:350 初值 0，
  *    `--soundDelay == -20` 第 20 拍家族叫声 PalCattiva :50099-50102 / PalFoxparks
  *    :59119-59122，音量 0.35=SoundID.cs:1074/:1086；`== -1` 首拍 PalSummon
  *    :50103-50106/:59123-59126，音量 0.15=SoundID.cs:1072）——tick1=PalSummon、tick20=家族叫声
  *    （1093/1094 与 1112/1113 同序，曾登记相反已订正）
- *  · OOA 十二哨兵 663-693：物品 3818-3834 UseSound=DD2_DefenseTowerSpawn（Item.cs:33794）
+ *  ★R31 §A③ 双播收口（2026-08-25）：下列条目已删——物品 UseSound 由 Game.playUseSound
+ *  经 vanilla-itemusesound.json 真值单播,本表再播即双声:
+ *   · 970/1022：5114→AbigailSummon / 5456→DeadCellsMushroomSummon 两键已在表;
+ *   · OOA 十二哨兵弹 663-693：3818-3834 → DD2_DefenseTowerSpawn 十二键已在表。
  *  其余随从族原版统一 UseSound=Item44（Game 侧 summon 通道已播，此处不重复） */
 const MINION_SUMMON_SFX: Record<number, Array<{ track: string; vol: number; at: number }>> = {
-  970: [{ track: 'abigail_summon', vol: 0.9, at: 1 }],
-  1022: [{ track: 'deadcells_mushroom_summon', vol: 0.35, at: 1 }],
   1093: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_cattiva', vol: 0.35, at: 20 }],
   1094: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_foxparks', vol: 0.35, at: 20 }],
   1112: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_cattiva', vol: 0.35, at: 20 }],
   1113: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_foxparks', vol: 0.35, at: 20 }],
   // 1098/1123 钻地龟出场双声（AI_204 :39222-39231：soundDelay-- ==-1 → PalSummon
-  // 0.15（tick1）/ ==-20 → PalDigtoise 0.35（tick20）——SoundID.cs:1072/:1094 同族节拍）
+  // 0.15（tick1）/ ==-20 → PalDigtoise 0.35（tick20）——SoundID.cs:1072/:1094 同族节拍；
+  // 物品 5667/6174 无 UseSound 行,非双播）
   1098: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_digtoise', vol: 0.35, at: 20 }],
   1123: [{ track: 'pal_summon', vol: 0.15, at: 1 }, { track: 'pal_digtoise', vol: 0.35, at: 20 }],
-  ...Object.fromEntries([663, 665, 667, 677, 678, 679, 688, 689, 690, 691, 692, 693]
-    .map((id) => [id, [{ track: 'dd2_defense_tower_spawn', vol: 0.7, at: 1 }]])),
 };
 
 /** 随从射弹出膛音（原版在弹幕 AI 首帧 localAI[0]==0 处 PlaySound，等效落射弹生成帧）：
@@ -1325,7 +1355,8 @@ export class MinionProj extends Entity {
    *  · 尘粒:423 冲刺每子步 ai[1]>3 → 1×dust 220/221（:66158-66166）;613 每子步
    *    ai[1]>3 → numUpdates<20 门 3×dust 229 + 2×环尘（:66198-66226）+归零拍 30×
    *    尘爆（:66249-66270）——本仓 spawnParticles 色彩近似、数量/节拍 1:1;
-   *    375/407 待机尘 1/7、1/5 每拍（:66925-66932/:66934-66937）未折算（登记）;
+   *    375/407 待机尘 1/7、1/5 每拍（:66925-66932/:66934-66937）已接（R31 §A⑥,见
+   *    ai62Step 尾部待机尘块）;
    *    407 alpha 渐变、帧表（MINION_FRAMES 已按 :66829-66946 表驱动）、
    *    375 攻击帧门改由 a62A1∈(0,24) 驱动（:66910-66913,见 draw） */
   private ai62Step(game: GameHooks, p: Player, dmg0: number, tgt: EnemyLike | null): void {
@@ -1622,6 +1653,19 @@ export class MinionProj extends Entity {
         }
       }
       } // !poseFrozen（冷却+射击段——触发拍 return 跳过 :66562）
+      // ---- 待机尘（R31 §A⑥ P2,AI_062 :66903-66940——帧段每 update 跑,触发拍
+      //  return 同样跳过）：375 小鬼 Next(7)==0 → d6 fire(scale2,v×0.3,noGravity,
+      //  noLight);407 暴风雨 Next(5)==0 → d217(scale2,alpha100,v×0.3,noGravity,noLight)
+      //  ——两杖的驻场识别色（MinionProj.ts:1328 旧登记"未折算"就此消账）----
+      if (!poseFrozen) {
+        if (type === 375 && Math.floor(Math.random() * 7) === 0) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 0, null, 2);
+          if (d) { d.vx *= 0.3; d.vy *= 0.3; d.noGravity = true; d.noLight = true; }
+        } else if (type === 407 && Math.floor(Math.random() * 5) === 0) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 217, 0, 0, 100, null, 2);
+          if (d) { d.vx *= 0.3; d.vy *= 0.3; d.noGravity = true; d.noLight = true; }
+        }
+      }
     }
     this.x += this.vx;
     this.y += this.vy;
@@ -2458,6 +2502,12 @@ export class MinionProj extends Entity {
         // 哨兵背在身上随玩家移动,各塔族开火段照常跑（原版拾起块后 AI 继续 :37824+）
         this.x = owner.cx - this.w / 2;
         this.y = owner.cy - this.h / 2;
+      } else if (FLOATING_SENTRIES.has(this.projId)) {
+        // 悬浮哨兵（R31 §C① P1）：AI_123 首行 velocity=Zero（:37726 区块,641/643）/
+        // AI_197 悬浮炮台（1025）——tileCollide=false 恒悬浮于放置点,不吃重力。
+        // 此前走下方重力段被拽到地面,"空中炮台"站位语义丢失。放置点本体（落地扫描
+        // +定速下坠）由 pickSentryLandingSpot 导出函数承载,Game 接线见落点清单。
+        this.vx = 0; this.vy = 0;
       } else {
         // 落地（AI_130 尾部 :65420：tileCollide=true + velocity.Y += 0.2）
         this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
@@ -2634,7 +2684,34 @@ export class MinionProj extends Entity {
       // ai[0]≤0 开火（射速 60/60/90，弹速 9/9/12.5，:27282-27311）→ ai[0] 每 tick 递减
       const s53 = SENTRY53[this.projId];
       if (s53) {
-        if (this.sInit === 0) { this.sInit = 1; this.sCool = 120; } // localAI[0]==0 → ai[0]=120（:27176-27181）
+        if (this.sInit === 0) {
+          this.sInit = 1; this.sCool = 120;   // localAI[0]==0 → ai[0]=120（:27176-27181）
+          // ---- 出生尘爆 + Item46 音（R31 §C②/A⑥ P1,AI_053 首帧 Projectile.cs:37951-37990）：
+          // 全体 PlaySound(Item46);308 冰霜九头蛇=80×d185(Y+16 盒,v×2,noGravity,scale×1.15);
+          // 377 蜘蛛皇后=40×d171(scale=Next(1,10)×0.1,fadeIn1.5,v×0.75,alpha100);
+          // 966 猎犬=30×d219(Center±(25,30) 盒,v×2,noGravity,scale×0.5)。377 frame=4/
+          // 966 ai[1]=-1+frame=0 为帧档微差未建模(登记)。此前哨兵"啪一下静默出现"。
+          game.playSfxFiles(soundTrackFiles('Item_46'), 1, this.cx, this.cy);
+          if (this.projId === 308) {
+            for (let i = 0; i < 80; i++) {
+              const d = game.spawnDust?.(this.x, this.y + 16, this.w, this.h - 16, 185, 0, 0, 0);
+              if (d) { d.vx *= 2; d.vy *= 2; d.noGravity = true; d.scale *= 1.15; }
+            }
+          } else if (this.projId === 377) {
+            for (let j = 0; j < 40; j++) {
+              const d = game.spawnDust?.(this.x, this.y + 16, this.w, this.h - 16, 171, 0, 0, 100);
+              if (d) {
+                d.scale = (1 + Math.floor(Math.random() * 9)) * 0.1;   // Next(1,10)*0.1
+                d.noGravity = true; d.fadeIn = 1.5; d.vx *= 0.75; d.vy *= 0.75;
+              }
+            }
+          } else if (this.projId === 966) {
+            for (let k = 0; k < 30; k++) {
+              const d = game.spawnDust?.(this.cx - 25, this.cy - 30, 50, 60, 219, 0, 0, 0);
+              if (d) { d.vx *= 2; d.vy *= 2; d.noGravity = true; d.scale *= 0.5; }
+            }
+          }
+        }
         const tgt = this.nearestEnemy(game, 1000); // AI_053_HandleSentryNPCTargeting maxDistance=1000
         let sector = 2;
         if (tgt) {

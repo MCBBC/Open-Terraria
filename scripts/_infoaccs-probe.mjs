@@ -105,6 +105,24 @@ const dps = await page.evaluate(async () => {
 });
 check('DPS 行累计显示(100 伤 → ≥50/s)', dps.ctxDps >= 50 && /(\d+ ?DPS|每秒\s*\d+\s*伤害)/.test(dps.text), JSON.stringify(dps));
 
+// textAlign 泄漏免疫:模拟死亡画面类裸设('center')→ 信息列文本仍左对齐
+// (判定:图标右缘 X+14 与文本左缘 X+20 之间的 4px 缝隙无文字像素)
+const gapOk = await page.evaluate(() => {
+  const g = window.__swGame;
+  const cv = document.querySelector('canvas');
+  const c = cv.getContext('2d');
+  c.textAlign = 'center';
+  c.textBaseline = 'alphabetic';   // 模拟 drawDeathScreen 类泄漏
+  return new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(() => {
+    const r = g.renderer.infoAccs.state.iconRects[0];
+    if (!r) return res(false);
+    const band = c.getImageData(r.x + 15, r.y, 4, r.h).data;
+    for (let i = 3; i < band.length; i += 4) if (band[i] > 40) return res(false);
+    res(true);
+  })));
+});
+check('textAlign 泄漏免疫(图标/文本缝 4px 净空)', gapOk === true, '');
+
 // hideInfo 隐藏语义:全置真 → 行清空(背包关时隐藏行不画图标不画文本)
 const hidden = await page.evaluate(async () => {
   const g = window.__swGame;

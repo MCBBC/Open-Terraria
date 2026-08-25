@@ -344,7 +344,20 @@ export class TagEffectState {
         this.enableProcOnNPC(npcId);
         break;
       case 'kaleidoscope':
-        // WhipTagEffect_Kaleidoscope :8-15：RainbowRodHit 粒子（本仓粒子管线近似）
+        // WhipTagEffect_Kaleidoscope.cs:9-15：OnTaggedHit → ParticleOrchestrator
+        //  RequestParticleSpawn(RainbowRodHit)@弹心——tag 敌被吃鞭的随从每次命中都
+        //  触发。此前空 case 零发射（注释称"本仓粒子管线近似"实为无实现,R31 §B④）。
+        //  RainbowRodHit 编排粒子本仓无 Orchestrator 管线 → 彩虹径向粒子簇占位
+        //  （六向径向,hue 随时钟轮转——最小可见反馈）。
+        {
+          const g2 = game;
+          const hue0 = (typeof performance !== 'undefined' ? performance.now() / 5000 : 0) % 1;
+          for (let k = 0; k < 6; k++) {
+            const ang = (k / 6) * Math.PI * 2;
+            g2.spawnBurst?.(ctx.hx, ctx.hy, whipHslCss((hue0 + k / 6) % 1), 2, 3.2,
+              ang, Math.PI / 8, { life: 22 });
+          }
+        }
         break;
       default:
         break;
@@ -736,4 +749,25 @@ export function resolveWhipTagHit(
   }
   if (crit) dmg *= 2;
   return { dmg: Math.max(1, Math.round(dmg)), crit };
+}
+
+/** hue(0..1) → css 颜色（万花筒彩虹粒子占位用;满饱和半亮度同 Main.hslToRgb(h,1,0.5)） */
+function whipHslCss(h: number): string {
+  const f = (n: number): number => {
+    const k = (n + h * 12) % 12;
+    return Math.round(255 * Math.min(1, Math.max(0, Math.min(k - 3, 9 - k, 1)) * 0.5 + 0.5 * (1 - Math.abs(2 * 0.5 - 1)))) ;
+  };
+  // 简式：l=0.5、s=1 → rgb = hue2rgb 标准式
+  const q = h < 1 / 3 ? h * 6 : h < 0.5 ? 1 : h < 2 / 3 ? 4 - h * 6 : 0;
+  const seg = (off: number): number => {
+    let t = off + 1 / 3;
+    if (t > 1) t -= 1;
+    if (t < 0) t += 1;
+    if (6 * t < 1) return q;
+    if (2 * t < 1) return 1;
+    if (3 * t < 2) return 4 - 6 * t;
+    return 0;
+  };
+  void f;
+  return `rgb(${Math.round(seg(0) * 255)},${Math.round(seg(-1 / 3) * 255)},${Math.round(seg(1 / 3) * 255)})`;
 }

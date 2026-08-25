@@ -306,7 +306,9 @@ describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () =>
     expect(m.pierce).toBe(3);
     expect(m['homingId']).toBe(-1);
     fly(m, hooks, 40);
-    expect(en.hits).toBe(3);
+    // ★R27：3 次接触命中 + 死亡 Resize(128) AoE 二次结算（Projectile.cs:72426-72434——
+    // maxPenetrate=−1 后 Damage() 重开判定盒,localNPCImmunity 清零即同拍可再中）= 4 跳
+    expect(en.hits).toBe(4);
     expect(m.dead).toBe(true);
   });
 
