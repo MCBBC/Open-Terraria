@@ -6052,6 +6052,9 @@ export class Enemy extends Entity {
       if (rage) { stepY = 0.1; overCapY = 0.1; driftY = 0.05; }   // :53086-53117
     }
     this.facing = dirX;
+    // AI_002 全族 tilt（cs:52906 无条件 rotation = vy×0.1×direction——追敌俯冲随
+    // 纵速转头）；133/664 由 FindFrame 层覆写为速度角（findFrameRotation）
+    this.visAngle = this.vy * 0.1 * dirX;
     const vid2 = this.vanillaId ?? 0;
     const isPigron = vid2 === 170 || vid2 === 171 || vid2 === 180;
     // ---- 猪龙三色（170 腐化/171 圣域/180 猩红,cs:52726-52791,审计眼睛族）：

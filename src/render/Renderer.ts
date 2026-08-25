@@ -5276,7 +5276,7 @@ export class Renderer {
         else if (stR === 115 && idR === 603) ctx.rotate(e.visAngle);  // 海鸥2(FindFrame :74550+ 空中 vx×0.1/水面与静止 0)
         else if (stR === 7 && (idR === 230 || idR === 593)) ctx.rotate(e.visAngle);  // 走路金鱼/金色走路金鱼(FindFrame :76585+ 高速下落 −=vy×0.01 抬头、落地归零)
         else if (stR === 3 && (idR === 461 || idR === 469)) ctx.rotate(e.visAngle);  // 深渊来客(空中 (rot×4+瞄准)/5 平滑+翻面取反 :76025+)/被附身者(冲刺态 atan2+π/2 :76365+)
-        else if (stR === 2 && idR === 133) ctx.rotate(e.visAngle);   // 游荡眼(FindFrame :74760+ 随速度角、左行 +π;其余 aiStyle2 恶魔眼族不旋转)
+        else if (stR === 2) ctx.rotate(e.visAngle);   // AI_002 眼族:全族 tilt=vy×0.1×direction(cs:52906);游荡眼/火把神由 FindFrame 覆写为速度角(:74860/:75628,左行 +π)
         else if (e.vanilla?.aiStyle === 13) ctx.rotate(e.visAngle); // AI_013 植物族:头随朝玩家伸展方向旋转(cs:22778-22794);spriteDirection 仍翻转→不进 rotationDriven
         else if (stR === 93) ctx.rotate(e.visAngle);   // AI_093 荷兰飞盗船:rotation=vx*0.025(cs:41011);spriteDirection=-sign(vx) 仍镜像
         else if (stR === 102 || stR === 109) ctx.rotate(e.visAngle); // AI_102/109 沙尘精/黑暗魔法师:rotation=vx*0.04(cs:42249/:66415)
