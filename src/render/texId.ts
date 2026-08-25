@@ -20,6 +20,9 @@ export function texId(img: object): number {
  *  进页贴图已有磁盘缓存）。凡"烘焙染色副本进缓存"的路径入口一律先过本守卫；
  *  位图（ImageBitmap）构造即解码完成、画布内容同步,查 width 即可。 */
 export function texReady(tex: ImageBitmap | HTMLImageElement | HTMLCanvasElement): boolean {
-  if (tex instanceof HTMLImageElement) return tex.complete && tex.naturalWidth > 0;
+  // Node 测试环境无 HTMLImageElement 全局——typeof 守卫后再 instanceof
+  if (typeof HTMLImageElement !== 'undefined' && tex instanceof HTMLImageElement) {
+    return tex.complete && tex.naturalWidth > 0;
+  }
   return tex.width > 0;
 }

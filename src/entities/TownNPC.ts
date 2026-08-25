@@ -672,6 +672,10 @@ export class TownNPC extends Entity {
   get holdoutAim(): number { return this.holdAim; }
   /** world.flags.hardMode 缓存（攻击Update 每 tick 刷新）——持械表 pre/hm 选档用 */
   get hardMode(): boolean { return this.hardModeFlag; }
+  /** ai[1] 态倒计时只读（AttackType3 挥砍渲染 GetSwingStats 消费） */
+  get attackTimer(): number { return this.atkTimer; }
+  /** localAI[3] 态内 tick 只读（AttackType2 光环 4 帧动画相位消费） */
+  get attackTick(): number { return this.atkTick; }
   /** ai[2]：弓族发射档写入，其余恒 0 */
   private holdAim = 0;
   /** ai[1]:态倒计时(AttackTime) */

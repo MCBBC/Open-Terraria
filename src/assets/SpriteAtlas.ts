@@ -731,6 +731,31 @@ export function sliceItemAnimFrame(vid: number, ar: DrawRect, tick: number): Dra
   return { img: ar.img, sx: ar.sx, sy: ar.sy + Math.round(fh * f), sw: ar.sw, sh: Math.round(fh) };
 }
 
+/** 多格 tile 图标拼装（place_v_* 图标用）：vanilla tile 帧表=18px 步进（16×16 帧
+ *  +2px 边距,VanillaTiler :838/:1125 同源）——按 (tx×18,ty×18) 逐格取 16×16 贴到
+ *  w×16 × h×16 画布,边距不入户。表未载返回 null（调用方走 UI 逐帧重试自愈）。
+ *  缓存按 sheet（一表一 tile 族;首风格块在表原点） */
+const TILE_FOOTPRINT_CACHE = new Map<number, HTMLCanvasElement | null>();
+function tileFootprintCanvas(atlas: SpriteAtlas, sheet: number, w: number, h: number): HTMLCanvasElement | null {
+  const hit = TILE_FOOTPRINT_CACHE.get(sheet);
+  if (hit !== undefined) return hit;
+  if (typeof document === 'undefined') return null;
+  const img = atlas.ensureVImage(`vanilla/Tiles_${sheet}.png`);
+  if (!img || !(img.width > 0)) return null;   // 未载:不缓存,下次重试
+  const c = document.createElement('canvas');
+  c.width = w * 16; c.height = h * 16;
+  const cx = c.getContext('2d');
+  if (!cx) return null;
+  cx.imageSmoothingEnabled = false;
+  for (let ty = 0; ty < h; ty++) {
+    for (let tx = 0; tx < w; tx++) {
+      cx.drawImage(img as CanvasImageSource, tx * 18, ty * 18, 16, 16, tx * 16, ty * 16, 16, 16);
+    }
+  }
+  TILE_FOOTPRINT_CACHE.set(sheet, c);
+  return c;
+}
+
 export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | null {
   const vid = VANILLA_ITEM_ICON_MAP[key];
   if (vid !== undefined) return atlas.vicon(vid);
@@ -746,13 +771,14 @@ export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | nul
     if (tid !== undefined) {
       const td = TILE_DEFS[tid];
       if (td?.vanilla) {
-        // ★多格 tile 整脚印取图（(0,0,w×16,h×16)——首风格块在表原点,vanilla 帧
-        // 表 2px 边距不含）：曾 vframeAt 单格 16×16 = 多格放置物图标缺损
-        // （2026-08-25 用户报向日葵只显示左上角碎片）。单格 tile 维持 vframeAt
-        // （窄条表如压板 135 的 16×200 竖条 cols=0 会让 vframe 判越界）
+        // ★多格 tile 逐格拼装（vanilla tile 帧表=18px 步进:16×16 帧+2px 边距,
+        // VanillaTiler :838/:1125 同源）——整块 vrect 直取会把边距行列包进来
+        // =十字缝（2026-08-25 用户报蜂巢十字缝/向日葵竖缝）;单格 16×16 碎片
+        // （向日葵初报）同根。拼装缓存按 sheet
         if ((td.w ?? 1) > 1 || (td.h ?? 1) > 1) {
-          return atlas.vrect(td.vanilla.sheet, 0, 0, (td.w ?? 1) * 16, (td.h ?? 1) * 16)
-            ?? atlas.vframeAt(td.vanilla.sheet, 0, 0) ?? atlas.vframe(td.vanilla.sheet, 0, 0);
+          const assembled = tileFootprintCanvas(atlas, td.vanilla.sheet, td.w ?? 1, td.h ?? 1);
+          if (assembled) return { img: assembled, sx: 0, sy: 0, sw: assembled.width, sh: assembled.height };
+          return null;   // 表未载:走 UI 逐帧重试自愈（勿回退单格碎片）
         }
         return atlas.vframeAt(td.vanilla.sheet, 0, 0) ?? atlas.vframe(td.vanilla.sheet, 0, 0);
       }

@@ -143,3 +143,40 @@ export const TOWN_HOLDOUT: Record<number, TownHoldout> = {
   227: { pre: 3350, grip: 16, scale: 0.85 },     // 酒馆老板
   368: { pre: 2269, hm: 2223, preGripAimDown: 28, preScale: 0.75 }, // 旅商:左轮→肉后枪;攻帧≥21 加持 Extra_53 手部
 };
+
+/** GetMagicAuraColor(NPCID.cs:4859 MagicAuraColor 表)——AttackType2 施法光环乘色
+ *  （A=127 经 globalAlpha 施加;微光变体 160 BGR 互换 / 20→(90,20,210) 渲染侧处理） */
+export const TOWN_MAGIC_AURA_COLOR: Record<number, [number, number, number, number]> = {
+  54: [100, 4, 227, 127],    // 服装商
+  108: [255, 80, 60, 127],   // 巫师
+  160: [40, 80, 255, 127],   // 松露人
+  20: [40, 255, 80, 127],    // 树妖
+  663: [178, 121, 229, 127], // hsl(0.92,1,0.78)≈(178,121,229)
+};
+
+/** GetSwingStats(NPC.cs:67247-67320)——AttackType3 近战挥砍的持位/旋转纯函数。
+ *  三相位（<1/3 前持 / <2/3 中持 / 其余回拉）按 item 宽高分档取贴身距离；
+ *  旋转 = (进度−0.5)×(−aimDir)×3.5 − aimDir×0.3 */
+export function townSwingStats(
+  swingMax: number, swingCurrent: number, aimDir: number,
+  itemW: number, itemH: number, centerX: number, positionY: number,
+): { x: number; y: number; rot: number } {
+  let x: number, y: number;
+  if (swingCurrent < swingMax * 0.333) {
+    const n = itemW >= 92 ? 38 : itemW >= 64 ? 28 : itemW >= 52 ? 24 : itemW > 32 ? 14 : 10;
+    x = centerX + (itemW * 0.5 - n) * aimDir;
+    y = positionY + 24;
+  } else if (swingCurrent < swingMax * 0.666) {
+    const n = itemW >= 92 ? 38 : itemW >= 64 ? 28 : itemW >= 52 ? 24 : itemW > 32 ? 18 : 10;
+    x = centerX + (itemW * 0.5 - n) * aimDir;
+    const ny = itemH > 64 ? 14 : itemH > 52 ? 12 : itemH > 32 ? 8 : 10;
+    y = positionY + ny;
+  } else {
+    const n = itemW >= 92 ? 38 : itemW >= 64 ? 28 : itemW >= 52 ? 24 : itemW >= 48 ? 18 : itemW > 32 ? 14 : 6;
+    x = centerX - (itemW * 0.5 - n) * aimDir;
+    const ny = itemH > 64 ? 14 : itemH > 52 ? 12 : itemH > 32 ? 10 : 10;
+    y = positionY + ny;
+  }
+  const rot = (swingCurrent / swingMax - 0.5) * -aimDir * 3.5 - aimDir * 0.3;
+  return { x, y, rot };
+}

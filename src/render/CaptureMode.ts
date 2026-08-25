@@ -849,9 +849,13 @@ export class CaptureInterface {
     //   中间态）；水色精确值由 Renderer.updateWaterStyle 捕获直供兜底
     const savedScene = r.scene;
     const choice = CaptureSettings.biomeChoiceIndex;
-    if (choice >= 0 && savedScene) {
+    // ★BISECT(临时):__iso = { sceneSwap, snap } 二分黑屏归因
+    const iso = (typeof window !== 'undefined' ? (window as unknown as { __iso?: { sceneSwap: boolean; snap: boolean } }).__iso : null) ?? { sceneSwap: true, snap: true };
+    if (choice >= 0 && savedScene && iso.sceneSwap) {
       const ov = captureSceneOverride(choice, savedScene);
       if (ov) r.scene = ov;
+    }
+    if (choice >= 0 && iso.snap) {
       r.biomeBg.snapStyle(this.settings!.biome.backgroundIndex);
     }
     try {

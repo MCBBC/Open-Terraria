@@ -236,6 +236,8 @@ export function queueRippleRaw(
 ): void {
   if (!waterWaves.gates.ripple) { _rqCount = 0; return; }
   if (_rqCount >= MAX_RIPPLES) return;
+  const __cap = (globalThis as { __swRippleCap?: unknown[] }).__swRippleCap;
+  if (__cap && __cap.length < 400) __cap.push({ x: Math.round(x), y: Math.round(y), sx: Math.round(sx), sy: Math.round(sy), a: +colA.toFixed(3), g: +colG.toFixed(3) });
   _rqX[_rqCount] = x; _rqY[_rqCount] = y;
   _rqW[_rqCount] = sx; _rqH[_rqCount] = sy;
   _rqColR[_rqCount] = colR; _rqColG[_rqCount] = colG; _rqA[_rqCount] = colA;

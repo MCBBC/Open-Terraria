@@ -172,7 +172,7 @@ class GLBgBlit implements BGBlit {
 }
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
-import { TOWN_HOLDOUT, ITEM_POS_NUM } from '../data/vanillaTownAttack';
+import { TOWN_HOLDOUT, ITEM_POS_NUM, TOWN_ATTACK_TYPE, TOWN_ATTACK_TIME, TOWN_SWING, TOWN_MAGIC_AURA_COLOR, townSwingStats } from '../data/vanillaTownAttack';
 import { viIdFromKey, itemCombat } from '../data/vanillaItemCombat';
 import { VANILLA_IS_FOOD, type FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -8718,6 +8718,12 @@ export class Renderer {
         //      ai[0]==12 全程手持武器图标——旋转 = ai[2]×90°×朝向；228/229/209 原版
         //      提前 return 无持械（表里不列即同效）。传本体帧几何供 Extra_52/53 overlay
         if (!n.bound && n.attackState === 12) this.drawTownHoldout(ctx, n, r, addYT);
+        // ---- AttackType2/3（:27697-27760）：魔法施法光环 / 近战挥砍武器——
+        //      2026-08-25 review 补齐（此前整块缺失：服装商/巫师/松露人/树妖施法
+        //      无光环,动物学家等挥砍无武器）----
+        const nAt = TOWN_ATTACK_TYPE[n.vanillaId];
+        if (!n.bound && nAt === 2 && n.attackState === 14) this.drawTownMagicAura(ctx, n);
+        if (!n.bound && nAt === 3 && n.attackState === 15) this.drawTownMeleeSwing(ctx, n);
         return;
       }
       // 贴图条懒加载首帧未就绪：落入下方程序化兜底，本帧后懒加载完成
@@ -8800,6 +8806,53 @@ export class Renderer {
 
   /** swing 形状（Game.swing / 远端 swingNet 同构）。
    *  useStyle 分族 + aim（useStyle 5/13 的瞄准角）由 Game.useSwing 写入 */
+  /** AttackType2 施法光环（DrawNPCExtras :27697-27705）：Extra_51 竖 4 帧
+   *  （帧 = frameCounter%48/12,本仓以态内 tick atkTick 代——同为逐 tick 推进），
+   *  锚 = Bottom+(0,4)、origin=帧底中心，乘色 = MagicAuraColor 表（A=127 经
+   *  globalAlpha）；微光变体：160 BGR 互换 / 20→(90,20,210)（GetMagicAuraColor） */
+  private drawTownMagicAura(ctx: CanvasRenderingContext2D, n: TownNPC): void {
+    if (!this.atlas) return;
+    const img = this.atlas.ensureVImage('vanilla/Extra_51.png');
+    if (!img || !(img.width > 0)) return;
+    const fh = Math.max(1, Math.floor(img.height / 4));
+    const fi = Math.floor((n.attackTick % 48) / 12);
+    let [r, g, b] = TOWN_MAGIC_AURA_COLOR[n.vanillaId] ?? [255, 255, 255];
+    if (n.vanillaId === 160 && n.shimmered) { const t = r; r = b; b = t; }
+    if (n.vanillaId === 20 && n.shimmered) { r = 90; g = 20; b = 210; }
+    ctx.save();
+    ctx.globalAlpha = 127 / 255;
+    tintIconRect(ctx, { img, sx: 0, sy: fi * fh, sw: img.width, sh: fh },
+      { x: Math.round(n.cx - img.width / 2), y: Math.round(n.y + n.h + 4 - fh), w: img.width, h: fh },
+      [r, g, b]);
+    ctx.restore();
+  }
+
+  /** AttackType3 近战挥砍（DrawNPCExtras :27705-27760）：武器 4 默认 / 3349(207) /
+   *  3352(353) / 3351(441)，持位+旋转 = GetSwingStats（AttackTime×2, ai[1], dir,
+   *  rect,rect——rect=TOWN_SWING.rect=num13）+ 末段 zero.Y=12 + 中段外扩 num14；
+   *  origin = (sd!==1 ? W : 0, H) 底角、effect^FlipH（本仓 scale(-1,1) 等价） */
+  private drawTownMeleeSwing(ctx: CanvasRenderingContext2D, n: TownNPC): void {
+    if (!this.atlas) return;
+    const item = n.vanillaId === 207 ? 3349 : n.vanillaId === 353 ? 3352 : n.vanillaId === 441 ? 3351 : 4;
+    const icon = this.atlas.vicon(item);
+    if (!icon) return;
+    const atkTime = TOWN_ATTACK_TIME[n.vanillaId] ?? 30;
+    const rect = TOWN_SWING[n.vanillaId]?.rect ?? 32;
+    const num14 = n.vanillaId === 441 ? 0.1 : n.vanillaId === 207 || n.vanillaId === 353 ? 0.15 : 0;
+    const zeroY = n.attackTimer > atkTime * 0.66 ? 12 : 0;
+    const st = townSwingStats(atkTime * 2, n.attackTimer, n.facing, rect, rect, n.cx, n.y);
+    const vx = st.x + (st.x - n.cx) * num14;
+    const vy = st.y + zeroY;
+    ctx.save();
+    ctx.globalAlpha = shimmerBodyAlpha(n.shimmerTransparency);
+    ctx.translate(Math.round(vx), Math.round(vy));
+    ctx.rotate(st.rot);
+    if (n.facing === -1) ctx.scale(-1, 1);
+    ctx.drawImage(icon.img as CanvasImageSource, icon.sx, icon.sy, icon.sw, icon.sh,
+      0, -icon.sh, icon.sw, icon.sh);
+    ctx.restore();
+  }
+
   /** 游泳腿相位（Player.cs:35791-35805 legFrameCounter 状态机）：swimTime>0 期间
    *  counter 每 tick +2、每 8 进一行（行 7..19 回绕钳制）——counter 只在非游泳分支
    *  清零（vy≠0 行 5 / 站立行 0），入水时残留恒 0 → 相位 = 自进入连续游泳段起每 4t
@@ -10111,7 +10164,8 @@ export class Renderer {
     let holdStyleRaw = 0;   // 未置零的静持档（holdStyle 7 无持位绘制但身体行 11 :36042-36045）
     /** 静持绘制载荷（段 A 算参数、本体层之后消费——DrawPlayer_27_HeldItem 层位
      *  = BehindFrontArm 本体之上；曾整段画在本体之前=被身体挡住,用户实报） */
-    let heldDraw: { vid: number; hs: number; ar: DrawRect | null; icon: HTMLImageElement | null;
+    let heldDraw: { vid: number; hs: number; ar: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number } | null;
+      icon: HTMLCanvasElement | HTMLImageElement | null;
       fw: number; fh: number; offX: number; offY: number; rot: number } | null = null;
     if (!swing) {
       const held = p.inv.heldItem();

@@ -62,19 +62,21 @@ describe('地表远景背景锚点（Main.cs DrawSurfaceBG :58749/:58860）', ()
     const camTopY = cam.y - 862 / 2 / 1.25;                 // screenPosition.Y
     const num3 = -(camTopY - 300) / (100 * 16);
     const scAdj = scAdjOf(camTopY, 862, 1.25, 100, 600);
-    // 森林专属远山两档（:60716-60717 topA 1300/1600, topB 1090/1350——调试实证
-    // 首帧 alphaFront 仅 0.05 时树层同绘,两档均在 recs;+scAdj+push(2026-08-20)
-    const y0 = num3 * 1300 + 1090 + scAdj + PUSH;
-    const y1 = num3 * 1600 + 1350 + scAdj + PUSH;
-    expect(recs.some((c) => Math.abs(c.dy - y0) < 1.01), `dys=${recs.map((c) => Math.round(c.dy)).join(",")} want=${Math.round(y0)}`).toBe(true);
-    expect(recs.some((c) => Math.abs(c.dy - y1) < 1.01)).toBe(true);
-    // 旧实现（cam.y - 862/2）算出的同档 topY 必差 ~70px——若退回 /1 占位,
-    // 修正档坐标恒不出现（实measured 差 70px = 用户可见的"Y 偏下"量）
+    // 山体双步（2026-08-25 原版对齐重写）：m[0]=Step1 几何 num3×1300+1090、
+    // m[1]=treeMntBGSet1[1] 块 num3×1400+1260（:60430），各 + GetLayerYOffset(贴图)
+    // + scAdj + push。风格按种子挑选——候选取全部森林风格 m 槽贴图的 YOffset 集
+    // {7:0,93:-50,171:-100,176:-760} / {8:0,90:0,94:0,172:130,177:-200}
+    const y0Cands = [0, -50, -100, -760].map((o) => num3 * 1300 + 1090 + o + scAdj + PUSH);
+    const y1Cands = [0, 130, -200].map((o) => num3 * 1400 + 1260 + o + scAdj + PUSH);
+    expect(recs.some((c) => y0Cands.some((y) => Math.abs(c.dy - y) < 1.01)),
+      `dys=${recs.map((c) => Math.round(c.dy)).join(",")} want=[${y0Cands.map(Math.round)}]`).toBe(true);
+    expect(recs.some((c) => y1Cands.some((y) => Math.abs(c.dy - y) < 1.01))).toBe(true);
+    // zoom 修正判别：/1 占位锚（旧实现）的 m[0] 档与 zoom 修正档差 ~70px——
+    // 渲染集命中修正档（上断言）且两档坐标差显著,占位回归即候选恒不命中
     const camTopOld = cam.y - 862 / 2;
     const num3Old = -(camTopOld - 300) / (100 * 16);
     const y0Old = num3Old * 1300 + 1090 + scAdj + PUSH;
-    expect(Math.abs(y0Old - y0)).toBeGreaterThan(30);
-    expect(recs.some((c) => Math.abs(c.dy - y0Old) < 1)).toBe(false);
+    for (const yo of y0Cands) expect(Math.abs(y0Old - yo)).toBeGreaterThan(30);
   });
 
   it('X 锚 = 屏左 camLeftX（中心 - 半屏/zoom）×parallax 的 IEEERemainder', () => {
