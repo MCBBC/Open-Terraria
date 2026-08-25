@@ -1,8 +1,7 @@
 // _prism-mana-probe:终极棱镜魔力不足链路实测
 // 原版语义(Player.cs CheckMana :53215 + AI_075 633 :67656-67682):
 //   ①空蓝不断链(ManaV2 :53241-53256 statMana=0+slowMagicUse=true 照常施法)
-//   ②slowMagicUse 效果:632 束淡化(Main.cs 1458 厚×0.7/透明×0.25)+免疫窗 5→12t
-//     (:14058 GetSlowMagicUseTime)
+//   ②slowMagicUse 效果:632 束淡化(1458 厚×0.7/透明×0.25)+免疫窗 5→12t(:14058)
 //   ③CheckMana 入口复位(:53217)——蓝回够下一节拍即还原(曾缺=永久淡化)
 //   ④魔力花自动喝蓝(:53226-53239)
 import puppeteer from 'puppeteer-core';
@@ -31,8 +30,8 @@ const out = await page.evaluate(async () => {
   g.input.mouseX = g.renderer.canvas.width / 2 + 120;
   g.input.mouseY = g.renderer.canvas.height / 2 - 60;
   const sample = () => {
-    const pr = g.entities.projectiles.find((q) => q.constructor.name === 'PrismProj');
-    const prong = g.entities.projectiles.find((q) => q.constructor.name === 'PrismProng');
+    const pr = g.entities.projectiles.find((q) => q.constructor.name === 'PrismProj' || q.projId === 633);
+    const prong = g.entities.projectiles.find((q) => q.projId === 632);
     return {
       alive: !!pr && !pr.dead,
       charge: pr ? Math.round(pr.charge) : null,
@@ -47,7 +46,7 @@ const out = await page.evaluate(async () => {
   g.input.mouseDown = true; g.input.mouseHeld = true;
   await new Promise((r) => setTimeout(r, 200));
   log.A_full = sample();
-  // 阶段B:清空魔力 → 空蓝续充 1.5s(应不断链+slowMagicUse=true+mana 钳 0)
+  // 阶段B:清空魔力 → 空蓝续充 1.5s(应不断链+slowMagicUse=true+mana 贴地)
   p.mana = 0;
   await new Promise((r) => setTimeout(r, 1500));
   log.B_empty = sample();

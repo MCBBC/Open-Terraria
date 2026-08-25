@@ -4734,10 +4734,11 @@ export class Game implements GameHooks {
     this.sfx.suppress = false;   // 安全网：afterWorldLoad 中段抛异常导致门未解除时，首 tick 自动恢复有声
     this.sfx.setListener(this.camera.x, this.camera.y);
     // ---- 原版环境采样 + BGM 选曲（SceneMetrics/UpdateAudio_DecideOnNewMusic；15 tick 刷新） ----
-    // 座钟授时（⚠️3，Player.cs:12593-12596 `if (SceneMetrics.HasClock && accWatch < 3)
-    // accWatch++`）：扫描窗内有落地座钟 104 → accWatch 逐 tick 提到 3（金表精度
-    // 时间行,Main.cs:46220-46227 ==3 显示真实分）。equipStats.infoAccs 由装备重算
-    // 重建,此处逐 tick 顶回（scene 每 15t 刷新,旗标滞后 ≤0.25s 无感）
+    // 座钟授时（⚠️3，Player.cs:13119-13122(1457;1456 :12593-12596) `if (HasClock &&
+    // accWatch < 3) accWatch++`——**从 0 也提**:无表近钟 = 铜表精度时间行):扫描窗内
+    // 有落地座钟 104 → accWatch 逐 tick 提到 3（金表精度时间行,Main.cs:46220-46227
+    // ==3 显示真实分）。equipStats.infoAccs 由装备重算重建,此处逐 tick 顶回
+    // （scene 每 15t 刷新,旗标滞后 ≤0.25s 无感）
     if (this.scene.hasClock && this.player.equipStats.infoAccs.accWatch < 3) {
       this.player.equipStats.infoAccs.accWatch++;
     }
@@ -8987,7 +8988,10 @@ export class Game implements GameHooks {
         const sawVid = heldDef ? heldDef.vid ?? viIdFromKey(heldDef.key) : -1;
         const sawShoot = heldDef?.shoot
           ?? (sawVid >= 0 ? itemCombat(sawVid)?.shoot : undefined);
-        if (sawShoot && projectileData(sawShoot)?.aiStyle === 20) {
+        // r33-③：ai75 激光钻变体（2798→445）同门放行——AI_075 挂手/命中面与 AI_020
+        // 同构（:68404-68411 共用尾），差异只在音 Item132/23t+相位灯串（实体侧 laser 分支）
+        const sawAi = sawShoot ? projectileData(sawShoot)?.aiStyle : undefined;
+        if (sawShoot && (sawAi === 20 || sawAi === 75)) {
           const sawAng = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
           if (this.swing) {
             this.swing.useStyle = 5;
@@ -9009,7 +9013,8 @@ export class Game implements GameHooks {
               () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
               { projId: sawShoot,
                 pick: tool.pickPower ?? (tool.type === 'pick' ? tool.power : 0),   // 音效分档 :23868
-                shootSpeed: cSaw?.shootSpeed });                          // 509=48 / 252=46
+                shootSpeed: cSaw?.shootSpeed,                             // 509=48 / 252=46 / 2798=36
+                laser: sawAi === 75 });
             saw.critChance = 0.04 + this.player.critChance('melee') / 100 + (psSaw?.crt ?? 0) / 100;
             saw.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
             this.entities.add(saw, 'projectiles');
@@ -25161,37 +25166,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private _iconUiDirtyAt = 0;
   /** iconUiDirty 上次刷 UI 的 tick（冷却节流用） */
   private iconUiAt = -100;
-  /** 新物品入手飘名（主角旁浅白文本） */
-
+  /** 拾取后刷新 UI（节流+尾包补发）。★旧"库存 diff 飘名"已摘除（2026-08-25
+   *  用户实报同名双飘）：该快照 diff 路径是 PopupText 链接入前的兜底飘名——
+   *  与 showPickupLabel（PopupText.NewText 对齐链）并行产出 = 同名两条飘字
+   *  （一条带计数一条不带）。飘名职责全权归 showPickupLabel，本函数只管刷 UI */
   notifyInventoryChanged() {
-    // 检测新物品：与上次快照比较，新增的种类在主角旁飘名
-    const inv = this.player.inv;
-    if (!this._invSnapshot) {
-      this._invSnapshot = new Map<number, number>();
-      for (const s2 of inv.slots) {
-        if (s2) this._invSnapshot.set(s2.id, (this._invSnapshot.get(s2.id) ?? 0) + s2.stack);
-      }
-      return;
-    }
-    const now = new Map<number, number>();
-    for (const s2 of inv.slots) {
-      if (s2) now.set(s2.id, (now.get(s2.id) ?? 0) + s2.stack);
-    }
-    for (const [id, n] of now) {
-      const before = this._invSnapshot.get(id) ?? 0;
-      if (n > before && this.tickCount - this.lastNotifiedAt > 30) {
-        this.lastNotifiedAt = this.tickCount;
-        const def = ITEM_DEFS[id];
-        if (def) {
-          this.dmgNumbers.push({
-            x: this.player.cx, y: this.player.y - 6, vy: -0.9,
-            value: 0, crit: false, color: '#FFFFFF', life: 60, label: Lang.itemNameByKey(def.key),
-          } as DamageNumber & { label: string });
-        }
-        break; // 每次 refresh 只飘一个
-      }
-    }
-    this._invSnapshot = now;
     if (this.tickCount - this.invNotifyAt >= 10) {
       this.invNotifyAt = this.tickCount;
       this.invNotifyPending = false;
@@ -25200,9 +25179,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.invNotifyPending = true;
     }
   }
-  private _invSnapshot: Map<number, number> | null = null;
-  private lastNotifiedAt = 0;
-
   private flushInvNotify() {
     if (this.invNotifyPending && this.tickCount - this.invNotifyAt >= 10) {
       this.invNotifyAt = this.tickCount;
@@ -27000,7 +26976,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       this.cb.onInventoryChanged?.();
     }
-    bobber.dead = true;
+    // R32（2026-08-25，蓝队钓竿案）：无咬/断线收线 = ai[0]=1/2 收线飞行（ItemCheck_
+    // PullFishingBobbers Player.cs:53019-53043 → AI_061 :54635-54668），触玩家盒才 Kill
+    // ——非即时消失；reel() 已置 retract 时由 Bobber.fixedUpdate 自管寿命（竿静持随行）
+    if (!bobber.retracting) bobber.dead = true;
   }
 
   /** SpawnOnPlayer 等价（NPC.cs:81273-81506）：灯泡破坏召唤走此链——在玩家

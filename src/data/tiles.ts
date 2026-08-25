@@ -897,6 +897,16 @@ def({ key: 'v_749_boulder_block', name: '', solid: true, opacity: 1, pick: 0, ma
 def({ key: 'v_750_sharp_spike_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#797979', blend: true, drop: 6134, vanilla: { sheet: 750, frame: 'auto' } });
 TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));
 
+/** 原版 TileID → 本仓 tile id（本仓 id = 注册序,与原版 TileID【不同域】——
+ *  例:沙 原版 53 / 本仓 22。★凡持原版 tile id 的逻辑(弹幕落档/击碎清单/
+ *  TileFrame 门等)必须经此表换算,直比 = 永不命中或写错方块。
+ *  vanilla.sheet 即原版 TileID;一 sheet 多 def 时取首个注册者） */
+export const VANILLA_TILE_ID: Map<number, number> = new Map();
+TILE_DEFS.forEach((d, i) => {
+  const v = d?.vanilla?.sheet;
+  if (typeof v === 'number' && v > 0 && !VANILLA_TILE_ID.has(v)) VANILLA_TILE_ID.set(v, i);
+});
+
 // ===================== 存档稳定 id(根治 TILE_DEFS 数组下标漂移;存档 v3 起生效) =====================
 // 磁盘存"稳定 id":原版 tile 真身 = vanilla sheet id(1-752);下列自造/借用/变体 def = 私有段 1000+。
 // 运行时仍用数组下标——SaveFile 保存/加载两个收口点经此双表映射,TILE_DEFS 顺序从此自由。

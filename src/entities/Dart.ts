@@ -4,7 +4,7 @@ import { Entity } from './Entity';
 import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile } from './projTargets';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
-import { TILE_BY_KEY } from '../data/tiles';
+import { TILE_BY_KEY, VANILLA_TILE_ID } from '../data/tiles';
 import { prefetchProjectiles } from './Arrow';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -903,6 +903,9 @@ export class Dart extends Entity {
       }
     }
     // ---- 位移 ----
+    // 上一帧中心格（31 沙球落档放置格用,见撞块段注释）
+    const prevTx = Math.floor(this.cx / TILE);
+    const prevTy = Math.floor(this.cy / TILE);
     // 293 追踪（AI_051 :AI_051 200px 曼哈顿内:target=norm(玩家-心)×3,vel=(vel*100+target)/101）
     if (st.home && !game.player.dead) {
       const p = game.player;
@@ -943,9 +946,7 @@ export class Dart extends Entity {
       for (let bx = Math.floor(this.x / TILE); bx <= Math.floor((this.x + this.w - 0.01) / TILE); bx++) {
         for (let by = Math.floor(this.y / TILE); by <= Math.floor((this.y + this.h - 0.01) / TILE); by++) {
           if (!sst.inBounds(bx, by)) continue;
-          const t = sst.get(bx, by);
-          if (t === 12 || t === 105 || t === 165 || t === 178 || t === 185 || t === 186
-            || t === 187 || t === 639 || t === 665) game.breakTile?.(bx, by);
+          if (SHATTER_SET.has(sst.get(bx, by))) game.breakTile?.(bx, by);
         }
       }
     }
@@ -965,19 +966,29 @@ export class Dart extends Entity {
       if (st.rocket) { this.rocketKill(game); return; }  // 303 火箭撞块即爆（Kill 段）
       if (st.noTile) { /* 300 圣锤/299 暗影焰 tileCollide=false:穿墙 */ }
       else {
-        // ---- 31 沙球落档（Projectile.cs :75430-75536）：落地放沙 53 ----
-        // 下方是轨道314/传送带421-422 不放（BlockBelowMakesSandFall 门与
-        // 421-422 上放沙失败掉物品的边角略——本仓无逐格落沙链）。
-        // 弹心已入实心格时向上找第一个空格（原版 TileCollision 令弹体停在格
-        // 外、放置格=弹心；本仓中心判死已入格半步）
+        // ---- 31 沙球落档（Projectile.Kill aiStyle==10 :79117-79310 等价）：落地放沙 ----
+        // ★放置格 = 上一帧中心格:原版 TileCollision 把弹体挡在实心外、Kill 时中心格
+        // =实心上方空格;本仓碰撞判定在积分后(中心已入实心格),上一帧中心格即原版
+        // 弹回后的中心格。放置格须空(!active),被占→不放(蚁狮敌版 ai[0]==2 num18=0,
+        // :79137-79140 连物品都不掉=纯消失)。★旧"向上扫第一个空位"会把沙抬到草苗/
+        // 仙人掌上方悬空叠放——FallingBlock 63 系 2026-08-24 已修,31 喷沙路径漏网
+        // (用户复报"喷出的沙块出现在草的上面",2026-08-25 补齐)。
+        // 下方 314 轨道/421-422 传送带 → 不放(:79256-79260);BlockBelowMakesSandFall
+        // (WorldGen.cs:87868:下方空/下方非实心且再下空/钟乳石165)→不放。
+        // ★放置 tile = 原版 53 沙 → 本仓 id 经 VANILLA_TILE_ID 换算(曾硬编码 53=
+        // 本仓第 53 号注册位=别的方块)。
         if (st.sandBall) {
           const sst = game.world.store;
-          const scx = Math.floor(this.cx / TILE);
-          let scy = Math.floor(this.cy / TILE);
-          while (scy > 0 && sst.get(scx, scy) !== 0) scy--;
-          const below = sst.inBounds(scx, scy + 1) ? sst.get(scx, scy + 1) : 0;
-          const noPlace = below === 314 || below === 421 || below === 422;
-          if (!noPlace && sst.inBounds(scx, scy) && sst.get(scx, scy) === 0) sst.setTile(scx, scy, 53);
+          const below = sst.inBounds(prevTx, prevTy + 1) ? sst.get(prevTx, prevTy + 1) : 0;
+          const below2 = sst.inBounds(prevTx, prevTy + 2) ? sst.get(prevTx, prevTy + 2) : 0;
+          let noPlace = below === T_RAIL || below === T_CONV_L || below === T_CONV_R;
+          if (!noPlace && below === 0) noPlace = true;
+          else if (!noPlace && below2 === 0 && !sst.isSolid(prevTx, prevTy + 1)) noPlace = true;
+          else if (!noPlace && below === T_STALAC) noPlace = true;
+          if (T_SAND !== undefined && !noPlace && sst.inBounds(prevTx, prevTy)
+            && sst.get(prevTx, prevTy) === 0) {
+            sst.setTile(prevTx, prevTy, T_SAND);
+          }
         }
         this.dead = true; return;
       }
@@ -1190,6 +1201,20 @@ export class Dart extends Entity {
  *   tilt    = rotation = vx*0.125（836 蒲公英籽 :43312）
  *   none    = 恒 0（128 霜爆/177 冰水吐涎/288 金雨,AI_028/AI_012 无旋转更新）
  *  alpha=255 族视觉 = 渐入（302 族按 |v|*0.9 :52782,257 恒 -10 :53036,其余家族恒减） */
+// ---- 31 沙球用原版 TileID → 本仓 id 换算（★本仓 tile id ≠ 原版 TileID,直比/直写
+// = 永不命中或写错方块——曾硬编码 53/314/421/422/165 原版 id,2026-08-25 修正）----
+const T_SAND = TILE_BY_KEY['sand'];
+const T_RAIL = VANILLA_TILE_ID.get(314);          // MinecartTrack
+const T_CONV_L = VANILLA_TILE_ID.get(421);        // ConveyorBeltLeft
+const T_CONV_R = VANILLA_TILE_ID.get(422);        // ConveyorBeltRight
+const T_STALAC = VANILLA_TILE_ID.get(165);        // CaveDecos 钟乳石
+// 沿途击碎清单（:55106-55136 KillTile）：水晶12/雕像105/钟乳石165/裸露宝石178/
+// 小石堆185/大石堆186-187/魔力水晶639/生命水晶巨石665
+const SHATTER_VANILLA = [12, 105, 165, 178, 185, 186, 187, 639, 665]
+  .map((v) => VANILLA_TILE_ID.get(v))
+  .filter((v): v is number => v !== undefined);
+const SHATTER_SET = new Set(SHATTER_VANILLA);
+
 interface DartStyle {
   w: number; h: number;                  // 碰撞盒(SetDefaults width/height)
   scale?: number;                        // 绘制缩放(SetDefaults scale)

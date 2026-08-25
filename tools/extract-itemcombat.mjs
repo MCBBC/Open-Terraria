@@ -552,6 +552,47 @@ function main() {
     obj[vid] = { useTime: 45, useAnimation: 45, consumable: true };
   }
   obj['2350'] = { ...obj['2350'], useTime: 30, useAnimation: 30 };
+  //  · 月主委托件 15 件（2026-08-25 r33 蓝队；red-team-r33 §三 P0-①②）：委托段
+  //    `SetDefaults3(N)` 本体只有 type/glowMask[/shoot]——九挥砍件 rec/sound 双空被
+  //    applyRec 早退门吞掉（连 delegates 都不进），六锯钻是老脚本产物只落了 {shoot:N}。
+  //    值=基底 case 终态+本段覆写（C# 先跑基底再覆写；1458 :26566-26615/:31056-31078，
+  //    两版同值已对账）。★六锯钻 dump 侧委托合并已能产出正确终态，此处固化仅为
+  //    "重跑不丢"与提交态对齐。
+  //  · 496 冰雪法杖 knockBack=2（:7297 knockBack=0f 后 :7300 再赋 2f——首匹配取 0，
+  //    C# 顺序语义终值 2）。
+  //  · 纸飞机/新奇品/PrincessWeapon 批次 A 回填：DefaultToThrownWeapon
+  //    （:48458-48469 = autoReuse 缺省 false/useStyle1/anim=time=singleShotTime/
+  //    noMelee/ranged/consumable）与 DefaultToStaff(:48016 = DefaultToMagicWeapon
+  //    (proj,singleShotTime,pushSpeed,autoReuse)+mana+40×40+Item43) 形参赋值。
+  //    ★golden 表的 useTime=4/8 系把第三参 shotVelocity 误当 useTime，源码为 17/25/20。
+  const LUNAR_DELEGATE = {
+    2778: { base: '2773', shoot: 429 }, 2783: { base: '2773', shoot: 431 }, 3463: { base: '2773', shoot: 610 },
+    2779: { base: '2774', shoot: 430 }, 2784: { base: '2774', shoot: 432 }, 3464: { base: '2774', shoot: 609 },
+  };
+  for (const [vid, d] of Object.entries(LUNAR_DELEGATE)) {
+    obj[vid] = { ...obj[d.base], ...obj[vid], shoot: d.shoot };
+  }
+  for (const [vid, base] of Object.entries({ 2777: '2772', 2782: '2772', 3462: '2772',
+    2780: '2775', 2785: '2775', 3465: '2775', 2781: '2776', 2786: '2776', 3466: '2776' })) {
+    obj[vid] = { ...obj[base] };
+  }
+  if (obj['496']) obj['496'] = { ...obj['496'], knockBack: 2 };
+  const THROWN_WEAPONS = {
+    4343: { shoot: 761, useTime: 17, useAnimation: 17, shootSpeed: 5, damage: 4, knockBack: 2 },
+    4344: { shoot: 762, useTime: 17, useAnimation: 17, shootSpeed: 5, damage: 4, knockBack: 2 },
+    // ranged:false 为源码显式覆盖（4682 :38561 / 4702 :38650 `ranged = false`）
+    4682: { shoot: 851, useTime: 25, useAnimation: 25, shootSpeed: 4, ranged: false, noUseGraphic: true },
+    4702: { shoot: 855, useTime: 25, useAnimation: 25, shootSpeed: 4, ranged: false, noUseGraphic: true },
+    4765: { shoot: 868, useTime: 20, useAnimation: 20, shootSpeed: 8 },
+    4766: { shoot: 869, useTime: 20, useAnimation: 20, shootSpeed: 8 },
+    5285: { shoot: 996, useTime: 20, useAnimation: 20, shootSpeed: 8 },
+  };
+  for (const [vid, rec] of Object.entries(THROWN_WEAPONS)) {
+    const full = { noMelee: true, ranged: true, consumable: true, autoReuse: false, ...rec };
+    obj[vid] = { ...obj[vid], ...full };
+  }
+  obj['5065'] = { shoot: 950, useTime: 25, useAnimation: 25, shootSpeed: 10, mana: 18,
+    damage: 70, knockBack: 5, noMelee: true, magic: true, autoReuse: true };
   //  · 炸弹六件 4824-4827/4908-4909：`shoot = 903 + (type - 4824)` 算术表达式未解析
   //    （Item.cs:39487/:39783）——补 shoot 903-906/910-911（2026-08-22 补 C 审计：
   //    缺 shoot → thrownCombat 返 null 不可投掷）

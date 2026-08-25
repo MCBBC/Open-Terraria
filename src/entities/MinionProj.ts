@@ -1274,7 +1274,7 @@ export class MinionProj extends Entity {
           this.tA1 = en.id;
         }
       }
-      this.tHitTick(game, dmg0);
+      this.tHitTick(game, p, dmg0);
       return;
     }
     // ---- 攻击（ai[0] > 0）：目标校验（:52648-52676）----
@@ -1332,12 +1332,12 @@ export class MinionProj extends Entity {
       const l4 = clamp01((lerp2 - 0.6) / 0.4);         // GetLerpValue(0.6,1,...)
       const tRot = Math.atan2(vy, vx) + Math.PI / 2;
       this.rot = angleTowards(this.rot, tRot, Math.PI / 5);
-      this.cx = vx0 + (tgt.cx - vx0) * l3;
-      this.cy = vy0 + (tgt.cy - vy0) * l3;
-      if (l4 > 0) { this.cx = tgt.cx + (ox - tgt.cx) * l4; this.cy = tgt.cy + (oy - tgt.cy) * l4; }
+      this.x = vx0 + (tgt.cx - vx0) * l3 - this.w / 2;
+      this.y = vy0 + (tgt.cy - vy0) * l3 - this.h / 2;
+      if (l4 > 0) { this.x = tgt.cx + (ox - tgt.cx) * l4 - this.w / 2; this.y = tgt.cy + (oy - tgt.cy) * l4 - this.h / 2; }
     }
     // ---- 体触伤害（Damage_PVE：10×10×0.75 盒,每轮每敌一次）----
-    this.tHitTick(game, dmg0);
+    this.tHitTick(game, p, dmg0);
     // ---- 链式/收尾（:52729-52742 ai0==num16）----
     if (this.tA0 === num16) {
       const en = this.tTarget(game, p.cx, p.cy);
@@ -1350,7 +1350,7 @@ export class MinionProj extends Entity {
   }
 
   /** 体触结算：攻击期盒相交 → hurt（每敌每轮一次,tHit 于 StartAttack 清） */
-  private tHitTick(game: GameHooks, dmg0: number): void {
+  private tHitTick(game: GameHooks, p: Player, dmg0: number): void {
     for (const [k, v] of this.tHit) {
       if (v <= 1) this.tHit.delete(k); else this.tHit.set(k, v - 1);
     }
@@ -3575,6 +3575,9 @@ export class MinionProj extends Entity {
       // rotation+=vx/20——不走龙链 rot,直接套用）;34×34 单帧
       if (this.cubeRot !== 0) ctx.rotate(this.cubeRot);
       ctx.scale(0.8, 0.8);
+    }
+    if (this.projId === 946) {
+      ctx.scale(0.75, 0.75);   // 泰拉棱镜：SetDefaults scale=0.75（:8932）
     }
     if (img) {
       if (off3) ctx.drawImage(img, -num145 + foxFlipAdj, -(this.h / 2 + off3[0]), img.width, img.height);

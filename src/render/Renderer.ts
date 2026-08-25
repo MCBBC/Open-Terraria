@@ -386,6 +386,7 @@ import { Enemy } from '../entities/Enemy';
 import { visEffectFrames } from '../entities/Enemy';
 import { projFrameCount, projFrameImg, Arrow } from '../entities/Arrow';
 import { GrenadeProj, SpearProj } from '../entities/WeaponProj';
+import { Bobber, hackHoldStyleActive } from '../entities/Bobber';
 import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/LunarEvent';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC, sittingHatY, shimmerBodyAlpha, shimmerGlowAlpha } from '../entities/TownNPC';
@@ -2467,6 +2468,13 @@ export class Renderer {
     if (this.gpuDegraded) return;
     this.animTick++;
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
+    this.bobberOwners.clear();   // 钓竿静持门快照逐帧重建（ItemCheck_HackHoldStyles 等价,见下）
+    for (const e of entities) {
+      if (e instanceof Bobber && !e.dead) {
+        const o = (e as unknown as { ownerRef?: () => unknown }).ownerRef?.();
+        if (o) this.bobberOwners.add(o);
+      }
+    }
     this.whipFullbrightQueue.length = 0;   // 1034 星辰鞭线体全亮队列逐帧重建（WhipProj 收集）
     this.prismCrystalQueue.length = 0;   // 终极棱镜晶体队列逐帧重建（PrismProj 收集,drawPlayer 后冲刷）
     this._mouseX = mouseX;
@@ -3861,6 +3869,9 @@ export class Renderer {
   }
   /** 远端玩家（Game.render 每帧注入；单机空数组零开销） */
   remotePlayers: Player[] = [];
+  /** 本帧有浮漂弹在场的玩家集合（render 入口逐帧重建——ItemCheck_HackHoldStyles
+   *  Player.cs:53483-53492 的渲染侧快照：竿+浮漂在场 → holdStyle 置 1 静持画竿） */
+  bobberOwners = new Set<unknown>();
   /** Main.netMode != 0（Game 每帧注入 net?.active）——队伍发色剂单机恒取 teamColor[0]
    *  （DyeInitializer.cs:334 `Main.netMode != 0 ? player.team : 0`） */
   netActive = false;
@@ -10054,8 +10065,18 @@ export class Renderer {
       if (held && def && (!p.inWater || !NO_WET_ITEMS.has(viIdFromKey(def.key)))) {
         const vid = viIdFromKey(def.key); // vi_8_Torch 自动解析 8(本地特判已退役)
         // IsFood 门在最前：原版公共尾段无条件覆盖（即使 itemfunc 已录也以 1 为准）
-        const hs = vid >= 0 && VANILLA_IS_FOOD.has(vid) ? 1
+        let hs = vid >= 0 && VANILLA_IS_FOOD.has(vid) ? 1
           : vid >= 0 ? itemFuncOfVid(vid)?.holdStyle ?? (HOLD_STYLE_ITEMS.has(vid) ? 1 : 0) : 0;
+        // ★钓竿静持门（ItemCheck_HackHoldStyles Player.cs:53483-53492，2026-08-25 R32）：
+        // 竿族 holdStyle 运行时清零，仅当使用动画窗已收且场上存在本人浮漂弹时置 1
+        // → ItemCheck_ApplyHoldStyle :50879/:51002-51005 静持绘制（此前缺失=抛竿后
+        // 手上无竿、鱼线凭空——用户实报）。bobberOwners = 每帧实体表重扫（render 入口）
+        const hacked = hackHoldStyleActive(
+          vid >= 0 ? itemFuncOfVid(vid)?.fishingPole ?? 0 : 0,
+          this.bobberOwners.has(p),
+          !swing && p.useTime <= 0,   // ItemTimeIsZero && itemAnimation==0（:53487）
+        );
+        if (hacked >= 0) hs = hacked;
         staticHoldStyle = hs === 7 ? 0 : hs;
         // CanVisuallyHoldItem（:49462-49500）：抚摸中 holdStyle 4/5/6 持物隐藏
         //（petting 三分支 return false——仅门持物绘制，身体行档不受此门）
@@ -10088,6 +10109,13 @@ export class Renderer {
             // 969（:49610-49645，模型侧）；856 独角兽棒 (4,34)；353 麦酒 (6,中心+11)；
             // IsFood 族 (4, 中心+fh/2)（:49709-49713——锚=itemLocation 底左角，
             // MountedCenter.Y = p.y+p.h/2）
+            // ★钓竿族（fishingPole 子支 :51002-51005，2026-08-25 R32）：X=中心+
+            // (int)(frameW×0.18)×dir、Y=py+24 再 +4（:51033-51035）= py+28；
+            // itemRotation=0（:51071）不旋。锚=itemLocation 底左角（dir=-1 时贴图
+            // 翻转、底右角落锚——本仓 scale(facing) 对称等价）
+            else if (hs === 1 && vid >= 0 && (itemFuncOfVid(vid)?.fishingPole ?? 0) > 0) {
+              offX = Math.trunc(fw * 0.18); offY = 28;
+            }
             else if (hs === 1 && vid === 968) { offX = 8; }
             else if (hs === 1 && vid === 856) { offX = 4; offY = 34; }
             else if (hs === 1 && vid === 353) { offX = 6; offY = p.h * 0.5 + 11; }

@@ -126,6 +126,9 @@ const CSS = `
   .sw-title-btns { gap: 6px; margin-top: 4vh; }
   .sw-title-btn { font-size: 19px; padding: 7px 18px; letter-spacing: 2px;
     touch-action: manipulation; }
+  /* 署名/免责两行(right:10 bottom:8,高 ~42px)窄屏下左延到版本号位置 →
+     版本号上移避让(桌面两角分居不重叠,不动) */
+  .sw-title-version { bottom: 58px; }
 }
 @media (max-height: 500px) {
   .sw-title-logo { width: min(340px, 46vw); margin-top: 3vh; }

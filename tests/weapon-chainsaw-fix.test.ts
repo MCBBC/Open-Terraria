@@ -183,8 +183,9 @@ describe('挂手锚 RotatedRelativePoint(MountedCenter)（:23879 → Player.cs:4
     const saw = new ChainsawProj(player, 120, 8, () => true,
       () => ({ x: player.cx + 50, y: player.cy + 10 }), { projId: 509, shootSpeed: 48 });
     saw.fixedUpdate(1 / 60, hooks);
-    expect(saw.x).toBeCloseTo(player.cx - 11);            // anchor.x − 22/2
-    expect(saw.y).toBeCloseTo(player.cy + 10 - 11);       // anchor.y(=cy+gfx) − 22/2
+    // r33-②：判定盒吃 proj.scale（SetDefaults 尾 :10673-10674）——509=22×1.2→26,半宽 13
+    expect(saw.x).toBeCloseTo(player.cx - 13);            // anchor.x − 26/2
+    expect(saw.y).toBeCloseTo(player.cy + 10 - 13);       // anchor.y(=cy+gfx) − 26/2
   });
 
   it('瞄准向归一 ×(shootSpeed×scale)（:23884-23902）+ velocity.X 抖动 ±3%（:23932）', () => {
@@ -212,13 +213,13 @@ describe('挂手锚 RotatedRelativePoint(MountedCenter)（:23879 → Player.cs:4
 // ④ 252 叶绿插孔锤持械弹存在性（Item.cs:15631-15650 → :3083-3089）
 // ============================================================
 describe('252 插孔锤持械弹（aiStyle20 同门）', () => {
-  it('SetDefaults（:3083-3089）：18×18 / scale1.1 / 速度模 46×1.1', () => {
+  it('SetDefaults（:3083-3089 声明 18×18 scale1.1 → 判定盒尾乘 :10673-10674 = (int)19×19）', () => {
     const { hooks, player } = makeHooks();
     const saw = new ChainsawProj(player, 45, 5.2, () => true,
       () => ({ x: player.cx + 100, y: player.cy }), { projId: 252, pick: 0, shootSpeed: 46 });
     expect(saw.projId).toBe(252);
-    expect(saw.w).toBe(18);
-    expect(saw.h).toBe(18);
+    expect(saw.w).toBe(19);   // (int)(18×1.1)=19.8→19 截断（r33-②）
+    expect(saw.h).toBe(19);
     saw.fixedUpdate(1 / 60, hooks);
     const speedMod = Math.hypot(saw.vx, saw.vy);
     expect(speedMod).toBeGreaterThanOrEqual(46 * 1.1 * 0.97 - 1e-9);   // 抖动 ±3%（ε 容浮点）
@@ -255,11 +256,11 @@ describe('252 插孔锤持械弹（aiStyle20 同门）', () => {
     expect(projectileData(509)?.aiStyle).toBe(20);
   });
 
-  it('缺省 opts 保持 509 档（22×22）——旧调用面兼容', () => {
+  it('缺省 opts 保持 509 档（22×22×1.2 → 判定盒 26×26 :10673-10674）', () => {
     const { player } = makeHooks();
     const saw = new ChainsawProj(player, 120, 8, () => true, () => ({ x: player.cx, y: player.cy }));
     expect(saw.projId).toBe(509);
-    expect(saw.w).toBe(22);
-    expect(saw.h).toBe(22);
+    expect(saw.w).toBe(26);   // (int)(22×1.2)=26.4→26（r33-②）
+    expect(saw.h).toBe(26);
   });
 });

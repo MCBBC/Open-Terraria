@@ -21,6 +21,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy } from './projTargets';
+import { projectileData } from '../data/vanillaProjectiles';
 
 /** 玩家侧挂点状态（RotatedRelativePoint 消费，Player.cs:4063-4089）：
  *  cx/cy = MountedCenter（:3189-3194；本仓不建模坐骑挂点偏移，恒等玩家中心）；
@@ -55,6 +56,9 @@ export interface ChainsawOpts {
   pick?: number;
   /** 持械物品 shootSpeed（:23884；509=48 / 252=46，Item.cs SetDefaults） */
   shootSpeed?: number;
+  /** ai75 激光钻变体（projId=445，Item 2798）：音 Item132/23t+相位灯串，无 pick 分档
+   *  （AI_075 :67285-67292；挂手/命中面与 AI_020 同构 :68404-68411） */
+  laser?: boolean;
 }
 
 export class ChainsawProj extends Entity {
@@ -80,6 +84,14 @@ export class ChainsawProj extends Entity {
   dead = false;
   /** 绘制 scale（SetDefaults：509=1.2 :5522 / 252=1.1 :3088） */
   private drawScale: number;
+  /** ai75 激光钻分支标记（Game.ts 调用点按 projectileData(shoot).aiStyle===75 置位） */
+  private readonly laser: boolean;
+  private phaseT = 0;
+  /** 实体自报点光（AI_075 :67300-67320：localAI[0] 60t 相位,青(0,1,.7)→蓝(0,.7,1) lerp×0.5；
+   *  Game 光照循环 projectiles 桶消费——BookProj 同通道先例）。PlotTileLine 光带
+   *  （玩家→弹体线段播光 :67308-67313）未建模,以弹心点光近似（登记 blue-r33 §③） */
+  lightRGB: [number, number, number] | null = null;
+  lightRGBAt: { x: number; y: number } | null = null;
 
   constructor(owner: SawOwner, damage: number, knockback: number,
     channelCb: () => boolean, aimCb: () => { x: number; y: number },
@@ -90,24 +102,41 @@ export class ChainsawProj extends Entity {
     this.knockback = knockback;
     this.channelCb = channelCb;
     this.aimCb = aimCb;
-    this.projId = opts?.projId ?? 509;
+    const pid = opts?.projId ?? 509;
+    this.projId = pid;
     this.pick = opts?.pick ?? 0;
-    this.drawScale = this.projId === 252 ? 1.1 : 1.2;   // :3088 / :5522
-    this.w = this.h = this.projId === 252 ? 18 : 22;    // :3084-3085 / :5517-5518
-    this.speed = (opts?.shootSpeed ?? (this.projId === 252 ? 46 : 48)) * this.drawScale;
+    this.laser = opts?.laser ?? false;
+    // ★判定盒吃 proj.scale（r33-②）：SetDefaults 尾 `width = (int)(width * scale)`（1458
+    // Projectile.cs:10673-10674，全弹体公共尾）——509=22×1.2→26、252=18×1.1→19；月主竖长盒
+    // 427:22×56 / 430·432·609:30×54 / 431·610:28×64 不缩。此前硬编码 252=18/其余=22 且
+    // 不乘 scale：屠夫锯盒虚小 28%、金属钻类（59 等 22×0.9→19）反向虚大。
+    // vanillaProjectiles.ts "scale 非判定盒宽"系误注——源码即乘，随批勘误登记（blue-r33）。
+    const pd = projectileData(pid);
+    const sc = pd?.scale ?? (pid === 252 ? 1.1 : 1.2);
+    this.drawScale = sc;
+    this.w = Math.max(1, Math.trunc((pd?.width ?? (pid === 252 ? 18 : 22)) * sc));
+    this.h = Math.max(1, Math.trunc((pd?.height ?? (pid === 252 ? 18 : 22)) * sc));
+    // 出膛速度模 = shootSpeed×proj.scale（AI_020 :23852 num157=item.shootSpeed*scale；
+    // 五档 0.9~1.2——proj59 类曾按 1.2 算 +33% 偏快）
+    this.speed = (opts?.shootSpeed ?? (pid === 252 ? 46 : 48)) * sc;
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     // channel 门（:23882-23907）：断链即 Kill
     if (!this.channelCb()) { this.dead = true; return; }
-    // 帧动画（:23840-23865）：252 = 4 帧 4t/帧；509 = 2 帧 2t/帧
-    const ft = this.projId === 252 ? 4 : 2;
-    if (++this.frameCtr >= ft) { this.frameCtr = 0; this.frame = (this.frame + 1) % ft; }
-    // 链锯音分档（:23866-23878）：持械物品 pick>0 → Item190 每 15t（钻族）；
-    // 否则 Item189 每 20t（链锯/插孔锤——509 axe30/pick0、252 hammer90/pick0 均此档）
+    // 帧动画（:25807-25829）：AI_020 仅 252（4 帧 4t/帧）与 509（2 帧 2t/帧）有帧推进，
+    // 其余 aiStyle20 族无支=恒 frame0——扩族防多帧贴图误动（r33-④P2）
+    const ft = this.projId === 252 ? 4 : this.projId === 509 ? 2 : 0;
+    if (ft > 0 && ++this.frameCtr >= ft) { this.frameCtr = 0; this.frame = (this.frame + 1) % ft; }
+    // 链锯音分档（:23866-23878）：ai75 激光钻走 Item132 每 23t（AI_075 :67285-67292，
+    // 无 pick 分档）；ai20 持械物品 pick>0 → Item190 每 15t（钻族）；否则 Item189 每
+    // 20t（链锯/插孔锤——509 axe30/pick0、252 hammer90/pick0 均此档）
     if (--this.sndT <= 0) {
-      if (this.pick > 0) {
+      if (this.laser) {
+        this.sndT = 23;
+        game.playSfxFiles(['Item_132'], 1, this.cx, this.cy);
+      } else if (this.pick > 0) {
         this.sndT = 15;
         game.playSfxFiles(['Item_190'], 1, this.cx, this.cy);
       } else {
@@ -132,6 +161,17 @@ export class ChainsawProj extends Entity {
     // velocity.X 抖动（:23932）：×(1+Next(−3,4)×0.01)——原版在旋转/尘之前，
     // 每帧被 channel 直写覆盖，实际只影响下方尘的前向偏移
     this.vx *= 1 + (Math.floor(Math.random() * 8) - 3) * 0.01;
+    // ai75 相位灯串（:67300-67320）：localAI[0]++ ≥60 归零；num12=phase/60 三角折返
+    // （>0.5 取 1−num12）；vector5=Lerp(青(0,1,.7),蓝(0,.7,1),1−num12×2)×0.5——
+    // 弹心点光经 lightRGB 通道结算（PlotTileLine 线光带未建模，登记）
+    if (this.laser) {
+      this.phaseT = (this.phaseT + 1) % 60;
+      let num12 = this.phaseT / 60;
+      if (num12 > 0.5) num12 = 1 - num12;
+      const t = 1 - num12 * 2;
+      this.lightRGB = [0 * 0.5, (1 + (0.7 - 1) * t) * 0.5, (0.7 + (1 - 0.7) * t) * 0.5];
+      this.lightRGBAt = { x: this.cx, y: this.cy };
+    }
     // 尘 31 火花（:23933-23941）：1/6、出生 = position+velocity×Next(6,10)×0.1
     // （单掷同乘双轴 → 前向偏移 0.6-0.9）、position.X−4、noGravity、
     // velocity×0.2 后 vy = −Next(7,13)×0.15（向上反溅）

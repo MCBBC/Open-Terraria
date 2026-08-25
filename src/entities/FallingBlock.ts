@@ -4,12 +4,18 @@
 // 落到实心格上变回原 tile。见 Game.checkFallingSand(触发侧)。
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
-import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, VANILLA_TILE_ID } from '../data/tiles';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+
+// 落格门用原版 TileID → 本仓 id 换算（★本仓 tile id ≠ 原版 TileID,2026-08-25 修正）
+const T_RAIL = VANILLA_TILE_ID.get(314);      // MinecartTrack
+const T_CONV_L = VANILLA_TILE_ID.get(421);    // ConveyorBeltLeft
+const T_CONV_R = VANILLA_TILE_ID.get(422);    // ConveyorBeltRight
+const T_STALAC = VANILLA_TILE_ID.get(165);    // CaveDecos 钟乳石
 
 export class FallingBlock extends Entity {
   w = 10; h = 10; // 原版 width/height = 10(vanilla-projectiles.json 全沙族一致)
@@ -33,6 +39,9 @@ export class FallingBlock extends Entity {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.dead = true; return; }
+    // 上一帧中心格（落地放置格,见下方落地段注释）
+    const prevTx = Math.floor((this.x + this.w / 2) / TILE);
+    const prevTy = Math.floor((this.y + this.h / 2) / TILE);
     this.vy = Math.min(this.vy + FallingBlock.GRAV, 16);
     this.x += this.vx;
     this.y += this.vy;
@@ -68,21 +77,34 @@ export class FallingBlock extends Entity {
     }
     if (hitCritters(this, game)) { /* 小动物被砸即死,块继续坠 */ }
 
-    // ---- 落地:变回 tile(原版 Projectile.Kill aiStyle==10 段 :75362-75530)----
-    // ★原版语义:放置格 = 投射物【中心格】且必须为空(!active),被占 → 【直接消失
-    // 不放置】(碰撞停在实心顶,中心格自然在实心上方空格)。曾"向上扫第一个空位":
-    // 沙落到草/仙人掌上会被抬到草上方悬空叠放、甚至顶进仙人掌臂位断掉仙人掌
-    // (用户实报"蚁狮沙堆叠在草上/仙人掌断缝")。
+    // ---- 落地:变回 tile(原版 Projectile.Kill aiStyle==10 :79117-79310 等价)----
+    // ★放置格 = 上一帧中心格:原版 TileCollision 把弹体挡在实心【外】,Kill 时中心格
+    // =实心上方空格;本仓碰撞判定在积分后(中心已入实心格半步),上一帧中心格即原版
+    // 弹回后的中心格。放置格须空(!active),被占→直接消失不放置(:79248 门)。
+    // ★修正史:初版"向上扫第一个空位"→沙抬到草/仙人掌上方悬空叠放(用户实报
+    // "蚁狮沙堆叠在草上/仙人掌断缝");二版把放置条件钉在碰撞格上→中心入实心恒被占
+    // =下落沙【永不落格】的隐性回归;本版(2026-08-25)按上一帧中心格落格。
+    // 下方 314 轨道/421-422 传送带 → 不放(:79256-79260);BlockBelowMakesSandFall
+    // (WorldGen.cs:87868:下方空/下方非实心且再下空/钟乳石165)→不放,防放置即再落。
+    // (半砖修正 :79242-79246 依赖运行时半砖碰撞面,本仓无,登记;玩家版被占时掉落
+    //  对应物品块 num18>0(:79300)——本仓无投射物掉物接口,登记)
     if (st.isSolid(tx, ty) || st.isPlatform(tx, ty)) {
       const tid = TILE_BY_KEY[this.tileKey];
-      if (tid !== undefined && st.type[st.idx(tx, ty)] === 0) {
-        st.setTile(tx, ty, tid, 0, 0);
+      const below = st.inBounds(prevTx, prevTy + 1) ? st.get(prevTx, prevTy + 1) : 0;
+      const below2 = st.inBounds(prevTx, prevTy + 2) ? st.get(prevTx, prevTy + 2) : 0;
+      let noPlace = below === T_RAIL || below === T_CONV_L || below === T_CONV_R;
+      if (!noPlace && below === 0) noPlace = true;
+      else if (!noPlace && below2 === 0 && !st.isSolid(prevTx, prevTy + 1)) noPlace = true;
+      else if (!noPlace && below === T_STALAC) noPlace = true;
+      if (tid !== undefined && !noPlace && st.inBounds(prevTx, prevTy)
+        && st.type[st.idx(prevTx, prevTy)] === 0) {
+        st.setTile(prevTx, prevTy, tid, 0, 0);
         game.playSfx?.('dig', 0.6);
         // 沙堆到仙人掌旁 → 仙人掌支撑复查(原版 TileFrame case 80 → CheckCactus
         // 级联;沙坡/沙堆改变邻接后悬托仙人掌须断根——用户实报"仙人掌悬在沙坡上")
         const CAC = TILE_BY_KEY['v_80_cactus'];
         if (CAC !== undefined) {
-          for (const [ax, ay] of [[tx, ty - 1], [tx - 1, ty], [tx + 1, ty], [tx - 1, ty - 1], [tx + 1, ty - 1]] as const) {
+          for (const [ax, ay] of [[prevTx, prevTy - 1], [prevTx - 1, prevTy], [prevTx + 1, prevTy], [prevTx - 1, prevTy - 1], [prevTx + 1, prevTy - 1]] as const) {
             if (st.inBounds(ax, ay) && st.get(ax, ay) === CAC) {
               game.fellCactus?.(ax, ay);
               break;
@@ -90,7 +112,7 @@ export class FallingBlock extends Entity {
           }
         }
       }
-      this.dead = true;   // 中心格被占(落在草/仙人掌/任意非空格)→ 沙消失(原版同)
+      this.dead = true;   // 放置格被占/门拦截 → 沙消失(原版同,蚁狮版 num18=0 纯消失)
     }
   }
 

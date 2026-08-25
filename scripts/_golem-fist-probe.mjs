@@ -80,7 +80,6 @@ const flight = await page.evaluate(async () => {
   g.input.mouseDown = false;
   // 逐步采样
   const seq = [];
-  let midSample = null;
   for (let i = 0; i < 180; i++) {
     g.fixedUpdate(1 / 60);
     const f = g.entities.projectiles.find((e) => e.constructor?.name === 'AnchoredProj' && e.projId === 262);
@@ -90,24 +89,9 @@ const flight = await page.evaluate(async () => {
     }
     const dx = f.cx - g.player.cx;
     seq.push(Math.round(dx));
-    // 中段(150~400px 出膛途中):等渲染帧落盘后更新链节判定线段+像素采样快照
-    if (!midSample && dx > 150 && dx < 400) {
-      // ★暂停冻结渲染态:RAF 循环仍在跑,若不暂停,渲染帧的弹/相机位会超前
-      //   本快照 → 像素采样线段错位(coverage 抖动根因)
-      g.paused = true;
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      midSample = {
-        fistX: f.cx, fistY: f.cy, shown: f.shown,
-        px: g.player.cx, py: g.player.cy,
-        camX: g.camera.x, camY: g.camera.y, zoom: g.camera.zoom, punchX: g.camera.punchX, punchY: g.camera.punchY,
-        vw: cv0.width, vh: cv0.height,
-      };
-      g.paused = false;
-    }
     if (f.dead) break;
   }
-  return { seq, midSample };
+  return { seq };
 });
 
 // 三段形态断言
@@ -123,55 +107,53 @@ const flight = await page.evaluate(async () => {
   ok('a5-despawned-at-hand', !flight.seq.includes(undefined), 'seq 完整');
 }
 
-// ---- (b) 链索像素采样(用中段快照在当前帧外重演坐标不可行——直接在快照时刻同步采) ----
-// 注:midSample 抓取时已等 RAF;此处回放采样逻辑
-{
-  const m = flight.midSample;
-  ok('b0-midflight-snapshot', !!m, '中段快照存在=飞行持续多帧');
-  if (m) {
-    const pix = await page.evaluate((snap) => {
-      const g = window.__swGame;
-      const cv = g.renderer.canvas;
-      const c = cv.getContext('2d');
-      // 世界→屏幕(与 Camera.worldToScreen 同式;punch 忽略——探针无震屏)
-      const w2s = (wx, wy) => [(wx - snap.camX) * snap.zoom + snap.vw / 2, (wy - snap.camY) * snap.zoom + snap.vh / 2];
-      const [ax, ay] = w2s(snap.px, snap.py);
-      const [bx, by] = w2s(snap.fistX, snap.fistY);
+// ---- (b) 链索像素采样(RAF 对齐):注册到游戏主循环之后的 rAF 回调里读态+采像素
+// ——游戏一帧 = update→render,其后我的回调看到的实体位与画布内容严格同帧
+// (GL 合成层下 drawImage 钩不可见,像素回读是唯一真相)
+const chainPix = await page.evaluate(() => new Promise((resolve) => {
+  const g = window.__swGame;
+  const cv = g.renderer.canvas;
+  const c = cv.getContext('2d');
+  g.entities.projectiles.length = 0;
+  g.input.mouseX = cv.width / 2 + 400;
+  g.input.mouseY = cv.height / 2;
+  g.player.useTime = 0;
+  g.input.mouseDown = true;
+  let best = { ink: 0, cov: 0, len: 0, shown: false, frames: 0 };
+  const tick = () => {
+    const f = g.entities.projectiles.find((e) => e.constructor?.name === 'AnchoredProj' && e.projId === 262);
+    if (!f) { if (best.frames > 0 || g.player.useTime === 0) return resolve(best); requestAnimationFrame(tick); return; }
+    const dx = f.cx - g.player.cx;
+    if (dx > 150 && dx < 420 && f.shown) {
+      // 世界→屏幕(Camera.worldToScreen 同式,含 punch)
+      const w2s = (wx, wy) => [(wx - g.camera.x + g.camera.punchX) * g.camera.zoom + cv.width / 2,
+        (wy - g.camera.y + g.camera.punchY) * g.camera.zoom + cv.height / 2];
+      const [ax, ay] = w2s(g.player.cx, g.player.cy);
+      const [bx, by] = w2s(f.cx, f.cy);
       const len = Math.hypot(bx - ax, by - ay);
       const ux = (bx - ax) / len, uy = (by - ay) / len;
       const nx = -uy, ny = ux;
-      const inkAt = [];
-      // 密采样(步长 3px):两端各留 32px(玩家身体/弹体贴图本体不算链)
+      let ink = 0, total = 0;
       for (let d = 32; d < len - 32; d += 3) {
+        total++;
         const sx = ax + ux * d, sy = ay + uy * d;
         const p1 = c.getImageData(Math.round(sx), Math.round(sy), 1, 1).data;
         const q1 = c.getImageData(Math.round(sx + nx * 10), Math.round(sy + ny * 10), 1, 1).data;
         const q2 = c.getImageData(Math.round(sx - nx * 10), Math.round(sy - ny * 10), 1, 1).data;
-        const d1 = Math.abs(p1[0] - q1[0]) + Math.abs(p1[1] - q1[1]) + Math.abs(p1[2] - q1[2]);
-        const d2 = Math.abs(p1[0] - q2[0]) + Math.abs(p1[1] - q2[1]) + Math.abs(p1[2] - q2[2]);
-        // 线上点显著异于两侧背景 = 有墨(链节)
-        if (Math.min(d1, d2) > 45) inkAt.push(d);
+        const dd1 = Math.abs(p1[0] - q1[0]) + Math.abs(p1[1] - q1[1]) + Math.abs(p1[2] - q1[2]);
+        const dd2 = Math.abs(p1[0] - q2[0]) + Math.abs(p1[1] - q2[1]) + Math.abs(p1[2] - q2[2]);
+        if (Math.min(dd1, dd2) > 45) ink++;       // 线上异于两侧背景 = 链节墨
       }
-      // 聚类(间隔 >7px 断开)= 链节数;★Chain22 贴图 12×12、步长 12px → 链节
-      //   边贴边成连续带,聚类/节距判据不适用——改用"带宽覆盖率":线上点 ±5px
-      //   垂向窗内有墨即计入(GL 合成层下 drawImage 钩不可见,像素是唯一真相)
-      const covered = new Set();
-      for (const d of inkAt) {
-        for (let o = -6; o <= 6; o += 3) covered.add(Math.round(d + o));
-      }
-      const totalPts = Math.max(1, Math.floor((len - 64) / 3));
-      return {
-        inkCount: inkAt.length,
-        coverage: Math.round((covered.size / totalPts) * 100) / 100,
-        lineLen: Math.round(len),
-        shown: snap.shown,
-      };
-    }, m);
-    ok('b1-chain-band-coverage', pix.coverage >= 0.5 && pix.inkCount >= 20,
-      `coverage=${pix.coverage} inkSamples=${pix.inkCount} lineLen=${pix.lineLen}px`);
-    ok('b2-chain-pixels-on-line', pix.inkCount >= 3, `inkSamples=${pix.inkCount} lineLen=${pix.lineLen}px shown=${pix.shown}`);
-  }
-}
+      best.frames++;
+      if (ink > best.ink) best = { ink, cov: Math.round((ink / Math.max(1, total)) * 100) / 100, len: Math.round(len), shown: f.shown, frames: best.frames };
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}));
+ok('b1-chain-band-coverage', chainPix.cov >= 0.5 && chainPix.ink >= 20,
+  `coverage=${chainPix.cov} inkSamples=${chainPix.ink} lineLen=${chainPix.len}px frames=${chainPix.frames}`);
+ok('b2-chain-pixels-on-line', chainPix.ink >= 3, `inkSamples=${chainPix.ink} lineLen=${chainPix.len}px shown=${chainPix.shown}`);
 
 // ---- (c) 命中假人提前回收 + 返回冲击爆炸音 ----
 const hitRun = await page.evaluate(() => {

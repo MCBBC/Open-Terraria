@@ -1120,7 +1120,12 @@ export class BiomeBackground {
     near?: { closer?: () => void; closest?: () => void }): void {
     if (!this.menuMode) return;
     const st = MENU_FOREST_STYLES[this.menuForestStyle] ?? MENU_FOREST_STYLES[1];
-    const sc = viewW / 1024;   // 贴图重复周期 ≈ 窗口宽（截图拟合）
+    // 贴图重复周期 ≈ 窗口宽（截图拟合）。★竖屏补偿项：层带 Y 按 H 分位
+    // （山 40/45%、树 72/79/86%）而贴图高按 W 缩放,H/W>1.66 时山带底
+    // (0.45H+435·sc)够不到树带顶(0.72H)→带间露出裸天空硬接缝(2026-08-25
+    // 手机实报;树带更瘦时同样悬空)。H 项仅在 H/W>1.416(远超桌面横窗)时
+    // 占优——桌面/横屏取 W 项,数学恒等零变化
+    const sc = Math.max(viewW / 1024, viewH / 1450);
     // 远山两带：脊线 40%/45%H（内容行补偿后），双槽交叉淡化（bgAlphaFarBackLayer）：
     // 昼 slot0=treeMntBGSet1[0]/[1]、夜 slot2=tex 24/25——UpdateBGVisibility_BackLayer
     // 把 Corruption 映射到 slot2（cs:65154）、贴图在 Step1/Step2 各自 alpha>0 门下

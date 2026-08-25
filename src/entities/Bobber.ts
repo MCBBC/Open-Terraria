@@ -22,7 +22,8 @@ import {
   tryGetItemDrop, CAN_FISH_IN_LAVA_POLES, IS_LAVA_BAIT, ANGLER_QUEST_ITEMS,
   type ZoneInput,
 } from '../data/vanillaFishing';
-import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS } from '../data/items';
+import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 import { chumsInTile } from './chumBucket';
 import { VI_ID } from '../data/itemKeys';
@@ -35,6 +36,18 @@ import { Lang } from '../i18n/Lang';
 import { drawFishingStringLine, stringColorOpts } from '../render/StringLine';
 
 type LiquidType = 'water' | 'lava' | 'honey';
+
+// ---- AI_061 收线/断线常量（Projectile.cs:54635-54668 / :54701-54705，1456=1457=1458 同值）----
+/** 玩家中心与浮漂中心距离 >900px → ai[0]=1 自动收线（:54703-54705） */
+export const RETRACT_DIST = 900;
+/** 收线飞行中距离 >3000px → 直接 Kill（:54656-54658） */
+export const KILL_DIST = 3000;
+/** 收线速度平滑窗 num=10（velocity = (v×9 + 目标)/10，:54659/:54663-54664） */
+export const REEL_SMOOTH = 10;
+/** 收线目标速度上限（方向归一 ×15.9 px/t，:54660） */
+export const REEL_SPEED = 15.9;
+/** 浮漂弹盒（SetDefaults :4511-4522 width=height=14——Kill 触玩家盒判定用） */
+export const BOBBER_BOX = 14;
 
 /** Main.rand.Next(min, max)（左闭右开） */
 function nextInt(min: number, max: number): number {
@@ -117,6 +130,15 @@ export class Bobber extends Entity {
   private ai1 = 0;
   /** localAI[1]：等待累积器（>660 触发 FishingCheck，:50943-50947） */
   private lAI1 = 0;
+  /** ai[0]（AI_061 :54635 起）：0=飞行/漂浮；1=收线中（PullFishingBobbers :53031 /
+   *  超 900px :54704）；2=断线/敌怪收线（收线首 tick 播 Item17+溅水一次后自增 3，
+   *  :54636-54645）。收线飞行 tileCollide=false 直移、触玩家盒即 Kill（:54666-54668） */
+  retract = 0;
+  /** 当前浮着液体（入液时登记；AI_061 wet/lavaWet/honeyWet 三位最小投影——
+   *  收线断线溅水门 :54641-54644 岩浆/蜂蜜免溅用） */
+  liquidKind: 'water' | 'lava' | 'honey' | null = null;
+  /** 收线态只读（Game.reelBobber 尾部 Kill 门消费——原版收线非即时消失） */
+  get retracting(): boolean { return this.retract >= 1; }
 
   constructor(
     x: number, y: number, vx: number, vy: number,
@@ -175,10 +197,56 @@ export class Bobber extends Entity {
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
-    if (this.lai0 < 100) this.lai0 += 1;   // 钓线张力渐稳（:50809-50811）
     void dt;
     const p = this.ownerRef();
     if (!p || p.dead) { this.dead = true; return; }
+    // ---- AI_061 存活门（Projectile.cs:54605-54621 flag2 五支，1456=1457=1458 同构）：
+    //      手持非钓竿 / CCed / noItems(诅咒 23=本仓 Cursed buff) / 手持竿 shoot 与
+    //      本弹型不符（浮漂饰品覆写弹 986-993 豁免，flag :54604） / pulley 绳悬 → Kill。
+    //      ★切物品即断线收漂的原版语义（此前缺失=换手持竿浮漂永生）----
+    const held = p.inv.heldItem();
+    const hdef = held ? ITEM_DEFS[held.id] : undefined;
+    const hv = hdef ? +(/^vi_(\d+)_/.exec(hdef.key)?.[1] ?? -1) : -1;
+    const hf = hv >= 0 ? itemFuncOfVid(hv) : null;
+    const lavaBobberAcc = this.projId >= 986 && this.projId <= 993;
+    if (!((hf?.fishingPole ?? 0) > 0) || p.cced || p.buffs.has(BuffType.Cursed)
+      || (!lavaBobberAcc && (hf?.shoot ?? 0) !== this.projId)
+      || p.pulley) {
+      this.dead = true;
+      return;
+    }
+    // ---- 收线态（ai[0]>=1，:54635-54668）：断线哨(2→3 播 Item17+溅水一次) →
+    //      localAI[0] 0→100（钓线摆垂权重收敛，:54647-54649）→ tileCollide=false
+    //      直移朝玩家（平滑窗 10、速度归一 ×15.9）→ >3000 Kill / 触玩家盒 Kill ----
+    if (this.retract >= 1) {
+      if (this.retract === 2) {
+        this.retract = 3;
+        game.playSfxFile?.('Item_17', 0.9, this.cx, this.cy);   // SoundID.Item17（:54640）
+        if (this.liquidKind === 'water' || this.liquidKind === null) this.doSplash(game);
+      }
+      if (this.lai0 < 100) this.lai0 += 1;
+      const dxp = p.cx - this.cx, dyp = p.cy - this.cy;
+      const d = Math.sqrt(dxp * dxp + dyp * dyp);
+      if (d > KILL_DIST) { this.dead = true; return; }          // :54656-54658
+      const txv = d > 1e-6 ? (dxp / d) * REEL_SPEED : 0;
+      const tyv = d > 1e-6 ? (dyp / d) * REEL_SPEED : 0;
+      this.vx = (this.vx * (REEL_SMOOTH - 1) + txv) / REEL_SMOOTH;   // :54659-54664
+      this.vy = (this.vy * (REEL_SMOOTH - 1) + tyv) / REEL_SMOOTH;
+      this.x += this.vx;
+      this.y += this.vy;                    // tileCollide=false（:54652）无碰撞直移
+      // Hitbox.Intersects(player.Hitbox)（:54666-54668）：14×14 弹盒 vs 玩家盒
+      if (this.cx + BOBBER_BOX / 2 > p.x && this.cx - BOBBER_BOX / 2 < p.x + p.w
+        && this.cy + BOBBER_BOX / 2 > p.y && this.cy - BOBBER_BOX / 2 < p.y + p.h) {
+        this.dead = true;
+        return;
+      }
+      return;
+    }
+    // ---- 距离门（:54701-54705）：玩家走远 >900px → ai[0]=1 自动收线断线 ----
+    {
+      const dxp = p.cx - this.cx, dyp = p.cy - this.cy;
+      if (Math.sqrt(dxp * dxp + dyp * dyp) > RETRACT_DIST) { this.retract = 1; return; }
+    }
     const st = (game.world as World).store;
     const idx = st.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h) / TILE));
     const liq = st.liquid[idx];
@@ -190,6 +258,7 @@ export class Bobber extends Entity {
       moveAndCollide(this, game.world, this.vx, this.vy);
       if (liqType === 'water' || liqType === 'honey') {
         this.floating = true;
+        this.liquidKind = liqType;
         this.vx = 0; this.vy = 0;
         // 原版浮标经 AI_061_GetWaterLine（:50947-50978）沉到液面以下、中心格 wet；
         // 此处把中心对齐到入液行中部，保证 FishingCheck 的 Center/16 坐标落在液格内
@@ -201,6 +270,7 @@ export class Bobber extends Entity {
         const canLava = this.ownerLavaOk();
         if (!canLava) { this.dead = true; return; }
         this.floating = true;
+        this.liquidKind = 'lava';
         this.vx = 0; this.vy = 0;
         const rowYL = Math.floor((this.y + this.h) / TILE);
         this.y = rowYL * TILE + (TILE - this.h) / 2;
@@ -408,9 +478,21 @@ export class Bobber extends Entity {
     this.ai1 = nextInt(-240, -90) - level;
   }
 
-  /** 收竿（窗口内）：返回渔获原版 id（0=没咬/没饵/血月敌怪——后者查 catchEnemy）；消耗鱼饵 */
+  /** AI_061_FishingBobber_DoASplash（Projectile.cs:54839-54852）近似：
+   *  水花尘团（原版 100 粒水尘 noGravity，此处粒子池口径 24 粒）+ 溅水音 19 */
+  private doSplash(game: GameHooks): void {
+    game.spawnParticles(this.cx, this.cy - 4, '#A8D8F0', 24, 2, { life: 30 });
+    game.playSfx('splash', 1);
+  }
+
+  /** 收竿（窗口内）：返回渔获原版 id（0=没咬/没饵/血月敌怪——后者查 catchEnemy）；消耗鱼饵。
+   *  ★无咬收竿 = ai[0]=1 收线飞行（ItemCheck_PullFishingBobbers :53019-53043：湿态
+   *  vy>-10 上提一记，飞行触玩家盒才 Kill :54666-54668）——此前即时消失=收线无动画 */
   reel(game: GameHooks): number {
-    if (this.biteT <= 0 || (!this.catchId && !this.catchEnemy && !this.truffleBite)) return 0;
+    if (this.biteT <= 0 || (!this.catchId && !this.catchEnemy && !this.truffleBite)) {
+      this.startReel(1);
+      return 0;
+    }
     const p = this.ownerRef();
     if (!p) return 0;
     // 声呐药水（buff 122）：咬钩时已掷——由 Game 侧显示（本实体的 catchId 预存）
@@ -424,17 +506,27 @@ export class Bobber extends Entity {
     }
     const caught = this.catchId;
     this.catchId = 0;
-    this.dead = true;
     // R14-E6：收竿 1/7 断线（PullBobber :53076-53079 `Next(7)==0 && !accFishingLine`
     // → ai[0]=2 渔获作废）——仅物品渔获支（敌怪/松露虫支无断线掷）;饵已在上文消耗
     // （ConsumeBait 先于 PullBobber,:53031-53033）。高测钓线族 equipStats.fishingLine 免疫
     if (caught > 0
       && !(p as unknown as { equipStats?: { fishingLine?: boolean } }).equipStats?.fishingLine
       && Math.floor(Math.random() * 7) === 0) {
+      this.startReel(2);   // 断线（PullBobber :53076-53079 ai[0]=2）——首 tick 播 Item17+溅水
       return 0;
     }
+    // 命中渔获：原版 ai[1]=itemType 随收线飞行、触玩家盒 Kill 时 GiveItemToPlayer
+    // （Projectile.cs:73234-73241）——本仓 Game.reelBobber 即时入包契约不变（登记偏差：
+    // 收到即得，无飞行携物），浮漂此处即灭=竿静持随之解除
+    this.dead = true;
     void game;
     return caught;
+  }
+
+  /** PullFishingBobbers 收线置位（Player.cs:53030-53035）：ai[0]==0 才置；湿态上提 */
+  private startReel(mode: 1 | 2): void {
+    if (this.retract === 0) this.retract = mode;
+    if (this.floating && this.vy > -10) this.vy = -10;
   }
 
   /** 鱼饵消耗（ItemCheck_CheckFishingBobber_ConsumeBait PLA57:53106-53165 全支 1:1）：
@@ -543,18 +635,32 @@ export class Bobber extends Entity {
 // ================= 钓线（DrawProj_FishingLine,Main.cs:34967-35201 1:1）=================
 
 /** 竿尖偏移表（:35017-35106 逐 case;dir<0 再 −13;Y 项 ×gravDir（:35023 等
- *  −M·gravDir——gravDir=-1 重力药水倒置时取反）） */
-const POLE_TIP: Record<number, [number, number]> = {
+ *  −M·gravDir——gravDir=-1 重力药水倒置时取反））——1457/1458 同值（1458 Main.cs:36145-36233 复核） */
+export const POLE_TIP: Record<number, [number, number]> = {
   2289: [43, -36], 2291: [43, -34], 2292: [46, -34], 2293: [43, -34],
   2294: [43, -30], 2295: [43, -30], 2296: [43, -30],
   2421: [47, -36], 2422: [47, -32], 4325: [44, -32], 4442: [44, -32],
 };
 /** 线色（:34988-35010;基色 (200,200,200,100) + 逐竿覆写;α=100 半透） */
-const POLE_STRING_COLOR: Record<number, [number, number, number]> = {
+export const POLE_STRING_COLOR: Record<number, [number, number, number]> = {
   2294: [100, 180, 230], 2295: [250, 90, 70], 2293: [203, 190, 210],
   2421: [183, 77, 112], 2422: [255, 226, 116], 4325: [200, 100, 100],
   4442: [100, 100, 200],
 };
+
+/**
+ * ItemCheck_HackHoldStyles（Player.cs:53483-53492，1456=1457=1458 同构）纯判定：
+ * 钓竿族 holdStyle 先清零；仅当【使用动画窗已收】(ItemTimeIsZero && itemAnimation==0)
+ * 且场上存在本人浮漂弹时运行时置 1 → ItemCheck_ApplyHoldStyle :50879/:51002 静持绘制。
+ * 返回：-1 = 非钓竿（不接管，沿用物品自身 holdStyle）；0/1 = 钓竿生效档。
+ * （Renderer 手持层门 + tests/fishing-rod-hold 直测双消费）
+ */
+export function hackHoldStyleActive(
+  fishingPole: number, hasBobber: boolean, animWindowOver: boolean,
+): -1 | 0 | 1 {
+  if (fishingPole <= 0) return -1;
+  return hasBobber && animWindowOver ? 1 : 0;
+}
 
 /** 钓线竿尖起点（Main.cs:34969-35111 全链，纯函数——tests/string-anchor 直测）：
  *  mountedCenter → [mount52 死支] → ApplyItemPositionOffsetFromMount → +gfxOffY
