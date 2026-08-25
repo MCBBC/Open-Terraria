@@ -371,6 +371,19 @@ export class WaterfallRenderer {
         pHoriz = dx;
         cx += dx; cy += dy;
         pSlope = slopeDir;
+        // 环境音累积（WaterfallManager.cs:709-719 num42=1−dist/(screenWidth×0.75)）：
+        // 每瀑布格按到屏心距离衰减累加,最近格记位——Main.Ambience 每 15t 消费
+        {
+          const sw = ctx.canvas.width, sh = ctx.canvas.height;
+          const d39 = Math.abs(cx * 16 + 8 - sw / 2), d40 = Math.abs(cy * 16 + 8 - sh / 2);
+          if (d39 < sw * 2 && d40 < sh * 2) {
+            const falloff = 1 - Math.hypot(d39, d40) / (sw * 0.75);
+            if (falloff > 0) {
+              if (wf.type === 0) { this.ambWf.strength += falloff; this.ambWf.x = cx * 16 + 8; this.ambWf.y = cy * 16 + 8; }
+              else if (wf.type === 1) { this.ambLava.strength += falloff; this.ambLava.x = cx * 16 + 8; this.ambLava.y = cy * 16 + 8; }
+            }
+          }
+        }
       }
     }
     ctx.globalAlpha = 1;

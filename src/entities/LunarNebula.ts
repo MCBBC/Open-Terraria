@@ -25,14 +25,14 @@ import { canHit, canHitLine } from '../physics/LineOfSight';
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
 };
 
 const TAU = Math.PI * 2;
 
 /** 通用命中（音效 + hurt + 飘字） */
 function strike(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean, kb: number, kdir: number, pen: number): void {
-  e.hurt(dmg, kdir * kb, 0, game, pen, crit);   // 音/飘值=单点
+  e.hurt(dmg, kdir * kb, 0, game, pen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
 }
 
 // ================= 星云烈焰弹 634/635（AI_001 :51577-51762） =================

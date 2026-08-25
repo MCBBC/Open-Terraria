@@ -746,6 +746,9 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
   return {
     meta: {
       schemaVersion: DEBUG_REPORT_SCHEMA_VERSION,
+      bundle: typeof document !== 'undefined'
+        ? (document.querySelector('script[src*="index-"]')?.getAttribute('src') ?? null)?.split('/').pop() ?? null
+        : null,
       generatedAt: new Date().toISOString(),
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
       viewport: typeof window !== 'undefined' && window.innerWidth

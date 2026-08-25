@@ -146,7 +146,7 @@ export class PrismProng extends Entity {
       const steps = Math.max(1, Math.floor(this.beamLen / 12));
       for (const ent of game.enemies()) {
         if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
-        const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
         if (e.dead || this.hitCd.has(e.id)) continue;
         for (let s2 = 1; s2 <= steps; s2++) {
           const d = s2 * 12;
@@ -156,7 +156,7 @@ export class PrismProng extends Entity {
           const crit = Math.random() < this.critChance;
           let dmg = crit ? this.damage * 2 : this.damage;
           if (charge >= 180) dmg *= 3;                     // 满充 ×3（:30379-30381）
-          e.hurt(dmg, this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit);
+          e.hurt(dmg, this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
           // 同敌免疫窗（Damage_PVE_Inner :14058 `type==632 → immune[owner]=
           // GetSlowMagicUseTime(5)`）：常态 5t,蓝空过载（slowMagicUse）×2.5=12t
           // （缺省 5——旧桩 player 无此方法时行为不变）
@@ -520,7 +520,7 @@ export class BlasterBeam extends Entity {
     const steps = Math.max(1, Math.floor(this.beamLen / 12));
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitCd.has(e.id)) continue;
       for (let s2 = 1; s2 <= steps; s2++) {
         const d = s2 * 12;
@@ -529,7 +529,7 @@ export class BlasterBeam extends Entity {
         if (!(bx < e.x + e.w && bx + thick > e.x && by < e.y + e.h && by + thick > e.y)) continue;
         const crit = Math.random() < this.critChance;
         const dmg = crit ? this.damage * 2 : this.damage;
-        e.hurt(dmg, this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit);
+        e.hurt(dmg, this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
         this.hitCd.set(e.id, 5);
         break;
       }

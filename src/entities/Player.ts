@@ -3741,7 +3741,7 @@ export class Player extends Entity {
           const crit = Math.random() * 100 < this.critChance('melee');  // :20811-20813
           const dmg = Math.max(1, Math.round(30 * this.damageMult('melee')) * (crit ? 2 : 1));
           const kb = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);
-          en.hurt(dmg, dir * kb, -4, game);
+          en.hurt(dmg, dir * kb, -4, game, 0, false, 0, true);   // 克脑盾冲撞=玩家伤害=DPS 计(:20811 PlayerAttack 族)
           game.addDamageNumber(en.cx, en.cy, dmg, crit, crit ? '#FF8040' : '#FFD080');
           this.eocDash = 10;            // :20833
           this.eocHitId = en.id ?? -2;  // :20840（后续帧不再对同一敌结算）
@@ -3859,7 +3859,7 @@ export class Player extends Entity {
           const crit3 = Math.random() * 100 < this.critChance('melee');
           const dmg3 = Math.max(1, Math.round(150 * this.damageMult('melee')) * (crit3 ? 2 : 1));  // :21317
           const kb3 = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);        // :21318-21327
-          en.hurt(dmg3, dir3 * kb3, -4, game);
+          en.hurt(dmg3, dir3 * kb3, -4, game, 0, false, 0, true);   // 日耀盾滑行=玩家伤害=DPS 计(:21317)
           if (en.iframes !== undefined) en.iframes = 6;   // :21348 immune[whoAmI]=6
           game.addDamageNumber(en.cx, en.cy, dmg3, crit3, crit3 ? '#FF8040' : '#FFD080');
           // 不置 solarDashing=false——滑行全程逐帧结算（原版 :21352 无终止写）

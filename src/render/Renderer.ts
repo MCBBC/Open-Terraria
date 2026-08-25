@@ -141,7 +141,7 @@ import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, r
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
-import { CaptureInterface } from './CaptureMode';
+import { CaptureInterface, CaptureSettings } from './CaptureMode';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { GLWorldLight } from './GLWorldLight';
@@ -3837,6 +3837,17 @@ export class Renderer {
   private wsDelay = 0;
   /** 群系水色 1:1（Main.CalculateWaterStyle :56766-56824；喷泉/血月柱并入） */
   private updateWaterStyle(world: World, cam: { y: number }): void {
+    // ★拍照模式手动群系档直供（文件头③消费缺口补齐 2026-08-25）：DirtLayer/
+    //    RockLayer/BloodMoon 的水色走深度/昼夜派生链,合成 scene 表达不了——
+    //    捕获重渲通道直接取所选群系水色（原版 DrawCapture 直改 Main.waterStyle）
+    if (this._capturePass) {
+      const cb = this.captureMode.settings?.biome;
+      if (cb && CaptureSettings.biomeChoiceIndex >= 0) {
+        this.waterStyle = cb.waterStyle;
+        this.wsDelay = 0;
+        return;
+      }
+    }
     const f = this.scene;
     if (!f) return;
     // 喷泉（:56766-56770）：ActiveFountainColor ≥ 0 直接短路返回——无 bgDelay 迟滞，

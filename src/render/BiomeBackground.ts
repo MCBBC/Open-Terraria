@@ -29,13 +29,6 @@ const STYLE_TO_AREA: Record<number, number> = {
   4: 10, 9: 11,
 };
 
-interface LayerDef { tex: number; scale: number; parallax: number; topA: number; topB: number }
-/** 群系 3 层标准参数（DrawSurfaceBG_* 实测常量；topY = num3*topA + topB） */
-const L3 = (t: number[], y1: number, y2: number, y3: number): LayerDef[] => [
-  { tex: t[0], scale: 1.25, parallax: 0.40, topA: 1800, topB: y1 },
-  { tex: t[1], scale: 1.31, parallax: 0.43, topA: 1950, topB: y2 },
-  { tex: t[2], scale: 1.34, parallax: 0.49, topA: 2100, topB: y3 },
-];
 
 // ---- 贴图集表（WorldGen.setBG :7181-7700；style 由世界种子确定性挑选） ----
 // 森林（SetForestBGSet :7605：树层 + 远山组；style 见 case）
@@ -72,11 +65,83 @@ const DESERT_STYLES: Array<[number, number, number]> = [
 /** 海洋单层贴图变体（WorldGen.setBG case 7 :7513-7541：style 0-7 → Main.oceanBG，
  *  worldgen 期 setBG(7, random.Next(8)) :7973 掷骰；海洋层 = 单张贴图无树层组） */
 const OCEAN_STYLES = [28, 110, 111, 209, 210, 283, 332, 340];
-/** 海洋层专属 Y 偏移（DrawSurfaceBG_GetLayerYOffset :59172：case 283→-800 :59220-21、
- *  case 332/340→-25 :59222-25、28/110/111/209/210 走 default 0） */
-const OCEAN_YOFF: Record<number, number> = { 283: -800, 332: -25, 340: -25 };
 /** 地下带状背景横向视差（Main.cs:1172 caveParallax 默认 0.88;设置项 "Parallax" 可调） */
 const CAVE_PARALLAX = 0.88;
+
+// ---- 表面层每贴图覆盖总表（Main.cs SetBackgroundOffsets :61335-61716 全表转写）----
+// [scale?, parallax?, topA?, topB?]——缺省项沿用各群系 DrawSurfaceBG_* 函数头默认档;
+// topA/topB 任一非 0 才重算 bgTopY（原版 num/num2 语义）。bgScale 另乘 num4=2。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const SET_BG: Record<number, [number | undefined, number | undefined, number | undefined, number | undefined]> = {
+  258: [1.25, 0.23, 1800, 850], 259: [1.31, 0.33, 1950, 1500], 260: [1.34, 0.4, 2100, 1650],
+  263: [1.25, 0.23, 1800, 1450], 264: [1.31, 0.33, 1950, 1700], 265: [1.34, 0.4, 2100, 2000],
+  267: [1.25, 0.23, 1700, 1300], 266: [1.31, 0.33, 1950, 1600], 268: [1.34, 0.41, 2100, 1850],
+  248: [1.3, 0.37, 1800, 1100], 249: [1.4, 0.43, 1950, 1200], 250: [1.7, 0.49, 2000, 1000],
+  255: [1.15, 0.25, 1800, 1450], 256: [1.21, 0.32, 1950, 1550], 257: [1.34, 0.4, 2100, 1550],
+  240: [1.15, 0.3, 1800, 1500], 241: [1.21, 0.43, 1950, 1300], 242: [1.34, 0.49, 2100, 1400],
+  243: [1.15, 0.25, 1800, 1400], 244: [1.21, 0.35, 1950, 1550], 245: [1.24, 0.45, 2100, 1650],
+  273: [undefined, 0.49, 2100, 1560],
+  234: [undefined, 0.23, 1700, 1150], 235: [undefined, 0.33, 1950, 1550], 236: [undefined, 0.41, 2100, 2000],
+  279: [2.5, 0.35, 1850, 1750], 282: [2.6, 0.25, 1800, 1340],
+  261: [undefined, 0.27], 262: [undefined, 0.4],
+  219: [undefined, 0.25], 220: [undefined, 0.34], 221: [undefined, 0.43],
+  222: [undefined, undefined, 1800, 1400], 223: [undefined, undefined, 2150, 1850], 224: [undefined, undefined, 2500, 2400],
+  237: [undefined, undefined, 1800, 1500], 238: [undefined, undefined, 1950, 1500], 239: [undefined, undefined, 2100, 1900],
+  284: [undefined, 0.23, 1600, 900], 285: [undefined, 0.36, 1900, 960], 286: [undefined, 0.42, 2100, 1200],
+  287: [undefined, 0.21, 1700, 1560], 288: [undefined, 0.33, 1950, 1730], 289: [undefined, 0.41, 2100, 1400],
+  207: [undefined, 0.32],
+  298: [1.25, 0.35, 2000, 1700], 299: [undefined, 0.28, 1600, 1400],
+  300: [2.41, 0.53, 3000, 2050], 301: [2.36, 0.415, 2200, 1700], 302: [2.25, 0.24, 1400, 950],
+  303: [undefined, 0.35, 2400, 1900], 304: [undefined, 0.35, 2400, 1900], 305: [undefined, 0.35, 2400, 1900],
+  307: [undefined, 0.35, 2400, 1900], 308: [undefined, 0.35, 2400, 1900], 309: [undefined, 0.35, 2400, 1900],
+  311: [undefined, 0.35, 2400, 1900], 312: [undefined, 0.35, 2400, 1900], 313: [undefined, 0.35, 2400, 1900],
+  315: [undefined, 0.35, 2400, 1900], 316: [undefined, 0.35, 2400, 1900], 317: [undefined, 0.35, 2400, 1900],
+  306: [undefined, 0.26, 1800, 1700], 310: [undefined, 0.26, 1800, 1700],
+  314: [undefined, 0.26, 1800, 1700], 318: [undefined, 0.26, 1800, 1700],
+  319: [undefined, 0.6, 4600, 3250], 320: [undefined, 0.3, 2250, 1950], 321: [undefined, 0.25],
+  322: [undefined, 0.45, 2400, 1950], 323: [undefined, 0.35, 1900, 1500], 324: [undefined, 0.25, 1600, 1300],
+  325: [undefined, 0.49, 2800, 2400], 326: [undefined, 0.33, 2000, 1740], 327: [undefined, 0.22, 1450, 1165],
+  328: [2.01, 0.34], 329: [2.29, 0.26], 330: [undefined, 0.25, 1750, 1450],
+  333: [2.01, 0.37], 334: [undefined, 0.26], 335: [undefined, 0.22, 1650, 1470],
+  337: [1.01, 0.35, 2500, 2200], 338: [0.98, 0.24, 1900, 1650], 339: [0.94, 0.2, 1600, 1350],
+  341: [undefined, 0.3], 342: [undefined, 0.25], 343: [undefined, 0.2, 1650, 1550],
+};
+
+/** GetLayerYOffset（Main.cs :60687-60730）：山体/雪原/丛林层贴图专属 Y 微调 */
+const LAYER_YOFF: Record<number, number> = {
+  59: -550, 93: -50, 168: -50, 169: -50, 170: -50, 171: -100, 172: 130,
+  176: -760, 177: -200, 179: -100, 180: -350, 181: -350, 182: -350, 183: -350,
+  246: -150, 247: -150, 263: -700, 269: -600, 270: -50, 271: -300, 272: -380,
+  277: -260, 278: -120, 280: -170, 281: -300, 283: -800, 332: -25, 340: -25,
+};
+
+/** GetBackgroundRect 2×2 帧动画表（Main.cs :62164-62199）：值=帧周期（GameUpdateCount
+ *  tick,60/s）；Frame(2,2,col,row)+Inflate(0,-2)——帧=整表半宽半高,帧距=整表宽×scale */
+const BG_SHEET: Record<number, number> = { 235: 20, 281: 5 };
+for (const t of [219, 220, 221, 271, 272, 273, 302, 303, 305, 307, 309, 311, 313, 315, 317, 326, 337, 338, 341]) {
+  BG_SHEET[t] = 15;
+}
+
+/** 各群系函数 topY 微调集合（Forest :62302-62322/:62378-62390/:62444-62452 +
+ *  Crimson :61150-61156/:61231 + Jungle :61888/:61920/:61948） */
+const SURF_NUDGE: Record<number, number> = {
+  50: -50, 53: -100, 91: 200, 173: 200, 178: 75, 330: -150, 335: -150, 343: -300,   // Forest[0]
+  51: -50, 54: -100, 329: -150, 334: -150, 342: -300,                              // Forest[1]
+  52: -50, 55: -100, 92: 150, 328: -150, 333: -150, 341: -50,                      // Forest[2]
+  105: 50, 174: -350, 175: -400,                                                   // Crimson[0]/[2]
+  59: -200, 60: -175, 61: -150,                                                    // Jungle
+};
+
+/** Forest[1] 层 topY 绝对重置（:62355-62362 91/173/184 与 [1] 329/334、[2] 328/333） */
+const SURF_TOP_RESET: Record<number, [number, number]> = {
+  91: [1600, 1400], 173: [1600, 1400], 184: [1600, 1400],
+  329: [1900, 1600], 334: [1900, 1650],
+  328: [2600, 2300], 333: [2800, 2550],
+};
+
+/** 水平翻转（Forest[1] 51/54 SpriteEffects.FlipHorizontally :62397 + Corrupt[1] 整层
+ *  FlipHorizontally :62133——13/57/212/226/241/323 为腐化各风格 [1] 槽贴图） */
+const SURF_FLIP = new Set([51, 54, 13, 57, 212, 226, 241, 323]);
 
 // ---- 菜单样式表（menuMode 专用，与上方游戏内数组分池）----
 // 游戏内 FOREST_STYLES/CORRUPT_STYLES 数组的键空间 = seedPick 档位(0..6/0..5)；
@@ -129,11 +194,6 @@ const TEX_TOPROW: Record<number, number> = {
   333: 8, 336: 5, 343: 28, 342: 38, 341: 63,
 };
 
-// 远山层（bgAlphaFarBackLayer；DrawBG_ModifyBGFarBackLayerAlpha :63703 映射 + setBG 各组）
-const FAR_TEX: Record<number, number> = {
-  [Corruption]: 23, [Desert]: 24, [CrimsonDesert]: 24, [CorruptDesert]: 24,
-  [Jungle]: 15, [Snow]: 35, [Crimson]: 24, [Hallow]: 29, [HallowDesert]: 24,
-};
 
 // ---- 地下 style→7 槽贴图表（DrawBackground_UpdateBackgroundStyles :53221 全表） ----
 // 槽位: [0]表面过渡 [1]泥土 [2]岩石上 [3]岩石下/群系 [4]岩浆过渡 [5]地狱柱 [6]岩浆体
@@ -195,7 +255,9 @@ interface Cam { x: number; y: number; zoom: number }
 export interface BGBlit {
   img(im: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
     dx: number, dy: number, dw: number, dh: number,
-    opts?: { alpha?: number; tint?: readonly [number, number, number] | null }): void;
+    opts?: { alpha?: number; tint?: readonly [number, number, number] | null;
+      /** 2×2 帧动画子区（GetBackgroundRect）；tint 烘焙路径按此取样 */
+      src?: [number, number, number, number] }): void;
   fill(x: number, y: number, w: number, h: number, r: number, g: number, b: number, a?: number): void;
 }
 
@@ -204,15 +266,19 @@ class CanvasBgBlit implements BGBlit {
   constructor(private bg: BiomeBackground, private ctx: CanvasRenderingContext2D) {}
   img(im: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
     dx: number, dy: number, dw: number, dh: number,
-    opts?: { alpha?: number; tint?: readonly [number, number, number] | null }): void {
+    opts?: { alpha?: number; tint?: readonly [number, number, number] | null;
+      src?: [number, number, number, number] }): void {
     const ctx = this.ctx;
     const alpha = opts?.alpha ?? 1;
     const tint = opts?.tint ?? null;
+    const src = opts?.src;
     ctx.save();
     if (alpha !== 1) ctx.globalAlpha = alpha;
     if (tint && !(tint[0] >= 0.999 && tint[1] >= 0.999 && tint[2] >= 0.999)) {
-      // 与旧路径同款:tint 时整图烘焙(忽略 src 子区——消费方恒全图)
-      this.bg.drawTiledTinted(ctx, im, tint[0], tint[1], tint[2], dx, dy, dw, dh);
+      // tint 烘焙（缓存键=贴图|色桶）；帧动画子区在绘制端裁
+      this.bg.drawTiledTinted(ctx, im, tint[0], tint[1], tint[2], dx, dy, dw, dh, src);
+    } else if (src) {
+      ctx.drawImage(im, src[0], src[1], src[2], src[3], dx, dy, dw, dh);
     } else {
       ctx.drawImage(im, sx, sy, sw, sh, dx, dy, dw, dh);
     }
@@ -275,6 +341,13 @@ export class BiomeBackground {
   private alphaFar = new Array(16).fill(0);
   /** 岩浆背景动画累计 ms（magmaBGFrameCounter 每 8 tick=133.33ms 推帧,mod 3） */
   private magmaFrameT = 0;
+  /** GetBackgroundCounter（:62200-62206 游戏内 = GameUpdateCount,60/s tick）——
+   *  2×2 帧动画/173 四帧轮换的时间源；draw(dtMs) 按帧长 16.667ms 累进 */
+  private bgTick = 0;
+  private bgTickAcc = 0;
+  /** 水平翻转烘焙缓存（SpriteEffects.FlipHorizontally——Forest[1] 51/54、Corrupt[1]
+   *  整层；烘焙一次复用,双后端通用——GL quad 助手无翻转参数,走贴图侧翻转） */
+  private flipCache = new WeakMap<object, HTMLCanvasElement>();
   /** 地下风格（≈Main.undergroundBackground/oldUndergroundBackground/ugBackTransition） */
   ugStyle = 0;
   private ugOld = 0;
@@ -448,6 +521,20 @@ export class BiomeBackground {
     return this.alphaFront;
   }
 
+  /** 样式快照（CaptureMode 手动群系档专用，2026-08-25）：样式直落 + 双 alpha 槽
+   *  全开 + 冷却/渐变/瞬切计数清零——拍照分块重渲跨数帧，走正常交叉淡化
+   *  （±0.05/帧）会拍到半透明中间态；原版 DrawCapture 直接改 Main.bgStyle 无
+   *  过渡态，此处对齐该语义。调用方负责随后以合成 scene 维持 want 稳定。 */
+  snapStyle(style: number): void {
+    this.bgStyle = style;
+    this.bgDelay = 0;
+    this.instantBG = 0;
+    this.alphaFront.fill(0);
+    this.alphaFar.fill(0);
+    this.alphaFront[style] = 1;
+    this.alphaFar[style] = 1;
+  }
+
   /** 每帧状态推进：风格切换延迟 + alpha 渐变（UpdateBGVisibility ±0.05/帧，:63534/:63594） */
   update(world: World, scene: SceneFlags, dtMs: number,
     geom?: { centerTileX: number; topTileY: number; bottomTileY: number }) {
@@ -525,9 +612,10 @@ export class BiomeBackground {
       }
     }
     // 远山层 alpha（bgStyle→far 槽映射简化为同号；海洋 = Step2 专属 far 槽 3，
-    // UpdateBGVisibility_BackLayer case 4 :63636-63638，本仓按同号 Ocean 槽驱动）
-    const farTarget = FAR_TEX[this.bgStyle] !== undefined || this.bgStyle === Ocean
-      ? this.bgStyle : -1;
+    // UpdateBGVisibility_BackLayer case 4 :63636-63638，本仓按同号 Ocean 槽驱动。
+    // 丛林无山体双步（三树层即全部）→ 无 far 档；神圣 246/247 仅 hallowStyle===3
+    // 绘制,但 alpha 照常驱动（不绘即无害））
+    const farTarget = this.bgStyle === Jungle ? -1 : this.bgStyle;
     for (let l = 0; l < 16; l++) {
       const target = l === farTarget ? 1 : 0;
       this.alphaFar[l] += target > this.alphaFar[l] ? Math.min(frames * 0.05, target - this.alphaFar[l]) : Math.max(-frames * 0.05, target - this.alphaFar[l]);
@@ -628,27 +716,20 @@ export class BiomeBackground {
     camTopY: number, camLeftX: number, viewW: number, viewH: number, tint: [number, number, number],
   ) {
     this.seedFor(world); // 兜底：即便 update 未先行播种也不崩（HMR/首帧边界）
-    // 垂直视差系数（DrawSurfaceBG :58749：num3 = -(screenPosition.Y-300)/(worldSurface*16)）
+    // 垂直视差系数（DrawSurfaceBG :60256：num3 = -(screenPosition.Y-300)/(worldSurface*16)）
     const num3 = -(camTopY - 300) / (world.groundLevel * 16);
-    // scAdj(DrawBG :63418 ComputeScAdj :63389-63413):世界深度视差补偿——
+    // scAdj(DrawBG :64941 ComputeScAdj)：世界深度视差补偿——
     // num=worldSurface·16/(screenY+screenH),k=max((maxTilesY·0.15·16−screenY)·
     // 0.00025,0)²,按世界高度档 ×(−500/−300/−150)。screenY=屏顶世界 Y。
-    // pushBGTopHack(DrawCloudsBG :58722-58774):num=30 in-game / 0 gameMenu(本渲染器
-    // 仅 in-game,菜单 0 档注释备案);drunkWorldGen 内 onlyShimmerOcean −240(该
-    // 秘密种子未实装,恒不可达) / vampireSeed −100 / !notTheBees −180。
-    // ★2026-08-20 审计补齐:此前两层都漏,表面背景整体垂直偏移(小世界 ≈
-    // −154+30px);与 tree 层 topY=num3·topA+topB+scAdj+push 同式(Main.cs
-    // :58840 系 treeMntBGSet 赋值块)
     const worldH = world.store?.h ?? 1200;   // 无 store(桩)按小世界档
-    const screenTopYv = camTopY;
     const screenHworld = viewH / cam.zoom;   // 世界像素屏高
-    const scNum = (world.groundLevel * 16) / Math.max(1, screenTopYv + screenHworld);
-    let scK = (worldH * 0.15 * 16 - screenTopYv) * 0.00025;
+    const scNum = (world.groundLevel * 16) / Math.max(1, camTopY + screenHworld);
+    let scK = (worldH * 0.15 * 16 - camTopY) * 0.00025;
     if (scK < 0) scK = 0;
     const scAdj = scNum * (0.45 - scK * scK)
       * (worldH <= 1200 ? -500 : worldH <= 1800 ? -300 : -150);
-    // Main.cs:58722-58732（drunkWorldGen = seedFlags.drunkWorld——05162020/
-    // drunkworld/getfixedboi 置位；notTheBees 同表；onlyShimmerOcean 秘密种子未实装）
+    // pushBGTopHack（DrawSurfaceBG :60236-60252）：in-game 恒 30（drunkWorldGen 内
+    // onlyShimmerOcean −240 / vampireSeed −100 / !notTheBees −180——秘密种子未实装）
     const sfSeed = world.seedFlags ?? {};
     const pushHack = sfSeed.drunkWorld
       ? (sfSeed.vampireSeed ? -100 : !sfSeed.notTheBees ? -180 : 30)
@@ -656,38 +737,58 @@ export class BiomeBackground {
     const [tr0, tg0, tb0] = tint;
     const tintOn: readonly [number, number, number] | null
       = tr0 >= 0.999 && tg0 >= 0.999 && tb0 >= 0.999 ? null : [tr0, tg0, tb0];
-    const drawLayer = (l: LayerDef, alpha: number) => {
-      if (alpha <= 0.01 || l.tex < 0) return;
-      const im = this.img(l.tex);
-      if (!im || !(im.width > 0) || im.width === 0) return;
-      const wScaled = im.width * l.scale;
-      // 横向视差锚 = 屏幕左缘（Main.cs :58860 bgStartX = -IEEERemainder(
-      // screenPosition.X×bgParallax, w) - w/2 - w——比正模多退一整块,配 +4 档
-      // loops 保屏）。曾用 cam.x(中心)——差 viewW/2/zoom×parallax 常量相位偏移
-      const startX = -BiomeBackground.ieeeRemOf(camLeftX * l.parallax, wScaled) - wScaled / 2 - wScaled;
+    // ★num4 = 2（DrawSurfaceBG :60259 无条件 bgGlobalScaleMultiplier）——全部表面层
+    // scale ×2。曾漏乘 = 图层只有原版一半,树/山层底缘悬在屏内,飞高或站高处底部
+    // 露天空底色（2026-08-25 用户实报"底部远景露馅,原版不会"）。
+    // 层解析序 = 原版各函数序：函数头默认档 → SET_BG 覆盖 → TOP_RESET 绝对重置
+    // → nudge/YOffset → scAdj/pushHack。
+    const drawLayer = (
+      tex: number, dS: number, dP: number, dA: number, dB: number, alpha: number,
+      opt: { yoff?: boolean; anim?: boolean; flip?: boolean; nudge?: number } = {},
+    ): void => {
+      if (alpha <= 0.01 || tex < 0) return;
+      const ov = SET_BG[tex];
+      const scale = (ov?.[0] ?? dS) * 2;          // ×num4（:60259）
+      const par = ov?.[1] ?? dP;
+      const rst = SURF_TOP_RESET[tex];
+      const topA = rst?.[0] ?? ov?.[2] ?? dA;
+      const topB = rst?.[1] ?? ov?.[3] ?? dB;
+      let im = this.img(tex);
+      if (!im || !texReady(im)) return;
+      // Forest[0] tex 173 四帧轮换（:62289-62296：counter/10%4 → Background[251+frame]）
+      if (tex === 173) {
+        im = this.img(251 + (Math.floor(this.bgTick / 10) % 4)) ?? im;
+      }
+      // GetBackgroundRect（:62164-62199）：2×2 帧表 Frame(2,2,col,row)+Inflate(0,-2)；
+      // 帧距 = 整表宽×scale（bgWidthScaled 语义），帧绘制尺寸 = 半表×scale
+      let sx = 0, sy = 0, sw = im.width, sh = im.height;
+      const period = opt.anim ? BG_SHEET[tex] : undefined;
+      if (period !== undefined) {
+        const f = Math.floor(this.bgTick / period) % 4;
+        sw = im.width >> 1; sh = im.height >> 1;
+        sx = (f % 2) * sw; sy = Math.floor(f / 2) * sh + 2; sh -= 4;
+      }
+      if (opt.flip) im = this.flippedOf(im);
+      const wScaled = im.width * scale;
+      // 横向视差锚 = 屏幕左缘（:61151 bgStartX = -IEEERemainder(screenX×par,w)-w/2
+      // -w——多退一整块配 +3 档 loops 保屏）
+      const startX = -BiomeBackground.ieeeRemOf(camLeftX * par, wScaled) - wScaled / 2 - wScaled;
       const loops = Math.ceil(viewW / wScaled) + 3;
-      const topY = num3 * l.topA + l.topB + scAdj + pushHack; // 屏幕空间 y（vanilla bgTopY 语义,含 scAdj+pushHack）
-      // ★+1px 保险重叠:浮点视差位置(startX 取模 cam.x*parallax)+非整数缩放
-      // (naturalWidth×1.25)下,相邻背景图独立光栅化在接缝处留 1px 缺口(发丝缝),
-      // 双线性平滑还会把边缘混透明放大缝。外扩 1px 让邻图覆盖接缝
-      const dw = wScaled + 1;
+      const topY = num3 * topA + topB + (opt.nudge ?? SURF_NUDGE[tex] ?? 0)
+        + (opt.yoff ? (LAYER_YOFF[tex] ?? 0) : 0) + scAdj + pushHack;
+      const dw = sw * scale + 1;   // +1px 保险重叠（浮点视差接缝,既有约定）
+      const dh = sh * scale;
       for (let i = 0; i < loops; i++) {
-        b.img(im, 0, 0, im.width, im.height, startX + i * wScaled, topY, dw, im.height * l.scale,
-          { alpha, tint: tintOn });
+        b.img(im, sx, sy, sw, sh, startX + i * wScaled, topY, dw, dh, { alpha, tint: tintOn });
       }
     };
-    // ---- cloudBG 大云图双层（Main.cs:58787-58871，Background 112/113）----
-    // 门 = cloudBGAlpha>0（累积器 :58781-58792：cloudBGActive>0 时 +0.0005·dayRate/t
-    //  否则 −，钳 0..1；门 = !drunkWorld && camTop ≤ worldSurface+10 tile——阴天/雨雪
-    //  天渐显的大云幕，晴天恒 0 不画）。原版序：极光（DrawToDepth 1/0.09 :58829）
-    //  在本层之前——Renderer sky.draw 先于 biomeBg.draw 已保证。
-    //  层0 = Background 112：scale1.65 / par0.09 / topY=num3·900+600 / α=min(1,α累积)
-    //  层1 = Background 113：scale1.85 / par0.12 / topY=num3·1100+750 / α=min(1,α累积×1.5)
-    //  色 = ColorOfSurfaceBackgroundsBase×α×num5（:58828/:58831，num5=ProcessCloud
-    //  Alpha()×atmo，本仓无塔/月总天空 fade → ProcessCloudAlpha 恒 1）——沿用本文件
-    //  既有山层同款约定：α 进 globalAlpha、rgb 走 tint（tint 烘焙缓存按色键控，α 独立
-    //  变化不破缓存）。风漂移 cloudBGX += windSpeedCurrent×par×9×dayRate
-    //  （FocusHelper.AllowSkyMovement=GameplayActive，游戏内恒真 :58796），wrap ±w·scale。
+    // ---- cloudBG 大云图双层（Main.cs :60280-60375，Background 112/113）----
+    // 门 = cloudBGAlpha>0（累积器 cloudBGActive>0 时 +0.0005·dayRate/t 否则 −，钳
+    // 0..1；门 = !drunkWorld && camTop ≤ worldSurface+10 tile——阴天/雨雪天渐显的
+    // 大云幕，晴天恒 0 不画）。层0 = Background 112：scale1.65 / par0.09 / topY=
+    // num3·900+600 / α=min(1,α累积)；层1 = Background 113：scale1.85 / par0.12 /
+    // topY=num3·1100+750 / α=min(1,α累积×1.5)。风漂移 cloudBGX += wind×par×9×dayRate
+    // （:60268 AllowSkyMovement 游戏内恒真），wrap ±w·scale。
     {
       const wr = world.weather;
       const dayRate = world.dayRate?.() ?? 1;
@@ -709,15 +810,15 @@ export class BiomeBackground {
           const im = this.img(cf.tex);
           if (!im || !(im.width > 0)) continue;
           const wScaled = im.width * cf.scale;
-          this.cloudBGX[s] += wind * cf.par * 9 * dayRate;         // :58796/:58845
+          this.cloudBGX[s] += wind * cf.par * 9 * dayRate;         // :60268/:60317
           if (this.cloudBGX[s] > wScaled) this.cloudBGX[s] -= wScaled;
           if (this.cloudBGX[s] < -wScaled) this.cloudBGX[s] += wScaled;
           const a = Math.min(1, this.cloudBGAlpha * cf.aMul) * atmo;
           if (a <= 0.01) continue;
-          const topY = num3 * cf.topA + cf.topB + scAdj + pushHack;  // :58807/:58854
+          const topY = num3 * cf.topA + cf.topB + scAdj + pushHack;  // :60287/:60334
           const startX = -BiomeBackground.ieeeRemOf(camLeftX * cf.par, wScaled)
-            - wScaled / 2 - wScaled + this.cloudBGX[s];              // :58811-58813
-          const loops = Math.ceil(viewW / wScaled) + 4;              // :58815 +2+2
+            - wScaled / 2 - wScaled + this.cloudBGX[s];              // :60290-60292
+          const loops = Math.ceil(viewW / wScaled) + 4;              // :60294 +2+2
           for (let i = 0; i < loops; i++) {
             b.img(im, 0, 0, im.width, im.height, startX + i * wScaled, topY,
               wScaled + 1, im.height * cf.scale, { alpha: a, tint: tintOn });
@@ -725,62 +826,79 @@ export class BiomeBackground {
         }
       }
     }
-    // 远山层 Step1（bgAlphaFarBackLayer；parallax 0.15/scale 1，:59240）
-    const farTex = FAR_TEX[this.bgStyle];
-    if (farTex !== undefined) {
-      const a = this.alphaFar[this.bgStyle];
-      drawLayer({ tex: farTex, scale: 1, parallax: 0.15, topA: 1300, topB: 1090 }, a);
-    } else if (this.bgStyle === Ocean) {
-      // ★海洋专属层 = Step2 far 槽 3（Main.cs:59348-59351 bgAlphaFarBackLayer[3] →
-      // DrawSurfaceBG_DrawBackMountainsLayer(oceanBG)）。几何取 Step2 共用档
-      // （:58919-58937 treeMntBGSet1[1] 设置块）：parallax 0.2 / scale 1.15×num4 /
-      // topY = num3×1400+1260，再叠贴图专属 Y 偏移（DrawSurfaceBG_GetLayerYOffset
-      // :59172，283→-800/332/340→-25/其余 0）。原版海洋【无】前景树层组——
-      // front 槽 4 只画变更换屏闪光 overlay（:58994-58996 DrawChangeOverlay(10)，
-      // BackgroundChangeFlashInfo 黑闪,本仓未实装=常态不画），曾经 forest 兜底
-      // 画树层是本仓自造,已移除;群系背景全由本层承担。
-      const ot = this.oceanTexId();
-      drawLayer({ tex: ot, scale: 1.15, parallax: 0.2, topA: 1400, topB: 1260 + (OCEAN_YOFF[ot] ?? 0) }, this.alphaFar[Ocean]);
-    }
-    // 前景群系层
+    // ---- 群系层（序 = DrawSurfaceBG 绘制序：Step1 远山 → Step2 近山 → 前景群系函数）----
+    // 山体双步几何：Step1（:60745）scale1 par0.15 topY=num3·1300+1090；
+    // Step2（treeMntBGSet1[1] 块 :60430 = Step2 槽共用档）scale1.15 par0.2
+    // topY=num3·1400+1260；两步都过 GetLayerYOffset + GetBackgroundRect（动画）。
+    // ★曾只画一层远山——近山层（22/25/36/42/247/森林 m[1] 第二档）整层缺失。
     const style = this.bgStyle;
-    const s = world.seed >>> 0;
-    const a = this.alphaFront[style];
+    const aFar = this.alphaFar[style] ?? 0;
+    const aFront = this.alphaFront[style] ?? 0;
     if (style === Forest1 || style === Forest2 || style === Forest3 || style === Forest4) {
       const seg = style === Forest1 ? 0 : style === Forest2 ? 1 : style === Forest3 ? 2 : 3;
       const fs = this.pickStyle('forest', FOREST_STYLES, this.forestStyles[seg], world);
-      // 森林远/近树层（_Forest :60708：scale 1.2/1.2/1.4 parallax 0.25/0.25/0.27 topY num3*1600+1400）
-      drawLayer({ tex: fs.t[0], scale: 1.2, parallax: 0.25, topA: 1600, topB: 1400 }, a);
-      drawLayer({ tex: fs.t[1], scale: 1.2, parallax: 0.25, topA: 1600, topB: 1400 }, a);
-      drawLayer({ tex: fs.t[2], scale: 1.4, parallax: 0.27, topA: 1800, topB: 1500 }, a);
-      // 森林专属远山（比通用远山更近一档：parallax 0.18）
-      if (FAR_TEX[style] === undefined) {
-        drawLayer({ tex: fs.m[0], scale: 1, parallax: 0.1, topA: 1300, topB: 1090 }, a);
-        drawLayer({ tex: fs.m[1], scale: 1, parallax: 0.18, topA: 1600, topB: 1350 }, a);
-      }
+      drawLayer(fs.m[0], 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });   // Step1 槽[0]
+      drawLayer(fs.m[1], 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true }); // [1] 块/Step2
+      // DrawSurfaceBG_Forest（:62217）三树层
+      drawLayer(fs.t[0], 1.25, 0.4, 1800, 1500, aFront, { anim: true });
+      drawLayer(fs.t[1], 1.31, 0.43, 1950, 1750, aFront, { anim: true, flip: true });
+      drawLayer(fs.t[2], 1.34, 0.49, 2100, 2000, aFront, { anim: true });
+      // [0]==91 风格：[2] 层贴图 92 走 1.3/0.42 特例（:62404-62407）+ nudge +150
+      if (fs.t[0] === 91) drawLayer(92, 1.3, 0.42, 2100, 2000, aFront, { anim: true, nudge: 150 });
     } else if (style === Corruption) {
-      for (const l of L3(this.pickStyle('corrupt', CORRUPT_STYLES, this.corruptStyle, world), 1500, 1750, 2000)) drawLayer(l, a);
+      drawLayer(24, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[2]
+      drawLayer(25, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[2]
+      const cs = this.pickStyle('corrupt', CORRUPT_STYLES, this.corruptStyle, world);
+      // [0]==56 → 三层全 -100（:62086/:62124/:62156 各块共门）；[1] 整层水平翻转
+      const n56 = cs[0] === 56 ? -100 : 0;
+      drawLayer(cs[0], 1.25, 0.4, 1800, 1500, aFront, { nudge: n56 });
+      drawLayer(cs[1], 1.31, 0.43, 1950, 1750, aFront, { flip: true, nudge: n56 });
+      drawLayer(cs[2], 1.34, 0.49, 2100, 2000, aFront, { nudge: n56 });
     } else if (style === Crimson) {
-      for (const l of L3(this.pickStyle('crimson', CRIMSON_STYLES, this.crimsonStyle, world), 1500, 1750, 2000)) drawLayer(l, a);
+      drawLayer(24, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[5]
+      drawLayer(42, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[5]
+      const cs = this.pickStyle('crimson', CRIMSON_STYLES, this.crimsonStyle, world);
+      drawLayer(cs[0], 1.25, 0.4, 1800, 1500, aFront, { anim: true });   // 105:+50/174:-350 走 NUDGE
+      drawLayer(cs[1], 1.31, 0.43, 1950, 1750, aFront, { anim: true });
+      drawLayer(cs[2], 1.34, 0.49, 2100, 2000, aFront, { anim: true });  // 175:-400 走 NUDGE
     } else if (style === Jungle) {
-      for (const l of L3(this.pickStyle('jungle', JUNGLE_STYLES, this.jungleStyle, world), 1660, 1840, 2060)) drawLayer(l, a);
+      const js = this.pickStyle('jungle', JUNGLE_STYLES, this.jungleStyle, world);
+      drawLayer(js[0], 1.25, 0.4, 1800, 1660, aFront, { anim: true, yoff: true });  // 59:-200+YOff-550
+      drawLayer(js[1], 1.31, 0.43, 1950, 1840, aFront, { anim: true, yoff: true });
+      drawLayer(js[2], 1.34, 0.49, 2100, 2060, aFront, { anim: true, yoff: true });
     } else if (style === Snow) {
-      // 雪山对（snowMntBG :7297：parallax 0.23/0.33）
-      drawLayer({ tex: 35, scale: 1.25, parallax: 0.23, topA: 1600, topB: 1350 }, a);
-      drawLayer({ tex: 36, scale: 1.31, parallax: 0.33, topA: 1950, topB: 1650 }, a);
-      for (const l of L3(this.pickStyle('snow', SNOW_STYLES, this.snowStyle, world), 1500, 1750, 2000)) drawLayer(l, a);
+      drawLayer(35, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // snowMntBG[0] Step1
+      drawLayer(36, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // snowMntBG[1] Step2
+      const ss = this.pickStyle('snow', SNOW_STYLES, this.snowStyle, world);
+      drawLayer(ss[0], 1.25, 0.4, 1800, 1500, aFront, { yoff: true });
+      drawLayer(ss[1], 1.31, 0.43, 1950, 1750, aFront, { yoff: true });
+      drawLayer(ss[2], 1.34, 0.49, 2100, 2000, aFront, { yoff: true });
     } else if (style === Hallow) {
-      for (const l of L3(this.pickStyle('hallow', HALLOW_STYLES, this.hallowStyle, world), 1500, 1750, 2000)) drawLayer(l, a);
+      // 246/247 山体仅 hallowBG==3 档（:60816/:60845 门；HALLOW_STYLES[3]=[243,244,245]）
+      if (this.hallowStyle === 3) {
+        drawLayer(246, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });
+        drawLayer(247, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });
+      }
+      const hs = this.pickStyle('hallow', HALLOW_STYLES, this.hallowStyle, world);
+      drawLayer(hs[0], 1.25, 0.4, 1800, 1500, aFront, { anim: true });
+      drawLayer(hs[1], 1.31, 0.43, 1950, 1750, aFront, { anim: true });
+      drawLayer(hs[2], 1.34, 0.49, 2100, 2000, aFront, { anim: true });
     } else if (style === Mushroom) {
-      for (const l of L3(this.pickStyle('mushroom', MUSHROOM_STYLES, this.mushroomStyle, world), 1400, 1675, 1950)) drawLayer(l, a);
+      const ms = this.pickStyle('mushroom', MUSHROOM_STYLES, this.mushroomStyle, world);
+      drawLayer(ms[0], 1.25, 0.4, 1800, 1400, aFront, { anim: true });
+      drawLayer(ms[1], 1.32, 0.43, 1950, 1675, aFront, { anim: true });
+      drawLayer(ms[2], 1.36, 0.49, 2100, 1950, aFront, { anim: true });
     } else if (style === Desert || style === CorruptDesert || style === CrimsonDesert || style === HallowDesert) {
+      drawLayer(23, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[1]
+      drawLayer(22, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[1]
       const d = this.pickStyle('desert', DESERT_STYLES, this.desertStyle, world);
-      drawLayer({ tex: d[0], scale: 1.25, parallax: 0.37, topA: 1800, topB: 1750 }, a);
-      drawLayer({ tex: d[1], scale: 1.34, parallax: 0.49, topA: 2100, topB: 2150 }, a);
+      drawLayer(d[0], 1.25, 0.37, 1800, 1750, aFront);
+      drawLayer(d[1], 1.34, 0.49, 2100, 2150, aFront);
+    } else if (style === Ocean) {
+      // 海洋 = Step2 槽[3]（:60836 bgAlphaFarBackLayer[3] → oceanBG）+ YOff（283→-800 等）
+      drawLayer(this.oceanTexId(), 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });
+      // 原版海洋无前景树层组——front 槽 4 只画变更换屏闪光 overlay（未实装=常态不画）
     }
-    // Ocean(4) 无前景群系层组：原版 front 槽 4 仅变更换屏 overlay（见上方远山区
-    // 海洋分支考据注释），群系背景 = Step2 far 层一张 oceanBG,已在上文绘制。
-    void s; void viewH;
   }
 
   /** 带色调平铺绘制（tint 缓存按 (tex,量化tint) 键，避免每帧逐像素）。
@@ -799,9 +917,25 @@ export class BiomeBackground {
   }
   private tintTexIds = new WeakMap<object, number>();
   private tintTexIdSeq = 0;
+  /** 水平翻转烘焙（SpriteEffects.FlipHorizontally 等价；按源贴图缓存一次） */
+  private flippedOf(im: ImageBitmap | HTMLImageElement): ImageBitmap | HTMLImageElement {
+    let c = this.flipCache.get(im);
+    if (!c) {
+      c = document.createElement('canvas');
+      c.width = im.width; c.height = im.height;
+      const cx = c.getContext('2d')!;
+      cx.translate(im.width, 0);
+      cx.scale(-1, 1);
+      cx.drawImage(im, 0, 0);
+      this.flipCache.set(im, c);
+    }
+    return c;
+  }
+
   drawTiledTinted(
     ctx: CanvasRenderingContext2D, im: ImageBitmap | HTMLImageElement,
     tr: number, tg: number, tb: number, dx: number, dy: number, dw: number, dh: number,
+    src?: [number, number, number, number],
   ) {
     // ★texReady 半加载窗守卫（2026-08-25 同洞加固，鸟群白闪竞态同款）：元数据已到
     //  但主体未完时烘焙 = 平色矩形按 (贴图|量化色桶) 键永久入缓存。未就绪本帧
@@ -828,7 +962,10 @@ export class BiomeBackground {
         if (first !== undefined) this.tintCache.delete(first);
       }
     }
-    ctx.drawImage(c, dx, dy, dw, dh);
+    // 2×2 帧动画层（GetBackgroundRect 子区）带 tint 时按子区取样——烘焙仍整表
+    // （缓存键 = 贴图|色桶,子区在绘制端裁）
+    if (src) ctx.drawImage(c, src[0], src[1], src[2], src[3], dx, dy, dw, dh);
+    else ctx.drawImage(c, dx, dy, dw, dh);
   }
 
   // ---- 地下层 ----
@@ -871,6 +1008,12 @@ export class BiomeBackground {
     // 8 tick = 133.33ms）。岩浆体 125+hell(160×288=3 帧×96px)与过渡/波纹条
     // (160×48,取 16px 行×3 帧)共用同一 frame
     this.magmaFrameT += dtMs;
+    // GetBackgroundCounter 累进（60/s tick；帧长 16.667ms）
+    this.bgTickAcc += dtMs;
+    while (this.bgTickAcc >= 16.6667) {
+      this.bgTickAcc -= 16.6667;
+      this.bgTick++;
+    }
     const magmaFrame = Math.floor(this.magmaFrameT / 133.33) % 3;
     // ★层序（:52265-52270）：SurfaceTransition → Dirt → 【黑盒打底】→ Rock → Magma。
     // 黑盒 gate = magmaLayer*16 ≤ 屏底（:52815）——带层随后重画覆盖;深处(UnderworldLayer

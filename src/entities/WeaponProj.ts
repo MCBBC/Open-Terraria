@@ -2486,7 +2486,7 @@ export class YoyoShotProj extends Entity {
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean;
-        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean };
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean };
       if (e.dead) continue;
       if (e.id === this.excludeId) continue;                 // localNPCImmunity[victim]=-1
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
@@ -2495,7 +2495,7 @@ export class YoyoShotProj extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
-      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit);   // 音/飘值=单点
+      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
       if (this.projId === 1134) break;                       // penetrate 1（:10643）
     }
   }
@@ -4239,7 +4239,7 @@ export class DaybreakFlare extends Entity {
   private hitStep(game: GameHooks): void {
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; cx?: number; cy?: number; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; cx?: number; cy?: number; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean };
       if (e.dead) continue;
       // :14520-14523 大型目标命中盒各边内缩 1/8（636 专属——大 Boss 须命中内圈才附着）
       const sx = e.w > 8 && e.h > 8 ? Math.floor(e.w / 8) : 0;
@@ -4248,7 +4248,7 @@ export class DaybreakFlare extends Entity {
       if (!(this.x < rx + rw && this.x + this.w > rx && this.y < ry + rh && this.y + this.h > ry)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit);
+      e.hurt(dmg, (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       // :10691-10693 + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, e as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });

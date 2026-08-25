@@ -43,6 +43,7 @@ import { mobileUiScale } from '../ui/MobileControls';
 import { Lang } from '../i18n/Lang';
 import { UISfx } from '../vui/UISfx';
 import type { LeashedEntityManager } from '../entities/LeashedCritter';
+import type { SceneFlags } from '../world/SceneMetrics';
 
 // =====================================================================
 // CaptureSettings.cs 1:1
@@ -156,6 +157,38 @@ export function getCaptureBiome(choice: number, loc?: BiomeLocInput): CaptureBio
 // =====================================================================
 // 纯几何/规划助手（CaptureCamera._Capture :133-173 / GetArea / ConstraintPoints）
 // =====================================================================
+
+/** 手动群系档 → 合成场景旗（文件头③消费缺口补齐 2026-08-25：曾只存数据不
+ *  渲染——设置格选了丛林/腐化等拍出来仍是现场群系）。从现场 scene 克隆后按
+ *  选择覆写群系旗：背景样式机(preferredStyle)与水色推导(updateWaterStyle)读
+ *  同一 scene,一次换装两链生效;水色精确值另由 Renderer.updateWaterStyle 的
+ *  捕获直供兜底(DirtLayer/RockLayer/BloodMoon 的深度/昼夜派生链场景旗表达
+ *  不了)。choice<0 = 自动档 → null(不换装,原版自动档同取现场群系)。 */
+export function captureSceneOverride(choice: number, base: SceneFlags): SceneFlags | null {
+  const s: SceneFlags = { ...base };
+  const clear = () => {
+    s.zoneCorrupt = false; s.zoneCrimson = false; s.zoneJungle = false;
+    s.zoneSnow = false; s.zoneDesert = false; s.zoneHallow = false;
+    s.zoneGlowshroom = false; s.zoneBeach = false; s.zoneUnderworldHeight = false;
+    s.bloodMoonMonolith = false;
+  };
+  switch (choice) {
+    case 0: case 1: clear(); break;                                   // Purity(森林)
+    case 2: clear(); s.zoneCorrupt = true; break;                     // 腐化
+    case 3: clear(); s.zoneJungle = true; break;                      // 丛林
+    case 4: clear(); s.zoneHallow = true; break;                      // 神圣
+    case 5: clear(); s.zoneSnow = true; break;                        // 雪原
+    case 6: clear(); s.zoneDesert = true; break;                      // 地表沙漠
+    case 7: clear(); s.belowSurface = true; break;                    // 土层(水色直供 7)
+    case 8: clear(); s.belowSurface = true; break;                    // 岩层(水色直供 8)
+    case 9: clear(); s.zoneCrimson = true; break;                     // 猩红
+    case 10: clear(); s.zoneDesert = true; s.belowSurface = true; break; // 地下沙漠
+    case 11: clear(); s.zoneBeach = true; break;                      // 海洋
+    case 12: clear(); s.zoneGlowshroom = true; break;                 // 发光蘑菇
+    default: return null;                                             // 自动档
+  }
+  return s;
+}
 
 /** GetArea（:965-972）：两角点 → 含端点矩形 */
 export function getArea(ax: number, ay: number, bx: number, by: number): TileArea {
@@ -344,6 +377,15 @@ export class CaptureInterface {
   // ---- 公共态（原版 static :890-918 → 实例字段;单 Renderer 单实例等价）----
   active = false;
   justActivated = false;
+  // 调试桥（main.ts __sw* 同款模式）：探针/E2E 直改拍摄设置（群系档等）
+  // ★2026-08-25 修复:类体内裸块 {} 非法（ES 类体只允许成员）,阻塞全仓构建——
+  //   改 IIFE 字段等价实现（构造时执行一次）
+  private __captureBridge = (() => {
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __swCaptureSettings?: typeof CaptureSettings }).__swCaptureSettings = CaptureSettings;
+    }
+    return true;
+  })();
   selectedMode: Mode = Mode.Edge;
   hoveredMode = -1;
   edgeAPinned = false;
@@ -802,6 +844,16 @@ export class CaptureInterface {
     r.ctx = cctx;
     r.fullMap.open = false;
     r._capturePass = true;
+    // ★手动群系档渲染强制（文件头③消费缺口补齐）：合成 scene 换装（背景样式机
+    //   preferredStyle 与水色推导同源生效）+ 背景样式快照（免分块拍到交叉淡化
+    //   中间态）；水色精确值由 Renderer.updateWaterStyle 捕获直供兜底
+    const savedScene = r.scene;
+    const choice = CaptureSettings.biomeChoiceIndex;
+    if (choice >= 0 && savedScene) {
+      const ov = captureSceneOverride(choice, savedScene);
+      if (ov) r.scene = ov;
+      r.biomeBg.snapStyle(this.settings!.biome.backgroundIndex);
+    }
     try {
       r.render(
         cam, b.world, b.world.clock, b.chunks,
@@ -820,6 +872,7 @@ export class CaptureInterface {
       r.canvas = savedCanvas;
       r.ctx = savedCtx;
       r.fullMap.open = savedMapOpen;
+      r.scene = savedScene;
       // 光照区回切玩家视野（Game 每 tick ensureRegion 亦会自愈,此处显式回切
       // 防本帧后续消费读到块区域）
       if (L) L.ensureRegion(b.cam.x, b.cam.y,

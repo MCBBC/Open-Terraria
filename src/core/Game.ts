@@ -8391,16 +8391,21 @@ export class Game implements GameHooks {
         this.playUseSound(swVid, 'bowShoot');            // UseSound=DD2_SkyDragonsFurySwing
         this.input.rightDown = false;
       }
-      // 帕鲁钻地龟 5667/6174 右键指挥（Player.cs:31899/:31903 altFunctionUse=1 →
-      // :43066-43069 升 2 → ItemCheck_Shoot :48690 flag5=右键段；2026-08-23 内容
-      // 缺口批）。挂在 tile 交互分派之后 = 原版 !tileInteractionHappened 语义
-      // （同 3384/3858 两支）——右键悬箱/门时优先交互不指挥。使用节奏 = useTime 15
+      // 帕鲁钻地龟 5667/6174 右键【全体回收】（Player.cs:31899/:31903 altFunctionUse=1 →
+      // :43063 松开升 2 → ItemCheck_Shoot :48690 flag5=(altFunctionUse==2) → :48701-48702
+      // `if (flag5) { projectile2.Kill(); continue; }` 对场内每只 1098/1123 执行 Kill。
+      // ★R35 勘误:2026-08-23 内容缺口批曾把 flag5 之后【非 flag5 段】的指挥逻辑
+      // (:48705-48727)误读进右键支——右键语义是回收不是指挥。挂在 tile 交互分派之后
+      // = 原版 !tileInteractionHappened 语义（同 3384/3858 两支）。使用节奏 = useTime 15
       if (inp.rightDown && heldDef && this.player.useTime === 0
         && (() => { const v = heldDef.vid ?? viIdFromKey(heldDef.key); return v === 5667 || v === 6174; })()
         && this.entities.projectiles.some((m) => m instanceof MinionProj && !m.dead
           && m.ownerPlayer === this.player && (m.projId === 1098 || m.projId === 1123))) {
-        const [cwx, cwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-        this.commandDigtoises(cwx, cwy);
+        for (const m of this.entities.projectiles) {
+          if (!(m instanceof MinionProj) || m.dead || m.ownerPlayer !== this.player) continue;
+          if (m.projId !== 1098 && m.projId !== 1123) continue;
+          m.dead = true;                            // projectile.Kill()（:48702）
+        }
         this.useSwing(heldDef, undefined);
         this.player.useTime = 15;                     // ApplyItemTime（useTime=useAnimation=15）
         this.input.rightDown = false;

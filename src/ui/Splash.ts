@@ -155,10 +155,18 @@ export function showSplash(opts: {
   //  不满足时输入忽略;已处渐隐段则无操作;监听随 remove() 摘除
   const canSkipNow = (): boolean => menuBehind && (opts.canSkip ? opts.canSkip() : loadingDone);
   const trySkip = (): void => {
-    if (removed || !canSkipNow()) return;
+    // ★已在渐隐段/revealing 中一律忽略(2026-08-25 用户实报"重复点击淡出从头
+    //  重播"):快进后 t0 已前移,真实时间 vs 时间轴阈值错位会让 now<fadeStart
+    //  再次成立 → t0 二次前移 = 淡出从头重播
+    if (removed || revealing || !canSkipNow()) return;
+    if (fadeOutStarted) return;
     const fadeStart = n5 - n6;          // 渐隐段起点(ms)
     const now = performance.now();
-    if (now < fadeStart) t0 = now - fadeStart;   // 时间轴前移=立即进入渐隐态
+    if (now < fadeStart) {
+      t0 = now - fadeStart;             // 时间轴前移=立即进入渐隐态
+      fadeOutStarted = true;
+      goTransparent();                  // 渐隐态本就应透出幕后菜单
+    }
   };
   const onSkipPointer = (): void => trySkip();
   const onSkipKey = (e: KeyboardEvent): void => {

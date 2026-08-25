@@ -555,7 +555,7 @@ export class Minecart extends Entity {
           const resist = (ent as { def?: { knockBackResist?: number } }).def?.knockBackResist ?? 1;
           const kbx = resist > 0 && resist < 1 ? kb / resist : kb;
           // 命中：pierce=0 走 hurt 自带免疫门；命中后覆写 30t（原版 immune[i]=30）
-          if (e.hurt(dmg, dir * kbx, 0, game, 0, crit, 0)) {
+          if (e.hurt(dmg, dir * kbx, 0, game, 0, crit, 0, true)) {   // 矿车碾压=玩家伤害=DPS 计
             e.iframes = 30;
             if (e.dead) {
               game.achievements?.handleSpecialEvent(9,

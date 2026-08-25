@@ -65,7 +65,7 @@ function segHitsRect(x0: number, y0: number, x1: number, y1: number, thick: numb
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
 };
 
 /** 近战弹通用命中结算（音效 + hurt——四型号均无 StatusNPC 表项；浸剂三链仅
@@ -73,7 +73,7 @@ type EnemyLike = {
  *  的 StatusNPC 走 Projectile.Damage 同门——此处统一接齐） */
 function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
   kb: number, kdir: number, pen: number): void {
-  e.hurt(dmg, kdir * kb, 0, game, pen, crit);   // 音/飘值=StrikeNPC 单点
+  e.hurt(dmg, kdir * kb, 0, game, pen, crit, 0, true);   // 音/飘值=StrikeNPC 单点;fromPlayer=DPS 计
 }
 
 /** 尘 31 火花（NewDustDirect box 抖动 + DirectionTo 反溅——707/709 通用近似） */

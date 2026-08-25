@@ -1,4 +1,4 @@
-// 一次性:主角持械层级取证——挥舞中截图,验证武器在身体之上(不再被本体挡住)
+// 一次性:主角静持层级取证——火把(holdStyle=1)静持,验证手持物在身体之上
 import puppeteer from 'puppeteer-core';
 import { mkdirSync } from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -12,36 +12,21 @@ const p = await b.newPage();
 await p.goto(ORIGIN + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await p.waitForFunction(() => { const g = window.__swGame; return g && g.player && g.world; }, { timeout: 150000 });
 await sleep(1500);
-// 给主角一把剑并连续挥舞:直接写 swing 状态(Game.useSwing 语义)——找 swing 字段
-const info = await p.evaluate(() => {
-  const g = window.__swGame;
-  const p1 = g.player;
-  // 找一把宽刃剑放手上(铁宽剑 6? vanillaId)
-  const swingKeys = Object.keys(p1).filter((k) => /swing/i.test(k));
-  return { swingKeys, inv: p1.inv?.heldItem?.() ? 'has' : 'none' };
-});
-console.log('INFO:', JSON.stringify(info));
-// 连续触发挥舞:每 200ms 调一次左键使用路径(模拟 UseItem)——直接驱动 Game 的使用入口
+// 火把(id=8)塞快捷栏 0 并选中 → holdStyle 1 静持恒显
 const ok = await p.evaluate(() => {
   const g = window.__swGame;
-  // 直接驱动 useSwing(铜镐=手上一件)连续挥
-  g.__swingPin = setInterval(() => {
-    const held = g.player.inv.heldItem();
-    const def = held ? (window.__ITEM_DEFS_REF || g.ITEM_DEFS || null) : null;
-    g.useSwing ? g.useSwing(null, -0.5) : null;
-  }, 250);
-  return { hasUseSwing: typeof g.useSwing };
+  const inv = g.player.inv;
+  inv.slots[0] = { id: 739, stack: 1 };
+  inv.selected = 0;
+  return { held: inv.heldItem()?.id };
 });
-console.log('MOUSE:', JSON.stringify(ok));
-await sleep(300);
-// 挥舞窗口内连拍 4 张
-for (let i = 0; i < 4; i++) {
-  await p.screenshot({ path: `${OUT}/held-swing-${i}.png` });
-  await sleep(180);
-  await p.evaluate(() => {
-    const g = window.__swGame;
-    if (g.mouse) g.mouse.left = true;
-  });
-}
-await b.close();
+console.log('STAFF:', JSON.stringify(ok));
+await sleep(800);
+const crop = await p.evaluate(() => {
+  const g = window.__swGame;
+  const [sx, sy] = g.camera.worldToScreen(g.player.cx, g.player.cy);
+  return { x: Math.max(0, Math.round(sx - 30)), y: Math.max(0, Math.round(sy - 65)), width: 70, height: 80 };
+});
+await p.screenshot({ path: `${OUT}/held-staff.png`, clip: crop });
 console.log('DONE →', OUT);
+await b.close();

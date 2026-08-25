@@ -314,6 +314,7 @@ const CSS = `
 .sw-char-panel {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 500px; max-width: 96vw; z-index: 20; cursor: auto;
+  opacity: 0.9;   /* 与 .sw-vsel 选择面板同族 90% 微半透（2026-08-25 用户实报缺） */
   display: flex; flex-direction: column; align-items: center;
   color: #e8e8f4; user-select: none;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;

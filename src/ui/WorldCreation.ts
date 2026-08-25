@@ -36,6 +36,7 @@ const CSS = `
 .sw-wc-panel {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 620px; max-width: 96vw; z-index: 20; cursor: auto;
+  opacity: 0.9;   /* 与 .sw-vsel 选择面板同族 90% 微半透（2026-08-25 用户实报缺） */
   color: #e8e8f4; padding: 10px 4px;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
 }

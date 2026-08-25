@@ -45,7 +45,7 @@ const out = await page.evaluate(async () => {
   };
   // 锁左输入(defineProperty getter 拦截 Input 每帧赋值)
   const p = g.player;
-  Object.defineProperty(p, 'inputX', { configurable: true, get: () => -1 });
+  Object.defineProperty(p, 'inputX', { configurable: true, get: () => -1, set: (v) => { void v; } });
   const run = async (startTx, startTy, vx0, label) => {
     if (g.minecart) { /* 已有车先下 */ }
     const ok = g.mountMinecartAt(startTx, startTy, -1);

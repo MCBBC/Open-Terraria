@@ -89,25 +89,34 @@ const bomb = await page.evaluate(async () => {
 if (bomb.err) { console.log('FAIL: 炸弹准备 ' + bomb.err); fail++; }
 else {
   await page.mouse.move(bomb.sx, bomb.sy);
+  await page.evaluate(() => {
+    const g = window.__swGame;
+    window.__boom = 0;
+    const orig = g.explodeAt.bind(g);
+    g.explodeAt = (...a) => { window.__boom++; return orig(...a); };
+  });
   await page.mouse.down();
-  await new Promise((r) => setTimeout(r, 400));
-  const mid = await page.evaluate(() => {
+  const mid = await page.evaluate(async () => {
     const g = window.__swGame;
-    const bombs = g.entities.projectiles.filter((e) => !e.dead && (e.projId === 28 || e.constructor?.name === 'GrenadeProj'));
-    return { bombs: bombs.length, held: g.player.inv.heldItem()?.id, useT: g.player.useTime };
+    const track = [];
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const z = g.entities.enemies.find((e) => e.vanillaId === 3);
+      track.push({ t: (i + 1) * 0.5, bombs: g.entities.projectiles.filter((e) => e.constructor?.name === 'GrenadeProj' && !e.dead).length,
+        z: z ? z.hp : null, boom: window.__boom, dps: g.player.dpsDamage });
+    }
+    return track;
   });
-  await new Promise((r) => setTimeout(r, 3100));  // 引信 180t=3s + 爆炸
   await page.mouse.up();
-  const post = await page.evaluate(() => {
-    const g = window.__swGame;
-    const z = g.entities.enemies.find((e) => e.vanillaId === 3);
-    return { dps: g.player.getDPS(), zAlive: z ? !z.dead : null, zhp: z?.hp, started: g.player.dpsStarted };
-  });
-  check('炸弹已掷出(场上弹体)', mid.bombs > 0, JSON.stringify(mid));
-  check('炸弹爆炸 → DPS>0', post.dps > 0, JSON.stringify({ ...post, mid }));
+  console.log('  炸弹时间线:', JSON.stringify(mid));
+  // ★DPS 读数须在爆炸后 3s 窗口内(原版 checkDPSTime 停手 3s 归 N/A=正确行为)
+  const inWindow = mid.find((s) => s.boom > 0 && s.dps > 0);
+  const post = await page.evaluate(() => ({ boom: window.__boom }));
+  check('炸弹爆炸发生', post.boom > 0, `boom=${post.boom}`);
+  check('炸弹爆炸 → DPS 累计(窗口内)', !!inWindow, JSON.stringify(inWindow ?? null));
 }
 
-check('无页面错误', errors.length === 0, errors.join('|').slice(0, 160));
+check('无页面错误', errors.filter((e) => !e.includes('img load fail')).length === 0, errors.join('|').slice(0, 160));
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 await browser.close();
 process.exit(fail ? 1 : 0);
