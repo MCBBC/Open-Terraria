@@ -10,6 +10,7 @@ import { TILE_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
 import { TILE } from '../core/constants';
 import { liquidDebugState } from '../render/VanillaLiquidRenderer';
+import { waterWaves, waveTexReady as waterWavesTexReady } from '../render/WaterWaves';
 import { autoFrameAt } from '../render/VanillaTiler';
 import { TILE_ANIM_RATE, animFrameIdx, animYOffset, tileAnim } from '../render/TileAnim';
 import { vanillaFrameIdx } from '../render/Renderer';
@@ -903,6 +904,43 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         waterfall: optionalDebugState(g.renderer?.waterfalls ?? null),
         liquids: liquidDebugState(),
       },
+      // ---- 水波动诊断（2026-08-25 用户报"高速跳入水 GL 扰动像被跳过"）----
+      waterWaves: (() => {
+        try {
+          const WW = { waterWaves, texReady: waterWavesTexReady() };
+          const r = g.renderer;
+          const warpOn = !!r && !r.isCpuRender() && r.waterWarpActive();
+          const p = g.player;
+          // 玩家列垂直扰动扫描：相对玩家中心 ±，看能量在水面线还是深水/缺失
+          const scan: number[] = [];
+          if (p && WW.texReady) {
+            const d: [number, number] = [0, 0];
+            for (let dy = -48; dy <= 96; dy += 16) {
+              WW.waterWaves.sampleDisplace(p.cx, p.cy + dy, d);
+              scan.push(+Math.hypot(d[0], d[1]).toFixed(2));
+            }
+          }
+          return {
+            quality: WW.waterWaves.quality,
+            gates: WW.waterWaves.gates,
+            texReady: WW.texReady,
+            progress: +WW.waterWaves.progress.toFixed(3),
+            activeTexels: WW.waterWaves.debug().activeTexels,
+            stepsLastFrame: WW.waterWaves.debug().stepsLastFrame,
+            rippleQueueUsed: WW.waterWaves.debug().rippleQueueUsed,
+            // 管线路由：warpOn=全屏 GL 扭曲；false 时只有表层格 bob（深层注入不可见）
+            cpuRender: r ? r.isCpuRender() : null,
+            warpMode: r?.waterWarpMode() ?? null,
+            warpActive: r ? r.waterWarpActive() : null,
+            warpOn,
+            glUnavailable: r?.waterWarpGlUnavailable() ?? null,
+            // 玩家湿态 + 垂直扰动扫描（10 档，-48..+96px 步 16，相对玩家中心）
+            playerWet: p ? { wet: p.inWater ? 1 : 0, wetCount: p.wetCount,
+              x: Math.round(p.x), y: Math.round(p.y), vx: +p.vx.toFixed(2), vy: +p.vy.toFixed(2) } : null,
+            disturbScan: scan,
+          };
+        } catch { return null; }
+      })(),
     },
     lighting: g.lighting ? {
       rx: g.lighting.rx, ry: g.lighting.ry, rw: g.lighting.rw, rh: g.lighting.rh,

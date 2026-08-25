@@ -15,7 +15,7 @@ import type { Camera } from '../render/Camera';
 import { TILE } from '../core/constants';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, hitPlayer } from './projTargets';
 import { applyProjStatus } from './projStatus';
 import { projSprite } from './Arrow';
 import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
@@ -634,13 +634,24 @@ export class StormLightning extends Entity {
   private t = 0;
   private hitCd = new HitCdImpl();
   private sharedCd: HitCdImpl | null;
-  /** ai[0] 目标锁（≥0=NPC 桶序；本仓无玩家目标链——登记） */
+  /** ai[0] 目标锁（≥0=NPC 桶序；1091 玩家目标=布尔,单玩家足够——原版 ai[0]=-2-idx） */
   private targetIdx = -1;
+  /** 1091 玩家目标态（:40419-40438 num3=14 半径+localAI[2] 5 次豁免计数） */
+  private targetPlayer = false;
+  private playerGrace = 0;
+  /** noLightning+moreLightning 双种子组合（:12795 伤害变治疗/绿雷;Game 注入） */
+  comboSeed = false;
   /** Kill 帧 bolt 折线（视觉 + 命中域）；visualT>0 = 尸检期（弹已停 AI,仅画 bolt） */
   private bolt: Bolt | null = null;
+  /** 全 bolt 列表（主雷+分支叉——StormLightningParticle.Draw foreach bolts 全画,
+   *  叉强度 0.5×0.8^(depth−1);曾 generateMainBoltPath 传 null 列表=叉生成即丢弃） */
+  private bolts: Bolt[] = [];
   private boltColor: [number, number, number] = [1, 1, 1];
   private visualT = 0;
-  private visualTotal = 16;      // ★闪电之击专项：1117=12/1122=16（Spawn_StormLightning num2 :1036）
+  /** 尸检寿命：1117=45（Spawn_StormLightning num=45;★R35 勘误:曾误用宽度 num2=12 当
+   *  寿命=闪 4 倍快——num2 是 Prepare 的 width 参）/ 1122=16（Spawn_ArcLightning num2=16,
+   *  MovementVector.Y==1 ×3 档登记未接） */
+  private visualTotal = 16;
   /** 跟鼠标回调（1117 无目标态；Game 注入） */
   mouseWorld?: () => { x: number; y: number };
 
@@ -651,18 +662,26 @@ export class StormLightning extends Entity {
     this.x = x - this.w / 2; this.y = y - this.h / 2;
     this.damage = Math.max(1, Math.round(damage));
     this.knockback = knockback;
-    // :40363-40370（1117：num=30/num2=12；1122：缺省 240/32）
+    // :40363-40370（1117：num=30/num2=12；1091：缺省 240/32；1122：缺省 240/32）
     // ★R34-② 勘误：1122 SetDefaults `timeLeft = 1`（:10447）——Update 循环
     //   `timeLeft--; if(≤0) Kill()`（:17308-17312）先于 AI 派发 → 出生首拍即 Kill，
     //   AI_203 的 ai[1]≥240 帽全程死代码（仅敌意 1091 用到）。bolt 整线伤害在 Kill 帧
     //   （:71895-71921），故实体寿命=1 拍：本拍 fixedUpdate 走 doKill 落雷。
-    this.life = projId === 1117 ? 30 : 1;
+    // ★1091 世界落雷（2026-08-25 补全,1.4.5 新机制）：寿命=缺省 240（ai[1] 帽真实
+    //   消费者）;标记期无害（Damage_CanDealDamage :12483 localAI[0]≤0→false——
+    //   localAI[0] 在 Kill 帧才写 1/2/3）;玩家侧目标半径 num3=14(Legendary 32)+
+    //   localAI[2] 5 次豁免计数（Legendary 0）;色=青 (80,220,220)（:40590,
+    //   noLightning+moreLightning 组合种子 → 绿 (80,220,80) 且伤害变治疗）
+    this.life = projId === 1117 ? 30 : (projId === 1091 ? 240 : 1);
     this.searchR = projId === 1117 ? 12 : 32;
     this.sharedCd = projId === 1122 ? ID_STATIC_1122 : null;     // 1122 IDStatic 10（全场同型一张表）
-    this.boltColor = projId === 1117 ? [60 / 255, 120 / 255, 1] : [1, 60 / 255, 60 / 255]; // GetLightningColor :40566
-    // ★闪电之击专项：bolt 视觉余命按型分流（Spawn_ArcLightning num2=16 :1259 /
-    //   Spawn_StormLightning num2=flag?12:16 :1036——1117 武器档=12,1122=16）
-    this.visualTotal = projId === 1122 ? 16 : 12;
+    this.boltColor = projId === 1117 ? [60 / 255, 120 / 255, 1]
+      : projId === 1091 ? [80 / 255, 220 / 255, 220 / 255]
+      : [1, 60 / 255, 60 / 255]; // GetLightningColor :40566
+    // ★闪电之击专项 R35 再勘误：bolt 视觉余命=Prepare 的 lifeTimeTotal 参——
+    //   1117=Spawn_StormLightning num=45(:1031)/1122=Spawn_ArcLightning num2=16(:1259,
+    //   MovementVector.Y==1 ×3 档登记)。曾误读宽度 num2=12 当寿命=闪 4 倍快
+    this.visualTotal = projId === 1122 ? 16 : 45;   // 1091 世界落雷同 Spawn_StormLightning 档
   }
 
   /** TileCollision（LightningGenerator.cs:209-226）：实心/斜坡 或 液体浸没 */
@@ -682,10 +701,32 @@ export class StormLightning extends Entity {
     // ---- Kill 帧后：bolt 视觉余命（弹本体已死,原版由 StormLightningParticle 承接）----
     if (this.visualT > 0) {
       this.visualT--;
+      const vprog = 1 - this.visualT / this.visualTotal;
+      // 天端 windup 电花（StormLightningParticle.Update num<0.5 段 :177-227）：
+      // 主雷 positions[0]=1117 天上端点——3× rand(4)==0 顶升 d306(±90° 抖) +
+      // k=±1 侧向 45° d306 + 白核克隆;本仓 spawnParticles 近似（d306 池无帧链）
+      if (this.bolt && vprog < 0.5) {
+        const skyEnd = this.bolt.positions[0];
+        const col = this.projId === 1117 ? '#3C78FF' : '#FF3C3C';
+        for (let j = 0; j < 3; j++) {
+          if (Math.floor(Math.random() * 4) !== 0) continue;
+          const a9 = -Math.PI / 2 + (Math.random() * 2 - 1) * Math.PI / 2;
+          game.spawnParticles(skyEnd.x, skyEnd.y, col, 1, 1.8,
+            { life: 16, grav: 0, vx: Math.cos(a9) * 4, vy: Math.sin(a9) * 4, damp: 0.95 });
+          game.spawnParticles(skyEnd.x, skyEnd.y, '#FFFFFF', 1, 1.3,
+            { life: 12, grav: 0, vx: Math.cos(a9) * 4, vy: Math.sin(a9) * 4, damp: 0.95 });
+        }
+        for (let k = -1; k <= 1; k += 2) {
+          if (Math.floor(Math.random() * 4) !== 0) continue;
+          const a9 = -Math.PI / 2 + k * Math.PI / 4;
+          game.spawnParticles(skyEnd.x, skyEnd.y, col, 1, 1.8,
+            { life: 16, grav: 0, vx: Math.cos(a9) * 4, vy: Math.sin(a9) * 4, damp: 0.95 });
+        }
+      }
       // steadyLight（StormLightningParticle.Update :157-165）：沿线每 20 点加光,
       // 强度 = Remap(progress,0,0.3,0,1)×Remap(progress,0.7,1,1,0)
       if (this.bolt && game.addLightAt) {
-        const prog = 1 - this.visualT / this.visualTotal;
+        const prog = vprog;
         const k = remapL(prog, 0, 0.3, 0, 1) * remapL(prog, 0.7, 1, 1, 0);
         const pos = this.bolt.positions;
         const [r, g, b] = this.boltColor;
@@ -703,6 +744,12 @@ export class StormLightning extends Entity {
     if (this.targetIdx >= 0) {
       const e = this.enemyAt(game, this.targetIdx);
       if (!e || e.dead || Math.hypot(e.cx - this.cx, e.cy - this.cy) > 600) {
+        this.doKill(game); return;
+      }
+    }
+    if (this.targetPlayer) {
+      const p = game.player;
+      if (!p || p.dead || Math.hypot(p.cx - this.cx, p.cy - this.cy) > 600) {
         this.doKill(game); return;
       }
     }
@@ -732,6 +779,26 @@ export class StormLightning extends Entity {
       const step = Math.min(32, d);
       this.x += (e.cx - this.cx) / d * step;
       this.y += (e.cy - this.cy) / d * step;
+    } else if (this.targetPlayer) {
+      // :40453-40456 玩家目标 MoveTowards(center,32)
+      const p = game.player;
+      const d = Math.hypot(p.cx - this.cx, p.cy - this.cy) || 1;
+      const step = Math.min(32, d);
+      this.x += (p.cx - this.cx) / d * step;
+      this.y += (p.cy - this.cy) / d * step;
+    } else if (this.projId === 1091) {
+      // :40419-40438 玩家侧捕获（NPC 扫描落空后）：num3=14（Legendary 32——本仓
+      //   无 Legendary 档）;玩家在半径内时 localAI[2] 豁免计数 +1,计满 5 次才可
+      //   被选中（Legendary 0 次=立即可选）——给玩家 5 tick 逃离窗
+      const p = game.player;
+      if (p && !p.dead) {
+        const px = Math.min(Math.max(this.cx, p.x), p.x + p.w);
+        const py = Math.min(Math.max(this.cy, p.y), p.y + p.h);
+        if (Math.hypot(px - this.cx, py - this.cy) <= 14) {
+          if (this.playerGrace < 5) this.playerGrace++;
+          else this.targetPlayer = true;
+        }
+      }
     } else if (this.projId === 1117 && this.mouseWorld) {
       // :40423-40436（1117 无目标跟鼠标：v=鼠标−中心钳 16,撞实心停）
       const m = this.mouseWorld();
@@ -777,7 +844,13 @@ export class StormLightning extends Entity {
     const dir = this.projId === 1122
       ? { x: center.x - this.handAnchor(game).x, y: center.y - this.handAnchor(game).y }
       : null;
-    const bolt = gen.generateMainBoltPath(this.seed >>> 0, center, dir);
+    // ★R35 勘误：Generate 传 bolts 列表（StormLightningParticle._Prepare :74 同式）——
+    //   分支叉收集进列表全画（曾 generateMainBoltPath 传 null=叉生成即丢弃=闪电无叉）;
+    //   calcRotations=true（EmitSpawnDust 尘速=−rotations[i] 向量,:103-106）。
+    //   direction null→UnitY 展开在调用方（generate 不收 null,GenerateMainBoltPath :295 同式）
+    this.bolts = [];
+    const bolt = gen.generate(this.bolts, this.seed >>> 0, center,
+      dir ?? { x: 0, y: 1 }, true, true);
     this.bolt = bolt;
     // 1117：撞块 → 中心吸附 bolt 末点（:71945-71949）；液体 → localAI[0]=3
     if (this.projId === 1117) {
@@ -787,12 +860,42 @@ export class StormLightning extends Entity {
       }
       // localAI[0]=3 液体链导电（SelfHurtPlayers 玩家自伤——本仓玩家弹不伤主,登记）
       void (typeof game.world.liquidAt === 'function' ? game.world.liquidAt(this.cx, this.cy) : 0);
+      // 震屏（Spawn_StormLightning 尾 PunchCameraModifier：随机向×(0.5,1),
+      // 强度 Lerp(2,10,室外天气强度)——本仓恒 6 近似,天气强度通道登记）
+      game.punchCamera?.((Math.random() * 2 - 1) * 0.5, Math.random(), 12, 6);
     }
     // ---- MultiPointHitbox 16×16 沿 bolt 折线一次性结算（:71918-71919/:71957-71962）----
     this.damageAlongBolt(game, bolt);
+    // ---- 1091 玩家侧结算（friendly+hostile+trap 三态弹:玩家同样吃 bolt 路径伤害;
+    //   :14915 专属缩放表 LightningPlayerDamageScaling（Journey.5→.04/Classic1→.08/
+    //   Master3→.24/Legendary4→.4,按 Main.Difficulty int 采样）× Damage_EVP ×2;
+    //   noLightning+moreLightning 组合种子 → Heal(80) 免伤（:14896-14900））----
+    if (this.projId === 1091) {
+      const p = game.player;
+      if (p && !p.dead) {
+        const pts = bolt.positions;
+        let hitP = false;
+        for (let i = 0; i < pts.length; i++) {
+          const q = pts[i];
+          if (q.x >= p.x - 8 && q.x < p.x + p.w + 8 && q.y >= p.y - 8 && q.y < p.y + p.h + 8) { hitP = true; break; }
+        }
+        if (hitP) {
+          if (this.comboSeed) {
+            p.heal?.(80);
+          } else {
+            // Sample(Main.Difficulty int GameMode 0-3) 对曲线键(0.5→.04/1→.08/3→.24/4→.4):
+            // 经典0→.04 专家1→.08 大师2→lerp(1,3 段)=.16 旅程3→.24
+            const diff = game.world.difficulty;
+            const scale = diff === 1 ? 0.08 : diff === 2 ? 0.16 : diff === 3 ? 0.24 : 0.04;
+            hitPlayer({ x: this.x, y: this.y, w: this.w, h: this.h }, game,
+              Math.max(1, Math.round(this.damage * scale * 2)), true);
+          }
+        }
+      }
+    }
     // ---- 编排视觉（Spawn_ArcLightning P57:1245-1345）----
     this.emitBoltFx(game, bolt);
-    // 弹本体死,bolt 视觉余命 16f（StormLightningParticle lifeTimeTotal=num2）
+    // 弹本体死,bolt 视觉余命 visualTotal（1117=45/1122=16）
     this.visualT = this.visualTotal;
   }
 
@@ -836,7 +939,20 @@ export class StormLightning extends Entity {
       if (!hit) continue;
       if (!cd.ready(e.id, this.projId === 1122 ? 10 : -1)) continue;
       const crit = Math.random() < this.critChance;
-      const dmg = crit ? this.damage * 2 : this.damage;
+      let dmg = crit ? this.damage * 2 : this.damage;
+      // 1091 NPC 伤难度乘区（Damage_GetProjectileSpecificDamageMultiplier :14630-14633:
+      //   ×Remap(Main.Difficulty int GameMode 0-3, Classic1, Master3, 1, 3)——
+      //   经典0→1 专家1→1 大师2→2 旅程3→3）
+      if (this.projId === 1091) {
+        const d = game.world.difficulty;
+        dmg = Math.round(dmg * (d === 3 ? 3 : d === 2 ? 2 : 1));
+        // noLightning+moreLightning 组合种子：NPC 伤害改治疗 10% lifeMax（:12795-12807）
+        if (this.comboSeed) {
+          const heal = Math.min(Math.round(e.maxHp * 0.1), e.maxHp - e.hp);
+          if (heal > 0) { e.hp = Math.min(e.maxHp, e.hp + heal); }
+          continue;
+        }
+      }
       const kdir = Math.sign(e.x + e.w / 2 - this.cx) || 1;
       e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
@@ -866,6 +982,8 @@ export class StormLightning extends Entity {
     const maxValue = Math.ceil(pts.length / num4);
     // 种子 RNG（EmitSpawnDust :80 new LCG32Random(seed)——与折线同种子独立流）
     const rng = new LCG32(this.seed >>> 0);
+    // ★R35：尘速=−rotations[i] 单位向量（:103-106——calcRotations 已开,曾恒 UnitY）
+    const rots = bolt.rotations;
     for (let i = 5; i < pts.length - 5; i++) {
       if (rng.next(maxValue) !== 0) continue;
       const p = pts[i];
@@ -873,7 +991,8 @@ export class StormLightning extends Entity {
       const d = game.spawnDust?.(p.x, p.y, 0, 0, dustType, 0, spd, 0, color, baseScale + rng.nextFloat() * 0.5);
       if (d) {
         d.x = p.x; d.y = p.y;                    // NewDustPerfect（:107）
-        d.vx = 0; d.vy = spd;                    // velocity=UnitY×spd
+        if (rots) { d.vx = -Math.cos(rots[i]) * spd; d.vy = -Math.sin(rots[i]) * spd; }
+        else { d.vx = 0; d.vy = spd; }           // rotations==null 回退 UnitY（:102）
         d.fadeIn = 0;
         d.noGravity = true;
         d.noLight = true; d.noLightEmittance = true;   // steadyLight（:115-118）
@@ -907,14 +1026,30 @@ export class StormLightning extends Entity {
 
   /** StormLightningDrawer（:69-115）Canvas 折线近似：逐段梯形带 + 波前扫掠 α。
    *  StripWidth：w×Remap(s,0.5,1,1,0.5)×Remap(progress,0.5,1,1,0.5)(+taperEnd)；
-   *  StripColors：waveIn×waveOut 双波门（ArcSurge 参数 :57-67）。加算合成。 */
+   *  StripColors：waveIn×waveOut 双波门。加算合成。
+   *  ★R35 勘误：①anim 按型分流——1117=DefaultAnim(FadeStart.1/Mid.25/End.75/Final0/
+   *  WaveLen.5/In.15/Out.75,:45-55),1122=ArcSurge(.1/.4/1/.3/.3/.3/.5,:57-67),曾两型
+   *  同套 ArcSurge 参数;②foreach bolts 全画（StormLightningParticle.Draw :257-262）,
+   *  叉强度 0.5×0.8^(depth−1)×Intensity;③天端 windup 电花（Update num<0.5 段 :177-227,
+   *  d306 顶升/侧向+白核克隆,d226 HackFrame278——draw 侧每帧近似 spawn）。 */
   draw(r: Renderer, _cam: Camera): void {
     const ctx = r.ctx;
     if (!ctx) return;
     ctx.save();
-    if (this.bolt && this.visualT > 0) {
+    if (this.bolt && this.visualT > 0 && this.bolts.length > 0) {
       const progress = 1 - this.visualT / this.visualTotal;
-      this.drawBolt(ctx, this.bolt, 1, progress);
+      const is1117 = this.projId === 1117;
+      const anim = is1117
+        ? { fadeStart: 0.1, fadeMid: 0.25, fadeEnd: 0.75, final: 0, waveLen: 0.5, waveIn: 0.15, waveOut: 0.75 }
+        : { fadeStart: 0.1, fadeMid: 0.4, fadeEnd: 1, final: 0.3, waveLen: 0.3, waveIn: 0.3, waveOut: 0.5 };
+      const opacity = remapL(progress, anim.fadeStart, anim.fadeMid, 0.5, 1)
+        * remapL(progress, anim.fadeMid, anim.fadeEnd, 1, anim.final);
+      const waveInP = remapL(progress, 0, anim.waveIn, 0, 1);
+      const waveOutP = remapL(progress, 1 - anim.waveOut, 1, 0, 1);
+      for (const b of this.bolts) {
+        const inten = (b.forkDepth === 0 ? 1 : 0.5 * Math.pow(0.8, b.forkDepth - 1));
+        this.drawBolt(ctx, b, inten, progress, opacity, anim, waveInP, waveOutP);
+      }
     } else {
       // 飞行期本体贴图（:40450-40455 光强包络近似亮度）
       const img = projSprite(this.projId);
@@ -934,15 +1069,15 @@ export class StormLightning extends Entity {
   }
 
   private drawBolt(ctx: CanvasRenderingContext2D, bolt: Bolt,
-    intensity: number, progress: number): void {
+    intensity: number, progress: number, opacity: number,
+    anim: { waveLen: number; waveIn: number; waveOut: number },
+    waveInP: number, waveOutP: number): void {
     const pts = bolt.positions;
     if (pts.length < 2) return;
-    const W = 12;                                          // Prepare width 12f
-    // StripColors（:93-102）：ArcSurge 参数 FadeStart 0.1/FadeMid 0.4/FadeEnd 1/
-    // Final 0.3 + 波前 In 0.3/Out 0.5/Length 0.3
-    const opacity = remapL(progress, 0.1, 0.4, 0.5, 1) * remapL(progress, 0.4, 1, 1, 0.3);
-    const waveIn = Math.min(1, Math.max(0, progress / 0.3));
-    const waveOut = Math.min(1, Math.max(0, (progress - (1 - 0.5)) / 0.5));
+    const W = 12;                                          // Prepare width 12f（两型同）
+    // 波前双门（WaveTransition :88-91,anim 按型——R35 勘误:1117=DefaultAnim 曾误套 ArcSurge）
+    const waveIn = Math.min(1, Math.max(0, waveInP));
+    const waveOut = Math.min(1, Math.max(0, waveOutP));
     const taperEnd = bolt.progressRange.max < 1;
     const [cr, cg, cb] = this.boltColor;
     const range = bolt.progressRange;
@@ -951,8 +1086,8 @@ export class StormLightning extends Entity {
       const s0 = range.min + (range.max - range.min) * (i / (pts.length - 1));
       const s1 = range.min + (range.max - range.min) * ((i + 1) / (pts.length - 1));
       // 波前双门（WaveTransition :88-91）
-      const a0 = waveGate(s0, waveIn, 0.3, 0, 1) * waveGate(s0, waveOut, 0.3, 1, 0);
-      const a1 = waveGate(s1, waveIn, 0.3, 0, 1) * waveGate(s1, waveOut, 0.3, 1, 0);
+      const a0 = waveGate(s0, waveIn, anim.waveLen, 0, 1) * waveGate(s0, waveOut, anim.waveLen, 1, 0);
+      const a1 = waveGate(s1, waveIn, anim.waveLen, 0, 1) * waveGate(s1, waveOut, anim.waveLen, 1, 0);
       if (a0 <= 0.004 && a1 <= 0.004) continue;
       const w0 = stripWidthAt(s0, W, progress, taperEnd, bolt) * intensity;
       const w1 = stripWidthAt(s1, W, progress, taperEnd, bolt) * intensity;

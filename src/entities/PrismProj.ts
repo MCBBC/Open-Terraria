@@ -400,6 +400,7 @@ export class PrismProj extends Entity {
     // ItemCheck_ApplyManaRegenDelay → delay 钉 4 = 全程 5% 滴流回蓝；2026-08-22
     // 审计 ❌ 修复——棱镜充能 120t+ 远超 useTime 10t,不续期则白嫖魔力）
     game.player.onChannelManaHold?.();
+    game.refreshChannelItem?.();   // 蓄力期手持棱镜不脱落（channel itemAnimation 钉满）
     // 挂玩家手（heldProj 语义：parent.Center 即光棱轨道圆心）
     const pl = game.player as unknown as { cx: number; cy: number } | null;
     if (!pl) { this.dead = true; this.killProngs(); return; }
@@ -615,6 +616,7 @@ export class ChargedBlaster extends Entity {
     // ItemCheck_ApplyManaRegenDelay → delay 钉 4 = 全程 5% 滴流回蓝；2026-08-22
     // 审计 ❌ 修复——蓄力 180t+ 远超 useTime,不续期则白嫖魔力）
     game.player.onChannelManaHold?.();
+    game.refreshChannelItem?.();   // 蓄力期手持棱镜不脱落（channel itemAnimation 钉满）
     // 挂手
     const pl = game.player as unknown as { cx: number; cy: number } | null;
     if (!pl) { this.dead = true; return; }

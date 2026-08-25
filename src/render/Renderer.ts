@@ -1956,6 +1956,10 @@ export class Renderer {
   isCpuRender(): boolean {
     return options.data.renderMode === 'cpu' || this.cpuRender;
   }
+  /** 水波动诊断（F5 报告）：全屏扭曲管线状态三件套 */
+  waterWarpMode(): 'auto' | '2d' | 'off' { return this.waterWarp.mode; }
+  waterWarpActive(): boolean { return this.waterWarp.active(); }
+  waterWarpGlUnavailable(): boolean { return this.waterWarp.glUnavailable(); }
   /** 主画布 2D 上下文统一属性(构造器与 recreateMainCanvas 两处创建点必须同参——
    *  同一元素重复 getContext 属性以首次为准)。alpha:false=不透明后备
    *  (Chrome 免混合提交路径;?opaque=0 逃生门),willReadFrequently=CPU 软渲染 */

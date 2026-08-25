@@ -118,6 +118,16 @@ export class WaterWarpCompositor {
     return null;
   }
 
+  /** GL 扭曲是否不可用（F5 诊断：WebGL 缺失/软件渲染/上下文死亡——真值=全屏
+   *  扭曲管线走不了，水体只有表层格 bob 路径，深层注入不可见） */
+  glUnavailable(): boolean {
+    if (this.mode === 'off' || this.mode === '2d') return true;
+    if (this.gl) return this.gl.unavailable || !!this.gl.diedAt;
+    // 未实例化：试建一个探测（30s 闩内直接 true）
+    if (performance.now() < this.glRetryAt) return true;
+    return false;
+  }
+
   /** GL 实例哨兵（活实例直取；死亡 5s 退避；初始化失败 30s 闩——同 worldLightLayer） */
   private glLayer(): GLWaterDistortion | null {
     if (this.gl) {

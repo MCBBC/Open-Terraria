@@ -30,7 +30,7 @@ const OUT = process.env.SW_PPP_OUT ?? '/tmp/ppp-out/jsrolls97.txt';
     if (!on) return;
     if (/Count|Attempts|deadCands|deadCount$/.test(n)) rec.marks.push({ n, idx: rec.vals.length });
     else if (n === 'campTry') rec.marks.push({ n: `campTry ${d?.[0]},${d?.[1]}`, idx: rec.vals.length });
-    else if (/^camp/.test(n) && n !== 'campCell' && n !== 'campSF' && n !== 'campPW') rec.marks.push({ n: `${n} ${Array.isArray(d) ? d.join(',') : ''}`, idx: rec.vals.length });
+    else if ((/^camp|^mx/.test(n)) && n !== 'campCell' && n !== 'campSF' && n !== 'campPW') rec.marks.push({ n: `${n} ${Array.isArray(d) ? d.join(',') : ''}`, idx: rec.vals.length });
     else if (n === 'campSF' || n === 'campPW') rec.valsMarks.push({ k: n, c: d?.[0] as number, idx: rec.vals.length, coord: `${d?.[1]},${d?.[2]}` });
   };
 

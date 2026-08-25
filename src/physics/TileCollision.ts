@@ -544,7 +544,12 @@ function unembedPass(b: Body, world: World): void {
       }
     }
   }
-  if (!st.isSolid(cx, cy) && !topEmbedded) {
+  // ★中心格判据须排除坡/半砖/平台(与上方顶行变体及函数头注释同款)——掉落物
+  //  12px 高,站斜面对角线低侧时中心点必沉入坡面实心三角(合法贴合姿态,
+  //  slopeCollide 逐 tick 管理),无排除=被判真嵌入→15t 后上抬 16px→重力落回
+  //  →循环("掉落物在斜坡上下移-瞬移-再下移",2026-08-25 用户实报+存档标记定位)
+  const centerSolid = st.isSolid(cx, cy) && st.slope[ci] === 0 && !st.half[ci] && !st.isPlatform(cx, cy);
+  if (!centerSolid && !topEmbedded) {
     b.embedTicks = 0;   // 脱出/未嵌入:计数复位(瞬态嵌片靠原版物理自愈)
     return;
   }

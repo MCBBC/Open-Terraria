@@ -21,7 +21,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { Player } from './Player';
 import { projSprite, projFrameCount } from './Arrow';
-import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
+import { canBeChasedBy } from './projTargets';
 import { canHitLine } from '../physics/LineOfSight';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { prefixStat } from '../data/vanillaPrefixes';

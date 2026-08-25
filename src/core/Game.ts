@@ -213,6 +213,7 @@ import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bes
 // F10 瞬移落脚搜索参数(角色 20×42 ≈ 2 宽×3 高净空 + 脚下实心)
 const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_RING_MAX = 60;
 import { ChunkCache } from '../render/ChunkCache';
+import { waterWaves, waveTexReady as waterWavesDiagReady } from '../render/WaterWaves';
 import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha, wormholeHeadHit } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
@@ -1440,6 +1441,10 @@ export class Game implements GameHooks {
   player!: Player;
   camera!: Camera;
   renderer: Renderer;
+  /** 水波诊断：入水翻转检测上一 tick 湿态 + 密集采样倒计时（0=采样窗结束，
+   *  翻转检测恒跑） */
+  waveDiagPrevWet = false;
+  waveDiagT = 0;
   /** 小地图拆带构建的完成 Promise（afterWorldLoad 内启动；三条进世界路径
    *  await 后才 onWorldReady——见 Minimap.buildStriped 大世界巨帧注释） */
   minimapReady: Promise<void> | null = null;
@@ -4642,11 +4647,52 @@ export class Game implements GameHooks {
     // 行为录制：玩家运动轨迹骨干（每 60t ≈ 1s 一采样；vx/vy 一位小数防噪）
     if (this.tickCount % 60 === 0) {
       const p = this.player;
-      this.recLog('sample', {
+      const rec: Record<string, unknown> = {
         x: Math.round(p.x), y: Math.round(p.y),
         vx: +p.vx.toFixed(1), vy: +p.vy.toFixed(1),
         hp: p.hp, ground: p.onGround ? 1 : 0,
-      });
+      };
+      // ★wv=水波扰动能量（2026-08-25 用户报"跳入水 GL 扰动像被跳过"诊断）：玩家
+      //   列 ±48px sampleDisplace 最大幅值——1s 级时间序列抓入水瞬间水面反应；
+      //   wet/wc=湿态与去抖计数。读波形缓冲（渲染帧步进，跨帧持久）零分配
+      if (this.renderer && waterWavesDiagReady()) {
+        const d: [number, number] = [0, 0];
+        let wv = 0;
+        for (let dy = -48; dy <= 48; dy += 16) {
+          waterWaves.sampleDisplace(p.cx, p.cy + dy, d);
+          wv = Math.max(wv, Math.hypot(d[0], d[1]));
+        }
+        rec.wv = +wv.toFixed(2);
+        rec.wet = p.inWater ? 1 : 0;
+        rec.wc = p.wetCount;
+      }
+      this.recLog('sample', rec);
+    }
+    // ★入水扰动密集采样（2026-08-25 用户报"跳入水 GL 扰动像被跳过"）：涟漪窗口
+    //   仅 10t(0.17s)，1s 级 sample 会错过——翻转 tick 记 'wentry'（含全列剖面），
+    //   后续 20t 每 4t 记 'wv'。scan=玩家列 -48..+96px 步 16 的位移幅值剖面
+    //   （能量在水面线还是深水/缺失一目了然）
+    if (this.renderer && waterWavesDiagReady()) {
+      const p = this.player;
+      const flip = p.inWater && !this.waveDiagPrevWet;
+      this.waveDiagPrevWet = p.inWater;
+      if (flip) this.waveDiagT = 20;
+      if (flip || (this.waveDiagT > 0 && this.waveDiagT < 20)) {
+        const d: [number, number] = [0, 0];
+        const scan: number[] = [];
+        let wv = 0;
+        for (let dy = -48; dy <= 96; dy += 16) {
+          waterWaves.sampleDisplace(p.cx, p.cy + dy, d);
+          const m = +Math.hypot(d[0], d[1]).toFixed(2);
+          scan.push(m);
+          wv = Math.max(wv, m);
+        }
+        this.recLog(flip ? 'wentry' : 'wv', {
+          wv: +wv.toFixed(2), wet: p.inWater ? 1 : 0, wc: p.wetCount,
+          y: Math.round(p.y), vy: +p.vy.toFixed(1), scan,
+        });
+      }
+      if (this.waveDiagT > 0) this.waveDiagT--;
     }
     // 对话距离保持:离开 NPC 超过 6 格自动关闭(原版 SetTalkNPC(-1) 语义)
     if (this.dialogNpc) {
@@ -5658,70 +5704,54 @@ export class Game implements GameHooks {
     }
 
     // ---- 敌人生成（F8 可关闭；频率语义见 trySpawnEnemy，每帧概率门） ----
-    // 水蜡烛(Main.waterCandle 语义):手持或 32 格内有放置态 → 刷怪率修正（getSpawnRate 内）
+    // 水蜡烛(Main.waterCandle 语义):手持或范围内有放置态 → 刷怪率修正（getSpawnRate 内）
     const held2 = this.player.inv.heldItem();
     const heldWC = !!held2 && viIdFromKey(ITEM_DEFS[held2.id]?.key ?? '') === 148;
     this.heldWaterCandle = heldWC;
     if (this.tickCount % 15 === 0) this.boundTouchCheck();   // 绑缚触碰解救（AI_007 接触语义）
-    let nearWC = false;
-    if (this.tickCount % 30 === 0) {
-      nearWC = false;
-      const st2 = this.world.store;
-      const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor(this.player.cy / TILE);
-      const WCT = TILE_BY_KEY['water_candle'];
-      for (let dx = -32; dx <= 32 && !nearWC; dx += 4) {
-        for (let dy = -24; dy <= 24; dy += 4) {
-          if (st2.get(ptx + dx, pty + dy) === WCT) { nearWC = true; break; }
-        }
-      }
-      this.waterCandleNear = nearWC;
-    }
-    // 篝火/心灯光环:篝火 lifeRegen+1 = 0.5 HP/s;心灯(灯笼 tile42 frameY 324-358,
-    // SceneMetrics.cs:207-208)lifeRegen+2 = 1 HP/s,两者独立。
-    // ★原版扫描(SceneMetrics :354-368+Player.UpdateSceneMetrics):以玩家 tile 心
-    //   为中心的 CenteredRectangle(ZoneScanSize=(1920/16+50−1, 1200/16+50−1)=
-    //   169×124 格)= ±84/±62;点燃门 = frameY<36（frameY 即状态位,frameX 是列——
-    //   曾 frameX<18:只认左列且不看点燃=有效区左偏+熄灭篝火也给 buff,用户报偏移）
+    // ---- 场景物件扫描（原版 SceneMetrics.Scan:Player.UpdateSceneMetrics 以
+    //      BiomeScanCenter=玩家心 → CenteredRectangle(ZoneScanSize) 【逐格】;
+    //      ZoneScanSize=(1920/16+25×2−1, 1200/16+25×2−1)=169×124 格=±84/±62
+    //      （SceneMetrics.cs:14-16/:354-368）。曾各族分散小窗(±48/±36、±32/±24
+    //      step4)=范围缩水+1 格件步进漏采（2026-08-25 用户报篝火范围偏移连带排查）----
+    // 家族门（SceneMetrics.cs:380-411 全表对照）:
+    //   篝火=215 frameY<36 ∪ 壁炉=405 frameX<54（Sets.Campfires={215,405}——
+    //     曾漏 405=壁炉不给温馨之火）
+    //   心灯=42 frameY 324-358 / 瓶中星=42 frameY 252-286（同表 42 双档）
+    //   猫堡垒=506 frameX<72 / 和平蜡烛=372 frameX<18 / 水蜡烛=49 frameX<18
+    //   向日葵=27（墓地压制走 hasSunflower 另门）
     if (this.tickCount % 20 === 0) {
       const ptx2 = Math.floor(this.player.cx / TILE), pty2 = Math.floor(this.player.cy / TILE);
-      let fire = false, heart = false;
-      const FIRE = TILE_BY_KEY['v_215_campfires'];
-      const LANTERN = TILE_BY_KEY['lantern'];
+      let fire = false, heart = false, star = false, sun = false, bast = false, peace = false, water = false;
       const st3 = this.world.store;
-      for (let dx = -84; dx <= 84 && !(fire && heart); dx += 3) {
-        for (let dy = -62; dy <= 62; dy += 3) {
-          const lx = ptx2 + dx, ly = pty2 + dy;
-          if (!st3.inBounds(lx, ly)) continue;
+      const T_FIRE = TILE_BY_KEY['v_215_campfires'], T_FIREP = TILE_BY_KEY['v_405_fireplace'];
+      const T_LANT = TILE_BY_KEY['lantern'], T_SUN = TILE_BY_KEY['v_27_sunflower'];
+      const T_BAST = TILE_BY_KEY['v_506_bast_statue'], T_PEACE = TILE_BY_KEY['v_372_peacecandle'];
+      const T_WATER = TILE_BY_KEY['water_candle'];
+      for (let dy = -62; dy <= 62; dy++) {
+        const ly = pty2 + dy;
+        if (ly < 0 || ly >= st3.h) continue;
+        for (let dx = -84; dx <= 84; dx++) {
+          const lx = ptx2 + dx;
+          if (lx < 0 || lx >= st3.w) continue;
           const li = st3.idx(lx, ly);
-          if (st3.type[li] === FIRE && st3.frameY[li] < 36) fire = true;
-          if (st3.type[li] === LANTERN && st3.frameY[li] >= 324 && st3.frameY[li] <= 358) heart = true;
-          if (fire && heart) break;
+          const t = st3.type[li];
+          if (t === T_FIRE) { if (st3.frameY[li] < 36) fire = true; }
+          else if (t === T_FIREP) { if (st3.frameX[li] < 54) fire = true; }
+          else if (t === T_LANT) {
+            const fy = st3.frameY[li];
+            if (fy >= 324 && fy <= 358) heart = true;
+            else if (fy >= 252 && fy <= 286) star = true;
+          }
+          else if (t === T_SUN) sun = true;
+          else if (t === T_BAST) { if (st3.frameX[li] < 72) bast = true; }
+          else if (t === T_PEACE) { if (st3.frameX[li] < 18) peace = true; }
+          else if (t === T_WATER) { if (st3.frameX[li] < 18) water = true; }
         }
       }
+      this.waterCandleNear = water;
       if (fire) this.player.buffs.apply(BuffType.Campfire, 0.5);
       this.player.buffs.lanternHeal = heart ? 1 : 0;
-    }
-    // ---- 环境光环四族（SceneMetrics.cs:385-411 + Player.cs:25235-25266 授予链）：
-    // 瓶中星(42 frameY 252-286→158)、向日葵(27→146，墓地压制见下)、猫堡垒(506 frameX<72→215)、
-    // 和平蜡烛(372 frameX<18→157)——AddBuff 2t 自动续。
-    // 向日葵 HasSunflower 门（SceneMetrics.cs:626-631）：墓碑计数 > GraveyardTileMin(16)
-    // 时 HasSunflower=false——墓地内向日葵不再给"快乐！"buff（:25262-25265）
-    if (this.tickCount % 20 === 0) {
-      const ptx3 = Math.floor(this.player.cx / TILE), pty3 = Math.floor(this.player.cy / TILE);
-      let star = false, sun = false, bast = false, peace = false;
-      const st4 = this.world.store;
-      for (let dx = -48; dx <= 48 && !(star && sun && bast && peace); dx += 3) {
-        for (let dy = -36; dy <= 36; dy += 3) {
-          const sx = ptx3 + dx, sy = pty3 + dy;
-          if (!st4.inBounds(sx, sy)) continue;
-          const si = st4.idx(sx, sy);
-          const sheet = TILE_DEFS[st4.type[si]]?.vanilla?.sheet ?? -1;
-          if (sheet === 42 && st4.frameY[si] >= 252 && st4.frameY[si] <= 286) star = true;
-          else if (sheet === 27) sun = true;
-          else if (sheet === 506 && st4.frameX[si] < 72) bast = true;
-          else if (sheet === 372 && st4.frameX[si] < 18) peace = true;
-        }
-      }
       const b = this.player.buffs;
       if (star) b.apply(BuffType.StarInBottle, 0.5);
       if (sun && this.scene.hasSunflower) b.apply(BuffType.Sunflower, 0.5);
@@ -25560,6 +25590,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 单 wav 直播（环境声三表专用,失败静默——与 playSfxFiles 不同,不回退合成音） */
+  /** channel 蓄力期手持动画续期（Player.ItemCheck channel 分支 itemAnimation 钉满——
+   *  手持法杖全程举向鼠标不脱落；GlacierFangShot/PrismProj 蓄力态逐 tick 调用。
+   *  swing 窗（=useAnimation 24t）远短于蓄力（60+ 拍），不续则法杖中途消失） */
+  refreshChannelItem() {
+    if (this.swing) this.swing.t = Math.max(this.swing.t, 1);
+    this.player.useTime = Math.max(this.player.useTime, 1);
+  }
+
   playSfxWav(file: string, vol?: number, x?: number, y?: number, pitch?: number, replace?: boolean) {
     this.sfx.playWavFile(file, vol ?? 1, x, y, pitch, replace);
   }
