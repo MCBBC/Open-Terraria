@@ -3514,6 +3514,24 @@ export class Renderer {
       return typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmult');
     } catch { return false; }
   })();
+  /** 全亮快路径(?lightfast=0 逃生门,A/B 对拍用):光照图全 255 时世界层回退分支
+   *  直接 drawImage(worldCanvas),跳过全屏 getImageData+乘循环+putImageData。
+   *  等价性论证见 compositeLight 内注(2026-08-25 软渲染 trace 优化批) */
+  static readonly lightFast = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('lightfast') !== '0';
+    } catch { return false; }
+  })();
+  /** 主画布不透明后备(?opaque=0 逃生门,A/B 对拍用):alpha:false 让 Chrome 走
+   *  免混合提交路径(SHM 帧少拷贝,软渲染下 Commit/viz 受益)。核验记录
+   *  (2026-08-25):body=#000、主画布零像素读出(toDataURL/getImageData 无命中)、
+   *  死亡灰化自绘(:3122)在满屏已绘内容上语义等价、CaptureMode 用独立 alpha:true
+   *  离屏、菜单背景是独立画布——视觉等价 */
+  static readonly opaqueMain = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('opaque') !== '0';
+    } catch { return false; }
+  })();
   /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
   private readonly waterWarp = new WaterWarpCompositor();
   private updateWaterWaves(
@@ -12254,6 +12272,33 @@ export class Renderer {
         return;
       }
       const mctx = this.lightMaskCtxLayer;
+      // ★满亮行旗【提前】到 getImageData 之前（2026-08-25 软渲染 trace：本回退分支
+      //   6.2s/26.6s=23% 帧时，其中全屏 getImageData ~2.7ms/帧）。数据源同为
+      //   img.data（光图本就在 CPU 内存），扫描先行不改变任何时序语义。
+      //   ★全亮快路径：光图全 255 ⇒ 每行 rowWhite=255 ⇒ 下方面积乘循环对全部像素
+      //   走恒等乘跳过（l=255·Σw，Σw=1±ulp，钳位写回舍回原值；α=0 格两路径均
+      //   不落笔）⇒ putImageData 后 mask 与 worldCanvas 逐位相同 ⇒
+      //   drawImage(mask) 与 drawImage(worldCanvas) 同 ctx 状态同结果。
+      //   白天地表大面积命中整条读回-乘-写回链免掉。?lightfast=0 关（A/B 对拍）
+      if (!this._clRowWhite || this._clRowWhite.length !== h2) {
+        this._clRowWhite = new Uint8Array(h2);
+      }
+      const rowWhite = this._clRowWhite!;
+      {
+        const ld0 = img.data;
+        let all = 255;
+        for (let ry = 0; ry < h2; ry++) {
+          let a = 255;
+          const base = ry * w2 * 4;
+          for (let k = 0; k < w2 * 4; k++) a &= ld0[base + k];
+          rowWhite[ry] = a;
+          all &= a;
+        }
+        if (Renderer.lightFast && all === 255) {
+          this.ctx.drawImage(this.worldCanvas!, 0, 0);
+          return;
+        }
+      }
       // ★CPU 逐像素精确乘（2026-08-20 史莱姆浊暗终案：Canvas multiply 三步法对
       //   半透明像素留 (1-αd)·光 洗色——PDF 混合的 Cs 项无法在 Canvas 2D 消去。
       //   光照数组与 lightCanvas 同源（4-tap 双线性），直接在 worldCanvas 像素上
@@ -12315,21 +12360,10 @@ export class Renderer {
         }
       const ld = img.data;
       const h2m1 = h2 - 1;
-      // ★满亮行旗（每帧对光照图全量 AND 一遍，w2×4×h2≈7K 字节，成本可忽略）：
-      //   整行全 255 → 该行任意采样恒等乘（l=255×权重和，权重和恒 1±ulp，
-      //   wd·l/255 与 wd 偏差 ≤1e-13 < 0.5 → 钳位写回必舍回原值）→ 白天地表
-      //   大面积行级跳过。★行级而非逐像素：夜晚/洞穴无满亮区时逐像素检查
+      // ★满亮行旗已在 getImageData 前算好（本函数上方；数据源同为 img.data，
+      //   行旗语义不变）：整行全 255 → 该行任意采样恒等乘 → 白天地表大面积
+      //   行级跳过。★行级而非逐像素：夜晚/洞穴无满亮区时逐像素检查
       //   实测反慢 9%（微基准），行旗对无满亮场景零成本
-      if (!this._clRowWhite || this._clRowWhite.length !== h2) {
-        this._clRowWhite = new Uint8Array(h2);
-      }
-      const rowWhite = this._clRowWhite!;
-      for (let ry = 0; ry < h2; ry++) {
-        let a = 255;
-        const base = ry * w2 * 4;
-        for (let k = 0; k < w2 * 4; k++) a &= ld[base + k];
-        rowWhite[ry] = a;
-      }
       for (let py = 0; py < viewH; py++) {
         let ly = (py - sy) * lyRatio;
         if (ly < 0) ly = 0; else if (ly > h2m1) ly = h2m1;

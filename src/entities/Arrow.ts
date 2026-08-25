@@ -625,6 +625,12 @@ export class Arrow extends Entity {
   bubbleScale = 0;
   /** 167-170 烟花 ai[1]=1=发射器档（AI_034 :30xxx 出膛尘花+尾迹;0=无） */
   launcherFirework = 0;
+  /** 发射者玩家引用（5451/5738 机件单实例替换圈定用;一般弹不设） */
+  ownerPlayer?: object;
+  /** 5461 杀意牌 ai[2]=±0.4 自旋档（:49716 NewProjectile 尾参,draw 侧累积） */
+  cardSpin = 0;
+  /** 5461 杀意牌 ai[0]==2 定身标记（:49752-49754 phase3 全场 v=0） */
+  cardFreeze = 0;
   /** 烟花 ai[0]（AI_034 发射器档计数） */
   private fwAi0 = 0;
   /** 专家追踪参数（null=无） */
@@ -1766,6 +1772,8 @@ export class Arrow extends Entity {
       ctx.rotate(this.spinRot);      // 恒旋族（:54741/:54824 累加不对齐速度）
     } else if (this.mlBoulder) {
       ctx.rotate(this.spinRot);      // 1021 巨砾滚动旋转（:24666 rotation += vx·0.06 累积）
+    } else if (this.projId === 1024) {
+      ctx.rotate(this.spinRot);       // 杀意牌 ai[2] 自旋（R35 清单⑥）
     } else if (this.projId >= 167 && this.projId <= 170) {
       ctx.rotate(ang + Math.PI / 2);  // 烟花（AI_034 :30xxx rotation=velocity+π/2）
     } else if (PROJ_NO_ROT.has(this.projId)) {
@@ -2809,6 +2817,11 @@ export class Arrow extends Entity {
         game.spawnDust?.(this.x + 2, this.y + 20, 8, 8, 6,
           this.vx, this.vy, 100, null, 1.2, true);
       }
+    }
+    // ---- R35 清单⑥：5461 杀意牌（ai113 牌 1024）——ai[2]=±0.4 自旋累积;
+    // ai[0]==2 定身态（velocity 已零,保持不坠不减速）
+    if (this.projId === 1024) {
+      if (this.cardSpin !== 0) this.spinRot += this.cardSpin;
     }
     // ---- R27：宝石法珠飞行彩尘（AI_029_GemStaffs_ActuallyGemStaffs :38534-38541）----
     //  两臂各 1/5 掷：d(type−121+86 / 597→262) 于弹盒内、初速=弹速全额(NewDust 叠加

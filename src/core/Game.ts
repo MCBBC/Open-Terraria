@@ -8497,6 +8497,97 @@ export class Game implements GameHooks {
         return;
       }
     }
+    // 帕鲁机件 5451 吉姆无人机/5738 遥控车（ItemCheck_Shoot :49511-49522 共用支）：
+    // 先 Kill 场内所有同型同主弹,再生成一只（单实例替换语义）——combatWeapon 已显式
+    // 退出 'shot' 兜底（R35 清单⑤）;ai195/205 本体行为另批登记,现以惯性 Arrow 承载
+    {
+      const pmVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+      if (pmVid === 5451 || pmVid === 5738) {
+        if (this.player.useTime === 0) {
+          const pc5 = itemCombat(pmVid);
+          const shootId5 = pc5?.shoot ?? (pmVid === 5451 ? 1020 : 1105);
+          for (const m of this.entities.projectiles) {
+            if (!(m instanceof Arrow) || m.dead || m.ownerPlayer !== this.player) continue;
+            if (m.projId !== shootId5) continue;
+            m.dead = true;                              // projectile.Kill()（:49516-49519）
+          }
+          const [pmx, pmy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          const pa5 = Math.atan2(pmy - this.player.cy, pmx - this.player.cx);
+          const spd5 = pc5?.shootSpeed ?? 1;
+          const mech = new Arrow(this.player.cx, this.player.cy,
+            Math.cos(pa5) * spd5, Math.sin(pa5) * spd5,
+            pc5?.damage ?? 1, pc5?.knockBack ?? 0, shootId5, null, { grav: 0, pierce: 1 });
+          mech.ownerPlayer = this.player;
+          this.entities.add(mech, 'projectiles');
+          this.useSwing(heldDef, pa5);
+          this.player.useTime = Math.max(1, pc5?.useAnimation ?? 20);
+          this.playUseSound(pmVid, 'tink');
+          this.input.mouseDown = false;
+        }
+        return;
+      }
+    }
+    // 放飞鸽子 4682（ItemCheck_Shoot :48865-48873）+ 秘蛇 4262（:48276-48300）：
+    // 两件 consumable/decor 新奇品此前 dispatch 链 return null=使用零效果（R35 清单⑦⑧）
+    {
+      const nvVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+      if (nvVid === 4682 && this.player.useTime === 0) {
+        // 3 鸽：v=基准 ±rand(-20,21)×0.1=±2px 抖动,proj 851（ai166 4×4 小鸽）
+        const [nvx, nvy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        const na = Math.atan2(nvy - this.player.cy, nvx - this.player.cx);
+        const nc = itemCombat(4682);
+        const nspd = nc?.shootSpeed ?? 4;
+        for (let i = 0; i < 3; i++) {
+          const dove = new Arrow(this.player.cx, this.player.cy,
+            Math.cos(na) * nspd + (Math.random() * 41 - 20) * 0.1,
+            Math.sin(na) * nspd + (Math.random() * 41 - 20) * 0.1,
+            nc?.damage ?? 0, nc?.knockBack ?? 0, 851, null, { grav: 0, life: 300, pierce: 1 });
+          this.entities.add(dove, 'projectiles');
+        }
+        this.useSwing(heldDef, na);
+        this.player.useTime = Math.max(1, nc?.useAnimation ?? 25);
+        this.playUseSound(nvVid, 'tink');
+        this.player.inv.removeAt(this.player.inv.selected, 1);   // consumable（:48865 族）
+        this.cb.onInventoryChanged();
+        this.input.mouseDown = false;
+        return;
+      }
+      if (nvVid === 4262 && this.player.useTime === 0) {
+        // 秘蛇：沿鼠标向逐格 CanHitLine+落地扫描（WorldUtils.Find MysticSnake 简化——
+        // 向下 ≤31 格找实心;ai155 蜷绕态机登记后置）,Kill 旧蛇单实例重生
+        const [mvx2, mvy2] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        const mdir = mvx2 >= this.player.cx ? 1 : -1;
+        const st42 = this.world.store;
+        let land42: { x: number; y: number } | null = null;
+        const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor(this.player.cy / TILE);
+        const scanMax = Math.min(15, Math.floor(Math.abs(mvx2 - this.player.cx) / TILE) + (mdir < 0 ? 1 : 0));
+        for (let step = scanMax; step >= 0; step--) {
+          const cx9 = ptx + mdir * step;
+          if (!canHitLine(st42, this.player.cx, this.player.cy, 1, 1,
+            this.player.cx + TILE * step * mdir, this.player.cy, 1, 1)) continue;
+          for (let down = 0; down <= 31; down++) {              // Searches.Down(31)
+            const ty9 = pty + down;
+            if (!st42.inBounds(cx9, ty9)) break;
+            if (st42.isSolid(cx9, ty9)) { land42 = { x: cx9, y: ty9 }; break; }
+          }
+          if (land42) break;
+        }
+        if (land42) {
+          for (const m of this.entities.projectiles) {
+            if (m instanceof Arrow && !m.dead && m.projId === 754) m.dead = true;   // 旧蛇硬杀
+          }
+          const snake = new Arrow(land42.x * TILE + 8 - 7, land42.y * TILE + 8 - 16 - 7,
+            0, -2.6666667, 0, 0, 754, null, { grav: 0, life: 3600, pierce: 1 });
+          this.entities.add(snake, 'projectiles');
+        }
+        this.useSwing(heldDef, mdir > 0 ? 0 : Math.PI);
+        this.player.useTime = Math.max(1, itemCombat(4262)?.useAnimation ?? 30);
+        this.player.inv.removeAt(this.player.inv.selected, 1);   // consumable 装饰件
+        this.cb.onInventoryChanged();
+        this.input.mouseDown = false;
+        return;
+      }
+    }
     // ── 武器/工具兼放置物（Player.cs TryUsingItem：melee 挥击/工具挖掘与
     //  PlaceThing 并行）：再生法杖 213（melee+createTile 2）/再生之斧 5295
     //  （axe+createTile 2）。近战/工具分支的 return 曾把放置链整个截胡
@@ -11938,6 +12029,56 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           }
           this.input.mouseDown = false;
+          this.player.onManaItemUsed();
+          break;
+        }
+        // 5461 杀意牌叠（ItemCheck_Shoot :49704-49760,killingCardFireType 相位循环）：
+        // 0 单牌/1 正反镜像双牌(v,−v)/2 六扇 π/4 弧(间隔 π/24,ai2=±0.4 每扇随机翻)/
+        // 3 全场定身(v=0,ai[0]=2,ResetImmunity+Damage() 再结算——本仓免疫到期自然再中,
+        // 显式 Damage 登记);入拍 phase==3 且场内无未定身牌 → 归零;发后 phase++ >3 回绕
+        if (critVid === 5461) {
+          const cardVid = cw.shoot;                       // 1024（ai113 牌）
+          const fireCard = (cvx: number, cvy: number, spin: number): void => {
+            const card = new Arrow(px, py, cvx, cvy, cw.damage, cw.knockback, cardVid, null,
+              { grav: 0, pierce: 1 });
+            card.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            card.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            card.frostEligible = false;
+            card.cardSpin = spin;                         // ai[2]=±0.4（NewProjectile 尾参）
+            this.entities.add(card, 'projectiles');
+          };
+          if (this.killingCardPhase === 3) {
+            const anyLive = this.entities.projectiles.some((m) => m instanceof Arrow
+              && !m.dead && (m as Arrow).projId === cardVid && (m as Arrow).cardFreeze !== 2);
+            if (!anyLive) this.killingCardPhase = 0;      // :49706-49722
+          }
+          const baseVx9 = Math.cos(ang) * cw.shootSpeed, baseVy9 = Math.sin(ang) * cw.shootSpeed;
+          if (this.killingCardPhase === 3) {
+            for (const m of this.entities.projectiles) {
+              if (!(m instanceof Arrow) || m.dead || m.projId !== cardVid) continue;
+              m.vx = 0; m.vy = 0;                         // velocity=Zero（:49752-49754）
+              m.cardFreeze = 2;                           // ai[0]=2 定身标记
+            }
+          } else if (this.killingCardPhase === 1) {
+            const s91 = (Math.floor(Math.random() * 2) * 2 - 1) * 0.4;
+            const s92 = (Math.floor(Math.random() * 2) * 2 - 1) * 0.4;
+            fireCard(baseVx9, baseVy9, s91);
+            fireCard(-baseVx9, -baseVy9, s92);            // :49731-49733 镜像双牌
+          } else if (this.killingCardPhase === 2) {
+            const n9 = 6, step9 = Math.PI / 4 / (n9 - 1); // :49737-49739
+            let flip9 = -1;                               // num216=-1
+            for (let i9 = 0; i9 < n9; i9++) {
+              const r9 = step9 * (-(n9 - 1) * 0.5 + i9);
+              const rc9 = Math.cos(r9), rs9 = Math.sin(r9);
+              fireCard(baseVx9 * rc9 - baseVy9 * rs9, baseVx9 * rs9 + baseVy9 * rc9, flip9 * 0.4);
+              if (Math.floor(Math.random() * 2) === 0) flip9 *= -1;   // :49748-49750
+            }
+          } else {
+            fireCard(baseVx9, baseVy9, (Math.floor(Math.random() * 2) * 2 - 1) * 0.4);
+          }
+          this.killingCardPhase = this.killingCardPhase >= 3 ? 0 : this.killingCardPhase + 1;
+          this.input.mouseDown = false;
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           this.player.onManaItemUsed();
           break;
         }
@@ -25407,6 +25548,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 拾取物品后刷新 UI（带轻量节流 + 尾包补发，最多延迟 ~166ms） */
   private invNotifyAt = -100;
+  /** 5461 杀意牌叠相位（Player.killingCardFireType :3171,出生清零 :17106——
+   *  0 单牌/1 镜像双牌/2 六扇 π/4 弧/3 全场定身;>3 回绕,R35 清单⑥） */
+  private killingCardPhase = 0;
   private invNotifyPending = false;
   /** 图标图集晚到标记（onVImageLoaded 置位，flushInvNotify 节流刷 UI） */
   private iconUiDirty = false;

@@ -23,8 +23,7 @@ await page.evaluate(() => {
     entities: [], swing: null, flicker: null, remotePlayers: [] },
     env: { mouseX: 0, mouseY: 0, mouseLeft: false, mouseRight: false,
       mapOpen: false, mapEnabled: true, viewW: 1280, viewH: 800, worldW: 4200, worldH: 1200, fm: null } });
-  window.__swCaptureSettings.biomeChoiceIndex = 5;   // Snow(水色 5)
-  window.__swGame.renderer.biomeBg.warmStyle(7);
+  window.__swCaptureSettings.biomeChoiceIndex = -1;   // 自动档对照
 });
 await page.keyboard.press('F4');
 await new Promise((r) => setTimeout(r, 600));
@@ -33,7 +32,7 @@ await page.evaluate(() => {
   cm.edgeAPinned = true; cm.edgeA = { x: 150, y: 270 };
   cm.edgeBPinned = true; cm.edgeB = { x: 220, y: 300 };
 });
-await new Promise((r) => setTimeout(r, 4500));
+await new Promise((r) => setTimeout(r, 800));
 await page.evaluate(() => {
   const { r, bundle, env } = window.__mk();
   window.__swGame.renderer.captureMode.pressButton(1, r, bundle, env);

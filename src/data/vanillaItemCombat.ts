@@ -242,6 +242,11 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
   // 物品链由 entities/PortalGunBolt.ts firePortalGun 承载（Game.updateUse 专属分支）。
   // 另两消费点（右键集火门/remoteSwingDur）对 null 与 'shot' 行为一致，无回归。
   if (vid === 3384) return null;
+  // 吉姆无人机 5451/遥控车 5738（Item.cs 共用支 Player.cs:49511-49522）：宠物机件
+  // 非武器弹幕——使用语义=先 Kill 场内所有同型同主弹再生成一只（单实例替换）。
+  // noUseGraphic 使通用分流落 'shot' 兜底=把机件当子弹射出（R35 清单⑤）——显式退出,
+  // 发射链由 Game 专支承载（ai195/205 本体行为另批登记）
+  if (vid === 5451 || vid === 5738) return null;
   // 鞭（DefaultToWhip，Item.cs:47439——提取器漏提，独立表 src/data/vanilla-whips.json 全 18 把）
   const whip = WHIPS[String(vid)];
   if (whip) {

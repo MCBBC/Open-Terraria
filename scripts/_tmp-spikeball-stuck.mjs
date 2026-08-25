@@ -33,15 +33,14 @@ const r = await page.evaluate(async () => {
   const e = await window.__swFlow.spawnVanillaEnemy(72, 51543, 10848);
   if (!e) return { bail: 'spawn failed' };
   const live = () => [...(g.enemies() ?? [])].find((x) => x.id === e.id);
-  // 采样 240 tick(4s)位置/速度/ai
+  // 先跑 240 tick,再逐 tick 采样 40 tick 冻结段
+  for (let t = 0; t < 240; t++) await new Promise((r2) => setTimeout(r2, 16));
   const trace = [];
-  for (let t = 0; t < 240; t++) {
+  for (let t = 0; t < 40; t++) {
     await new Promise((r2) => setTimeout(r2, 16));
-    if (t % 20 === 0) {
-      const s = live();
-      if (!s) { trace.push({ t, gone: true }); continue; }
-      trace.push({ t, x: Math.round(s.x), y: Math.round(s.y), vx: +(s.vx ?? 0).toFixed(2), vy: +(s.vy ?? 0).toFixed(2), ai0: s.ai0, ai1: s.ai1, facing: s.facing, dirY: s.dirY });
-    }
+    const s = live();
+    if (!s) { trace.push({ t, gone: true }); continue; }
+    trace.push({ t, x: +s.x.toFixed(1), y: +s.y.toFixed(1), vx: +(s.vx ?? 0).toFixed(2), vy: +(s.vy ?? 0).toFixed(2), ai0: s.ai0, ai1: s.ai1, f: s.facing, dY: s.dirY, w: s.hitWall ? 1 : 0, g: s.onGround ? 1 : 0, h: s.hitHead ? 1 : 0 });
   }
   // 地形 ASCII(最终卡点周边;#=实块 .=空)
   const s3 = live();

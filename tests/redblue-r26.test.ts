@@ -61,17 +61,24 @@ describe('REUSE_DELAY_TICKS vs vanilla-shoot-table.json(R26 提取器权威,只�
   const table = JSON.parse(readFileSync(
     fileURLToPath(new URL('../tools/golden/vanilla-shoot-table.json', import.meta.url)), 'utf8',
   )) as { items: Record<string, { reuseDelay?: number }> };
-  it('32 件 rd>0 全量收录且逐值相等(diff1457Items=0 基准)', () => {
+  it('32+1 件 rd>0 全量收录且逐值相等(diff1457Items=0 基准)', () => {
     const golden = new Map<number, number>();
     for (const [id, e] of Object.entries(table.items)) {
       if ((e.reuseDelay ?? 0) > 0) golden.set(Number(id), e.reuseDelay!);
     }
+    // ★R35 勘误:3787 天界碎裂 reuseDelay=useAnimation+6=18(Item.cs:33536)系非字面式,
+    // R26 提取器不解析算式=golden 盲区(与 R33 SetDefaults3 同类)——反编译源为权威,
+    // 我方表显式补录;其余 32 件仍与 golden 逐值对账
+    const NON_LITERAL_RD: Record<number, number> = { 3787: 18 };
     expect(golden.size).toBe(32);
     for (const [id, rd] of golden) {
       expect(REUSE_DELAY_TICKS[id], `vid ${id} reuseDelay`).toBe(rd);
     }
-    // 反向:我方表无多余条目
-    expect(Object.keys(REUSE_DELAY_TICKS).length).toBe(golden.size);
+    for (const [id, rd] of Object.entries(NON_LITERAL_RD)) {
+      expect(REUSE_DELAY_TICKS[Number(id)], `vid ${id} reuseDelay(非字面式补录)`).toBe(rd);
+    }
+    // 反向:我方表无多余条目(golden 32+非字面补录 1)
+    expect(Object.keys(REUSE_DELAY_TICKS).length).toBe(golden.size + Object.keys(NON_LITERAL_RD).length);
   });
 
   it('useSwing:+1 帧门含 reuseDelay==0 子句(:4451)+ 后摇并入动画尾(源断言)', () => {

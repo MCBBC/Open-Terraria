@@ -12,11 +12,14 @@
 //   ② GlobalTimerPaused（CaptureCamera.Capture :110 / FinishCapture :431）：
 //      截图期间世界模拟冻结——本仓无法从渲染层触及 Game 模拟循环，不冻结
 //      （偏差登记：黑屏 1-2s 内世界继续动，出图内容可能与按下瞬间差 1-2s）
-//   ③ CaptureBiome 的渲染端强制（水色 liquidAlpha/背景 UpdateBGVisibility/
-//      瓦色 TileColorStyle，DrawCapture :56155-56240）：本仓渲染器从现场 scene
-//      推导水色/背景，无强制注入口——自动档（BiomeChoiceIndex=-1）行为等价
-//      （原版 GetBiomeByLocation/ByWater 取的也是玩家现场群系）；手动档仅
-//      保存选择状态（数据层完整，消费缺口登记）
+//   ③ CaptureBiome 渲染端强制（2026-08-25 大部补齐）：合成 scene 换装
+//      （captureSceneOverride：背景样式机+水色推导同源）+ 背景样式快照
+//      （snapStyle：免交叉淡化中间态）+ 水色直供（updateWaterStyle 捕获直取,
+//      DirtLayer/RockLayer/BloodMoon 深度/昼夜派生链兜底）。★剩余缺口:
+//      a) TileColorStyle 瓦色调无渲染消费（数据层完整）;
+//      b) 水下/海面区域的选区拍摄全黑——【预存 bug,自动档同黑】与群系覆盖
+//         无关（对照实证）,疑捕获重渲的水下光照/水面色链,待查;
+//      c) 群系贴图预热走选格时刻（warmStyle）,秒选秒拍仍可能首块缺图
 //   ④ MapIcon_0/4 与 Cd 贴图未入素材提取（vanilla-ui 无对应键）：按钮 5 图标
 //      与禁用态 CD 罩用矢量回退
 //   ⑤ ReverseGravitySupport（:145 等）：原版 gravDir=-1 时屏幕空间垂直翻转，
@@ -849,13 +852,9 @@ export class CaptureInterface {
     //   中间态）；水色精确值由 Renderer.updateWaterStyle 捕获直供兜底
     const savedScene = r.scene;
     const choice = CaptureSettings.biomeChoiceIndex;
-    // ★BISECT(临时):__iso = { sceneSwap, snap } 二分黑屏归因
-    const iso = (typeof window !== 'undefined' ? (window as unknown as { __iso?: { sceneSwap: boolean; snap: boolean } }).__iso : null) ?? { sceneSwap: true, snap: true };
-    if (choice >= 0 && savedScene && iso.sceneSwap) {
+    if (choice >= 0 && savedScene) {
       const ov = captureSceneOverride(choice, savedScene);
       if (ov) r.scene = ov;
-    }
-    if (choice >= 0 && iso.snap) {
       r.biomeBg.snapStyle(this.settings!.biome.backgroundIndex);
     }
     try {
