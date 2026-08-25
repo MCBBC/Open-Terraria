@@ -33,18 +33,21 @@ const r = await page.evaluate(async () => {
   const e = await window.__swFlow.spawnVanillaEnemy(72, 51543, 10848);
   if (!e) return { bail: 'spawn failed' };
   const live = () => [...(g.enemies() ?? [])].find((x) => x.id === e.id);
-  // 先跑 240 tick,再逐 tick 采样 40 tick 冻结段
-  for (let t = 0; t < 240; t++) await new Promise((r2) => setTimeout(r2, 16));
+  // 1200 tick 浸泡:每 10 tick 采样;统计连续零位移窗口(≥30 tick 视为楔死)
   const trace = [];
-  for (let t = 0; t < 40; t++) {
+  let frozen = 0, maxFrozen = 0, lastX = 0, lastY = 0;
+  for (let t = 0; t < 1200; t++) {
     await new Promise((r2) => setTimeout(r2, 16));
     const s = live();
-    if (!s) { trace.push({ t, gone: true }); continue; }
-    trace.push({ t, x: +s.x.toFixed(1), y: +s.y.toFixed(1), vx: +(s.vx ?? 0).toFixed(2), vy: +(s.vy ?? 0).toFixed(2), ai0: s.ai0, ai1: s.ai1, f: s.facing, dY: s.dirY, w: s.hitWall ? 1 : 0, g: s.onGround ? 1 : 0, h: s.hitHead ? 1 : 0 });
+    if (!s) continue;
+    if (Math.abs(s.x - lastX) < 0.5 && Math.abs(s.y - lastY) < 0.5) frozen++;
+    else { frozen = 0; maxFrozen = Math.max(maxFrozen, frozen); }
+    lastX = s.x; lastY = s.y;
+    if (t % 60 === 0) trace.push({ t, x: Math.round(s.x), y: Math.round(s.y) });
   }
+  const s2 = live();
   // 地形 ASCII(最终卡点周边;#=实块 .=空)
-  const s3 = live();
-  const cx = Math.round((s3?.x ?? 50816) / 16), cy = Math.round((s3?.y ?? 11200) / 16);
+  const cx = s2 ? Math.round(s2.x / 16) : -1, cy = s2 ? Math.round(s2.y / 16) : -1;
   let map = '';
   for (let y = cy - 11; y <= cy + 11; y++) {
     let line = '';

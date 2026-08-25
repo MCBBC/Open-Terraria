@@ -40,7 +40,7 @@ export function npcNoAggroActive(player: Player): boolean {
  *  双门的墙侧（SceneMetrics/WorldGen 各有一份同值表） */
 const DUNGEON_WALL_IDS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 import { spawnStardustMarks } from './StardustMarkProj';
-import { moveAndCollide } from '../physics/TileCollision';
+import { moveAndCollide, moveNoSlopeBox } from '../physics/TileCollision';
 import { TileStore } from '../world/TileStore';
 import { Dart } from './Dart';
 import { PoopProj } from './PoopProj';
@@ -6979,7 +6979,12 @@ export class Enemy extends Entity {
     }
     this.vx = 6 * this.facing;
     this.vy = 6 * this.dirY;
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // type 72 走原版专用碰撞（NPC.cs:93755-93757 → Collision_MoveBlazingWheel :
+    // 93918 → noSlopeCollision 12×12 中心盒/斜面当整块/平台穿透）。通用路径的
+    // slopeCollide 推离不置 collideY 旗 → AI 看不到 Y 碰撞、永不翻向 = 凹袋楔死
+    // （2026-08-25 用户报地牢刺球卡死,种子 12345 复现实录）
+    if (this.vanillaId === 72) moveNoSlopeBox(this, game.world, this.vx, this.vy);
+    else moveAndCollide(this, game.world, this.vx, this.vy);
     // ---- 点光（cs:24722-24724）：aiStyle21 全族（=72 火轮）火焰光
     //  (0.9, 0.3+num306, 0.2)，num306=(270−mouseTextColor)/400（190-255 三角波 → 0.0375-0.1375）
     if (this.vanillaId === 72) {

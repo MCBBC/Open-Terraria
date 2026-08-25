@@ -3089,7 +3089,7 @@ export class Arrow extends Entity {
       //   （207 N=8 :57868-57872；★837 N=20——1457 :57861-57864 把 1456 的 32 改 20
       //   （1456 :54001-54005），转向响应 ×1.6，蓝队 R7-1 曾照抄 1456 旧值）
       if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 25);
-      if (this.projId === 207) this.lightRGB = [0.5, 0.5, 0.5];   // SetDefaults light=0.5（:2686）
+      // 207 光走静态表(数据 light=0.5 × MUL [0.4,1,0.4]=原版绿)——曾实体白光覆盖
       // ★1457 新增（:57774-57779，1456 无此块）：837 弹心埋进实心格时每 update 额外
       //   烧 33t 寿命（timeLeft>33 门）——防骷髅头穿墙滞留（480t → 最快 ~15 拍耗尽），
       //   蓝队 R7-2：曾整缺，射入方块后按自然寿命慢消且穿透期内持续可命中贴墙敌
@@ -3775,7 +3775,7 @@ export class Arrow extends Entity {
       // 星屑尾（:22336-22339）；alpha 通用闪烁档 0↔200（:22222-22238）；Item_9 星啸
       // 每 20-59t（:22166-22172）；rotation += sign(vx)·(|vx|+|vy|)·0.01（PROJ_SPIN 表）
       if (this.y > this.starFallLine) this.noTileCollide = false;
-      this.lightRGB = [0.9, 0.9, 0.9];
+      this.lightRGB = [0.72, 0.54, 0.9];   // light 0.9（:22334）× ProjLight :16373-16377 R×0.8/G×0.6/B=1(紫)——曾发白光
       if (Math.random() < 0.1) {
         game.spawnDust?.(this.x, this.y, this.w, this.h, 58,
           this.vx * 0.5, this.vy * 0.5, 150, null, 1.2);

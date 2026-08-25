@@ -1956,6 +1956,15 @@ export class Renderer {
   isCpuRender(): boolean {
     return options.data.renderMode === 'cpu' || this.cpuRender;
   }
+  /** 主画布 2D 上下文统一属性(构造器与 recreateMainCanvas 两处创建点必须同参——
+   *  同一元素重复 getContext 属性以首次为准)。alpha:false=不透明后备
+   *  (Chrome 免混合提交路径;?opaque=0 逃生门),willReadFrequently=CPU 软渲染 */
+  private mainCtxAttrs(): CanvasRenderingContext2DSettings {
+    const a: CanvasRenderingContext2DSettings = {};
+    if (Renderer.opaqueMain) a.alpha = false;
+    if (this.isCpuRender()) a.willReadFrequently = true;
+    return a;
+  }
   /** ?mapgl=0 逃生门(#2);GL 初始化失败自动回退;可运行时切换(对拍探针用) */
   mapGlEnabled = (() => {
     try { return typeof location !== 'undefined' && new URLSearchParams(location.search).get('mapgl') !== '0'; }
@@ -2213,9 +2222,7 @@ export class Renderer {
     this.canvas = nu;
     // CPU 软渲染:willReadFrequently 强制软件光栅化(画布后备走 CPU 内存,
     // 不占 Chrome GPU 进程预算——多开/弱 GPU 的稳定出路)
-    this.ctx = this.isCpuRender()
-      ? nu.getContext('2d', { willReadFrequently: true })!
-      : nu.getContext('2d')!;
+    this.ctx = nu.getContext('2d', this.mainCtxAttrs())!;
     this.onCanvasRecreated?.(nu);
   }
 
@@ -2378,8 +2385,10 @@ export class Renderer {
 
   constructor(public assets: AssetBundle, public atlas: SpriteAtlas | null = null) {
     this.canvas = document.createElement('canvas');
-    this.ctx = this.canvas.getContext('2d', this.isCpuRender() ? { willReadFrequently: true } : undefined)!;
+    this.ctx = this.canvas.getContext('2d', this.mainCtxAttrs())!;
     this.lightCanvas = document.createElement('canvas');
+    // ★lightCanvas 恒 alpha:true——光照图构建写 α=255 但 putImageData/乘光链路
+    //   语义依赖 RGBA 后备,勿随主画布改 opaque
     this.lightCtx = this.lightCanvas.getContext('2d', this.isCpuRender() ? { willReadFrequently: true } : undefined)!;
     // 群系前景层 alpha（≈Main.bgAlphaFrontLayer）注入天空渲染器——AmbientSky.GetColor
     // 六族乘子（Pegasus×神圣槽 等，AmbientSky.cs:334/:383/:556/:987/:1198/:1222）消费源

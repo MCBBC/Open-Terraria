@@ -744,6 +744,11 @@ function itemByCreateTile(tileId: number): number | undefined {
   return CREATE_TILE_ITEM_MAP.get(tileId);
 }
 
+/** place_v_<sheet>_<name> 键的 tile def 键（place_v_ 剥离） */
+function tk0(key: string): string {
+  return key.slice('place_'.length);
+}
+
 /** 多格 tile 图标拼装（place_v_* 图标用）：vanilla tile 帧表=18px 步进（16×16 帧
  *  +2px 边距,VanillaTiler :838/:1125 同源）——按 (tx×18,ty×18) 逐格取 16×16 贴到
  *  w×16 × h×16 画布,边距不入户。表未载返回 null（调用方走 UI 逐帧重试自愈）。
@@ -779,20 +784,22 @@ export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | nul
   }
   // 阶段 5:place_v_* 放置物品回退用图块贴图首帧作图标
   if (key.startsWith('place_v_')) {
-    const tk = key.slice('place_'.length);
-    const tid = TILE_BY_KEY[tk];
-    if (tid !== undefined) {
-      const td = TILE_DEFS[tid];
+    // ★sheet id 直接从键解析（place_v_<sheet>_<name>——不依赖 tile def:
+    //   place_v_517_abigails_flower 等无 def 件此前直接 null=蓝/问号回退）
+    const sm = /^place_v_(\d+)_/.exec(key);
+    const sheet = sm ? Number(sm[1]) : -1;
+    if (sheet > 0) {
+      // ★首选原版物品贴图：createTile===sheet 的物品 → vicon=原版背包图标
+      // （苔藓团/蜂巢/向日葵物品贴图,非 tile 贴图——曾用 tile 贴图:单格=碎片
+      // (向日葵初报)/整块=18px 栅格边距十字缝(蜂巢)/苔藓=raw 石纹非原版观感）
+      const itemId = itemByCreateTile(sheet);
+      if (itemId !== undefined) {
+        const ar = atlas.vicon(itemId);
+        if (ar) return ar;
+      }
+      const tid = TILE_BY_KEY[tk0(key)];
+      const td = tid !== undefined ? TILE_DEFS[tid] : undefined;
       if (td?.vanilla) {
-        // ★首选原版物品贴图：place_v_X 的 X=tile sheet id,查 vanilla.json items 中
-        // createTile===X 的物品 → vicon(物品 id)=原版背包图标（苔藓团/蜂巢/向日葵
-        // 物品贴图,非 tile 贴图——曾用 tile 贴图:单格=碎片(向日葵初报)/整块=18px
-        // 栅格边距十字缝(蜂巢,2026-08-25)/苔藓=raw 石纹非原版物品观感）
-        const itemId = itemByCreateTile(td.vanilla.sheet);
-        if (itemId !== undefined) {
-          const ar = atlas.vicon(itemId);
-          if (ar) return ar;
-        }
         // 回退:多格 tile 逐格拼装（18px 步进）/单格 vframeAt
         if ((td.w ?? 1) > 1 || (td.h ?? 1) > 1) {
           const assembled = tileFootprintCanvas(atlas, td.vanilla.sheet, td.w ?? 1, td.h ?? 1);

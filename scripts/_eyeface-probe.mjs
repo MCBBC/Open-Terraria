@@ -47,11 +47,16 @@ await page.evaluate(() => {
   }
 });
 await new Promise((r) => setTimeout(r, 100));
-const st = await page.evaluate(() => {
+const st = await page.evaluate(async () => {
   const g = window.__swGame;
-  return [...(g.entities?.critters ?? []), ...(g.entities?.enemies ?? [])]
-    .filter((e) => e.vanillaId === 5 || e.vanillaId === 133)
-    .map((e) => ({ vid: e.vanillaId, vx: Math.round(e.vx * 10) / 10, vy: Math.round(e.vy * 10) / 10, vis: Math.round((e.visAngle ?? 0) * 100) / 100, facing: e.facing }));
+  const all = () => [...(g.entities?.critters ?? []), ...(g.entities?.enemies ?? [])]
+    .filter((e) => e.vanillaId === 5 || e.vanillaId === 133);
+  const trace = [];
+  for (let i = 0; i < 8; i++) {
+    trace.push(all().map((e) => ({ vid: e.vanillaId, vx: Math.round(e.vx * 10) / 10, vy: Math.round(e.vy * 10) / 10, vis: Math.round((e.visAngle ?? 0) * 100) / 100, facing: e.facing, ai: e.vanilla?.aiStyle })));
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return trace;
 });
 console.log('STATE', JSON.stringify(st));
 await page.screenshot({ path: '/tmp/eyeface.png' });

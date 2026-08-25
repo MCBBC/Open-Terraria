@@ -380,6 +380,59 @@ function slopeCollide(b: Body, world: World): void {
   }
 }
 
+/** 原版 Collision.noSlopeCollision（Collision.cs:2038-2113）+ NPC.Collision_MoveBlazingWheel
+ *  （NPC.cs:93918-93926）——type 72 刺球专用碰撞（ApplyTileCollision :93755-93757 按
+ *  type==72 分派；且 :93715 把 type 72 排除在 MoveSlopesAndStairFall 之外）：
+ *  · 碰撞盒 = 身体中心 12×12（num=num2=12 :93921-93924），非全身盒
+ *  · 斜面当整块（noSlope 无坡面放行/贴合）、平台穿透（fallThrough+fall2 :93925）
+ *  · 速度按盒夹取 → 整体位移；collideX/collideY 按「速度是否被改」置位
+ *    （Collision_MoveWhileDry :93734-93747：天花板接触 up→vy=0.01 下推也置 collideY）
+ *  通用 moveAndCollide 的 slopeCollide 推离不置 collideY 旗 → AI_021 永远看不到
+ *  Y 碰撞、永不翻向 = 刺球在地牢凹袋楔死（2026-08-25 用户报，种子 12345 复现实录） */
+export function moveNoSlopeBox(b: Body, world: World, dx: number, dy: number): void {
+  const st = world.store;
+  const oldVX = dx, oldVY = dy;
+  const bx = b.x + b.w / 2 - 6, by = b.y + b.h / 2 - 6;   // 12×12 盒左上 = 中心-6
+  let rx = dx, ry = dy;
+  let up = false, down = false;
+  const tx0 = Math.max(0, Math.floor(bx / TILE) - 1), tx1 = Math.min(st.w - 1, Math.floor((bx + 12) / TILE) + 2);
+  const ty0 = Math.max(0, Math.floor(by / TILE) - 1), ty1 = Math.min(st.h - 1, Math.floor((by + 12) / TILE) + 2);
+  for (let i = tx0; i <= tx1; i++) {
+    for (let j = ty0; j <= ty1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const ji = st.idx(i, j);
+      if (!st.isActive(i, j)) continue;
+      const solidTop = !st.isSolid(i, j) && st.isPlatform(i, j);
+      if (!st.isSolid(i, j) && !solidTop) continue;
+      let vy4 = j * TILE, h7 = TILE;
+      if (st.half[ji]) { vy4 += 8; h7 -= 8; }
+      const vx4 = i * TILE;
+      // 目标位盒不重叠 → 跳过（noSlopeCollision 的 vector2 = Position+Velocity）
+      if (bx + dx + 12 <= vx4 || bx + dx >= vx4 + TILE || by + dy + 12 <= vy4 || by + dy >= vy4 + h7) continue;
+      if (by + 12 <= vy4) {
+        // 从上方来 = 地板；fallThrough+fall2 → 平台顶穿透（:1902 前置条件取反）
+        if (solidTop) continue;
+        ry = Math.min(ry, vy4 - (by + 12));
+        down = true;
+      } else if (bx + 12 <= vx4 && !solidTop) {
+        rx = Math.min(rx, vx4 - (bx + 12));            // 从左来,右侧墙
+      } else if (bx >= vx4 + TILE && !solidTop) {
+        rx = Math.max(rx, vx4 + TILE - bx);            // 从右来,左侧墙
+      } else if (by >= vy4 + h7 && !solidTop) {
+        up = true;                                      // 从下方来,天花板
+        ry = Math.max(ry, vy4 + h7 - by);
+      }
+    }
+  }
+  b.x += rx; b.y += ry;
+  b.vx = rx; b.vy = ry;
+  if (up) b.vy = 0.01;                                 // Collision.up → vy=0.01（:93736-93738）
+  b.hitWall = rx !== oldVX;
+  b.hitHead = up;
+  b.onGround = down;
+  b.collideY = ry !== oldVY;
+}
+
 /** 移动并碰撞。高速时分子步防穿透。 */
 export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   // tileCollide=false（Projectile.tileCollide 镜像,蜘蛛 :62852-62860 穿平台/归位飞行

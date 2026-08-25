@@ -17,7 +17,7 @@ await sleep(1200);
 const setup = await p.evaluate(() => {
   const g = window.__swGame;
   const inv = g.player.inv;
-  inv.slots[0] = { id: 6153, stack: 1 };
+  inv.slots[0] = { id: 6153, stack: 1 }; g.player.mana = 200; g.player.baseMaxMana = 200;
   inv.selected = 0;
   const r = g.renderer.canvas.getBoundingClientRect();
   // 鼠标指向玩家右上方 45°(屏幕坐标)
