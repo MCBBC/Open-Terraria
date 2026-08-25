@@ -53,23 +53,38 @@ const st2 = await page.evaluate(() => {
 console.log('STEP2', JSON.stringify(st2));
 await page.screenshot({ path: '/tmp/manual-2-panel.png' });
 
-// 3) 勾"不再显示" + 我知道了 → 按钮整体撤除 + 持久化
+// 3) 不勾选直接"我知道了" → 面板关+徽标熄+按钮在+世界恢复
+await page.click('.sw-manual-ok');
+await new Promise((r) => setTimeout(r, 600));
+const st3 = await page.evaluate(() => ({
+  panelGone: !document.querySelector('.sw-manual-panel'),
+  badgeGone: !document.querySelector('.sw-manual-badge'),
+  btnKept: !!document.querySelector('.sw-manual-btn'),
+  resumed: !window.__swGame.paused,
+}));
+console.log('STEP3', JSON.stringify(st3));
+
+// 4) 重开面板勾"不再显示"+我知道了 → 按钮整体撤除
+await page.click('.sw-manual-btn');
+await new Promise((r) => setTimeout(r, 300));
 await page.click('.sw-manual-hide input');
 await page.click('.sw-manual-ok');
 await new Promise((r) => setTimeout(r, 600));
-const st3 = await page.evaluate(async () => {
-  const opts = await new Promise((res) => {
-    const d = window.__swGame;
-    res({ seen: d ? undefined : undefined });
-  });
-  const w = window;
-  const optsData = w.__swOptionsProbe?.();
-  return {
-    panelGone: !document.querySelector('.sw-manual-panel'),
-    btnGone: !document.querySelector('.sw-manual-btn'),
-    paused: window.__swGame.paused,
-    optsData,
-  };
-});
-console.log('STEP3', JSON.stringify(st3));
+const st4 = await page.evaluate(() => ({
+  btnGone: !document.querySelector('.sw-manual-btn'),
+  panelGone: !document.querySelector('.sw-manual-panel'),
+}));
+console.log('STEP4', JSON.stringify(st4));
+
+// 5) 刷新重进(新世界) → 按钮仍隐藏(持久化生效)
+await page.reload({ waitUntil: 'networkidle0' });
+await new Promise((r) => setTimeout(r, 1500));
+await page.evaluate(() => { window.btnByText2?.('单人模式')?.click(); });
+await new Promise((r) => setTimeout(r, 800));
+await page.evaluate(() => { window.btnByText2?.('创建新世界')?.click(); });
+await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 });
+await new Promise((r) => setTimeout(r, 2000));
+const st5 = await page.evaluate(() => ({ btnStillGone: !document.querySelector('.sw-manual-btn') }));
+console.log('STEP5', JSON.stringify(st5));
+await page.screenshot({ path: '/tmp/manual-3-hidden.png', clip: { x: 0, y: 0, width: 640, height: 140 } });
 await browser.close();

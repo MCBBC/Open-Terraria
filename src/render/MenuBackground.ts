@@ -22,7 +22,7 @@ import { BiomeBackground } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { Clock } from '../world/World';
 import {
-  colorOfTheSkies, setFrameAurora, setFrameBiome, setFrameCloudDim,
+  colorOfTheSkies, setFrameAurora, setFrameAtmo, setFrameBiome, setFrameCloudDim,
   setFrameLightning, setFrameHorizon,
 } from '../lighting/SkyColor';
 
@@ -124,6 +124,8 @@ export class MenuBackground {
     setFrameCloudDim(1);
     setFrameLightning(0);
     setFrameHorizon(null);
+    setFrameAtmo(1);   // :62633 gameMenu 强制 atmo=1（★缺此则太空退盘残留 atmo=0
+                       //  把标题天空涂黑——2026-08-25 最终清零 review 抓出）
     this.sky.moonType = 0;
     // 菜单地表默认值（小世界 surface≈4300px）：★原版 Main.worldSurface 无启动
     //  初始化（仅生成/读档/联机写入）——冷启动标题 num3=(300-屏Y)/max(1,0) 爆表，
@@ -248,6 +250,7 @@ export class MenuBackground {
     menuTimeInfo.dayFactor = this.clock.dayFactor;
     // 云色单源（= Renderer 帧内 this.sky.cots 同款）：ColorOfTheSkies——菜单不喂
     //  则云回落 lastSkyTop(天空顶色深蓝)→深蓝云画在深蓝天上隐形（实测 lit=0）
+    setFrameAtmo(1);   // :62633 gameMenu 每帧强制(实例复用时构造器复位不重跑)
     this.sky.cots = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase, true);
     // MenuXMovement（:47625-47631：+4/帧，wrap ±2^31）
     this.camX = (this.camX + 4 * frames) % MENU_X_WRAP;
@@ -276,6 +279,7 @@ export class MenuBackground {
   /** 层 tint = ColorOfTheSkies（cs:64527 菜单也跑 SetBackColor → 层色 ×cots）。
    *  近白免烘（正昼）；量化烘焙与缓存约定在 BiomeBackground.menuTinted */
   private layerTint(): [number, number, number] | null {
+    setFrameAtmo(1);
     const c = colorOfTheSkies(this.clock.timeOfDay, this.dayCount, false, false, this.moonPhase, true);
     if (c[0] >= 254.5 && c[1] >= 254.5 && c[2] >= 254.5) return null;
     return [c[0] / 255, c[1] / 255, c[2] / 255];

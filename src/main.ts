@@ -17,7 +17,7 @@ import { SpriteAtlas } from './assets/SpriteAtlas';
 import { AudioSystem } from './core/Audio';
 import { setDebugPool } from './data/vanillaNpcs';
 import { VUI } from './vui/VUI';
-import { initAssetCache, primeBootAssets, setLazyWorkerPrefetch, warmAllAssets } from './net/AssetCache';
+import { assetsDownloadIdle, initAssetCache, primeBootAssets, setLazyWorkerPrefetch, warmAllAssets } from './net/AssetCache';
 import { prefetchWorldGenWorker } from './workers/WorldGenClient';
 import { prefetchSaveWorker } from './workers/SaveClient';
 import { holdForAssetsReady, mountAssetBadge } from './ui/AssetDownloadUI';
@@ -625,6 +625,7 @@ kvHas('sandboxworld.quicksave').then(async () => {
   const splash = showSplash({
     loading: new Promise<void>((r) => { splashGate.resolve = r; }),
     quick: audio.muted || audio.volume === 0,   // 原版 quickSplash（musicVolume==0）
+    canSkip: assetsDownloadIdle,                // 跳过门(2026-08-25):资源下载空闲才允许
   });
   void audio.play('title');   // ★标题曲随 splash 出现即起（用户要求，非进标题才播；
                               // 音频门/首次手势解锁已保 AC running）

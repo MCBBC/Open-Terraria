@@ -558,7 +558,7 @@ export class SpriteAtlas {
 
   // ---- 资产健康只读视图(F5 调试报告 assetHealth 段;运行期防线,2026-08-13) ----
   failedVImages(): string[] { return [...this._vImageFailed.keys()]; }
-  failedUiImages(): string[] { return [...this._uiFailed]; }
+  failedUiImages(): string[] { return [...this._uiFailed.keys()]; }
   vuiMissKeys(): string[] { return [..._vuiKeyMisses]; }
   /** 设计内回退 miss(静默但可审计) */
   vuiFallbackMisses(): string[] { return [..._vuiFallbackMisses]; }

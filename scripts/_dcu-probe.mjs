@@ -27,6 +27,7 @@ const out = await page.evaluate(async () => {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const g = window.__swGame, st = g.world.store, p = g.player, inv = p.inv;
   const items = window.__swItems;
+  const mainCanvas = () => [...document.querySelectorAll('canvas')].sort((a, b) => b.width * b.height - a.width * a.height)[0];
   const res = { steps: [], data: {} };
   const ok = (name, cond, extra) => {
     res.steps.push(`${cond ? 'PASS' : 'FAIL'} ${name}${extra !== undefined ? ` (${extra})` : ''}`);
@@ -63,7 +64,7 @@ const out = await page.evaluate(async () => {
 
   // ---- ① 舱体贴图：静止 vs 移动 截图对比 ----
   const grabMountPixels = async () => {
-    const cv = document.querySelector('canvas');
+    const cv = mainCanvas();
     const [sxCss, syCss] = g.camera.worldToScreen(p.cx, p.y - 10);
     const kx = cv.width / cv.clientWidth, ky = cv.height / cv.clientHeight;
     const sx = sxCss * kx, sy = syCss * ky;
@@ -104,7 +105,7 @@ const out = await page.evaluate(async () => {
   // 原版 = 453 存活期每 tick AimAbility（Projectile.cs:31183-31190）——按住期间
   // 移动鼠标，diodeRotationTarget 应连续跟随（而非仅点击瞬间更新一次）
   const mouseTo = (dxWorld, dyWorld) => {
-    const cv = document.querySelector('canvas');
+    const cv = mainCanvas();
     const [sxCss, syCss] = g.camera.worldToScreen(p.cx + dxWorld, p.cy + dyWorld);
     const r = cv.getBoundingClientRect();
     g.input.mouseX = Math.round(sxCss * (r.width / cv.clientWidth));

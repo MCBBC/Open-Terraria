@@ -225,6 +225,14 @@ export function assetsComplete(): boolean {
   return state.enabled && state.total > 0 && state.done >= state.total && state.failed === 0;
 }
 
+/** 资源下载空闲谓词(2026-08-25 splash 跳过门用):资产系统未启用(dev/?nosw/http)
+ *  视为空闲(无可等待);启用时=完成态或本地完成标志(返回用户免 SW 状态重枚举
+ *  窗口的 1-2s 误禁,见 assetsCompleteFast 注)——底部指示器工作期间为 false */
+export function assetsDownloadIdle(): boolean {
+  if (!state.enabled) return true;
+  return assetsCompleteFast();
+}
+
 /** 完成态本地标志(★2026-08-18 用户报"每次 build 后进单人游戏卡下载门槛"):
  *  门槛真正在等的是 SW status 回包——SW 冷启动 + cache.keys() 枚举万条缓存
  *  要 1-2s,期间 done=0 → 门槛误显示"正在下载 0%"(实际零下载,trace 实证

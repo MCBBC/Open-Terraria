@@ -170,8 +170,9 @@ export interface MountedPlayerView {
   /** 上一 tick 是否按下跳跃（releaseJump 语义：松开后才可重触发飞行/起跳） */
   prevInputJump: boolean;
   /** 上一 tick 尾快照的跳跃键（Player.jumpEdgePrev——tryStartHover 的 releaseUp
-   *  边沿门 :26939 消费；prevInputJump 在 tick 头快照且输入已更新=恒等不可用） */
-  jumpEdgePrev: boolean;
+   *  边沿门 :26939 消费；prevInputJump 在 tick 头快照且输入已更新=恒等不可用）。
+   *  可选：合成视图（单测桩）缺省 = 上一 tick 未按（边沿成立） */
+  jumpEdgePrev?: boolean;
   /** 盾冲滑行态（Player.dashDelay：<0 = 滑行中；62-65 冲刺帧门 Mount.cs:4541-4545） */
   dashDelay?: number;
   gravDir: number;
@@ -1489,7 +1490,9 @@ export class MountInstance {
     if (blocked && this.hoverIgnoresFatigue()) p.y -= 0.001;
   }
 
-  /** 落地帧态探测（Mount.cs TryLanding :4544-4558：无升降输入且下方 4px 无地面） */
+  /** 落地帧态探测（Mount.cs TryLanding :4602-4611：无升降输入且下方 4px 内有地面
+   *  → 切地面帧。★条件曾写反（无地面才切）——悬停静置在空中被误切地面帧态,
+   *  hover() 的 flyingState 门随之隔 tick 失效（悬停控制断续） */
   tryLanding(p: MountedPlayerView): void {
     if ((this.frameState === FRAME_FLYING || this.frameState === FRAME_IN_AIR)
       && !p.inputUp && !p.inputDown && !p.inputJump) {
@@ -1500,7 +1503,7 @@ export class MountInstance {
       for (let tx = Math.floor(p.x / 16); tx <= Math.floor((p.x + p.w - 1) / 16); tx++) {
         if (st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty)) { grounded = true; break; }
       }
-      if (!grounded) this.updateFrame(p, this.intendedGroundedFrame(p), p.vx, p.vy);
+      if (grounded) this.updateFrame(p, this.intendedGroundedFrame(p), p.vx, p.vy);
     }
   }
 

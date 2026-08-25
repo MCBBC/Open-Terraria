@@ -45,6 +45,10 @@ export function showSplash(opts: {
   quick?: boolean;
   /** 随机源（默认 Math.random——原版 UnifiedRandom） */
   rand?: () => number;
+  /** 跳过门谓词(2026-08-25 用户要求):点击/空格跳过过渡——返回 false 时输入被
+   *  忽略。main 注入 assetsDownloadIdle(资源下载指示器工作期间禁止跳过);
+   *  缺省=boot 自身 loading 门通过即允许 */
+  canSkip?: () => boolean;
 }): SplashHandle {
   const rand = opts.rand ?? Math.random;
   const quick = opts.quick ?? false;
@@ -140,6 +144,21 @@ export function showSplash(opts: {
   let menuBehind = false;
   let fadeOutStarted = false;
   const goTransparent = () => { root.style.background = 'transparent'; };
+  // ★跳过(2026-08-25 用户要求):点击/空格立即收场揭幕——双门条件:
+  //   ①菜单已在幕后(revealBehind 已调,否则移除=揭幕闪黑)②资源下载空闲
+  //  (canSkip 谓词=assetsDownloadIdle,底部指示器工作期间禁止)。不满足时
+  //  输入忽略(不排队不加速);监听随 remove() 摘除
+  const canSkipNow = (): boolean => menuBehind && (opts.canSkip ? opts.canSkip() : loadingDone);
+  const trySkip = (): void => {
+    if (removed || !canSkipNow()) return;
+    remove();
+  };
+  const onSkipPointer = (): void => trySkip();
+  const onSkipKey = (e: KeyboardEvent): void => {
+    if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); trySkip(); }
+  };
+  window.addEventListener('pointerdown', onSkipPointer, true);
+  window.addEventListener('keydown', onSkipKey, true);
   const apply = () => {
     if (b > chromeSent) {
       chromeSent = b;
@@ -184,6 +203,8 @@ export function showSplash(opts: {
   const remove = () => {
     if (removed) return;
     removed = true;
+    window.removeEventListener('pointerdown', onSkipPointer, true);
+    window.removeEventListener('keydown', onSkipKey, true);
     root.remove();
     document.documentElement.style.removeProperty('--sw-splash-alpha'); // 角标回满亮(菜单态)
     resolveFinished();

@@ -26374,6 +26374,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const t = st.get(x, y);
     const def = TILE_DEFS[t];
     if (!def) return;
+    // 自研像素画（F1 图片导入）：自由悬浮装饰、无支撑语义——solid=false 后
+    // 会落进下方 framed+非实心家具校验（1×1"家具"要求有效支撑，像素下方还是
+    // 像素不算 → 写入期逐行级联拆除只剩贴地一行，2026-08-25 用户实报）
+    if (t === TILE_BY_KEY['pixel_block']) return;
     // ---- decor 支撑链（D-1,原版 TileFrameImportant :85703 → Check* 族派发）：
     // 按 DECOR_SUPPORT_KIND 分派（PlantCheck/CheckAlch/CheckSunflower/Check1x2/
     // Check1x1/CheckLogicTiles/CheckOrb/CheckPot/吊挂族/家具机制族）。曾 def.decor

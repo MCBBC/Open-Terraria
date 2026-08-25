@@ -106,24 +106,31 @@ function targetIdxOf(p: StormLightning): number {
 }
 
 describe('R25-② StormLightning AI_203 索敌（:40397-40411）', () => {
+  // ★R34-② 勘误：1122 SetDefaults timeLeft=1（:10447）→ 出生首拍即 Kill，AI_203
+  //   索敌/移动段对 1122 为死代码（仅 1117 与敌意 1091 消费）——索敌语义用例改用 1117。
   it('槽序首中：slot0 入圈即锁定，不再比 slot1 更近者（曾取最近者）', () => {
-    const p = new StormLightning(1122, 800, 480, 100, 2);   // 构造器按中心定位：cx=800, cy=480
-    const e0 = mkEnemy(0, 820, 472);                        // 盒距 12、中心距 ~14.4
-    const e1 = mkEnemy(1, 792, 472);                        // 盒距 0（更近）
+    const p = new StormLightning(1117, 800, 480, 100, 2);   // 构造器按中心定位：cx=800, cy=480
+    const e0 = mkEnemy(0, 806, 474);                        // 盒距 6 ≤12（半径 1117 档）
+    const e1 = mkEnemy(1, 798, 478);                        // 盒距 0（更近）
     p.fixedUpdate(1 / 60, slHooks([e0, e1]) as never);
     expect(targetIdxOf(p)).toBe(0);
   });
 
   it('盒最近点距：大体型敌中心距超半径、盒缘入圈仍锁定；全离圈不锁（曾用中心距）', () => {
-    const big = mkEnemy(0, 830, 460, 200, 40);   // cx=930 中心距 130>32；左缘盒距 30≤32
-    const p1 = new StormLightning(1122, 800, 480, 100, 2);
+    const big = mkEnemy(0, 840, 460, 200, 40);   // cx=940 中心距 120>12；左缘盒距 20>12 不锁
+    const p1 = new StormLightning(1117, 820, 480, 100, 2);  // 1117 半径 12（1122 的 32 档随其首拍落雷退役）
     p1.fixedUpdate(1 / 60, slHooks([big]) as never);
-    expect(targetIdxOf(p1)).toBe(0);
+    expect(targetIdxOf(p1)).toBe(-1);
 
-    const far = mkEnemy(0, 900, 460, 200, 40);   // 左缘盒距 100>32
-    const p2 = new StormLightning(1122, 800, 480, 100, 2);
-    p2.fixedUpdate(1 / 60, slHooks([far]) as never);
-    expect(targetIdxOf(p2)).toBe(-1);
+    const near = mkEnemy(0, 826, 472);           // 盒距 ≤12 → 锁定
+    const p2 = new StormLightning(1117, 820, 480, 100, 2);
+    p2.fixedUpdate(1 / 60, slHooks([near]) as never);
+    expect(targetIdxOf(p2)).toBe(0);
+
+    const far = mkEnemy(0, 900, 460, 200, 40);   // 左缘盒距 80>12
+    const p3 = new StormLightning(1117, 820, 480, 100, 2);
+    p3.fixedUpdate(1 / 60, slHooks([far]) as never);
+    expect(targetIdxOf(p3)).toBe(-1);
   });
 });
 

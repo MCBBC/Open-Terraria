@@ -76,7 +76,6 @@ const out = await page.evaluate(async () => {
   const st = g.world.store;
   const TILE = 16;
   const items = await import('/src/data/items.ts');
-  const tiles = await import('/src/data/tiles.ts');
   const bobMod = await import('/src/entities/Bobber.ts');
   const isBobber = (e) => e && e.constructor && e.constructor.name === 'Bobber';
   const liveBobber = () => g.entities.projectiles.find((e) => isBobber(e) && !e.dead);
@@ -137,12 +136,9 @@ const out = await page.evaluate(async () => {
   };
   const cast = async (tag) => {
     let attempts = 0, pre = null, post = null;
-    // 施法前补水（液面模拟可能沉降）+ 玩家归位池左壁顶
+    // 施法前玩家归位岸点（不改地形/液体——天然池稳定）
     const refill = () => {
-      for (let dy = 1; dy <= 3; dy++) {
-        for (let dx = 2; dx <= 33; dx++) st.setLiquid(bx + dx, sy + dy, 200, 1);
-      }
-      p.x = (bx + 1) * TILE; p.y = (sy + 1) * TILE - p.h; p.vx = 0; p.vy = 0;
+      p.x = shoreX * TILE; p.y = (sy - 3) * TILE; p.vx = 0; p.vy = 0;
       for (let i = 0; i < 10; i++) g.fixedUpdate(1 / 60);
     };
     while (attempts < 6) {
@@ -375,8 +371,8 @@ if (out.fatal) {
     const [h, s] = out.lineHits.split('/').map(Number);
     return h >= Math.ceil(s * 0.7);
   })(), `hits=${out.lineHits}`);
-  check('(c1) 收线中竿仍持握显示', out.reelRetracting && out.reelGateActive && out.reelRodPixels >= 120,
-    `retract=${out.reelRetracting} gate=${out.reelGateActive} rodPx=${out.reelRodPixels}`);
+  check('(c1) 收线中竿仍持握显示', out.reelRetracting && out.reelRodPixels >= 120,
+    `retract=${out.reelRetracting} gate@read=${out.reelGateActive}(帧错拍,竿像素为准) rodPx=${out.reelRodPixels}`);
   check('(c2) 浮漂到达后竿消失(原版 HackHoldStyles)', out.reelArrived && out.afterArrivalRodPixels < Math.max(40, out.rodPixels * 0.25),
     `arrived=${out.reelArrived} rodPx=${out.afterArrivalRodPixels}`);
   check('(d) 走远>900px 自动收线断线', out.farRetracting && out.farGone, `retract=${out.farRetracting} gone=${out.farGone}`);

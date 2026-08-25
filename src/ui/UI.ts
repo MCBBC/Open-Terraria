@@ -323,28 +323,34 @@ const CSS = `
   font-size:15px; color:#fff; text-shadow:2px 2px 0 #000; pointer-events:none;
   animation:sw-name-pulse 2s ease-in-out infinite alternate; }
 @keyframes sw-name-pulse { from { opacity:0.35; } to { opacity:1; } }
-/* ---- 说明书按钮（快捷栏右侧;槽底同 Inventory_Back20 融入栏内观感）----
- * 未读红点感叹号气泡 = CSS 步进闪烁(显著提醒,读过后熄灭) */
-.sw-manual-btn { position:fixed; left:470px; top:25px; width:44px; height:44px; z-index:11;
-  pointer-events:auto; cursor:pointer; border:none; padding:0;
+/* ---- 说明书按钮（快捷栏右侧;与未选中槽完全同构:52 贴图 scale0.75 不裁剪,
+ * alpha0.575——44px 盒装 52 背景会裁掉槽边框=首版"效果不对"根因）----
+ * 未读红点感叹号气泡 = CSS 步进闪烁(显著提醒,读过后熄灭);徽标挂 wrap 不随缩放 */
+.sw-manual-wrap { position:fixed; left:467px; top:25px; width:40px; height:40px;
+  pointer-events:none; z-index:11; }
+.sw-manual-btn { position:absolute; left:0; top:0; width:52px; height:52px;
+  transform:scale(0.75); transform-origin:top left;
+  pointer-events:auto; cursor:pointer; border:none; padding:0; background-color:transparent;
   background:url(sprites/vanilla/Inventory_Back20.png) 0 0/52px 52px no-repeat;
-  image-rendering:pixelated; user-select:none;
+  image-rendering:pixelated; user-select:none; opacity:0.575;
   font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif;
-  font-size:22px; font-weight:bold; color:#e8ecf8;
-  text-shadow:2px 2px 0 #000; line-height:44px; text-align:center; }
-.sw-manual-btn:hover { filter:brightness(1.25); }
-.sw-manual-badge { position:absolute; right:-7px; top:-7px; width:20px; height:20px;
+  font-size:26px; font-weight:bold; color:#e8ecf8;
+  text-shadow:2px 2px 0 #000; line-height:52px; text-align:center;
+  transition:opacity 80ms linear; }
+.sw-manual-btn:hover { opacity:1; filter:brightness(1.15); }
+.sw-manual-badge { position:absolute; right:-9px; top:-9px; width:20px; height:20px;
   border-radius:50%; background:#d21f2c; border:2px solid #fff;
   color:#fff; font-size:14px; font-weight:bold; line-height:17px; text-align:center;
   text-shadow:none; pointer-events:none;
   animation:sw-badge-blink 0.9s steps(2, jump-none) infinite; }
 @keyframes sw-badge-blink { 0% { opacity:1; transform:scale(1.15); } 100% { opacity:0.25; transform:scale(0.85); } }
-/* 说明书面板（复用暂停面板像素底系） */
+/* 说明书面板（暂停面板同款:Inventory_Back13 九宫 ×(33,15,91)×0.685 半透;
+ * 素材未就绪时 fallback 底色,首次打开后回补） */
 .sw-manual-panel { pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
   width:520px; max-width:92vw; z-index:32; box-sizing:border-box;
-  background:#2a1a63; border:2px solid #7d92d6; border-radius:6px;
-  box-shadow:0 0 0 2px rgba(10,14,30,0.8), 0 6px 28px rgba(0,0,0,0.65);
+  background-repeat:no-repeat; background-size:100% 100%; image-rendering:pixelated;
   font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif; user-select:none; color:#e8ecf8; }
+.sw-manual-panel.fallback-bg { background:#2a1a63; }
 .sw-manual-title { text-align:center; font-size:20px; letter-spacing:3px; color:#fff; padding:14px 0 6px;
   text-shadow:2px 0 0 #000,-2px 0 0 #000,0 2px 0 #000,0 -2px 0 #000; }
 .sw-manual-body { max-height:56vh; overflow-y:auto; padding:4px 18px 8px; scrollbar-width:thin; }
@@ -975,13 +981,15 @@ export class UI {
 
   private buildManualBtn(game: Game) {
     if (options.data.manualHidden) return;
+    const wrap = el('div', 'sw-manual-wrap');
     const btn = el('button', 'sw-manual-btn', '?');
     btn.title = Lang.text('Mods.SandboxWorld.UI.Manual');
     btn.addEventListener('mousedown', (e) => e.stopPropagation());   // 防触发拖拽/世界点击
     btn.addEventListener('click', () => this.openManualPanel(game));
-    if (!options.data.manualSeen) btn.appendChild(el('div', 'sw-manual-badge', '!'));
-    this.root.appendChild(btn);
-    this.manualBtn = btn;
+    wrap.appendChild(btn);
+    if (!options.data.manualSeen) wrap.appendChild(el('div', 'sw-manual-badge', '!'));
+    this.root.appendChild(wrap);
+    this.manualBtn = wrap;
   }
 
   private openManualPanel(game: Game) {
@@ -992,7 +1000,7 @@ export class UI {
     game.paused = true;
     game.input.uiBlocking = true;
 
-    const panel = el('div', 'sw-manual-panel');
+    const panel = el('div', 'sw-manual-panel fallback-bg');
     panel.appendChild(el('div', 'sw-manual-title', Lang.text('Mods.SandboxWorld.UI.ManualTitle')));
     const body = el('div', 'sw-manual-body');
     const sec = (t: string) => body.appendChild(el('div', 'sw-manual-sec', t));
@@ -1031,6 +1039,21 @@ export class UI {
     foot.append(hideLabel, ok);
     panel.append(body, foot);
     this.root.appendChild(panel);
+    // 暂停面板同款半透九宫底(Inventory_Back13 ×(33,15,91)×0.685;素材懒加载
+    // 竞态时保留 fallback 底色,下次打开生效)
+    const applyBg = () => {
+      if (!panel.isConnected) return;
+      const url = invBgDataUrl(panel.offsetWidth, panel.offsetHeight);
+      if (url) {
+        panel.style.backgroundImage = `url(${url})`;
+        panel.classList.remove('fallback-bg');
+      }
+    };
+    requestAnimationFrame(applyBg);
+    const bgImg = invBgEnsure();
+    if (bgImg && bgImg instanceof HTMLImageElement && !bgImg.complete) {
+      bgImg.addEventListener('load', applyBg, { once: true });
+    }
     ok.addEventListener('click', () => {
       void options.set('manualSeen', true);   // 读过=熄泡
       if (hideChk.checked) {
@@ -2894,10 +2917,11 @@ export class UI {
     const fresh = now - this.craftWheelLast > 120;
     this.craftWheelLast = now;
     if (fresh) {
-      // 新手势首事件：立即 1 行（无迟滞）——只滚窗口锚，不动选中配方
+      // 新手势首事件：立即 1 行（无迟滞）——只滚窗口锚，不动选中配方。
+      // ★hoverFocus 不清（2026-08-25 用户报：hover 态下滚动预览跳回第一个
+      //  配方）——滚动时悬停预览冻结，直到真实移动鼠标才更新
       this.craftWheelAcc = 0;
       this.craftScroll = Math.max(0, this.craftScroll + (dy > 0 ? 1 : -1));
-      this.hoverFocus = -1;
       this.refreshAll();
       return;
     }
@@ -2907,7 +2931,6 @@ export class UI {
     if (Math.abs(this.craftWheelAcc) < 100) return;
     this.craftWheelAcc = 0;
     this.craftScroll = Math.max(0, this.craftScroll + (dy > 0 ? 1 : -1));
-    this.hoverFocus = -1;
     this.refreshAll();
   }
 
@@ -2926,8 +2949,7 @@ export class UI {
     const s = Math.round(ratio * (meta.len - meta.visRows));
     const focus = Math.min(meta.len - 1, s + 4);
     if (focus !== this.craftScroll) {
-      this.craftScroll = focus;
-      this.hoverFocus = -1;
+      this.craftScroll = focus;   // 悬停预览同滚轮：冻结不清，真实移鼠标才更新
       this.refreshAll();
     }
   }

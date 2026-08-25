@@ -123,13 +123,23 @@ export const TOWN_SWING: Record<number, { dmg: number; kb: number; rect: number;
  *  grip=num11 握位(默认 4);scale=num10;hm=肉后替换武器。 */
 export interface TownHoldout {
   pre: number; hm?: number; grip?: number; scale?: number;
-  /** 肉前档:aim<-0.1 时换握位(368 高尔夫杆上抬位,:27157-27160) */
+  /** 肉前档:aim<-0.1 时换握位(368 旅商枪上抬位,:27157-27160) */
   preGripAimDown?: number; preScale?: number;
 }
+/** DrawPlayerItemPos(Main.cs 尾 `result.X = num`)——X = per-item 常量(默认 10),
+ *  ★不是帧宽/2(曾误用 W/2 → 旅商左轮 num12 差 24px 持枪浮空,2026-08-25 用户实报)。
+ *  Y 分量(H/2±2 族)被 EndCapture 侧 origin 弃用,无需移植。
+ *  表 = TOWN_HOLDOUT 全部 item 的 num 值;未列 item(39 木弓等)= 默认 10 */
+export const ITEM_POS_NUM: Record<number, number> = {
+  95: 6, 98: -5,          // 火枪 / 霰弹枪(爆破专家)
+  434: 0,                 // 吹管(巫医)
+  3350: 2,                // 酒馆老板枪
+  2269: 2, 2223: 2,       // 旅商左轮 / 肉后枪
+};
 export const TOWN_HOLDOUT: Record<number, TownHoldout> = {
   19: { pre: 95, hm: 98 },                       // 爆破专家:火枪→肉后霰弹枪;HM 锚 X-10*dir/Y+4(:27127-27131)
   22: { pre: 39, grip: 18 },                     // 向导:木弓;aim>-0.1 锚 Y+4(:27107)
   178: { pre: 434 },                             // 巫医
   227: { pre: 3350, grip: 16, scale: 0.85 },     // 酒馆老板
-  368: { pre: 2269, hm: 2223, preGripAimDown: 28, preScale: 0.75 }, // 高尔夫球手
+  368: { pre: 2269, hm: 2223, preGripAimDown: 28, preScale: 0.75 }, // 旅商:左轮→肉后枪;攻帧≥21 加持 Extra_53 手部
 };

@@ -16,6 +16,7 @@ import {
   type MountedPlayerView,
   DRILL_PICK_POWER, DRILL_PICK_TIME, DRILL_MAX_LENGTH,
   drillBlockTarget, drillWallTarget, clampToDeadZone, scutlixFindTarget,
+  groundBelowProbe,
   inAPlaceWithWind, fishronWashFactor,
   canKillTileAt, canPlayerSmashWallAt, smoothSlopeAt, bodyRotationFor, mountLights,
   MountShot,
@@ -591,6 +592,76 @@ describe('钻头坐骑（mount 8）：MountInstance 状态机（UseDrill/UpdateD
     expect(DRILL_PICK_POWER).toBe(210);
     expect(DRILL_PICK_TIME).toBe(1);
     expect(DRILL_MAX_LENGTH).toBe(224);
+  });
+});
+
+describe('悬停坐骑贴地/起落门（Mount.cs Hover :3437-3457 尾段 + Player.cs:26939）', () => {
+  /** view.store 桩：solid 集合按格坐标给（groundBelowProbe/tryBeginningFlight 探针用） */
+  const storeWith = (solid: Array<[number, number]>) => {
+    const set = new Set(solid.map(([x, y]) => `${x},${y}`));
+    return {
+      inBounds: (tx: number, ty: number) => tx >= 0 && tx < 40 && ty >= 0 && ty < 40,
+      idx: (tx: number, ty: number) => ty * 40 + tx,
+      flags: new Uint8Array(40 * 40).fill(1),
+      isSolid: (tx: number, ty: number) => set.has(`${tx},${ty}`),
+    };
+  };
+  it('groundBelowProbe：脚底下一行有实心 = 贴地（:3443-3448 TileCollision 探针等价）', () => {
+    const grounded = view({ x: 320, y: 594, w: 20, h: 42, store: storeWith([[20, 39], [21, 39]]) });
+    expect(groundBelowProbe(grounded)).toBe(true);      // 探针行 (594+42+1)/16=39 = 实心
+    const airborne = view({ x: 320, y: 560, w: 20, h: 42, store: storeWith([[20, 39], [21, 39]]) });
+    expect(groundBelowProbe(airborne)).toBe(false);     // 探针行 (603)/16=37 无实心
+  });
+
+  it('免疲劳 hover 坐骑贴地段：下方有地面 vy 保持 0；悬空/按下 → vy=0.001 起落', () => {
+    const m = new MountInstance();
+    m.setMount(8, view());   // 钻头 8 = HOVER_IGNORES_FATIGUE
+    m.frameState = FRAME_STANDING;
+    // 贴地：探针命中 → vy 不动（原版 :3443-3451 残量=0 分支）
+    const onGround = view({ x: 320, y: 594, w: 20, h: 42, store: storeWith([[20, 39], [21, 39]]) });
+    m.hover(onGround);
+    expect(onGround.vy).toBe(0);
+    // 悬空（walked off ledge）：探针落空 → vy=0.001 起落 → 下一 tick 帧态切空中
+    const offLedge = view({ x: 320, y: 560, w: 20, h: 42, store: storeWith([[20, 39], [21, 39]]) });
+    m.hover(offLedge);
+    expect(offLedge.vy).toBe(0.001);
+    // 贴地但按下：主动下潜起落（controlDown 分支）
+    const pressDown = view({ x: 320, y: 594, w: 20, h: 42, store: storeWith([[20, 39], [21, 39]]), inputDown: true });
+    m.hover(pressDown);
+    expect(pressDown.vy).toBe(0.001);
+  });
+
+  it('吃能量 hover 坐骑（蜜蜂 5）非悬停帧态仍走重力（:3437-3439）', () => {
+    const m = new MountInstance();
+    m.setMount(5, view());
+    m.frameState = FRAME_STANDING;
+    const v = view({ x: 320, y: 594, w: 20, h: 42, store: storeWith([[20, 39], [21, 39]]) });
+    m.hover(v);
+    expect(v.vy).toBeCloseTo(0.4);   // DEFAULT_GRAVITY
+  });
+
+  it('悬停静置防漂：无升降输入收敛 -0.001 且 y 下移 0.001 抵消上漂（:3446-3450）', () => {
+    const m = new MountInstance();
+    m.setMount(8, view());
+    m.frameState = FRAME_IN_AIR;
+    const v = view({ x: 320, y: 560, w: 20, h: 42, vy: 1.5, store: storeWith([]) });
+    for (let i = 0; i < 40 && v.vy !== -0.001; i++) m.hover(v);   // 钳位带 0.16/tick 回拉
+    expect(v.vy).toBe(-0.001);       // 静置档
+    const y0 = v.y;
+    m.hover(v);
+    expect(v.y).toBeCloseTo(y0 + 0.001);   // position.Y -= -0.001 抵消上漂
+  });
+
+  it('tryStartHover 边沿用 jumpEdgePrev（tick 尾快照）——上 tick 已按不触发（:26939 releaseUp）', () => {
+    const m = new MountInstance();
+    m.setMount(8, view());
+    const held = view({ inputUp: true, jumpEdgePrev: true });
+    m.tryStartHover(held);
+    expect(held.vy).toBe(0);         // 上 tick 跳键已按 = 非 releaseUp 边沿
+    const fresh = view({ inputUp: true, jumpEdgePrev: false });
+    m.tryStartHover(fresh);
+    expect(fresh.vy).toBeLessThan(0); // -(acceleration+gravity+0.001)
+    expect(fresh.vy).toBeCloseTo(-(0.16 + 0.4 + 0.001));
   });
 });
 

@@ -147,10 +147,12 @@ describe('1457 复活跳过五门', () => {
     p.dead = true;
     expect(p.isGhostPhase(w)).toBe(false);            // 非硬核:永不成幽灵
     (p as unknown as { appearance: { difficulty: number } }).appearance = { difficulty: 2 };
+    // ★2026-08-25 倒计语义（1456 respawnTimer 死亡置满值递减 :38303/:16896）:
+    //   幽灵相 = 计时到期（≤0）;曾正计"超时 >600"系移植反模型
     p.respawnTimer = 600;
-    expect(p.isGhostPhase(w)).toBe(false);            // 经典档阈值 600,未超时
-    p.respawnTimer = 601;
-    expect(p.isGhostPhase(w)).toBe(true);             // 超时 → 幽灵相(跳过门被禁)
+    expect(p.isGhostPhase(w)).toBe(false);            // 经典档满值 600,未到期
+    p.respawnTimer = 0;
+    expect(p.isGhostPhase(w)).toBe(true);             // 到期 → 幽灵相(跳过门被禁)
   });
   it('门⑤ PvP 死亡(lastPvpDeath):置位即禁跳(内联门 fixedUpdate :4741)', () => {
     const p = new Player(0, 0, new Inventory());
@@ -163,13 +165,14 @@ describe('1457 复活跳过五门', () => {
     // 2026-08-24 重构:门链提取为 respawnSkipUi 赋值(Main.cs:46104-46136 同门,
     // 死亡 UI"按SPACE跳过"提示淡入与此位联动,Renderer 消费)→ 跳过消费点变为
     // `jumpEdge && player.respawnSkipUi`。四门语义未动(=Player.cs:39264-39291)。
-    const i = src.indexOf('player.respawnSkipUi = player.respawnTimer >= 90');
+    // 2026-08-25 倒计改造:90t 锁的 elapsed 语义走 deadTime(双计数器分立)
+    const i = src.indexOf('player.respawnSkipUi = player.deadTime >= 90');
     expect(i).toBeGreaterThan(-1);
     const chain = src.slice(i, i + 260);   // 赋值链体(跨行条件)+ jumpEdge 消费点
     expect(chain).toContain('isGhostPhase');
     expect(chain).toContain('lastPvpDeath');
     expect(chain).toContain('allowsRespawnTimerSkip');
-    expect(chain).toContain('respawnTimer >= 90');   // DeadSkipLockoutTime(:1627)
+    expect(chain).toContain('deadTime >= 90');       // DeadSkipLockoutTime(:1627)
     expect(chain).toContain('jumpEdge');             // JustBecameTrue(Jump) 消费点
   });
 });

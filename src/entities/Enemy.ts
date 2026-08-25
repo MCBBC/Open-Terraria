@@ -271,6 +271,16 @@ const FROSTMOON_DAY_ACTIVE = new Set([343, 350]);
 /** 通用 ai[3] 卡死计数的跳过集（NPC.cs:57472-57546）：425/471 整段跳过（flag9，
  *  ai[3] 被各自状态机独占）；switch 集（flag10）在 ai[2]>0（瞄准/蓄力中）时跳过 */
 const AI3_COUNTER_SKIP_ENTIRELY = new Set([425, 471]);
+/** PlatformProperTopFrame（cs:70197）：帧列号 ∈[0,7]∪[12,16]∪[25,26]——
+ *  flag5 地面扫描的顶坡平台特例用（LiquidSim.ts 同源副本） */
+function platformProperTopFrame(fx: number): boolean {
+  const num = Math.floor(fx / 18);
+  if ((num < 0 || num > 7) && (num < 12 || num > 16)) {
+    if (num >= 25) return num <= 26;
+    return false;
+  }
+  return true;
+}
 // AI_003 宽探针表（1457 NPC.cs:60547-60550）：19 型前方探测点 = width/2+16（其余 15）
 // ——跳跃链与攻门共用（R6-B 1-5）
 const FIGHTER_WIDE_PROBE = new Set([
@@ -3881,11 +3891,17 @@ export class Enemy extends Entity {
     } else if (!(this.ai2 > 0 && FIGHTER_BUSY_WITH_ACTION.has(vidF))) {
       // :57771-57797 游荡转向；624/631 免 EncourageDespawn（:57773）
       if (daySurface && vidF !== 624 && vidF !== 631) this.encourageDespawn(10);
-      // 游荡转向（原版 else 分支 ：57783-57797：站定累计 2t 反转 direction——
-      // velocity.X==0 精确判，R6-B 对齐）
-      if (this.vx === 0 && this.vy === 0) {
-        this.state += 1;
-        if (this.state >= 2) { this.facing *= -1; this.state = 0; }
+      // 游荡转向（原版 else 分支 ：57783-57797）：★原版结构 = vx≠0 才清零；
+      // vx==0&&vy==0 计数+1；**vx==0&&vy≠0（空中未移动）计数保持**（内层无
+      // else-reset）——曾误加内层 else 清零，贴墙跳循环每周期被空中 tick 归零
+      // → 卡死计数满后永不转向（凹槽重放 face 恒 -1 实锤）。★vy 门补 onGround：
+      // 原版 AI 在物理前读 vy==0=贴地；本仓跳跃段在物理后，落地 tick 尾 vy=-8
+      // （跳已排队），onGround=上一 tick 碰撞落地态，两时点同义
+      if (this.vx === 0) {
+        if (this.vy === 0 || this.onGround) {
+          this.state += 1;
+          if (this.state >= 2) { this.facing *= -1; this.state = 0; }
+        }
       } else {
         this.state = 0;
       }
@@ -4005,11 +4021,57 @@ export class Enemy extends Entity {
       this.applyGravity(game);
       moveAndCollide(this, game.world, this.vx, this.vy);
     }
+    // ---- flag5 地面扫描（:60213-60255 扫描体 + :60412 `if (flag5)` 跳跃段总门）----
+    // 原版外层门 `velocity.Y == 0f || flag`（:60213；flag=特型跳攻态，僵尸族恒 false）
+    // ——AI 时点 vy==0 = 上一 tick 碰撞清零后（贴地/磕檐均满足）。扫描盒中段列
+    // （x+8..x+w-8）：头上 -9px 行 SolidTileNoPlatforms → flag5=false（封顶禁跳）；
+    // 脚下 +7px 行 SolidTileAllowBottomSlope → flag5=true（可跳）。flag5 默认 false，
+    // 空中 tick（vy≠0）整段扫描跳过 = 跳跃段不跑。
+    // ★缺此门的后果（2026-08-25 用户报双僵尸凹槽"卡死不动弹"，重放实锤 t16 起
+    // y=3808/hitHead=1/vy=-8 三量 900+ tick 恒定）：本仓跳跃段在碰撞【后】，
+    // vy===0 会被磕檐本身满足 + vxSign 捕获的是碰撞前非零值 → 磕檐+前方实心 →
+    // 每 tick 重新起跳 -8 → 永久钉死天花板。原版钉檐态下一 tick 扫描找不到脚下
+    // 地面 → flag5=false → 不跳 → 重力累积 → 落回。扫描按位置判定，两时点同效。
+    // （:60253-55 的 `!flag5 && vy<0 → vy=0` 在原版时点才可达，本时点 vy 恒 0，略。）
+    let flag5 = false;
+    if (this.vy === 0) {
+      const rowFeet = Math.floor((this.y + this.h + 7) / TILE);   // num188（:60214）
+      const rowHead = Math.floor((this.y - 9) / TILE);            // num189（:60215）
+      const colL = Math.floor(this.x / TILE);                     // num190
+      const colR = Math.floor((this.x + this.w) / TILE);          // num191
+      const scan0 = Math.floor((this.x + 8) / TILE);              // num192
+      const scan1 = Math.floor((this.x + this.w - 8) / TILE);     // num193
+      let flag23 = false;
+      for (let c = scan0; c <= scan1; c++) {
+        if (c >= colL && c <= colR && !st.inBounds(c, rowFeet)) { flag23 = true; continue; } // tile==null
+        // SolidTileNoPlatforms（WorldGen.cs:70444）：active && !Platforms 集 &&
+        // (tileSolid||tileSolidTop) && !inActive——Platforms 集 = 本仓 solid∧platform
+        if (st.inBounds(c, rowHead) && st.flags[st.idx(c, rowHead)]) {
+          const hd = TILE_DEFS[st.type[st.idx(c, rowHead)]];
+          const hi = st.idx(c, rowHead);
+          if (hd && (hd.solid || hd.platform) && !(hd.solid && hd.platform)
+            && !(st.wire[hi] & TileStore.WIRE_ACTUATED)) { flag5 = false; break; }
+        }
+        // SolidTileAllowBottomSlope（WorldGen.cs:70471）：active && (solid||solidTop)
+        // && (!topSlope || (Platforms && PlatformProperTopFrame)) && !halfBrick && !inActive
+        if (!flag23 && c >= colL && c <= colR && st.inBounds(c, rowFeet) && st.flags[st.idx(c, rowFeet)]) {
+          const fi = st.idx(c, rowFeet);
+          const fd = TILE_DEFS[st.type[fi]];
+          if (fd && (fd.solid || fd.platform) && !st.half[fi]
+            && !(st.wire[fi] & TileStore.WIRE_ACTUATED)) {
+            const sl = st.slope[fi];
+            if (!(sl === 1 || sl === 2)) flag5 = true;                    // 非顶坡直过
+            else if (fd.solid && fd.platform && platformProperTopFrame(st.frameX[fi] ?? 0)) flag5 = true;
+          }
+        }
+      }
+    }
     // ---- 四级跳判定（L24651-24733）：仅在朝移动方向撞到东西时 ----
     // 原版全部跳跃赋值都有 velocity.Y == 0f 前置（AI_003 内 44 处同款门）——
     // 缺失此门时空中贴墙每帧 vy=-8 → 沿墙飞天贴天花板（主角靠近才掉落）
     // ★门前短路（:60584 if/else 互斥）：攻门 tick 跳梯/卡死跳/专家梯整体不跑
-    const movingInto = atDoorTile === null && jumpGate580 && vxSign === dir
+    // ★整段在原版 `if (flag5)` 内（:60412）——含卡死小跳/专家跳扑/攻门
+    const movingInto = flag5 && atDoorTile === null && jumpGate580 && vxSign === dir
       && vxSign !== 0 && this.vy === 0;
     if (movingInto) {
       if (this.h >= 32 && solidAt(fx, fy - 2)) {
@@ -4042,14 +4104,15 @@ export class Enemy extends Entity {
       }
       // :60740 卡死小跳（R6-B 1-3）：flag6（tick 初零速未受击）+ 卡死计数恰 1 →
       // vy=-5——全战士族经典模式同样生效（顶墙/嵌格脱困；与上链互斥：链已起跳则
-      // vy≠0 跳过，与原版序一致）
-      if (this.vy === 0 && flag6Stuck && this.ai3 === 1) {
+      // vy≠0 跳过，与原版序一致）★在原版 `if (flag5)` 内
+      if (flag5 && this.vy === 0 && flag6Stuck && this.ai3 === 1) {
         this.vy = -5;
       }
       // :60744 专家跳扑梯（R6-B 1-2）：门 = 落地 &&（专家||586）&& 玩家底边高于
       // 自身顶边 && |Δcx|<玩家宽×3 && CanHit——无 vx==0/ai3 条件（贴墙奔跑时每 tick
       // 都可触发；曾误并入卡死计数恰 1 的单 tick 窗 → 专家模式战士跳不上玩家平台）
-      if (this.vy === 0 && (mainExpertMode(game.world) || vidF === 586) && player
+      // ★同在 `if (flag5)` 内
+      if (flag5 && this.vy === 0 && (mainExpertMode(game.world) || vidF === 586) && player
         && player.y + player.h < this.y
         && Math.abs(this.cx - player.cx) < player.w * 3
         && canHit(st, this.x, this.y, this.w, this.h, player.x, player.y, player.w, player.h)) {
@@ -4095,8 +4158,9 @@ export class Enemy extends Entity {
     // 460 恒一击即开、10=OpenDoor、388=ShiftTallGate，失败 → ai[3]=num58（停索敌
     // 转游荡）。行进无障碍时跳梯尾 else if(flag8) 归零 ai[1]/ai[2]（:60735-60739）。
     // ★flag8=false 族（FIGHTER_NO_DOOR）整段短路（doorWarm/doorHit 不累计）。
-    // atDoorTile 已在跳梯前探测（互斥门）；此处补 flag5 落地代理（vy==0）
-    if (atDoorTile !== null && this.vanillaId != null && this.vy === 0) {
+    // atDoorTile 已在跳梯前探测（互斥门）；★门块在原版 `if (flag5)` 顶层（:60584）
+    // ——曾用 vy==0 代理，磕檐后 vy==0 同样满足 → 钉檐态凭空攻门；现用真 flag5
+    if (flag5 && atDoorTile !== null && this.vanillaId != null) {
       this.doorWarm += 1;                              // ai[2]++（:60586）
       this.ai3 = 0;                                    // ai[3]=0 保持索敌（:60587）
       if (this.doorWarm >= 60) {                       // :60588 每 60t 一击

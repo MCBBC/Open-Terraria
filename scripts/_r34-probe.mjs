@@ -142,48 +142,44 @@ const out = await page.evaluate(async () => {
     await settle(3);
   } catch (e) { R.fatal = '(a) ' + e.message; }
 
-  // ---------- (b) 3852 书杖右键 704 ----------
+  // ---------- (b) 3852 书杖右键 704（per-tick 重申 rightDown 电平） ----------
   try {
     giveItem(3852, 2); p.inv.selected = 2;
     await settle(5);
-    // mana spy:记录 checkMana 入参 + 用引擎真值字段读蓝
-    p.statManaMax2 = 400; p.manaMax = 400; p.mana = 400;
     const manaCalls = [];
     const origCheck = p.checkMana.bind(p);
-    p.checkMana = (a, b) => { manaCalls.push(a); return origCheck(a, b); };
+    p.checkMana = (a) => { manaCalls.push(a); return origCheck(a); };
     const foe = makeFoe(px + 4);
+    foe.hpMax = 99999; foe.hp = 99999;
     await ticks(2); foeLog.unfreeze();
     const hp0 = foe.hp;
-    let twisterSeen = false;
-    let manaAtHit = null;
-    const t0 = performance.now();
-    g.input.rightDown = true;
-    for (let i = 0; i < 8 && !twisterSeen; i++) {
-      await ticks(1);
-      twisterSeen = g.entities.projectiles.some((q) => q.projId === 704);
-      if (twisterSeen && manaAtHit === null) manaAtHit = p.mana;
-    }
-    const mana0 = 400;
-    const twister = g.entities.projectiles.find((q) => q.projId === 704);
-    ck('(b1) 右键生成 704 风暴柱在场', !!twister, `found=${!!twister}`);
-    if (twister) ck('(b2) 盒 60×210(SetDefaults :7450)', twister.w === 60 && twister.h === 210,
-      `${twister.w}×${twister.h}`);
-    ck('(b3) 蓝 ×2=40(GetManaCostToPay :53320——checkMana spy 入参含 40)',
-      manaCalls.includes(40), `calls=${JSON.stringify(manaCalls)}`);
-    void manaAtHit; void mana0;   // 引擎侧蓝池钳制(新角 20 上限)使净耗读数失真——入参 spy 为准
-    for (let i = 0; i < 45; i++) { foeLog.unfreeze(); await ticks(1); }
-    ck('(b4) 风暴柱接触掉血(local 免疫 −1)', foe.hp < hp0, `hp ${hp0}→${foe.hp}`);
-    // RMB 连发(:31902):继续按住跨动画窗,spy 计第二颗生成
-    let made = 1;
+    aimAt(foeLog.home.x - 48, foeLog.home.y);
+    let made = 0;
     const origAddB = g.entities.add.bind(g.entities);
-    g.entities.add = (e, b) => { if (e && e.projId === 704) made++; return origAddB(e, b); };
-    g.input.rightDown = true;
-    for (let i = 0; i < 70; i++) { g.fixedUpdate(1 / 60); }
+    g.entities.add = (e, b) => {
+      if (e && e.projId === 704 && !e.dead) {
+        made++;
+        if (made === 1) manaCalls.push('manaAtFire=' + p.mana);
+      }
+      return origAddB(e, b);
+    };
+    // 右键按住 170t（覆盖 ≥2 动画窗）：每拍重申电平后同步步进
+    for (let i = 0; i < 170; i++) {
+      g.input.rightDown = true;
+      g.fixedUpdate(1 / 60);
+    }
     g.entities.add = origAddB;
     release();
-    ck('(b5) RMB 连发门(:31902 itemAnimation==0 再入,70t 内再产 ≥1)',
-      made >= 2, `made=${made} dt=${Math.round(performance.now() - t0)}ms`);
-    void mana0;
+    ck('(b1) 右键生成 704 风暴柱在场', made > 0, `made=${made}`);
+    const twister = g.entities.projectiles.find((q) => q.projId === 704);
+    if (twister) ck('(b2) 盒 60×210(SetDefaults :7450)', twister.w === 60 && twister.h === 210,
+      `${twister.w}×${twister.h}`);
+    ck('(b3) 蓝 ×2=40(GetManaCostToPay :53320——checkMana 入参含 40)',
+      manaCalls.includes(40), `calls=${JSON.stringify(manaCalls.slice(0, 8))}...`);
+    ck('(b5) RMB 连发门(:31902 itemAnimation==0 再入,170t 内 ≥2 柱)', made >= 2, `made=${made}`);
+    for (let i = 0; i < 30; i++) { foeLog.unfreeze(); g.fixedUpdate(1 / 60); }
+    ck('(b4) 风暴柱接触掉血(local 免疫 −1)', foe.hp < hp0, `hp ${hp0}→${foe.hp}`);
+    delete p.checkMana;
     await settle(4);
   } catch (e) { R.fatal = R.fatal ?? '(b) ' + e.message; }
 
@@ -225,11 +221,17 @@ const out = await page.evaluate(async () => {
     giveItem(5065, 2); p.inv.selected = 2;
     await settle(5);
     const foe = makeFoe(px + 4);   // 魔法阵自带 104 盒,敌无需放大
+    R.dbg.dHpAtSpawn = foe.hp;
     await ticks(2); foeLog.unfreeze();
+    R.dbg.dHpAfterTicks = foe.hp;
+    R.dbg.dPreHits = foeLog.hits.length;
+    foe.hpMax = 99999; foe.hp = 99999;                 // 满血装置:防秒杀干扰 hp 差断言
+    const hp0d = foe.hp;
     aimAt(foeLog.home.x, foeLog.home.y);
     g.input.mouseDown = true; g.input.mouseHeld = false;
     await ticks(3);
     const circle = g.entities.projectiles.find((q) => q.projId === 950 && !q.dead);
+    R.dbg.dHpAfterCast = foe.hp;
     ck('(d1) 出手生成 950 魔法阵', !!circle, `found=${!!circle}`);
     if (circle) {
       ck('(d2) 盒 104×104(SetDefaults :8960)', circle.w === 104 && circle.h === 104,
@@ -238,18 +240,32 @@ const out = await page.evaluate(async () => {
         `v=(${circle.vx},${circle.vy})`);
       const d0 = Math.hypot(circle.cx - foeLog.home.x, circle.cy - foeLog.home.y);
       ck('(d3b) 落点在目标近域(<140px,视线回卷几何)', d0 < 140, `dist=${Math.round(d0)}`);
-      const hp0 = foe.hp;
       for (let i = 0; i < 10; i++) { foeLog.unfreeze(); await ticks(1); }
-      ck('(d4) 接触掉血(伤×0.98 折价后)', foe.hp < hp0, `hp ${hp0}→${foe.hp}`);
-      // 60t 包络:引擎主循环驱动,墙钟窗断言(60t@60fps≈1000ms,容差 ±350ms)
-      const born = performance.now();
-      let died = -1;
-      for (let i = 0; i < 160 && died < 0; i++) {
-        await ticks(1);
-        if (!g.entities.projectiles.includes(circle)) died = performance.now() - born;
+      ck('(d4) 接触掉血(伤×0.98 折价后)', foe.hp < hp0d,
+        `hp ${hp0d}→${foe.hp} hits=${foeLog.hits.length}`);
+      // 60t 包络:以 fixedUpdate 计数断言(headless rAF 帧率不恒 60,墙钟失真)
+      const origFixedD = g.fixedUpdate.bind(g);
+      let ftick = 0;
+      g.fixedUpdate = (dt) => { ftick++; return origFixedD(dt); };
+      const bornTick = ftick;
+      const stacks = [];
+      let dv = circle.dead;
+      Object.defineProperty(circle, 'dead', {
+        get() { return dv; },
+        set(nv) { if (nv && !dv) stacks.push(new Error().stack?.split('\n').slice(1, 4).join(' | ')); dv = nv; },
+        configurable: true,
+      });
+      let diedAt = -1;
+      for (let i = 0; i < 400 && diedAt < 0; i++) {
+        origFixedD(1 / 60); ftick++;
+        if (!g.entities.projectiles.includes(circle)) diedAt = circle.t;
       }
-      ck('(d5) AI 自管 60t 包络自灭(AI_186 num=60)', died >= 550 && died <= 1350,
-        `lifeMs=${Math.round(died)}`);
+      g.fixedUpdate = origFixedD;
+      R.dbg.dStacks = stacks;
+      R.dbg.dN950 = 'post';
+      ck('(d5) AI 自管 60t 包络自灭(AI_186 num=60,总龄断言)', diedAt === 60,
+        `totalAgeTicks=${diedAt}`);
+      R.dbg.dDeadFlag = circle.dead;
     }
     release();
     await settle(3);

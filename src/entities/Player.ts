@@ -3461,7 +3461,13 @@ export class Player extends Entity {
       this.vy = Math.max(-lJSpd, Math.min(lMaxFall, this.vy));
       this.fallStartY = null;
     } else {
-      if (this.inputJump && (jumpEdge || (this.ridingMount ? this.mount.autoJump : eqJ.autoJump)) && this.onGround) {
+      // 悬停坐骑贴地档（JumpMovement :20845 落地门 = velocity.Y==0f 原版字面）：
+      // 免疲劳 hover 族（UFO 7/钻头 8 等）静置时 vy 恒 0 且无 Y 位移 → onGround
+      // （落地碰撞置位）恒假 → 跳跃门全灭 = 地底无法起飞只能横移（用户实报）。
+      // 原版以 vy==0 为贴地语义,此处对 CanHover 坐骑补同义门
+      const hoverGrounded = this.ridingMount && this.mount.canHover(this) && this.vy === 0;
+      if (this.inputJump && (jumpEdge || (this.ridingMount ? this.mount.autoJump : eqJ.autoJump))
+        && (this.onGround || hoverGrounded)) {
         // 跳跃速度 = 基础 + jumpSpeedBoost（蛙腿族 +1.6，Player.jumpSpeedBoost :22427）；
         // 重力倒置时方向取反（gravDir，Player.cs:3207 全部 vy 乘 gravDir 语义）
         // 起跳门 = releaseJump || (autoJump && vy==0)（JumpMovement :20845——按住跳键

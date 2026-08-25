@@ -172,7 +172,7 @@ class GLBgBlit implements BGBlit {
 }
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
-import { TOWN_HOLDOUT } from '../data/vanillaTownAttack';
+import { TOWN_HOLDOUT, ITEM_POS_NUM } from '../data/vanillaTownAttack';
 import { viIdFromKey, itemCombat } from '../data/vanillaItemCombat';
 import { VANILLA_IS_FOOD, type FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -10777,6 +10777,22 @@ export class Renderer {
         const anchorX = p.x + p.w / 2 + xOff;
         const anchorY = p.y + p.h - (42 + (d.heightBoost ?? 0)) / 2 + (d.yOffset ?? 0) + mnt.playerOffset;
         ctx.save();
+        // ---- 机身倾斜（Mount.cs Hover 尾段 :3468-3521 写 player.fullRotation）：
+        //      原版 mount 贴图与玩家本体同在 PlayerDrawSet 绘制缓存里，TransformDrawData
+        //      （PlayerDrawLayers.cs:4199-4230）绕 drawinfo.Position+fullRotationOrigin
+        //      把【全部层】作刚体旋转——两侧 pivot 必然同源：
+        //        UFO 7 / 钻头 8 = mounted 盒心（Mount.cs:6268-6271 (width/2, height/2)）
+        //        巫婆扫帚 23 = mounted 盒底心（Mount.cs:3520 (width/2, height)）
+        //      ★必须在锚点平移【之前】以绝对坐标施加——曾写在 translate(anchor) 之后,
+        //      枢轴被锚点平移二次偏移（T(A)·T(P)·R·T(−P)），位移 ≈2|P|sin(θ/2) 随世界
+        //      坐标线性放大（|P|≈3.4 万 px、θ=0.37 → 甩出 ≈1 万 px）= 钻头一动
+        //      舱体贴图整层消失（用户实报①）。旋转零角时 playerMountRotation 返
+        //      null，跳过等价 ----
+        const mrot = (mnt.type === 7 || mnt.type === 8 || mnt.type === 23)
+          ? playerMountRotation(mnt.type, mnt.fullRotation,
+            { x: p.x, y: p.y, w: p.w, h: p.h }, mnt.heightBoost)
+          : null;
+        if (mrot) applyPlayerMountRotation(ctx, mrot);
         ctx.translate(anchorX, anchorY);
         // 朝向翻转（Mount.Draw :5831-5837）：type 8 仅前层（座舱）面右翻——环/二极管
         // 不翻（二极管靠 diodeRotation 覆盖全向）；其余坐骑面左翻
@@ -10784,21 +10800,6 @@ export class Renderer {
           ? (layer === 'front' ? p.facing > 0 : false)
           : p.facing < 0;
         if (flip) ctx.scale(-1, 1);
-        // ---- 机身倾斜（Mount.cs Hover 尾段 :3468-3521 写 player.fullRotation）：
-        //      原版 mount 贴图与玩家本体同在 PlayerDrawSet 绘制缓存里，TransformDrawData
-        //      （PlayerDrawLayers.cs:4199-4230）绕 drawinfo.Position+fullRotationOrigin
-        //      把【全部层】作刚体旋转——两侧 pivot 必然同源：
-        //        UFO 7 / 钻头 8 = mounted 盒心（Mount.cs:6268-6271 (width/2, height/2)）
-        //        巫婆扫帚 23 = mounted 盒底心（Mount.cs:3520 (width/2, height)）
-        //      故此处与 drawPlayer 的 playerMountRotation 取同一锚（mounted 盒系，
-        //      不含 xOffset/yOffset/playerOffset 贴图定位项——曾挂贴图锚点上与本体
-        //      差 ≈4px（yOffset 4 + playerOffset），备案已核销）。旋转零角时
-        //      playerMountRotation 返 null，rotate(0) 本就恒等，跳过等价 ----
-        if (mnt.type === 7 || mnt.type === 8 || mnt.type === 23) {
-          const mrot = playerMountRotation(mnt.type, mnt.fullRotation,
-            { x: p.x, y: p.y, w: p.w, h: p.h }, mnt.heightBoost);
-          if (mrot) applyPlayerMountRotation(ctx, mrot);
-        }
         // 层旋转（Mount.Draw :5793-5796）：钻头背层 = 外环角 / 钻头眼前层 = 二极管角
         if (mnt.type === 8) {
           ctx.rotate(layer === 'back' ? mnt.outerRingRotation : 0);
@@ -10896,19 +10897,14 @@ export class Renderer {
               }
             } else if (mnt.type === 8 && layer === 'front') {
               // 二极管层（frontExtra）：不随 facing 翻（上面 flip 只对 front 主层）——
-              // 此处在已翻转的坐标系里先翻回来，再按 diodeRotation 旋转；同层先抵消
-              // 机身倾斜（fullRotation）——激光段原版 ignorePlayerRotation=true（:6061），
-              // 二极管贴图随机身倾斜的原版差异一并近似掉（登记）。
-              // 抵消须绕同一 mounted 盒 pivot 取逆（上方机身旋转已改挂该锚）——
-              // 简单 rotate(−θ) 绕贴图锚点会残留 pivot 杠杆位移（≈|Δ|·θ，~1.5px）
+              // 此处在已翻转的坐标系里先翻回来再旋转。净角 = diodeRotation：
+              // 原版层自转 num9 = diodeRotation − fullRotation（Mount.cs:5869-5871
+              // case 3），TransformDrawData 再给每层加回 fullRotation（:4210 附近）→
+              // 净 = diodeRotation。本仓 M（机身倾斜）已施加在锚点平移前（供给每层
+              // +fullRotation 分量），此处自转取 diodeRotation − fullRotation 对冲
               ctx.save();
-              if (mnt.fullRotation !== 0) {
-                const inv = playerMountRotation(mnt.type, -mnt.fullRotation,
-                  { x: p.x, y: p.y, w: p.w, h: p.h }, mnt.heightBoost);
-                if (inv) applyPlayerMountRotation(ctx, inv);
-              }
               if (flip) ctx.scale(-1, 1);
-              ctx.rotate(mnt.diodeRotation);
+              ctx.rotate(mnt.diodeRotation - mnt.fullRotation);
               ctx.drawImage(ex, 0, 0, ex.width, ex.height, -ex.width / 2, -ex.height / 2, ex.width, ex.height);
               // 二极管发光层（Mount.cs:1335 frontTextureExtraGlow=DrillMount[5]→
               // Mount_Glow_DrillDiode；Draw :5848-5852 同位二次 Draw，色同上主层公式）

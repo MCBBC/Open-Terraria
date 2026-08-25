@@ -42,18 +42,22 @@ interface Shell {
 
 /** 组装原型壳：mySlot=3，players 槽位表（{slot: {active, dead}}） */
 function shell(opts: {
-  dead?: boolean; respawnTimer?: number; slot?: number;
+  dead?: boolean; respawnTimer?: number; deadTime?: number; slot?: number;
   players?: Record<number, { active: boolean; dead: boolean }>;
   net?: boolean; ghost?: boolean;
 } = {}): Shell {
   const w = new World(64, 64, 42, '观战测试');
   const p = new Player(100, 100, new Inventory());
   p.dead = !!opts.dead;
+  // ★2026-08-25 倒计改造(1456 respawnTimer 死亡置满值递减 :38303/:16896):
+  //  观战门走 deadTime(CanDeathSpectate :3939 ≥ DeadSpectatingLockoutTime),
+  //  respawnTimer 仅作剩余值语义保留
   p.respawnTimer = opts.respawnTimer ?? 0;
+  p.deadTime = opts.deadTime ?? 0;
   if (opts.ghost) {
-    // isGhostPhase（Player.ts:5178-5182）：difficulty==2 且 respawnTimer 越阈值
+    // isGhostPhase:difficulty==2 且 respawnTimer 到期(≤0,倒计语义)
     p.appearance = { difficulty: 2 } as unknown as Player['appearance'];
-    p.respawnTimer = 2000;   // > (600+0)×1.5 硬核专家外也够（600 阈值已越）
+    p.respawnTimer = 0;
   }
   const sendFocus = vi.fn();
   const g = Object.create(Game.prototype) as unknown as Shell;
@@ -77,16 +81,16 @@ function shell(opts: {
 
 describe('CanDeathSpectate（Player.cs:3933-3943 + :16921 适用域门）', () => {
   it('dead && !ghost && deadTime≥60（DeadSpectatingLockoutTime :1526）', () => {
-    expect(shell({ dead: true, respawnTimer: 60 }).canDeathSpectate()).toBe(true);
+    expect(shell({ dead: true, deadTime: 60 }).canDeathSpectate()).toBe(true);
   });
   it('锁定期 59t 不接管', () => {
-    expect(shell({ dead: true, respawnTimer: 59 }).canDeathSpectate()).toBe(false);
+    expect(shell({ dead: true, deadTime: 59 }).canDeathSpectate()).toBe(false);
   });
   it('硬核幽灵（ghost）不接管——Ghost() :6349 已清观战', () => {
-    expect(shell({ dead: true, respawnTimer: 2000, ghost: true }).canDeathSpectate()).toBe(false);
+    expect(shell({ dead: true, respawnTimer: 0, ghost: true }).canDeathSpectate()).toBe(false);
   });
   it('存活态恒 false（存活观战走 :24496-24504 spectating>=0 路径）', () => {
-    expect(shell({ dead: false, respawnTimer: 100, slot: 5 }).canDeathSpectate()).toBe(false);
+    expect(shell({ dead: false, deadTime: 100, slot: 5 }).canDeathSpectate()).toBe(false);
   });
   it('单机恒 false（netMode==1 门——单机死亡用死亡画面，SpectateNextPlayer :17044 同门）', () => {
     expect(shell({ dead: true, respawnTimer: 100, net: false }).canDeathSpectate()).toBe(false);
@@ -112,7 +116,7 @@ describe('includeSelf 环选（SpectateNextPlayer :17049-17072，:17067 (num2 !=
     expect(g.spectatingSlot).toBe(-1);
   });
   it('死亡态从自尸（slot=-1）起环选：落到下一个他人，不落自机（n==cur 即环完 break）', () => {
-    const g = shell({ dead: true, respawnTimer: 100, players: { 5: { active: true, dead: false } } });
+    const g = shell({ dead: true, deadTime: 100, players: { 5: { active: true, dead: false } } });
     expect(g.spectateNextPlayer(1, true)).toBe(true);
     expect(g.spectatingSlot).toBe(5);
   });
@@ -145,7 +149,7 @@ describe('spectateCycle 接线（:16960 SpectateNextPlayer(num, dead) + 音效 !
 
 describe('handleSpectatingControls 死亡分支（UpdateDead 尾 :16920-16924）', () => {
   it('锁定期（<60t）：清观战（KillMe :38302 幂等）且不消费鼠标', () => {
-    const g = shell({ dead: true, respawnTimer: 30, slot: 5, players: { 5: { active: true, dead: false } } });
+    const g = shell({ dead: true, deadTime: 30, slot: 5, players: { 5: { active: true, dead: false } } });
     g.input.mouseDown = true;
     g.handleSpectatingControls();
     expect(g.spectatingSlot).toBe(-1);
@@ -154,7 +158,7 @@ describe('handleSpectatingControls 死亡分支（UpdateDead 尾 :16920-16924）
   });
 
   it('解锁后自尸镜头（slot=-1）同样接管：鼠标左键环选起跳', () => {
-    const g = shell({ dead: true, respawnTimer: 100, players: { 5: { active: true, dead: false } } });
+    const g = shell({ dead: true, deadTime: 100, players: { 5: { active: true, dead: false } } });
     g.input.mouseDown = true;
     g.handleSpectatingControls();
     expect(g.spectatingSlot).toBe(5);
@@ -162,7 +166,7 @@ describe('handleSpectatingControls 死亡分支（UpdateDead 尾 :16920-16924）
   });
 
   it('解锁后鼠标右键反向环选（−1 步）', () => {
-    const g = shell({ dead: true, respawnTimer: 100, players: { 1: { active: true, dead: false } } });
+    const g = shell({ dead: true, deadTime: 100, players: { 1: { active: true, dead: false } } });
     g.input.rightDown = true;
     g.handleSpectatingControls();
     expect(g.spectatingSlot).toBe(1);
@@ -171,7 +175,7 @@ describe('handleSpectatingControls 死亡分支（UpdateDead 尾 :16920-16924）
   it('目标死亡滞留超窗（180t，:16993）→ 回退换人；无他人 → 回自尸 -1', () => {
     // tickCount 越窗：目标 5 死亡且非当前滞留
     const g = shell({
-      dead: true, respawnTimer: 100, slot: 5,
+      dead: true, deadTime: 100, slot: 5,
       players: { 5: { active: true, dead: true } },
     });
     g.spectateDeathAt.set(5, 0);                          // 死亡时刻 t=0
@@ -183,7 +187,7 @@ describe('handleSpectatingControls 死亡分支（UpdateDead 尾 :16920-16924）
 
 describe('respawnPlayer 清观战（Spawn :37186-37137 spectating=-1）', () => {
   it('死亡观战遗留 slot 在复活时清 -1 并还原 AOI 焦点', () => {
-    const g = shell({ dead: true, respawnTimer: 100, slot: 5, players: { 5: { active: true, dead: false } } });
+    const g = shell({ dead: true, deadTime: 100, slot: 5, players: { 5: { active: true, dead: false } } });
     g.respawnPlayer();
     expect(g.player.dead).toBe(false);
     expect(g.spectatingSlot).toBe(-1);
@@ -233,7 +237,7 @@ describe('spectateKeyExits 退出键族（:16933 键盘半边,默认键位）', 
 
 describe('滚轮退出（:16933 尾项 ScrollWheelDelta != 0 → SetOrRequestSpectating(-1) return）', () => {
   it('滚轮非零 → 退出观战并消费 wheelDelta（防同 tick 视野缩放重复消费）', () => {
-    const g = shell({ dead: true, respawnTimer: 100, slot: 5, players: { 5: { active: true, dead: false } } });
+    const g = shell({ dead: true, deadTime: 100, slot: 5, players: { 5: { active: true, dead: false } } });
     g.input.wheelDelta = 1;
     g.handleSpectatingControls();
     expect(g.spectatingSlot).toBe(-1);

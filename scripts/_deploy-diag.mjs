@@ -1,48 +1,31 @@
-// 首访综合终验:veil 向日葵 + worker 预取 + 暖缓存 + 标题曲时点 + 404 计数。
+// 跳过门端到端验证:①加载中点击→拒绝 ②暖缓存完成后空格→跳过揭幕。
 import puppeteer from 'puppeteer-core';
-const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:4177';
 const b = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'] });
 const p = await b.newPage();
 const errs = [];
-let splash404 = 0, music404 = 0;
 p.on('pageerror', (e) => errs.push(String(e).slice(0, 120)));
-p.on('response', (r) => {
-  if (r.status() !== 404) return;
-  const u = r.url();
-  if (/SplashScreens/.test(u)) splash404++;
-  if (/Music_5\d\.mp3/.test(u)) music404++;
-});
-const t0 = Date.now();
-await p.goto(`${ORIGIN}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-await new Promise((r) => setTimeout(r, 350));
-const veil = await p.evaluate(() => {
-  const v = document.getElementById('sw-boot-prime');
-  if (!v) return { present: false, lit: -1 };
-  const ctx = v.querySelector('canvas')?.getContext('2d');
-  let lit = 0;
-  if (ctx) { const d = ctx.getImageData(0, 0, 52, 53).data; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) lit++; }
-  return { present: true, lit };
-}).catch(() => ({ present: false, lit: -1 }));
-let musicAt = -1, entries = -1, wg = false, sv = false;
-for (let i = 0; i < 60; i++) {
-  await new Promise((r) => setTimeout(r, 1000));
-  const s = await p.evaluate(async () => {
-    let n = 0, wg = false, sv = false, m50 = false;
-    for (const nm of await caches.keys()) {
-      for (const k of await (await caches.open(nm)).keys()) {
-        n++;
-        if (/worldGen\.worker.*\.js/.test(k.url)) wg = true;
-        if (/save\.worker.*\.js/.test(k.url)) sv = true;
-        if (/Music_50/.test(k.url)) m50 = true;
-      }
-    }
-    return { n, wg, sv, m50 };
-  }).catch(() => null);
-  if (!s) continue;
-  if (musicAt < 0 && s.m50) musicAt = Date.now() - t0;
-  entries = s.n; wg = s.wg; sv = s.sv;
-  if (entries >= 12034 && wg && sv) break;
-}
-console.log(JSON.stringify({ veil, music50CachedAtMs: musicAt, warmEntries: entries, worldGenWorker: wg, saveWorker: sv, splash404, music404, pageErrors: errs.length }));
+await p.goto(`${process.env.SW_ORIGIN ?? 'http://localhost:4177'}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+const splashPresent = () => p.evaluate(() => !!document.getElementById('sw-splash')).catch(() => false);
+const click = () => p.evaluate(() => window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+const space = () => p.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', key: ' ', bubbles: true })));
+const warmDone = () => p.evaluate(async () => {
+  let n = 0;
+  for (const nm of await caches.keys()) n += (await (await caches.open(nm)).keys()).length;
+  return n >= 12034;
+}).catch(() => false);
+
+await new Promise((r) => setTimeout(r, 5000));   // 等 revealBehind(菜单幕后就位)
+const earlyPresent = await splashPresent();
+await click();
+await new Promise((r) => setTimeout(r, 400));
+const afterEarlyClick = await splashPresent();
+console.log(JSON.stringify({ earlyPresent, afterEarlyClick, verdict: afterEarlyClick ? '加载中点击被拒 ✓' : '加载中点击竟跳过 ✗' }));
+
+for (let i = 0; i < 40; i++) { if (await warmDone()) break; await new Promise((r) => setTimeout(r, 1000)); }
+await space();
+await new Promise((r) => setTimeout(r, 400));
+const afterSpace = await splashPresent();
+console.log(JSON.stringify({ afterSpace, verdict: !afterSpace ? '暖完空格跳过 ✓' : '暖完空格未跳过 ✗' }));
+console.log('页面错误:', errs.length, errs.slice(0, 2).join(' | '));
 await b.close();
-process.exit(entries >= 12034 && wg && sv && errs.length === 0 ? 0 : 1);
+process.exit(afterEarlyClick && !afterSpace && errs.length === 0 ? 0 : 1);
