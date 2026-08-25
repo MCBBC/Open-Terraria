@@ -38,6 +38,41 @@ class HitCdImpl {
   }
 }
 
+/** ★StormLightning shader 的 Extra_288 亮度 LUT（用户实拍"颜色不对且很暗"定罪）：
+ *  原版 PixelShader.cso pass StormLightning（反汇编 /tmp/fx-dump-storm.txt :3181）：
+ *    texld r0, (t0.x, t0.y/t0.z), s0 → r0.x ×8 ×uOpacity ×uSaturation ×vColor → oC0
+ *  = 最终色=顶点色×(Extra_288.r×8×包络×强度)。Extra_288 为 256² 纵向梯度带
+ *  （y=128 峰值 250→×8 过曝白热芯；上下暗→蓝辉光边）——条带横向 v 采样出
+ *  "白芯蓝边"截面。曾平色 rgba 填充=无电纹不发亮。LUT 惰性构建（atlas 懒加载） */
+let stormTexLut: Float32Array | null = null;
+let stormTexTried = false;
+function stormTexBrightness(r: import('../render/Renderer').Renderer, v: number): number {
+  if (!stormTexTried) {
+    stormTexTried = true;
+    try {
+      const img = r.atlas?.ensureVImage('vanilla/Extra_288.png');
+      if (img && img.width > 0 && typeof document !== 'undefined') {
+        const cv = document.createElement('canvas');
+        cv.width = img.width; cv.height = img.height;
+        const cx = cv.getContext('2d', { willReadFrequently: true });
+        if (cx) {
+          cx.drawImage(img as CanvasImageSource, 0, 0);
+          const d = cx.getImageData(0, 0, img.width, img.height).data;
+          const lut = new Float32Array(img.height);
+          for (let y = 0; y < img.height; y++) {
+            let acc = 0;
+            for (let x = 0; x < img.width; x++) acc += d[(y * img.width + x) * 4];
+            lut[y] = acc / img.width / 255;
+          }
+          stormTexLut = lut;
+        }
+      }
+    } catch { /* 图集未就绪/CORS——回退平色 */ }
+  }
+  if (!stormTexLut) return 0.5;
+  return stormTexLut[Math.min(stormTexLut.length - 1, Math.max(0, (v * stormTexLut.length) | 0))];
+}
+
 /** 1122 ArcSurge 的 IDStatic 免疫共享表（usesIDStaticNPCImmunity + cooldown 10,
  *  :10567-10569——IDStatic 语义 = 全场同型一张表,非每弹一张） */
 const ID_STATIC_1122 = new HitCdImpl();
@@ -881,7 +916,7 @@ export class StormLightning extends Entity {
         }
         if (hitP) {
           if (this.comboSeed) {
-            p.heal?.(80);
+            p.hp = Math.min(p.maxHp, p.hp + 80);   // Heal(80)（:14898——组合种子雷改治疗）
           } else {
             // Sample(Main.Difficulty int GameMode 0-3) 对曲线键(0.5→.04/1→.08/3→.24/4→.4):
             // 经典0→.04 专家1→.08 大师2→lerp(1,3 段)=.16 旅程3→.24
@@ -920,7 +955,7 @@ export class StormLightning extends Entity {
     cd.tick();
     const pts = bolt.positions;
     for (const ent of game.enemies()) {
-      const e = ent as unknown as HitTarget & { vanillaId?: number };
+      const e = ent as unknown as HitTarget & { vanillaId?: number; hp: number; maxHp: number };
       if (!e || e.dead) continue;
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       // 膨胀盒含点判定（BoundingRect 粗筛省略——敌量小,逐点直测）
@@ -1048,7 +1083,7 @@ export class StormLightning extends Entity {
       const waveOutP = remapL(progress, 1 - anim.waveOut, 1, 0, 1);
       for (const b of this.bolts) {
         const inten = (b.forkDepth === 0 ? 1 : 0.5 * Math.pow(0.8, b.forkDepth - 1));
-        this.drawBolt(ctx, b, inten, progress, opacity, anim, waveInP, waveOutP);
+        this.drawBolt(ctx, r9, b, inten, progress, opacity, anim, waveInP, waveOutP);
       }
     } else {
       // 飞行期本体贴图（:40450-40455 光强包络近似亮度）
@@ -1068,7 +1103,8 @@ export class StormLightning extends Entity {
     ctx.restore();
   }
 
-  private drawBolt(ctx: CanvasRenderingContext2D, bolt: Bolt,
+  private drawBolt(ctx: CanvasRenderingContext2D, r9: import('../render/Renderer').Renderer,
+    bolt: Bolt,
     intensity: number, progress: number, opacity: number,
     anim: { waveLen: number; waveIn: number; waveOut: number },
     waveInP: number, waveOutP: number): void {
@@ -1096,14 +1132,29 @@ export class StormLightning extends Entity {
       const px = -dy / l, py = dx / l;
       const am = (a0 + a1) / 2 * opacity;
       if (am <= 0.004) continue;
-      ctx.fillStyle = `rgba(${(cr * 255) | 0},${(cg * 255) | 0},${(cb * 255) | 0},${Math.min(1, am).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.moveTo(pts[i].x + px * w0 / 2, pts[i].y + py * w0 / 2);
-      ctx.lineTo(pts[i + 1].x + px * w1 / 2, pts[i + 1].y + py * w1 / 2);
-      ctx.lineTo(pts[i + 1].x - px * w1 / 2, pts[i + 1].y - py * w1 / 2);
-      ctx.lineTo(pts[i].x - px * w0 / 2, pts[i].y - py * w0 / 2);
-      ctx.closePath();
-      ctx.fill();
+      // ★StormLightning shader 复刻（PixelShader.cso pass StormLightning）：
+      //   片元色=vColor×(Extra_288.r×8×uOpacity×uSaturation)——条带横向 K 切片,
+      //   每片按 v 采 LUT 亮度:中央亮带×8 过曝=白热芯,上下暗=蓝辉光边
+      //   ('lighter' 加算,fill alpha=波门,rgb 折增益)
+      const K = 6;
+      for (let k9 = 0; k9 < K; k9++) {
+        const v9 = (k9 + 0.5) / K;
+        const gain = stormTexBrightness(r9, v9) * 8 * opacity * intensity;
+        const e9r = Math.min(255, cr * 255 * gain);
+        const e9g = Math.min(255, cg * 255 * gain);
+        const e9b = Math.min(255, cb * 255 * gain);
+        if (e9r + e9g + e9b < 6) continue;
+        const sw0 = w0 / K, sw1 = w1 / K;
+        const o0 = -w0 / 2 + k9 * sw0, o1 = -w1 / 2 + k9 * sw1;
+        ctx.fillStyle = `rgba(${e9r | 0},${e9g | 0},${e9b | 0},${Math.min(1, am).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.moveTo(pts[i].x + px * o0, pts[i].y + py * o0);
+        ctx.lineTo(pts[i + 1].x + px * o1, pts[i + 1].y + py * o1);
+        ctx.lineTo(pts[i + 1].x + px * (o1 + sw1), pts[i + 1].y + py * (o1 + sw1));
+        ctx.lineTo(pts[i].x + px * (o0 + sw0), pts[i].y + py * (o0 + sw0));
+        ctx.closePath();
+        ctx.fill();
+      }
     }
     ctx.globalCompositeOperation = 'source-over';
   }

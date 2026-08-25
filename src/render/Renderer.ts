@@ -3591,6 +3591,7 @@ export class Renderer {
       push({
         kind: 'player', x: p.x, y: p.y, w: p.w, h: p.h, vx: p.vx, vy: p.vy,
         wet: p.inWater, wetCount: p.wetCount, honeyWet: p.inHoney, lavaWet: p.inLava,
+        entrySurfaceY: p.wetEntrySurfaceY,
       });
     };
     pushPlayer(player);
@@ -3602,11 +3603,13 @@ export class Renderer {
         push({
           kind: 'npc', x: e.x, y: e.y, w: e.w, h: e.h, vx: e.vx, vy: e.vy,
           wet: e.wet, wetCount: e.wetCount, honeyWet: e.honeyWet, lavaWet: e.lavaWet,
+          entrySurfaceY: e.wetEntrySurfaceY,
         });
       } else if (e instanceof TownNPC) {
         push({
           kind: 'townnpc', x: e.x, y: e.y, w: e.w, h: e.h, vx: e.vx, vy: e.vy,
           wet: e.wet, wetCount: e.wetCount, honeyWet: e.honeyWet, lavaWet: e.lavaWet,
+          entrySurfaceY: e.wetEntrySurfaceY,
         });
       } else {
         // 弹幕族（q>=3）：projId 鸭子类型（各 Proj 类无公共基类）；wet 以中心格

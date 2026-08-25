@@ -46,6 +46,8 @@ export interface GameHooks {
   ): void;
   /** 敌人列表(投射物命中判定用) */
   enemies(): unknown[];
+  /** 投射物桶只读（风暴落雷 800px 去重扫描用;StormLightningSpawner 消费） */
+  projectiles?(): unknown[];
   /** Main.mapFullscreen（全屏地图开关——链锤 AI_015 击杀门 Projectile.cs:41057-41059
    *  消费：开图瞬间链锤消失。Game 实现 = renderer.fullMap.open 镜像;缺省 = 不杀） */
   mapFullscreen?(): boolean;
@@ -92,6 +94,15 @@ export interface GameHooks {
   /** 按原版 NPC id 出生（Enemy.fromVanilla；小动物入微光 Transform / makeNPC 放生用。
    *  Game 实现：入 critters 桶（同 spawnCritter 的 spawnVanilla 语义），联机访客拒绝 */
   spawnNpcByVanilla?(id: number, x: number, y: number): import('./Enemy').Enemy | null;
+  /** 风暴落雷 bolt 折线校验（WorldGen.TrySpawnLightningBolt :72586-72589
+   *  LightningGenerator.StormLightning.CanHitTarget 等价——折线无 tile 碰撞才可落） */
+  stormLightningBolt?(seed: number, vx: number, vy: number):
+    { positions: Array<{ x: number; y: number }>; collidedWithTile: boolean } | null;
+  /** 生成 1091 世界落雷弹（TrySpawnLightningBolt :72590-72594 NewProjectile
+   *  500 伤 ai0=-1 ai2=种子）——StormLightningSpawner 消费 */
+  spawnStormBolt1091?(vx: number, vy: number, seed: number): void;
+  /** AnyDanger（SpawnStormLightning :72448 NPC.AnyDanger=任一 boss 在场 → 频率÷1.5） */
+  anyBossDanger?(): boolean;
   /** 粒子 */
   spawnParticles(
     x: number, y: number, color: string, count: number, speed?: number,

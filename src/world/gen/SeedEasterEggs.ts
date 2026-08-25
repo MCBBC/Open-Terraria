@@ -22,6 +22,10 @@ export interface SeedFlags {
   everything?: boolean;      // getfixedboi（Main.zenithWorld；组合种子）
   skyblock?: boolean;        // 1.4.5.6 新增 skyblock（Main.skyblockWorld）
   notTheBees?: boolean;      // not the bees（Main.notTheBeesWorld）
+  // ── 1.4.5 天雷种子对（WorldGen.cs:579-586 moreLightning/noLightning）──
+  moreLightning?: boolean;   // "lightning" 雷暴加密（Main.moreLightningSeed）
+  noLightning?: boolean;     // 无雷种子（Main.noLightningSeed）；与 more 叠加=组合
+                             // 种子（绿雷治疗化,Projectile.cs:12795/:14896）
 
   // ── 秘密种子 37 位（WorldGen.SecretSeed 注册序；明文路由见 SECRET_ROUTES）──
   //  涂装四件（消费端 = FinalSeedCleanupPass.ts FinalSeedCleanup_Paint/全图涂装 pass 族）
@@ -144,6 +148,10 @@ const SECRET_ROUTES: ReadonlyArray<[RegExp, (f: SeedFlags) => void]> = [
   [/^beammeup$/, (f) => { f.addTeleporters = true; }],
   [/^tooeasy$/, (f) => { f.startInHardmode = true; }],
   [/^fishmox$/, (f) => { f.noInfection = true; }],
+  // 1.4.5 天雷种子对（WorldGen.cs:409-414 注册序;明文词=注册名,1457 反编译
+  //  SecretSeedDescription 键名 moreLightning/noLightning）
+  [/^stormyweather$/, (f) => { f.moreLightning = true; }],
+  [/^clearskies$/, (f) => { f.noLightning = true; }],
   [/^doesthatsparkle$/, (f) => { f.hallowOnTheSurface = true; }],
   [/^purifythis$/, (f) => { f.infectedSeed = true; }],
   [/^toadstool$/, (f) => { f.surfaceIsMushrooms = true; }],

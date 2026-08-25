@@ -627,6 +627,8 @@ export class TownNPC extends Entity {
   onFireT = 0;
   onFire3T = 0;
   inWater = false;
+  /** ★偏离实验 v2：入水翻转 tick 液面 Y（npcLiquid 写，Renderer 消费） */
+  wetEntrySurfaceY?: number;
   /** liquidMoveFactor 每 tick 写（水 .5/蜜 .25/微光 .375/岩浆 .5）——moveAndCollide 消费 */
   liqFactor = 1;
   /** NpcLiquidHost.def 占位（splashSoundAllowed 的 boss 档） */

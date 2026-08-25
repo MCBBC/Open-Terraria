@@ -155,6 +155,8 @@ import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
 import { spawnMechQueenEnsemble, spawnSkeletronCaster } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC, isItStormingNext } from '../entities/TownNPC';
+import { spawnStormLightningTick } from '../world/StormLightningSpawner';
+import { stormLightningGenerator } from '../fx/LightningGenerator';
 import { scanScene, EMPTY_SCENE, scanBiomeLightCounts, type SceneFlags } from '../world/SceneMetrics';
 import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL } from '../stats/ScaleStats';
@@ -17788,6 +17790,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.recLog('world', { ev: 'rain', on: weather.raining });
     }
     weather.setWorldSize(w.w, w.h);
+    // ---- 风暴落雷（UpdateWorld :72073 SpawnStormLightning()——1.4.5 落雷机制,
+    //      雷暴期天雷劈下 500 伤;每 world tick 一次,门在 spawner 内）----
+    spawnStormLightningTick(this as unknown as Parameters<typeof spawnStormLightningTick>[0]);
     weather.update({
       dayRate: w.dayRate(), // Main.cs:64320-64409 天气全链吃 dayRate（旅程倍率/冻结/全员睡×5/晷快进，曾写死 1）
       dayTime: w.clock.isDay,
@@ -23144,6 +23149,40 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  鹿角怪震屏源（NPC.cs:44568 族 strength 20 / cycles 6 / 30t / falloff 1000 / identity
    *  "Deerclops"）。2026-08-20：旧"线性衰减单冲量近似"退役——Camera.modifiers 标准
    *  修饰器栈（余弦振动 × 线性包络 × 距离衰减，CameraModifierStack.ts） */
+  /** 风暴落雷三钩（StormLightningSpawner 消费,2026-08-25 补全 1.4.5 落雷机制） */
+  stormLightningBolt(seed: number, vx: number, vy: number):
+    { positions: Array<{ x: number; y: number }>; collidedWithTile: boolean } | null {
+    const probe = (x: number, y: number): boolean => {
+      const tx = Math.trunc(x / 16), ty = Math.trunc(y / 16);
+      const st = this.world.store;
+      if (!st.inBounds(tx, ty)) return false;
+      return st.isSolid(tx, ty);
+    };
+    const gen = stormLightningGenerator(probe);
+    try {
+      return gen.generate(null, seed >>> 0, { x: vx, y: vy }, { x: 0, y: 1 }, false, false);
+    } catch { return null; }
+  }
+
+  spawnStormBolt1091(vx: number, vy: number, seed: number): void {
+    const bolt = new StormLightning(1091, vx, vy, 500, 0);   // :72590 damage 500 kb 0
+    bolt.seed = seed;
+    bolt.comboSeed = (this.world.seedFlags?.noLightning === true && this.world.seedFlags?.moreLightning === true);
+    this.entities.add(bolt, 'projectiles');
+    // 落雷公告音（Spawn_StormLightning :1044-1051 SoundID.LightningStrikeHit 近似）
+    this.playSfxWav?.('Thunder_0', 0.8, vx, vy);
+  }
+
+  anyBossDanger(): boolean {
+    // NPC.AnyDanger：任一 boss 型 NPC 在场（OurStyle/boss 桶）
+    if (this.boss && !this.boss.dead) return true;
+    for (const e of [...this.entities.enemies, ...this.entities.critters]) {
+      const b = e as { def?: { boss?: boolean }; dead?: boolean };
+      if (!b.dead && b.def?.boss) return true;
+    }
+    return false;
+  }
+
   punchCamera(dirX: number, dirY: number, frames = 30, strength = 20,
     srcX?: number, srcY?: number): void {
     const d = Math.hypot(dirX, dirY) || 1;
@@ -23282,6 +23321,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   moonEventCtx(): { kind: 1 | 2; wave: number } | null {
     const me = this.world.moonEvent;
     return me.kind === 0 ? null : { kind: me.kind, wave: me.waveNumber };
+  }
+
+  /** 投射物桶只读（StormLightningSpawner 800px 去重扫描用） */
+  projectiles() {
+    return this.entities.projectiles;
   }
 
   enemies() {
