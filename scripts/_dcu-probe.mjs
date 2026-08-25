@@ -89,28 +89,45 @@ const out = await page.evaluate(async () => {
   await sleep(300);
   res.data.pixIdle = pixIdle; res.data.pixMoving = pixMoving;
   ok('① 移动时舱体贴图仍在（像素量不塌）', pixMoving > pixIdle * 0.35, `idle=${pixIdle} moving=${pixMoving}`);
+  // ①b 开火态（按住左键挖地）：舱体贴图同样不得消失
+  g.input.mouseDown = true;
+  await sleep(600);
+  const pixFiring = await grabMountPixels();
+  const firingActive = p.mount.abilityActive;
+  g.input.mouseDown = false;
+  await sleep(250);
+  res.data.pixFiring = pixFiring; res.data.firingActive = firingActive;
+  ok('①b 开火态激光激活', firingActive === true);
+  ok('①b 开火时舱体贴图仍在', pixFiring > pixIdle * 0.35, `idle=${pixIdle} firing=${pixFiring}`);
 
-  // ---- ② 朝向跟随鼠标（按住左键期间连续变向）----
-  // 鼠标放右侧 → 目标角≈0；再移到头顶 → 目标角≈-π/2(即 3π/2)
-  const setMouseAt = async (dxPx, dyPx) => {
-    const r = document.querySelector('canvas').getBoundingClientRect();
-    const px = (p.cx - g.camera.x) * (r.width / (g.camera.viewW || r.width)) + dxPx;
-    const py = (p.cy - g.camera.y) * (r.height / (g.camera.viewH || r.height)) + dyPx;
-    await page.constructor === Object ? null : null;
-    return { px: px + r.left, py: py + r.top };
+  // ---- ② 朝向跟随鼠标（真实输入链：mouseDown 电平 + 鼠标位移 → 每 tick AimAbility）----
+  // 原版 = 453 存活期每 tick AimAbility（Projectile.cs:31183-31190）——按住期间
+  // 移动鼠标，diodeRotationTarget 应连续跟随（而非仅点击瞬间更新一次）
+  const mouseTo = (dxWorld, dyWorld) => {
+    const cv = document.querySelector('canvas');
+    const [sxCss, syCss] = g.camera.worldToScreen(p.cx + dxWorld, p.cy + dyWorld);
+    const r = cv.getBoundingClientRect();
+    g.input.mouseX = Math.round(sxCss * (r.width / cv.clientWidth));
+    g.input.mouseY = Math.round(syCss * (r.height / cv.clientHeight));
   };
-  void setMouseAt;
-  // 直接驱动 aimWX/aimWY 等价输入（渲染管线读同一字段）
-  const rotRight = [];
-  const rotUp = [];
-  p.mount.abilityActive = true;   // 模拟按住中
-  for (let i = 0; i < 6; i++) { p.aimWX = p.cx + 200; p.aimWY = p.cy; g.player.mount.aimDrill(p.cx, p.cy, p.aimWX, p.aimWY); p.mount.updateDrill(); rotRight.push(+p.mount.diodeRotation.toFixed(3)); await sleep(30); }
-  for (let i = 0; i < 6; i++) { p.aimWX = p.cx; p.aimWY = p.cy - 200; g.player.mount.aimDrill(p.cx, p.cy, p.aimWX, p.aimWY); p.mount.updateDrill(); rotUp.push(+p.mount.diodeRotation.toFixed(3)); await sleep(30); }
-  p.mount.abilityActive = false;
-  const lastR = rotRight[rotRight.length - 1], lastU = rotUp[rotUp.length - 1];
-  res.data.rotRight = rotRight; res.data.rotUp = rotUp;
-  ok('② 朝右收敛到 ~0', Math.abs(lastR % (Math.PI * 2)) < 0.6 || Math.abs(lastR) < 0.6, `rot=${lastR}`);
-  ok('② 朝上收敛到 ~4.71(3π/2)', Math.abs(Math.abs(lastU) - Math.PI * 1.5) < 0.7, `rot=${lastU}`);
+  g.input.mouseDown = true;
+  mouseTo(200, 0);
+  await sleep(500);
+  const tRight = p.mount.diodeRotationTarget;
+  const actRight = p.mount.abilityActive;
+  const targets = [];
+  for (const [dx, dy] of [[200, -160], [-200, 0], [0, 200]]) {
+    mouseTo(dx, dy);
+    await sleep(400);
+    targets.push(+p.mount.diodeRotationTarget.toFixed(2));
+  }
+  g.input.mouseDown = false;
+  await sleep(200);
+  res.data.tRight = +tRight.toFixed(3); res.data.actRight = actRight; res.data.targets = targets;
+  ok('② 按住期间 abilityActive 常驻', actRight === true);
+  ok('② 目标角跟随鼠标（右≈0）', Math.abs(tRight) < 0.5 || Math.abs(tRight - Math.PI * 2) < 0.5, `t=${tRight.toFixed(3)}`);
+  ok('② 连续移动鼠标目标角逐段变化', Math.abs(targets[0] - tRight) > 0.5 && Math.abs(targets[1] - targets[0]) > 0.5,
+    `targets=${targets.join(',')} t0=${tRight.toFixed(2)}`);
 
   // ---- ③ 地底垂直移动 ----
   // 挖一个地下封闭室并传送进去
@@ -138,6 +155,17 @@ const out = await page.evaluate(async () => {
   g.input.keys.delete('KeyS');
   res.data.sinkDelta = +(sinkMax - y1).toFixed(1);
   ok('③ 地底按下下降 ≥16px', sinkMax - y1 >= 16, `sink=${(sinkMax - y1).toFixed(1)}px`);
+  // ③b 实战复合态：按住左键（钻掘中）同时按跳——地底作业时的真实操控
+  const y2 = p.y;
+  g.input.mouseDown = true;
+  g.input.keys.add('Space');
+  let rose2 = y2;
+  for (let i = 0; i < 20; i++) { await sleep(50); rose2 = Math.min(rose2, p.y); }
+  g.input.keys.delete('Space');
+  g.input.mouseDown = false;
+  await sleep(200);
+  res.data.riseDrilling = +(y2 - rose2).toFixed(1);
+  ok('③b 钻掘中按跳仍可上升 ≥32px', y2 - rose2 >= 32, `rise=${(y2 - rose2).toFixed(1)}px`);
 
   // ---- ④ 束参数：目标格距离钳制 ----
   p.aimWX = p.cx + 400; p.aimWY = p.cy;    // 远超 224+32

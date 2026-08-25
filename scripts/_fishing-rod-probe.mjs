@@ -22,6 +22,12 @@ const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' });
+// CPU 软渲染先行（headless swiftshader 下 GL 上下文易丢失 → GPU 熔断 → render()
+// 整帧跳过 = 世界层全黑，像素断言失效；CPU 模式无 GL 上下文不受熔断影响）
+await page.evaluate(async () => {
+  const options = await import('/src/core/Options.ts');
+  options.data.renderMode = 'cpu';
+});
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
 await new Promise((r) => setTimeout(r, 800));
@@ -75,9 +81,7 @@ const out = await page.evaluate(async () => {
   const R = { fatal: null, dbg: {} };
 
   if (g.world.journeyPowers) g.world.journeyPowers.godmode = true;
-  // 白天正午（黑暗场景会让竿/线被光照乘成黑——原版同语义，探针须可见光）
-  g.world.clock.timeOfDay = 0.5;
-  g.world.clock.dayTime = true;
+  // 白天：世界默认 8:30 开局即昼——不手动改 clock（此前置 0.5 伴生世界层全黑，弃用）
 
   // ---- 自建石砌水池（出生点右侧地表，保证露天+白天光照）----
   const stone = tiles.TILE_BY_KEY['stone'];   // 石块（键名无 _block 后缀）
@@ -157,11 +161,14 @@ const out = await page.evaluate(async () => {
           cam: { x: Math.round(g.camera.x), y: Math.round(g.camera.y), zoom: g.camera.zoom },
         };
       }
-      for (let i = 0; i < 80; i++) {
+      // 等浮漂落水漂浮（整窗等待；中途见非漂浮弹不中断——避免下次点击误触收线）
+      let fb = null;
+      for (let i = 0; i < 160; i++) {
         await ticks(1);
         const b = liveBobber();
-        if (b) { if (b.floating) { R.dbg['cast_' + tag] = { attempts, pre, post }; return b; } break; }
+        if (b && b.floating) { fb = b; break; }
       }
+      if (fb) { R.dbg['cast_' + tag] = { attempts, pre, post }; return fb; }
     }
     R.dbg['cast_' + tag] = {
       attempts, pre, post,

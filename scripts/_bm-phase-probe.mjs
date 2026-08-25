@@ -7,7 +7,7 @@ const OUT = '/tmp/mooncloud-probe';
 mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const NT = 7782;   // 与用户截图月亮位置同时刻(ft≈0.24,左上升段)
+const NT = 13000;   // 与用户截图月亮位置同时刻(ft≈0.24,左上升段)
 for (const ph of [0, 3, 4, 5]) {
   const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
   const p = await b.newPage();
@@ -15,7 +15,7 @@ for (const ph of [0, 3, 4, 5]) {
   await p.waitForFunction(() => { const g = window.__swGame; return g && g.player && g.world; }, { timeout: 150000 });
   await p.evaluate((ph) => {
     const g = window.__swGame;
-    g.world.clock.timeOfDay = 0.8125 + (7782 / 32400) * 0.375;
+    g.world.clock.timeOfDay = 0.8125 + (13000 / 32400) * 0.375;
     g.world.clock.moonPhase = ph;
     g.world.clock.bloodMoon = true;
     const pl = g.player;
@@ -37,7 +37,7 @@ for (const ph of [0, 3, 4, 5]) {
   // 裁月亮区放大存证
   const clip = await p.evaluate(() => {
     const m = window.__swGame.renderer.sky.moonScreen;
-    return m ? { x: Math.max(0, m.x - 60), y: Math.max(0, m.y - 60), width: 120, height: 120 } : null;
+    return m ? { x: Math.max(0, m.x - 60), y: 0, width: 120, height: 110 } : null;
   });
   if (clip) await p.screenshot({ path: `${OUT}/bm-phase-${ph}.png`, clip });
   console.log(`phase ${ph}:`, JSON.stringify(info));

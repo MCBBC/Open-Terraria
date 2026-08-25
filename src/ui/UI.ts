@@ -376,7 +376,11 @@ const CSS = `
   border:1px solid #6a5a8a; border-radius:4px; align-items:center; justify-content:center; }
 .sw-recipe { pointer-events:auto; display:flex; align-items:center; gap:6px; padding:5px 8px; margin:3px 0;
   background:rgba(50,40,70,0.8); border-radius:4px; cursor:pointer; font-size:13px; }
-.sw-recipe:hover { background:rgba(70,55,100,0.9); }
+/* 悬停高亮:合成列表走 .hov 类(JS 维护)——滚步会全量重建行 DOM,伪类在
+   旧行销毁瞬间断开、新行要等真实 mousemove 才恢复 = 滚动时高亮闪动
+   (2026-08-25 用户报);类由 enter/leave 维护 + 重建后立即补回 → 稳定。
+   :hover 并存兜底其他 .sw-recipe 列表(guide 检索结果等,无重建闪动问题) */
+.sw-recipe:hover, .sw-recipe.hov { background:rgba(70,55,100,0.9); }
 .sw-recipe.no { opacity:0.4; cursor:default; }
 .sw-recipe img { width:22px; height:22px; image-rendering:pixelated; }
 .sw-progress { position:fixed; inset:0; background:rgba(5,5,12,0.85); display:flex;
@@ -2732,6 +2736,11 @@ export class UI {
    *  让行从静止鼠标下经过」(后者浏览器同样派发 mouseenter,但无 mousemove
    *  伴随)——hover 预选只认前者(2026-08-25 用户报滚动过程连环误预选) */
   private craftMouseMoveLast = 0;
+  /** .hov 高亮行/其配方 idx/鼠标是否在列表内——高亮与预选(hoverFocus)分离:
+   *  滚步重建行后按 idx 补回高亮(灭-亮闪动修复),预选不补(滚动不预选) */
+  private craftHoverEl: HTMLElement | null = null;
+  private craftHoverIdx = -1;
+  private craftMouseInList = false;
   private craftWheelStep(dyRaw: number, deltaMode: number): void {
     const dy = deltaMode === 1 ? dyRaw * 40 : dyRaw;
     const now = performance.now();
@@ -3535,6 +3544,11 @@ export class UI {
         // 内有真实鼠标移动才认定主动悬停，静止鼠标下的滚动经过一律忽略
         if (performance.now() - this.craftMouseMoveLast > 150) return;
         if (performance.now() - this.craftWheelLast < 120) return;
+        // 高亮(.hov)与预选分离:主动悬停即亮;预选仍按需刷新
+        this.craftHoverIdx = idx;
+        this.craftHoverEl?.classList.remove('hov');
+        row.classList.add('hov');
+        this.craftHoverEl = row;
         if (this.hoverFocus !== idx) {
           this.hoverFocus = idx;
           this.refreshAll();
@@ -3561,13 +3575,17 @@ export class UI {
       if (!cl.__swCraftWheel) {
         cl.__swCraftWheel = true;
         cl.addEventListener('mousemove', () => { this.craftMouseMoveLast = performance.now(); });
+        cl.addEventListener('mouseenter', () => { this.craftMouseInList = true; });
         cl.addEventListener('wheel', (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
           this.craftWheelStep(ev.deltaY, ev.deltaMode);   // 累积阈值 100（craftWheelStep）
         }, { passive: false });
-        // 移出列表清预览（行重建销毁不派发 leave，容器级兜底防残留）
+        // 移出列表清预览+高亮（行重建销毁不派发 leave，容器级兜底防残留）
         cl.addEventListener('mouseleave', () => {
+          this.craftMouseInList = false;
+          this.craftHoverIdx = -1;
+          this.craftHoverEl = null;
           if (this.hoverFocus !== -1) { this.hoverFocus = -1; this.refreshAll(); }
         });
       }
@@ -3594,6 +3612,14 @@ export class UI {
         thb.style.height = `${thumbH}px`;
         thb.style.top = `${(start / maxStart) * (H - thumbH)}px`;
       }
+    }
+    // 重建后补回悬停高亮：鼠标仍在列表内且悬停配方仍在渲染窗 → 新行立即带
+    // .hov（旧行随重建销毁，伪类断开到下次 mousemove 之间就是闪动窗口）。
+    // 预选(hoverFocus)不补——滚动不预选语义不变
+    this.craftHoverEl = null;
+    if (this.craftMouseInList && this.craftHoverIdx >= start && this.craftHoverIdx < end) {
+      const el2 = this.craftListEl.children[this.craftHoverIdx - start] as HTMLElement | undefined;
+      if (el2) { el2.classList.add('hov'); this.craftHoverEl = el2; }
     }
   }
 

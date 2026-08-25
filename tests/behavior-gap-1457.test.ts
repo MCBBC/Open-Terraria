@@ -189,15 +189,19 @@ describe('633 最后棱镜帧拍无 slowMagic（调查误标纠正：67202-67228
   });
 });
 
-describe('getSlowMagicScalar 登记债（1457 三消费全在本仓未实装弹）', () => {
-  it('本仓零消费（仅定义 1 处）——439 激光机枪 :67211/:67222 与 535 美杜莎之首 :45301 均未实装,武器落地时须接', () => {
+describe('getSlowMagicScalar 登记债（1457 三消费:439 已落地接线,535 美杜莎之首仍未实装）', () => {
+  it('439 激光机枪已实装且 scalar 已接（:67211/:67222 消费点②③——债已偿）', () => {
     const src = readFileSync(new URL('../src/entities/Player.ts', import.meta.url), 'utf8');
     const def = src.match(/getSlowMagicScalar\(\): number \{/);
     expect(def).not.toBeNull();
-    const uses = readFileSync(new URL('../src/entities/PrismProj.ts', import.meta.url), 'utf8')
-      + readFileSync(new URL('../src/entities/Arrow.ts', import.meta.url), 'utf8')
-      + readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
-    expect(uses.includes('getSlowMagicScalar(')).toBe(false);
+    const game = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
+    expect(game.includes('getSlowMagicScalar()')).toBe(true);   // 439 LaserMachinegun scalar 回调
+  });
+  it('535 美杜莎之首 :45301 仍未实装（scalar 剩余消费债）', () => {
+    const prism = readFileSync(new URL('../src/entities/PrismProj.ts', import.meta.url), 'utf8');
+    const arrow = readFileSync(new URL('../src/entities/Arrow.ts', import.meta.url), 'utf8');
+    expect(prism.includes('getSlowMagicScalar(')).toBe(false);
+    expect(arrow.includes('getSlowMagicScalar(')).toBe(false);
   });
 });
 

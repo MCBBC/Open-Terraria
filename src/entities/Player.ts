@@ -2269,10 +2269,8 @@ export class Player extends Entity {
   /** GetSlowMagicScalar（:47444-47451）：节拍/阈值标量 ×2.5（slowMagicUse=false → 1）。
    *  ★1457 全部消费点核实（grep 全仓仅 3 处,全在 Projectile.cs）：439 激光机枪
    *  帧拍 frameCounter≥4×scalar（:67211）+ 音隔 soundDelay=(24−6×档)×scalar（:67222）、
-   *  535 美杜莎之首石化阈值 (int)(60×scalar)/4（:45301）。两件武器本仓均未实装
-   *  （2795 激光机枪无 AI、535 弹无 AI——Enemy.ts:2901 的 535 是美杜莎 NPC）→
-   *  本仓暂零消费,按 parity 原语保留（tests/diff-1457-player-batch1 已断言 1/2.5）,
-   *  武器实装时直接接（登记债） */
+   *  535 美杜莎之首石化阈值 (int)(60×scalar)/4（:45301）。★R34：2795 激光机枪已实装
+   *  （LaserMachinegunHolder rate/scalar 双通道接线）;535 弹仍无 AI（登记债） */
   getSlowMagicScalar(): number {
     if (!this.slowMagicUse) return 1;
     return Player.SLOW_MAGIC_MULTIPLIER;

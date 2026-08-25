@@ -337,6 +337,7 @@ import { Boomerang, SpearProj, AnchoredProj, anchoredActive, YoyoProj, FlailProj
 // 1457 批 C 新弹实体（叶绿双剑 1126-1129/花瓣 1116/天雷 1117·1122/冰牙 1115 + 孢子云生成器）
 import { ChloroClaymoreBlade, ChloroSaberStab, ChloroSporeCloud, ChloroBladeSlam,
   PetalstormShot, StormLightning, GlacierFangShot,
+  ThunderBoltShot, LaserMachinegunHolder, LaserMachinegunLaser, BookStormTwister, PrincessMagicCircle,
   findSporeCloudSpawn, spawnChlorophyteSporeCloud } from '../entities/proj1457';
 // 环境转换器族（Clentaminator 779/5134 溶液弹 aiStyle 31 + 圣/邪/血水投掷瓶）
 import { SolutionProj, WaterSplashProj, SPRAY_PROJ_IDS, WATER_PROJ_CONV, solutionConsumesThisShot } from '../entities/SolutionProj';
@@ -8404,6 +8405,37 @@ export class Game implements GameHooks {
         this.player.useTime = 15;                     // ApplyItemTime（useTime=useAnimation=15）
         this.input.rightDown = false;
       }
+      // 书杖风暴 3852 右键 alt（R34-⑤，Player.cs:49555-49562）：发 704 风暴柱
+      //  （Bottom−100 水平横扫 vx=direction×speed、伤×1.75、蓝×2 :53320）。
+      //  连发门 :31902 flag2&&alt==0&&itemAnimation==0 → 自动升 alt——按住 RMB 每动画窗
+      //  一发（本支不消费 rightDown,以 useTime===0 节流）;:43826 单窗单发同门覆盖。
+      //  挂 tile 交互分派之后 = !tileInteractionHappened 语义（同 3384/3858 先例）
+      if (inp.rightDown && heldDef && viIdFromKey(heldDef.key) === 3852 && this.player.useTime === 0) {
+        const bsPs = this.heldPrefixStat();
+        const bsData = itemCombat(3852);
+        const bsMana = (bsData?.mana ?? 20);
+        if (bsMana > 0 && this.player.buffs.has(BuffType.Silenced)) {
+          // 沉默门（Player.cs:51383-51385 同 case 'magic' 头）——静默不施放
+        } else {
+          const bsCost = Math.trunc(Math.round(bsMana * 2 * (bsPs?.mcst ?? 1))
+            * (1 - this.player.equipStats.manaCostOff) * this.player.equipStats.manaCostMul);   // GetManaCostToPay ×2(:53317-53321)
+          this.player.slowMagicUse = false;           // CheckMana 入口复位（:53216）
+          this.player.checkMana(bsCost);              // ManaV2 空蓝照放语义单点端口
+          const bsDmg = Math.max(1, Math.trunc((this.player.damageMult('magic')
+            * (bsData?.damage ?? 36) * (bsPs?.dmg ?? 1)) * 1.75));    // weaponDamage 链再 ×1.75 截断
+          const pb = this.player as unknown as { cy: number; y?: number; h?: number };
+          const feetY = pb.y !== undefined && pb.h ? pb.y + pb.h : pb.cy + 22;
+          const twister = new BookStormTwister(this.player.cx, feetY - 100,
+            this.player.facing * (bsData?.shootSpeed ?? 11), bsDmg,
+            (bsData?.knockBack ?? 9) * (bsPs?.kb ?? 1));
+          twister.critChance = 0.04 + this.player.critChance('magic') / 100;   // 概率域 0-1（同 critTotal 口径）
+          twister.armorPen = this.player.equipStats.armorPen + (bsPs?.arpen ?? 0);
+          this.entities.add(twister, 'projectiles');
+          this.useSwing(heldDef, undefined);
+          this.player.useTime = bsData?.useAnimation ?? 25;  // 动画窗节流（alt 仅 ItemAnimationJustStarted :43826）
+          this.playUseSound(3852, 'tink');                   // UseSound=DD2_BookStaffCast（起手播）
+        }
+      }
     }
 
     // 智能光标覆盖（SmartCursorHelper.cs:157-162）：只影响左键使用路径（挖掘/放置/电路工具），
@@ -12005,6 +12037,83 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           this.player.onManaItemUsed();
           this.playUseSound(critVid, 'tink');                // UseSound=Item15 只在起手播一次
+          this.input.mouseDown = false;
+          break;
+        }
+        // 4062 ThunderStaff（Item.cs:35701-35705 DefaultToStaff(731,8,17,6)）→ 弹 731
+        //  AI_029·731 支（Projectile.cs:38461-38509）：垂直之字摆/渐显/尘226/光/Kill 面
+        //  全套——通用 Arrow 表达不了摆动节拍（R34-④）
+        if (cw.shoot === 731) {
+          const bolt731 = new ThunderBoltShot(px, py,
+            Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+            cw.damage, cw.knockback);
+          bolt731.critChance = critTotal;
+          bolt731.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          this.entities.add(bolt731, 'projectiles');
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');                // UseSound=Item43（DefaultToStaff :48016）
+          this.input.mouseDown = false;
+          break;
+        }
+        // 2795 LaserMachinegun（Item.cs:26671-26688 channel=true/shoot439/mana6/speed20/
+        //  dmg60/noUseGraphic）→ 持握体 439（AI_075·439 支 :67185-67284）：四档加速
+        //  period=24−6×stage、双发 440、发射拍 CheckMana、slowMagic rate/scalar 三消费点。
+        //  起手扣魔在 case 头已付（ItemCheck_ActuallyPayMana），续发拍由 payMana 回调付
+        if (cw.shoot === 439) {
+          const mgOwner = this.player;
+          const mgItemId = ITEM_BY_KEY[def.key];
+          const mg = new LaserMachinegunHolder(px, py, ang, cw.damage, cw.knockback, {
+            channel: () => this.input.mouseHeld && !this.input.uiBlocking
+              && mgOwner.inv.heldItem()?.id === mgItemId && !mgOwner.dead,
+            aim: () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
+            payMana: () => { this.player.checkMana(cwCost); },      // CheckMana(held.mana,pay:true)（:67244）
+            rate: () => this.player.getSlowMagicUseRate(),           // ★消费点①（:67203）
+            scalar: () => this.player.getSlowMagicScalar(),          // ★消费点②③（:67212/:67223）
+            fire: (fx, fy, fvx, fvy) => {
+              const beam = new LaserMachinegunLaser(fx, fy, fvx, fvy, mg.damage, mg.knockback);
+              beam.critChance = critTotal;
+              beam.armorPen = mgOwner.equipStats.armorPen + (ps?.arpen ?? 0);
+              this.entities.add(beam, 'projectiles');
+            },
+          });
+          mg.critChance = critTotal;
+          mg.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          this.entities.add(mg, 'projectiles');
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 动画窗（channel 期 dummy item time 由实体侧续命近似）
+          this.player.onManaItemUsed();
+          // 无 UseSound 行（case 2795 静音起手）——循环射击音 Item91 在实体侧
+          this.input.mouseDown = false;
+          break;
+        }
+        // 5065 PrincessWeapon（Item.cs:40613-40617 DefaultToStaff(950,10,25,18)+70dmg）→
+        //  魔法阵 950（AI_186 :43454-43573）。出手 = GetFarthestSpawnPositionOnLine
+        //  （Player.cs:48179-48185 + :50063-50089）：自手点沿 aim 步进至视线断裂处放置
+        if (cw.shoot === 950) {
+          const [mwx950, mwy950] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          const lim950 = this.limitPointToPlayerReach(mwx950, mwy950);
+          let sx950 = px, sy950 = py;                          // startPos=pointPosition（手点）
+          const ax950 = Math.cos(ang) * cw.shootSpeed, ay950 = Math.sin(ang) * cw.shootSpeed;
+          const maxLen950 = Math.hypot(ax950, ay950);          // num2（:50068）
+          const goal950 = Math.hypot(lim950.x - sx950, lim950.y - sy950);   // num3（:50069）
+          let step950 = 0;
+          while (this.lineOfSightWalkable(sx950, sy950, this.player.cx, this.player.cy)) {
+            step950++;
+            sx950 += ax950; sy950 += ay950;
+            if (Math.hypot(sx950 - lim950.x, sy950 - lim950.y) < 20 + Math.abs(ax950) + Math.abs(ay950)) {
+              sx950 = lim950.x; sy950 = lim950.y; break;       // 到达鼠标（:50077-50081）
+            }
+            if (maxLen950 * step950 >= goal950) {
+              sx950 = lim950.x; sy950 = lim950.y; break;       // 射程耗尽（:50082-50086）
+            }
+          }
+          const circle = new PrincessMagicCircle(sx950, sy950, cw.damage, cw.knockback);
+          circle.critChance = critTotal;
+          circle.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          this.entities.add(circle, 'projectiles');
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');                  // UseSound=Item43（DefaultToStaff）
           this.input.mouseDown = false;
           break;
         }
@@ -24410,10 +24519,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return null;
       case 'goblin':
       case 'pirate': {
-        // 带门公共入口(哥布林战旗/海盗地图同款):hp≥200/Boss 不在场/无进行中入侵
-        // ——自然 roll 的 hp 门在调用点而非 startInvasion 内,直通会漏门
+        // 带门公共入口(哥布林战旗 361/海盗地图 602 同款):hp≥200/无进行中入侵
+        // (CanStartInvasion Main.cs:65387-65405,物品侧 ignoreDelay:true;
+        //  ★无「Boss 在场」门——原版本就没有,旧失败文案系虚构)
         const ok = this.startInvasionAndAnnounce(key === 'goblin' ? INVASION_GOBLIN : INVASION_PIRATE);
-        return ok ? null : '无法开启(见提示:生命上限<200/Boss 在场/已有入侵)';
+        return ok ? null : '无法开启(见提示:生命上限<200/已有入侵或入侵冷却中)';
       }
       default:
         return `未知事件 ${key}`;

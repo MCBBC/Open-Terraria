@@ -20,7 +20,7 @@ import { projSprite, projFrameImg } from './Arrow';
 import { hitPlayer, hitTownNpcs, hitCritters } from './projTargets';
 import { canHit } from '../physics/LineOfSight';
 import { LightningBoltProj } from './LightningBoltProj';
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { TtlSprite } from '../assets/ttlSprite';
 
 // ===================== 共用工具(与 bossAI.ts 同语义,私有副本) =====================
 
@@ -246,17 +246,9 @@ export class CultistRitualCircle extends Entity {
 }
 
 /** Extra_35（24×222 冰雾六角波纹，1×3 帧）懒加载（StardustMarkProj.beamSprite 同款） */
-let hexWaveImg: ImageBitmap | HTMLImageElement | null = null;
-let hexWaveTried = false;
+const hexWaveTtl = new TtlSprite('sprites/vanilla/Extra_35.png');
 function extra35(): ImageBitmap | HTMLImageElement | null {
-  if (hexWaveTried) return hexWaveImg;
-  hexWaveTried = true;
-  if (typeof Image === 'undefined') return null;
-  const im = new Image();
-  im.onload = () => upgradeToBitmap(im, (b) => { hexWaveImg = b; });
-  im.src = 'sprites/vanilla/Extra_35.png';
-  hexWaveImg = im;
-  return im;
+  return hexWaveTtl.get();   // TTL 自愈装载(2026-08-25 同类扫描)
 }
 
 /** 冰雾母云/子体 464（Projectile.cs aiStyle 86 :30747-30821 + SetDefaults :5078-5087）：

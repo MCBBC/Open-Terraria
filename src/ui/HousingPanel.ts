@@ -208,10 +208,18 @@ export class HousingPanel {
 }
 
 const imgCache = new Map<string, HTMLImageElement | null>();
+const imgFailAt = new Map<string, number>();
+const IMG_FAIL_TTL = 10_000;   // 失败负缓存 TTL(2026-08-25 同类扫描):过期重试自愈,期内有界不刷屏
 function img(src: string): HTMLImageElement | null {
   if (imgCache.has(src)) return imgCache.get(src) ?? null;
+  const fail = imgFailAt.get(src);
+  if (fail !== undefined) {
+    if (Date.now() - fail < IMG_FAIL_TTL) return null;
+    imgFailAt.delete(src);
+  }
   if (typeof Image === 'undefined') return null;
   const i = new Image();
+  i.onerror = () => { imgCache.delete(src); imgFailAt.set(src, Date.now()); };
   i.src = src;
   imgCache.set(src, i);
   return i;

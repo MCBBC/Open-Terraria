@@ -51,6 +51,18 @@ for (const yoyoVid of [3262, 3278, 3279, 3280, 3281, 3282, 3283, 3284, 3285, 328
 // 浮漂弹配对/静持门在册即生效）。
 FUNC['2421'] = { useStyle: 1, shoot: 381, fishingPole: 22 };
 
+// R32（2026-08-25）：竿族 shoot 键补全——Item.cs:23001 `shoot = 361 + type - 2291`
+// （2291-2296 共享块）/:23074（2421-2422 块）。提取器只落了 2289/4325/4442 三支的
+// shoot，其余五支缺键（消费端存活门已改读 bobberProjIdFor 移植表，此处补全供
+// 其他 shoot 消费方对齐 SetDefaults 终值）。
+FUNC['2291'] = { ...FUNC['2291'], shoot: 361 };
+FUNC['2292'] = { ...FUNC['2292'], shoot: 362 };
+FUNC['2293'] = { ...FUNC['2293'], shoot: 363 };
+FUNC['2294'] = { ...FUNC['2294'], shoot: 364 };
+FUNC['2295'] = { ...FUNC['2295'], shoot: 365 };
+FUNC['2296'] = { ...FUNC['2296'], shoot: 366 };
+FUNC['2422'] = { ...FUNC['2422'], shoot: 382 };
+
 /** 内部 item id（vi_ key）→ 功能画像 */
 export function itemFuncOfInternal(id: number, key: string): ItemFunc | null {
   const m = /^vi_(\d+)_/.exec(key);

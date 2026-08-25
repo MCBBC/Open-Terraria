@@ -1234,3 +1234,499 @@ export function spawnChlorophyteSporeCloud(
 
 /** LOS 门（canHit 转发,供 Game 侧索敌复用） */
 export { canHit };
+
+// ================= R34 批:4062 雷杖 731 / 2795 激光机枪 439+440 / 3852 右键 704 / 5065 魔法阵 950 =================
+
+/** 731 ThunderStaffShot（AI_029·731 支 Projectile.cs:38461-38509 + SetDefaults
+ *  :7696-7705 + Kill :77055-77069 + 出手 Player.cs 通用尾 :49960）：
+ *  - 10×10/ai29/alpha=255 起步 −15/t 渐显(≈17t 全显)/extraUpdates1/timeLeft90/magic
+ *  - 垂直之字摆：ai0++(奇数拍 ¼ 概率再+1);@10 vy−5 @12 vy+5 @18 vy+5 @20 vy−5 归零
+ *  - 帧 4t 进帧(projFrames[731]=4 Main.cs:8769);尘 226×⅓(scale0.4,vel=v×0.5 或 ×0.7)
+ *  - 光 (0.2,0.5,0.7);Kill:SoundID 0(击块)+尘 226×15(oldV×0.5,⅔ noGravity scale×1.5) */
+export class ThunderBoltShot extends Entity {
+  w = 10; h = 10;
+  damage: number;
+  knockback: number;
+  critChance = 0.04;
+  armorPen = 0;
+  dead = false;
+  magicProj = true;
+  readonly projId = 731;
+  private t = 0;
+  private readonly life = 90;      // timeLeft 90（SetDefaults）
+  private ai0 = 0;                 // 摆相计数
+  private frame = 0;
+  private frameCounter = 0;
+  private alpha = 255;             // SetDefaults alpha=255 → 渐显
+  private hitCd = new HitCdImpl();
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.vx = vx; this.vy = vy;
+    this.damage = Math.max(1, Math.round(damage));
+    this.knockback = knockback;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.t++;
+    if (this.t >= this.life || this.dead) { this.die(game); return; }
+    if (++this.frameCounter >= 4) {                            // :38463-38470
+      this.frameCounter = 0;
+      this.frame = (this.frame + 1) % 4;                       // projFrames[731]=4
+    }
+    this.alpha = Math.max(0, this.alpha - 15);                 // :38471-38475 渐显
+    // 之字摆（:38476-38497）
+    this.ai0++;
+    const oddTick = this.ai0 % 2 !== 0 && Math.random() < 0.25;
+    if (oddTick) this.ai0++;
+    switch (Math.trunc(this.ai0)) {
+      case 10: this.vy -= 5; break;
+      case 12: this.vy += 5; break;
+      case 18: this.vy += 5; break;
+      case 20: this.vy -= 5; this.ai0 = 0; break;
+    }
+    if (Math.random() < 1 / 3) {                               // 尘 226 ×⅓(:38498-38507)
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 226,
+        this.vx, this.vy, 50, null, 0.4);
+      if (d) {
+        d.noGravity = true;
+        d.vx = 0; d.vy = 0;
+        d.vx = this.vx * 0.5 * (Math.random() < 2 / 3 ? 1.4 : 1);
+        d.vy = this.vy * 0.5 * (Math.random() < 2 / 3 ? 1.4 : 1);
+      }
+    }
+    game.addLightAt?.(this.cx, this.cy, 0.2, 0.5, 0.7);        // :38508
+    // 位移（extraUpdates=1 → 原版双子步全速;单步全速视觉等效,登记近似）;
+    // tileCollide 缺省 true → 撞块亡
+    this.x += this.vx; this.y += this.vy;
+    const st = game.world.store;
+    const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+    if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) { this.die(game); return; }
+    dealContacts(this, game, this.hitCd, 10);                  // 缺省免疫窗（非 local 表族）
+  }
+
+  /** Kill（:77055-77069）：SoundID 0 + 尘 226×15(oldV×0.5,⅔ noGravity/scale×1.5/vel×0.5) */
+  die(game: GameHooks): void {
+    if (this.dead) return;
+    this.dead = true;
+    game.playSfxAt?.('hit', this.cx, this.cy);                 // SoundID 0 击块音（本仓近似轨）
+    for (let i = 0; i < 15; i++) {
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 226,
+        this.vx * 0.5, this.vy * 0.5, 50, null, 0.5);
+      if (d && Math.random() < 2 / 3) {
+        d.noGravity = true;
+        d.scale *= 1.5;
+        d.vx *= 0.5; d.vy *= 0.5;
+      }
+    }
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projSprite(731);
+    ctx.save();
+    ctx.globalAlpha = 1 - this.alpha / 255;                    // GetAlpha 白化淡入(:81134 灰阶近似)
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(Math.atan2(this.vy, this.vx) + 0 /*ai29 弹体竖直贴图→随速度向*/);
+    ctx.imageSmoothingEnabled = false;
+    if (img && img.width > 0) {
+      const fh = img.height / 4;
+      ctx.drawImage(img, 0, Math.round(this.frame * fh), img.width, Math.round(fh),
+        -(img.width * 0.7) / 2, -fh / 2, img.width * 0.7, fh);
+    } else {
+      ctx.fillStyle = '#66CCFF';
+      ctx.fillRect(-3, -3, 6, 6);
+    }
+    ctx.restore();
+  }
+}
+
+// ---------------- 2795 激光机枪:439 持握体(AI_075·439 支 :67185-67284) ----------------
+
+export interface LaserMgCtl {
+  /** player.channel 电平（mouseHeld+持械+!CCED 由 Game 侧并入门） */
+  channel: () => boolean;
+  /** 当前鼠标世界坐标（实时转向基准） */
+  aim: () => { x: number; y: number };
+  /** CheckMana(held.mana, pay:true)——每发射拍扣蓝（ManaV2 空蓝照充语义） */
+  payMana: () => void;
+  /** GetSlowMagicUseRate()（1/0.4）★消费点①发射节拍 */
+  rate: () => number;
+  /** GetSlowMagicScalar()（1/2.5）★消费点②帧动画 ③循环音间隔 */
+  scalar: () => number;
+  /** 双发回调（Game 侧造 440×2） */
+  fire: (x: number, y: number, vx: number, vy: number) => void;
+  onKill?: () => void;
+}
+
+/** 439 LaserMachinegun 持握体（SetDefaults 22×22/ai75/penetrate−1/noTile + 公共尾
+ *  :68381-68390 position=RRP(MountedCenter)−Size/2、rotation=vAngle+π/2、timeLeft=2 续命）。
+ *  发射节拍 period=24−6×stage(stage=@40/80/120 → 24/18/12/6t 四档加速);
+ *  slowMagic:ai1+=rate(节拍÷0.4)、frameCounter≥4×scalar、soundDelay=period×scalar。
+ *  循环音 Item91(ai0≠1 首帧免);枪口尘 135×2(Center+aim 向×24,scale1.4,noGravity)。
+ *  发射拍 gate 失败 → Kill(:67242-67282)。 */
+export class LaserMachinegunHolder extends Entity {
+  w = 22; h = 22;
+  damage: number;
+  knockback: number;
+  critChance = 0.04;
+  armorPen = 0;
+  dead = false;
+  magicProj = true;
+  readonly projId = 439;
+  private ai0 = 0;               // 充能计数（档位门 40/80/120）
+  private ai1 = 0;               // 发射累加器
+  private frame = 0;
+  private frameCounter = 0;
+  private soundDelay = 0;
+  private velAng = 0;            // velocity 角（公共尾 rotation=vAngle+π/2）
+  private ctl: LaserMgCtl;
+
+  constructor(x: number, y: number, ang: number, damage: number, knockback: number, ctl: LaserMgCtl) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.velAng = ang;
+    this.damage = Math.max(1, Math.round(damage));
+    this.knockback = knockback;
+    this.ctl = ctl;
+  }
+
+  get aimAngle(): number { return this.velAng; }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.ai0++;
+    const stage = (this.ai0 >= 40 ? 1 : 0) + (this.ai0 >= 80 ? 1 : 0) + (this.ai0 >= 120 ? 1 : 0);   // :67188-67200
+    const period = 24 - 6 * stage;                                                                   // 24/18/12/6
+    this.ai1 += this.ctl.rate();                                                                     // ★消费点①(:67204)
+    let firing = false;
+    if (this.ai1 >= period) { this.ai1 = 0; firing = true; }                                         // :67206-67210
+    this.frameCounter += 1 + stage;                                                                  // 加速档带帧(:67211)
+    if (this.frameCounter >= 4 * this.ctl.scalar()) {                                                // ★消费点②(:67212)
+      this.frameCounter = 0;
+      this.frame = (this.frame + 1) % 6;                                                             // projFrames[439]=6(Main.cs:8674)
+    }
+    if (--this.soundDelay <= 0) {
+      this.soundDelay = Math.max(1, Math.round(period * this.ctl.scalar()));                         // ★消费点③(:67223)
+      if (this.ai0 !== 1) game.playSfxWav?.('Item_91', 1, this.cx, this.cy);                         // 循环射击音(:67226)
+    }
+    if (this.ai1 === this.ctl.rate() && this.ai0 !== 1) {                                            // 枪口尘(:67229-67241)
+      for (let i = 0; i < 2; i++) {
+        const d = game.spawnDust?.(this.cx + Math.cos(this.velAng) * 24 - 8,
+          this.cy + Math.sin(this.velAng) * 24 - 8, 16, 16, 135,
+          Math.cos(this.velAng), Math.sin(this.velAng), 100, null, 1.4);
+        if (d) { d.noGravity = true; d.vx *= 0.66; d.vy *= 0.66; }
+      }
+    }
+    // 公共尾挂手（:68381-68389）：RRP(MountedCenter)≈玩家中心 − Size/2;timeLeft=2 续命
+    const p = game.player as unknown as { cx: number; cy: number };
+    this.x = p.cx - this.w / 2;
+    this.y = p.cy - this.h / 2;
+    if (firing) {
+      const m = this.ctl.aim();
+      if (!this.ctl.channel()) { this.kill(game); return; }                                        // gate 失败 → Kill(:67281)
+      this.ctl.payMana();
+      // 实时转向：v = normalize(mouse − hand) × shootSpeed(20)
+      const dx = m.x - p.cx, dy = m.y - p.cy;
+      const l = Math.hypot(dx, dy) || 1;
+      this.velAng = Math.atan2(dy, dx);
+      const spd = 14;                                                                              // num10=14(:67265)
+      for (let i = 0; i < 2; i++) {                                                                // 双发 440(:67267-67277)
+        const jx = (Math.random() * 15) | 0, jy = (Math.random() * 15) | 0;                        // rand(−7,±7)
+        const a = this.velAng + (Math.random() * 0.19634954631328583 - 0.09817477315664291);       // RotatedBy ±0.0982rad
+        this.ctl.fire(p.cx + jx - 7, p.cy + jy - 7, Math.cos(a) * spd, Math.sin(a) * spd);
+      }
+    }
+  }
+
+  kill(game: GameHooks): void {
+    if (this.dead) return;
+    this.dead = true;
+    this.ctl.onKill?.();
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projSprite(439);
+    ctx.save();
+    ctx.globalAlpha = 0.95;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.velAng + Math.PI / 2);                       // 公共尾 rotation=vAngle+π/2(:68382)
+    ctx.imageSmoothingEnabled = false;
+    if (img && img.width > 0) {
+      const fh = img.height / 6;
+      ctx.drawImage(img, 0, Math.round(this.frame * fh), img.width, Math.round(fh),
+        -img.width / 2, -fh / 2, img.width, fh);
+    } else {
+      ctx.fillStyle = '#8899BB';
+      ctx.fillRect(-11, -11, 22, 22);
+    }
+    ctx.restore();
+  }
+}
+
+// ---------------- 440 LaserMachinegunLaser(SetDefaults :5106-5116 + AI :55738-55774) ----------------
+
+/** 5×5/aiStyle1/alpha255 −25/t 渐显/extraUpdates2(3 子步全速)/timeLeft600/magic/noTile。
+ *  光 (0.25,0.4,0.7)(:55748-55750);localAI[0]+3/t 至 100(纯视觉余量);
+ *  Kill 尘 135×rand(3,7) scale2.1 noGravity(:74946-74956)。直线弹,缺省免疫窗。 */
+export class LaserMachinegunLaser extends Entity {
+  w = 5; h = 5;
+  damage: number;
+  knockback: number;
+  critChance = 0.04;
+  armorPen = 0;
+  dead = false;
+  magicProj = true;
+  readonly projId = 440;
+  private t = 0;
+  private readonly life = 600;
+  private alpha = 255;
+  private localAI0 = 0;
+  private hitCd = new HitCdImpl();
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.vx = vx; this.vy = vy;
+    this.damage = Math.max(1, Math.round(damage));
+    this.knockback = knockback;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.t++;
+    if (this.t >= this.life) { this.die(game); return; }
+    this.alpha = Math.max(0, this.alpha - 25);                  // :55740-55744
+    this.localAI0 = Math.min(100, this.localAI0 + 3);           // :55754-55762（视觉余量）
+    game.addLightAt?.(this.cx, this.cy, 0.25, 0.4, 0.7);        // :55748
+    for (let s = 0; s < 3; s++) {                               // extraUpdates=2 → 3 子步全速
+      this.x += this.vx; this.y += this.vy;
+      const st = game.world.store;
+      const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+      if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) { this.die(game); return; }
+    }
+    dealContacts(this, game, this.hitCd, 10);
+  }
+
+  private die(game: GameHooks): void {
+    if (this.dead) return;
+    this.dead = true;
+    const n = 3 + ((Math.random() * 4) | 0);                    // rand(3,7)
+    for (let i = 0; i < n; i++) {
+      const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 135, 0, 0, 100, null, 2.1);
+      if (d) { d.noGravity = true; d.vx *= 2; d.vy *= 2; }
+    }
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projSprite(440);
+    ctx.save();
+    ctx.globalAlpha = 1 - this.alpha / 255;                     // GetAlpha=(255−alpha) 灰阶(:81088)
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(Math.atan2(this.vy, this.vx));
+    ctx.imageSmoothingEnabled = false;
+    if (img && img.width > 0) {
+      const L = Math.hypot(this.vx, this.vy) * 3;               // 拉长光束段（子步行程）
+      ctx.drawImage(img, -L / 2, -img.height / 2, L, img.height);
+    } else {
+      ctx.fillStyle = '#AABBEE';
+      ctx.fillRect(-4, -1, 8, 2);
+    }
+    ctx.restore();
+  }
+}
+
+// ---------------- 3852 右键风暴 704(AI_145_BookStaffStorm :71421-71560 + SetDefaults :7449) ----------------
+
+/** 60×210/ai145/friendly magic/tileCollide=false/penetrate−1/local 免疫−1/timeLeft600。
+ *  寿命帽 300t(localAI[0]≥16 → 提前至 285);vx 保持出手向(±speed)仅 vy 受控:
+ *  身下 16×160 列撞固块/液体 → 升(vy −2/−4 至 −16,localAI[0]+=2),否则坠(+2/+4 至 +16)。
+ *  尘 274 沿纵向椭圆(fadeIn1.3 scale0.87 alpha211 noGravity,vel.x+=v.x×2.1)+
+ *  底部尘 31×4;彩带 gore 1007/1008 ×⅕(timeLeft60)。循环音 dd2_book_staff_twister_loop
+ *  (末 15t 音量线性归零)。命中每敌一次(cooldown −1)。 */
+export class BookStormTwister extends Entity {
+  w = 60; h = 210;
+  damage: number;
+  knockback: number;
+  critChance = 0.04;
+  armorPen = 0;
+  dead = false;
+  magicProj = true;
+  readonly projId = 704;
+  private t = 0;
+  private life = 300;            // ai[0] 帽 300（localAI[0]≥16 → 285,简化取 300 登记）
+  private localAI0 = 0;
+  private hitCd = new HitCdImpl();
+
+  constructor(x: number, y: number, vx: number, damage: number, knockback: number) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.vx = vx; this.vy = 0;
+    this.damage = Math.max(1, Math.round(damage));
+    this.knockback = knockback;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.t++;
+    if (this.t >= this.life) { this.dead = true; return; }      // :71454-71457
+    // 垂直物理（:71467-71510）：身下 16×160 探测柱
+    const probeX = this.cx - 8, probeYTop = this.y + this.h - 160;
+    let blocked = false;
+    {
+      const st = game.world.store;
+      for (let yy = probeYTop; !blocked && yy < this.y + this.h; yy += 16) {
+        const tx = Math.floor(probeX / TILE), ty = Math.floor(yy / TILE);
+        if (st.inBounds(tx, ty) && (st.isSolid(tx, ty))) blocked = true;
+      }
+    }
+    if (blocked) {                                              // 支撑/浸液 → 升
+      if (this.vy > 0) this.vy = 0;
+      this.vy -= this.vy > -4 ? 2 : 4;
+      if (this.vy < -16) this.vy = -16;
+      if (this.vy <= -4) this.localAI0 += 2;
+    } else {                                                    // 悬空 → 坠
+      this.localAI0 = Math.max(0, this.localAI0 - 1);
+      if (this.vy < 0) this.vy = 0;
+      this.vy += this.vy < 4 ? 2 : 4;
+      if (this.vy > 16) this.vy = 16;
+    }
+    this.x += this.vx; this.y += this.vy;
+    // 尘 274 ×1（:71511-71537,ai[0]<270 门略作恒真近似——末 30t 收尾停尘登记）
+    if (this.t < this.life - 30) {
+      const amt = Math.random();
+      const px = this.cx + (amt - 0.5) * this.h * 0.2 * 0.5 * 2;
+      const py = this.y + this.h * (0.5 + (Math.random() * 1.9 - 0.95)) * 0.5 + 10;
+      const d = game.spawnDust?.(px, py, 0, 0, 274, 0, Math.random() * -0.5 - 1.3, 211, null, 0.87);
+      if (d) {
+        d.fadeIn = 1.3;
+        d.noGravity = true;
+        d.noLight = true;
+        d.vx = (1 + Math.random()) + this.vx * 2.1;
+      }
+    }
+    for (let k = 0; k < 4; k++) {                               // 底部尘 31×4(:71538-71544)
+      const d = game.spawnDust?.(this.x + this.w / 2 - 25, this.y + this.h - 25, 50, 25, 31,
+        this.vx, -2, 100, null, 1);
+      if (d) d.noGravity = true;
+    }
+    dealContacts(this, game, this.hitCd, -1);                   // localNPCHitCooldown=−1
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projSprite(704);
+    if (!img || img.width <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, this.x, this.y, this.w, this.h);
+    ctx.restore();
+  }
+}
+
+// ---------------- 5065 公主之武魔法阵 950(AI_186_PrincessWeapon :43454-43573) ----------------
+
+/** 104×104/ai186/alpha255(本体不可见全粒子)/timeLeft180 但 AI 自管 60t 即 Kill/
+ *  tileCollide=false/penetrate=−1/ignoreWater。Damage() 伤 ×0.98（:13575-13577,出生伤折算）。
+ *  包络：Opacity=Remap(t,0,60,1,0);scale=(0.4+0.6×easeOut²)×(1−Remap(t,45,60)²);
+ *  尘 267(HSL(0.92,1,0.5)粉)双环反向 ×3×½掷(环缘半径 52×scale,法向±45°偏移 6px,
+ *  fadeIn rand×1.2×scale,vel 法向∓2+v×0.5)+白克隆 scale/2 fade×0.85;
+ *  PrincessWeapon 编排粒子 ×¾掷(u<0.95);t==50 四正交收束爆发 ×2 档速度(:43554-43572)。
+ *  命中走通用接触（缺省免疫窗）;direction 朝目标为表现位（:13232,省略）。 */
+export class PrincessMagicCircle extends Entity {
+  w = 104; h = 104;
+  damage: number;
+  knockback: number;
+  critChance = 0.04;
+  armorPen = 0;
+  dead = false;
+  magicProj = true;
+  readonly projId = 950;
+  private t = 0;
+  private readonly life = 60;
+  opacity = 1;
+  scl = 0.4;
+  private hitCd = new HitCdImpl();
+
+  constructor(x: number, y: number, damage: number, knockback: number) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.vx = 0; this.vy = 0;                                   // 零速定点放置（Player.cs:48183）
+    this.damage = Math.max(1, Math.round(damage * 0.98));       // Damage() 折价(:13575)
+    this.knockback = knockback;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.t++;
+    if (this.t >= this.life) { this.dead = true; return; }      // :43457-43461
+    const u = this.t / this.life;
+    this.opacity = 1 - u;                                       // Remap(ai0,0,num,1,0)
+    const e1 = 1 - (1 - u) * (1 - u);
+    const e2 = 1 - (1 - e1) * (1 - e1);
+    const tailK = Math.pow(Math.max(0, Math.min(1, (this.t - 45) / 15)), 2);
+    this.scl = (0.4 + 0.6 * e2) * (1 - tailK);                  // :43463-43470
+    if (u < 0.9) {                                              // 双环尘（:43479-43537）
+      const ringR = (this.w / 2) * this.scl;
+      for (const dirSign of [-1, 1]) {
+        for (let i = 0; i < 3; i++) {
+          if (Math.random() >= 0.5) continue;
+          const a = Math.random() * Math.PI * 2;
+          const nx = Math.cos(a), ny = Math.sin(a);
+          const px = this.cx + nx * ringR + ny * dirSign * 6;
+          const py = this.cy + ny * ringR - nx * dirSign * 6;
+          const d = game.spawnDust?.(px, py, 0, 0, 267, 0, 0, 0,
+            { r: 255, g: 102, b: 178, a: Math.round(255 * this.opacity) },
+            0.3 + Math.random() * 1.2 * this.scl, true);
+          if (d) {
+            d.scale *= this.scl;
+            d.vx = ny * dirSign * -2 * this.scl + this.vx * 0.5;
+            d.vy = -nx * dirSign * -2 * this.scl + this.vy * 0.5;
+          }
+        }
+      }
+      if (Math.random() < 0.75) {                               // 编排粒子近似(:43538-43552)
+        const a = Math.random() * Math.PI * 2 + Math.PI / 2;
+        const rr = (this.w / 2) * this.scl;
+        game.spawnParticles(this.cx + Math.cos(a) * rr, this.cy + Math.sin(a) * rr, '#FF66B2',
+          1, 1, { life: 20, grav: 0, damp: 0.93 });
+      }
+    }
+    if (this.t === this.life - 10) {                            // 收束爆发(:43554-43572)
+      for (let q = 0; q < 4; q += 1) {
+        const a = Math.PI * 2 * q * 0.25;
+        game.spawnParticles(this.cx, this.cy, '#FF66B2', 2, 6,
+          { life: 22, grav: 0, damp: 0.92 });
+        void a;
+      }
+    }
+    dealContacts(this, game, this.hitCd, 10);                   // 缺省免疫窗
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    // 本体 alpha=255 不可见——以半透明双环呈现粒子阵包络（原版观感近似）
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, this.opacity) * 0.28;
+    ctx.strokeStyle = '#FF66B2';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(this.cx, this.cy, (this.w / 2) * this.scl, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = Math.max(0, this.opacity) * 0.16;
+    ctx.beginPath();
+    ctx.arc(this.cx, this.cy, (this.w / 2) * this.scl * (0.4 + 0.6 * this.scl), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}

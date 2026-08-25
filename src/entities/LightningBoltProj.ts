@@ -34,21 +34,13 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { TtlSprite } from '../assets/ttlSprite';
 
 /** Extra_33（22×22 闪电纹理）懒加载（Arrow.projSprite 同款模式，不 import
  *  Renderer 运行时以免实体→渲染器环） */
-let boltImg: ImageBitmap | HTMLImageElement | null = null;
-let boltTried = false;
+const boltSprite = new TtlSprite('sprites/vanilla/Extra_33.png');
 function extra33(): ImageBitmap | HTMLImageElement | null {
-  if (boltTried) return boltImg;
-  boltTried = true;
-  if (typeof Image === 'undefined') return null;
-  const im = new Image();
-  im.onload = () => upgradeToBitmap(im, (b) => { boltImg = b; });
-  im.src = 'sprites/vanilla/Extra_33.png';
-  boltImg = im;
-  return im;
+  return boltSprite.get();   // TTL 自愈装载(2026-08-25 同类扫描:原 tried 锁一次失败整会话隐形)
 }
 
 /** Extra_33 体带高（LightningLaserDraw stage1 帧 (0,8,21,6)，DelegateMethods.cs:989） */

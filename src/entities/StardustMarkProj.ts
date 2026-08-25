@@ -25,22 +25,14 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { TtlSprite } from '../assets/ttlSprite';
 import { spawnVanillaEnemy } from './bossAI';
 
 /** Extra_47 落点束贴图懒加载（Arrow.projSprite 同款模式；不 import Renderer 运行时
  *  以免 Enemy→StardustMarkProj→Renderer→Enemy 运行时环） */
-let beamImg: ImageBitmap | HTMLImageElement | null = null;
-let beamTried = false;
+const beamSpriteTtl = new TtlSprite('sprites/vanilla/Extra_47.png');
 function beamSprite(): ImageBitmap | HTMLImageElement | null {
-  if (beamTried) return beamImg;
-  beamTried = true;
-  if (typeof Image === 'undefined') return null;
-  const im = new Image();
-  im.onload = () => upgradeToBitmap(im, (b) => { beamImg = b; });
-  im.src = 'sprites/vanilla/Extra_47.png';
-  beamImg = im;
-  return im;
+  return beamSpriteTtl.get();   // TTL 自愈装载(2026-08-25 同类扫描)
 }
 
 export class StardustMarkProj extends Entity {

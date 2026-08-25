@@ -421,6 +421,10 @@ export class MinionProj extends Entity {
    *  扑击 3+(num10-ai1)/(num10/4)（:50909） */
   palFrame = 0;
   private palFrameCd = 0;
+  /** 阿比盖尔一阶 963 帧机（AI_062 963 档 :66843-66868）：攻击态 fc/12 循环 0-6
+   *  收于 5；跟随态 7t 循环 0-7——draw 消费（2026-08-24 同类审计补） */
+  a963Frame = 0;
+  private a963Fc = 0;
   // ---- 1457 帕鲁钻地龟 1098/1123（AI_204_Digtoise Projectile.cs:39169-39506 态机，
   //      2026-08-23 内容缺口批；物品 5667 PalworldDigtoise / 6174 PalworldTrustyDigtoise）----
   /** ai[0]：0 出场 / 1 向下挖 / 2 向右挖 / 3 向左挖 / 4 离场 / 5 抚摸（:39173-39178） */

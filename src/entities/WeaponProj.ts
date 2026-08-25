@@ -7,7 +7,7 @@
 // 贴图统一 Projectile_N.png 懒加载（Arrow.projSprite 共享缓存）。
 import { Entity } from './Entity';
 import { moveAndCollide } from '../physics/TileCollision';
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { TtlSpriteMap } from '../assets/ttlSprite';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -2577,16 +2577,9 @@ function flailChainTex(projId: number): string {
     default: return 'Chain3';
   }
 }
-const chainImgCache = new Map<string, ImageBitmap | HTMLImageElement>();
+const chainSprites = new TtlSpriteMap((name) => `sprites/vanilla/${name}.png`);
 function chainImg(name: string): ImageBitmap | HTMLImageElement | null {
-  let img = chainImgCache.get(name);
-  if (img !== undefined) return img ?? null;
-  if (typeof Image === 'undefined') return null;
-  img = new Image();
-  img.onload = () => upgradeToBitmap(img, (b) => chainImgCache.set(name, b));
-  img.src = `sprites/vanilla/${name}.png`;
-  chainImgCache.set(name, img);
-  return img;
+  return chainSprites.get(name);   // TTL 自愈装载(2026-08-25 同类扫描:原锁存坏元素永久隐形)
 }
 
 export class FlailProj extends Entity {

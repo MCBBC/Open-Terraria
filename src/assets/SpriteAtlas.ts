@@ -356,12 +356,20 @@ export class SpriteAtlas {
 
   private _uiPending = new Set<string>();
   /** UI 贴图失败负缓存(与 ensureVImage._vImageFailed 对称,2026-08-13 补):
-   *  清单内但 404 的键若不加终态标记,每帧重查的消费方会每帧重发请求 */
-  private _uiFailed = new Set<string>();
+   *  清单内但 404 的键若不加终态标记,每帧重查的消费方会每帧重发请求。
+   *  ★TTL 化(2026-08-25 同类扫描):原永久 Set=一次失败整会话缺图(与刚修的
+   *  preloadUiFiles 同族漏网);改 10s 过期重试,暖缓存到位即自愈 */
+  private _uiFailed = new Map<string, number>();
+  private static readonly UI_FAIL_TTL = 10_000;
   private ensureUiImage(file: string): ImageBitmap | ImageBitmap | HTMLImageElement | null {
     const hit = this.uiimages.get(file);
     if (hit) return hit;
-    if (this._uiPending.has(file) || this._uiFailed.has(file)) return null;
+    const fail = this._uiFailed.get(file);
+    if (fail !== undefined) {
+      if (Date.now() - fail < SpriteAtlas.UI_FAIL_TTL) return null;
+      this._uiFailed.delete(file);
+    }
+    if (this._uiPending.has(file)) return null;
     this._uiPending.add(file);
     const im = new Image();
     im.onload = () => {
@@ -374,7 +382,7 @@ export class SpriteAtlas {
       if (!SpriteAtlas.USE_BITMAP) land(im);
       else tryBitmapUpgrade(im, file, land, () => land(im));  // 失败回退+退避重试(2026-08-18)
     };
-    im.onerror = () => { this._uiPending.delete(file); this._uiFailed.add(file); };
+    im.onerror = () => { this._uiPending.delete(file); this._uiFailed.set(file, Date.now()); };
     im.src = `sprites/${encodeURI(file)}`;
     return null;
   }

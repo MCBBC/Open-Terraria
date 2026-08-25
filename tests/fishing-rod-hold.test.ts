@@ -204,4 +204,21 @@ describe('AI_061 存活门与距离断线（R32）', () => {
     c.fixedUpdate(1, hooks);
     expect(c.dead).toBe(false);
   });
+
+  it('★R32 用户实报回归：itemfunc 缺 shoot 键的竿（金竿 2294 等）浮漂不被误杀——', () => {
+    // 存活门 shoot 比对读 bobberProjFor(手持竿)（=SetDefaults shoot 表移植），
+    // 不读 vanilla-itemfunc.shoot（该表仅 2289/4325/4442 有键——曾致金竿/玻纤/
+    // 强化/机械/坐鸭/热线浮漂一出生即 Kill = "挥不出鱼线"）
+    for (const [poleVid, bobberId] of [[2291, 361], [2292, 362], [2293, 363], [2294, 364], [2295, 365], [2296, 366], [2421, 381], [2422, 382]] as const) {
+      const { hooks, player } = makeHooks();
+      const poleId = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[poleVid]!]!;
+      player.inv.slots[5] = { id: poleId, stack: 1 };
+      const b = new Bobber(player.cx + 8, 95 * TILE + 8, 0, 2, 30, 0, 15, () => player);
+      b.projId = bobberId;                   // 正确配对浮漂
+      let landed = false;
+      for (let k = 0; k < 300; k++) { b.fixedUpdate(1, hooks); if (b.floating) { landed = true; break; } }
+      expect(landed).toBe(true);             // 落水漂浮=未被存活门误杀
+      expect(b.dead).toBe(false);
+    }
+  });
 });

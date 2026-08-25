@@ -28,22 +28,27 @@ interface DriveResult {
   framesOnTrack: number;
 }
 
-/** 驱动矿车:每 tick trackCollision + 积分(=Minecart.fixedUpdate 在轨分支)。
- *  stuck = 在轨状态下连续 30 tick 位移 < 0.05(前方有轨却不动弹) */
-function drive(st: TileStore, sx: number, sy: number, vx0: number, ticks = 900): DriveResult {
+/** 驱动矿车:每 tick 重力→trackCollision→积分(=Minecart.fixedUpdate 1:1)。
+ *  磁吸点 = (x+10, y+47);平轨轨面 = 行×16+5 → 车顶 y = 行×16-42。
+ *  stuck = 在轨状态下连续 30 tick 位移 < 0.05 且未达目标格(前方有轨却不动弹;
+ *  抵达终点开口端的合法急停不计) */
+function drive(st: TileStore, sx: number, sy: number, vx0: number, targetX: number, ticks = 900): DriveResult {
   const r = { x: sx, y: sy, vx: vx0, vy: 0, lastBoostX: 0, lastBoostY: 0 };
   const w = 20, h = 42;
+  const dir = Math.sign(vx0);
   let stuckRun = 0;
   let lastX = r.x;
   let stuckTick = -1;
   let framesOnTrack = 0;
   for (let i = 0; i < ticks; i++) {
+    r.vy = Math.min(r.vy + 0.4, 10);            // PLAYER_DEFAULT_GRAVITY
     const bits = trackCollision(st, r, w, h, false, false, 0, false, {});
     const onTrack = !!(bits & (1 << FLAG_ON_TRACK));
+    r.x += r.vx;
+    r.y += r.vy;
+    if (dir > 0 ? r.x >= targetX : r.x <= targetX) return { stuck: false, stuckTick: -1, endX: r.x, framesOnTrack };
     if (onTrack) {
       framesOnTrack++;
-      r.x += r.vx;
-      r.y += r.vy;
       if (Math.abs(r.x - lastX) < 0.05 && Math.abs(r.vx) < 0.05) {
         stuckRun++;
         if (stuckRun >= 30 && stuckTick < 0) stuckTick = i;
@@ -52,10 +57,6 @@ function drive(st: TileStore, sx: number, sy: number, vx0: number, ticks = 900):
       }
     } else {
       stuckRun = 0;
-      // 脱轨窗口:重力+落地(简化:贴回轨面由 trackCollision 下 tick 吸回)
-      r.vy = Math.min(r.vy + 0.4, 10);
-      r.x += r.vx;
-      r.y += r.vy;
     }
     lastX = r.x;
     if (stuckTick >= 0) break;
@@ -69,8 +70,8 @@ describe('矿车转角矩阵(placeTrack+frameTrackArea 真实铺轨产物)', () 
     const st = w.store;
     const R = 30;
     lay(st, Array.from({ length: 20 }, (_, i) => [20 + i, R] as [number, number]));
-    const r = drive(st, 20 * 16 + 8, R * 16 - 20, 3);
-    expect(r.stuck, `平直轨卡死 tick=${r.stuckTick}`).toBe(false);
+    const r = drive(st, 20 * 16 - 2, R * 16 - 42, 3, 38 * 16);
+    expect(r.stuck, `平直轨卡死 tick=${r.stuckTick} endX=${r.endX}`).toBe(false);
   });
 
   const shapes: Array<[string, Array<[number, number]>]> = [
@@ -108,9 +109,9 @@ describe('矿车转角矩阵(placeTrack+frameTrackArea 真实铺轨产物)', () 
       const minX = Math.min(...xs), maxX = Math.max(...xs);
       const left = cells.find((c) => c[0] === minX)!;
       const right = cells.find((c) => c[0] === maxX)!;
-      const fwd = drive(st, minX * 16 + 8, left[1] * 16 - 20, 3);
+      const fwd = drive(st, minX * 16 - 2, left[1] * 16 - 42, 3);
       expect(fwd.stuck, `${name} 右行卡死 tick=${fwd.stuckTick} endX=${fwd.endX}`).toBe(false);
-      const back = drive(st, maxX * 16 + 8, right[1] * 16 - 20, -3);
+      const back = drive(st, maxX * 16 - 2, right[1] * 16 - 42, -3);
       expect(back.stuck, `${name} 左行卡死 tick=${back.stuckTick} endX=${back.endX}`).toBe(false);
     });
   }

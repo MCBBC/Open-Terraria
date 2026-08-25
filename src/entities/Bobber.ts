@@ -207,14 +207,18 @@ export class Bobber extends Entity {
     // ---- AI_061 存活门（Projectile.cs:54605-54621 flag2 五支，1456=1457=1458 同构）：
     //      手持非钓竿 / CCed / noItems(诅咒 23=本仓 Cursed buff) / 手持竿 shoot 与
     //      本弹型不符（浮漂饰品覆写弹 986-993 豁免，flag :54604） / pulley 绳悬 → Kill。
-    //      ★切物品即断线收漂的原版语义（此前缺失=换手持竿浮漂永生）----
+    //      ★切物品即断线收漂的原版语义（此前缺失=换手持竿浮漂永生）。
+    //      ★shoot 比对取 bobberProjIdFor(手持竿 vid)（=Item.cs:23001 SetDefaults
+    //      shoot 表的移植），不读 itemfunc.shoot——该表仅 2289/4325/4442 有 shoot 键，
+    //      直读会让金竿/玻纤/强化/机械/坐鸭/热线的浮漂一出生即被误杀（2026-08-25
+    //      用户实报"挥不出鱼线"）----
     const held = p.inv.heldItem();
     const hdef = held ? ITEM_DEFS[held.id] : undefined;
     const hv = hdef ? +(/^vi_(\d+)_/.exec(hdef.key)?.[1] ?? -1) : -1;
     const hf = hv >= 0 ? itemFuncOfVid(hv) : null;
     const lavaBobberAcc = this.projId >= 986 && this.projId <= 993;
     if (!((hf?.fishingPole ?? 0) > 0) || p.cced || p.buffs.has(BuffType.Cursed)
-      || (!lavaBobberAcc && (hf?.shoot ?? 0) !== this.projId)
+      || (!lavaBobberAcc && bobberProjIdFor(hv) !== this.projId)
       || p.pulley) {
       this.dead = true;
       return;

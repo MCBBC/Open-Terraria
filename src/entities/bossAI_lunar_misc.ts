@@ -49,7 +49,7 @@ import { Entity } from './Entity';
 import { canHitLine } from '../physics/LineOfSight';
 import { MLDeathray, type NetProjMeta } from './bossAI_duke_moonlord';
 import { LightningBoltProj } from './LightningBoltProj';
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { TtlSprite } from '../assets/ttlSprite';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
@@ -2064,17 +2064,9 @@ export class LunarOrb extends Entity {
 // num347) / −rot ×scale / rot×0.5 ×scale×0.9）+ Projectile_578/579.png（−rot×0.7，
 // α×0.4），num347=0.95+sin(rotation×0.75)×0.1。
 /** Extra_50（60×60 星旋涡旋）懒加载 */
-let portalSwirlImg: ImageBitmap | HTMLImageElement | null = null;
-let portalSwirlTried = false;
+const portalSwirlTtl = new TtlSprite('sprites/vanilla/Extra_50.png');
 function extra50(): ImageBitmap | HTMLImageElement | null {
-  if (portalSwirlTried) return portalSwirlImg;
-  portalSwirlTried = true;
-  if (typeof Image === 'undefined') return null;
-  const im = new Image();
-  im.onload = () => upgradeToBitmap(im, (b) => { portalSwirlImg = b; });
-  im.src = 'sprites/vanilla/Extra_50.png';
-  portalSwirlImg = im;
-  return im;
+  return portalSwirlTtl.get();   // TTL 自愈装载(2026-08-25 同类扫描)
 }
 
 export class VortexPortalProj extends Entity {
