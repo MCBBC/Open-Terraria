@@ -744,6 +744,13 @@ function itemByCreateTile(tileId: number): number | undefined {
   return CREATE_TILE_ITEM_MAP.get(tileId);
 }
 
+/** 原版物品的 createTile（UI 搜索面板去重用:惰性 vi_ 注册的 createTile tile 若
+ *  已被 place_v 族覆盖,该 vi_ 件为不可放置死条目,不进搜索） */
+export function vanillaItemCreateTile(vid: number): number | undefined {
+  const ct = (vanillaJson.items as Record<string, { createTile?: number | null } | undefined>)[String(vid)]?.createTile;
+  return ct ?? undefined;
+}
+
 /** place_v_<sheet>_<name> 键的 tile def 键（place_v_ 剥离） */
 function tk0(key: string): string {
   return key.slice('place_'.length);

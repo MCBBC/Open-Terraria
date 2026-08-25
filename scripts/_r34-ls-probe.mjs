@@ -65,13 +65,34 @@ const out = await page.evaluate(async () => {
   const R = { fatal: null, checks: [], dbg: {} };
   const ck = (name, ok, detail) => R.checks.push({ name, ok, detail });
 
-  if (g.world.journeyPowers) g.world.journeyPowers.godmode = true;
+  if (g.world.journeyPowers) {
+    g.world.journeyPowers.godmode = true;
+    if ('infiniteMana' in g.world.journeyPowers) g.world.journeyPowers.infiniteMana = true;
+    if ('settleTime' in g.world.journeyPowers) g.world.journeyPowers.settleTime = true;
+  }
   g.world.clock.timeOfDay = 0.5; g.world.clock.dayTime = true;
 
   const p = g.player;
-  const sy = g.world.groundLevel;
+  const st0 = g.world.store;
   const px = Math.floor(p.x / TILE);
-  p.x = px * TILE; p.y = sy * TILE - p.h; p.vx = 0; p.vy = 0;
+  // ★装置勘误:groundLevel 在本种子出生点不准(曾把玩家中心埋进土块→CanHitLine
+  //   首步即断→落点短停 241px)。改列扫描首个实心格,脚踩其上
+  // 地表语义:groundLevel 起步,中心格若嵌固则逐格上移（自底向上会落洞穴底,
+  //   触发可达域钳拉偏——那是原版同式行为,非本仓缺陷,探针不取该场景）
+  let sy = Math.max(5, Math.floor(g.world.groundLevel));
+  let col = px;
+  p.x = col * TILE;
+  for (let tries = 0; tries < 40; tries++) {
+    p.y = sy * TILE - p.h - 2;
+    const cT = Math.floor(p.cx / 16), cTy = Math.floor((p.y + p.h / 2) / 16);
+    const feetOK = st0.isSolid(cT, cTy + 1) || st0.isSolid(cT, cTy + 2);
+    if (!st0.isSolid(cT, cTy)) break;
+    sy -= 1;                                             // 嵌固→上移
+  }
+  p.vx = 0; p.vy = 0;
+  for (let i = 0; i < 150; i++) g.fixedUpdate(1 / 60);   // 相机 lerp 沉降(偏移曾达 390px)
+  for (const q of g.entities.projectiles) q.dead = true;
+  p.useTime = 0; p.itemTime = 0;
 
   const giveItem = (vid, slot) => {
     const key = items.VANILLA_ITEM_KEY_BY_ID[vid];
@@ -114,7 +135,7 @@ const out = await page.evaluate(async () => {
 
   // 假人(盒 ×6 悬空防窒息,R33/R34 装置先例):钉在目标点上
   const { Enemy } = await import('/src/entities/Enemy.ts');
-  const foe = Enemy.fromVanilla(3, (px + 15) * TILE, sy * TILE - 48);
+  const foe = Enemy.fromVanilla(3, (col + 15) * TILE, sy * TILE - 48);
   g.entities.add(foe, 'enemies');
   foe.x -= foe.w * 2.5; foe.y -= foe.h * 2.5; foe.w *= 6; foe.h *= 6;
   foe.y = sy * TILE - 130 - foe.h / 2;
@@ -184,20 +205,52 @@ const out = await page.evaluate(async () => {
     Math.hypot(spawnPos.x - mouseWorldBefore.x, spawnPos.y - mouseWorldBefore.y) < 32,
     `spawn=(${spawnPos ? Math.round(spawnPos.x) : '?'},${spawnPos ? Math.round(spawnPos.y) : '?'}) ` +
     `mouse=(${Math.round(mouseWorldBefore.x)},${Math.round(mouseWorldBefore.y)})`);
+  // march 取证：沿玩家→鼠标逐步复跑 LOS,记录断裂点/阻挡格
+  try {
+    const mLOS = await import('/src/physics/LineOfSight.ts');
+    const stw = g.world.store;
+    let mx = p.cx, my = p.cy;
+    const mdx = mouseWorldBefore.x - p.cx, mdy = mouseWorldBefore.y - p.cy;
+    const mdl = Math.hypot(mdx, mdy) || 1;
+    const trace = [];
+    for (let k = 1; k <= 45; k++) {
+      mx += mdx / mdl * 8; my += mdy / mdl * 8;
+      const ok = mLOS.canHitLine(stw, p.cx, p.cy, 0, 0, mx, my, 0, 0);
+      trace.push({ k, ok });
+      if (!ok) {
+        const txx = Math.floor(mx / 16), tyy = Math.floor(my / 16);
+        R.dbg.fBlock = { k, x: Math.round(mx), y: Math.round(my),
+          tx: txx, ty: tyy, type: stw.type[stw.idx(txx, tyy)], solid: stw.isSolid(txx, tyy) };
+        break;
+      }
+    }
+    R.dbg.fTraceLast = trace.slice(-1);
+    R.dbg.fPlayer = { cx: Math.round(p.cx), cy: Math.round(p.cy),
+      tileSolid: stw.isSolid(Math.floor(p.cx / 16), Math.floor(p.cy / 16)) };
+  } catch (e) { R.dbg.fBlock = 'err:' + e.message; }
 
-  // (a) 悬浮期采样(t≈8-14):等渲染帧后取像素
+  // (a) 悬浮期可见性:draw() 调用计数 spy(引擎渲染循环每帧调一次;画布全 WebGL
+  //   getImageData 不可读——像素采样装置废弃)
+  const mod1457 = await import('/src/entities/proj1457.ts');
+  const orbProto = Object.getPrototypeOf(new mod1457.StormLightning(1117, 0, 0, 10, 2));
+  const origDrawLS = orbProto.draw;
+  let orbDraws = 0, lastAlpha = -1;
+  orbProto.draw = function (r2, cam2) {
+    const wasFlight = !this.dead && !(this.visualT > 0);
+    origDrawLS.call(this, r2, cam2);
+    if (wasFlight) { orbDraws++; lastAlpha = -1; }
+  };
   for (let i = 0; i < 4; i++) { unfreeze(); await ticks(1); }
   const orb = g.entities.projectiles.find((q) => q.projId === 1117 && !q.dead);
   if (orb) {
     const [osx, osy] = g.camera.worldToScreen(orb.cx, orb.cy);
     R.dbg.orbScreen = { x: Math.round(osx), y: Math.round(osy) };
   }
-  await ticks(1);                       // 让渲染帧跑一拍
+  await ticks(1);
   await new Promise((r) => requestAnimationFrame(r));
-  const during = sampleBox('pixDuring');
-  ck('(a) 悬浮期光球可见(目标域蓝像素较基线显著增多)',
-    !!during && !!baseline && during.blue > baseline.blue + 30,
-    `blue ${baseline ? baseline.blue : '?'} → ${during ? during.blue : '?'}`);
+  ck('(a) 悬浮期光球逐帧渲染(draw spy ≥3 帧)', orbDraws >= 3,
+    `draws=${orbDraws} orbAlive=${!!orb}`);
+  orbProto.draw = origDrawLS;
 
   // ---- (c) 伤害结算 tick + (b) bolt 形态 ----
   let hurtTick = -1, boltInfo = null;
@@ -228,8 +281,10 @@ const out = await page.evaluate(async () => {
   ck('(c) 沿线伤害结算于悬浮期末(Kill 帧,25-40t)', delay >= 20 && delay <= 45,
     `hurtTick=${hurtTick} castTick=${castTick} delay=${delay} hits=${foeHits.length}`);
 
-  // ---- (e) 节奏:autoReuse 持按三窗 ----
+  // ---- (e) 节奏:autoReuse 持按三窗(清残留 swing——空蓝慢施窗 ×2.5 曾阻塞再出手) ----
   await settle(6);
+  g.swing = null;
+  p.slowMagicUse = false;
   sfxLog.length = 0;
   const casts = [];
   let t2 = 0;
@@ -238,12 +293,19 @@ const out = await page.evaluate(async () => {
     return origAdd(e, b);
   };
   aimAt(homeF.x, homeF.y);
+  const heldNow = p.inv.heldItem();
   R.dbg.eStart = { mana: p.mana, ut: p.useTime, slow: !!p.slowMagicUse,
-    vid: (items.VANILLA_ITEM_KEY_BY_ID[6155] || '') , held: (() => { const h = p.inv.heldItem(); return h ? h.id : null; })() };
+    heldId: heldNow ? heldNow.id : null, dead: !!p.dead };
   g.input.mouseDown = true; g.input.mouseHeld = true;
-  for (; t2 < 210; t2++) { g.fixedUpdate(1 / 60); }
+  const utTrace = [];
+  for (; t2 < 260; t2++) {
+    g.fixedUpdate(1 / 60);
+    if (t2 % 20 === 0) utTrace.push({ t: t2, ut: p.useTime, sw: g.swing ? g.swing.dur - g.swing.t : -1 });
+  }
   g.entities.add = origAdd;
   release();
+  R.dbg.eStart.anyAddTotal = undefined;
+  R.dbg.eUtTrace = utTrace.slice(0, 8);
   R.dbg.eEnd = { mana: p.mana, ut: p.useTime, slow: !!p.slowMagicUse };
   const gaps = casts.slice(1).map((v, i) => v - casts[i]);
   R.dbg.castTicks = casts; R.dbg.gaps = gaps;

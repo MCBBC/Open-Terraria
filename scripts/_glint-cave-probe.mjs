@@ -33,7 +33,11 @@ await page.evaluate(() => {
   }
   // 封底
   for (let x = px - 4; x <= px + 4; x++) st.setTile(x, py + 5, 1);
-  g.player.x = (px - 6) * 16;
+  // 火把照明（池塘两侧壁上）
+  const torch = window.__swTileByKey ? window.__swTileByKey('torch') : 4;
+  st.setTile(px - 5, py + 1, torch);
+  st.setTile(px + 5, py + 1, torch);
+  g.player.x = (px - 7) * 16;
   g.player.y = (py + 1) * 16;
   g.player.vx = 0; g.player.vy = 0;
   window.__cave = { px, py };
@@ -45,17 +49,22 @@ await page.evaluate((s) => {
   g.camera.y = (s.py + 2) * 16;
 }, await page.evaluate(() => window.__cave));
 await new Promise((r) => setTimeout(r, 1200));
+// fullbright 看结构（glint 亮度因子仍走 lighting.lightAt=暗处受抑，可验证结构层）
+await page.evaluate(() => { window.__swGame.renderer.fullbright = true; });
+await new Promise((r) => setTimeout(r, 200));
 await page.screenshot({ path: '/tmp/cave-water-1.png' });
 await new Promise((r) => setTimeout(r, 450));
 await page.screenshot({ path: '/tmp/cave-water-2.png' });
+await page.evaluate(() => { window.__swGame.renderer.fullbright = false; });
 console.log('cave shots done');
 
-// 地表水面（对照：亮处波光应保留）——找地表水或造一个
+// 地表水面（对照：亮处波光应保留）——玩家旁边+正午
 await page.evaluate(() => {
   const g = window.__swGame;
   const st = g.world.store;
-  const px = Math.floor(g.player.x / 16) + 30;
-  const gy = Math.floor(g.world.groundLevel) + 2;
+  g.world.clock.timeOfDay = 0.5;
+  const px = Math.floor(g.player.x / 16) + 6;
+  const gy = Math.floor(g.player.y / 16) + 3;
   for (let x = px - 3; x <= px + 3; x++) {
     for (let y = gy; y <= gy + 2; y++) st.setTile(x, y, 0);
     for (let y = gy + 1; y <= gy + 2; y++) {

@@ -205,6 +205,16 @@ export class WaterfallRenderer {
           }
           ctx.globalAlpha = Math.max(0, Math.min(1, aF));
           ctx.drawImage(fgTex, frameFg * 18, 0, 16, hF, px - 8, py - 8, 16, hF);
+          // 环境音累积（★type 3 雨幕计入=刻意偏离,原版排除 Rain 11/12——放置雨云的
+          // 可见水幕无声=用户实报预期落差;衰减公式同 WaterfallManager.cs:713-719）
+          if (wf.type === 3) {
+            const sw2 = ctx.canvas.width, sh2 = ctx.canvas.height;
+            const d39 = Math.abs(wf.x * 16 + 8 - sw2 / 2), d40 = Math.abs((wf.y + j) * 16 + 8 - sh2 / 2);
+            if (d39 < sw2 * 2 && d40 < sh2 * 2) {
+              const falloff = 1 - Math.hypot(d39, d40) / (sw2 * 0.75);
+              if (falloff > 0) { this.ambWf.strength += falloff * aF; this.ambWf.x = wf.x * 16 + 8; this.ambWf.y = (wf.y + j) * 16 + 8; }
+            }
+          }
           px += j % 2 === 0 ? 1 : -1;
           py += 16;
         }
@@ -379,8 +389,13 @@ export class WaterfallRenderer {
           if (d39 < sw * 2 && d40 < sh * 2) {
             const falloff = 1 - Math.hypot(d39, d40) / (sw * 0.75);
             if (falloff > 0) {
-              if (wf.type === 0) { this.ambWf.strength += falloff; this.ambWf.x = cx * 16 + 8; this.ambWf.y = cy * 16 + 8; }
-              else if (wf.type === 1) { this.ambLava.strength += falloff; this.ambLava.x = cx * 16 + 8; this.ambLava.y = cy * 16 + 8; }
+              if (wf.type === 0 || wf.type === 3) {
+                // ★type 3 雨幕计入=刻意偏离（原版排除 Rain 11/12,Main.cs:709 排除表——
+                // 但放置雨云的可见水幕无声=用户实报预期落差;天降雨幕不走本渲染器不受影响）
+                this.ambWf.strength += falloff; this.ambWf.x = cx * 16 + 8; this.ambWf.y = cy * 16 + 8;
+              } else if (wf.type === 1) {
+                this.ambLava.strength += falloff; this.ambLava.x = cx * 16 + 8; this.ambLava.y = cy * 16 + 8;
+              }
             }
           }
         }

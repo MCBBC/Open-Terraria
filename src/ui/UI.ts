@@ -113,7 +113,7 @@ function invBgDataUrl(w: number, h: number): string | null {
   x.drawImage(t, 10, 10, 10, 10, 10, 10, c.width - 20, c.height - 20);
   return c.toDataURL();
 }
-import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap } from '../assets/SpriteAtlas';
+import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap, vanillaItemCreateTile } from '../assets/SpriteAtlas';
 import { VI } from '../data/itemKeys';
 import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/vanillaPrefixes';
 import { bannerNpcOfItem } from '../world/Banners';
@@ -1990,6 +1990,14 @@ export class UI {
     // ★同 vid 去重（首个 def 胜出,与 ITEM_INTERNAL_OF_STABLE 归一口径一致）：
     //   桥接批 snake 键 + vanilla.json 循环 Pascal 键曾双注册 1246 组（雷管双行
     //   根因,2026-08-21）——存量双条目不删（ITEM_DEFS id=下标不可平移）,显示层滤掉
+    // ★place_v 覆盖去重（2026-08-25 用户报"两个阿比盖尔的花/苔藓双行"）:place_v_*
+    //   族（可放置）与惰性 vi_ 注册（无 tile 字段=不可放置死条目)同 tile 并存——
+    //   vi_ 件的 createTile tile 已被 place_v 覆盖时不进搜索（保留可用 place_v 件）
+    const coveredSheets = new Set<number>();
+    for (const d of ITEM_DEFS) {
+      const mp = /^place_v_(\d+)_/.exec(d.key);
+      if (mp) coveredSheets.add(Number(mp[1]));
+    }
     const seenVid = new Set<number>();
     const entries = ITEM_DEFS.map((d, id) => {
       const vid = d.key.startsWith('vi_') ? d.key.slice(3, d.key.indexOf('_', 3)) : '';
@@ -2002,6 +2010,8 @@ export class UI {
       const vid = Number(m[1]);
       if (seenVid.has(vid)) return false;
       seenVid.add(vid);
+      const ct = vanillaItemCreateTile(vid);
+      if (ct !== undefined && coveredSheets.has(ct)) return false;   // 惰性 vi_ 死条目
       return true;
     });
     // 族词别名（zh 族词分裂：翅膀↔翼——搜"翅膀"也能命中"天使之翼"族；本地

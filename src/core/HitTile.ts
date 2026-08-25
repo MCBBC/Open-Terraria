@@ -1,10 +1,11 @@
-// 原版劈砍/挖掘伤害积累系统：Terraria1457/HitTile.cs 移植。
-// 每次挥击对目标格积累伤害（阈值 100 破坏）。★R4-47 差异备案（2026-08-23 蓝队复核）：
-//   原版 Prune 在【每次挖掘挥击伤害非零后】调用（Player.cs:46086-46088 等）,Prune 内
-//   按 ttl 分档渐次扣 damage（<12→-10、<24→-7、<36→-5、<48→-2、<=1 清除）——半挖离手
-//   后进度在约 60 次别处挥击内渐次流失;本仓=墙钟每 2 tick 仅清 ttl 到期条目、damage
-//   不衰减（分档衰减曾致铜镐永远挖不满 100,2026-08-13 实锤后裁决砍掉）。持续挖到破
-//   路径两边逐位一致;离手衰减节奏不同=已裁决可接受近似。
+// 原版劈砍/挖掘伤害积累系统：Terraria1456/HitTile.cs 移植。
+// 维护语义 = 原版 Prune 全式（2026-08-25 对齐，取代 R4-47 墙钟近似）：
+//   原版【无墙钟驱动】——Prune 只挂在每次【非零伤害】挥击之后（Player.cs:45083 锤支/
+//   :45150 斧支/:45351 锤墙/:52902 镐支，统一 if(damage!=0) hitTile.Prune()）。
+//   正被敲的格 AddDamage 即刷新 ttl=60，恒高于衰减阶梯(<48 才扣)，故持续挖到破
+//   零衰减、两边逐位一致；离手进度冻结（原版同），仅被后续任意挥击逐击衰减。
+//   2026-08-13"铜镐永远挖不满 100"事故根因 = 当年把分档衰减挂上墙钟节奏逐 tick 跑，
+//   非本语义本身——挥击驱动下命中格恒被刷新，不可能复现该事故。
 // 槽位用插入序 Map 简化（原版 500 槽 + order 换序，行为等价：最近使用的存活最久）
 export interface HitTileEntry { damage: number; ttl: number }
 
@@ -54,7 +55,8 @@ export class HitTile {
     return out;
   }
 
-  /** 清除指定格（破坏完成/格已空时调用） */
+  /** 清除指定格（破坏完成/格已空时调用；原版 ClearMiningCacheAt → TryClearingAndPruning
+   *  Player.cs:52924-52928 同语义） */
   clear(x: number, y: number, type = 1) {
     this.data.delete(`${x},${y},${type}`);
   }
@@ -63,16 +65,23 @@ export class HitTile {
     this.data.clear();
   }
 
-  /** 周期维护：仅 TTL 到期清条目（停止攻击 ~2×TTL tick 后清进度）。
-   *  ★R4-47：原版无墙钟衰减——Prune 挂在每次挥击后（见文件头差异备案）;
-   *  分档衰减 damage 曾是自创近似且速率超过铜镐积累速率 = 镐斧全体无法挖掘
-   *  （2026-08-13 铜镐实锤后裁决砍掉,维持墙钟清到期条目的近似） */
-  update() {
-    // Map 迭代中删除"当前条目"是安全的(迭代器已越过它),无需整表快照拷贝
-    // ——此前 [...this.data] 每 tick 拷最多 500 条的分配税
+  /** 原版 Prune 全式（HitTile.cs:191-249）：挂在每次非零伤害挥击后调用（挂点见文件头）。
+   *  逐条目：ttl≤1 清除；否则 ttl-- 后按档扣 damage（<12/-10 <24/-7 <36/-5 <48/-2）；
+   *  damage<0 清除；tile 类条目在格已非 active 时清除、wall 类条目在墙清零时清除
+   *  （else-if 链序与原版一致：tile 条目不做墙检查）。回调由宿主注入（保持本类零依赖）。 */
+  prune(tileActive: (x: number, y: number) => boolean, wallNonzero: (x: number, y: number) => boolean): void {
     for (const [key, e] of this.data) {
+      if (e.ttl <= 1) { this.data.delete(key); continue; }
       e.ttl--;
-      if (e.ttl <= 1) this.data.delete(key);
+      if (e.ttl < 12) e.damage -= 10;
+      else if (e.ttl < 24) e.damage -= 7;
+      else if (e.ttl < 36) e.damage -= 5;
+      else if (e.ttl < 48) e.damage -= 2;
+      const p = key.split(',');
+      const x = +p[0], y = +p[1], type = +p[2];
+      if (e.damage < 0 || (type === 1 && !tileActive(x, y)) || (type === 2 && !wallNonzero(x, y))) {
+        this.data.delete(key);
+      }
     }
   }
 }

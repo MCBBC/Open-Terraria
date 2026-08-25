@@ -6077,7 +6077,6 @@ export class Enemy extends Entity {
       pigronPhased = true;
     }
     if (isPigron) {
-      this.visAngle = this.vy * 0.1 * dirX;    // rotation = vy × 0.1 × direction（cs:52767）
       if (player && !player.dead) {
         // X（cs:52769-52787）：整盒仍在玩家左侧（dir=1）/右侧（dir=-1）才加速;
         // 步 0.08、二档(>4) 0.04、逆向修正 0.2（朝目标强反转）、帽 ±4
@@ -6155,6 +6154,9 @@ export class Enemy extends Entity {
       if (this.vy > cy) this.vy = cy;
     }
     }
+    // rotation = vy × 0.1 × direction（AI_002 全族无条件，1457 :52906——俯冲/爬升
+    // 倾斜旋转+镜像翻转;曾误锁猪龙 170/171/180 支,恶魔眼本体不转=用户实报）
+    this.visAngle = this.vy * 0.1 * dirX;
     // ---- 眼族尘（1457 :53258-53268，R6-B 4-12）：2 恶魔眼/133/190-194 克苏鲁眼
     //  仆从 1/40 尘 5（棕烟）——曾只接 116 尘 ----
     if ((vid2 === 2 || vid2 === 133 || (vid2 >= 190 && vid2 <= 194))

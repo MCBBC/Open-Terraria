@@ -1,39 +1,46 @@
-// 跳过+淡出重播修复验证:二访点击进渐隐后,连续快速点击 5 次——
-// 断言:渐隐不重播(移除时刻 ≈ 首击+n6,而非被推迟),自然移除,零错误。
+// HOLD 演练验证(慢速服:分片各延迟 3s → 暖缓存 ~30s+ >> 10.3s 时序):
+// 断言时序尽后过渡图【保持可见】(maxOpacity ≥0.5 持续采样),而非旧代码的置黑
+// (maxOpacity=0);最终加载完成/30s 超时 → 揭幕移除。
 import puppeteer from 'puppeteer-core';
 const b = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'] });
 const p = await b.newPage();
 const errs = [];
 p.on('pageerror', (e) => errs.push(String(e).slice(0, 120)));
-await p.goto(`${process.env.SW_ORIGIN ?? 'http://localhost:4177'}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-await new Promise((r) => setTimeout(r, 20000));   // 首访+暖完
-await p.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
 const t0 = Date.now();
-let clicked = false, fadeAt = -1, removedAt = -1, clicks = 0;
-for (let i = 0; i < 100; i++) {
-  await new Promise((r) => setTimeout(r, 100));
+await p.goto(`${process.env.SW_ORIGIN ?? 'http://localhost:4177'}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+let presentSamples = 0, heldSamples = 0, blackWhileLoading = 0, removed = false, removedAt = -1;
+let everHeld = false;
+for (let i = 0; i < 200; i++) {
+  await new Promise((r) => setTimeout(r, 250));
+  const now = Date.now() - t0;
   const s = await p.evaluate(() => {
     const v = document.getElementById('sw-splash');
-    return v ? { present: true, transparent: v.style.background === 'transparent' } : { present: false };
-  }).catch(() => ({ present: false }));
-  const now = Date.now() - t0;
-  if (s.present && !clicked) {
-    clicked = true;
-    await p.evaluate(() => window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
-    clicks++;
-    console.log(`首击 @${now}ms(进渐隐)`);
-    // 渐隐期间连点 5 次(修复前:每次点击淡出从头重播)
-    for (let k = 0; k < 5; k++) {
-      await p.evaluate(() => window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
-      clicks++;
-      await new Promise((r) => setTimeout(r, 120));
-    }
-    console.log(`渐隐期连点 5 次完毕 @${Date.now() - t0}ms`);
+    if (!v) return { present: false, maxOpacity: 0 };
+    const layers = ['back', 'tree', 'front'].map((c) => {
+      const el = v.querySelector('.' + c);
+      return el ? Number(el.style.opacity || '0') : 0;
+    });
+    return { present: true, maxOpacity: Math.max(...layers) };
+  }).catch(() => ({ present: false, maxOpacity: 0 }));
+  if (!s.present) {
+    if (presentSamples > 0) { removed = true; removedAt = now; }
+    continue;
   }
-  if (clicked && fadeAt < 0 && s.transparent) { fadeAt = now; console.log(`透明化 @${now}ms`); }
-  if (clicked && !s.present) { removedAt = now; console.log(`移除 @${now}ms(总点击 ${clicks})`); break; }
+  presentSamples++;
+  if (now > 11000) {
+    if (s.maxOpacity >= 0.5) { heldSamples++; everHeld = true; }
+    else if (s.maxOpacity === 0) blackWhileLoading++;
+  }
+  if (removed) break;
 }
-console.log(JSON.stringify({ clicked, fadeAt, removedAt, clicks, errs: errs.length }));
-const ok = clicked && removedAt > 0 && (removedAt - fadeAt) < 3000 && errs.length === 0;
-console.log(ok ? '淡出无重播 ✓' : '异常:渐隐被重播推迟 ✗');
-await b.close(); process.exit(ok ? 0 : 1);
+console.log(JSON.stringify({
+  presentSamples, heldSamplesAfterTimeline: heldSamples,
+  blackWhileLoadingSamples: blackWhileLoading,
+  artHeldThroughWait: everHeld && blackWhileLoading === 0,
+  removed, removedAtSec: +(removedAt / 1000).toFixed(1),
+  errs: errs.length,
+}));
+await b.close();
+const ok = everHeld && blackWhileLoading === 0 && removed;
+console.log(ok ? 'HOLD 演练 ✓ 过渡图等待期保持可见,无早退黑屏' : 'HOLD 演练 ✗');
+process.exit(ok ? 0 : 1);

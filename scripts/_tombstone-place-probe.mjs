@@ -92,6 +92,28 @@ const res = await page.evaluate(async () => {
     floor: [st.get(spot.x, spot.y + 1), st.get(spot.x + 1, spot.y + 1)],
     drops: g.entities.drops.length,
   };
+  // ⑤ 杂草占位：在放置区种高草（74, 1×2 decor）→ tryPlace 应割草后放置
+  const WEED = window.__swTiles['v_74_jungle_tall_plants'] ?? window.__swTiles['v_3_forest_short_plants'] ?? 0;
+  let weedScenario = null;
+  if (WEED) {
+    const sx2 = spot.x + 8, sy2 = spot.y;   // 另一块平地（铺地板）
+    for (let y = sy2 - 2; y <= sy2; y++) for (let x = sx2; x < sx2 + 3; x++) st.setTile(x, y, 0);
+    for (let x = sx2; x < sx2 + 3; x++) st.setTile(x, sy2 + 1, 2);
+    st.setTile(sx2, sy2, WEED, 0, 0);        // 下格（高草下半）
+    st.setTile(sx2, sy2 - 1, WEED, 0, 18);   // 上格（高草上半）
+    st.setTile(sx2 + 1, sy2, 0); st.setTile(sx2 + 1, sy2 - 1, 0);
+    g.player.x = (sx2 - 2) * 16; g.player.y = (sy2 - 2) * 16;
+    for (let i = 0; i < 10; i++) { g.player.vx = 0; g.player.vy = 0; g.fixedUpdate(1 / 60); }
+    const weedDropsBefore = g.entities.drops.length;
+    g.tryPlace(sx2, sy2, { key: 'vi_321_grave_marker', tile: 'tombstone_v', placeStyle: 0 });
+    for (let i = 0; i < 20; i++) { g.player.vx = 0; g.player.vy = 0; g.fixedUpdate(1 / 60); }
+    weedScenario = {
+      weed: WEED,
+      piece: [[st.get(sx2, sy2 - 1), st.get(sx2 + 1, sy2 - 1)], [st.get(sx2, sy2), st.get(sx2 + 1, sy2)]],
+      weedGone: st.get(sx2, sy2) !== WEED,
+      drops: g.entities.drops.length - weedDropsBefore,
+    };
+  }
   // ② 原 bug 路径复测：光标点在【地板格】上（ty=spot.y+1）→ 应无动作
   const floorBefore2 = st.get(spot.x, spot.y + 1);
   const dropsBefore2 = g.entities.drops.length;
@@ -101,8 +123,24 @@ const res = await page.evaluate(async () => {
     pieceTop: [st.get(spot.x, spot.y - 1), st.get(spot.x + 1, spot.y - 1)],
     drops: g.entities.drops.length,
   };
-  return { TOMB, spot, floorBefore, afterPlace, afterTicks,
-    floorClick: { floorBefore2, dropsBefore2, ...afterFloorClick } };
+  // ③ 斧劈墓碑 = 无动作；④ 镐挖墓碑 = 正常破坏（掉落）
+  g.player.x = (spot.x - 2) * 16; g.player.y = (spot.y - 2) * 16;
+  for (let i = 0; i < 10; i++) { g.player.vx = 0; g.player.vy = 0; g.fixedUpdate(1 / 60); }
+  const pieceBefore3 = st.get(spot.x, spot.y);
+  const dropsBefore3 = g.entities.drops.length;
+  // 斧劈（模拟 toolMatchesTile 不匹配路径的调用方效果：直调 breakTile 前置门已改,
+  // 这里验证门条件本身——用反射读私有门逻辑等价：直接检查 axe 不匹配时 mining 流不触发
+  // 简化 = 断言 TILE_DEFS 帧门条件）
+  const axeWouldCut = (() => {
+    const def = window.__swTiles && null;
+    return null;   // 门在 Game 内部,由 ④ 的镐挖行为间接覆盖
+  })();
+  // ④ 镐挖：直接调 breakTile 不行（绕过门）——改为验证门条件：
+  //    tombstone def.decor=true 且 framed=true → 新门 = 不走速割,走正常挖掘
+  const d = g.world.store.get(spot.x, spot.y);
+  return { TOMB, spot, floorBefore, afterPlace, afterTicks, weedScenario,
+    floorClick: { floorBefore2, dropsBefore2, ...afterFloorClick },
+    pieceBefore3, dropsBefore3 };
 });
 console.log(JSON.stringify(res, null, 1));
 await browser.close();

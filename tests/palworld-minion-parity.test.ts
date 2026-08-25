@@ -298,6 +298,76 @@ describe('⑤ 帕鲁地面随从 1112/1118（AI_067 flag8/flag9）', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// ⑤A 1093 基础捣蛋猫并入 flag8（2026-08-25 白帧根因修复）。Projectile.cs:50024
+//     `flag8 = type == 1093 || type == 1112` 共用同一地面态机（SetDefaults 亦全同
+//     :10197-10211 vs :10365-10380）；此前 1093 走通用飞行近似 → draw 兜底
+//     age/8%28 全帧循环扫到 28 帧表 14-27 白姿 hurt 带（原版 AI 永不写）
+//     = 用户实报"寻敌攻击变白"根因
+// ---------------------------------------------------------------------------
+describe('⑤A 1093 并入 flag8 地面态机（白帧根因）', () => {
+  it('分发/flag8/draw 三处覆盖 1093（:50024 共用态机）', () => {
+    expect(MINION_TS).toContain('if (this.projId === 1093 || this.projId === 1112 || this.projId === 1118) { this.palGroundStep');
+    expect(MINION_TS).toContain('const flag8 = this.projId === 1093 || this.projId === 1112');
+    expect(MINION_TS).toContain('} else if (this.projId === 1093 || this.projId === 1112 || this.projId === 1118) {');
+  });
+  it('1112 专属门不外溢：扑击双轴刹/追踪保持 type==1112（:50875/:50921）', () => {
+    expect(MINION_TS).toContain('if (this.projId === 1112) { this.vx *= 0.1; this.vy *= 0.1; }');
+    expect(MINION_TS).toContain('if (this.projId === 1112 && tgt) {');
+  });
+  it('SetDefaults 真值：alphaFade 255（:10211）/判定盒 14×22（:10199-10200）', () => {
+    const { hooks } = makeHooks();
+    const m = mk(1093);
+    expect((m as { alphaFade: number }).alphaFade).toBe(255);
+    expect(m.w).toBe(14);
+    expect(m.h).toBe(22);
+    m.fixedUpdate(1, hooks);
+    expect((m as { alphaFade: number }).alphaFade).toBe(240);
+  });
+  it('帧域安全：跑动 240t palFrame 恒 <14（白帧带 14-27 不可达）且走行帧 7+ 出现过', () => {
+    const e = mkEnemy(1, 60 * 16 + 300, 100 * 16 - 12);
+    const { hooks } = makeHooks([e]);
+    const m = mk(1093);
+    const seen = new Set<number>();
+    for (let k = 0; k < 240; k++) {
+      m.fixedUpdate(1, hooks);
+      seen.add((m as unknown as { palFrame: number }).palFrame);
+    }
+    expect(Math.max(...seen), `帧集 ${[...seen].join(',')}`).toBeLessThan(14);
+    expect(Math.max(...seen)).toBeGreaterThanOrEqual(7);
+  });
+  it('索敌 num2=800（flag8 共有 :50098）：敌 600px 逼近', () => {
+    const ex = 60 * 16 + 600, ey = 90 * 16;
+    const { hooks } = makeHooks([mkEnemy(1, ex, ey)]);
+    const m = mk(1093);
+    const d0 = Math.hypot(ex - m.cx, ey - m.cy);
+    for (let k = 0; k < 90; k++) m.fixedUpdate(1, hooks);
+    expect(Math.hypot(ex - m.cx, ey - m.cy)).toBeLessThan(d0 - 100);
+  });
+  it('扑击 num10=16 + 肩扛硬锚（:50844 flag8 共有）', () => {
+    {
+      const groundCy = 100 * 16 - 12;
+      const e = mkEnemy(1, 60 * 16 + 30, groundCy);
+      const { hooks } = makeHooks([e]);
+      const m = new MinionProj(e.cx - 14, e.cy - 12, 1093, 10, 2, false, 0, false, () => player);
+      m.fixedUpdate(1, hooks);
+      expect((m as unknown as { palA0: number }).palA0).toBe(2);
+      expect((m as unknown as { palA1: number }).palA1).toBe(16);
+      const hp0 = e.hp;
+      m.fixedUpdate(1, hooks);
+      expect(e.hp).toBeLessThan(hp0);
+    }
+    {
+      const { hooks } = makeHooks();
+      const m = new MinionProj(player.cx + 600, player.cy, 1093, 10, 2, false, 0, false, () => player);
+      m.fixedUpdate(1, hooks);
+      expect((m as unknown as { palA0: number }).palA0).toBe(1);
+      m.fixedUpdate(1, hooks);
+      expect(Math.hypot(player.cx - m.cx, (player.cy - 24) - m.cy)).toBeLessThan(10);
+    }
+  });
+});
+
 describe('⑥ 火绒狐 1113（AI_026 flag8 + AI_026 flag10 射击段）', () => {
   it('MINION_SHOOT 档：cd 30（:62569）/射程 1160（:62677/:62691）/弹 1097/地狱火（:11315-11318）', () => {
     // 表驱动断言经行为测试间接覆盖（表为模块私有）——此处验证射击出口

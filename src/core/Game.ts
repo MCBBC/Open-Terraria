@@ -4666,9 +4666,9 @@ export class Game implements GameHooks {
         }
       }
     }
-    // 原版 HitTile 衰减（每 2 tick 一次——原版按帧衰减配原版 ~27 帧挥速；
-    // 我们的挥击间隔更长，等比减半保持"连击可积累、停手会消退"）
-    if (this.tickCount % 2 === 0) this.hitTiles.update();
+    // HitTile 衰减不再走墙钟——原版 Prune 挂在每次非零伤害挥击后
+    //（Player.cs:45083/:45150/:45351/:52902，见 pruneHitTiles/HitTile.cs 文件头），
+    // 离手进度冻结、被后续挥击逐击衰减
     // 露西斧（Main.cs:17222 UpdateMessageCooldowns + Player.cs:24441-24444：
     // hasLucyTheAxe = 背包任意格持有 5095（inventory[0..57] 扫描，:12214）→
     // 每帧 TryPlayingIdleMessage）
@@ -13150,10 +13150,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private updateWaterfallAmbience(): void {
     const amb = this.renderer.waterfalls.ambienceState();
     const manage = (cur: import('./Sfx').SfxLoop | null, st: { strength: number }, file: string): import('./Sfx').SfxLoop | null => {
-      const vol = Math.max(0, Math.min(1, st.strength * 0.12));
+      const vol = Math.max(0, Math.min(1, st.strength * 0.25));   // 0.25:单格帘 0.25 可闻（曾 0.12×base0.5=0.06 近不可闻）
       if (st.strength > 0 && vol > 0.01) {
         if (cur && !cur.dead) { cur.setVolume(vol); return cur; }
-        return this.startLoopSfx(file, vol, 0.5);
+        return this.startLoopSfx(file, vol, 0.7);
       }
       cur?.stop();
       return null;
@@ -13257,9 +13257,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //     statLife/2, -direction)——【当前生命】一半，C# 整除地板（曾误用 maxHp/2）；
     //   - 冷却 = ApplyItemTime(sItem) 裸 useTime（:45085；max(val,1) 下限 :4226）——
     //     pickSpeed 药水链只进镐支（:44950/:45163 itemTime=useTime*pickSpeed），不乘锤支；
-    //   - CanKillTile 门（WorldGen.cs:62270-62301）：上邻为异类可支撑物(宝箱21/祭坛26/
-    //     草72/77/88/467/488)时拒拆 num2=0（无进度无反噬）；树干/棕榈/仙人掌的帧细分
-    //     条件对非实心祭坛不可达（无物可立于祭坛之上，底行上邻恒同为 26 直接放行）
+    //   - CanKillTile 门（WorldGen.cs:62270-62304 全式 = tileAboveProtected）：上邻为
+    //     异类可支撑物(树干族帧细分/棕榈/仙人掌列条件/宝箱21/祭坛26/草72/77/88/467/488)
+    //     时拒拆 num2=0（无进度无反噬）
     if (type === TILE_BY_KEY['v_26_altars']) {
       if (toolType !== 'hammer') { this.mining = null; return; }  // tileHammer 路由：镐/斧不入本格
       if (!(power > 0)) { this.mining = null; return; }           // sItem.hammer>0 门（Player.cs:45036）：零锤力整段跳过（无反噬无音）
@@ -13271,15 +13271,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       this.lastMineHitTick = this.tickCount;
       let num2 = power;
-      const stA = this.world.store;
-      if (ty >= 1) {
-        const ai = stA.idx(tx, ty - 1);
-        if (stA.flags[ai] !== 0 && stA.type[ai] !== type) {
-          const shAbove = TILE_DEFS[stA.type[ai]]?.vanilla?.sheet ?? -1;
-          if (shAbove === 21 || shAbove === 26 || shAbove === 72 || shAbove === 77
-            || shAbove === 88 || shAbove === 467 || shAbove === 488) num2 = 0;
-        }
-      }
+      // CanKillTile 上邻支撑门全式（WorldGen.cs:62270-62304）= 复用镐支同款
+      // tileAboveProtected（树干/棕榈/仙人掌帧细分 + PROTECTED_ABOVE_SHEETS 在内）
+      if (this.tileAboveProtected(tx, ty)) num2 = 0;
       if (power < 80 || !this.world.flags.hardMode) {
         num2 = 0;
         const p = this.player;
@@ -13300,6 +13294,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       } else {
         this.killTileBreakSound(type, tx, ty);              // KillTile(fail:true) 每击音
       }
+      if (num2 !== 0) this.pruneHitTiles();                 // Player.cs:45083 if(damage!=0) Prune
       return;
     }
     // 锤：敲除背景墙（无墙则无事发生；也可清装饰）
@@ -13392,7 +13387,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 墙读取不受前景 tile 影响（原版：火把/平台/门后的墙可锤；实心块已被上方
       // 半砖分支拦截——实心块后的墙原版同样不可直接锤，语义一致）
       const wall = this.world.store.wall[this.world.store.idx(tx, ty)];
-      if (type !== 0 && TILE_DEFS[type]?.decor) {
+      // ★割草判据 = tileCut 显式表（同上）；framed 家具（墓碑）不在表内
+      //  → 落到墙锤击（原版可锤家具后的墙）。曾只判 decor → 锤子一击拆墓碑
+      if (type !== 0 && TILE_CUT.has(type)) {
         this.breakTile(tx, ty, true);
         this.sfx.play('chop');
         this.mining = null;
@@ -13406,7 +13403,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
       }
       this.lastMineHitTick = this.tickCount;
-      const total = this.hitTiles.addDamage(tx, ty, Math.round(power * 2), 2); // 锤墙：木 5 击 / 铜 2 击
+      const dmgW = Math.round(power * 2);
+      const total = this.hitTiles.addDamage(tx, ty, dmgW, 2); // 锤墙：木 5 击 / 铜 2 击
       this.hardnessCache = 100;
       this.mining = { x: tx, y: ty, progress: total };
       this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 2, 1.2);
@@ -13417,16 +13415,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.sfx.play('chop');
         this.mining = null;
       }
+      if (dmgW !== 0) this.pruneHitTiles();               // Player.cs:45351 if(damage!=0) Prune
       return;
     }
     if (type === 0 || !this.toolMatchesTile(type, toolType)) {
       // 装饰物（杂草等）任意工具/武器一下清掉并掉落
-      if (type !== 0 && TILE_DEFS[type]?.decor && (toolType === 'pick' || toolType === 'axe')) {
+      if (type !== 0 && TILE_CUT.has(type)
+        && (toolType === 'pick' || toolType === 'axe')) {
         this.breakTile(tx, ty, true);
         this.sfx.play('chop');
         this.mining = null;
         return;
       }
+      // 墓碑等非 tileCut 家具不进此分支（镐经 toolMatchesTile 走正常挖掘链,
+      // 斧原版无动作 = mining=null 返回）
       this.mining = null;
       return;
     }
@@ -13499,6 +13501,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 原版此路径要求 sItem.axe>0（Player.cs:45104），dual.type==='axe' 已含此语义
       this.tryShakeTree(tx, ty);
     }
+    if (dmg !== 0) this.pruneHitTiles();                  // Player.cs:45150/:52902 if(damage!=0) Prune
   }
 
   /** GetPickaxeDamage + 门槛/保护门全式（Player.cs:52981-53075；tryMine 镐/斧支
@@ -13605,6 +13608,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.hitTiles.clear(tx, ty);
       this.breakTile(tx, ty, true);
     }
+    this.pruneHitTiles();                           // Player.cs:52902 PickTile 尾 Prune（dmg>0 已由上门保证）
     return true;
   }
 
@@ -13779,6 +13783,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (c <= 1 || (c >= 4 && c <= 5)) return true;
     }
     return false;
+  }
+
+  /** 原版 HitTile.Prune 挂点（Player.cs:45083 锤支/:45150 斧支/:45351 锤墙/:52902 镐支
+   *  统一 if(damage!=0) Prune）：衰减只由挥击驱动，无墙钟——离手进度冻结，被后续任意
+   *  挥击逐击按 ttl 档扣减（HitTile.cs:191-249 全式见 HitTile.prune） */
+  private pruneHitTiles(): void {
+    const st = this.world.store;
+    this.hitTiles.prune(
+      (x, y) => st.flags[st.idx(x, y)] !== 0,
+      (x, y) => st.wall[st.idx(x, y)] !== 0,
+    );
   }
 
   /** IsAlchemyPlantHarvestable（WorldGen.cs:66203-66227，83 成熟草药的时辰门；
@@ -15764,12 +15779,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // breakTile 走掉落(种子掷)/音效链；多格植物（丛林高草 74 等 1×2）上下
           // 同型整株清——曾 setTile 直切单格留上半悬在工作台上方（用户观感
           // "没放成,还得用台子再打一次草"2026-08-21）
-          const wdef = TILE_DEFS[st.get(px, py)];
-          // ★framed 不割（原版 Main.tileCut 表只含植物/草/藤族,全部非
-          //  frameImportant;墓碑 85 等 decor 标记的 framed 家具被占格时原版
-          //  直接放不进——曾只判 decor → 放置踩到已有 framed 家具格会把它
-          //  当草割成掉落物,2026-08-25 墓碑复测暴露）
-          if (!(wdef?.decor ?? false) || (wdef?.framed ?? false)) return;
+          // ★割草判据 = Main.tileCut 显式表（TILE_CUT,构建期从 TILE_CUT_VANILLA
+          //  派生,只含植物/草/藤族）。曾用 decor 启发式：墓碑 85 等 decor 标记的
+          //  framed 家具被当草割（2026-08-25 用户实报墓碑变掉落物）；改用
+          //  !framed 又误杀 style 帧植物（3/74 族本身 framed=true）——两族都
+          //  在 decor∩framed 交集里,唯 tileCut 表是原版权威判据
+          if (!TILE_CUT.has(st.get(px, py))) return;
           const wt = st.get(px, py);
           this.breakTile(px, py, true);
           for (let yy = py - 1; st.get(px, yy) === wt; yy--) this.breakTile(px, yy, true);
@@ -24316,7 +24331,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (grant) {
         const banner = bannerOfNpc(enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
         const name = Lang.npcName(bannerItemId(banner) ? (enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId) : enemy.vanillaId);
-        this.newText(Lang.text('Mods.SandboxWorld.Toast.BannerReady', name ?? ''), 250, 250, 0);
+        // 公告文案对齐原版 BannerSystem.AddNPCKillBy（BannerSystem.cs:249-255）：
+        // Game.EnemiesDefeatedAnnouncement「已打败第{0}个{1}！」（黄色 250,250,0 同源；
+        // 计数 = killCount[banner]；曾用自造键 Toast.BannerReady「XX 的旗帜已就绪」
+        // ——原版无此文案）
+        this.newText(Lang.text('Game.EnemiesDefeatedAnnouncement',
+          this.world.bannerKills[banner] ?? 0, name ?? ''), 250, 250, 0);
         const _bannerItemVid = bannerItemId(banner);
         const _bannerKey = VANILLA_ITEM_KEY_BY_ID[_bannerItemVid] ?? 'place_v_91_banners';
         this.spawnDrop(this.player.cx, this.player.cy, _bannerKey, 1, 0, -3, banner);

@@ -641,7 +641,7 @@ kvHas('sandboxworld.quicksave').then(async () => {
       const back = sp?.querySelector('.back') as HTMLElement | null;
       if ((sp && back && back.style.backgroundImage) || !sp) {
         clearInterval(handoff);
-        bootVeil.remove();
+        bootVeil?.remove();
         bootVeil = null;
       }
     }, 100);
