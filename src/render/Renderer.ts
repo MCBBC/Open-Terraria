@@ -2655,6 +2655,7 @@ export class Renderer {
       // 群系背景切换的黑闪遮罩（flash=1 落定、−0.05/帧衰减 20 帧；ValueChanged
       // !gameMenu 门=仅游戏内，菜单换样式无闪）。原版画在每组层后=世界层之前
       for (let a = 0; a < 13; a++) {
+        if (this._capturePass) break;   // 截图重渲不烘切换黑闪（原版 DrawCapture 无此层）
         const p = this.biomeBg.bgFlash[a];
         if (p > 0.01) {
           ctx.save();
@@ -5334,8 +5335,16 @@ export class Renderer {
         // 蜗牛 aiStyle67 spriteDirection 走象限表(上方旋转分支自带局部翻面)——
         // 通用 facing 镜像禁用,否则与象限翻面叠加成恒翻
         const snailMirror = stR === 67;
-        if (!rotationDriven && !owlMirror && !sdirNeg546 && !wormMirror && !snailMirror && e.facing > 0) ctx.scale(-1, 1);
+        // AI_002 飘浮眼族：AI_002 全段无 spriteDirection 写点→恒默认 -1 不镜像
+        // （恶魔眼 5/猪龙 170-180 等）；例外 133/664 FindFrame 按速度写 ±1
+        // （:74860/:75628）——曾按 AI 朝向镜像=俯冲过顶后速度反向仍朝玩家,
+        // 虹膜拖在身后（"眼球在屁股后面走",2026-08-25 用户实报）
+        const eyeFam = stR === 2;
+        const eyeVelMirror = eyeFam && (e.vanillaId === 133 || e.vanillaId === 664) && e.vx > 0;
+        if (!rotationDriven && !owlMirror && !sdirNeg546 && !wormMirror && !snailMirror
+          && !eyeFam && e.facing > 0) ctx.scale(-1, 1);
         if (!rotationDriven && (owlMirror || sdirNeg546) && e.facing < 0) ctx.scale(-1, 1);
+        if (eyeVelMirror) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐

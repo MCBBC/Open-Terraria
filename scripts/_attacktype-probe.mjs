@@ -29,11 +29,11 @@ for (const [key, vid, state] of [['wizard', 108, 14], ['dyer', 207, 15]]) {
     n.y = g.player.y - 10;
     n.vx = 0; n.vy = 0;
     let proto = Object.getPrototypeOf(n);
-    while (proto && typeof proto.update !== 'function') proto = Object.getPrototypeOf(proto);
-    if (proto && !proto.__swOrigUpdate) {
-      proto.__swOrigUpdate = proto.update;
-      proto.update = function (...a) {
-        const r = proto.__swOrigUpdate.apply(this, a);
+    while (proto && typeof proto.fixedUpdate !== 'function') proto = Object.getPrototypeOf(proto);
+    if (proto && !proto.__swOrigFixed) {
+      proto.__swOrigFixed = proto.fixedUpdate;
+      proto.fixedUpdate = function (...a) {
+        const r = proto.__swOrigFixed.apply(this, a);
         if (this.vanillaId === 108) { this.atkState = 14; this.atkTick = (this.atkTick + 1) % 48; }
         else if (this.vanillaId === 207) { this.atkState = 15; this.atkTimer = (this.atkTimer + 1) % 20; }
         return r;

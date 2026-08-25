@@ -26,31 +26,39 @@ if (!inWorld) { await browser.close(); process.exit(1); }
 const r = await page.evaluate(async () => {
   const g = window.__swGame;
   const st = g.world.store;
-  const T = (x, y) => (x >= 0 && y >= 0 && x < st.w && y < st.h) ? (st.isActive(x, y) ? st.type(x, y) : -1) : -9;
+  const T = (x, y) => (x >= 0 && y >= 0 && x < st.w && y < st.h) ? (st.isActive(x, y) ? st.type[st.idx(x, y)] : -1) : -9;
   // 校验地牢位置
   const dungeon = { x: g.world.dungeonX, y: g.world.dungeonY };
   // 在报告卡点生成刺球(报告实体 x=51543,y=10848 → tile (3221.4,678))
   const e = await window.__swFlow.spawnVanillaEnemy(72, 51543, 10848);
   if (!e) return { bail: 'spawn failed' };
+  const live = () => [...(g.enemies() ?? [])].find((x) => x.id === e.id);
   // 采样 240 tick(4s)位置/速度/ai
   const trace = [];
   for (let t = 0; t < 240; t++) {
     await new Promise((r2) => setTimeout(r2, 16));
-    if (t % 20 === 0) trace.push({ t, x: Math.round(e.x), y: Math.round(e.y), vx: +e.vx.toFixed(2), vy: +e.vy.toFixed(2), ai0: e.ai0, ai1: e.ai1, facing: e.facing, dirY: e.dirY });
+    if (t % 20 === 0) {
+      const s = live();
+      if (!s) { trace.push({ t, gone: true }); continue; }
+      trace.push({ t, x: Math.round(s.x), y: Math.round(s.y), vx: +(s.vx ?? 0).toFixed(2), vy: +(s.vy ?? 0).toFixed(2), ai0: s.ai0, ai1: s.ai1, facing: s.facing, dirY: s.dirY });
+    }
   }
-  // 地形 ASCII(卡点周边 26×22;#=实块 . =空)
+  // 地形 ASCII(最终卡点周边;#=实块 .=空)
+  const s3 = live();
+  const cx = Math.round((s3?.x ?? 50816) / 16), cy = Math.round((s3?.y ?? 11200) / 16);
   let map = '';
-  for (let y = 668; y <= 690; y++) {
+  for (let y = cy - 11; y <= cy + 11; y++) {
     let line = '';
-    for (let x = 3208; x <= 3236; x++) {
+    for (let x = cx - 13; x <= cx + 13; x++) {
       const t = T(x, y);
       line += t === -9 ? '?' : t === -1 ? '.' : (t >= 41 && t <= 44) ? 'D' : '#';
     }
     map += line + '\n';
   }
   // 球最终位置标记
-  const bx = Math.round(e.x / 16), by = Math.round(e.y / 16);
-  return { dungeon, trace, map, ballTile: { bx, by }, active: e.hp > 0, despawnTimer: e.despawnTimer };
+  const s2 = live();
+  const bx = s2 ? Math.round(s2.x / 16) : -1, by = s2 ? Math.round(s2.y / 16) : -1;
+  return { dungeon, trace, map, ballTile: { bx, by }, active: s2 ? s2.hp > 0 : false };
 });
 console.log(JSON.stringify(r, null, 1));
 await browser.close();

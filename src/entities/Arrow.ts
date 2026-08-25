@@ -623,6 +623,10 @@ export class Arrow extends Entity {
   dragAlways: number;
   /** 410 泡体 scale（ai[1]=rand(60,121)/100,首拍掷定——AI_072 :30954 盒 14×14×scale） */
   bubbleScale = 0;
+  /** 167-170 烟花 ai[1]=1=发射器档（AI_034 :30xxx 出膛尘花+尾迹;0=无） */
+  launcherFirework = 0;
+  /** 烟花 ai[0]（AI_034 发射器档计数） */
+  private fwAi0 = 0;
   /** 专家追踪参数（null=无） */
   homing: { speed: number; weight: number; floor?: number; cap?: number; axis?: 'x' | 'y' } | null;
   /** 电圈导弹 442 锁定格（ai[0]/[1]，tile 坐标；null=非锁定弹）——subStepAI 442 段消费 */
@@ -1762,6 +1766,8 @@ export class Arrow extends Entity {
       ctx.rotate(this.spinRot);      // 恒旋族（:54741/:54824 累加不对齐速度）
     } else if (this.mlBoulder) {
       ctx.rotate(this.spinRot);      // 1021 巨砾滚动旋转（:24666 rotation += vx·0.06 累积）
+    } else if (this.projId >= 167 && this.projId <= 170) {
+      ctx.rotate(ang + Math.PI / 2);  // 烟花（AI_034 :30xxx rotation=velocity+π/2）
     } else if (PROJ_NO_ROT.has(this.projId)) {
       /* 直立族（aiStyle 29 零 rotation）：恒不旋转 */
     } else if (PROJ_ROT_ASIS.has(this.projId)) {
@@ -2008,6 +2014,44 @@ export class Arrow extends Entity {
           const bl = Math.hypot(bd.vx, bd.vy) || 1;
           bd.vx = (bd.vx / bl) * (45 + Math.floor(Math.random() * 46)) / 10;
           bd.vy = (bd.vy / bl) * (45 + Math.floor(Math.random() * 46)) / 10;
+        }
+      }
+    }
+    // ★R35 清单③：烟花四式爆花（Kill :74257 起,各 400 尘 noGravity scale1.3——
+    // 167=d130 四环速 4/8/12/16;168=d131 速 2×(i/100)→10→13;169=d132 旋臂花
+    // （rand 5-8 臂×Lerp 弧,本仓简化环阵登记）;170=d133/134 交替速 16/11/8/5）
+    if (this.projId >= 167 && this.projId <= 170 && !this.dead) {
+      const fwVel = (dt: number, dType: number, i: number): void => {
+        const bd = game.spawnDust?.(this.cx - 3, this.cy - 3, 6, 6, dType, 0, 0, 100, null, 1.3, true);
+        if (!bd) return;
+        bd.noGravity = true; bd.scale = 1.3;
+        let dvx = bd.vx, dvy = bd.vy;
+        if (dvx === 0 && dvy === 0) { dvx = 1; }
+        const dl = Math.hypot(dvx, dvy) || 1;
+        const k = dt / dl;
+        bd.vx = dvx * 0.5 + dvx * k; bd.vy = dvy * 0.5 + dvy * k;
+        void i;
+      };
+      if (this.projId === 167) {
+        for (let i = 0; i < 400; i++) fwVel(i < 100 ? 4 : i < 200 ? 8 : i < 300 ? 12 : 16, 130, i);
+      } else if (this.projId === 168) {
+        for (let i = 0; i < 400; i++) fwVel(i > 250 ? 13 : i > 100 ? 10 : 2 * (i / 100), 131, i);
+      } else if (this.projId === 169) {
+        // 旋臂花简化:rand(5,9) 臂均布环阵,速 rand(12,17)（原式 Lerp 弧线登记备案）
+        const arms = 5 + Math.floor(Math.random() * 4);
+        for (let ai9 = 0; ai9 < arms; ai9++) {
+          const aa = (ai9 / arms) * Math.PI * 2;
+          for (let k9 = 0; k9 < 20; k9++) {
+            const spd9 = (12 + Math.random() * 5);
+            const bd9 = game.spawnDust?.(this.cx - 3, this.cy - 3, 6, 6, 132,
+              Math.cos(aa) * spd9, Math.sin(aa) * spd9, 100, null, 1.3, true);
+            if (bd9) { bd9.noGravity = true; bd9.scale = 1.3; }
+          }
+        }
+      } else {
+        for (let i = 0; i < 400; i++) {
+          const tier = i > 300 ? 5 : i > 200 ? 8 : i > 100 ? 11 : 16;
+          fwVel(tier, i > 100 ? (i > 300 ? 134 : 133) : 133, i);
         }
       }
     }
@@ -2748,6 +2792,24 @@ export class Arrow extends Entity {
       if (this.age > 3) this.alpha = Math.max(50, this.alpha - 25);
       this.vx *= 0.96; this.vy *= 0.96;
     }
+    // ---- R35 清单③：烟花 167-170（AI_034,Projectile.cs aiStyle34 支）----
+    // rotation=velocity+π/2（draw 侧）;发射器档(ai1==1):ai0++,==1 拍 8×d6 尘花
+    // （noGravity ×3 vel,fadeIn0.5,pos+=v/2,vel+=v/4+player.v×0.1 近似略玩家项）,
+    // ai0>2 每拍尾迹 d6(x+2,y+20)8×8 vel=v scale1.2 noGravity
+    if (this.projId >= 167 && this.projId <= 170 && this.launcherFirework === 1) {
+      this.fwAi0++;
+      if (this.fwAi0 === 1) {
+        for (let fn = 0; fn < 8; fn++) {
+          const fd = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+            this.vx * 3, this.vy * 3, 100, null, 1.8, true);
+          if (fd) { fd.noGravity = true; fd.fadeIn = 0.5; fd.vx += this.vx / 4; fd.vy += this.vy / 4; }
+        }
+      }
+      if (this.fwAi0 > 2) {
+        game.spawnDust?.(this.x + 2, this.y + 20, 8, 8, 6,
+          this.vx, this.vy, 100, null, 1.2, true);
+      }
+    }
     // ---- R27：宝石法珠飞行彩尘（AI_029_GemStaffs_ActuallyGemStaffs :38534-38541）----
     //  两臂各 1/5 掷：d(type−121+86 / 597→262) 于弹盒内、初速=弹速全额(NewDust 叠加
     //  ±2 抖动)、alpha50、scale1.2、noGravity、速度再 ×0.3——彩色闪烁拖尾是本族视觉主体
@@ -2954,7 +3016,7 @@ export class Arrow extends Entity {
       // 阻力、ai[1]>15 后 scale −0.05/t 至 0.2 消亡（94 支的 130t 长寿命档不适用）
       this.aiCnt++;                                              // ai[1] += 1（:24306）
       const l90 = this.drawScale * 0.5;
-      this.lightRGB = [l90, l90, l90];                           // light = scale*0.5（:24304）
+      this.lightRGB = [l90 * 0.05, l90 * 0.2, l90];               // light=scale×0.5（:24304）+ ProjLight :16630-16635 R×0.05/G×0.2/B=light(深蓝)——曾发白光覆盖静态表
       this.vx *= 0.96; this.vy *= 0.96;                          // velocity *= 0.96（:24320）
       if (this.aiCnt > 15) {                                     //（:24321-24326）
         this.drawScale -= 0.05;

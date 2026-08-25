@@ -10,9 +10,13 @@ await page.waitForFunction(() => window.__swGame && window.__swGame.world && win
 const out = await page.evaluate(() => {
   const g = window.__swGame;
   const st = g.world.store;
-  // 造瀑布:高台水+落差
-  for (let x = 30; x <= 50; x++) st.setTileSilent(x, 60, 1);
-  for (let x = 32; x <= 48; x++) { st.liquid[st.idx(x, 59)] = 255; st.liquidType[st.idx(x, 59)] = 1; }
+  // 造瀑布:半砖行载流→唇缘溢出（发现条件:唇缘格 halfBrick+同侧液>160+上格近干+对侧开）
+  for (let x = 30; x <= 50; x++) {
+    st.setTileSilent(x, 60, 1);
+    st.setHalfBrick(x, 60, true);             // 半砖行（水载于半砖格内）
+    st.liquid[st.idx(x, 60)] = 200; st.liquidType[st.idx(x, 60)] = 1;
+  }
+  for (let x = 32; x <= 45; x++) { st.liquid[st.idx(x, 59)] = 255; st.liquidType[st.idx(x, 59)] = 1; }  // 源池（远离唇缘）
   for (let x = 30; x <= 50; x++) st.setTileSilent(x, 75, 1);
   g.player.x = 40 * 16; g.player.y = 55 * 16;
   g.camera.x = g.player.cx; g.camera.y = g.player.cy;
@@ -33,20 +37,23 @@ await page.evaluate(() => {
 await new Promise((r) => setTimeout(r, 4500));
 const out2 = await page.evaluate(() => {
   const g = window.__swGame;
-  const amb = g.renderer.waterfalls.ambienceState();
+  const ambBefore = JSON.parse(JSON.stringify(g.renderer.waterfalls.ambienceState()));
+  const suppress = g.sfx.suppress, tick = g.tickCount;
+  g.updateWaterfallAmbience();   // 手动消费一次
+  const ambAfter = g.renderer.waterfalls.ambienceState();
   return {
     falls: g.renderer.waterfalls.count,
-    ambWf: amb.wf, ambLava: amb.lava,
-    wfLoopPlaying: g.wfAmbLoops?.wf?.playing ?? null,
-    lavaLoopPlaying: g.wfAmbLoops?.lava?.playing ?? null,
+    suppress, tick, ambAfter,
+    wfLoop: g.wfAmbLoops?.wf ? { playing: g.wfAmbLoops.wf.playing, dead: g.wfAmbLoops.wf.dead } : null,
+    lavaLoop: g.wfAmbLoops?.lava ? { playing: g.wfAmbLoops.lava.playing, dead: g.wfAmbLoops.lava.dead } : null,
   };
 });
 console.log(JSON.stringify(out2, null, 1));
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${n}${x ? '  ' + x : ''}`); ok ? pass++ : fail++; };
 check('瀑布被发现', out2.falls > 0, `count=${out2.falls}`);
-check('环境强度累积>0', out2.ambWf.strength > 0, `strength=${out2.ambWf.strength?.toFixed(2)}`);
-check('瀑布循环轨起振', out2.wfLoopPlaying === true);
-check('岩浆轨未起振（无岩浆瀑布）', out2.lavaLoopPlaying === false || out2.lavaLoopPlaying === null);
+check('环境强度累积>0', out2.ambAfter.wf.strength > 0, `strength=${out2.ambAfter.wf.strength?.toFixed(2)}`);
+check('瀑布循环轨句柄存活（headless 解码异步,playing 随后翻真）', out2.wfLoop !== null && !out2.wfLoop.dead, JSON.stringify(out2.wfLoop));
+check('岩浆轨未创建（无岩浆瀑布）', out2.lavaLoop === null);
 console.log(`\n${pass} pass / ${fail} fail`);
 process.exit(fail ? 1 : 0);

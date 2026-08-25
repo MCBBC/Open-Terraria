@@ -2686,21 +2686,31 @@ export class Player extends Entity {
     }
     // 入水/出水瞬间：水花尘 + 水花声（Player.cs:27464-27636,2026-08-20 补齐——
     // 曾只播入水声、零粒子=用户报"入水出水效果非常轻微且出水几乎没有"）
-    // 原版两方向都出 50 颗 dustWater 尘(水样=33,岩浆样=35,微光=308,蜜=152)+
-    // SoundID 19(splash);入水 vy−3 / 出水 vy−4、vx×2.5、scale 0.8、α100、无重力
+    // 原版两方向都出尘+SoundID 19(splash)（Player.cs:27500-27546 入 / :27595-27630 出）：
+    //   水 50 颗 dustWater(33) vy−3(入)/−4(出)、蜜 152 20 颗 vy−1、岩浆 35 20 颗 vy−1.5；
+    //   共同 = NewDust 基础速度 ±2 均匀 + vx×2.5 → vx∈±5、vy 全向上（喷发冠）+
+    //   scale 0.8(水)/1.3(蜜岩浆)、α100、noGravity。
+    //   ★出生盒 y：入水恒 h/2−8；出水水样 h/2（无 −8）、蜜/岩浆 h/2−8。
+    //   ★曾用 spawnParticles 随机方向弱漂移（≈四成向下+上浮力 0.12）——喷发冠
+    //   不存在，快速落入时出生点又整体在水面下（中心盒翻转穿透深）→ 水面零
+    //   表现 = 用户报"正上方落入无涟漪、边缘走入正常"（涟漪环同理：翻转点深
+    //   → 环心水下 11px 只露顶部窄弧；走入环心水下 5px 露宽弧——环公式与原版
+    //   一致不动，本修补齐原版赖以可见的喷发尘）。
     if (this.inWater !== wasInWater && this.wetCount === 0) {
       const exiting = !this.inWater;
-      // 原版矩形分布(Player.cs:27504-27509):NewDust(position.X−6, y+h/2−8,
-      // width+12, 24, dustWater())——盒内随机出生,vy−3/−4 上踢+vx×2.5 横散
-      const bx = this.x - 6, by = this.y + this.h / 2 - 8;
+      const bx = this.x - 6;
+      const by = this.y + this.h / 2 - (exiting && !this.inHoney && !this.inLava ? 0 : 8);
       const bw = this.w + 12, bh = 24;
-      const upKick = exiting ? -0.15 : -0.12;
+      const count = this.inHoney || this.inLava ? 20 : 50;
+      const vyKick = this.inHoney ? 1 : this.inLava ? 1.5 : exiting ? 4 : 3;
+      const size = this.inHoney || this.inLava ? 2.6 : 1.6;   // dust scale 1.3/0.8 × 2px 基准
       const color = this.inHoney ? '#D4A017' : this.inLava ? '#FF6600' : '#4A9EFF';
-      const count = this.inHoney ? 20 : 50;
       for (let i = 0; i < count; i++) {
         const dx = bx + Math.random() * bw;
         const dy = by + Math.random() * bh;
-        game.spawnParticles(dx, dy, color, 1, 2.5, { life: 30, damp: 0.97, grav: upKick });
+        const vx = (Math.random() * 2 - 1) * 5;                       // ±2 均匀 ×2.5
+        const vy = (Math.random() * 2 - 1) * 2 - vyKick;              // ±2 均匀 − 踢 → 全向上
+        game.spawnParticles(dx, dy, color, 1, 0, { life: 30, vx, vy, size, damp: 0.98 });
       }
       game.playSfx('splash');
     }

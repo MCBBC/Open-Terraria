@@ -531,6 +531,8 @@ export class BiomeBackground {
     this.bgStyle = style;
     this.bgDelay = 0;
     this.instantBG = 0;
+    this.lastFlashStyle = style;   // ★快照不算"实变"——否则 flash[area]=1 全屏
+                                   //   黑闪遮罩盖满拍照分块 = 全黑出图(2026-08-25)
     this.alphaFront.fill(0);
     this.alphaFar.fill(0);
     this.alphaFront[style] = 1;

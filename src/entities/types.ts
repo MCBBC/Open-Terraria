@@ -95,7 +95,7 @@ export interface GameHooks {
   /** 粒子 */
   spawnParticles(
     x: number, y: number, color: string, count: number, speed?: number,
-    opts?: { life?: number; damp?: number; grav?: number; size?: number },
+    opts?: { life?: number; damp?: number; grav?: number; size?: number; vx?: number; vy?: number },
   ): void;
   /** 定向粒子爆发（烟花爆花/喷泉/马桶水花等原版 dust 带初速方向的场景；
    *  spawnParticles 为全向均匀发射，无法表达定向）。dir 为中心角、spread 为半散布，

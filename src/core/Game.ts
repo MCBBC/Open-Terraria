@@ -930,6 +930,7 @@ const TAIL_SILENCE_WIN: Record<number, number> = { 3852: 4, 4952: 4, 6152: 4 };
 export const SENTRY_WAND_VIDS = new Set([1572, 2366, 3571, 3569, 5119, 5463]);
 export const REUSE_DELAY_TICKS: Record<number, number> = {
   434: 14,   // Vilethorn 邪恶荆棘（Item.cs case 434 :6471-6476——原版怪癖:ranged+useAmmo=Bullet 无 mana）
+  3787: 18,  // Sky Fracture 天界碎裂（case 3787 :33536 reuseDelay=useAnimation+6=18——非字面式,R26 提取器漏,R35 清单④补）
   3269: 10,  // Medusa Head 美杜莎之首（case 3269 :30314-30316,channel 件）
   3870: 10,  // Dragon's Fury 双足翼龙之怒（case 3870 :34217-34219）
   3541: 5,   // Last Prism 最后的棱镜（case 3541 :31750-31752,channel 件）
@@ -10021,6 +10022,39 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 逐型档（172=0.085@17、267/478/479=0.075@20、5/639=0 等）。此前 projGravity
         // 对 aiStyle1 一律 0 = 箭完全不下坠（与原版抛物线轨迹不符）
         const gs = projGravSpec(projId);
+        // ---- 3546 烟花发射器（ItemCheck_Shoot :49529-49541）：每击 2 发,速度=基准
+        //      ±rand(-40,41)×0.05 双轴散布,出生点=枪口+normalize(v.RotatedBy(−π/2×dir))×6
+        //      （垂直枪口偏移）,弹型硬覆盖 167+rand(4)（四色烟花 ai34 timeLeft45——
+        //      弹药只供伤害）;ai1=1=发射器档（AI_034 出膛尘花+尾迹,Kill 四式爆花——
+        //      Arrow 微支承载）。此前走火箭弹药链射标准 134=弹族整体错型（R35 清单③）----
+        if (bowVid2 === 3546) {
+          for (let fwI = 0; fwI < 2; fwI++) {
+            const fwVx = Math.cos(ang) * speed + (Math.random() * 81 - 40) * 0.05;
+            const fwVy = Math.sin(ang) * speed + (Math.random() * 81 - 40) * 0.05;
+            const rotF = -Math.PI / 2 * this.player.facing;
+            const frc = Math.cos(rotF), frs = Math.sin(rotF);
+            const frx = fwVx * frc - fwVy * frs, fry = fwVx * frs + fwVy * frc;
+            const frl = Math.hypot(frx, fry) || 1;
+            const fw = new Arrow(ax + frx / frl * 6, ay + fry / frl * 6, fwVx, fwVy,
+              damage, knockback, 167 + Math.floor(Math.random() * 4), null,
+              { grav: 0, life: 45, pierce: 1 });
+            fw.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
+            fw.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            fw.launcherFirework = 1;                    // ai[1]=1（AI_034 发射器档）
+            this.entities.add(fw, 'projectiles');
+          }
+          if (viIdFromKey(ammoDef.key) !== 3103 && viIdFromKey(ammoDef.key) !== 3104
+            && !this.ammoSaveRoll()) {
+            this.player.inv.removeAt(ammoSlot, 1);
+          }
+          this.player.useTime = Math.max(1, Math.round((bowC?.useTime ?? rg?.speed ?? 100) * (ps?.spd ?? 1)));
+          this.useSwing(heldDef, ang, ps?.spd ?? 1);
+          const usFw = itemUseSoundWav(bowVid2);        // UseSound=Item156（Item.cs:31942）
+          if (usFw) this.playSfxFile(usFw);
+          else this.sfx.play('gunShot');
+          this.cb.onInventoryChanged();
+          return;
+        }
         // ---- 发射器弹药族（aiStyle 16，AI_016 发射支 :44542-44911）：GrenadeProj
         //      fired 模式（无重力直线/火箭加速/雪人追踪/感应雷布防/撞块语义表），
         //      爆炸半径走 Kill :75260-75300 闸门表（I 型不毁地形，II/III/IV 毁）——
@@ -11852,6 +11886,58 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           this.input.mouseDown = false;
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          break;
+        }
+        // 3787 天界碎裂（ItemCheck_Shoot :49312-49330）：施放点=光标周随机
+        // （Lerp(20,60) 半径,CanHit 探测 ≤50 重掷方位）,速度=normalize(鼠标−出生)×speed
+        // 与基准向 Lerp 25% 混合——"剑尖在光标处炸出追光碎晶"身份;useTime4<anim12 →
+        // 一挥三施（R26 mspc 泛化通道,本支为泛化消费者）;reuseDelay=18 已补表
+        if (critVid === 3787) {
+          const fireFracture = (): void => {
+            const [fmx, fmy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+            let fa = Math.random() * Math.PI * 2;
+            let sx9 = fmx, sy9 = fmy;
+            for (let tries = 0; tries < 50; tries++) {
+              const rad = 20 + 40 * Math.random();          // Lerp(20,60,rand)
+              sx9 = fmx + Math.cos(fa) * rad; sy9 = fmy + Math.sin(fa) * rad;
+              const dx9 = sx9 - this.player.cx, dy9 = sy9 - this.player.cy;
+              const dl9 = Math.hypot(dx9, dy9) || 1;
+              if (canHitLine(this.world.store, this.player.cx, this.player.cy, 0, 0,
+                sx9 + dx9 / dl9 * 8, sy9 + dy9 / dl9 * 8, 0, 0)) break;   // :49322-49324
+              fa = Math.random() * Math.PI * 2;
+            }
+            const bvx9 = Math.cos(ang) * cw.shootSpeed, bvy9 = Math.sin(ang) * cw.shootSpeed;
+            let tvx = fmx - sx9, tvy = fmy - sy9;
+            const tl9 = Math.hypot(tvx, tvy);
+            if (tl9 > 0) { tvx = tvx / tl9 * cw.shootSpeed; tvy = tvy / tl9 * cw.shootSpeed; }
+            else { tvx = bvx9; tvy = bvy9; }                // SafeNormalize(vector59) 兜底
+            const fvx = tvx + (bvx9 - tvx) * 0.25;          // Lerp(v5, base, 0.25)（:49329）
+            const fvy = tvy + (bvy9 - tvy) * 0.25;
+            const shard = new Arrow(sx9, sy9, fvx, fvy, cw.damage, cw.knockback, 660, null,
+              { grav: 0, pierce: 1 });
+            shard.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            shard.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            shard.frostEligible = false;
+            this.entities.add(shard, 'projectiles');
+          };
+          const sw937 = this.swing;
+          const animDur937 = sw937?.dur ?? 12;
+          let mid937 = false;
+          this.playUseSound(critVid, 'tink');               // UseSound=Item9（Item.cs:33542）
+          fireFracture();                                   // 首发
+          if (sw937 && animDur937 > cw.useTime && cw.useTime > 0) {
+            sw937.multishot = {
+              useTime: this.player.getSlowMagicUseTime(cw.useTime),
+              fired: 1,
+              maxShots: sprayCyclePlan(animDur937, cw.useTime)?.shots ?? 1,   // 1+⌊11/4⌋=3
+              fire: () => { mid937 = true; fireFracture(); mid937 = false; },
+            };
+            this.player.useTime = this.player.getSlowMagicUseTime(animDur937);
+          } else {
+            this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          }
+          this.input.mouseDown = false;
           this.player.onManaItemUsed();
           break;
         }
@@ -26668,14 +26754,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   spawnParticles(
     x: number, y: number, color: string, count: number, speed = 2,
-    opts: { life?: number; damp?: number; grav?: number; size?: number } = {},
+    opts: { life?: number; damp?: number; grav?: number; size?: number; /** 逐粒显式初速（提供时替换随机方向速度——原版 NewDust+逐尘 velocity 修型 1:1 用） */ vx?: number; vy?: number } = {},
   ) {
     const base = opts.life ?? 40;
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       const life = Math.round(base * (0.6 + Math.random() * 0.4));
       this.particles.push({
-        x, y, vx: Math.cos(a) * speed * Math.random(), vy: Math.sin(a) * speed * Math.random() - 1,
+        x, y,
+        vx: opts.vx ?? Math.cos(a) * speed * Math.random(),
+        vy: opts.vy ?? Math.sin(a) * speed * Math.random() - 1,
         life, maxLife: life, color, size: opts.size ?? 2 + Math.random() * 2,
         damp: opts.damp, grav: opts.grav,
       });
