@@ -83,13 +83,13 @@ const SET_BG: Record<number, [number | undefined, number | undefined, number | u
   273: [undefined, 0.49, 2100, 1560],
   234: [undefined, 0.23, 1700, 1150], 235: [undefined, 0.33, 1950, 1550], 236: [undefined, 0.41, 2100, 2000],
   279: [2.5, 0.35, 1850, 1750], 282: [2.6, 0.25, 1800, 1340],
-  261: [undefined, 0.27], 262: [undefined, 0.4],
-  219: [undefined, 0.25], 220: [undefined, 0.34], 221: [undefined, 0.43],
+  261: [undefined, 0.27, undefined, undefined], 262: [undefined, 0.4, undefined, undefined],
+  219: [undefined, 0.25, undefined, undefined], 220: [undefined, 0.34, undefined, undefined], 221: [undefined, 0.43, undefined, undefined],
   222: [undefined, undefined, 1800, 1400], 223: [undefined, undefined, 2150, 1850], 224: [undefined, undefined, 2500, 2400],
   237: [undefined, undefined, 1800, 1500], 238: [undefined, undefined, 1950, 1500], 239: [undefined, undefined, 2100, 1900],
   284: [undefined, 0.23, 1600, 900], 285: [undefined, 0.36, 1900, 960], 286: [undefined, 0.42, 2100, 1200],
   287: [undefined, 0.21, 1700, 1560], 288: [undefined, 0.33, 1950, 1730], 289: [undefined, 0.41, 2100, 1400],
-  207: [undefined, 0.32],
+  207: [undefined, 0.32, undefined, undefined],
   298: [1.25, 0.35, 2000, 1700], 299: [undefined, 0.28, 1600, 1400],
   300: [2.41, 0.53, 3000, 2050], 301: [2.36, 0.415, 2200, 1700], 302: [2.25, 0.24, 1400, 950],
   303: [undefined, 0.35, 2400, 1900], 304: [undefined, 0.35, 2400, 1900], 305: [undefined, 0.35, 2400, 1900],
@@ -98,13 +98,13 @@ const SET_BG: Record<number, [number | undefined, number | undefined, number | u
   315: [undefined, 0.35, 2400, 1900], 316: [undefined, 0.35, 2400, 1900], 317: [undefined, 0.35, 2400, 1900],
   306: [undefined, 0.26, 1800, 1700], 310: [undefined, 0.26, 1800, 1700],
   314: [undefined, 0.26, 1800, 1700], 318: [undefined, 0.26, 1800, 1700],
-  319: [undefined, 0.6, 4600, 3250], 320: [undefined, 0.3, 2250, 1950], 321: [undefined, 0.25],
+  319: [undefined, 0.6, 4600, 3250], 320: [undefined, 0.3, 2250, 1950], 321: [undefined, 0.25, undefined, undefined],
   322: [undefined, 0.45, 2400, 1950], 323: [undefined, 0.35, 1900, 1500], 324: [undefined, 0.25, 1600, 1300],
   325: [undefined, 0.49, 2800, 2400], 326: [undefined, 0.33, 2000, 1740], 327: [undefined, 0.22, 1450, 1165],
-  328: [2.01, 0.34], 329: [2.29, 0.26], 330: [undefined, 0.25, 1750, 1450],
-  333: [2.01, 0.37], 334: [undefined, 0.26], 335: [undefined, 0.22, 1650, 1470],
+  328: [2.01, 0.34, undefined, undefined], 329: [2.29, 0.26, undefined, undefined], 330: [undefined, 0.25, 1750, 1450],
+  333: [2.01, 0.37, undefined, undefined], 334: [undefined, 0.26, undefined, undefined], 335: [undefined, 0.22, 1650, 1470],
   337: [1.01, 0.35, 2500, 2200], 338: [0.98, 0.24, 1900, 1650], 339: [0.94, 0.2, 1600, 1350],
-  341: [undefined, 0.3], 342: [undefined, 0.25], 343: [undefined, 0.2, 1650, 1550],
+  341: [undefined, 0.3, undefined, undefined], 342: [undefined, 0.25, undefined, undefined], 343: [undefined, 0.2, 1650, 1550],
 };
 
 /** GetLayerYOffset（Main.cs :60687-60730）：山体/雪原/丛林层贴图专属 Y 微调 */
@@ -778,8 +778,12 @@ export class BiomeBackground {
         + (opt.yoff ? (LAYER_YOFF[tex] ?? 0) : 0) + scAdj + pushHack;
       const dw = sw * scale + 1;   // +1px 保险重叠（浮点视差接缝,既有约定）
       const dh = sh * scale;
+      // 帧动画子区经 opts.src 走 tint 烘焙路径的子区取样（GL 路径 quad 本就按源矩形采样）
+      const sub = sx !== 0 || sy !== 0 || sw !== im.width || sh !== im.height;
+      const opts = { alpha, tint: tintOn,
+        ...(sub ? { src: [sx, sy, sw, sh] as [number, number, number, number] } : {}) };
       for (let i = 0; i < loops; i++) {
-        b.img(im, sx, sy, sw, sh, startX + i * wScaled, topY, dw, dh, { alpha, tint: tintOn });
+        b.img(im, sx, sy, sw, sh, startX + i * wScaled, topY, dw, dh, opts);
       }
     };
     // ---- cloudBG 大云图双层（Main.cs :60280-60375，Background 112/113）----
@@ -929,7 +933,8 @@ export class BiomeBackground {
       cx.drawImage(im, 0, 0);
       this.flipCache.set(im, c);
     }
-    return c;
+    // canvas 是合法 drawImage/texFromImage 源——按消费方联合类型口径归还
+    return c as unknown as HTMLImageElement;
   }
 
   drawTiledTinted(

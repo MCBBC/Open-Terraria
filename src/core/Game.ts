@@ -8468,25 +8468,28 @@ export class Game implements GameHooks {
     //  纯近战(剑/vi_ melee)与本仓库 legacy sword 走本分支
     const cw = cwEarly;
     const cwMelee = cw?.kind === 'melee' ? cw : null;
-    // 帕鲁钻地龟 5667/6174 左键召唤（2026-08-23 内容缺口批；ItemCheck_Shoot 专支
+    // 帕鲁钻地龟 5667/6174 左键召唤/指挥（2026-08-23 内容缺口批；ItemCheck_Shoot 专支
     // Player.cs:48687-48752——combatWeapon 对该两件落 'shot' 兜底会发空箭，此处
     // 先行拦截）。altFunctionUse==0（左键）且场内无 1098/1123 → flag6=true →
-    // SpawnDigtoiseOnCursor（:50015-50045）；场内有 → 本支 no-op（原版 for 循环
-    // 空转后 `if (flag6)` 才补召——同型在场左键不重复召，右键才指挥，见下方
-    // interactAt 后的 6174 右键支）。使用节奏 = useTime 15（Item.cs:47569-47571）
+    // SpawnDigtoiseOnCursor（:50015-50045）；**场内有 → 指挥**（:48705-48727 循环:
+    // 停抚摸/≥1200px 回收/按鼠标方位定挖掘向/挖掘中→离场——commandDigtoises 1:1）。
+    // ★R35 勘误:旧注"右键才指挥"系把 flag5 后非 flag5 段误读进右键支——右键=全体
+    // 回收(:8394 支),指挥在左键在场拍。使用节奏 = useTime 15（Item.cs:47569-47571）
     {
       const dgVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
       if (this.player.useTime === 0 && (dgVid === 5667 || dgVid === 6174)) {
         const out = this.entities.projectiles.filter((m): m is MinionProj =>
           m instanceof MinionProj && !m.dead && m.ownerPlayer === this.player
           && (m.projId === 1098 || m.projId === 1123));
+        const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         if (out.length === 0) {
-          const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
           this.spawnDigtoiseOnCursor(Math.floor(mwx / TILE), Math.floor(mwy / TILE),
             dgVid === 6174 ? 1123 : 1098);
-          this.useSwing(heldDef, undefined);          // useStyle 5 + noUseGraphic（:47566-47572）
-          this.player.useTime = 15;                   // ApplyItemTime（useTime=useAnimation=15）
+        } else {
+          this.commandDigtoises(mwx, mwy);            // :48705-48727 指挥循环（原死代码接活）
         }
+        this.useSwing(heldDef, undefined);            // useStyle 5 + noUseGraphic（:47566-47572）
+        this.player.useTime = 15;                     // ApplyItemTime（useTime=useAnimation=15）
         this.input.mouseDown = false;
         return;
       }

@@ -2762,12 +2762,40 @@ export class Arrow extends Entity {
     if (this.projId === 94) {
       this.aiCnt++;                                              // ai[1] += 1（:24306）
       const l94 = this.drawScale * 0.5;
-      this.lightRGB = [l94, l94, l94];                           // light = scale*0.5（:24304）
+      this.lightRGB = [l94 * 0.5, 0, l94];                        // ProjLight :16380-16382 R×0.5/G×0/B=light(紫)——曾发白光
       if (Math.random() < 0.25) {                                // 1/4 尘 70（:24308-24315）
         game.spawnParticles(this.cx, this.cy, '#A0C8F0', 1, 0.5, { life: 20, grav: 0 });
       }
       this.vx *= 0.985; this.vy *= 0.985;                        // velocity *= 0.985（:24317）
       if (this.aiCnt > 130) {                                    //（:24318-24325）
+        this.drawScale -= 0.05;
+        if (this.drawScale <= 0.2) {
+          this.drawScale = 0.2;
+          this.killNow(game);
+          return;
+        }
+      }
+    } else if (this.projId === 1114) {
+      // 1114 日耀花弹（aiStyle 24，Projectile.cs:26292/:26310-26340）：light=scale×0.5
+      // （:26292 族首,ProjLight :16383-16388 乘 R×0.6/G×0.45/B×0.2=暖橙——夜间照明,
+      // Update :17136 无昼夜门）、velocity×0.985 阻力、ai[1]>130 后 scale −0.05/t 至
+      // 0.2 消亡（光随缩径衰减至 0.1）、wet 即 Kill（:26311-26313）。此前无物理分支
+      // =无光+永续飞行（2026-08-25 用户报"夜间无照明"）
+      this.aiCnt++;                                              // ai[1] += 1（:26333）
+      const l1114 = this.drawScale * 0.5;
+      this.lightRGB = [l1114 * 0.6, l1114 * 0.45, l1114 * 0.2];  // :26292 + ProjLight :16383-16388
+      this.vx *= 0.985; this.vy *= 0.985;                        // velocity *= 0.985（:26334）
+      const stW = (game as unknown as { world?: { store?: { wet?: Uint8Array; idx(x: number, y: number): number } } }).world?.store;
+      if (stW?.wet) {
+        const wx0 = Math.floor(this.x / TILE), wx1 = Math.floor((this.x + this.w - 1) / TILE);
+        const wy0 = Math.floor(this.y / TILE), wy1 = Math.floor((this.y + this.h - 1) / TILE);
+        for (let wi = wx0; wi <= wx1 && !this.dead; wi++) {
+          for (let wj = wy0; wj <= wy1; wj++) {
+            if (stW.wet[stW.idx(wi, wj)] > 0) { this.killNow(game); break; }   // wet → Kill（:26311-26313）
+          }
+        }
+      }
+      if (this.aiCnt > 130) {                                    //（:26335-26340）
         this.drawScale -= 0.05;
         if (this.drawScale <= 0.2) {
           this.drawScale = 0.2;
