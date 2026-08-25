@@ -19,7 +19,7 @@ import { playerCanHitEnemy, hitPlayer } from './projTargets';
 import { applyProjStatus } from './projStatus';
 import { projSprite } from './Arrow';
 import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
-  type Bolt } from '../fx/LightningGenerator';
+  type Bolt, stormLightningGenerator } from '../fx/LightningGenerator';
 
 /** 同敌命中去重/冷却表（WeaponProj.HitCooldown 同构——该类模块私有，此处独立一份） */
 class HitCdImpl {
@@ -871,9 +871,13 @@ export class StormLightning extends Entity {
   private doKill(game: GameHooks): void {
     const probe = this.tileProbe(game);
     const center = { x: this.cx, y: this.cy };
+    // 生成器按型分流（Kill :71936-71940）：1122=ArcSurge 手→雷；1091=StormLightning
+    // （世界落雷预设,与 TrySpawnLightningBolt CanHitTarget 同款）；1117=LightningStrikeWeapon
     const gen = this.projId === 1122
       ? arcSurgeWeaponGenerator(this.handAnchor(game), center, probe)
-      : lightningStrikeWeaponGenerator(probe);
+      : this.projId === 1091
+        ? stormLightningGenerator(probe)
+        : lightningStrikeWeaponGenerator(probe);
     // 1122：direction = center − hand（:71913-71914）；1117：direction 缺省 UnitY
     // （Generate(null,seed,target,direction??UnitY) → 天降 bolt,start=目标上方 750px）
     const dir = this.projId === 1122
@@ -908,13 +912,15 @@ export class StormLightning extends Entity {
     if (this.projId === 1091) {
       const p = game.player;
       if (p && !p.dead) {
+        // 玩家判定用【整条 bolt 路径】（Kill 帧 customHitbox 对 NPC/Player 两环同效
+        // ——曾用标记盒=路径上远端玩家漏劈）
         const pts = bolt.positions;
-        let hitP = false;
+        let hitPt: { x: number; y: number } | null = null;
         for (let i = 0; i < pts.length; i++) {
           const q = pts[i];
-          if (q.x >= p.x - 8 && q.x < p.x + p.w + 8 && q.y >= p.y - 8 && q.y < p.y + p.h + 8) { hitP = true; break; }
+          if (q.x >= p.x - 8 && q.x < p.x + p.w + 8 && q.y >= p.y - 8 && q.y < p.y + p.h + 8) { hitPt = q; break; }
         }
-        if (hitP) {
+        if (hitPt) {
           if (this.comboSeed) {
             p.hp = Math.min(p.maxHp, p.hp + 80);   // Heal(80)（:14898——组合种子雷改治疗）
           } else {
@@ -922,7 +928,8 @@ export class StormLightning extends Entity {
             // 经典0→.04 专家1→.08 大师2→lerp(1,3 段)=.16 旅程3→.24
             const diff = game.world.difficulty;
             const scale = diff === 1 ? 0.08 : diff === 2 ? 0.16 : diff === 3 ? 0.24 : 0.04;
-            hitPlayer({ x: this.x, y: this.y, w: this.w, h: this.h }, game,
+            // 零尺寸盒@命中点=projOverlap 必交（判定已按 bolt 路径完成）
+            hitPlayer({ x: hitPt.x, y: hitPt.y, w: 0, h: 0 }, game,
               Math.max(1, Math.round(this.damage * scale * 2)), true);
           }
         }
@@ -1083,7 +1090,7 @@ export class StormLightning extends Entity {
       const waveOutP = remapL(progress, 1 - anim.waveOut, 1, 0, 1);
       for (const b of this.bolts) {
         const inten = (b.forkDepth === 0 ? 1 : 0.5 * Math.pow(0.8, b.forkDepth - 1));
-        this.drawBolt(ctx, r9, b, inten, progress, opacity, anim, waveInP, waveOutP);
+        this.drawBolt(ctx, r, b, inten, progress, opacity, anim, waveInP, waveOutP);
       }
     } else {
       // 飞行期本体贴图（:40450-40455 光强包络近似亮度）

@@ -21,7 +21,7 @@ const out = await page.evaluate(() => {
   // 手动调一次消费
   let manualErr = null;
   try { g.updateWaterfallAmbience(); } catch (e) { manualErr = String(e).slice(0, 200); }
-  const h1 = g.startLoopSfx('Waterfall_0.wav', 0.5, 0.5);
+  const h1 = g.startLoopSfx('Liquid_0.wav', 0.5, 1, -0.2);
   return {
     ctxState: sfx.ctxState ? sfx.ctxState() : (sfx.ctx ? sfx.ctx.state : 'no-ctx-access'),
     hasCtx: !!sfx.ctx || !!sfx.ensure,

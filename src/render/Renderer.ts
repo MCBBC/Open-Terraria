@@ -2968,6 +2968,13 @@ export class Renderer {
       if ((rp.sitting || rp.sleeping) && !rp.dead) this.drawPlayer(rp, world, rp.swingNet, flicker);
     }
     if ((player.sitting || player.sleeping) && !player.dead) this.drawPlayer(player, world, swing, flicker);
+    // ★投射物层前移登记（2026-08-25 用户实报冰川之牙蓄力冰矛被角色贴图遮挡）：
+    //   原版层序 = DrawNPCs → DrawPlayers → DrawProjectiles（弹在玩家【之上】）
+    //   ——本仓曾把自带 draw 的弹混入本 y 排序循环画在 drawPlayer【之前】= 玩家
+    //   贴图整体盖住弹体（蓄力冰矛挂玩家中心,只露两端刺尖）。弹的 draw 挪到
+    //   drawPlayer 之后（下方 postPlayerDraws 冲刷）,账本登记仍在原位（drawPlayer
+    //   同帧消费 heldProj 指向）
+    const postPlayerDraws: Array<() => void> = [];
     for (const e of sorted) {
       if (e instanceof Enemy) {
         if (this.isBehindTilesEnemy(e)) { this.drawHealthBar(e, world.isExpert); continue; }
@@ -2980,9 +2987,18 @@ export class Renderer {
       else if (!(e instanceof ItemDrop) && e instanceof TownNPC) { this.drawTownNPC(e, world); this.drawHealthBar(e); }
       else if (e instanceof Tombstone) this.drawTombstone(e);
       else if (typeof (e as { draw?: unknown }).draw === 'function') {
-        // 投射物等自带 draw 的实体(飞镖/陷阱弹/箭/法弹):世界变换内绘制
-        noteHeldProjEntity(e);   // heldProj 账本登记(非目标弹型静默跳过)
-        (e as unknown as { draw(r: Renderer, cam: Camera): void }).draw(this, cam);
+        // 投射物(带 projId:箭/法弹/蓄力件等)→ 玩家【之后】绘制（原版
+        //   DrawProjectiles 在 DrawPlayers 之后;曾画在玩家之前=冰川之牙蓄力
+        //   冰矛被角色贴图遮挡,用户实报）。其余自带 draw 实体(小动物等
+        //   原版 NPC 族)仍在玩家前。heldProj 账本登记两路都在（drawPlayer
+        //   同帧消费 heldProj 指向）
+        noteHeldProjEntity(e);
+        if ('projId' in (e as object)) {
+          const ee = e as unknown as { draw(r: Renderer, cam: Camera): void };
+          postPlayerDraws.push(() => ee.draw(this, cam));
+        } else {
+          (e as unknown as { draw(r: Renderer, cam: Camera): void }).draw(this, cam);
+        }
       }
     }
     // 表情气泡（原版 EmoteBubble：实体层之上；本段在世界变换内，世界坐标绘制）
@@ -3011,6 +3027,10 @@ export class Renderer {
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致；
     // 挥舞动画 = msg13 useItem 位派生的 swingNet（对齐本地 swing 参数形状））
     for (const rp of this.remotePlayers) { this.drawPlayer(rp, world, rp.swingNet, flicker); }
+    // ---- 投射物层（原版 DrawProjectiles :63204 段序 = DrawPlayers 之后、
+    //      DrawItems 之前——弹在玩家【之上】。2026-08-25 用户实报冰川之牙蓄力
+    //      冰矛长在角色贴图后面：弹曾混入实体 y 排序循环画在 drawPlayer 之前）----
+    for (const draw of postPlayerDraws) draw();
     // 终极棱镜晶体(633 drawLayer=7)冲刷:原版在玩家绘制层组内持物层位置插入
     // (PlayerDrawLayers.cs:3154→:4318)= 身体【前】——实体循环直画被纸娃娃盖住
     if (this.prismCrystalQueue.length) {

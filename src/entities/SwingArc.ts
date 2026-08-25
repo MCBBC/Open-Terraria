@@ -19,6 +19,7 @@ import { projSprite } from './Arrow';
 import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
 import { prettyStarSparkle } from '../render/Renderer';
 import { canHitLine } from '../physics/LineOfSight';
+import { drawStripTrail } from '../fx/TrailShader';
 
 interface ArcOwner { cx: number; cy: number; x: number; y: number; w: number; h: number; facing: number; dead: boolean }
 
@@ -830,6 +831,26 @@ export class ZenithSword extends Entity {
       }
       ctx.globalAlpha = 1;
       ctx.restore();
+      // ★shader 审计修齐批：FinalFractalVertex pass 叠层真化（PixelShader.cso
+      //   :2808-2879——s0=Extra_201/s1=Extra_193（FinalFractalHelper.Draw :180-181
+      //   出手侧覆写绑定）×噪声门×锯齿波（uShaderSpecificData=(4,0,0,4)→k=1/4）。
+      //   平色底条保留（预乘语义已验证），此层注入贴图纹理/噪声/锯齿真值
+      if (r.atlas) {
+        const ptsFS: Array<{ x: number; y: number; hw: number; r: number; g: number; b: number; a: number }> = [];
+        for (let i = n - 1; i >= 1; i--) {
+          const f = fractalStripFade((n - 0.5 - i) / (60 - 1));
+          if (f <= 0.02) continue;
+          ptsFS.push({ x: this.trail[i * 3], y: this.trail[i * 3 + 1], hw: tw * 0.85,
+            r: prof.color[0] / 255, g: prof.color[1] / 255, b: prof.color[2] / 255, a: f });
+        }
+        if (ptsFS.length >= 2) {
+          try {
+            drawStripTrail(ctx, r as unknown as Parameters<typeof drawStripTrail>[1],
+              { set: 'FinalFractal' as never, pts: ptsFS, opacity: 1,
+                time: performance.now() / 1000, zigzag: 0.5 });
+          } catch { /* atlas 未就绪静默 */ }
+        }
+      }
     }
 
     // ---- 贴图绘制原语（:29945-29953：LoadItem(ai[1])、Frame() 全幅、origin=中心、

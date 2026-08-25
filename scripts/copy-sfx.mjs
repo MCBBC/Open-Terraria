@@ -33,6 +33,10 @@ const FILES = [
   'Item_36', 'Item_41',
   // 邪教徒仪式圈 490（Projectile.cs:31221 SoundID.Item123）
   'Item_123',
+  // 1458 音频对账(2026-08-25):Item_8/Item_43 是官方 1458 唯二 PCM 变更的音效
+  // (Steam 安装 08-20 更新的 13 个 xnb 里仅这两处内容差,recon-sound-1458 抓到);
+  // Liquid_0/1 = SoundID 34/35 瀑布/岩浆跟踪循环(LegacySoundPlayer.cs:225)
+  'Item_8', 'Item_43', 'Liquid_0', 'Liquid_1',
   // 塔灭碎裂双音之一（NPC.cs:41118-41121 SoundID 22 = Unlock；另一为 NPC_Killed_1 已在库）
   'Unlock',
   // 蜂后专属吼（NPC.cs:30488 PlaySound(29,…,125)——"Zombie"族实为逐 NPC 语音槽位）

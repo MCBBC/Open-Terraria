@@ -486,10 +486,13 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   if (!gs.seedFlags.notTheBees) {
     const lavaTries = w * 0.02;                    // num31(裸 double 比较,不取整)
     for (let j = 0; j < lavaTries; j++) {
+      segProbe('lavaJ', j);
       for (let k = 0; k < 10150; k++) {
         const x = rng.int(200, w - 201);
         const y = rng.int(gs.lavaLine - 100, h - 211);   // Next(lavaLine-100, h-210)
-        if (placeLavaTrap(st, gs, x, y, rng)) { segProbe('lavaOk', [x, y]); break; }
+        const __r = placeLavaTrap(st, gs, x, y, rng);
+        segProbe('tAtt', [x, y, __r ? 1 : 0]);
+        if (__r) { segProbe('lavaOk', [x, y]); break; }
       }
     }
   }
@@ -1094,6 +1097,7 @@ function placeMahoganyTree(
     const num4 = c(ICE_T) + c(FROZEN_T) + c(FLOWER_T) + c(FLOWER2_T);
     if (c(SNOW_T) + num4 > num3 || num2 > num3 || num3 < 50) return false;
   }
+  segProbe('mGates');
   // ⑤ 摆幅三掷(cs:46-52)
   const num5 = Math.trunc((ry - r2y - 9) / 5);
   const num6 = num5 * 5;
@@ -1101,6 +1105,7 @@ function placeMahoganyTree(
   const num8 = rng.next() + 1.0;
   let num9 = rng.next() + 2.0;
   if (rng.nextInt(2) === 0) num9 = -num9;
+  segProbe('mSwing');
   // 干身段动作链(纯写入,零掷骰):
   //   A: SkipTiles→SkipWalls(87)→RemoveWall→SetTile(383)→SetFrames
   //   B/C: SkipTiles→SkipWalls(87)→ClearTile(frameNeighbors)→PlaceWall(78)
@@ -1145,6 +1150,7 @@ function placeMahoganyTree(
     genRect(rx + num7 + 2, ry - i * 5, 2, 2, shaftCell);
     num7 = num10;
   }
+  segProbe('mShaft');
   // ⑦⑧ 树冠分枝(ShapeBranch ×4,cs:70-81)+叶球(cs:82-87)
   const endpoints: Array<[number, number]> = [];
   const branchCell = (x: number, y: number): void => {
@@ -1200,17 +1206,24 @@ function placeMahoganyTree(
     const num14 = num12 + Math.trunc(Math.sin(num5 * num13 / 12 * num8 * PI_F) * num9);
     let num15 = rng.next() * 0.7853981852531433 - 0.7853981852531433 - 0.2;
     if (num12 === 0) num15 -= 1.5707963705062866;
+    segProbe(`mB${j}pre`);
     shapeBranch(num15, rng.int(12, 15), rx + num14, ry - Math.trunc(num5 * 5 * num13));
+    segProbe(`mB${j}post`);
     num12 = 6 - num12;
   }
   const num16 = Math.trunc(Math.sin(num5 / 12 * num8 * PI_F) * num9);
+  segProbe('mTop1pre');
   shapeBranch(-0.6853981852531433, rng.int(16, 21), rx + 6 + num16, ry - num6);
+  segProbe('mTop1post');
+  segProbe('mTop2pre');
   shapeBranch(-2.45619455575943, rng.int(16, 21), rx + num16, ry - num6);
+  segProbe('mTop2post');
   // 叶球:每个 endpoint 的 Circle(4)+Blotches(4,2)+SkipTiles(383,21,467,226,237)+
   //        SkipWalls(78,87)+SetTile(384)(cs:82-87)。endpoints 在迭代中追加——
   //        C# List foreach 对增长集合抛异常?否:此处 list 只被叶球循环前填满,
   //        叶球循环本身不追加(Blotches/Circle 不 OutputEndpoints)——快照安全。
   const LEAF_SKIP = idsByVanillaSheet(383, 21, 467, 226, 237);
+  segProbe('mLeafPre');
   for (const [cx, cy] of endpoints) {
     const r = 4, rr = (r + 1) * (r + 1);
     for (let dy = -r; dy <= r; dy++) {
@@ -1256,6 +1269,7 @@ function placeMahoganyTree(
     st.type[i] = LIVING_MAHOGANY; st.flags[i] = 1;
     genFrameNeighbors(st, rng, x, y, 'setTile');   // SetTile(383,setSelfFrames)+setNeighborFrames 默认真（cs:88，UUUU 补掷）
   };
+  segProbe('mLeafPost');
   for (let k = 0; k < 4; k++) {
     const angle0 = k / 3 * 2 + 0.57075;
     const distance = rng.int(40, 59);   // Next(40, 60)
@@ -1278,11 +1292,15 @@ function placeMahoganyTree(
       }
     }
   }
+  segProbe('mRoots');
   // ⑩ 常春藤箱(cs:93):AddBuriedChest(x+3, y-1, GetNextJungleChestItem(), false, 10, false, 0)
+  segProbe('mChestPre');
   placeBuriedChest(st, rng, gs, sink, rx + 3, ry - 1,
     { style: 10, loot: nextJungleItem(gs, rng), trySlope: false, notNearOtherChests: false, flags: { ivy: true } });
+  segProbe('mChestPost');
   // ⑪ structures.AddProtectedStructure(Rectangle(result.X-30, result.Y-30, 60, 60))(cs:94)
   addProtectedStructure(gs, { x0: rx - 30, y0: ry - 30, x1: rx + 30, y1: ry + 30 }, 0);
+  segProbe('mOk');
   return true;
 }
 

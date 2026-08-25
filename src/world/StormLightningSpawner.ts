@@ -53,7 +53,9 @@ function isSafeFromRain(game: GameHooks, startX: number, startY: number): boolea
     const cx = px + dx * 8 * i, cy = py + dy * 8 * i;
     for (const [ox, oy] of [[-2, 0], [2, 0], [0, -2], [0, 2]] as const) {
       const tx = Math.floor((cx + ox) / 16), ty = Math.floor((cy + oy) / 16);
-      if (tx < 0 || ty < 0 || tx >= st.w || ty >= st.h) return true;   // 出界=出地表=安全
+      // 界外格=空（原版 PlotTileLine 对界外按无 tile 继续,走出世界顶=全程无遮蔽
+      // =不安全照劈——曾 return true 反转=高空永不落雷）
+      if (tx < 0 || ty < 0 || tx >= st.w || ty >= st.h) continue;
       if (st.isSolid(tx, ty)) return true;
     }
   }

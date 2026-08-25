@@ -242,8 +242,13 @@ void main() {
     const n = w * h;
     if (!this.waveBytes || this.waveBytes.length !== n) this.waveBytes = new Uint8Array(n);
     const bytes = this.waveBytes;
+    // ?wamp=N 波形偏差增益（默认 2=2026-08-25 用户校准"刚刚好"：1×入水扰动 ~1-2px
+    // 被 ±3px 环境噪声底噪淹没=用户报"跳入水无扰动"；5× 过强。只放大缓冲偏差
+    // （涟漪/洗掠/传播波=扰动响应），不动 shader 噪声底噪。URL 参数可覆盖
+    // （?wamp=1=原版 1:1，诊断用））
+    const amp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 2; } catch { return 2; } })();
     for (let i = 0; i < n; i++) {
-      const v = waveR[i] * 255 + 0.5;
+      const v = ((waveR[i] - 0.5) * amp + 0.5) * 255 + 0.5;
       bytes[i] = v < 0 ? 0 : v > 255 ? 255 : v;
     }
     gl.activeTexture(gl.TEXTURE2);

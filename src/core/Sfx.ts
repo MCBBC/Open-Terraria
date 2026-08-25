@@ -871,9 +871,10 @@ export class Sfx {
     return p;
   }
 
-  /** 循环轨底层（任意 wav 文件 + 外部基础音量）；缓冲未就位时句柄先行返回，
-   *  解码完成后自动起振——调用方无需重试 */
-  private startLoopFile(file: string, vol: number, base: number): SfxLoop | null {
+  /** 循环轨底层（任意 wav 文件 + 外部基础音量 + 可选 XNA Pitch）；缓冲未就位时句柄先行返回，
+   *  解码完成后自动起振——调用方无需重试。pitch 语义与 startBuffer 同款
+   *  （SoundEffectInstance.Pitch -1..1，频率倍率 2^pitch；显式直传跳过 PITCH_CASE） */
+  private startLoopFile(file: string, vol: number, base: number, pitch?: number): SfxLoop | null {
     const ctx = this.ensure();
     if (!ctx) return null;
     const gain = ctx.createGain();
@@ -883,6 +884,7 @@ export class Sfx {
       src: null as AudioBufferSourceNode | null,
       vol: Math.max(0, Math.min(1, vol)),
       base,
+      rate: pitchRateFor(file, pitch),
       started: false,
       stopped: false,
       failed: false,
@@ -913,6 +915,7 @@ export class Sfx {
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.loop = true;
+      if (st.rate !== 1) src.playbackRate.value = st.rate;
       src.connect(gain);
       src.start();
       st.src = src;
@@ -933,9 +936,9 @@ export class Sfx {
     return this.startLoopFile(list[0], vol, LOOP_BASE_VOL[name]);
   }
 
-  /** 按文件名播放循环（沙暴等未来素材接入的备用口） */
-  playLoopFile(file: string, vol = 0.3, base = 1): SfxLoop | null {
-    return this.startLoopFile(file, vol, base);
+  /** 按文件名播放循环（瀑布/岩浆跟踪循环等；pitch = XNA Pitch，case34 瀑布 −0.2） */
+  playLoopFile(file: string, vol = 0.3, base = 1, pitch?: number): SfxLoop | null {
+    return this.startLoopFile(file, vol, base, pitch);
   }
 
   /** 缓冲起振（playWavFile 即时路径与 deferPlay 补播共用的出声单点）：

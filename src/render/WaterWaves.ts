@@ -422,9 +422,13 @@ class WaterWaveSystem {
     // texel 坐标（noiseAt 吃 texel；×贴图边长 256）
     const gx = noiseAt(0, u * 0.1 * _noiseW, d1v * _noiseH) - noiseAt(0, u * 0.2 * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
     const gy = noiseAt(1, u * 0.1 * _noiseW, d1v * _noiseH) - noiseAt(1, u * 0.2 * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
-    // 涟漪高度项：h' = bufR − 0.5（(1−0.4·bufB)=1，1456 bufB=0），钳 ±0.3 取负入 DISPY
+    // 涟漪高度项：h' = bufR − 0.5（(1−0.4·bufB)=1，1456 bufB=0），钳 ±0.3 取负入 DISPY。
+    // ★waveAmp：波形偏差增益（?wamp=N；与 GLWaterDistortion.uploadWave 同旋钮同值——
+    //   2D bob 路径与 GL 全屏路径表现一致。只放大缓冲偏差=扰动响应，不动噪声底噪）
     const h = this._readR(px, py);
-    const hClamp = Math.min(0.3, Math.max(-0.3, h - 0.5));
+    //   默认 2=2026-08-25 用户校准"刚刚好"（1×入水扰动 ~1-2px 被环境噪声淹没）
+    const waveAmp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 2; } catch { return 2; } })();
+    const hClamp = Math.min(0.3, Math.max(-0.3, (h - 0.5) * waveAmp));
     const I = this.intensity;
     const dispx = gx * 0.1 * I;
     const dispy = gy * 0.1 * I - hClamp;

@@ -291,8 +291,12 @@ describe('StormLightning(AI_203_StormLightning)', () => {
     const a = new StormLightning(1117, 800, 800, 120, 10);
     for (let i = 0; i < 30; i++) a.fixedUpdate(1 / 60, g);
     expect(a.dead).toBe(false);                                  // Kill 帧 → 视觉期
+    // ★闪电之击专项：1117 bolt 视觉余命=45（Spawn_StormLightning num=45,
+    //   ParticleOrchestrator.cs:1031——协作会话定值;旧断言 16f 系 ArcSurge 档）
     for (let i = 0; i < 16; i++) a.fixedUpdate(1 / 60, g);
-    expect(a.dead).toBe(true);                                   // 视觉余命耗尽
+    expect(a.dead).toBe(false);                                  // 45t 余命未耗尽
+    for (let i = 0; i < 35; i++) a.fixedUpdate(1 / 60, g);
+    expect(a.dead).toBe(true);                                   // 余命耗尽
     const b = new StormLightning(1122, 800, 800, 180, 4);
     b.fixedUpdate(1 / 60, g);                                    // 首拍即 Kill 落雷(:10447)
     expect(b.dead).toBe(false);                                  // → bolt 视觉期

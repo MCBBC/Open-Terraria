@@ -4967,8 +4967,11 @@ export class Game implements GameHooks {
 
     // ---- 玩家输入 ----
     const inp = this.input;
-    // 点击右上角小地图 → 开关全屏地图
-    if (inp.mouseDown && !this._mapClickLatch) {
+    // 点击右上角小地图 → 开关全屏地图。★必须用按下边沿（mouseDown&&!_prevMouseDown）：
+    // 原版所有 UI 点击走 mouseLeft&&mouseLeftRelease（Main.cs:52706 帧末按电平回写，
+    // 按住第二帧起恒 false）——连发枪按住开火时准星扫进小地图矩形不得开图
+    // （mouseDown 在按住期间是持续电平；2026-08-25 用户实报）
+    if (inp.mouseDown && !this._prevMouseDown && !this._mapClickLatch) {
       const r = this.renderer.minimapRect;
       const fm = this.renderer.fullMap;
       const inMap = inp.mouseX >= r.x && inp.mouseX <= r.x + r.w && inp.mouseY >= r.y && inp.mouseY <= r.y + r.h;
@@ -5062,8 +5065,9 @@ export class Game implements GameHooks {
     } else {
       this._mapClickLatch2 = false;
     }
-    // ---- 标注模式：点击标记方块（优先于挖掘/放置/使用） ----
-    if (this.annotateMode && inp.mouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open && !this.renderer.timeUiHover && !this.renderer.weatherUiHover) {
+    // ---- 标注模式：点击标记方块（优先于挖掘/放置/使用；同款按下边沿门——
+    //      annotateMode 下 updateUse 不消费点击，电平按住扫过新格会误标） ----
+    if (this.annotateMode && inp.mouseDown && !this._prevMouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open && !this.renderer.timeUiHover && !this.renderer.weatherUiHover) {
       this._annoLatch = true;
       const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
       if (this.fixTexMode) {
@@ -8568,6 +8572,30 @@ export class Game implements GameHooks {
         return;
       }
     }
+    // 宠物物品使用=召唤/收回切换（669 鱼/753 海草；★P3-B 勘误：红队 r35 §E-10/11
+    // "玩具弧线"定性有误——原版 case 669（Item.cs:9202-9213 buffType=41）/753 是宠物
+    // 召唤件，proj112/127 走 AI_026 宠物态机（Projectile.cs:59086，112 num=100 /
+    // 127 num=50 + penguin/turtle 维持门 timeLeft=2），不是投掷物。本仓宠物管线=
+    // miscEquips[0]+PetFollower 管理器（updatePetSlot :24661），故 use 语义落成
+    // "装备/卸下宠物槽"——召唤/收回的用户可见行为与原版 TogglePet 一致；
+    // 表驱动泛化到其余 60 只 vanilla 宠物另批登记）
+    {
+      const ptVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+      if ((ptVid === 669 || ptVid === 753) && this.player.useTime === 0) {
+        const held = this.player.inv.heldItem();
+        const eq = this.player.inv.miscEquips;
+        if (held && eq[0] && eq[0].id === held.id) {
+          eq[0] = null;                               // 已在场 → 收回（TogglePet hideMisc 翻转）
+        } else if (held) {
+          eq[0] = { id: held.id, stack: 1 };          // 召唤（管理器按 projId 换款重生）
+          this.petHidden = false;
+        }
+        this.playUseSound(ptVid, 'tink');             // UseSound Item_2（:9208，表值命中不走 fallback）
+        this.player.useTime = 20;                     // useTime=useAnimation=20（:9209-9210）
+        this.input.mouseDown = false;
+        return;
+      }
+    }
     // 放飞鸽子 4682（ItemCheck_Shoot :48865-48873）+ 秘蛇 4262（:48276-48300）：
     // 两件 consumable/decor 新奇品此前 dispatch 链 return null=使用零效果（R35 清单⑦⑧）
     {
@@ -10817,6 +10845,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.input.mouseDown = false;
           return;
         }
+        // ---- 烟雾弹 1168 → proj196（aiStyle14 弹跳物理族，SetDefaults :2825-2831
+        //      16×16/penetrate−1/scale0.8；AI_014 尾 :25380 区段重力 0.2/update+
+        //      撞块反弹；逐 tick 1-2×d31 烟尘在 Arrow.smokeTrail196）。非 ai2 抛物
+        //      刀族物理——此前走通用投掷=无弹跳无烟尾（red-team-r35 §E-12 P3）----
+        if (tc.shoot === 196) {
+          const smk = new Arrow(px, py,
+            Math.cos(ang) * (c?.shootSpeed ?? 6), Math.sin(ang) * (c?.shootSpeed ?? 6),
+            dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), 196,
+            null, { grav: 0.2, life: 600, pierce: -1, bounce: true });
+          smk.critBonus = this.player.critChance('ranged') + (psT?.crt ?? 0);
+          this.entities.add(smk, 'projectiles');
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.player.useTime = c?.useTime ?? 15;
+          this.useSwing(heldDef);
+          this.playUseSound(vid, 'throw');            // UseSound Item_1（表值）
+          this.cb.onInventoryChanged();
+          this.input.mouseDown = false;
+          return;
+        }
         // ---- 圣水 422/邪水 423/血水 3477 → 弹体 69/70/621（aiStyle 2 专属物理
         //      :21853-21859,ai0≥10 后 0.25 重力）+ Kill 尘爆/音效13/Convert(·,4)
         //      （:75610-75625）——此前按通用投掷 Arrow 打（0.4 重力档/无转换）----
@@ -11376,7 +11423,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (st.inBounds(x + i, y + j) && st.isSolid(x + i, y + j)) return false;
         }
       }
-      const m = new MinionProj(x * TILE + 8 - 17, y * TILE - 32 - 17, projId, 0, 0,
+      const m = new MinionProj(x * TILE + 8, y * TILE - 32, projId, 0, 0,
         false, 0, false, () => (this.player.dead ? null : this.player));
       m.noSlot = true;
       m.vy = 15;
@@ -13187,20 +13234,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 瀑布/岩浆环境循环音消费（Main.Ambience :13636-13680）：绘制期累积的强度→
-   *  循环轨音量（strength 多格累加,×0.12 压档;归零→拆轨=原版 style0 停止音语义） */
+   *  循环轨音量。★2026-08-25 音频对账改 1:1：素材换原版 Liquid_0/Liquid_1
+   *  （LegacySoundPlayer.cs:225 Sounds/Liquid_N；此前误判"原版循环音未进提取集"
+   *  而程序化合成 Waterfall_0/Lava_0——两文件已删），音量/音高按 case 34/35 终值：
+   *  vol = min(1,strength/50)(:1253-1255) × 0.2(瀑布,:1260)/0.65(岩浆,:1292)
+   *  × (1−shimmerAlpha)（:1261/:1293）；pitch 瀑布 −0.2（:1273）/岩浆 0（:1305）。
+   *  屏距衰减已烘焙进 strength（WaterfallRenderer falloff 累积,原版由 PlaySound
+   *  x,y 距离衰减承担）——归零拆轨 = 原版 style0 停止语义（:13658/:13681）。 */
   private updateWaterfallAmbience(): void {
     const amb = this.renderer.waterfalls.ambienceState();
-    const manage = (cur: import('./Sfx').SfxLoop | null, st: { strength: number }, file: string): import('./Sfx').SfxLoop | null => {
-      const vol = Math.max(0, Math.min(1, st.strength * 0.25));   // 0.25:单格帘 0.25 可闻（曾 0.12×base0.5=0.06 近不可闻）
+    const shimmer = this.renderer?.monoFilters?.shimmerAlpha ?? 0;
+    const manage = (cur: import('./Sfx').SfxLoop | null, st: { strength: number }, file: string,
+                    baseVol: number, pitch: number): import('./Sfx').SfxLoop | null => {
+      const vol = Math.min(1, st.strength / 50) * baseVol * (1 - shimmer);
       if (st.strength > 0 && vol > 0.01) {
         if (cur && !cur.dead) { cur.setVolume(vol); return cur; }
-        return this.startLoopSfx(file, vol, 0.7);
+        return this.startLoopSfx(file, vol, 1, pitch);
       }
       cur?.stop();
       return null;
     };
-    this.wfAmbLoops.wf = manage(this.wfAmbLoops.wf, amb.wf, 'Waterfall_0.wav');
-    this.wfAmbLoops.lava = manage(this.wfAmbLoops.lava, amb.lava, 'Lava_0.wav');
+    this.wfAmbLoops.wf = manage(this.wfAmbLoops.wf, amb.wf, 'Liquid_0.wav', 0.2, -0.2);
+    this.wfAmbLoops.lava = manage(this.wfAmbLoops.lava, amb.lava, 'Liquid_1.wav', 0.65, 0);
   }
 
   /** 钻头坐骑（mount 8）每 tick 能力驱动（Mount.cs UseDrill/UseAbility/AimAbility +
@@ -25624,9 +25679,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 常驻循环轨按 wav 文件（GameHooks.startLoopSfx——吸血鬼炽灼音环
-   *  SoundID.VampireSizzle，Player.cs:28107-28121；SfxLoop setVolume 每帧跟随） */
-  startLoopSfx(file: string, vol: number, base = 1) {
-    return this.sfx.playLoopFile(file, vol, base);
+   *  SoundID.VampireSizzle，Player.cs:28107-28121；瀑布/岩浆跟踪循环 Main.cs:13653/13676；
+   *  SfxLoop setVolume 每帧跟随。pitch = XNA Pitch（case34 瀑布 −0.2，LegacySoundPlayer.cs:1272） */
+  startLoopSfx(file: string, vol: number, base = 1, pitch?: number) {
+    return this.sfx.playLoopFile(file, vol, base, pitch);
   }
 
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number) {

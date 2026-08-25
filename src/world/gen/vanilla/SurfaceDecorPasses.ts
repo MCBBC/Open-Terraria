@@ -1174,6 +1174,33 @@ function placeChilletEggs(st: TileStore, rng: RNG, gs: GenState): void {
 /** chillet 蛋地面门 = glow tulip 同款（cs:45734 与 73148 逐字一致） */
 const chilletGround = glowTulipGround;
 
+/** Main.tileTable（Main.cs:6828-6903 单赋值 77 条 + cs:9900 循环 435..439，共 82 id）。
+ *  ★#84 ntb 定罪（2026-08-25）：Place2x2（cs:51352）default 地面门 =
+ *  `nactive() && (SolidTile2(tile) || Main.tileTable[tile.type])`——桌面/平台族
+ *  （19 平台 tileTable=true 非 solid！）可作蛋的地面。旧移植只查 SolidTile2
+ *  ⇒ vanilla 在平台面放成的第 n 座蛋（ntb SEED=1372357239 锚(2945,775)、
+ *  左列地面 (2944,776)=19 平台）JS 拒收继续掷 → 蛋错位族 T0>752×4/T752>0×4。 */
+const PLACE2X2_TABLE = new Set([
+  14, 18, 19, 87, 88, 101, 114,
+  275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339,
+  358, 359, 361, 362, 363, 364, 376, 380,
+  391, 392, 393, 394, 405, 413, 414, 427,
+  435, 436, 437, 438, 439, 469,
+  532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559,
+  582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612,
+  619, 629, 632, 640, 643, 644, 645, 710,
+]);
+
+/** Place2x2 default 列地面门（cs:51513-51521）：nactive() && (SolidTile2 || tileTable)。
+ *  inActive 生成期恒 0 不查；越界 GetTileSafely→空 tile→!nactive→false */
+function place2x2GroundOk(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  return solidTile2(st, x, y) || PLACE2X2_TABLE.has(SHEET[st.type[i]] ?? -1);
+}
+
 function tryPlaceChilletEgg(st: TileStore, rng: RNG, i: number, j: number): boolean {
   const w = st.w, h = st.h;
   for (let k = 0; k < 5; k++) {
@@ -1193,7 +1220,8 @@ function tryPlaceChilletEgg(st: TileStore, rng: RNG, i: number, j: number): bool
     }
     if (near) continue;
     // PlaceTile(x, y, 752)（cs:45720 调用）：头段 cs:59370-59507（752 不在液体拒置
-    // 表）→ case 752 → Place2x2（cs:51352）：2×2 净空 + 双列地面 SolidTile2
+    // 表）→ case 752 → Place2x2（cs:51352）：2×2 净空 + 双列地面
+    // nactive&&(SolidTile2||tileTable)（★#84：tileTable 豁免不可缺）
     // → 尾奏 cs:60283 目标格活性即 SquareTileFrame
     if (x < 5 || x > w - 5 || y < 5 || y > h - 5) continue;
     const k0 = st.idx(x, y);
@@ -1203,7 +1231,7 @@ function tryPlaceChilletEgg(st: TileStore, rng: RNG, i: number, j: number): bool
       for (let b = y - 1; b <= y && ok; b++) {
         if (activeAt(st, a, b)) ok = false;
       }
-      if (!solidTile2(st, a, y + 1)) ok = false;
+      if (!place2x2GroundOk(st, a, y + 1)) ok = false;
     }
     if (!ok) {
       if (st.flags[k0] & 1) genSquareTileFrame(st, rng, x, y);          // 尾奏（未放置但目标活性）

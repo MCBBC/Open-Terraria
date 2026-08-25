@@ -394,7 +394,10 @@ function marblePileWithStatues(st: TileStore, rng: RNG, X: number, Y: number, wo
         row--;
       }
     }
-    vx += dvx;                                              // cs:10516
+    vx += dvx; vy += dvy;                                   // cs:10515-10516 val += val2 双分量推进——
+                                                            //  ★QQQC（2026-08-25）曾漏 vy 分量：堆心 Y 恒钉
+                                                            //  num-1 不下沉 → 堆底缘整圈缺（首堆 21 格）、雕像相
+                                                            //  (int)val.Y 读点错、后续尝试 x-pick 流错位级联全段
     dvx += rng.next() * 0.2 - 0.1;                          // cs:10517
     dvy += (0.1 + rng.next() * 0.1) * 0.8;                  // cs:10518
     // cs:10519-10520 Utils.Clamp 裸语句（返回值丢弃）= no-op——shellPile 同款原版笔误

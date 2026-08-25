@@ -701,12 +701,17 @@ function kfSheetAt(st: TileStore, x: number, y: number): number {
   const i = st.idx(x, y);
   return st.flags[i] ? (TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1) : -1;
 }
+/** KillTile 尾 SquareTileFrame 级联出口（frameKillSweep 扫描期挂载，域外恒 null 零开销）：
+ *  每个被杀格一条——扫描器据此对其九宫发【自帧 Check】任务（vanilla KillTile 尾
+ *  SquareTileFrame(i,j) 对被杀格自身九宫逐格 TileFrame 的精确镜像）。 */
+let kfCascadeSink: number[] | null = null;
 function kfKillCell(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   // KillTile（cs:63964-63966）：type=0 + 失活 + 尾 SquareTileFrame——stale type
   // 下游可读（CanGeneratePressurePlateAt 按型拒等），故清 type（setTileSilent(0)）
   const i = st.idx(x, y);
   st.setTileSilent(x, y, 0);
+  kfCascadeSink?.push(i);
 }
 
 // ---------- JJJJ 批：门（CheckDoorClosed cs:87176）与 485 蚁狮（CheckSuper cs:48117
@@ -856,41 +861,54 @@ function killSnap(st: TileStore, rooms: Rect[]): KillSnap {
   return { x0, y0, x1, y1, f, t };
 }
 
-/** 帧杀扫描：snap→现在 的变更格九宫内家族物件 → Check* 击杀（级联至稳定） */
+/** 帧杀扫描：snap→现在 的变更格九宫内家族物件 → Check* 击杀（级联至稳定）。
+ *  ★m59 修（2026-08-25）：任务两态统一为「单格自帧 Check」——probe=阶段变更格，
+ *  对其九宫各发一条 check；check=对单格跑 kfCheckObject（=vanilla TileFrame 分派
+ *  该格自身 Check*）。KillTile 尾 SquareTileFrame(被杀格) 精确镜像为「被杀格九宫
+ *  各发一条 check」（kfCascadeSink 收每杀格）。旧实现把级联格当新中心再探其邻域
+ *  → 每经一杀探及半径外扩一格：支撑梁杀滚地仙人掌后经 (3707,70x) 中转隔空探到
+ *  (3706,*)，187 骨堆被误杀——vanilla 帧 (3707,70x)=非活性/蛛网零效果即止，骨堆
+ *  根本不会被帧（m 链 #59 (3704..3706,705..706) T187>0×6 首差实证）。 */
 function frameKillSweep(st: TileStore, rng: RNG, rooms: Rect[], snap: KillSnap): void {
   const w = snap.x1 - snap.x0 + 1;
-  const queue: number[] = [];
+  const ents: Array<{ i: number; probe: boolean }> = [];
   for (let y = snap.y0; y <= snap.y1; y++) {
     for (let x = snap.x0; x <= snap.x1; x++) {
       const q = (y - snap.y0) * w + (x - snap.x0);
       const i = st.idx(x, y);
-      if (snap.f[q] !== st.flags[i]! || snap.t[q] !== st.type[i]!) queue.push(i);
+      if (snap.f[q] !== st.flags[i]! || snap.t[q] !== st.type[i]!) ents.push({ i, probe: true });
     }
   }
   const checked = new Set<number>();
-  let guard = 0;
-  while (queue.length && guard++ < 20000) {
-    const i = queue.shift()!;
-    const x = i % st.w, y = Math.floor(i / st.w);
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const nx = x + dx, ny = y + dy;
-        if (!st.inBounds(nx, ny)) continue;
-        const ni = st.idx(nx, ny);
-        if (!st.flags[ni] || checked.has(ni)) continue;
-        const before = st.flags[ni]!;
-        kfCheckObject(st, rng, ni, checked, queue);
-        if (!st.flags[ni]!) {
-          // 击杀 → 九宫再入队（KillTile 尾 SquareTileFrame 级联）
-          for (let ddy = -1; ddy <= 1; ddy++) {
-            for (let ddx = -1; ddx <= 1; ddx++) {
-              const cx = nx + ddx, cy = ny + ddy;
-              if (st.inBounds(cx, cy)) queue.push(st.idx(cx, cy));
-            }
-          }
-        }
+  const killSink: number[] = [];   // 助手 queue 形参出口（门/Check3x3/Super 杀格）
+  const squareChecks = (ni: number): void => {
+    const nx0 = ni % st.w, ny0 = Math.floor(ni / st.w);
+    for (let ddy = -1; ddy <= 1; ddy++) {
+      for (let ddx = -1; ddx <= 1; ddx++) {
+        const cx = nx0 + ddx, cy = ny0 + ddy;
+        if (st.inBounds(cx, cy)) ents.push({ i: st.idx(cx, cy), probe: false });
       }
     }
+  };
+  let guard = 0;
+  kfCascadeSink = killSink;
+  try {
+    while (ents.length && guard++ < 20000) {
+      const e = ents.shift()!;
+      if (e.probe) {
+        // 变更格 → SquareTileFrame 式九宫自帧（含自格；非活性/已查格在 check 态早退）
+        squareChecks(e.i);
+        continue;
+      }
+      // check：单格自身 Check* 分派（TileFrame 语义；非活性零效果即止）
+      if (!st.flags[e.i] || checked.has(e.i)) continue;
+      kfCheckObject(st, rng, e.i, checked, killSink);
+      // 本格若被杀 → 其 KillTile 尾九宫（kfCascadeSink 已收全部被杀格）
+      if (!st.flags[e.i]!) squareChecks(e.i);
+      for (const k of killSink.splice(0)) squareChecks(k);
+    }
+  } finally {
+    kfCascadeSink = null;
   }
 }
 

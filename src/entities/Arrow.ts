@@ -3,6 +3,7 @@
 // 原版贴图 Projectile_N.png；命中敌人伤害/击退/暴击（穿透>1 时同敌免疫防连击）；
 // 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
+import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
@@ -950,6 +951,8 @@ export class Arrow extends Entity {
   /** 宝石弹 oldPos 环（扁平 [x0,y0,x1,y1,…]，[0]=本 tick 出生位、[2i/2i+1]=i tick 前
    *  ——Projectile.cs:15452-15466 FastThenSlow 拖尾扫掠 oldPos[1..5] 消费） */
   private gemTrail: number[] = [];
+  /** ★shader 审计战役：34/16/106 拖尾点环（x,y 对，旧→新）——drawStripTrail 消费 */
+  private stripTrailPts: number[] = [];
   /** oldPos 拖尾环（彩虹拖尾 Main.cs:32495-32513 沿 oldPos 逐段绘制，N=10） */
   private meowTrail: number[] = [];
   /** aiStyle 24 书族 oldPos 环（94 水晶风暴/95 诅咒之焰/1114 日耀花——Main.cs:35251/
@@ -1693,6 +1696,71 @@ export class Arrow extends Entity {
           ctx.restore();
           ctx.globalAlpha = 1;
         }
+      }
+    }
+    // ★shader 审计战役：MagicMissile 族拖尾 shader 直连（Main.cs:28616-28690 分发表——
+    //   34 火鞭=FlameLashDrawer/16 魔导弹=MagicMissileDrawer/121-126+597+1120=
+    //   GemStaffShotDrawer("RainbowRod")/106 光棱剑=LightDiscDrawer）。原版走
+    //   VertexStrip+GameShaders.Misc[pass]（Extra_N LUT 采样），此前我方无拖尾渲染。
+    //   fx/TrailShader.ts 逐像素复刻 pass 公式（噪声门×边缘包络×顶点色），加算叠画
+    {
+      const nowS = performance.now() / 1000;
+      const lerpC = (a: number[], b: number[], t: number): number[] =>
+        [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+      const GEM_TRAIL_COLORS: Record<number, number[][]> = {
+        121: [[0.58, 0, 0.83], [0.5, 0, 0.5], [1, 1, 1]],          // 紫晶 Violet/Purple/White
+        122: [[1, 0.65, 0], [1, 0.65, 0], [1, 1, 1]],              // 黄晶 Orange
+        1120: [[1, 0.65, 0], [1, 0.65, 0], [1, 1, 1]],
+        123: [[60 / 255, 90 / 255, 1], [60 / 255, 90 / 255, 1], [60 / 255, 90 / 255, 1]], // 蓝晶
+        124: [[0.2, 0.8, 0.2], [0, 0.5, 0], [1, 1, 1]],            // 翡翠 LimeGreen/Green
+        597: [[1, 0.27, 0], [1, 0.55, 0], [1, 1, 1]],              // 琥珀 OrangeRed/DarkOrange
+        125: [[1, 0, 0], [1, 0, 0], [1, 1, 1]],                    // 红晶 Red
+        126: [[0.75, 0.75, 0.75], [0.75, 0.75, 0.75], [1, 1, 1]],  // 钻石 Silver
+      };
+      const buildPts = (raw: number[], hw: number, colFn: (pv: number) => number[]): TrailPt[] => {
+        const n2 = raw.length / 2;
+        const out: TrailPt[] = [];
+        for (let i = 0; i < n2; i++) {
+          const v = n2 > 1 ? i / (n2 - 1) : 1;                     // 0=尾(旧) 1=头(新)
+          const c = colFn(v);
+          out.push({ x: raw[i * 2], y: raw[i * 2 + 1], hw,
+            r: c[0], g: c[1], b: c[2],
+            a: Math.min(1, v * 1.7) });
+        }
+        return out;
+      };
+      if ((isGemBolt(this.projId) || this.projId === 1120) && this.gemTrail.length >= 4) {
+        const cols = GEM_TRAIL_COLORS[this.projId] ?? GEM_TRAIL_COLORS[121];
+        const intensity = this.projId === 123 ? 3 : 2;
+        drawStripTrail(ctx, r, {
+          set: 'RainbowRod',
+          pts: buildPts(this.gemTrail, 9, (v) => v < 0.45 ? lerpC(cols[2], cols[1], v / 0.45)
+            : lerpC(cols[1], cols[0], (v - 0.45) / 0.55)),
+          opacity: intensity * 0.5,
+          time: nowS,
+        });
+      } else if (this.stripTrailPts.length >= 4 &&
+        (this.projId === 34 || this.projId === 16 || this.projId === 106)) {
+        // 顶点色=vanilla 各 Drawer.StripColors（pv: 0=头新→1=尾旧）
+        const colFn = this.projId === 34
+          ? (pv: number) => {                                       // White→Red（FlameLashDrawer）
+            const lv = Math.max(0, Math.min(1, (pv + 0.1) / 0.8));
+            return lerpC([1, 1, 1], [1, 0, 0], lv);
+          }
+          : this.projId === 16
+            ? (pv: number) => lerpC([1, 1, 1], [0.58, 0, 0.83], Math.max(0, Math.min(1, pv / 0.7)))
+            : (pv: number) => {                                     // LightDisc：(48,63,150) 加算余辉
+              const k = Math.pow(1 - pv, 4) * 0.5;
+              return [48 / 255 * k / 0.5, 63 / 255 * k / 0.5, 150 / 255 * k / 0.5];
+            };
+        const hw = this.projId === 34 ? 18 : this.projId === 16 ? 15 : 10;
+        const op = this.projId === 106 ? 1 : 2;
+        drawStripTrail(ctx, r, {
+          set: this.projId === 34 ? 'FlameLash' : this.projId === 106 ? 'LightDisc' : 'MagicMissile',
+          pts: buildPts(this.stripTrailPts, hw, colFn),
+          opacity: op,
+          time: nowS,
+        });
       }
     }
     // ---- aiStyle 24 书族十份 oldPos 渐隐拖尾（Main.cs:35251 94/:35299 1114——
@@ -2452,6 +2520,12 @@ export class Arrow extends Entity {
     if (this.gem) {
       this.gemTrail.unshift(this.x, this.y);
       if (this.gemTrail.length > 12) this.gemTrail.length = 12;
+    }
+    // ★shader 审计战役：34 火鞭/16 魔导弹/106 光棱剑拖尾记录（原版 Main.cs:28616-28622
+    //   /28664-28666 FlameLashDrawer/MagicMissileDrawer/LightDiscDrawer 的 oldPos 环）
+    if (this.projId === 34 || this.projId === 16 || this.projId === 106) {
+      this.stripTrailPts.unshift(this.x, this.y);
+      if (this.stripTrailPts.length > 24) this.stripTrailPts.length = 24;
     }
     // 食人鱼 190 独占状态机（aiStyle 39）——重力/穿透递减/撞块消亡等通用语义不适用
     if (this.piranha) { this.piranhaStep(game); return; }
@@ -4489,6 +4563,18 @@ export class Arrow extends Entity {
         }
         // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
         if (this.bounce && this.bounceOff(game)) return;
+        // ---- 烟雾弹 196 拖尾（AI_014 type==196 支 :25200-25211）：每 tick 1-2×d31 烟
+        //      （dust 初速 0→v×0.3 归零,alpha100+rand100、vx+=Next(-10,11)×0.025、
+        //      vy-=0.4+Next(-3,14)×0.15 上飘、fadeIn=1.25+Next(20)×0.15）----
+        if (this.projId === 196 && game.spawnDust) {
+          const nSmk = 1 + (Math.random() < 0.5 ? 1 : 0);
+          for (let i = 0; i < nSmk; i++) {
+            const dvx = (Math.floor(Math.random() * 21) - 10) * 0.025;
+            const dvy = -(0.4 + (Math.floor(Math.random() * 17) - 3) * 0.15);
+            game.spawnDust(this.x, this.y, this.w, this.h, 31, dvx, dvy, 100,
+              null, 1.25 + Math.floor(Math.random() * 20) * 0.15, true);
+          }
+        }
         // 1457 宝石法珠 CanBounce（HandleMovement :18112-18150）：撞块法向反弹 ×0.8 +
         // penetrate--（归零消亡）——琥珀法珠/琥珀长袍臂。hitWall 族旗是 moveAndCollide
         // 分轴碰撞语义、本类裸位移不置位（曾据此判死=分支永假,反弹死代码）——

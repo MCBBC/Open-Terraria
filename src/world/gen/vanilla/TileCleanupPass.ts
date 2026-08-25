@@ -185,6 +185,11 @@ function canKillTile(st: TileStore, x: number, y: number): boolean {
   return true;
 }
 
+/** ★QQQB 临时诊断探针（用完即删） */
+const segProbe = (name: string, detail?: unknown): void => {
+  (globalThis as { __swSeg?: unknown }).__swSeg?.(name, detail);
+};
+
 export function runTileCleanupPass(
   st: TileStore, rng: RNG, gs: GenState,
   chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
@@ -226,44 +231,59 @@ export function runTileCleanupPass(
 
       // ④ 液体中的 SlowlyDiesInWater 方块清除(cs:21354-21357)
       if (st.flags[i] && st.liquid[i] > 0 && SLOWLY_DIES_IN_WATER.has(st.type[i])) {
+        segProbe('K', [k, l, SHEET_OF[st.type[i]]]);
         killTile(st, rng, k, l);
       }
 
       // ⑤ 滴水石笋(cs:21358-21435):空格+无液+上方实心才进
-      if (!st.flags[i] && st.liquid[i] === 0 && rng.int(0, 2) !== 0 && solidTile(st, k, l - 1)) {
-        // 上扫(cs:21360-21411):l-2 起向上 num(15-20) 格,液体>=128
-        let num = rng.int(15, 20); // Next(15,21)
-        for (let n2 = l - 2; n2 >= l - num; n2--) {
-          const up = st.idx(k, n2);
-          if (st.liquid[up] >= 128 && st.liquidType[up] !== LIQUID_TYPE.SHIMMER) {
-            const maxValue = l - n2; // 距离,最小 2
-            if (rng.int(0, maxValue - 1) <= 1) { // Next(maxValue)
-              let drip = dripFor(st.liquidType[up]);
-              if (st.wall[i] === BEE_WALL) drip = DRIP_HONEY; // cs:21404
-              st.setTileSilent(k, l, drip, 0, 0);
-              break;
-            }
-          }
-        }
-        // 下扫(cs:21413-21429):l+1 起向下 num(3-10) 格,液体>=200
-        if (!st.flags[i]) {
-          num = rng.int(3, 10); // Next(3,11)
-          for (let m = l + 1; m <= l + num; m++) {
-            const dn = st.idx(k, m);
-            if (st.liquid[dn] >= 200 && st.liquidType[dn] !== LIQUID_TYPE.SHIMMER) {
-              const dist = m - l;
-              if (rng.int(0, dist * 3 - 1) <= 1) { // Next(dist*3)
-                st.setTileSilent(k, l, dripFor(st.liquidType[dn]), 0, 0);
+      if (!st.flags[i] && st.liquid[i] === 0) {
+        const g3 = rng.int(0, 2); // Next(3)
+        segProbe('G', [k, l, g3]);
+        if (g3 !== 0 && solidTile(st, k, l - 1)) {
+          // 上扫(cs:21360-21411):l-2 起向上 num(15-20) 格,液体>=128
+          let num = rng.int(15, 20); // Next(15,21)
+          segProbe('U', [k, l, num]);
+          for (let n2 = l - 2; n2 >= l - num; n2--) {
+            const up = st.idx(k, n2);
+            if (st.liquid[up] >= 128 && st.liquidType[up] !== LIQUID_TYPE.SHIMMER) {
+              const maxValue = l - n2; // 距离,最小 2
+              const rv = rng.int(0, maxValue - 1); // Next(maxValue)
+              segProbe('UQ', [k, n2, maxValue, rv]);
+              if (rv <= 1) {
+                let drip = dripFor(st.liquidType[up]);
+                if (st.wall[i] === BEE_WALL) drip = DRIP_HONEY; // cs:21404
+                st.setTileSilent(k, l, drip, 0, 0);
                 break;
               }
             }
           }
-        }
-        // 小沙堆(cs:21431-21441):上方是沙岩/硬沙 → 1/4 概率放 461
-        if (!st.flags[i] && rng.int(0, 3) === 0) { // Next(4)
-          const above = st.idx(k, l - 1);
-          if (CONV_SANDSTONE.has(st.type[above]) || CONV_HARDENED_SAND.has(st.type[above])) {
-            st.setTileSilent(k, l, SAND_PILE, 0, 0);
+          // 下扫(cs:21413-21429):l+1 起向下 num(3-10) 格,液体>=200
+          if (!st.flags[i]) {
+            num = rng.int(3, 10); // Next(3,11)
+            segProbe('D', [k, l, num]);
+            for (let m = l + 1; m <= l + num; m++) {
+              const dn = st.idx(k, m);
+              if (st.liquid[dn] >= 200 && st.liquidType[dn] !== LIQUID_TYPE.SHIMMER) {
+                const dist = m - l;
+                const rv = rng.int(0, dist * 3 - 1); // Next(dist*3)
+                segProbe('DQ', [k, m, dist * 3, rv]);
+                if (rv <= 1) {
+                  st.setTileSilent(k, l, dripFor(st.liquidType[dn]), 0, 0);
+                  break;
+                }
+              }
+            }
+          }
+          // 小沙堆(cs:21431-21441):上方是沙岩/硬沙 → 1/4 概率放 461
+          if (!st.flags[i]) {
+            const sv = rng.int(0, 3); // Next(4)
+            segProbe('S4', [k, l, sv]);
+            if (sv === 0) {
+              const above = st.idx(k, l - 1);
+              if (CONV_SANDSTONE.has(st.type[above]) || CONV_HARDENED_SAND.has(st.type[above])) {
+                st.setTileSilent(k, l, SAND_PILE, 0, 0);
+              }
+            }
           }
         }
       }
