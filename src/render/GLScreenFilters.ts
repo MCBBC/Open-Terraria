@@ -228,10 +228,15 @@ export const SCREEN_FX_FRAGS: Readonly<Record<string, string>> = FRAGS;
 /** 噪声贴图（Images/Misc/noise → public/sprites/vanilla/Misc_noise.png，256²） */
 let noiseImage: HTMLImageElement | null = null;
 let noisePixels: { w: number; h: number; data: Uint8ClampedArray } | null = null;
+let noiseFailAt = 0;
+const NOISE_FAIL_TTL = 10_000;   // 失败负缓存 TTL(2026-08-25 同类扫描):过期重试自愈
 function loadNoise(): HTMLImageElement | null {
   if (noiseImage) return noiseImage;
+  if (noiseFailAt && Date.now() - noiseFailAt < NOISE_FAIL_TTL) return null;
   if (typeof document === 'undefined') return null;
   const im = new Image();
+  im.onerror = () => { noiseFailAt = Date.now(); };
+  im.onload = () => { noiseFailAt = 0; };
   im.src = 'sprites/vanilla/Misc_noise.png';
   noiseImage = im;
   return im;

@@ -137,6 +137,11 @@ export interface OptionsData {
   /** 设置版本号（R4-14,M57:4241 Put("LastLaunchedVersion",325)——迁移按 >= 门;
    *  本仓迁移仍字段嗅探,此键先落语义锚,后续迁移改造消费） */
   settingsVersion: number;
+  // ---- 游戏说明书按钮（Web 便利档,原版无对应物）----
+  /** 已读过说明书（点过"我知道了"）——红点气泡熄灭;false=气泡闪烁中 */
+  manualSeen: boolean;
+  /** 永久隐藏说明书（勾选"不再显示"后落真）——按钮整体不建;设置页可重开 */
+  manualHidden: boolean;
 }
 
 const KEY = 'sandboxworld.options';
@@ -184,6 +189,8 @@ export class OptionsStore {
     quickStackMode: 'quick',                // Player.Settings.StackToChestsPreferredMode（QuickStackToNearbyChests）
     panControlMode: 0,                      // Hold（PlayerInputProfile.cs:59 键盘缺省）
     settingsVersion: 325,                   // LastLaunchedVersion（M57:4241）
+    manualSeen: false,                      // 说明书未读=红点气泡闪烁
+    manualHidden: false,                    // 说明书按钮显示中
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];

@@ -258,11 +258,19 @@ export function liquidDebugState(): LiquidDebugState {
  *  预载/重烘列表,首次调用返回 null 且不触发网络加载 = 永远 null。
  *  模块级缓存跨帧持久——函数内声明会每帧重建 Map = Image 永远 width=0） */
 const _slopeTexCache = new Map<number, HTMLImageElement>();
+const _slopeTexFailAt = new Map<number, number>();
+const SLOPE_FAIL_TTL = 10_000;   // 失败负缓存 TTL(2026-08-25 同类扫描):过期重试自愈
 const getSlopeTex = (waterStyle: number): HTMLImageElement | null => {
   const ws = Math.max(0, Math.min(14, waterStyle));
+  const fail = _slopeTexFailAt.get(ws);
+  if (fail !== undefined) {
+    if (Date.now() - fail < SLOPE_FAIL_TTL) return null;
+    _slopeTexFailAt.delete(ws);
+  }
   let im = _slopeTexCache.get(ws);
   if (im === undefined) {
     im = new Image();
+    im.onerror = () => { _slopeTexCache.delete(ws); _slopeTexFailAt.set(ws, Date.now()); };
     im.src = `sprites/vanilla/LiquidSlope_${ws}.png`;
     _slopeTexCache.set(ws, im);
   }

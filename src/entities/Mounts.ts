@@ -1426,16 +1426,47 @@ export class MountInstance {
         if (vMax !== -0.001) vy = Math.min(vy, vMax);
       }
       p.vy = vy;
+      // 悬停静置防漂（:3446-3450）：三值全 -0.001（无升降输入的免疲劳静置）时
+      // position.Y -= -0.001（下移 0.001 抵消 vy=-0.001 的上漂）；随后的
+      // TryStabilizingSmallMountPositionBetweenSlopes（坡面静置贴合）由本仓
+      // slopeCollide 常规贴合承担（登记）
+      if (vMin === -0.001 && vMax === -0.001 && vy === -0.001) p.y += 0.001;
     } else if (!noFatigue) {
-      // 非悬停帧态：正常重力（:3440）
+      // 非悬停帧态：正常重力（:3437-3439）
       p.vy += DEFAULT_GRAVITY * p.gravDir;
+    } else if (p.vy === 0) {
+      // 免疲劳档贴地段（:3440-3451，UFO 7/钻头 8/猪鲨崽 12 等静置在地面时）：
+      // TileCollision(UnitY×gravDir) 探针残量≠0 = 下方悬空（或按下）→ vy=0.001
+      // 起落——下一 tick vy≠0 → frameState 切 IN_AIR → 悬停控制接管。★此分支
+      // 曾整段缺失：贴地 vy 恒 0 → 永不失稳入空中态 → 跳跃门(onGround 由落地
+      // 碰撞置位，vy=0 无 Y 位移恒不置)全灭 = 钻头地底无法升/降只能横移（用户实报）
+      if (!groundBelowProbe(p) || p.inputDown) p.vy = 0.001;
+    } else if (p.vy === -0.001) {
+      p.vy -= -0.001;   // :3452-3456 字面（-0.001 - (-0.001) = 0）
     }
     return true;
   }
 
-  /** 起跳瞬间向上的 hover 触发（Player.cs:26416：vy==0 且 CanHover 且按上且松键边沿） */
+  /** Hover 贴地探针（:3443-3448 Collision.TileCollision(position, UnitY*gravDir, …)
+   *  的本仓等价）：脚底下一行（gravDir=1）任一列实心 = 下方有地面（残量=0）。
+   *  原版 fallThrough:false 平台亦拦——isSolid 含平台档（TileStore.isSolid 语义） */
+  function groundBelowProbe(p: MountedPlayerView): boolean {
+    const st = p.store;
+    if (!st) return true;   // 无世界缓存（探针合成视图）按有地面=不起落
+    const ty = Math.floor((p.y + p.h + 1) / 16);
+    const x0 = Math.floor(p.x / 16), x1 = Math.floor((p.x + p.w - 0.01) / 16);
+    for (let tx = x0; tx <= x1; tx++) {
+      if (st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty)) return true;
+    }
+    return false;
+  }
+
+  /** 起跳瞬间向上的 hover 触发（Player.cs:26939：vy==0 且 CanHover 且 controlUp
+   *  且 releaseUp 边沿）。★边沿用 jumpEdgePrev（tick 尾快照）——prevInputJump 在
+   *  Player.fixedUpdate 头部快照（Player.ts fixedUpdate 首行）且 Game 输入写入在前,
+   *  同 tick 恒等 → `!prevInputJump` 恒假 = 本触发曾是死代码（W 起飞无响应） */
   tryStartHover(p: MountedPlayerView): void {
-    if (p.vy === 0 && this.canHover(p) && p.inputUp && !p.prevInputJump) {
+    if (p.vy === 0 && this.canHover(p) && p.inputUp && !p.jumpEdgePrev) {
       p.vy = -(this.acceleration + DEFAULT_GRAVITY + 0.001);
     }
   }

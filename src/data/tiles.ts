@@ -439,7 +439,7 @@ def({ key: 'v_3_forest_short_plants', name: '', decor: true, framed: true, opaci
 // frameX=((r||1)<<8)|(g||1) / frameY=(b||1)(||1 防 0,0 触发 style 路径锚点重建扫描)。
 // 渲染端 drawVanillaCell 顶部独占分支直画纯色+斜面,不取任何素材表。
 // 可破坏(走镐挖路径)/进存档(type+frames 既有持久化,零格式改动)/联机走 setTile 上报。
-def({ key: 'pixel_block', name: '像素方块', solid: true, framed: true, opacity: 1, pick: 0, mapColor: '#888888', drop: null, vanilla: { sheet: 0, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'pixel_block', name: '像素方块', solid: false, framed: true, opacity: 1, pick: 0, mapColor: '#888888', drop: null, vanilla: { sheet: 0, frame: 'style', fw: 1, fh: 1 } }); // solid=false 可通行（用户 2026-08-25）；自发光见 TileLightScanner pixelBlockId 分支
 def({ key: 'v_73_forest_tall_plants', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#1BC56D', drop: null, vanilla: { sheet: 73, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_61_jungle_short_plants', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#87C41A', drop: null, light: undefined /* 动态光 → specialTileLight case 61：丛林植物 frameX==144 绽放光（:2632-2640，与 703 共体） */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 61, frame: 'style', fw: 1, fh: 1 } }); // 丛林矮草（16x20 表）
 def({ key: 'v_74_jungle_tall_plants', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#60C51B', drop: null, vanilla: { sheet: 74, frame: 'style', fw: 1, fh: 2 } }); // 丛林高草（16x32 两格高）

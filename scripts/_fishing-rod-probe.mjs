@@ -27,7 +27,7 @@ await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' });
 await page.evaluate(async () => {
   const options = await import('/src/core/Options.ts');
   for (let i = 0; i < 100; i++) {
-    if (options.data) { options.data.renderMode = 'cpu'; return; }
+    if (options.options?.data) { options.options.data.renderMode = "cpu"; return; }
     await new Promise((r) => setTimeout(r, 50));
   }
 });
@@ -218,7 +218,7 @@ const out = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 500));
   R.renderAlive = g.renderer.animTick > at0;
   R.animTickDelta = g.renderer.animTick - at0;
-  R.renderMode = (await import('/src/core/Options.ts')).data.renderMode;
+  R.renderMode = (await import('/src/core/Options.ts')).options.data.renderMode;
   // 区域快照（只读小窗，降低 canvas 读回压力；CPU 渲染模式下 getImageData 稳定）
   const snapRegion = ([x0, y0, x1, y1]) => ({
     x0, y0, w: x1 - x0, h: y1 - y0,
@@ -366,7 +366,7 @@ if (out.fatal) {
   check('(e) 小范围走动浮漂不跟随', !out.anchorRetract && out.anchorDx < 1.5 && out.anchorDy < 1.5,
     `dx=${out.anchorDx.toFixed(2)} dy=${out.anchorDy.toFixed(2)} retract=${out.anchorRetract}`);
 }
-console.log(`gateActiveA=${out.gateActiveA} gateActiveB=${out.gateActiveB}`);
+console.log(`gateActiveA=${out.gateActiveA} gateActiveB=${out.gateActiveB} gpuDegraded=${out.gpuDegraded} renderAlive=${out.renderAlive}(${out.animTickDelta}) renderMode=${out.renderMode} scene=${JSON.stringify(out.scene ?? null)}`);
 if (errs.length) console.log('PAGE ERRORS:', errs.slice(0, 5));
 console.log(`\n${pass}/${pass + fail} checks passed`);
 process.exitCode = fail === 0 && !out.fatal ? 0 : 1;

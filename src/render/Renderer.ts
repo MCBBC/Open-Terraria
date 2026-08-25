@@ -11530,6 +11530,7 @@ export class Renderer {
   screenObstruction = 0;
   private obstructionLastSpeed = 0.1;   // lastSpeed（:9）
   private obstructionTex: ImageBitmap | HTMLImageElement | null = null;
+  private obstructionFailAt = 0;   // 失败负缓存 TTL(2026-08-25 同类扫描)
 
   /** Update（:12-41）+ Draw（:43-63）合并：headcovered（buff 163）→ 目标 0.95/步进
    *  0.3；解除后以 lastSpeed 回落。绘制 = 黑幕四象限围出玩家矩形孔（MagicPixel 四
@@ -11568,10 +11569,13 @@ export class Renderer {
     ctx.fillRect(0, rect.bottom, viewW, Math.max(0, viewH - rect.bottom));              // 下
     ctx.fillRect(0, 0, Math.max(0, rect.left), viewH);                                  // 左
     if (!this.obstructionTex) {
-      const im = new Image();
-      im.onload = () => upgradeToBitmap(im, (b) => { this.obstructionTex = b; });
-      im.src = 'sprites/vanilla/Extra_49.png';
-      this.obstructionTex = im;
+      if (!this.obstructionFailAt || Date.now() - this.obstructionFailAt >= 10_000) {   // 失败 TTL:过期重试自愈
+        const im = new Image();
+        im.onload = () => upgradeToBitmap(im, (b) => { this.obstructionTex = b; });
+        im.onerror = () => { this.obstructionFailAt = Date.now(); this.obstructionTex = null; };
+        im.src = 'sprites/vanilla/Extra_49.png';
+        this.obstructionTex = im;
+      }
     }
     const tex = this.obstructionTex;
     if (tex && (tex.width > 0) && tex.width > 0) {

@@ -1,6 +1,7 @@
 // DOM overlay UI：主菜单 / HUD 快捷栏 / 背包+配饰栏 / 合成 / 宝箱 / Buff栏 / 暂停 / Tooltip / Toast
 import type { Game } from '../core/Game';
 import { options } from '../core/Options';
+import { bindsOf, keybindActionLabel, keybindCodeLabel, type KeybindAction } from '../core/Keybinds';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { OPENABLE_BAG_VIDS, openBagItem } from '../data/vanillaOpenBags';
 import { TILE_DEFS } from '../data/tiles';
@@ -322,6 +323,47 @@ const CSS = `
   font-size:15px; color:#fff; text-shadow:2px 2px 0 #000; pointer-events:none;
   animation:sw-name-pulse 2s ease-in-out infinite alternate; }
 @keyframes sw-name-pulse { from { opacity:0.35; } to { opacity:1; } }
+/* ---- 说明书按钮（快捷栏右侧;槽底同 Inventory_Back20 融入栏内观感）----
+ * 未读红点感叹号气泡 = CSS 步进闪烁(显著提醒,读过后熄灭) */
+.sw-manual-btn { position:fixed; left:470px; top:25px; width:44px; height:44px; z-index:11;
+  pointer-events:auto; cursor:pointer; border:none; padding:0;
+  background:url(sprites/vanilla/Inventory_Back20.png) 0 0/52px 52px no-repeat;
+  image-rendering:pixelated; user-select:none;
+  font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif;
+  font-size:22px; font-weight:bold; color:#e8ecf8;
+  text-shadow:2px 2px 0 #000; line-height:44px; text-align:center; }
+.sw-manual-btn:hover { filter:brightness(1.25); }
+.sw-manual-badge { position:absolute; right:-7px; top:-7px; width:20px; height:20px;
+  border-radius:50%; background:#d21f2c; border:2px solid #fff;
+  color:#fff; font-size:14px; font-weight:bold; line-height:17px; text-align:center;
+  text-shadow:none; pointer-events:none;
+  animation:sw-badge-blink 0.9s steps(2, jump-none) infinite; }
+@keyframes sw-badge-blink { 0% { opacity:1; transform:scale(1.15); } 100% { opacity:0.25; transform:scale(0.85); } }
+/* 说明书面板（复用暂停面板像素底系） */
+.sw-manual-panel { pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:520px; max-width:92vw; z-index:32; box-sizing:border-box;
+  background:#2a1a63; border:2px solid #7d92d6; border-radius:6px;
+  box-shadow:0 0 0 2px rgba(10,14,30,0.8), 0 6px 28px rgba(0,0,0,0.65);
+  font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif; user-select:none; color:#e8ecf8; }
+.sw-manual-title { text-align:center; font-size:20px; letter-spacing:3px; color:#fff; padding:14px 0 6px;
+  text-shadow:2px 0 0 #000,-2px 0 0 #000,0 2px 0 #000,0 -2px 0 #000; }
+.sw-manual-body { max-height:56vh; overflow-y:auto; padding:4px 18px 8px; scrollbar-width:thin; }
+.sw-manual-sec { font-size:15px; color:#ffd76e; margin:10px 0 4px; letter-spacing:2px;
+  text-shadow:1px 1px 0 #000; border-bottom:1px solid rgba(125,146,214,0.35); padding-bottom:2px; }
+.sw-manual-row { display:flex; justify-content:space-between; align-items:center; gap:12px;
+  padding:3px 0; font-size:14px; }
+.sw-manual-row .desc { color:#cfd6ee; }
+.sw-manual-key { white-space:nowrap; font-size:12px; color:#fff; background:rgba(10,14,30,0.75);
+  border:1px solid #7d92d6; border-radius:4px; padding:2px 8px; text-shadow:1px 1px 0 #000; }
+.sw-manual-key.none { color:#8890b8; border-style:dashed; }
+.sw-manual-foot { display:flex; align-items:center; justify-content:space-between;
+  padding:10px 18px 14px; gap:10px; }
+.sw-manual-hide { display:flex; align-items:center; gap:6px; font-size:13px; color:#cfd6ee; cursor:pointer; }
+.sw-manual-hide input { width:16px; height:16px; accent-color:#7d92d6; cursor:pointer; }
+.sw-manual-ok { background:#3d2f8f; border:2px solid #7d92d6; border-radius:5px; cursor:pointer;
+  color:#fff; font-family:inherit; font-size:16px; letter-spacing:2px; padding:6px 26px;
+  text-shadow:1px 1px 0 #000; transition:background .1s; }
+.sw-manual-ok:hover { background:#5443b8; }
 /* 垃圾桶：原版槽底 = Inventory_Back7（ItemSlot.cs:2063 context 6）。
  * 空槽时画 Trash.png（ItemSlot.cs:2514-2520：32×32 居中，scale 0.85，
  *  颜色 Color(100,100,100,100) = 亮度×0.39 + alpha×0.39） */
@@ -427,6 +469,8 @@ export class UI {
   root: HTMLElement;
   game!: Game;  // 生命周期由 enterGame 置入;quitToMenu 经 detachGame() 摘引用(2026-08-13 泄露 review)
   hotbarEl!: HTMLElement;
+  /** 说明书按钮（快捷栏右侧;manualHidden=true 时不建） */
+  private manualBtn: HTMLElement | null = null;
   hotbarNameEl!: HTMLElement;
   invPanel!: HTMLElement;
   chestPanel!: HTMLElement;
@@ -880,6 +924,7 @@ export class UI {
     // M4 表情窗口入口（背包表情角按钮 onEmoteMenu——原版 DrawEmoteIcon Main.cs:41854
     // → IngameFancyUI.OpenUIState(UIEmotesMenu)）。打开期间暂停世界+阻断输入
     // （IngameFancyUI 语义,同 BestiaryPanel 惯例;关闭恢复先前态）
+    this.buildManualBtn(game);
     this.onEmoteMenu = () => {
       const g = this.game;
       if (!g || document.querySelector('.sw-emote-menu')) return;
@@ -897,6 +942,94 @@ export class UI {
         },
       });
     };
+  }
+
+  // ============ 游戏说明书（快捷栏右侧;Web 便利档,原版无对应物）============
+  // 未读红点气泡步进闪烁 → 点按钮开面板(暂停世界+阻断输入,同表情窗惯例) →
+  // "我知道了"关面板+熄泡;勾"不再显示"= manualHidden 落盘,按钮不再创建
+  // (设置页"显示说明书按钮"可重开)。
+
+  /** 快捷键行:action 官译名 + 当前绑定(重映射实时反映;空绑定=灰虚线"未设置") */
+  private manualKeyRow(action: KeybindAction): HTMLElement {
+    const row = el('div', 'sw-manual-row');
+    row.appendChild(el('span', 'desc', keybindActionLabel(action)));
+    const codes = bindsOf(action);
+    row.appendChild(el('span', codes.length ? 'sw-manual-key' : 'sw-manual-key none',
+      codes.length ? codes.map(keybindCodeLabel).join(' / ') : Lang.text('Mods.SandboxWorld.UI.ManualUnbound')));
+    return row;
+  }
+
+  private buildManualBtn(game: Game) {
+    if (options.data.manualHidden) return;
+    const btn = el('button', 'sw-manual-btn', '?');
+    btn.title = Lang.text('Mods.SandboxWorld.UI.Manual');
+    btn.addEventListener('mousedown', (e) => e.stopPropagation());   // 防触发拖拽/世界点击
+    btn.addEventListener('click', () => this.openManualPanel(game));
+    if (!options.data.manualSeen) btn.appendChild(el('div', 'sw-manual-badge', '!'));
+    this.root.appendChild(btn);
+    this.manualBtn = btn;
+  }
+
+  private openManualPanel(game: Game) {
+    if (document.querySelector('.sw-manual-panel')) return;
+    // 打开期间暂停世界+阻断输入(IngameFancyUI 语义,同表情窗惯例;关闭恢复先前态)
+    const wasPaused = game.paused;
+    const wasBlocking = game.input.uiBlocking;
+    game.paused = true;
+    game.input.uiBlocking = true;
+
+    const panel = el('div', 'sw-manual-panel');
+    panel.appendChild(el('div', 'sw-manual-title', Lang.text('Mods.SandboxWorld.UI.ManualTitle')));
+    const body = el('div', 'sw-manual-body');
+    const sec = (t: string) => body.appendChild(el('div', 'sw-manual-sec', t));
+    const mouseRow = (keyText: string, desc: string) => {
+      const row = el('div', 'sw-manual-row');
+      row.appendChild(el('span', 'sw-manual-key', keyText));
+      row.appendChild(el('span', 'desc', desc));
+      body.appendChild(row);
+    };
+    const kbSec = (title: string, actions: KeybindAction[]) => {
+      sec(title);
+      for (const a of actions) body.appendChild(this.manualKeyRow(a));
+    };
+    // 鼠标操作
+    sec(Lang.text('Mods.SandboxWorld.UI.ManualSecMouse'));
+    mouseRow(Lang.text('Mods.SandboxWorld.UI.ManualKeyLmb'), Lang.text('Mods.SandboxWorld.UI.ManualOpMine'));
+    mouseRow(Lang.text('Mods.SandboxWorld.UI.ManualKeyRmb'), Lang.text('Mods.SandboxWorld.UI.ManualOpInteract'));
+    mouseRow(Lang.text('Mods.SandboxWorld.UI.ManualKeyShift'), Lang.text('Mods.SandboxWorld.UI.ManualOpShift'));
+    mouseRow(Lang.text('Mods.SandboxWorld.UI.ManualKeyAlt'), Lang.text('Mods.SandboxWorld.UI.ManualOpAlt'));
+    // 键位分组（序=设置页"控制"页分组序）
+    kbSec(Lang.text('Mods.SandboxWorld.UI.ManualSecMove'), ['Up', 'Down', 'Left', 'Right', 'Jump']);
+    kbSec(Lang.text('Mods.SandboxWorld.UI.ManualSecFunc'), ['Inventory', 'SmartCursor', 'SmartSelect', 'QuickHeal', 'QuickMana', 'QuickBuff', 'QuickMount', 'Grapple']);
+    kbSec(Lang.text('Mods.SandboxWorld.UI.ManualSecHotbar'), ['Hotbar1', 'Hotbar2', 'Hotbar3', 'Hotbar4', 'Hotbar5', 'Hotbar6', 'Hotbar7', 'Hotbar8', 'Hotbar9', 'Hotbar10', 'HotbarMinus', 'HotbarPlus']);
+    kbSec(Lang.text('Mods.SandboxWorld.UI.ManualSecMap'), ['MapFull', 'MapStyle', 'MapZoomIn', 'MapZoomOut', 'MapAlphaUp', 'MapAlphaDown']);
+    kbSec(Lang.text('Mods.SandboxWorld.UI.ManualSecView'), ['ViewZoomIn', 'ViewZoomOut']);
+    kbSec(Lang.text('Mods.SandboxWorld.UI.ManualSecLoadout'), ['Loadout1', 'Loadout2', 'Loadout3']);
+    kbSec(Lang.text('Mods.SandboxWorld.UI.ManualSecMisc'), ['ToggleCreativeMenu', 'ToggleCameraMode']);
+
+    const foot = el('div', 'sw-manual-foot');
+    const hideLabel = el('label', 'sw-manual-hide');
+    const hideChk = document.createElement('input');
+    hideChk.type = 'checkbox';
+    hideLabel.appendChild(hideChk);
+    hideLabel.appendChild(document.createTextNode(Lang.text('Mods.SandboxWorld.UI.ManualHide')));
+    const ok = el('button', 'sw-manual-ok', Lang.text('Mods.SandboxWorld.UI.ManualGotIt'));
+    foot.append(hideLabel, ok);
+    panel.append(body, foot);
+    this.root.appendChild(panel);
+    ok.addEventListener('click', () => {
+      void options.set('manualSeen', true);   // 读过=熄泡
+      if (hideChk.checked) {
+        void options.set('manualHidden', true);   // 永久隐藏=按钮撤除(设置页可重开)
+        this.manualBtn?.remove();
+        this.manualBtn = null;
+      } else {
+        this.manualBtn?.querySelector('.sw-manual-badge')?.remove();
+      }
+      panel.remove();
+      if (!wasPaused) game.paused = false;
+      if (!wasBlocking) game.input.uiBlocking = false;
+    });
   }
 
   slotEl(i: number, where: SlotWhere): HTMLElement {
@@ -3539,11 +3672,14 @@ export class UI {
         // 2026-08-24 用户报：滚轮滚动过程中鼠标扫过行会连环触发 hover 重选+
         // refreshAll 抖动——滚动期（craftWheelLast 120ms 内有事件）临时屏蔽
         // hover，静默 120ms 后恢复（与 craftWheelStep 的 fresh 判定同口径）。
-        // ★2026-08-25 补 mousemove 门：慢速滚动每步间隔 >120ms 时滚轮门失效，
-        // 且行重建/内容滚动派发的 mouseenter 无 mousemove 伴随——只有 150ms
-        // 内有真实鼠标移动才认定主动悬停，静止鼠标下的滚动经过一律忽略
+        // ★2026-08-25 补 mousemove 门：行重建/内容滚动派发的 mouseenter 无
+        // mousemove 伴随——只有 150ms 内有真实鼠标移动才认定主动悬停。
+        // ★滚轮门 120→350ms（用户复报：hover 态下滚动预览仍在变）——慢滚步
+        // 间隔 >120ms 且手滚滚轮时鼠标微动会刷新 mousemove 门，两门全过 =
+        // 每步重建都预选鼠标下行；350 覆盖慢滚/触控板惯性尾段间隔，滚动
+        // 静默 350ms 后才恢复主动悬停判定
         if (performance.now() - this.craftMouseMoveLast > 150) return;
-        if (performance.now() - this.craftWheelLast < 120) return;
+        if (performance.now() - this.craftWheelLast < 350) return;
         // 高亮(.hov)与预选分离:主动悬停即亮;预选仍按需刷新
         this.craftHoverIdx = idx;
         this.craftHoverEl?.classList.remove('hov');

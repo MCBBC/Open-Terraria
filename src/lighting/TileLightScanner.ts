@@ -2,7 +2,7 @@
 // GetTileMask(:68-87):遮挡分类;GetTileLight(:89-108):逐格 max-raise 播种
 // (天空 ApplySurfaceLight:3152 → 地狱 ApplyHellLight:3261 → 墙 :167 → tile :344 → 液体 :110)。
 // 洞穴(worldSurface..UnderworldLayer)零环境光。
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { lightIsOn } from '../world/wiring/devices';
 import { TileStore } from '../world/TileStore';
 import { FastRandom } from './FastRandom';
@@ -562,7 +562,7 @@ export class TileLightScanner {
   //      烘焙为按 type/wall id 索引的 typed array,构造期一次;值与原查表逐项同源,
   //      越界 id 读出 undefined=falsy 与原「d 不存在/sheet=-1 不命中」语义一致,
   //      位级由 tests/lighting-scan-blur-golden 锁定)----
-  private readonly pixelBlockId = -1;                // 自研像素方块内部 id(-1=无)
+  private readonly pixelBlockId: number = -1;        // 自研像素方块内部 id(-1=无)
   private readonly sheetById: Int16Array;            // 内部 id → vanilla sheet(-1=无)
   private readonly crackedById: Uint8Array;          // sheet∈CRACKED_SHEETS
   private readonly allowWaterById: Uint8Array;       // sheet∈ALLOW_LIGHT_IN_WATER_SHEETS

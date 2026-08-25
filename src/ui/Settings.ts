@@ -499,6 +499,13 @@ export class SettingsPanel {
           () => Lang.menu(d.autoPause ? 69 : 70),
           () => void options.set('autoPause', !d.autoPause),
         ),
+        // 显示说明书按钮（说明书勾"不再显示"后在此重开；manualHidden 落盘）
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.ShowManual'),
+          () => String(!d.manualHidden),
+          () => Lang.menu(!d.manualHidden ? 69 : 70),
+          () => void options.set('manualHidden', !d.manualHidden),
+        ),
         // 激活套装奖励键上下反转（:647 Main.ReversedUpDownArmorSetBonuses；
         // 消费=Lang 替换键 ToggleArmorSetBonusKey）
         this.modeRow(

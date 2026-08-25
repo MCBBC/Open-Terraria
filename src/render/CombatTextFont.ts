@@ -45,6 +45,11 @@ function ensureFonts(): void {
     const p = FONTS[key];
     const img = new Image();
     img.onload = () => upgradeToBitmap(img, (b) => { TEX[i] = b; READY[i] = true; });
+    img.onerror = () => {
+      // ★失败重试(2026-08-25 同类扫描):原单发锁=一次失败伤害飘字整会话不渲染。
+      //   同元素 10s 退避重试直至命中暖缓存(onload 链对 READY/TEX 透明)
+      setTimeout(() => { img.src = `sprites/${p.texture}`; }, 10_000);
+    };
     img.src = `sprites/${p.texture}`;
   });
 }

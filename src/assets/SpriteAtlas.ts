@@ -433,7 +433,17 @@ export class SpriteAtlas {
         if (!SpriteAtlas.USE_BITMAP) land(img);
         else tryBitmapUpgrade(img, f, land, () => land(img));
       };
-      img.onerror = () => resolve();
+      img.onerror = () => {
+        // ★失败重试一次(2026-08-25 同类扫描):与 preloadUiFiles 同款——冷缓存窗口
+        //   瞬时失败不留永久空表(settled 门防双计数,重试成功走晚到表语义重烘)
+        if (!retried) {
+          retried = true;
+          setTimeout(() => { img.src = `sprites/${encodeURI(f)}`; }, 800);
+          return;
+        }
+        resolve();
+      };
+      let retried = false;
       img.src = `sprites/${encodeURI(f)}`;
     })));
   }

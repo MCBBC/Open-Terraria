@@ -99,6 +99,14 @@ interface SkyStar {
  *  Moon_N.png 50×400 竖条 = 8 个相位帧(moonType 0-8 选表,moonPhase 选帧) */
 function loadTex(name: string): HTMLImageElement {
   const im = new Image();
+  let attempts = 0;
+  // ★失败重试(2026-08-25 同类扫描):日月/星/云为 PRUNED 路径,首访冷缓存窗口
+  //   一次失败=天空恒缺(构造器字段持有坏 Image 无 onerror)。10s 起步退避重试
+  //   直至命中暖缓存;upgradeToBitmap 链经 UPG 登记对持有方透明
+  im.onerror = () => {
+    attempts++;
+    setTimeout(() => { im.src = `sprites/vanilla/${name}`; }, Math.min(10_000 * attempts, 30_000));
+  };
   im.onload = () => upgradeToBitmap(im, (b) => { UPG.get(im)?.forEach((cb) => cb(b)); UPG.delete(im); });
   im.src = `sprites/vanilla/${name}`;
   return im;

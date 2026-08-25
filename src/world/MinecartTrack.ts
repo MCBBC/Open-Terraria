@@ -188,6 +188,16 @@ function buildTables(): void {
 }
 buildTables();
 
+/** 审计/测试桥:Initialize 连接表只读快照(Minecart.cs:103-547 产物;
+ *  帧链连通性审计器以此为其准基准) */
+export function initializeConnTablesForAudit(): { left: number[]; right: number[]; heights: number[][] } {
+  return {
+    left: [...LEFT_CONN],
+    right: [...RIGHT_CONN],
+    heights: TILE_HEIGHT.map((h) => [...h]),
+  };
+}
+
 // ============================================================================
 // 存取助手（frameX/frameY 的 Uint16 ↔ int16 语义）
 // ============================================================================
