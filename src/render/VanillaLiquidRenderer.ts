@@ -287,6 +287,9 @@ export function drawVanillaLiquids(
    *  bob 语义由 compositeLight 后的全屏位移场交付（原版 waterTarget 本体无 bob，
    *  波动全部来自 FilterWaterDistortion 的屏幕位移）。水体/浸润带均直画目标层。 */
   warpMode = false,
+  /** 场景亮度采样（tile 光照 RGB 均值/255；Renderer 注入 lighting.lightAt）——
+   *  波光 glint 的亮度因子（obj19 :106-111 用位移后场景像素亮度，暗处→0） */
+  lumAt?: (tx: number, ty: number) => number,
 ): void {
   if (!atlas) { _liqDebug.atlasReady = false; return; }
   const PAD = 2;
@@ -676,7 +679,7 @@ export function drawVanillaLiquids(
       // ★warpMode 下仍画（进离屏随位移场整体扭动——原版 glint 加在全屏 pass 输出上，
       //   位置与波前水线一致）；波光仅 q>0 门，不受 warpMode 关闭影响
       if (waterWaves.quality > 0 && !isBackground && hasTE[i]) {
-        const gl = waterWaves.sampleGlint(x * 16 + 8, y * 16 + 8);
+        const gl = waterWaves.sampleGlint(x * 16 + 8, y * 16 + 8, lumAt?.(x, y) ?? 0.75);
         if (gl > 0.03) {
           ctx.globalCompositeOperation = 'lighter';
           ctx.globalAlpha = Math.min(1, gl * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));

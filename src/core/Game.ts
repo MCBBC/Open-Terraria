@@ -12197,9 +12197,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  :49686-49702）;1117 Damage() ×0.8（Projectile.cs:13581-13586）已折算
         if (cw.shoot === 1117) {
           const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-          const lim = this.limitPointToPlayerReach(mwx, mwy);
+          // ★闪电之击专项勘误（原版 :49645 LimitPointToPlayerReachableArea=1920×1200
+          //  可达域钳）：改用 clampPointToPlayerReachableArea 全式（旧 limitPointToPlayerReach
+          //  仅世界界钳,且步进向量曾用屏幕中心角 ang——相机非居中即落点大偏）
+          const lim = this.clampPointToPlayerReachableArea(mwx, mwy);
           let sx6155 = px, sy6155 = py;
-          const stepX = Math.cos(ang) * cw.shootSpeed, stepY = Math.sin(ang) * cw.shootSpeed;
+          // 步进向量 = 玩家中心→鼠标世界 单位向量×shootSpeed（vanilla num4/num5=
+          // (mouseScreen−pointPosition) 归一到 speed,:47685-47707）
+          const dxm6155 = mwx - px, dym6155 = mwy - py;
+          const dlm6155 = Math.hypot(dxm6155, dym6155) || 1;
+          const stepX = dxm6155 / dlm6155 * cw.shootSpeed, stepY = dym6155 / dlm6155 * cw.shootSpeed;
           for (let k = 0; k < 400; k++) {
             sx6155 += stepX; sy6155 += stepY;
             if (Math.hypot(sx6155 - lim.x, sy6155 - lim.y) < 20 + Math.abs(stepX) + Math.abs(stepY)) {
@@ -12208,7 +12215,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             }
             if (!this.lineOfSightWalkable(sx6155, sy6155, px, py)) break;   // CanHitLine 断即停
           }
-          const ux = Math.cos(ang), uy = Math.sin(ang);
+          const ul6155 = Math.hypot(stepX, stepY) || 1;
+          const ux = stepX / ul6155, uy = stepY / ul6155;
           for (let k = 0; k < 16 && this.solidPoint(sx6155, sy6155); k++) {             // 退出实心（:49700-49703）
             sx6155 -= ux; sy6155 -= uy;
           }
@@ -13240,20 +13248,57 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 门，射程由光束自身 256px 钳制——Mount.cs :3155-3162）
     if (!opts?.drill && !this.inTileRange(tx, ty)) { this.mining = null; return; }
     const type = this.world.store.get(tx, ty);
-    // 恶魔祭坛（tile 26，原版 Player.cs:45058）：镐不可破坏（def pick:-1 拦）；
-    // 锤 ≥80 锤力且困难模式 → SmashAltar（砸碎=困难矿三档轮换+幽灵）；
-    // 否则进度清零 + 玩家受 statLife/2 电击（ByOther(4)）
+    // 恶魔/猩红祭坛（同一 tile 26，样式=frameX/54：0 恶魔 1 猩红——TEdit Altars 双帧，
+    // 同一分支两族通吃）。原版锤支累积制（Player.cs:45032-45068
+    // ItemCheck_UseMiningTools_ActuallyUseMiningTool tileHammer 分支）：
+    //   每挥击周期 num2 += 锤力 → HitTile 累积 ≥100 才 KillTile(case 26 → SmashAltar)，
+    //   未达阈值 KillTile(fail:true) 仅播每击音——神锤(锤力80)须两击。
+    //   - 反噬门（:45058）：锤力 <80 或 !hardMode → num2=0 + Hurt(ByOther(4),
+    //     statLife/2, -direction)——【当前生命】一半，C# 整除地板（曾误用 maxHp/2）；
+    //   - 冷却 = ApplyItemTime(sItem) 裸 useTime（:45085；max(val,1) 下限 :4226）——
+    //     pickSpeed 药水链只进镐支（:44950/:45163 itemTime=useTime*pickSpeed），不乘锤支；
+    //   - CanKillTile 门（WorldGen.cs:62270-62301）：上邻为异类可支撑物(宝箱21/祭坛26/
+    //     草72/77/88/467/488)时拒拆 num2=0（无进度无反噬）；树干/棕榈/仙人掌的帧细分
+    //     条件对非实心祭坛不可达（无物可立于祭坛之上，底行上邻恒同为 26 直接放行）
     if (type === TILE_BY_KEY['v_26_altars']) {
-      this.mining = null;
-      if (toolType === 'hammer' && power >= 80 && this.world.flags.hardMode) {
-        this.smashAltar(tx, ty);
-      } else if (toolType === 'hammer') {
+      if (toolType !== 'hammer') { this.mining = null; return; }  // tileHammer 路由：镐/斧不入本格
+      if (!(power > 0)) { this.mining = null; return; }           // sItem.hammer>0 门（Player.cs:45036）：零锤力整段跳过（无反噬无音）
+      const cooldown = Math.max(1, useTime ?? speed);             // ApplyItemTime 裸 useTime
+      if (this.tickCount - this.lastMineHitTick < cooldown) {
+        this.hardnessCache = 100;
+        this.mining = { x: tx, y: ty, progress: this.hitTiles.getDamage(tx, ty) };
+        return;
+      }
+      this.lastMineHitTick = this.tickCount;
+      let num2 = power;
+      const stA = this.world.store;
+      if (ty >= 1) {
+        const ai = stA.idx(tx, ty - 1);
+        if (stA.flags[ai] !== 0 && stA.type[ai] !== type) {
+          const shAbove = TILE_DEFS[stA.type[ai]]?.vanilla?.sheet ?? -1;
+          if (shAbove === 21 || shAbove === 26 || shAbove === 72 || shAbove === 77
+            || shAbove === 88 || shAbove === 467 || shAbove === 488) num2 = 0;
+        }
+      }
+      if (power < 80 || !this.world.flags.hardMode) {
+        num2 = 0;
         const p = this.player;
-        const dmg = Math.max(1, Math.floor(p.maxHp / 2));
+        const dmg = Math.max(1, Math.floor(p.hp / 2));  // statLife/2（当前生命整除）
         p.lastDamageCause = { kind: 'defaultWrap' };  // 祭坛锤反噬:ByOther(3) 同族(applyTouchDamage)
         p.damage(dmg, p.cx - p.facing * 8, p.cy, false);
         this.addDamageNumber(p.cx, p.y, dmg, false, '#B080FF');
         this.sfx.play('hit', 1);
+      }
+      const total = this.hitTiles.addDamage(tx, ty, num2);  // AddDamage(num,num2)
+      this.hardnessCache = 100;
+      this.mining = { x: tx, y: ty, progress: total };
+      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, TILE_DEFS[type].mapColor, 2, 1.2);
+      if (total >= 100) {
+        this.hitTiles.clear(tx, ty);
+        this.mining = null;
+        this.smashAltar(tx, ty);                            // KillTile case 26 → SmashAltar
+      } else {
+        this.killTileBreakSound(type, tx, ty);              // KillTile(fail:true) 每击音
       }
       return;
     }
@@ -15514,8 +15559,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // tileCut 族(草类)由 decor 近似覆盖;framed 家具不换;solid!==false 排除非实心
         // (|| 平台 19 族可换——优先级括号已显式)
         const solidish = tdef ? (tdef.solid || tdef.vanilla?.sheet === 19) : false;
+        // ★放置侧 framed 门（1458 PlaceThing_CheckSpecificValidtyCaseForBlockSwap
+        //  :40340-40343 `!Falling[placed] && tileFrameImportant[placed] &&
+        //  !Platforms[placed] → return false`）——framed 放置物（墓碑/家具族）点在
+        //  实心格上原版无动作；曾缺此门 = 拿墓碑点地板 → 地板被"替换"打掉、
+        //  墓碑放进地板原位 → 支撑监听复验失撑 → 整件变掉落物（2026-08-25 用户实报）
+        const placeDef = TILE_DEFS[TILE_BY_KEY[itemDef.tile!]];
+        const placeFramedNoPlatform = (placeDef?.framed ?? false)
+          && (placeDef?.vanilla?.sheet ?? -1) !== 19;
         let swapOk = !NO_SWAP_PLACE.has(placeTileSheet) && !NO_SWAP_TARGET.has(tsheet)
-          && !(tdef?.decor ?? false) && !tdef?.framed && solidish;
+          && !(tdef?.decor ?? false) && !tdef?.framed && solidish
+          && !placeFramedNoPlatform;
         // style 族交换分支(:39299-39349——平台/火把/篝火/箱/柜的逐 style 换,
         // 同型不同 style 可换;frameX/frameY 偏差超出该 style 的宽 → swap。2026-08-13)
         let styleSwap = false;
@@ -15711,7 +15765,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 同型整株清——曾 setTile 直切单格留上半悬在工作台上方（用户观感
           // "没放成,还得用台子再打一次草"2026-08-21）
           const wdef = TILE_DEFS[st.get(px, py)];
-          if (!(wdef?.decor ?? false)) return;
+          // ★framed 不割（原版 Main.tileCut 表只含植物/草/藤族,全部非
+          //  frameImportant;墓碑 85 等 decor 标记的 framed 家具被占格时原版
+          //  直接放不进——曾只判 decor → 放置踩到已有 framed 家具格会把它
+          //  当草割成掉落物,2026-08-25 墓碑复测暴露）
+          if (!(wdef?.decor ?? false) || (wdef?.framed ?? false)) return;
           const wt = st.get(px, py);
           this.breakTile(px, py, true);
           for (let yy = py - 1; st.get(px, yy) === wt; yy--) this.breakTile(px, yy, true);

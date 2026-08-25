@@ -588,14 +588,20 @@ kvHas('sandboxworld.quicksave').then(async () => {
   //   用户要求替换脉冲点)
   // 懒 worker 预取钩子注入(音频门等待窗口借 SW 回填;见 WorldGenClient/SaveClient 尾注)
   setLazyWorkerPrefetch(() => { prefetchWorldGenWorker(); prefetchSaveWorker(); });
+  // ★启动幕生命周期(2026-08-25 用户要求"门后黑屏间隙铺向日葵"):向日葵幕存活至
+  //   过渡页三层图挂载(首帧绘出)才交接——覆盖 音频门点击后 → loadAssets → 过渡图
+  //   缓存等待 的全部无图窗口,消灭"以为故障黑屏"。z=10000:门(10001)之下、
+  //   过渡页(30)之上
+  let bootVeil: HTMLElement | null = null;
   if (!bypassBoot) {
     const veil = document.createElement('div');
     veil.id = 'sw-boot-prime';
     veil.innerHTML = `<style>
-      #sw-boot-prime { position: fixed; inset: 0; z-index: 10002; background: #000;
+      #sw-boot-prime { position: fixed; inset: 0; z-index: 10000; background: #000;
         display: flex; align-items: center; justify-content: center; }
     </style><canvas width="52" height="53"></canvas>`;
     document.body.appendChild(veil);
+    bootVeil = veil;
     const cv = veil.querySelector('canvas') as HTMLCanvasElement;
     const cctx = cv.getContext('2d')!;
     const sfImg = new Image();
@@ -614,7 +620,7 @@ kvHas('sandboxworld.quicksave').then(async () => {
     };
     requestAnimationFrame(sfStep);
     try { await primeBootAssets(30_000); } catch { /* 降级放行 */ }
-    veil.remove();
+    // ★幕不在此撤:继续盖住音频门之后的 loadAssets/过渡图缓存等待间隙
   }
   if (!bypassBoot && shouldShowAudioGate() && audio.isAutoplayBlocked()) {
     await showAudioGate(() => audio.resumeNow());
@@ -627,6 +633,19 @@ kvHas('sandboxworld.quicksave').then(async () => {
     quick: audio.muted || audio.volume === 0,   // 原版 quickSplash（musicVolume==0）
     canSkip: assetsDownloadIdle,                // 跳过门(2026-08-25):资源下载空闲才允许
   });
+  // ★启动幕交接(消灭门后黑屏间隙):轮询至过渡页三层图已挂载(首帧绘出)或过渡页
+  //   已收场,才撤向日葵幕。post-prime 缓存必已含过渡图 → 交接在百毫秒级完成
+  if (bootVeil) {
+    const handoff = setInterval(() => {
+      const sp = document.getElementById('sw-splash');
+      const back = sp?.querySelector('.back') as HTMLElement | null;
+      if ((sp && back && back.style.backgroundImage) || !sp) {
+        clearInterval(handoff);
+        bootVeil.remove();
+        bootVeil = null;
+      }
+    }, 100);
+  }
   void audio.play('title');   // ★标题曲随 splash 出现即起（用户要求，非进标题才播；
                               // 音频门/首次手势解锁已保 AC running）
   await assetsP;

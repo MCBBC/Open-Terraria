@@ -140,13 +140,28 @@ const out = await page.evaluate(async () => {
   // 基线像素采样区(目标点屏幕域 ±28px)
   const dpr = g.renderer.dpr || 1;
   const [bsx, bsy] = g.camera.worldToScreen(targetX, targetY);
+  // 画布枚举:取基线非零的可见画布(渲染器可能离屏合成)
+  const canvases = [...document.querySelectorAll('canvas')];
+  const pickCanvas = () => {
+    for (const cv of canvases) {
+      try {
+        const cx2 = cv.getContext('2d');
+        if (!cx2) continue;
+        const im = cx2.getImageData(Math.max(0, Math.round(bsx * dpr) - 28), Math.max(0, Math.round(bsy * dpr) - 28),
+          Math.min(56, cv.width), Math.min(56, cv.height));
+        let lit = 0;
+        for (let i = 0; i < im.data.length; i += 40) if (im.data[i] + im.data[i + 1] + im.data[i + 2] > 140) lit++;
+        if (lit > 10) return { cv, cx2 };
+      } catch (e) { /* 跨域/无 ctx 跳过 */ }
+    }
+    return null;
+  };
   const sampleBox = (tag) => {
     try {
-      const cv = g.renderer.canvas;
-      const cx2 = g.renderer.ctx || cv.getContext('2d');
+      const picked = pickCanvas();
+      if (!picked) { R.dbg[tag] = 'no-live-canvas'; return null; }
       const x0 = Math.max(0, Math.round(bsx * dpr) - 28 * dpr), y0 = Math.max(0, Math.round(bsy * dpr) - 28 * dpr);
-      const wq = 56 * dpr, hq = 56 * dpr;
-      const im = cx2.getImageData(Math.round(x0), Math.round(y0), Math.round(wq), Math.round(hq));
+      const im = picked.cx2.getImageData(x0, y0, Math.round(56 * dpr), Math.round(56 * dpr));
       let lit = 0, blue = 0;
       for (let i = 0; i < im.data.length; i += 4) {
         const rr = im.data[i], gg = im.data[i + 1], bb = im.data[i + 2];
@@ -223,10 +238,13 @@ const out = await page.evaluate(async () => {
     return origAdd(e, b);
   };
   aimAt(homeF.x, homeF.y);
+  R.dbg.eStart = { mana: p.mana, ut: p.useTime, slow: !!p.slowMagicUse,
+    vid: (items.VANILLA_ITEM_KEY_BY_ID[6155] || '') , held: (() => { const h = p.inv.heldItem(); return h ? h.id : null; })() };
   g.input.mouseDown = true; g.input.mouseHeld = true;
   for (; t2 < 210; t2++) { g.fixedUpdate(1 / 60); }
   g.entities.add = origAdd;
   release();
+  R.dbg.eEnd = { mana: p.mana, ut: p.useTime, slow: !!p.slowMagicUse };
   const gaps = casts.slice(1).map((v, i) => v - casts[i]);
   R.dbg.castTicks = casts; R.dbg.gaps = gaps;
   ck('(e) 节奏:持按连发间隔≈55t(ut=ua=55 一窗一发)', casts.length >= 3 && gaps.every((x) => x >= 50 && x <= 62),

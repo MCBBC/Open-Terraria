@@ -1,4 +1,6 @@
-// 从 Terarria1456 Item.cs SetDefaults1-5 逐物品提取【功能画像】→ vanilla-itemfunc.json。
+// 从 Terarria1458 Item.cs SetDefaults1-5 逐物品提取【功能画像】→ vanilla-itemfunc.json。
+// ★2026-08-25 用户令"以 1458 作为最新基准"：源 1456→1458（1458 SetDefaults 数值面
+// 零变更——旧件终值应零 diff,新增件=6150-6185 块等 1458 新物品,此前整块漏提）。
 // 用途：道具功能全量审计的"原版应有功能"基准（tools/item-audit.mjs 对照）。
 // 提取字段（仅记非默认值）：
 //   近战/远程/魔法/召唤旗、noMelee、damage、mana（耗魔）
@@ -10,11 +12,14 @@
 // 注意 case 归属 = 最近一层 switch(type)（嵌套 switch 陷阱同 extract-equip-prefix.mjs）。
 // 2026-08-17 useTurn 叠加：全量归档来自 extract-itemcombat.mjs 三通道提取库（显式字面
 // + DefaultTo* 辅助函数族 + 区间 if 块；Item.cs:170 默认 false——表内仅记 true=1）。
+// 2026-08-25 DefaultTo 武器族展开（1458 Item.cs）：MagicWeapon/RangedWeapon/Bow/
+//   Staff/Spear/ThrownWeapon——此前只认显式赋值,这些辅助函数族的 case（整块 615x）
+//   全部漏提 → heldUseStyle 回退 useStyle 1（冰川之牙斜挥穿胸,用户实报）。
 import { readFileSync, writeFileSync } from 'node:fs';
 import { EXTRA_USETURN } from './extract-itemcombat.mjs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const itemSrc = readFileSync(`${ROOT}/Terarria1456/Terraria/Item.cs`, 'utf8');
+const itemSrc = readFileSync(`${ROOT}/Terarria1458/Terraria/Item.cs`, 'utf8');
 
 function methodBodyOf(src, name) {
   const idx = src.indexOf(name);
@@ -110,8 +115,34 @@ const FIELDS = [
 ];
 
 const FUNC = {};
-for (const [id, seg] of SEGS) {
+/** DefaultTo 武器族基座（1458 Item.cs :48016/:48025/:48425-48470）：case 段内的
+ *  辅助调用 → 基础字段（case 显式赋值随后在 FIELDS pass 覆盖——显式=终值）。
+ *  · MagicWeapon(p,t,v[,autoReuse]) → useStyle5/magic/noMelee/shoot
+ *  · RangedWeapon(p,ammo,t,v[,autoReuse]) → useStyle5/ranged/noMelee/shoot/useAmmo
+ *  · Bow(t,v[,autoReuse]) = RangedWeapon(1,Arrow=1,…)（case 可覆写 shoot）
+ *  · Staff(p,v,t,mana) = MagicWeapon(…,autoReuse:true)+mana（case 显式 mana 覆盖）
+ *  · Spear(p,v,t) → useStyle5/melee+noMelee+noUseGraphic/shoot（投矛即弹体）
+ *  · ThrownWeapon(p,t,v[,autoReuse]) → useStyle1/ranged/noMelee/consumable/shoot */
+function defaultToBase(seg) {
   const f = {};
+  const auto = (m) => (m[0].includes('true') ? 1 : undefined);
+  let m;
+  m = seg.match(/DefaultToMagicWeapon\(\s*(-?\d+)\s*,\s*\d+\s*,\s*[\d.]+f?(?:\s*,\s*(?:hasAutoReuse\s*:\s*)?true\s*)?\)/);
+  if (m) { f.shoot = +m[1]; f.useStyle = 5; f.magic = 1; f.noMelee = 1; const a = auto(m); if (a) f.autoReuse = a; }
+  m = seg.match(/DefaultToRangedWeapon\(\s*(-?\d+)\s*,\s*(\d+)\s*,\s*\d+\s*,\s*[\d.]+f?(?:\s*,\s*(?:hasAutoReuse\s*:\s*)?true\s*)?\)/);
+  if (m) { f.shoot = +m[1]; f.useAmmo = +m[2]; f.useStyle = 5; f.ranged = 1; f.noMelee = 1; const a = auto(m); if (a) f.autoReuse = a; }
+  m = seg.match(/DefaultToBow\(\s*\d+\s*,\s*[\d.]+f?(?:\s*,\s*(?:hasAutoReuse\s*:\s*)?true\s*)?\)/);
+  if (m) { f.shoot = 1; f.useAmmo = 1; f.useStyle = 5; f.ranged = 1; f.noMelee = 1; const a = auto(m); if (a) f.autoReuse = a; }
+  m = seg.match(/DefaultToStaff\(\s*(-?\d+)\s*,\s*[\d.]+f?\s*,\s*\d+\s*,\s*(\d+)\s*\)/);
+  if (m) { f.shoot = +m[1]; f.useStyle = 5; f.magic = 1; f.noMelee = 1; f.autoReuse = 1; f.mana = +m[2]; }
+  m = seg.match(/DefaultToSpear\(\s*(-?\d+)\s*,\s*[\d.]+f?\s*,\s*\d+\s*\)/);
+  if (m) { f.shoot = +m[1]; f.useStyle = 5; f.melee = 1; f.noMelee = 1; f.noUseGraphic = 1; }
+  m = seg.match(/DefaultToThrownWeapon\(\s*(-?\d+)\s*,\s*\d+\s*,\s*[\d.]+f?(?:\s*,\s*(?:hasAutoReuse\s*:\s*)?true\s*)?\)/);
+  if (m) { f.shoot = +m[1]; f.useStyle = 1; f.ranged = 1; f.noMelee = 1; f.consumable = 1; const a = auto(m); if (a) f.autoReuse = a; }
+  return f;
+}
+for (const [id, seg] of SEGS) {
+  const f = defaultToBase(seg);
   for (const [name, re, type] of FIELDS) {
     const m = seg.match(re);
     if (!m) continue;

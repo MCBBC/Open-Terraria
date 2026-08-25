@@ -640,7 +640,7 @@ export class StormLightning extends Entity {
   private bolt: Bolt | null = null;
   private boltColor: [number, number, number] = [1, 1, 1];
   private visualT = 0;
-  private readonly visualTotal = 16;
+  private visualTotal = 16;      // ★闪电之击专项：1117=12/1122=16（Spawn_StormLightning num2 :1036）
   /** 跟鼠标回调（1117 无目标态；Game 注入） */
   mouseWorld?: () => { x: number; y: number };
 
@@ -660,6 +660,9 @@ export class StormLightning extends Entity {
     this.searchR = projId === 1117 ? 12 : 32;
     this.sharedCd = projId === 1122 ? ID_STATIC_1122 : null;     // 1122 IDStatic 10（全场同型一张表）
     this.boltColor = projId === 1117 ? [60 / 255, 120 / 255, 1] : [1, 60 / 255, 60 / 255]; // GetLightningColor :40566
+    // ★闪电之击专项：bolt 视觉余命按型分流（Spawn_ArcLightning num2=16 :1259 /
+    //   Spawn_StormLightning num2=flag?12:16 :1036——1117 武器档=12,1122=16）
+    this.visualTotal = projId === 1122 ? 16 : 12;
   }
 
   /** TileCollision（LightningGenerator.cs:209-226）：实心/斜坡 或 液体浸没 */
@@ -743,7 +746,11 @@ export class StormLightning extends Entity {
     }
     const prog = this.t / this.life;
     if (this.t === Math.floor(this.life * 0.15)) {
-      game.playSfxAt?.('hit', this.cx, this.cy);                // NPCHit34（:40459,本仓近似）
+      // ★闪电之击专项：windup 音=NPCHit34（:40507 vol=Lerp(.4,1,室外天气强度)）——
+      //   资产无 npchit_34.wav，取电花特征最近的 dd2_lightning_aura_zap_0-3（近似登记）
+      const zaps = ['dd2_lightning_aura_zap_0', 'dd2_lightning_aura_zap_1',
+        'dd2_lightning_aura_zap_2', 'dd2_lightning_aura_zap_3'];
+      game.playSfxWav?.(zaps[(Math.random() * 4) | 0], 0.8, this.cx, this.cy);
       game.spawnParticles(this.cx, this.cy, this.projId === 1117 ? '#3C78FF' : '#FF3C3C', 6, 2.2, { life: 18, grav: -0.02, damp: 0.93 });
     }
     // :40450-40455 num9=√(1−(num8−1)²)×0.3 光强包络（num8=Remap(prog,0,0.5,0,1)）
@@ -886,10 +893,16 @@ export class StormLightning extends Entity {
       { life: 14, grav: 0, damp: 0.9 });
     game.spawnParticles(end.x, end.y, this.projId === 1117 ? '#3C78FF' : '#FF3C3C', 10, 2.4,
       { life: 20, grav: 0, damp: 0.92 });
-    // 双音效（:1306-1307）：Item15 + ArcSurge=LegacySoundStyle(2,203)=Item_203.wav,
-    // 后者 pitch=NextFloatDirection×0.2−0.05、vol 0.6
-    game.playSfxWav?.('Item_15', 1, hand.x, hand.y);
-    game.playSfxWav?.('Item_203', 0.6, hand.x, hand.y, (Math.random() * 2 - 1) * 0.2 - 0.05);
+    // ★闪电之击专项勘误：Kill 音按型分流——Item15+ArcSurge(Item_203) 双音属
+    //   Spawn_ArcLightning（1122 ArcSurge 专支,ParticleOrchestrator.cs:1263-1268）;
+    //   1117/1091 走 Spawn_StormLightning（:1044-1051）= SoundID.LightningStrikeHit
+    //   （=style(2,204)=Item_204.wav,pitch 0,vol=Lerp(.4,1,weather)）
+    if (this.projId === 1122) {
+      game.playSfxWav?.('Item_15', 1, hand.x, hand.y);
+      game.playSfxWav?.('Item_203', 0.6, hand.x, hand.y, (Math.random() * 2 - 1) * 0.2 - 0.05);
+    } else {
+      game.playSfxWav?.('Item_204', 0.9, end.x, end.y);
+    }
   }
 
   /** StormLightningDrawer（:69-115）Canvas 折线近似：逐段梯形带 + 波前扫掠 α。

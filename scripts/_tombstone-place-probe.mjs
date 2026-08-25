@@ -62,6 +62,9 @@ const res = await page.evaluate(async () => {
     for (let i = 0; i < 10; i++) { g.player.vx = 0; g.player.vy = 0; g.fixedUpdate(1 / 60); }
     spot = { x: sx, y: sy };
   }
+  // 传送玩家到取样点旁（inTileRange 射程门内）
+  g.player.x = (spot.x - 2) * 16; g.player.y = (spot.y - 2) * 16;
+  for (let i = 0; i < 10; i++) { g.player.vx = 0; g.player.vy = 0; g.fixedUpdate(1 / 60); }
   const floorBefore = [st.get(spot.x, spot.y + 1), st.get(spot.x + 1, spot.y + 1)];
   // 插桩：追踪 tryPlace 期间的所有 breakTile/setTile 调用（谁拆的墓碑）
   const trace = [];
@@ -89,7 +92,17 @@ const res = await page.evaluate(async () => {
     floor: [st.get(spot.x, spot.y + 1), st.get(spot.x + 1, spot.y + 1)],
     drops: g.entities.drops.length,
   };
-  return { TOMB, spot, floorBefore, afterPlace, afterTicks };
+  // ② 原 bug 路径复测：光标点在【地板格】上（ty=spot.y+1）→ 应无动作
+  const floorBefore2 = st.get(spot.x, spot.y + 1);
+  const dropsBefore2 = g.entities.drops.length;
+  g.tryPlace(spot.x, spot.y + 1, { key: 'vi_321_grave_marker', tile: 'tombstone_v', placeStyle: 0 });
+  const afterFloorClick = {
+    floor: [st.get(spot.x, spot.y + 1), st.get(spot.x + 1, spot.y + 1)],
+    pieceTop: [st.get(spot.x, spot.y - 1), st.get(spot.x + 1, spot.y - 1)],
+    drops: g.entities.drops.length,
+  };
+  return { TOMB, spot, floorBefore, afterPlace, afterTicks,
+    floorClick: { floorBefore2, dropsBefore2, ...afterFloorClick } };
 });
 console.log(JSON.stringify(res, null, 1));
 await browser.close();

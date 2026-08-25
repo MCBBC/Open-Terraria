@@ -2971,7 +2971,13 @@ export class SkyRenderer {
       ctx.globalAlpha = alpha;
       ctx.translate(sx, sy);
       ctx.rotate(e.rotation);
-      if (e.dir < 0) ctx.scale(-1, 1);   // SpriteEffects.FlipHorizontally
+      // EOCSkyEntity（eyeball/eos/crimera）原版不写 Effects=恒 None——朝向完全由
+      // Rotation=Velocity.ToRotation() 承担（:1296，贴图原生朝右）；曾叠 dir 翻转
+      // =左飞时 rotate π 已转头再镜像回反→虹膜拖在身后（"眼球在屁股后面走",
+      // 2026-08-25 用户实报）。其余族 Effects=风向翻转（:191 等全族同式）≈dir 翻转
+      if (e.dir < 0 && e.kind !== 'eyeball' && e.kind !== 'eos' && e.kind !== 'crimera') {
+        ctx.scale(-1, 1);   // SpriteEffects.FlipHorizontally
+      }
       ctx.drawImage(tinted, -fw * scale / 2, -fh * scale / 2, fw * scale, fh * scale);
       ctx.restore();
     }

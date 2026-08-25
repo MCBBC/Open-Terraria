@@ -463,6 +463,9 @@ const FLARE_DUST: Record<number, number> = { 163: 127, 310: 187, 1008: 169, 1009
  *  匕首/94 水晶风暴/95 诅咒之焰/96 敌诅咒火/1114 日耀花/253 霜球/258 火球/102 Prime
  *  炸弹）：XNA AlphaBlend=预乘语义,RGB 全额加算 A 只衰背景=发光观感。canvas 'lighter'
  *  复刻（2026-08-24 清零批,source-over 直译=半透灰） */
+/** ProjectileID.Sets.IsDestroyedByWater（ProjectileID.cs:287）——AI_001 共享 wet 段
+ *  消亡表（Projectile.cs:16923-16925）：水（非岩浆/非蜂蜜豁免语义=仅排 lava）触即 Kill */
+const ARROW_DESTROYED_BY_WATER = new Set([85, 15, 188, 34, 1097, 1106]);
 const ADDITIVE_GLOW_PROJS = new Set([15, 34, 93, 94, 95, 96, 1114, 253, 258, 102,
   876]);   // R27：zapinator（GetAlpha :81458-81464 (255−alpha) 白 A=0 = 加算白光渐显）
 const PROJ_ALPHA0: Record<number, number> = {
@@ -2510,6 +2513,21 @@ export class Arrow extends Entity {
         if (lt === LIQUID_TYPE.WATER || lt === LIQUID_TYPE.LAVA) { this.killNow(game); return; }
       }
     }
+    // 入水块（AI_001 共享 wet 段 Projectile.cs:16921-16931）：wet && !lavaWet →
+    // ① IsDestroyedByWater{85,15,188,34,1097,1106}（ProjectileID.cs:287）Kill;
+    // ② type 2 燃烧箭 → TransformType(1) 变木箭 + light = 0（projId 改 1 后
+    //   数据表 1 无 light,光自动归零=原版语义）。此前整缺(备案项已处理)
+    {
+      const stW2 = world.store;
+      const cx2 = Math.floor((this.x + this.w / 2) / TILE), cy2 = Math.floor((this.y + this.h / 2) / TILE);
+      if (stW2.inBounds(cx2, cy2) && stW2.liquid[stW2.idx(cx2, cy2)] > 0) {
+        const lt2 = stW2.liquidType[stW2.idx(cx2, cy2)];
+        if (lt2 !== LIQUID_TYPE.LAVA) {
+          if (ARROW_DESTROYED_BY_WATER.has(this.projId)) { this.killNow(game); return; }
+          if (this.projId === 2) this.projId = 1;   // TransformType(1)（:16929）
+        }
+      }
+    }
     // ---- ★R29 幻象弓载体 630（AI_001 type==630 支 Projectile.cs:68194-68295）----
     // ai[0]++ 计龄;加速窗 num67=(age≥40)+(≥80)+(≥120),interval=24−2×num67（四档
     // 24/22/20/18）;ai[1]-- 归零触发 volley（重置 interval）+ soundDelay 节拍器
@@ -2693,7 +2711,10 @@ export class Arrow extends Entity {
     // ---- ★R29 星星炮星 955（aiStyle5,AI_005 通用支 :24133-24240）----
     // 通用闪烁档 alpha 0↔200 ±25/t + Item_9 星啸 20-59t + 1/20 尘 58（v×0.5,
     // alpha150,scale1.2)+屏内 1/6 gore16/17（自旋在 PROJ_SPIN 表;light R18 禁入区）
-    if (this.projId === 955) {
+    if (this.projId === 955 || this.projId === 12) {
+      // 12/955 同支(:24223-24240):light = 0.9(AI 侧覆盖 SetDefaults 1.0,备案项已处理)
+      // × ProjLight MUL [0.9,0.8,0.1] = [0.81,0.72,0.09]
+      this.lightRGB = [0.81, 0.72, 0.09];
       this.alpha += 25 * this.twinkleDir;
       if (this.alpha >= 200) { this.alpha = 200; this.twinkleDir = -1; }
       if (this.alpha <= 0) { this.alpha = 0; this.twinkleDir = 1; }

@@ -3666,17 +3666,22 @@ export class Renderer {
     if (!warpOn) clearWaterWarpDebug();
     // 双 pass 共用同一时刻，避免动画帧错位（原版 PrepareDraw 每帧一次、两 pass 共享缓存）
     // warpMode 入参 = 表层逐格 bob 关闭（波动由全屏位移场交付）
+    // 波光 glint 的场景亮度因子（obj19 :106-111 亮度项；地底暗光→glint→0）
+    const glintLumAt = (tx: number, ty: number): number => {
+      const [r, g, b] = this.lighting?.lightAt(tx, ty) ?? [192, 192, 192];
+      return (r + g + b) / 765;
+    };
     if (isBackground) {
       drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn);
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn, glintLumAt);
     } else if (warpOn) {
       const fgCtx = this.waterWarp.beginFgPass(this.ctx);
       drawVanillaLiquids(fgCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true);
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt);
       if (fgCtx) this.waterWarp.endFgPass(this.ctx);
     } else {
       drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false);
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false, glintLumAt);
     }
   }
 

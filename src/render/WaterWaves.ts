@@ -432,9 +432,13 @@ class WaterWaveSystem {
     out[1] = dispy * 32;         // c14.y=1.0
   }
 
-  /** 波光 tint 量（obj19 :106-111 近似：lum 取 0.75，见头部取舍）。>0 → 'lighter' 提亮 */
-  sampleGlint(worldX: number, worldY: number): number {
-    if (this.quality === 0 || !_noiseData) return 0;
+  /** 波光 tint 量（obj19 :106-111 结构近似）。原版末段 = 位移后场景像素 RGB 和
+   *  （亮度）×(波场项+1/|∇noise|)×水面掩码×边缘门×1/3 加色——亮度因子使暗处
+   *  （地底）glint→0；曾取常数 lum=0.75 + 正向噪声梯度 → 地底静水恒有随
+   *  progress 滚动的脉动白光（用户报"地底水面格动态发白"）。lum=调用方传的
+   *  场景亮度（tile 光照 RGB 均值/255，Renderer 注入）。>0 → 'lighter' 提亮 */
+  sampleGlint(worldX: number, worldY: number, lum = 0.75): number {
+    if (this.quality === 0 || !_noiseData || lum <= 0.004) return 0;
     const px = (worldX - this._camX) * this._zoom;
     const py = (worldY - this._camY) * this._zoom;
     const u = px / _noiseW, v = py / _noiseH;
@@ -442,7 +446,10 @@ class WaterWaveSystem {
     const gx = noiseAt(0, (u * 0.1) * _noiseW, (v * 0.1 + prog * 0.04) * _noiseH) - noiseAt(0, (u * 0.2) * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
     const gy = noiseAt(1, (u * 0.1) * _noiseW, (v * 0.1 + prog * 0.04) * _noiseH) - noiseAt(1, (u * 0.2) * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
     const h = this._readR(px, py) - 0.5;
-    return Math.min(1, Math.abs(0.3 * h + Math.hypot(gx, gy)) * 0.75 * 0.3333);
+    // 原版 :97/:106-110：r0.z = 波场钳值·c13.w + 1/|∇n|（逆梯度=焦散线，平坦处亮），
+    // 再 × 亮度 × 掩码/边缘门（平水面≈1）÷3
+    const gmag = Math.max(0.2, Math.hypot(gx, gy));
+    return Math.min(1, lum * (0.15 * Math.abs(h) + 1 / gmag) * 0.3333);
   }
 
   /** 实体洗掠注入（WaterDistortionObject obj50 + DrawWaves 调用参数）。
