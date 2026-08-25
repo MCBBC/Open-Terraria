@@ -524,7 +524,9 @@ export class BiomeBackground {
   /** 样式快照（CaptureMode 手动群系档专用，2026-08-25）：样式直落 + 双 alpha 槽
    *  全开 + 冷却/渐变/瞬切计数清零——拍照分块重渲跨数帧，走正常交叉淡化
    *  （±0.05/帧）会拍到半透明中间态；原版 DrawCapture 直接改 Main.bgStyle 无
-   *  过渡态，此处对齐该语义。调用方负责随后以合成 scene 维持 want 稳定。 */
+   *  过渡态，此处对齐该语义。★贴图未预热时该样式层为空 = 天空层空洞（全黑
+   *  出图根因）→ 内联 warmStyle 预热（幂等,已载秒回）；调用方宜在【选择时刻】
+   *  先行 warm（用户选格到按快门有数秒余裕），此处兜底。 */
   snapStyle(style: number): void {
     this.bgStyle = style;
     this.bgDelay = 0;
@@ -533,6 +535,26 @@ export class BiomeBackground {
     this.alphaFar.fill(0);
     this.alphaFront[style] = 1;
     this.alphaFar[style] = 1;
+    this.warmStyle(style);
+  }
+
+  /** 拍照群系档贴图预热：style(0-14) → 该风格贴图 id 集 → loadBg（变体取当前
+   *  世界掷定的 corruptStyle/jungleStyle 等，与 draw 解析同表同变体）。 */
+  warmStyle(style: number): void {
+    let ids: number[] = [];
+    if (style === Forest1 || style === Forest2 || style === Forest3 || style === Forest4) {
+      const st = FOREST_STYLES[this.forestStyles[0] % FOREST_STYLES.length];
+      ids = [...st.m, ...st.t];
+    } else if (style === Corruption) ids = CORRUPT_STYLES[this.corruptStyle];
+    else if (style === Crimson) ids = CRIMSON_STYLES[this.crimsonStyle];
+    else if (style === Jungle) ids = JUNGLE_STYLES[this.jungleStyle];
+    else if (style === Snow) ids = SNOW_STYLES[this.snowStyle];
+    else if (style === Hallow) ids = HALLOW_STYLES[this.hallowStyle];
+    else if (style === Mushroom) ids = MUSHROOM_STYLES[this.mushroomStyle];
+    else if (style === Desert) ids = DESERT_STYLES[this.desertStyle];
+    else if (style === Ocean) ids = [this.oceanTexId()];
+    const clean = ids.filter((n) => n >= 0);
+    if (clean.length) void this.loadBg(clean);
   }
 
   /** 每帧状态推进：风格切换延迟 + alpha 渐变（UpdateBGVisibility ±0.05/帧，:63534/:63594） */

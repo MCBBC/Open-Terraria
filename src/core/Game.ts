@@ -5634,6 +5634,8 @@ export class Game implements GameHooks {
       this.liquid.step();
       // 液体直接写数组绕过 store 监听：有活动液体时手动通知光照衰减变化
       if (this.liquid.numLiquid > 0) this.lighting.liquidDirty = true;
+      // 瀑布/岩浆环境循环音（Main.Ambience :13636 每 15t：SoundID 34/35,强度=音量档）
+      if (this.tickCount % 15 === 0 && !this.sfx.suppress) this.updateWaterfallAmbience();
     }
 
     // ---- 花靴行走生花（Player.ApplyEquipFunctional :12688-12692 每帧 + DoBootsEffect
@@ -11831,6 +11833,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  本仓 useTime 冷却模型天然 4t/发,补 swing 进度门复刻停发窗;1114 = aiStyle 24
         //  火花弹（湿亡/×0.985 阻力/130t 后缩径消亡——Arrow dragAlways 近似）+
         //  出手 ±4px 抖动/±0.157 旋向（:49946-49952）+ Damage ×0.8? 否——1114 无折价
+        // 2623 泡泡枪（Player.cs:48877 ItemCheck_Shoot 专支）：每击 3 泡,velocity 恒
+        // 基准向量(无逐发散布——散布全在出生点 ±Next(-40,41)×0.1=±4px 抖动);
+        // proj 410=ai72 泡体(Arrow 410 微支:alpha 渐显钳 50/×0.96 减速/scale
+        // rand(0.6,1.2)/Kill Item54+d212 环——R35 清单①)
+        if (cw.shoot === 410) {
+          this.playUseSound(critVid, 'tink');             // UseSound=Item85（Item.cs:25680）
+          for (let i = 0; i < 3; i++) {
+            const bjx = (Math.random() * 81 - 40) * 0.1;  // Next(-40,41)×0.1
+            const bjy = (Math.random() * 81 - 40) * 0.1;
+            const bub = new Arrow(px + bjx, py + bjy,
+              Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+              cw.damage, cw.knockback, 410, null, { grav: 0, life: 100, pierce: 1 });
+            bub.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            bub.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            bub.frostEligible = false;                    // magic 弹不吃冰霜引擎
+            this.entities.add(bub, 'projectiles');
+          }
+          this.input.mouseDown = false;
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          break;
+        }
         if (critVid === 6152) {
           // ★R26 GAP-03：周期窗化（旧模型冷却=4t/发+每 dispatch 扣魔 → 持按蓝耗
           // 10×/尾停发窗永不触发——每次 dispatch 都重启 swing 相位）。现冷却抬到整窗
@@ -12884,6 +12908,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.world.altarCount++;
     // 成就：BEGONE_EVIL（WorldGen.cs:49111 event 6——每次砸祭坛都触发）
     this.achievements.notifyProgressionEvent(6);
+  }
+
+  /** 瀑布/岩浆环境循环音消费（Main.Ambience :13636-13680）：绘制期累积的强度→
+   *  循环轨音量（strength 多格累加,×0.12 压档;归零→拆轨=原版 style0 停止音语义） */
+  private updateWaterfallAmbience(): void {
+    const amb = this.renderer.waterfalls.ambienceState();
+    const manage = (cur: import('./Sfx').SfxLoop | null, st: { strength: number }, file: string): import('./Sfx').SfxLoop | null => {
+      const vol = Math.max(0, Math.min(1, st.strength * 0.12));
+      if (st.strength > 0 && vol > 0.01) {
+        if (cur && !cur.dead) { cur.setVolume(vol); return cur; }
+        return this.startLoopSfx(file, vol, 0.5);
+      }
+      cur?.stop();
+      return null;
+    };
+    this.wfAmbLoops.wf = manage(this.wfAmbLoops.wf, amb.wf, 'Waterfall_0.wav');
+    this.wfAmbLoops.lava = manage(this.wfAmbLoops.lava, amb.lava, 'Lava_0.wav');
   }
 
   /** 钻头坐骑（mount 8）每 tick 能力驱动（Mount.cs UseDrill/UseAbility/AimAbility +
@@ -17266,6 +17307,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 天气环境音常驻循环轨（SceneState.cs 暴风雪双轨式：轨不拆、音量每帧跟随；
    *  rain 走既有 setRain（MusicID 28 RainAmbience），其余走 Sfx.playLoop） */
   private weatherLoops: Partial<Record<import('./Sfx').WeatherLoopName, import('./Sfx').SfxLoop>> = {};
+  /** 瀑布/岩浆环境循环轨（Main.Ambience :13636-13680 SoundID 34/35——绘制期强度累积
+   *  消费,updateWaterfallAmbience 每 15t 驱动） */
+  private wfAmbLoops: { wf: import('./Sfx').SfxLoop | null; lava: import('./Sfx').SfxLoop | null } = { wf: null, lava: null };
   private weatherLoopVol: Record<string, number> = {};
   /** 史莱姆雨延迟公告倒计时（Main.slimeWarningTime/Delay=420，UpdateSlimeRainWarning :64984） */
   private slimeWarningTime = 0;

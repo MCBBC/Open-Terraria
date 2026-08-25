@@ -32,10 +32,9 @@ const setup = await page.evaluate(() => {
 });
 
 const runCase = async (name, dropH, walk) => {
+  await page.evaluate(() => { window.__swRippleCap = []; });
   const out = await page.evaluate(async ({ s, dropH, walk }) => {
     const g = window.__swGame;
-    const cap = [];
-    window.__swRippleCap = cap;
     g.paused = true;
     g.entities.enemies.length = 0;
     g.player.wetCount = 0;
@@ -50,13 +49,14 @@ const runCase = async (name, dropH, walk) => {
     for (let t = 0; t < 160; t++) {
       g.fixedUpdate(1 / 60);
       if (g.player.inWater && entered < 0) entered = t;
-      if (entered >= 0 && t >= entered + 14) break;
+      if (entered >= 0 && t >= entered + 2) break;
     }
-    window.__swRippleCap = undefined;
-    return { entered, cap, surfaceY: s.surfaceY };
+    return { entered, surfaceY: s.surfaceY };
   }, { s: setup, dropH, walk });
-  console.log(`\n=== ${name}（水面 y=${out.surfaceY}）入水@t${out.entered}，捕获 ${out.cap.length} 颗 ===`);
-  for (const r of out.cap.slice(0, 14)) {
+  await new Promise((r) => setTimeout(r, 120));   // 涟漪窗(10t)内的渲染帧发生,入捕获
+  const cap = await page.evaluate(() => { const c = window.__swRippleCap ?? []; window.__swRippleCap = undefined; return c; });
+  console.log(`\n=== ${name}（水面 y=${out.surfaceY}）入水@t${out.entered}，捕获 ${cap.length} 颗 ===`);
+  for (const r of cap.slice(0, 14)) {
     const rel = r.y - out.surfaceY;
     const top = rel - r.sy / 2, bot = rel + r.sy / 2;
     console.log(`  y=${r.y}(水面${rel >= 0 ? '+' : ''}${rel}) 环跨[${Math.round(top)},${Math.round(bot)}] 尺寸${r.sx}×${r.sy} α=${r.a}`);

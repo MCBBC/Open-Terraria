@@ -1213,7 +1213,12 @@ export class CaptureInterface {
         let state = 0;
         const hover = env.mouseX >= rx && env.mouseX < rx + 20 && env.mouseY >= ry && env.mouseY < ry + 20;
         if (hover) {
-          if (this.clickLeft) CaptureSettings.biomeChoiceIndex = num;   // :751-756
+          if (this.clickLeft) {
+            CaptureSettings.biomeChoiceIndex = num;   // :751-756
+            // ★选格即预热该群系背景贴图（2048px 级解码 ~数秒）——用户选格到按
+            //   快门的余裕内装载完成；否则快照 snapStyle 时贴图未就绪 = 黑图
+            r.biomeBg.warmStyle(getCaptureBiome(num).backgroundIndex);
+          }
           state++;
         }
         if (CaptureSettings.biomeChoiceIndex === num) state += 2;

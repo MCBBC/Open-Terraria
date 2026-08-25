@@ -472,6 +472,7 @@ const PROJ_ALPHA0: Record<number, number> = {
   // 45 恶魔镰刀 alpha=100(:1289，GetAlpha :81468 恒 White 不消费——存真值备案)/
   // 7/8/150/151/152 荆棘链 alpha=255(:884/:2408，aiStyle4 渐显期 −50[/−75]/update 消费)
   22: 255, 27: 255, 45: 100,
+  410: 255,                                                          // 泡泡枪泡体（:4926 alpha=255,ai72 −25/t 渐显钳 50）
   7: 255, 8: 255, 150: 255, 151: 255, 152: 255,
   876: 255,                                                          // 灰/橙 zapinator（:8426）
   // ★R28：294 暗影束（SetDefaults :3840-3849 alpha 无显式行——aiStyle48 AI 支
@@ -620,6 +621,8 @@ export class Arrow extends Entity {
   grav2At: number;
   /** 恒定 vx 衰减/update（0=无；686/711 0.99——不挂重力门） */
   dragAlways: number;
+  /** 410 泡体 scale（ai[1]=rand(60,121)/100,首拍掷定——AI_072 :30954 盒 14×14×scale） */
+  bubbleScale = 0;
   /** 专家追踪参数（null=无） */
   homing: { speed: number; weight: number; floor?: number; cap?: number; axis?: 'x' | 'y' } | null;
   /** 电圈导弹 442 锁定格（ai[0]/[1]，tile 坐标；null=非锁定弹）——subStepAI 442 段消费 */
@@ -1471,6 +1474,7 @@ export class Arrow extends Entity {
       // 955 星星炮星（AI_005 通用闪烁档 :24200-24213 alpha 0↔200 ±25/t）/
       // 728 超级星（AI_151 −10/t 钳 100 :22340-22343）
       case 630: return 0;
+      case 410: return (255 - this.alpha) / 255;   // 泡泡枪泡体（ai72 alpha 255→50,缺省 GetAlpha 路径同式）
       case 631: case 661: case 819: case 955: case 728: return (255 - this.alpha) / 255;
       // 337 暴雪法杖雪片（GetAlpha :81157 = (250,250,250,150) 半透白——恒定档,
       // 不随 alpha 字段变化）
@@ -1991,6 +1995,22 @@ export class Arrow extends Entity {
     }
     // ---- ★R28 死亡 AoE 二次结算两件（Resize+Damage() 模式,NebulaBlazeBurst/
     //      LunarFlareStar 同构第三/四例）----
+    // ★R35 清单①：410 泡泡破裂（Kill :74257-74280）——Item54 爆泡音+10× d212 环状尘
+    //（尘位=Center+normalize(尘−Center)×10×ai[1]×scale,速度向外;num306=10×ai[1]）
+    if (this.projId === 410 && !this.dead) {
+      game.playSfxFiles?.(['Item_54'], 1, this.cx, this.cy);
+      const bsc = this.bubbleScale || 1;
+      const br = 10 * bsc;
+      for (let bp = 0; bp < 10; bp++) {
+        const bd = game.spawnDust?.(this.cx - br, this.cy - br, br * 2, br * 2, 212,
+          0, 0, 0, null, bsc, true);
+        if (bd) {
+          const bl = Math.hypot(bd.vx, bd.vy) || 1;
+          bd.vx = (bd.vx / bl) * (45 + Math.floor(Math.random() * 46)) / 10;
+          bd.vy = (bd.vy / bl) * (45 + Math.floor(Math.random() * 46)) / 10;
+        }
+      }
+    }
     if (this.projId === 617 && !this.dead) this.arcanumDeathBurst(game);
     else if (this.projId === 659 && !this.dead && this.sf659Ai0 >= 0) this.flame659DeathBurst(game);
     // ★R29 玛瑙爆破枪黑爆二段（Kill :73493-73540）：Resize(160)→Damage() AoE
@@ -2714,6 +2734,19 @@ export class Arrow extends Entity {
     //（金色星光=日耀花视觉主体；noLight 尘不进光照,spawnParticles 近似）
     if (this.projId === 1114 && this.age % 4 === 0) {
       game.spawnParticles(this.cx, this.cy, '#FFD966', 1, 0.5, { life: 18, grav: 0 });
+    }
+    // ---- R35 清单①：410 泡泡枪泡体（AI_072,Projectile.cs:30954-30977）----
+    // localAI0++ >3 后 alpha −25/t 钳 ≥50（GetAlpha 缺省路径 → 半透渐显）;
+    // velocity ×0.96 全向量减速;ai[1] 首拍掷 rand(60,121)/100=scale,盒 14×14×scale 居中
+    if (this.projId === 410) {
+      if (this.bubbleScale === 0) {
+        this.bubbleScale = (60 + Math.floor(Math.random() * 61)) / 100;
+        const bw = Math.trunc(14 * this.bubbleScale);
+        this.x += (this.w - bw) / 2; this.y += (this.h - bw) / 2;   // position=Center−盒/2（:30971-30976）
+        this.w = bw; this.h = bw;
+      }
+      if (this.age > 3) this.alpha = Math.max(50, this.alpha - 25);
+      this.vx *= 0.96; this.vy *= 0.96;
     }
     // ---- R27：宝石法珠飞行彩尘（AI_029_GemStaffs_ActuallyGemStaffs :38534-38541）----
     //  两臂各 1/5 掷：d(type−121+86 / 597→262) 于弹盒内、初速=弹速全额(NewDust 叠加

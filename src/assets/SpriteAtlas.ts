@@ -731,6 +731,19 @@ export function sliceItemAnimFrame(vid: number, ar: DrawRect, tick: number): Dra
   return { img: ar.img, sx: ar.sx, sy: ar.sy + Math.round(fh * f), sw: ar.sw, sh: Math.round(fh) };
 }
 
+/** createTile → 物品 id 映射（place_v_* 图标首选原版物品贴图用;同 tile 多物品取最低 id） */
+let CREATE_TILE_ITEM_MAP: Map<number, number> | null = null;
+function itemByCreateTile(tileId: number): number | undefined {
+  if (!CREATE_TILE_ITEM_MAP) {
+    CREATE_TILE_ITEM_MAP = new Map();
+    for (const [id, m] of Object.entries(vanillaJson.items)) {
+      const ct = (m as { createTile?: number | null }).createTile;
+      if (ct != null && !CREATE_TILE_ITEM_MAP.has(ct)) CREATE_TILE_ITEM_MAP.set(ct, Number(id));
+    }
+  }
+  return CREATE_TILE_ITEM_MAP.get(tileId);
+}
+
 /** 多格 tile 图标拼装（place_v_* 图标用）：vanilla tile 帧表=18px 步进（16×16 帧
  *  +2px 边距,VanillaTiler :838/:1125 同源）——按 (tx×18,ty×18) 逐格取 16×16 贴到
  *  w×16 × h×16 画布,边距不入户。表未载返回 null（调用方走 UI 逐帧重试自愈）。
@@ -771,10 +784,16 @@ export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | nul
     if (tid !== undefined) {
       const td = TILE_DEFS[tid];
       if (td?.vanilla) {
-        // ★多格 tile 逐格拼装（vanilla tile 帧表=18px 步进:16×16 帧+2px 边距,
-        // VanillaTiler :838/:1125 同源）——整块 vrect 直取会把边距行列包进来
-        // =十字缝（2026-08-25 用户报蜂巢十字缝/向日葵竖缝）;单格 16×16 碎片
-        // （向日葵初报）同根。拼装缓存按 sheet
+        // ★首选原版物品贴图：place_v_X 的 X=tile sheet id,查 vanilla.json items 中
+        // createTile===X 的物品 → vicon(物品 id)=原版背包图标（苔藓团/蜂巢/向日葵
+        // 物品贴图,非 tile 贴图——曾用 tile 贴图:单格=碎片(向日葵初报)/整块=18px
+        // 栅格边距十字缝(蜂巢,2026-08-25)/苔藓=raw 石纹非原版物品观感）
+        const itemId = itemByCreateTile(td.vanilla.sheet);
+        if (itemId !== undefined) {
+          const ar = atlas.vicon(itemId);
+          if (ar) return ar;
+        }
+        // 回退:多格 tile 逐格拼装（18px 步进）/单格 vframeAt
         if ((td.w ?? 1) > 1 || (td.h ?? 1) > 1) {
           const assembled = tileFootprintCanvas(atlas, td.vanilla.sheet, td.w ?? 1, td.h ?? 1);
           if (assembled) return { img: assembled, sx: 0, sy: 0, sw: assembled.width, sh: assembled.height };
