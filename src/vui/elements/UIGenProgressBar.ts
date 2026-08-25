@@ -60,24 +60,36 @@ export class UIGenProgressBar extends UIElement {
     const x = Math.round(k === 1 ? d.x : (UIScale.logicalW - 612 * k) / 2);
     const y = Math.round(d.y);
 
-    // 外框（随邪恶类型；vanilla :100-106：r.X-=8 后 Outer 画在 r.TopLeft()=(x-8,y)，
+    // ---- 填充先画（DrawSelf :100-103 顺序：DrawFilling2 ×2 在 Outer 之前——
+    //      外框最后画压在填充上 = 填充两端"长在"框内装饰下的合成观感；此前
+    //      先框后填充 = 填充盖住两端装饰，用户实报"进度条画在 UI 上面"）----
+    // DrawFilling2（:117-126）1:1：填充宽 (int)(progress×总宽) 且偶数对齐
+    // （%2≠0 减一）；边界处 2px 分隔条 = Lerp(填充色, Black, 0.5)；空槽 = 填充
+    // 之后的余段（非全宽垫底）
+    const drawFilling = (ox: number, oy: number, h: number, totalW: number,
+      progress: number, filled: Color, empty: Color): void => {
+      let cw = Math.floor(Math.max(0, Math.min(1, progress)) * totalW);
+      if (cw % 2 !== 0) cw--;                        // :118-120 偶数对齐
+      const px = x + ox * k, py = y + oy * k, hk = h * k, cwK = cw * k;
+      batch.fillRect(px, py, cwK, hk, filled);
+      batch.fillRect(px + cwK, py, totalW * k - cwK, hk, empty);
+      // 分隔条（:124-125）：填充末端内缩 2px、Lerp(filled,Black,0.5)——cw=0 时
+      // 画在条左界外 2px（原版同款，被后画的外框端饰盖住）
+      const sep = rgb(Math.round(filled.r * 0.5), Math.round(filled.g * 0.5), Math.round(filled.b * 0.5));
+      batch.fillRect(px + cwK - 2 * k, py, 2 * k, hk, sep);
+    };
+    const fillColor = this.randomEvil ? RANDOM_COLOR : this.crimson ? CRIMSON_COLOR : CORRUPT_COLOR;
+    drawFilling(20, 40, 16, LONG_BAR_WIDTH, this.totalProgress, fillColor, EMPTY_LONG);
+    drawFilling(50, 60, 8, SMALL_BAR_WIDTH, this.currentProgress, SMALL_COLOR, EMPTY_SMALL);
+
+    // ---- 外框后画（:104-107）：r.X-=8 后 Outer 画在 r.TopLeft()=(x-8,y)，
     //  Outer_Lower 画在 r.TopLeft()+(44,60)=(x+36,y+60)——此前误写 x+44 右移 8px
-    //  （2026-08-24 用户截图实报下条框未对齐））
+    //  （2026-08-24 用户截图实报下条框未对齐）----
     const outerKey = this.randomEvil ? 'UI_WorldGen_Outer_Random'
       : this.crimson ? 'UI_WorldGen_Outer_Crimson' : 'UI_WorldGen_Outer_Corrupt';
     const outer = UITextures.get(outerKey);
     if (outer) batch.draw(outer, x - 8 * k, y, { scale: k });
     const lower = UITextures.get('UI_WorldGen_Outer_Lower');
     if (lower) batch.draw(lower, x + 36 * k, y + 60 * k, { scale: k });
-
-    // 长条空槽 + 填充
-    batch.fillRect(x + 20 * k, y + 40 * k, LONG_BAR_WIDTH * k, 16 * k, EMPTY_LONG);
-    const longFill = Math.round(LONG_BAR_WIDTH * k * Math.max(0, Math.min(1, this.totalProgress)));
-    const fillColor = this.randomEvil ? RANDOM_COLOR : this.crimson ? CRIMSON_COLOR : CORRUPT_COLOR;
-    if (longFill > 0) batch.fillRect(x + 20 * k, y + 40 * k, longFill, 16 * k, fillColor);
-    // 短条空槽 + 填充
-    batch.fillRect(x + 50 * k, y + 60 * k, SMALL_BAR_WIDTH * k, 8 * k, EMPTY_SMALL);
-    const smallFill = Math.round(SMALL_BAR_WIDTH * k * Math.max(0, Math.min(1, this.currentProgress)));
-    if (smallFill > 0) batch.fillRect(x + 50 * k, y + 60 * k, smallFill, 8 * k, SMALL_COLOR);
   }
 }

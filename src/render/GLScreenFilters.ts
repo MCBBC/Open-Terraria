@@ -74,7 +74,13 @@ void main() {
   vec2 delta = nA - nB - 0.5;                                     // :856-857(def c6.y=-0.5)
   vec2 uvOut = vUv + delta * uOffset;                             // :858
   uvOut = mod(uvOut, 1.0);                    // s0 设备默认 wrap 的手工等价
-  gl_FragColor = vec4(texture2D(uScreen, uvOut).rgb * uTint, 1.0); // :859
+  // ★v0 死参数定谳（2026-08-25 用户实报血月过暗）：ScreenShader.cso 全 pass 反汇编
+  //  ——滤镜族（Heat/MiniTower/Graveyard/BloodMoon/Test2/CRT/MoonLord…）【无一读取
+  //  v0】（仅 Default 直通/沙尘暴/暴风雪/水波读）——EndCapture C# 侧
+  //  Draw(…, Main.ColorOfTheSkies) 的顶点色对着色器是死参数（自定义像素着色器
+  //  不采样 v0 即不生效）。曾从 C# 侧误推 ×uTint = 全屏多乘一次夜色 → 血月
+  //  暗得离谱（F9 也救不回，乘在光照之后）。已按字节码删除
+  gl_FragColor = vec4(texture2D(uScreen, uvOut).rgb, 1.0); // :859
 }`;
 
 /** FilterMiniTower（obj12 :483-508）：V+min 亮度度量驱动的柱色推色 */
@@ -94,7 +100,7 @@ void main() {
   vec3 hi = mix(uColor, vec3(1.0) - uColor, k);                   // :496-497(c2=1-color preshader)
   vec3 lo = sum * uColor;                                         // :499
   vec3 tgt = k >= 0.0 ? hi : lo;                                  // :498,500(cmp r2.x=k/2)
-  gl_FragColor = vec4(mix(s.rgb, tgt * s.a, uOpacity) * uTint, 1.0); // :501-502
+  gl_FragColor = vec4(mix(s.rgb, tgt * s.a, uOpacity), 1.0); // :501-502（★v0 死参数,见 FRAG_HEAT 注）
 }`;
 
 /** FilterGraveyard（obj6 :159-175）：intensity 标定灰度 + progress 去饱和 */
@@ -110,7 +116,7 @@ void main() {
   vec4 s = texture2D(uScreen, vUv);                                // :165
   float gray = (s.r + s.g + s.b) * uIntensity * 0.333333;          // :166-168,169(c3)
   vec3 desat = mix(s.rgb, vec3(gray), uProgress);                  // :170
-  gl_FragColor = vec4(mix(s.rgb, desat * s.a, uOpacity) * uTint, 1.0); // :171-172
+  gl_FragColor = vec4(mix(s.rgb, desat * s.a, uOpacity), 1.0); // :171-172（★v0 死参数,见 FRAG_HEAT 注）
 }`;
 
 /** FilterBloodMoon（obj11 :429-482）：V+min 分档染色 + 径向衰减 + alpha 抛物线 */
@@ -140,7 +146,9 @@ void main() {
   vec3 A = s.a * tgt;                                             // :468
   vec3 mid = 0.3 * A + 0.7 * A * A;                               // :469-471
   vec3 outc = mix(s.rgb, mid, amt);                               // :472
-  gl_FragColor = vec4(mix(s.rgb, radial * outc, uOpacity) * uTint, 1.0); // :473-474
+  // :472-474 尾段 = mix(s.rgb, radial·outc, uOpacity)——★字节码 mov oDepth,r0 前
+  //  无任何 v0 乘（dcl v0 声明即死）,×ColorOfTheSkies 系 C# 顶点色死参数误推,删除
+  gl_FragColor = vec4(mix(s.rgb, radial * outc, uOpacity), 1.0); // :473-474
 }`;
 
 /** FilterTest2（obj25 :1122-1152）：复古柱 GB 四阶调色板（V+min 度量） */
@@ -159,7 +167,7 @@ void main() {
            : x >= 0.5  ? vec3(0.545098, 0.674510, 0.058824)        // c5 :1146
            : x >= 0.25 ? vec3(0.188235, 0.384314, 0.188235)        // c4 :1147
                        : vec3(0.058824, 0.219608, 0.058824);       // c3 :1146
-  gl_FragColor = vec4(mix(s.rgb, pal, uOpacity) * uTint, 1.0);     // :1148
+  gl_FragColor = vec4(mix(s.rgb, pal, uOpacity), 1.0);     // :1148（★v0 死参数,见 FRAG_HEAT 注）
 }`;
 
 /** FilterCRT（obj27 :1182-1238）：不透明度缩放交叉桶形 + 边缘遮黑 + RGB 相位扫描线 */
@@ -187,7 +195,7 @@ void main() {
   float mx = 1.0 + (cos(ph) - 1.0) * 0.13;                         // :1224-1225(c7.z)
   float my = 1.0 + (sin(ph) - 1.0) * 0.16;                         // :1223,1227(c7.x)
   vec3 scan = vec3(col.r * mx, col.g * my, col.b * mx);            // :1226-1228
-  gl_FragColor = vec4(mix(col.rgb, scan, uOpacity) * uTint, 1.0);  // :1230
+  gl_FragColor = vec4(mix(col.rgb, scan, uOpacity), 1.0);  // :1230（★v0 死参数,见 FRAG_HEAT 注）
 }`;
 
 /** SkyWeatherTint（非 shader 移植——SandstormSky/BlizzardSky 的 SpriteBatch

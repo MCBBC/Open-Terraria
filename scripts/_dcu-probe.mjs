@@ -11,11 +11,15 @@ const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
 await page.goto(ORIGIN, { waitUntil: 'networkidle0', timeout: 120000 });
+console.log('[boot] page loaded');
 await page.waitForFunction(() => !document.getElementById('sw-splash'), { timeout: 300000, polling: 500 });
+console.log('[boot] splash gone');
 await page.waitForSelector('select', { timeout: 120000 });
 await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; });
 await page.click('button');
-await page.waitForFunction(() => window.__swGame?.player, { timeout: 800000, polling: 1000 });
+console.log('[boot] world create clicked');
+await page.waitForFunction(() => window.__swGame?.player, { timeout: 420000, polling: 1000 });
+console.log('[boot] player ready');
 await new Promise(r => setTimeout(r, 2000));
 
 const out = await page.evaluate(async () => {

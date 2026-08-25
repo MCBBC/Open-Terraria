@@ -163,3 +163,11 @@ export class SaveClient {
 
 /** 全局单例(mainFlow 建流时 ensure) */
 export const saveClient = new SaveClient();
+
+/** 预取(2026-08-25):音频门等待窗口借 SW 回填 worker 脚本(同 WorldGenClient 注) */
+export function prefetchSaveWorker(): void {
+  try {
+    const w = new Worker(new URL('./save.worker.ts', import.meta.url), { type: 'module' });
+    setTimeout(() => w.terminate(), 3000);
+  } catch { /* 回退路径照旧 */ }
+}

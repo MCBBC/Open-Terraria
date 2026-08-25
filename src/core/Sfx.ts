@@ -749,9 +749,10 @@ export class Sfx {
       }
     }
   }
-  /** 页面级监听只挂一次(多实例/HMR 重跑防重);首个 ctx 创建时接线 */
+  /** 页面级监听只挂一次(多实例/HMR 重跑防重);首个 ctx 创建时接线。
+   *  ★node 单测环境无 document——守卫跳过(失焦闸纯浏览器行为) */
   private static hookVisibilityOnce(): void {
-    if (Sfx.visHooked) return;
+    if (Sfx.visHooked || typeof document === 'undefined') return;
     Sfx.visHooked = true;
     document.addEventListener('visibilitychange', () => {
       Sfx.setAudioSuspension(document.hidden);
@@ -768,7 +769,10 @@ export class Sfx {
       Sfx.hookVisibilityOnce();
     }
     // ★失焦闸配合：隐藏期间禁止自动 resume(否则网络回调等触发的 ensure 会拆闸)
-    if (this.ctx.state === 'suspended' && !document.hidden) this.ctx.resume().catch(() => {});
+    // ★失焦闸配合：隐藏期间禁止自动 resume(否则隐藏期任何 ensure 调用拆闸);
+    //   node 单测无 document → 视为可见
+    const pageHidden = typeof document !== 'undefined' && document.hidden;
+    if (this.ctx.state === 'suspended' && !pageHidden) this.ctx.resume().catch(() => {});
     this.warmup();
     return this.ctx;
   }

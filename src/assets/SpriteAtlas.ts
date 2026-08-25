@@ -560,8 +560,24 @@ export class SpriteAtlas {
     this._iconsPromise = Promise.all(icons.map((f) => new Promise<void>((resolve) => {
       if (this.vimages.has(f)) { done++; onProgress?.(done / icons.length); return resolve(); }
       const im = new Image();
-      im.onload = () => { this.vimages.set(f, im); done++; onProgress?.(done / icons.length); resolve(); };
-      im.onerror = () => resolve();
+      let settledI = false;
+      const landI = () => {
+        this.vimages.set(f, im);
+        if (settledI) return;   // 重试成功二次落地不双计数
+        settledI = true;
+        done++; onProgress?.(done / icons.length); resolve();
+      };
+      im.onload = landI;
+      im.onerror = () => {
+        // ★失败重试一次(同 preloadUiFiles 2026-08-25):拥塞窗口瞬时失败不留永久空图
+        if (!retriedI) {
+          retriedI = true;
+          setTimeout(() => { im.src = `sprites/${encodeURI(f)}`; }, 800);
+          return;
+        }
+        resolve();
+      };
+      let retriedI = false;
       im.src = `sprites/${encodeURI(f)}`;
     }))).then(() => undefined);
     return this._iconsPromise;
@@ -600,7 +616,20 @@ export class SpriteAtlas {
         if (!SpriteAtlas.USE_BITMAP) { land(im); return; }
         tryBitmapUpgrade(im, f, land, () => land(im));
       };
-      im.onerror = () => resolve();
+      im.onerror = () => {
+        // ★失败重试一次(2026-08-25 用户实报首访偶现热栏图标永久缺失):冷缓存+
+        //   暖缓存并发抢路的拥塞窗口里,个别图标请求瞬时失败——原 onerror 直接
+        //   resolve 会留下永久空槽(直到刷新)。延迟 800ms 重试一次;再失败才维持
+        //   原放弃语义(不存在的探测键仍只多 404 一遍,可忽略)。settled 门保证
+        //   重试成功二次 land 只换表项不双计数(原注释语义)
+        if (!retried) {
+          retried = true;
+          setTimeout(() => { im.src = `sprites/${encodeURI(f)}`; }, 800);
+          return;
+        }
+        resolve();
+      };
+      let retried = false;
       im.src = `sprites/${encodeURI(f)}`;
     })));
   }

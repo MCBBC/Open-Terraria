@@ -28,6 +28,9 @@ const walk = (dir, out = []) => {
 };
 const all = walk(DIST);
 for (const f of all) if (f.endsWith('.map')) errors.push(`sourcemap 文件残留: ${f}`);
+// ★.ts/.tsx 源文件残留(2026-08-25 实测:裸 new URL 引 .ts 会被 vite 当静态资产
+//   原样拷进 dist=源码泄漏;worker 引用必须走 spawn 点的 new Worker(new URL) 模式)
+for (const f of all) if (/\.tsx?$/.test(f)) errors.push(`源码文件泄漏: ${f}`);
 
 const jsFiles = all.filter((f) => f.endsWith('.js'));
 for (const f of jsFiles) {

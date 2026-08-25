@@ -728,18 +728,61 @@ export class MonolithFilters {
     ctx.restore();
   }
 
-  /** FilterBloodMoon：UseColor(2,-0.8,-0.6) 的 multiply 近似（负通道按 0 截断；
-   *  不透明度 = UseOpacity(BloodMoonScreenShaderData.Update) × Filter.Opacity） */
+  /** FilterBloodMoon（obj11 :429-482 字节码精确式,半分辨率逐像素同 drawSepia）：
+   *  V+min 分档染色 + 径向衰减 + α 抛物线。★2026-08-25 重写：旧 multiply 近似
+   *  (mix(c)=255·(1−a+c·a) 全屏一刷) 在 a=0.75 时把 G/B 钳 0 = 纯红黑屏,且
+   *  GL 侧同日已定谳字节码不读 v0（EndCapture 的 ×ColorOfTheSkies 是死参数）——
+   *  本兜底与 GL FRAG_BLOODMOON 同式,无 uTint */
   private drawBloodMoon(ctx: CanvasRenderingContext2D, f: FilterState, w: number, h: number): void {
-    const [r, g, b] = f.def.color!;
-    const a = this.bloodMoonUseOpacity * f.opacity;
-    if (a <= 0) return;
-    const mix = (c: number) => Math.round(255 * Math.max(0, Math.min(1, 1 - a + c * a)));
-    ctx.save();
-    ctx.globalCompositeOperation = 'multiply';
-    ctx.fillStyle = `rgb(${mix(r)},${mix(g)},${mix(b)})`;
-    ctx.fillRect(0, 0, w, h);
-    ctx.restore();
+    const [cr, cg, cb] = f.def.color!;
+    const opacity = this.bloodMoonUseOpacity * f.opacity;
+    if (opacity <= 0) return;
+    const low = this.lowCanvas(w, h);
+    const lctx = low.getContext('2d')!;
+    lctx.clearRect(0, 0, low.width, low.height);
+    lctx.drawImage(ctx.canvas, 0, 0, low.width, low.height);
+    const img = lctx.getImageData(0, 0, low.width, low.height);
+    const d = img.data;
+    const lw = low.width, lh = low.height;
+    for (let y = 0; y < lh; y++) {
+      const vy = y / lh - 0.5;
+      for (let x = 0; x < lw; x++) {
+        const i = (y * lw + x) * 4;
+        const sa = d[i + 3] / 255;
+        const sr = d[i] / 255, sg = d[i + 1] / 255, sb = d[i + 2] / 255;
+        // 径向（:446-448,中心 (0.5,0.5),不夹下界）
+        const dx = x / lw - 0.5;
+        const dd = Math.sqrt(dx * dx + vy * vy);
+        const radial = dd >= 0.3 ? 1 - 2 * (dd - 0.3) : 1;
+        const V = Math.max(sr, sg, sb);
+        const mn = Math.min(sr, sg, sb);
+        const sum = V + mn;
+        // :456-460 分档（c1=1-color preshader）
+        const hi0 = 1 - cr, hi1 = 1 - cg, hi2 = 1 - cb;
+        const k = 1.5 - 0.5 * sum;
+        const hiR = 1 - hi0 * k, hiG = 1 - hi1 * k, hiB = 1 - hi2 * k;
+        const loR = sum * cr, loG = sum * cg, loB = sum * cb;
+        const useLo = 0.5 * (1 - sum) >= 0;
+        let bR = useLo ? loR : hiR, bG = useLo ? loG : hiG, bB = useLo ? loB : hiB;
+        bR += -0.5 * sum; bG += -0.5 * sum; bB += -0.5 * sum;   // :461
+        const diff = (V - mn) + 0.166667;                        // :454-455,462
+        const tR = bR * diff + 0.5 * sum, tG = bG * diff + 0.5 * sum, tB = bB * diff + 0.5 * sum;
+        const amt = (1 - 0.5 * sum) * 1 * 0.7;                   // :463-465(intensity 恒 1)
+        // :468-471 α 抛物线（A=tgt·s.a;mid=0.3A+0.7A²）
+        const aR = sa * tR, aG = sa * tG, aB = sa * tB;
+        const mR = 0.3 * aR + 0.7 * aR * aR, mG = 0.3 * aG + 0.7 * aG * aG, mB = 0.3 * aB + 0.7 * aB * aB;
+        // :472-474 双 mix（amt 内层 + opacity 外层,radial 乘中层）
+        const oR = sr + (radial * mR - sr) * amt;
+        const oG = sg + (radial * mG - sg) * amt;
+        const oB = sb + (radial * mB - sb) * amt;
+        d[i] = 255 * Math.max(0, Math.min(1, sr + (oR - sr) * opacity));
+        d[i + 1] = 255 * Math.max(0, Math.min(1, sg + (oG - sg) * opacity));
+        d[i + 2] = 255 * Math.max(0, Math.min(1, sb + (oB - sb) * opacity));
+        d[i + 3] = 255;
+      }
+    }
+    lctx.putImageData(img, 0, 0);
+    ctx.drawImage(low, 0, 0, w, h);
   }
 
   /** FilterSepia：半分辨率逐像素（亮度→棕调 + progress 加性染色），

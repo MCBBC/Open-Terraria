@@ -431,6 +431,11 @@ function runMarblePilesSection(st: TileStore, rng: RNG, gs: GenState): void {
     }
     const y = Math.floor(gs.worldSurface / 2);              // (int)Main.worldSurface / 2
     const ok = marblePileWithStatues(st, rng, x, y, gs.worldSurface);
+    // OOOOOOO 诊断钩子（探针消费,生产零开销）：逐尝试记账
+    {
+      const g = globalThis as { __swMpLog?: (x: number, y: number, ok: boolean) => void };
+      try { g.__swMpLog?.(x, y, ok); } catch { /* probe */ }
+    }
     if (ok) {
       placed++;
       if (placed >= target) break;                          // cs:16384-16387

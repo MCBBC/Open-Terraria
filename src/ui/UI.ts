@@ -2669,7 +2669,7 @@ export class UI {
     this.craftSearchEl = el('input') as HTMLInputElement;
     this.craftSearchEl.placeholder = Lang.text('Mods.SandboxWorld.Craft.SearchHint');
     this.craftSearchEl.style.cssText = 'flex:1; padding:4px 8px; background:#241e38; color:#fff; border:1px solid #6a5a8a; border-radius:4px; font-size:12px;';
-    this.craftSearchEl.addEventListener('input', () => { this.craftFocus = 0; this.refreshVanillaCrafting(); });
+    this.craftSearchEl.addEventListener('input', () => { this.craftFocus = 0; this.craftScroll = 0; this.refreshVanillaCrafting(); });
     modernRow.appendChild(this.craftSearchEl);
     this.craftGridEl = el('div');
     this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:520px;';
@@ -2728,15 +2728,19 @@ export class UI {
    *  事件直接走 1 行（单格滚不迟钝）；120ms 内的连发/惯性走累积阈值 100
    *  （触控板小增量按比例缓行）。deltaMode 1(lines) ×40 换算 */
   private craftWheelLast = 0;
+  /** 列表容器最近一次真实 mousemove——区分「鼠标主动移到行上」与「内容滚动
+   *  让行从静止鼠标下经过」(后者浏览器同样派发 mouseenter,但无 mousemove
+   *  伴随)——hover 预选只认前者(2026-08-25 用户报滚动过程连环误预选) */
+  private craftMouseMoveLast = 0;
   private craftWheelStep(dyRaw: number, deltaMode: number): void {
     const dy = deltaMode === 1 ? dyRaw * 40 : dyRaw;
     const now = performance.now();
     const fresh = now - this.craftWheelLast > 120;
     this.craftWheelLast = now;
     if (fresh) {
-      // 新手势首事件：立即 1 行（无迟滞）
+      // 新手势首事件：立即 1 行（无迟滞）——只滚窗口锚，不动选中配方
       this.craftWheelAcc = 0;
-      this.craftFocus = Math.max(0, this.craftFocus + (dy > 0 ? 1 : -1));
+      this.craftScroll = Math.max(0, this.craftScroll + (dy > 0 ? 1 : -1));
       this.hoverFocus = -1;
       this.refreshAll();
       return;
@@ -2746,7 +2750,7 @@ export class UI {
     this.craftWheelAcc += dy;
     if (Math.abs(this.craftWheelAcc) < 100) return;
     this.craftWheelAcc = 0;
-    this.craftFocus = Math.max(0, this.craftFocus + (dy > 0 ? 1 : -1));
+    this.craftScroll = Math.max(0, this.craftScroll + (dy > 0 ? 1 : -1));
     this.hoverFocus = -1;
     this.refreshAll();
   }
@@ -2765,8 +2769,8 @@ export class UI {
     // 曾映射 [0,len-1] 与 thumb 域错位=拖到底列表没到尾）
     const s = Math.round(ratio * (meta.len - meta.visRows));
     const focus = Math.min(meta.len - 1, s + 4);
-    if (focus !== this.craftFocus) {
-      this.craftFocus = focus;
+    if (focus !== this.craftScroll) {
+      this.craftScroll = focus;
       this.hoverFocus = -1;
       this.refreshAll();
     }
@@ -3441,10 +3445,14 @@ export class UI {
     this.refreshVanillaCrafting();
   }
 
-  /** 鱼眼合成列表焦点行（原版 focusRecipe；滚轮 ±1，CraftingUI 滚动 ±6.5/帧） */
+  /** 合成列表选中配方（材料格数据源；★仅点击行设置——2026-08-25 用户定案：
+   *  滚动只滚列表不换选中，材料格/详情不随滚动切换。搜索重置归零） */
   private craftFocus = 0;
+  /** 渲染窗滚动锚（滚轮/滚动条驱动；原与 craftFocus 同体——拆离后滚动不再
+   *  改选中配方。窗起点 start=craftScroll-4，钳制/滑块几何同旧） */
+  private craftScroll = 0;
   /** 悬停预览行（材料格显示源；-1=无）。★只动材料格不动渲染窗——
-   *  窗口锚点/鱼眼中心恒用 craftFocus（滚轮/点击驱动），hover 不触发滚动 */
+   *  窗口锚点恒用 craftScroll（滚轮/点击驱动），hover 不触发滚动 */
   private hoverFocus = -1;
   /** Modern 合成网格：搜索栏 + 焦点配方材料格（1.4.5 CraftingGrid 语义） */
   private craftSearchEl: HTMLInputElement | null = null;
@@ -3481,26 +3489,27 @@ export class UI {
     // 曾按 MAX_ROWS=60 取窗 min(focus-30, len-60)：len<60 时恒 start=0，240px
     // overflow:hidden 容器永远只露前 ~8 行，滚轮只空转焦点、行窗不动。
     const VIS_ROWS = 8;   // 240px 容器 ÷ ~30px 行 ≈ 8 可见行（原版 ±5 居中同义）
-    const WIN = VIS_ROWS + 4;   // 渲染窗全宽（下缘 +4：鱼眼淡出余量）
-    if (this.craftFocus > avail.length - 1) this.craftFocus = Math.max(0, avail.length - 1);   // 钳尾不回卷（ScrollCraftingList :582-589 钳 [0,len-1]）
+    const WIN = VIS_ROWS + 4;   // 渲染窗全宽（下缘 +4：淡出余量）
+    if (this.craftScroll > avail.length - 1) this.craftScroll = Math.max(0, avail.length - 1);   // 钳尾不回卷（ScrollCraftingList :582-589 钳 [0,len-1]）
     // ★start 钳到 maxStart（2026-08-21 用户报"拖到底还能往下拖"）：曾只 max(0,focus-4)
     //   ——尾部 focus-4 会浪费视口（末页只渲染 len-start 行，thumb 随 visRows 缩水、
     //   与拖拽域 [0,len-1] 不一致）。钳尾后视口恒满、thumb 高恒定、拖拽 1:1
     const maxStart = Math.max(0, avail.length - WIN);
-    // 焦点上界=窗尾锚（maxStart+4）：到底后滚轮不再漂移 focus（曾只钳 len-1 →
-    // 底部继续滚会把 focus 推离窗锚,回滚出现最多 7 格死区）
+    // 焦点上界=窗尾锚（maxStart+4）：到底后滚轮不再漂移（曾只钳 len-1 →
+    // 底部继续滚会把锚推离窗尾,回滚出现最多 7 格死区）
     const maxFocus = avail.length > WIN ? maxStart + (VIS_ROWS >> 1) : avail.length - 1;
-    if (this.craftFocus > maxFocus) this.craftFocus = maxFocus;
-    const start = Math.max(0, Math.min(this.craftFocus - (VIS_ROWS >> 1), maxStart));
+    if (this.craftScroll > maxFocus) this.craftScroll = maxFocus;
+    const start = Math.max(0, Math.min(this.craftScroll - (VIS_ROWS >> 1), maxStart));
     const end = Math.min(avail.length, start + WIN);
     for (let idx = start; idx < end; idx++) {
       const { r, count } = avail[idx];
-      const dy = idx - this.craftFocus; // 相对焦点的连续偏移（原版 availableRecipeY）
-      const scale = Math.max(0.75, 100 / (Math.abs(dy) + 100));
       const outKey = vanillaItemKey(r.create);
       if (!outKey) continue;
       const row = el('div', 'sw-recipe');
-      row.style.cssText += ` transform:scale(${scale.toFixed(3)}); transform-origin:left center; opacity:${(1 - Math.min(0.75, Math.abs(dy) / 30)).toFixed(2)}; transition:transform 0.08s;`;
+      // ★2026-08-25 用户定案去掉鱼眼缩放/淡出（原 availableRecipeY 焦点行
+      //  scale=100/(|dy|+100)）：焦点行恒比其余行宽一截，用户视为「滚动时自动
+      //  预选了一个配方」——列表回归普通等宽行。滚动锚 craftScroll 机制不变
+      //  （只是不再视觉强调任何一行）；选中配方 craftFocus 仅由点击设置
       const img = el('img') as HTMLImageElement;
       img.src = iconUrl(game, game.itemId(outKey));
       row.appendChild(img);
@@ -3520,7 +3529,11 @@ export class UI {
         // craftFocus（=渲染窗锚点/鱼眼中心）不被 hover 触碰 → 窗口纹丝不动。
         // 2026-08-24 用户报：滚轮滚动过程中鼠标扫过行会连环触发 hover 重选+
         // refreshAll 抖动——滚动期（craftWheelLast 120ms 内有事件）临时屏蔽
-        // hover，静默 120ms 后恢复（与 craftWheelStep 的 fresh 判定同口径）
+        // hover，静默 120ms 后恢复（与 craftWheelStep 的 fresh 判定同口径）。
+        // ★2026-08-25 补 mousemove 门：慢速滚动每步间隔 >120ms 时滚轮门失效，
+        // 且行重建/内容滚动派发的 mouseenter 无 mousemove 伴随——只有 150ms
+        // 内有真实鼠标移动才认定主动悬停，静止鼠标下的滚动经过一律忽略
+        if (performance.now() - this.craftMouseMoveLast > 150) return;
         if (performance.now() - this.craftWheelLast < 120) return;
         if (this.hoverFocus !== idx) {
           this.hoverFocus = idx;
@@ -3529,7 +3542,7 @@ export class UI {
       });
       row.addEventListener('mousedown', (ev) => {
         ev.stopPropagation();
-        this.craftFocus = idx; // 选中置焦（原版 focusRecipe=i，点击才动窗口）
+        this.craftFocus = idx; // 选中配方（材料格数据源）——★仅点击设置，滚动不改
         this.hoverFocus = -1;  // 点击行即焦点，预览态退场
         // 点击行 = 合成（合成按钮已去除）。材料格存料先归还背包再统一扣料——
         // 防"料在格里、背包不足"的假失败（换焦点路径已由 refreshCraftGrid 归还）
@@ -3547,6 +3560,7 @@ export class UI {
       const cl = this.craftListEl as HTMLElement & { __swCraftWheel?: boolean };
       if (!cl.__swCraftWheel) {
         cl.__swCraftWheel = true;
+        cl.addEventListener('mousemove', () => { this.craftMouseMoveLast = performance.now(); });
         cl.addEventListener('wheel', (ev) => {
           ev.preventDefault();
           ev.stopPropagation();

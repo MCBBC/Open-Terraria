@@ -10840,6 +10840,27 @@ export class Renderer {
           }
         }
         ctx.drawImage(img, 0, fr * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
+        // ---- 发光层（Mount.Draw :5520-5535 texture2D2 同帧同位二次 DrawData）----
+        // 原版发光色 color = drawColor×0.25 + 0.75（:5818）再 ×(drawColor.A/255)
+        // （:5850）——drawColor≈环境光照调制色（0-1），即发光贴图在黑暗中仍保有
+        // 0.75 亮度、全亮时 1.0（DCU 钻头白热自发光的来源；UFO/机械矿车同管线）。
+        // 本仓以光照引擎中心格亮度近似 drawColor 标量（lightAt 0-255→0-1）；
+        // 原版 RGB 逐通道调制（色偏随光色）此处以贴图原色 + 标量 alpha 近似（登记）
+        {
+          const glowTex = layer === 'back' ? d.backTextureGlow : d.frontTextureGlow;
+          const gi = glowTex && this.atlas ? this.atlas.ensureVImage(glowTex) : null;
+          if (gi) {
+            const lt = this.lighting?.lightAt(Math.floor((p.x + p.w / 2) / 16), Math.floor((p.y + p.h / 2) / 16));
+            const lum = lt ? Math.max(lt[0], lt[1], lt[2]) / 255 : 1;
+            const gAlpha = 0.25 * lum + 0.75;
+            const gfh = Math.floor(gi.height / frames);
+            const ga = ctx.globalAlpha;
+            ctx.globalAlpha = ga * gAlpha;
+            ctx.drawImage(gi, 0, Math.min(fr * fh, Math.max(0, gi.height - gfh)), gi.width, gfh,
+              -gi.width / 2, -gfh / 2, gi.width, gfh);
+            ctx.globalAlpha = ga;
+          }
+        }
         // 副层（蜜蜂翅膀 Mount_BeeWings / Scutlix 眼族 / 钻头二极管）：
         //  - Scutlix 眼辉：充能比渐显，charge==0 整层跳过（:5729-5735）
         //  - 钻头二极管：diodeRotation 旋转（:5796）+ 两束激光（:6027-6063，激光
@@ -10875,28 +10896,19 @@ export class Renderer {
               if (flip) ctx.scale(-1, 1);
               ctx.rotate(mnt.diodeRotation);
               ctx.drawImage(ex, 0, 0, ex.width, ex.height, -ex.width / 2, -ex.height / 2, ex.width, ex.height);
-              // 两束激光：二极管点 → 光束锁定格中心（MagicPixel scale(2, len) 近似）
-              const rot = (v: { x: number; y: number }) => ({
-                x: v.x * Math.cos(mnt.diodeRotation) - v.y * Math.sin(mnt.diodeRotation),
-                y: v.x * Math.sin(mnt.diodeRotation) + v.y * Math.cos(mnt.diodeRotation),
-              });
-              const p1 = rot({ x: 36, y: -6 }), p2 = rot({ x: 36, y: 8 });
-              for (let i = 0; i < mnt.beams.length; i++) {
-                const b = mnt.beams[i];
-                if (b.tx < 0) continue;
-                const txp = b.tx * 16 + 8 - anchorX, typ = b.ty * 16 + 8 - anchorY;
-                const origins = [p1, p2];
-                const o = origins[i % 2];
-                const dx = txp - o.x, dyL = typ - o.y;
-                const len = Math.hypot(dx, dyL);
-                if (len <= 0) continue;
-                ctx.save();
-                ctx.translate(o.x, o.y);
-                ctx.rotate(Math.atan2(dyL, dx));
-                ctx.globalAlpha *= 0.25;    // color.A=128 后 ×0.5（:6045-6047）
-                ctx.fillStyle = i % 2 === 0 ? '#6495ED' : '#90EE90';  // CornflowerBlue/LightGreen
-                ctx.fillRect(-1, 0, 2, len);
-                ctx.restore();
+              // 二极管发光层（Mount.cs:1335 frontTextureExtraGlow=DrillMount[5]→
+              // Mount_Glow_DrillDiode；Draw :5848-5852 同位二次 Draw，色同上主层公式）
+              {
+                const dg = d.frontTextureExtraGlow && this.atlas
+                  ? this.atlas.ensureVImage(d.frontTextureExtraGlow) : null;
+                if (dg) {
+                  const lt = this.lighting?.lightAt(Math.floor((p.x + p.w / 2) / 16), Math.floor((p.y + p.h / 2) / 16));
+                  const lum = lt ? Math.max(lt[0], lt[1], lt[2]) / 255 : 1;
+                  const ga = ctx.globalAlpha;
+                  ctx.globalAlpha = ga * (0.25 * lum + 0.75);
+                  ctx.drawImage(dg, 0, 0, dg.width, dg.height, -dg.width / 2, -dg.height / 2, dg.width, dg.height);
+                  ctx.globalAlpha = ga;
+                }
               }
               ctx.restore();
             } else {
@@ -10905,6 +10917,42 @@ export class Renderer {
           }
         }
         ctx.restore();
+        // 两束激光（Mount.Draw case 8 drawType 3 :6027-6063）：每条【激活束】
+        // 自两个二极管点（drillDiodePoint1(36,-6)/2(36,8) :303-307，RotatedBy
+        // diodeRotation 后平移自坐骑锚点 Position）各引一条线至锁定格中心——
+        // ignorePlayerRotation=true（:6061）不随机身倾斜，且原版该 DrawData 的
+        // 位置/旋转全在世界系，故在坐骑变换 restore 之后直绘（曾画在旋转/翻转
+        // 变换内：二极管点被二次旋转 + 终点未逆变换 → 发点/指向/长度全错）。
+        // 色 CornflowerBlue(100,149,237)/LightGreen(50,205,50)，A=128 再整色 ×0.5
+        // （:6045-6047）→ RGB/A 均减半，AlphaBlend 叠加 = src·(64/255)+dst·(191/255)，
+        // canvas 等价 fillStyle 取减半色 + globalAlpha=64/255（不乘光照——原版
+        // color2 独立于 drawColor，黑暗中同亮）
+        if (mnt.type === 8 && layer === 'front' && this.atlas) {
+          const dRot = mnt.diodeRotation;
+          const cosR = Math.cos(dRot), sinR = Math.sin(dRot);
+          const diodes: Array<{ o: { x: number; y: number }; col: string }> = [
+            { o: { x: anchorX + 36 * cosR + 6 * sinR, y: anchorY + 36 * sinR - 6 * cosR }, col: 'rgb(50,74,118)' },
+            { o: { x: anchorX + 36 * cosR - 8 * sinR, y: anchorY + 36 * sinR + 8 * cosR }, col: 'rgb(25,102,25)' },
+          ];
+          const ga = ctx.globalAlpha;
+          ctx.globalAlpha = 64 / 255;
+          for (const b of mnt.beams) {
+            if (b.tx < 0) continue;
+            const txp = b.tx * 16 + 8, typ = b.ty * 16 + 8;
+            for (const dd of diodes) {
+              const dx = txp - dd.o.x, dyL = typ - dd.o.y;
+              const len = Math.hypot(dx, dyL);
+              if (len <= 1) continue;
+              ctx.save();
+              ctx.translate(dd.o.x, dd.o.y);
+              ctx.rotate(Math.atan2(dyL, dx));
+              ctx.fillStyle = dd.col;
+              ctx.fillRect(0, -1, len, 2);   // MagicPixel scale(2,len)（:6057）
+              ctx.restore();
+            }
+          }
+          ctx.globalAlpha = ga;
+        }
         // 钻头激活时的光标十字 = 原版投射物 453（DrillMountCrosshair：1×1、tileCollide
         // false、ai = 鼠标偏移，纯光标视觉无物理）。本仓无通用投射物实体管线，直绘
         // Projectile_453 贴图于 mount.crosshairX/Y（= 鼠标世界坐标，Mount.aimDrill 维护）

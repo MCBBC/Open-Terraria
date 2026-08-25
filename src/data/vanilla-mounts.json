@@ -1186,7 +1186,8 @@
    "backTextureGlow": "Mount_Glow_DrillRing.png",
    "frontTexture": "Mount_DrillSeat.png",
    "frontTextureGlow": "Mount_Glow_DrillSeat.png",
-   "frontTextureExtra": "Mount_DrillDiode.png"
+   "frontTextureExtra": "Mount_DrillDiode.png",
+   "frontTextureExtraGlow": "Mount_Glow_DrillDiode.png"
   },
   "9": {
    "spawnDust": 15,

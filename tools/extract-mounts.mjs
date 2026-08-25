@@ -158,7 +158,7 @@ function parseBlock(body, prefix, extra = {}) {
     const set = t.match(/^array\[(\d+)\] -= (-?\d+);$/);
     if (set) yDelta.set(+set[1], (yDelta.get(+set[1]) ?? 0) - (+set[2]));
     // 贴图四层
-    for (const slot of ['backTexture', 'backTextureGlow', 'backTextureExtra', 'frontTexture', 'frontTextureGlow', 'frontTextureExtra']) {
+    for (const slot of ['backTexture', 'backTextureGlow', 'backTextureExtra', 'frontTexture', 'frontTextureGlow', 'frontTextureExtra', 'frontTextureExtraGlow']) {
       if (d[slot] === undefined) {
         const m2 = t.match(new RegExp(`^${rel(slot)} = (TextureAssets\\.[^;]+?);?$`));
         if (m2 && !m2[1].includes('Asset<Texture2D>.Empty')) d[slot] = m2[1];
@@ -169,7 +169,7 @@ function parseBlock(body, prefix, extra = {}) {
     if (lc) d.lightColor = [+lc[1], +lc[2], +lc[3]];
   }
   // 展开贴图 → 文件名（缺素材字段保留原表达式供登记）
-  for (const slot of ['backTexture', 'backTextureGlow', 'backTextureExtra', 'frontTexture', 'frontTextureGlow', 'frontTextureExtra']) {
+  for (const slot of ['backTexture', 'backTextureGlow', 'backTextureExtra', 'frontTexture', 'frontTextureGlow', 'frontTextureExtra', 'frontTextureExtraGlow']) {
     if (typeof d[slot] === 'string') d[slot] = texOf(d[slot]) ?? d[slot];
   }
   // playerYOffsets 定稿
@@ -342,12 +342,12 @@ const textureOk = {};
 const texAvailable = (file) => typeof file === 'string' && /\.png$/.test(file) && existsSync(join(IMG, file));
 for (const [id, d] of Object.entries(mounts)) {
   const layers = [d.backTexture, d.frontTexture, d.backTextureExtra, d.frontTextureExtra,
-    d.backTextureGlow, d.frontTextureGlow].filter((f) => f !== undefined);
+    d.backTextureGlow, d.frontTextureGlow, d.frontTextureExtraGlow].filter((f) => f !== undefined);
   const main = [d.backTexture, d.frontTexture].filter((f) => f !== undefined);
   textureOk[id] = main.length > 0 && main.every(texAvailable);
   // 全层缺素材的层剔除（不进管线），保留登记信息
   for (const slot of ['backTexture', 'frontTexture', 'backTextureExtra', 'frontTextureExtra',
-    'backTextureGlow', 'frontTextureGlow']) {
+    'backTextureGlow', 'frontTextureGlow', 'frontTextureExtraGlow']) {
     if (typeof d[slot] === 'string' && !texAvailable(d[slot])) delete d[slot];
   }
   if (d.playerYOffsets) d.playerYOffsets = d.playerYOffsets.map((v) => +v.toFixed(2));

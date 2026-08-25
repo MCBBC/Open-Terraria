@@ -248,27 +248,12 @@ export function assetsCompleteFast(): boolean {
 /** 与 public/sw.js 的 CACHE_PREFIX 手工同步(缓存名前缀;改须双侧) */
 const CACHE_PREFIX = 'sw-assets-v';
 
-/** 懒加载 worker 预取(2026-08-25 review#2):worldGen(4MB)/save(1.9MB)worker
- *  原为首次进世界/首次存档才懒下载——利用音频门等待窗口后台 fetch 填充 SW 缓存,
- *  真正使用时走 cache-first 秒开。URL 经 new URL(asset, import.meta.url) 由 vite
- *  解析到与 spawn 点相同的哈希产物;缓存键=绝对 URL 与 SW 回填口径一致。 */
-function prefetchLazyWorkers(): void {
-  if (!import.meta.env.PROD || typeof caches === 'undefined') return;
-  const urls = [
-    new URL('../workers/worldGen.worker.ts', import.meta.url),
-    new URL('../workers/save.worker.ts', import.meta.url),
-  ];
-  void (async () => {
-    try {
-      const cache = await caches.open(CACHE_PREFIX + state.version);
-      for (const u of urls) {
-        const key = String(u);
-        if (await cache.match(key)) continue;
-        const res = await fetch(u);
-        if (res && res.ok) await cache.put(key, res.clone());
-      }
-    } catch { /* 非关键路径 */ }
-  })();
+/** 懒加载 worker 预取钩子(2026-08-25):由 main 注入(main 持有两个客户端的
+ *  prefetchWorker——spawn 点的 new Worker(new URL) 才会被 vite 构建,此处若用
+ *  裸 new URL 引 .ts 会被当静态资产原样拷贝进发布包=源码泄漏,实测踩坑)。 */
+let lazyWorkerPrefetch: (() => void) | null = null;
+export function setLazyWorkerPrefetch(fn: () => void): void {
+  lazyWorkerPrefetch = fn;
 }
 
 function postToSw(msg: Record<string, unknown>): void {
@@ -300,7 +285,7 @@ export async function primeBootAssets(timeoutMs = 30_000): Promise<boolean> {
     await new Promise((r) => setTimeout(r, 250));
   }
   // 哨兵就位(或超时降级)后:利用音频门等待窗口预取两个懒加载 worker
-  prefetchLazyWorkers();
+  lazyWorkerPrefetch?.();
   try {
     const ms = await Promise.all(want.map((u) => caches.match(u)));
     return ms.every(Boolean);

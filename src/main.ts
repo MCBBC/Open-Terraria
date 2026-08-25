@@ -17,7 +17,9 @@ import { SpriteAtlas } from './assets/SpriteAtlas';
 import { AudioSystem } from './core/Audio';
 import { setDebugPool } from './data/vanillaNpcs';
 import { VUI } from './vui/VUI';
-import { initAssetCache, primeBootAssets, warmAllAssets } from './net/AssetCache';
+import { initAssetCache, primeBootAssets, setLazyWorkerPrefetch, warmAllAssets } from './net/AssetCache';
+import { prefetchWorldGenWorker } from './workers/WorldGenClient';
+import { prefetchSaveWorker } from './workers/SaveClient';
 import { holdForAssetsReady, mountAssetBadge } from './ui/AssetDownloadUI';
 import { UITextures } from './vui/assets/UITextures';
 import { UIFont } from './vui/draw/UIFont';
@@ -584,6 +586,8 @@ kvHas('sandboxworld.quicksave').then(async () => {
   //   等待指示=原版 LoadingSunflower 帧动画(UI_Sunflower_Loading.png 52×1007
   //   竖条 19 帧,帧序 :52041-52060 同款 Frame(1,19,0,(帧/3+10)%19),2026-08-25
   //   用户要求替换脉冲点)
+  // 懒 worker 预取钩子注入(音频门等待窗口借 SW 回填;见 WorldGenClient/SaveClient 尾注)
+  setLazyWorkerPrefetch(() => { prefetchWorldGenWorker(); prefetchSaveWorker(); });
   if (!bypassBoot) {
     const veil = document.createElement('div');
     veil.id = 'sw-boot-prime';

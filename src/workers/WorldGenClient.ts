@@ -220,3 +220,14 @@ export class WorldGenClient {
 
   terminate() { this.teardown(); }
 }
+
+/** 预取(2026-08-25):音频门等待窗口借 SW 回填 worker 脚本进缓存——spawn+延迟
+ *  terminate,脚本请求经 SW cache-first 落缓存;真正 ensureWorker 时秒开。
+ *  ★必须走本文件的 new Worker(new URL) 模式(vite 才会构建产物);外部裸
+ *  new URL 引 .ts 会被当静态资产原样拷进发布包=源码泄漏,实测踩坑 */
+export function prefetchWorldGenWorker(): void {
+  try {
+    const w = new Worker(new URL('./worldGen.worker.ts', import.meta.url), { type: 'module' });
+    setTimeout(() => w.terminate(), 3000);
+  } catch { /* SW 未控/不支持 → 懒路径照旧 */ }
+}

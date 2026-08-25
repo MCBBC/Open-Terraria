@@ -238,13 +238,16 @@ export class PrismProng extends Entity {
         const [rr, gg, bb] = hueToRgb(this.idx / 6);
         const rotAdj = Math.atan2(this.vy, this.vx) - Math.PI / 2;   // 贴图纵向→束向(Utils.cs:2804)
         ctx.save();
-        // ★混合=原版 AlphaBlend（Main.DrawProjectiles spriteBatch.Begin(AlphaBlend)）
-        // ——曾 'lighter' 加法:光晕外扩显粗+hue 冲白=用户报"比原版粗/色调不对"
+        // ★XNA 预乘混合语义（AlphaBlend 对预乘贴图 out = tex.rgb×C.rgb + dest×(1−tex.a×C.a)
+        // ——RGB 贡献【不吃 C.alpha】）:hue pass A×=0(:32826) → 纯加法不衰减背景
+        // ='lighter' 等价;白 pass RGB 贡献=255×0.75×op 全额(A=127 只衰减 dest)。
+        // 曾 source-over(遮暗背景=显粗/色调闷)与白芯 ×127/255(亮度减半)皆误,均废
+        ctx.globalCompositeOperation = 'lighter';
         ctx.imageSmoothingEnabled = false;
         const hueTex = tintedTex(img, [rr, gg, bb], true);
         const whiteTex = tintedTex(img, [255, 255, 255], true);
         if (hueTex) this.drawLaserTex(ctx, hueTex, sx, sy, rotAdj, len, this.prongScale * th, 0.75 * opacity);
-        if (whiteTex) this.drawLaserTex(ctx, whiteTex, sx, sy, rotAdj, len, this.prongScale * 0.5 * th, 0.75 * (127 / 255) * opacity);
+        if (whiteTex) this.drawLaserTex(ctx, whiteTex, sx, sy, rotAdj, len, this.prongScale * 0.5 * th, 0.75 * opacity);
         ctx.restore();
         return;
       }

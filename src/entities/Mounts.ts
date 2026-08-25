@@ -119,6 +119,9 @@ export interface MountData {
   backTexture?: string; frontTexture?: string;
   backTextureExtra?: string; frontTextureExtra?: string;
   backTextureGlow?: string; frontTextureGlow?: string;
+  /** Mount.Draw drawType 3 发光层（:5534 frontTextureExtraGlow——钻头二极管
+   *  DrillMount[5]→Mount_Glow_DrillDiode；提取器 slot 表曾漏此键，钻头 8 已手补） */
+  frontTextureExtraGlow?: string;
 }
 
 export const MOUNT_COUNT: number = mountJson.count;

@@ -113,8 +113,9 @@ export class AudioSystem {
       Sfx.registerAudioContext(this.ac);
     }
     // ★失焦闸配合：隐藏期间禁止自动 resume（手势恢复走 resumeNow/armUnlock,均由
-    //  用户输入触发、隐藏态不可达）
-    if (this.ac.state === 'suspended' && !document.hidden) {
+    //  用户输入触发、隐藏态不可达）。node 单测无 document → 视为可见
+    const pageHidden = typeof document !== 'undefined' && document.hidden;
+    if (this.ac.state === 'suspended' && !pageHidden) {
       this.ac.resume().catch(() => { /* 手势前恢复被拒，播放时重试 */ });
     }
     return this.ac;

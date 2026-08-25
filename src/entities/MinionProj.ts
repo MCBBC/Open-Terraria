@@ -413,6 +413,14 @@ export class MinionProj extends Entity {
   private palA0 = 0;
   /** ai[1]：扑击剩余 tick（num10 初值 16/30，:50490/:50499） */
   private palA1 = 0;
+  /** 帧（AI_067 flag8/flag9 原版帧机驱动，draw 消费——2026-08-24 用户报捣蛋猫
+   *  攻击白团：此前走 age/8%28 全帧循环，把表内受惊/扑击白姿帧也播出来。
+   *  原版 flag8(1112) 步行/索敌期【不写 frame】=冻结静止帧，仅肩扛 0/1/2
+   *  （Player.vy 阈 :50788-50800）与扑击 3+(num10-ai1)/(num10/4)（:50875）；
+   *  flag9(1118) 步行机 :51885-51930（idle 0/走 8-15/空气 1-2/抚摸 16）、
+   *  扑击 3+(num10-ai1)/(num10/4)（:50909） */
+  palFrame = 0;
+  private palFrameCd = 0;
   // ---- 1457 帕鲁钻地龟 1098/1123（AI_204_Digtoise Projectile.cs:39169-39506 态机，
   //      2026-08-23 内容缺口批；物品 5667 PalworldDigtoise / 6174 PalworldTrustyDigtoise）----
   /** ai[0]：0 出场 / 1 向下挖 / 2 向右挖 / 3 向左挖 / 4 离场 / 5 抚摸（:39173-39178） */
@@ -762,7 +770,7 @@ export class MinionProj extends Entity {
       this.palJoyCd = 60;
       if (this.projId === 1093 || this.projId === 1112) {
         game.playSfxFiles(['pal_cattiva_joy'], 0.35, this.cx, this.cy);   // SoundID.cs:1078 0.35
-      } else if (this.projId === 1094 || this.projId === 1113) {
+      } else if (this.projId === 1118) {
         game.playSfxFiles(['pal_foxparks_joy'], 0.35, this.cx, this.cy);  // SoundID.cs:1090 0.35
       }
     }
@@ -835,6 +843,8 @@ export class MinionProj extends Entity {
         this.y = p.cy - 24 - this.h / 2;   // MountedCenter = 玩家中心（p.cy）
         this.vx = 0; this.vy = 0;
         this.facing = p.facing;
+        // 肩扛帧（:50788-50800）：frame=1 → vy≥-6 归 0 → vy≥6 归 2
+        this.palFrame = p.vy >= 6 ? 2 : p.vy >= -6 ? 0 : 1;
         if (p.vy === 0) { this.palA0 = 0; this.palA1 = 0; }
         return;
       }
@@ -862,6 +872,9 @@ export class MinionProj extends Entity {
     const tgt = this.palA0 === 0 || this.palA0 === 2 ? this.nearestEnemy(game, num2, 'line') : null;
     // ---- ai[0]==2 扑击（:50901-50956）----
     if (this.palA0 === 2) {
+      // 扑击帧（flag9 :50909 / flag8 :50875 同式）：3 + (num10-ai1)/(num10/4)
+      this.palFrame = Math.min(7,
+        3 + Math.floor((num10 - this.palA1) / (num10 / 4)));
       this.palA1--;                           // :50953
       if (this.palA1 === num10 - 1) {
         if (this.onGround) this.vx *= 0.1;    // :50905-50907（velocity.Y==0=贴地语义）
@@ -994,6 +1007,29 @@ export class MinionProj extends Entity {
     if (this.vx < 0) this.facing = -1;
     else if (this.vx > 0) this.facing = 1;
     else this.facing = p.cx > this.cx ? 1 : -1;
+    // 步行帧机（flag9 :51885-51930 1:1，仅 1118——flag8/1112 步行期原版不写
+    // frame=冻结静止帧）：贴地静止 0 / 走行 |vx|≥0.5 计步循环 8-15 / 空中 1(升)2(降)
+    if (!flag8) {
+      const air = !this.onGround;
+      if (!air) {
+        if (Math.abs(this.vx) < 0.5) {
+          this.palFrame = 0;
+          this.palFrameCd = 0;
+        } else {
+          this.palFrameCd += Math.abs(this.vx);
+          this.palFrameCd++;
+          if (this.palFrame < 8) this.palFrame = 8;
+          if (this.palFrameCd > 10) {
+            this.palFrame++;
+            this.palFrameCd = 0;
+          }
+          if (this.palFrame >= 15) this.palFrame = 8;
+        }
+      } else {
+        this.palFrameCd = 0;
+        this.palFrame = this.vy > 0 ? 2 : 1;
+      }
+    }
   }
 
   /** 帕鲁钻地龟 1098/1123（AI_204_Digtoise Projectile.cs:39169-39506 全式折算，
@@ -3503,6 +3539,9 @@ export class MinionProj extends Entity {
     } else if (this.projId >= 390 && this.projId <= 392) {
       // 蜘蛛步行链帧通道（AI_026 :65092-65220）：0-2 走 / 3 空 / 4-7 爬墙
       frame = Math.min(this.spFrame, Math.max(0, frames - 1));
+    } else if (this.projId === 1112 || this.projId === 1118) {
+      // 帕鲁地面随从（AI_067 flag8/flag9）：palGroundStep 原版帧机直写
+      frame = Math.min(this.palFrame, Math.max(0, frames - 1));
     } else if (MINION_FRAMES[this.projId]) {
       // 帧表族（源码各 AI 提取）：每帧 tick 循环帧表；
       // 小鬼 375 攻击帧门 = ai[1]∈(0,24)（:66910-66913——a62A1 冷却计数器直读,
@@ -3511,6 +3550,9 @@ export class MinionProj extends Entity {
       frame = Math.floor(this.age / tickPer) % count;
       if (atkOff && (this.projId === 375
         ? (this.a62A1 > 0 && this.a62A1 < 24) : this.attackFlash > 0)) frame += atkOff;
+    } else if (this.projId === 1112 || this.projId === 1118) {
+      // 帕鲁地面随从（AI_067 flag8/flag9）：palGroundStep 原版帧机直写
+      frame = Math.min(this.palFrame, Math.max(0, frames - 1));
     } else if (this.projId === 1094 || this.projId === 1113) {
       // 火绒狐帧态机（AI_026 flag8 帧段 :64729-64826 折算,foxAnimTick 每 tick 维护）。
       // 贴图 = 6 列×9 行网格（1457 Main.cs:33734-33737 X=(frame/9)*64、

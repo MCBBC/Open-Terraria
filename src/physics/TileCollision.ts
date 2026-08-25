@@ -44,6 +44,8 @@ export interface Body {
   /** 液体位移减速因子（原版 waterMovementSpeed 族，NPC.cs:5946：水/岩浆 .5、蜂蜜 .25、
    *  微光 .375；dry=1）。Entity 基类缺省 1，Enemy 侧由 npcLiquid.updateNpcLiquid 写入 */
   liqFactor?: number;
+  /** 连续中心格嵌入 tick 计数（unembedPass 延迟门用；脱出/未嵌入即复位） */
+  embedTicks?: number;
 }
 
 /** Collision.StepUp（Collision.cs:3641-3770，gravDir=1、holdsMatching=false）：
@@ -404,9 +406,14 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   // 瞬移按压到地面（萤火虫/蝴蝶"怪力按地+闪现"根因）
   if (b.stepUp) {
     const gate = b.stepDownGate ?? 'grounded';
-    // 'never'（AI_007 TownCritter flag22 恒 true 档）跳过 StepDown,StepUp 照常
+    // 'never'（AI_007 TownCritter flag22 恒 true 档）跳过 StepDown,StepUp 照常。
+    // ★'grounded' 门补 vy>=0（2026-08-25）：原版字面 vy==0（NPC.cs:54374）在跳起
+    //   首 tick（AI 已置 vy=-8）同样不吸附——曾只查 wasGround，跳起首 tick 被
+    //   StepDown 先拽下 16px 再起跳（观感=起跳顿挫/沉一下；探针 tick=56 实录
+    //   from y3928→3944 且 v=(−1.5,−8)）。vy>=0 不复活旧"低空飞虫被按地"bug
+    //   （那需要无 wasGround 门；飞虫 wasGround 恒 false 本就不吸附）
     if (gate === 'never') { /* no StepDown */ }
-    else if (gate === 'gravity' ? b.vy === GRAVITY : wasGround) applyStepDown(b, world);
+    else if (gate === 'gravity' ? b.vy === GRAVITY : (wasGround && b.vy >= 0)) applyStepDown(b, world);
     applyStepUp(b, world, !!b.stepUpHolds, b.stepUpNpc === true);
   }
   // 速度辅助（Collision.cs:1773-1790）：脚底中心所在格(原版为整行落地候选格的近似)
@@ -448,15 +455,31 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
  *  与实心相交=恒拦),AI 跳跃(vy=-7)在实心顶盖下无效 → 永久卡死(用户实报:
  *  火把僵尸半嵌土丘,vy=-7 反复跳不出)。
  *  脱出:向上找最近连续净空(≤3 格)直接上移(重力场景天然出口);上方封死 →
- *  测左右 2 格净空宽的一侧平移。每 tick 至多一次,脱出后交还常规碰撞。 */
+ *  测左右 2 格净空宽的一侧平移。每 tick 至多一次,脱出后交还常规碰撞。
+ *  ★延迟门+限速(2026-08-25 弹射/贴顶双症状修复):原版【无】自救 pass——嵌入
+ *  实体靠常规碰撞自行走出(嵌入格不拦已跨入的 X,TileCollision 旧位放行语义)。
+ *  瞬态嵌片(低顶隧道口 StepUp 抬升/坡顶过渡)零点几秒内自愈,不该被瞬移;
+ *  沙埋/塌方类真嵌入才救援。故:
+ *  - 中心格实心须连续 ≥EMBED_DELAY_TICKS(≈0.25s)才动手——期间原版物理照常
+ *    尝试自行走出;
+ *  - 每 tick 至多脱 1 格(16px)——曾一次抬 clear×16(≤48px)+逐 tick 棘轮 =
+ *    2880px/s 竖直弹射(用户报"僵尸从屏幕外被弹射抛入"),落到地表顶后沿顶
+ *    行走 = "贴着方块顶部走像飞"。限速后观感=快速爬出而非弹射。 */
+const EMBED_DELAY_TICKS = 15;
 function unembedPass(b: Body, world: World): void {
   const st = world.store;
   const cx = Math.floor((b.x + b.w / 2) / TILE);
   const cy = Math.floor((b.y + b.h / 2) / TILE);
   if (!st.inBounds(cx, cy)) return;
   const ci = st.idx(cx, cy);
-  if (!st.isSolid(cx, cy) || st.slope[ci] > 0 || st.half[ci] || st.isPlatform(cx, cy)) return;
-  // ① 向上:从盒顶行上方起找连续净空(≤3 格),上移到盒顶达净空区
+  if (!st.isSolid(cx, cy) || st.slope[ci] > 0 || st.half[ci] || st.isPlatform(cx, cy)) {
+    b.embedTicks = 0;   // 脱出/未嵌入:计数复位(瞬态嵌片靠原版物理自愈)
+    return;
+  }
+  const emb = (b.embedTicks ?? 0) + 1;
+  b.embedTicks = emb;
+  if (emb < EMBED_DELAY_TICKS) return;
+  // ① 向上:从盒顶行上方起找连续净空(≤3 格),每 tick 至多上移 1 格
   const topRow = Math.floor(b.y / TILE);
   let clear = 0;
   for (let k = 1; k <= 3; k++) {
@@ -465,17 +488,19 @@ function unembedPass(b: Body, world: World): void {
     clear = k;
   }
   if (clear > 0) {
-    // 上移量 = 盒顶到净空区底部(顶行上方第 clear 格的底) + 2px 余量
-    const lift = Math.min(clear * TILE, b.y - (topRow - clear) * TILE + 2);
+    const lift = Math.min(clear * TILE, TILE);
     if (lift > 0) {
       const ny = b.y - lift;
-      // ★整盒验证(2026-08-24 review 加固):上移后盒占的所有格非实心
-      // (中心格单点验证不够——盒高 2.6 格,顶/底格可能撞进别的实心)
+      // ★增量条带验证(2026-08-25 限速改):只验新扫过的顶带(旧顶行以上至新顶行)
+      // ——限速后盒下半仍嵌在原实心里(救援前提),整盒验证恒假自否。
+      // 原整盒验证(2026-08-24)配全深抬升,语义=一次到位;限速后逐格爬出,
+      // 每步只须保证新进入的行净空(坡/半砖/平台不拦,同原判)。
       const nx0 = Math.floor(b.x / TILE), nx1 = Math.floor((b.x + b.w - 0.01) / TILE);
-      const ny0 = Math.floor(ny / TILE), ny1 = Math.floor((ny + b.h - 0.01) / TILE);
+      const newRow = Math.floor(ny / TILE);
+      const oldRow = Math.floor(b.y / TILE);
       let fits = true;
       for (let tx = nx0; tx <= nx1 && fits; tx++) {
-        for (let ty = ny0; ty <= ny1; ty++) {
+        for (let ty = newRow; ty < oldRow && fits; ty++) {
           if (!st.inBounds(tx, ty)) continue;
           const ti = st.idx(tx, ty);
           if (st.isSolid(tx, ty) && st.slope[ti] === 0 && !st.half[ti] && !st.isPlatform(tx, ty)) {
@@ -504,20 +529,17 @@ function unembedPass(b: Body, world: World): void {
   const l = sideClear(-1), r = sideClear(1);
   if (l === 0 && r === 0) return;
   const dir = r >= l ? 1 : -1;
-  const push = Math.max(l, r) * TILE;
+  const push = Math.min(Math.max(l, r), 1) * TILE;   // 每 tick 至多平移 1 格（同上限速）
   const nx = b.x + dir * push;
-  // 整盒验证(同上移支)
-  const nx0 = Math.floor(nx / TILE), nx1 = Math.floor((nx + b.w - 0.01) / TILE);
-  const nyc = Math.floor((b.y + b.h / 2) / TILE);
+  // 增量条带验证（同上移支）：只验新扫入的前缘列
+  const leadCol = dir > 0 ? Math.floor((nx + b.w - 0.01) / TILE) : Math.floor(nx / TILE);
   let fits = true;
-  for (let tx = nx0; tx <= nx1 && fits; tx++) {
-    for (let ty = Math.floor(b.y / TILE); ty <= Math.floor((b.y + b.h - 0.01) / TILE); ty++) {
-      if (!st.inBounds(tx, ty)) continue;
-      const ti = st.idx(tx, ty);
-      if (st.isSolid(tx, ty) && st.slope[ti] === 0 && !st.half[ti] && !st.isPlatform(tx, ty)) {
-        fits = false;
-        break;
-      }
+  for (let ty = Math.floor(b.y / TILE); ty <= Math.floor((b.y + b.h - 0.01) / TILE); ty++) {
+    if (!st.inBounds(leadCol, ty)) continue;
+    const ti = st.idx(leadCol, ty);
+    if (st.isSolid(leadCol, ty) && st.slope[ti] === 0 && !st.half[ti] && !st.isPlatform(leadCol, ty)) {
+      fits = false;
+      break;
     }
   }
   if (fits) {
