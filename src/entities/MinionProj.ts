@@ -23,7 +23,7 @@ import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
 import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
 import { ITEM_DEFS } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
 
@@ -680,7 +680,7 @@ export class MinionProj extends Entity {
     const pool: (EnemyLike & { vx?: number; vy?: number })[] = [];
     for (const e of game.enemies()) {
       const en = e as EnemyLike & { vx?: number; vy?: number };
-      if (!playerCanHitEnemy(e, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
+      if (!canBeChasedBy(e)) continue;   // CanBeChasedBy :91070/:91141——友好+immortal 族不入索敌（防追踪睡渔夫/假人）
       if (!en.dead && Math.abs(en.cx - p.cx) <= 800 && Math.abs(en.cy - p.cy) <= 400) pool.push(en);
     }
     if (!pool.length) return false;
@@ -1284,7 +1284,7 @@ export class MinionProj extends Entity {
     let bestD = 1000;
     for (const e of game.enemies()) {
       const en = e as never as EnemyLike & { dead: boolean };
-      if (!playerCanHitEnemy(e, game) || !en || en.dead) continue;
+      if (!canBeChasedBy(e) || !en || en.dead) continue;
       const d = Math.hypot(en.cx - pcx, en.cy - pcy);
       if (d > 1000) continue;
       if (!canHitLine(game.world.store, this.x, this.y, this.w, this.h, en.x, en.y, en.w, en.h)) continue;
@@ -1338,7 +1338,7 @@ export class MinionProj extends Entity {
       return;
     }
     // ---- 攻击（ai[0] > 0）：目标校验（:52648-52676）----
-    if (!tgt || tgt.dead || !playerCanHitEnemy(tgt as never, game)) {
+    if (!tgt || tgt.dead || !canBeChasedBy(tgt as never)) {
       const en = this.tTarget(game, p.cx, p.cy);
       if (en) {
         this.tA0 = Math.random() < 0.5 ? num : num3;   // 链式 NextFromList(40,80) :52666
@@ -1416,7 +1416,7 @@ export class MinionProj extends Entity {
     }
     for (const e of game.enemies()) {
       const en = e as never as EnemyLike & { dead: boolean; id: number };
-      if (!en || en.dead || !playerCanHitEnemy(e, game)) continue;
+      if (!en || en.dead || !canBeChasedBy(e)) continue;
       if (this.tHit.has(en.id)) continue;
       if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
       this.tHit.set(en.id, 60);
@@ -1490,7 +1490,7 @@ export class MinionProj extends Entity {
       return;
     }
     // 攻击（:52577-52647）
-    if (!tgt || tgt.dead || !playerCanHitEnemy(tgt as never, game)) { this.bA0 = 0; this.bA1 = 0; return; }
+    if (!tgt || tgt.dead || !canBeChasedBy(tgt as never)) { this.bA0 = 0; this.bA1 = 0; return; }
     this.bA0--;
     if (this.bA0 >= num2) {
       // 减速段（:52590-52596）：velocity×0.8,至 65 记起点
@@ -1534,7 +1534,7 @@ export class MinionProj extends Entity {
     }
     for (const e of game.enemies()) {
       const en = e as never as EnemyLike & { dead: boolean; id: number };
-      if (!en || en.dead || !playerCanHitEnemy(e, game)) continue;
+      if (!en || en.dead || !canBeChasedBy(e)) continue;
       if (this.bHit.has(en.id)) continue;
       if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
       this.bHit.set(en.id, 60);
@@ -2083,8 +2083,7 @@ export class MinionProj extends Entity {
       let any700 = false, los700 = false;
       for (const e of game.enemies()) {
         const en = e as EnemyLike;
-        if (!playerCanHitEnemy(e, game)) continue;
-        if (en.dead) continue;
+        if (!canBeChasedBy(e)) continue;
         if (Math.abs(p.cx - en.cx) + Math.abs(p.cy - en.cy) >= 700) continue;
         if (canHit(st, this.x, this.y, this.w, this.h, en.x, en.y, en.w, en.h)) los700 = true;
         any700 = true;
@@ -2140,8 +2139,7 @@ export class MinionProj extends Entity {
     }
     for (const e of game.enemies()) {
       const en = e as EnemyLike;
-      if (!playerCanHitEnemy(e, game)) continue;
-      if (en.dead) continue;
+      if (!canBeChasedBy(e)) continue;
       const d = Math.abs(this.cx - en.cx) + Math.abs(this.cy - en.cy);
       if (d < anyD) { anyD = d; anyT = en; }          // :62814-62860（LOS 候选可覆写种子）
       if (d < losD && canHit(st, this.x, this.y, this.w, this.h, en.x, en.y, en.w, en.h)) {
@@ -2441,7 +2439,7 @@ export class MinionProj extends Entity {
       let best = 900;
       for (const e of game.enemies()) {
         const en = e as EnemyLike;
-        if (!playerCanHitEnemy(e, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
+        if (!canBeChasedBy(e)) continue;   // CanBeChasedBy :91070/:91141——友好+immortal 族不入索敌（防追踪睡渔夫/假人）
         if (en.dead) continue;
         const d = Math.abs(this.cx - en.cx) + Math.abs(this.cy - en.cy);
         if (d < best && canHit(game.world.store, this.x, this.y, this.w, this.h, en.x, en.y, en.w, en.h)) {
@@ -2776,7 +2774,7 @@ export class MinionProj extends Entity {
     const stack = p.tagEffectStack;
     for (const e of game.enemies()) {
       const en = e as never as EnemyLike & { dead: boolean };
-      if (!playerCanHitEnemy(e, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
+      if (!canBeChasedBy(e)) continue;   // CanBeChasedBy :91070/:91141——友好+immortal 族不入索敌（防追踪睡渔夫/假人）
       if (!en || en.dead) continue;
       const d = Math.hypot(en.cx - bx, en.cy - by);
       if (d < bestD) {

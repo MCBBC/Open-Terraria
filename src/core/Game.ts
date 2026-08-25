@@ -521,7 +521,8 @@ const BOSS_GAME_EVENT_BY_NPC: Record<number, number> = {
 // 挥击范围内命中即 KillTile：杂草/藤蔓/药草芽等直接碎，瓦罐(28)走整罐碎裂+掉落
 const TILE_CUT_VANILLA = new Set([
   654, 518, 519, 549, 529, 637, 231, 484, 711, 201, 3, 24, 28, 32, 51, 52, 61, 62, 69, 655,
-  71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 352, 382, 528, 636, 638, 444, 485,
+  71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 236, 254, 352, 382, 444, 454, 485,
+  528, 529, 549, 636, 637, 638,
 ]);
 // ---- 原版挖掘表（vanilla sheet id）----
 // tileNoFail（Main.cs:7138/7142-7152/7313-7338/7392/7772-8318/9407-9411/9498/10197-10198）：
@@ -5676,19 +5677,23 @@ export class Game implements GameHooks {
       this.waterCandleNear = nearWC;
     }
     // 篝火/心灯光环:篝火 lifeRegen+1 = 0.5 HP/s;心灯(灯笼 tile42 frameY 324-358,
-    // SceneMetrics.cs:207-208)lifeRegen+2 = 1 HP/s,两者独立
+    // SceneMetrics.cs:207-208)lifeRegen+2 = 1 HP/s,两者独立。
+    // ★原版扫描(SceneMetrics :354-368+Player.UpdateSceneMetrics):以玩家 tile 心
+    //   为中心的 CenteredRectangle(ZoneScanSize=(1920/16+50−1, 1200/16+50−1)=
+    //   169×124 格)= ±84/±62;点燃门 = frameY<36（frameY 即状态位,frameX 是列——
+    //   曾 frameX<18:只认左列且不看点燃=有效区左偏+熄灭篝火也给 buff,用户报偏移）
     if (this.tickCount % 20 === 0) {
       const ptx2 = Math.floor(this.player.cx / TILE), pty2 = Math.floor(this.player.cy / TILE);
       let fire = false, heart = false;
       const FIRE = TILE_BY_KEY['v_215_campfires'];
       const LANTERN = TILE_BY_KEY['lantern'];
       const st3 = this.world.store;
-      for (let dx = -48; dx <= 48 && !(fire && heart); dx += 3) {
-        for (let dy = -36; dy <= 36; dy += 3) {
+      for (let dx = -84; dx <= 84 && !(fire && heart); dx += 3) {
+        for (let dy = -62; dy <= 62; dy += 3) {
           const lx = ptx2 + dx, ly = pty2 + dy;
           if (!st3.inBounds(lx, ly)) continue;
           const li = st3.idx(lx, ly);
-          if (st3.type[li] === FIRE && st3.frameX[li] < 18) fire = true;
+          if (st3.type[li] === FIRE && st3.frameY[li] < 36) fire = true;
           if (st3.type[li] === LANTERN && st3.frameY[li] >= 324 && st3.frameY[li] <= 358) heart = true;
           if (fire && heart) break;
         }

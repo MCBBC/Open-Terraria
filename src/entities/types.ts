@@ -146,6 +146,9 @@ export interface GameHooks {
   startTrackedLoop?(
     name: string, vol: number, x: number, y: number,
   ): { stop(): void; setPos(px: number, py: number): void } | null;
+  /** channel 蓄力期手持动画续期（Player.ItemCheck channel 分支 itemAnimation 钉满——
+   *  手持法杖全程举向鼠标不脱落；GlacierFangShot/PrismProj 蓄力态逐 tick 调用） */
+  refreshChannelItem?(): void;
   /** 常驻循环轨按 wav 文件（SoundEngine.PlayTrackedLoopedSound 的音量跟随档——
    *  吸血鬼炽灼音环 SoundID.VampireSizzle（Player.cs:28107-28121）Volume 每帧 =
    *  GetLerpValue(0,120,sunScorchCounter)；Game 实现 = Sfx.playLoopFile，

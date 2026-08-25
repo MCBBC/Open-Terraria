@@ -502,7 +502,7 @@ export function drawTileFlames(
       let frameY = st.frameY[i];
       if (isCampfire) {
         if (frameY >= 36) continue;                     // :2731 门（上半 36px 才有火）
-        frameY += campfireYOffset(frameY);              // addFrY（:2737）
+        frameY = campfireYOffset(frameY);               // addFrY（:2737）——返回完整绘制 y
       } else if (isBrazier) {
         // 火盆族 addFrY = Main.tileFrame[type]*54（GetTileDrawData :5376-5385）——
         // 与本体烘焙同源（TileAnim），火焰帧行与制作台动画同步

@@ -641,8 +641,12 @@ kvHas('sandboxworld.quicksave').then(async () => {
       const back = sp?.querySelector('.back') as HTMLElement | null;
       if ((sp && back && back.style.backgroundImage) || !sp) {
         clearInterval(handoff);
-        bootVeil?.remove();
-        bootVeil = null;
+        // ★延迟 1000ms 再撤(2026-08-25 用户要求:500ms 基础上再延 500):向日葵
+        //   与过渡页并存交接
+        setTimeout(() => {
+          bootVeil?.remove();
+          bootVeil = null;
+        }, 1000);
       }
     }, 100);
   }

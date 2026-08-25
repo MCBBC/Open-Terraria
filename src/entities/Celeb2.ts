@@ -18,7 +18,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -229,7 +229,7 @@ export class Celeb2Rocket extends Entity {
             let bd = 800;
             for (const ent of game.enemies()) {
               const e = ent as unknown as EnemyLike & { cx: number; cy: number };
-              if (!playerCanHitEnemy(e, game, this.projId)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
+              if (!canBeChasedBy(e)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
               if (e.dead) continue;
               const d = Math.abs(e.cx - this.cx) + Math.abs(e.cy - this.cy);
               if (d < bd) { bd = d; tx = e.x + e.w / 2; ty = e.y + e.h / 2; found = true; this.ai1 = e.id + 1; }

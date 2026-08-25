@@ -1040,6 +1040,9 @@ export class GlacierFangShot extends Entity {
   private penTier = 1;
   private hits = 0;
   private hitCd = new HitCdImpl();
+  /** Projectile.timeLeft 等价（蓄力期每拍重置 300 :37596；释放后 300 递减归零
+   *  Kill=释放冰矛 5 秒寿命——曾无上限,开阔天空永不消亡=无限堆积,用户实报） */
+  private life = 300;
   private ctl: GlacierFangCtl;
 
   constructor(x: number, y: number, dirX: number, dirY: number, damage: number, knockback: number, ctl: GlacierFangCtl) {
@@ -1065,6 +1068,10 @@ export class GlacierFangShot extends Entity {
       // ItemCheck_ApplyManaRegenDelay → delay 钉 4 = 全程 5% 滴流回蓝；2026-08-22
       // 审计 ❌ 修复——蓄力最长 60 拍(慢施 ÷2.5=150t)远超 useTime,不续期则白嫖魔力）
       p.onChannelManaHold?.();
+      // ★手持动画续期（channel 语义:蓄力期 itemAnimation 钉满,手持法杖全程举向
+      //  鼠标不脱落——swing 窗 24t 远短于蓄力,不续则法杖中途消失,用户实报）
+      game.refreshChannelItem?.();
+      this.life = 300;                                       // :37596 timeLeft=300 每拍重置
       const m = this.ctl.aim();
       // 挂手：RotatedRelativePoint(MountedCenter) − Size/2（:37587）
       this.x = p.cx - this.w / 2;
@@ -1093,6 +1100,10 @@ export class GlacierFangShot extends Entity {
     this.y += this.vy;
     this.vy += 0.15 + (0.025 - 0.15) * Math.min(1, Math.max(0, this.charge / 45));  // Remap(ai0,0,45,0.15,0.025)
     if (this.vy > 16) this.vy = 16;
+    // ★寿命帽（timeLeft=300 蓄力期每拍重置 :37596,释放后递减归零 Kill=5 秒寿命——
+    //  此前无上限,开阔地释放的冰矛永不消亡=多次施法无限堆积,用户实报蓄力贴图异常）
+    this.life = (this.life ?? 300) - 1;
+    if (this.life <= 0) { this.dead = true; return; }
     // 撞实心 → 消亡（tileCollide=true :37644）
     const st = game.world.store;
     const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);

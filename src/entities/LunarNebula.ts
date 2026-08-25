@@ -20,7 +20,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 
 type EnemyLike = {
@@ -119,7 +119,7 @@ export class NebulaBlazeBolt extends Entity {
       let bd = this.cfg.seek;
       for (const ent of game.enemies()) {
         const e = ent as unknown as EnemyLike;
-        if (!playerCanHitEnemy(e, game, this.projId)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
+        if (!canBeChasedBy(e)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
         if (e.dead) continue;
         const d = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
         if (d < bd && canHit(game.world.store, this.cx, this.cy, 0, 0, e.x + e.w / 2, e.y + e.h / 2, 0, 0)) {

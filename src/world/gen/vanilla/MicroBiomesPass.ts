@@ -509,6 +509,7 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
     }
     if (solid < total - 5) return false;
   }
+  segProbe('campGate');
   const num = rng.int(6, 9);  // Next(6,10)
   const num2 = rng.int(1, 4); // Next(1,5)
   const rect: Rect = { x0: ox - num, y0: oy - num, x1: ox + num + 1, y1: oy + num + 1 };
@@ -549,6 +550,7 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
   }
   // Slime(num) + Blotches(num2,num2,num2,1,chance 1.0) 形状(cs:67-68):
   //  blotch 点入 ShapeData;Offset(0,-2) 后沙 53→397;空墙 → wallType
+  segProbe('campWall');
   const data = new Set<number>();
   const r2 = (num + 1) * (num + 1);
   const slimeRows: Array<[number, number]> = [];
@@ -608,7 +610,13 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
   //     .NET HashSet 枚举序=槽分配序=插入序（XXXX 批裁决，见文件头），JS Set 同序。
   //     SetFrames 在 OnlyWalls(0) 门之前（链位）——逐点恒执行；PlaceWall 掷仅
   //     空墙点（XXXX 补）
+  segProbe('campBlot');
+  segProbe('campDataN', data.size);
+  let __cellN = 0;
   for (const key of data) {
+    __cellN++;
+    segProbe('campCell', __cellN);
+
     const px = key % st.w, py = Math.trunc(key / st.w);
     if (!st.inBounds(px, py)) continue;
     const i = st.idx(px, py);
@@ -616,9 +624,11 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
     st.slope[i] = 0; st.half[i] = 0;
     st.wire[i] &= ~WIRE_ACTUATOR;                     // ClearTile 的 inActive(false)
     st.liquid[i] = 0; st.liquidType[i] = 0;
+    segProbe('campSF', [__cellN, px, py]);
     genFrameNeighbors(st, rng, px, py, 'setTile');    // SetFrames(frameNeighbors:true)（cs:69）
     if (st.wall[i] === 0) {
       st.wall[i] = wallType;
+      segProbe('campPW', __cellN);
       placeWallFrameRollsMB(st, rng, px, py);         // PlaceWall(type) 五连 SquareWallFrame
     }
   }
@@ -631,6 +641,7 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
     }
     if (!found) return false;
   }
+  segProbe('campGround');
   const num4 = groundY - 1;
   // ★裸 Next() 的 int 取模位谓词(CampsiteBiome.cs:75 `Next() % 2 == 0`)——RNG.vanilla
   //   直通 UnifiedRandom.next()(= C# Next() 裸 int32)。曾译 `next()<0.5`(NextDouble
@@ -660,6 +671,7 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
   // ★KKKKK：PlaceTile(186)→Place3x2(i,j)+SquareTileFrame(i,j)（cs:60018-60026）——
   //   中心锚 [i-1..i+1]×[j-1..j]（曾 [i..i+2] 整体 +1）；门=区全失活+逐列地面
   //   SolidTile2(x±,j+1)+Boulders 排除（186/187）
+  segProbe('campCoin');
   const num8 = (num - 3) * (flag ? -1 : 1);
   if (rng.vanilla.next() % 10 !== 0) {
     place3x2MB(st, rng, ox + num8, num4, LARGE_PILES);               // style 0

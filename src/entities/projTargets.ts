@@ -109,15 +109,12 @@ export function playerCanHitEnemy(
   game: GameHooks,
   projId = 0,
 ): boolean {
-  const t = e as { vanillaId?: number | null; def?: { friendly?: boolean }; immortal?: boolean } | null | undefined;
-  // CanBeChasedBy 的 !immortal / chaseable 门（NPC.cs:91141-91147，1457 全表提取）：
-  //  immortal=true：488 训练假人 / 690 伪装雕像 / 133 巡游之眼（事件眼非本体重生态）
-  //  chaseable=false：399 火星探测 probe / 416 日耀骑手骑体 / 437 教徒祭坛石板 /
-  //  438 教徒信徒 / 440 教主克隆体 / 523 远古末日球——均不可被**索敌瞄准**
-  //  （玩家手动攻击走直接命中不受限。2026-08-24 用户报"召唤宠物追打假人"）
+  const t = e as { vanillaId?: number | null; def?: { friendly?: boolean } } | null | undefined;
+  // ★本函数只做【命中校验】（Damage_PVE_Inner :11892-11896 flag 门 + ApplyItemToNPC
+  //  :43605 friendly 门同式）——原版 immortal/chaseable 剔除属 CanBeChasedBy（:91141）
+  //  索敌门，仅目标选取使用；曾误入此处致训练假人被一切玩家攻击免伤
+  //  （2026-08-25 用户报"假人无法被击中"）——索敌侧请用 canBeChasedBy()。
   const vid = t?.vanillaId;
-  if (vid !== undefined && vid !== null && (vid === 488 || vid === 690 || vid === 133 || vid === 399
-    || vid === 416 || vid === 437 || vid === 438 || vid === 440 || vid === 523)) return false;
   if (!t?.def?.friendly) return true;
   if (projId === 318) return true;
   const eq = (game.player as unknown as { equipStats?: { killGuide?: boolean; killClothier?: boolean } } | null)
@@ -125,6 +122,24 @@ export function playerCanHitEnemy(
   if (vid === 22 && eq?.killGuide) return true;
   if (vid === 54 && eq?.killClothier) return true;
   return false;
+}
+
+/** 原版 NPC.CanBeChasedBy（NPC.cs:91141-91147）索敌门——仅供【目标选取】使用：
+ *  immortal 族（488 训练假人/690 伪装雕像/133 巡游之眼）与 chaseable=false 族
+ *  （399 火星探测/416 日耀骑手骑体/437 祭坛石板/438 信徒/440 教主克隆/523 远古末日球）
+ *  不入索敌；friendly 同拒。玩家直接命中不受此限——命中校验用 playerCanHitEnemy。
+ *  （2026-08-24 "召唤宠物追打假人"修复的正解层；当时误改 playerCanHitEnemy 致次日回归） */
+export function canBeChasedBy(e: unknown): boolean {
+  const t = e as { dead?: boolean; vanillaId?: number | null; def?: { friendly?: boolean; lifeMax?: number };
+    dontTakeDamage?: boolean } | null | undefined;
+  if (!t || t.dead) return false;
+  const lm = t.def?.lifeMax;
+  if (lm !== undefined && lm <= 5) return false;          // lifeMax > 5(:91141 小生命 critter 族不入索敌）
+  if (t.dontTakeDamage) return false;                    // !dontTakeDamage（克脑一阶 266/伪装 690/起飞飞碟 395 等）
+  const vid = t.vanillaId;
+  if (vid !== undefined && vid !== null && (vid === 488 || vid === 690 || vid === 133 || vid === 399
+    || vid === 416 || vid === 437 || vid === 438 || vid === 440 || vid === 523)) return false;
+  return !t.def?.friendly;
 }
 
 /** 敌对弹幕命中玩家(原版 Projectile.Damage_EVP,Projectile.cs:13706-13830):

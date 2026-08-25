@@ -17,7 +17,7 @@
 import type { GameHooks } from '../entities/types';
 import type { Player } from '../entities/Player';
 import { Arrow } from '../entities/Arrow';
-import { playerCanHitEnemy } from '../entities/projTargets';
+import { canBeChasedBy } from '../entities/projTargets';
 
 export interface SnapStrikeTarget {
   id: number;
@@ -68,7 +68,7 @@ export function trySnapStrike(
     if (strikes >= maxTargets) break;
     const t = ent as unknown as SnapStrikeTarget;
     if (t.dead || t.id === victimId) continue;                     // skipTargets（:14372-14376）
-    if (!playerCanHitEnemy(ent, game, projId)) continue;           // FindTargetWithLineOfSight 敌对门
+    if (!canBeChasedBy(ent)) continue;           // FindTargetWithLineOfSight → CanBeChasedBy 索敌门(:14372)
     if (Math.hypot(t.cx - hx, t.cy - hy) > maxRange) continue;
     strikes++;
     // NewProjectile(nPC.Center, UnitY*0.1, projId, dmg, kb 5) + timeLeft=2（:14413-14416）

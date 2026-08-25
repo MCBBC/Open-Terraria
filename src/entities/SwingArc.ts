@@ -16,7 +16,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
 import { prettyStarSparkle } from '../render/Renderer';
 import { canHitLine } from '../physics/LineOfSight';
 
@@ -1137,8 +1137,8 @@ export class HorsemansPumpkin extends Entity {
       id: number; x: number; y: number; w: number; h: number; dead: boolean;
     }>;
     const tgt = enemies.find((e) => e.id === this.ai0);
-    if (tgt && !tgt.dead && playerCanHitEnemy(tgt, game, 321)) {
-      // CanBeChasedBy（:29227）+ !CountsAsCritter（projTargets 友好门近似）
+    if (tgt && !tgt.dead && canBeChasedBy(tgt)) {
+      // CanBeChasedBy（:29227/:91141）追踪重锁索敌门（命中校验仍走下方 Damage_PVE 门）
       const dx = tgt.x + tgt.w / 2 - this.cx, dy = tgt.y + tgt.h / 2 - this.cy;
       const dl = Math.hypot(dx, dy) || 1;
       this.vx = (this.vx * 14 + dx / dl * 8) / 15;                          // :29229 num427=8f、:29238 收敛式
@@ -1147,7 +1147,7 @@ export class HorsemansPumpkin extends Entity {
       // 重锁（:29241-29257）：1000 曼哈顿内 Collision.CanHit 最近者
       let bd = 1000, bi = 0;
       for (const e of enemies) {
-        if (e.dead || !playerCanHitEnemy(e, game, 321)) continue;
+        if (!canBeChasedBy(e)) continue;
         const d = Math.abs(this.cx - (e.x + e.w / 2)) + Math.abs(this.cy - (e.y + e.h / 2));
         if (d >= bd) continue;
         if (!canHitLine(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;

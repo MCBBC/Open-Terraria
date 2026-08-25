@@ -13,7 +13,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { Arrow, projSprite } from './Arrow';
-import { hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile } from './projTargets';
+import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile } from './projTargets';
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
@@ -566,7 +566,7 @@ export class Boomerang extends Entity {
         let best = 800; // :36907 / FindTargetWithLineOfSight 缺省 800 :42972
         for (const ent of game.enemies()) {
           const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
-          if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
+          if (!canBeChasedBy(ent)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
           if (e.dead) continue;
           if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
           const d = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
@@ -1719,7 +1719,7 @@ export class CounterweightProj extends Entity {
       {
         let best = 800, tx = 0, ty = 0, found = false;
         for (const ent of game.enemies()) {
-          if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070
+          if (!canBeChasedBy(ent)) continue;   // CanBeChasedBy :91070
           const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
           if (e.dead) continue;
           const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
@@ -2127,7 +2127,7 @@ export class YoyoProj extends Entity {
         svy += (ry / rl) * rm;
         let best = 400;
         for (const ent of game.enemies()) {
-          if (!playerCanHitEnemy(ent, game)) continue;          // CanBeChasedBy :91070
+          if (!canBeChasedBy(ent)) continue;          // CanBeChasedBy :91070
           const e2 = ent as { x: number; y: number; w: number; h: number; dead: boolean };
           if (e2.dead) continue;
           const ecx = e2.x + e2.w / 2, ecy = e2.y + e2.h / 2;
@@ -3016,7 +3016,7 @@ export class FlailProj extends Entity {
           let best = 600, bx = 0, by = 0, found = false;
           for (const ent of game.enemies()) {
             const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
-            if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
+            if (!canBeChasedBy(ent)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
             if (e.dead) continue;
             if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
             const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
@@ -3221,7 +3221,7 @@ export class FlaironSpike extends Entity {
       let best = 650, bx = 0, by = 0, found = false;
       for (const ent of game.enemies()) {
         const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
-        if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
+        if (!canBeChasedBy(ent)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
         if (e.dead) continue;
         if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
         const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
@@ -3241,7 +3241,7 @@ export class FlaironSpike extends Entity {
       let best = 650, bx = 0, by = 0, found = false;
       for (const ent of game.enemies()) {
         const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
-        if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
+        if (!canBeChasedBy(ent)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
         if (e.dead) continue;
         const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
         if (d < best) { best = d; bx = e.x + e.w / 2; by = e.y + e.h / 2; found = true; }

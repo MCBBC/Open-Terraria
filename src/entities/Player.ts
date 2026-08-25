@@ -8,7 +8,7 @@ import {
 } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { wetCollision } from './npcLiquid';
-import { playerCanHitEnemy } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
 import { randomizeFriendlyInsanityShadow } from './InsanityShadowFriendly';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { vanillaIdOfItem } from '../stats/Shimmer';
@@ -6492,7 +6492,7 @@ export class Player extends Entity {
     const store = game.world.store;
     const candidates: Array<{ cx: number; cy: number }> = [];
     for (const e of game.enemies() as unknown as Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean }>) {
-      if (e.dead || !playerCanHitEnemy(e, game)) continue;
+      if (e.dead || !canBeChasedBy(e)) continue;
       if (Math.hypot(e.cx - this.cx, e.cy - this.cy) > 500) continue;
       if (!canHitLine(store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
       candidates.push(e);

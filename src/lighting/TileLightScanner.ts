@@ -343,11 +343,10 @@ export function specialTileLight(
       return null;
     }
     case 215: {
-      // 篝火（点燃门 frameY<288——熄灭带 y=288-323;点燃带 4 帧循环 frameY 本身
-      // 在 0/36/72/108(顶)与 18/54/90/126(底)游走,曾 <36 门只匹配帧 0=帧 1-3 无光
-      // （2026-08-25 用户报"点燃篝火无光照",存档帧恰为 36/54）;style=frameX/54;
-      // flicker 三通道叠加，cs:689-720 附近）
-      if (frameY >= 288) return null;
+      // 篝火（点燃门 frameY<36——frameY 即状态位:0/18=点燃、36/54=熄灭
+      // （TileDrawing.cs:6132-6140 熄灭加 FrY 252 绘制 y=288/306 带）;熄灭无光=
+      // 原版真态。style=frameX/54;flicker 三通道叠加，cs:689-720 附近）
+      if (frameY >= 36) return null;
       const rnd = ctx?.localRand?.();
       if (!rnd) return null;
       const st = Math.floor(frameX / 54);

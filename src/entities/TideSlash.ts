@@ -12,7 +12,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
 
 export class TideSlash extends Entity {
   w = 16; h = 16;
@@ -75,7 +75,7 @@ export class TideSlash extends Entity {
       let target: { cx: number; cy: number; vx: number; vy: number } | null = null, bd = 250;
       for (const ent of game.enemies()) {
         const e = ent as unknown as { cx: number; cy: number; vx: number; vy: number; dead: boolean };
-        if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
+        if (!canBeChasedBy(ent)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
         if (e.dead) continue;
         const d = Math.hypot(e.cx - this.cx, e.cy - this.cy);
         if (d < bd) { bd = d; target = e; }

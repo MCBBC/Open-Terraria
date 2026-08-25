@@ -25,7 +25,7 @@ function setup() {
   const owner = {
     cx: 100 * 16, cy: 80 * 16, x: 100 * 16 - 10, y: 80 * 16 - 21, w: 20, h: 42,
     facing: 1, dead: false, iframes: 0, hp: 400, maxHp: 400,
-    buffs: { has: () => false },
+    buffs: { has: () => false }, addDPS: () => {},   // hurt(fromPlayer) 的 DPS 统计桩(12073 行引入晚于本审计 mock)
   };
   const game = {
     world,

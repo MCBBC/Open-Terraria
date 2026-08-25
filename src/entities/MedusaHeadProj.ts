@@ -21,7 +21,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { Player } from './Player';
 import { projSprite, projFrameCount } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
 import { canHitLine } from '../physics/LineOfSight';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { prefixStat } from '../data/vanillaPrefixes';
@@ -156,7 +156,7 @@ export class MedusaHeadProj extends Entity {
       if (e.dead) continue;
       const d = Math.hypot(e.x + e.w / 2 - hx, e.y + e.h / 2 - hy);
       if (d >= 320) continue;                        // Distance(nPC.Center) < 320f
-      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // CanBeChasedBy
+      if (!canBeChasedBy(ent)) continue;   // CanBeChasedBy
       if (!canHitLine(game.world.store, e.x, e.y, e.w, e.h, hx, hy, 0, 0)) continue;
       cands.push({ e, d });
     }

@@ -5315,6 +5315,9 @@ export class Renderer {
           // 被本覆写。曾只接 133 且注释"其余不旋转"=误读(2026-08-25 用户实报不转)。
           // 镜像按 sign(vx) 自管(绕过通用 facing 镜像——追踪向≠速度向的瞬态防双翻)
           ctx.rotate(Math.atan2(e.vy, e.vx) + (e.vx < 0 ? Math.PI : 0));
+          // spriteDirection = sign(vx)（:74819/:74824）→ DrawNPC :23358-23361
+          // spriteDirection==1 翻转(原生贴图朝左)——vx>0 时翻;曾漏加翻转=右飞贴图反
+          if (e.vx > 0) ctx.scale(-1, 1);
           eyeMirrorByVx = true;
         } else if (stR === 2 && idR === 133) ctx.rotate(e.visAngle);   // 游荡眼(随速度角、左行 +π)
         else if (stR === 2) ctx.rotate(e.visAngle);   // AI_002 其余成员(猪龙 170-180 等):AI 倾斜 vy×0.1×dir(:52906)——曾无消费门=猪龙不倾斜

@@ -5,7 +5,7 @@
 import { Entity } from './Entity';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
-import { hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
+import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { trySnapStrike } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
@@ -1107,7 +1107,7 @@ export class Arrow extends Entity {
     for (const ent of game.enemies()) {
       const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean; vx?: number; vy?: number };
       if (e.dead) continue;
-      if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+      if (!canBeChasedBy(ent)) continue;
       const cx = e.x + e.w / 2, cy = e.y + e.h / 2;
       const d = Math.hypot(cx - this.cx, cy - this.cy);
       if (d >= best) continue;
@@ -3084,7 +3084,7 @@ export class Arrow extends Entity {
       const tgt614 = this.stickerTgt
         ? (game.enemies() as Array<{ id: number; dead?: boolean }>).find((q) => q.id === this.stickerTgt)
         : null;
-      if (!tgt614 || tgt614.dead || !playerCanHitEnemy(tgt614 as never, game, this.projId)) {
+      if (!tgt614 || tgt614.dead || !canBeChasedBy(tgt614 as never)) {
         this.killNow(game);                                    // :41318-41320 失的即杀
         return;
       }
@@ -3142,7 +3142,7 @@ export class Arrow extends Entity {
           let bestId = 0;
           for (const e of enemies) {
             if (e.dead) continue;
-            if (!playerCanHitEnemy(e, game, this.projId)) continue;   // CanBeChasedBy（:53950）
+            if (!canBeChasedBy(e)) continue;   // CanBeChasedBy（:53950）
             const d = manh(e);
             if (d >= best) continue;
             // Collision.CanHit（:53956 弹心 1×1 → 敌盒）
@@ -3154,7 +3154,7 @@ export class Arrow extends Entity {
         if (this.chloAi1 !== 0) {
           const tgt = enemies.find((e) => e.id === this.chloAi1);
           // :53973-53976 active + CanBeChasedBy(ignoreDontTakeDamage) + !dontTakeDamage
-          if (tgt && !tgt.dead && !tgt.dontTakeDamage && playerCanHitEnemy(tgt, game, this.projId)) {
+          if (tgt && !tgt.dead && !tgt.dontTakeDamage && canBeChasedBy(tgt)) {
             if (manh(tgt) < 1000) {                       // :53981 1000px 保持圈
               steer = true;
               tx = tgt.x + tgt.w / 2; ty = tgt.y + tgt.h / 2;
@@ -3233,7 +3233,7 @@ export class Arrow extends Entity {
         for (const ent of game.enemies()) {
           const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean; wet?: boolean };
           if (e.dead) continue;
-          if (!playerCanHitEnemy(ent, game, this.projId)) continue;      // CanBeChasedBy
+          if (!canBeChasedBy(ent)) continue;      // CanBeChasedBy
           // 湿敌豁免（:27769）：Duke Fishron 370 或 307 自身可追湿敌
           if (e.wet && this.projId !== 307 && e.id !== 370) continue;
           const d36 = Math.abs(this.cx - (e.x + e.w / 2)) + Math.abs(this.cy - (e.y + e.h / 2));
@@ -3291,7 +3291,7 @@ export class Arrow extends Entity {
           for (const ent of game.enemies()) {
             const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean };
             if (e.dead) continue;
-            if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+            if (!canBeChasedBy(ent)) continue;
             const d616 = Math.abs(this.cx - (e.x + e.w / 2)) + Math.abs(this.cy - (e.y + e.h / 2));
             if (d616 >= best616) continue;
             if (!canHitLine(world.store, this.cx, this.cy, 0, 0, e.x, e.y, e.w, e.h)) continue;
@@ -3304,7 +3304,7 @@ export class Arrow extends Entity {
           const t616 = (game.enemies() as Array<{ id: number; x: number; y: number; w: number; h: number; dead?: boolean }>)
             .find((e) => e.id === this.vx616Ai1);
           //（:58423-58437）active + CanBeChasedBy(ignoreDontTakeDamage) + 1000px 内
-          if (t616 && !t616.dead && playerCanHitEnemy(t616, game, this.projId)
+          if (t616 && !t616.dead && canBeChasedBy(t616)
             && Math.abs(this.cx - (t616.x + t616.w / 2)) + Math.abs(this.cy - (t616.y + t616.h / 2)) < 1000) {
             const dx616 = t616.x + t616.w / 2 - this.cx, dy616 = t616.y + t616.h / 2 - this.cy;
             const dl616 = Math.hypot(dx616, dy616) || 1;
@@ -3324,7 +3324,7 @@ export class Arrow extends Entity {
       for (const ent of game.enemies()) {
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean };
         if (e.dead) continue;
-        if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+        if (!canBeChasedBy(ent)) continue;
         const dE = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
         if (dE >= b297) continue;                          // Distance < 400（:28865）
         if (!canHitLine(world.store, this.cx, this.cy, 0, 0, e.x + e.w / 2, e.y + e.h / 2, 0, 0)) continue;
@@ -3355,7 +3355,7 @@ export class Arrow extends Entity {
         for (const ent of game.enemies()) {
           const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean };
           if (e.dead) continue;
-          if (!playerCanHitEnemy(ent, game, this.projId)) continue;      // CanBeChasedBy
+          if (!canBeChasedBy(ent)) continue;      // CanBeChasedBy
           const d659 = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
           if (d659 >= best659) continue;                   //（:36890 < 400f）
           const hitC = canHitLine(world.store, this.cx, this.cy, 0, 0, e.x + e.w / 2, e.y + e.h / 2, 0, 0);
@@ -3527,7 +3527,7 @@ export class Arrow extends Entity {
         for (const ent of game.enemies()) {
           const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean; iframes?: number };
           if (e.dead) continue;
-          if (!playerCanHitEnemy(ent, game, this.projId)) continue;      // CanBeChasedBy
+          if (!canBeChasedBy(ent)) continue;      // CanBeChasedBy
           const d409 = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
           if (d409 >= best409) continue;
           if (!canHitLine(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
@@ -3758,7 +3758,7 @@ export class Arrow extends Entity {
           for (const ent of game.enemies()) {
             const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean };
             if (e.dead) continue;
-            if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+            if (!canBeChasedBy(ent)) continue;
             const d617 = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
             if (d617 >= best617) continue;
             if (!canHitLine(world.store, this.cx, this.cy, 0, 0, e.x + e.w / 2, e.y + e.h / 2, 0, 0)) continue;
@@ -5209,7 +5209,7 @@ export class Arrow extends Entity {
         for (const ent of game.enemies()) {
           const e = ent as unknown as PiranhaTarget;
           if (e.dead || e.hp <= 0 || e.dontTakeDamage) continue;
-          if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（CanBeChasedBy :91070——睡渔夫 376 等友好 NPC 不入索敌）
+          if (!canBeChasedBy(e)) continue;   // friendly 门（CanBeChasedBy :91070——睡渔夫 376 等友好 NPC 不入索敌）
           const score = Math.abs(this.cx - e.cx) + Math.abs(this.cy - e.cy);
           if (score >= bestScore) continue;
           if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;

@@ -91,14 +91,16 @@ const TILE_ANIM_FRAMES: Record<number, number> = {
  *  36px 无缝排布——曾按默认 38 导致每帧 +2px 漂移，火焰像胶片滚动）；
  *  frameY≥36 的行（熄灭/灰烬变体）恒取静止帧 252 */
 export function campfireYOffset(frameY: number): number {
-  // 熄灭态门 = frameY >= 288（vanilla off 帧带 y=288-323）
-  // 点燃带 = y 0-143（4 帧×36px 循环）。★存档/原版 AnimateTiles 的 frameY 本身
-  // 随动画在 0/36/72/108（顶行）与 18/54/90/126（底行）循环——offset 必须基于
-  // 【frameY%36 归位后的基行】再叠加,否则存档停在帧 1（fy=36/54）时
-  // 36+offset 扫到 144+ 越过点燃带 = 混入熄灭带/其它样式（2026-08-25 用户报
-  // "燃烧+熄灭两态动画同放"）。曾 <36 门:style>0 底行 fy=36 撞门静止=错位源。
-  if (frameY >= 288) return 0;
-  return (frameY % 36) + animFrameIdx(215, 144) * 36;
+  // ★原版语义（TileDrawing.cs:6132-6140）:frameY 本身即状态位——
+  //   点燃 = 0/18（<36）:addFrY = tileFrame×36（4 帧火动画,y 0-143 带循环）
+  //   熄灭 = 36/54（≥36）:addFrY = 252 固定（绘制 y=288/306 熄灭带,静止）
+  //   线控 ToggleCampFire = frameY ±36 翻转（Wiring.cs:1003-1020）;
+  //   SceneMetrics :380 frameY<36=点燃（篝火增益计数）。
+  // 曾 <288 门:熄灭件（36/54）被误判点燃去动画+扫过点燃带=双态动画同放/
+  // 上下行错缝（2026-08-25 用户报,存档帧恰为 36/54 熄灭态）。曾 <36 光照门
+  // 反而是对的（熄灭本就无光）。
+  if (frameY < 36) return frameY + animFrameIdx(215, 144) * 36;
+  return frameY + 252;
 }
 
 /** 全局动画时钟（Game 主循环每帧 +1；暂停时冻结） */
