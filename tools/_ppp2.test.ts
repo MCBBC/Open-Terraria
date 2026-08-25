@@ -19,9 +19,15 @@ const OUT = process.env.SW_PPP_OUT ?? '/tmp/ppp-out/ppp2-g.json';
   const placeLog: Array<{ p: string; ok: boolean; d: number; b: number; e: number }> = [];
   let curCand = '';
 
-  const chestEv: Array<{ ph: string; i: number; j: number; r?: number }> = [];
+  const chestEv: Array<{ ph: string; i: number; j: number; r?: number; st?: string }> = [];
   (globalThis as { __swChestEv?: unknown }).__swChestEv = (ph: string, i: number, j: number, r?: number) => {
-    if (i >= 2800 && i <= 2900) chestEv.push({ ph, i, j, r });
+    if (i >= 2800 && i <= 2900) {
+      let st: string | undefined;
+      if (ph === 'ab' && j < 400) {
+        st = (new Error().stack ?? '').split('\n').slice(2, 6).map((l) => l.replace(/^.*?(src\/[^ (]+).*$/, '$1')).join(' <- ');
+      }
+      chestEv.push({ ph, i, j, r, st });
+    }
   };
   const proto = DeadMansChestBiome.prototype as unknown as Record<string, (...a: never[]) => unknown>;
 

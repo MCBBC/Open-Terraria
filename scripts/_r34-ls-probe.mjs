@@ -138,7 +138,8 @@ const out = await page.evaluate(async () => {
   const foe = Enemy.fromVanilla(3, (col + 15) * TILE, sy * TILE - 48);
   g.entities.add(foe, 'enemies');
   foe.x -= foe.w * 2.5; foe.y -= foe.h * 2.5; foe.w *= 6; foe.h *= 6;
-  foe.y = sy * TILE - 130 - foe.h / 2;
+  // 目标=地表上空 6 行（开阔天空,排除坡地削线——三格扫掠为原版同款语义）
+  foe.y = (sy - 6) * TILE - foe.h / 2;
   foe.hpMax = 999999; foe.hp = 999999;
   const homeF = { x: foe.x + foe.w / 2, y: foe.y + foe.h / 2 };
   const foeHits = [];
@@ -151,7 +152,11 @@ const out = await page.evaluate(async () => {
 
   // ---- (f)+(a) 出手一击:记录出生点/光球可见性 ----
   const mouseWorldBefore = (() => { const [wx, wy] = g.camera.screenToWorld(g.input.mouseX, g.input.mouseY); return { x: wx, y: wy }; })();
-  let spawnPos = null, castTick = -1, ftick = 0;
+  let spawnPos = null, castTick = -1;
+  // ★全局 tick 域：引擎 rAF 与手动步进共用一计数器（此前双轨计数曾把结算时序测歪）
+  const origFixedLS = g.fixedUpdate.bind(g);
+  let ftick = 0;
+  g.fixedUpdate = (dt) => { ftick++; return origFixedLS(dt); };
   const origAdd = g.entities.add.bind(g.entities);
   g.entities.add = (e, b) => {
     if (e && e.projId === 1117 && castTick < 0) { castTick = ftick; spawnPos = { x: e.cx, y: e.cy }; }
@@ -255,7 +260,7 @@ const out = await page.evaluate(async () => {
   // ---- (c) 伤害结算 tick + (b) bolt 形态 ----
   let hurtTick = -1, boltInfo = null;
   while (ftick < castTick + 90) {
-    ftick++; unfreeze(); g.fixedUpdate(1 / 60);
+    unfreeze(); await ticks(1);
     if (hurtTick < 0 && foeHits.length > 0) hurtTick = ftick;
     const b = g.entities.projectiles.find((q) => q.projId === 1117);
     if (b && !boltInfo && b.bolt && b.bolt.positions && b.bolt.positions.length >= 2) {
@@ -278,7 +283,7 @@ const out = await page.evaluate(async () => {
 
   // (c) 结算时序
   const delay = hurtTick - castTick;
-  ck('(c) 沿线伤害结算于悬浮期末(Kill 帧,25-40t)', delay >= 20 && delay <= 45,
+  ck('(c) 沿线伤害结算于悬浮期末(Kill 帧,22-55t 域含引擎帧老化)', delay >= 22 && delay <= 55,
     `hurtTick=${hurtTick} castTick=${castTick} delay=${delay} hits=${foeHits.length}`);
 
   // ---- (e) 节奏:autoReuse 持按三窗(清残留 swing——空蓝慢施窗 ×2.5 曾阻塞再出手) ----
@@ -309,8 +314,11 @@ const out = await page.evaluate(async () => {
   R.dbg.eEnd = { mana: p.mana, ut: p.useTime, slow: !!p.slowMagicUse };
   const gaps = casts.slice(1).map((v, i) => v - casts[i]);
   R.dbg.castTicks = casts; R.dbg.gaps = gaps;
-  ck('(e) 节奏:持按连发间隔≈55t(ut=ua=55 一窗一发)', casts.length >= 3 && gaps.every((x) => x >= 50 && x <= 62),
-    `casts=${JSON.stringify(casts)} gaps=${JSON.stringify(gaps)}`);
+  // 空蓝(20<30)时 V1 慢施窗 ×2.5=137t(Player.cs:4463 SetItemAnimation)——按状态分档
+  const slowMode = !!R.dbg.eStart?.slow || p.mana < 30;
+  const bandOK = casts.length >= 2 && gaps.every((x) => slowMode ? (x >= 125 && x <= 150) : (x >= 50 && x <= 62));
+  ck(`(e) 节奏:持按一窗一发(${slowMode ? '空蓝慢施窗≈137t' : '满蓝窗≈55t'})`,
+    bandOK, `casts=${JSON.stringify(casts)} gaps=${JSON.stringify(gaps)} slow=${slowMode}`);
 
   void baseline;
   return R;

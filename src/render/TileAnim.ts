@@ -91,9 +91,14 @@ const TILE_ANIM_FRAMES: Record<number, number> = {
  *  36px 无缝排布——曾按默认 38 导致每帧 +2px 漂移，火焰像胶片滚动）；
  *  frameY≥36 的行（熄灭/灰烬变体）恒取静止帧 252 */
 export function campfireYOffset(frameY: number): number {
-  // 熄灭态门 = frameY >= 288（vanilla off 帧带 y=288-323）；fy=0(顶)/18(底) 均 <288
-  // 恒动画。曾 <36 门:style>0 的底行 fy=18+18=36 撞门走熄灭静止 = 另一半错位源。
-  return frameY < 288 ? animFrameIdx(215, 324) * 36 : 0;
+  // 熄灭态门 = frameY >= 288（vanilla off 帧带 y=288-323）
+  // 点燃带 = y 0-143（4 帧×36px 循环）。★存档/原版 AnimateTiles 的 frameY 本身
+  // 随动画在 0/36/72/108（顶行）与 18/54/90/126（底行）循环——offset 必须基于
+  // 【frameY%36 归位后的基行】再叠加,否则存档停在帧 1（fy=36/54）时
+  // 36+offset 扫到 144+ 越过点燃带 = 混入熄灭带/其它样式（2026-08-25 用户报
+  // "燃烧+熄灭两态动画同放"）。曾 <36 门:style>0 底行 fy=36 撞门静止=错位源。
+  if (frameY >= 288) return 0;
+  return (frameY % 36) + animFrameIdx(215, 144) * 36;
 }
 
 /** 全局动画时钟（Game 主循环每帧 +1；暂停时冻结） */

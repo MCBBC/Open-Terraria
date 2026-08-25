@@ -5253,6 +5253,7 @@ export class Renderer {
         // 旋转族:整体随自转角旋转(原版 npc.rotation;朝向翻转不适用)。
         // 4=克眼 visAngle;35/68=骷髅王头 spin;125/126=双子;127-131=Prime 头+部件;134-136=毁灭者链
         const rotId = ROTATION_NPC.has(e.vanillaId);
+        let eyeMirrorByVx = false;   // 眼族 FindFrame case 2:镜像按 sign(vx) 自管
         // ★旋转驱动族总判定：朝向完全由 rotation 决定，原版这些家族不动 spriteDirection
         // （默认 -1 从不镜像）——渲染层禁止对其叠加 facing 镜像，否则"屁股朝前"
         // （噬魂怪 aiStyle5 实踩）。新增旋转族 AI 时必须登记在此，旋转与镜像共用本判定。
@@ -5308,7 +5309,15 @@ export class Renderer {
         else if (stR === 115 && idR === 603) ctx.rotate(e.visAngle);  // 海鸥2(FindFrame :74550+ 空中 vx×0.1/水面与静止 0)
         else if (stR === 7 && (idR === 230 || idR === 593)) ctx.rotate(e.visAngle);  // 走路金鱼/金色走路金鱼(FindFrame :76585+ 高速下落 −=vy×0.01 抬头、落地归零)
         else if (stR === 3 && (idR === 461 || idR === 469)) ctx.rotate(e.visAngle);  // 深渊来客(空中 (rot×4+瞄准)/5 平滑+翻面取反 :76025+)/被附身者(冲刺态 atan2+π/2 :76365+)
-        else if (stR === 2 && idR === 133) ctx.rotate(e.visAngle);   // 游荡眼(FindFrame :74760+ 随速度角、左行 +π;其余 aiStyle2 恶魔眼族不旋转)
+        else if (stR === 2 && (idR === 2 || (idR >= 190 && idR <= 194) || idR === 317 || idR === 318)) {
+          // 恶魔眼族 FindFrame case 2(:74815-74827):rotation = atan2(vy,vx)(vx<0 再 +π)、
+          // spriteDirection = sign(vx)——瞳孔全程追踪速度向,AI 的 vy×0.1 倾斜(:52906)
+          // 被本覆写。曾只接 133 且注释"其余不旋转"=误读(2026-08-25 用户实报不转)。
+          // 镜像按 sign(vx) 自管(绕过通用 facing 镜像——追踪向≠速度向的瞬态防双翻)
+          ctx.rotate(Math.atan2(e.vy, e.vx) + (e.vx < 0 ? Math.PI : 0));
+          eyeMirrorByVx = true;
+        } else if (stR === 2 && idR === 133) ctx.rotate(e.visAngle);   // 游荡眼(随速度角、左行 +π)
+        else if (stR === 2) ctx.rotate(e.visAngle);   // AI_002 其余成员(猪龙 170-180 等):AI 倾斜 vy×0.1×dir(:52906)——曾无消费门=猪龙不倾斜
         else if (e.vanilla?.aiStyle === 13) ctx.rotate(e.visAngle); // AI_013 植物族:头随朝玩家伸展方向旋转(cs:22778-22794);spriteDirection 仍翻转→不进 rotationDriven
         else if (stR === 93) ctx.rotate(e.visAngle);   // AI_093 荷兰飞盗船:rotation=vx*0.025(cs:41011);spriteDirection=-sign(vx) 仍镜像
         else if (stR === 102 || stR === 109) ctx.rotate(e.visAngle); // AI_102/109 沙尘精/黑暗魔法师:rotation=vx*0.04(cs:42249/:66415)
@@ -5367,7 +5376,7 @@ export class Renderer {
         // 蜗牛 aiStyle67 spriteDirection 走象限表(上方旋转分支自带局部翻面)——
         // 通用 facing 镜像禁用,否则与象限翻面叠加成恒翻
         const snailMirror = stR === 67;
-        if (!rotationDriven && !owlMirror && !sdirNeg546 && !wormMirror && !snailMirror && e.facing > 0) ctx.scale(-1, 1);
+        if (!rotationDriven && !owlMirror && !sdirNeg546 && !wormMirror && !snailMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
         if (!rotationDriven && (owlMirror || sdirNeg546) && e.facing < 0) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。

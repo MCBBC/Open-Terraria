@@ -34,13 +34,31 @@ await page.evaluate(() => {
 });
 await new Promise((r) => setTimeout(r, 1200));
 await page.evaluate(() => document.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true })));
-// 刷一只怪在 300px 外触发索敌→走行→扑击
+// 刷怪触发索敌→走行→扑击：在猫周围找平地落点（表面扫描），视线不被树冠挡
 const spawn = await page.evaluate(() => {
   const g = window.__swGame;
   const m = g.entities.projectiles.find((p) => p.projId === 1093 && !p.dead);
   if (!m) return { fail: 'no 1093 minion' };
-  const e = g.spawnEnemy('slime_green', m.cx + 300, m.cy - 8);
-  return { ok: true, minionX: Math.round(m.cx), enemyHp: e.hp };
+  const st = g.world.store;
+  const T = 16;
+  const surfaceYAt = (px) => {
+    const col = Math.floor(px / T);
+    const row0 = Math.floor(m.cy / T);
+    for (let row = row0 - 6; row < row0 + 8; row++) {
+      if (st.isSolid(col, row)) return row;
+    }
+    return null;
+  };
+  for (const dx of [150, 220, 300, 120]) {
+    const row = surfaceYAt(m.cx + dx);
+    if (row === null) continue;
+    // 平地校验：落点左右 2 格同高（防斜坡/台阶挡扑击侧翼点）
+    const rL = surfaceYAt(m.cx + dx - 32), rR = surfaceYAt(m.cx + dx + 32);
+    if (rL !== row || rR !== row) continue;
+    const e = g.spawnEnemy('slime_green', m.cx + dx, row * T - 12);
+    return { ok: true, dx, enemyHp: e.hp, ey: row * T - 12 };
+  }
+  return { fail: 'no flat spot' };
 });
 console.log(JSON.stringify(spawn));
 if (spawn.fail) { await browser.close(); process.exit(1); }

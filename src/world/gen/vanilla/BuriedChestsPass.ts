@@ -1209,11 +1209,15 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
         }
         if (!hit) continue;   // 蓄水池无墙 244 空格 → 本轮作废
       }
-      const flags: ChestFlags = sky ? { sky: true } : { wooden: true };
-      // cs:17282：notNearOtherChests:true（NearOtherChests 拒绝 → 重试多掷——#60 欠掷
-      //   15.9k 主因之一，2026-08-17 尾批 2-C 补传）；style 原版传 flag2?12:-1，
-      //   -1 走落点解析（地表恒 y<worldSurface → style 0）与显式 0 等价
-      if (placeBuriedChest(st, rng, gs, chests, cx, cy, { style: sky ? 12 : 0, flags, notNearOtherChests: true })) ok = true;
+      // ★PPPPPPP（2026-08-25）：非 sky 支原版传 chestStyle=-1（cs:17292 flag2?12:-1）
+      //   ——由 AddBuriedChest 内部落深门解析（cs:36022 `(double)num7 >= Main.worldSurface+25.0`
+      //   →num9=1 金箱）。曾错传显式 0 并预置 wooden 旗（旧注释「地表恒 y<worldSurface→
+      //   style 0 与显式 0 等价」系误判：地表掷点可坠穿地表洞到 ws+25 之下，如 g 链
+      //   (2848,334)→落 gy=378≥362 判金——x86 (2847,376) style1 实锤，JS 木箱致
+      //   DeadMans 候选缺一席 → pick 序漂移 → #97 薄冰/剑冢全斑）。
+      //   wooden 旗同步改为内层解析（cs:36060：(chestStyle==0)||(-1∧num9==0)）。
+      const flags: ChestFlags = sky ? { sky: true } : {};
+      if (placeBuriedChest(st, rng, gs, chests, cx, cy, { style: sky ? 12 : undefined, flags, notNearOtherChests: true })) ok = true;
     }
   }
 }

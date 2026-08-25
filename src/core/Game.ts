@@ -841,7 +841,11 @@ const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 //  传 sheet,换算后的集合 58 项误命中导致大量方块被一击秒挖;消费点已改用
 //  TILE_NO_FAIL_SHEETS 原表)
 
-const TILE_CUT = new Set<number>(
+/** 原版 Main.tileCut 派生（TILE_CUT_VANILLA → 内部 id）——割草/放置清格/
+ *  锤路径/速挖的唯一权威判据。★勿用 decor/framed 启发式替代：墓碑 85
+ *  (decor+framed 家具) 与杂草 3/74 (decor+framed 植物) 两标记完全同构，
+ *  只有本表能区分（2026-08-25 墓碑三连 bug 根因）。 */
+export const TILE_CUT = new Set<number>(
   TILE_DEFS.reduce<number[]>((acc, d, id) => {
     if (d.vanilla && TILE_CUT_VANILLA.has(d.vanilla.sheet)) acc.push(id);
     return acc;
@@ -4348,7 +4352,7 @@ export class Game implements GameHooks {
         this.world.flags.unlockedSlimeYellowSpawn = true;
         const ms = new TownNPC('town_slime_yellow', c.x, c.y);
         this.entities.add(ms, 'npcs');
-        this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.NpcArrived', Lang.npcName(683) ?? ''));
+        this.cb.onToast?.(Lang.text('Announcement.HasArrived', Lang.npcName(683) ?? ''));
         break;
       }
     }
@@ -11201,7 +11205,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (df?.bait && dm) { baitSlot = i; baitPower = df.bait; baitVid = +dm[1]; break; }
           }
           if (baitSlot < 0) {
-            this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedBait'));
+            this.cb.onToast(Lang.text('GameUI.BaitRequired'));
           } else {
             const ang = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
             const owner = this.player;
@@ -24365,7 +24369,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const nerdy = new TownNPC('town_slime_blue', enemy.cx, enemy.cy - 20);
       nerdy.vy = -3 - Math.random() * 3;
       this.entities.add(nerdy, 'npcs');
-      this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.NpcArrived', Lang.npcName(670) ?? ''));
+      this.cb.onToast?.(Lang.text('Announcement.HasArrived', Lang.npcName(670) ?? ''));
     }
     // 史莱姆雨击杀推进（NPC.cs:79880-79897：阈值 150、杀过王减半 75；场上无王 → 召王）。
     // ★自然出王有公告（2026-08-18 修正旧注"静默无公告"）：SpawnBoss switch 的
@@ -27439,7 +27443,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.world.flags.unlockedSlimeRedSpawn = true; // 世界级一次性（Player.cs:51586-51588 / WorldFile :1413/:2433 持久化）
         const slime = new TownNPC('town_slime_red', bobber.x, bobber.y);
         this.entities.add(slime, 'npcs');
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NpcArrived', Lang.itemName(682) ?? ''));
+        this.cb.onToast(Lang.text('Announcement.HasArrived', Lang.itemName(682) ?? ''));
       } else {
         const en = Enemy.fromVanilla(id, bobber.cx, bobber.cy);
         if (en) {

@@ -678,7 +678,7 @@ export class ChunkCache {
           // （pitch 默认 38，3 格高特例组 54，篝火族特例 36+熄灭行静止——见 TileAnim）
           let fy = st.frameY[i];
           if (def.vanilla.sheet === 215) {
-            fy += campfireYOffset(st.frameY[i]);
+            fy = campfireYOffset(st.frameY[i]);   // 返回完整绘制 y（基行归位+动画帧）
             let set215 = this.animChunksBySheet.get(215);
             if (!set215) { set215 = new Set(); this.animChunksBySheet.set(215, set215); }
             set215.add(ChunkCache.key(cx, cy));

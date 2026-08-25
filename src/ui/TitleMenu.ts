@@ -182,6 +182,7 @@ export class TitleMenu {
         <div class="sw-title-btn" data-act="mp">${Lang.text('LegacyMenu.13')}</div>
         <div class="sw-title-btn" data-act="set">${Lang.text('LegacyMenu.14')}</div>
         <div class="sw-title-btn" data-act="buy">${Lang.text('Mods.SandboxWorld.Menu.BuyTerraria')}</div>
+        <div class="sw-title-btn" data-act="replog">${Lang.text('Mods.SandboxWorld.Menu.ReplicaNotes')}</div>
         <div class="sw-title-btn" data-act="quit">${Lang.text('LegacyMenu.15')}</div>
       </div>
     `;
@@ -225,6 +226,7 @@ export class TitleMenu {
     on('mp', () => flow.onMultiplayer());
     on('set', () => flow.onSettings());
     on('buy', () => window.open('https://store.steampowered.com/app/105600/Terraria', '_blank', 'noopener'));
+    on('replog', () => window.open('https://github.com/Vinlic/terraria-replica-build-notes', '_blank', 'noopener'));
     on('quit', () => flow.onQuit());
     parent.appendChild(this.root);
     this.startLogoFade();
@@ -335,6 +337,7 @@ export class TitleMenu {
     set('mp', t('LegacyMenu.13'));
     set('set', t('LegacyMenu.14'));
     set('buy', t('Mods.SandboxWorld.Menu.BuyTerraria'));
+    set('replog', t('Mods.SandboxWorld.Menu.ReplicaNotes'));
     set('quit', t('LegacyMenu.15'));
     // 右下署名两行（多语化：{0}/{1} = 加粗名，b 样式含像素字体复制法加粗+左右 margin）
     const credit = this.chrome.querySelector('[data-credit]');

@@ -525,7 +525,26 @@ function unembedPass(b: Body, world: World): void {
   const cy = Math.floor((b.y + b.h / 2) / TILE);
   if (!st.inBounds(cx, cy)) return;
   const ci = st.idx(cx, cy);
-  if (!st.isSolid(cx, cy) || st.slope[ci] > 0 || st.half[ci] || st.isPlatform(cx, cy)) {
+  // ★顶带嵌入 variant（2026-08-25 用户存档凹龛实锤）：盒中心在空气袋但【顶行】
+  // 压进悬突天花板（1 宽×2 高凹龛容不下 42px 高僵尸,头部嵌锡矿 8-10px）——
+  // 中心格判空气→旧触发器恒不点火;而头部嵌入使 X/Y 碰撞互锁(移动目的地仍与
+  // 实心相交=恒拦)→原版物理也自愈不能。顶行任一实心(非坡/半砖/平台)计入触发,
+  // 15t 延迟门照旧滤瞬态(跳跃磕檐/StepUp 抬升的瞬时顶接触每帧复位计数)。
+  // 站立/行走态顶行必为空气(42px 盒站 16px 地面,顶行高于地面 2 行)无误触发。
+  const topRow = Math.floor(b.y / TILE);
+  let topEmbedded = false;
+  if (!st.isSolid(cx, cy)) {
+    const nx0 = Math.floor(b.x / TILE), nx1 = Math.floor((b.x + b.w - 0.01) / TILE);
+    for (let tx = nx0; tx <= nx1; tx++) {
+      if (!st.inBounds(tx, topRow)) continue;
+      const ti = st.idx(tx, topRow);
+      if (st.isSolid(tx, topRow) && st.slope[ti] === 0 && !st.half[ti] && !st.isPlatform(tx, topRow)) {
+        topEmbedded = true;
+        break;
+      }
+    }
+  }
+  if (!st.isSolid(cx, cy) && !topEmbedded) {
     b.embedTicks = 0;   // 脱出/未嵌入:计数复位(瞬态嵌片靠原版物理自愈)
     return;
   }
@@ -533,7 +552,6 @@ function unembedPass(b: Body, world: World): void {
   b.embedTicks = emb;
   if (emb < EMBED_DELAY_TICKS) return;
   // ① 向上:从盒顶行上方起找连续净空(≤3 格),每 tick 至多上移 1 格
-  const topRow = Math.floor(b.y / TILE);
   let clear = 0;
   for (let k = 1; k <= 3; k++) {
     const ty = topRow - k;
