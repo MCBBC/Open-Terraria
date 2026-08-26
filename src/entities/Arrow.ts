@@ -1527,6 +1527,14 @@ export class Arrow extends Entity {
       //   红队 R28 §1/§2）/ 535 美杜莎之首（挂首模型由 MedusaHeadProj 承载,
       //   转换前的通用 Arrow 帧不显示）
       case 294: case 295: case 296: case 535: return 0;
+      // ★2026-08-26（用户实报蓝晶/宝石法珠弹观感批）：宝石法珠 121-126/597 与 1120
+      // SetDefaults alpha=255（Projectile.cs:2107-2160/:6466-6471/:10485-10491,
+      // 1458），AI 不衰减——GetAlpha 缺省路径（:81503-81519）num14=(255−255)/255=0、
+      // A=newColor.A−alpha≤0 → 像素弹芯【全程不可见】。可见本体 =
+      // GemStaffShotDrawer("RainbowRod") 拖尾条（本仓 drawStripTrail 已接）+
+      // AI 尘迹 + Main.cs:33667-33690 四层灰脉冲芯（drawGemCoreGlow 承载）
+      case 121: case 122: case 123: case 124: case 125: case 126:
+      case 597: case 1120: return 0;
       // ★R29：630 幻象弓载体（aiStyle75,DrawProj :33xxx 画的是持弓姿态非弹体贴图,
       // 本仓未建模载体绘制 → 隐形,P2 登记）/ 631 幻象矢（alpha255 渐显 :6786,AI_122
       // −15/t）/ 661 黑爆弹（alpha255 渐显 :7117,AI −55/t + scale1.3）/
@@ -1853,6 +1861,52 @@ export class Arrow extends Entity {
     const xenoFilter = this.drawXenoFilter();
     if (xenoFilter) ctx.filter = xenoFilter;
     else if (tableFilter) ctx.filter = tableFilter;
+    // ---- 宝石法珠弹芯脉冲（2026-08-26 用户实报批,1458 Main.cs:33667-33690）----
+    // 像素贴图本体 alpha=255 隐身（drawGlobalAlpha 侧已归零）;可见"芯"= 同心四层
+    // Color(80,80,80,0) 叠画（XNA 预乘 A=0 → src.rgb 全额加算 ≈ 每层 +31.4% 灰,
+    // canvas 'lighter'+grayscale(1)×α0.314 复刻），scale = 弹速向姿态
+    // base(X×1.25 早期通支 :33201-33203) × (1+cos(GlobalTime·2π)·0.2) × 0.6 慢脉冲;
+    // BiggerHitbox（126/钻/全特性臂）：再叠 (80,80,80,0)×0.5 的 (1,f)/(f,1)
+    // 双正交拉伸层（rot+π/4,4Hz 快脉冲 f=1+cos(GTW·8π)·0.2,:33681-33689）
+    if (isGemBolt(this.projId) || this.projId === 1120) {
+      const imgG = img;
+      if (imgG && (imgG.width > 0)) {
+        const gtS = performance.now() / 1000;                 // GlobalTimeWrappedHourly 近似
+        const slowPulse = 1 + Math.cos(gtS * Math.PI * 2) * 0.2;
+        const sBase = this.drawScale;
+        const iw0 = imgG.width * sBase, ih0 = imgG.height * sBase;
+        ctx.save();
+        ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+        ctx.rotate(ang);                                       // num341 = velocity.ToRotation()
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.filter = 'grayscale(1)';
+        ctx.imageSmoothingEnabled = false;
+        for (let i = 0; i < 4; i++) {                          // 四层同心灰芯
+          ctx.globalAlpha = 0.314;                             // +80/255 每层
+          const sw = iw0 * 1.25 * slowPulse * 0.6, sh = ih0 * slowPulse * 0.6;
+          ctx.drawImage(imgG as CanvasImageSource, -sw / 2, -sh / 2, sw, sh);
+        }
+        ctx.filter = 'none';
+        if (this.gem?.biggerHitbox) {
+          const fb = 1 + Math.cos(gtS * Math.PI * 2 * 4) * 0.2;   // 4Hz
+          ctx.globalAlpha = 0.157;                             // color104 × 0.5
+          const drawCross = (sx: number, sy: number): void => {
+            const swx = iw0 * sx, shy = ih0 * sy;
+            ctx.save();
+            ctx.rotate(Math.PI / 4);
+            ctx.drawImage(imgG as CanvasImageSource, -swx / 2, -shy / 2, swx, shy);
+            ctx.restore();
+          };
+          drawCross(fb, fb * 2);
+          drawCross(fb * 2, fb);
+        }
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.filter = 'none';
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+      return;
+    }
     // 329 焰镰（aiStyle 56）：rotation 恒自旋（不对齐速度）；spriteDirection<0 水平镜像
     if (this.scytheRot !== null) {
       ctx.rotate(this.spinRot);

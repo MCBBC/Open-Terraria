@@ -2783,7 +2783,11 @@ export class UI {
     }
     const grid = el('div');
     grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,52px); gap:4px;';
-    for (let i = 10; i < INV_SIZE; i++) {
+    // 背包网格 = 槽 10-49（10×4）。★曾写到 INV_SIZE=58——50-57 是钱币/弹药槽
+    // （COIN_START/AMMO_START,已在左列渲染），混进网格成第 5 行幻影格：query 首匹配
+    // 让左列元素吃掉绘制、悬停却读出钱币/弹药 tooltip（2026-08-26 用户实报红框行）。
+    // 原版背包网格到 49 为止（Main.cs 背包 10×4）。
+    for (let i = 10; i < COIN_START; i++) {
       grid.appendChild(this.makeSlotEl(i, 'inv'));
     }
     right.appendChild(grid);

@@ -68,6 +68,37 @@ describe('创建路径整合（overgroundTile 经 fitTopPlant 门）', () => {
   });
 });
 
+describe('growCactus 支撑形态双态门（cs:57060-57061，2026-08-26 案③）', () => {
+  function mkCactus(slope: number, half: boolean) {
+    return mkWorld((s) => {
+      for (let x = 12; x <= 28; x++) for (let y = 20; y <= 24; y++) s.setTile(x, y, SAND);   // 沙密度窗先满足
+      if (slope) { s.setTile(20, 20, SAND); s.setSlope(20, 20, slope); }
+      if (half) { s.setTile(20, 20, SAND); s.setHalfBrick(20, 20, true); }
+    });
+  }
+  const grow = (evo: WorldEvolution, rndVal = 0.01) => {
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(rndVal);
+    try { (evo as unknown as { growCactus(i: number, j: number): void }).growCactus(20, 20); } finally { rnd.mockRestore(); }
+  };
+  it('S1 坡沙上不生长（用户案③根因：运行时语境拒绝坡面基格）', () => {
+    const { st, evo } = mkCactus(1, false);
+    grow(evo);
+    expect(typeAt(st, 20, 19)).toBe(0);
+  });
+  it('半砖沙上不生长（GrowCactus halfBrick 门）', () => {
+    const { st, evo } = mkCactus(0, true);
+    grow(evo);
+    expect(typeAt(st, 20, 19)).toBe(0);
+  });
+  it('平整沙正常生长（双态门不误伤合法支）', () => {
+    const { st, evo } = mkWorld((s) => {
+      for (let x = 12; x <= 28; x++) for (let y = 20; y <= 24; y++) s.setTile(x, y, SAND);   // 沙≥10 满足密度窗
+    });
+    grow(evo);
+    expect(typeAt(st, 20, 19)).toBe(CACTUS);
+  });
+});
+
 describe('sanitizePlants（进图一次性孤儿清整）', () => {
   it('案① 收口：坡面草块上的蘑菇装饰被清除', () => {
     const { st, evo } = mkWorld((s) => {

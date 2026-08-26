@@ -12442,7 +12442,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           };
           const sw6152 = this.swing;
           const animDur6152 = sw6152?.dur ?? 40;
-          let mwx6152 = px, mwy6152 = py;
+          let mwx6152 = mzX, mwy6152 = mzY;
           { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); mwx6152 = wx; mwy6152 = wy; }
           let midSwing6152 = false;
           fireBloom6152();                                  // 首发（含 UseSound/mouseDown 消费）
@@ -12535,10 +12535,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  可达域钳）：改用 clampPointToPlayerReachableArea 全式（旧 limitPointToPlayerReach
           //  仅世界界钳,且步进向量曾用屏幕中心角 ang——相机非居中即落点大偏）
           const lim = this.clampPointToPlayerReachableArea(mwx, mwy);
-          let sx6155 = px, sy6155 = py;
+          let sx6155 = mzX, sy6155 = mzY;                 // 步进原点=pointPosition(:47603 中心)
           // 步进向量 = 玩家中心→鼠标世界 单位向量×shootSpeed（vanilla num4/num5=
           // (mouseScreen−pointPosition) 归一到 speed,:47685-47707）
-          const dxm6155 = mwx - px, dym6155 = mwy - py;
+          const dxm6155 = mwx - mzX, dym6155 = mwy - mzY;
           const dlm6155 = Math.hypot(dxm6155, dym6155) || 1;
           const stepX = dxm6155 / dlm6155 * cw.shootSpeed, stepY = dym6155 / dlm6155 * cw.shootSpeed;
           for (let k = 0; k < 400; k++) {
@@ -12547,7 +12547,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               sx6155 = lim.x; sy6155 = lim.y;                // 吸附（:49695-49698）
               break;
             }
-            if (!this.lineOfSightWalkable(sx6155, sy6155, px, py)) break;   // CanHitLine 断即停
+            if (!this.lineOfSightWalkable(sx6155, sy6155, mzX, mzY)) break;   // CanHitLine 断即停
           }
           const ul6155 = Math.hypot(stepX, stepY) || 1;
           const ux = stepX / ul6155, uy = stepY / ul6155;
@@ -12579,7 +12579,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const lim = this.limitPointToPlayerReach(mwx, mwy);
             const maxD = cw.shootSpeed * 20;                   // num205（:49708）
             let sx6173 = lim.x, sy6173 = lim.y;
-            const d6173 = Math.hypot(lim.x - px, lim.y - py);
+            const d6173 = Math.hypot(lim.x - mzX, lim.y - mzY);
             if (d6173 < maxD) {
               sx6173 += Math.cos(ang6173) * (maxD - d6173);        // :49710-49712 外推
               sy6173 += Math.sin(ang6173) * (maxD - d6173);
@@ -12605,17 +12605,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             let extra = 0;
             for (let ci = 0; ci < cands.length && extra < 2; ci++) {
               const t = cands[Math.floor(Math.random() * cands.length)];
-              const dot = ((t.cx - px) / (Math.hypot(t.cx - px, t.cy - py) || 1)) * Math.cos(ang6173)
-                + ((t.cy - py) / (Math.hypot(t.cx - px, t.cy - py) || 1)) * Math.sin(ang6173);
+              const dot = ((t.cx - mzX) / (Math.hypot(t.cx - mzX, t.cy - mzY) || 1)) * Math.cos(ang6173)
+                + ((t.cy - mzY) / (Math.hypot(t.cx - mzX, t.cy - mzY) || 1)) * Math.sin(ang6173);
               if (dot < 0.5) continue;                         // :49730 前半平面门
-              let bx = px, by = py;
+              let bx = mzX, by = mzY;
               for (let k = 0; k < 200; k++) {
                 const ddx = t.cx - bx, ddy = t.cy - by;
                 const dl = Math.hypot(ddx, ddy) || 1;
                 if (dl <= 8) break;
                 const stp = Math.min(8, dl);
                 bx += ddx / dl * stp; by += ddy / dl * stp;
-                if (!this.lineOfSightWalkable(bx, by, px, py)) break;   // CanHitLine 走到遮挡（:49732-49734）
+                if (!this.lineOfSightWalkable(bx, by, mzX, mzY)) break;   // CanHitLine 走到遮挡（:49732-49734）
               }
               if (Math.hypot(bx - t.cx, by - t.cy) > 16) continue;      // :49737 未贴近 → 跳过
               drop6173(bx, by);
@@ -12789,17 +12789,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.input.mouseDown = false;
           break;
         }
-        // 双足翼龙之怒 3870 → 711×3（Player.cs:48156-48170）：出膛 40px（LOS 门）
-        // + 三连扇形（0.8×速 + 垂直分量 0/±1，各旋 -π/60×direction）
+        // 双足翼龙之怒 3870 → 711×3（Player.cs:49265-49284,1458 行号）：出膛前探
+        // 40×item.scale px 带 CanHit 门（断则原地出生）+ 三连扇 v_k =
+        // (v*0.8 + aim单位*k).RotatedBy(k*(-π/180*direction))——★2026-08-26 对齐：
+        // 出生锚点=玩家中心(:47603);垂直分量系【瞄准向单位】k(旧实现误用切向 perp,
+        // 前 fan 边瓣指向偏 90°);CanHit 门曾缺
         if (cw.shoot === 711) {
-          const muzzleX = px + Math.cos(ang) * 40;
-          const muzzleY = py + Math.sin(ang) * 40;
+          const outX711 = Math.cos(ang) * 40, outY711 = Math.sin(ang) * 40;
+          let muzzleX = mzX, muzzleY = mzY;
+          if (canHitLine(this.world.store, mzX, mzY, 0, 0, mzX + outX711, mzY + outY711, 0, 0)) {
+            muzzleX += outX711; muzzleY += outY711;             // :49268-49271
+          }
           const baseVx = Math.cos(ang) * cw.shootSpeed * 0.8;
           const baseVy = Math.sin(ang) * cw.shootSpeed * 0.8;
-          const perpX = -Math.sin(ang), perpY = Math.cos(ang);
+          const aimXu = Math.cos(ang), aimYu = Math.sin(ang);
           const rotStep = Math.PI / 180 * -this.player.facing;
           for (let k = 0; k <= 2; k++) {
-            let bvx = baseVx + perpX * k, bvy = baseVy + perpY * k;
+            let bvx = baseVx + aimXu * k, bvy = baseVy + aimYu * k;   // :49276 vector55*k
             const rot = k * rotStep;
             const rc = Math.cos(rot), rs = Math.sin(rot);
             const nvx = bvx * rc - bvy * rs, nvy = bvx * rs + bvy * rc;
@@ -12832,7 +12838,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 大地法杖 1296 → 261（AI_014 弹跳巨石）：重力 0.3 + ai14 弹跳衰减
         // + extraUpdates 1（pd 驱动）；慢速消亡/墙撞爆岩在 Arrow boulder 模式
         if (cw.shoot === 261) {
-          const b261 = new Arrow(px, py,
+          const b261 = new Arrow(mzX, mzY,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback, 261, null,
             { grav: 0.3, bounce: true, life: pd?.timeLeft ?? 3600, pierce: 6 });
@@ -12949,8 +12955,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 // 兄弟弹：枪口 → 当前光标 × shootSpeed（Player.cs:46642-46673 num4/num5 同构）
                 const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
                 const a2 = Math.atan2(mwy - this.player.cy, mwx - this.player.cx);
-                const sx = this.player.cx + Math.cos(a2) * 14;
-                const sy = this.player.cy - 4 + Math.sin(a2) * 14;
+                // ★2026-08-26 锚点对齐：兄弟弹亦从玩家中心出生（:47603 RotatedRelativePoint
+                //   (MountedCenter) 无"枪口前伸"式——旧 +14px 偏差随本批统一移除）
+                const sx = this.player.cx;
+                const sy = this.player.cy;
                 const dl = Math.hypot(mwx - sx, mwy - sy) || 1;
                 spawnMissile(sx, sy, (mwx - sx) / dl * cw.shootSpeed, (mwy - sy) / dl * cw.shootSpeed);
               },
@@ -12964,7 +12972,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             };
             this.entities.add(m, 'projectiles');
           };
-          spawnMissile(px, py, Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed);
+          spawnMissile(mzX, mzY, Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed);
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
           this.playUseSound(critVid, 'tink'); // UseSound 数据驱动（113=Item9/218=Item20/495 各杖专属）
@@ -12997,8 +13005,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const fireAgain27 = (): void => {
             const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
             const a2 = Math.atan2(mwy - this.player.cy, mwx - this.player.cx);
-            const px2 = this.player.cx + Math.cos(a2) * 14;
-            const py2 = this.player.cy - 4 + Math.sin(a2) * 14;
+            // 续发锚点=玩家中心（2026-08-26 出生锚点批,同 case 'magic' 头 mzx 语义）
+            const px2 = this.player.cx;
+            const py2 = this.player.cy;
             this.fireGemStaffBolts(cw, def, ps, a2, px2, py2, critVid, pen, true);
           };
           // 尾停发窗 gate：动画末 useTime×N 静默（Player.cs:43820-43852 同式族）——
@@ -13017,7 +13026,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             } : {}),
           };
         }
-        this.fireGemStaffBolts(cw, def, ps, ang, px, py, critVid, pen, false);
+        // ---- 通用尾支出生偏移（原版 Player.cs 显式块逐件补,2026-08-26 锚点批）----
+        // 517 魔法匕首（:47641-47644）：pointPosition ±Next(-3,4)*3.5 双轴盒抖动
+        let gmzX = mzX, gmzY = mzY;
+        if (critVid === 517) {
+          gmzX += (Math.floor(Math.random() * 7) - 3) * 3.5;   // Next(-3,4)
+          gmzY += (Math.floor(Math.random() * 7) - 3) * 3.5;
+        }
+        // projToShoot==206 树叶吹风（:49944-49946）：pointPosition +=
+        // NextVector2Circular(12,12) − 出速向量（整速回拉一次,吹风的"喷口后坐"签名）
+        if (cw.shoot === 206) {
+          const u206 = Math.random(), a206 = Math.random() * Math.PI * 2;
+          gmzX += Math.cos(a206) * 12 * u206 - Math.cos(ang) * cw.shootSpeed;
+          gmzY += Math.sin(a206) * 12 * u206 - Math.sin(ang) * cw.shootSpeed;
+        }
+        this.fireGemStaffBolts(cw, def, ps, ang, gmzX, gmzY, critVid, pen, false);
         if (spray27 && this.swing) {
           // 周期窗冷却覆盖（fireGemStaffBolts 内置的 per-shot 冷却被抬到整窗）：
           // mana 下次扣减要等 itemAnimation 归零（:43072 门）→ 一动画窗一扣
@@ -19903,11 +19926,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const chestDef = ITEM_DEFS[this.player.inv.armor[1]?.id ?? -1];
         const chestVid = chestDef ? (chestDef.vid ?? viIdFromKey(chestDef.key) ?? -1) : -1;
         if (packGemStaffFeatures(gemCw.shoot, chestVid >= 0 ? chestVid : undefined, gemVid).arPenSpread) {
-          // 出手链同 case 'magic'（:10612-10614）：当前光标向、枪口点
+          // 出手链同 case 'magic'（:10612-10614）：当前光标向、出生点=玩家中心
+          //（2026-08-26 锚点批——RotatedRelativePoint(MountedCenter)=碰撞盒中心,
+          //  原"枪口 +14px 前伸"系登记偏差,红晶环偏移在 fireGemStaffBolts 内自加）
           const gAng = Math.atan2(this.input.mouseY - this.renderer.canvas.height / 2,
             this.input.mouseX - this.renderer.canvas.width / 2);
-          const gpx = this.player.cx + Math.cos(gAng) * 14;
-          const gpy = this.player.cy - 4 + Math.sin(gAng) * 14;
+          const gpx = this.player.cx;
+          const gpy = this.player.cy;
           this.fireGemStaffBolts(gemCw, heldDef, gPs, gAng, gpx, gpy, gemVid,
             projectileData(gemCw.shoot)?.penetrate ?? 1, true);
         }

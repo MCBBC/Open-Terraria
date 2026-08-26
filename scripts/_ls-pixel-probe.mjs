@@ -197,6 +197,16 @@ const outB = await page.evaluate(async () => {
   const TILE = 16;
   const dpr = g.renderer.dpr || 1;
   const cv = g.renderer.canvas;
+  // ★B 段重施 fresh cast（A 段强制帧加速 orb 老化,尸检窗已耗尽）
+  for (const q of g.entities.projectiles) if (q.projId === 1117) q.dead = true;
+  g.input.mouseDown = true; g.input.mouseHeld = false;
+  let fresh = null;
+  for (let i = 0; i < 40 && !fresh; i++) {
+    g.fixedUpdate(1 / 60);
+    fresh = g.entities.projectiles.find((q) => q.projId === 1117 && !q.dead) ?? null;
+  }
+  g.input.mouseDown = false;
+  if (!fresh) return { boltSeen: null, lineSamples: [], rgbAcc: [], err: 'no-recast' };
   function sampleWorldRGB(wx, wy) {
     const [sxw, syw] = g.camera.worldToScreen(wx, wy);
     const x0 = Math.round(sxw * dpr), y0 = Math.round(syw * dpr);
