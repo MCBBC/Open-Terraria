@@ -3611,6 +3611,14 @@ export class Renderer {
       return typeof location !== 'undefined' && new URLSearchParams(location.search).get('lightfast') !== '0';
     } catch { return false; }
   })();
+  /** 旱地扭曲跳过总门(?dryskip=0 回退无视口液体探针的旧行为——每帧恒做全屏
+   *  扭曲上传。像素等价性实机实证:空前景水 α 下 applyFullScreen 输出≡输入,
+   *  逐字节 diff=0(scripts/_perf-parity-probe.mjs,#perf2026-08-26 批) */
+  static readonly dryWarpSkip = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('dryskip') !== '0';
+    } catch { return true; }
+  })();
   /** 主画布不透明后备(?opaque=0 逃生门,A/B 对拍用):alpha:false 让 Chrome 走
    *  免混合提交路径(SHM 帧少拷贝,软渲染下 Commit/viz 受益)。核验记录
    *  (2026-08-25):body=#000、主画布零像素读出(toDataURL/getImageData 无命中)、
@@ -12762,7 +12770,7 @@ export class Renderer {
         //   全由 obj19 alpha 门控交付（GLWaterDistortion 头注）。GL 不可用/逃生门/
         //   视口无液体探针（_waveLiquidInView，恒等输出跳过整屏上传）→ 原样直画。
         const warped = this._waveCss && !this.isCpuRender() && waterWaves.quality > 0
-          && this._waveLiquidInView
+          && (!Renderer.dryWarpSkip || this._waveLiquidInView)
           ? this.waterWarp.applyFullScreen(gl.canvas, this._waveCss,
             this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null)
           : null;

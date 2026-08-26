@@ -2307,8 +2307,12 @@ export class SkyRenderer {
     // drawArrays 同步消费几何、无惰性引用 → 单 scratch 在两通道间重填安全。
     // 菜单侧 MenuBackground 分 'closer'/'closest' 注入调用 = 两通道夹不同层,
     // 必须各自独立会话(不传批令牌,走原路径)。
+    // ★舍入界(实机探针 scripts/_perf-parity-probe.mjs 实证):porter-duff over 可
+    // 结合,但两条路径的 8bit 中间量化分组不同 → 云贴图半透明重叠像素 ±1~2 LSB
+    // (实测 988×862 全屏 67 像素差,maxΔ=2;无重叠即逐位同)。方向中性且更贴近
+    // 原版 SpriteBatch 单背板流式语义。?cloudbatch=0 一键回退独立会话。
     let shared: GLSpriteLayer | null = null;
-    if (which === 'both') {
+    if (which === 'both' && SkyRenderer.batchBoth) {
       const g = this.useGLClouds ? this.cloudGlLayer : null;
       shared = g && !g.unavailable ? g : null;
     }
@@ -2474,6 +2478,9 @@ export class SkyRenderer {
   /** GL 云总门(?cloudgl=0 逃生门;cpuRender 由 Renderer 注入 null 实现) */
   useGLClouds = typeof location !== 'undefined'
     ? new URLSearchParams(location.search).get('cloudgl') !== '0' : true;
+  /** 'both' 双通道共享批总门(?cloudbatch=0 回退每通道独立会话——2026-08-26 前语义) */
+  static readonly batchBoth = typeof location !== 'undefined'
+    ? new URLSearchParams(location.search).get('cloudbatch') !== '0' : true;
   disposeCloudGL(): void {
     // 上下文本体归 Renderer.glfx 管;这里只摘引用(调用方:cpu 切换/销毁)
     this.cloudGlLayer = null;
