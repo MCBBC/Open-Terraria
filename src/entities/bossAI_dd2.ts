@@ -947,7 +947,9 @@ export function sandSharkAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (!aheadSand && sign(e.vx) === e.facing
         && Math.hypot(tgt!.x - e.cx, tgt!.y - e.cy) < range
         && (e.ai2 >= 30 || e.ai2 < 0)) {
-        if (x[0] === 0) { x[0] = -1; game.playSfxWav?.('Zombie_7', 1, e.cx, e.cy); }  // :42713 (14,542) 出沙扑咬音
+        // vol 0.4 = case14 style542 档（:803 ×0.4）——原 FILE_CASE_VOL.Zombie_7 文件级档
+        //   与吸血鬼闲话(case29 style7 满响)冲突,2026-08-26 移交调用点显式传
+        if (x[0] === 0) { x[0] = -1; game.playSfxWav?.('Zombie_7', 0.4, e.cx, e.cy); }  // :42713 (14,542) 出沙扑咬音
         e.ai2 = -30;
         const d = dirTo(e, tgt!.x, tgt!.y - 80);   // 跃沙扑咬 12 速（:42708-42711）
         e.vx = d.x * 12;
@@ -1148,7 +1150,10 @@ export function lanePortalAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.ai1 === 0) {
     // ---- 开门出怪（:43071-43116） ----
     if (x[0] === 0) {
-      game.playSfxFiles(['dd2_etherian_portal_open'], 0.7, e.cx, e.cy);  // DD2_EtherianPortalOpen（:43075）
+      // F2 2026-08-26:vol 0.7→1.0——SoundID.cs:986 DD2_EtherianPortalOpen=
+      // CreateTrackable("dd2_etherian_portal_open") 无 WithVolume,NPC.cs:41400
+      // 调用点亦无 override → 满响×PlayTrackedSound 距离衰减（曾私改 0.7）
+      game.playSfxFiles(['dd2_etherian_portal_open'], 1.0, e.cx, e.cy);  // DD2_EtherianPortalOpen（:43075→41400）
     }
     if (x[0] > 150) portalLoopManage(e, game, 1);   // ★B1：循环轨起轨（NPC.cs:41406-41413 localAI[0]>150 判 GetActiveSound 空 → PlayTrackedSound；SoundID.cs:984 无 WithVolume → 基音量 1。原版带位置衰减,本仓 startLoopSfx 无空间参数,屏距衰减未建模登记）
     if (!DD2_EVENT_HOOKS.enemySpawningOnHold()) e.ai0 += 1;

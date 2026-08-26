@@ -218,7 +218,10 @@ export const FILE_CASE_VOL: Record<string, number> = (() => {
   //   0.25 是 style4(沙鲨游弋 :42661)调用点专属,由调用方显式传(bossAI_dd2)——
   //   曾按文件名统一乘 → 蠕虫掘地被压 1/4,2026-08-18 修正
   m.Zombie_109 = 0.3;  // case45 Dolphin(:1063 ×0.3)——海豚跃出声
-  m.Zombie_7 = 0.4;    // case14 style542(:793-799 沙鲨出沙扑咬 = Zombie_7 ×0.4)
+  // ★Zombie_7 无文件级档（2026-08-26 审计修正）：同文件两消费面音量不同——
+  //   case14 style542 沙鲨扑咬 ×0.4 vs case29 style7 吸血鬼闲话 ×1.0（:1008-1052
+  //   style<24 无乘区）。文件级表无法双值,×0.4 移交沙鲨调用点显式传
+  //   （bossAI_dd2 出沙扑咬），闲话路径回归原版满响。
   // case14 style489/586 分支（:808-816,Next(21,24)=Zombie_21/22/23）两分支都 ×0.4
   //   （:803/:813）——血僵尸 489/僵尸鱼人 586 闲话池（曾缺档在播偏大 ~2.5×）
   m.Zombie_21 = 0.4; m.Zombie_22 = 0.4; m.Zombie_23 = 0.4;
@@ -245,12 +248,19 @@ export const FILE_CASE_VOL: Record<string, number> = (() => {
   return m;
 })();
 
-/** 原版逐类型音高抖动表（LegacySoundPlayer.PlaySound 各 case 的 Pitch 随机式;
- *  R22 修复:旧实现全局一档 playbackRate=0.92+rand×0.16≈±0.115,与原版逐类型档
- *  系统性偏差——门 ±0.20/草 ±0.30/Item ±0.06/鸟 -0.70..+0.25/受击咆哮菜单等不抖）。
- *  键 = wav 文件名;值 = [lo,hi]（单位 0.01,含端点,XNA Next(lo,hi+1)*0.01 等价）。
- *  未登记文件 = 不抖（原版无 Pitch 赋值的 case 与现代 trackable 路径默认 PitchVariance=0 同语义;
- *  player_hit_* 宠物语音按 SoundID.cs WithPitchVariance(0.4) 登记 ±40）。
+/** 原版逐类型音高抖动表（LegacySoundPlayer.PlaySound 各 case 的 Pitch 随机式
+ *  + 现代 trackable 的 WithPitchVariance;R22 修复:旧实现全局一档
+ *  playbackRate=0.92+rand×0.16≈±0.115,与原版逐类型档系统性偏差——门 ±0.20/
+ *  草 ±0.30/Item ±0.06/鸟 -0.70..+0.25/受击咆哮菜单等不抖）。
+ *  键 = wav 文件名;值 = [lo,hi]（单位 0.01,含端点,XNA Next(lo,hi+1)*k 等价）。
+ *  ★双语义（2026-08-26 F1 全表对源审计,Terarria1458）：
+ *  · LSP 显式式档 = case 内 Next(a,b)×k 直录 [a,b]×k——不经 GetRandomPitch,原样精确;
+ *  · WithPitchVariance(v) 档 = **半幅 ±v/2**——GetRandomPitch=NextFloat()×v−v×0.5
+ *    （Terraria.Audio/SoundStyle.cs:42）;trackable 走 type42(LSP :1383-1388 无自身
+ *    Pitch)+尾部 += GetRandomPitch(ActiveSound.cs:83/:94),故终值 ∈ ±PV/2 非全幅,
+ *    表内登记 [-v×50, v×50]（曾按全幅 ±v×100 登记系统性宽 2 倍,F1 已修）。
+ *  未登记文件 = 不抖（原版无 Pitch 赋值的 case 与 CreateTrackable 默认 PitchVariance=0 同语义;
+ *  player_hit_* 宠物语音按 SoundID.cs WithPitchVariance(0.4) 登记半幅 ±20）。
  *  显式 pitch 参数（乐器 musicPitch 直传,Player.cs:45928）仍优先于本表。 */
 export const PITCH_CASE: Record<string, [number, number] | null> = (() => {
   const m: Record<string, [number, number] | null> = {};
@@ -268,7 +278,9 @@ export const PITCH_CASE: Record<string, [number, number] | null> = (() => {
     'Drown'], null);                                                      // case23(:950)
   put(['Zombie_0', 'Zombie_1', 'Zombie_2',                                // case14 ZombieMoan(:796-827)
     'Zombie_7', 'Zombie_21', 'Zombie_22', 'Zombie_23'], null);
-  put(['Zombie_115', 'Zombie_116', 'Zombie_117'], null);                  // case65(:1400)
+  put(['Zombie_6', 'Zombie_8'], [-10, 10]);   // case29 style6/8 弗兰肯/面怪闲话(:1051 ±0.10;
+                                              //   Zombie_7 保持 null=case14-542 无抖动与 case29 有抖动同文件冲突,取沙鲨侧)
+  put(['Zombie_115', 'Zombie_116', 'Zombie_117'], null);                  // case65(:1389-1405 无 Pitch)
   put(['Female_Hit_0', 'Female_Hit_1', 'Female_Hit_2'], null);            // case20(:914-926)
   // —— ±0.10 档 Next(-10,11)×0.01 ——
   put(rng('Dig_', 0, 2), [-10, 10]);              // case0(:453)
@@ -303,23 +315,37 @@ export const PITCH_CASE: Record<string, [number, number] | null> = (() => {
   m.Item_132 = [-2, 2];      // :622 ×0.001
   m.Item_153 = [-15, 15];    // :625 ×0.003
   m.Item_156 = [-10, 10];    // :628 ×0.002
-  m.Item_169 = [-86, -74];   // :642 默认档后 Pitch -= 0.8
-  m.Item_26 = null; m.Item_35 = null; m.Item_47 = null;   // :634-637 Pitch=Main.musicPitch(乐器直传不随机)
-  // 鼓槌十档(LegacySoundPlayer.cs:1238-1245 case53-62→Item_139..148):数字型支无 Pitch
+  m.Item_169 = [-86, -74];   // :643-645 默认档后 Pitch -= 0.8
+  m.Item_26 = null; m.Item_35 = null; m.Item_47 = null;   // :638-642 Pitch=Main.musicPitch(乐器直传不随机)
+  // 鼓槌十档(LegacySoundPlayer.cs:1237-1248 case53-62→Item_139..148):数字型支无 Pitch
   // 赋值(仅 ×0.7 音量)——2026-08-25 音频对账收口,勿吃 case2 默认 ±0.06 抖动
   for (let d = 139; d <= 148; d++) m[`Item_${d}`] = null;
-  // —— 宠物史莱姆受击语音（SoundID.cs WithPitchVariance(0.4),vanillaNpcAmbience 表注同源）——
+  // —— 宠物史莱姆受击语音（SoundID.cs 各 Hurt 全链 WithPitchVariance(0.4f)→半幅 ±0.20;
+  //  vanillaNpcAmbience 表注同源。逐条行号:chicken :1142/chicken_rare :1144/frog :1146/
+  //  goat :1148/retro :1150/cat :1154/dog :1156/turkey :1158/goblin :1160/crow :1162/
+  //  balloon :1164(BalloonDeath :1166 同文件)/undead :1168/vampire :1170/fairy :1172）——
   put(['player_hit_balloon', 'player_hit_cat', 'player_hit_chicken', 'player_hit_chicken_rare',
     'player_hit_crow', 'player_hit_dog', 'player_hit_fairy', 'player_hit_frog',
     'player_hit_goat', 'player_hit_goblin', 'player_hit_retro', 'player_hit_turkey',
-    'player_hit_undead', 'player_hit_vampire'], [-40, 40]);
-  // —— 系统单件接线批补档（WithPitchVariance(v) ≡ ±v×100 档,同 player_hit_* 约定）——
-  m.Double_Jump = [-10, 10];   // LSP.cs:846-857 case16 Pitch=Next(-10,11)×0.01（多段跳族）
-  m.best_reforge = [-10, 10];  // SoundID.cs:1122 BestReforge.WithPitchVariance(0.1f)
-  m.sonar_potion = [-3, 3];    // SoundID.cs:1128 SonarPotion.WithPitchVariance(0.03f)
+    'player_hit_undead', 'player_hit_vampire'], [-20, 20]);
+  // —— F1 审计补档（WithPitchVariance 半幅族,实播但此前缺档;SoundID.cs 定源）——
+  // eow_dig PV=0.02f(:1176)→±0.01 / statuemimic 三轨 PV=0.1f(:1130/:1132/:1134)→±0.05 /
+  // trash_item PV=0.25f(:1124)→±0.125 / lucyaxe_talk PV=0.1f(:1028)→±0.05
+  put(['eow_dig'], [-1, 1]);
+  put(['statuemimic_scare', 'statuemimic_jump', 'statuemimic_laugh_0', 'statuemimic_laugh_1',
+    'statuemimic_laugh_2', 'lucyaxe_talk_0', 'lucyaxe_talk_1', 'lucyaxe_talk_2',
+    'lucyaxe_talk_3', 'lucyaxe_talk_4'], [-5, 5]);
+  put(['trash_item_0', 'trash_item_1'], [-12.5, 12.5]);
+  // —— 系统单件接线批补档——
+  //  ★双语义（F1 2026-08-26）:WithPitchVariance(v) 档=±v/2 半幅（GetRandomPitch=
+  //  NextFloat()×v−v/2,SoundStyle.cs:42;trackable type42 无自身 Pitch+尾部 += ,
+  //  LSP :1383-1388/ActiveSound.cs:83）;LSP 显式 case 式=Next(a,b)×0.01 原样直录。
+  m.Double_Jump = [-10, 10];   // LSP.cs case16(:846) Pitch=Next(-10,11)×0.01(:854) 显式式,保持全区间（多段跳族）
+  m.best_reforge = [-5, 5];    // SoundID.cs:1122 BestReforge.WithPitchVariance(0.1f)→半幅 ±0.05（曾误 ±0.10）
+  m.sonar_potion = [-1.5, 1.5];  // SoundID.cs:1128 SonarPotion.WithPitchVariance(0.03f)→半幅 ±0.015（连续均匀的 3 点离散近似）
   // —— 玩家语音批（voiceVariant/语音饰品子系统,PlayerVoice.ts 消费）——
-  m.player_hit_default = [-20, 20];   // SoundID.cs:1138 DefaultPlayerHurt.WithPitchVariance(0.2f)
-  m.player_death_retro = [-40, 40];   // :1152 RetroDeath.WithPitchVariance(0.4f)
+  m.player_hit_default = [-10, 10];   // SoundID.cs:1138 DefaultPlayerHurt.WithPitchVariance(0.2f)→半幅 ±0.10（曾误 ±0.20）
+  m.player_death_retro = [-20, 20];   // SoundID.cs:1152 RetroDeath.WithPitchVariance(0.4f)→半幅 ±0.20（曾误 ±0.40）
   return m;
 })();
 
@@ -554,7 +580,13 @@ export class Sfx {
    *  时 return null 不重触发)——仅 Roar:多段蠕虫(毁灭者 80 段各自掷 soundDelay)靠
    *  同槽互斥收敛为单声,否则每 10-20t 满响吼叫叠成音墙。NPC_Hit(case3)是 Stop-重播、
    *  NPC_Killed(case4)/僵尸族(case14/26/29)每次都播,均不在此列(R22 登记面维持) */
-  private static readonly SINGLE_INSTANCE = new Set(['Roar_0', 'Roar_1', 'NPC_Killed_10']);
+  private static readonly SINGLE_INSTANCE = new Set([
+    'Roar_0', 'Roar_1', 'NPC_Killed_10',
+    // 成就解锁音去重（AchievementInitializer.cs OnAchievementCompleted：FindActiveSound
+    // ==null 才 PlayTrackedSound——进世界批量补授多成就同帧解锁时原版只响一声,
+    // 2026-08-26 review 补,否则 achOnWorldEnter 一帧 N 连播叠音墙）
+    'achievement_complete',
+  ]);
   /** ★R26 GAP-05:Item 音库(case 2 LegacySoundPlayer.cs:519-643)三组实例槽语义——
    *  原版每个 style 一条 SoundInstanceItem[num] 槽,快速连发时:
    *  · SKIP_IF_PLAYING(styles 53/55/159,:555-561/:587-591):在播 → return null 不重触发;

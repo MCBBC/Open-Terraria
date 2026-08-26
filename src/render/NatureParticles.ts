@@ -430,13 +430,16 @@ export class NatureParticles {
    *  缓存,超限整体清空 */
   private goreTintCache = new Map<string, HTMLCanvasElement>();
 
-  private tintedGore(img: HTMLImageElement, lr: number, lg: number, lb: number): HTMLImageElement | HTMLCanvasElement {
+  private tintedGore(img: HTMLImageElement | ImageBitmap, texKey: string,
+    lr: number, lg: number, lb: number): HTMLCanvasElement {
     const qr = Math.round(lr / 24) * 24, qg = Math.round(lg / 24) * 24, qb = Math.round(lb / 24) * 24;
-    const key = `${img.src}|${qr},${qg},${qb}`;
+    const key = `${texKey}|${qr},${qg},${qb}`;
     const hit = this.goreTintCache.get(key);
     if (hit) return hit;
+    const iw = 'naturalWidth' in img ? img.naturalWidth : img.width;
+    const ih = 'naturalHeight' in img ? img.naturalHeight : img.height;
     const cv = document.createElement('canvas');
-    cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+    cv.width = iw; cv.height = ih;
     const cx = cv.getContext('2d')!;
     cx.drawImage(img, 0, 0);
     cx.globalCompositeOperation = 'multiply';
@@ -459,7 +462,7 @@ export class NatureParticles {
       const fw = img.width / 32, fh = img.height / 8;
       const [lr, lg, lb] = lightAt?.(Math.floor((l.x + 4) / TILE), Math.floor((l.y + 4) / TILE)) ?? [255, 255, 255];
       ctx.globalAlpha = 1 - l.alpha / 255;
-      ctx.drawImage(this.tintedGore(img, lr, lg, lb), 0, l.row * fh, fw, fh, l.x, l.y, fw * l.scale, fh * l.scale);
+      ctx.drawImage(this.tintedGore(img, `leaf${l.gore}`, lr, lg, lb), 0, l.row * fh, fw, fh, l.x, l.y, fw * l.scale, fh * l.scale);
     }
     // 滴水：18×300 竖条 15 帧（帧高 20）——Gore 716 特例 GetAlpha 恒 (255,255,255,200)
     // 不受光照,不染色
@@ -482,7 +485,7 @@ export class NatureParticles {
       ctx.translate(c.x + w / 2, c.y + h / 2);
       if (c.rotation) ctx.rotate(c.rotation);
       if (c.scale !== 1) ctx.scale(c.scale, c.scale);
-      ctx.drawImage(this.tintedGore(img, lr, lg, lb), -w / 2, -h / 2);
+      ctx.drawImage(this.tintedGore(img, `fog${c.type}`, lr, lg, lb), -w / 2, -h / 2);
       ctx.restore();
     }
     ctx.globalAlpha = 1;

@@ -1268,6 +1268,13 @@ function tintIconRect(
 // 等价原版 FindFrame 每 update 调一次）。
 export interface NpcGridFrameState { counter: number; idx: number }
 
+/** 657 水晶核 Extra_186 Y 偏移表（Main.cs :23950-23986 switch(num100)，键=帧索引）。
+ *  王冠 Extra_177 表同值唯 idx=6 反号（冠 +10 / 核 −10,:24003-24005），消费侧差分补正 */
+const QUEEN_SLIME_CORE_Y_OFF: Record<number, number> = {
+  1: -10, 6: -10, 3: 10, 5: 10, 4: 18, 12: 18, 13: 18, 14: 18, 15: 18,
+  7: -14, 8: -14, 9: -16, 10: -18, 11: 20, 20: -14, 21: -18, 23: -18, 22: -22,
+};
+
 /** 657 史莱姆皇后（FindFrame case 657，NPC.cs:67503-67614）。
  *  flag13 = life≤lifeMax/2（二段）；noGravity 为 AI 侧动态位，渲染层以
  *  `half && ai0==0`（二段待机=飞行，bossAI_lategame queenSlimeAI flying 同款判定）近似。
@@ -5409,17 +5416,25 @@ export class Renderer {
         // (蛆虫族 485-487 :73515 设 direction→正常镜像)
         const owlMirror = e.vanillaId === 611 || e.vanillaId === 689;
         // 546 怒滚虫 spriteDirection=−direction(cs:63368)→同鸮族反翻档:facing<0 才翻
-        // (facing 兼作 chargerAI 的 AI direction,不可在 AI 侧取反)。
-        // 301 渡鸦同反翻族(FindFrame :74257-74271 专属支:飞行 vx>0.5→spriteDirection=-1、
-        // vx<-0.5→=1、落地 =-direction——贴图原生朝右,与通用朝左约定相反)→facing<0 才翻;
-        // 曾落通用镜像档=向右飞倒飞(2026-08-26 用户实报墓地乌鸦)
-        const sdirNeg = e.vanillaId === 546 || e.vanillaId === 301;
+        // (facing 兼作 chargerAI 的 AI direction,不可在 AI 侧取反)
+        const sdirNeg = e.vanillaId === 546;
+        // 301 渡鸦（FindFrame :74257-74271 专属支,贴图原生朝右）双态判据:
+        //   落地(vy==0) sdir=-direction(:74260)→facing<0 翻;
+        //   飞行按【速度向】滞回 vx>0.5→sdir=-1 / vx<-0.5→sdir=1(:74263-74270)→vx<-0.5 翻。
+        //   ★不可并入上档按 facing 翻:转向瞬态 direction 先翻而速度未翻(vultureAI X 加速
+        //   0.15/t,满速反转 ~24t 窗口)、受击退速度已反向 direction 未变——两态按 facing
+        //   都会短暂倒飞。速度向镜像先例=恶魔眼族 eyeMirrorByVx。|vx|≤0.5 死区原版保前值
+        //   (有态滞回),本处无态近似不翻(数 tick 瞬态,登记)。
+        //   曾整体落通用镜像档=恒倒飞(2026-08-26 用户实报墓地乌鸦)
+        const ravenMirror = e.vanillaId === 301;
+        const ravenFlip = ravenMirror && (e.vy === 0 ? e.facing < 0 : e.vx < -0.5);
         const wormMirror = stR === 66 && !(e.vanillaId >= 485 && e.vanillaId <= 487);
         // 蜗牛 aiStyle67 spriteDirection 走象限表(上方旋转分支自带局部翻面)——
         // 通用 facing 镜像禁用,否则与象限翻面叠加成恒翻
         const snailMirror = stR === 67;
-        if (!rotationDriven && !owlMirror && !sdirNeg && !wormMirror && !snailMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
+        if (!rotationDriven && !owlMirror && !sdirNeg && !ravenMirror && !wormMirror && !snailMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
         if (!rotationDriven && (owlMirror || sdirNeg) && e.facing < 0) ctx.scale(-1, 1);
+        if (ravenFlip) ctx.scale(-1, 1);   // 301:双态判据已含方向,不叠 facing<0 门(受击退瞬态 facing⊥vx)
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
@@ -6971,9 +6986,141 @@ export class Renderer {
     });
     // 几何(cols/rows/cell/inflateY)查 NPC_GRIDS 单一真源(重制管线共用)
     const g = NPC_GRIDS[657]!;
+    this.drawQueenSlimeExtras(e, idx, half);
     this.drawNpcGrid(e, img, g.cols, g.rows, idx, g.cellW, g.cellH, {
       perRow: g.perRow, yOff: 2, inflateY: g.inflateY, mirrorTexFaces: 'right', rotate: e.spin,
     });
+    this.drawQueenSlimeCrown(e, idx);
+  }
+
+  /** 657 附属层（Main.cs case 657 :23938-23963 + DrawNPCDirect_QueenSlimeWings :22691-22717，
+   *  本批补全——此前"素材/系统缺"登记随 Extra_177/179/180/185/186 入库作废）：
+   *  ① 二段翅膀（life≤halfMax）：Extra_185 Frame(1,4,0,lai3/6)、scale 0.8、双翼镜像锚
+   *     Center（i=1 右翼 +2px 翻转）、翼尖倾斜 = clamp(vy,±6)×−0.1（左翼反号）、
+   *     rotation≠0 时锚点绕 Bottom 旋转；
+   *  ② 残影（ai0==4 && vy≠0，:23969-23986）：oldPos[0..7]+(w/2,h) 底心向当前 Bottom 收拢
+   *     (Bottom−ghost)×0.25×num102（ai2==1 坠相 ×6），alpha=(1−k/8)，XOR 翻转；
+   *  ③ 水晶核 Extra_186：Center+(0,Y 偏移表[:23950-23986]) 绕 Bottom 旋转、origin 心。
+   *  ★QueenSlime shader 近似（DyeInitializer.cs:434-436 绑定 pixelShader+Extra_180/179
+   *  渐变噪声）：水晶/残影按时间在蓝(0,160,255)↔粉(255,80,255)=GetDustColor(:45612)
+   *  调色族间循环染色，色桶量化 8 步进复用 tintAtlas 缓存；本体全幅 shader 洗染未建模
+   *  （登记近似——本体保持光照管线路径）。 */
+  private drawQueenSlimeExtras(e: Enemy, idx: number, half: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.atlas) return;
+    const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+    if (opacity <= 0) return;
+    // shader 循环色（GetDustColor 调色族端点 lerp;8 桶量化入 tintedSprite 缓存）
+    const tSec = (typeof performance !== 'undefined' ? performance.now() : 0) / 400;
+    const mix = 0.5 + 0.5 * Math.sin(tSec);
+    const tint = [Math.round(255 * mix), Math.round(160 - 80 * mix), Math.round(255)];
+    const bottomX = e.cx, bottomY = e.y + e.h;
+    const spin = e.spin;
+    const rotAboutBottom = (px: number, py: number): [number, number] => {
+      if (spin === 0) return [px, py];
+      const c = Math.cos(spin), s = Math.sin(spin);
+      const dx = px - bottomX, dy = py - bottomY;
+      return [bottomX + dx * c - dy * s, bottomY + dx * s + dy * c];
+    };
+    // ① 二段翅膀（先于本体,原版绘制序 :23946-23949）
+    if (half) {
+      const wimg = this.atlas.ensureVImage('vanilla/Extra_185.png');
+      if (wimg && wimg.height >= 4) {
+        const fh = wimg.height / 4;
+        const wi = Math.floor((e.lai3 % 24) / 6) & 3;
+        for (let i = 0; i < 2; i++) {
+          let px = e.cx + (i === 1 ? 2 : 0), py = e.cy;
+          [px, py] = rotAboutBottom(px, py);
+          const tilt = -Math.max(-6, Math.min(6, e.vy)) * 0.1 * (i === 0 ? -1 : 1);
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(spin + tilt);
+          ctx.scale(i === 1 ? -1 : 1, 1);
+          ctx.globalAlpha = opacity;
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(wimg as CanvasImageSource, 0, wi * fh, wimg.width, fh, -wimg.width, -fh / 2, wimg.width, fh);
+          ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+    // ② 残影（ai0==4 且空中;坠相 num102=6 强化收拢）
+    if (e.ai0 === 4 && Math.abs(e.vy) > 0.01) {
+      const bodyImg = this.atlas.ensureVImage('vanilla/NPC_657.png');
+      if (bodyImg) {
+        const g = NPC_GRIDS[657]!;
+        const perRow = g.perRow ?? g.rows;
+        const col = Math.floor(idx / perRow), row = idx % perRow;
+        let sx = col * g.cellW, sy = row * g.cellH + ((g.inflateY ?? 0) >> 1);
+        let sw = g.cellW, sh = g.cellH - (g.inflateY ?? 0);
+        sx = Math.max(0, Math.min(bodyImg.width - 1, sx));
+        sy = Math.max(0, Math.min(bodyImg.height - 1, sy));
+        sw = Math.max(1, Math.min(sw, bodyImg.width - sx));
+        sh = Math.max(1, Math.min(sh, bodyImg.height - sy));
+        const num102 = e.ai2 === 1 ? 6 : 1;
+        const depth = e.historyDepth();
+        ctx.imageSmoothingEnabled = false;
+        for (let k = 7; k >= 0; k--) {
+          if (k >= depth) continue;
+          const bx = e.histXAt(k) + e.w * 0.5, by = e.histYAt(k) + e.h;
+          const gx = bx - (bottomX - bx) * 0.25 * num102;
+          const gy = by - (bottomY - by) * 0.25 * num102;
+          ctx.save();
+          ctx.translate(gx, gy);
+          ctx.rotate(spin);
+          ctx.scale(e.facing > 0 ? -1 : 1, 1);   // XOR FlipHorizontally（与本体反向）
+          ctx.globalAlpha = Math.max(0, 1 - k / 8) * opacity;
+          ctx.drawImage(bodyImg as CanvasImageSource, sx, sy, sw, sh, -sw / 2, -sh, sw, sh);
+          ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+    // ③ 水晶核（shader 循环染色近似）
+    const crystal = this.atlas.ensureVImage('vanilla/Extra_186.png');
+    if (crystal) {
+      const tinted = this.tintedSprite(`qs186|${Math.floor(((tSec % 8) + 8) % 8)}`,
+        { img: crystal as CanvasImageSource, sx: 0, sy: 0, sw: crystal.width, sh: crystal.height }, tint);
+      let px = e.cx, py = e.cy + (QUEEN_SLIME_CORE_Y_OFF[idx] ?? 0);
+      [px, py] = rotAboutBottom(px, py);
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(spin);
+      ctx.globalAlpha = opacity;
+      ctx.imageSmoothingEnabled = false;
+      if (tinted) ctx.drawImage(tinted.c, -crystal.width / 2, -crystal.height / 2, crystal.width, crystal.height);
+      else ctx.drawImage(crystal as CanvasImageSource, -crystal.width / 2, -crystal.height / 2);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /** 657 王冠层（Main.cs :24001-24044，本批补全）：Extra_177 于 Center.X、
+   *  Top.Y − 冠高 + 44 + Y 偏移表（idx=6 与水晶核表反号 +10/:24003-24005），
+   *  origin 心、rotation≠0 绕 Bottom 旋转。普通混合（不进 shader）。 */
+  private drawQueenSlimeCrown(e: Enemy, idx: number): void {
+    const ctx = this.ctx;
+    const crown = this.atlas?.ensureVImage('vanilla/Extra_177.png');
+    if (!ctx || !crown) return;
+    const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+    if (opacity <= 0) return;
+    const bottomX = e.cx, bottomY = e.y + e.h;
+    const spin = e.spin;
+    let px = e.cx, py = e.y - crown.height + 44 + (QUEEN_SLIME_CORE_Y_OFF[idx] ?? 0);
+    if (idx === 6) py += 20;   // 冠表 6→+10 与水晶表 6→−10 的差值（:24003-24005 vs :23952）
+    if (spin !== 0) {
+      const c = Math.cos(spin), s = Math.sin(spin);
+      const dx = px - bottomX, dy = py - bottomY;
+      px = bottomX + dx * c - dy * s; py = bottomY + dx * s + dy * c;
+    }
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(spin);
+    ctx.globalAlpha = opacity;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(crown as CanvasImageSource, -crown.width / 2, -crown.height / 2);
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   /** 576/577 DD2 食人魔（Main.cs case 576/577 :23301-23330 + FindFrame :68241-68380）：

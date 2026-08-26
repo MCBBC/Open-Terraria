@@ -2,6 +2,7 @@
 //   数据表 data/vanillaNpcAmbience.ts 全量对账 + 代表性触发验证
 import { describe, it, expect } from 'vitest';
 import { IDLE_SOUNDS, CHATTER_SOUNDS, CRITTER_SOUNDS, PET_SLIME_HIT_VOICES, petSlimeHitVoice } from '../src/data/vanillaNpcAmbience';
+import type { ChatterSpec } from '../src/data/vanillaNpcAmbience';
 import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
 import type { GameHooks } from '../src/entities/types';
@@ -9,6 +10,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+/** 单路取值（162 双路数组取首路;窄化 ChatterEntry 联合供逐字段断言） */
+function chatter1(id: number): ChatterSpec | undefined {
+  const v = CHATTER_SOUNDS[id];
+  return Array.isArray(v) ? v[0] : v;
+}
 
 function makeGame(world: World, sounds: string[]): GameHooks {
   return {
@@ -43,13 +50,19 @@ describe('环境声三表数据对账', () => {
     expect(CHATTER_SOUNDS[3]).toEqual({ denom: 1000, file: 'Zombie_0' });
     // 木乃伊四型（NPC.cs:57926-57928 → LSP.cs:972-981 case26 Next(3,5)=Zombie_3/4 ×0.9）
     expect(CHATTER_SOUNDS[78]).toEqual({ denom: 500, file: 'Zombie_3', pool: ['Zombie_3', 'Zombie_4'] });
-    expect(CHATTER_SOUNDS[630]?.pool).toEqual(['Zombie_3', 'Zombie_4']);
+    expect(chatter1(630)?.pool).toEqual(['Zombie_3', 'Zombie_4']);
     // 血僵尸 489/僵尸鱼人 586（:57922-57924 → LSP.cs:808-816 case14 Next(21,24)=21/22/23 ×0.4）
     const bloodPool = ['Zombie_21', 'Zombie_22', 'Zombie_23'];
     expect(CHATTER_SOUNDS[489]).toEqual({ denom: 800, file: 'Zombie_21', pool: bloodPool });
     expect(CHATTER_SOUNDS[586]).toEqual({ denom: 800, file: 'Zombie_21', pool: bloodPool });
     expect(CHATTER_SOUNDS[159]).toEqual({ denom: 500, file: 'Zombie_7' });
-    expect(CHATTER_SOUNDS[269]?.denom).toBe(1000);                          // 地牢骨铠
+    expect(chatter1(269)?.denom).toBe(1000);                          // 地牢骨铠
+    // 弗兰肯 162 双路（NPC.cs:57918 大僵尸表 Next(1000)→PlaySound(14) + :57930 独立支
+    //   Next(500)→PlaySound(29,…,6),两条 if 都活;数组=同 tick 两路独立掷,F2 2026-08-26）
+    expect(CHATTER_SOUNDS[162]).toEqual([
+      { denom: 1000, file: 'Zombie_0', pool: ['Zombie_0', 'Zombie_1', 'Zombie_2'] },
+      { denom: 500, file: 'Zombie_6' },
+    ]);
   });
   it('Critter 表:鸭 1/200 白天+rare 1/300 / 枭 rare 三均分 / 青蛙 still / 鸟清晨池', () => {
     expect(CRITTER_SOUNDS[362]?.denom).toBe(200);
@@ -73,9 +86,11 @@ describe('环境声三表数据对账', () => {
     for (const s of Object.values(IDLE_SOUNDS)) {
       for (let n = s.range[0]; n < s.range[1]; n++) files.add(`Zombie_${n}`);
     }
-    for (const c of Object.values(CHATTER_SOUNDS)) {
-      files.add(c.file);
-      for (const f of c.pool ?? []) files.add(f);   // B2 批:闲话池化(Zombie_4/23 首次入表)
+    for (const entry of Object.values(CHATTER_SOUNDS)) {
+      for (const c of Array.isArray(entry) ? entry : [entry]) {   // 数组=162 双路(F2)
+        files.add(c.file);
+        for (const f of c.pool ?? []) files.add(f);   // B2 批:闲话池化(Zombie_4/23 首次入表)
+      }
     }
     for (const c of Object.values(CRITTER_SOUNDS)) {
       files.add(c.file);

@@ -1,5 +1,6 @@
 // DOM overlay UI：主菜单 / HUD 快捷栏 / 背包+配饰栏 / 合成 / 宝箱 / Buff栏 / 暂停 / Tooltip / Toast
 import type { Game } from '../core/Game';
+import { getPass, runPassOnImageData, defaultUniforms } from '../fx/SM2Effect';
 import { options } from '../core/Options';
 import { bindsOf, keybindActionLabel, keybindCodeLabel, type KeybindAction } from '../core/Keybinds';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
@@ -484,7 +485,7 @@ export class UI {
   tooltip!: HTMLElement;
   toastEl: HTMLElement | null = null;
   achWrapEl: HTMLElement | null = null;
-  heldStack: { id: number; stack: number; prefix?: number; placeStyle?: number } | null = null; // prefix/placeStyle 随实例流转
+  heldStack: { id: number; stack: number; prefix?: number; placeStyle?: number; favorited?: boolean } | null = null; // prefix/placeStyle/favorited 随实例流转（★批III②收藏态透传——ghost 金边框消费）
   /** 光标持有物来源区（露西存取台词的 CountsAsStorage 判定，ItemSlot 上下文；
    *  两会话撞字段合并：null=未持取（CountsAsStorage 判定的"非箱取"缺省档） */
   heldFrom: SlotWhere | null = null;
@@ -1340,6 +1341,49 @@ export class UI {
   private dragFrom: { i: number; where: SlotWhere; sx: number; sy: number } | null = null;
   private ghostEl: HTMLElement | null = null;
   private mouseX = 0; private mouseY = 0;
+  /** ★批III② MouseItem 光标辉光（CraftingEffects.GetGlow :41-48 / _mouseItemGlow
+   *  衰减 0.035/UI tick :35-38 ≈500ms；ItemSlot :2500-2526 绘制段）：刚合成物品的
+   *  OurFavoriteColor(255,23169) SM2 辉光脉冲。Game 合成完成侧经 cb.onCraftCursorGlow 注入 */
+  private cursorGlowId = -1;
+  private cursorGlowUntil = 0;
+  /** 辉光时长（1/0.035≈28.6 tick×16.7ms 取整） */
+  private static readonly CURSOR_GLOW_MS = 480;
+  /** SM2 MouseItem 光晕烘焙缓存（键=id|glow 量化档;防 mousemove 逐帧跑解释器） */
+  private readonly mouseHaloCache = new Map<string, HTMLCanvasElement | 'pending'>();
+  /** 合成完成注入（mainFlow cb 接线）——vanilla 语义=成品上光标(CraftItem_GrantItem),
+   *  本仓成品入包,拾取同型时辉光仍亮即近似复现脉冲观感（模型差登记） */
+  markCursorGlow(id: number): void {
+    this.cursorGlowId = id;
+    this.cursorGlowUntil = performance.now() + UI.CURSOR_GLOW_MS;
+    this.moveGhost();
+  }
+  /** SM2 MouseItem 光晕帧烘焙（getPass('MouseItem') 直连,uColor=OurFavoriteColor/
+   *  uSaturation=glow²——ItemSlot :2518-2521 uniform 对齐;量化 5 档省解释器开销） */
+  private mouseHaloFrame(img: HTMLImageElement, glow: number): HTMLCanvasElement | null {
+    const pass = getPass('MouseItem');
+    if (!pass || !img.complete || !img.naturalWidth) return null;
+    const q = Math.max(1, Math.round(glow * 5));               // 量化 [1..5]
+    const key = `${img.getAttribute('src')?.slice(-40)}|${q}`;
+    const hit = this.mouseHaloCache.get(key);
+    if (hit === 'pending') return null;
+    if (hit) return hit;
+    this.mouseHaloCache.set(key, 'pending');
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    const octx = off.getContext('2d');
+    if (!octx) return null;
+    octx.drawImage(img, 0, 0, w, h);
+    const im = octx.getImageData(0, 0, w, h);
+    runPassOnImageData(pass, im.data, w, h, {
+      ...defaultUniforms(),
+      uColor: [255 / 255, 231 / 255, 69 / 255],              // Main.OurFavoriteColor :886
+      uSaturation: glow * glow,                              // UseSaturation(num20),num20=glow²(:2504/:2519)
+    });
+    octx.putImageData(im, 0, 0);
+    this.mouseHaloCache.set(key, off);
+    return off;
+  }
 
   private installDragListeners() {
     // 点击面板外的世界区域：光标持有物直接丢出（原版行为）
@@ -1406,7 +1450,7 @@ export class UI {
     else if (where === 'miscDye') this.game.player.inv.miscDyes[i] = null;
     else if (this.openChest) this.openChest.items[i] = null;
     if (this.heldStack) this.heldStack.stack += cur.stack;
-    else { this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; this.heldFrom = where; } // 保留词缀+实例样式
+    else { this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, favorited: cur.favorited, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; this.heldFrom = where; } // 保留词缀+实例样式+收藏态（★批III②）
     this.refreshAll();
   }
 
@@ -1641,6 +1685,18 @@ export class UI {
       this.ghostEl.appendChild(img);
       document.body.appendChild(this.ghostEl);
     }
+    // ★批III② 收藏态金边（Inventory_Back10 同 slot paintSlot 档——ItemSlot :1966-1985）
+    const favFrame = 'url(sprites/vanilla/Inventory_Back10.png)';
+    if (this.heldStack.favorited) {
+      if (!this.ghostEl.dataset.fav) {
+        this.ghostEl.dataset.fav = '1';
+        this.ghostEl.style.backgroundImage = favFrame;
+        this.ghostEl.style.backgroundSize = '100% 100%';
+      }
+    } else if (this.ghostEl.dataset.fav) {
+      delete this.ghostEl.dataset.fav;
+      this.ghostEl.style.backgroundImage = '';
+    }
     const img = this.ghostEl.querySelector('img') as HTMLImageElement;
     const url = iconUrl(this.game, this.heldStack.id);
     // ★getAttribute 比较(2026-08-17 trace 定位):img.src 属性返回绝对化 URL,
@@ -1652,6 +1708,37 @@ export class UI {
       if (!cnt) { cnt = el('span', 'cnt'); this.ghostEl.appendChild(cnt); }
       cnt.textContent = String(this.heldStack.stack);
     } else cnt?.remove();
+    // ★批III② MouseItem SM2 辉光（ItemSlot :2500-2526）：num20=glow²、放大倍率
+    //   num21=Remap(num20,1→0,1→2)=1+num20、uColor=OurFavoriteColor——光晕帧垫在
+    //   本体图下 lighter 叠加（原版 Immediate pass 第二次 Draw 在本体之上,
+    //   加算观感等价,层级登记）
+    const nowMs = performance.now();
+    const glowLeft = this.cursorGlowUntil - nowMs;
+    let halo = this.ghostEl.querySelector<HTMLCanvasElement>('.halo');
+    if (glowLeft > 0 && this.heldStack.id === this.cursorGlowId) {
+      const glow = Math.max(0, Math.min(1, glowLeft / UI.CURSOR_GLOW_MS));
+      const baked = img.complete && img.naturalWidth ? this.mouseHaloFrame(img, glow) : null;
+      if (baked) {
+        if (!halo) {
+          halo = document.createElement('canvas');
+          halo.className = 'halo';
+          halo.style.cssText = 'position:absolute;left:0;top:0;width:40px;height:40px;'
+            + 'image-rendering:pixelated;mix-blend-mode:lighter;pointer-events:none;';
+          this.ghostEl.insertBefore(halo, this.ghostEl.firstChild);
+        }
+        const num20 = glow * glow;
+        const scaleMul = 1 + num20;                            // Remap(num20,1,0,1,2) :2513
+        const px = Math.round(40 * scaleMul);
+        halo.width = baked.width; halo.height = baked.height;
+        const hctx = halo.getContext('2d');
+        hctx?.drawImage(baked, 0, 0);
+        halo.style.width = `${px}px`;
+        halo.style.height = `${px}px`;
+        halo.style.left = `${(40 - px) / 2}px`;
+        halo.style.top = `${(40 - px) / 2}px`;
+        halo.style.display = '';
+      } else halo && (halo.style.display = 'none');
+    } else if (halo) halo.remove();
     this.ghostEl.style.transform = `translate(${this.mouseX - 20}px, ${this.mouseY - 20}px)`;
   }
 

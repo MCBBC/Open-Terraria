@@ -12,6 +12,7 @@ import { MagicProj } from './MagicProj';
 import { Arrow } from './Arrow';
 import { markMechQueen, registerMechQueen, mechQueenUp, getMechQueen, getMechQueenCenter } from './mechQueen';
 import { GorePiece } from './GorePiece';
+import { getEnemyCtor } from './enemyCtorRegistry';
 
 const addProj = (game: GameHooks, p: MagicProj) => {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(p, 'projectiles');
@@ -239,11 +240,11 @@ const baseOf = (e: Enemy) => {
   return b;
 };
 
-let enemyCtor: (typeof import('./Enemy'))['Enemy'] | null = null;
-/** Enemy 构造注入(Enemy.ts import 时回填,避免循环依赖) */
-export function bindEnemyCtor(c: (typeof import('./Enemy'))['Enemy']) { enemyCtor = c; }
+// 注册表抽叶模块 enemyCtorRegistry.ts（2026-08-26 根修:活环导入序脆弱点,
+// 见该文件头注）;此处仅消费 getEnemyCtor()。
 
 export function spawnPart(game: GameHooks, src: Enemy, id: number): Enemy | null {
+  const enemyCtor = getEnemyCtor();
   if (!enemyCtor) return null;
   const p = enemyCtor.fromVanilla(id, src.cx, src.cy);
   if (!p) return null;
@@ -253,6 +254,7 @@ export function spawnPart(game: GameHooks, src: Enemy, id: number): Enemy | null
 /** 指定坐标生成原版怪（NPC.NewNPC 语义，Bottom 锚点由调用方换算）：
  *  spawnWOF（bossAI_wof）等无"母体"来源的生成点用 */
 export function spawnVanillaEnemy(game: GameHooks, id: number, x: number, y: number): Enemy | null {
+  const enemyCtor = getEnemyCtor();
   if (!enemyCtor) return null;
   const p = enemyCtor.fromVanilla(id, x, y);
   if (!p) return null;
@@ -262,6 +264,7 @@ export function spawnVanillaEnemy(game: GameHooks, id: number, x: number, y: num
 /** Enemy.spawnWormChain 的代理出口（外部 AI 文件以 type-only 导入 Enemy，
  *  运行时引用会成环——绑定源同 spawnPart 的 enemyCtor）：建链并入 enemies 桶 */
 export function spawnWormChainFor(game: GameHooks, head: Enemy, segCount: number): Enemy[] {
+  const enemyCtor = getEnemyCtor();
   if (!enemyCtor) return [];
   const segs = enemyCtor.spawnWormChain(head, segCount);
   const em = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
@@ -2108,7 +2111,7 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
 
 /** 生成蠕虫段链(Enemy.spawnWormChain 的外部包装;Destroyer 用 135/136) */
 export function enemySpawnChain(head: Enemy, count: number): Enemy[] {
-  const Ctor = enemyCtor;
+  const Ctor = getEnemyCtor();
   if (!Ctor) return [];
   return Ctor.spawnWormChain(head, count);
 }

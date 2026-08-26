@@ -340,7 +340,8 @@ import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
 import { Boomerang, SpearProj, AnchoredProj, anchoredActive, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, TorchGodHelperProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare, counterweightDecision, YoyoShotProj, meleeThrowSpeed, placeAtShootSpawn, type CounterweightCtx, type CounterweightPlayView } from '../entities/WeaponProj';
 // 1457 批 C 新弹实体（叶绿双剑 1126-1129/花瓣 1116/天雷 1117·1122/冰牙 1115 + 孢子云生成器）
-import { ChloroClaymoreBlade, ChloroSaberStab, ChloroSporeCloud, ChloroBladeSlam,
+import { TitaniumStormShard,
+  ChloroClaymoreBlade, ChloroSaberStab, ChloroSporeCloud, ChloroBladeSlam,
   PetalstormShot, StormLightning, GlacierFangShot,
   ThunderBoltShot, LaserMachinegunHolder, LaserMachinegunLaser, BookStormTwister, PrincessMagicCircle,
   findSporeCloudSpawn, spawnChlorophyteSporeCloud } from '../entities/proj1457';
@@ -1164,6 +1165,9 @@ export function hairRestylePriceRaw(hairChanged: boolean, colorChanged: boolean,
 export interface GameCallbacks {
   onWorldReady: () => void;
   onInventoryChanged: () => void;
+  /** ★批III② 合成完成光标辉光（CraftingEffects.GlowPulse :18-23——成品上光标时
+   *  _mouseItemGlow=1;本仓成品入包,UI 侧拾取同型即亮。可选=测试/无 UI 兼容 */
+  onCraftCursorGlow?: (itemId: number) => void;
   onToast: (msg: string) => void;
   /** 住房光标态变化（激活/单发后置 null——UI 侧同步面板高亮） */
   onHousingCursor?: (mode: { kind: 'query' } | { kind: 'assign'; npcKey: string } | null) => void;
@@ -5716,9 +5720,13 @@ export class Game implements GameHooks {
       this.liquid.step();
       // 液体直接写数组绕过 store 监听：有活动液体时手动通知光照衰减变化
       if (this.liquid.numLiquid > 0) this.lighting.liquidDirty = true;
-      // 瀑布/岩浆环境循环音（Main.Ambience :13636 每 15t：SoundID 34/35,强度=音量档）
-      if (this.tickCount % 15 === 0 && !this.sfx.suppress) this.updateWaterfallAmbience();
     }
+    // 瀑布/岩浆环境循环音（Main.Ambience :13636 每 15t：SoundID 34/35,强度=音量档）
+    // ★本地视听,双端各自成立（F2 2026-08-26）：强度源 = 本地 WaterfallRenderer 绘制
+    // 累积（访客端同样本地绘制）,wfAmbLoops 句柄纯本地音频面不涉网络——曾挂在上方
+    // 液体模拟的 !net||isHost 权威门内被顺带静音（联机访客无瀑布声）。保留 suppress
+    // 门与 %15 节拍（%15 蕴含 %2,host 端时序不变）
+    if (this.tickCount % 15 === 0 && !this.sfx.suppress) this.updateWaterfallAmbience();
 
     // ---- 花靴行走生花（Player.ApplyEquipFunctional :12688-12692 每帧 + DoBootsEffect
     //      :13657-13666 自门：miscCounter%2==0（每 2t）+ 落地 + 无钩爪 +
@@ -13539,8 +13547,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       cur?.stop();
       return null;
     };
-    this.wfAmbLoops.wf = manage(this.wfAmbLoops.wf, amb.wf, 'Liquid_0.wav', 0.2, -0.2);
-    this.wfAmbLoops.lava = manage(this.wfAmbLoops.lava, amb.lava, 'Liquid_1.wav', 0.65, 0);
+    // ★文件名不带扩展名：Sfx 加载面统一 fetch sounds/<file>.wav、AMBIENT_FILES/
+    //   trackVolumeFor 也按裸名（'Liquid_0'）分派 ambient 轨——带 .wav 会 404 进
+    //   负缓存且音轨错走 masterVol（2026-08-26 review 修）
+    this.wfAmbLoops.wf = manage(this.wfAmbLoops.wf, amb.wf, 'Liquid_0', 0.2, -0.2);
+    this.wfAmbLoops.lava = manage(this.wfAmbLoops.lava, amb.lava, 'Liquid_1', 0.65, 0);
   }
 
   /** 钻头坐骑（mount 8）每 tick 能力驱动（Mount.cs UseDrill/UseAbility/AimAbility +
@@ -18332,6 +18343,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     this.weatherLoops = {};
     this.weatherLoopVol = {};
+    // 瀑布/岩浆跟踪循环轨随退世界拆（★review 修 2026-08-26：updateWaterfallAmbience
+    // 每 15t 才经 manage 驱动/拆轨，世界停更后不再运行——不在此拆则近瀑退世界
+    // 满音量漏进菜单直至重载，同下方雨声层教训）
+    this.wfAmbLoops.wf?.stop();
+    this.wfAmbLoops.lava?.stop();
+    this.wfAmbLoops = { wf: null, lava: null };
     // 风/雨 cue 双轨 Immediate 静音（★review 修：单帧状态机步进不会归零，天气链
     // 停更后 gain 滞留漏进菜单；风层此前无任何退出静音路径）+ 驱动量复位
     this.sfx.stopAmbientCues();
@@ -23534,17 +23551,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     bolt.seed = seed;
     bolt.comboSeed = (this.world.seedFlags?.noLightning === true && this.world.seedFlags?.moreLightning === true);
     this.entities.add(bolt, 'projectiles');
-    // 落雷声（ParticleOrchestrator.Spawn_StormLightning :1027-1075 的声段 :1048-1053）：
-    // 自然雷（flag=false，IndexOfPlayerWhoInvokedThis==255）→ SoundID.InstantThunder
-    // （SoundID.cs:1126 CreateTrackable("instant_thunder",3)）= instant_thunder_0..2 随机，
-    // vol = Lerp(0.4, 1, Main.SceneState.outsideWeatherEffectIntensity)——本仓等价值
-    // weather.outsideWeatherEffect（Weather.ts:217，SceneState.cs:190-191 同源钳 0-1）。
-    // 武器雷（flag=true，1117 闪电之击/ArcSurge 链）→ SoundID.LightningStrikeHit=Item_204
-    // 已在 proj1457.ts StormLightning Kill 帧 emitBoltFx 按型分流接线——本函数调用源仅
-    // StormLightningSpawner（自然天雷单源），无需 source 参数区分（2026-08-26 核查）
-    const inten = Math.max(0, Math.min(1, this.world.weather?.outsideWeatherEffect ?? 1));
-    this.sfx.playFiles(['instant_thunder_0', 'instant_thunder_1', 'instant_thunder_2'],
-      0.4 + (1 - 0.4) * inten, vx, vy);
+    // ★落雷声不在此播（2026-08-26 review 修）：原版声段在 Projectile.Kill 的
+    //   RequestParticleSpawn(StormLightning) 编排内（ParticleOrchestrator.cs:1048-1053）
+    //   = 落雷瞬间单发；1091 是 240t 无害标记弹，此处出手即播会提前 ~4s 且与
+    //   proj1457 doKill 的 Kill 帧音双播。InstantThunder/LightningStrikeHit 分流与
+    //   vol=Lerp(0.4,1,outsideWeatherEffectIntensity) 已收口到 proj1457.ts doKill 按型播
   }
 
   anyBossDanger(): boolean {
@@ -27781,6 +27792,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 不等 onInventoryChanged 全包扫描——直调零时差,在飞去重防双发）
     if (outId !== undefined) this.prefetchPlaceableSheets([outId]);
     this.achNotifyCraft(outKey);
+    if (outId !== undefined) this.cb.onCraftCursorGlow?.(outId);   // ★批III② MouseItem 辉光注入（CraftingEffects :18-23）
     this.sfx.play('pickup'); // SoundID 7 物品抓取（原版合成成品上鼠标的 grab 声）
     this.cb.onInventoryChanged();
   }
@@ -28878,6 +28890,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.entities.add(new InsanityShadowFriendly(p, 18), 'projectiles');
   }
 
+  /** GameHooks.spawnTitaniumShard（Player.cs:6932-6935：ownedProjectileCounts[908]<7 →
+   *  NewProjectile(908, dmg50, kb15)——钛金全套 on-hit 碎片;计数=存活同型） */
+  spawnTitaniumShard(x: number, y: number): void {
+    if (this.net && !this.net.policy.isHost) return;
+    const alive = this.entities.projectiles.filter((q) => !q.dead && (q as { projId?: number }).projId === 908).length;
+    if (alive >= 7) return;                                    // ownedProjectileCounts 门
+    const dmg = Math.max(1, Math.round(50 * this.player.damageMult('melee')));
+    const shard = new TitaniumStormShard(x, y, dmg, 15);
+    shard.critChance = 0.04 + this.player.critChance('melee') / 100;
+    shard.armorPen = this.player.equipStats.armorPen;
+    this.entities.add(shard, 'projectiles');
+  }
+
   /** GameHooks.spawnRainForced（Rain.NewRainForced——眼球伞 5101 滴水） */
   spawnRainForced(x: number, y: number, vx: number, vy: number): void {
     if (this.renderer.weatherFxActive) this.renderer.weatherFx.newRainForced(x, y, vx, vy);
@@ -29105,6 +29130,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.netPvpProjFeedback();
       // PvP 冷却递减（圣骑士盾独立槽近似 + 狱火光环 per-owner）
       if (this.player.paladinShieldCd > 0) this.player.paladinShieldCd--;
+      if (this.player.titaniumStormCd > 0) this.player.titaniumStormCd--;   // Player.cs:6919
       for (const [k, v] of this.pvpAuraCd) {
         if (v <= 1) this.pvpAuraCd.delete(k);
         else this.pvpAuraCd.set(k, v - 1);

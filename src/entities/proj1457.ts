@@ -10,6 +10,7 @@
 // 1127→397 孢子侵染 300t / 1117→323+399 / 1122→400 已在 vanilla-projstatus.json）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
+import { BuffType } from '../stats/Buffs';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { TILE } from '../core/constants';
@@ -871,11 +872,17 @@ export class StormLightning extends Entity {
         2, 1.4, { life: 14, grav: -0.01, damp: 0.92 });
     }
     if (this.t === Math.floor(this.life * 0.15)) {
-      // ★闪电之击专项：windup 音=NPCHit34（:40507 vol=Lerp(.4,1,室外天气强度)）——
-      //   资产无 npchit_34.wav，取电花特征最近的 dd2_lightning_aura_zap_0-3（近似登记）
+      // ★闪电之击专项：windup 音=NPCHit34（Projectile.cs:40507 vol=Lerp(.4,1,
+      //   Main.SceneState.outsideWeatherEffectIntensity)）——资产无 npchit_34.wav，
+      //   取电花特征最近的 dd2_lightning_aura_zap_0-3（近似登记）。室外强度经
+      //   world.weather.outsideWeatherEffect（Weather.ts:217,:338 钳 0-1,SceneState
+      //   同源值;与本类 doKill Kill 帧音同通道,缺省 1 兜底同款）——曾固定 0.8
+      //   （F2 2026-08-26 对齐 Lerp 原式）
       const zaps = ['dd2_lightning_aura_zap_0', 'dd2_lightning_aura_zap_1',
         'dd2_lightning_aura_zap_2', 'dd2_lightning_aura_zap_3'];
-      game.playSfxWav?.(zaps[(Math.random() * 4) | 0], 0.8, this.cx, this.cy);
+      const wx = (game.world as unknown as { weather?: { outsideWeatherEffect?: number } }).weather;
+      const inten = Math.max(0, Math.min(1, wx?.outsideWeatherEffect ?? 1));
+      game.playSfxWav?.(zaps[(Math.random() * 4) | 0], 0.4 + 0.6 * inten, this.cx, this.cy);
       game.spawnParticles(this.cx, this.cy, this.projId === 1117 ? '#3C78FF' : '#FF3C3C', 6, 2.2, { life: 18, grav: -0.02, damp: 0.93 });
     }
     // :40450-40455 num9=√(1−(num8−1)²)×0.3 光强包络（num8=Remap(prog,0,0.5,0,1)）
@@ -1079,13 +1086,24 @@ export class StormLightning extends Entity {
       { life: 20, grav: 0, damp: 0.92 });
     // ★闪电之击专项勘误：Kill 音按型分流——Item15+ArcSurge(Item_203) 双音属
     //   Spawn_ArcLightning（1122 ArcSurge 专支,ParticleOrchestrator.cs:1263-1268）;
-    //   1117/1091 走 Spawn_StormLightning（:1044-1051）= SoundID.LightningStrikeHit
-    //   （=style(2,204)=Item_204.wav,pitch 0,vol=Lerp(.4,1,weather)）
+    //   1117/1091 走 Spawn_StormLightning 声段（:1055-1060）：
+    //   vol = Lerp(0.4,1,outsideWeatherEffectIntensity) 两型同式；
+    //   flag=IndexOfPlayerWhoInvokedThis!=255 → 1117(=owner)=LightningStrikeHit
+    //   （=style(2,204)=Item_204.wav,pitch 0）/ 1091(=255 自然雷)=InstantThunder
+    //   （SoundID.cs:1126 三变体随机）。★声在 Kill 帧（原版编排由 Kill 触发,
+    //   Game.spawnStormBolt1091 出手侧不播——2026-08-26 review 修双播+提前 4s）
     if (this.projId === 1122) {
       game.playSfxWav?.('Item_15', 1, hand.x, hand.y);
       game.playSfxWav?.('Item_203', 0.6, hand.x, hand.y, (Math.random() * 2 - 1) * 0.2 - 0.05);
     } else {
-      game.playSfxWav?.('Item_204', 0.9, end.x, end.y);
+      const w = (game.world as unknown as { weather?: { outsideWeatherEffect?: number } }).weather;
+      const inten = Math.max(0, Math.min(1, w?.outsideWeatherEffect ?? 1));
+      const v = 0.4 + 0.6 * inten;
+      if (this.projId === 1117) game.playSfxWav?.('Item_204', v, end.x, end.y);
+      else {
+        game.playSfxFiles?.(['instant_thunder_0', 'instant_thunder_1', 'instant_thunder_2'],
+          v, end.x, end.y);
+      }
     }
   }
 
@@ -1870,6 +1888,11 @@ export class BookStormTwister extends Entity {
     this.vx = vx; this.vy = 0;
     this.damage = Math.max(1, Math.round(damage));
     this.knockback = knockback;
+    // ★外部提前 kill 也必须拆循环轨（2026-08-26 review 补）：自然寿命终点的
+    //   loop.stop() 在 fixedUpdate 尾段，外部置 dead（Entity.compact 剔除回调 destroy,
+    //   Entity.ts:69-76）不走那里——漏注入则龙卷风循环音满音量长鸣至重载。
+    //   GrenadeProj 引信音/dd2 传送门循环轨同款兜底通道
+    (this as unknown as { destroy?: () => void }).destroy = () => { this.loop?.stop(); };
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -2038,6 +2061,77 @@ export class PrincessMagicCircle extends Entity {
     ctx.beginPath();
     ctx.arc(this.cx, this.cy, (this.w / 2) * this.scl * (0.4 + 0.6 * this.scl), 0, Math.PI * 2);
     ctx.stroke();
+    ctx.restore();
+  }
+}
+
+
+// ---------------- 修齐批②：钛金屏障碎片 908（AI_175 :46151-46172） ----------------
+
+/** TitaniumStormShard（Player.cs:6927-6936 on-hit 生成≤7;SetDefaults :8628-8638:
+ *  14×14/ai175/friendly/penetrate1/timeLeft3600/drawLayer3）：
+ *  - frame=rand12、rotation=rand2π 后每拍 +=π/200（:46160-46162）
+ *  - 环绕：角=(index/total+miscCounterNormalized×6)×2π、半径=24+total×6,
+ *    位=Lerp(位, player.Center+(cos,sin×0.05)×半径, 0.3)（水平扁椭圆,Y 压 0.05）
+ *  - 存续门=hasTitaniumStormBuff(buff306)/玩家存活,失即 Kill（:46154-46157）
+ *  - 接触伤 50/kb15/penetrate1（命中即亡） */
+export class TitaniumStormShard extends Entity {
+  w = 14; h = 14;
+  damage: number;
+  knockback: number;
+  critChance = 0.04;
+  armorPen = 0;
+  dead = false;
+  readonly projId = 908;
+  private t = 0;
+  private rot = Math.random() * Math.PI * 2;
+  private frame = Math.floor(Math.random() * 12);
+  private orbitAngle = 0;
+  private hitCd = new HitCdImpl();
+
+  constructor(x: number, y: number, damage: number, knockback: number) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.damage = Math.max(1, Math.round(damage));
+    this.knockback = knockback;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    const p = game.player as unknown as { cx: number; cy: number; dead: boolean;
+      buffs: { has(t: BuffType): boolean } };
+    if (!p || p.dead || !p.buffs.has(BuffType.TitaniumStorm)) { this.dead = true; return; }
+    this.t++;
+    this.rot += Math.PI / 200;                                 // :46162
+    // 组序（AI_GetMyGroupIndexAndFillBlackList 同构近似：同 projId 存活序）
+    const all = (game.projectiles?.() ?? []) as Array<{ projId?: number; dead?: boolean }>;
+    const group = all.filter((q) => q && !q.dead && q.projId === 908);
+    const index = Math.max(0, group.indexOf(this as unknown as { projId?: number; dead?: boolean }));
+    const total = Math.max(1, group.length);
+    this.orbitAngle = (index / total + this.t / 60 * 6) * Math.PI * 2;
+    const radius = 24 + total * 6;                             // :46165
+    const tx = p.cx + Math.cos(this.orbitAngle) * radius;
+    const ty = p.cy + Math.sin(this.orbitAngle) * radius * 0.05;
+    this.x += (tx - this.w / 2 - this.x) * 0.3;                // Lerp 0.3（:46170）
+    this.y += (ty - this.h / 2 - this.y) * 0.3;
+    dealContacts(this, game, this.hitCd, -1, () => { this.dead = true; });   // penetrate=1
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projSprite(908);
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rot);
+    ctx.imageSmoothingEnabled = false;
+    if (img && img.width > 0) {
+      const fw = img.width / 12;
+      ctx.drawImage(img, this.frame * fw, 0, fw, img.height, -fw / 2, -img.height / 2, fw, img.height);
+    } else {
+      ctx.fillStyle = '#B8C4D8';
+      ctx.fillRect(-5, -5, 10, 10);
+    }
     ctx.restore();
   }
 }

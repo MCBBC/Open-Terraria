@@ -8,6 +8,11 @@
 //     5-12 行走 / 13-18 开盖段 / 19 合盖过渡）
 // 契约常量桩 = data/vanillaOpenBags.ts CHESTER_CONTAINER。
 import { describe, it, expect, vi } from 'vitest';
+// ★Enemy 须最先加载（2026-08-26 审计,同 tests/sfx-wiring.test.ts 先例）：
+//   Game→…→bossAI→Arrow→TownNPC→Enemy 活环,Game-first 导入序下 Enemy.ts 尾部
+//   顶层 bindEnemyCtor(Enemy) 在环内求值时 bossAI 未初始化即 TypeError 整文件
+//   无法收集。先完整加载 Enemy 断环;根修=bindEnemyCtor 抽叶模块(挂账)。
+import { Enemy } from '../src/entities/Enemy';
 import { Game } from '../src/core/Game';
 import { PetFollower } from '../src/entities/PetFollower';
 import { Player } from '../src/entities/Player';

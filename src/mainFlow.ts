@@ -201,6 +201,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     const g = new Game(root, {
       onWorldReady: () => { ui.hideProgress(); enterGame(g); maybeDev(g); applyAppearance(g); },
       onInventoryChanged: () => { g.prefetchInvProjectiles(); g.prefetchInvPlaceableSheets(); ui.refreshAll(); },
+      onCraftCursorGlow: (itemId) => ui.markCursorGlow(itemId),
       onBuffsChanged: () => ui.refreshBuffs(),
       // 自动保存（Main.autoSave 墙钟到点 → DoUpdate_AutoSave :19589 saveAndPlay）
       onAutoSave: () => doSave(),

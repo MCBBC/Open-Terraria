@@ -81,8 +81,11 @@ export const IDLE_SOUNDS: Record<number, IdleSoundSpec> = {
  *  pool = 多文件均匀随机（原版在 LegacySoundPlayer 各 case 内掷变体号,本仓消费点掷;
  *  file 字段保留为池首/回退键,消费方有 pool 时优先 pool）。 */
 export interface ChatterSpec { denom: number; file: string; pool?: string[]; }
-export const CHATTER_SOUNDS: Record<number, ChatterSpec> = (() => {
-  const m: Record<number, ChatterSpec> = {};
+/** 值可为数组 = 同 tick 内多路【独立掷】（原版 AI_003 尾段多条 if 各自 Main.rand.Next,
+ *  同帧双中都各播一次——弗兰肯 162 双源 :57918+:57930,F2 2026-08-26 结构升级） */
+export type ChatterEntry = ChatterSpec | ChatterSpec[];
+export const CHATTER_SOUNDS: Record<number, ChatterEntry> = (() => {
+  const m: Record<number, ChatterEntry> = {};
   // 僵尸大表（:57918,PlaySound(14)=case14 默认组 Next(3)=Zombie_0-2 → 直取 0 号;FILE_CASE_VOL ×0.4）
   const zombies = [3, 691, 591, 590, 331, 332, 21, 449, 450, 451, 452, 31, 294, 295, 296,
     77, 110, 132, 167, 161, 162, 186, 187, 188, 189, 197, 200, 201, 202, 203, 223,
@@ -96,10 +99,19 @@ export const CHATTER_SOUNDS: Record<number, ChatterSpec> = (() => {
   // 木乃伊（:57926-57928 PlaySound(26)→LSP.cs:972-981 case26 Next(3,5)=Zombie_3/4
   //   ×0.9——曾写死 Zombie_3 单文件=漏 Zombie_4 半数变体）
   for (const t of [78, 79, 80, 630]) m[t] = { denom: 500, file: 'Zombie_3', pool: ['Zombie_3', 'Zombie_4'] };
-  // 吸血鬼 159（:57930,(29,7)）;弗兰肯 162→(29,6);面怪 181→(29,8)
+  // 吸血鬼 159（:57930,(29,7)）;面怪 181→(29,8)
   m[159] = { denom: 500, file: 'Zombie_7' };
-  m[162] = { denom: 500, file: 'Zombie_6' };
   m[181] = { denom: 500, file: 'Zombie_8' };
+  // 弗兰肯 162 双路（F2 2026-08-26）：原版两条独立 if 都活,单值 Record 曾被后写
+  //   覆盖丢掉大表那路——①:57918 大僵尸表 Next(1000)==0 → PlaySound(14),LSP
+  //   case14 default(:818-827)=Next(3)=Zombie_0/1/2 均匀 ×0.4、无 pitch（大表其余
+  //   条目仍保留"直取 0 号"旧简化,未在本批扩 scope）;②:57930 Next(500)==0 →
+  //   PlaySound(29,…,6),LSP case29 style6(:1011-1043)→Zombie_6,style<24 无档乘=
+  //   基音量,pitch Next(-10,11)×0.01=±0.10
+  m[162] = [
+    { denom: 1000, file: 'Zombie_0', pool: ['Zombie_0', 'Zombie_1', 'Zombie_2'] },
+    { denom: 500, file: 'Zombie_6' },
+  ];
   // 地牢骨铠 269-280（:57942,(14)）
   for (let t = 269; t <= 280; t++) m[t] = { denom: 1000, file: 'Zombie_0' };
   return m;

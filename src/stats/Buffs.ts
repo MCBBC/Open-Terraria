@@ -334,6 +334,8 @@ export enum BuffType {
   PalworldMinionFoxsparks = 257, // 火绒狐(386,←5664 可靠的火绒狐,弹1094)：召唤物伴生
   HeartyMeal = 258,              // 丰盛大餐(336,火腿棍 5096 击杀授予 AddBuff(336,420))：lifeRegen+6=3HP/s
   // ---- 配饰审计 P0 批（2026-08-22）：冰冻护盾族（Player.cs:14348-14351）----
+  TitaniumStorm = 306,         // 钛金屏障(钛金全套 on-hit,Player.cs:6931 AddBuff(306,600))：
+                               //   碎片 908 环绕存续旗标（AI_175 :46151 hasTitaniumStormBuff 门）
   IceBarrier = 246,    // 冰障(62,冰冻海龟壳 1253/冰冻护盾 3997 半血挂)：半血以下 endurance+0.25
                        //   （UpdateBuffs :10127-10152；超半血 DelBuff——施加/移除门在
                        //   Player.fixedUpdate 与装备 1253/3997 半血判定联动）

@@ -187,6 +187,9 @@ export interface GameHooks {
   /** 骸骨头盔幻影生成（Projectile 964 NewProjectile——Player.SpawnHallucination
    *  :13627-13656 出参直传；Game 实现 = entities.add(InsanityShadowFriendly)） */
   spawnInsanityShadow?(p: import('./InsanityShadowFriendly').InsanitySpawnParams): void;
+  /** 钛金屏障碎片 908 生成（Player.cs:6932-6935 ownedProjectileCounts[908]<7 →
+   *  NewProjectile(908, 50dmg, 15kb)；Game 实现 = 计存活碎片+entities.add） */
+  spawnTitaniumShard?(x: number, y: number): void;
   /** 强制雨滴（Rain.NewRainForced Rain.cs:134-171——眼球伞 5101 滴水用；
    *  Game 实现 = renderer.weatherFx.newRainForced） */
   spawnRainForced?(x: number, y: number, vx: number, vy: number): void;

@@ -272,6 +272,7 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     //  旧衬衫 3878、ammoCost75 1/4 星旋胸 2758。旧单 denom 聚合会漏并戴时的第二次掷）
     ammoSaveHuntress: boolean; ammoSaveChloro: boolean; ammoSaveCost80: boolean; ammoSaveCost75: boolean;
     magmaStone: boolean;   // 近战命中点燃（岩浆石/火焰护手；StatusNPC:10866/Player.cs:6184）
+    titaniumStorm: boolean;   // 钛金全套 on-hit（ArmorSetBonuses.cs:222-225;Player.cs:6927-6936）
     /** 蜂巢背包 3333（ApplyEquipFunctional :15457-15459 currentItem.type==3333 →
      *  strongBees）——beeType() 50% 弹 566 巨蜂/beeDamage 强蜂 +Next(1,3)/
      *  beeKB 0.5+KB×1.1（:12505-12531）；消费端 Game.ts 1121 蜂枪 volley 分支 */
@@ -502,6 +503,8 @@ export class Player extends Entity {
   /** 圣骑士盾转移冷却（hurtCooldowns[ImmunityCooldownID.PaladinsShield] 槽近似,
    *  Player.cs:37756-37763——独立于常规无敌帧;Game.fixedUpdate 递减） */
   paladinShieldCd = 0;
+  /** 钛金屏障 on-hit 冷却（Player.cs:6919 titaniumStormCooldown>0 门,10t） */
+  titaniumStormCd = 0;
   /** 收税计时（Player.cs:793 taxTimer；taxRate=3600 即每游戏小时一结） */
   taxTimer = 0;
   /** 蜂蜜浸入（原版 honeyWet，Player.cs:27436-27438）：授予 Honey buff(48,1800t) 的来源 */
@@ -1091,6 +1094,7 @@ export class Player extends Entity {
     //（Player.cs:36441-36449：5540/5541→29 在前、item.stringColor>0 在后，槽序 3-9→13-19）
     let stringColor = 0;
     let magmaStone = false;   // Player.magmaStone（:1850）：近战命中点燃（1322/1343）
+    let titaniumStorm = false;   // ArmorSetBonuses.cs:222-225 Titanium（:461 三头盔变体）
     let iceSkate = false;      // Player.iceSkate（:1077 族）：冰面移动修正
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false;
     let counterWeight = 0, vanityCounterWeight = 0;   // int 物品 id（0=无）
@@ -1621,6 +1625,7 @@ export class Player extends Entity {
       if (sb.runSlowMul) setRunSlowMul = sb.runSlowMul;
       if (sb.endurance) setEndurance += sb.endurance;   // 日曜套 :16224
       if (sb.solar) solarSet = true;
+      if (sb.titaniumStorm) titaniumStorm = true;   // ★修齐批②
       if (sb.dashType) dash = Math.max(dash, sb.dashType);   // 日曜套 :16288-16294（dash 与 accfx 同聚合链）
       if (sb.fireWalk) fireWalk = true;
       // Molten 套 buffImmune[24] 门（Player.cs:15883 UpdateArmorSetsOld：裸 Molten
@@ -1706,7 +1711,7 @@ export class Player extends Entity {
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
       infoAccs,                 // 信息饰品 12 门禁(DrawInfoAccs)
       arrowDmg, ammoSaveHuntress, ammoSaveChloro, ammoSaveCost80, ammoSaveCost75,
-      kbGlove, autoReuseGlove, yoyoString, magmaStone,
+      kbGlove, autoReuseGlove, yoyoString, magmaStone, titaniumStorm,
       meleeScaleGlove,   // 手套族近战放大 ×1.1（GetAdjustedItemScale :41919-41930）
       stringColor,   // 线饰品线色（UpdateVisibleAccessory :36441-36449）
       accDraw,       // 身上贴图十族绘制槽（UpdateVisibleAccessory :36441-36520;渲染层消费）

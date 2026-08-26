@@ -47,6 +47,9 @@ import { runFinishNoTraps } from './FinishNoTrapsPass';
 // （cs:63579 `num==2 → return` 在尘段之前,零掷零写;1:1 实现已在 HalfBrickPass,
 //  TTTTTT 批移植含 isLockedDoorKT cs:69248 全同帧门/下方锁门门/HasReasonToReturnEarly 全支）
 import { checkTileBreakability } from './HalfBrickPass';
+// ★TTTTTTT：tileCut 生长门为 1457 新增（1456 WorldGen.cs:22317/22341 无此支）——
+//   双态门随 hfIs1457
+import { hfIs1457 } from './HellFortPass';
 // ★UUUUUU（2026-08-23）：notTheBees 终转化（调用位 cs:22602-22605——⑭ 之后）
 import { runNotTheBees, runFinishNotTheBees } from './NotTheBeesPass';
 
@@ -138,8 +141,10 @@ const TILE_CUT_FC = new Set([
   205, 231, 236, 254, 352, 382, 444, 454, 484, 485, 518, 519, 528, 529, 549, 636, 637,
   638, 654, 655, 711,
 ]);
-/** 生成期 tileCut 读数（活性才有效;非活性格走 !active 支短路,残型不参与） */
+/** 生成期 tileCut 读数（活性才有效;非活性格走 !active 支短路,残型不参与）。
+ *  ★双态门：1456 口径无 tileCut 支（恒 false）——冻结 g12345 线零扰动。 */
 function tileCutAt(st: TileStore, x: number, y: number): boolean {
+  if (!hfIs1457()) return false;
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;

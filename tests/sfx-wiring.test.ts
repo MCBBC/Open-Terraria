@@ -6,9 +6,12 @@
 //  C. MinionProj.ts：族召唤音（首帧）+ 阿比盖尔挥击 + 射弹出膛（376 小鬼火球 Item_20）+
 //     OOA 哨兵放置/开火音
 // 全部断言走 mock 的 game.playSfxFiles 录音（不触真实音频）。
-import { BetsyBreath } from '../src/entities/bossAI_dd2';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+// ★Enemy 须先于 bossAI_dd2 加载（2026-08-26 审计修复）：bossAI_dd2→bossAI→Arrow→
+//   TownNPC→…→Enemy 是活环,Enemy.ts 尾部顶层 bindEnemyCtor(Enemy) 在环内求值时
+//   bossAI 尚未初始化 → 模块加载即 TypeError 整文件红。先完整加载 Enemy 断环。
 import { Enemy } from '../src/entities/Enemy';
+import { BetsyBreath } from '../src/entities/bossAI_dd2';
 import { MinionProj } from '../src/entities/MinionProj';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';

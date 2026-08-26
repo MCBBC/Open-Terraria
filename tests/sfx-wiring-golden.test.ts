@@ -86,6 +86,37 @@ const DEAD_SLOTS: string[] = [
  *  留作空表备用（后续并行施工期可临时添前缀） */
 const PARALLEL_CLAIMED_PREFIXES: string[] = [];
 
+
+/** 注释剥离（状态机,尊重引号串——防 URL 'http://' 误伤）：金标语料只认代码,
+ *  注释里的名字（"Zombie_"+k 示例/轨名罗列）既不该算接线也不该豁免检查。
+ *  ★2026-08-26 假绿通道封堵:此前注释与音量/音高表键都会误判覆盖 */
+function stripComments(src: string): string {
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  let state = 'code';
+  while (i < n) {
+    const c = src[i], d = src[i + 1];
+    if (state === 'code') {
+      if (c === '/' && d === '/') { state = 'line'; i += 2; out += ' '; continue; }
+      if (c === '/' && d === '*') { state = 'block'; i += 2; out += ' '; continue; }
+      if (c === "'" || c === '"' || c === '`') { state = `str${c}`; out += c; i++; continue; }
+      out += c; i++; continue;
+    }
+    if (state === 'line') { if (c === '\n') { state = 'code'; out += '\n'; } i++; continue; }
+    if (state === 'block') { if (c === '*' && d === '/') { state = 'code'; out += ' '; i += 2; } else { if (c === '\n') out += '\n'; i++; } continue; }
+    // 字符串态:保留内容(模板串允许嵌套 ${} 里再进 code 态的复杂场景从简——按原样保留)
+    if (c === state[3]) { state = 'code'; out += c; i++; continue; }
+    if (c === '\\') { out += src.slice(i, i + 2); i += 2; continue; }
+    out += c; i++;
+  }
+  return out;
+}
+
+/** Sfx.ts 内部直名接线（文件整体排除出语料后的补偿面——该文件的
+ *  FILE_CASE_VOL/PITCH_CASE 键是假绿源头,WAV_MAP/AMBIENT_FILES 已走 face⑤ 导入） */
+const SFX_INTERNAL_WIRED = ['Item_18', 'Item_19'];
+
 function walkTs(dir: string): string[] {
   const out: string[] = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -104,7 +135,17 @@ describe('sfx wiring golden', () => {
     expect(wavs.length).toBeGreaterThan(800);
 
     const srcFiles = walkTs(`${ROOT}/src`);
-    const srcCorpus = srcFiles.map((p) => readFileSync(p, 'utf8')).join('\n \n');
+    // ★Sfx.ts 整文件排除出语料:其音量/音高表键(FILE_CASE_VOL/PITCH_CASE)曾构成
+    //   假绿通道;真实消费面已由 face⑤(WAV_MAP/AMBIENT_FILES 导入值)承担,
+    //   文件内仅有的直名接线(Item_18/19 轮换)经 SFX_INTERNAL_WIRED 显式补面
+    const srcCorpus = [
+      ...Object.values(WAV_MAP).flat(),
+      ...AMBIENT_FILES,
+      ...SFX_INTERNAL_WIRED,
+      ...srcFiles
+        .filter((p) => !p.endsWith('core/Sfx.ts'))
+        .map((p) => stripComments(readFileSync(p, 'utf8'))),
+    ].join('\n \n');
     const lowerCorpus = srcCorpus.toLowerCase();
 
     // ① 直名字面量 + ④ 被 src 点名的声轨键整组展开
@@ -169,7 +210,7 @@ describe('sfx wiring golden', () => {
     // 动态族规则：stem 去掉尾部 _N 后,若语料里出现 `<prefix>_` 紧跟模板/字符串
     // 边界（`Zombie_${93+…}` 形）——整族视为已接（动态选变体覆盖全组）。
     const dynRe = (prefix: string) =>
-      new RegExp(`(?<![a-zA-Z0-9_])${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}_['"\`+]`);
+      new RegExp(`(?<![a-zA-Z0-9_])${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}_['"\`+$]`);
     const allUncovered = wavs.filter((w) => {
       if (coveredLower.has(w.toLowerCase())) return false;
       const m = w.match(/^(.*)_\d+$/);

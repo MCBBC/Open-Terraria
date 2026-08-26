@@ -173,15 +173,25 @@ describe('1457 对齐档 2：Temple 砖线 + FinalSeedCleanup 复线', () => {
     expect(arch).toContain('export function makeTempleGenerateBricks(');
   });
 
-  it('FinalSeedCleanup 接线存在且位序正确：vampireSeed 终段之后、残片兜底之前（1457 cs:22666→:692）', () => {
+  it('FinalSeedCleanup 接线存在且位序正确：终清理槽内 beforeShimmer 钩（1457 cs:22666 在 pass 体内、ShimmerCleanUp 之前）——TTTTTTT 批移位定谳（x86 dump#105 逐字节等价为权威）', () => {
     const wg = readFileSync(join(__dirname, '..', 'src', 'world', 'gen', 'WorldGen.ts'), 'utf8');
+    const fcp = readFileSync(join(__dirname, '..', 'src', 'world', 'gen', 'vanilla', 'FinalCleanupPass.ts'), 'utf8');
     const iImport = wg.indexOf("import { finalSeedCleanup } from './vanilla/FinalSeedCleanupPass'");
-    const iVamp = wg.indexOf('vampireSeedFinishPass(ctx);');
-    const iFsc = wg.indexOf('finalSeedCleanup(ctx.store, ctx.world.seedFlags ?? {}, world.chests);');
-    const iSweep = wg.indexOf('runMultitileFragmentSweepPass(ctx.store);');
+    const iHook = wg.indexOf('beforeShimmer: hfIs1457()');
+    const iCall = wg.indexOf('finalSeedCleanup(store, ctxGs[0]!.seedFlags ?? {}, world.chests as never)');
+    const iMerge = wg.indexOf('finalGenMergeScan(store, rng);');
     expect(iImport).toBeGreaterThan(-1);
-    expect(iFsc).toBeGreaterThan(iVamp);   // 1457 管线序：vampireSeed 终段 → FinalizeSecretSeeds 尾
-    expect(iSweep).toBeGreaterThan(iFsc);  // 残片兜底仍在终扫之后
+    expect(iHook).toBeGreaterThan(-1);
+    expect(iCall).toBeGreaterThan(iHook);
+    // 终清理槽内：runFinalCleanupPass(beforeShimmer=FinalSeedCleanup) → LiquidCheck 尾扫
+    expect(iMerge).toBeGreaterThan(iCall);
+    // ★旧位（generateWorld 尾 finalize 之后）不得残留——时点晚于 dump#105 快照位
+    expect(wg.includes('finalSeedCleanup(ctx.store')).toBe(false);
+    // 引擎侧钩子在 ShimmerCleanUp 段之前被调用
+    const iShim = fcp.indexOf('opts?.beforeShimmer?.()');
+    const iShimmer = fcp.indexOf('if (gs.shimmerX >= 0 && gs.shimmerY >= 0)');
+    expect(iShim).toBeGreaterThan(-1);
+    expect(iShimmer).toBeGreaterThan(iShim);
   });
 
   it('FinalSeedCleanupPass 存档头注已翻「已接线」（KKKKKK DORMANT 备案解除）', () => {

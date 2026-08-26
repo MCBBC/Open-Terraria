@@ -1,8 +1,11 @@
 // 流星雨陨石碎块(Projectile 1078 "MeteorOre",WorldGen.UpdateWorld :71771-71810
 // 消耗 meteorShowerCount 的产物)。与夜间坠星(FallingStar,弹幕 12)是两个东西:
 // 1078 带重力抛物线、伤害 50(专家40/大师35)+ 击退 5、命中玩家施加 OnFire(24)
-// 300-600t(Projectile.cs:11456-11459)、撞地消亡【无掉落】——流星雨是灾害,
-// 不是坠星农场。
+// 300-600t(Projectile.cs:11456-11459)、撞地消亡但带掉落(Kill :76509-76511:
+// netMode!=1 门内 1/16 × item116 陨石矿 ×Next(2,7)=2..6)——★头注旧"撞地无掉落"
+// 系审计误读(F2 2026-08-26 勘误):把 1078 与坠星弹幕 12 的掉落语义混记了。两者
+// 区分:1078=概率小量陨石矿;弹幕 12 自然星(damage>500)落地必掉 item75×1
+// (Kill_ExplodeTiles :79349-79351,FallingStar natural 支已对齐)。
 // · SetDefaults(:9783-9793):w=h=14, hostile+friendly, penetrate=-1
 // · AI_199(:37668-37691):frame=rand(3) 视觉;尘 31+6 号;红光(1,0,0);
 //   rotation += vx*0.06 + direction*0.06;运动=通用重力(0.3,aiStyle 199 无运动覆写)
@@ -12,6 +15,7 @@ import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 
 export class MeteorChunk extends Entity {
   w = 14; h = 14;
@@ -69,15 +73,24 @@ export class MeteorChunk extends Entity {
     if (Math.random() < 0.5) {
       game.spawnParticles(this.cx, this.cy, '#FF7050', 1, 0.5, { life: 18 });
     }
-    // 撞地消亡(tileCollide 默认;Kill 无特例 → 无掉落)
+    // 撞地消亡(tileCollide 默认)
     if (st.isSolid(tx, ty)) {
+      // Kill 掉落（Projectile.cs:76509-76511,netMode!=1 门=纯客户端不掷）：
+      // Main.rand.Next(16)==0 → Item.NewItem(Center,116 陨石矿,Next(2,7)=2..6)。
+      // vid→key 走 VANILLA_ITEM_KEY_BY_ID 反查（CoinPortalProj 同惯例）
+      if (Math.random() < 1 / 16) {
+        const oreKey = VANILLA_ITEM_KEY_BY_ID[116];
+        if (oreKey) game.spawnDrop(this.cx, this.cy, oreKey, 2 + Math.floor(Math.random() * 5));
+      }
       game.spawnParticles(this.cx, this.cy, '#FF9060', 6, 2, { life: 24 });
       // Kill 音(:76511-76518):type 1078 掷 Next(1,4) 次 MeteorShower 跟踪音——
       // CreateTrackable("meteor_shower",6) vol×0.8 pitchVariance±0.3(SoundID.cs:1120)
+      // ★pitch 抖动 = SoundStyle.GetRandomPitch = rand×PV−PV/2 ∈ ±PV/2（±0.15）,
+      //   非全幅 ±PV——曾 ×2 过宽（2026-08-26 review 修）
       const hits = 1 + Math.floor(Math.random() * 3);
       for (let i = 0; i < hits; i++) {
         game.playSfxWav?.(`meteor_shower_${Math.floor(Math.random() * 6)}`, 0.8, this.cx, this.cy,
-          (Math.random() * 2 - 1) * 0.3);
+          (Math.random() - 0.5) * 0.3);
       }
       this.dead = true;
     }

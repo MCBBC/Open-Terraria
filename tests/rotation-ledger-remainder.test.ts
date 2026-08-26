@@ -137,7 +137,9 @@ describe('546 怒滚草：滚转累积 + 派发 + 反翻镜像', () => {
 // ---------------------------------------------------------------------------
 // ⑤ 301 渡鸦（墓地乌鸦，FindFrame :74257-74271）——2026-08-26 用户实报"倒飞"清偿：
 //   贴图原生朝右（5 帧喙均在右），FindFrame 专属支 spriteDirection 与移动反向
-//   （飞行 vx>0.5→-1 / vx<-0.5→1、落地 =-direction）→ 与鸮族 611/689、546 同反翻档。
+//   （飞行 vx>0.5→-1 / vx<-0.5→1【速度向滞回】、落地 =-direction【方向向】）——
+//   与鸮族 611/689、546 同为反翻族,但飞行支是速度向 → 独立双态判据
+//   （Renderer ravenFlip;不可并入 facing 基础的 sdirNeg 档,转向/击退瞬态会分叉）。
 //   曾落通用镜像档（facing>0 翻）=向右飞倒飞；rotation=vx×0.1（:74287）此前已接。
 // ---------------------------------------------------------------------------
 describe('301 渡鸦：vx 倾斜 + 反翻镜像（贴图原生朝右的反翻族）', () => {
@@ -153,14 +155,29 @@ describe('301 渡鸦：vx 倾斜 + 反翻镜像（贴图原生朝右的反翻族
     expect(e.visAngle).toBeCloseTo(-0.1, 5);
   });
 
-  it('镜像门归属：向右飞(sdir=-1)不翻 / 向左飞(sdir=1)翻——统一 facing<0 才翻（:74257-74271,曾落通用档=倒飞）', () => {
+  it('镜像门归属（:74257-74271 双态）：飞行按速度向滞回、落地按 -direction——曾落通用档=倒飞', () => {
     const w = makeWorld();
     const h = makeHooks(w, null);
     const e = spawn(h, 301, 40, 20);
-    e.visAngle = 0.25; e.facing = 1;
-    expect(flips(drawWithFake(e, w)).length, 'facing=1(向右飞,spriteDirection=-1)→不翻——倒飞回归锁').toBe(0);
+    e.visAngle = 0.25;
+    // 飞行右行（vx>0.5→sdir=-1）：不翻
+    e.vy = 1; e.vx = 2; e.facing = 1;
+    expect(flips(drawWithFake(e, w)).length, '飞行右行→不翻（倒飞回归锁）').toBe(0);
+    // 转向瞬态：direction 已先翻、速度仍右行（vultureAI X 加速 0.15/t ≈24t 窗口）
+    // ——速度向判据仍不翻（按 facing 会提前反向=短暂倒飞）
     e.facing = -1;
-    expect(flips(drawWithFake(e, w)).length, 'facing=-1(向左飞,spriteDirection=1)→翻').toBe(1);
+    expect(flips(drawWithFake(e, w)).length, '转向瞬态:速度仍右行→仍不翻（速度向判据）').toBe(0);
+    // 飞行左行（vx<-0.5→sdir=1）：翻
+    e.vx = -2; e.facing = -1;
+    expect(flips(drawWithFake(e, w)).length, '飞行左行→翻').toBe(1);
+    // 受击退瞬态：速度已反向、direction 未变——仍按速度翻（facing<0 门会漏）
+    e.facing = 1;
+    expect(flips(drawWithFake(e, w)).length, '受击退:速度已左行 direction 仍右→翻（速度向）').toBe(1);
+    // 落地（vy==0→sdir=-direction）：facing<0 翻 / facing>0 不翻
+    e.vy = 0; e.vx = 0; e.facing = -1;
+    expect(flips(drawWithFake(e, w)).length, '落地 direction=-1→sdir=1 翻').toBe(1);
+    e.facing = 1;
+    expect(flips(drawWithFake(e, w)).length, '落地 direction=1→sdir=-1 不翻').toBe(0);
   });
 });
 

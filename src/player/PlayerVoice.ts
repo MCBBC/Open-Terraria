@@ -178,7 +178,10 @@ export function playDeathVoice(game: GameHooks, state: VoiceState | null | undef
   // 无 remix 排除——与受击门不同,照抄);override 命中已在 deathVoicePlan 内先行返回
   const sfD = (game as unknown as { world?: { seedFlags?: Record<string, boolean | undefined> } }).world?.seedFlags ?? {};
   const ovD = state?.voiceOverride ?? 0;
-  if (ovD === 0 && (sfD.theConstant || sfD.tenthAnniversary)) {
+  // 原版死亡 switch 只对 {1,2,3,4,5,9,15} 提前 return(Player.cs:39020-39041);
+  // 其余 override(6,7,8,10-14,16-20)落到 DST 支——2026-08-26 审计收窄修正
+  const DEATH_SWITCH_RETURNS = new Set([1, 2, 3, 4, 5, 9, 15]);
+  if (!DEATH_SWITCH_RETURNS.has(ovD) && (sfD.theConstant || sfD.tenthAnniversary)) {
     const maleD = !FEMALE_VARIANTS.includes(state?.skinVariant ?? 0);
     game.playSfxWav?.(`${maleD ? 'dst_male_hit' : 'dst_female_hit'}_${Math.floor(Math.random() * 3)}`, 0.1);
     return;

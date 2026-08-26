@@ -49,8 +49,9 @@ import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
 import { daybreakStacks } from './WeaponProj';
 import { npcCheckArmorPenetration } from './projStatus';
-import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, destroyerSegmentLight, spawnPart, addEnemy, shoot, losClear, mechProbeLock } from './bossAI';
-import { mechQueenUp } from './mechQueen';
+import { skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, destroyerSegmentLight, spawnPart, addEnemy, shoot, losClear, mechProbeLock } from './bossAI';
+
+import { bindEnemyCtor } from './enemyCtorRegistry';import { mechQueenUp } from './mechQueen';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
 import { lunaticCultistAI, empressOfLightAI, queenSlimeAI, ancientLightAI, ancientDoomAI } from './bossAI_lategame';
 import { deerclopsAI } from './bossAI_deerclops';
@@ -2421,12 +2422,19 @@ export class Enemy extends Entity {
     //   本仓 shimmerT≥100 才哑,渐入期(0..100)照常呻吟。IdleSounds 是另一档门
     //   (!transparency>0 即浸入即静默,:91185),保持 ==0 门不动。
     if (this.vanilla?.aiStyle === 3 && !this.despawnEncouraged && !(this.shimmerT >= 100)) {
-      const ch = CHATTER_SOUNDS[id];
-      if (ch && Math.floor(Math.random() * ch.denom) === 0) {
-        const f = ch.pool ? ch.pool[Math.floor(Math.random() * ch.pool.length)] : ch.file;
-        game.playSfxWav?.(f, 1, this.cx, this.cy);
-        return;
+      // 值可数组 = 同 tick 多路【独立掷】（原版 AI_003 尾段多条 if 各自 Main.rand.Next,
+      // 同帧双中都各播一次——弗兰肯 162 双源 :57918+:57930,F2 2026-08-26）
+      const rawCh = CHATTER_SOUNDS[id];
+      const specs = Array.isArray(rawCh) ? rawCh : rawCh ? [rawCh] : [];
+      let chatterPlayed = false;
+      for (const ch of specs) {
+        if (Math.floor(Math.random() * ch.denom) === 0) {
+          const f = ch.pool ? ch.pool[Math.floor(Math.random() * ch.pool.length)] : ch.file;
+          game.playSfxWav?.(f, 1, this.cx, this.cy);
+          chatterPlayed = true;
+        }
       }
+      if (chatterPlayed) return;
     }
     // IdleSounds（:91184-91246,门 !shimmerTransparency>0 = 浸入即静默——shimmerT>0 即哑,
     // 与闲话的 <1f 宽门分档;旧实现靠函数头全局早退承担,拆门后在此显式承接）
@@ -12006,6 +12014,20 @@ export class Enemy extends Entity {
     // 对"已死未出列"的敌怪二次触发死亡管线(碎块/掉落/音效翻倍)。原版由
     // Damage_PVE 的 npc.active 前置门(Projectile.cs:11869)天然防重;此处等价。
     if (this.dead) return false;
+    // ★修齐批②：钛金屏障 on-hit（Player.cs:6927-6936——任意 NPC 伤害源命中,
+    //   cooldown 10t 门+statue/488 豁免;buff306 600t+碎片 908 ≤7）
+    if (fromPlayer && dmg > 0) {
+      const pl = game.player as unknown as { titaniumStormCd?: number; dead?: boolean;
+        cx: number; cy: number;
+        buffs: { apply(t: number, sec: number): void }; equipStats: { titaniumStorm?: boolean } };
+      if (pl && !pl.dead && pl.equipStats?.titaniumStorm) {
+        if ((pl.titaniumStormCd ?? 0) <= 0) {
+          pl.titaniumStormCd = 10;
+          pl.buffs.apply(306, 10);                           // AddBuff(306,600t)=10s
+          game.spawnTitaniumShard?.(pl.cx ?? 0, pl.cy ?? 0);
+        }
+      }
+    }
     if (pierce !== 1 && this.iframes > 0) return false; // 单发弹豁免免疫检查（flag3）
     // 旗 buff 加伤（Main.GetBannerBuffEffect → StrikeNPC 乘区,ItemID.cs:11-44 普通族:
     // 经典 ×1.5/专家 ×2;DD2 0.2 族不区分,登记）——统一入口=StrikeNPC 全通道语义
@@ -12550,6 +12572,8 @@ export class Enemy extends Entity {
 
   draw() { /* Renderer 统一绘制 */ }
 }
+// 构造器回填（enemyCtorRegistry 叶模块承载,导入序无关——2026-08-26 生产包
+// TDZ 实报后抽叶根修,详见 enemyCtorRegistry.ts 头注）
 bindEnemyCtor(Enemy);
 
 // ===================== 仙灵宝箱搜索（GetFairyTreasureCoords NPC.cs:48794-48852 1:1）=====================

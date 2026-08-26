@@ -15,6 +15,7 @@ export interface ArmorSetBonus {
   critRanged?: number;
   critMagic?: number;
   noKnockback?: boolean;
+  titaniumStorm?: boolean;   // 钛金全套 on-hit（ArmorSetBonuses.cs:222-225 Titanium→onHitTitaniumStorm）
   runAccMul?: number;      // runAcceleration *=（暗影套 1.75,:26195-26201）
   endurance?: number;
   dmgMinion?: number;   // minionDamage +=
@@ -35,6 +36,11 @@ export interface ArmorSetBonus {
 }
 
 export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
+  // 钛金 (1215|1216|1217 头 ×1218 胸 ×1219 腿,ArmorSetBonuses.cs:461-463)：
+  // on-hit 钛金屏障（Player.cs:6927-6936 cooldown10+buff306 600t+碎片908≤7）
+  '1215|1218|1219': { titaniumStorm: true, name: 'Titanium' },
+  '1216|1218|1219': { titaniumStorm: true, name: 'Titanium' },
+  '1217|1218|1219': { titaniumStorm: true, name: 'Titanium' },
   // 金属一档（铜 1,1,1 / 铁(72|2),2,2 / 铅 47,28,27——木套 1.4.5 无加成）：防 +2
   '1|1|1': { def: 2, name: 'MetalTier1' },
   '72|2|2': { def: 2, name: 'MetalTier1' },

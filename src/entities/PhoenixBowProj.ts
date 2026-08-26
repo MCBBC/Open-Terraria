@@ -39,7 +39,6 @@ import { projSprite } from './Arrow';
 import { playerCanHitEnemy } from './projTargets';
 import { applyProjStatus } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
-import { LIQUID_TYPE } from '../world/TileStore';
 import { TILE } from '../core/constants';
 
 /** 玩家侧挂点（RotatedRelativePoint(MountedCenter) ≈ 中心；SkyDragonFury.DragonOwner 同口径）
