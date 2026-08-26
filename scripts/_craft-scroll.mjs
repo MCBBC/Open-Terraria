@@ -46,7 +46,7 @@ const out = await page.evaluate(async () => {
   const r1el = list.querySelector('[data-ri="1"]');
   const stride = (r0el && r1el)
     ? (r1el.getBoundingClientRect().top - r0el.getBoundingClientRect().top) : -1;
-  const overlapFree = Math.abs(rowH - 32) < 0.6 && Math.abs(stride - 32) < 0.6;
+  const overlapFree = Math.abs(rowH - 30) < 0.6 && Math.abs(stride - 30) < 0.6;
   // A0.5: 灵敏度——单击一格应走 ≥1 行
   wheel(120); await raf(60);
   const oneNotch = ui.craftScrollF;
@@ -94,6 +94,32 @@ const out = await page.evaluate(async () => {
     refreshPerScroll,
     maxA, overPeak: +overPeak.toFixed(2), overSettled: +overSettled.toFixed(2),
     bounceOK: overPeak > maxA && Math.abs(overSettled - maxA) < 0.01,
+    // ---- 短列表场景(用户实报 len≈8-11)----
+    short8: (async () => {
+      g.vanillaAvailableRecipes = () => fake.slice(0, 8);
+      ui.craftScroll = 0; ui.craftWheelTarget = 0; ui.craftScrollF = 0;
+      ui.refreshAll();
+      await raf(4);
+      const trk = ui.craftTrackEl;
+      return { track: trk.style.display, firstRi: list.querySelector('[data-ri]')?.dataset.ri };
+    })(),
+    short11: (async () => {
+      g.vanillaAvailableRecipes = () => fake.slice(0, 11);
+      ui.craftScroll = 0; ui.craftWheelTarget = 0; ui.craftScrollF = 0;
+      ui.refreshAll();
+      await raf(4);
+      const trk = ui.craftTrackEl;
+      const shown = trk.style.display !== 'none';
+      // 拖到底:按 track 几何调 jump(与真实拖拽同路径)
+      const r = trk.getBoundingClientRect();
+      ui.craftScrollJump(r.bottom + 40);
+      await raf(4);
+      return {
+        track: trk.style.display,
+        firstRi: list.querySelector('[data-ri]')?.dataset.ri ?? '?',
+        anchor: +ui.craftScrollF.toFixed(2),
+      };
+    })(),
     topRest, rowH: +rowH.toFixed(1), stride: +stride.toFixed(1), overlapFree,
     oneNotch: +oneNotch.toFixed(2), freshSmall: +freshSmall.toFixed(2),
     tailY199: rowY(199),
@@ -101,6 +127,6 @@ const out = await page.evaluate(async () => {
     listH: list.style.height,
   };
 });
-console.log(JSON.stringify(out));
+(async () => { for (const k of ['short11']) if (out[k] instanceof Promise) out[k] = await out[k]; console.log(JSON.stringify(out)); })();
 await page.screenshot({ path: 'shots/craft-scroll.png' });
 await browser.close();

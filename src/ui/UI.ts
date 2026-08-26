@@ -2946,11 +2946,13 @@ export class UI {
     modernRow.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:6px;';
     this.craftSearchEl = el('input') as HTMLInputElement;
     this.craftSearchEl.placeholder = Lang.text('Mods.SandboxWorld.Craft.SearchHint');
-    this.craftSearchEl.style.cssText = 'flex:1; padding:4px 8px; background:#241e38; color:#fff; border:1px solid #6a5a8a; border-radius:4px; font-size:12px;';
+    // ★input 高度对齐右侧配方细项盒(38px)并恒定——未 hover 时细项盒塌掉曾把
+    //  本行行高拖落=搜索框上下抖动（2026-08-26 用户图文定案）
+    this.craftSearchEl.style.cssText = 'flex:1; height:38px; box-sizing:border-box; padding:4px 8px; background:#241e38; color:#fff; border:1px solid #6a5a8a; border-radius:4px; font-size:12px;';
     this.craftSearchEl.addEventListener('input', () => { this.craftFocus = -1; this.craftScroll = 0; this.craftScrollF = 0; this.craftWheelTarget = 0; this.refreshVanillaCrafting(); });
     modernRow.appendChild(this.craftSearchEl);
     this.craftGridEl = el('div');
-    this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:520px;';
+    this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:520px; height:38px; box-sizing:border-box;';
     modernRow.appendChild(this.craftGridEl);
     right.appendChild(modernRow);
     const craftWrap = el('div');
@@ -3773,7 +3775,7 @@ export class UI {
   private craftPool: HTMLElement[] = [];
   private craftPoolIdx: number[] = [];  // 每池行当前配方 idx(-1 空,-2=强制重绘)
   private craftAvailRef: Array<{ r: import('../data/vanillaRecipes').VanillaRecipeLike; count: number }> = [];
-  private static readonly CRAFT_ROW_H = 32;   // border-box 含 4px 纵 padding+2 边框,内容 22 恰好贴图
+  private static readonly CRAFT_ROW_H = 30;   // border-box: 22 贴图+3×2 padding+2 边框=30;240/30=8 行整除(半行裁切观感即消失)
   /** 悬停预览行（材料格显示源；-1=无）。★只动材料格不动渲染窗——
    *  窗口锚点恒用 craftScroll（滚轮/点击驱动），hover 不触发滚动 */
   private hoverFocus = -1;
@@ -3810,7 +3812,7 @@ export class UI {
       this.craftAvailRef = [];
       this.craftListEl.replaceChildren();
       this.craftPool = []; this.craftPoolIdx = [];
-      this.craftListEl.style.height = '0px';   // 空列表收合（面板底部不留 240px 空腔）
+      this.craftListEl.style.height = '0px';   // 空列表收合（抖动源已改由细项盒恒高解决）
       if (this.craftTrackEl) this.craftTrackEl.style.display = 'none';
       return;
     }
@@ -3825,7 +3827,7 @@ export class UI {
       this.craftPool = []; this.craftPoolIdx = [];
       for (let k = 0; k < WIN; k++) {
         const row = el('div', 'sw-recipe');
-        row.style.cssText = `height:${UI.CRAFT_ROW_H}px; box-sizing:border-box; padding:4px 8px; margin:0; position:absolute; left:0; right:0; top:0; will-change:transform;`;
+        row.style.cssText = `height:${UI.CRAFT_ROW_H}px; box-sizing:border-box; padding:3px 8px; margin:0; position:absolute; left:0; right:0; top:0; will-change:transform;`;
         row.addEventListener('mouseenter', () => {
           // 悬停预选三段语义保留（2026-08-21/24/25）：只动材料格不动窗、
           // mousemove 门 150ms、滚轮门 350ms——池行持久后 mouseenter 只在
@@ -3901,7 +3903,9 @@ export class UI {
     //  浮点版漏了——顶部锚 0 时 topF=-4 → 首行画在 120px 下。基准钳 [0,len-VIS],
     //  过冲(回弹)量单独 ×0.6 加成 = 端部拉伸视觉保留
     const maxAnchor = Math.max(0, len - 1);
-    const maxTop = Math.max(0, len - Math.ceil(240 / H));   // 末页 8 行填满,无底部留白
+    const viewH = Math.min(240, len * H);
+    cl.style.height = `${viewH}px`;
+    const maxTop = Math.max(0, len - Math.ceil(viewH / H));   // 末页填满视口,无底部留白
     const clampedAnchor = Math.max(0, Math.min(maxAnchor, anchor));
     const topF = Math.max(0, Math.min(maxTop, clampedAnchor - (VIS_ROWS >> 1)))
       + (anchor - clampedAnchor) * 0.6;
@@ -3944,8 +3948,8 @@ export class UI {
       }
       row.style.transform = `translateY(${((idx - topF) * H).toFixed(2)}px)`;
     }
-    // 高度自适应（配方不足一屏收合，面板底边贴内容——同旧语义，改为公式直算）
-    cl.style.height = `${Math.min(240, len * H)}px`;
+    // 高度贴内容（min(240, len*H)）：恒 240 会让短列表下方出现大死区（2026-08-26
+    //  用户复报"滚动困难不顺滑"后回滚）——抖动源既已由细项盒恒高消除,此处回归自适应
     // 滚动条几何：thumb 高=填充行占比、top 跟【动画值】（拖拽顺滑）。
     // ★可见判据 = maxTop>0（内容超出视口才可滚）——曾用 min(VIS, len) 当分母:
     //  8-11 行的短列表显示滚动条但 maxTop=0 → thumb 能拖、行永不动+底部留白

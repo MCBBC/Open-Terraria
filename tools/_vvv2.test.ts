@@ -20,6 +20,19 @@ let kwin: { on: boolean; buf: string[]; n: number } | null = null;
   if (!kwin?.on) return;
   kwin.buf.push(`K ${++kwin.n} ${x} ${y} ${sheet} ${fx} ${fy}`);
 };
+// VVV 批：wc 死亡判定分支首见覆盖集（与 rig SW_WCPROBE 同口径）
+const WLOG = '/tmp/vvv-out/j-wc.txt';
+const wcSeen = new Set<string>();
+const wcBuf: string[] = [];
+(globalThis as unknown as { __swWcProbe?: unknown }).__swWcProbe = (
+  x: number, y: number, sheet: number, fx: number, fy: number, liq: number, lty: number,
+) => {
+  const key = x + '_' + y;
+  if (wcSeen.has(key)) return;
+  wcSeen.add(key);
+  if (!kwin?.on) return;
+  wcBuf.push(`W ${kwin.n} ${x} ${y} ${sheet} ${fx} ${fy} ${liq} ${lty}`);
+};
 
 it('vvv tagged sample stream', async () => {
   if (!RUN) return;
@@ -73,4 +86,5 @@ it('vvv tagged sample stream', async () => {
   }
   writeFileSync(TAG, buf.join('\n') + '\n');
   if (kwin) writeFileSync(KLOG, kwin.buf.join('\n') + '\n');
+  writeFileSync(WLOG, wcBuf.join('\n') + '\n');
 }, 600000);

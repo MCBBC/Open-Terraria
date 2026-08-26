@@ -9,12 +9,13 @@ export const UITextures = {
   setAtlas(a: SpriteAtlas) { atlas = a; },
 
   /** 按白名单键取贴图（自动补 .png 后缀），缺失返回 null（控件须自兜底）。
-   *  ★探测顺序：先带 .png 的规范键再裸键（2026-08-13 修）——uiFiles 1509 键
-   *  全部带 .png 后缀,旧序先探裸键 100% 落空 → UI_Cursor_0 类必刷警告;
-   *  带后缀调用方（PaperDoll Player_0_10.png）旧序还会二补成 .png.png 警告 */
+   *  ★只探规范键（2026-08-26）：uiFiles 1509 键【全部】带 .png 后缀,裸键兜底
+   *  探针 100% 落空且必误告——懒载 HUD（UI_InfoIcon 等在预载排除表,首帧图片
+   *  未就绪）第一探针命中清单但 ensureUiImage 返回 null → 落到裸键探针 →
+   *  vuiKeyMiss 误报"清单无此键"（2026-08-26 用户实报 UI_InfoIcon_4/12/13）。
+   *  真缺失的键仍由规范键探针 warn-once 一次,诊断不受损 */
   get(name: string): DrawRect | null {
     if (!atlas) return null;
-    const withPng = name.endsWith('.png') ? name : `${name}.png`;
-    return atlas.vui(withPng) ?? atlas.vui(name);
+    return atlas.vui(name.endsWith('.png') ? name : `${name}.png`);
   },
 };

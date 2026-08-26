@@ -1783,6 +1783,9 @@ export class LiquidSim {
     this.numLiquid = 0;
     this.bufCount = 0; // 原版 WaterCheck 首行清 LiquidBuffer（WorldGen.cs:48959）
     this.checking.fill(0);
+    // VVV 批诊断钩（SW_WCPROBE 时启用，用毕删）：镜像原版 wc 死亡判定分支的
+    // 首 witnessed 覆盖集——vanilla 首分支=nactive∧solid∧!solidTop
+    const wcProbe = process.env.SW_WCPROBE ? (globalThis as Record<string, unknown>).__swWcProbe as ((x: number, y: number, type: number, fx: number, fy: number, liq: number, lty: number) => void) | undefined : undefined;
     for (let x = 1; x < st.w - 1; x++) {
       for (let y = st.h - 2; y > 0; y--) {
         const i = this.idx(x, y);
@@ -1795,6 +1798,7 @@ export class LiquidSim {
             if (SHEET_OF[t] !== 379) st.liquid[i] = 0;
             continue;
           }
+          wcProbe?.(x, y, SHEET_OF[t] ?? -1, st.frameX[i] ?? 0, st.frameY[i] ?? 0, st.liquid[i], st.liquidType[i]);
           // 1456 WaterCheck L81172-81187：液体冲毁可死亡方块（走 KillTile）
           if (st.liquidType[i] === 2) { if (this.diesIn(t, st.frameX[i]!, st.frameY[i]!, true)) this.killTileAt(x, y); }
           else if (this.diesIn(t, st.frameX[i]!, st.frameY[i]!, false)) this.killTileAt(x, y);

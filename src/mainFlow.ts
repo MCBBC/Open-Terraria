@@ -7,6 +7,7 @@ import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData, playerFromDiskForm } from './save/SaveFile';
 import { saveClient } from './workers/SaveClient';
+import { maybeShowWelcomeAnnounce } from './ui/WelcomeAnnounce';
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
 import { kvGet, kvHas } from './save/KvStore';
@@ -199,7 +200,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   function makeGame(): Game {
     const g = new Game(root, {
-      onWorldReady: () => { ui.hideProgress(); enterGame(g); maybeDev(g); applyAppearance(g); },
+      onWorldReady: () => { ui.hideProgress(); enterGame(g); maybeDev(g); applyAppearance(g); maybeShowWelcomeAnnounce(); },
       onInventoryChanged: () => { g.prefetchInvProjectiles(); g.prefetchInvPlaceableSheets(); ui.refreshAll(); },
       onCraftCursorGlow: (itemId) => ui.markCursorGlow(itemId),
       onBuffsChanged: () => ui.refreshBuffs(),
