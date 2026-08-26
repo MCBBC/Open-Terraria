@@ -169,7 +169,8 @@ export class LiquidSim {
   /** WWWWWWW 批：盒内逐 Update 分支签名迹（与 rig SW_TRKBOX 同位标；生产 null 关闭零开销） */
   static trkProbe: ((iter: number, x: number, y: number, sig: number, amtA: number, ltyA: number, kill: number, delay: number, pre: { amt: number; lty: number }) => void) | null = null;
   static trkBox: { x0: number; x1: number; y0: number; y1: number } | null = null;
-  private trkIter = 0;
+  /** 当前迭代号（包装层在调用 updateLiquid 前写入；迹数值仅作参考，对拍按出现序） */
+  static trkIterCur = 0;
   private trkSig = 0;
   private preAmt = 0;
   private preLty = 0;
@@ -879,10 +880,11 @@ export class LiquidSim {
       this.trkSig = 0;
       this.preAmt = st.liquid[i5];
       this.preLty = Math.max(0, st.liquidType[i5] - 1);
+      LiquidSim.trkProbe!(LiquidSim.trkIterCur, x, y, -1, 0, 0, 0, 0, { amt: this.preAmt, lty: this.preLty });
     }
     // 1) 本格被实心方块占据 → 下轮必删（Liquid.cs:306-310）
     if (this.blocksLiquid(x, y)) {
-      if (trkOn) { this.trkSig |= 1; this.trkPost(this.trkIter, e); }
+      if (trkOn) { this.trkSig |= 1; this.trkPost(e); }
       e.kill = 999; return;
     }
     const startAmt = st.liquid[i5];
@@ -891,7 +893,7 @@ export class LiquidSim {
       st.liquid[i5] = Math.max(0, st.liquid[i5] - 2);
     }
     if (st.liquid[i5] === 0) {
-      if (trkOn) { this.trkSig |= 2; this.trkPost(this.trkIter, e); }
+      if (trkOn) { this.trkSig |= 2; this.trkPost(e); }
       e.kill = 999; return;
     }
     const myType = st.liquidType[i5];
@@ -989,17 +991,12 @@ export class LiquidSim {
     } else {
       e.kill++;
     }
-    if (trkOn) this.trkPost(this.trkIter, e);
+    if (trkOn) this.trkPost(e);
   }
 
-  /** 盒内逐 Update 迹输出（iter 由调用方注入——update 无迭代上下文，包一层计数） */
-  emitTrk(iter: number): void {
-    this.trkIter = iter;
-  }
-
-  private trkPost(iter: number, e: LiquidEntry): void {
+  private trkPost(e: LiquidEntry): void {
     const st = this.world.store;
-    LiquidSim.trkProbe?.(iter, e.x, e.y, this.trkSig, st.liquid[this.idx(e.x, e.y)], Math.max(0, st.liquidType[this.idx(e.x, e.y)] - 1), e.kill, e.delay, { amt: this.preAmt, lty: this.preLty });
+    LiquidSim.trkProbe?.(LiquidSim.trkIterCur, e.x, e.y, this.trkSig, st.liquid[this.idx(e.x, e.y)], Math.max(0, st.liquidType[this.idx(e.x, e.y)] - 1), e.kill, e.delay, { amt: this.preAmt, lty: this.preLty });
   }
 
   /** 侧向均流：参与格全体写平均值（Liquid.cs:398-651，逐分支照抄） */

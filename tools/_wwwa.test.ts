@@ -118,8 +118,21 @@ function fpOf(sim: FpSim): string {
   const origUpdate = proto.updateLiquid;
   let it0 = 0;
   const fpLines: string[] = ['---START'];
+
+  // 盒内逐 Update 分支签名迹（SW_WWWA_TRK="x0,x1,y0,y1" 开启；与 rig x2-trkbox 同格式）
+  const trkEnv = process.env.SW_WWWA_TRK;
+  const trkLines: string[] = [];
+  if (trkEnv) {
+    const [bx0, bx1, by0, by1] = trkEnv.split(',').map(Number);
+    LiquidSim.trkBox = { x0: bx0!, x1: bx1!, y0: by0!, y1: by1! };
+    LiquidSim.trkProbe = (iter, x, y, sig, amtA, ltyA, kill, delay, pre) => {
+      trkLines.push(sig === -1 ? `P ${iter} ${x} ${y} ${pre.amt} ${pre.lty}` : `T ${iter} ${x} ${y} ${sig.toString(16)} ${amtA} ${ltyA} ${kill} ${delay}`);
+    };
+  }
+
   type Entry = { x: number; y: number; delay: number; kill: number };
   proto.updateLiquid = function (this: { numLiquid: number; bufCount: number; liquids: Entry[]; world: World }) {
+    LiquidSim.trkIterCur = it0;
     const r = origUpdate.apply(this, arguments as unknown as unknown[]);
     it0++;
     const n = this.numLiquid;
@@ -161,6 +174,7 @@ function fpOf(sim: FpSim): string {
   }
 
   writeFileSync(`${OUT}/j-liqlog.txt`, fpLines.join('\n') + '\n');
+  if (trkLines.length) writeFileSync(`${OUT}/j-trkbox.txt`, trkLines.join('\n') + '\n');
   writeFileSync(`${OUT}/j-rep-kills.txt`, kills.join('\n') + '\n');
 
   // 终态对拍（vs x86 098_Settle_Liquids_Again）：A/T/L/Lt 四通道
