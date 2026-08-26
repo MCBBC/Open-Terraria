@@ -354,6 +354,7 @@ export function wetFromBubbleContact(rand: () => number = Math.random): number {
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
+  [BuffType.TitaniumStorm]: { vanillaBuff: 306, descKey: 'BuffDescription.TitaniumStorm', fallbackName: '钛金屏障' },
   [BuffType.Campfire]: { vanillaBuff: 87, descKey: 'Mods.SandboxWorld.Buff.Campfire.Desc', fallbackName: '篝火' },
   [BuffType.Agility]: { vanillaBuff: 3, descKey: 'Mods.SandboxWorld.Buff.Agility.Desc', fallbackName: '敏捷' },
   [BuffType.Ironskin]: { vanillaBuff: 5, descKey: 'Mods.SandboxWorld.Buff.Ironskin.Desc', fallbackName: '铁皮' },

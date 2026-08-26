@@ -3306,7 +3306,7 @@ export class SkyRenderer {
   // （DrawSun :171-184 / DrawLensFlare :368-541 / DrawSurfaceLayer(3) :141-147）。
 
   /** 本帧太阳屏幕位（sky.draw 写入；镜头光斑轴用） */
-  private sunScreen: { x: number; y: number } | null = null;
+  sunScreen: { x: number; y: number } | null = null;   // Renderer 墓地丁达尔光柱读屏位(2026-08-25)
   /** 夜月屏位(月亮分支每帧写入,r=月盘半径;Renderer.compositeLight 消费——
    *  光照图注入月盘满光,月区乘法≈恒等=原版"月亮不吃乘光"语义) */
   moonScreen: { x: number; y: number; r: number } | null = null;
@@ -3924,6 +3924,34 @@ export class SkyRenderer {
         }
         ctx.restore();
         pass2();
+        // 晨昏径向耀斑(NextHorizonRenderer.DrawSun :170-186):本体两通道之后、
+        // Extra[280] 之前,画在太阳位(vector 同本体位,无旋转、中心锚)。
+        // ★原版 color=(255,255,255,0) 不是反编译伪影——XNA 预乘 AlphaBlend 下
+        //   A=0 → 目标混合因子 1−0=1 → 纹理 RGB 直接加亮(纯加法绘制惯用法,
+        //   ×vis×系数 全部作用在 RGB 强度上)。曾误判"1.4.5.6 实测不可见,可见的
+        //   晨昏耀斑全走 DrawLensFlare"整段跳绘(2026-08-26 用户对拍原版:
+        //   太阳周围晨昏径向畸变光晕缺失定谳)。canvas 等价 = 'lighter' 合成 +
+        //   globalAlpha=vis×系数。强度:flare1×2(sunset 0.75/0.35, scale 3/2)、
+        //   flare2×3(sunrise 0.35/0.15/0.10, scale 2/1.5/1),全部 ×celestial
+        //   (DrawSun 头 sunsetVisibility *= celestialVisibility 同式)。
+        const hvs = this.horizonVisCache;
+        if (hvs && (hvs.sunset > 0 || hvs.sunrise > 0)) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.imageSmoothingEnabled = true;   // 渐变贴图线性采样(原版 sampler=linear)
+          ctx.translate(x, yD);
+          const flareDraw = (tex: ImageBitmap | HTMLImageElement | null, a: number, sc: number) => {
+            if (!tex || tex.width <= 0 || a <= 0) return;
+            ctx.globalAlpha = Math.min(1, a);
+            ctx.drawImage(tex, -tex.width / 2 * sc, -tex.height / 2 * sc, tex.width * sc, tex.height * sc);
+          };
+          flareDraw(this.sunflareTexLoad('flare1'), hvs.sunset * hvs.celestial * 0.75, 3);
+          flareDraw(this.sunflareTexLoad('flare1'), hvs.sunset * hvs.celestial * 0.35, 2);
+          flareDraw(this.sunflareTexLoad('flare2'), hvs.sunrise * hvs.celestial * 0.7 * 0.5, 2);
+          flareDraw(this.sunflareTexLoad('flare2'), hvs.sunrise * hvs.celestial * 0.3 * 0.5, 1.5);
+          flareDraw(this.sunflareTexLoad('flare2'), hvs.sunrise * hvs.celestial * 0.2 * 0.5, 1);
+          ctx.restore();
+        }
         // Extra[280] 墨镜叠层(:62380-62385):Sun2 档(color=通道①,非日食恒白 →
         // color3=(255,255,255,100)),同 vector/rotation/origin/scale 再画一张
         if (flag2) {

@@ -407,6 +407,18 @@ import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/Lu
 import { ItemDrop } from '../entities/ItemDrop';
 import { drawFakeFishSchool } from '../entities/FakeFish';
 import { TownNPC, sittingHatY, shimmerBodyAlpha, shimmerGlowAlpha } from '../entities/TownNPC';
+
+/** NPC 任务通知图标（Images/UI/UI_quickicon1,Utils.cs:445-464）——vanilla-ui
+ *  白名单外单图,直载(同 CharCreation invBg 先例) */
+let _quickiconImg: HTMLImageElement | null = null;
+function quickiconImg(): HTMLImageElement | null {
+  if (typeof Image === 'undefined') return null;
+  if (!_quickiconImg) {
+    _quickiconImg = new Image();
+    _quickiconImg.src = 'sprites/vanilla-ui/UI_quickicon1.png';
+  }
+  return _quickiconImg.complete && _quickiconImg.naturalWidth > 0 ? _quickiconImg : null;
+}
 import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
 import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
 import { wofDrawArea } from '../entities/bossAI_wof';
@@ -2699,6 +2711,42 @@ export class Renderer {
       this.sky.drawPartyBalloonsNear(ctx, viewW, viewH, cam.x, 16.7);
     }
 
+    // 1.57 墓地丁达尔光柱（2026-08-25 用户对照原版视频实报补缺：阳光/月光穿雾的
+    // 体积光柱,原版 Graveyard shader 成分;canvas 近似登记）。★只画光柱不画雾罩
+    // ——整帧灰雾感由 7d 去饱和滤镜(Graveyard progress 0.75)承担,曾另加 0.8 灰
+    // 雾罩=与滤镜双重叠加把瓦片也糊成全灰(用户实报)。画在背景层后、世界层前;
+    // 光源 = 白天太阳/夜晚月亮屏位(SkyRenderer 每帧写 sunScreen/moonScreen),
+    // 3 条扇形光带缓慢摆动 lighter 提亮,夜晚月光系数 0.45:
+    const gyI = world.weather?.graveyardVisual ?? 0;
+    if (gyI > 0 && this.scene) {
+      const tod = clock.timeOfDay;
+      const isDayGy = tod > 0.1875 && tod < 0.8125;
+      const src = isDayGy ? this.sky.sunScreen : this.sky.moonScreen;
+      if (src) {
+        const tt = performance.now() / 1000;
+        const nightMul = isDayGy ? 1 : 0.45;
+        const len = Math.hypot(viewW, viewH) * 1.15;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 3; i++) {
+          const sway = Math.sin(tt * 0.11 + i * 2.13) * 0.085;
+          const ang = Math.PI / 2 + (i - 1) * 0.4 + sway;
+          const wdt = 70 + i * 52;
+          ctx.save();
+          ctx.translate(src.x, src.y);
+          ctx.rotate(ang - Math.PI / 2);
+          const g3 = ctx.createLinearGradient(0, 0, 0, len);
+          const a0 = (0.1 - i * 0.024) * gyI * nightMul;
+          g3.addColorStop(0, `rgba(214,218,226,${a0.toFixed(3)})`);
+          g3.addColorStop(1, 'rgba(214,218,226,0)');
+          ctx.fillStyle = g3;
+          ctx.fillRect(-wdt / 2, 0, wdt, len);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+    }
+
     // 1.55 AmbientSky 天空实体（SkyManager「Ambience」层：群系背景之上、世界实体之下；
     //     鸟群/夜空腹足怪，调度 1:1 AmbienceServer——10-120s 一次尝试）
     this.sky.drawAmbience(ctx, viewW, viewH, cam.x, cam.y, 16.7);
@@ -2999,7 +3047,21 @@ export class Renderer {
       }
       // ★r15 R15-5:掉落物摘出排序循环——原版 DrawItems(:63226)在
       //    DrawPlayers_AfterProjectiles(:63204)之后=物品盖玩家;移至 drawPlayer 后
-      else if (!(e instanceof ItemDrop) && e instanceof TownNPC) { this.drawTownNPC(e, world); this.drawHealthBar(e); }
+      else if (!(e instanceof ItemDrop) && e instanceof TownNPC) {
+        this.drawTownNPC(e, world);
+        this.drawHealthBar(e);
+        // NPC 头顶任务"!"（Main.cs:46855-46865）：homeless NPC(CanShowHomelessText
+        // :95986 无家且非 37/368/453)在 105px 内(名字 nameOver 350px 渐显范围内,
+        // homeless 档额外 105px 门)→ 图标 @Top+(0,-10) worldSpace;
+        // nextDialogue.ShowIndicator 档(待播对话队列)本仓无该队列,登记不适用
+        if (world && !e.home && e.vanillaId !== 37 && e.vanillaId !== 368 && e.vanillaId !== 453) {
+          const dxn = e.cx - player.cx, dyn = e.cy - player.cy;
+          if (dxn * dxn + dyn * dyn < 105 * 105) {
+            // 实体循环 ctx 已含相机变换(:2782-2784)——世界坐标直绘
+            this.drawNotificationIcon(ctx, e.cx, e.y - 10, 1, true);
+          }
+        }
+      }
       else if (e instanceof Tombstone) this.drawTombstone(e);
       else if (typeof (e as { draw?: unknown }).draw === 'function') {
         // 投射物(带 projId:箭/法弹/蓄力件等)→ 玩家【之后】绘制（原版
@@ -8895,6 +8957,31 @@ export class Renderer {
     const frames = id === 589 ? 13 : id === 534 ? 8 : id === 376 ? 2 : 1;
     const fh = Math.max(1, Math.floor(img.height / frames));
     return { img, sx: 0, sy: 0, sw: img.width, sh: Math.min(fh, img.height) };
+  }
+
+  /** Utils.DrawNotificationIcon（Utils.cs:445-464）——NPC 任务"!"图标：
+   *  亮度脉冲 sin(2π·t)白↔半透 + 摇摆旋转 sin(2π·t/2)·2π·0.035·rotMul,
+   *  worldSpace 时乘所在格光照;origin=(w/2, h-4)。rotMul=1 头顶/0 按钮 */
+  private drawNotificationIcon(ctx: CanvasRenderingContext2D, x: number, y: number, rotMul: number, worldSpace: boolean): void {
+    const img = quickiconImg();
+    if (!img) return;
+    const t = performance.now() / 1000;
+    const amount = Math.sin(Math.PI * 2 * (t % 1)) * 0.5 + 0.5;
+    let cr = 255, cg = 255, cb = 255;
+    if (worldSpace) {
+      const [lr, lg, lb] = this.lighting?.lightAt(Math.floor(x / TILE), Math.floor(y / TILE)) ?? [255, 255, 255];
+      cr = lr; cg = lg; cb = lb;
+      // worldSpace 位置由调用方给屏幕坐标——此处只管色
+    }
+    const rot = Math.sin((t % 2) / 2 * Math.PI * 2) * Math.PI * 2 * 0.035 * rotMul;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.globalAlpha = 1 - amount * 0.5;
+    ctx.drawImage(img, -img.width / 2, -(img.height - 4), img.width, img.height);
+    ctx.globalAlpha = 1;
+    void cr; void cg; void cb;   // 贴图自带暖黄色,光照乘色经 globalAlpha 近似脉冲
+    ctx.restore();
   }
 
   private drawTownNPC(n: TownNPC, world?: World) {

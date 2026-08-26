@@ -134,7 +134,9 @@ export type FishSplashLiquid = keyof typeof FISH_SPLASH_PITCH_OFFSET;
 export function fishSplashPitch(kind: FishSplashLiquid, rand: () => number = Math.random): number {
   // LegacySoundPlayer.PlaySound 尾段 Clamp(instance.Pitch + variance + offset, -1, 1)
   // （:1417）→ 两档 clamp 后同为 +1（八度上移）——原版运行时四液同调,差值死参备案
-  const p = FISH_SPLASH_PITCH_OFFSET[kind] + (rand() * 2 - 1) * 0.02;
+  // GetRandomPitch=rand×PV−PV/2(SoundStyle.cs:41-44,PV0.02→±0.01 半幅;
+  // ★曾全幅 ±0.02=同 F1 族错误,2026-08-26 清零轮收口)
+  const p = FISH_SPLASH_PITCH_OFFSET[kind] + (rand() - 0.5) * 0.02;
   return Math.max(-1, Math.min(1, p));
 }
 

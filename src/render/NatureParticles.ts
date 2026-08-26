@@ -474,14 +474,16 @@ export class NatureParticles {
       ctx.drawImage(img, 0, d.frame * fh, img.width, fh, d.x, d.y, img.width, fh);
     }
     // 云雾：Main.DrawGore（Main.cs:21749-21756）——中心锚 + scale + rotation，
-    // 色 = GetAlpha(中心格光照) × (255-alpha)/255；透明度只由淡出控制
+    // 色 = GetAlpha(中心格光照)；★透明度乘墓地雾半透系数 0.55（2026-08-25 用户
+    // 定案：原版观感=非常半透的贴地薄雾,字面 math(光照×fade 不透明)在密集重叠
+    // +暗背景下观感远重于原版视频,故意偏离登记）
     for (const c of this.clouds) {
       const img = atlas.ensureVImage(`vanilla/Gore_${c.type}.png`);
       if (!img || !(img.width > 0) || img.width === 0) continue;
       const w = img.width, h = img.height;
       const [lr, lg, lb] = lightAt?.(Math.floor((c.x + 15) / TILE), Math.floor(c.y / TILE)) ?? [255, 255, 255];
       ctx.save();
-      ctx.globalAlpha = Math.max(0, (255 - c.alpha) / 255);
+      ctx.globalAlpha = Math.max(0, (255 - c.alpha) / 255) * 0.55;
       ctx.translate(c.x + w / 2, c.y + h / 2);
       if (c.rotation) ctx.rotate(c.rotation);
       if (c.scale !== 1) ctx.scale(c.scale, c.scale);

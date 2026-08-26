@@ -17,7 +17,12 @@ await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
 await new Promise((r) => setTimeout(r, 800));
 await page.click('[data-act=sp]');
-await page.waitForSelector('.sw-vsel', { timeout: 30000 });
+try {
+  await page.waitForSelector('.sw-vsel', { timeout: 15000 });
+} catch {
+  await page.click('[data-act=sp]');          // 重按（首点可能被开场动画吃掉）
+  await page.waitForSelector('.sw-vsel', { timeout: 45000 });
+}
 await new Promise((r) => setTimeout(r, 600));
 if (!(await page.$('.sw-vsel .sw-vitem'))) {
   await page.click('.sw-vsel [data-act=new]');
@@ -111,9 +116,17 @@ const out = await page.evaluate(async () => {
   const s0 = g.entities.projectiles.find((q) => !q.dead && q.projId === 908);
   let moved = false;
   if (s0) {
+    // ★轨道周期=10t(angle 速率 6/60×2π)——端点距在整数圈窗共振归零,
+    //   改采窗口内最大位移
+    let maxD = 0;
     const p0 = { x: s0.cx, y: s0.cy };
-    for (let i = 0; i < 20; i++) g.fixedUpdate(1 / 60);
-    moved = Math.hypot(s0.cx - p0.x, s0.cy - p0.y) > 4;
+    for (let i = 0; i < 23; i++) {
+      g.fixedUpdate(1 / 60);
+      const d = Math.hypot(s0.cx - p0.x, s0.cy - p0.y);
+      if (d > maxD) maxD = d;
+    }
+    moved = maxD > 8 && !s0.dead;
+    R.dbg.c1 = { maxD: +maxD.toFixed(1), alive: !s0.dead };
   }
   ck('(c1) 碎片环绕动画(位置随 tick 变化)', moved, `moved=${moved}`);
 

@@ -8,7 +8,7 @@ type EnemyCtor = (typeof import('./Enemy'))['Enemy'];
 
 let enemyCtor: EnemyCtor | null = null;
 
-/** Enemy.ts / TownNPC.ts 模块尾回填各自构造器 */
+/** Enemy.ts 模块尾回填(唯一绑定方;TownNPC extends Entity 根本不适配单槽注册表) */
 export function bindEnemyCtor(c: EnemyCtor): void { enemyCtor = c; }
 
 /** bossAI 侧生成代理消费口（spawnPart/spawnVanillaEnemy/spawnWormChainFor） */

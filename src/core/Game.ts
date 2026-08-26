@@ -12197,12 +12197,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  t > dur−16（条件反相）——起始帧 t=dur 恰落在吞窗内=第一发就被吞+mouseDown
         //  被消费,autoReuse 再按也被门吃=「挥动没有任何效果」用户实报根因。
         //  门在扣魔【前】,停发 tick 不耗蓝;先于下方 CheckMana 段）
-        if (TAIL_SILENCE_WIN[critVid] !== undefined) {
+        if (this.swing && TAIL_SILENCE_WIN[critVid] !== undefined) {
           // 停发窗族（Player.cs:43847 同式族）：3852 书杖/4952 夜光书 ×4、6152 ×4
           //（4956/5669 ×3=zenith cycle≤2 帽已接、4953 ×5=定数 5 连发已接）
-          const swT0 = this.swing?.t ?? 0, swDur0 = this.swing?.dur ?? 40;
+          // ★窗仅存在于动画存活期（原版 flag=itemAnimation < max−win,归零即出窗）
+          //  ——曾无 this.swing 门:swing 归零(null)后 swT0=0<win 恒真,按住期间
+          //  永久吞施法=法杖放下不回举（2026-08-25 用户实报连发瞬态）
+          const swT0 = this.swing.t, swDur0 = this.swing.dur;
           const win = TAIL_SILENCE_WIN[critVid] * (cw.useTime || 4);
-          if (swDur0 > 0 && swT0 < swDur0 - win) {
+          // ★swT0>1:t≤1=动画已尽/autoReuse 保活钉——放行重施（原版 itemAnimation
+          //  归零同帧重施,0 态不停留）
+          if (swT0 > 1 && swT0 < swDur0 - win) {
             this.player.useTime = cw.useTime || 4;
             this.input.mouseDown = false;
             break;
@@ -19816,7 +19821,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private updateSwingHits() {
     if (!this.swing) return;
     this.swing.t--;
-    if (this.swing.t <= 0) { this.swing = null; return; }
+    if (this.swing.t <= 0) {
+      // ★autoReuse 按住保活（2026-08-25 用户实报法杖连发"放下→闪回"瞬态）：
+      //  本仓 updateUse(施法)/postUpdate(递减) 分相——归零帧渲染=武器消失一帧。
+      //  原版 ItemCheck 递减+autoReuse 重施同段无 0 帧。钉 t=1 保活一帧,
+      //  下一 updateUse 重施刷新（停发窗以 swT0>1 放行 t≤1 重施）
+      const held = this.player.inv.heldItem();
+      const au = held ? itemCombat(held.vid ?? viIdFromKey(held.key))?.autoReuse : false;
+      if (au && this.input.mouseHeld && !this.annotateMode) { this.swing.t = 1; return; }
+      this.swing = null;
+      return;
+    }
     // 天顶剑族动画内续发（Player.cs:42880 flag4 = itemAnimation>0 && ItemTimeIsZero
     // + :42818 的 3*useTime flag 门）：每越 useTime 边界射一发（num164=1/2——首发
     // num164=0 已在挥击开始时射出）。挂在 updateSwingHits（无输入门）而非 updateUse：

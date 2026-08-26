@@ -38,9 +38,10 @@ export interface ArmorSetBonus {
 export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   // 钛金 (1215|1216|1217 头 ×1218 胸 ×1219 腿,ArmorSetBonuses.cs:461-463)：
   // on-hit 钛金屏障（Player.cs:6927-6936 cooldown10+buff306 600t+碎片908≤7）
-  '1215|1218|1219': { titaniumStorm: true, name: 'Titanium' },
-  '1216|1218|1219': { titaniumStorm: true, name: 'Titanium' },
-  '1217|1218|1219': { titaniumStorm: true, name: 'Titanium' },
+  '89|56|51': { titaniumStorm: true, name: 'Titanium' },    // Mask(headSlot 89)
+  '90|56|51': { titaniumStorm: true, name: 'Titanium' },    // Helmet(90)
+  '91|56|51': { titaniumStorm: true, name: 'Titanium' },    // Headgear(91)
+  // （键=armorSlot 值:headSlot 89/90/91|bodySlot 56|legSlot 51——Item.cs case 1215-1219）
   // 金属一档（铜 1,1,1 / 铁(72|2),2,2 / 铅 47,28,27——木套 1.4.5 无加成）：防 +2
   '1|1|1': { def: 2, name: 'MetalTier1' },
   '72|2|2': { def: 2, name: 'MetalTier1' },

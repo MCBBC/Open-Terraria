@@ -45,7 +45,6 @@ function serverBase(addr: string): { httpBase: string; wsBase: string } | null {
 
 export class MultiplayerSelect {
   root: HTMLElement;
-  private serverInput: HTMLInputElement;
   private roomList = el('div');
   private codeInput: HTMLInputElement;
   private createName: HTMLInputElement;
@@ -93,17 +92,13 @@ export class MultiplayerSelect {
       }
     });
 
-    // ---- 服务器地址 ----
+    // ---- 刷新房间(2026-08-25 用户要求:不再暴露服务器地址——lobby 固定 DEFAULT_SERVER;
+    //      连不上时房间列表为空,不报错) ----
     const srvRow = el('div');
     srvRow.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:10px;';
-    this.serverInput = el('input') as HTMLInputElement;
-    this.serverInput.value = DEFAULT_SERVER;
-    this.serverInput.placeholder = T('ServerAddr');
-    this.serverInput.style.cssText = 'flex:1; padding:8px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
     const srvBtn = el('button', 'sw-btn', T('Refresh')) as HTMLButtonElement;
     srvBtn.style.cssText = 'width:auto; margin:0; padding:8px 12px; flex:none;';
     srvBtn.onclick = () => void this.refreshRooms();
-    srvRow.appendChild(this.serverInput);
     srvRow.appendChild(srvBtn);
     this.root.appendChild(srvRow);
 
@@ -192,13 +187,13 @@ export class MultiplayerSelect {
   // ================= 加入 =================
 
   private joinUrl(code: string, token = ''): string | null {
-    const base = serverBase(this.serverInput.value);
+    const base = serverBase(DEFAULT_SERVER);
     if (!base) { this.status(this.roomList, T('BadAddr'), '#ff6b6b'); return null; }
     return token ? `${base.wsBase}/${code}?token=${encodeURIComponent(token)}` : `${base.wsBase}/${code}`;
   }
 
   private async refreshRooms() {
-    const base = serverBase(this.serverInput.value);
+    const base = serverBase(DEFAULT_SERVER);
     if (!base) { this.status(this.roomList, T('BadAddr'), '#ff6b6b'); return; }
     this.status(this.roomList, T('Fetching'));
     try {
@@ -229,14 +224,15 @@ export class MultiplayerSelect {
         this.roomList.appendChild(item);
       }
     } catch {
-      this.status(this.roomList, T('ConnectFail'), '#ff6b6b');
+      // ★连不上=列表为空(2026-08-25 用户要求:不报错不暴露服务器细节)
+      this.status(this.roomList, T('NoRooms'));
     }
   }
 
   private async joinByCode() {
     const code = this.codeInput.value.trim();
     if (!/^\d{6}$/.test(code)) { this.status(this.roomList, T('BadCode'), '#ff6b6b'); return; }
-    const base = serverBase(this.serverInput.value);
+    const base = serverBase(DEFAULT_SERVER);
     if (!base) { this.status(this.roomList, T('BadAddr'), '#ff6b6b'); return; }
     this.status(this.roomList, T('Checking', code));
     try {
@@ -252,7 +248,7 @@ export class MultiplayerSelect {
   // ================= 建房 =================
 
   private async createRoom(btn: HTMLButtonElement) {
-    const base = serverBase(this.serverInput.value);
+    const base = serverBase(DEFAULT_SERVER);
     if (!base) { this.status(this.createdInfo, T('BadAddr'), '#ff6b6b'); return; }
     const id = parseInt(this.saveSel.value, 10);
     const sv = this.saves.find((x) => x.id === id);

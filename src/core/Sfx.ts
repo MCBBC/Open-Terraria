@@ -316,7 +316,11 @@ export const PITCH_CASE: Record<string, [number, number] | null> = (() => {
   m.Item_153 = [-15, 15];    // :625 ×0.003
   m.Item_156 = [-10, 10];    // :628 ×0.002
   m.Item_169 = [-86, -74];   // :643-645 默认档后 Pitch -= 0.8
-  m.Item_26 = null; m.Item_35 = null; m.Item_47 = null;   // :638-642 Pitch=Main.musicPitch(乐器直传不随机)
+  m.Item_26 = null; m.Item_47 = null;   // :638-642 Pitch=Main.musicPitch(乐器直传不随机)
+  // Item_35 双语义:乐器(铃507,显式 musicPitch 直传跳本表,Game.ts:9629)=null 语义;
+  // 但 BellHurt/BalloonHurt 族=WithPitchVariance(0.4f)(SoundID.cs:1140)→半幅 ±0.20
+  // (2026-08-26 审计补)。消费面核验:铃走显式 pitch 跳过本表,受击/宠物侧无显式=吃档 ✓
+  m.Item_35 = [-20, 20];
   // 鼓槌十档(LegacySoundPlayer.cs:1237-1248 case53-62→Item_139..148):数字型支无 Pitch
   // 赋值(仅 ×0.7 音量)——2026-08-25 音频对账收口,勿吃 case2 默认 ±0.06 抖动
   for (let d = 139; d <= 148; d++) m[`Item_${d}`] = null;
