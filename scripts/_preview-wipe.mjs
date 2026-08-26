@@ -24,15 +24,37 @@ const out = await page.evaluate(async () => {
   const W = 640, H = 180;
   const mk = (r, g, b) => { const a = new Uint8ClampedArray(W * H * 4); for (let i = 0; i < a.length; i += 4) { a[i] = r; a[i + 1] = g; a[i + 2] = b; a[i + 3] = 255; } return a; };
   const isNewColor = (d, x) => d[x * 4] === 0 && d[x * 4 + 1] === 200;   // 新帧绿色
+  const isYel = (c) => c && c.r > 230 && c.g > 180 && c.b < 160;          // 指示线
   const p = new GenWorldPreview();
   p.setPreviewFrame(mk(255, 255, 255), W, H);      // 白首帧
   p.setPreviewFrame(mk(255, 255, 255), W, H);      // 同尺寸第二帧（走 wipe 常规路径）
+  p.recalculate();                                  // 独立实例：默认 provider=全屏逻辑尺寸
+  const D = p.getDimensions();
+  const rects = [];                                 // 每次 drawSelf 的黄色 fillRect 记录
+  const fakeBatch = {
+    draw() {}, fillRect(x, y, w, h, c) { if (isYel(c)) rects.push({ x, y, w, h }); },
+  };
   const edges = [];   // 每模拟帧左起新色像素数（未到=0，全过=W）
+  let yellowAtMidwipe = false, yellowMatchesEdge = false, bufCleanAtEdge = true;
   for (let f = 0; f < 140; f++) {
     if (f === 40) p.setPreviewFrame(mk(0, 200, 0), W, H);   // 绿帧注入
     p.update();                                     // 元素 update = 每渲染帧一次
+    const before = rects.length;
+    p.drawSelf(fakeBatch);
+    const frac = p.revealX / W;
+    const active = frac > 0 && frac < 1;
+    const ys = rects.slice(before);
+    if (active && ys.length >= 2 && ys.some((r) => r.w <= 3)) {   // 光晕+主线都有
+      yellowAtMidwipe = true;
+      const ex = D.x + D.width * frac;
+      const main = ys.find((r) => r.w <= 3);
+      if (Math.abs(main.x + main.w / 2 - ex) <= 3) yellowMatchesEdge = true;
+    }
+    if (!active && ys.length > 0) console.log('意外：非揭示期出现指示线', JSON.stringify(ys));
     const d = p.showCtx.getImageData(0, 0, W, 1).data;
     let e = 0; while (e < W && isNewColor(d, e)) e++;
+    // 前沿像素本身必须还是纯净新帧色（线只画显示层，不写入缓冲）
+    if (e > 0 && e < W && !(isNewColor(d, Math.max(0, e - 1)))) bufCleanAtEdge = false;
     edges.push(e);
     await new Promise((r) => setTimeout(r, 16));    // ≈60Hz
   }
@@ -45,10 +67,15 @@ const out = await page.evaluate(async () => {
     finalFull: after[after.length - 1] === W,
     doneAfterNFrames: after.findIndex((e) => e === W),   // 相对注入点；wipe≈72 帧
     sampleIdx: [0, 20, 39, 50, 70, 90, 110, 139].map((i) => edges[i]),
+    yellowSeenWhileWiping: yellowAtMidwipe,
+    yellowTracksFrontier: yellowMatchesEdge,
+    frameBufferClean: bufCleanAtEdge,
+    dims: { x: D.x, y: D.y, w: D.width, h: D.height },
   };
 });
 console.log(JSON.stringify(out, null, 2));
-const ok = out.beforeAllZero && out.monotonicL2R && out.finalFull;
+const ok = out.beforeAllZero && out.monotonicL2R && out.finalFull
+  && out.yellowSeenWhileWiping && out.yellowTracksFrontier && out.frameBufferClean;
 console.log(ok ? 'PASS: 黑色新帧从左到右单调刷过并铺满' : 'FAIL');
 if (errors.length) console.log('pageerrors:', errors.slice(0, 3));
 await browser.close();

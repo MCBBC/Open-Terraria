@@ -232,15 +232,17 @@ export const MONOLITH_FILTER_AUDIT: readonly FilterAuditRow[] = [
       + '非仅视区）；EffectPriority.VeryHigh → 合成序在 Medium 柱族之后。canvas 同款径向紫晕近似',
   },
   {
-    key: 'Sepia', pass: 'FilterSepia', disasm: ':176-247', glExact: false,
-    note: '未端口：DSTNoise 采样+HSV(max/min 饱和度链)+vignette(radial 1.1 系数)+双 lerp，'
-      + '~40 指令；C# 侧参数链(SepiaScreenShaderData.Update)已 1:1（sepiaParams），'
-      + 'canvas 近似=亮度棕调+progress 染色',
+    key: 'Sepia', pass: 'FilterSepia', disasm: ':176-247', glExact: true,
+    note: '★shader 修齐批终口已端口（GLScreenFilters FRAG_SEPIA）：DSTNoise² 门选+亮度'
+      + 'HSV 饱和度链（c11.yzx 权重,四倍斜率 sat）+uColor 1/3 调色+第二 vibrance'
+      + '(uProgress)+径向 vignette(1.1)+双 lerp；def 常量逐值照抄（c11-c14）,'
+      + 'c11 域 swizzle 组合按 CRYSTAL_VORTEX「掩码近似」先例备案',
   },
   {
-    key: 'Noir', pass: 'FilterNoir', disasm: ':248-341', glExact: false,
-    note: '未端口：exp/log 胶片颗粒(19.83/32/1024 系数族)+NoirNoise(PointWrap)+去饱和，'
-      + '~35 指令；canvas 近似=grayscale+程序化噪点 overlay',
+    key: 'Noir', pass: 'FilterNoir', disasm: ':248-341', glExact: true,
+    note: '★shader 修齐批终口已端口（GLScreenFilters FRAG_NOIR）：exp/log 胶片颗粒'
+      + 'hash(19.83/32/1024 族)→NoirNoise(s1,PointWrap→NEAREST) 门选+亮度去饱和'
+      + '(c11 三权)+c12/c13 三次多项式对比+径向压暗；uTime 滚动颗粒',
   },
 ];
 

@@ -44,6 +44,7 @@ await page.click('[data-act=create]');   // 进 UIWorldLoadState
 
 // 加载期采样底部预览带（等比缩放后位于底部居中），哈希去重计变化
 const hashes = new Set();
+const SHOTS = process.env.SAVE_SHOTS ?? '';   // 设为目录路径时保存前几张中间态截图
 let ingame = false;
 for (let i = 0; i < 400; i++) {
   ingame = await page.evaluate(() => !!(window.__swGame && window.__swGame.player));
@@ -52,6 +53,7 @@ for (let i = 0; i < 400; i++) {
   let h = 7;
   for (let j = 0; j < buf.length; j += 97) h = ((h * 31) + buf[j]) & 0xffffff;   // 抽样 FNV
   hashes.add(h);
+  if (SHOTS && [4, 12, 24].includes(i)) await import('node:fs').then((fs) => fs.writeFileSync(`${SHOTS}/load-${i}.png`, buf));
   await new Promise((r) => setTimeout(r, 150));
 }
 console.log(JSON.stringify({

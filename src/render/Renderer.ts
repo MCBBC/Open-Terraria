@@ -437,7 +437,7 @@ import {
   shieldHaloFactor, shieldParryTransform,
   FACE_UNDER_HAIR, FACE_MASK_LAYER, FACE_FLOWER_LAYER, FACE_HEAD_LAYER,
 } from '../data/vanillaAccDrawslots';
-import { defaultUniforms, getPass, runPassOnImageData, sampleImageData, type SM2Uniforms } from '../fx/SM2Effect';
+import { defaultUniforms, getPass, runPassOnImageData, sampleImageData, type SM2Sampler, type SM2Uniforms } from '../fx/SM2Effect';
 import { drawStardewAnimation } from '../fx/StardewAnimation';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
@@ -7014,11 +7014,98 @@ export class Renderer {
     });
     // 几何(cols/rows/cell/inflateY)查 NPC_GRIDS 单一真源(重制管线共用)
     const g = NPC_GRIDS[657]!;
-    this.drawQueenSlimeExtras(e, idx, half);
+    // ★shader 修齐收口：QueenSlime pass 全幅洗染（Main.cs:23964/23989/23996 三 Apply
+    //   ——洗染对象=NPC_657 表切片(残影 ghost 环+value19 发光叠绘),本体 batch 素绘、
+    //   水晶核(Extra_186)在 reset 后素绘。当前帧 cell 逐像素过 SM2 pass
+    //   （t0=表 UV 域 uSourceRect/uImageSize0;s1/s2=Extra_180/179 渐变噪声））
+    const washed = this.queenSlimeWashedCell(e, img, g, idx);
+    this.drawQueenSlimeExtras(e, idx, half, washed);
     this.drawNpcGrid(e, img, g.cols, g.rows, idx, g.cellW, g.cellH, {
       perRow: g.perRow, yOff: 2, inflateY: g.inflateY, mirrorTexFaces: 'right', rotate: e.spin,
     });
+    // value19 发光叠绘：洗染 cell 以 Bottom+2 锚、origin 底心、XOR 镜像再绘一遍
+    // （GetAlpha(color19)≈白×Opacity → globalAlpha=opacity）
+    if (washed) {
+      const ctx = this.ctx;
+      const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+      if (opacity > 0) {
+        const sw2 = g.cellW, sh2 = g.cellH - (g.inflateY ?? 0);
+        const mirrored = e.facing <= 0;                    // mirrorTexFaces:'right' 同式
+        ctx.save();
+        ctx.translate(e.cx, e.y + e.h + 2);
+        if (e.spin) ctx.rotate(e.spin);
+        ctx.scale((mirrored ? -1 : 1), 1);
+        ctx.globalAlpha = opacity;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(washed, -sw2 / 2, -sh2, sw2, sh2);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+    }
     this.drawQueenSlimeCrown(e, idx);
+  }
+
+  /** ★修齐批终口：当前帧 cell 的 QueenSlime pass 洗染（离屏栅格化→SM2 解释器→
+   *  回贴）。t0=表 UV 域（uSourceRect=[sx,sy,w,h]/uImageSize0=表尺寸——径向/
+   *  swirl 数学在表空间展开,同 vanilla SpriteBatch 贴图 UV 语义）;s1/s2=
+   *  Extra_180/179 渐变噪声（wrap 采样）。失败（解释器/资产未就绪）返回 null,
+   *  调用方回退素绘。 */
+  private qsNoisePix: Record<string, { w: number; h: number; data: Uint8ClampedArray }> = {};
+  private queenSlimeWashedCell(
+    e: Enemy, img: ImageBitmap | HTMLImageElement,
+    g: { cellW: number; cellH: number; perRow?: number; inflateY?: number },
+    idx: number,
+  ): HTMLCanvasElement | null {
+    if (!this.atlas) return null;
+    const perRow = g.perRow ?? 16;
+    const col = Math.floor(idx / perRow), row = idx % perRow;
+    let sx = col * g.cellW, sy = row * g.cellH + ((g.inflateY ?? 0) >> 1);
+    let sw = g.cellW, sh = g.cellH - (g.inflateY ?? 0);
+    sx = Math.max(0, Math.min(sx, img.width - 1));
+    sy = Math.max(0, Math.min(sy, img.height - 1));
+    sw = Math.max(1, Math.min(sw, img.width - sx));
+    sh = Math.max(1, Math.min(sh, img.height - sy));
+    try {
+      const pass = getPass('QueenSlime');
+      if (!pass) return null;
+      const cv0 = document.createElement('canvas');
+      cv0.width = sw; cv0.height = sh;
+      const c0 = cv0.getContext('2d', { willReadFrequently: true });
+      if (!c0) return null;
+      c0.drawImage(img as CanvasImageSource, sx, sy, sw, sh, 0, 0, sw, sh);
+      const im = c0.getImageData(0, 0, sw, sh);
+      // Extra_180/179 渐变噪声采样器（wrap;像素缓存）
+      const mkSampler = (file: string): SM2Sampler | undefined => {
+        let px = this.qsNoisePix[file];
+        if (!px) {
+          const nimg = this.atlas!.ensureVImage(`vanilla/${file}.png`);
+          if (!nimg || !(nimg.width > 0)) return undefined;
+          const nc = document.createElement('canvas');
+          nc.width = nimg.width; nc.height = nimg.height;
+          const ncx = nc.getContext('2d', { willReadFrequently: true })!;
+          ncx.drawImage(nimg as CanvasImageSource, 0, 0);
+          px = { w: nc.width, h: nc.height, data: ncx.getImageData(0, 0, nc.width, nc.height).data };
+          this.qsNoisePix[file] = px;
+        }
+        return (uu, vv) => {
+          const u2 = uu - Math.floor(uu), v2 = vv - Math.floor(vv);
+          const x = Math.min(px.w - 1, (u2 * px.w) | 0), y = Math.min(px.h - 1, (v2 * px.h) | 0);
+          const o = (y * px.w + x) * 4;
+          return [px.data[o] / 255, px.data[o + 1] / 255, px.data[o + 2] / 255, px.data[o + 3] / 255];
+        };
+      };
+      const s1 = mkSampler('Extra_180'), s2 = mkSampler('Extra_179');
+      const u = defaultUniforms();
+      u.uTime = (performance.now() / 1000) % 3600;
+      u.uSourceRect = [sx, sy, sw, sh];
+      u.uImageSize0 = [img.width, img.height];
+      u.uColor = [1, 1, 1]; u.uOpacity = 1; u.uSaturation = 1;
+      runPassOnImageData(pass, im.data, sw, sh, u, [s1, s2]);
+      c0.putImageData(im, 0, 0);
+      return cv0;
+    } catch {
+      return null;                                          // 回退素绘
+    }
   }
 
   /** 657 附属层（Main.cs case 657 :23938-23963 + DrawNPCDirect_QueenSlimeWings :22691-22717，
@@ -7029,11 +7116,12 @@ export class Renderer {
    *  ② 残影（ai0==4 && vy≠0，:23969-23986）：oldPos[0..7]+(w/2,h) 底心向当前 Bottom 收拢
    *     (Bottom−ghost)×0.25×num102（ai2==1 坠相 ×6），alpha=(1−k/8)，XOR 翻转；
    *  ③ 水晶核 Extra_186：Center+(0,Y 偏移表[:23950-23986]) 绕 Bottom 旋转、origin 心。
-   *  ★QueenSlime shader 近似（DyeInitializer.cs:434-436 绑定 pixelShader+Extra_180/179
-   *  渐变噪声）：水晶/残影按时间在蓝(0,160,255)↔粉(255,80,255)=GetDustColor(:45612)
-   *  调色族间循环染色，色桶量化 8 步进复用 tintAtlas 缓存；本体全幅 shader 洗染未建模
-   *  （登记近似——本体保持光照管线路径）。 */
-  private drawQueenSlimeExtras(e: Enemy, idx: number, half: boolean): void {
+   *  ★shader 修齐收口（终态）：vanilla 洗染对象=NPC_657 表切片——残影(Apply 门内
+   *  :23964-23972)+value19 发光叠绘(:23989-23996 GetAlpha) 经 SM2 QueenSlime pass
+   *  （washed cell 由 queenSlimeWashedCell 逐帧产出,t0=表 UV 域,s1/s2=Extra_180/179）；
+   *  水晶核=reset 后素绘（循环染色近似退役）。Extra_185 老翅表示与 1458 NPC 表
+   *  Frame(2,16) 切片的分域差异维持登记（非 shader 面）。 */
+  private drawQueenSlimeExtras(e: Enemy, idx: number, half: boolean, washed?: HTMLCanvasElement | null): void {
     const ctx = this.ctx;
     if (!ctx || !this.atlas) return;
     const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
@@ -7088,6 +7176,8 @@ export class Renderer {
         const num102 = e.ai2 === 1 ? 6 : 1;
         const depth = e.historyDepth();
         ctx.imageSmoothingEnabled = false;
+        // ★修齐收口：残影=Apply 门内 value17 切片（Main.cs:23964-23972）——
+        //   洗染 cell 就绪用之,否则回退素切片
         for (let k = 7; k >= 0; k--) {
           if (k >= depth) continue;
           const bx = e.histXAt(k) + e.w * 0.5, by = e.histYAt(k) + e.h;
@@ -7098,7 +7188,8 @@ export class Renderer {
           ctx.rotate(spin);
           ctx.scale(e.facing > 0 ? -1 : 1, 1);   // XOR FlipHorizontally（与本体反向）
           ctx.globalAlpha = Math.max(0, 1 - k / 8) * opacity;
-          ctx.drawImage(bodyImg as CanvasImageSource, sx, sy, sw, sh, -sw / 2, -sh, sw, sh);
+          if (washed) ctx.drawImage(washed, -sw / 2, -sh, sw, sh);
+          else ctx.drawImage(bodyImg as CanvasImageSource, sx, sy, sw, sh, -sw / 2, -sh, sw, sh);
           ctx.restore();
         }
         ctx.globalAlpha = 1;
@@ -7107,8 +7198,8 @@ export class Renderer {
     // ③ 水晶核（shader 循环染色近似）
     const crystal = this.atlas.ensureVImage('vanilla/Extra_186.png');
     if (crystal) {
-      const tinted = this.tintedSprite(`qs186|${Math.floor(((tSec % 8) + 8) % 8)}`,
-        { img: crystal as CanvasImageSource, sx: 0, sy: 0, sw: crystal.width, sh: crystal.height }, tint);
+      // ★shader 修齐收口：水晶核=reset 后素绘（vanilla :23973-23975 pass reset 后
+      //   Draw value18 无 shader）——8 步循环染色近似退役
       let px = e.cx, py = e.cy + (QUEEN_SLIME_CORE_Y_OFF[idx] ?? 0);
       [px, py] = rotAboutBottom(px, py);
       ctx.save();
@@ -7116,8 +7207,7 @@ export class Renderer {
       ctx.rotate(spin);
       ctx.globalAlpha = opacity;
       ctx.imageSmoothingEnabled = false;
-      if (tinted) ctx.drawImage(tinted.c, -crystal.width / 2, -crystal.height / 2, crystal.width, crystal.height);
-      else ctx.drawImage(crystal as CanvasImageSource, -crystal.width / 2, -crystal.height / 2);
+      ctx.drawImage(crystal as CanvasImageSource, -crystal.width / 2, -crystal.height / 2);
       ctx.restore();
       ctx.globalAlpha = 1;
     }
@@ -12378,9 +12468,20 @@ export class Renderer {
           case 'crt':
             passes.push({ kind: 'FilterCRT', screenH: screenRes[1], zoom: z, opacity: f.opacity });
             break;
+          // ★shader 修齐批终口：Sepia/Noir glExact 落地（FilterSepia :176-247/
+          //   FilterNoir :248-341 逐指令直译 frag,详见 GLScreenFilters FRAG_SEPIA/
+          //   FRAG_NOIR 头注;参数源=SepiaScreenShaderData.Update 链 mono.sepia）
+          case 'sepia':
+            passes.push({ kind: 'FilterSepia', color: mono.sepia.color,
+              intensity: mono.sepia.intensity, progress: mono.sepia.progress,
+              opacity: f.opacity });
+            break;
+          case 'noir':
+            passes.push({ kind: 'FilterNoir', opacity: f.opacity,
+              time: (performance.now() / 1000) % 3600 });
+            break;
           default:
-            break;   // moonLord/sepia/noir 未入 GL 端口(审计登记;moonLord 在 GL 链
-                     // 上方补画见下,sepia/noir 需读源像素维持跳过)
+            break;   // moonLord 未入 GL 端口(在 GL 链上方补画见下)
         }
       }
       if (passes.length > 0 && gl.drawChain(this.canvas, passes,

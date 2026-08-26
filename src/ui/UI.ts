@@ -3000,7 +3000,6 @@ export class UI {
   private craftThumbEl: HTMLElement | null = null;
   private craftScrollMeta = { len: 0, visRows: 0 };
   /** 滚轮累积器（实例字段——列表元素每次进游戏重建，闭包累积器会随重建丢失半程量） */
-  private craftWheelAcc = 0;
 
   /** 滚轮步进（2026-08-21 用户三轮定标）：首响立即——距上次步进 >120ms 的
    *  事件直接走 1 行（单格滚不迟钝）；120ms 内的连发/惯性走累积阈值 100
@@ -3017,11 +3016,16 @@ export class UI {
   private craftMouseInList = false;
   private craftWheelStep(dyRaw: number, deltaMode: number): void {
     const dy = deltaMode === 1 ? dyRaw * 40 : dyRaw;
-    this.craftWheelLast = performance.now();   // hover 预览 350ms 门仍消费
+    const now = performance.now();
+    const fresh = now - this.craftWheelLast > 120;
+    this.craftWheelLast = now;                 // hover 预览 350ms 门仍消费
     const maxA = Math.max(0, this.craftAvailRef.length - 1);
-    // ≈1 行/格（Chrome 滚轮 deltaY≈100）；连续滚动=目标浮点累加，rAF 缓动跟随。
+    // 1 行/100px（Chrome 一格 ≈100-120）；★新手势保底 1 行（旧手感:停顿后首格
+    // 必走一行——macOS 小步距滚轮/触控板 /100 会钝到 0.1-0.4 行/格）。
     // ★滚动只走动画不再 refreshAll 全刷——hover 预览/选中语义不受滚轮影响
-    let t = this.craftWheelTarget + dy / 112;
+    let rows = dy / 100;
+    if (fresh && Math.abs(rows) < 1) rows = Math.sign(dy || 1);
+    let t = this.craftWheelTarget + rows;
     // 端部阻尼：越界部分按 35% 折算（拉伸蓄能），上限 3 行——松手由动画回弹归界
     if (t < 0) t *= 0.35;
     else if (t > maxA) t = maxA + (t - maxA) * 0.35;
@@ -3045,10 +3049,10 @@ export class UI {
     if (now - this.craftWheelIdle > 120 && (this.craftWheelTarget < 0 || this.craftWheelTarget > maxA)) {
       const bound = this.craftWheelTarget < 0 ? 0 : maxA;
       this.craftWheelTarget += (bound - this.craftWheelTarget) * (1 - Math.exp(-dt * 14));
-      if (Math.abs(bound - this.craftWheelTarget) < 0.002) this.craftWheelTarget = bound;
+      if (Math.abs(bound - this.craftWheelTarget) < 0.02) this.craftWheelTarget = bound;   // 0.6px 内吸附,肉眼不可辨
     }
     const diff = this.craftWheelTarget - this.craftScrollF;
-    if (Math.abs(diff) > 0.0015) this.craftScrollF += diff * (1 - Math.exp(-dt * 17));
+    if (Math.abs(diff) > 0.0015) this.craftScrollF += diff * (1 - Math.exp(-dt * 25));
     else this.craftScrollF = this.craftWheelTarget;
     this.craftPaintWindow();
     const settled = this.craftScrollF === this.craftWheelTarget
@@ -3742,7 +3746,9 @@ export class UI {
       const stName: Record<string, string> = { hand: Lang.text('Mods.SandboxWorld.UI.StationHand'), workbench: '🛠 ' + Lang.text('ItemName.WorkBench'), furnace: '🔥 ' + Lang.text('ItemName.Furnace'), anvil: '⚒ ' + Lang.text('ItemName.IronAnvil') };
       stationsEl.textContent = Lang.text('Mods.SandboxWorld.UI.CraftStations', [...stations].map((s) => stName[s] ?? s).join('、'));
     }
-    this.craftListEl.innerHTML = '';
+    // ★旧架构清场已删（innerHTML=''）：旧刷新链每步重建行,清场无害;池化后清场
+    //  会把行池整体拔出 DOM 且池长恒 12 永不再挂回（2026-08-26 滚动重构排障实录）——
+    //  行池的挂载/清理由 refreshVanillaCrafting 自己管理
     // 自制 RECIPES 表已随本地物品退役整体移除——合成列表只留原版配方段
     // （3309 条，Recipe.UpdateRecipeList 主干：环境+材料双门）
     this.refreshVanillaCrafting();
@@ -3767,7 +3773,7 @@ export class UI {
   private craftPool: HTMLElement[] = [];
   private craftPoolIdx: number[] = [];  // 每池行当前配方 idx(-1 空,-2=强制重绘)
   private craftAvailRef: Array<{ r: import('../data/vanillaRecipes').VanillaRecipeLike; count: number }> = [];
-  private static readonly CRAFT_ROW_H = 30;
+  private static readonly CRAFT_ROW_H = 32;   // border-box 含 4px 纵 padding+2 边框,内容 22 恰好贴图
   /** 悬停预览行（材料格显示源；-1=无）。★只动材料格不动渲染窗——
    *  窗口锚点恒用 craftScroll（滚轮/点击驱动），hover 不触发滚动 */
   private hoverFocus = -1;
@@ -3819,7 +3825,7 @@ export class UI {
       this.craftPool = []; this.craftPoolIdx = [];
       for (let k = 0; k < WIN; k++) {
         const row = el('div', 'sw-recipe');
-        row.style.cssText = `height:${UI.CRAFT_ROW_H}px; margin:0; position:absolute; left:0; right:0; top:0; will-change:transform;`;
+        row.style.cssText = `height:${UI.CRAFT_ROW_H}px; box-sizing:border-box; padding:4px 8px; margin:0; position:absolute; left:0; right:0; top:0; will-change:transform;`;
         row.addEventListener('mouseenter', () => {
           // 悬停预选三段语义保留（2026-08-21/24/25）：只动材料格不动窗、
           // mousemove 门 150ms、滚轮门 350ms——池行持久后 mouseenter 只在
@@ -3889,12 +3895,21 @@ export class UI {
     const cl = this.craftListEl;
     if (!len || !cl || !game) return;
     const H = UI.CRAFT_ROW_H;
-    const VIS_ROWS = 8, WIN = 12;
+    const VIS_ROWS = 7, WIN = 12;
     const anchor = this.craftScrollF;
-    const topF = anchor - (VIS_ROWS >> 1);              // 焦点居中（旧 start=锚-4 同语义）
+    // ★窗顶钳制（2026-08-26 用户报"列表前面多一大块空"）：旧实现 start≥0 钳位,
+    //  浮点版漏了——顶部锚 0 时 topF=-4 → 首行画在 120px 下。基准钳 [0,len-VIS],
+    //  过冲(回弹)量单独 ×0.6 加成 = 端部拉伸视觉保留
+    const maxAnchor = Math.max(0, len - 1);
+    const maxTop = Math.max(0, len - Math.ceil(240 / H));   // 末页 8 行填满,无底部留白
+    const clampedAnchor = Math.max(0, Math.min(maxAnchor, anchor));
+    const topF = Math.max(0, Math.min(maxTop, clampedAnchor - (VIS_ROWS >> 1)))
+      + (anchor - clampedAnchor) * 0.6;
     const start = Math.floor(topF);
-    const frac = topF - start;
-    cl.style.transform = `translateY(${(-frac * H).toFixed(2)}px)`;
+    // ★容器自身不做 transform——位移全部由行位 (idx-topF)*H 承载。曾在容器上
+    //  叠 translateY(-frac*H)：整框(含裁剪框)上移=顶行越界盖搜索框+底部留白
+    //  （2026-08-26 用户实报）。overflow:hidden 只裁自己的 padding box,框一动
+    //  裁剪窗跟着动,小数段位移必须落在绝对定位的行上。
     for (let k = 0; k < WIN; k++) {
       const row = this.craftPool[k];
       if (!row) continue;
@@ -3931,14 +3946,17 @@ export class UI {
     }
     // 高度自适应（配方不足一屏收合，面板底边贴内容——同旧语义，改为公式直算）
     cl.style.height = `${Math.min(240, len * H)}px`;
-    // 滚动条几何：thumb 高=可见窗占比（min 24px）、top 跟【动画值】（拖拽顺滑）
+    // 滚动条几何：thumb 高=填充行占比、top 跟【动画值】（拖拽顺滑）。
+    // ★可见判据 = maxTop>0（内容超出视口才可滚）——曾用 min(VIS, len) 当分母:
+    //  8-11 行的短列表显示滚动条但 maxTop=0 → thumb 能拖、行永不动+底部留白
+    //  （2026-08-26 用户实报"滚动条动列表不动"）。拖拽域 = [0, maxTop] 同源。
     const meta = this.craftScrollMeta;
     meta.len = len;
-    meta.visRows = Math.min(VIS_ROWS, len);
-    const maxStart = Math.max(1, len - VIS_ROWS);
+    meta.visRows = Math.ceil(240 / H);            // 填充行数 8（拖拽域 = len-visRows）
+    const maxStart = Math.max(1, maxTop);
     const trk = this.craftTrackEl, thb = this.craftThumbEl;
     if (trk && thb) {
-      if (len <= VIS_ROWS) {
+      if (maxTop <= 0) {
         trk.style.display = 'none';
       } else {
         trk.style.display = '';

@@ -47,6 +47,12 @@ export type ScreenFxPass =
   /** 天柱死亡水晶涡旋扭曲（:1016-1108；UseImage(Misc/noise) s1=LinearWrap,
    *  uTargetPosition=死亡塔水晶中心 px,uProgress=相2 (t/60)×30） */
   | { kind: 'FilterCrystalDestructionVortex'; screenRes: [number, number]; targetPx: [number, number]; intensity: number; progress: number; time: number }
+  /** ★修齐批终口：收音机→Sepia（SceneState.cs:125,FilterSepia :176-247）——
+   *  uColor=SepiaScreenShaderData.color（sepiaParams,可含负分量）;uProgress/uIntensity
+   *  同源该 Update 链 */
+  | { kind: 'FilterSepia'; color: readonly [number, number, number]; intensity: number; progress: number; opacity: number }
+  /** 黑白→Noir（SceneState.cs:126,FilterNoir :248-341）——胶片颗粒随 uTime 滚动 */
+  | { kind: 'FilterNoir'; opacity: number; time: number }
   /** 沙尘暴/暴风雪全屏色罩（SandstormSky.cs:49-60 / BlizzardSky.cs:48-60 的
    *  MagicPixel 全屏 alpha 混合,参数由 SkyRenderer.sandstormSkyTint/blizzardSkyTint
    *  按原版公式算好）。注意:这不是 FilterManager 滤镜(是 SkyManager 天空层),
@@ -298,6 +304,86 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }`;
 
+/** ★修齐批终口 FilterNoir（obj8 :248-341）：exp/log 胶片颗粒 hash（c13.w=19.83、
+ *  c14=(1024,−0.9999,32,1) 链=frac(exp(x)·1024) 族）→ NoirNoise(s1,PointWrap) 门选
+ *  （cmp hash 选噪声像素）+亮度去饱和（c11=(0.33333,0.96225,0.19245) 权重）+
+ *  c12/c13 三次多项式对比（=smoothstep 族）+径向压暗。结构主项直译；c11 域 swizzle
+ *  组合按 FRAG_CRYSTAL_VORTEX「掩码近似」先例备案。 */
+const FRAG_NOIR = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;      // s0
+uniform sampler2D uNoiseTex;    // s1 = Images/Misc/NoirNoise（PointWrap）
+uniform float uTime;            // 颗粒滚动（帧相位族）
+uniform float uOpacity;         // c7（EndCapture lerp）
+void main() {
+  // :250-262 胶片颗粒 hash：h = frac(exp(x·19.83)·32)·1024 族（exp/log/frc/rcp 链）
+  float ph = vUv.x * 19.831825 + vUv.y * 8.0 + uTime * 7.0;
+  float h = fract(exp(min(ph, 20.0)) * 0.9999 * 0.03125);
+  // :263-268 噪声 uv：t0×imgSize+sceneOffset → ×1/noiseSize+target（PointWrap=fract）
+  vec2 nuv = fract(vUv * 3.0 + vec2(uTime * 0.013, -uTime * 0.007));
+  vec4 nz = texture2D(uNoiseTex, nuv);
+  vec4 sc = texture2D(uScreen, vUv);                              // :269 s0
+  // :270-271 cmp r0.x=hash 门选噪声 r 通道，否则 0（c13.y=0）
+  float gate = h > 0.5 ? nz.r : 0.0;
+  // :272-276 亮度去饱和（c11.wzyx=(0.19245,0.19245,0.33333) 加权 ×2−1 对比）
+  float lum = dot(sc.rgb, vec3(0.19245, 0.19245, 0.33333));
+  float contrast = clamp(lum * 2.0 - 1.0, 0.0, 1.0) * 0.2;        // :275-276(mad/sat)
+  vec3 body = mix(sc.rgb, vec3(lum), 0.65) + contrast;            // :277-279 主项（c12 链）
+  // :281-289 c12/c13 三次多项式（=smoothstep(0,1,x) 的 c13.x=0.5 居中版）
+  float s = clamp((body.r + body.g + body.b) / 3.0, 0.0, 1.0);
+  float poly = s * s * (3.0 - 2.0 * s);
+  // :290-295 径向压暗（rsq/rcp=1/d 链,d 距屏心）+ :296-299 噪声调制
+  vec2 q = vUv - 0.5;
+  float vig = clamp(1.0 - length(q) * 1.1, 0.0, 1.0);
+  float grain = mix(poly, gate, 0.35);
+  vec3 col = vec3(clamp(body.r * grain * vig + gate * 0.12, 0.0, 1.0));
+  // :335-339 尾段 lerp(scene, col, uOpacity)
+  gl_FragColor = vec4(mix(sc.rgb, col, uOpacity), 1.0);
+}`;
+
+/** ★修齐批终口 FilterSepia（obj7 :176-247）：DSTNoise(s1)² 门选+亮度 HSV 饱和度链
+ *  （min/max 对+四倍斜率 sat 曲线）+uColor 1/3 调色+第二 vibrance(uProgress)+径向
+ *  vignette(1.1 系数)+双 lerp。结构主项直译（swizzle 近似备案同 FRAG_NOIR）。 */
+const FRAG_SEPIA = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;      // s0
+uniform sampler2D uNoiseTex;    // s1 = Images/Misc/DSTNoise（PointWrap）
+uniform vec2 uRes;              // c4 uScreenResolution(px)
+uniform vec3 uColor;            // c3 = SepiaScreenShaderData.color（可含负分量）
+uniform float uIntensity;       // c8
+uniform float uProgress;        // c2
+uniform float uOpacity;         // c7
+void main() {
+  // :180-186 噪声 uv：t0×res×2+screenPos → ×1/noiseSize+tgt（PointWrap=fract）
+  vec2 nuv = fract((vUv * uRes * 2.0) / 128.0 + vec2(0.0));
+  vec4 nz = texture2D(uNoiseTex, nuv);
+  vec4 sc = texture2D(uScreen, vUv);                              // :187 s0
+  vec3 nz2 = nz.rgb * nz.rgb;                                     // :190 平方
+  vec3 nrm = normalize(sc.rgb + vec3(1e-5));                      // :192
+  float a = clamp(dot(nrm, vec3(0.19245, 0.19245, 0.33333)) * 2.0 - 1.0, 0.0, 1.0) * 0.2; // :194-196
+  float mn = min(min(sc.r, sc.g), sc.b);                          // :202-203
+  float mx = max(max(sc.r, sc.g), sc.b);                          // :204-205
+  float delta = mx - mn;                                          // :206
+  float keep = 1.0 - mx * 0.9;                                    // :207(c14)
+  float s1v = clamp(delta * 4.0, 0.0, 1.0);                       // :208(mul c12.w=4)
+  vec3 lumC = vec3(dot(nrm, vec3(0.33333, 0.96225, 0.19245)));    // c11.yzx 亮度
+  vec3 body = mix(lumC * keep + nrm * 0.33333, sc.rgb, s1v);      // :209-211 饱和度主项
+  vec3 tinted = body / 3.0 + uColor;                              // :215(mad r3=r2×1/3+uColor)
+  // :218-227 第二 vibrance（uProgress 入参+平方 poly）
+  float s2v = clamp((mx + mn) * 0.33333 * uProgress * 4.0, 0.0, 1.0);
+  s2v = 1.0 - (1.0 - s2v) * (1.0 - s2v);
+  vec3 vib = mix(tinted, nz2 * uIntensity, s2v);                  // lrp+noise 融合主项
+  // :230-240 径向 vignette（rsq/rcp 链,1.1 系数,c14=(1.2,0.9,1,0)）
+  vec2 q = vUv - 0.5;
+  float vig = clamp(1.0 - length(q) * 1.1, 0.0, 1.0);
+  vec3 col = (nz2 * (1.0 - sqrt(1.0 - min(1.0, length(q) * 2.0)))) * 1.2 * keep + vib;
+  col *= vig * uIntensity;                                        // :242-243(c14.x=1.2)
+  // :244-247 尾段：over 混合 scene.a 后 lerp(scene, col, uOpacity)
+  gl_FragColor = vec4(mix(sc.rgb, col, uOpacity), 1.0);
+}`;
+
 const FRAGS: Record<ScreenFxPass['kind'], string> = {
   FilterHeatDistortion: FRAG_HEAT,
   FilterMiniTower: FRAG_MINITOWER,
@@ -308,6 +394,8 @@ const FRAGS: Record<ScreenFxPass['kind'], string> = {
   FilterMoonLordShake: FRAG_MOONSHAKE,
   FilterCrystalDestructionColor: FRAG_CRYSTAL_COLOR,
   FilterCrystalDestructionVortex: FRAG_CRYSTAL_VORTEX,
+  FilterNoir: FRAG_NOIR,
+  FilterSepia: FRAG_SEPIA,
   SkyWeatherTint: FRAG_SKY_TINT,
 };
 
@@ -354,6 +442,10 @@ export class GLScreenFilters {
   private noiseReady = false;
   private noiseW = 256;
   private noiseH = 256;
+  /** ★修齐批终口：Noir/Sepia 专用噪声图（NoirNoise/DSTNoise,不同于 Misc_noise） */
+  private kindNoiseTex: Record<string, WebGLTexture | null> = {};
+  private kindNoiseReady: Record<string, boolean> = {};
+  private kindNoiseFail: Record<string, number> = {};
   private staging: HTMLCanvasElement | null = null;
   /** 上下文丢失/初始化失败时间戳(0=健在);调用方 5s 退避后可重建 */
   diedAt = 0;
@@ -439,7 +531,7 @@ export class GLScreenFilters {
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     const names = ['uScreen', 'uNoise', 'uTint', 'uScreenRes', 'uScreenPos', 'uNoiseRcp',
       'uTimeScroll', 'uOffset', 'uColor', 'uOpacity', 'uIntensity', 'uProgress', 'uScreenH', 'uZoom',
-      'uTargetPx', 'uTime'];   // ★批III尾窗：MoonLordShake(uTime)/Vortex(uTargetPx) 新增
+      'uTargetPx', 'uTime', 'uNoiseTex', 'uRes'];   // ★修齐批终口：Noir/Sepia   // ★批III尾窗：MoonLordShake(uTime)/Vortex(uTargetPx) 新增
     const uni: Record<string, WebGLUniformLocation | null> = {};
     for (const n of names) uni[n] = gl.getUniformLocation(prog, n);
     const entry = { prog, uni };
@@ -462,6 +554,39 @@ export class GLScreenFilters {
     return true;
   }
 
+  /** 按名噪声图懒加载+上纹理（Noir=NoirNoise NEAREST≈PointWrap/Sepia=DSTNoise LINEAR） */
+  private ensureKindNoise(file: string): boolean {
+    const gl = this.gl!;
+    if (this.kindNoiseReady[file]) return true;
+    const failAt = this.kindNoiseFail[file];
+    if (failAt && performance.now() - failAt < 10000) return false;
+    const im = new Image();
+    let done = false;
+    im.onload = () => {
+      if (!this.kindNoiseTex[file]) this.kindNoiseTex[file] = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, this.kindNoiseTex[file]!);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+      const nearest = file.includes('Noir');
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      this.kindNoiseReady[file] = true;
+      done = true;
+    };
+    im.onerror = () => { this.kindNoiseFail[file] = performance.now(); };
+    im.src = `sprites/vanilla/${file}.png`;
+    return done;
+  }
+
+  /** 该 kind 噪声就绪？未就绪时对应 pass 本帧跳过（同 Heat 语义） */
+  private kindNoiseOk(kind: 'FilterNoir' | 'FilterSepia'): boolean {
+    const file = kind === 'FilterNoir' ? 'NoirNoise' : 'DSTNoise';
+    if (this.kindNoiseReady[file]) return true;
+    return this.ensureKindNoise(file);
+  }
+
   /**
    * 合成一条滤镜链（passes 按 EffectPriority 升序——FilterManager.EndCapture :136-176：
    * 逐级把前级结果作为 s0 再滤；每级乘 ColorOfTheSkies）。结果写回 this.canvas，
@@ -473,7 +598,14 @@ export class GLScreenFilters {
     if (!gl || this.diedAt || this.unavailable || passes.length === 0) return false;
     const w = source.width, h = source.height;
     if (w === 0 || h === 0) return false;
-    const needNoise = passes.some((p) => p.kind === 'FilterHeatDistortion' || p.kind === 'FilterCrystalDestructionVortex');
+    const needNoise = passes.some((p) => p.kind === 'FilterHeatDistortion' || p.kind === 'FilterCrystalDestructionVortex'
+      || p.kind === 'FilterNoir' || p.kind === 'FilterSepia');
+    for (const p2 of passes) {
+      if ((p2.kind === 'FilterNoir' || p2.kind === 'FilterSepia') && !this.kindNoiseOk(p2.kind)) {
+        passes = passes.filter((q) => q !== p2);
+      }
+    }
+    if (passes.length === 0) return false;
     if (needNoise && !this.ensureNoise()) {
       // 噪声未就绪：跳过 Heat/Vortex pass 本帧（保持其余链）
       passes = passes.filter((p) => p.kind !== 'FilterHeatDistortion' && p.kind !== 'FilterCrystalDestructionVortex');
@@ -535,6 +667,21 @@ export class GLScreenFilters {
       } else if (p.kind === 'SkyWeatherTint') {
         gl.uniform3f(entry.uni.uColor, p.color[0], p.color[1], p.color[2]);
         gl.uniform1f(entry.uni.uOpacity, p.alpha);
+      } else if (p.kind === 'FilterSepia') {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this.kindNoiseTex['DSTNoise']!);
+        gl.uniform1i(entry.uni.uNoiseTex, 1);
+        gl.uniform2f(entry.uni.uRes, w, h);
+        gl.uniform3f(entry.uni.uColor, p.color[0], p.color[1], p.color[2]);
+        gl.uniform1f(entry.uni.uIntensity, p.intensity);
+        gl.uniform1f(entry.uni.uProgress, p.progress);
+        gl.uniform1f(entry.uni.uOpacity, p.opacity);
+      } else if (p.kind === 'FilterNoir') {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this.kindNoiseTex['NoirNoise']!);
+        gl.uniform1i(entry.uni.uNoiseTex, 1);
+        gl.uniform1f(entry.uni.uTime, p.time);
+        gl.uniform1f(entry.uni.uOpacity, p.opacity);
       } else {
         gl.uniform1f(entry.uni.uScreenH, p.screenH);
         gl.uniform1f(entry.uni.uZoom, p.zoom);

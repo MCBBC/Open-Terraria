@@ -172,15 +172,17 @@ describe('FilterHeatDistortion 像素公式（obj18 字节码/preshader）', () 
 });
 
 describe('monolith 审计结论表（MONOLITH_FILTER_AUDIT）', () => {
-  it('六个 pass GL 字节码 1:1 就位，三个 pass 登记未端口', () => {
+  it('八个 pass GL 字节码 1:1 就位，两个 pass 登记未端口', () => {
+    // ★shader 修齐批终口：Sepia/Noir glExact 翻正（FRAG_SEPIA/FRAG_NOIR 落地）
     const exact = MONOLITH_FILTER_AUDIT.filter((r) => r.glExact).map((r) => r.pass).sort();
     expect(exact).toEqual(['FilterBloodMoon', 'FilterCRT', 'FilterGraveyard',
-      'FilterHeatDistortion', 'FilterMiniTower', 'FilterTest2']);
+      'FilterHeatDistortion', 'FilterMiniTower', 'FilterNoir', 'FilterSepia',
+      'FilterTest2']);
     // FilterMoonLord 两行：MonolithMoonLord（柱）+ MoonLord（月总战滤镜，
     // SceneState.cs:109）同 pass 同字节码（ScreenEffectInitializer.cs:22-24 唯一
     // 差异=aimAtPlayer）——未端口登记共用
     const pending = MONOLITH_FILTER_AUDIT.filter((r) => !r.glExact).map((r) => r.pass);
-    expect(pending).toEqual(['FilterMoonLord', 'FilterMoonLord', 'FilterSepia', 'FilterNoir']);
+    expect(pending).toEqual(['FilterMoonLord', 'FilterMoonLord']);
   });
 
   it('登记项均注明未端口根因（非空 note）', () => {
@@ -193,6 +195,21 @@ describe('monolith 审计结论表（MONOLITH_FILTER_AUDIT）', () => {
 });
 
 describe('GLSL 源锁字节码衍生常量（防漂移）', () => {
+  it('FilterNoir：颗粒 hash 族/点采样/亮度权重锁', () => {
+    const f = SCREEN_FX_FRAGS['FilterNoir'];
+    expect(f).toContain('19.831825');              // c13.w（:251 def 颗粒乘子）
+    expect(f).toContain('NoirNoise');              // s1 噪声图名
+    expect(f).toContain('0.19245');                // c11 亮度权（:250 def）
+    expect(f).toContain('uOpacity');
+  });
+  it('FilterSepia：DSTNoise/sat 曲线/vignette 1.1/uColor 锁', () => {
+    const f = SCREEN_FX_FRAGS['FilterSepia'];
+    expect(f).toContain('DSTNoise');               // s1 噪声图名
+    expect(f).toContain('0.96225');                // c11.y（:250 def）
+    expect(f).toContain('* 4.0');                  // c12.w（:252 def sat 四倍斜率）
+    expect(f).toContain('1.1');                    // c13.z（:253 def vignette）
+    expect(f).toContain('uProgress');              // 第二 vibrance 入参
+  });
   it('FilterHeatDistortion：±滚动/偏置/半尺/重采样链', () => {
     const f = SCREEN_FX_FRAGS['FilterHeatDistortion'];
     expect(f).toContain('nA - nB - 0.5');

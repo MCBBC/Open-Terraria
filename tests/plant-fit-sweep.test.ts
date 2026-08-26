@@ -9,7 +9,18 @@ import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { TileStore } from '../src/world/TileStore';
 import { WorldEvolution, type EvolutionHost } from '../src/world/evolution/WorldEvolution';
-import { TILE_BY_KEY } from '../src/data/tiles';
+import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
+
+// 与 WorldEvolution.SID 同语义：sheet → 首个内部 id
+const SID = (() => {
+  const m = new Map<number, number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const sh = TILE_DEFS[i]?.vanilla?.sheet;
+    if (sh != null && !m.has(sh)) m.set(sh, i);
+  }
+  return m;
+})();
+const sid = (sh: number) => SID.get(sh) ?? -1;
 
 const GRASS = TILE_BY_KEY['v_2_grass_block'] ?? TILE_BY_KEY['grass'];
 const CORRUPT = TILE_BY_KEY['v_23_corrupt_grass_block'];
@@ -96,6 +107,48 @@ describe('growCactus 支撑形态双态门（cs:57060-57061，2026-08-26 案③�
     });
     grow(evo);
     expect(typeAt(st, 20, 19)).toBe(CACTUS);
+  });
+});
+
+describe('全族审查补齐（2026-08-26 全面 review）', () => {
+  // 与上方 SID 同语义（模块级构建）
+  it('藤蔓向上扫描 bottomSlope 中断（cs:73097 族——下缘削坡草挂不住藤）', () => {
+    // 挂靠腐化草：slope3/4=bottomSlope → 不垂藤；slope1/2/0 → 正常垂 636
+    const CORRUPT_ID = sid(23), VINE636 = sid(636);
+    for (const [sl, want] of [[3, 0], [4, 0], [1, VINE636], [2, VINE636], [0, VINE636]] as const) {
+      const { st, evo } = mkWorld((s) => s.setTile(20, 20, CORRUPT));
+      if (sl) st.setSlope(20, 20, sl);
+      const rnd = vi.spyOn(Math, 'random').mockReturnValue(0.01);  // 1/maxV=1/60 必过
+      try { (evo as unknown as { vineFamily(i: number, j: number, s2: number): void }).vineFamily(20, 20, 23); } finally { rnd.mockRestore(); }
+      expect(typeAt(st, 20, 21)).toBe(want);
+    }
+  });
+  it('hasSupport 同款中断（普通藤 2 号草锚，cs:72563-72579）', () => {
+    const GRASS_ID = sid(2);
+    const { evo } = mkWorld((s) => { s.setTile(20, 18, GRASS_ID); s.setSlope(20, 18, 4); });
+    expect((evo as unknown as { hasSupport(i: number, j: number, g: number): boolean }).hasSupport(20, 19, 2)).toBe(false);
+    const { evo: e2 } = mkWorld((s) => s.setTile(20, 18, GRASS_ID));
+    expect((e2 as unknown as { hasSupport(i: number, j: number, g: number): boolean }).hasSupport(20, 19, 2)).toBe(true);
+  });
+  it('蘑菇草地表顶 71 经门：平整长出、坡面不长（overgroundTile 整合）', () => {
+    const MUSHGRASS = sid(70), TOP71 = sid(71);
+    const flat = mkWorld((s) => s.setTile(20, 20, MUSHGRASS));
+    let rnd = vi.spyOn(Math, 'random').mockReturnValue(0.01);
+    try { (flat.evo as unknown as { overgroundTile(i: number, j: number, w: number): void }).overgroundTile(20, 20, 1); } finally { rnd.mockRestore(); }
+    expect(typeAt(flat.st, 20, 19)).toBe(TOP71);
+    const slope = mkWorld((s) => { s.setTile(20, 20, MUSHGRASS); s.setSlope(20, 20, 1); });
+    rnd = vi.spyOn(Math, 'random').mockReturnValue(0.01);
+    try { (slope.evo as unknown as { overgroundTile(i: number, j: number, w: number): void }).overgroundTile(20, 20, 1); } finally { rnd.mockRestore(); }
+    expect(typeAt(slope.st, 20, 19)).toBe(0);
+  });
+  it('fitJunglePairFlat：球茎/生命果双列整平底（PlaceJunglePlant :48226 两列 SolidTile&&60）', () => {
+    const JG = sid(60);
+    const bothFlat = mkWorld((s) => { s.setTile(20, 20, JG); s.setTile(21, 20, JG); });
+    expect((bothFlat.evo as unknown as { fitJunglePairFlat(x: number, y: number): boolean }).fitJunglePairFlat(20, 20)).toBe(true);
+    const oneAir = mkWorld((s) => s.setTile(20, 20, JG));
+    expect((oneAir.evo as unknown as { fitJunglePairFlat(x: number, y: number): boolean }).fitJunglePairFlat(20, 20)).toBe(false);
+    const oneSlope = mkWorld((s) => { s.setTile(20, 20, JG); s.setTile(21, 20, JG); s.setSlope(21, 20, 2); });
+    expect((oneSlope.evo as unknown as { fitJunglePairFlat(x: number, y: number): boolean }).fitJunglePairFlat(20, 20)).toBe(false);
   });
 });
 

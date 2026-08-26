@@ -1,11 +1,10 @@
-// 创建房间完整链路验证(空角色库):创建房间 → CharSelect → 新建 → CharCreation
-// 表单 → [data-act=create] 创建角色 → 世界列表(.sw-wsel)出现 → 点首个世界行 →
-// MP 面板恢复 + 建房继续(lobby 不可达 → 失败反馈属预期)。
+// 现场转储:点创建房间→CharSelect→新建→[data-act=create] 后的全状态。
 import puppeteer from 'puppeteer-core';
 const b = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'] });
 const p = await b.newPage();
 const errs = [];
-p.on('pageerror', (e) => errs.push(String(e).slice(0, 150)));
+p.on('pageerror', (e) => errs.push(String(e.stack ?? e).slice(0, 300)));
+p.on('console', (m) => { const t = m.text(); if (!/404|AudioContext/i.test(t)) errs.push('console.' + m.type() + ': ' + t.slice(0, 150)); });
 await p.goto(`${process.env.SW_ORIGIN ?? 'http://localhost:4177'}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 let menuOk = false;
 for (let i = 0; i < 150; i++) {
@@ -15,39 +14,40 @@ for (let i = 0; i < 150; i++) {
 }
 await p.evaluate(() => { document.querySelector('[data-act=mp]').click(); });
 await new Promise((r) => setTimeout(r, 800));
-const s1 = await p.evaluate(() => {
-  const panel = [...document.querySelectorAll('.sw-panel')].find((x) => x.textContent?.includes('多人联机'));
-  return { saveSelGone: !panel?.querySelector('select') };
-});
 await p.evaluate(() => {
   const btn = [...document.querySelectorAll('.sw-panel button')].find((b2) => b2.textContent === '创建房间');
   btn.click();
 });
 await new Promise((r) => setTimeout(r, 500));
-const s2 = await p.evaluate(() => ({ charSelect: !!document.querySelector('.sw-vsel') }));
-await p.evaluate(() => { document.querySelector('[data-act=new]')?.click(); });
+await p.evaluate(() => { document.querySelector('.sw-vsel [data-act=new]')?.click(); });
 await new Promise((r) => setTimeout(r, 500));
-const s3 = await p.evaluate(() => ({ charCreation: !!document.querySelector('[data-act=create]') }));
-// 捏人确认([data-act=create],默认外观直接创建)
-await p.evaluate(() => { document.querySelector('[data-act=create]')?.click(); });
-await new Promise((r) => setTimeout(r, 1500));
-const s4 = await p.evaluate(() => {
-  const wsel = document.querySelector('.sw-wsel, .sw-vsel');
-  const worldRows = [...document.querySelectorAll('.sw-witem')].length
-    || [...document.querySelectorAll('div')].filter((d2) => /中小.*世界|世界.*\d{3,4}/.test(d2.textContent ?? '')).length;
-  return { worldSelectShown: worldRows > 0, rowsSample: worldRows };
-});
-// 世界列表出现后点首个世界行(onPlay)
-await p.evaluate(() => {
-  const row = document.querySelector('.sw-witem') || [...document.querySelectorAll('div')].find((d2) => /世界/.test(d2.textContent ?? '') && d2.style.cursor === 'pointer');
-  row?.click();
-});
-await new Promise((r) => setTimeout(r, 1500));
-const s5 = await p.evaluate(() => {
+const before = await p.evaluate(() => {
+  const holders = [...document.querySelectorAll('div')].filter((d2) => d2.style.zIndex === '22');
   const panel = [...document.querySelectorAll('.sw-panel')].find((x) => x.textContent?.includes('多人联机'));
-  const created = panel?.textContent?.match(/房间码|房间已创建|加入房间/);
-  return { mpPanelBack: !!panel, roomCreateFeedback: created ? created[0] : null, holderGone: !document.querySelector('[style*="z-index: 22"]') };
+  return {
+    holders: holders.length,
+    holderChildren: holders.map((h) => Array.from(h.children).map((c) => c.className).join(',')),
+    mpDisplay: panel ? getComputedStyle(panel).display : 'panel-gone',
+    createBtnInDom: !!document.querySelector('[data-act=create]'),
+  };
 });
-console.log(JSON.stringify({ s1, s2, s3, s4, s5, errs: errs.length }, null, 1));
+console.log('BEFORE:', JSON.stringify(before));
+await p.evaluate(() => { document.querySelector('[data-act=create]')?.click(); });
+await new Promise((r) => setTimeout(r, 2000));
+const after = await p.evaluate(() => {
+  const holders = [...document.querySelectorAll('div')].filter((d2) => d2.style.zIndex === '22');
+  const panel = [...document.querySelectorAll('.sw-panel')].find((x) => x.textContent?.includes('多人联机'));
+  return {
+    holders: holders.length,
+    holderHtmlLen: holders.map((h) => h.innerHTML.length),
+    holderChildren: holders.map((h) => Array.from(h.children).map((c) => c.className).join(',')),
+    holderTextHead: holders.map((h) => (h.textContent ?? '').slice(0, 60)),
+    mpDisplay: panel ? getComputedStyle(panel).display : 'panel-gone',
+    vsel: !!document.querySelector('.sw-vsel'),
+    wselText: (document.querySelector('.sw-vsel-title')?.textContent ?? '').slice(0, 20),
+  };
+});
+console.log('AFTER:', JSON.stringify(after, null, 1));
+for (const e of errs.slice(0, 5)) console.log('ERR:', e);
 await b.close();
 process.exit(0);

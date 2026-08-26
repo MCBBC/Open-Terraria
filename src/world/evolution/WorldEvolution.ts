@@ -233,6 +233,13 @@ export class WorldEvolution {
     return flowerGroundOk(sheetOf(st.type[bi]), want);
   }
 
+  /** 丛林株双列整平底门（PlaceJunglePlant :48226-48229 地基段：占宽两列的底行
+   *  逐格 SolidTile && type==60）。bulb 238/fruit 236 底行 = j 行、第二列 i+1 */
+  private fitJunglePairFlat(i: number, j: number): boolean {
+    return this.solidTile(i, j) && sheetOf(this.typeAt(i, j)) === 60
+      && this.solidTile(i + 1, j) && sheetOf(this.typeAt(i + 1, j)) === 60;
+  }
+
   /** 进图一次性植物孤儿清整：全网格按 PlantCheck 处置历史遗留（读档/导入期写入的
    *  非法锚植株——运行时监听只护支撑变化后状态，粘滞件在此收口）。换型用
    *  TryGetNewType 同表；无法变型即静默清除（等价导入期 FinalCleanupPass）。
@@ -631,11 +638,15 @@ export class WorldEvolution {
       // 两 id 均 Style2x2（TileObjectData.cs:3504-3511 / 3997-4011），主体占 j-2..j-1 两行
       // （锚 Origin=(0,1) 底行坐沙面）；485 变体 StyleHorizontal+WrapLimit4 →
       // frameX=style*36（cs:73687 style=genRand.Next(4)；此前 1×1+style*18 双错）
-      if (Math.random() < 1 / 100) { this.placeBlock(i, j - 2, 751, 2, 2); }
-      else {
-        let clear = true;
-        for (let d = -1; d >= -3; d--) { if (this.active(i, j + d)) { clear = false; break; } }
-        if (clear) this.placeBlock(i, j - 2, 485, 2, 2, Math.floor(Math.random() * 4) * 36);
+      // 双列整平底门（原版 Style2x2 走 PlaceTile→TileObject 锚校验：底行两列
+      // 均须 active+solid+非半砖+slope0——沙岩坡缘不再挂幼虫堆；底行=j 本排）
+      if (this.solidTile(i, j) && this.solidTile(i + 1, j)) {
+        if (Math.random() < 1 / 100) { this.placeBlock(i, j - 2, 751, 2, 2); }
+        else {
+          let clear = true;
+          for (let d = -1; d >= -3; d--) { if (this.active(i, j + d)) { clear = false; break; } }
+          if (clear) this.placeBlock(i, j - 2, 485, 2, 2, Math.floor(Math.random() * 4) * 36);
+        }
       }
     } else if (sheet === 69) {
       this.growSpike(i, j, 69, 60);
