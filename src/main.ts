@@ -693,7 +693,7 @@ kvHas('sandboxworld.quicksave').then(async () => {
   splash.revealBehind();
   warmAllAssets();
   mountAssetBadge();
-  await holdForAssetsReady({ minMs: 0, timeoutMs: 30000 });
+  await holdForAssetsReady({ minMs: 0 });   // p0-p8 全落盘才揭幕(停滞 60s 兜底;2026-08-26 用户定案)
   splashGate.resolve();        // 下载完才解 splash"加载完成"门（时序尽自收场）
   await splash.finished;       // 渐隐到菜单后揭幕
 });

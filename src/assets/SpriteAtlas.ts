@@ -1305,20 +1305,40 @@ function tryBitmapUpgrade(
 /** 通用 bitmap-only 加载器(2026-08-17 修 trace⑨ 收尾两个真 bug):
  *  ①在飞守卫——此前未就绪期间每帧重 new Image = 请求风暴(雨/尘每粒子每帧)
  *  ②失败回退存 Image——此前失败静默 = 纹理永久缺(用户报"贴图丢失")
- *  ③(2026-08-18)失败回退非终态:退避重试,成功后 store(bitmap) 原地替换 */
+ *  ③(2026-08-18)失败回退非终态:退避重试,成功后 store(bitmap) 原地替换
+ *  ④(2026-08-26)失败 TTL 负缓存(与 _uiFailed/_vImageFailed 同族)——发布形态
+ *   sprites/vanilla 无散件(prune-dist 全裁,SW 分片暖缓存就位前 cache-miss →
+ *   网络回退恒 404),而消费方(BiomeBackground.img/SkyRenderer.cloudTex 等全部
+ *   16 处)都是绘制路径 if(!缓存) 调用:onerror 只清 pending 时每帧重发 =
+ *   云族 ~60 req/s × N 文件的 404 风暴(2026-08-26 用户实报"进页面数千 404")。
+ *   10s 冷却内直接早退,暖缓存落地后下个重试窗自愈 */
 const _bmpOnlyPending = new Set<string>();
+const _bmpOnlyFailed = new Map<string, number>();
+const BMP_ONLY_FAIL_TTL = 10_000;
 export function loadBitmapOnly(
   file: string, has: () => boolean, store: (x: ImageBitmap | HTMLImageElement) => void,
 ): void {
   if (has() || _bmpOnlyPending.has(file)) return;
+  const failAt = _bmpOnlyFailed.get(file);
+  if (failAt !== undefined) {
+    if (Date.now() - failAt < BMP_ONLY_FAIL_TTL) return;
+    _bmpOnlyFailed.delete(file);
+  }
   _bmpOnlyPending.add(file);
   const im = new Image();
   im.onload = () => {
-    const land = (x: ImageBitmap | HTMLImageElement) => { store(x); _bmpOnlyPending.delete(file); };
+    const land = (x: ImageBitmap | HTMLImageElement) => {
+      store(x);
+      _bmpOnlyPending.delete(file);
+      _bmpOnlyFailed.delete(file);
+    };
     if (!SpriteAtlas.USE_BITMAP) { land(im); return; }
     tryBitmapUpgrade(im, file, (b) => land(b), () => land(im));
   };
-  im.onerror = () => _bmpOnlyPending.delete(file);
+  im.onerror = () => {
+    _bmpOnlyPending.delete(file);
+    _bmpOnlyFailed.set(file, Date.now());
+  };
   im.src = `sprites/${file}`;
 }
 

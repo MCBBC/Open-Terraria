@@ -1,6 +1,8 @@
 // 启动 splash 保持期(holdForAssetsReady)回归:
-//  无下载概念(SW 未启用/完成标志在)→ 补满 minMs;有下载 → 等完或失败终态放行;
-//  timeout 兜底;sinceMs 计入 splash 已显示时长。真实短定时器(轮询粒度 250ms)。
+//  p0-p8 全部落盘才放行(2026-08-26 用户定案):SW 未启用→补满 minMs;有下载→
+//  等 complete() 或失败终态;进度停滞 stallMs 兜底放行(原 absolute timeout 30s
+//  与 completeFast 免检已删——慢网过半放行/驱逐后标志假完成,均=缺资产揭幕)。
+//  真实短定时器(轮询粒度 250ms)。
 import { it, expect } from 'vitest';
 import { holdForAssetsReady, type HoldDeps } from '../src/ui/AssetDownloadUI';
 import type { AssetCacheState } from '../src/net/AssetCache';
@@ -35,11 +37,17 @@ it('无下载概念(SW 未启用)→ 补满 minMs 即放行', async () => {
   expect(released).toBe(true);
 });
 
-it('完成标志在(completeFast)→ 同样只补 minMs', async () => {
+it('完成标志在但 SW 未证实(complete=false)→ 仍等待,实测 complete 才放行', async () => {
+  // 2026-08-26 用户定案:localStorage 上轮标志 ≠ 本轮缓存实况(驱逐后假完成),
+  // 放行只认 complete() 实测——标志在+缓存被清时放行=菜单开在缺资产态+404 风暴
+  let done = false;
   let released = false;
-  void holdForAssetsReady({ minMs: 120, deps: mkDeps({ completeFast: () => true }) })
+  void holdForAssetsReady({ minMs: 120, deps: mkDeps({ completeFast: () => true, complete: () => done }) })
     .then(() => { released = true; });
-  await sleep(500);
+  await sleep(600);                       // 标志在但未证实:必须继续等
+  expect(released).toBe(false);
+  done = true;                            // SW status 回包证实全就位
+  await sleep(400);
   expect(released).toBe(true);
 });
 
@@ -63,12 +71,24 @@ it('失败终态(failed>0)放行(徽标在菜单继续示警,不卡死启动)', 
   expect(released).toBe(true);
 });
 
-it('下载链挂死 → timeout 兜底放行', async () => {
+it('进度停滞超 stallMs → 兜底放行(挂死链)', async () => {
   let released = false;
-  void holdForAssetsReady({ minMs: 60000, timeoutMs: 300, deps: mkDeps() }) // min 永不满足
+  // state 全静止(下载链挂死)→ stallMs 到即放行
+  void holdForAssetsReady({ minMs: 120, stallMs: 300, deps: mkDeps() })
     .then(() => { released = true; });
-  await sleep(700);
+  await sleep(1100);                      // 300ms 停滞窗 + 轮询粒度余量
   expect(released).toBe(true);
+});
+
+it('健康下载(进度持续)→ 不误触停滞放行', async () => {
+  let released = false;
+  let tick = 0;
+  void holdForAssetsReady({
+    minMs: 120, stallMs: 300,
+    deps: mkDeps({ state: () => mkState({ done: ++tick, bytesDone: tick * 1024 }) }),
+  }).then(() => { released = true; });
+  await sleep(1400);                      // 300ms 窗的 4 倍,进度持续 → 仍等
+  expect(released).toBe(false);
 });
 
 it('下载在 minMs 内完成 → 仍补满 minMs(不提前放行)', async () => {

@@ -363,17 +363,29 @@ export interface HoldDeps {
   complete(): boolean;
 }
 
-/** 启动 splash 保持：无下载概念（SW 未启用或上轮完成标志在）→ 补满 minMs；
- *  有下载 → 等下载完（或失败终态放行，徽标在菜单上继续示警）；timeoutMs 兜底
- *  防下载链挂死卡死启动。sinceMs = splash 已显示时长（loadAssets 期计入）。
- *  轮询 250ms（SW 消息驱动状态，无需订阅式精确唤醒）。 */
+/** 启动 splash 保持（2026-08-26 用户定案语义:**p0-p8 全部落盘才放行揭幕**）。
+ *  放行条件(任一):complete()(SW status 回包实测 cached=total);失败终态
+ *  (failed>0,徽标在菜单继续示警+门槛"重新下载"兜底);进度停滞超 stallMs
+ *  (防下载链挂死卡死启动)。
+ *  ★删掉的两条提前放行(2026-08-26 用户实报"只下到 p1-p4 就显示完成进主菜单"
+ *  +菜单期 vanilla 贴图 404 风暴同链):
+ *  ①原 absolute timeoutMs 30s——慢网全量 warm(~360MB zip)远超 30s,到点放行
+ *    =菜单开在缺资产态;
+ *  ②原 completeFast 免检——localStorage 上轮完成标志 ≠ 本轮缓存实况(浏览器
+ *    存储压力会驱逐 CacheStorage 条目而版本号不变),标志在+缓存被清时秒放
+ *    =同一缺资产态。回访已全就位时也要等 SW status 回包实测(1-2s)——换确定性。
+ *  sinceMs = splash 已显示时长(loadAssets 期计入)。轮询 250ms(SW 消息驱动
+ *  状态,无需订阅式精确唤醒)。 */
 export function holdForAssetsReady(opts: {
   minMs: number;
   sinceMs?: number;
-  timeoutMs?: number;
+  /** 进度停滞放行窗(默认 60s,原 timeout 的"防挂死"本意):done+bytesDone+phase
+   *  三静止达窗即放行。zip 健康下载 worker 每 200ms/512KB 报字节增量、legacy
+   *  分块有 15s 看门狗续发——均远快于此窗,不会误触发 */
+  stallMs?: number;
   deps?: HoldDeps;
 }): Promise<void> {
-  const { minMs, sinceMs = 0, timeoutMs = 30000 } = opts;
+  const { minMs, sinceMs = 0, stallMs = 60_000 } = opts;
   const d = opts.deps ?? {
     now: () => performance.now(),
     state: assetCacheState,
@@ -381,14 +393,20 @@ export function holdForAssetsReady(opts: {
     complete: assetsComplete,
   };
   const t0 = d.now();
-  const needWait = d.state().enabled && !d.completeFast();
+  const needWait = d.state().enabled;   // 完成标志不再免检——以 SW 实测为准(头注)
   return new Promise((resolve) => {
-    const finish = () => { clearInterval(iv); clearTimeout(to); resolve(); };
+    let lastSig = '';
+    let lastProgressAt = d.now();
+    const finish = () => { clearInterval(iv); resolve(); };
     const iv = setInterval(() => {
       const elapsed = sinceMs + (d.now() - t0);
       if (elapsed < minMs) return;
-      if (!needWait || d.complete() || d.state().failed > 0) finish();
+      const s = d.state();
+      if (!needWait || d.complete() || s.failed > 0) { finish(); return; }
+      // 停滞检测:done/bytesDone/phase 三静止达窗 = 下载链挂死,放行兜底
+      const sig = `${s.done}|${s.bytesDone}|${s.phase}`;
+      if (sig !== lastSig) { lastSig = sig; lastProgressAt = d.now(); return; }
+      if (d.now() - lastProgressAt >= stallMs) finish();
     }, 250);
-    const to = setTimeout(finish, Math.max(0, timeoutMs - sinceMs));
   });
 }
