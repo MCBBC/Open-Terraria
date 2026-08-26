@@ -229,7 +229,11 @@ export class WeatherState {
     this.windSpeedTarget = this.windSpeedCurrent;
     this.numClouds = this.rng.int(0, 199);
     this.numCloudsTemp = this.numClouds;
-    this.resetWindCounter(true);
+    // ★windCounter/extremeWindCounter 保持 0(原版静态字段默认,Main.cs 无 worldgen
+    //  初始化)——首个 updateWind tick 立即掷目标并触发早期 ±0.35 钳(无 ≥120 血玩家)。
+    //  曾构造期 resetWindCounter(true) 预掷 900-2700t:钳被推迟 15-45s,期间 worldgen
+    //  初值 ±0.8 的风声直吹(且 windCounter 不入存档=每次进世界都复现,2026-08-26
+    //  用户报"新存档进来都大风吹"的残留段)
     this.weatherCounter = this.rng.int(3600, 10799);
   }
 

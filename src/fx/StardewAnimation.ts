@@ -51,7 +51,7 @@ function ensureAssets(): boolean {
       pending--;
       if (pending === 0) loaded = true;
     };
-    im.onerror = () => { failedAt = Date.now(); };
+    im.onerror = () => { failedAt = Date.now(); };   // IMG-SELF-HEAL:10s 后 ensureAssets 重入即重试
     im.src = `/sprites/vanilla/${names[i]}.png`;
   }
   return loaded;

@@ -28,19 +28,24 @@ const out = await page.evaluate(async () => {
   for (let x = px - 24; x <= px + 24; x++) st.setTile(px + x - px, gy + 2, 0); // 保持场地无地砖干扰(地面留在 gy+3 以下)
   const countTile = (ri) => { let n = 0; for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) if (st.get(x, y) === ri) n++; return n; };
   // 局部计数(扫描区小窗)
-  const tryPlace = (itemIdx, tx, ty) => { g.tryPlace(tx, ty, items.ITEM_DEFS[itemIdx]); };
+  const tryPlace = (itemIdx, tx, ty) => { g.player.useTime = 0; g.tryPlace(tx, ty, items.ITEM_DEFS[itemIdx]); };
   const cnt = (ri, x0, x1, y0, y1) => { let n = 0; for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) if (st.get(x, y) === ri) n++; return n; };
   const X = px + 4;
   // 清场:gy-12..gy+1 全空,背景木墙已铺;地面测试用临时石块(用完即清)
   for (let y = gy - 12; y <= gy + 1; y++) for (let x = X - 2; x <= X + 2; x++) st.setTile(x, y, 0);
+  // 玩家挪进试验区(gy-4)——tryPlace 有 inTileRange 射程门,清场后原地表距离超限
+  g.player.x = (X - 2) * 16; g.player.y = (gy - 4) * 16; g.player.vx = 0; g.player.vy = 0;
   const res = {};
   // ①门悬墙:候选域内无任何实心 → 拒
   tryPlace(doorItem, X, gy - 4);
   res.doorWallOnly = cnt(DOOR, X - 1, X + 1, gy - 10, gy + 1);
   // ②门落地:石块在 (X, gy+1),点击 gy-2 → 格 gy-2..gy,底锚=gy+1 石 ✓
   st.setTile(X, gy + 1, 2);
+  const preDoor = { useTime: g.player.useTime, cells: [0,1,2].map((k) => st.get(X, gy - 2 + k)),
+    doorId: DOOR, itemTile: items.ITEM_DEFS[doorItem]?.tile };
   tryPlace(doorItem, X, gy - 2);
   res.doorOnFloor = cnt(DOOR, X - 1, X + 1, gy - 4, gy + 1);
+  res.preDoor = preDoor;
   st.setTile(X, gy + 1, 0);
   for (let y = gy - 4; y <= gy; y++) if (st.get(X, y) === DOOR) st.setTile(X, y, 0);
   // ③门顶悬:石块在 (X, gy-7),点击 gy-5 → 首候选 cy=gy-6,格 gy-6..gy-4,顶锚=gy-7 ✓

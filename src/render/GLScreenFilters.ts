@@ -559,7 +559,7 @@ export class GLScreenFilters {
     const gl = this.gl!;
     if (this.kindNoiseReady[file]) return true;
     const failAt = this.kindNoiseFail[file];
-    if (failAt && performance.now() - failAt < 10000) return false;
+    if (failAt && performance.now() - failAt < 10000) return false;   // IMG-SELF-HEAL:10s TTL 失败负缓存
     const im = new Image();
     let done = false;
     im.onload = () => {

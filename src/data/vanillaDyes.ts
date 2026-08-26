@@ -70,6 +70,7 @@ let noiseSam: SM2Sampler | null = null;
 let noiseStarted = false;
 const NOISE_SIZE = 256;                       // Misc_noise.png 256²（资产实测）
 const noiseNeutral: SM2Sampler = () => [0.5, 0.5, 0.5, 1];   // 中性灰回退
+let noiseRetried = false;
 function noiseSampler(): SM2Sampler {
   if (noiseSam) return noiseSam;
   if (noiseStarted || typeof document === 'undefined') return noiseNeutral;
@@ -87,6 +88,13 @@ function noiseSampler(): SM2Sampler {
         const w = cv.width, h = cv.height;
         noiseSam = (u, v) => sampleImageData(d, w, h, u - Math.floor(u), v - Math.floor(v), false);
       } catch { /* 解码失败：维持中性灰 */ }
+    };
+    img.onerror = () => {
+      // ★失败重试一次(2026-08-25 同类扫描):瞬时失败不留永久中性灰
+      if (!noiseRetried) {
+        noiseRetried = true;
+        setTimeout(() => { noiseStarted = false; noiseSampler(); }, 1000);
+      }
     };
     img.src = '/sprites/vanilla/Misc_noise.png';
   } catch { /* 无 DOM：维持中性灰 */ }

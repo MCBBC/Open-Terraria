@@ -923,7 +923,7 @@ export class CharCreation {
     // 随机后同步重烘当前页 sheet（buildLook/buildHair 尾部的 scheduleSheetBake(0)
     // 走 setTimeout 异步+retry 链依赖贴图重载——contextlost 清缓存后 retry 期格子
     // 全空（2026-08-24 用户实报）。同步烘一次立即出图，retry 链仍作兜底
-    this.bakeSheets();
+    void this.bakeSheets();
   }
 
   // ================= 缩略图 sprite sheet（纸娃娃管线烘一张，格子切片消费） =================
@@ -989,8 +989,6 @@ export class CharCreation {
         } else missed = true;
       });
       this.lookSheetUrl = cv.toDataURL();
-      // WARMDBG(临时诊断)
-      console.error('[WARMDBG] look bake: missed=' + missed + ' blank=' + this.sheetAllTransparent(cv));
       // ★内容自检(2026-08-25 用户实报"随机几次后样式全空"):doll 非 null 但内容
       //   全透明 = 源 canvas 被静默清零(显存驱逐类,菜单阶段无 Renderer.onLost 扫)
       //   ——空 sheet 一旦挂上缩略图,不重烘就永久空槽。检测到全透明 → 清 PaperDoll
@@ -1026,7 +1024,7 @@ export class CharCreation {
     if (this.sheetTimer) clearTimeout(this.sheetTimer);
     this.sheetTimer = setTimeout(() => {
       this.sheetTimer = 0;
-      this.bakeSheets();
+      void this.bakeSheets();
     }, delay);
   }
 

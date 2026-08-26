@@ -118,7 +118,7 @@ export class WorldCreationPanel {
   private previewCtx: CanvasRenderingContext2D;
   private seedIcon: ImageBitmap | HTMLImageElement;
   // 模块级:语言切换重建面板时恢复用户选择
-  private static lastSel = { size: 1, diff: 0, evil: 0 };
+  private static lastSel = { size: 0, diff: 0, evil: 0 };   // 默认小世界(2026-08-26 用户要求;会话内仍记忆用户上次选择)
   private sel = { ...WorldCreationPanel.lastSel };
 
   constructor(parent: HTMLElement, private flow: WorldCreationFlow) {
