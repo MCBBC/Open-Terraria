@@ -125,17 +125,8 @@ function dealContacts(
   }
 }
 
-/** 弹体 CutTiles（Projectile.Damage→CutTiles :12517/:15276 → CutTilesAt :15454）：
- *  friendly 玩家弹每 tick 扫弹盒(+1 格右/下外沿,原版循环含端)逐格砍 tileCut 物
- *  ——瓦罐整罐碎裂/杂草等非实心可砍物。CanCutTiles(:15407) 排除表外才走,
- *  调用方自证类型不在表内。cutTile 内部对非 tileCut 格零操作 */
-function cutTilesBox(game: GameHooks, x: number, y: number, w: number, h: number): void {
-  const x0 = Math.floor(x / TILE), x1 = Math.floor((x + w) / TILE) + 1;
-  const y0 = Math.floor(y / TILE), y1 = Math.floor((y + h) / TILE) + 1;
-  for (let ix = x0; ix <= x1; ix++) {
-    for (let iy = y0; iy <= y1; iy++) game.cutTile(ix, iy);
-  }
-}
+/** 弹体 CutTiles 助手已迁至 ProjCutTiles.ts（全仓单点——Monk/SkyDragon 族同用） */
+import { cutTilesBox } from './ProjCutTiles';
 
 // ================= 1126 叶绿巨剑刃（AI_190 旋刃,1226 重做本体） =================
 
@@ -246,6 +237,17 @@ export class ChloroClaymoreBlade extends Entity {
     // 挥击亦无 LOS 门）；usesOwnerMeleeHitCD（:10556）→ 与玩家挥击共享命中表
     dealContacts(this, game, this.hitCd, -1, undefined,
       { ownerCx: p.cx, ownerCy: p.cy, maxDist: 300, sharedHits: this.sharedMeleeHits ?? undefined });
+    // CutTiles（aiStyle190||191 线支 :15341-15343：rotation±π/4 两端连线宽 60×scale——
+    // flag=false 无弹盒支）。PlotTileLine 厚线以三采样窗近似（1127 单点刃尖先例同款登记）
+    {
+      const r60 = 60 * this.itemScale;
+      const a0 = this.rot - Math.PI / 4, a1 = this.rot + Math.PI / 4;
+      const ex = Math.cos(a0) * r60, ey = Math.sin(a0) * r60;
+      const fx = Math.cos(a1) * r60, fy = Math.sin(a1) * r60;
+      for (const k of [0, 0.5, 1]) {
+        cutTilesBox(game, this.cx + ex + (fx - ex) * k - 4, this.cy + ey + (fy - ey) * k - 4, 8, 8);
+      }
+    }
     // ---- 绿光（:42948-42953）----
     game.addLightAt?.(this.cx, this.cy, 0, 0.42, 0);
     if (num >= 1) this.dead = true;                              // :42997-43000
@@ -479,6 +481,7 @@ export class ChloroBladeSlam extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
+    cutTilesBox(game, this.x, this.y, this.w, this.h);         // CutTiles（:12517/:15276;两门排除表均无 1129）
     dealContacts(this, game, this.hitCd, -1);
     if (this.t === 1) {
       game.spawnParticles(this.cx, this.cy, '#32C864', 16, 3.4, { life: 26, grav: -0.03, damp: 0.93 });
@@ -1820,6 +1823,7 @@ export class LaserMachinegunLaser extends Entity {
     game.addLightAt?.(this.cx, this.cy, 0.25, 0.4, 0.7);        // :55748
     for (let s = 0; s < 3; s++) {                               // extraUpdates=2 → 3 子步全速
       this.x += this.vx; this.y += this.vy;
+      cutTilesBox(game, this.x, this.y, this.w, this.h);        // CutTiles（:12517/:15276;两门排除表均无 440）
       const st = game.world.store;
       const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
       if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) { this.die(game); return; }
@@ -1933,6 +1937,7 @@ export class BookStormTwister extends Entity {
       if (this.vy > 16) this.vy = 16;
     }
     this.x += this.vx; this.y += this.vy;
+    cutTilesBox(game, this.x, this.y, this.w, this.h);          // CutTiles（:12517/:15276;两门排除表均无 704）
     // 尘 274 ×1（:71511-71537,ai[0]<270 门略作恒真近似——末 30t 收尾停尘登记）
     if (this.t < this.life - 30) {
       const amt = Math.random();
@@ -2043,6 +2048,7 @@ export class PrincessMagicCircle extends Entity {
         void a;
       }
     }
+    cutTilesBox(game, this.x, this.y, this.w, this.h);          // CutTiles（:12517/:15276;两门排除表均无 950）
     dealContacts(this, game, this.hitCd, 10);                   // 缺省免疫窗
   }
 

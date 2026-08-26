@@ -651,7 +651,7 @@ export class MonolithFilters {
           this.drawMoonLord(ctx, f, viewW, viewH,
             f.def.aimAtPlayer === false && moonLordCoreScreen ? moonLordCoreScreen : playerScreen);
           break;
-        case 'graveyard': this.drawGraveyard(ctx, f, viewW, viewH, playerScreen); break;
+        case 'graveyard': this.drawGraveyard(ctx, canvas, f, viewW, viewH); break;
         case 'bloodMoon': this.drawBloodMoon(ctx, f, viewW, viewH); break;
         case 'sepia': this.drawSepia(ctx, canvas, f, viewW, viewH); break;
         case 'noir': this.drawNoir(ctx, canvas, f, viewW, viewH); break;
@@ -700,54 +700,41 @@ export class MonolithFilters {
     this.drawMoonLord(ctx, f, w, h, target);
   }
 
-  /** FilterGraveyard（ScreenEffectInitializer.cs:25）：HLSL 二进制不在反编译源码，
-   *  仅源码内可见参数——UseProgress = Lerp(0,0.75,intensity)、UseIntensity(1.2)、
-   *  UseTargetPosition(SceneMetrics.Center)（SceneState.cs:132-138）。
-   *  ★2026-08-25 重写（用户对照原版视频实报"旧 multiply 压暗近似几乎不可见,
-   *  原版=整画面蒙灰雾"）：半透明中性灰雾罩全画面(EndCapture 合成帧=世界整体,
-   *  FilterManager.cs:143-199 同层),以玩家屏幕位为心的径向透明(中心略清透、
-   *  远处浓),低频噪声扰动手感。星光/天空压暗另在 SkyRenderer（SetBackColor :62990） */
-  private drawGraveyard(ctx: CanvasRenderingContext2D, f: FilterState, w: number, h: number,
-    playerScreen: { x: number; y: number }): void {
-    const k = Math.min(1, this.graveyardProgress * 1.2) * f.opacity;   // progress × UseIntensity(1.2)
-    if (k <= 0) return;
-    const rad = Math.hypot(w, h) * 0.62;
-    const grad = ctx.createRadialGradient(
-      playerScreen.x, playerScreen.y, rad * 0.12,
-      playerScreen.x, playerScreen.y, rad,
-    );
-    grad.addColorStop(0, `rgba(167,169,171,${(0.52 * k).toFixed(3)})`);   // 玩家周边略清透
-    grad.addColorStop(1, `rgba(167,169,171,${(0.9 * k).toFixed(3)})`);    // 远处浓
+  /** FilterGraveyard（ScreenEffectInitializer.cs:25）。★2026-08-25 反汇编
+   *  ScreenShader.cso obj6（disasm-fx.mjs,ps_2_0 共 7 指令）字节码 1:1：
+   *    gray  = (r+g+b) × uIntensity(1.2) / 3
+   *    desat = lerp(scene.rgb, gray, uProgress)         // uProgress=Lerp(0,0.75,强度)
+   *    final = lerp(scene.rgb, desat × scene.a, uOpacity)
+   *  ×scene.a 项:场景合成纹理的 alpha——本仓主画布不透明(canvas 合成后 a=1)
+   *  → ×1 恒等,与 GL 路径 s.a 采样一致。半分辨率逐像素同 drawSepia。
+   *  昼夜观感差 = 场景本身亮度差经去饱和保亮度传递(夜暗灰/昼亮灰),非 shader 分叉 */
+  private drawGraveyard(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, f: FilterState,
+    w: number, h: number): void {
+    const low = this.lowCanvas(w, h);
+    const lctx = low.getContext('2d')!;
+    lctx.clearRect(0, 0, low.width, low.height);
+    lctx.drawImage(canvas, 0, 0, low.width, low.height);
+    const img = lctx.getImageData(0, 0, low.width, low.height);
+    const d = img.data;
+    const inten = 1.2;                                  // UseIntensity(1.2)（SceneState.cs:138）
+    const prog = Math.max(0, Math.min(1, this.graveyardProgress));
+    const a = f.opacity;
+    for (let i = 0; i < d.length; i += 4) {
+      const gray = (d[i] + d[i + 1] + d[i + 2]) * inten / 3;
+      // desat = mix(scene, gray, progress);final = mix(scene, desat×scene.a, opacity)
+      const dr = d[i] + (gray - d[i]) * prog;
+      const dg = d[i + 1] + (gray - d[i + 1]) * prog;
+      const db = d[i + 2] + (gray - d[i + 2]) * prog;
+      d[i] = d[i] + (dr - d[i]) * a;
+      d[i + 1] = d[i + 1] + (dg - d[i + 1]) * a;
+      d[i + 2] = d[i + 2] + (db - d[i + 2]) * a;
+    }
+    lctx.putImageData(img, 0, 0);
     ctx.save();
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(low, 0, 0, w, h);
     ctx.restore();
-    // 低频噪声扰动（原版 shader 噪声雾手感;静态种子噪声 + progress 相位漂移）
-    const noise = noiseData();
-    if (noise && this.gyNoiseCanvas === null) {
-      const cv = document.createElement('canvas');
-      cv.width = noise.w; cv.height = noise.h;
-      const cx = cv.getContext('2d')!;
-      const id = cx.createImageData(noise.w, noise.h);
-      id.data.set(noise.data);
-      cx.putImageData(id, 0, 0);
-      this.gyNoiseCanvas = cv;
-    }
-    if (this.gyNoiseCanvas) {
-      ctx.save();
-      ctx.globalAlpha = 0.1 * k;
-      ctx.globalCompositeOperation = 'overlay';
-      const pat = ctx.createPattern(this.gyNoiseCanvas, 'repeat');
-      if (pat) {
-        ctx.fillStyle = pat;
-        ctx.fillRect(0, 0, w, h);
-      }
-      ctx.restore();
-    }
   }
-
-  /** Graveyard 雾噪声纹理缓存（懒建一次） */
-  private gyNoiseCanvas: HTMLCanvasElement | null = null;
 
   /** FilterBloodMoon（obj11 :429-482 字节码精确式,半分辨率逐像素同 drawSepia）：
    *  V+min 分档染色 + 径向衰减 + α 抛物线。★2026-08-25 重写：旧 multiply 近似

@@ -375,6 +375,9 @@ export class VanillaDust {
       if (!chainLink && !d.noGravity && d.type !== 41 && d.type !== 44 && d.type !== 309) {
         d.vy += 0.1;
       }
+      // :1895-1897 血尘 5/273 悬浮档（noGravity 时额外收缩——本引擎产 5 号恒重力档
+      // （NewDust noGravity 恒 false），门随源码保留防未来悬浮产尘漏缩）
+      if ((d.type === 5 || d.type === 273) && d.noGravity) d.scale -= 0.04;
       // :2144-2146 通用旋转
       if (d.type !== 79 && d.type !== 268 && d.type !== 304) {
         d.rotation += d.vx * 0.5;

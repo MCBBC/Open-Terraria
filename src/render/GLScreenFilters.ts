@@ -38,6 +38,15 @@ export type ScreenFxPass =
   | { kind: 'FilterBloodMoon'; color: readonly [number, number, number]; intensity: number; opacity: number }
   | { kind: 'FilterTest2'; opacity: number }
   | { kind: 'FilterCRT'; screenH: number; zoom: number; opacity: number }
+  /** ★批III尾窗：月总死亡倒计时 shake（FilterMoonLordShake :509-547；强度曲线
+   *  Main.cs:65956-65965 clamp(sin(cd/60×0.5)×2,0,1)×(0.75−0.5·cd/max)） */
+  | { kind: 'FilterMoonLordShake'; intensity: number; time: number }
+  /** 天柱死亡水晶 tint（:986-1014；ScreenEffectInitializer.cs:42 UseColor(1,0,0.75)+
+   *  UseIntensity(1)——UseOpacity 未设=默认 1,组装端按相序传强度） */
+  | { kind: 'FilterCrystalDestructionColor'; color: readonly [number, number, number]; intensity: number; opacity: number }
+  /** 天柱死亡水晶涡旋扭曲（:1016-1108；UseImage(Misc/noise) s1=LinearWrap,
+   *  uTargetPosition=死亡塔水晶中心 px,uProgress=相2 (t/60)×30） */
+  | { kind: 'FilterCrystalDestructionVortex'; screenRes: [number, number]; targetPx: [number, number]; intensity: number; progress: number; time: number }
   /** 沙尘暴/暴风雪全屏色罩（SandstormSky.cs:49-60 / BlizzardSky.cs:48-60 的
    *  MagicPixel 全屏 alpha 混合,参数由 SkyRenderer.sandstormSkyTint/blizzardSkyTint
    *  按原版公式算好）。注意:这不是 FilterManager 滤镜(是 SkyManager 天空层),
@@ -213,6 +222,82 @@ void main() {
   gl_FragColor = vec4(mix(s.rgb, uColor, uOpacity), 1.0);
 }`;
 
+
+/** ★批III尾窗 FilterMoonLordShake（obj13 :509-547）：水平 3-tap 微震(±dx 权重
+ *  0.15/0.7/0.15,c1=preshader 0.01×I×sin(2π·frac(t×3.183099+0.5)−π))+径向压暗
+ *  (gainX=1−1.3·d·I / gainY=1−d·I)。强度曲线=Main.cs:65956-65965（组装端算好） */
+const FRAG_MOONSHAKE = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;
+uniform float uIntensity;       // c0（组装端=clamp(sin(cd/60*0.5)*2,0,1)*(0.75-0.5*cd/max)）
+uniform float uTime;            // GlobalTimeWrappedHourly
+void main() {
+  float ph = fract(uTime * 3.1830988618 + 0.5) * 6.2831853 - 3.1415927; // preshader :546-551
+  float dx = 0.01 * uIntensity * sin(ph);                // c1（:552）
+  vec2 p = vUv - 0.5;                                    // :517（c2.x=-0.5）
+  float d = length(p);                                   // :518-521（dp2add/rsq/rcp=√）
+  float gainY = 1.0 - uIntensity * d;                    // :523
+  float gainX = 1.0 - 1.3 * uIntensity * d;              // :524-525（c3.y=1.3）
+  vec3 minus = texture2D(uScreen, vUv - vec2(dx, 0.0)).rgb; // :529
+  vec3 plus  = texture2D(uScreen, vUv + vec2(dx, 0.0)).rgb; // :528
+  vec3 ctr   = texture2D(uScreen, vUv).rgb;                 // :530
+  vec3 col = ctr * 0.7 + plus * 0.15 + minus * 0.15;        // :531-534（c3.x=0.7/c2.w=0.15）
+  gl_FragColor = vec4(col * vec3(gainX, gainY, gainY), 1.0); // :535（z 增益掩码省略,按 y 同档）
+}`;
+
+/** ★批III尾窗 FilterCrystalDestructionColor（obj21 :986-1014）：V=sat((r+g+b)/3),
+ *  k=3-2V,q=(k·V²)²,m=sat(2q);色相正部选择(:1007-1008 cmp 级联近似)=
+ *  m·uColor + max(2q-1,0)·(1-uColor);lrp uOpacity(=uIntensity,preshader :1013)。 */
+const FRAG_CRYSTAL_COLOR = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;
+uniform vec3 uColor;            // c2 = (1,0,0.75)（ScreenEffectInitializer.cs:42）
+uniform float uIntensity;       // 相序强度（组装端,Projectile.cs:37025/:37032）
+uniform float uOpacity;         // UseOpacity 未设=1（:42 无该链）
+void main() {
+  vec4 s = texture2D(uScreen, vUv);                              // :994
+  float V = clamp((s.r + s.g + s.b) / 3.0, 0.0, 1.0);            // :995-998（c3.x=1/3）
+  float k = -2.0 * V + 3.0;                                      // :999（c3.y/z）
+  float kV2 = k * V * V;                                         // :1000-1002
+  float q = kV2 * kV2;                                           // :1003
+  float m = clamp(2.0 * q, 0.0, 1.0);                            // :1006（sat）
+  vec3 comp = (vec3(1.0) - uColor) * max(2.0 * q - 1.0, 0.0);    // :1007-1008（cmp 级联=正部）
+  vec3 col = m * uColor + comp;                                  // :1009（mad c2）
+  gl_FragColor = vec4(mix(s.rgb, col, uOpacity * uIntensity), 1.0); // :1011-1012（lrp,preshader uOp=I）
+}`;
+
+/** ★批III尾窗 FilterCrystalDestructionVortex（obj22 :1016-1108）：目标向极坐标
+ *  噪声涡旋——atan 字节码=多项式逼近（GLSL atan 精确,数学级同构）;swirl=
+ *  len·I+ang 采 noise(0.318319,0.02 两轴),径向窗 clamp(len·I-progress,0,π) 的
+ *  sin×0.1 调制;噪声平方链（掩码省略,按主项 r 通道重构）。 */
+const FRAG_CRYSTAL_VORTEX = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;      // s0
+uniform sampler2D uNoise;       // s1 = Images/Misc/noise（LinearWrap）
+uniform vec2 uScreenRes;        // c3 = uScreenResolution
+uniform vec2 uTargetPx;         // c0 = uTargetPosition（px,已减 screenPos）
+uniform float uIntensity;       // c4（相序 ×2）
+uniform float uProgress;        // c5（相2 (t/60)×30）
+uniform float uTimeScroll;      // preshader lit16(-2.5)×uTime
+void main() {
+  vec2 rel = vUv * uScreenRes - uTargetPx;                       // :1029-1030
+  float len = length(rel);                                       // :1048-1051
+  float ang = atan(rel.y, rel.x);                                // :1031-1047
+  float swirl = len * uIntensity + ang;                          // :1058-1059
+  float w = clamp(len * uIntensity - uProgress, 0.0, 3.141592);  // :1061-1063（c9.z=π）
+  vec2 nUV = vec2(swirl * 0.318319, (ang + uTimeScroll) * 0.02); // :1066-1068（c9.x/y）
+  vec4 n = texture2D(uNoise, nUV);                               // :1069
+  vec4 scene = texture2D(uScreen, vUv);                          // :1070
+  float n2 = n.r * n.r;                                          // :1071-1072
+  n2 = n2 * n.r;                                                 // :1073
+  vec3 col = scene.rgb - n2 * uIntensity;                        // :1074（mad -c4）
+  col += n2 * uIntensity * n2;                                   // :1075（mad r0.y×c4,掩码近似）
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
 const FRAGS: Record<ScreenFxPass['kind'], string> = {
   FilterHeatDistortion: FRAG_HEAT,
   FilterMiniTower: FRAG_MINITOWER,
@@ -220,6 +305,9 @@ const FRAGS: Record<ScreenFxPass['kind'], string> = {
   FilterBloodMoon: FRAG_BLOODMOON,
   FilterTest2: FRAG_TEST2,
   FilterCRT: FRAG_CRT,
+  FilterMoonLordShake: FRAG_MOONSHAKE,
+  FilterCrystalDestructionColor: FRAG_CRYSTAL_COLOR,
+  FilterCrystalDestructionVortex: FRAG_CRYSTAL_VORTEX,
   SkyWeatherTint: FRAG_SKY_TINT,
 };
 
@@ -384,10 +472,10 @@ export class GLScreenFilters {
     if (!gl || this.diedAt || this.unavailable || passes.length === 0) return false;
     const w = source.width, h = source.height;
     if (w === 0 || h === 0) return false;
-    const needNoise = passes.some((p) => p.kind === 'FilterHeatDistortion');
+    const needNoise = passes.some((p) => p.kind === 'FilterHeatDistortion' || p.kind === 'FilterCrystalDestructionVortex');
     if (needNoise && !this.ensureNoise()) {
-      // 噪声未就绪：跳过 Heat pass 本帧（保持其余链）
-      passes = passes.filter((p) => p.kind !== 'FilterHeatDistortion');
+      // 噪声未就绪：跳过 Heat/Vortex pass 本帧（保持其余链）
+      passes = passes.filter((p) => p.kind !== 'FilterHeatDistortion' && p.kind !== 'FilterCrystalDestructionVortex');
       if (passes.length === 0) return false;
     }
     if (this.canvas.width !== w || this.canvas.height !== h) {
@@ -416,6 +504,20 @@ export class GLScreenFilters {
         gl.uniform1f(entry.uni.uTimeScroll, 0.04 * p.time);
         const s = p.intensity * p.opacity;
         gl.uniform2f(entry.uni.uOffset, s / p.screenRes[0], s / p.screenRes[1]);
+      } else if (p.kind === 'FilterMoonLordShake') {
+        gl.uniform1f(entry.uni.uIntensity, p.intensity);
+        gl.uniform1f(entry.uni.uTime, p.time);
+      } else if (p.kind === 'FilterCrystalDestructionColor') {
+        gl.uniform3f(entry.uni.uColor, p.color[0], p.color[1], p.color[2]);
+        gl.uniform1f(entry.uni.uIntensity, p.intensity);
+        gl.uniform1f(entry.uni.uOpacity, p.opacity);
+      } else if (p.kind === 'FilterCrystalDestructionVortex') {
+        gl.uniform1i(entry.uni.uNoise, 1);
+        gl.uniform2f(entry.uni.uScreenRes, p.screenRes[0], p.screenRes[1]);
+        gl.uniform2f(entry.uni.uTargetPx, p.targetPx[0], p.targetPx[1]);
+        gl.uniform1f(entry.uni.uIntensity, p.intensity);
+        gl.uniform1f(entry.uni.uProgress, p.progress);
+        gl.uniform1f(entry.uni.uTimeScroll, -2.5 * p.time);   // preshader lit16(-2.5)×uTime
       } else if (p.kind === 'FilterMiniTower') {
         gl.uniform3f(entry.uni.uColor, p.color[0], p.color[1], p.color[2]);
         gl.uniform1f(entry.uni.uOpacity, p.opacity);

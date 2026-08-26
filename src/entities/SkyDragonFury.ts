@@ -19,6 +19,7 @@
 //     4 帧 3t、8t 免疫 penetrate −1）：滞留 AoE 圈，尘 226 环抛。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
+import { cutTilesBox } from './ProjCutTiles';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
@@ -325,6 +326,7 @@ export class SkyDragonSwing extends Entity {
     const fwd = rotBy({ x: this.aimLen + 22, y: 0 }, this.aimAng);        // num11=22 前伸
     this.x = this.owner.cx - this.w / 2 + sp.x + fwd.x;
     this.y = this.owner.cy - this.h / 2 + sp.y + fwd.y;
+    cutTilesBox(game, this.x, this.y, this.w, this.h);                    // CutTiles（:12517/:15276;两门排除表均无 708）
     const tgt = rotBy({ x: this.aimLen + 22 + 40, y: 0 }, this.aimAng);   // 头前 40px 锚
     const txv = sp.x + tgt.x, tyv = sp.y + tgt.y;
     this.rot = Math.atan2(tyv, txv) + Math.PI / 4 * facing;               // :66579
@@ -436,6 +438,7 @@ export class SkyDragonShot extends Entity {
     this.vy += 0.3;                                  // aiStyle1 箭重力
     this.x += this.vx;
     this.y += this.vy;
+    cutTilesBox(game, this.x, this.y, this.w, this.h);          // CutTiles（:12517/:15276;两门排除表均无 709）
     const st = game.world.store;
     const tx = Math.floor(this.cx / 16), ty = Math.floor(this.cy / 16);
     if (!st.inBounds(tx, ty) || st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) { this.explode(game); return; }
@@ -549,6 +552,7 @@ export class SkyDragonCircle extends Entity {
     this.x = this.cx0 - size / 2;
     this.y = this.cy0 - size / 2;
     this.w = size; this.h = size;
+    cutTilesBox(game, this.x, this.y, this.w, this.h);          // CutTiles（:12517/:15276;两门排除表均无 1110）
     if (++this.frameCtr >= 3) {                      // 4 帧 3t（:29643-29652）
       this.frameCtr = 0;
       this.frame = (this.frame + 1) % 4;

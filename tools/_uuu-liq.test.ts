@@ -139,11 +139,13 @@ const OPS_OUT = process.env.SW_UUU_OPS_PATH ?? '/tmp/uuu-out/liqops-js.txt';
       liquids: Array<{ x: number; y: number; delay: number; kill: number }>; numLiquid: number; bufCount: number;
       checking: Uint8Array; skip: Uint8Array; cycles: number; curMaxLiquid: number;
       wetCounter: number; quickSettle: boolean; quickFall: boolean; stuckCount: number; stuckAmount: number; stuck: boolean;
-      solidNP: Uint8Array; solidFull: Uint8Array; world: { store: Record<string, Uint16Array | Uint8Array> & { w: number; h: number } };
+      solidNP: Uint8Array; world: { store: Record<string, Uint16Array | Uint8Array> & { w: number; h: number } };
       genWaterLine?: number; dungeonWaterExempt?: unknown; shimmerCenter?: unknown; generatingWorld?: boolean;
       waterDeathIds?: Set<number>; lavaDeathIds?: Set<number>;
     };
     const st = s2.world.store;
+    const dbg = s2 as unknown as Record<string, unknown>;
+    console.log('[dbg]', ['liquids','numLiquid','checking','skip','cycles','curMaxLiquid','wetCounter','quickSettle','quickFall','stuckCount','stuckAmount','stuck','solidNP','waterDeathIds','lavaDeathIds'].map(k=>k+':'+(dbg[k]===undefined?'U':typeof dbg[k])).join(' '), '| st:', ['type','flags','wall','liquid','liquidType','half','slope','wire','frameX','frameY'].map(k=>k+':'+((st as Record<string, unknown>)[k]===undefined?'U':'ok')).join(' '));
     const bin = (name: string, arr: Uint8Array | Uint16Array) => writeFileSync(`${DUMP_DIR}/${name}.bin`, Buffer.from(arr.buffer, arr.byteOffset, arr.byteLength));
     const meta = {
       iter,
@@ -153,9 +155,16 @@ const OPS_OUT = process.env.SW_UUU_OPS_PATH ?? '/tmp/uuu-out/liqops-js.txt';
       cycles: s2.cycles, curMaxLiquid: s2.curMaxLiquid, wetCounter: s2.wetCounter,
       quickSettle: s2.quickSettle, quickFall: s2.quickFall,
       stuckCount: s2.stuckCount, stuckAmount: s2.stuckAmount, stuck: s2.stuck,
-      solidNP: Array.from(s2.solidNP), solidFull: Array.from(s2.solidFull),
+      solidNP: Array.from(s2.solidNP),
       genWaterLine: s2.genWaterLine, hasDungeonExempt: !!s2.dungeonWaterExempt, shimmerCenter: s2.shimmerCenter ?? null,
       generatingWorld: s2.generatingWorld,
+      bufSliceX: Array.from((s2 as unknown as { bufX: Int32Array }).bufX.subarray(0, s2.bufCount)),
+      bufSliceY: Array.from((s2 as unknown as { bufY: Int32Array }).bufY.subarray(0, s2.bufCount)),
+      // pass 链 RNG 快照（UnifiedRandom = seedArray+inext，回放续流用）
+      rngSnap: ((sim as unknown as { passRng?: { vanilla?: UnifiedRandom } | null }).passRng?.vanilla) ? {
+        seedArray: Array.from((sim as unknown as { passRng: { vanilla: UnifiedRandom } }).passRng.vanilla.seedArray),
+        inext: (sim as unknown as { passRng: { vanilla: UnifiedRandom } }).passRng.vanilla.inext,
+      } : null,
     };
     writeFileSync(`${DUMP_DIR}/meta.json`, JSON.stringify(meta));
     const b64 = (name: string, set: Set<number>) => writeFileSync(`${DUMP_DIR}/${name}.json`, JSON.stringify([...set]));

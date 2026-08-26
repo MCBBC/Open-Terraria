@@ -45,6 +45,10 @@ function serverBase(addr: string): { httpBase: string; wsBase: string } | null {
 
 export class MultiplayerSelect {
   root: HTMLElement;
+  private chars: Array<{ id: number; name: string }> = [];
+  private charPicker: HTMLElement;
+  private charList = el('div');
+  private pickCb: (() => void) | null = null;
   private roomList = el('div');
   private codeInput: HTMLInputElement;
   private createName: HTMLInputElement;
@@ -68,29 +72,20 @@ export class MultiplayerSelect {
       'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); max-width:520px; width:min(520px,96vw); z-index:20; cursor:auto; max-height:92vh; overflow-y:auto;';
     this.root.appendChild(el('h2', undefined, T('Title')));
 
-    // ---- 角色选择（进房使用的角色；外观随 SyncPlayer 同步给其他玩家） ----
-    const charSel = el('select') as HTMLSelectElement;
-    charSel.style.cssText = 'width:100%; padding:6px; margin-bottom:10px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
-    charSel.appendChild(el('option', undefined, T('DefaultChar')));
-    this.root.appendChild(charSel);
-    charSel.addEventListener('change', () => {
-      const id = parseInt(charSel.value, 10);
-      if (!Number.isNaN(id)) void cb.onPickCharacter(id);
-    });
-    void cb.listCharacters().then((chars) => {
-      let first = -1;
-      for (const c of chars) {
-        const opt = el('option', undefined, c.name) as HTMLOptionElement;
-        opt.value = String(c.id);
-        charSel.appendChild(opt);
-        if (first < 0) first = c.id;
-      }
-      // 有角色则默认选中第一个（进房即带外观）
-      if (first >= 0) {
-        charSel.value = String(first);
-        void cb.onPickCharacter(first);
-      }
-    });
+    // ---- 角色列表(2026-08-25 用户要求:面板顶部不再常驻选择器——加入/创建时才
+    //      跳到角色列表选择,见 openCharPicker/closeCharPicker) ----
+    void cb.listCharacters().then((list) => { this.chars = list; });
+    this.charPicker = el('div');
+    this.charPicker.style.cssText = 'position:absolute; inset:0; z-index:5; background:#0a1028; padding:16px; overflow-y:auto; display:none;';
+    const pickerTitle = el('div', undefined, T('PickCharacter'));
+    pickerTitle.style.cssText = 'margin:0 0 10px; color:#c9d4ff;';
+    this.charPicker.appendChild(pickerTitle);
+    this.charPicker.appendChild(this.charList);
+    const pickerBack = el('button', 'sw-btn', T('Back')) as HTMLButtonElement;
+    pickerBack.style.marginTop = '12px';
+    pickerBack.onclick = () => this.closeCharPicker();
+    this.charPicker.appendChild(pickerBack);
+    this.root.appendChild(this.charPicker);
 
     // ---- 刷新房间(2026-08-25 用户要求:不再暴露服务器地址——lobby 固定 DEFAULT_SERVER;
     //      连不上时房间列表为空,不报错) ----
@@ -117,7 +112,11 @@ export class MultiplayerSelect {
     this.codeInput.style.cssText = 'flex:1; padding:8px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
     const codeBtn = el('button', 'sw-btn', T('JoinByCode')) as HTMLButtonElement;
     codeBtn.style.cssText = 'width:auto; margin:0; padding:8px 14px; flex:none;';
-    codeBtn.onclick = () => void this.joinByCode();
+    codeBtn.onclick = () => {
+      const code = this.codeInput.value.trim();
+      if (!/^\d{6}$/.test(code)) { this.status(this.roomList, T('BadCode'), '#ff6b6b'); return; }
+      this.openCharPicker(() => void this.joinByCode());
+    };
     this.codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') codeBtn.click(); });
     codeRow.appendChild(this.codeInput);
     codeRow.appendChild(codeBtn);
@@ -170,7 +169,12 @@ export class MultiplayerSelect {
 
     const createBtn = el('button', 'sw-btn', T('Create')) as HTMLButtonElement;
     createBtn.style.margin = '8px 0 4px';
-    createBtn.onclick = () => void this.createRoom(createBtn);
+    createBtn.onclick = () => {
+      const id = parseInt(this.saveSel.value, 10);
+      const sv = this.saves.find((x) => x.id === id);
+      if (!sv?.json) { this.status(this.createdInfo, T('PickSaveFirst'), '#ff6b6b'); return; }
+      this.openCharPicker(() => void this.createRoom(createBtn));
+    };
     this.root.appendChild(createBtn);
 
     this.createdInfo.style.cssText = 'min-height:18px; font-size:13px; color:#8b98bd; word-break:break-all;';
@@ -182,6 +186,39 @@ export class MultiplayerSelect {
     this.root.appendChild(back);
 
     void this.refreshRooms();
+  }
+
+  // ================= 角色选择跳转(2026-08-25) =================
+
+  /** 打开角色列表浮层;玩家点选角色 → onPickCharacter → 执行挂起的加入/创建动作 */
+  private openCharPicker(onPicked: () => void): void {
+    this.pickCb = onPicked;
+    this.charList.textContent = '';
+    const addRow = (name: string, pick: () => void): void => {
+      const item = el('div', undefined, name);
+      item.style.cssText = 'padding:10px; border-bottom:1px solid rgba(90,120,220,0.2); cursor:pointer; color:#e8ecf8;';
+      item.onmouseenter = () => { item.style.background = 'rgba(60,80,160,0.3)'; };
+      item.onmouseleave = () => { item.style.background = ''; };
+      item.onclick = () => {
+        pick();
+        this.closeCharPicker();
+        const cb2 = this.pickCb;
+        this.pickCb = null;
+        cb2?.();
+      };
+      this.charList.appendChild(item);
+    };
+    if (this.chars.length) {
+      for (const c of this.chars) addRow(c.name, () => { void this.cb.onPickCharacter(c.id); });
+    } else {
+      addRow(T('DefaultChar'), () => {});   // 无存档角色:走主流程默认角色
+    }
+    this.charPicker.style.display = 'block';
+  }
+
+  private closeCharPicker(): void {
+    this.charPicker.style.display = 'none';
+    this.pickCb = null;
   }
 
   // ================= 加入 =================
@@ -218,8 +255,10 @@ export class MultiplayerSelect {
         item.appendChild(left);
         item.appendChild(right);
         item.onclick = () => {
-          const url = this.joinUrl(rm.code);
-          if (url) this.cb.onJoinRoom(url, '');
+          this.openCharPicker(() => {
+            const url = this.joinUrl(rm.code);
+            if (url) this.cb.onJoinRoom(url, '');
+          });
         };
         this.roomList.appendChild(item);
       }

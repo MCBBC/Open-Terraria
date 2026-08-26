@@ -29,6 +29,7 @@
 //   Damage 击退向 :13652-13661（697/699/707/708 = 远离【玩家】中心；698/700 用默认弹体向）
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
+import { cutTilesBox } from './ProjCutTiles';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
@@ -338,6 +339,7 @@ export class MonkSlam extends Entity {
     this.ai0++;
     if (this.ai0 > 20) { this.dead = true; return; }             // :70691-70693
     if (--this.timeLeft <= 0) { this.dead = true; return; }      // timeLeft=5（:7393）
+    cutTilesBox(game, this.x, this.y, this.w, this.h);           // CutTiles（:12517/:15276;两门排除表均无 698）
     if (this.ai0 === 1) this.impactFx(game);                     // :70694-70700（ai0==1 帧）
     // ---- 命中（Colliding :15537-15551）：盒 inflate(70,0)+X 平移 velX×30；再取
     //      Y−70 / X+velX×20 / inflate(−30,0) 子盒判交。每敌一次（:7396-7397）----
@@ -472,6 +474,7 @@ export class GhastlyGlaiveProj extends Entity {
     const fwdX = (this.aimLen + 22) * cosA, fwdY = (this.aimLen + 22) * sinA;    // num5=22 前伸（:70930）
     this.x = this.owner.cx - this.w / 2 + spx2 + fwdX;               // Center 钉手心（:70912）后 position += …（:70931）
     this.y = this.owner.cy - this.h / 2 + spy2 + fwdY;
+    cutTilesBox(game, this.x, this.y, this.w, this.h);               // CutTiles（:12517/:15276;两门排除表均无 699）
     // rotation：原版 target = vector2(手心) + spinningpoint.Rot + Vector2(len+22+40,0).Rot
     // （:70932）→ AngleTo(target) 即 target 相对手心的角（:70933）
     this.rot = Math.atan2(spy2 + (this.aimLen + 22 + 40) * sinA, spx2 + (this.aimLen + 22 + 40) * cosA)
@@ -636,6 +639,7 @@ export class MonkGhast extends Entity {
       }
     }
     this.x += this.vx; this.y += this.vy;
+    cutTilesBox(game, this.x, this.y, this.w, this.h);          // CutTiles（:12517/:15276;两门排除表均无 700）
     // ---- 命中：默认 AABB 判定（700 无 Colliding 特支）+ 每敌一次 ----
     hitTownNpcs(this, game, this.damage, sgn * 2, 'playerProj', 0);
     for (const ent of game.enemies()) {

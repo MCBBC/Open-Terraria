@@ -438,6 +438,7 @@ import {
   FACE_UNDER_HAIR, FACE_MASK_LAYER, FACE_FLOWER_LAYER, FACE_HEAD_LAYER,
 } from '../data/vanillaAccDrawslots';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageData, type SM2Uniforms } from '../fx/SM2Effect';
+import { drawStardewAnimation } from '../fx/StardewAnimation';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
 import { MapPingStore } from '../net/syncModules';
@@ -3337,6 +3338,10 @@ export class Renderer {
         lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
     }
 
+    // ★批III尾窗：Stardew 彩蛋编排器（Main.cs:28604 弹体 995 屏叠；此处屏空间
+    //    等位复刻——全屏过场,画于 HUD 前）
+    drawStardewAnimation(ctx, viewW, viewH);
+
     // 7b'. 指针物品/交互图标（Main.cs:44474-44562 DrawInterface_40）+ 住房光标
     //      携带头像（:44622-44688 DrawInterface_38）——屏幕空间最后层
     this.drawCursorItemIcon(ctx, player);
@@ -3367,7 +3372,7 @@ export class Renderer {
       this.drawMapOverlay(ctx, cam, world, player, entities, viewW, viewH, z);
     }
 
-    this.drawScreenFilterChain(ctx, cam, player, viewW, viewH, z);
+    this.drawScreenFilterChain(ctx, cam, player, viewW, viewH, z, world);
 
     // 8. 飘字（受光照影响后画）。数字类 = 原版位图字体（Combat_Text/Combat_Crit
     //    xnb 提取,见 render/CombatTextFont）:5 层绘制（±targetScale 四向暗化影 +
@@ -5480,23 +5485,20 @@ export class Renderer {
         // 546 怒滚虫 spriteDirection=−direction(cs:63368)→同鸮族反翻档:facing<0 才翻
         // (facing 兼作 chargerAI 的 AI direction,不可在 AI 侧取反)
         const sdirNeg = e.vanillaId === 546;
-        // 301 渡鸦（FindFrame :74257-74271 专属支,贴图原生朝右）双态判据:
-        //   落地(vy==0) sdir=-direction(:74260)→facing<0 翻;
-        //   飞行按【速度向】滞回 vx>0.5→sdir=-1 / vx<-0.5→sdir=1(:74263-74270)→vx<-0.5 翻。
-        //   ★不可并入上档按 facing 翻:转向瞬态 direction 先翻而速度未翻(vultureAI X 加速
-        //   0.15/t,满速反转 ~24t 窗口)、受击退速度已反向 direction 未变——两态按 facing
-        //   都会短暂倒飞。速度向镜像先例=恶魔眼族 eyeMirrorByVx。|vx|≤0.5 死区原版保前值
-        //   (有态滞回),本处无态近似不翻(数 tick 瞬态,登记)。
-        //   曾整体落通用镜像档=恒倒飞(2026-08-26 用户实报墓地乌鸦)
+        // 301 渡鸦（FindFrame :74257-74271 专属支,贴图原生朝右）：spriteDirection
+        // 有态写点已迁 Enemy.findFrameRotation（落地=-direction/飞行 vx±0.5 滞回/
+        // 死区保前值 → e.ravenSdir）——此处只按 Main.cs:22984 `spriteDirection==1`
+        // 镜像。曾落通用镜像档=恒倒飞(2026-08-26 用户实报墓地乌鸦);中间版无态
+        // 双式在转向/击退瞬态与死区滞回上偏离,终版=有态字段 1:1
         const ravenMirror = e.vanillaId === 301;
-        const ravenFlip = ravenMirror && (e.vy === 0 ? e.facing < 0 : e.vx < -0.5);
+        const ravenFlip = ravenMirror && e.ravenSdir === 1;
         const wormMirror = stR === 66 && !(e.vanillaId >= 485 && e.vanillaId <= 487);
         // 蜗牛 aiStyle67 spriteDirection 走象限表(上方旋转分支自带局部翻面)——
         // 通用 facing 镜像禁用,否则与象限翻面叠加成恒翻
         const snailMirror = stR === 67;
         if (!rotationDriven && !owlMirror && !sdirNeg && !ravenMirror && !wormMirror && !snailMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
         if (!rotationDriven && (owlMirror || sdirNeg) && e.facing < 0) ctx.scale(-1, 1);
-        if (ravenFlip) ctx.scale(-1, 1);   // 301:双态判据已含方向,不叠 facing<0 门(受击退瞬态 facing⊥vx)
+        if (ravenFlip) ctx.scale(-1, 1);   // 301:spriteDirection 态机已含全部双态/滞回,不叠 facing 门
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
@@ -8984,6 +8986,30 @@ export class Renderer {
     ctx.restore();
   }
 
+  /** ★批III尾窗：RainbowTownSlime pass 逐帧烘焙（Main.cs:25780）。输入=本体帧切片，
+   *  t0Rect=帧在 NPC 表内的位置（uSourceRect/uImageSize0 语义=SpriteBatch 子矩形）；
+   *  uTime=GlobalTimeWrappedHourly（preshader 内 ×0.16 相位）。失败（pass 缺失/画布
+   *  不可用）返回 null = 回退平贴。 */
+  private rainbowSlimeScratch: HTMLCanvasElement | null = null;
+  private bakeRainbowSlimeFrame(r: DrawRect, pass: NonNullable<ReturnType<typeof getPass>>): HTMLCanvasElement | null {
+    if (typeof document === 'undefined') return null;
+    const cv = this.rainbowSlimeScratch ??= document.createElement('canvas');
+    if (cv.width !== r.sw || cv.height !== r.sh) { cv.width = r.sw; cv.height = r.sh; }
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    if (!cx) return null;
+    cx.clearRect(0, 0, r.sw, r.sh);
+    cx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
+    const id = cx.getImageData(0, 0, r.sw, r.sh);
+    const u = defaultUniforms();
+    u.uTime = (performance.now() / 1000) % 3600;
+    u.uSourceRect = [r.sx, r.sy, r.sw, r.sh];
+    u.uImageSize0 = [r.img.width, r.img.height];
+    runPassOnImageData(pass, id.data, r.sw, r.sh, u, [],
+      { sx: r.sx, sy: r.sy, sheetW: r.img.width, sheetH: r.img.height });
+    cx.putImageData(id, 0, 0);
+    return cv;
+  }
+
   private drawTownNPC(n: TownNPC, world?: World) {
     const ctx = this.ctx;
     // 血条统一走实体循环的 drawHealthBar(原版 HealthBar1/2 贴图版,Main.cs:21721+;
@@ -9033,7 +9059,21 @@ export class Renderer {
         // 恰好等价原版帽档 num8 = 1−st（Main.cs:27073-27075）
         ctx.globalAlpha = shimmerBodyAlpha(n.shimmerTransparency);
         if (n.iframes > 0 && n.iframes % 4 < 2) ctx.filter = 'brightness(2.5)'; // 受击闪白
-        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2 + addYT, r.sw, r.sh);
+        // ---- ★批III尾窗：彩虹镇史莱姆 676/681 本体 RainbowSlime pass（Main.cs:25780
+        //      GameShaders.Misc["RainbowTownSlime"].Apply(DrawData)——SM2 字节码经
+        //      t0Rect 表空间映射逐帧烘焙；uTime preshader 内部 ×0.16；位置相由
+        //      uSourceRect/uImageSize0 同源。相序 40×56 帧小窗,每帧重烘焙可负担
+        if (nidT === 676 || nidT === 681) {
+          const rsp = getPass('RainbowTownSlime');
+          const baked = rsp ? this.bakeRainbowSlimeFrame(r, rsp) : null;
+          if (baked) {
+            ctx.drawImage(baked, -r.sw / 2, -r.sh / 2 + addYT, r.sw, r.sh);
+          } else {
+            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2 + addYT, r.sw, r.sh);
+          }
+        } else {
+          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2 + addYT, r.sw, r.sh);
+        }
         // ---- 160/209 Glow 变体档（Main.cs:25769-25799，S 备案 npcGlowVariantTex 接通）----
         //      城镇 NPC 不经 drawNpcGlow → 本体后挂同档 Glow：Color(128−α/2,×3,0)
         //      A=0 → 'lighter' 加性（'128a2' 同款表达式）；160 松露人微光态 Glow_352、
@@ -12310,13 +12350,19 @@ export class Renderer {
    *  失败回退 2D(heat 半分辨率扭曲 + MonolithFilters canvas 近似) */
   private drawScreenFilterChain(
     ctx: CanvasRenderingContext2D, cam: Camera, player: Player,
-    viewW: number, viewH: number, z: number,
+    viewW: number, viewH: number, z: number, world?: World,
   ): void {
     const mono = this.monoFilters;
     // 沙尘暴/暴风雪色罩(SkyWeatherTint,SkyRenderer 状态机产出;头插=天空层在
     // FilterManager 滤镜链之下——SandstormSky/BlizzardSky 是 SkyManager 层非滤镜)
     const wxTints = this.sky.weatherTintPasses();
-    if (!mono.anyInUse && !mono.heatInUse && wxTints.length === 0) return;
+    const lec = world?.lunarEvent;
+    const shakeI = lec && lec.moonLordCountdown > 0
+      ? Math.min(1, Math.max(0, Math.sin(lec.moonLordCountdown / 60 * 0.5) * 2))
+        * (0.75 - 0.5 * lec.moonLordCountdown / Math.max(1, lec.moonLordCountdownMax))
+      : 0;
+    const cd = lec?.crystalDeath ?? null;
+    if (!mono.anyInUse && !mono.heatInUse && wxTints.length === 0 && shakeI <= 0 && !cd) return;
     // uScreenResolution=UnscaledScreenSize(screen/RenderZoom ScreenShaderData.cs:96);
     // uScreenPosition=屏幕左上世界px(本仓屏幕即全幅,无 offScreenRange=200 垫,
     // 语义等价——vanilla 垫值只是为比屏幕大的离屏采集目标)
@@ -12331,6 +12377,25 @@ export class Renderer {
           intensity: mono.heatIntensity, opacity: mono.heatOpacity,
           time: (performance.now() / 1000) % 3600,   // GlobalTimeWrappedHourly(Main.cs:16777)
         });
+      }
+      // ---- ★批III尾窗：事件屏效三 pass ----
+      // 月总死亡倒计时 shake（Main.cs:65956-65965：强度=clamp(sin(cd/60×0.5)×2,0,1)
+      // ×(0.75−0.5·cd/max)；MaxMoonLordCountdown=3600→我方 countdownMax 同源）
+      if (shakeI > 0) {
+        passes.push({ kind: 'FilterMoonLordShake', intensity: shakeI,
+          time: (performance.now() / 1000) % 3600 });
+      }
+      // 天柱死亡水晶 tint+vortex（Projectile.cs:37019-37075 三相序；t 由
+      // LunarEvent.tickCrystalDeath 驱动,480t 归零）
+      if (cd) {
+        const nI = cd.t < 120 ? Math.min(1, cd.t / 120) : 1;              // 相0 淡入/相1 恒1
+        passes.push({ kind: 'FilterCrystalDestructionColor', color: [1, 0, 0.75],
+          intensity: nI, opacity: 1 });
+        const vI = (cd.t < 420 ? nI : 2);                                  // 相2 I=2（:37057）
+        const prog = cd.t >= 420 ? (cd.t - 420) / 60 * 30 : 0;             // 相2 (t/60)×30（:37060）
+        passes.push({ kind: 'FilterCrystalDestructionVortex', screenRes,
+          targetPx: [cd.x - screenPos[0], cd.y - screenPos[1]],
+          intensity: vI, progress: prog, time: (performance.now() / 1000) % 3600 });
       }
       for (const f of mono.visibleFilters()) {
         switch (f.def.kind) {

@@ -79,6 +79,12 @@ const CSS = `
   padding: 5px 16px; cursor: pointer; font-family: inherit;
 }
 .sw-npc-btns button:hover { background: #4a5aa0; }
+/* NPCChatPanel.cs:136-138 按钮通知图标(UI_quickicon1,文字右+8px;亮度脉冲
+   sin(2πt)白↔半透=Utils.cs:448,rotMul=0 无摇摆) */
+.sw-npc-btns button { position: relative; }
+.sw-npc-excl { width: 6px; height: 16px; image-rendering: pixelated; margin-left: 8px;
+  vertical-align: -3px; animation: sw-excl-pulse 1s linear infinite; }
+@keyframes sw-excl-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 .sw-npc-shop {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 520px; max-width: 94vw; z-index: 23; cursor: auto;
@@ -157,7 +163,7 @@ export class NpcDialog {
     this.close();
     const panel = document.createElement('div');
     panel.className = 'sw-npc-dialog';
-    const btns = buttons.map((b) => `<button data-b="${b.id}">${b.label}</button>`).join('');
+    const btns = buttons.map((b) => `<button data-b="${b.id}">${b.label}${(b as { excl?: boolean }).excl ? '<img class="sw-npc-excl" src="sprites/vanilla-ui/UI_quickicon1.png" alt="!" draggable="false">' : ''}</button>`).join('');
     // 头像(原版 Main.npcChatPortrait = Images/TownNPCs/Portraits/Portrait_<Name>，SetTalkNPC :4196;
     // 打开时 DoNPCPortraitHop 弹跳)——无头像类型(如骷髅商人外的野兽)原版也不显示。
     // ★原版画法（Main.cs DrawNPCPortrait :39745）：200×200 原尺寸画在圆形底框上、

@@ -1605,6 +1605,11 @@ export class Enemy extends Entity {
   /** 原版 directionY（火轮/刺球对角弹跳的纵向方向；AI_002 飘浮眼亦在此持久化——
    *  玩家死亡后 TargetClosest 无操作,沿用最后垂直方向滑行而非恒上飞） */
   dirY = 1;
+  /** 渡鸦 301 spriteDirection（FindFrame case 301 :74257-74271 有态写点——
+   *  落地=-direction、飞行 vx±0.5 滞回、|vx|≤0.5 死区保前值。缺省=-1 与
+   *  原版 NPC.spriteDirection 字段缺省一致（NPC.cs:6430）。渲染层
+   *  drawEnemy 消费（==1 镜像,Main.cs:22984） */
+  ravenSdir = -1;
   /** AI 首帧初始化标记（原版 ai[0]==0 门在 ai0 初值 -1120 的史莱姆语义下不可用） */
   aiInit = false;
   /** AI_024 鸮族 localAI[0]（出生即飞行一次性门,NPC.cs:25410-25416） */
@@ -1752,6 +1757,12 @@ export class Enemy extends Entity {
     this.targetClosest(game);
     const player = this.targetRef(game);
     const hasPlayer = !!player && !player.dead;
+    // Collision_DecideFallThroughPlatforms（NPC.cs:94118-94252 全表 1:1）——
+    // 原版 Update 在 AI 后、ApplyTileCollision 前逐 tick 求值（本仓物理在 AI 内,
+    // 取上一 tick 态=标准一拍滞后等价）；true = 平台不作为落面（下落穿透）。
+    // 恶魔眼/飞行武器/蜘蛛/幽灵等飞行族恒穿;战士族 aiStyle3 仅 directionY==1
+    // （下落中）穿、落地 dirY 归 0 恢复站面。玩家不受此表（Player 侧 inputDown）
+    this.dropThrough = this.decideFallThroughPlatforms(game);
 
     // ---- 原版数据驱动路径：按 aiStyle 分发到已移植的 AI 家族（分发后落入共享尾段） ----
     // 蠕虫身体段（wormFollow 非空）无 AI：位置由头部 wormAI 沿链驱动，但仍走共享尾段（接触伤害等）
@@ -2332,6 +2343,36 @@ export class Enemy extends Entity {
     this.pushHistory();   // 原版 npc.oldPos/oldRot（DrawNPC 拖尾族 419/125-131 读）
   }
 
+  /** Collision_DecideFallThroughPlatforms（NPC.cs:94118-94252）1:1 全表：
+   *  true = 本 tick 平台不作为落面（下落穿透）。极性对读：Update :93738
+   *  `fall = Collision_DecideFallThroughPlatforms()` → ApplyTileCollision(fall,…)
+   *  → TileCollision fallThrough 参（恶魔眼族/aiStyle 5 飞行武器/40 蜘蛛/44 飞鱼/
+   *  22 幽灵/49/14 等飞行族恒 true；aiStyle 3 战士族 directionY==1 下落中才穿）。
+   *  aiStyle 7 城镇支（:94216-94251）依赖 homeTileY——本仓城镇 NPC 恒 homeTileY=-1
+   *  （无 home,Enemy.townNPC 注），两分母（homeTileY-行>16 / 行<-2）恒假 → 恒不穿 */
+  decideFallThroughPlatforms(game: GameHooks): boolean {
+    const t = this.vanillaId;
+    const st = this.vanilla?.aiStyle ?? 0;
+    if (t != null && (t === 2 || t === -43 || (t >= 190 && t <= 194) || t === 317 || t === 318 || t === 133)) return true;
+    if (st === 10 || st === 5 || st === 40 || st === 44 || st === 22 || st === 49 || st === 14) return true;
+    if (t != null && (t === 467 || t === 477 || t === 173 || t === 210 || t === 211
+      || t === 247 || t === 248 || t === 418 || t === 405 || t === 406 || t === 490 || t === 301)) return true;
+    if (t === 469 && this.ai2 === 1) return true;                       // :94161
+    if (st === 3 && this.dirY === 1) return true;                       // :94164 战士族下落穿
+    const p = game.player as Player | null;
+    const pBelow = !!p && p.y > this.y + this.h;                        // player.position.Y > bottom
+    // target>=0 门（:6374 缺省 -1）≈ hadTarget（seekDirX 生效过即置位;潜行/镇静
+    // 早退分支原版仍写 target、本仓不置——一拍自愈,登记）
+    if (t === 50 && this.hadTarget && pBelow) return true;              // :94170 史王
+    if (t === 657 && this.hadTarget && p && p.y > this.y + this.h) return true; // :94174 史皇后
+    if (st === 26 && this.hadTarget && p && p.y + p.h - this.vy > this.y + this.h) return true; // :94178 独角兽族
+    if (t === 245 && this.hadTarget && pBelow) return true;             // :94183 石巨人本体
+    if (t != null && t >= 542 && t <= 545) return true;                 // :94187
+    if (st === 107 && this.dirY === 1) return true;                     // :94190
+    if (st === 87 && pBelow) return true;                               // :94194 宝箱怪(原版无 target 判)
+    return false;
+  }
+
   /** FindFrame 旋转写点层（NPC.cs FindFrame 逐 case 1:1，AI 主体之后执行——
    *  原版 FindFrame 每 tick 在 AI 后跑，其中十余 case 写 rotation；本仓此前只搬了
    *  帧 logic 漏了旋转，2026-08-20 旋转三件套审计补齐。spriteDirection=direction
@@ -2341,7 +2382,16 @@ export class Enemy extends Entity {
     if (vid === 75) this.visAngle = this.vx * 0.1;                    // 精灵 :74820
     else if (vid === 122) this.visAngle = this.vx * 0.05;             // 蜗牛怪 :74307
     else if (vid === 330) this.visAngle = this.vx * 0.15;             // 骚灵 :75595
-    else if (vid === 301) this.visAngle = this.vx * 0.1;              // 渡鸦 :74287
+    else if (vid === 301) {
+      // 渡鸦 FindFrame case 301（:74257-74271 专属支）：spriteDirection 有态写点——
+      //   落地(vy==0) =-direction(:74260)；飞行 vx>0.5→-1 / vx<-0.5→1(:74263-74270)、
+      //   |vx|≤0.5 死区保前值（滞回）。rotation=vx×0.1（:74287）。
+      //   渲染层 drawEnemy 按 ravenSdir==1 镜像（Main.cs:22984 spriteDirection==1）
+      if (this.vy === 0) this.ravenSdir = -this.facing;
+      else if (this.vx > 0.5) this.ravenSdir = -1;
+      else if (this.vx < -0.5) this.ravenSdir = 1;
+      this.visAngle = this.vx * 0.1;
+    }
     else if (vid === 156 || vid === 226) this.visAngle = this.vx * 0.1;  // 红魔/飞蛇 :74604/:75510
     else if (vid === 509 || vid === 581) this.visAngle = this.vx * 0.1;  // 巨型飞蚁狮/飞蚁狮（AI 段 :31107/:31140）
     else if (vid === 224 || vid === 587) {                            // 飞鱼/眼球飞鱼 :75460-75468
@@ -5486,6 +5536,11 @@ export class Enemy extends Entity {
     this.noGravity = true;
     if (this.ai0 === 0) {
       this.noGravity = false;
+      // TargetClosest 每 tick 刷新（:24085 栖息态帧首——FindFrame 落地支
+      // spriteDirection=±direction 消费：秃鹫 61 正向(:74236)=面向玩家、
+      // 渡鸦 301 反向(:74260)=背向玩家,各自 vanilla 观感）。player 死亡门
+      // =本仓 seekDirX 调用侧统一约定（飞行支同门）
+      if (player && !player.dead) this.facing = this.seekDirX(player);
       // 唤醒判定用重力前的速度（原版 AI 先读 velocity、重力在其后施放——
       // 落地碰撞清零后站立态 vy==0，不会被本 tick 重力误判成"有速度"）
       const preVy = this.vy;
@@ -12112,6 +12167,17 @@ export class Enemy extends Entity {
     } else {
       this.hp -= dmg;
     }
+    // NPC.HitEffect 鸟族块（NPC.cs:87518-87556：61 秃鹫/252 鹦鹉/301 渡鸦同式）：
+    // 存活受击 → ceil(防后伤/lifeMax×100) 簇 5 号血尘（DustID.Blood=5；
+    // SpeedX=hitDirection/SpeedY=-1 + NewDust 通用抖动）。原版 hitDirection=
+    // StrikeNPC 入参（调用侧恒 ±1）→ 本仓 kbx 符号,0 兜 1（同死亡 gore 调用约定）。
+    // ★原版 HitEffect 无通用尾支（最终 else=`if(type!=156) return`）——未列型
+    // 受击/死亡原版不出尘；击杀分支走下方死亡管线的 50 簇段。
+    if ((this.vanillaId === 61 || this.vanillaId === 252 || this.vanillaId === 301) && this.hp > 0) {
+      const hd = Math.sign(kbx) || 1;
+      const n = Math.ceil((dmg / this.maxHp) * 100);
+      for (let k = 0; k < n; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hd, -1);
+    }
     // DPS 计累计(Projectile.cs:12817-12818/Player.cs:20165-20168 两调用点均
     // accDreamCatcher 门禁+fromPlayer 标记;全仓伤害漏斗单点收口)
     if (fromPlayer) {
@@ -12540,6 +12606,13 @@ export class Enemy extends Entity {
         // 空 = 显式无声(原版 DeathSound=null,246 头:血尽本应转 249,标准死零死音)——
         // 旧 'killed' 合成 fallback 无可达场景(fromVanilla 恒非空除 null 路径),撤
       }
+      // 鸟族死亡尘（HitEffect life<=0 段：50 簇 5 号血尘 SpeedX=2×hitDirection/
+      // SpeedY=-2,先尘后 gore 与原版同序）。gore 438/439 由上方查表
+      // （vanilla-gore.json 301→438/439、61→86/87/88）
+      if (this.vanillaId === 61 || this.vanillaId === 252 || this.vanillaId === 301) {
+        const hd = Math.sign(kbx) || 1;
+        for (let k = 0; k < 50; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, 2 * hd, -2);
+      }
       // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs:82421-:90873 →
       // tools/extract-gore.mjs → src/data/vanilla-gore.json）：查表炸 GorePiece
       // （位置/速度/ai 门/gates 守卫/post 后处理 1:1，Gore.NewGore 随机扰动在
@@ -12548,16 +12621,23 @@ export class Enemy extends Entity {
       // （史莱姆族等）→ 只走下方彩色粒子近似
       spawnNpcDeathGore(this, game, Math.sign(kbx) || 1, this.facing);
       // 死亡碎裂：与主角同款物理粒子（喷溅/落地反弹/停驻淡出），颜色按怪物类型
-      // （兼作原版 HitEffect 的血尘近似，与 gore 碎块叠加）
+      // （兼作原版 HitEffect 的血尘近似，与 gore 碎块叠加）——鸟族 61/252/301
+      // 已换原版精确血尘（上方 50 簇），不再叠通用近似（原版本族无彩色粒子段）
       const [c1, c2, c3] = this.def.gore;
       const big = this.killBossFlag || this.w > 40;
-      game.spawnParticles(this.cx, this.y + this.h * 0.3, c1, big ? 26 : 12, big ? 3.4 : 2.6, { life: 240, damp: 0.988, grav: 0.09 });
-      game.spawnParticles(this.cx, this.cy, c2, big ? 18 : 8, big ? 2.6 : 2.0, { life: 220, damp: 0.985, grav: 0.09 });
-      game.spawnParticles(this.cx, this.cy - this.h * 0.2, c3, big ? 12 : 6, big ? 3.0 : 2.3, { life: 200, damp: 0.988, grav: 0.09 });
+      const birdExactDust = this.vanillaId === 61 || this.vanillaId === 252 || this.vanillaId === 301;
+      if (!birdExactDust) {
+        game.spawnParticles(this.cx, this.y + this.h * 0.3, c1, big ? 26 : 12, big ? 3.4 : 2.6, { life: 240, damp: 0.988, grav: 0.09 });
+        game.spawnParticles(this.cx, this.cy, c2, big ? 18 : 8, big ? 2.6 : 2.0, { life: 220, damp: 0.985, grav: 0.09 });
+        game.spawnParticles(this.cx, this.cy - this.h * 0.2, c3, big ? 12 : 6, big ? 3.0 : 2.3, { life: 200, damp: 0.988, grav: 0.09 });
+      }
       return true;
     }
-    // 受击：少量碎屑零散溅落（不大面积）
-    game.spawnParticles(this.cx, this.cy, this.def.gore[0], 5, 1.4, { life: 60 });
+    // 受击：少量碎屑零散溅落（不大面积）——鸟族 61/252/301 已有原版精确血尘
+    // （ hurt 首段 HitEffect 块），不再叠通用近似
+    if (this.vanillaId !== 61 && this.vanillaId !== 252 && this.vanillaId !== 301) {
+      game.spawnParticles(this.cx, this.cy, this.def.gore[0], 5, 1.4, { life: 60 });
+    }
     return false;
   }
 

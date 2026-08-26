@@ -116,6 +116,13 @@ export interface GameHooks {
     dir: number, spread: number,
     opts?: { life?: number; damp?: number; grav?: number; xMul?: number; yMul?: number },
   ): void;
+  /** 原版 Dust 池（VanillaDust.spawn 直通——NPC.HitEffect 鸟族血尘 61/252/301 等
+   *  实体侧消费；leashedEnv 另有同款包装）。缺省 = 测试/无尘环境静默跳过 */
+  dust?: {
+    spawn(x: number, y: number, w: number, h: number, type: number, speedX?: number,
+      speedY?: number, alpha?: number,
+      color?: { r: number; g: number; b: number; a: number } | null, scale?: number): unknown;
+  };
   /** 拾取物品后刷新 UI（掉落物实体调用） */
   notifyInventoryChanged(): void;
   /** 编排粒子广播（ParticleOrchestrator.BroadcastOrRequestParticleSpawn 联机半边：

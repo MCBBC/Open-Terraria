@@ -62,6 +62,9 @@ export interface LunarEventState {
   /** NPC.MoonLordCountdown / MaxMoonLordCountdown（不进存档；0=无倒计时） */
   moonLordCountdown: number;
   moonLordCountdownMax: number;
+  /** ★批 III 尾窗：天柱死亡水晶屏效（Projectile.cs:37019-37075 三相序；不进存档）。
+   *  t=已进行 tick（480 = 120+300+60 归零灭），x/y=死亡塔水晶中心（vortex uTargetPosition） */
+  crystalDeath: { t: number; x: number; y: number } | null;
 }
 
 export function newLunarEventState(): LunarEventState {
@@ -71,6 +74,7 @@ export function newLunarEventState(): LunarEventState {
     shield: { solar: 0, vortex: 0, nebula: 0, stardust: 0 },
     moonLordCountdown: 0,
     moonLordCountdownMax: 0,
+    crystalDeath: null,
   };
 }
 
@@ -109,6 +113,7 @@ export function applyLunarSave(w: World): void {
   }
   s.moonLordCountdown = 0;
   s.moonLordCountdownMax = 0;
+  s.crystalDeath = null;
 }
 
 /** 区域 x1..x2 / y1..y2 是否全非实心（Collision.SolidTiles 近似——本仓无视 slope） */
@@ -208,12 +213,15 @@ export function startImpendingDoom(w: World, countdownTime: number, host: LunarH
 
 /** 塔真死（NPC.cs:80122-80146）：downedTower_X=true、TowerActive_X=false、
  *  UpdateLunarApocalypse + MessageLunarApocalypse（顺序 1:1——Update 可能触发 doom 关事件，
- *  随后的 Message 因 active=false 不播） */
-export function onTowerKilled(w: World, towerId: number, has: (id: number) => boolean, host: LunarHost): void {
+ *  随后的 Message 因 active=false 不播）。★at=死亡塔中心 → 水晶死亡屏效三相序
+ *  （Projectile.cs:37019 塔死时起 crystal 弹序列——本仓无该弹体,状态直接挂 here） */
+export function onTowerKilled(w: World, towerId: number, has: (id: number) => boolean, host: LunarHost,
+  at?: { x: number; y: number }): void {
   const key = TOWER_KEY[towerId];
   if (!key) return;
   w.flags[`downedTower${TOWER_CAP[key]}`] = true;
   w.lunarEvent.towerActive[key] = false;
+  if (at) startCrystalDeath(w, at);
   persist(w);
   updateLunarApocalypse(w, has, host);
   messageLunarApocalypse(w, host);
@@ -268,4 +276,19 @@ export function tickMoonLordCountdown(w: World): boolean {
   if (s.moonLordCountdown <= 0) return false;
   s.moonLordCountdown--;
   return s.moonLordCountdown <= 0;
+}
+
+/** ★批 III 尾窗：天柱死亡水晶屏效三相序（Projectile.cs:37019-37075）：
+ *  相0（0-120t）Color/Vortex 强度=min(1,t/120)；相1（120-420）恒 1；相2（420-480）
+ *  Vortex.UseProgress=(t-420)/60×30、Color I=1、Vortex I=2；480t 归零（:37068-37074
+ *  Deactivate+Kill）。at = 死亡塔水晶中心（UseTargetPosition base.Center）。 */
+export const CRYSTAL_DEATH_TICKS = 480;
+export function startCrystalDeath(w: World, at: { x: number; y: number }): void {
+  w.lunarEvent.crystalDeath = { t: 0, x: at.x, y: at.y };
+}
+export function tickCrystalDeath(w: World): void {
+  const cd = w.lunarEvent.crystalDeath;
+  if (!cd) return;
+  cd.t++;
+  if (cd.t >= CRYSTAL_DEATH_TICKS) w.lunarEvent.crystalDeath = null;
 }

@@ -59,7 +59,9 @@ import {
   TOWER_KEY, TOWER_ZONE_RADIUS, isTowerId, isTowerMinion,
   triggerLunarApocalypse, onTowerKilled, updateLunarApocalypse,
   towerBoltTarget, onTowerBoltHit, tickMoonLordCountdown, startImpendingDoom, type LunarHost,
+  tickCrystalDeath,
 } from '../world/LunarEvent';
+import { startStardewAnimation } from '../fx/StardewAnimation';
 import {
   dawnEclipseRoll, useSolarTablet, endEclipseAtDusk, type EclipseHost,
 } from '../world/Eclipse';
@@ -1148,6 +1150,13 @@ export function dropInventoryOnDeath(
 
 /** NPC 对话框按钮 id（与 ui/NpcDialog.ts NpcButtonId 同形；quest = 渔夫任务交付） */
 export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'hair' | 'quest' | 'plant' | 'happiness' | 'status' | 'close';
+/** 按钮通知图标（NPCChatPanel.cs:136-138 interaction.ShowExclamation →
+ *  Utils.DrawNotificationIcon 按钮文字右+8px,rotMul=0 无摇摆仅亮度脉冲） */
+export interface NpcButton {
+  id: NpcButtonId;
+  label: string;
+  excl?: boolean;
+}
 
 /** 造型师理发报价纯式（Main.cs:43198-43211 逐行）：
  *  发型 100000 + 发色 20000 → 折扣 ×0.8 截断（:43208）→ ×PriceAdjustment 截断
@@ -1642,6 +1651,16 @@ export class Game implements GameHooks {
   dmgNumbers: DamageNumber[] = [];
   /** 原版 Dust 池（翅膀尘埃批引入；DrawDust 语义见 Renderer.drawVanillaDust） */
   readonly vanillaDust = new VanillaDust();
+
+  /** GameHooks.dust：原版 Dust 池实体侧入口（Enemy.hurt NPC.HitEffect 鸟族血尘
+   *  61/252/301 等；leashedEnv 另有同款包装） */
+  get dust() {
+    return {
+      spawn: (x: number, y: number, w: number, h: number, type: number, sx = 0, sy = 0,
+        alpha = 0, color: { r: number; g: number; b: number; a: number } | null = null,
+        scale = 1) => this.vanillaDust.spawn(x, y, w, h, type, sx, sy, alpha, color, scale),
+    };
+  }
 
   // 敌人生成
   boss: Enemy | null = null;
@@ -5860,6 +5879,7 @@ export class Game implements GameHooks {
     // ---- 月总倒计时（Main.cs:64437-64459：四塔全灭 → StartImpendingDoom(3600)，
     //      每 tick -1，归零 SpawnOnPlayer(最近玩家, 398)）----
     if (tickMoonLordCountdown(w)) this.spawnMoonLordOnPlayer();
+    tickCrystalDeath(w);   // ★批III尾窗:天柱死亡水晶屏效 480t 三相序(Projectile.cs:37019-37075)
     // ---- 天启态每帧巡检（WorldGen.cs:71523 UpdateWorld 内 UpdateLunarApocalypse，
     //      每帧执行）：场上无对应塔 NPC → TowerActive 置 false；四塔全灭且无 398
     //      → StartImpendingDoom。除塔被击杀（onLunarTowerKilled）外还覆盖塔被
@@ -19827,7 +19847,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  原版 ItemCheck 递减+autoReuse 重施同段无 0 帧。钉 t=1 保活一帧,
       //  下一 updateUse 重施刷新（停发窗以 swT0>1 放行 t≤1 重施）
       const held = this.player.inv.heldItem();
-      const au = held ? itemCombat(held.vid ?? viIdFromKey(held.key))?.autoReuse : false;
+      // ★vid/key 在 def 上不在实例上(InvItem={id,stack,prefix…})——曾读 held.vid/held.key
+      //  → viIdFromKey(undefined)='reading match' 每次挥击到期帧崩停机(实报帧循环异常)
+      const heldDef = held ? ITEM_DEFS[held.id] : null;
+      const au = heldDef ? itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse : false;
       if (au && this.input.mouseHeld && !this.annotateMode) { this.swing.t = 1; return; }
       this.swing = null;
       return;
@@ -21291,6 +21314,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     // FullName 语义（NPC.FullName:6657 + Game.NPCTitle，zh "{1}{0}"=类型名+个人名）
     const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
+    // ★批III尾窗：Stardew 彩蛋触发（Main.cs:40965 DryadText_WorldPurityOrStardewValleyBit
+    //    + CanDryadPlayStardewAnimation :41158：手持 Joja 可乐 5275 对树妖(20)对话 →
+    //    消耗 1 罐 + 播编排器（弹体 995 ai[0] 计时）+ progression 46 + 彩蛋台词）
+    if (npc.vanillaId === 20) {
+      const held = this.player.inv.heldItem();
+      const hv = held ? viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') : -1;
+      if (held && hv === 5275 && held.stack > 0) {
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.cb.onInventoryChanged?.();
+        startStardewAnimation();
+        this.achievements.notifyProgressionEvent(46);   // NotifyProgressionEvent(46) :40992
+        this.sfx.play('menuOpen');
+        this.cb.onNpcDialog?.(name, this.formatDialogTags(Lang.text('StardewTalk.PlayerGivesCola')),
+          this.npcDialogButtons(npc), portraitUrl(npc.vanillaId));
+        return;
+      }
+    }
     // chatOverride：唤醒链（AI_000_TransformBoundNPC）传换型前 GetChat 台词
     this.cb.onNpcDialog?.(name, this.formatDialogTags(chatOverride ?? this.townNpcChat(npc)),
       this.npcDialogButtons(npc), portraitUrl(npc.vanillaId));
@@ -21298,8 +21338,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 对话框按钮组（NPCInteractions.cs 各 NPCInteraction 注册序）：商店/治疗/收税/
    *  重铸/诅咒/渔夫任务（AnglerQuest :134-152，标签 Lang.inter[64]「任务」） */
-  private npcDialogButtons(npc: TownNPC): Array<{ id: NpcButtonId; label: string }> {
-    const buttons: Array<{ id: NpcButtonId; label: string }> = [];
+  private npcDialogButtons(npc: TownNPC): Array<{ id: NpcButtonId; label: string; excl?: boolean }> {
+    const buttons: Array<{ id: NpcButtonId; label: string; excl?: boolean }> = [];
     // 商店按钮(NPCInteractions.cs:489-513 Shop 注册表覆盖的全部 NPC)
     if (Game.SHOPSTOCK[String(npc.vanillaId)]) buttons.push({ id: 'shop', label: Lang.inter(28) });
     if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
@@ -21325,7 +21365,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       buttons.push({ id: 'curse', label: Lang.inter(50) });                                 // 诅咒
     }
     // 渔夫：任务交付（NPCInteractions.AnglerQuest.GetText = Lang.inter[64]）
-    if (npc.vanillaId === 369) buttons.push({ id: 'quest', label: Lang.inter(64) });
+    // 渔夫:任务交付(NPCInteractions.AnglerQuest:GetText=inter[64]、ShowExclamation
+    // = !Main.anglerQuestFinished(NPCInteractions.cs:135)→按钮后通知图标)
+    if (npc.vanillaId === 369) buttons.push({ id: 'quest', label: Lang.inter(64), excl: !this.world.anglerQuestFinished });
     // 快乐度（ReportHappiness，NPCInteractions.cs:289-314；注册序在全部商店/其它交互之后）：
     // 无家 NPC 换成 RequestHome 不显示（NPC.CanShowHomelessText NPC.cs:96048-96060），
     // 旅行商/骷髅商/老人 HappinessReport 为空也不显示
@@ -24964,7 +25006,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  与月事件计分同位（掉落结算之后同帧，对齐原版 checkDead 尾段顺序）
     if (enemy && enemy.vanillaId != null) {
       if (isTowerId(enemy.vanillaId)) {
-        this.onLunarTowerKilled(enemy.vanillaId);
+        this.onLunarTowerKilled(enemy.vanillaId, { x: enemy.cx, y: enemy.cy });
       } else if (this.world.lunarEvent.active && isTowerMinion(enemy.vanillaId)) {
         this.onLunarMinionKilled(enemy);
       }
@@ -25634,8 +25676,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 塔真死（NPC.cs:80122-80146：downedTower_* + Update/MessageLunarApocalypse） */
-  private onLunarTowerKilled(towerId: number): void {
-    onTowerKilled(this.world, towerId, (id) => this.hasNpcId(id), this.lunarHost());
+  private onLunarTowerKilled(towerId: number, at?: { x: number; y: number }): void {
+    onTowerKilled(this.world, towerId, (id) => this.hasNpcId(id), this.lunarHost(), at);
   }
 
   /** 本组怪死亡 → 朝对应塔发射 629 TowerDamageBolt 真弹体（NPC.cs:80089-80121 发弹 +
