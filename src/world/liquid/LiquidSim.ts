@@ -147,6 +147,12 @@ function platformProperTopFrameL(fx: number): boolean {
 /** TileID.Sets.NotReallySolid（TileID.cs:355，sheet id）——CheckBanner 锚门的
  *  排除族（开门10/高门387/闸门388） */
 const NOT_REALLY_SOLID_SHEETS = new Set([387, 388, 10]);
+/** ★VVV 批：Check1x2Top 坐具族（cs:87107 派发 case 表——椅42/金椅270/银椅271/
+ *  王座座族572/浴桶581/金马桶660；698=死亡展示罐走绳锚特支）。FCP 引擎缺该臂，
+ *  按 CheckBanner/check1xXGen 前置扫惯例在 LiquidSim 就地实现。 */
+const CHECK_1X2TOP_SHEETS = new Set([42, 270, 271, 572, 581, 660, 698]);
+/** Main.tileRope（绳索族，sheet id）：锚支仅 698 用（本世界地狱域无罐，惰性） */
+const ROPE_SHEETS = new Set([77, 213]);
 
 export class LiquidSim {
   world: World;
@@ -333,10 +339,65 @@ export class LiquidSim {
         // ★MMMMMMM：case 92/93/453 → Check1xX（cs:87030）——FCP 引擎缺臂过渡前置扫
         else if ((st.flags[ni]! & 1) && (SHEET_OF[st.type[ni]!] === 92 || SHEET_OF[st.type[ni]!] === 93
           || SHEET_OF[st.type[ni]!] === 453)) this.check1xXGen(nx, ny, st.type[ni]!);
+        // ★VVV 批：case {42,270,271,572,581,660,698} → Check1x2Top（cs:87107）——
+        //   FCP 引擎缺臂前置扫（g#98 初轮 12 格椅/罐级联 x86 K-probe 实证）
+        else if ((st.flags[ni]! & 1) && CHECK_1X2TOP_SHEETS.has(SHEET_OF[st.type[ni]!] ?? -1)) {
+          this.check1x2TopGen(nx, ny, SHEET_OF[st.type[ni]!]!);
+        }
       }
     }
     // 签名要求 RNG 非空但 SweepCtx.rng 实为 RNG|undefined（null 路径=掷骰占位 0）
     genSquareTileFrame(st, this.passRng as RNG, x, y);
+  }
+
+  /** Check1x2Top（WorldGen.cs:46719-46827，1×2 竖排坐具完整性；引 cs 行号为 1456）：
+   *  组顶反解（frameY/18 → 组内行 num2、样式段 num3=num2/2）+ 双格帧校验 +
+   *  上锚三支（坐具=平台∪380 可；698=绳可；通用=nactive∧tileSolid∧!tileSolidTop）→
+   *  任一破 → destroyObject 闸内整组杀（只杀 type 相符格）。掉落支生成期不产实体。 */
+  private check1x2TopGen(x: number, y: number, sheet: number): void {
+    if (this.destroyObj) return;                                     // cs:46722 头闸
+    const st = this.world.store;
+    const num2raw = Math.trunc((st.frameY[this.idx(x, y)] ?? 0) / 18); // cs:46728 /18
+    let num2 = num2raw, num3 = 0;
+    while (num2 >= 2) { num2 -= 2; num3++; }                          // 样式段（cs:46731-35）
+    let num = y - num2;                                               // 组顶格 y（cs:46736）
+    num2 = num3 * 36;                                                 // cs:46737
+    const readCell = (cx: number, cy: number): { act: boolean; ty: number; fy: number } => {
+      if (cx < 0 || cy < 0 || cx >= st.w || cy >= st.h) return { act: false, ty: -1, fy: -1 };
+      const q = this.idx(cx, cy);
+      return { act: st.flags[q] !== 0, ty: st.type[q], fy: st.frameY[q] ?? 0 };
+    };
+    const top = readCell(x, num), bot = readCell(x, num + 1);
+    let flag = true;
+    if (top.fy === num2 && bot.fy === num2 + 18 && top.ty === sheet && bot.ty === sheet) flag = false; // cs:46749-55
+    const anc = readCell(x, num - 1);
+    let flag2 = false, flag3 = false;
+    if ([42, 270, 271, 572, 581, 660].includes(sheet)) flag2 = true;   // cs:46757-74 坐具族
+    else if (sheet === 698) { flag2 = true; flag3 = true; }
+    const isPlatOr380 = anc.act && (() => {
+      if (anc.ty < 0) return false;
+      return !!TILE_DEFS[anc.ty]?.platform || (TILE_DEFS[anc.ty]?.vanilla?.sheet ?? -1) === 380;
+    })();
+    const isRope = anc.act && ROPE_SHEETS.has(TILE_DEFS[anc.ty]?.vanilla?.sheet ?? -1);
+    const anchorGenericFail = this.check1x2TopAnchorFail(x, num - 1);
+    if (((!flag2 || !isPlatOr380) && (!flag3 || !isRope)) && anchorGenericFail) flag = true;  // cs:46780
+    if (!flag) return;
+    this.destroyObj = true;
+    if (top.ty === sheet) this.killTileGen(x, num);                    // cs:46807-15 只杀同型格
+    if (bot.ty === sheet) this.killTileGen(x, num + 1);
+    this.destroyObj = false;                                           // 掉落支：生成期无实体，备案
+  }
+
+  /** Check1x2Top 通用锚支（cs:46781）：锚格 active ∧ tileSolid ∧ !tileSolidTop。
+   *  solid 走 solidNP（含生成期 GenSolid 注入）；tileSolidTop≈platform 近似（本仓
+   *  全文件同口径）。越界=原版 new Tile() 零值 → 无效。 */
+  private check1x2TopAnchorFail(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
+    const i = this.idx(x, y);
+    if (!st.flags[i]) return true;
+    const t = st.type[i];
+    return this.solidNP[t] !== 1;
   }
 
   /** CheckBanner（cs:86442 派发 → WorldGen.CheckBanner cs:46105）：1×3 竖排旗帜，
@@ -1784,40 +1845,54 @@ export class LiquidSim {
     this.bufCount = 0; // 原版 WaterCheck 首行清 LiquidBuffer（WorldGen.cs:48959）
     this.checking.fill(0);
     // VVV 批诊断钩（SW_WCPROBE 时启用，用毕删）：镜像原版 wc 死亡判定分支的
-    // 首 witnessed 覆盖集——vanilla 首分支=nactive∧solid∧!solidTop
-    const wcProbe = process.env.SW_WCPROBE ? (globalThis as Record<string, unknown>).__swWcProbe as ((x: number, y: number, type: number, fx: number, fy: number, liq: number, lty: number) => void) | undefined : undefined;
+    // 首 witnessed 覆盖集
+    const wcProbe = process.env.SW_WCPROBE ? (globalThis as unknown as { __swWcProbe?: (x: number, y: number, type: number, fx: number, fy: number, liq: number, lty: number) => void }).__swWcProbe : undefined;
     for (let x = 1; x < st.w - 1; x++) {
       for (let y = st.h - 2; y > 0; y--) {
         const i = this.idx(x, y);
         if (st.liquid[i] === 0) continue;
         const t = st.type[i];
-        if (t !== 0 && st.flags[i]) {
-          // 实心格内液体清零——379（泡泡,QuickWater 已置实心）例外保留液体且不复查
-          // （cs:81173-81177 `if (tile.type != 379) tile.liquid = 0;`）
-          if (this.solidNP[t] === 1) {
-            if (SHEET_OF[t] !== 379) st.liquid[i] = 0;
-            continue;
+        const il = i - 1, ir = i + 1, iu = i - st.w, id = i + st.w;
+        // ★VVV 批全量转写（WorldGen.cs:81168-81221）：
+        // 原版首分支谓词= liquid>0 ∧ nactive() ∧ Main.tileSolid ∧ !Main.tileSolidTop。
+        // nactive()= active ∧ !checkingLiquid（Tile.cs:270）。★关键结构差异：不满足
+        // 首分支（含【幽灵格 flags=0 但液体>0】与【在列 checking 格】）一律落 else-if，
+        // 幽灵格虽跳过死亡检查、但下灌/侧流三重入列判定**照常执行**——JS 曾把
+        // 整个 rebuild 尾段折进 active 门内，幽灵湿格整段漏重建 → 下一轮沉降活量/
+        // 触点漂移（g#98 初轮 1283 格首见覆盖差 + 罐28×23 组/棺木42/丛林植物233
+        // 孤儿块的全部直接根因；x86 W-probe 对拍实证）。
+        // 379（泡泡,QuickWater 已置实心）例外保留液体且不复查（cs:81173-81177）。
+        const chk = this.checking[i] === 1;
+        const nactive = st.flags[i] !== 0 && !chk;
+        let solidBr = false;
+        if (t >= 0 && nactive && this.solidNP[t] === 1) {
+          solidBr = true;
+          if (SHEET_OF[t] !== 379) st.liquid[i] = 0;
+        } else {
+          if (st.flags[i] !== 0) {
+            wcProbe?.(x, y, SHEET_OF[t] ?? -1, st.frameX[i] ?? 0, st.frameY[i] ?? 0, st.liquid[i], st.liquidType[i]);
+            // 1456 WaterCheck L81172-81187：液体冲毁可死亡方块（走 KillTile）
+            if (st.liquidType[i] === 2) { if (this.diesIn(t, st.frameX[i]!, st.frameY[i]!, true)) this.killTileAt(x, y); }
+            else if (this.diesIn(t, st.frameX[i]!, st.frameY[i]!, false)) this.killTileAt(x, y);
           }
-          wcProbe?.(x, y, SHEET_OF[t] ?? -1, st.frameX[i] ?? 0, st.frameY[i] ?? 0, st.liquid[i], st.liquidType[i]);
-          // 1456 WaterCheck L81172-81187：液体冲毁可死亡方块（走 KillTile）
-          if (st.liquidType[i] === 2) { if (this.diesIn(t, st.frameX[i]!, st.frameY[i]!, true)) this.killTileAt(x, y); }
-          else if (this.diesIn(t, st.frameX[i]!, st.frameY[i]!, false)) this.killTileAt(x, y);
         }
-        const id = i + st.w;
-        const dq = st.liquid[id];
-        if (!this.blocksLiquid(x, y + 1) && dq < 255) {
-          if (dq > 250) st.liquid[id] = 255;
-          else this.addWater(x, y);
-        }
-        const il = i - 1, ir = i + 1;
-        if (!this.blocksLiquid(x - 1, y) && st.liquid[il] !== st.liquid[i]) this.addWater(x, y);
-        else if (!this.blocksLiquid(x + 1, y) && st.liquid[ir] !== st.liquid[i]) this.addWater(x, y);
-        if (st.liquidType[i] === 2) {
-          const iu = i - st.w;
-          if ((st.liquid[il] > 0 && st.liquidType[il] !== 2) ||
-              (st.liquid[ir] > 0 && st.liquidType[ir] !== 2) ||
-              (st.liquid[iu] > 0 && st.liquidType[iu] !== 2) ||
-              (dq > 0 && st.liquidType[id] !== 2)) this.addWater(x, y);
+        if (!solidBr) {
+          // 下灌：下方可通且未满 → 液位 >250 直补满，否则当前格入列（cs:81190-81200）
+          const dq = st.liquid[id];
+          if (!this.blocksLiquid(x, y + 1) && dq < 255) {
+            if (dq > 250) st.liquid[id] = 255;
+            else this.addWater(x, y);
+          }
+          // 侧流：左或右液位不等 → 当前格入列（cs:81202-81204）
+          if (!this.blocksLiquid(x - 1, y) && st.liquid[il] !== st.liquid[i]) this.addWater(x, y);
+          else if (!this.blocksLiquid(x + 1, y) && st.liquid[ir] !== st.liquid[i]) this.addWater(x, y);
+          // 岩浆旁异种液体四向复查（cs:81205-81217）
+          if (st.liquidType[i] === 2) {
+            if ((st.liquid[il] > 0 && st.liquidType[il] !== 2) ||
+                (st.liquid[ir] > 0 && st.liquidType[ir] !== 2) ||
+                (st.liquid[iu] > 0 && st.liquidType[iu] !== 2) ||
+                (dq > 0 && st.liquidType[id] !== 2)) this.addWater(x, y);
+          }
         }
       }
     }

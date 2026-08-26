@@ -36,7 +36,7 @@ export function maybeShowWelcomeAnnounce(): void {
   root.style.cssText = 'position:fixed; inset:0; z-index:60; background:rgba(0,0,0,0.72); display:flex; align-items:center; justify-content:center; padding:16px;';
 
   const panel = document.createElement('div');
-  panel.style.cssText = 'max-width:680px; width:min(680px,94vw); max-height:86vh; display:flex; flex-direction:column; background:rgba(10,16,40,0.97); border:2px solid #4a5a9a; border-radius:8px; box-shadow:0 8px 40px rgba(0,0,0,0.7); font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif;';
+  panel.style.cssText = 'max-width:680px; width:min(680px,94vw); max-height:70vh; display:flex; flex-direction:column; background:rgba(10,16,40,0.97); border:2px solid #4a5a9a; border-radius:8px; box-shadow:0 8px 40px rgba(0,0,0,0.7); font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif;';
 
   const head = document.createElement('div');
   head.textContent = '📢 欢迎来到 SandboxWorld';
@@ -49,18 +49,11 @@ export function maybeShowWelcomeAnnounce(): void {
   const disclaim = document.createElement('div');
   disclaim.style.cssText = 'color:#ffd76b; line-height:1.9;';
   disclaim.innerHTML = DISCLAIMER
-    + `<a href="${BUY_URL}" target="_blank" rel="noopener" style="color:#4da3ff; text-decoration:underline;">购买原版</a>`
-    + '(新标签页打开)';
+    + `<a href="${BUY_URL}" target="_blank" rel="noopener" style="color:#4da3ff; text-decoration:underline;">购买原版</a>`;
   body.appendChild(disclaim);
 
   const footer = document.createElement('div');
-  footer.style.cssText = 'display:flex; gap:12px; padding:12px 18px 16px; border-top:1px solid rgba(90,120,220,0.35);';
-  const buyLink = document.createElement('a');
-  buyLink.href = BUY_URL;
-  buyLink.target = '_blank';
-  buyLink.rel = 'noopener';
-  buyLink.textContent = '购买原版';
-  buyLink.style.cssText = 'flex:1; text-align:center; padding:10px 0; border:1px solid #4a5a9a; border-radius:4px; color:#4da3ff; text-decoration:none; font-size:15px;';
+  footer.style.cssText = 'display:flex; padding:12px 18px 16px; border-top:1px solid rgba(90,120,220,0.35);';
   const ack = document.createElement('button');
   ack.textContent = '我已知晓';
   ack.style.cssText = 'flex:1; padding:10px 0; background:#3d4f9e; color:#fff; border:1px solid #6a7ad0; border-radius:4px; font-size:15px; cursor:pointer; font-family:inherit;';
@@ -68,7 +61,6 @@ export function maybeShowWelcomeAnnounce(): void {
     try { localStorage.setItem(ACK_KEY, '1'); } catch { /* 隐私模式:本次会话内关闭 */ }
     root.remove();
   };
-  footer.appendChild(buyLink);
   footer.appendChild(ack);
 
   panel.appendChild(head);
