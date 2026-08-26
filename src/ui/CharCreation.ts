@@ -1006,7 +1006,7 @@ export class CharCreation {
   /** 全透明检测(2026-08-25):采样 400 像素,全 <α16 = 烘焙画了空气(源 canvas
    *  被静默清零)——触发缓存弃置+重烘。正常 sheet 亮像素占比高,误报可忽略 */
   private sheetAllTransparent(cv: HTMLCanvasElement): boolean {
-    const g = cv.getContext('2d');
+    const g = cv.getContext('2d', { willReadFrequently: true });
     if (!g) return false;
     const step = Math.max(4, Math.floor(cv.width / 100) * 4);
     const d = g.getImageData(0, 0, cv.width, cv.height).data;

@@ -16132,11 +16132,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const sheet = def.vanilla?.sheet ?? -1;
       const bw = def.w ?? 1, bh = def.h ?? 1;
       if (sheet === 10 || sheet === 11) {
-        // 门：候选锚 = 点击格解释为中格/顶格/底格，取首个"净空+支撑"达标者
-        const solidAt = (sx: number, sy: number) => {
+        // 门：候选锚 = 点击格解释为中格/顶格/底格，取首个"净空+锚定"达标者
+        // ★门双锚全满足制（TileObjectData addTile(10)：AnchorTop+AnchorBottom
+        //  SolidTile×1；TileObject.CanPlace 尾 num4==1f 全满足才可放——平地裸放
+        //  1/2 满足即拒，2026-08-26 用户实报+反编译定谳）：
+        //  顶锚 = SolidTile(实心非坡非平台) | SolidBottom(平台/半砖/顶坡亦可);
+        //  底锚 = SolidTile(实心非坡) | SolidWithTop(平台)。
+        const slopeAt = (sx: number, sy: number) => st.inBounds(sx, sy) ? st.slope[st.idx(sx, sy)] : 0;
+        const topAnchorOK = (sx: number, sy: number) => {
           if (!st.inBounds(sx, sy)) return false;
           const b = TILE_DEFS[st.get(sx, sy)];
-          return !!b && b.solid && !b.platform;
+          if (!b) return false;
+          const sl = slopeAt(sx, sy);
+          return (b.solid && !b.platform && sl === 0) || b.platform
+            || st.half[st.idx(sx, sy)] === 1 || sl === 3 || sl === 4;   // SolidBottom:半砖/顶坡亦锚
+        };
+        const botAnchorOK = (sx: number, sy: number) => {
+          if (!st.inBounds(sx, sy)) return false;
+          const b = TILE_DEFS[st.get(sx, sy)];
+          if (!b) return false;
+          const sl = slopeAt(sx, sy);
+          return (b.solid && !b.platform && sl === 0) || b.platform;
         };
         const cands = [ty - 1, ty, ty - 2].filter((cy) => st.inBounds(tx, cy)
           && st.inBounds(tx + bw - 1, cy + bh - 1));
@@ -16148,10 +16164,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           if (!free) continue;
           if (!this.hasSupport(tx, cy, bw, bh, true, false)) continue;
-          // ★门交替锚（TileObjectData addTile(10) alternate：AnchorTop/Bottom
-          //  SolidTile×1——顶格上/底格下任一实心即锚,无 AnchorWall）。此前
-          //  hasSupport 近似"邻格或墙即支撑"→ 门可悬墙放置（2026-08-26 用户实报）
-          if (!solidAt(tx, cy - 1) && !solidAt(tx, cy + bh)) continue;
+          if (!topAnchorOK(tx, cy - 1) || !botAnchorOK(tx, cy + bh)) continue;   // 双锚全满足
           ty = cy; picked = true; break;
         }
         if (!picked) return;
@@ -16172,8 +16185,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const belowOK = !!belowDef && (belowDef.solid || belowDef.platform);
       const sideOK = [tx - 1, tx + 1].some((sx) => {
         if (!st.inBounds(sx, gy - 1)) return false;
-        const b = TILE_DEFS[st.get(sx, gy - 1)];
-        return !!b && b.solid && !b.platform;             // SolidSide：底行侧邻实心
+        // SolidSide 原版字面 = blockType 4/5（坡砖 3/4）的实心侧缘,非整砖
+        const sl = st.slope[st.idx(sx, gy - 1)];
+        return sl === 3 || sl === 4;
       });
       if (!belowOK && !sideOK) return;
     }
