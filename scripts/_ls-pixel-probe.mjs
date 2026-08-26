@@ -7,7 +7,8 @@ const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5238';
 const browser = await puppeteer.launch({
   protocolTimeout: 400000,
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: true, args: ['--no-sandbox'],
+  headless: 'new', args: ['--no-sandbox', '--enable-unsafe-swiftshader',
+    '--use-angle=swiftshader', '--enable-webgl', '--use-gl=angle'],
   defaultViewport: { width: 988, height: 862 },
 });
 const page = await browser.newPage();
@@ -17,7 +18,12 @@ await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
 await new Promise((r) => setTimeout(r, 800));
 await page.click('[data-act=sp]');
-await page.waitForSelector('.sw-vsel', { timeout: 10000 });
+try {
+  await page.waitForSelector('.sw-vsel', { timeout: 15000 });
+} catch {
+  await page.click('[data-act=sp]');
+  await page.waitForSelector('.sw-vsel', { timeout: 45000 });
+}
 await new Promise((r) => setTimeout(r, 600));
 if (!(await page.$('.sw-vsel .sw-vitem'))) {
   await page.click('.sw-vsel [data-act=new]');
@@ -130,7 +136,14 @@ const out = await page.evaluate(async () => {
   let castTick = -1, ftick = 0;
   const origFixed = g.fixedUpdate.bind(g);
   g.fixedUpdate = (dt) => { ftick++; return origFixed(dt); };
-  for (let i = 0; i < 4 && castTick < 0; i++) { origFixed(1 / 60); ftick++; }
+  // ★GPU 模式热身可能迟——轮询至 orb 出现（≤90t）
+  for (let i = 0; i < 90 && castTick < 0; i++) {
+    origFixed(1 / 60); ftick++;
+    if (i < 4) continue;
+    const oEarly = g.entities.projectiles.find((q) => q.projId === 1117);
+    if (oEarly) { castTick = ftick; spawnPos = { x: oEarly.cx, y: oEarly.cy }; }
+  }
+  R.dbg.castTick = castTick;
   const orb = () => g.entities.projectiles.find((q) => q.projId === 1117);
   // 悬浮期逐帧:渲染帧后采 orb 中心
   // ★headless rAF 不跑→世界从未渲染（首轮回炉实锤:orb 中心 lum≈41 全黑）。
@@ -143,6 +156,14 @@ const out = await page.evaluate(async () => {
     orbSamples.push({ t: ftick - castTick, ...sampleWorld(o.cx, o.cy) });
   }
   R.dbg.orbFlight = orbSamples;
+  // 背景对照：远离 orb 的天空点（+150,+150）同帧亮度
+  try {
+    const oB = orb();
+    if (oB) {
+      const bg = sampleWorld(oB.cx + 150, oB.cy + 150);
+      R.dbg.skyBgLum = bg.lum ?? -1;
+    }
+  } catch {}
 
   // 尸检期入口：推进到 bolt 生成+视觉期，返回裁剪框（Node 层截图=合成器 ground truth）
   let clip = null;

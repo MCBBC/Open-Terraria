@@ -13778,6 +13778,7 @@ export class Renderer {
     // ★1457 钻地龟图标层（DigtoiseMapLayer——MapIconOverlay 注册序 Main.cs:374
     //   Digtoise→BossBag→Spawn→TeamBasedSpawn→TeleportPylons,画在晶塔层之前）
     this.drawDigtoiseMapLayer(ctx, cx0, cy0, mouseX, mouseY, entities);
+    this.drawSpawnMapLayer(ctx, cx0, cy0, mouseX, mouseY, world);
     this.drawPylonMapLayer(ctx, cx0, cy0, mouseX, mouseY);
     // 地图 ping 图标层（PingMapLayer——MapIconOverlay 注册序 Pylons→Pings :349-351，
     // 画在晶塔层之上）
@@ -13935,6 +13936,50 @@ export class Renderer {
    *     玩家不在晶塔旁 → 半透明灰（color = Gray*0.5 :70-73）
    *   - 悬停提示（:97-99）：晶塔物品名
    *  击中判定（Game.tryPylonMapTeleport）：图标中心 = 锚点 + (1.5, 2) 格。 */
+  /** 全屏地图出生点图标层（SpawnMapLayer.cs 1:1；MapIconOverlay 注册序
+   *  Digtoise→BossBag→Spawn→TeamBasedSpawn→Pylons→Pings Main.cs:349-351——
+   *  本链曾缺 Spawn 层,旧批注释已登记）：
+   *  ① 世界生成点 = SpawnPoint 贴图,锚 (spawnTileX+0.5, spawnTileY) 底中
+   *     （Alignment.Bottom=OffsetMultiplier(0.5,1)，MapOverlayDrawContext.Draw）;
+   *     teamBasedSpawnsSeed 门本仓未建模 → 恒画（Main.cs:349 层序不变）
+   *  ② 床生成点 = SpawnBed 贴图,门 localPlayer.SpawnX≠-1——本仓床生成点未建模
+   *     （恒 -1 语义）→ 恒不画,待床系统落地再接
+   *  悬停 = Lang 'UI.SpawnPoint'（zh「生成点」）写 fullMapHoverName 单槽
+   *  （先画先写、后层覆盖——Spawn 在 Pylons 之前=会被晶塔名覆盖,原版同序）
+   *  scale = min(1,(zoom×0.4+1)/3)（Main.cs:55063 num39；虫洞头像层同式已在用）。
+   *  贴图 UI_SpawnPoint/SpawnBed.png 在盘但 vanilla-ui.json 索引未收录（vui 空）
+   *  → 运行时直载 + 10s 重试（与 SkyRenderer.loadTex 同纪律）。 */
+  private spawnMapTexs: { point: HTMLImageElement | null; bed: HTMLImageElement | null } = { point: null, bed: null };
+  private spawnMapTex(kind: 'point' | 'bed'): HTMLImageElement | null {
+    let im = this.spawnMapTexs[kind];
+    if (!im) {
+      im = new Image();
+      const file = kind === 'point' ? 'UI_SpawnPoint.png' : 'UI_SpawnBed.png';
+      im.onerror = () => setTimeout(() => { im!.src = `sprites/vanilla-ui/${file}`; }, 10_000);
+      im.src = `sprites/vanilla-ui/${file}`;
+      this.spawnMapTexs[kind] = im;
+    }
+    return im.width > 0 ? im : null;
+  }
+  private drawSpawnMapLayer(
+    ctx: CanvasRenderingContext2D, cx0: number, cy0: number,
+    mouseX: number, mouseY: number, world: World | null,
+  ): void {
+    if (!world) return;
+    const fm = this.fullMap;
+    const scale = Math.min(1, (fm.zoom * 0.4 + 1) / 3);   // Main.cs:55063 num39
+    const draw = (tex: HTMLImageElement | null, tx: number, ty: number): boolean => {
+      if (!tex || tex.width <= 0) return false;
+      const mx = cx0 + tx * fm.zoom, my = cy0 + ty * fm.zoom;
+      const dw = tex.width * scale, dh = tex.height * scale;
+      const x0 = mx - dw / 2, y0 = my - dh;               // Alignment.Bottom 底中锚
+      ctx.drawImage(tex, x0, y0, dw, dh);
+      return mouseX >= x0 && mouseX <= x0 + dw && mouseY >= y0 && mouseY <= y0 + dh;
+    };
+    const hover = draw(this.spawnMapTex('point'), world.spawnX + 0.5, world.spawnY);
+    if (hover && !this.fullMapHoverName) this.fullMapHoverName = Lang.text('UI.SpawnPoint');
+  }
+
   private drawPylonMapLayer(
     ctx: CanvasRenderingContext2D, cx0: number, cy0: number,
     mouseX: number, mouseY: number,

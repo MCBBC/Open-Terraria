@@ -1717,6 +1717,12 @@ export class WorldEvolution {
     if (j <= 0 || !this.active(i, j)) return;
     const base = this.typeAt(i, j);
     const baseSheet = sheetOf(base);
+    // ★支撑形态双态门（cs:57060-57061）：半砖/坡面基格运行时不长——原版
+    //   `(!isGeneratingOrLoadingWorld && slope!=0)||halfBrick` 拒绝,生成期窗口
+    //   放行=沙漠山坡原生仙人掌是原版相（worker 侧不受此限）;运行时演化恒属
+    //   "非生成期",坡/半砖根一律拒绝（2026-08-26 用户报 S1 坡沙生根仙人掌实证）
+    const bi = st.idx(i, j);
+    if (st.half[bi] || st.slope[bi] !== 0) return;
     if (this.liquidAt(i, j - 1) > 0) return;
     // 水量门（cactusWaterWidth 50/Height 25/Limit 25，cs:56599-56611）
     let water = 0;

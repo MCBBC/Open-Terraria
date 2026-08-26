@@ -684,12 +684,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         })));
       },
       // 加入/创建前需要角色(2026-08-25 用户要求):复用单人角色列表(CharSelectPanel
-      // 以覆盖层出现,多人面板保持挂载)——选完 then() 继续动作;返回则揭开多人面板
+      // 覆盖层)——★holder 无底色(与单人进角色列表同观感:游戏背景透出);多人面板
+      // 覆盖层期间隐藏(否则透出的是面板),返回时恢复——选完 then() 继续动作
       onNeedCharacter: (then) => {
         const holder = document.createElement('div');
-        holder.style.cssText = 'position:fixed; inset:0; z-index:22; background:#0a1028; overflow-y:auto;';
+        holder.style.cssText = 'position:fixed; inset:0; z-index:22; overflow-y:auto;';
         root.appendChild(holder);
-        const closeHolder = () => holder.remove();
+        panelRoot?.style.setProperty('display', 'none');
+        const closeHolder = () => {
+          holder.remove();
+          panelRoot?.style.removeProperty('display');
+        };
         new CharSelectPanel(holder, charStore, {
           onPlay: (a, id) => {
             closeHolder();

@@ -38,10 +38,10 @@ const OPS_OUT = process.env.SW_UUU_OPS_PATH ?? '/tmp/uuu-out/liqops-js.txt';
   let liqIter = 0;
   const rolls: number[] = [];
   const lines: string[] = [];
-  const r30sink: Array<[number, number, number, number]> = [];
+  const r30sink: Array<[number, number, number, number, number]> = [];
   LiquidSim.r30Sink = (x, y, v, n1, lq, rq, slf) => {
     void lq; void rq; void slf;
-    if (active) r30sink.push([r30sink.length + 1, x, y, v]);
+    if (active) r30sink.push([r30sink.length + 1, x, y, v, rolls.length]);
   };
 
   // 掷流记录（internalSample 原始样本，与 rig OnRoll 口径一致：主实例全部样本）
@@ -244,6 +244,10 @@ const OPS_OUT = process.env.SW_UUU_OPS_PATH ?? '/tmp/uuu-out/liqops-js.txt';
         active = false;
         writeFileSync(OUT, `---START\n${lines.join('\n')}\n---END ${name}\n`);
         writeFileSync(ROLLOUT, rolls.join('\n'));
+        writeFileSync(process.env.SW_UUU_R30 ?? '/tmp/uuu-out/r30-js-win.txt',
+          r30sink.map((r) => `${r[0]} ${r[1]} ${r[2]} ${r[3]} #${(r[4] as number) - 1}`).join('\n'));
+        console.log(`[uuu] r30 triggers in window: ${r30sink.length}`);
+        LiquidSim.r30Sink = null;
       }
     });
   } finally {

@@ -12197,6 +12197,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             break;
           }
         }
+        // ★2026-08-26 出生锚点对齐（用户实报"魔法弹应从杖头发出"复核）：原版
+        //  ItemCheck_Shoot 通用发射点 = RotatedRelativePoint(MountedCenter)（1458
+        //  Player.cs:47603;:4209-4227 无旋转/无坐骑/无睡坐时恒等玩家碰撞盒中心——
+        //  vector2=(0,-n)+(0,n)=0,gfxOffY=0）→ 即 this.player.cx/cy。【魔法域没有任何
+        //  "杖头/枪口前伸"通用式】,旧 px/py(中心+cos(ang)*14, y−4)是登记偏差
+        //  (R30 §4.2 落点清单#1,曾注"待专批统一")——本批为该专批:'magic' 全支改吃
+        //  mzx/mzy 并逐件补 Player.cs 显式偏移块:
+        //   {517 魔法匕首}: ±Next(-3,4)*3.5 双轴抖动(:47641-47644)
+        //   {206 树叶吹风弹}: += NextVector2Circular(12,12) − 出速向量(:49944-49946)
+        //   {1114 日耀花弹}: += NextVector2Circular(4,4)(:49948-49950)
+        //   其余 79 件魔法武器 pointPosition 原样=center;速度向仍由光标角单独算
+        const mzX = this.player.cx;
+        const mzY = this.player.cy;
         const cwCost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1)) * (1 - this.player.equipStats.manaCostOff) * this.player.equipStats.manaCostMul); // ⑪+⑧ 词缀 mcst(I:562 round)
         // ★R27：陨石套 spaceGun 无限蓝（ItemCheck_PayMana_ShouldSkipManaUse
         // :53331-53335：spaceGun && type∈{127,4347,4348,514} → 整个耗魔段跳过——不扣蓝、
@@ -12278,10 +12291,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (cw.shoot === 410) {
           this.playUseSound(critVid, 'tink');             // UseSound=Item85（Item.cs:25680）
           for (let i = 0; i < 3; i++) {
-            const bjx = (Math.random() * 81 - 40) * 0.1;  // Next(-40,41)×0.1
-            const bjy = (Math.random() * 81 - 40) * 0.1;
-            const bub = new Arrow(px + bjx, py + bjy,
-              Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+            // ★2026-08-26 勘误（用户实报弹位链复核）：散布在【速度】非出生点——
+            // Player.cs:48877-48887 `num140=num4 += Next(-40,41)*0.1` ×2 轴,三泡同点
+            // 出生(pointPosition 原样),±4px/t 双轴速度抖动才是扇面来源(旧注释"散布全
+            // 在出生点±4px 抖动"把乘区挪错了对象)
+            const bjx = (Math.floor(Math.random() * 81) - 40) * 0.1;   // Next(-40,41)×0.1
+            const bjy = (Math.floor(Math.random() * 81) - 40) * 0.1;
+            const bub = new Arrow(mzX, mzY,
+              Math.cos(ang) * cw.shootSpeed + bjx, Math.sin(ang) * cw.shootSpeed + bjy,
               cw.damage, cw.knockback, 410, null, { grav: 0, life: 100, pierce: 1 });
             bub.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
             bub.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
@@ -12352,7 +12369,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (critVid === 5461) {
           const cardVid = cw.shoot;                       // 1024（ai113 牌）
           const fireCard = (cvx: number, cvy: number, spin: number): void => {
-            const card = new Arrow(px, py, cvx, cvy, cw.damage, cw.knockback, cardVid, null,
+            const card = new Arrow(mzX, mzY, cvx, cvy, cw.damage, cw.knockback, cardVid, null,
               { grav: 0, pierce: 1 });
             card.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
             card.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
@@ -12401,14 +12418,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // A=40（TryStartUse 门 :43072）,窗内续发挂 multishot 并按实时相位重判
           // 尾停发窗（动画末 useTime×4=16t 静默,:43847——gate 拒发拍不推进 fired）
           const fireBloom6152 = (): void => {
-            const jx = (Math.random() * 2 - 1) * 4, jy = (Math.random() * 2 - 1) * 4;   // NextVector2Circular(4,4)
+            // 出手点抖动 = Utils.NextVector2Circular(4,4)（Player.cs:49949）：单位圆角
+            // ×同一次 NextFloat 标量 ×(4,4)——椭圆盘内均匀角但半径线性(非 box-jitter,
+            // 曾 (rand*2-1)*4 方形散布=分布错)。★出生锚点 mzx/mzy=玩家中心(:47603)
+            const ju6152 = Math.random(), ja6152 = Math.random() * Math.PI * 2;
+            const jx = Math.cos(ja6152) * 4 * ju6152, jy = Math.sin(ja6152) * 4 * ju6152;
             const jr = (Math.random() * 2 - 1) * 0.15707963705062866;                  // RotatedByRandom(0.157)
             const jc = Math.cos(jr), js = Math.sin(jr);
             // 续发重瞄当前光标（ItemCheck_Shoot 每 shot 重读 Main.MouseWorld）
             const fa6152 = midSwing6152 ? Math.atan2(mwy6152 - this.player.cy, mwx6152 - this.player.cx) : ang;
             const bvx = (Math.cos(fa6152) * cw.shootSpeed) * jc - (Math.sin(fa6152) * cw.shootSpeed) * js;
             const bvy = (Math.cos(fa6152) * cw.shootSpeed) * js + (Math.sin(fa6152) * cw.shootSpeed) * jc;
-            const bloom = new Arrow(px + jx, py + jy, bvx, bvy, cw.damage, cw.knockback, 1114, null,
+            const bloom = new Arrow(mzX + jx, mzY + jy, bvx, bvy, cw.damage, cw.knockback, 1114, null,
               { grav: 0, dragAlways: 0.985, life: 146, pierce: 1, bounce: true });
             bloom.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
             bloom.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
@@ -12451,7 +12472,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (cw.shoot === 1115) {
           const gfOwner = this.player;
           const gfItemId = ITEM_BY_KEY[def.key];
-          const gf = new GlacierFangShot(px, py, Math.cos(ang), Math.sin(ang),
+          const gf = new GlacierFangShot(mzX, mzY, Math.cos(ang), Math.sin(ang),
             cw.damage, cw.knockback, {
               channel: () => this.input.mouseHeld && !this.input.uiBlocking
                 && gfOwner.inv.heldItem()?.id === gfItemId && !gfOwner.dead,
@@ -12624,7 +12645,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  AI_029·731 支（Projectile.cs:38461-38509）：垂直之字摆/渐显/尘226/光/Kill 面
         //  全套——通用 Arrow 表达不了摆动节拍（R34-④）
         if (cw.shoot === 731) {
-          const bolt731 = new ThunderBoltShot(px, py,
+          const bolt731 = new ThunderBoltShot(mzX, mzY,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback);
           bolt731.critChance = critTotal;
@@ -12643,7 +12664,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (cw.shoot === 439) {
           const mgOwner = this.player;
           const mgItemId = ITEM_BY_KEY[def.key];
-          const mg = new LaserMachinegunHolder(px, py, ang, cw.damage, cw.knockback, {
+          const mg = new LaserMachinegunHolder(mzX, mzY, ang, cw.damage, cw.knockback, {
             channel: () => this.input.mouseHeld && !this.input.uiBlocking
               && mgOwner.inv.heldItem()?.id === mgItemId && !mgOwner.dead,
             aim: () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
@@ -12672,7 +12693,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (cw.shoot === 950) {
           const [mwx950, mwy950] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
           const lim950 = this.limitPointToPlayerReach(mwx950, mwy950);
-          let sx950 = px, sy950 = py;                          // startPos=pointPosition（手点）
+          let sx950 = mzX, sy950 = mzY;                        // startPos=pointPosition（玩家中心,:47603）
           const ax950 = Math.cos(ang) * cw.shootSpeed, ay950 = Math.sin(ang) * cw.shootSpeed;
           const maxLen950 = Math.hypot(ax950, ay950);          // num2（:50068）
           const goal950 = Math.hypot(lim950.x - sx950, lim950.y - sy950);   // num3（:50069）
@@ -12700,7 +12721,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 彩虹枪 250（aiStyle 46）：专用弹链——隐形飞行头铺 251 彩虹段（40s 持续
         // 伤害带），通用 Arrow 无法表达铺段/恒速拱弧/静态免疫
         if (cw.shoot === 250) {
-          const bolt = new RainbowBolt(px, py,
+          const bolt = new RainbowBolt(mzX, mzY,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback);
           bolt.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
@@ -12717,8 +12738,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (cw.shoot === 634) {
           const mega = Math.random() * 100 < 20;
           const speed634 = mega ? cw.shootSpeed : cw.shootSpeed - 1;
-          const bolt = new NebulaBlazeBolt(px, py,
-            Math.cos(ang) * speed634, Math.sin(ang) * speed634,
+          // ★2026-08-26 补出手散布（Player.cs:49286-49297 3542 支）：±(π/4)*0.7 抖角，
+          // CanHit(point→point+抖向*100) 断则重掷 ≤10 次；速度 ×(0.95..1.25)——
+          // 曾直发无散布。出生锚点 = pointPosition = 玩家中心（mzx）
+          let spreadA634 = (Math.random() - 0.5) * (Math.PI / 4) * 0.7;
+          for (let t634 = 0; t634 < 10; t634++) {
+            if (canHitLine(this.world.store, mzX, mzY, 0, 0,
+              mzX + Math.cos(ang + spreadA634) * 100, mzY + Math.sin(ang + spreadA634) * 100, 0, 0)) break;
+            spreadA634 = (Math.random() - 0.5) * (Math.PI / 4) * 0.7;
+          }
+          const vsc634 = speed634 * (0.95 + Math.random() * 0.3);
+          const bolt = new NebulaBlazeBolt(mzX, mzY,
+            Math.cos(ang + spreadA634) * vsc634, Math.sin(ang + spreadA634) * vsc634,
             mega ? Math.round(cw.damage * 3) : cw.damage, cw.knockback,
             mega ? 635 : 634);
           bolt.critChance = critTotal;
