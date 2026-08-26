@@ -378,13 +378,47 @@ export class SpriteAtlas {
         this.uiimages.set(file, store);
         this._uiPending.delete(file);
         this._uiFailed.delete(file);
+        this.flushUiWaiters(file, true);   // 唤醒 waitUi 等待者(2026-08-25)
       };
       if (!SpriteAtlas.USE_BITMAP) land(im);
       else tryBitmapUpgrade(im, file, land, () => land(im));  // 失败回退+退避重试(2026-08-18)
     };
-    im.onerror = () => { this._uiPending.delete(file); this._uiFailed.set(file, Date.now()); };
+    im.onerror = () => {
+      this._uiPending.delete(file);
+      this._uiFailed.set(file, Date.now());
+      this.flushUiWaiters(file, false);
+    };
     im.src = `sprites/${encodeURI(file)}`;
     return null;
+  }
+
+  // ---- 可等待懒载(2026-08-25 用户要求"懒加载+串行":CharCreation 烘焙前置
+  //      ensure,替代"发请求→失败→重试预算"的盲试链) ----
+  private _uiWaiters = new Map<string, Array<(ok: boolean) => void>>();
+  private flushUiWaiters(file: string, ok: boolean): void {
+    const ws = this._uiWaiters.get(file);
+    if (!ws) return;
+    this._uiWaiters.delete(file);
+    for (const w of ws) w(ok);
+  }
+  /** 等待单个 UI 贴图就绪(幂等触发懒载;404/失败也 settle=false 不悬挂) */
+  waitUi(file: string): Promise<boolean> {
+    this.ensureUiImage(file);
+    if (this.uiimages.get(file)) return Promise.resolve(true);
+    const fail = this._uiFailed.get(file);
+    if (fail !== undefined && Date.now() - fail < SpriteAtlas.UI_FAIL_TTL) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const ws = this._uiWaiters.get(file) ?? [];
+      ws.push((ok) => resolve(ok));
+      this._uiWaiters.set(file, ws);
+    });
+  }
+  /** 串行预载一批 UI 贴图(逐个 await,避免并发请求风暴+解码卡顿) */
+  async ensureUiBatch(names: string[]): Promise<void> {
+    for (const raw of names) {
+      const name = raw.endsWith('.png') ? raw : `${raw}.png`;
+      try { await this.waitUi(name); } catch { /* 单文件失败不阻断整批 */ }
+    }
   }
 
   /** 原版物品图标。构建期已 shelf-pack 进少数 Item_Atlas_k.png 图集(ix/iy/iw/ih

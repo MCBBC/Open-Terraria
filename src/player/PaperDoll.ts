@@ -6,6 +6,7 @@ import { bitmapize, freeBaked, type Baked } from '../render/bitmapize';
 import { type Appearance, backHairDraw, MALE_VARIANTS } from './Appearance';
 import { UITextures } from '../vui/assets/UITextures';
 import { noteVuiConsumer } from '../assets/SpriteAtlas';
+import { texReady } from '../render/texId';
 
 export const BODY_FRAMES = 20;     // 身体帧数
 export const FRAME_W = 40;
@@ -102,9 +103,15 @@ export function headArmorImage(headIdx: number): ImageBitmap | HTMLImageElement 
 const cache = new Map<string, Baked>();   // 写一次合成 → 异步升格 ImageBitmap(bitmapize)
 /** 调色缓存上限(2026-08-13 泄露 review):键=贴图×外观色(用户可控,键空间近无限),
  *  值=整图尺寸 canvas——无闸时长会话/选人界面拖色条无界增长(同文件 cache 有
- *  LRU 64 而此表漏配)。超限整体清空(值小,重建廉价) */
-const TINT_CACHE_MAX = 256;
+ *  LRU 64 而此表漏配)。
+ *  ★2026-08-25 二次修(用户实报"骰子随机几次后样式全空"):原"满 256 整表清空"
+ *  = 数百 MB canvas 瞬间弃置 → 内存压力下浏览器丢弃存活 canvas 的后备存储 →
+ *  后续 drawImage 画空气 → 烘焙空白被外观键缓存定格 = 样式全空不恢复。
+ *  改【字节预算 + LRU】:超预算逐出最旧条目(纯弃引用),存活条目永不被殃及 */
+const TINT_CACHE_MAX_ENTRIES = 256;
+const TINT_CACHE_MAX_BYTES = 48 * 1024 * 1024;
 const tintCache = new Map<string, Baked>();
+let tintCacheBytes = 0;
 /** WeakMap(2026-08-13):外层原为强引用 Map——会把已被 cache LRU 淘汰的合成
  *  canvas 钉住永不释放;改弱引用后源 canvas 回收时条目随之消失 */
 const stealthTintCache = new WeakMap<Baked, Map<string, Baked>>();
@@ -117,6 +124,7 @@ export function clearPaperDollCache(): void {
   for (const c of tintCache.values()) freeBaked(c);
   cache.clear();
   tintCache.clear();
+  tintCacheBytes = 0;
 }
 
 function colorKey(color: { r: number; g: number; b: number }): string {
@@ -133,9 +141,18 @@ function tint(img: CanvasImageSource & { width: number; height: number }, color:
   const key = `t${id}|` + colorKey(color);
   let c: Baked | undefined = tintCache.get(key);
   if (c) return c;
-  if (tintCache.size >= TINT_CACHE_MAX) {  // 满即清(防无界)
+  if (tintCache.size >= TINT_CACHE_MAX_ENTRIES) {  // 满即逐出最旧(防无界)
     for (const old of tintCache.values()) freeBaked(old);
     tintCache.clear();
+    tintCacheBytes = 0;
+  }
+  const bytes = img.width * img.height * 4;
+  while (tintCacheBytes + bytes > TINT_CACHE_MAX_BYTES && tintCache.size) {
+    const oldest = tintCache.keys().next().value as string;
+    const oldEntry = tintCache.get(oldest);
+    tintCacheBytes -= (oldEntry?.width ?? 0) * (oldEntry?.height ?? 0) * 4;
+    freeBaked(oldEntry);
+    tintCache.delete(oldest);
   }
   const cv = document.createElement('canvas');
   c = cv;
@@ -148,6 +165,7 @@ function tint(img: CanvasImageSource & { width: number; height: number }, color:
   ctx.fillRect(0, 0, c.width, c.height);
   ctx.globalCompositeOperation = 'destination-in';
   ctx.drawImage(img, 0, 0);
+  tintCacheBytes += bytes;
   tintCache.set(key, c);
   bitmapize(tintCache, key);
   return c;
@@ -299,13 +317,22 @@ export function compositePaperDoll(
     : part === 'body' ? new Set<number>([3, 4, 5, 6, 7, 8, 13])
     : part === 'legs' ? new Set<number>([10, 11, 12])
     : new Set<number>([...VERTICAL_CHANNELS.map((ch) => ch.sheet), 3, 4, 5, 6, 7, 8, 13]);
+  // ★texReady 就绪守卫(2026-08-25 用户实报"骰子随机几次后样式全空"):atlas 半加载/
+  //   解码驱逐窗口内 drawImage 画不出内容,而 tint() 的 multiply+destination-in 会把
+  //   不透明调色色块铺满画布 → 空白/色块 doll 被 appearanceKey 缓存+bitmapize 定格
+  //   =永久空槽(texId.ts texReady 注释同款坑)。改用 texReady 实测可绘,不就绪返回
+  //   null 不缓存 → CharCreation retry 链在贴图就绪帧重烘,自愈
+  const ready = (name: string): boolean => {
+    const r = UITextures.get(name);
+    return !!r && texReady(r.img as ImageBitmap | HTMLImageElement);
+  };
   for (const s of needSheets) {
-    if (!sheetRect(a.skinVariant, s)) return null;
+    if (!ready(`Player_${a.skinVariant}_${s}.png`) && !ready(`Player_0_${s}.png`)) return null;
   }
-  if (hairMode !== 'none' && (!part || part === 'head') && !UITextures.get(hairSrc)) return null;
-  if (equip?.legs && (!part || part === 'legs') && !UITextures.get(`Armor_Legs_${equip.legs}.png`)) return null;
-  if (equip?.body && (!part || part === 'body') && !UITextures.get(`Armor_Armor_${equip.body}.png`)) return null;
-  if (equip?.head && (!part || part === 'head') && !UITextures.get(`Armor_Head_${equip.head}.png`)) return null;
+  if (hairMode !== 'none' && (!part || part === 'head') && !ready(hairSrc)) return null;
+  if (equip?.legs && (!part || part === 'legs') && !ready(`Armor_Legs_${equip.legs}.png`)) return null;
+  if (equip?.body && (!part || part === 'body') && !ready(`Armor_Armor_${equip.body}.png`)) return null;
+  if (equip?.head && (!part || part === 'head') && !ready(`Armor_Head_${equip.head}.png`)) return null;
 
   // rows 模式：单帧 40×56（body 件取 rows.body、legs 件取 rows.legs）
   const rowsMode = opts?.rows ?? null;

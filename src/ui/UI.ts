@@ -3820,7 +3820,10 @@ export class UI {
     this.craftScrollF = Math.max(0, Math.min(maxAnchor, this.craftScrollF));
     this.craftWheelTarget = Math.max(0, Math.min(maxAnchor, this.craftWheelTarget));
     // 行池初始化（容器每进游戏重建 → __swCraftWheel 随之失效重挂，同旧纪律）
-    if (this.craftPool.length !== WIN) {
+    // ★池挂载校验：craftListEl 每次进游戏重建（面板重构）——仅判池长会让池行
+    //  挂在上一局的旧元素上=列表空、滚动条照常显示（2026-08-26 用户报"偶发列表
+    //  不渲染只渲染滚动条"）。池行必须真挂在当前列表元素下。
+    if (this.craftPool.length !== WIN || this.craftPool[0]?.parentElement !== this.craftListEl) {
       const cl = this.craftListEl;
       cl.replaceChildren();
       cl.style.cssText = 'height:240px; overflow:hidden; width:520px; position:relative;';

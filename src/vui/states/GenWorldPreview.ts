@@ -170,7 +170,7 @@ export class GenWorldPreview extends UIElement {
     batch.fillRect(d.x, d.y + d.height - 2, d.width, 2, rgb(0, 0, 0, 160));
     batch.fillRect(d.x, d.y, 2, d.height, rgb(0, 0, 0, 160));
     batch.fillRect(d.x + d.width - 2, d.y, 2, d.height, rgb(0, 0, 0, 160));
-    // 扫描前沿黄色指示线（显示层叠加，不写入帧缓冲）：软光晕 + 主线。
+    // 扫描前沿白色指示线（显示层叠加，不写入帧缓冲）：细主线 + 极淡光晕。
     // 揭示进行中贴边缘；扫完即隐。fallback 列扫描的循环前沿同款
     let frac = -1;
     if (this.bitmapMode && this.show && this.revealX > 0 && this.revealX < this.show.width)
@@ -179,8 +179,8 @@ export class GenWorldPreview extends UIElement {
       frac = this.sweepCol / this.world.w;
     if (frac >= 0) {
       const ex = d.x + d.width * frac;
-      batch.fillRect(ex - 4, d.y + 2, 8, d.height - 4, rgb(255, 208, 48, 60));
-      batch.fillRect(ex - 1, d.y + 2, 2, d.height - 4, rgb(255, 236, 120, 245));
+      batch.fillRect(ex - 2, d.y + 2, 4, d.height - 4, rgb(255, 255, 255, 38));
+      batch.fillRect(ex, d.y + 2, 1, d.height - 4, rgb(255, 255, 255, 190));
     }
   }
 }

@@ -166,9 +166,6 @@ export class LiquidSim {
   r30Trace?: (x: number, y: number, v: number, num1: number, lq: number, rq: number, self: number) => void;
   /** UUU 批：模块级 R30 触点槽——settle 内部新建 sim 实例也能被探针捕获 */
   static r30Sink: ((x: number, y: number, v: number, num1: number, lq: number, rq: number, self: number) => void) | null = null;
-  /** VVV 批诊断槽（SW_LQTRACE 时由探针注入；生产 undefined 零开销）：
-   * 沉降事件迹 (event, x, y)——bbox 过滤在探针侧做 */
-  traceSink: ((ev: string, x: number, y: number) => void) | null = null;
   numLiquid = 0;
   /** tile.checkingLiquid / tile.skipLiquid 位图 */
   private checking: Uint8Array;
@@ -1766,8 +1763,6 @@ export class LiquidSim {
     const fi = this.idx(X, Y);
     st.liquid[fi] = liquid;
     st.liquidType[fi] = type;
-    this.traceSink?.('SW', originX, originY);
-    this.traceSink?.('LAND', X, Y);
     if (st.liquid[fi] > 0) {
       // 落地即交互（Liquid.cs:206-210 / AttemptToMoveLava/Honey/Shimmer 248-432）
       this.attemptToMoveLiquid(X, Y, srcType, 2);
@@ -1787,9 +1782,7 @@ export class LiquidSim {
       : (x: number, y: number) => this.shimmerCheck(x, y);
     const diff = (x: number, y: number) => {
       const i = this.idx(x, y);
-      const hit = st.liquid[i] > 0 && (st.liquidType[i] === targetType) !== srcIs;
-      if (hit) this.traceSink?.(`DIFF${targetType}`, x, y);
-      return hit;
+      return st.liquid[i] > 0 && (st.liquidType[i] === targetType) !== srcIs;
     };
     if (diff(X - 1, Y)) { if (srcIs) check(X, Y); else check(X - 1, Y); }
     else if (diff(X + 1, Y)) { if (srcIs) check(X, Y); else check(X + 1, Y); }
@@ -1851,9 +1844,6 @@ export class LiquidSim {
     this.numLiquid = 0;
     this.bufCount = 0; // 原版 WaterCheck 首行清 LiquidBuffer（WorldGen.cs:48959）
     this.checking.fill(0);
-    // VVV 批诊断钩（SW_WCPROBE 时启用，用毕删）：镜像原版 wc 死亡判定分支的
-    // 首 witnessed 覆盖集
-    const wcProbe = process.env.SW_WCPROBE ? (globalThis as unknown as { __swWcProbe?: (x: number, y: number, type: number, fx: number, fy: number, liq: number, lty: number) => void }).__swWcProbe : undefined;
     for (let x = 1; x < st.w - 1; x++) {
       for (let y = st.h - 2; y > 0; y--) {
         const i = this.idx(x, y);
@@ -1877,12 +1867,9 @@ export class LiquidSim {
           if (SHEET_OF[t] !== 379) st.liquid[i] = 0;
         } else {
           if (st.flags[i] !== 0) {
-            const dl = st.liquidType[i] === 2 ? this.diesIn(t, st.frameX[i]!, st.frameY[i]!, true) : false;
-            const dw = st.liquidType[i] === 2 ? false : this.diesIn(t, st.frameX[i]!, st.frameY[i]!, false);
-            (process.env.SW_WCPROBE ? (globalThis as unknown as { __swWcVerdict?: (x: number, y: number, dl: boolean, dw: boolean) => void }).__swWcVerdict : undefined)?.(x, y, dl, dw);
             // 1456 WaterCheck L81172-81187：液体冲毁可死亡方块（走 KillTile）
-            if (dl) this.killTileAt(x, y);
-            else if (dw) this.killTileAt(x, y);
+            if (st.liquidType[i] === 2) { if (this.diesIn(t, st.frameX[i]!, st.frameY[i]!, true)) this.killTileAt(x, y); }
+            else if (this.diesIn(t, st.frameX[i]!, st.frameY[i]!, false)) this.killTileAt(x, y);
           }
         }
         if (!solidBr) {

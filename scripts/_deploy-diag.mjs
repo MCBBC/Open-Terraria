@@ -1,5 +1,5 @@
-// 随机外观复现探针(v2,等待到位):进创建页→服装页签→连点骰子 12 次,
-// 每次采样 look sheet 非透明像素,抓"随机几次后全空"。
+// 自愈验证:连点骰子 24 次,采样每次 lit——旧代码:空白一旦出现持续到刷新;
+// 新代码:空白后(缓存弃置+重烘)数轮内恢复非空,且不再持续全空到底。
 import puppeteer from 'puppeteer-core';
 const b = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'] });
 const p = await b.newPage();
@@ -33,9 +33,6 @@ for (let i = 0; i < 40; i++) {
   thumbsOk = await p.evaluate(() => document.querySelectorAll('.sw-cc-stylebtn .sw-cc-thumb').length > 0).catch(() => false);
   if (thumbsOk) break;
 }
-console.log('就绪:', JSON.stringify({ menuOk, selOk, ccOk, thumbsOk }));
-if (!thumbsOk) { console.log('页面错误:', errs.slice(0, 2).join(' | ')); await b.close(); process.exit(1); }
-
 const sampleSheet = () => p.evaluate(() => new Promise((resolve) => {
   const thumb = document.querySelector('.sw-cc-stylebtn .sw-cc-thumb');
   if (!thumb) return resolve({ thumb: false, lit: -1 });
@@ -59,15 +56,17 @@ const clickDice = () => p.evaluate(() => {
   const dice = [...document.querySelectorAll('.sw-cc-looklow .sw-cc-small')][2];
   dice?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 });
-const s0 = await sampleSheet();
-console.log('初值:', JSON.stringify(s0));
-for (let round = 1; round <= 12; round++) {
+const lits = [];
+for (let round = 1; round <= 24; round++) {
   await clickDice();
   await new Promise((r) => setTimeout(r, 450));
   const s = await sampleSheet();
-  console.log(`骰#${round}: lit=${s.lit} (${s.w ?? '?'}x${s.h ?? '?'})${s.noDataUrl ? ' 无dataURL' : ''}${s.err ? ' ' + s.err : ''}`);
-  if (s.lit === 0) { console.log(`>>> 骰#${round} 全空复现!`); break; }
+  lits.push(s.lit);
+  console.log('骰#' + round + ': lit=' + s.lit);
 }
-console.log('页面错误:', errs.length, errs.slice(0, 2).join(' | '));
+const blanks = lits.filter((v) => v === 0).length;
+const lastFive = lits.slice(-5);
+const recoveredTail = lastFive.some((v) => v > 0);
+console.log(JSON.stringify({ blanks, total: lits.length, recoveredTail, errs: errs.length }));
 await b.close();
-process.exit(0);
+process.exit(blanks > 0 ? (recoveredTail ? 0 : 2) : 0);

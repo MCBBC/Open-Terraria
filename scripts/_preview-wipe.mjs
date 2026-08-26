@@ -24,7 +24,7 @@ const out = await page.evaluate(async () => {
   const W = 640, H = 180;
   const mk = (r, g, b) => { const a = new Uint8ClampedArray(W * H * 4); for (let i = 0; i < a.length; i += 4) { a[i] = r; a[i + 1] = g; a[i + 2] = b; a[i + 3] = 255; } return a; };
   const isNewColor = (d, x) => d[x * 4] === 0 && d[x * 4 + 1] === 200;   // 新帧绿色
-  const isYel = (c) => c && c.r > 230 && c.g > 180 && c.b < 160;          // 指示线
+  const isYel = (c) => c && c.r > 230 && c.g > 230 && c.b > 230;          // 白色指示线
   const p = new GenWorldPreview();
   p.setPreviewFrame(mk(255, 255, 255), W, H);      // 白首帧
   p.setPreviewFrame(mk(255, 255, 255), W, H);      // 同尺寸第二帧（走 wipe 常规路径）

@@ -793,7 +793,10 @@ export class BiomeBackground {
         sx = (f % 2) * sw; sy = Math.floor(f / 2) * sh + 2; sh -= 4;
       }
       if (opt.flip) im = this.flippedOf(im);
-      const wScaled = im.width * scale;
+      // ★平铺步进 = 绘制帧宽×scale（sw:动画层=半表帧宽,静态层=整表）——曾用
+      //   im.width×scale:动画层 stride=绘制宽 2 倍 → 每两块间空 50% 露天
+      //   （2026-08-25 用户报丛林远景"接续露馅";森林树层同病被树间隙观感掩盖）
+      const wScaled = sw * scale;
       // 横向视差锚 = 屏幕左缘（:61151 bgStartX = -IEEERemainder(screenX×par,w)-w/2
       // -w——多退一整块配 +3 档 loops 保屏）
       const startX = -BiomeBackground.ieeeRemOf(camLeftX * par, wScaled) - wScaled / 2 - wScaled;

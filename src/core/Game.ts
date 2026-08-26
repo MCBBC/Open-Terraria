@@ -16133,6 +16133,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const bw = def.w ?? 1, bh = def.h ?? 1;
       if (sheet === 10 || sheet === 11) {
         // 门：候选锚 = 点击格解释为中格/顶格/底格，取首个"净空+支撑"达标者
+        const solidAt = (sx: number, sy: number) => {
+          if (!st.inBounds(sx, sy)) return false;
+          const b = TILE_DEFS[st.get(sx, sy)];
+          return !!b && b.solid && !b.platform;
+        };
         const cands = [ty - 1, ty, ty - 2].filter((cy) => st.inBounds(tx, cy)
           && st.inBounds(tx + bw - 1, cy + bh - 1));
         let picked = false;
@@ -16143,6 +16148,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           if (!free) continue;
           if (!this.hasSupport(tx, cy, bw, bh, true, false)) continue;
+          // ★门交替锚（TileObjectData addTile(10) alternate：AnchorTop/Bottom
+          //  SolidTile×1——顶格上/底格下任一实心即锚,无 AnchorWall）。此前
+          //  hasSupport 近似"邻格或墙即支撑"→ 门可悬墙放置（2026-08-26 用户实报）
+          if (!solidAt(tx, cy - 1) && !solidAt(tx, cy + bh)) continue;
           ty = cy; picked = true; break;
         }
         if (!picked) return;
@@ -16150,6 +16159,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         ty -= bh - 1;   // 底行 Origin：点击格=家具左下格
         if (!st.inBounds(tx, ty)) return;
       }
+    }
+    // ★椅锚定全式（TileObjectData.cs:4131 椅 CopyFrom Style1x2：AnchorBottom =
+    //  SolidTile|SolidWithTop|SolidSide——底行下实心/平台，或底行侧邻实心；
+    //  无 AnchorWall）。此前 hasSupport 近似"邻格或墙即支撑"→ 椅可纯墙悬空挂
+    //  （2026-08-26 用户实报）。hasSupport 近似对其余家具族暂保留（锚点全表
+    //  提取另批）。
+    if (def.vanilla?.sheet === 15) {
+      const ch = def.h ?? 1;
+      const gy = ty + ch;                                 // 底行下一格
+      const belowDef = st.inBounds(tx, gy) ? TILE_DEFS[st.get(tx, gy)] : null;
+      const belowOK = !!belowDef && (belowDef.solid || belowDef.platform);
+      const sideOK = [tx - 1, tx + 1].some((sx) => {
+        if (!st.inBounds(sx, gy - 1)) return false;
+        const b = TILE_DEFS[st.get(sx, gy - 1)];
+        return !!b && b.solid && !b.platform;             // SolidSide：底行侧邻实心
+      });
+      if (!belowOK && !sideOK) return;
     }
     // 旧日军团竞技场建造封锁（Player.cs:25669-25672：DD2Event.Ongoing &&
     // ShouldBlockBuilding → 禁改方块，DD2Event.cs:794-796 包围盒判定）

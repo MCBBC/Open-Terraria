@@ -11,8 +11,13 @@ await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
 await new Promise((r) => setTimeout(r, 800));
 
-await page.click('[data-act=sp]');
-await page.waitForSelector('.sw-vsel', { timeout: 10000 });
+// 并行会话可能正改菜单链源码 → 轮询重试点 sp（点击幂等，最多 30s）
+let vselOk = false;
+for (let i = 0; i < 20 && !vselOk; i++) {
+  await page.click('[data-act=sp]').catch(() => {});
+  vselOk = await page.waitForSelector('.sw-vsel', { timeout: 1600 }).then(() => true).catch(() => false);
+}
+if (!vselOk) { console.log('FAIL: 角色面板未出现（源码可能正被并行会话修改）'); console.log('errs:', errs.slice(0, 3)); await browser.close(); process.exit(1); }
 await new Promise((r) => setTimeout(r, 600));
 if (!(await page.$('.sw-vsel .sw-vitem'))) {
   await page.click('.sw-vsel [data-act=new]');

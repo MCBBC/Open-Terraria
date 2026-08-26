@@ -406,6 +406,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (cs) {
       applyPlayer(g, { ...playerFromDiskForm(cs), x: px, y: py });
       applyCharJourney(g, cs);
+    } else if (cid != null) {
+      // 有角色上下文但无随身态(新角色/从未进过世界)=原版全新 .plr——初始铜三件
+      // (原版 Player 初始 inventory:短剑 3507/镐 3509/斧 3506),★不回落世界内嵌
+      // player(那是上个存档玩家的状态,回落=选新角色继承他人装备,同 bug 族;
+      // 2026-08-26 用户实报"角色 B 拿到角色 A 的装备/血量上限")
+      g.player.inv.slots[0] = { id: ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD], stack: 1 };
+      g.player.inv.slots[1] = { id: ITEM_BY_KEY[VI_KEY.STARTER.PICK], stack: 1 };
+      g.player.inv.slots[2] = { id: ITEM_BY_KEY[VI_KEY.STARTER.AXE], stack: 1 };
+      g.player.baseMaxHp = 100; g.player.baseMaxMana = 20;
+      g.player.hp = 100; g.player.mana = 20;
+      g.cb.onInventoryChanged();
     } else if (worldPlayer) {
       applyPlayer(g, { ...worldPlayer, x: px, y: py });
     }
@@ -705,10 +716,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           onNew: () => {
             new CharCreation(holder, {
               onCreate: async (a) => {
-                await charStore.create(a);
+                const meta = await charStore.create(a);
                 selectedAppearance = a;
-                selectedCharId = null;
-                pickWorld();
+                selectedCharId = meta.id;   // ★新角色立即可用 id——曾置 null,读档时
+                pickWorld();                 // charContextId() 回退 localStorage 上一角色 id → 继承其装备/血量(2026-08-26 用户实报)
               },
               onCancel: () => closeFlow(),
             });
@@ -738,10 +749,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           onNew: () => {
             new CharCreation(holder, {
               onCreate: async (a) => {
-                await charStore.create(a);
+                const meta = await charStore.create(a);
                 closeHolder();
                 selectedAppearance = a;
-                selectedCharId = null;
+                selectedCharId = meta.id;   // ★新角色 id 立即可用(曾置 null → 读档回退上一角色 id=串档)
                 then();
               },
               onCancel: () => closeHolder(),
@@ -769,7 +780,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onNew: () => {
         new CharCreation(root, {
           onCreate: async (a) => {
-            await charStore.create(a);
+            const meta = await charStore.create(a);
+            selectedCharId = meta.id;   // ★同上:新角色 id 立即可用(曾置 null=串档)
             showCharacterSelect();
           },
           onCancel: () => showCharacterSelect(),

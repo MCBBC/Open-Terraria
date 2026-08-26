@@ -44,7 +44,8 @@ import {
   defaultVoiceVariant,
 } from '../player/Appearance';
 import { cycleVoiceVariant, hurtVoicePlan } from '../player/PlayerVoice';
-import { compositePaperDoll, dollFrame, walkFrame, IDLE_FRAME } from '../player/PaperDoll';
+import { compositePaperDoll, dollFrame, walkFrame, IDLE_FRAME, clearPaperDollCache } from '../player/PaperDoll';
+import { UITextures } from '../vui/assets/UITextures';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
 import { formatCopper } from './NpcDialog';
@@ -927,9 +928,32 @@ export class CharCreation {
 
   // ================= 缩略图 sprite sheet（纸娃娃管线烘一张，格子切片消费） =================
 
+  /** 烘焙前置:串行懒载本页所需的全部纸娃娃源贴图(2026-08-25 用户要求
+   *  "懒加载+串行"——先前的"发请求→texReady 不过→重试预算"盲试链在预算耗尽后
+   *  = 样式全空不恢复)。await 返回时 texReady 预检必过,烘焙一次成型 */
+  private async ensureBakeSources(): Promise<void> {
+    const names = new Set<string>();
+    const sheets = [0, 1, 2, 3, 4, 5, 6, 7, 8, 13, 10, 11, 12];
+    const v = this.appearance.skinVariant;
+    for (const s of sheets) {
+      names.add(`Player_${v}_${s}.png`);
+      names.add(`Player_0_${s}.png`);   // 女体缺通道的回退源
+    }
+    names.add(`Player_Hair_${this.appearance.hair + 1}.png`);
+    names.add(`Player_HairAlt_${this.appearance.hair + 1}.png`);
+    if (this.tab === 'hair') {
+      for (const hairId of CHAR_CREATION_HAIRS) {
+        names.add(`Player_Hair_${hairId + 1}.png`);
+        names.add(`Player_HairAlt_${hairId + 1}.png`);
+      }
+    }
+    await UITextures.ensure([...names]);
+  }
+
   /** 烘当前页所需 sheet：发型页 44×44 头像格 ×213 / 外观页 44×80 全身格 ×10 */
-  private bakeSheets(): void {
+  private async bakeSheets(): Promise<void> {
     if (!this.panel.isConnected) return;
+    await this.ensureBakeSources();
     if (this.tab === 'hair') {
       const cols = 10, cell = 44;
       const rows = Math.ceil(CHAR_CREATION_HAIRS.length / cols);
@@ -944,6 +968,11 @@ export class CharCreation {
         else missed = true;
       });
       this.hairSheetUrl = cv.toDataURL();
+      if (!missed && this.sheetAllTransparent(cv)) {
+        clearPaperDollCache();
+        this.scheduleThumbRetry(true);
+        return;
+      }
       if (missed) this.scheduleThumbRetry(true);
     } else if (this.tab === 'look') {
       const cell = 44;
@@ -960,9 +989,36 @@ export class CharCreation {
         } else missed = true;
       });
       this.lookSheetUrl = cv.toDataURL();
+      // WARMDBG(临时诊断)
+      console.error('[WARMDBG] look bake: missed=' + missed + ' blank=' + this.sheetAllTransparent(cv));
+      // ★内容自检(2026-08-25 用户实报"随机几次后样式全空"):doll 非 null 但内容
+      //   全透明 = 源 canvas 被静默清零(显存驱逐类,菜单阶段无 Renderer.onLost 扫)
+      //   ——空 sheet 一旦挂上缩略图,不重烘就永久空槽。检测到全透明 → 清 PaperDoll
+      //   缓存(弃掉可能已死的缓存画布)+ 重烘(retry 链有界,6 次后放弃=降级不卡死)
+      if (!missed && this.sheetAllTransparent(cv)) {
+        clearPaperDollCache();
+        this.scheduleThumbRetry(true);
+        return;
+      }
       if (missed) this.scheduleThumbRetry(true);
     }
     this.applySheetUrls();
+  }
+
+  /** 全透明检测(2026-08-25):采样 400 像素,全 <α16 = 烘焙画了空气(源 canvas
+   *  被静默清零)——触发缓存弃置+重烘。正常 sheet 亮像素占比高,误报可忽略 */
+  private sheetAllTransparent(cv: HTMLCanvasElement): boolean {
+    const g = cv.getContext('2d');
+    if (!g) return false;
+    const step = Math.max(4, Math.floor(cv.width / 100) * 4);
+    const d = g.getImageData(0, 0, cv.width, cv.height).data;
+    let sampled = 0;
+    for (let i = 3; i < d.length; i += step * 4) {
+      sampled++;
+      if (d[i] > 16) return false;
+    }
+    void sampled;
+    return true;
   }
 
   /** 防抖重烘（拖色每帧重烘 213 格太贵——停手 250ms 后一次烘） */
