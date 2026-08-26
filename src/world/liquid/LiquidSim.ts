@@ -166,6 +166,17 @@ export class LiquidSim {
   r30Trace?: (x: number, y: number, v: number, num1: number, lq: number, rq: number, self: number) => void;
   /** UUU 批：模块级 R30 触点槽——settle 内部新建 sim 实例也能被探针捕获 */
   static r30Sink: ((x: number, y: number, v: number, num1: number, lq: number, rq: number, self: number) => void) | null = null;
+  /** WWWWWWW 批：盒内逐 Update 分支签名迹（与 rig SW_TRKBOX 同位标；生产 null 关闭零开销） */
+  static trkProbe: ((iter: number, x: number, y: number, sig: number, amtA: number, ltyA: number, kill: number, delay: number, pre: { amt: number; lty: number }) => void) | null = null;
+  static trkBox: { x0: number; x1: number; y0: number; y1: number } | null = null;
+  private trkIter = 0;
+  private trkSig = 0;
+  private preAmt = 0;
+  private preLty = 0;
+  private inTrkBox(x: number, y: number): boolean {
+    const b = LiquidSim.trkBox;
+    return b !== null && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+  }
   numLiquid = 0;
   /** tile.checkingLiquid / tile.skipLiquid 位图 */
   private checking: Uint8Array;
@@ -863,17 +874,30 @@ export class LiquidSim {
     const w = st.w, h = st.h;
     const x = e.x, y = e.y;
     const i5 = this.idx(x, y);
+    const trkOn = LiquidSim.trkProbe !== null && this.inTrkBox(x, y);
+    if (trkOn) {
+      this.trkSig = 0;
+      this.preAmt = st.liquid[i5];
+      this.preLty = Math.max(0, st.liquidType[i5] - 1);
+    }
     // 1) 本格被实心方块占据 → 下轮必删（Liquid.cs:306-310）
-    if (this.blocksLiquid(x, y)) { e.kill = 999; return; }
+    if (this.blocksLiquid(x, y)) {
+      if (trkOn) { this.trkSig |= 1; this.trkPost(this.trkIter, e); }
+      e.kill = 999; return;
+    }
     const startAmt = st.liquid[i5];
     // 2) 地狱蒸发：水每 tick -2（Liquid.cs:314-320；UnderworldLayer ≈ h-200）
     if (y > h - 200 && st.liquidType[i5] === 1 && st.liquid[i5] > 0) {
       st.liquid[i5] = Math.max(0, st.liquid[i5] - 2);
     }
-    if (st.liquid[i5] === 0) { e.kill = 999; return; }
+    if (st.liquid[i5] === 0) {
+      if (trkOn) { this.trkSig |= 2; this.trkPost(this.trkIter, e); }
+      e.kill = 999; return;
+    }
     const myType = st.liquidType[i5];
     // 3) 岩浆/蜂蜜：先交互检查，再降速（Liquid.cs:327-373）
     if (myType === 2) {
+      this.trkSig |= 4;
       this.lavaCheck(x, y);
       if (!this.quickFall) {
         if (e.delay < 5) { e.delay++; return; }
@@ -896,6 +920,7 @@ export class LiquidSim {
         if (st.liquidType[ni] === 2) this.addWater(nx, ny);
       }
       if (myType === 3) {
+        this.trkSig |= 8;
         this.honeyCheck(x, y);
         if (!this.quickFall) {
           if (e.delay < 10) { e.delay++; return; }
@@ -911,6 +936,7 @@ export class LiquidSim {
           if (st.liquidType[ni] === 3) this.addWater(nx, ny);
         }
         if (myType === 4) {
+          this.trkSig |= 0x10;
           // 微光格：自检交互（Liquid.cs:543-546 tile5.shimmer() → ShimmerCheck），
           // 无降速 delay——流动性与水一致
           this.shimmerCheck(x, y);
@@ -934,6 +960,7 @@ export class LiquidSim {
       const belowType = st.liquidType[bi];
       const belowBlocks = y + 1 >= h ? true : this.blocksLiquid(x, y + 1);
       if (!belowBlocks && (belowAmt <= 0 || belowType === myType) && belowAmt < 255) {
+        this.trkSig |= 0x20;
         let t = 255 - belowAmt;
         if (t > st.liquid[i5]) t = st.liquid[i5];
         // 原版边界特性：缺口 1 且本格满格时不扣源（Liquid.cs:381-384）
@@ -949,7 +976,7 @@ export class LiquidSim {
       }
     }
     // 5) 侧向均流（Liquid.cs:398-651）
-    if (st.liquid[i5] > 0) this.sideFlow(x, y, i5);
+    if (st.liquid[i5] > 0) { this.trkSig |= 0x40; this.sideFlow(x, y, i5); }
     // 6) kill 维护（Liquid.cs:652-671）
     if (st.liquid[i5] !== startAmt) {
       if (st.liquid[i5] === 254 && startAmt === 255) {
@@ -962,6 +989,17 @@ export class LiquidSim {
     } else {
       e.kill++;
     }
+    if (trkOn) this.trkPost(this.trkIter, e);
+  }
+
+  /** 盒内逐 Update 迹输出（iter 由调用方注入——update 无迭代上下文，包一层计数） */
+  emitTrk(iter: number): void {
+    this.trkIter = iter;
+  }
+
+  private trkPost(iter: number, e: LiquidEntry): void {
+    const st = this.world.store;
+    LiquidSim.trkProbe?.(iter, e.x, e.y, this.trkSig, st.liquid[this.idx(e.x, e.y)], Math.max(0, st.liquidType[this.idx(e.x, e.y)] - 1), e.kill, e.delay, { amt: this.preAmt, lty: this.preLty });
   }
 
   /** 侧向均流：参与格全体写平均值（Liquid.cs:398-651，逐分支照抄） */
@@ -986,6 +1024,7 @@ export class LiquidSim {
     if (st.liquid[i5] < 3) num1 = -1;         // 薄层蒸发偏置（Liquid.cs:424-426）
     if (st.liquid[i5] > 250) { f3 = false; f4 = false; }
     if (f1 && f2) {
+      this.trkSig |= (f3 && f4) ? 0x100 : 0x200;
       if (f3 && f4) {
         // ±3 延伸判定（Liquid.cs:436-449）
         let f5 = true, f6 = true;
@@ -1030,6 +1069,7 @@ export class LiquidSim {
           if (same !== 4 || st.liquid[iu] <= 0) st.liquid[i5] = m;
         }
       } else if (f3) {
+        this.trkSig |= 0x400;
         // 4 格：左延伸（Liquid.cs:567-587）。类型写在条件判断之前（原版 L568 无条件写）
         const m = csRound((lq + rq + st.liquid[im2] + st.liquid[i5] + num1) / 4); // 1456 Math.Round=取偶
         st.liquidType[il] = myType;
@@ -1040,6 +1080,7 @@ export class LiquidSim {
         if (st.liquid[im2] !== m || st.liquid[i5] !== m) { st.liquid[im2] = m; this.addWater(x - 2, y); }
         st.liquid[i5] = m;
       } else if (f4) {
+        this.trkSig |= 0x800;
         // 4 格：右延伸（Liquid.cs:590-609）。类型写在条件判断之前（原版 L591 无条件写）
         const m = csRound((lq + rq + st.liquid[ip2] + st.liquid[i5] + num1) / 4); // 1456 Math.Round=取偶
         st.liquidType[il] = myType;
@@ -1050,6 +1091,7 @@ export class LiquidSim {
         if (st.liquid[ip2] !== m || st.liquid[i5] !== m) { st.liquid[ip2] = m; this.addWater(x + 2, y); }
         st.liquid[i5] = m;
       } else {
+        this.trkSig |= 0x1000;
         // 3 格均分（Liquid.cs:613-628）：随机 254→255 补满
         let m = csRound((lq + rq + st.liquid[i5] + num1) / 3); // 1456 Math.Round=取偶
         // 原版 WorldGen.genRand.Next(30)==0 晋升（gen 期走 pass 链流）。
@@ -1064,6 +1106,7 @@ export class LiquidSim {
         st.liquid[i5] = m;
       }
     } else if (f1) {
+      this.trkSig |= 0x2000;
       // 2 格：向左（Liquid.cs:633-639）
       const m = csRound((lq + st.liquid[i5] + num1) / 2); // 1456 Math.Round=取偶
       if (lq !== m) st.liquid[il] = m;
@@ -1071,6 +1114,7 @@ export class LiquidSim {
       if (st.liquid[i5] !== m || st.liquid[il] !== m) this.addWater(x - 1, y);
       st.liquid[i5] = m;
     } else if (f2) {
+      this.trkSig |= 0x4000;
       // 2 格：向右（Liquid.cs:643-649）
       const m = csRound((rq + st.liquid[i5] + num1) / 2); // 1456 Math.Round=取偶
       if (rq !== m) st.liquid[ir] = m;
