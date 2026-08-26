@@ -177,15 +177,17 @@ export class CharSelectPanel {
     const img = document.createElement('img');
     img.src = BTN_SRC(src);
     img.title = label;
-    img.addEventListener('mouseenter', () => { this.setLabel(label, false); });
-    img.addEventListener('mouseleave', () => { this.setLabel('', false); });
+    img.addEventListener('mouseenter', () => { this.setLabel(wrap, label, false); });
+    img.addEventListener('mouseleave', () => { this.setLabel(wrap, '', false); });
     wrap.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
     wrap.appendChild(img);
     parent.appendChild(wrap);
   }
 
-  private setLabel(text: string, del: boolean): void {
-    const el = this.panel.querySelector(del ? '.sw-vitem-del-label' : '.sw-vitem-label');
+  private setLabel(from: HTMLElement, text: string, del: boolean): void {
+    // 标签挂在各自行内——按钮就近锚所在 .sw-vitem 行内取
+    // （曾查整个 panel：多行恒中第一行,hover 其它行文字串进首行,2026-08-26 用户报）
+    const el = from.closest('.sw-vitem')?.querySelector(del ? '.sw-vitem-del-label' : '.sw-vitem-label');
     if (el) el.textContent = text;
   }
 

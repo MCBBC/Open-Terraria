@@ -25,6 +25,8 @@ await page.goto(ORIGIN + '/', { waitUntil: 'domcontentloaded', timeout: 60000 })
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.waitForSelector('#sw-splash', { hidden: true, timeout: 90000 }).catch(() => {});
 await new Promise((r) => setTimeout(r, 800));
+await page.mouse.click(6, 6);   // 音频门真点(探针坑:音频门会吃掉首次 page.click)
+await new Promise((r) => setTimeout(r, 300));
 await page.click('.sw-title-menu [data-act=sp]');
 await page.waitForSelector('.sw-vsel', { timeout: 15000 });
 await new Promise((r) => setTimeout(r, 600));

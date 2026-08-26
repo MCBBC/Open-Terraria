@@ -121,23 +121,27 @@ export class WorldSelectPanel {
 
   private unsubLang: (() => void) | null = null;
 
-  private iconBtn(parent: HTMLElement, src: string, label: string, fn: () => void): void {
+  private iconBtn(parent: HTMLElement, src: string, label: string, fn: () => void): HTMLElement {
     // 24px 图标外包 .sw-vico 触控热区层(C 档 padding 6/margin -6 → 36² 热区,
     // 桌面无样式盒尺寸=img 几何零变化);click 挂热区层,img 点击冒泡仍触发
+    // 返回热区层供点击后改写本行标签(种子钮复制回显)
     const wrap = document.createElement('span');
     wrap.className = 'sw-vico';
     const img = document.createElement('img');
     img.src = BTN_SRC(src);
     img.title = label;
-    img.addEventListener('mouseenter', () => { this.setLabel(label, false); });
-    img.addEventListener('mouseleave', () => { this.setLabel('', false); });
+    img.addEventListener('mouseenter', () => { this.setLabel(wrap, label, false); });
+    img.addEventListener('mouseleave', () => { this.setLabel(wrap, '', false); });
     wrap.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
     wrap.appendChild(img);
     parent.appendChild(wrap);
+    return wrap;
   }
 
-  private setLabel(text: string, del: boolean): void {
-    const el = this.panel.querySelector(del ? '.sw-vitem-del-label' : '.sw-vitem-label');
+  private setLabel(from: HTMLElement, text: string, del: boolean): void {
+    // 标签挂在各自行内——按钮就近锚所在 .sw-vitem 行内取
+    // （曾查整个 panel：多行恒中第一行,hover 其它行文字串进首行,2026-08-26 用户报）
+    const el = from.closest('.sw-vitem')?.querySelector(del ? '.sw-vitem-del-label' : '.sw-vitem-label');
     if (el) el.textContent = text;
   }
 
@@ -178,9 +182,9 @@ export class WorldSelectPanel {
         });
       // 原版按钮序（UIWorldListItem.cs:95-158）：Play/Favorite/Seed/Rename/Delete——
       // 种子钮复制完整种子串（SeedButtonClick :127-131），非"复制世界"
-      this.iconBtn(btns, 'UI_ButtonSeed', Lang.text('UI.CopySeed', fullSeedText(m)), () => {
+      const seedBtn = this.iconBtn(btns, 'UI_ButtonSeed', Lang.text('UI.CopySeed', fullSeedText(m)), () => {
         copyToClipboard(fullSeedText(m));
-        this.setLabel(Lang.text('UI.SeedCopied'), false);
+        this.setLabel(seedBtn, Lang.text('UI.SeedCopied'), false);
       });
       this.iconBtn(btns, 'UI_ButtonRename', Lang.text('UI.Rename'), async () => {
         const name = prompt(Lang.text('UI.Rename'), m.name);

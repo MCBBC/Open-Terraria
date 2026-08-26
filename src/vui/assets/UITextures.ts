@@ -20,7 +20,9 @@ export const UITextures = {
   },
 
   /** 串行懒载一批 UI 贴图(2026-08-25 用户要求"懒加载+串行"):await 返回时
-   *  名单内【存在的】文件均已入 uiimages(可绘);不存在的文件跳过不悬挂 */
+   *  名单内【存在的】文件均已入 uiimages(可绘);不存在的文件跳过不悬挂。
+   *  入参为 vanilla-ui 清单键(与 get() 同域,如 'Player_Hair_5.png'),
+   *  ensureUiBatch 内部解析成磁盘路径 */
   ensure(names: string[]): Promise<void> {
     if (!atlas) return Promise.resolve();
     return atlas.ensureUiBatch(names);

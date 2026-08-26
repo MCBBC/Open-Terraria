@@ -401,7 +401,9 @@ export class SpriteAtlas {
     this._uiWaiters.delete(file);
     for (const w of ws) w(ok);
   }
-  /** 等待单个 UI 贴图就绪(幂等触发懒载;404/失败也 settle=false 不悬挂) */
+  /** 等待单个 UI 贴图就绪(幂等触发懒载;404/失败也 settle=false 不悬挂)。
+   *  ★入参是磁盘路径(vanilla-ui/…,清单解析后)非清单键——键→路径解析在 vui/
+   *  ensureUiBatch,直传键会按错误路径发 404(ensureUiBatch 头注 2026-08-26 案) */
   waitUi(file: string): Promise<boolean> {
     this.ensureUiImage(file);
     if (this.uiimages.get(file)) return Promise.resolve(true);
@@ -413,11 +415,18 @@ export class SpriteAtlas {
       this._uiWaiters.set(file, ws);
     });
   }
-  /** 串行预载一批 UI 贴图(逐个 await,避免并发请求风暴+解码卡顿) */
+  /** 串行预载一批 UI 贴图(逐个 await,避免并发请求风暴+解码卡顿)。
+   *  ★入参语义=【清单键】(vanilla-ui.json 键,如 'Player_Hair_5.png')——与
+   *  vui()/UITextures.get 同源,先经 uiFiles 解析成磁盘路径(vanilla-ui/ 前缀)
+   *  再加载;清单外的入参按路径直用(资源包注入等直路径调用方的逃生门)。
+   *  曾把键当路径直发(sprites/Player_Hair_5.png,缺 vanilla-ui/ 前缀)→ 发型页
+   *  452 键全 404 且 SW 不缓存 404,开面板两波 904 个往返跑完才开始烘焙
+   *  (2026-08-26 用户实报"发型列表等 904 个 404 才渲染") */
   async ensureUiBatch(names: string[]): Promise<void> {
     for (const raw of names) {
-      const name = raw.endsWith('.png') ? raw : `${raw}.png`;
-      try { await this.waitUi(name); } catch { /* 单文件失败不阻断整批 */ }
+      const key = raw.endsWith('.png') ? raw : `${raw}.png`;
+      const file = this.uiFiles[key] ?? key;
+      try { await this.waitUi(file); } catch { /* 单文件失败不阻断整批 */ }
     }
   }
 
