@@ -130,6 +130,48 @@ function fpOf(sim: FpSim): string {
     };
   }
 
+  // QUICKWATER 尾世界快照（K.liq 等；验证 QW 相位本身是否已分歧）
+  const origQW = proto.quickWater;
+  let qwSeen = false;
+  proto.quickWater = function () {
+    const r = origQW.apply(this, arguments as unknown as unknown[]);
+    if (!qwSeen && process.env.SW_WWWA_QW === '1') {
+      qwSeen = true;
+      const st2 = this.world.store;
+      writeFileSync(`${OUT}/j-qw-world/K.liq`, Buffer.from(st2.liquid.slice().buffer));
+      const e8 = new Uint8Array(N);
+      for (let i = 0; i < N; i++) e8[i] = st2.flags[i]! & 1;
+      writeFileSync(`${OUT}/j-qw-world/K.act`, Buffer.from(e8.buffer));
+      for (let i = 0; i < N; i++) e8[i] = st2.liquid[i] ? Math.max(0, st2.liquidType[i]! - 1) : 0;
+      writeFileSync(`${OUT}/j-qw-world/K.lty`, Buffer.from(e8.buffer));
+      console.log('QW done nl=', this.numLiquid);
+    }
+    return r;
+  };
+  (proto as Record<string, (...a: unknown[]) => unknown>)._wwwaOrigQW = origQW;
+
+  // head-WaterCheck 后的活动表快照（与 rig DumpList("head") 对拍）
+  const origWC = proto.waterCheck;
+  let wcSeen = 0;
+  proto.waterCheck = function () {
+    const r = origWC.apply(this, arguments as unknown as unknown[]);
+    if (this.numLiquid > 0) {
+      wcSeen++;
+      if (wcSeen === 1) {
+        const st2 = this.world.store;
+        const rows: string[] = [];
+        for (let k = 0; k < this.numLiquid; k++) {
+          const e = (this as unknown as { liquids: Entry[] }).liquids[k]!;
+          const i = st2.idx(e.x, e.y);
+          rows.push(`${e.x},${e.y},${st2.liquid[i]},${Math.max(0, st2.liquidType[i] - 1)}`);
+        }
+        writeFileSync(`${OUT}/j-list-head.txt`, rows.join('\n') + '\n');
+      }
+    }
+    return r;
+  };
+  (proto as Record<string, (...a: unknown[]) => unknown>)._wwwaOrigWC = origWC;
+
   type Entry = { x: number; y: number; delay: number; kill: number };
   proto.updateLiquid = function (this: { numLiquid: number; bufCount: number; liquids: Entry[]; world: World }) {
     LiquidSim.trkIterCur = it0;
@@ -169,6 +211,8 @@ function fpOf(sim: FpSim): string {
   try {
     await settleWorldLiquids(world, 'gen', undefined, new RNG(SEED), false);
   } finally {
+    if ((proto as Record<string, unknown>)._wwwaOrigQW) proto.quickWater = (proto as Record<string, unknown>)._wwwaOrigQW as (...a: unknown[]) => unknown;
+    if ((proto as Record<string, unknown>)._wwwaOrigWC) proto.waterCheck = (proto as Record<string, unknown>)._wwwaOrigWC as (...a: unknown[]) => unknown;
     proto.updateLiquid = origUpdate;
     delete (globalThis as { __swLqKill?: unknown }).__swLqKill;
   }

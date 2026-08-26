@@ -3591,6 +3591,12 @@ export class Renderer {
   private _cssW = 0;
   /** 果冻管线帧级换算态（updateWaterWaves 缓存；drawLiquids 消费——CSS/世界/设备三系互算） */
   private _waveCss: WaterWarpFrameState | null = null;
+  /** 本帧视口（±2 格余量）是否含任何液体（updateWaterWaves 每帧探针）。水体全屏
+   *  扭曲的门控：obj19 门控以前景水 α 作乘子、波场位移亚像素级——视口确无液体时
+   *  applyFullScreen 必然产出与直画一致的恒等画面，整轮「整屏场景纹理上传+GL
+   *  全屏 pass+回贴」纯白耗（#perf2026-08-26 trace：旱地地表 ~5ms/帧）。缺省
+   *  true=未初始化帧保守走旧路。 */
+  private _waveLiquidInView = true;
   /** ?oldmult=1：CPU 乘光走优化前逐像素全重算旧循环（A/B 对拍/逃生门） */
   static readonly legacyCpuMult = (() => {
     try {
@@ -3637,6 +3643,29 @@ export class Renderer {
     // 帧态在激活时必然新鲜：active ⇒ 本函数已跑到这里）
     this._waveCss = { cssW, cssH, cssScale, cssZoom, camL, camT };
     if (waterWaves.quality === 0) { waterWaves.disable(); return; }
+
+    // ---- 视口液体探针（水体全屏扭曲门控，#perf2026-08-26 trace 批）----
+    // 视口±2 格行扫描（~千格 Uint8Array 直读，µs 级）。效果外延论证：扭曲位移
+    // 亚像素级（波场项 ×0.1 后 ±1px 内）、水线果冻/水下晃动都以前景水 α 门控，
+    // 像素影响不出水面贴图邻域——2 格余量远大于任何外延。false 仅在整窗确无
+    // 液体时置位（保守方向：有液或异常一律 true 走旧路）。
+    {
+      const stP = world.store;
+      const MARGIN = 2;
+      const px0 = Math.max(0, Math.floor(camL / TILE) - MARGIN);
+      const py0 = Math.max(0, Math.floor(camT / TILE) - MARGIN);
+      const px1 = Math.min(stP.w - 1, Math.ceil((camL + viewW / z) / TILE) + MARGIN);
+      const py1 = Math.min(stP.h - 1, Math.ceil((camT + viewH / z) / TILE) + MARGIN);
+      let seen = false;
+      const liqArr = stP.liquid;
+      scan: for (let ty = py0; ty <= py1; ty++) {
+        const row = ty * stP.w;
+        for (let tx = px0; tx <= px1; tx++) {
+          if (liqArr[row + tx] > 0) { seen = true; break scan; }
+        }
+      }
+      this._waveLiquidInView = seen;
+    }
 
     waterWaves.setCamera(camL, camT, cssZoom);
 
@@ -12730,9 +12759,10 @@ export class Renderer {
       if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [sx, sy, lw, lh])) {
         // ★全屏水体扭曲（原版 FilterManager.EndCapture :127-176 语义）：滤镜作用于
         //   【带光照的完整合成场景】——水下整屏随噪声+波场晃动、水线果冻、旱地 0，
-        //   全由 obj19 alpha 门控交付（GLWaterDistortion 头注）。GL 不可用/逃生门
-        //   → 原样直画（无扭曲降级）。
+        //   全由 obj19 alpha 门控交付（GLWaterDistortion 头注）。GL 不可用/逃生门/
+        //   视口无液体探针（_waveLiquidInView，恒等输出跳过整屏上传）→ 原样直画。
         const warped = this._waveCss && !this.isCpuRender() && waterWaves.quality > 0
+          && this._waveLiquidInView
           ? this.waterWarp.applyFullScreen(gl.canvas, this._waveCss,
             this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null)
           : null;

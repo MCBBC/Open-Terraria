@@ -2301,18 +2301,53 @@ export class SkyRenderer {
     const { bgTopY } = this.cloudBgTop(camY, viewH);
     const sH = viewH / 600;
     const scratch = this.cloudScratch;   // 两 pass 同步消费,单 scratch 顺序复用
+    // #perf2026-08-26(trace 热点:云近双通道各一次全屏 blit):'both' 下 pass2/pass3
+    // 同处一个层序位(biomeBg 之后、树层之前——Renderer.ts 唯一调用点),共享一个
+    // GL 会话(单 resize+单 clear+单次全屏合成)。gl.quad/cloudQuad 经 uniform+
+    // drawArrays 同步消费几何、无惰性引用 → 单 scratch 在两通道间重填安全。
+    // 菜单侧 MenuBackground 分 'closer'/'closest' 注入调用 = 两通道夹不同层,
+    // 必须各自独立会话(不传批令牌,走原路径)。
+    let shared: GLSpriteLayer | null = null;
+    if (which === 'both') {
+      const g = this.useGLClouds ? this.cloudGlLayer : null;
+      shared = g && !g.unavailable ? g : null;
+    }
+    let batchBegun = false;
+    /** 懒开启共享会话(首个非空通道触发;两通道全空则零工作=旧 early-return 语义) */
+    const openBatch = (): GLSpriteLayer | null => {
+      if (!shared) return null;
+      if (!batchBegun) {
+        shared.resize(ctx.canvas.width, ctx.canvas.height);
+        shared.begin();
+        batchBegun = true;
+      }
+      return shared;
+    };
+    const finishBatch = () => {
+      if (shared && batchBegun) {
+        shared.end();
+        ctx.drawImage(shared.canvas, 0, 0);   // 与单通道尾blit同 ctx 态(identity/α=1)
+        ctx.globalAlpha = 1;
+      }
+    };
+    const batch = shared ? { openGl: openBatch } : undefined;
     if (which !== 'closest') {
       scratch.length = 0;
       for (const c of this.vclouds) if (c.scale >= 1 && c.scale < 1.15) scratch.push(c);
-      this.drawCloudPass(ctx, scratch, 2, camY,
-        (c) => c.y * sH + bgTopY + 150);
+      if (scratch.length || !batch) {          // 空选集在批模式下不再单独 begin+blit
+        this.drawCloudPass(ctx, scratch, 2, camY,
+          (c) => c.y * sH + bgTopY + 150, batch);
+      }
     }
     if (which !== 'closer') {
       scratch.length = 0;
       for (const c of this.vclouds) if (c.scale >= 1.15) scratch.push(c);
-      this.drawCloudPass(ctx, scratch, 3, camY,
-        (c) => c.y * sH - 100 + bgTopY * 1.01 - 150);
+      if (scratch.length || !batch) {
+        this.drawCloudPass(ctx, scratch, 3, camY,
+          (c) => c.y * sH - 100 + bgTopY * 1.01 - 150, batch);
+      }
     }
+    finishBatch();
     void viewW;
   }
   /** 单通道绘制（云色链 NextHorizonRenderer.DrawCloud :246-268 1:1）：
@@ -2327,6 +2362,10 @@ export class SkyRenderer {
   private drawCloudPass(
     ctx: CanvasRenderingContext2D, clouds: VanillaCloud[], pass: 1 | 2 | 3,
     camY: number, yOf: (c: VanillaCloud) => number,
+    /** 共享批令牌(#perf2026-08-26,'both' 双通道合并专用):传入时本函数只向调用方
+     *  已开启的 GL 层提交四边形,跳过 begin 与尾blit(统一由 drawCloudsNear 收口);
+     *  返回 null=GL 不可用 → 本 pass 走 2D 兜底直画(与独立路径一致)。 */
+    batch?: { openGl: () => GLSpriteLayer | null },
   ) {
     if (!clouds.length) return;
     const atmo = this.atmoValue(camY);
@@ -2351,9 +2390,14 @@ export class SkyRenderer {
     // 不可用(WebGL2 缺失/上下文死亡退避/cpuRender/?cloudgl=0)→ 2D cloudTint 兜底
     // #A 合并(2026-08-19):云不再持有独立 WebGL 上下文——与背景层共用
     // Renderer.glfx(每帧注入;不可用/退避/cpuRender/?cloudgl=0 → 2D cloudTint 兜底)
-    const glRaw = this.useGLClouds ? this.cloudGlLayer : null;
-    const gl = glRaw && !glRaw.unavailable ? glRaw : null;
-    if (gl) { gl.resize(ctx.canvas.width, ctx.canvas.height); gl.begin(); }
+    let gl: GLSpriteLayer | null;
+    if (batch) {
+      gl = batch.openGl();
+    } else {
+      const glRaw = this.useGLClouds ? this.cloudGlLayer : null;
+      gl = glRaw && !glRaw.unavailable ? glRaw : null;
+      if (gl) { gl.resize(ctx.canvas.width, ctx.canvas.height); gl.begin(); }
+    }
     ctx.save();
     ctx.imageSmoothingEnabled = true; // 原版云为软边贴图，平滑缩放(2D 兜底路径)
     for (const c of clouds) {
@@ -2419,7 +2463,8 @@ export class SkyRenderer {
     }
     ctx.restore();
     ctx.globalAlpha = 1;
-    if (gl) { gl.end(); ctx.drawImage(gl.canvas, 0, 0); }   // 合成进主画布(三 pass 间 clear 复用)
+    // 批模式('both' 双通道共享会话)的 end+全屏 blit 由 drawCloudsNear 统一收口
+    if (gl && !batch) { gl.end(); ctx.drawImage(gl.canvas, 0, 0); }   // 合成进主画布(三 pass 间 clear 复用)
   }
 
   // ---- 云 GL 共享层(#A 2026-08-19 合并:云与背景层共用 Renderer.glfx 一个
