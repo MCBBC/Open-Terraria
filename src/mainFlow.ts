@@ -995,14 +995,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // 全图数组结构化克隆的 memcpy),不可用时 SaveClient 内部回退同步 saveGame
     saveClient.ensure();
     void saveClient.save(game.world, game.player, Date.now() - playStart, game.townNpcsForSave(), game.eventsForSave()).then((json) => {
-      const mb = json.length / 1024 / 1024;
       void kvSetCompat(json).then((where) => {
         if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
         else {
           quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
-          // 保存成功提示（2026-08-24 用户要求;曾因 Toast.Saved 键缺失注释——键已补）
-          ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved',
-            where === 'idb' ? mb.toFixed(1) + ' MB · IndexedDB' : 'localStorage'));
+          // 保存成功提示（2026-08-26 用户要求：只显示"世界已保存"，去掉容量/存储介质后缀——
+          // 文案已去 {0} 占位，实参不再传入）
+          ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved'));
         }
       }).catch((e) => {
         console.error('kvSet failed', e);

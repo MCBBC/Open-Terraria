@@ -281,3 +281,56 @@ describe('R33 C1：texld-s1 检测与 noise 采样器接线', () => {
     expect(near3(a, b)).toBe(false);                     // s1 调制可达
   });
 });
+
+// ---- R33 回归轮：Phase 染料×翅膀 终验回归（消失+卡顿） ----
+describe('R33 回归轮：noise 族回退与 Phase alpha 保形', () => {
+  /** 翅膀帧近似:184×56 中央体(暗蓝,α200)+透明边;返回 avgA/vis */
+  const wingBake = (s1?: SM2Sampler, time = 12.34) => {
+    const apply = dyeApplyOf(3042)!;
+    const W = 92, H = 28;   // 半分辨率桶(缓存后实际走 200ms 桶,此处测数学)
+    const data = new Uint8ClampedArray(W * H * 4);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4; const b = x > 30 && x < 65 && y > 5 && y < 23;
+      data[i] = b ? 180 : 0; data[i + 1] = b ? 60 : 0; data[i + 2] = b ? 220 : 0; data[i + 3] = b ? 200 : 0;
+    }
+    apply.uniforms.uTime = time;
+    applyDyePass(data, W, H, apply, [], { sx: 0, sy: 0, sheetW: W, sheetH: H }, s1);
+    let sumA = 0, vis = 0, bodyA = 0, bodyN = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4; sumA += data[i + 3];
+      if (data[i + 3] > 40) vis++;
+      if (x > 30 && x < 65 && y > 5 && y < 23) { bodyA += data[i + 3]; bodyN++; }
+    }
+    let hash = 0;
+    for (let i = 0; i < data.length; i += 4) hash = (hash + data[i] * 31 + data[i + 1] * 7 + data[i + 2]) | 0;
+    return { avgA: sumA / (W * H), vis, bodyAvgA: bodyA / bodyN, hash };
+  };
+
+  it('★alpha 保形：体区烘焙 avgA ≥ 输入 α×0.7（翅膀不消失——out.a=sceneA+相位项）', () => {
+    const r = wingBake((u, v) => [0.27, 0.27, 0.27, 1]);   // 真 Misc_noise 均值
+    expect(r.bodyAvgA).toBeGreaterThanOrEqual(200 * 0.7);
+    expect(r.vis).toBeGreaterThan(300);
+  });
+
+  it('★中性回退：无注入 = 中性灰 0.5（不泄漏消费端 hallowRamp）', () => {
+    const neutral = wingBake();                                    // noiseSampler 未就绪路径
+    const explicitGray = wingBake((u, v) => [0.5, 0.5, 0.5, 1]);   // 同值显式注入
+    expect(neutral.avgA).toBeCloseTo(explicitGray.avgA, 0);
+    expect(neutral.vis).toBe(explicitGray.vis);
+    // 与 hallowRamp 型渐变（错纹理）逐像素可区分
+    const ramp = wingBake((u, v) => [u, v, 0.5, 1]);
+    expect(neutral.hash).not.toBe(ramp.hash);
+  });
+
+  it('★噪声族 uImageSize1 强制 [256,256]（rcp(0)=Infinity 相位 UV 中毒修复）', () => {
+    const a = dyeApplyOf(3042)!;
+    a.uniforms.uImageSize1 = [0, 0];
+    const data = new Uint8ClampedArray(8 * 4);
+    applyDyePass(data, 2, 1, a, [], undefined);
+    expect(a.uniforms.uImageSize1).toEqual([256, 256]);
+    const b = dyeApplyOf(4778)!;                                    // HallowBoss(Extra_156) 同强制
+    b.uniforms.uImageSize1 = [0, 0];
+    applyDyePass(new Uint8ClampedArray(8 * 4), 2, 1, b, [() => [1, 1, 1, 1]], undefined);
+    expect(b.uniforms.uImageSize1).toEqual([256, 256]);
+  });
+});

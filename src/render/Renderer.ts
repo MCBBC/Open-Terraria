@@ -9974,9 +9974,25 @@ export class Renderer {
 
   /** 翅膀纹理可绘源：染料仿真 → tint 链（无处理时返回原图）。返回 canvas 时
    *  调用方按整幅居中绘制（sw/sh 尺寸） */
+  /** ★R33 回归轮：翅膀染料烘焙缓存（时间桶 LRU）——ArmorPhase 单帧 SM2 烘焙实测
+   *  232ms（184×56,最重 pass 3216B 逐像素解释器），wingTexSource 每帧重烘=4fps
+   *  卡顿（用户终验实报）。桶 200ms=染料动画 ~5fps（微光闪灼语义可接受）；
+   *  键=dyeVid|tint|切片|桶；上限 48 条 + 2s 修剪防膨胀。 */
+  private wingBakeCache = new Map<string, HTMLCanvasElement>();
+  private wingBakeCachePruneAt = 0;
   private wingTexSource(img: ImageBitmap | HTMLImageElement | HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number,
     dye: DyeApply | null, tint: [number, number, number] | null): HTMLCanvasElement | null {
     if (!dye && !tint) return null;
+    const bucket = Math.floor(performance.now() / 200);
+    const cacheKey = `${dye ? dye.vid : 't'}|${tint ? tint.join(',') : ''}|${sx},${sy},${sw}x${sh}|${bucket}`;
+    const cached = this.wingBakeCache.get(cacheKey);
+    if (cached) return cached;
+    if (performance.now() - this.wingBakeCachePruneAt > 2000) {
+      this.wingBakeCachePruneAt = performance.now();
+      while (this.wingBakeCache.size >= 48) {
+        this.wingBakeCache.delete(this.wingBakeCache.keys().next().value as string);
+      }
+    }
     const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
     if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
     const sctx = sc.getContext('2d', { willReadFrequently: true })!;
@@ -9994,6 +10010,7 @@ export class Renderer {
       }
       sctx.putImageData(id, 0, 0);
     }
+    this.wingBakeCache.set(cacheKey, sc);
     return sc;
   }
 

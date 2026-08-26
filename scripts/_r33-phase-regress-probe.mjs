@@ -24,6 +24,7 @@ page.on('pageerror', (e) => errs.push(String(e.message).slice(0, 200)));
 let noiseReqs = 0;
 page.on('request', (req) => { if (String(req.url()).includes('Misc_noise')) noiseReqs++; });
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' });
+await page.evaluate(() => { try { localStorage.clear(); } catch {} });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
 await new Promise((r) => setTimeout(r, 800));

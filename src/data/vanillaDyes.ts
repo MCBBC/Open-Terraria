@@ -61,14 +61,18 @@ const S1_PASSES: Set<string> = (() => {
 })();
 
 /** s1=noise 内建采样器（Images/Misc/noise → /sprites/vanilla/Misc_noise.png）。
- *  惰性 Image 加载（applyDyePass 同步、不 await）：加载完成前返回 undefined
- *  （=今日黑回退，不劣化）；onload 后常驻；onerror 静默降级同今日行为。
- *  寻址=clamp（SM2Effect 头注：染料 SpriteBatch LinearClamp 语义）。 */
+ *  惰性 Image 加载（applyDyePass 同步、不 await）；onload 后常驻；onerror 静默
+ *  降级到中性灰。寻址=clamp（SM2Effect 头注：染料 SpriteBatch LinearClamp 语义）。
+ *  ★R33 回归轮：加载单例化已复核（noiseStarted 旗，Image 只建一次=无加载风暴）；
+ *  就绪前回退改中性灰（0.5）而非放行消费端 hallowRamp——Extra_156 彩虹渐变对
+ *  noise 族是错纹理（曾致相位染料彩虹污染+不可预期 alpha）。 */
 let noiseSam: SM2Sampler | null = null;
 let noiseStarted = false;
-function noiseSampler(): SM2Sampler | undefined {
+const NOISE_SIZE = 256;                       // Misc_noise.png 256²（资产实测）
+const noiseNeutral: SM2Sampler = () => [0.5, 0.5, 0.5, 1];   // 中性灰回退
+function noiseSampler(): SM2Sampler {
   if (noiseSam) return noiseSam;
-  if (noiseStarted || typeof document === 'undefined') return undefined;
+  if (noiseStarted || typeof document === 'undefined') return noiseNeutral;
   noiseStarted = true;
   try {
     const img = new Image();
@@ -77,16 +81,16 @@ function noiseSampler(): SM2Sampler | undefined {
         const cv = document.createElement('canvas');
         cv.width = img.naturalWidth; cv.height = img.naturalHeight;
         const cx = cv.getContext('2d', { willReadFrequently: true });
-        if (!cx || !cv.width || !cv.height) return;
+        if (!cx || !cv.width || !cv.height) return;   // 维持中性灰
         cx.drawImage(img, 0, 0);
         const d = cx.getImageData(0, 0, cv.width, cv.height).data;
         const w = cv.width, h = cv.height;
         noiseSam = (u, v) => sampleImageData(d, w, h, u - Math.floor(u), v - Math.floor(v), false);
-      } catch { /* 解码失败：维持黑回退 */ }
+      } catch { /* 解码失败：维持中性灰 */ }
     };
     img.src = '/sprites/vanilla/Misc_noise.png';
-  } catch { /* 无 DOM：维持黑回退 */ }
-  return undefined;
+  } catch { /* 无 DOM：维持中性灰 */ }
+  return noiseNeutral;
 }
 
 /** 染料 vid → 可执行描述（tech + 已装配 uniforms 基底）；无表项/无字节码 pass 返回 null */
@@ -126,9 +130,12 @@ export function dyeCount(): number {
 
 /**
  * 对 ImageData 执行染料 pass（原地）。extraSamplers 供 s1/s2（见 needsImage1）。
- * ★R33 C1：noise 族染料（s1 pass 但非 HallowBoss）的 s1 一律覆写为内建
- * Misc_noise 采样器——消费端传来的 hallowRamp(Extra_156) 仅对 HallowBoss 正确；
- * noiseOverride 供测试/上层注入（生产走内建惰性加载）。返回是否实际染色。
+ * ★R33 C1：noise 族染料（s1 pass 但非 HallowBoss）的 s1 一律覆写——就绪用真
+ * Misc_noise，未就绪用中性灰（0.5）——【不放行】消费端误传的 hallowRamp
+ * (Extra_156 彩虹渐变=错纹理，曾污染相位染料)。noiseOverride 供测试/上层注入。
+ * ★噪声族 uImageSize1 强制 [256,256]：ArmorPhase 等 preshader 对噪声尺寸取
+ * rcp（默认 [0,0] → rcp(0)=Infinity → 相位 UV 中毒，2026-08-26 回归轮定谳）。
+ * 返回是否实际染色。
  */
 export function applyDyePass(data: Uint8ClampedArray, w: number, h: number,
   apply: DyeApply, extraSamplers: Array<SM2Sampler | undefined> = [],
@@ -137,10 +144,14 @@ export function applyDyePass(data: Uint8ClampedArray, w: number, h: number,
   const pass = getPass(apply.tech);
   if (!pass) return false;
   let extra = extraSamplers;
-  if (S1_PASSES.has(pass.name) && pass.name !== 'ArmorHallowBoss') {
-    const nz = noiseOverride ?? noiseSampler();
-    if (nz) extra = [nz, ...extraSamplers.slice(1)];
-    // nz 未就绪：保持调用方原样（=今日黑回退，不劣化）
+  if (S1_PASSES.has(pass.name)) {
+    if (pass.name === 'ArmorHallowBoss') {
+      apply.uniforms.uImageSize1 = [256, 256];   // Extra_156 同为 256²（噪声尺寸 rcp 消费面）
+    } else {
+      const nz = noiseOverride ?? noiseSampler();
+      extra = [nz, ...extraSamplers.slice(1)];
+      apply.uniforms.uImageSize1 = [NOISE_SIZE, NOISE_SIZE];
+    }
   }
   runPassOnImageData(pass, data, w, h, apply.uniforms, extra, t0Rect);
   return true;
