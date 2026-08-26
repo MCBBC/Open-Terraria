@@ -17,20 +17,26 @@ describe('pack-assets 纯函数', () => {
     expect([...STORE_EXT].sort()).toEqual(['.mp3', '.png', '.woff2', '.zip']);
   });
 
-  it('planParts：确定性 + 双上限（字节目标/条目数）贪心切分', () => {
+  it('planParts：确定性 + 双上限（worst-case 输出体积硬帽/条目数）贪心切分', () => {
     const files = Array.from({ length: 10 }, (_, i) => `f${i}.png`);
     const sizes = Object.fromEntries(files.map((f) => [f, 10]));
-    // 字节上限优先：target=25 → 每片 2-3 文件
-    const a = planParts(files, sizes, { targetUnzipped: 25, maxFilesPerPart: 99 });
+    // 输出硬帽优先：maxZipBytes=25 → 每片 2-3 文件（bytes 按不可压缩全额计价）
+    const a = planParts(files, sizes, { maxZipBytes: 25, maxFilesPerPart: 99 });
     expect(a.every((p) => p.bytes <= 25 || p.entries.length === 1)).toBe(true);
     expect(a.reduce((s, p) => s + p.entries.length, 0)).toBe(10);
     // 条目数上限：maxFiles=4 → 每片 ≤4
-    const b = planParts(files, sizes, { targetUnzipped: 1 << 30, maxFilesPerPart: 4 });
+    const b = planParts(files, sizes, { maxZipBytes: 1 << 30, maxFilesPerPart: 4 });
     expect(b.every((p) => p.entries.length <= 4)).toBe(true);
     // 顺序保持（字典序输入不重排）
     expect(b.flatMap((p) => p.entries)).toEqual(files);
     // 确定性：同输入两次结果深相等
-    expect(planParts(files, sizes, { targetUnzipped: 25 })).toEqual(planParts(files, sizes, { targetUnzipped: 25 }));
+    expect(planParts(files, sizes, { maxZipBytes: 25 })).toEqual(planParts(files, sizes, { maxZipBytes: 25 }));
+    // 单文件超帽：独占成片且条目零丢失（Pages 上限闸门由 CLI 端实测兜底）
+    const big = ['a.png', 'huge.png', 'b.png'];
+    const bigSizes = { 'a.png': 30, 'huge.png': 100, 'b.png': 30 };
+    const c = planParts(big, bigSizes, { maxZipBytes: 50 });
+    expect(c.reduce((s, p) => s + p.entries.length, 0)).toBe(3);
+    expect(c.find((p) => p.entries[0] === 'huge.png')!.entries).toEqual(['huge.png']);
   });
 
   it('buildZip：roundtrip 字节相等 + mtime 钉死跨调用字节确定（fflate 默认内嵌当前时间）', () => {

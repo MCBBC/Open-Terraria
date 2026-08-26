@@ -1,0 +1,15 @@
+# Cloudflare Pages 响应头(2026-08-26 部署配套)
+# ★CF 对同路径多规则的同名 header 是【合并】不是覆盖(manifest 曾拿到
+#  "immutable, no-cache" 缝合值)——immutable 通配必须精确圈住纯内容寻址面,
+#  同名可变文件绝不可落入其范围。
+# 内容寻址产物(Vite 文件名带内容哈希 / zip 片名 p<i>-<sha1前8>.zip)→ 一年 immutable;
+/index.html
+  Cache-Control: no-cache
+/sw.js
+  Cache-Control: no-cache
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/assets-zip/p*.zip
+  Cache-Control: public, max-age=31536000, immutable
+/assets-zip/manifest.json
+  Cache-Control: no-cache

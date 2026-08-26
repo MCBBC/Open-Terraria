@@ -1,0 +1,10 @@
+# Cloudflare Pages 重定向(2026-08-26 部署配套)
+# ★阻断 SPA 兜底:prune-dist 裁掉的散件目录原本会被改写成 200+index.html
+# (线上 HAR 实证:.png URL 全数收到 text/html 兜底 → SW 未激活首访裸奔期
+# 解码失败帧循环重试,SW 激活后更是毒丸入 Cache API)。
+# 省略 destination 的 404 写法(带 destination 会二次落回 SPA fallback);
+# 项目根 404.html 就位后,其余未命中路径也走真 404(direct upload + 无
+# 404.html 时 Pages 才用 index.html 接管全路径)。
+/sprites/vanilla/* 404
+/sounds/* 404
+/audios/music/* 404

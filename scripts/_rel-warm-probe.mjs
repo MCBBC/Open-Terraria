@@ -26,8 +26,17 @@ const errs = [];
 const zipParts = [];          // {file, at, ms}
 const nf = new Map();         // file -> count
 let nfTotal = 0;
+const failedReqs = [];
+const consoleAll = [];
 page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
-page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.text().slice(0, 160)); });
+page.on('console', (m) => {
+  if (m.type() === 'error') errs.push('console: ' + m.text().slice(0, 160));
+  else if (consoleAll.length < 40) consoleAll.push(m.type() + ': ' + m.text().slice(0, 120));
+});
+page.on('requestfailed', (r) => {
+  const u = r.url();
+  if (u.includes('worker') || u.includes('assets-zip')) failedReqs.push(u + ' :: ' + (r.failure()?.errorText ?? ''));
+});
 page.on('response', (r) => {
   const u = r.url();
   const t = Date.now() - T0;
@@ -108,7 +117,9 @@ clearInterval(sampler);
 // 终态取证:cache 实况 + 抽查
 const finalState = await page.evaluate(async () => {
   const h = globalThis.__swAssetCache;
-  const s = h ? { ...h.state } : null;
+  const handleShape = h ? Object.keys(h) : null;
+  const st = h?.state;
+  const s = st ? { enabled: st.enabled, done: st.done, total: st.total, phase: st.phase, failed: st.failed, warming: st.warming } : null;
   const names = await caches.keys();
   let cacheName = names.find((n) => n.startsWith('sw-assets-v'));
   let count = -1;

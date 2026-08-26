@@ -34,8 +34,14 @@ const DIR_PHASE = {
 };
 /** 已压缩格式 store-only（level 0）；wav/json 走 deflate-6 */
 export const STORE_EXT = new Set(['.png', '.mp3', '.woff2', '.zip']);
-export const ALGO_VERSION = 1;
-const TARGET_UNZIPPED = 64 << 20;   // 片目标（未压缩字节）
+// v2（2026-08-26）：Pages 直传单文件硬帽 25MiB → 分片预算从「unzipped 目标 64MiB」
+// 改为「输出 zip 体积硬帽」（worst-case 装箱），bump 强制快路径失效全量重分片。
+export const ALGO_VERSION = 2;
+/** 片输出（zip 后）体积硬帽。Cloudflare Pages/Workers Assets 单文件上限 25MiB，
+ *  预算取 20MiB 留 ~20% 余量给 per-entry 头+中央目录（4000 条最坏 ≈150KB）。 */
+export const MAX_PART_ZIP_BYTES = 20 << 20;
+/** Pages 真实硬帽——构建期闸门：实测 zipBytes ≥ 此值直接抛错拒产（warn 线在其下 1MiB） */
+export const PAGES_FILE_LIMIT = 25 << 20;
 const MAX_FILES_PER_PART = 4000;    // cache.put 逐条有开销,片内条目数也要进 SW 击杀窗口预算
 
 export function fileExt(name) { const i = name.lastIndexOf('.'); return i < 0 ? '' : name.slice(i).toLowerCase(); }
@@ -60,15 +66,19 @@ export function scanInputs(pub = PUB) {
   return [...boot, ...rest];
 }
 
-/** 确定性分片：顺序贪心填充（unzipped 字节目标 + 条目数上限） */
+/** 确定性分片：顺序贪心填充（★worst-case 输出体积硬帽 + 条目数上限）。
+ *  每条目按【不可压缩】计价（原始字节全额）——store 类(png/mp3)本就 level 0 不缩,
+ *  deflate 类只可能更小 ⇒ zip 后体积必然 ≤ 压缩比无关的 bytes + 常数头开销,
+ *  无需预扫描试压即可硬保证不超过 Pages 单文件上限。单文件超帽时独占成片
+ *  （由 CLI 端实测闸门兜底拒产）。 */
 export function planParts(files, sizes, opts = {}) {
-  const target = opts.targetUnzipped ?? TARGET_UNZIPPED;
+  const maxZipBytes = opts.maxZipBytes ?? MAX_PART_ZIP_BYTES;
   const maxFiles = opts.maxFilesPerPart ?? MAX_FILES_PER_PART;
   const parts = [];
   let cur = null;
   for (const f of files) {
     const sz = sizes[f] ?? 0;
-    if (!cur || cur.bytes + sz > target || cur.entries.length >= maxFiles) {
+    if (!cur || cur.bytes + sz > maxZipBytes || cur.entries.length >= maxFiles) {
       cur = { entries: [], bytes: 0 };
       parts.push(cur);
     }
@@ -216,7 +226,18 @@ function phaseOf(firstEntry) {
   return DIR_PHASE[dir] ?? 'misc';
 }
 
-// 4) GC 孤儿 zip
+// 3.5) Pages 单文件上限构建期闸门（复用与重打两路统一后置校验）：
+//  ≥25MiB 抛错拒产（直传必被 CF 拒）;>20MiB 设计预算 warn——zip per-entry
+//  头+中央目录开销使实测可比 worst-case 计价高 ~2%（4000 条满载约 +0.4MB）,
+//  属已知漂移、仍在硬帽内，提示可见即可。
+for (const p of partsMeta) {
+  if (p.zipBytes >= PAGES_FILE_LIMIT) {
+    throw new Error(`[pack-assets] 片 ${p.file} 实测 ${(p.zipBytes / 1048576).toFixed(1)}MB ≥ Pages 单文件硬帽 25MiB — 分片预算失效,须排查`);
+  }
+  if (p.zipBytes > MAX_PART_ZIP_BYTES) {
+    console.warn(`[pack-assets] ⚠ 片 ${p.file} 实测 ${(p.zipBytes / 1048576).toFixed(1)}MB 超设计预算 ${MAX_PART_ZIP_BYTES >> 20}MiB（条目头开销漂移）— 硬帽 25MiB 内,可放行`);
+  }
+}
 const keep = new Set(partsMeta.map((p) => p.file));
 let gc = 0;
 if (existsSync(OUT_DIR)) {

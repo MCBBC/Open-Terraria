@@ -301,6 +301,16 @@ export async function primeBootAssets(timeoutMs = 30_000): Promise<boolean> {
 }
 
 /** 注册 SW 并启动(仅生产构建;?sw=1 强制开、?nosw 关)。幂等。 */
+/** manifest 受理门(纯函数,可单测):algoVersion ≥1 且形状完整。
+ *  ★曾硬编码 ===1——pack-assets ALGO_VERSION 升到 2 后新 manifest 在此被整份
+ *  丢弃:zipPlan=null → startZipWarm 静默 return → p0 启动小片全缺、零分片下载、
+ *  页面海量散件 404(2026-08-26 线上实锤)。manifest 形状自 v1 未变;将来结构
+ *  不兼容的新大版本应另开字段区分,不得复用本数做排他。 */
+export function acceptsZipManifest(m: ZipManifest | null): boolean {
+  return !!m && typeof m.algoVersion === 'number' && m.algoVersion >= 1
+    && Array.isArray((m as ZipManifest).parts) && (m as ZipManifest).parts.length > 0;
+}
+
 export async function initAssetCache(): Promise<void> {
   if (state.enabled || typeof navigator === 'undefined' || !navigator.serviceWorker) return;
   const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
@@ -320,7 +330,7 @@ export async function initAssetCache(): Promise<void> {
       const res = await fetch('assets-zip/manifest.json', ctrl);
       if (res.ok) {
         const m = (await res.json()) as ZipManifest;
-        if (m && m.algoVersion === 1 && Array.isArray(m.parts) && m.parts.length > 0) {
+        if (acceptsZipManifest(m)) {
           zipPlan = m;
           state.version = composeVersion(state.version, m.contentHash);
           state.total = m.totalFiles;
@@ -370,8 +380,12 @@ export async function initAssetCache(): Promise<void> {
     });
     startWatchdog();
     // ★showTitle 的 warmAllAssets 可能抢在 manifest 拉取前到达(enabled=false
-    //   被 return 吞掉,之后再无人补调 → 永久 idle;此处自补一脚,幂等)
-    warmAllAssets();
+    //   被 return 吞掉,之后再无人补调 → 永久 idle;此处自补一脚)
+    // ★force 对账(2026-08-26):status 回报的 done 口径含壳/散件噪声,缓存总数
+    //   曾虚高越线被误盖 'done' 章、幂等门据此短路 → 缺片无人补、主菜单裸缺
+    //   (world.har 实报)。force 只丢弃 UI 进度态重启流程;startZipWarm 按
+    //   have-set×manifest 差集下载,无缺失秒退,代价 ≈ 一次 keys() 扫描。
+    warmAllAssets(true);
   } catch { /* 注册失败(老浏览器/隐私模式)→ 降级现状,零影响 */ }
 }
 
@@ -381,13 +395,17 @@ function onSwMessage(e: MessageEvent): void {
     // 初始判定:以 SW 实测缓存数对齐进度(被系统清理→cached 变小→重新补下)
     if (typeof d.cached === 'number' && d.version === state.version) {
       state.done = Math.min(d.cached, state.total);
-      // 满缓存直接判定完成——免得每次进菜单空跑 23 个块(SW keys() 扫一遍×23)
-      if (state.done >= state.total && !state.warming) {
+      // 满缓存直接判定完成——★仅 legacy 逐文件口径可用:cached 是【全缓存】
+      // 条目数(含壳 JS/Logo/vanilla-ui 散件/l10n),与 zip totalFiles 不同源,
+      // 曾虚高越线被误盖 'done' 完成章 → warmAllAssets 幂等门随后永久短路,
+      // 缺失分片再无人补、主菜单裸缺(2026-08-26 world.har 用户实报)。
+      // zip 模式的权威对账只在 startZipWarm(have-set×manifest 差集,幂等廉价)。
+      if (!zipPlan && state.done >= state.total && !state.warming) {
         chunkCursor = plan.urls.length;
         state.warming = false;
         state.phase = 'done';
       }
-      writeCompleteFlag(state.done >= state.total);   // 实测校准:满=落标志,被清理=撤销
+      if (!zipPlan) writeCompleteFlag(state.done >= state.total);   // 实测校准:满=落标志,被清理=撤销
       lastProgressAt = Date.now();
       emit();
     }

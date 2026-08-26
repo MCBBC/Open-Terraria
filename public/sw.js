@@ -13,6 +13,24 @@
 'use strict';
 
 const ASSET_RE = /\/(sprites|fonts|l10n|sounds|audios)\//;
+
+// ★MIME 门(2026-08-26):CF Pages 对不存在文件按 SPA 规则回 **200+text/html**
+// （线上 HAR 实证:sprites/vanilla/*.png 全部收到 index.html 兜底 ~1.6KB）。
+// 只判 res.ok 会把兜底 HTML 当资产正文塞进 Cache API ——永久坏图毒丸。故所有
+// 资产类回填必须按扩展名校验 content-type 族;不符一律视作 miss、拒入缓存。
+const MIME_BY_EXT = [
+  [/\.png$|\.jpe?g$|\.webp$|\.gif$/, /^image\//],
+  [/\.woff2?$|\.ttf$/, /^font\//],
+  [/\.json$/, /^(application\/json|text\/json)\b/],
+  [/\.wav$|\.mp3$|\.ogg$/, /^audio\//],
+  [/\.m?js$/, /^(application|text)\/(javascript|ecmascript)\b/],
+  [/\.css$/, /^text\/css\b/],
+];
+function mimeOk(path, res) {
+  const ct = res.headers.get('content-type') || '';
+  for (const [re, want] of MIME_BY_EXT) if (re.test(path)) return want.test(ct);
+  return true;   // 未登记扩展名不拦（维持旧行为）
+}
 const CACHE_PREFIX = 'sw-assets-v';
 let currentVersion = '';
 let cacheReady = null;
@@ -81,7 +99,7 @@ self.addEventListener('fetch', (e) => {
       if (hit) return hit;
       try {
         const res = await fetch(req);
-        if (res && res.ok) { await cache.put(req, res.clone()); return res; }
+        if (res && res.ok && mimeOk(path, res)) { await cache.put(req, res.clone()); return res; }
         if (res) return res;   // 非 ok(404 等)直通不缓存
       } catch (err) { /* 离线且无缓存 → 504 */ }
       return new Response('', { status: 504, statusText: 'offline' });
@@ -97,7 +115,7 @@ self.addEventListener('fetch', (e) => {
       const cache = await getCache();
       try {
         const res = await fetch(req);
-        if (res && res.ok && res.type === 'basic') cache.put(req, res.clone());
+        if (res && res.ok && res.type === 'basic' && mimeOk(path, res)) cache.put(req, res.clone());
         return res;
       } catch (err) {
         const hit = await cache.match(req);
@@ -114,7 +132,13 @@ self.addEventListener('fetch', (e) => {
     if (hit) return hit;
     try {
       const res = await fetch(req);
-      if (res && res.ok && res.type === 'basic') cache.put(req, res.clone());
+      // SPA 兜底(200+text/html)或异常:拒入缓存,并以真 404 应答——上层
+      // onerror 立即稳定,不再因 HTML 解码失败进入帧循环重试(HAR:单图 5 连击)
+      if (!res || !res.ok || res.type !== 'basic' || !mimeOk(path, res)) {
+        if (res && !res.ok) return res;         // 真 404/5xx 直通语义不变
+        return new Response('', { status: 404 });
+      }
+      cache.put(req, res.clone());
       return res;
     } catch (err) {
       return hit || Response.error();
@@ -172,7 +196,7 @@ async function warm(tag, urls, base) {
           if (warmAbort) return;
           try {
             const res = await fetch(u);
-            if (res && res.ok) { await cache.put(u, res); ok = true; }
+            if (res && res.ok && mimeOk(u, res)) { await cache.put(u, res); ok = true; }
             else if (attempt === 2) failed++;
           } catch (err) {
             if (attempt === 2) failed++;
@@ -219,6 +243,27 @@ function gcOldCaches() {
   })().catch(() => {});
 }
 
+/** 毒丸卫生清扫(2026-08-26):旧版无 MIME 门时期,Pages SPA 兜底的
+ * "200+text/html 伪图"曾被照常 cache.put;缓存名由页面内容 hash 推导、内容
+ * 不变则同名——毒条目会跨 SW 换代存活并被 cache-first 直接命中(连 fetch 都
+ * 不发,MIME 门无从拦截)。init 时逐条目核对已登记扩展名的 content-type,
+ * 不符即删:删后下次请求走 miss→fetch→MIME 门拒置真 404,零好数据重下。 */
+async function scrubPoisonedEntries() {
+  try {
+    const cache = await getCache();
+    const bad = [];
+    for (const req of await cache.keys()) {
+      const p = new URL(req.url).pathname;
+      if (!MIME_BY_EXT.some(([re]) => re.test(p))) continue;
+      const res = await cache.match(req);
+      if (!res) continue;
+      if (!mimeOk(p, res)) bad.push(req);
+    }
+    for (const r of bad) await cache.delete(r);
+    if (bad.length) console.log(`[sw] 清除 SPA 兜底伪图 ${bad.length} 条`);
+  } catch { /* 清扫失败不阻断 init */ }
+}
+
 /** 缓存现状查询(页面初始完成判定/清理检测;附最近一轮 warm 统计) */
 let lastWarm = { done: 0, total: 0, failed: 0, running: false };
 async function reportStatus() {
@@ -247,7 +292,7 @@ self.addEventListener('message', (e) => {
   }
   if (d.type === 'init') {
     getCache();
-    e.waitUntil(gcOldCaches());
+    e.waitUntil(gcOldCaches().then(scrubPoisonedEntries));
   } else if (d.type === 'warm') {
     if (!currentVersion) return; // 无版本(未 init 且消息未带)拒绝,防写错缓存
     // ★必须 waitUntil:否则 message 事件结束后 Chrome 随时终止 SW
