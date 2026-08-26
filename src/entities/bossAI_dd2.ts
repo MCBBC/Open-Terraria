@@ -91,6 +91,7 @@ import { statusPlayer } from './projTargets';
 import { TILE_DEFS } from '../data/tiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import { GDL, getKnockbackMultiplierScaledByDifficulty, hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { GorePiece } from './GorePiece';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 
@@ -115,6 +116,48 @@ export const dd2LocalAI = (e: Enemy): number[] => {
   if (!a) { a = [0, 0, 0, 0]; localAI.set(e, a); }
   return a;
 };
+
+// ---------------------------------------------------------------------------
+// ★B1 接线批：549 神秘传送门常驻循环轨（DD2_EtherianPortalIdleLoop）
+// 原版把 PlayTrackedSound 的 SlotId 存进 localAI[3]（NPC.cs:41403-41404），此后每帧
+// GetActiveSound(SlotId.FromFloat(localAI[3])) 判空重建、收门态逐帧改 Volume
+// （:41455-41465）、消散终帧 activeSound2?.Stop()（:43146）。本仓 SfxLoop 是对象
+// 句柄（非数值槽），Enemy 类无本地字段落点 → 模块级 Map 承载；manage 语义对齐
+// Game.updateWaterfallAmbience 的 wfAmbLoops（句柄终态 dead 即拆建）。
+// ---------------------------------------------------------------------------
+/** 循环轨句柄结构面（GameHooks.startLoopSfx 返回值，Sfx.startLoopFile 产物） */
+interface DD2LoopHandle {
+  stop(): void; setVolume(v: number): void;
+  readonly playing: boolean; readonly dead: boolean;
+}
+const portalLoops = new Map<Enemy, DD2LoopHandle>();
+/** 循环轨加载失败门：句柄终态但从未起振 = 缓冲缺失——该实例不再重建防逐帧泄
+ *  GainNode（Player._sizzleFailed 同语义，Player.ts:6366-6368） */
+const portalLoopDead = new WeakSet<Enemy>();
+/** 循环轨 manage（vol≤0 视作拆轨）：先代扫已亡实例——AI 在实体死亡后即停摆，
+ *  自拆只能靠存活门代劳（门恒成对出生 + 消散由胜负演出统一置 ai1=1 走受控停轨，
+ *  清扫链不断）；实例级兜底见 lanePortalAI bInit 注入的 destroy()（Entity.compact
+ *  剔除 dead 实体时回调，Entity.ts:69-76）。残余窗口仅 EntityManager.clear() 退世界
+ *  不走 destroy（WeaponProj.ts:4145 同登记），单机影响=离世界后余音至重载。 */
+function portalLoopManage(e: Enemy, game: GameHooks, vol: number): void {
+  for (const [k, h] of portalLoops) {
+    if (k.dead || h.dead) {
+      if (h.dead && !h.playing) portalLoopDead.add(k);
+      h.stop();
+      portalLoops.delete(k);
+    }
+  }
+  if (portalLoopDead.has(e)) return;
+  let h = portalLoops.get(e);
+  if (!h) {
+    if (vol <= 0) return;
+    h = game.startLoopSfx?.('dd2_etherian_portal_idle_loop', Math.min(1, vol)) ?? undefined;
+    if (h) portalLoops.set(e, h);
+    return;
+  }
+  if (vol <= 0) { h.stop(); portalLoops.delete(e); return; }
+  h.setVolume(Math.min(1, vol));
+}
 /** 原版 oldVelocity（碰撞前一帧速度,cs:93795 collideX/collideY 判定源）→ WeakMap */
 const oldVel = new WeakMap<Enemy, { x: number; y: number }>();
 /** 黑魔法师施法期瞄准快照（AI_109 头部 GetTargetData 一次取值,施法全程不重定向） */
@@ -1030,11 +1073,32 @@ export function eterniaCrystalAI(e: Enemy, game: GameHooks, player: Player | nul
     e.dontTakeDamage = true;   // ★同上:真旗标
     e.hp = e.maxHp;
     if (e.ai0 === 0) {
+      // ★B1 接线批：败北演出音。原版首帧在水晶同拍生成效果弹 672（NPC.cs:41299，
+      // Center−UnitY×40）→ 弹 t=0（localAI[0]==0）播 DD2_DefeatScene
+      //（Projectile.cs:36991-36992 aiStyle132；SoundID.cs:992 单变体无音量覆写 → 1）
+      // ——本仓演出折叠在水晶本体，音挂同一拍（胜利音 dd2_win_scene 同构，:42851）
+      game.playSfxFiles(soundTrackFiles('dd2_defeat_scene'), 1, e.cx, e.cy);
       for (const n of game.enemies() as Enemy[]) {
         if (!n.dead && n.vanillaId === 549) { n.ai1 = 1; n.ai0 = 0; }
       }
       DD2_EVENT_HOOKS.reportLoss?.(game);
       game.spawnParticles(e.cx, e.cy - 40, '#FF6A6A', 24, 3, { life: 60 });
+    }
+    if (e.ai0 === 105) {
+      // ★B1 接线批：水晶喷溅 gore（Projectile.cs:37001-37012 效果弹 t=105 段）：
+      // 20 枚 SelectRandom{1027..1030}，速度向量=(rand×10,0) 旋(i/20·−π+rand·0.1−0.05)、
+      // 出生位=弹心(Center−40y)+向×3；vy>0 反折 ×−0.5、vy<−5 再 ×0.8、尾乘
+      // vy×1.1/vx×0.88（NewGoreDirect 标准扰动由 GorePiece.newGore 缺省档承载）
+      const ax = e.cx, ay = e.cy - 40;
+      for (let i = 0; i < 20; i++) {
+        const th = (i / 20) * -Math.PI + Math.random() * 0.1 - 0.05;
+        const spd = Math.random() * 10;
+        let gx = Math.cos(th) * spd, gy = Math.sin(th) * spd;
+        if (gy > 0) { gx *= -0.5; gy *= -0.5; }
+        if (gy < -5) gy *= 0.8;
+        gy *= 1.1; gx *= 0.88;
+        GorePiece.newGore(1027 + rnd(4), ax + gx * 3, ay + gy * 3, gx, gy);
+      }
     }
     e.ai0 += 1;
     if (e.ai0 < 96) e.vy = lerp(0, -1, e.ai0 / 96);   // :42993-42997 上浮
@@ -1061,7 +1125,15 @@ export function eterniaCrystalAI(e: Enemy, game: GameHooks, player: Player | nul
 // ai[2]=0 左门/1 右门;ai[1] 0=开门出怪（事件依赖）→ 1=缩放消散
 // ---------------------------------------------------------------------------
 export function lanePortalAI(e: Enemy, game: GameHooks, player: Player | null) {
-  if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = e.ai2 === 1 ? 1 : 0; }
+  if (!e.bInit) {
+    e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = e.ai2 === 1 ? 1 : 0;
+    // ★B1 接线批：实例级 destroy 注入——循环轨随实体剔除拆轨（Entity.compact 对
+    // dead 实体回调 destroy，Entity.ts:69-76；GrenadeProj 引信音同款兜底通道）
+    (e as { destroy?: () => void }).destroy = () => {
+      portalLoops.get(e)?.stop();
+      portalLoops.delete(e);
+    };
+  }
   const x = dd2LocalAI(e);
   const leftGate = e.ai2 === 0;
   e.despawnTimer = 750;   // netAlways
@@ -1078,6 +1150,7 @@ export function lanePortalAI(e: Enemy, game: GameHooks, player: Player | null) {
     if (x[0] === 0) {
       game.playSfxFiles(['dd2_etherian_portal_open'], 0.7, e.cx, e.cy);  // DD2_EtherianPortalOpen（:43075）
     }
+    if (x[0] > 150) portalLoopManage(e, game, 1);   // ★B1：循环轨起轨（NPC.cs:41406-41413 localAI[0]>150 判 GetActiveSound 空 → PlayTrackedSound；SoundID.cs:984 无 WithVolume → 基音量 1。原版带位置衰减,本仓 startLoopSfx 无空间参数,屏距衰减未建模登记）
     if (!DD2_EVENT_HOOKS.enemySpawningOnHold()) e.ai0 += 1;
     const rate = DD2_EVENT_HOOKS.laneSpawnRate();
     // 出怪拍（:43094-43108 1:1）：ai[0] 数到 LaneSpawnRate 才进门——首拍在第
@@ -1099,7 +1172,11 @@ export function lanePortalAI(e: Enemy, game: GameHooks, player: Player | null) {
     // ---- 缩放消散（:43118-43146） ----
     e.ai0 += 1;
     e.vanillaScale = lerp(1, 0.05, lerpValue(500, 600, e.ai0));
+    // ★B1：收门态循环轨跟随——GetActiveSound 空则重建 + Volume=scale 逐帧降音
+    //（NPC.cs:41455-41465；scale 下限 0.05 不归零,轨随终帧显式拆）
+    portalLoopManage(e, game, e.vanillaScale);
     if (e.ai0 >= 550) {
+      portalLoopManage(e, game, 0);                // :43146 activeSound2?.Stop()
       e.iframes = 0;
       e.dontTakeDamage = false;                    // :43145 解除无敌 → 自杀走 hurt 管线
       e.hp = 0;

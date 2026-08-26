@@ -1,12 +1,17 @@
 // ============================================================================
 // §4 乐器 + §5 趣味道具——纯函数层（Terarria1456 反编译源码为唯一标杆，行号对照）
 //   ItemCheck_PlayInstruments   Player.cs:45892-46024 （乐器族入口：musicDist + 音符）
-//   PlayDrums                   Player.cs:46106-46156 （鼓槌 10 档音色按鼠标距离）
+//   PlayDrums                   Player.cs:47108-47157 （鼓槌 10 档音色按鼠标距离；1456 :46106-46156）
 //   ItemCheck_GetMeleeHitboxParticles Player.cs:44429-44462（泡泡棒 1450 气泡 gore 掷骰）
 //   ItemCheck_ApplyUseStyle 1124 支 Player.cs:42946-42958（蜂巢挥动发蜂掷骰）
 //   ItemCheck_ApplyPetBuffs 425 支 Player.cs:52256-52272（仙灵铃三选一）
 //   ItemCheck_ApplyHoldStyle 968 支 Player.cs:50955-50994（棉花糖烤串烤制态机）
 //   Chest.Lock Chest.cs:409-473（金锁 5328 可锁样式表）
+//   PlayGuitarChord             Player.cs:47073-47106（1458 基线；吉他三件 4057/4372/
+//                               4715 六档和弦 + 坏运跑调,LSP type 支映射 Item_133-138）
+//   ★行号基准：1458 增量变更面权威（ItemCheck_PlayInstruments 入口 :46894；
+//     1305 The Axe :46945-46970 / 吉他 4057+4372 共支 :46972-46987 /
+//     SparkleGuitar 4715 独支 :46989-47004）
 //
 // 本模块纯函数化：全部状态走入参（随机源注入），不触 Game/World/Sfx。
 // Game.ts 单点 if 调用（use 链「趣味使用分支」），消费侧只做 IO 装配。
@@ -36,20 +41,57 @@ export function instrumentUseSound(vid: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// 鼓槌音色档（Player.PlayDrums Player.cs:46106-46156）：range = 归一化鼠标距离
-//   （0..1，**不做** ×2−1 映射——与竖琴段不同，:46014-46020 只钳上界）。
+// 鼓槌音色档（Player.PlayDrums Player.cs:47108-47157）：range = 归一化鼠标距离
+//   （0..1，**不做** ×2−1 映射——与竖琴段不同，:47016-47022 只钳上界）。
 //   10 档 1/10 步进阈值递减，命中首档返回（else-if 链，先高后低）。
+//   ★PlayDrums 播的是数字音型 53..62（SoundEngine.PlaySound(59/58/53/…/:47113)），
+//   经 LegacySoundPlayer.PlaySound default 支 `num = 139 + type - 53`
+//   （LegacySoundPlayer.cs:1238-1239，音量 num2*0.7 :1245）落到 **Item_N wav 表**
+//   Item_139~148——旧表直接写 Item_53..62 是漏乘这一层映射的错位 bug
+//   （2026-08-26 B1 接线批修正：t → 139 + (t−53)，即 +86）。
 // ---------------------------------------------------------------------------
 const DRUM_TIERS: ReadonlyArray<readonly [number, string]> = [
-  [9, 'Item_59'], [8, 'Item_58'], [7, 'Item_53'], [6, 'Item_57'], [5, 'Item_62'],
-  [4, 'Item_61'], [3, 'Item_54'], [2, 'Item_56'], [1, 'Item_55'],
+  [9, 'Item_145'], [8, 'Item_144'], [7, 'Item_139'], [6, 'Item_143'], [5, 'Item_148'],
+  [4, 'Item_147'], [3, 'Item_140'], [2, 'Item_142'], [1, 'Item_141'],
 ];
 
 export function drumSoundFile(range: number): string {
   for (const [k, file] of DRUM_TIERS) {
-    if (range > k * 0.1) return file;   // num2 = 1/10（:46108）
+    if (range > k * 0.1) return file;   // num2 = 1/10（:47111）
   }
-  return 'Item_60';                     // :46155-46156 兜底档
+  return 'Item_146';                    // :47148-47150 else 兜底 = 音型 60 → 139+60-53
+}
+
+// ---------------------------------------------------------------------------
+// 吉他六档和弦（Player.PlayGuitarChord Player.cs:47073-47106,num=6 :47075/num2=1/6 :47076）：range = 鼠标世界
+//   距离/(SmallerScaledAxis/2) 只钳上界 1（:46985-46988 / :47000-47002——与鼓槌同式,
+//   **不做** ×2−1 映射）。六档 else-if 链阈值 k/6 先高后低命中即返：
+//     >5/6→音型49 >4/6→48 >3/6→47 >2/6→51 >1/6→52 else→50——**档序非单调**照抄。
+//   音型→wav = LegacySoundPlayer.PlaySound type 支 case47-52 `num = 133 + type - 47`
+//   （LegacySoundPlayer.cs:1215-1220）→ Item_135/134/133/137/138/136。
+//   该 case 无 Pitch 抖动赋值（实例默认 0,不落 PITCH_CASE 的 Item_ 族 ±0.06 档）、
+//   音量 num2×0.45（:1231）;播放前 Stop 掉 Item_133..138 全部在播实例（:1222-1227
+//   单音互斥）——本仓 WebAudio 槽按文件粒度、跨文件互斥不可表达,登记简化
+//   （六档叠响需两把吉他和弦窗口重叠,概率低）。
+// ---------------------------------------------------------------------------
+const GUITAR_TIERS: ReadonlyArray<readonly [number, string]> = [
+  [5, 'Item_135'], [4, 'Item_134'], [3, 'Item_133'], [2, 'Item_137'], [1, 'Item_138'],
+];
+
+export function guitarChordFile(range: number): string {
+  for (const [k, file] of GUITAR_TIERS) {
+    if (range > k / 6) return file;     // num2 = 1/6（:47076）
+  }
+  return 'Item_136';                    // :47101-47103 else 兜底 = 音型 50 → 133+50-47
+}
+
+/** 吉他坏运跑调（Player.cs:47077-47080）：RollOnlyBadLuckExtreme(10)==0 →
+ *  pitchOffset = Next(-50,51)*0.01。Luck.RollOnlyBadLuckExtreme（Luck.cs:53-58,
+ *  Terraria.GameContent/）= luck<0 且 NextFloat()<-luck 时 Next(range/10)=Next(1)=0
+ *  恒触发,否则返回 -1 不触发。rnd 注入两次独立掷（NextFloat → Next),单测种子化。 */
+export function guitarBadLuckDetune(luck: number, rnd: () => number): number {
+  if (luck < 0 && rnd() < -luck) return (Math.floor(rnd() * 101) - 50) * 0.01;
+  return 0;
 }
 
 // ---------------------------------------------------------------------------

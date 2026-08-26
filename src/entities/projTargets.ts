@@ -79,11 +79,14 @@ export function hitCritters(self: { x: number; y: number; w: number; h: number }
 
 /** 弹幕命中怪物:播受击音效(原版 NPC.StrikeNPC 语义——任意伤害来源都响,
  *  近战挥砍早已如此;弹幕此前漏了)。
+ *  实例级 HitSound 优先（原版 NPC.HitSound 本就是实例字段,AI 可运行时改写——
+ *  488 训练假人 AI_092 每 tick Next(20)==0 在 {NPCHit15,16,17} 重卷,NPC.cs:39196-39212）:
+ *  e.hitSoundOverride 非空 → 用之,勿回写 def.hitSound(按型共享档会串所有实例)。
  *  宠物史莱姆语音表优先（StrikeNPC :82255-82302）：type==1 且 ai[1]=语音
  *  饰品物品 id → 按表替换（鸡 1/5 稀有变体在 petSlimeHitVoice 内掷） */
 export function playEnemyHitSound(
   game: GameHooks,
-  e: { def?: { hitSound?: string[] }; vanillaId?: number | null; ai1?: number; cx?: number; cy?: number },
+  e: { def?: { hitSound?: string[] }; hitSoundOverride?: string[] | null; vanillaId?: number | null; ai1?: number; cx?: number; cy?: number },
 ): void {
   if (e.vanillaId === 1 && e.ai1 != null) {
     const v = petSlimeHitVoice(e.ai1);
@@ -93,7 +96,7 @@ export function playEnemyHitSound(
       return;
     }
   }
-  const files = e.def?.hitSound;
+  const files = (e.hitSoundOverride && e.hitSoundOverride.length) ? e.hitSoundOverride : e.def?.hitSound;
   if (files && files.length) game.playSfxFiles(files, 0.9);
 }
 

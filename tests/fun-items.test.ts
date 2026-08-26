@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import {
   MUSIC_NOTES, instrumentNotePitch, instrumentUseSound, drumSoundFile, bubbleWandGoreRoll,
+  guitarChordFile, guitarBadLuckDetune,
 } from '../src/items/FunItems';
 import {
   GorePiece, resetGorePool, liveGorePieces,
@@ -51,20 +52,50 @@ describe('① 竖琴音符音高（Player.cs:45908-45928）', () => {
   });
 });
 
-describe('① 鼓槌音色档（Player.PlayDrums :46106-46156）', () => {
-  it('10 档 1/10 步进阈值递减、兜底 Item60', () => {
-    expect(drumSoundFile(0)).toBe('Item_60');        // :46155-46156 else 兜底
-    expect(drumSoundFile(0.05)).toBe('Item_60');
-    expect(drumSoundFile(0.15)).toBe('Item_55');     // > 1×0.1
-    expect(drumSoundFile(0.25)).toBe('Item_56');     // > 2×0.1
-    expect(drumSoundFile(0.35)).toBe('Item_54');
-    expect(drumSoundFile(0.45)).toBe('Item_61');
-    expect(drumSoundFile(0.55)).toBe('Item_62');
-    expect(drumSoundFile(0.65)).toBe('Item_57');
-    expect(drumSoundFile(0.75)).toBe('Item_53');
-    expect(drumSoundFile(0.85)).toBe('Item_58');
-    expect(drumSoundFile(0.95)).toBe('Item_59');     // > 9×0.1 最高档
-    expect(drumSoundFile(1)).toBe('Item_59');
+describe('① 鼓槌音色档（Player.PlayDrums :47108-47157 + LegacySoundPlayer.cs:1238-1239 映射）', () => {
+  it('10 档 1/10 步进阈值递减、兜底 Item146（档序按原版音型 59/58/53/57/62/61/54/56/55/60 → +86）', () => {
+    expect(drumSoundFile(0)).toBe('Item_146');       // :47148-47150 else 兜底 = 音型 60
+    expect(drumSoundFile(0.05)).toBe('Item_146');
+    expect(drumSoundFile(0.15)).toBe('Item_141');    // 音型 55 → 139+55-53
+    expect(drumSoundFile(0.25)).toBe('Item_142');    // 音型 56
+    expect(drumSoundFile(0.35)).toBe('Item_140');    // 音型 54
+    expect(drumSoundFile(0.45)).toBe('Item_147');    // 音型 61
+    expect(drumSoundFile(0.55)).toBe('Item_148');    // 音型 62
+    expect(drumSoundFile(0.65)).toBe('Item_143');    // 音型 57
+    expect(drumSoundFile(0.75)).toBe('Item_139');    // 音型 53
+    expect(drumSoundFile(0.85)).toBe('Item_144');    // 音型 58
+    expect(drumSoundFile(0.95)).toBe('Item_145');    // 音型 59，> 9×0.1 最高档
+    expect(drumSoundFile(1)).toBe('Item_145');
+  });
+});
+
+describe('① 吉他六档和弦（Player.PlayGuitarChord :47073-47106 + LSP.cs:1215-1220 映射）', () => {
+  it('6 档 1/6 步进阈值递减、兜底 Item136（档序非单调：49/48/47/51/52/50 → 133+type-47）', () => {
+    // >5/6→49(Item_135) >4/6→48(Item_134) >3/6→47(Item_133)
+    // >2/6→51(Item_137) >1/6→52(Item_138) else→50(Item_136)——照抄原版非单调序
+    expect(guitarChordFile(0)).toBe('Item_136');     // :47101-47103 else 兜底 = 音型 50
+    expect(guitarChordFile(0.1)).toBe('Item_136');   // ≤1/6 不过首档 → 兜底
+    expect(guitarChordFile(0.2)).toBe('Item_138');   // >2/6 不成立、>1/6 成立 = 音型 52
+    expect(guitarChordFile(0.34)).toBe('Item_137');  // >2/6 ≈0.333 = 音型 51
+    expect(guitarChordFile(0.5)).toBe('Item_137');   // =3/6 边界取等不算 → 落 >2/6 档（非单调序）
+    expect(guitarChordFile(0.6)).toBe('Item_133');   // ∈(3/6,4/6] = 音型 47
+    expect(guitarChordFile(0.67)).toBe('Item_134');  // >4/6 ≈0.667 = 音型 48
+    expect(guitarChordFile(0.84)).toBe('Item_135');  // >5/6 ≈0.833 = 音型 49
+    expect(guitarChordFile(1)).toBe('Item_135');     // 钳上界后最高档
+  });
+  it('坏运跑调（:47077-47080 RollOnlyBadLuckExtreme）：luck≥0 恒 0；luck<0 触发 ∈ [-0.5,0.5]', () => {
+    expect(guitarBadLuckDetune(0, lcg(3))).toBe(0);
+    expect(guitarBadLuckDetune(0.4, lcg(3))).toBe(0);      // 正运不触发（Luck.cs:53-58）
+    const alwaysZero = () => 0;                             // NextFloat()=0 < −luck 必过门
+    expect(guitarBadLuckDetune(-0.5, alwaysZero)).toBe(-0.5);   // Next(101)=0 → -50×0.01
+    const one = () => 1;                                    // NextFloat()=1 ≥ −luck 不过门
+    expect(guitarBadLuckDetune(-0.9, one)).toBe(0);
+    const lucky = lcg(99);                                  // 种子化分布：触发值域钳 ±0.5
+    for (let i = 0; i < 200; i++) {
+      const d = guitarBadLuckDetune(-0.9, lucky);
+      expect(d).toBeGreaterThanOrEqual(-0.5);
+      expect(d).toBeLessThanOrEqual(0.5);
+    }
   });
 });
 

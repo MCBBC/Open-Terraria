@@ -16,16 +16,17 @@ await p.evaluate(() => {
   g.player.inv.selected = 0;
   g.player.mana = 200; g.player.baseMaxMana = 200;
   const [sx, sy] = g.camera.worldToScreen(g.player.cx, g.player.cy);
-  g.input.mouseX = sx + 60; g.input.mouseY = sy - 60;
+  g.input.mouseY = sy;   // 鼠标与玩家同高=水平瞄准(对齐原版参考图)
   g.input.mouseDown = true; g.input.mouseHeld = true;
 });
-await sleep(2000);   // 蓄力中(charge≈60 满档,远超旧 24t swing 窗)
-const crop = await p.evaluate(() => {
+await sleep(1400);   // 蓄力中(charge≈60 满档,远超旧 24t swing 窗)
+await p.evaluate(() => { clearInterval(window.__swGame.__swing); });
+  const crop = await p.evaluate(() => {
   const g = window.__swGame;
   const [sx, sy] = g.camera.worldToScreen(g.player.cx, g.player.cy);
   return { x: Math.max(0, Math.round(sx - 70)), y: Math.max(0, Math.round(sy - 90)), width: 140, height: 150 };
 });
-await p.screenshot({ path: '/tmp/mooncloud-probe/gf-charging-full.png', clip: crop });
+await p.screenshot({ path: '/tmp/mooncloud-probe/gf-charging-horiz.png', clip: crop });
 const st = await p.evaluate(() => {
   const g = window.__swGame;
   const orbs = (g.entities?.all?.() ?? []).filter((e) => e && e.projId === 1115);

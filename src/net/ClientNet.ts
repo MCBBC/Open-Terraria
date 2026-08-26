@@ -358,6 +358,9 @@ export class ClientNet {
         // 全量上传自身（对齐原版 msg3 后立刻 SyncPlayer + RequestWorldData）
         // hairDye 并入外观 JSON（原版 msg4 PlayerInfo 携带 hairDye byte 的等价；
         // 服务器盲转字符串 → 零协议改动，2026-08-14）
+        // voiceVariant/voicePitchOffset 同走本通道（原版 MessageBuffer.cs:299-302
+        // msg4 读 byte+float 并 clamp——整包 spread 等价承载,登记差异：无独立
+        // clamp 门,消费侧 Appearance.validate/hurtVoicePlan 自行钳 1..3/±1）
         const p2 = this.game.player as { appearance?: unknown; hairDye?: number } | undefined | null;
         const app = JSON.stringify({ ...(p2?.appearance as Record<string, unknown> ?? {}), hairDye: p2?.hairDye ?? 0 });
         this.send(new NetWriter(Msg.SyncPlayer).u8(this.mySlot).str(app).finish());

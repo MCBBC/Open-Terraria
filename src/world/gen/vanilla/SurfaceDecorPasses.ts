@@ -2583,7 +2583,7 @@ const JUNGLE_LARGE = TILE_BY_KEY['v_233_jungle_large_plants']!;
  *  type==60。inheritPaint 恒 no-op（生成期无漆）。返回是否成块（主循环
  *  失败回退用）。 */
 function placeJunglePlant233(
-  st: TileStore, x: number, y: number, styleX: number, styleY: number,
+  st: TileStore, rng: RNG, x: number, y: number, styleX: number, styleY: number,
 ): boolean {
   const dxLo = -1, dxHi = styleY > 0 ? 0 : 1;   // 2×2 分支 x-1..x；3×2 分支 x-1..x+1
   const inB = (cx: number, cy: number) => st.inBounds(cx, cy);
@@ -2605,10 +2605,14 @@ function placeJunglePlant233(
     }
   }
   if (!ok) return false;
+  // ★SSSSSSS：净空击杀 = vanilla KillTile(noItem:true) 全语义（cs:47820-47830）——
+  //   尘掷 + 击杀 + 尾部 SquareTileFrame 级联。曾 setTileSilent 裸清零掷零级联：
+  //   邻接非活性格的 slope/half 残留未被 TileFrame(!active 分支) 清除
+  //   （ntb #88 S0>1×1 @(823,589)：杀邻 185 堆后其 SQ 波及该格实证）。
   for (let dx = dxLo; dx <= dxHi; dx++) {
     for (let dy = -1; dy <= 0; dy++) {
       if (inB(x + dx, y + dy) && st.flags[st.idx(x + dx, y + dy)]) {
-        st.setTileSilent(x + dx, y + dy, 0, 0, 0);   // KillTile（active=false+type=0）
+        genKillTile(st, rng, x + dx, y + dy);
       }
     }
   }
@@ -2646,10 +2650,10 @@ export function runJunglePlantsPart2Pass(st: TileStore, rng: RNG, gs: GenState):
     const ji = st.idx(num, j);
     if (st.flags[ji] && SHEET[st.type[ji]] === 60) {
       j--;
-      placeJunglePlant233(st, num, j, rng.int(0, 7), 0);            // Next(8)
+      placeJunglePlant233(st, rng, num, j, rng.int(0, 7), 0);       // Next(8)
       const ti = st.inBounds(num, j) ? st.idx(num, j) : -1;
       if (ti < 0 || !st.flags[ti] || SHEET[st.type[ti]] !== 233) {
-        placeJunglePlant233(st, num, j, rng.int(0, 11), 1);         // Next(12)
+        placeJunglePlant233(st, rng, num, j, rng.int(0, 11), 1);    // Next(12)
       }
     }
   }

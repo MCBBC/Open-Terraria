@@ -456,3 +456,39 @@ describe('⑦ 新弹命中盒真值（Projectile.cs SetDefaults width/height）'
     expect([mk(375).w, mk(375).h]).toEqual([16, 16]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ⑧ 火绒狐攻击叫声称（TryUsingFoxsparksAbility Player.cs:43694-43712：channeling
+//    期 projectile.soundDelay<=-320 → 重置 -21 + PalFoxparksAttack（SoundID.cs:1092
+//    WithVolume 0.18）——MinionProj.foxSoundCd 镜像,AI_026 首段 --soundDelay :59119）
+// ---------------------------------------------------------------------------
+describe('⑧ 火绒狐攻击叫声称门（foxSoundCd 镜像 ≤-320 触发/重置 -21）', () => {
+  it('按住 channeling：出场第 320 拍首响,重置后第 619 拍第二响,窗口内不重复', () => {
+    const { hooks } = makeHooks();
+    const m = mk(1094);
+    (m as { foxChannel: boolean }).foxChannel = true;
+    const wav: string[] = [];
+    (hooks as unknown as { playSfxWav: (f: string) => void }).playSfxWav =
+      (f: string) => { wav.push(f); };
+    const firedAt: number[] = [];          // 绝对拍号（镜像自 0 每 tick --）
+    for (let k = 1; k <= 700; k++) {
+      m.fixedUpdate(1, hooks);
+      if (wav.length !== firedAt.length) firedAt.push(k);
+    }
+    expect(wav.every((f) => f === 'pal_foxparks_attack')).toBe(true);
+    expect(firedAt).toEqual([320, 619]);   // -21 起再走 299 拍回 -320
+  });
+  it('非 channeling 期只递减不发声；1113 同门（Player.cs:43679 normalFoxparks 双型）', () => {
+    const { hooks } = makeHooks();
+    const m = mk(1113);
+    const wav: string[] = [];
+    (hooks as unknown as { playSfxWav: (f: string) => void }).playSfxWav =
+      (f: string) => { wav.push(f); };
+    for (let k = 0; k < 400; k++) m.fixedUpdate(1, hooks);
+    expect(wav).toEqual([]);       // 未按住 → 门永不消费（原版门在用物品 tick 内）
+    // 已过 -320 后再开通道 → 立即一响
+    (m as { foxChannel: boolean }).foxChannel = true;
+    m.fixedUpdate(1, hooks);
+    expect(wav.filter((f) => f === 'pal_foxparks_attack').length).toBe(1);
+  });
+});

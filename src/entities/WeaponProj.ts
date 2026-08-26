@@ -687,7 +687,13 @@ export class Boomerang extends Entity {
       game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
       game.playSfx('dig', 1, this.cx, this.cy);
       // :18152-18160 其余:ai[0]=1 回收 + 速度=-lastVelocity（383 豁免取反 :18156）。
-      // 383 ≥10 的 HitTilesInACircle(300)+Item14 / 301 冲击波粒（:18115-18138）未建模
+      // 383 ≥10 的 HitTilesInACircle(300)+Item14 未建模;
+      // 301 圣骑士锤冲击波音（1458 Projectile.cs:19653-19660:type==301 支 owner==
+      // Main.myPlayer 门 → ParticleOrchestrator.Spawn_PaladinsHammerShockwave
+      // ParticleOrchestrator.cs:816-821 内播 SoundID.Item180。本仓 netPuppet 在
+      // fixedUpdate 头早退不进 moveStep = 等价"本地玩家才响";冲击波盒 localAI[0]=200
+      // 粒本体仍未建模,只接音——2026-08-26 B1 批)
+      if (this.projId === 301) game.playSfxFile?.('Item_180', 1, this.cx, this.cy);
       this.ai0 = 1; this.outT = 0;
       if (this.projId !== 383) { this.vx = -lvx; this.vy = -lvy; }
     }

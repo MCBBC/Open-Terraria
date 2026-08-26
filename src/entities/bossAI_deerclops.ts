@@ -415,6 +415,35 @@ function deerclopsMovement(
   // 永不动 = 召唤在哪冻在哪（2026-08-19 用户实报"冻结在半空"，探针复现恒 y）
   e.x += e.vx;
   e.y += e.vy;
+  deerclopsStepSound(e, game);
+}
+
+/** ★B1 接线批：行走步声（NPC.cs:67596-67610 FindFrame case668 行走段——帧号变化
+ *  且新帧∈{4,9} → PlaySound(DeerclopsStep, Bottom)；SoundID.cs:1040 WithVolume(0.2)）。
+ *  【挂点选择】原版步声在 FindFrame 内触发；本仓帧机在渲染层
+ *  Renderer.deerclopsNextFrame(:1414-1452)——渲染层不宜播音（截图/诊断等多入口
+ *  复用且逐 pass 调用），故在 AI 移动段以同式复算帧计数掷声（每 tick 单点，
+ *  与原版 FindFrame 每 tick 一次的调用时机等价）。本仓无 IsABestiaryIconDummy
+ *  等价的假想绘制路径（全库无 bestiary 实时帧消费，图鉴图标走静态贴图），无需豁免。 */
+const deerclopsStepState = new WeakMap<Enemy, { counter: number; last: number }>();
+function deerclopsStepSound(e: Enemy, game: GameHooks): void {
+  const jump = e.vy > 0 || e.lai0 === 1;                     // :67589 跳跃/下落支
+  if (jump || e.vx === 0) {                                  // 帧 1 / 帧 0 支（:67594-67599）
+    const s0 = deerclopsStepState.get(e);
+    if (s0) { s0.counter = 0; s0.last = jump ? 1 : 0; }
+    return;
+  }
+  let s = deerclopsStepState.get(e);
+  if (!s) { s = { counter: 0, last: -1 }; deerclopsStepState.set(e, s); }
+  s.counter += Math.abs(e.vx);                               // frameCounter += |vx|（:67601）
+  const num155 = 10, num156 = 15;                            // :67602-67603
+  if (s.counter >= num155 * num156 || s.counter < 0) s.counter = 0;
+  const y = 2 + Math.floor(s.counter / num156);              // 帧 = 2 + counter/15
+  if (s.last !== y && (y === 4 || y === 9)) {
+    // Bottom 锚 = (Center.X, position.Y+height)（Entity.Bottom）→ 本仓 (cx, y+h)
+    game.playSfxFile?.('deerclops_step', 0.2, e.cx, e.y + e.h);
+  }
+  s.last = y;
 }
 
 // ---------------------------------------------------------------------------

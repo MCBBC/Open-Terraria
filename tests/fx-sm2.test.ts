@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   defaultUniforms, getPass, runPassOnImageData, passNames, type SM2Sampler,
 } from '../src/fx/SM2Effect';
-import { dyeApplyOf, dyeCount, dyeEntryOf } from '../src/data/vanillaDyes';
+import { dyeApplyOf, dyeCount, dyeEntryOf, applyDyePass } from '../src/data/vanillaDyes';
 import fxJson from '../src/data/fxPixelShader.json';
 
 const near = (a: number, b: number, eps = 1e-3) => Math.abs(a - b) <= eps;
@@ -241,5 +241,43 @@ describe('SM2 解码锁:_sat 位与 sincos 分量序(r15)', () => {
     expect(sincos.get('WaterDistortionObject')).toBe(1);
     expect(sincos.get('QueenSlime')).toBe(2);
     expect(sincos.get('ArmorForceField')).toBe(3);
+  });
+});
+
+// ---- R33 review C1 修复回归：texld-s1 检测 + noise 采样器覆写 ----
+describe('R33 C1：texld-s1 检测与 noise 采样器接线', () => {
+  /** 2×1 白图跑 ArmorGel/ArmorTwilight，注入指定 s1 → 返回首像素 RGB */
+  const runWith = (vid: number, s1: SM2Sampler): [number, number, number] => {
+    const apply = dyeApplyOf(vid)!;
+    const data = new Uint8ClampedArray([255, 255, 255, 255, 255, 255, 255, 255]);
+    applyDyePass(data, 2, 1, apply, [], undefined, s1);
+    return [data[0] / 255, data[1] / 255, data[2] / 255];
+  };
+  const near3 = (a: [number, number, number], b: [number, number, number], eps = 1e-3) =>
+    Math.abs(a[0] - b[0]) <= eps && Math.abs(a[1] - b[1]) <= eps && Math.abs(a[2] - b[2]) <= eps;
+
+  it('needsImage1 = texld-s1 检测：Gel/Twilight/Phase 真,HallowBoss 真,ArmorColored 假', () => {
+    for (const vid of [3024, 3561, 3562, 4663, 3039]) expect(dyeApplyOf(vid)!.needsImage1).toBe(true);
+    expect(dyeApplyOf(4778)!.needsImage1).toBe(true);    // Extra_156（消费端 hallowRamp）
+    expect(dyeApplyOf(1007)!.needsImage1).toBe(false);   // ArmorColored 无 s1
+  });
+
+  it('ArmorGel：s1=noise 到达 pass（白噪声 vs 黑回退输出不同;噪声门非均匀）', () => {
+    const white: SM2Sampler = () => [1, 1, 1, 1];
+    const black: SM2Sampler = () => [0, 0, 0, 1];
+    const withWhite = runWith(3024, white);
+    const withBlack = runWith(3024, black);
+    expect(near3(withWhite, withBlack)).toBe(false);     // 修复后 noise 项生效 → 输出改变
+    // 字节码实测：r6(=s1.r) 反向调制 B 通道（s1=0 → B=0.310 / s1=1 → B=0）
+    expect(withBlack[2]).toBeGreaterThan(0.05);          // 黑 s1 = 今日回退态（B 通道塌满）
+    expect(withWhite[2]).toBeLessThan(0.05);             // 白 s1 → B 归零（高光路径接管）
+  });
+
+  it('ArmorTwilight：noise 覆写生效（s1 梯度驱动 → 两档噪声输出不同）', () => {
+    const lo: SM2Sampler = () => [0.1, 0.1, 0.1, 1];
+    const hi: SM2Sampler = () => [0.9, 0.9, 0.9, 1];
+    const a = runWith(3039, lo);
+    const b = runWith(3039, hi);
+    expect(near3(a, b)).toBe(false);                     // s1 调制可达
   });
 });

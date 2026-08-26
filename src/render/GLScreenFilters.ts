@@ -191,7 +191,8 @@ void main() {
   vec2 suv = mod(duv, 1.0);                    // s0 wrap 等价（右缘越界采到左缘）
   vec4 col = outSide > 0.5 ? vec4(0.0) : texture2D(uScreen, suv);  // :1210,1215
   // :1216 cmp -uMultiChunkScene(false) → 恒取畸变采样
-  float ph = fract(vUv.y * uScreenH * uZoom * 0.222656) * 6.283185 - 3.141593; // :1217-1221
+  // ★R33 C4：:1220 mad c8.y(+0.5) 后 frc——曾漏 +0.5 → cos/sin 反相（扫描线明暗带互换）
+  float ph = fract(vUv.y * uScreenH * uZoom * 0.222656 + 0.5) * 6.283185 - 3.141593; // :1217-1221
   float mx = 1.0 + (cos(ph) - 1.0) * 0.13;                         // :1224-1225(c7.z)
   float my = 1.0 + (sin(ph) - 1.0) * 0.16;                         // :1223,1227(c7.x)
   vec3 scan = vec3(col.r * mx, col.g * my, col.b * mx);            // :1226-1228

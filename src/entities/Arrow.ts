@@ -932,6 +932,44 @@ export class Arrow extends Entity {
     }
   }
 
+  /** ★B1 接线批：死亡细胞桶发射器弹 1023 Kill 爆（Projectile.cs:78560-78585）：
+   *  音 DeadCellsBarrelLauncherExplode（SoundID.cs:1104 WithVolume 0.6）→ 判定盒
+   *  归心扩至 192×192 结算 Damage() → DeadCellsBarrelExplosion 编排粒子
+   *  （ParticleOrchestrator.cs:1710-1766 Extra_269 三帧青白闪 tint(52,208,254)
+   *  ——编排池未含该型，spawnParticles 青色近似）+ 8 枚烟 gore 61-63 八向环抛
+   *  （出生位=Center±24 盘内、速=2π·i/8 向 ×rand·8）+ 40× d31 从盒内向心位
+   *  DirectionTo(dust) 径向 ×rand·8。 */
+  private barrel1023Burst(game: GameHooks): void {
+    game.playSfxFile?.('deadcells_barrel_launcher_explode', 0.6, this.cx, this.cy);
+    const R23 = 96;                                    // Resize(192) 半宽
+    // 原版盒重叠结算（Resize 后 Damage()）；本仓 AoE 族统一中心距近似（gemAoeBurst 同）
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean; hurt?: (...a: unknown[]) => boolean };
+      if (e.dead || !e.hurt) continue;
+      const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
+      if (Math.abs(ecx - this.cx) < R23 + e.w / 2 && Math.abs(ecy - this.cy) < R23 + e.h / 2) {
+        const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+        e.hurt(crit ? this.damage * 2 : this.damage,
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // fromPlayer=DPS 计
+      }
+    }
+    game.spawnParticles(this.cx, this.cy, '#34D0FE', 26, 5, { life: 25, size: 3 });
+    for (let i = 0; i < 8; i++) {                      // 烟 gore 环抛（:78570-78573）
+      const th = (Math.PI * 2 * i) / 8;
+      GorePiece.newGore(61 + Math.floor(Math.random() * 3),
+        this.cx + (Math.random() * 48 - 24), this.cy + (Math.random() * 48 - 24),
+        Math.cos(th) * Math.random() * 8, Math.sin(th) * Math.random() * 8);
+    }
+    for (let i = 0; i < 40; i++) {                     // 40×d31 径向烟（:78575-78578）
+      const d = game.spawnDust?.(this.cx - R23, this.cy - R23, R23 * 2, R23 * 2, 31);
+      if (!d) continue;
+      const dx = d.x - this.cx, dy = d.y - this.cy;
+      const l = Math.hypot(dx, dy) || 1;
+      const spd = Math.random() * 8;
+      d.vx = (dx / l) * spd; d.vy = (dy / l) * spd;
+    }
+  }
+
   // ---- 喵刀弹 502（Meowmere Cat）专属态 ----
   /** 614 星尘细胞弹 ai[1]（AI_113_TargetSticker :41289-41330）：目标敌 id（发射侧
    *  MinionProj 注入,原版 NewProjectile 第 11 参 = num13 目标索引）——硬追踪/失的即杀/
@@ -2143,6 +2181,9 @@ export class Arrow extends Entity {
     else if (this.projId === 659 && !this.dead && this.sf659Ai0 >= 0) this.flame659DeathBurst(game);
     // ★R29 玛瑙爆破枪黑爆二段（Kill :73493-73540）：Resize(160)→Damage() AoE
     else if (this.projId === 661 && !this.dead && !this.hostile) this.blackBolt661Burst(game);
+    // ★B1 死亡细胞桶发射器 1023（Kill :78560-78585）：音+192 盒 Damage()+编排粒子
+    // 近似+gore/尘（hostile 门同 661——被反射后不回打敌侧）
+    else if (this.projId === 1023 && !this.dead && !this.hostile) this.barrel1023Burst(game);
     // §1 暗影束消亡：补铺末段（Kill :71840-71870 从最后锚点到死亡位广播）
     if (this.projId === 294 && !this.hostile && this.sbL0 > 9
       && (this.sbAx > 0 || this.sbAy > 0)) {

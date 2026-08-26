@@ -52,6 +52,7 @@ if (!(await page.$('.sw-vsel .sw-vitem'))) {
 await page.waitForFunction(() => window.__swGame?.world?.store?.w > 0 && window.__swGame?.player, { timeout: 300000, polling: 1000 });
 await new Promise((r) => setTimeout(r, 2500));
 
+let pageShot = null;
 const out = await page.evaluate(async () => {
   const g = window.__swGame;
   const TILE = 16;
@@ -86,6 +87,20 @@ const out = await page.evaluate(async () => {
   const cv = g.renderer.canvas;
 
   /** 世界点 → canvas 设备像素亮度采样(3×3 域最大通道) */
+  function sampleWorldRGB(wx, wy) {
+    const [sxw, syw] = g.camera.worldToScreen(wx, wy);
+    const x0 = Math.round(sxw * dpr), y0 = Math.round(syw * dpr);
+    let mx = -1, r = 0, gg = 0, b = 0;
+    try {
+      const cx2 = cv.getContext('2d');
+      const im = cx2.getImageData(x0 - 2, y0 - 2, 5, 5);
+      for (let i = 0; i < im.data.length; i += 4) {
+        const lum = 0.2126 * im.data[i] + 0.7152 * im.data[i + 1] + 0.0722 * im.data[i + 2];
+        if (lum > mx) { mx = lum; r = im.data[i]; gg = im.data[i + 1]; b = im.data[i + 2]; }
+      }
+    } catch (e) { return { lum: -1, r: 0, g: 0, b: 0 }; }
+    return { lum: Math.round(mx), r, g: gg, b };
+  }
   function sampleWorld(wx, wy) {
     const [sxw, syw] = g.camera.worldToScreen(wx, wy);
     const x0 = Math.round(sxw * dpr), y0 = Math.round(syw * dpr);
@@ -118,44 +133,120 @@ const out = await page.evaluate(async () => {
   for (let i = 0; i < 4 && castTick < 0; i++) { origFixed(1 / 60); ftick++; }
   const orb = () => g.entities.projectiles.find((q) => q.projId === 1117);
   // 悬浮期逐帧:渲染帧后采 orb 中心
+  // ★headless rAF 不跑→世界从未渲染（首轮回炉实锤:orb 中心 lum≈41 全黑）。
+  //   手动驱动引擎帧:origFixed 推逻辑 + g.frame() 同步渲染,随后立即采样
   for (let i = 0; i < 26; i++) {
     origFixed(1 / 60); ftick++;
-    await new Promise((r) => requestAnimationFrame(r));
+    g.frame(performance.now());
     const o = orb();
     if (!o || o.dead) break;
     orbSamples.push({ t: ftick - castTick, ...sampleWorld(o.cx, o.cy) });
   }
   R.dbg.orbFlight = orbSamples;
 
-  // 尸检期:沿折线每 40px 一点,每帧采全部点取亮值
-  const lineSamples = [];
-  let boltSeen = null;
-  while (ftick < castTick + 90) {
+  // 尸检期入口：推进到 bolt 生成+视觉期，返回裁剪框（Node 层截图=合成器 ground truth）
+  let clip = null;
+  for (let i = 0; i < 60; i++) {
     origFixed(1 / 60); ftick++;
-    await new Promise((r) => requestAnimationFrame(r));
+    g.frame(performance.now());
     const o = orb();
     if (!o) break;
-    if (o.bolt && !boltSeen) boltSeen = { pts: o.bolt.positions.length, span: Math.round(o.bolt.positions[o.bolt.positions.length - 1].y - o.bolt.positions[0].y) };
+    if (o.bolt && o.visualT > 0 && o.bolts && o.bolts.length > 0) {
+      const [cxs, cys] = g.camera.worldToScreen(o.cx, o.cy);
+      clip = { x: Math.max(0, Math.round(cxs - 220)), y: Math.max(0, Math.round(cys - 300)),
+        width: 440, height: 430 };
+      break;
+    }
+    if (o.dead) break;
+  }
+  R.clip = clip;
+  return R;
+});
+
+// ---- Node 截图（合成器 ground truth）----
+let shotClip = null;
+const outA = out;
+if (outA.clip) {
+  shotClip = outA.clip;
+}
+
+// ---- B 段:续采样（同一页面状态延续） ----
+const outB = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const TILE = 16;
+  const dpr = g.renderer.dpr || 1;
+  const cv = g.renderer.canvas;
+  function sampleWorldRGB(wx, wy) {
+    const [sxw, syw] = g.camera.worldToScreen(wx, wy);
+    const x0 = Math.round(sxw * dpr), y0 = Math.round(syw * dpr);
+    let mx = -1, r = 0, gg = 0, b = 0;
+    try {
+      const cx2 = cv.getContext('2d');
+      const im = cx2.getImageData(x0 - 2, y0 - 2, 5, 5);
+      for (let i = 0; i < im.data.length; i += 4) {
+        const lum = 0.2126 * im.data[i] + 0.7152 * im.data[i + 1] + 0.0722 * im.data[i + 2];
+        if (lum > mx) { mx = lum; r = im.data[i]; gg = im.data[i + 1]; b = im.data[i + 2]; }
+      }
+    } catch (e) { return { lum: -1, r: 0, g: 0, b: 0 }; }
+    return { lum: Math.round(mx), r, g: gg, b };
+  }
+  function sampleWorld(wx, wy) {
+    const [sxw, syw] = g.camera.worldToScreen(wx, wy);
+    const x0 = Math.round(sxw * dpr), y0 = Math.round(syw * dpr);
+    let mx = -1;
+    try {
+      const cx2 = cv.getContext('2d');
+      if (!cx2) return { err: 'no-2d' };
+      const im = cx2.getImageData(x0 - 2, y0 - 2, 5, 5);
+      for (let i = 0; i < im.data.length; i += 4) {
+        const lum = 0.2126 * im.data[i] + 0.7152 * im.data[i + 1] + 0.0722 * im.data[i + 2];
+        if (lum > mx) mx = lum;
+      }
+    } catch (e) { return { err: String(e.message).slice(0, 60) }; }
+    return { lum: Math.round(mx) };
+  }
+  const lineSamples = [];
+  const rgbAcc = [];
+  let boltSeen = null;
+  let tickN = 0;
+  const o0 = g.entities.projectiles.find((q) => q.projId === 1117);
+  while (tickN < 50) {
+    tickN++;
+    g.fixedUpdate(1 / 60);
+    g.frame(performance.now());
+    const o = g.entities.projectiles.find((q) => q.projId === 1117);
+    if (!o) break;
+    if (o.bolt && !boltSeen) boltSeen = { pts: o.bolt.positions.length,
+      span: Math.round(o.bolt.positions[o.bolt.positions.length - 1].y - o.bolt.positions[0].y) };
     if (o.visualT > 0 && o.bolt) {
       const pts = o.bolt.positions;
       const frameVals = [];
+      let sR = 0, sG = 0, sB = 0, sN = 0;
       for (let i = 0; i < pts.length; i += Math.ceil(pts.length / 12)) {
-        const s = sampleWorld(pts[i].x, pts[i].y);
-        frameVals.push(s.lum ?? -1);
+        const s2 = sampleWorldRGB(pts[i].x, pts[i].y);
+        frameVals.push(s2.lum ?? -1);
+        if (s2.lum > 60) { sR += s2.r; sG += s2.g; sB += s2.b; sN++; }
       }
+      if (sN > 0) rgbAcc.push({ r: sR / sN, g: sG / sN, b: sB / sN });
       lineSamples.push({ vt: o.visualT, prog: +(1 - o.visualT / (o.visualTotal ?? 45)).toFixed(2),
         maxLum: Math.max(...frameVals), lit180: frameVals.filter((v) => v > 180).length });
     }
   }
-  R.dbg.boltMeta = boltSeen;
-  R.dbg.lineSamples = lineSamples.filter((x, i) => i % 2 === 0).slice(0, 14);
-  const flightMax = Math.max(...orbSamples.map((s) => s.lum ?? -1));
-  const corpseMax = Math.max(...lineSamples.map((s) => s.maxLum));
-  R.verdict = { flightOrbMaxLum: flightMax, corpseLineMaxLum: corpseMax,
-    orbVisible: flightMax > 120, boltVisible: corpseMax > 150,
-    diagnosis: flightMax <= 120 ? '整类坐标错(实体层不在采样 canvas)'
-      : corpseMax <= 150 ? 'drawBolt 特有错(合成/坐标/门)' : '两者均可见——探针阈值问题' };
-  return R;
+  return { boltSeen, lineSamples, rgbAcc };
 });
+out.dbg.boltMeta = outB.boltSeen;
+if (outB.lineSamples?.length) {
+  const mR = outB.rgbAcc?.reduce((x, y) => x + y.r, 0) / (outB.rgbAcc?.length || 1);
+  const mG = outB.rgbAcc?.reduce((x, y) => x + y.g, 0) / (outB.rgbAcc?.length || 1);
+  out.dbg.edgeRatioRG = +(mR / Math.max(1, mG)).toFixed(2);   // C2:红/绿边带比（原版≈2-3,修前≈0.9）
+}
+out.dbg.lineSamples = outB.lineSamples;
+const flightMax = Math.max(...(outA.dbg.orbFlight || []).map((x) => x.lum ?? -1));
+const corpseMax = Math.max(...(outB.lineSamples || []).map((x) => x.maxLum));
+out.verdict = { flightOrbMaxLum: flightMax, corpseLineMaxLum: corpseMax,
+  orbVisible: flightMax > 120, boltVisible: corpseMax > 150,
+  diagnosis: flightMax <= 120 ? '整类坐标错(实体层不在采样 canvas)'
+    : corpseMax <= 150 ? 'drawBolt 特有错(合成/坐标/门)' : '两者均可见——探针阈值问题' };
+if (shotClip) await page.screenshot({ path: '/tmp/ls-bolt-shot.png', clip: shotClip });
 console.log(JSON.stringify(out, null, 1));
 await browser.close();

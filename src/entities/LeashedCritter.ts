@@ -654,6 +654,10 @@ export interface LeashedEnv {
   addLight(i: number, j: number, r: number, g: number, b: number): void;
   /** 原版 Dust 池（金系 43 / 妖精 278 / 帝皇蝶 267 / 地狱蝶 6 / Recall 15） */
   dust?: LeashedDustPool;
+  /** 单 wav 直播（风筝线长变化音 SoundID.Item192——KiteLogic :49385-49393；
+   *  pitch = Projectile.kiteSoundPitch，LegacySoundPlayer case 192 :632 消费。
+   *  可选 = 测试 mock 兼容） */
+  playSfxWav?(file: string, vol?: number, x?: number, y?: number, pitch?: number): void;
   /** Lighting.GetColor(i, j) → [r,g,b] 0-255（金系闪光的照度门，LeashedCritter.cs:143-156） */
   lightAt?(i: number, j: number): [number, number, number];
 }
@@ -2139,11 +2143,23 @@ export class LeashedKiteEntity {
   private kiteLogic(st: TileStore, env: LeashedEnv, bobOffset: number): void {
     void st;
     const ai0 = this.kiteDistance;
-    // :45838-45854 localAI[2] 线长簿记 + soundDelay（owner!=myPlayer → 不播音效）
+    // :45838-45854 localAI[2] 线长簿记 + soundDelay（owner!=myPlayer → 不播音效；
+    // 锚桩风筝 owner=255 dummy 恒非本地 → !flag 恒真必播 :49390-49392）
     if (this.localAI2 === 0) this.localAI2 = ai0;
     else if (this.localAI2 !== ai0) {
       this.localAI2 = ai0;
-      if (this.soundDelay === 0) this.soundDelay = 30;
+      if (this.soundDelay === 0) {
+        this.soundDelay = 30;
+        // SoundID.Item192（Projectile.cs:49385-49393 KiteLogic）：pitch 存
+        // kiteSoundPitch（:49388，num=4/num2=500 收放线界）由 LegacySoundPlayer
+        // case 192（LegacySoundPlayer.cs:631-633）落到实例 Pitch；本仓经
+        // playWavFile 第 5 参直传。位置 = player.position = AnchorWorldPosition
+        // （LeashedKite.cs:169 CopyToDummy 后 player.Center=锚点）→ 本仓 anchorX/Y
+        if (env.playSfxWav) {
+          const pitch = ((this.localAI2 - 4) / (500 - 4)) * -0.12 + 0.06;   // :49388
+          env.playSfxWav('Item_192', 1, this.anchorX, this.anchorY, pitch);
+        }
+      }
     }
     if (this.soundDelay > 0) this.soundDelay--;
     // :45863-45871

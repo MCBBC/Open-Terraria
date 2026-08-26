@@ -72,6 +72,13 @@ export class MeteorChunk extends Entity {
     // 撞地消亡(tileCollide 默认;Kill 无特例 → 无掉落)
     if (st.isSolid(tx, ty)) {
       game.spawnParticles(this.cx, this.cy, '#FF9060', 6, 2, { life: 24 });
+      // Kill 音(:76511-76518):type 1078 掷 Next(1,4) 次 MeteorShower 跟踪音——
+      // CreateTrackable("meteor_shower",6) vol×0.8 pitchVariance±0.3(SoundID.cs:1120)
+      const hits = 1 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < hits; i++) {
+        game.playSfxWav?.(`meteor_shower_${Math.floor(Math.random() * 6)}`, 0.8, this.cx, this.cy,
+          (Math.random() * 2 - 1) * 0.3);
+      }
       this.dead = true;
     }
   }

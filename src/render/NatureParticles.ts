@@ -405,6 +405,9 @@ export class NatureParticles {
       if (c.alpha >= 255) { c.dead = true; return; }
     }
     c.x += c.vx;
+    c.y += c.vy;   // ★原版 position += velocity 双轴（Gore.cs:146）——NewGore 上踢
+                   // vy(-1~-3) 让贴地雾升起→下方两格全空→flag 淡出≈275tick 寿命;
+                   // 曾漏 Y = 雾永不上升且永不淡出 → 600 池堆积成"炸裂"(2026-08-25)
   }
 
   /** UpdateAmbientAirborneCloud（Gore.cs:157-202）：航向 = 速度角；头部格实心或
@@ -429,14 +432,26 @@ export class NatureParticles {
 
   // ================= 绘制 =================
 
-  draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas): void {
+  /** 光照采样（Renderer 注入 this.lighting.lightAt；缺省全亮=测试环境）。
+   *  ★Gore 渲染色 = GetAlpha(位置光照色)（Gore.cs:1484-1518 默认分支:
+   *  light×(1-alpha/255)）——雾/落叶受所在位置瓦片光照,夜里暗蓝近隐、火把旁
+   *  亮橙;曾无光照直画纯白贴图 = 夜里"错误的高亮贴图"（2026-08-25 用户报）。
+   *  雾/叶贴图 achromatic → 光色乘积≈亮度乘积,取 max 通道即可;滴水 716 特例
+   *  (GetAlpha 恒 255,255,255,200)不受光,不乘 */
+  draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+    lightAt?: (tx: number, ty: number) => [number, number, number]): void {
     ctx.imageSmoothingEnabled = false;
+    const lum = (tx: number, ty: number): number => {
+      if (!lightAt) return 1;
+      const [r, g, b] = lightAt(tx, ty);
+      return Math.max(0, Math.min(1, Math.max(r, g, b) / 255));
+    };
     // 落叶：32 列(油漆) × 8 行(旋转)，帧 12×14（SpriteFrame(32,8)）
     for (const l of this.leaves) {
       const img = atlas.ensureVImage(`vanilla/Gore_${l.gore}.png`);
       if (!img || !(img.width > 0) || img.width === 0) continue;
       const fw = img.width / 32, fh = img.height / 8;
-      ctx.globalAlpha = 1 - l.alpha / 255;
+      ctx.globalAlpha = (1 - l.alpha / 255) * lum(Math.floor((l.x + 4) / TILE), Math.floor((l.y + 4) / TILE));
       ctx.drawImage(img, 0, l.row * fh, fw, fh, l.x, l.y, fw * l.scale, fh * l.scale);
     }
     // 滴水：18×300 竖条 15 帧（帧高 20）
@@ -448,13 +463,14 @@ export class NatureParticles {
       ctx.drawImage(img, 0, d.frame * fh, img.width, fh, d.x, d.y, img.width, fh);
     }
     // 云雾：Main.DrawGore（Main.cs:21749-21756）——中心锚 + scale + rotation，
-    // 不透明度 = (255-alpha)/255（Gore.GetAlpha :1486）
+    // 色 = GetAlpha(位置光照) × (255-alpha)/255（Gore.cs:1484-1518）
     for (const c of this.clouds) {
       const img = atlas.ensureVImage(`vanilla/Gore_${c.type}.png`);
       if (!img || !(img.width > 0) || img.width === 0) continue;
       const w = img.width, h = img.height;
       ctx.save();
-      ctx.globalAlpha = Math.max(0, (255 - c.alpha) / 255);
+      ctx.globalAlpha = Math.max(0, (255 - c.alpha) / 255)
+        * lum(Math.floor((c.x + 15) / TILE), Math.floor(c.y / TILE));
       ctx.translate(c.x + w / 2, c.y + h / 2);
       if (c.rotation) ctx.rotate(c.rotation);
       if (c.scale !== 1) ctx.scale(c.scale, c.scale);

@@ -27,11 +27,14 @@ it('其余 shoot 指向新解析投射物的物品不落入异常族', () => {
   }
 });
 
-it('aiStyle 13 锚定链族(鱼叉/Golem拳/KO加农/链刀/链斩)归 spear,不再子弹射飞', () => {
+it('aiStyle 13 锚定链族归派(★R35 后终态:专用 anchored kind;481 断头台保留 spear)', () => {
   for (const [vid, proj] of [[160, 23], [1297, 262], [1314, 271], [1325, 273], [3012, 481]] as const) {
     expect(projectileData(proj)?.aiStyle, `proj ${proj}`).toBe(13);
     const cw = combatWeapon({ key: `vi_${vid}_x`, vid });
-    expect(cw?.kind, `item ${vid}`).toBe('spear');
+    // ★2026-08-25 锚定族升级:AI_013 三段伸缩/链条绘制专支落地(Game case 'anchored'),
+    //   整族脱离 'spear' 长矛前刺近似;唯 481 断头台链刃按 R30 备案保留 spear
+    //   (SpearProj 内 R30 专支行为已对拍锁定,vanillaItemCombat.ts 派发处注释在案)
+    expect(cw?.kind, `item ${vid}`).toBe(vid === 3012 ? 'spear' : 'anchored');
     expect((cw as { shoot: number }).shoot).toBe(proj);
   }
 });

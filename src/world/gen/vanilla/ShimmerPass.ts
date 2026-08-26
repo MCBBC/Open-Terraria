@@ -480,7 +480,10 @@ export function placeUncheckedStalactite(st: TileStore, x: number, y: number, pr
   const put = (xx: number, yy: number, fx: number, fy: number) => {
     if (!st.inBounds(xx, yy)) return;
     const i = st.idx(xx, yy);
-    st.type[i] = STALACTITE; st.flags[i] = 1; st.slope[i] = 0;
+    // ★SSSSSSS：ClearSlope 全语义（Tile.cs:158-163 = slope(0)+halfBrick(false)）——
+    //   曾只清 slope 不清 half：非活性格残留 half=1 被钟乳石继承
+    //   （s22222 #103 H0>1×1 @(2012,610)：#102 幽灵苔 182/half1 上放 165 实锤）。
+    st.type[i] = STALACTITE; st.flags[i] = 1; st.slope[i] = 0; st.half[i] = 0;
     st.frameX[i] = fx; st.frameY[i] = fy;
   };
   // 锚定材质 → 专属列基带（GetDesiredStalagtiteStyle :38746-38844 + style→fx

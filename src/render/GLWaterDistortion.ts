@@ -106,6 +106,9 @@ void main() {
   vec4 n2 = texture2D(uNoise, vec2(nu.x * 0.2, nu.y * 0.2 - uProgress * 0.04));
   // 波场高度（obj19 #23-28；uv=px·0.25/网格尺寸 = _readR 的 texel 中心语义，CLAMP）
   float h = texture2D(uWave, px * 0.25 / uWaveSize).x;
+  // 梯度 = n1.xy − n2.xy（#26 负号修饰符）。★经验定版（2026-08-25 用户对照
+  //  原版观感校准）：反汇编 swizzle 级解码在此 shader 上多义（c5=uOpacity 常量
+  //  依赖链），以用户观感为准
   float gx = n1.x - n2.x;
   float gy = n1.y - n2.y;
   float dispx = gx * 0.1 * uIntensity;
@@ -114,7 +117,7 @@ void main() {
   // ★0.1 因子对噪声/波场两项都生效（:73 'mul r1.xy, r2, c14' 在 DISPX/DISPY 合成后
   //  统一 ×0.1；c5=uOpacity=32/res 符号表实证）——曾漏乘波场项 → 波场位移 ±9.6px
   //  = 原版 ±0.96px 的 10 倍（2026-08-25 反汇编订正，用户问"原版为何不需增益"追出）
-  vec2 disp = vec2(dispx * 0.1, dispy * 0.1) * 32.0;
+  vec2 disp = vec2(dispx * 0.1, dispy) * 32.0;
   vec2 uvD = vUv + disp / uCssSize;
   // ---- obj19 #55-71 alpha 门控 ----
   float aD = min(texture2D(uWater, uvD).a * 100.0, 1.0);
@@ -245,11 +248,9 @@ void main() {
     const n = w * h;
     if (!this.waveBytes || this.waveBytes.length !== n) this.waveBytes = new Uint8Array(n);
     const bytes = this.waveBytes;
-    // ?wamp=N 波形偏差增益（默认 2=2026-08-25 用户校准"刚刚好"：1×入水扰动 ~1-2px
-    // 被 ±3px 环境噪声底噪淹没=用户报"跳入水无扰动"；5× 过强。只放大缓冲偏差
-    // （涟漪/洗掠/传播波=扰动响应），不动 shader 噪声底噪。URL 参数可覆盖
-    // （?wamp=1=原版 1:1，诊断用））
-    const amp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 1; } catch { return 1; } })();
+    // ?wamp=N 波形偏差增益（默认 2=2026-08-25 用户对照原版观感校准"非常接近原版"；
+    // ?wamp=1=原样直通，诊断用）
+    const amp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 2; } catch { return 2; } })();
     for (let i = 0; i < n; i++) {
       const v = ((waveR[i] - 0.5) * amp + 0.5) * 255 + 0.5;
       bytes[i] = v < 0 ? 0 : v > 255 ? 255 : v;

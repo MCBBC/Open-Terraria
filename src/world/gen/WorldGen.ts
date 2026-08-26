@@ -352,14 +352,12 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   // 吸血鬼种子终段（WorldGen.cs:22625-22631：GenerateWorld 尾部全部 GenPass 之后
   // vampireSeed → RandomizeWorldSpawn + PlaceTorchesAroundSpawn + PutMonsterVanityInChests）
   vampireSeedFinishPass(ctx);
-  // ★1457 对齐档 2（2026-08-23）复线：FinalSeedCleanup 终扫——1457 WorldGen.cs:22666
-  //   `SecretSeed.FinalizeSecretSeeds()`（vampireSeed 终段 cs:22657-22665 之后）尾部
-  //   cs:692 **无条件**调用 FinalSeedCleanup（:695-747）：悬空 Falling 块静态化
-  //   （53/495→397、112→398、234→399、116→402、224→147、其余→1）+逐格
-  //   FinalSeedCleanup_Paint。1456 无此调用（KKKKKK 批曾撤,基准回 1457 后复线）。
-  //   ★VVVVVV 双态门：SW_MB_1457=1 才执行（1456 口径无此终扫; mile8 槽链窗口在
-  //   finalize 前,不受影响;world-final 域 1457 线经门后逐位不变）。
-  if (hfIs1457()) finalSeedCleanup(ctx.store, ctx.world.seedFlags ?? {}, world.chests);
+  // ★TTTTTTT（2026-08-26）：FinalSeedCleanup 移位——1457 WorldGen.cs:22666
+  //   `SecretSeed.FinalizeSecretSeeds()` 实际在 FinalCleanup pass 体【内】
+  //   （ShimmerCleanUp cs:22639 之前），曾挂此处（finalize 之后）时点晚于 dump
+  //   #105 快照位 → mile8 槽 57 把静态化差全记在 #105。现经 finalCleanupPass
+  //   的 opts.beforeShimmer 钩子在原版位执行（hfIs1457 门同前；1456 口径无此扫，
+  //   双态文件不受扰）。
   // ★终扫(finalize 之后):finalize 的幽灵 type 净化会把"flags=0 但 type 残留"
   // 的多格物体清成 0 → 在清扫 pass 之后【再造残片】(2026-08-13 缺位断言实锤:
   // 生成后 pot 残片 1 处,补扫即清零)。清扫幂等且廉价,此处兜底。
@@ -1201,7 +1199,17 @@ function brokenTrapCleanupPass({ store, rng, world }: GenCtx) {
 
 function finalCleanupPass({ store, rng, world }: GenCtx) {
   // ★SSSSSS：opts.chests 透传——FinishNoTraps (E) 段（每箱 1/15 塞 5346 Gas Trap）
-  runFinalCleanupPass(store, ctxGs[0]!, rng, { chests: world.chests as never });
+  // ★TTTTTTT：opts.beforeShimmer 接线 FinalSeedCleanup（1457 WorldGen.cs:22666
+  //   SecretSeed.FinalizeSecretSeeds() 在 pass 体【内】、ShimmerCleanUp 之前；
+  //   :692 尾部无条件调 FinalSeedCleanup :695 悬空 Falling 块静态化）。曾挂在
+  //   generateWorld 尾（finalize 之后）=时点晚于 dump #105 快照位，mile8 槽 57
+  //   对拍把静态化差全记在 #105（const/s22222 T1>332×11 金币堆假债主）。
+  runFinalCleanupPass(store, ctxGs[0]!, rng, {
+    chests: world.chests as never,
+    beforeShimmer: hfIs1457()
+      ? () => finalSeedCleanup(store, ctxGs[0]!.seedFlags ?? {}, world.chests as never)
+      : undefined,
+  });
   // ★DDDDDD 批（2026-08-21）归位：原版 FinalCleanup pass 体末的全图 LiquidCheck
   // (createMergeTilesDuringGen:true)（cs:22639-50，ShimmerCleanUp 之后）——曾挂在
   // #49/#97 沉降尾（settle.ts，时点早 8 pass）。终清理槽直调，掷骰走 pass 链流。

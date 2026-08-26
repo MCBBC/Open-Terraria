@@ -702,31 +702,52 @@ export class MonolithFilters {
 
   /** FilterGraveyard（ScreenEffectInitializer.cs:25）：HLSL 二进制不在反编译源码，
    *  仅源码内可见参数——UseProgress = Lerp(0,0.75,intensity)、UseIntensity(1.2)、
-   *  UseTargetPosition(SceneMetrics.Center)（SceneState.cs:132-138）。canvas 近似：
-   *  ① 全屏 multiply 冷灰去色（progress×intensity 缩放，蓝通道少压保墓地青灰调）；
-   *  ② 以目标位（玩家屏幕位）为心的雾霭径向渐变，远处更浓——观感对齐原版
-   *  "墓地灰蓝雾 + 中心略透"。星光/天空压暗另在 SkyRenderer（SetBackColor :62990） */
+   *  UseTargetPosition(SceneMetrics.Center)（SceneState.cs:132-138）。
+   *  ★2026-08-25 重写（用户对照原版视频实报"旧 multiply 压暗近似几乎不可见,
+   *  原版=整画面蒙灰雾"）：半透明中性灰雾罩全画面(EndCapture 合成帧=世界整体,
+   *  FilterManager.cs:143-199 同层),以玩家屏幕位为心的径向透明(中心略清透、
+   *  远处浓),低频噪声扰动手感。星光/天空压暗另在 SkyRenderer（SetBackColor :62990） */
   private drawGraveyard(ctx: CanvasRenderingContext2D, f: FilterState, w: number, h: number,
     playerScreen: { x: number; y: number }): void {
     const k = Math.min(1, this.graveyardProgress * 1.2) * f.opacity;   // progress × UseIntensity(1.2)
     if (k <= 0) return;
-    ctx.save();
-    ctx.globalCompositeOperation = 'multiply';
-    const r = Math.round(255 * (1 - 0.30 * k));
-    const g = Math.round(255 * (1 - 0.30 * k));
-    const b = Math.round(255 * (1 - 0.24 * k));
-    ctx.fillStyle = `rgb(${r},${g},${b})`;
-    ctx.fillRect(0, 0, w, h);
-    ctx.restore();
-    const rad = Math.hypot(w, h) * 0.55;
-    const grad = ctx.createRadialGradient(playerScreen.x, playerScreen.y, rad * 0.25, playerScreen.x, playerScreen.y, rad);
-    grad.addColorStop(0, 'rgba(150,160,170,0)');
-    grad.addColorStop(1, `rgba(150,160,170,${(0.34 * k).toFixed(3)})`);
+    const rad = Math.hypot(w, h) * 0.62;
+    const grad = ctx.createRadialGradient(
+      playerScreen.x, playerScreen.y, rad * 0.12,
+      playerScreen.x, playerScreen.y, rad,
+    );
+    grad.addColorStop(0, `rgba(167,169,171,${(0.52 * k).toFixed(3)})`);   // 玩家周边略清透
+    grad.addColorStop(1, `rgba(167,169,171,${(0.9 * k).toFixed(3)})`);    // 远处浓
     ctx.save();
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
     ctx.restore();
+    // 低频噪声扰动（原版 shader 噪声雾手感;静态种子噪声 + progress 相位漂移）
+    const noise = noiseData();
+    if (noise && this.gyNoiseCanvas === null) {
+      const cv = document.createElement('canvas');
+      cv.width = noise.w; cv.height = noise.h;
+      const cx = cv.getContext('2d')!;
+      const id = cx.createImageData(noise.w, noise.h);
+      id.data.set(noise.data);
+      cx.putImageData(id, 0, 0);
+      this.gyNoiseCanvas = cv;
+    }
+    if (this.gyNoiseCanvas) {
+      ctx.save();
+      ctx.globalAlpha = 0.1 * k;
+      ctx.globalCompositeOperation = 'overlay';
+      const pat = ctx.createPattern(this.gyNoiseCanvas, 'repeat');
+      if (pat) {
+        ctx.fillStyle = pat;
+        ctx.fillRect(0, 0, w, h);
+      }
+      ctx.restore();
+    }
   }
+
+  /** Graveyard 雾噪声纹理缓存（懒建一次） */
+  private gyNoiseCanvas: HTMLCanvasElement | null = null;
 
   /** FilterBloodMoon（obj11 :429-482 字节码精确式,半分辨率逐像素同 drawSepia）：
    *  V+min 分档染色 + 径向衰减 + α 抛物线。★2026-08-25 重写：旧 multiply 近似

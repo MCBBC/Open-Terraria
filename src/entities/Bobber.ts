@@ -34,6 +34,13 @@ import type { World } from '../world/World';
 import { BuffType } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
 import { drawFishingStringLine, stringColorOpts } from '../render/StringLine';
+// FakeFish 钓鱼装饰鱼群（FakeFishParticle 移植;clientOnly 编排=纯本地不上网）
+import {
+  spawnFakeFishInWater, requestFakeFishSpawn, magnetFakeFish,
+  pingFakeFish, pushAwayFakeFish, releaseCaughtFakeFish,
+  type FakeFishLatchTarget,
+} from './FakeFish';
+import type { FishingRollCtx } from '../data/vanillaFishing';
 
 type LiquidType = 'water' | 'lava' | 'honey';
 
@@ -113,6 +120,9 @@ export class Bobber extends Entity {
   truffleBite = false;
   /** 血月咬钩敌怪（FishingCheck_RollEnemySpawns）——收竿由 Game 侧生成 */
   catchEnemy = 0;
+  /** 收竿带渔获镜像（Player.cs:53082 bobber.ai[1]=localAI[1],±id）——FakeFish
+   *  CheckLatch 收线路（FakeFishParticle.cs:158-165）的配对判定源 */
+  caughtVid = 0;
   /** 渔获原版 id → 钓起时落物用 */
   private polePower: number;
   poleVid = 0;
@@ -384,6 +394,25 @@ export class Bobber extends Entity {
     const junk = rollJunk(level, pond.waterTilesCount, waterNeeded);
     const levels = rollDropLevels(level, p.buffs.has(BuffType.Crate));
     const questFish = this.probeQuestFish(p, game);   // :19328 → :20089-20104
+    // ---- FakeFish 生成门（Projectile.cs:20709 SpawnFakeFishInWater）----
+    // TryBuildFishingContext 成功即跑、先于咬钩掷骰且与其独立；展示条件与实际渔获
+    // 共用同一掷（junk/五档/rolled 即本 tick 掷值,GetDisplayableDrops 只查条件不掷
+    // chance）。clientOnly 编排 = 纯本地特效不上网。★zones/rolled 求值点自渔获掷前
+    // 提至咬钩门前（prepareFishingContext 仅 zone 冲突时掷 Math.random,无种子流依赖）
+    const zones = this.zonesOf(game);
+    const rollCtx: FishingRollCtx = {
+      inLava: pond.lava, inHoney: pond.honey, junk, crate: levels.crate,
+      common: levels.common, uncommon: levels.uncommon, rare: levels.rare,
+      veryrare: levels.veryrare, legendary: levels.legendary,
+      anyEnemies: false, canFishInLava,   // 原版门内 rolledEnemySpawn 尚未掷=恒 false
+      x: tx, y: ty, waterTilesCount: pond.waterTilesCount,
+      rockLayer: w.rockLevel, maxTilesX: st.w, heightLevel, questFish,
+      hardMode: !!w.flags.hardMode, bloodMoon: !!w.clock.bloodMoon,
+      combatBookWasUsed: !!w.flags.combatBookWasUsed, remix: false,
+      zones, rolled: prepareFishingContext(zones, heightLevel, ty, w.rockLevel,
+        undefined, !!w.seedFlags?.notTheBees),   // :19451-19502（R14-E13② NTB 弃丛林掷）
+    };
+    spawnFakeFishInWater(game, tx, ty, rollCtx);
     // 咬钩门（:19181-19184）：Next(100) <= ⌊(力+75)/2⌋ 才真咬（否则空拍再等下一轮）
     if (Math.floor(Math.random() * 100) > Math.floor((level + 75) / 2)) return;
     // ---- SetFishingCheckResults（:19333-19396）----
@@ -409,25 +438,33 @@ export class Bobber extends Entity {
       }
     }
     // 渔获掷（FishingCheck_RollItemDrop :19431-19449 → FishDropRuleList）：
-    // AnyEnemies stopper 居表首 → 敌怪已掷出时恒 0（互斥由表保证）
-    const zones = this.zonesOf(game);
-    this.catchId = tryGetItemDrop({
-      inLava: pond.lava, inHoney: pond.honey, junk, crate: levels.crate,
-      common: levels.common, uncommon: levels.uncommon, rare: levels.rare,
-      veryrare: levels.veryrare, legendary: levels.legendary,
-      anyEnemies: this.catchEnemy > 0, canFishInLava,
-      x: tx, y: ty, waterTilesCount: pond.waterTilesCount,
-      rockLayer: w.rockLevel, maxTilesX: st.w, heightLevel, questFish,
-      hardMode: !!w.flags.hardMode, bloodMoon: !!w.clock.bloodMoon,
-      combatBookWasUsed: !!w.flags.combatBookWasUsed, remix: false,
-      zones, rolled: prepareFishingContext(zones, heightLevel, ty, w.rockLevel,
-        undefined, !!w.seedFlags?.notTheBees),   // :19451-19502（R14-E13② NTB 弃丛林掷）
-    });
+    // AnyEnemies stopper 居表首 → 敌怪已掷出时恒 0（互斥由表保证）。
+    // ★rollCtx.anyEnemies 覆写为敌怪掷后真值（生成门内原版读到的仍是掷前 0——
+    //   两时点同构,FishingContext.Fisher.rolledEnemySpawn 在 RollEnemySpawns 后才置位）
+    rollCtx.anyEnemies = this.catchEnemy > 0;
+    this.catchId = tryGetItemDrop(rollCtx);
+    // ---- FakeFish 咬钩联动（FishingCheck_RollItemDrop :20962-20977）----
+    // 声呐药水：浮标下 24px 处先补一条【渔获同款】鱼（UniqueInfoPiece=rolledItemDrop、
+    //   MovementVector=Center+(0,24)）+ Ping/PushAway;磁化恒跑——距离序最近配型鱼
+    //   吸附到浮标（TryToMagnetizeTo）。clientOnly = 纯本地不上网
+    if (this.catchId > 0) {
+      if (p.buffs.has(BuffType.Sonar)) {
+        requestFakeFishSpawn(
+          this.cx + (Math.random() * 2 - 1) * 16,   // NextVector2Circular(16,0)
+          this.cy + 24, this.cx, this.cy + 24, this.catchId);
+        pingFakeFish(st, this.cx, this.cy, this.catchId);
+        pushAwayFakeFish(st, this.cx, this.cy, this.catchId);
+      }
+      magnetFakeFish(st, this.fakeFishView(), this.catchId);
+    }
     if (this.catchId > 0 || this.catchEnemy > 0) {
       this.openBiteWindow(level);                     // :19348/:19362
       game.playSfx('splash', 1);
-      // 声呐药水音效（Projectile.cs:19340-19346 SoundID Item9——文字已接、音效 2026-08-13 补）
-      if (p.buffs.has(BuffType.Sonar)) game.playSfxFile?.('Item_9', 0.8, this.cx, this.cy);
+      // 声呐药水咬钩音（Projectile.cs SetFishingCheckResults :20874/:20888 sonarPotion
+      //   门 → SoundID.SonarPotion=sonar_potion.wav：SoundID.cs:1128 WithVolume(0.65)
+      //   经 FILE_CASE_VOL 库层生效、WithPitchVariance(0.03)→PITCH_CASE ±0.03）。
+      //   旧 'Item_9'（水晶风暴连发音）冒名已正（2026-08-26）
+      if (p.buffs.has(BuffType.Sonar)) game.playSfxWav?.('sonar_potion', 1, this.cx, this.cy);
       game.spawnParticles(this.cx, this.cy, this.catchEnemy > 0 ? '#C04040' : '#80B8FF',
         6, 1.5, { life: 24 });
       return;
@@ -486,6 +523,25 @@ export class Bobber extends Entity {
     this.ai1 = nextInt(-240, -90) - level;
   }
 
+  /** FakeFish latch 目标视图（FakeFishLatchTarget：原版 _latchedProjectile 字段投影）。
+   *  缓存单例——鱼以对象引用识别宿主浮漂（matchesLatch），getter 活读本实体字段 */
+  private ffView: FakeFishLatchTarget | null = null;
+  fakeFishView(): FakeFishLatchTarget {
+    if (!this.ffView) {
+      const self = this;
+      this.ffView = {
+        get cx() { return self.cx; },
+        get cy() { return self.cy; },
+        get active() { return !self.dead; },
+        get projType() { return self.projId; },
+        get retract() { return self.retract; },      // ai[0]
+        get ai1() { return self.ai1; },              // ai[1] 原值（负=咬钩窗）
+        get caughtVid() { return self.caughtVid; },
+      };
+    }
+    return this.ffView;
+  }
+
   /** AI_061_FishingBobber_DoASplash（Projectile.cs:54839-54852）近似：
    *  水花尘团（原版 100 粒水尘 noGravity，此处粒子池口径 24 粒）+ 溅水音 19 */
   private doSplash(game: GameHooks): void {
@@ -525,7 +581,13 @@ export class Bobber extends Entity {
     }
     // 命中渔获：原版 ai[1]=itemType 随收线飞行、触玩家盒 Kill 时 GiveItemToPlayer
     // （Projectile.cs:73234-73241）——本仓 Game.reelBobber 即时入包契约不变（登记偏差：
-    // 收到即得，无飞行携物），浮漂此处即灭=竿静持随之解除
+    // 收到即得，无飞行携物），浮漂此处即灭=竿静持随之解除。
+    // ★收竿带渔获置位（Player.cs:53082 else 支 bobber.ai[1]=localAI[1],断线/敌怪支
+    //   不置）——FakeFish CheckLatch(:158-165) 据此判「本鱼即渔获」自灭;本仓浮漂即时
+    //   Kill 等不到鱼下一 tick 的检查,releaseCaughtFakeFish 时点直驱补偿
+    this.ai1 = caught;
+    this.caughtVid = caught;
+    releaseCaughtFakeFish(this.fakeFishView(), caught);
     this.dead = true;
     void game;
     return caught;

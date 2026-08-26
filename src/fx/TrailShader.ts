@@ -6,8 +6,10 @@
 //   m   *= tex(s1,uvS).r                                  // 噪声门
 //   out  = tex(s0,uv) × m × vColor × uOpacity             // 加算叠画
 //   uvS 随时间滚动（preshader c1=f(uTime)，ps.mul_s[1] uSaturation.x,uTime.x）
-// FinalFractalVertex（:2808-2879）：同构 + 长度向三角波 zigzag(uShaderSpecificData) +
-//   mask 同式；s0/s1=UseImage0/1。绑定表 DyeInitializer.cs:461-480：
+// FinalFractalVertex（:2808-2879）：mask 同式；s0/s1=UseImage0/1。★锯齿调深链为
+//   死代码（c2 未定义恒 0,见 FINAL_FRACTAL_ZIGZAG_DEPTH 定谳注）。绑定表
+//   DyeInitializer.cs:461-480（FinalFractal 出手侧被 FinalFractalHelper.cs:185-186
+//   覆写为 201/193）：
 //   MagicMissile=Extra192/194/193  FlameLash=191/189/190  RainbowRod=195/197/196
 //   LightDisc=195/195/252  EmpressBlade(FinalFractalVertex)=209/210/-（s2 缺省白）
 // 消费弹型（Main.cs:28616-28668）：34 火鞭/16 魔导弹/121-126+597+1120 宝石弹/
@@ -70,6 +72,17 @@ function sampleAt(im: ImgData | null, u: number, v: number): number {
 }
 
 let scratch: HTMLCanvasElement | null = null;
+
+/** ★R33 复核定谳（C3）：FinalFractalVertex 字节码的锯齿调深链是【死代码】——
+ *  ps `mad r0.x, r0.x, -c2.x, r0.z` 的 c2 既无 def 也不在 CTAB 符号表
+ *  （fxPixelShader.json symbols 仅 c0=uOpacity/c1=uShaderSpecificData）→
+ *  D3D9 常量默认 (0,0,0,0) → dim = 1 − tri×0 ≡ 1;preshader `SSD.w = 1/SSD.w`
+ *  (=0.25) 亦无 ps 消费（c1.w 全 token 零引用）。即原版 FinalFractalVertex
+ *  像素输出 ≡ MagicMissile 公式（s0=Extra_201/s1=Extra_193 绑定差异除外），
+ *  三角波链（frc+cmp :2822-2825,相位=v×SSD.x=×4）不产生可见调制。
+ *  本常量=字节码真值 c2.x=0;参数链保留（波形/相位照算）以便未来发现 c2
+ *  真实写入方时一键启用。 */
+const FINAL_FRACTAL_ZIGZAG_DEPTH = 0;
 
 export interface TrailSpec {
   /** 'RainbowRod'(宝石弹)/'MagicMissile'(魔导弹)/'FlameLash'/'LightDisc' —— 决定 Extra 组 */
@@ -152,7 +165,11 @@ export function drawStripTrail(
       const gate = sampleAt(s1, uvU, uvV);
       const edge = Math.max(0, Math.min(1, 2 * ((s2 ? sampleAt(s2, uvU, uvV) : gate) - (uN * 1.5 - 0.5))));
       const base = sampleAt(s0, uvV, uvU * 0.5 + scrollT * 0.4);   // s0 底噪（轴对调采样近似投影差）
-      const zzK = zz > 0 ? 1 - zz * (0.5 + 0.5 * Math.sin(bestV * 40 + scrollT * 6)) : 1;
+      // C3：三角波（frc+cmp 链同构）× 字节码真值深度 0（见 FINAL_FRACTAL_ZIGZAG_DEPTH
+      // 定谳注）——曾写 sin(v×40+t×6)(波形/频率/时滚三处非同构,且原版本无可见调制)
+      const zzPh = bestV * 4;                                  // SSD.x=4（FinalFractalHelper.cs:181）
+      const zzTri = Math.abs(((zzPh % 2) + 2) % 2 - 1);
+      const zzK = 1 - zz * FINAL_FRACTAL_ZIGZAG_DEPTH * zzTri; // ≡1（死链）
       const k = gate * edge * zzK;
       if (k <= 0.01) continue;
       const o = (pyi * bw + pxi) * 4;

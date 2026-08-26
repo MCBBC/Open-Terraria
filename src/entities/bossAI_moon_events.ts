@@ -212,6 +212,10 @@ export function mourningWoodAI(e: Enemy, game: GameHooks, player: Player | null)
         dx *= s * (1 + rndRange(-20, 21) * 0.01);
         dy *= s * (1 + rndRange(-20, 21) * 0.01);
         shootE(game, ox, oy, dx, dy, 50, 325);
+        // 燃木出生音（Projectile.cs:56158-56161 type==325 AI:ai[1]==0→置 1 播
+        // SoundID.Item42 = 每弹首发一次；本仓 shootE 恰生成一枚 → 发射点直播等价。
+        // 敌源两发射点 NPC.cs:33123 伤50 / :33211 伤75）
+        game.playSfxWav?.('Item_42', 1, ox, oy);
       }
       if (e.ai1 >= 120) { e.ai1 = 0; e.ai0 = 0; }
     }
@@ -264,6 +268,7 @@ export function mourningWoodAI(e: Enemy, game: GameHooks, player: Player | null)
       dx *= s * (1 + rndRange(-20, 21) * 0.001);
       dy *= s * (1 + rndRange(-20, 21) * 0.001);
       shootE(game, ox, oy, dx, dy, 75, 325);
+      game.playSfxWav?.('Item_42', 1, ox, oy);   // 燃木出生音（Projectile.cs:56158-56161，同上）
     }
     if (e.ai1 >= 120) { e.ai1 = 0; e.ai0 = 0; }
   } else if (e.ai0 === 4 && player) {

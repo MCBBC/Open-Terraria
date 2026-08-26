@@ -134,6 +134,7 @@ import { applyFrostBurn, applyMagmaStoneSwing, applyWeaponStatusSwing } from '..
 import { trySnapStrike } from '../stats/SnapStrike';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
+import { playDeathVoice, playHurtVoice } from '../player/PlayerVoice';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
 const BUFF_BY_VANILLA = new Map<number, BuffType>();
 for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBuff, Number(bt) as BuffType);
@@ -145,7 +146,7 @@ import { invIndexOfVanilla } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { MONEY_TROUGH_USE } from '../data/vanillaOpenBags';
-import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
+import { rollablePrefixes, rollPrefix, prefixStat, prefixValueMul } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
@@ -274,6 +275,7 @@ import { isDyeItem } from '../data/vanillaEquip';
 import {
   instrumentNotePitch, instrumentUseSound, drumSoundFile, bubbleWandGoreRoll,
   hiveBeeRoll, fairyBellVariant, chestLockOf,
+  guitarChordFile, guitarBadLuckDetune,
   marshmallowProbeTile, marshmallowRoastStep,
 } from '../items/FunItems';
 
@@ -348,6 +350,9 @@ import { RainbowBolt } from '../entities/RainbowProj';
 import { PrismProj, ChargedBlaster } from '../entities/PrismProj';
 import { MagicMissileProj, StarfuryStar, FlyingKnifeProj } from '../entities/MissileProj';
 import { SkyDragonSpin, SkyDragonSwing, SkyDragonShot, SkyDragonCircle } from '../entities/SkyDragonFury';
+import { PhoenixChannel, PhoenixBolt } from '../entities/PhoenixBowProj';
+import { MonkStaffSpin, MonkSlam, GhastlyGlaiveProj, MonkGhast } from '../entities/MonkStaffFury';
+import { FlintChargeProj, FlintWaveProj, FlintSpikeProj, emitFlintSpikes } from '../entities/DeadCellsFlint';
 import { NebulaBlazeBolt, LunarFlareStar } from '../entities/LunarNebula';
 import { Celeb2Muzzle, Celeb2Rocket } from '../entities/Celeb2';
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, LightsBaneSlash, GrassSlash } from '../entities/SwingArc';
@@ -358,6 +363,7 @@ import { ChainsawProj } from '../entities/ChainsawProj';
 import { MinionProj, pickSentryLandingSpot } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
+import { updateFakeFishSchool, clearFakeFish } from '../entities/FakeFish';
 import { type InfoAccCtx, mphOf } from '../stats/InfoAccs';
 import { npcRarityOf } from '../data/vanillaNpcs';
 import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../entities/GolfBall';
@@ -913,8 +919,15 @@ const PERMANENT_USE_VIDS = new Set([
  *  425 仙灵铃左键直用（:52252-52272 三选一——QuickBuff 同入口）、1124 蜂巢
  *  （:42946-42958 挥动发蜂+通用消耗 :42602）、5328 金锁（:40946-41010
  *  PlaceThing_LockChest+Chest.Lock :409）、5343 货郎背包（:44749-44762）、
- *  1345 彩带（★原版零使用效果——仅 :42602 通用消耗,审计"彩纸弹"系误记） */
-export const FUN_USE_VIDS = new Set([508, 4673, 856, 1450, 507, 425, 1124, 5328, 5343, 1345]);
+ *  1345 彩带（★原版零使用效果——仅 :42602 通用消耗,审计"彩纸弹"系误记）。
+ *  2026-08-26 演奏通道批：4057 CarbonGuitar(Rain Song)/4372 IvyGuitar(Ivy)/
+ *  4715 SparkleGuitar(Stellar Tune) 三吉他（Player.cs:46972-47004 PlayGuitarChord）
+ *  + 1305 The Axe 和弦音（:46945-46970 SoundID.Item47） */
+export const FUN_USE_VIDS = new Set([
+  508, 4673, 856, 1450, 507, 425, 1124, 5328, 5343, 1345,
+  4057, 4372, 4715,   // 吉他三件（ItemID.cs:9660/10290/10976 DefaultToGuitar :48628）
+  1305,               // The Axe（ItemID.cs:4156;镐锤工具+和弦音双语义,见 case 注备案）
+]);
 /** 停发窗族（Player.cs:43820-43852 同式族,vid → useTime 倍数）：动画末 useTime×N
  *  静默（itemAnimation < max − useTime×N → flag=false）。3852 书杖/4952 夜光书 ×4、
  *  6152 日耀花法杖 ×4；4956/5669 ×3=zenithFireCycle cycle≤2 帽、4953 ×5=定数 5 连发
@@ -4224,6 +4237,10 @@ export class Game implements GameHooks {
       const disp = Lang.text(`Achievements.${name}_Name`);
       if (this.cb.onAchievementPopup) this.cb.onAchievementPopup(name, disp);
       else this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AchievementUnlocked', disp));
+      // 解锁音（AchievementInitializer.cs:727-735 OnAchievementCompleted：
+      //   FindActiveSound(SoundID.AchievementComplete)==null 才 PlayTrackedSound——
+      //   原版靠活动实例去重防连爆；本回调每成就单发一次,弹窗拍天然无叠声,直名直播即同语义）
+      this.sfx.playWavFile('achievement_complete');
       // 背包内提示牌即时换下一目标（原版每帧重绘的等价触发）
       this.cb.onInventoryChanged?.();
     };
@@ -4510,6 +4527,7 @@ export class Game implements GameHooks {
     natureParticles.clear(); // 落叶/滴水粒子不跨世界残留
     natureParticles.onDripSplash = null;
     flameParticles.clear(); // 山羊火焰 FlameParticle 同理不跨世界残留
+    clearFakeFish();        // FakeFish 装饰鱼群同理不跨世界残留（寿命 ≤420t,防泄漏）
     // 月总震屏滤镜解除（倒计时中退世界 → 菜单不留红色脉冲）
     this.renderer.moonLordShake = null;
     // 资源释放链(缺一不可,见各 dispose 注释):连续多次读档曾因不释放
@@ -5067,7 +5085,7 @@ export class Game implements GameHooks {
     }
     // ---- 标注模式：点击标记方块（优先于挖掘/放置/使用；同款按下边沿门——
     //      annotateMode 下 updateUse 不消费点击，电平按住扫过新格会误标） ----
-    if (this.annotateMode && inp.mouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open && !this.renderer.timeUiHover && !this.renderer.weatherUiHover) {
+    if (this.annotateMode && inp.mouseDown && !this._prevMouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open && !this.renderer.timeUiHover && !this.renderer.weatherUiHover) {
       this._annoLatch = true;
       const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
       if (this.fixTexMode) {
@@ -5195,6 +5213,10 @@ export class Game implements GameHooks {
     // ParticleSystem_World_BehindPlayers——山羊坐骑 47 火焰本体；
     // spawn 在 Player.goatFlames 回调，绘制在 Renderer.drawFlameParticles）
     flameParticles.update();
+    // FakeFish 装饰鱼群步进（FakeFishParticle.Update——原版同挂
+    // ParticleSystem_World_BehindPlayers,Main.cs:4004;生成门在 Bobber.fishingCheck,
+    // 绘制在 Renderer 实体层 drawFlameParticles 同带）
+    updateFakeFishSchool(this);
     // 原版 Dust 步进（UpdateDust :423——customData 跟随差值 = 主角本 tick 位移；
     // 视口世界矩形用于屏底清除）+ 逐尘光照推 LightingEngine
     {
@@ -5466,7 +5488,9 @@ export class Game implements GameHooks {
               const below = st.inBounds(btx, bty) && st.flags[st.idx(btx, bty)] !== 0
                 ? golfVanillaTileId(st, btx, bty) : null;   // 原版 id（材质表键）
               b.clubHit(shot.vx, shot.vy, club.rough, below);
-              this.sfx.play('tink', 0.8, b.cx, b.cy);   // Item126 击球音（:49550）
+              // 击球音 = SoundID.Item126（Projectile.cs:53385 AI_150_GolfClubHelper
+              // 击出段，逐球 Center 定位；缺省音量）
+              this.playSfxFile('Item_126', 1, b.cx, b.cy);
             }
             this.sfx.play('throw', 1, this.player.cx, this.player.cy); // Item1 挥杆音（:49528）
             this.golfAim = false; this.golfAimBall = null;
@@ -7764,11 +7788,13 @@ export class Game implements GameHooks {
 
   /** ★R29 幻象弓 630 载体 volley 弹药解析（Projectile.cs:68233-68245 PickAmmo 等价）：
    *  每轮 volley 现解析一发弹药——弹型/伤/kb 全取弹药终值（Damage3 初值=GetWeaponDamage
-   *  再由 PickAmmo 叠弹药伤×分道乘区；speed3 初值【14】非武器 shootSpeed,再 +弹药
+   *  再由 PickAmmo 叠弹药伤×分道乘区；speed 初值 speedBase【14】非武器 shootSpeed,再 +弹药
    *  shootSpeed 与箭袋/射手档）；耗弹 = 无尽袋豁免 + gunAmmoSaveRoll(3540)（1/3）+
-   *  ammoSaveRoll。无弹药 → 返回 null（载体 Kill）。返回值供 Arrow 630 支生成 4 箭 */
+   *  ammoSaveRoll。无弹药 → 返回 null（载体 Kill）。返回值供 Arrow 630 支生成 4 箭。
+   *  ★3854 复用：幻影凤凰 705 载体 volley 同链（AI_075 type==705 :68287-68400）——
+   *  其 speed4 初值为【12】（:68319），经 speedBase 参数注入不共享 630 的 14 */
   private phantasmPickAmmo(bowVid: number, useAmmo: number,
-    shtspd: number): { pid: number; dmg: number; kb: number; speed: number } | null {
+    shtspd: number, speedBase = 14): { pid: number; dmg: number; kb: number; speed: number } | null {
     const c3540 = itemCombat(bowVid);
     if (!c3540) return null;
     // 弹药槽解析（与主链同式：AmmoSlots 匹配 → 默认序）
@@ -7798,9 +7824,10 @@ export class Game implements GameHooks {
     const dmgP = Math.round((c3540.damage ?? 50) * (psP?.dmg ?? 1) * this.player.rangedDamageMult(rKindP))
       + Math.trunc(((ammoCP?.damage ?? 0)) * this.player.rangedDamageMult(rKindP));
     let kbP = (c3540.knockBack ?? 2) * (psP?.kb ?? 1) + (ammoCP?.knockBack ?? 0);
-    // speed3 = 14 基准（AI_001 630 段硬编码）+ 弹药 shootSpeed + 箭袋 ×1.1 +
+    // speed3 = speedBase 基准（630 段硬编码 14；705 段 =12，Projectile.cs:68319——
+    // 经参数注入）+ 弹药 shootSpeed + 箭袋 ×1.1 +
     // 射手 <20 ×1.2 钳 20（PickAmmo :52707-52723 同链;shtspd 词缀乘武器侧不进此路）
-    let spdP = 14 + (ammoCP?.shootSpeed ?? 0);
+    let spdP = speedBase + (ammoCP?.shootSpeed ?? 0);
     spdP *= shtspd;
     if (isArrowP) {
       if (this.player.equipStats.quiver) { spdP *= 1.1; kbP *= 1.1; }
@@ -7918,6 +7945,19 @@ export class Game implements GameHooks {
     if (!def) return;
     const px = x * TILE + 8, py = y * TILE + 8;
     if (def.vanilla?.sheet === 127) { this.playSfxFile('Item_27', 1, px, py); return; }
+    // 雪块/淤泥 → Item48/Item49 二选一（WorldGen.cs:66967-66976 KillTile_PlaySounds
+    // genRand.Next(2)；vanilla.sheet = 原版 TileID，与上 127 同惯例）
+    if (def.vanilla?.sheet === 147 || def.vanilla?.sheet === 224) {
+      this.playSfxFiles(['Item_48', 'Item_49'], 1, px, py);
+      return;
+    }
+    // 冰族 {161 冰,163 紫,164 粉,200 猩红冰,541 回声,736 复活节}
+    // → Item50（WorldGen.cs:66978-66982）
+    if (def.vanilla?.sheet === 161 || def.vanilla?.sheet === 163 || def.vanilla?.sheet === 164
+      || def.vanilla?.sheet === 200 || def.vanilla?.sheet === 541 || def.vanilla?.sheet === 736) {
+      this.playSfxFile('Item_50', 1, px, py);
+      return;
+    }
     if (type !== POT_TILE && TILE_CUT.has(type)) { this.sfx.play('chop', 1, px, py); return; }  // chop=Grass.wav
     if (/stone|ore|brick|obsidian|ash|gem_|fossil|silt|slate/i.test(def.key)) {
       this.sfx.play('tink', 1, px, py);
@@ -9180,6 +9220,16 @@ export class Game implements GameHooks {
         // 无"对准目标"门）。旧自创 chop/tink/dig 按材质分档已废：材质分档属
         // 破坏完成音（KillTile_PlaySounds 四档，见 killTileBreakSound/tryMine 尾）
         this.playUseSound(heldDef!.vid ?? viIdFromKey(heldDef!.key), 'throw');
+        // The Axe 1305 和弦音双语义转发（Player.cs:46945-46970：镐锤挥动+点击和弦
+        // 并行）——工具分支 return 先于 FUN_USE_VIDS 链,此处直播同款(与下方乐器层
+        // case 1305 同式;useTime 已由工具链裁决,不在此改)
+        if ((heldDef!.vid ?? viIdFromKey(heldDef!.key)) === 1305) {
+          const [cwx, cwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          const cAxis = Math.min(this.renderer.canvas.width, this.renderer.canvas.height);
+          this.sfx.playWavFile('Item_47', 1, this.player.cx, this.player.cy,
+            instrumentNotePitch(Math.hypot(cwx - this.player.cx, cwy - this.player.cy), cAxis));
+          this.achievements.notifyProgressionEvent(37);   // :46970
+        }
         // ★aiStyle20 持械工具（屠夫链锯 3098→509 / 叶绿插孔锤 1262→252；Item.cs
         // useStyle5+channel+shoot :15631-15650/:30931-30946）：按住生成持械弹体承载
         // 接触伤害（AI_020 :23837-23942，ChainsawProj 挂手/瞄准直写/松链亡）；挖掘
@@ -9403,6 +9453,10 @@ export class Game implements GameHooks {
         featherfall: BuffType.Featherfall, waterWalking: BuffType.WaterWalking,
         archery: BuffType.Archery, nightOwl: BuffType.NightOwl,
       };
+      // ★2026-08-26 核查：本 heldDef.potion 分支现为死代码——全 ITEM_DEFS 无一挂
+      // .potion 字段（0 条），实际饮用走下方 consumableFuncGate 桥接分支：
+      // itemFuncOfVid(vid).buffType → BUFF_BY_VANILLA 反查。声呐药水 2355
+      // （buffType=122→BuffType.Sonar）经该路已正确加 buff,无需在此补键
       if (p.isHealType && this.player.buffs.healBlocked) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HealBlock'));
         this.player.useTime = 30;
@@ -9449,7 +9503,10 @@ export class Game implements GameHooks {
         this.addDamageNumber(this.player.cx, this.player.y, 20, false, '#4080FF');
         this.player.inv.removeAt(this.player.inv.selected, 1);
         this.player.useTime = 30;
-        this.sfx.play('drink');
+        // UseSound=Item29（Item.cs:2670-2676 case 109 UseSound=SoundID.Item29;
+        //   Player.cs:45658-45671 ItemCheck_UseManaCrystal 只做上限+ManaEffect 飘字,
+        //   ★原版无双层 MaxMana 声——勿加 chime）。旧 'drink'（合成兜底音）冒名已正
+        this.sfx.playWavFile('Item_29');
         this.cb.onInventoryChanged();
         // 成就：魔力水晶使用（Player.cs:44667 HandleSpecialEvent(1)）
         this.achievements.handleSpecialEvent(1,
@@ -9527,7 +9584,8 @@ export class Game implements GameHooks {
           const tx = Math.floor(p.cx / TILE), ty = Math.floor(p.cy / TILE);
           const drumTile = TILE_BY_KEY['v_486_drum_set'];
           if (drumTile !== undefined && st.inBounds(tx, ty) && st.get(tx, ty) === drumTile) {
-            this.sfx.playWavFile(drumSoundFile(drumRange), 1, p.cx, p.cy);
+            // 音量 ×0.7 = LegacySoundPlayer.cs:1245（鼓型 53-62 支 num2*0.7f）
+            this.sfx.playWavFile(drumSoundFile(drumRange), 0.7, p.cx, p.cy);
           }
           p.useTime = useTimeOf(4673);  // 12（Item.cs:38490-38500）
           this.input.mouseDown = false; // ★V2a ⚠️g：原版 :46009 要求 mouseLeftRelease（fresh click）——吞按住连响（425 同款）
@@ -9551,6 +9609,51 @@ export class Game implements GameHooks {
           this.sfx.playWavFile(instrumentUseSound(507), 1, p.cx, p.cy,
             instrumentNotePitch(mouseWorldDist, axis));
           p.useTime = useTimeOf(507);   // 12（Item.cs:7392-7402）
+          break;
+        }
+        case 4057:
+        case 4372: { // 吉他 Rain Song/Ivy（Player.cs:46972-46987 两件共支）：
+          // fresh click 一响（:46943-46944 mouseLeftRelease 门——DefaultToGuitar
+          // autoReuse=true 但和弦要求松手再点,鼓槌同款吞按住连响）;六档和弦按鼠标
+          // 距离（PlayGuitarChord :47073-47106,音型→Item_133-138 映射见 FunItems 注）
+          // 音量 ×0.45（LegacySoundPlayer.cs:1231 type 支）;pitch = 坏运跑调
+          // （:47077-47080）,无跑调显式传 0——type 支无 Pitch 抖动,pitch 直传跳过
+          // PITCH_CASE 的 Item_ 族 ±0.06 档（Sfx.pitchRateFor explicitPitch 门）
+          this.useSwing(heldDef);
+          this.sfx.playWavFile(guitarChordFile(drumRange), 0.45, p.cx, p.cy,
+            guitarBadLuckDetune(p.luck, Math.random));
+          this.achievements.notifyProgressionEvent(37);   // :46986（乐器成就事件,三支同掷）
+          p.useTime = 12;               // DefaultToGuitar useAnimation=(useTime=12)（Item.cs:48628-48636）
+          this.input.mouseDown = false; // :46944 fresh click 门——吞按住连响
+          break;
+        }
+        case 4715: { // Stellar Tune（Player.cs:46989-47004 独支）：门多 `| ItemAnimationJustStarted`
+          // （:46989）——autoReuse 按住循环重启动画每周期一响,不吞 mouseDown（竖琴复读同款）。
+          // ★攻击面未实装备案：shoot 856 弹幕/mana 12/crit 20/damage 85（Item.cs:38755-38768,
+          // GetSparkleGuitarTarget 索敌 :47034-47052）属武器族批,本批只接演奏通道
+          this.useSwing(heldDef);
+          this.sfx.playWavFile(guitarChordFile(drumRange), 0.45, p.cx, p.cy,
+            guitarBadLuckDetune(p.luck, Math.random));
+          this.achievements.notifyProgressionEvent(37);   // :47003
+          // 数据面 useTime=6/useAnimation=12（Item.cs:38758-38759 /=2）,但和弦门 =
+          // ItemAnimationJustStarted（每动画周期一响,周期=12t）——本仓单计时器模型
+          // 无独立"动画首拍"事件,取 useAnimation=12 承载周期保可闻节拍（若填 6 会
+          // 每周期双响）
+          p.useTime = 12;
+          break;
+        }
+        case 1305: { // The Axe 和弦音（Player.cs:46945-46970）：musicPitch 六档量化直传
+          // （instrumentNotePitch 同竖琴量化式 :46948-46967;SoundID.Item47 = Item 音库
+          // 槽 47 → Item_47.wav,LegacySoundPlayer.cs:633-637 Volume=num2×0.75+
+          // Pitch=Main.musicPitch——FILE_CASE_VOL.Item_47=0.75 自动乘,pitch 显式直传
+          // 跳过抖动表,PITCH_CASE.Item_47=null 同源）。
+          // ★行为面备案：本仓 1305 是镐锤工具（items.ts tool+axePower 桥接）,updateUse
+          // 工具分支（Game.ts「双工具族」支 tryMine 后 return）先于本链整段分流——
+          // 本 case 现不可达,接线保留待工具分支转发后生效（原版即"镐锤挥动+点击
+          // 和弦音"并行语义 :46944/:46968）
+          this.sfx.playWavFile('Item_47', 1, p.cx, p.cy, instrumentNotePitch(mouseWorldDist, axis));
+          this.achievements.notifyProgressionEvent(37);   // :46970
+          p.useTime = 7;                // useTime=7（Item.cs:16130-16143;占位防按住复读,与工具链不冲突前提=转发侧自行裁决）
           break;
         }
         case 425: { // 仙灵铃左键直用（Player.cs:52252-52272 ItemCheck_ApplyPetBuffs
@@ -9719,6 +9822,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (p.appearance) {
             const v = p.appearance.skinVariant ?? 0;
             if (v === 0 || v === 1) p.appearance.skinVariant = v === 0 ? 1 : 0;
+            // 语音随性别对调（:43530-43545 Male 翻转后 switch(voiceVariant) 1↔2——
+            // Other(3)/缺省不动;原版此处 SendData(4)=外观同步,本仓走 resendAppearance
+            // 外观整包通道同效）
+            const vv = p.appearance.voiceVariant;
+            if (vv === 1) p.appearance.voiceVariant = 2;
+            else if (vv === 2) p.appearance.voiceVariant = 1;
           }
           consume(); p.useTime = 30; this.sfx.play('drink');
           break;
@@ -10562,6 +10671,62 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             };
             this.entities.add(carrier, 'projectiles');
           }
+          specialShots = 1;
+        } else if (bowVid2 === 3854) {
+          // ---- 幻影凤凰（DD2 终波奖励弓，Item.cs:34049-34070 shoot=705 channel）：
+          //      本体出手只出 705 蓄力载体（Player.cs:49524-49527 `sItem.type == 3854`
+          //      专支 NewProjectile(…,705,…)+return——不出普通箭），持械期间载体自行
+          //      按 itemAnimationMax(18) 节拍 PickAmmo 射 2 箭、phantomPhoneixCounter
+          //      计到 3 的下一拍改射单发 706 凤凰弹（伤 ×2/速 16/散布 0/节拍 ×1.5，
+          //      AI_075 type==705 :68287-68400；行为全在 entities/PhoenixBowProj.ts）。
+          //      在场唯一性守卫 + 已蓄力时不重入 = 原版 channel 门（ItemCheck 不再进
+          //      ItemCheck_Shoot，SetDummyItemTime(2) 钉动画 :68404-68406——否则
+          //      autoReuse 电平重入会逐周期多耗弹/重播 UseSound）
+          const ppAlive = this.entities.projectiles.some(
+            (e) => e instanceof PhoenixChannel && !e.dead);
+          if (ppAlive) {
+            this.input.mouseDown = false;
+            return;                                   // channel 持械不重入
+          }
+          const ppItemId = ITEM_BY_KEY[heldDef.key];
+          const ppOwner = this.player;
+          const ppInterval = Math.max(1, Math.round((bowC?.useAnimation ?? 18) * (ps?.spd ?? 1)));
+          const carrier = new PhoenixChannel(
+            ppOwner,
+            Math.cos(ang) * (bowC?.shootSpeed ?? 20), Math.sin(ang) * (bowC?.shootSpeed ?? 20),
+            damage, knockback, ppInterval,
+            {
+              // canShoot4 门近似：channel 持械 + 未死亡 + 手持未换（HasAmmo 在
+              // volley 回调内以 null 返回承载 → 载体 Kill :68394-68396）
+              channel: () => this.input.mouseHeld && !this.input.uiBlocking && !ppOwner.dead
+                && ppOwner.inv.heldItem()?.id === ppItemId,
+              aim: () => {
+                const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+                return { x: wx, y: wy };
+              },
+              // 每拍现解析弹药+耗弹（PickAmmo 等价）；speedBase=12（AI_075 speed4
+              // 初值 :68319，非 630 段的 14）
+              volley: () => this.phantasmPickAmmo(bowVid2, useAmmo, ps?.shtspd ?? 1, 12),
+              fire: (fpid, fx, fy, fvx, fvy, fdmg, fkb) => {
+                if (fpid === 706) {
+                  const bolt = new PhoenixBolt(fx, fy, fvx, fvy, fdmg, fkb);
+                  bolt.critChance = critTotal;
+                  bolt.armorPen = arpenTotal;
+                  this.entities.add(bolt, 'projectiles');
+                } else {
+                  const gsP = projGravSpec(fpid);
+                  const ar = new Arrow(fx, fy, fvx, fvy, fdmg, fkb, fpid, null,
+                    { grav: gsP.grav, gravDelay: gsP.delay, grav2: gsP.grav2, grav2At: gsP.grav2At });
+                  ar.frostEligible = true;            // ranged 弹（冰霜盔甲引擎门）
+                  ar.critBonus = critTotal;
+                  ar.armorPen = arpenTotal;
+                  this.entities.add(ar, 'projectiles');
+                }
+              },
+            });
+          carrier.critChance = critTotal;
+          carrier.armorPen = arpenTotal;
+          this.entities.add(carrier, 'projectiles');
           specialShots = 1;
         } else if (bowVid2 === 1229) {
           // ---- ★R29 叶绿素射弹弓（Player.cs:48750-48780）：n=2 + Next(3)==0 再 +1
@@ -11530,6 +11695,53 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.useSwing(def, ang);
       // 炸弹族 noUseGraphic=true（炸弹 166:3398/雷管 167:3413/手雷 168:3428 等 381 件
       // 全量列）——useSwing 内按 vanilla-itemcombat 置 noGraphic，投射物即本体
+    }
+    // ---- Dead Cells 火石枪 5462（Item.cs:43080-43097 channel/autoReuse/noMelee/
+    // melee/shoot1040/useAnim15）→ 弹 1040 蓄力控制器（AI_198_Flint :53155-53233）：
+    // 持按蓄力（ai1==30 拍 deadcells_flint_charge 音 :53221-53224）、松手恒发 1043
+    // 斩击波（伤×1.78 :53171）+满蓄沿地表刺出 1041 尖刺列（EmitSpikes :53235-53277，
+    // Spawn_DeadCellsFlint 编排粒子收尾播 deadcells_flint_release+monk_ground_impact
+    // ParticleOrchestrator.cs:1884/:1888）。本支置于 switch 前——'shot' 分派区正被
+    // 并行会话作业,原子插入避让;语义等价（原版 ItemCheck_Shoot 特判亦先于通用射击）
+    if (critVid === 5462) {
+      const flItemId = ITEM_BY_KEY[def.key];
+      const flOwner = this.player;
+      // 单实例门：场上有蓄力/收势实体即吞本次触发（channel 期 UsingOrReusingItem 语义）
+      if (this.entities.projectiles.some((e) => e instanceof FlintChargeProj && !e.dead)) {
+        this.input.mouseDown = false;
+        return;
+      }
+      const flArpen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+      const charge = new FlintChargeProj(flOwner, 0, 0, cw.damage, cw.knockback,
+        () => this.input.mouseHeld && !this.input.uiBlocking
+          && flOwner.inv.heldItem()?.id === flItemId && !flOwner.dead,
+        () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
+        (cw as { useAnimation?: number }).useAnimation ?? 15);   // useAnim15（Item.cs:43084）
+      charge.critChance = critTotal;
+      charge.armorPen = flArpen;
+      charge.spawnWave = (sx, sy, svx, svy, wdmg, wdir) => {
+        void sx; void sy;                                  // 波锚玩家中心（AI_190 :42760 自取）
+        const wave = new FlintWaveProj(flOwner, svx, svy, wdmg, cw.knockback, wdir);
+        wave.critChance = critTotal;
+        wave.armorPen = flArpen;
+        this.entities.add(wave, 'projectiles');
+      };
+      charge.emitSpikes = (sx, sy, sdir, sdmg) => {
+        emitFlintSpikes(this, sx, sy, sdir, sdmg, cw.knockback, critTotal, flArpen,
+          (e) => this.entities.add(e as never, 'projectiles'));
+      };
+      charge.pinUse = (t) => {                             // SetDummyItemTime 钉持械+复用闸
+        // 蓄力相 dummy = useAnim+min(ai1,3)（≥useAnim）——钉持械姿势续期;
+        // 收势相 dummy = Remap(ai1,0,5,useAnim,0) 钳 2（≤useAnim）——只闸复用不续姿势
+        const flAnim = (cw as { useAnimation?: number }).useAnimation ?? 15;
+        if (t >= flAnim) this.refreshChannelItem();
+        if (this.player.useTime < t) this.player.useTime = t;
+      };
+      this.entities.add(charge, 'projectiles');
+      this.refreshChannelItem();
+      this.playUseSound(critVid, 'bowShoot');   // UseSound=Item_1（vanilla-itemusesound 表值）
+      this.input.mouseDown = false;
+      return;
     }
     switch (cw.kind) {
       case 'grenade': {
@@ -12911,6 +13123,63 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (this.swing) { this.swing.noGraphic = true; this.swing.t = 52; this.swing.dur = 52; } // noUseGraphic(:34091)+持械姿势延展到旋完
           this.player.useTime = 52;
           this.playUseSound(critVid, 'bowShoot');   // UseSound=DD2_SkyDragonsFurySwing（itemUseSound 表）
+          this.input.mouseDown = false;
+          break;
+        }
+        // 睡章鱼 3835 → 697（Item.cs:33959-33977 channel/autoReuse/noMelee/shootSpeed24/
+        // damage50；AI_140 type697 支 Projectile.cs:70509-70584）：持械旋棍+砸地 698+
+        // ground_impact 音。697 不在 NoMeleeSpeedVelocityScaling（ProjectileID.cs:429）→
+        // 初速 shootSpeed/meleeSpeed（Player.cs:47466-47468）
+        if (cw.shoot === 697) {
+          const msAlive = this.entities.projectiles.some((e) => e instanceof MonkStaffSpin && !e.dead);
+          if (msAlive) { this.input.mouseDown = false; break; }
+          const msItemId = ITEM_BY_KEY[def.key];
+          const msOwner = this.player;
+          const msSpd = meleeThrowSpeed(cw.shootSpeed, this.player.attackSpeedMult);
+          const spin = new MonkStaffSpin(msOwner,
+            Math.cos(ang) * msSpd, Math.sin(ang) * msSpd, cw.damage, cw.knockback,
+            () => this.input.mouseHeld && !this.input.uiBlocking && msOwner.inv.heldItem()?.id === msItemId && !msOwner.dead,
+            () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
+            () => { if (this.player.useTime > 10) this.player.useTime = 10; });   // reuseDelay=10（:70572）
+          spin.critChance = critTotal;
+          spin.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          spin.spawnSlam = (sx, sy, svx, svy, slamDmg) => {
+            const slam = new MonkSlam(sx, sy, svx, svy, slamDmg);
+            slam.critChance = critTotal + 0.25;                 // bonusCritChance=25（:70582）
+            slam.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            this.entities.add(slam, 'projectiles');
+          };
+          this.entities.add(spin, 'projectiles');
+          this.useSwing(def, ang);
+          if (this.swing) { this.swing.noGraphic = true; this.swing.t = 50; this.swing.dur = 50; }
+          this.player.useTime = 50;                             // 满程≈40t + reuseDelay10 近似
+          this.playUseSound(critVid, 'bowShoot');               // UseSound=DD2_MonkStaffSwing（表数据驱动）
+          this.input.mouseDown = false;
+          break;
+        }
+        // 骸骨长戟 3836 → 699（Item.cs:33978-33995 channel 无 autoReuse/shootSpeed42/
+        // damage45；AI_142 type699 支 :70914-70962；命中→SummonMonkGhast→700 幽灵）
+        if (cw.shoot === 699) {
+          const glOwner = this.player;
+          const glItemId = ITEM_BY_KEY[def.key];
+          const glaive = new GhastlyGlaiveProj(glOwner,
+            Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,   // 不缩放（:429 表成员）
+            cw.damage, cw.knockback,
+            Math.random() * cw.shootSpeed * 0.75 * (Math.cos(ang) > 0 ? 1 : -1),   // ai0（Player.cs:49231-49234）
+            () => this.swing?.t ?? 0, cw.useAnimation ?? 27,
+            () => { if (this.player.useTime > 2) this.player.useTime = 2; });      // reuseDelay=2（:71052）
+          glaive.critChance = critTotal;
+          glaive.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          glaive.spawnGhast = (gx, gy, gvx, gvy, gdmg) => {
+            const ghast = new MonkGhast(gx, gy, gvx, gvy, gdmg);
+            ghast.critChance = critTotal;
+            ghast.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            this.entities.add(ghast, 'projectiles');
+          };
+          this.entities.add(glaive, 'projectiles');
+          this.useSwing(def, ang);
+          this.player.useTime = cw.useTime;
+          this.playUseSound(critVid, 'bowShoot');               // UseSound=DD2_GhastlyGlaivePierce
           this.input.mouseDown = false;
           break;
         }
@@ -16166,6 +16435,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       cloudAlpha: w.weather?.cloudAlpha ?? 0,
       playerCx: this.player?.cx ?? 0,   // afterWorldLoad 阶段 player 尚未构造（读档/建世链）
       playerCy: this.player?.cy ?? 0,
+      // 风筝线长变化音（LeashedKite KiteLogic → SoundID.Item192,Projectile.cs:49385-49393）
+      playSfxWav: (file, vol, x, y, pitch) => this.playSfxWav(file, vol, x, y, pitch),
       addLight: (i, j, r, g, b) => {
         if (this.world.store.inBounds(i, j)) this.lighting.addLight(i, j, r, g, b);
       },
@@ -16770,7 +17041,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             : type === TILE_BY_KEY['v_287_ammo_box'] ? BuffType.AmmoBox
               : type === TILE_BY_KEY['v_464_war_table'] ? BuffType.WarTable : BuffType.SugarRush;
       this.player.buffs.apply(bt, dur);
-      this.sfx.play('drink'); // 原版 SoundID.Item4（药水/授予类 UseSound 占位）
+      // 工位音分流（Player.cs:32861-32866/:32873-32878）：磨刀石 377→Item37、
+      // 弹药箱 287→Item149；其余工位（水晶球/附魔台/战争桌/蛋糕）原版仍 Item4
+      if (type === TILE_BY_KEY['v_377_sharpening_station']) this.playSfxFile('Item_37', 1, tx * TILE, ty * TILE);
+      else if (type === TILE_BY_KEY['v_287_ammo_box']) this.playSfxFile('Item_149', 1, tx * TILE, ty * TILE);
+      else this.sfx.play('drink'); // 原版 SoundID.Item4（药水/授予类 UseSound 占位）
       this.cb.onInventoryChanged();
       this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
@@ -23224,8 +23499,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     bolt.seed = seed;
     bolt.comboSeed = (this.world.seedFlags?.noLightning === true && this.world.seedFlags?.moreLightning === true);
     this.entities.add(bolt, 'projectiles');
-    // 落雷公告音（Spawn_StormLightning :1044-1051 SoundID.LightningStrikeHit 近似）
-    this.playSfxWav?.('Thunder_0', 0.8, vx, vy);
+    // 落雷声（ParticleOrchestrator.Spawn_StormLightning :1027-1075 的声段 :1048-1053）：
+    // 自然雷（flag=false，IndexOfPlayerWhoInvokedThis==255）→ SoundID.InstantThunder
+    // （SoundID.cs:1126 CreateTrackable("instant_thunder",3)）= instant_thunder_0..2 随机，
+    // vol = Lerp(0.4, 1, Main.SceneState.outsideWeatherEffectIntensity)——本仓等价值
+    // weather.outsideWeatherEffect（Weather.ts:217，SceneState.cs:190-191 同源钳 0-1）。
+    // 武器雷（flag=true，1117 闪电之击/ArcSurge 链）→ SoundID.LightningStrikeHit=Item_204
+    // 已在 proj1457.ts StormLightning Kill 帧 emitBoltFx 按型分流接线——本函数调用源仅
+    // StormLightningSpawner（自然天雷单源），无需 source 参数区分（2026-08-26 核查）
+    const inten = Math.max(0, Math.min(1, this.world.weather?.outsideWeatherEffect ?? 1));
+    this.sfx.playFiles(['instant_thunder_0', 'instant_thunder_1', 'instant_thunder_2'],
+      0.4 + (1 - 0.4) * inten, vx, vy);
   }
 
   anyBossDanger(): boolean {
@@ -23635,9 +23919,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         p.buffs.apply(BuffType.Honey, 5);
       }
-      // 致死一击：不播受击声，只播死亡声（保证最后听到的音效是死亡）
-      if (p.hp <= 0) this.sfx.play('pkilled');
-      else this.sfx.play('hurt');
+      // 致死一击：不播受击声，只播死亡声（保证最后听到的音效是死亡）。
+      // 死亡=PlayerVoice.playDeathVoice（PlayDeathSound :39013-39041：override 9
+      // retro/5 铃/15 气球,默认 Player_Killed 库——无 variant 分派,原版同构）;
+      // 受击语音走 PlayerVoice.playHurtVoice 全分派（Player.cs:38867-39011,
+      // voiceOverride 语音饰品层 + variant 三档尾段）——与 Player.ts 各受击路径同源
+      if (p.hp <= 0) playDeathVoice(this as unknown as GameHooks, p.voiceState);
+      else playHurtVoice(this as unknown as GameHooks, p.voiceState);
       // 实际扣血 = max(1, dmg - defense*0.5)（在 Player.damage 内）
       const dealt = Math.max(1, dmg - p.defense * 0.5);
       this.addDamageNumber(p.cx, p.y, Math.round(dealt), false, '#FF5050');
@@ -25693,9 +25981,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** channel 蓄力期手持动画续期（Player.ItemCheck channel 分支 itemAnimation 钉满——
    *  手持法杖全程举向鼠标不脱落；GlacierFangShot/PrismProj 蓄力态逐 tick 调用。
    *  ★必须钉 t=dur：postUpdate 每帧 t-- 归零即 swing=null（法杖消失）——曾用
-   *  max(t,1) 弱钉,1→0 一帧后照样清,用户实报"蓄力时法杖放下压根没有手持"） */
-  refreshChannelItem() {
-    if (this.swing) this.swing.t = Math.max(this.swing.t, this.swing.dur);
+   *  max(t,1) 弱钉,1→0 一帧后照样清,用户实报"蓄力时法杖放下压根没有手持"。
+   *  ★aim 续期（2026-08-25 用户实报"冰矛没挂载在杖体上"）：原版 channel 期
+   *  itemRotation 每帧跟随鼠标（:50382 itemLocation+itemRotation 逐帧重算）——
+   *  曾冻结在出手瞬间,鼠标一动法杖与冰矛分离=冰矛"长在身上"） */
+  refreshChannelItem(aim?: number) {
+    if (this.swing) {
+      this.swing.t = Math.max(this.swing.t, this.swing.dur);
+      if (aim !== undefined && this.swing.useStyle === 5) this.swing.aim = aim;
+    }
     this.player.useTime = Math.max(this.player.useTime, 10);   // SetDummyItemTime(10)（:37609）
   }
 
@@ -27368,7 +27662,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   buyHairRestyle(next: { hair: number; hairColor: { r: number; g: number; b: number } }): boolean {
     const price = this.hairRestylePrice(next);
     if (price > 0 && (this.coinsOwned() < price || !this.spendCopper(price))) return false;
-    this.sfx.play('coin');   // SoundID 18（BuyHairWindow SoundEngine.PlaySound(18)）
+    // Main.cs:44429 SoundEngine.PlaySound(18)（Main.cs:44425-44437 窗口结算段）——
+    // cue18 = Coins.wav（SoundID.cs:58 Coins=18；LSP.cs:868 case18 无音高修正）。
+    // 旧 'coin'=Coin_0..4 拾币叮当（case38）冒名已正
+    this.sfx.playWavFile('Coins');
     return true;
   }
 
@@ -27404,8 +27701,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!pool || !pool.length) return -1;
     const cost = this.reforgeCost(item);
     if (this.coinsOwned() < cost || !this.spendCopper(cost)) return -1;
+    // 最优档判定（Item.cs:505-576 Prefix(-2,out rolledPrefixIsTopTier)）：
+    //   num = BestPrefixValue()（Item.cs:1083-1099 可掷池内 value 乘积最大值）、
+    //   num2 = 掷中词缀的 value 乘积（TryGetPrefixStatMultipliersForItem 尾公式），
+    //   rolledPrefixIsTopTier = num2 == num。本仓 prefixValueMul
+    //   （vanillaPrefixes.ts:39-43）与原版尾部公式同构——同一词缀 id 同式计算,
+    //   浮点恒等使 === 判定成立（数据面自带 tier 档位,无需稀有度色近似）
+    const bestVal = pool.reduce((mx, pfx) => Math.max(mx, prefixValueMul(pfx)), 0);
     item.prefix = rollPrefix(pool, true);
-    this.sfx.play('tink'); // SoundID.Item37（非最优档）；最优档音效未接
+    if (prefixValueMul(item.prefix) === bestVal) {
+      // 最优档（Main.cs:42620-42631 SoundID.BestReforge=best_reforge.wav,
+      //   SoundID.cs:1122 WithPitchVariance(0.1f)→PITCH_CASE 库层抖动）
+      this.sfx.playWavFile('best_reforge');
+    } else {
+      // 非最优档（Main.cs:42653 SoundID.Item37；FILE_CASE_VOL 已有 ×0.5 档）
+      this.sfx.playWavFile('Item_37');
+    }
     this.cb.onInventoryChanged?.();
     return item.prefix;
   }
@@ -27434,7 +27745,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // PutBallInCup_TextAndEffects（:117-135）：>0 杆才有公告；单/复数键切换。
     // 参数序 = (玩家名, 球名, 杆数)（:127/:131 NetworkText.FromKey）
     if (swings !== 0) {
-      this.sfx.play('tink', 0.9, ball.cx, ball.cy);                // Item129 进洞音（:168）
+      // 进洞爆效音 = SoundID.Item129（GolfHelper.cs:166-168 EmitGolfballExplosion）；
+      // 音量 ×0.6 = LegacySoundPlayer.cs:524-525（case 2 num==129 支）
+      this.playSfxFile('Item_129', 0.6, ball.cx, ball.cy);
       const ballName = Lang.projectileName(ball.projId) ?? '';
       this.newText(swings === 1
         ? Lang.text('Game.BallBounceResultGolf_Single', this.playerName(), ballName)
@@ -28568,7 +28881,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         onJourneyUnlock: (slot, itemId, amount) => {
           // NetCreativeUnlocksPlayerReportModule.Deserialize :28-32：同队门
           // （LocalPlayer.team>0 && 同队）→ RegisterItemSacrifice（队友名归集
-          // AnyNewlyUnlocksFromTeammates 图标未做 UI——偏差登记）
+          // AnyNewlyUnlocksFromTeammates 图标未做 UI——偏差登记）。
+          // ★献祭音不接（2026-08-26 差异登记）：原版 RegisterItemSacrifice 的网络/
+          //   成就自动链无声，Research_0..3 只在创意 UI 手动献祭动画帧出
+          //   （UICreativeInfiniteItemsDisplay.cs:354/:372）——本端 ResearchUI 已接,
+          //   此处保持静默即原版语义
           const myTeam = (this.player as unknown as { team: number }).team;
           const theirTeam = net.players.get(slot)?.team ?? 0;
           if (myTeam > 0 && myTeam === theirTeam) {

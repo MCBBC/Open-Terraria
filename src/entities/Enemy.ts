@@ -2378,21 +2378,21 @@ export class Enemy extends Entity {
     }
   }
 
-  /** 环境声三表（UpdateNPC IdleSounds :91119-91246 + AI_003 闲话 :57735-57764 +
-   *  CritterSounds :93420-93517,数据在 data/vanillaNpcAmbience.ts）。
+  /** 环境声三表（UpdateNPC IdleSounds :91184-91246 + AI_003 闲话 :57914-57945 +
+   *  CritterSounds :93365-93468,数据在 data/vanillaNpcAmbience.ts）。
    *  每 tick 每 NPC 至多一次掷骰（原版各表独立掷,同帧双中概率≈0 取先闲话后 idle）。
    *  playSfxWav = GameHooks→Sfx.playWavFile 直 wav（FILE_CASE_VOL 带 Zombie_24-87
    *  ×0.5 等档,零新增 SfxName）。 */
   private ambientSoundTick(game: GameHooks): void {
     const id = this.vanillaId;
     if (id == null || this.dead) return;
-    if (this.shimmerT > 0) return;   // IdleSounds :91117 微光浸入态不发声(闲话 :57734 同门)
     const world = game.world;
     const clock = world.clock;
     const st = world.store;
-    // 小动物声（:93420-93517）——门控族(day/night/dawn/still)
+    // 小动物声（:93365-93468）——门控族(day/night/dawn/still);微光浸入即静默
     const cs = CRITTER_SOUNDS[id];
     if (cs) {
+      if (this.shimmerT > 0) return;
       let ok = true;
       if (cs.gate === 'day') ok = clock.isDay;
       else if (cs.gate === 'night') ok = !clock.isDay;
@@ -2400,24 +2400,38 @@ export class Enemy extends Entity {
       else if (cs.gate === 'still') ok = Math.abs(this.vx) < 0.5
         && (!clock.isDay || this.y > world.groundLevel * 16);
       if (ok && Math.floor(Math.random() * cs.denom) === 0) {
-        const f = cs.pool ? cs.pool[Math.floor(Math.random() * cs.pool.length)] : cs.file;
-        game.playSfxWav?.(f, 1, this.cx, this.cy);
+        // 稀有变体先掷（联合概率 = 主掷命中 × rare 掷命中,原版两层掷在 LSP case 内
+        // 串联:鸭 case30 :1105-1126 Next(300)==0 换 Zombie_12 / 枭 case46 :1074-1093
+        // Next(300)==0 三均分 {112,113,114}）——命中即独占本次发声跳过常规池
+        // （原版稀有支的"独占忙检"简化为普通掷,WebAudio 短音叠加无碍）
+        if (cs.rare && Math.floor(Math.random() * cs.rare.denom) === 0) {
+          game.playSfxWav?.(cs.rare.files[Math.floor(Math.random() * cs.rare.files.length)], 1, this.cx, this.cy);
+        } else {
+          const f = cs.pool ? cs.pool[Math.floor(Math.random() * cs.pool.length)] : cs.file;
+          game.playSfxWav?.(f, 1, this.cx, this.cy);
+        }
       }
       return;   // 原版 critter 段互斥(else-if 链)
     }
-    // AI_003 闲话（:57735-57764）——仅战士族 aiStyle 3 且未被鼓励消散
-    // （:57732 DespawnEncouragement_NotDiscouraged 主语义=白天驱散态不呻吟;
+    // AI_003 闲话（:57914-57945）——仅战士族 aiStyle 3 且未被鼓励消散
+    // （:57914 DespawnEncouragement_NotDiscouraged 主语义=白天驱散态不呻吟;
     //   完整表含雕像/墓地/事件豁免,此处取 despawnEncouraged 旗主门,近似备案）
-    if (this.vanilla?.aiStyle === 3 && !this.despawnEncouraged) {
+    // ★微光门分档修正：旧实现全局 `shimmerT>0 早退`,把闲话门一并收窄——原版闲话门 =
+    //   `shimmerTransparency < 1f`（:57916,仅全饱和静默）;shimmerT≈transparency×100 →
+    //   本仓 shimmerT≥100 才哑,渐入期(0..100)照常呻吟。IdleSounds 是另一档门
+    //   (!transparency>0 即浸入即静默,:91185),保持 ==0 门不动。
+    if (this.vanilla?.aiStyle === 3 && !this.despawnEncouraged && !(this.shimmerT >= 100)) {
       const ch = CHATTER_SOUNDS[id];
       if (ch && Math.floor(Math.random() * ch.denom) === 0) {
-        game.playSfxWav?.(ch.file, 1, this.cx, this.cy);
+        const f = ch.pool ? ch.pool[Math.floor(Math.random() * ch.pool.length)] : ch.file;
+        game.playSfxWav?.(f, 1, this.cx, this.cy);
         return;
       }
     }
-    // IdleSounds（:91119-91246）
+    // IdleSounds（:91184-91246,门 !shimmerTransparency>0 = 浸入即静默——shimmerT>0 即哑,
+    // 与闲话的 <1f 宽门分档;旧实现靠函数头全局早退承担,拆门后在此显式承接）
     const is = IDLE_SOUNDS[id];
-    if (is) {
+    if (is && !(this.shimmerT > 0)) {
       if (is.gate === 'wet') {
         const ti = st.idx(Math.floor(this.cx / 16), Math.floor(this.cy / 16));
         if (st.liquid[ti] <= 0) return;
@@ -3406,7 +3420,8 @@ export class Enemy extends Entity {
   /** AI_003_Fighters 通用核（NPC.cs:24559-24733，剥离 per-type 特例）：
    *  前方 tile 探测 + 四级跳（2 格墙 -8 / 1 格墙 -7 / 卡半格 -5 / 前方悬空且目标在上 -8 加速），
    *  加速度 0.1、最大速度 1.0（原版 num1/num2 常量），门/高门交互待移植 */
-  /** AI_092 训练假人（NPC 488，NPC.cs:40871-40914）：静止站立于锚定 tile（tile 378，
+  /** AI_092 训练假人（NPC 488，NPC.cs:39196-39214;★旧锚 :40871-40914 为 1456 行段）：
+   *  静止站立于锚定 tile（tile 378，
    *  ai0/ai1 = 锚点 tile 坐标）；锚 tile 被破坏 → 消失。受击显示伤害数字+播声音+
    *  摇晃动画（shake = clamp(dmg,20,120)，帧由渲染层读取），永不死亡（immortal）。 */
   doorWarm = 0;            // 攻门蓄势（AI_003 ai[2]：门前每 tick +1，满 60 一击后归零）
@@ -3414,6 +3429,10 @@ export class Enemy extends Entity {
   dummyShake = 0;          // localAI[0]：受击摇晃强度（20..120，每 tick -1）
   dummyHitDir = 0;         // localAI[1]：受击方向
   dummyAnchor: [number, number] | null = null;  // ai[0]/ai[1]：tile 378 锚点
+  /** 实例级受击音覆写（原版 NPC.HitSound 本就是实例字段,SetDefaults 赋默认值;
+   *  本仓 def.hitSound 是按型共享档——488 假人 AI 每 tick 重卷需实例槽承接,
+   *  非空时 playEnemyHitSound 优先消费。勿写回 def(会串到同型所有实例)! */
+  hitSoundOverride: string[] | null = null;
   private dummyAI(game: GameHooks) {
     const st = game.world.store;
     const [ax, ay] = this.dummyAnchor ?? [-1, -1];
@@ -3421,6 +3440,13 @@ export class Enemy extends Entity {
     if (ax < 0 || !st.inBounds(ax, ay) || st.type[st.idx(ax, ay)] !== DUMMY_TILE_ID) {
       this.dead = true;
       return;
+    }
+    // 受击音重卷（AI_092 头段 cs:39196-39212）：每 tick Next(20)==0 → 在
+    // {NPCHit15,16,17} 重卷实例 HitSound——假人被连打时音色逐击漂移的原版语义。
+    // （Next(15,18)=15/16/17 三均分;播报单点在 Enemy.hurt→playEnemyHitSound,
+    //   该处读本槽优先于 def.hitSound）
+    if (Math.floor(Math.random() * 20) === 0) {
+      this.hitSoundOverride = [`NPC_Hit_${15 + Math.floor(Math.random() * 3)}`];
     }
     // 摇晃衰减（FindFrame 488 分支 cs:71522-71527：>24 钳 24 是【字段写入】——
     // 命中侧存 clamp(dmg,20,120)（cs:83498-83507），帧机每拍先钳 24 再 -1，

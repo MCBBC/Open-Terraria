@@ -1511,6 +1511,14 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
     e.ai0 = 0; e.ai1 = -100; e.ai2 = 0; e.ai3 = 0;
     la.la0 = e.maxHp;
   }
+  // 存活期环境音（NPC.cs:46255-46258 AI_121 头段,任何状态每 tick 掷）：
+  // Next(360)==0 → PlaySound(65) = LSP.cs:1389-1408 case65 → Zombie_115/116/117
+  // 均匀、Volume=num2×0.5 无 Pitch——×0.5 已在 Sfx.FILE_CASE_VOL 单点登记,
+  // 此处传 vol=1（传 0.5 会与自动档叠乘成 ×0.25）。原版"三槽任一在播即静默"
+  // 的独占忙检省略——WebAudio 短音叠加无碍（简化登记）。
+  if (Math.floor(Math.random() * 360) === 0) {
+    game.playSfxWav?.(`Zombie_${115 + Math.floor(Math.random() * 3)}`, 1, e.cx, e.cy);
+  }
   const phase2 = e.hp <= e.maxHp / 2; // flag2 :45552
   // 点光(:45557-45558 AI_121 头段,恒亮无门)：Center (1,0.7,0.9) 粉光
   e.lightRGB = [1, 0.7, 0.9];

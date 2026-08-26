@@ -26,6 +26,7 @@ import { soundTrackFiles } from '../data/vanillaNpcs';
 import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
 import { ITEM_DEFS } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
+import { MushroomBoiExplosionProj, requestMushroomBoiExplosion } from './DeadCellsMushroom';
 
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
  *  帧 1-6 开火动画、第 12t 出火球 668 */
@@ -398,6 +399,12 @@ export class MinionProj extends Entity {
   foxChannel = false;
   foxAimX = 0; foxAimY = 0;
   private foxT = 0;
+  /** projectile.soundDelay 镜像（1094/1113）：初值 0 与原版 SetDefaults 同
+   *  （Projectile.cs:350/:751），AI_026 首段每 tick --（:59119-59120——出场段
+   *  -1 PalSummon/-20 PalFoxparks 两声已并入 MINION_SUMMON_SFX 表按 age 节拍,
+   *  本槽只承载 TryUsingFoxsparksAbility 攻击叫声称的门/重置 :43691-43694,
+   *  见 fixedUpdate 消费点）*/
+  private foxSoundCd = 0;
   /** 火绒狐 1094/1113 帧态机（AI_026 flag8 帧段 :64729-64826 折算,foxAnimTick 维护）：
    *  foxFrame 直映原版 frame——待机 18-25 / 行走 28-35 / 空中 27 / 攻击 36-41 往返 /
    *  抚摸 45-52（网格切片见 Arrow PROJ_GRID,帧域 = 列主序 6×9） */
@@ -453,6 +460,20 @@ export class MinionProj extends Entity {
    *  :59122-59131 1094/1113 镜像）：flag10 且归零 → 60t 重触发 Joy 音；
    *  `> (flag10?1:0)` 递减——抚摸中钉 1、停摸后放空到 0 */
   palJoyCd = 0;
+  // ---- 蘑菇小伙伴 1022（Dead Cells 联动,5456；AI_067 flag6 :50023/:50140-50148 折算）----
+  /** ai[0]：0 地面跟随/索敌 / 1 归位飞行（:50444 flag14=false+friendly=true、
+   *  :50448-50450 检索档 0||1） */
+  private mbA0 = 0;
+  /** ai[2]：跃击/爆炸态（TryJumpingToTarget 1022 支 :52108-52152 置 30;爆点支
+   *  :50599-50621 爆后置 -120 冷却;<0 逐拍 ++ 回零,>0 空中逐拍 −−贴地归零
+   *  :50622-50630;Damage_CanDealDamage (1022&&ai[2]>0)=false :12463） */
+  private mbA2 = 0;
+  /** localAI[2]：跃击前摇计数（TargetFound 编排粒子首拍 + 15t 蓄势 :52127-52147;
+   *  无目标清零 :51017-51019） */
+  private mbLai2 = 0;
+  /** 帧通道（AI_067 flag6 帧机 :51642-51681 直写,draw 消费）与帧计 */
+  mushFrame = 0;
+  private mushFrameCd = 0;
   // ---- 同伴方块 653（AI_067,Projectile.cs:46657/46804-46860/47055-47830）----
   private cubeA0 = 0;     // ai[0]：0 地面跟随 / 1 归位悬浮
   private cubeLai0 = 0;    // localAI[0]：岩浆尖叫计数 0..20（近主清零 :47088）
@@ -1053,6 +1074,208 @@ export class MinionProj extends Entity {
         this.palFrame = petting ? 16 : 0;                    // :51886-51891
         this.palFrameCd = 0;
       }
+    }
+  }
+
+  /** 蘑菇小伙伴 1022（Dead Cells 联动·蘑菇小伙伴杖 5456；AI_067 flag6 分支折算，
+   *  Projectile.cs:50023 flag6 定义/:50140-50148 续命+射程 800/:50285-50310 跟随锚
+   *  （主后 (45+w/2)+组序×30）/ :50444-50450 friendly=true+检索档 ai[0]∈{0,1}/
+   *  :51003-51019 目标偏移点（敌心 +(27,0)×direction,:51022-51026 num30=20+7）/
+   *  :51017-51019 无目标清 localAI[2]/ :52108-52152 TryJumpingToTarget 1022 支——
+   *  目标高 160px 或归位态且 ai[2]==0 → TargetFound 编排粒子 @Top 前摇 15t → 蓄跃
+   *  32 速朝拦截点（GetChaseResults 近似=直瞄,备案）、ai[2]=30、贴图前摇 ShockIcon/
+   *  爆点 :50598-50621：ai[2]>0 且 IsInRangeOfMeOrMyOwner(敌,60)（本体/主中心距取近,
+   *  :52406-52424 本仓无 CanHitWithOwnBody/MeleeWeapon 二门近似直距）→ 弹 1044
+   *  （伤×1.33/kb×3,DeadCellsMushroom.ts 承载 AI_117+AoE+爆炸编排粒子音）+
+   *  Center=玩家中心+小随机速度;ai[2]<0 逐拍 ++ / >0 空中逐拍 −−贴地归零
+   *  （:50622-50630）;Damage_CanDealDamage (1022&&ai[2]>0)=false :12463 → 跃击途中
+   *  无接触伤。移动档（:51296-51302 有目标 0.8/6/6,缺省 0.5/4/4;:51342-51345 主速
+   *  catch-up）/跳梯（:51424-51527 同帕鲁族——flag6 仅关 flag20 墙意图档 :51384,
+   *  flag21 前柱探测仍生效 + 高出距离表 −6..−16）/重力 0.4 封顶 10（:51553-51556,
+   *  num62×num63 附加项未折算备案）。帧机 :51642-51681：索敌中空中 13 / 地面 10-15
+   *  每 4fc;无目标立地 0 / 走行 |vx|≥0.5 计步 2-9 / 空中 1;归位帧 1+rotation=vx×0.1
+   *  （:50713-50716）。jump/land 两音为原版孤儿（deadcells_mushroom_jump/land 全树
+   *  零调用,DEAD_SLOTS 备案）不接。 */
+  private mushBoiStep(game: GameHooks, p: Player, dmg0: number): void {
+    const st = game.world.store;
+    const wet = st.liquid[st.idx(Math.floor(this.cx / 16), Math.floor(this.cy / 16))] > 0;
+    // ---- 索敌（检索档 ai[0]==0||1 :50448-50450;视线门 skipIfCannotHitWithOwnBody）----
+    const tgt = this.mbA0 === 0 || this.mbA0 === 1 ? this.nearestEnemy(game, 800, 'line') : null;
+    // ---- 爆点判定（:50598-50621,先于移动块）----
+    if (this.mbA2 > 0 && tgt) {
+      const dMe = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy);
+      const dP = Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy);
+      if (Math.min(dMe, dP) < 60) {                       // IsInRangeOfMeOrMyOwner(…,60) 直距近似
+        this.mbA2 = -120;                                 // :50604
+        const boom = new MushroomBoiExplosionProj(this.cx, this.cy,
+          Math.max(1, Math.round(dmg0 * 1.33)), this.knockback * 3,   // :50606-50607
+          (bx, by) => { requestMushroomBoiExplosion(game, bx, by); });
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(boom, 'projectiles');
+        this.x = p.cx - this.w / 2;                       // Center = player.Center（:50609-50611）
+        this.y = p.cy - this.h / 2;
+        this.vx = -2 + Math.random() * 4;                 // velocity=(rand(−2..2),rand(1..2))（:50612）
+        this.vy = 1 + Math.random();
+      }
+    }
+    // ---- ai[2] 衰减（:50622-50630；velocity.Y==0 ⟺ 贴地——碰撞落地清零语义）----
+    if (this.mbA2 < 0) this.mbA2++;
+    else if (this.vy === 0 && this.onGround) this.mbA2 = 0;
+    else if (--this.mbA2 < 0) this.mbA2 = 0;
+    // ---- TryJumpingToTarget 1022 支（:52108-52152;attackTarget>=0 段每拍调用）----
+    if (tgt) {
+      if ((tgt.cy < this.cy - 160 || this.mbA0 === 1) && this.mbA2 === 0) {
+        if (this.mbLai2 === 0) {
+          // DeadCellsMushroomBoiTargetFound @Top（:52129-52136）——ShockIcon 黄色惊叹
+          game.spawnParticles(this.cx, this.y - 40, '#FFFF0A', 4, 1.5, { life: 15, grav: 0 });
+        }
+        if (++this.mbLai2 >= 15) {                        // :52139-52147
+          const dl = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
+          // GetChaseResults 拦截速度 32 近似=直瞄归一 ×32（目标慢速时同值;零距兜底
+          // SafeNormalize(−UnitY)×32 = 竖直上跃）
+          this.vx = dl > 1 ? (tgt.cx - this.cx) / dl * 32 : 0;
+          this.vy = dl > 1 ? (tgt.cy - this.cy) / dl * 32 : -32;
+          this.mbA2 = 30;
+          this.mbLai2 = 0;
+        }
+      }
+    } else {
+      this.mbLai2 = 0;                                    // :51017-51019
+    }
+    // ---- 归位飞行（ai[0]==1 :50636-50716;先于地面段——该态不行走）----
+    if (this.mbA0 === 1) {
+      this.tileCollide = false;                           // :50637 归位段穿墙
+      const dpx = p.cx - this.cx, dpy = p.cy - this.cy;
+      if (Math.hypot(dpx, dpy) > 2000) {                  // :50660-50662 瞬移
+        this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2;
+      } else {
+        const sp = Math.max(10, Math.abs(p.vx) + Math.abs(p.vy));   // num19=10/主速 catch-up（:50644-50649）
+        const dl = Math.hypot(dpx, dpy) || 1;
+        this.vx += Math.max(-0.3, Math.min(0.3, dpx / dl * sp - this.vx));   // acc 0.2 反向 ×1.5 补（:50722-50752）
+        this.vy += Math.max(-0.3, Math.min(0.3, dpy / dl * sp - this.vy));
+        this.x += this.vx; this.y += this.vy;
+      }
+      // 退出门（:50685-50692）：距主 <200 且主落地且自身脚下净空
+      if (p.vy === 0 && Math.hypot(p.cx - this.cx, p.cy - this.cy) < 200
+        && !st.isSolid(Math.floor(this.cx / 16), Math.floor((this.y + this.h) / 16))) {
+        this.mbA0 = 0;
+        if (this.vy < -6) this.vy = -6;                   // :50689-50690
+      }
+      // 帧（:50713-50716）：frame=1、rotation=vx×0.1
+      this.mushFrame = 1;
+      this.rot = this.vx * 0.1;
+      return;
+    }
+    this.rot = 0;                                         // flag6 rotation=0（:51643）
+    // ---- 无目标归位门（:51199-51211）----
+    if (!tgt) {
+      const dpx = p.cx - this.cx, dpy = p.cy - this.cy;
+      if (Math.hypot(dpx, dpy) > 2000) {                  // :51202-51204 瞬移
+        this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2;
+      } else if (Math.hypot(dpx, dpy) > 500 || Math.abs(dpy) > 300) {   // num3=500/num4=300（:50031-50033）
+        this.mbA0 = 1;
+        return;
+      }
+    }
+    // ---- 行走目标点（:51003-51026 敌侧偏移 / :50285-50310 主后跟随锚）----
+    let ax: number, ay: number;
+    if (tgt) {
+      ax = tgt.cx + 27 * (this.facing || 1);              // vector7 += (num30+7,0)*direction（:51022-51024）
+      ay = tgt.cy;
+    } else {
+      const peers = (game as unknown as { entities: { projectiles: MinionProj[] } }).entities.projectiles
+        .filter((m) => m instanceof MinionProj && !m.dead && m.projId === this.projId);
+      const groupIdx = peers.indexOf(this);
+      ax = p.cx - (45 + p.w / 2) * p.facing - groupIdx * 30 * p.facing;   // :50287-50289
+      ay = p.cy;
+      for (let k = 0; k < 20; k++) {                      // 落地扫描 ≤20 格（:51204-51212）
+        if (st.isSolid(Math.floor(ax / 16), Math.floor(ay / 16))) break;
+        ay += 16;
+      }
+      {
+        const dx = ax - p.cx, dy = ay - p.cy;
+        for (let t = 0.05; t <= 1.001; t += 0.05) {       // 视线截断（:51214-51260 5% 步进近似）
+          if (st.isSolid(Math.floor((p.cx + dx * t) / 16), Math.floor((p.cy + dy * t) / 16))) break;
+          ax = p.cx + dx * t; ay = p.cy + dy * t;
+        }
+      }
+    }
+    // ---- 地面移动（:51296-51568）----
+    const withTgt = tgt !== null;
+    let acc = 0.5, vmax = 4, clamp = 4;                   // 缺省档（:51297-51300）
+    if (withTgt) { acc = 0.8; vmax = 6; clamp = 6; }      // flag6 有目标档（:51301-51305）
+    const pSpd = Math.abs(p.vx) + Math.abs(p.vy);
+    if (clamp < pSpd) { clamp = pSpd; acc = 0.7; }        // :51342-51345
+    const dx = ax - this.cx;
+    if (Math.abs(dx) > 5) {
+      if (dx < 0) { this.vx -= this.vx > -vmax ? acc : 0.1; }
+      else { this.vx += this.vx < vmax ? acc : 0.1; }     // :51348-51362（num53=0.1）
+    } else {
+      this.vx *= 0.9;                                     // :51406-51410
+      if (Math.abs(this.vx) < acc * 2) this.vx = 0;
+    }
+    this.vx = Math.max(-clamp, Math.min(clamp, this.vx));
+    // 跳梯（:51424-51527）：flag6 关 flag20 墙意图档（:51384-51386）但 flag21 前柱
+    // 探测（|dx|≥64 或 dy≤−48&&|dx|≥8 :51424-51427）仍触发
+    let jump = false;
+    const dyA = ay - this.cy;
+    const gate = Math.abs(dx) >= 64 || (dyA <= -48 && Math.abs(dx) >= 8);
+    if (Math.abs(dx) > 5 && gate) {
+      const dirS = Math.sign(dx);
+      const col = Math.floor((this.x + this.w / 2) / 16) + dirS + Math.round(this.vx);
+      for (let row = Math.floor(this.y / 16); row <= Math.floor(this.y / 16) + this.h / 16 + 1; row++) {
+        if (st.isSolid(col, row)) { jump = true; break; } // :51448-51457
+      }
+    }
+    this.vy = Math.min(this.vy + 0.4, 10);                // 重力 0.4 封顶 10（:51553-51556）
+    this.tileCollide = true;                              // 地面段恒 true（:51266——先于移动）
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.onGround) {
+      if (jump) {
+        const col = Math.floor((this.x + this.w / 2) / 16) + Math.sign(dx || 1);
+        const row = Math.floor((this.y + this.h / 2) / 16);
+        const solid = (oy: number) => st.isSolid(col, row + oy);
+        if (!solid(-1) && !solid(-2)) this.vy = -5.1;     // :51470-51490
+        else if (!solid(-2)) this.vy = -7.1;
+        else if (solid(-5)) this.vy = -11.1;
+        else if (solid(-4)) this.vy = -10.1;
+        else this.vy = -9.1;
+      }
+      if (dyA < -48) {                                    // :51492-51527 高出距离表
+        const d = -dyA;
+        this.vy = d < 60 ? -6 : d < 80 ? -7 : d < 100 ? -8 : d < 120 ? -9
+          : d < 140 ? -10 : d < 160 ? -11 : d < 190 ? -12 : d < 210 ? -13
+          : d < 270 ? -14 : d < 310 ? -15 : -16;
+      }
+      if (wet) this.vy *= 2;                              // :51616-51619 湿身起跳 ×2
+    }
+    // 朝向（:51558-51568）
+    if (this.vx < 0) this.facing = -1;
+    else if (this.vx > 0) this.facing = 1;
+    else this.facing = p.cx > this.cx ? 1 : -1;
+    // ---- 接触伤（friendly=true 段 :50444;Damage_CanDealDamage 跃击途中 false :12463;
+    //      localNPCHitCooldown=18 SetDefaults :9679）----
+    if (this.mbA2 <= 0) this.contact(game, dmg0, 18);
+    // ---- 帧机（:51642-51681；velocity.Y 判据 = 本仓 onGround 落地清零同构）----
+    if (tgt) {
+      if (!this.onGround) {
+        this.mushFrame = 13; this.mushFrameCd = 0;        // :51646-51649
+      } else {
+        if (++this.mushFrameCd > 3) { this.mushFrame++; this.mushFrameCd = 0; }   // :51650-51654
+        if (this.mushFrame < 10 || this.mushFrame > 15) this.mushFrame = 10;       // :51655-51657
+      }
+    } else if (this.onGround) {
+      if (this.vx === 0) { this.mushFrame = 0; this.mushFrameCd = 0; }            // :51659-51662
+      else if (Math.abs(this.vx) >= 0.5) {
+        this.mushFrameCd += Math.abs(this.vx);            // :51663-51672 计步翻页
+        this.mushFrameCd++;
+        if (this.mushFrame < 2) this.mushFrame = 2;
+        if (this.mushFrameCd > 10) { this.mushFrame++; this.mushFrameCd = 0; }
+        if (this.mushFrame < 2 || this.mushFrame > 9) this.mushFrame = 2;
+      } else {
+        this.mushFrame = 0; this.mushFrameCd = 0;         // :51673-51676
+      }
+    } else {
+      this.mushFrame = 1; this.mushFrameCd = 0;           // :51677-51680 空中
     }
   }
 
@@ -2736,6 +2959,8 @@ export class MinionProj extends Entity {
     if (projId === 1098 || projId === 1123) { this.w = 34; this.h = 34; }
     else if (projId === 1093 || projId === 1112 || projId === 1118 || projId === 1119) { this.w = 14; this.h = 22; }
     else if (projId === 1113) { this.w = 18; this.h = 18; }
+    // 蘑菇小伙伴 1022（Dead Cells 联动,5456）：20×30（SetDefaults Projectile.cs:9670-9671）
+    else if (projId === 1022) { this.w = 20; this.h = 30; }
   }
 
   /** 归属玩家（ownerRef 公开读——Game 抚摸白名单按 owner 过滤） */
@@ -2823,6 +3048,20 @@ export class MinionProj extends Entity {
       if (owner0) this.palJoyTick(game, owner0);
       // 火绒狐帧态机（AI_026 flag8 帧段折算）——同 palJoyTick 先于各家族早退支
       if (owner0 && (this.projId === 1094 || this.projId === 1113)) this.foxAnimTick(owner0);
+      // 火绒狐攻击叫声称（TryUsingFoxsparksAbility Player.cs:43677-43698：channeling
+      // 期 soundDelay<=-320（:43691）→ 重置 -21（:43693）并播 PalFoxparksAttack
+      // （:43694,SoundID.cs:1092 WithVolume 0.18）。原版门在玩家用物品 tick
+      // （SetDummyItemTime(2) :43690 → 调用点 :43103 每 ~2t 一查），本仓挂在 AI
+      // 首段的 foxChannel 消费点,时点差 ≤1t 备案;声源锚玩家中心（base.Center
+      // :43694——channeling 期弹体本被 Game 锚到玩家中心 position=MountedCenter-
+      // Size/2(:56120),本仓 cx/cy 同点等价）
+      if (this.projId === 1094 || this.projId === 1113) {
+        this.foxSoundCd--;                                   // --soundDelay（:59119）
+        if (this.foxChannel && this.foxSoundCd <= -320) {
+          this.foxSoundCd = -21;                             // :43693
+          game.playSfxWav?.('pal_foxparks_attack', 0.18, this.cx, this.cy);
+        }
+      }
     }
     if (this.projId === 653) { this.companionCubeStep(game); return; }
     if (this.sentry) {
@@ -3287,6 +3526,8 @@ export class MinionProj extends Entity {
     }
     // ---- 1457 帕鲁地面随从 1093/1112/1118（5663/6148/6161，AI_067 flag8/flag9 折算）----
     if (this.projId === 1093 || this.projId === 1112 || this.projId === 1118) { this.palGroundStep(game, p, dmg0); return; }
+    // ---- Dead Cells 蘑菇小伙伴 1022（5456，AI_067 flag6 折算；爆点→弹 1044）----
+    if (this.projId === 1022) { this.mushBoiStep(game, p, dmg0); return; }
     if (this.projId === 917 || this.projId === 1036) {
       // 生命与玩家 buff 绑定（AI_177 :42468：coolWhipBuff/cobWhipBuff → timeLeft=2 续命）
       if (!p.whipBuffs[this.projId === 917 ? 312 : 365]) { this.dead = true; return; }
@@ -3655,6 +3896,9 @@ export class MinionProj extends Entity {
     } else if (this.projId === 1093 || this.projId === 1112 || this.projId === 1118) {
       // 帕鲁地面随从（AI_067 flag8=1093||1112/flag9）：palGroundStep 原版帧机直写
       frame = Math.min(this.palFrame, Math.max(0, frames - 1));
+    } else if (this.projId === 1022) {
+      // 蘑菇小伙伴（AI_067 flag6 :51642-51681）：mushBoiStep 原版帧机直写
+      frame = Math.min(this.mushFrame, Math.max(0, frames - 1));
     } else if (this.projId === 963) {
       // 阿比盖尔一阶（AI_062 963 档 :66843-66868）：abigailBody 帧机直写
       frame = Math.min(this.a963Frame, Math.max(0, frames - 1));

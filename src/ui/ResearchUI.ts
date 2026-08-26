@@ -55,6 +55,17 @@ function ensureCss(): void {
 let panel: HTMLElement | null = null;
 let escHandler: ((e: KeyboardEvent) => void) | null = null;
 
+/** 献祭音（UICreativeInfiniteItemsDisplay.cs:354/:372 + LegacySoundPlayer.cs:483-505）：
+ *  研究完成拍（sacrifice 返回 true=刚跨过 need 线,_newlyUnlocked 语义）→ Research_0
+ *  （cue64,case :496-505）；推进未满 → Research_1..3 随机（cue63 case :483-495,
+ *  Main.rand.Next(1,4)，播前 Stop 旧实例的槽语义不建模）。两 case 均无 Pitch 档。
+ *  ★Game.ts 自动链不接声（队友代捐 onJourneyUnlock → research.sacrifice 等）：原版
+ *  RegisterItemSacrifice 的网络/成就路径无音效，献祭声只在创意 UI 手动动画帧出——差异已登记 */
+function playResearchSfx(game: Game, completed: boolean): void {
+  if (completed) game.sfx.playWavFile('Research_0');
+  else game.sfx.playFiles(['Research_1', 'Research_2', 'Research_3'], 1);
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -133,7 +144,7 @@ export function openResearchPanel(game: Game): void {
           e.stopPropagation();
           // RegisterItemSacrifice：扣 1 + 计数（幂等早退在内核侧）
           if (consumeOne()) {
-            r.sacrifice(vid, 1);
+            playResearchSfx(game, r.sacrifice(vid, 1));
             // M9 研究上报（CreativeUI.SacrificeItem :308：本地注册 + 发服务器中继）
             game.net?.sendJourneyUnlock(vid, 1);
             game.cb.onInventoryChanged?.();
@@ -144,11 +155,14 @@ export function openResearchPanel(game: Game): void {
         bAll.addEventListener('mousedown', (e) => {
           e.stopPropagation();
           // CreativeUI.SacrificeItem :297-314：消耗量 = min(need-have, stack)——
-          // 永不超扣（曾整堆扣光：计数满了物品还在被吃）
+          // 永不超扣（曾整堆扣光：计数满了物品还在被吃）。音效按【末件】判定播一声
+          // （原版单次 SacrificeItem 一段动画一声；逐件循环只取最后一次返回值）
           const remaining = info.need - info.have;
           let n = 0;
-          while (n < stack && n < remaining && consumeOne()) { r.sacrifice(vid, 1); n++; }
+          let justCompleted = false;
+          while (n < stack && n < remaining && consumeOne()) { justCompleted = r.sacrifice(vid, 1); n++; }
           if (n > 0) {
+            playResearchSfx(game, justCompleted);
             // M9：整包上报（原版按 SacrificeItem 单帧 num2——本 UI 逐件扣，合计上报）
             game.net?.sendJourneyUnlock(vid, n);
             game.cb.onInventoryChanged?.();

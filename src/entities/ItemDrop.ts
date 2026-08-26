@@ -383,6 +383,11 @@ export class ItemDrop extends Entity {
    *  之后**：钱币 71-74 与火炬 8 等都有 IsCrafted 配方，放前面会抢走转化/coinLuck 分支 */
   private getShimmered(game: GameHooks): void {
     const vid = vanillaIdOfItem(this.itemId);
+    // 微光转化完成音 = SoundID.Item176（WorldItem.cs:1689-1696 ShimmerEffect——
+    // GetShimmered 全部分支【共尾】单点调用 :1875,钱币支不 return 也走）。
+    // 音量 ×0.9 = LegacySoundPlayer.cs:520-521（case 2 num==176 支）。
+    // 本仓链是早退分支结构 → 每个落地分支补一次（下方各支同款行）
+    const shimmerDoneSfx = (): void => game.playSfxFile?.('Item_176', 0.9, this.cx, this.cy);
     if (vid === 71 || vid === 72 || vid === 73 || vid === 74) {
       // 钱币 → 微光化币（:1791-1810）：面额放大后 AddCoinLuck（距离 <1000px 才累计，
       // LuckState.addCoinLuck 1:1），物品消失
@@ -390,6 +395,7 @@ export class ItemDrop extends Entity {
       const player = (game as unknown as { player: Player }).player;
       const dist = Math.hypot(player.cx - this.cx, player.cy - this.cy);
       player.luckState.addCoinLuck(dist, amount);
+      shimmerDoneSfx();                                        // 原版共尾 :1875
       this.stack = 0;
       this.dead = true;
       return;
@@ -403,6 +409,7 @@ export class ItemDrop extends Entity {
         this.shimmerTime = 1;
         this.vx *= 0.1; this.vy *= 0.1;
         game.playSfx('shimmerSplash', 1, this.cx, this.cy);
+        shimmerDoneSfx();                                      // Item176（WorldItem.cs:1875 共尾）
         return;
       }
     }
@@ -421,6 +428,7 @@ export class ItemDrop extends Entity {
       else this.shimmerTime = 1;                                   // :1948-1951 共尾
       this.vx *= 0.1; this.vy *= 0.1;                              // :1958
       game.playSfx('shimmerSplash', 1, this.cx, this.cy);
+      shimmerDoneSfx();                                      // Item176（WorldItem.cs:1875 共尾）
       return;
     }
     // 560 史莱姆王冠（:1838-1854）：雨未进行 → 触发史莱姆雨并消耗 1 个
@@ -432,6 +440,7 @@ export class ItemDrop extends Entity {
       if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1845-1848
       else this.shimmered = true;                                  // :1850-1853
       game.playSfx('shimmerSplash', 1, this.cx, this.cy);
+      shimmerDoneSfx();                                      // Item176（WorldItem.cs:1875 共尾）
       return;
     }
     // makeNPC 瓶中小动物（:1855-1877）：逐个放生（上限 min(stack, 空闲 NPC 槽, 50)），
@@ -453,6 +462,7 @@ export class ItemDrop extends Entity {
       else this.shimmerTime = 1;
       this.vx *= 0.1; this.vy *= 0.1;
       game.playSfx('shimmerSplash', 1, this.cx, this.cy);
+      shimmerDoneSfx();                                      // Item176（WorldItem.cs:1875 共尾）
       return;
     }
     this.tryDecraft(game, vid);   // :1878 else-if 链末端
@@ -492,6 +502,9 @@ export class ItemDrop extends Entity {
     if (this.stack <= 0) { this.stack = 0; this.dead = true; }
     else this.shimmerTime = 1;                   // :1936 剩余 stack 保留并重置浸入进度
     game.playSfx('shimmerSplash', 1, this.cx, this.cy);
+    // Item176 转化音（WorldItem.cs:1875 GetShimmered 共尾 → ShimmerEffect :1689-1696；
+    // ×0.9 = LegacySoundPlayer.cs:520）——decraft 支同走该尾
+    game.playSfxFile?.('Item_176', 0.9, this.cx, this.cy);
     return true;
   }
 

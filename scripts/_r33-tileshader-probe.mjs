@@ -19,8 +19,10 @@ await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
 await new Promise((r) => setTimeout(r, 800));
-await page.click('[data-act=sp]');
-await page.waitForSelector('.sw-vsel', { timeout: 10000 });
+for (let i = 0; i < 3; i++) {   // 菜单动画竞态重试（vsel 弹出偶发吞首击）
+  await page.click('[data-act=sp]').catch(() => {});
+  try { await page.waitForSelector('.sw-vsel', { timeout: 6000 }); break; } catch { await new Promise((r) => setTimeout(r, 1200)); }
+}
 await new Promise((r) => setTimeout(r, 600));
 if (!(await page.$('.sw-vsel .sw-vitem'))) {
   await page.click('.sw-vsel [data-act=new]');
@@ -54,45 +56,70 @@ const out = await page.evaluate(async () => {
   const R = { checks: [] };
   const ck = (name, ok, detail) => R.checks.push({ name, ok, detail });
 
-  // ---- (1) paintTile 原语 ----
+  // ---- (2) 渲染面：chunk 重烘像素断言（先锁已烘 chunk,再在其世界范围找实心格）----
   const paint = await import('/src/world/Paint.ts');
   const st = g.world.store;
-  const px0 = Math.floor(g.player.x / TILE), py0 = g.world.groundLevel + 2;
-  // 找一格实心石/泥
-  let tx = px0, ty = py0;
-  for (let dx = 0; dx < 40; dx++) {
-    if (st.flags[st.idx(px0 + dx, py0)] && st.type[st.idx(px0 + dx, py0)] !== 0) { tx = px0 + dx; break; }
+  const cc0 = g.chunks;
+  let cxk = -1, cyk = -1;
+  // ★定位含「页内基线非零」门：flags/type 有效但页画布该处可能透明（帧区外/半砖等）
+  outer: for (const k of cc0.chunks.keys()) {
+    const cxx = k & 0xffff, cyy = (k >>> 16) & 0xffff;
+    const pr = cc0.chunks.get(k);
+    if (!pr?.tile) continue;
+    for (let ddx = 2; ddx < 14; ddx++) for (let ddy = 2; ddy < 14; ddy++) {
+      const wx = cxx * 16 + ddx, wy = cyy * 16 + ddy;
+      const ii = st.inBounds(wx, wy) ? st.idx(wx, wy) : -1;
+      if (ii < 0 || !st.flags[ii] || st.type[ii] === 0 || st.half?.[ii]) continue;
+      const pxv = Array.from(pr.tile.getContext('2d')
+        .getImageData(pr.sx + ddx * TILE + 8, pr.sy + ddy * TILE + 8, 1, 1).data);
+      if (pxv[3] > 0 && (pxv[0] || pxv[1] || pxv[2])) { cxk = cxx; cyk = cyy; tx = wx; ty = wy; break outer; }
+    }
   }
-  const before = st.paint[st.idx(tx, ty)];
-  const ok1 = paint.paintTile(st, tx, ty, 5);
-  const again = paint.paintTile(st, tx, ty, 5);   // 同色拒刷
-  ck('(1) paintTile 写入+同色拒刷', ok1 === true && again === false && st.paint[st.idx(tx, ty)] === 5,
-    `before=${before} after=${st.paint[st.idx(tx, ty)]} rePaint=${again}`);
+  if (cxk < 0) { ck('(2) 定位已烘 chunk 内可见实心格', false, 'none'); return R; }
 
-  // ---- (2) 渲染面：chunk 重烘像素断言 ----
+  // ---- (2) 渲染面续 ----
   const cc = g.chunks;
-  const CHUNK = 24;   // ChunkCache CHUNK（key 除数；markDirty 内部同式）
+  const CHUNK = 16;   // core/constants :39
   const keyOf = (cx, cy) => (cx & 0xffff) | ((cy & 0xffff) << 16);   // ChunkCache.key :279
-  const cxk = Math.floor(tx / CHUNK), cyk = Math.floor(ty / CHUNK);
   const key = keyOf(cxk, cyk);
   let pair = cc.chunks.get(key);
   if (!pair || !pair.tile) { pair = [...cc.chunks.values()].find((v) => v && v.tile); }
   if (!pair || !pair.tile) { ck('(2) 取 chunk pair', false, 'no pair'); return R; }
   const lx = tx - cxk * CHUNK, ly = ty - cyk * CHUNK;
+  let lastReadState = '';
   const readPx = () => {
     const pr = cc.chunks.get(key);
-    if (!pr || !pr.tile) throw new Error('chunk gone');
-    return Array.from(pr.tile.getContext('2d').getImageData(lx * TILE + 8, ly * TILE + 8, 1, 1).data);
+    lastReadState = `has=${cc.chunks.has(key)} tile=${pr ? !!pr.tile : 'n/a'} sx=${pr?.sx} sy=${pr?.sy}`;
+    if (!pr || !pr.tile) throw new Error('chunk gone: ' + lastReadState);
+    // pair.tile = 多 chunk 共享大页——cell 原点 = (sx,sy)，格内偏移 lx*TILE
+    return Array.from(pr.tile.getContext('2d')
+      .getImageData(pr.sx + lx * TILE + 8, pr.sy + ly * TILE + 8, 1, 1).data);
   };
-  const rawBefore = readPx();
+  const dbg = { key, has: cc.chunks.has(key), size: cc.chunks.size,
+    sampleKeys: [...cc.chunks.keys()].slice(0, 6), CHUNK };
+  // ★序：先取未涂漆基线像素，再涂漆——setPaint 的 store listener 会立即 markDirty
+  //   （标记删除态 chunks.set(k,undefined)），涂后读不到旧像素
+  let rawBefore;
+  try { rawBefore = readPx(); } catch (e) { ck('(2) 取基线像素', false, String(e.message)); R.dbg = dbg; return R; }
+
+  // ---- (1) paintTile 原语 ----
+  const before = st.paint[st.idx(tx, ty)];
+  const ok1 = paint.paintTile(st, tx, ty, 5);
+  const again = paint.paintTile(st, tx, ty, 5);   // 同色拒刷
+  ck('(1) paintTile 写入+同色拒刷', ok1 === true && again === false && st.paint[st.idx(tx, ty)] === 5,
+    `before=${before} after=${st.paint[st.idx(tx, ty)]} rePaint=${again}`);
   const rebake = async () => {
     cc.markDirty(tx, ty);
-    g.renderer.requestFrame ? g.renderer.requestFrame() : null;
-    for (let i = 0; i < 30; i++) {   // 等 dirtyQueue 消化到本 chunk 重建
+    for (let i = 0; i < 90; i++) {   // 游戏循环驱动 renderer（视口内 chunk 重绘+flushDirty）
+      g.fixedUpdate(1 / 60);
+      cc.flushDirty(8, 24);
       await new Promise((r) => requestAnimationFrame(r));
-      if (cc.chunks.get(key) && cc.chunks.get(key).tile) return;
+      if (cc.chunks.get(key) && cc.chunks.get(key).tile) { R.dbg = { ...dbg, rebuiltAt: i }; return; }
     }
+    R.dbg = { ...dbg, hasAfter: cc.chunks.has(key), dqAfter: cc.dirtyQueue.length,
+      sampleKeys: [...cc.chunks.keys()].slice(0, 5) };
   };
+  R.dbgPlace = { tx, ty, cxk, cyk };
   await rebake();
   const painted = readPx();
   const expect = paint.applyPaintTint(rawBefore[0], rawBefore[1], rawBefore[2], 5);

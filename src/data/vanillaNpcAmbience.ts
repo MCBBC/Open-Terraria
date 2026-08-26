@@ -2,11 +2,13 @@
 //   播放通道 = playSfxWav（GameHooks→Sfx.playWavFile 直文件,FILE_CASE_VOL 自带
 //   Zombie_24-87 ×0.5 等档）——数字音效号→wav 映射见 FILE_CASE_VOL/SoundID.cs。
 //
-// 【表一 IDLE_SOUNDS】UpdateNPC 段 :91119-91246（"IdleSounds"）——
+// 【表一 IDLE_SOUNDS】UpdateNPC 段 :91184-91246（"IdleSounds",门 !shimmerTransparency>0）——
 //   PlaySound(29, style) 的逐 type 掷骰（denom = Main.rand.Next(denom)==0）。
 //   style 为 [lo,hi) 左闭右开区间（原版 Next(lo,hi)）。
-// 【表二 CHATTER】AI_003 尾段 :57735-57764（战士族闲话,TargetClosest 前）。
-// 【表三 CRITTER】UpdateNPC_CritterSounds :93365-93468（鸭/蛙/鸟/鼠/鸥/枭;1457 同行号）。
+// 【表二 CHATTER】AI_003 尾段 :57914-57945（战士族闲话,TargetClosest 前;门
+//   shimmerTransparency < 1f 在 :57916——★旧锚 :57735-57764 是 1456 行段,1457/1458
+//   实际行号以本条为准）。
+// 【表三 CRITTER】UpdateNPC_CritterSounds :93365-93468（鸭/蛙/鸟/鼠/鸥/枭;1457/1458 同行号）。
 // 【表四 PET_SLIME_HIT_VOICES】StrikeNPC 受击段 :82255-82302——type==1（史莱姆）
 //   且 ai[1]=语音饰品物品 id 时受击音按表替换（语音史莱姆 = 派对/天空盒特殊
 //   生成的蓝史莱姆,ai[1] 赋值点 :60828-60852）。
@@ -75,26 +77,30 @@ export const IDLE_SOUNDS: Record<number, IdleSoundSpec> = {
   391: { denom: 700, range: [86, 87] },    // Scutlix
 };
 
-/** AI_003 闲话表（:57735-57764）——各族掷骰 + 音效文件（直接 wav 名） */
-export interface ChatterSpec { denom: number; file: string; }
+/** AI_003 闲话表（:57914-57945,1457/1458 行段）——各族掷骰 + 音效文件（直接 wav 名）
+ *  pool = 多文件均匀随机（原版在 LegacySoundPlayer 各 case 内掷变体号,本仓消费点掷;
+ *  file 字段保留为池首/回退键,消费方有 pool 时优先 pool）。 */
+export interface ChatterSpec { denom: number; file: string; pool?: string[]; }
 export const CHATTER_SOUNDS: Record<number, ChatterSpec> = (() => {
   const m: Record<number, ChatterSpec> = {};
-  // 僵尸大表（:57737,PlaySound(14)=Zombie_0-2 组→直取 0 号;FILE_CASE_VOL ×0.4）
+  // 僵尸大表（:57918,PlaySound(14)=case14 默认组 Next(3)=Zombie_0-2 → 直取 0 号;FILE_CASE_VOL ×0.4）
   const zombies = [3, 691, 591, 590, 331, 332, 21, 449, 450, 451, 452, 31, 294, 295, 296,
     77, 110, 132, 167, 161, 162, 186, 187, 188, 189, 197, 200, 201, 202, 203, 223,
     291, 292, 293, 320, 321, 319, 481, 632, 635];
   for (const t of zombies) m[t] = { denom: 1000, file: 'Zombie_0' };
-  // 血僵尸 489/僵尸鱼人 586（:57743,(14,type)→Zombie_21-23 由 LegacySoundPlayer style=type 映射;
-  //   直文件名 = Zombie_{type%...}——style 489/586 超变体范围,取近似 21/22/23 池由调用方掷)
-  m[489] = { denom: 800, file: 'Zombie_21' };
-  m[586] = { denom: 800, file: 'Zombie_22' };
-  // 木乃伊（:57748,(26)→LegacySoundPlayer case26 = Zombie_{3,4} ×0.9(:968-976 Next(3,5)））
-  for (const t of [78, 79, 80, 630]) m[t] = { denom: 500, file: 'Zombie_3' };
-  // 吸血鬼 159（:57753,(29,7)）;弗兰肯 162→(29,6);面怪 181→(29,8)
+  // 血僵尸 489/僵尸鱼人 586（:57922-57924 PlaySound(14,…,type)→LSP.cs:808-816
+  //   case14 style489/586 分支 Next(21,24)=Zombie_21-23 均匀 ×0.4——池化接真值,
+  //   曾写死 Zombie_21/Zombie_22 单文件=漏两变体+音量档缺）
+  m[489] = { denom: 800, file: 'Zombie_21', pool: ['Zombie_21', 'Zombie_22', 'Zombie_23'] };
+  m[586] = { denom: 800, file: 'Zombie_21', pool: ['Zombie_21', 'Zombie_22', 'Zombie_23'] };
+  // 木乃伊（:57926-57928 PlaySound(26)→LSP.cs:972-981 case26 Next(3,5)=Zombie_3/4
+  //   ×0.9——曾写死 Zombie_3 单文件=漏 Zombie_4 半数变体）
+  for (const t of [78, 79, 80, 630]) m[t] = { denom: 500, file: 'Zombie_3', pool: ['Zombie_3', 'Zombie_4'] };
+  // 吸血鬼 159（:57930,(29,7)）;弗兰肯 162→(29,6);面怪 181→(29,8)
   m[159] = { denom: 500, file: 'Zombie_7' };
   m[162] = { denom: 500, file: 'Zombie_6' };
   m[181] = { denom: 500, file: 'Zombie_8' };
-  // 地牢骨铠 269-280（:57764,(14)）
+  // 地牢骨铠 269-280（:57942,(14)）
   for (let t = 269; t <= 280; t++) m[t] = { denom: 1000, file: 'Zombie_0' };
   return m;
 })();
@@ -105,9 +111,9 @@ export const CHATTER_SOUNDS: Record<number, ChatterSpec> = (() => {
  *  ★2026-08-24 R22 蓝队修正：旧表把 SoundID 类型号当 wav 变体号（枭→Zombie_46、
  *  海鸥→Zombie_44、鹦鹉族→Zombie_67/68/69、鼠→Zombie_33 全是 24-87 怪物语音库文件）
  *  ——按 LegacySoundPlayer 各 case 的真实 bank 变体号改回：
- *   case46(:1074) → Zombie_110/111（1/300 稀有掷 {112,113,114} 均分,见登记）
+ *   case46(:1074-1093) → Zombie_110/111（1/300 稀有掷 {112,113,114} 均分,rare 槽登记）
  *   case44(:1054) → Zombie_106-108 均匀池 ×0.2 音高 -0.70..0
- *   case30(:1105) → Zombie_10/11 均匀（1/300 稀有换 Zombie_12,登记）
+ *   case30(:1105-1126) → Zombie_10/11 均匀（1/300 稀有换 Zombie_12,rare 槽登记）
  *   case31(:1128) → Zombie_13 ×0.35
  *   case32(:1136) → style 14-19 = Zombie_14-19 ×0.15 音高 -0.70..+0.25
  *   case67/68/69(:1147/:1159/:1171) → Zombie_118-120 / 126-128 / 129-130 均匀池
@@ -120,18 +126,29 @@ export interface CritterSoundSpec {
   gate?: 'day' | 'night' | 'dawn' | 'nightOrUnderground' | 'still';
   /** 多变体池（消费方均匀随机;权重用重复项表达——鸟 74 是原版 Next(3)!=0 的 2/3:1/3） */
   pool?: string[];
+  /** 稀有变体（独立掷）：denom 命中→从 files 取一并【跳过常规池】。
+   *  联合概率 = 主掷命中 × rare 掷命中（原版两层掷在 LSP case 内串联:
+   *  鸭 case30 :1105-1126 / 枭 case46 :1074-1093）——消费方须在外层 denom
+   *  命中后才掷本骰,不得每 tick 独立掷（否则稀有率虚高数百倍）。 */
+  rare?: { denom: number; files: string[] };
 }
 export const CRITTER_SOUNDS: Record<number, CritterSoundSpec> = {
-  611: { denom: 700, file: 'Zombie_110', gate: 'night', pool: ['Zombie_110', 'Zombie_111'] },  // 猫头鹰(:93371,(46))
-  689: { denom: 700, file: 'Zombie_110', gate: 'night', pool: ['Zombie_110', 'Zombie_111'] },  // 灰猫头鹰
+  611: { denom: 700, file: 'Zombie_110', gate: 'night', pool: ['Zombie_110', 'Zombie_111'],
+    rare: { denom: 300, files: ['Zombie_112', 'Zombie_113', 'Zombie_114'] } },  // 猫头鹰(:93371,(46);LSP case46 :1074-1093 Next(300)==0 三均分)
+  689: { denom: 700, file: 'Zombie_110', gate: 'night', pool: ['Zombie_110', 'Zombie_111'],
+    rare: { denom: 300, files: ['Zombie_112', 'Zombie_113', 'Zombie_114'] } },  // 灰猫头鹰
   602: { denom: 1200, file: 'Zombie_106', gate: 'day', pool: ['Zombie_106', 'Zombie_107', 'Zombie_108'] },  // 海鸥(:93375,(44))
   603: { denom: 1200, file: 'Zombie_106', gate: 'day', pool: ['Zombie_106', 'Zombie_107', 'Zombie_108'] },
-  // 鸭族 362-365(:93379,(30))——case30 常规 Next(10,12)=10/11 均匀,Zombie_12 仅 1/300
-  //   稀有掷(消费方无权重面,稀有变体登记待接,勿再并回均匀池=R22 前的"鸭 12 均匀化"偏差)
-  362: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'] },
-  363: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'] },
-  364: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'] },
-  365: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'] },
+  // 鸭族 362-365(:93379-93383,(30))——case30 常规 Next(10,12)=10/11 均匀;Next(300)==0
+  //   稀有换 Zombie_12（LSP.cs:1105-1114,独占忙检省略=普通掷）
+  362: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'],
+    rare: { denom: 300, files: ['Zombie_12'] } },
+  363: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'],
+    rare: { denom: 300, files: ['Zombie_12'] } },
+  364: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'],
+    rare: { denom: 300, files: ['Zombie_12'] } },
+  365: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'],
+    rare: { denom: 300, files: ['Zombie_12'] } },
   361: { denom: 200, file: 'Zombie_13', gate: 'still' },   // 青蛙族(:93386,(31),夜或地下+|vx|<0.5)
   445: { denom: 200, file: 'Zombie_13', gate: 'still' },
   687: { denom: 200, file: 'Zombie_13', gate: 'still' },

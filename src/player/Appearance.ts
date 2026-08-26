@@ -17,6 +17,15 @@ export interface Appearance {
   pantsColor: RGBColor;
   shoeColor: RGBColor;
   difficulty: Difficulty;
+  /** 语音变体（PlayerVoiceID：1 男/2 女/3 其他,ID/PlayerVoiceID.cs:17-22）。
+   *  建号按性别初始化 Male?1:2（Player.cs:56393）;存档 byte（:55582 写/:56388 读,
+   *  release≥280）;联机随 Msg4 SyncPlayer 同步（MessageBuffer.cs:299-300 读 byte
+   *  +clamp——本仓走 appearanceJson 整包通道,等价承载） */
+  voiceVariant?: 1 | 2 | 3;
+  /** 语音音高偏移 -1..1（梳妆台滑杆 21 档量化 Remap(0..1→-1..1),Main.cs:45429-45451;
+   *  存档 float :55583/:56398 release≥281。受击时 Remap(-1..1→∓0.7) 直传 Pitch,
+   *  Player.cs:38996） */
+  voicePitchOffset?: number;
   /** 硬核角色已消亡（Player.cs:38255 HardcoreDeathPenalty 的本仓持久化标记：
    *  死亡后置 true → respawnPlayer 拒绝重生 + 角色列表灰显；原版直接删 .plr 档） */
   hardcoreDead?: boolean;
@@ -63,6 +72,9 @@ export function defaultAppearance(name = ''): Appearance {
     ...structuredClone(DEFAULT_COLORS),
     difficulty: 0,
     team: 0,
+    // voiceVariant 不在此预填：缺省=未设置态,消费侧按性别推导（Player.cs:56393
+    // release<280 回退式）——预填会污染旧档升级的推导路径（女档被钉成男声）
+    voicePitchOffset: 0,                    // 滑杆中位（Player.cs:56394/56402 缺省 0）
   };
 }
 
@@ -91,7 +103,24 @@ export function validateAppearance(a: Partial<Appearance> | null | undefined): A
     difficulty: ([0, 1, 2, 3] as number[]).includes(a.difficulty as number) ? (a.difficulty as Difficulty) : 0,
   team: (typeof a.team === 'number' && a.team >= 0 && a.team <= 5) ? Math.trunc(a.team) : 0,
     hardcoreDead: a.hardcoreDead === true ? true : undefined,   // 硬核消亡标记（旧数据缺省未消亡）
+    // 语音两字段（旧档缺省 → 按性别推导初始化 = LoadPlayer release<280 回退式,
+    // Player.cs:56393;clamp 1..3——原版 LastMinuteFixes clamp(1,4) 的 4 槽在
+    // VariantOrder/分派 switch 均无消费=死值,本仓收紧到有效域并登记差异）
+    voiceVariant: validateVoiceVariant(a.voiceVariant)
+      ?? (FEMALE_VARIANTS.includes(a.skinVariant ?? 0) ? 2 : 1),
+    voicePitchOffset: typeof a.voicePitchOffset === 'number' && Number.isFinite(a.voicePitchOffset)
+      ? Math.max(-1, Math.min(1, a.voicePitchOffset)) : 0,
   };
+}
+
+/** voiceVariant 合法域校验（1 男/2 女/3 其他;越界/缺省 → undefined 走性别推导） */
+function validateVoiceVariant(v: unknown): 1 | 2 | 3 | undefined {
+  return v === 1 || v === 2 || v === 3 ? v : undefined;
+}
+
+/** 建号初始化（Player.cs:56393 voiceVariant = Male ? 1 : 2 同式） */
+export function defaultVoiceVariant(skinVariant: number): 1 | 2 {
+  return FEMALE_VARIANTS.includes(skinVariant) ? 2 : 1;
 }
 
 /** UICharacterCreation.cs:58 的有效衣服样式（1.4.5.6：前 5 男装 / 后 5 女装） */
@@ -135,6 +164,8 @@ export function randomAppearance(name = ''): Appearance {
   a.hair = CHAR_CREATION_HAIRS[Math.floor(Math.random() * CHAR_CREATION_HAIRS.length)];
   const pool = FEMALE_HAIRS.has(a.hair) ? FEMALE_VARIANTS : MALE_VARIANTS;
   a.skinVariant = pool[Math.floor(Math.random() * pool.length)];
+  // 语音随性别初始化（Player.cs:56393 Male?1:2——随机掷定变体后同步落档）
+  a.voiceVariant = defaultVoiceVariant(a.skinVariant);
   const hsl = (h: number, s: number, l: number) => {
     const [r, g, b] = hslToRgb(h / 360, s, l);
     return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };

@@ -76,12 +76,12 @@ describe('❌508 竖琴回归锁（已实装批，FunItems.ts）', () => {
   });
 });
 
-describe('❌4673 鼓槌回归锁（Player.cs:46003-46023 + PlayDrums :46106-46156）', () => {
-  it('注册在册 + 10 档音色边界（1/10 步进阈值递减、兜底 Item60）', () => {
+describe('❌4673 鼓槌回归锁（Player.cs:47003-47025 + PlayDrums :47108-47157 + LP:1238 映射）', () => {
+  it('注册在册 + 10 档音色边界（音型+86 落 Item_139~148、兜底 Item146）', () => {
     expect(FUN_USE_VIDS.has(4673)).toBe(true);
-    expect(drumSoundFile(0)).toBe('Item_60');
-    expect(drumSoundFile(0.95)).toBe('Item_59');       // > 9×0.1
-    expect(drumSoundFile(0.11)).toBe('Item_55');       // > 1×0.1
+    expect(drumSoundFile(0)).toBe('Item_146');
+    expect(drumSoundFile(0.95)).toBe('Item_145');      // 音型 59 → 139+59-53
+    expect(drumSoundFile(0.11)).toBe('Item_141');      // 音型 55
   });
   it('鼓组 tile 486 在库（发声门 = 玩家中心格站上鼓组）', () => {
     const t = TILE_BY_KEY['v_486_drum_set'];

@@ -112,13 +112,20 @@ function isSaveSlope(t: number): boolean {
   return pristineSolid || NON_SOLID_SAVE_SLOPES.has(t);
 }
 
-/** WorldGen.SolidTile(cs:42370):active && tileSolid && !tileSolidTop && !halfBrick && slope==0。
+/** WorldGen.SolidTile(cs:1456 42370 / 1457 70682):active && tileSolid && !tileSolidTop
+ *  && !halfBrick && slope==0 && !inActive。
  *  tileSolid 走 GenSolid（① 的 379 覆写 = pass 头 cs:21331 翻转）;tileSolidTop
- *  近似为 platform(与 HalfBrickPass 同口径) */
+ *  近似为 platform(与 HalfBrickPass 同口径)。
+ *  ★QQQB 定罪（2026-08-26，s22222 链 #100 滴水石笋 28 格）：曾漏 **!inActive()**——
+ *  被致动(inActive 位=wire bit5)的锚格在原版不算实心，⑤ 门应跳过该空格（仅耗
+ *  Next(3)）；漏检导致 JS 多进块多掷(U/D/S4)，掷流自首个此类锚起整体错位，
+ *  在 x∈[548,567] 洞穴带上游出 28 格滴头残差(T374>0×11/T373>0×7/T0>373×7/T0>374×3,
+ *  首差 @(560,340))。离线重放加回该子句后对 rig dump#100 全世界零差(dA=dT=dL=0)。 */
 function solidTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
+  if ((st.wire[i] >>> 5) & 1) return false; // inActive：被致动的格不算实心锚
   const t = st.type[i];
   const d = TILE_DEFS[t];
   return genSolidType(t) && !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
@@ -185,11 +192,6 @@ function canKillTile(st: TileStore, x: number, y: number): boolean {
   return true;
 }
 
-/** ★QQQB 临时诊断探针（用完即删） */
-const segProbe = (name: string, detail?: unknown): void => {
-  (globalThis as { __swSeg?: unknown }).__swSeg?.(name, detail);
-};
-
 export function runTileCleanupPass(
   st: TileStore, rng: RNG, gs: GenState,
   chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
@@ -231,59 +233,44 @@ export function runTileCleanupPass(
 
       // ④ 液体中的 SlowlyDiesInWater 方块清除(cs:21354-21357)
       if (st.flags[i] && st.liquid[i] > 0 && SLOWLY_DIES_IN_WATER.has(st.type[i])) {
-        segProbe('K', [k, l, SHEET_OF[st.type[i]]]);
         killTile(st, rng, k, l);
       }
 
       // ⑤ 滴水石笋(cs:21358-21435):空格+无液+上方实心才进
-      if (!st.flags[i] && st.liquid[i] === 0) {
-        const g3 = rng.int(0, 2); // Next(3)
-        segProbe('G', [k, l, g3]);
-        if (g3 !== 0 && solidTile(st, k, l - 1)) {
-          // 上扫(cs:21360-21411):l-2 起向上 num(15-20) 格,液体>=128
-          let num = rng.int(15, 20); // Next(15,21)
-          segProbe('U', [k, l, num]);
-          for (let n2 = l - 2; n2 >= l - num; n2--) {
-            const up = st.idx(k, n2);
-            if (st.liquid[up] >= 128 && st.liquidType[up] !== LIQUID_TYPE.SHIMMER) {
-              const maxValue = l - n2; // 距离,最小 2
-              const rv = rng.int(0, maxValue - 1); // Next(maxValue)
-              segProbe('UQ', [k, n2, maxValue, rv]);
-              if (rv <= 1) {
-                let drip = dripFor(st.liquidType[up]);
-                if (st.wall[i] === BEE_WALL) drip = DRIP_HONEY; // cs:21404
-                st.setTileSilent(k, l, drip, 0, 0);
+      if (!st.flags[i] && st.liquid[i] === 0 && rng.int(0, 2) !== 0 && solidTile(st, k, l - 1)) {
+        // 上扫(cs:21360-21411):l-2 起向上 num(15-20) 格,液体>=128
+        let num = rng.int(15, 20); // Next(15,21)
+        for (let n2 = l - 2; n2 >= l - num; n2--) {
+          const up = st.idx(k, n2);
+          if (st.liquid[up] >= 128 && st.liquidType[up] !== LIQUID_TYPE.SHIMMER) {
+            const maxValue = l - n2; // 距离,最小 2
+            if (rng.int(0, maxValue - 1) <= 1) { // Next(maxValue)
+              let drip = dripFor(st.liquidType[up]);
+              if (st.wall[i] === BEE_WALL) drip = DRIP_HONEY; // cs:21404
+              st.setTileSilent(k, l, drip, 0, 0);
+              break;
+            }
+          }
+        }
+        // 下扫(cs:21413-21429):l+1 起向下 num(3-10) 格,液体>=200
+        if (!st.flags[i]) {
+          num = rng.int(3, 10); // Next(3,11)
+          for (let m = l + 1; m <= l + num; m++) {
+            const dn = st.idx(k, m);
+            if (st.liquid[dn] >= 200 && st.liquidType[dn] !== LIQUID_TYPE.SHIMMER) {
+              const dist = m - l;
+              if (rng.int(0, dist * 3 - 1) <= 1) { // Next(dist*3)
+                st.setTileSilent(k, l, dripFor(st.liquidType[dn]), 0, 0);
                 break;
               }
             }
           }
-          // 下扫(cs:21413-21429):l+1 起向下 num(3-10) 格,液体>=200
-          if (!st.flags[i]) {
-            num = rng.int(3, 10); // Next(3,11)
-            segProbe('D', [k, l, num]);
-            for (let m = l + 1; m <= l + num; m++) {
-              const dn = st.idx(k, m);
-              if (st.liquid[dn] >= 200 && st.liquidType[dn] !== LIQUID_TYPE.SHIMMER) {
-                const dist = m - l;
-                const rv = rng.int(0, dist * 3 - 1); // Next(dist*3)
-                segProbe('DQ', [k, m, dist * 3, rv]);
-                if (rv <= 1) {
-                  st.setTileSilent(k, l, dripFor(st.liquidType[dn]), 0, 0);
-                  break;
-                }
-              }
-            }
-          }
-          // 小沙堆(cs:21431-21441):上方是沙岩/硬沙 → 1/4 概率放 461
-          if (!st.flags[i]) {
-            const sv = rng.int(0, 3); // Next(4)
-            segProbe('S4', [k, l, sv]);
-            if (sv === 0) {
-              const above = st.idx(k, l - 1);
-              if (CONV_SANDSTONE.has(st.type[above]) || CONV_HARDENED_SAND.has(st.type[above])) {
-                st.setTileSilent(k, l, SAND_PILE, 0, 0);
-              }
-            }
+        }
+        // 小沙堆(cs:21431-21441):上方是沙岩/硬沙 → 1/4 概率放 461
+        if (!st.flags[i] && rng.int(0, 3) === 0) { // Next(4)
+          const above = st.idx(k, l - 1);
+          if (CONV_SANDSTONE.has(st.type[above]) || CONV_HARDENED_SAND.has(st.type[above])) {
+            st.setTileSilent(k, l, SAND_PILE, 0, 0);
           }
         }
       }

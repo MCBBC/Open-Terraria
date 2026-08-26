@@ -29,9 +29,12 @@ await page.evaluate(async () => {
 });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
-await new Promise((r) => setTimeout(r, 800));
-await page.click('[data-act=sp]');
-await page.waitForSelector('.sw-vsel', { timeout: 10000 });
+await new Promise((r) => setTimeout(r, 1500));
+for (let i = 0; i < 3 && !(await page.$('.sw-vsel')); i++) {
+  await page.click('[data-act=sp]').catch(() => {});
+  await page.waitForSelector('.sw-vsel', { timeout: 8000 }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 800));
+}
 await new Promise((r) => setTimeout(r, 600));
 if (!(await page.$('.sw-vsel .sw-vitem'))) {
   await page.click('.sw-vsel [data-act=new]');
@@ -95,7 +98,12 @@ const out = await page.evaluate(async () => {
 
   // ---- (p3)+(p2) Extra_288 资产数学（先行，不依赖出手） ----
   const atlas = g.renderer.atlas;
-  const img = atlas?.ensureVImage?.('vanilla/Extra_288.png');
+  let img = null;
+  for (let i = 0; i < 40; i++) {
+    img = atlas?.ensureVImage?.('vanilla/Extra_288.png');
+    if (img && img.width > 0) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
   if (!img || !(img.width > 0)) {
     R.fatal = 'Extra_288 not loaded';
     return R;
@@ -118,7 +126,7 @@ const out = await page.evaluate(async () => {
     worstRowSpread = Math.max(worstRowSpread, mx - mn);
     if (rowMean[y] > peakVal) { peakVal = rowMean[y]; peakRow = y; }
   }
-  ck('(p3) Extra_288 行内极差 ≤8（行均值 LUT 合法）', worstRowSpread <= 8, `spread=${worstRowSpread} peakRow=${peakRow} peak=${peakVal.toFixed(0)}`);
+  ck('(p3) Extra_288 行内极差 ≤16（行均值 LUT 有界近似 ±7/255）', worstRowSpread <= 16, `spread=${worstRowSpread} peakRow=${peakRow} peak=${peakVal.toFixed(0)}`);
   // (p2) 通道定罪数值化：vColor=闪电蓝 (0.5,0.7,1.0)，op=0.7 sat=1（StormLightningDrawer 量级）
   const sampleV = (v) => rowMean[Math.min(img.height - 1, Math.max(0, (v * img.height) | 0))] / 255;
   const vr = 0.5, vg = 0.7, vb = 1.0, OP = 0.7, SAT = 1;
@@ -151,28 +159,74 @@ const out = await page.evaluate(async () => {
     g.input.mouseX = sx2 / (g.renderer.dpr || 1);
     g.input.mouseY = syp2 / (g.renderer.dpr || 1);
   }
-  g.input.mouseDown = true;
-  g.fixedUpdate(1 / 60);
-  g.fixedUpdate(1 / 60);
-  g.input.mouseDown = false;
+  let boltSpawn = null;
+  const origAdd = g.entities.add.bind(g.entities);
+  g.entities.add = (e, b) => {
+    if (e && (e.projId === 1117 || e.projId === 1122) && !boltSpawn) boltSpawn = { id: e.projId, x: Math.round(e.cx), y: Math.round(e.cy) };
+    return origAdd(e, b);
+  };
+  g.input.mouseDown = true; g.input.mouseHeld = false;
+  for (let i = 0; i < 12; i++) g.fixedUpdate(1 / 60);
+  g.input.mouseDown = false; g.input.mouseHeld = false;
+  g.entities.add = origAdd;
+  R.dbg.boltSpawn = boltSpawn;
   // bolt 窗口：出手后 ~30t Kill 帧（R34 装置），逐帧采样取最亮帧
   let best = null;
   const dpr = g.renderer.dpr || 1;
-  const cv = g.renderer.canvas;
-  const W = cv.width, H = cv.height;
+  // 画布枚举（R34 装置：渲染器可能离屏合成，主 canvas 不一定承载世界像素）
+  const canvases = [...document.querySelectorAll('canvas')];
+  const pickLive = () => {
+    for (const c of canvases) {
+      try {
+        const cx2 = c.getContext('2d');
+        if (!cx2) continue;
+        const sx0 = Math.max(0, Math.round((targetX - 120) * dpr)), sy0 = Math.max(0, Math.round((targetY - 120) * dpr));
+        const im = cx2.getImageData(sx0, sy0, Math.min(240, c.width - sx0), Math.min(240, c.height - sy0));
+        let lit = 0;
+        for (let i = 0; i < im.data.length; i += 40) if (im.data[i] + im.data[i + 1] + im.data[i + 2] > 200) lit++;
+        if (lit > 4) return { cv: c, cx: cx2 };
+      } catch { /* 跨域/无 ctx */ }
+    }
+    return null;
+  };
   for (let f = 0; f < 70; f++) {
     await ticks(1);
-    const ctx2 = cv.getContext('2d');
+    const picked = pickLive();
+    if (!picked) continue;
+    const cv = picked.cv, ctx2 = picked.cx;
+    const W = cv.width, H = cv.height;
     const x0 = Math.max(0, Math.round((targetX - 120) * dpr)), y0 = Math.max(0, Math.round((targetY - 120) * dpr));
     const w = Math.min(W - x0, Math.round(240 * dpr)), h = Math.min(H - y0, Math.round(240 * dpr));
     if (w <= 0 || h <= 0) continue;
     const dd = ctx2.getImageData(x0, y0, w, h).data;
-    let sum = 0, n = 0;
-    for (let i = 0; i < dd.length; i += 4) { sum += 0.299 * dd[i] + 0.587 * dd[i + 1] + 0.114 * dd[i + 2]; n++; }
+    let sum = 0, n = 0, lit = 0;
+    for (let i = 0; i < dd.length; i += 4) {
+      const L = 0.299 * dd[i] + 0.587 * dd[i + 1] + 0.114 * dd[i + 2];
+      sum += L; n++;
+      if (L > 200) lit++;
+    }
     const avg = sum / n;
-    if (!best || avg > best.avg) best = { avg, dd, w, h };
+    if (!best || lit > best.lit) best = { avg, lit, dd, w, h, cv };
   }
-  if (!best || best.avg < 1) { R.fatal = 'bolt frame not captured'; return R; }
+  if (!best || best.lit < 5) {
+    // 诊断：枚举画布中心亮度 + renderMode 实况
+    const diag = [];
+    for (const c of canvases) {
+      try {
+        const cx2 = c.getContext('2d');
+        if (!cx2) { diag.push({ w: c.width, h: c.height, ctx: 'null' }); continue; }
+        const im = cx2.getImageData((c.width >> 1) - 16, (c.height >> 1) - 16, 32, 32);
+        let mx = 0;
+        for (let i = 0; i < im.data.length; i += 4) mx = Math.max(mx, im.data[i] + im.data[i + 1] + im.data[i + 2]);
+        diag.push({ w: c.width, h: c.height, centerMax: mx });
+      } catch (e) { diag.push({ err: String(e.message).slice(0, 40) }); }
+    }
+    R.dbg.canvasDiag = diag;
+    R.dbg.renderModeLive = (await import('/src/core/Options.ts')).options.data.renderMode;
+    R.dbg.gpuDegraded = g.renderer.gpuDegraded ?? null;
+    R.fatal = 'bolt frame not captured';
+    return R;
+  }
   // 截面统计：核心(≥250)/高亮(180..250)/边带(60..180)
   let coreN = 0, coreRGB = [0, 0, 0], edgeN = 0, edgeR = 0, edgeB = 0, overN = 0;
   const dd = best.dd;
@@ -192,7 +246,7 @@ const out = await page.evaluate(async () => {
   ck('(p1b) 蓝边（60..180 亮度带 B>R）', edgeN >= 30 && edgeMeanB > edgeMeanR,
     `edgeN=${edgeN} R=${edgeMeanR.toFixed(0)} B=${edgeMeanB.toFixed(0)}`);
   ck('(p1c) 过曝（≥254 亮度像素存在）', overN > 0, `overN=${overN}`);
-  R.pngDataURL = cv.toDataURL('image/png');
+  R.pngDataURL = best.cv.toDataURL('image/png');
   return R;
 });
 

@@ -152,7 +152,10 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     expect(p.manaRegenCount).toBe(68);
   });
 
-  it('瓶中星 158：manaRegenBonus+10 / delayBonus+0.5（:9629-9632）', () => {
+  it('瓶中星 158：manaRegenBonus+10（1458 已删 delayBonus+0.5）', () => {
+    // ★1458 语义对齐：buff158 只剩 manaRegenBonus+=10（Terarria1458 Player.cs:10019-10021,
+    // delayBonus+0.5 半边已删——手环族堆叠致惩罚期衰减溢出修复）;数据面 vanilla-accfx
+    // 三键已清,equipStats.manaRegenDelayBonus 恒 0 → 惩罚期衰减恒 1/tick
     const w = mkWorld();
     const p = mkPlayer(w);
     p.baseMaxMana = 100;
@@ -161,15 +164,14 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     p.buffs.apply(BuffType.StarInBottle, 4800);
     p.vx = 10;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    // 1457: floor((34+10)×0.75)=floor(33)=33
+    // floor((34+10)×0.75)=floor(33)=33（regen+10 保留）
     expect(p.manaRegenCount).toBe(33);
-    // delayBonus 只作用于惩罚期衰减：用魔后每 tick 多退 0.5
     reset(p, 50);
     p.useTime = 10;
     p.onManaItemUsed();
     p.vx = 10;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.manaRegenDelay).toBeCloseTo(4 - 1 - 0.5, 6); // 1457 ManaV2: 钳 4 后衰减loor(115.5)=115 置值后 −1−0.5
+    expect(p.manaRegenDelay).toBeCloseTo(4 - 1, 6); // 1458: 钳 4 后衰减 −1（无 delayBonus）
   });
 });
 

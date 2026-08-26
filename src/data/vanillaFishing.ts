@@ -308,6 +308,51 @@ export function tryGetItemDrop(ctx: FishingRollCtx): number {
   return 0;
 }
 
+// ==================== 展示用渔获表（FakeFish 鱼群贴图选取，FishDropRuleList.cs:23-43）====================
+
+/** FishPossibilityEntry（FishDropRuleList.cs:7-11）：ItemType + 视觉出现频率 */
+export interface FishPossibilityEntry { itemType: number; frequency: number }
+
+/** Rarity.FrequencyOfAppearanceForVisuals（AFishDropRulePopulator.cs:46-81）：
+ *  Any=1 / Legendary=0.1 / VeryRare=0.25 / Rare=0.4 / Uncommon=0.8 / Common=1 /
+ *  炸弹鱼档=0.6 / UncommonOrCommon=1 */
+const VISUAL_FREQUENCY: Record<string, number> = {
+  Any: 1,
+  Legendary: 0.1,
+  VeryRare: 0.25,
+  Rare: 0.4,
+  Uncommon: 0.8,
+  BombRarityOfNotLegendaryAndNotVeryRareAndUncommon: 0.6,
+  Common: 1,
+  UncommonOrCommon: 1,
+};
+
+/** FishDropRuleList.GetDisplayableDrops（FishDropRuleList.cs:23-43）1:1：
+ *  FakeFish 生成门（Projectile.SpawnFakeFishInWater :20607）选鱼贴图的候选表——
+ *  逐条【只查条件不掷 chance】（MeetsConditions(forDisplay) 的 forDisplay 形参在
+ *  原版本体即死参，FishDropRule.cs:53-64），命中即以池内均匀随机取一物品 +
+ *  稀有档视觉频率入表；stopper（空池档：AnyEnemies/岩浆/蜂蜜/垃圾/宝匣/海洋）
+ *  入表后截断。★空池 stopper 命中时入表 itemType=0（原版同款：垃圾/纯岩浆等
+ *  场景会生成「无贴图鱼」，消费端 Draw 对 null 贴图静默跳过 = 原版空白观感）。 */
+export function getDisplayableDrops(ctx: FishingRollCtx): FishPossibilityEntry[] {
+  const rng = ctx.rng ?? mathRng;
+  const out: FishPossibilityEntry[] = [];
+  for (let i = 0; i < FISH_DROP_RULES.length; i++) {
+    const rule = FISH_DROP_RULES[i];
+    let ok = true;
+    for (const c of rule.conditions) {
+      if (!condMatches(c, ctx)) { ok = false; break; }
+    }
+    if (!ok) continue;
+    out.push({
+      itemType: rule.items.length ? rule.items[rng.next(rule.items.length)] : 0,   // NextFromList
+      frequency: VISUAL_FREQUENCY[rule.rarity] ?? 1,
+    });
+    if (rule.stopper) break;   // IsStopper → 截断（FishDropRuleList.cs:40-42）
+  }
+  return out;
+}
+
 // ==================== 渔夫任务链：每日选取（Main.cs:3799-3947）====================
 
 /** AnglerQuestSwap 的世界门（Main.cs:3807-3866 逐条 if 的归一化形，见 json filters） */

@@ -41,7 +41,9 @@
 import {
   type Appearance, type RGBColor, randomAppearance, DIFFICULTY_INFO,
   VALID_CLOTH_STYLES, CHAR_CREATION_HAIRS, hslToRgb, rgbToScaledHsl, scaledLuminosity,
+  defaultVoiceVariant,
 } from '../player/Appearance';
+import { cycleVoiceVariant, hurtVoicePlan } from '../player/PlayerVoice';
 import { compositePaperDoll, dollFrame, walkFrame, IDLE_FRAME } from '../player/PaperDoll';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
@@ -419,7 +421,16 @@ const CSS = `
 .sw-cc-looksep { position: absolute; left: 19px; top: 89px; width: 442px; height: 4px; box-sizing: border-box;
   border: 2px solid transparent; border-image: var(--cc-sep) 2 fill stretch;
   image-rendering: pixelated; pointer-events: none; }
-.sw-cc-looklow { position: absolute; left: 0; right: 0; top: 106px; display: flex; justify-content: center; }
+.sw-cc-looklow { position: absolute; left: 0; right: 0; top: 106px; display: flex; justify-content: center; align-items: center; gap: 6px; }
+/* ---- 语音行（梳妆台更衣窗：循环钮 + 音高滑杆；竖分隔线对齐原版钮间留白）---- */
+.sw-cc-vsep { width: 2px; height: 26px; margin: 0 4px; background: rgba(255, 255, 255, 0.18); }
+.sw-cc-vlbl { font-size: 12px; color: #dfe6ff; text-shadow: 1px 1px 0 #10142e; white-space: nowrap; }
+.sw-cc-voicebtn { position: relative; display: flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px;
+  background: rgba(20, 27, 62, 0.85); border: 1px solid #4a5aa0; border-radius: 3px; cursor: pointer; }
+.sw-cc-voicebtn:hover { border-color: #8fa3ff; background: rgba(35, 44, 82, 0.9); }
+.sw-cc-voicedot { width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55); }
+.sw-cc-voicename { font-size: 12px; color: #fff; text-shadow: 1px 1px 0 #10142e; white-space: nowrap; }
+.sw-cc-voiceslider { width: 110px; height: 14px; accent-color: #8fa3ff; cursor: pointer; }
 /* ---- 小方钮（UIColoredImageButton isSmall：SmallPanel 32×32 底，常态 0.4 暗）---- */
 .sw-cc-small { position: relative; width: 32px; height: 32px; image-rendering: pixelated; }
 .sw-cc-small::before { content: ''; position: absolute; inset: 0; z-index: 0;
@@ -1081,6 +1092,58 @@ export class CharCreation {
       }),
       this.smallBtn('Randomize', 'Mods.SandboxWorld.CharCreate.Random', () => this.randomizeAppearance()),
     );
+    // ---- 语音行（梳妆台专属：更衣窗语音循环钮 + 音高滑杆,Main.cs:45395-45410/
+    // :45429-45458——CycleVoiceStyle 全树唯一调用点在更衣窗,创建页原版无此面）。
+    // 切换 = CycleVoiceStyle(+1) 男→女→其他→男;每次切换/滑杆变档经 dummy 玩家
+    // PlayHurtSound 预览（:45397-45407/:45449-45455 同式,本地 (-1,-1) 无空间化）
+    if (this.dresser) {
+      const preview = () => {
+        const plan = hurtVoicePlan(this.appearance);
+        UISfx.sfx.playWavFile(plan.files[Math.floor(Math.random() * plan.files.length)],
+          plan.vol, undefined, undefined, plan.pitch);
+      };
+      const dot = el('i', 'sw-cc-voicedot');
+      const name = el('span', 'sw-cc-voicename');
+      const vbtn = el('button', 'sw-cc-voicebtn');
+      vbtn.title = Lang.text('Mods.SandboxWorld.ClothesWindow.VoiceTip');
+      vbtn.append(dot, name);
+      const refreshVoice = () => {
+        const v = this.appearance.voiceVariant
+          ?? defaultVoiceVariant(this.appearance.skinVariant);   // 旧底稿缺省按性别推导(:56393)
+        name.textContent = Lang.text(
+          v === 1 ? 'Mods.SandboxWorld.ClothesWindow.VoiceMale'
+            : v === 2 ? 'Mods.SandboxWorld.ClothesWindow.VoiceFemale'
+              : 'Mods.SandboxWorld.ClothesWindow.VoiceOther');
+        // PlayerVoiceID.Sets.Colors（ID/PlayerVoiceID.cs:8）：1 靛蓝/2 桃红/3 青柠
+        dot.style.background = v === 1 ? '#6495ED' : v === 2 ? '#FF69B4' : '#32CD32';
+      };
+      refreshVoice();
+      vbtn.addEventListener('click', () => {
+        this.appearance.voiceVariant = cycleVoiceVariant(this.appearance.voiceVariant);
+        refreshVoice();
+        preview();
+        UISfx.click();
+      });
+      // 音高滑杆：21 档量化（Round(z*20)/20 → Remap 0..1→-1..1 = 0.1 步进,
+      // Main.cs:45440-45451）;变档即预览（原版同款 dummy 试听）
+      const slider = document.createElement('input');
+      slider.className = 'sw-cc-voiceslider';
+      slider.type = 'range';
+      slider.min = '-10'; slider.max = '10'; slider.step = '1';
+      slider.value = String(Math.round((this.appearance.voicePitchOffset ?? 0) * 10));
+      slider.title = Lang.text('Mods.SandboxWorld.ClothesWindow.VoicePitch');
+      slider.setAttribute('aria-label', slider.title);
+      let lastStep = Number(slider.value);
+      slider.addEventListener('input', () => {
+        this.appearance.voicePitchOffset = Number(slider.value) / 10;
+        if (Number(slider.value) !== lastStep) {
+          lastStep = Number(slider.value);
+          preview();
+        }
+      });
+      low.append(el('i', 'sw-cc-vsep'), el('span', 'sw-cc-vlbl',
+        Lang.text('Mods.SandboxWorld.ClothesWindow.Voice')), vbtn, slider);
+    }
     box.appendChild(low);
     this.content.appendChild(box);
     this.scheduleSheetBake(0);

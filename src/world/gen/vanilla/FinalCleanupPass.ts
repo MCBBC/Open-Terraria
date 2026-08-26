@@ -128,6 +128,25 @@ function oceanDepths(st: TileStore, gs: GenState, x: number, y: number): boolean
   return x < gs.beachDistance || x > st.w - gs.beachDistance;
 }
 
+/** Main.tileCut（1457 Main.cs:7918 族全量 41 项）——③ 悬空落体柱生长的「可穿过」
+ *  谓词第二支（TTTTTTT 批：const/s22222 #105 T53>28/T53>397/T0>28 残差定罪——
+ *  原版入口门与 while 均为 `(!active || tileCut[type])`,JS 曾只查 !active →
+ *  生长撞上陶罐(28∈tileCut)/草花等可切格即提前停柱,并把末写格经重扫转成
+ *  硬化沙(397),vanilla 则直接覆写可切格续柱）。同源副本惯例不 import。 */
+const TILE_CUT_FC = new Set([
+  3, 24, 28, 32, 51, 52, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 201,
+  205, 231, 236, 254, 352, 382, 444, 454, 484, 485, 518, 519, 528, 529, 549, 636, 637,
+  638, 654, 655, 711,
+]);
+/** 生成期 tileCut 读数（活性才有效;非活性格走 !active 支短路,残型不参与） */
+function tileCutAt(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const sh = SWEEP_SHEET[st.type[i]];
+  return sh >= 0 && TILE_CUT_FC.has(sh);
+}
+
 // ============================================================
 // TileFrame 全图扫掷仿真 + 写侧（ZZZ 批 2026-08-18，cs:22544 逐格）
 // ============================================================
@@ -2574,7 +2593,8 @@ function fillWallHolesInArea(st: TileStore, gs: GenState): void {
 
 export function runFinalCleanupPass(
   st: TileStore, gs: GenState, rng?: RNG,
-  opts?: { frameSparse?: boolean; stats?: ZzzStats; chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }> },
+  opts?: { frameSparse?: boolean; stats?: ZzzStats; chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>;
+    beforeShimmer?: () => void },
 ): void {
   const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: !!opts?.frameSparse, stats: opts?.stats ?? __zzzLastStats };
   // ★pass 头 tileSolid 翻转（cs:22306 `Main.tileSolid[484] = false`）：滚动仙人掌
@@ -2596,7 +2616,9 @@ export function runFinalCleanupPass(
 
       // ③ 悬空落体柱(cs:22312-22385)
       if (st.flags[t] && !solidTile(st, i, j + 1) && SAND_FALL_BASE.has(type)) {
-        if (j < gs.worldSurface + 10 && !st.flags[st.idx(i, j + 1)]
+        // ★TTTTTTT：入口门第二支 `|| Main.tileCut[type]`（cs:22317）——可切格
+        //   （陶罐 28/草花族）视同空格,柱可直接长入并覆写
+        if (j < gs.worldSurface + 10 && (!st.flags[st.idx(i, j + 1)] || tileCutAt(st, i, j + 1))
           && st.wall[st.idx(i, j + 1)] !== 191 && !oceanDepths(st, gs, i, j)) {
           // 地表带:向下生长同类型柱
           let num = 10;
@@ -2605,7 +2627,9 @@ export function runFinalCleanupPass(
             if (st.flags[kk] && st.type[kk] === TRACK) { num = 0; break; }
           }
           let num2 = j + 1;
-          while (!st.flags[st.idx(i, num2)] && num > 0 && num2 < h - 50) {
+          // ★TTTTTTT：while 谓词同门 `(!active || tileCut[type])`（cs:22341）——
+          //   曾漏第二支 → 柱停在陶罐/可切格前,末写格被主循环重扫转硬化沙
+          while ((!st.flags[st.idx(i, num2)] || tileCutAt(st, i, num2)) && num > 0 && num2 < h - 50) {
             flatten(st, i, num2 - 1);
             st.setTileSilent(i, num2, type);
             flatten(st, i, num2);
@@ -2800,6 +2824,13 @@ export function runFinalCleanupPass(
   }
 
   // ── ShimmerCleanUp（cs:22639→34750，⑭ 之后同 pass 尾段；ZZZ 批补）──
+  //    ★TTTTTTT：原版序=…NotTheBees → GG/Remix → vampire 块 →
+  //    SecretSeed.FinalizeSecretSeeds()（cs:22666,内含无条件 FinalSeedCleanup
+  //    :692/:695 悬空 Falling 块静态化）→ TenthPaintTrees → ShimmerCleanUp。
+  //    本仓 FinalSeedCleanup 曾挂在 generateWorld 尾（finalize 之后）——时点晚于
+  //    dump #105 快照位,mile8 槽 57 对拍把静态化差全记在 #105（const/s22222
+  //    T1>332×11 假债）。opts.beforeShimmer 钩子由 WorldGen 接线 FinalSeedCleanup。
+  opts?.beforeShimmer?.();
   //    苔藓计数平权的关键写侧：r<120 环带内 moss 块→石 1 / 184 苔藓芽+51/56/
   //    229/230/659 击杀（本种子实测 vanilla 侧 625→1×1358 + 184 杀×558）。
   //    r<90 块的 Convert(j,i,0,3)（净化 7×7 菱形）结构性 no-op：微光 pass 塑形

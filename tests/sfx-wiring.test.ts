@@ -246,12 +246,15 @@ function makeMinionHooks(enemyAt?: { x: number; y: number }) {
 }
 
 describe('C. MinionProj.ts 族专属音', () => {
-  it('阿比盖尔 970：首帧召唤音 + 同类>1 升级音', () => {
+  it('阿比盖尔 970：召唤音单播在 UseSound 面（R31 §A③ 收口），同类>1 升级音仍随从侧', () => {
+    // ★2026-08-25 R31 §A③ 双播收口（MinionProj.ts MINION_SUMMON_SFX 注释块）：
+    //   5114→AbigailSummon 已由 Game.playUseSound 经 vanilla-itemusesound.json 单播,
+    //   随从首帧不再播 summon——本断言钉"不双播";升级音(:43974 同类>1)保留随从侧。
     const { hooks, sfx, projectiles } = makeMinionHooks();
     const a = new MinionProj(60 * TILE, 90 * TILE, 970, 6, 2, false, 0, false, () => hooks.player as never as Player);
     projectiles.push(a);                  // 生产侧经 entities.add 入桶（peerCount 计数源）
     a.fixedUpdate(1, hooks);
-    expect(played(sfx, 'abigail_summon')).toHaveLength(1);
+    expect(played(sfx, 'abigail_summon')).toHaveLength(0);   // 单播面在物品使用链
     const b = new MinionProj(61 * TILE, 90 * TILE, 970, 6, 2, false, 1, false, () => hooks.player as never as Player);
     projectiles.push(b);
     b.fixedUpdate(1, hooks);
@@ -270,11 +273,13 @@ describe('C. MinionProj.ts 族专属音', () => {
     m.fixedUpdate(1, hooks);
     expect(played(sfx, 'Item_20')).toHaveLength(1);
   });
-  it('OOA 哨兵 663：放置首帧 dd2_defense_tower_spawn；开火帧 dd2_flameburst_tower_shot', () => {
+  it('OOA 哨兵 663：放置音单播在 UseSound 面（R31 §A③ 收口）；开火帧 dd2_flameburst_tower_shot', () => {
+    // ★2026-08-25 R31 §A③：3818-3834 → DD2_DefenseTowerSpawn 由物品使用链单播,
+    //   哨兵首帧不重播——本断言钉"不双播";开火帧射击音保留随从侧。
     const { hooks, sfx } = makeMinionHooks({ x: 64 * TILE, y: 96 * TILE });
     const s = new MinionProj(60 * TILE, 96 * TILE, 663, 30, 2, true, 0, false, () => hooks.player as never as Player);
     s.fixedUpdate(1, hooks);
-    expect(played(sfx, 'dd2_defense_tower_spawn')).toHaveLength(1);
+    expect(played(sfx, 'dd2_defense_tower_spawn')).toHaveLength(0);
     s.fixedUpdate(1, hooks);              // 进入开火状态机（sFire=1 起手）
     for (let k = 0; k < 14; k++) s.fixedUpdate(1, hooks);   // 第 12t 开火帧
     expect(played(sfx, 'dd2_flameburst_tower_shot').length).toBeGreaterThanOrEqual(1);

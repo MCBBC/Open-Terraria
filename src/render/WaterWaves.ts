@@ -423,18 +423,16 @@ class WaterWaveSystem {
     const gx = noiseAt(0, u * 0.1 * _noiseW, d1v * _noiseH) - noiseAt(0, u * 0.2 * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
     const gy = noiseAt(1, u * 0.1 * _noiseW, d1v * _noiseH) - noiseAt(1, u * 0.2 * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
     // 涟漪高度项：h' = bufR − 0.5（(1−0.4·bufB)=1，1456 bufB=0），钳 ±0.3 取负入 DISPY。
-    // ★waveAmp：波形偏差增益（?wamp=N；与 GLWaterDistortion.uploadWave 同旋钮同值——
-    //   2D bob 路径与 GL 全屏路径表现一致。只放大缓冲偏差=扰动响应，不动噪声底噪）
+    // ★waveAmp：波形偏差增益（?wamp=N；默认 2=2026-08-25 用户对照原版观感校准
+    //   "非常接近原版"；?wamp=1=原样直通。与 GLWaterDistortion.uploadWave 同值）
     const h = this._readR(px, py);
-    //   默认 2=2026-08-25 用户校准"刚刚好"（1×入水扰动 ~1-2px 被环境噪声淹没）
-    const waveAmp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 1; } catch { return 1; } })();
+    const waveAmp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 2; } catch { return 2; } })();
     const hClamp = Math.min(0.3, Math.max(-0.3, (h - 0.5) * waveAmp));
     const I = this.intensity;
     const dispx = gx * 0.1 * I;
     const dispy = gy * 0.1 * I - hClamp;
-    // ★0.1 因子两项统一（:73 合成后 ×c14；c5=32/res）——曾漏乘波场项 10 倍
-    out[0] = dispx * 3.2;   // dispx·0.1·32
-    out[1] = dispy * 3.2;   // dispy·0.1·32
+    out[0] = dispx * 0.1 * 32;   // c14.x=0.1 × c5=32/res × res
+    out[1] = dispy * 32;         // c14.y=1.0
   }
 
   /** 波光 tint 量（obj19 :106-111 精确解码，2026-08-25 反汇编订正）：

@@ -4,6 +4,7 @@ import { parseSeed } from '../world/gen/SeedEasterEggs';
 import { randomWorldName } from '../i18n/RandomText';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
+import { UISfx } from '../vui/UISfx';
 
 export interface WorldCreationFlow {
   onCreate(cfg: { name: string; seed: string; w: number; h: number; /** 尺寸档 0 小/1 中/2 大（SIZES 下标；GenConfig.size 直传，W/H 与之同源派生） */ size: number; difficulty: number; evil: -1 | 0 | 1 }): void;
@@ -260,6 +261,8 @@ export class WorldCreationPanel {
     draw();
   }
 
+  /** 上次解析的种子图标键——menu_accept 的「首次命中」判定基线 */
+  private lastSeedKey = '';
   private refreshSeedIcon() {
     const seed = (this.panel.querySelector('[data-f=seed]') as HTMLInputElement).value.trim();
     const { flags } = parseSeed(seed);
@@ -274,6 +277,15 @@ export class WorldCreationPanel {
       : flags.remix ? 'Seed_Remix'
       : flags.vampireSeed ? 'Seed_Secret'   // 秘密种子通用图标（吸血鬼 1.4.5 无专属图标）
       : 'Seed_Normal';
+    // 输入即响（UIWorldCreation.cs:842 输入回调内 CheckInputForSecretSeed 命中且未启用 →
+    //   WorldGen.SecretSeed.Enable(secretSeed)（WorldGen.cs:532-546,playSound 缺省 true）
+    //   → SoundEngine.PlaySound(seed._sound)；全部秘密种子 _sound=SoundID.MenuAccept
+    //   （WorldGen.cs:341-379 Register 统一传参））。本仓 parseSeed 是纯函数无 Enabled
+    //   生命周期,以「图标键从普通切到任一秘密种子」为首次命中拍——同键续敲/回改普通不重播
+    if (key !== this.lastSeedKey && key !== 'Seed_Normal') {
+      UISfx.sfx.playWavFile('menu_accept');
+    }
+    this.lastSeedKey = key;
     (this.seedIcon as HTMLImageElement).src = `sprites/vanilla-ui/UI_WorldCreation_${key}.png`;
   }
 

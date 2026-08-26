@@ -84,7 +84,11 @@ describe('修复3：94 水晶风暴（aiStyle 24，P.cs:24302-24326）', () => {
     a.fixedUpdate(1 / 60, game);
     expect(a.vx).toBeCloseTo(9.85, 5);                          // :24317
     expect(a.vy).toBeCloseTo(3.94, 5);
-    expect(a.lightRGB![0]).toBeCloseTo(1.2 * 0.5, 5);           // :24304
+    // light 色：ProjLight :16380-16382 type94 → R×0.5/G×0/B=light（紫光,commit 033cc029
+    // 依原版修正"曾发白光"）——R=l94×0.5=scale×0.25、B=scale×0.5
+    expect(a.lightRGB![0]).toBeCloseTo(1.2 * 0.25, 5);          // :24304 + :16380-16382
+    expect(a.lightRGB![1]).toBe(0);
+    expect(a.lightRGB![2]).toBeCloseTo(1.2 * 0.5, 5);
   });
 
   it('ai[1]>130 后缩径，scale 0.2 消亡（:24318-24325）', () => {

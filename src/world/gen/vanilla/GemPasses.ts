@@ -53,7 +53,10 @@ function placeUncheckedInitial(st: TileStore, x: number, y: number, preferSmall:
   const put = (xx: number, yy: number, fx: number, fy: number): void => {
     if (!st.inBounds(xx, yy)) return;
     const i = st.idx(xx, yy);
-    st.type[i] = STALACTITE_TILE; st.flags[i] = 1; st.slope[i] = 0;
+    // ★SSSSSSS：ClearSlope 全语义（Tile.cs:158-163 = slope(0)+halfBrick(false)）——
+    //   曾只清 slope：非活性格残留 half=1 被钟乳石继承
+    //   （s22222 #103 H0>1×1 @(2012,610) / const #103 H0>1×2 @(3209,417) 实锤）。
+    st.type[i] = STALACTITE_TILE; st.flags[i] = 1; st.slope[i] = 0; st.half[i] = 0;
     st.frameX[i] = fx; st.frameY[i] = fy;
   };
   if (solidTileAt(st, x, y - 1) && !st.flags[st.idx(x, y)] && !st.flags[st.idx(x, y + 1)]) {

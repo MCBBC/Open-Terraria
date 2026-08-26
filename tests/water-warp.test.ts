@@ -34,7 +34,7 @@ describe('GLWaterDistortion.FRAG：obj19 位移公式锁（防漂移）', () => 
     expect(f).toContain('gy * 0.1 * uIntensity - clamp(h - 0.5, -0.3, 0.3)');
   });
 
-  it('屏幕位移量：(DISPX·0.1, DISPY)·32 —— c14.x=0.1/c14.y=1 × c5=32·opacity/res × res', () => {
+  it('屏幕位移量：(DISPX·0.1, DISPY)·32 —— c14.x=0.1/c14.y=1 × c5=32·opacity/res × res（★经验定版：反汇编 swizzle 解码多义，以用户对照原版观感校准为准 wamp=2）', () => {
     expect(f).toContain('vec2(dispx * 0.1, dispy) * 32.0');
     expect(f).toContain('vUv + disp / uCssSize');
   });

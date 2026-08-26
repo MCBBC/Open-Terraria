@@ -39,15 +39,30 @@ describe('环境声三表数据对账', () => {
     expect(IDLE_SOUNDS[391]?.range).toEqual([86, 87]);                      // Scutlix
     expect(Object.keys(IDLE_SOUNDS).length).toBeGreaterThanOrEqual(47);
   });
-  it('闲话表:僵尸 1/1000 / 木乃伊 Zombie_3 / 吸血鬼 Zombie_7', () => {
+  it('闲话表:僵尸 1/1000 / 木乃伊 Zombie_3+4 池 / 血僵尸三变体池 / 吸血鬼 Zombie_7', () => {
     expect(CHATTER_SOUNDS[3]).toEqual({ denom: 1000, file: 'Zombie_0' });
-    expect(CHATTER_SOUNDS[78]).toEqual({ denom: 500, file: 'Zombie_3' });
+    // 木乃伊四型（NPC.cs:57926-57928 → LSP.cs:972-981 case26 Next(3,5)=Zombie_3/4 ×0.9）
+    expect(CHATTER_SOUNDS[78]).toEqual({ denom: 500, file: 'Zombie_3', pool: ['Zombie_3', 'Zombie_4'] });
+    expect(CHATTER_SOUNDS[630]?.pool).toEqual(['Zombie_3', 'Zombie_4']);
+    // 血僵尸 489/僵尸鱼人 586（:57922-57924 → LSP.cs:808-816 case14 Next(21,24)=21/22/23 ×0.4）
+    const bloodPool = ['Zombie_21', 'Zombie_22', 'Zombie_23'];
+    expect(CHATTER_SOUNDS[489]).toEqual({ denom: 800, file: 'Zombie_21', pool: bloodPool });
+    expect(CHATTER_SOUNDS[586]).toEqual({ denom: 800, file: 'Zombie_21', pool: bloodPool });
     expect(CHATTER_SOUNDS[159]).toEqual({ denom: 500, file: 'Zombie_7' });
     expect(CHATTER_SOUNDS[269]?.denom).toBe(1000);                          // 地牢骨铠
   });
-  it('Critter 表:鸭 1/200 白天 / 青蛙 still / 鸟清晨池', () => {
+  it('Critter 表:鸭 1/200 白天+rare 1/300 / 枭 rare 三均分 / 青蛙 still / 鸟清晨池', () => {
     expect(CRITTER_SOUNDS[362]?.denom).toBe(200);
     expect(CRITTER_SOUNDS[362]?.gate).toBe('day');
+    // 鸭族稀有变体（LSP.cs:1105-1114 case30 Next(300)==0 换 Zombie_12）——四型同档
+    for (const t of [362, 363, 364, 365]) {
+      expect(CRITTER_SOUNDS[t]?.rare).toEqual({ denom: 300, files: ['Zombie_12'] });
+    }
+    // 枭族稀有变体（LSP.cs:1074-1093 case46 Next(300)==0 三均分 {112,113,114}）
+    for (const t of [611, 689]) {
+      expect(CRITTER_SOUNDS[t]?.rare)
+        .toEqual({ denom: 300, files: ['Zombie_112', 'Zombie_113', 'Zombie_114'] });
+    }
     expect(CRITTER_SOUNDS[361]?.gate).toBe('still');
     // 鸟 74：原版 Next(3)!=0→style14(2/3) else style18(1/3)——重复项表达精确权重(R22)
     expect(CRITTER_SOUNDS[74]?.pool).toEqual(['Zombie_14', 'Zombie_14', 'Zombie_18']);
@@ -58,10 +73,14 @@ describe('环境声三表数据对账', () => {
     for (const s of Object.values(IDLE_SOUNDS)) {
       for (let n = s.range[0]; n < s.range[1]; n++) files.add(`Zombie_${n}`);
     }
-    for (const c of Object.values(CHATTER_SOUNDS)) files.add(c.file);
+    for (const c of Object.values(CHATTER_SOUNDS)) {
+      files.add(c.file);
+      for (const f of c.pool ?? []) files.add(f);   // B2 批:闲话池化(Zombie_4/23 首次入表)
+    }
     for (const c of Object.values(CRITTER_SOUNDS)) {
       files.add(c.file);
       for (const f of c.pool ?? []) files.add(f);
+      for (const f of c.rare?.files ?? []) files.add(f);   // B2 批:rare 稀有变体槽
     }
     files.add('Pixie'); files.add('Roar_1'); files.add('NPC_Killed_9');
     files.add('NPC_Hit_11'); files.add('Zombie_109');

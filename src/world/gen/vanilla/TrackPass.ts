@@ -35,6 +35,7 @@ import { idsByVanillaSheet } from './TileRunner';
 import { genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { TRACK_TILE, frameTrack } from '../../MinecartTrack';
 import { vanGenSolidType } from './GenSolid';
+import { hfIs1457 } from './HellFortPass';
 
 /** FFFFF 探针:placePath 逐列步进钩(harness _wwwrep 经 __setTrackStepProbe 安装;
  *  缺省 undefined 零开销)。loop 1=清轨巷遍/2=铺轨遍。 */
@@ -162,12 +163,24 @@ function makeTileDustRoll(rng: RNG, sheet: number, fx: number): void {
   }
 }
 
-/** TrackGenerator.InvalidWalls(TrackGenerator.cs:44-48) */
+/** TrackGenerator.InvalidWalls(TrackGenerator.cs:44-48)。
+ *  ★SSSSSSS：NTB 豁免 wall!=108(cs:460 `(!notTheBees || wall != 108)`,1456/1457 同款)
+ *  曾漏接——消费在 isLocationInvalid。 */
 const INVALID_WALLS = new Set([7, 94, 95, 8, 98, 99, 9, 96, 97, 3, 83, 68, 62, 78, 87, 86, 42, 74, 27, 149]);
-/** TrackGenerator.InvalidTiles(cs:50-56) */
-const INVALID_TILES = idsByVanillaSheet(
+/** NTB 豁免墙(108=grass wall 族):notTheBees 世界不因该墙拒位 */
+const NTB_EXEMPT_WALL = 108;
+/** TrackGenerator.InvalidTiles(cs:50-56)。
+ *  ★SSSSSSS 定罪(#97 矿轨掷差 long Δ+63/std Δ−174 的第一环)：JS 曾按 1456 的
+ *  37 项表移植;1457 在表尾追加 {141 Explosives, 411 Detonator, 21 Chest,
+ *  467 Containers2(DeadMan'sChest), 88 Dressers}(TrackGenerator.cs:50-57,1457 形
+ *  =42 项)。认证口径 SW_MB_1457=1 下缺项 → 含这五型的格 JS 判 Available 而 x86 判
+ *  Invalid → findPath 历史改写路径分叉(金标种子实测首差格 (829,717)=Detonator:
+ *  x86 r2/JS r0,事件流第 777 位分叉)→ PlacePath 掷耗 ±漂移并级联 std-track/lava。
+ *  双态门 hfIs1457():1456 缺省形保持旧 37 项(与 VVVVVV 迁移战役约定一致)。 */
+const INVALID_TILES_1456 = idsByVanillaSheet(
   383, 384, 15, 304, 30, 321, 245, 246, 240, 241, 242, 16, 34, 158, 377, 94, 10, 19, 86, 219,
   484, 190, 664, 665, 41, 43, 44, 226, 237, 711, 712, 713, 714, 715, 716, 379, 314);
+const INVALID_TILES_1457_EXTRA = idsByVanillaSheet(141, 411, 21, 467, 88);
 /** TileID.Sets.GeneralPlacementTiles = false 全集(TileID.cs:311,default true) */
 const PLACEMENT_BLOCKED = idsByVanillaSheet(
   225, 41, 481, 43, 482, 44, 483, 226, 203, 112, 25, 70, 151, 21, 31, 696, 467, 12, 665, 639,
@@ -221,10 +234,15 @@ export class TrackGenerator {
   private destroyObj = false;
   /** WorldGen.fossilBreak 实例旗(attemptFossilShatter 递归门) */
   private fossilBreak = false;
+  /** IsLocationInvalid 的 InvalidTiles 表(SSSSSSS 双态):1457 追加五型 */
+  private readonly invalidTiles: Set<number>;
 
   constructor(st: TileStore, gs: GenState, chests?: ReadonlyArray<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>) {
     this.st = st;
     this.gs = gs;
+    this.invalidTiles = hfIs1457()
+      ? new Set([...INVALID_TILES_1456, ...INVALID_TILES_1457_EXTRA])
+      : INVALID_TILES_1456;
     // CanDestroyChest(cs:590-607)镜像:锚位格 → 是否有货箱(CanKillTile 箱支消费;
     // 生成期箱皆有货 → 恒"不可毁"——保守按有货判,箱族/音乐盒 235 帧锚位入表)
     if (chests) {
@@ -999,6 +1017,8 @@ export class TrackGenerator {
     return state;
   }
 
+
+
   private calcState(x: number, y: number): number {
     for (let i = 0; i < 6; i++) {
       if (this.isLocationInvalid(x, y - i)) return INVALID;
@@ -1051,13 +1071,16 @@ export class TrackGenerator {
     if (y <= oceanLevel && (x < gs.beachDistance || x > st.w - gs.beachDistance)) return true;
     // dualDungeons 分支未接(无 DungeonUtils)
     const idx = st.inBounds(x, y) ? st.idx(x, y) : -1;
-    if (idx >= 0 && INVALID_WALLS.has(st.wall[idx])) return true;
-    if (idx >= 0 && st.flags[idx] && INVALID_TILES.has(st.type[idx])) return true;
-    // 邻列 general placement 屏蔽(cs:470-476)
+    // NTB 豁免:wall 108 不拒位(cs:458-464 `(!notTheBees || wall != 108)`)
+    if (idx >= 0 && INVALID_WALLS.has(st.wall[idx])
+      && !(gs.seedFlags.notTheBees && st.wall[idx] === NTB_EXEMPT_WALL)) return true;
+    if (idx >= 0 && st.flags[idx] && this.invalidTiles.has(st.type[idx])) return true;
+    // 邻列 general placement 屏蔽(cs:470-476);NTB 豁免 225(cs:472 同款三目)
     for (let k = -1; k <= 1; k++) {
       if (!st.inBounds(x + k, y)) return true;
       const nidx = st.idx(x + k, y);
-      if (st.flags[nidx] && st.type[nidx] !== TRACK_TILE && PLACEMENT_BLOCKED.has(st.type[nidx])) return true;
+      if (st.flags[nidx] && st.type[nidx] !== TRACK_TILE && PLACEMENT_BLOCKED.has(st.type[nidx])
+        && !(gs.seedFlags.notTheBees && SHEET_OF[st.type[nidx]!] === 225)) return true;
     }
     return false;
   }

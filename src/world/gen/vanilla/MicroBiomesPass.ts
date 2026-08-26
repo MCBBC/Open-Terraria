@@ -2038,6 +2038,12 @@ function placeEnchantedSwordShrine(
     const i = st.idx(px, py);
     st.type[i] = GRASS; st.flags[i] = 1;                    // SetTile(2)
     st.frameX[i] = 0; st.frameY[i] = 0; st.slope[i] = 0; st.half[i] = 0;
+    // ★RRRRRRR（2026-08-26）：vanilla SetTile(2) 默认 clearTile=true（Actions.cs:213/
+    //   221-227）→ tile.Clear(~(Wiring|Actuator)) **连墙带液全清**。曾只写块不清墙：
+    //   洞穴顶行轮廓格残留天然墙 244 → ⑬ PlaceWall 四邻 SquareWallFrame 中心掷多
+    //   消耗 7×Next(0,3)（x86 ctr/nbr 分账 863+1663 vs JS 863+1670 定罪），剑冢段
+    //   总掷差 +4 的主源；尾段全链切片漂移由此起。
+    st.wall[i] = 0; st.liquid[i] = 0; st.liquidType[i] = 0;
     // ★BBBBBB：SetFrames(frameNeighbors:true) 五连（cs:78）——同 ⑨ 补掷
     genFrameNeighbors(st, rng, px, py, 'setTile');
   }
@@ -2055,7 +2061,10 @@ function placeEnchantedSwordShrine(
   // ⑬ 花墙 68 + 藤蔓(cs:80):Chain(PlaceWall(68), OnlyTiles(2), Offset(0,1),
   //    ActionVines)——★BBBBBB：**同一格流内顺序执行**(每格 PlaceWall→门→vines)，
   //    曾拆两个 each=先全墙后全藤，vines 长度掷(int(3,5))与墙帧掷(Next(0,3))交错
-  //    序错位(22222 全序列 #84078 van=b3,6 vs js=b0,3 定谳)
+  //    序错位(22222 全序列 #84078 van=b3,6 vs js=b0,3 定谳)。
+  //    ★RRRRRRR 分账基准（x86 ctr/nbr 插桩实测）：PlaceWall.Apply=中心
+  //    SquareWallFrame（墙 68 非大框恒掷 Next(0,3)）+四邻 SquareWallFrame（各中心
+  //    reset=true，按邻格旧墙 ≠0 且非大框才掷）——本洞实例 863+1663+171(vines)=2697。
   cave.each((dx, dy) => {
     const px = pointX + dx, py = pointY + dy;
     if (!st.inBounds(px, py)) return;
@@ -2102,6 +2111,10 @@ function placeEnchantedSwordShrine(
           if (!st.flags[i2] || st.type[i2] !== SAND) continue;     // OnlyTiles(53)
           st.type[i2] = HARDSAND_TILE;                             // SetTile(397)
           st.frameX[i2] = 0; st.frameY[i2] = 0;
+          // ★RRRRRRR：SetTile(397) 默认 clearTile=true → Clear(~(Wiring|Actuator))
+          //   连墙带液清（与 ⑪ 轮廓格同款；入口支此前漏清）
+          st.wall[i2] = 0; st.liquid[i2] = 0; st.liquidType[i2] = 0;
+          st.slope[i2] = 0; st.half[i2] = 0;
           // ★BBBBBB：SetTile(397).Output(data)（cs:84）——硬化格并入 data（HashSet
           //   重复 add 无害，枚举序=槽序）
           shaft.add(dx + i, dy + j);

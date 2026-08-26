@@ -847,6 +847,15 @@ export class StormLightning extends Entity {
       game.spawnParticles(this.cx, this.cy, '#3C78FF', 1, 1.2, { life: 14, grav: 0, damp: 0.92 });
     }
     const prog = this.t / this.life;
+    // ★回炉：风窗粒子连续撒（vanilla :40518-40526 每拍 P<=prog×0.2——曾仅 t=15%
+    //   一发 6 粒=光球期 2/3 屏时几乎无粒子=用户"很暗"主源之一）
+    if (this.t > 1 && Math.random() <= prog * 0.55) {
+      const [wr, wg2, wb] = this.boltColor;
+      game.spawnParticles(this.cx + (Math.random() * 2 - 1) * 10,
+        this.cy + (Math.random() * 2 - 1) * 10,
+        `rgb(${Math.round(wr * 255)},${Math.round(wg2 * 255)},${Math.round(wb * 255)})`,
+        2, 1.4, { life: 14, grav: -0.01, damp: 0.92 });
+    }
     if (this.t === Math.floor(this.life * 0.15)) {
       // ★闪电之击专项：windup 音=NPCHit34（:40507 vol=Lerp(.4,1,室外天气强度)）——
       //   资产无 npchit_34.wav，取电花特征最近的 dd2_lightning_aura_zap_0-3（近似登记）
@@ -1096,9 +1105,21 @@ export class StormLightning extends Entity {
       // 飞行期本体贴图（:40450-40455 光强包络近似亮度）
       const img = projSprite(this.projId);
       const T = this.t / this.life;
-      const glow = Math.sqrt(Math.max(0, 1 - Math.pow(2 * Math.min(1, T / 0.5) - 1, 2))) * 0.3 + 0.4;
+      const glow = Math.sqrt(Math.max(0, 1 - Math.pow(2 * Math.min(1, T / 0.5) - 1, 2))) * 0.3 + 0.75;   // ★回炉:底亮 0.4→0.75(悬浮期光球可读性)
+      // ★回炉:加算白芯辉光盘（vanilla 风窗粒子云的观感等价——贴图本体是暗蓝小纹,
+      //   仅 source-over 叠画=用户实拍"很暗"的 orb 期主源）
+      const [gcr, gcg, gcb] = this.boltColor;
       ctx.globalAlpha = Math.max(0.15, Math.min(1, glow));
       ctx.translate(this.cx, this.cy);
+      // ★辉光盘必须在 translate 之后（曾画在世界原点=不可见）
+      ctx.globalCompositeOperation = 'lighter';
+      const grd = ctx.createRadialGradient(0, 0, 1, 0, 0, 16);
+      grd.addColorStop(0, `rgba(255,255,255,${(0.85 * glow).toFixed(3)})`);
+      grd.addColorStop(0.45, `rgba(${Math.round(gcr * 255)},${Math.round(gcg * 255)},${Math.round(gcb * 255)},${(0.5 * glow).toFixed(3)})`);
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grd;
+      ctx.fillRect(-16, -16, 32, 32);
+      ctx.globalCompositeOperation = 'source-over';
       ctx.imageSmoothingEnabled = false;
       if (img && img.width > 0) {
         ctx.drawImage(img, -img.width / 2, -img.height / 2);
@@ -1146,10 +1167,17 @@ export class StormLightning extends Entity {
       const K = 6;
       for (let k9 = 0; k9 < K; k9++) {
         const v9 = (k9 + 0.5) / K;
-        const gain = stormTexBrightness(r9, v9) * 8 * opacity * intensity;
-        const e9r = Math.min(255, cr * 255 * gain);
-        const e9g = Math.min(255, cg * 255 * gain);
-        const e9b = Math.min(255, cb * 255 * gain);
+        const lut = stormTexBrightness(r9, v9);
+        // ★C2 勘误（字节码 :3207-3210 writemask）：×8×uOpacity×uSaturation 增益链
+        //   只写 r0.x【红通道】——末指令 mul r0.xyzw,r0,v0 逐通道展开后 G/B=
+        //   tex.g/b×vColor 不吃增益。曾三通道全乘 → 边带亮度比 2.77× 偏差
+        const gainR = lut * 8 * opacity * intensity;
+        // vColor=StormLightningDrawer 白顶点色（StripColors=White——蓝调由风窗粒子/
+        //   光 tint 承担;曾用 GetLightningColor 蓝基 → C2 分通道后亮度重心崩塌）
+        const wcr = 1 - (1 - cr) * 0.35, wcb = 1 - (1 - cb) * 0.35;
+        const e9r = Math.min(255, wcr * 255 * gainR);
+        const e9g = Math.min(255, 255 * lut * (1 - (1 - cg) * 0.35));
+        const e9b = Math.min(255, wcb * 255 * lut);
         if (e9r + e9g + e9b < 6) continue;
         const sw0 = w0 / K, sw1 = w1 / K;
         const o0 = -w0 / 2 + k9 * sw0, o1 = -w1 / 2 + k9 * sw1;
@@ -1262,8 +1290,11 @@ export class GlacierFangShot extends Entity {
       // 审计 ❌ 修复——蓄力最长 60 拍(慢施 ÷2.5=150t)远超 useTime,不续期则白嫖魔力）
       p.onChannelManaHold?.();
       // ★手持动画续期（channel 语义:蓄力期 itemAnimation 钉满,手持法杖全程举向
-      //  鼠标不脱落——swing 窗 24t 远短于蓄力,不续则法杖中途消失,用户实报）
-      game.refreshChannelItem?.();
+      //  鼠标不脱落——swing 窗 24t 远短于蓄力,不续则法杖中途消失,用户实报）。
+      //  ★aim 同步续期（:50382 itemRotation 逐帧跟鼠标——曾冻结在出手瞬间,
+      //  鼠标一动法杖与冰矛分离=冰矛"长在身上"不挂杖,用户实报）
+      const mAim = this.ctl.aim();
+      game.refreshChannelItem?.(Math.atan2(mAim.y - p.cy, mAim.x - p.cx));
       this.life = 300;                                       // :37596 timeLeft=300 每拍重置
       const m = this.ctl.aim();
       // 挂手：RotatedRelativePoint(MountedCenter) − Size/2（:37587）
@@ -1786,6 +1817,9 @@ export class BookStormTwister extends Entity {
   private life = 300;            // ai[0] 帽 300（localAI[0]≥16 → 285,简化取 300 登记）
   private localAI0 = 0;
   private hitCd = new HitCdImpl();
+  /** 循环轨句柄(:71434-71447 soundDelay==0 首拍起播,localAI[1] 存 SlotId)——
+   *  GameHooks.startLoopSfx 返回面的结构化类型(与 types.ts :169 同构) */
+  private loop: { stop(): void; setVolume(v: number): void; readonly playing: boolean; readonly dead: boolean } | null = null;
 
   constructor(x: number, y: number, vx: number, damage: number, knockback: number) {
     super();
@@ -1798,7 +1832,19 @@ export class BookStormTwister extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
-    if (this.t >= this.life) { this.dead = true; return; }      // :71454-71457
+    // 循环音(:71434-71447)：首拍 PlayTrackedSound 起轨;每 tick Volume=
+    // 1−max(ai[0]−(life−15),0)/15(末 15t 线性归零)。★位置跟身(activeSound.Position=
+    // Center)本仓循环轨无此通道,龙卷横移慢+轨短,简化为定源登记。
+    if (this.t === 1) {
+      this.loop = game.startLoopSfx?.('dd2_book_staff_twister_loop', 1, 1) ?? null;
+    } else {
+      this.loop?.setVolume(Math.max(0, 1 - Math.max(this.t - (this.life - 15), 0) / 15));
+    }
+    if (this.t >= this.life) {
+      this.loop?.stop();
+      this.dead = true;
+      return;
+    }                                                      // :71454-71457
     // 垂直物理（:71467-71510）：身下 16×160 探测柱
     const probeX = this.cx - 8, probeYTop = this.y + this.h - 160;
     let blocked = false;

@@ -206,6 +206,9 @@ export const FILE_CASE_VOL: Record<string, number> = (() => {
     [210, 0.35],   // R4-37：GlacierFang_Charging（LegacySoundPlayer.cs:579 case 210 ×0.35）
   ];
   for (const [s, v] of itemVol) m[`Item_${s}`] = v;
+  // ---- 现代音库单件（SoundID.cs CreateTrackable 的 WithVolume——style 内建档,
+  //   调用方传 1 即原版语义）----
+  m.sonar_potion = 0.65;   // SoundID.cs:1128 SonarPotion.WithVolume(0.65f)——咬钩提示音
   // case 19 Splash（:870-909）：styles 2/3 ×0.75（:876-879）、4/5 ×0.75（:880-883，微光/岩浆对）
   m.Splash_2 = 0.75; m.Splash_3 = 0.75; m.Splash_4 = 0.75; m.Splash_5 = 0.75;
   // case 29 Zombie 怪物声（:1007-1049）：24-87 ×0.5、88-91 ×0.7、92 ×0.5、93-99 ×0.4、
@@ -216,6 +219,9 @@ export const FILE_CASE_VOL: Record<string, number> = (() => {
   //   曾按文件名统一乘 → 蠕虫掘地被压 1/4,2026-08-18 修正
   m.Zombie_109 = 0.3;  // case45 Dolphin(:1063 ×0.3)——海豚跃出声
   m.Zombie_7 = 0.4;    // case14 style542(:793-799 沙鲨出沙扑咬 = Zombie_7 ×0.4)
+  // case14 style489/586 分支（:808-816,Next(21,24)=Zombie_21/22/23）两分支都 ×0.4
+  //   （:803/:813）——血僵尸 489/僵尸鱼人 586 闲话池（曾缺档在播偏大 ~2.5×）
+  m.Zombie_21 = 0.4; m.Zombie_22 = 0.4; m.Zombie_23 = 0.4;
   for (let s = 88; s <= 91; s++) m[`Zombie_${s}`] = 0.7;
   m.Zombie_92 = 0.5;
   for (let s = 93; s <= 99; s++) m[`Zombie_${s}`] = 0.4;
@@ -299,11 +305,21 @@ export const PITCH_CASE: Record<string, [number, number] | null> = (() => {
   m.Item_156 = [-10, 10];    // :628 ×0.002
   m.Item_169 = [-86, -74];   // :642 默认档后 Pitch -= 0.8
   m.Item_26 = null; m.Item_35 = null; m.Item_47 = null;   // :634-637 Pitch=Main.musicPitch(乐器直传不随机)
+  // 鼓槌十档(LegacySoundPlayer.cs:1238-1245 case53-62→Item_139..148):数字型支无 Pitch
+  // 赋值(仅 ×0.7 音量)——2026-08-25 音频对账收口,勿吃 case2 默认 ±0.06 抖动
+  for (let d = 139; d <= 148; d++) m[`Item_${d}`] = null;
   // —— 宠物史莱姆受击语音（SoundID.cs WithPitchVariance(0.4),vanillaNpcAmbience 表注同源）——
   put(['player_hit_balloon', 'player_hit_cat', 'player_hit_chicken', 'player_hit_chicken_rare',
     'player_hit_crow', 'player_hit_dog', 'player_hit_fairy', 'player_hit_frog',
     'player_hit_goat', 'player_hit_goblin', 'player_hit_retro', 'player_hit_turkey',
     'player_hit_undead', 'player_hit_vampire'], [-40, 40]);
+  // —— 系统单件接线批补档（WithPitchVariance(v) ≡ ±v×100 档,同 player_hit_* 约定）——
+  m.Double_Jump = [-10, 10];   // LSP.cs:846-857 case16 Pitch=Next(-10,11)×0.01（多段跳族）
+  m.best_reforge = [-10, 10];  // SoundID.cs:1122 BestReforge.WithPitchVariance(0.1f)
+  m.sonar_potion = [-3, 3];    // SoundID.cs:1128 SonarPotion.WithPitchVariance(0.03f)
+  // —— 玩家语音批（voiceVariant/语音饰品子系统,PlayerVoice.ts 消费）——
+  m.player_hit_default = [-20, 20];   // SoundID.cs:1138 DefaultPlayerHurt.WithPitchVariance(0.2f)
+  m.player_death_retro = [-40, 40];   // :1152 RetroDeath.WithPitchVariance(0.4f)
   return m;
 })();
 

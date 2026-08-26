@@ -197,6 +197,9 @@ export class PetFollower extends Entity {
   /** 动画帧与帧内计时（原版 frame/frameCounter） */
   private frame = 0;
   private frameAcc = 0;
+  /** 957 弹跳休息计时（原版 localAI[0]：200+rand(150) 掷息 / 移动重置 300——
+   *  Projectile.cs:36155/:36185/:36199；初值 0 = 首次静止即弹跳，同原文） */
+  private restT = 0;
   /** 慢速计时（bob 相位 / legacy 正弦浮动共用） */
   private animTick = 0;
   /** aiStyle 67 滚动角（rotation += vx/roll） */
@@ -234,7 +237,7 @@ export class PetFollower extends Entity {
       } else {
         this.vx = 0; this.vy = 0;
       }
-      if (this.params) this.stepAnim(this.params);
+      if (this.params) this.stepAnim(this.params, game);
       return;
     }
     const R = this.params;
@@ -244,7 +247,7 @@ export class PetFollower extends Entity {
       case 'fly': this.flyAI(p, R); break;
       case 'hover': this.hoverAI(p, R); break;
     }
-    this.stepAnim(R);
+    this.stepAnim(R, game);
   }
 
   // =============== 地面跳跃族（aiStyle 26 地面子型 + aiStyle 67 滚地族） ===============
@@ -509,7 +512,8 @@ export class PetFollower extends Entity {
   //           frameCounter += |vx|，>6 进帧）；
   //   fly：匀速循环全表（移动 4t/帧、待机 8t/帧）；
   //   hover：AI_144/124 原版双速率（待机 idleRate/移动 moveRate，vel>6 判移动）。
-  private stepAnim(R: PetParams): void {
+  //   ★957 GlommerPet 走专支（见 case 'hover' 头部注释）。
+  private stepAnim(R: PetParams, game?: GameHooks): void {
     const frames = Math.max(1, R.e.frames ?? 1);
     if (frames <= 1) { this.frame = 0; return; }
     switch (R.family) {
@@ -530,6 +534,39 @@ export class PetFollower extends Entity {
         break;
       }
       case 'hover': {
+        // ---- ★B1 接线批：957 GlommerPet 待机弹跳专支（Projectile.cs:36126-36205，
+        // aiStyle124 内联 type==957 段）——静止(v≤0.01)且中心列探针过（下方连续 4 格
+        // 非实+第 5 格实，SolidTileAllowBottomSlope :36138-36160）时进入弹跳段：
+        // localAI[0] 归零后帧跳 num936×2=24 起、3t/帧（帧≤30 段 2t/帧——原文
+        // `frame<=30 && frame<=33` 两条件同域取严 :36166-36168），36 归零并掷休息
+        // 计时 200+rand(150)；休息期与移动期同档 4t/帧扫 0..23（:36190-36205）。
+        // 帧==32 触发 GlommerBounce（:36173-36174；SoundID.cs:1054 双变体 ×0.5）
+        // ——触发点在推进器单点自增内，同帧天然不重复。其余 hover 族维持原近似。 ----
+        if (this.projId === 957 && game && frames === 12) {
+          const resting = Math.hypot(this.vx, this.vy) <= 0.01 && this.glommerGroundProbe(game);
+          if (!resting) {
+            this.restT = 300;                                   // :36161/:36199 移动/悬空重置
+            if (++this.frameAcc >= 4) { this.frameAcc = 0; this.frame = (this.frame + 1) % 24; }
+            break;
+          }
+          if (--this.restT > 0) {                               // 休息期慢扫（:36190-36198）
+            if (++this.frameAcc >= 4) { this.frameAcc = 0; if (++this.frame >= 24) this.frame = 0; }
+            break;
+          }
+          this.restT = 0;
+          if (this.frame < 24) this.frame = 24;                 // 入弹跳段先跳 24（:36164-36165）
+          if (++this.frameAcc >= (this.frame <= 30 ? 2 : 3)) {
+            this.frameAcc = 0;
+            this.frame++;
+            if (this.frame >= 36) {                             // 弹跳收拍 → 掷下一轮计时
+              this.restT = 200 + Math.floor(Math.random() * 150);
+              this.frame = 0;
+              break;
+            }
+            if (this.frame === 32) game.playSfxFiles(['glommer_bounce_0', 'glommer_bounce_1'], 0.5, this.cx, this.cy);
+          }
+          break;
+        }
         const e = R.e;
         const rate = Math.hypot(this.vx, this.vy) > 6
           ? (e.moveRate ?? 4) : (e.idleRate ?? 6);
@@ -543,6 +580,19 @@ export class PetFollower extends Entity {
     }
   }
 
+  /** 957 地面探针（Projectile.cs:36138-36160）：中心格起下探 5 格——前 4 格全非实、
+   *  第 5 格实心才许弹跳。SolidTileAllowBottomSlope 以本仓 isSolid 近似（jumpPick
+   *  同口径），越界=不可弹跳（原文坐标钳同样置 false） */
+  private glommerGroundProbe(game: GameHooks): boolean {
+    const st = game.world.store;
+    const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+    for (let i = 0; i < 5; i++) {
+      if (!st.inBounds(tx, ty + i)) return false;
+      if ((st.isSolid(tx, ty + i)) !== (i === 4)) return false;
+    }
+    return true;
+  }
+
   // ===================== 绘制 =====================
   draw(r: Renderer, _cam: Camera): void {
     const img = r.atlas?.ensureVImage(`vanilla/Projectile_${this.projId}.png`);
@@ -553,8 +603,19 @@ export class PetFollower extends Entity {
     // 竖排帧条（原版投射物表布局）：帧高 = 图高/帧数；贴图异常（不足一帧）回退整图
     const fh = frames > 1 ? img.height / frames : img.height;
     const useStrip = Number.isFinite(fh) && fh >= 1 && (frames <= 1 || img.height >= frames);
-    const sx = 0, sy = useStrip ? Math.round(this.frame * fh) : 0;
-    const sw = img.width, sh = useStrip ? Math.round(fh) : img.height;
+    // ★B1：957 帧床是 3 列 × projFrames 行横排（Main.cs:33708-33713
+    // `Frame(3, projFrames)`，frameX=frame/12、frameY=frame%12）——弹跳段线性帧号
+    // 24..35 落在第 3 列，竖条假设会越界取空。按列宽 1/3 切片（Projectile_957.png
+    // 实测 168×1296 → 单格 56×108）
+    let sx = 0, sy = useStrip ? Math.round(this.frame * fh) : 0;
+    let sw = img.width;
+    if (useStrip && this.projId === 957 && frames > 1) {
+      const fw = Math.floor(img.width / 3);
+      sx = Math.round(Math.floor(this.frame / frames) * fw);
+      sy = Math.round((this.frame % frames) * fh);
+      sw = fw;
+    }
+    const sh = useStrip ? Math.round(fh) : img.height;
     // 翻转 = 原版 spriteDirection（flipSign 映射：+1 朝右翻、-1 朝左翻、0 不翻）；
     // ★ 313 Spider 例外（:59361 `type != 313` 门——原版跳过 spriteDirection 赋值，恒不翻）
     const face = this.params.e.faceFrom === 'player'

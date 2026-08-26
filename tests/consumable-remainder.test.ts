@@ -405,9 +405,15 @@ describe('F 彩带 1345 / 蜂巢 1124：挥动 + 通用消耗（:42602 consumabl
     expect(itemFuncOfVid(1124)?.createTile === undefined || itemFuncOfVid(1124)?.createTile === null).toBe(true);
   });
   it('两件均已入 FUN_USE_VIDS 使用链（挥动+消耗+冷却）', () => {
-    expect(gameSrc).toContain('const FUN_USE_VIDS = new Set([508, 4673, 856, 1450, 507, 425, 1124, 5328, 5343, 1345]);');
+    // 2026-08-26 演奏通道批扩容：4057/4372/4715 三吉他 + 1305 The Axe（见 Game.ts 注）
+    expect(gameSrc).toContain('const FUN_USE_VIDS = new Set([');
+    expect(gameSrc).toContain('4057, 4372, 4715,   // 吉他三件');
+    expect(gameSrc).toContain('1305,               // The Axe');
     expect(gameSrc).toContain('case 1345:');
     expect(gameSrc).toContain('case 1124:');
+    expect(gameSrc).toContain('case 4057:');
+    expect(gameSrc).toContain('case 4715:');
+    expect(gameSrc).toContain('case 1305:');
   });
 });
 

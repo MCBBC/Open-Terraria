@@ -403,6 +403,7 @@ import { GrenadeProj, SpearProj } from '../entities/WeaponProj';
 import { Bobber, hackHoldStyleActive } from '../entities/Bobber';
 import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/LunarEvent';
 import { ItemDrop } from '../entities/ItemDrop';
+import { drawFakeFishSchool } from '../entities/FakeFish';
 import { TownNPC, sittingHatY, shimmerBodyAlpha, shimmerGlowAlpha } from '../entities/TownNPC';
 import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
 import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
@@ -2906,8 +2907,10 @@ export class Renderer {
         hallow: !!this.scene?.zoneHallow,
       });
 
-      // 自然层粒子（原版 Gore：落叶/滴水——DrawGores 在 tile 层后实体前）
-      natureParticles.draw(ctx, this.atlas);
+      // 自然层粒子（原版 Gore：落叶/滴水/墓地雾——DrawGores 在 tile 层后实体前；
+      // Gore.GetAlpha 乘位置光照色 → 注入 lightAt 采样）
+      natureParticles.draw(ctx, this.atlas,
+        (tx, ty) => this.lighting?.lightAt(tx, ty) ?? [255, 255, 255]);
 
       // 训练假人 tile 动态绘制层（tile 378 已摘出烘焙，本层画当前动画行——单层
       // 绘制语义，防烘焙静止行透出同朝向重影）
@@ -3021,6 +3024,10 @@ export class Renderer {
         }
       }
       this.drawFlameParticles(flameDye);
+      // FakeFish 装饰鱼群（FakeFishParticle.Draw——原版同带
+      // ParticleSystem_World_BehindPlayers,Main.cs:63206-63209 投射物后/玩家前;
+      // 湖面星闪 Spawn_LakeSparkle 同池）。步进在 Game.update updateFakeFishSchool
+      drawFakeFishSchool(this);
     }
     this.drawPlayer(player, world, swing, flicker);
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致）

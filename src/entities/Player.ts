@@ -103,6 +103,7 @@ import { PARTY_HAIR_DYE_SHADER_ID } from '../data/vanillaHairDyes';
 import { GorePiece } from './GorePiece';
 import { TownShot } from './TownShot';
 import { hslToRgb } from '../player/Appearance';
+import { playDeathVoice, playHurtVoice, voiceSlotOfItem, type VoiceState } from '../player/PlayerVoice';
 import {
   MountInstance, SCUTLIX_PROJ_ID, SCUTLIX_SHOT_DAMAGE, inAPlaceWithWind, MountShot, MOUNT_DATA,
 } from './Mounts';
@@ -260,6 +261,11 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
      *  3016 血肉指虎/3992 狂战士手套/3998 英雄盾 +400(:14109/:13999/:14029)。
      *  ★审计台账"1300"有误——1300=Rifle Scope,1456 反编译无 aggro 赋值,以源码为准） */
     aggroAcc: number;
+    /** 语音饰品槽（PlayHurtSound/PlayDeathSound 的 voiceOverride,Player.cs:1689）：
+     *  ApplyEquipFunctional :14487-14491（!hideVisibleAccessory 门内）+ ApplyEquipVanity
+     *  :14337-14341（社交槽无门）逐槽 voiceSlot!=0 直赋=后写覆盖前写;0=无 override。
+     *  消费端 PlayerVoice.hurtVoicePlan/deathVoicePlan（受击/死亡分派最高优先层) */
+    voiceOverride: number;
     // ↑省弹四档独立旗（原版 Player 四布尔字段，PickAmmo :52791-52804 逐档各掷一次
     //  Next(N)==0——huntressAmmoCost90 1/10 女猎手 3804/水晶忍者胸 4983、
     //  chloroAmmoCost80 1/5 叶绿头盔 1002、ammoCost80 1/5 蘑菇矿胸 1549/化石套/女猎
@@ -430,6 +436,10 @@ export class Player extends Entity {
   shieldRaised = false;      // 格挡盾举起(:31263)
   shieldParryTimeLeft = 0;  // 格挡窗口(:30981 >0 面敌免疫+反伤2×)
   shieldParryCd = 0;        // 降盾冷却(:31276 15t)
+  /** 盾反就绪提示待播（Player.cs:31955-31963 cd 归零拍播 MaxMana+橙尘×10）。
+   *  置位在 damage()（本仓盾冷却递减所在,无 game 钩子）,fixedUpdate 消费——
+   *  bocPulse 同款延一拍模式 */
+  parryReadyCue = false;
   /** 玩家对决开关（Player.cs:2436 hostile，会话态不存档——仅网络同步，进服默认 false） */
   hostile = false;
   /** 队伍 0-5（Player.cs:1312 team，PlayerTeamID：0 无/1 红/2 绿/3 蓝/4 黄/5 粉紫；存档持久） */
@@ -457,6 +467,18 @@ export class Player extends Entity {
   buffs = new BuffState();
   /** 角色外观（来自角色系统；渲染层 M7 切换 PaperDoll 时使用） */
   appearance?: import('../player/Appearance').Appearance;
+  /** 语音分派入参聚合（PlayerVoice.VoiceState——PlayHurtSound :38867-39011/
+   *  PlayDeathSound :39013-39041 的本仓入参面）：appearance 三字段
+   *  （skinVariant/voiceVariant/voicePitchOffset,后两者随角色档持久化)+
+   *  equipStats.voiceOverride（语音饰品装备聚合）。受击/死亡播声点统一取此 */
+  get voiceState(): VoiceState {
+    return {
+      skinVariant: this.appearance?.skinVariant,
+      voiceVariant: this.appearance?.voiceVariant,
+      voicePitchOffset: this.appearance?.voicePitchOffset,
+      voiceOverride: this.equipStats.voiceOverride,
+    };
+  }
   iframes = 0;
   jumpHold = 0;          // 长按跳跃剩余加速 tick
   /** 游泳划水动画计时（Player.swimTime :2634——脚蹼水中跳/人鱼按住刷新 30，
@@ -1101,6 +1123,7 @@ export class Player extends Entity {
     let minionSlots = 0, minionDmg = 0, minionKB = 0, sentrySlots = 0, whipRange = 0;
     // ---- 身上贴图绘制槽 + 仇恨轴（配饰审计系统性批 2026-08-22）----
     let aggroAcc = 0;
+    let voiceOverrideAcc = 0;   // 语音饰品 override（两轮槽扫逐槽直赋,后写覆盖前写同原版）
     const accDraw = {
       back: 0, front: 0, shield: 0, shoe: 0, waist: 0, neck: 0, face: 0,
       balloon: 0, balloonFront: 0, handOn: 0, handOff: 0, beard: 0,
@@ -1159,6 +1182,11 @@ export class Player extends Entity {
       // 巫毒娃娃(Player.cs:8801 killGuide / :8804 killClothier):装备即置位——
       // 玩家弹幕/近战对向导(22)/裁缝师(54) 的伤害门(Projectile.cs:11970-11972)
       const accVid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      // 语音饰品（ApplyEquipFunctional :14485-14491：currentItem.voiceSlot!=0 →
+      // voiceOverride=voiceSlot,!hideVisibleAccessory[itemSlot] 门内——隐藏的语音
+      // 饰品不生效;逐槽直赋=后写覆盖前写）
+      const vSlot = voiceSlotOfItem(accVid);
+      if (vSlot > 0 && !this.hideVisibleAccessory[i]) voiceOverrideAcc = vSlot;
       // 身上贴图绘制槽（UpdateVisibleAccessories :36331-36351 功能槽轮 + !hide 门
       // :36361——per-slot 隐藏开关已建模（hideVisibleAccessory,眼睛图标只藏贴图,
       // 功能效果 ApplyEquipFunctional :13962 独立扫不受影响）;社交槽 13-19 轮在
@@ -1432,6 +1460,10 @@ export class Player extends Entity {
       // 虚荣配重球（ApplyEquipVanity :13800-13803，社交槽 13-19 彩色配重球 →
       // vanityCounterWeight；Counterweight() 消费端优先于功能槽 counterWeight :11991-11994）
       if (vid >= 3309 && vid <= 3314) vanityCounterWeight = 556 + vid - 3309;
+      // 语音饰品·社交槽（ApplyEquipVanity :14337-14341：voiceSlot!=0 直赋,
+      // 无 !hide 门——时装槽同样改声,同原版）
+      const vSlotVanity = voiceSlotOfItem(vid);
+      if (vSlotVanity > 0) voiceOverrideAcc = vSlotVanity;
       // 社交槽身上贴图（UpdateVisibleAccessories :36353-36361 第二轮：
       // UpdateVisibleAccessory 无 !hide 门,时装配饰贴图无条件生效,后写覆盖功能槽）
       if (vid > 0) accDrawApply(s, i);
@@ -1679,6 +1711,7 @@ export class Player extends Entity {
       stringColor,   // 线饰品线色（UpdateVisibleAccessory :36441-36449）
       accDraw,       // 身上贴图十族绘制槽（UpdateVisibleAccessory :36441-36520;渲染层消费）
       aggroAcc,      // 仇恨轴 ±400 七件合计（aggro getter 并入）
+      voiceOverride: voiceOverrideAcc,   // 语音饰品 override（PlayHurt/DeathSound 最高优先层）
       iceSkate,
     quiver: equipHasQuiver,
     moltenQuiver, // 箭袋族：箭速/击退 ×1.1（Player.cs:52711-52715）
@@ -2623,11 +2656,25 @@ export class Player extends Entity {
       manaRegen = Math.floor(manaRegen * num10);                                // :19599（×1.15 已删）
       if (manaRegen < 2) manaRegen = 2;                                         // :19600-19603 下限（滴流支同样吃 2 下限）
     }
-    // 蓄能结算（:19274-19278）：≥120 扣 120 换 1 魔（满魔时也扣——原版同语义）
+    // 蓄能结算（:19274-19278）：≥120 扣 120 换 1 魔（满魔时也扣——原版同语义）。
+    // 回蓝满触发（Player.cs:19656-19686）：每跳 flag4=「本跳实补了 1 点」；仅当
+    // 补完 statMana==statManaMax2 且 flag4（本地玩家）才播 SoundID.MaxMana(25)
+    // + Dust 45 ×5（noLight/noGravity/v×0.5、scale Next(20,26)×0.1）——即【只有
+    // 从<max 补到 ==max 的那一跳】响,满魔后多圈循环 flag4 恒 false 不重播
+    // （ManaV2 调试支 :19666-19668 置 flag4=false,本仓无 DebugOptions 不移植）
     this.manaRegenCount += manaRegen;
     while (this.manaRegenCount >= 120) {
       this.manaRegenCount -= 120;
-      if (this.mana < smm) this.mana++;
+      const filledThisJump = this.mana < smm;   // Player.cs:19660 flag4
+      if (filledThisJump) this.mana++;
+      if (this.mana < smm) continue;            // :19670-19672 未满不结算提示
+      if (!filledThisJump) continue;
+      game.playSfxWav?.('MaxMana', 1);
+      for (let i = 0; i < 5; i++) {
+        const d = game.vanillaDust?.spawn(this.x, this.y, this.w, this.h, 45, 0, 0, 255, null,
+          (20 + Math.floor(Math.random() * 6)) / 10);   // Next(20,26)*0.1
+        if (d) { d.noLight = true; d.noGravity = true; d.vx *= 0.5; d.vy *= 0.5; }
+      }
     }
     if (this.manaRegenCount < 0) this.manaRegenCount = 0;  // :25686-25688
     if (this.mana > smm) this.mana = smm;                  // :25690-25693
@@ -2824,7 +2871,7 @@ export class Player extends Entity {
         // {General,BossNoCheese} 不含 Lava（R5-F23,Player.cs:2675 岩浆段不耗盾）
         if (this.damage(lavaDmg, this.cx, this.y - 10, false, false, 4)) {
           this.buffs.apply(BuffType.OnFire, this.equipStats.lavaRose ? 3.5 : 7);
-          game.playSfx('hurt');
+          playHurtVoice(game, this.voiceState);   // PlayHurtSound 全分派(:38867-39011)
           game.addDamageNumber(this.cx, this.y, this.damagePreview(lavaDmg), false, '#FF6020');
           game.spawnParticles(this.cx, this.y + this.h / 2, '#FF9A3C', 12, 1.6, { life: 32, grav: -0.05 });
         }
@@ -2943,7 +2990,7 @@ export class Player extends Entity {
     // 死亡等待重生（任何死法统一在此发声——溺水/岩浆/摔落/受击都经过这里）
     if (this.hp <= 0) {
       if (!this.dead) {
-        game.playSfx('pkilled');
+        playDeathVoice(game, this.voiceState);   // PlayDeathSound(:39013-39041,override 9 retro/5 铃/15 气球)
         this.dead = true;
         game.recLog?.('death', { hp: 0 });   // 行为录制：玩家死亡（任何死法统一在此结算）
       }
@@ -3053,7 +3100,7 @@ export class Player extends Entity {
         if (stonedNow) {
           this.lastDamageCause = { kind: 'petrified' };
           this.damage(getAttackDamageScaledByDifficulty(20, mainDifficulty(game.world)), this.cx, this.cy - 10, false);
-          game.playSfx('hurt');
+          playHurtVoice(game, this.voiceState);   // PlayHurtSound 全分派(:38867-39011)
           game.spawnParticles(this.cx, this.cy, '#9A8FA0', 20, 2.2);
         }
         this.lastStoned = stonedNow;
@@ -3543,7 +3590,14 @@ export class Player extends Entity {
         this.vy = -mJumpSpd * gd;
         this.jumpHold = Math.round(mJumpTicks * hMult);
         this.performingJump = opt;                          // isPerformingJump_* 等价标记
-        game.playSfxFiles(['Item_16'], 1, this.cx, this.cy); // SoundID 16（沙暴/暴雪/屁瓶/航行同）
+        // 双跳音分流（Player.cs:20689/:20966 族 SoundEngine.PlaySound(16)=cue16
+        //   DoubleJump（SoundID.cs:54）→ Sounds/Double_Jump.wav（LSP.cs:235 Load,
+        //   :846-857 case16 Pitch±0.10 经 PITCH_CASE 生效）;屁瓶例外 :21019 用
+        //   SoundID.Item16=bank(2,16)=Item_16.wav（PITCH_CASE Item 档 ±0.06）。
+        //   ★case16 单实例语义差异备案：原版播前 Stop 上一 DoubleJump 实例,本仓
+        //   非 Item_N 文件不入单实例槽——快速连段可能叠响,登记不建模）
+        if (opt === 'Fart') game.playSfxWav?.('Item_16', 1, this.cx, this.cy);
+        else game.playSfxWav?.('Double_Jump', 1, this.cx, this.cy);
         const D = game.vanillaDust;
         const mk = (x: number, y: number, w: number, h: number, type: number,
           alpha: number, scale: number, vx = 0, vy = 0) => D ? D.spawn(x, y, w, h, type, vx, vy, alpha, null, scale) : null;
@@ -4181,6 +4235,23 @@ export class Player extends Entity {
       this.bocPulse = 0;
       this.buffs.apply(BuffType.BrainOfConfusionBuff, 4);
     }
+    // 盾反冷却就绪提示（Player.cs:31953-31963）：shield_parry_cooldown 归零拍播
+    // SoundEngine.PlaySound(25,Center)=MaxMana + 橙尘 45×10——位置 Center+
+    // (direction*6+左向偏 -10, -14)、10×16 盒、Color(255,100,0,127)、
+    // scale Next(10,16)×0.1、noLight/noGravity/velocity×0.5。置位在 damage()
+    // （parryReadyCue 字段注），此处延一拍消费
+    if (this.parryReadyCue) {
+      this.parryReadyCue = false;
+      game.playSfxWav?.('MaxMana', 1);
+      const dirP = this.facing;
+      for (let i = 0; i < 10; i++) {
+        const d = game.vanillaDust?.spawn(
+          this.cx + dirP * 6 + (dirP === -1 ? -10 : 0), this.cy - 14, 10, 16, 45,
+          0, 0, 127, { r: 255, g: 100, b: 0, a: 127 },
+          (10 + Math.floor(Math.random() * 6)) / 10);
+        if (d) { d.noLight = true; d.noGravity = true; d.vx *= 0.5; d.vy *= 0.5; }
+      }
+    }
     // 潜行（1:1 改写 1457 :25930-26021）：蘑菇矿套=移动蓄(|vx|+|vy|)×0.0075/t、
     // 静止散 0.015/t 且衰减拍 stealthTimer=30（:25991——原版无 useTime 置 5、无 ==0 门）；
     // 星璇套=双击↓开关 vortexStealthActive
@@ -4327,7 +4398,7 @@ export class Player extends Entity {
           const dmg = Math.max(1, Math.round((fallTiles - 2) * 20));
           this.lastDamageCause = { kind: 'fell' };
           this.damage(dmg, this.cx, this.y - 10);
-          game.playSfx('hurt');
+          playHurtVoice(game, this.voiceState);   // PlayHurtSound 全分派(:38867-39011)
           game.addDamageNumber(this.cx, this.y, dmg, false, '#FF5050');
           if (!this.dead && this.hp > 0 && this.hp <= this.maxHp / 10) {
             game.achievements?.handleSpecialEvent(8,
@@ -4349,7 +4420,7 @@ export class Player extends Entity {
         }
         this.lastDamageCause = { kind: 'fell' };
         this.damage(dmg, this.cx, this.y - 10);
-        game.playSfx('hurt');
+        playHurtVoice(game, this.voiceState);   // PlayHurtSound 全分派(:38867-39011)
         game.addDamageNumber(this.cx, this.y, dmg, false, '#FF5050');
         // 成就：摔落幸存（Player.cs:25085-25090：!dead && hp≤maxHp/10 → event 8
         // LUCKY_BREAK；stoned 摔伤分支 :25071-25076 同门——stoned 态本仓未实装）
@@ -4744,7 +4815,7 @@ export class Player extends Entity {
       const dmg = getAttackDamageScaledByDifficulty(50, wall.difficulty);
       this.lastDamageCause = { kind: 'npc', name: 'Wall of Flesh' };
       if (this.damage(dmg, wall.cx, wall.cy)) {
-        game.playSfx('hurt');
+        playHurtVoice(game, this.voiceState);   // PlayHurtSound 全分派(:38867-39011)
         game.addDamageNumber(this.cx, this.y, this.damagePreview(dmg), false, '#FF5050');
         // :22005 noKnockback=false——舌击无视钴盾族免击退，沿墙推进方向弹开。
         // 原版走 Hurt(hitDirection=墙 direction)（:22007）→ 击退段 = 固定
@@ -6127,7 +6198,12 @@ export class Player extends Entity {
       this.shieldParryTimeLeft++;
       if (this.shieldParryTimeLeft > 20) this.shieldParryTimeLeft = 0;  // :31250
     }
-    if (this.shieldParryCd > 0) this.shieldParryCd--;
+    if (this.shieldParryCd > 0) {
+      this.shieldParryCd--;
+      // 就绪拍（:31953-31963 shield_parry_cooldown 归零那一拍）：置位提示,
+      // 声/尘由 fixedUpdate 消费（此处无 game 钩子）
+      if (this.shieldParryCd === 0) this.parryReadyCue = true;
+    }
     let solarConsumed = false;
     // 日曜护盾消耗门（Hurt :38591 `ImmunityCooldownID.Sets.Counter[cooldownCounter]`
     // = CreateBoolSet(General(-1), BossNoCheese(1))（ImmunityCooldownID.cs:31）——
@@ -6230,7 +6306,7 @@ export class Player extends Entity {
       if (!this.damage(dmg, this.cx, this.y - 10, false, false, 0)) {
         blocked = true;
       } else {
-        game.playSfx('hurt');
+        playHurtVoice(game, this.voiceState);   // PlayHurtSound 全分派(:38867-39011)
         game.addDamageNumber(this.cx, this.y, this.damagePreview(dmg), false, '#FF5050');
       }
     }
