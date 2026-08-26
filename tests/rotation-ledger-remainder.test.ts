@@ -135,6 +135,36 @@ describe('546 怒滚草：滚转累积 + 派发 + 反翻镜像', () => {
 });
 
 // ---------------------------------------------------------------------------
+// ⑤ 301 渡鸦（墓地乌鸦，FindFrame :74257-74271）——2026-08-26 用户实报"倒飞"清偿：
+//   贴图原生朝右（5 帧喙均在右），FindFrame 专属支 spriteDirection 与移动反向
+//   （飞行 vx>0.5→-1 / vx<-0.5→1、落地 =-direction）→ 与鸮族 611/689、546 同反翻档。
+//   曾落通用镜像档（facing>0 翻）=向右飞倒飞；rotation=vx×0.1（:74287）此前已接。
+// ---------------------------------------------------------------------------
+describe('301 渡鸦：vx 倾斜 + 反翻镜像（贴图原生朝右的反翻族）', () => {
+  it('FindFrame 对拍：visAngle = vx×0.1（:74287 rotation=velocity.X×0.1）', () => {
+    const w = makeWorld();
+    const h = makeHooks(w, null);
+    const e = spawn(h, 301, 40, 20);
+    e.vx = 2.5;
+    drive(e, 'findFrameRotation').call(e);
+    expect(e.visAngle).toBeCloseTo(0.25, 5);
+    e.vx = -1;
+    drive(e, 'findFrameRotation').call(e);
+    expect(e.visAngle).toBeCloseTo(-0.1, 5);
+  });
+
+  it('镜像门归属：向右飞(sdir=-1)不翻 / 向左飞(sdir=1)翻——统一 facing<0 才翻（:74257-74271,曾落通用档=倒飞）', () => {
+    const w = makeWorld();
+    const h = makeHooks(w, null);
+    const e = spawn(h, 301, 40, 20);
+    e.visAngle = 0.25; e.facing = 1;
+    expect(flips(drawWithFake(e, w)).length, 'facing=1(向右飞,spriteDirection=-1)→不翻——倒飞回归锁').toBe(0);
+    e.facing = -1;
+    expect(flips(drawWithFake(e, w)).length, 'facing=-1(向左飞,spriteDirection=1)→翻').toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ② 76/75 火星飞碟族 392-395
 // ---------------------------------------------------------------------------
 describe('火星飞碟族：核心相位摆动 + 部件继承/公转 + 派发镜像归属', () => {

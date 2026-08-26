@@ -397,6 +397,8 @@ import { localAIOf } from '../entities/bossAI_moon_events';
 import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG } from '../data/vanillaMapColors';
 import { mapPaintColor, PAINT_RGB } from '../world/Paint';
 import { Enemy } from '../entities/Enemy';
+import { drawForceFieldBubble } from '../fx/ForceFieldBubble';
+import { shieldMax as shieldMaxOf } from '../world/LunarEvent';
 import { visEffectFrames } from '../entities/Enemy';
 import { projFrameCount, projFrameImg, Arrow } from '../entities/Arrow';
 import { GrenadeProj, SpearProj } from '../entities/WeaponProj';
@@ -1942,6 +1944,9 @@ function dustTrailCount(d: { type: number; vx: number; vy: number; fadeIn: numbe
   else if (t === 331 && d.fadeIn === 0) n = (Math.abs(d.vx) + Math.abs(d.vy)) * 3;
   return n > 10 ? 10 : n;
 }
+
+/** 四柱护盾泡破盾/重塑计时器（enemy → 状态;drawEnemy 逐帧推进） */
+const PILLAR_FF = new WeakMap<object, { lastShield: number; breakTick: number; reformTick: number }>();
 
 export class Renderer {
   /** GL 合成层(#1 背景族 + #2 全屏地图共用;docs/webgl2-migration-plan.md) */
@@ -5404,14 +5409,17 @@ export class Renderer {
         // (蛆虫族 485-487 :73515 设 direction→正常镜像)
         const owlMirror = e.vanillaId === 611 || e.vanillaId === 689;
         // 546 怒滚虫 spriteDirection=−direction(cs:63368)→同鸮族反翻档:facing<0 才翻
-        // (facing 兼作 chargerAI 的 AI direction,不可在 AI 侧取反)
-        const sdirNeg546 = e.vanillaId === 546;
+        // (facing 兼作 chargerAI 的 AI direction,不可在 AI 侧取反)。
+        // 301 渡鸦同反翻族(FindFrame :74257-74271 专属支:飞行 vx>0.5→spriteDirection=-1、
+        // vx<-0.5→=1、落地 =-direction——贴图原生朝右,与通用朝左约定相反)→facing<0 才翻;
+        // 曾落通用镜像档=向右飞倒飞(2026-08-26 用户实报墓地乌鸦)
+        const sdirNeg = e.vanillaId === 546 || e.vanillaId === 301;
         const wormMirror = stR === 66 && !(e.vanillaId >= 485 && e.vanillaId <= 487);
         // 蜗牛 aiStyle67 spriteDirection 走象限表(上方旋转分支自带局部翻面)——
         // 通用 facing 镜像禁用,否则与象限翻面叠加成恒翻
         const snailMirror = stR === 67;
-        if (!rotationDriven && !owlMirror && !sdirNeg546 && !wormMirror && !snailMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
-        if (!rotationDriven && (owlMirror || sdirNeg546) && e.facing < 0) ctx.scale(-1, 1);
+        if (!rotationDriven && !owlMirror && !sdirNeg && !wormMirror && !snailMirror && !eyeMirrorByVx && e.facing > 0) ctx.scale(-1, 1);
+        if (!rotationDriven && (owlMirror || sdirNeg) && e.facing < 0) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
@@ -5720,6 +5728,36 @@ export class Renderer {
       }
       ctx.restore();
       ctx.filter = 'none';
+    }
+    // ★shader 修齐批①：四柱护盾泡（Main.cs:24551-24583——盾在=Perlin 泡 White×
+    //   (frac×0.8+0.2)+ForceField pass;破盾=膨胀淡出波 scale×(1+num321)/色(1−√num321)）。
+    //   盾量源=world.lunarEvent.shield（R23b 清怪解锁机制）;破盾计时器本处逐帧推进
+    if (e.vanillaId === 517 || e.vanillaId === 422 || e.vanillaId === 507 || e.vanillaId === 493) {
+      const key = e.vanillaId === 517 ? 'solar' : e.vanillaId === 422 ? 'vortex'
+        : e.vanillaId === 507 ? 'nebula' : 'stardust';
+      const le = world.lunarEvent;
+      const cur = le?.shield?.[key] ?? 0;
+      const max = Math.max(1, shieldMaxOf(world));
+      let st = PILLAR_FF.get(e);
+      if (!st) { st = { lastShield: cur, breakTick: -1, reformTick: -1 }; PILLAR_FF.set(e, st); }
+      if (st.lastShield > 0 && cur === 0) st.breakTick = 0;         // 盾破沿起
+      if (st.lastShield === 0 && cur > 0) st.reformTick = 0;        // 重塑淡入沿起
+      if (st.breakTick >= 0 && st.breakTick <= 120) st.breakTick++;
+      if (st.reformTick >= 0 && st.reformTick <= 30) st.reformTick++;
+      st.lastShield = cur;
+      if (!e.dead && (cur > 0 || (st.breakTick >= 0 && st.breakTick <= 120))) {
+        const tint: [number, number, number] = e.vanillaId === 517 ? [1, 0.45, 0.1]
+          : e.vanillaId === 422 ? [0.4, 0.45, 1]
+          : e.vanillaId === 507 ? [1, 0.35, 0.8] : [0.3, 0.9, 1];
+        drawForceFieldBubble(ctx, this, {
+          cx: e.cx, cy: e.cy,
+          radius: Math.max(e.w, e.h) * 0.9 + 40,
+          tint, frac: Math.min(1, cur / max),
+          breakT: cur === 0 && st.breakTick >= 0 ? Math.min(1, st.breakTick / 120) : -1,
+          reformT: cur > 0 && st.reformTick >= 0 ? Math.min(1, st.reformTick / 30) : -1,
+          time: performance.now() / 1000,
+        });
+      }
     }
     void world;
   }

@@ -11680,7 +11680,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // GetWeaponCrit（Player.cs:42531 族）= 4 基础 + 武器 item.crit + 装备/buff——
     // 投射物近战四族此前写死 4%（Sunfury item.crit=7 原版应 11%）
     const critVid = def.vid ?? viIdFromKey(def.key);
+    // GetWeaponCrit（Player.cs:42531 族）= 4 基础 + 武器 item.crit + 装备/buff + 词缀 crt
+    // ★2026-08-26 审计修：成就块曾插进本表达式中部——ASI 把 critTotal 截在首行,
+    //   余下两行 `+ …` 成独立废语句（合法编译、零报错）,全 combat 武器暴击丢
+    //   装备/buff/词缀档。恢复表达式连续性,成就支后置。
     const critTotal = 0.04 + (itemCombat(critVid)?.crit ?? 0) / 100
+      + this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee') / 100
+      + (ps?.crt ?? 0) / 100; // ⑧ 词缀 crt（I:566 crit+=crt）
     // 成就：蜜蜂套装持蜂枪使用（Player.cs:16060-16069 → event 3 NOT_THE_BEES：
     // head 160 + body 168 + legs 103 且 itemAnimation 中挥动 1121 BeeGun）
     if (critVid === 1121) {
@@ -11692,8 +11698,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
       }
     }
-      + this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee') / 100
-      + (ps?.crt ?? 0) / 100; // ⑧ 词缀 crt（I:566 crit+=crt）
     // 使用姿势（Player.ItemCheck：itemAnimation>0 期间持物可见）。
     // ★矛(含短剑,kind 'spear' 覆盖 AI_019/AI_161/AI_070)/回旋镖/悠悠球也登记 swing——
     //   原版 useStyle 5/13 照样驱动身体行（Pl.cs:49927+ ApplyUseStyle、:35876-35990

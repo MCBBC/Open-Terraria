@@ -422,29 +422,47 @@ export class NatureParticles {
 
   // ================= 绘制 =================
 
-  /** 光照采样（Renderer 注入 this.lighting.lightAt；缺省全亮=测试环境）。
-   *  ★Gore 渲染色 = GetAlpha(位置光照色)（Gore.cs:1484-1518 默认分支:
-   *  light×(1-alpha/255)）——雾/落叶受所在位置瓦片光照,夜里暗蓝近隐、火把旁
-   *  亮橙;曾无光照直画纯白贴图 = 夜里"错误的高亮贴图"（2026-08-25 用户报）。
-   *  雾/叶贴图 achromatic → 光色乘积≈亮度乘积,取 max 通道即可;滴水 716 特例
-   *  (GetAlpha 恒 255,255,255,200)不受光,不乘 */
+  /** Gore 光照染色缓存（Gore.GetAlpha :1484-1518 默认分支 = 位置光照色×(1−alpha/255),
+   *  Main.DrawGore :22067 传雾团中心格 Lighting.GetColor;XNA AlphaBlend 预乘混合下
+   *  雾的【颜色跟随光照变暗】——黑暗处雾变黑与背景融合、火把旁亮橙,透明度只由
+   *  淡出控制。★曾误把光照做成透明度乘法(globalAlpha×lum):有光处雾恒全亮不透明
+   *  =「过于不透明」、黑暗处雾透明消失(2026-08-25 用户定案)。染色按 24/通道量化
+   *  缓存,超限整体清空 */
+  private goreTintCache = new Map<string, HTMLCanvasElement>();
+
+  private tintedGore(img: HTMLImageElement, lr: number, lg: number, lb: number): HTMLImageElement | HTMLCanvasElement {
+    const qr = Math.round(lr / 24) * 24, qg = Math.round(lg / 24) * 24, qb = Math.round(lb / 24) * 24;
+    const key = `${img.src}|${qr},${qg},${qb}`;
+    const hit = this.goreTintCache.get(key);
+    if (hit) return hit;
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+    const cx = cv.getContext('2d')!;
+    cx.drawImage(img, 0, 0);
+    cx.globalCompositeOperation = 'multiply';
+    cx.fillStyle = `rgb(${qr},${qg},${qb})`;
+    cx.fillRect(0, 0, cv.width, cv.height);
+    cx.globalCompositeOperation = 'destination-in';
+    cx.drawImage(img, 0, 0);                       // 恢复 PNG alpha 形状
+    if (this.goreTintCache.size > 240) this.goreTintCache.clear();
+    this.goreTintCache.set(key, cv);
+    return cv;
+  }
+
   draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
     lightAt?: (tx: number, ty: number) => [number, number, number]): void {
     ctx.imageSmoothingEnabled = false;
-    const lum = (tx: number, ty: number): number => {
-      if (!lightAt) return 1;
-      const [r, g, b] = lightAt(tx, ty);
-      return Math.max(0, Math.min(1, Math.max(r, g, b) / 255));
-    };
-    // 落叶：32 列(油漆) × 8 行(旋转)，帧 12×14（SpriteFrame(32,8)）
+    // 落叶：32 列(油漆) × 8 行(旋转)，帧 12×14（SpriteFrame(32,8)）——同受光照染色
     for (const l of this.leaves) {
       const img = atlas.ensureVImage(`vanilla/Gore_${l.gore}.png`);
       if (!img || !(img.width > 0) || img.width === 0) continue;
       const fw = img.width / 32, fh = img.height / 8;
-      ctx.globalAlpha = (1 - l.alpha / 255) * lum(Math.floor((l.x + 4) / TILE), Math.floor((l.y + 4) / TILE));
-      ctx.drawImage(img, 0, l.row * fh, fw, fh, l.x, l.y, fw * l.scale, fh * l.scale);
+      const [lr, lg, lb] = lightAt?.(Math.floor((l.x + 4) / TILE), Math.floor((l.y + 4) / TILE)) ?? [255, 255, 255];
+      ctx.globalAlpha = 1 - l.alpha / 255;
+      ctx.drawImage(this.tintedGore(img, lr, lg, lb), 0, l.row * fh, fw, fh, l.x, l.y, fw * l.scale, fh * l.scale);
     }
-    // 滴水：18×300 竖条 15 帧（帧高 20）
+    // 滴水：18×300 竖条 15 帧（帧高 20）——Gore 716 特例 GetAlpha 恒 (255,255,255,200)
+    // 不受光照,不染色
     for (const d of this.drips) {
       const img = atlas.ensureVImage(`vanilla/Gore_${d.type}.png`);
       if (!img || !(img.width > 0) || img.width === 0) continue;
@@ -453,18 +471,18 @@ export class NatureParticles {
       ctx.drawImage(img, 0, d.frame * fh, img.width, fh, d.x, d.y, img.width, fh);
     }
     // 云雾：Main.DrawGore（Main.cs:21749-21756）——中心锚 + scale + rotation，
-    // 色 = GetAlpha(位置光照) × (255-alpha)/255（Gore.cs:1484-1518）
+    // 色 = GetAlpha(中心格光照) × (255-alpha)/255；透明度只由淡出控制
     for (const c of this.clouds) {
       const img = atlas.ensureVImage(`vanilla/Gore_${c.type}.png`);
       if (!img || !(img.width > 0) || img.width === 0) continue;
       const w = img.width, h = img.height;
+      const [lr, lg, lb] = lightAt?.(Math.floor((c.x + 15) / TILE), Math.floor(c.y / TILE)) ?? [255, 255, 255];
       ctx.save();
-      ctx.globalAlpha = Math.max(0, (255 - c.alpha) / 255)
-        * lum(Math.floor((c.x + 15) / TILE), Math.floor(c.y / TILE));
+      ctx.globalAlpha = Math.max(0, (255 - c.alpha) / 255);
       ctx.translate(c.x + w / 2, c.y + h / 2);
       if (c.rotation) ctx.rotate(c.rotation);
       if (c.scale !== 1) ctx.scale(c.scale, c.scale);
-      ctx.drawImage(img, -w / 2, -h / 2);
+      ctx.drawImage(this.tintedGore(img, lr, lg, lb), -w / 2, -h / 2);
       ctx.restore();
     }
     ctx.globalAlpha = 1;

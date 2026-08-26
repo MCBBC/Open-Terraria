@@ -14,6 +14,7 @@ for (let i = 0; i < 600; i++) {
   if (ready.menu && !ready.splashUp) break;
   await new Promise((r) => setTimeout(r, 100));
 }
+await page.waitForFunction(() => !!window.__swFlow?.newWorld, { timeout: 60000 });
 await page.evaluate(() => window.__swFlow.newWorld('12345', 4200, 1200));
 for (let i = 0; i < 90 && !(await page.evaluate(() => !!window.__swGame?.world?.store?.w)); i++) {
   await new Promise((r) => setTimeout(r, 1000));

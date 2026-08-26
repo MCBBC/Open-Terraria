@@ -124,6 +124,18 @@ function dealContacts(
   }
 }
 
+/** 弹体 CutTiles（Projectile.Damage→CutTiles :12517/:15276 → CutTilesAt :15454）：
+ *  friendly 玩家弹每 tick 扫弹盒(+1 格右/下外沿,原版循环含端)逐格砍 tileCut 物
+ *  ——瓦罐整罐碎裂/杂草等非实心可砍物。CanCutTiles(:15407) 排除表外才走,
+ *  调用方自证类型不在表内。cutTile 内部对非 tileCut 格零操作 */
+function cutTilesBox(game: GameHooks, x: number, y: number, w: number, h: number): void {
+  const x0 = Math.floor(x / TILE), x1 = Math.floor((x + w) / TILE) + 1;
+  const y0 = Math.floor(y / TILE), y1 = Math.floor((y + h) / TILE) + 1;
+  for (let ix = x0; ix <= x1; ix++) {
+    for (let iy = y0; iy <= y1; iy++) game.cutTile(ix, iy);
+  }
+}
+
 // ================= 1126 叶绿巨剑刃（AI_190 旋刃,1226 重做本体） =================
 
 /** 1226 出手链（Player.cs:49406-49426）：NewProjectile(MountedCenter, (dir, 0|1), 1126,
@@ -562,6 +574,8 @@ export class PetalstormShot extends Entity {
       }
     }
     this.moveWithBounce(game);
+    // CutTiles（:12517/:15276;CanCutTiles 排除表无 1116）——扫草/碎罐同 GlacierFangShot
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     if (this.t >= 10) {
       const fade = Math.max(0, Math.min(1, (this.life - this.t) / 120));
       game.addLightAt?.(this.cx, this.cy, 0,
@@ -1300,6 +1314,9 @@ export class GlacierFangShot extends Entity {
       // 挂手：RotatedRelativePoint(MountedCenter) − Size/2（:37587）
       this.x = p.cx - this.w / 2;
       this.y = p.cy - this.h / 2;
+      // 蓄力态同样每拍 CutTiles（Damage() 对 active 弹无条件跑,1115 不在
+      // Damage_CanDealDamage :12461 排除表——挂手弹盒扫到瓦罐/草即碎,原版同态）
+      cutTilesBox(game, this.x, this.y, this.w, this.h);
       if (Math.floor(this.charge) % 3 === 0) {
         const spd = 4 + (15 - 4) * Math.min(1, Math.max(0, this.charge / 60));   // Remap(ai0,0,60,4,15)
         const d = Math.hypot(m.x - p.cx, m.y - p.cy) || 1;
@@ -1324,6 +1341,9 @@ export class GlacierFangShot extends Entity {
     this.y += this.vy;
     this.vy += 0.15 + (0.025 - 0.15) * Math.min(1, Math.max(0, this.charge / 45));  // Remap(ai0,0,45,0.15,0.025)
     if (this.vy > 16) this.vy = 16;
+    // CutTiles（Damage→CutTiles 每拍旁路,:12517/:15276;CanCutTiles 排除表无 1115）：
+    // 瓦罐等非实心 tileCut 物弹盒扫到即碎——曾整缺=冰矛穿罐不碎（2026-08-26 用户报）
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     // ★寿命帽（timeLeft=300 蓄力期每拍重置 :37596,释放后递减归零 Kill=5 秒寿命——
     //  此前无上限,开阔地释放的冰矛永不消亡=多次施法无限堆积,用户实报蓄力贴图异常）
     this.life = (this.life ?? 300) - 1;
@@ -1377,10 +1397,32 @@ export class GlacierFangShot extends Entity {
     if (!ctx) return;
     const img = projSprite(1115);
     this.frame = this.charge >= 40 ? 2 : this.charge >= 20 ? 1 : 0;   // :37666-37672
+    const aim = Math.atan2(this.vy, this.vx);
     ctx.save();
     ctx.globalAlpha = this.released ? 1 : 0.9;
+    // ★蓄力态锚=手持法杖位（MountedCenter+aim×staffReach 6,与 drawUseItem 杖支
+    //  同锚）,矛【尾】贴锚、沿瞄准方向从杖上向外生长（原版观感:冰矛叠在法杖上
+    //  从手伸出——曾居中玩家盒中心=半截长在角色身上,用户三次实报）。
+    //  释放态=居中飞行体（原版 DrawProjectiles 居中同款）
+    const staffAx = Math.cos(aim) * 6, staffAy = Math.sin(aim) * 6;
+    if (!this.released) {
+      ctx.translate(this.cx + staffAx, this.cy + staffAy);
+      ctx.rotate(aim + Math.PI / 2);
+      ctx.imageSmoothingEnabled = false;
+      if (img && img.width > 0) {
+        const fh = img.height / 3;
+        // 矛尾钉锚:精灵【底边】(帧底=尾)在锚上,沿旋转后的"上"=瞄准方向伸出
+        ctx.drawImage(img, 0, Math.round(this.frame * fh), img.width, Math.round(fh),
+          -img.width / 2, -fh, img.width, fh);
+      } else {
+        ctx.fillStyle = '#8FD8FF';
+        ctx.fillRect(-5, -28, 10, 28);
+      }
+      ctx.restore();
+      return;
+    }
     ctx.translate(this.cx, this.cy);
-    ctx.rotate(Math.atan2(this.vy, this.vx) + Math.PI / 2);
+    ctx.rotate(aim + Math.PI / 2);
     ctx.imageSmoothingEnabled = false;
     if (img && img.width > 0) {
       const fh = img.height / 3;
@@ -1557,6 +1599,7 @@ export class ThunderBoltShot extends Entity {
     const st = game.world.store;
     const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
     if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) { this.die(game); return; }
+    cutTilesBox(game, this.x, this.y, this.w, this.h);         // CutTiles（:12517/:15276;排除表无 731）
     dealContacts(this, game, this.hitCd, 10);                  // 缺省免疫窗（非 local 表族）
   }
 

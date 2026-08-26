@@ -1575,6 +1575,16 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
     }
   }
 
+  // 帧驱动 localAI[3]（:45789-45802，本批补缺）：二阶段每 t +1 循环 24——翅膀
+  // （Extra_185 4 帧 = lai3/6）与水晶核绘制层消费；砸地坠相(ai0=4,ai2=1)钉 6、
+  // 凝胶环蓄相(ai0=5,ai2≠1)钉 7（钉值在 ++ 之后覆写,与原版同序）。此前缺失 =
+  // 二阶段翅膀帧恒 0、水晶核 Y 偏移表虽按帧号走但翅拍不动。
+  if (phase2) {
+    e.lai3 = (e.lai3 + 1) % 24;
+    if (e.ai0 === 4 && e.ai2 === 1) e.lai3 = 6;
+    if (e.ai0 === 5 && e.ai2 !== 1) e.lai3 = 7;
+  }
+
   // noGravity/noTileCollide 置位(:45634-45635 默认关;case 4/5 与二阶段飞行开启)——
   // 原版 case 4 整段(含 ai2=0 升空)置 noGravity,故一阶段升空同样免重力
   const flying = e.ai0 === 5 || (e.ai0 === 4 && e.ai2 === 0) || (phase2 && e.ai0 === 0);

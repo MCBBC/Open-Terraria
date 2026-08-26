@@ -347,6 +347,10 @@ export class FlintWaveProj extends Entity {
     }
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
+      // ★2026-08-26 审计修：penetrate=2 上限门提到循环顶——原写在尾 break 只拦
+      //   本 tick 后续目标，次 tick 首个新敌仍先结算一击再 break（超发一次伤害）；
+    //   原版 StopsDealingDamageAfterPenetrateHits(:9871) 打满即停手。
+      if (this.hits >= 2) break;
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       if (e.dead || this.hitDone.has(e.id)) continue;
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
@@ -491,6 +495,9 @@ export class FlintSpikeProj extends Entity {
     }
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
+      // ★2026-08-26 审计修：penetrate=4 上限门提到循环顶（同 FlintWaveProj——
+      //   尾 break 拦不住次 tick 的首个新敌,会超发一击）
+      if (this.hits >= 4) break;
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       if (e.dead || this.hitCd.has(e.id)) continue;
       const d2 = distPtSegSq(e.x + e.w / 2, e.y + e.h / 2, this.cx, this.cy, ex, ey);

@@ -98,6 +98,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { isGemBolt, type GemStaffFlags, gemDamageMultiplier } from '../data/vanillaGemStaff';
 import { projGravSpec } from '../data/vanillaItemCombat';
 import { GorePiece } from './GorePiece';
+import { TownNPC } from './TownNPC';
 import { MedusaHeadProj } from './MedusaHeadProj';
 const PROJ_FRAMES = projFramesJson as Record<string, number>;
 
@@ -2068,6 +2069,21 @@ export class Arrow extends Entity {
         const db = game.spawnDust?.(bx, by, 8, 8, 27, this.vx, this.vy, 100, null, 0.9, true);
         if (db) { db.vx *= 0.5; db.vy *= 0.5; }
       }
+    } else if (this.projId === 936 && !this.hostile && this.vy < 0
+      && game.world.flags['unlockedSlimeRainbowSpawn'] !== true) {
+      // ★批III① 闪耀史莱姆气球上升期爆裂解锁（Projectile.Kill aiStyle2 段
+      //   :22678-22690）：velocity.Y<0 = 上升中爆（敌命中/滞空寿命尽；落地爆
+      //   vy≥0/撞地速度归零与原版同闭）→ unlockedSlimeRainbowSpawn 置位
+      //   （世界旗,WorldFile 随存档）+ 巨星史莱姆 681 于爆点生成（继承弹速
+      //   :22684-22687,本仓 TownNPC 出生静止近似登记）+ RealEstateAndTownSlimes
+      //   记账由城镇入住 flags 门承载（Main.cs:66913 townNPCCanSpawn[681]）
+      game.world.flags['unlockedSlimeRainbowSpawn'] = true;
+      const ms = new TownNPC('town_slime_diva', this.cx + 4, this.cy);
+      const entsB = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
+      if (entsB?.add) entsB.add(ms, 'npcs');
+      game.spawnParticles(this.cx, this.cy, '#FFF3D2', 12, 2.2, { life: 26 });
+      game.spawnParticles(this.cx, this.cy, '#BEF5FF', 8, 1.6, { life: 22 });
+      game.spawnParticles(this.cx, this.cy, '#FF96FF', 8, 1.6, { life: 22 });   // WorldItem.cs:1704-1723 彩虹尘四色档
     } else if (this.projId === 295 && !this.hostile) {
       // §2 地狱火叉死亡火柱（Kill :75810-75815,owner 本机门）：Center 生成 296 爆区,
       // damage×0.75(int 截断)、kb 继承——150×150 盒驻留 ~135t 对盒内敌持续结算

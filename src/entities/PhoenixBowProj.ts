@@ -307,15 +307,14 @@ export class PhoenixBolt extends Entity {
   override fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
 
-    // ---- 湿灭（:56743-56746 `if (wet) { Kill(); return; }`——水/岩浆即消；
-    //      本仓 wet 口径 = 弹心格液量>0 且 liquidType ∈ {WATER,LAVA}，Arrow.ts 同式）----
+    // ---- 湿灭（:56743-56746 `if (wet) { Kill(); return; }`）：wet = Collision
+    //      .WetCollision（Collision.cs:1575-1652）对【任意液体】返回 true——水/岩浆/
+    //      蜂蜜/微光全档即消（无 469 式 honey/shimmer 豁免）。★2026-08-26 审计修：
+    //      曾误抄 469 蜂箭的 {WATER,LAVA} 窄门（Arrow.ts:2641-2650），蜂蜜/微光里不灭 ----
     {
       const st = game.world.store;
       const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
-      if (st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0) {
-        const lt = st.liquidType[st.idx(tx, ty)];
-        if (lt === LIQUID_TYPE.WATER || lt === LIQUID_TYPE.LAVA) { this.die(game); return; }
-      }
+      if (st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0) { this.die(game); return; }
     }
 
     // ---- 首拍音 + 尘爆（localAI[1]==0 :56748-56763）----

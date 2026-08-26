@@ -23,7 +23,7 @@
 //     即时伤害落账 + autoReuse 重扣退款去重（AI_100 :45296-45454）
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
-import { Arrow, PROJ_SPIN } from '../src/entities/Arrow';
+import { Arrow } from '../src/entities/Arrow';
 import { projGravSpec } from '../src/data/vanillaItemCombat';
 import { NebulaBlazeBolt, LunarFlareStar } from '../src/entities/LunarNebula';
 import { MedusaHeadProj } from '../src/entities/MedusaHeadProj';

@@ -23,9 +23,16 @@ const cfg = CFGS[CHAIN]!;
   const oIS = URp.internalSample;
   const vals: number[] = [];
   let cap = false;
+  const stackAt = process.env.SW_T3_STACK !== undefined ? Number(process.env.SW_T3_STACK) : -1;
   URp.internalSample = function (this: unknown) {
     const v = oIS.call(this);
-    if (cap) vals.push(v);
+    if (cap) {
+      if (vals.length === stackAt) {
+        const st = new Error().stack ?? '';
+        console.log(`[stack@${stackAt}] ${st.split('\n').slice(1, 9).join(' | ')}`);
+      }
+      vals.push(v);
+    }
     return v;
   };
   try {
