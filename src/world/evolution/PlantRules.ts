@@ -33,6 +33,9 @@ export const PLANT_CHECK_SHEETS = [3, 24, 61, 71, 73, 74, 110, 113, 201, 637];
 export function flowerGroundOk(down: number, want: number): boolean {
   if (want === 61 || want === 74) return down === 60 || down === 226;
   if (want === 71) return down === 70;
+  // 丛林株族（PlaceJunglePlant :48191 地基段 SolidTile(i,num+1)&&type==60）——
+  // 233 小株单格锚；238 球茎/236 生命果为双列整平底，主列先过此门、副列由调用方逐列校验
+  if (want === 233 || want === 238 || want === 236 || want === 702) return down === 60;
   const ok = FLOWER_GROUND_SHEETS[want];
   return !!ok && ok.has(down);
 }

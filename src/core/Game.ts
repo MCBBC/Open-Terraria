@@ -12197,19 +12197,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             break;
           }
         }
-        // ★2026-08-26 出生锚点对齐（用户实报"魔法弹应从杖头发出"复核）：原版
-        //  ItemCheck_Shoot 通用发射点 = RotatedRelativePoint(MountedCenter)（1458
-        //  Player.cs:47603;:4209-4227 无旋转/无坐骑/无睡坐时恒等玩家碰撞盒中心——
-        //  vector2=(0,-n)+(0,n)=0,gfxOffY=0）→ 即 this.player.cx/cy。【魔法域没有任何
-        //  "杖头/枪口前伸"通用式】,旧 px/py(中心+cos(ang)*14, y−4)是登记偏差
-        //  (R30 §4.2 落点清单#1,曾注"待专批统一")——本批为该专批:'magic' 全支改吃
-        //  mzx/mzy 并逐件补 Player.cs 显式偏移块:
+        // ★2026-08-26 出生锚点（用户实报二次追加，以实机原版观感为准）：弹从
+        //  【杖头】出生 = MountedCenter + 瞄准单位×18（杖 reach 6 + 半杖身≈杖头前端）;
+        //  速度向 = 出生点→鼠标世界 重瞄角。备案：1458 源码字面 pointPosition =
+        //  RotatedRelativePoint(MountedCenter) = 碰撞盒中心（Player.cs:47603;
+        //  :4209-4227 无旋转恒等中心,魔法域无"枪口前伸"通用式）——用户拍板按实机
+        //  观感（弹从杖头出现）覆盖字面。速度向重瞄反而与原版同构：num4/num5 本就
+        //  = (mouseScreen−pointPosition) 归一（:47681-47707），基准点随锚点走。
+        //  逐型显式偏移块（在本锚点上加）：
         //   {517 魔法匕首}: ±Next(-3,4)*3.5 双轴抖动(:47641-47644)
         //   {206 树叶吹风弹}: += NextVector2Circular(12,12) − 出速向量(:49944-49946)
         //   {1114 日耀花弹}: += NextVector2Circular(4,4)(:49948-49950)
-        //   其余 79 件魔法武器 pointPosition 原样=center;速度向仍由光标角单独算
-        const mzX = this.player.cx;
-        const mzY = this.player.cy;
+        //   {281/986}+6dir/−6grav、{3007}−4dir/−2grav、{2611/5526}+1aim、{3827}侧移24、
+        //   {3094/3378/3543/5117}Y=height/3——均【非】magic kind（ranged/melee,
+        //   Item.cs case 复核）,走 'shot' 族登记偏差,不在本批
+        const [mzMouseX, mzMouseY] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        const mzX = this.player.cx + Math.cos(ang) * 18;
+        const mzY = this.player.cy + Math.sin(ang) * 18;
+        const mzAng = Math.atan2(mzMouseY - mzY, mzMouseX - mzX);   // 出生点→光标 重瞄角
         const cwCost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1)) * (1 - this.player.equipStats.manaCostOff) * this.player.equipStats.manaCostMul); // ⑪+⑧ 词缀 mcst(I:562 round)
         // ★R27：陨石套 spaceGun 无限蓝（ItemCheck_PayMana_ShouldSkipManaUse
         // :53331-53335：spaceGun && type∈{127,4347,4348,514} → 整个耗魔段跳过——不扣蓝、
@@ -12247,8 +12252,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (Math.floor(Math.random() * 6) === 0) nBee++;
           if (this.player.equipStats.strongBees && Math.floor(Math.random() * 3) === 0) nBee++;   // strongBees 档（:48788-48791）
           const [bmwx, bmwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-          const angB = Math.atan2(bmwy - this.player.cy, bmwx - this.player.cx);
-          this.player.facing = Math.cos(angB) > 0 ? 1 : -1;
+          // ★2026-08-26 锚点批：蜂枪弹同 'magic' 域从杖头出生+出生点→光标重瞄
+          const angB0 = Math.atan2(bmwy - this.player.cy, bmwx - this.player.cx);
+          const bzX = this.player.cx + Math.cos(angB0) * 18, bzY = this.player.cy + Math.sin(angB0) * 18;
+          const angB = Math.atan2(bmwy - bzY, bmwx - bzX);
+          this.player.facing = Math.cos(angB0) > 0 ? 1 : -1;
           const bvx0 = Math.cos(angB) * cw.shootSpeed, bvy0 = Math.sin(angB) * cw.shootSpeed;
           const dmgBee0 = Math.max(1, Math.round((cw.damage ?? 9) * (ps?.dmg ?? 1) * this.player.damageMult('magic')));
           const kbBase = cw.knockback ?? 0.25;
@@ -12261,7 +12269,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               + (strongBee ? 1 + Math.floor(Math.random() * 3) : Math.floor(Math.random() * 2));
             // beeKB()（:12524-12531）：强蜂 0.5+KB×1.1 / 普蜂 KB 原值
             const kbBee = strongBee ? 0.5 + kbBase * 1.1 : kbBase;
-            const bee = new Arrow(this.player.cx, this.player.cy,
+            const bee = new Arrow(bzX, bzY,
               bvx0 + nrand(35) * 0.02, bvy0 + nrand(35) * 0.02,
               dmgBee, kbBee, strongBee ? 566 : 181, null, { grav: 0 });
             bee.frostEligible = false;   // magic=true 弹（Projectile.cs:48804）不吃冰霜引擎
@@ -12298,7 +12306,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const bjx = (Math.floor(Math.random() * 81) - 40) * 0.1;   // Next(-40,41)×0.1
             const bjy = (Math.floor(Math.random() * 81) - 40) * 0.1;
             const bub = new Arrow(mzX, mzY,
-              Math.cos(ang) * cw.shootSpeed + bjx, Math.sin(ang) * cw.shootSpeed + bjy,
+              Math.cos(mzAng) * cw.shootSpeed + bjx, Math.sin(mzAng) * cw.shootSpeed + bjy,
               cw.damage, cw.knockback, 410, null, { grav: 0, life: 100, pierce: 1 });
             bub.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
             bub.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
@@ -12426,7 +12434,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const jr = (Math.random() * 2 - 1) * 0.15707963705062866;                  // RotatedByRandom(0.157)
             const jc = Math.cos(jr), js = Math.sin(jr);
             // 续发重瞄当前光标（ItemCheck_Shoot 每 shot 重读 Main.MouseWorld）
-            const fa6152 = midSwing6152 ? Math.atan2(mwy6152 - this.player.cy, mwx6152 - this.player.cx) : ang;
+            // 续发重瞄当前光标（ItemCheck_Shoot 每 shot 重读 Main.MouseWorld;
+            // num4/5=(mouse−pointPosition) 归一——基准点=杖头锚点,2026-08-26 批）
+            const fa6152 = midSwing6152 ? Math.atan2(mwy6152 - mzY, mwx6152 - mzX) : mzAng;
             const bvx = (Math.cos(fa6152) * cw.shootSpeed) * jc - (Math.sin(fa6152) * cw.shootSpeed) * js;
             const bvy = (Math.cos(fa6152) * cw.shootSpeed) * js + (Math.sin(fa6152) * cw.shootSpeed) * jc;
             const bloom = new Arrow(mzX + jx, mzY + jy, bvx, bvy, cw.damage, cw.knockback, 1114, null,

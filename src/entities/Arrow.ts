@@ -549,6 +549,23 @@ export { PROJ_ROT_RIGHT };
 const PROJ_ROT_ASIS = new Set([121, 122, 123, 124, 125, 126, 597, 732]);   // 732 风暴气旋 rotation=velocity.ToRotation()（AI_044 :28317）
 export { PROJ_ROT_ASIS };
 
+/** 宝石法珠弹 AddLight 配色（2026-08-26 用户实报批）：AI_029_GemStaffs_ActuallyGemStaffs
+ *  尾段 Lighting.AddLight(center, R,G,B)（1458 Projectile.cs:38645-38692）——
+ *  num25 = type−120 切换乘区：121(0.9,0,0.9)紫晶 /122(0.9,0.9,0)黄玉 /123(0,0.1,1.3)
+ *  蓝晶 /124(0,1,0.1)翡翠 /125(1,0.1,0.1)红晶 /126(1.3,1.3,1.3)钻石;597 default+262
+ *  支(0.9,0.6,0.2)琥珀；1120 num=170 落 default 全白。SetDefaults 无 projectile.light
+ *  （子代理 A 复核）→ 动态点光是唯一光面 */
+const GEM_BOLT_LIGHT: Readonly<Record<number, [number, number, number]>> = {
+  121: [0.9, 0, 0.9],
+  122: [0.9, 0.9, 0],
+  123: [0, 0.1, 1.3],
+  124: [0, 1, 0.1],
+  125: [1, 0.1, 0.1],
+  126: [1.3, 1.3, 1.3],
+  597: [0.9, 0.6, 0.2],
+  1120: [1, 1, 1],
+};
+
 /** 子弹消亡火花音族（★R29：Projectile.Kill :77624-77625 列表直抄——Collision.HitTiles
  *  +SoundID.Item10；1458 列表含 389。消费面：Arrow 实心块路径 HitTiles 近似尘 +
  *  Game.onProjectileDeath Item_10 音）。放 Arrow.ts 供两侧共用（Game 反向 import） */
@@ -787,7 +804,10 @@ export class Arrow extends Entity {
   }
 
   /** AoeExplosion 爆段（Kill :77011-77058）：Resize(160)=80px 半径 AoE——
-   *  伤害 ×0.35/GetDamageMultiplier、kb ×0.35、penetrate -1（一击全杀段） */
+   *  伤害 ×0.35/GetDamageMultiplier、kb ×0.35、penetrate -1（一击全杀段）。
+   *  ★2026-08-26 尘面按原版补齐（:77014-77029）：30 枚同色尘,noGravity=rand(5)!=0、
+   *  scale×(1+rand)、v×4.2（无重力档再 scale×0.6/fadeIn=0/noLight）+ 全体 v×rand
+   *  ——曾以 '#C080FF' 引擎粒子近似（不进尘池无光照语义） */
   private gemAoeBurst(game: GameHooks): void {
     if (!this.gem?.aoeExplosion) return;
     const mult = gemDamageMultiplier(this.gem);
@@ -802,7 +822,27 @@ export class Arrow extends Entity {
         e.hurt(dmg, Math.sign(cx - this.cx) * this.knockback * 0.35, 0, game, this.settlePen, false, this.pierceInit, true);
       }
     }
-    game.spawnParticles(this.cx, this.cy, '#C080FF', 18, 3, { life: 24, size: 3 });
+    // vector67 = velocity.SafeNormalize（<1 归零,:76993-77000 同公共段）
+    const aSpd = Math.hypot(this.vx, this.vy);
+    const adx = aSpd < 1 ? 0 : this.vx / aSpd;
+    const ady = aSpd < 1 ? 0 : this.vy / aSpd;
+    const adust = this.projId === 597 ? 262 : this.projId - 35;
+    for (let i = 0; i < 30; i++) {
+      const ng = Math.floor(Math.random() * 5) !== 0;          // noGravity = rand(5)!=0
+      const da = game.spawnDust?.(this.x, this.y, this.w, this.h, adust,
+        adx, ady, 50, null, 1.2);
+      if (!da) break;
+      da.noGravity = ng;
+      da.scale *= 1 + Math.random();
+      const rv = Math.random();
+      da.vx = (da.vx * 4.2) * rv;
+      da.vy = (da.vy * 4.2) * rv;
+      if (!ng) {
+        da.scale *= 0.6;
+        da.fadeIn = 0;
+        da.noLight = true;
+      }
+    }
   }
 
   /** ★R28 §6 星璇秘术死亡爆（Kill :73553-73612）：176×176 居中 Damage() AoE +
@@ -1875,12 +1915,12 @@ export class Arrow extends Entity {
         const slowPulse = 1 + Math.cos(gtS * Math.PI * 2) * 0.2;
         const sBase = this.drawScale;
         const iw0 = imgG.width * sBase, ih0 = imgG.height * sBase;
-        ctx.save();
-        ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+        // （注：已处于外层 save+translate(弹心) 坐标系内——此处只转姿态不再平移）
         ctx.rotate(ang);                                       // num341 = velocity.ToRotation()
         ctx.globalCompositeOperation = 'lighter';
         ctx.filter = 'grayscale(1)';
         ctx.imageSmoothingEnabled = false;
+        ctx.globalAlpha = 1;
         for (let i = 0; i < 4; i++) {                          // 四层同心灰芯
           ctx.globalAlpha = 0.314;                             // +80/255 每层
           const sw = iw0 * 1.25 * slowPulse * 0.6, sh = ih0 * slowPulse * 0.6;
@@ -1890,15 +1930,17 @@ export class Arrow extends Entity {
         if (this.gem?.biggerHitbox) {
           const fb = 1 + Math.cos(gtS * Math.PI * 2 * 4) * 0.2;   // 4Hz
           ctx.globalAlpha = 0.157;                             // color104 × 0.5
-          const drawCross = (sx: number, sy: number): void => {
-            const swx = iw0 * sx, shy = ih0 * sy;
-            ctx.save();
-            ctx.rotate(Math.PI / 4);
-            ctx.drawImage(imgG as CanvasImageSource, -swx / 2, -shy / 2, swx, shy);
-            ctx.restore();
-          };
-          drawCross(fb, fb * 2);
-          drawCross(fb * 2, fb);
+          const iwC = iw0, ihC = ih0;
+          ctx.save();
+          ctx.rotate(Math.PI / 4);
+          let swx = iwC * fb, shy = ihC * fb * 2;
+          ctx.drawImage(imgG as CanvasImageSource, -swx / 2, -shy / 2, swx, shy);
+          ctx.restore();                                       // （vanilla: base(1,f)/(f,1) 双层）
+          ctx.save();
+          ctx.rotate(Math.PI / 4);
+          swx = iwC * fb * 2; shy = ihC * fb;
+          ctx.drawImage(imgG as CanvasImageSource, -swx / 2, -shy / 2, swx, shy);
+          ctx.restore();
         }
         ctx.globalCompositeOperation = 'source-over';
         ctx.filter = 'none';
@@ -2035,6 +2077,27 @@ export class Arrow extends Entity {
     // 判定盒外扩 112×112 重结算 Damage() + 尘 31×4/228×80；近身 42/撞块/180t
     // 自毁全部走此口）
     if (this.martianRocket) this.rocketExplode(game);
+    // ★2026-08-26 宝石法珠 Kill 公共段（Projectile.cs:76985-77010,1458；用户实报批）：
+    // SoundEngine.PlaySound(0)=Dig 音 + 15 枚同色尘（noGravity、scale×1.25、
+    // v=dir:(v<1 归零向) → ×2.2 +dir×1.5 → ×randFloat——六连式与原版逐式对齐）
+    if ((isGemBolt(this.projId) || this.projId === 1120) && !this.dead) {
+      game.playSfx?.('dig', 1, this.cx, this.cy);            // PlaySound(0,...)（:76987）
+      const kSpd = Math.hypot(this.vx, this.vy);
+      const kdx = kSpd < 1 ? 0 : this.vx / kSpd;             // vector67（<1 取 Zero,:76995）
+      const kdy = kSpd < 1 ? 0 : this.vy / kSpd;
+      const kdust = this.projId === 597 ? 262 : this.projId === 1120 ? 170 : this.projId - 35;
+      for (let i = 0; i < 15; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, kdust,
+          kdx, kdy, 50, null, 1.2);
+        if (d) {
+          d.noGravity = true;
+          d.scale *= 1.25;
+          const rr = Math.random();                          // Main.rand.NextFloat()
+          d.vx = (d.vx * 2.2 + kdx * 1.5) * rr;
+          d.vy = (d.vy * 2.2 + kdy * 1.5) * rr;
+        }
+      }
+    }
     // 1457 宝石法珠 AoeExplosion 爆段（Kill :77011-77058，黄玉法珠/长袍臂）：
     // Resize(160) 80px 半径 AoE + 伤 ×0.35/GetDamageMultiplier + kb ×0.35
     if (this.gem?.aoeExplosion && !this.dead) this.gemAoeBurst(game);
@@ -2632,8 +2695,9 @@ export class Arrow extends Entity {
     }
     // 宝石弹 oldPos 环（Projectile.cs:17236-17245 TrailingMode=2 每 tick 逐位后移，
     // oldPos[0]=本 tick 出生位）——Colliding :15452-15466 FastThenSlow 拖尾扫掠消费
-    //（蓝队 R2-02：本仓 Arrow 原无位置历史，补 5 帧环形缓冲）
-    if (this.gem) {
+    //（蓝队 R2-02：本仓 Arrow 原无位置历史，补 5 帧环形缓冲）★1120 同 aiStyle29
+    // 也吃 GemStaffShotDrawer 拖尾（Main.cs:28623 分发表含 1120）→ 记录条件扩同集
+    if (this.gem || isGemBolt(this.projId) || this.projId === 1120) {
       this.gemTrail.unshift(this.x, this.y);
       if (this.gemTrail.length > 12) this.gemTrail.length = 12;
     }
@@ -4181,9 +4245,31 @@ export class Arrow extends Entity {
     //   Homing 视距 500（FastThenSlow/CanBounce ×2=1000）、转向率随距离/速度;
     //   FastThenSlow 恒 ×0.97 减速（缩到 0.1 以下 Kill）;
     //   SwirlTwins 垂直向正弦摆（幅 6、0.05Hz×π 相位）
-    if (this.gem) {
-      const g = this.gem;
-      if (g.swirlTwins) {
+    if (this.gem || isGemBolt(this.projId) || this.projId === 1120) {
+      const g: GemStaffFlags | null | undefined = this.gem;
+      // ---- AI 轨迹尘 + 点光（AI_029_GemStaffs_ActuallyGemStaffs :38516-38693,
+      //      2026-08-26 用户实报批补齐）----
+      // 尘型 num = type−121+86（121→86…126→91）;597→262 琥珀;1120→170。
+      // NewDust(...,num,velocity.X,velocity.Y,50,default,1.2f) 后 noGravity+velocity
+      // ×0.3：1120 每拍恒 1 枚（flag=false 门 :38527）,宝石珠 2 槽各 rand(5)==0 才出
+      // （期望 0.4 枚/t）。★近似：NewDust 内在随机扰动分量未随 ×0.3 缩放（登记）
+      const gemDustId = this.projId === 597 ? 262 : this.projId === 1120 ? 170 : this.projId - 35;
+      if (this.projId === 1120) {
+        game.spawnDust?.(this.x, this.y, this.w, this.h, gemDustId,
+          this.vx * 0.3, this.vy * 0.3, 50, null, 1.2, true);
+      } else {
+        for (let slot = 0; slot < 2; slot++) {
+          if (Math.floor(Math.random() * 5) === 0) {
+            game.spawnDust?.(this.x, this.y, this.w, this.h, gemDustId,
+              this.vx * 0.3, this.vy * 0.3, 50, null, 1.2, true);
+          }
+        }
+      }
+      // AddLight（:38692 Lighting.AddLight(center,R·G·B),按弹配色——87 号黄玉橙/
+      // 123 蓝晶深蓝(0,0.1,1.3)/126 钻白 1.3 等;1120 default 支=全白）
+      this.lightRGB = GEM_BOLT_LIGHT[this.projId] ?? null;
+
+      if (g?.swirlTwins) {
         // :38618-38630 num18=ai[1]×π(孪生弹反相);本仓 gemPhase 0/1
         const num18 = this.gemPhase * Math.PI;
         const n19 = Math.sin((this.gemSwirlT) * (Math.PI * 2) * 0.05 + num18);
@@ -4194,7 +4280,7 @@ export class Arrow extends Entity {
         this.x += (-this.vy / sp) * d * 6;
         this.y += (this.vx / sp) * d * 6;
       }
-      if (g.fastThenSlow) {
+      if (g?.fastThenSlow) {
         // :38633-38641 减速段：速度 >0.1 恒 ×0.97；≤0.1 后逐帧 scale −0.005 收缩、
         // <0.1 Kill（不是悬停到 timeLeft 自然消亡——蓝队 R2-13 补；scale 仅视觉，
         // 原版 Colliding 用 width/height 不随 scale 缩）
@@ -4204,7 +4290,7 @@ export class Arrow extends Entity {
           if (this.drawScale < 0.1) { this.killNow(game); return; }
         }
       }
-      if (g.homing) {
+      if (g?.homing) {
         // :38563-38624 视距 500（FastThenSlow/CanBounce ×2）;FindTargetWithLineOfSight
         // 取最近有视线目标;速度 <num9(8,FastThenSlow×2) 时 +0.1 提速并 ×1.1;
         // rotateTowards 转向率 = Remap(距离,视距,0,0,1)×0.1+0.01（近距 +0.05 并

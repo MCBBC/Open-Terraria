@@ -674,14 +674,46 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         });
       },
       onBack: () => { closePanel(); showTitle(); },
-      listSaves: async () => {
-        // 列出世界槽位并读出存档 JSON（IndexedDB → 上传给中央服务器建房）
-        await worldStore.ensureLoaded();
-        return Promise.all(worldStore.list().map(async (m) => ({
-          id: m.id,
-          name: m.name,
-          json: await worldStore.load(m),
-        })));
+      // 创建房间资产链(2026-08-25 用户要求,单人式流程):角色选择 → 世界列表 →
+      // 选定世界读存档 JSON → then 继续建房。新建世界暂引导去单人创建(备案:
+      // worldStore.register 在进游戏后才登记,无"只建不进"的廉价 API)
+      onCreateRoomFlow: (then) => {
+        const holder = document.createElement('div');
+        holder.style.cssText = 'position:fixed; inset:0; z-index:22; overflow-y:auto;';
+        root.appendChild(holder);
+        panelRoot?.style.setProperty('display', 'none');
+        const closeFlow = () => { holder.remove(); panelRoot?.style.removeProperty('display'); };
+        const pickWorld = () => {
+          new WorldSelectPanel(holder, worldStore, {
+            onPlay: (meta) => {
+              void worldStore.load(meta).then((json) => {
+                closeFlow();
+                then(json ?? '', meta.name);
+              });
+            },
+            onNew: () => { ui.toast(Lang.text('Mods.SandboxWorld.MP.CreateWorldInSingle')); },
+            onBack: () => closeFlow(),
+          });
+        };
+        new CharSelectPanel(holder, charStore, {
+          onPlay: (a, id) => {
+            selectedAppearance = a;
+            selectedCharId = id ?? null;
+            pickWorld();   // 世界列表面板后入=覆盖角色列表(各面板自带全屏底)
+          },
+          onNew: () => {
+            new CharCreation(holder, {
+              onCreate: async (a) => {
+                await charStore.create(a);
+                selectedAppearance = a;
+                selectedCharId = null;
+                pickWorld();
+              },
+              onCancel: () => closeFlow(),
+            });
+          },
+          onBack: () => closeFlow(),
+        });
       },
       // 加入/创建前需要角色(2026-08-25 用户要求):复用单人角色列表(CharSelectPanel
       // 覆盖层)——★holder 无底色(与单人进角色列表同观感:游戏背景透出);多人面板

@@ -178,7 +178,9 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
           const s0 = sheetOf(st.type[idx]!);
           if (TILE_DUNGEON.has(s0) || CRACKED_BRICKS.has(s0)) st.paint[idx] = DUNGEON_PAINT;
         }
-        if (WALL_DUNGEON.has(st.wall[idx]!)) st.wallPaint[idx] = DUNGEON_PAINT;
+        // ★UUU 勘误：原并行会话写 `st.wallPaint`（TileStore 无此字段,tsc TS2339,
+        //   运行时静默空转）——按同文件 :307 与 cs:25449 语义应为 paintWall
+        if (WALL_DUNGEON.has(st.wall[idx]!)) st.paintWall[idx] = DUNGEON_PAINT;
         continue;
       }
       // 中带草化（cs:25307-25327：tenth/dstarve/drunk 门——纯 NTB 恒假）

@@ -470,8 +470,11 @@ describe('6152 DaybloomStaff 停发窗/autoReuse（用户实报"挥动没效果"
     const src = readFileSync('src/core/Game.ts', 'utf8');
     // 门已泛化为 TAIL_SILENCE_WIN 表（{3852:4, 4952:4, 6152:4},win=useTime×N）——
     // 守卫两点：①静默窗方向必须是 t < dur−win（反相则起始帧被吞）②6252 在表内 ×4
-    const gate = src.match(/if \(swDur0 > 0 && swT0 < swDur0 - win\)/);
-    expect(gate, '停发窗门存在且方向=倒计时末段（t < dur−win）').toBeTruthy();
+    // ★2026-08-26 勘误:门合法演化加 `swT0 > 1` 闩(2026-08-25 修 swing 归零后
+    //   swT0=0<win 恒真=按住永久吞施法/放下不回举,用户实报连发瞬态)——方向子句
+    //   `swT0 < swDur0 - win` 不变,正则随新形态更新(旧正则锁 swDur0>0 前置已废)
+    const gate = src.match(/if \(swT0 > 1 && swT0 < swDur0 - win\)/);
+    expect(gate, '停发窗门存在且方向=倒计时末段（t < dur−win）+重施闩').toBeTruthy();
     const tbl = src.match(/TAIL_SILENCE_WIN[^=]*= \{([^}]*)\}/);
     expect(tbl, 'TAIL_SILENCE_WIN 表存在').toBeTruthy();
     expect(tbl![1]).toContain('6152: 4');

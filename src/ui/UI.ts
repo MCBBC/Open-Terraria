@@ -2947,7 +2947,7 @@ export class UI {
     this.craftSearchEl = el('input') as HTMLInputElement;
     this.craftSearchEl.placeholder = Lang.text('Mods.SandboxWorld.Craft.SearchHint');
     this.craftSearchEl.style.cssText = 'flex:1; padding:4px 8px; background:#241e38; color:#fff; border:1px solid #6a5a8a; border-radius:4px; font-size:12px;';
-    this.craftSearchEl.addEventListener('input', () => { this.craftFocus = -1; this.craftScroll = 0; this.refreshVanillaCrafting(); });
+    this.craftSearchEl.addEventListener('input', () => { this.craftFocus = -1; this.craftScroll = 0; this.craftScrollF = 0; this.craftWheelTarget = 0; this.refreshVanillaCrafting(); });
     modernRow.appendChild(this.craftSearchEl);
     this.craftGridEl = el('div');
     this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:520px;';
@@ -3017,26 +3017,45 @@ export class UI {
   private craftMouseInList = false;
   private craftWheelStep(dyRaw: number, deltaMode: number): void {
     const dy = deltaMode === 1 ? dyRaw * 40 : dyRaw;
-    const now = performance.now();
-    const fresh = now - this.craftWheelLast > 120;
-    this.craftWheelLast = now;
-    if (fresh) {
-      // 新手势首事件：立即 1 行（无迟滞）——只滚窗口锚，不动选中配方。
-      // ★hoverFocus 不清（2026-08-25 用户报：hover 态下滚动预览跳回第一个
-      //  配方）——滚动时悬停预览冻结，直到真实移动鼠标才更新
-      this.craftWheelAcc = 0;
-      this.craftScroll = Math.max(0, this.craftScroll + (dy > 0 ? 1 : -1));
-      this.refreshAll();
-      return;
-    }
-    // 同手势连发：累积限速（惯性不连跳）
-    if (this.craftWheelAcc !== 0 && Math.sign(dy) !== Math.sign(this.craftWheelAcc)) this.craftWheelAcc = 0;
-    this.craftWheelAcc += dy;
-    if (Math.abs(this.craftWheelAcc) < 100) return;
-    this.craftWheelAcc = 0;
-    this.craftScroll = Math.max(0, this.craftScroll + (dy > 0 ? 1 : -1));
-    this.refreshAll();
+    this.craftWheelLast = performance.now();   // hover 预览 350ms 门仍消费
+    const maxA = Math.max(0, this.craftAvailRef.length - 1);
+    // ≈1 行/格（Chrome 滚轮 deltaY≈100）；连续滚动=目标浮点累加，rAF 缓动跟随。
+    // ★滚动只走动画不再 refreshAll 全刷——hover 预览/选中语义不受滚轮影响
+    let t = this.craftWheelTarget + dy / 112;
+    // 端部阻尼：越界部分按 35% 折算（拉伸蓄能），上限 3 行——松手由动画回弹归界
+    if (t < 0) t *= 0.35;
+    else if (t > maxA) t = maxA + (t - maxA) * 0.35;
+    this.craftWheelTarget = Math.max(-3, Math.min(maxA + 3, t));
+    this.craftWheelIdle = performance.now();
+    this.craftAnimKick();
   }
+
+  /** rAF 动画：锚向目标指数缓动 + 越界回弹 + 窗绘制。静止即停，零空转 */
+  private craftAnimKick(): void {
+    if (this.craftAnimRaf) return;
+    this.craftAnimLast = performance.now();
+    this.craftAnimRaf = requestAnimationFrame(this.craftAnimFrame);
+  }
+  private craftAnimFrame = (now: number): void => {
+    this.craftAnimRaf = 0;
+    const dt = Math.min(0.05, Math.max(0.001, (now - this.craftAnimLast) / 1000));
+    this.craftAnimLast = now;
+    const maxA = Math.max(0, this.craftAvailRef.length - 1);
+    // 滚轮静默 >120ms 且目标越界 → 弹回界内（回弹）
+    if (now - this.craftWheelIdle > 120 && (this.craftWheelTarget < 0 || this.craftWheelTarget > maxA)) {
+      const bound = this.craftWheelTarget < 0 ? 0 : maxA;
+      this.craftWheelTarget += (bound - this.craftWheelTarget) * (1 - Math.exp(-dt * 14));
+      if (Math.abs(bound - this.craftWheelTarget) < 0.002) this.craftWheelTarget = bound;
+    }
+    const diff = this.craftWheelTarget - this.craftScrollF;
+    if (Math.abs(diff) > 0.0015) this.craftScrollF += diff * (1 - Math.exp(-dt * 17));
+    else this.craftScrollF = this.craftWheelTarget;
+    this.craftPaintWindow();
+    const settled = this.craftScrollF === this.craftWheelTarget
+      && this.craftWheelTarget >= 0 && this.craftWheelTarget <= maxA;
+    if (!settled) this.craftAnimKick();
+    else this.craftScroll = Math.round(Math.max(0, Math.min(maxA, this.craftScrollF)));   // 语义锚回写
+  };
 
   /** 滚动条跳转（clientY → 槽内比例 → 焦点行；拖滑块与点槽共用） */
   private craftScrollJump(clientY: number): void {
@@ -3054,7 +3073,9 @@ export class UI {
     const focus = Math.min(meta.len - 1, s + 4);
     if (focus !== this.craftScroll) {
       this.craftScroll = focus;   // 悬停预览同滚轮：冻结不清，真实移鼠标才更新
-      this.refreshAll();
+      this.craftWheelTarget = focus;   // 拖拽同样走缓动（跳变被动画抹平）
+      this.craftWheelIdle = 0;         // 拖拽非滚轮手势：直接允许绘制
+      this.craftAnimKick();
     }
   }
 
@@ -3734,6 +3755,19 @@ export class UI {
   /** 渲染窗滚动锚（滚轮/滚动条驱动；原与 craftFocus 同体——拆离后滚动不再
    *  改选中配方。窗起点 start=craftScroll-4，钳制/滑块几何同旧） */
   private craftScroll = 0;
+  // ---- 平滑滚动态(2026-08-26 用户报"滚动卡卡+hover 高亮闪")----
+  // 旧行为=滚轮每步重建窗口 12 行 DOM(元素在光标下销毁重建=闪)且每步 refreshAll
+  // 全刷(=卡)。新:浮点动画锚 craftScrollF 缓动至 craftWheelTarget(可越界=回弹),
+  // 行池 12 行复用、滚动帧只改 transform 不销毁元素;重建(搜索/库存变化)才重填内容。
+  private craftScrollF = 0;             // 动画值(浮点行锚,可短暂越界画拉伸)
+  private craftWheelTarget = 0;         // 滚轮/拖拽目标(浮点,越界=阻尼蓄能)
+  private craftWheelIdle = 0;           // 最近滚轮时间戳(回弹起振门)
+  private craftAnimRaf = 0;
+  private craftAnimLast = 0;
+  private craftPool: HTMLElement[] = [];
+  private craftPoolIdx: number[] = [];  // 每池行当前配方 idx(-1 空,-2=强制重绘)
+  private craftAvailRef: Array<{ r: import('../data/vanillaRecipes').VanillaRecipeLike; count: number }> = [];
+  private static readonly CRAFT_ROW_H = 30;
   /** 悬停预览行（材料格显示源；-1=无）。★只动材料格不动渲染窗——
    *  窗口锚点恒用 craftScroll（滚轮/点击驱动），hover 不触发滚动 */
   private hoverFocus = -1;
@@ -3743,19 +3777,17 @@ export class UI {
   /** 材料格已存（原版 vid → 数量；焦点配方切换/关面板时归还背包） */
   private craftGrid = new Map<number, number>();
   private craftGridRecipe: VanillaRecipeLike | null = null;
-  /** 原版配方列表（数据驱动 1456 全量；鱼眼缩放 = 100/(|Δ|+100) 下限 0.75，CraftingUI.cs:184-192 DOM 近似） */
+  /** 原版配方列表（数据驱动 1456 全量）。
+   *  ★2026-08-26 平滑滚动重构（用户报"滚动卡卡+hover 高亮闪"）：旧行为=滚轮每步
+   *  replaceChildren 重建窗 12 行 + refreshAll 全刷（元素在光标下销毁重建=闪、
+   *  每步全量 UI 刷新=卡）。新=行池 12 行复用 + 浮点锚 rAF 缓动（craftWheelStep →
+   *  craftAnimFrame → craftPaintWindow），滚动帧只改 transform 零销毁；池行
+   *  mouseenter/mousedown 走 dataset.ri 读 craftAvailRef，行为语义（预览冻结门/
+   *  选中仅点击/shift×10）全部保留。 */
   private refreshVanillaCrafting(): void {
     const game = this.game;
     if (!game || !this.craftListEl) return;
-    // ★先清后填(2026-08-13 泄露 review):此前只 append 从不清空——合成搜索
-    // 每键直调本方法,连续打字时 61 节点/键无上界累积(清空原本只在 refreshCrafting)
-    this.craftListEl.replaceChildren();
     let avail = game.vanillaAvailableRecipes();
-    if (!avail.length) {
-      this.craftListEl.style.height = '0px';   // 空列表收合（面板底部不留 240px 空腔）
-      return;
-    }
-    // 搜索过滤（Modern 网格搜索栏：按成品名过滤）
     const q = this.craftSearchEl?.value.trim().toLowerCase() ?? '';
     if (q) {
       const filtered = avail.filter(({ r }) => {
@@ -3765,139 +3797,167 @@ export class UI {
       });
       if (filtered.length) avail = filtered;
     }
-    // 小标题已摘——面板只留原版配方段,无需分区标识
-    // ★视口跟随（2026-08-21 用户报"无法滚动到第 7 项以后"）：渲染窗以【可见行数】
-    // 为基、焦点居中——原版 availableRecipeY[focus]→0 即视口中心（CraftingUI.cs
-    // :383-404 行 Y=(i-focus)×65、middleY=屏高/600×250 ≈ ±5 行 :40969-40977）。
-    // 曾按 MAX_ROWS=60 取窗 min(focus-30, len-60)：len<60 时恒 start=0，240px
-    // overflow:hidden 容器永远只露前 ~8 行，滚轮只空转焦点、行窗不动。
-    const VIS_ROWS = 8;   // 240px 容器 ÷ ~30px 行 ≈ 8 可见行（原版 ±5 居中同义）
-    const WIN = VIS_ROWS + 4;   // 渲染窗全宽（下缘 +4：淡出余量）
-    if (this.craftScroll > avail.length - 1) this.craftScroll = Math.max(0, avail.length - 1);   // 钳尾不回卷（ScrollCraftingList :582-589 钳 [0,len-1]）
-    // ★start 钳到 maxStart（2026-08-21 用户报"拖到底还能往下拖"）：曾只 max(0,focus-4)
-    //   ——尾部 focus-4 会浪费视口（末页只渲染 len-start 行，thumb 随 visRows 缩水、
-    //   与拖拽域 [0,len-1] 不一致）。钳尾后视口恒满、thumb 高恒定、拖拽 1:1
-    const maxStart = Math.max(0, avail.length - WIN);
-    // 焦点上界=窗尾锚（maxStart+4）：到底后滚轮不再漂移（曾只钳 len-1 →
-    // 底部继续滚会把锚推离窗尾,回滚出现最多 7 格死区）
-    const maxFocus = avail.length > WIN ? maxStart + (VIS_ROWS >> 1) : avail.length - 1;
-    if (this.craftScroll > maxFocus) this.craftScroll = maxFocus;
-    const start = Math.max(0, Math.min(this.craftScroll - (VIS_ROWS >> 1), maxStart));
-    const end = Math.min(avail.length, start + WIN);
-    for (let idx = start; idx < end; idx++) {
-      const { r, count } = avail[idx];
-      const outKey = vanillaItemKey(r.create);
-      if (!outKey) continue;
-      const row = el('div', 'sw-recipe');
-      // ★2026-08-25 用户定案去掉鱼眼缩放/淡出（原 availableRecipeY 焦点行
-      //  scale=100/(|dy|+100)）：焦点行恒比其余行宽一截，用户视为「滚动时自动
-      //  预选了一个配方」——列表回归普通等宽行。滚动锚 craftScroll 机制不变
-      //  （只是不再视觉强调任何一行）；选中配方 craftFocus 仅由点击设置
-      const img = el('img') as HTMLImageElement;
-      img.src = iconUrl(game, game.itemId(outKey));
-      row.appendChild(img);
-      const label = el('span', '', `${Lang.itemNameByKey(outKey)}${r.createStack > 1 ? ` ×${r.createStack}` : ''} ×${count}`);
-      row.appendChild(label);
-      const mats = el('span', '', r.items.map((req) => {
-        const k = ingredientKey(req.id);
-        if (!k) return ` ? ${req.stack}`;
-        const have = game.player.inv.countOf(game.itemId(k));
-        return ` ${Lang.itemNameByKey(k)} ${Math.min(have, req.stack)}/${req.stack}`;
-      }).join(' ·'));
-      mats.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right;';
-      row.appendChild(mats);
-      row.addEventListener('mouseenter', () => {
-        // 悬停预选（2026-08-21 用户两段定案：hover 显示该配方材料格，但【不得】
-        // 触发列表滚动——滚动只由滚轮驱动）。hoverFocus 只作材料格预览源，
-        // 渲染窗锚 craftScroll 不被 hover 触碰 → 窗口纹丝不动。
-        // 2026-08-24 用户报：滚轮滚动过程中鼠标扫过行会连环触发 hover 重选+
-        // refreshAll 抖动——滚动期（craftWheelLast 120ms 内有事件）临时屏蔽
-        // hover，静默 120ms 后恢复（与 craftWheelStep 的 fresh 判定同口径）。
-        // ★2026-08-25 补 mousemove 门：行重建/内容滚动派发的 mouseenter 无
-        // mousemove 伴随——只有 150ms 内有真实鼠标移动才认定主动悬停。
-        // ★滚轮门 120→350ms（用户复报：hover 态下滚动预览仍在变）——慢滚步
-        // 间隔 >120ms 且手滚滚轮时鼠标微动会刷新 mousemove 门，两门全过 =
-        // 每步重建都预选鼠标下行；350 覆盖慢滚/触控板惯性尾段间隔，滚动
-        // 静默 350ms 后才恢复主动悬停判定
-        if (performance.now() - this.craftMouseMoveLast > 150) return;
-        if (performance.now() - this.craftWheelLast < 350) return;
-        // 高亮(.hov)与预选分离:主动悬停即亮;预选仍按需刷新
-        this.craftHoverIdx = idx;
-        this.craftHoverEl?.classList.remove('hov');
-        row.classList.add('hov');
-        this.craftHoverEl = row;
-        if (this.hoverFocus !== idx) {
-          this.hoverFocus = idx;
-          this.refreshAll();
-        }
-      });
-      row.addEventListener('mousedown', (ev) => {
-        ev.stopPropagation();
-        this.craftFocus = idx; // 选中配方（材料格数据源）——★仅点击设置，滚动不改
-        this.hoverFocus = -1;  // 点击行即焦点，预览态退场
-        // 点击行 = 合成（合成按钮已去除）。材料格存料先归还背包再统一扣料——
-        // 防"料在格里、背包不足"的假失败（换焦点路径已由 refreshCraftGrid 归还）
-        this.returnCraftGrid();
-        game.vanillaCraft(r, (ev as MouseEvent).shiftKey ? 10 : 1);
-        this.refreshAll();
-      });
-      this.craftListEl.appendChild(row);
+    const WIN = 12;                                     // 池行数 = 可见 8 + 余量 4
+    const maxAnchor = Math.max(0, avail.length - 1);
+    if (this.craftScroll > maxAnchor) this.craftScroll = maxAnchor;   // 钳尾不回卷（ScrollCraftingList :582-589）
+    if (!avail.length) {
+      this.craftAvailRef = [];
+      this.craftListEl.replaceChildren();
+      this.craftPool = []; this.craftPoolIdx = [];
+      this.craftListEl.style.height = '0px';   // 空列表收合（面板底部不留 240px 空腔）
+      if (this.craftTrackEl) this.craftTrackEl.style.display = 'none';
+      return;
     }
-    // 滚轮：焦点 ±1（原版 ScrollCraftingList；±6.5/帧的平滑由 transition 兜）。
-    // ★2026-08-13 泄露 review 两修:①绑定标记挂元素(craftListEl 每次进游戏
-    // 重建,旧类字段置真后永不复位=第二次进游戏滚轮永久失效);②refreshAll
-    // 改走 rAF 合并(滚轮风暴每事件一次全量重建=BestiaryPanel 同根因)
-    {
-      const cl = this.craftListEl as HTMLElement & { __swCraftWheel?: boolean };
-      if (!cl.__swCraftWheel) {
-        cl.__swCraftWheel = true;
-        cl.addEventListener('mousemove', () => { this.craftMouseMoveLast = performance.now(); });
-        cl.addEventListener('mouseenter', () => { this.craftMouseInList = true; });
-        cl.addEventListener('wheel', (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          this.craftWheelStep(ev.deltaY, ev.deltaMode);   // 累积阈值 100（craftWheelStep）
-        }, { passive: false });
-        // 移出列表清预览+高亮（行重建销毁不派发 leave，容器级兜底防残留）
-        cl.addEventListener('mouseleave', () => {
-          this.craftMouseInList = false;
-          this.craftHoverIdx = -1;
-          this.craftHoverEl?.classList.remove('hov');   // ★必须摘类:hoverFocus 已 -1 时不会重建,漏摘=高亮残留
-          this.craftHoverEl = null;
-          if (this.hoverFocus !== -1) { this.hoverFocus = -1; this.refreshAll(); }
+    this.craftAvailRef = avail;
+    this.craftScrollF = Math.max(0, Math.min(maxAnchor, this.craftScrollF));
+    this.craftWheelTarget = Math.max(0, Math.min(maxAnchor, this.craftWheelTarget));
+    // 行池初始化（容器每进游戏重建 → __swCraftWheel 随之失效重挂，同旧纪律）
+    if (this.craftPool.length !== WIN) {
+      const cl = this.craftListEl;
+      cl.replaceChildren();
+      cl.style.cssText = 'height:240px; overflow:hidden; width:520px; position:relative;';
+      this.craftPool = []; this.craftPoolIdx = [];
+      for (let k = 0; k < WIN; k++) {
+        const row = el('div', 'sw-recipe');
+        row.style.cssText = `height:${UI.CRAFT_ROW_H}px; margin:0; position:absolute; left:0; right:0; top:0; will-change:transform;`;
+        row.addEventListener('mouseenter', () => {
+          // 悬停预选三段语义保留（2026-08-21/24/25）：只动材料格不动窗、
+          // mousemove 门 150ms、滚轮门 350ms——池行持久后 mouseenter 只在
+          // 真实进出时派发，两门主要防重建派发的兜底语义不变
+          if (performance.now() - this.craftMouseMoveLast > 150) return;
+          if (performance.now() - this.craftWheelLast < 350) return;
+          const idx = +(row.dataset.ri ?? -1);
+          if (idx < 0) return;
+          this.craftHoverIdx = idx;
+          this.craftHoverEl?.classList.remove('hov');
+          row.classList.add('hov');
+          this.craftHoverEl = row;
+          if (this.hoverFocus !== idx) { this.hoverFocus = idx; this.refreshAll(); }
         });
+        row.addEventListener('mousedown', (ev) => {
+          ev.stopPropagation();
+          const idx = +(row.dataset.ri ?? -1);
+          const rec = this.craftAvailRef[idx];
+          if (!rec) return;
+          this.craftFocus = idx;      // 选中配方——仅点击设置，滚动不改
+          this.hoverFocus = -1;       // 点击行即焦点，预览态退场
+          // 格料先归还背包再统一扣料——防"料在格里、背包不足"假失败（同旧）
+          this.returnCraftGrid();
+          game.vanillaCraft(rec.r, (ev as MouseEvent).shiftKey ? 10 : 1);
+          this.refreshAll();
+        });
+        cl.appendChild(row);
+        this.craftPool.push(row);
+        this.craftPoolIdx.push(-2);   // -2=强制首绘
       }
+      {
+        const cl2 = cl as HTMLElement & { __swCraftWheel?: boolean };
+        if (!cl2.__swCraftWheel) {
+          cl2.__swCraftWheel = true;
+          cl2.addEventListener('mousemove', () => { this.craftMouseMoveLast = performance.now(); });
+          cl2.addEventListener('mouseenter', () => { this.craftMouseInList = true; });
+          cl2.addEventListener('wheel', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            this.craftWheelStep(ev.deltaY, ev.deltaMode);
+          }, { passive: false });
+          // 移出列表清预览+高亮（容器级兜底防残留，同旧）
+          cl2.addEventListener('mouseleave', () => {
+            this.craftMouseInList = false;
+            this.craftHoverIdx = -1;
+            this.craftHoverEl?.classList.remove('hov');
+            this.craftHoverEl = null;
+            if (this.hoverFocus !== -1) { this.hoverFocus = -1; this.refreshAll(); }
+          });
+        }
+      }
+    } else {
+      // avail 引用已换（材料计数/过滤可能变）→ 池行内容强制重绘
+      for (let k = 0; k < WIN; k++) this.craftPoolIdx[k] = -2;
     }
+    this.craftPaintWindow();
     // Modern 合成网格材料格（焦点配方）
     this.refreshCraftGrid(avail);
-    // 视口高度自适应（2026-08-21 用户报"背包面板底部空白大"）：240px 是鱼眼视口
-    // 上限，配方不足一屏时收缩到内容高——overflow:hidden 的 scrollHeight 仍返回
-    // 内容全高（行 transform 缩放不参与布局，行高恒定），面板底边随之贴内容
-    this.craftListEl.style.height = `${Math.min(240, this.craftListEl.scrollHeight)}px`;
-    // 滚动条几何：thumb 高=可见窗占比（min 24px），top=窗口起点比例；内容不满
-    // 一屏（无滚动余地）整条隐藏
+  }
+
+  /** 池行窗口绘制（rAF 动画帧/重建共用）：浮点锚 → 容器小数段位移 + 行按需换绑
+   *  （仅进出窗的行重建内容，窗内行零 DOM 变更=hover 稳定）+ thumb 跟动画值 */
+  private craftPaintWindow(): void {
+    const avail = this.craftAvailRef;
+    const game = this.game;
+    const len = avail.length;
+    const cl = this.craftListEl;
+    if (!len || !cl || !game) return;
+    const H = UI.CRAFT_ROW_H;
+    const VIS_ROWS = 8, WIN = 12;
+    const anchor = this.craftScrollF;
+    const topF = anchor - (VIS_ROWS >> 1);              // 焦点居中（旧 start=锚-4 同语义）
+    const start = Math.floor(topF);
+    const frac = topF - start;
+    cl.style.transform = `translateY(${(-frac * H).toFixed(2)}px)`;
+    for (let k = 0; k < WIN; k++) {
+      const row = this.craftPool[k];
+      if (!row) continue;
+      const idx = start + k;
+      if (idx < 0 || idx >= len) {
+        if (this.craftPoolIdx[k] !== -1) { row.style.visibility = 'hidden'; this.craftPoolIdx[k] = -1; }
+        continue;
+      }
+      if (this.craftPoolIdx[k] !== idx) {
+        // 换绑（进出窗才发生）：内容重建 + 高亮归属交接
+        if (this.craftHoverEl === row) { this.craftHoverEl = null; }
+        row.classList.remove('hov');
+        row.style.visibility = '';
+        row.dataset.ri = String(idx);
+        const { r, count } = avail[idx];
+        const outKey = vanillaItemKey(r.create);
+        row.replaceChildren();
+        const img = el('img') as HTMLImageElement;
+        img.src = iconUrl(game, game.itemId(outKey ?? ''));
+        row.appendChild(img);
+        const label = el('span', '', `${outKey ? Lang.itemNameByKey(outKey) : '?'}${r.createStack > 1 ? ` ×${r.createStack}` : ''} ×${count}`);
+        row.appendChild(label);
+        const mats = el('span', '', r.items.map((req) => {
+          const k2 = ingredientKey(req.id);
+          if (!k2) return ` ? ${req.stack}`;
+          const have = game.player.inv.countOf(game.itemId(k2));
+          return ` ${Lang.itemNameByKey(k2)} ${Math.min(have, req.stack)}/${req.stack}`;
+        }).join(' ·'));
+        mats.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right;';
+        row.appendChild(mats);
+        this.craftPoolIdx[k] = idx;
+      }
+      row.style.transform = `translateY(${((idx - topF) * H).toFixed(2)}px)`;
+    }
+    // 高度自适应（配方不足一屏收合，面板底边贴内容——同旧语义，改为公式直算）
+    cl.style.height = `${Math.min(240, len * H)}px`;
+    // 滚动条几何：thumb 高=可见窗占比（min 24px）、top 跟【动画值】（拖拽顺滑）
     const meta = this.craftScrollMeta;
-    meta.len = avail.length;
-    meta.visRows = Math.min(WIN, avail.length);   // 恒定（曾用 end-start=尾部缩水致 thumb 越拖越短）
+    meta.len = len;
+    meta.visRows = Math.min(VIS_ROWS, len);
+    const maxStart = Math.max(1, len - VIS_ROWS);
     const trk = this.craftTrackEl, thb = this.craftThumbEl;
     if (trk && thb) {
-      if (meta.len <= meta.visRows) {
+      if (len <= VIS_ROWS) {
         trk.style.display = 'none';
       } else {
         trk.style.display = '';
-        const H = Math.max(1, trk.clientHeight);
-        const thumbH = Math.max(24, (meta.visRows / meta.len) * H);
+        const Ht = Math.max(1, trk.clientHeight);
+        const thumbH = Math.max(24, (meta.visRows / meta.len) * Ht);
         thb.style.height = `${thumbH}px`;
-        thb.style.top = `${(start / maxStart) * (H - thumbH)}px`;
+        const anchorC = Math.max(0, Math.min(maxStart, anchor - (VIS_ROWS >> 1)));
+        thb.style.top = `${(anchorC / maxStart) * (Ht - thumbH)}px`;
       }
     }
-    // 重建后补回悬停高亮：鼠标仍在列表内且悬停配方仍在渲染窗 → 新行立即带
-    // .hov（旧行随重建销毁，伪类断开到下次 mousemove 之间就是闪动窗口）。
-    // 预选(hoverFocus)不补——滚动不预选语义不变
-    this.craftHoverEl = null;
-    if (this.craftMouseInList && this.craftHoverIdx >= start && this.craftHoverIdx < end) {
-      const el2 = this.craftListEl.children[this.craftHoverIdx - start] as HTMLElement | undefined;
-      if (el2) { el2.classList.add('hov'); this.craftHoverEl = el2; }
+    // 重建/滚动后补回悬停高亮：悬停配方仍在窗内 → 池行立即带 .hov（预选不补）
+    if (this.craftMouseInList && this.craftHoverIdx >= start && this.craftHoverIdx < start + WIN) {
+      const k = this.craftHoverIdx - start;
+      const row = this.craftPool[k];
+      if (row && this.craftPoolIdx[k] === this.craftHoverIdx && this.craftHoverEl !== row) {
+        this.craftHoverEl?.classList.remove('hov');
+        row.classList.add('hov');
+        this.craftHoverEl = row;
+      }
     }
   }
 

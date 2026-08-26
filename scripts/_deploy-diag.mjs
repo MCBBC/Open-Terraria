@@ -1,10 +1,11 @@
-// 背景透出验证:CharSelect 覆盖层打开时 ①多人面板隐藏 ②holder 无不透明底
-// ③游戏天空画布可见(背景与单人进角色列表同观感) ④选角后流程继续。
+// 创建房间完整链路验证(空角色库):创建房间 → CharSelect → 新建 → CharCreation
+// 表单 → [data-act=create] 创建角色 → 世界列表(.sw-wsel)出现 → 点首个世界行 →
+// MP 面板恢复 + 建房继续(lobby 不可达 → 失败反馈属预期)。
 import puppeteer from 'puppeteer-core';
 const b = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'] });
 const p = await b.newPage();
 const errs = [];
-p.on('pageerror', (e) => errs.push(String(e).slice(0, 120)));
+p.on('pageerror', (e) => errs.push(String(e).slice(0, 150)));
 await p.goto(`${process.env.SW_ORIGIN ?? 'http://localhost:4177'}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 let menuOk = false;
 for (let i = 0; i < 150; i++) {
@@ -14,32 +15,39 @@ for (let i = 0; i < 150; i++) {
 }
 await p.evaluate(() => { document.querySelector('[data-act=mp]').click(); });
 await new Promise((r) => setTimeout(r, 800));
-await p.evaluate(() => {
-  const input = [...document.querySelectorAll('.sw-panel input')].find((i2) => i2.placeholder.includes('房间码'));
-  input.value = '123456';
+const s1 = await p.evaluate(() => {
+  const panel = [...document.querySelectorAll('.sw-panel')].find((x) => x.textContent?.includes('多人联机'));
+  return { saveSelGone: !panel?.querySelector('select') };
 });
 await p.evaluate(() => {
-  const btn = [...document.querySelectorAll('.sw-panel button')].find((b2) => b2.textContent === '加入');
+  const btn = [...document.querySelectorAll('.sw-panel button')].find((b2) => b2.textContent === '创建房间');
   btn.click();
 });
 await new Promise((r) => setTimeout(r, 500));
-const s = await p.evaluate(() => {
-  const vsel = document.querySelector('.sw-vsel');
-  const holder = vsel?.parentElement;
-  const mpPanel = [...document.querySelectorAll('.sw-panel')].find((x) => x.textContent?.includes('多人联机'));
-  const skyCanvasVisible = [...document.querySelectorAll('canvas')].some((c) => {
-    const st = getComputedStyle(c);
-    return c.width > 300 && st.display !== 'none' && st.visibility !== 'hidden';
-  });
-  return {
-    charSelect: !!vsel,
-    holderBg: holder ? getComputedStyle(holder).backgroundColor : 'n/a',
-    holderBgTransparent: holder ? getComputedStyle(holder).backgroundColor === 'rgba(0, 0, 0, 0)' : false,
-    mpPanelHidden: mpPanel ? getComputedStyle(mpPanel).display === 'none' : 'panel-gone',
-    skyCanvasVisible,
-  };
+const s2 = await p.evaluate(() => ({ charSelect: !!document.querySelector('.sw-vsel') }));
+await p.evaluate(() => { document.querySelector('[data-act=new]')?.click(); });
+await new Promise((r) => setTimeout(r, 500));
+const s3 = await p.evaluate(() => ({ charCreation: !!document.querySelector('[data-act=create]') }));
+// 捏人确认([data-act=create],默认外观直接创建)
+await p.evaluate(() => { document.querySelector('[data-act=create]')?.click(); });
+await new Promise((r) => setTimeout(r, 1500));
+const s4 = await p.evaluate(() => {
+  const wsel = document.querySelector('.sw-wsel, .sw-vsel');
+  const worldRows = [...document.querySelectorAll('.sw-witem')].length
+    || [...document.querySelectorAll('div')].filter((d2) => /中小.*世界|世界.*\d{3,4}/.test(d2.textContent ?? '')).length;
+  return { worldSelectShown: worldRows > 0, rowsSample: worldRows };
 });
-console.log(JSON.stringify(s, null, 1));
-const ok = s.charSelect && s.holderBgTransparent && s.mpPanelHidden === true && s.skyCanvasVisible;
+// 世界列表出现后点首个世界行(onPlay)
+await p.evaluate(() => {
+  const row = document.querySelector('.sw-witem') || [...document.querySelectorAll('div')].find((d2) => /世界/.test(d2.textContent ?? '') && d2.style.cursor === 'pointer');
+  row?.click();
+});
+await new Promise((r) => setTimeout(r, 1500));
+const s5 = await p.evaluate(() => {
+  const panel = [...document.querySelectorAll('.sw-panel')].find((x) => x.textContent?.includes('多人联机'));
+  const created = panel?.textContent?.match(/房间码|房间已创建|加入房间/);
+  return { mpPanelBack: !!panel, roomCreateFeedback: created ? created[0] : null, holderGone: !document.querySelector('[style*="z-index: 22"]') };
+});
+console.log(JSON.stringify({ s1, s2, s3, s4, s5, errs: errs.length }, null, 1));
 await b.close();
-process.exit(ok ? 0 : 1);
+process.exit(0);

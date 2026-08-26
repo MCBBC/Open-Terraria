@@ -17,8 +17,9 @@ export interface SaveEntry { id: number; name: string; json: string | null }
 export interface MultiplayerSelectCallbacks {
   /** 加入房间（完整 ws URL：ws://host:wsPort/<房间码>[?token=...]） */
   onJoinRoom: (url: string, hostToken: string) => void;
-  /** 列出可开房的存档槽位（name + 存档 JSON 字符串） */
-  listSaves: () => Promise<SaveEntry[]>;
+  /** 创建房间资产链(2026-08-25 用户要求,单人式流程):角色选择 → 世界列表 →
+   *  then(saveJson, worldName) 继续建房 */
+  onCreateRoomFlow: (then: (worldJson: string, worldName: string) => void) => void;
   /** 加入/创建前需要角色(2026-08-25 用户要求):跳转既有单人角色列表
    *  (CharSelectPanel 覆盖层,多人面板保持挂载)——选完 then() 继续动作 */
   onNeedCharacter: (then: () => void) => void;
@@ -51,11 +52,9 @@ export class MultiplayerSelect {
   private createTiles: HTMLInputElement;
   private createItems: HTMLInputElement;
   private createPvp: HTMLInputElement;
-  private saveSel: HTMLSelectElement;
   private createdInfo = el('div');
   private hostCode = '';
   private hostToken = '';
-  private saves: SaveEntry[] = [];
   private status = (elm: HTMLElement, text: string, color = '#8b98bd') => {
     elm.textContent = text;
     elm.style.color = color;
@@ -112,19 +111,8 @@ export class MultiplayerSelect {
     sHost.style.cssText = 'margin:0 0 6px; color:#c9d4ff;';
     this.root.appendChild(sHost);
 
-    this.saveSel = el('select') as HTMLSelectElement;
-    this.saveSel.style.cssText = 'width:100%; padding:6px; margin-bottom:6px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
-    this.saveSel.appendChild(el('option', undefined, T('PickSave')));
-    this.root.appendChild(this.saveSel);
-    void cb.listSaves().then((list) => {
-      this.saves = list.filter((x) => x.json);
-      for (const sv of this.saves) {
-        const opt = el('option', undefined, sv.name) as HTMLOptionElement;
-        opt.value = String(sv.id);
-        this.saveSel.appendChild(opt);
-      }
-      if (!this.saves.length) this.saveSel.appendChild(el('option', undefined, T('NoSaves')));
-    });
+    // 存档选择器已移除(2026-08-25 用户要求):创建房间走 角色选择 → 世界列表
+    // (onCreateRoomFlow,单人式流程),选中的世界 JSON 在链尾传入 createRoom
 
     this.createName = el('input') as HTMLInputElement;
     this.createName.placeholder = T('RoomNameHint');
@@ -150,10 +138,8 @@ export class MultiplayerSelect {
     const createBtn = el('button', 'sw-btn', T('Create')) as HTMLButtonElement;
     createBtn.style.margin = '8px 0 4px';
     createBtn.onclick = () => {
-      const id = parseInt(this.saveSel.value, 10);
-      const sv = this.saves.find((x) => x.id === id);
-      if (!sv?.json) { this.status(this.createdInfo, T('PickSaveFirst'), '#ff6b6b'); return; }
-      this.cb.onNeedCharacter(() => void this.createRoom(createBtn));
+      // 单人式资产链:角色选择 → 世界列表 → 建房(2026-08-25 用户要求)
+      this.cb.onCreateRoomFlow((worldJson, worldName) => void this.createRoom(createBtn, worldJson, worldName));
     };
     this.root.appendChild(createBtn);
 
@@ -233,12 +219,9 @@ export class MultiplayerSelect {
 
   // ================= 建房 =================
 
-  private async createRoom(btn: HTMLButtonElement) {
+  private async createRoom(btn: HTMLButtonElement, worldJson: string, worldName: string) {
     const base = serverBase(DEFAULT_SERVER);
     if (!base) { this.status(this.createdInfo, T('BadAddr'), '#ff6b6b'); return; }
-    const id = parseInt(this.saveSel.value, 10);
-    const sv = this.saves.find((x) => x.id === id);
-    if (!sv?.json) { this.status(this.createdInfo, T('PickSaveFirst'), '#ff6b6b'); return; }
     btn.disabled = true;
     this.status(this.createdInfo, T('Uploading'));
     try {
@@ -246,12 +229,12 @@ export class MultiplayerSelect {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: this.createName.value.trim() || sv.name,
+          name: this.createName.value.trim() || worldName,
           public: this.createPublic.checked,
           protectTiles: this.createTiles.checked,
           protectItems: this.createItems.checked,
           pvpAllowed: this.createPvp.checked,
-          save: sv.json,
+          save: worldJson,
         }),
       });
       const data = await r.json() as { ok: boolean; code?: string; hostToken?: string; error?: string };

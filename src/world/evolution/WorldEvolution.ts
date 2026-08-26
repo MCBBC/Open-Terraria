@@ -408,7 +408,9 @@ export class WorldEvolution {
               const s = sheetOf(this.typeAt(l, m));
               if (this.active(l, m) && (s === 324 || s === 81)) cnt++;
             }
-            if (cnt < need) {
+            if (cnt < need && this.solidTile(i, k + 1)) {
+              // 贝壳/珊瑚锚面门（PlaceTile num==81 支 :59922-59934：下方 active+solid
+              // +非半砖+slope==0；324 珊瑚同经 PlaceTile 口）——坡沙上不再放
               if (Math.random() < 0.5 && this.liquidAt(i, k) >= 230) this.place1(i, k, 81, 0, 5);
               else this.place1(i, k, 324, 0, 8);
             }
@@ -558,10 +560,13 @@ export class WorldEvolution {
     if (!this.growMoreVines(i, j)) return;
     if (Math.random() >= 1 / maxV) return;
     if (this.active(i, j + 1) || this.isLava(i, j + 1)) return;
-    // 向上 10 格内找挂靠草（bottomSlope 中断；近似：仅判 type）
+    // 向上 10 格内找挂靠草（原版扫描任一途经格 bottomSlope 即中断——cs:72602-72792
+    // 各族同构；曾仅判 type 漏坡底中断=下缘削坡草上垂藤，全族审查补齐）
     let ok = false;
     for (let y = j; y > j - 10; y--) {
       if (!this.host.store.inBounds(i, y)) break;
+      const sl = this.host.store.slope[this.host.store.idx(i, y)];
+      if (sl === 3 || sl === 4) break;
       if (this.active(i, y) && anchorSheets.includes(sheetOf(this.typeAt(i, y)))) { ok = true; break; }
     }
     if (ok) this.setType(i, j + 1, S(vineSheet));
@@ -569,8 +574,13 @@ export class WorldEvolution {
 
   /** 藤顶挂靠检查（普通藤专用：向上找 2 号草，cs:72563-72579） */
   private hasSupport(i: number, j: number, grassSheet: number): boolean {
+    const st = this.host.store;
     for (let y = j; y > j - 10; y--) {
-      if (!this.host.store.inBounds(i, y)) break;
+      if (!st.inBounds(i, y)) break;
+      // 原版扫描任一途经格 bottomSlope 即败（cs:73097-73107/72733 同构——
+      // 下缘削坡的块挂不住藤；hasSupportMulti 早已有此中断，此处补齐）
+      const sl = st.slope[st.idx(i, y)];
+      if (sl === 3 || sl === 4) return false;
       if (this.active(i, y) && sheetOf(this.typeAt(i, y)) === grassSheet) return true;
     }
     return false;
@@ -739,7 +749,7 @@ export class WorldEvolution {
           for (let x = i - 150; x < i + 150 && !has; x += 2) for (let y = j - 150; y < j + 150; y += 2) {
             if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === 238) { has = true; break; }
           }
-          if (!has) this.placeBlock(i, minJ - 1, 238, 2, 2);
+          if (!has && this.fitJunglePairFlat(i, j)) this.placeBlock(i, minJ - 1, 238, 2, 2);
         }
         const expert = (this.host.difficulty ?? 0) >= 1;
         const lifeDoor = expert ? 30 : 40;   // expert 1/30 / 其余 1/40（cs:74514）
@@ -750,7 +760,7 @@ export class WorldEvolution {
           for (let x = i - lifeRange; x < i + lifeRange && !has; x += 2) for (let y = j - lifeRange; y < j + lifeRange; y += 2) {
             if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === 236) { has = true; break; }
           }
-          if (!has) this.placeBlock(i, minJ - 1, 236, 2, 2);
+          if (!has && this.fitJunglePairFlat(i, j)) this.placeBlock(i, minJ - 1, 236, 2, 2);
         }
       }
       if (toDirt !== -1) {
@@ -825,7 +835,7 @@ export class WorldEvolution {
       }
       case 70: {
         // 蘑菇草（cs:74765-74818）：顶蘑菇草植物 71（1/10）+ 蘑菇树（未接）+ 泥→70
-        if (!this.active(i, minJ) && Math.random() < 1 / 10) this.place1(i, minJ, 71, 0, 1);
+        if (!this.active(i, minJ) && Math.random() < 1 / 10 && this.fitTopPlant(i, minJ, 71)) this.place1(i, minJ, 71, 0, 1);
         for (let k = minI; k < maxI; k++) for (let l = minJ; l < maxJ; l++) {
           if ((i === k && j === l) || !this.active(k, l)) continue;
           if (sheetOf(this.typeAt(k, l)) === 59) this.spreadGrass(k, l, 59, 70);
@@ -834,12 +844,13 @@ export class WorldEvolution {
       }
       case 60: {
         // 丛林草（cs:74821-74886）：顶 61（1/7）+ 世花球茎 238 + 生命果 236 + 丛林植物 233 + 泥→60
-        if (!this.active(i, minJ) && Math.random() < 1 / 7) {
+        if (!this.active(i, minJ) && Math.random() < 1 / 7 && this.fitTopPlant(i, minJ, 61)) {
           this.place1(i, minJ, 61, 0, 8);
         } else if (Math.random() < 1 / 500 && (!this.active(i, minJ)
           || [61, 74, 69].includes(sheetOf(this.typeAt(i, minJ))))) {
           void 0; // 蘑菇树再生（TryGrowingTreeByType(5)）——树系统运行时接口未接
-        } else if (Math.random() < 1 / 25 && this.liquidAt(i, minJ) === 0) {
+        } else if (Math.random() < 1 / 25 && this.liquidAt(i, minJ) === 0
+          && this.fitTopPlant(i, minJ, 233)) {
           // 丛林植物 233（cs:74837-74856 地表段 style rand(8)——花苞 238/生命果 236
           // 属【地下半区】case 60（cs:74480-74558,flag 作用域 :74429 证实）,2026-08-13
           // 自地表误植段移除——此前地下丛林永不长花苞,世花链只靠首杀保底单株）
@@ -853,14 +864,15 @@ export class WorldEvolution {
       }
       case 226: {
         // 神庙砖顶 61（1/7，密度门，cs:74880-74899）
-        if (!this.active(i, minJ) && Math.random() < 1 / 7 && !this.tooManyJunglePlants(i, minJ)) {
+        if (!this.active(i, minJ) && Math.random() < 1 / 7 && !this.tooManyJunglePlants(i, minJ)
+          && this.fitTopPlant(i, minJ, 61)) {
           this.place1(i, minJ, 61, 0, 8);
         }
         return;
       }
       case 633: {
         // 灰烬草（cs:74902-74928）：顶 637（1/10）+ 灰烬→633
-        if (!this.active(i, minJ) && Math.random() < 1 / 10) this.place1(i, minJ, 637, 0, 4);
+        if (!this.active(i, minJ) && Math.random() < 1 / 10 && this.fitTopPlant(i, minJ, 637)) this.place1(i, minJ, 637, 0, 4);
         for (let k = minI; k < maxI; k++) for (let l = minJ; l < maxJ; l++) {
           if ((i === k && j === l) || !this.active(k, l)) continue;
           if (sheetOf(this.typeAt(k, l)) === 57) this.spreadGrass(k, l, 57, 633);

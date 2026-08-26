@@ -16,7 +16,7 @@ const out = await page.evaluate(() => {
     const k = s.dataset.idx;
     (byIdx[k] = byIdx[k] || []).push(s);
   }
-  const dup = Object.entries(byIdx).filter(([, v]) => (v as HTMLElement[]).length > 1).map(([k, v]) => k);
+  const dup = Object.entries(byIdx).filter(([, v]) => v.length > 1).map(([k, v]) => k);
   const gridRow5 = [...document.querySelectorAll('[data-idx="50"][data-where="inv"]')].length;
   return {
     invSlotTotal: grids.length,
