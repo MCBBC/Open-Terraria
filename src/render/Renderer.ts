@@ -2712,42 +2712,6 @@ export class Renderer {
       this.sky.drawPartyBalloonsNear(ctx, viewW, viewH, cam.x, 16.7);
     }
 
-    // 1.57 墓地丁达尔光柱（2026-08-25 用户对照原版视频实报补缺：阳光/月光穿雾的
-    // 体积光柱,原版 Graveyard shader 成分;canvas 近似登记）。★只画光柱不画雾罩
-    // ——整帧灰雾感由 7d 去饱和滤镜(Graveyard progress 0.75)承担,曾另加 0.8 灰
-    // 雾罩=与滤镜双重叠加把瓦片也糊成全灰(用户实报)。画在背景层后、世界层前;
-    // 光源 = 白天太阳/夜晚月亮屏位(SkyRenderer 每帧写 sunScreen/moonScreen),
-    // 3 条扇形光带缓慢摆动 lighter 提亮,夜晚月光系数 0.45:
-    const gyI = world.weather?.graveyardVisual ?? 0;
-    if (gyI > 0 && this.scene) {
-      const tod = clock.timeOfDay;
-      const isDayGy = tod > 0.1875 && tod < 0.8125;
-      const src = isDayGy ? this.sky.sunScreen : this.sky.moonScreen;
-      if (src) {
-        const tt = performance.now() / 1000;
-        const nightMul = isDayGy ? 1 : 0.45;
-        const len = Math.hypot(viewW, viewH) * 1.15;
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        for (let i = 0; i < 3; i++) {
-          const sway = Math.sin(tt * 0.11 + i * 2.13) * 0.085;
-          const ang = Math.PI / 2 + (i - 1) * 0.4 + sway;
-          const wdt = 70 + i * 52;
-          ctx.save();
-          ctx.translate(src.x, src.y);
-          ctx.rotate(ang - Math.PI / 2);
-          const g3 = ctx.createLinearGradient(0, 0, 0, len);
-          const a0 = (0.1 - i * 0.024) * gyI * nightMul;
-          g3.addColorStop(0, `rgba(214,218,226,${a0.toFixed(3)})`);
-          g3.addColorStop(1, 'rgba(214,218,226,0)');
-          ctx.fillStyle = g3;
-          ctx.fillRect(-wdt / 2, 0, wdt, len);
-          ctx.restore();
-        }
-        ctx.restore();
-      }
-    }
-
     // 1.55 AmbientSky 天空实体（SkyManager「Ambience」层：群系背景之上、世界实体之下；
     //     鸟群/夜空腹足怪，调度 1:1 AmbienceServer——10-120s 一次尝试）
     this.sky.drawAmbience(ctx, viewW, viewH, cam.x, cam.y, 16.7);

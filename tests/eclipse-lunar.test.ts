@@ -639,6 +639,7 @@ describe('逐塔出怪表结构（NPC.cs:1204-1289）', () => {
       shield: { solar: 0, vortex: 0, nebula: 0, stardust: 0 },
       moonLordCountdown: 0,
       moonLordCountdownMax: 0,
+      crystalDeath: null,   // ★批III尾窗：天柱死亡水晶屏效（运行时不进存档）
     });
   });
 });

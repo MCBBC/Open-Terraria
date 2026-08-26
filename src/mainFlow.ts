@@ -683,14 +683,34 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           json: await worldStore.load(m),
         })));
       },
-      // 角色选择（需求："可以选择一个角色加入房间"）——选中后 applyAppearance 补发外观
-      listCharacters: async () => {
-        await charStore.ensureLoaded();
-        return charStore.list().map((c) => ({ id: c.id, name: c.name }));
-      },
-      onPickCharacter: async (id: number) => {
-        selectedAppearance = await charStore.get(id);
-        selectedCharId = id;
+      // 加入/创建前需要角色(2026-08-25 用户要求):复用单人角色列表(CharSelectPanel
+      // 以覆盖层出现,多人面板保持挂载)——选完 then() 继续动作;返回则揭开多人面板
+      onNeedCharacter: (then) => {
+        const holder = document.createElement('div');
+        holder.style.cssText = 'position:fixed; inset:0; z-index:22; background:#0a1028; overflow-y:auto;';
+        root.appendChild(holder);
+        const closeHolder = () => holder.remove();
+        new CharSelectPanel(holder, charStore, {
+          onPlay: (a, id) => {
+            closeHolder();
+            selectedAppearance = a;
+            selectedCharId = id ?? null;
+            then();
+          },
+          onNew: () => {
+            new CharCreation(holder, {
+              onCreate: async (a) => {
+                await charStore.create(a);
+                closeHolder();
+                selectedAppearance = a;
+                selectedCharId = null;
+                then();
+              },
+              onCancel: () => closeHolder(),
+            });
+          },
+          onBack: () => closeHolder(),
+        });
       },
     });
     panelRoot = panel.root;

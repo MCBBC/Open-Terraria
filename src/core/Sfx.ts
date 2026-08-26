@@ -604,11 +604,16 @@ export class Sfx {
   private static readonly ITEM_OVERLAP_OK = new Set([
     'Item_9', 'Item_10', 'Item_24', 'Item_26', 'Item_34', 'Item_43',
     'Item_103', 'Item_156', 'Item_162', 'Item_205',
-    // 幻影矢 462 二选一音对(2026-08-26 工单⑦):Projectile.cs:56239-56244 走
-    // SoundEngine.PlaySound(SoundID.Item124/125)=新音频系统路径,每次调用独立
-    // 实例零槽管理——三连矢槽(dur-14/-7/dur 每 7t 一发)须完整叠响,default 组
-    // 的 Stop-then-play 会截断上一发尾音(~50% 掷同文件时)
-    'Item_124', 'Item_125',
+    // ★2026-08-26 终审修正:曾把 Item_124/125(弹 462 二选一音)划入免停组,依据是
+    //   "SoundEngine.PlaySound(SoundID.Item124)=新音频系统路径零槽管理"——该论断在
+    //   1.4.5.8 反编译源不成立:LegacyAudioSystem 是唯一音频系统(SoundEngine.Initialize
+    //   Terraria.Audio/SoundEngine.cs:24-33 只返回 Legacy/Disabled),LegacySoundStyle
+    //   重载(SoundID.Item124=LegacySoundStyle(2,124),SoundID.cs:664/:666)在
+    //   PlaySound(LegacySoundStyle…) SoundEngine.cs:88-100 折算回 (type=2,style=124)
+    //   int 路径:102-109→LegacySoundPlayer.PlaySound case2:num=124 既不在免停组
+    //   (:598-608)也不在 53/55/159 在播跳过组——落 default 先 .Stop() 再建新实例
+    //   (:592-597)= stop 档。三连矢(dur-14/-7/dur 每 7t 一发)掷到同文件时原版即
+    //   截断上一发尾音,本仓照抄。
   ]);
   /** 单实例槽分类('skip'=在播跳过 / 'stop'=先停后播 / 'none'=不管理可自由叠响):
    *  Item_N 全体入槽管理(槽引用照记,default 组停旧、例外组只换绑),Roar 族维持 skip */

@@ -161,15 +161,26 @@ const out = await page.evaluate(async () => {
     `frame=${(pet).frame}`);
   R.dbg.lidFrame = pet.frame;
 
-  // (c) 再右键关闭
+  // (c) 再触发关闭。★实机差异：本仓容器面板挂背包层（openInventory→uiBlocking=true
+  //     Main/main.ts 输入门），面板开着时世界右键在 updateUse 入口即被吞——全容器族
+  //     （世界箱同款）输入层约定，非 Chester 缺陷；关闭契约按任务惯例直调内部方法验证。
   window.__chWav.length = 0;
-  rightClickPet();
+  rightClickPet();                                            // 被阻断：无音、面板保持
+  const stillOpen = g.openChestRef?.() ?? null;
+  ck('(c) 实机输入层:面板开时 uiBlocking 吞掉世界右键（容器族约定）',
+    !!stillOpen && stillOpen.x === -2 && chestSounds().length === 0
+      && g.chesterTrackedPet === pet,
+    `uiBlocking=${!!g.input.uiBlocking} sfx=${JSON.stringify(chestSounds())}`);
+  g.interactChesterContainer(pet);                            // 关闭契约直调
   const closed = g.openChestRef?.() ?? null;
-  ck('(c) 再右键:面板收起(chest=-1)', closed === null || closed.x !== -2, '');
+  ck('(c) 再触发:面板收起(chest=-1)', closed === null || closed.x !== -2, '');
   ck('(c) 关箱音 chester_close_0/1', /^chester_close_[01]$/.test(chestSounds()[chestSounds().length - 1] ?? ''),
     JSON.stringify(chestSounds()));
   ck('(c) tracker Clear + beingTracked 复位',
     g.chesterTrackedPet === null && pet.beingTracked === false, '');
+  // 还原无面板输入态（背包层仍开着会继续吞右键）
+  try { window.__swUI && window.__swUI.closeInventory && window.__swUI.closeInventory(); }
+  catch { g.input.uiBlocking = false; }
 
   // (d) 走出射程自动关（Player.cs:31268-31278 Simple 射程门）
   rightClickPet();                                            // 重新打开

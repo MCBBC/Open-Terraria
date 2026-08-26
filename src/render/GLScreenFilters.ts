@@ -438,7 +438,8 @@ export class GLScreenFilters {
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     const names = ['uScreen', 'uNoise', 'uTint', 'uScreenRes', 'uScreenPos', 'uNoiseRcp',
-      'uTimeScroll', 'uOffset', 'uColor', 'uOpacity', 'uIntensity', 'uProgress', 'uScreenH', 'uZoom'];
+      'uTimeScroll', 'uOffset', 'uColor', 'uOpacity', 'uIntensity', 'uProgress', 'uScreenH', 'uZoom',
+      'uTargetPx', 'uTime'];   // ★批III尾窗：MoonLordShake(uTime)/Vortex(uTargetPx) 新增
     const uni: Record<string, WebGLUniformLocation | null> = {};
     for (const n of names) uni[n] = gl.getUniformLocation(prog, n);
     const entry = { prog, uni };

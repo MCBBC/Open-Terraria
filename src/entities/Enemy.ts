@@ -10,7 +10,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { paintColor } from '../world/Paint';
 import { liquidCollision, drownCollision } from '../stats/TouchDamage';
 import { updateNpcLiquid, getWaterLine } from './npcLiquid';
-import type { GameHooks } from './types';
+import type { GameHooks, LootPlayerCtx } from './types';
 import { Clock } from '../world/World';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
@@ -3794,6 +3794,10 @@ export class Enemy extends Entity {
     // 冲刺瞄准）继续走尸体坐标——下列子段一律用 rawPlayer。
     // M11：rawPlayer = 当前索敌目标（Main.player[npc.target]，联机可为访客代理）
     const rawPlayer = this.targetRef(game, player);
+    // :56248-56251 AI_003 帧首 directionY 维护（穿透表 :94164 消费——玩家与 NPC
+    // 脚底同高 → -1（同层追击可站平台）；缺省 1 → 其余情况（含站台上玩家在别层）
+    // 下落/站立均判下落 = 平台穿透，vanilla 僵尸不恋平台的行为根基）
+    if (rawPlayer && rawPlayer.y + rawPlayer.h === this.y + this.h) this.dirY = -1;
     // ---- 111 僵尸威慑态（AI_003 :57368-57407，AI_127_Pal 生成的双僵尸 ai[3]<0）：
     //      TargetClosest(不转面) + 受击/玩家 <200px 解除（转普通僵尸 ai0=0）；
     //      威慑期 directionY=-1、vx ×0.93（<0.1 归零）、恒面向被威慑宠、
@@ -12384,18 +12388,20 @@ export class Enemy extends Entity {
       // 联机傀儡跳过：掉落权威在房主（真身死亡掉落经 msg21 广播，本地生成会被
       // 自己的 netDropSweep 当作本端掉落二次广播 → 幽灵物品+重复掉落）
       const rng = new RNG(Math.floor(Math.random() * 1e9));
-      if (this.vanillaId && !this.netPuppet) {
-        // R14-A2：FTW（getGoodWorld）肉前骷髅族"杀之无掉落"早退门（NPCLoot 首行
-        // NPC57:79645 `(getGoodWorld || !isThereAWorldSurface) && !downedBoss3 &&
-        // !onlyShimmerOceanWorlds && type∈{31,294,296,295,32,34,71,693,694}` → 整次
-        // NPCLoot return（无钱无物无心星）——FTW 肉前打骷髅零收益补偿机制。
-        // !isThereAWorldSurface（无地表世界）/onlyShimmerOcean 本仓无对应世界形态不接
-        const FTW_NO_LOOT_SKELETONS = new Set([31, 294, 296, 295, 32, 34, 71, 693, 694]);
-        if (game.world.seedFlags?.getGoodWorld
-          && !(game.world.flags['downed_35'] || game.world.flags.downedSkeletron)
-          && FTW_NO_LOOT_SKELETONS.has(this.vanillaId)) {
-          return;
-        }
+      // R14-A2：FTW（getGoodWorld）肉前骷髅族"杀之无掉落"早退门（NPCLoot 首行
+      // NPC57:79645 `(getGoodWorld || !isThereAWorldSurface) && !downedBoss3 &&
+      // !onlyShimmerOceanWorlds && type∈{31,294,296,295,32,34,71,693,694}` → 整次
+      // NPCLoot return（无钱无物无心星）——FTW 肉前打骷髅零收益补偿机制。
+      // !isThereAWorldSurface（无地表世界）/onlyShimmerOcean 本仓无对应世界形态不接。
+      // ★门并入下方掉落段条件而非裸 return：本段内联在 hurt():boolean 死亡分支里,
+      // 裸 return 会连带跳过其后双子抑制/Boss 药水等死亡处理（TS2322 即此误）。
+      // 可达集（肉前骷髅族）非双子非 Boss → 被门跳过的后续段对这些 type 恒无产出,
+      // 并入条件=与"NPCLoot 函数级 return"语义逐字节等价
+      const FTW_NO_LOOT_SKELETONS = new Set([31, 294, 296, 295, 32, 34, 71, 693, 694]);
+      const ftwNoLoot = game.world.seedFlags?.getGoodWorld === true
+        && !(game.world.flags['downed_35'] || game.world.flags.downedSkeletron)
+        && this.vanillaId != null && FTW_NO_LOOT_SKELETONS.has(this.vanillaId);
+      if (this.vanillaId && !this.netPuppet && !ftwNoLoot) {
         // 雕像产怪战利品门（NPCLoot :79648-79654）：肉前集合 / StatueSpawnedDropRarity
         // 概率门外 → 整单不出（连钱带心星一起跳过，原版直接 return）
         const statueSkip = this.spawnedFromStatue && (() => {
@@ -12424,6 +12430,9 @@ export class Enemy extends Entity {
         // 单人 = 本地玩家（表缺席时回退 p.*，与旧实现逐字节同源）
         let closestLuck = p.luck, closestHp = p.hp, closestHpMax = p.maxHp,
           closestMana = p.mana, closestManaMax = p.maxMana;
+        // MP 最近结算玩家对象（zoneDungeon 等标量外字段的地牢魂条件消费源；
+        // 单人 null → 走 scene 回退,与旧实现同）
+        let closest: LootPlayerCtx | null = null;
         if (lootPlayers) {
           let best = -1;
           for (let i = 0; i < lootPlayers.length; i++) {
@@ -12434,6 +12443,7 @@ export class Enemy extends Entity {
               best = d;
               closestLuck = c.luck; closestHp = c.hp; closestHpMax = c.hpMax;
               closestMana = c.mana; closestManaMax = c.manaMax;
+              closest = c;
             }
           }
         }
@@ -12548,7 +12558,7 @@ export class Enemy extends Entity {
         if (this.vanillaId !== 288 && ctx.lifeMax > 100 && ctx.value > 0 && ctx.hasPlayerTarget
           && ctx.hardMode && ctx.flags['downed_262']
           && (lootPlayers
-            ? (closest.zoneDungeon
+            ? (closest?.zoneDungeon
               ?? (game as unknown as { scene?: { zoneDungeon?: boolean } }).scene?.zoneDungeon)
             : (game as unknown as { scene?: { zoneDungeon?: boolean } }).scene?.zoneDungeon)
           && rollLuck(ctx.luck ?? 0, ctx.isExpert ? 9 : 13, () => rng.next()) === 0) {

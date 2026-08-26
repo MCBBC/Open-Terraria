@@ -87,6 +87,34 @@ const OUT = process.env.SW_UUU_REPLAY_OUT ?? '/tmp/uuu-out/replay-lines.txt';
   }
 
   const lines: string[] = [];
+  // R30 触点记录（与 rig SW_R30LOG 同构：<n> <x> <y> <val>）
+  const r30lines: string[] = [];
+  (sim as unknown as { r30Trace: unknown }).r30Trace = (x: number, y: number, v: number, n1: number, lq: number, rq: number, slf: number) => {
+    r30lines.push(`${r30lines.length + 1} ${x} ${y} ${v}`);
+    void n1; void lq; void rq; void slf;
+  };
+  // RNG 调用记录 + 可选强制（SW_UUU_FORCE="idx:val,..."）——在 ret 记录已耗样本；
+  // FORCE 在指定调用序号（1 基）覆写返回值
+  const rngCalls: Array<{ idx: number; max: number; ret: number }> = [];
+  const forceMap = new Map<number, number>();
+  for (const kv of (process.env.SW_UUU_FORCE ?? '').split(',').filter(Boolean)) {
+    const [a, b] = kv.split(':').map(Number);
+    forceMap.set(a!, b!);
+  }
+  {
+    const prng = s.passRng as RNG | undefined | null;
+    if (prng) {
+      const oNI = prng.nextInt.bind(prng);
+      prng.nextInt = (max: number) => {
+        let r = oNI(max);
+        const callNo = rngCalls.length + 1;
+        const f = forceMap.get(callNo);
+        if (f !== undefined && max === 30) r = f;
+        rngCalls.push({ idx: callNo, max, ret: r });
+        return r;
+      };
+    }
+  }
   // 可选：写迹窗（SW_UUU_TRACE_BOX="x0,x1,y0,y1[,iterFrom,iterTo]"）——世界 liquid/
   // type 字节每次变更记一行（before→after），限定盒与迭代区间。ctx=x,y;cur 来自 update 包裹
   const traceBox = process.env.SW_UUU_TRACE_BOX;
@@ -133,6 +161,10 @@ const OUT = process.env.SW_UUU_REPLAY_OUT ?? '/tmp/uuu-out/replay-lines.txt';
   }
   if (box) writeFileSync((OUT ?? '/tmp/uuu-out/replay-lines.txt').replace(/\.txt$/, '-trace.txt'), traceLines.join('\n'));
   writeFileSync(OUT, lines.join('\n') + '\n');
-  console.log(`[replay] ${NITER} iters from k=${meta.iter}: nl7=${meta.numLiquid} -> nl=${sim.numLiquid}; lines -> ${OUT}${box ? ` (+${traceLines.length} trace)` : ''}`);
+  const r30 = rngCalls.filter((c) => c.max === 30);
+  console.log(`[replay] ${NITER} iters from k=${meta.iter}: nl7=${meta.numLiquid} -> nl=${sim.numLiquid}; lines -> ${OUT}${box ? ` (+${traceLines.length} trace)` : ''}; calls=${rngCalls.length} r30=${r30.length}${r30.length ? ' firstR30@call' + r30[0]!.idx : ''}`);
+  const trOut = (OUT ?? '/tmp/uuu-out/replay-lines.txt').replace(/\.txt$/, '-calls.txt');
+  writeFileSync(trOut, rngCalls.map((c) => `${c.idx}\t${c.max}\t${c.ret}`).join('\n'));
+  writeFileSync((OUT ?? '/tmp/uuu-out/replay-lines.txt').replace(/\.txt$/, '-r30.txt'), r30lines.join('\n'));
 }, 300_000);
 void readdirSync;

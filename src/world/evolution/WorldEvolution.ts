@@ -20,8 +20,10 @@
 //     （API 档，1456 运行时无消费方——照抄备用）；火把转换
 //     （Convert_ActuallyConvertTorch）已随各 case 全链接入
 import type { TileStore } from '../TileStore';
-import { TILE_DEFS } from '../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { NOT_CLEARABLE } from '../gen/vanilla/TileRunner';
+import { flowerGroundOk, plantBadMatch, plantNewType, PLANT_CHECK_SHEETS,
+  PLANT_CONVERT_KEY } from './PlantRules';
 
 /** sheet id → 内部 tile id（首匹配；TILE_DEFS 顺序固定，模块加载时一次构建） */
 const SID = new Map<number, number>();
@@ -217,6 +219,53 @@ export class WorldEvolution {
     const f = this.host.flags;
     // 原版 downedMechBoss1/2/3 = 毁灭者(134)/双子(125)/机械骷髅王(127)
     return !!(f['downed_134'] && f['downed_125'] && f['downed_127']);
+  }
+
+  /** WorldGen.IsFitToPlaceFlowerIn（:58714-58734）+ PlaceTile 61/71 内联锚支
+   *  （:60073/:60142）1:1：支撑格 active+slope==0+非半砖，类型严格配对。
+   *  ★蔓延生成端此前无此门 → 斜面/半砖草上长蘑菇、腐化地长森林草（2026-08-26 用户实报,
+   *  存档 (2059,242)=S1 草块上 1023 蘑菇 / (1014,241)=H 腐化草上 73 森林高草实证） */
+  private fitTopPlant(x: number, y: number, want: number): boolean {
+    const st = this.host.store;
+    if (!st.inBounds(x, y + 1)) return false;
+    const bi = st.idx(x, y + 1);
+    if (!st.flags[bi] || st.slope[bi] !== 0 || st.half[bi]) return false;
+    return flowerGroundOk(sheetOf(st.type[bi]), want);
+  }
+
+  /** 进图一次性植物孤儿清整：全网格按 PlantCheck 处置历史遗留（读档/导入期写入的
+   *  非法锚植株——运行时监听只护支撑变化后状态，粘滞件在此收口）。换型用
+   *  TryGetNewType 同表；无法变型即静默清除（等价导入期 FinalCleanupPass）。
+   *  O(w·h) 单次线性，flags 先筛实活格，几十 ms 级。 */
+  sanitizePlants(): void {
+    const st = this.host.store;
+    const { w } = st;
+    const n = w * st.h;
+    for (let i = 0; i < n; i++) {
+      if (!st.flags[i]) continue;
+      const sheet = sheetOf(st.type[i]);
+      if (!PLANT_CHECK_SHEETS.includes(sheet)) continue;
+      const x = i % w, y = Math.floor(i / w);
+      // PlantCheck down 判据（cs:81838-81844）：下格 nactive+非半砖+slope==0 才认地基
+      let down = -1;
+      if (y + 1 < st.h) {
+        const bi2 = st.idx(x, y + 1);
+        if (st.flags[bi2] && !st.half[bi2] && st.slope[bi2] === 0) {
+          down = sheetOf(st.type[bi2]);
+        }
+      }
+      if (!plantBadMatch(down, sheet)) continue;
+      const r = plantNewType(sheet, down, st.frameX[i]);
+      if (r.type !== sheet) {
+        const key = PLANT_CONVERT_KEY[r.type];
+        const nid = key ? TILE_BY_KEY[key] : undefined;
+        if (nid !== undefined) {
+          st.setTile(x, y, nid, r.spore ? (r.type === 201 ? 270 : 144) : r.fx, st.frameY[i]);
+          continue;
+        }
+      }
+      st.setTile(x, y, 0);
+    }
   }
 
   /** 放置 1×1 装饰（帧 style×18,0；目标须为空——PlaceTile EmptyTile 门） */
@@ -675,7 +724,8 @@ export class WorldEvolution {
         case 226: plant = 61; plantChance = 10; toDirt = -1; break;
       }
       if (plant !== -1 && !this.active(i, minJ) && Math.random() < 1 / plantChance) {
-        if (!(sheet === 226 && this.tooManyJunglePlants(i, minJ))) {
+        // 地下顶植物同受 PlaceTile→IsFit 锚门（原版 PlaceTile 唯一口,谱系/坡面一致拒绝）
+        if (!(sheet === 226 && this.tooManyJunglePlants(i, minJ)) && this.fitTopPlant(i, minJ, plant)) {
           this.place1(i, minJ, plant, 0, plant === 61 ? 8 : 1);
         }
       }
@@ -726,7 +776,7 @@ export class WorldEvolution {
           else if ((sheet === 23 || sheet === 661) && Math.random() < 1 / 10) plant = 24;
           else if ((sheet === 199 || sheet === 662) && Math.random() < 1 / 10) plant = 201;
           else if (sheet === 109 && Math.random() < 1 / 10) plant = 110;
-          if (plant !== -1) this.place1(i, minJ, plant, 0, plant === 3 ? 7 : 1);
+          if (plant !== -1 && this.fitTopPlant(i, minJ, plant)) this.place1(i, minJ, plant, 0, plant === 3 ? 7 : 1);
         }
         // 类型归一（cs:74629-74657）：32→23 352→199 477→2 492→109；邪恶对 23/661、199/662
         let grass = sheet;

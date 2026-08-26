@@ -19,10 +19,9 @@ export interface MultiplayerSelectCallbacks {
   onJoinRoom: (url: string, hostToken: string) => void;
   /** 列出可开房的存档槽位（name + 存档 JSON 字符串） */
   listSaves: () => Promise<SaveEntry[]>;
-  /** 角色列表（加入房间使用的角色） */
-  listCharacters: () => Promise<Array<{ id: number; name: string }>>;
-  /** 选中角色（进游戏后应用外观并补发 SyncPlayer） */
-  onPickCharacter: (id: number) => void | Promise<void>;
+  /** 加入/创建前需要角色(2026-08-25 用户要求):跳转既有单人角色列表
+   *  (CharSelectPanel 覆盖层,多人面板保持挂载)——选完 then() 继续动作 */
+  onNeedCharacter: (then: () => void) => void;
   onBack: () => void;
 }
 
@@ -45,10 +44,6 @@ function serverBase(addr: string): { httpBase: string; wsBase: string } | null {
 
 export class MultiplayerSelect {
   root: HTMLElement;
-  private chars: Array<{ id: number; name: string }> = [];
-  private charPicker: HTMLElement;
-  private charList = el('div');
-  private pickCb: (() => void) | null = null;
   private roomList = el('div');
   private codeInput: HTMLInputElement;
   private createName: HTMLInputElement;
@@ -72,23 +67,15 @@ export class MultiplayerSelect {
       'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); max-width:520px; width:min(520px,96vw); z-index:20; cursor:auto; max-height:92vh; overflow-y:auto;';
     this.root.appendChild(el('h2', undefined, T('Title')));
 
-    // ---- 角色列表(2026-08-25 用户要求:面板顶部不再常驻选择器——加入/创建时才
-    //      跳到角色列表选择,见 openCharPicker/closeCharPicker) ----
-    void cb.listCharacters().then((list) => { this.chars = list; });
-    this.charPicker = el('div');
-    this.charPicker.style.cssText = 'position:absolute; inset:0; z-index:5; background:#0a1028; padding:16px; overflow-y:auto; display:none;';
-    const pickerTitle = el('div', undefined, T('PickCharacter'));
-    pickerTitle.style.cssText = 'margin:0 0 10px; color:#c9d4ff;';
-    this.charPicker.appendChild(pickerTitle);
-    this.charPicker.appendChild(this.charList);
-    const pickerBack = el('button', 'sw-btn', T('Back')) as HTMLButtonElement;
-    pickerBack.style.marginTop = '12px';
-    pickerBack.onclick = () => this.closeCharPicker();
-    this.charPicker.appendChild(pickerBack);
-    this.root.appendChild(this.charPicker);
+    // ---- 角色选择不再自造列表(2026-08-25 用户要求):加入/创建时经
+    //      onNeedCharacter 跳转既有单人角色列表(CharSelectPanel) ----
 
-    // ---- 刷新房间(2026-08-25 用户要求:不再暴露服务器地址——lobby 固定 DEFAULT_SERVER;
-    //      连不上时房间列表为空,不报错) ----
+    // ---- 加入：房间列表(2026-08-25 用户要求:刷新按钮在列表下方) ----
+    const sJoin = el('div', undefined, T('JoinSection'));
+    sJoin.style.cssText = 'margin:10px 0 6px; color:#c9d4ff;';
+    this.root.appendChild(sJoin);
+    this.roomList.style.cssText = 'min-height:60px; max-height:220px; overflow-y:auto; background:rgba(10,16,40,0.5); border-radius:4px; padding:4px; margin-bottom:8px;';
+    this.root.appendChild(this.roomList);
     const srvRow = el('div');
     srvRow.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:10px;';
     const srvBtn = el('button', 'sw-btn', T('Refresh')) as HTMLButtonElement;
@@ -96,13 +83,6 @@ export class MultiplayerSelect {
     srvBtn.onclick = () => void this.refreshRooms();
     srvRow.appendChild(srvBtn);
     this.root.appendChild(srvRow);
-
-    // ---- 加入：房间列表 ----
-    const sJoin = el('div', undefined, T('JoinSection'));
-    sJoin.style.cssText = 'margin:10px 0 6px; color:#c9d4ff;';
-    this.root.appendChild(sJoin);
-    this.roomList.style.cssText = 'min-height:60px; max-height:220px; overflow-y:auto; background:rgba(10,16,40,0.5); border-radius:4px; padding:4px; margin-bottom:8px;';
-    this.root.appendChild(this.roomList);
 
     // 码加入（非公开房）
     const codeRow = el('div');
@@ -115,7 +95,7 @@ export class MultiplayerSelect {
     codeBtn.onclick = () => {
       const code = this.codeInput.value.trim();
       if (!/^\d{6}$/.test(code)) { this.status(this.roomList, T('BadCode'), '#ff6b6b'); return; }
-      this.openCharPicker(() => void this.joinByCode());
+      this.cb.onNeedCharacter(() => void this.joinByCode());
     };
     this.codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') codeBtn.click(); });
     codeRow.appendChild(this.codeInput);
@@ -173,7 +153,7 @@ export class MultiplayerSelect {
       const id = parseInt(this.saveSel.value, 10);
       const sv = this.saves.find((x) => x.id === id);
       if (!sv?.json) { this.status(this.createdInfo, T('PickSaveFirst'), '#ff6b6b'); return; }
-      this.openCharPicker(() => void this.createRoom(createBtn));
+      this.cb.onNeedCharacter(() => void this.createRoom(createBtn));
     };
     this.root.appendChild(createBtn);
 
@@ -186,39 +166,6 @@ export class MultiplayerSelect {
     this.root.appendChild(back);
 
     void this.refreshRooms();
-  }
-
-  // ================= 角色选择跳转(2026-08-25) =================
-
-  /** 打开角色列表浮层;玩家点选角色 → onPickCharacter → 执行挂起的加入/创建动作 */
-  private openCharPicker(onPicked: () => void): void {
-    this.pickCb = onPicked;
-    this.charList.textContent = '';
-    const addRow = (name: string, pick: () => void): void => {
-      const item = el('div', undefined, name);
-      item.style.cssText = 'padding:10px; border-bottom:1px solid rgba(90,120,220,0.2); cursor:pointer; color:#e8ecf8;';
-      item.onmouseenter = () => { item.style.background = 'rgba(60,80,160,0.3)'; };
-      item.onmouseleave = () => { item.style.background = ''; };
-      item.onclick = () => {
-        pick();
-        this.closeCharPicker();
-        const cb2 = this.pickCb;
-        this.pickCb = null;
-        cb2?.();
-      };
-      this.charList.appendChild(item);
-    };
-    if (this.chars.length) {
-      for (const c of this.chars) addRow(c.name, () => { void this.cb.onPickCharacter(c.id); });
-    } else {
-      addRow(T('DefaultChar'), () => {});   // 无存档角色:走主流程默认角色
-    }
-    this.charPicker.style.display = 'block';
-  }
-
-  private closeCharPicker(): void {
-    this.charPicker.style.display = 'none';
-    this.pickCb = null;
   }
 
   // ================= 加入 =================
@@ -255,7 +202,7 @@ export class MultiplayerSelect {
         item.appendChild(left);
         item.appendChild(right);
         item.onclick = () => {
-          this.openCharPicker(() => {
+          this.cb.onNeedCharacter(() => {
             const url = this.joinUrl(rm.code);
             if (url) this.cb.onJoinRoom(url, '');
           });

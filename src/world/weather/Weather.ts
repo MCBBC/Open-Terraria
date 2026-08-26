@@ -333,16 +333,18 @@ export class WeatherState {
 
   /** 每帧平滑 + 下发循环音量（update 尾段调用） */
   private updateAmbienceLoops(ctx: WeatherCtx): void {
-    const dayRate = Math.max(1, ctx.dayRate);
-    // 室外强度（SceneState.cs:190-191）：露天 1.1 / 墙内 -0.1，0.005/tick 逼近后钳 0-1
+    // 室外强度（SceneState.cs:178-179）：露天 1.1 / 墙内 -0.1，0.005/tick 逼近后钳 0-1。
+    // ★2026-08-26 终审修：原版步长恒定不走 dayRate——SceneState.Update 挂在每帧
+    // UpdateWorld 尾段固定步进（Main.cs:17999），旅程时光倍率只作用于世界计时链,
+    // 视觉/音频缓动仍按真实帧推进。曾 ×dayRate=倍速档渐变被加速（偏离原版）。
     this.outsideWeatherEffect = Math.max(0, Math.min(1,
-      WeatherState.moveTowards(this.outsideWeatherEffect, ctx.behindBackwall ? -0.1 : 1.1, 0.005 * dayRate)));
-    // 暴风雪轨渐入（SceneState.cs:252）：flag = ZoneRain && ZoneSnow（:101-102）→ ±0.01/tick
+      WeatherState.moveTowards(this.outsideWeatherEffect, ctx.behindBackwall ? -0.1 : 1.1, 0.005)));
+    // 暴风雪轨渐入（SceneState.cs:259）：flag = ZoneRain && ZoneSnow（:101-102）→ ±0.01/tick
     // ZoneRain = Main.raining && SurfaceAtmospherics（SceneMetrics.cs:700）——ctx.zoneRain
     // 由 SceneMetrics 派生（接线清单）；缺省回退 this.raining（旧露天近似）
     const blizzard = (ctx.zoneRain ?? this.raining) && (ctx.zoneSnow ?? false);
     this.blizzardSoundVolume = WeatherState.moveTowards(
-      this.blizzardSoundVolume, blizzard ? 1 : 0, 0.01 * dayRate);
+      this.blizzardSoundVolume, blizzard ? 1 : 0, 0.01);
     // 雨 cue28 门（Main.cs:11713 num12 = ZoneRain && !ZoneSnow）——ZoneRain 已含
     // SurfaceAtmospherics → 地下恒假；缺省回退 this.raining 与暴风雪门同源
     const rainGate = (ctx.zoneRain ?? this.raining) && !(ctx.zoneSnow ?? false);

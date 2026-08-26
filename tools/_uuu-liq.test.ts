@@ -38,6 +38,11 @@ const OPS_OUT = process.env.SW_UUU_OPS_PATH ?? '/tmp/uuu-out/liqops-js.txt';
   let liqIter = 0;
   const rolls: number[] = [];
   const lines: string[] = [];
+  const r30sink: Array<[number, number, number, number]> = [];
+  LiquidSim.r30Sink = (x, y, v, n1, lq, rq, slf) => {
+    void lq; void rq; void slf;
+    if (active) r30sink.push([r30sink.length + 1, x, y, v]);
+  };
 
   // 掷流记录（internalSample 原始样本，与 rig OnRoll 口径一致：主实例全部样本）
   const urp = UnifiedRandom.prototype as unknown as Record<string, unknown>;

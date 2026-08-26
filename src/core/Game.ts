@@ -719,13 +719,6 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // 内联——上方 active+solid+非 solidTop+非底坡,失顶即杀）滴落族
   373: 'drip', 374: 'drip', 375: 'drip', 461: 'drip', 709: 'drip',
 };
-/** PlantCheck 换型目标（PlantCheck_TryGetNewType :81886 回写用,sheet→def key——
- *  ★不能走 TILE_INTERNAL_BY_SHEET：sheet 3 首个 def 是 mushroom 非草丛本体） */
-const PLANT_CONVERT_KEY: Record<number, string> = {
-  3: 'v_3_forest_short_plants', 24: 'v_24_corruption_short_plants', 61: 'v_61_jungle_short_plants',
-  71: 'v_71_mushroom_plant', 73: 'v_73_forest_tall_plants', 74: 'v_74_jungle_tall_plants',
-  110: 'v_110_hallow_short_plants', 113: 'v_113_hallow_tall_plants', 201: 'v_201_crimson_short_plants',
-};
 /** CheckAlch 药草地基列（cs:45981,Main.tileAlch={82,83,84};键=frameX/18 列）——
  *  与生成期 FinalCleanupPass.ALCH_GROUND 同表 */
 const ALCH_GROUND_RUNTIME: Record<number, Set<number>> = {
@@ -791,41 +784,8 @@ function isTileReplaceable(st: Game['world']['store'], x: number, y: number): bo
   }
   return true;
 }
-/** PlantCheck 地基失配（cs:81421,与生成期 FinalCleanupPass.plantBadMatch 同式） */
-function plantBadMatch(down: number, type: number): boolean {
-  if ((type !== 3 || down === 2 || down === 477 || down === 78 || down === 380 || down === 579)
-    && (type !== 73 || down === 2 || down === 477 || down === 78 || down === 380 || down === 579)
-    && (type !== 24 || down === 23 || down === 661)
-    && (type !== 61 || down === 60 || down === 226)
-    && (type !== 74 || down === 60 || down === 226)
-    && (type !== 71 || down === 70)
-    && (type !== 110 || down === 109 || down === 492)
-    && (type !== 113 || down === 109 || down === 492)
-    && (type !== 201 || down === 199 || down === 662)) {
-    if (type === 637) return down !== 633;
-    return false;
-  }
-  return true;
-}
-/** PlantCheck_TryGetNewType（1457 cs:81886-81928,与生成期 FinalCleanupPass.plantNewType
- *  同式）：按地基换型+帧折叠;spore=入口帧蘑菇株标记（回写 270/144） */
-function plantNewType(sheet: number, down: number, fx: number): { type: number; fx: number; spore: boolean } {
-  let type = sheet, nfx = fx;
-  let spore = false;
-  if (type === 3 || type === 61 || type === 110 || type === 24) spore = nfx === 144;
-  if (type === 201) spore = nfx === 270;
-  if ((type === 3 || type === 73) && down !== 2 && down !== 477 && nfx >= 162) nfx = 126;
-  if (type === 74 && down !== 60 && down !== 226 && nfx >= 162) nfx = 126;
-  switch (down) {
-    case 23: case 661: type = 24; if (nfx >= 162) nfx = 126; break;
-    case 2: case 477: type = type === 113 ? 73 : 3; break;
-    case 109: case 492: type = type === 73 ? 113 : 110; break;
-    case 199: case 662: type = 201; break;
-    case 60: case 226: type = 61; while (nfx > 126) nfx -= 126; break;
-    case 70: type = 71; while (nfx > 72) nfx -= 72; break;
-  }
-  return { type, fx: nfx, spore };
-}
+// PlantCheck 判定/换型规则已迁 src/world/evolution/PlantRules.ts 单点（Game 与演化放置门共用）
+import { plantBadMatch, plantNewType, PLANT_CONVERT_KEY } from "../world/evolution/PlantRules";
 // 草族"转化"放置族（BlockPlacementForAssortedThings :40379-40440）：种子/法杖
 // 的 createTile 落在这些草 tile 上时，放置语义 = 转化【已有】块而非铺空格——
 // 草种 62/圣种→泥土(0)；腐化/猩红种→泥土或泥(59)；丛林/蘑菇/661/662 种→泥(59)；
@@ -4141,6 +4101,10 @@ export class Game implements GameHooks {
     // 家具失撑（原版 TileFrame → Check2x1/Check3x2/Check4x2 族 :47500+：支撑格
     // 被挖 → 家具掉落。曾无此链=挖掉工作台脚下它悬空挂着，2026-08-21 review）
     w.store.onTileChanged((x, y) => this.checkFurnitureSupport(x, y - 1));
+    // 进图一次性植物孤儿清整（演化监听只护"支撑变化后"的状态——读档/导入期写入的
+    // 非法锚植株[斜面/半砖上的蘑菇、腐化地上森林草]是粘滞件，2026-08-26 用户实报；
+    // 新增侧已由演化 IsFit 门拦截，历史遗留在此收口）
+    this.evolution.sanitizePlants();
     this.entities.clear();
     resetGorePool();                // Gore 池计数同步归零（clear 丢弃引用不置 dead，防 600 槽假满）
     clearPortals();                 // 传送门为世界内实体，切世界/重载一并清（BirthdayParty.WorldClear 同位）
@@ -13558,7 +13522,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  vol = min(1,strength/50)(:1253-1255) × 0.2(瀑布,:1260)/0.65(岩浆,:1292)
    *  × (1−shimmerAlpha)（:1261/:1293）；pitch 瀑布 −0.2（:1273）/岩浆 0（:1305）。
    *  屏距衰减已烘焙进 strength（WaterfallRenderer falloff 累积,原版由 PlaySound
-   *  x,y 距离衰减承担）——归零拆轨 = 原版 style0 停止语义（:13658/:13681）。 */
+   *  x,y 距离衰减承担）——归零拆轨 = 原版 style0 停止语义（Main.cs:13658/:13681,
+   *  LSP case34 num2<=0 门:1262）。备案:起轨门用 vol>0.01 较原版精确零阈提前
+   *  （≤1% 音量区间不起轨/即拆,不可闻,WebAudio 节点 churn 抑制）——严格非
+   *  等价,终值音量公式一致。pitch 差异备案:case34 创生支无 Pitch 赋值、仅已播
+   *  调整支设 −0.2(LSP :1273),本仓恒 −0.2——首个 ≤15t 窗口差半音阶内。 */
   private updateWaterfallAmbience(): void {
     const amb = this.renderer.waterfalls.ambienceState();
     const shimmer = this.renderer?.monoFilters?.shimmerAlpha ?? 0;
@@ -24446,8 +24414,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 两型同构仅尘型之差):position 归心后 width=height=176 判定盒 → Damage()
     // 对玩家一次(hitPlayer = Damage_EVP 同式:iframes 门/DamageVar ±15%/敌弹难度
     // 乘区,与接触命中同函数语义;hostile 门 = 敌弹爆不回打敌怪)+ Item_14 音 +
-    // 尘 31×4(scale1.5,alpha100)+ 30 循环×{尘A(scale3.7,alpha200,noGravity,
-    // v×3) + 尘A(scale1.5,alpha100,noGravity,fadeIn2.5,v×2)}(467=尘6 / 468=尘27)
+    // 尘 31×4(scale1.5,alpha100)+ 中段循环×{尘A(scale3.7,alpha200,noGravity,
+    // v×3) + 尘A(scale1.5,alpha100,noGravity,fadeIn2.5,v×2)}(467=30 对:74402 /
+    // 468=20 对:74454、尘6/尘27)
     // + 速度轴环 {尘A×10(scale2.7) + 尘31×10(scale1.5)}(均 noGravity,v×3)+
     // gore 61-63×2(v×0.3+Next(-10,10)×0.05 扰动)。尘位原版取 Center±UnitY/UnitX
     // .RotatedByRandom(π)·rand·88 径向——本仓以 176 盒均布近似(41/246 爆族同式);
@@ -24459,8 +24428,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.playSfxFiles(['Item_14'], 1, cx, cy);       // SoundID.Item14（:74394/:74446）
       const bx = cx - R, by = cy - R, bs = R * 2;      // Resize(176) 后的尘盒/判定盒
       const mid = projId === 467 ? 6 : 27;             // 中段+速度轴第一环尘型
+      // 中段对数循环:467=30(Projectile.cs:74402)/468=20(:74454)——曾两型同写 30
+      const midN = projId === 467 ? 30 : 20;
       for (let i = 0; i < 4; i++) this.spawnDust(bx, by, bs, bs, 31, 0, 0, 100, null, 1.5);
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < midN; i++) {
         const dA = this.spawnDust(bx, by, bs, bs, mid, 0, 0, 200, null, 3.7, true);
         if (dA) { dA.vx *= 3; dA.vy *= 3; }
         const dB = this.spawnDust(bx, by, bs, bs, mid, 0, 0, 100, null, 1.5, true);

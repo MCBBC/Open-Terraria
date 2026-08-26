@@ -132,14 +132,18 @@ const out = await page.evaluate(async () => {
   }
   R.dbg.beats = [...beats];
   R.dbg.fires = fires.map((f) => ({ pid: f.pid, dmg: f.dmg, tick: f.atTick }));
+  // 节拍器音戳记须在清场前快照（(b) 段会重置录制数组）
+  const i5Stamps = window.__pxFile.filter((e) => e.f === 'Item_5').map((e) => e.t);
 
   ck('(a) 首拍即发（ai[1] 初值归零触发）', beats[0] === 1, `beat0=${beats[0]}`);
   ck('(a) 拍点数 ≥3（两轮双箭+一次凤凰弹）', beats.length >= 3, JSON.stringify(beats));
-  const v0 = fires.filter((f) => f.pid !== 706);
   const phx = fires.filter((f) => f.pid === 706);
-  ck('(a) 前两拍各双箭共 4 发', fires.length - phx.length === 4, `arrows=${fires.length - phx.length}`);
-  ck('(a) 木箭 1 就地换燃烧箭 2（:68330-68332）', v0.every((f) => f.pid === 2),
-    `pids=${v0.map((f) => f.pid).join(',')}`);
+  const arrows3 = fires.filter((f) => f.pid !== 706 && f.atTick <= beats[2]);
+  ck('(a) 前两拍各双箭共 4 发', arrows3.length === 4,
+    `arrows(≤t${beats[2]})=${arrows3.length}`);
+  ck('(a) 木箭 1 就地换燃烧箭 2（:68330-68332）',
+    fires.filter((f) => f.pid !== 706).every((f) => f.pid === 2),
+    `pids=${[...new Set(fires.filter((f) => f.pid !== 706).map((f) => f.pid))]}`);
   ck('(a) 第 3 拍转单发 706 凤凰弹', phx.length === 1, `n=${phx.length}`);
   ck('(a) 凤凰弹伤×2=100（:68337 Damage4*=2）', phx[0]?.dmg === 100,
     `dmg=${phx[0]?.dmg} ctrAfter=${p.ppPhoenixCounter}`);
@@ -175,11 +179,11 @@ const out = await page.evaluate(async () => {
     ck('(b) 弹存活未触轨/未湿灭（净空走廊成立）', !bolt.dead, `dead=${bolt.dead}`);
   }
 
-  // ---- 节拍器音（旁证）：Item_5 每 interval 响（t=19/37/55），首拍豁免 :68303 ----
-  const i5 = window.__pxFile.filter((e) => e.f === 'Item_5');
-  ck('(b) 通道节拍器 Item_5 首拍豁免+逐拍三响(t=19/37/55)',
-    i5.length === 3 && i5[0].t === 19,
-    JSON.stringify(window.__pxFile.filter((e) => e.f === 'Item_5').map((e) => e.t)));
+  // ---- 节拍器音（旁证，(a) 段快照）：Item_5 每 interval=18 响（t=19/37/55/73/91），
+  //      首拍 age==1 豁免（:68303）----
+  ck('(b) 通道节拍器 Item_5 首拍豁免+逐拍响(t=19,37,55,73,91)',
+    JSON.stringify(i5Stamps) === JSON.stringify([19, 37, 55, 73, 91]),
+    JSON.stringify(i5Stamps));
   return R;
 });
 

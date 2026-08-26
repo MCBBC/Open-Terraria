@@ -156,6 +156,10 @@ export class LiquidSim {
    *  两时刻记格，Liquid.cs:1189/:1583；null=单机/访客（不模拟）零开销）。
    *  60ms 节流上报见 net/syncModules.ts module0 注 */
   netChangeSink: ((x: number, y: number) => void) | null = null;
+  /** 诊断观察钩：3 格均分晋升掷触点（UUU 批液体域定罪用；生产恒 undefined） */
+  r30Trace?: (x: number, y: number, v: number, num1: number, lq: number, rq: number, self: number) => void;
+  /** UUU 批：模块级 R30 触点槽——settle 内部新建 sim 实例也能被探针捕获 */
+  static r30Sink: ((x: number, y: number, v: number, num1: number, lq: number, rq: number, self: number) => void) | null = null;
   numLiquid = 0;
   /** tile.checkingLiquid / tile.skipLiquid 位图 */
   private checking: Uint8Array;
@@ -987,7 +991,13 @@ export class LiquidSim {
       } else {
         // 3 格均分（Liquid.cs:613-628）：随机 254→255 补满
         let m = csRound((lq + rq + st.liquid[i5] + num1) / 3); // 1456 Math.Round=取偶
-        if (m === 254 && this.roll(30) === 0) m = 255; // 原版 WorldGen.genRand.Next(30)==0（gen 期走 pass 链流）
+        // 原版 WorldGen.genRand.Next(30)==0 晋升（gen 期走 pass 链流）。
+        // LiquidSim.r30Sink=诊断观察槽（UUU 批液体域对拍注入；生产恒 null 零开销）
+        if (m === 254) {
+          const v30 = this.roll(30);
+          LiquidSim.r30Sink?.(x, y, v30, num1, lq, rq, st.liquid[i5]);
+          if (v30 === 0) m = 255;
+        }
         if (lq !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); } else st.liquidType[il] = myType;
         if (rq !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); } else st.liquidType[ir] = myType;
         st.liquid[i5] = m;
