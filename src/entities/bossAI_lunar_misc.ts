@@ -42,7 +42,7 @@ import type { Player } from './Player';
 import { TILE, ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { BuffType } from '../stats/Buffs';
 import { moveAndCollide } from '../physics/TileCollision';
-import { spawnPart, spawnVanillaEnemy, losClear, enemySpawnChain, addEnemy } from './bossAI';
+import { spawnPart, spawnVanillaEnemy, losClear, enemySpawnChain, addEnemy, shootBolt462 } from './bossAI';
 import { Arrow } from './Arrow';
 import { projFrameImg, projSprite, volleyPhantomOrbs, nudgePhantomOrbs } from './Arrow';
 import { Entity } from './Entity';
@@ -217,7 +217,9 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
     if (t === dur - 14 || t === dur - 7 || t === dur) {          // :38392-38398
       const ox = Math.cos(x[0]) * 30 * x[1], oy = Math.sin(x[0]) * 30 * x[1];
       const d = Math.hypot(dx, dy) || 1;
-      shootL(game, e.cx + ox, e.cy + oy, (dx / d) * 8, (dy / d) * 8, 35, 462);
+      // 出膛口走 shootBolt462(首拍二选一音 Item_124/125 + 尘 229,Projectile.cs
+      // :56236-56257,工单⑦——与月总手/头/核心折叠链四处发射点统一)
+      shootBolt462(game, e.cx + ox, e.cy + oy, (dx / d) * 8, (dy / d) * 8, 35);
     }
   } else if (e.ai0 === 2) {
     // ---- 幻影球 454 六角螺旋(:38397-38491) ----

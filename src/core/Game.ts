@@ -145,7 +145,7 @@ import { availableRecipes, consumeMaterials, craftSourcesFor, vanillaItemKey as 
 import { invIndexOfVanilla } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
-import { MONEY_TROUGH_USE } from '../data/vanillaOpenBags';
+import { MONEY_TROUGH_USE, CHESTER_CONTAINER } from '../data/vanillaOpenBags';
 import { rollablePrefixes, rollPrefix, prefixStat, prefixValueMul } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
@@ -8322,6 +8322,18 @@ export class Game implements GameHooks {
       return;
     }
     if (inp.rightDown) {
+      // ---- Chester 宠物箱（proj 960）右键开合（Main.cs:38411 TryInteractingWithMoneyTrough
+      // 的 proj.type==960 支）。置于抚摸分派之前：原版绘制扫描里 960 只进钱槽交互支
+      // （Main.cs:35119-35123 `type!=525&&!=960→return`），TryPetting 三支（:33734/
+      // :34245/:34819）均不含 960——右键 Chester=开关容器，永不触发抚摸 ----
+      {
+        const ches = this.hoveredChester();
+        if (ches) {
+          this.interactChesterContainer(ches);
+          this.input.rightDown = false;
+          return;   // tileInteractionHappened（Main.cs:38452-38453）——本点击不再落地块交互
+        }
+      }
       // 坐骑抚摸（Mount.TryPettingMount :6137-6166，骑乘 62-65 时由 Mount.Draw 挂）：
       // 门 = |vx|<1（:6140 站立）+ 光标落在 Bottom+(dir*26,-54) 为心的 24×24 盒；
       // 右键 → PetMount（Player.cs:33601-33620 toggle）+ PalChilletJoy（:33615-33618
@@ -19220,6 +19232,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   openChest: ((c: ChestData) => void) | null = null;
   /** UI 侧当前打开的箱子（Wiring.cs:2571 Chest.UsingChest 判定用；UI.ts 赋值） */
   openChestRef: (() => ChestData | null) | null = null;
+  /** 收起宝箱/储物面板回调（UI 注入；Main.cs:38455-38458 chest=-1 与 Player.cs
+   *  :31264/:31277 追踪失联关面板路径——Game 侧 Chester 容器链用） */
+  closeChestPanel: (() => void) | null = null;
+  /** Chester 宠物箱追踪（piggyBankProjTracker 本仓等价，Player.cs:31245
+   *  TrackedProjectileReference）：Main.cs:38469 Set / Player.cs:31324 Clear——
+   *  非空 = 当前 -2 面板由该 Chester 打开，updateChesterContainerRange 每 tick
+   *  复核存活+射程（HandleBeingInChestRange :31258-31280） */
+  private chesterTrackedPet: PetFollower | null = null;
 
   private findChest(tx: number, ty: number): ChestData | null {
     for (const c of this.world.chests) {
@@ -21395,6 +21415,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           p.cursorItemIconID = p.mount.type === 62 ? 5665
             : p.mount.type === 63 ? 5666
               : p.mount.type === 64 ? 6150 : 6151;
+        }
+      }
+      // Chester 宠物箱悬停图标（Main.cs:38435-38443 flag2 段：cursorItemIconEnabled +
+      // cursorItemIconID = proj.type==960?5098:3213——本仓悬停只经 Chester 分支,恒
+      // 5098）。帧内后于 TileInteractionsMouseOver 悬停扫描(同帕鲁坐骑支覆写其结果);
+      // noThrow=4(:38437,压 T 键投掷)本仓无投掷键建模不接线
+      {
+        const ches = this.hoveredChester();
+        if (ches) {
+          p.cursorItemIconEnabled = true;
+          p.cursorItemIconID = CHESTER_CONTAINER.cursorIconVid;   // 5098（:38440-38443）
         }
       }
     }
@@ -24339,6 +24370,52 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       return;
     }
+    // 教徒火球 467/468 消亡爆(Projectile.cs:74390-74441 / :74442-74505 Kill 段,
+    // 两型同构仅尘型之差):position 归心后 width=height=176 判定盒 → Damage()
+    // 对玩家一次(hitPlayer = Damage_EVP 同式:iframes 门/DamageVar ±15%/敌弹难度
+    // 乘区,与接触命中同函数语义;hostile 门 = 敌弹爆不回打敌怪)+ Item_14 音 +
+    // 尘 31×4(scale1.5,alpha100)+ 30 循环×{尘A(scale3.7,alpha200,noGravity,
+    // v×3) + 尘A(scale1.5,alpha100,noGravity,fadeIn2.5,v×2)}(467=尘6 / 468=尘27)
+    // + 速度轴环 {尘A×10(scale2.7) + 尘31×10(scale1.5)}(均 noGravity,v×3)+
+    // gore 61-63×2(v×0.3+Next(-10,10)×0.05 扰动)。尘位原版取 Center±UnitY/UnitX
+    // .RotatedByRandom(π)·rand·88 径向——本仓以 176 盒均布近似(41/246 爆族同式);
+    // 命中侧 OnFire(24)已由 vanillaProjStatusPlayer 表覆盖。2026-08-26 工单⑧补;
+    // 出膛音 Item_34 在 bossAI_lategame 发射点(:55136-55139 / :55282-55286)
+    if (projId === 467 || projId === 468) {
+      const cx = x + w / 2, cy = y + h / 2;
+      const R = 88;                                    // width=height=176 → 半宽 88
+      this.playSfxFiles(['Item_14'], 1, cx, cy);       // SoundID.Item14（:74394/:74446）
+      const bx = cx - R, by = cy - R, bs = R * 2;      // Resize(176) 后的尘盒/判定盒
+      const mid = projId === 467 ? 6 : 27;             // 中段+速度轴第一环尘型
+      for (let i = 0; i < 4; i++) this.spawnDust(bx, by, bs, bs, 31, 0, 0, 100, null, 1.5);
+      for (let i = 0; i < 30; i++) {
+        const dA = this.spawnDust(bx, by, bs, bs, mid, 0, 0, 200, null, 3.7, true);
+        if (dA) { dA.vx *= 3; dA.vy *= 3; }
+        const dB = this.spawnDust(bx, by, bs, bs, mid, 0, 0, 100, null, 1.5, true);
+        if (dB) { dB.vx *= 2; dB.vy *= 2; dB.fadeIn = 2.5; }   //（:74405-74413 同构）
+      }
+      for (let i = 0; i < 10; i++) {
+        const dC = this.spawnDust(bx, by, bs, bs, mid, 0, 0, 0, null, 2.7, true);
+        if (dC) { dC.vx *= 3; dC.vy *= 3; }
+        const dD = this.spawnDust(bx, by, bs, bs, 31, 0, 0, 0, null, 1.5, true);
+        if (dD) { dD.vx *= 3; dD.vy *= 3; }
+      }
+      for (let g = 0; g < 2; g++) {
+        const go = GorePiece.newGore(61 + Math.floor(Math.random() * 3),   // Next(61,64)
+          cx, cy, 0, 0);
+        if (go) {
+          go.vx = go.vx * 0.3 + nrand(10) * 0.05;      // velocity×0.3 + Next(-10,11)×0.05
+          go.vy = go.vy * 0.3 + nrand(10) * 0.05;
+        }
+      }
+      if (flags?.hostile) {
+        // Damage() 二次结算：Resize(176) 盒内玩家一次（:74392-74394/:74444-74446）
+        const box467: { x: number; y: number; w: number; h: number; projId?: number } =
+          { x: bx, y: by, w: bs, h: bs, projId };
+        hitPlayer(box467, this, dmg > 0 ? dmg : 30);
+      }
+      return;
+    }
     // R4-38：禁戒仆从弹 1120 消亡 Dig 音 + 尘（Projectile.cs:76927-76952 Kill 1120 支：
     // PlaySound(0)=Dig + 15 尘 170 noGravity×0.3——尘近似并入通用消亡,此处补音）
     if (projId === 1120) {
@@ -24998,6 +25075,76 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         Math.floor(this.lightPetFollower.cx / TILE), Math.floor(this.lightPetFollower.cy / TILE),
         1.1, 1.0, 0.85,
       );
+    }
+    // Chester 宠物箱追踪保持（T2，见 updateChesterContainerRange）
+    this.updateChesterContainerRange();
+  }
+
+  // ---- Chester 宠物箱便携容器流（proj 960；Main.cs:38411 TryInteractingWithMoneyTrough
+  //      + Player.cs:31245 HandleBeingInChestRange 的 piggyBankProjTracker 子集）----
+  // 语义：Chester 无独立存储——TryGetContainerIndex（Projectile.cs:80556-80564）把
+  // 525/960 都映射到 chest=-2 = 玩家存钱罐 player.bank（本仓 banks[0]，已持久化）。
+
+  /** 光标悬停 Chester 命中。合成门 = IsProjectileInteractableAndInInteractionRange
+   *  （Player.cs:23336-23352：宠物格 TileReachCheckSettings.Simple 射程内 → inTileRange）
+   *  + Hitbox.Contains(鼠标世界点)（Main.cs:38425；光标世界点距宠物中心 <32px，
+   *  同抚摸命中口径 :8371）。右键链与 tickCursorIcon 悬停图标共用 */
+  private hoveredChester(): PetFollower | null {
+    const f = this.petFollower;
+    if (!f || f.dead || f.projId !== CHESTER_CONTAINER.projId) return null;
+    const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+    if (Math.hypot(f.cx - wx, f.cy - wy) >= 32) return null;
+    if (!this.inTileRange(Math.floor(f.cx / TILE), Math.floor(f.cy / TILE))) return null;
+    return f;
+  }
+
+  /** T1 右键开合容器（Main.cs:38449-38476 mouseRightRelease 段）：面板来源已是存钱罐
+   *  （player.chest==-2 ↔ 本仓面板 x===-2 约定，含存钱罐 tile/物品打开的同一容器）
+   *  → 关（:38455-38459 chest=-1 + PlayInteractiveProjectileOpenCloseSound(960,false)，
+   *  Main.cs:38648-38658 case960=SoundID.ChesterClose，SoundID.cs:1044 两变体）；否则
+   *  开 banks[0] 活引用（:38463-38475 chest=-2 + piggyBankProjTracker.Set(proj) +
+   *  playerInventory=true + ChesterOpen，SoundID.cs:1042 两变体）。开箱音/关箱音 =
+   *  chester_open_N/chester_close_N 随机变体（CreateTrackable("chester_open", 2)） */
+  interactChesterContainer(pet: PetFollower): void {
+    const cur = this.openChestRef?.() ?? null;
+    if (cur && cur.x === CHESTER_CONTAINER.openChestX) {
+      this.chesterTrackedPet = null;                    // tracker Clear（Player.cs:31324）
+      pet.beingTracked = false;                         // 合盖帧段消费位同步复位
+      this.closeChestPanel?.();                         // chest = -1（UI 面板收起）
+      this.playSfxWav(`chester_close_${Math.floor(Math.random() * 2)}`);
+      return;
+    }
+    // items 直通 banks[0]（同储物族 openChest({x:-2-bi}) 约定 :16897）——面板写入即存档数据
+    this.openChest?.({
+      x: CHESTER_CONTAINER.openChestX, y: 0,
+      items: this.player.banks[CHESTER_CONTAINER.bankIndex],
+    });
+    this.chesterTrackedPet = pet;                       // piggyBankProjTracker.Set(proj)（:38469）
+    pet.beingTracked = true;
+    this.playSfxWav(`chester_open_${Math.floor(Math.random() * 2)}`);
+  }
+
+  /** T2 跟随关门（Player.HandleBeingInChestRange Player.cs:31245-31327 追踪支的每 tick
+   *  子集）：仅当 -2 面板由 Chester 打开（tracker 在位 ≡ Main.cs:38469 Set）时校验——
+   *  宠物消失（Key.TryGetActive false :31261-31265）或走出交互射程（chestX/Y 每帧回写
+   *  + Simple 射程门 :31268-31278）→ 关面板 + ChesterClose 音（:31263/:31275）。世界箱/
+   *  tile 容器走原版 :31308-31320 tile 支，本仓对应路径不挂追踪、不受影响 */
+  private updateChesterContainerRange(): void {
+    const pet = this.chesterTrackedPet;
+    if (!pet) return;
+    const open = this.openChestRef?.() ?? null;
+    if (!open || open.x !== CHESTER_CONTAINER.openChestX) {
+      pet.beingTracked = false;
+      this.chesterTrackedPet = null;   // 面板已关/已换容器 → 清追踪（Player.cs:31324 Clear）
+      return;
+    }
+    const ok = !pet.dead && pet.projId === CHESTER_CONTAINER.projId
+      && this.inTileRange(Math.floor(pet.cx / TILE), Math.floor(pet.cy / TILE));
+    pet.beingTracked = ok;             // T3 开盖帧消费（Projectile.cs:66055-66066）
+    if (!ok) {
+      this.chesterTrackedPet = null;
+      this.closeChestPanel?.();        // chest = -1（:31264/:31277）
+      this.playSfxWav(`chester_close_${Math.floor(Math.random() * 2)}`);  // :31263/:31275
     }
   }
 

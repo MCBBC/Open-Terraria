@@ -515,7 +515,10 @@ function spawnCultistClone(game: GameHooks, parent: Enemy, x: number, y: number,
 
 /** 克隆体补射 468(:65375-65397 冰雾 / :65462-65499 火球第三拍 / :65531-65562 闪电 /
  *  :65796-65822 光第三拍):每只克隆体朝玩家(预判 20t)发 count 发,18 伤,
- *  (6+rand4) 速 ±spread 散布,出口 = 克隆体中心 + (facing*30, 12) */
+ *  (6+rand4) 速 ±spread 散布,出口 = 克隆体中心 + (facing*30, 12)。
+ *  弹 468 首拍音 Item_34(Projectile.cs:55280-55287 ai[1]==0 → SoundID.Item34):
+ *  原版逐弹首 tick 各播一次——与触发招式无关,凡 468 出膛即播(2026-08-26 工单⑧补;
+ *  1458 四处发射点 = NPC.cs:65610/:65683/:65761/:65990) */
 function cloneSupplement(game: GameHooks, clones: Enemy[], player: Player, count: number, spread: number): void {
   for (const c of clones) {
     const dir = Math.sign(player.cx - c.cx);
@@ -525,6 +528,7 @@ function cloneSupplement(game: GameHooks, clones: Enemy[], player: Player, count
       const spd = 6 + Math.random() * 4;
       const [dvx, dvy] = rot(aim.x * spd, aim.y * spd, (Math.random() - 0.5) * 2 * spread);
       shoot(game, c.cx + c.facing * 30, c.cy + 12, dvx, dvy, 18, 468);
+      game.playSfxWav?.('Item_34', 1, c.cx + c.facing * 30, c.cy + 12);   // :55285
     }
   }
 }
@@ -702,7 +706,9 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     e.ai1 += 1;
     if (e.ai1 > 360) { e.vx *= 0.95; e.vy *= 0.95; }      // :65109-65111 收势阻尼
     else if (e.ai1 > 300) { e.vx = 0; e.vy = -1; }        // :65113-65115 velocity=-UnitY
-    // :65117-65124 显形末段(>360)播 (29,…,105)=Zombie_105(case29 ×0.25 档,终审补)
+    // :65117-65124 显形末段(>360)播 (29,…,105)=Zombie_105——case29 衰减表
+    // (LegacySoundPlayer.cs:1011-1049)只列 24-87×0.5/88-91×0.7/92×0.5/93-99×0.4/
+    // 100-101×0.25/102×0.4/103×0.4/104×0.55,【105 无衰减项 = 满档】,终审补
     if (e.ai1 === 361) game.playSfxWav?.('Zombie_105', 1, e.cx, e.cy);
     flyIntegrate(e);
     if (e.ai1 >= 420) { e.ai0 = 0; e.ai1 = 0; e.spawnAlpha = 0; }
@@ -785,7 +791,14 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
 
   // ---- ai0 == 3 火球 467(:65430-65530):每 num2t 一发×num3,30 伤,(6+rand4) 速
   //      ±0.52rad 散布(18×3,FTW 10×5 :64941-64949);第三拍克隆体各补 1 发
-  //      468(:65462-65499);持续 4+num2*num3 ----
+  //      468(:65462-65499);持续 4+num2*num3。
+  //      ★弹道备案升级(2026-08-26 工单⑧):原版 467 为制导弹(AI_001 :55133-55279)
+  //      ——首拍音 Item34(:55136-55139)→ ai[1]==1 锁定 2000px 内最近 CanHit 玩家
+  //      (:55140-55163)→ 速度模长不变、AngleLerp(targetAngle,0.008)/t 转向
+  //      (:55172-55186),距玩家 <20px 自爆 Kill(:55158-55160/:55171)。本仓走 Arrow
+  //      直飞桶【未移植制导】,直线弹道系登记近似;命中侧 OnFire(24)已由
+  //      vanillaProjStatusPlayer 表覆盖。消亡爆(Kill :74390-74441)在
+  //      Game.onProjectileDeath 467/468 分支结算 ----
   if (e.ai0 === 3) {
     const numFire = ftw ? 10 : 18;
     const fireCount = ftw ? 5 : 3;
@@ -798,6 +811,8 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       const spd = 6 + Math.random() * 4;
       const [dvx, dvy] = rot(aim.x * spd, aim.y * spd, (Math.random() - 0.5) * 2 * 0.5235987901687622);
       shoot(game, e.cx + e.facing * 30, e.cy + 12, dvx, dvy, 30, 467); // :65505-65517
+      // 弹 467 首拍音(Projectile.cs:55133-55139 ai[1]==0 → SoundID.Item34,逐弹一声)
+      game.playSfxWav?.('Item_34', 1, e.cx + e.facing * 30, e.cy + 12);
     }
     e.ai1 += 1;
     if (e.ai1 >= 4 + numFire * fireCount) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
@@ -1855,6 +1870,9 @@ export function ancientDoomAI(e: Enemy, game: GameHooks, player: Player | null) 
     for (let k = 0; k < 4; k++) {
       const ang = -Math.PI / 2 + (Math.PI / 2) * k;
       shoot(game, e.cx, e.cy, Math.cos(ang) * 4, Math.sin(ang) * 4, e.def.damage, 593);
+      // 弹 593 首拍音(Projectile.cs:56226-56230 ai[1]==0 → SoundID.Item11):
+      // 原版逐弹首 tick 各播一次——四向齐射同帧四弹即四声(2026-08-26 工单⑨补)
+      game.playSfxWav?.('Item_11', 1, e.cx, e.cy);
     }
   }
   if (gone) e.dead = true;

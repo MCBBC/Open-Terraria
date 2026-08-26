@@ -9,6 +9,11 @@
 //   pot/statue/banner/door/anvil/furnace/bewitching_table/wall_hangings…)。
 //   豁免表与集成测试 FRAGMENTS 白名单同源;新类型出现残片=自动清扫,
 //   若属合法半存形态,集成 unknown 断言会拦下人工裁决。
+//   ★TTTTTTT（2026-08-26）新豁免支「他物覆写孤儿」：缺角被【其他活性物】覆写
+//   的组不算残片——vanilla 对多格物的清除只走 KillTile 级联（TileFrame 重访），
+//   FinalCleanup 落体柱生长经 tileCut 门【直写】覆写陶罐列后，邻列残罐永无
+//   重访即存活（const/s22222 链 #105 (1800,343)/(1800,344) 半罐 x86 实证存活,
+//   本仓曾扫杀=2 格假债）。空格/非活性缺格仍是真残片（本仓单格清写遗留）。
 // 判定与 R1 同源:src/world/audit/rules.ts findFragments(单一事实源)。
 import type { TileStore } from '../../TileStore';
 import { findFragments } from '../../audit/rules';

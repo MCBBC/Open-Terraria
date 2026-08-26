@@ -228,6 +228,18 @@ export const MONEY_TROUGH_USE = {
   sound: 'Item_59',        // 使用音 = 开猪音（两处同 SoundID.Item59）
 } as const;
 
+/** Chester 宠物箱 960 便携容器契约（Main.cs:38411-38487 TryInteractingWithMoneyTrough
+ *  的 proj.type==960 支 + Projectile.cs:80556-80564 TryGetContainerIndex + Player.cs:
+ *  31245-31327 HandleBeingInChestRange 追踪支）。右键宠物 → chest=-2 开【玩家存钱罐
+ *  player.bank】（TryGetContainerIndex：525/960 → -2，无独立存储）；再右键/宠物消失/
+ *  走出射程 → 关面板 + 关音。表值即测试桩（tests/chester-pet.test.ts）。 */
+export const CHESTER_CONTAINER = {
+  projId: 960,             // Projectile.cs:63714 type==960 帧机支
+  openChestX: -2,          // Main.cs:38463 localPlayer.chest = -2
+  bankIndex: 0,            // GetCurrentContainer → player.bank（本仓 banks[0]）
+  cursorIconVid: 5098,     // Main.cs:38440-38443 cursorItemIconID = 960?5098:3213
+} as const;
+
 /** 开包上下文（世界旗 + 锁盒钥匙门）：
  *  - hardMode：OpenPresent :6654 硬模式门（读档旗）。
  *  - consumeItem / hasItem：锁盒族钥匙门回调（3085 金钥匙 327【消耗】/

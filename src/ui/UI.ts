@@ -927,6 +927,9 @@ export class UI {
     game.openChest = (c) => this.openChestPanel(c);
     // 当前打开箱子引用（Game 提取机通电 Wiring.cs:2571 Chest.UsingChest 判定用）
     game.openChestRef = () => this.openChest;
+    // Game 侧收起面板（Main.cs:38455-38458 chest=-1 + Player.cs:31264/:31277 追踪失联
+    // ——Chester 宠物箱再右键/走远/宠物消失路径）
+    game.closeChestPanel = () => this.closeChest();
     // M4 表情窗口入口（背包表情角按钮 onEmoteMenu——原版 DrawEmoteIcon Main.cs:41854
     // → IngameFancyUI.OpenUIState(UIEmotesMenu)）。打开期间暂停世界+阻断输入
     // （IngameFancyUI 语义,同 BestiaryPanel 惯例;关闭恢复先前态）

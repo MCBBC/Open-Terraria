@@ -200,6 +200,11 @@ export class PetFollower extends Entity {
   /** 957 弹跳休息计时（原版 localAI[0]：200+rand(150) 掷息 / 移动重置 300——
    *  Projectile.cs:36155/:36185/:36199；初值 0 = 首次静止即弹跳，同原文） */
   private restT = 0;
+  /** 960 Chester 开盖段相位闩（原版 localAI[0]：0=开盖首拍帧13 → >6t 置 1 进保持环；
+   *  Projectile.cs:63749-63777）与跟踪闩（localAI[1]：入开盖段先清 frameCounter 的
+   *  一次性沿 :63751-63755/:63782-63786）。合盖/行走/空中按原文逐处归零 */
+  private chestLidPhase = 0;
+  private chestLidArm = 0;
   /** 慢速计时（bob 相位 / legacy 正弦浮动共用） */
   private animTick = 0;
   /** aiStyle 67 滚动角（rotation += vx/roll） */
@@ -211,6 +216,11 @@ export class PetFollower extends Entity {
    *  Game 侧 Player.petAnimal 置位 / updatePettingAnimal 停止时复位（2026-08-20
    *  接通——此前文件尾"④ AI_026 抚摸交互帧未移植"登记销核） */
   beingPetted = false;
+  /** 被玩家跟踪为容器（Chester 960 专用；原版 piggyBankProjTracker.IsTracking ↔
+   *  Chester_IsAnyPlayerTrackingThisProjectile Projectile.cs:66055-66066）：Game 侧
+   *  面板经此宠物打开时置位，Player.HandleBeingInChestRange（Player.cs:31258-31280）
+   *  每 tick 复核存活+射程后回写，驱动 type==960 开盖帧段（Projectile.cs:63747） */
+  beingTracked = false;
 
   constructor(x: number, y: number, public readonly projId: number,
     private ownerRef: () => OwnerRef | null) {
@@ -226,6 +236,9 @@ export class PetFollower extends Entity {
     const p = this.ownerRef();
     if (!p || p.dead) { this.dead = true; return; }
     this.animTick++;
+    // flag27 基准（position.X - oldPosition.X == 0f，Projectile.cs:63335）：
+    // 物理/AI 推进前取位，stepAnim 消费（960 帧机"静止/行走"分档判据）
+    const prevX = this.x;
     // 被抚摸（AI_026 flag9）：闲逛/浮游停摆 + 面向玩家 + 速度衰减（地面族保留重力）
     if (this.beingPetted) {
       this.dir = Math.sign(p.cx - this.cx) || this.dir;
@@ -237,7 +250,7 @@ export class PetFollower extends Entity {
       } else {
         this.vx = 0; this.vy = 0;
       }
-      if (this.params) this.stepAnim(this.params, game);
+      if (this.params) this.stepAnim(this.params, game, this.x !== prevX);
       return;
     }
     const R = this.params;
@@ -247,7 +260,7 @@ export class PetFollower extends Entity {
       case 'fly': this.flyAI(p, R); break;
       case 'hover': this.hoverAI(p, R); break;
     }
-    this.stepAnim(R, game);
+    this.stepAnim(R, game, this.x !== prevX);
   }
 
   // =============== 地面跳跃族（aiStyle 26 地面子型 + aiStyle 67 滚地族） ===============
@@ -513,11 +526,21 @@ export class PetFollower extends Entity {
   //   fly：匀速循环全表（移动 4t/帧、待机 8t/帧）；
   //   hover：AI_144/124 原版双速率（待机 idleRate/移动 moveRate，vel>6 判移动）。
   //   ★957 GlommerPet 走专支（见 case 'hover' 头部注释）。
-  private stepAnim(R: PetParams, game?: GameHooks): void {
+  //   ★960 Chester 宠物箱走专支（见 case 'ground' 头部注释——2026-08-26 接通，
+  //     此前落在本文件尾"③ 地面族逐款帧窗口"近似登记内）。
+  private stepAnim(R: PetParams, game?: GameHooks, movedX = true): void {
     const frames = Math.max(1, R.e.frames ?? 1);
     if (frames <= 1) { this.frame = 0; return; }
     switch (R.family) {
       case 'ground': {
+        // ---- ★T3 Chester 宠物箱 960 专属帧机（Projectile.cs:63714-63828 AI_026
+        // type==960 支 1:1；20 帧床：0-3 待机 6t/帧 / 4 空中 / 5-12 行走 /
+        // 13-18 开盖段 / 19 合盖过渡）。分档判据 = 空中(vy≠0 :63717)、
+        // 静止(flag27=本 tick 水平零位移 :63335/:63724)、被跟踪(:63747) ----
+        if (this.projId === 960 && frames === 20) {
+          this.chesterStepAnim(movedX);
+          break;
+        }
         if (!this.onGround) { this.frame = Math.min(1, frames - 1); this.frameAcc = 0; break; }
         if (Math.abs(this.vx) <= 0.1) { this.frame = 0; this.frameAcc = 0; break; }
         this.frameAcc += Math.abs(this.vx);
@@ -578,6 +601,73 @@ export class PetFollower extends Entity {
         break;
       }
     }
+  }
+
+  /** ★T3 Chester 宠物箱 960 帧机（Projectile.cs:63714-63828 AI_026 type==960 支 1:1）。
+   *  20 帧床分段：0-3 待机（frameCounter/6 :63798-63805）/ 4 空中（:63722）/ 5-12 行走
+   *  （frameCounter += max(2,|v|)，窗界外回 5，:63808-63823）/ 13 开盖首拍（>6t 进保持，
+   *  :63749-63764）/ 14-18 开盖保持环（>6t 步进越界回 14，:63765-63777）/ 19 合盖过渡
+   *  （停 7t 回 0，:63787-63796）。状态闩 chestLidPhase/chestLidArm = localAI[0]/[1]、
+   *  frameAcc = frameCounter；movedX 取反即 flag27（position.X-oldPosition.X==0f :63335） */
+  private chesterStepAnim(movedX: boolean): void {
+    // 空中档（velocity.Y != 0f :63717-63723；本仓落地碰撞逐 tick 清 vy——
+    // TileCollision moveAxis `if (b.vy > 0) b.vy = 0`,贴地即 vy==0 同原文语义）：
+    // 全状态复位 + 定格帧 4
+    if (this.vy !== 0) {
+      this.chestLidPhase = 0; this.chestLidArm = 0; this.frameAcc = 0;
+      this.frame = 4;
+      return;
+    }
+    // ---- 静止档（flag27 :63724）----
+    if (!movedX) {
+      // 面向玩家（!flag11 门 :63726-63733——追赶飞行态不夺朝向；960 族
+      // spriteDirection=direction 直映 Projectile.cs:63331-63334 → dir=玩家侧符号）
+      if (!this.flying) {
+        const p = this.ownerRef();
+        if (p) this.dir = Math.sign(p.cx - this.cx) || this.dir;
+      }
+      // 收步段：行走循环未走完先收完（5..11 每 4t 进帧、到 12 归 0，:63734-63746）
+      if (this.frame >= 5 && this.frame < 12) {
+        if (++this.frameAcc > 3) {
+          this.frameAcc = 0;
+          this.frame++;
+          if (this.frame >= 12) this.frame = 0;
+        }
+        return;
+      }
+      // 被跟踪 → 开盖段（Chester_IsAnyPlayerTrackingThisProjectile :63747/:66055-66066；
+      // beingTracked 由 Game T2 每 tick 回写）
+      if (this.beingTracked) {
+        if (this.chestLidPhase === 0) {                 // localAI[0]==0 首拍（:63749-63764）
+          if (this.chestLidArm === 0) { this.chestLidArm = 1; this.frameAcc = 0; }  // localAI[1] 沿
+          this.frame = 13;
+          if (++this.frameAcc > 6) { this.chestLidPhase = 1; this.frame = 14; this.frameAcc = 0; }
+        } else {                                        // 保持环 14..18（:63765-63777）
+          if (++this.frameAcc > 6) {
+            this.frame++;
+            if (this.frame > 18) this.frame = 14;
+            this.frameAcc = 0;
+          }
+        }
+        return;
+      }
+      // 无人跟踪：复位开盖闩（:63781-63786）+ 合盖过渡/待机轮（:63787-63805）
+      this.chestLidPhase = 0;
+      if (this.chestLidArm === 1) { this.chestLidArm = 0; this.frameAcc = 0; }
+      if (this.frame >= 12 && this.frame <= 19) {       // 合盖过渡定格 19（:63787-63796）
+        this.frame = 19;
+        if (++this.frameAcc > 6) { this.frame = 0; this.frameAcc = 0; }
+        return;
+      }
+      if (++this.frameAcc >= 24) this.frameAcc = 0;     // 待机 0..3（frameCounter/6）
+      this.frame = Math.floor(this.frameAcc / 6);
+      return;
+    }
+    // ---- 行走档（else of flag27 :63808-63823）：闩全清 + 速度累进帧 ----
+    this.chestLidPhase = 0; this.chestLidArm = 0;
+    this.frameAcc += Math.floor(Math.max(2, Math.hypot(this.vx, this.vy)));
+    if (this.frameAcc > 6) { this.frame++; this.frameAcc = 0; }
+    if (this.frame < 5 || this.frame > 12) this.frame = 5;   // 窗界钳回 5
   }
 
   /** 957 地面探针（Projectile.cs:36138-36160）：中心格起下探 5 格——前 4 格全非实、
@@ -642,6 +732,8 @@ export class PetFollower extends Entity {
   //    尖叫/黑暗戳人、1090 彩虹巨石微光粒子——纯视觉/彩蛋，未移植；
   //  ③ 地面族逐款帧窗口（958 行走 5-12、825 待机表情轮盘等）与 208 鹦鹉 0.95
   //    水平阻尼、1027 波浪帧段——按家族通用规则近似；
+  //    ★960 Chester 已转正专支（chesterStepAnim，Projectile.cs:63714-63828，
+  //    2026-08-26 接通——开盖/合盖/行走/待机四段 1:1），从本登记销核；
   //  ④ AI_026 抚摸(petting)：已接通（beingPetted 2026-08-20——flag9 闲逛/浮游停摆 +
   //     面向玩家，全链在 Player.petAnimal/updatePettingAnimal + Game 右键链）。
   //     残留：Pal 族(1093/1094/1098)专属 Joy 音效（1.4.5 Palworld 联动，素材

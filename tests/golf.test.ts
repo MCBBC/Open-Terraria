@@ -402,9 +402,10 @@ describe('球体 AI_149 与球座（tile 494）', () => {
 
 // ===================== E. Golfer 商店门槛（Chest.cs:3135-3245） =====================
 describe('高尔夫球手商店分数门槛', () => {
-  it('0 分与恰好 500 分：无门槛货（严格 >500，:3147）', () => {
+  it('0 分无门槛货；恰好 500 分含 >=500 四杆族（R14-C27 勘误,:3163-3177 原 1456/1457 同 >=）', () => {
     expect(golferShopScoreGates(0, 0, false)).toEqual([]);
-    expect(golferShopScoreGates(500, 0, false)).toEqual([]);
+    // 恰 500：四杆族(>=500)在列;球箱/铜奖杯仍 >500 不在
+    expect(golferShopScoreGates(500, 0, false)).toEqual([4039, 4094, 4093, 4092]);
   });
   it('>500：四杆族(铁/木/挖/推)+球箱+铜奖杯（:3147-3162/:3183/:3190）', () => {
     expect(golferShopScoreGates(501, 0, false)).toEqual([4039, 4094, 4093, 4092, 4265, 4599]);

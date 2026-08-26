@@ -61,7 +61,14 @@ export function findFragments(st: TileStore, onlyKeys?: ReadonlySet<string>): Ar
           for (let dy = 0; dy < m.h && full; dy++) {
             for (let dx = 0; dx < m.w; dx++) {
               const nx = ax + dx, ny = ay + dy;
-              if (nx < 0 || ny < 0 || nx >= st.w || ny >= st.h || st.type[st.idx(nx, ny)] !== t) { full = false; break; }
+              if (nx < 0 || ny < 0 || nx >= st.w || ny >= st.h) { full = false; break; }
+              const qi = st.idx(nx, ny);
+              if (st.type[qi] === t) continue;
+              // ★TTTTTTT：缺格被其他活性物覆写=vanilla 孤儿形态（FinalCleanup 落体柱
+              //   tileCut 直写覆写罐列,邻列残罐无 TileFrame 重访即存活——const/s22222
+              //   #105 (1800,343)/(1800,344) x86 实证）,不计缺角;空格/非活性缺格仍=真残片。
+              if (st.flags[qi]) continue;
+              full = false; break;
             }
           }
           if (full) { ok = true; break; }

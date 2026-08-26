@@ -982,6 +982,30 @@ export function shoot(game: GameHooks, x: number, y: number, vx: number, vy: num
     new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1, hostile: true, ...arrowOpts }), 'projectiles');
 }
 
+/** 幻影矢 462 出膛统一口(2026-08-26 音频收口工单⑦):发弹(shoot 同式直飞桶)+
+ *  首拍二选一音 + 出生尘——Projectile.cs:56236-56257 ai[1]==0 首拍分支 1:1:
+ *  · Main.rand.Next(2)==0 → SoundID.Item124 else Item125(:56239-56244)——逐弹
+ *    各掷一次(每颗弹出生即其 AI 首 tick,本仓 462 走 Arrow 直飞桶无 ai[1] 态,
+ *    于发射点等价结算;月总手/头/真眼折叠链 + 游离眼四处发射点全走此口);
+ *  · 尘 229 ×Next(5,10)(=5..9,:56245-56247):velocity.Y--(:56248)、+= 弹向单位
+ *    向量×2(vector20 = Normalize(velocity),:56243/:56249)、position -= One×4
+ *    (:56250)、noGravity(:56251)。 */
+export function shootBolt462(game: GameHooks, x: number, y: number, vx: number, vy: number,
+  dmg: number, life = 600): void {
+  shoot(game, x, y, vx, vy, dmg, 462, life);
+  game.playSfxWav?.(Math.random() < 0.5 ? 'Item_124' : 'Item_125', 1, x, y);   // :56239-56244
+  const n = 5 + Math.floor(Math.random() * 5);            // Next(5,10) 右开 = 5..9（:56245）
+  const l = Math.hypot(vx, vy) || 1;
+  for (let i = 0; i < n; i++) {
+    const d = game.spawnDust?.(x, y, 0, 0, 229, 0, 0, 100);
+    if (!d) continue;
+    d.vy -= 1;                                            // velocity.Y--（:56248）
+    d.vx += (vx / l) * 2; d.vy += (vy / l) * 2;           // += vector20 × 2（:56249）
+    d.x -= 4; d.y -= 4;                                   // position -= Vector2.One × 4（:56250）
+    d.noGravity = true;                                   //（:56251）
+  }
+}
+
 /** NPC.SpawnMechQueen 合体召唤链(NPC.cs:19739-19748,Game.summonMechdusa 调用)：
  *  queen(127) 落位 → markMechQueen(=SpawnBoss :81472 写 ai[3]=mechQueen 非零标记)
  *  → 以 queen Center 为共同出生点同点 NewNPC 125/126/134 + 2×139 探针

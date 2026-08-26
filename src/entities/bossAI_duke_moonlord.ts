@@ -26,7 +26,7 @@ import type { Renderer } from '../render/Renderer';
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import { hostileProjectileDamage, mainDifficulty, mainExpertMode } from '../stats/ScaleStats';
-import { spawnPart, shoot, accelTo, losClear } from './bossAI';
+import { spawnPart, shoot, shootBolt462, accelTo, losClear } from './bossAI';
 import { projSprite, projFrameCount, volleyPhantomOrbs } from './Arrow';
 import { GorePiece } from './GorePiece';
 import { BuffType } from '../stats/Buffs';
@@ -1645,7 +1645,9 @@ function mlCoreBarrage(e: Enemy, game: GameHooks, player: Player) {
       // :38374-38377 PlaySound(4,…,6)=死音库 → NPC_Killed_6(终审修)
       if (inSlot === dur - 35) game.playSfxWav?.('NPC_Killed_6', 1, e.cx, e.cy);
       if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
-        shoot(game, e.cx, e.cy, dx / d * 8, dy / d * 8, 35, 462, 600);            // :38378-38382
+        // :38378-38382 NewProjectile(462)——出膛口走 shootBolt462(首拍二选一音
+        // Item_124/125 + 尘 229,Projectile.cs:56236-56257,工单⑦)
+        shootBolt462(game, e.cx, e.cy, dx / d * 8, dy / d * 8, 35);
       }
       break;
     }
@@ -1811,9 +1813,10 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
     if (inSlot === dur - 35) game.playSfxWav?.('NPC_Killed_6', 1, e.cx, e.cy);   // :37464(组4 死音库,终审修)
     if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
       // :37466-37471 从眼球位置射 462(30 伤,8 速)——出生点 = Vector2FromElipse(l0,(30,66)×l1)
+      // 出膛口走 shootBolt462(首拍二选一音 Item_124/125 + 尘 229,:56236-56257,工单⑦)
       const [exx, eyy] = mlElipseVec(x.l0, 30 * x.l1, 66 * x.l1);
       const d = Math.hypot(dx, dy) || 1;
-      shoot(game, e.cx + exx, e.cy + eyy, (dx / d) * 8, (dy / d) * 8, 30, 462, 600);
+      shootBolt462(game, e.cx + exx, e.cy + eyy, (dx / d) * 8, (dy / d) * 8, 30);
     }
   }
 
@@ -2048,9 +2051,10 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
     if (inSlot === dur - 35) game.playSfxWav?.('NPC_Killed_6', 1, e.cx, e.cy);   // :38007(组4 死音库,终审修)
     if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
       // 眼球椭圆 (27,59)(:37727 vector200)——Vector2FromElipse(:38001),8 速 30 伤
+      // 出膛口走 shootBolt462(首拍二选一音 Item_124/125 + 尘 229,:56236-56257,工单⑦)
       const [exx, eyy] = mlElipseVec(x.l0, 27 * x.l1, 59 * x.l1);
       const d = Math.hypot(dx, dy) || 1;
-      shoot(game, e.cx + exx, e.cy + eyy, (dx / d) * 8, (dy / d) * 8, 30, 462, 600);
+      shootBolt462(game, e.cx + exx, e.cy + eyy, (dx / d) * 8, (dy / d) * 8, 30);
     }
   }
 

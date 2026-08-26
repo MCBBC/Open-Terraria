@@ -29,14 +29,10 @@ const UNWIRED_ALLOWLIST: string[] = [];
  *  player_hit_default / player_death_retro 已随语音系统批（2026-08-26,
  *  PlayerVoice.ts voiceOverride 全支+PlayDeathSound）接线清出;
  *  剩余挂账仅 Chester 宠物箱(容器交互待扩展) */
-const B3_PENDING: string[] = [
-  // Chester 宠物箱开合音(Main.cs:38656 case960 便携容器流)——宠本体已移植
-  // (PetFollower.ts:305),容器交互未移植;容器系统扩宠物位时在此四处接线删除
-  'chester_open_0',
-  'chester_open_1',
-  'chester_close_0',
-  'chester_close_1',
-  ];
+/** B3_PENDING——2026-08-26 清空:chester×4 已随宠物容器批接线(Game.ts 右键链/
+ *  跟随关门/PetFollower 开盖帧段;Main.cs:38411-38476/:38656/:31244-31330),
+ *  本桶机制留作空表备用 */
+const B3_PENDING: string[] = [];
 
 /** 原版自身零引用的死素材（vanilla 全树无任何调用面 → 本仓永不接线）——
  *  从 uncovered 计算中排除,不占白名单额度。证据逐条：

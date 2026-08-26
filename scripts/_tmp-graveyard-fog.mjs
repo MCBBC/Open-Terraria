@@ -1,4 +1,4 @@
-// 一次性诊断:墓地雾光照染色视觉验证(审完即删)——夜/昼对比
+// 一次性诊断:墓地雾最终验证(审完即删)——贴地/不上升/密度/昼夜
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const origin = process.env.SW_ORIGIN ?? 'http://localhost:5199';
@@ -34,13 +34,18 @@ await page.evaluate(async () => {
   Object.defineProperty(g, 'graveyardIntensity', { configurable: true, get: () => 1, set: () => {} });
   Object.defineProperty(g.world.weather, 'graveyardVisual', { configurable: true, get: () => 1, set: () => {} });
 });
-await new Promise((r) => setTimeout(r, 5000));   // 雾积累 + opacity 斜坡
-await page.screenshot({ path: '/tmp/va8-graveyard-day.png' });
-await page.evaluate(() => {
-  const c = window.__swGame.world.clock;
-  c.time = c.dayLength * 0.5;   // 切夜
+await new Promise((r) => setTimeout(r, 6000));   // 雾带饱和
+await page.screenshot({ path: '/tmp/va9-graveyard-day.png' });
+const stats = await page.evaluate(() => {
+  const np = window.__swGame.constructor; // 占位
+  return null;
 });
-await new Promise((r) => setTimeout(r, 2500));
-await page.screenshot({ path: '/tmp/va8-graveyard-night.png' });
-console.log('shots done');
+const r2 = await page.evaluate(async () => {
+  const np = (await import('/src/render/NatureParticles.ts')).natureParticles;
+  const cs = np.clouds;
+  const ys = cs.map((c) => c.y);
+  return { n: cs.length, minY: ys.length ? Math.round(Math.min(...ys)) : 0, maxY: ys.length ? Math.round(Math.max(...ys)) : 0,
+    playerY: Math.round(window.__swGame.player.y) };
+});
+console.log(JSON.stringify(r2, null, 1));
 await browser.close();
