@@ -37,7 +37,7 @@ export function giveItem(game: Game, internalId: number, stack: number): void {
   const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
   const want = Math.min(stack, Math.max(1, def?.maxStack ?? 999));
   const left = inv.add(internalId, want);
-  const key = def?.key;
+  const key = (def as { key?: string } | undefined)?.key;
   if (left > 0 && key) {
     game.spawnDrop(game.player.cx, game.player.cy,
       key, left, 0, -2);   // 溢出落地（GetItem 溢出语义）

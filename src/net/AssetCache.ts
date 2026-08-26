@@ -239,6 +239,9 @@ export function assetsDownloadIdle(): boolean {
  *  仅 133 条正常懒载)。完成态落 localStorage:门槛先查标志秒开;SW 回包
  *  到达后若实测缓存被清,撤销标志回到真实门槛。版本随 key 走,新资产自然失效 */
 const COMPLETE_FLAG = 'swAssetsComplete:';
+/** manifest contentHash 记忆(2026-08-27):成功会话落盘,失败会话沿用拼版本——
+ *  保证缓存名跨会话稳定(否则失败会话换名触发 gc 误清成功会话的暖存) */
+const CONTENT_HASH_KEY = 'swContentHash:';
 function writeCompleteFlag(v: boolean): void {
   try {
     if (v) localStorage.setItem(COMPLETE_FLAG + state.version, '1');
@@ -322,21 +325,44 @@ export async function initAssetCache(): Promise<void> {
     state.version = assetVersion();
     // zip manifest 拉取(3s 超时;路径不匹配 ASSET_RE → SW 天然放行不缓存;
     // cache:'reload' 防部署后读到旧 manifest)。失败=legacy 逐文件(dev/旧部署)
-    try {
-      const ctrl: RequestInit = { cache: 'reload' };
-      if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
-        ctrl.signal = AbortSignal.timeout(3000);
-      }
-      const res = await fetch('assets-zip/manifest.json', ctrl);
-      if (res.ok) {
-        const m = (await res.json()) as ZipManifest;
-        if (acceptsZipManifest(m)) {
-          zipPlan = m;
-          state.version = composeVersion(state.version, m.contentHash);
-          state.total = m.totalFiles;
+    // ★manifest 拉取带重试(2026-08-26):原单次 3s 超时把「一次抖动」放大成
+    // 「整份清单判死」——zipPlan=null → p0 启动小片(过渡图/标题曲)无人装载,
+    // splash 三件套 image 全 miss → 时序尽转全暗 + 指示器停滞(用户实报偶发,
+    // 刷新即愈=典型超时抖动指纹;no-cache 边缘协商+本地代理首字节的边缘条件)。
+    // 现 3 次 [4s,4s,8s] 上界尝试,全灭才降级 legacy 逐文件(prune 形态下那也
+    // 只是保底,自愈主路靠这里拿到 manifest)。
+    for (let a = 0, ts: number[] = [4000, 4000, 8000]; a < ts.length; a++) {
+      try {
+        const ctrl: RequestInit = { cache: 'reload' };
+        if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
+          ctrl.signal = AbortSignal.timeout(ts[a]);
         }
-      }
-    } catch { /* legacy */ }
+        const res = await fetch('assets-zip/manifest.json', ctrl);
+        if (res.ok) {
+          const m = (await res.json()) as ZipManifest;
+          if (acceptsZipManifest(m)) {
+            zipPlan = m;
+            state.version = composeVersion(state.version, m.contentHash);
+            state.total = m.totalFiles;
+            try { localStorage.setItem(CONTENT_HASH_KEY, m.contentHash); } catch { /* */ }
+            break;
+          }
+        }
+        // 非 ok(5xx 抖动)/形状不符 → 落到下一轮重试
+      } catch { /* 超时或网络瞬态 → 重试 */ }
+      if (a < ts.length - 1) await new Promise((r) => setTimeout(r, 400));
+    }
+    // ★失败会话版本锚定(2026-08-27):3 连败时 zipPlan=null,version 若停在
+    // base 形态,SW init 消息将以此版本触发 gcOldCaches——把上次【成功】会话
+    // (composed 形态)暖满的缓存整批误清(线上实锤:同 profile 跨会话缓存名
+    // 1gl9bw6↔1r403ge 漂移,暖存反复蒸发)。沿用 localStorage 记忆的 contentHash
+    // 拼版本 ⇒ 版本号恒定;本会话不 warm(下方门),缓存只读保命。
+    if (!zipPlan) {
+      try {
+        const prev = localStorage.getItem(CONTENT_HASH_KEY);
+        if (prev) state.version = composeVersion(state.version, prev);
+      } catch { /* 隐私模式等:保底 base 形态 */ }
+    }
     // updateViaCache:'none':SW 脚本本身绕过 HTTP 缓存——否则部署新版 sw.js 后
     // 浏览器最长 24h 仍跑旧 SW(标准坑,2026-08-13)
     const reg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
@@ -361,6 +387,10 @@ export async function initAssetCache(): Promise<void> {
       state: assetCacheState, warm: warmAllAssets, complete: assetsComplete,
     }; // 调试/探针句柄
     sw.postMessage({ type: 'init', version: state.version });
+    // ★gc 显式授权(2026-08-27):仅清单在手的会话允许 SW 清理旧版本缓存——
+    // manifest 失败会话不发本消息,version 即便回退 base 形态也无破坏权
+    // (localStorage 锚定失效的极端情况[崩溃丢盘]下缓存照样安全)。
+    if (zipPlan) sw.postMessage({ type: 'gc', version: state.version });
     postToSw({ type: 'status' });
     navigator.serviceWorker.addEventListener('message', onSwMessage);
     // SW 被击杀重启后 controller 会换新实例——重新对齐版本并触发看门狗续传
@@ -385,7 +415,9 @@ export async function initAssetCache(): Promise<void> {
     //   曾虚高越线被误盖 'done' 章、幂等门据此短路 → 缺片无人补、主菜单裸缺
     //   (world.har 实报)。force 只丢弃 UI 进度态重启流程;startZipWarm 按
     //   have-set×manifest 差集下载,无缺失秒退,代价 ≈ 一次 keys() 扫描。
-    warmAllAssets(true);
+    // ★manifest 失败会话不 warm(2026-08-27):zipPlan=null 时 legacy 逐文件在
+    //   prune 形态下注定全 404(熔断兜底前也白烧请求),且本会话缓存只读保命。
+    if (zipPlan) warmAllAssets(true);
   } catch { /* 注册失败(老浏览器/隐私模式)→ 降级现状,零影响 */ }
 }
 
@@ -422,6 +454,16 @@ function onSwMessage(e: MessageEvent): void {
     // legacy 逐文件分块通道(zip 模式页面直给,不经本消息)
     chunkFailedAcc += d.failed ?? 0;
     state.failed = chunkFailedAcc;
+    // ★风暴熔断:发布形态下 prune 散件全 404,单块失败率 ≥60% = 「清单缺失」
+    //  形态,继续接力/自动重试纯属烧请求(见 legacyCircuitBroken 注)。停机待
+    //  zip 主路接管;"重新下载"按钮经 warmAllAssets(force) 复位本旗。
+    if (!zipPlan && lastChunkLen > 0 && (d.failed ?? 0) >= lastChunkLen * 0.6) {
+      legacyCircuitBroken = true;
+      state.warming = false;
+      state.phase = 'done';   // 压住 watchdog 的停滞补发
+      emit();
+      return;
+    }
     if ((d.done ?? 0) > chunkCursor) chunkCursor = d.done;  // 块完成→接力下一块
     sendChunkLegacy();
   }
@@ -437,6 +479,13 @@ const CHUNK = 500;
 let chunkCursor = 0;      // 下一块在 plan.urls 的起始下标
 let chunkFailedAcc = 0;   // 跨块累计失败
 let autoRetries = 0;      // 全量跑完仍有失败时的自动补拉轮数(限速期偶发失败自愈)
+/** legacy 风暴熔断旗(2026-08-26):manifest 拉取失败降级 legacy 后,发布形态
+ *  (prune)的 vanilla/sounds/music 散件 100% 404,块失败率→1,3 轮自动重试 =
+ *  12000×3 次注定失败的请求 ~70 分钟(线上实锤:7245 req / 20min / 卡 8%)。
+ *  单块失败率 ≥60% 即置位停机;zip 修复(manifest 重试)自会接管主路。 */
+let legacyCircuitBroken = false;
+/** 当前在途块大小(warm-done 熔断判失败率用) */
+let lastChunkLen = 0;
 
 /** 分批发送 dispatcher:zip 模式起 worker 直给,legacy 走分块 */
 function sendChunk(): void {
@@ -539,7 +588,9 @@ async function startZipWarm(): Promise<void> {
 }
 
 function sendChunkLegacy(): void {
+  if (legacyCircuitBroken) return;
   const slice = plan.urls.slice(chunkCursor, chunkCursor + CHUNK);
+  lastChunkLen = slice.length;
   if (!slice.length) {
     // 全量跑完仍有失败 → 自动重拉一轮(keys() 过滤=只补失败项,极快);
     // 3 轮后放弃,交人工(门槛弹窗的"重新下载"按钮)
@@ -588,6 +639,7 @@ export function warmAllAssets(force = false): void {
     zipWorker?.terminate();
     zipWorker = null;
     zipFailedAcc = 0;
+    legacyCircuitBroken = false;   // 人工"重新下载"绕过熔断
     chunkCursor = 0;
     state.done = 0;
     state.failed = 0;

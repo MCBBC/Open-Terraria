@@ -237,6 +237,9 @@ async function warm(tag, urls, base) {
 function gcOldCaches() {
   return (async () => {
     const keep = cacheName();
+    // ★无版本会话(keep=CACHE_PREFIX 裸名)禁止清缓存——version 缺失意味着
+    //   本会话没拿到清单,删"非当前"=删掉成功会话的全部暖存(2026-08-27)
+    if (keep === CACHE_PREFIX) return;
     for (const name of await caches.keys()) {
       if (name.startsWith(CACHE_PREFIX) && name !== keep) await caches.delete(name);
     }
@@ -292,7 +295,16 @@ self.addEventListener('message', (e) => {
   }
   if (d.type === 'init') {
     getCache();
-    e.waitUntil(gcOldCaches().then(scrubPoisonedEntries));
+    // ★gc 权限模型(2026-08-27):init 不再顺带 gcOldCaches——manifest 失败的
+    // 会话(版本回退 base 形态)一度借 init 把成功会话的暖存整批误清。现仅
+    // 页面在【清单到手】后显式发 {type:'gc'} 才允许清理(见 AssetCache)。
+    // scrub 卫生清扫同理收编到 gc 通道(它只该跑在可信版本确立后)。
+    e.waitUntil(scrubPoisonedEntries());
+  } else if (d.type === 'gc') {
+    if (typeof d.version === 'string' && d.version) {
+      if (d.version !== currentVersion) { currentVersion = d.version; cacheReady = null; }
+      e.waitUntil(gcOldCaches());
+    }
   } else if (d.type === 'warm') {
     if (!currentVersion) return; // 无版本(未 init 且消息未带)拒绝,防写错缓存
     // ★必须 waitUntil:否则 message 事件结束后 Chrome 随时终止 SW

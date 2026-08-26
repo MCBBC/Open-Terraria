@@ -402,7 +402,7 @@ function tryRoll(ctx: NpcDropCtx, rule: Rule): boolean {
   // 曾记成普通 common → 幸运玩家白吃加成/负运玩家反被惩罚（双向都反）
   if ((rule as { onlyBadLuck?: number }).onlyBadLuck) {
     if (denom <= 1) return true;
-    if (ctx.luck < 0 && ctx.rng.next() < -ctx.luck) {
+    if ((ctx.luck ?? 0) < 0 && ctx.rng.next() < -(ctx.luck ?? 0)) {
       return ctx.rng.int(0, Math.floor(ctx.rng.int(Math.floor(denom / 2), denom - 1))) < num;
     }
     return ctx.rng.int(0, denom - 1) < num;
