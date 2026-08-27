@@ -573,6 +573,9 @@ export class Player extends Entity {
    *  显示 :44788 1+timer/60 自然倒数；.plr 存剩余值(:53956)。曾移植为正计数
    *  （deadTime 语义）→ 死亡界面秒数往上数，2026-08-25 校正为双计数器 */
   respawnTimer = 0;
+  /** 法力斗篷魔法命中星雨冷却(Projectile.cs:13894 = 60f*5f = 300t;
+   *  受击星雨无冷却门,仅此魔法命中通道用) */
+  starCloakCooldown = 0;
   /** 死亡经过时间（Player.cs:1518 deadTime，死亡起每 tick 递增 :16780、
    *  Spawn 归零 :37182）——观战门 CanDeathSpectate(:3939 ≥60) 与跳过锁
    *  (DeadSkipLockoutTime 90) 的 elapsed 语义计数器，与 respawnTimer 分立 */

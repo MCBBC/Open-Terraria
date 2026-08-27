@@ -2074,8 +2074,25 @@ export class Game implements GameHooks {
     if (op.op === 0) {
       const id = ITEM_BY_KEY[op.key];
       if (id === undefined) return;
+      const isResidue = op.op === 3;
       let pup = this.netDropPuppets.get(op.netId);
       if (!pup) {
+        // op3/回报路径：netId 对上本端【真身】（他端拾取了我们的掉落只搬走一部分，
+        // 余量经 hooks.puppetDropResidue 以 op0 报回）——原版无此向：msg21 单向
+        // 服务器广播；本仓所有权分散，拥有者必须吃进回报否则 60t 重 assert 用陈旧
+        // 全量把对方已取走的量刷回来（人人再捡一遍 = 复制）
+        for (const ent of this.entities.drops) {
+          const d = ent as ItemDrop;
+          if (!d.netPuppet && !d.dead && d.netId === op.netId) {
+            d.itemId = id; d.stack = Math.max(1, op.stack);
+            d.x = op.x; d.y = op.y; d.vx = op.vx; d.vy = op.vy;
+            d.shimmered = op.shimmered ?? false;
+            d.shimmerTime = op.shimmerTime ?? 0;
+            return;
+          }
+        }
+        // 残余上报不允许凭空建物（防伪造复活已消亡实体）
+        if (isResidue) return;
         const d = new ItemDrop(op.x, op.y, id, Math.max(1, op.stack), op.vx, op.vy);
         d.netPuppet = true;
         d.netId = op.netId;
@@ -2085,6 +2102,11 @@ export class Game implements GameHooks {
       }
       pup.d.x = op.x; pup.d.y = op.y;
       pup.d.vx = op.vx; pup.d.vy = op.vy;
+      // 原版 msg21 = 槽位全态覆写（NetMessage.WriteItem：type/stack/pos 全写）。
+      // upsert 只校位不刷内容 → 拥有端的堆变化（合并加数/升面换物/残余上报/
+      // 怪吸币扣减）永远到不了他端。itemId 对不上（钱币升面 71→72→73→74）一并换
+      if (pup.d.itemId !== id) pup.d.itemId = id;
+      pup.d.stack = Math.max(1, op.stack);
       // 145 尾段：微光态镜像（缺省=非微光——发送端无尾段即清，upsert 语义）
       pup.d.shimmered = op.shimmered ?? false;
       pup.d.shimmerTime = op.shimmerTime ?? 0;
@@ -2130,6 +2152,15 @@ export class Game implements GameHooks {
       });
     }
     return out;
+  }
+
+  /** MP：他人掉落被本端部分拾取后的余量上报（GameHooks.puppetDropResidue 实现；
+   *  ItemDrop 拾取路径消费）——msg21 op0 全态报回，拥有端在 netApplyItemOp 的
+   *  真身匹配支更新。整堆拾取（dead）由傀儡清扫的 take 差分覆盖，不经此 */
+  puppetDropResidue(d: ItemDrop): void {
+    if (!this.net?.active || !d.netId) return;
+    this.net.sendItemOp(3, d.netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack,
+      d.x, d.y, d.vx, d.vy, d.shimmered, d.shimmerTime);
   }
 
   /** per-client 掉落发放（GameHooks.grantInstancedLoot 实现；结算端=本端房主）：
@@ -23945,6 +23976,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.recLog('drop', { key: itemKey, n: count, x: Math.round(x), y: Math.round(y) });   // 行为录制：掉落物生成（唯一入口）
     const drop = new ItemDrop(x - 6, y - 6, id, count, vx, vy);
     if (placeStyle !== undefined) drop.placeStyle = placeStyle;
+    // 法力斗篷之星 4143 = pickup 类(拾取 +50 魔力 + ManaHeat,Player.cs:35357-35371)
+    if (viIdFromKey(itemKey) === 4143) drop.pickup = 'manastar';
     // ★原版 Main.item 槽位上限 400（Main.cs:1696 WorldItem[401],NewItem 扫 0..399）:
     //  满槽 → 回收【最老的 pickup 类】槽位（Item.cs:49781-49800:IsAPickup 里
     //  timeSinceItemSpawned 最大者——普通掉落从不被抢占;曾不判型 shift() 最旧,
@@ -23957,7 +23990,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  ② 仍满 → EmergencyStacking 腾位（EmergencyStacking.cs 全量移植）；
     //  ③ 仍满 → 覆写最老掉落（尾段 argmax(timeSinceItemSpawned) 槽被新物写入，
     //     NewItem 实际不会失败）。曾不判型 shift()/直接失败，均已对齐。
-    let free = drops.filter((d) => !d.dead).length < 400;
+    // MP（Item.cs:336/:49801）：netMode==2 时 num4 -= SlotsRemainingBeforeEmergency
+    // StackingInMultiplayer(=40)——服务器留 40 槽给 per-client instanced 掉落，腾位
+    // 提前到 360 触发。角色映射：房主 ≙ 原版服务器（战利品结算在房主）；访客照旧 400
+    const dropCap = this.net?.active && this.net.policy.isHost ? 360 : 400;
+    let free = drops.filter((d) => !d.dead).length < dropCap;
     if (!free) {
       let oldest: ItemDrop | null = null;
       for (const dRaw of drops) {
@@ -23985,18 +24022,44 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return drop;
   }
 
+  /** 法力斗篷星雨(魔法武器命中触发,Projectile.cs:13892-13940 1:1):
+   *  manaCloakOverride(4001/蛇 6186)装备 + starCloakCooldown==0 → 冷却 300t(60×5)
+   *  + 生成 1 颗 723 法力星(x=被打 NPC±400,y=NPC 上方 500-800,瞄向 NPC,ai2=1);
+   *  落地(Arrow kill)→ RequestNewItem(4143 法力斗篷之星) */
+  tryManaCloakStarOnMagicHit(x: number, y: number): void {
+    const p = this.player;
+    const accVids = accessoryVanillaIds(p);
+    if (!(accVids.includes(4001) || accVids.includes(6186))) return;   // 法力斗篷/蛇斗篷
+    if (p.starCloakCooldown > 0) return;                               // :13894 冷却门
+    p.starCloakCooldown = 300;                                         // :13894 = 60f*5f
+    const sx = x + (Math.floor(Math.random() * 800) - 400);            // :13900 ±400
+    const sy = y - (500 + Math.floor(Math.random() * 300));            // :13901 上方 500-800
+    let n15 = x + 8 - sx + (Math.floor(Math.random() * 201) - 100);  // :13904 瞄向被打 NPC(NPC 中心 ±100)
+    let n16 = y + 8 - sy;
+    const n17 = 23 / Math.hypot(n15, n16);                             // :13908 23f 归一
+    n15 *= n17; n16 *= n17;
+    this.entities.add(new Arrow(sx, sy, n15, n16, 100, 5, 723, null, { manaStar: true, star: { targetY: y + 8 } }), 'projectiles');
+  }
+
   /** EmergencyStackItemsToMakeSpace（EmergencyStacking.cs 1:1 全量移植）：
    *  地上可堆叠对按保存优先级组就近合并（曼哈顿 ≤2400、单次上限 20 笔、
-   *  屏幕内 src +3 优先惩罚、钱币堆满升面 71→72→73→74） */
+   *  屏幕内 src +3 优先惩罚、钱币堆满升面 71→72→73→74）。
+   *  MP：只在自己拥有的堆（真身非傀儡/私有实例）之间搬运——原版算法在服务器上
+   *  对全量 Main.item 有所有权，本仓所有权分散，跨所有者搬运会双端各自改写
+   *  同一堆 → 傀儡/实例一律出局；改完的堆即刻 op0 全态广播（= 原版每笔转账的
+   *  SendData(21)，等下一轮 60t 重 assert 会闪旧值）。返回是否释放了槽位 */
   private emergencyStackMakeSpace(): boolean {
     const players: Array<{ x: number; y: number }> = [{ x: this.player.cx, y: this.player.cy }];
     const remotes = (this.net as unknown as { remotePlayers?: Array<{ cx: number; cy: number }> } | undefined)?.remotePlayers;
     if (remotes) for (const r of remotes) players.push({ x: r.cx, y: r.cy });
-    return emergencyStackItemsToMakeSpace(
+    const netActive = !!this.net?.active;
+    const res = emergencyStackItemsToMakeSpace(
       this.entities.drops as ItemDrop[],
       {
         vidOf: (d) => vanillaIdOfItem(d.itemId),
         viewCenters: players,
+        // MP 所有权门：联机时排除傀儡（他端所有）与 netLocalOnly（本端私有袋）
+        mpOwned: netActive ? ((d: ItemDrop) => !d.netPuppet && !d.netLocalOnly) : undefined,
         maxStackOf: (d) => ITEM_DEFS[d.itemId]?.maxStack ?? 1,
         onlyNeedOne: (vid) => {
           const ov = ITEM_ONLY_NEED_ONE_OVERRIDE[vid];
@@ -24021,6 +24084,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         },
       },
     );
+    // MP：被搬运改动的堆即刻全态广播（= 原版每笔转账 SendData(21)；升面换物的
+    // itemId 变化也只有这里能送达，重 assert 差分只看生死不看内容）。回收槽
+    // （src 搬空死亡）走既有 take 差分
+    if (netActive && res.touched.length) {
+      for (const t of res.touched) {
+        if (!t.netId || t.dead) continue;
+        this.net!.sendItemOp(0, t.netId, ITEM_DEFS[t.itemId]?.key ?? '', t.stack,
+          t.x, t.y, t.vx, t.vy, t.shimmered, t.shimmerTime);
+      }
+    }
+    return res.freed;
   }
 
   /** 星云 booster 实体（原版是 Item 3453-55：WI:418 重力 0.1；PC:34497 抓取 42px 内

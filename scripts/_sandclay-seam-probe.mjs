@@ -17,6 +17,7 @@ const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args
 const p = await b.newPage();
 p.on('pageerror', (e) => console.log('[pageerror]', String(e).slice(0, 200)));
 await p.goto(ORIGIN + '/?nosw', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await p.evaluate(() => { (window).__lastErr = null; window.addEventListener('error', (ev) => { (window).__lastErr = String(ev.error?.stack ?? ev.message); }); });
 await p.waitForFunction(() => typeof window.__swLoadJson === 'function', { timeout: 120000 });
 const conv = await p.evaluate(async (b64) => {
   const m = await import('/src/wld/WldImport.ts');
@@ -40,6 +41,7 @@ await p.evaluate(() => {
 });
 await sleep(5000);
 
+p.on('pageerror', (e) => { const st = String(e.stack ?? e); if (st.includes('RangeError')) { const fs2 = st.split('\n').filter((l) => l.includes('.ts:')).slice(0, 26).join('\n'); fs.writeFileSync('/tmp/vf-overflow-stack.txt', fs2); } });
 const out = await p.evaluate(async () => {
   const g = window.__swGame;
   const st = g.world.store;
@@ -105,12 +107,13 @@ const out = await p.evaluate(async () => {
     const nb = { n: typeOf(x, y - 1), e: typeOf(x + 1, y), s: typeOf(x, y + 1), w: typeOf(x - 1, y) };
     rows.push({ x, y, type: t === typeOf(x, y) ? (sheet === 53 ? 'sand' : sheet === 40 ? 'clay' : 'dirt') : '?', frame: `${f.col},${f.row}`, diffPx: diff, holePx: holes.length, holes: holes.slice(0, 6), nb: Object.fromEntries(Object.entries(nb).map(([k, v]) => [k, v === 0 ? '.' : (keyOf(v) === 53 ? 'S' : keyOf(v) === 40 ? 'C' : keyOf(v) === 0 ? 'D' : 'o')])) });
   }
-  return { png4x, rows };
+  return { png4x, rows, errStack: (window).__lastErr };
 });
 fs.mkdirSync(OUT, { recursive: true });
 fs.writeFileSync(OUT + '/region4x.png', Buffer.from(out.png4x.split(',')[1], 'base64'));
 fs.writeFileSync(OUT + '/rows.json', JSON.stringify(out.rows, null, 1));
 const holes = out.rows.filter((r) => r.holePx > 0);
+if (out.errStack) console.log('PAGE OVERFLOW STACK:\n' + out.errStack.split('\n').filter((l) => l.includes('.ts')).slice(0, 26).join('\n'));
 console.log('solid tiles checked:', out.rows.length, ' with holes:', holes.length);
 for (const h of holes.slice(0, 12)) console.log(`(${h.x},${h.y}) ${h.type} frame=${h.frame} holePx=${h.holePx} at ${h.holes.join(' ')} nb=${JSON.stringify(h.nb)}`);
 const diffs = out.rows.filter((r) => r.diffPx > 0);

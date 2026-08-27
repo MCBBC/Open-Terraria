@@ -94,6 +94,11 @@ export interface GameHooks {
   /** 按原版 NPC id 出生（Enemy.fromVanilla；小动物入微光 Transform / makeNPC 放生用。
    *  Game 实现：入 critters 桶（同 spawnCritter 的 spawnVanilla 语义），联机访客拒绝 */
   spawnNpcByVanilla?(id: number, x: number, y: number): import('./Enemy').Enemy | null;
+  /** 法力斗篷星雨(魔法武器命中触发,Projectile.cs:13892-13914):冷却门+生成 1 颗 723 法力星(ai2=1 落地掉 4143) */
+  tryManaCloakStarOnMagicHit?(x: number, y: number): void;
+  /** MP：他人掉落（傀儡）被本端部分拾取后的余量上报（msg21 op0 全态；Game 实现
+   *  → 拥有端据以更新真身，防重 assert 回灌复制）。整堆拾取走 op1 take 不经此 */
+  puppetDropResidue?(d: import('./ItemDrop').ItemDrop): void;
   /** 风暴落雷 bolt 折线校验（WorldGen.TrySpawnLightningBolt :72586-72589
    *  LightningGenerator.StormLightning.CanHitTarget 等价——折线无 tile 碰撞才可落） */
   stormLightningBolt?(seed: number, vx: number, vy: number):

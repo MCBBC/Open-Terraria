@@ -17,6 +17,46 @@ import {
 import { cageFamilyOf, drawCageCell } from './CritterCage';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
 import { animFrameIdx, animYOffset, TILE_ANIM_RATE } from './TileAnim';
+import { vanillaFrameFor, setVanillaSolidTables } from './VanillaFraming';
+// 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程)。★默认停用(2026-08-27 回滚):
+// 链的 id 域( vanilla )与运行时 store 域未钉死一致,启用会全局隔离帧——重做对齐
+// (域契约 + rig 逐位对拍)完成后再默认启用。临时启用:localStorage sw_vanilla_framing=1。
+const SW_VANILLA_FRAMING = typeof localStorage !== 'undefined'
+  ? localStorage.getItem('sw_vanilla_framing') === '1'
+  : false;
+// vanilla solid/solidTop 表注入(初始化一次;solidTop 用 SW 平台表近似——矩阵对 426-434/727-732
+// 皆整块,不涉 solidTop,误差面为零)
+let _solidTablesInit = false;
+function ensureSolidTables(): void {
+  if (_solidTablesInit) return;
+  _solidTablesInit = true;
+  const solid = new Array(600).fill(false);
+  const solidTop = new Array(600).fill(false);
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const v = TILE_DEFS[i]?.vanilla;
+    if (!v || v.sheet >= 600) continue;
+    solid[v.sheet] = !!TILE_DEFS[i].solid;
+    solidTop[v.sheet] = !!TILE_DEFS[i].platform;
+  }
+  setVanillaSolidTables(solid, solidTop);
+}
+// vanilla 帧的绘制入口(shared by auto/blend 分流):命中则直画并 return true
+function tryVanillaFramingCell(
+  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, sheet: number,
+  st: TileStore, x: number, y: number, type: number, px: number, py: number,
+  world?: { rockLevel?: number },
+): boolean {
+  if (!SW_VANILLA_FRAMING) return false;
+  ensureSolidTables();
+  const meta = atlas.vmeta(sheet);
+  const v = vanillaFrameFor(st, x, y, st, ((x * 7) + (y * 11)) % 3, world?.rockLevel ?? 0);
+  if (v.fx < 0 || v.fy < 0) return false;
+  if (meta && (v.fx + 16 > (meta.cols) * 18 || v.fy + 16 > (meta.rows) * 18)) return false; // 越表回退旧路径
+  const r = atlas.vframe(sheet, Math.floor(v.fx / 18), Math.floor(v.fy / 18));
+  if (!r) return false;
+  ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, TILE, TILE);
+  return true;
+}
 
 type Frame = [number, number];
 
@@ -491,6 +531,7 @@ export interface TreeStyleData {
   treeTops?: number[];
   worldSurface?: number;
   worldW?: number;
+  rockLevel?: number;
 }
 
 /** 634 灰烬树 glowmask 叠画（原版 DrawTrees :8291-8300/:8336-8345：顶 Glow_316 / 枝 Glow_317，
@@ -945,6 +986,9 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     drawXmasTreeCell(ctx, atlas, st, x, y, px, py);
     return;
   }
+  // ★vanilla-exact 分帧(TileFrameCosmetic 全链移植):auto/blend 两近似路径的统一替代。
+  // 未命中(越表/链未定)回落下方既有近似路径。
+  if ((frame === 'auto' || frame === 'blend') && tryVanillaFramingCell(ctx, atlas, sheet, st, x, y, type, px, py, trees)) return;
   // blend 类（泥土/石族/草族/沙/泥/雪）：TEdit BlendRules 移植
   // （掩码位序：E=0x1 N=0x10 W=0x100 S=0x1000；角 TR/TL/BL/BR <<16）
   if (frame === 'blend') {

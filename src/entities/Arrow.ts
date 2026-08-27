@@ -230,6 +230,8 @@ export interface ArrowOpts {
   pierce?: number;
   /** 敌对弹（原版 Projectile.hostile，Damage_EVP :13708 门禁）：
    *  Boss/敌怪发射的弹传 true → 命中玩家结算伤害；玩家武器弹默认 false 不伤玩家。 */
+  /** 法力斗篷星(723,Projectile.cs:13914 ai2=1):落地掉 4143 法力斗篷之星 */
+  manaStar?: boolean;
   hostile?: boolean;
   /** aiStyle 14 弹跳弹（希腊火/装饰球等月事件弹幕，Projectile.cs 碰撞反弹
    *  cs:18314-18327 档）：撞实心块法向反弹 ×0.5 衰减而非消亡。 */
@@ -604,6 +606,7 @@ export class Arrow extends Entity {
   drawScale = 1;
   /** 回收掉落的 item key（null = 不回收，如燃烧箭） */
   dropKey: string | null;
+  manaStar: boolean;
   grav: number;
   life: number;
   pierce: number;
@@ -1348,6 +1351,7 @@ export class Arrow extends Entity {
     this.knockback = knockback;
     this.projId = projId;
     this.dropKey = dropKey;
+    this.manaStar = opts?.manaStar ?? false;
     // 判定盒/绘制 scale 按弹型取 SetDefaults（子弹 14 = 4×4 hitbox；箭 1 = 10×10）
     const pd0 = projectileData(projId);
     if (pd0?.width) this.w = pd0.width;
@@ -1741,7 +1745,7 @@ export class Arrow extends Entity {
     // 星怒剑 503 独占：rotation=vel−π/2（:22236-22239），origin (w/2, 70)
     // （Main.cs:29898-29901——34×90 贴图锚点近底部，剑尖前伸 70px）；
     // Opacity = 1−alpha/255 渐显
-    if (this.starY !== null) {
+    if (this.starY !== null && this.projId === 503) {
       const img = projSprite(503);
       if (!img || !(img.width > 0) || img.width === 0) return;
       ctx.save();
@@ -2077,6 +2081,16 @@ export class Arrow extends Entity {
     // 判定盒外扩 112×112 重结算 Damage() + 尘 31×4/228×80；近身 42/撞块/180t
     // 自毁全部走此口）
     if (this.martianRocket) this.rocketExplode(game);
+    // 斗篷星落地(Kill :76693-76715):723 音 Item10+尘 88(noGravity 紫)×10+碎砾 16/17×3(v×2);
+    // 法力档(ai2=1 ≙ manaStar)→ RequestNewItem(4143 法力斗篷之星,:76712-76714)
+    if ([723, 724, 725, 726, 907, 1133].includes(this.projId) && !this.dead) {
+      if (this.projId === 723) game.playSfxFile?.('Item_10', 1, this.cx, this.cy);
+      for (let i = 0; i < 10; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 88, this.vx * 0.2, this.vy * 0.2, 150, null, 1.2);
+        if (d) { d.noGravity = true; d.vx *= 2; }
+      }
+      if (this.manaStar) game.spawnDrop?.(this.x, this.y, 'vi_4143_manacloakstar', 1);
+    }
     // ★2026-08-26 宝石法珠 Kill 公共段（Projectile.cs:76985-77010,1458；用户实报批）：
     // SoundEngine.PlaySound(0)=Dig 音 + 15 枚同色尘（noGravity、scale×1.25、
     // v=dir:(v<1 归零向) → ×2.2 +dir×1.5 → ×randFloat——六连式与原版逐式对齐）
@@ -4725,7 +4739,11 @@ export class Arrow extends Entity {
     // 星怒剑线上方穿墙（:22139-22143 越线前 tileCollide=false）与
     // noTileCollide 族（SetDefaults 逐型 325/329/348/350/351…，HandleMovement
     // 整段不跑）——撞块/砍草整段跳过（曾漏 = 月事件弹幕扎进地里被地形吞噬）
-    if (tileType !== 0 && !this.noTileCollide && !(this.starY !== null && !this.starCollide)) {
+    // ★斗篷星 723 家族:SetDefaults tileCollide=false,原版 AI 越 ai1 线动态置
+    //  tileCollide=true(:24101)——目标线之下必须碰块。starY 弹的碰块门只看
+    //  starCollide(线上恒穿透/线下恒碰块);非 starY 弹维持 noTileCollide 原判
+    const starNoHit = this.starY !== null ? !this.starCollide : this.noTileCollide;
+    if (tileType !== 0 && !starNoHit) {
       // 可砍物（杂草/瓦罐）：Projectile.CutTiles 语义——原版 CutTiles 是 Damage()
       // 内的旁路副作用（Projectile.cs:11824，在 :15738 Damage 调用链内），不拦截命中
       game.cutTile(tx, ty);

@@ -163,7 +163,7 @@ const CSS = `
   background-position:var(--fx0) var(--fy); }
 .sw-emote-menu.frame1 .sw-emote-btn .icon { background-position:var(--fx1) var(--fy); }
 .sw-emote-btn .border { position:absolute; left:-4px; top:-4px; width:72px; height:60px;
-  background-repeat:no-repeat; }
+  background-repeat:no-repeat; background-size:100% 100%; }
 /* ★边框偏移 = 原版 vector-(2,2)（DrawSelf :77 EmoteBubbleBorder 中心对齐 -2px）——
    曾画在 (0,0) = 描边右/下被裁、左/上悬空（用户报"错误的 stroke"） */
 .sw-emote-btn:hover .border { background-image:var(--border-hover); }

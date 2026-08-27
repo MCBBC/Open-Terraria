@@ -2191,6 +2191,10 @@ export const ITEM_ONLY_NEED_ONE_OVERRIDE: Record<number, boolean> = {
   205: false, 206: false, 207: false, 1128: false, 267: false, 849: false,
 };
 
+// 法力斗篷之星（Item.cs:35962 SetDefaults 12×12;Projectile.cs:76712 法力斗篷星落地掉落;
+// Player.cs:35357 拾取 +50 魔力+ManaHeat;WorldItem.cs:664 生成 300t 消失。2026-08-27 补注册）
+item({ key: 'vi_4143_manacloakstar', name: '' });
+
 export const ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);
 /** 稳定 id → internal id(加载方向;同 vid 重复注册时归一到首个 def——内容等价) */
 export const ITEM_INTERNAL_OF_STABLE = new Map<number, number>();

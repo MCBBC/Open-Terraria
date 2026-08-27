@@ -129,6 +129,10 @@ export class MagicProj extends Entity {
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
         const crit = Math.random() < this.critChance; // 暴击链（P:52512——曾恒 false）
+        // 法力斗篷星雨(魔法武器命中触发,Projectile.cs:13892-13914):manaCloak 装备
+        // + 冷却 300t → 法力星 723(ai2=1)落地掉 4143 法力斗篷之星
+        (game as unknown as { tryManaCloakStarOnMagicHit?: (x: number, y: number) => void })
+          .tryManaCloakStarOnMagicHit?.(e.x, e.y);
         e.hurt(crit ? this.damage * 2 : this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
         this.dead = true;
         return;

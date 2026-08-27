@@ -3,6 +3,7 @@ import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell, drawCactusCell } from './VanillaTiler';
+import { invalidateVanillaFrameAt } from './VanillaFraming';
 import { treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
 // 树油漆 style 派生已迁 VanillaTiler（2026-08-25：WindSway 同源消费防环）——re-export 保既有引用面
 export { treeGroundVariant, treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
@@ -309,6 +310,7 @@ export class ChunkCache {
   }
 
   markDirtyAround(x: number, y: number) {
+    invalidateVanillaFrameAt(x, y); // 原版全链帧缓存局部失效(协商旗受 ±1 格影响)
     const cx = Math.floor(x / CHUNK), cy = Math.floor(y / CHUNK);
     this.markDirty(cx, cy);
     // 边缘融合：邻接 chunk 也要标脏
@@ -669,7 +671,8 @@ export class ChunkCache {
             (t) => t === type || frameMergesWith(type, t),
             px, py, st.frameX[i], fy,
             { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
-              worldSurface: this.world.groundLevel, worldW: this.world.w },
+              worldSurface: this.world.groundLevel, worldW: this.world.w,
+              rockLevel: this.world.rockLevel },
           );
           continue;
         }

@@ -43,6 +43,7 @@ import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
 import { runFinishNoTraps } from './FinishNoTrapsPass';
+import { improveAllChestContents } from './vanilla/TenthAnniversaryImprove';
 // ★YYYYYY（2026-08-23）：KillTile 头部不可破坏门——NOTRAPS #58 神庙锁门三格拒毁
 // （cs:63579 `num==2 → return` 在尘段之前,零掷零写;1:1 实现已在 HalfBrickPass,
 //  TTTTTT 批移植含 isLockedDoorKT cs:69248 全同帧门/下方锁门门/HasReasonToReturnEarly 全支）
@@ -2826,7 +2827,7 @@ export function runFinalCleanupPass(
   //    Drunk/NTB/GG/Remix 之前；实现体见下方 runFinishTenthAnniversaryWorld）──
   //    ★SSS-CELEB 批新增：ConvertSkyIslands(2) 神圣化 + 六族 Paint + 巨石 138→665。
   if (gs.seedFlags.tenthAnniversary && !gs.seedFlags.skyblock && rng) {
-    runFinishTenthAnniversaryWorld(st, rng, gs);
+    runFinishTenthAnniversaryWorld(st, rng, gs, opts?.chests);
   }
 
   // ── NotTheBees + FinishNotTheBees（cs:22602-22605 调用位：⑭ 之后、
@@ -2972,7 +2973,7 @@ const rainbowPaintIdWiggly = (x: number, y: number): number => {
 
 /** FinishTenthAnniversaryWorld（1458 cs:24508-24553）：纯 celeb 路径
  *  （remix/gg/drunk/ntb/dontStarve 组合域支不移植，各自线另案）。 */
-function runFinishTenthAnniversaryWorld(st: TileStore, rng: RNG, gs: GenState): void {
+function runFinishTenthAnniversaryWorld(st: TileStore, rng: RNG, gs: GenState, chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>): void {
   convertSkyIslandsTenth(st, rng, gs);          // ConvertSkyIslands(2, growTrees:true)
   paintTheDungeonTenth(st, gs, 24, 24);
   paintTheLivingTreesTenth(st, gs, 12, 12);
@@ -3001,7 +3002,9 @@ function runFinishTenthAnniversaryWorld(st: TileStore, rng: RNG, gs: GenState): 
     }
   }
   void b138s;
-  // ImproveAllChestContents：未移植（前缀引擎债，见文件头登记）
+  // ★EEEEE 批（1458 cs:24552-24554）：ImproveAllChestContents——巨石扫之后、
+  //  Finish 子段最后一步（掷流位次在此，勿前移）。实现体 TenthAnniversaryImprove.ts。
+  improveAllChestContents(chests, rng);
 }
 
 /** ConvertSkyIslands(2, growTrees:true)（1458 cs:24947-24986）。

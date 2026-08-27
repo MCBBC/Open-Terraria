@@ -3145,6 +3145,8 @@ export class UI {
   private craftTrackEl: HTMLElement | null = null;
   private craftThumbEl: HTMLElement | null = null;
   private craftScrollMeta = { len: 0, visRows: 0 };
+  /** 配方列表可用高度（2026-08-27 用户要求：延展到面板下缘,曾恒 240px 底部死区） */
+  private craftListH = 240;
   /** 列表容器上次写入的高度（同值跳过写=免布局失效） */
   private craftLastViewH = -1;
   /** 滚轮累积器（实例字段——列表元素每次进游戏重建，闭包累积器会随重建丢失半程量） */
@@ -3958,7 +3960,30 @@ export class UI {
       });
       if (filtered.length) avail = filtered;
     }
-    const WIN = 12;                                     // 池行数 = 可见 8 + 余量 4
+    // ★2026-08-27 用户要求：可合成（背包材料齐）排最前，未满足置灰垫底——
+    // 稳定排序保持组内原版注册序；置灰行不可点击（见池行 mousedown 门）。
+    // 原版口径备案：UpdateRecipeList 只列材料齐的配方（CollectedEnoughItemsToCraft
+    // >0,未满足根本不显示）,顺序 = 注册序静态;本仓扩展显示未满足行故自行分组
+    const metFlags = avail.map(({ r }) => {
+      let met = r.items.length > 0;
+      for (const req of r.items) {
+        const k2 = ingredientKey(req.id);
+        const have = k2 ? game.player.inv.countOf(game.itemId(k2)) : 0;
+        if (have < req.stack) { met = false; break; }
+      }
+      return met;
+    });
+    avail = avail
+      .map((e, i) => ({ e, met: metFlags[i] }))
+      .sort((x, y) => Number(y.met) - Number(x.met))
+      .map((x) => x.e);
+    // ★2026-08-27 用户要求：列表高度延展到面板下缘（曾恒 240px 底部死区）——
+    // 可用 = 视口底缘-32px（面板 padding-bottom 12 + body margin 8 + 余量,曾 -12
+    // 溢出屏幕）与列表顶的差,钳下限 240；池行数随高度增长
+    const rectTop = this.craftListEl.getBoundingClientRect().top;
+    const LIST_H = Math.max(240, Math.floor(window.innerHeight - 32 - rectTop));
+    this.craftListH = LIST_H;
+    const WIN = Math.max(12, Math.ceil(LIST_H / UI.CRAFT_ROW_H) + 4);   // 池行 = 可见 + 余量
     const maxAnchor = Math.max(0, avail.length - 1);
     if (this.craftScroll > maxAnchor) this.craftScroll = maxAnchor;   // 钳尾不回卷（ScrollCraftingList :582-589）
     if (!avail.length) {
@@ -3979,7 +4004,7 @@ export class UI {
     if (this.craftPool.length !== WIN || this.craftPool[0]?.parentElement !== this.craftListEl) {
       const cl = this.craftListEl;
       cl.replaceChildren();
-      cl.style.cssText = 'height:240px; overflow:hidden; width:520px; position:relative;';
+      cl.style.cssText = `height:${LIST_H}px; overflow:hidden; width:520px; position:relative;`;
       this.craftPool = []; this.craftPoolIdx = [];
       for (let k = 0; k < WIN; k++) {
         const row = el('div', 'sw-recipe');
@@ -4003,6 +4028,8 @@ export class UI {
           const idx = +(row.dataset.ri ?? -1);
           const rec = this.craftAvailRef[idx];
           if (!rec) return;
+          if (row.classList.contains('no')) return;   // ★置灰行（背包材料未齐,可经
+          //   仓库合成）不可点击合成——原版语义:列表只列可合成项,置灰为本仓扩展
           this.craftFocus = idx;      // 选中配方——仅点击设置，滚动不改
           this.hoverFocus = -1;       // 点击行即焦点，预览态退场
           // 格料先归还背包再统一扣料——防"料在格里、背包不足"假失败（同旧）
@@ -4053,13 +4080,15 @@ export class UI {
     const cl = this.craftListEl;
     if (!len || !cl || !game) return;
     const H = UI.CRAFT_ROW_H;
-    const VIS_ROWS = 7, WIN = 12;
+    // 高度/窗行随 craftListH（refreshVanillaCrafting 每刷回写）——曾恒 240/7/12
+    const VIS_ROWS = Math.max(1, Math.floor(this.craftListH / H));
+    const WIN = VIS_ROWS + 4;
     const anchor = this.craftScrollF;
     // ★窗顶钳制（2026-08-26 用户报"列表前面多一大块空"）：旧实现 start≥0 钳位,
     //  浮点版漏了——顶部锚 0 时 topF=-4 → 首行画在 120px 下。基准钳 [0,len-VIS],
     //  过冲(回弹)量单独 ×0.6 加成 = 端部拉伸视觉保留
     const maxAnchor = Math.max(0, len - 1);
-    const viewH = Math.min(240, len * H);
+    const viewH = Math.min(this.craftListH, len * H);
     if (this.craftLastViewH !== viewH) { cl.style.height = `${viewH}px`; this.craftLastViewH = viewH; }
     const maxTop = Math.max(0, len - Math.ceil(viewH / H));   // 末页填满视口,无底部留白
     const clampedAnchor = Math.max(0, Math.min(maxAnchor, anchor));
@@ -4100,6 +4129,16 @@ export class UI {
         }).join(' ·'));
         mats.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right;';
         row.appendChild(mats);
+        // 材料未满足 = 置灰（.sw-recipe.no opacity .4；2026-08-27 用户报"样式从未
+        // 套上"）。判据与材料文本同源 = 背包可见持有（craftableCount 计银行/仓库
+        // 源,材料文本只显示背包——0/1 行用户读作未满足）
+        let met = r.items.length > 0;
+        for (const req of r.items) {
+          const k2 = ingredientKey(req.id);
+          const have = k2 ? game.player.inv.countOf(game.itemId(k2)) : 0;
+          if (have < req.stack) { met = false; break; }
+        }
+        row.classList.toggle('no', !met);
         this.craftPoolIdx[k] = idx;
       }
       row.style.transform = `translateY(${((idx - topF) * H).toFixed(2)}px)`;
@@ -4112,7 +4151,7 @@ export class UI {
     //  （2026-08-26 用户实报"滚动条动列表不动"）。拖拽域 = [0, maxTop] 同源。
     const meta = this.craftScrollMeta;
     meta.len = len;
-    meta.visRows = Math.ceil(240 / H);            // 填充行数 8（拖拽域 = len-visRows）
+    meta.visRows = Math.ceil(this.craftListH / H);            // 填充行数（拖拽域 = len-visRows）
     const maxStart = Math.max(1, maxTop);
     const trk = this.craftTrackEl, thb = this.craftThumbEl;
     if (trk && thb) {

@@ -44,7 +44,7 @@ export class ItemDrop extends Entity {
   color?: number[]; // [r, g, b, a]
   /** 心(58)/星(184) 是 pickup 类物品（ItemID.Sets.IsAPickup, ItemID.cs:248）：
    *  碰触即回血 20 / 回蓝 100 并消失，永不进背包（Player.PickupItem :34610-34630） */
-  pickup?: 'heart' | 'star';
+  pickup?: 'heart' | 'star' | 'manastar';
   /** 原版 Item.noGrabDelay：玩家主动抛出的物品 =100t（Player.cs:4990/:4996
    *  DropSelectedItem），期间抛出者拾不回；普通战利品 0（走全局 PICKUP_DELAY） */
   noGrabDelay = 0;
@@ -181,6 +181,11 @@ export class ItemDrop extends Entity {
           if (this.pickup === 'heart') {
             player.hp = Math.min(player.maxHp, player.hp + 20);
             game.addDamageNumber(player.cx, player.y, 20, false, '#40E080');
+          } else if (this.pickup === 'manastar') {
+            // 法力斗篷之星 4143(Player.cs:35357-35371):音 7 + 魔力 +50 + ManaHeat(0.2,2s)
+            player.mana = Math.min(player.maxMana, player.mana + 50);
+            player.tryApplyManaHeat(0.2, 2);
+            game.addDamageNumber(player.cx, player.y, 50, false, '#4080FF');
           } else {
             player.mana = Math.min(player.maxMana, player.mana + 100);
             // 1457: 拾取魔力星附加 ManaHeat(0.2, 2s)（PickupItem :35346-35351——
@@ -220,6 +225,10 @@ export class ItemDrop extends Entity {
           if (def) game.showPickupLabel(def.key, before - left, this.prefix);
         }
         this.stack = left;
+        // MP：他人掉落的残余上报（op0 携余量全态）——原版 msg21 为服务器权威
+        // 单向广播，本仓所有权分散在生成端，拾取端必须把"还剩多少"报回去，否则
+        // 拥有者 60t 重 assert 会用陈旧全量把残余刷回去（人人可再捡 = 物品复制）
+        if (left > 0 && this.netPuppet && this.netId) game.puppetDropResidue?.(this);
       } else if (inGrabRange) {
         // PullItem_Common(:34533-34584):每轴 0.45 步进、钳 4(水平含 player.vx),
         // 速度反向时附加 ×0.75 反拉——被拉取帧跳过瓦片碰撞(WorldItem.cs:587-597
