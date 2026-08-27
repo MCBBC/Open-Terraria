@@ -2053,17 +2053,27 @@ export class UI {
     }
   }
 
-  /** 背包面板贴位：左=热键栏首格左缘,顶=其底+8px（2026-08-27 用户要求）；构建与
-   *  每次打开时重算。★取槽的 inline left/top 布局目标值——slot 有 80ms left/top
-   *  过渡动画,rect 会采到中途值（用户实测面板左缘歪 20px 即此因）。透明度 0.75、
-   *  边框/投影弱化（同用户要求） */
+  /** 背包面板贴位：左=热键栏【可视最左】格左缘,顶=其底+8px（2026-08-27 用户要求）；
+   *  构建与每次打开时重算。★取槽的 inline left/top 布局目标值（slot 有 80ms 过渡,
+   *  rect 会采到中途值）;★扫描全部槽取 min——hotbarEl.firstElementChild 是 (20,20)
+   *  锚位元素非首格（用户实测左缘歪 20px 即此因）。透明只调面板底色 alpha、边框/
+   *  投影弱化（opacity 曾连内容一起半透,用户纠正） */
   private positionInvPanel(): void {
     if (!this.invPanel) return;
-    const hb0 = this.hotbarEl?.firstElementChild as HTMLElement | null;
-    const leftPx = parseFloat(hb0?.style.left ?? '');
-    const topPx = parseFloat(hb0?.style.top ?? '');
-    const left = Number.isFinite(leftPx) ? Math.max(4, Math.round(leftPx)) : 8;
-    const top = Number.isFinite(topPx) ? Math.round(topPx + 52 + 8) : 84;
+    let best: HTMLElement | null = null;
+    let bestL = Infinity;
+    for (const s of Array.from(this.hotbarEl?.querySelectorAll<HTMLElement>('.sw-slot') ?? [])) {
+      const l = parseFloat(s.style.left);
+      if (Number.isFinite(l) && l < bestL) { bestL = l; best = s; }
+    }
+    const left = best ? Math.max(4, Math.round(bestL)) : 8;
+    const h = best ? (parseFloat(best.style.height) || best.getBoundingClientRect().height || 52) : 52;
+    const topPx = best ? parseFloat(best.style.top) : NaN;
+    const top = Number.isFinite(topPx) ? Math.round(topPx + h + 8) : 84;
+    // ★position:fixed/overflow 必须在此维持（.sw-panel 类无定位——曾重写贴位时
+    //   丢掉 fixed → 面板回落文档流 = 满宽平铺、left/top 全失效）
+    this.invPanel.style.position = 'fixed';
+    this.invPanel.style.overflow = 'auto';
     this.invPanel.style.left = `${left}px`;
     this.invPanel.style.top = `${top}px`;
     this.invPanel.style.maxHeight = `calc(100vh - ${top + 12}px)`;
@@ -2625,12 +2635,12 @@ export class UI {
     this.invPanel.style.display = 'none';
     // 原版背包无标题栏（DrawInventory 直接铺槽位）——标题行已摘（2026-08-13）
 
-    // ---- 顶部：三套 Loadout 切换（DrawLoadoutButtons Main.cs:41386+：当前套高亮） ----
-    {
-      const row = el('div');
-      row.style.cssText = 'display:flex; gap:4px; align-items:center; margin-bottom:6px;';
-      row.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.Tabs.Loadout')));
-      this.loadoutBtns = [];
+    // ---- Loadout 切换行（DrawLoadoutButtons Main.cs:41386+：当前套高亮）——
+    //  ★2026-08-27 用户要求：随装备列整体迁至右缘（成就/杂项列左侧）,不再占顶排
+    const loadoutRow = el('div');
+    loadoutRow.style.cssText = 'display:flex; gap:4px; align-items:center; margin-bottom:6px;';
+    loadoutRow.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.Tabs.Loadout')));
+    this.loadoutBtns = [];
       for (let k = 0; k < 3; k++) {
         // 原版 DrawLoadoutButtons（Main.cs:41395-41431）：Extra[259] 3×3 图集——
         // 行 = loadout 配色，列 = 常态 0 / 选中 1 / 悬停 2（OurFavoriteColor 染色帧）
@@ -2651,16 +2661,18 @@ export class UI {
           this.flashLoadoutSwitch();
           this.refreshAll();
         });
-        row.appendChild(b);
+        loadoutRow.appendChild(b);
         this.loadoutBtns.push(b);
       }
+      // 顶排：页签/入口图标行——★2026-08-27 用户要求：不再占整行留空,挂到右缘列
+      // 顶部（成就卡上方,居中可换行）,背包/弹药/配装三列直接顶到面板上沿
+      const row = el('div');
+      row.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px; align-items:center; justify-content:center; margin-bottom:2px;';
       // 页签：住房/图鉴图标钮（原版 DrawPageIcons :43528 EquipPage[4]灰房/hover=[7]红房
       // /页开=[5]；图鉴 = BestiaryMenuButton（Images/UI/Bestiary 2 帧书:常态/金高亮）。
       // 2026-08-27 用户要求：移植原版图标 + 两图标居右。住房点击：藏背包+开住房
       // 右缘条（查询器/指定 NPC 头像列）；条上 ✕ / 右键落光标 / E = 收条）
-      const spacer = el('div');
-      spacer.style.flex = '1';
-      row.appendChild(spacer);
+      // （spacer 已随顶行退役——图标行现挂右缘列顶部,居中换行）
       // 多人玩家列表（联机态显示）与旅程入口排图标左侧
       this.playerListBtn = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.PlayerList.Title'));
       this.playerListBtn.style.cssText = 'margin:0; padding:4px 10px; font-size:12px; display:none;';
@@ -2747,8 +2759,7 @@ export class UI {
       // 原版同款：背包左侧未完成成就小卡点击开成就页）。背包顶栏成就按钮已摘
       // （2026-08-13 用户要求：双入口只留原版位；原版设置菜单 Lang.menu[131] 入口
       // 如需再补应落在 Settings 而非背包顶栏）
-      this.invPanel.appendChild(row);
-    }
+    // 图标行挂右缘列顶部（原 invPanel 顶行,2026-08-27）——advRail 创建于下方彼处 prepend
 
     // 主体：原版布局——左装备竖列（盔甲 0-2 + 配饰 3-7 | 染料 0-2+3-7 | 时装 10-12 + 时装配饰 13-17）
     // / 杂项页（miscEquips[5] + miscDyes[5]，Main.cs:40616-40672 EquipPage==2）+
@@ -2756,7 +2767,10 @@ export class UI {
     const body = el('div');
     body.style.cssText = 'display:flex; gap:14px; margin-bottom:8px;';
     const left = el('div');
-    left.style.cssText = 'display:flex; gap:6px; flex:none;';
+    // 装备组（2026-08-27 用户要求：配装行+染料/时装/装备列整体迁至成就/杂项列左侧,
+    // 背包贴热键栏）——挂载点移至 body 尾部 rightRail 之后
+    left.style.cssText = 'display:flex; flex-direction:column; gap:6px; flex:none;';
+    left.appendChild(loadoutRow);
     // 竖排列构建器（原版 DrawInventory :40844-40968 语义：同 x 纵向排，label 顶部）
     const vcol = (label: string, from: number, n: number, where: SlotWhere) => {
       const col = el('div');
@@ -2878,11 +2892,11 @@ export class UI {
     rightRail.appendChild(coinAmmo);
     rightRail.appendChild(trashWrap);
     // 挂载点移到背包右侧（夹在背包与成就/杂项列之间,2026-08-27 用户要求）——
-    // 见下方 body.appendChild(right) 后
+    // 见下方 body.appendChild(right) 后。装备组（left=配装+染料/时装/装备列）挂载点
+    // 同样移至 rightRail 之后、成就/杂项列之前（用户要求整体右迁）
     // 成就提示牌（AchievementAdvisor：未完成成就小卡，点击开成就菜单）
     // ——挂载点在物品格之后（见 body.appendChild(right) 处），此处仅创建
     this.achAdvisorEl = createAchievementAdvisor(this.game);
-    body.appendChild(left);
 
     // 背包 10×4（10-39）
     const right = el('div');
@@ -2958,12 +2972,16 @@ export class UI {
     // 垃圾桶/弹药/钱币列 → 背包右侧（夹在背包与成就/杂项列中间,2026-08-27 用户
     // 要求——背包+合成整体贴向装备列,顺手中转距离更短）
     body.appendChild(rightRail);
+    // 装备组（配装行+染料/时装/装备列）→ 成就/杂项列左侧（2026-08-27 用户要求：
+    // 背包整体贴左上热键栏,换物路径最短）
+    body.appendChild(left);
     // 右缘列：成就提示牌 + 杂项（宠物/光源/矿车/坐骑/钩爪+染料，原杂项页迁入）
     // + PvP/队伍钮（2026-08-27 用户指定：杂项搬玩家对决原位,对决/队伍钮被顶下去；
     //   列高 ≈ 成就卡+杂项 310+PvP 120 ≈ 左装备列 620,面板高度不受影响。
     //   ★与左列 rightRail（垃圾桶/钱币）重名,此为 advRail）
     const advRail = el('div');
     advRail.style.cssText = 'display:flex; flex-direction:column; gap:8px; flex:none; align-items:center;';
+    advRail.appendChild(row);   // 图标行（搜索/住房/图鉴+联机/旅程钮）挂列顶
     // 成就提示牌 → 物品格右侧（用户指定；alignSelf 防 body stretch 拉高卡片）
     this.achAdvisorEl.style.alignSelf = 'stretch';
     advRail.appendChild(this.achAdvisorEl);
@@ -3160,6 +3178,14 @@ export class UI {
     else if (t > maxA) t = maxA + (t - maxA) * 0.35;
     this.craftWheelTarget = Math.max(-3, Math.min(maxA + 3, t));
     this.craftWheelIdle = performance.now();
+    // ★起步即动（2026-08-27 用户报"起步滚很延迟"）：缓动软启动首帧只走 ~40%，
+    //  事件→rAF 排帧→缓动追=起步"顿一下再滑"。手势首格直接推到目标（零延迟），
+    //  同手势后续事件也先走 65% 缩短追赶距离——rAF 只收剩下的尾巴
+    if (fresh) {
+      this.craftScrollF = this.craftWheelTarget;
+    } else {
+      this.craftScrollF += (this.craftWheelTarget - this.craftScrollF) * 0.65;
+    }
     this.craftAnimKick();
   }
 

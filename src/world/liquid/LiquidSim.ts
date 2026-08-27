@@ -374,14 +374,24 @@ export class LiquidSim {
     while (num2 >= 2) { num2 -= 2; num3++; }                          // 样式段（cs:46731-35）
     let num = y - num2;                                               // 组顶格 y（cs:46736）
     num2 = num3 * 36;                                                 // cs:46737
-    const readCell = (cx: number, cy: number): { act: boolean; ty: number; fy: number } => {
-      if (cx < 0 || cy < 0 || cx >= st.w || cy >= st.h) return { act: false, ty: -1, fy: -1 };
+    // ★SSSSSSSS2（2026-08-27）域一致性修复：cell 类型比较必须落在与形参 sheet 相同的
+    //  原版 sheet 域。旧实现 readCell 直接用内部 id 与 sheet 硬比——本仓映射后内部 id
+    //  早期段与 sheet 恒等故 {270,271,572,581,660} 等族 historically 成立，唯独吊灯
+    //  42↔内部77 不等号：整组完整性判定恒假（=永远判坏），但成员杀支同样用错域
+    //  （ty===sheet 恒假）→ destroyObject 闸开合而无一格被杀 → 组员永不级联。
+    //  g#98 初轮 WC 相位实证：(2749,{1100,1101}) 吊灯组底格岩浆直杀后，其尾
+    //  SquareTileFrame 邻访本臂对顶格 no-op；原版同相 KillTile 清 type(=0,cs:64405)
+    //  后级联 Check1x2Top 整组破格 → KillTile(顶格)+尘掷 10 —— 正是「初始 WC
+    //  Δ10」的首插入分歧源（x86 KLOG idx 109025439→449 台阶）。修=统一转换到
+    //  sheet 域（SHEET_OF），不影响 {internal≡sheet} 的其余六族逐位行为。
+    const readCell = (cx: number, cy: number): { act: boolean; sh: number; fy: number; ty: number } => {
+      if (cx < 0 || cy < 0 || cx >= st.w || cy >= st.h) return { act: false, sh: -1, fy: -1, ty: -1 };
       const q = this.idx(cx, cy);
-      return { act: st.flags[q] !== 0, ty: st.type[q], fy: st.frameY[q] ?? 0 };
+      return { act: st.flags[q] !== 0, sh: SHEET_OF[st.type[q]] ?? -1, fy: st.frameY[q] ?? 0, ty: st.type[q] };
     };
     const top = readCell(x, num), bot = readCell(x, num + 1);
     let flag = true;
-    if (top.fy === num2 && bot.fy === num2 + 18 && top.ty === sheet && bot.ty === sheet) flag = false; // cs:46749-55
+    if (top.fy === num2 && bot.fy === num2 + 18 && top.sh === sheet && bot.sh === sheet) flag = false; // cs:46749-55
     const anc = readCell(x, num - 1);
     let flag2 = false, flag3 = false;
     if ([42, 270, 271, 572, 581, 660].includes(sheet)) flag2 = true;   // cs:46757-74 坐具族
@@ -395,8 +405,8 @@ export class LiquidSim {
     if (((!flag2 || !isPlatOr380) && (!flag3 || !isRope)) && anchorGenericFail) flag = true;  // cs:46780
     if (!flag) return;
     this.destroyObj = true;
-    if (top.ty === sheet) this.killTileGen(x, num);                    // cs:46807-15 只杀同型格
-    if (bot.ty === sheet) this.killTileGen(x, num + 1);
+    if (top.sh === sheet) this.killTileGen(x, num);                    // cs:46807-15 只杀同型格
+    if (bot.sh === sheet) this.killTileGen(x, num + 1);
     this.destroyObj = false;                                           // 掉落支：生成期无实体，备案
   }
 

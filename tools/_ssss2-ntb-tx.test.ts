@@ -7,7 +7,9 @@
 //   逐格逐通道对拍。任何分歧都可定位到具体行级语义滑点。
 // 用法：cd game && SW_SSSS2NTB=1 npx vitest run tools/_ssss2-ntb-tx.test.ts
 import { it } from 'vitest';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+void readFileSync;
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 import { UnifiedRandom } from '../src/core/rng';
@@ -35,6 +37,24 @@ const v2 = (id: number): number => {
   return t;
 };
 
+
+// ---- SSSS2 离线分析快照持久化 ----
+const BLOB_DIR = '/tmp/sss2-out/ntb/blobs';
+type AnyArr = Uint8Array | Uint16Array;
+function storeArrs(st: import('../src/world/TileStore').TileStore): Array<[string, AnyArr]> {
+  return [
+    ['flags', st.flags], ['type', st.type], ['wall', st.wall],
+    ['liq', st.liquid], ['lty', st.liquidType], ['half', st.half],
+    ['slope', st.slope], ['wire', st.wire], ['paint', st.paint], ['paintWall', st.paintWall],
+  ];
+}
+function saveBlobs(prefix: string, st: import('../src/world/TileStore').TileStore): void {
+  try { mkdirSync(BLOB_DIR, { recursive: true }); } catch { /* ok */ }
+  for (const [nm, ar] of storeArrs(st)) {
+    writeFileSync(`${BLOB_DIR}/${prefix}_${nm}.bin`, Buffer.from(ar.buffer, ar.byteOffset, ar.byteLength));
+  }
+}
+let SAVE_ENABLED = false;
 interface Snap {
   flags: Uint8Array; type: Uint16Array; wall: Uint16Array; liq: Uint8Array;
   lty: Uint8Array; half: Uint8Array; slope: Uint8Array; wire: Uint8Array;
@@ -51,20 +71,24 @@ function snap(st: import('../src/world/TileStore').TileStore): Snap {
 // ---- 掷流录制（真实调用用）：记 method/min/max/result ----
 type Draw = { m: string; a: number; b: number; r: number };
 let rec: Draw[] | null = null;
+let gFlag = false; let gCount = 0;
 const urp = UnifiedRandom.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
 const oNext = urp.nextDouble!, oInt = urp.nextInt!, oRange = urp.nextIntRange!;
 urp.nextDouble = function (this: unknown, ...a: unknown[]) {
   const r = oNext.apply(this, a);
+  if (gFlag) gCount++;
   if (rec) rec.push({ m: 'nextDouble', a: NaN, b: NaN, r });
   return r;
 };
 urp.nextInt = function (this: unknown, ...a: unknown[]) {
   const r = oInt.apply(this, a);
+  if (gFlag) gCount++;
   if (rec) rec.push({ m: 'nextInt', a: a[0] as number, b: NaN, r });
   return r;
 };
 urp.nextIntRange = function (this: unknown, ...a: unknown[]) {
   const r = oRange.apply(this, a);
+  if (gFlag) gCount++;
   if (rec) rec.push({ m: 'nextIntRange', a: a[0] as number, b: a[1] as number, r });
   return r;
 };
@@ -103,7 +127,7 @@ interface TxRes { draws: number; anom: string[] }
 function txNotTheBees(s0: Snap, recDraws: Draw[], gs: import('./../src/world/gen/vanilla/GenState').GenState, w: number, h: number): { s1: Snap; res: TxRes } {
   // 克隆可变副本
   const flags = s0.flags.slice(), type = s0.type.slice(), wall = s0.wall.slice();
-  const liq = s0.liq.slice(), lty = s0.lty.slice();
+  const liq = s0.liq.slice(), lty = s0.lty.slice(), wire = s0.wire.slice();
 
   const sf = gs.seedFlags;
   if (sf.skyblock) return { s1: { ...s0 }, res: { draws: 0, anom: [] } };  // cs:25384-25386
@@ -330,7 +354,7 @@ function txNotTheBees(s0: Snap, recDraws: Draw[], gs: import('./../src/world/gen
   }
 
   // 收尾：返回克隆态（未涉通道以入口快照透传）
-  const s1: Snap = { ...s0, flags, type, wall, liq, lty };
+  const s1: Snap = { ...s0, flags, type, wall, liq, lty, wire };
   return { s1, res: { draws, anom: src.anom } };
 }
 
@@ -359,6 +383,9 @@ function txNotTheBees(s0: Snap, recDraws: Draw[], gs: import('./../src/world/gen
       }
       cur = { snapIn: snap(st), rec: [], tag, gs };
       rec = cur.rec;
+      gFlag = true;
+      if (SAVE_ENABLED) saveBlobs(`c${calls.length}in`, st);
+      console.log(`[cap-in #${calls.length}] ${tag} notTheBees=${gs.seedFlags?.notTheBees} flagsKeys=${Object.keys(gs.seedFlags ?? {}).length}`);
       calls.push({ tag, n: calls.length + 1, drawsRec: 0, drawsTx: 0, anomN: 0, anomHead: [],
         dFlags: 0, dType: 0, dWall: 0, dLiq: 0, dLty: 0, pairs: [], samples: [] });
       return;
@@ -367,15 +394,52 @@ function txNotTheBees(s0: Snap, recDraws: Draw[], gs: import('./../src/world/gen
     const c = calls[calls.length - 1]!;
     const s = cur!;
     rec = null;
+    gFlag = false;
+    console.log(`[cap-out #${calls.length}] recLen=${s.rec.length} gCount=${gCount}`);
+    if (SAVE_ENABLED) {
+      saveBlobs(`c${calls.length}out`, st);
+      if (calls.length === 6) {
+        const n = s.rec.length;
+        const A = new Int32Array(n), B = new Int32Array(n), R = new Int32Array(n);
+        const M = new Uint8Array(n);
+        for (let q = 0; q < n; q++) {
+          const d = s.rec[q]!;
+          A[q] = Number.isNaN(d.a) ? -2147483648 : d.a;
+          B[q] = Number.isNaN(d.b) ? -2147483648 : d.b;
+          R[q] = Math.round(d.r);
+          M[q] = d.m === 'nextDouble' ? 1 : d.m === 'nextInt' ? 2 : 3;
+        }
+        try { mkdirSync(BLOB_DIR, { recursive: true }); } catch { /* ok */ }
+        writeFileSync(`${BLOB_DIR}/c6_rec_a.i32`, Buffer.from(A.buffer));
+        writeFileSync(`${BLOB_DIR}/c6_rec_b.i32`, Buffer.from(B.buffer));
+        writeFileSync(`${BLOB_DIR}/c6_rec_r.i32`, Buffer.from(R.buffer));
+        writeFileSync(`${BLOB_DIR}/c6_rec_m.u8`, Buffer.from(M.buffer));
+        const g = s.gs;
+        const meta = {
+          w: W, h: H, seedText: SEED,
+          worldSurface: g.worldSurface, rockLevel: g.rockLevel, lavaLine: g.lavaLine,
+          beachDistance: g.beachDistance, dungeonSide: g.dungeonSide,
+        };
+        writeFileSync('/tmp/sss2-out/ntb/meta.json', JSON.stringify(meta));
+      }
+    }
     const snapOut = snap(st);
     const src = new ReplaySrc([]);
     void src;
     // 转录重放
-    const { s1, res } = txNotTheBees(s.snapIn, s.rec.slice(), s.gs as never, W, H);
+    let s1: Snap; let res: TxRes;
+    try {
+      ({ s1, res } = txNotTheBees(s.snapIn, s.rec.slice(), s.gs as never, W, H));
+    } catch (err) {
+      console.log(`[tx-crash #${calls.length}] ${(err as Error).stack}`);
+      cur = null;
+      return;
+    }
     c.drawsRec = s.rec.length;
     c.drawsTx = res.draws;
     c.anomN = res.anom.length;
     c.anomHead = res.anom.slice(0, 12);
+    console.log(`[dbg] call#${c.n} tag=${c.tag} drawsRec=${c.drawsRec} drawsTx=${c.drawsTx} anomN=${c.anomN} dT=${c.dType} dW=${c.dWall}`);
     // 逐格对拍（转录 s1 vs 真实 snapOut）
     const pair = new Map<string, number>();
     const pushPair = (k: string) => pair.set(k, (pair.get(k) ?? 0) + 1);
@@ -393,9 +457,14 @@ function txNotTheBees(s0: Snap, recDraws: Draw[], gs: import('./../src/world/gen
   };
 
   try {
+    SAVE_ENABLED = process.env.SW_SSSS2SAVE === '1';
     await generateWorld({
       width: W, height: H, seedText: SEED, evil: -1 as -1 | 0 | 1,
       seedFlags: { notTheBees: true } as never,
+      onWorldPartial: (w, i) => {
+        if (!SAVE_ENABLED || (i !== 49 && i !== 50)) return;
+        saveBlobs(`slot${String(i).padStart(2, '0')}`, w.store);
+      },
     });
   } finally {
     delete g0.__swNTBCap;

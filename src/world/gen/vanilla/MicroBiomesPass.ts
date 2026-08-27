@@ -1317,7 +1317,7 @@ interface WireSpot { x: number; y: number; dirX: number; dirY: number; steps: nu
 interface BoulderSpot { x: number; y: number; yPush: number; bestType: number }
 
 /** WorldGen.countWires(WorldGen.cs:9462):四色线逐位计数 */
-function countWires(st: TileStore, x: number, y: number, size: number): number {
+export function countWires(st: TileStore, x: number, y: number, size: number): number {
   let n = 0;
   for (let i = x - size; i <= x + size; i++) {
     for (let j = y - size; j <= y + size; j++) {
@@ -1333,7 +1333,7 @@ function countWires(st: TileStore, x: number, y: number, size: number): number {
  *  非实心格洪水填充计数。墙≠0/墙 244/微光液体/贴边 → 直接判满(3500);
  *  结果只与连通域相关,与遍历序无关(< 40 门槛与 3500 封顶均序不变) */
 const MAX_TILE_COUNT = 3500;   // WorldGen.maxTileCount(cs:4194)
-function countTiles(st: TileStore, x0: number, y0: number): number {
+export function countTiles(st: TileStore, x0: number, y0: number): number {
   let count = 0;
   const seen = new Set<number>();
   const stack: Array<[number, number]> = [[x0, y0]];
