@@ -201,4 +201,42 @@ const mix = await p.evaluate(() => {
 const tcv2 = await p.screenshot({ encoding: 'binary' });
 fs.writeFileSync('/tmp/ftw-shot2.png', tcv2);
 console.log('判定位 panel/sky 屏幕:', JSON.stringify(mix));
+
+// 终局二分：雕像格【烘焙页 alpha】 vs 【最终主画布 alpha】
+const final = await p.evaluate(() => {
+  try {
+    const g = window.__swGame;
+    const st = g.world.store;
+    const cells = [[4042,432],[4043,433],[4044,434],[4045,435],[4038,448],[4039,431]];
+    const pageAlpha = (tx, ty) => {
+      const chx = Math.floor(tx / 16), chy = Math.floor(ty / 16);
+      const ch = g.chunks.get(chx, chy);
+      if (!ch || !ch.tile) return 'no-chunk';
+      const tcv = document.createElement('canvas'); tcv.width = 256; tcv.height = 256;
+      const tctx = tcv.getContext('2d', { willReadFrequently: true });
+      tctx.drawImage(ch.tile, ch.sx, ch.sy, 256, 256, 0, 0, 256, 256);
+      const d = tctx.getImageData((tx - chx * 16) * 16 + 8, (ty - chy * 16) * 16 + 8, 1, 1).data;
+      return [d[0], d[1], d[2], d[3]];
+    };
+    const main = g.renderer.canvas;
+    const mcv = document.createElement('canvas'); mcv.width = main.width; mcv.height = main.height;
+    const mctx = mcv.getContext('2d', { willReadFrequently: true });
+    mctx.drawImage(main, 0, 0);
+    const cam = g.camera;
+    const canvasAlpha = (tx, ty) => {
+      const [sx, sy] = cam.worldToScreen(tx * 16 + 8, ty * 16 + 8);
+      const d = mctx.getImageData(Math.round(sx), Math.round(sy), 1, 1).data;
+      return [d[0], d[1], d[2], d[3]];
+    };
+    const out = [];
+    for (const [tx, ty] of cells) {
+      out.push({ c: tx + ',' + ty, t: st.type[st.idx(tx, ty)],
+        wire32: (st.wire[st.idx(tx, ty)] & 32) !== 0, paint: st.paint[st.idx(tx, ty)],
+        page: pageAlpha(tx, ty), canvas: canvasAlpha(tx, ty) });
+    }
+    out.push({ skyRef: canvasAlpha(4045, 415) });
+    return out;
+  } catch (e) { return 'err:' + String(e).slice(0, 150); }
+});
+console.log('终局二分:', JSON.stringify(final, null, 1));
 await b.close();

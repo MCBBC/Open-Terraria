@@ -40,6 +40,7 @@ export class HousingPanel {
   private hoverIdx = -1;
   private raf = 0;
   private disposed = false;
+  private readonly closeBtn: HTMLButtonElement;
   private readonly scale: number;   // inventoryScale 近似(1.0;UIScale 影响下的 DOM canvas 走 1:1 像素)
   private readonly startX: number;
   private colX = 0;                 // 当前列相对 startX 偏移(换列 -48)
@@ -60,6 +61,20 @@ export class HousingPanel {
       + 'z-index:60;image-rendering:pixelated;pointer-events:auto;cursor:pointer;';
     this.canvas.className = 'sw-panel';   // Input mousedown UI 过滤器
     document.body.appendChild(this.canvas);
+    // ✕ 关闭钮（2026-08-27 用户要求：探查/分配后面板不自动收——关闭收口到此钮；
+    //  挂条首列左外侧,不遮 0 号查询器槽）
+    this.closeBtn = document.createElement('button');
+    this.closeBtn.className = 'sw-btn sw-housing-x';
+    this.closeBtn.textContent = '✕';
+    this.closeBtn.title = '✕';
+    this.closeBtn.style.cssText =
+      `position:fixed; left:${this.startX - 26}px; top:160px; width:22px; height:22px;`
+      + 'margin:0; padding:0; font-size:11px; line-height:1; z-index:61; cursor:pointer;';
+    this.closeBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.destroy();
+    });
+    document.body.appendChild(this.closeBtn);
     this.ctx = this.canvas.getContext('2d')!;
     this.bind();
     this.refresh();
@@ -95,10 +110,10 @@ export class HousingPanel {
       e.stopPropagation();
       const idx = this.hitTest(e.offsetX, e.offsetY);
       if (e.button === 2) {
-        // 右键 = 取消(Sound12,SetMouseNPC(-1,-1) :44666-44669)
+        // 右键 = 仅落光标(Sound12,SetMouseNPC(-1,-1) :44666-44669)——★面板保持
+        // （2026-08-27 用户要求：查询/指定后不切回背包,收口 = ✕ 钮/E）
         UISfx.sfx.play('menuTick', 1);
         this.setCursor(null);
-        this.destroy();
         return;
       }
       if (e.button !== 0 || idx < 0) return;
@@ -199,11 +214,15 @@ export class HousingPanel {
   }
 
   destroy(): void {
+    // ★幂等门 + canvas 先摘（2026-08-27）：onClosed → UI.closeHousingPanel 会在
+    // canvas 尚在 DOM 时重入 querySelector→destroy——曾无门 = 右键关面板即爆栈
+    if (this.disposed) return;
     this.disposed = true;
     cancelAnimationFrame(this.raf);
     this.onCursor(null);
-    this.onClosed();
     this.canvas.remove();
+    this.closeBtn.remove();
+    this.onClosed();
   }
 }
 

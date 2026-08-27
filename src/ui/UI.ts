@@ -2012,17 +2012,46 @@ export class UI {
     return !!this.invPanel && this.invPanel.style.display === 'block';
   }
 
+  /** 住房面板开合回写（mainFlow.openHousing / HousingPanel.onClosed）——
+   *  图标切 DisplaySlots_4(常态)/5(住房开) */
+  setHousingOpen(v: boolean): void {
+    this.housingOpen = v;
+    this.refreshHousingBtn();
+  }
+
+  private refreshHousingBtn(): void {
+    if (this.housingBtn) {
+      this.housingBtn.style.backgroundImage
+        = `url(sprites/vanilla-ui/UI_DisplaySlots_${this.housingOpen ? 5 : 4}.png)`;
+    }
+  }
+
+  /** 收住房右缘条（关面板兜底:E/Esc/关背包/退菜单都带走它）——destroy→onClosed
+   *  会重入 openInventory,彼时背包尚未显示,重入支直接开背包后外层幂等续行 */
+  private closeHousingPanel(): void {
+    this.housingOpen = false;
+    this.refreshHousingBtn();
+    if (document.querySelector('.sw-housing-panel')) {
+      (window as unknown as { __swHousingPanel?: { destroy(): void } }).__swHousingPanel?.destroy();
+      // destroy 已 canvas.remove;裸移除兜底（面板若被外部摘过节点）
+      document.querySelector('.sw-housing-panel')?.remove();
+    }
+  }
+
   openInventory() {
     if (this.invPanel.style.display === 'block') {
       this.closeInventory();
       return;
     }
+    // 住房条开着(E 切回背包):先收——不收则背包被住房 Canvas 压住
+    this.closeHousingPanel();
     this.invPanel.style.display = 'block';
     this.refreshAll();
     this.game.input.uiBlocking = true;
   }
 
   closeInventory() {
+    this.closeHousingPanel();
     this.invPanel.style.display = 'none';
     this.closeItemSearch();
     this.closeGuideSearch();
@@ -2461,6 +2490,10 @@ export class UI {
   private qsHover = false;
   /** 多人玩家列表入口（联机态显示；面板本体在 PlayerListPanel.ts） */
   private playerListBtn: HTMLButtonElement | null = null;
+  /** 住房面板开合（mainFlow.openHousing/面板 onClosed 回写）——住房图标钮
+   *  DisplaySlots_4(常态)/5(开) 切换用 */
+  private housingOpen = false;
+  private housingBtn: HTMLButtonElement | null = null;
   /** PvP 剑钮 + 6 队伍钮（DrawPVPIcons Main.cs:42074；refreshPvpButtons 刷帧/提示） */
   private pvpSwordBtn!: HTMLButtonElement;
   private pvpTeamBtns: HTMLButtonElement[] = [];
@@ -2555,33 +2588,14 @@ export class UI {
         row.appendChild(b);
         this.loadoutBtns.push(b);
       }
-      // 页签：住房（原版 EquipPage 1=住房 DrawNPCHousesInUI :40813——点击开
-      // HousingPanel 覆盖层（Canvas 1:1 房屋列，2026-08-15 B 方案））。
-      // ★装备/杂项页签已拆（2026-08-27 用户要求）：装备常驻左列、杂项移右缘列
-      // （玩家对决位，PvP/队伍钮下移），页签只剩住房入口
+      // 页签：住房/图鉴图标钮（原版 DrawPageIcons :43528 EquipPage[4]灰房/hover=[7]红房
+      // /页开=[5]；图鉴 = BestiaryMenuButton（Images/UI/Bestiary 2 帧书:常态/金高亮）。
+      // 2026-08-27 用户要求：移植原版图标 + 两图标居右。住房点击：藏背包+开住房
+      // 右缘条（查询器/指定 NPC 头像列）；条上 ✕ / 右键落光标 / E = 收条）
       const spacer = el('div');
       spacer.style.flex = '1';
       row.appendChild(spacer);
-      {
-        const b = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Housing.Button'));
-        b.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
-        b.addEventListener('mousedown', (e) => {
-          e.stopPropagation();
-          this.onHousing?.();
-        });
-        row.appendChild(b);
-      }
-      // 图鉴入口（原版 BestiaryMenuButton Main.cs:41896-41910 在右上 2×2 钮簇
-      // (498,278)；贴图 BestiaryMenuButton 未在素材集，暂留顶栏文字钮）
-      const bBst = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Tabs.Bestiary'));
-      bBst.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
-      bBst.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        this.onBestiary?.();
-      });
-      row.appendChild(bBst);
-      // 多人玩家列表（原版 PC 无面板——/playing 命令与服务器控制台独占；本仓自有
-      // QoL 件：名字/队伍色/RTT。仅联机态显示（refreshAllNow 逐刷），单机隐藏
+      // 多人玩家列表（联机态显示）与旅程入口排图标左侧
       this.playerListBtn = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.PlayerList.Title'));
       this.playerListBtn.style.cssText = 'margin:0; padding:4px 10px; font-size:12px; display:none;';
       this.playerListBtn.addEventListener('mousedown', (e) => {
@@ -2590,14 +2604,7 @@ export class UI {
         openPlayerListPanel(this.game);
       });
       row.appendChild(this.playerListBtn);
-      // 成就入口 = 背包内 AchievementAdvisor 卡（AchievementsUI.createAchievementAdvisor，
-      // 原版同款：背包左侧未完成成就小卡点击开成就页）。背包顶栏成就按钮已摘
-      // （2026-08-13 用户要求：双入口只留原版位；原版设置菜单 Lang.menu[131] 入口
-      // 如需再补应落在 Settings 而非背包顶栏）
-      // Journey 研究献祭入口（原版仅旅程模式 UISacrificeDialog；Appearance.difficulty===3 门）
       if (this.game.player.appearance?.difficulty === 3) {
-        // 力量菜单入口（原版 CreativeUI.Draw :98-117：背包左上 Journey_Toggle 按钮，
-        // 同样 LocalPlayer.difficulty==3 门——点击 ToggleMenu 开 UICreativePowersMenu）
         const bPow = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.JourneyPowers.Title'));
         bPow.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
         bPow.addEventListener('mousedown', (e) => {
@@ -2615,6 +2622,46 @@ export class UI {
         });
         row.appendChild(bRes);
       }
+      {
+        const b = el('button', 'sw-btn');
+        b.title = Lang.text('Mods.SandboxWorld.Housing.Button');
+        b.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none; border:none;'
+          + 'background:url(sprites/vanilla-ui/UI_DisplaySlots_4.png) 0 0/100% 100%;'
+          + 'image-rendering:pixelated; cursor:pointer;';
+        this.housingBtn = b;
+        this.refreshHousingBtn();
+        // hover 态 = 原版 EquipPage[7]（DrawPageIcons :43538 悬停叠 [7] 金染）——
+        // DOM 等价 = 悬停切 _7 贴图；开态(_5)保持
+        b.addEventListener('mouseenter', () => {
+          if (!this.housingOpen) b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_DisplaySlots_7.png)';
+        });
+        b.addEventListener('mouseleave', () => this.refreshHousingBtn());
+        b.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          // 背包先收（住房条挂屏幕右缘,背包不藏会被压住/挡点击/挡移动）
+          this.closeInventory();
+          this.onHousing?.();
+        });
+        row.appendChild(b);
+      }
+      {
+        const bBst = el('button', 'sw-btn');
+        bBst.title = Lang.text('Mods.SandboxWorld.Tabs.Bestiary');
+        bBst.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none; border:none;'
+          + 'background:url(sprites/vanilla-ui/UI_Bestiary.png) 0 0/200% 100%;'
+          + 'image-rendering:pixelated; cursor:pointer;';
+        bBst.addEventListener('mouseenter', () => { bBst.style.backgroundPosition = '100% 0'; });
+        bBst.addEventListener('mouseleave', () => { bBst.style.backgroundPosition = '0 0'; });
+        bBst.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          this.onBestiary?.();
+        });
+        row.appendChild(bBst);
+      }
+      // 成就入口 = 背包内 AchievementAdvisor 卡（AchievementsUI.createAchievementAdvisor，
+      // 原版同款：背包左侧未完成成就小卡点击开成就页）。背包顶栏成就按钮已摘
+      // （2026-08-13 用户要求：双入口只留原版位；原版设置菜单 Lang.menu[131] 入口
+      // 如需再补应落在 Settings 而非背包顶栏）
       this.invPanel.appendChild(row);
     }
 
@@ -4209,6 +4256,12 @@ export class UI {
     closeAchievementsPanel();
     closeResearchPanel();
     this.achWrapEl = null;
+    // 住房右缘条（body 级 Canvas,不随 root 清空）——先摘旗再 destroy：onClosed
+    // 里 `if (game) openInventory` 在退菜单路径 game 已 null,不会误开背包
+    this.housingOpen = false;
+    this.refreshHousingBtn();
+    (window as unknown as { __swHousingPanel?: { destroy(): void } }).__swHousingPanel?.destroy();
+    document.querySelector('.sw-housing-panel')?.remove();
   }
 
   /** 摘除 Game 引用(quitToMenu→closeAll 调用):防旧 Game 整图(世界 store

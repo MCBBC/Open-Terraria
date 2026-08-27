@@ -735,11 +735,24 @@ function chestDustRoll(rng: RNG, sheet: number, fx: number): void {
       if (CHEST_FURNITURE_DUST.has(sheet)) rng.nextInt(3);
   }
 }
+/** ★RRRRRRR2（m#61 定罪修复）：vanilla KillTile 中段门 CheckTileBreakability2_
+ *  ShouldTileSurvive（cs:63692 def / cs:64365 调用点）——BasicChest 锚格
+ *  Chest.DestroyChest 返回 false（有物）→ KillTile 整体早退：不杀不级联零掷。
+ *  与 vanilla/ 镜像件保持同文（root 副本被 CaveHouse/LivingTree/OceanCaves 等 import）。 */
+const KILL_SURVIVE_CHEST_SHEETS = new Set([21, 467]);   // TileID.Sets.BasicChest
+let killSurviveAnchors: Set<number> | null = null;
+export function __setJCItemChestAnchors(s: Set<number> | null): void { killSurviveAnchors = s; }
 export function killTileChest(st: TileStore, rng: RNG, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const k = st.idx(x, y);
   if (!st.flags[k]) return;
   const sheet = TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1;
+  if (killSurviveAnchors && KILL_SURVIVE_CHEST_SHEETS.has(sheet)) {
+    let num = Math.trunc(st.frameX[k]! / 18);
+    while (num > 1) num -= 2;
+    const ax = x - num, ay = y - Math.trunc(st.frameY[k]! / 18);
+    if (killSurviveAnchors.has(ay * st.w + ax)) return;   // 有物箱存活=KillTile 早退
+  }
   const fx = st.frameX[k]!;
   const dust = chestKillDustAmount(sheet, fx);
   for (let q = 0; q < dust; q++) chestDustRoll(rng, sheet, fx);

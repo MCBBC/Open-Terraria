@@ -85,6 +85,10 @@ const TILE_ANIM_PITCH: Record<number, number> = {
 const TILE_ANIM_FRAMES: Record<number, number> = {
   12: 10, 639: 10,   // 表 396px=11 带，AnimateTiles 回卷 10（Main.cs:18375/18385）
   171: 4,            // 圣诞树串灯：Xmas_4 四帧行（Main.cs:18614-18616 >3 回卷）
+  207: 6,            // 喷泉：表 504px/72=7 带，但第 0 带是关态整图非动画帧——
+                     //   动画带只有 6（72..503），AnimateTiles 回卷 6（Main.cs:18797-18800）。
+                     //   曾按默认 7 → 第 7 帧源矩形越界 vframeAt 落空回退 (0,0) 帧，
+                     //   开态喷泉每轮回闪一次关态整图（2026-08-27 用户实报猩红喷泉切帧错误）
 };
 
 /** 篝火族（TileDrawing.cs:6124-6133 Campfires 覆盖）：pitch=36（非默认 38！素材帧块
@@ -101,6 +105,19 @@ export function campfireYOffset(frameY: number): number {
   // 反而是对的（熄灭本就无光）。
   if (frameY < 36) return frameY + animFrameIdx(215, 144) * 36;
   return frameY + 252;
+}
+
+/** 喷泉族（TileDrawing.cs:6007-6028 case 207 1:1）：sheet 7 带 = 第 0 带关态整图 +
+ *  6 帧开态水流动画带（SwitchFountain WorldGen.cs:51624-51631 frameY±72 切换）。
+ *  关态（frameY<72，放置默认）addFrY=0 静止；开态（frameY≥72）
+ *  addFrY = ((全局帧 + 左列世界x%6) % 6) × 72 —— 逐喷泉按 x 错相（:6012-6022），
+ *  右列归左列判据 frameX%36!==0。由 ChunkCache 预加（相位需世界 x，与 215 同款），
+ *  drawVanillaCell 通用 animYOffset 叠加须排除 207 防双加。 */
+export function fountainYOffset(frameY: number, x: number, frameX: number): number {
+  if (frameY < 72) return frameY;
+  const leftX = frameX % 36 !== 0 ? x - 1 : x;
+  const idx = (animFrameIdx(207, 504) + (leftX % 6)) % 6;
+  return frameY + idx * 72;
 }
 
 /** 全局动画时钟（Game 主循环每帧 +1；暂停时冻结） */

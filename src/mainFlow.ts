@@ -952,17 +952,30 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   /** 住房面板（原版背包房屋界面 B 方案）：不暂停世界（要点击世界分配/查询）；
    *  光标态双向同步（面板选择 → game.housingMode;Game 单发完成 → onHousingCursor
-   *  → 面板自毁）。Esc/再点按钮 = 取消光标并关面板。 */
+   *  → 面板自毁）。右键/Esc = 关面板。
+   *  ★2026-08-27：住房图标钮点击时背包面板已由 UI 侧隐藏（不遮挡/不挡移动），
+   *  面板关闭 → 回背包；再点住房图标（若可见）= 关面板 toggle。 */
   async function openHousing() {
     const g = game;
     if (!g) return;
-    document.querySelector('.sw-housing-panel')?.remove();
+    // 再点 = 关面板（destroy → onClosed → 回背包 + 摘图标开态）
+    if (document.querySelector('.sw-housing-panel')) {
+      (window as unknown as { __swHousingPanel?: { destroy(): void } }).__swHousingPanel?.destroy();
+      return;
+    }
     const { HousingPanel } = await import('./ui/HousingPanel');
+    // 动态 import 间隙防双开（连点/退出竞态）
+    if (document.querySelector('.sw-housing-panel') || !game) return;
     const panel = new HousingPanel(g,
       (m) => { g.housingMode = m; },
-      () => { /* onClosed: 仅自毁 */ });
+      () => {
+        ui.setHousingOpen(false);
+        // 关面板回背包（住房条藏了背包,退出世界路径 game 已 null → 菜单不误开）
+        if (game) ui.openInventory();
+      });
     panel.canvas.classList.add('sw-housing-panel');
     (window as unknown as { __swHousingPanel?: unknown }).__swHousingPanel = panel;
+    ui.setHousingOpen(true);
   }
 
   function showTitle(bgPaused = false) {

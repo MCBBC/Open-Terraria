@@ -1154,9 +1154,10 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     // 动画家具帧带偏移（原版 GetTileDrawData addFrY = tileFrame[type]*pitch，
     // Main.cs:18868-18874：355 镜像 354，8 帧回卷）——★必须在零帧重建与分带
     // 换算【之后】叠加：预加进 fy 会让重建门 (ofx===0&&ofy===0) 失效，零帧
-    // 多格物体（dgWr 系放置/存量存档）整物塌成重复碎片。215 篝火例外：其
-    // 帧偏移由 ChunkCache 预加 campfireYOffset（pitch 36 专属语义），勿重复
-    if (sheet !== 215) {
+    // 多格物体（dgWr 系放置/存量存档）整物塌成重复碎片。215 篝火与 207 喷泉
+    // 例外：帧偏移由 ChunkCache 预加（campfireYOffset/fountainYOffset——两族
+    // 均有"带 0 静止态门/相位"专属语义），勿在此重复叠加
+    if (sheet !== 215 && sheet !== 207) {
       ofy += animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
     }
     // 标准 18px stride 像素偏移直取（宝箱 Tiles_21 也是标准网格：

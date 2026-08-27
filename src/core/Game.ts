@@ -118,7 +118,7 @@ import {
   kiteAnchorPlace, kiteAnchorBreakDrop, critterAnchorAt, kiteAnchorAt,
   type FurnitureKind,
 } from '../world/FurnitureItems';
-import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys } from '../data/items';
+import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys } from '../data/items';
 import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles } from '../data/vanillaNpcs';
@@ -135,6 +135,8 @@ import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
 import { applyFrostBurn, applyMagmaStoneSwing, applyWeaponStatusSwing } from '../entities/projStatus';
 import { trySnapStrike } from '../stats/SnapStrike';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
+import { equipKindOfInternal } from '../data/vanillaEquip';
+import { emergencyStackItemsToMakeSpace } from '../world/EmergencyStacking';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
 import { playDeathVoice, playHurtVoice } from '../player/PlayerVoice';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
@@ -8231,8 +8233,9 @@ export class Game implements GameHooks {
         } else {
           this.housingAssign(Math.floor(wx / TILE), Math.floor(wy / TILE), this.housingMode.npcKey);
         }
-        this.housingMode = null;      // 单发（原版分配成功后 SetMouseNPC(-1,-1)）
-        this.cb.onHousingCursor?.(null);
+        // ★光标保留（2026-08-27 用户要求：探查/分配后不切回背包——可连续查询
+        // 多间房屋/把同一 NPC 指到多间；取消 = 右键条上落光标/✕/E）
+        // this.housingMode = null;   // 旧单发语义（曾发 onHousingCursor(null) 连带收面板）
       }
       this.input.mouseDown = false;   // 住房模式期间持续吞使用点击
       return;
@@ -23948,22 +23951,74 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  珍稀掉落可被心/币挤掉,2026-08-27 对齐）。仍无 pickup → EmergencyStacking
     //  原版兜底未移植 → 生成失败（原版无槽同样失败,语义一致）。
     const drops = this.entities.drops;
-    if (drops.filter((d) => !d.dead).length >= 400) {
+    // ★原版满槽链（NewItem 尾段 Item.cs:49781-49835）：
+    //  ① 回收最老 pickup（age > PickupReplacementTime 1200t=20s，Item.cs:334——
+    //     新生 pickup 不可抢占，资格内取最老）→ 槽位被新物覆写；
+    //  ② 仍满 → EmergencyStacking 腾位（EmergencyStacking.cs 全量移植）；
+    //  ③ 仍满 → 覆写最老掉落（尾段 argmax(timeSinceItemSpawned) 槽被新物写入，
+    //     NewItem 实际不会失败）。曾不判型 shift()/直接失败，均已对齐。
+    let free = drops.filter((d) => !d.dead).length < 400;
+    if (!free) {
       let oldest: ItemDrop | null = null;
       for (const dRaw of drops) {
         const d = dRaw as ItemDrop;
         if (d.dead) continue;
         const vid = vanillaIdOfItem(d.itemId);
-        // ★回收资格 = IsAPickup 且 age > PickupReplacementTime(1200t=20s,
-        //  Item.cs:334)——新生 pickup 不可抢占;资格内取最老(num3 爬升语义)
         if (vid > 0 && ITEM_IS_A_PICKUP.has(vid) && d.age > 1200
           && (!oldest || d.age > oldest.age)) oldest = d;
       }
-      if (!oldest) return null;   // EmergencyStacking 未移植的登记点
-      oldest.dead = true;
+      if (oldest) { oldest.dead = true; free = true; }
     }
+    if (!free) {
+      if (this.emergencyStackMakeSpace()) free = true;
+    }
+    if (!free) {
+      let oldest: ItemDrop | null = null;
+      for (const dRaw of drops) {
+        const d = dRaw as ItemDrop;
+        if (!d.dead && (!oldest || d.age > oldest.age)) oldest = d;
+      }
+      if (oldest) { oldest.dead = true; free = true; }
+    }
+    if (!free) return null;   // 理论不可达（无活掉落时恒有空槽）
     this.entities.add(drop, 'drops');
     return drop;
+  }
+
+  /** EmergencyStackItemsToMakeSpace（EmergencyStacking.cs 1:1 全量移植）：
+   *  地上可堆叠对按保存优先级组就近合并（曼哈顿 ≤2400、单次上限 20 笔、
+   *  屏幕内 src +3 优先惩罚、钱币堆满升面 71→72→73→74） */
+  private emergencyStackMakeSpace(): boolean {
+    const players: Array<{ x: number; y: number }> = [{ x: this.player.cx, y: this.player.cy }];
+    const remotes = (this.net as unknown as { remotePlayers?: Array<{ cx: number; cy: number }> } | undefined)?.remotePlayers;
+    if (remotes) for (const r of remotes) players.push({ x: r.cx, y: r.cy });
+    return emergencyStackItemsToMakeSpace(
+      this.entities.drops as ItemDrop[],
+      {
+        vidOf: (d) => vanillaIdOfItem(d.itemId),
+        viewCenters: players,
+        maxStackOf: (d) => ITEM_DEFS[d.itemId]?.maxStack ?? 1,
+        onlyNeedOne: (vid) => {
+          const ov = ITEM_ONLY_NEED_ONE_OVERRIDE[vid];
+          if (ov !== undefined) return ov;
+          const f = itemFuncOfVid(vid);
+          const consumable = !!(f?.consumable ?? itemCombat(vid)?.consumable);
+          if (!consumable) {
+            const useStyle = f?.useStyle ?? (itemCombat(vid) as unknown as { useStyle?: number })?.useStyle ?? 0;
+            if (useStyle === 0) return equipKindOfInternal(vid) !== null;   // CanBeEquipped
+            return true;
+          }
+          return false;
+        },
+        promoteCoin: (d) => {
+          const vid = vanillaIdOfItem(d.itemId);
+          if (vid >= 71 && vid < 74) {
+            const k = VANILLA_ITEM_KEY_BY_ID[vid + 1];
+            if (k) { const nid = ITEM_BY_KEY[k]; if (nid !== undefined) d.itemId = nid; }
+          }
+        },
+      },
+    );
   }
 
   /** 星云 booster 实体（原版是 Item 3453-55：WI:418 重力 0.1；PC:34497 抓取 42px 内

@@ -9,7 +9,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { placeBuriedChest, nextJungleItem, killTileChest, PC_SOLID_TOP, type ChestSink } from './BuriedChestsPass';
+import { placeBuriedChest, nextJungleItem, killTileChest, __setJCItemChestAnchors, jcItemChestAnchorSet, PC_SOLID_TOP, type ChestSink } from './BuriedChestsPass';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType } from './GenSolid';
 
@@ -239,6 +239,9 @@ export function runJungleChestsPass(
   for (const s of spots) {
     const main = nextJungleItem(gs, rng);
     if (!placeBuriedChest(st, rng, gs, chests, s.x + rng.int(0, 1), s.y, { style: 10, loot: main, flags: { ivy: true } })) {
+      // ★RRRRRRR2（m#61）：回退 KillTile 前=vanilla Chest registry 实时口径——
+      //   有物箱锚集按世界箱列表重建（Chest.DestroyChest 有物=false→存活）。
+      __setJCItemChestAnchors(jcItemChestAnchorSet(st, chests));
       // ★OOOOO：回退清场 = vanilla KillTile（cs:17320-23）——尘掷 + SquareTileFrame 级联
       //   （多格件越框残部整组杀：s22222 (3214-3215,485-487) 雕像 2×3 六格全灭 / 心 2×2）。
       //   曾 setTileSilent(0) 裸清 3×3：框外残格存活 → 二次放置箱体撞残件被拒
@@ -258,6 +261,8 @@ export function runJungleChestsPass(
         }
       }
       placeBuriedChest(st, rng, gs, chests, s.x, s.y, { style: 10, loot: main, flags: { ivy: true } });
+      __setJCItemChestAnchors(null);
     }
   }
+  __setJCItemChestAnchors(null);
 }

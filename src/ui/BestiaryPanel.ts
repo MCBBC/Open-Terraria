@@ -641,7 +641,8 @@ const CSS = `
 .sw-bst-chip { padding:4px 8px; font-size:11px; background:#232c52; border:1px solid #3a4680;
   border-radius:4px; cursor:pointer; color:#cfd6f2; font-family:inherit; }
 .sw-bst-chip.active { background:#5a6ac0; color:#fff; outline:1px solid #ffd76e; }
-.sw-bst-back { flex:none; padding:5px 14px; font-size:12px; }
+.sw-bst-back { flex:none; width:auto; height:26px; padding:5px 14px; font-size:12px;
+  white-space:nowrap; }
 .sw-bst-main { flex:1; display:flex; gap:8px; padding:0 10px; min-height:0; }
 .sw-bst-gridwrap { flex:1; min-width:0; position:relative; overflow:hidden; }
 .sw-bst-grid { display:grid; }

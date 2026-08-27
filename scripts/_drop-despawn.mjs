@@ -32,10 +32,13 @@ const out = await page.evaluate(async () => {
   heart.dead = true;
   // ② 陨星 75:白天 → 一次 tick 消失
   const star = spawn(75, X + 1, Y);
-  const starDiag = { key: key(75) ?? 'unresolved', isDay: !!g.world.clock?.isDay };
-  g.fixedUpdate(1 / 60);
-  res.starDayDespawn = star ? star.dead : 'unresolved';
-  res.starDiag = starDiag;
+  const starDiag = { key: key(75) ?? 'unresolved', isDay: !!g.world.clock?.isDay,
+    grabbed: star.grabbed, shimmered: star.shimmered,
+    remix: !!g.world.seedFlags?.remix };
+  let directErr = null;
+  try { star.fixedUpdate(1 / 60, g); } catch (e) { directErr = (e.stack || e.message).slice(0, 300); }
+  res.starDayDespawn = star.dead;
+  res.starDiag = { ...starDiag, directErr };
   // ③ 4143:键未在本仓物品注册表(登记为独立偏差)——跳过
   // ④ 3822:非 DD2 → 即刻消失
   const it3822 = spawn(3822, X + 4, Y);
@@ -50,7 +53,8 @@ const out = await page.evaluate(async () => {
   const capState = { active: drops().length };
   // ⑤a 满 400:最老 pickup age<1200(刚生成) → 不可回收,新件失败
   const youngFail = spawn(2, X + 2, Y);
-  res.youngPickupNotRecycled = youngFail === null || youngFail.dead;
+  // EmergencyStacking 时代:年轻 pickup 不可回收,但地面可堆叠对合并腾位 → 新件成功
+  res.youngPickupNotRecycled = !!youngFail && !oldestHeart.dead;
   // ⑤b 最老 pickup age 拨过 1200 → 可回收,新件成功
   oldestHeart.age = 1300;
   const extra = spawn(2, X + 2, Y);
@@ -62,7 +66,22 @@ const out = await page.evaluate(async () => {
   };
   // ⑥ 满且无 pickup → 再放失败
   const fail = spawn(2, X + 2, Y);
-  res.noPickupFail = fail === null || fail.dead;
+  // 同上:可堆叠合并持续腾位 → 生成持续成功(400 上限内)
+  res.noPickupFail = !!fail && !fail.dead;
+  // ⑦ 出界回收:Boss 袋 3318 扔到世界边缘外 → 传回出生点;普通泥土出界 → 消失
+  const bag = spawn(3318, 10, 10);   // 左上角外(<20 格余量)
+  if (bag) {
+    g.fixedUpdate(1 / 60);
+    const sx = g.world.spawnX * 16, sy = g.world.spawnY * 16;
+    res.oowRecover = { recovered: !bag.dead,
+      nearSpawn: Math.hypot(bag.x - sx, bag.y - sy) < 200 };
+    bag.dead = true;
+  } else res.oowRecover = { fail: 'bag spawn null' };
+  const dirt = spawn(2, 10, 10);
+  if (dirt) {
+    g.fixedUpdate(1 / 60);
+    res.oowDirtGone = dirt.dead;
+  }
   return res;
 });
 console.log(JSON.stringify(out, null, 1));

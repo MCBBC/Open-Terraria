@@ -8,7 +8,7 @@ import { treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
 export { treeGroundVariant, treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
 import { frameMergesWith } from './TileMergeFamily';
 import { swayBakeSkip } from './WindSway';
-import { TILE_ANIM_RATE, tileAnim, campfireYOffset } from './TileAnim';
+import { TILE_ANIM_RATE, tileAnim, campfireYOffset, fountainYOffset } from './TileAnim';
 import { cageAnimRate, cageFamilyOf } from './CritterCage';
 import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
@@ -635,6 +635,15 @@ export class ChunkCache {
             let set314 = this.animChunksBySheet.get(314);
             if (!set314) { set314 = new Set(); this.animChunksBySheet.set(314, set314); }
             set314.add(ChunkCache.key(cx, cy));
+          } else if (def.vanilla.sheet === 207) {
+            // 喷泉（GetTileDrawData case 207 :6007-6028 1:1）：关态（frameY<72,
+            // 放置默认）主体带静止不动画；开态（frameY≥72,SwitchFountain 线控
+            // frameY±72）6 帧水花带 + 逐喷泉 x%6 错相——相位需世界 x,故在烘焙侧
+            // 预加完整绘制 y（与 215 campfire 同款），drawVanillaCell 勿重复叠加
+            fy = fountainYOffset(st.frameY[i], x, st.frameX[i]);
+            let set207 = this.animChunksBySheet.get(207);
+            if (!set207) { set207 = new Set(); this.animChunksBySheet.set(207, set207); }
+            set207.add(ChunkCache.key(cx, cy));
           } else if (cageFamilyOf(def.vanilla.sheet)) {
             // 小动物笼族（CritterCage.ts）：帧行偏移由 drawVanillaCell→drawCageCell
             // 内部按 (族,槽位,tick) 计算，此处只注册重烘焙

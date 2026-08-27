@@ -193,6 +193,19 @@ export function achievementsPanelOpen(): boolean { return !!openPanel; }
 
 // ---- 背包提示牌（AchievementAdvisor：未完成成就小卡，点击开菜单） ----
 /** 构建提示牌并返回带 update() 的元素（背包每次 refresh 时刷新显示内容） */
+/** 原版 AchievementAdvisor.Initialize 精选序列（1458 与 1456 同序同集，36 项；
+ *  序 ≠ AchievementInitializer 注册序——OBTAIN_HAMMER 在 NO_HOBO 前） */
+const ADVISOR_ORDER = [
+  'TIMBER', 'BENCHED', 'OBTAIN_HAMMER', 'NO_HOBO', 'YOU_CAN_DO_IT', 'OOO_SHINY',
+  'HEAVY_METAL', 'MATCHING_ATTIRE', 'HEART_BREAKER', 'I_AM_LOOT', 'HOLD_ON_TIGHT',
+  'STAR_POWER', 'EYE_ON_YOU', 'SMASHING_POPPET', 'WHERES_MY_HONEY', 'STING_OPERATION',
+  'BONED', 'DUNGEON_HEIST', 'ITS_GETTING_HOT_IN_HERE', 'MINER_FOR_FIRE', 'STILL_HUNGRY',
+  'ITS_HARD', 'BEGONE_EVIL', 'EXTRA_SHINY', 'HEAD_IN_THE_CLOUDS', 'BUCKETS_OF_BOLTS',
+  'DRAX_ATTAX', 'PHOTOSYNTHESIS', 'GET_A_LIFE', 'THE_GREAT_SOUTHERN_PLANTKILL',
+  'TEMPLE_RAIDER', 'LIHZAHRDIAN_IDOL', 'ROBBING_THE_GRAVE', 'OBSESSIVE_DEVOTION',
+  'STAR_DESTROYER', 'CHAMPION_OF_TERRARIA',
+];
+
 export function createAchievementAdvisor(game: Game): HTMLElement & { update(): void } {
   ensureCss();
   const card = el('div', 'sw-ach-advisor') as unknown as HTMLElement & { update(): void };
@@ -205,20 +218,18 @@ export function createAchievementAdvisor(game: Game): HTMLElement & { update(): 
     openAchievementsPanel(game);
   });
   card.update = () => {
-    // Advisor 选择：优先有进度的未完成成就，其次注册序首个未完成
+    // Advisor 选择 = 原版 AchievementAdvisor.GetBestCards(1)（1458 同 1456）：
+    // 精选序列（AchievementAdvisor.Initialize 36 项，序≠注册序）中首个未完成。
+    // IsAchievableInWorld 未建模（原版检查世界进度门槛，本仓成就无条件可达）略。
     const a = game.achievements;
-    let best: { name: string; ratio: number } | null = null;
-    let bestRatio = -1;
-    for (const def of a.defList()) {
-      if (a.isCompleted(def.name)) continue;
-      const p = a.progressOf(def.name);
-      const r = p.ratio ?? p.doneConds / p.totalConds;
-      if (r > bestRatio) { bestRatio = r; best = { name: def.name, ratio: r }; }
+    let best: string | null = null;
+    for (const name of ADVISOR_ORDER) {
+      if (a.defOf(name) && !a.isCompleted(name)) { best = name; break; }
     }
     if (!best) { card.style.display = 'none'; return; }
     card.style.display = 'flex';
-    glyphStyle(glyph, a, best.name);
-    tx.textContent = Lang.text(`Achievements.${best.name}_Name`);
+    glyphStyle(glyph, a, best);
+    tx.textContent = Lang.text(`Achievements.${best}_Name`);
   };
   card.update();
   return card;

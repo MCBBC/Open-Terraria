@@ -2174,6 +2174,23 @@ export function placeableSheetsForItems(itemIds: Iterable<number>): { tileSheets
  *  （Item.cs:49781-49800），普通掉落从不被抢占 */
 export const ITEM_IS_A_PICKUP = new Set([58, 184, 1734, 1735, 1867, 1868, 3453, 3454, 3455, 4143]);
 
+/** ItemID.Sets.RecoverableImportantItem（ItemID.cs:1221 BoolSet）——出界回收类：
+ *  Boss 掉落袋族 3318-3332/3860-3862/4782/4957/5111，出界（InWorld 20 格余量外）
+ *  传回出生点而非消失（WorldItem.cs:597-605 Center=出生点坐标） */
+export const ITEM_RECOVERABLE_IMPORTANT = new Set([3318, 3319, 3320, 3321, 3322, 3323, 3324, 3325, 3326, 3327, 3328, 3329, 3330, 3331, 3332, 3860, 3861, 3862, 4782, 4957, 5111]);
+
+/** ItemID.Sets.OnlyNeedOneInInventoryOverride（ItemID.cs:1224-1281 CustomSet 56 项，
+ *  22 真/6 假）——EmergencyStacking Equipment 组判定的覆写表：缺省走
+ *  OnlyNeedOneInInventory 逻辑（非消耗品 useStyle!=0 恒真/useStyle==0 看可装备），
+ *  覆写 205/206/207/1128/267/849 = false（旗帜/巫毒娃娃等可消耗堆叠物不算装备组） */
+export const ITEM_ONLY_NEED_ONE_OVERRIDE: Record<number, boolean> = {
+  1522: true, 1523: true, 1524: true, 1525: true, 1526: true, 1527: true,
+  3643: true, 3103: true, 3104: true, 856: true, 1299: true, 329: true,
+  4346: true, 5391: true, 4767: true, 5453: true, 5309: true, 5454: true,
+  5323: true, 5455: true, 6190: true, 6195: true,
+  205: false, 206: false, 207: false, 1128: false, 267: false, 849: false,
+};
+
 export const ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);
 /** 稳定 id → internal id(加载方向;同 vid 重复注册时归一到首个 def——内容等价) */
 export const ITEM_INTERNAL_OF_STABLE = new Map<number, number>();

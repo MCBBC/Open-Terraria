@@ -3,7 +3,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { ITEM_GRAVITY, ITEM_MAX_FALL, MAGNET_RADIUS, PICKUP_DELAY, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
-import { ITEM_DEFS } from '../data/items';
+import { ITEM_DEFS, ITEM_RECOVERABLE_IMPORTANT } from '../data/items';
 import { coinIndexOf } from '../items/Inventory';
 import type { Player } from './Player';
 import {
@@ -86,36 +86,8 @@ export class ItemDrop extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     this.age++;
-    // 消失条件 = 原版 DespawnIfMeetingConditions（WorldItem.cs:652-690）。
-    // ★1.4 已移除通用 5 分钟消失——仅四类特例+出界+堆叠归零，无 age 上限。
-    //  曾自创 600s 全体消失：掉落配额（Item.MechSpawn）饱和后的自愈节奏与
-    //  原版不符（2026-08-27 用户定案完全对齐）。
-    const vid = vanillaIdOfItem(this.itemId);
-    const wd = (game.world ?? {}) as unknown as {
-      w?: number; h?: number; clock?: { isDay?: boolean };
-      seedFlags?: { remix?: boolean }; oldOnesArmy?: { ongoing?: boolean };
-    };
-    // ① 陨星 75：白天（非 remix/未微光/未被保留）→ 星尘+星星碎砾（Dust15×10+Gore16-18×3）
-    if (vid === 75 && wd.clock?.isDay && !wd.seedFlags?.remix && !this.shimmered && !this.grabbed) {
-      game.spawnParticles?.(this.x + 11, this.y + 11, '#FFECB3', 13, 1.2, { life: 20 });
-      this.dead = true; return;
-    }
-    // ② 4143：生成超 300t → 靛蓝尘×20（CornflowerBlue→Indigo 渐变近似）
-    if (vid === 4143 && this.age > 300) {
-      game.spawnParticles?.(this.x + 11, this.y + 11, '#4169E1', 20, 1.0, { life: 20 });
-      this.dead = true; return;
-    }
-    // ③ 3822：非 DD2 进行中 → 金尘×(18-24)（v×8/上飘/noGravity 的近似）
-    if (vid === 3822 && !wd.oldOnesArmy?.ongoing) {
-      game.spawnParticles?.(this.x + 11, this.y + 11, '#FFD966', 18 + Math.floor(Math.random() * 7), 1.5, { life: 24 });
-      this.dead = true; return;
-    }
-    // ④ 出界（InWorld 20 格余量外）→ 消失。★RecoverableImportantItem 回出生点
-    //    分支未移植（该集合庞大未提取；重要物出界即消失，偏差登记）
-    if (typeof wd.w === 'number' && typeof wd.h === 'number') {
-      const tx2 = Math.floor(this.x / 16), ty2 = Math.floor(this.y / 16);
-      if (tx2 < 20 || ty2 < 20 || tx2 >= wd.w - 20 || ty2 >= wd.h - 20) { this.dead = true; return; }
-    }
+    this.grabbed = false;   // beingGrabbed 每 tick 复位（WorldItem.cs:437,拉取路径再置位）
+    const vid = vanillaIdOfItem(this.itemId);   // 全函数消费（岩浆/微光/吸附等段）
 
     // R14-A3：专家模式怪捡钱币（WorldItem.GetPickedUpByMonsters_Money :1127-1219,
     // Update 入口 :412-416 `if (Main.expertMode && IsACoin)`）——命中合格怪吸收
@@ -358,6 +330,50 @@ export class ItemDrop extends Entity {
       this.shimmerTime = Math.max(0, this.shimmerTime - 0.01);
     }
     void ITEM_DEFS;
+    // ---- 消失条件 = 原版 DespawnIfMeetingConditions（WorldItem.cs:652-690）----
+    // 时序 = Update 尾部（抓取置位后判定,与原版同拍）。★1.4 已移除通用 5 分钟
+    // 消失——仅四类特例+出界+堆叠归零,无 age 上限;曾自创 600s 全体消失=掉落配额
+    // （Item.MechSpawn）饱和后的自愈节奏与原版不符（2026-08-27 用户定案完全对齐）。
+    {
+      const dvid = vanillaIdOfItem(this.itemId);
+      const wd = (game.world ?? {}) as unknown as {
+        w?: number; h?: number; spawnX?: number; spawnY?: number;
+        clock?: { isDay?: boolean }; seedFlags?: { remix?: boolean };
+        oldOnesArmy?: { ongoing?: boolean };
+      };
+      // ① 陨星 75：白天（非 remix/未微光/未被拉取保留）→ 星尘 15×10 + 星星碎砾 16-18×3
+      //   （beingGrabbed=有玩家在拉取范围内;本仓 grabbed 于拉取路径置位、tick 头复位）
+      if (dvid === 75 && wd.clock?.isDay && !wd.seedFlags?.remix && !this.shimmered && !this.grabbed) {
+        game.spawnParticles?.(this.x + 11, this.y + 11, '#FFECB3', 10, 1.2, { life: 20 });
+        this.dead = true; return;
+      }
+      // ② 4143：生成超 300t → 靛蓝尘×20（:664）
+      if (dvid === 4143 && this.age > 300) {
+        game.spawnParticles?.(this.x + 11, this.y + 11, '#4169E1', 20, 1.0, { life: 20 });
+        this.dead = true; return;
+      }
+      // ③ 3822：非 DD2 进行中 → 金尘×(18-24)（:672）
+      if (dvid === 3822 && !wd.oldOnesArmy?.ongoing) {
+        game.spawnParticles?.(this.x + 11, this.y + 11, '#FFD966', 18 + Math.floor(Math.random() * 7), 1.5, { life: 24 });
+        this.dead = true; return;
+      }
+      // ④ 出界（InWorld 20 格余量外,:580-612）：
+      //    RecoverableImportantItem → Center=出生点坐标(回出生点,velocity 清零)
+      //    其余 → 消失
+      if (typeof wd.w === 'number' && typeof wd.h === 'number') {
+        const tx2 = Math.floor(this.x / 16), ty2 = Math.floor(this.y / 16);
+        if (tx2 < 20 || ty2 < 20 || tx2 >= wd.w - 20 || ty2 >= wd.h - 20) {
+          if (ITEM_RECOVERABLE_IMPORTANT.has(dvid) && typeof wd.spawnX === 'number' && typeof wd.spawnY === 'number') {
+            this.x = wd.spawnX * 16 + 8 - this.w / 2;
+            this.y = wd.spawnY * 16 + 8 - this.h / 2;   // Center = 出生点格中心
+            this.vx = 0; this.vy = 0;
+          } else {
+            this.dead = true;
+          }
+          return;
+        }
+      }
+    }
   }
 
   /** 上浮白光（WorldItem.cs:511 AddLight(Center,(1-shimmerTime)*0.8 ×3)）：
@@ -370,6 +386,7 @@ export class ItemDrop extends Entity {
   }
   /** 光源锚点缺省（实体中心，Game 扫描回退语义） */
   lightRGBAt: { x: number; y: number } | null = null;
+
 
   /** WorldItem.Shimmering（:806-840）：脚上方格是微光且可转化 → 进度 +0.01/t，
    *  >0.9 触发 GetShimmered；不在微光中则进度衰减。转化触发在本地玩家侧语义

@@ -735,11 +735,36 @@ function chestDustRoll(rng: RNG, sheet: number, fx: number): void {
       if (CHEST_FURNITURE_DUST.has(sheet)) rng.nextInt(3);
   }
 }
+/** ★RRRRRRR2（m#61 定罪修复）：vanilla KillTile 中段门 CheckTileBreakability2_
+ *  ShouldTileSurvive（cs:63692 def / cs:64365 调用点）——BasicChest 锚格
+ *  Chest.DestroyChest 返回 false（有物,cs:Chest.cs:619 item.type>0&&stack>0）
+ *  → ShouldTileSurvive=true → KillTile 在尘段之后整体 return：**不杀不级联、
+ *  服务端无尘掷 ⇒ 整格调用 = 纯 no-op 零掷**。x86 m20260811 BOXLOG 实证：
+ *  rc=84 JC#3 回退 3×3 击杀 (4737,742)/(4737,743) t=21 chestIdx=50 hasItem=1
+ *  只打印 KPRE/KCHEST 无 KILL-OK ⇒ 原版存活。锚集由 __setJCItemChestAnchors 注入
+ *  （pass 头按世界箱列表重建，有物判定=id>0&&stack>0，与 TrapsPass 锚同式）。 */
+const KILL_SURVIVE_CHEST_SHEETS = new Set([21, 467]);   // TileID.Sets.BasicChest
+let killSurviveAnchors: Set<number> | null = null;
+export function __setJCItemChestAnchors(s: Set<number> | null): void { killSurviveAnchors = s; }
+export function jcItemChestAnchorSet(st: TileStore, chests: ChestSink): Set<number> {
+  const s = new Set<number>();
+  for (const c of chests) {
+    if (c.items.some((it) => it && it.id > 0 && it.stack > 0)) s.add(c.y * st.w + c.x);
+  }
+  return s;
+}
 export function killTileChest(st: TileStore, rng: RNG, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const k = st.idx(x, y);
   if (!st.flags[k]) return;
   const sheet = TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1;
+  if (killSurviveAnchors && KILL_SURVIVE_CHEST_SHEETS.has(sheet)) {
+    // CanDestroyChest 锚（帧列模 2 / 帧行）＝CheckTileBreakability2_ShouldTileSurvive 同位
+    let num = Math.trunc(st.frameX[k]! / 18);
+    while (num > 1) num -= 2;
+    const ax = x - num, ay = y - Math.trunc(st.frameY[k]! / 18);
+    if (killSurviveAnchors.has(ay * st.w + ax)) return;   // 有物箱存活=KillTile 早退
+  }
   const fx = st.frameX[k]!;
   const dust = chestKillDustAmount(sheet, fx);
   for (let q = 0; q < dust; q++) chestDustRoll(rng, sheet, fx);
