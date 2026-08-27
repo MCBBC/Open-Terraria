@@ -207,6 +207,9 @@ export class ItemDrop extends Entity {
           if (vid > 0) game.achievements?.notifyItemPickup(vid);
         }
         if (left === 0) {
+          // MP：整堆拾取即时自报 take（op1）——替代傀儡清扫的对死推断
+          // （清扫无法区分"被拾取"与"TTL 超时"，曾把超时误报成拾取反杀真身）
+          if (this.netPuppet && this.netId) game.puppetDropTaken?.(this);
           this.dead = true;
           game.recLog?.('pickup', { key: ITEM_DEFS[this.itemId]?.key ?? this.itemId, n: before, vid: vanillaIdOfItem(this.itemId) });   // 行为录制：整堆拾取
           game.notifyInventoryChanged();

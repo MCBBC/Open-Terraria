@@ -237,12 +237,12 @@ const T2 = { nets: [] };
   const T1 = { realId: born?.realId ?? -1, netId: 0 };
   check('① A 真身生成', !!born);
   // 等 netId 分配 + 广播成傀儡（精确 netId 追踪）
-  let t1NetId = 0;
   const gotPuppet = await poll('①B见傀儡60', async () => {
-    if (!t1NetId) t1NetId = await pageA.evaluate((rid) => window.__swGame.entities.drops.find((e) => e.id === rid)?.netId ?? 0, T1.realId);
-    if (!t1NetId) return ['no-id'];
-    const m = await readMirrors(pageB, [t1NetId]);
-    return m[t1NetId]?.stack === 60 ? ['ok'] : [JSON.stringify(m[t1NetId] ?? null)];
+    if (!T1.netId) T1.netId = await pageA.evaluate((rid) => window.__swGame.entities.drops.find((e) => e.id === rid)?.netId ?? 0, T1.realId);
+    if (!T1.netId) return ['no-id'];
+    const m = await readMirrors(pageB, [T1.netId]);
+    
+    return m[T1.netId]?.stack === 60 ? ['ok'] : [JSON.stringify(m[T1.netId] ?? null)];
   }, ['ok'], 30000);
   check('① B 见傀儡 60', gotPuppet);
 
@@ -292,12 +292,26 @@ const T2 = { nets: [] };
     }
   }
   {
+    // 记录窗口内历史（末值可能落在清理间隙，最佳值才代表协议行为）
+    let bestB = null;
     const bResid = await poll('①B35', async () => {
       const m = await readMirrors(pageB, [T1.netId]);
       const e = m[T1.netId];
-      return e && e.alive && e.stack === 35 ? ['ok'] : ['mirror=' + (e ? JSON.stringify(e) : 'none')];
+      if (e && e.alive && (!bestB || e.stack > bestB)) bestB = e.stack;
+      return e && e.alive && e.stack === 35 ? ['ok'] : ['mirror=' + (e ? JSON.stringify(e) : 'none') + ' best=' + bestB];
     }, ['ok'], 15000);
     check('① B 傀儡同步 35', bResid);
+    {
+      const wB = await pageB.evaluate(() => window.__wire || { sent: [], recv: [] });
+      console.log('  DBG-B-wire sent-tail=', JSON.stringify(wB.sent.slice(-6)), 'recv-tail=', JSON.stringify(wB.recv.slice(-6)));
+      const puppetDump = await pageB.evaluate((nid) => {
+        const g = window.__swGame;
+        const all = Array.from(g.entities.drops).map((e) => ({ id: e.id, nid: e.netId, pup: e.netPuppet, dead: !!e.dead, st: e.stack }));
+        return { mapSize: (g.netDropPuppets && g.netDropPuppets.size) ?? -1, total: all.length, sample: all.slice(0, 8),
+          pDead: g.player.dead, tick: g.tickCount };
+      }, T1.netId);
+      console.log('  DBG-B-puppet:', JSON.stringify(puppetDump));
+    }
   }
 }
 
@@ -370,7 +384,8 @@ const T2 = { nets: [] };
   await pump(pageA, 3);
   await pump2(2);
 
-  const fmtStacks = (obj, arr) => arr.map((n) => ((obj[n] && obj[n].alive) ? obj[n].stack : 0)).sort((x, y) => y - x).join(',');
+  // 只统计存活参与者的堆（死掉的 src 不再以 0 混入多重集）
+  const fmtStacks = (obj, arr) => arr.filter((n) => obj[n] && obj[n].alive).map((n) => obj[n].stack).sort((x, y) => y - x).join(',');
   {
     const aMerge = await poll('②Am', async () => {
       const rm = await readRealMap();

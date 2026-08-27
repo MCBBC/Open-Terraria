@@ -813,7 +813,11 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   if (lava && type !== 3) return false;
   if (deep && type !== 3) return false;
   for (const [ax, ay] of [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1], [0, -2], [-1, -2], [1, -2]] as const) {
-    if (st.flags[st.idx(x2 + ax, py + ay)]) return false;             // cs:8973 nactive 九格
+    // ★FFFFFFF 批：nactive()==(sTileHeader&0x60)==32 = active 且【非致动隐身位】
+    //   （Tile.cs:242-249/591-618）——旧实现只看 flags 漏 inActive 维度，与
+    //   solidTileAllowBottomSlope(:647-656) 已有的同位判定不一致。
+    const ni = st.idx(x2 + ax, py + ay);
+    if (st.flags[ni] && ((st.wire[ni] >>> 5) & 1) === 0) return false;  // cs:8973 nactive 九格
   }
   {
     const below = st.idx(x2, py + 1);

@@ -96,6 +96,10 @@ export interface GameHooks {
   spawnNpcByVanilla?(id: number, x: number, y: number): import('./Enemy').Enemy | null;
   /** 法力斗篷星雨(魔法武器命中触发,Projectile.cs:13892-13914):冷却门+生成 1 颗 723 法力星(ai2=1 落地掉 4143) */
   tryManaCloakStarOnMagicHit?(x: number, y: number): void;
+  /** MP：他人掉落（傀儡）被本端【整堆】拾取后上报 take（op1）——拥有端移除真身。
+   *  与部分拾取的 puppetDropResidue 成对；傀儡 TTL 自然消亡不得触发（否则
+   *  拥有端把"丢包超时"当"被人捡走"，真身被误杀——2026-08-28 探针实锤） */
+  puppetDropTaken?(d: import('./ItemDrop').ItemDrop): void;
   /** MP：他人掉落（傀儡）被本端部分拾取后的余量上报（msg21 op0 全态；Game 实现
    *  → 拥有端据以更新真身，防重 assert 回灌复制）。整堆拾取走 op1 take 不经此 */
   puppetDropResidue?(d: import('./ItemDrop').ItemDrop): void;

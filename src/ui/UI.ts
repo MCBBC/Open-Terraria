@@ -1333,7 +1333,9 @@ export class UI {
       // 无箱→垃圾桶（覆盖旧内容，OverrideLeftClick cursorOverride 6 :689-706）
       inv.trash = cur;
       inv.slots[i] = null;
-      this.game.sfx.play('menuTick', 1);
+      // 音 = TrashItem+Grab 双音（:692-706，同垃圾桶直丢路径；曾 menuTick 偏差）
+      this.game.sfx.playFiles(['trash_item_0', 'trash_item_1'], 1);
+      this.game.sfx.play('pickup', 1);
       this.refreshAll();
       return;
     }
@@ -1464,6 +1466,8 @@ export class UI {
     else if (this.openChest) this.openChest.items[i] = null;
     if (this.heldStack) this.heldStack.stack += cur.stack;
     else { this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, favorited: cur.favorited, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; this.heldFrom = where; } // 保留词缀+实例样式+收藏态（★批III②）
+    // 拿取/合并音（ItemSlot.cs:987-989：转移后光标或格子有物 → SoundID 7 Grab）
+    this.game.sfx.play('pickup', 1);
     this.refreshAll();
   }
 
@@ -1582,6 +1586,8 @@ export class UI {
           arr[i] = { ...this.heldStack, stack: 1 };
           this.heldStack.stack--;
         }
+        // 空装备槽放置音（原版 case1/2 MouseItemSwap 后 SoundID 7 :1018）
+        this.game.sfx.play('pickup', 1);
       } else if (this.heldStack.stack === 1 && cur.id !== this.heldStack.id) {
         // 交换前反向校验（取出的物品总是合法的，防御性保留）
         if (where === 'armor' && !inv.armorAccepts(i, cur.id)) return;
@@ -1618,6 +1624,8 @@ export class UI {
         inv.slots[i] = this.heldStack;
         this.heldStack = cur;
       }
+      // 放置/合并/交换音（ItemSlot.cs:987-989 → SoundID 7 Grab）
+      this.game.sfx.play('pickup', 1);
     } else {
       const chest = this.openChest;
       if (!chest) return;
@@ -1635,6 +1643,8 @@ export class UI {
         chest.items[i] = this.heldStack;
         this.heldStack = cur;
       }
+      // 箱格放置/合并/交换音（同 :987-989 → SoundID 7）
+      this.game.sfx.play('pickup', 1);
     }
   }
 
@@ -2859,6 +2869,7 @@ export class UI {
       } else if (this.game.player.inv.trash) {
         this.heldStack = this.game.player.inv.trash; // 取回
         this.game.player.inv.trash = null;
+        this.game.sfx.play('pickup', 1);   // 取回 = Grab（:701-706 mouseItem 有物 → 7）
         this.paintTrash();
       }
       this.refreshAll();

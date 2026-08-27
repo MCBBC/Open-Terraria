@@ -2071,10 +2071,11 @@ export class Game implements GameHooks {
 
   /** msg21 回包：掉落物傀儡 upsert / take 移除（含拥有者本地真掉落被他人拾取） */
   private netApplyItemOp(op: ItemOpMsg) {
-    if (op.op === 0) {
+    // op0=spawn/upsert；op3=残余上报（同形状，但不允许凭空建物）
+    const isResidue = op.op === 3;
+    if (op.op === 0 || isResidue) {
       const id = ITEM_BY_KEY[op.key];
       if (id === undefined) return;
-      const isResidue = op.op === 3;
       let pup = this.netDropPuppets.get(op.netId);
       if (!pup) {
         // op3/回报路径：netId 对上本端【真身】（他端拾取了我们的掉落只搬走一部分，
@@ -2157,6 +2158,13 @@ export class Game implements GameHooks {
   /** MP：他人掉落被本端部分拾取后的余量上报（GameHooks.puppetDropResidue 实现；
    *  ItemDrop 拾取路径消费）——msg21 op0 全态报回，拥有端在 netApplyItemOp 的
    *  真身匹配支更新。整堆拾取（dead）由傀儡清扫的 take 差分覆盖，不经此 */
+  /** GameHooks.puppetDropTaken 实现：傀儡被本端整堆拾取 → 立即上报 op1 take，
+   *  拥有端真身移除（服务端照常广播，第三端同步收敛） */
+  puppetDropTaken(d: ItemDrop): void {
+    if (!this.net?.active || !d.netId) return;
+    this.net.sendItemOp(1, d.netId);
+  }
+
   puppetDropResidue(d: ItemDrop): void {
     if (!this.net?.active || !d.netId) return;
     this.net.sendItemOp(3, d.netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack,
@@ -2657,9 +2665,9 @@ export class Game implements GameHooks {
     }
     for (const [id, pup] of this.netDropPuppets) {
       if (pup.d.dead) {
-        // 傀儡消失两源：本地拾取（dead 由 ItemDrop 置位）→ 上报 take 让房主移除真身；
-        // 寿命/远端 take → netApplyItemOp 已删映射，不会走到这
-        this.net?.sendItemOp(1, id);
+        // 傀儡消失不再推断 take：拾取走 ItemDrop 的 puppetDropTaken 显式自报，
+        // 远端 take/残余经 netApplyItemOp 已删映射。TTL 超时静默清理——
+        // 把超时当拾取曾反向杀死拥有端真身（丢包=凭空没收,2026-08-28 实锤）
         this.netDropPuppets.delete(id);
         continue;
       }

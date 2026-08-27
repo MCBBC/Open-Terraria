@@ -416,9 +416,10 @@ export class FrameParser {
           cb(msgId, new NetReader(this.buf.subarray(p + 3, p + len)));
         } catch (e) {
           // netdbg：解析异常取证（?netdbg=1 时窗口可读；默认吞掉保持旧毒化语义）
-          const g = globalThis as unknown as { __FRAME_ERRS?: Array<{ msgId: number; len: number; e: string }> };
+          const g = globalThis as unknown as { __FRAME_ERRS?: Array<{ msgId: number; len: number; hex?: string; e: string }> };
           if (g.__FRAME_ERRS && g.__FRAME_ERRS.length < 8) {
-            g.__FRAME_ERRS.push({ msgId, len: p + len > this.len ? -1 : len, e: String((e as Error).message) });
+            const hex = Array.from(this.buf.subarray(p + 3, Math.min(p + len, p + 15))).map((b) => b.toString(16).padStart(2, '0')).join(' ');
+            g.__FRAME_ERRS.push({ msgId, len, hex, e: String((e as Error).message) });
           }
           if (typeof location !== 'undefined' && location.search.includes('netdbg')) throw e;
         }
