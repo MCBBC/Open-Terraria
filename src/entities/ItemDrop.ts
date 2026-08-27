@@ -341,9 +341,11 @@ export class ItemDrop extends Entity {
         clock?: { isDay?: boolean }; seedFlags?: { remix?: boolean };
         oldOnesArmy?: { ongoing?: boolean };
       };
-      // ① 陨星 75：白天（非 remix/未微光/未被拉取保留）→ 星尘 15×10 + 星星碎砾 16-18×3
-      //   （beingGrabbed=有玩家在拉取范围内;本仓 grabbed 于拉取路径置位、tick 头复位）
-      if (dvid === 75 && wd.clock?.isDay && !wd.seedFlags?.remix && !this.shimmered && !this.grabbed) {
+      // ① 陨星 75：白天（非 remix/未微光）→ 星尘 15×10 + 星星碎砾 16-18×3。
+      //   ★原版 !beingGrabbed 条件为死逻辑：beingGrabbed 在物品自身 Update 头被
+      //   无条件复位（WorldItem.cs:437），Player 侧置位先于复位被抹（单人恒 false）——
+      //   本仓 grabbed 置位发生在同方法内（复位之后），判读会泄漏 → 不进判定
+      if (dvid === 75 && wd.clock?.isDay && !wd.seedFlags?.remix && !this.shimmered) {
         game.spawnParticles?.(this.x + 11, this.y + 11, '#FFECB3', 10, 1.2, { life: 20 });
         this.dead = true; return;
       }

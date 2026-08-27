@@ -116,7 +116,14 @@ def({ key: 'snow_brick', name: '雪砖', solid: true, opacity: 1, pick: 0, mapCo
 def({ key: 'sandstone', name: '沙岩', solid: true, opacity: 1, pick: 0, mapColor: '#C67C4E', blend: true, drop: 3271, vanilla: { sheet: 396, frame: 'auto' } });
 def({ key: 'hardened_sand', name: '硬化沙块', solid: true, opacity: 1, pick: 0, mapColor: '#D4C064', blend: true, drop: 3272, vanilla: { sheet: 397, frame: 'auto' } });
 def({ key: 'desert_fossil', name: '沙漠化石', solid: true, opacity: 1, pick: 0, mapColor: '#D49458', blend: true, drop: 3347, vanilla: { sheet: 404, frame: 'auto' } });
-def({ key: 'clay', name: '粘土块', solid: true, opacity: 1, pick: 0, mapColor: '#925144', blend: true, drop: 133, vanilla: { sheet: 40, frame: 'auto' } });
+// ★2026-08-27 frame 'auto'→'blend':原版对粘土帧不落盘（FTW V2.wld 实测 type40 85543 格
+//  frameX/Y 100% 全零=绘制期虚拟化,与沙53/土0/石1/泥59/雪147 同族）,应走 TEdit BlendRules
+//  路径（mergeWith=0 泥土协商）。曾标 'auto'（8 向表+tileBrick 家族）→ 粘土与沙/土/石
+//  交界双侧系统互不认账:blend 侧(沙)按 mergeWith 同指连粘土画内帧,粘土侧按 tileBrick
+//  (40 不在族)画边缘帧——交界处沙侧裸纹理对粘土侧描边+边缘帧透明缺口,地下黑背景
+//  透出=用户标注的断缝(31 格 marks)。改 blend 后双侧同一 BlendRules 协商,边界用
+//  合并过渡帧衔接。
+def({ key: 'clay', name: '粘土块', solid: true, opacity: 1, pick: 0, mapColor: '#925144', blend: true, drop: 133, vanilla: { sheet: 40, frame: 'blend' } });
 def({ key: 'glass', name: '玻璃', solid: true, opacity: 0.15, pick: 0, mapColor: '#C8F6FE', drop: 170, vanilla: { sheet: 54, frame: 'auto' } });
 def({ key: 'obsidian', name: '黑曜石', solid: true, opacity: 1, pick: 55, mapColor: '#2B2854', blend: true, drop: 173, vanilla: { sheet: 56, frame: 'auto' } });
 def({ key: 'gray_brick', name: '灰砖', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 129, vanilla: { sheet: 38, frame: 'auto' } });

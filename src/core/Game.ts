@@ -24011,10 +24011,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           return false;
         },
         promoteCoin: (d) => {
+          // OnReachingMaxStack（:436-449）inner.SetDefaults(下一级)——SetDefaults 语义
+          // 含 stack=1（100 银币=1 金币;漏重置=百倍价值）
           const vid = vanillaIdOfItem(d.itemId);
           if (vid >= 71 && vid < 74) {
             const k = VANILLA_ITEM_KEY_BY_ID[vid + 1];
-            if (k) { const nid = ITEM_BY_KEY[k]; if (nid !== undefined) d.itemId = nid; }
+            if (k) { const nid = ITEM_BY_KEY[k]; if (nid !== undefined) { d.itemId = nid; d.stack = 1; } }
           }
         },
       },

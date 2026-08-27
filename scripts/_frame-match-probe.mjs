@@ -73,7 +73,37 @@ const out = await p.evaluate(async () => {
       bestMatchFrame: `${best.c},${best.r}`, bestDiff: best.d,
       paint: st.paint[i], coat: st.coat[i], half: st.half[i], slope: st.slope[i] });
   }
-  return rows;
+  // ★markDirty 强制重烘后复测:若帧变化 → 烘焙陈旧(加载期邻居不全)bug
+  const dirty = new Set();
+  for (const [x, y] of samples) dirty.add(Math.floor(x / 16) + ',' + Math.floor(y / 16));
+  for (const k of dirty) { const [cx2, cy2] = k.split(',').map(Number); g.chunks.markDirty(cx2, cy2); }
+  await new Promise((r) => setTimeout(r, 2000));
+  const rows2 = [];
+  for (const [x, y] of samples) {
+    const i = st.idx(x, y);
+    const t = st.type[i];
+    const sheet = TILE_DEFS[t]?.vanilla?.sheet;
+    const pred = autoFrameAt(st, x, y, t);
+    const ch = g.chunks.get(Math.floor(x / 16), Math.floor(y / 16));
+    const tcv = document.createElement('canvas'); tcv.width = 256; tcv.height = 256;
+    const tctx = tcv.getContext('2d', { willReadFrequently: true });
+    tctx.drawImage(ch.tile, ch.sx, ch.sy, 256, 256, 0, 0, 256, 256);
+    const rend = tctx.getImageData((x - Math.floor(x / 16) * 16) * 16, (y - Math.floor(y / 16) * 16) * 16, 16, 16).data;
+    const { cc } = getSheetCtx(sheet);
+    const cols = Math.floor(cc.canvas.width / 18), rws = Math.floor(cc.canvas.height / 18);
+    let best = null;
+    for (let r = 0; r < rws; r++) for (let c = 0; c < cols; c++) {
+      const f = cc.getImageData(c * 18, r * 18, 16, 16).data;
+      let d = 0;
+      for (let k = 0; k < 16 * 16 * 4; k += 4) {
+        if (Math.abs(rend[k + 3] - f[k + 3]) > 40) { d += 8; continue; }
+        if (rend[k + 3] > 40) d += (Math.abs(rend[k] - f[k]) + Math.abs(rend[k + 1] - f[k + 1]) + Math.abs(rend[k + 2] - f[k + 2]));
+      }
+      if (!best || d < best.d) best = { c, r, d };
+    }
+    rows2.push({ x, y, predictedFrame: `${pred.col},${pred.row}`, bestMatchFrame: `${best.c},${best.r}`, bestDiff: best.d });
+  }
+  return { initial: rows, afterMarkDirty: rows2 };
 });
 console.log(JSON.stringify(out, null, 1));
 await b.close();

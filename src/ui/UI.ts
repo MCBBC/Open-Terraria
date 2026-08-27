@@ -414,7 +414,7 @@ const CSS = `
   left:-1.5px; top:-1.5px; }
 @keyframes sw-ach-in { from { opacity:0; transform:translateY(12px) scale(0.9); } }
 .sw-tooltip { position:fixed; background:rgba(21,23,75,0.93);
-  padding:9px 13px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:100; max-width:280px;
+  padding:9px 13px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:1300; max-width:280px;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
   text-shadow: 1px 1px 0 rgba(0,0,0,0.85); line-height:1.5; }   /* 原版 MouseText 字体+字影（:20256 DrawColorCodedStringWithShadow） */
 .sw-tooltip-nobox { background:transparent; }   /* 悬停文本框:关（SettingsEnabled_OpaqueBoxBehindTooltips=false，无底板纯文字原版支） */
@@ -1195,6 +1195,14 @@ export class UI {
     eye.title = Lang.text(hidden ? 'LegacyInterface.60' : 'LegacyInterface.59');
   }
 
+  /** 杂项眼（宠物/光源,miscRail）——同配饰眼图标/文案族（原版 40666-40691：
+   *  TogglePet/ToggleLight 翻 petFlag/lightFlag 后画 InventoryTickOn/Off） */
+  private paintPetEye(eye: HTMLElement, slot: 0 | 1): void {
+    const hidden = slot === 0 ? this.game.petHidden : this.game.lightPetHidden;
+    eye.style.backgroundImage = `url(sprites/vanilla/Inventory_Tick_${hidden ? 'Off' : 'On'}.png)`;
+    eye.title = Lang.text(hidden ? 'LegacyInterface.60' : 'LegacyInterface.59');
+  }
+
   /** 全部眼睛图标重刷（读档回填/翻槽后） */
   private paintAccEyes(): void {
     for (const [idx, eye] of this.accEyeEls) this.paintAccEye(eye, idx);
@@ -1761,8 +1769,10 @@ export class UI {
     return '#b42cff';
   }
 
-  private showTooltipFor(i: number, where: SlotWhere) {
-    const s = this.slotContent(where, i) as { id: number; stack: number; favorited?: boolean; prefix?: number } | null;
+  /** 槽位悬停详情气泡。override：非槽位锚点（道具搜索结果行）——slot 传合成槽
+   *  内容（stack 1 无词缀/收藏），anchor 传气泡定位锚元素 */
+  private showTooltipFor(i: number, where: SlotWhere, override?: { slot: { id: number; stack: number }; anchor: HTMLElement }) {
+    const s = (override?.slot ?? this.slotContent(where, i)) as { id: number; stack: number; favorited?: boolean; prefix?: number } | null;
     if (!s) { this.tooltip.style.display = 'none'; return; }
     const def = ITEM_DEFS[s.id];
     // 名称按稀有度着色（原版 GetItemNameColor 15 档）：vi_ 物品查 vanilla-itemrare.json
@@ -1913,7 +1923,7 @@ export class UI {
     this.applyTooltipBg();
     // 定位：锚槽右侧（原版跟鼠标+toolTipDistance；槽锚定确定性更好），屏幕钳制
     // （:20241-20250 num4=18 边距）
-    const slotEl = this.slotEl(i, where);
+    const slotEl = override?.anchor ?? this.slotEl(i, where);
     if (slotEl) {
       const r = slotEl.getBoundingClientRect();
       const tw = this.tooltip.offsetWidth, th = this.tooltip.offsetHeight;
@@ -2071,21 +2081,32 @@ export class UI {
 
   // ============ 调试用：道具搜索器（背包面板"🔍 道具搜索"按钮） ============
   private itemSearchEl: HTMLDivElement | null = null;
+  /** 搜索面板开启期间 tooltip 的暂离归宿（面板 z1200 > .sw-root z10——tooltip 留在
+   *  root 内会被 stacking context 压在面板下,2026-08-27 用户报；搬 body 顶层） */
+  private tooltipHome: HTMLElement | null = null;
 
   /** 打开搜索面板：按 名称/key/原版id 过滤 ITEM_DEFS，点击条目入包 */
   openItemSearch() {
     if (!this.game) return;
     this.closeItemSearch();
+    // tooltip 提到 body 顶层（关闭时归还 root）——否则结果行气泡被面板遮挡
+    if (this.tooltip.parentElement !== document.body) {
+      this.tooltipHome = this.tooltip.parentElement;
+      document.body.appendChild(this.tooltip);
+    }
     const overlay = el('div') as HTMLDivElement;
     overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1200; display:flex; align-items:center; justify-content:center;';
     const panel = el('div');
     panel.style.cssText = 'width:560px; max-height:70vh; background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;';
     const titleRow = el('div');
-    titleRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+    titleRow.style.cssText = 'display:flex; justify-content:space-between; align-items:flex-start;';
     titleRow.appendChild(el('div', 'sw-lbl', '道具搜索（点击加入背包）'));
-    const closeBtn = el('button', 'sw-btn');
-    closeBtn.textContent = Lang.text('Mods.SandboxWorld.UI.Close');
-    closeBtn.style.cssText = 'cursor:pointer;';
+    const closeBtn = el('button');
+    closeBtn.textContent = '✕';
+    closeBtn.title = Lang.text('Mods.SandboxWorld.UI.Close');
+    closeBtn.style.cssText = 'margin:0; width:20px; height:20px; padding:0; flex:none; cursor:pointer;'
+      + 'font-size:11px; line-height:1; background:#3a3a4a; color:#ddd; border:1px solid #6b6b8a; border-radius:3px;';
+    closeBtn.addEventListener('mousedown', (e) => e.stopPropagation());
     closeBtn.addEventListener('click', () => this.closeItemSearch());
     titleRow.appendChild(closeBtn);
     panel.appendChild(titleRow);
@@ -2150,6 +2171,14 @@ export class UI {
         const item = el('div');
         item.title = `${e.name}  [${e.d.key}]`;
         item.style.cssText = 'display:flex; align-items:center; gap:4px; width:170px; padding:3px 5px; background:#1f1f28; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:12px; color:#ddd;';
+        // 悬停 = 背包同款详情气泡（2026-08-27 用户要求）——合成槽语义（stack1 无
+        // 词缀/收藏）,锚=行元素;离开即收
+        item.addEventListener('mouseenter', () =>
+          this.showTooltipFor(e.id, 'inv', { slot: { id: e.id, stack: 1 }, anchor: item }));
+        item.addEventListener('mouseleave', () => {
+          this.tooltip.style.display = 'none';
+          cancelAnimationFrame(this.tooltipPulseRaf);
+        });
         const img = el('img') as HTMLImageElement;
         img.src = iconUrl(this.game!, e.id);
         img.style.cssText = 'width:24px; height:24px; image-rendering:pixelated; flex:none;';
@@ -2179,6 +2208,12 @@ export class UI {
       this.itemSearchEl.remove();
       this.itemSearchEl = null;
     }
+    // tooltip 归位 root + 收起（面板关,气泡无锚）
+    if (this.tooltipHome) {
+      this.tooltipHome.appendChild(this.tooltip);
+      this.tooltipHome = null;
+    }
+    this.tooltip.style.display = 'none';
   }
 
   // ============ 重铸（哥布林工匠，Main.InReforgeMenu + ReforgeItemInReforgeSlot） ============
@@ -2622,10 +2657,28 @@ export class UI {
         });
         row.appendChild(bRes);
       }
+      // 道具搜索（调试检索器）：图标化入顶排图标组（2026-08-27 用户要求,原背包
+      // 标签行文字钮退役）——贴图 = 原版图鉴搜索钮 UI_Bestiary_Button_Search/[_2]=hover。
+      // ★三图标钮一律裸 icon（不带 .sw-btn 渐变/边框/圆角）+ 各按原生素材尺寸
+      // 显示（Search 22×22/房 22×24 hover26×28/书 32×30）,不互拉变形
       {
-        const b = el('button', 'sw-btn');
+        const bS = el('button');
+        bS.title = '道具搜索';
+        bS.style.cssText = 'margin:0; width:22px; height:22px; padding:0; flex:none; border:none;'
+          + 'background:url(sprites/vanilla-ui/UI_Bestiary_Button_Search.png) 0 0/100% 100%;'
+          + 'image-rendering:pixelated; cursor:pointer;';
+        bS.addEventListener('mouseenter', () => { bS.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Bestiary_Button_Search_2.png)'; });
+        bS.addEventListener('mouseleave', () => { bS.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Bestiary_Button_Search.png)'; });
+        bS.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          this.openItemSearch();
+        });
+        row.appendChild(bS);
+      }
+      {
+        const b = el('button');
         b.title = Lang.text('Mods.SandboxWorld.Housing.Button');
-        b.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none; border:none;'
+        b.style.cssText = 'margin:0; width:22px; height:24px; padding:0; flex:none; border:none;'
           + 'background:url(sprites/vanilla-ui/UI_DisplaySlots_4.png) 0 0/100% 100%;'
           + 'image-rendering:pixelated; cursor:pointer;';
         this.housingBtn = b;
@@ -2645,9 +2698,9 @@ export class UI {
         row.appendChild(b);
       }
       {
-        const bBst = el('button', 'sw-btn');
+        const bBst = el('button');
         bBst.title = Lang.text('Mods.SandboxWorld.Tabs.Bestiary');
-        bBst.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none; border:none;'
+        bBst.style.cssText = 'margin:0; width:32px; height:30px; padding:0; flex:none; border:none;'
           + 'background:url(sprites/vanilla-ui/UI_Bestiary.png) 0 0/200% 100%;'
           + 'image-rendering:pixelated; cursor:pointer;';
         bBst.addEventListener('mouseenter', () => { bBst.style.backgroundPosition = '100% 0'; });
@@ -2725,19 +2778,22 @@ export class UI {
       pair.appendChild(el('div', 'sw-lbl', lbl));
       const slotEl = this.makeSlotEl(k, 'misc');
       // 宠物/光源槽眼睛开关（原版 InventoryTick 图标 Main.cs:40666-40691：光标为空
-      // 时点击小眼睛 → TogglePet/ToggleLight 显隐翻转——槽 0/1 专属）
+      // 时点击小眼睛 → TogglePet/ToggleLight 显隐翻转——槽 0/1 专属）。
+      // ★图标同配饰眼 Inventory_Tick_On/Off（2026-08-27 用户报：曾用 emoji 👁
+      // 与装备列眼睛不一致）
       if (k === 0 || k === 1) {
         const eye = el('button', 'sw-btn sw-peteye');
-        eye.textContent = '👁';   // 原版 InventoryTick 眼睛图标（无文字标签）
         eye.style.cssText = 'position:absolute; right:-12px; top:-10px; width:24px; height:20px;'
-          + 'margin:0; padding:0; font-size:11px; line-height:1; z-index:5;';
+          + 'margin:0; padding:0; z-index:5; background:center/contain no-repeat; image-rendering:pixelated;';
         eye.addEventListener('mousedown', (e) => {
           e.stopPropagation();
           if (this.heldStack) return;   // 原版 mouseItem.IsAir 门（:40670）
           this.game.togglePetSlot(k as 0 | 1);
+          this.paintPetEye(eye, k as 0 | 1);
         });
         slotEl.style.position = 'relative';
         slotEl.appendChild(eye);
+        this.paintPetEye(eye, k as 0 | 1);
       }
       pair.appendChild(slotEl);
       miscCol.appendChild(pair);
@@ -2781,13 +2837,16 @@ export class UI {
       col.style.cssText = 'display:flex; flex-direction:column;';
       return col;
     };
-    coinAmmo.appendChild(mkCol(Lang.text('LegacyInterface.26'), COIN_START));
+    // ★2026-08-27 用户要求：左右调转——左→右 = 弹药 | 钱币
     coinAmmo.appendChild(mkCol(Lang.text('LegacyInterface.27'), AMMO_START));
+    coinAmmo.appendChild(mkCol(Lang.text('LegacyInterface.26'), COIN_START));
     const rightRail = el('div');
-    rightRail.style.cssText = 'display:flex; gap:8px; align-items:flex-start;';
-    rightRail.appendChild(trashWrap);
+    // ★2026-08-27 用户要求：垃圾桶放到弹药/钱币列下方（列改纵向：上=弹药|钱币,下=垃圾桶）
+    rightRail.style.cssText = 'display:flex; flex-direction:column; gap:8px; align-items:flex-start;';
     rightRail.appendChild(coinAmmo);
-    left.appendChild(rightRail);
+    rightRail.appendChild(trashWrap);
+    // 挂载点移到背包右侧（夹在背包与成就/杂项列之间,2026-08-27 用户要求）——
+    // 见下方 body.appendChild(right) 后
     // 成就提示牌（AchievementAdvisor：未完成成就小卡，点击开成就菜单）
     // ——挂载点在物品格之后（见 body.appendChild(right) 处），此处仅创建
     this.achAdvisorEl = createAchievementAdvisor(this.game);
@@ -2800,12 +2859,7 @@ export class UI {
       const lblRow = el('div');
       lblRow.style.cssText = 'display:flex; align-items:center; justify-content:space-between; width:100%;';
       lblRow.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.UI.InvLabel')));
-      const searchBtn = el('button', 'sw-btn');
-      // 调试专用按钮：不入 l10n 包（生成产物 12 语言），标签硬编码
-      searchBtn.textContent = '道具搜索';
-      searchBtn.style.cssText = 'font-size:12px; padding:2px 8px; cursor:pointer;';
-      searchBtn.addEventListener('click', () => this.openItemSearch());
-      lblRow.appendChild(searchBtn);
+      // 道具搜索文字钮已摘（2026-08-27 图标化上移顶排图标组,见上方 buildInventoryPanel）
       // 向导配方反查按钮已摘（2026-08-14 用户要求；openGuideSearch 逻辑保留，
       // 通道如需再开走 Guide 对话入口）
       right.appendChild(lblRow);
@@ -2837,6 +2891,8 @@ export class UI {
     this.quickStackBtn.addEventListener('mouseleave', () => { this.qsHover = false; this.refreshAll(); });
     this.quickStackBtn.addEventListener('mousedown', (e) => {
       e.stopPropagation();
+      if (e.button !== 0) return;   // ★右键 = contextmenu 切模式（2026-08-27 用户报：
+                                    //  mousedown 无键判 → 右键先触发堆叠再切模式）
       this.game.quickStackAllChests();
       this.game.sfx.play('menuTick', 1);          // SoundID 12（:41292）
       this.refreshAll();
@@ -2863,8 +2919,13 @@ export class UI {
       this.onEmoteMenu?.();
     });
     clusterRow.appendChild(bEmote);
-    right.appendChild(clusterRow);
+    // ★2026-08-27 用户要求：堆叠/表情钮挂垃圾桶下方（原在背包网格下沿）——
+    //  与右缘列构成：弹药|钱币 → 垃圾桶 → 堆叠+表情 的纵向工具列
+    rightRail.appendChild(clusterRow);
     body.appendChild(right);
+    // 垃圾桶/弹药/钱币列 → 背包右侧（夹在背包与成就/杂项列中间,2026-08-27 用户
+    // 要求——背包+合成整体贴向装备列,顺手中转距离更短）
+    body.appendChild(rightRail);
     // 右缘列：成就提示牌 + 杂项（宠物/光源/矿车/坐骑/钩爪+染料，原杂项页迁入）
     // + PvP/队伍钮（2026-08-27 用户指定：杂项搬玩家对决原位,对决/队伍钮被顶下去；
     //   列高 ≈ 成就卡+杂项 310+PvP 120 ≈ 左装备列 620,面板高度不受影响。
@@ -2883,7 +2944,8 @@ export class UI {
     //      原版 ShouldPVPDraw=netMode==1 仅联机画，本仓常开=设置页 PvP/队伍同款
     //      语义（单机调试便利 + 联机 msg13 同步）） ----
     const pvpWrap = el('div');
-    pvpWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center;';
+    // margin-top 拉开与钩爪行（杂项列末行）的间距（2026-08-27 用户要求）
+    pvpWrap.style.cssText = 'display:flex; flex-direction:column; align-items:center; margin-top:24px;';
     // PvP 剑（:42112-42116：38px 帧裁 Width-2/Height-1 → 36×37）
     this.pvpSwordBtn = el('button', 'sw-btn');
     this.pvpSwordBtn.style.cssText = 'margin:0; width:36px; height:37px; padding:0; flex:none;'
@@ -2965,7 +3027,8 @@ export class UI {
     // 合成区 —— 挂 right（物品格容器）内部底部=物品格正下方（用户指定，
     // 此前挂 invPanel 横跨整个面板宽度）。标题+可用合成站同行（减少高度占用）
     const craftTitleRow = el('div');
-    craftTitleRow.style.cssText = 'display:flex; align-items:baseline; gap:8px; margin-bottom:6px;';
+    // margin-top 撑开背包网格/钮簇与合成区的间距（2026-08-27 用户要求,红框处）
+    craftTitleRow.style.cssText = 'display:flex; align-items:baseline; gap:8px; margin:14px 0 6px;';
     craftTitleRow.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting')));
     const stations = el('div', '', '');
     stations.style.cssText = 'font-size:11px; color:#8ad0a0; flex:1; min-width:0; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
