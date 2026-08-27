@@ -918,31 +918,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     doSave();
   }
 
-  /** 设置面板（主菜单含数据栏；游戏内不显示数据栏） */
-  function openSettings(inGame: boolean) {
+  /** 设置面板（★资源包/数据栏已摘 2026-08-27 用户要求;inGame 语义随之退役） */
+  function openSettings(_inGame: boolean) {
     // 已开守卫(2026-08-13 泄露 review):无守卫时暂停菜单里重复点"设置"
     // 叠面板,每层多 1 个 window Esc + 1 个 Lang 订阅
     if (document.querySelector('.sw-set-panel')) return;
     new SettingsPanel(root, {
-      ...(inGame ? {} : {
-        onQuickLoad: () => void quickLoad(),
-        onLoadFile: () => {
-          fileInput.onchange = () => {
-            const f = fileInput.files?.[0];
-            if (f) void f.text().then(loadFromJson);
-            fileInput.value = '';
-          };
-          fileInput.click();
-        },
-        onImportWld: () => {
-          wldInput.onchange = () => {
-            const f = wldInput.files?.[0];
-            if (f) void f.arrayBuffer().then((ab) => importWld(new Uint8Array(ab)));
-            wldInput.value = '';
-          };
-          wldInput.click();
-        },
-      }),
       onBack: () => { /* 面板自毁 */ },
     });
   }

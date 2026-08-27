@@ -118,7 +118,7 @@ import {
   kiteAnchorPlace, kiteAnchorBreakDrop, critterAnchorAt, kiteAnchorAt,
   type FurnitureKind,
 } from '../world/FurnitureItems';
-import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, PLACE_TILE_ON_ALT_USE, placeableSheetsForItems, vanillaPlaceableTileKeys } from '../data/items';
+import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys } from '../data/items';
 import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles } from '../data/vanillaNpcs';
@@ -23942,11 +23942,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.recLog('drop', { key: itemKey, n: count, x: Math.round(x), y: Math.round(y) });   // 行为录制：掉落物生成（唯一入口）
     const drop = new ItemDrop(x - 6, y - 6, id, count, vx, vy);
     if (placeStyle !== undefined) drop.placeStyle = placeStyle;
-    this.entities.add(drop, 'drops');
-    // 原版 Main.item 槽位上限 400,超出移除最旧掉落(Main.UpdateItems 空 slot 回收)——
-    // 此前无上限:dev 模式一次 ~500 实体/雕像农场线性堆积(2026-08 审计 #10)
+    // ★原版 Main.item 槽位上限 400（Main.cs:1696 WorldItem[401],NewItem 扫 0..399）:
+    //  满槽 → 回收【最老的 pickup 类】槽位（Item.cs:49781-49800:IsAPickup 里
+    //  timeSinceItemSpawned 最大者——普通掉落从不被抢占;曾不判型 shift() 最旧,
+    //  珍稀掉落可被心/币挤掉,2026-08-27 对齐）。仍无 pickup → EmergencyStacking
+    //  原版兜底未移植 → 生成失败（原版无槽同样失败,语义一致）。
     const drops = this.entities.drops;
-    while (drops.length > 400) drops.shift();
+    if (drops.filter((d) => !d.dead).length >= 400) {
+      let oldest: ItemDrop | null = null;
+      for (const dRaw of drops) {
+        const d = dRaw as ItemDrop;
+        if (d.dead) continue;
+        const vid = vanillaIdOfItem(d.itemId);
+        // ★回收资格 = IsAPickup 且 age > PickupReplacementTime(1200t=20s,
+        //  Item.cs:334)——新生 pickup 不可抢占;资格内取最老(num3 爬升语义)
+        if (vid > 0 && ITEM_IS_A_PICKUP.has(vid) && d.age > 1200
+          && (!oldest || d.age > oldest.age)) oldest = d;
+      }
+      if (!oldest) return null;   // EmergencyStacking 未移植的登记点
+      oldest.dead = true;
+    }
+    this.entities.add(drop, 'drops');
     return drop;
   }
 

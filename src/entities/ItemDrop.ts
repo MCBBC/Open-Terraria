@@ -65,6 +65,8 @@ export class ItemDrop extends Entity {
    *  playerIndexTheItemIsReservedFor=Main.myPlayer 语义——各端只持有自己的副本,
    *  天然互不可见）。拾取后入包照常（转为随身物品,跨端同步走 msg5） */
   netLocalOnly = false;
+  /** 被玩家拉取/抓取中（原版 beingGrabbed——星白天消失的豁免位,拉取路径置位） */
+  grabbed = false;
 
   constructor(x: number, y: number, itemId: number, stack = 1, vx = 0, vy = -2) {
     super();
@@ -84,8 +86,36 @@ export class ItemDrop extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     this.age++;
-    // 寿命（10 分钟）
-    if (this.age > 60 * 600) { this.dead = true; return; }
+    // 消失条件 = 原版 DespawnIfMeetingConditions（WorldItem.cs:652-690）。
+    // ★1.4 已移除通用 5 分钟消失——仅四类特例+出界+堆叠归零，无 age 上限。
+    //  曾自创 600s 全体消失：掉落配额（Item.MechSpawn）饱和后的自愈节奏与
+    //  原版不符（2026-08-27 用户定案完全对齐）。
+    const vid = vanillaIdOfItem(this.itemId);
+    const wd = (game.world ?? {}) as unknown as {
+      w?: number; h?: number; clock?: { isDay?: boolean };
+      seedFlags?: { remix?: boolean }; oldOnesArmy?: { ongoing?: boolean };
+    };
+    // ① 陨星 75：白天（非 remix/未微光/未被保留）→ 星尘+星星碎砾（Dust15×10+Gore16-18×3）
+    if (vid === 75 && wd.clock?.isDay && !wd.seedFlags?.remix && !this.shimmered && !this.grabbed) {
+      game.spawnParticles?.(this.x + 11, this.y + 11, '#FFECB3', 13, 1.2, { life: 20 });
+      this.dead = true; return;
+    }
+    // ② 4143：生成超 300t → 靛蓝尘×20（CornflowerBlue→Indigo 渐变近似）
+    if (vid === 4143 && this.age > 300) {
+      game.spawnParticles?.(this.x + 11, this.y + 11, '#4169E1', 20, 1.0, { life: 20 });
+      this.dead = true; return;
+    }
+    // ③ 3822：非 DD2 进行中 → 金尘×(18-24)（v×8/上飘/noGravity 的近似）
+    if (vid === 3822 && !wd.oldOnesArmy?.ongoing) {
+      game.spawnParticles?.(this.x + 11, this.y + 11, '#FFD966', 18 + Math.floor(Math.random() * 7), 1.5, { life: 24 });
+      this.dead = true; return;
+    }
+    // ④ 出界（InWorld 20 格余量外）→ 消失。★RecoverableImportantItem 回出生点
+    //    分支未移植（该集合庞大未提取；重要物出界即消失，偏差登记）
+    if (typeof wd.w === 'number' && typeof wd.h === 'number') {
+      const tx2 = Math.floor(this.x / 16), ty2 = Math.floor(this.y / 16);
+      if (tx2 < 20 || ty2 < 20 || tx2 >= wd.w - 20 || ty2 >= wd.h - 20) { this.dead = true; return; }
+    }
 
     // R14-A3：专家模式怪捡钱币（WorldItem.GetPickedUpByMonsters_Money :1127-1219,
     // Update 入口 :412-416 `if (Main.expertMode && IsACoin)`）——命中合格怪吸收
@@ -226,6 +256,7 @@ export class ItemDrop extends Entity {
         // 微光速度门解除,后续按普通物品吸走拾取（此前不清 → 拉动中恒 ≥0.2 死锁）
         this.shimmered = false;
         beingGrabbed = true;
+        this.grabbed = true;
         const SPEED = 0.45, MAXV = 4, BACK = 0.75;
         if (player.cx > this.cx) {
           if (this.vx < MAXV + player.vx) this.vx += SPEED;

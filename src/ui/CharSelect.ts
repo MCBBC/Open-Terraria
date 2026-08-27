@@ -46,17 +46,17 @@ const CSS = `
 .sw-vsel-list::-webkit-scrollbar-thumb { background: #ffe745; border: 2px solid #2c396a; }
 .sw-vsel-empty { color: #cfd6f4; text-align: center; padding: 48px 0; font-size: 15px;
   text-shadow: 1px 1px 0 #000; }
-/* 行高 112:边12+info(顶15+名21+隙3+副16=55→内容底67)+钮区(底6,高24→顶66)
-   ——96 档副行与钮区重叠 13px(实测 _row-rect),原版 96 无文本行不适用 */
-.sw-vitem { position: relative; height: 112px; flex-shrink: 0; padding: 6px; display: block; }
+/* 行高 126:边12+info(顶15+名框~40(pixel 字体实际行盒)+隙3+副16≈74)+钮区(底6,高24
+   →顶96)——126-96=30 即副行与按钮的间距;112 档内容底(74)距钮区顶(82)仅 8px,
+   字体行盒再涨一格就贴字(用户实测),原版 96 无文本行不适用 */
+.sw-vitem { position: relative; height: 126px; flex-shrink: 0; padding: 6px; display: block; }
 .sw-vitem.dead { opacity: 0.45; }
 .sw-vitem-doll {
   position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
   width: 66px; height: 66px;
   image-rendering: pixelated; pointer-events: none;
 }
-.sw-vitem-info { position: absolute; left: 104px; top: 15px; right: 56px; bottom: 38px;
-  overflow: hidden; pointer-events: none; }   /* bottom 38 = 钮区顶(82) 上留 6px 间距——难度副行不再贴按钮 */
+.sw-vitem-info { position: absolute; left: 104px; top: 15px; right: 56px; pointer-events: none; }
 .sw-vitem-info .name { font-size: 17px; line-height: 1.25;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
 .sw-vitem-info .sub { font-size: 12px; color: #cfd6f4; margin-top: 3px;

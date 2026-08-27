@@ -2169,6 +2169,11 @@ export function placeableSheetsForItems(itemIds: Iterable<number>): { tileSheets
 // 零下标平移：只挪构建时机,ITEM_DEFS 数组序/内部 id 一律不变（平移事故先例,见
 // :980 注）。闸门测试：tests/item-retirement.test.ts「全 def 必有稳定 id」。
 /** internal id → 稳定 id(保存方向;0=无映射,不应出现) */
+/** ItemID.Sets.IsAPickup（ItemID.cs:248 BoolSet）——pickup 类掉落物（心/星/币/
+ *  星云 booster/4143 等）：Main.item 满槽时 NewItem 优先回收其中最老者的槽位
+ *  （Item.cs:49781-49800），普通掉落从不被抢占 */
+export const ITEM_IS_A_PICKUP = new Set([58, 184, 1734, 1735, 1867, 1868, 3453, 3454, 3455, 4143]);
+
 export const ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);
 /** 稳定 id → internal id(加载方向;同 vid 重复注册时归一到首个 def——内容等价) */
 export const ITEM_INTERNAL_OF_STABLE = new Map<number, number>();

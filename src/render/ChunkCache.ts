@@ -2,7 +2,7 @@
 import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
-import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
+import { drawVanillaCell, drawTreeCell, drawCactusCell } from './VanillaTiler';
 import { treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
 // 树油漆 style 派生已迁 VanillaTiler（2026-08-25：WindSway 同源消费防环）——re-export 保既有引用面
 export { treeGroundVariant, treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
@@ -174,8 +174,10 @@ export class ChunkCache {
     this.sheets = sheets;
     this.autotiler = autotiler;
     this.wallTiler = wallTiler;
-    // 原版 TileID.Sets.TruncatesWalls（54 玻璃 / 328 暗影宝箱 / 459 / 748）→ 内部 tile id
-    this.truncatesWalls = ['glass', 'v_328_shadow_chest', 'v_459_', 'v_748_']
+    // 原版 TileID.Sets.TruncatesWalls（54 玻璃 / 328 / 459 / 748）→ 内部 tile id。
+    // ★曾写 'v_328_shadow_chest'/'v_459_'/'v_748_' 等不存在的 key → 映射 -1 被滤掉,
+    //   全表只剩 glass 截断（2026-08-27 FTW V2 墙审查顺带修）
+    this.truncatesWalls = ['glass', 'v_328_confetti_block', 'v_459_snowfall_block', 'v_748_aquarium_block']
       .map((k) => TILE_BY_KEY[k] ?? -1)
       .filter((id) => id >= 0);
     world.store.onTileChanged((x, y) => this.markDirtyAround(x, y));
@@ -558,6 +560,33 @@ export class ChunkCache {
           }
         }
       }
+    }
+
+    // ---- 第 1.5 遍：仙人掌 chunk 底缝补绘（tileTop+2 跨 chunk 溢出带，2026-08-27）----
+    // 仙人掌格内容画在 y*16+2..+18（tileTop+2，GetTileDrawData case 80），底部 2px 越
+    // 入下一格。chunk 末行（y%16=15）的溢出带（源帧 rows14-15）被本 cell clip 裁掉，
+    // 下一 chunk 首格又从 +2 起画 → 两个 chunk 都没人画这 2px，主干每跨一条 chunk
+    // 边界断 2px（用户实报 FTW V2 导入图，缝带实测 chunk 顶两行全透明；2026-08-21
+    // 旧补丁画 padding 行系误诊已删）。修 = 烘焙本 chunk 时把上一行（y0-1）仙人掌在
+    // py=-TILE 整格重画——clip 自然只留底部 2px 溢出带，落位与原版逐像素一致；
+    // 先于主遍 = 原版行序（上行先画、下行覆盖，如根部延伸被下方沙盖住）。
+    // 竖直溢出家族中仅仙人掌多格裸露可见（其余 +2 单格件底 2px 被下方地面覆盖，备案）。
+    if (this.autotiler) {
+      for (let lx = 0; lx < CHUNK; lx++) {
+        const x = x0 + lx, y = y0 - 1;
+        if (!st.inBounds(x, y)) continue;
+        const i = st.idx(x, y);
+        const type = st.type[i];
+        if (type === 0 || !st.flags[i]) continue;
+        const def = TILE_DEFS[type];
+        if (!def?.vanilla || def.vanilla.sheet !== 80 || def.vanilla.frame !== 'style') continue;
+        // 回声涂层块不绘制（IsVisible 同款门，与主遍一致）
+        if ((st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !st.showInvisibleBlocks) continue;
+        const actuated = (st.wire[i] & 32) !== 0;
+        ctx.globalAlpha = actuated ? 0.3 : 1;
+        drawCactusCell(ctx, this.autotiler.atlas, st, x, y, type, lx * TILE, -TILE);
+      }
+      ctx.globalAlpha = 1;
     }
 
     // ---- 第二遍：前景 tile / 物体（绘制到 tile 层画布；水渲染在墙层与 tile 层之间）----

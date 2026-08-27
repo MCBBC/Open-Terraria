@@ -824,28 +824,16 @@ export function drawCactusCell(
   // 生物群系变体:向下扫沙类(腐化/猩红/神圣)→ 拆行等价的独立贴图
   const img = cactusTextureFor(atlas, st, x, y);
   if (!img) return;
-  // 原版 GetTileDrawData case 80(:5083-5085):16×16、tileTop +2(插入沙面 2px)。
-  // ★源矩形取 18 高（帧内容 y=0..17 全取）：帧 y=16-17 是本格底部的延伸内容，
-  //  填回 tileTop 下移后越出格界的 2px——否则 chunk 烘焙 cell 末行（y%16=15）
-  //  的溢出 2px 被 clip 裁掉，与下 cell 续格之间出现 2px 横缝
-  //  （2026-08-21 用户实报沙漠仙人掌贴图缝，缝精确落在 chunk 边界）。
-  //  帧间内容连续（帧 n 的 y=16-17 ≡ 帧 n+1 的 y=0-1 延续），多画不重影；
-  //  顶格帧(0,2) y=16-17 为透明、底格帧(0,0) y=16-17 有内容均自洽。
-  // 下方仍是仙人掌（续格）→ 源 18 高填缝；底格（下方非仙人掌）→ 原 16 高
-  // （帧 y=16-17 的扎根延伸丢弃，避免插入沙面下 2px——原版裁 16 同款）
-  const contBelow = st.inBounds(x, y + 1) && !!st.flags[st.idx(x, y + 1)]
-    && st.type[st.idx(x, y + 1)] === type;
+  // 原版 GetTileDrawData case 80(:5083-5085)：源 16×16、tileTop +2（插入沙面 2px）。
+  // ★跨 chunk 溢出带由 ChunkCache 烘焙侧「上一行重画」补绘（bakeChunkBody 第 1.5 遍）：
+  //  本格底部 2px（源帧 rows14-15）画在 y*16+16..+18，chunk 末行（y%16=15）被烘焙
+  //  clip 裁掉且下 chunk 无人补 → 主干每跨一条 chunk 边界断 2px（2026-08-27 用户实报
+  //  FTW V2 导入图仙人掌断缝，缝精确落在 chunk 边界）。2026-08-21 旧补丁在本格
+  //  py+14 画帧 rows16-17 系双重误诊：rows16-17 是 18px 网格透明 padding（贴图逐像素
+  //  实测仅 col0 部分帧有渗出描边，≠ 下格 rows0-1），且画在缝的错误一侧——实测反而把
+  //  rows12-13 覆盖成 padding 渗出的描边色垃圾，已删。
   if (ux * 18 + 16 <= img.width && uy * 18 + 16 <= img.height) {
-    // 主 pass：源 16×16、tileTop+2 下移（原版 :5083-5085）
     ctx.drawImage(img, ux * 18, uy * 18, 16, 16, px, py + 2, TILE, TILE);
-    // ★chunk 缝补丁：cell 末行（y%16=15）的续格，tileTop 下移使底部 2px 越出
-    //  cell 底缘被烘焙 clip 裁掉 → 与下 cell 续格之间 2px 横缝（2026-08-21 用户
-    //  实报，缝精确落在 chunk 边界）。补丁 = 把帧 y=16..17（本格底部延伸，视觉
-    //  等价下格帧 y=0..1）画到本格 py+14..py+16（cell 内安全区）→ cell 底 2px
-    //  有内容，下格从 py'+2 起画帧 y=0 → 拼接连续。
-    if (contBelow && y >= 0 && (y % 16) === 15) {
-      ctx.drawImage(img, ux * 18, uy * 18 + 16, 16, 2, px, py + 14, TILE, 2);
-    }
   }
 }
 

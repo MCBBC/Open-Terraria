@@ -1235,6 +1235,11 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
     }
   }
   const nf = gs.seedFlags;
+  // ★RRRRRRR2 批：分段掷流标定钩（与 x86 rig JJHook.HashMark 同名同位；未注册零开销）
+  const __hm = (label: string) => {
+    (globalThis as { __swTrapHm?: (l: string) => void }).__swTrapHm?.(label);
+  };
+  __hm('traps-head');
   let trapTries = st.w * 0.05;
   if (nf.noTraps) {
     // cs:18781-18783：三元链逐层照抄（double 乘法次序保持）
@@ -1244,13 +1249,21 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
     trapTries *= 1.5;
   }
   for (let n = 0; n < trapTries; n++) {
+    // ★RRRRRRR2：与 rig 同款 att/pt/ptr 计数（pt=placeTrap 受理尝试数，ptr=其内部掷量）
+    let mAtt = 0, mPt = 0;
+    const __rn = () => (globalThis as { __swRollN?: number }).__swRollN ?? -1;
+    const mRb = __rn();
     for (let k = 0; k < 1150; k++) {
+      mAtt++;
       if (nf.noTraps) {
         // cs:18816-18827：全域采样（无 oceanDepths 重掷）
         const x = rng.int(50, st.w - 51);                             // Next(50, w-50)
         let y = rng.int(50, st.h - 51);                               // Next(50, h-50)
         if (nf.remix) y = rng.int(50, st.h - 211);                    // remix: Next(50, h-210)
-        if ((y > gs.worldSurface || st.wall[st.idx(x, y)] > 0) && placeTrap(st, rng, gs, x, y, -1)) break;
+        if ((y > gs.worldSurface || st.wall[st.idx(x, y)] > 0)) {
+          mPt++;
+          if (placeTrap(st, rng, gs, x, y, -1)) break;
+        }
       } else {
         let x = rng.int(200, st.w - 201);                               // Next(200, w-200)
         let y = rng.int(gs.worldSurface, st.h - 211);                   // Next(surface, h-210)
@@ -1260,10 +1273,15 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
           x = rng.int(200, st.w - 201);
           y = rng.int(gs.worldSurface, st.h - 211);
         }
-        if (st.wall[st.idx(x, y)] === 0 && placeTrap(st, rng, gs, x, y, -1)) break;
+        if (st.wall[st.idx(x, y)] === 0) {
+          mPt++;
+          if (placeTrap(st, rng, gs, x, y, -1)) break;
+        }
       }
     }
+    __hm(`traps-main-g${n}-att${mAtt}-pt${mPt}-ptr${__rn() - mRb}`);
   }
+  __hm('traps-post-mainloop');
   if (nf.noTraps) {
     // ---- TNT 桶（cs:18829-18851）：W*3 次（tenth W/3）----
     let tntTries = st.w * 3;
@@ -1276,16 +1294,26 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
       placeTNTBarrel(st, x, y);
     }
   }
+  __hm('traps-post-tnt');
   let sandTries = st.w * 0.003;
   if (nf.noTraps) sandTries *= 5;                                     // cs:18857-18859
   else if (nf.getGoodWorld) sandTries *= 1.5;
+  __hm('traps-sand-head');
   for (let n = 0; n < sandTries; n++) {
+    // ★RRRRRRR2：与 rig 同款 att/hit/ok 计数（hit=wall187 命中数，ok=落成功）
+    let sAtt = 0, sHit = 0, sOk = false;
     for (let k = 0; k < 20000; k++) {
+      sAtt++;
       const x = rng.int(Math.floor(st.w * 0.15), Math.floor(st.w * 0.85) - 1);
       const y = rng.int(gs.worldSurface + 20, st.h - 211);
-      if (st.wall[st.idx(x, y)] === 187 && placeSandTrap(st, rng, x, y)) break;
+      if (st.wall[st.idx(x, y)] === 187) {
+        sHit++;
+        if (placeSandTrap(st, rng, x, y)) { sOk = true; break; }
+      }
     }
+    __hm(`traps-sand-g${n}-att${sAtt}-hit${sHit}${sOk ? '-ok1' : '-ok0'}`);
   }
+  __hm('traps-post-sand');
   // ★pass 尾（cs:18893-18896）：noTraps → SetBoulderSolidity(true)（巨石族回实心）
   if (nf.noTraps) setBoulderSolidity(true);
   // ★pass 尾还原（cs:18897 `Main.tileSolid[379] = true`）

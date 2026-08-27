@@ -1,5 +1,8 @@
-// 设置面板（DOM，M6）：分栏 声音/界面/游戏/数据 + 返回。
-// 主菜单与游戏内（暂停菜单）共用；数据栏仅主菜单显示。
+// 设置面板（DOM，M6）：分栏 音量/界面/游戏/按键绑定 + 返回。
+// 主菜单与游戏内（暂停菜单）共用。
+// ★资源包/数据栏已摘除（2026-08-27 用户要求）：资源包页 UI 模块（ResourcePackPage）
+//   一并删除；数据栏三入口（继续存档/读档/导入 .wld）下线，底层能力仍在
+//   （__swFlow 桥 + 世界列表导入）。
 // 文案全部走 Lang（M8 语言系统）：原版键（LegacyMenu.*）+ 自有键（Mods.SandboxWorld.*）。
 // 语言切换：网格按钮（原版语义=用当前语言显示所有语言名，Language.* 类别），
 // 点击后 Lang.setLanguage → 本面板经 Lang.onChange 重建（保留当前分栏）。
@@ -12,14 +15,8 @@ import { TEAM_COLORS } from '../stats/Pvp';
 import { UIScale } from '../vui/draw/UIScale';
 import { UISfx } from '../vui/UISfx';
 import { Lang } from '../i18n/Lang';
-// M13 资源包页（UIResourcePackSelectionMenu/InfoMenu 复刻）
-import { buildResourcePackPage, RESOURCE_PACK_PAGE_CSS } from './ResourcePackPage';
 
 export interface SettingsFlow {
-  /** 主菜单专属：继续存档 / 读档 / 导入 .wld / 开发者模式 */
-  onQuickLoad?(): void;
-  onLoadFile?(): void;
-  onImportWld?(): void;
   onBack(): void;
 }
 
@@ -85,7 +82,7 @@ export class SettingsPanel {
     if (!document.getElementById('sw-set-style')) {
       const style = document.createElement('style');
       style.id = 'sw-set-style';
-      style.textContent = CSS + RESOURCE_PACK_PAGE_CSS;
+      style.textContent = CSS;
       document.head.appendChild(style);
     }
     this.panel = document.createElement('div');
@@ -118,8 +115,6 @@ export class SettingsPanel {
       case 'ui': return Lang.text('Mods.SandboxWorld.Settings.Interface');
       case 'game': return Lang.text('Mods.SandboxWorld.Settings.Gameplay');
       case 'controls': return Lang.menu(222);          // 按键绑定（UIManageControls）
-      case 'packs': return Lang.text('UI.ResourcePacks'); // 资源包（原版同键）
-      case 'data': return Lang.text('Mods.SandboxWorld.Settings.Data');
       default: return cat;
     }
   }
@@ -127,7 +122,8 @@ export class SettingsPanel {
   private buildCats() {
     const cats = document.createElement('div');
     cats.className = 'sw-set-cats';
-    const list = ['sound', 'ui', 'game', 'controls', 'packs', ...(this.flow.onQuickLoad ? ['data'] : [])];
+    // 资源包/数据栏已摘（2026-08-27 用户要求）——见文件头注
+    const list = ['sound', 'ui', 'game', 'controls'];
     for (const c of list) {
       const div = document.createElement('div');
       div.dataset.cat = c;
@@ -599,22 +595,6 @@ export class SettingsPanel {
       devHint.className = 'sw-set-hint';
       devHint.textContent = Lang.text('Mods.SandboxWorld.Settings.DevKeysHint');
       this.content.append(devHint);
-    } else if (this.cat === 'packs') {
-      // ---- 资源包（M13）：双列启停/调序/信息 + zip 上传（ResourcePackPage）----
-      this.content.append(buildResourcePackPage());
-    } else if (this.cat === 'data' && this.flow.onQuickLoad) {
-      const btns = document.createElement('div');
-      btns.className = 'sw-set-btns';
-      const mk = (label: string, fn: () => void) => {
-        const b = document.createElement('button');
-        b.textContent = label;
-        b.addEventListener('click', () => this.close(fn));
-        btns.appendChild(b);
-      };
-      mk(Lang.text('Mods.SandboxWorld.Data.ContinueSave'), () => this.flow.onQuickLoad!());
-      mk(Lang.text('Mods.SandboxWorld.Data.LoadFile'), () => this.flow.onLoadFile?.());
-      mk(Lang.text('Mods.SandboxWorld.Data.ImportWld'), () => this.flow.onImportWld?.());
-      this.content.append(btns);
     }
   }
 

@@ -2452,39 +2452,23 @@ export class UI {
   trashEl: HTMLElement | null = null;
   /** 成就提示牌（背包内 Advisor 卡） */
   achAdvisorEl: (HTMLElement & { update(): void }) | null = null;
-  /** 装备/杂项页签与 Loadout 按钮（背包面板顶部） */
-  private eqPageEl: HTMLElement | null = null;
-  private miscPageEl: HTMLElement | null = null;
   /** 配饰格可见性眼睛钮（槽序 → 元素,attachVisibilityEye 登记/refreshAllNow 重刷） */
   private accEyeEls = new Map<number, HTMLElement>();
   private loadoutBtns: HTMLButtonElement[] = [];
-  private eqPageBtns: HTMLButtonElement[] = [];
   /** 背包侧"堆叠至附近宝箱"钮（ChestStack：左键堆叠/右键循环模式；开箱时隐藏） */
   private quickStackBtn!: HTMLButtonElement;
   /** ChestStack 钮悬停态（帧选 0/1 常态·悬停位） */
   private qsHover = false;
   /** 多人玩家列表入口（联机态显示；面板本体在 PlayerListPanel.ts） */
   private playerListBtn: HTMLButtonElement | null = null;
-  private equipPage = 0;
   /** PvP 剑钮 + 6 队伍钮（DrawPVPIcons Main.cs:42074；refreshPvpButtons 刷帧/提示） */
   private pvpSwordBtn!: HTMLButtonElement;
   private pvpTeamBtns: HTMLButtonElement[] = [];
   /** 队伍/PvP 切换冷却截止（teamCooldown 300t 的墙钟等价；:42106/:42171） */
   private pvpCooldownUntil = 0;
 
-  /** 页签切换（原版 EquipPage 0=装备 2=杂项；DrawInventory :40614） */
-  setEquipPage(page: number): void {
-    this.equipPage = page;
-    if (this.eqPageEl) this.eqPageEl.style.display = page === 0 ? 'flex' : 'none';
-    if (this.miscPageEl) this.miscPageEl.style.display = page === 1 ? 'flex' : 'none';
-    // 页签高亮：按钮序 [装备,住房,杂项]——内部页 1(杂项) 高亮第 3 枚；
-    // 住房页签（第 2 枚）是覆盖层入口，永不高亮（原版 EquipPage 1 独立页语义）
-    const bi = page === 1 ? 2 : 0;
-    this.eqPageBtns.forEach((b, k) => {
-      b.style.borderColor = k === bi ? '#ffd75a' : '#6a5a8a';
-    });
-    this.refreshAll();
-  }
+  /** ★页签机制已拆（2026-08-27 用户要求）：装备/杂项合并为常驻左列+右缘杂项列，
+   *  页签只剩 住房（覆盖层入口）/图鉴；setEquipPage/EquipPage 概念随之退役 */
 
   // ---- PvP/队伍快切钮行为（DrawPVPIcons Main.cs:42074-42195） ----
 
@@ -2571,24 +2555,21 @@ export class UI {
         row.appendChild(b);
         this.loadoutBtns.push(b);
       }
-      // 页签：装备 / 住房 / 杂项（原版 EquipPage 0/1/2——DrawPageIcons :42198 三枚
-      // 页签图标，页 1=住房 DrawNPCHousesInUI :40813。住房页签点击开 HousingPanel
-      // 覆盖层（Canvas 1:1 房屋列，2026-08-15 B 方案），装备/杂项切左列页）
+      // 页签：住房（原版 EquipPage 1=住房 DrawNPCHousesInUI :40813——点击开
+      // HousingPanel 覆盖层（Canvas 1:1 房屋列，2026-08-15 B 方案））。
+      // ★装备/杂项页签已拆（2026-08-27 用户要求）：装备常驻左列、杂项移右缘列
+      // （玩家对决位，PvP/队伍钮下移），页签只剩住房入口
       const spacer = el('div');
       spacer.style.flex = '1';
       row.appendChild(spacer);
-      this.eqPageBtns = [];
-      for (const [label, page] of [[Lang.text('Mods.SandboxWorld.UI.Equipment'), 0], [Lang.text('Mods.SandboxWorld.Housing.Button'), -1], [Lang.text('Mods.SandboxWorld.Tabs.Misc'), 1]] as const) {
-        const b = el('button', 'sw-btn');
-        b.textContent = label;
+      {
+        const b = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Housing.Button'));
         b.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
-          if (page === -1) { this.onHousing?.(); return; }   // 住房页 = 原版 EquipPage 1
-          this.setEquipPage(page);
+          this.onHousing?.();
         });
         row.appendChild(b);
-        this.eqPageBtns.push(b);   // page -1（住房）不参与高亮——setEquipPage 按 0/1 着色
       }
       // 图鉴入口（原版 BestiaryMenuButton Main.cs:41896-41910 在右上 2×2 钮簇
       // (498,278)；贴图 BestiaryMenuButton 未在素材集，暂留顶栏文字钮）
@@ -2671,22 +2652,24 @@ export class UI {
       col.style.cssText = 'display:flex; flex-direction:column;';
       return col;
     };
-    this.eqPageEl = el('div');
     this.accEyeEls.clear();   // 面板重建（重进世界）时旧眼钮引用作废
-    this.eqPageEl.style.cssText = 'display:flex; gap:16px;'; // 列距拉开：自制列标签与邻列槽贴叠会被读成"词左边的杂字"（原版无文字标签不显此问题）
-    this.eqPageEl.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 7, 'dye'));            // 染料 dye[0-2]+[3-9]
-    this.eqPageEl.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor')); // 时装 armor[10-12]+[13-17]
+    const eqPage = el('div');
+    eqPage.style.cssText = 'display:flex; gap:16px;'; // 列距拉开：自制列标签与邻列槽贴叠会被读成"词左边的杂字"（原版无文字标签不显此问题）
+    eqPage.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 7, 'dye'));            // 染料 dye[0-2]+[3-9]
+    eqPage.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor')); // 时装 armor[10-12]+[13-17]
     const equipCol = vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor', true);   // 装备 armor[0-2]+[3-7]（防御计数器挂此列底;配饰段挂眼睛开关）
-    this.eqPageEl.appendChild(equipCol);
-    left.appendChild(this.eqPageEl);
-    // 杂项页：miscEquips[5]（宠物/光源/矿车/坐骑/抓钩，context 19/20/18/17/16）+ miscDyes[5]（context 33）
-    this.miscPageEl = el('div');
-    this.miscPageEl.style.cssText = 'display:none; gap:10px;';
+    eqPage.appendChild(equipCol);
+    left.appendChild(eqPage);
+    // 杂项（常驻右缘列，原杂项页 2026-08-27 并入）：miscEquips[5]（宠物/光源/矿车/
+    // 坐骑/抓钩，context 19/20/18/17/16）+ miscDyes[5]（context 33）——挂 advRail
+    // 玩家对决原位，PvP/队伍钮被顶到其下（节点在下方 advRail 段挂载）
     const MISC_LABELS = [
       Lang.text('Mods.SandboxWorld.Tabs.Pet'), Lang.text('Mods.SandboxWorld.Tabs.Light'),
       Lang.text('Mods.SandboxWorld.Tabs.Minecart'), Lang.text('Mods.SandboxWorld.Tabs.Mount'),
       Lang.text('Mods.SandboxWorld.Tabs.Grapple'),
     ];
+    const miscRail = el('div');
+    miscRail.style.cssText = 'display:flex; gap:10px; align-items:flex-start;';
     const miscCol = el('div');
     miscCol.style.cssText = 'display:flex; flex-direction:column;';
     MISC_LABELS.forEach((lbl, k) => {
@@ -2712,9 +2695,8 @@ export class UI {
       pair.appendChild(slotEl);
       miscCol.appendChild(pair);
     });
-    this.miscPageEl.appendChild(miscCol);
-    this.miscPageEl.appendChild(vcol(Lang.text('Mods.SandboxWorld.Tabs.Dye'), 0, 5, 'miscDye'));
-    left.appendChild(this.miscPageEl);
+    miscRail.appendChild(miscCol);
+    miscRail.appendChild(vcol(Lang.text('Mods.SandboxWorld.Tabs.Dye'), 0, 5, 'miscDye'));
     // 垃圾桶（持久槽；可交换取回）——原版 (448,258) scale0.85=44px、槽底 Back7（context 6）
     const trashWrap = el('div');
     trashWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.3')));
@@ -2836,19 +2818,21 @@ export class UI {
     clusterRow.appendChild(bEmote);
     right.appendChild(clusterRow);
     body.appendChild(right);
-    // 右缘列：成就提示牌 + PvP/队伍钮（2026-08-21 用户指定——面板右缘成就卡下方
-    // 整块空白，PvP 列挂这里流内排布，不挤合成区宽度；列高 225 < 左装备列 620，
-    // 面板高度不受影响。★与左列 rightRail（垃圾桶/钱币）重名，此为 advRail）
+    // 右缘列：成就提示牌 + 杂项（宠物/光源/矿车/坐骑/钩爪+染料，原杂项页迁入）
+    // + PvP/队伍钮（2026-08-27 用户指定：杂项搬玩家对决原位,对决/队伍钮被顶下去；
+    //   列高 ≈ 成就卡+杂项 310+PvP 120 ≈ 左装备列 620,面板高度不受影响。
+    //   ★与左列 rightRail（垃圾桶/钱币）重名,此为 advRail）
     const advRail = el('div');
     advRail.style.cssText = 'display:flex; flex-direction:column; gap:8px; flex:none; align-items:center;';
     // 成就提示牌 → 物品格右侧（用户指定；alignSelf 防 body stretch 拉高卡片）
     this.achAdvisorEl.style.alignSelf = 'stretch';
     advRail.appendChild(this.achAdvisorEl);
+    advRail.appendChild(miscRail);   // 杂项（玩家对决原位）——PvP/队伍在其下方
     body.appendChild(advRail);
     this.invPanel.appendChild(body);
 
     // ---- PvP/队伍快切钮（DrawPVPIcons Main.cs:42074-42195：原版背包右下角；
-    //      本仓按用户指定挂右缘列（成就卡下方流内，不挤合成区宽度）；
+    //      本仓挂右缘列杂项块下方（2026-08-27 杂项迁入此列,对决/队伍钮顶下去）；
     //      原版 ShouldPVPDraw=netMode==1 仅联机画，本仓常开=设置页 PvP/队伍同款
     //      语义（单机调试便利 + 联机 msg13 同步）） ----
     const pvpWrap = el('div');
