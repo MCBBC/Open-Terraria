@@ -42,7 +42,9 @@ const QUICK_SAVE_KEY = 'sandboxworld.quicksave';
 let legacyShim: HTMLElement | null = null;
 
 export interface FlowHandle {
-  showTitle(): void;
+  showTitle(bgPaused?: boolean): void;
+  /** 揭幕解冻菜单背景（main.ts splash.revealBehind 时调——配合 showTitle(true)） */
+  resumeMenuBg(): void;
   newWorld(seed: string, w: number, h: number): Promise<void>;
   quickLoad(): Promise<void>;
   importWld(buf: Uint8Array): Promise<void>;
@@ -927,7 +929,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     (window as unknown as { __swHousingPanel?: unknown }).__swHousingPanel = panel;
   }
 
-  function showTitle() {
+  function showTitle(bgPaused = false) {
     audio.play('title');
     ui.closeAll();
     // SW 资产预载(仅生产构建):进菜单即按优先级全量后台下载 + 挂右下角进度徽标
@@ -938,6 +940,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       menuBg = new MenuBackground(root);
       (window as unknown as { __swMenuBg?: MenuBackground }).__swMenuBg = menuBg; // 调试句柄
     }
+    // 启动路径(bgPaused=true):菜单挂在 splash 后备场但揭幕前冻结 tick/绘制
+    // ——过渡图阶段时间不再空转,加载密集期零渲染负载(2026-08-27 用户报);
+    // 回菜单路径(quitToMenu 等)不传参=立即恢复运镜
+    menuBg.setPaused(bgPaused);
     titleMenu?.destroy();
     titleMenu = new TitleMenu(root, {
       onSinglePlayer: () => gateAssetsOrRun(() => showCharacterSelect()),
@@ -962,6 +968,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       },
     });
     installLegacyShim();
+  }
+
+  /** 揭幕解冻菜单背景（main.ts 在 splash.revealBehind 时调） */
+  function resumeMenuBg(): void {
+    menuBg?.setPaused(false);
   }
 
   /** 旧 puppeteer 脚本兼容垫片：select(尺寸)+button(创建) 隐藏 DOM（M7 移除）。
@@ -1111,6 +1122,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   return {
     showTitle,
+    resumeMenuBg,
     newWorld,
     quickLoad,
     importWld,

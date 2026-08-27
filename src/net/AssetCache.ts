@@ -327,12 +327,15 @@ export async function primeBootAssets(timeoutMs = 30_000): Promise<boolean> {
   void initAssetCache().then(() => warmAllAssets());
   const want = ['audios/music/Music_50.mp3', 'audios/music/Music_51.mp3'];
   const t0 = Date.now();
+  let sent = -1;
   for (;;) {
     try {
       const ms = await Promise.all(want.map((u) => caches.match(u)));
-      if (ms.every(Boolean)) break;
-    } catch { break; }
-    if (Date.now() - t0 >= timeoutMs) break;
+      const n = ms.filter(Boolean).length;
+      if (n !== sent) { swTrace(`primeBoot 哨兵 ${n}/${want.length}(p0 过渡图+标题曲)`); sent = n; }
+      if (ms.every(Boolean)) { swTrace(`primeBoot 就绪(${Date.now() - t0}ms)`); break; }
+    } catch { swTrace('primeBoot 哨兵 match 异常'); break; }
+    if (Date.now() - t0 >= timeoutMs) { swTrace(`primeBoot ${timeoutMs}ms 超时降级(此后向日葵窗=等 p0,非故障)`); break; }
     await new Promise((r) => setTimeout(r, 250));
   }
   // 哨兵就位(或超时降级)后:利用音频门等待窗口预取两个懒加载 worker
@@ -378,12 +381,20 @@ async function fetchManifestInto(budgets: number[]): Promise<boolean> {
       if (res.ok) {
         const m = (await res.json()) as ZipManifest;
         if (acceptsZipManifest(m)) {
+          // ★compose 幂等门(2026-08-27):重复拉取(单例前的双发遗留/重试路径)
+          //  不得对【已 composed】的 version 再 compose——叠哈希=版本漂移复辟
+          const first = !zipPlan;
           zipPlan = m;
-          const prevVer = state.version;
-          state.version = composeVersion(state.version, m.contentHash);
-          state.total = m.totalFiles;
-          try { localStorage.setItem(CONTENT_HASH_KEY, m.contentHash); } catch { /* */ }
-          swTrace(`manifest 试${a + 1} ok ${m.totalFiles}条 hash=${m.contentHash.slice(0, 8)} ${Date.now() - tA}ms ver ${prevVer}→${state.version}`);
+          if (first) {
+            const prevVer = state.version;
+            state.version = composeVersion(state.version, m.contentHash);
+            state.total = m.totalFiles;
+            try { localStorage.setItem(CONTENT_HASH_KEY, m.contentHash); } catch { /* */ }
+            swTrace(`manifest 试${a + 1} ok ${m.totalFiles}条 hash=${m.contentHash.slice(0, 8)} ${Date.now() - tA}ms ver ${prevVer}→${state.version}`);
+          } else {
+            state.total = m.totalFiles;
+            swTrace(`manifest 试${a + 1} ok(重复拉取,version 保持 ${state.version})`);
+          }
           return true;
         }
         swTrace(`manifest 试${a + 1} 形状不符(${Date.now() - tA}ms)`);
@@ -420,7 +431,19 @@ function scheduleManifestRetry(): void {
   }, 20_000);
 }
 
-export async function initAssetCache(): Promise<void> {
+let initInFlight: Promise<void> | null = null;
+/** 单例包装(2026-08-27 ★双发竞态根修):main 与 primeBootAssets 各调一次,
+ *  原 enabled 守卫要等首次跑完才翻真——manifest await 窗口(~105ms)内第二次
+ *  进入 ⇒ manifest 双拉 ⇒ composeVersion 对【已 composed 的 version】再 compose
+ *  = 版本叠哈希漂移(G→r403ge)⇒ SW 切名、暖存整批"失踪"、菜单贴图全空
+ *  (用户 PC trace 06:07:21 实锤:两行 manifest ok + ver 叠变)。并发调用复用
+ *  同一 Promise。 */
+export function initAssetCache(): Promise<void> {
+  if (!initInFlight) initInFlight = doInitAssetCache();
+  return initInFlight;
+}
+
+async function doInitAssetCache(): Promise<void> {
   if (state.enabled || typeof navigator === 'undefined' || !navigator.serviceWorker) return;
   const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
   const force = q.has('sw');

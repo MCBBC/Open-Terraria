@@ -5,6 +5,7 @@
 // audios/music/Music_<id>.mp3（tools/xwb-extract.mjs 提取）。
 import { MUSIC } from '../data/Music';
 import { Sfx } from './Sfx';
+import { swTrace } from '../net/AssetCache';
 
 const TITLE_ID = MUSIC.TitleIntro; // 50
 
@@ -94,6 +95,32 @@ export class AudioSystem {
   isAutoplayBlocked(): boolean {
     const ac = this.audio();
     return ac ? ac.state === 'suspended' : false;
+  }
+
+  /** ★探测式判定（2026-08-27 手机实测“策略禁 autoplay 却直接跳过耳机门”）：
+   *  策略对新建 AC 的挂起是【异步】的——创建瞬间常读 running，数百 ms 后才被
+   *  挂起；同步快照在启动 IO 高峰期必误判“未拦截”→ 不出门 → 静音裸奔。
+   *  现：创建即 running 时等 250ms 给策略引擎挂起窗口，再实测 resume——
+   *  resume 后仍非 running = 拦截实锤（要门）；running = 环境允许（不门）。 */
+  async detectAutoplayBlocked(): Promise<boolean> {
+    const ac = this.audio();
+    if (!ac) return false;
+    // st() 函数化读取:绕开 TS 对 ac.state 的控制流窄化(跨 await 后状态可变,
+    // 字面量比较是运行时合法的——TS2367 为假阳性)
+    const st = (): string => ac.state as string;
+    if (st() === 'running') {
+      await new Promise((r) => setTimeout(r, 250));
+      if (st() !== 'suspended') { swTrace('音频探测: AC running（策略未拦）'); return false; }
+    }
+    try {
+      await Promise.race([
+        ac.resume(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('resume超时')), 600)),
+      ]);
+    } catch { /* resume 被拒/超时 = 拦截实锤 */ }
+    const blocked = st() !== 'running';
+    swTrace(`音频探测: state=${st()} → ${blocked ? '拦截，出门' : '未拦截'}`);
+    return blocked;
   }
 
   /** 手势恢复（音频门点击放行）：resume 并回是否已 running（armUnlock 兜底并行） */
@@ -264,6 +291,7 @@ export class AudioSystem {
     if (id === 0) return;
     const ac = this.audio();
     if (!ac) return;
+    if (ac.state !== 'running') swTrace(`playMusic 于挂起 AC 起播(state=${ac.state},手势恢复后出声)`);
     // 缓冲未就绪：解码完成后补建源（此时才真正起播，无冷启动顿挫）
     if (!this.buffers.has(id)) {
       void this.buffer(id).then((buf) => { if (buf && this.curMusic === id) this.track(id); });

@@ -1010,11 +1010,20 @@ function templePart2(
   flipGenSolid([232], true);
 }
 
-/** PlaceTile(105, style)（神庙雕像，cs:60090）→ Place2xX（cs:39705）+ SquareTileFrame×2。
+/** PlaceTile(105, style)（神庙雕像）→ Place2xX（cs:39705）+ SquareTileFrame。
  *  锚 = 底行左列 (x, y)；2×3 占位 (x..x+1)×(y-2..y)；门 = 六格全 inactive +
  *  SolidTile2(x,y+1) && SolidTile2(x+1,y+1)（★曾缺地面门——斜坡/半砖砖上 JS 放
  *  vanilla 拒）；帧 55 列换行（cs:39716-39720）。前奏 Clear 只清锚格（其余五格
- *  ghost slope 按 vanilla **不清**——Place2xX 只写 active/frameY/frameX/type）。 */
+ *  ghost slope 按 vanilla **不清**——Place2xX 只写 active/frameY/frameX/type）。
+ *  ★QQQQQQQQ（2026-08-27）notraps#66 定罪落刀：PlaceTile 对象分派族
+ *  （rig cs:60655 case105 等）= `Place2xX(...); SquareTileFrame(...); break` ——
+ *  尾部 SquareTileFrame **无条件执行**（Place2xX 失败无 return 值可拦）；
+ *  PlaceTile 末尾还有一发 `if (tile.active()) SquareTileFrame` 二连。旧 JS 失败
+ *  早退零级联 ⇒ 邻接先在物失去重帧机会：notraps 种子 x86 在 (730,735) 候选失败
+ *  时九宫打到左邻 (729,734..736) 的 Statues 雕像 → Check2xX 底锚门
+ *  （SolidTileAllowBottomSlope(728/729,737)=makeTemple 火刺非实心）败 → 整组杀，
+ *  JS 雕像残留 ×6（mile8 #66 T0>105×6 唯一族）。修复：Place2xX 门败走同一发
+ *  无条件尾帧再早退；成功路保持二连不变。 */
 function placeStatueTemple(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
   const STATUE = TILE_BY_KEY['v_105_statue'];
   if (STATUE === undefined) return false;
@@ -1026,12 +1035,17 @@ function placeStatueTemple(st: TileStore, rng: RNG, x: number, y: number, style:
   const row = Math.floor(sty / 55);
   num -= 1980 * row;         // 55*36 列换行
   num2 += 54 * row;
+  let placed = true;
   for (let i = y - 2; i <= y; i++) {
     for (const xx of [x, x + 1]) {
-      if (st.inBounds(xx, i) && st.flags[st.idx(xx, i)]) return false;   // 六格须全空
+      if (st.inBounds(xx, i) && st.flags[st.idx(xx, i)]) placed = false;   // 六格须全空
     }
   }
-  if (!solidTile2TP(st, x, y + 1) || !solidTile2TP(st, x + 1, y + 1)) return false;
+  if (!solidTile2TP(st, x, y + 1) || !solidTile2TP(st, x + 1, y + 1)) placed = false;
+  if (!placed) {
+    genSquareTileFrame(st, rng, x, y);   // case 105 体尾（★无条件，失败也发）
+    return false;
+  }
   // PlaceTile 前奏 Clear（锚格 inactive）：type/帧/坡/半砖全清（cs:59499-59501）
   const ai = st.idx(x, y);
   if (st.inBounds(x, y) && !st.flags[ai]) {

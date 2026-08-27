@@ -627,7 +627,7 @@ kvHas('sandboxworld.quicksave').then(async () => {
     try { await primeBootAssets(30_000); } catch { /* 降级放行 */ }
     // ★幕不在此撤:继续盖住音频门之后的 loadAssets/过渡图缓存等待间隙
   }
-  if (!bypassBoot && shouldShowAudioGate() && audio.isAutoplayBlocked()) {
+  if (!bypassBoot && shouldShowAudioGate() && (await audio.detectAutoplayBlocked())) {
     await showAudioGate(() => audio.resumeNow());
   }
   // 素材装载与音频门并行（门期间后台预载，点击放行即有图可显）
@@ -694,13 +694,16 @@ kvHas('sandboxworld.quicksave').then(async () => {
   //  ③ 有下载停在 splash 等完（徽标 z40 浮于其上；splashGate 迟解=时序尽转全
   //     暗+向日葵续等，下完才自收场）
   await initAssetCache();
-  flow.showTitle();            // 菜单+角标文字幕后就位（音乐/预载调用幂等）
+  flow.showTitle(true);        // 菜单+角标文字幕后就位（音乐/预载调用幂等）；★true=
+                               // 背景冻结——揭幕前零 tick 零绘制(2026-08-27 用户报:
+                               // 过渡图阶段时间空转+加载密集期背后全屏渲染抢算力)
   warmAllAssets();
   // ★2026-08-27 用户定案:过渡图阶段必须 zip 全量落盘;渐隐(revealBehind)与
   //   "加载完成"门统一等 hold 放行——菜单揭幕时永不缺图。时序尽(10.3s)而
   //   未完成时由 splash 既有路径转全暗+向日葵续等(徽标持续显示进度)。
   //   revealBehind 曾在 hold 前调用:渐隐段把缺图菜单提前透出(用户实测)。
   await holdForAssetsReady({ minMs: 0 });
+  flow.resumeMenuBg();         // 揭幕即起播——菜单时间从初始值开始（进主菜单才播动画）
   splash.revealBehind();
   splashGate.resolve();        // 全量完成才解 splash"加载完成"门（时序尽自收场）
   await splash.finished;       // 渐隐到菜单后揭幕

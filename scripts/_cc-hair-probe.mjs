@@ -2,21 +2,30 @@
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/tmp/cc-hair-' + (Date.now() % 100000), args: ['--no-proxy-server'],
+  headless: 'new', userDataDir: process.env.SW_USERDIR ?? ('/tmp/cc-hair-' + (Date.now() % 100000)), args: ['--no-proxy-server'],
 });
 const page = await browser.newPage();
 await page.goto('https://sandbox.vinlic.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 // 等揭幕(splash 移除+菜单可点;全新 profile 需等 warm 全量)
-for (let i = 0; i < 60; i++) {
+for (let i = 0; i < 66; i++) {
   await new Promise((r) => setTimeout(r, 5000));
   const go = await page.evaluate(() => !document.getElementById('sw-splash') && !document.getElementById('sw-boot-prime') && !!document.querySelector('[data-act=sp]'));
   if (go) break;
+  if (i === 65) {   // 超时兜底:开诊断面板抓 trace 再退
+    await page.evaluate(() => window.__swAssetDiag && window.__swAssetDiag());
+    await new Promise((r) => setTimeout(r, 500));
+    const ta = await page.evaluate(() => document.querySelector('#sw-asset-diag textarea')?.value ?? '(无面板)');
+    console.log('== 超时现场 trace(尾 40 行)==');
+    console.log(ta.split('\n').slice(-40).join('\n'));
+  }
 }
 const t0 = Date.now();
 for (let i = 0; i < 10; i++) { try { await page.click('[data-act=sp]'); break; } catch { await new Promise((r) => setTimeout(r, 1000)); } }
 // 单人模式 → 角色选择列表
 for (let i = 0; i < 20; i++) { if (await page.$('[data-act=new]')) break; await new Promise((r) => setTimeout(r, 250)); }
-await page.click('[data-act=new]');  // 新建角色 → CharCreation
+await page.click('[data-act=new]');  // 新建角色 → CharCreation(默认信息页)
+for (let i = 0; i < 20; i++) { if (await page.$('.sw-cc-tab[data-tab=hair]')) break; await new Promise((r) => setTimeout(r, 250)); }
+await page.click('.sw-cc-tab[data-tab=hair]');   // 切到发型页
 // 等发型网格
 for (let i = 0; i < 20; i++) {
   if (await page.$('.sw-cc-hairgrid')) break;

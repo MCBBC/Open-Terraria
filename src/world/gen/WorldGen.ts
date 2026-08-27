@@ -407,6 +407,7 @@ import { runWavyCavesPass } from './vanilla/WavyCavesPass';
 import { runTreePass, randomizeTreeStyle, randomizeCaveBackgrounds, growAshTree } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
 import { runPotsPass } from './vanilla/PotsPass';
+import { runBoulderPileSection } from './vanilla/PilesPass';
 import { runTeleporterPass } from './vanilla/TeleporterPass';
 import { runGravitatingSandPass } from './vanilla/GravitatingSandPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
@@ -1565,6 +1566,10 @@ function potPass({ store, rng, world }: GenCtx) {
   if (graveyardSeedGate(gs.seedFlags)) {
     spawnGraveyardBiomesEverywhere(store, rng, world, gs);
   }
+  // ---- ★QQQQQQQQ 位次勘误（1457 cs:18135-18204）：noTraps/errorWorld 巨石三角段
+  //      归属 **本 pass**（teleporters/墓园段之后、瓦罐主循环之前）——SSSSSS 批曾错挂
+  //      PilesPass 头 → notraps 链 #71 起全流位漂移。执行序=原版注册序。
+  runBoulderPileSection(store, rng, gs);
   runPotsPass(store, rng, gs);
 }
 

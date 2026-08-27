@@ -458,7 +458,7 @@ const CSS = `
 @keyframes sw-cc-bakespin { to { transform: rotate(360deg); } }
 .sw-cc-hairgrid { flex: 1; min-height: 0; overflow-y: auto; display: grid;
   grid-template-columns: repeat(10, 44px); gap: 4px 2px; justify-content: center; align-content: start;
-  padding: 2px 14px 4px 2px; scrollbar-width: thin; scrollbar-color: #4a5aa0 rgba(10, 14, 40, 0.6); }
+  padding: 2px 14px 8px 2px; scrollbar-width: thin; scrollbar-color: #4a5aa0 rgba(10, 14, 40, 0.6); }
 .sw-cc-hairgrid::-webkit-scrollbar { width: 12px; }
 .sw-cc-hairgrid::-webkit-scrollbar-track { background: rgba(10, 14, 40, 0.6); }
 .sw-cc-hairgrid::-webkit-scrollbar-thumb { background: #4a5aa0; border: 2px solid #232c52; }
@@ -476,7 +476,7 @@ const CSS = `
   background: var(--cc-catborder) center / 100% 100% no-repeat; }
 .sw-cc-hairbtn:hover::after { opacity: 1; }
 .sw-cc-hairbtn .sw-cc-thumb { z-index: 3; }
-.sw-cc-hairlow { flex: none; height: 34px; display: flex; justify-content: center; align-items: center; gap: 12px; }
+.sw-cc-hairlow { flex: none; height: 34px; margin-top: 6px; display: flex; justify-content: center; align-items: center; gap: 12px; }
 .sw-cc-arrow { position: relative; width: 32px; height: 32px; image-rendering: pixelated; }
 .sw-cc-arrow:hover { outline: 2px solid #ffe745; }
 .sw-cc-arrowico { position: absolute; inset: 0; image-rendering: pixelated;
@@ -919,6 +919,9 @@ export class CharCreation {
       this.appearance.hair = CHAR_CREATION_HAIRS[Math.floor(Math.random() * CHAR_CREATION_HAIRS.length)];
       this.syncHslFromPart();
       this.buildContent();
+      // buildContent 走发型页复用支=节点重挂滚动归零（DOM 脱离文档即丢 scrollTop）
+      // ——随机后把新选中项滚回视野（2026-08-27 用户报）
+      if (this.tab === 'hair') this.scrollHairTo(this.appearance.hair, true);
       return;
     }
     if (this.dresser) {
@@ -1269,7 +1272,7 @@ export class CharCreation {
     low.append(
       this.arrowBtn(0, 'Mods.SandboxWorld.CharCreate.PrevHair', () => this.stepHair(-1)),
       this.smallBtn('Randomize', 'Mods.SandboxWorld.CharCreate.RandomHair', () => {
-        this.setHair(CHAR_CREATION_HAIRS[Math.floor(Math.random() * CHAR_CREATION_HAIRS.length)]);
+        this.setHair(CHAR_CREATION_HAIRS[Math.floor(Math.random() * CHAR_CREATION_HAIRS.length)], true);
       }),
       this.arrowBtn(1, 'Mods.SandboxWorld.CharCreate.NextHair', () => this.stepHair(1)),
     );
@@ -1278,11 +1281,12 @@ export class CharCreation {
     this.scheduleSheetBake(0);
   }
 
-  private setHair(id: number): void {
+  private setHair(id: number, scroll = false): void {
     this.appearance.hair = id;
     this.content.querySelectorAll('.sw-cc-hairbtn').forEach((x) => {
       x.classList.toggle('active', Number((x as HTMLElement).dataset.hair) === id);
     });
+    if (scroll) this.scrollHairTo(id, true);
     this.queueIconTint();
   }
 
@@ -1290,7 +1294,21 @@ export class CharCreation {
     const list = CHAR_CREATION_HAIRS;
     const idx = list.indexOf(this.appearance.hair);
     const next = idx < 0 ? 0 : (idx + dir + list.length) % list.length;
-    this.setHair(list[next]);
+    this.setHair(list[next], true);
+  }
+
+  /** 选中发型滚动定位（2026-08-27 用户报:随机/箭头换选后网格须跟随——随机=居中
+   *  滚入;箭头=已可见则不动,滚出视野时贴边滚入）。grid 非定位元素,btn/grid 的
+   *  offsetParent 同为 .sw-cc-hair(position:relative),offsetTop 相减即网格内纵位 */
+  private scrollHairTo(id: number, center: boolean): void {
+    const grid = this.content.querySelector<HTMLElement>('.sw-cc-hairgrid');
+    const btn = grid?.querySelector<HTMLElement>(`.sw-cc-hairbtn[data-hair="${id}"]`);
+    if (!grid || !btn) return;
+    const y = btn.offsetTop - grid.offsetTop;
+    const h = btn.offsetHeight, view = grid.clientHeight;
+    if (!center && y >= grid.scrollTop && y + h <= grid.scrollTop + view) return;
+    const target = center ? y - (view - h) / 2 : y < grid.scrollTop ? y : y + h - view;
+    grid.scrollTop = Math.min(Math.max(target, 0), grid.scrollHeight - view);
   }
 
   // ---- 颜色页（部位 = 当前颜色页签） ----

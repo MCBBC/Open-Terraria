@@ -4599,6 +4599,7 @@ export class Game implements GameHooks {
     (window as unknown as { __swNatureParticles?: typeof natureParticles }).__swNatureParticles = natureParticles;
     let steps = 0;
     if (!this.paused) {
+      this.tickChestAutoClose();
       this.acc += elapsed;
       while (this.acc >= FIXED_DT && steps < 5) {
         this.fixedUpdate(FIXED_DT);
@@ -8402,9 +8403,14 @@ export class Game implements GameHooks {
         }
       }
       // 光标格本身是蜥蜴祭坛时跳过 ±1 格宝箱搜索——神庙宝箱全庙随机散布可能
-      // 贴着祭坛，原版无 ±1 搜索（点到箱本体才开箱）；不跳过则右键祭坛变成开箱
+      // 贴着祭坛，原版无 ±1 搜索（点到箱本体才开箱）；不跳过则右键祭坛变成开箱。
+      // ★射程门（Player.cs:31495）：TileInteractionsCheck 整体被
+      //   IsInTileInteractionRange(smartInteractX,smartInteractY,Simple) 门住——
+      //   光标 tile 不在 tileRange 5/3 矩形内连交互都不进。曾缺门=隔全图右键开箱
       const cursorIsAltar = type === TILE_BY_KEY['v_237_lihzahrd_altar'];
-      const nearChest = cursorIsAltar ? null : this.findChestNear(tx, ty);
+      const nearChest = !cursorIsAltar && this.inTileRange(tx, ty)
+        ? this.findChestNear(tx, ty)
+        : null;
       if (nearChest) {
         this.tryOpenChest(nearChest);
         this.input.rightDown = false;
@@ -16939,13 +16945,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   private interactAt(tx: number, ty: number) {
     const st = this.world.store;
-    // 距离门（原版 Player.IsInTileInteractionRange Simple：约 5 格）——此前整个
-    // interactAt 无距离检查，隔全图右键可开储物/设床重生点
-    {
-      const dx = tx - Math.floor(this.player.cx / TILE);
-      const dy = ty - Math.floor(this.player.cy / TILE);
-      if (!this.inTileRange(tx, ty, this.blockRange())) { this.input.rightDown = false; return; }
-    }
+    // 距离门（原版 Player.cs:31495 IsInTileInteractionRange Simple，TB=0——
+    // :31495 调用不带 TB；此前整个 interactAt 无距离检查，隔全图右键可开储物/设床）
+    if (!this.inTileRange(tx, ty)) { this.input.rightDown = false; return; }
     const type = st.get(tx, ty);
     // 原版 tile sheet（八音盒/喷泉/天塔柱/派对柱右键分支用）
     const sh = this.wiring?.sheetOf(tx, ty) ?? -1;
@@ -19376,6 +19378,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 3×3 邻域内找宝箱（点击容差） */
+  /** 开箱超距自动关（Player.cs:30614-30620）：世界宝箱面板开着时每 tick 校验——
+   *  箱多格命中盒(Inflate −1)最近点仍在 IsInTileInteractionRange(Simple) 内才保持
+   *  打开,出界 → chest=-1 + Sound 11。命中盒按原版 :30635-30651 分型：
+   *  BasicChest 21=32×32 / 88 大橱柜=48×32 / 29=32×16 / 463/491=48×64@(−16,−32)。
+   *  玩家随身容器(x<0 钱槽/储物族)不判距离（内容随身；vanilla 走
+   *  piggyBankProjTracker 等 proj 存活链,本仓自有存活管理,登记） */
+  private tickChestAutoClose() {
+    const c = this.openChestRef?.();
+    if (!c || c.x === undefined || c.x < 0 || !this.world) return;
+    const st = this.world.store;
+    if (!st.inBounds(c.x, c.y)) return;
+    const sheet = TILE_DEFS[st.type[st.idx(c.x, c.y)]]?.vanilla?.sheet ?? -1;
+    let rx = c.x * TILE, ry = c.y * TILE, rw = 32, rh = 32;   // BasicChest（21/97）
+    if (sheet === 88) rw = 48;                                 // 大橱柜
+    else if (sheet === 29) rh = 16;
+    else if (sheet === 463 || sheet === 491) { rx -= 16; ry -= 32; rw = 48; rh = 64; }
+    // Inflate(-1,-1) → ClosestPointInRect(player.Center)（:30643-30649 clamp 语义）
+    const px = Math.max(rx + 1, Math.min(this.player.cx, rx + rw - 1));
+    const py = Math.max(ry + 1, Math.min(this.player.cy, ry + rh - 1));
+    if (!this.inTileRange(Math.floor(px / TILE), Math.floor(py / TILE))) {
+      this.closeChestPanel?.();                                // chest = -1
+      this.sfx.play('menuClose', 1);                           // Sound 11
+    }
+  }
+
   private findChestNear(tx: number, ty: number): ChestData | null {
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {

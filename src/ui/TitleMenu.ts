@@ -25,15 +25,12 @@ import { openAssetDiagPanel } from './AssetDownloadUI';
 /** Sun.png 114×114 / Moon_N.png 50×400（8 相位帧，帧宽 50）——SkyRenderer.ts:27-28 */
 const SUN_SIZE = 114;
 const MOON_FRAME_W = 50;
-/** 昼夜判定边界 = Clock.DAWN/DUSK（0.1875/0.8125）；下面行程映射沿用
- *  SkyRenderer.ts:1024-1028 自身的 0.25/0.75 约定（含晨昏边缘 dayTime 为负的
- *  既有行为）——本文件与之逐式对齐，不另立口径 */
+/** 昼夜判定边界 = Clock.DAWN/DUSK（0.1875/0.8125）；行程映射 = 画布菜单太阳
+ *  同款（SkyRenderer.ts:3709 日 (t−DAWN)/0.625·54000、:3896 夜 (t−DUSK)/0.375·32400
+ *  ——2026-08-23 校正的 DrawSunAndMoon 口径。★本文件曾沿用旧 0.25/0.75 基,
+ *  命中层与可见太阳仅在正午 t=0.5 处重合(两线性映射交点),其余时刻恒偏
+ *  ——用户实报"只有太阳在 logo 区(≈屏顶中央)才抓得到"即此因,2026-08-27 对齐） */
 const DAY_T0 = 0.1875, DAY_T1 = 0.8125;
-/** 菜单月相：Clock.moonPhase 初始 0 且菜单侧无推进（Game 黎明推进不在菜单跑）
- *  → 恒满月帧 0，与画布 SkyRenderer 读同一 Clock 的结果一致 */
-const MENU_MOON_PHASE = 0;
-const SUN_SPRITE = 'sprites/vanilla/Sun.png';
-const MOON_SPRITE = 'sprites/vanilla/Moon_0.png';
 
 export interface TitleMenuFlow {
   onSinglePlayer(): void;
@@ -92,33 +89,18 @@ const CSS = `
 }
 /* 右下署名（GLM-5.3/GLM-5.3-Flash 协作声明）用【内联样式】——注入样式表的
    getElementById 守卫在 HMR 期会驻留旧 CSS 吞掉变更，内联不受其害 */
-/* 日/月命中层 + 可见体：罩住天空画布里的太阳/月亮（Main.cs:62420 value4）。
+/* 日/月命中层：罩住天空画布里的太阳/月亮（Main.cs:62420 value4），纯命中区
+   无自有贴图——★曾内嵌 .body 可见体在抓取中显示=第二颗太阳(2026-08-27 用户报
+   双太阳)。那是 setCelestialModY 接线前的旧反馈方案(彼时画布只横移);现画布经
+   setClockT 横移 + setCelestialModY 垂直(sunModY,SkyRenderer :3937)双轴跟手
+   =原版"拖的就是真太阳",DOM 可见体已整体拆除,本层只当抓取热区+grab 光标。
    z-index:-1 = 根 stacking context 内垫底——必在天空画布(0)之上、logo/按钮之下，
-   不会截走菜单按钮的点击；touch-action:none 防触摸拖动触发页面手势。
-   ★可见体常态隐藏(2026-08-13,用户报"太阳跑到前景层前面"):DOM 层结构性垫在
-   整块画布之上=盖住山/树前景,而原版日/月画在山层之后被遮挡(Main.cs:61531
-   天空 pass → :61546 DrawBG)——常态可见的日/月=画布那颗(含被山遮挡语义)。
-   DOM 体仅【拖拽抓取中】显示:跟手游标下的可见反馈(原版拖的就是真太阳,
-   画布侧经 onSunMoonGrab→setClockT 同步横移,DOM 体补垂直跟手) */
+   不会截走菜单按钮的点击；touch-action:none 防触摸拖动触发页面手势。 */
 .sw-title-celestial {
   position: fixed; pointer-events: auto; cursor: grab; z-index: -1;
   touch-action: none;
 }
 .sw-title-celestial.grabbing { cursor: grabbing; }
-/* (抓取态 .body 显示规则在下方 .body 块处) */
-.sw-title-celestial .body {
-  position: absolute; inset: 0; pointer-events: none;
-  image-rendering: pixelated; background-repeat: no-repeat;
-  background-size: 100% 100%;
-  /* 常态隐藏:让位给画布日/月(正确的遮挡语义)。★visibility 非 opacity
-     (2026-08-18 review):opacity:0 的层仍每帧参与绘制——syncCelestial 每帧
-     写 left/top/transform,菜单全程都在无谓重记录一张隐形日/月贴图
-     (解码逐出窗口期=LazyPixelRef 候补源);visibility:hidden 跳过绘制,
-     布局与命中热区保留,grab 瞬间可见位置已同步 */
-  visibility: hidden;
-}
-.sw-title-celestial.grabbing .body { visibility: visible; }  /* 抓取中:跟手可见反馈 */
-.sw-title-celestial.night .body { background-size: 100% 800%; } /* 月相竖条 8 帧 */
 /* ---- 手机适配(2026-08-25,加法式覆盖,桌面 ≥1024×768 全不命中)----
    A 竖屏窄(max-width:560):压缩纵向节奏;B 矮横屏(max-height:500):
    手机横屏 ~390 高,13vh+486logo+5钮列 ≈470 会溢出 → 缩 logo + 收紧间距 */
@@ -146,9 +128,6 @@ export class TitleMenu {
   private logoDay!: ImageBitmap | HTMLImageElement;
   private logoNight!: ImageBitmap | HTMLImageElement;
   private celestial!: HTMLDivElement;
-  private celestialBody!: HTMLDivElement;
-  /** 昼/夜贴图态（避免每帧重设 background-image） */
-  private bodyDayTime: boolean | null = null;
   private rafId = 0;
   private unsubLang: (() => void) | null = null;
   /** alreadyGrabbingSunOrMoon（Main.cs:62428/:62451-62454 抓取闩） */
@@ -233,15 +212,15 @@ export class TitleMenu {
     // 日/月命中层 + 可见体（GOING_OLDSCHOOL）——置于按钮之下、天空画布之上
     this.celestial = document.createElement('div');
     this.celestial.className = 'sw-title-celestial';
-    this.celestial.innerHTML = '<div class="body"></div>';
-    this.celestialBody = this.celestial.querySelector('.body')!;
     this.root.appendChild(this.celestial);
     this.celestial.addEventListener('pointerdown', (e) => {
       // mouseLeft && 命中矩形（Main.cs:62436-62451）→ 抓取闩 + 成就（每帧皆调，
       // Achievements.completeFlag 已完成后早退，幂等同原版 Complete()）
+      // ★按下帧也写 modY（原版 :62430 按住首帧即写）——不传 Y 则首帧只改时间,
+      //   太阳垂直方向要等首个 pointermove 才跟手
       this.grabbing = true;
       this.celestial.classList.add('grabbing');
-      this.handleGrab(e.clientX);
+      this.handleGrab(e.clientX, e.clientY);
     });
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);
@@ -263,7 +242,8 @@ export class TitleMenu {
   // ---- 日/月抓取（GOING_OLDSCHOOL，Main.cs:62420-62453 1:1）----
 
   /**
-   * 日/月绘制态，与 SkyRenderer.ts:1024-1067 逐式同源（画布画的那颗同款）：
+   * 日/月绘制态，与画布菜单太阳逐式同源（SkyRenderer.ts:3709/:3896/:3927-3938
+   * ——菜单 bgTopY=0，见 ：3729 !frameCtx 支）：
    * x = ft*(屏宽+图宽*2)-图宽（横穿）、y = dip*250+180（正午/子夜最高）、
    * scale = (1.2-dip*0.4)×(日 1.1 / 夜 1)、rotation = ft*2-7.3。
    */
@@ -271,8 +251,8 @@ export class TitleMenu {
     const t = menuTimeInfo.timeOfDay;
     const W = window.innerWidth;
     const isDay = t > DAY_T0 && t < DAY_T1;                       // Clock.DAWN/DUSK
-    const dayTime = isDay ? ((t - 0.25) / 0.5) * 54000 : 0;
-    const nightTime = !isDay ? ((((t - 0.75) + 1) % 1) / 0.5) * 32400 : 0;
+    const dayTime = isDay ? ((t - DAY_T0) / 0.625) * 54000 : 0;
+    const nightTime = !isDay ? ((((t - DAY_T1) + 1) % 1) / 0.375) * 32400 : 0;
     const size0 = isDay ? SUN_SIZE : MOON_FRAME_W;
     const ft = (isDay ? dayTime : nightTime) / (isDay ? 54000 : 32400);
     const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
@@ -282,23 +262,13 @@ export class TitleMenu {
     return { x, y, size: size0 * scale, rot: ft * 2 - 7.3, dayTime: isDay };
   }
 
-  /** 每帧把命中层与可见体对到画布日/月上（含昼/夜贴图翻转与旋转） */
+  /** 每帧把命中层对到画布日/月上（同公式自算；本层无贴图，画布那颗才是可见体） */
   private syncCelestial(): void {
     const s = this.celestialState();
     this.celestial.style.left = `${Math.round(s.x - s.size / 2)}px`;
     this.celestial.style.top = `${Math.round(s.y - s.size / 2 + this.modY)}px`; // modY 绘制偏移（:62376/:62395）
     this.celestial.style.width = `${Math.round(s.size)}px`;
     this.celestial.style.height = `${Math.round(s.size)}px`;
-    this.celestialBody.style.transform = `rotate(${s.rot}rad)`;
-    if (this.bodyDayTime !== s.dayTime) {
-      this.bodyDayTime = s.dayTime;
-      // 月相竖条 8 帧：background-size 100% 800% + 纵向偏移 -phase/8（菜单恒满月帧 0）
-      this.celestial.classList.toggle('night', !s.dayTime);
-      this.celestialBody.style.backgroundImage
-        = `url(${s.dayTime ? SUN_SPRITE : MOON_SPRITE})`;
-      this.celestialBody.style.backgroundPosition = s.dayTime
-        ? '0 0' : `0 -${MENU_MOON_PHASE * 12.5}%`;
-    }
   }
 
   /** 拖动中的每帧：反算菜单时间（Main.cs:62434-62446）+ modY 垂直跟手（:62430/:62440）+ 触发成就（:62450） */

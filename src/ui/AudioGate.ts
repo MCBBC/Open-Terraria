@@ -4,6 +4,7 @@
 // 旁路（?play/?quickload/?vuidemo/?nogate）与自动化探针（navigator.webdriver，
 // puppeteer 置位——不豁免则全部浏览器探针挂死在门上）直接放行。
 import { Lang } from '../i18n/Lang';
+import { swTrace } from '../net/AssetCache';
 
 /** 是否需要出音频门（旁路/探针豁免判定；拦截与否由调用方探测 AC 状态） */
 export function shouldShowAudioGate(): boolean {
@@ -41,16 +42,22 @@ export function showAudioGate(resume: () => Promise<boolean>): Promise<void> {
     `;
     document.body.appendChild(root);
     let settled = false;
-    const done = () => {
+    const done = (e: Event) => {
+      // ★只认真实用户手势(2026-08-27 手机实测"门显示1-2s自己消失但音乐没播"):
+      //  页面内存在程序化派发的点击(存档下载 a.click() 等),合成事件 isTrusted=false,
+      //  曾在门出现后 1-2s 误触 done → 无手势 resume 被拒 → 静音进游戏
+      if (!e.isTrusted) { swTrace('音频门: 拒绝合成事件(非用户手势)'); return; }
       if (settled) return;
       settled = true;
       window.removeEventListener('pointerdown', done, true);
       window.removeEventListener('keydown', done, true);
       void resume();
+      swTrace('音频门: 用户手势放行');
       root.remove();
       resolve();
     };
     window.addEventListener('pointerdown', done, true);
     window.addEventListener('keydown', done, true);
+    swTrace('音频门: 显示');
   });
 }

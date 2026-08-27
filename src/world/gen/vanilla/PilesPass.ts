@@ -222,9 +222,13 @@ function place2x2Piles(st: TileStore, x: number, y: number, type: number): boole
 /** ★SSSSSS-NOTRAPS（cs:18921-18190→1457 cs:18135-18204）：noTraps/errorWorld 巨石
  *  三角堆——W*H*0.0004 次（remix ÷2）：全域掷点下扫首个活性格上一格，anyShimmer 拒，
  *  三连 PlaceTile(138)（tenth 1/5 用 711）= (x,y)/(x+2,y)/(x+1,y-2) 三角。段首
- *  SetBoulderSolidity(true)（巨石须实心才过 Place2x2 地面门）+ 段尾 false（此后
- *  生成期巨石恒非实心到 SettleLiquidsAgain 的 QuickWater 还原）。 */
-function runBoulderPileSection(st: TileStore, rng: RNG, gs: GenState): void {
+ *  SetBoulderSolidity(true)（巨石须实心才过 Place2x2 地面门）+ 段尾 false。
+ *  ★QQQQQQQQ（2026-08-27）位次勘误：1457 该段真身在 **PotsGraveyardsAndBoulderPiles
+ *  pass 内**（cs:18135-18204，teleporters/墓园段之后、瓦罐主循环之前）——Piles pass
+ *  只有头置非实心（cs:18936-18941）。旧实现错挂 PilesPass 头 → notraps 链 #71 起全流
+ *  位漂移（pots/boulder 族 T28/T138 双向 ~15k 格）。现整体迁回 potPass 调用点
+ *  （WorldGen.potPass），执行序=原版注册序；本文件仅存留 Piles 头翻非实心一行。 */
+export function runBoulderPileSection(st: TileStore, rng: RNG, gs: GenState): void {
   const nf = gs.seedFlags;
   if (!(nf.noTraps || nf.errorWorld) || nf.actuallyNoTraps) return;
   const { w, h } = st;
@@ -259,11 +263,11 @@ function runBoulderPileSection(st: TileStore, rng: RNG, gs: GenState): void {
 export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
   // ★pass 头 tileSolid 翻转（cs:18906-18916,逐条 1:1）：379/229/190/196/189/
   //   717/718/719/202/460/484 全部置非实心——原 PASS_NON_SOLID 局部表迁移至此。
-  //   （cs:18919 SetBoulderSolidity(false) 在 noTrapsWorldGen 门内,普通种子不触发,备案）
   flipGenSolid([379, 229, 190, 196, 189, 717, 718, 719, 202, 460, 484], false);
-  // ★SSSSSS-NOTRAPS：巨石三角堆段（原版位次=teleporters/graveyard 段之后、①洞穴堆
-  //   之前；本仓两前置段均为未实装种子专属 → 直接置于段首）
-  runBoulderPileSection(st, rng, gs);
+  // ★QQQQQQQQ 补挂（cs:18936-18941）：noTraps → SetBoulderSolidity(false)——
+  //   Traps 尾回实心的还原窗到此结束（巨石三角段本体在 Pots pass，见
+  //   WorldGen.potPass 调用点勘误注）。
+  if (gs.seedFlags.noTraps) setBoulderSolidity(false);
   const w = st.w, h = st.h;
   const ws = Math.floor(gs.worldSurface);
   /** GetPileGenerationAttempts（cs:23873）：w/2（skyblock ÷10 分支不触发） */

@@ -9,6 +9,8 @@
 //  (t/3+10)%19，底中锚缩放；:53417-53422 显隐门 1:1）。
 //  RE-LOGIC 字样烘在 Splash_N_2 前景层（透明底 PNG）；vanilla-ui/logo_1..8.png
 //  是死资产（AssetInitializer.cs:84 加载后无绘制点），不使用。
+import { swTrace } from '../net/AssetCache';
+
 export interface SplashHandle {
   /** 旁路立即收场（?play/?quickload 调试入口不陪跑时序）；正常路径不调用——
    *  时序自然走完自收场 */
@@ -118,21 +120,50 @@ export function showSplash(opts: {
   //  分片缓存里),直接设 URL 首访必 404 → 过渡图永久空白、加载完"跳过"主菜单过渡。
   //  改为轮询 CacheStorage 直到三条就位(SW 换控后 CSS url 走 cache-first 命中)再挂;
   //  上限 25s 对齐 holdForAssetsReady 预算;caches 不可用(http/nosw/dev)立即现挂=旧行为。
+  swTrace(`过渡图时序启动 set=${set} quick=${quick}`);
   void (async () => {
     const t0w = performance.now();
     if (typeof caches !== 'undefined') {
+      let lastLog = -1;
       for (;;) {
+        let hit = -1;
         try {
           const ms = await Promise.all(splashUrls.map((u) => caches.match(u)));
-          if (ms.every(Boolean)) break;
-        } catch { break; }
+          hit = ms.filter(Boolean).length;
+          if (ms.every(Boolean)) { swTrace(`过渡图三层 cache 就绪(${Math.round(performance.now() - t0w)}ms)`); break; }
+        } catch { swTrace('过渡图 cache.match 异常,走直挂'); break; }
         // ★无时限(2026-08-25 用户实报"某些环境纯黑"):原 25s 上限放弃后 URL 挂上
         //   即 404 定局=全程无图。HOLD 态下过渡页长存,图到即显示,轮询到 removed 为止
         if (removed) break;
+        // ★等图期打点(2026-08-27 用户报"回地址一看过渡图不绘制纯黑"):状态变化
+        //   才记——此期过渡图层黑但 bootVeil(黑+居中向日葵)应盖在其上
+        if (hit !== lastLog) { swTrace(`过渡图等 cache ${hit}/3(此窗过渡层暂黑,veil 应在)`); lastLog = hit; }
         await new Promise((r) => setTimeout(r, 250));
       }
     }
-    if (removed) return;
+    if (removed) { swTrace('过渡图挂载中止(已收场)'); return; }
+    // ★预载确认后挂载(2026-08-27):CSS background 无法 onerror——曾"bg 挂上但
+    //   图 404/驱逐=纯黑不可归因"。现先 Image 预载(onload 才挂 bg,onerror 记
+    //   trace 重试),黑屏的每种成因都可在 trace 归因
+    let attempt = 0;
+    for (;;) {
+      try {
+        await Promise.all(splashUrls.map((u) => new Promise<void>((res, rej) => {
+          const im = new Image();
+          im.onload = () => res();
+          im.onerror = () => rej(new Error(`加载失败: ${u}`));
+          im.src = u;
+        })));
+        break;
+      } catch (e) {
+        attempt++;
+        swTrace(`过渡图预载失败 第${attempt}次(${String(e).slice(0, 70)})→ 重试`);
+        if (removed) return;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      if (removed) return;
+    }
+    swTrace('过渡图三层挂载');
     back.style.backgroundImage = `url(${splashUrls[0]})`;
     tree.style.backgroundImage = `url(${splashUrls[1]})`;
     front.style.backgroundImage = `url(${splashUrls[2]})`;
@@ -202,14 +233,14 @@ export function showSplash(opts: {
     const a = splashAlphaAt(t, quick);
     if (a < 0) {
       if (!loadingDone) {
-        if (!holding) { holding = true; holdB = Math.max(b, 160); }
+        if (!holding) { holding = true; holdB = Math.max(b, 160); swTrace(`时序尽→HOLD冻结 holdB=${holdB} bg=${back.style.backgroundImage ? '已挂' : '未挂'} loadingDone=${loadingDone}`); }
         b = holdB;
         timelineOver = true;
       } else { remove(); return; }
     }
     else if (!loadingDone && t >= n5 - n6) {
       // 渐隐段但下载未完:同样冻结亮度(不随曲线衰减、不透出菜单)
-      if (!holding) { holding = true; holdB = Math.max(Math.round(a), 160); }
+      if (!holding) { holding = true; holdB = Math.max(Math.round(a), 160); swTrace(`渐隐段未完→HOLD冻结 holdB=${holdB} bg=${back.style.backgroundImage ? '已挂' : '未挂'} loadingDone=${loadingDone}`); }
       b = holdB;
     }
     else b = Math.round(a);
@@ -228,6 +259,16 @@ export function showSplash(opts: {
   };
   requestAnimationFrame(step);
 
+  // ★回前台打点(2026-08-27 用户报"切后台回来过渡图纯黑"):后台 rAF 暂停/图像
+  //  内存缓存被清的现场——回来瞬间记录全部绘制状态并强制重画一帧,归因三选一:
+  //  bg 未挂(等图/加载失败)/HOLD 冻结中(bg 已挂应可见)/revealing(渐隐中)
+  const onVis = () => {
+    if (document.visibilityState !== 'visible' || removed) return;
+    swTrace(`回前台: HOLD=${holding} bg=${back.style.backgroundImage ? '已挂' : '未挂'} loadingDone=${loadingDone} b=${b} revealing=${revealing} t=${Math.round(performance.now() - t0)}ms`);
+    apply();
+  };
+  document.addEventListener('visibilitychange', onVis);
+
   let resolveFinished: () => void = () => {};
   const finished = new Promise<void>((r) => { resolveFinished = r; });
   const remove = () => {
@@ -235,6 +276,8 @@ export function showSplash(opts: {
     removed = true;
     window.removeEventListener('pointerdown', onSkipPointer, true);
     window.removeEventListener('keydown', onSkipKey, true);
+    document.removeEventListener('visibilitychange', onVis);
+    swTrace(`过渡页收场(用时${Math.round(performance.now() - t0)}ms holding=${holding} loadingDone=${loadingDone})`);
     root.remove();
     document.documentElement.style.removeProperty('--sw-splash-alpha'); // 角标回满亮(菜单态)
     resolveFinished();

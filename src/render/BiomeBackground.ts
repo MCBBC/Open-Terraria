@@ -379,6 +379,25 @@ export class BiomeBackground {
     return OCEAN_STYLES[this.oceanStyle] ?? OCEAN_STYLES[0];
   }
 
+  /** 风格表兜底读（pickStyle 的无 world 版）：索引缺失/越界回退 [0] 并留现场。
+   *  warm/warmStyle/tint 全族统一走此口——裸读表曾在风格域字段越界时
+   *  "undefined.filter" 帧循环 halt（2026-08-27 用户实报 Td.warm） */
+  private styleRow<T>(tag: string, arr: readonly T[], idx: number | undefined): T {
+    const v = arr[idx ?? -1];
+    if (v === undefined) {
+      this.fallbackWarn(`styleRow-${tag}`, {
+        seededFor: this.seededFor, idx, arrLen: arr.length,
+        forestStyles: this.forestStyles, corruptStyle: this.corruptStyle,
+        crimsonStyle: this.crimsonStyle, jungleStyle: this.jungleStyle,
+        snowStyle: this.snowStyle, hallowStyle: this.hallowStyle,
+        mushroomStyle: this.mushroomStyle, desertStyle: this.desertStyle,
+        oceanStyle: this.oceanStyle,
+      });
+      return arr[0];
+    }
+    return v;
+  }
+
   /** 世界派生随机档（原版 worldgen 期掷骰的运行时重建） */
   private forestStyles: number[] = [];
   private corruptStyle = 0;
@@ -427,14 +446,15 @@ export class BiomeBackground {
    *  后台取齐,跨群系旅行不闪空。fire-and-forget */
   warm(scene: SceneFlags): void {
     if (this.seededFor === -1) return; // 尚未播种(preloadInitial/draw 先行),跳过防取错风格
+    // ★风格档读取统一走 styleRow 兜底（seedPick 负模数曾致同类崩溃，见类内注记）
     const styles: number[][] = [];
-    if (scene.zoneCorrupt) styles.push(CORRUPT_STYLES[this.corruptStyle]);
-    else if (scene.zoneCrimson) styles.push(CRIMSON_STYLES[this.crimsonStyle]);
-    else if (scene.zoneJungle) styles.push(JUNGLE_STYLES[this.jungleStyle]);
-    else if (scene.zoneSnow) styles.push(SNOW_STYLES[this.snowStyle]);
-    else if (scene.zoneHallow) styles.push(HALLOW_STYLES[this.hallowStyle]);
-    else if (scene.zoneGlowshroom) styles.push(MUSHROOM_STYLES[this.mushroomStyle]);
-    else if (scene.zoneDesert) styles.push(DESERT_STYLES[this.desertStyle]);
+    if (scene.zoneCorrupt) styles.push(this.styleRow('corrupt', CORRUPT_STYLES, this.corruptStyle));
+    else if (scene.zoneCrimson) styles.push(this.styleRow('crimson', CRIMSON_STYLES, this.crimsonStyle));
+    else if (scene.zoneJungle) styles.push(this.styleRow('jungle', JUNGLE_STYLES, this.jungleStyle));
+    else if (scene.zoneSnow) styles.push(this.styleRow('snow', SNOW_STYLES, this.snowStyle));
+    else if (scene.zoneHallow) styles.push(this.styleRow('hallow', HALLOW_STYLES, this.hallowStyle));
+    else if (scene.zoneGlowshroom) styles.push(this.styleRow('mushroom', MUSHROOM_STYLES, this.mushroomStyle));
+    else if (scene.zoneDesert) styles.push(this.styleRow('desert', DESERT_STYLES, this.desertStyle));
     // 海洋 = 单张 oceanBG 贴图（Step2 far 槽 3，Main.cs:59348-59351）
     else if (scene.zoneBeach) styles.push([this.oceanTexId()]);
     if (!styles.length) return; // 森林已在 preloadInitial 就位
@@ -545,15 +565,15 @@ export class BiomeBackground {
   warmStyle(style: number): void {
     let ids: number[] = [];
     if (style === Forest1 || style === Forest2 || style === Forest3 || style === Forest4) {
-      const st = FOREST_STYLES[this.forestStyles[0] % FOREST_STYLES.length];
+      const st = this.styleRow('warm-forest', FOREST_STYLES, this.forestStyles[0] % FOREST_STYLES.length);
       ids = [...st.m, ...st.t];
-    } else if (style === Corruption) ids = CORRUPT_STYLES[this.corruptStyle];
-    else if (style === Crimson) ids = CRIMSON_STYLES[this.crimsonStyle];
-    else if (style === Jungle) ids = JUNGLE_STYLES[this.jungleStyle];
-    else if (style === Snow) ids = SNOW_STYLES[this.snowStyle];
-    else if (style === Hallow) ids = HALLOW_STYLES[this.hallowStyle];
-    else if (style === Mushroom) ids = MUSHROOM_STYLES[this.mushroomStyle];
-    else if (style === Desert) ids = DESERT_STYLES[this.desertStyle];
+    } else if (style === Corruption) ids = this.styleRow('corrupt', CORRUPT_STYLES, this.corruptStyle);
+    else if (style === Crimson) ids = this.styleRow('crimson', CRIMSON_STYLES, this.crimsonStyle);
+    else if (style === Jungle) ids = this.styleRow('jungle', JUNGLE_STYLES, this.jungleStyle);
+    else if (style === Snow) ids = this.styleRow('snow', SNOW_STYLES, this.snowStyle);
+    else if (style === Hallow) ids = this.styleRow('hallow', HALLOW_STYLES, this.hallowStyle);
+    else if (style === Mushroom) ids = this.styleRow('mushroom', MUSHROOM_STYLES, this.mushroomStyle);
+    else if (style === Desert) ids = this.styleRow('desert', DESERT_STYLES, this.desertStyle);
     else if (style === Ocean) ids = [this.oceanTexId()];
     const clean = ids.filter((n) => n >= 0);
     if (clean.length) void this.loadBg(clean);
@@ -1500,11 +1520,11 @@ export class BiomeBackground {
     }
     // 沙漠 @248
     if (this.alphaFront[Desert] > 0
-      && has(DESERT_STYLES[this.desertStyle].filter((n) => n >= 0), [248])) {
+      && has(this.styleRow('tint-desert', DESERT_STYLES, this.desertStyle).filter((n) => n >= 0), [248])) {
       out.push({ rgb: [184, 211, 245], alpha: this.alphaFront[Desert] });
     }
     // 雪原 @263/268/269
-    if (this.alphaFront[Snow] > 0 && has(SNOW_STYLES[this.snowStyle], [263, 268, 269])) {
+    if (this.alphaFront[Snow] > 0 && has(this.styleRow('tint-snow', SNOW_STYLES, this.snowStyle), [263, 268, 269])) {
       out.push({ rgb: [169, 241, 255], alpha: this.alphaFront[Snow] });
     }
     // 丛林双带 @59/@284

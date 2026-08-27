@@ -63,6 +63,11 @@ export class MenuBackground {
   private menuBGChangedNight = false;
   private lockBG = false;             // lockMenuBGChange（生成/读档期）
   private grabbing = false;           // alreadyGrabbingSunOrMoon（只冻时间 cs:20106）
+  /** 暂停门（2026-08-27 用户报:过渡图阶段菜单背景已在背后跑——时间空转+全屏
+   *  天空渲染与资源下载/解码抢算力。菜单挂在 splash 后备场(2026-08-24 定案)但
+   *  揭幕(main.ts revealBehind→resumeMenuBg)前零 tick 零绘制,画布保持黑底由
+   *  splash 全遮;揭幕瞬间恢复,时间从初始值起播=「进主菜单才开始播动画」 */
+  private paused = false;
   private grabUntil = 0;
   private starAcc = 0;                // 定帧累积器（坠星 1/12 每帧）
   /** 当前森林样式（WorldGen.treeBG1 菜单侧；初始 = 开局默认样式 1）。
@@ -187,7 +192,11 @@ export class MenuBackground {
     this.clock.dayCount = this.dayCount;
   }
 
+  /** 揭幕前冻结（mainFlow.showTitle(bgPaused)→resumeMenuBg 接线） */
+  setPaused(on: boolean): void { this.paused = on; }
+
   tick(dtMs: number) {
+    if (this.paused) return;   // 零推进零绘制零 GL 云层获取——加载密集期不抢算力
     const frames = Math.min(8, dtMs / FRAME_MS);   // 后台标签回来防大步进雪崩
     // 星坠落（cs:20048）：夜 rand(12)==0/帧 → 随机星 Fall（抓取中照跑）
     if (!this.dayTime) {
