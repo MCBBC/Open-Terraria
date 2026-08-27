@@ -944,7 +944,12 @@ export class UI {
       g.input.uiBlocking = true;
       openEmoteMenu(this.root, {
         gateFlags: () => g.world.flags as Record<string, boolean | undefined>,
-        makeLocalPlayerEmote: (id) => g.makeLocalPlayerEmote(id),
+        makeLocalPlayerEmote: (id) => {
+          g.makeLocalPlayerEmote(id);
+          // ★选完表情连背包一起收（2026-08-27 用户要求——原版 IngameFancyUI.Close
+          //   回到背包页,本仓用户定策选完即全收）
+          this.closeInventory();
+        },
         playTick: () => UISfx.sfx.play('menuTick', 1),
         onBack: () => {
           if (!wasPaused) g.paused = false;
@@ -2048,6 +2053,27 @@ export class UI {
     }
   }
 
+  /** 背包面板贴位：左=热键栏首格左缘,顶=其底+8px（2026-08-27 用户要求）；构建与
+   *  每次打开时重算。★取槽的 inline left/top 布局目标值——slot 有 80ms left/top
+   *  过渡动画,rect 会采到中途值（用户实测面板左缘歪 20px 即此因）。透明度 0.75、
+   *  边框/投影弱化（同用户要求） */
+  private positionInvPanel(): void {
+    if (!this.invPanel) return;
+    const hb0 = this.hotbarEl?.firstElementChild as HTMLElement | null;
+    const leftPx = parseFloat(hb0?.style.left ?? '');
+    const topPx = parseFloat(hb0?.style.top ?? '');
+    const left = Number.isFinite(leftPx) ? Math.max(4, Math.round(leftPx)) : 8;
+    const top = Number.isFinite(topPx) ? Math.round(topPx + 52 + 8) : 84;
+    this.invPanel.style.left = `${left}px`;
+    this.invPanel.style.top = `${top}px`;
+    this.invPanel.style.maxHeight = `calc(100vh - ${top + 12}px)`;
+    // ★透明只调面板底色 alpha（0.78/0.8 → 0.55/0.58）——不动 opacity（曾用面板级
+    //   opacity 连格子/文字一起半透,2026-08-27 用户纠正）
+    this.invPanel.style.background = 'linear-gradient(rgba(38,50,90,0.55), rgba(22,30,58,0.58))';
+    this.invPanel.style.borderColor = 'rgba(125,146,214,0.4)';
+    this.invPanel.style.boxShadow = '0 0 0 1px rgba(10,14,30,0.45), 0 4px 16px rgba(0,0,0,0.4)';
+  }
+
   openInventory() {
     if (this.invPanel.style.display === 'block') {
       this.closeInventory();
@@ -2055,7 +2081,10 @@ export class UI {
     }
     // 住房条开着(E 切回背包):先收——不收则背包被住房 Canvas 压住
     this.closeHousingPanel();
+    this.positionInvPanel();
     this.invPanel.style.display = 'block';
+    // 开背包会引发热键栏重排（slot 80ms left 过渡）——过渡结束后二次贴位校正
+    setTimeout(() => this.positionInvPanel(), 120);
     this.refreshAll();
     this.game.input.uiBlocking = true;
   }
@@ -2588,10 +2617,12 @@ export class UI {
 
   private buildInventoryPanel() {
     this.invPanel = el('div', 'sw-panel');
-    // 顶锚（2026-08-21 用户报"面板过高与左上工具栏重叠"）：原版背包从热键栏行
-    // 下方铺开（非垂直居中）——顶=热键栏底(20+52)+12px 间隙；max-height 同步
-    // 收口，内容超高走面板内滚动，永不遮热键栏
-    this.invPanel.style.cssText = 'position:fixed; left:50%; top:84px; transform:translateX(-50%); display:none; max-height:calc(100vh - 96px); overflow:auto;';
+    // 位置（2026-08-27 用户要求）：对齐左上工具栏最左格（面板跑工具栏正下方一点）,
+    // 不再水平居中——左=热键栏首格左缘,顶=热键栏底+8px;透明度再拉高（opacity .75,
+    // 叠 .sw-panel 半透底）+ 边框/投影弱化。★每次 openInventory 重算（贴位取热键栏
+    // 槽 inline 布局值）;★构建后必须显式 display:none（E 开/E 关语义,曾漏=默认开着）
+    this.positionInvPanel();
+    this.invPanel.style.display = 'none';
     // 原版背包无标题栏（DrawInventory 直接铺槽位）——标题行已摘（2026-08-13）
 
     // ---- 顶部：三套 Loadout 切换（DrawLoadoutButtons Main.cs:41386+：当前套高亮） ----
@@ -2658,17 +2689,18 @@ export class UI {
         row.appendChild(bRes);
       }
       // 道具搜索（调试检索器）：图标化入顶排图标组（2026-08-27 用户要求,原背包
-      // 标签行文字钮退役）——贴图 = 原版图鉴搜索钮 UI_Bestiary_Button_Search/[_2]=hover。
-      // ★三图标钮一律裸 icon（不带 .sw-btn 渐变/边框/圆角）+ 各按原生素材尺寸
-      // 显示（Search 22×22/房 22×24 hover26×28/书 32×30）,不互拉变形
+      // 标签行文字钮退役）——★Bestiary 搜索贴图自带蓝底面板非裸 icon,用户定策
+      // 改用 emoji 🔍 + hover 金色衬底
       {
         const bS = el('button');
         bS.title = '道具搜索';
-        bS.style.cssText = 'margin:0; width:22px; height:22px; padding:0; flex:none; border:none;'
-          + 'background:url(sprites/vanilla-ui/UI_Bestiary_Button_Search.png) 0 0/100% 100%;'
-          + 'image-rendering:pixelated; cursor:pointer;';
-        bS.addEventListener('mouseenter', () => { bS.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Bestiary_Button_Search_2.png)'; });
-        bS.addEventListener('mouseleave', () => { bS.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Bestiary_Button_Search.png)'; });
+        bS.textContent = '🔍';
+        bS.style.cssText = 'margin:0; width:24px; height:24px; padding:0; flex:none; border:none;'
+          + 'background:transparent; font-size:14px; line-height:1; cursor:pointer;'
+          + 'display:flex; align-items:center; justify-content:center;'
+          + 'border-radius:4px; transition:background .12s;';
+        bS.addEventListener('mouseenter', () => { bS.style.background = 'rgba(255,231,69,0.28)'; });
+        bS.addEventListener('mouseleave', () => { bS.style.background = 'transparent'; });
         bS.addEventListener('mousedown', (e) => {
           e.stopPropagation();
           this.openItemSearch();
@@ -3095,6 +3127,8 @@ export class UI {
   private craftTrackEl: HTMLElement | null = null;
   private craftThumbEl: HTMLElement | null = null;
   private craftScrollMeta = { len: 0, visRows: 0 };
+  /** 列表容器上次写入的高度（同值跳过写=免布局失效） */
+  private craftLastViewH = -1;
   /** 滚轮累积器（实例字段——列表元素每次进游戏重建，闭包累积器会随重建丢失半程量） */
 
   /** 滚轮步进（2026-08-21 用户三轮定标）：首响立即——距上次步进 >120ms 的
@@ -3116,10 +3150,9 @@ export class UI {
     const fresh = now - this.craftWheelLast > 120;
     this.craftWheelLast = now;                 // hover 预览 350ms 门仍消费
     const maxA = Math.max(0, this.craftAvailRef.length - 1);
-    // 1 行/100px（Chrome 一格 ≈100-120）；★新手势保底 1 行（旧手感:停顿后首格
-    // 必走一行——macOS 小步距滚轮/触控板 /100 会钝到 0.1-0.4 行/格）。
-    // ★滚动只走动画不再 refreshAll 全刷——hover 预览/选中语义不受滚轮影响
-    let rows = dy / 100;
+    // 1.8 行/100px（2026-08-27 用户报"滚动迟滞"提速：旧 1 行/100px 长列表
+    // traverse 太慢；新手势保底 1 行保留）。★滚动只走动画不再 refreshAll 全刷
+    let rows = dy / 55;
     if (fresh && Math.abs(rows) < 1) rows = Math.sign(dy || 1);
     let t = this.craftWheelTarget + rows;
     // 端部阻尼：越界部分按 35% 折算（拉伸蓄能），上限 3 行——松手由动画回弹归界
@@ -3148,7 +3181,7 @@ export class UI {
       if (Math.abs(bound - this.craftWheelTarget) < 0.02) this.craftWheelTarget = bound;   // 0.6px 内吸附,肉眼不可辨
     }
     const diff = this.craftWheelTarget - this.craftScrollF;
-    if (Math.abs(diff) > 0.0015) this.craftScrollF += diff * (1 - Math.exp(-dt * 25));
+    if (Math.abs(diff) > 0.0015) this.craftScrollF += diff * (1 - Math.exp(-dt * 34));
     else this.craftScrollF = this.craftWheelTarget;
     this.craftPaintWindow();
     const settled = this.craftScrollF === this.craftWheelTarget
@@ -4001,7 +4034,7 @@ export class UI {
     //  过冲(回弹)量单独 ×0.6 加成 = 端部拉伸视觉保留
     const maxAnchor = Math.max(0, len - 1);
     const viewH = Math.min(240, len * H);
-    cl.style.height = `${viewH}px`;
+    if (this.craftLastViewH !== viewH) { cl.style.height = `${viewH}px`; this.craftLastViewH = viewH; }
     const maxTop = Math.max(0, len - Math.ceil(viewH / H));   // 末页填满视口,无底部留白
     const clampedAnchor = Math.max(0, Math.min(maxAnchor, anchor));
     const topF = Math.max(0, Math.min(maxTop, clampedAnchor - (VIS_ROWS >> 1)))
@@ -4057,14 +4090,16 @@ export class UI {
     const maxStart = Math.max(1, maxTop);
     const trk = this.craftTrackEl, thb = this.craftThumbEl;
     if (trk && thb) {
+      // ★先读后写（clientHeight 读强制同步排版——滚动帧每帧写 display/height
+      //  后再读 = 每帧布局抖动；display 仅变化时写 + 高度先缓存读）
       if (maxTop <= 0) {
-        trk.style.display = 'none';
+        if (trk.style.display !== 'none') trk.style.display = 'none';
       } else {
-        trk.style.display = '';
+        if (trk.style.display !== '') trk.style.display = '';
         const Ht = Math.max(1, trk.clientHeight);
         const thumbH = Math.max(24, (meta.visRows / meta.len) * Ht);
-        thb.style.height = `${thumbH}px`;
         const anchorC = Math.max(0, Math.min(maxStart, anchor - (VIS_ROWS >> 1)));
+        thb.style.height = `${thumbH}px`;
         thb.style.top = `${(anchorC / maxStart) * (Ht - thumbH)}px`;
       }
     }

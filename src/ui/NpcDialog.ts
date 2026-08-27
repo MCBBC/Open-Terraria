@@ -264,17 +264,14 @@ export class NpcShop {
         ${it.iconUrl ? `<img src="${it.iconUrl}">` : '<span style="width:26px;height:26px;display:inline-block"></span>'}
         <span class="nm">${it.name}</span><span class="pr">${it.medal !== undefined ? medalPriceText(it.medal) : formatCopper(it.price)}</span>
       </div>`).join('');
-    // 快乐度表情 + 价格百分比（Main.cs:41231-41243 商店标题旁 NPCHappiness 贴图 +
-    //  priceAdjustment.ToString("P0")；DOM 版用表情档位代替贴图帧）
-    const happy = happinessPct != null
-      ? `<span class="sw-shop-happy ${happinessFace(happinessPct).cls}">${happinessFace(happinessPct).face} ${happinessPct}</span>`
-      : '';
+    // 快乐度头部指示已摘（2026-08-27 用户要求：商店标题旁不再显示快乐度系数——
+    // 快乐度详情仍走底部「快乐度」页签；原版 Main.cs:41231-41243 参考备案）
     // 勋章持有并列显示（CustomCurrencyManager.DrawSavings :28-63：双货币店在
     //  钱币行旁画勋章图标+数量；仅本店有勋章条目时传值）
     const medalLine = medals !== undefined
       ? ` <span class="sw-shop-medals">🏅 ×${medals}</span>` : '';
     panel.innerHTML = `
-      <div class="sw-shop-title">${title}${happy}</div>
+      <div class="sw-shop-title">${title}</div>
       <div class="sw-shop-coins">${formatCopper(copper)}${medalLine}</div>
       <div class="sw-shop-list">${rows}</div>
       <div class="sw-shop-foot"><button class="sw-set-back" style="background:#3a4680;color:#e8e8f4;border:1px solid #7d92d6;border-radius:4px;padding:5px 16px;cursor:pointer;font-family:inherit;">${Lang.inter(52)}</button></div>`;

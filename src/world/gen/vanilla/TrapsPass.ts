@@ -83,6 +83,12 @@ const SHEET379 = sheetId(379);
 const WIRE_RED = TileStore.WIRE_RED;
 const WIRE_ACTUATOR = TileStore.WIRE_ACTUATOR;
 
+// ★SSSSSSSS2 批：placeTrap 事件流仪（与 x86 rig JJHook.TrapEv/SW_TRAPSLOG 同名同位；
+//   未注册零开销）。锚序与语义严格对齐 rig WorldGen.cs 内插入点，供逐事件对拍 diff。
+function trapEv(kind: string, a: number, b: number, v: number): void {
+  (globalThis as { __swTrapEv?: (kind: string, a: number, b: number, v: number) => void }).__swTrapEv?.(kind, a, b, v);
+}
+
 /** WorldGen.SetBoulderSolidity（cs:11036）＝tileSolid 九巨石族整体翻转。
  *  ★集合不含 665（生命水晶巨石在 Boulders 集但不在本翻转列——1456/1457 逐行同）。
  *  SSSSSS-NOTRAPS 批接线（原 GenSolid.ts「特殊种子专属翻转备案」三处之一）。 */
@@ -762,6 +768,7 @@ export function placeTrapCanContinue(st: TileStore, x: number, y: number): boole
 
 /** placeTrap 主体（cs:8875-9460，普通种子路径）。type: 0 飞镖 / 1 巨石 / 2 炸药桶 / 3 热喷泉 */
 export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number, type = -1): boolean {
+  trapEv('E', x2, y2, type);
   // ★R3-10（W57:8876-8879；1456 :8878-8881 同有——存量缺口非 1457 增量）：
   //  "moretrapsplease"（actuallyNoTrapsForRealIMeanIt）种子下陷阱全免,入口即
   //  return true（把"没放"当"放成功",防调用方重试）——先于 CanContinue
@@ -787,6 +794,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   // ★noTraps 巨石非实心窗 #2（cs:8908-8910）：下扫毕还原实心
   if (nf.noTraps) setBoulderSolidity(true);
   py--;                                                               // cs:8910 num--
+  trapEv('D', 0, py, 0);
   // 邻蘑菇草 70 回避（cs:8911 IsTileNearby ±20；★noTraps 跳过）/ 蜥蜴墙 87（cs:8915）/ 微光墙 350（cs:8919）
   if (!nf.noTraps && isTileNearby(st, x2, py, 70, 20)) return false;
   const wi = st.idx(x2, py);
@@ -799,6 +807,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   else if (type === -1) type = rng.int(0, 1);
   // ★noTraps+tenth 强制巨石（cs:8957-8961）：Next(4)==0 → type=1（掷照耗）
   if (nf.noTraps && nf.tenthAnniversary && rng.int(0, 3) === 0) type = 1;
+  trapEv('T', 0, py, type);
   // 共同守卫（cs:8961-8985）
   if (x2 < 3 || py < 3 || x2 > st.w - 4 || py > st.h - 4) return false;   // InWorld(x2,num,3)
   if (lava && type !== 3) return false;
@@ -832,6 +841,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   if (nf.noTraps) setBoulderSolidity(false);
 
   if (type === 1) {
+    trapEv('K', 1, 0, 0);
     // ---- 巨石陷阱（cs:9151-9345）----
     // ★noTraps（cs:9159-9162）：宠物巨石上限 ×2 + SetBoulderSolidity(true)
     //   （6×6 扫描期巨石算实心——SolidTile 判定进 allSolid/石壳统计）
@@ -840,6 +850,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     if (nf.noTraps) setBoulderSolidity(true);
     let colX = x2 + rng.int(-1, 1);                                   // num4（cs:9166 Next(-1,2)）
     let top = py - 8;                                                 // num5（cs:9165）
+    trapEv('BXC', colX, top, 0);
     // ★MMMMMMM（2026-08-25）#76 定罪修复（双态门）：巨石支受理门两版真分叉——
     //   1456（cs:9171-9183）= 邻巨石检查**前置**（初始 top=num-8 位,noTraps 半径6/普通10）
     //   + 扫描逐格拒 wall350、无 actuator/巨石拒;
@@ -923,6 +934,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     else if (rng.int(0, 24) === 0) boulderId = BOULDER711;
     else if (rng.int(0, 19) === 0) boulderId = BOULDER664;
     if (boulderId === BOULDER138 && boulderPetsPlaced < petCap) { boulderPetsPlaced++; boulderId = BOULDER716; }
+    trapEv('VID', sheetOf(boulderId), top, colX);
     {
       // ★cs:9307 反编译印 PlaceTile(num4+1, num5+1)，x86 金标实证锚=(num4, num5)
       //   （site 对账：(533,603) 板/num4=532/num5=579 → 巨石 532-533×579-580；
@@ -960,6 +972,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   }
 
   if (type === 2) {
+    trapEv('K', 2, 0, 0);
     // ---- 炸药桶（cs:9347-9413）——★原版 case2 落穿 switch 尾 return false（放置成功
     //   也返回 false→内层 1150 循环不 break，bug-for-bug 保留）----
     const drop = rng.int(4, 6);
@@ -987,6 +1000,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   }
 
   if (type === 3) {
+    trapEv('K', 3, 0, 0);
     // ---- 热喷泉（cs:9415-9452）：2×1，frameX = 18*k + 36*Next(2)；直写保半砖/坡 ----
     if (st.flags[st.idx(x2 + 1, py)]) return false;
     if (st.liquid[st.idx(x2, py)] > 0 && st.liquidType[st.idx(x2, py)] !== 2) return false;   // cs:9421 非岩浆液体拒
@@ -1009,6 +1023,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   }
 
   // ---- type 0 飞镖（cs:9009-9150）----
+  trapEv('K', 0, 0, 0);
   const j2 = py - rng.int(0, 2);                                      // num27（cs:9013）
   const solidFor = (x: number, y: number) => solidTileV(st, x, y)
     || (st.inBounds(x, y) && st.flags[st.idx(x, y)] && isCracked(st.type[st.idx(x, y)]));
@@ -1046,6 +1061,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     if (wet(i5) || wet(i5 - 1) || wet(i5 + 1)) num33 = 1;
   }
   st.setTileSilent(i5, j2, TRAP137, dir === 1 ? 18 : 0, 18 * num33);  // cs:9115（frameY=18*style）
+  trapEv('DTW', num33, dir, 0);
   lWire(st, x2, py, i5, j2);
   return true;
 }
@@ -1255,6 +1271,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
     const mRb = __rn();
     for (let k = 0; k < 1150; k++) {
       mAtt++;
+      trapEv('A', n, k, 0);
       if (nf.noTraps) {
         // cs:18816-18827：全域采样（无 oceanDepths 重掷）
         const x = rng.int(50, st.w - 51);                             // Next(50, w-50)
@@ -1262,6 +1279,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
         if (nf.remix) y = rng.int(50, st.h - 211);                    // remix: Next(50, h-210)
         if ((y > gs.worldSurface || st.wall[st.idx(x, y)] > 0)) {
           mPt++;
+          trapEv('C', x, y, 0);
           if (placeTrap(st, rng, gs, x, y, -1)) break;
         }
       } else {
@@ -1275,6 +1293,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
         }
         if (st.wall[st.idx(x, y)] === 0) {
           mPt++;
+          trapEv('C', x, y, 0);
           if (placeTrap(st, rng, gs, x, y, -1)) break;
         }
       }

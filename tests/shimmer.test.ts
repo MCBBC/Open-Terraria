@@ -149,6 +149,9 @@ describe('掉落物入微光（WorldItem.Shimmering + GetShimmered）', () => {
 
   it('不可转化物（坠落之星 75）入池不转化不消失', () => {
     const w = shimmerWorld();
+    // 夜晚隔离：原版 DespawnIfMeetingConditions（WorldItem.cs:652）白天消失
+    // 陨星——本测验证微光池语义,须与昼间消失门解耦
+    w.clock.timeOfDay = 0.95;
     const p = new Player(45 * TILE, 30 * TILE, new Inventory());
     const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[75]], 1);
     for (let i = 0; i < 400; i++) d.fixedUpdate(1, hooks(w, p));
