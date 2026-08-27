@@ -14,6 +14,8 @@ export interface WorldSelectFlow {
   onPlay(meta: WorldMeta): void;
   onNew(): void;
   onBack(): void;
+  /** 导入世界（.wld / 本仓 .json 存档）——只落库进列表，不进入世界 */
+  onImport(file: File): Promise<void>;
 }
 
 const SIZE_LABEL = (m: WorldMeta) => Lang.text(m.w >= 8400 ? 'UI.WorldSizeLarge' : m.w >= 6400 ? 'UI.WorldSizeMedium' : 'UI.WorldSizeSmall');
@@ -98,6 +100,8 @@ export class WorldSelectPanel {
   private panel: HTMLElement;
   private body: HTMLElement;
   private closed = false;
+  private fileInput: HTMLInputElement;
+  private importBusy = false;
 
   constructor(parent: HTMLElement, private store: WorldStore, private flow: WorldSelectFlow) {
     ensureStyle();
@@ -108,15 +112,58 @@ export class WorldSelectPanel {
       <div class="sw-vsel-panel sw-vpanel"><div class="sw-vsel-list"></div></div>
       <div class="sw-vsel-footer">
         <button class="sw-vbtn" data-act="back">${Lang.text('UI.Back')}</button>
+        <button class="sw-vbtn" data-act="import">${Lang.text('Mods.SandboxWorld.WorldSelect.Import')}</button>
         <button class="sw-vbtn" data-act="new">${Lang.text('LegacyMenu.47')}</button>
       </div>
     `;
     this.body = this.panel.querySelector('.sw-vsel-list')!;
     this.panel.querySelector('[data-act=back]')!.addEventListener('click', () => this.close(flow.onBack));
     this.panel.querySelector('[data-act=new]')!.addEventListener('click', () => this.close(flow.onNew));
+    // 导入世界（自制,原版无此钮）：.wld / 本仓 .json——file input 走隐藏控件,
+    // change 后清 value 允许连选同一文件;导入中按钮进 loading 态(文案+禁用)
+    this.fileInput = document.createElement('input');
+    this.fileInput.type = 'file';
+    this.fileInput.accept = '.wld,.json';
+    this.fileInput.style.display = 'none';
+    this.panel.querySelector('[data-act=import]')!.addEventListener('click', () => {
+      if (this.importBusy) return;
+      this.fileInput.click();
+    });
+    this.fileInput.addEventListener('change', () => {
+      const f = this.fileInput.files?.[0];
+      this.fileInput.value = '';
+      if (f) void this.runImport(f);
+    });
+    this.panel.appendChild(this.fileInput);
     this.unsubLang = Lang.onChange(() => { void this.reload(); });
     parent.appendChild(this.panel);
     void this.reload();
+  }
+
+  /** 导入 loading 态：按钮转「导入中…」+禁用（防重复选文件），完成后刷新列表。
+   *  wld 解析是主线程同步重活——先让 loading 文案绘制（rAF 两拍）再开解析 */
+  private async runImport(f: File): Promise<void> {
+    if (this.importBusy) return;
+    this.importBusy = true;
+    const btn = this.panel.querySelector('[data-act=import]') as HTMLButtonElement | null;
+    const old = btn?.textContent ?? '';
+    if (btn) {
+      btn.textContent = Lang.text('Mods.SandboxWorld.WorldSelect.Importing');
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+    }
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      await this.flow.onImport(f);
+      await this.reload();
+    } finally {
+      this.importBusy = false;
+      if (btn && btn.isConnected) {
+        btn.textContent = old;
+        btn.disabled = false;
+        btn.style.opacity = '';
+      }
+    }
   }
 
   private unsubLang: (() => void) | null = null;

@@ -55,7 +55,8 @@ const CSS = `
   width: 66px; height: 66px;
   image-rendering: pixelated; pointer-events: none;
 }
-.sw-vitem-info { position: absolute; left: 104px; top: 15px; right: 56px; pointer-events: none; }
+.sw-vitem-info { position: absolute; left: 104px; top: 15px; right: 56px; bottom: 38px;
+  overflow: hidden; pointer-events: none; }   /* bottom 38 = 钮区顶(82) 上留 6px 间距——难度副行不再贴按钮 */
 .sw-vitem-info .name { font-size: 17px; line-height: 1.25;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000; }
 .sw-vitem-info .sub { font-size: 12px; color: #cfd6f4; margin-top: 3px;

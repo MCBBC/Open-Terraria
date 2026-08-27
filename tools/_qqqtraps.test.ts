@@ -96,3 +96,58 @@ function chan8(st: TileStore, idx: number) {
   console.log(`pairs: ${[...pair.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, n]) => `${k}×${n}`).join(' ')}`);
   console.log(`samples: ${samples.join(' | ')}`);
 }, 600000);
+
+// ---- QQQQQQQQ 二期：样本流录制（SW_QROLL=1 时启用）——与 x86 SW_ROLLWIN/
+//      SW_TAGRANGE 同格式（ln|v|api|frames）逐行对拍用。----
+(RUN ? it : it.skip)('traps roll-stream capture', async () => {
+  if (process.env.SW_QROLL !== '1') return;
+  const seedFlags2 = { noTraps: true } as Record<string, boolean>;
+  const base2 = runResetAndTerrain({ width: W, height: H, seedText: SEEDTXT, evil: EVIL as -1 | 0 | 1, seedFlags: seedFlags2 });
+  const st2 = base2.world.store;
+  chan8(st2, PRE);
+  let ln = 0;
+  let on = false;
+  const lines: string[] = [];
+  const tagOf = (): string => {
+    const stack = new Error().stack ?? '';
+    const frames: string[] = [];
+    for (const l of stack.split('\n')) {
+      const m = l.match(/src\/(world|core|data)\/[^\s()]+\.ts:\d+:\d+/);
+      if (!m) continue;
+      const fn = l.match(/at (\S+?) \(/)?.[1] ?? '?';
+      if (fn.includes('Object.__swOnRoll') || fn.includes('tagOf')) continue;
+      frames.push(fn + '@' + m[1].replace(/.*\/(\w+)\.ts$/, '$1') + ':' + m[0].match(/:(\d+):\d+$/)?.[1]);
+      if (frames.length >= 4) break;
+    }
+    return frames.join('|');
+  };
+  (globalThis as unknown as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll = () => {};
+  const outPath = process.env.SW_QROLL_PATH ?? '/tmp/qqqqq2-out/j-traps-roll.txt';
+  const slim = process.env.SW_QROLL_SLIM === '1';   // 只写 ln|v（无栈标签）
+  base2.rng.reseed(base2.seed);
+  on = true;
+  try {
+    if (!slim) throw new Error('tagged mode retired——用 SW_QROLL_SLIM=1 轻量模式');
+    // 手写文件流，避免内存峰值
+    const fh = await import('node:fs');
+    const ws = fh.createWriteStream(outPath);
+    let buf: string[] = [];
+    (globalThis as unknown as { __swOnRollS?: (n: number, v: number) => void }).__swOnRoll = () => {};
+    const origEmit = (globalThis as unknown as { __swOnRoll?: unknown }).__swOnRoll;
+    (globalThis as unknown as { __swOnRoll?: (v: number) => void }).__swOnRoll = (v: number) => {
+      if (!on) return;
+      buf.push(`${++ln} ${v}`);
+      if (buf.length >= 65536) {
+        ws.write(buf.join('\n') + '\n');
+        buf = [];
+        if ((ln >> 20) !== ((ln - 1) >> 20)) console.log(`ln~${ln}`);
+      }
+    };
+    void origEmit;
+    runTrapsPass(st2, base2.rng, base2.gs, undefined);
+    if (buf.length) ws.write(buf.join('\n') + '\n');
+    buf = [];
+    await new Promise<void>((res) => ws.end(() => res()));
+    console.log(`total ln=${ln} → ${outPath}`);
+  } finally { on = false; }
+}, 600000);

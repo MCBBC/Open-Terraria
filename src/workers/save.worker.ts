@@ -1,8 +1,12 @@
 // 存档序列化 worker:接收 tilestore 副本(结构化克隆,不 transfer——主线程数组是活的)
 // + 世界元数据,在后台线程完成 RLE/base64/JSON 全套序列化,回传 JSON 字符串。
 // 与主线程 SaveFile.saveGame 共用 ./save/serialize 纯核心,输出逐位一致。
+// 导入域(2026-08-27 用户报「导入卡住 UI」):.wld 解析(parseWldToSave 是主线程
+// 同步重活,大图数秒)+存档 JSON.stringify 全搬本线程;buf transfer 零拷贝。
+// WldImport 无 DOM 依赖(纯数据表+SaveFile 纯函数),worker 可安全加载。
 import { serializeSave } from '../save/serialize';
 import type { SaveData, SaveMeta, SaveStoreView } from '../save/serialize';
+import { parseWldToSave } from '../wld/WldImport';
 
 interface SaveRequest {
   type: 'save';
@@ -27,8 +31,50 @@ interface SaveRequest {
   events?: import('../save/serialize').SaveData['events'];
 }
 
-self.onmessage = (e: MessageEvent<SaveRequest>) => {
+type SaveWorkerRequest = SaveRequest
+  | { type: 'importWld'; id: number; buf: ArrayBuffer }
+  | { type: 'inspectSave'; id: number; text: string };
+
+self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
   const req = e.data;
+  // ---- 导入:.wld → SaveData(json) + 槽位元数据（世界列表「导入」,不进世界）----
+  if (req.type === 'importWld') {
+    try {
+      const { save, seedText, gameMode } = parseWldToSave(new Uint8Array(req.buf));
+      (self as unknown as Worker).postMessage({
+        type: 'imported', id: req.id, json: JSON.stringify(save),
+        meta: {
+          name: save.header.name ?? '', seedText,
+          seedNum: save.header.seed, gameMode,
+          w: save.header.width, h: save.header.height,
+          evil: save.header.crimson ? 1 : 0,
+        },
+      });
+    } catch (err) {
+      (self as unknown as Worker).postMessage({ type: 'error', id: req.id, message: String(err) });
+    }
+    return;
+  }
+  // ---- 导入:.json 档校验+提头（JSON.parse 大档本身也是主线程阻塞点）----
+  if (req.type === 'inspectSave') {
+    try {
+      const h = (JSON.parse(req.text) as {
+        header?: { name?: string; seed?: number | string; width?: number; height?: number;
+          difficulty?: number; crimson?: boolean; hardMode?: boolean };
+      }).header;
+      const ok = !!h && typeof h.width === 'number' && typeof h.height === 'number';
+      (self as unknown as Worker).postMessage({
+        type: 'inspected', id: req.id, ok,
+        meta: ok ? {
+          name: h.name ?? '', seed: String(h.seed ?? ''), w: h.width, h: h.height,
+          difficulty: h.difficulty ?? 0, evil: h.crimson ? 1 : 0, hardMode: !!h.hardMode,
+        } : undefined,
+      });
+    } catch {
+      (self as unknown as Worker).postMessage({ type: 'inspected', id: req.id, ok: false });
+    }
+    return;
+  }
   if (req.type !== 'save') return;
   try {
     const n = Math.floor(req.bufs.type.byteLength / 2);

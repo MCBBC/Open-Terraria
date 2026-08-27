@@ -539,6 +539,66 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     }
   }
 
+  /** 世界名去重（导入/注册共用）：撞名追加 " (2)"、" (3)"… */
+  function dedupeWorldName(name: string): string {
+    const names = new Set(worldStore.list().map((m) => m.name));
+    if (!names.has(name)) return name;
+    let i = 2;
+    while (names.has(`${name} (${i})`)) i++;
+    return `${name} (${i})`;
+  }
+
+  /** 世界列表「导入世界」：.wld / 本仓 .json → 只解析落库进列表,不进入世界
+   *  （2026-08-27 用户要求;与 importWld 的进世界路径不同,本路径不过 Game——
+   *  parseWldToSave 产物 SaveData 经 JSON.stringify 即存储格式,loadSave =
+   *  loadSaveData(JSON.parse(json)) 无损回读）。
+   *  ★解析/校验/序列化全走 save.worker(2026-08-27 用户报「导入卡住 UI」:
+   *  parseWldToSave 主线程同步数秒级,大档 JSON.parse 亦数百 ms)——worker 不可用
+   *  内部自动回退主线程同步路径,调用面不变 */
+  async function importWorldFile(file: File): Promise<void> {
+    const lower = file.name.toLowerCase();
+    try {
+      await worldStore.ensureLoaded();
+      if (lower.endsWith('.json')) {
+        const text = await file.text();
+        const info = await saveClient.inspectSave(text);
+        if (!info.ok || !info.meta) {
+          throw new Error(Lang.text('Mods.SandboxWorld.Toast.ImportBadFormat'));
+        }
+        const m = info.meta;
+        const meta = await worldStore.importSlot({
+          name: dedupeWorldName(m.name || file.name.replace(/\.json$/i, '')),
+          seed: m.seed,
+          w: m.w, h: m.h,
+          difficulty: m.difficulty,
+          evil: m.evil,
+          hardMode: m.hardMode,
+        }, text);
+        ui.toast(Lang.text('Mods.SandboxWorld.Toast.WorldImported', meta.name));
+      } else if (lower.endsWith('.wld')) {
+        const buf = new Uint8Array(await file.arrayBuffer());
+        saveClient.ensure();
+        const r = await saveClient.importWld(buf);
+        const meta = await worldStore.importSlot({
+          name: dedupeWorldName(r.meta.name || file.name.replace(/\.wld$/i, '')),
+          seed: r.meta.seedText || String(r.meta.seedNum ?? ''),
+          w: r.meta.w, h: r.meta.h,
+          difficulty: r.meta.gameMode,
+          evil: r.meta.evil,
+          // wld header 无 hardMode 位（进世界路径读的是已载 world.flags）——导入态
+          // 缺省=非困难,首次进世界存档时随 meta 原地刷新
+          hardMode: false,
+        }, r.json);
+        ui.toast(Lang.text('Mods.SandboxWorld.Toast.WorldImported', meta.name));
+      } else {
+        ui.toast(Lang.text('Mods.SandboxWorld.Toast.ImportBadExt'));
+      }
+    } catch (e) {
+      console.error(e);
+      ui.toast(Lang.text('Mods.SandboxWorld.Toast.ImportFailed', (e as Error).message));
+    }
+  }
+
   async function importWld(buf: Uint8Array) {
     ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.ParsingWld'), 0.1);
     try {
@@ -557,15 +617,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.WldImported', save.header.name ?? '', save.header.wldVersion ?? 0));
       // 登记世界槽位并持久化：导入不再是一次性的，重进游戏可在世界列表中看到并继续游玩
       await worldStore.ensureLoaded();
-      const names = new Set(worldStore.list().map((m) => m.name));
-      let name = save.header.name;
-      if (names.has(name)) {
-        let i = 2;
-        while (names.has(`${name} (${i})`)) i++;
-        name = `${name} (${i})`;
-      }
       currentWorld = await worldStore.register({
-        name, seed: seedText || String(save.header.seed),
+        name: dedupeWorldName(save.header.name), seed: seedText || String(save.header.seed),
         w: save.header.width, h: save.header.height,
         difficulty: gameMode, evil: save.header.crimson ? 1 : 0,
         hardMode: !!(game?.world.flags.hardMode),   // 导入档 header 无此字段,读已载世界(空档兜 false)
@@ -706,6 +759,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
                 then(json ?? '', meta.name);
               });
             },
+            onImport: (file) => importWorldFile(file),   // 导入入本地列表(建房选世界同面)
             onNew: () => { ui.toast(Lang.text('Mods.SandboxWorld.MP.CreateWorldInSingle')); },
             onBack: () => closeFlow(),
           });
@@ -800,6 +854,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     VUI.clear();
     new WorldSelectPanel(root, worldStore, {
       onPlay: (meta) => void loadWorldFlow(meta),
+      onImport: (file) => importWorldFile(file),
       onNew: () => {
         // 世界创建页（DOM）
         VUI.setState(null);

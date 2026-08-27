@@ -69,6 +69,9 @@ export class UnifiedRandom {
     num3 = num3 + ((num3 >> 31) & 0x7fffffff); // >>31 算术移位，JS/C# 一致
     this.seedArray[num] = num3;
     this.inext = num;
+    // QQQQQQQQ：样本级观察钩（x86 UnifiedRandom.InternalSample→JJHook.OnRoll 同位
+    //   织入）。未注册零开销；观测型回调不得消费/改写状态。
+    (globalThis as { __swOnRoll?: (value: number, inst: object) => void }).__swOnRoll?.(num3, this);
     return num3;
   }
 

@@ -762,14 +762,32 @@ export function placeBuriedChest(
   // 探针（AB/ABX 对拍 vanilla ChestProbe；无钩零开销）
   const __ab = (globalThis as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void }).__swChestEv;
   const __n0 = (globalThis as { __swRollN?: number }).__swRollN ?? -1;
+  const __jcdbg = (globalThis as { __swJCDebug?: () => boolean }).__swJCDebug;
   __ab?.('ab', i, j, __n0);
+  let rInner = false;
+  let threw: unknown = null;
   try {
-    const r = placeBuriedChestInner(st, rng, gs, chests, i, j, opts);
-    __ab?.('abx', i, j, r ? 1 : 0);
-    return r;
+    rInner = placeBuriedChestInner(st, rng, gs, chests, i, j, opts);
+    __ab?.('abx', i, j, rInner ? 1 : 0);
+    return rInner;
   } catch (e) {
     __ab?.('abx', i, j, -1);
+    threw = e;
     throw e;
+  } finally {
+    // ★QQQQQQQ-TEMP：ABMap 镜像（调用后区域快照，与 x86 JJHook.AbMap 同窗对拍）
+    if (__jcdbg?.()) {
+      console.log(`[jcmap-anchor] ${i},${j} ret=${rInner ? 1 : 0}${threw ? ' THROW' : ''}`);
+      for (let y = j - 12; y <= j + 10; y++) {
+        let line = `${y}: `;
+        for (let x = i - 8; x <= i + 10; x++) {
+          if (!st.inBounds(x, y)) continue;
+          const k = st.idx(x, y);
+          line += `${st.flags[k] ? TILE_DEFS[st.type[k]]?.vanilla?.sheet : '.'}/${st.wall[k]} `;
+        }
+        console.log(line);
+      }
+    }
   }
 }
 
@@ -1026,6 +1044,23 @@ function placeBuriedChestInner(
   // （SolidTile|平台|solidTop|桌，chestLegOK）。
   const topY = gy - 2;
   if (topY < 1) { restoreSlopes(); return false; }
+  // ★QQQQQQQ-TEMP：临场脚印状态诊断（探针后拆）
+  {
+    const jcdbg = (globalThis as { __swJCDebug?: () => boolean }).__swJCDebug;
+    if (jcdbg?.()) {
+      const fpCells: string[] = [];
+      for (let dx = -1; dx <= 0; dx++) {
+        for (let dy = 0; dy <= 1; dy++) {
+          const x = i + dx, y = topY + dy;
+          const k = st.idx(x, y);
+          fpCells.push(`${x},${y}:f${st.flags[k] ?? -1},t${TILE_DEFS[st.type[k]]?.vanilla?.sheet},w${st.wall[k]},L${st.liquid[k]}`);
+        }
+      }
+      console.log(`[jcdbg] i=${i} j=${j} gy=${gy} topY=${topY} | ${fpCells.join(' ')} | legs f${st.flags[st.idx(i - 1, gy)]}/f${st.flags[st.idx(i, gy)]}`);
+    }
+  }
+  // ★QQQQQQQ-TEMP：ABMap 镜像（成功/失败后的区域快照，与 x86 JJHook.AbMap 对拍）——
+  //   放在 wrapper 层打印（调用方持有返回值前后的世界态语义=x86 同位）。
   {
     const sheetOf = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? 0;
     const legL = sheetOf(st.type[st.idx(i - 1, gy)]);

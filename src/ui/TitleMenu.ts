@@ -20,6 +20,7 @@
 //      TitleMenu flow 里接 onSunMoonGrab 即原版般跟手；time01 已按原版公式反算好抛出。
 import { Lang } from '../i18n/Lang';
 import { menuTimeInfo } from '../render/MenuBackground';
+import { decayCelestialModY } from '../render/SkyRenderer';
 import { openAssetDiagPanel } from './AssetDownloadUI';
 
 /** Sun.png 114×114 / Moon_N.png 50×400（8 相位帧，帧宽 50）——SkyRenderer.ts:27-28 */
@@ -359,9 +360,13 @@ export class TitleMenu {
       (this.logoDay as HTMLImageElement).style.opacity = String(logoA / 255);
       (this.logoNight as HTMLImageElement).style.opacity = String((255 - logoA) / 255);
       // 日/月命中层每帧对齐天空画布（时钟在走，日/月横穿屏幕）
-      // modY 松手衰减 ×0.999/帧（Main.cs:62415-62416——short 截断在视觉上不可辨，省略）
+      // modY 松手衰减 = 画布同款 decayCelestialModY（Main.cs:62415-62416 (short)
+      // 截断向零）。★截断绝不是"视觉上不可辨"：纯浮点 ×0.999 从 230px 归零要
+      // ~90s，截断每帧至少削 1px ~4s 归零——曾两套衰减并存,拖完太阳画布日/月
+      // 数秒弹回轨道位而命中层残留偏移一分多钟 =「不灵敏/得点月亮上方才有效」
+      // （2026-08-27 用户报,231px 实测算术）
       if (!this.grabbing && this.modY !== 0) {
-        this.modY = Math.abs(this.modY) < 0.5 ? 0 : this.modY * 0.999;
+        this.modY = decayCelestialModY(this.modY);
       }
       this.syncCelestial();
       this.rafId = requestAnimationFrame(step);

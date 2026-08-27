@@ -47,7 +47,7 @@ const CSS = `
   background: rgba(4,6,14,0.82);
 }
 .sw-asset-gate .panel {
-  width: min(560px, 88vw); text-align: center; color: #e8ecf8;
+  width: min(680px, 94vw); text-align: center; color: #e8ecf8;
   background-color: #241a4e;                 /* 九宫格贴图就绪前的兜底 */
   background-size: 100% 100%; image-rendering: pixelated;
   border: 2px solid #7d92d6;
@@ -59,10 +59,15 @@ const CSS = `
   text-shadow: 2px 0 0 #000, -2px 0 0 #000, 0 2px 0 #000, 0 -2px 0 #000;
 }
 /* 原版世界创建进度条 1:1(UIGenProgressBar):612×70 Outer 框 + 内槽(20,40,570,16) */
-.sw-asset-barwrap { position: relative; width: 100%; aspect-ratio: 612 / 70; margin: 18px auto 6px; }
+/* 原版世界创建进度条 1:1（UIGenProgressBar 修正版层级,2026-08-27）：
+   612×70 逻辑尺寸固定不拉伸；★填充槽先渲染、Outer 外框后画压上（端点装饰
+   盖住填充两端=原版 DrawSelf :100-107 序;此前 DOM 反序+100% 100% 拉伸=端点
+   装饰变形+被填充盖住）。窄屏整体 transform scale（JS 挂载时算,同
+   fitProgressScale 语义）。 */
+.sw-asset-barwrap { position: relative; width: 612px; max-width: 100%; height: 70px; margin: 18px auto 6px; transform-origin: top center; }
 .sw-asset-barwrap .outer {
-  position: absolute; inset: 0;
-  background: url('sprites/vanilla-ui/UI_WorldGen_Outer_Corrupt.png') 100% 100% / 100% 100% no-repeat;
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: url('sprites/vanilla-ui/UI_WorldGen_Outer_Corrupt.png') 0 0 / 612px 70px no-repeat;
   image-rendering: pixelated;
 }
 .sw-asset-barwrap .slot {
@@ -81,8 +86,8 @@ const CSS = `
 .sw-asset-retry:hover { background: #4a3a7a; }
 /* 下载详情面板(点击徽标打开;同 gate 面板语言) */
 .sw-asset-panel {
-  position: fixed; right: 14px; bottom: 56px; z-index: 10003;
-  width: min(460px, 90vw); text-align: center; color: #e8ecf8;
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 10003;
+  width: min(680px, 94vw); text-align: center; color: #e8ecf8;
   background-color: #241a4e; background-size: 100% 100%; image-rendering: pixelated;
   border: 2px solid #7d92d6; box-shadow: 0 0 0 2px #0a0e1e, 0 10px 32px rgba(0,0,0,0.7);
   padding: 20px 22px 16px;
@@ -284,6 +289,15 @@ export function unmountAssetBadge(): void {
 let panelEl: HTMLElement | null = null;
 let panelUnsub: (() => void) | null = null;
 
+/** 进度条窄屏适配(同 UIGenProgressBar.fitProgressScale 语义):容器宽 <612 时
+ *  整体 transform scale(612×70 逻辑尺寸固定,不拉伸不裁切) */
+function fitProgressBar(wrap: HTMLElement): void {
+  const panel = wrap.closest('.sw-asset-panel, .sw-asset-gate .panel') as HTMLElement | null;
+  const avail = Math.max(240, (panel?.clientWidth ?? 612) - 48);
+  const k = Math.min(1, avail / 612);
+  wrap.style.transform = k < 1 ? `scale(${k})` : '';
+}
+
 export function toggleAssetPanel(): void {
   if (panelEl) closeAssetPanel();
   else openAssetPanel();
@@ -305,6 +319,7 @@ function openAssetPanel(): void {
     <button class="sw-asset-retry" style="display:none">重新下载</button>
     <button class="sw-asset-close">关闭</button>`;
   document.body.appendChild(panelEl);
+  fitProgressBar(panelEl.querySelector('.sw-asset-barwrap') as HTMLElement);
   ensurePanelBg(panelEl);
   const bar = panelEl.querySelector('.slot > div') as HTMLElement;
   const mbEl = panelEl.querySelector('.sw-asset-mb') as HTMLElement;
@@ -364,6 +379,7 @@ export function gateAssetsOrRun(action: () => void): void {
       <button class="sw-asset-retry" style="display:none">重新下载</button>
     </div>`;
   document.body.appendChild(gateEl);
+  fitProgressBar(gateEl.querySelector('.sw-asset-barwrap') as HTMLElement);
   ensurePanelBg(gateEl.querySelector('.panel') as HTMLElement);
   const bar = gateEl.querySelector('.slot > div') as HTMLElement;
   const pct = gateEl.querySelector('.sw-asset-pct') as HTMLElement;

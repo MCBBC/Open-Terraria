@@ -2,24 +2,45 @@
 // 15/35/60ms——对比原同步序列化 147ms+ 全在主线程),RLE+base64+JSON 全套在后台完成。
 // worker 不可用/超时/出错 → 回退主线程 saveGame(行为与旧版完全一致)。
 // 与 WorldGenClient 同款握手模式。
+// 导入域(2026-08-27):importWld/inspectSave——世界列表「导入」的 wld 解析与
+// 大档 JSON.parse 搬后台;主线程回退路径与旧同步实现逐位一致。
 import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
 import type { SaveData, SaveMeta } from '../save/serialize';
-import { saveGame } from '../save/SaveFile';
+import { saveGame, loadSave } from '../save/SaveFile';
+import { parseWldToSave } from '../wld/WldImport';
 import { weatherToSave } from '../world/weather/Weather';
 
 const HANDSHAKE_MS = 2000;
 const SAVE_TIMEOUT_MS = 20000;
+/** 大 wld 解析+stringify 余量(8400×2400 数秒级) */
+const IMPORT_TIMEOUT_MS = 60000;
+
+/** importWld 结果:存储格式 JSON + 注册槽位所需元数据 */
+export interface ImportedWorld {
+  json: string;
+  meta: { name: string; seedText: string; seedNum: number | string; gameMode: number;
+    w: number; h: number; evil: 0 | 1 };
+}
+
+/** inspectSave 结果:本仓 .json 档头校验 */
+export interface SaveHeaderInfo {
+  ok: boolean;
+  meta?: { name: string; seed: string; w: number; h: number;
+    difficulty: number; evil: 0 | 1; hardMode: boolean };
+}
 
 type SaveResponse =
   | { type: 'saved'; id: number; json: string }
+  | { type: 'imported'; id: number; json: string; meta: ImportedWorld['meta'] }
+  | { type: 'inspected'; id: number; ok: boolean; meta?: SaveHeaderInfo['meta'] }
   | { type: 'error'; id: number; message: string };
 
 export class SaveClient {
   private worker: Worker | null = null;
   private broken = false;
   private nextId = 1;
-  private pending = new Map<number, { resolve: (json: string) => void; reject: (e: Error) => void }>();
+  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   /** 串行队列:连按保存只排一次,避免并发双份全图快照(瞬时内存 ×2) */
   private chain: Promise<unknown> = Promise.resolve();
 
@@ -113,7 +134,7 @@ export class SaveClient {
       explored: world.explored.buffer,   // 战争迷雾（0/1 位图；结构化克隆快照，不 transfer）
     };
     const promise = new Promise<string>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { resolve: (v) => resolve(v as string), reject });
       setTimeout(() => {
         const p = this.pending.get(id);
         if (p) { this.pending.delete(id); p.reject(new Error('save worker timeout')); }
@@ -133,6 +154,93 @@ export class SaveClient {
     }
   }
 
+  /** 后台 .wld 导入解析(2026-08-27 用户报「导入卡住 UI」):parseWldToSave +
+   *  JSON.stringify 全在 worker;buf transfer 零拷贝(调用方 buf 来自
+   *  file.arrayBuffer() 一次性数据,detach 无害)。不可用/超时/出错回退主线程
+   *  同步路径(与旧实现逐位一致) */
+  async importWld(buf: Uint8Array): Promise<ImportedWorld> {
+    this.ensure();
+    const w = this.worker;
+    if (this.broken || !w) return this.importWldSync(buf);
+    const id = this.nextId++;
+    const promise = new Promise<unknown>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      setTimeout(() => {
+        const p = this.pending.get(id);
+        if (p) { this.pending.delete(id); p.reject(new Error('import worker timeout')); }
+      }, IMPORT_TIMEOUT_MS);
+    });
+    try {
+      w.postMessage({ type: 'importWld', id, buf: buf.buffer }, [buf.buffer]);
+    } catch {
+      const p = this.pending.get(id);
+      if (p) this.pending.delete(id);
+      return this.importWldSync(buf);
+    }
+    try {
+      return await promise as ImportedWorld;
+    } catch {
+      return this.importWldSync(buf);   // 回退同步(worker 出错/超时)
+    }
+  }
+
+  /** 后台 .json 档头校验+提取(大档 JSON.parse 数百 ms 也在 worker) */
+  async inspectSave(text: string): Promise<SaveHeaderInfo> {
+    this.ensure();
+    const w = this.worker;
+    if (this.broken || !w) return this.inspectSaveSync(text);
+    const id = this.nextId++;
+    const promise = new Promise<unknown>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
+      setTimeout(() => {
+        const p = this.pending.get(id);
+        if (p) { this.pending.delete(id); p.reject(new Error('inspect worker timeout')); }
+      }, SAVE_TIMEOUT_MS);
+    });
+    try {
+      w.postMessage({ type: 'inspectSave', id, text });
+    } catch {
+      const p = this.pending.get(id);
+      if (p) this.pending.delete(id);
+      return this.inspectSaveSync(text);
+    }
+    try {
+      return await promise as SaveHeaderInfo;
+    } catch {
+      return this.inspectSaveSync(text);
+    }
+  }
+
+  /** 主线程回退:.wld 解析(= 旧同步实现) */
+  private importWldSync(buf: Uint8Array): ImportedWorld {
+    const { save, seedText, gameMode } = parseWldToSave(buf);
+    return {
+      json: JSON.stringify(save),
+      meta: {
+        name: save.header.name ?? '', seedText, seedNum: save.header.seed, gameMode,
+        w: save.header.width, h: save.header.height,
+        evil: save.header.crimson ? 1 : 0,
+      },
+    };
+  }
+
+  /** 主线程回退:.json 档头校验 */
+  private inspectSaveSync(text: string): SaveHeaderInfo {
+    try {
+      const h = (JSON.parse(text) as {
+        header?: { name?: string; seed?: number | string; width?: number; height?: number;
+          difficulty?: number; crimson?: boolean; hardMode?: boolean };
+      }).header;
+      if (!h || typeof h.width !== 'number' || typeof h.height !== 'number') return { ok: false };
+      return { ok: true, meta: {
+        name: h.name ?? '', seed: String(h.seed ?? ''), w: h.width, h: h.height,
+        difficulty: h.difficulty ?? 0, evil: h.crimson ? 1 : 0, hardMode: !!h.hardMode,
+      } };
+    } catch {
+      return { ok: false };
+    }
+  }
+
   /** 懒建 worker(首次 save 时);失败标记 broken 永久回退 */
   ensure(): void {
     if (this.worker || this.broken || typeof Worker === 'undefined') return;
@@ -144,6 +252,8 @@ export class SaveClient {
         if (!p) return;
         this.pending.delete(d.id);
         if (d.type === 'saved') p.resolve(d.json);
+        else if (d.type === 'imported') p.resolve({ json: d.json, meta: d.meta });
+        else if (d.type === 'inspected') p.resolve({ ok: d.ok, meta: d.meta });
         else p.reject(new Error(d.message));
       };
       w.onerror = () => {

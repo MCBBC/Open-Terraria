@@ -86,6 +86,14 @@ export class WorldStore {
     return meta;
   }
 
+  /** 导入落库（世界列表「导入」路径）：register 只登记索引不落数据，
+   *  本方法一并写入存档全文（duplicate 同型；数据 = SaveFile JSON 全文） */
+  async importSlot(m: Omit<WorldMeta, 'id' | 'createdAt' | 'lastPlayed' | 'playTimeMs' | 'favorite'>, saveJson: string): Promise<WorldMeta> {
+    const meta = await this.register(m);
+    await kvSet(dataKey(meta.id), saveJson);
+    return meta;
+  }
+
   /** 保存世界数据（同时刷新 meta 的游玩时间/时长） */
   async save(meta: WorldMeta, saveJson: string, playTimeMs: number) {
     meta.lastPlayed = Date.now();

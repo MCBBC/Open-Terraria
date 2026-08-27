@@ -19377,7 +19377,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return null;
   }
 
-  /** 3×3 邻域内找宝箱（点击容差） */
   /** 开箱超距自动关（Player.cs:30614-30620）：世界宝箱面板开着时每 tick 校验——
    *  箱多格命中盒(Inflate −1)最近点仍在 IsInTileInteractionRange(Simple) 内才保持
    *  打开,出界 → chest=-1 + Sound 11。命中盒按原版 :30635-30651 分型：
@@ -19394,6 +19393,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (sheet === 88) rw = 48;                                 // 大橱柜
     else if (sheet === 29) rh = 16;
     else if (sheet === 463 || sheet === 491) { rx -= 16; ry -= 32; rw = 48; rh = 64; }
+    else if (sheet !== 21 && sheet !== 97) {
+      // 原位已非箱（开着时被拆/被电路换型）→ 原版 DestroyChest 即 chest=-1（:606-624），
+      // 不做距离判定直接收面板
+      this.closeChestPanel?.();
+      this.sfx.play('menuClose', 1);
+      return;
+    }
     // Inflate(-1,-1) → ClosestPointInRect(player.Center)（:30643-30649 clamp 语义）
     const px = Math.max(rx + 1, Math.min(this.player.cx, rx + rw - 1));
     const py = Math.max(ry + 1, Math.min(this.player.cy, ry + rh - 1));
@@ -19403,6 +19409,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** 3×3 邻域内找宝箱（点击容差） */
   private findChestNear(tx: number, ty: number): ChestData | null {
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
