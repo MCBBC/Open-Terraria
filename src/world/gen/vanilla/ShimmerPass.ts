@@ -69,13 +69,26 @@ export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState, onStage?: 
     gs.dungeonSide < 1
       ? rng.int(Math.trunc(w * (wide ? 0.8 : 0.89)), w - 201)
       : rng.int(200, Math.trunc(w * (wide ? 0.2 : 0.11)) - 1);
+  // ★SSS-CELEB（1458 cs:15294-15310）：tenth 世界微光强制浅带——num6=(int)ws+150、
+  //   num7=((int)(rl+ws+200))/2（下限钳制 num6+50）；首掷 num4 改 Next(num6,num7)
+  //   （x 带不变，标准带先掷后仅覆写 y），重试环 num8<10000 时同带重掷 y+x，
+  //   ≥10000 落回普通 else 支（y 下限 (ws+rl)/2+20）、>20000 才进放宽支。
+  const celbShim = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags?.remix;
+  const shimYLo = Math.floor(gs.worldSurface) + 150;
+  const shimYHiRaw = Math.trunc((gs.rockLevel + gs.worldSurface + 200) / 2);
+  const celbYHi = Math.max(shimYHiRaw, shimYLo + 50);   // cs:15290 if(num7<=num6) num7=num6+50
   // ★cs:15273-15274 首掷是 Y 先 X 后(与重试环内的顺序一致;重试环 cs:15291-15292 同为 Y 先)
   let y = rng.int(yLoBase, yHi - 1);
   let x = pickX(false);
+  if (celbShim) y = rng.int(shimYLo, celbYHi - 1);
   let tries = 0;
   while (!shimmerMakeBiome(st, rng, gs, x, y, onStage)) {
     tries++;
-    if (tries > 20000) {
+    if (celbShim && tries < 10000) {
+      // cs:15300-15303:tenth 浅带重掷——Y 先 X 后,x 用标准窄带
+      y = rng.int(shimYLo, celbYHi - 1);
+      x = pickX(false);
+    } else if (tries > 20000) {
       // cs:15292-15295:放宽 x 带(0.8w/w-200 或 200/0.2w),y 下限 ws+100+20
       y = rng.int(ws + 100 + 20, yHi - 1);
       x = pickX(true);

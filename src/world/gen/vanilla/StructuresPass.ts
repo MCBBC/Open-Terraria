@@ -499,7 +499,8 @@ export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void
   }
   const { w, h } = st;
   const yMin = Math.floor((gs.worldSurface * 2 + gs.rockLevel) / 3);
-  const count = Math.floor(w * h * 0.00002);
+  // ★SSS-CELEB（1458 cs:16880-16882）：tenth → num×1.2（RECON-CELEB「生命水晶」）
+  const count = Math.floor(w * h * 0.00002 * (gs.seedFlags?.tenthAnniversary ? 1.2 : 1));
   const maxTries = 10000;
   for (let n = 0; n < count; n++) {
     let done = false;
@@ -580,10 +581,24 @@ export function runPyramidPass(
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
 ): void {
   const accepted: Array<{ x: number; y: number }> = [];
+  // ★SSS-CELEB（1458 cs:15446-15452）：tenth（!dualDungeons）→ 地下沙漠中心保底
+  //   金字塔（Center.X, Top-10；Pyramid(x,j) 默认 75/125），且候选循环排除沙漠矩形内
+  //   的候选点（Rectangle.Contains 半开区间）。
+  const udPyr = gs.undergroundDesert;
+  const celbPyr = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags.remix;
+  if (celbPyr && udPyr) {
+    const px = udPyr.x0 + Math.trunc((udPyr.x1 - udPyr.x0) / 2);   // Rectangle.Center.X=X+W/2
+    const pj = udPyr.y0 - 10;                                      // Top-10
+    if (PYR_TRACE) console.log(`PYR celeb guaranteed @(${px},${pj})`);
+    pyramid(st, rng, gs, chests, px, pj, 75, 125, false);
+    accepted.push({ x: px, y: pj });
+  }
   for (let idx = 0; idx < gs.pyramidSpots.length; idx++) {
     const cand = gs.pyramidSpots[idx];
     const num = cand.x;
     if (num <= 300 || num >= st.w - 300) continue;
+    if (celbPyr && udPyr
+      && num >= udPyr.x0 && num < udPyr.x1 && cand.y >= udPyr.y0 && cand.y < udPyr.y1) continue;
     // 地牢侧回避（cs:15450-15452）：dungeonSide>Left 时须 num ≥ dungeonX+0.15w；
     // dungeonSide<Right 时须 num ≤ dungeonX-0.15w（任一不过即拒）。
     // ★dungeonX 此处 = generatingDungeonPositionX 的**终值**＝爬升入口走廊终点（入口 X，

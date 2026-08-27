@@ -73,7 +73,7 @@ function rowHasInvalidTiles(st: TileStore, ntbSkipMud: boolean, startX: number, 
 /** DesertDescription.CreateFromPlacement + SandMound.Place（1:1，Sub-A）。
  *  返回 null = 无效（RowHasInvalidTiles 命中）——blockRows 掷骰已消耗（原版语义） */
 export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurface: number, skipCheck = false,
-  ntbSkipMud = false): DesertDesc | null {
+  ntbSkipMud = false, seedFlagsRef?: GenState['seedFlags']): DesertDesc | null {
   _wsRef = () => worldSurface;
   const { w, h } = st;
   const factor = w / 4200;
@@ -87,9 +87,16 @@ export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurfac
   // num6 = (int)(Average + Bottom) / 2 —— 先截断再 int 除（DesertDescription.cs:81）
   const topY = Math.trunc(sm.average + sm.bottom) / 2 | 0;
   const hiveTop = topY + rng.int(40, 59);    // Next(40,60)
-  const desertH = hiveTop + Math.trunc(height / 2) - topY; // Desert.Height（未封顶）
+  // ★SSS-CELEB（1458 DesertDescription.cs:84-93）：tenth → num7=(int)(20*num)
+  //   （小世界=20）。矩形整体下移/加深：Hive=(X, Y+num7, w, h-num7)、
+  //   Desert.Height+=num7、CombinedArea 不变。后续入口/Hive/Cleanup 全部消费
+  //   该偏移后的矩形（vanilla 在 CreateFromPlacement 内一次成型）。
+  const celbNum7 = seedFlagsRef?.tenthAnniversary ? Math.trunc(20 * factor) : 0;
+  const desertH = hiveTop + Math.trunc(height / 2) - topY + celbNum7; // Desert.Height（未封顶）
   // ---- SandMound.Place（SandMound.cs 1:1）----
-  let moundH = Math.min(desertH, Math.trunc(height / 2));  // min(Desert.Height, Hive.Height/2)
+  //   ★SSS-CELEB：vanilla SandMound 读的是【已含 num7 的 description】——
+  //   moundH=min(Desert.Height+7, ⌊(Hive.Height-7)/2⌋)（Hive 高度同步被削 num7）
+  let moundH = Math.min(desertH, Math.trunc((height - celbNum7) / 2)); // min(Desert.Height, Hive.Height/2)
   const moundBottom = topY + moundH;                        // capped desert.Bottom
   const sandBottom = topY + desertH;                        // Desert.Bottom（沙柱底）
   let coarse = 0, fine = 0;
@@ -127,8 +134,8 @@ export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurfac
   // UpdateSurfaceMap（mound 后重扫，入口/Hive 消费）
   const sm2 = surfaceMapFromArea(st, ox - 5, width + 10);
   return {
-    combX: ox, combY: topY, combW: width, combH: hiveTop + height - topY,
-    hiveTop, hiveH: height, desertH,
+    combX: ox, combY: topY, combW: width, combH: hiveTop + height - topY, // CombinedArea 不含 num7
+    hiveTop: hiveTop + celbNum7, hiveH: height - celbNum7, desertH,
     blockCols, blockRows,
     surface: sm.heights, surfaceX: ox - 5,
     surface2: sm2.heights, surface2X: ox - 5,
@@ -194,7 +201,7 @@ export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): Deser
   let x = half + num4 * -side;
   let desc: DesertDesc | null = null;
   for (;;) {
-    desc = desertPlaceMound(st, rng, x, gs.worldSurface, false, ntbSkipMud);
+    desc = desertPlaceMound(st, rng, x, gs.worldSurface, false, ntbSkipMud, gs.seedFlags);
     if (desc) break;
     num4 = Math.trunc(rng.nextIntRange(0, half) / 2) + Math.trunc(half / 8)
       + rng.nextIntRange(0, Math.trunc(tries / 12));
@@ -206,7 +213,7 @@ export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): Deser
     }
     if (skipCheck) {
       // 恒过：RowHasInvalidTiles 直接 false（GenVars.skipDesertTileCheck 语义）
-      desc = desertPlaceMound(st, rng, x, gs.worldSurface, true);
+      desc = desertPlaceMound(st, rng, x, gs.worldSurface, true, false, gs.seedFlags);
       break;
     }
   }
@@ -451,7 +458,10 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   // ================= Sub-C：入口（DesertBiome.cs:23-40）=================
   // ChanceOfEntrance 被 Configuration.json 覆盖为 0.5（DesertBiome.cs:11 代码默认
   // 0.3333 不生效——曾按 0.3333 写导致门判定与原版分叉）
-  if (rng.next() <= 0.5) {
+  // ★SSS-CELEB（1458 DesertBiome.cs:23）：`!tenthAnniversaryWorld && NextDouble()<=chance`
+  //   ——celeb 世界**整个入口段跳过且不消耗掷骰**（NextDouble/Next(4) 都不吃）。
+  //   此处无 extraLiquid（SecretSeed 组合域）支。
+  if (!gs.seedFlags?.tenthAnniversary && rng.next() <= 0.5) {
     const kind = rng.nextIntRange(0, 4);        // Next(4)：Chambers/Anthill/LarvaHole/Pit
     if (kind === 0) chambersEntrance();
     else if (kind === 1) anthillEntrance();

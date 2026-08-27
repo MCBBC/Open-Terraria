@@ -52,6 +52,8 @@ import { checkTileBreakability } from './HalfBrickPass';
 import { hfIs1457 } from './HellFortPass';
 // ★UUUUUU（2026-08-23）：notTheBees 终转化（调用位 cs:22602-22605——⑭ 之后）
 import { runNotTheBees, runFinishNotTheBees } from './NotTheBeesPass';
+// ★SSS-CELEB（2026-08-27）：FinishTenthAnniversaryWorld 全家（1458 cs:24502-24554）
+import { growTree } from './TreePass';
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0(空格)安全退化 */
 const SHEET_TO_INTERNAL = new Map<number, number>();
@@ -2783,7 +2785,9 @@ export function runFinalCleanupPass(
     const MUD_TILE = TILE_BY_KEY['mud']!;   // ★UUUUUU：TileID.Sets.Mud={59}（NTB 命中集扩展）
     const DIRTIEST = TILE_BY_KEY['v_668_the_dirtiest_block']!;
     const sizeId = st.w <= 4200 ? 0 : st.w <= 6400 ? 1 : 2;      // GetWorldSize（cs:6518）
-    const target = sizeId === 1 ? 6 : sizeId === 2 ? 9 : 3;
+    // ★SSS-CELEB（1458 cs:22587-22589）：tenth → 数量 ×5（15/30/45）
+    const target0 = sizeId === 1 ? 6 : sizeId === 2 ? 9 : 3;
+    const target = gs.seedFlags.tenthAnniversary ? target0 * 5 : target0;
     let placed = 0;
     let budget = 3000;
     while (placed < target) {
@@ -2818,6 +2822,13 @@ export function runFinalCleanupPass(
     runFinishNoTraps(st, rng, gs, opts.chests);
   }
 
+  // ── FinishTenthAnniversaryWorld（1458 cs:22637-22640 调用位：NoTraps 之后、
+  //    Drunk/NTB/GG/Remix 之前；实现体见下方 runFinishTenthAnniversaryWorld）──
+  //    ★SSS-CELEB 批新增：ConvertSkyIslands(2) 神圣化 + 六族 Paint + 巨石 138→665。
+  if (gs.seedFlags.tenthAnniversary && !gs.seedFlags.skyblock && rng) {
+    runFinishTenthAnniversaryWorld(st, rng, gs);
+  }
+
   // ── NotTheBees + FinishNotTheBees（cs:22602-22605 调用位：⑭ 之后、
   //    ShimmerCleanUp 之前；原版序=FinishNoTraps/Tenth/Drunk 之后、GG 之前）──
   //    ★UUUUUU 批新增（实现体在 NotTheBeesPass.ts）：notTheBees 专属终转化
@@ -2836,6 +2847,12 @@ export function runFinalCleanupPass(
   //    dump #105 快照位,mile8 槽 57 对拍把静态化差全记在 #105（const/s22222
   //    T1>332×11 假债）。opts.beforeShimmer 钩子由 WorldGen 接线 FinalSeedCleanup。
   opts?.beforeShimmer?.();
+  // ★SSS-CELEB（1458 cs:22668-22670）：FinishTenthAnniversaryWorldPaintTreesAndMushrooms
+  //   ——FinalizeSecretSeeds 之后、ShimmerCleanUp 之前（原序 cs:22666→22668→22671）。
+  if (gs.seedFlags.tenthAnniversary && !gs.seedFlags.skyblock && rng) {
+    paintTheTreesTenth(st, rng, gs);
+    paintTheMushroomsTenth(st, rng, gs);
+  }
   //    苔藓计数平权的关键写侧：r<120 环带内 moss 块→石 1 / 184 苔藓芽+51/56/
   //    229/230/659 击杀（本种子实测 vanilla 侧 625→1×1358 + 184 杀×558）。
   //    r<90 块的 Convert(j,i,0,3)（净化 7×7 菱形）结构性 no-op：微光 pass 塑形
@@ -2906,6 +2923,25 @@ export function runFinalCleanupPass(
       b = 255;
       if (!st.inBounds(bx, by) || st.flags[st.idx(bx, by)] || ++guard > st.h) break;
     }
+    // ★SSS-CELEB（1458 cs:35171-35195）：tenth 巨化带——X±170 × Y+40..h-430 内
+    //   373/374/375→709（滴虫→异晶块），墙 86 豁免；非微光/蜂蜜液体 → Shimmerator
+    //   洪泛转微光（RECON-CELEB「微光池 x±170 巨化」）。
+    if (gs.seedFlags.tenthAnniversary && rng) {
+      const actxA = new Set<number>();
+      for (let k = SX - 170; k <= SX + 170; k++) {
+        for (let l = SY + 40; l < st.h - 330 - 100; l++) {
+          if (!st.inBounds(k, l)) continue;
+          const i = st.idx(k, l);
+          if (st.wall[i] === 86) continue;
+          const sh = SWEEP_SHEET[st.type[i]];
+          if (sh === 375 || sh === 374 || sh === 373) st.type[i] = sid(709);
+          if (st.liquid[i]! > 0 && st.liquidType[i] !== LIQUID_TYPE.SHIMMER
+            && st.liquidType[i] !== LIQUID_TYPE.HONEY) {
+            shimmeratorTenth(st, rng, k, l, actxA, ctx);
+          }
+        }
+      }
+    }
     // 全图微光淹没树击杀（cs:34833-34843）
     for (let xx = 10; xx < st.w - 10; xx++) {
       for (let yy = 10; yy < st.h - 10; yy++) {
@@ -2917,4 +2953,299 @@ export function runFinalCleanupPass(
       }
     }
   }
+}
+
+// ═══════════════ SSS-CELEB 批（2026-08-27）：FinishTenthAnniversaryWorld 全家 ═══════════════
+// 1458 WorldGen.cs:24502-24554 + Paint 族 24555-24947 + ConvertSkyIslands 24947-24986。
+// 掷流登记：ImproveAllChestContents（cs:24989-25047，前缀引擎 Item.Prefix(-3)）本批
+// 未移植 → 其后的 PaintTrees/PaintMushrooms 颜色带掷骰位次相对 vanilla 有位移
+// （仅涂色色相分布差，无格子几何差；备案=SSS-CELEB 遗留#1）。
+
+const CRACKED_BRICKS = idsByVanillaSheet(48, 487);
+const TILE_DUNGEON_FC = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
+const RAINBOW_BASE = 13;                       // GetRainbowPaintIDForPosition 基色
+const rainbowPaintIdAt = (x: number, y: number): number => (x % 44 + y % 44) % 11 + RAINBOW_BASE;
+const rainbowPaintIdWiggly = (x: number, y: number): number => {
+  const wx = x + Math.trunc(Math.sin((y % 50) / 50 * Math.PI * 2) * 10) - 5;
+  return (wx % 44) % 11 + RAINBOW_BASE;
+};
+
+/** FinishTenthAnniversaryWorld（1458 cs:24508-24553）：纯 celeb 路径
+ *  （remix/gg/drunk/ntb/dontStarve 组合域支不移植，各自线另案）。 */
+function runFinishTenthAnniversaryWorld(st: TileStore, rng: RNG, gs: GenState): void {
+  convertSkyIslandsTenth(st, rng, gs);          // ConvertSkyIslands(2, growTrees:true)
+  paintTheDungeonTenth(st, gs, 24, 24);
+  paintTheLivingTreesTenth(st, gs, 12, 12);
+  paintTheTempleTenth(st, gs, 10, 5);
+  paintTheCloudsTenth(st, gs, 12, 12);
+  paintTheSandTenth(st, rng, gs, 7, 7);
+  paintThePyramidsTenth(st, gs, 12, 12);
+  // —— 巨石 138→665 生命水晶巨石（cs:24530-24544）：全图扫 [50,w-50)×[50,h-50)，
+  //    Next(4) **每格无条件消耗**（&&链首项），命中锚格(frameX/Y==0 → JS 用
+  //    左/上同型邻格不存在判定)才改写 2×2。
+  const b138s = sid(138), b665s2 = sid(665);
+  for (let i = 50; i < st.w - 50; i++) {
+    for (let j = 50; j < st.h - 50; j++) {
+      if (rng.int(0, 3) !== 0) continue;
+      const t = st.idx(i, j);
+      const sh = SWEEP_SHEET[st.type[t]];
+      if (!st.flags[t] || sh !== 138) continue;
+      // 锚格近似：vanilla frameX==0 && frameY==0（JS 生成期无帧通道）
+      const anchor = !(i > 0 && SWEEP_SHEET[st.type[st.idx(i - 1, j)]] === 138)
+        && !(j > 0 && SWEEP_SHEET[st.type[st.idx(i, j - 1)]] === 138);
+      if (!anchor) continue;
+      st.type[t] = b665s2;
+      if (j + 1 < st.h) st.type[st.idx(i, j + 1)] = b665s2;
+      if (i + 1 < st.w) st.type[st.idx(i + 1, j)] = b665s2;
+      if (i + 1 < st.w && j + 1 < st.h) st.type[st.idx(i + 1, j + 1)] = b665s2;
+    }
+  }
+  void b138s;
+  // ImproveAllChestContents：未移植（前缀引擎债，见文件头登记）
+}
+
+/** ConvertSkyIslands(2, growTrees:true)（1458 cs:24947-24986）。
+ *  带上界=num=`从 y=20 下扫首个含云族的行`（Skyblock denyAllGeneration 门恒过）。 */
+function convertSkyIslandsTenth(st: TileStore, rng: RNG, gs: GenState): void {
+  let num = 0;
+  outer:
+  for (let i = 20; i < gs.worldSurface; i++) {
+    for (let j = 20; j < st.w - 20; j++) {   // ★原版即以 w-20 为列界（bug-for-bug）
+      const ti = st.idx(j, i);
+      if (st.flags[ti] && CLOUDS.has(st.type[ti])) { num = i; break outer; }
+    }
+  }
+  const ctxF: SweepCtx = { rng, destroyObject: false, frameSparse: false };
+  const GRASS2 = sid(2), HALLOW109 = sid(109), SAPLING596 = sid(596), SAPLING616 = sid(616);
+  for (let k = 20; k <= st.w - 20; k++) {
+    for (let l = 20; l < num; l++) {
+      const t2 = st.idx(k, l);
+      if (!st.flags[t2] || st.type[t2] !== GRASS2) continue;
+      const t3 = st.idx(k, l - 1);
+      const sh3 = SWEEP_SHEET[st.type[t3]];
+      if (sh3 === 596 || sh3 === 616) killTileGen(st, ctxF, k, l - 1);       // 树苗杀
+      // Convert(k,l,2)：grass→hallowed grass 109（TryConverting… 对树上 109 放行=不杀）
+      if (SWEEP_SHEET[st.type[t2]] === 2 && SWEEP_SHEET[st.type[t2]] !== 109) st.type[t2] = HALLOW109;
+      void SAPLING596; void SAPLING616;
+      if ((sh3 === 82 || sh3 === 83 || sh3 === 185 || sh3 === 186 || sh3 === 187 || sh3 === 227)) {
+        killTileGen(st, ctxF, k, l - 1);                                     // 向日葵/药草族杀
+      }
+      if (rng.int(0, 2) === 0) growTree(st, rng, gs, k, l);                  // TryGrowingTreeByType(5)
+    }
+  }
+}
+
+/** PaintTheDungeon(24,24)（1458 cs:24849-24883）：tileDungeon∪CrackedBricks 上漆；
+ *  tile19 火把支依赖 frameY/18 分型，生成期无帧通道 → 备案跳过（火把不可漆成临洞。 */
+function paintTheDungeonTenth(st: TileStore, _gs: GenState, tc: number, wc: number): void {
+  for (let x = 0; x < st.w; x++) {
+    for (let y = 0; y < st.h; y++) {
+      const i = st.idx(x, y);
+      if (st.flags[i]) {
+        const sh = SWEEP_SHEET[st.type[i]];
+        if (TILE_DUNGEON_FC.has(st.type[i]) || CRACKED_BRICKS.has(st.type[i])) st.paint[i] = tc & 31;
+        void sh;
+      }
+      if (WALL_DUNGEON.has(st.wall[i])) st.paintWall[i] = wc & 31;
+    }
+  }
+}
+
+/** PaintTheLivingTrees(12,12)（1458 cs:24778-24848）。 */
+function paintTheLivingTreesTenth(st: TileStore, _gs: GenState, tc: number, wc: number): void {
+  const isVineSheet = (sh: number) => sh === 52 || sh === 62 || sh === 382;
+  for (let x = 0; x < st.w; x++) {
+    for (let y = 0; y < st.h; y++) {
+      const i = st.idx(x, y);
+      if (st.flags[i]) {
+        const wl = st.wall[i];
+        if (wl === 244) st.paint[i] = tc & 31;
+        else {
+          const sh = SWEEP_SHEET[st.type[i]];
+          if (sh === 192 || sh === 191) st.paint[i] = tc & 31;
+          else if (isVineSheet(sh)) {
+            // GetVineTop（cs:63941-63954）：沿藤上行至非藤格，锚为 192 才漆
+            let ty = y;
+            while (ty > 20 && isVineSheet(SWEEP_SHEET[st.type[st.idx(x, ty)]])) ty--;
+            if (SWEEP_SHEET[st.type[st.idx(x, ty)]] === 192) st.paint[i] = tc & 31;
+          } else if (sh === 187) {
+            let dy = 0;
+            while (SWEEP_SHEET[st.type[st.idx(x, Math.min(st.h - 1, y + dy))]] === 187) dy++;
+            if (SWEEP_SHEET[st.type[st.idx(x, Math.min(st.h - 1, y + dy))]] === 192) st.paint[i] = tc & 31;
+          }
+        }
+      }
+      if (st.wall[i] === 244) st.paintWall[i] = wc & 31;
+    }
+  }
+}
+
+/** PaintTheTemple(10,5)（1458 cs:24707-24748）。137 支 frameY/18∈[1..4] 无帧通道
+ *  → 仅 226/61 两支（蜥蜴砖/其上门帘类），帧支备案跳过。 */
+function paintTheTempleTenth(st: TileStore, _gs: GenState, tc: number, wc: number): void {
+  const T226 = sid(226), T61 = sid(61);
+  for (let x = 10; x < st.w - 10; x++) {
+    for (let y = 10; y < st.h - 10; y++) {
+      const i = st.idx(x, y);
+      if (st.flags[i]) {
+        const sh = SWEEP_SHEET[st.type[i]];
+        if (sh === 226) st.paint[i] = tc & 31;
+        else if (sh === 61 && st.type[st.idx(x, y + 1)] === T226) st.paint[i] = tc & 31;
+      }
+      if (st.wall[i] === 87) st.paintWall[i] = wc & 31;
+    }
+  }
+}
+
+/** PaintTheClouds(12,12)（1458 cs:24751-24767）。 */
+function paintTheCloudsTenth(st: TileStore, _gs: GenState, tc: number, wc: number): void {
+  for (let x = 0; x < st.w; x++) {
+    for (let y = 0; y < st.h; y++) {
+      const i = st.idx(x, y);
+      if (st.flags[i] && CLOUDS.has(st.type[i])) st.paint[i] = tc & 31;
+      if (st.wall[i] === 73) st.paintWall[i] = wc & 31;
+    }
+  }
+}
+
+/** PaintTheSand(7,7)（1458 cs:24556-24581）：沙族 {53,396,397} 上漆 + 地表下滴虫
+ *  165/185-187 邻格继承 + 墙 187/216。 */
+function paintTheSandTenth(_st: TileStore, _rng: RNG, _gs: GenState, _tc: number, _wc: number): void {
+  const st = _st;
+  for (let x = 20; x < st.w - 20; x++) {
+    for (let y = 20; y < st.h - 20; y++) {
+      const i = st.idx(x, y);
+      if (st.flags[i]) {
+        const sh = SWEEP_SHEET[st.type[i]];
+        if (sh === 53 || sh === 396 || sh === 397) {
+          st.paint[i] = _tc & 31;
+          if (y > _gs.worldSurface) {
+            for (const [dx, dy, only165] of [[0, -1, false], [0, -2, false], [0, 1, true], [0, 2, true]] as const) {
+              const shN = sheetAt2Safe(st, x + dx, y + dy);
+              const hit = only165 ? shN === 165 : (shN === 165 || shN === 185 || shN === 186 || shN === 187);
+              if (hit) st.paint[st.idx(x + dx, y + dy)] = _tc & 31;
+            }
+          }
+        }
+      }
+      if (st.wall[i] === 187 || st.wall[i] === 216) st.paintWall[i] = _wc & 31;
+    }
+  }
+}
+
+/** PaintThePyramids(12,12)（1458 cs:24685-24704）：151 沙岩砖 + 墙 34。 */
+function paintThePyramidsTenth(st: TileStore, _gs: GenState, tc: number, wc: number): void {
+  const T151 = sid(151);
+  for (let x = 0; x < st.w; x++) {
+    for (let y = 0; y < st.h; y++) {
+      const i = st.idx(x, y);
+      if (st.flags[i] && st.type[i] === T151) st.paint[i] = tc & 31;
+      if (st.wall[i] === 34) st.paintWall[i] = wc & 31;
+    }
+  }
+}
+
+function sheetAt2Safe(st: TileStore, x: number, y: number): number {
+  if (!st.inBounds(x, y)) return -1;
+  return SWEEP_SHEET[st.type[st.idx(x, y)]];
+}
+
+/** PaintTheTrees（1458 cs:24622-24650）：竖列树族染色——首掷 Next(1,13)，
+ *  列内命中 5/323/596/616 即 color(b)；列扫完 `flag&&!flag2` 时 b++ 循环 1..12。
+ *  ★掷流位置依赖 ImproveAllChestContents（未移植）→ 相对 vanilla 有位差（备案）。 */
+function paintTheTreesTenth(st: TileStore, rng: RNG, _gs: GenState): void {
+  let b = rng.int(1, 12);                      // Next(1,13)
+  let flag = false;
+  for (let i = 20; i < st.w - 20; i++) {
+    let flag2 = false;
+    for (let j = 20; j < st.h - 20; j++) {
+      const i2 = st.idx(i, j);
+      if (!st.flags[i2]) continue;
+      const sh = SWEEP_SHEET[st.type[i2]];
+      if (sh === 5 || sh === 323 || sh === 596 || sh === 616) {
+        st.paint[i2] = b & 31;
+        flag2 = true;
+        flag = true;
+      }
+    }
+    if (flag && !flag2) {
+      flag = false;
+      b++;
+      if (b > 12) b = 1;
+    }
+  }
+}
+
+/** PaintTheMushrooms（1458 cs:24555-24621）：蘑菇草族 {70,578,190,71,528,519fy90}
+ *  全图扫 Next(1,13) 起点 + 每列消耗计数 num3（==0 时 b+=Next(1,3) 回卷）；
+ *  wall 80/74 同步。remix 支组合域不移植。 */
+function paintTheMushroomsTenth(st: TileStore, rng: RNG, _gs: GenState): void {
+  const num = st.h - 20;
+  const MUSH_SHEETS = new Set([70, 578, 190, 71, 528]);
+  let b = rng.int(1, 12);
+  let num3 = 0;
+  for (let k = 20; k < st.w - 20; k++) {
+    for (let l = 20; l < num; l++) {
+      const i2 = st.idx(k, l);
+      if (!st.flags[i2]) continue;
+      const sh = SWEEP_SHEET[st.type[i2]];
+      if (MUSH_SHEETS.has(sh) || sh === 519) {
+        st.paint[i2] = b & 31;
+        num3 = 10;
+      }
+      if (st.wall[i2] === 80 || st.wall[i2] === 74) {
+        st.paintWall[i2] = b & 31;
+        num3 = 10;
+      }
+    }
+    num3--;
+    if (num3 === 0) {
+      b += rng.int(1, 2);                      // Next(1,3)
+      if (b > 12) b = 1;
+    }
+  }
+}
+
+/** Shimmerator（1458 cs:35487-35528：洪泛收集 + Shimminate）。
+ *  maxTileCount=300（GlobalGems 段 cs:17545 最后写值，celeb ×1.5 不变该常量）。 */
+const SHIMMERATOR_CAP = 300;
+function shimmeratorTenth(
+  st: TileStore, _rng: RNG, x0: number, y0: number,
+  countedGlobal: Set<number>, ctx: SweepCtx,
+): void {
+  const counted = new Set<number>();
+  const cells: Array<[number, number]> = [];
+  let n = 0;
+  const stack: Array<[number, number]> = [[x0, y0]];
+  while (stack.length) {
+    const [x, y] = stack.pop()!;
+    if (n >= SHIMMERATOR_CAP) break;
+    if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) { n = SHIMMERATOR_CAP; break; }
+    const key = st.idx(x, y);
+    if (counted.has(key) || countedGlobal.has(key)) continue;
+    const i = key;
+    const liquidOk = !isSolidTileFC(st, x, y) && st.liquidType[i] !== LIQUID_TYPE.SHIMMER && st.liquid[i]! > 0;
+    const block56 = st.flags[i] && SWEEP_SHEET[st.type[i]] === 56;
+    if (!(liquidOk || block56)) continue;
+    counted.add(key);
+    countedGlobal.add(key);
+    cells.push([x, y]);
+    n++;
+    stack.push([x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]);
+  }
+  if (n > 0 && n < SHIMMERATOR_CAP) {
+    for (const [x, y] of cells) {
+      const i = st.idx(x, y);
+      st.liquidType[i] = LIQUID_TYPE.SHIMMER;
+      st.liquid[i] = 255;
+      const sh = SWEEP_SHEET[st.type[i]];
+      if (sh === 5 || sh === 56 || (TILE_CUT_FC.has(st.type[i]) && sh !== 28)) killTileGen(st, ctx, x, y);
+    }
+  }
+}
+
+function isSolidTileFC(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  return !!st.flags[i] && !!TILE_DEFS[st.type[i]]?.solid;
 }

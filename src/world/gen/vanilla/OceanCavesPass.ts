@@ -184,9 +184,13 @@ export function runOceanCavesPass(st: TileStore, rng: RNG, gs: GenState): Array<
   const { w } = st;
   for (const side of [0, 1] as const) {
     // 左海洋仅当地牢在左(dungeonSide < Right)、右海洋仅当在右(cs:15243)
-    if (side === 0 && gs.dungeonSide !== -1) continue;
-    if (side === 1 && gs.dungeonSide !== 1) continue;
-    if (rng.int(0, 2) !== 0) continue; // 1/3
+    // ★SSS-CELEB（1458 cs:15249-15252）：门=比较语义（左:dungeonSide<Right(+1)、
+    //   右:>Left(-1)，即中间地牢两侧全过）+ 恒开析取（Next(3)==0 || drunk || tenth）。
+    //   Next(3) 在旗标世界里**照常消耗**（C# 短路 OR 首项必评估）——勿移进"已跳过
+    //   就不掷"的误区。此前门只认严格异侧，celeb 中带窄世界两洋各丢一条洞。
+    if (side === 0 && !(gs.dungeonSide < 1)) continue;
+    if (side === 1 && !(gs.dungeonSide > -1)) continue;
+    if (!(gs.seedFlags.drunkWorld || gs.seedFlags.tenthAnniversary || rng.int(0, 2) === 0)) continue;
     // ★cs:15249-15252:`int num = genRand.Next(55, 95); if (i == 1) num = Next(w-95, w-55);`
     //   右洋(i==1)的首次 Next(55,95) 被丢弃但**消耗掷骰流**——此前 JS 只掷一次,
     //   右洋蠕虫后续全部掷骰错位(8888 种子对拍实锤:HARDSAND/SAND 壳层错写 ~13k 格)。

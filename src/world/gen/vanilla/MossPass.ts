@@ -145,18 +145,31 @@ function neonMossBiome(st: TileStore, rng: RNG, gs: GenState, i: number, j: numb
 /** MossAndMossCaves pass（cs:17573-17833）1:1 */
 export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   // randMoss（cs:9702-9719）：霓虹四选一；三槽 mossType 互异（0-4）
-  const neon = NEON_TILES[rng.nextInt(NEON_TILES.length)];
+  // ★SSS-CELEB：let 化——tenth 洞群逐洞可重抽霓虹色（cs:17610 randMoss(justNeon)）
+  let neon = NEON_TILES[rng.nextInt(NEON_TILES.length)];
   const mossType: number[] = [];
   mossType[0] = rng.nextInt(5);
   do { mossType[1] = rng.nextInt(5); } while (mossType[1] === mossType[0]);
   do { mossType[2] = rng.nextInt(5); } while (mossType[2] === mossType[0] || mossType[2] === mossType[1]);
 
   // ---- 霓虹苔藓洞（cs:17583-17649）：count=w/2100 个；禁区检查 101×101 ----
-  const caveCount = Math.floor(st.w / 2100);
+  // ★SSS-CELEB（1458 cs:17576-17618）：remix→×1.5 / **tenth→×2 且逐洞
+  //   Next(2)==0 → randMoss(justNeon) 重抽霓虹色**，并跳过中带拒绝环（eLse-if 阶梯：
+  //   remix 重掷带/getGood 拒绝环/tenth 抽霓虹/!drunk 中带拒绝环四者互斥）。
+  const celbMoss = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags.remix;
+  const pickNeon = (): number => NEON_TILES[rng.nextInt(NEON_TILES.length)];
+  let caveCount = Math.floor(st.w / 2100);
+  if (gs.seedFlags.remix) caveCount = Math.trunc(caveCount * 1.5);       // cs:17578-17580
+  else if (celbMoss) caveCount *= 2;                                     // cs:17581-17583
   let placed = 0, fails = 0;
   while (placed < caveCount) {
     let x = rng.nextIntRange(100, st.w - 100);
-    while (x > st.w * 0.38 && x < st.w * 0.62) x = rng.nextIntRange(100, st.w - 100);
+    if (gs.seedFlags.remix) { /* remix 带重掷域未接（组合域债，登记） */ }
+    else if (celbMoss) {
+      if (rng.nextIntRange(0, 2) === 0) neon = pickNeon();               // cs:17610-17616
+    } else {
+      while (x > st.w * 0.38 && x < st.w * 0.62) x = rng.nextIntRange(100, st.w - 100);
+    }
     const y = rng.nextIntRange(gs.rockLevel + 40, gs.lavaLine - 40);
     let forbidden = false;
     outer:

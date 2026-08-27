@@ -647,10 +647,17 @@ function vanillaTerrain(ctx: GenCtx) {
   // ⑰ dungeonSide（cs:11360）：Next(2)==0 → Left(我们 -1)
   gs.dungeonSide = rng.nextIntRange(0, 2) === 0 ? -1 : 1;
   // ⑱ 丛林（cs:11377-11392）：与地牢异侧，Next(15,30)
-  if (gs.dungeonSide === -1) {
-    gs.jungleX = Math.trunc(W * (1 - rng.nextIntRange(15, 30) * 0.01));
-  } else {
-    gs.jungleX = Math.trunc(W * (rng.nextIntRange(15, 30) * 0.01));
+  // ★SSS-CELEB（1458 cs:11391-11394）：tenthAnniversary && !remix → minValue=25/maxValue=35
+  //   （RECON-CELEB 只记了 minValue；反编译两值都变）。纯世纪组合按惯例不移植。
+  {
+    const sfT = !!gs.seedFlags?.tenthAnniversary, sfR = !!gs.seedFlags?.remix;
+    const jMin = sfT && !sfR ? 25 : 15;
+    const jMax = sfT && !sfR ? 35 : 30;
+    if (gs.dungeonSide === -1) {
+      gs.jungleX = Math.trunc(W * (1 - rng.nextIntRange(jMin, jMax) * 0.01));
+    } else {
+      gs.jungleX = Math.trunc(W * (rng.nextIntRange(jMin, jMax) * 0.01));
+    }
   }
   world.jungleX = gs.jungleX;
   // ⑲ 地牢侧锚点 num7（cs:11394-11416）：Next(w) 拒绝采样到地牢侧 15% 区间
@@ -668,8 +675,17 @@ function vanillaTerrain(ctx: GenCtx) {
   gs.snowOriginLeft = Math.max(0, dX - snowL);
   gs.snowOriginRight = Math.min(W, dX + snowR);
   // ㉑㉒ 海滩（cs:11445-11459）：Next(300,340)（center 320±range 20）+ 侧别加宽
-  gs.beachLeftEnd = rng.nextIntRange(300, 340) + (gs.dungeonSide === 1 ? 40 : 20);
-  gs.beachRightStart = W - rng.nextIntRange(300, 340) - (gs.dungeonSide === -1 ? 40 : 20);
+  // ★SSS-CELEB（1458 cs:11450-11452/11463-11465）：tenth&&!remix 恒取最大滩宽
+  //   leftBeachEnd=center+range(340)/rightBeachStart=w-(center+range)——重掷被覆写
+  //   不额外消耗掷骰（先掷后改，掷骰次数不变）
+  {
+    const sfT = !!gs.seedFlags?.tenthAnniversary, sfR = !!gs.seedFlags?.remix;
+    const celbMaxBeach = sfT && !sfR;
+    gs.beachLeftEnd = rng.nextIntRange(300, 340) + (gs.dungeonSide === 1 ? 40 : 20);
+    if (celbMaxBeach) gs.beachLeftEnd = 320 + 20 + (gs.dungeonSide === 1 ? 40 : 20);
+    gs.beachRightStart = W - rng.nextIntRange(300, 340) - (gs.dungeonSide === -1 ? 40 : 20);
+    if (celbMaxBeach) gs.beachRightStart = W - (320 + 20) - (gs.dungeonSide === -1 ? 40 : 20);
+  }
   // ㉓ 地牢入口（cs:11461-11470）：地牢侧海滩内 15% 区间（dungeonBeachPadding=50）
   if (gs.dungeonSide === -1) {
     gs.dungeonLocation = rng.nextIntRange(gs.beachLeftEnd + 50, Math.trunc(W * 0.2));

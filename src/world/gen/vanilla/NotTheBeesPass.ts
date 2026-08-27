@@ -309,11 +309,14 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
           st.paintWall[idx] = DUNGEON_PAINT;
         } else if (
           // (remix || (!tenth && !dstarve && !drunk) || …Next(3) 短路)——纯 NTB 恒真不掷
-          // ★UUU：撤 GLASS_WALLS 玻璃墙族豁免——那是 1458 扩展（cs:25582 WallID.Sets.
-          //   Glass），1456/1457 基线只有 `wall != 21` 单项（Terarria1456/WorldGen.cs:
-          //   25460）。本世界证零效应但属基线偏离，随本批一并退役。
+          // ★NNNNNNNN（2026-08-27 追 1458 定版）：用户裁决基准翻 1458——玻璃墙族豁免
+          //   恢复启用（Terarria1458/WorldGen.cs:25582 `(wall<0||!WallID.Sets.Glass[wall])`
+          //   替换 1456/1457 的 `wall != 21` 单项；WallID.Sets.Glass={21,88,89,90,91,92,
+          //   93,241,242,243} WallID.cs:46）。UUU 批曾按 1457 基线退役本豁免，随裁决
+          //   翻回；纯 NTB 世界内该族墙不出现=观测零差（UUU 已证），语义位归位。
           (!dstarve || remix)
-          && wall !== 23 && wall !== 24 && wall !== 42 && wall !== 10 && wall !== 21
+          && wall !== 23 && wall !== 24 && wall !== 42 && wall !== 10
+          && (wall < 0 || !GLASS_WALLS.has(wall))
           && wall !== 82 && wall !== 187 && wall !== 216 && wall !== 34 && wall !== 244) {
           if (wall === 2 || wall === 196 || wall === 197 || wall === 198 || wall === 199) {
             // 原版自等赋 no-op 支（cs:25468-25481 字面）

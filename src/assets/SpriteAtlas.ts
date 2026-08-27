@@ -415,19 +415,26 @@ export class SpriteAtlas {
       this._uiWaiters.set(file, ws);
     });
   }
-  /** 串行预载一批 UI 贴图(逐个 await,避免并发请求风暴+解码卡顿)。
+  /** 限并发池预载一批 UI 贴图(2026-08-27:原逐张串行 await——发型页 452 键
+   *  串行 RTT 相加=加载缓慢主因;改 8 路并发池,总时长≈÷8。"避免并发风暴"
+   *  由池上限保证;同文件重复请求由 waitUi 内部 waiter 去重合并)。
    *  ★入参语义=【清单键】(vanilla-ui.json 键,如 'Player_Hair_5.png')——与
    *  vui()/UITextures.get 同源,先经 uiFiles 解析成磁盘路径(vanilla-ui/ 前缀)
    *  再加载;清单外的入参按路径直用(资源包注入等直路径调用方的逃生门)。
    *  曾把键当路径直发(sprites/Player_Hair_5.png,缺 vanilla-ui/ 前缀)→ 发型页
    *  452 键全 404 且 SW 不缓存 404,开面板两波 904 个往返跑完才开始烘焙
    *  (2026-08-26 用户实报"发型列表等 904 个 404 才渲染") */
-  async ensureUiBatch(names: string[]): Promise<void> {
-    for (const raw of names) {
-      const key = raw.endsWith('.png') ? raw : `${raw}.png`;
-      const file = this.uiFiles[key] ?? key;
-      try { await this.waitUi(file); } catch { /* 单文件失败不阻断整批 */ }
-    }
+  async ensureUiBatch(names: string[], concurrency = 8): Promise<void> {
+    let i = 0;
+    const lanes = Array.from({ length: Math.min(concurrency, names.length) }, async () => {
+      while (i < names.length) {
+        const raw = names[i++]!;
+        const key = raw.endsWith('.png') ? raw : `${raw}.png`;
+        const file = this.uiFiles[key] ?? key;
+        try { await this.waitUi(file); } catch { /* 单文件失败不阻断整批 */ }
+      }
+    });
+    await Promise.all(lanes);
   }
 
   /** 原版物品图标。构建期已 shelf-pack 进少数 Item_Atlas_k.png 图集(ix/iy/iw/ih

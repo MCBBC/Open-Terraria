@@ -46,38 +46,73 @@ it('完成标志在但 SW 未证实(complete=false)→ 仍等待,实测 complete
     .then(() => { released = true; });
   await sleep(600);                       // 标志在但未证实:必须继续等
   expect(released).toBe(false);
-  done = true;                            // SW status 回包证实全就位
+  void holdForAssetsReady;
+  done = true;                            // complete 假阳(口径污染)也不放行——只认 phase 终态
   await sleep(400);
-  expect(released).toBe(true);
-});
-
-it('有下载 → minMs 后仍等,complete 才放行;sinceMs 计入已显示时长', async () => {
-  let done = false;
-  let released = false;
-  void holdForAssetsReady({ minMs: 120, sinceMs: 2000, deps: mkDeps({ complete: () => done }) })
-    .then(() => { released = true; });
-  await sleep(400);                       // sinceMs 已超 minMs,但下载未完仍等
   expect(released).toBe(false);
-  done = true;
-  await sleep(400);
+});
+
+it('worker 真完成终态(phase=done,failed=0,done≥total)→ 放行', async () => {
+  let released = false;
+  void holdForAssetsReady({ minMs: 120, sinceMs: 2000, deps: mkDeps({ state: () => mkState({ phase: 'done', failed: 0, done: 100 }) }) })
+    .then(() => { released = true; });
+  await sleep(400);                       // sinceMs 已超 minMs
   expect(released).toBe(true);
 });
 
-it('失败终态(failed>0)放行(徽标在菜单继续示警,不卡死启动)', async () => {
+it('★口径污染回归:done≥total 但 phase≠done(假满)→ 不放行(2026-08-27 手机 34% 揭幕)', async () => {
   let released = false;
-  void holdForAssetsReady({ minMs: 120, deps: mkDeps({ state: () => mkState({ failed: 3, warming: false }) }) })
+  // status 回包曾把 cached(含壳噪声)回写 done → done=total 假满,phase 仍是
+  // 进行中相位——放行只认 phase 终态,口径假满不得揭幕
+  void holdForAssetsReady({ minMs: 0, deps: mkDeps({ state: () => mkState({ done: 100, phase: 'game-sprites', warming: true }), complete: () => true }) })
+    .then(() => { released = true; });
+  await sleep(800);
+  expect(released).toBe(false);
+});
+
+it('失败终态(failed>0,自动补拉轮耗尽)放行(徽标在菜单继续示警,不卡死启动)', async () => {
+  let released = false;
+  void holdForAssetsReady({ minMs: 120, deps: mkDeps({ state: () => mkState({ failed: 3, warming: false }), retriesExhausted: () => true }) })
     .then(() => { released = true; });
   await sleep(500);
   expect(released).toBe(true);
 });
 
-it('进度停滞超 stallMs → 兜底放行(挂死链)', async () => {
+it('失败停机但自动补拉轮未耗尽 → 不放行(等 15s/online 自动重扫,2026-08-27)', async () => {
   let released = false;
-  // state 全静止(下载链挂死)→ stallMs 到即放行
-  void holdForAssetsReady({ minMs: 120, stallMs: 300, deps: mkDeps() })
+  void holdForAssetsReady({ minMs: 0, deps: mkDeps({ state: () => mkState({ failed: 3, warming: false }), retriesExhausted: () => false }) })
+    .then(() => { released = true; });
+  await sleep(800);
+  expect(released).toBe(false);
+});
+
+it('进行中瞬时失败(warming=true, failed>0)→ 不放行(2026-08-27 手机弱网回归:片重试中不得提前揭幕)', async () => {
+  let released = false;
+  void holdForAssetsReady({ minMs: 0, deps: mkDeps({ state: () => mkState({ failed: 2, warming: true, phase: 'sounds' }) }) })
+    .then(() => { released = true; });
+  await sleep(800);                       // 远超轮询粒度,若误放行早已 released
+  expect(released).toBe(false);
+});
+
+it('进度停滞超 stallMs 且无活动(warming=false)→ 兜底放行(挂死链)', async () => {
+  let released = false;
+  let warmed = false;
+  // state 全静止且无活动 → stallMs 到即放行
+  void holdForAssetsReady({ minMs: 120, stallMs: 300, deps: mkDeps({ state: () => mkState({ warming: false }), warm: () => { warmed = true; } }) })
     .then(() => { released = true; });
   await sleep(1100);                      // 300ms 停滞窗 + 轮询粒度余量
   expect(released).toBe(true);
+  expect(warmed).toBe(false);
+});
+
+it('进度停滞但 warming=true → force 重启对账续传,不放行(2026-08-27 手机锁屏回归)', async () => {
+  let released = false;
+  let warmed = 0;
+  void holdForAssetsReady({ minMs: 120, stallMs: 300, deps: mkDeps({ state: () => mkState({ warming: true }), warm: () => { warmed++; } }) })
+    .then(() => { released = true; });
+  await sleep(1100);
+  expect(released).toBe(false);
+  expect(warmed).toBeGreaterThanOrEqual(1);
 });
 
 it('健康下载(进度持续)→ 不误触停滞放行', async () => {
@@ -94,7 +129,9 @@ it('健康下载(进度持续)→ 不误触停滞放行', async () => {
 it('下载在 minMs 内完成 → 仍补满 minMs(不提前放行)', async () => {
   let done = false;
   let released = false;
-  void holdForAssetsReady({ minMs: 600, deps: mkDeps({ complete: () => done }) })
+  void holdForAssetsReady({ minMs: 600, deps: mkDeps({ state: () => mkState(done
+    ? { phase: 'done' as const, failed: 0, done: 100, warming: false }
+    : { phase: 'menu' as const, warming: true }) }) })
     .then(() => { released = true; });
   await sleep(300);
   done = true;                            // 0.3s 就下完了

@@ -47,7 +47,7 @@ export interface FlowHandle {
   quickLoad(): Promise<void>;
   importWld(buf: Uint8Array): Promise<void>;
   quitToMenu(): void;
-  doSave(): void;
+  doSave(silent?: boolean): void;
   /** 导出存档为文件(自有 JSON 格式,与 __swFlow.loadJson 闭环) */
   doExportSave(): void;
   openSettings(inGame: boolean): void;
@@ -205,7 +205,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onCraftCursorGlow: (itemId) => ui.markCursorGlow(itemId),
       onBuffsChanged: () => ui.refreshBuffs(),
       // 自动保存（Main.autoSave 墙钟到点 → DoUpdate_AutoSave :19589 saveAndPlay）
-      onAutoSave: () => doSave(),
+      // silent=原版自动保存全程静默（:19594 无任何 UI/音效）；手动/退出保存仍提示
+      onAutoSave: () => doSave(true),
       // 配装热键切换白闪（GetColorByLoadout :2554-2559；背包按钮同款）
       onLoadoutSwitched: () => ui.flashLoadoutSwitch(),
       onToast: (m) => ui.toast(m),
@@ -1001,7 +1002,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     showTitle();
   }
 
-  function doSave() {
+  function doSave(silent = false) {
     if (!game) return;
     // 存档序列化走后台 worker(RLE+base64+JSON 全套离主线程;主线程只付一次
     // 全图数组结构化克隆的 memcpy),不可用时 SaveClient 内部回退同步 saveGame
@@ -1011,9 +1012,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
         else {
           quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
-          // 保存成功提示（2026-08-26 用户要求：只显示"世界已保存"，去掉容量/存储介质后缀——
-          // 文案已去 {0} 占位，实参不再传入）
-          ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved'));
+          // 保存成功提示（2026-08-26 用户要求：只显示"世界已保存"，去掉容量/存储介质后缀）。
+          // silent 档 = 自动保存路径（2026-08-27 用户要求：自动保存不弹提示,原版
+          // DoUpdate_AutoSave 亦全程静默）；失败 toast 不受 silent 门控（数据安全告警）
+          if (!silent) ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved'));
         }
       }).catch((e) => {
         console.error('kvSet failed', e);

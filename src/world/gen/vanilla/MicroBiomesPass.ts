@@ -370,11 +370,15 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   //   SecretSeed.Variations.noSurfaceNoSwordShrines 门(cs:21858)无对应变体,恒启用
   //   (普通世界行为一致);errorWorld 分支(cs:21879-21882/21890)未建模。
   {
-    const swordAttempts = rng.int(scW(1), scW(2));   // SwordShrineAttempts 1-2 ×WorldWidth
+    // ★SSS-CELEB（1458 cs:21869-21874）：tenth → attempts ×2 / placementChance ÷2，
+    //   且**首座(i==0)恒试放**（cs:21162 `(i==0 && tenth) || !(NextDouble<num13)`）。
+    const celbSword = !!gs.seedFlags?.tenthAnniversary;
+    let swordAttempts = rng.int(scW(1), scW(2));   // SwordShrineAttempts 1-2 ×WorldWidth
+    if (celbSword) swordAttempts *= 2;             // ×2（cs:21870）
     segProbe('swordAttempts', swordAttempts);
     for (let i = 0; i < swordAttempts; i++) {
-      // !(NextDouble < SwordShrinePlacementChance 0.5) 才放置(cs:21886)——注意极性
-      if (!(rng.next() < 0.5)) {
+      // !(NextDouble < SwordShrinePlacementChance 0.5/2=0.25) 才放置(cs:21886)——注意极性
+      if ((celbSword && i === 0) || !(rng.next() < (celbSword ? 0.25 : 0.5))) {
         // 重试 while (num15++ <= maxTilesX)(cs:21888):最多 w+1 次,掷序 Y→Next(2)→X
         // ★BBBBBB：cs:21888 `origin3.Y = (int)GenVars.worldSurface + Next(50,100)`——
         //   是 GenVars.worldSurface(Terrain 游走终值)非 Main.worldSurface！曾混用

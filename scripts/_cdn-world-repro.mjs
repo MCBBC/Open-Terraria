@@ -4,7 +4,7 @@
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const host = process.env.HOST ?? 'world.vinlic.com';
+const host = process.env.HOST ?? 'sandbox.vinlic.com';
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: 'new',
   userDataDir: `/tmp/cdn-repro-${host.split('.')[0]}-${Date.now() % 100000}`,
@@ -23,8 +23,8 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text().slice
 
 await page.goto(`https://${host}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-for (let t = 10; t <= 60; t += 10) {
-  await new Promise((r) => setTimeout(r, 10000));
+for (let t = 5; t <= 90; t += 5) {
+  await new Promise((r) => setTimeout(r, 5000));
   const s = await page.evaluate(async () => {
     const h = globalThis.__swAssetCache;
     const st = (h && typeof h.state === 'function') ? h.state() : null;

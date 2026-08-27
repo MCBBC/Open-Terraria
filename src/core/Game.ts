@@ -4577,13 +4577,22 @@ export class Game implements GameHooks {
     this.lastTime = now;
     // 自动保存（Main.autoSave，DoUpdate_AutoSave Main.cs:19589-19613：墙钟
     // Stopwatch > 600000ms → saveAndPlay；间隔档为任务要求的 Web 扩展，默认 10min=
-    // 原版恒值。暂停不停表（原版 Stopwatch 语义）；onAutoSave 由流程层接 doSave）
-    if (this.world && this.cb.onAutoSave && options.data.autoSave) {
+    // 原版恒值。暂停不停表（原版 Stopwatch 语义）；onAutoSave 由流程层接 doSave）。
+    // 关开关 → 锚点清零（:19617-19619 saveTime.Stop()——重开后从头计满间隔,
+    // 曾缺=关→开立即用旧锚触发一次保存）。
+    // ★MP 客户端门（:19601 `autoSave || netMode==2` 的反面——原版 netMode==1 客户端
+    //   走 :19595 5 分钟分支【只存玩家,永不存世界】,世界权威在服务器）：本仓房间制
+    //   同为服务器权威,客户端 this.net 存活时跳过世界自动存（写本地 quick save 会用
+    //   同步快照覆盖单人档;玩家态本就实时上报 host,无需客户端侧玩家存档）
+    const mpClient = !!this.net?.active && !this.net.policy.isHost;
+    if (this.world && this.cb.onAutoSave && options.data.autoSave && !mpClient) {
       if (!this._autoSaveAt) this._autoSaveAt = now;
       else if (now - this._autoSaveAt > options.data.autoSaveIntervalMin * 60000) {
         this._autoSaveAt = now;
         this.cb.onAutoSave();
       }
+    } else {
+      this._autoSaveAt = 0;
     }
     windSway.active = !this.paused; // _isActiveAndNotPaused（暂停不喷落叶；物理随 !paused 冻结）
     // 调试桥：暴露 app 实例（HMR 双实例防探针误读——EmoteBubble 同款教训）

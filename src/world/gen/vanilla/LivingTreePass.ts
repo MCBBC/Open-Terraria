@@ -1117,6 +1117,20 @@ export function runLivingTreesPass(
   const num3 = w / 4200;                  // cs:15563
   let num4 = rng.int(0, Math.floor(2 * num3));   // cs:15564 Next(0, (int)(2*num3)+1)
   if (num4 === 0 && rng.int(0, 1) === 0) num4++; // cs:15565 genRand.Next(2)==0（int(0,1) ≡ Next(2) 位级一致）
+  // ★SSS-CELEB（1458 cs:15576-15602 else-if 阶梯）：活树数量种子加成。
+  //   梯序：SecretSeed.extraLivingTrees → ntb&&tenth&&!drunk(+10·num3) →
+  //   drunk(+2) → **tenth(+3)** → remix(+2)。前两支是组合域（按惯例不移植），
+  //   drunk/remix/tenth 三支照 1458 补齐——各自独立线的既有缺口同框清偿。
+  const sfT = !!gs.seedFlags?.tenthAnniversary;
+  if (gs.seedFlags.notTheBees && sfT && !gs.seedFlags.drunkWorld) {
+    num4 += Math.trunc(10 * num3);            // cs:15579-15581
+  } else if (gs.seedFlags.drunkWorld) {
+    num4 += Math.trunc(2 * num3);             // cs:15582-15584
+  } else if (sfT) {
+    num4 += Math.trunc(3 * num3);             // cs:15585-15587 十周年活树+3（小世界 num3=1.0）
+  } else if (gs.seedFlags.remix) {
+    num4 += Math.trunc(2 * num3);             // cs:15588-15590
+  }
   if (LT_TRACE) { ltRngCache = rng; console.log(`LT count num4=${num4}`); }
   for (let i = 0; i < num4; i++) {
     let flag = false;
@@ -1124,7 +1138,16 @@ export function runLivingTreesPass(
     while (!flag) {
       num5++;
       if (num5 > w / 2) flag = true;      // cs:15608
-      const num6 = rng.int(gs.beachDistance, w - gs.beachDistance - 1);  // cs:15610
+      const num6b = rng.int(gs.beachDistance, w - gs.beachDistance - 1); // cs:15610 基掷（恒消耗）
+      // ★SSS-CELEB（1458 cs:15619-15622）：tenth&&!remix → 候选 X 改走 [0.15w,0.85w)
+      //   （基掷被覆写但**照常消耗**——两次 Next 都执行，小世界终值 (int)((float)4200*0.85f)=3570）
+      const celbBand = sfT && !gs.seedFlags.remix;
+      let num6: number;
+      if (celbBand) {
+        num6 = rng.nextIntRange(Math.trunc(w * 0.15), Math.trunc(Math.fround(Math.fround(w) * Math.fround(0.85))));
+      } else {
+        num6 = num6b;
+      }
       if (num6 <= Math.floor(w / 2) - num || num6 >= Math.floor(w / 2) + num) {
         let j = num2;
         // cs:15622-15629：自顶向下找首个实心格（超过 worldSurface 放弃）
@@ -1170,7 +1193,16 @@ export function runLivingTreesPass(
                 for (let n = -1; n <= 1; n++) {
                   if (n === 0) continue;
                   let num7 = num6;
-                  let num8 = rng.int(0, 3);
+                  let num8 = rng.int(0, 3);          // cs:15728 基掷（恒消耗）
+                  // ★SSS-CELEB（1458 cs:15730-15744 else-if 阶梯）：patch 小树清带宽加成
+                  //   ntb&&tenth&&!drunk +Next(3,7)/drunk||tenth +Next(2,5)/remix +Next(1,6)
+                  if (gs.seedFlags.notTheBees && sfT && !gs.seedFlags.drunkWorld) {
+                    num8 += rng.int(3, 6);
+                  } else if (gs.seedFlags.drunkWorld || sfT) {
+                    num8 += rng.int(2, 4);
+                  } else if (gs.seedFlags.remix) {
+                    num8 += rng.int(1, 5);
+                  }
                   for (let n9 = 0; n9 < num8; n9++) {
                     num7 += rng.int(13, 30) * n;
                     if (num7 <= Math.floor(w / 2) - num || num7 >= Math.floor(w / 2) + num) {

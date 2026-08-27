@@ -602,6 +602,11 @@ kvHas('sandboxworld.quicksave').then(async () => {
     </style><canvas width="52" height="53"></canvas>`;
     document.body.appendChild(veil);
     bootVeil = veil;
+    // ★资源指示器提前挂载(2026-08-27 用户要求):从向日葵幕阶段就显示
+    //   "资源加载中 · N%"(badge z=10002 浮于本幕 10000 之上),不再等到过渡图
+    //   出现才出现——进度覆盖 primeBootAssets 等待窗口。warm 已由
+    //   primeBootAssets 内部自启,此处 state 即有字节账可读。
+    mountAssetBadge();
     const cv = veil.querySelector('canvas') as HTMLCanvasElement;
     const cctx = cv.getContext('2d')!;
     const sfImg = new Image();
@@ -690,10 +695,13 @@ kvHas('sandboxworld.quicksave').then(async () => {
   //     暗+向日葵续等，下完才自收场）
   await initAssetCache();
   flow.showTitle();            // 菜单+角标文字幕后就位（音乐/预载调用幂等）
-  splash.revealBehind();
   warmAllAssets();
-  mountAssetBadge();
-  await holdForAssetsReady({ minMs: 0 });   // p0-p8 全落盘才揭幕(停滞 60s 兜底;2026-08-26 用户定案)
-  splashGate.resolve();        // 下载完才解 splash"加载完成"门（时序尽自收场）
+  // ★2026-08-27 用户定案:过渡图阶段必须 zip 全量落盘;渐隐(revealBehind)与
+  //   "加载完成"门统一等 hold 放行——菜单揭幕时永不缺图。时序尽(10.3s)而
+  //   未完成时由 splash 既有路径转全暗+向日葵续等(徽标持续显示进度)。
+  //   revealBehind 曾在 hold 前调用:渐隐段把缺图菜单提前透出(用户实测)。
+  await holdForAssetsReady({ minMs: 0 });
+  splash.revealBehind();
+  splashGate.resolve();        // 全量完成才解 splash"加载完成"门（时序尽自收场）
   await splash.finished;       // 渐隐到菜单后揭幕
 });

@@ -442,7 +442,20 @@ const CSS = `
 .sw-cc-small:hover::after { opacity: 1; }
 .sw-cc-small > img { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 3; image-rendering: pixelated; }
 /* ---- 发型页（UIHairStyleButton 44×44 网格 + 滚动）---- */
-.sw-cc-hair { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; }
+.sw-cc-hair { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; position: relative; }
+/* 烘焙等待遮罩(2026-08-27 用户要求"未就绪应有 loading 转圈"):源贴图懒载+纸娃娃
+   合成期间盖住网格(首访 hairSheetUrl=null 全空槽=曾像卡死);applySheetUrls 撤除 */
+.sw-cc-hair.baking::before {
+  content: ''; position: absolute; inset: 0; z-index: 6;
+  background: rgba(10, 14, 40, 0.72);
+}
+.sw-cc-hair.baking::after {
+  content: ''; position: absolute; left: 50%; top: 42%; width: 22px; height: 22px;
+  margin: -11px 0 0 -11px; z-index: 7;
+  border: 3px solid #7d92d6; border-top-color: #ffd76e;
+  animation: sw-cc-bakespin 0.9s steps(8) infinite;
+}
+@keyframes sw-cc-bakespin { to { transform: rotate(360deg); } }
 .sw-cc-hairgrid { flex: 1; min-height: 0; overflow-y: auto; display: grid;
   grid-template-columns: repeat(10, 44px); gap: 4px 2px; justify-content: center; align-content: start;
   padding: 2px 14px 4px 2px; scrollbar-width: thin; scrollbar-color: #4a5aa0 rgba(10, 14, 40, 0.6); }
@@ -863,7 +876,11 @@ export class CharCreation {
   private thumbRetry = 0;
   private thumbTimer: ReturnType<typeof setTimeout> | 0 = 0;
   private scheduleThumbRetry(missed: boolean) {
-    if (!missed || ++this.thumbRetry > 6 || this.thumbTimer) return;
+    if (!missed || ++this.thumbRetry > 6 || this.thumbTimer) {
+      // 重试链耗尽:撤烘焙遮罩(空槽诚实可见,不永久转圈)
+      this.content.querySelector('.sw-cc-hair')?.classList.remove('baking');
+      return;
+    }
     this.thumbTimer = setTimeout(() => {
       this.thumbTimer = 0;
       if (!this.content.isConnected) return;                   // 面板已关
@@ -961,12 +978,21 @@ export class CharCreation {
       cv.width = cols * cell; cv.height = rows * cell;
       const g = cv.getContext('2d')!;
       g.imageSmoothingEnabled = false;
+      // ★分帧合成(2026-08-27 用户报"加载时很卡"):213 次纸娃娃合成曾整段同步
+      //   阻塞主线程;改 24 格/帧,yield 让出(界面保持响应),页面切走即中止
+      this.content.querySelector('.sw-cc-hair')?.classList.add('baking');
       let missed = false;
-      CHAR_CREATION_HAIRS.forEach((hairId, i) => {
-        const doll = compositePaperDoll({ ...this.appearance, hair: hairId });
-        if (doll) g.drawImage(doll, 0, 0, 40, 44, (i % cols) * cell + 2, Math.floor(i / cols) * cell, 40, 44);
-        else missed = true;
-      });
+      for (let start = 0; start < CHAR_CREATION_HAIRS.length; start += 24) {
+        const slice = CHAR_CREATION_HAIRS.slice(start, start + 24);
+        slice.forEach((hairId, j) => {
+          const i = start + j;
+          const doll = compositePaperDoll({ ...this.appearance, hair: hairId });
+          if (doll) g.drawImage(doll, 0, 0, 40, 44, (i % cols) * cell + 2, Math.floor(i / cols) * cell, 40, 44);
+          else missed = true;
+        });
+        await new Promise((r) => setTimeout(r, 0));
+        if (!this.panel.isConnected) return;
+      }
       this.hairSheetUrl = cv.toDataURL();
       if (!missed && this.sheetAllTransparent(cv)) {
         clearPaperDollCache();
@@ -1030,6 +1056,7 @@ export class CharCreation {
 
   /** 已挂载格子原地换 sheet（不重建网格） */
   private applySheetUrls(): void {
+    this.content.querySelector('.sw-cc-hair')?.classList.remove('baking');
     if (this.hairSheetUrl) {
       const img = `url(${this.hairSheetUrl})`;
       this.content.querySelectorAll<HTMLElement>('.sw-cc-hairbtn .sw-cc-thumb')
@@ -1235,11 +1262,13 @@ export class CharCreation {
       grid.appendChild(b);
     });
     box.appendChild(grid);
-    // 下沿：上一个 / 随机发型（音符） / 下一个（原版该排为语音控件，本仓改派发型域）
+    if (!this.hairSheetUrl) box.classList.add('baking');   // 烘焙等待遮罩(转圈)
+    // 下沿：上一个 / 随机发型（Randomize 图标；原版该排为语音控件，本仓改派发型域
+    // ——2026-08-27 用户报音符 icon 语义错位,改用顶排随机钮同款 UI_CharCreation_Randomize）
     const low = el('div', 'sw-cc-hairlow');
     low.append(
       this.arrowBtn(0, 'Mods.SandboxWorld.CharCreate.PrevHair', () => this.stepHair(-1)),
-      this.smallBtn('Voice', 'Mods.SandboxWorld.CharCreate.RandomHair', () => {
+      this.smallBtn('Randomize', 'Mods.SandboxWorld.CharCreate.RandomHair', () => {
         this.setHair(CHAR_CREATION_HAIRS[Math.floor(Math.random() * CHAR_CREATION_HAIRS.length)]);
       }),
       this.arrowBtn(1, 'Mods.SandboxWorld.CharCreate.NextHair', () => this.stepHair(1)),

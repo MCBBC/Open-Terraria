@@ -152,8 +152,13 @@ async function warm(tag, urls, base) {
   const done0 = base || 0;
   lastWarm = { done: done0, total: done0 + urls.length, failed: 0, running: true };
   const cache = await getCache();
-  // pathname 归一(去前导 /):cache 条目是绝对 URL 的 pathname,清单是相对路径
-  const have = new Set((await cache.keys()).map((r) => new URL(r.url).pathname.replace(/^\//, '')));
+  // pathname 归一(去前导 /+★decode):cache 条目 URL 保留编码(空格=%20),
+  // 清单是原始空格名——曾致带空格条目每轮恒判缺失、每次启动重下 58MB
+  // (2026-08-27;与 src/net/AssetCache.ts normCacheKey 双侧同步)
+  const have = new Set((await cache.keys()).map((r) => {
+    const p = new URL(r.url).pathname.replace(/^\//, '');
+    try { return decodeURIComponent(p); } catch { return p; }
+  }));
   const missing = urls.filter((u) => !have.has(u.replace(/^\//, '')));
   const total = done0 + urls.length;
   let done = total - missing.length;

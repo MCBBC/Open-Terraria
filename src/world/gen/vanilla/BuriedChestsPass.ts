@@ -1231,10 +1231,13 @@ export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests
   const num5 = w / 4200;
   const count = 9 * num5;
   let num4 = 0;
+  // ★SSS-CELEB（1458 cs:17395-17400）：tenth → maxValue 10→7（Lava Charm 863
+  //   命中率 1/10→1/7；RECON-CELEB「水域宝箱 Lava Charm」同族——门在主件骰这里）
+  const celbWC = !!gs.seedFlags?.tenthAnniversary ? 6 : 9;
   for (let n = 0; n < count; n++) {
     num4++;
     let main: number;
-    if (rng.int(0, 9) === 0) {                                          // Next(10)
+    if (rng.int(0, celbWC) === 0) {                                     // Next(10|7)
       main = 863;
     } else {
       switch (num4) {

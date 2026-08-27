@@ -5,7 +5,7 @@
 // 规格=UIGenProgressBar.ts 常量);面板底=Inventory_Back13 九宫格乘色
 // ((33,15,91)×0.685,与 UI.ts 原版像素面板同源);全程方角/硬边框/像素字体,
 // 无圆角无渐变。
-import { assetCacheState, assetsComplete, assetsCompleteFast, onAssetProgress, warmAllAssets, PHASE_LABEL, type AssetCacheState } from '../net/AssetCache';
+import { assetCacheState, assetsComplete, assetsCompleteFast, assetsRetriesExhausted, onAssetProgress, readSwTrace, swTrace, warmAllAssets, PHASE_LABEL, type AssetCacheState } from '../net/AssetCache';
 import { Lang } from '../i18n/Lang';
 
 /** 原版 packed 色(UIGenProgressBar.ts 同源):corrupt 长条填充 4283888223 */
@@ -22,16 +22,17 @@ const CSS = `
 .sw-asset-badge {
   /* 底部居中(2026-08-24 用户要求):左下版本号/右下署名角标已占位,避让;
      与 LoadingSunflower(底 50px)上下错开不叠 */
-  position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 40;
+  position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 10002;
   display: flex; align-items: center; gap: 8px;
   background: #141028; border: 2px solid #7d92d6;
   box-shadow: 0 0 0 2px #0a0e1e;
   padding: 6px 12px; color: #e8ecf8; font-size: 13px;
   cursor: pointer;
-  /* 渐显入场与 splash 图片同曲线(2026-08-24 用户要求)——--sw-splash-alpha 由
-     Splash 单调广播,揭幕后变量摘除=回满亮。★transition 不能挂基类:逐帧变量
-     更新会被 .6s 过渡拖拽成滞后追踪;淡出过渡在 unmount 处内联挂 */
-  opacity: var(--sw-splash-alpha, 1);
+  /* ★常显(2026-08-27 用户改案):不随 --sw-splash-alpha(旧 2026-08-24"渐显入场
+     同曲线"已废——splash 挂载即置 0,badge 曾随之隐形再随渐入重现,用户实测
+     "耳机页后被隐藏过渡页重现")。出现=向日葵幕骨架,消失=完成淡出(≈过渡页
+     收场渐隐)。★transition 不能挂基类;淡出过渡在 unmount 处内联挂 */
+  opacity: 1;
   image-rendering: pixelated;
 }
 .sw-asset-badge:hover { border-color: #ffd76e; }
@@ -80,7 +81,7 @@ const CSS = `
 .sw-asset-retry:hover { background: #4a3a7a; }
 /* 下载详情面板(点击徽标打开;同 gate 面板语言) */
 .sw-asset-panel {
-  position: fixed; right: 14px; bottom: 56px; z-index: 45;
+  position: fixed; right: 14px; bottom: 56px; z-index: 10003;
   width: min(460px, 90vw); text-align: center; color: #e8ecf8;
   background-color: #241a4e; background-size: 100% 100%; image-rendering: pixelated;
   border: 2px solid #7d92d6; box-shadow: 0 0 0 2px #0a0e1e, 0 10px 32px rgba(0,0,0,0.7);
@@ -96,6 +97,28 @@ const CSS = `
   font-family: inherit; font-size: 13px;
 }
 .sw-asset-panel .sw-asset-close:hover { background: #4a3a7a; }
+/* 资产诊断面板(手机无 Console 取证:logo 连点5次,2026-08-27;调试工具,文案硬编码不走 l10n) */
+.sw-asset-diag {
+  position: fixed; inset: 0; z-index: 10020; display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 6, 14, 0.92);
+}
+.sw-asset-diag .diag-wrap {
+  width: min(680px, 94vw); height: min(78vh, 720px); display: flex; flex-direction: column;
+  background: #10142a; border: 2px solid #7d92d6; box-shadow: 0 0 0 2px #0a0e1e;
+  padding: 12px 14px; color: #e8ecf8;
+}
+.sw-asset-diag .diag-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+  font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif; font-size: 14px; }
+.sw-asset-diag .diag-bar button {
+  background: #3a2a5a; color: #fff; border: 2px solid #7d92d6; padding: 4px 14px;
+  cursor: pointer; font-family: inherit; font-size: 13px;
+}
+.sw-asset-diag .diag-bar button:hover { background: #4a3a7a; }
+.sw-asset-diag textarea {
+  flex: 1; width: 100%; resize: none; white-space: pre; overflow: auto;
+  background: #0a0e1e; color: #cfe0ff; border: 1px solid #33406e;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.45;
+}
 `;
 
 let styleEl: HTMLStyleElement | null = null;
@@ -193,16 +216,30 @@ export function mountAssetBadge(): void {
   if (!s.enabled) {
     if (s.phase !== 'done') {
       badgePending = true;
+      // ★骨架即挂(2026-08-27 用户要求:向日葵幕阶段就显示):enabled 未翻真时
+      //   state 无字节账,先上 spinner+"资源加载中 · …"骨架;订阅 enabled 翻真
+      //   后原地重建换绑正常进度循环
+      ensureStyle();
+      badgeEl = document.createElement('div');
+      badgeEl.className = 'sw-asset-badge';
+      badgeEl.innerHTML = '<div class="spin"></div><span class="txt"></span>';
+      (badgeEl.querySelector('.txt') as HTMLElement).textContent =
+        Lang.text('Mods.SandboxWorld.AssetDl.Loading', '…');
+      document.body.appendChild(badgeEl);
       const off = onAssetProgress((st) => {
-        if (st.enabled && !badgeEl) { badgePending = false; off(); mountAssetBadge(); }
+        if (!st.enabled || !badgeEl) return;
+        off();
+        badgeEl.remove(); badgeEl = null; badgePending = false;
+        mountAssetBadge();   // 正常挂载路径:绑定进度 update 订阅
       });
     }
     return;
   }
   if (s.phase === 'done') return; // 已完成不挂
-  // ★完成标志在(内容版本键命中)干脆不挂——reload 后"徽标挂载又 0.7s 淡出"的
-  //   闪现源(缓存真被系统清理的罕见窗口由门槛弹窗兜底,徽标只是装饰)
-  if (assetsCompleteFast()) return;
+  // ★完成标志不再免挂(2026-08-27):手机实测 CacheStorage 会被系统驱逐而
+  //   localStorage 标志残留——flag 在+缓存缺=正是需要徽标展示补拉进度的场景
+  //   (原免挂逻辑曾让补拉全程无进度可见);挂后由 status 回包实测校准,
+  //   真完成自然 0.7s 淡出,不构成常驻
   ensureStyle();
   badgeEl = document.createElement('div');
   badgeEl.className = 'sw-asset-badge';
@@ -220,9 +257,10 @@ export function mountAssetBadge(): void {
       txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Failed', st.failed);
       return;
     }
-    // 徽标文案"资源加载中 · N%"(2026-08-24 用户要求,"素材包 0% · 菜单"很怪);
-    // 字节数/阶段挪进悬停 tooltip
-    txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Loading', fmtPct(st));
+    // 徽标文案"资源加载中 · N% · NNNMB"(2026-08-27 用户要求:百分比后加已下载
+    // MB;字节数明细/阶段仍在悬停 tooltip)
+    txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Loading', fmtPct(st))
+      + (st.bytesTotal > 0 ? ` · ${Math.round(st.bytesDone / 1048576)}MB` : '');
     if (st.phase === 'done' && !badgeFading) {
       badgeFading = true;
       badgeEl.style.transition = 'opacity .6s';   // 淡出过渡仅此刻内联挂(基类挂会拖拽渐显变量)
@@ -361,52 +399,114 @@ export interface HoldDeps {
   state(): AssetCacheState;
   completeFast(): boolean;
   complete(): boolean;
+  /** 失败终态放行的前置门(缺省=真实现 zipAutoRetries≥5);单测注入 */
+  retriesExhausted?(): boolean;
+  /** 停滞+warming 时的重启动作(缺省=warmAllAssets(true) 对账续传);单测注入 */
+  warm?: () => void;
 }
 
-/** 启动 splash 保持（2026-08-26 用户定案语义:**p0-p8 全部落盘才放行揭幕**）。
- *  放行条件(任一):complete()(SW status 回包实测 cached=total);失败终态
- *  (failed>0,徽标在菜单继续示警+门槛"重新下载"兜底);进度停滞超 stallMs
- *  (防下载链挂死卡死启动)。
- *  ★删掉的两条提前放行(2026-08-26 用户实报"只下到 p1-p4 就显示完成进主菜单"
- *  +菜单期 vanilla 贴图 404 风暴同链):
- *  ①原 absolute timeoutMs 30s——慢网全量 warm(~360MB zip)远超 30s,到点放行
- *    =菜单开在缺资产态;
- *  ②原 completeFast 免检——localStorage 上轮完成标志 ≠ 本轮缓存实况(浏览器
- *    存储压力会驱逐 CacheStorage 条目而版本号不变),标志在+缓存被清时秒放
- *    =同一缺资产态。回访已全就位时也要等 SW status 回包实测(1-2s)——换确定性。
- *  sinceMs = splash 已显示时长(loadAssets 期计入)。轮询 250ms(SW 消息驱动
- *  状态,无需订阅式精确唤醒)。 */
+/** 启动 splash 保持（2026-08-27 用户定案语义:**过渡图阶段必须全量落盘才放行揭幕**;
+ *  2026-08-26 为"p0-p8",2026-08-27 收紧为全部 zip 分片——菜单不允许缺图)。
+ *  成功放行:phase==='done' 且 failed===0 且 done≥total(worker 真完成终态;
+ *  不用 complete() 的 cached 口径——status 回包含壳噪声曾虚高越线)。
+ *  失败放行:**失败终态**(failed>0 且 !warming;徽标在菜单继续示警+门槛
+ *  "重新下载"兜底)。★2026-08-27 修复:warm 进行中的瞬时条目失败(片重试中,
+ *  warming 仍 true)曾命中旧条件 `failed>0` 提前放行揭幕=手机弱网下"资源没
+ *  加载完就到主菜单"(用户实测);现必须等 warming 熄灭。
+ *  停滞放行:done+bytesDone+phase 三静止达 stallMs(防下载链挂死;150s——
+ *  移动网络冷边缘起速慢,60s 曾误放)。
+ *  sinceMs = splash 已显示时长(loadAssets 期计入)。轮询 250ms。 */
 export function holdForAssetsReady(opts: {
   minMs: number;
   sinceMs?: number;
-  /** 进度停滞放行窗(默认 60s,原 timeout 的"防挂死"本意):done+bytesDone+phase
-   *  三静止达窗即放行。zip 健康下载 worker 每 200ms/512KB 报字节增量、legacy
-   *  分块有 15s 看门狗续发——均远快于此窗,不会误触发 */
+  /** 进度停滞放行窗(默认 150s):done+bytesDone+phase 三静止达窗即放行。
+   *  zip 健康下载 worker 每 200ms/512KB 报字节增量——远快于此窗,不误触发 */
   stallMs?: number;
   deps?: HoldDeps;
 }): Promise<void> {
-  const { minMs, sinceMs = 0, stallMs = 60_000 } = opts;
+  const { minMs, sinceMs = 0, stallMs = 150_000 } = opts;
   const d = opts.deps ?? {
     now: () => performance.now(),
     state: assetCacheState,
     completeFast: assetsCompleteFast,
     complete: assetsComplete,
+    retriesExhausted: assetsRetriesExhausted,
+    warm: () => warmAllAssets(true),
   };
+  const retriesEx = d.retriesExhausted ?? assetsRetriesExhausted;
   const t0 = d.now();
-  const needWait = d.state().enabled;   // 完成标志不再免检——以 SW 实测为准(头注)
+  const needWait = d.state().enabled;   // 调用点在 await initAssetCache() 之后:
+  // enabled=false 已是穷尽重试的降级终态(dev/?nosw/register 三连败)→ 无等待概念
   return new Promise((resolve) => {
     let lastSig = '';
     let lastProgressAt = d.now();
-    const finish = () => { clearInterval(iv); resolve(); };
+    const finish = (why: string) => {
+      swTrace(`hold放行[${why}] 等待${Math.round(d.now() - t0)}ms done=${(d.state() as AssetCacheState).done}/${(d.state() as AssetCacheState).total}`);
+      clearInterval(iv); resolve();
+    };
     const iv = setInterval(() => {
       const elapsed = sinceMs + (d.now() - t0);
       if (elapsed < minMs) return;
       const s = d.state();
-      if (!needWait || d.complete() || s.failed > 0) { finish(); return; }
-      // 停滞检测:done/bytesDone/phase 三静止达窗 = 下载链挂死,放行兜底
+      if (!needWait) { finish('未启用降级'); return; }   // 降级终态:补满 minMs 即放行(无等待概念)
+      // 放行只认两条,均以 phase 终态为准(2026-08-27):
+      //   ①worker 真完成(phase=done 且 failed=0 且 done≥total)——不用
+      //     complete()/done 口径:status 回包的 cached 曾把 done 污染成假满
+      //     (用户手机实测 34% 字节进度 30s 内揭幕缺图菜单)
+      //   ②失败终态(须自动补拉轮耗尽,轮内 15s/online 会自愈)
+      if ((s.phase === 'done' && s.failed === 0 && s.done >= s.total) || (s.failed > 0 && !s.warming && retriesEx())) { finish(s.failed > 0 ? `失败终态(轮耗尽) failed=${s.failed}` : '真完成'); return; }
+      // 停滞检测:done/bytesDone/phase 三静止达窗:
+      //   warming 中 = 下载链疑似挂死/手机切后台节流 → force 重启对账续传
+      //   (2026-08-27 手机实测:锁屏 150s 无增量曾放行揭幕缺图菜单——不再放行)
+      //   !warming = 无任何活动是真挂死 → 放行兜底
       const sig = `${s.done}|${s.bytesDone}|${s.phase}`;
       if (sig !== lastSig) { lastSig = sig; lastProgressAt = d.now(); return; }
-      if (d.now() - lastProgressAt >= stallMs) finish();
+      if (d.now() - lastProgressAt >= stallMs) {
+        if (s.warming) { swTrace(`hold停滞${stallMs}ms(warming)→ force重启对账`); d.warm?.(); lastProgressAt = d.now(); return; }
+        finish(`停滞${stallMs}ms(无活动)`);
+      }
     }, 250);
+  });
+}
+
+// ---- 资产诊断面板(2026-08-27;手机无 Console 的取证出口) ----
+// 入口:主菜单 logo 连点 5 次(TitleMenu 绑定)。展示 swTrace 环形日志
+// (内存本轮 + localStorage 上轮,跨刷新可见),textarea 可全选复制。
+
+/** 追加一条到诊断日志(供 UI 层补充上下文,如"logo 连点"本身) */
+export function assetDiagNote(msg: string): void {
+  swTrace(msg);
+}
+
+export function openAssetDiagPanel(): void {
+  if (typeof document === 'undefined' || document.getElementById('sw-asset-diag')) return;
+  ensureStyle();
+  const el = document.createElement('div');
+  el.id = 'sw-asset-diag';
+  el.className = 'sw-asset-diag';
+  el.innerHTML = `
+    <div class="diag-wrap">
+      <div class="diag-bar">
+        <span>资产诊断 · 最近 300 条(跨刷新持久)</span>
+        <button data-a="copy">复制全部</button>
+        <button data-a="close">关闭</button>
+      </div>
+      <textarea readonly spellcheck="false"></textarea>
+    </div>`;
+  document.body.appendChild(el);
+  const ta = el.querySelector('textarea') as HTMLTextAreaElement;
+  ta.value = readSwTrace().join('\n') || '(空)';
+  ta.scrollTop = ta.scrollHeight;
+  (el.querySelector('[data-a=close]') as HTMLElement).addEventListener('click', () => el.remove());
+  (el.querySelector('[data-a=copy]') as HTMLElement).addEventListener('click', async () => {
+    ta.select();
+    try {
+      await navigator.clipboard.writeText(ta.value);
+      (el.querySelector('[data-a=copy]') as HTMLElement).textContent = '已复制 ✓';
+    } catch {
+      document.execCommand('copy');   // 剪贴板 API 不可用时的老式兜底
+      (el.querySelector('[data-a=copy]') as HTMLElement).textContent = '已复制 ✓';
+    }
+    setTimeout(() => { const b = el.querySelector('[data-a=copy]'); if (b) b.textContent = '复制全部'; }, 1500);
   });
 }

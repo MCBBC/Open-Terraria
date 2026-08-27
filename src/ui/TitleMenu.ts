@@ -20,6 +20,7 @@
 //      TitleMenu flow 里接 onSunMoonGrab 即原版般跟手；time01 已按原版公式反算好抛出。
 import { Lang } from '../i18n/Lang';
 import { menuTimeInfo } from '../render/MenuBackground';
+import { openAssetDiagPanel } from './AssetDownloadUI';
 
 /** Sun.png 114×114 / Moon_N.png 50×400（8 相位帧，帧宽 50）——SkyRenderer.ts:27-28 */
 const SUN_SIZE = 114;
@@ -89,7 +90,7 @@ const CSS = `
   text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;
   pointer-events: none;
 }
-/* 右下署名（GLM-5.3/OX-Alpha 协作声明）用【内联样式】——注入样式表的
+/* 右下署名（GLM-5.3/GLM-5.3-Flash 协作声明）用【内联样式】——注入样式表的
    getElementById 守卫在 HMR 期会驻留旧 CSS 吞掉变更，内联不受其害 */
 /* 日/月命中层 + 可见体：罩住天空画布里的太阳/月亮（Main.cs:62420 value4）。
    z-index:-1 = 根 stacking context 内垫底——必在天空画布(0)之上、logo/按钮之下，
@@ -204,6 +205,31 @@ export class TitleMenu {
     document.body.appendChild(this.chrome);
     this.logoDay = this.root.querySelector('.logo-day') as unknown as HTMLImageElement;
     this.logoNight = this.root.querySelector('.logo-night') as unknown as HTMLImageElement;
+    // ★资产诊断入口(2026-08-27):logo 连点 5 次(2.5s 内)弹出资产诊断面板
+    //   (手机无 Console 的取证出口,swTrace 跨刷新持久)。调试工具,文案硬编码。
+    //   ★监听挂 window 捕获阶段+按坐标命中 logo 矩形——logo 上方有日/月成就
+    //   命中层(celestial,pointerdown 捕获),元素级 click 会被它吃掉(用户实测
+    //   "手机/PC 都点不动");window 捕获先于一切,遮挡免疫。菜单移除时自解绑。
+    {
+      let taps = 0, tapTimer: ReturnType<typeof setTimeout> | null = null;
+      const onTap = (e: PointerEvent) => {
+        const logoEl = this.root.isConnected ? this.root.querySelector('.sw-title-logo') : null;
+        if (!logoEl) { window.removeEventListener('pointerdown', onTap, true); return; }
+        const r = logoEl.getBoundingClientRect();
+        if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+        taps++;
+        if (tapTimer) clearTimeout(tapTimer);
+        tapTimer = setTimeout(() => { taps = 0; }, 2500);
+        if (taps >= 5) {
+          taps = 0;
+          if (tapTimer) clearTimeout(tapTimer);
+          openAssetDiagPanel();
+        }
+      };
+      window.addEventListener('pointerdown', onTap, true);
+    }
+    // 调试句柄(探针/远程 Console 用;与 __swAssetCache 同族先例)
+    (window as unknown as { __swAssetDiag?: () => void }).__swAssetDiag = openAssetDiagPanel;
     // 日/月命中层 + 可见体（GOING_OLDSCHOOL）——置于按钮之下、天空画布之上
     this.celestial = document.createElement('div');
     this.celestial.className = 'sw-title-celestial';
@@ -343,7 +369,7 @@ export class TitleMenu {
     const credit = this.chrome.querySelector('[data-credit]');
     if (credit) {
       const bs = 'font-weight:700;margin:0 5px;text-shadow:1px 0 0 #fff,1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000';
-      credit.innerHTML = `${t('Mods.SandboxWorld.Credits.Line1', `<b style="${bs}">GLM-5.3</b>`, `<b style="${bs}">OX-Alpha</b>`)}<br>${t('Mods.SandboxWorld.Credits.Line2')}`;
+      credit.innerHTML = `${t('Mods.SandboxWorld.Credits.Line1', `<b style="${bs}">GLM-5.3</b>`, `<b style="${bs}">GLM-5.3-Flash</b>`)}<br>${t('Mods.SandboxWorld.Credits.Line2')}`;
     }
   }
 

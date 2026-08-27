@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   fnv1a32, assetVersion, menuWarmUrls, worldWarmUrls, miscWarmUrls,
   soundsWarmUrls, musicWarmUrls, priorityPlan, initAssetCache, assetCacheState,
-  composeVersion, zipPhaseAt, acceptsZipManifest, type ZipManifest, type ZipManifestPart,
+  composeVersion, zipPhaseAt, acceptsZipManifest, normCacheKey, type ZipManifest, type ZipManifestPart,
 } from '../src/net/AssetCache';
 import vanillaJson from '../public/sprites/vanilla.json';
 import vanillaUiJson from '../public/sprites/vanilla-ui.json';
@@ -85,6 +85,16 @@ describe('zip 模式(纯函数)', () => {
     algoVersion: 1, contentHash: 'abc123', totalFiles: 100, totalBytes: 1000,
     parts: [part('menu', 20), part('game-sprites', 30), part('sounds', 25), part('music', 25)],
   };
+
+  it('normCacheKey:keys() 编码键解码回原始条目名(空格=%20 死循环修复)', () => {
+    // 2026-08-27:带空格文件名(Backgrounds_Underworld*/Underworld* 族)曾被
+    // %20 编码形态对账恒判缺失 → 每次启动固定重下 58MB
+    expect(normCacheKey('https://x/sprites/vanilla/Backgrounds_Underworld%200.png'))
+      .toBe('sprites/vanilla/Backgrounds_Underworld 0.png');
+    expect(normCacheKey('https://x/sprites/vanilla/Tiles_0.png')).toBe('sprites/vanilla/Tiles_0.png');
+    expect(normCacheKey('https://x/%E4%B8%AD%E6%96%87.png')).toBe('中文.png');
+    expect(normCacheKey('https://x/bad%ZZ.png')).toBe('bad%ZZ.png');   // 非法 % 序列回退
+  });
 
   it('manifest 受理门:v1/v2 均接受,坏形状拒收(防 ALGO_VERSION bump 再入)', () => {
     expect(acceptsZipManifest(manifest)).toBe(true);

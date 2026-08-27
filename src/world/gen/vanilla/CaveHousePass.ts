@@ -1682,7 +1682,16 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     }
     if (!ok) return __fail('bounds');
     const theme = getHouseType(st, rooms);
-    const def = THEMES[theme];
+    // ★SSS-CELEB：WoodHouseBuilder ctor 的 PotentiallyConvertToRainbowBrick
+    //   （HouseBuilder.cs:92-108）：tenth&&!getGood → Next(2)==0 → 瓷漆砖 160/墙 44。
+    //   def 克隆成每屋副本以便覆写（THEMES 是模块级共享表，禁原地改）。
+    const def: ThemeDef = { ...THEMES[theme] };
+    if (theme === 'wood' && gs.seedFlags?.tenthAnniversary && !gs.seedFlags.getGoodWorld) {
+      if (rng.nextIntRange(0, 2) === 0) {
+        const rb = sheetTile(160);
+        if (rb >= 0) { def.tile = rb; def.wall = 44; }
+      }
+    }
     if (def.tile < 0 || def.beam < 0) return __fail('theme');
     // 岩浆回避(granite 主题豁免,HouseUtils.AreRoomsValid)
     if (theme !== 'granite') {
@@ -1833,6 +1842,26 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     }
     if (theme === 'desert' && extractCount < rng.int(2, 4)) {
       if (cascadePlace(st, rng, rooms, 'v_219_extractinator', false)) extractCount++;
+    }
+    // ★SSS-CELEB：WoodHouseBuilder.Place 覆写尾 → RainbowifyOnTenthAnniversaryWorlds
+    //   （HouseBuilder.cs:114-124）：TileType==160 时掷 Next(2)（==0 则整屋跳漆），
+    //   否则逐房 SetTileAndWallRainbowPaint（Actions.cs:479-493：活性格 color、
+    //   墙!=0 格 wallColor，色号=GetRainbowPaintIDForPosition(x,y)=13+(x%44+y%44)%11
+    //   非 wiggly——坐标即世界绝对坐标）。
+    if (theme === 'wood' && gs.seedFlags?.tenthAnniversary) {
+      const skip = TILE_DEFS[def.tile]?.vanilla?.sheet === 160 && rng.nextIntRange(0, 2) === 0;
+      if (!skip) {
+        for (const r of rooms) {
+          for (let x = r.x; x < r.x + r.w; x++) {
+            for (let y = r.y; y < r.y + r.h; y++) {
+              const pid = 13 + ((x % 44 + y % 44) % 11);
+              const i = st.idx(x, y);
+              if (st.flags[i]) st.setPaintSilent(x, y, pid);
+              if (st.wall[i] !== 0) st.setPaintWallSilent(x, y, pid);
+            }
+          }
+        }
+      }
     }
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('bt', ox, oy, 0, __rn());

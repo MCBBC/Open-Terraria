@@ -39,7 +39,12 @@ export function runTunnelsPass(st: TileStore, rng: RNG, gs: GenState): void {
     const array2 = new Array<number>(10);
     let num2 = rng.nextIntRange(450, w - 450);
     // 避开中部 40%-60%（出生点带）
-    while (num2 > w * 0.4 && num2 < w * 0.6) num2 = rng.nextIntRange(450, w - 450);
+    // ★SSS-CELEB（1458 cs:11779-11786）：tenth&&!remix → 单掷改走 [0.2w,0.8w)
+    //   带无拒绝环（Next((int)(w*0.2), (int)(w*0.8))，**流位=替换而非追加**：
+    //   vanilla 是 if/else 二选一，非先掷后覆写）
+    const celbTun = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags?.remix;
+    if (celbTun) num2 = rng.nextIntRange(Math.trunc(w * 0.2), Math.trunc(w * 0.8));
+    else while (num2 > w * 0.4 && num2 < w * 0.6) num2 = rng.nextIntRange(450, w - 450);
     let j = 0;
     let flag: boolean;
     do {
@@ -105,12 +110,16 @@ export function runSmallHolesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const avoidance = 340; // GenVars.smallHolesBeachAvoidance = beachSandRandomCenter(320)+20
   const total = w * h;
   const num = Math.trunc(total * 0.0015); // 4200×1200 → 7560
+  // ★SSS-CELEB（1458 cs:12065-12073）：tenth&&!remix 走"拒绝环"，但其条件是原版
+  //   反编译实证的死条件（num2<0.2w **&&** num2>0.8w 恒假）→ 环体零执行=首掷必收。
+  //   bug-compat 移植：直接跳过拒绝环，不加自造的 || 表达式（那会改变掷骰流）。
+  const celbSkip = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags?.remix;
   for (let i = 0; i < num; i++) {
     const type = rng.nextInt(5) === 0 ? -2 : -1;
     // 发 1：小挖
     let num2 = rng.nextIntRange(0, w);
     let num3 = rng.nextIntRange(gs.worldSurfaceHigh, h);
-    while (((num2 < avoidance || num2 > w - avoidance) && num3 < worldSurfaceHigh)
+    if (!celbSkip) while (((num2 < avoidance || num2 > w - avoidance) && num3 < worldSurfaceHigh)
       || (num2 > w * 0.45 && num2 < w * 0.55 && num3 < gs.genWorldSurface)) {
       num2 = rng.nextIntRange(0, w);
       num3 = rng.nextIntRange(gs.worldSurfaceHigh, h);
@@ -121,7 +130,7 @@ export function runSmallHolesPass(st: TileStore, rng: RNG, gs: GenState): void {
     // 发 2：大挖
     num2 = rng.nextIntRange(0, w);
     num3 = rng.nextIntRange(gs.worldSurfaceHigh, h);
-    while (((num2 < avoidance || num2 > w - avoidance) && num3 < worldSurfaceHigh)
+    if (!celbSkip) while (((num2 < avoidance || num2 > w - avoidance) && num3 < worldSurfaceHigh)
       || (num2 > w * 0.45 && num2 < w * 0.55 && num3 < gs.genWorldSurface)) {
       num2 = rng.nextIntRange(0, w);
       num3 = rng.nextIntRange(gs.worldSurfaceHigh, h);
