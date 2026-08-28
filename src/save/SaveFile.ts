@@ -57,6 +57,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     bloodMoon: world.clock.bloodMoon, eclipse: world.clock.eclipse,
     moonPhase: world.clock.moonPhase, moonType: world.moonType,
     seedFlags: { ...world.seedFlags },
+    starterSwapMigrated: world.starterSwapMigrated,   // ★IIIII20b 换人一次性迁移标
     difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）
     journeyTimeRate: world.journeyTimeRate, journeyFreezeTime: world.journeyFreezeTime,
     // 旅程力量·世界侧（IPersistentPerWorldContent；玩家侧三件走 player 段下方）
@@ -304,6 +305,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   if (data.clock.moonPhase !== undefined) world.clock.moonPhase = data.clock.moonPhase;
   if (data.header.moonType !== undefined) world.moonType = data.header.moonType;
   if (data.header.seedFlags) world.seedFlags = { ...data.header.seedFlags };
+  // ★IIIII20b：StarterNPC 换人一次性迁移标记（只落真值，旧档缺省=未迁移）
+  if (data.header.starterSwapMigrated) world.starterSwapMigrated = true;
   // 世界难度（Main.GameMode，Main.cs:2677）——旧档缺省 0=经典
   if (data.header.difficulty !== undefined) world.difficulty = data.header.difficulty;
   // 旅程时间倍率/冻结（CreativePowers.cs:866/:1448）——旧档缺省 1/false

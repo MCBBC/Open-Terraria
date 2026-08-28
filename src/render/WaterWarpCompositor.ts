@@ -13,6 +13,7 @@
 //     撕裂风险）。
 //  逃生门：?wwarp=0 整条管线关闭（前景水直画世界层 + 表层逐格 bob 旧路径）；
 //     ?wwarp=2d 强制跳过 GL 全屏 pass（对拍用）。
+import { starvedLock } from './GLStats';
 import { GLWaterDistortion } from './GLWaterDistortion';
 import { waterWaves, waveTexReady } from './WaterWaves';
 import { setWaterWarpDebug } from './VanillaLiquidRenderer';
@@ -143,6 +144,7 @@ export class WaterWarpCompositor {
       this.gl = null;
     }
     if (performance.now() < this.glRetryAt) return null;
+    if (starvedLock()) return null;   // 饥饿锁:扭曲层不参与重建竞争(#三开压测批)
     const inst = new GLWaterDistortion();
     if (inst.unavailable) {
       inst.dispose();

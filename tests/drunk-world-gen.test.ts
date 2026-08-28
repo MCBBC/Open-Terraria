@@ -56,4 +56,120 @@ describe('IIIII14 DRUNK(05162020) 世界效应', () => {
     // pass 播种记录——裸 drunk 落 party_girl）
     expect(world.starterTownNpcs?.map((s) => s.key)).toContain('party_girl');
   }, 180000);
+
+  it('IIIII21 二期：浮空岛族/FDC paint+宝箱/地牢入口族/神庙三倍体', async () => {
+    const { lastGenState } = await import('../src/world/gen/WorldGen');
+    const SHEET: number[] = [];
+    TILE_DEFS.forEach((d, i) => { if (d?.vanilla?.sheet != null) SHEET[i] = d.vanilla.sheet; });
+    const itemIds = await import('../src/data/itemKeys');
+    const gen = (seedText: string) =>
+      generateWorld({ width: 4200, height: 1200, seedText, name: 't' }).then((world) => ({ world, gs: lastGenState()! }));
+    const analyze = (wWorld: Awaited<ReturnType<typeof gen>>['world'], gs: Awaited<ReturnType<typeof gen>>['gs']) => {
+      const st = wWorld.store;
+      const cntBySheet = (sheet: number, pred?: (paint: number) => boolean): number => {
+        let n = 0;
+        for (let i = 0; i < st.type.length; i++) {
+          if (!st.flags[i] || SHEET[st.type[i]] !== sheet) continue;
+          if (pred && !pred(st.paint[i])) continue;
+          n++;
+        }
+        return n;
+      };
+      const dgBricks = new Set([41, 43, 44, 677, 678, 679]);
+      const dgWalls = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+      const brickPaintHist = new Map<number, number>();
+      const templePaintHist = new Map<number, number>();
+      const wallPaintHist = new Map<number, number>();
+      for (let i = 0; i < st.type.length; i++) {
+        if (!st.flags[i]) continue;
+        const sh = SHEET[st.type[i]];
+        if (dgBricks.has(sh)) brickPaintHist.set(st.paint[i], (brickPaintHist.get(st.paint[i]) ?? 0) + 1);
+        else if (sh === 226) templePaintHist.set(st.paint[i], (templePaintHist.get(st.paint[i]) ?? 0) + 1);
+      }
+      for (let i = 0; i < st.wall.length; i++) {
+        const wl = st.wall[i];
+        if (dgWalls.has(wl)) wallPaintHist.set(st.paintWall[i], (wallPaintHist.get(st.paintWall[i]) ?? 0) + 1);
+      }
+      // 埋地深度：黑涂地牢墙最低行（drunk 入口族整群在地下）
+      let wall25MinY = Infinity;
+      for (let i = 0; i < st.wall.length; i++) {
+        if (st.paintWall[i] === 25 && dgWalls.has(st.wall[i])) {
+          const y = Math.floor(i / st.w);
+          if (y < wall25MinY) wall25MinY = y;
+        }
+      }
+      // 活木死树（GenerateDungeonTree 的 b=28 主写）
+      let treeWoodPainted = 0;
+      for (let i = 0; i < st.type.length; i++) {
+        if (!st.flags[i] || SHEET[st.type[i]] !== 191 || st.paint[i] !== 28) continue;
+        treeWoodPainted++;
+      }
+      const vid1571 = itemIds.VI_ID(1571);
+      const vid1569 = itemIds.VI_ID(1569);
+      const vid5001 = itemIds.VI_ID(5001);
+      const vid678 = itemIds.VI_ID(678);
+      let has1571 = 0, has1569 = 0, redPotion = 0, moonLegs = 0;
+      for (const c of wWorld.chests) {
+        const ids2 = c.items.filter(Boolean).map((it) => it.id);
+        if (ids2.includes(vid1571)) has1571++;
+        if (ids2.includes(vid1569)) has1569++;
+        if (ids2.includes(vid5001)) redPotion++;
+        if (ids2.includes(vid678)) moonLegs++;
+      }
+      return {
+        islands: gs.floatingIslands.map((isl) => isl),
+        snowCloud: cntBySheet(460),
+        fountains: cntBySheet(207),
+        brickPaint: Object.fromEntries(brickPaintHist),
+        templePaint: Object.fromEntries(templePaintHist),
+        wallPaint25: wallPaintHist.get(25) ?? 0,
+        dungeonWallStyle: gs.dungeonWallStyle,
+        tRooms: gs.tRooms,
+        treeWoodPainted,
+        wall25MinY,
+        has1571, has1569, redPotion, moonLegs,
+        ws: gs.worldSurface,
+        chestCount: wWorld.chests.length,
+      };
+    };
+    const D = await gen('5162020').then(({ world, gs }) => analyze(world, gs));
+    const C = await gen('sw-ctl-iiii21').then(({ world, gs }) => analyze(world, gs));
+    // ---- C1 浮空岛族（cs:13124-13155）----
+    expect(D.islands.filter((i) => !i.isLake)).toHaveLength(3);
+    const styles = D.islands.filter((i) => !i.isLake).map((i) => i.style);
+    expect(styles.every((s2) => s2 === 1 || s2 === 3)).toBe(true);
+    expect(D.snowCloud).toBeGreaterThan(60);            // 雪云 460 只在雪岛出现
+    expect(D.fountains).toBeGreaterThan(0);             // style>0 → 喷泉（cs:80543）
+    expect(C.islands.filter((i) => !i.isLake).map((i) => i.style)).toEqual([0, 0, 0]);
+    expect(C.snowCloud).toBe(0);
+    expect(C.fountains).toBe(0);
+    // ---- C2 FinishDrunkGen（cs:26493-26611）----
+    const colors = Object.entries(D.brickPaint).filter(([k, v]) => Number(k) !== 0 && v > 500);
+    expect(colors).toHaveLength(1);                     // 全图统一主色
+    expect(Number(colors[0]![0])).toBeGreaterThanOrEqual(13);
+    expect(Number(colors[0]![0])).toBeLessThanOrEqual(24);
+    expect(D.wallPaint25).toBeGreaterThan(3000);        // 地牢墙黑涂 25
+    const tp16 = Number(D.templePaint['16'] ?? 0);
+    expect(tp16).toBeGreaterThan(1500);                 // 神庙柠檬绿
+    expect(C.wallPaint25).toBe(0);                      // 对照世界无墙黑涂
+    const ctlAnyPaint = Object.entries({ ...C.brickPaint, ...C.templePaint })
+      .some(([k, v]) => Number(k) !== 0 && v > 500);
+    expect(ctlAnyPaint).toBe(false);                    // 对照世界 paint 通道全零
+    expect(C.redPotion).toBe(0);
+    expect(C.moonLegs).toBe(0);
+    expect(D.redPotion).toBeGreaterThan(0);             // 1/15 红药水
+    expect(D.moonLegs).toBeGreaterThan(0);              // 1/30 月总腿
+    // ---- C3 地牢入口族 ----
+    expect(Number.isInteger(D.dungeonWallStyle as number)).toBe(true);   // DC.cs:94-110 重掷已掷
+    expect(C.dungeonWallStyle).toBeUndefined();         // 普通世界零骰
+    expect(D.wall25MinY).toBeGreaterThan(Math.trunc(D.ws) - 80);          // 入口族埋于地下
+    expect(D.has1571).toBeGreaterThan(0);
+    expect(D.has1569).toBeGreaterThan(0);               // 双邪恶生物群系箱并存（第 5 箱支）
+    expect(C.has1571 > 0 && C.has1569 > 0).toBe(false); // 对照世界单侧邪恶箱
+    expect(D.treeWoodPainted).toBeGreaterThan(180);     // 死生命树活木 b=28（DU:615-1151）
+    expect(C.treeWoodPainted).toBe(0);
+    // ---- C4 神庙三倍体（cs:33752 ×3 / cs:34415 ×1.5 / 木刺 ±2）----
+    expect(D.tRooms).toBeGreaterThanOrEqual(27);        // 房数×3（10..15 ×3）
+    expect(C.tRooms).toBeLessThan(16);                  // 对照世界正常房数
+  }, 420000);
 });

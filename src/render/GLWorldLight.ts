@@ -12,7 +12,7 @@
 // `ctx.drawImage(layer.canvas, 0, 0)` 单次合成。GL 不可用/上下文丢失时
 // unavailable=true,调用方回退 2D 三步近似(见 Renderer.compositeLight)。
 
-import { glStatUpload, glStatDraw, registerFence } from './GLStats';
+import { glStatUpload, glStatTexCreate, glStatDraw, registerFence, noteContextLost } from './GLStats';
 export class GLWorldLight {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | null = null;
@@ -141,6 +141,12 @@ void main() {
     registerFence('worldLight', gl);   // #perf-gpulog
   }
 
+  /** 整幅刷新优化(#perf-gpulog,gptlog2 定量):world/light 同尺寸场景纹理每帧整幅重传——
+   *  首次/尺寸变化才走 texImage2D(隐式重分配),此后 texSubImage2D 数据区直刷,
+   *  规避驱动逐帧 realloc/错排路径(弱 iGPU 上该路径是 CPU→GPU 复制的主要开销项)。
+   *  账本语义不变:上传恒记带宽;仅 key 变化时补记一笔 新分配(隐式 realloc)。 */
+  private _texKeyWorld = '';
+  private _texKeyLight = '';
   /** 每帧合成:world(worldCanvas) × light(lightCanvas @ lightRect 像素矩形) → this.canvas */
   composite(world: HTMLCanvasElement, light: HTMLCanvasElement, lightRect: readonly [number, number, number, number]): boolean {
     const gl = this.gl;
@@ -159,13 +165,26 @@ void main() {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     // 预乘上传声明:canvas 源内部即预乘,显式 true = 驱动零转换直拷(实现无关)
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, world);
-    // ★两笔均为【既有纹理逐帧整幅刷新】= 纯带宽,不计驻留(#perf-gpulog 语义修订)
-    glStatUpload('worldLight', w * h * 4);
+    const kW = `${w}x${h}`;
+    const kb = `${light.width}x${light.height}`;
+    if (this._texKeyWorld !== kW) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, world);   // 分配式首传/变尺寸重分配
+      glStatTexCreate('worldLight', w * h * 4);
+      this._texKeyWorld = kW;
+    } else {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, world);
+    }
+    glStatUpload('worldLight', w * h * 4);   // 带宽恒记(两种路径都发生的真实传输量)
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.texLight);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, light);
+    if (this._texKeyLight !== kb) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, light);
+      glStatTexCreate('worldLight', light.width * light.height * 4);
+      this._texKeyLight = kb;
+    } else {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, light);
+    }
     glStatUpload('worldLight', light.width * light.height * 4);
     gl.uniform1i(this.uni.uWorld, 0);
     gl.uniform1i(this.uni.uLight, 1);
@@ -175,7 +194,7 @@ void main() {
     glStatDraw('worldLight', 4);   // #perf-gpulog
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     // WebGL 错误哨兵:上下文丢失即判死,调用方回退 2D
-    if (gl.isContextLost()) { this.diedAt = performance.now(); return false; }
+    if (gl.isContextLost()) { noteContextLost('worldLight'); this.diedAt = performance.now(); return false; }   // #三开压测批
     return true;
   }
 }

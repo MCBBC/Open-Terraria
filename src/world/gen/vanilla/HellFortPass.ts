@@ -35,12 +35,12 @@
 //   =「1457 代码 vs 1456 槽链」基准错位——七条 mile8 槽链（/tmp/sw-slp/g* 认证线,
 //   run.log 实证 Terraria Server **v1.4.5.6**）是用户金标=1456 真值,而 1457 迁移
 //   是并行会话独立战役（caves/shimmer 检查点金标 08-23 03:29-03:54 已按 1457 oracle
-//   再生）。裁决=双态：**缺省 1456**（hellFort1456(),本文件尾,cs:32850-33310 1:1
-//   重建）服务槽链认证线;**SW_MB_1457=1** 走上方 1457 对齐档 2 主体服务迁移战役
-//   （与 oracle 侧 SW_MB_1457 门同款先例;oracle 后随「1456 口径退役」删门,JS 侧
-//   保留双态）。懒读取 env（首次 hellFort 调用时取）——测试/探针可在用例体前置
-//   process.env.SW_MB_1457='1' 切换。worldgen-1457-rewire.test.ts 的 HellFort 结构
-//   断言对双态兼容（1457 形文本全保留在位,1456 分支置文件尾不抢 indexOf 首现）。
+//   再生）。当时裁决=双态：**缺省 1456**（hellFort1456(),本文件尾,cs:32850-33310
+//   1:1 重建）;**SW_MB_1457=1** 走上方 1457 对齐档 2 主体。
+//   ★★IIIII23（2026-08-28）缺省翻转：1456 槽链纪元已随基座换血退役
+//   （/tmp/rrrr-out/x86-* 七链=1457 x86 真值),本门缺省改 **1457**;
+//   显式降档 SW_MB_1456=1 / SW_MB_1457=0 仍可走 hellFort1456(实现原样保留)。
+//   ——历史注记保留于上,勿删。
 import type { TileStore } from '../../TileStore';   // KKKKKK:塌墙阶段回滚后无值消费,改 type-only
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -85,7 +85,17 @@ const PIC_246 = TILE_BY_KEY['v_246_paintings_3x2']!;
 const T_DOOR = TILE_BY_KEY['door_closed']!;
 const T_STATUE = TILE_BY_KEY['v_105_statue']!;
 
-// ★VVVVVV 双态门：缺省 1456（槽链认证线）,SW_MB_1457=1 → 1457 对齐档 2（迁移战役）。
+// ★VVVVVV 双态门 —— ★IIIII23 批（2026-08-28）缺省翻转为 **1457**：
+//  CLAUDE.md 基准自 2026-08-23 切 1.4.5.7 且认证基座已全部为 x86 1457 真值
+//  （/tmp/rrrr-out/x86-* 七链,rserie 插桩哈希验证）——旧「缺省 1456」是把
+//  已退役的 /tmp/sw-slp/* 1456 槽链纪元误留为运行时缺省。IIIII22 曾据
+//  「无门 mile8 出 T57>0/Y2>0/墙 0↔14 结构族」定罪为陈年债,实为探针未锚
+//  口径的伪影:七链双态实证 g/m/s22222 全 106 槽逐字节全等、12345/const/
+//  notraps/ntb 的 #28 地狱带同样归零（残红全部换位到各自域内既登记前沿,
+//  与本门无关）。故缺省改走 1457;显式开关:
+//    SW_MB_1456=1      → 强制 1456 兼容路径（考古/复核用,原样保留实现）
+//    SW_MB_1457=0/任意非1 → 同上兼容映射（对旧脚本语义连续）
+//    SW_MB_1457=1 / 缺省 → 1457 终态
 //  懒读取+进程内 memo——env 在单进程内不中途切换;测试文件在用例体前置赋值即可生效
 //  （首次 hellFort 调用发生在用例执行期,晚于模块级赋值）。
 let hfMode1457: boolean | null = null;
@@ -93,7 +103,11 @@ export function hfIs1457(): boolean {
   if (hfMode1457 === null) {
     // 浏览器 worker 无 process（node 测试环境才有 env）——守卫防 worldgen 崩
     // （2026-08-23:裸引用致共享 dev server 全部 worldgen 卡 pass4,游戏无法加载）
-    hfMode1457 = (typeof process !== 'undefined' && process.env?.SW_MB_1457) === '1';
+    const env = typeof process !== 'undefined' ? process.env : undefined;
+    // 显式降档门：SW_MB_1456=1（新）或 SW_MB_1457=0（旧值语义连续化）→ 1456 兼容路径
+    if (env?.SW_MB_1456 === '1') { hfMode1457 = false; }
+    else if (env?.SW_MB_1457 === '0') { hfMode1457 = false; }
+    else { hfMode1457 = true; }
   }
   return hfMode1457;
 }
@@ -780,8 +794,11 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState,
 //   → 首候选行即 break）=正常世界右外门从不放置且零掷；⑤ 无塌墙阶段。
 
 function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: number, wallType: number, tno = -1): void {
-  // ★VVVVVV 基准分派：缺省 1456（hellFort1456,文件尾）=七条 mile8 槽链认证线;
-  //  SW_MB_1457=1 → 下方 1457 对齐档 2 主体（sibling 迁移战役,caves/shimmer 检查点线）。
+  // ★VVVVVV 基准分派 —— ★IIIII23（2026-08-28）：缺省改 **1457**（基准切换的应然终态;
+  //  x86 七链双态实证:1457 形 g/m/s22222 全 106 槽逐字节全等,#28 地狱带全链归零;
+  //  「缺省 1456」纪元遗留的 untagged mile8 探针曾由此烧出 #28 T57>0/Y2>0 结构族伪影,
+  //  IIII22 陈年债结论即该口径错位的产物）。显式降档见 hfIs1457() 头注
+  // （SW_MB_1456=1 / SW_MB_1457=0 → 下方 hellFort1456,实现原样保留,零改动）。
   if (!hfIs1457()) { hellFort1456(st, rng, i, j, tileType, wallType, tno); return; }
   const { w, h } = st;
   const hellTop = h - 200;

@@ -3,7 +3,7 @@
 // 位序（与游戏 neighborMask 不同！）：U=1 L=2 R=4 D=8 UL=16 UR=32 DL=64 DR=128
 // 变体选择 (x*7 + y*11) % 3；无条目/越界回退默认帧 (1,1)
 import type { SpriteAtlas, DrawRect } from '../assets/SpriteAtlas';
-import type { TileStore } from '../world/TileStore';
+import { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { getUVForMasks } from './BlendFraming';
@@ -1285,14 +1285,36 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     return;
   }
   if (slope > 0 && !half) {
-    // 平台坡面(:1540-1567):整帧 + 下侧对角实心时背面填充(楼梯视觉);
-    // 平台不走切条(原版平台分支在切条之前 return)
+    // 平台坡面(TileDrawing.cs:1537-1575)1:1:整帧 + 下对角「原版实心」时
+    // 背后层连接补片(slope1→右下 198/324、slope2→左下 162/306;下对角为
+    // 平平台 → 换连接帧码)。★实心域 = 原版 Main.tileSolid(平台族在内!)——
+    // 本仓 solid 域平台=false,曾漏画「楼梯接平平台走道」的 324/306 补片。
+    // 抑制支(:1551/:1565):正下方为 BlocksStairs 族 {386,387,54,328,459,541}
+    // 且 blockType∈{0,5}(整块/坡4) → 不补;echo 涂层(invisibleBlock)按
+    // shouldShowInvisibleBlocks=false 语义排除。平台不走切条(原版在切条前 return)
     if (TILE_DEFS[st.type[si]]?.platform) {
       ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dpx, dpy, r.sw, r.sh);
-      const diagOK = (dx2: number) => {
+      // :1541/:1566 原版「下方格」三连门：active && 非echo && blockType∈{0,5} && BlocksStairs
+      const belowSuppresses = (): boolean => {
+        if (!st.inBounds(x, y + 1)) return false;
+        const bi = st.idx(x, y + 1);
+        if (!st.flags[bi]) return false;
+        if (st.coat[bi] & TileStore.COAT_INVISIBLE_BLOCK) return false;   // invisibleBlock 显示模式关
+        const bt = st.slope[bi] > 0 ? st.slope[bi] + 1 : st.half[bi] ? 1 : 0;   // Tile.blockType()
+        if (bt !== 0 && bt !== 5) return false;
+        const bs = TILE_DEFS[st.type[bi]]?.vanilla?.sheet;
+        return bs !== undefined && BLOCKS_STAIRS_SHEETS.has(bs);
+      };
+      // :1545/:1569 原版「下对角格」门：active && 非echo && 原版实心 && 对向坡非 && 非半砖
+      const diagOK = (dx2: number): boolean => {
         if (!st.inBounds(x + dx2, y + 1)) return false;
         const j = st.idx(x + dx2, y + 1);
-        return !!st.flags[j] && !!TILE_DEFS[st.type[j]]?.solid && st.slope[j] !== (dx2 > 0 ? 2 : 1) && !st.half[j];
+        if (!st.flags[j]) return false;
+        if (st.coat[j] & TileStore.COAT_INVISIBLE_BLOCK) return false;
+        const dj = TILE_DEFS[st.type[j]];
+        if (!(dj && (dj.solid || dj.platform))) return false;   // Main.tileSolid 原版域
+        if (st.slope[j] === (dx2 > 0 ? 2 : 1) || st.half[j]) return false;
+        return !belowSuppresses();                              // :1551/:1565 抑制支
       };
       if (slope === 1 && diagOK(1)) {
         const j = st.idx(x + 1, y + 1);
@@ -1496,6 +1518,9 @@ function drawPixelBlock(
 /** 坡面/邻接特判 Set(TileID.cs 原文) */
 const DONT_DRAW_SLOPES = new Set([137, 235, 388, 476, 138, 664, 665, 630, 631, 711, 712, 713, 714, 715, 716, 723, 726]);
 const HAS_SLOPE_FRAMES = new Set([421, 422]);
+/** TileID.Sets.BlocksStairs（TileID.cs:357）——平台坡面连接补片的抑制族
+ *  （TileDrawing.cs:1551/:1565：正下方为该族整块(blockType 0)/坡4(5) 时不补） */
+const BLOCKS_STAIRS_SHEETS = new Set([386, 387, 54, 328, 459, 541]);
 const IGNORES_NEARBY_HALFBRICK = new Set([380, 476, 235, 138, 664, 137, 484, 421, 422, 711, 712, 713, 714, 715, 716]);
 const NOT_REALLY_SOLID = new Set([387, 388, 10]);
 const SMOOTH_BORDER = new Set([321, 157, 208, 159, 190, 80, 251, 202, 229, 56, 38, 39, 152, 118, 151, 148, 206, 119, 175, 46, 176, 45, 140, 347, 370, 121, 122, 680, 681, 682, 685, 686, 346, 687, 688, 689, 690, 691, 692, 160, 226, 54, 156, 155, 153, 154, 150, 250, 198, 273, 274, 325, 284, 348, 385, 327, 326, 345, 328, 329, 357, 369, 268, 261, 262, 255, 267, 260, 265, 258, 266, 259, 264, 257, 263, 256, 311, 426, 430, 431, 432, 433, 434, 727, 728, 729, 730, 731, 732, 272, 145, 146, 350, 127, 472, 473, 477, 478, 479, 492, 496, 507, 508, 563, 618, 708, 722, 735, 748]);

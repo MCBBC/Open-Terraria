@@ -27,7 +27,13 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS } from '../../../data/tiles';
+import { VI_ID } from '../../../data/itemKeys';
 import type { ChestSink } from './BuriedChestsPass';
+
+/** 5001=Blood Rainbow(红药水) / 678=Moon Lord Legs（SetDefaults 按 vid SetDefaults；
+ *  本仓物品面为内部 id——与 dgLootItems 的 VANILLA_ITEM_KEY_BY_ID 同构映射） */
+const POTION_5001 = VI_ID(5001);
+const MOON_LEGS_678 = VI_ID(678);
 
 /** 内部 tile id ↔ 原版 sheet 映射（模块载入一次性构建；本仓 tile id ≠ 原版 TileID，
  *  判定一律走 sheet 定锚——见 MEMORY「蚁狮沙球/tile id 域」）。 */
@@ -124,10 +130,10 @@ export function runFinishDrunkGenPass(st: TileStore, rng: RNG, gs: GenState, che
     const chest = chests[n3];
     if (chest == null) break;                             // Main.chest 首空位即终止
     if (rng.int(0, 14) === 0 && chestItemStack(chest.items, 1) !== 0) {
-      giveChestItem(chest.items, 5001);
+      if (POTION_5001 > 0) giveChestItem(chest.items, POTION_5001);
     }
     if (rng.int(0, 29) !== 0 || chestItemStack(chest.items, 1) === 0) continue;
-    giveChestItem(chest.items, 678);
+    if (MOON_LEGS_678 > 0) giveChestItem(chest.items, MOON_LEGS_678);
   }
 }
 

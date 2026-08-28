@@ -14,6 +14,7 @@
 //    imageSmoothingEnabled 开关与横向平铺 1:1 映射
 //  · tint 为 uniform 乘法(canvas multiply+destination-in 的等价,零离屏)
 //  · WebGL2 NPOT 纹理可 REPEAT(地下带横向平铺)
+import { noteContextLost } from './GLStats';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { texId, texReady } from './texId';
 import { glStatUpload, glStatTexCreate, glStatDelete, glStatDraw } from './GLStats';
@@ -287,6 +288,7 @@ export class GLSpriteLayer {
     // 全空且不再重试。死亡即标 unavailable,消费方丢弃实例走 2D 兜底,
     // 退避期后重建新实例
     this.canvas.addEventListener('webglcontextlost', (e) => {
+      noteContextLost(`sprite:${this.statName}`);   // #三开压测批
       e.preventDefault();               // 保留恢复资格(部分驱动可自动恢复)
       this.unavailable = true;
       this.diedAt = performance.now();

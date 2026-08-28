@@ -172,10 +172,77 @@ export function installGpuLogger(intervalSec = 2): void {
   }, intervalSec * 1000);
 }
 
+// ---- 跨实例显存饥饿锁(#三开压测批) ----
+// 三 tab 共享同一 GPU 进程池:预算穿透后 Chrome 逐最旧表面 → 各层反复蒸发+重建
+// (inst-3 实测 25×CONTEXT_LOST / 每轮重传 ~27MB 全量驻留 = 正反馈死亡螺旋)。
+// 本锁 = 90s 窗口内 ≥3 次 contextlost 即判定系统性饥饿:工厂新建入口直接让路,
+// 渲染走各消费方既有 2D 回退链,直到滚动窗口自然衰减。VUI 光标等 2D 自愈不受限。
+const lossTimes: number[] = [];
+/** 记一次真实 GL 上下文丢失(isContextLost==true 或 webglcontextlost 事件;分配失败不计) */
+export function noteContextLost(tag: string): void {
+  lossTimes.push(performance.now());
+  if (lossTimes.length > 64) lossTimes.shift();
+}
+let lastStarveLogAt = -Infinity;
+/** ≥3 次/90s = 饥饿;进入与解除沿各告警一条 */
+export function starvedLock(): boolean {
+  const now = performance.now();
+  while (lossTimes.length && now - lossTimes[0] > 90_000) lossTimes.shift();
+  const active = lossTimes.length >= 3;
+  if (active && now - lastStarveLogAt > 30_000) {
+    lastStarveLogAt = now;
+    console.warn(`[gpulog] GPU 饥饿锁生效(90s 内丢失 ${lossTimes.length} 次)——GL 层重建暂停,走 2D 回退`);
+  }
+  return active;
+}
+let tag = '';
+export function setStarveTag(t: string): void { tag = t; }
+
+/** 显存预算观测(#2 需求):浏览器不暴露分配配额——这里给的是
+ *  ①每个 GL 上下文的真实硬件身份(RENDERER/MAX_TEXTURE_SIZE);
+ *  ②本仓账本净驻留(GL 纹理字节);
+ *  ③DOM 全量 2D 画布表面估算(width×height×4,含窗口外);
+ *  ④真实每进程显存要看 Chrome 任务管理器(Shift+Esc,"内存"列选 GPU 进程)。 */
+export function gpuBudgetReport(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const dom: Array<{ kind: string; count: number; mb: number }> = [];
+  try {
+    const map = new Map<string, { c: number; b: number }>();
+    document.querySelectorAll('canvas').forEach((c) => {
+      const gl = !!c.getContext;
+      let kind = '2d-or-other';
+      const gk = (c as HTMLCanvasElement).dataset?.glkind; if (gk) kind = gk;
+      else if (c.id === 'ui-canvas') kind = 'vui';
+      else if (c === document.querySelector('#game-root canvas')) kind = 'main?';
+      const cur = map.get(kind) ?? { c: 0, b: 0 };
+      cur.c++; cur.b += c.width * c.height * 4; map.set(kind, cur);
+    });
+    for (const [k, v] of map) dom.push({ kind: k, count: v.c, mb: +(v.b / 1048576).toFixed(2) });
+    out.domSurfacesMB = +dom.reduce((a, x) => a + x.mb, 0).toFixed(1);
+    out.domBreakdown = dom.sort((a, b) => b.mb - a.mb);
+  } catch { /* 无 DOM 环境 */ }
+  const gpus: Record<string, unknown> = {};
+  fencesByCtx.forEach((f, name) => {
+    try {
+      const dbg = f.gl.getExtension('WEBGL_debug_renderer_info');
+      const rd = dbg ? String(f.gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : String(f.gl.getParameter(f.gl.RENDERER));
+      gpus[name] = {
+        renderer: rd.slice(0, 80),
+        maxTextureSize: f.gl.getParameter(f.gl.MAX_TEXTURE_SIZE),
+        liveTexturesMB: +((ctx(name)?.liveBytes ?? 0) / 1048576).toFixed(2),
+      };
+    } catch { /* 上下文死 */ }
+  });
+  out.glContexts = gpus;
+  out.jsHeapMB = (() => { try { return +(((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 1048576).toFixed(0); } catch { return -1; } })();
+  return out;
+}
+
 export function maybeInstallGpuLoggerFromUrl(): void {
   try {
     (window as unknown as { __swGPULog?: unknown }).__swGPULog = {
       snapshot: gpuLogSnapshot,
+      budget: gpuBudgetReport,
       start: installGpuLogger,
     };
     if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('gpulog') === '1') {

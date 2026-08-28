@@ -167,6 +167,8 @@ import { TownNPC, isItStormingNext } from '../entities/TownNPC';
 import { spawnStormLightningTick } from '../world/StormLightningSpawner';
 import { stormLightningGenerator } from '../fx/LightningGenerator';
 import { scanScene, EMPTY_SCENE, scanBiomeLightCounts, type SceneFlags } from '../world/SceneMetrics';
+// ★IIIII22b（royale-with-cheese）：队伍出生点系统——TeamBased 世界开局/重生按队点落位
+import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
 import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL } from '../stats/ScaleStats';
 import {
@@ -4213,6 +4215,10 @@ export class Game implements GameHooks {
     cultistWorldClear();            // CultistRitual.recheck 运行时位复位（delay 走存档）
     this.golfState.worldClear();    // GolfState.WorldClear（GolfState.cs:69-76）：轨迹记录/跟踪态不进存档
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
+    // ★IIIII22b：开局/加入联机的首次落位同样走 Player.Spawn 三分支队点臂（床位=世界级，
+    // 未挂床时 teamBased 世界按队伍点表放置；applyTeamSpawnPlacement 内含旗门/床位/队号三道
+    // 早退，非 royale-with-cheese 世界零触碰）
+    this.applyTeamSpawnPlacement(this.player);
     // R4-13：PanControl 四档持久化灌入（PlayerInputProfile.cs:194-201 读回语义——
     // 曾纯运行时字段,刷新即回 Hold 档）
     this.player.panControlMode = options.data.panControlMode;
@@ -4289,6 +4295,17 @@ export class Game implements GameHooks {
         : sfL.getGoodWorld ? 'demolitionist'                 // cs:20036 NewNPC(38)
         : sfL.drunkWorld ? 'party_girl'                      // cs:20045
         : 'guide';
+      // ★IIIII20b（用户实测回归）：换人族旗标在身、存档却仍是「换人支实装前」旧生成器
+      //  留下的向导起始位 ⇒ 原版语义等价世界（vanilla 同旗标 .wld）出生即换人、绝无此
+      //  向导条目。首次以修复后客户端载入时做**一次性顶替**：该 guide 条目不实例化，
+      //  改由下方 starterKey 门生出正确 starter；随后打标持久化，玩家此后在该世界合法
+      //  补招的向导（原版允许：派对女孩世界的空房条件达成后 Guide 可自然入住）永不再被动。
+      if (starterKey !== 'guide' && !this.world.starterSwapMigrated) {
+        const hasStarterInSave = savedNpcs.some((n) => n.key === starterKey);
+        const legacyGuideIdx = savedNpcs.findIndex((n) => n.key === 'guide');
+        if (!hasStarterInSave && legacyGuideIdx >= 0) savedNpcs.splice(legacyGuideIdx, 1);
+        this.world.starterSwapMigrated = true;               // 只跑一次；此后入库为保真态
+      }
       if (!savedNpcs.some((n) => n.key === starterKey)) {
         const st = new TownNPC(starterKey, this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16);
         if (sfL.infectedSeed && starterKey === 'dryad') {
@@ -23393,6 +23410,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  {BiomeName} ← TownNPCMoodBiomes.<nameKey>，{NPCName} ← NPC.GetFullnameByID（Lang.npcName） */
   private happinessLineText(l: HappinessReportLine): string {
     let s = Lang.text(l.key);
+    // ★per-NPC 键 miss → 共享池回退（原版 AddHappinessReportText :194-201 构建
+    //  per-NPC 分节键，但 l10n 中大多数 NPC 无专属心情文本，只有 TownNPCMood.<sub>
+    //  共享池——原版 Language.GetText 对不存在键返回键名本身 → 本仓 Lang.text 同样
+    //  返回键名 → 判定 resolved===key 即 miss → 去 NPC 前缀取共享池，2026-08-27 用户实报）
+    if (s === l.key && l.key.startsWith('TownNPCMood_')) {
+      const sub = l.key.split('.').pop() ?? '';
+      const fallback = Lang.text(`TownNPCMood.${sub}`);
+      if (fallback !== `TownNPCMood.${sub}`) s = fallback;
+    }
     if (l.biomeNameKey !== undefined) {
       s = s.replace('{BiomeName}', Lang.text(`TownNPCMoodBiomes.${l.biomeNameKey}`));
     }
@@ -24051,23 +24077,69 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 扣铜币:全背包四档币换算清点,整额清空后按面额找零(vanilla BuyItem 语义;vi_71-74 单轨) */
+  /** 扣铜币（五容器：背包+钱币格 / bank0-3。原版 BuyItem Player.cs:35687-35708
+   *  合计四随身银行后 TryPurchasing :35776-35803 面额外层（高→低）容器内层
+   *  （背包先于银行）跨池扣款；破面额拆零找零回流背包——原版造进空格,差异登记。
+   *  曾只清背包 = 存进猪猪的钱买不了东西,2026-08-28 用户报钱币槽/猪猪存钱罐案） */
   private spendCopper(n: number): boolean {
-    const inv = this.player.inv;
+    const p = this.player;
     if (this.coinsOwned() < n) return false;
-    const change = this.coinsOwned() - n;
-    for (let i = 0; i < inv.slots.length; i++) {
-      const sl = inv.slots[i];
-      if (sl && coinIndexOf(sl.id) >= 0) inv.slots[i] = null;
+    const pools: Array<Array<{ id: number; stack: number } | null>> =
+      [p.inv.slots, p.banks[0], p.banks[1], p.banks[2], p.banks[3]];
+    let remain = n;
+    // 整额扣款：面额从高到低,各池按整除份额扣（背包先于银行）
+    for (let d = COIN_VALUES.length - 1; d >= 0 && remain > 0; d--) {
+      const v = COIN_VALUES[d];
+      let quota = Math.floor(remain / v);
+      for (const pool of pools) {
+        for (let i = 0; i < pool.length && quota > 0; i++) {
+          const s = pool[i];
+          if (!s || coinIndexOf(s.id) !== d) continue;
+          const take = Math.min(s.stack, quota);
+          s.stack -= take;
+          quota -= take;
+          remain -= take * v;
+          if (s.stack <= 0) pool[i] = null;
+        }
+      }
     }
-    // 按面额回流(铂→金→银→铜,栈内合并)
-    const plat = Math.floor(change / 1000000);
-    const gold = Math.floor((change % 1000000) / 10000);
-    const silver = Math.floor((change % 10000) / 100);
-    const copper = change % 100;
-    if (plat) inv.add(ITEM_BY_KEY[VI_KEY.COIN.PLATINUM], plat);
-    if (gold) inv.add(ITEM_BY_KEY[VI_KEY.COIN.GOLD], gold);
-    if (silver) inv.add(ITEM_BY_KEY[VI_KEY.COIN.SILVER], silver);
-    if (copper) inv.add(ITEM_BY_KEY[VI_KEY.COIN.COPPER], copper);
+    // 破面额：低面额凑不出余额 → 从小到大拆币覆盖,找零回流背包
+    if (remain > 0) {
+      const needed = remain;
+      let taken = 0;
+      let guard = 0;
+      while (taken < needed && guard++ < 1000) {
+        let took = 0;
+        for (let d = 1; d < COIN_VALUES.length && !took; d++) {
+          for (const pool of pools) {
+            let hit = false;
+            for (let i = 0; i < pool.length && !hit; i++) {
+              const s = pool[i];
+              if (!s || coinIndexOf(s.id) !== d) continue;
+              s.stack -= 1;
+              if (s.stack <= 0) pool[i] = null;
+              took = COIN_VALUES[d];
+              hit = true;
+            }
+            if (hit) break;
+          }
+        }
+        if (!took) break;   // 防御:coinsOwned 已保证有币,不应达
+        taken += took;
+      }
+      const change = taken - needed;
+      if (change > 0) {
+        const inv = p.inv;
+        const plat = Math.floor(change / 1000000);
+        const gold = Math.floor((change % 1000000) / 10000);
+        const silver = Math.floor((change % 10000) / 100);
+        const copper = change % 100;
+        if (plat) inv.add(ITEM_BY_KEY[VI_KEY.COIN.PLATINUM], plat);
+        if (gold) inv.add(ITEM_BY_KEY[VI_KEY.COIN.GOLD], gold);
+        if (silver) inv.add(ITEM_BY_KEY[VI_KEY.COIN.SILVER], silver);
+        if (copper) inv.add(ITEM_BY_KEY[VI_KEY.COIN.COPPER], copper);
+      }
+    }
     return true;
   }
 
@@ -29067,10 +29139,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   coinsOwned(): number {
     const p = this.player;
     let total = 0;
-    for (const s of p.inv.slots) {
-      if (!s) continue;
-      const ci = coinIndexOf(s.id);
-      if (ci >= 0) total += s.stack * COIN_VALUES[ci];
+    // 原版 BuyItem（Player.cs:35687-35691）合计背包 + 四随身银行（bank 猪猪存钱罐 /
+    // bank2 保险箱 / bank3 守护者熔炉 / bank4 虚空保险库）——随身银行的钱可直接
+    // 消费。曾只扫背包 = 存进猪猪的钱商店读不到,钱币槽/猪猪形同虚设
+    // （2026-08-28 用户报"钱币槽/猪猪存钱罐功能正常吗"）
+    for (const pool of [p.inv.slots, p.banks[0], p.banks[1], p.banks[2], p.banks[3]]) {
+      for (const s of pool) {
+        if (!s) continue;
+        const ci = coinIndexOf(s.id);
+        if (ci >= 0) total += s.stack * COIN_VALUES[ci];
+      }
     }
     return total;
   }
@@ -29107,6 +29185,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 旗 buff：该 npc 是否被屏内旗覆盖（ItemID.Sets.BannerStrength 普通族） */
   bannerNpcActive(npcId: number): boolean { return this._bannerNpcs.has(npcId); }
 
+  /** ★IIIII22b：royale-with-cheese 队伍出生点落位（TeamBasedSpawns 批主接面）。
+   *  Player.Spawn :37911-37916 三分支 = 床点(SpawnX≥0) > teamBasedSpawnsSeed 队点 >
+   *  世界出生点。本仓床点为世界级（world.spawnX≠spawnX0 且复验通过），因此"无床"口径 =
+   *  解析后仍落在原始出生点；队伍 ≥1 的玩家此时按 ExtraSpawnPointManager 点表
+   *  （resolveTeamSpawnFloor=Spawn_GetPositionAtSpawn 精简核扫位）重定位。
+   *  点表由各端以世界种子确定性重算（ensureExtraSpawnPoints，R1 同种子重放范式）——
+   *  单机/主机/访客同路径且非 teamBasedSpawns 世界整段零触碰（单机零漂移）。 */
+  private applyTeamSpawnPlacement(p: Player): void {
+    const w = this.world;
+    const fl = teamSpawnPlacement(w, p.team,
+      w.spawnX !== w.spawnX0 || w.spawnY !== w.spawnY0);
+    if (!fl) return;
+    p.x = fl.tx * TILE + 8;                                        // 同世界出生点放置口径(+8 锚)
+    p.y = (fl.ty - 3) * TILE;
+  }
+
   respawnPlayer() {
     const p = this.player;
     // 硬核角色已消亡（Player.cs:16894 difficulty==2 死亡后 ghost=true 不再重生；
@@ -29139,6 +29233,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     p.x = spawnX * TILE + 8;
     p.y = (spawnY - 3) * TILE;
+    // ★IIIII22b：三分支第二臂——床点未定（复验后落回原始出生点）且 teamBased 世界且
+    // 队伍 ≥1 → 按队伍点表重定位（Player.Spawn :37913-37915 Spawn_SetPositionAtTeamSpawn）
+    this.applyTeamSpawnPlacement(p);
     // ★1457 出生扫位链未移植（Spawn_GetPositionAtSpawn :38008-38040 X±1 逐格找
     // Spawn_IsAreaValidSpawn :38042+ 有效落位;IsAreaValidSpawn 含压板 135/CanTileHurt/
     // InWorld(5) 三检）——本仓出生 = worldgen 固定 spawn（无运行时扫位/校验链,出生点

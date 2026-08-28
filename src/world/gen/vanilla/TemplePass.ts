@@ -11,9 +11,11 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 // ★1457 对齐档 2：砖线（makeTemple_GenerateBricks）从 1457 语义存档即插接线
 import { makeTempleGenerateBricks } from './rollback1457/TempleBricks.1457';
-// ★VVVVVV（2026-08-23）双态门（与 HellFortPass 同款）：缺省 1456 砖线=「全房对
+// ★VVVVVV（2026-08-23）双态门（与 HellFortPass 同款）：缺省曾为 1456 砖线=「全房对
 //   四角连线」（makeTempleCorridors,本文件尾,cs:33700-33760）服务七条 mile8 槽链
 //   认证线;SW_MB_1457=1 → 1457 GenerateBricks（存档即插,迁移战役线）。
+//   ★IIIII23（2026-08-28）：1456 槽链纪元退役后缺省翻转（见 HellFortPass.hfIs1457
+//   头注）——现缺省 1457 砖线,SW_MB_1456=1 / SW_MB_1457=0 显式降档。
 import { hfIs1457 } from './HellFortPass';
 
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
@@ -339,11 +341,11 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     const f = (globalThis as { __swTmDepths?: (d: number[], rooms: Room[], sx: number, sy: number) => void }).__swTmDepths;
     if (f) f(depths.slice(), rooms.map((r) => ({ ...r })), sx, sy);
   }
-  // ---- ★VVVVVV 砖线双态门（SW_MB_1457,与 HellFortPass 同款）：缺省 1456=
+  // ---- ★VVVVVV 砖线双态门（SW_MB_1457,与 HellFortPass 同款）：缺省曾为 1456=
   //      「全房对四角连线」（makeTempleCorridors,本文件尾,cs:33700-33760,零掷骰）;
   //      SW_MB_1457=1 → 1457 砖线（cs:33864 调用位,深度组并界+StrictAngles L 形线,
-  //      存档 rollback1457/TempleBricks.1457.ts 即插）——1457 对齐档 2 接线保留在位,
-  //      两套基准并存（七条 mile8 槽链=1456 认证线,2026-08-23 #46 神庙槽定罪后补门）。
+  //      存档 rollback1457/TempleBricks.1457.ts 即插）——★IIIII23 缺省已翻转:
+  //      现 **缺省 1457 砖线**;SW_MB_1456=1 / SW_MB_1457=0 显式降档走 makeTempleCorridors。
   if (hfIs1457()) makeTempleGenerateBricks(st, rooms, depths);
   else makeTempleCorridors(st, rooms);
   {

@@ -398,7 +398,12 @@ export function runDungeonPass(
       if (tries <= 0) break;
       const nx = dgLoc - 100 + rn(200);
       if (nx > BEACH && nx < w - BEACH) {
-        let ny = 10;
+        // ★IIIII21（DC.cs:314-322）：候选纵坐标起点——普通世界 y=10；
+        //   drunk(noSurface 同支)=入口地下：num2=(int)GenVars.rockLayer-20
+        //   （HasATree 支=dungonType 非 dual 的纯 drunk 全走 rockLayer-20）。
+        //   buried 特典支（worldSurface-10+offset，desert 组合域）不接线。
+        //   下行 while 找首活跃/液体/墙格（无骰），护栏 num2-40-RoughHeight>0 不变。
+        let ny = gs.seedFlags.drunkWorld ? Math.trunc(gs.rockLevel) - 20 : 10;
         // tile!=null ⟺ 界内；界外/首 active/liquid/wall 格停（此处直读 st——actAt/
         // wallAt 常量在函数尾才初始化，TDZ）
         while (ny < h && st.flags[st.idx(nx, ny)] === 0
@@ -2200,8 +2205,9 @@ export function runDungeonPass(
     const n8 = 30, n9 = 25, n10 = 30, n11 = 20, n12 = 50, n13 = 15, n14 = 20, n16 = 90;
     const minY = n7 - n16, maxY = n7 + 10;
     // 塔侧地表圆清 Circle(15)（:92-98 Shapes.Circle.Perform 椭圆逐行 + Actions.Clear
-    // =ClearEverything）
-    {
+    // =ClearEverything；★IIIII21：drunk 入口地下 → `!buried&&!underground` 门恒假
+    // （cs:105）→ 整段跳过。掷流中性（Actions.Clear 零骰）。）
+    if (!(gs.seedFlags.drunkWorld)) {
       const cx = leftSide ? i + n3 - 1 : i - n3 + 1;
       const cy = n7 - 15, rad = 15, sq = (rad + 1) * (rad + 1);
       for (let yy = cy - rad; yy <= cy + rad; yy++) {
@@ -2394,9 +2400,17 @@ export function runDungeonPass(
     dgTowerDoor(i, n7, n4, n3, !leftSide);
     // 老头锚（SetOldManSpawnAndSpawnOldManIfDefaultDungeon :1659——dungeonX/Y=(i,num7)）
     dungeonX = i; dungeonY = n7;
-    // 阶梯双侧（:437-443，depth=num5=100）
-    dgStairs(i + n4, n7, 1, n5);
-    dgStairs(i - n4, n7, -1, n5);
+    // ★IIIII21（cs:493-495）：drunk 死生命树——x=i、y=(int)worldSurface、
+    //   attachmentY=num7-num16+8、generateRoots=false。
+    if (gs.seedFlags.drunkWorld) {
+      generateDungeonTree(i, Math.trunc(gs.worldSurface), n7 - n16 + 8, false);
+    }
+    // 阶梯双侧（:437-443，depth=num5=100；★IIIII21：drunk 入口地下 → HasStairs 恒假
+    //   整跳；num5 地下改 num17-m+5=45 同步登记不接线——阶梯关死无消费面）
+    if (!(gs.seedFlags.drunkWorld)) {
+      dgStairs(i + n4, n7, 1, n5);
+      dgStairs(i - n4, n7, -1, n5);
+    }
     if (dgTW) dgTW.tower1 = dgMainRolls;
   }
   // ============ DomeDungeonEntrance.DomeEntrance（DomeDungeonEntrance.cs:40-441）============
@@ -2427,8 +2441,9 @@ export function runDungeonPass(
     const n2 = 5, n3 = 35, n4 = 40, n5 = 100;
     const n7 = j - 30;                             // 基线（num6=30，cs:81）
     const num18 = n7 + 1;                          // cs:239
-    // 地表侧圆清 Circle(20)（cs:93-102——Tower 是 Circle(15)@±num3，Dome 半径 20@±num4）
-    {
+    // 地表侧圆清 Circle(20)（cs:93-102——Tower 是 Circle(15)@±num3，Dome 半径 20@±num4；
+    // ★IIIII21：drunk 入口地下 → `!buried&&!underground` 门恒假（cs:95）→ 整段跳过）
+    if (!(gs.seedFlags.drunkWorld)) {
       const cx = leftSide ? i + n4 - 1 : i - n4 + 1;
       const cy = n7 - 20, rad = 20, sq = (rad + 1) * (rad + 1);
       for (let yy = cy - rad; yy <= cy + rad; yy++) {
@@ -2666,8 +2681,16 @@ export function runDungeonPass(
     // 老头锚（cs:430 SetOldManSpawnAndSpawnOldManIfDefaultDungeon :1659——
     //   CurrentDungeon==0 时 Main.dungeonX/Y=(i,num7)。AAAA 批 :3864 的锚语义在此本体化）
     dungeonX = i; dungeonY = n7;
-    // 阶梯（cs:435-439，HasStairs 正常种子=真）：dungeon 侧单侧，depth=num5=100
-    dgStairs(leftSide ? i + n4 : i - n4, n7, leftSide ? 1 : -1, n5);
+    // ★IIIII21（cs:473-475）：drunk 死生命树——x=i、y=(int)worldSurface、
+    //   attachmentY=num7-num3+5、generateRoots=false（穹顶座无根）。
+    if (gs.seedFlags.drunkWorld) {
+      generateDungeonTree(i, Math.trunc(gs.worldSurface), n7 - n3 + 5, false);
+    }
+    // 阶梯（cs:435-439，HasStairs 正常种子=真；★IIIII21：drunk 入口地下恒假 → 整跳；
+    //   num5 地下改 50-10+5=45 同步登记不接线——阶梯关死无消费面）
+    if (!(gs.seedFlags.drunkWorld)) {
+      dgStairs(leftSide ? i + n4 : i - n4, n7, leftSide ? 1 : -1, n5);
+    }
     if (dgTW) dgTW.tower1 = dgMainRolls;
   }
   // shelf 段定标（dgPlatforms 尾）——dormant 计数

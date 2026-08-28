@@ -16,9 +16,11 @@ import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
-// ★VVVVVV（2026-08-23）双态门（与 HellFortPass 同款）：缺省 1456（三掷位=753 首分支/
+// ★VVVVVV（2026-08-23）双态门（与 HellFortPass 同款）：缺省曾为 1456（三掷位=753 首分支/
 //   Next(6) 六选+669 主物门/尾段无 753·669 门）服务七条 mile8 槽链认证线;
 //   SW_MB_1457=1 → 1457 对齐档 2 形（迁移战役线）。
+//   ★IIIII23（2026-08-28）缺省翻转：现缺省 1457 形,SW_MB_1456=1 / SW_MB_1457=0
+//   显式降档（见 HellFortPass.hfIs1457 头注的七链双态实证）。
 import { hfIs1457 } from './HellFortPass';
 // 1456 主物门回退值（cs:36130-36133 Next(50)==0）——经具名常量承载（VVVVVV 双态
 // 与 worldgen-1457-rewire 结构锁兼容:该锁禁 1456 赋值形直书,具名常量绕行）。
@@ -978,8 +980,9 @@ function placeBuriedChestInner(
       //   1579, 6153 })` = **Next(7) 七选**（6153 GlacierFang 系 1457 新内容,
       //   1456 是 Next(6) 六选,IIIIII IL 复裁 instr673 在案）；`Next(50)==0 → 669`
       //   主物门 1457 已删（669 1/50 移箱尾段 cs:37781,本文件尾段已同步复线）。
-      // ★VVVVVV 双态门：缺省 1456=cs:36117-36132 Next(6) 六选（remix 支内联槽 3,
+      // ★VVVVVV 双态门：缺省曾为 1456=cs:36117-36132 Next(6) 六选（remix 支内联槽 3,
       //   零加掷）+997 门+669 主物门;SW_MB_1457=1 → 1457 Next(7) 七选形。
+      //   ★IIIII23 缺省翻转：现缺省 1457 Next(7) 形（SW_MB_1456=1 / SW_MB_1457=0 降档）。
       if (hfIs1457()) {
         mainId = [670, 724, 950, 1319, 987, 1579, 6153][rng.nextInt(7)]; // cs:36456 Next(7) 七选
         if (gs.seedFlags.remix && mainId === 1319) mainId = 725;   // cs:36457-36459

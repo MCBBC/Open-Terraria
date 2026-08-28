@@ -263,6 +263,79 @@ check('腾一格批量=10 只入账(合并优先,GetItem ③先于④)', full.bu
   && full.hits.length === 1 && full.hits[0][1] === 11 && full.coinsSpent4 === full.coinsSpent3 * 10,
   JSON.stringify(full));
 
+// ---- ⑤ 钱币槽/猪猪存钱罐链（对照 Player.cs:35687-35708 BuyItem 计四随身银行）：
+//      3213 使用→直开 piggy 面板(banks[0] 活引用) → Shift+点存币 → 空背包用银行钱
+//      购物（修前 coinsOwned/spendCopper 只扫背包=存进去的钱花不掉）→ 猪猪 tile 右键
+//      开同一容器 ----
+const bank = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const ui = window.__swUI;
+  const VIK = window.__swVANILLA_ITEM_KEY_BY_ID, IK = window.__swItems;
+  const wipe = () => {
+    for (let i = 0; i < g.player.inv.slots.length; i++) g.player.inv.slots[i] = null;
+    for (const b of g.player.banks) b.fill(null);
+  };
+  wipe();
+  // ① 钱币槽 3213 使用 → piggy 面板（不消耗）
+  g.player.inv.slots[0] = { id: IK[VIK[3213]], stack: 1 };
+  g.cb.onInventoryChanged?.();
+  g.input.mouseX = 640; g.input.mouseY = 300;
+  g.input.mouseDown = true; g.input.mouseHeld = true;
+  g.fixedUpdate(1 / 60);
+  g.input.mouseDown = false; g.input.mouseHeld = false;
+  const mtPanel = ui.openChest ? { x: ui.openChest.x, sameRef: ui.openChest.items === g.player.banks[0] } : null;
+  const mtKept = g.player.inv.slots[0]?.id === IK[VIK[3213]];
+  // ② 存钱：Shift+点银币格 → banks[0]
+  g.player.inv.slots[51] = { id: IK[VIK[72]], stack: 50 };   // 50 银 = 5000 铜
+  ui.refreshAll();
+  ui.shiftClick(51, 'inv');
+  const deposited = g.player.banks[0].some((s) => s && s.id === IK[VIK[72]] && s.stack === 50);
+  const invCleared = !g.player.inv.slots[51];
+  ui.closeInventory();
+  // ③ 空背包消费：买 30 铜沙滩球 → 扣银行 1 银、找零 70 铜回背包
+  const { TownNPC } = await import('/src/entities/TownNPC.ts');
+  const npc = new TownNPC('party_girl', g.player.x + 100, g.player.y - 40);
+  g.entities.add(npc, 'npcs');
+  g.openNpcDialog(npc);
+  const totalBefore = g.coinsOwned();
+  const okBuy = g.npcShopBuy(859, undefined);
+  const bankSilver = g.player.banks[0].find((s) => s && s.id === IK[VIK[72]])?.stack ?? 0;
+  const totalAfter = g.coinsOwned();
+  const invCoins = [];
+  for (let i = 0; i < g.player.inv.slots.length; i++) {
+    const s = g.player.inv.slots[i];
+    if (s && window.__swItems[VIK[71]] === s.id) invCoins.push(s.stack);
+  }
+  // ④ 猪猪 tile：玩家右侧 3 格放置 → 右键开同一容器（先复活+顶血:死态 updateUse 整链早退）
+  if (g.player.dead) g.respawnPlayer?.();
+  g.player.hp = 99999;
+  const pigTile = window.__swTiles['v_29_piggy_bank'];
+  const tx = Math.floor(g.player.cx / 16) + 3, ty = Math.floor(g.player.cy / 16);
+  g.world.store.setTile(tx, ty, pigTile);
+  g.world.store.setTile(tx + 1, ty, pigTile);
+  const [sx, sy] = g.camera.worldToScreen((tx + 0.5) * 16, (ty + 0.5) * 16);
+  g.input.mouseX = sx; g.input.mouseY = sy;
+  g.input.rightDown = true;
+  g.fixedUpdate(1 / 60);
+  g.input.rightDown = false;
+  const pigPanel = ui.openChest ? { x: ui.openChest.x, sameRef: ui.openChest.items === g.player.banks[0] } : null;
+  ui.closeInventory();
+  return { mtPanel, mtKept, deposited, invCleared, totalBefore, okBuy, bankSilver,
+    totalAfter, invCopper70: invCoins.includes(70), pigPanel,
+    deadAtPig: g.player.dead, tileAtMouse: (() => {
+      const [wx2, wy2] = g.camera.screenToWorld(sx, sy);
+      return g.world.store.get(Math.floor(wx2 / 16), Math.floor(wy2 / 16));
+    })() };
+});
+check('钱币槽使用=直开 piggy 面板(banks[0] 活引用,不消耗)',
+  bank.mtPanel?.x === -2 && bank.mtPanel?.sameRef === true && bank.mtKept === true, JSON.stringify(bank));
+check('Shift+点存币 → 入猪猪且背包清空',
+  bank.deposited === true && bank.invCleared === true);
+check('空背包用银行钱购物成功', bank.okBuy === true && bank.totalBefore === 5000 && bank.totalAfter === 4970,
+  JSON.stringify(bank));
+check('扣银行 1 银、找零 70 铜回背包', bank.bankSilver === 49 && bank.invCopper70 === true);
+check('猪猪 tile 右键 = 同一 piggy 容器', bank.pigPanel?.x === -2 && bank.pigPanel?.sameRef === true);
+
 console.log(`\n${pass} pass / ${fail} fail`);
 await browser.close();
 process.exit(fail === 0 ? 0 : 1);

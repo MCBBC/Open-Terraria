@@ -620,10 +620,14 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
   // ★pass 尾 tileSolid 还原族（cs:19591-19602,逐条 1:1）：190/192/196/189/717/
-  //   718/719/202/225/460/379 回实心 + SetBoulderSolidity(true)（后者普通种子为
-  //   冗余——巨石族生成期从未翻非实心）。★229 与 484 **不在**还原列：
-  //   229 要等 BeeLarva 头（cs:21022）才回 true,484 生成期再无还原点。
-  //   （192/225 头部未翻,此处的 true 写入对齐原版无条件还原语义）
+  //   718/719/202/225/460/379 回实心 + SetBoulderSolidity(true)。★229 不在本列：
+  //   等 BeeLarva 头（cs:21022）才回 true。旧注「巨石族生成期从未翻非实心/484 无
+  //   还原点」系误判——484 自 DesertBiome 头（cs:12537）/Gems 头（cs:14766）/
+  //   Altars 头（cs:15541）/SettleLiquids 尾（cs:16292）/SpreadingGrass LavaCleanup
+  //   （cs:17686 条件支）多次翻 false,本尾 SetBoulderSolidity(true) 是其唯一
+  //   还原点（IIIII11 批 x86 ATOMIC 探针实证 call6 时 lut=True;漏挂曾使 NTB
+  //   掷流节奏 ±2/格错位 → #98 蜂巢↔泥互补翻转 T225>59×721 全族伪签名）。
   flipGenSolid([190, 192, 196, 189, 717, 718, 719, 202, 225, 460, 379], true);
+  setBoulderSolidity(true);
 }
 

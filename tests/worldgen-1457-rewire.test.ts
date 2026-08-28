@@ -177,12 +177,16 @@ describe('1457 对齐档 2：Temple 砖线 + FinalSeedCleanup 复线', () => {
     const wg = readFileSync(join(__dirname, '..', 'src', 'world', 'gen', 'WorldGen.ts'), 'utf8');
     const fcp = readFileSync(join(__dirname, '..', 'src', 'world', 'gen', 'vanilla', 'FinalCleanupPass.ts'), 'utf8');
     const iImport = wg.indexOf("import { finalSeedCleanup } from './vanilla/FinalSeedCleanupPass'");
-    const iHook = wg.indexOf('beforeShimmer: hfIs1457()');
+    // ★IIIII16/17 批改形：hfIs1457 门移入钩子体内（FinalizeSecretSeeds 端点在 portalGun/
+    //   finalSeedCleanup 之前、按 cs:589-663 if 链序），钩本体改为箭头函数字面量。
+    const iHook = wg.indexOf('beforeShimmer: () => {');
+    const iGate = wg.indexOf('if (hfIs1457()) {\n            if (ctxGs[0]!.seedFlags?.portalGunInChests)');
     const iCall = wg.indexOf('finalSeedCleanup(store, ctxGs[0]!.seedFlags ?? {}, world.chests as never)');
     const iMerge = wg.indexOf('finalGenMergeScan(store, rng);');
     expect(iImport).toBeGreaterThan(-1);
     expect(iHook).toBeGreaterThan(-1);
-    expect(iCall).toBeGreaterThan(iHook);
+    expect(iGate).toBeGreaterThan(iHook); // 门在钩内、端点序保持（雨虹在枪前由 IIIII16 断言覆盖）
+    expect(iCall).toBeGreaterThan(iGate);
     // 终清理槽内：runFinalCleanupPass(beforeShimmer=FinalSeedCleanup) → LiquidCheck 尾扫
     expect(iMerge).toBeGreaterThan(iCall);
     // ★旧位（generateWorld 尾 finalize 之后）不得残留——时点晚于 dump#105 快照位

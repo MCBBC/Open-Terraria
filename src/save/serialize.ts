@@ -62,6 +62,10 @@ export interface SaveData {
     wldVersion?: number;
     moonType?: number;   // 月亮贴图样式（原版 header WF:1252；旧档缺省 0 标准月）
     seedFlags?: Record<string, boolean>; // 彩蛋种子旗标（旧档缺省={}）
+    /** ★IIIII20b：StarterNPC 换人一次性迁移标记——换人族旗标在身而存档还是
+     *  换人支实装前生成的向导起始位时，首次以修复后客户端载入做顶替并打标。
+     *  打标后该世界的后续合法入城（如派对女孩世界玩家补招的向导）不再被动 */
+    starterSwapMigrated?: boolean;
     /** 世界难度 = Main.GameMode（Main.cs:2677：0 经典 1 专家 2 大师 3 旅程；
      *  原版随 WorldFileData 持久化；旧档缺省 0=经典） */
     difficulty?: number;
@@ -258,6 +262,8 @@ export interface SaveMeta {
   timeOfDay: number; dayCount: number;
   bloodMoon?: boolean; eclipse?: boolean; moonPhase?: number; moonType?: number;
   seedFlags?: Record<string, boolean>;
+  /** ★IIIII20b：StarterNPC 换人一次性迁移标记（见 SaveData.header 同名注释） */
+  starterSwapMigrated?: boolean;
   /** 世界难度 = Main.GameMode（Main.cs:2677；旧档缺省 0=经典） */
   difficulty?: number;
   /** 旅程时间倍率/冻结（CreativePowers.cs:866/:1448；旧档缺省 1/false） */

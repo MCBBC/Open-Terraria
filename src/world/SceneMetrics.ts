@@ -5,6 +5,7 @@
 import { TILE_DEFS } from '../data/tiles';
 import type { World } from './World';
 import { WALL_HOUSE } from './Housing';
+import { sceneMetricDualOverride } from './DungeonDualZones';
 import { musicBoxStyleOf, fountainColorOf, monolithTypeOf, bloodMoonMonolithOf } from './wiring/devices';
 
 /** vanilla tile sheet id → 本仓库内部 tile id（TILE_DEFS 下标即内部 id；未注册的 sheet 缺席=计数 0） */
@@ -386,6 +387,16 @@ export function scanScene(
   const undergroundForShimmering = tileY > worldSurface + 84 && tileY < h - 396;
   const zoneShimmer = shimmerTileCount >= SHIMMER_TILE_THRESHOLD && undergroundForShimmering && !zoneDungeon;
 
+  // ---- ★IIIII22b：双地牢玩家 Zone 重扫（SceneMetrics.cs:714-738 CalculateZones 尾部支，
+  //      本批接面②）。vanilla 序：此段位于 ZoneShimmer/水蜡烛系之后、CalculateZones 返回前——
+  //      故 shimmer/atmospherics 等先算位不吃覆盖值。dual 世界 BelowSurface 时自玩家行向下
+  //      ≤300 格找首个可判格重写九位；非双地牢世界恒 null 零改动。
+  const ddScan = world.seedFlags?.dualDungeons
+    ? sceneMetricDualOverride(
+        st, tileX, tileY, worldSurface, underworldLayer, rockLevel, centerWall,
+        (sheet) => WALL_HOUSE.has(sheet))
+    : null;
+
   return {
     tileX, tileY,
     belowSurface,
@@ -396,11 +407,11 @@ export function scanScene(
     zoneDirtLayerHeight: tileY <= rockLevel && tileY > worldSurface,
     zoneRockLayerHeight: tileY <= underworldLayer && tileY > rockLevel,
     zoneUnderworldHeight,
-    zoneCorrupt: evil >= CORRUPTION_THRESHOLD,
-    zoneCrimson: blood >= CRIMSON_THRESHOLD,
-    zoneHallow: holy >= HALLOW_THRESHOLD,
-    zoneJungle: jungle >= JUNGLE_THRESHOLD && !zoneUnderworldHeight,
-    zoneSnow: snow >= SNOW_THRESHOLD,
+    zoneCorrupt: ddScan ? ddScan.ZoneCorrupt : evil >= CORRUPTION_THRESHOLD,
+    zoneCrimson: ddScan ? ddScan.ZoneCrimson : blood >= CRIMSON_THRESHOLD,
+    zoneHallow: ddScan ? ddScan.ZoneHallow : holy >= HALLOW_THRESHOLD,
+    zoneJungle: ddScan ? ddScan.ZoneJungle : jungle >= JUNGLE_THRESHOLD && !zoneUnderworldHeight,
+    zoneSnow: ddScan ? ddScan.ZoneSnow : snow >= SNOW_THRESHOLD,
     zoneDesert,
     snowTileCount: snow,
     jungleTileCount: jungle,
@@ -410,15 +421,17 @@ export function scanScene(
     // 海洋沙 = isDesertBiomeSand ∩ oceanDepths 逐格计，扫描窗内与原版一致）
     graveyardTileCount: graveyard,
     hasSunflower,
-    zoneGlowshroom: mushroom >= MUSHROOM_THRESHOLD,
+    zoneGlowshroom: ddScan ? ddScan.ZoneGlowshroom : mushroom >= MUSHROOM_THRESHOLD,
     zoneMeteor: meteor >= METEOR_THRESHOLD,
     zoneGraveyard: graveyard >= GRAVEYARD_THRESHOLD,
     zoneShadowCandle: shadowCandleCount > 0,   // tile 646
     hasClock,
-    zoneDungeon,
-    zoneTemple: centerWall === 87,
+    zoneDungeon: ddScan ? ddScan.ZoneDungeon : zoneDungeon,
+    zoneTemple: ddScan ? ddScan.ZoneLihzhardTemple : centerWall === 87,
     zoneBeach,
-    zoneUndergroundDesert: zoneDesert && belowSurface && UNDERGROUND_DESERT_WALLS.has(centerWall),
+    zoneUndergroundDesert: ddScan
+      ? ddScan.ZoneUndergroundDesert
+      : zoneDesert && belowSurface && UNDERGROUND_DESERT_WALLS.has(centerWall),
     townNPCCount,
     musicBoxStyle: mbStyle,
     fountainColor: fountain,

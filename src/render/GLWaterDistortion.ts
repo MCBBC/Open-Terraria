@@ -53,7 +53,7 @@
 // 里以本模块输出替换直画。GL 不可用/上下文丢失时 composite() 返回 false，调用方
 // 原样直画（无扭曲——CPU 渲染/低端机自动降级，同 ?wwarp=0 逃生门）。
 
-import { glStatUpload, glStatDraw, registerFence, texBytes } from './GLStats';
+import { glStatUpload, glStatTexCreate, glStatDraw, registerFence, noteContextLost, texBytes } from './GLStats';
 export class GLWaterDistortion {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | null = null;
@@ -61,6 +61,10 @@ export class GLWaterDistortion {
   private uni: Record<string, WebGLUniformLocation | null> = {};
   private texScene: WebGLTexture | null = null;
   private texWater: WebGLTexture | null = null;
+  /** 常驻空门控纹理（1×1 透明；无水帧绑它 = 门控恒0直通，替代逐帧上传） */
+  private texWaterEmpty: WebGLTexture | null = null;
+  private _gateReal = false;            // 真水纹理当前是否在场(回收/重建判定)
+  private _texKeyScene = ''; private _texKeyWater = '';
   private texNoise: WebGLTexture | null = null;
   private texWave: WebGLTexture | null = null;
   private noiseReady = false;
@@ -301,20 +305,41 @@ void main() {
     gl.bindTexture(gl.TEXTURE_2D, this.texScene);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
-    glStatUpload('waterDistortion', scene.width * scene.height * 4);   // #perf-gpulog
+    const kS = `${scene.width}x${scene.height}`;
+    if (this._texKeyScene !== kS) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
+      glStatTexCreate('waterDistortion', scene.width * scene.height * 4);   // 分配式首传/变尺寸重分配
+      this._texKeyScene = kS;
+    } else {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, scene);   // 同尺寸数据直刷(#perf-gpulog)
+    }
+    glStatUpload('waterDistortion', scene.width * scene.height * 4);   // 带宽恒记
     // 前景水门控纹理（α 参与门控；预乘不影响 α 通道）
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, this.texWater);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     if (water && water.width > 0 && water.height > 0) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, water);
-      glStatUpload('waterDistortion', water.width * water.height * 4);   // #perf-gpulog
+      const kW = `${water.width}x${water.height}`;
+      if (this._texKeyWater !== kW) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, water);
+        glStatTexCreate('waterDistortion', water.width * water.height * 4);
+        this._texKeyWater = kW;
+      } else {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, water);
+      }
+      this._gateReal = true;   // 真水纹理在场(切回空门控时才知道要重建)
+      glStatUpload('waterDistortion', water.width * water.height * 4);   // 带宽恒记
     } else {
-      // 无水帧：1×1 透明纹理 = 门控恒 0 = 原样直通
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-        new Uint8Array([0, 0, 0, 0]));
+      // 无水帧：常驻 1×1 透明门控纹理(#perf-gpulog:原每帧 new Uint8Array+上传一次)
+      if (!this.texWaterEmpty) {
+        this.texWaterEmpty = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this.texWaterEmpty);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+          new Uint8Array([0, 0, 0, 0]));
+        this._gateReal = false;
+      }
+      gl.bindTexture(gl.TEXTURE_2D, this.texWaterEmpty);
     }
     this.uploadWave(waveR, gridW, gridH);
     gl.uniform1i(this.uni.uScene, 0);
@@ -331,7 +356,7 @@ void main() {
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     glStatDraw('waterDistortion', 4);   // #perf-gpulog
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    if (gl.isContextLost()) { this.diedAt = performance.now(); return false; }
+    if (gl.isContextLost()) { noteContextLost('waterDistortion'); this.diedAt = performance.now(); return false; }   // #三开压测批
     return true;
   }
 }

@@ -11,6 +11,7 @@ import { TILE_DEFS } from '../src/data/tiles';
 /** 按内部 id 查表 */
 const CHEST = TILE_DEFS.findIndex((d) => d?.key === 'chest');
 const XMAS = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === 171);
+const PLATFORM = TILE_DEFS.findIndex((d) => d?.key === 'platform');
 expect(CHEST).toBeGreaterThan(0);
 expect(XMAS).toBeGreaterThan(0);
 

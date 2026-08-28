@@ -21,6 +21,7 @@ import { spawnRateMultiplier } from '../JourneyPowers';
 import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollBadLuck, rollLuck } from '../../stats/Luck';
 import { canHit } from '../../physics/LineOfSight';
 import { chumSpots } from '../../entities/chumBucket';
+import { scanChosenTileZones } from '../DungeonDualZones';
 
 /** 星璇塔刷怪上下文（Game 每帧随 setPlayerFlags 传入；null=事件未开启/不在任何塔区） */
 export interface LunarSpawnCtx {
@@ -685,6 +686,44 @@ export class VanillaSpawner {
         this.spawnSpider = true;
       }
     }
+    // ★IIIII22b：双地牢 chosen-tile 尾部支（NPC.cs:1256-1281 → :428-441，本批主接面）。
+    // 门 = dualDungeonsSeed && 世界表面以下 && 地狱层以上；rand(7) 重掷三层带（0/1 地表化/
+    // 2 地下/3-6 深岩层）+ NPCSpawningFlagsForDualDungeons 按落脚格九位重写玩家 Zone*。
+    // 原版是 SetSpawnFlagsForChosenTile 的**最后一段**——JS 折叠的窗口计数值（上方
+    // ZoneSnow..ZoneGlowshroom）按 vanilla 序在这里被扫描值覆盖。非双地牢世界零掷零写。
+    if (this.world.seedFlags?.dualDungeons
+      && spawnTileY > this.world.groundLevel && spawnTileY < st.h - 200) {
+      switch (rng.int(0, 6)) {                          // Main.rand.Next(7)
+        case 0: case 1:
+          this.surfaceSpawn = true;
+          this.underGround = false;
+          this.deeperThanRockLayer = false;
+          break;
+        case 2:
+          this.surfaceSpawn = false;
+          this.underGround = true;
+          this.deeperThanRockLayer = false;
+          break;
+        default:
+          this.surfaceSpawn = false;
+          this.underGround = false;
+          this.deeperThanRockLayer = true;
+          break;
+      }
+      const scan = scanChosenTileZones(st, spawnTileX, spawnTileY, this.world.rockLevel);
+      // NPC.cs:432-440 覆盖序 1:1：dungeon/desert 取与（&=），其余六位直接重写
+      this.ZoneDungeon = this.ZoneDungeon && scan.ZoneDungeon;
+      this.ZoneSnow = scan.ZoneSnow;
+      this.ZoneGlowshroom = scan.ZoneGlowshroom;
+      this.ZoneCorrupt = scan.ZoneCorrupt;
+      this.ZoneCrimson = scan.ZoneCrimson;
+      this.ZoneJungle = scan.ZoneJungle;
+      this.ZoneHallow = scan.ZoneHallow;
+      this.ddLihzhardLatch = scan.ZoneLihzhardTemple;   // ZoneLihzhardTemple = scan
+      this.spawnUndergroundDesert = this.spawnUndergroundDesert && scan.ZoneUndergroundDesert;
+    } else {
+      this.ddLihzhardLatch = null;                      // 非门路径复位闩（vanilla 每次重建等价）
+    }
   }
 
   /** tileDungeon 集（Main.cs:7941-7946）：41/43/44 主砖（677-679 安全变体未注册缺席=0）。
@@ -1061,8 +1100,16 @@ export class VanillaSpawner {
     const scY = this.scopeNum3 > 0 ? Math.floor(viewHalfH / this.scopeNum3) : 0;
     const rangeX = Math.max(1, Math.floor(viewHalfW * 1.4)) + sc;
     const rangeY = Math.max(1, Math.floor(viewHalfH * 1.4)) + scY;
-    const safeX = Math.max(1, Math.floor(viewHalfW * 1.04)) + sc;
-    const safeY = Math.max(1, Math.floor(viewHalfH * 1.04)) + scY;
+    let safeX = Math.max(1, Math.floor(viewHalfW * 1.04)) + sc;
+    let safeY = Math.max(1, Math.floor(viewHalfH * 1.04)) + scY;
+    // ★IIIII22b：双地牢 safeArea 半化（NPC.cs:964-966 GetSpawnArea 尾支）——
+    // dualDungeonsSeed && 玩家不在地表高度带（!ZoneOverworldHeight && !ZoneSkyHeight
+    // ≡ tileY > worldSurface）时 safe 区矩形尺寸从 ×2 改为原值（NPC.cs:966），即半宽÷2 →
+    // 敌怪允许刷得更近。vanilla 在狙击镜扩圈之后替换矩形。
+    if (this.world.seedFlags?.dualDungeons && py > this.world.groundLevel) {
+      safeX = Math.max(1, Math.floor(safeX / 2));
+      safeY = Math.max(1, Math.floor(safeY / 2));
+    }
     // WorldUtils.ClampToWorld
     const areaL = Math.max(2, px - rangeX), areaR = Math.min(st.w - 3, px + rangeX);
     const areaT = Math.max(2, py - rangeY), areaB = Math.min(st.h - 3, py + rangeY);
@@ -3117,9 +3164,17 @@ export class VanillaSpawner {
   /** ZoneLihzhardTemple（SceneMetrics.cs:688）：玩家所站格墙 == 87（蜥蜴人砖墙）。
    *  神庙砖怪池门（NPC.cs:3821）与 GetSpawnRate 神庙倍率共用；缺省取本帧玩家格 */
   private zoneLihzardTemple(tx = this.pX, ty = this.pY): boolean {
+    // ★IIIII22b：双地牢世界 SetSpawnFlagsForChosenTile 尾部重写玩家 Zone 位后
+    // （NPC.cs:439 ZoneLihzhardTemple = scan），神庙门走扫描值而非中心墙直读——
+    // latch 由 dual 区块每次选格刷新（非双地牢世界恒 null → 原路径零改动）。
+    if (this.ddLihzhardLatch !== null) return this.ddLihzhardLatch;
     const st = this.world.store;
     return st.inBounds(tx, ty) && st.wall[st.idx(tx, ty)] === 87;
   }
+
+  /** 双地牢 chosen-tile 扫描的 ZoneLihzhardTemple 覆写闩（NPCSpawningFlagsForDualDungeons
+   *  九位之一；null=未覆写，保持 SceneMetrics 玩家中心墙派生） */
+  private ddLihzhardLatch: boolean | null = null;
 
   /** GetGemBunnyToSpawn（NPC.cs:5587-5615 1:1）：Next(100) 分档——琥珀 5%/钻石 8%/
    *  红玉 10%/翠玉 12%/蓝玉 16%/黄玉 21%/紫晶 28%（越稀有权重越低） */

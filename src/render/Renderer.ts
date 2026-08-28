@@ -1,4 +1,5 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
+import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, starvedLock } from '../render/GLStats';
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { TILE, CHUNK } from '../core/constants';
 import { TintAtlas, type TintRect } from './TintAtlas';
@@ -2064,6 +2065,7 @@ export class Renderer {
       this.glfx = null;
     }
     if (performance.now() < this.glInitRetryAt) return null;
+    if (starvedLock()) return null;   // 饥饿锁:跨实例显存耗尽期暂停重建(走 2D 回退)
     const inst = new GLSpriteLayer();
     inst.statName = 'glfx';   // #perf-gpulog
     if (inst.unavailable) {
@@ -2221,6 +2223,7 @@ export class Renderer {
       if (this.gpuDegraded || !this.canvas.isConnected) return;
       const mainLost = (this.ctx as CanvasRenderingContext2D & { isContextLost?: () => boolean }).isContextLost?.() ?? false;
       if (mainLost) {
+        noteContextLost('main-canvas');   // #三开压测批
         this.recreateMainCanvas();
         this.recreateAuxCanvases();
         this.cbOnGpuRecover?.();
@@ -12489,6 +12492,7 @@ export class Renderer {
       this.worldLight = null;
     }
     if (performance.now() < this.worldLightRetryAt) return null;
+    if (starvedLock()) return null;   // 饥饿锁:同上——光乘法走 2D 回退分支
     const inst = new GLWorldLight();
     if (inst.unavailable) {
       inst.dispose();
@@ -12516,6 +12520,7 @@ export class Renderer {
       this.screenFx = null;
     }
     if (performance.now() < this.screenFxRetryAt) return null;
+    if (starvedLock()) return null;
     const inst = new GLScreenFilters();
     if (inst.unavailable) {
       inst.dispose();

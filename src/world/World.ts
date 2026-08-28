@@ -162,6 +162,9 @@ export class World {
    *  生成期灌入 + 存档 header.seedFlags 持久化；wld 导入自 S0-3 起按头九位回填
    *  （WldImport→SaveData.header.seedFlags→SaveFile.ts:281），普通档={}） */
   seedFlags: import('./gen/SeedEasterEggs').SeedFlags = {};
+  /** ★IIIII20b：StarterNPC 换人一次性迁移标记（SaveData.header.starterSwapMigrated；
+   *  旧档缺省=undefined 未迁移——换人族世界首载修复客户端时把历史伪影向导顶替并打标） */
+  starterSwapMigrated?: boolean;
   /** FTW 克脑重力倒置锚（原版 NPC.brainOfGravity 静态槽）：克脑 266 二阶段每 tick
    *  写实体 id（NPC.cs:32650-32653，bossAI.brainOfCthulhuAI）；消费端 Player.fixedUpdate
    *  距脑 <4000px → gravDir=-1（Player.cs:26489-26496 forcedGravity）；锚失效/非 266
@@ -173,6 +176,11 @@ export class World {
   /** 原始世界出生点（床 RemoveSpawn 回退锚——Player.RemoveSpawn :53686 清覆盖位语义;
    *  生成/wld 导入/存档回填时快照;header.spawn0 缺省回退当前 spawn（旧档兼容） */
   spawnX0 = 0; spawnY0 = 0;
+  /** ★IIIII22b：royale-with-cheese 队伍出生点表（ExtraSpawnPointManager.extraSpawnPoints，
+   *  cs:91-113 生成的 Point[6]；队 0=世界出生点）。瞬态运行时缓存**不落盘不进协议包**
+   *  ——各端按世界种子确定性重算（src/world/spawn/ExtraSpawnsRoyale.ts R1 同种子重放
+   *  范式），ensureExtraSpawnPoints 幂等填本字段；非 teamBasedSpawns 世界恒 undefined */
+  extraSpawnPoints?: Array<{ x: number; y: number }>;
   groundLevel = 0; rockLevel = 0;   // tile 坐标
   /** 地狱顶（原版 UnderworldLayer = maxTilesY-200；TerrainPass 设定，SceneMetrics/BGM/背景共用） */
   lavaLine = 0;
