@@ -215,8 +215,10 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
       // 藤→丛林藤（cs:25329）
       const s0 = sheetOf(st.type[idx]!);
       const vhit = s0 === 52 || s0 === 382;
-      if (vhit) st.type[idx] = JUNGLE_VINE;
-      try { g0.__swNTBChron?.(vhit ? 'V' : 'VM', i, j); } catch { /* probe */ }
+      if (vhit) {
+        st.type[idx] = JUNGLE_VINE;
+        try { g0.__swNTBChron?.('V', i, j); } catch { /* probe */ }
+      }
       // 实心转化主体（cs:25331-25400）
       const cracked = st.flags[idx] !== 0 && CRACKED_BRICKS.has(sheetOf(st.type[idx]!));
       if ((solidOrSloped(st, i, j) || cracked)

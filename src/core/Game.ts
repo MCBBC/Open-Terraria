@@ -138,6 +138,8 @@ import { trySnapStrike } from '../stats/SnapStrike';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { equipKindOfInternal } from '../data/vanillaEquip';
 import { emergencyStackItemsToMakeSpace } from '../world/EmergencyStacking';
+import { checkBoulderFamily, BOULDER_FAMILY_SHEETS, BOULDER_CONVERT_TABLE } from '../world/BoulderMech';
+import { RollingBoulder } from '../entities/RollingBoulder';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
 import { playDeathVoice, playHurtVoice } from '../player/PlayerVoice';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
@@ -3790,6 +3792,16 @@ export class Game implements GameHooks {
     // Recipe.UpdateItemVariants（Player.cs:34880/Recipe.cs:531）的本仓等价物，
     // 三条进世界路径均汇到此处，2026-08-20）
     setItemVariantWorld(w.seedFlags ?? null);
+    // ★IIIIIII18（节日双旗 gen→世界事件字段桥，InitializeSecretSeeds WorldGen.cs:573-579）：
+    //   原版在生成期把 SecretSeed 启用态折进 Main.forceHalloweenForever /
+    //   Main.forceXMasForever（endlessHalloween/endlessChristmas——hocus pocus /
+    //   jingle all the way），随 .wld LoadWorldFlags 位落盘（WF:2471-2472 v287+），
+    //   运行时 checkSeasonal(Game:23874/:23877) 读的是 world.flags 面。
+    //   S0-1 解耦后旗标只落在 seedFlags，本桥补上 seedFlags→flags 折算：
+    //   三条进世界路径均汇于此处——SW 自产新世界生成完成即生效并随首存落盘；
+    //   旧档带旗缺位则读档修复；无该旗世界零触碰（存量默认值不漂移）。
+    if (w.seedFlags?.endlessHalloween && !w.flags.forceHalloweenForever) w.flags.forceHalloweenForever = true;
+    if (w.seedFlags?.endlessChristmas && !w.flags.forceXMasForever) w.flags.forceXMasForever = true;
     this._autoSaveAt = 0;              // 自动保存墙钟重起（换世界 Stopwatch.Reset）
     this._autoPausedByFocus = false;
     // WorldGen.Skyblock 普查（CountTiles :71160 逐列扫至 X==maxTilesX-1 →
@@ -4147,6 +4159,40 @@ export class Game implements GameHooks {
     // 下方一格的藤（支撑/同型续接/亲代变型）；打掉中间一节 → 下方整段级联消失
     // （breakTile→setTile(0) 再触发本监听逐节向下，下落沙同款）
     w.store.onTileChanged((x, y) => this.checkVineAt(x, y + 1));
+    // 巨石族完整性（WorldGen.Check2x2 :48811 邻格变化→校验；破坏/爆炸拆支柱即经
+    // 本监听进入）。窗口 ±2：覆盖 2×2 物块任一格与其"下方支撑行(ay+2)"的全部相对位。
+    // ★致动失活不改 type/solid 数组 ⇒ 与反编译判定一致自然不触发（源语义如此），
+    // 真正释放路径 = 上方被压塌/下方格被 KillTile。
+    w.store.onTileChanged((cx, cy) => {
+      const stb = w.store;
+      const ctx = {
+        sheetOfInternal: (tid: number) => TILE_DEFS[tid]?.vanilla?.sheet ?? -1,
+        breakCell: (bx: number, by: number) => this.breakTile(bx, by),
+        convert: (axc: number, ayc: number, sheet: number) => {
+          const row = BOULDER_CONVERT_TABLE[sheet];
+          if (!row) return;
+          // cs:49172 原文字面偏移 (+15.5,+16)/(654:+8,+8) 会把 31px 盒半嵌右/下邻
+          // 实心柱——原版靠内嵌弹射消化,本仓碰撞无该语义 → 冻结(2026-08-28 用户实报)。
+          // 等价改写：盒心对齐被清 2×2（31px 在 32px 内余 0.5 边距），观察行为同原版
+          // （从柱顶下落+自启滚出），备案偏差。
+          const px = axc * TILE + 0.5;
+          const py = ayc * TILE + 0.5;
+          this.entities.add(new RollingBoulder(px, py, sheet), 'projectiles');
+          this.recLog('boulderRoll', { sheet, x: axc, y: ayc });
+        },
+      };
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const nx = cx + dx, ny = cy + dy;
+          if (!stb.inBounds(nx, ny)) continue;
+          const tid = stb.type[stb.idx(nx, ny)];
+          if (tid === 0) continue;
+          const sh = TILE_DEFS[tid]?.vanilla?.sheet ?? -1;
+          if (!BOULDER_FAMILY_SHEETS.has(sh)) continue;
+          checkBoulderFamily(stb, nx, ny, ctx);
+        }
+      }
+    });
     // 家具失撑（原版 TileFrame → Check2x1/Check3x2/Check4x2 族 :47500+：支撑格
     // 被挖 → 家具掉落。曾无此链=挖掉工作台脚下它悬空挂着，2026-08-21 review）
     w.store.onTileChanged((x, y) => this.checkFurnitureSupport(x, y - 1));
@@ -6402,8 +6448,14 @@ export class Game implements GameHooks {
       // 入夜 roll 整段门 = !IsFastForwardingTime() && !stopEvents（:64728）——晷快进/
       // 灯笼夜/天界入侵/月总在场或倒计时全部压掉（stopEvents 须在 CheckNight 之后
       // 判读——当夜刚兑现的灯笼夜也算）
-      this.spawnEyePending = false;
-      this.spawnHardBossPending = 0;
+      // ★每夜重置自然召唤旗必须在 crossed(DUSK) 块【内】——曾裸放块外=每帧无条件
+      //   清零，入夜置位的 pending 活不过一帧，消费端整夜读 false → "收到邪恶存在
+      //   消息但克眼整夜不生成，直接天亮"（2026-08-28 用户实报，探针 pending 单帧
+      //   归零+消费端零调用实锤；黎明侧 :6232 清零已足，此处为入夜防御性重置）
+      if (crossed(Clock.DUSK)) {
+        this.spawnEyePending = false;
+        this.spawnHardBossPending = 0;
+      }
       if (crossed(Clock.DUSK) && !w.isFastForwardingTime()
         && !(LanternNight.lanternsUp || w.lunarEvent.active || w.lunarEvent.moonLordCountdown > 0
           || this.entities.enemies.some((e) => !((e as Enemy).dead) && (e as Enemy).vanillaId === 398))) {

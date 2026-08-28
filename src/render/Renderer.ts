@@ -12545,6 +12545,10 @@ export class Renderer {
     try { this.screenFxLayer(); } catch { /* 同上 */ }
     try { this.acquireGL(); } catch { /* glfx/bg 层 */ }
     try { this.waterWarp.prewarm(); } catch { /* 扭曲层 */ }
+    // ★极光 GL(#perf2026-08-28 trace 定罪):AuroraSky 字段初始化式 new GLAurora()
+    // 曾在构造链上同步引爆 getContext+着色器编译 ~790ms=进图风暴主犯;改惰性访问器
+    // 后由此显式预热进加载页窗口
+    try { this.sky.aurora.prewarmGL(); } catch { /* 极光层 */ }
     console.log(`[prewarmGL] WebGL 管线预热完成 ${(performance.now() - t0).toFixed(0)}ms`);
   }
 

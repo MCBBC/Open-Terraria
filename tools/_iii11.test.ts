@@ -29,26 +29,36 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
     }) => void;
     __swNTBChron?: (tag: string, a: number, b: number) => void;
   };
-  // IIII11：chron 流缓冲（call 边界打 CALLBEGIN/CALLEND 与 rig 对齐）
+  // IIII11：chron 流缓冲（call 边界打 CALLBEGIN/CALLEND 与 rig 对齐）+ 全程样本序
   const chronAll: string[] = [];
-  // call6 掷流窗捕获（与 rig SW_ROLLWIN="98-98" 同位对拍）
-  const rolls6: number[] = [];
-  let recRolls = false;
+  let jsSeq = 0;
+  // 样本流直接落盘（避免内存上限）：64KB 分块 append
+  const fs11 = await import('node:fs');
+  const fd11 = fs11.openSync('/tmp/iii11-out/j-allvals.txt', 'w');
+  let pend: number[] = [];
+  const gs3 = globalThis as unknown as { seedLine?: number };
   const g1 = globalThis as { __swOnRoll?: (value: number, inst: object) => void };
-  g1.__swOnRoll = (v) => { if (recRolls) rolls6.push(v); };
-  g0.__swNTBChron = (tag, a, b) => { chronAll.push(`${tag} ${a} ${b}`); };
-  g0.__swNTBCap = (phase, _gs, st) => {
+  g1.__swOnRoll = (v) => {
+    jsSeq++;
+    pend.push(v);
+    if (pend.length >= 65536) {
+      fs11.writeSync(fd11, pend.join('\n') + '\n');
+      pend = [];
+    }
+  };
+  g0.__swNTBChron = (tag, a, b) => { chronAll.push(`${tag} ${a} ${b} rc=${jsSeq}`); };
+  g0.__swNTBCap = (phase, gsv, st) => {
     if (phase === 'in') {
       if (outstanding) throw new Error('ntbcap pairing broken: in before out');
       callN++;
       outstanding = true;
-      if (callN === 6) recRolls = true;
-      chronAll.push(`CALLBEGIN ${callN} 0`);
+      const wv = gsv as { worldSurface?: number };
+      if (callN === 1 && wv?.worldSurface !== undefined) gs3.seedLine = Math.round(wv.worldSurface * 100);
+      chronAll.push(`CALLBEGIN ${callN} 0 rc=${jsSeq}`);
     } else if (phase === 'out') {
       if (!outstanding) throw new Error('ntbcap pairing broken: out before in');
       outstanding = false;
-      if (callN === 6) { recRolls = false; writeFileSync('/tmp/iii11-out/j-rolls6.txt', rolls6.join('\n') + '\n'); }
-      chronAll.push(`CALLEND ${callN} 0`);
+      chronAll.push(`CALLEND ${callN} 0 rc=${jsSeq}`);
     } else return;
     const dir = `${OUT}/${phase}-${callN}`;
     const n = st.w * st.h;
@@ -112,7 +122,10 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
     console.log(`[iii11] done calls=${callN}`);
   } finally {
     writeFileSync('/tmp/iii11-out/j-chron.txt', chronAll.join('\n') + '\n');
+    if (pend.length) fs11.writeSync(fd11, pend.join('\n') + '\n');
+    fs11.closeSync(fd11);
     g0.__swNTBCap = undefined;
     g0.__swNTBChron = undefined;
+    (g1 as { __swOnRoll?: unknown }).__swOnRoll = undefined;
   }
 }, 900_000);

@@ -7,6 +7,9 @@ import { CHEST_MAX_ITEMS } from '../world/World';
 import { TILE_BY_KEY, T, TILE_DEFS } from '../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { translateSeed } from '../core/rng';
+// ★IIIIIII18 F-1：导入路径统一走与新创建世界相同的 seed 解析层——
+// parseSeedChain（WorldGen.CheckInputForSecretSeed 等价层 + '|' 多段协议）
+import { parseSeedChain } from '../world/gen/SeedEasterEggs';
 
 /** wld NPC spriteId → 存档 key（正常态反查 TOWN_NPC_IDS；bound 型单独映射，id-maps 核实：
  *  105 BoundGoblin→goblin_tinkerer、106 BoundWizard→wizard、123 BoundMechanic→mechanic、
@@ -612,9 +615,24 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       treeTops: wld.treeTops?.length ? wld.treeTops : undefined,
       crimson: wld.isCrimson,
       moonType: wld.moonType,
-      // 彩蛋种子旗标九位回填（WldParser 头读 WorldFile.cs:1242-1250；S0-3——曾读位即弃，
-      // 导入原版特殊种子档丢全部特性。仅真值落键，普通世界={} 与旧档缺省同形）
-      seedFlags: Object.keys(wld.seedFlags).length ? { ...wld.seedFlags } : undefined,
+      // 彩蛋种子旗标回填（双源并集，★IIIIIII18 F-1）：
+      //  ① 派生源 = header seed 文本过 parseSeedChain（与新创建世界同一解析层）。
+      //     section 位只覆盖九特殊 + dualDungeons/moreLightning/noLightning 五位；
+      //     37 枚明文秘种子（`hocus pocus|…` 型密码组）在原版的唯一持久面就是
+      //     header 种子串文本（UIWorldCreation.FinishCreatingWorld cs:1004-1008
+      //     `join('|')` 协议，含 SetSeedToRandomWithCurrentEvents :423 的
+      //     "pumpkinseason|" 前缀与自写重复段），曾只读位即弃 → 秘种子导入整枚丢失。
+      //  ② 权威位 = parser 从 section 读出的 wld.seedFlags（vanilla 持久真值）后并。
+      //     两源均只落真值（union 即无冲突）；getfixedboi 类组合态由文件位全量
+      //     还原（其种子串实存纯数字底种，派生源为空集不干扰）。
+      //  仅真值落键；空集保持 undefined（普通世界与旧档缺省同形，零漂移）。
+      //  单元测试：tests/wld-secret-seed-import.test.ts（硬等断言）。
+      seedFlags: (() => {
+        const merged: Record<string, boolean> = {};
+        for (const [k, v] of Object.entries(parseSeedChain(wld.seed).flags)) if (v) merged[k] = true;
+        for (const [k, v] of Object.entries(wld.seedFlags)) if (v) merged[k] = true;
+        return Object.keys(merged).length ? merged : undefined;
+      })(),
       // 世界难度（WldParser.ts:108-111 gameMode 位；Main.cs:2677）——
       // 0 经典 1 专家 2 大师 3 旅程，loadSaveData 回填 world.difficulty
       difficulty: wld.gameMode,

@@ -49,6 +49,12 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 //   与本文件 placeDoorHF/placeTileDoorHF/solidTileHF 同构,勿双向耦合）
 import { hellFortAttemptDoorAt, hellFortPlaceDoorLoop, hellFortCanCrumbleWall, hellFortAttemptCrumbleWall } from './rollback1457/HellFort.1457';
 
+// ★IIIII14（cs:32981-32984 / 1456 cs:32874 同款）：drunk 房间跨距 num=8→4、num2=20→40
+//  与翼/双轴门恒开——hellFort/hellFort1456 双实现无 gs 入参，经模块档位传递，
+//  由 runHellFortPass 入口置位（每世界刷新；探针可 setHellFortDrunkMode 直接钉档）。
+let hfDrunkMode = false;
+export function setHellFortDrunkMode(v: boolean): void { hfDrunkMode = v; }
+
 const OBS_BRICK = TILE_BY_KEY['v_75_obsidian_brick']!;
 const HELL_BRICK = TILE_BY_KEY['v_76_hellstone_brick'] ?? OBS_BRICK;
 const PLATFORM = TILE_BY_KEY['platform']!;
@@ -469,18 +475,21 @@ let hfChests: import('./BuriedChestsPass').ChestSink | undefined;
 export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState,
   phaseMark?: (name: string) => void, chests?: import('./BuriedChestsPass').ChestSink): void {
   hfChests = chests;
+  hfDrunkMode = !!gs.seedFlags.drunkWorld;   // ★IIIII14：双实现共享档位（每世界刷新）
   const { w, h } = st;
   const hellTop = h - 200;
   if (hellTop >= h - 60) return;
   // AddHellHouses(cs:32299-32318):for 逐列 i=100..w-100,正常世界只处理中间 50%
-  // (num..w-num;drunk/remix 秘密种子域反转,不移植)。**只有成功建成才**跳格
-  // i += Next(30,130)(再 1/10 追加 Next(0,200));找不到落点仅靠 for 自增 i+1
-  // 扫下一列——旧实现改成 while 无论成败都跳格+耗骰,塔数量级直接错(H1);
-  // 有效起点域到 w-num(=0.75w),旧 endX-30 截尾同批修正
+  // (num..w-num)。★IIIII14（cs:13893 同款门）：drunk/remix 域反转——残屋只落在
+  // **外侧两带**（i<num 或 i>w-num 处理、中带跳过）。
+  // **只有成功建成才**跳格 i += Next(30,130)(再 1/10 追加 Next(0,200));找不到落点
+  // 仅靠 for 自增 i+1 扫下一列——旧实现改成 while 无论成败都跳格+耗骰,塔数量级
+  // 直接错(H1);有效起点域到 w-num(=0.75w),旧 endX-30 截尾同批修正
   const num = Math.floor(w * 0.25);
+  const bandInvert = !!gs.seedFlags.drunkWorld;
   let towerNo = 0;
   for (let i = 100; i < w - 100; i++) {
-    if (i < num || i > w - num) continue;
+    if (bandInvert ? (i > num && i < w - num) : (i < num || i > w - num)) continue;
     // 找落点(cs:32307-32310):从 h-40 向上跳过 active/液体格,首格空气即塔底锚点。
     // 原版无下界(旧实现自制 y>hellTop 下界已删,H4)
     let j = h - 40;
@@ -779,6 +788,10 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
   // ---- 列左右界(1457 cs:32996-33008):中央 ±4-9,其余依次外扩 8-19 ----
   // ★1457 掷序：左翼(colR[1]/colL[1]、colR[0]/colL[0])先掷,右翼(colL[3]/colR[3]、
   //   colL[4]/colR[4])后掷（1456 是右翼先——掷数不变、几何镜像级偏移,#28 定罪项）
+  // ★IIIII14 登记债：本 1457 存档路径（SW_MB_1457=1 专用）未接 drunk 跨距/门放宽
+  //（cs:32981-32984 num=8→4/num2=20→40 与翼门恒开）——worldgen-1457-rewire 结构
+  // 断言钉死本段字面量；GFB（天然 drunk）合并双态时随存档一并接线。缺省运行与
+  // 金标链走下方 hellFort1456（已接）。
   const colL = new Array<number>(5), colR = new Array<number>(5);
   colL[2] = i - rng.int(4, 9);
   colR[2] = i + rng.int(4, 9);
@@ -1061,13 +1074,16 @@ function hellFort1456(st: TileStore, rng: RNG, i: number, j: number, tileType: n
   const { w, h } = st;
   const hellTop = h - 200;
   // ---- 列左右界（1456 cs:32871-32877）：中央 ±4-9,右翼先掷、左翼后掷 ----
+  // ★IIIII14（1456 cs:32858-32953）：drunk 跨距 num=8→4 / num2=20→40（Next(4,40)）
+  const hfNum = hfDrunkMode ? 4 : 8;
+  const hfNum2 = hfDrunkMode ? 40 : 20;
   const colL = new Array<number>(5), colR = new Array<number>(5);
-  colL[2] = i - rng.int(4, 9);
-  colR[2] = i + rng.int(4, 9);
-  colL[3] = colR[2]; colR[3] = colL[3] + rng.int(8, 19);   // ★1456 右翼先（掷 3-4）
-  colL[4] = colR[3]; colR[4] = colL[4] + rng.int(8, 19);
-  colR[1] = colL[2]; colL[1] = colR[1] - rng.int(8, 19);   // ★1456 左翼后（掷 5-6）
-  colR[0] = colL[1]; colL[0] = colR[0] - rng.int(8, 19);
+  colL[2] = i - rng.int(Math.trunc(hfNum / 2), Math.trunc(hfNum2 / 2) - 1);
+  colR[2] = i + rng.int(Math.trunc(hfNum / 2), Math.trunc(hfNum2 / 2) - 1);
+  colL[3] = colR[2]; colR[3] = colL[3] + rng.int(hfNum, hfNum2 - 1);   // ★1456 右翼先（掷 3-4）
+  colL[4] = colR[3]; colR[4] = colL[4] + rng.int(hfNum, hfNum2 - 1);
+  colR[1] = colL[2]; colL[1] = colR[1] - rng.int(hfNum, hfNum2 - 1);   // ★1456 左翼后（掷 5-6）
+  colR[0] = colL[1]; colL[0] = colR[0] - rng.int(hfNum, hfNum2 - 1);
   // ---- 行上下界（cs:32878-32889,1456≡1457）----
   const rowT = new Array<number>(10), rowB = new Array<number>(10);
   rowT[3] = j - rng.int(6, 11); rowB[3] = j;
@@ -1078,24 +1094,24 @@ function hellFort1456(st: TileStore, rng: RNG, i: number, j: number, tileType: n
   let hasLWing = false, hasRWing = false;
   let spanLo = 3, spanHi = 3;
   for (let round = 0; round < 2; round++) {
-    if (rng.int(0, 2) === 0) {
+    if (rng.int(0, 2) === 0 || hfDrunkMode) {   // Next(3)==0||drunk——骰恒掷（IIIII14）
       hasLWing = true;
       const r0 = rng.int(0, 9);
       if (r0 < spanLo) spanLo = r0;      // ★1456 直接扩 span（无 Clamp）
       if (r0 > spanHi) spanHi = r0;
       let wingCol = 1;
-      if (rng.int(0, 1) === 0) { occ[0][r0] = true; occ[1][r0] = true; wingCol = 0; }
+      if (rng.int(0, 1) === 0 || hfDrunkMode) { occ[0][r0] = true; occ[1][r0] = true; wingCol = 0; }   // Next(2)==0||drunk
       else occ[1][r0] = true;
       let dir = rng.int(0, 1); if (dir === 0) dir = -1;
       for (let steps = rng.int(0, 9), r = r0; steps > 0 && r >= 0 && r < 10; r += dir) occ[wingCol][r] = true;
     }
-    if (rng.int(0, 2) === 0) {
+    if (rng.int(0, 2) === 0 || hfDrunkMode) {   // Next(3)==0||drunk——骰恒掷（IIIII14）
       hasRWing = true;
       const r0 = rng.int(0, 9);
       if (r0 < spanLo) spanLo = r0;
       if (r0 > spanHi) spanHi = r0;
       let wingCol = 3;
-      if (rng.int(0, 1) === 0) { occ[3][r0] = true; occ[4][r0] = true; wingCol = 4; }
+      if (rng.int(0, 1) === 0 || hfDrunkMode) { occ[3][r0] = true; occ[4][r0] = true; wingCol = 4; }   // Next(2)==0||drunk
       else occ[3][r0] = true;
       let dir = rng.int(0, 1); if (dir === 0) dir = -1;
       for (let steps = rng.int(0, 9), r = r0; steps > 0 && r >= 0 && r < 10; r += dir) occ[wingCol][r] = true;

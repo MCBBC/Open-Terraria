@@ -297,7 +297,7 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng?: RNG, multiFallba
     // ★IIII10：墙挂/吊挂族真分派（CheckBanner/CheckXxxWall/CheckChand）——
     //   与 TileFrameImportant 同族互斥（不在 CHECK1X1/CHEST/CHECK2X2/185 表内），
     //   命中即消费本次邻格分派，绝不落入下方的地板支撑近似。
-    if (!I13_LEGACY && wallArtDispatchT(st, ux, uy, rng)) continue;   // ★IIII10（SW_I13_LEGACY=1 反演回退）
+    if (!i13Legacy() && wallArtDispatchT(st, ux, uy, rng)) continue;   // ★IIII10（SW_I13_LEGACY=1 反演回退）
     if (!multiFallback || !MULTI_DEFS.has(ut)) continue;
     // 找含 (ux,uy) 的完整块锚
     const m = MULTI_DEFS.get(ut)!;
@@ -620,7 +620,7 @@ function wallArtDispatchT(st: TileStore, x: number, y: number, rng?: RNG): boole
   if (sh === 91) { checkBannerT(st, x, y, rng); return true; }
   if (sh === 34 || sh === 454) { checkChandT(st, x, y, rng); return true; }
   if (sh === 240 || sh === 440 || sh === 245 || sh === 246 || sh === 241 || sh === 242) { checkWallArtT(st, x, y, rng); return true; }
-  if (!I13_LEGACY && CHECK_SUPER_DEFS[sh]) { checkSuperT(st, x, y); return true; }
+  if (!i13Legacy() && CHECK_SUPER_DEFS[sh]) { checkSuperT(st, x, y); return true; }
   return false;
 }
 
@@ -1151,6 +1151,7 @@ function lWire(st: TileStore, x0: number, y0: number, x1: number, y1: number): v
  *  非 1457 特有语义、无版本门。 */
 export function placePlate(st: TileStore, x: number, y: number, style: number, rng?: RNG): boolean {
   if (x < 2 || y < 2 || x > st.w - 3 || y > st.h - 3) return false;   // InWorld(x,y,2)
+  placeHeadMirrorT(st, x, y);                                         // ★III13 PlaceTile 头半砖双支（135 可覆盖门恒过）
   if (st.flags[st.idx(x, y)] !== 0) return false;                     // Place1x1 !tile.active()
   if (!solidTile2V(st, x, y + 1)) return false;
   if (isBoulderType(st.type[st.idx(x, y + 1)]!)) return false;        // cs:45213 机关×巨石底座
@@ -1167,7 +1168,7 @@ export function placePlate(st: TileStore, x: number, y: number, style: number, r
   //   实证），但墙面挂件（画 240-246/旗 91 等）的真实分派在原版走 CheckBanner/
   //   TileObjectData 锚系（墙面悬挂语义），地板支撑近似会误杀 → 板尾新开环先不
   //   走兜底支（IIII10 实证：notraps g3003+ 段 T240>0×9/T91>0×9 误杀漂移）。 */
-  if (!I13_LEGACY) cascade3x3T(st, x, y, rng, false);  // ★IIII10 case135 尾 SquareTileFrame（LEGACY=1 回退至 IIII10 前）
+  if (!i13Legacy()) cascade3x3T(st, x, y, rng, false);  // ★IIII10 case135 尾 SquareTileFrame（LEGACY=1 回退至 IIII10 前）
   return true;
 }
 
@@ -1420,6 +1421,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
       }
     }
     killTileWhole(st, bx, by, rng);                                        // KillTile（cs:9382，清半砖/坡）
+    placeHeadMirrorT(st, bx, by);                                     // ★III13 炸药桶写位头变异（141）
     st.setTileSilent(bx, by, EXPLOSIVES, 0, rng.int(0, 1) * 18);      // cs:9383-9386
     placePlate(st, x2, py, rng.int(2, 3));                            // cs:9387
     lWire(st, x2, py, bx, by);
@@ -1446,6 +1448,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     }
     const fx = rng.int(0, 1);
     for (let k = 0; k < 2; k++) {
+      placeHeadMirrorT(st, x2 + k, py);                               // ★III13 喷泉写位头变异（443）
       st.setTileSilent(x2 + k, py, GEYSER, 18 * k + 36 * fx, 0);
     }
     return true;
@@ -1489,10 +1492,37 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     const wet = (x: number) => st.liquid[st.idx(x, j2)] > 0;
     if (wet(i5) || wet(i5 - 1) || wet(i5 + 1)) num33 = 1;
   }
+  placeHeadMirrorT(st, i5, j2);                                       // ★III13 镖身写位头变异（137 非实心）
   st.setTileSilent(i5, j2, TRAP137, dir === 1 ? 18 : 0, 18 * num33);  // cs:9115（frameY=18*style）
   trapEv('DTW', num33, dir, 0);
   lWire(st, x2, py, i5, j2);
   return true;
+}
+
+/** ★III13 批（C 项定罪落地）：PlaceTile 头半砖双支镜像（cs:60111-60122）。
+ *  vanilla 的 PlaceTile 对一切非实心/可覆盖 num 在门后先做锚格头变异：
+ *  ①ghost 锚（!active）→ tile.Clear(Tile|TilePaint|Slope)=half/slope/paint 清零；
+ *  ②active 非 frameImportant 锚 → ResetsHalfBrickPlacementAttempt[num] 分支
+ *    （SetFactory.CreateBoolSet(**defaultState:true**,豁免表)＝**除豁免表外恒真**，
+ *    TileID.cs:181）→ halfBrick(false)+frameX/Y=0。
+ *  rig HalfEv 实证：traps 窗内 PTreset_n654×7374 / n105×23500 / n349 / n137 /
+ *  n656——即桶/镖/雕像等一切放置尝试均会清锚半砖（含后续放置被拒的场合）；
+ *  残差 H0>1×43 全部由此族在 X 侧落清位写、J 端无对应行为 ⇒ 补本镜像。
+ *  触点=TrapsPass 内 vanilla 经 WorldGen.PlaceTile 放置的每个非实心写位：
+ *  plate(135)/dart(137)/explosive(141)/geyser(443)/barrel(654)。石头(type1)
+ *  直填走 EmptyTile 门恒 ghost ⇒ 不触此支，勿挂。 */
+const RESETS_HALF_EXEMPT_SHEETS = new Set([2, 23, 661, 60, 70, 199, 662, 109, 477, 492, 179, 512,
+  180, 513, 181, 514, 182, 515, 183, 516, 381, 517, 534, 535, 536, 537, 539, 540, 625, 626, 627, 628, 633]);
+function placeHeadMirrorT(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) {
+    st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0;                   // Clear(Tile|TilePaint|Slope)
+  } else if (!RESETS_HALF_EXEMPT_SHEETS.has(sheetOf(st.type[i]!) >= 0 ? sheetOf(st.type[i]!) : -1)
+    && !TILE_DEFS[st.type[i]!]?.framed) {
+    st.half[i] = 0;                                                     // halfBrick(false)
+    st.frameX[i] = 0 as never; st.frameY[i] = 0 as never;
+  }
 }
 
 function isCracked(t: number): boolean {
@@ -1508,8 +1538,11 @@ function sandEv(kind: string, a: number, b: number, v: number): void {
 }
 
 /** ★III13+#28 回归仲裁开关：SW_I13_LEGACY=1 时关闭本批新增（CheckSuper 分派/
- *  桶尾级联）并回退 IIII10 两刀行为面（plate 尾级联、墙挂真分派），供 A/B 反演。 */
-const I13_LEGACY = typeof process !== 'undefined' && process.env?.SW_I13_LEGACY === '1';   // 浏览器无 process——守卫防整页启动炸
+ *  桶尾级联）并回退 IIII10 两刀行为面（plate 尾级联、墙挂真分派），供 A/B 反演。
+ *  运行时可切（__i13SetLegacy，隔离重放探针同进程双跑对照）；浏览器无 process 守卫。 */
+let I13_LEGACY = typeof process !== 'undefined' && process.env?.SW_I13_LEGACY === '1';
+export function __i13SetLegacy(v: boolean): void { I13_LEGACY = v; }
+function i13Legacy(): boolean { return I13_LEGACY; }
 
 /** PlaceSandTrap（cs:35505-35781）：地下沙漠蜂窝墙内的塌沙陷阱（1456 全尾段） */
 /** PlaceSandTrap（cs:35505-35781）——导出仅供探针对账 */
@@ -1813,8 +1846,9 @@ export function placeTNTBarrel(st: TileStore, x: number, y: number, rng?: RNG): 
     if (st.liquid[i] > 0 && st.liquidType[i] === 4) return false;     // anyShimmer（LIQ_SHIMMER）
   }
   // PlaceTile(654) → Place2x2（cs:60229 分派；右下锚语义同 MicroBiomes place2x2Direct）
+  placeHeadMirrorT(st, x, py);                                        // ★III13 桶锚头变异（654 非实心门恒过）
   const ok = place2x2Traps(st, x, py, TNT_BARREL);
-  if (ok && !I13_LEGACY) cascade3x3T(st, x, py, rng, true);   // cs:60752 通用尾 SquareTileFrame(i,j)
+  if (ok && !i13Legacy()) cascade3x3T(st, x, py, rng, true);   // cs:60752 通用尾 SquareTileFrame(i,j)
   return ok;
 }
 

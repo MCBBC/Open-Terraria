@@ -119,12 +119,12 @@ function pushSwWarn(msg: unknown) {
   };
 }
 
-ui.onBestiary = () => flow.openBestiary(); // 背包面板图鉴按钮（原版 BestiaryMenuButton）
-ui.onHousing = () => flow.openHousing?.(); // 背包面板住房按钮（原版 DrawInterface_33_Housing）
+ui.onBestiary = () => flow?.openBestiary(); // 背包面板图鉴按钮（原版 BestiaryMenuButton）
+ui.onHousing = () => flow?.openHousing?.(); // 背包面板住房按钮（原版 DrawInterface_33_Housing）
 const audio = new AudioSystem();
 let atlas: SpriteAtlas | null = null;
 
-let flow: FlowHandle;
+let flow: FlowHandle | undefined;
 let inGame = false;
 let pausePanel: HTMLElement | null = null;
 
@@ -204,7 +204,7 @@ let remasterRuntime: RemasterRuntime | null = null;
 let remasterManager: RemasterManager | null = null;
 
 function enterGameHooks() {
-  const g = flow.game!;
+  const g = flow?.game ?? undefined;
   inGame = true;
   (window as unknown as { __swTiles: typeof TILE_BY_KEY }).__swTiles = TILE_BY_KEY;
   (window as unknown as { __swItems: typeof ITEM_BY_KEY }).__swItems = ITEM_BY_KEY;
@@ -218,7 +218,7 @@ function enterGameHooks() {
   // (★禁 invalidateAll——21 万次重解码风暴前科);闭包每次现取 game,换世界安全
   if (remasterRuntime) {
     remasterRuntime.onSheetReplaced = (file) => {
-      flow.game?.chunks?.onSheetReplaced(file);
+      flow?.game?.chunks?.onSheetReplaced(file);
     };
   }
 }
@@ -249,7 +249,7 @@ function initCameraModeWiring(game: Game): boolean {
 
 // ---- 键盘：背包/暂停/保存 ----
 window.addEventListener('keydown', (e) => {
-  const game = flow.game;
+  const game = flow?.game;
   if (!inGame || !game) return;
   // 输入框内打字不算操作键位（合成搜索框等）：除 Escape 外全部放行给输入框
   const tgt = e.target as HTMLElement | null;
@@ -281,15 +281,15 @@ window.addEventListener('keydown', (e) => {
           pausePanel = null;
           game!.paused = false;
         },
-        onSave: () => flow.doSave(),
-        onExport: () => flow.doExportSave(),
-        onSettings: () => flow.openSettings(true),
-        onBestiary: () => flow.openBestiary(),
+        onSave: () => flow?.doSave(),
+        onExport: () => flow?.doExportSave(),
+        onSettings: () => flow?.openSettings(true),
+        onBestiary: () => flow?.openBestiary(),
         onQuit: () => {
           pausePanel = null;
           game!.paused = false;
           inGame = false;
-          flow.quitToMenu();
+          flow?.quitToMenu();
         },
       });
     } else {
@@ -314,7 +314,7 @@ window.addEventListener('keydown', (e) => {
       // Ctrl+S 快速存档（原 F6 让位召唤面板后迁入）
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        flow.doSave();
+        flow?.doSave();
       }
       break;
     case 'F3':
@@ -385,7 +385,7 @@ window.addEventListener('keydown', (e) => {
 //      渲染端回写清零已晚一帧;地图开着时放行——滚轮归地图缩放（原版分支序）。
 //      pendingWheel ±120/notch = 原版 ScrollWheelDelta 计数语义 ----
 window.addEventListener('wheel', (e) => {
-  const g = flow.game;
+  const g = flow?.game;
   const cm = g?.renderer.captureMode;
   if (!g || !cm?.active) return;
   if (g.renderer.fullMap.open) return;
@@ -398,7 +398,7 @@ let f5DownAt = 0;
 /** 长按阈值 ms：≥ 此值视为长按（行为录制窗开关），否则短按（调试报告） */
 const F5_LONGPRESS_MS = 500;
 window.addEventListener('keyup', (e) => {
-  const game = flow.game;
+  const game = flow?.game;
   if (!inGame || !game || e.code !== 'F5' || !f5DownAt) return;
   const held = performance.now() - f5DownAt;
   f5DownAt = 0;
@@ -444,7 +444,7 @@ function downloadText(filename: string, text: string) {
 
 // ---- 方块标注模式（Shift+F5）：标记问题方块，导出标注 + 地图给开发者 ----
 function toggleAnnotate() {
-  const game = flow.game;
+  const game = flow?.game;
   if (!game) return;
   game.annotateMode = !game.annotateMode;
   if (game.annotateMode) {
@@ -452,16 +452,16 @@ function toggleAnnotate() {
       onExportMarks: exportMarks,
       onExportMap: exportMap,
       onClear: () => {
-        if (!flow.game) return;
+        if (!flow?.game) return;
         flow.game.marks = [];
         ui.updateAnnotateCount(0);
       },
       onClose: () => toggleAnnotate(),
       onToggleFix: () => {
-        if (!flow.game) return;
+        if (!flow?.game) return;
         flow.game.fixTexMode = !flow.game.fixTexMode;
-        ui.setFixModeLabel(flow.game.fixTexMode);
-        ui.toast(flow.game.fixTexMode ? '贴图纠错模式：点击方块打开其贴图表' : '已关闭贴图纠错模式');
+        ui.setFixModeLabel(flow?.game.fixTexMode);
+        ui.toast(flow?.game.fixTexMode ? '贴图纠错模式：点击方块打开其贴图表' : '已关闭贴图纠错模式');
       },
       onExportFixes: exportTexFixes,
     });
@@ -474,7 +474,7 @@ function toggleAnnotate() {
 }
 
 function exportMarks() {
-  const game = flow.game;
+  const game = flow?.game;
   if (!game) return;
   const g = game;
   const st = g.world.store;
@@ -524,7 +524,7 @@ function exportMarks() {
 }
 
 function exportMap() {
-  const game = flow.game;
+  const game = flow?.game;
   if (!game) return;
   const json = saveGameCompat(game);
   downloadText(`map-${game.world.name.replace(/\s+/g, '_')}.json`, json);
@@ -532,7 +532,7 @@ function exportMap() {
 }
 
 function exportTexFixes() {
-  const game = flow.game;
+  const game = flow?.game;
   if (!game) return;
   const fixes = ui.texFixes;
   if (!fixes.length) { ui.toast('还没有记录任何贴图纠错'); return; }

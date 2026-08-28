@@ -359,6 +359,33 @@ function doPaintEverythingNegativeSingleTile(st: TileStore, x: number, y: number
   if (st.wall[i] === 60) st.paintWall[i] = 30;
 }
 
+/** DoPortalGunInChests（1457 WorldGen.cs:3004-3026；FinalizeSecretSeeds cs:663-666 内
+ *  #18 位——rainbowStuff 之后、worldIsFrozen Finish/errorWorld Finish/FinalSeedCleanup
+ *  尾扫之前。IIIII17 批实装）。逐箱掷 genRand.Next(7)==0（1/7 概率；★掷在 item 判定
+ *  **之前**,每箱恒耗一颗——满员/无货箱同样消耗）；item[1]（第二槽）有货才继续,
+ *  在槽 1..maxItems-1 找首个空堆叠槽 SetDefaults(3384)=Portal Gun（stack=1）。
+ *  ★main chest 槽 0 永不插枪（j 从 1 起）；本仓 items 紧凑数组无洞 = 首空槽
+ *  即 items.length(≤39)（echo P3-10 同款约定）；maxItems 固定 40 与 echo 同表。
+ *  next7() 语义：真值 = Next(7)==0（调用方传 `rng.nextInt(7) === 0`）。
+ *  护栏：旗关时零掷零写（普通种子零扰动）。 */
+export function doPortalGunInChests(chests: ReadonlyArray<{ items: Array<{ id: number; stack: number } | null> }>,
+  next7: () => boolean): void {
+  const gun = vidItem(3384);
+  const limit = Math.min(8000, chests.length);        // Main.chest[] 前 8000 枚,null 即 break
+  for (let i = 0; i < limit; i++) {
+    const items = chests[i]!.items;
+    if (!next7()) continue;                           // genRand.Next(7)!=0 → continue（先掷）
+    if (!items[1] || (items[1].stack ?? 0) === 0) continue;   // chest.item[1].stack==0 → continue
+    for (let j = 1; j < 40; j++) {                    // chest.maxItems（WorldGen.cs:3017）
+      const it = items[j];
+      if (!it || (it.stack ?? 0) === 0) {             // 首个空堆叠槽
+        if (gun >= 0) items[j] = { id: gun, stack: 1 };   // SetDefaults(3384)
+        break;
+      }
+    }
+  }
+}
+
 /** DoCoatEverythingEcho（cs:913-938）：边距 5 全图涂 + errorWorld ErrorRemoval +
  *  8000 箱 1/25 首空堆叠槽（自槽 1 起）塞 SpectreGoggles(4409)。
  *  ★1456 边距 0（全图含边框）→ 1457 收 5。chests 为世界箱注册表

@@ -77,6 +77,20 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     }
   }
   (window as unknown as { __swAudio?: AudioSystem }).__swAudio = audio; // 探针调试桥
+  // #perf2026-08-28（进入世界卡顿第三批）：程序化素材总包 buildAssets——~6700 张
+  // 物品图标画布 + 全部 tile 表/角色表/敌人精灵，同步生成 ~700ms（弱机更长）。
+  // 它是确定性全局单例，但触发点在首次 new Game() = **点击进入世界瞬间**整体砸下
+  // （trace t1104：t≈4.0-4.75s getContext 707ms + putImageData 207ms 连续满载段）。
+  // 菜单空闲期提前预生成 → makeGame/首帧零成本复用。?assetprewarm=0 关闭(A/B)。
+  if ((() => { try {
+    return typeof location === 'undefined'
+      || new URLSearchParams(location.search).get('assetprewarm') !== '0';
+  } catch { return true; } })()) {
+    const kick = () => { void import('./assets/AssetGen').then((m) => m.buildAssets()); };
+    const ric = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
+    if (typeof ric === 'function') ric(kick, { timeout: 2500 });
+    else setTimeout(kick, 1200);
+  }
   let playStart = 0;
   let menuBg: MenuBackground | null = null;
   let menuRunning = false;

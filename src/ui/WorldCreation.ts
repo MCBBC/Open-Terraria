@@ -157,12 +157,14 @@ export class WorldCreationPanel {
     this.buildGroup('size', SIZES);
     this.buildGroup('diff', DIFFS);
     this.buildGroup('evil', EVILS);
+    // ★seedIcon 必须先于 refresh() 就位——refreshSeedIcon() 会向它写 .src
+    //  （曾挪到下方 randseed 监听器组后,构造器首刷写 undefined.src 崩"创建世界"）
+    this.seedIcon = this.panel.querySelector('.sw-wc-seedicon') as unknown as HTMLImageElement;
     this.refresh();
 
     this.panel.querySelector('[data-act=randname]')!.addEventListener('click', () => {
       (this.panel.querySelector('[data-f=name]') as HTMLInputElement).value = randomWorldName();
     });
-    this.seedIcon = this.panel.querySelector('.sw-wc-seedicon') as unknown as HTMLImageElement;
     this.panel.querySelector('[data-act=randseed]')!.addEventListener('click', () => {
       (this.panel.querySelector('[data-f=seed]') as HTMLInputElement).value = String(Math.floor(Math.random() * 1e9));
       this.refreshSeedIcon();

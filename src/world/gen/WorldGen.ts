@@ -383,7 +383,7 @@ import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
 import { runOceanSandPass, runBeachesPass, runBeachDecorPass } from './vanilla/BeachPass';
 import { runIceBiomePass, runSlushPass } from './vanilla/IceBiomePass';
 import { runWebsPass as runVanillaWebsPass } from './vanilla/WebsPass';
-import { runUnderworldPass } from './vanilla/UnderworldPass';
+import { runUnderworldPass, underworldAshGrassTrees } from './vanilla/UnderworldPass';
 import { runGrassPass } from './vanilla/GrassPass';
 import { runJunglePass } from './vanilla/JunglePass';
 import { runMudCavesPass, spreadGrass } from './vanilla/Spread';
@@ -451,6 +451,8 @@ import { runNotTheBees } from './vanilla/NotTheBeesPass';
 // ★1457 对齐档 2（2026-08-23）复线：finalSeedCleanup import 恢复（1457 FinalizeSecretSeeds
 //   尾无条件终扫;KKKKKK 批曾撤,基准回 1457 后按 1457 WorldGen.cs:22666/:692 接回）。
 import { finalSeedCleanup } from './vanilla/FinalSeedCleanupPass';
+// ★IIIII17：DoPortalGunInChests（WorldGen.cs:3004，FinalizeSecretSeeds #18 位）
+import { doPortalGunInChests } from './vanilla/FinalSeedCleanupPass';
 
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
 // ★UUUUUU：oceanStrip 形参化——原版 cs:16221-16231 海洋带归水全扫只在 #49
@@ -899,7 +901,11 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   // AddHellHouses（cs:13893，Underworld pass **尾**段调用，Corruption(13919) 之前）：
   // 地狱要塞 HellFort 原版属地狱 pass 尾——2026-08-16 前独立占「地狱屋」槽
   // （LifeCrystals 之后，晚原版位约 3000 行）= 顺序偏差，R 批归位到 Underworld 尾。
+  // ★IIIII14 时序移位（cs:13876 else-if(!drunk) 跳过 + cs:13906 追加段）：普通世界
+  // 灰烬草/树(外缘带)在 AddHellHouses 前；drunk 在其后、且全图无外缘门。
+  if (!gs.seedFlags.drunkWorld) underworldAshGrassTrees(store, rng, gs, false);
   runHellFortPass(store, rng, gs, undefined, world.chests); // TTTT:梳妆台 88 烧 chest 注册槽(cs:52169)
+  if (gs.seedFlags.drunkWorld) underworldAshGrassTrees(store, rng, gs, true);
   rng.reseed(gs.seed); // ▶CorruptionAndCrimson cs:13919
   runCorruptionPass(store, rng, gs); // 29 Corruption/Crimson
   rng.reseed(gs.seed); // ▶Lakes cs:14613
@@ -1241,10 +1247,26 @@ function finalCleanupPass({ store, rng, world }: GenCtx) {
   //   :692 尾部无条件调 FinalSeedCleanup :695 悬空 Falling 块静态化）。曾挂在
   //   generateWorld 尾（finalize 之后）=时点晚于 dump #105 快照位，mile8 槽 57
   //   对拍把静态化差全记在 #105（const/s22222 T1>332×11 金币堆假债主）。
+  //   ★IIIII17（2026-08-28）：FinalizeSecretSeeds 内已实装端点按原版序挂载——
+  //   #18 portalGunInChests → DoPortalGunInChests(:3004，rainbowStuff 之后、
+  //   worldIsFrozen Finish/errorWorld Finish/FinalSeedCleanup 尾扫之前)。
+  //   掷流走本 pass 自有流(genRand 在 RunPass 头重播;旗关零掷),其余 finalize 端点
+  //   (DoCoatEverything*/DoRainbowStuff/…) 未实装,故此处即 cs:22666 可达面全序;
+  //   后续批次补端点时须按 vanilla 序插在本钩子内 portalGun 与 finalSeedCleanup 间。
   runFinalCleanupPass(store, ctxGs[0]!, rng, {
     chests: world.chests as never,
     beforeShimmer: hfIs1457()
-      ? () => finalSeedCleanup(store, ctxGs[0]!.seedFlags ?? {}, world.chests as never)
+      ? () => {
+          // ★IIIII17：FinalizeSecretSeeds 已实装端点按原版序——#18 portalGunInChests
+          //   （cs:3004;rainbowStuff 之后、worldIsFrozen Finish/errorWorld Finish/
+          //   FinalSeedCleanup 尾扫之前）。掷流走本 pass 流（旗关零掷）;其余
+          //   finalize 端点未实装=此处即 cs:22666 可达面全序，后续批次按 vanilla 序
+          //   插在本钩子内 portalGun 与 finalSeedCleanup 之间。
+          if (ctxGs[0]!.seedFlags?.portalGunInChests) {
+            doPortalGunInChests(world.chests as never, () => rng.nextInt(7) === 0);
+          }
+          finalSeedCleanup(store, ctxGs[0]!.seedFlags ?? {}, world.chests as never);
+        }
       : undefined,
   });
   // ★DDDDDD 批（2026-08-21）归位：原版 FinalCleanup pass 体末的全图 LiquidCheck

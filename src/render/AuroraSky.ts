@@ -383,8 +383,17 @@ export class AuroraSky {
   private _sm2Tex = new Float64Array(8 * 4);
   private _sm2V0 = new Float64Array(8);
   private _sm2O = new Float64Array(4);
-  /** WebGL2 极光渲染器（用户令：GPU shader 渲染替代 CPU 离屏） */
-  readonly glAurora = new GLAurora();
+  /** WebGL2 极光渲染器（用户令：GPU shader 渲染替代 CPU 离屏）。
+   *  ★懒建（#perf2026-08-28 trace 定罪：字段初始化式 new GLAurora() 在构造链
+   *  Game→Renderer→SkyRenderer→AuroraSky 上一同步引爆 getContext+着色器编译
+   *  ~790ms=进图风暴主犯,prewarmGameGL 够不到的死角）。改惰性访问器后由
+   *  Renderer.prewarmGameGL 显式预热到加载页窗口；取值路径语义不变 */
+  private _glAurora: GLAurora | null = null;
+  get glAurora(): GLAurora {
+    return this._glAurora ?? (this._glAurora = new GLAurora());
+  }
+  /** 预热入口（仅触发惰建;幂等） */
+  prewarmGL(): void { void this.glAurora; }
   /** GL 顶点暂存（grow-only 复用；3 带上限 × 140 段 × 6 顶点 × 8 float） */
   private glVerts: Float32Array | null = null;
   private glNoiseReady = false;

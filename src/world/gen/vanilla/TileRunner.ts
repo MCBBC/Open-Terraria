@@ -136,6 +136,7 @@ export function tileRunner(
   //   灰烬界上跳格 / cs:77361 加速梯 Next(3) 断续门 / cs:77446 尾段水平摆）——全部
   //   只在 seedFlags.drunkWorld 时生效，普通种子流零扰动（金标链锚定）。
   const drunkTR = !!gs.seedFlags.drunkWorld;
+  const { strength, steps, type } = o;
   let strengthIn = strength;
   let stepsIn = steps;
   if (drunkTR && !o.mudWall) {
@@ -143,7 +144,7 @@ export function tileRunner(
     strengthIn *= 1 + rng.int(-80, 80) * 0.01;
     stepsIn = Math.trunc(stepsIn * (1 + rng.int(-80, 80) * 0.01));
   }
-  const { type } = o;
+
   // 灰烬块（sheet 57）标志：drunk 世界灰烬 runner 在 y<h-300 段整体跳格（cs:77224）
   const ashBlockTr = TILE_DEFS[type]?.vanilla?.sheet === 57;
   const addTile = o.addTile ?? false;
@@ -198,13 +199,13 @@ export function tileRunner(
         if (tf[ti] && FRAMED_SKIP[ty[ti]]) continue;
         if (ignoreTileType >= 0 && ty[ti] === ignoreTileType && tf[ti]) continue;
         const dist = Math.abs(x - px) + Math.abs(y - py);
-        if (dist >= strength * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;
+        if (dist >= strengthIn * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;
         // 丛林泥墙(原版 mudWall 分支:浅层墙 15,深层墙 64,均避让四邻;落墙走
         // PlaceWall 语义=仅空墙可落+成功必掷 1 颗 Next(0,3))
         // ★局部化:twall=st.wall 提局部 + idx 内联(泥 runner 每格 5-8 次跳读,热点)
         if (o.mudWall && y > gs.worldSurface && twall[ti - stW] !== 2
           && y < st.h - 210 - rng.int(0, 2)
-          && dist < strength * 0.45 * (1 + rng.int(-10, 10) * 0.01)) {
+          && dist < strengthIn * 0.45 * (1 + rng.int(-10, 10) * 0.01)) {
           if (y > gs.lavaLine - rng.int(0, 3) - 50) {
             if (twall[ti - stW] !== 64 && twall[ti + stW] !== 64
               && twall[ti - 1] !== 64 && twall[ti + 1] !== 64) placeWall(st, rng, x, y, 15);
@@ -215,7 +216,7 @@ export function tileRunner(
         }
         // granite/marble 伴生墙(cs:77272-77278):核心 0.3R 内 PlaceWall 180/178
         if (type === GRANITE || type === MARBLE) {
-          if (dist < strength * 0.3 * (1 + rng.int(-10, 10) * 0.01)) {
+          if (dist < strengthIn * 0.3 * (1 + rng.int(-10, 10) * 0.01)) {
             placeWall(st, rng, x, y, type === GRANITE ? 180 : 178);
           }
         }

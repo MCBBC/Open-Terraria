@@ -433,7 +433,10 @@ const CSS = `
    (2026-08-25 用户报);类由 enter/leave 维护 + 重建后立即补回 → 稳定。
    :hover 并存兜底其他 .sw-recipe 列表(guide 检索结果等,无重建闪动问题) */
 .sw-recipe:hover, .sw-recipe.hov { background:rgba(70,55,100,0.9); }
-.sw-recipe.no { opacity:0.4; cursor:default; }
+/* 置灰只作用内容（img/span opacity+去饱和）——★行本身保持透明：行 opacity<1
+   会连"透出的游戏画面"一起半透 = 一块灰色遮罩观感（2026-08-27 用户报） */
+.sw-recipe.no { cursor:default; }
+.sw-recipe.no img, .sw-recipe.no span { opacity:0.45; filter:grayscale(0.7); }
 .sw-recipe img { width:22px; height:22px; image-rendering:pixelated; }
 .sw-progress { position:fixed; inset:0; background:rgba(5,5,12,0.85); display:flex;
   flex-direction:column; align-items:center; justify-content:center; color:#e8e4f0; }
@@ -2106,8 +2109,12 @@ export class UI {
     this.closeHousingPanel();
     this.positionInvPanel();
     this.invPanel.style.display = 'block';
-    // 开背包会引发热键栏重排（slot 80ms left 过渡）——过渡结束后二次贴位校正
-    setTimeout(() => this.positionInvPanel(), 120);
+    // 开背包会引发热键栏重排（slot 80ms left 过渡）——过渡结束后二次贴位校正；
+    // 配方列表高度同批二次刷新（首次采样布局未稳,LIST_H 偏大,hover 前不收敛）
+    setTimeout(() => {
+      this.positionInvPanel();
+      this.refreshVanillaCrafting();
+    }, 120);
     this.refreshAll();
     this.game.input.uiBlocking = true;
   }
@@ -3999,6 +4006,11 @@ export class UI {
       .map((e, i) => ({ e, met: metFlags[i] }))
       .sort((x, y) => Number(y.met) - Number(x.met))
       .map((x) => x.e);
+    // 排序改变行→配方映射：清除滞留的 hover 高亮（.hov 深底留在重排后的行上
+    // = 用户报"第一项配方盖着遮罩"——池行持久,重排后 .hov 残留在错位行上）
+    this.craftHoverEl?.classList.remove('hov');
+    this.craftHoverEl = null;
+    this.craftHoverIdx = -1;
     // ★2026-08-27 用户要求：列表高度对齐右缘列底（曾恒 240px 底部死区→改视口限
     // 又溢出右缘列底 200px）——上限 = min(视口底-32, 右缘列底-8)，钳下限 240；
     // 池行数随高度增长。首帧布局未就绪（rect 0）时落 240 下限,后续刷新自校正
@@ -4114,7 +4126,11 @@ export class UI {
     //  过冲(回弹)量单独 ×0.6 加成 = 端部拉伸视觉保留
     const maxAnchor = Math.max(0, len - 1);
     const viewH = Math.min(this.craftListH, len * H);
-    if (this.craftLastViewH !== viewH) { cl.style.height = `${viewH}px`; this.craftLastViewH = viewH; }
+    // ★无条件写高度（2026-08-27 用户报"打开时留空,hover/滚动才逐步坍缩"）：首次
+    //  刷新在 display:none→block 布局未稳时采样,LIST_H 偏大且 craftLastViewH 残留
+    //  旧值相等时跳写 = 错误高度滞留到滚动/悬停才被 paint 修正
+    cl.style.height = `${viewH}px`;
+    this.craftLastViewH = viewH;
     const maxTop = Math.max(0, len - Math.ceil(viewH / H));   // 末页填满视口,无底部留白
     const clampedAnchor = Math.max(0, Math.min(maxAnchor, anchor));
     const topF = Math.max(0, Math.min(maxTop, clampedAnchor - (VIS_ROWS >> 1)))

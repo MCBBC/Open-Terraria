@@ -1354,13 +1354,20 @@ export class SkyRenderer {
     this.tintCache2.set(key, c);
     return c;
   }
-  /** 晨昏渐变贴图(Sunrise/Sunset 四调色板) */
+  /** 晨昏渐变贴图——Sunrise/Sunset 各自只有 4 色（原版资产实际存在的子集）：
+   *  Sunrise = Blue/Violet/Yellow/Aluminum；Sunset = Blue/Dark/Pink/Red。
+   *  曾对两种 kind 都用同一 7 色表 → 3×2=6 个 404（2026-08-27 用户实报） */
+  private static readonly GRAD_COLORS: Record<'Sunrise' | 'Sunset', string[]> = {
+    Sunrise: ['Blue', 'Violet', 'Yellow', 'Aluminum'],
+    Sunset: ['Blue', 'Dark', 'Pink', 'Red'],
+  };
   private gradTexs = new Map<string, HTMLImageElement>();
   private horizonGradTex(kind: 'Sunrise' | 'Sunset', idx: number): HTMLImageElement | null {
     const key = `${kind}${idx}`;
     let t = this.gradTexs.get(key);
     if (t === undefined) {
-      t = loadTex(`Misc_${kind}_${kind}_${['Blue', 'Violet', 'Yellow', 'Aluminum', 'Dark', 'Pink', 'Red'][idx]}.png`);
+      const colors = SkyRenderer.GRAD_COLORS[kind];
+      t = loadTex(`Misc_${kind}_${kind}_${colors[idx % colors.length]}.png`);
       this.gradTexs.set(key, t);
     }
     return t.width > 0 ? t : null;

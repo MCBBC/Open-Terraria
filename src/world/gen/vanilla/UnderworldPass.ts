@@ -80,28 +80,36 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
     sim.dispose();
   }
   // ④ 1/13 列灰烬柱 + 横向灰烬团 + 挖掘隧道
+  // ★IIIII14（cs:13812/13821）：drunk/remix 中带（0.4w-0.6w）主柱与侧柱各加一道
+  //   `Next(3)==0` 放行门——骰**恒掷**（C# || 左侧先求值），普通世界短路不掷。
+  const drunkUW = !!gs.seedFlags.drunkWorld;
+  const inCentralBandUW = (x: number) => x > w * 0.4 && x < w * 0.6;
   for (let x = 0; x < w; x++) {
     if (rng.next() * 13 >= 1) continue;               // ≡ Next(13)==0
     let y = h - 65;
     while ((st.liquid[st.idx(x, y)] > 0 || st.flags[st.idx(x, y)]) && y > h - 140) y--;
-    tileRunner(st, rng, gs, x, y - rng.int(2, 4), {
-      strength: rng.int(5, 29), steps: 1000, type: ASH, addTile: true,
-      speedX: 0, speedY: rng.int(1, 2), noYChange: true,
-    });
-    let scale = rng.int(1, 2);                        // Next(1,3)
-    if (rng.next() * 3 < 1) scale *= 0.5;             // ≡ Next(3)==0
-    if (rng.next() < 0.5) {                           // ≡ Next(2)==0
+    if (!drunkUW || rng.int(0, 2) === 0 || !inCentralBandUW(x)) {
       tileRunner(st, rng, gs, x, y - rng.int(2, 4), {
-        strength: Math.trunc(rng.int(5, 14) * scale), steps: Math.trunc(rng.int(10, 14) * scale),
-        type: ASH, addTile: true, speedX: 1, speedY: 0.3,
+        strength: rng.int(5, 29), steps: 1000, type: ASH, addTile: true,
+        speedX: 0, speedY: rng.int(1, 2), noYChange: true,
       });
     }
-    if (rng.next() < 0.5) {
-      const s2 = rng.int(1, 2);
-      tileRunner(st, rng, gs, x, y - rng.int(2, 4), {
-        strength: Math.trunc(rng.int(5, 14) * s2), steps: Math.trunc(rng.int(10, 14) * s2),
-        type: ASH, addTile: true, speedX: -1, speedY: 0.3,
-      });
+    let scale = rng.int(1, 2);                        // Next(1,3)
+    if (rng.next() * 3 < 1) scale *= 0.5;             // ≡ Next(3)==0
+    if (!drunkUW || rng.int(0, 2) === 0 || !inCentralBandUW(x)) {
+      if (rng.next() < 0.5) {                         // ≡ Next(2)==0
+        tileRunner(st, rng, gs, x, y - rng.int(2, 4), {
+          strength: Math.trunc(rng.int(5, 14) * scale), steps: Math.trunc(rng.int(10, 14) * scale),
+          type: ASH, addTile: true, speedX: 1, speedY: 0.3,
+        });
+      }
+      if (rng.next() < 0.5) {
+        const s2 = rng.int(1, 2);
+        tileRunner(st, rng, gs, x, y - rng.int(2, 4), {
+          strength: Math.trunc(rng.int(5, 14) * s2), steps: Math.trunc(rng.int(10, 14) * s2),
+          type: ASH, addTile: true, speedX: -1, speedY: 0.3,
+        });
+      }
     }
     // Next(-10,10)×2 → 闭区间映射 int(-10,9)（曾误 int(-10,10)=Next(-10,11) 竖向差 1）
     tileRunner(st, rng, gs, x + rng.int(-10, 9), y + rng.int(-10, 9), {
@@ -127,6 +135,16 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       strength: rng.int(2, 6), steps: rng.int(2, 6), type: -2,
     });
   }
+  // ★IIIII14（cs:13848-13853）：drunk/remix 中带（0.35w-0.65w）追加挖液 runner ×2w
+  // （type=-2 灌岩浆腔洞）。remix 组合域共用门，纯 drunk 已生效。
+  if (gs.seedFlags.drunkWorld) {
+    for (let n = 0; n < w * 2; n++) {
+      tileRunner(st, rng, gs,
+        rng.int(Math.trunc(w * 0.35), Math.trunc(w * 0.65) - 1),
+        rng.int(h - 180, h - 11),
+        { strength: rng.int(5, 19), steps: rng.int(5, 9), type: -2 });
+    }
+  }
   // ⑥ 底部岩浆层（h-145/144 两行）
   for (let x = 0; x < w; x++) {
     for (const dy of [145, 144]) {
@@ -140,8 +158,18 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       strength: rng.int(2, 6), steps: rng.int(3, 6), type: HELLSTONE,
     });
   }
-  // ⑧ 灰烬草 633 + 灰烬树 634（cs:13869-13915）：外缘 17% 带
-  const outer = (x: number) => x < w * 0.17 || x > w * 0.83;
+  void gs;
+}
+
+/**
+ * ⑧ 灰烬草 633 + 灰烬树 634（cs:13869-13915 原为 pass 内联段，★IIIII14 抽出以便
+ * drunk 的时序移位）。普通世界：**外缘 17% 带**、AddHellHouses **前**（原序不变）；
+ * drunk 世界（cs:13876 `else if (!drunkWorldGen)` 跳过 + cs:13906 追加段）：
+ * AddHellHouses **后**、**全图**同链——残屋环上照长灰烬草/灰烬树。
+ */
+export function underworldAshGrassTrees(st: TileStore, rng: RNG, gs: GenState, full: boolean): void {
+  const { w, h } = st;
+  const outer = (x: number) => full || x < w * 0.17 || x > w * 0.83;
   for (let x = 25; x < w - 25; x++) {
     if (!outer(x)) continue;
     // ★条件内 Next(-1,2) 每迭代重掷（原版 cs:13870 for 条件逐次求值）——
@@ -168,5 +196,4 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (rng.int(0, 2) === 0) growAshTree(st, rng, x, y);   // Next(3)==0 → TryGrowingTreeByType(634)
     }
   }
-  void gs;
 }

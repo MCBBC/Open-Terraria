@@ -149,7 +149,92 @@ function solidPct(st: TileStore, r: Rect): number {
   return n / (r.w * r.h);
 }
 
-function createRooms(st: TileStore, rng: RNG, ox: number, oy: number): Rect[] {
+// ---------- 秘种子：abandoned manors（IIIII17，2026-08-28） ----------
+/** GenerateBiggerAbandonedHouses（WorldGen.cs:433-447 三态 getter 1:1，1456 :428 同文）：
+ *  biggerAbandonedHouses.Enabled → true；否则 errorWorld.Enabled → genRand.Next(3)==0
+ *  （★errorWorld 骰面共享路径——属性【每次读取】各掷一颗，读点=①主循环 y 钳制
+ *  cs:17180、②CreateRooms 分支 HouseUtils.cs:88、③支撑梁短路臂 HouseBuilder.cs:639
+ *  （`num7<50 && !…` 短路,num7≥50 或 num7≤0 不评估=不掷）；双旗皆关 → false。
+ *  本仓 parseSeed 单播语义两旗互斥,errorWorld 臂休眠但语义就位（组合输入接线后即活）。
+ *  ★旗开启时 getter 恒早退【零掷】,纯 abandoned manors 世界对普通流零扰动。 */
+function genBiggerAbandonedHouses(gs: GenState, rng: RNG): boolean {
+  const f = gs.seedFlags;
+  if (f?.biggerAbandonedHouses) return true;           // WorldGen.cs:437 早退
+  if (f?.errorWorld) return rng.nextInt(3) === 0;      // cs:441 Next(3)==0
+  return false;
+}
+
+/** GetMaxPossibleRoomsInABigAbandonedHouse（HouseUtils.cs:40-47）：errorWorld=30 / 否则 7 */
+function getMaxPossibleRoomsInBigHouse(gs: GenState): number {
+  return gs.seedFlags?.errorWorld ? 30 : 7;
+}
+
+/** GetRandomizedRoomCountInABigAbandonedHouse（HouseUtils.cs:49-57）：errorWorld 时
+ *  num=Next(7,31)，再恒掷 Next(4)；返回 Max(0, num-Next(4))——bigger-only 世界
+ *  恒只耗 1 掷且房数 ∈ [4..7]（num=7），0 房空表仅 errorWorld 臂可达。 */
+function getRandomizedRoomCountInBigHouse(gs: GenState, rng: RNG): number {
+  let num = 7;
+  if (gs.seedFlags?.errorWorld) num = rng.nextIntRange(7, 31);   // HouseUtils.cs:54
+  return Math.max(0, num - rng.nextInt(4));                      // :56
+}
+
+/** FindRoom_BigAbandonedHouses（HouseUtils.cs:156-210）：与标准 FindRoom 差异=
+ *  高度不吃 Up 探测改随机 Next(8,13)、宽度随机 Next(15,31) 非跨度钳制；侧向由
+ *  Next(2)==0 选左支（X 取左探点并钳进 lastRoom.Left）/右支（右探点钳 lastRoom.Right,
+ *  X=探点-宽）；两侧同做 Left≤10→10 / Right≥maxTilesX-10→回推边界护栏。 */
+function findRoomBig(st: TileStore, rng: RNG, ox: number, oy: number, lastRoom: Rect): Rect {
+  let lx = ox;
+  for (let i = 0; i < 25 && !solidAt(st, lx, oy); i++) lx--;
+  let rx = ox;
+  for (let i = 0; i < 25 && !solidAt(st, rx, oy); i++) rx++;
+  const rect: Rect = { x: ox, y: oy, w: 0, h: 0 };
+  const rightEdge = lastRoom.x + lastRoom.w;                  // Rectangle.Right=X+Width
+  if (rng.nextInt(2) === 0) {                                 // cs:173
+    if (lx < lastRoom.x) lx = lastRoom.x;                     // result.X<lastRoom.Left 钳入
+    rect.x = lx;
+    rect.w = rng.nextIntRange(15, 31);                        // Next(minValue=15, num+1)
+    if (rect.x <= 10) rect.x = 10;                            // result3.Left<=10
+    if (rect.x + rect.w >= st.w - 10) rect.x = st.w - 10 - rect.w;
+  } else {
+    if (rx > rightEdge) rx = rightEdge;                       // result2.X>lastRoom.Right 钳入
+    rect.w = rng.nextIntRange(15, 31);
+    rect.x = rx - rect.w;
+    if (rect.x <= 10) rect.x = 10;
+    if (rect.x + rect.w >= st.w - 10) rect.x = st.w - 10 - rect.w;
+  }
+  rect.h = rng.nextIntRange(8, 13);                           // Next(minValue2=8, num2+1)
+  rect.y -= rect.h;
+  return rect;
+}
+
+/** CreateRooms_BigAbandonedHouses（HouseUtils.cs:59-84）：Down(200) 找地锚 → 首层房走
+ *  标准 FindRoom → GetRandomizedRoomCount 房数 → 逐层向上叠房（新层原点 =
+ *  (lastRoom.Center.X, lastRoom.Y+1)，Center.X=X+Width/2 向下取整）→ 尾段全体 Y+=3。
+ *  返回【自底向上】插入序——HouseBuilder ctor 按 Top 升序重排（HouseBuilder.cs:74，
+ *  JS 在本函数外层统一 sort）。房数==0（仅 errorWorld 臂可达）→ 空表 →
+ *  CreateBuilder Invalid（CaveHouseBiome.Place 失败,k-- 重试）。 */
+function createRoomsBigAbandonedHouses(st: TileStore, gs: GenState, rng: RNG, ox: number, oy: number): Rect[] {
+  let py = oy;
+  for (let i = 0; i < 200 && !solidAt(st, ox, py); i++) py++;   // Searches.Down(200)
+  if (!solidAt(st, ox, py) || py === oy) return [];             // cs:62-65 同款失败门
+  let last = findRoom(st, ox, py);                              // cs:66 首房=标准 FindRoom
+  const count = getRandomizedRoomCountInBigHouse(gs, rng);
+  const rooms: Rect[] = [];
+  for (let i = 0; i < count; i++) {
+    // 新层锚点向上一行叠压（矩形相接共一行,y 锚=last.Y+1 后 Y-=高）——塔式纵向堆叠
+    rooms.push(findRoomBig(st, rng, last.x + (last.w >> 1), last.y + 1, last));
+    last = rooms[rooms.length - 1]!;
+  }
+  for (const r of rooms) r.y += 3;                              // cs:78-82
+  return rooms;
+}
+
+function createRooms(st: TileStore, gs: GenState, rng: RNG, ox: number, oy: number): Rect[] {
+  // ★IIIII17：GenerateBiggerAbandonedHouses 分支（HouseUtils.cs:88-91）——先评估
+  //   getter（errorWorld 未开旗时此读即一掷）再决定房间族谱
+  if (genBiggerAbandonedHouses(gs, rng)) {
+    return createRoomsBigAbandonedHouses(st, gs, rng, ox, oy);
+  }
   let py = oy;
   for (let i = 0; i < 200 && !solidAt(st, ox, py); i++) py++;
   if (!solidAt(st, ox, py) || py === oy) return [];
@@ -1477,7 +1562,7 @@ function placePlatforms(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): 
 }
 
 /** CreateSupportBeamList + PlaceSupportBeams:6→4 步长梁列,落下一房顶/实心 */
-function placeSupportBeams(st: TileStore, rooms: Rect[], def: ThemeDef): void {
+function placeSupportBeams(st: TileStore, gs: GenState, rng: RNG, rooms: Rect[], def: ThemeDef): void {
   const minX = Math.min(...rooms.map((r) => r.x));
   const maxX = Math.max(...rooms.map((r) => r.x + r.w)) - 1;
   let step = 6;
@@ -1494,12 +1579,14 @@ function placeSupportBeams(st: TileStore, rooms: Rect[], def: ThemeDef): void {
       }
       if (limit <= 0) continue;
       let found = -1;
-      if (limit < 50) found = bottom + limit; // 原版:num7<50 视为命中下一房顶
-      else {
-        for (let y = bottom; y < bottom + limit; y++) {
-          if (solidAt(st, x, y)) { found = y; break; }
-        }
+      // ★IIIII17（HouseBuilder.cs:638-643）：原版 Find 恒跑（无掷），随后
+      //   `num7<50 && !GenerateBiggerAbandonedHouses` 才覆写为"直落下一房顶"——
+      //   manor 塔层相邻对 num7=-1 被上 gate 拒 → 大宅禁此伪梁、无实底长间隙无梁；
+      //   getter 短路求值面与原版一致：仅 limit<50 格读一次（errorWorld 臂即一掷）。
+      for (let y = bottom; y < bottom + limit; y++) {
+        if (solidAt(st, x, y)) { found = y; break; }
       }
+      if (limit < 50 && !genBiggerAbandonedHouses(gs, rng)) found = bottom + limit;
       if (found < 0) continue;
       const height = found - bottom;
       if (height > 1 && st.type[st.idx(x, bottom - 1)] !== PLATFORM) {
@@ -1670,7 +1757,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
         if (t === CHEST21 || t === CHEST2) return __fail('chest');  // TileID.Sets.BasicChest
       }
     }
-    const rooms = createRooms(st, rng, ox, oy);
+    const rooms = createRooms(st, gs, rng, ox, oy);
     if (!rooms.length) return __fail('rooms');
     // 位置合法(InWorld 10 边距 / 底部 < h-220)。★无房间互斥检查——原版 above/below
     //   房与主房天然重叠（HouseUtils.AreRoomLocationsValid 只查 InWorld+底界；x86
@@ -1811,7 +1898,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('pl', ox, oy, 0, __rn());
     // 5) 支撑梁
-    placeSupportBeams(st, rooms, def);
+    placeSupportBeams(st, gs, rng, rooms, def);
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('sb', ox, oy, 0, __rn());
     // 6) 沙漠 Bast 石碑(HouseBuilder.cs:757-831):三级级联(底行→顶行兜底),
@@ -1870,12 +1957,22 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
 
   // 主循环(cs:17152-17192):失败(oceanDepths/放置失败)消耗共享预算 10000 并
   // 重掷同名额(k--)——旧实现失败即弃、名额白丢(C8)
+  // ★IIIII17（cs:17176-17191）：GenerateBiggerAbandonedHouses 时 y 探点下压钳制——
+  //   num11=(int)(worldSurfaceHigh+20)+GetMaxPossibleRoomsInABigAbandonedHouse()*10
+  //   （errorWorld=300 / 否则 70）、num12=maxTilesY-230，num10=Clamp(num10,num11,num12)。
+  //   ★MathHelper.Clamp 序语：value<min→min 先判、否则 value>max→max——min>max 时
+  //   返 min（非 JS Math.min/max 链）；remix 重掷臂 cs:17184-17188 随 remix 债另行登记。
   const __hc = (globalThis as { __swHouseEv?: (phase: string, x: number, y: number) => void }).__swHouseEv;
   let fail = 10000;
   for (let n = 0; n < count; ) {
     if (fail <= 0) break;
     const ox = rng.int(80, w - 81);
-    const oy = rng.int(Math.ceil(gs.worldSurfaceHigh + 20), h - 231);
+    let oy = rng.int(Math.ceil(gs.worldSurfaceHigh + 20), h - 231);
+    if (genBiggerAbandonedHouses(gs, rng)) {                  // getter 读=骰面(errorWorld 臂)
+      const lo = gs.worldSurfaceHigh + 20 + getMaxPossibleRoomsInBigHouse(gs) * 10;  // (int)(…)截断=GenState 已 floor
+      const hi = h - 230;
+      oy = oy < lo ? lo : oy > hi ? hi : oy;
+    }
     __hc?.('try', ox, oy);
     if (!placeHouse(ox, oy, true)) { fail--; __hc?.('no', ox, oy); continue; }
     __hc?.('ok', ox, oy);

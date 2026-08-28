@@ -175,3 +175,32 @@ export function parseSeed(rawSeed: string): { flags: SeedFlags; seedText: string
     : null;
   return { flags, seedText: rawSeed, specialName };
 }
+
+/** 多段秘种子串解析（vanilla '|' 分隔协议，★IIIIIII18 FILE 车道新增出入口）。
+ *
+ *  原版档的 header seed 文本并非单一种子——UIWorldCreation.FinishCreatingWorld
+ *  （cs:1004-1008）写侧为 `SetSeed(string.Join("|", _secretSeedTextsEntered) +
+ *  "|" + SeedText)`：每录入一枚秘种子就往头部拼一段，SetSeedToRandomWithCurrentEvents
+ *  （WorldFileData.cs:419-425）还会前缀 `"pumpkinseason|"`。因此原版 .wld 可携带
+ *  `purify this|jingle all the way|48152` 型多段串；读侧比对 = TryParseSecretSeed
+ *  循环（WorldFileData.cs:296-309）逐段 CheckInputForSecretSeed。
+ *
+ *  本函数逐段独立过 parseSeed（与新创建世界完全同一解析层），命中段**并集**合并：
+ *  - 单段/无分隔串行为与 parseSeed 全等（主路径零变化）；
+ *  - 原版自写重复段（如 `hocus pocus|hocus pocus|底种`——单秘种子时输入文本会
+ *    出现在 join 与 SeedText 两处）幂等吸收；
+ *  - 纯数字段照常走数字路由（05162020/5162021 等 SpecialSeedValues 同源命中，
+ *    与「把这串单独输进新世界」的语义一致）。 */
+export function parseSeedChain(rawSeed: string): { flags: SeedFlags; hitTexts: string[] } {
+  const flags: SeedFlags = {};
+  const hitTexts: string[] = [];
+  for (const part of String(rawSeed ?? '').split('|')) {
+    if (!part || !part.trim()) continue;
+    const seg = parseSeed(part);
+    if (Object.keys(seg.flags).length > 0) {
+      Object.assign(flags, seg.flags);
+      hitTexts.push(part.trim());
+    }
+  }
+  return { flags, hitTexts };
+}

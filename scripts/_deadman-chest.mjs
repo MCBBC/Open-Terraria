@@ -47,11 +47,22 @@ const out = await page.evaluate(async () => {
     const ob = g.explodeAt.bind(g);
     g.explodeAt = (...a) => { boomLog.push({ x: a[0], y: a[1], r: a[3] }); return ob(...a); };
   }
+  // 滚石/爆炸/监听链综合取证
+  const rollLog = [];
+  window.__rollSeen = rollLog;
   const emAdd = g.entities.add.bind(g.entities);
   g.entities.add = (e, bucket) => {
-    if (bucket === 'projectiles') projLog.push({ cls: e.constructor.name, pid: e.projId ?? null, tag: e.tag ?? '', x: Math.round(e.x), y: Math.round(e.y) });
+    if (bucket === 'projectiles') {
+      projLog.push({ cls: e.constructor.name, pid: e.projId ?? null, tag: e.tag ?? '', x: Math.round(e.x), y: Math.round(e.y) });
+      if (e.constructor.name === 'RollingBoulder') rollLog.push({ x: Math.round(e.x / 16 * 10) / 10, y: Math.round(e.y / 16 * 10) / 10, projId: e.projId });
+    }
     return emAdd(e, bucket);
   };
+  if (!window.__recHooked) {
+    window.__recHooked = true;
+    const oRec = g.recLog.bind(g);
+    g.recLog = (k, v) => { if (k === 'boulderRoll') rollLog.push({ viaRec: k, ...v }); try { return oRec(k, v); } catch {} };
+  }
   // ---- 正例：真实开箱路径（markBoom 须在触发前取基线）----
   const beforeN = projLog.length;
   const markBoom = boomLog.length;
@@ -59,6 +70,20 @@ const out = await page.evaluate(async () => {
   await raf(120);
   info.fired1 = projLog.length > beforeN;
   info.boomAnchors1 = boomLog.slice(markBoom).slice(0, 8);
+  info.rollLog1 = rollLog.slice();
+  // ---- 滚石运动轨迹：t0/t30/t90 三拍采样（错位修复=应从盒心出生；没掉落修复=应有落差与横移）----
+  const rollerAt = () => Array.from(g.entities.projectiles)
+    .filter((e) => e.constructor.name === 'RollingBoulder')
+    .map((e) => ({ x: +(e.x / 16).toFixed(2), y: +(e.y / 16).toFixed(2), vx: +e.vx.toFixed(2), vy: +e.vy.toFixed(2), ground: !!e.onGround }));
+  const tracks = [];
+  const t0 = rollerAt();
+  tracks.push({ t: 0, s: t0 });
+  for (let k = 0; k < 90; k++) {
+    g.fixedUpdate(1 / 60); g.postUpdate();
+    if (k === 29 || k === 89) tracks.push({ t: k + 1, s: rollerAt() });
+    await new Promise((r) => setTimeout(r, 4));
+  }
+  info.tracks = tracks;
   info.newSpawns = projLog.slice(beforeN).slice(0, 12);
   // 炸药:引擎 explodeAt 直拆无弹体实体 → 爆炸以 boomAnchors 取证；TrapShot=发射器
   info.darts1 = projLog.slice(beforeN).filter((p) => p.cls === 'TrapShot').length;
