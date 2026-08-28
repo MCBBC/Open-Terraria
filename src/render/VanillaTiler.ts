@@ -1445,8 +1445,11 @@ function tileTopCond(sheet: number, fx: number, fy: number): number | null {
     case 443: return fx / 36 >= 2 ? -2 : 2;                                  // :4612-4621
     case 567: return fy === 0 ? -2 : 0;                                      // :5203-5206
     case 388: case 389: return (fy === 0 || fy === 94) ? -2 : 0;             // :5106-5119
-    // 185/186/187 落穿进 184 分支(:5212-5221 C# fallthrough):预置 2 再被帧段覆盖
-    case 184: case 185: case 186: case 187: return fy <= 36 ? 2 : fy <= 108 ? -2 : 2; // :5282-5292
+    // ★185/186/187:tileTop 恒 2(:5218-5236 自成一块,内含 187 分带换算)——
+    //  曾误读 C# fallthrough 方向塞进 184 的帧条件档(fy 条件只属 184:
+    //  :5288-5292 fy≤36→+2/fy≤108→−2/余+2),fy∈(36,108] 样式曾错取 −2px
+    case 184: return fy <= 36 ? 2 : fy <= 108 ? -2 : 2;                     // :5288-5292
+    case 185: case 186: case 187: return 2;                                 // :5219 恒 2
     case 442: { const c = Math.floor(fx / 22); return c === 1 ? -4 : (c === 2 || c === 3) ? -2 : 0; } // :5704-5720
     case 178: return fy <= 36 ? 2 : 0;
     case 227: return fx === 238 ? -6 : -20;                                  // :5121-5131(染料植物/大仙人掌)
@@ -1615,7 +1618,9 @@ function drawAdjust(
     }
     case 751: if (fit(fx, fy, 56, 46)) { a.sw = 56; a.sh = 46; } break;  // :4582-4589
     case 752: if (fit(fx, fy, 36, 38)) { a.sw = 36; a.sh = 38; } break;  // :4577-4581
-    case 185: case 186: case 187: if (fit(fx, fy, 20, 16)) a.sw = 20; break; // 落穿 184:宽 20(:5212-5292)
+    case 184: if (fit(fx, fy, 20, 16)) a.sw = 20; break; // :5289 tileWidth=20 仅 184——曾误落 185-187
+    //  (C# 无 fallthrough:187 块 :5218-5236 只设 tileTop+分带换算,宽 20 会让
+    //   3×2 石堆每格多绘右邻 4px=接缝错位,2026-08-28 用户报)
     case 624: a.sh = 16; break;                                            // :5153-5162(20×16)
     case 711: if (fx > 0 && fit(fx, fy, 18, 20)) { a.sw = 18; a.sh = 20; } break; // :5000-5008
     case 561: a.sh = 20; break;                                            // 落穿 388 前预置高 20

@@ -422,16 +422,22 @@ function cullDirVisible(st: TileStore, ci: number, cj: number, dx: number, dy: n
 }
 
 // ===================== 代码生成通道(tileframe-codegen.js)=====================
-// gen-codegen.mjs 把 tileframe-program.json 直译为单函数;语义逐位等价于下方解释器
-// (对拍基准 = 同一 store 驱动两路比较)。默认关;localStorage sw_vanilla_framing=1
-// (与 VanillaTiler 同旗)或 setFramingCodegenEnabled 显式开启。解释器保留作 fallback。
+// gen-tileframe-codegen.mjs 把 tileframe-program.json 直译为单函数;语义与下方解释器
+// 逐位等价(golden 四层 + worldwide parity 对拍)。**链启用时它是默认引擎**(trace 实测
+// 解释器中位 0.87ms/格 vs 生成函数 ~3µs/格);显式关断见 _CODEGEN_DEFAULT。解释器保留
+// 作对拍参照与调试回退(localStorage sw_vanilla_framing_codegen=0)。
 const GEN_FRAME = makeFrame();
 let _codegenOverride: boolean | null = null;
+// ★默认引擎 = 代码生成(2026-08-28 trace 定谳):此前本旗只认 localStorage,而链启用走
+// URL ?vf=1(VanillaTiler 读 URL、本处不读)→ 门控错位,?vf=1 时整条链落到解释器
+// (0.87ms/格中位,bake 长任务 220ms;trace /tmp/trace-vf/)。现与 VanillaTiler 三态门
+// 同源复制,gen==interp==rig 已三方逐位等价(golden+worldwide parity),故链开即 gen。
+// 调试回退解释器:localStorage sw_vanilla_framing_codegen=0。
 const _CODEGEN_DEFAULT = (() => {
-  // 模块加载期读一次(VanillaTiler 同款语义);localStorage 缺失(node 测试环境)= 关
   try {
-    return typeof localStorage !== 'undefined' && localStorage.getItem('sw_vanilla_framing') === '1';
-  } catch { return false; }
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('sw_vanilla_framing_codegen') === '0') return false;
+  } catch { /* SSR */ }
+  return true;
 })();
 export function setFramingCodegenEnabled(on: boolean | null): void { _codegenOverride = on; }
 export function isFramingCodegenEnabled(): boolean {

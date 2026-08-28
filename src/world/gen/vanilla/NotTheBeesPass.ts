@@ -20,7 +20,8 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { genKillTile, genTileFrame, genSquareTileFrame } from './FinalCleanupPass';
-import { spreadGrass } from './Spread';
+import { grassSpreadState } from './MushroomPass';
+import { NOT_CLEARABLE } from './TileRunner';
 import { growTree, growVanityTree } from './TreePass';
 import { placePlantTile } from './SurfaceDecorPasses';
 
@@ -351,6 +352,53 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
   try { g0.__swNTBCap?.('out', gs, st); } catch { /* probe */ }
 }
 
+
+/** ★IIII24：FinishNotTheBees 域专用 SpreadGrass（vanilla cs:75748-75860 同源副本）。
+ *  与 Spread.ts 版差异仅两点：
+ *  ① 写入后的 SquareTileFrame 走**全引擎** genSquareTileFrame（FinalCleanupPass，
+ *     tileFrameImportant 全分派 + 非实心非FI的仙人掌/藤蔓支）——cs:75288 原文如此；
+ *     NTB 世界该级联可观测影响：苔藓184邻格无条件 Next(3) 掷、藤蔓 CheckVines
+ *     （基座转草后悬挂藤 636→62 换型——T636>62 家族实证）、各 Check* 支撑杀。
+ *  ② cs:75755-75763 的邪恶草专属门/0-泥地表门不适用（本域 grass∈{60,70} 恒走第二
+ *     else-if 且 dirt≠0），直接按原文括号结构省略恒真分支；
+ *     TryConvertingOrKillingTreesAboveIfTheyWouldBecomeInvalid(cs:55277) 结构性
+ *     no-op：IsATreeTrunk∈{5,72,583..589,596,616,634} 中——type5 的 flag 由第一段
+ *     switch 按 Conversion.Grass/JungleGrass/Snow/MushroomGrass[60/70]=true 直接
+ *     存活；72 无 profile→flag 保持 true；583-589/634 底座为石/灰烬≠dirt(59) 不达
+ *     入口；596/616 VanityTreeGroundTest 只认 Conversion.Grass 族含除23/199——
+ *     60/70∉ ⇒ 走 ConvertTreeAndGround(…,5)：仅重写 type/帧零掷且其数仅在「底格为
+ *     泥而上有樱柳」场景触发——但樱柳种在 grass(2)/mud 顶？#82 种树后地表块类型早
+ *     已定格为非 mud ⇒ 全图零可达。故整个 helper 在本域恒 no-op，不移植（备案）。*/
+function spreadGrassFinishEngine(st: TileStore, rng: RNG, x: number, y: number, dirt: number, grass: number): void {
+  if (x < 10 || x >= st.w - 10 || y < 10 || y >= st.h - 10) return;
+  const i = st.idx(x, y);
+  if (!st.flags[i] || st.type[i] !== dirt) return;
+  const x0 = Math.max(0, x - 1), x1 = Math.min(st.w, x + 2);
+  const y0 = Math.max(0, y - 1), y1 = Math.min(st.h, y + 2);
+  let enclosed = true;
+  for (let k = x0; k < x1; k++) {
+    for (let l = y0; l < y1; l++) {
+      const wi = st.idx(k, l);
+      if (!st.flags[wi] || !vanGenSolidType(st.type[wi])) enclosed = false;
+      if (st.liquidType[wi] === LIQUID_TYPE.LAVA && st.liquid[wi] > 0) { enclosed = true; break; }
+    }
+  }
+  if (enclosed) return;
+  if (NOT_CLEARABLE.has(st.type[i])) return;
+  st.type[i] = grass;
+  genSquareTileFrame(st, rng, x, y);
+  for (let m = x0; m < x1; m++) {
+    for (let n = y0; n < y1; n++) {
+      const ni = st.idx(m, n);
+      if (st.flags[ni] && st.type[ni] === dirt && grassSpreadState.n < 1000) {
+        grassSpreadState.n++;
+        spreadGrassFinishEngine(st, rng, m, n, dirt, grass);
+        grassSpreadState.n--;
+      }
+    }
+  }
+}
+
 // ============================================================
 // ② OverGrownDungeon（1457 cs:24237-24299）——丛林化地牢
 //   ★IIII24 批定罪修复（ntb 链 #105 四家族 T62>0×3085/T60>59×2683/T60>43×1659/
@@ -381,6 +429,9 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
 function overGrownDungeon(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w, h = st.h;
   const dualDun = !!gs.seedFlags.dualDungeons;
+  const mk = (t: string, a: number, b: number): void => {
+    try { (globalThis as { __swFCMark?: (tag: string, a?: number, b?: number) => void }).__swFCMark?.(t, a, b); } catch { /* probe */ }
+  };
   /** SolidTile3（cs:70991-71013）：nactive && Main.tileSolid && !Main.tileSolidTop */
   const solidTile3Ogd = (x: number, y: number): boolean => {
     if (!st.inBounds(x, y)) return false;
@@ -398,8 +449,10 @@ function overGrownDungeon(st: TileStore, rng: RNG, gs: GenState): void {
     //   下游所有随机支（雪带阈值/树藤风格）全体错位。
     if (!st.inBounds(n, n2) || !WALL_DUNGEON.has(st.wall[st.idx(n, n2)]!)) continue;
     const n3 = rng.int(5, 15);
+    try { mk?.('OCOL', n, n2); } catch { /* probe */ }
     for (let j = n - n3; j <= n + n3; j++) {
       for (let k = n2 - n3; k <= n2 + n3; k++) {
+        try { mk?.('OCELL', j, k); } catch { /* probe */ }
         if (!activeAt(st, j, k) || !TILE_DUNGEON.has(sheetAt(st, j, k))) continue;
         // cs:24262-24268：flag=顶行三格完整性（TL/TC/TR），skip=(!flag∧L∧R∧BL∧BC∧TR)
         // （BR[j+1,k+1] 不参与！）∨ ((flag∨¬SolidTile3(j,k-1))∧dualDun)
@@ -412,9 +465,11 @@ function overGrownDungeon(st: TileStore, rng: RNG, gs: GenState): void {
         }
         const ki = st.idx(j, k);
         st.type[ki] = JUNGLE_GRASS;                                // cs:24269 type=60
+        try { mk?.('OWRITE', j, k); } catch { /* probe */ }
         st.paint[ki] = 0;                                          // color(0)
         if (!activeAt(st, j, k - 1) && !growTree(st, rng, gs, j, k)) {
           placeJunglePlantImpl(st, rng, gs, j, k - 1);             // PlaceTile(61,mute:true)
+          try { mk?.('OPLANT', j, k - 1); } catch { /* probe */ }
         }
         // 藤链（cs:24275-24293）：PlaceTile(62) 经 genera default 臂实装成功，
         // Next(3)/Next(4)/Next(3)/Next(2) 条件掷时序 1:1
@@ -586,10 +641,18 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
         if (up === 62 || up === 60 || up === 384) st.type[idx] = JUNGLE_VINE;
       }
       // SpreadGrass 熔岩线分界（cs:25665-25671）
+      // ★IIII24：原版 SpreadGrass 尾 SquareTileFrame 是**全引擎** TileFrame×9 派发
+      //   （cs:75288→SquareTileFrame→tileFrameImportant 全表+CheckVines/苔藓184掷）
+      // ——旧版走 Spread.ts 的 scoped 副本（仅 185/186/187/26）静默漏掉：
+      //   ① 苔藓 184 邻格每次访视的无条件 Next(3)（NTB 蜂蜜世界苔藓密度极高，
+      //      全扫累计数千掷债）；② 藤蔓 CheckVines 转化/击杀（新草基座下悬挂藤的
+      //      636→62 转化差实证家族 T636>62×172）；③ 各 frameImportant 支撑杀。
+      // 本域专用 wrapper：写侧与递归规则与 Spread.spreadGrass 同源副本，
+      // 仅把尾奏换成引擎 genSquareTileFrame。
       if (n > lavaLine + rng.int(-2, 2) + 2) {
-        if (!remix) spreadGrass(st, m, n, MUD, MUSHROOM_GRASS);
+        if (!remix) spreadGrassFinishEngine(st, rng, m, n, MUD, MUSHROOM_GRASS);
       } else {
-        spreadGrass(st, m, n, MUD, JUNGLE_GRASS);
+        spreadGrassFinishEngine(st, rng, m, n, MUD, JUNGLE_GRASS);
       }
       // 雪冰带重分界（cs:25673-25712）
       const num14 = lavaLine + rng.int(0, 4);                        // Next(5)

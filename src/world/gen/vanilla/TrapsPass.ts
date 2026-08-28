@@ -630,7 +630,11 @@ function wallArtDispatchT(st: TileStore, x: number, y: number, rng?: RNG): boole
  *  strideX/Y=CoordinateWidth(16)+padding(2)=18；fullW/fullH=边长×18=36。 */
 const CHECK_SUPER_DEFS: Record<number, { w: number; h: number; horiz: boolean }> = {
   376: { w: 2, h: 2, horiz: true },
-  443: { w: 2, h: 1, horiz: false },
+  // ★III24b：443（Style2x1 基，TileObjectData.cs:2799-2808）StyleHorizontal=true、
+  //   CoordFullW=36；同基含 吊挂 alternate(addAlternate(2/3)，AnchorTop=SolidBottom)。
+  //   曾误标 horiz:false ⇒ 完整性等式把 fx≥36 的正当喷泉判残缺整块杀（notraps
+  //   #76 (1734..1735,840) 双证＋CS443 流 x/j 首分歧）。
+  443: { w: 2, h: 1, horiz: true },
   444: { w: 2, h: 2, horiz: false },
   485: { w: 2, h: 2, horiz: true },
 };
@@ -708,6 +712,16 @@ function checkSuperT(st: TileStore, x: number, y: number): void {
       if (!anchorValidT(st, k, ay - 1, 'bottom')) hangOk = false;
     }
     if (!hangOk && !floorOk) bad = true;
+    // ★III24b 补 vanilla 存活分支的【重排帧】面（cs:48605-48625）：floor 锚存 ⇒
+    //   fx=m*18+(num/2)*36；仅吊挂锚存 ⇒ fx=n*18+((num-2)/2)*36+72。num=入口格
+    //   frameX/36（C# 正值整除）。J 曾缺此支 ⇒ 存活喷泉帧不被改写，后续完整性
+    //   等式与重进级联全部错位。
+    if (!bad) {
+      const num36 = Math.trunc(fx / 36);
+      for (let m = 0; m < def.w; m++) {
+        st.frameX[ax + m] = (m * 18 + (floorOk ? Math.trunc(num36 / 2) * 36 : Math.trunc((num36 - 2) / 2) * 36 + 72)) as never;
+      }
+    }
   }
   if (sh === 444) {
     for (let k = ax; k < ax + def.w && !bad; k++) {             // 顶行锚（上格 SolidTile）
@@ -724,11 +738,7 @@ function checkSuperT(st: TileStore, x: number, y: number): void {
       if (!anchorValidT(st, k, ay + def.h, 'solid')) bad = true;
     }
   }
-  if (!bad) {
-    (globalThis as { __swAbEv?: (l: string) => void }).__swAbEv?.(`CS443 ${x} ${y} t${sh} fx${fx} fy${fy} R0 rc${(globalThis as { __swRollN?: number }).__swRollN}`);
-    return;
-  }
-  (globalThis as { __swAbEv?: (l: string) => void }).__swAbEv?.(`CS443 ${x} ${y} t${sh} fx${fx} fy${fy} R1 rc${(globalThis as { __swRollN?: number }).__swRollN}`);
+  if (!bad) return;
   destroyObjectT = true;
   for (let dx = 0; dx < def.w; dx++) {
     for (let dy = 0; dy < def.h; dy++) {
@@ -1235,20 +1245,6 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   // ★noTraps+tenth 强制巨石（cs:8957-8961）：Next(4)==0 → type=1（掷照耗）
   if (nf.noTraps && nf.tenthAnniversary && rng.int(0, 3) === 0) type = 1;
   trapEv('T', 0, py, type);
-  // ★III24b 批一次性取证：九格 nactive 位模式探针（G4 守卫读域；仅限观测矩形，
-  //   与 x86 rig JJHook 'N' 事件同位同序，用毕删除）。
-  if (x2 >= 1650 && x2 <= 1850 && py >= 550 && py <= 1050) {
-    let m9 = 0, b = 0;
-    for (let dy = 0; dy >= -2; dy--) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const ii = st.idx(x2 + dx, py + dy);
-        const na = st.flags[ii] !== 0 && ((st.wire[ii] >>> 5) & 1) === 0;
-        if (na) m9 |= 1 << b;
-        b++;
-      }
-    }
-    trapEv('N', x2, py, m9);
-  }
   // 共同守卫（cs:8961-8985）
   if (x2 < 3 || py < 3 || x2 > st.w - 4 || py > st.h - 4) return false;   // InWorld(x2,num,3)
   if (lava && type !== 3) return false;
@@ -1468,9 +1464,6 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     for (let k = 0; k < 2; k++) {
       placeHeadMirrorT(st, x2 + k, py);                               // ★III13 喷泉写位头变异（443）
       st.setTileSilent(x2 + k, py, GEYSER, 18 * k + 36 * fx, 0);
-    }
-    if (x2 >= 1600 && x2 <= 1900 && py >= 350 && py <= 1100) {
-      trapEv('GW', x2, py, fx);                                       // ★III24b 取证（用毕删）
     }
     return true;
   }
@@ -1857,10 +1850,12 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
 const TNT_BARREL = sheetId(654);
 export function placeTNTBarrel(st: TileStore, x: number, y: number, rng?: RNG): boolean {
   let py = y;
+  let rejReason = 0;
   while (!st.flags[st.idx(x, py)]) {
     py++;
-    if (py > st.h - 350) return false;
+    if (py > st.h - 350) { rejReason = 11; break; }
   }
+  if (rejReason) { trapEv('BX', x, py, rejReason); return false; }
   py--;
   {
     const i = st.idx(x, py);
@@ -1870,6 +1865,24 @@ export function placeTNTBarrel(st: TileStore, x: number, y: number, rng?: RNG): 
   placeHeadMirrorT(st, x, py);                                        // ★III13 桶锚头变异（654 非实心门恒过）
   const ok = place2x2Traps(st, x, py, TNT_BARREL);
   if (ok && !i13Legacy()) cascade3x3T(st, x, py, rng, true);   // cs:60752 通用尾 SquareTileFrame(i,j)
+  if (!ok) {
+    // ★III24b 取证：拒绝定位（用毕删）。r1=footprint active / r2=ground 缺席 /
+    // r3=ground 非表且非 SolidTile2(带列 idx 与 ground-sheet)
+    for (let i = x - 1; i <= x && !ok; i++) {
+      for (let j = py - 1; j <= py; j++) {
+        if (st.flags[st.idx(i, j)]) { trapEv('BX', x, i * 100 + (j - (py - 1)), 21); return false; }
+      }
+      const gi = st.idx(i, py + 1);
+      const gt = st.type[gi]!;
+      const solid2 = st.flags[gi] !== 0 && vanGenSolidType(gt) && st.slope[gi] === 0 && st.half[gi] === 0
+        && ((st.wire[gi] >>> 5) & 1) === 0;
+      if (!st.flags[gi]) { trapEv('BX', x, py + 1, 31); return false; }
+      if (!solid2 && !PLACE2X2_TABLE.has(sheetOf(gt))) { trapEv('BX', x, sheetOf(gt), 41); return false; }
+    }
+    trapEv('BX', x, py, 99);
+    return false;
+  }
+  trapEv('BW', x, py, 1);                                      // 成功锚点流（对拍用）
   return ok;
 }
 

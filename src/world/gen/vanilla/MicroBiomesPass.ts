@@ -340,24 +340,6 @@ const mbDraws = (): number => {
   try { return g.__swMbDraws?.() ?? 0; } catch { return 0; }
 };
 
-/** IIII26 临时预算探针(批后删除):每次调用记录 [调用序, 开始掷, 结束掷] */
-interface BudgetRec { site: string; seq: number; a: number; b: number }
-let __budgetSeqCounter = 0;
-const __budgetLog: BudgetRec[] = [];
-function __budgetEnter(site: string): void {
-  const rec: BudgetRec = { site, seq: ++__budgetSeqCounter, a: mbDraws(), b: -1 };
-  __budgetLog.push(rec);
-}
-function __budgetExit(): void {
-  const g = globalThis as { __swBudgetStack?: BudgetRec[] };
-  if (!g.__swBudgetStack) return;
-  const rec = g.__swBudgetStack.pop();
-  if (rec) { rec.b = mbDraws(); }
-}
-export function __resetBudgetLog(): void {
-  __budgetSeqCounter = 0; __budgetLog.length = 0;
-}
-export function __readBudgetLog(): BudgetRec[] { return __budgetLog.slice(); }
 
 export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests?: ChestSink): void {
   const g0 = globalThis as { __swMbCap?: (gs: GenState, st: TileStore, chests?: ChestSink) => void };
@@ -385,16 +367,15 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     const possible = deadMans.getPossibleChests();
     segProbe('deadCands', possible.map(p => [p.x, p.y]));
     const deadCount = rng.int(scW(10), scW(20));   // DeadManChests 10-20 ×WorldWidth
-    segProbe('deadCount', deadCount);
-    let done = 0;
+    segProbe('deadCount', deadCount);    let done = 0;
     let guard = 3000;                              // num4
     while (done < deadCount && possible.length > 0) {
       if (--guard <= 0) break;
       segProbe('DMPICK');
       const pick = rng.int(0, possible.length - 1);
       const c = possible[pick];
-      const ok = deadMans.place(c.x, c.y);          // 返回值原版丢弃(cs:21814)
-      segProbe(`DMPLACE ${c.x},${c.y} ok=${ok ? 1 : 0}`);
+
+      const ok = deadMans.place(c.x, c.y);          // 返回值原版丢弃(cs:21814)      segProbe(`DMPLACE ${c.x},${c.y} ok=${ok ? 1 : 0}`);
       done++;
       possible.splice(pick, 1);
     }
@@ -403,15 +384,13 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   // ---- 2. Thin Ice(cs:21825-21854)----
   if (!gs.seedFlags.notTheBees || gs.seedFlags.remix) {
     const iceCount = rng.int(scW(3), scW(5));      // ThinIcePatchCount 3-5 ×WorldWidth
-    segProbe('iceCount', iceCount);
-    let iceDone = 0, iceFail = 0;
+    segProbe('iceCount', iceCount);    let iceDone = 0, iceFail = 0;
     const iceFailLimit = 1000;                     // num9
     while (iceDone < iceCount) {
       // RandomWorldPoint(worldSurface+20, 50, 200, 50)(cs:21836)
       const ox = rng.int(50, w - 51);
       const oy = rng.int(Math.floor(gs.worldSurface) + 20, h - 201);
-      segProbe('iceTry', [ox, oy]);
-      __budgetEnter('TI.place'); let _tiOk: boolean; try { _tiOk = placeThinIcePatch(st, rng, gs, ox, oy); } finally { __budgetExit(); }
+      segProbe('iceTry', [ox, oy]);      const _tiOk = placeThinIcePatch(st, rng, gs, ox, oy);
       if (_tiOk) {
         iceDone++;
         iceFail = 0;
@@ -1553,8 +1532,8 @@ export class DeadMansChestBiome {
       if (!this.isAGoodSpot(x, y)) { segProbe(`CAND ${x},${y} good=False`); continue; }
       this.clearCaches();
       const px = x, py = y + 1;
-      __budgetEnter('DM.cand.findBoulder'); try { this.findBoulderTrapSpots(px, py); } finally { __budgetExit(); }
-      __budgetEnter('DM.cand.findDart'); try { this.findDartTrapSpots(px, py); } finally { __budgetExit(); }
+      this.findBoulderTrapSpots(px, py);
+      this.findDartTrapSpots(px, py);
       // III7 探针:CAND.good 仅反映 IsAGoodSpot(x86 同口径);CanPlace 结果另记
       segProbe(`CAND ${x},${y} good=True`);
       const good = this.areThereEnoughTraps()
@@ -1569,22 +1548,22 @@ export class DeadMansChestBiome {
 
   /** Place(cs:102-136) */
   place(ox: number, oy: number): boolean {
-    __budgetEnter('DM.place'); try { return this.placeInner(ox, oy); } finally { __budgetExit(); }
+    return this.placeInner(ox, oy);
   }
   private placeInner(ox: number, oy: number): boolean {
     if (!this.isAGoodSpot(ox, oy)) return false;
     this.clearCaches();
     const px = ox, py = oy + 1;   // position = origin + (0,1)
-    __budgetEnter('DM.place.findBoulder'); try { this.findBoulderTrapSpots(px, py); } finally { __budgetExit(); }
-    __budgetEnter('DM.place.findDart'); try { this.findDartTrapSpots(px, py); } finally { __budgetExit(); }
-    __budgetEnter('DM.place.findExpl'); try { this.findExplosiveTrapSpots(px, py); } finally { __budgetExit(); }
+    this.findBoulderTrapSpots(px, py);
+    this.findDartTrapSpots(px, py);
+    this.findExplosiveTrapSpots(px, py);
     if (!this.areThereEnoughTraps()) return false;
-    __budgetEnter('DM.turnGoldChest'); try { this.turnGoldChestIntoDeadMansChest(ox, oy); } finally { __budgetExit(); }
-    for (const d of this.darts) { __budgetEnter('DM.dartTrap'); try { this.actuallyPlaceDartTrap(d); } finally { __budgetExit(); } }
-    for (const w of this.wires) { __budgetEnter('DM.wireLine'); try { this.placeWireLine(w); } finally { __budgetExit(); } }
-    for (const b of this.boulders) { __budgetEnter('DM.boulderTrap'); try { this.actuallyPlaceBoulderTrap(b); } finally { __budgetExit(); } }
-    for (const e of this.explosives) { __budgetEnter('DM.explPlace'); try { this.actuallyPlaceExplosive(e); } finally { __budgetExit(); } }
-    __budgetEnter('DM.wiresForExpl'); try { this.placeWiresForExplosives(ox, oy); } finally { __budgetExit(); }
+    this.turnGoldChestIntoDeadMansChest(ox, oy);
+    for (const d of this.darts) { this.actuallyPlaceDartTrap(d); }
+    for (const w of this.wires) { this.placeWireLine(w); }
+    for (const b of this.boulders) { this.actuallyPlaceBoulderTrap(b); }
+    for (const e of this.explosives) { this.actuallyPlaceExplosive(e); }
+    this.placeWiresForExplosives(ox, oy);
     return true;
   }
 

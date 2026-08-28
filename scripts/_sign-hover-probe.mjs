@@ -7,14 +7,16 @@ page.on('pageerror', (e) => console.log('PAGEERR:', String(e.message).slice(0, 2
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
-// 私有 origin 资产缓存可能冷/复检:等徽标完成淡出(否则菜单点击被资产门吞掉)
-await page.waitForFunction(() => {
-  const b = document.querySelector('.sw-asset-badge');
-  return !b || /完成|Ready|100%/.test(b.textContent || '');
-}, { timeout: 600000, polling: 1000 });
-await new Promise((r) => setTimeout(r, 1500));
-await page.click('[data-act=sp]');
-await page.waitForSelector('.sw-vsel', { timeout: 10000 });
+
+// 菜单可能被资产门/HMR 重挂:点 sp 重试至 .sw-vsel 出现
+for (let i = 0; i < 10; i++) {
+  try {
+    await page.waitForSelector('[data-act=sp]', { timeout: 10000 });
+    await page.click('[data-act=sp]');
+    await page.waitForSelector('.sw-vsel', { timeout: 8000 });
+    break;
+  } catch { if (i === 9) throw new Error('sp click failed 10x'); }
+}
 await new Promise((r) => setTimeout(r, 600));
 if (!(await page.$('.sw-vsel .sw-vitem'))) {
   await page.click('.sw-vsel [data-act=new]');
@@ -68,7 +70,8 @@ const res = await page.evaluate(async () => {
   st.setTile(sx + 1, sy, SIGN, 18, 0);
   st.setTile(sx, sy + 1, SIGN, 0, 18);
   st.setTile(sx + 1, sy + 1, SIGN, 18, 18);
-  // 写文字
+  // 写文字（先懒建牌项——setSignText 只写已有项，等价 openSignEditor 懒建路径）
+  if (!g.world.signs.find((sg) => sg.x === sx && sg.y === sy)) g.world.signs.push({ x: sx, y: sy, text: '' });
   g.setSignText(sx, sy, 'Hello World! 这是一块标牌。');
   for (let i = 0; i < 30; i++) { g.player.vx = 0; g.player.vy = 0; g.fixedUpdate(1 / 60); }
   // 屏幕坐标换算（camera.toScreen 或手算）：标牌中心格

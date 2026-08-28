@@ -274,13 +274,14 @@ async function scrubPoisonedEntries() {
   scrubRunning = _scrubInner().finally(() => { scrubRunning = null; });
   return scrubRunning;
 }
-async function _scrubInner() {
+async function _scrubInner(force = false) {
   try {
     const cache = await getCache();
     // ★每版本一次(2026-08-28 trace 实证):全缓存逐条 match+MIME 是 SW 线程
     // 头号 CPU 热点(数千条×IO),而毒条目只能来自"坏部署写同名缓存"——同版本
     // 二次 init 纯重复扫。标记条目存版本内,跨 SW 重启仍跳过;换版本自然重扫。
-    try {
+    // force(gc 显式清理)无视标记强制重扫=同版本毒条目再现的逃生门。
+    if (!force) try {
       const marker = await cache.match('__sw_meta__');
       if (marker) {
         const j = await marker.json().catch(() => null);
@@ -341,7 +342,10 @@ self.addEventListener('message', (e) => {
       if (d.version !== currentVersion) { currentVersion = d.version; cacheReady = null; }
       // gc = 页面显式清理(清理按钮/检测)——顺带强制重扫本版本毒条目
       // (scrub 每版本一次的逃生门:同版本若再现毒条目,这里兜底)
-      e.waitUntil(gcOldCaches().then(() => _scrubInner()));
+      e.waitUntil((async () => {
+        try { await gcOldCaches(); await _scrubInner(true); }
+        catch (err) { self.__swLastGcErr = String(err && err.message || err); }
+      })());
     }
   } else if (d.type === 'warm') {
     if (!currentVersion) return; // 无版本(未 init 且消息未带)拒绝,防写错缓存
@@ -350,7 +354,7 @@ self.addEventListener('message', (e) => {
   } else if (d.type === 'warm-cancel') {
     warmAbort = true;
   } else if (d.type === 'ping') {
-    postMessageToPages({ type: 'pong', version: currentVersion });
+    postMessageToPages({ type: 'pong', version: currentVersion, lastGcErr: self.__swLastGcErr ?? null });
   } else if (d.type === 'status') {
     if (!currentVersion) return;
     reportStatus();

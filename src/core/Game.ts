@@ -4734,6 +4734,15 @@ export class Game implements GameHooks {
 
   /** 渲染锁帧时间戳(帧率上限用;逻辑 tick 恒 60Hz 不受影响) */
   private _lastCapTs = 0;
+  private _paintedFrames = 0;
+  private _paintWaits: Array<{ frames: number; res: () => void }> = [];
+  /** 世界首帧真实上屏等待(#三开压测批"就绪瞬间黑一下"):渲染帧完成 frames 次
+   *  后 resolve——加载页/菜单幕布据此延后撤除,世界在幕布【底下】先渲染完整,
+   *  切换零空窗。跳帧(frameCap 未到)不计数,只认真实渲染帧 */
+  whenFirstPaint(frames = 2): Promise<void> {
+    if (this._paintedFrames >= frames) return Promise.resolve();
+    return new Promise((res) => this._paintWaits.push({ frames, res }));
+  }
   start() {
     if (this.running) return;
     this.running = true;
@@ -4751,6 +4760,13 @@ export class Game implements GameHooks {
         }
         this._lastCapTs = now;
         this.frame(now);
+        this._paintedFrames++;
+        if (this._paintWaits.length) {
+          this._paintWaits = this._paintWaits.filter((w) => {
+            if (this._paintedFrames >= w.frames) { w.res(); return false; }
+            return true;
+          });
+        }
         requestAnimationFrame(loop);
       } catch (err) {
         // 帧循环异常熔断(2026-08-18):未捕获异常曾把 rAF 链静默炸断 = 整页 JS
@@ -5865,6 +5881,15 @@ export class Game implements GameHooks {
 
     // ---- 实体 ----
     this.entities.update(dt, this);
+    // 亡命箱窗口递减（Player.cs:24811 Update 每 tick）+死亡结算（KillMe :39126
+    // `window>0 → HandleSpecialEvent(23)`——任何死法,window 自然排干）
+    if (this.deadmanWindow > 0) {
+      this.deadmanWindow--;
+      if (this.player.dead && this.deadmanWindow > 0) {
+        this.achievements.handleSpecialEvent(23, {
+          statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+      }
+    }
     // ---- 雨天金鱼形态链（NPC.FishTransformationDuringRain，NPC.cs:94084-94115：
     //      原版在 UpdateCollision :93742 逐 NPC 每 tick 调，wet 计算后位移积分前；
     //      本仓在敌怪轮后逐敌调——wet 为本 tick 新值等价）。230湿→55/55非湿雨→230/
@@ -17727,6 +17752,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const fxC = stC.frameX[stC.idx(cxy.x, cxy.y)];
       if (sheetC === 467 && Math.floor(fxC / 36) === 4) {
         this.wiring.hitSwitch(cxy.x, cxy.y);
+        this.deadmanWindow = 600;   // :33519 死亡成就窗口(10s)
       }
     }
     // 成就：打开金箱（Player.cs:32782-32790：sheet21 frameX∈[36,72) = 金箱 style1
@@ -19585,6 +19611,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   closeChestPanel: (() => void) | null = null;
   /** 死亡收背包（Main.cs:46435 dead ⇒ playerInventory=false；UI 注入） */
   closeInventory: (() => void) | null = null;
+  /** 亡命箱死亡成就窗口（Player.cs:24811 _framesLeftEligibleForDeadmansChest
+   *  DeathAchievement——开布线箱置 600,每 tick 递减,死亡时 >0 → 成就 23
+   *  "Dead Men Tell No Tales"(任何死法,原版语义即如此) */
+  deadmanWindow = 0;
   /** 便携容器宠物追踪（piggyBankProjTracker 本仓等价，Player.cs:31245
    *  TrackedProjectileReference）：Main.cs:38469 Set / Player.cs:31324 Clear——
    *  非空 = 当前 -2 面板由该容器宠物（960 Chester / 525 飞猪存钱罐，两型共用

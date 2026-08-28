@@ -96,26 +96,26 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     flowGenClient ??= new WorldGenClient();
     return flowGenClient;
   }
-  function startAssetPrewarm(): void {
-    // ★必须 setTimeout 宏任务边界(t1547 trace 实锤):AssetGen 已被 Game 静态导入,
-    // 产物里动态 import 被内联为 Promise.resolve → .then 是【微任务】,生成包
-    // (~550ms putImageData)会在点击 EventDispatch 的同一次派发里同步跑完=
-    // "点进入世界卡 0.7s"的主犯。宏任务让点击先落屏,生成块挪进加载页自身 task
-    setTimeout(() => {
-      void (async () => {
-        try {
-          const c = await sharedGenClient();
-          const icons = await c.genIcons({ timeoutMs: 30000 });
-          const m = await import('./assets/AssetGen');
-          m.prepareIconAtlas(icons);
-          m.buildAssets();   // 物化(图集 putImageData 一次+逐图标 drawImage)
-        } catch {
-          // worker 不可用:回退主线程同步生成(Game ctor 冷兜底同款)
-          const m = await import('./assets/AssetGen');
-          m.buildAssets();
-        }
-      })();
-    }, 0);
+  let prewarmPromise: Promise<void> | null = null;
+  /** 图标包预热(#三开压测批 worker 化):worker 生成图集→注入 AssetGen→物化。
+   *  返回 Promise——调用方【必须 await】后再 makeGame(worker 化后定时器任务只
+   *  派发异步作业,不 await 则 Game ctor 冷兜底仍会同步跑 legacy 生成,白干)。
+   *  内部首个 await(worker spawn)即真异步 → 点击派发先行落屏;会话闩防重复生成 */
+  function startAssetPrewarm(): Promise<void> {
+    prewarmPromise ??= (async () => {
+      try {
+        const c = await sharedGenClient();
+        const icons = await c.genIcons({ timeoutMs: 30000 });
+        const m = await import('./assets/AssetGen');
+        m.prepareIconAtlas(icons);
+        m.buildAssets();   // 图集 putImageData 一次 + sheets/角色/敌怪(遗留主线程段)
+      } catch (e) {
+        console.warn('[assetPrewarm] 预热失败(回退主线程同步生成):', String(e).slice(0, 120));
+        const m = await import('./assets/AssetGen');
+        m.buildAssets();
+      }
+    })();
+    return prewarmPromise;
   }
   let menuBg: MenuBackground | null = null;
   let menuRunning = false;
@@ -221,14 +221,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // 全屏地图背景族预取(MapBG* 43 张+卷轴 Map.png——vui 懒加载首次请求要几百 ms,
     // 开图头几帧背景未就绪 → 近黑底色一闪;进世界后台补齐后开图即得羊皮纸)
     atlas?.preloadUiPrefix(['MapBG', 'Map.png']).catch(() => {});
-    stopMenu();
+    // ★幕布撤除延后(#三开压测批"就绪瞬间黑一下"):stopMenu(毁菜单幕布+
+    // VUI.setState(null) 清加载页)原在 g.start() 前——首帧上屏前的空窗=黑一下。
+    // 现世界先在幕布底下渲 2 帧,stopMenu 由 onWorldReady 的 whenFirstPaint 回调执行
     titleMenu?.destroy();
     titleMenu = null;
     ui.game = g;
     ui.initInGame(); // DOM 版游戏内 UI（道具栏/背包/合成/宝箱/Buff）——用户指定 web 技术路线
     g.start();
     audio.play('main');
-    ui.toast(Lang.text('Mods.SandboxWorld.Toast.Welcome', g.world.name));
   }
 
   function maybeDev(g: Game) {
@@ -241,7 +242,21 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   function makeGame(): Game {
     const g = new Game(root, {
-      onWorldReady: () => { ui.hideProgress(); enterGame(g); maybeDev(g); applyAppearance(g); maybeShowWelcomeAnnounce(); },
+      onWorldReady: () => {
+        // ★首帧上屏后再切画面(#三开压测批"就绪瞬间黑一下"):enterGame 先在
+        // 加载页【底下】启动世界渲染,whenFirstPaint(2 帧真实上屏)后才撤幕布/
+        // 进度页——切换零空窗。3s 兜底防渲染异常时永久卡加载页
+        enterGame(g);
+        void Promise.race([
+          g.whenFirstPaint(4),   // 4 帧:tintSkyTex 首烘(~2 帧)也纳入幕布下,切换帧必亮
+          new Promise((r) => setTimeout(r, 3000)),
+        ]).then(() => {
+          ui.hideProgress();
+          stopMenu();   // 撤菜单幕布+清 VUI 加载页(世界已上屏,零空窗)
+          ui.toast(Lang.text('Mods.SandboxWorld.Toast.Welcome', g.world.name));
+          maybeDev(g); applyAppearance(g); maybeShowWelcomeAnnounce();
+        });
+      },
       onInventoryChanged: () => { g.prefetchInvProjectiles(); g.prefetchInvPlaceableSheets(); ui.refreshAll(); },
       onCraftCursorGlow: (itemId) => ui.markCursorGlow(itemId),
       onBuffsChanged: () => ui.refreshBuffs(),
@@ -332,8 +347,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // 否则 makeGame 同步构造里 Game ctor 冷兜底 buildAssets(~1.2s)会吃掉整个
     // 点击 EventDispatch(t1547 后续专录 trace 实锤:WorldCreation:151 派发 1232ms)
     ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.GeneratingWorld'), 0.05);
-    startAssetPrewarm();
-    await new Promise((r) => setTimeout(r, 0));
+    await startAssetPrewarm();
     const g = makeGame();
     await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(Lang.worldgenText(label), p));
   }
@@ -645,7 +659,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   async function importWld(buf: Uint8Array) {
-    startAssetPrewarm();   // #perf2026-08-28:同 loadFromKey(wld 转换/沉降段并行)
+    await startAssetPrewarm();   // #perf2026-08-28:同 loadFromKey(wld 转换/沉降段并行)
     // ★宏任务让路:parseWldToSave 同步重活+makeGame 构造必须与预热定时器分 task
     await new Promise((r) => setTimeout(r, 0));
     ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.ParsingWld'), 0.1);
@@ -938,8 +952,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // buildAssets(~1.2s)必须发生在点击 EventDispatch 之外的独立 task——本函数才是
     // 创建 UI 的真实入口(WorldCreationPanel→flow.onCreate),此前补丁打在 legacy
     // newWorld 上未覆盖此处(t1547 专录 trace 实锤 772-1232ms 派发)
-    startAssetPrewarm();
-    await new Promise((r) => setTimeout(r, 0));
+    await startAssetPrewarm();
     const g = makeGame();
     await g.newWorld(cfg.seed || String(Date.now()), cfg.w, cfg.h,
       (label, p) => loadState.setProgress(label, p),

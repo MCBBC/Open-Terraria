@@ -66,6 +66,14 @@ const cfg = CFGS[CHAIN]!;
     if (bad) mask[i] = 1;
   }
   console.log(`[${CHAIN}] GLOBAL A=${dA} T=${dT} W=${dW} L=${dL} Hf=${dHf} Sl=${dSl}`);
+  // J-side trap-family histogram (active sheet-654/443/137/135/141)
+  const hist = new Map<number, number>();
+  for (let i = 0; i < N; i++) {
+    if (!(ja[i]! & 1)) continue;
+    const s2 = SHEET[jt[i]!];
+    if ([654, 443, 137, 135, 141].includes(s2)) hist.set(s2, (hist.get(s2) ?? 0) + 1);
+  }
+  console.log(`J-hist ${[654,443,137,135,141].map(k=>`${k}:${hist.get(k)??0}`).join(" ")}`);
   // clusters 4-connectivity
   const seenC = new Uint8Array(N);
   const clusters: number[][] = [];

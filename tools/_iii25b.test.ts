@@ -34,14 +34,17 @@ const OUT = process.env.SW_I25_OUT ?? '/tmp/iii25-out/j-hm.txt';
   const wPath = process.env.SW_I25_W ?? '/tmp/iii25-out/j-W.txt';
   (globalThis as unknown as { __swTrapEv?: (k: string, a: number, b: number, v: number) => void }).__swTrapEv =
     (kind: string, a: number, b: number, v: number) => {
+      if (G_LO < 0 && kind !== 'BW' && kind !== 'BX') return;
       if (G_LO >= 0) {
         if (!logging && kind === 'A' && a >= G_LO) logging = true;
-        if (!logging) return;
-        if (kind === 'A' && a > G_HI) { logging = false; return; }
+        else if (!logging && kind !== 'BW' && kind !== 'BX') return;
+        if (kind === 'A' && a > G_HI) { logging = false; }
+        if (!logging && kind !== 'BW' && kind !== 'BX') return;
       }
       appendFileSync(evPath, `${evLines + 1}|${kind}|${a}|${b}|${v}|rc${g.__swRollN}\n`);
       evLines++;
       if (kind === 'GW') appendFileSync(wPath, `GW ${a} ${b} st${v} rc${g.__swRollN}\n`);
+      if (kind === 'BW' || kind === 'BX') appendFileSync(wPath, `${kind} ${a} ${b} r${v} rc${g.__swRollN}\n`);
     };
   const csPath = process.env.SW_I25_CS ?? '/tmp/iii25-out/j-CS.txt';
   let csOn = process.env.SW_I25_CS === '1';

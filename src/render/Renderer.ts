@@ -2458,9 +2458,9 @@ export class Renderer {
     this.sky.disposeCloudGL();
   }
 
-  /** 物品图标：优先 Maples 素材，缺省回退程序化 */
+  /** 物品图标：优先 Maples 素材，缺省回退程序化(懒物化,首次访问切片) */
   itemIcon(id: number): HTMLCanvasElement | null {
-    return this.assets.itemIcons.get(id) ?? null;
+    return this.assets.itemIcon(id);
   }
 
   /** Maples 图标绘制矩形（找不到返回 null）。
@@ -2551,6 +2551,9 @@ export class Renderer {
   private _mouseX = 0;
   /** 鼠标悬停告示牌的文本（render 内计算，tooltip 层消费） */
   private signHoverText = '';
+  /** 悬停告示牌头顶指示泡（Main.signBubble，Player.cs:33839 置位/:45133 绘制；
+   *  屏坐标在悬停检测段算好存此处，tooltip 层消费。无文本的空牌也显示） */
+  private signBubbleScreen: { x: number; y: number; flip: boolean } | null = null;
   private _mouseY = 0;
   private _mouseDown = false;
 
@@ -3397,6 +3400,7 @@ export class Renderer {
     //      鼠标旁 460px 宽 wordwrap 悬浮提示。2026-08-27 补）
     {
       this.signHoverText = '';
+      this.signBubbleScreen = null;
       const cam2 = cam, z2 = z;
       const mwx = cam2.x + (this._mouseX - viewW / 2) / z2;
       const mwy = cam2.y + (this._mouseY - viewH / 2) / z2;
@@ -3409,6 +3413,14 @@ export class Renderer {
           const ay = mty - Math.floor(world.store.frameY[si] / 18);
           const sign = world.signs.find((sg) => sg.x === ax && sg.y === ay);
           if (sign && sign.text.trim()) this.signHoverText = sign.text;
+          // signBubble（Player.cs:33839-33841）：悬停任意告示牌即置位——
+          // signX=锚右缘px、signY=锚顶行；泡偏玩家异侧（:45142 signX>玩家右缘 → 翻转）
+          const signX = ax * TILE + 16, signY = ay * TILE;
+          this.signBubbleScreen = {
+            x: Math.round((signX - cam2.x) * z2 + viewW / 2),
+            y: Math.round((signY - cam2.y) * z2 + viewH / 2),
+            flip: signX > player.x + player.w,
+          };
         }
       }
     }
@@ -12460,35 +12472,69 @@ export class Renderer {
       ctx.fillText(p.cursorItemIconText, x, y);
       ctx.restore();
     }
-    // 告示牌悬停文本（vanilla :43671-43700：鼠标旁 460px 宽 wordwrap、
-    // MouseText 字体白×mouseTextColor 脉动、OpaqueBox 背后 tooltip）——
-    // 本仓 canvas 字+四向描边（字体偏差登记同 cursorItemIconText）
+    // 告示牌头顶指示泡（Main.cs:45133-45152 signBubble）：Chat2.png（32×28）挂锚顶
+    // 上方 22px、偏玩家异侧 ±(8+宽)，白×mouseTextColor 脉动（乘色，复用 tintIconRect）
+    if (this.signBubbleScreen) {
+      const tex = this.atlas.ensureVImage('vanilla/Chat2.png');
+      if (tex) {
+        const mtb = this.lighting?.clock.mouseTextColor ?? 255;
+        const cb = Math.round((mtb / 255) * 255);
+        let num = this.signBubbleScreen.x;
+        if (this.signBubbleScreen.flip) num += -8 - tex.width;
+        else num += 8;
+        const num2 = this.signBubbleScreen.y - 22;
+        ctx.save();
+        if (this.signBubbleScreen.flip) {
+          const cxm = num + tex.width / 2;
+          ctx.translate(cxm, 0); ctx.scale(-1, 1); ctx.translate(-cxm, 0);
+        }
+        tintIconRect(ctx, { img: tex, sx: 0, sy: 0, sw: tex.width, sh: tex.height },
+          { x: num, y: num2, w: tex.width, h: tex.height }, [cb, cb, cb]);
+        ctx.restore();
+      }
+    }
+    // 告示牌悬停文本（Main.cs:42354-42397 1:1）：WordwrapString(text,460,10) 断行 →
+    // 锚=mouse+(16,16)（OpaqueBox 再 +(8,2)）→ 右/下缘钳制（Y>H-行高×行数、
+    // X>W-maxW）→ DrawInvBG 底板（x-10,y-5,w+20,行高×行数+7, Color(23,25,81)×
+    // 0.925×0.85）→ DrawBorderStringFourWay 白×mouseTextColor 四向描边。
+    // ★canvas fillText y=基线而 XNA DrawString y=字形顶（origin 零）——曾按基线画
+    //   致文字浮出底板上缘（2026-08-28 用户实报"标牌文字错位"），textBaseline=top 修正
     if (this.signHoverText) {
       ctx.font = '14px monospace';
+      const lh = 20;
       const lines: string[] = [];
       let remaining = this.signHoverText;
-      while (remaining.length > 0) {
-        if (remaining.length <= 40) { lines.push(remaining); break; }
-        let cut = remaining.lastIndexOf(' ', 40);
-        if (cut <= 0) cut = 40;
+      while (remaining.length > 0 && lines.length < 10) {
+        if (ctx.measureText(remaining).width <= 460) { lines.push(remaining); break; }
+        let cut = remaining.length;
+        while (cut > 1 && ctx.measureText(remaining.slice(0, cut)).width > 460) cut--;
+        const sp = remaining.lastIndexOf(' ', cut);   // 优先空格断词（WordwrapString 语义）
+        if (sp > 0) cut = sp;
         lines.push(remaining.slice(0, cut));
         remaining = remaining.slice(cut).trimStart();
       }
-      const maxW = Math.max(...lines.map((l) => ctx.measureText(l).width), 40);
-      const lh = 16;
-      const boxW = maxW + 24, boxH = lines.length * lh + 16;
+      let maxW = 0;
+      for (const l of lines) maxW = Math.max(maxW, ctx.measureText(l).width);
       let bx = this._mouseX + 16, by = this._mouseY + 16;
-      if (bx + boxW > this.canvas.width - 10) bx = this.canvas.width - boxW - 10;
-      if (by + boxH > this.canvas.height - 10) by = this.canvas.height - boxH - 10;
+      if (options.data.opaqueBoxBehindTooltips) { bx += 8; by += 2; }
+      if (by > this.canvas.height - lh * lines.length) by = this.canvas.height - lh * lines.length;
+      if (bx > this.canvas.width - maxW) bx = this.canvas.width - maxW;
       ctx.save();
-      ctx.fillStyle = 'rgba(30,30,50,0.85)';
-      ctx.fillRect(bx - 6, by - 6, boxW + 12, boxH + 12);
-      ctx.strokeStyle = 'rgba(120,130,200,0.5)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(bx - 6, by - 6, boxW + 12, boxH + 12);
-      ctx.fillStyle = '#fff';
+      ctx.textBaseline = 'top';
+      if (options.data.opaqueBoxBehindTooltips) {
+        ctx.fillStyle = 'rgba(18,20,64,0.79)';   // Color(23,25,81,255)×0.925×0.85
+        ctx.fillRect(bx - 10, by - 5, maxW + 20, lh * lines.length + 7);
+      }
+      const mt2 = this.lighting?.clock.mouseTextColor ?? 255;
+      const c2 = Math.round((mt2 / 255) * 255);
       for (let i = 0; i < lines.length; i++) {
-        ctx.fillText(lines[i], bx, by + i * lh);
+        const y = by + i * lh;
+        for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+          ctx.fillStyle = '#000';
+          ctx.fillText(lines[i], bx + ox, y + oy);
+        }
+        ctx.fillStyle = `rgb(${c2},${c2},${c2})`;
+        ctx.fillText(lines[i], bx, y);
       }
       ctx.restore();
     }

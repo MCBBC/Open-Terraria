@@ -45,6 +45,9 @@ try {
   // ---------- 会话1:首载 ----------
   const p1 = await mk();
   const okMenu = await page_waitMenu(p1, 45000);
+  if (!okMenu) {
+    console.log('  [debug] title-html=', await p1.evaluate(() => document.title + ' | ' + (document.body.innerText || '').slice(0, 120)).catch(() => 'eval-fail'));
+  }
   check('① 首载进到主菜单(揭幕门不受扰)', okMenu);
   const v = await getCache(p1);
   check('① 版本锚定到手', !!v, v ?? '');
@@ -83,18 +86,46 @@ try {
   check('③ 同版本二次 init:标记跳过,毒条目仍在(不再全量重扫)', poisonAfter === 'text/html', poisonAfter);
 
   // ---------- gc 逃生门 ----------
+  // ★必须先让更新后的 SW 接管:reload 触发 update-check,新字节→install→skipWaiting
+  const pong = await p1.evaluate(async () => {
+    const reg0 = await navigator.serviceWorker.getRegistration();
+    const old = reg0?.active || reg0?.waiting || reg0?.installing;
+    if (!old) return { err: 'no-sw' };
+    const pingOnce = async (sw) => new Promise((res) => {
+      const onMsg = (e) => { if (e.data?.type === 'pong') { navigator.serviceWorker.removeEventListener('message', onMsg); res(e.data); } };
+      navigator.serviceWorker.addEventListener('message', onMsg);
+      try { sw.postMessage({ type: 'ping' }); } catch (e) { res({ err: String(e) }); }
+      setTimeout(() => { navigator.serviceWorker.removeEventListener('message', onMsg); res({ err: 'ping-timeout' }); }, 700);
+    });
+    // 能力探测:当前 active 已具备 lastGcErr 字段=最新版,无需等更新
+    const first = await pingOnce(reg0.active);
+    if (typeof first.lastGcErr !== 'undefined') return { fresh: true, lastGcErr: first.lastGcErr };
+    try { await reg0.update(); } catch {}
+    // 轮询等新字节 SW 接管(skipWaiting+claim)——引用必须每次重读
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sw = reg?.active;
+      if (sw && sw !== old) {
+        const r = await pingOnce(sw);
+        if (typeof r.lastGcErr !== 'undefined') return { fresh: true, lastGcErr: r.lastGcErr };
+      }
+    }
+    return { err: 'sw-never-updated' };
+  });
+  console.log('  [sw rev]', JSON.stringify(pong));
   await p1.evaluate(async () => {
     const reg = await navigator.serviceWorker.getRegistration();
     reg?.active?.postMessage({ type: 'gc', version: window.__swAssetCache.state().version });
   });
-  await new Promise((r) => setTimeout(r, 1500));
+  await new Promise((r) => setTimeout(r, 2000));
   const poisonGc = await p1.evaluate(async (u) => {
     const ver = window.__swAssetCache.state().version;
     const c = await caches.open('sw-assets-v' + ver);
     const r = await c.match(u);
     return r ? r.headers.get('content-type') : null;
   }, poisonUrl);
-  check('④ gc 逃生门:强制重扫后毒条目被清', poisonGc === null, String(poisonGc));
+  check('④ gc 逃生门:强制重扫后毒条目被清', poisonGc === null, String(poisonGc) + ' swErr=' + JSON.stringify(pong));
 
   // ---------- 计数口径 ----------
   const counts = await p1.evaluate(async () => {

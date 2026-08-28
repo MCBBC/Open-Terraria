@@ -236,10 +236,10 @@ function iconUrl(game: Game, id: number): string {
       }
       // 懒加载未就绪:返回程序化兜底但【不缓存】(此前把空串/兜底缓存死,
       // 图标加载完成后道具栏永远不升级为原版图标)。预载流程完成后此路径不再触发
-      const c = game.assets.itemIcons.get(id);
+      const c = game.assets.itemIcon(id);
       return c ? c.toDataURL() : '';
     }
-    const c = game.assets.itemIcons.get(id);
+    const c = game.assets.itemIcon(id);
     url = c ? c.toDataURL() : '';
     if (url) iconCache.set(id, url);  // 无 atlas(永久)才缓存兜底;空串不缓存
   }
@@ -2906,9 +2906,12 @@ export class UI {
     const equipExtras: HTMLElement[] = [];
     const vanityExtras: HTMLElement[] = [];
     {
-      const equipWrap = equipCol.firstElementChild as HTMLElement | null;
+      // ★追加槽必须接在【槽位容器】尾部(vcol2 的 col.children[1])——
+      //  firstElementChild 是列标签 div,曾 append 进标签 ⇒ 恶魔之心/大师槽
+      //  插到列最前面(2026-08-28 用户报),应在尾部配饰之后追加
+      const equipWrap = equipCol.children[1] as HTMLElement | null;
       const vanityCol = eqPage.children[1] as HTMLElement | null;
-      const vanityWrap = vanityCol?.firstElementChild as HTMLElement | null;
+      const vanityWrap = vanityCol?.children[1] as HTMLElement | null;
       for (let k = 0; k < 2; k++) {
         const es = this.makeSlotEl(8 + k, 'armor');
         this.attachVisibilityEye(es, 8 + k);

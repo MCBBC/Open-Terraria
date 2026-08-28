@@ -211,11 +211,15 @@ export interface AssetCacheState {
   /** 下载字节账(zip 模式;bytesTotal=0 → 无字节信息,UI 回退文件数口径) */
   bytesDone: number;
   bytesTotal: number;
+  /** ★已校准(2026-08-28 用户报"暖缓存也闪 0%"):首个 status 回包/warm 进度到达
+   *  前.done/total 只是计划值,徽标若照渲染必闪"0%"——UI 在校准前只出骨架文案
+   *  (无百分比),校准后若 done>=total 直接走完成淡出=全缓存命中时徽标全程无百分比 */
+  calibrated: boolean;
 }
 
 const state: AssetCacheState = {
   enabled: false, version: '', total: 0, done: 0, failed: 0, phase: 'idle', warming: false,
-  bytesDone: 0, bytesTotal: 0,
+  bytesDone: 0, bytesTotal: 0, calibrated: false,
 };
 
 let plan = priorityPlan();
@@ -564,6 +568,7 @@ async function doInitAssetCache(): Promise<void> {
 function onSwMessage(e: MessageEvent): void {
   const d = e.data || {};
   if (d.type === 'status') {
+    state.calibrated = true;   // status 回包=缓存实测账到手(校准位)
     if (typeof d.cached === 'number' && d.version === state.version) {
       // ★zip 模式禁止用 cached 回写 done(2026-08-27 根修):cached=【全缓存】
       // 条目数(含壳 JS/l10n/上轮遗留),与 zip totalFiles 不同源。上轮暖满的
@@ -589,6 +594,7 @@ function onSwMessage(e: MessageEvent): void {
       emit();
     }
   } else if (d.type === 'warm-progress') {
+    state.calibrated = true;   // 实际下载进度到达=必然有真实账
     // done 为绝对值(SW 侧 base 偏移);failed 为当前块/片计数,跨批累计
     state.done = Math.min(d.done ?? 0, state.total);
     state.failed = (zipPlan ? zipFailedAcc : chunkFailedAcc) + (d.failed ?? 0);
@@ -598,6 +604,7 @@ function onSwMessage(e: MessageEvent): void {
     lastProgressAt = Date.now();
     emit();
   } else if (d.type === 'warm-done') {
+    state.calibrated = true;
     // legacy 逐文件分块通道(zip 模式页面直给,不经本消息)
     chunkFailedAcc += d.failed ?? 0;
     state.failed = chunkFailedAcc;

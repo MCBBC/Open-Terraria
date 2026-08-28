@@ -50,17 +50,6 @@ export function __setTfCellProbe(fn: ((sheet: number, x: number, y: number, fx: 
   __tfCellProbe = fn;
 }
 
-/** IIII26 临时诊断钩(批后删除):killTileLane 入口 cell 快照 */
-interface KillLaneCell { x: number; y: number; n: number; act: number; sheet: number; fx: number; fy: number; sl: number; h: number; liq: number; wall: number }
-let __killLaneProbe: ((c: KillLaneCell) => void) | undefined;
-let __killLaneRollIdx: (() => number) | undefined;
-export function __setKillLaneProbe(fn: ((c: KillLaneCell) => void) | undefined): void {
-  __killLaneProbe = fn;
-}
-export function __setKillLaneRollIdx(fn: (() => number) | undefined): void {
-  __killLaneRollIdx = fn;
-}
-
 // ============================================================
 // Tile.SmoothSlope 链(cs:822-888 + CanPoundTile cs:81434-81479 +
 // CanKillTile cs:62249-62402)——FFFFF 批 1:1 补齐
@@ -84,6 +73,8 @@ const PREVENTS_REMOVAL_SS = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 58
 const CONTAINER_SS = new Set([21, 467, 88]);
 /** Main.tileMoss(Main.cs:6956-6996)——KillTile fail 支苔藓→石转换族 */
 const TILE_MOSS_SS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
+/** TileID.Sets.tileMossBrick(TileID.cs:309)——fail 支 moss 砖→38(Stone Slab? cs:64246) */
+const TILE_MOSS_BRICK_SS = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
 /** sheet → 内部 id(单射假设下取首个;fail 支类型回退写用) */
 const ID_OF_SHEET = new Map<number, number>();
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -126,8 +117,11 @@ function trkTileSolidGen(t: number): boolean {
 // killTileGen 私有不可导出——全表复刻。轨道巷语境 404 化石连锁/58 地狱岩浆/
 // 419 逻辑门/TruncatesWalls 族不可达,同 killTileGen 先例不移植)
 // ============================================================
-/** KillTile_GetTileDustAmount(cs:66654,fail=false 档) */
-function killTileDustAmount(sheet: number, fx: number): number {
+/** KillTile_GetTileDustAmount(cs:66654)。fail 参数=1457 全档:true 支(cs:67119-67208)
+ *  default→3 / 231→3 / 534·536·539·625·627→3 / 184(fx/22<5)→3——IIII26 批按反编译源
+ *  补齐 fail 档(轨道巷 brk==1 走此分支;brk==0 与旧表一致)。 */
+function killTileDustAmount(sheet: number, fx: number, fail = false): number {
+  const small = fail ? 3 : 10;
   if (sheet === 654 || sheet === 630 || sheet === 631) return 0;
   if (sheet === 125 || sheet === 138 || sheet === 172 || sheet === 287
     || (sheet >= 300 && sheet <= 308) || sheet === 354 || sheet === 355
@@ -135,13 +129,13 @@ function killTileDustAmount(sheet: number, fx: number): number {
     || sheet === 564 || sheet === 565 || sheet === 593 || sheet === 594 || sheet === 617
     || sheet === 664 || sheet === 665 || sheet === 699 || sheet === 709
     || (sheet >= 711 && sheet <= 716)) return 0;
-  if (sheet === 231) return 6;
+  if (sheet === 231) return fail ? 3 : 6;
   if (sheet >= 481 && sheet <= 483) return 3;
   if (sheet === 541) return 1;
   if (sheet === 549) return 2;
-  if (sheet === 534 || sheet === 536 || sheet === 539 || sheet === 625 || sheet === 627) return 5;
-  if (sheet === 184) return Math.floor(fx / 22) >= 5 ? 5 : 10;
-  return 10;
+  if (sheet === 534 || sheet === 536 || sheet === 539 || sheet === 625 || sheet === 627) return fail ? 3 : 5;
+  if (sheet === 184) return Math.floor(fx / 22) >= 5 ? 5 : small;
+  return small;
 }
 /** MakeTileDust 每调的 genRand 掷(cs:66744+,RRRR 实测表) */
 const FURNITURE_DUST = new Set([
@@ -538,22 +532,8 @@ export class TrackGenerator {
    *  九宫(squareFrameTrack)内不可达 314(轨迹未铺,IsTileNearby 30 格隔离) */
   private killTileLane(rng: RNG, x: number, y: number): void {
     const st = this.st;
-    const idxRaw = st.inBounds(x, y) ? st.idx(x, y) : -1;
-    __killLaneProbe?.({
-      x, y,
-      n: __killLaneRollIdx ? __killLaneRollIdx() : -1,
-      act: idxRaw >= 0 ? st.flags[idxRaw] : 0,
-      sheet: idxRaw >= 0 ? SHEET_OF[st.type[idxRaw]!] : -9,
-      fx: idxRaw >= 0 ? st.frameX[idxRaw]! : -1,
-      fy: idxRaw >= 0 ? st.frameY[idxRaw]! : -1,
-      sl: idxRaw >= 0 ? st.slope[idxRaw]! : 0,
-      h: idxRaw >= 0 ? st.half[idxRaw]! : 0,
-      liq: idxRaw >= 0 ? st.liquid[idxRaw]! : 0,
-      wall: idxRaw >= 0 ? st.wall[idxRaw]! : 0,
-      brk: -1,
-    });
     if (!st.inBounds(x, y)) return;
-    const i = idxRaw;
+    const i = st.idx(x, y);
     if (!st.flags[i]) return;
     const sheet = SHEET_OF[st.type[i]!];
     if (sheet < 0) return;
@@ -562,7 +542,17 @@ export class TrackGenerator {
     const brk = this.checkTileBreakability(x, y);
     if (brk === 2) return;
     if (brk === 1) {
-      // fail 支(cs:63757-63773):草/苔类型回退 + SquareTileFrame 后 return。
+      // fail 支(cs:63757-63773):★IIII26 定谳——vanilla KillTile 里 CheckTileBreakability==1
+      // 只置 fail=true,**尘埃/化石链在类型回退之前照常执行**(cs:64204 dust loop +
+      // cs:64208 AttemptFossilShattering(fail)),随后才做草/苔类型回退 + SquareTileFrame
+      // 后 return。旧 JS fail 支整体跳过尘掷 + 跳过 tileMossBrick→38 回退,与源不符。
+      // 尘掷量用 GetTileDustAmount(fail:true)(default→3 等),dustType 用原 type 选——
+      // moss 族(179-183/381/534..627)/184 的 per-particle 选型零 genRand(cs:67336
+      // tileMoss 公式 / case184 switch),掷源只在家具族 FURNITURE_DUST 与少量表列型。
+      const fx = st.frameX[i]!;
+      const dustFail = killTileDustAmount(sheet, fx, true);
+      for (let k = 0; k < dustFail; k++) makeTileDustRoll(rng, sheet, fx);
+      this.attemptFossilShatter(rng, x, y, sheet, true);
       // ShakeTree 门(netMode!=1&&IsShakeable)——fail 触发族{10锁门,138巨石}非
       // shakeable,巷内不可达不移植
       const sh = SHEET_OF[st.type[i]!] ?? -1;
@@ -570,13 +560,14 @@ export class TrackGenerator {
       else if (sh === 633) st.type[i] = ID_OF_SHEET.get(57)!;
       else if (sh === 60 || sh === 661 || sh === 662 || sh === 70) st.type[i] = ID_OF_SHEET.get(59)!;
       if (TILE_MOSS_SS.has(SHEET_OF[st.type[i]!] ?? -1)) st.type[i] = ID_OF_SHEET.get(1)!;
+      else if (TILE_MOSS_BRICK_SS.has(SHEET_OF[st.type[i]!] ?? -1)) st.type[i] = ID_OF_SHEET.get(38)!;
       this.squareFrameTrack(rng, x, y);
       return;
     }
     const fx = st.frameX[i]!;
     const dust = killTileDustAmount(sheet, fx);
     for (let k = 0; k < dust; k++) makeTileDustRoll(rng, sheet, fx);
-    this.attemptFossilShatter(rng, x, y, sheet);   // cs:63756(FFFFF 补:#101 巷内 404 可达——曾误判不可达)
+    this.attemptFossilShatter(rng, x, y, sheet, false);   // cs:63756(FFFFF 补:#101 巷内 404 可达——曾误判不可达)
     st.setTileSilent(x, y, 0);
     this.squareFrameTrack(rng, x, y);
   }
@@ -638,7 +629,7 @@ export class TrackGenerator {
 
   /** AttemptFossilShattering(cs:63526-63554)——404 化石 3×3 邻格掷(Next(15)/
    *  Next(4))+递归杀。fossilBreak 递归门=实例旗(vanilla static) */
-  private attemptFossilShatter(rng: RNG, i: number, j: number, sheet: number): void {
+  private attemptFossilShatter(rng: RNG, i: number, j: number, sheet: number, fail = false): void {
     if (sheet !== 404 || this.fossilBreak) return;
     this.fossilBreak = true;
     const st = this.st;
@@ -646,7 +637,7 @@ export class TrackGenerator {
       for (let l = j - 1; l <= j + 1; l++) {
         let maxValue = 15;
         if (!solidTile(st, k, l + 1)) maxValue = 4;
-        else if (k === i && l === j - 1) maxValue = 4;                 // fail 恒 false
+        else if (k === i && l === j - 1 && !fail) maxValue = 4;        // cs:64006 `else if(k==i&&l==j-1&&!fail)`——IIII26 补 fail 位
         if ((k !== i || l !== j) && st.inBounds(k, l)) {
           const ki = st.idx(k, l);
           if (st.flags[ki] && SHEET_OF[st.type[ki]!] === 404 && rng.nextInt(maxValue) === 0) {

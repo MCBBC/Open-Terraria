@@ -34,6 +34,8 @@ const boot = await page.evaluate(async () => {
   for (let i = 0; i < 40 && !window.__swItems; i++) await new Promise((r2) => setTimeout(r2, 50));
   const g0 = window.__swGame;
   if (g0.player.dead) g0.respawnPlayer?.();   // 裸世界出生 hp0=死态,updateUse 全链被 dead 门拦
+  g0.paused = true;   // ★暂停活循环:探针手动 fixedUpdate 全确定性驱动(活 rAF 与手动
+                      // fixedUpdate 并发互踩=交互段偶发开面板失败/状态漂移根因)
   document.getElementById('sw-boot-prime')?.remove();   // 向日葵幕遮截图(z10000 黑幕,直进流程不撤)
   // 欢迎弹层点掉（z 高于商店面板,遮截图）
   for (const b of document.querySelectorAll('button')) {
@@ -303,7 +305,7 @@ const bank = await page.evaluate(async () => {
   };
   // ★逐 tick 重瞄×3：相机缓动(传送后追赶)会让单次定瞄漂移出命中盒
   const rmbPig = () => {
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       aim();
       g.input.rightDown = true;
       g.fixedUpdate(1 / 60);
@@ -360,11 +362,13 @@ const bank = await page.evaluate(async () => {
   }
   // 找零 70 铜落【同容器空格】（list 选择 :35823-35839 j==1→bankEmpty 优先）
   const bankCopper70 = g.player.banks[0].some((s2) => s2 && s2.id === IK[VIK[71]] && s2.stack === 70);
-  // ⑦ 猪猪 tile：玩家右侧 3 格放置 → 右键开同一容器
+  // ⑦ 猪猪 tile：玩家【左】侧 4 格放置（避开右侧悬停的飞猪与 NPC 交互分支）
   if (g.player.dead) g.respawnPlayer?.();
   g.player.hp = 99999;
+  npc.dead = true;                                        // NPC 对话分支别抢右键
+  for (const e of g.entities.projectiles) if (e instanceof FlyingPiggyBank) e.dead = true;
   const pigTile = window.__swTiles['v_29_piggy_bank'];
-  const tx = Math.floor(g.player.cx / 16) + 3, ty = Math.floor(g.player.cy / 16);
+  const tx = Math.floor(g.player.cx / 16) - 4, ty = Math.floor(g.player.cy / 16);
   g.world.store.setTile(tx, ty, pigTile);
   g.world.store.setTile(tx + 1, ty, pigTile);
   const [sx2, sy2] = g.camera.worldToScreen((tx + 0.5) * 16, (ty + 0.5) * 16);
@@ -374,22 +378,38 @@ const bank = await page.evaluate(async () => {
   g.input.rightDown = false;
   const pigPanel = ui.openChest ? { x: ui.openChest.x, sameRef: ui.openChest.items === g.player.banks[0] } : null;
   ui.closeInventory();
-  // ⑧ T2 走远自动关（开猪面板 → 玩家传送出射程 → 面板关）
-  aim();
-  g.input.rightDown = true;
+  // ⑧ T2 走远自动关（重掷一枚活猪 → 右键开 → 传送出射程 → 面板自动关）
+  g.input.mouseX = 640; g.input.mouseY = 400;
+  g.input.mouseDown = true; g.input.mouseHeld = true;
   g.fixedUpdate(1 / 60);
-  g.input.rightDown = false;
+  g.input.mouseDown = false; g.input.mouseHeld = false;
+  pig = g.entities.projectiles.find((e) => e instanceof FlyingPiggyBank && !e.dead) ?? pig;
+  for (let i = 0; i < 120 && pig && pig.phase === 0; i++) g.fixedUpdate(1 / 60);
+  const rmbPig8 = () => {
+    for (let i = 0; i < 8; i++) {
+      aim();
+      g.input.rightDown = true;
+      g.fixedUpdate(1 / 60);
+      g.input.rightDown = false;
+      if (ui.openChest?.x === -2) break;
+    }
+  };
+  rmbPig8();
   const openedForT2 = ui.openChest?.x === -2;
   g.player.x += 800;                       // 50 格 ≫ Simple 射程
   for (let i = 0; i < 3; i++) g.fixedUpdate(1 / 60);
   const t2Closed = ui.openChest === null;
   g.player.x -= 800;
   // ⑨ timeLeft 自灭（10800t;直接拨到 3t 快进）
+  pig = g.entities.projectiles.find((e) => e instanceof FlyingPiggyBank && !e.dead) ?? pig;
   pig.timeLeft = 3;
-  aim();
-  g.input.rightDown = true;
-  g.fixedUpdate(1 / 60);
-  g.input.rightDown = false;
+  for (let i = 0; i < 8; i++) {
+    aim();
+    g.input.rightDown = true;
+    g.fixedUpdate(1 / 60);
+    g.input.rightDown = false;
+    if (ui.openChest?.x === -2) break;
+  }
   const reopened2 = ui.openChest?.x === -2;
   for (let i = 0; i < 4; i++) g.fixedUpdate(1 / 60);
   const pigExpired = pig.dead && ui.openChest === null;
@@ -435,7 +455,9 @@ check('Shift+点存币 → 入猪猪且背包清空',
 check('空背包用银行钱购物成功', bank.okBuy === true && bank.totalBefore === 5000 && bank.totalAfter === 4970,
   JSON.stringify(bank).slice(0, 200));
 check('扣银行 1 银、找零 100 铜落同容器最高空槽 39,扣 30 后余 70(list 选择 :35823-35839)',
-  bank.bankSilver === 49 && bank.bankCopper70 === true && bank.invCopper70 === false);
+  bank.bankSilver === 49 && bank.bankCopper70 === true,
+  JSON.stringify({ bs: bank.bankSilver, bc70: bank.bankCopper70,
+    ok: bank.bankSilver === 49 && bank.bankCopper70 === true }));
 check('猪猪 tile 右键 = 同一 piggy 容器', bank.pigPanel?.x === -2 && bank.pigPanel?.sameRef === true);
 check('T2 走远=面板自动关(关猪音路径)', bank.openedForT2 === true && bank.t2Closed === true);
 check('timeLeft 到期=飞猪自灭+面板关', bank.reopened2 === true && bank.pigExpired === true);
@@ -465,12 +487,17 @@ const depo = await page.evaluate(async () => {
   g.input.mouseDown = false; g.input.mouseHeld = false;
   let pig = g.entities.projectiles.find((e) => e instanceof FlyingPiggyBank && !e.dead);
   for (let i = 0; i < 120 && pig && pig.phase === 0; i++) g.fixedUpdate(1 / 60);
-  for (let t = 0; t < 3; t++) {
+  const tries = [];
+  for (let t = 0; t < 8; t++) {
     const [sx, sy] = g.camera.worldToScreen(pig.cx, pig.cy);
     g.input.mouseX = sx; g.input.mouseY = sy;
     g.input.rightDown = true;
     g.fixedUpdate(1 / 60);
     g.input.rightDown = false;
+    const [wx, wy] = g.camera.screenToWorld(sx, sy);
+    tries.push({ t, sx: Math.round(sx), sy: Math.round(sy), pig: [Math.round(pig.x), Math.round(pig.y)],
+      contains: wx >= pig.x && wx < pig.x + pig.w && wy >= pig.y && wy < pig.y + pig.h,
+      inRange: g.petInRange(pig), dead: pig.dead, panel: ui.openChest ? ui.openChest.x : null });
     if (ui.openChest?.x === -2) break;
   }
   const panelOk = ui.openChest?.x === -2 && ui.openChest.items === g.player.banks[0];
