@@ -7,7 +7,12 @@ import { RNG, hash2 } from '../core/rng';
 function mk(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
-  const ctx = c.getContext('2d')!;
+  // ★willReadFrequently(#三开压测批 P0):图标画布生成后【只读】——消费=UI 的
+  // toDataURL(UI.ts:239)与三处世界绘制(掉落物/手持/挥动,静态源按 generation
+  // 缓存 GPU 副本,首用一次上传)。SHM 后备让 ~6059 张小画布不进 IOSurface 池
+  // (macOS surface 数上限敏感);toDataURL/getImageData 还免 GPU 回读。
+  // 注意:此 flag 只适用于"生成后只读"源——每帧采样的 tileSheets/角色表勿加
+  const ctx = c.getContext('2d', { willReadFrequently: true })!;
   return [c, ctx];
 }
 

@@ -26,7 +26,7 @@ const OUT = process.env.SW_I25_OUT ?? '/tmp/iii25-out/j-hm.txt';
     appendFileSync(OUT, `${label}\n`);
     if (++lines % 500 === 0) console.log(`hm ${lines}`);
   };
-  // 事件流（与 rig SW_TRAPSLOG 对拍；仅 mainloop 窗口 g7913..7925）
+  // 事件流（与 rig SW_TRAPSLOG 对拍；仅 mainloop 窗口 G_LO..G_HI）
   const G_LO = Number(process.env.SW_I25_GLO ?? 7913);
   const G_HI = Number(process.env.SW_I25_GHI ?? 7925);
   const evPath = process.env.SW_I25_EV ?? '/tmp/iii25-out/j-traps.txt';

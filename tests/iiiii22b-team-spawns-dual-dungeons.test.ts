@@ -26,7 +26,7 @@ function mkWorld(opts: { royale?: boolean; dd?: boolean; seed?: number; h?: numb
   const st = new TileStore(W, H);
   const w = new World(W, H, opts.seed ?? 77123, 't');
   w.store = st;
-  w.groundLevel = SURFACE_Y;
+  w.groundLevel = 548;   // 声明地表线 ≈ 真实地面(550)上沿——搜寻盒触得到地表
   w.rockLevel = opts.h ? 520 : ROCK_Y;      // H=1300 场景把 rock 层上移使地下带存在
   w.spawnX = Math.floor(W / 2);
   w.spawnY = 560;                            // 地表板脚下
@@ -41,7 +41,7 @@ function mkWorld(opts: { royale?: boolean; dd?: boolean; seed?: number; h?: numb
   // 「地表下方处处可落脚」分布，使探测循环按 vanilla 预期概率快速命中
   // （真空世界会让 500×250 暴力预算跑满——vanilla 同构但 C# 原生可承受）
   for (let x = 0; x < W; x++) {
-    for (let y = 550; y < H - 5; y++) st.setTileSilent(x, y, dirt);
+    for (let y = 500; y < H - 5; y++) st.setTileSilent(x, y, dirt);
   }
   return { world: w, st };
 }
@@ -95,6 +95,9 @@ describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManage
       }
       expect(pts[i]!.x).toBeGreaterThanOrEqual(60);       // 60 边距（cs:118/:155）
       expect(pts[i]!.x).toBeLessThanOrEqual(W - 60);
+      // 落点应贴近实际地面（搜索成功语义）而非 IterateDownToFloor 起点(≈50)的
+      // 退化 fallback 形——本世界 groundLevel/地面贴合后 vanilla 预期全部命中
+      expect(Math.abs(pts[i]!.y - 550), `team ${i} y=${pts[i]!.y}`).toBeLessThanOrEqual(120);
     }
   });
 
@@ -137,7 +140,7 @@ describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManage
     // 床位激活口径：world.spawn≠spawnX0 ⇒ 门直接回 null（Player.Spawn :37911 床优先）
     const rw = mkWorld({ royale: true }).world;
     rw.spawnX = rw.spawnX0 + 5;
-    expect(teamSpawnPlacement(rw, 2, false)).toBeNull();
+    expect(teamSpawnPlacement(rw, 2, rw.spawnX !== rw.spawnX0 || rw.spawnY !== rw.spawnY0)).toBeNull();
   });
 });
 
@@ -147,16 +150,31 @@ type SpawnerProbe = {
   ZoneDungeon: boolean; ZoneSnow: boolean; ZoneCorrupt: boolean; ZoneHallow: boolean;
   ZoneJungle: boolean; ZoneGlowshroom: boolean; ddLihzhardLatch: boolean | null;
 };
-function callSetFlags(sp: VanillaSpawner, x: number, y: number, type: number, stubInt: number): number {
-  let intCalls = 0;
-  const rngStub = {
-    next: () => 0,
-    int: (_a: number, _b: number) => { intCalls++; return stubInt; },
-  } as never;
+/** stub rng：rng.int 必须尊重 [a,b] 闭区间契约（stepI≥1 等消费方依赖），band 覆写
+ *  仅命中 dd 尾部支的 rng.int(0,6)（Next(7) 等价带掷）。 */
+function makeStubRng(bandOverride: number | null): { counts: number } & object {
+  const counts = { int: 0, band: 0 };
+  const anyStub = {
+    next: () => 0.25,
+    int: (a: number, b: number): number => {
+      counts.int++;
+      if (a === 0 && b === 6) { counts.band++; if (bandOverride !== null) return bandOverride; }
+      return Math.floor((a + b) / 2);
+    },
+  };
+  void anyStub;
+  (anyStub as { counts: unknown }).counts = counts;
+  return anyStub as unknown as { counts: { int: number } };
+}
+function callSetFlags(
+  sp: VanillaSpawner, x: number, y: number, type: number,
+  opts: { band?: number } = {},
+): { intCalls: number; bandCalls: number } {
+  const stub = makeStubRng(opts.band ?? null);
   (sp as unknown as {
     setFlagsForChosenTile: (a: number, b: number, c: number, r: never) => void;
-  }).setFlagsForChosenTile(x, y, type, rngStub);
-  return intCalls;
+  }).setFlagsForChosenTile(x, y, type, stub as never);
+  return { intCalls: stub.counts.int, bandCalls: stub.counts.band };
 }
 function probe(sp: VanillaSpawner): SpawnerProbe {
   return sp as unknown as SpawnerProbe;
@@ -172,17 +190,23 @@ describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 /
     const purpleIce = TILE_BY_KEY['v_163_purple_ice_block'];
     const templeBrick = TILE_BY_KEY['v_226_lihzahrd_brick'];
     const mud = TILE_BY_KEY['mud'];
-    const sandstone = TILE_BY_KEY['sandstone'];
+    // 沙岩必须按 vanilla sheet 53 反查内部 id（'sandstone' 裸键在 data/tiles 的
+    // vanilla.sheet=396，与原版 53 不是同一物块——曾致 Desert 臂永不命中）
+    const sandstone = internalOfSheet(53);
     for (const v of [blueBrick, snowBlk, ebonstone, purpleIce, templeBrick, mud, sandstone]) {
       expect(v).toBeGreaterThan(0);
     }
-    col(st, 100, 820, 850, blueBrick);                    // 地牢主砖 41
-    col(st, 200, 820, 850, snowBlk);                      // 雪块 147
-    col(st, 300, 820, 850, ebonstone);                    // 黑檀石 25
-    col(st, 400, 820, 850, purpleIce);                    // 紫冰 163：雪+腐化双置
-    col(st, 500, 820, 850, templeBrick);                  // 神庙砖 226
-    col(st, 600, 820, 850, mud, 204);                     // 泥土 59 × DualJungleWall 204
-    col(st, 700, 820, 850, sandstone, 216);               // 沙岩 53 × HardenedSand 216
+    expect(TILE_DEFS[mud]?.vanilla?.sheet).toBe(59);      // 防映射漂移护闸
+    expect(TILE_DEFS[sandstone]?.vanilla?.sheet).toBe(53);
+    col(st, 100, 818, 852, blueBrick);                    // 地牢主砖 41
+    col(st, 200, 818, 852, snowBlk);                      // 雪块 147
+    col(st, 300, 818, 852, ebonstone);                    // 黑檀石 25
+    col(st, 400, 818, 852, purpleIce);                    // 紫冰 163：雪+腐化双置
+    col(st, 500, 818, 852, templeBrick);                  // 神庙砖 226
+    col(st, 600, 818, 852, mud);                          // 泥土 59；墙列见下（含上邻行）
+    for (let y = 618; y <= 852; y++) st.wall[st.idx(600, y)] = 204;
+    col(st, 700, 818, 852, sandstone);                    // 沙岩 53；墙 216 同理
+    for (let y = 618; y <= 852; y++) st.wall[st.idx(700, y)] = 216;
     const rock = world.rockLevel;
     let s = scanChosenTileZones(st, 100, 840, rock);
     expect(s.ZoneDungeon).toBe(true);
@@ -223,15 +247,19 @@ describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 /
 
   it('B3 Spawner chosen-tile 尾部支：rand(7) 三层带重掷 + Zone 九位覆盖序（gated dualDungeons）', () => {
     __m('B3 S-start');
+    // ★几何前提：dd 尾部支域 = worldSurface(548) < spawnTileY < UnderworldLayer(700)，
+    // 而地牢位的岩石层门要求 spawnTileY > rockLayer —— 本世界把 rockLevel 上移到 300
+    // 使两域交叠（vanilla 双地牢本就是浅岩层+地下带的组合语义）。
     const { world, st } = mkWorld({ dd: true });
+    world.rockLevel = 300;
     const blueBrick = TILE_BY_KEY['v_41_blue_brick'];
     const dirt = TILE_BY_KEY['dirt'];
-    col(st, 150, 640, 700, blueBrick);
+    col(st, 150, 600, 660, blueBrick);                     // 地牢柱（含落脚行 650 的上邻墙? 无墙）
 
     // band∈{3..6} 臂（stubInt=3）：地表/地下收、深岩层开；地牢列 ⇒ ZoneDungeon &= true 保持真
     const sp = new VanillaSpawner(world);
     (sp as unknown as { ZoneDungeon: boolean }).ZoneDungeon = true;
-    callSetFlags(sp, 150, 700, blueBrick, 3);
+    callSetFlags(sp, 150, 650, blueBrick, { band: 3 });
     const p1 = probe(sp);
     expect(p1.surfaceSpawn).toBe(false);
     expect(p1.deeperThanRockLayer).toBe(true);
@@ -243,12 +271,12 @@ describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 /
     // 平地列：scan 全空 ⇒ ZoneDungeon 由真被 &= 成假（覆盖序 1:1，vanilla 同态）
     const sp2 = new VanillaSpawner(world);
     (sp2 as unknown as { ZoneDungeon: boolean }).ZoneDungeon = true;
-    callSetFlags(sp2, 301, 700, dirt, 3);
+    callSetFlags(sp2, 301, 650, dirt, { band: 3 });
     expect(probe(sp2).ZoneDungeon).toBe(false);
 
     // band∈{0,1} 臂（stubInt=1）：地下落脚强制地表化
     const sp3 = new VanillaSpawner(world);
-    callSetFlags(sp3, 150, 700, blueBrick, 1);
+    callSetFlags(sp3, 150, 650, blueBrick, { band: 1 });
     const p3 = probe(sp3);
     expect(p3.surfaceSpawn).toBe(true);
     expect(p3.underGround).toBe(false);
@@ -256,7 +284,7 @@ describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 /
 
     // band==2 臂（stubInt=2）：只开 underGround
     const sp4 = new VanillaSpawner(world);
-    callSetFlags(sp4, 150, 700, blueBrick, 2);
+    callSetFlags(sp4, 150, 650, blueBrick, { band: 2 });
     const p4 = probe(sp4);
     expect(p4.surfaceSpawn).toBe(false);
     expect(p4.underGround).toBe(true);
@@ -268,14 +296,15 @@ describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 /
     console.error('[B4] mkWorld-begin');
     const { world } = mkWorld({});
     console.error('[B4] mkWorld-done');
+    __m('B4 c-ctor-begin');
     const sp = new VanillaSpawner(world);
-    console.error('[B4] spawner-ctor-done');
+    __m('B4 d-ctor-done');
     const dirt = TILE_BY_KEY['dirt'];
-    const consumed = callSetFlags(sp, 310, 700, dirt, 0);
-    console.error('[B4] setFlags-done consumed=', consumed);
-    expect(consumed).toBe(0);                              // rand(7) 未消耗 ⇒ 普通世界骰流不变
+    const used = callSetFlags(sp, 310, 700, dirt);
+    __m('B4 e-setflags-done ' + used.intCalls);
+    expect(used.bandCalls).toBe(0);                        // rand(7) 带⇒ 未消耗 ⇒ 普通世界骰流不变
     const p = probe(sp);
-    expect(p.surfaceSpawn).toBe(700 <= SURFACE_Y);         // 基线 L1046 语义
+    expect(p.surfaceSpawn).toBe(700 <= 548);               // 基线 L1046 语义（groundLevel=548）
     expect(p.deeperThanRockLayer).toBe(700 >= ROCK_Y);
     expect(p.ddLihzhardLatch).toBeNull();                  // 闩未置（zoneLihzardTemple 原路径）
   });

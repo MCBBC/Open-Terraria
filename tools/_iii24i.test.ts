@@ -40,6 +40,7 @@ it('segment counters vs x86', async () => {
     xBase = startLine0;
   };
   let marks: Array<{ t: string; s: number }> = [];
+  let ntbIn: number[] = [];
   let ntbCalls = 0;
   let phaseNtb = false;
   let seq = 0;
@@ -57,7 +58,7 @@ it('segment counters vs x86', async () => {
 
   const g0 = globalThis as { __swNTBCap?: (p: string) => void; __swFCMark?: (t: string) => void };
   g0.__swNTBCap = (p: string): void => {
-    if (p === 'in') { phaseNtb = true; }
+    if (p === 'in') { ntbIn.push(seq); phaseNtb = true; }
     else {
       ntbCalls++;
       marks.push({ t: `NTB${ntbCalls}`, s: seq });
@@ -84,7 +85,8 @@ it('segment counters vs x86', async () => {
   void phaseNtb; void AbortErr;
   // 重新读取 marks 中 NTBn（段末序号），x 端 CALLEND 对应同一段末。
   for (let k = 0; k < Math.min(7, jNtb.length); k++) {
-    const jd = jNtb[k].s - (marks.filter((m) => m.t.startsWith('NTB'))[k - 1]?.s ?? 0);
+    const ji = ntbIn[k] ?? -1;
+    const jd = jNtb[k].s - ji;
     const xd = X_CALLS[k][1] - X_CALLS[k][0] + 1;
     console.log(`NTB${k + 1}: j_end=${jNtb[k].s} 段长~${jd} | x 段长=${xd} Δ=${jd - xd}`);
   }
