@@ -2176,8 +2176,48 @@ export class UI {
    *  root 内会被 stacking context 压在面板下,2026-08-27 用户报；搬 body 顶层） */
   private tooltipHome: HTMLElement | null = null;
 
-  /** 打开搜索面板：按 名称/key/原版id 过滤 ITEM_DEFS，点击条目入包 */
+  /** 打开搜索面板（首用门：道具搜索为超游调试件,明示风险确认一次后
+   *  localStorage 持久放行,后续不再拦截——2026-08-27 用户要求） */
   openItemSearch() {
+    if (!this.game) return;
+    let confirmed = false;
+    try { confirmed = localStorage.getItem('sbw.itemSearchConfirmed') === '1'; } catch { /* 隐私模式静默 */ }
+    if (!confirmed) { this.showItemSearchGate(); return; }
+    this.openItemSearchPanel();
+  }
+
+  /** 首用确认弹窗（取消即关；确认写入持久旗并放行） */
+  private showItemSearchGate(): void {
+    if (document.getElementById('sw-itemsearch-gate')) return;
+    const overlay = el('div');
+    overlay.id = 'sw-itemsearch-gate';
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1250; display:flex; align-items:center; justify-content:center;';
+    const panel = el('div');
+    panel.style.cssText = 'width:400px; max-width:90vw; box-sizing:border-box; background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px; padding:14px; display:flex; flex-direction:column; gap:12px; color:#ddd; font-size:13px;';
+    panel.appendChild(el('div', 'sw-lbl', '道具搜索'));
+    panel.appendChild(el('div', '', '为了游戏体验，如非卡关或调试不建议使用此功能，可能破坏游戏乐趣。确认启用后不再拦截。'));
+    const btnRow = el('div');
+    btnRow.style.cssText = 'display:flex; gap:8px; justify-content:flex-end;';
+    const cancel = el('button', 'sw-btn', '取消');
+    cancel.style.cssText = 'margin:0; width:auto; padding:5px 14px; font-size:12px;';
+    cancel.addEventListener('click', () => overlay.remove());
+    const ok = el('button', 'sw-btn', '确认启用');
+    ok.style.cssText = 'margin:0; width:auto; padding:5px 14px; font-size:12px;';
+    ok.addEventListener('mousedown', (e) => e.stopPropagation());
+    ok.addEventListener('click', () => {
+      try { localStorage.setItem('sbw.itemSearchConfirmed', '1'); } catch { /* 隐私模式静默 */ }
+      overlay.remove();
+      this.openItemSearch();
+    });
+    btnRow.append(cancel, ok);
+    panel.appendChild(btnRow);
+    overlay.appendChild(panel);
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+
+  /** 搜索面板本体：按 名称/key/原版id 过滤 ITEM_DEFS，点击条目入包 */
+  private openItemSearchPanel() {
     if (!this.game) return;
     this.closeItemSearch();
     // tooltip 提到 body 顶层（关闭时归还 root）——否则结果行气泡被面板遮挡
@@ -4297,10 +4337,17 @@ export class UI {
     //  浮点版漏了——顶部锚 0 时 topF=-4 → 首行画在 120px 下。基准钳 [0,len-VIS],
     //  过冲(回弹)量单独 ×0.6 加成 = 端部拉伸视觉保留
     const maxAnchor = Math.max(0, len - 1);
-    const viewH = Math.min(this.craftListH, len * H);
-    // ★无条件写高度（2026-08-27 用户报"打开时留空,hover/滚动才逐步坍缩"）：首次
-    //  刷新在 display:none→block 布局未稳时采样,LIST_H 偏大且 craftLastViewH 残留
-    //  旧值相等时跳写 = 错误高度滞留到滚动/悬停才被 paint 修正
+    // ★高度每次绘制【活体现测】（2026-08-27 三连用户报的终修）：不再信任
+    //  craftListH 缓存（个别刷新时机 rect 采样未稳/站间切换残留 → 打开拉满、
+    //  hover 才逐步坍缩）——每次绘制对【当下】视口+右缘列底现测现钳,任何陈旧
+    //  值一次绘制内收敛。上限 = min(视口底-32, 右缘列底-8),钳下限 240
+    const clRect = cl.getBoundingClientRect();
+    const advB = this.advRailEl?.getBoundingClientRect().bottom ?? 0;
+    const avail_h = Math.max(240, Math.floor(Math.min(
+      window.innerHeight - 32 - clRect.top,
+      advB > clRect.top ? advB - 8 - clRect.top : Infinity,
+    )));
+    const viewH = Math.min(avail_h, len * H);
     cl.style.height = `${viewH}px`;
     this.craftLastViewH = viewH;
     const maxTop = Math.max(0, len - Math.ceil(viewH / H));   // 末页填满视口,无底部留白
@@ -4369,7 +4416,7 @@ export class UI {
     //  （2026-08-26 用户实报"滚动条动列表不动"）。拖拽域 = [0, maxTop] 同源。
     const meta = this.craftScrollMeta;
     meta.len = len;
-    meta.visRows = Math.ceil(this.craftListH / H);            // 填充行数（拖拽域 = len-visRows）
+    meta.visRows = Math.ceil(viewH / H);            // 填充行数（拖拽域 = len-visRows）
     const maxStart = Math.max(1, maxTop);
     const trk = this.craftTrackEl, thb = this.craftThumbEl;
     if (trk && thb) {

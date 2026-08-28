@@ -2549,6 +2549,8 @@ export class Renderer {
   }
 
   private _mouseX = 0;
+  /** 鼠标悬停告示牌的文本（render 内计算，tooltip 层消费） */
+  private signHoverText = '';
   private _mouseY = 0;
   private _mouseDown = false;
 
@@ -3390,6 +3392,26 @@ export class Renderer {
     //    等位复刻——全屏过场,画于 HUD 前）
     drawStardewAnimation(ctx, viewW, viewH);
 
+    // 7b'-pre. 告示牌悬停文本（vanilla :43671 signHover → MouseText 悬浮提示：
+    //      鼠标格命中 Main.tileSign {55,85,425,573} 且 world.signs 有非空文本时,
+    //      鼠标旁 460px 宽 wordwrap 悬浮提示。2026-08-27 补）
+    {
+      this.signHoverText = '';
+      const cam2 = cam, z2 = z;
+      const mwx = cam2.x + (this._mouseX - viewW / 2) / z2;
+      const mwy = cam2.y + (this._mouseY - viewH / 2) / z2;
+      const mtx = Math.floor(mwx / TILE), mty = Math.floor(mwy / TILE);
+      if (world.store.inBounds(mtx, mty)) {
+        const si = world.store.idx(mtx, mty);
+        const sh2 = world.store.type[si] !== 0 ? (TILE_DEFS[world.store.type[si]]?.vanilla?.sheet ?? -1) : -1;
+        if (sh2 === 55 || sh2 === 85 || sh2 === 425 || sh2 === 573) {
+          const ax = mtx - Math.floor(world.store.frameX[si] / 18);
+          const ay = mty - Math.floor(world.store.frameY[si] / 18);
+          const sign = world.signs.find((sg) => sg.x === ax && sg.y === ay);
+          if (sign && sign.text.trim()) this.signHoverText = sign.text;
+        }
+      }
+    }
     // 7b'. 指针物品/交互图标（Main.cs:44474-44562 DrawInterface_40）+ 住房光标
     //      携带头像（:44622-44688 DrawInterface_38）——屏幕空间最后层
     this.drawCursorItemIcon(ctx, player);
@@ -12436,6 +12458,38 @@ export class Renderer {
       }
       ctx.fillStyle = `rgb(${c},${c},${c})`;
       ctx.fillText(p.cursorItemIconText, x, y);
+      ctx.restore();
+    }
+    // 告示牌悬停文本（vanilla :43671-43700：鼠标旁 460px 宽 wordwrap、
+    // MouseText 字体白×mouseTextColor 脉动、OpaqueBox 背后 tooltip）——
+    // 本仓 canvas 字+四向描边（字体偏差登记同 cursorItemIconText）
+    if (this.signHoverText) {
+      ctx.font = '14px monospace';
+      const lines: string[] = [];
+      let remaining = this.signHoverText;
+      while (remaining.length > 0) {
+        if (remaining.length <= 40) { lines.push(remaining); break; }
+        let cut = remaining.lastIndexOf(' ', 40);
+        if (cut <= 0) cut = 40;
+        lines.push(remaining.slice(0, cut));
+        remaining = remaining.slice(cut).trimStart();
+      }
+      const maxW = Math.max(...lines.map((l) => ctx.measureText(l).width), 40);
+      const lh = 16;
+      const boxW = maxW + 24, boxH = lines.length * lh + 16;
+      let bx = this._mouseX + 16, by = this._mouseY + 16;
+      if (bx + boxW > this.canvas.width - 10) bx = this.canvas.width - boxW - 10;
+      if (by + boxH > this.canvas.height - 10) by = this.canvas.height - boxH - 10;
+      ctx.save();
+      ctx.fillStyle = 'rgba(30,30,50,0.85)';
+      ctx.fillRect(bx - 6, by - 6, boxW + 12, boxH + 12);
+      ctx.strokeStyle = 'rgba(120,130,200,0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx - 6, by - 6, boxW + 12, boxH + 12);
+      ctx.fillStyle = '#fff';
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], bx, by + i * lh);
+      }
       ctx.restore();
     }
     ctx.restore();

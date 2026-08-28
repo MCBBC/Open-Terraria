@@ -95,11 +95,15 @@ export interface GenConfigDTO {
 export type WorldWorkerRequest =
   | { id: number; type: 'ping' }
   | { id: number; type: 'generate'; cfg: GenConfigDTO }
-  | { id: number; type: 'saveParse'; key?: string; json?: string; save?: SaveData };
+  | { id: number; type: 'saveParse'; key?: string; json?: string; save?: SaveData }
+  | { id: number; type: 'genIcons' };
 
 export type WorldWorkerEvent =
   | { id: number; type: 'ready' }
   | { id: number; type: 'progress'; phase: string; label?: string; p: number }
   | { id: number; type: 'preview'; passIndex: number; passName: string; width: number; height: number; rgba: ArrayBuffer }
   | { id: number; type: 'result'; world: WorldPacket; player?: SaveData['player']; save?: SaveData }
+  /** 程序化图标图集(#三开压测批 worker 化):genIcons 请求回传,rgba transfer。
+   *  独立事件类型——与 result(必须带 world)共用 type 值会让联合收窄歧义 */
+  | { id: number; type: 'icons'; icons: { rgba: ArrayBuffer; width: number; height: number; cols: number; ids: number[] } }
   | { id: number; type: 'error'; message: string; stack?: string };

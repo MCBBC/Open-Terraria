@@ -128,9 +128,11 @@ export class GLAurora {
         }
     }
 
-    /** 噪声上传(R 通道 0..1 Float32 → R8 unorm,数值等价) */
-    uploadNoise(texA: Float32Array, texB: Float32Array): void {
+    /** 噪声上传(R 通道 0..1 Float32 → R8 unorm,数值等价)。
+     *  任一张未就绪(null,如资产 404 在途)整体跳过,下帧重试——禁止抛错撕帧循环。 */
+    uploadNoise(texA: Float32Array | null, texB: Float32Array | null): void {
         const gl = this.gl; if (!gl || this._noiseUploaded) return;
+        if (!texA || !texB) return;
         const mk = (data: Float32Array, size: number): WebGLTexture => {
             const bytes = new Uint8Array(data.length);
             for (let i = 0; i < data.length; i++) bytes[i] = data[i] * 255 + 0.5 | 0;
@@ -152,9 +154,11 @@ export class GLAurora {
 
     get ready(): boolean { return !!(this.gl && this.prog && !this.diedAt && !this.unavailable); }
 
-    /** 帧头:调尺寸/清屏(加法累积的零底)/帧常量 uniform/噪声绑定/开加法混合 */
+    /** 帧头:调尺寸/清屏(加法累积的零底)/帧常量 uniform/噪声绑定/开加法混合。
+     *  噪声未就绪(null)时不上传也不弃帧:绑空纹理采样为黑,additive 下零贡献
+     *  (极光暂时不可见,等噪声到位自然恢复)——永不因资产失败停机。 */
     beginFrame(w: number, h: number, time: number,
-        noiseA: Float32Array, noiseB: Float32Array): void {
+        noiseA: Float32Array | null, noiseB: Float32Array | null): void {
         const gl = this.gl; if (!gl || !this.prog) return;
         if (this.canvas!.width !== w || this.canvas!.height !== h) {
             this.canvas!.width = w; this.canvas!.height = h;

@@ -2,9 +2,11 @@
 // 全程纯计算（generateWorld/settleWorldLiquids/loadSaveData 均无 DOM 依赖），
 // 结果 packWorld 转移所有权回传。错误按请求 id 回传，绝不静默 pending。
 /// <reference lib="webworker" />
+import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { generateWorld } from '../world/gen/WorldGen';
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { repairIndexFramesInStore } from '../world/repairIndexFrames';
+import { genItemIconPixels } from '../assets/ItemIconGen';
 import { packWorld } from './worldPacket';
 import { renderPreviewBitmap } from './previewBitmap';
 import { loadSaveData } from '../save/SaveFile';
@@ -33,6 +35,30 @@ ctx.onmessage = async (e) => {
   try {
     if (req.type === 'ping') {
       ctx.postMessage({ id: req.id, type: 'ready' });
+      return;
+    }
+    if (req.type === 'genIcons') {
+      // 程序化图标图集(#三开压测批 worker 化):纯像素生成平铺进单张图集,
+      // rgba transfer 回传——主线程只做一次 putImageData,消灭 ~6059 次逐图标
+      // createCanvas/putImageData(~0.7-1.2s 主线程 task)
+      const ids: number[] = [];
+      const COLS = 64;
+      const n = ITEM_DEFS.length;
+      const rows = Math.ceil(n / COLS);
+      const rgba = new Uint8ClampedArray(COLS * 16 * rows * 16 * 4);
+      for (let i = 0; i < n; i++) {
+        const px = genItemIconPixels(ITEM_DEFS[i].key);
+        const cx = (i % COLS) * 16, cy = Math.floor(i / COLS) * 16;
+        for (let y = 0; y < 16; y++) {
+          const src = y * 64, dst = ((cy + y) * COLS * 16 + cx) * 4;
+          rgba.set(px.data.subarray(src, src + 64), dst);
+        }
+        ids.push(ITEM_BY_KEY[ITEM_DEFS[i].key]);
+      }
+      const buf = rgba.buffer as ArrayBuffer;
+      ctx.postMessage({ id: req.id, type: 'icons',
+        icons: { rgba: buf, width: COLS * 16, height: rows * 16, cols: COLS, ids } },
+        [buf]);
       return;
     }
     if (req.type === 'generate') {

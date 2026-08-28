@@ -16,12 +16,16 @@ function mk(w: number, h: number): [HTMLCanvasElement, CanvasRenderingContext2D]
   return [c, ctx];
 }
 
-function tileThumb(tileKey: string): HTMLCanvasElement {
+/** 纯像素缓冲(worker 化 #perf-gpulog):生成期零 canvas/零 surface,
+ *  putImageData 由调用方一次性落盘 */
+export interface Px16 { data: Uint8ClampedArray }
+function px16(): Px16 { return { data: new Uint8ClampedArray(16 * 16 * 4) }; }
+
+function tileThumb(tileKey: string): Px16 {
   // 从 tile sheet 提取一个 16×16 缩样（用 mask=0 全边框帧）
-  const [c, ctx] = mk(16, 16);
+  const px = px16();
   // 直接画简化方块
   const m = matForTile(tileKey);
-  const px = ctx.createImageData(16, 16);
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
       const n = hash2(x, y, TILE_BY_KEY[tileKey] ?? 3);
@@ -33,8 +37,7 @@ function tileThumb(tileKey: string): HTMLCanvasElement {
       px.data[i] = (v >> 16) & 255; px.data[i + 1] = (v >> 8) & 255; px.data[i + 2] = v & 255; px.data[i + 3] = 255;
     }
   }
-  ctx.putImageData(px, 0, 0);
-  return c;
+  return px;
 }
 
 function matForTile(tileKey: string) {
@@ -49,9 +52,8 @@ function matForTile(tileKey: string) {
   }
 }
 
-function drawTool(kind: 'pick' | 'axe' | 'sword' | 'hammer', metal: Mat): HTMLCanvasElement {
-  const [c, ctx] = mk(16, 16);
-  const px = ctx.createImageData(16, 16);
+function drawTool(kind: 'pick' | 'axe' | 'sword' | 'hammer', metal: Mat): Px16 {
+  const px = px16();
   const set = (x: number, y: number, col: string) => {
     if (x < 0 || y < 0 || x > 15 || y > 15) return;
     const v = parseInt(col.slice(1), 16);
@@ -102,13 +104,11 @@ function drawTool(kind: 'pick' | 'axe' | 'sword' | 'hammer', metal: Mat): HTMLCa
     for (let x = 7; x <= 15; x++) set(x, 10, x === 11 ? metal.light : metal.dark);
     set(10, 11, MATS.woodDark.base); set(10, 12, MATS.woodDark.dark);
   }
-  ctx.putImageData(px, 0, 0);
-  return c;
+  return px;
 }
 
-function drawBar(metal: Mat): HTMLCanvasElement {
-  const [c, ctx] = mk(16, 16);
-  const px = ctx.createImageData(16, 16);
+function drawBar(metal: Mat): Px16 {
+  const px = px16();
   const set = (x: number, y: number, col: string) => {
     const v = parseInt(col.slice(1), 16);
     const i = (y * 16 + x) * 4;
@@ -122,13 +122,11 @@ function drawBar(metal: Mat): HTMLCanvasElement {
     }
   }
   set(4, 7, metal.light); set(5, 7, metal.light);
-  ctx.putImageData(px, 0, 0);
-  return c;
+  return px;
 }
 
-function drawOreIcon(metal: Mat): HTMLCanvasElement {
-  const [c, ctx] = mk(16, 16);
-  const px = ctx.createImageData(16, 16);
+function drawOreIcon(metal: Mat): Px16 {
+  const px = px16();
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
       const n = hash2(x, y, 5);
@@ -146,13 +144,11 @@ function drawOreIcon(metal: Mat): HTMLCanvasElement {
       px.data[i] = (v >> 16) & 255; px.data[i + 1] = (v >> 8) & 255; px.data[i + 2] = v & 255;
     }
   }
-  ctx.putImageData(px, 0, 0);
-  return c;
+  return px;
 }
 
-function simple(color: string, shape: (set: (x: number, y: number, c: string) => void) => void): HTMLCanvasElement {
-  const [c, ctx] = mk(16, 16);
-  const px = ctx.createImageData(16, 16);
+function simple(color: string, shape: (set: (x: number, y: number, c: string) => void) => void): Px16 {
+  const px = px16();
   const set = (x: number, y: number, col: string) => {
     if (x < 0 || y < 0 || x > 15 || y > 15) return;
     const v = parseInt(col.slice(1), 16);
@@ -160,13 +156,12 @@ function simple(color: string, shape: (set: (x: number, y: number, c: string) =>
     px.data[i] = (v >> 16) & 255; px.data[i + 1] = (v >> 8) & 255; px.data[i + 2] = v & 255; px.data[i + 3] = 255;
   };
   shape(set);
-  ctx.putImageData(px, 0, 0);
-  return c;
+  return px;
 }
 
 import type { Mat } from './Palette';
 
-function genItemIcon(key: string): HTMLCanvasElement {
+export function genItemIconPixels(key: string): Px16 {
   const def = ITEM_DEFS[ITEM_BY_KEY[key]];
   const metals: Record<string, Mat> = {
     copper: MATS.copper, iron: MATS.iron, silver: MATS.silver, gold: MATS.gold,
@@ -242,10 +237,29 @@ function genItemIcon(key: string): HTMLCanvasElement {
   });
 }
 
+/** canvas 包装(worker 不可用时的主线程回退路径用) */
+export function genItemIconCanvas(key: string): HTMLCanvasElement {
+  const px = genItemIconPixels(key);
+  const [c, ctx] = mk(16, 16);
+  // TS ImageDataArray 收窄:显式可变视图
+  const clamped = new Uint8ClampedArray(px.data);
+  ctx.putImageData(new ImageData(clamped, 16, 16), 0, 0);
+  return c;
+}
+
 export function generateAllItemIcons(): Map<number, HTMLCanvasElement> {
   const map = new Map<number, HTMLCanvasElement>();
   for (const def of ITEM_DEFS) {
-    map.set(ITEM_BY_KEY[def.key], genItemIcon(def.key));
+    map.set(ITEM_BY_KEY[def.key], genItemIconCanvas(def.key));
   }
   return map;
+}
+
+/** worker 载荷:全部图标平铺进一张图集 */
+export interface IconAtlasPayload {
+  rgba: ArrayBuffer;          // atlasW×atlasH×4(transferable)
+  width: number; height: number;
+  cols: number;               // 每行图标数(=atlasW/16)
+  /** 按 ITEM_DEFS 下标序的 id 列表(与槽位一一对应) */
+  ids: number[];
 }

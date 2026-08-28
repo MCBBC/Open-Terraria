@@ -105,6 +105,37 @@ export function setVanillaSolidTables(solid: boolean[], solidTop: boolean[]): vo
   TILE_SOLID_TOP = solidTop;
 }
 
+// 运行时表推导(TILE_DEFS 域):产出与金标注入的 Main.cs 真值等价的 solid/solidTop。
+// ★last-write-wins 陷阱(2026-08-28 用户实报「草↔泥边界暗线」根因):同 sheet 多 def 时
+// 按定义序直写会把主块覆盖——pixel_block(vanilla.sheet=0, solid=false) 定义在 dirt
+// (sheet 0, solid=true)之后 ⇒ solid[0]=false ⇒ 链内 TileMergeAttemptWeird(num,-1,tileSolid)
+// (WorldGen.cs:83467)把泥土邻居当非固体改写成 -1,「草上泥下」被判成悬空,
+// 草族 num11 分支(:83495-83650)全链翻转 → 边界出现错帧(绿带/暗边)。
+// 规则(与 Main.cs 真值逐 sheet 对账 ≤599;块族全等,家具/装饰族残差与旧实现同域备案):
+//   solid[sheet] = 旧 last-write 值 OR 任一【分帧主 def】(frame 'blend'|'auto')的 solid。
+//   即旧行为的超集修正:只把「后定义非块 def 覆盖分帧主 def」一类错(sheet 0 泥土被
+//   pixel_block 覆盖成非固体 = 本次用户实报根因)拨回 true,绝不新增 true→false 翻转。
+//   v_* 装饰/家具 sheet 的 solid 语义噪声(vines/banner/gemspark 偏 true)系旧表既有,
+//   不在本修域(只影响邻格 -1/类型保留的个别角帧选择,非本次症状)。
+//   solidTop[sheet] = 任意 def platform(OR 语义,与旧实现一致)。
+export function deriveVanillaSolidTablesFromDefs(): { solid: boolean[]; solidTop: boolean[] } {
+  const solid = new Array(600).fill(false);
+  const solidTop = new Array(600).fill(false);
+  const lastWrite = new Array(600).fill(false);
+  const primaryTrue = new Array(600).fill(false);
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const d = TILE_DEFS[i];
+    const v = d?.vanilla;
+    if (!v || v.sheet >= 600) continue;
+    const frame = (v as { frame?: string }).frame;
+    lastWrite[v.sheet] = !!d.solid;
+    if ((frame === 'blend' || frame === 'auto') && d.solid) primaryTrue[v.sheet] = true;
+    if (d.platform) solidTop[v.sheet] = true;
+  }
+  for (let s = 0; s < 600; s++) solid[s] = lastWrite[s] || primaryTrue[s];
+  return { solid, solidTop };
+}
+
 // 测试金标消费:原始集合表(vanilla-framing-golden 对账用)
 export const VANILLA_FRAME_SETS = {
   MERGE_DIRT, CHECKS_FOR_MERGE, TILE_BRICK, TILE_STONE, TILE_MOSS, TILE_PILE, TILE_BLEND_ALL,

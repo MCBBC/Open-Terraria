@@ -23538,6 +23538,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const times = bulk ? bulkBuyAmount(bb ? bb.stack : undefined) : 1;
     let bought = 0;
     let bagFullBlocked = false;
+    let fundsShort = false;
     for (let i = 0; i < times; i++) {
       const key = VANILLA_ITEM_KEY_BY_ID[vanillaId];
       const invId = key !== undefined ? ITEM_BY_KEY[key] : undefined;
@@ -23553,7 +23554,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (medalPrice !== undefined) {
         if (this.defenderMedalsOwned() < price
           || !spendDefenderMedals(this.player.inv.slots, price)) break;
-      } else if (this.coinsOwned() < price || !this.spendCopper(price)) break;
+      } else if (this.coinsOwned() < price) {
+        fundsShort = true;
+        break;
+      } else if (!this.spendCopper(price)) {
+        break;   // 找零不可行（无空格破币,TryPurchasing 回滚）→ 原版静默拒付无提示
+      }
       if (held) {
         if (held.stack >= (ITEM_DEFS[held.id]?.maxStack ?? 1)) break;   // :1890-1893
         held.stack++;   // :1910-1923 买叠到光标（CanStack 门已保证 prefix 全等）
@@ -23576,11 +23582,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       bought++;
     }
     if (bought === 0) {
-      this.cb.onToast(bagFullBlocked
-        ? Lang.text('Mods.SandboxWorld.NPC.InventoryFull')
-        : medalPrice !== undefined
-          ? Lang.text('Mods.SandboxWorld.NPC.NotEnoughMedals')
-          : Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
+      // 原版拒付无提示（HandleShopSlot :2038 BuyItem false → continue）——本仓 toast
+      // 仅限真缺钱/缺勋章/满包守门;找零不可行（TryPurchasing 回滚）静默同 vanilla。
+      // ★满包拒购本身=登记 UX 偏差：原版买入落光标永不拒（:2053-2066）,本仓直入
+      // 背包模型必须有容量守门（物品消失事故回归防线）
+      if (bagFullBlocked || fundsShort || medalPrice !== undefined) {
+        this.cb.onToast(bagFullBlocked
+          ? Lang.text('Mods.SandboxWorld.NPC.InventoryFull')
+          : fundsShort
+            ? Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins')
+            : Lang.text('Mods.SandboxWorld.NPC.NotEnoughMedals'));
+      }
       this.openNpcShop();
       return false;
     }
@@ -24110,66 +24122,132 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  合计四随身银行后 TryPurchasing :35776-35803 面额外层（高→低）容器内层
    *  （背包先于银行）跨池扣款；破面额拆零找零回流背包——原版造进空格,差异登记。
    *  曾只清背包 = 存进猪猪的钱买不了东西,2026-08-28 用户报钱币槽/猪猪存钱罐案） */
+  /** 扣铜币 = 原版 TryPurchasing（Player.cs:35771-35922）逐句移植：
+   *  Pass A（:35777-35803）整币扣除——面额铂(1e6)→金(1e4)→银(100)→铜(1),slotCoins 序
+   *  =背包(跳弹药格)先银行后,整除份额扣,清整堆者其格入 slotsEmpty（原版即如此,含银行格）;
+   *  不足 → 破币找零（:35808-35911）——扫容器 j=背包..bank4,门 num≥[1e4,100,1] 破
+   *  [铂→金×100 / 金→银×100 / 银→铜×100],再 l 循环破 [金→银×100 / 铂→金×100]（无门）;
+   *  找零落空格 = 同容器空格优先,退背包空格（:35823-35839）;新小币格加入 slotCoins 供
+   *  下一轮 Pass A;找零不可行（无空格）→ dictionary 快照整单回滚拒付（:35914-35919,
+   *  原版 result 反语义 true=失败;= "背包满且无空格找零 → 买不了" 原版行为）。
+   *  容器面 = 背包(跳弹药格 54-57)/bank0 猪猪/bank1 保险箱/bank2 守护者熔炉/bank3 虚空库
+   *  （BuyItem :35687-35763 装配同式;coinsOwned 合计门即 BuyItem 的 CoinsCombineStacks 门） */
   private spendCopper(n: number): boolean {
     const p = this.player;
-    if (this.coinsOwned() < n) return false;
-    const pools: Array<Array<{ id: number; stack: number } | null>> =
+    if (this.coinsOwned() < n) return false;            // CoinsCombineStacks 门（:35692）
+    const pools: Array<Array<{ id: number; stack: number; prefix?: number; placeStyle?: number } | null>> =
       [p.inv.slots, p.banks[0], p.banks[1], p.banks[2], p.banks[3]];
-    let remain = n;
-    // 整额扣款：面额从高到低,各池按整除份额扣（背包先于银行）
-    for (let d = COIN_VALUES.length - 1; d >= 0 && remain > 0; d--) {
-      const v = COIN_VALUES[d];
-      let quota = Math.floor(remain / v);
-      for (const pool of pools) {
-        for (let i = 0; i < pool.length && quota > 0; i++) {
-          const s = pool[i];
-          if (!s || coinIndexOf(s.id) !== d) continue;
-          const take = Math.min(s.stack, quota);
-          s.stack -= take;
-          quota -= take;
-          remain -= take * v;
-          if (s.stack <= 0) pool[i] = null;
-        }
+    const isCoin = (s: { id: number } | null) => !!s && coinIndexOf(s.id) >= 0;
+    // slotCoins（:35714-35723）：五容器全币格,背包先银行后,槽位升序;背包排除弹药格
+    const excluded = new Set([54, 55, 56, 57, 58]);
+    const slotCoins: Array<[number, number]> = [];
+    for (let j = 0; j < pools.length; j++) {
+      for (let k = 0; k < pools[j].length; k++) {
+        if (j === 0 && excluded.has(k)) continue;
+        if (isCoin(pools[j][k])) slotCoins.push([j, k]);
       }
     }
-    // 破面额：低面额凑不出余额 → 从小到大拆币覆盖,找零回流背包
-    if (remain > 0) {
-      const needed = remain;
-      let taken = 0;
-      let guard = 0;
-      while (taken < needed && guard++ < 1000) {
-        let took = 0;
-        for (let d = 1; d < COIN_VALUES.length && !took; d++) {
-          for (const pool of pools) {
-            let hit = false;
-            for (let i = 0; i < pool.length && !hit; i++) {
-              const s = pool[i];
-              if (!s || coinIndexOf(s.id) !== d) continue;
-              s.stack -= 1;
-              if (s.stack <= 0) pool[i] = null;
-              took = COIN_VALUES[d];
-              hit = true;
+    // 空格池（:35724-35763）：槽位降序（空=type0||stack0）
+    const slotsEmpty: Array<[number, number]> = [];     // 背包空格
+    for (let k = pools[0].length - 1; k >= 0; k--) {
+      if (excluded.has(k)) continue;
+      if (!pools[0][k]) slotsEmpty.push([0, k]);
+    }
+    const bankEmpty: Array<Array<[number, number]>> = [];
+    for (let j = 1; j < pools.length; j++) {
+      const list: Array<[number, number]> = [];
+      for (let k = pools[j].length - 1; k >= 0; k--) if (!pools[j][k]) list.push([j, k]);
+      bankEmpty.push(list);
+    }
+    const snapshot = new Map<string, { id: number; stack: number; prefix?: number; placeStyle?: number } | null>();
+    const snap = (j: number, k: number) => {
+      const s = pools[j][k];
+      snapshot.set(`${j}:${k}`, s ? { ...s } : null);
+    };
+    let num = n;
+    let failed = false;                                  // 原版 result（true=失败已回滚）
+    let guard = 0;
+    while (num > 0 && guard++ < 10000) {
+      // ---- Pass A 整币扣除（:35777-35803）：面额外层铂→铜,slotCoins 内层 ----
+      for (const [d, v] of [[3, 1000000], [2, 10000], [1, 100], [0, 1]] as const) {
+        if (num < v) continue;
+        for (const [j, k] of slotCoins) {
+          const s = pools[j][k];
+          if (!s || coinIndexOf(s.id) !== d) continue;
+          const quota = Math.floor(num / v);
+          snap(j, k);                                   // :35788 先快照后扣
+          const take = Math.min(quota, s.stack);
+          s.stack -= take;
+          if (s.stack <= 0) { pools[j][k] = null; slotsEmpty.push([j, k]); }   // :35795-35796
+          num -= v * take;                              // :35798（快照差值=实取）
+        }
+      }
+      if (num <= 0) continue;                           // :35804-35807 成功退出（扣款保留）
+      if (slotsEmpty.length > 0) {
+        // ---- 破币找零（:35808-35912）：扫容器 j=背包..bank4 ----
+        slotsEmpty.sort((a, b) => b[1] - a[1]);         // CompareYReverse（DelegateMethods:1008-1011）
+        let item: [number, number] | null = null;
+        for (let j = 0; j < pools.length && !item; j++) {
+          // k 循环（:35814-35859）：门 num≥[1e4,100,1],破 [铂,金,银]→[金,银,铜]×100
+          for (const [d, gate] of [[3, 10000], [2, 100], [1, 1]] as const) {
+            if (num < gate) { continue; }
+            for (const [cj, ck] of slotCoins) {
+              if (cj !== j) continue;
+              const s = pools[cj][ck];
+              if (!s || coinIndexOf(s.id) !== d || s.stack < 1) continue;
+              const list = (j >= 1 && bankEmpty[j - 1].length > 0) ? bankEmpty[j - 1] : slotsEmpty;
+              s.stack -= 1;                             // :35840 破一枚
+              if (s.stack <= 0) { pools[cj][ck] = null; list.push([cj, ck]); }
+              const [tj, tk] = list[0];
+              snap(tj, tk);                             // :35845
+              pools[tj][tk] = { id: this.coinIdOf(d - 1), stack: 100 };            // :35846-35847
+              item = [tj, tk];
+              list.shift();                             // :35849
+              break;                                    // :35850
             }
-            if (hit) break;
+            if (item) break;                            // :35854-35857
+          }
+          // l 循环（:35860-35900）：无门,破 [金→银×100 / 铂→金×100]
+          for (const [d, cd] of [[2, 1], [3, 2]] as const) {
+            if (item) break;                            // :35862-35865
+            for (const [cj, ck] of slotCoins) {
+              if (cj !== j) continue;
+              const s = pools[cj][ck];
+              if (!s || coinIndexOf(s.id) !== d || s.stack < 1) continue;
+              const list = (j >= 1 && bankEmpty[j - 1].length > 0) ? bankEmpty[j - 1] : slotsEmpty;
+              s.stack -= 1;                             // :35887
+              if (s.stack <= 0) { pools[cj][ck] = null; list.push([cj, ck]); }
+              const [tj, tk] = list[0];
+              snap(tj, tk);                             // :35892
+              pools[tj][tk] = { id: this.coinIdOf(cd), stack: 100 };               // :35893-35894
+              item = [tj, tk];
+              list.shift();                             // :35896
+              break;                                    // :35897
+            }
+          }
+          if (item) {                                   // :35901-35905
+            slotCoins.push(item);                       // 新小币格加入下一轮扫描
           }
         }
-        if (!took) break;   // 防御:coinsOwned 已保证有币,不应达
-        taken += took;
+        // :35907-35911 再排序
+        slotsEmpty.sort((a, b) => b[1] - a[1]);
+        for (const bl of bankEmpty) bl.sort((a, b) => b[1] - a[1]);
+        continue;                                       // :35912 下一轮整币扣除
       }
-      const change = taken - needed;
-      if (change > 0) {
-        const inv = p.inv;
-        const plat = Math.floor(change / 1000000);
-        const gold = Math.floor((change % 1000000) / 10000);
-        const silver = Math.floor((change % 10000) / 100);
-        const copper = change % 100;
-        if (plat) inv.add(ITEM_BY_KEY[VI_KEY.COIN.PLATINUM], plat);
-        if (gold) inv.add(ITEM_BY_KEY[VI_KEY.COIN.GOLD], gold);
-        if (silver) inv.add(ITEM_BY_KEY[VI_KEY.COIN.SILVER], silver);
-        if (copper) inv.add(ITEM_BY_KEY[VI_KEY.COIN.COPPER], copper);
+      // :35914-35919 找零不可行 → 快照回滚整单拒付（原版 result=true = 失败）
+      for (const [key, val] of snapshot) {
+        const [j, k] = key.split(':').map(Number);
+        pools[j][k] = val ? { ...val } : null;
       }
+      failed = true;
+      break;
     }
-    return true;
+    return !failed && num <= 0;
+  }
+
+  /** 原版 71+d 面额 → 本仓 coin id（spendCopper 找零用） */
+  private coinIdOf(d: number): number {
+    return ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[71 + d]];
   }
 
   // （旧 isValidHouse 启发式已删除——房屋判定移至 src/world/Housing.ts，

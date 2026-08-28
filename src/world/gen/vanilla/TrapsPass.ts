@@ -724,7 +724,11 @@ function checkSuperT(st: TileStore, x: number, y: number): void {
       if (!anchorValidT(st, k, ay + def.h, 'solid')) bad = true;
     }
   }
-  if (!bad) return;
+  if (!bad) {
+    (globalThis as { __swAbEv?: (l: string) => void }).__swAbEv?.(`CS443 ${x} ${y} t${sh} fx${fx} fy${fy} R0 rc${(globalThis as { __swRollN?: number }).__swRollN}`);
+    return;
+  }
+  (globalThis as { __swAbEv?: (l: string) => void }).__swAbEv?.(`CS443 ${x} ${y} t${sh} fx${fx} fy${fy} R1 rc${(globalThis as { __swRollN?: number }).__swRollN}`);
   destroyObjectT = true;
   for (let dx = 0; dx < def.w; dx++) {
     for (let dy = 0; dy < def.h; dy++) {
@@ -1464,6 +1468,9 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     for (let k = 0; k < 2; k++) {
       placeHeadMirrorT(st, x2 + k, py);                               // ★III13 喷泉写位头变异（443）
       st.setTileSilent(x2 + k, py, GEYSER, 18 * k + 36 * fx, 0);
+    }
+    if (x2 >= 1600 && x2 <= 1900 && py >= 350 && py <= 1100) {
+      trapEv('GW', x2, py, fx);                                       // ★III24b 取证（用毕删）
     }
     return true;
   }

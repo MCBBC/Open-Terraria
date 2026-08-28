@@ -1,0 +1,15 @@
+import puppeteer from 'puppeteer-core';
+const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
+const page = await browser.newPage();
+page.on('pageerror', (e) => console.log('PAGEERR:', String(e.message).slice(0, 200)));
+page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE:', m.text().slice(0, 200)); });
+await page.goto(process.env.SW_ORIGIN ?? 'http://localhost:5219', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
+await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
+await new Promise((r) => setTimeout(r, 800));
+console.log('menu buttons:', await page.evaluate(() => [...document.querySelectorAll('[data-act]')].map((b) => b.dataset.act).join(',')));
+await page.click('[data-act=sp]');
+await new Promise((r) => setTimeout(r, 1500));
+console.log('after sp, body classes:', await page.evaluate(() => [...document.querySelectorAll('body > *')].map((e) => e.className || e.tagName).join(' | ').slice(0, 300)));
+await page.screenshot({ path: '/tmp/sp-debug.png' });
+await browser.close();

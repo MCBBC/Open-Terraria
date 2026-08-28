@@ -292,7 +292,9 @@ function ensureNoise(): void {
   let pending = 2;
   let failed = false;
   const finish = (p: Float32Array | null): void => {
-    void p;
+    // null 回执 = 该张加载失败(曾因丢弃 p 使 failed 恒 false → 失败照样置就绪,
+    // 下帧 uploadNoise(null).length 崩停帧循环;现凭回执判定,TTL 后自动重试)
+    if (p === null) failed = true;
     if (--pending === 0) {
       if (failed) { noiseState = 0; noiseFailAt = Date.now(); }
       else noiseState = 2;
@@ -478,7 +480,8 @@ export class AuroraSky {
     for (let i = 0; i < m.bands; i++) this.computeBand(i, m, globalTime, skyOpacity, scale);
     // 纹理未就位帧跳过:加载窗 ≤ 数十 ms,而 skyOpacity 淡入 ≥ 数秒,视觉不可见;
     // 失败(资源缺失)则极光不画——像素公式的采样器是硬依赖,不做近似降级。
-    if (noiseState !== 2) return;
+    // 除状态字外再验数据面(双保险:任何状态机漂移都不许把 null 送进渲染管线)。
+    if (noiseState !== 2 || !tex286 || !tex287) return;
     // ★WebGL2 GPU 渲染路径（用户令：shader 反编译→GLSL→GPU 逐像素）——
     //    computeBand 已产出带几何（sBotX/Y/sTopX/Y/sU/sD/sR/G/B/sA），
     //    展开为三角形顶点传 GLAurora 用 GPU shader 逐像素渲染。

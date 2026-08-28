@@ -88,13 +88,33 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
    *  弱 GPU 上把 ~7k 张画布后备堆进菜单期 → 光标层上下文被逐（canvas哨兵 streak
    *  ≥100×6窗）+ HealCanvas 空转（2026-08-28 用户实报"菜单页就开始崩"）。fire-
    *  and-forget；Game 构造时 buildAssets 命中热单例（未完成则原地同步补完，语义同旧） */
+  /** mainFlow 侧共享 worldGen worker(loadSave/预生成同进程串行:图标作业
+   *  天然排在读档之前;Game 自身的 genClient 独立,互不影响) */
+  let flowGenClient: import('./workers/WorldGenClient').WorldGenClient | null = null;
+  async function sharedGenClient() {
+    const { WorldGenClient } = await import('./workers/WorldGenClient');
+    flowGenClient ??= new WorldGenClient();
+    return flowGenClient;
+  }
   function startAssetPrewarm(): void {
     // ★必须 setTimeout 宏任务边界(t1547 trace 实锤):AssetGen 已被 Game 静态导入,
     // 产物里动态 import 被内联为 Promise.resolve → .then 是【微任务】,生成包
     // (~550ms putImageData)会在点击 EventDispatch 的同一次派发里同步跑完=
     // "点进入世界卡 0.7s"的主犯。宏任务让点击先落屏,生成块挪进加载页自身 task
     setTimeout(() => {
-      void import('./assets/AssetGen').then((m) => m.buildAssets()).catch(() => {});
+      void (async () => {
+        try {
+          const c = await sharedGenClient();
+          const icons = await c.genIcons({ timeoutMs: 30000 });
+          const m = await import('./assets/AssetGen');
+          m.prepareIconAtlas(icons);
+          m.buildAssets();   // 物化(图集 putImageData 一次+逐图标 drawImage)
+        } catch {
+          // worker 不可用:回退主线程同步生成(Game ctor 冷兜底同款)
+          const m = await import('./assets/AssetGen');
+          m.buildAssets();
+        }
+      })();
     }, 0);
   }
   let menuBg: MenuBackground | null = null;
@@ -491,8 +511,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     try {
       startAssetPrewarm();   // #perf2026-08-28:与读档 worker 并行,勿占菜单期表面预算
       // worker 路径：IDB 读取 + JSON 解析 + RLE 解码 + load 模式沉降全在后台
-      const { WorldGenClient } = await import('./workers/WorldGenClient');
-      const client = new WorldGenClient();
+      const client = await sharedGenClient();
       if (await client.probe()) {
         try {
           // ★与创建世界同款 VUI 加载页(原版风 UIWorldLoadState;用户报"读档 UI 还是旧的")
@@ -528,8 +547,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     try {
       startAssetPrewarm();   // #perf2026-08-28:同 loadFromKey
       // worker 路径：JSON 解析 + RLE 解码 + load 模式沉降全在后台（json 源传入）
-      const { WorldGenClient } = await import('./workers/WorldGenClient');
-      const client = new WorldGenClient();
+      const client = await sharedGenClient();
       if (await client.probe()) {
         try {
           const loadState = new UIWorldLoadState();

@@ -17,7 +17,7 @@ import {
 import { cageFamilyOf, drawCageCell } from './CritterCage';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
 import { animFrameIdx, animYOffset, TILE_ANIM_RATE } from './TileAnim';
-import { vanillaFrameFor, setVanillaSolidTables } from './VanillaFraming';
+import { vanillaFrameFor, setVanillaSolidTables, deriveVanillaSolidTablesFromDefs } from './VanillaFraming';
 // 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程)。★实验旗(默认停用):
 // 启用 = URL ?vf=1 或 localStorage sw_vanilla_framing=1;?vf=0 强制关(压过 localStorage)。
 // id 域契约已在 VanillaFraming 内收敛(内部 id→vanilla 换算),rig 1932 格逐位仲裁通过。
@@ -31,18 +31,15 @@ const SW_VANILLA_FRAMING = (() => {
 })();
 // vanilla solid/solidTop 表注入(初始化一次;solidTop 用 SW 平台表近似——矩阵对 426-434/727-732
 // 皆整块,不涉 solidTop,误差面为零)
+// ★2026-08-28:推导逻辑收敛到 VanillaFraming.deriveVanillaSolidTablesFromDefs——
+// 此前按 def 序 last-write-wins 直写,pixel_block(sheet 0, solid=false) 后定义覆盖 dirt
+// ⇒ solid[0]=false ⇒ 泥土被 TileMergeAttemptWeird 当非固体改写 -1,草/泥边界分支全翻转
+// (用户实报「草下泥土出现暗色横线」根因,金标测试因注入 Main.cs 真值表而漏检)。
 let _solidTablesInit = false;
 function ensureSolidTables(): void {
   if (_solidTablesInit) return;
   _solidTablesInit = true;
-  const solid = new Array(600).fill(false);
-  const solidTop = new Array(600).fill(false);
-  for (let i = 0; i < TILE_DEFS.length; i++) {
-    const v = TILE_DEFS[i]?.vanilla;
-    if (!v || v.sheet >= 600) continue;
-    solid[v.sheet] = !!TILE_DEFS[i].solid;
-    solidTop[v.sheet] = !!TILE_DEFS[i].platform;
-  }
+  const { solid, solidTop } = deriveVanillaSolidTablesFromDefs();
   setVanillaSolidTables(solid, solidTop);
 }
 // vanilla 帧的绘制入口(shared by auto/blend 分流):命中则直画并 return true

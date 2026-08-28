@@ -358,6 +358,8 @@ const bank = await page.evaluate(async () => {
     const s = g.player.inv.slots[i];
     if (s && window.__swItems[VIK[71]] === s.id) invCoins.push(s.stack);
   }
+  // 找零 70 铜落【同容器空格】（list 选择 :35823-35839 j==1→bankEmpty 优先）
+  const bankCopper70 = g.player.banks[0].some((s2) => s2 && s2.id === IK[VIK[71]] && s2.stack === 70);
   // ⑦ 猪猪 tile：玩家右侧 3 格放置 → 右键开同一容器
   if (g.player.dead) g.respawnPlayer?.();
   g.player.hp = 99999;
@@ -415,9 +417,12 @@ const bank = await page.evaluate(async () => {
     selOff = pig.interactState;
   }
   ui.closeInventory?.();
+  const bd = g.player.banks[0].map((cs, i2) => cs ? `${i2}:${cs.id}x${cs.stack}` : null).filter(Boolean);
+  const pd = g.player.inv.slots.map((cs, i2) => cs ? `${i2}:${cs.id}x${cs.stack}` : null).filter(Boolean);
   return {
+    bd, pd,
     diag, pAfter3, pAfter4, pAfter5, spawnOk, hoverOk, openOk, closeOk, reopened, deposited, totalBefore, okBuy,
-    bankSilver, totalAfter, invCopper70: invCoins.includes(70), pigPanel,
+    bankSilver, totalAfter, bankCopper70: g.player.banks[0].some((s2) => s2 && s2.id === IK[VIK[71]] && s2.stack === 70), pigPanel,
     openedForT2, t2Closed, reopened2, pigExpired, dedupOk, selHover, selAway, selOff,
   };
 });
@@ -429,7 +434,8 @@ check('Shift+点存币 → 入猪猪且背包清空',
   bank.deposited === true && bank.reopened === true);
 check('空背包用银行钱购物成功', bank.okBuy === true && bank.totalBefore === 5000 && bank.totalAfter === 4970,
   JSON.stringify(bank).slice(0, 200));
-check('扣银行 1 银、找零 70 铜回背包', bank.bankSilver === 49 && bank.invCopper70 === true);
+check('扣银行 1 银、找零 100 铜落同容器最高空槽 39,扣 30 后余 70(list 选择 :35823-35839)',
+  bank.bankSilver === 49 && bank.bankCopper70 === true && bank.invCopper70 === false);
 check('猪猪 tile 右键 = 同一 piggy 容器', bank.pigPanel?.x === -2 && bank.pigPanel?.sameRef === true);
 check('T2 走远=面板自动关(关猪音路径)', bank.openedForT2 === true && bank.t2Closed === true);
 check('timeLeft 到期=飞猪自灭+面板关', bank.reopened2 === true && bank.pigExpired === true);
@@ -499,6 +505,60 @@ check('钱币归并:250铜中200进位成2银入猪猪 → 1金3银50铜终态',
 check('非钱币(火把)同入猪猪(原版无币种过滤)', depo.torchIn === true);
 check('热键栏 0-9 不动/收藏跳过', depo.hotbarKept === true && depo.favKept === true);
 check('玩家无铜残留(全部入猪猪,总额守恒)', depo.playerCopperGone === true && depo.torchGone === true);
+
+// ---- ⑧ 破币找零链（TryPurchasing :35808-35912）：银行仅 1 金、背包全空 →
+//      买 30 铜沙滩球 → 破金成 100 银入原格 → 仍不足破 1 银成 100 铜入背包空格
+//      （slotsEmpty 降序=钱币格 53 优先）→ 扣 30 → 终态 银行 99 银 + 53 格 70 铜 ----
+const brk = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const ui = window.__swUI;
+  const VIK = window.__swVANILLA_ITEM_KEY_BY_ID, IK = window.__swItems;
+  const { FlyingPiggyBank } = await import('/src/entities/FlyingPiggyBank.ts');
+  for (let i = 0; i < g.player.inv.slots.length; i++) g.player.inv.slots[i] = null;
+  for (const b of g.player.banks) b.fill(null);
+  if (g.player.dead) g.respawnPlayer?.();
+  g.player.hp = 99999;
+  g.player.inv.slots[0] = { id: IK[VIK[3213]], stack: 1 };
+  g.cb.onInventoryChanged?.();
+  g.input.mouseX = 640; g.input.mouseY = 400;
+  g.input.mouseDown = true; g.input.mouseHeld = true;
+  g.fixedUpdate(1 / 60);
+  g.input.mouseDown = false; g.input.mouseHeld = false;
+  let pig = g.entities.projectiles.find((e) => e instanceof FlyingPiggyBank && !e.dead);
+  for (let i = 0; i < 120 && pig && pig.phase === 0; i++) g.fixedUpdate(1 / 60);
+  for (let t = 0; t < 3; t++) {
+    const [sx, sy] = g.camera.worldToScreen(pig.cx, pig.cy);
+    g.input.mouseX = sx; g.input.mouseY = sy;
+    g.input.rightDown = true;
+    g.fixedUpdate(1 / 60);
+    g.input.rightDown = false;
+    if (ui.openChest?.x === -2) break;
+  }
+  const { TownNPC } = await import('/src/entities/TownNPC.ts');
+  const npc = new TownNPC('party_girl', g.player.x + 100, g.player.y - 40);
+  g.entities.add(npc, 'npcs');
+  g.openNpcDialog(npc);
+  g.player.banks[0][0] = { id: IK[VIK[73]], stack: 1 };   // 仅 1 金
+  ui.closeInventory();
+  const totalBefore = g.coinsOwned();
+  const okBuy = g.npcShopBuy(859, undefined);
+  const bankS0 = g.player.banks[0][0];
+  const c53 = g.player.inv.slots[53];
+  const totalAfter = g.coinsOwned();
+  ui.closeInventory?.();
+  const b = g.player.banks[0];
+  const bdump = b.map((cs, i) => cs ? `${i}:${cs.id}x${cs.stack}` : null).filter(Boolean);
+  const pdump = g.player.inv.slots.map((cs, i) => cs ? `${i}:${cs.id}x${cs.stack}` : null).filter(Boolean);
+  return {
+    bdump, pdump,
+    okBuy, totalBefore, totalAfter,
+    bankS39Silver: !!b[39] && b[39].id === IK[VIK[72]] && b[39].stack === 99,
+    bankS38Copper: !!b[38] && b[38].id === IK[VIK[71]] && b[38].stack === 70,
+  };
+});
+check('破币链:银行仅 1 金仍可买 30 铜货', brk.okBuy === true && brk.totalBefore === 10000 && brk.totalAfter === 9970, JSON.stringify(brk));
+check('破金→100 银落最高空槽 39(CompareYReverse 降序,余 99)', brk.bankS39Silver === true, JSON.stringify(brk));
+check('破银→100 铜落次空槽 38,扣 30 后余 70', brk.bankS38Copper === true, JSON.stringify(brk));
 
 console.log(`\n${pass} pass / ${fail} fail`);
 await browser.close();

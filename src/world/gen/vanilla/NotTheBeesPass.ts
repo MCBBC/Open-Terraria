@@ -393,8 +393,11 @@ function overGrownDungeon(st: TileStore, rng: RNG, gs: GenState): void {
     let n = rng.int(50, Math.floor(w / 2) - 1);              // Next(50, maxTilesX/2)
     if (gs.dungeonSide >= 1) n = rng.int(Math.floor(w / 2), w - 51);
     const n2 = rng.int(50, h - 51);
-    const n3 = rng.int(5, 15);
+    // ★IIII24：半径 num3 的 Next(5,16) 原版在 wallDungeon 门【之后】才掷（rig 1457
+    //   cs:24348-24353 实证）——旧版门先掷，失败列多耗 1 掷 ⇒ 本域累计 +5213 掷债，
+    //   下游所有随机支（雪带阈值/树藤风格）全体错位。
     if (!st.inBounds(n, n2) || !WALL_DUNGEON.has(st.wall[st.idx(n, n2)]!)) continue;
+    const n3 = rng.int(5, 15);
     for (let j = n - n3; j <= n + n3; j++) {
       for (let k = n2 - n3; k <= n2 + n3; k++) {
         if (!activeAt(st, j, k) || !TILE_DUNGEON.has(sheetAt(st, j, k))) continue;

@@ -340,6 +340,25 @@ const mbDraws = (): number => {
   try { return g.__swMbDraws?.() ?? 0; } catch { return 0; }
 };
 
+/** IIII26 临时预算探针(批后删除):每次调用记录 [调用序, 开始掷, 结束掷] */
+interface BudgetRec { site: string; seq: number; a: number; b: number }
+let __budgetSeqCounter = 0;
+const __budgetLog: BudgetRec[] = [];
+function __budgetEnter(site: string): void {
+  const rec: BudgetRec = { site, seq: ++__budgetSeqCounter, a: mbDraws(), b: -1 };
+  __budgetLog.push(rec);
+}
+function __budgetExit(): void {
+  const g = globalThis as { __swBudgetStack?: BudgetRec[] };
+  if (!g.__swBudgetStack) return;
+  const rec = g.__swBudgetStack.pop();
+  if (rec) { rec.b = mbDraws(); }
+}
+export function __resetBudgetLog(): void {
+  __budgetSeqCounter = 0; __budgetLog.length = 0;
+}
+export function __readBudgetLog(): BudgetRec[] { return __budgetLog.slice(); }
+
 export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests?: ChestSink): void {
   const g0 = globalThis as { __swMbCap?: (gs: GenState, st: TileStore, chests?: ChestSink) => void };
   try { g0.__swMbCap?.(gs, st, chests); } catch { /* probe */ }
@@ -392,7 +411,8 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       const ox = rng.int(50, w - 51);
       const oy = rng.int(Math.floor(gs.worldSurface) + 20, h - 201);
       segProbe('iceTry', [ox, oy]);
-      if (placeThinIcePatch(st, rng, gs, ox, oy)) {
+      __budgetEnter('TI.place'); let _tiOk: boolean; try { _tiOk = placeThinIcePatch(st, rng, gs, ox, oy); } finally { __budgetExit(); }
+      if (_tiOk) {
         iceDone++;
         iceFail = 0;
       } else {
@@ -1533,8 +1553,8 @@ export class DeadMansChestBiome {
       if (!this.isAGoodSpot(x, y)) { segProbe(`CAND ${x},${y} good=False`); continue; }
       this.clearCaches();
       const px = x, py = y + 1;
-      this.findBoulderTrapSpots(px, py);
-      this.findDartTrapSpots(px, py);
+      __budgetEnter('DM.cand.findBoulder'); try { this.findBoulderTrapSpots(px, py); } finally { __budgetExit(); }
+      __budgetEnter('DM.cand.findDart'); try { this.findDartTrapSpots(px, py); } finally { __budgetExit(); }
       // III7 探针:CAND.good 仅反映 IsAGoodSpot(x86 同口径);CanPlace 结果另记
       segProbe(`CAND ${x},${y} good=True`);
       const good = this.areThereEnoughTraps()
@@ -1549,19 +1569,22 @@ export class DeadMansChestBiome {
 
   /** Place(cs:102-136) */
   place(ox: number, oy: number): boolean {
+    __budgetEnter('DM.place'); try { return this.placeInner(ox, oy); } finally { __budgetExit(); }
+  }
+  private placeInner(ox: number, oy: number): boolean {
     if (!this.isAGoodSpot(ox, oy)) return false;
     this.clearCaches();
     const px = ox, py = oy + 1;   // position = origin + (0,1)
-    this.findBoulderTrapSpots(px, py);
-    this.findDartTrapSpots(px, py);
-    this.findExplosiveTrapSpots(px, py);
+    __budgetEnter('DM.place.findBoulder'); try { this.findBoulderTrapSpots(px, py); } finally { __budgetExit(); }
+    __budgetEnter('DM.place.findDart'); try { this.findDartTrapSpots(px, py); } finally { __budgetExit(); }
+    __budgetEnter('DM.place.findExpl'); try { this.findExplosiveTrapSpots(px, py); } finally { __budgetExit(); }
     if (!this.areThereEnoughTraps()) return false;
-    this.turnGoldChestIntoDeadMansChest(ox, oy);
-    for (const d of this.darts) this.actuallyPlaceDartTrap(d);
-    for (const w of this.wires) this.placeWireLine(w);
-    for (const b of this.boulders) this.actuallyPlaceBoulderTrap(b);
-    for (const e of this.explosives) this.actuallyPlaceExplosive(e);
-    this.placeWiresForExplosives(ox, oy);
+    __budgetEnter('DM.turnGoldChest'); try { this.turnGoldChestIntoDeadMansChest(ox, oy); } finally { __budgetExit(); }
+    for (const d of this.darts) { __budgetEnter('DM.dartTrap'); try { this.actuallyPlaceDartTrap(d); } finally { __budgetExit(); } }
+    for (const w of this.wires) { __budgetEnter('DM.wireLine'); try { this.placeWireLine(w); } finally { __budgetExit(); } }
+    for (const b of this.boulders) { __budgetEnter('DM.boulderTrap'); try { this.actuallyPlaceBoulderTrap(b); } finally { __budgetExit(); } }
+    for (const e of this.explosives) { __budgetEnter('DM.explPlace'); try { this.actuallyPlaceExplosive(e); } finally { __budgetExit(); } }
+    __budgetEnter('DM.wiresForExpl'); try { this.placeWiresForExplosives(ox, oy); } finally { __budgetExit(); }
     return true;
   }
 

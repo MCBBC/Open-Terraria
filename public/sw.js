@@ -26,10 +26,22 @@ const MIME_BY_EXT = [
   [/\.m?js$/, /^(application|text)\/(javascript|ecmascript)\b/],
   [/\.css$/, /^text\/css\b/],
 ];
+/** 扩展名→规则直查（scrub 全缓存扫描×数千条,warm 首轮数千次 fetch——线性 6 正则
+ *  在 CPU profile 里成 SW 线程头号热点,2026-08-28 trace 实证）。未登记=null 不拦 */
+const MIME_BY_EXT_MAP = new Map();
+for (const [re, want] of MIME_BY_EXT) {
+  for (const ext of ['png', 'jpg', 'jpeg', 'webp', 'gif', 'woff2', 'woff', 'ttf', 'json',
+    'wav', 'mp3', 'ogg', 'js', 'mjs', 'css']) {
+    if (re.test('.' + ext)) MIME_BY_EXT_MAP.set(ext, want);
+  }
+}
 function mimeOk(path, res) {
+  // 与原线性正则严格同义：小写敏感、路径终点锚定（fetch/warm 传的都是无 query 路径）
+  const m = /\.([a-z0-9]+)$/.exec(path);
+  const want = m ? MIME_BY_EXT_MAP.get(m[1]) : undefined;
+  if (!want) return true;   // 未登记扩展名不拦（维持旧行为）
   const ct = res.headers.get('content-type') || '';
-  for (const [re, want] of MIME_BY_EXT) if (re.test(path)) return want.test(ct);
-  return true;   // 未登记扩展名不拦（维持旧行为）
+  return want.test(ct);
 }
 const CACHE_PREFIX = 'sw-assets-v';
 let currentVersion = '';
@@ -256,9 +268,25 @@ function gcOldCaches() {
  * 不变则同名——毒条目会跨 SW 换代存活并被 cache-first 直接命中(连 fetch 都
  * 不发,MIME 门无从拦截)。init 时逐条目核对已登记扩展名的 content-type,
  * 不符即删:删后下次请求走 miss→fetch→MIME 门拒置真 404,零好数据重下。 */
+let scrubRunning = null;
 async function scrubPoisonedEntries() {
+  if (scrubRunning) return scrubRunning;
+  scrubRunning = _scrubInner().finally(() => { scrubRunning = null; });
+  return scrubRunning;
+}
+async function _scrubInner() {
   try {
     const cache = await getCache();
+    // ★每版本一次(2026-08-28 trace 实证):全缓存逐条 match+MIME 是 SW 线程
+    // 头号 CPU 热点(数千条×IO),而毒条目只能来自"坏部署写同名缓存"——同版本
+    // 二次 init 纯重复扫。标记条目存版本内,跨 SW 重启仍跳过;换版本自然重扫。
+    try {
+      const marker = await cache.match('__sw_meta__');
+      if (marker) {
+        const j = await marker.json().catch(() => null);
+        if (j && j.scrubbedVersion === currentVersion) return;
+      }
+    } catch { /* 标记读失败按未清扫处理 */ }
     const bad = [];
     for (const req of await cache.keys()) {
       const p = new URL(req.url).pathname;
@@ -269,6 +297,7 @@ async function scrubPoisonedEntries() {
     }
     for (const r of bad) await cache.delete(r);
     if (bad.length) console.log(`[sw] 清除 SPA 兜底伪图 ${bad.length} 条`);
+    await cache.put('__sw_meta__', new Response(JSON.stringify({ scrubbedVersion: currentVersion })));
   } catch { /* 清扫失败不阻断 init */ }
 }
 
@@ -276,7 +305,9 @@ async function scrubPoisonedEntries() {
 let lastWarm = { done: 0, total: 0, failed: 0, running: false };
 async function reportStatus() {
   const cache = await getCache();
-  const cached = (await cache.keys()).length;
+  // 排除 __sw_meta__ 标记——legacy 逐文件模式用全缓存条目数校准进度
+  // (AssetCache state.done=min(cached,total)),计数语义必须与标记引入前逐位一致
+  const cached = (await cache.keys()).filter((r) => !r.url.endsWith('/__sw_meta__')).length;
   postMessageToPages({ type: 'status', version: currentVersion, cached, warm: lastWarm });
 }
 
@@ -308,7 +339,9 @@ self.addEventListener('message', (e) => {
   } else if (d.type === 'gc') {
     if (typeof d.version === 'string' && d.version) {
       if (d.version !== currentVersion) { currentVersion = d.version; cacheReady = null; }
-      e.waitUntil(gcOldCaches());
+      // gc = 页面显式清理(清理按钮/检测)——顺带强制重扫本版本毒条目
+      // (scrub 每版本一次的逃生门:同版本若再现毒条目,这里兜底)
+      e.waitUntil(gcOldCaches().then(() => _scrubInner()));
     }
   } else if (d.type === 'warm') {
     if (!currentVersion) return; // 无版本(未 init 且消息未带)拒绝,防写错缓存

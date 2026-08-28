@@ -27,18 +27,28 @@ const OUT = process.env.SW_I25_OUT ?? '/tmp/iii25-out/j-hm.txt';
     if (++lines % 500 === 0) console.log(`hm ${lines}`);
   };
   // 事件流（与 rig SW_TRAPSLOG 对拍；仅 mainloop 窗口 G_LO..G_HI）
-  const G_LO = Number(process.env.SW_I25_GLO ?? 7913);
-  const G_HI = Number(process.env.SW_I25_GHI ?? 7925);
+  const G_LO = Number(process.env.SW_I25_GLO ?? -1);
+  const G_HI = Number(process.env.SW_I25_GHI ?? -1);
   const evPath = process.env.SW_I25_EV ?? '/tmp/iii25-out/j-traps.txt';
   let logging = false, evLines = 0;
+  const wPath = process.env.SW_I25_W ?? '/tmp/iii25-out/j-W.txt';
   (globalThis as unknown as { __swTrapEv?: (k: string, a: number, b: number, v: number) => void }).__swTrapEv =
     (kind: string, a: number, b: number, v: number) => {
-      if (!logging && kind === 'A' && a >= G_LO) logging = true;
-      if (!logging) return;
-      if (kind === 'A' && a > G_HI) { logging = false; return; }
+      if (G_LO >= 0) {
+        if (!logging && kind === 'A' && a >= G_LO) logging = true;
+        if (!logging) return;
+        if (kind === 'A' && a > G_HI) { logging = false; return; }
+      }
       appendFileSync(evPath, `${evLines + 1}|${kind}|${a}|${b}|${v}|rc${g.__swRollN}\n`);
       evLines++;
+      if (kind === 'GW') appendFileSync(wPath, `GW ${a} ${b} st${v} rc${g.__swRollN}\n`);
     };
+  const csPath = process.env.SW_I25_CS ?? '/tmp/iii25-out/j-CS.txt';
+  let csOn = process.env.SW_I25_CS === '1';
+  (globalThis as unknown as { __swAbEv?: (l: string) => void }).__swAbEv = (l: string) => {
+    if (!csOn) return;
+    if (/^CS443/.test(l)) appendFileSync(csPath, l + "\n");
+  };
   const { generateWorld } = await import('../src/world/gen/WorldGen');
   await generateWorld({
     width: 4200, height: 1200, seedText: '1896728457', evil: 1,

@@ -29,6 +29,8 @@ interface Pending {
   stallTimer?: ReturnType<typeof setInterval>;
   /** loadSave 专用结果处理器（world + player） */
   onLoadResult?: (ev: Extract<WorldWorkerEvent, { type: 'result' }>) => void;
+  /** genIcons 专用结果处理器(#perf-gpulog 图标包 worker 化) */
+  onIcons?: (ev: Extract<WorldWorkerEvent, { type: 'icons' }>) => void;
 }
 
 /** 握手超时：覆盖老 Safari 无 module worker / CSP 禁 worker / file:// 全挂 */
@@ -135,6 +137,28 @@ export class WorldGenClient {
     });
   }
 
+  /** 程序化图标图集(#perf-gpulog 图标包 worker 化):纯像素生成+平铺进单张
+   *  图集,rgba transfer 回传。排队语义 = 与后续 saveParse/generate 同 worker
+   *  串行——startAssetPrewarm 先发本请求,天然排在读档/生成作业之前 */
+  async genIcons(cb?: { timeoutMs?: number }): Promise<{
+    rgba: ArrayBuffer; width: number; height: number; cols: number; ids: number[];
+  }> {
+    const w = await this.ensureWorker();
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        this.teardown();
+        reject(new WorldGenUnavailable('图标生成超时'));
+      }, cb?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: () => undefined, reject, timer,
+        onIcons: (ev) => resolve(ev.icons),
+      });
+      w.postMessage({ id, type: 'genIcons' } satisfies WorldWorkerRequest);
+    });
+  }
+
   /** 读档解析（worker 内 IDB 直读/JSON 解析/RLE 解码 + load 模式沉降，transfer 回传） */
   async loadSave(
     args: { key?: string; json?: string; save?: unknown },
@@ -164,6 +188,13 @@ export class WorldGenClient {
 
   private onEvent(ev: WorldWorkerEvent) {
     const p = this.pending.get(ev.id);
+    if (ev.type === 'icons') {
+      if (!p) return;
+      clearTimeout(p.timer);
+      this.pending.delete(ev.id);
+      p.onIcons?.(ev);
+      return;
+    }
     if (ev.type === 'result') {
       if (!p) return;
       clearTimeout(p.timer);
