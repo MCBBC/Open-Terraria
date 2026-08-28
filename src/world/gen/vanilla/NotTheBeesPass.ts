@@ -398,6 +398,7 @@ function spreadGrassFinishEngine(st: TileStore, rng: RNG, x: number, y: number, 
   if (enclosed) return;
   if (NOT_CLEARABLE.has(st.type[i])) return;
   st.type[i] = grass;
+  fntbTagSafe('SPG', x, y);            // ★IIII29：SpreadGrass 成功写入锚（probe 域）
   genSquareTileFrame(st, rng, x, y);
   for (let m = x0; m < x1; m++) {
     for (let n = y0; n < y1; n++) {
@@ -613,9 +614,10 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
         st.flags[idx] = 0;
         st.liquid[idx] = 255;
         st.liquidType[idx] = LIQUID_TYPE.WATER;
+        fntbTagSafe('HBW', m, n);
       }
       if ((dstarve || noTraps) && !tenth && num8 === 48) st.type[idx] = TILE_BY_KEY['v_232_wooden_spike']!;
-      if (num8 === 571) genTileFrame(st, rng, m, n);                // 竹重帧
+      if (num8 === 571) { fntbTagSafe('T571', m, n); genTileFrame(st, rng, m, n); }   // 竹重帧
       const num9 = remix ? 10 : 20;
       // 腐化丛林草 25 → 661（cs:25599-25625）
       if (num8 === 25 || (remix && num8 === 23 && n < ws)) {
@@ -654,7 +656,10 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
       // 藤→丛林藤（丛林基座下）（cs:25663）
       if ((num8 === 382 || num8 === 52) && activeAt(st, m, n - 1)) {
         const up = sheetAt(st, m, n - 1);
-        if (up === 62 || up === 60 || up === 384) st.type[idx] = JUNGLE_VINE;
+        if (up === 62 || up === 60 || up === 384) {
+          st.type[idx] = JUNGLE_VINE;
+          fntbTagSafe('V62', m, n);
+        }
       }
       // SpreadGrass 熔岩线分界（cs:25665-25671）
       // ★IIII24：原版 SpreadGrass 尾 SquareTileFrame 是**全引擎** TileFrame×9 派发
@@ -676,8 +681,8 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
       const num16 = Math.trunc((num14 + num15) / 2);
       if (n > num15 && n <= num14) {
         if (m < bd + 200 - 20 - rng.int(-2, 2) || m > w - bd - 200 + 20 + rng.int(-2, 2)) {
-          if (st.wall[idx] === HIVE_WALL) st.wall[idx] = 0;
-          if (st.liquid[idx]! > 0) { clearHoney(st, idx); clearLava(st, idx); }
+          if (st.wall[idx] === HIVE_WALL) { st.wall[idx] = 0; fntbTagSafe('W86', m, n); }
+          if (st.liquid[idx]! > 0) { clearHoney(st, idx); clearLava(st, idx); fntbTagSafe('LQ', m, n); }
           if (num8 === 59) {
             let nearJungle = false;
             for (let a = m - 1; a <= m + 1; a++) {
@@ -687,19 +692,21 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
             }
             if (!nearJungle) {
               st.type[idx] = n < num16 ? ICE : SNOW;
+              fntbTagSafe(n < num16 ? 'I161' : 'S147', m, n);
             }
           }
           if (num8 === 225 || num8 === 230) {
             st.type[idx] = n > num16 ? ICE : SNOW;
+            fntbTagSafe(num8 === 225 ? (n > num16 ? 'H225I' : 'H225S') : (n > num16 ? 'H230I' : 'H230S'), m, n);
           }
         }
       }
       // 树族回退（cs:25714-25730）
       if (!remix && !dstarve) {
         if (num8 === 6 || num8 === 7 || num8 === 166 || num8 === 167) {
-          if (n > (lavaLine + rock * 2) / 3 + rng.int(-2, 2) + 2) st.type[idx] = DIRT;
+          if (n > (lavaLine + rock * 2) / 3 + rng.int(-2, 2) + 2) { st.type[idx] = DIRT; fntbTagSafe('TF0', m, n); }
         } else if (num8 === 40 || num8 === 123) {
-          if (n > (lavaLine + rock) / 2 + rng.int(-2, 2) + 2) st.type[idx] = STONE;
+          if (n > (lavaLine + rock) / 2 + rng.int(-2, 2) + 2) { st.type[idx] = STONE; fntbTagSafe('TF1', m, n); }
         }
       }
       // 幼虫播种（cs:25732-25752）
@@ -731,7 +738,7 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
       if (!st.inBounds(x, y)) continue;
       const i = st.idx(x, y);
       clearHoney(st, i);                                            // honey(false)
-      if (sheetOf(st.type[i]!) === 375) st.type[i] = TILE_BY_KEY['v_373_water_drip']!;
+      if (sheetOf(st.type[i]!) === 375) { st.type[i] = TILE_BY_KEY['v_373_water_drip']!; fntbTagSafe('D373', x, y); }
       if (!remix) {
         if (sheetOf(st.type[i]!) === 60) {
           st.type[i] = GRASS;
@@ -794,6 +801,7 @@ function placeLarva(st: TileStore, rng: RNG, x: number, y: number): void {
       st.frameY[i] = (dy + 2) * 18;
     }
   }
+  fntbTagSafe('L231', x, y);           // ★IIII29：PlaceTile(231) 成功锚
   genSquareTileFrame(st, rng, x, y);   // cs:59993 尾奏
 }
 

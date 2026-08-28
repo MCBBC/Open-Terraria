@@ -71,6 +71,9 @@ const le16 = (p: string): Uint16Array => {
   // ★I30 写位观察：盒内一切 setTileSilent 直写（含整块静默擦除路径）
   const evs: string[] = [];
   (globalThis as unknown as Record<string, unknown>).__swTntEv = (m: string) => evs.push(m);
+  let rollN = 0;
+  (globalThis as unknown as Record<string, unknown>).__swOnRoll = () => { rollN++; (globalThis as unknown as Record<string, number>).__swRollN = rollN; };
+  (globalThis as unknown as Record<string, unknown>).__swTrapHm = (label: string) => evs.push(`HM ${label} ln=${rollN}`);
   {
     const orig = TileStore.prototype.setTileSilent;
     const g1s = (): string => {
@@ -118,6 +121,8 @@ const le16 = (p: string): Uint16Array => {
     runTrapsPass(st, rng as never, gs, chests);
   } finally {
     delete (globalThis as unknown as Record<string, unknown>).__swTntEv;
+    delete (globalThis as unknown as Record<string, unknown>).__swOnRoll;
+    delete (globalThis as unknown as Record<string, unknown>).__swTrapHm;
   }
   writeFileSync(`${OUT}/j-replay-tnt-${CHAIN}.txt`, evs.join('\n') + '\n');
   // ---- 对拍 dump076 ----

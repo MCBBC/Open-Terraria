@@ -30,6 +30,7 @@ import { VuiDemoState } from './vui/states/VuiDemoState';
 import { createFlow } from './mainFlow';
 import type { FlowHandle } from './mainFlow';
 import { downloadDebugReport } from './debug/DebugReport';
+import { showFeatureGate } from './ui/QuickGate';
 import { installCanvasWatch } from './render/CanvasWatch';
 import { RemasterRuntime } from './remaster/RemasterRuntime';
 import { assetVersion } from './net/AssetCache';
@@ -248,6 +249,17 @@ function initCameraModeWiring(game: Game): boolean {
 }
 
 // ---- 键盘：背包/暂停/保存 ----
+/** 地图点击传送开关（Shift+F2/F4/F6-F10 共用,2026-08-27）：首用确认门（同道具
+ *  搜索/旅程快捷键）——确认启用后本地持久,后续按键直接开合。默认禁用态下全屏
+ *  地图的选点/两次点击传送整链不可达（Game.mapClickTeleportEnabled 门） */
+function toggleMapClickTeleport(): void {
+  const g = flow?.game;
+  if (!g) return;
+  showFeatureGate('mapteleport', '地图点击传送', () => {
+    g.mapClickTeleportEnabled = true;
+    ui.toast('地图点击传送已启用：全屏地图点击选点，再点同一点传送');
+  });
+}
 window.addEventListener('keydown', (e) => {
   const game = flow?.game;
   if (!inGame || !game) return;
@@ -309,6 +321,15 @@ window.addEventListener('keydown', (e) => {
     game.renderer.captureMode.toggleRequest(game.player, game.world);
     return;
   }
+  // ★Shift+F2/F4/F6/F7/F8/F9/F10（2026-08-27 用户要求）：统一 = 地图点击传送
+  //  开关（首用确认门;stopImmediatePropagation 防旧迁入键并行——如 Game 的
+  //  Shift+F2 无敌/相机模式等）。F2 在下方 switch 无 case,在此统一拦截
+  if (e.shiftKey && ['F2', 'F4', 'F6', 'F7', 'F8', 'F9', 'F10'].includes(e.code)) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    toggleMapClickTeleport();
+    return;
+  }
   switch (e.code) {
     case 'KeyS':
       // Ctrl+S 快速存档（原 F6 让位召唤面板后迁入）
@@ -328,16 +349,12 @@ window.addEventListener('keydown', (e) => {
       }
       break;
     case 'F4':
-      // 调试全图迷雾消除迁 Shift+F4（2026-08-20：裸 F4 让位原版 ToggleCameraMode
-      // 拍照模式（PlayerInput.cs:1926 默认 F4,经下方 isBound('ToggleCameraMode')
-      // 派发）;grep scripts/_*.mjs 无 F4 按键依赖——_fogband/_fogwatch 两探针
-      // 直接调 world.explored API 不按键,无探针破坏）
+      // ★Shift+F4（2026-08-27 用户要求）：改为地图点击传送开关（原全图迷雾消除
+      //  让位退役,world.explored API 仍可经探针/控制台调用）
       if (e.shiftKey) {
         e.preventDefault();
-        game.world.explored.fill(1);
-        game.world.exploredDirty = null; // 全图变化无脏信息 → 渲染端整幅重建
-        game.world.exploredVersion++; // 使迷雾缓存失效重建
-        ui.toast('已消除全图迷雾');
+        e.stopImmediatePropagation();
+        toggleMapClickTeleport();
       }
       break;
     case 'F5': {

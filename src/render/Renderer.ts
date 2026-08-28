@@ -28,7 +28,7 @@ import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene,
 import { GLScreenFilters, type ScreenFxPass } from './GLScreenFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora, setFrameAtmo } from '../lighting/SkyColor';
-import { journeyQuickConfirmed, showJourneyQuickGate } from '../ui/QuickGate';
+import { showJourneyQuickGate } from '../ui/QuickGate';
 import { SMART_CURSOR_DIRECTION_LOCKS, sheetOf } from '../player/SmartCursor';
 import { mobileUiScale } from '../ui/MobileControls';
 import { TEAM_COLORS } from '../stats/Pvp';
@@ -13539,9 +13539,8 @@ export class Renderer {
     ctx.fillText('\u00b1', btnX + btnS / 2, btnY + 15);
     if (clicked && btnHover) {
       // ★首用确认门（2026-08-27 用户要求,同道具搜索）：未确认 → 弹窗明示超游
-      //   风险,确认后 localStorage 持久放行；本次点击被门吞掉（下一击生效）
-      if (!journeyQuickConfirmed('time')) { showJourneyQuickGate('time', () => { this.timePanelOpen = true; }); }
-      else this.timePanelOpen = !this.timePanelOpen;
+      //   风险,确认后 localStorage 持久放行且本次即开面板；已确认 → 直接开合
+      showJourneyQuickGate('time', () => { this.timePanelOpen = !this.timePanelOpen; });
     }
     if (this.timePanelOpen) {
       const px = ox, py = oy + 276, pw = size, ph = 64;
@@ -13588,8 +13587,7 @@ export class Renderer {
     ctx.font = 'bold 12px sans-serif';
     ctx.fillText('⛅', wBtnX + btnS / 2, wBtnY + 15);
     if (clicked && wBtnHover) {
-      if (!journeyQuickConfirmed('weather')) { showJourneyQuickGate('weather', () => { this.weatherPanelOpen = true; }); }
-      else this.weatherPanelOpen = !this.weatherPanelOpen;
+      showJourneyQuickGate('weather', () => { this.weatherPanelOpen = !this.weatherPanelOpen; });
     }
     if (this.weatherPanelOpen) {
       const px2 = ox, py2 = wPanelY, pw2 = size;

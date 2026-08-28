@@ -5274,7 +5274,10 @@ export class Game implements GameHooks {
             //（原版头像环先跑、晶塔悬停 cancelWormHole 才让位——门禁内含晶塔让位）
             this._tpTarget = null;
             this.renderer.tpMark = null;
-          } else if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
+          } else if (this.mapClickTeleportEnabled && tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
+            // ★普通选点/两次点击传送 = 本仓自造调试功能（2026-08-27 用户要求默认
+            //   禁用,Shift+F2/F4/F6-F10 切换）——含传送前的定位点击（首次选点）。
+            //   晶塔/虫洞药水/Ctrl+点击 ping 为原版/既有机制,分支在前不受本旗影响
             // 晶塔图标优先（TeleportPylonsMapLayer.cs:77-127：点中图标 → 门禁 → 传送/
             // 失败文案；图标悬停时原版取消普通选点 cancelWormHole :97）
             if (this.tryPylonMapTeleport(tx, ty)) {
@@ -29209,6 +29212,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return true;
   }
 
+  /** 地图点击传送开关（2026-08-27 用户要求：默认禁用——全屏地图两次点击传送
+   *  （首次选点/二次传送）为本仓自造调试功能,非原版;Shift+F2/F4/F6-F10 切换。
+   *  晶塔/虫洞药水/Ctrl+点击 ping 为原版机制不随本旗禁用） */
+  mapClickTeleportEnabled = false;
   /** 地图传送：在目标点附近找可容纳主角的空间（2 格高净空 + 站立地面）。
    *  优先目标点自身，然后螺旋外扩到 24 格内就近安置 */
   /** 传送前贴图就位门:目标区域 ±160 类型扫描 → 预载 → 再落位。

@@ -1684,6 +1684,9 @@ function drawAdjust(
     case 3: case 24: case 33: case 49: case 61: case 71: case 82: case 83: case 84:
     case 110: case 174: case 201: case 372: case 637: case 646: case 703:
       if (fit(fx, fy, 16, 20)) { a.sh = 20; } break;
+    // h32 高植物族(:5038-5050 等 h=32,tileTop −12 已在表;同上共用入口)
+    case 73: case 74: case 113:
+      if (fit(fx, fy, 16, 32)) { a.sh = 32; } break;
     case 726: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break;  // 炮弹 20×20
     case 184: if (fit(fx, fy, 20, 16)) a.sw = 20; break; // :5289 tileWidth=20 仅 184——曾误落 185-187
     //  (C# 无 fallthrough:187 块 :5218-5236 只设 tileTop+分带换算,宽 20 会让

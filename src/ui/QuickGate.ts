@@ -1,24 +1,35 @@
-// 旅程模式快捷调整（时间 ±/天气 ⛅）首用确认门（2026-08-27 用户要求）：
-// 与道具搜索同款语义——首点明示超游风险，确认启用后 localStorage 持久放行、
-// 后续不再拦截。按 kind（time/weather）独立记忆。独立小模块避免 render↔ui 循环依赖。
+// 功能首用确认门（2026-08-27 用户要求）：超游类功能（道具搜索/旅程时间天气/
+// 地图点击传送…）首次使用时明示风险，确认启用后 localStorage 持久放行、后续
+// 不再拦截。独立小模块——render↔ui 均可安全导入（无游戏态依赖）。
 
-export type JourneyQuickKind = 'time' | 'weather';
+const KEY = (kind: string) => `sbw.journeyQuick.${kind}`;
 
-const KEY = (kind: JourneyQuickKind) => `sbw.journeyQuick.${kind}`;
-
-export function journeyQuickConfirmed(kind: JourneyQuickKind): boolean {
-  try { return localStorage.getItem(KEY(kind)) === '1'; } catch { return false; }
+/** 门查询：该功能是否已确认启用 */
+export function featureGateConfirmed(key: string): boolean {
+  try { return localStorage.getItem(KEY(key)) === '1'; } catch { return false; }
 }
 
-export function confirmJourneyQuick(kind: JourneyQuickKind): void {
-  try { localStorage.setItem(KEY(kind), '1'); } catch { /* 隐私模式静默 */ }
+/** 写入确认旗（确认启用时调） */
+export function confirmFeatureGate(key: string): void {
+  try { localStorage.setItem(KEY(key), '1'); } catch { /* 隐私模式静默 */ }
 }
 
-/** 确认弹窗（居中 DOM，z 高于游戏画布；确认回调内做面板开合） */
-export function showJourneyQuickGate(kind: JourneyQuickKind, onConfirm: () => void): void {
-  const id = `sw-journeyquick-gate-${kind}`;
+/** 旅程快捷键（时间/天气）便捷封装（Renderer 消费） */
+export function journeyQuickConfirmed(kind: 'time' | 'weather'): boolean {
+  return featureGateConfirmed(kind);
+}
+
+export function confirmJourneyQuick(kind: 'time' | 'weather'): void {
+  confirmFeatureGate(kind);
+}
+
+/** 确认弹窗（居中 DOM，z 高于游戏画布）。已确认过 → 直接走 onConfirm；
+ *  未确认 → 弹窗，确认启用 = 写旗 + onConfirm（取消 = 关闭弹窗不放行）。
+ *  同 key 重复调用幂等（已有同 id 弹窗则忽略）。 */
+export function showFeatureGate(key: string, title: string, onConfirm: () => void): void {
+  if (featureGateConfirmed(key)) { onConfirm(); return; }
+  const id = `sw-journeyquick-gate-${key}`;
   if (document.getElementById(id)) return;
-  const title = kind === 'time' ? '时间调整' : '天气调整';
   const overlay = document.createElement('div');
   overlay.id = id;
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1250; display:flex; align-items:center; justify-content:center;';
@@ -41,7 +52,7 @@ export function showJourneyQuickGate(kind: JourneyQuickKind, onConfirm: () => vo
   ok.textContent = '确认启用';
   ok.style.cssText = 'margin:0; width:auto; padding:5px 14px; font-size:12px;';
   ok.addEventListener('click', () => {
-    confirmJourneyQuick(kind);
+    confirmFeatureGate(key);
     overlay.remove();
     onConfirm();
   });
@@ -50,4 +61,9 @@ export function showJourneyQuickGate(kind: JourneyQuickKind, onConfirm: () => vo
   overlay.appendChild(panel);
   overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) overlay.remove(); });
   document.body.appendChild(overlay);
+}
+
+/** 旅程快捷键弹窗（Renderer 消费；onConfirm 内做面板开合） */
+export function showJourneyQuickGate(kind: 'time' | 'weather', onConfirm: () => void): void {
+  showFeatureGate(kind, kind === 'time' ? '时间调整' : '天气调整', onConfirm);
 }
