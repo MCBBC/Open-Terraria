@@ -1850,12 +1850,10 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
 const TNT_BARREL = sheetId(654);
 export function placeTNTBarrel(st: TileStore, x: number, y: number, rng?: RNG): boolean {
   let py = y;
-  let rejReason = 0;
   while (!st.flags[st.idx(x, py)]) {
     py++;
-    if (py > st.h - 350) { rejReason = 11; break; }
+    if (py > st.h - 350) return false;
   }
-  if (rejReason) { trapEv('BX', x, py, rejReason); return false; }
   py--;
   {
     const i = st.idx(x, py);
@@ -1865,24 +1863,6 @@ export function placeTNTBarrel(st: TileStore, x: number, y: number, rng?: RNG): 
   placeHeadMirrorT(st, x, py);                                        // ★III13 桶锚头变异（654 非实心门恒过）
   const ok = place2x2Traps(st, x, py, TNT_BARREL);
   if (ok && !i13Legacy()) cascade3x3T(st, x, py, rng, true);   // cs:60752 通用尾 SquareTileFrame(i,j)
-  if (!ok) {
-    // ★III24b 取证：拒绝定位（用毕删）。r1=footprint active / r2=ground 缺席 /
-    // r3=ground 非表且非 SolidTile2(带列 idx 与 ground-sheet)
-    for (let i = x - 1; i <= x && !ok; i++) {
-      for (let j = py - 1; j <= py; j++) {
-        if (st.flags[st.idx(i, j)]) { trapEv('BX', x, i * 100 + (j - (py - 1)), 21); return false; }
-      }
-      const gi = st.idx(i, py + 1);
-      const gt = st.type[gi]!;
-      const solid2 = st.flags[gi] !== 0 && vanGenSolidType(gt) && st.slope[gi] === 0 && st.half[gi] === 0
-        && ((st.wire[gi] >>> 5) & 1) === 0;
-      if (!st.flags[gi]) { trapEv('BX', x, py + 1, 31); return false; }
-      if (!solid2 && !PLACE2X2_TABLE.has(sheetOf(gt))) { trapEv('BX', x, sheetOf(gt), 41); return false; }
-    }
-    trapEv('BX', x, py, 99);
-    return false;
-  }
-  trapEv('BW', x, py, 1);                                      // 成功锚点流（对拍用）
   return ok;
 }
 

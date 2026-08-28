@@ -215,11 +215,16 @@ export interface AssetCacheState {
    *  前.done/total 只是计划值,徽标若照渲染必闪"0%"——UI 在校准前只出骨架文案
    *  (无百分比),校准后若 done>=total 直接走完成淡出=全缓存命中时徽标全程无百分比 */
   calibrated: boolean;
+  /** ★缓存覆盖度(2026-08-28 用户要求"本地扫描/预热有进度也亮出来,有盼头"):
+   *  status 回包 cached/total 的百分比——本地校验阶段徽标显示它;【仅显示用】,
+   *  永不驱动 done/phase/completeFlag(zip 模式 cached 与 plan 不同源,
+   *  2026-08-27 假满防线不动)。undefined=尚无回包 */
+  coveragePct?: number;
 }
 
 const state: AssetCacheState = {
   enabled: false, version: '', total: 0, done: 0, failed: 0, phase: 'idle', warming: false,
-  bytesDone: 0, bytesTotal: 0, calibrated: false,
+  bytesDone: 0, bytesTotal: 0, calibrated: false, coveragePct: undefined,
 };
 
 let plan = priorityPlan();
@@ -570,6 +575,8 @@ function onSwMessage(e: MessageEvent): void {
   if (d.type === 'status') {
     state.calibrated = true;   // status 回包=缓存实测账到手(校准位)
     if (typeof d.cached === 'number' && d.version === state.version) {
+      // 覆盖度仅显示用(徽标"资源校验·N%"),不参与 done/completeFlag 假满防线
+      if (state.total > 0) state.coveragePct = Math.min(100, Math.round((d.cached / state.total) * 100));
       // ★zip 模式禁止用 cached 回写 done(2026-08-27 根修):cached=【全缓存】
       // 条目数(含壳 JS/l10n/上轮遗留),与 zip totalFiles 不同源。上轮暖满的
       // 设备 cached≥total → done 假满 → complete() 假阳秒放行(用户手机实测

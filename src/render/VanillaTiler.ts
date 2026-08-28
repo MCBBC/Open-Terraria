@@ -42,22 +42,25 @@ function ensureSolidTables(): void {
   const { solid, solidTop } = deriveVanillaSolidTablesFromDefs();
   setVanillaSolidTables(solid, solidTop);
 }
-// vanilla 帧的绘制入口(shared by auto/blend 分流):命中则直画并 return true
-function tryVanillaFramingCell(
-  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, sheet: number,
-  st: TileStore, x: number, y: number, type: number, px: number, py: number,
+// vanilla 链帧生产者(auto/blend 分流的替代帧源):只产出帧与取帧矩形,不绘制。
+// 绘制必须走 drawVanillaCell 与 auto 路径共享的原版 TileDrawing 对齐尾部
+// (坡面切条 drawSlopedFrame/半砖下半切片/半砖衔接帧/drawAdjust/vectorOffset)——
+// 链帧本就是普通合并帧(rig 实证:斜坡格存 (54,54) 等),斜坡/半砖的形状完全由
+// 绘制层切出;此前链命中直画整块 ⇒ vf=1 斜坡/半砖全变完整方块(用户实报根因)。
+function vanillaChainFrame(
+  atlas: SpriteAtlas, sheet: number,
+  st: TileStore, x: number, y: number, type: number,
   world?: { rockLevel?: number },
-): boolean {
-  if (!SW_VANILLA_FRAMING) return false;
+): { r: DrawRect; fx: number; fy: number } | null {
+  if (!SW_VANILLA_FRAMING) return null;
   ensureSolidTables();
   const meta = atlas.vmeta(sheet);
   const v = vanillaFrameFor(st, x, y, st, ((x * 7) + (y * 11)) % 3, world?.rockLevel ?? 0);
-  if (v.fx < 0 || v.fy < 0) return false;
-  if (meta && (v.fx + 16 > (meta.cols) * 18 || v.fy + 16 > (meta.rows) * 18)) return false; // 越表回退旧路径
+  if (v.fx < 0 || v.fy < 0) return null;
+  if (meta && (v.fx + 16 > (meta.cols) * 18 || v.fy + 16 > (meta.rows) * 18)) return null; // 越表回退旧路径
   const r = atlas.vframe(sheet, Math.floor(v.fx / 18), Math.floor(v.fy / 18));
-  if (!r) return false;
-  ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, TILE, TILE);
-  return true;
+  if (!r) return null;
+  return { r, fx: v.fx, fy: v.fy };
 }
 
 type Frame = [number, number];
@@ -989,11 +992,17 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     return;
   }
   // ★vanilla-exact 分帧(TileFrameCosmetic 全链移植):auto/blend 两近似路径的统一替代。
+  // 链只产出帧 (fx,fy)+r;后续坡面切条/半砖切片/衔接帧/drawAdjust/vectorOffset 全走
+  // 与 auto 路径共享的下方原版对齐尾部(斜坡/半砖的形状是绘制层切出来的,帧是普通合并帧)。
   // 未命中(越表/链未定)回落下方既有近似路径。
-  if ((frame === 'auto' || frame === 'blend') && tryVanillaFramingCell(ctx, atlas, sheet, st, x, y, type, px, py, trees)) return;
+  let vfFrame: { r: DrawRect; fx: number; fy: number } | null = null;
+  if ((frame === 'auto' || frame === 'blend') && SW_VANILLA_FRAMING) {
+    vfFrame = vanillaChainFrame(atlas, sheet, st, x, y, type, trees);
+  }
   // blend 类（泥土/石族/草族/沙/泥/雪）：TEdit BlendRules 移植
   // （掩码位序：E=0x1 N=0x10 W=0x100 S=0x1000；角 TR/TL/BL/BR <<16）
-  if (frame === 'blend') {
+  // ★链已产出帧时跳过(vf 命中格不再走 TEdit 近似)
+  if (vfFrame === null && frame === 'blend') {
     const myMeta = atlas.vmeta(sheet);
     const myMerge = myMeta?.mergeWith ?? null;
     const myStone = !!myMeta?.isStone;
@@ -1130,7 +1139,16 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     return;
   }
   let r: DrawRect | null = null;
-  if (frame === 'auto') {
+  if (vfFrame) {
+    // 链帧汇入共享尾部:后续坡面/半砖/衔接/drawAdjust 与 auto 路径完全同一体
+    r = vfFrame.r;
+    fx = vfFrame.fx;
+    fy = vfFrame.fy;
+    // 动画块叠加与 auto 分支同款(瀑布族 326/327/345/458/459:addFrY=帧序×90)
+    if (TILE_ANIM_RATE[sheet]) {
+      r = { ...r, sy: r.sy + animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18) };
+    }
+  } else if (frame === 'auto') {
     r = frameFor(atlas, sheet, st, x, y, type, same);
     // 动画 'auto' 块（瀑布族 326/327/345/458/459：Main.cs:18743-18793 8 帧回卷、
     // TileDrawing.cs:6085-6094 addFrY=frame*90）——TEdit 8 向帧取自首带,动画帧
@@ -1139,7 +1157,7 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     if (r && TILE_ANIM_RATE[sheet]) {
       r = { ...r, sy: r.sy + animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18) };
     }
-  } else {
+  } else if (vfFrame === null) {
     // 重建帧偏移：只针对帧数据全 0 的残缺物体（wld 部分家具）。
     // 邻居必须同样存 (0,0) 才视为同物体的待重建格——已带 18px 偏移的邻居
     // 一定是相邻物体的格子（如并排宝箱的 (18,0)），必须挡住扫描。

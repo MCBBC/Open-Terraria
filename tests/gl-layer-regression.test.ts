@@ -21,7 +21,9 @@ describe('GLSpriteLayer 回归守卫(源码级锁定)', () => {
   });
 
   it('纹理上传后生成 mip 链(无链时 MIPMAP_LINEAR 采样器采样不完整 mip = 花屏)', () => {
-    expect(SRC).toMatch(/texImage2D[\s\S]{0,200}generateMipmap/);
+    // 窗 500:两调用间可隔注释(2026-08-28 并行会话插注把 200 窗撑爆;守卫意图是
+    // 防【调用被删】而非锁定排版——删调用则两词相距超窗立即红)
+    expect(SRC).toMatch(/texImage2D[\s\S]{0,500}generateMipmap/);
   });
 
   it('预乘上传(mip 平均预乘像素能量正确;直 Alpha 边缘发暗)', () => {
@@ -35,7 +37,8 @@ describe('GLSpriteLayer 回归守卫(源码级锁定)', () => {
   });
 
   it('dispose 字节归零(防跨世界累积)', () => {
-    expect(SRC).toMatch(/dispose[\s\S]{0,300}bytes = 0/);
+    // 窗 600:同上,容注释间隔,防删调用不防排版
+    expect(SRC).toMatch(/dispose[\s\S]{0,600}bytes = 0/);
   });
 
   it('WebGL2 DOM 源子区上传走 8 参重载(9 参曾把画布左上角贴进目标区 = #362CFF 退化块)', () => {

@@ -262,16 +262,37 @@ export function mountAssetBadge(): void {
       txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Failed', st.failed);
       return;
     }
+    // ★校准前不出百分比(2026-08-28 用户报"暖缓存也闪 0%"):done/total 在 status
+    // 回包前只是计划值——此时保持骨架文案"资源加载中 · …";校准后若全缓存命中,
+    // phase 立即 'done' 走下方淡出=全程无 0% 闪烁。有真实下载量才显示百分比。
+    if (!st.calibrated) {
+      txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Loading', '…');
+      return;
+    }
+    // ★本地校验/预热阶段有进度也亮出来(2026-08-28 用户要求"有盼头"):
+    // status 回包的缓存覆盖度 cached/total——下载开始后由下方下载百分比接管。
+    // ★必须让位给完成态(phase done 先行),否则暖缓存永远停在"校验 100%"
+    // (2026-08-28 用户实报卡死根因:本校验支曾无 done 门,遮住下方就绪+淡出)
+    if (!st.warming && st.phase !== 'done' && typeof st.coveragePct === 'number') {
+      txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Verify', st.coveragePct);
+      return;
+    }
+    // ★完成态先于百分比渲染(2026-08-28 用户报"暖缓存闪 0%/100%"):全缓存命中时
+    // 不得出现任何百分比——显示"就绪"文案并淡出
+    if (st.phase === 'done') {
+      txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Done');
+      if (!badgeFading) {
+        badgeFading = true;
+        badgeEl.style.transition = 'opacity .6s';   // 淡出过渡仅此刻内联挂(基类挂会拖拽渐显变量)
+        badgeEl.style.opacity = '0';
+        setTimeout(() => { unmountAssetBadge(); }, 700);
+      }
+      return;
+    }
     // 徽标文案"资源加载中 · N% · NNNMB"(2026-08-27 用户要求:百分比后加已下载
     // MB;字节数明细/阶段仍在悬停 tooltip)
     txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Loading', fmtPct(st))
       + (st.bytesTotal > 0 ? ` · ${Math.round(st.bytesDone / 1048576)}MB` : '');
-    if (st.phase === 'done' && !badgeFading) {
-      badgeFading = true;
-      badgeEl.style.transition = 'opacity .6s';   // 淡出过渡仅此刻内联挂(基类挂会拖拽渐显变量)
-      badgeEl.style.opacity = '0';
-      setTimeout(() => { unmountAssetBadge(); }, 700);
-    }
   };
   update(s);
   badgeUnsub = onAssetProgress(update);

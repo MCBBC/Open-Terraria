@@ -10,7 +10,9 @@ import { TileStore } from '../src/world/TileStore';
 import type { SpriteAtlas, DrawRect } from '../src/assets/SpriteAtlas';
 
 const PILE = TILE_BY_KEY['v_187_decos_3x2_group_2']!;   // vanilla sheet 187
+const PILE186 = TILE_BY_KEY['v_186_decos_3x2']!;        // vanilla sheet 186
 expect(PILE).toBeGreaterThan(0);
+expect(PILE186).toBeGreaterThan(0);
 
 function recCtx() {
   const calls: Array<{ sx: number; sy: number; sw: number; sh: number; dx: number; dy: number }> = [];
@@ -73,3 +75,37 @@ function recCtx0(calls: Array<{ sx: number; sy: number; sw: number; sh: number; 
     globalAlpha: 1,
   } as unknown as CanvasRenderingContext2D;
 }
+
+describe('大石堆 186（Decos 3x2）绘制', () => {
+  it('样式11(594/612/630)每格 16×16、无 20 宽越取；dest y = py+2', () => {
+    const st = new TileStore(24, 24);
+    const cells = [[594, 0], [612, 0], [630, 0], [594, 18], [612, 18], [630, 18]];
+    cells.forEach(([fx, fy], k) => {
+      st.setTileSilent(10 + (k % 3), 10 + Math.floor(k / 3), PILE186, fx, fy);
+    });
+    const calls: Array<{ sx: number; sy: number; sw: number; sh: number; dx: number; dy: number }> = [];
+    const fakeImg = { width: 1890, height: 36 };
+    const atlas = {
+      vmeta: (s: number) => (s === 186
+        ? { sheet: 'Tiles_186.png', grid: [16, 16], stride: [18, 18], cols: 105, rows: 2 } : null),
+      ensureVImage: () => fakeImg as unknown as HTMLImageElement,
+      vframeAt: (_s: number, x: number, y: number): DrawRect =>
+        ({ img: fakeImg as unknown as HTMLImageElement, sx: x, sy: y, sw: 16, sh: 16 }),
+      vImageFailed: () => false,
+    } as unknown as SpriteAtlas;
+    for (let k = 0; k < 6; k++) {
+      const x = 10 + (k % 3), y = 10 + Math.floor(k / 3);
+      const i = st.idx(x, y);
+      drawVanillaCell(recCtx0(calls), atlas, 186, 'style', 3, 2, st, x, y,
+        PILE186, () => true, (x - 10) * 16, (y - 10) * 16, st.frameX[i], st.frameY[i]);
+    }
+    expect(calls).toHaveLength(6);
+    for (const c of calls) {
+      expect(c.sw).toBe(16);
+      expect(c.sh).toBe(16);
+      expect(c.dy - Math.floor(c.dy / 16) * 16).toBe(2);   // tileTop 恒 2（无 −2 档）
+    }
+    expect(calls.map((c) => `${c.sx},${c.sy}`)).toEqual(
+      ['594,0', '612,0', '630,0', '594,18', '612,18', '630,18']);
+  });
+});
