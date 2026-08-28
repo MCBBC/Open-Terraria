@@ -12,13 +12,42 @@ import { T } from '../../../data/tiles';
 
 const enum Feature { Plateau, Hill, Dale, Mountain, Valley }
 
-// GenerateWorldSurfaceOffset（1456 cs:293-401，普通模式 else 分支：
-// 条件 drunk/getGood/remix 为 false 时不掷判定骰）
-function genSurfaceOffset(rng: RNG, f: Feature): number {
+// GenerateWorldSurfaceOffset（1456 cs:293-401）：双分支全量移植。
+// ★IIIII14：drunk/getGood/remix 世界且 Next(2)==0 → 走夸张长爬升表
+// （1457 TerrainPass.cs:296-359——Plateau 阈 6/Hill·Dale 阈 3/Mountain·Valley 先
+// `!=0` 短跳再长补）；否则普通表。判定骰只在特殊旗标世界消耗（普通短路不掷，
+// 流零扰动）。曾只实现普通分支并备案。
+function genSurfaceOffset(rng: RNG, f: Feature, specialPossible: boolean): number {
   // ★ilspycmd 对真 exe 的权威反汇编（2026-08-13）：本函数有两个分支——
   // drunk/getGood/remix 世界（且 Next(2)==0）才是 6/3/!=0 长爬升表；
   // 普通世界走 else：Plateau Next(0,7)、Hill/Dale Next(0,4)、Mountain/Valley
   // Next(0,2)==0（短爬升）。曾误把特殊分支当普通世界表"修复"过，已回滚。
+  if (specialPossible && rng.nextIntRange(0, 2) === 0) {
+    // ★IIIII14 特殊长爬升表（TerrainPass.cs:300-358）
+    let n = 0;
+    switch (f) {
+      case Feature.Plateau:
+        while (rng.next() * 6 < 1) n += rng.int(-1, 1);
+        break;
+      case Feature.Hill:
+        while (rng.next() * 3 < 1) n--;
+        while (rng.next() * 10 < 1) n++;
+        break;
+      case Feature.Dale:
+        while (rng.next() * 3 < 1) n++;
+        while (rng.next() * 10 < 1) n--;
+        break;
+      case Feature.Mountain:
+        while (rng.next() * 3 >= 1) n--;   // Next(0,3)!=0 → 非 0 继续
+        while (rng.next() * 6 < 1) n++;
+        break;
+      case Feature.Valley:
+        while (rng.next() * 3 >= 1) n++;
+        while (rng.next() * 5 < 1) n--;
+        break;
+    }
+    return n;
+  }
   let n = 0;
   switch (f) {
     case Feature.Plateau:
@@ -48,8 +77,15 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
   const { w, h } = st;
   const leftBeach = gs.beachLeftEnd, rightBeach = w - gs.beachRightStart;
   // num10（cs:117-131）：0.17 基线，小世界（GetWorldSize()==0，maxTilesX==4200）+0.02
-  const surfLo = h * (0.17 + (w === 4200 ? 0.02 : 0));
-  const surfHi = h * 0.26;
+  // ★IIIII14（1457 TerrainPass.cs:123-127）：drunk → num10=0.15 / num11=0.28
+  //  （surfaceIsInSpace 分支在前、remix 在后——组合域未接）。地表/岩层带比例整体
+  //  下移加宽 = 「mirror/mixed 地形」主参数之一。
+  const pLo = gs.seedFlags.drunkWorld ? 0.15 : 0.17;
+  const pHi = gs.seedFlags.drunkWorld ? 0.28 : 0.26;
+  const surfLo = h * (pLo + (w === 4200 ? 0.02 : 0));
+  const surfHi = h * pHi;
+  // ★IIIII14：drunk/getGood/remix 世界走长爬升表的可能位（判定骰在 genSurfaceOffset 内）
+  const specialOffset = !!(gs.seedFlags.drunkWorld || gs.seedFlags.getGoodWorld || gs.seedFlags.remix);
   let feature: Feature = Feature.Plateau;
   let num2 = h * 0.3 * (rng.int(90, 109) * 0.005);            // num3 worldSurface(逐列游走,double)
   let num3 = (num2 + h * 0.2) * (rng.int(90, 109) * 0.01);      // num4 rockLayer(逐列游走,double)
@@ -75,7 +111,7 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
     }
     if (x > w * 0.48 && x < w * 0.52) feature = Feature.Plateau;
     // 原版：double 累加（整数偏移），无任何 float 舍入——IEEE754 double 与 C# 位级一致
-    num2 += genSurfaceOffset(rng, feature);
+    num2 += genSurfaceOffset(rng, feature, specialOffset);
     if (x < leftBeach + flatBeachPadding || x > w - rightBeach - flatBeachPadding) {
       num2 = Math.max(surfLo, Math.min(num2, maxSurf)); // Utils.Clamp(海滩区)
     } else if (num2 < surfLo) { num2 = surfLo; runLen = 0; }

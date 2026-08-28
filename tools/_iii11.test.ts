@@ -31,16 +31,23 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   };
   // IIII11：chron 流缓冲（call 边界打 CALLBEGIN/CALLEND 与 rig 对齐）
   const chronAll: string[] = [];
+  // call6 掷流窗捕获（与 rig SW_ROLLWIN="98-98" 同位对拍）
+  const rolls6: number[] = [];
+  let recRolls = false;
+  const g1 = globalThis as { __swOnRoll?: (value: number, inst: object) => void };
+  g1.__swOnRoll = (v) => { if (recRolls) rolls6.push(v); };
   g0.__swNTBChron = (tag, a, b) => { chronAll.push(`${tag} ${a} ${b}`); };
   g0.__swNTBCap = (phase, _gs, st) => {
     if (phase === 'in') {
       if (outstanding) throw new Error('ntbcap pairing broken: in before out');
       callN++;
       outstanding = true;
+      if (callN === 6) recRolls = true;
       chronAll.push(`CALLBEGIN ${callN} 0`);
     } else if (phase === 'out') {
       if (!outstanding) throw new Error('ntbcap pairing broken: out before in');
       outstanding = false;
+      if (callN === 6) { recRolls = false; writeFileSync('/tmp/iii11-out/j-rolls6.txt', rolls6.join('\n') + '\n'); }
       chronAll.push(`CALLEND ${callN} 0`);
     } else return;
     const dir = `${OUT}/${phase}-${callN}`;

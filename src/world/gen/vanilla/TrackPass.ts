@@ -103,8 +103,10 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
  *  落内部 id0+active（见 MicroBiomesPass.mbTileSolidGen 同构注释），曾用 vanGenSolidType
  *  → 轨道避障/坡面门在 alias 土格语义翻转，LTRK 单次成功 place 差 −13 掷。
  *  生产域 id1('dirt') 本就 solid=true、真空格 flags=0 不入 active 门——两侧等价。 */
+const __trkMirrorOn = typeof process === 'undefined' || process.env.SW_MB_MIRROR !== 'off';
 function trkTileSolidGen(t: number): boolean {
-  if (t === 0 || (SHEET_OF[t] ?? -1) === 0) return true;   // internal 0 / sheet0(dirt 别名)
+  if (!__trkMirrorOn) return vanGenSolidType(t);
+  if (t === 0 || (SHEET_OF[t] ?? -1) === 0) return true;
   return vanGenSolidType(t);
 }
 

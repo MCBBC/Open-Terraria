@@ -123,6 +123,11 @@ function smoothSlopeSelf(st: TileStore, x: number, y: number): void {
 /** TileID.Sets.Ore（TileID.cs:399，19 个）——大理石/花岗岩 ResetToType 的矿石保留判定。
  *  曾抄成 20/203/70/21/116/234 的杂表 → 花岗岩体内矿石被吞（granite checkpoint 纯 type 差） */
 const VANILLA_ORE = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+// ★IIIII14（GraniteBiome.cs:213-216/262-265、MarbleBiome.cs:116-119）：drunk 世界
+// 大理石/花岗岩「生成式互换」——大理石园放花岗岩块(368/墙180)、花岗岩园放大理石块
+// (367/墙178)。vanilla 是各 Place 内的常量替换；本仓经模块档位传递（两入口置位）。
+let drunkStoneSwap = false;
+
 function isOreType(t: number): boolean {
   const v = TILE_DEFS[t]?.vanilla?.sheet;
   return v != null && VANILLA_ORE.has(v);
@@ -140,6 +145,7 @@ export function runMarbleGranitePass(st: TileStore, rng: RNG, gs: GenState): voi
  *  y∈[GenVars.rockLayer+20, +(h-rockLayer-40-200))；中部 45-55% 重掷 beachDistance..w-；
  *  100 次预算；失败计数 > w*10 收缩 count。Place 内联在采样环（BiomeTileCheck 双查）。 */
 export function runMarblePass(st: TileStore, rng: RNG, gs: GenState): void {
+  drunkStoneSwap = !!gs.seedFlags.drunkWorld;
   let count = worldGenRangeCount(st, rng, 4, 8, 'area');
   let placed = 0, fails = 0;
   while (placed < count) {
@@ -242,13 +248,16 @@ function marblePlace(st: TileStore, rng: RNG, ox0: number, oy0: number): boolean
           const px = pOX + i, py = pOY + j;
           if (!st.inBounds(px, py)) continue;
           const ti = st.idx(px, py);
-          st.type[ti] = isOreType(st.type[ti]) ? st.type[ti] : MARBLE;  // ResetToType：矿石保留
+          // ★IIIII14：slab 材质档（PlaceSlab 头 num/wall 常量——drunk 368/180）
+          const mT = drunkStoneSwap ? GRANITE : MARBLE;
+          const mW = drunkStoneSwap ? 180 : 178;
+          st.type[ti] = isOreType(st.type[ti]) ? st.type[ti] : mT;  // ResetToType：矿石保留
           st.flags[ti] = slabSolid(pst, i, j, 3) ? 1 : 0;
           st.liquid[ti] = 0; st.liquidType[ti] = 0;
           st.half[ti] = 0; st.slope[ti] = 0;  // ResetToType 清 sTileHeader（半砖/坡面）
           // ★wall 是 Tile.cs 独立 ushort 字段——ResetToType 的 bTileHeader*=0 不清墙，
           // HasWall=false 时保留旧墙（SquareWallFrame 掷照旧）
-          if (pWall) st.wall[ti] = 178;
+          if (pWall) st.wall[ti] = mW;
           // WorldUtils.TileFrame(frameNeighbors:true)（cs:WorldUtils.cs:79-88）：
           // 中心 + (x+1,y)/(x-1,y)/(x,y+1)/(x,y-1) 各一次 TileFrameImportant——
           // 165 格 → CheckStalactite 重查（支撑被后续格上坡 → 击杀/重定型掷）
@@ -275,6 +284,7 @@ function marblePlace(st: TileStore, rng: RNG, ox0: number, oy0: number): boolean
 /** cs:12884-12975：采样与放置两段分离——先收点（CanPlace = !BiomeTileCheck && !active），
  *  再统一 Place。带宽 (w-200)/num。 */
 export function runGranitePass(st: TileStore, rng: RNG, gs: GenState): void {
+  drunkStoneSwap = !!gs.seedFlags.drunkWorld;
   let count = worldGenRangeCount(st, rng, 4, 8, 'width');
   const pts: Array<[number, number]> = [];
   let placed = 0, fails = 0;
@@ -399,15 +409,18 @@ function granitePlace(st: TileStore, rng: RNG, gs: GenState, x0: number, y0: num
       const ti = st.idx(tx, ty);
       const gnum = Math.sin((goy + j) * 0.4) * 0.7 + 1.2;
       const gnum2 = 0.2 + 0.5 / Math.sqrt(Math.max(0, pres[mi]! - res[mi]!));
+      // ★IIIII14：granite 园材质/墙档（PlaceGranite 头——drunk 置 367/178）
+      const gT = drunkStoneSwap ? MARBLE : GRANITE;
+      const gW = drunkStoneSwap ? 178 : 180;
       if (Math.max(1 - Math.max(0, gnum * gnum2), pres[mi]! / 15) > 0.35 + (solidTileAt(st, tx, ty) ? 0 : 0.5)) {
-        st.type[ti] = isOreType(st.type[ti]) ? st.type[ti] : GRANITE;
+        st.type[ti] = isOreType(st.type[ti]) ? st.type[ti] : gT;
         st.flags[ti] = 1; st.liquid[ti] = 0; st.liquidType[ti] = 0;
         st.half[ti] = 0; st.slope[ti] = 0;           // ResetToType 清 sTileHeader
-        st.wall[ti] = 180;
+        st.wall[ti] = gW;
       } else if (res[mi]! < 0.01) {
         st.flags[ti] = 0;                            // ClearTile：type/wall/液体保留
         st.half[ti] = 0; st.slope[ti] = 0;           // ClearSlope
-        st.wall[ti] = 180;
+        st.wall[ti] = gW;
       }
       if (st.liquid[ti] > 0 && useLava) st.liquidType[ti] = 2;
     }
@@ -426,7 +439,7 @@ function granitePlace(st: TileStore, rng: RNG, gs: GenState, x0: number, y0: num
   }
   for (const [cx, cy] of clean) {
     const ti = st.idx(cx, cy);
-    st.flags[ti] = 0; st.wall[ti] = 180;
+    st.flags[ti] = 0; st.wall[ti] = drunkStoneSwap ? 178 : 180;   // CleanupTiles 墙档(cs:262-265)
     st.half[ti] = 0; st.slope[ti] = 0;               // ClearTile→ClearSlope
   }
   // PlaceDecorations：FastRandom(seed).WithModifier(65440) 独立流（与 genRand 无关）

@@ -213,7 +213,9 @@ function growEpicTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: numbe
     && st.flags[st.idx(i + dx, index1)] && family.has(st.type[st.idx(i + dx, index1)]);
   if (!fitSide(-1) && !fitSide(1)) return false;
   if (!emptyTileCheck(st, i - 2, i + 2, index1 - 55, index1 - 1, 20)) return false;
-  return growTrunk(st, rng, gs, i, index1, rng.int(20, 29), false); // Next(20,30)；epic 无 flag3（cs:27672/27891 裸掷）
+  // ★IIIII14（cs:27499-27501）：drunk 巨树干高 Next(3,7) 替代 Next(20,30)——巨树矮化
+  const trunk = gs.seedFlags.drunkWorld ? rng.int(3, 6) : rng.int(20, 29);
+  return growTrunk(st, rng, gs, i, index1, trunk, false); // epic 无 flag3（cs:27672/27891 裸掷）
 }
 
 

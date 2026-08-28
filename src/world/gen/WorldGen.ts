@@ -547,8 +547,10 @@ function vanillaTerrain(ctx: GenCtx) {
   // ① jungleHut（cs:11182 Next(5)，cs:11333-11352 映射 0-4→119/120/158/175/45）
   //    JungleShrinePass 复用本值（曾照掷照弃致 pass 内重掷、流位+样式双偏）
   gs.jungleHut = rng.nextInt(5);
-  // ② crimsonLeft（cs:11235）——邪恶群系左右分布，未消费
-  rng.nextInt(2);
+  // ② crimsonLeft（cs:11235-11250）——Next(2)==0→false / 非0→true。
+  //    ★IIIII14：普通世界无消费者（照掷即可），drunk 双邪恶的半侧分配键——落盘 gs
+  //    （CorruptionAndCrimson cs:14031/14370 半侧锁 + 祭坛/珠/祭坛清理 style 半侧规则消费）
+  gs.crimsonLeft = rng.nextInt(2) !== 0;
   // ③ RandomizeWeather（cs:7736-7746）：numClouds + 风速 do-while
   rng.nextIntRange(10, 200);
   for (;;) {
@@ -669,10 +671,21 @@ function vanillaTerrain(ctx: GenCtx) {
   }
   world.jungleX = gs.jungleX;
   // ⑲ 地牢侧锚点 num7（cs:11394-11416）：Next(w) 拒绝采样到地牢侧 15% 区间
+  //    ★IIIII14（cs:11407-11414 + cs:11425-11432）：drunk 在采样**前翻面**、采样后翻回
+  //    ——净效应=side 恢复原值，但 num7（雪原带中心）落到与普通世界相反的一侧
+  //    （丛林同侧：wiki「丛林+雪原可能挤在同侧」 drunk 表现之一）。两道门
+  //    `(!dontStarve||remix)` / `(!dontStarve||tenth)`——theConstant 未实装世界恒 true。
+  //    remix/tenth 组合域照序转录（JS 该二旗在世时也按字面门生效）。
   let dX = rng.nextInt(W);
+  if (gs.seedFlags.drunkWorld && (!gs.seedFlags.theConstant || gs.seedFlags.remix)) {
+    gs.dungeonSide = (gs.dungeonSide === -1 ? 1 : -1);
+  }
   const dLo = W * (gs.dungeonSide === 1 ? 0.60 : 0.25);
   const dHi = W * (gs.dungeonSide === 1 ? 0.75 : 0.40);
   while (dX < dLo || dX > dHi) dX = rng.nextInt(W);
+  if (gs.seedFlags.drunkWorld && (!gs.seedFlags.theConstant || gs.seedFlags.tenthAnniversary)) {
+    gs.dungeonSide = (gs.dungeonSide === -1 ? 1 : -1);
+  }
   gs.dungeonX = dX;
   // ⑳ 雪原（cs:11425-11440）：锚点两侧独立扩展（num9 = w/4200，小世界恰 1.0）
   const num9 = W / 4200;

@@ -94,6 +94,9 @@ function generateTunnelToSurface(st: TileStore, rng: RNG, gs: GenState, i: numbe
   let jungleX = i;
   while (running) {
     if (py < gs.worldSurface) {
+      // ★IIIII14（JunglePass.cs:129-132）：drunk 隧道头越过地表即停（flag=false，
+      // 本迭代照常执行,下一轮 while 退出）——丛林不挖地表隧道
+      if (gs.seedFlags.drunkWorld) running = false;
       const cx = Math.max(10, Math.min(st.w - 10, Math.floor(px)));
       const cy = Math.max(10, Math.min(st.h - 10, Math.floor(py)));
       // 隧道顶到达无墙无块的开放区即停(检查上方 1-5 格)

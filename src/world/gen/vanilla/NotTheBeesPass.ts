@@ -130,8 +130,6 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
   // 一次性探针钩（__swUwCap 同款惯例）：NotTheBees 入口/出口快照（phase='in'|'out'）
   const g0 = globalThis as { __swNTBCap?: (phase: string, gs: GenState, st: TileStore) => void; __swNTBChron?: (tag: string, a: number, b: number) => void };
   try { g0.__swNTBCap?.('in', gs, st); } catch { /* probe */ }
-  // @ts-ignore probe-only
-  var call1 = true;
   const w = st.w, h = st.h;
   const numRemix = Math.floor(w / 7);            // cs:25278（仅 remix 支消费）
   if (!sf.notTheBees) return;                    // cs:25280
@@ -209,14 +207,13 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
           }
         }
         if (sheetOf(st.type[idx]!) === 60) st.type[idx] = MUD;
-        try { g0.__swNTBChron?.('MBD', i, j); } catch { /* probe */ }
+            try { g0.__swNTBChron?.('MBD', i, j); } catch { /* probe */ }
         continue;
       }
       // ★IIII9 TAP：主转化段入口态
 
       // 藤→丛林藤（cs:25329）
       const s0 = sheetOf(st.type[idx]!);
-      if (i === 5 && j < 9 && call1) console.log(`[iii11sheet] ${i},${j} t=${st.type[idx]} s=${s0}`);
       const vhit = s0 === 52 || s0 === 382;
       if (vhit) st.type[idx] = JUNGLE_VINE;
       try { g0.__swNTBChron?.(vhit ? 'V' : 'VM', i, j); } catch { /* probe */ }
@@ -232,24 +229,31 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
         && (sheetOf(st.type[idx]!) !== 56 || !!sf.skyblock)) {
         const s = sheetOf(st.type[idx]!);
         if (s === 191 || s === 383) {
-          if (!remix) st.type[idx] = LIVING_MAHO;
-          try { g0.__swNTBChron?.('MA', i, j); } catch { /* probe */ }
+          if (!remix) {
+            st.type[idx] = LIVING_MAHO;
+            try { g0.__swNTBChron?.('MA', i, j); } catch { /* probe */ }
+          }
         } else if (s === 192 || s === 384) {
-          if (!remix) st.type[idx] = LIVING_MAHO_LEAF;
-          try { g0.__swNTBChron?.('LE', i, j); } catch { /* probe */ }
+          if (!remix) {
+            st.type[idx] = LIVING_MAHO_LEAF;
+            try { g0.__swNTBChron?.('LE', i, j); } catch { /* probe */ }
+          }
         } else if (s !== 151 && s !== 662 && s !== 661 && !CLOUDS.has(s) && s !== 120
           && s !== 158 && s !== 175 && s !== 45 && s !== 119
           && !(s >= 63 && s <= 68) && s !== 57 && s !== 76 && s !== 75
           && s !== 229 && s !== 230 && s !== 407 && s !== 404) {
           if (s === 224) {
-            if (!dstarve || remix) st.type[idx] = HONEY_BLOCK;       // 淤泥→蜂蜜块
-            try { g0.__swNTBChron?.('HO', i, j); } catch { /* probe */ }
+            if (!dstarve || remix) {
+              st.type[idx] = HONEY_BLOCK;
+              try { g0.__swNTBChron?.('HO', i, j); } catch { /* probe */ }
+            }       // 淤泥→蜂蜜块
           } else if (s === 53) {
             // 沙→蜂蜜块（滩带豁免；Next(3) 短路链）
             if ((!dstarve || remix)) {
-              if (i < bd + rng.int(0, 2)) st.type[idx] = HONEY_BLOCK;
-              else if (i > w - bd - rng.int(0, 2)) st.type[idx] = HONEY_BLOCK;
-              try { g0.__swNTBChron?.('HS', i, j); } catch { /* probe */ }
+              let hshit = false;
+              if (i < bd + rng.int(0, 2)) { st.type[idx] = HONEY_BLOCK; hshit = true; }
+              else if (i > w - bd - rng.int(0, 2)) { st.type[idx] = HONEY_BLOCK; hshit = true; }
+              if (hshit) try { g0.__swNTBChron?.('HS', i, j); } catch { /* probe */ }
             }
           } else if (
             (i <= bd - rng.int(0, 2)
@@ -274,12 +278,16 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
                 try { g0.__swNTBChron?.('D59', i, j); } catch { /* probe */ }
               } else if (s !== 633 && s !== 562 && s !== 563) {     // （!dstarve||remix 恒真）
                 if (j > lavaLine + rng.int(-2, 2) + 2) {
-                  if (j <= remixNum2 + rng.int(0, 2)) st.type[idx] = CRISPY_HONEY;
-                  try { g0.__swNTBChron?.('C230', i, j); } catch { /* probe */ }
+                  if (j <= remixNum2 + rng.int(0, 2)) {
+                    st.type[idx] = CRISPY_HONEY;
+                    try { g0.__swNTBChron?.('C230', i, j); } catch { /* probe */ }
+                  }
                 } else {
                   // (!remix || j > ws + Next(-1,2))——纯 NTB 恒真
-                  if (!remix || j > ws + rng.int(-1, 1)) st.type[idx] = HIVE;
-                  try { g0.__swNTBChron?.('Z225', i, j); } catch { /* probe */ }
+                  if (!remix || j > ws + rng.int(-1, 1)) {
+                    st.type[idx] = HIVE;
+                    try { g0.__swNTBChron?.('Z225', i, j); } catch { /* probe */ }
+                  }
                 }
               }
             }
@@ -306,8 +314,10 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
               && activeAt(st, n3 + 1, n4 - 1) && activeAt(st, n3 - 1, n4)
               && activeAt(st, n3 + 1, n4) && activeAt(st, n3 - 1, n4 + 1)
               && activeAt(st, n3, n4 + 1) && activeAt(st, n3 + 1, n4 - 1);
-            if (st.flags[ki] && sheetOf(st.type[ki]!) === 225 && full) st.type[ki] = MUD;
-            try { g0.__swNTBChron?.('WKM', n3, n4); } catch { /* probe */ }
+            if (st.flags[ki] && sheetOf(st.type[ki]!) === 225 && full) {
+              st.type[ki] = MUD;
+              try { g0.__swNTBChron?.('WKM', n3, n4); } catch { /* probe */ }
+            }
           }
         }
         // 同款脆蜜块→蘑菇草（cs:25425-25445）
@@ -322,8 +332,10 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
               && activeAt(st, n5 + 1, n6 - 1) && activeAt(st, n5 - 1, n6)
               && activeAt(st, n5 + 1, n6) && activeAt(st, n5 - 1, n6 + 1)
               && activeAt(st, n5, n6 + 1) && activeAt(st, n5 + 1, n6 - 1);
-            if (st.flags[li] && sheetOf(st.type[li]!) === 230 && full) st.type[li] = MUD;
-            try { g0.__swNTBChron?.('WKU', n5, n6); } catch { /* probe */ }
+            if (st.flags[li] && sheetOf(st.type[li]!) === 230 && full) {
+              st.type[li] = MUD;
+              try { g0.__swNTBChron?.('WKU', n5, n6); } catch { /* probe */ }
+            }
           }
         }
       }
@@ -348,8 +360,8 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
           if (wall === 2 || wall === 196 || wall === 197 || wall === 198 || wall === 199) {
             // 原版自等赋 no-op 支（cs:25468-25481 字面）
           } else if (wall === 63) {
-            st.wall[idx] = 64;                                     // 草墙→丛林墙
-            try { g0.__swNTBChron?.('WL64', i, j); } catch { /* probe */ }
+            st.wall[idx] = 64;
+            try { g0.__swNTBChron?.('WL64', i, j); } catch { /* probe */ }                                     // 草墙→丛林墙
           } else if (wall !== 3 && wall !== 83 && wall !== 73 && wall !== 62
             && wall !== 180 && wall !== 178 && wall !== 13 && wall !== 14
             && wall !== 312 && wall !== 313 && wall > 0

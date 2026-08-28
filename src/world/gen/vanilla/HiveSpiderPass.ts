@@ -323,7 +323,10 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
   const hvStat = (globalThis as { __swHvStat?: (k: string, v?: number) => number }).__swHvStat;
   const hvN = (k: string, v = 1) => { if (hvStat) hvStat(k, v); };
   const s = st.w / 4200;
-  const count = 1 + rng.int(Math.floor(5 * s), Math.max(Math.floor(5 * s) + 1, Math.floor(8 * s)) - 1);
+  // ★IIIII14（cs:16024-16026）：drunk 蜂巢预算 ×0.667（浮点乘不取整——while 循环
+  //   `num2 > 0` 比较，vanilla num2 即 double）
+  const countRaw = (1 + rng.int(Math.floor(5 * s), Math.max(Math.floor(5 * s) + 1, Math.floor(8 * s)) - 1));
+  const count = gs.seedFlags.drunkWorld ? countRaw * 0.667 : countRaw;
   const yMin = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
   // 结构互斥走全局 StructureMap（GenState.protectedRects,canPlaceStructure/
   //   addProtectedStructure）——主巢 ±50（CanPlace 无 pad / AddProtectedStructure pad5,
@@ -341,6 +344,13 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     // 纵向放到 h-21 贴地狱
     const x = rng.int(20, st.w - 21);
     const y = rng.int(yMin, st.h - 301);
+    // ★IIIII14（cs:16041-16044）：drunk 每次尝试额外照掷照弃 RandomWorldPoint
+    //   ((int)worldSurface,20,300,20)——RandomWorldPoint=固定 2 骰 Next(left,w-right)+
+    //   Next(top,h-bottom)（cs:27379-27382），返回值弃用（流位关键，勿省）。
+    if (gs.seedFlags.drunkWorld) {
+      rng.int(20, st.w - 21);
+      rng.int(Math.trunc(gs.worldSurface), st.h - 301);
+    }
     { const f2 = (globalThis as { __swHvLog?: (s: string) => void }).__swHvLog; if (f2) f2(`HIVE ${x},${y}`); }
     mk?.(`PLACE ${x},${y}`);
     { const dg = (globalThis as { __swHvDiag?: (x: number, y: number, st: TileStore, gs: GenState) => void }).__swHvDiag; if (dg) dg(x, y, st, gs); }

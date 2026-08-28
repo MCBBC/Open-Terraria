@@ -60,6 +60,8 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     flags: world.flags,
     treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
     shimmerX: world.shimmerX, shimmerY: world.shimmerY,
+    // 历史索引帧修复完成标志（worker saveParse/gen 侧置位；主线程据此跳过二次扫描）
+    ...(world.indexFramesRepaired ? { repairedIndexFrames: true as const } : {}),
     buf,
   };
   return { packet, transfer: Object.values(buf) as ArrayBuffer[] };

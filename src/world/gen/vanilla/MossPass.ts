@@ -167,7 +167,8 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
     if (gs.seedFlags.remix) { /* remix 带重掷域未接（组合域债，登记） */ }
     else if (celbMoss) {
       if (rng.nextIntRange(0, 2) === 0) neon = pickNeon();               // cs:17610-17616
-    } else {
+    } else if (!gs.seedFlags.drunkWorld) {
+      // ★IIIII14（1457 cs:17632-17640）：drunk 跳过中带拒绝环（苔藓洞可落在出生点下方）
       while (x > st.w * 0.38 && x < st.w * 0.62) x = rng.nextIntRange(100, st.w - 100);
     }
     const y = rng.nextIntRange(gs.rockLevel + 40, gs.lavaLine - 40);

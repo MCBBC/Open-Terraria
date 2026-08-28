@@ -51,8 +51,8 @@ const CSS = `
   padding: 6px 8px; border-radius: 4px; font-family: inherit; min-width: 0; }
 .sw-wc-rand { background: #232c52; border: 1px solid #3a4680; border-radius: 4px; padding: 4px 8px;
   cursor: pointer; flex-shrink: 0; }
-.sw-wc-rand img { width: 28px; height: 28px; display: block; image-rendering: pixelated; }
 .sw-wc-seedicon { width: 34px; height: 34px; flex-shrink: 0; image-rendering: pixelated; }
+.sw-wc-rand img { width: 28px; height: 28px; display: block; image-rendering: pixelated; }
 .sw-wc-group { display: flex; flex-direction: column; gap: 2px; }
 .sw-wc-grouplabel { color: #b8c0e8; font-size: 13px; }
 .sw-wc-opts { display: flex; gap: 8px; }
@@ -116,7 +116,6 @@ export class WorldCreationPanel {
   private desc: HTMLElement;
   private preview: HTMLCanvasElement;
   private previewCtx: CanvasRenderingContext2D;
-  private seedIcon: ImageBitmap | HTMLImageElement;
   // 模块级:语言切换重建面板时恢复用户选择
   private static lastSel = { size: 0, diff: 0, evil: 0 };   // 默认小世界(2026-08-26 用户要求;会话内仍记忆用户上次选择)
   private sel = { ...WorldCreationPanel.lastSel };
@@ -153,7 +152,6 @@ export class WorldCreationPanel {
     this.preview = this.panel.querySelector('.sw-wc-preview')!;
     this.previewCtx = this.preview.getContext('2d')!;
     this.previewCtx.imageSmoothingEnabled = false;
-    this.seedIcon = this.panel.querySelector('.sw-wc-seedicon') as unknown as HTMLImageElement;
 
     // 选项组
     this.buildGroup('size', SIZES);
@@ -164,6 +162,7 @@ export class WorldCreationPanel {
     this.panel.querySelector('[data-act=randname]')!.addEventListener('click', () => {
       (this.panel.querySelector('[data-f=name]') as HTMLInputElement).value = randomWorldName();
     });
+    this.seedIcon = this.panel.querySelector('.sw-wc-seedicon') as unknown as HTMLImageElement;
     this.panel.querySelector('[data-act=randseed]')!.addEventListener('click', () => {
       (this.panel.querySelector('[data-f=seed]') as HTMLInputElement).value = String(Math.floor(Math.random() * 1e9));
       this.refreshSeedIcon();
@@ -261,6 +260,7 @@ export class WorldCreationPanel {
     draw();
   }
 
+  private seedIcon: ImageBitmap | HTMLImageElement;
   /** 上次解析的种子图标键——menu_accept 的「首次命中」判定基线 */
   private lastSeedKey = '';
   private refreshSeedIcon() {

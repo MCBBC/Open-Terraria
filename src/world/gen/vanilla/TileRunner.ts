@@ -132,13 +132,26 @@ export function tileRunner(
   st: TileStore, rng: RNG, gs: GenState,
   i: number, j: number, o: TileRunnerOpts,
 ): void {
-  const { strength, steps, type } = o;
+  // ★IIIII14 五处 drunk 触点（cs:77132-77140 头部双掷 / cs:77181 循环头跳变 / cs:77224
+  //   灰烬界上跳格 / cs:77361 加速梯 Next(3) 断续门 / cs:77446 尾段水平摆）——全部
+  //   只在 seedFlags.drunkWorld 时生效，普通种子流零扰动（金标链锚定）。
+  const drunkTR = !!gs.seedFlags.drunkWorld;
+  let strengthIn = strength;
+  let stepsIn = steps;
+  if (drunkTR && !o.mudWall) {
+    // cs:77133-77139：strength *= 1+Next(-80,81)*0.01；steps=(int)(steps*(1+Next(-80,81)*0.01))
+    strengthIn *= 1 + rng.int(-80, 80) * 0.01;
+    stepsIn = Math.trunc(stepsIn * (1 + rng.int(-80, 80) * 0.01));
+  }
+  const { type } = o;
+  // 灰烬块（sheet 57）标志：drunk 世界灰烬 runner 在 y<h-300 段整体跳格（cs:77224）
+  const ashBlockTr = TILE_DEFS[type]?.vanilla?.sheet === 57;
   const addTile = o.addTile ?? false;
   const overRide = o.overRide ?? true;
   const noYChange = o.noYChange ?? false;
   const ignoreTileType = o.ignoreTileType ?? -1;
-  let num1 = strength;          // 当前半径(衰减)
-  let num2 = steps;             // 剩余步数
+  let num1 = strengthIn;        // 当前半径(衰减)
+  let num2 = stepsIn;           // 剩余步数
   let px = i + 0.0, py = j + 0.0;
   // 原版初始速度 Next(-10,11)*0.1(0.1 步长离散);仅 speedX/speedY 任一非 0 才覆写
   let vx = rng.int(-10, 10) * 0.1;
@@ -159,9 +172,14 @@ export function tileRunner(
   const ty = st.type, tf = st.flags, twall = st.wall, tliq = st.liquid, tltype = st.liquidType;
   const thalf = st.half, tslope = st.slope;
   while (num1 > 0 && num2 > 0) {
+    // ★IIIII14（cs:77181-77185）：drunk 循环头 1/30 跳变——位置瞬移 ±5，三掷
+    if (drunkTR && rng.int(0, 29) === 0) {
+      px += rng.int(-100, 100) * 0.05;
+      py += rng.int(-100, 100) * 0.05;
+    }
     // 泥向上钻出世界顶即停(原版)
     if (py < 0 && num2 > 0 && type === MUD) num2 = 0;
-    num1 = strength * (num2 / steps);
+    num1 = strengthIn * (num2 / stepsIn);
     num2--;
     const x0 = Math.max(1, Math.floor(px - num1 * 0.5));
     const x1 = Math.min(stW - 1, Math.floor(px + num1 * 0.5));
@@ -169,6 +187,9 @@ export function tileRunner(
     const y1 = Math.min(st.h - 1, Math.floor(py + num1 * 0.5));
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
+        // ★IIIII14（cs:77224）：drunk 灰烬 runner 上界门——y<maxTilesY-300 的灰烬格
+        //   全跳（**dist 骰不消耗**，vanilla continue 在骰前）
+        if (drunkTR && ashBlockTr && y < st.h - 300) continue;
         // 原版活性 framed 物件跳过（cs:77217-77220，在 dist 掷骰**之前**短路——
         // 这些格不消耗菱形判定骰）。近似映射：framed && !decor（树/箱/门等）；
         // 植物 decor≈tileCut 不跳。洞穴链阶段世界尚无 framed 活性块，零影响，
@@ -261,17 +282,25 @@ export function tileRunner(
     }
     // 移动 + 大半径加速(原版 12 档阶梯 50..900,每档速度抖动 ±0.05)
     px += vx; py += vy;
-    for (const thr of [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900]) {
-      if (num1 > thr) {
-        px += vx; py += vy;
-        num2--;
-        vy += rng.int(-10, 10) * 0.05;
-        vx += rng.int(-10, 10) * 0.05;
-      } else break;
+    // ★IIIII14（cs:77899）：drunk 加速梯断续门——Next(3)==0 时整梯跳过。骰**恒掷**
+    //（C# && 左侧先行，num>50 判定在骰后），普通世界不掷。
+    let ladderGo = true;
+    if (drunkTR) ladderGo = rng.int(0, 2) !== 0;
+    if (ladderGo) {
+      for (const thr of [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900]) {
+        if (num1 > thr) {
+          px += vx; py += vy;
+          num2--;
+          vy += rng.int(-10, 10) * 0.05;
+          vx += rng.int(-10, 10) * 0.05;
+        } else break;
+      }
     }
     // 每步全局速度抖动 + ±1 钳制(cs L46659-46673):X 恒抖;
     // !noYChange 时 Y 抖动;noYChange 且非泥、半径<3 时只钳不抖
     vx += rng.int(-10, 10) * 0.05;
+    // ★IIIII14（cs:77984-77987）：drunk 尾段水平额外摆 Next(-10,11)*0.25（钳制前）
+    if (drunkTR) vx += rng.int(-10, 10) * 0.25;
     if (vx > 1) vx = 1;
     if (vx < -1) vx = -1;
     if (!noYChange) {

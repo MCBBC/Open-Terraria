@@ -53,13 +53,22 @@ describe('WeatherState 状态机', () => {
   });
 
   it('风场：target cap ±0.8；弱玩家（<120 血）钳 ±0.35', () => {
-    const w = new WeatherState(42);
+    // 构造器 windCounter/extremeWindCounter 保持 0（原版静态字段缺省，Main.cs:10801
+    // 注——2026-08-26"新存档大风吹"修复）：首个 updateWind tick 即走极端分支整体
+    // 重掷目标并复位计数器。首掷断言锁此语义。
+    const first = new WeatherState(42);
+    first.update(ctx());
+    expect(first.windCounter).toBeGreaterThanOrEqual(900);
+    // ±0.8 钳在更新尾段（Main.cs:58346-58347 同构）：冻结调度（不触发重掷）时
+    // 手置超界值被钳回端点。
+    const w = new WeatherState(43);
+    w.windCounter = 1e9;
     w.windSpeedTarget = 2; // 超界
     w.update(ctx());
     expect(w.windSpeedTarget).toBe(0.8);
     // 弱玩家钳位只在 windCounter 到期重掷时生效（原版 Main.cs:58252-58340 同构，
     // 构造器初掷不钳——10801）。强制到期至少一次再断言。
-    const weak = new WeatherState(43);
+    const weak = new WeatherState(44);
     weak.windCounter = 1;
     for (let i = 0; i < 3000; i++) weak.update(ctx({ playerStrongEnough: false, aboveRockLayer: false }));
     expect(Math.abs(weak.windSpeedTarget)).toBeLessThanOrEqual(0.35);

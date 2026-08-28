@@ -98,6 +98,12 @@ export class WaterWarpCompositor {
     return this.fgCanvas;
   }
 
+  /** 预热 GL 扭曲层（#perf2026-08-28：提前触发上下文创建/着色器编译到加载页窗口；
+   *  off/2d 模式 no-op。仅触发现有惰性工厂，无绘制副作用） */
+  prewarm(): void {
+    if (this.mode === 'auto') void this.glLayer();
+  }
+
   /**
    * 全屏水体扭曲：scene（带光照世界层画布）按位移场重采样、前景水 alpha 门控。
    * 返回扭曲后画布；null = 本帧不扭（GL 不可用 / 逃生门 / 无水帧直通失败），

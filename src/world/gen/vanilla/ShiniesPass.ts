@@ -10,18 +10,38 @@ import { tileRunner } from './TileRunner';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
 import { flipGenSolid } from './GenSolid';
 
-/** 单深度带放矿：count 次尝试，y∈[yMin,yMax)，strength/steps 各自区间 */
+/** drunk 矿组重掷映射（vanilla sheet：正体 7/6/9/8，替身 166 锡/167 铅/168 钨/169 铂） */
+const ORE_FLIP_PAIRS: Record<'copper' | 'iron' | 'silver' | 'gold', [string, string]> = {
+  copper: ['ore_copper', 'ore_tin'],
+  iron: ['ore_iron', 'ore_lead'],
+  silver: ['ore_silver', 'ore_tungsten'],
+  gold: ['ore_gold', 'ore_platinum'],
+};
+
+/** 单深度带放矿：count 次尝试，y∈[yMin,yMax)，strength/steps 各自区间。
+ *  ★IIIII14：flipKey 非空时每条矿脉前掷 Next(2) 重掷该档矿组——0→正体(铜7/铁6/银9/
+ *  金8)、非0→替身(锡166/铅167/钨168/铂169)（cs:13258 起逐带内联 if(drunk){Next(2)}，
+ *  **与 Reset 期方向相反**）；掷结果**写回 gs.oreTiers**（原版 GenVars.copper 同为持续
+ *  改写，后续带读新值）。普通世界 flipKey 缺省不传、零骰零写。 */
 function band(
   st: TileStore, rng: RNG, gs: GenState,
   count: number, yMin: number, yMax: number,
   type: number, s: [number, number], steps: [number, number],
+  flipKey?: 'copper' | 'iron' | 'silver' | 'gold',
 ) {
+  const drunkFlip = flipKey !== undefined && !!gs.seedFlags.drunkWorld;
   for (let i = 0; i < count; i++) {
+    let t = type;
+    if (drunkFlip && flipKey) {
+      const [normK, altK] = ORE_FLIP_PAIRS[flipKey];
+      t = rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY[normK]! : TILE_BY_KEY[altK]!;
+      gs.oreTiers = { ...gs.oreTiers, [flipKey]: t };
+    }
     const x = rng.int(0, st.w - 1);              // Next(0, maxTilesX)
     const y = rng.int(Math.max(0, yMin), yMax - 1); // Next(yMin, yMax)
     tileRunner(st, rng, gs, x, y, {
       strength: rng.int(s[0], s[1]), steps: rng.int(steps[0], steps[1]),
-      type, addTile: false,
+      type: t, addTile: false,
     });
   }
 }
@@ -31,24 +51,33 @@ export function runShiniesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const area = st.w * st.h;
   const surfLow = gs.worldSurfaceLow, surfHigh = gs.worldSurfaceHigh;
   const rockHigh = gs.rockLevelHigh, rockLow = gs.rockLevelLow;
+  const drunkE = !!gs.seedFlags.drunkWorld;
+  const fk = (k: 'copper' | 'iron' | 'silver' | 'gold') => (drunkE ? k : undefined);
 
   // 铜/锡：三带 6e-5 / 8e-5 / 2e-4（cs:5840-5862）
-  band(st, rng, gs, Math.floor(area * 6e-5), surfLow, surfHigh, gs.oreTiers.copper, [3, 5], [2, 5]);
-  band(st, rng, gs, Math.floor(area * 8e-5), surfHigh, rockHigh, gs.oreTiers.copper, [3, 6], [3, 6]);
-  band(st, rng, gs, Math.floor(area * 2e-4), rockLow, st.h, gs.oreTiers.copper, [4, 8], [4, 7]);
+  band(st, rng, gs, Math.floor(area * 6e-5), surfLow, surfHigh, gs.oreTiers.copper, [3, 5], [2, 5], fk('copper'));
+  band(st, rng, gs, Math.floor(area * 8e-5), surfHigh, rockHigh, gs.oreTiers.copper, [3, 6], [3, 6], fk('copper'));
+  band(st, rng, gs, Math.floor(area * 2e-4), rockLow, st.h, gs.oreTiers.copper, [4, 8], [4, 7], fk('copper'));
   // 铁/铅：三带 3e-5 / 8e-5 / 2e-4（cs:5863-5892）
-  band(st, rng, gs, Math.floor(area * 3e-5), surfLow, surfHigh, gs.oreTiers.iron, [3, 6], [2, 4]);
-  band(st, rng, gs, Math.floor(area * 8e-5), surfHigh, rockHigh, gs.oreTiers.iron, [3, 5], [3, 5]);
-  band(st, rng, gs, Math.floor(area * 2e-4), rockLow, st.h, gs.oreTiers.iron, [4, 8], [4, 7]);
+  band(st, rng, gs, Math.floor(area * 3e-5), surfLow, surfHigh, gs.oreTiers.iron, [3, 6], [2, 4], fk('iron'));
+  band(st, rng, gs, Math.floor(area * 8e-5), surfHigh, rockHigh, gs.oreTiers.iron, [3, 5], [3, 5], fk('iron'));
+  band(st, rng, gs, Math.floor(area * 2e-4), rockLow, st.h, gs.oreTiers.iron, [4, 8], [4, 7], fk('iron'));
   // 银/钨：中层 2.6e-5 / 深层 1.5e-4（cs:13548-13562）；天空带 1.7e-4 在金深层**之后**（cs:13585）
-  band(st, rng, gs, Math.floor(area * 2.6e-5), surfHigh, rockHigh, gs.oreTiers.silver, [3, 5], [3, 5]);
-  band(st, rng, gs, Math.floor(area * 1.5e-4), rockLow, st.h, gs.oreTiers.silver, [4, 8], [4, 7]);
+  band(st, rng, gs, Math.floor(area * 2.6e-5), surfHigh, rockHigh, gs.oreTiers.silver, [3, 5], [3, 5], fk('silver'));
+  band(st, rng, gs, Math.floor(area * 1.5e-4), rockLow, st.h, gs.oreTiers.silver, [4, 8], [4, 7], fk('silver'));
   // 金/铂：深层 1.2e-4（cs:13563-13577）——注册序在银天空带之前（曾倒置致流分叉）
-  band(st, rng, gs, Math.floor(area * 1.2e-4), rockLow, st.h, gs.oreTiers.gold, [4, 7], [4, 7]);
+  band(st, rng, gs, Math.floor(area * 1.2e-4), rockLow, st.h, gs.oreTiers.gold, [4, 7], [4, 7], fk('gold'));
   // 银/钨天空带 1.7e-4（cs:13585-13598）/ 金近地表带 1.2e-4（cs:13599-13612）
-  band(st, rng, gs, Math.floor(area * 1.7e-4), 0, surfLow, gs.oreTiers.silver, [4, 8], [4, 7]);
-  band(st, rng, gs, Math.floor(area * 1.2e-4), 0, Math.max(1, surfLow - 20), gs.oreTiers.gold, [4, 7], [4, 7]);
-  // 邪恶矿：2.25e-5，仅岩层以下（cs:5932-5949）
+  band(st, rng, gs, Math.floor(area * 1.7e-4), 0, surfLow, gs.oreTiers.silver, [4, 8], [4, 7], fk('silver'));
+  band(st, rng, gs, Math.floor(area * 1.2e-4), 0, Math.max(1, surfLow - 20), gs.oreTiers.gold, [4, 7], [4, 7], fk('gold'));
+  // 邪恶矿：2.25e-5，仅岩层以下（cs:5932-5949）。
+  // ★IIIII14（cs:13599-13619）：drunk 先跑**双生半密度带**——猩红矿 204 半量 + 魔矿 22
+  //   半量；随后 cs:13621 起的 if(crimson) 全量带照常叠加（净 1.5× 邪恶矿,两族并存）。
+  if (drunkE) {
+    const halfCnt = Math.trunc(area * 2.25e-05 / 2);
+    band(st, rng, gs, halfCnt, gs.rockLevel, st.h, TILE_BY_KEY['ore_crimtane']!, [3, 5], [4, 7]);
+    band(st, rng, gs, halfCnt, gs.rockLevel, st.h, TILE_BY_KEY['ore_demonite']!, [3, 5], [4, 7]);
+  }
   const evil = gs.crimson ? TILE_BY_KEY['ore_crimtane']! : TILE_BY_KEY['ore_demonite']!;
   band(st, rng, gs, Math.floor(area * 2.25e-5), gs.rockLevel, st.h, evil, [3, 5], [4, 7]);
 }

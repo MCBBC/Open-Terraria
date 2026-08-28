@@ -251,8 +251,10 @@ const UP_PROTECT_MB = new Set([21, 26, 72, 77, 88, 467, 488]);
  *  生产管线内部 id1('dirt')走 vanGenSolidType 同判 true、真空格 flags=0 不入 active
  *  门 —— 两侧语义等价,仅修转译域伪影。 */
 const mbSheetOf = (t: number): number => (t === 0 ? 0 : (SHEET_OF_MB[t] ?? -1));
+const __mbMirrorOn = typeof process === 'undefined' || process.env.SW_MB_MIRROR !== 'off';
 const mbTileSolidGen = (t: number): boolean => {
-  if (t === 0 || (SHEET_OF_MB[t] ?? -1) === 0) return true;   // ★internal 0(air) 无注册行
+  if (!__mbMirrorOn) return vanGenSolidType(t);
+  if (t === 0 || (SHEET_OF_MB[t] ?? -1) === 0) return true;
   return vanGenSolidType(t);
 };
 

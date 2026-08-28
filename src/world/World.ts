@@ -80,6 +80,11 @@ export class World {
   store!: TileStore;   // definite assignment(读档 skipStore 路径由 fromPacket 注入)
   /** 本帧 SceneMetrics 快照（Game 每帧写；Enemy 判 zoneGraveyard 等只读用） */
   scene: import('./SceneMetrics').SceneFlags | null = null;
+  /** 历史索引帧修复已跑过（worker 读档管线在沉降前调 repairIndexFramesInStore 后置位、
+   *  随包回传（protocol WorldPacket.repairedIndexFrames）；生成路径=生成端写像素帧
+   *  终态天然免修，同样置位）。运行时标志不落盘——afterWorldLoad 据此跳过主线程
+   *  二次全图扫描（#perf2026-08-28 批）。主线程 fallback 读档无此包标志 → 原地同步跑 */
+  indexFramesRepaired?: boolean;
   /** 世界难度 = 原版 Main.GameMode（Main.cs:2677，ActiveWorldFileData.GameMode）：
    *  0 经典 / 1 专家 / 2 大师 / 3 旅程。与角色难度（Appearance.difficulty 0软/1中/2硬/3旅）
    *  是**两条独立轴**——世界难度管掉落倍率/吸血预算/掉钱档/旅行商店等 gameplay 门；
@@ -349,6 +354,8 @@ export class World {
     w.crimson = p.crimson; w.dungeonX = p.dungeonX; w.dungeonY = p.dungeonY; w.jungleX = p.jungleX;
     w.exploredVersion = p.exploredVersion;
     if (p.difficulty !== undefined) w.difficulty = p.difficulty;   // Main.GameMode（旧包缺省 0）
+    // 历史索引帧修复完成标志（worker 读档/生成路径置位；旧包缺省=未修，主线程原地跑）
+    w.indexFramesRepaired = !!p.repairedIndexFrames;
     w.clock.timeOfDay = p.clock.timeOfDay;
     w.clock.dayCount = p.clock.dayCount;
     if (p.clock.bloodMoon !== undefined) w.clock.bloodMoon = p.clock.bloodMoon;

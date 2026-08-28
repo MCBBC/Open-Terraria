@@ -86,6 +86,7 @@ import shopstockJson from '../data/vanilla-shopstock.json';
 import { dryadMoonPhaseStock, rollTownPetVariant, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore, LIQUID_TYPE } from '../world/TileStore';
+import { repairIndexFramesInStore } from '../world/repairIndexFrames';
 import { paintTile, paintWall, paintDustColor, paintCoatTile, paintCoatWall, type PaintDustHook, type CoatDustHook } from '../world/Paint';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import {
@@ -3480,6 +3481,8 @@ export class Game implements GameHooks {
     const applyDifficulty = () => { if (opts?.difficulty !== undefined) this.world.difficulty = opts.difficulty; };
     // ---- worker 路径（generate + settle 一条链在后台完成，UI 全程不卡） ----
     if (!this.genClient) this.genClient = new WorldGenClient();
+    // GL 管线预热（#perf2026-08-28，同 loadWorld——生成窗口同样有空档可吃）
+    this.renderer.prewarmGameGL();
     if (await this.genClient.probe()) {
       try {
         this.world = await this.genClient.generate(
@@ -3507,6 +3510,8 @@ export class Game implements GameHooks {
     }
     // ---- 主线程 fallback（原路径原样保留：worker 不可用 + 探针依赖） ----
     this.world = await generateWorld({ width, height, size: opts?.size, seedText, name: opts?.name, evil: opts?.evil, seedFlags: opts?.seedFlags, onWorldPartial: opts?.onWorldPartial }, (label, p) => onProgress?.(label, p * 0.7));
+    // 新生成世界免索引帧修复扫描（生成端写像素帧终态；与 worker 路径同置位语义）
+    this.world.indexFramesRepaired = true;
     // 水体预沉降：原版二次沉降(cs:21051)自 2026-08-17 起已归位 generateWorld 管线内
     //（蜂巢幼虫之后、仙人掌珊瑚之前——曾在此处/worker 生成后补跑 = 时点晚 8 个 pass，
     //  #98 珊瑚/水盒/燕麦液体门读到未沉降水体）。此处不再重复沉降。
@@ -3702,6 +3707,9 @@ export class Game implements GameHooks {
   async loadWorld(world: World, onProgress?: (label: string, p: number) => void, opts?: { settled?: boolean; playerAt?: { x: number; y: number } }) {
     this.freshlyCreated = false;
     this.world = world;
+    // GL 管线预热（#perf2026-08-28）：五个惰性 WebGL 上下文+着色器编译从进图首帧
+    // 挪到加载页窗口（与存档沉降/素材下载并行）。fire-and-forget，失败走工厂退避
+    this.renderer.prewarmGameGL();
     if (!opts?.settled) {
       // 读档沉降文案=原版 gen[27] 收敛比例 50-100%(WorldFile.cs:762;主线程 fallback
       // 路径与 worker 路径同款——mainFlow.loadProgressLabel)
@@ -4189,10 +4197,15 @@ export class Game implements GameHooks {
     this.cb.onMoonCountdown?.(this.world.lunarEvent.moonLordCountdown, this.world.lunarEvent.moonLordCountdownMax || 3600);
     this.boss = null;
     // ---- 历史存档索引帧修复 ----
-    // 旧版生成代码曾把多格家具的格内偏移写成【格索引】(0/1)而非【像素】(0/18)，
-    // 渲染端 ofx=1 只偏 1px → 2×2 宝箱四格显示同一贴图。特征：多格 vanilla framed
-    // 物体的全部格帧 <18 且非全 0（合法块必有一格 ≥18；全 0 由渲染端锚点扫描重建）
-    this.repairIndexFrames();
+    // worker 读档管线（saveParse）已在沉降前修复并置 world.indexFramesRepaired、
+    // 随包回传；生成路径同置位（生成端写像素帧终态）。这里只兜底两条无标志路径：
+    // 主线程 loadSave fallback（kvGet 文本直读）与旧探针注入世界。谓词幂等，即便
+    // 标志意外缺失而重复执行也只是白扫一遍全图，绝不会二次 ×18。
+    if (!w.indexFramesRepaired) {
+      const tRepair = performance.now();
+      this.repairIndexFrames();
+      if (this.renderLoadLog) console.log(`[afterWorldLoad] 索引帧修复扫描 ${(performance.now() - tRepair).toFixed(0)}ms`);
+    }
 
     // （2026-08-17 用户定案：旧世界不做零帧样式兼容，只保新开档正确——
     //  零帧石堆/地牢陈设的读档回填已撤销；正确性由生成端写帧 + finalize
@@ -4212,8 +4225,14 @@ export class Game implements GameHooks {
         this.entities.add(t, 'npcs');
       }
       // 向导：存档无向导条目才按新世界语义出生（WorldGen.cs:20036）；吸血鬼种子世界
-      // 起始 NPC 换动物学家（:19981-19986 vampireSeed → NewNPC 633 homeless）
-      const starterKey = this.world.seedFlags?.vampireSeed ? 'zoologist' : this.world.seedFlags?.notTheBees ? 'merchant' : 'guide'; // ★UUUUUU：NTB 起始 NPC=商人 17（cs:20007-20014）
+      // 起始 NPC 换动物学家（:19981-19986 vampireSeed → NewNPC 633 homeless）。
+      // ★IIIII14：drunk 支同 newWorld 路径（drunk×const→机械师 / 裸 drunk→派对女孩）。
+      const sfL = this.world.seedFlags ?? {};
+      const starterKey = sfL.vampireSeed ? 'zoologist'
+        : sfL.notTheBees ? 'merchant'
+        : (sfL.drunkWorld && sfL.theConstant) ? 'mechanic'
+        : sfL.drunkWorld ? 'party_girl'
+        : 'guide';
       if (!savedNpcs.some((n) => n.key === starterKey)) {
         this.entities.add(new TownNPC(starterKey, this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
       }
@@ -4230,6 +4249,10 @@ export class Game implements GameHooks {
       // （Andrew/Whitney/Yorai/Amanda，白兔=生成期 B 掷池名）；朝向=pass direction ±1。
       const starters = this.world.starterTownNpcs ?? [];
       this.world.starterTownNpcs = undefined;
+      // ★IIIII14：起始镇民记录的消费域仍限定十周年（GenuineParty/派对帽是十周年
+      //  Reset 域语义 cs:11156-11163）；纯 drunk 的单记录（派对女孩/机械师）只走
+      //  实例化循环,不进派对基态。
+      const tenthStarters = !!this.world.seedFlags?.tenthAnniversary;
       for (const sRec of starters) {
         const t = new TownNPC(sRec.key, sRec.x, sRec.y);
         t.givenName = sRec.givenName;
@@ -4237,7 +4260,7 @@ export class Game implements GameHooks {
         if (sRec.variationIndex !== undefined) t.variationIndex = sRec.variationIndex;
         this.entities.add(t, 'npcs');
       }
-      if (starters.length > 0) {
+      if (starters.length > 0 && tenthStarters) {
         // Reset 域（cs:11156-11163）：GenuineParty=true + PartyDaysOnCooldown=5 ——
         // 开局即派对（CelebratingNPCs=五名 seed 镇民，渲染层派对帽同源）
         this.partyState.genuineParty = true;
@@ -4249,7 +4272,16 @@ export class Game implements GameHooks {
       // 商人/护士等由 checkTownArrival 按原版条件 + 房屋系统入住(见 updateTownNpcArrival)。
       // 吸血鬼种子（vampireSeed）：起始 NPC = 动物学家 633（WorldGen.cs:19981-19986，
       // else-if 链在 infectedSeed 后截胡——替代向导出生、homeless、direction=1）
-      const starterNpcKey = this.world.seedFlags?.vampireSeed ? 'zoologist' : this.world.seedFlags?.notTheBees ? 'merchant' : 'guide'; // ★UUUUUU：NTB 起始 NPC=商人 17（cs:20007-20014，else-if 链在 vampire 后）
+      // ★IIIII14（cs:20016-20054）：drunk 支接线——drunk×theConstant → 机械师 124
+      //   (savedMech)；裸 drunk → 派对女孩 208(unlockedPartyGirlSpawn)。链序照反编译
+      //   （infected/vampire/remix 在前，notBees/getGood 居中）；infected/remix/getGood
+      //   三支仍为登记债、不在本链（维持既有落 guide 的行为口径）。
+      const sfD = this.world.seedFlags ?? {};
+      const starterNpcKey = sfD.vampireSeed ? 'zoologist'
+        : sfD.notTheBees ? 'merchant'                     // ★UUUUUU：NTB 起始 NPC=商人 17（cs:20007-20014）
+        : (sfD.drunkWorld && sfD.theConstant) ? 'mechanic'  // drunk×dontStarve→机械师 124（cs:20016）
+        : sfD.drunkWorld ? 'party_girl'                     // 裸 drunk→派对女孩 208（cs:20045） ★IIIII14
+        : 'guide';
       // ★IIIIIII6：十周年世界的向导已含在播种名单 → 跳过默认向导生成
       // （与 savedNpcs 分支的 some(key===starterKey) 门同语义）
       if (!seededKeys.has(starterNpcKey)
@@ -17093,8 +17125,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.toggleDoor(tx, ty, true);
     } else if (type === T.DOOR_OPEN) {
       this.toggleDoor(tx, ty, false);
-    } else if (type === T.CHEST || this.wiring?.sheetOf(tx, ty) === 441 || this.wiring?.sheetOf(tx, ty) === 468) {
-      // 陷阱箱 441/468 也走开箱流程(tryOpenChest 内触发电路+射镖)
+    } else if (type === T.CHEST) {
+      // 真容器交互走此路；假容器(FakeContainers 441/FakeContainers2 468)不认——
+      // 原版 Chest.FindChest 只收真箱型，装饰箱右键无任何行为
       // 打开宝箱：精确命中或 3×3 容差（点击宝箱边缘也算）
       const chest = this.findChest(tx, ty) ?? this.findChestNear(tx, ty);
       if (chest) this.tryOpenChest(chest);
@@ -17563,18 +17596,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.cb.onInventoryChanged();
       }
     }
-    // 陷阱箱 441/468(Player.cs:21303 语义):开启即触发电路 + 向玩家八方射镖
+    // 亡命箱布线触发（WorldGen.IsChestRigged :36127-36133 权威式）：type 467
+    // (Containers2) 且 styleRow=frameX/36==4 → 开启/再点均 Wiring.HitSwitch(topLeft)
+    // （Player.cs:33495-33519：开箱分支尾部无条件判定，已开态重复点击同样触发挥鞭；
+    // HitSwitch 沿线级联——发射器/炸药/致动巨石完全由玩家布线决定，无内置射镖）。
+    // 死亡成就窗口 _framesLeftEligibleForDeadmansChestDeathAchievement=600f 未接线，备案。
+    // MP：中继房开箱请求经 msg31 → 拥有权威世界的端点执行本路径即等效；
+    // SimHost 权威房后续在服务端 case31 复刻 MessageBuffer.cs:1879 直触发（登记）。
     const cxy = chest as { x?: number; y?: number };
-    const csh = cxy.x !== undefined && cxy.y !== undefined ? this.wiring?.sheetOf(cxy.x, cxy.y) ?? -1 : -1;
-    if ((csh === 441 || csh === 468) && cxy.x !== undefined && cxy.y !== undefined) {
-      this.wiring?.hitSwitch(cxy.x, cxy.y);
-      const cxp = cxy.x * TILE + 16, cyp = cxy.y * TILE + 16;
-      for (let k = 0; k < 8; k++) {
-        const ang = (k / 8) * Math.PI * 2;
-        this.entities.add(new TrapShot(cxp, cyp, Math.cos(ang) * 6, Math.sin(ang) * 6, 20, 'dart'), 'projectiles');
+    if (cxy.x !== undefined && cxy.y !== undefined && this.wiring) {
+      const stC = this.world.store;
+      const sheetC = TILE_DEFS[stC.get(cxy.x, cxy.y)]?.vanilla?.sheet ?? -1;
+      const fxC = stC.frameX[stC.idx(cxy.x, cxy.y)];
+      if (sheetC === 467 && Math.floor(fxC / 36) === 4) {
+        this.wiring.hitSwitch(cxy.x, cxy.y);
       }
-      this.sfx.play('tink');
-      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestTrapped'));
     }
     // 成就：打开金箱（Player.cs:32782-32790：sheet21 frameX∈[36,72) = 金箱 style1
     // 开箱 → event 16 I_AM_LOOT「在地下找到一个金宝箱并看看里面」）
@@ -26305,56 +26341,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 索引帧修复（见 afterWorldLoad 注释）：扫一遍全图多格 vanilla framed 物体 */
+  /** 主线程兜底入口（worker 读档管线已修复时由 afterWorldLoad 门控跳过）。
+   *  算法本体在 src/world/repairIndexFrames.ts 纯函数（两侧共用），此处只负责
+   *  Game 侧副作用：chunk 全图标脏 + 日志。 */
   private repairIndexFrames(): void {
     const st = this.world.store;
-    let fixed = 0;
-    for (let y = 0; y < st.h; y++) {
-      for (let x = 0; x < st.w; x++) {
-        const i = st.idx(x, y);
-        const type = st.type[i];
-        if (type === 0 || !st.flags[i]) continue;
-        const def = TILE_DEFS[type];
-        const fw = def?.vanilla?.fw ?? 0, fh = def?.vanilla?.fh ?? 0;
-        if (!def?.vanilla || def.vanilla.frame !== 'style' || fw < 2) continue;
-        // 圣诞树 171 豁免：wld 原生就是"索引帧"约定（锚点 frameX=10 哨兵 + 列/行
-        // 裸索引，PlaceXmasTree_Direct :39584-39593）+ 锚点 frameY 装饰位段
-        // （setXmasTree :39430）——×18 会同时毁掉两者（位段溢出 uint16 成垃圾）
-        if (def.vanilla.sheet === 171) continue;
-        // 物体块帧汇总（fw×fh 邻域内同型格）
-        let maxFx = 0, maxFy = 0, cells = 0, anyNonZero = false;
-        for (let dy = 0; dy < fh; dy++) {
-          for (let dx = 0; dx < fw; dx++) {
-            const xx = x + dx, yy = y + dy;
-            if (!st.inBounds(xx, yy)) continue;
-            const ii = st.idx(xx, yy);
-            if (st.type[ii] !== type) continue;
-            cells++;
-            const fx = st.frameX[ii], fy = st.frameY[ii];
-            if (fx > maxFx) maxFx = fx;
-            if (fy > maxFy) maxFy = fy;
-            if (fx !== 0 || fy !== 0) anyNonZero = true;
-          }
-        }
-        // 索引帧特征：≥2 格且全 <18 且非全 0（全 0 是 wld 残缺帧，渲染端另有重建）
-        if (cells < 2 || maxFx >= 18 || maxFy >= 18 || !anyNonZero) continue;
-        // 只在左上角格修一次（dx=dy=0 的格），避免重复 ×18
-        const li = st.idx(x - 1, y);
-        const above = st.idx(x, y - 1);
-        if (st.inBounds(x - 1, y) && st.type[li] === type) continue;
-        if (st.inBounds(x, y - 1) && st.type[above] === type) continue;
-        for (let dy = 0; dy < fh; dy++) {
-          for (let dx = 0; dx < fw; dx++) {
-            const xx = x + dx, yy = y + dy;
-            if (!st.inBounds(xx, yy)) continue;
-            const ii = st.idx(xx, yy);
-            if (st.type[ii] !== type) continue;
-            st.frameX[ii] = st.frameX[ii] * 18;
-            st.frameY[ii] = st.frameY[ii] * 18;
-            fixed++;
-          }
-        }
-      }
-    }
+    const fixed = repairIndexFramesInStore(st);
     if (fixed) {
       for (let cy = 0; cy < Math.ceil(st.h / 16); cy++) {
         for (let cx = 0; cx < Math.ceil(st.w / 16); cx++) this.chunks.markDirty(cx, cy);

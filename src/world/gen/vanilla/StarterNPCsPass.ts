@@ -171,8 +171,41 @@ function pushStarter(
 export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World }): void {
   const { store, rng, world } = ctx;
   const f = world.seedFlags ?? {};
-  // cs:19852 外门 tenthAnniversary。infectedSeed 组合支登记未移植（不可达面）；skyblock
-  // 组合按 cs:19892 `if (!skyblockWorldGen)` 门语义整段跳过。
+  // cs:19852 外门 tenthAnniversary。skyblock 组合按 cs:19892 `if (!skyblockWorldGen)`
+  // 门语义整段跳过。
+  // ★IIIII14（非十周年 else 链，cs:19963-20065——接 D 批登记）：
+  //   infectedSeed→20 / vampireSeed→633 / remix→441 / drunk×dontStarve→124 机械师
+  //   (savedMech) / notTheBees&&!dontStarve→17 商人 / getGood→38 爆破匠 /
+  //   **drunk→208 派对女孩(unlockedPartyGirlSpawn)** / 否则 22 向导。
+  //   本批接线纯 drunk 可达的两支：drunk×theConstant 与裸 drunk；其余组合仍由
+  //   Game.ts 历史口径承接/登记。链序照抄反编译（vampire 在 remix 后、notBees 在
+  //   drunk×const 后、getGood 在 notBees 后）。位置锚=spawn 像素原值（NewNPC 直投,
+  //   非调整点）、home 锚=spawn 本格、direction=1、homeless。命名掷 ×2 同③注
+  //   （GivenName 池抽中被**保留**——非十周年链无硬编码名覆盖,名字终态运行期补齐）。
+  if (!f.tenthAnniversary && !f.infectedSeed && !f.skyblock && !f.vampireSeed && !f.remix && f.drunkWorld) {
+    const sx = world.spawnX, sy = world.spawnY;
+    if (f.theConstant) {
+      // drunk×dontStarve → 机械师 124（cs:20016-20025）
+      rng.nextInt(NAME_ROLL_WIDTH[124]!);   // getNewNPCName(124)——结果保留（运行期近似 ''）
+      rng.nextInt(NAME_ROLL_WIDTH[124]!);   // GetNameForVariant 重掷（Legacy 恒 0）
+      world.flags.savedMech = true;         // NPC.savedMech（cs:20023）
+      world.starterTownNpcs = [{
+        key: 'mechanic', givenName: '',
+        x: sx * 16 + 8, y: (sy - 2) * 16, anchor: [sx, sy], dir: 1,
+      }];
+    } else {
+      // 裸 drunk → 派对女孩 208（cs:20045-20054）
+      rng.nextInt(NAME_ROLL_WIDTH[208]!);
+      rng.nextInt(NAME_ROLL_WIDTH[208]!);
+      world.flags.unlockedPartyGirlSpawn = true;   // NPC.unlockedPartyGirlSpawn（cs:20052）
+      world.starterTownNpcs = [{
+        key: 'party_girl', givenName: '',
+        x: sx * 16 + 8, y: (sy - 2) * 16, anchor: [sx, sy], dir: 1,
+      }];
+    }
+    return;
+  }
+  // infectedSeed 组合支登记未移植（不可达面）。
   if (!f.tenthAnniversary || f.infectedSeed || f.skyblock) return;
 
   const sx = world.spawnX;

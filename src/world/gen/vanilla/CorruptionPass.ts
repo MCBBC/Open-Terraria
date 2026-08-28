@@ -82,112 +82,144 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   const dungeonAvoid = 100;
   const midFixer = 50;      // evilBiomeAvoidanceMidFixer
   // ★裸 double：4200×0.00045 = 1.89 → 两组！（曾 floor 成 1 → 整片邪恶群系少一半）
-  const groupCount = w * 0.00045;
+  // ★IIIII14：drunk flag 恒 true（猩红分支必跑）且 num10 /= 2（cs:14024-14028）——
+  //   两分支各得一半组数；普通世界维持原值单分支。
+  const drunk = !!gs.seedFlags.drunkWorld;
+  const groupCount = drunk ? w * 0.00045 / 2 : w * 0.00045;
   const hearts: Array<[number, number]> = [];
-  for (let g = 0; g < groupCount; g++) {
-    let snowLo = sLo, snowHi = sHi, jungLo = jLo, jungHi = jHi;
-    let cx = 0, zLo = 0, zHi = 0;
-    let ok = false;
-    // 拒绝采样（cs:13979-14009）：地牢侧钳制 → 地牢 ±100 → 中央 ±200 → 沙漠 → 雪原 → 丛林
-    while (!ok) {
-      ok = true;
-      cx = rng.int(500, w - 501);                              // Next(num8=500, w-500)(cs:13976/14012);曾误用 380 避滩值
-      zLo = cx - rng.int(0, 199) - 100;                        // Next(200)
-      zHi = cx + rng.int(0, 199) + 100;
-      if (zLo < beachAvoid) zLo = beachAvoid;
-      if (zHi > w - beachAvoid) zHi = w - beachAvoid;
-      if (cx < zLo + midFixer) cx = zLo + midFixer;
-      if (cx > zHi - midFixer) cx = zHi - midFixer;
-      // ★dungeonSide 钳制是猩红分支专属（cs:14042-14049）；腐化分支（cs:14358-14384）
-      //   没有这两行——曾两分支共用 → corruption 侧 zLo 被错误钳到 400/w-400，
-      //   s6666 首组起整条流分叉（+1.14M 掷）。1405 无此钳制（1456 猩红新增）。
-      if (gs.crimson) {
-        if (gs.dungeonSide < 0 && zLo < 400) zLo = 400;          // dungeonSide<=Left
-        else if (gs.dungeonSide > 0 && zLo > w - 400) zLo = w - 400;
+  /** 半侧域锁（cs:14031 猩红 / cs:14370 腐化）：drunk 时 cx 先按 crimsonLeft 锁半侧。
+   *  vanilla= (crimsonLeft ? Next(num8, w*0.5) : Next(w*0.5, w-num8))——左侧参数语义：
+   *  猩红与腐化取**相反**区间。0 = 全图（普通世界路径）。 */
+  const pickCenter = (whichCrimson: boolean): number => {
+    if (!drunk) return rng.int(500, w - 501);                  // Next(num8, maxTilesX-num8)
+    const half = Math.trunc(w * 0.5);
+    const onLeft = whichCrimson ? gs.crimsonLeft : !gs.crimsonLeft;
+    return onLeft ? rng.int(500, half - 1) : rng.int(half, w - 501);
+  };
+  /**
+   * 单邪恶分支执行器（corruption 组循环体逐语句 1:1）。
+   * @param which true=猩红分支(cs:14032-14345)/false=腐化分支(cs:14346-14581)
+   */
+  const runBranch = (which: boolean): void => {
+    for (let g = 0; g < groupCount; g++) {
+      let snowLo = sLo, snowHi = sHi, jungLo = jLo, jungHi = jHi;
+      let cx = 0, zLo = 0, zHi = 0;
+      let ok = false;
+      // 拒绝采样（cs:13979-14009）：地牢侧钳制 → 地牢 ±100 → 中央带 → 沙漠 → 雪原 → 丛林
+      while (!ok) {
+        ok = true;
+        cx = pickCenter(which);                                // Next(...)（上注）
+        zLo = cx - rng.int(0, 199) - 100;                      // Next(200)
+        zHi = cx + rng.int(0, 199) + 100;
+        if (zLo < beachAvoid) zLo = beachAvoid;
+        if (zHi > w - beachAvoid) zHi = w - beachAvoid;
+        if (cx < zLo + midFixer) cx = zLo + midFixer;
+        if (cx > zHi - midFixer) cx = zHi - midFixer;
+        // ★dungeonSide 钳制是猩红分支专属（cs:14042-14049）；腐化分支（cs:14358-14384）
+        //   没有这两行——曾两分支共用 → corruption 侧 zLo 被错误钳到 400/w-400,
+        //   s6666 首组起整条流分叉（+1.14M 掷）。1405 无此钳制（1456 猩红新增）。
+        //   ★drunk 下猩红分支照常生效（vanilla 只看本分支）。
+        if (which) {
+          if (gs.dungeonSide < 0 && zLo < 400) zLo = 400;          // dungeonSide<=Left
+          else if (gs.dungeonSide > 0 && zLo > w - 400) zLo = w - 400;
+        }
+        if (zLo < gs.dungeonLocation + dungeonAvoid && zHi > gs.dungeonLocation - dungeonAvoid) ok = false;
+        // 中央回避带：num19 = drunk?100:200 仅猩红分支（cs:14018-14020）；腐化分支
+        // num50 恒 200（cs:14362）——drunk 不放松（非对称，原版如此）。
+        const centralBand = which && drunk ? 100 : 200;
+        const mid = w / 2;
+        if (Math.abs(cx - mid) < centralBand || Math.abs(zLo - mid) < centralBand || Math.abs(zHi - mid) < centralBand) ok = false;
+        const ud = gs.undergroundDesert;
+        if (ud && ((cx > ud.x0 && cx < ud.x1) || (zLo > ud.x0 && zLo < ud.x1) || (zHi > ud.x0 && zHi < ud.x1))) ok = false;
+        if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }   // cs:14006-14010（先雪后林）
+        // ★UUUUUU（cs:14090 `(!notTheBees || remix)` 同款于 cs:14416 猩红侧）：
+        //   NTB 跳过丛林带收缩——蜂蜜世界邪恶带不避让丛林（泥带全域化）
+        if (!(gs.seedFlags.notTheBees && !gs.seedFlags.remix)
+          && zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
       }
-      if (zLo < gs.dungeonLocation + dungeonAvoid && zHi > gs.dungeonLocation - dungeonAvoid) ok = false;
-      const mid = w / 2;
-      if (Math.abs(cx - mid) < 200 || Math.abs(zLo - mid) < 200 || Math.abs(zHi - mid) < 200) ok = false;
-      const ud = gs.undergroundDesert;
-      if (ud && ((cx > ud.x0 && cx < ud.x1) || (zLo > ud.x0 && zLo < ud.x1) || (zHi > ud.x0 && zHi < ud.x1))) ok = false;
-      if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }   // cs:14006-14010（先雪后林）
-      // ★UUUUUU（cs:14090 `(!notTheBees || remix)` 同款于 cs:14416 猩红侧）：
-      //   NTB 跳过丛林带收缩——蜂蜜世界邪恶带不避让丛林（泥带全域化）
-      if (!(gs.seedFlags.notTheBees && !gs.seedFlags.remix)
-        && zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
-    }
-    gs.evilZones.push({ x0: zLo, x1: zHi });
-    __mark?.(`zone${g}:${zLo}-${zHi}:cx${cx}`);
+      gs.evilZones.push({ x0: zLo, x1: zHi });
+      __mark?.(`zone${g}:${zLo}-${zHi}:cx${cx}`);
 
-    if (gs.crimson) {
-      crimStart(st, rng, gs, cx, gs.worldSurfaceLow - 10, hearts);
-      // 丛林草→猩红丛林草（cs:14110-14122：仅 type 60→662；曾误把泥也清成 0）
-      for (let x = zLo; x < zHi; x++) {
-        for (let y = gs.worldSurfaceLow; y < gs.worldSurface - 1; y++) {
-          if (!st.flags[st.idx(x, y)]) continue;
-          const depth = y + rng.int(10, 13);                  // Next(10,14)
-          for (let y2 = y; y2 < depth; y2++) {
-            if (st.flags[st.idx(x, y2)] && st.type[st.idx(x, y2)] === JUNGLE_GRASS
-              && x >= zLo + rng.int(0, 4) && x < zHi - rng.int(0, 4)) {
-              st.type[st.idx(x, y2)] = CRIMSON_JUNGLE_GRASS;
-            }
-          }
-          break;
-        }
-      }
-      convertSurface(st, rng, gs, zLo, zHi, true);
-      // 猩红**逐组**祭坛（cs:14241，本 pass 猩红分支内）——原版就在 Corruption pass 里，
-      // 与独立 pass "Demon And Crimson Altars"(cs:15825，全图随机撒) 是两处放置，
-      // 勿把这里挪到 15825 位（会同时丢流序与逐组锚定，见 runAltarsPass 头注）。
-      placeAltars(st, rng, gs, zLo, zHi, 1, CRIMSTONE);
-    } else {
-      // 腐化裂隙（cs:14368-14390）+ 丛林草→腐化丛林草（cs:14392-14404）
-      let cooldown = 0;
-      for (let x = zLo; x < zHi; x++) {
-        if (cooldown > 0) cooldown--;
-        if (x === cx || cooldown === 0) {
-          let sy = -1;
+      if (which) {
+        crimStart(st, rng, gs, cx, gs.worldSurfaceLow - 10, hearts);
+        // 丛林草→猩红丛林草（cs:14110-14122：仅 type 60→662；曾误把泥也清成 0）
+        for (let x = zLo; x < zHi; x++) {
           for (let y = gs.worldSurfaceLow; y < gs.worldSurface - 1; y++) {
-            if (st.flags[st.idx(x, y)] || st.wall[st.idx(x, y)] > 0) {
-              sy = y;
-              if (x === cx) {
-                cooldown = 20;
-                const __st = rng.int(0, 149) + 150;                           // Next(150)+150
-                __mark?.(`chasMain@${x},${y},${__st}`);
-                chasmRunner(st, rng, gs, x, y, __st, true);
-              } else if (rng.int(0, 34) === 0 && cooldown === 0) {
-                cooldown = 30;
-                const __st = rng.int(0, 49) + 50;                             // Next(50)+50
-                __mark?.(`chasSat@${x},${y},${__st}`);
-                chasmRunner(st, rng, gs, x, y, __st, true);
+            if (!st.flags[st.idx(x, y)]) continue;
+            const depth = y + rng.int(10, 13);                  // Next(10,14)
+            for (let y2 = y; y2 < depth; y2++) {
+              if (st.flags[st.idx(x, y2)] && st.type[st.idx(x, y2)] === JUNGLE_GRASS
+                && x >= zLo + rng.int(0, 4) && x < zHi - rng.int(0, 4)) {
+                st.type[st.idx(x, y2)] = CRIMSON_JUNGLE_GRASS;
               }
-              break;
             }
+            break;
           }
-          void sy;
         }
-        for (let y = gs.worldSurfaceLow; y < gs.worldSurface - 1; y++) {
-          if (!st.flags[st.idx(x, y)]) continue;
-          const depth = y + rng.int(10, 13);
-          for (let y2 = y; y2 < depth; y2++) {
-            if (st.flags[st.idx(x, y2)] && st.type[st.idx(x, y2)] === JUNGLE_GRASS
-              && x >= zLo + rng.int(0, 4) && x < zHi - rng.int(0, 4)) {
-              st.type[st.idx(x, y2)] = CORRUPT_JUNGLE_GRASS;  // 60→661
+        convertSurface(st, rng, gs, zLo, zHi, true);
+        // 猩红**逐组**祭坛（cs:14241，本 pass 猩红分支内）——原版就在 Corruption pass 里，
+        // 与独立 pass "Demon And Crimson Altars"(cs:15825，全图随机撒) 是两处放置,
+        // 勿把这里挪到 15825 位（会同时丢流序与逐组锚定，见 runAltarsPass 头注）。
+        placeAltars(st, rng, gs, zLo, zHi, 1, CRIMSTONE);
+      } else {
+        // 腐化裂隙（cs:14368-14390）+ 丛林草→腐化丛林草（cs:14392-14404）
+        let cooldown = 0;
+        for (let x = zLo; x < zHi; x++) {
+          if (cooldown > 0) cooldown--;
+          if (x === cx || cooldown === 0) {
+            let sy = -1;
+            for (let y = gs.worldSurfaceLow; y < gs.worldSurface - 1; y++) {
+              if (st.flags[st.idx(x, y)] || st.wall[st.idx(x, y)] > 0) {
+                sy = y;
+                if (x === cx) {
+                  cooldown = 20;
+                  const __st = rng.int(0, 149) + 150;                           // Next(150)+150
+                  __mark?.(`chasMain@${x},${y},${__st}`);
+                  chasmRunner(st, rng, gs, x, y, __st, true);
+                } else if (rng.int(0, 34) === 0 && cooldown === 0) {
+                  cooldown = 30;
+                  const __st = rng.int(0, 49) + 50;                             // Next(50)+50
+                  __mark?.(`chasSat@${x},${y},${__st}`);
+                  chasmRunner(st, rng, gs, x, y, __st, true);
+                }
+                break;
+              }
             }
+            void sy;
           }
-          break;
+          for (let y = gs.worldSurfaceLow; y < gs.worldSurface - 1; y++) {
+            if (!st.flags[st.idx(x, y)]) continue;
+            const depth = y + rng.int(10, 13);
+            for (let y2 = y; y2 < depth; y2++) {
+              if (st.flags[st.idx(x, y2)] && st.type[st.idx(x, y2)] === JUNGLE_GRASS
+                && x >= zLo + rng.int(0, 4) && x < zHi - rng.int(0, 4)) {
+                st.type[st.idx(x, y2)] = CORRUPT_JUNGLE_GRASS;  // 60→661
+              }
+            }
+            break;
+          }
         }
+        convertSurface(st, rng, gs, zLo, zHi, false);
+        __mark?.('converted');
+        // 暗影球周黑檀石囊（cs:14546-14581，★仅本组区间；第二条件仅清 active 保 type 幽灵）
+        cleanOrbPockets(st, rng, zLo, zHi);
+        __mark?.('orbs');
       }
-      convertSurface(st, rng, gs, zLo, zHi, false);
-      __mark?.('converted');
-      // 暗影球周黑檀石囊（cs:14546-14581，★仅本组区间；第二条件仅清 active 保 type 幽灵）
-      cleanOrbPockets(st, rng, zLo, zHi);
-      __mark?.('orbs');
     }
+  };
+  // ==== 分支调度（cs:14029/14343-14347）====
+  if (gs.crimson || drunk) {
+    // flag=true：普通猩红世界或全部 drunk 世界跑猩红分支
+    runBranch(true);
   }
-  // CrimPlaceHearts（cs:14331）：全组结束后一次性（曾逐组内联 → 流序错位）
-  if (gs.crimson) {
+  // CrimPlaceHearts（cs:14341）：猩红分支结束后一次性（曾逐组内联 → 流序错位）；
+  // drunk：夹在双分支之间（vanilla 同位），普通世界语义不变（hearts 只有猩红分支写）。
+  if (gs.crimson || drunk) {
     crimPlaceHearts(st, rng, hearts);
+  }
+  if (!gs.crimson || drunk) {
+    // `if (drunkWorldGen) flag=false; if (!flag)`：普通腐化世界或 drunk 的第二段
+    runBranch(false);
   }
 }
 
@@ -211,7 +243,15 @@ export function runAltarsPass(st: TileStore, rng: RNG, gs: GenState): void {
   //   头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
   flipGenSolid([484], false);
   const count = Math.trunc(st.w * st.h * 3.3e-06);   // remixWorldGen×3 / dualDungeons÷2 秘种子门不适用
-  const style = gs.crimson ? 1 : 0;
+  const drunkA = !!gs.seedFlags.drunkWorld;
+  const styleOf = (x: number): number => {
+    if (!drunkA) return gs.crimson ? 1 : 0;
+    // ★IIIII14（cs:15883-15875）：drunk 祭坛 style 按**落点半侧**取——crimsonLeft 时
+    // 左半侧→猩红坛/右半侧→腐化坛，!crimsonLeft 相反（纯函数零骰，落点确定后可判）。
+    return gs.crimsonLeft
+      ? (x < st.w / 2 ? 1 : 0)
+      : (x >= st.w / 2 ? 1 : 0);
+  };
   const yLo = Math.trunc(gs.worldSurface * 2 + gs.rockLevel) / 3 | 0;   // (int)(ws*2+rock)/3
   const yHi = Math.trunc(gs.rockLevel + (st.h - 350) * 2) / 3 | 0;      // (int)(rock+(h-350)*2)/3
   const midLo = st.w * 0.45, midHi = st.w * 0.55;
@@ -227,7 +267,7 @@ export function runAltarsPass(st: TileStore, rng: RNG, gs: GenState): void {
         while (x > midLo && x < midHi) x = rng.int(281, st.w - 284);
         y = rng.int(yLo, yHi - 1);
       }
-      if (!isTileNearby(st, x, y, ALTAR, 3)) place3x2(st, x, y, ALTAR, style);
+      if (!isTileNearby(st, x, y, ALTAR, 3)) place3x2(st, x, y, ALTAR, styleOf(x));
       if (st.type[st.idx(x, y)] === ALTAR) break;                    // 成坛即停（:15877）
     }
   }

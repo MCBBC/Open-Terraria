@@ -4,6 +4,7 @@
 /// <reference lib="webworker" />
 import { generateWorld } from '../world/gen/WorldGen';
 import { settleWorldLiquids } from '../world/liquid/settle';
+import { repairIndexFramesInStore } from '../world/repairIndexFrames';
 import { packWorld } from './worldPacket';
 import { renderPreviewBitmap } from './previewBitmap';
 import { loadSaveData } from '../save/SaveFile';
@@ -58,6 +59,7 @@ ctx.onmessage = async (e) => {
       );
       // 二次沉降(cs:21051)自 2026-08-17 起归位 generateWorld 管线内（蜂巢幼虫之后、
       // 仙人掌珊瑚之前）——此处不再生成后补跑（曾晚 8 个 pass：#98 液体门读到未沉水体）
+      world.indexFramesRepaired = true;   // 生成端写像素帧终态，免主线程修复扫描
       const { packet, transfer } = packWorld(world); // 转移所有权（本分支最后一步）
       ctx.postMessage({ id: req.id, type: 'result', world: packet }, transfer);
       return;
@@ -74,6 +76,15 @@ ctx.onmessage = async (e) => {
       // 百分比区间在 mainFlow 端拼(:762 同款 50+p*50)
       const { world, player } = loadSaveData(data,
         (p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'tiles', p }));
+      // ★历史索引帧修复（#perf2026-08-28 前移到 worker）：旧档多格家具的格内偏移
+      // 曾写成格索引(0/1)而非像素(0/18)。★必须在沉降【前】——LiquidSim.diesIn 按
+      // frameX/frameY 解析对象死亡档位（TILE_OBJECT_DEATH style/alt），索引态帧会
+      // 让档位错位（主路径旧序=afterWorldLoad 里修复在 waterCheck 之后，历史倒置
+      // 顺带在此归位）。谓词幂等（修过即 maxFx≥18 跳过）绝不二次 ×18。置位后主线程
+      // afterWorldLoad 跳过重复全图扫描（关键路径曾 ~133ms）。
+      const repaired = repairIndexFramesInStore(world.store);
+      world.indexFramesRepaired = true;
+      if (repaired) console.log(`[worker] 索引帧修复 ${repaired} 格（索引→像素 ×18）`);
       await settleWorldLiquids(world, 'load',
         (p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'settle', label: '水体沉降', p }));
       const { packet, transfer } = packWorld(world);

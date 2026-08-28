@@ -144,6 +144,9 @@ import { WaterfallRenderer } from './WaterfallRenderer';
 import { CaptureInterface } from './CaptureMode';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
+import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
+  drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
+  drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay } from './npcExtraParts';
 import { GLWorldLight } from './GLWorldLight';
 import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
 
@@ -2619,6 +2622,7 @@ export class Renderer {
     // 天空深化批帧数据挂点（月塔近距门/月总死亡戏剧/稀有云旗标/环境族 zone 门/涟漪采样；
     // oceanFrontAlpha = bgAlphaFrontLayer[4] 海滩杀云门，Cloud.cs:401）
     this.sky.frameCtx = { entities, world, scene: this.scene, player, clock, camX: cam.x, camY: cam.y, z, viewW, viewH,
+      paused: this._worldPaused,
       oceanFrontAlpha: this.biomeBg.frontLayer()[4] };
     // BackgroundDrawers 带表(SunGradients.cs:175-189 取数闭包注入)
     this.sky.biomeBgBands = () => this.biomeBg.surfaceGradientBands();
@@ -5327,6 +5331,40 @@ export class Renderer {
             ctx.restore();
           }
         }
+        // 370 猪鲨/372/373 残影系统（vanilla aiStyle 69 分支 value76 链——oldPos 拖影
+        // + 圆周爆发 + ai0≥4 DukeFishron.png 换贴图，2026-08-27 审计补缺）
+        if (e.vanillaId === 370 || e.vanillaId === 372 || e.vanillaId === 373) {
+          const fr370 = this.atlas.vnpc(e.vanillaId, vanillaFrameIdx(e, Math.max(1, e.vanilla?.frames ?? 1)));
+          if (fr370) {
+            drawDukeAfterimages(ctx, e, this.atlas,
+              { sx: fr370.sx, sy: fr370.sy, sw: fr370.sw, sh: fr370.sh },
+              [1, 1, 1]);
+          }
+        }
+        // 399 火星探测器逃跑扫描束 + 418 Corite 拖尾（DrawNPC 附加层审计补缺）
+        if (e.vanillaId === 399) drawMartianProbeBeams(ctx, e, this.atlas, 0);
+        if (e.vanillaId === 418) drawCoriteTrail(ctx, e, this.atlas);
+        // 618 血月潜舰蓄力闪（ai0==3 门——DrawNPC aiStyle 117 段 value5 链）
+        if (e.vanillaId === 618) drawDreadnautilusFlash(ctx, e, this.atlas);
+        // 566/567 DD2 骷髅头冠（lai3≥115 门——DrawNPC Extra_80 段）
+        if (e.vanillaId === 566 || e.vanillaId === 567) drawDD2SkeletonCrown(ctx, e, this.atlas, 0);
+        // 551 Betsy 双翼（DrawNPC Extra_81/82 段——后翼先画、前翼后画）
+        if (e.vanillaId === 551) {
+          const fr551 = this.atlas.vnpc(551, vanillaFrameIdx(e, 11));
+          if (fr551) {
+            drawBetsyWings(ctx, e, this.atlas, (img, sx, sy, sw, sh, dx, dy, dw, dh) => {
+              ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+            });
+          }
+        }
+        // 693 万圣节书架骷髅（DrawNPC Extra_289 段——localAI 驱动色彩/缩放）
+        if (e.vanillaId === 693) drawLibrarianSkeleton(ctx, e, this.atlas);
+        // 522 未命名 NPC 加算覆盖帧（DrawNPC aiStyle 100 段 value85 链）
+        if (e.vanillaId === 522) {
+          const fr522 = this.atlas.vnpc(522, 0);
+          if (fr522) draw522Overlay(ctx, e, this.atlas,
+            { sx: fr522.sx, sy: fr522.sy, sw: fr522.sw, sh: fr522.sh });
+        }
         ctx.save();
         // 锚点（Main.cs:23658-23660 通用尾段 1:1）：position = Center −
         // frameSize×scale/2 + halfSize×scale + (0, num46+num47+gfxOffY)，origin =
@@ -5573,6 +5611,11 @@ export class Renderer {
         if (e.vanillaId === 568 || e.vanillaId === 569) this.drawWitherBirth(ctx, e, r, scale);
         // debuff 染色在身时基础层由下方 tintedSprite(multiply) 版本承担（双画=叠亮）
         if (!xnaColor && !dbTint) ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, bodyY, r.sw, r.sh);
+        // 618 血月潜舰触腕叠加层（DrawNPC Extra_129 段：通用帧后追加同帧叠画）
+        if (e.vanillaId === 618) {
+          drawDreadnautilusOverlay(ctx, e, this.atlas,
+            { sx: r.sx, sy: r.sy, sw: r.sw, sh: r.sh });
+        }
         // ---- EoC 冲刺残影（Main.cs:25469-25481 1:1）：门 = ai[0]==3 且 ai[1]≥4
         //      （P2 连冲态 4 / 悬下方回冲态 5）→ 沿 oldPos 画 9 层鬼影，每层 RGBA
         //      × 0.5×(10−i)/20（越旧越淡），同一帧/旋转，锚点同本体（中心+eocOff）。
@@ -9205,6 +9248,20 @@ export class Renderer {
             ctx.globalAlpha = ga;
           }
         }
+        // 124 电工变体头饰（Main.cs type==124 localAI[0]==0 + Extra_263：DrawNPC
+        //  :22900-22930 段 townNpcVariationIndex==1 时换 Extra_263 贴图画头顶装备。
+        //  2026-08-27 DrawNPC 附加贴图审计缺口——TownNPC 路径补接）
+        if (n.vanillaId === 124 && !n.bound) {
+          const vIdx = (n as unknown as { townNpcVariationIndex?: number }).townNpcVariationIndex ?? 0;
+          if (vIdx === 1) {
+            const eg = this.atlas.ensureVImage('vanilla/Extra_263.png');
+            if (eg) {
+              ctx.save();
+              ctx.drawImage(eg, -eg.width / 2, -r.sh / 2 + addYT - eg.height + 4, eg.width, eg.height);
+              ctx.restore();
+            }
+          }
+        }
         if (this.scene?.partyUp && world) this.drawPartyHat(ctx, n, world);
         ctx.filter = 'none';
         ctx.restore();
@@ -12466,6 +12523,29 @@ export class Renderer {
     }
     this.screenFx = inst;
     return inst;
+  }
+
+  /** GL 管线预热总门(?prewarmgl=0 关闭,A/B 对拍;#perf2026-08-28 批) */
+  static readonly prewarmGL = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('prewarmgl') !== '0';
+    } catch { return true; }
+  })();
+  private _glPrewarmed = false;
+  /** 进世界前把全部惰性 WebGL 上下文建好（#perf2026-08-28 trace：进入世界首帧窗
+   *  t≈2.6-3.9s 串行 getContext 风暴 ~1.3s = GLWorldLight/WaterDistortion/
+   *  ScreenFilters/glfx(SpriteLayer) 的 init 上下文+着色器编译，弱 GPU 每个
+   *  ~100-200ms）。调用点在加载页窗口（与素材下载并行），本方法仅触发现有
+   *  惰性工厂——失败走各自既有退避哨兵，与首帧路径零行为差异；重复调用幂等 */
+  prewarmGameGL(): void {
+    if (this._glPrewarmed || !Renderer.prewarmGL) return;
+    this._glPrewarmed = true;
+    const t0 = performance.now();
+    try { this.worldLightLayer(); } catch { /* 工厂内部已退避 */ }
+    try { this.screenFxLayer(); } catch { /* 同上 */ }
+    try { this.acquireGL(); } catch { /* glfx/bg 层 */ }
+    try { this.waterWarp.prewarm(); } catch { /* 扭曲层 */ }
+    console.log(`[prewarmGL] WebGL 管线预热完成 ${(performance.now() - t0).toFixed(0)}ms`);
   }
 
   /** 7d 滤镜链合成：HeatDistortion(Low) → 柱族(Medium) → CRT/Test2(VeryHigh)。

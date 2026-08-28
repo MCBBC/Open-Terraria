@@ -160,7 +160,9 @@ export function runUndergroundJungleTreesPass(st: TileStore, rng: RNG, gs: GenSt
   const yEnd = h - 350;
   for (let i = 0; i < w; i++) {
     for (let j = yStart; j < yEnd; j++) {
-      if (rng.int(0, 9) === 0) {           // Next(10)==0 门（drunk 恒真分支不接普通种子）
+      // Next(10)==0 门（cs:17963 `Next(10)==0 || drunkWorldGen`）——★IIIII14：drunk
+      // 恒真（每格都尝试长地下树；判定骰照常消耗,与原版 || 短路一致）
+      if (rng.int(0, 9) === 0 || gs.seedFlags.drunkWorld) {
         growUndergroundTree(st, rng, gs, i, j);
       }
     }

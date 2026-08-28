@@ -277,7 +277,8 @@ const CSS = `
   border-radius:6px; cursor:pointer; font-size:15px; text-align:center; }
 .sw-btn:hover { background:linear-gradient(#5a4a7e,#4a3a6e); }
 .sw-btn:disabled { opacity:0.45; cursor:default; }
-.sw-slot { pointer-events:auto; width:52px; height:52px; background:url(sprites/vanilla/Inventory_Back.png) 0 0 / 100% 100%;
+.sw-root { --slot: 39px; }   /* 槽基准 = 热键栏未选中格视觉尺寸（52×0.75,2026-08-27 用户要求统一） */
+.sw-slot { pointer-events:auto; width:var(--slot); height:var(--slot); background:url(sprites/vanilla/Inventory_Back.png) 0 0 / 100% 100%;
   position:relative; cursor:pointer; image-rendering:pixelated; }
 /* 原版槽底乘色通道（ItemSlot.Draw :1945+：背景贴图 × inventoryBack 灰色 180-220，
  *  默认 220/255≈0.86 亮度；Loadout 染色/锁定灰 80 均经此 overlay 实现 MultiplyRGBA） */
@@ -285,11 +286,13 @@ const CSS = `
   background:var(--slot-tint, rgb(220,220,220)); mix-blend-mode:multiply; }
 .sw-hotbar .sw-slot::before { display:none; } /* 快捷栏 Back14/20 贴图自带 alpha 语义 */
 .sw-slot:hover { filter:brightness(1.15); }
-.sw-slot img { position:absolute; inset:8px; width:36px; height:36px; image-rendering:pixelated; }
-/* 44px 垃圾桶槽：36px 物品图标居中（inset 8 会贴右下角偏 4px,2026-08-21 用户报） */
-.sw-slot.sw-trash img:not(.sw-trash-icon) { inset:4px; }
-.sw-slot .cnt { position:absolute; left:4px; bottom:0; font-size:12px; font-weight:bold; color:#fff;
-  text-shadow:1px 1px 0 #000; transform-origin:left bottom; }
+/* 图标 inset/尺寸按槽盒百分比（15.4%=8/52、69.2%=36/52）——随 --slot 缩放不变形 */
+.sw-slot img { position:absolute; inset:15.4%; width:69.2%; height:69.2%; image-rendering:pixelated; }
+/* 垃圾桶槽（44/52=0.846 比例）：图标居中（inset 4 会贴右下角偏 4px,2026-08-21 用户报） */
+.sw-slot.sw-trash { width:calc(var(--slot) * 0.846); height:calc(var(--slot) * 0.846); }
+.sw-slot.sw-trash img:not(.sw-trash-icon) { inset:9.1%; width:81.8%; height:81.8%; }
+.sw-slot .cnt { position:absolute; left:4px; bottom:0; font-size:11px; font-weight:bold; color:#fff;
+  text-shadow:1px 1px 0 #000; transform-origin:left bottom; }   /* 11px = 热键栏数字号（.sw-slot-num 同款） */
 /* Loadout 三色（ItemSlot.LoadoutSlotColors :322-340，×inventoryBack 灰 = multiply）：
  * 切换瞬间白闪（GetColorByLoadout :2546：Remap(dt,0,30,0.5,0)³ lerp→白） */
 @keyframes sw-loadout-flash { 0% { background:rgb(255 255 255 / 0.5); }
@@ -301,15 +304,15 @@ const CSS = `
 @keyframes sw-slot-glow { 0% { opacity:0.5; } 100% { opacity:0; } }
 .sw-slot .sw-glow-overlay { position:absolute; inset:0; pointer-events:none;
   background:var(--glow); animation:sw-slot-glow 5s cubic-bezier(0.5,0,1,1) forwards; }
-/* 金币/弹药槽 0.6 缩放（Main.cs:41193/41211 inventoryScale=0.6 → 31px、列距 33.6） */
-.sw-slot.sm { width:31px; height:31px; }
-.sw-slot.sm img { inset:4px; width:23px; height:23px; }
+/* 金币/弹药槽 0.6 缩放（Main.cs:41193/41211 inventoryScale=0.6 → 0.596×基准、列距同比） */
+.sw-slot.sm { width:calc(var(--slot) * 0.596); height:calc(var(--slot) * 0.596); }
+.sw-slot.sm img { inset:12.9%; width:74.2%; height:74.2%; }
 .sw-slot.sm .cnt { font-size:10px; left:2px; }
 .sw-slot.sm::before { border-radius:2px; }
-/* Modern 合成网格材料格（38px 小槽）——.sw-slot img 默认按 52px 槽 inset8/36px,
- *  38px 格继承后图标锚 (8,8)+36×36 向右下溢出 6px = 材料图标错位（2026-08-21 实报）。
- *  38px 用 inset3/32px 居中（(38-32)/2=3），计数同 .sm 缩一号 */
-.sw-slot.chip img { inset:3px; width:32px; height:32px; }
+/* Modern 合成网格材料格（0.731×基准）——图标 inset 7.9%/84.2% 居中（原 38 盒 inset3/32px），
+ *  计数同 .sm 缩一号 */
+.sw-slot.chip { width:calc(var(--slot) * 0.731); height:calc(var(--slot) * 0.731); }
+.sw-slot.chip img { inset:7.9%; width:84.2%; height:84.2%; }
 .sw-slot.chip .cnt { font-size:10px; left:3px; }
 /* ---- 快捷栏（原版 GUIHotbarDrawInner Main.cs:42996-43060 1:1）----
  * 贴图 52px：未选中 scale0.75（视觉 39px、y+6、alpha 147/255≈0.575）+ Back20；
@@ -2565,6 +2568,8 @@ export class UI {
   trashEl: HTMLElement | null = null;
   /** 成就提示牌（背包内 Advisor 卡） */
   achAdvisorEl: (HTMLElement & { update(): void }) | null = null;
+  /** 右缘列（成就卡+杂项+PvP）——配方列表高度的上对齐基准（列表底 ≤ 列底） */
+  private advRailEl: HTMLElement | null = null;
   /** 配饰格可见性眼睛钮（槽序 → 元素,attachVisibilityEye 登记/refreshAllNow 重刷） */
   private accEyeEls = new Map<number, HTMLElement>();
   private loadoutBtns: HTMLButtonElement[] = [];
@@ -2922,7 +2927,7 @@ export class UI {
       right.appendChild(lblRow);
     }
     const grid = el('div');
-    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,52px); gap:4px;';
+    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10, var(--slot)); gap:4px;';
     // 背包网格 = 槽 10-49（10×4）。★曾写到 INV_SIZE=58——50-57 是钱币/弹药槽
     // （COIN_START/AMMO_START,已在左列渲染），混进网格成第 5 行幻影格：query 首匹配
     // 让左列元素吃掉绘制、悬停却读出钱币/弹药 tooltip（2026-08-26 用户实报红框行）。
@@ -2991,6 +2996,7 @@ export class UI {
     //   列高 ≈ 成就卡+杂项 310+PvP 120 ≈ 左装备列 620,面板高度不受影响。
     //   ★与左列 rightRail（垃圾桶/钱币）重名,此为 advRail）
     const advRail = el('div');
+    this.advRailEl = advRail;
     advRail.style.cssText = 'display:flex; flex-direction:column; gap:8px; flex:none; align-items:center;';
     advRail.appendChild(row);   // 图标行（搜索/住房/图鉴+联机/旅程钮）挂列顶
     // 成就提示牌 → 物品格右侧（用户指定；alignSelf 防 body stretch 拉高卡片）
@@ -3090,7 +3096,12 @@ export class UI {
     const craftTitleRow = el('div');
     // margin-top 撑开背包网格/钮簇与合成区的间距（2026-08-27 用户要求,红框处）
     craftTitleRow.style.cssText = 'display:flex; align-items:baseline; gap:8px; margin:14px 0 6px;';
-    craftTitleRow.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting')));
+    {
+      const t = el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting'));
+      t.style.fontSize = '14px';   // 随 39px 格缩放降级（.sw-title 17px 偏大,2026-08-27 用户要求）
+      t.style.marginBottom = '0px';
+      craftTitleRow.appendChild(t);
+    }
     const stations = el('div', '', '');
     stations.style.cssText = 'font-size:11px; color:#8ad0a0; flex:1; min-width:0; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
     stations.dataset.role = 'stations';
@@ -3107,7 +3118,7 @@ export class UI {
     this.craftSearchEl.addEventListener('input', () => { this.craftFocus = -1; this.craftScroll = 0; this.craftScrollF = 0; this.craftWheelTarget = 0; this.refreshVanillaCrafting(); });
     modernRow.appendChild(this.craftSearchEl);
     this.craftGridEl = el('div');
-    this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:520px; height:38px; box-sizing:border-box;';
+    this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:426px; height:38px; box-sizing:border-box;';
     modernRow.appendChild(this.craftGridEl);
     right.appendChild(modernRow);
     const craftWrap = el('div');
@@ -3116,7 +3127,7 @@ export class UI {
     this.craftListEl = el('div');
     // 原版无滚动条——滚轮驱动焦点评动(CraftingUI 滚动列表),不走原生滚动;
     // 曾 overflow-y:auto + refreshAll 重建行后 scrollTop 归零 = 滚动位置每帧重置
-    this.craftListEl.style.cssText = 'height:240px; overflow:hidden; width:520px;';
+    this.craftListEl.style.cssText = 'height:240px; overflow:hidden; width:426px;';
     craftWrap.appendChild(this.craftListEl);
     // 滚动条（2026-08-21 用户要求；原版鱼眼列表无此件=自造 QoL）：列表右缘
     // 6px 竖槽+滑块，几何由 refreshVanillaCrafting 尾部按行窗占比刷；拖滑块/
@@ -3124,7 +3135,7 @@ export class UI {
     const track = el('div');
     // 槽底提亮+描边（2026-08-21 用户报"下滚一段才出现"——实为深蓝槽在面板上
     // 隐形，打开即渲染但视觉不可辨；提对比让它从打开起就是显性滚动条）
-    track.style.cssText = 'position:absolute; left:526px; top:0; bottom:0; width:6px;'
+    track.style.cssText = 'position:absolute; left:430px; top:0; bottom:0; width:6px;'
       + 'background:rgba(58,52,108,0.75); border:1px solid rgba(122,144,214,0.4);'
       + 'border-radius:3px; cursor:pointer; display:none; box-sizing:border-box;';
     const thumb = el('div');
@@ -3489,7 +3500,7 @@ export class UI {
     this.chestTitle = el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Chest'));
     this.chestPanel.appendChild(this.chestTitle);
     const grid = el('div');
-    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,52px); gap:5px;';
+    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10, var(--slot)); gap:5px;';
     // 按 40 槽上限构建（玩家储物 bank×4）；打开时按容器实际长度显隐（宝箱 10 / 储物 40）
     for (let i = 0; i < 40; i++) {
       grid.appendChild(this.makeSlotEl(i, 'chest'));
@@ -3988,11 +3999,14 @@ export class UI {
       .map((e, i) => ({ e, met: metFlags[i] }))
       .sort((x, y) => Number(y.met) - Number(x.met))
       .map((x) => x.e);
-    // ★2026-08-27 用户要求：列表高度延展到面板下缘（曾恒 240px 底部死区）——
-    // 可用 = 视口底缘-32px（面板 padding-bottom 12 + body margin 8 + 余量,曾 -12
-    // 溢出屏幕）与列表顶的差,钳下限 240；池行数随高度增长
+    // ★2026-08-27 用户要求：列表高度对齐右缘列底（曾恒 240px 底部死区→改视口限
+    // 又溢出右缘列底 200px）——上限 = min(视口底-32, 右缘列底-8)，钳下限 240；
+    // 池行数随高度增长。首帧布局未就绪（rect 0）时落 240 下限,后续刷新自校正
     const rectTop = this.craftListEl.getBoundingClientRect().top;
-    const LIST_H = Math.max(240, Math.floor(window.innerHeight - 32 - rectTop));
+    const advBottom = this.advRailEl?.getBoundingClientRect().bottom ?? 0;
+    const byViewport = window.innerHeight - 32 - rectTop;
+    const byRail = advBottom > rectTop ? advBottom - 8 - rectTop : Infinity;
+    const LIST_H = Math.max(240, Math.floor(Math.min(byViewport, byRail)));
     this.craftListH = LIST_H;
     const WIN = Math.max(12, Math.ceil(LIST_H / UI.CRAFT_ROW_H) + 4);   // 池行 = 可见 + 余量
     const maxAnchor = Math.max(0, avail.length - 1);
@@ -4015,7 +4029,7 @@ export class UI {
     if (this.craftPool.length !== WIN || this.craftPool[0]?.parentElement !== this.craftListEl) {
       const cl = this.craftListEl;
       cl.replaceChildren();
-      cl.style.cssText = `height:${LIST_H}px; overflow:hidden; width:520px; position:relative;`;
+      cl.style.cssText = `height:${LIST_H}px; overflow:hidden; width:426px; position:relative;`;
       this.craftPool = []; this.craftPoolIdx = [];
       for (let k = 0; k < WIN; k++) {
         const row = el('div', 'sw-recipe');

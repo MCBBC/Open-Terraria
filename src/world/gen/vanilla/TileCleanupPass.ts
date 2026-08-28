@@ -318,7 +318,11 @@ export function runTileCleanupPass(
         if (t === sheetId(31)) {
           let num8 = Math.floor(fx / 18);
           let num9 = Math.floor(num8 / 2);
-          num9 = gs.crimson ? 1 : 0;              // 非 drunk 分支覆写（cs:21494）
+          // 非 drunk 分支覆写（cs:21494）；★IIIII14（1457 cs:21865）：drunk 按本格
+          // 背墙判侧——crimstone 墙 83 → 猩红心 style，否则魔珠 style（半侧共存）。
+          num9 = gs.seedFlags.drunkWorld
+            ? (st.wall[i] === 83 ? 1 : 0)
+            : (gs.crimson ? 1 : 0);
           num8 %= 2;
           const num10 = k - num8;
           let num11 = Math.floor(fy / 18);
@@ -426,7 +430,11 @@ export function runTileCleanupPass(
           let num56 = Math.floor(fx / 18);
           const num58 = k - (num56 % 3);
           const num59 = l - Math.floor(fy / 18);
-          const num57 = gs.crimson ? 1 : 0;       // 非 drunk 分支（cs:21713）
+          // 非 drunk 分支（cs:21713）；★IIIII14（1457 cs:22076）：drunk 按本格背墙
+          // 83 判侧（猩红坛/恶魔坛 style 半侧规则，重帧不换族仅校正左右帧带）。
+          const num57 = gs.seedFlags.drunkWorld
+            ? (st.wall[i] === 83 ? 1 : 0)
+            : (gs.crimson ? 1 : 0);
           for (let num60 = 0; num60 < 3; num60++) {
             for (let num61 = 0; num61 < 2; num61++) {
               const ni = st.idx(num58 + num60, num59 + num61);

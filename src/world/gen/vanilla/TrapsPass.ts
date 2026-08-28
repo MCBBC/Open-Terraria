@@ -297,7 +297,7 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng?: RNG, multiFallba
     // ★IIII10：墙挂/吊挂族真分派（CheckBanner/CheckXxxWall/CheckChand）——
     //   与 TileFrameImportant 同族互斥（不在 CHECK1X1/CHEST/CHECK2X2/185 表内），
     //   命中即消费本次邻格分派，绝不落入下方的地板支撑近似。
-    if (wallArtDispatchT(st, ux, uy, rng)) continue;
+    if (!I13_LEGACY && wallArtDispatchT(st, ux, uy, rng)) continue;   // ★IIII10（SW_I13_LEGACY=1 反演回退）
     if (!multiFallback || !MULTI_DEFS.has(ut)) continue;
     // 找含 (ux,uy) 的完整块锚
     const m = MULTI_DEFS.get(ut)!;
@@ -620,7 +620,7 @@ function wallArtDispatchT(st: TileStore, x: number, y: number, rng?: RNG): boole
   if (sh === 91) { checkBannerT(st, x, y, rng); return true; }
   if (sh === 34 || sh === 454) { checkChandT(st, x, y, rng); return true; }
   if (sh === 240 || sh === 440 || sh === 245 || sh === 246 || sh === 241 || sh === 242) { checkWallArtT(st, x, y, rng); return true; }
-  if (CHECK_SUPER_DEFS[sh]) { checkSuperT(st, x, y); return true; }
+  if (!I13_LEGACY && CHECK_SUPER_DEFS[sh]) { checkSuperT(st, x, y); return true; }
   return false;
 }
 
@@ -1167,7 +1167,7 @@ export function placePlate(st: TileStore, x: number, y: number, style: number, r
   //   实证），但墙面挂件（画 240-246/旗 91 等）的真实分派在原版走 CheckBanner/
   //   TileObjectData 锚系（墙面悬挂语义），地板支撑近似会误杀 → 板尾新开环先不
   //   走兜底支（IIII10 实证：notraps g3003+ 段 T240>0×9/T91>0×9 误杀漂移）。 */
-  cascade3x3T(st, x, y, rng, false);
+  if (!I13_LEGACY) cascade3x3T(st, x, y, rng, false);  // ★IIII10 case135 尾 SquareTileFrame（LEGACY=1 回退至 IIII10 前）
   return true;
 }
 
@@ -1502,10 +1502,14 @@ function isCracked(t: number): boolean {
 
 /** ★III13 批：PlaceSandTrap 门序仪（与 x86 rig JJHook.SandEv 同名同位；未注册零开销）。
  *  B 项（sand-g2 Δln=−2 早退深度）取证专用：逐门记 S0/G1..G9/OK/R1/R2，x86 权威件
- *  /tmp/iii13-out/x-sand13.txt 与 JS 件逐行对拍锁首个门分叉。 */
+ *  /tmp/iii13-out/x-sandC.txt 与 JS 件逐行对拍锁首个门分叉。 */
 function sandEv(kind: string, a: number, b: number, v: number): void {
   (globalThis as { __swSandEv?: (kind: string, a: number, b: number, v: number) => void }).__swSandEv?.(kind, a, b, v);
 }
+
+/** ★III13+#28 回归仲裁开关：SW_I13_LEGACY=1 时关闭本批新增（CheckSuper 分派/
+ *  桶尾级联）并回退 IIII10 两刀行为面（plate 尾级联、墙挂真分派），供 A/B 反演。 */
+const I13_LEGACY = typeof process !== 'undefined' && process.env?.SW_I13_LEGACY === '1';   // 浏览器无 process——守卫防整页启动炸
 
 /** PlaceSandTrap（cs:35505-35781）：地下沙漠蜂窝墙内的塌沙陷阱（1456 全尾段） */
 /** PlaceSandTrap（cs:35505-35781）——导出仅供探针对账 */
@@ -1810,7 +1814,7 @@ export function placeTNTBarrel(st: TileStore, x: number, y: number, rng?: RNG): 
   }
   // PlaceTile(654) → Place2x2（cs:60229 分派；右下锚语义同 MicroBiomes place2x2Direct）
   const ok = place2x2Traps(st, x, py, TNT_BARREL);
-  if (ok) cascade3x3T(st, x, py, rng, true);   // cs:60752 通用尾 SquareTileFrame(i,j)
+  if (ok && !I13_LEGACY) cascade3x3T(st, x, py, rng, true);   // cs:60752 通用尾 SquareTileFrame(i,j)
   return ok;
 }
 

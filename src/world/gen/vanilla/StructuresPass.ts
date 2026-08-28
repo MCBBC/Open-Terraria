@@ -614,9 +614,11 @@ export function runPyramidPass(
     if (k >= gs.worldSurface) continue;
     if (st.type[st.idx(num, k)] !== SAND) continue;   // cs:15455 沙列门禁
     // 与全部先序候选（PyrX[0..idx-1]）取最小距，须 ≥220（cs:15460-15472）
+    // ★IIIII14（cs:15476-15480）：num5=220，drunk /=2 → ≥110（金字塔更密）。
+    const pyrMinDist = gs.seedFlags.drunkWorld ? 110 : 220;
     let minDist = st.w;
     for (let l = 0; l < idx; l++) minDist = Math.min(minDist, Math.abs(num - gs.pyramidSpots[l].x));
-    if (minDist >= 220) {
+    if (minDist >= pyrMinDist) {
       if (PYR_TRACE) console.log(`PYR cand#${idx} x=${num} k=${k} minDist=${minDist} ACCEPT`);
       k--;
       pyramid(st, rng, gs, chests, num, k, 75, 125, false);

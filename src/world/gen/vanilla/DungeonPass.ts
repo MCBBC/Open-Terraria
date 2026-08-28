@@ -454,6 +454,11 @@ export function runDungeonPass(
       if (n4 < 60) y0 += 60 - n4;
     }
   }
+  // ★IIIII14（cs:14874-14877）：drunk 地牢无地表入口——y 强制 worldSurface+70
+  //   （老人预置地下屋/守卫限深放宽同族）；零骰。SecretSeed.noSurface 豁免支不适用。
+  if (gs.seedFlags.drunkWorld) {
+    y0 = Math.trunc(ws) + 70;
+  }
   // —— MakeDungeon（cs:327-505）——
   const s1x = ri(25, 29) + 0.0, s1y = ri(20, 24) + 0.0;
   const s2x = ri(35, 49) + 0.0, s2y = ri(10, 14) + 0.0;
@@ -3335,7 +3340,7 @@ export function runDungeonPass(
     // #32 终清批 III：Lights 入口全网格落盘（SW_DG_LIGHTS_GRID=<path 前缀>）——与
     //   vanilla 探针 SW_DGLIGHTS_GRID 同口径对拍（typ/act/wal/half/slope 五通道）。
     if (typeof process !== 'undefined' && process.env.SW_DG_LIGHTS_GRID) {
-      const pfx = process.env.SW_DG_LIGHTS_GRID as string;
+      const pfx = (typeof process !== 'undefined' ? process.env?.SW_DG_LIGHTS_GRID : undefined) as string | undefined;   // 浏览器无 process——守卫
       const vtyp = new Uint16Array(w * h), vact = new Uint8Array(w * h);
       const vhalf = new Uint8Array(w * h), vslope = new Uint8Array(w * h);
       for (let i = 0; i < w * h; i++) {

@@ -817,6 +817,9 @@ function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: nu
  *  消费：月塔天空近距门 / 月总死亡戏剧 / 稀有云世界旗标 / AmbientSky zone 门 /
  *  涟漪水面采样。null = 未注入（菜单等），各子系统自静默。 */
 export interface SkyFrameCtx {
+  /** Game.paused（Main.gamePaused，:17144 CanPauseGame→return——云/星更新整体冻结门）。
+   *  可选 = 菜单态 frameCtx 省略（undefined 视为未暂停,与原版菜单云照常漂一致） */
+  paused?: boolean;
   /** 场上实体（月塔 493/422/507/517 与月总 398 扫描用；vanillaId/ai0/ai1 为 Enemy
    *  侧字段——可选以兼容 Entity 基类条目，消费侧以 !== 严格比对自然跳过缺省值） */
   entities: ReadonlyArray<{
@@ -1625,6 +1628,9 @@ export class SkyRenderer {
    *  速度随雨增强由 Weather.updateWind 承担（Main.cs:58221-58237：
    *  current 向 target×(1+5/9×maxRaining) 逼近——暴雨云速最高 +~56%） */
   private updateClouds(dtMs: number, viewW: number, camX = 0) {
+    // 暂停冻结（Main.cs:17140-17146 CanPauseGame→DoUpdate_WhilePaused→return——
+    // Cloud.UpdateClouds :17199 在门后,暂停时漂移/生成/消亡全停;画面仍从冻结态绘制）
+    if (this.frameCtx?.paused) return;
     const frames = dtMs / (1000 / 60);
     this.updateWind(frames);
     // 相机视差（Cloud.cs UpdateCloudParallax :313-330）：云.x −= 相机位移 × GetParallax
@@ -2215,7 +2221,7 @@ export class SkyRenderer {
 
   private drawVanillaClouds(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, isNight: boolean, dtMs: number, camX = 0, camY = 0) {
     this.updateClouds(dtMs, viewW, camX);
-    this.maintainClouds(viewW, viewH);
+    if (!this.frameCtx?.paused) this.maintainClouds(viewW, viewH);   // 暂停冻结（UpdateClouds 同门 :17199）
     const camTop = camY - viewH / 2;
     if (camTop >= this.fx.surfaceY + 16) return;
     this.updateCloudCelestial(camY - viewH / 2);
@@ -3872,7 +3878,7 @@ export class SkyRenderer {
       const cotsR = this.cots ? this.cots[0] : 255;
       const visGate = 255 * (1 - (this.weatherRef?.cloudAlpha ?? 0) * this.atmoValue(camY)) - cotsR - 25;
       const dayRate = this.frameCtx?.world?.dayRate?.() ?? 1;
-      this.updateStars(dayRate, isDay, dayTimeTicks);
+      if (!this.frameCtx?.paused) this.updateStars(dayRate, isDay, dayTimeTicks);   // Star.UpdateStars 同门(:17198)——暂停冻结
       if (starDim > 0 && visGate > 0) {
         // ★环外一次性状态(2026-08-24):save/getTransform/smoothing 各一次,
         //   逐星 setTransform(见 drawStar 注)——restore 收尾还原全部

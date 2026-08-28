@@ -35,6 +35,10 @@ export interface WorldPacket {
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（读档路径回传;旧包缺省 0） */
   altarCount?: number;
+  /** 历史索引帧修复已在 worker 完成（saveParse 在沉降前调用 repairIndexFramesInStore；
+   *  generate 新世界生成端写像素帧终态天然无需修复）。主线程 afterWorldLoad 以
+   *  World.indexFramesRepaired 门控跳过二次全图扫描（#perf2026-08-28 批） */
+  repairedIndexFrames?: boolean;
   /** 夜间小动物概率五件套（NPC.setFireFlyChance；旧包缺省=代表值，当晚重掷） */
   critterChances?: {
     fireFly: number; fireFlyFriendly: number; fireFlyMultiple: number;

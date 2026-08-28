@@ -34,6 +34,11 @@ export interface GenState {
 
   // Reset pass 掷的世界级选择
   crimson: boolean;           // 50% 猩红 / 50% 腐化
+  /** GenVars.crimsonLeft（cs:11235-11250 Reset 掷 Next(2)：0→false 右侧猩红 /
+   *  非0→true 左侧猩红）——普通世界无消费者（纯计数骰），**drunk 双邪恶的半侧分配键**
+   *  （CorruptionAndCrimson cs:14031/14370、祭坛 style cs:15883、TileCleanup style
+   *  半侧规则等消费）。曾被照掷照弃——IIIII14 批起落盘。 */
+  crimsonLeft: boolean;
   oreTiers: { copper: number; iron: number; silver: number; gold: number }; // 含替代 id
   dungeonSide: 1 | -1;        // 地牢在地图哪侧
   dungeonX: number;           // 地牢位置（Reset num4：仅作雪原中心）
@@ -245,6 +250,7 @@ export function newGenState(w: number, h: number): GenState {
     genWorldSurface: 0, genRockLayer: 0, genWorldSurfaceHigh: 0,
     tunnelX: new Array(50).fill(0), numTunnels: 0,
     crimson: false,
+    crimsonLeft: false,
     oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
     dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, generatingDungeonPositionX: 0, lAltarX: -1, lAltarY: -1, jungleX: 0,
     tLeft: 0, tRight: 0, tTop: 0, tBottom: 0, tRooms: 0,    // C# GenVars 静态 int 默认 0
