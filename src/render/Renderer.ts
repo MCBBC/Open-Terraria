@@ -1,5 +1,5 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
-import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, starvedLock } from '../render/GLStats';
+import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, onStarveTransition, starvedLock } from '../render/GLStats';
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { TILE, CHUNK } from '../core/constants';
 import { TintAtlas, type TintRect } from './TintAtlas';
@@ -2307,6 +2307,8 @@ export class Renderer {
   cbOnGpuPressure: (() => void) | null = null;
   /** GPU 冷却期满回调(重建 chunk 池;Game 接线) */
   cbOnGpuRecover: (() => void) | null = null;
+  /** 自动降渲染分辨率回调(Game 注入→Toast;#perf-gpulog 方案A) */
+  cbOnAutoResolution?: ((pct: number) => void) | null = null;
 
   /** 原版生命/魔力资源条（ClassicPlayerResourcesDisplaySet 移植）——按当前样式
    *  懒构造二选一(此前两个实例同时构造 = 15 张 UI 贴图急载,另一套样式永远不用) */
@@ -2477,10 +2479,69 @@ export class Renderer {
   /** 渲染时钟(60t/s 等效,供物品动画取帧;Vanilla Star.NightSetup 无关) */
   animTick = 0;
 
+  /** 渲染分辨率阶梯(#perf-gpulog 方案A):index 越低越糊;0=100% 原态 */
+  private static readonly RSCALE_RUNGS = [1, 0.75, 0.66, 0.5] as const;
+  private _autoRungIdx = 0;
+  private _scaleApplied = '';
+  /** 生效系数 = 手动档(renderScale>0)或自动档当前阶梯;饥饿沿触发降一级。
+   *  ★只作用于【世界层中间画布】;以下情形强制 1(原分辨率):
+   *  · CPU 渲染/世界层关闭(GL 乘光路径不存在,2D 回退链按全尺寸写死)
+   *  · 拍照模式(_capturePass,原版 DrawCapture 语义=最高质量)
+   *  · GL 世界光层当帧不可用(fallback 乘光循环按全尺寸读 worldCanvas) */
+  private effectiveRenderScale(): number {
+    const o = options.data.renderScale;
+    if (o > 0) return o;
+    if (this.isCpuRender() || !this.worldLayerEnabled || this._capturePass) return 1;
+    if (!this.worldLightLayer()) return 1;
+    return Renderer.RSCALE_RUNGS[Math.min(this._autoRungIdx, Renderer.RSCALE_RUNGS.length - 1)];
+  }
+  /** 本帧世界层缩放(render 头计算,begin/transform/合成三处共用) */
+  private _worldLowK = 1;
+  private _worldLowW = 0;
+  private _worldLowH = 0;
+  private _starveHooked = false;
+  /** 饥饿沿→自动降档挂钩(Game 构造期一次;方案A #perf-gpulog) */
+  bindRenderScaleAuto(): void {
+    if (this._starveHooked) return;
+    this._starveHooked = true;
+    onStarveTransition((active) => {
+      if (!active || !options.data.renderScaleAuto || options.data.renderScale > 0) return;
+      if (this._autoRungIdx < Renderer.RSCALE_RUNGS.length - 1) {
+        this._autoRungIdx++;
+        const pct = Math.round(Renderer.RSCALE_RUNGS[this._autoRungIdx] * 100);
+        this.applyRenderScale();
+        (this.cbOnAutoResolution ?? (() => {}))(pct);   // Game 侧转 Toast(带百分比文案)
+      }
+    });
+  }
+  /** 设置面板手动改档后的应用入口(Settings 经 __swGame 桥调用) */
+  applyUserRenderScale(): void {
+    const o = options.data.renderScale;
+    if (o > 0) {
+      const idx = Renderer.RSCALE_RUNGS.indexOf(o as 1 | 0.75 | 0.66 | 0.5);
+      if (idx >= 0) this._autoRungIdx = idx;   // 手动档与自动档共用游标起点
+    }
+    this.applyRenderScale();
+  }
+  applyRenderScale(): void {
+    const k = this.effectiveRenderScale();
+    const key = `${k}`;
+    if (this._scaleApplied === key && this.canvas.width === Math.round(window.innerWidth * k)) return;
+    this.resize();
+    // 后备尺寸变化 → chunk 页画布几何全变:复用恢复链整池重建(与 contextlost 同路)
+    this.cbOnGpuRecover?.();
+    this._scaleApplied = key;
+  }
   resize() {
     this._cssW = this.canvas.clientWidth || 0;
+    // ★主画布恒 CSS 全尺寸(#perf-gpulog 方案A 修订):降分辨率的对象是【世界层
+    // 中间画布】(beginWorldLayer 内 K 缩),不是主后备——HUD/飘字/背景/输入全程
+    // 原分辨率原语义,仅世界栅格与 GL 链低清,合成时拉伸回填。CSS 100% 保留=
+    // 后备与元素解耦的显式契约(曾依赖"K=1 固有尺寸恰等于视口"的隐式全屏)
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
+    this.canvas.style.width = '100%';
+    this.canvas.style.height = '100%';
   }
 
   attach(parent: HTMLElement) {
@@ -2732,7 +2793,11 @@ export class Renderer {
     //      sky 直绘 backbuffer 的分层语义。此前全屏乘光把夜空按月光地板
     //      (~21/255)整体压暗：月亮 241→~20、星星/夜空同步压黑（用户实报
     //      "夜里的月亮不亮"根因）====
-    const worldLayer = this.beginWorldLayer(viewW, viewH);
+    // #perf-gpulog 方案A:世界层(墙/方块/实体/前景水/地下分层)按 K 降分辨率
+    // 栅格化;背景/天体/HUD/飘字留在主画布全分辨率,合成时拉伸回填
+    const wK = this.effectiveRenderScale();
+    this._worldLowK = wK;
+    const worldLayer = this.beginWorldLayer(viewW, viewH, wK);
     if (worldLayer) ctx = worldLayer;
 
     ctx.save();
@@ -2745,8 +2810,11 @@ export class Renderer {
     ctx.imageSmoothingEnabled = false;
     const camRX = Math.round(cam.x * z) / z;
     const camRY = Math.round(cam.y * z) / z;
-    ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
-    ctx.scale(z, z);
+    // 低清档:基准变换整体 ×K(视野的世界矩形不变——culling 仍按 viewW/H 算,
+    // 只是落点像素少 K²);屏内坐标一律乘 K 后落画布
+    const lw = this._worldLowW, lh = this._worldLowH;
+    ctx.translate(Math.round(lw / 2), Math.round(lh / 2));
+    ctx.scale(z * wK, z * wK);
     ctx.translate(-camRX, -camRY);
 
     // 2. chunks 绘制序列（对照原版 Main.cs 帧序：背景水 → 墙 → 方块 → 瀑布 → 实体 → 前景水）
@@ -2778,9 +2846,11 @@ export class Renderer {
       //   (2026-08-20 搬入世界层吃光时坐标未换算的回归,用户实报"夜空光照改造
       //   后地底远景全没了";逆变换后仍在世界层画布内=光照乘法照常吃)
       mainCtx2.save();
+      // 低清档(#perf-gpulog):逆变换须与基准变换(z×wK、中心 lw/2)精确互逆,
+      // 否则地下分层背景错位(本注释块下方的 2026-08-20 回归同型)
       mainCtx2.translate(camRX, camRY);
-      mainCtx2.scale(1 / z, 1 / z);
-      mainCtx2.translate(-Math.round(viewW / 2), -Math.round(viewH / 2));
+      mainCtx2.scale(1 / (z * wK), 1 / (z * wK));
+      mainCtx2.translate(-Math.round(lw / 2), -Math.round(lh / 2));
       this.biomeBg.draw(mainCtx2, world, this.scene, cam, viewW, viewH, [1, 1, 1], 0, 'underground');
       mainCtx2.restore();
     }
@@ -2797,6 +2867,7 @@ export class Renderer {
     const drawChunkGrid = (layer: 'wall' | 'tile') => {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (wK < 1) ctx.scale(wK, wK);   // 低清档:屏空间数学保持全尺寸坐标,落点压缩
       ctx.imageSmoothingEnabled = false;
       // ★世界变换 = translate(round(viewW/2), round(viewH/2)) · scale(z) · translate(-camRX, -camRY)
       //   ——退出变换后必须补回中心偏移（曾漏加 = 整层 chunk 左上偏半屏，2026-08-18 用户实抓）
@@ -3138,6 +3209,7 @@ export class Renderer {
     //     仍在 worldLayer 内 → compositeLight 照常乘光）
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (wK < 1) ctx.scale(wK, wK);   // 低清档:同上
     this.drawVanillaDustPass(false, cam, player);
     ctx.restore();
 
@@ -12720,8 +12792,11 @@ export class Renderer {
 
   /** render() 世界段入口调用：切换 this.ctx → 世界层（返回 null = 逃生门关闭，
    *  调用方继续用主画布 ctx）。每帧清屏；尺寸跟随主画布。 */
-  private beginWorldLayer(viewW: number, viewH: number): CanvasRenderingContext2D | null {
+  private beginWorldLayer(viewW: number, viewH: number, wK = 1): CanvasRenderingContext2D | null {
     if (!this.worldLayerEnabled || typeof document === 'undefined') { this.worldLayerActive = false; return null; }
+    const lw = Math.max(64, Math.round(viewW * wK));
+    const lh = Math.max(64, Math.round(viewH * wK));
+    this._worldLowW = lw; this._worldLowH = lh;
     if (!this.worldCanvas || !this.worldCtxLayer || !this.lightMaskCanvas || !this.lightMaskCtxLayer) {
       this.worldCanvas = document.createElement('canvas');
       // ★willReadFrequently：CPU 乘光回退路径每帧 getImageData 全屏（GL 路径则
@@ -12730,13 +12805,13 @@ export class Renderer {
       this.lightMaskCanvas = document.createElement('canvas');
       this.lightMaskCtxLayer = this.lightMaskCanvas.getContext('2d')!;
     }
-    if (this.worldCanvas.width !== viewW || this.worldCanvas.height !== viewH) {
-      this.worldCanvas.width = viewW; this.worldCanvas.height = viewH;   // resize 自带清屏
-      this.lightMaskCanvas.width = viewW; this.lightMaskCanvas.height = viewH;
+    if (this.worldCanvas.width !== lw || this.worldCanvas.height !== lh) {
+      this.worldCanvas.width = lw; this.worldCanvas.height = lh;   // resize 自带清屏
+      this.lightMaskCanvas.width = lw; this.lightMaskCanvas.height = lh;
     } else {
       const w = this.worldCtxLayer;
       w.setTransform(1, 0, 0, 1, 0, 0);
-      w.clearRect(0, 0, viewW, viewH);
+      w.clearRect(0, 0, lw, lh);
     }
     this.worldLayerActive = true;
     this.ctx = this.worldCtxLayer;
@@ -12796,7 +12871,8 @@ export class Renderer {
     rx: number, ry: number, rw: number, rh: number,
   ) {
     if (this.fullbright) { // 开灯：不做 multiply，全部原色（世界层仍须叠回主画布）
-      if (this.worldLayerActive && this.worldCanvas) this.ctx.drawImage(this.worldCanvas, 0, 0);
+      // 低清档(#perf-gpulog):世界层 K 缩 → 拉伸回填全尺寸
+      if (this.worldLayerActive && this.worldCanvas) this.ctx.drawImage(this.worldCanvas, 0, 0, viewW, viewH);
       return;
     }
     const z = cam.zoom;
@@ -12869,7 +12945,9 @@ export class Renderer {
     if (this.worldLayerActive && this.worldCtxLayer && this.lightMaskCtxLayer) {
       const lw = tilesX * ts * z, lh = tilesY * ts * z;
       const gl = this.worldLightLayer();
-      if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [sx, sy, lw, lh])) {
+      // 低清档(#perf-gpulog):world 纹理已 K 缩,lightRect 同比缩(world-layer 像素系)
+      const k = this._worldLowK;
+      if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [sx * k, sy * k, lw * k, lh * k])) {
         // ★全屏水体扭曲（原版 FilterManager.EndCapture :127-176 语义）：滤镜作用于
         //   【带光照的完整合成场景】——水下整屏随噪声+波场晃动、水线果冻、旱地 0，
         //   全由 obj19 alpha 门控交付（GLWaterDistortion 头注）。GL 不可用/逃生门/
@@ -12879,7 +12957,7 @@ export class Renderer {
           ? this.waterWarp.applyFullScreen(gl.canvas, this._waveCss,
             this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null)
           : null;
-        this.ctx.drawImage(warped ?? gl.canvas, 0, 0);
+        this.ctx.drawImage(warped ?? gl.canvas, 0, 0, viewW, viewH);   // 低清→全尺寸拉伸回填
         return;
       }
       const mctx = this.lightMaskCtxLayer;

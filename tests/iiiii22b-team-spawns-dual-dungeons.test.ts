@@ -56,6 +56,8 @@ function col(st: TileStore, x: number, y0: number, y1: number, internalId: numbe
 }
 
 describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManager cs:91-113 移植）', () => {
+  // 共享夹具：分布规则断言全部基于同一份确定性点表（重算幂等性由 A1 另行验证）
+  const fx: { world?: World; st?: TileStore } = {};
   it('A1 点表确定性收敛——同种子双实例逐元素相等（跨客户端重放范式 R1）', () => {
     const a = mkWorld({ royale: true, seed: 424242 });
     const b = mkWorld({ royale: true, seed: 424242 });
@@ -64,10 +66,12 @@ describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManage
     expect(pa.length).toBe(PLAYER_TEAM_COUNT);           // PlayerTeamID.Count=6（PlayerTeamID.cs:17）
     expect(pb).toEqual(pa);
     expect(ensureExtraSpawnPoints(a.world)).toBe(pa);     // 幂等：重复 ensure 不重掷
+    // 复用同 seed 世界作为后续断言夹具（已缓存表零成本）
+    fx.world = a.world; fx.st = a.st;
   });
 
   it('A2 队 0 恒=世界出生点（cs:101）；队点互不挤进 250 双轴间隔盒（cs:281-290）', () => {
-    const { world } = mkWorld({ royale: true, seed: 90210 });
+    const world = fx.world!;
     const pts = ensureExtraSpawnPoints(world);
     expect(pts[0]).toEqual({ x: world.spawnX, y: world.spawnY });
     for (let i = 1; i < pts.length; i++) {
@@ -83,7 +87,7 @@ describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManage
   });
 
   it('A3 落位扫位通过 Spawn_IsAreaValidSpawn 精简核且不嵌格', () => {
-    const { world } = mkWorld({ royale: true, seed: 5150 });
+    const world = fx.world!;
     for (let team = 1; team < PLAYER_TEAM_COUNT; team++) {
       const fl = teamSpawnPlacement(world, team, false);
       expect(fl, `team ${team}`).not.toBeNull();
@@ -93,7 +97,7 @@ describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManage
   });
 
   it('A4 双人合成场景：队 0 走世界出生点；队伍玩家取得各自互异队点', () => {
-    const { world } = mkWorld({ royale: true, seed: 31337 });
+    const world = fx.world!;
     // 玩家甲未入队（team=0）⇒ 三分支走世界出生点（Place 与队点无关）
     expect(teamSpawnPlacement(world, 0, false)).toBeNull();
     // 玩家乙绿队（team=2）⇒ 取得队点，至少与甲不完全重合（甲恒在中央）
@@ -266,6 +270,10 @@ describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 /
       w.seedFlags = (ddFlag ? { dualDungeons: true } : {}) as typeof w.seedFlags;
       const bb = TILE_BY_KEY['v_41_blue_brick'];
       for (let y = 700; y <= 730; y++) st.setTileSilent(600, y, bb);   // 单列 31 格
+      // ★vanilla 收尾门（SceneMetrics.cs:722）：ZoneDungeon 覆写值还要 ∧ 玩家中心格
+      // 墙 ∈ Main.wallDungeon——单列砖没有地牢墙时重写为假是正确语义；此处给中心格
+      // 补一面地牢墙使覆盖生效。
+      st.wall[st.idx(600, 720)] = 7;
       return { w, px: 600 * 16, py: 720 * 16 };
     };
     const plain = buildTall(false);

@@ -233,7 +233,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 观战启动关全 UI（IngameUIWindows.CloseAll :43017）
       onCloseAllUI: () => ui.closeAll(),
       // NPC 对话系统(SetTalkNPC + GetChat)
-      onNpcDialog: (name, chat, buttons, portrait) => ui.showNpcDialog(name, chat, buttons, portrait),
+      onNpcDialog: (name, chat, buttons, portrait, vanillaId) => ui.showNpcDialog(name, chat, buttons, portrait, vanillaId),
       onNpcDialogClose: () => ui.closeNpcDialog(),
       onReforgeOpen: () => ui.showReforge(),
       onNpcShop: (title, items, copper, happinessMul, medals) => ui.showNpcShop(title, items, copper, happinessMul, medals),

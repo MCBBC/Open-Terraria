@@ -153,7 +153,8 @@ import { availableRecipes, consumeMaterials, craftSourcesFor, vanillaItemKey as 
 import { invIndexOfVanilla } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
-import { MONEY_TROUGH_USE, CHESTER_CONTAINER } from '../data/vanillaOpenBags';
+import { CHESTER_CONTAINER, MONEY_TROUGH_USE } from '../data/vanillaOpenBags';
+import { FlyingPiggyBank } from '../entities/FlyingPiggyBank';
 import { rollablePrefixes, rollPrefix, prefixStat, prefixValueMul } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
@@ -1158,7 +1159,7 @@ export interface GameCallbacks {
   /** 观战启动时关闭全 UI（原版 IngameUIWindows.CloseAll :43017——5644 使用成功支） */
   onCloseAllUI?: () => void;
   /** NPC 对话框(SetTalkNPC):name/chat/buttons → UI 渲染 */
-  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null) => void;
+  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null, vanillaId?: number) => void;
   onNpcDialogClose?: () => void;
   /** 哥布林重铸界面（Main.InReforgeMenu） */
   onReforgeOpen?: () => void;
@@ -3252,7 +3253,14 @@ export class Game implements GameHooks {
     // GPU 压力自适应(2026-08-14 trace⑦):contextlost → chunk 上限减半 + 立即释放超限;
     // 熔断态(2026-08-18 双开崩溃:抖动环 1.7 万次/3s)加一次 toast 提示
     this.renderer.installGpuPressureGuard();
+    // 自动降分辨率 → Toast 提示(#perf-gpulog 方案A;饥饿锁联动)
+    this.renderer.cbOnAutoResolution = (pct) => {
+      this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Perf.ResolutionDowngraded', `${pct}%`));
+    };
     maybeInstallGpuLoggerFromUrl();   // #perf-gpulog:?gpulog=1 时开启周期打印
+    // 饥饿沿→自动降渲染分辨率(#三开压测批 方案A):只降不升,窗口干净后停在当前档;
+    // 手动档(renderScale>0)不受影响。zoom 补偿在 Camera.renderScale,后备缩放在 Renderer.resize
+    this.renderer.bindRenderScaleAuto();
     // 主画布重建(熔断后上下文死亡的最后手段)→ 重绑输入与 resize。
     // ★构造期守卫:options.onChange 注册即派发(Options.ts:95-98 loaded 同步回调),
     // 持久化 renderMode:'cpu' 会在 input 构造(下方 :2270)之前就走进
@@ -8511,14 +8519,15 @@ export class Game implements GameHooks {
       return;
     }
     if (inp.rightDown) {
-      // ---- Chester 宠物箱（proj 960）右键开合（Main.cs:38411 TryInteractingWithMoneyTrough
-      // 的 proj.type==960 支）。置于抚摸分派之前：原版绘制扫描里 960 只进钱槽交互支
-      // （Main.cs:35119-35123 `type!=525&&!=960→return`），TryPetting 三支（:33734/
-      // :34245/:34819）均不含 960——右键 Chester=开关容器，永不触发抚摸 ----
+      // ---- 便携容器宠物（proj 525 飞猪 / 960 Chester）右键开合（Main.cs:38411
+      // TryInteractingWithMoneyTrough 的 proj.type∈{525,960} 支）。置于抚摸分派之前：
+      // 原版绘制扫描里 525/960 只进钱槽交互支（Main.cs:35119-35123
+      // `type!=525&&!=960→return`），TryPetting 三支（:33734/:34245/:34819）均不含
+      // 960——右键容器宠物=开关容器，永不触发抚摸 ----
       {
-        const ches = this.hoveredChester();
-        if (ches) {
-          this.interactChesterContainer(ches);
+        const hit = this.containerPetHit();
+        if (hit) {
+          this.interactContainerPet(hit);
           this.input.rightDown = false;
           return;   // tileInteractionHappened（Main.cs:38452-38453）——本点击不再落地块交互
         }
@@ -11366,16 +11375,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.input.mouseDown = false;
     } else if (heldDef && viIdFromKey(heldDef.key) === 3213
       && inp.mouseDown && this.player.useTime === 0) {
-      // ---- 钱槽 3213（Item.cs:28953-28962：useStyle 1 / useTime 28 / shoot 525
-      // 飞猪 / UseSound Item59，不消耗）。本仓无 525 悬停弹幕实体，按任务约定
-      // 「纯 UI 直开+音效」：使用即开 piggy 面板（= Main.cs:37321-37333 右键飞猪
-      // chest=-2 + PlayInteractiveProjectileOpenCloseSound(525)→Item59 同款语义）。
-      // 契约常量在 data/vanillaOpenBags.ts MONEY_TROUGH_USE（测试桩）；
-      // 原版"再右键飞猪=关闭"属弹幕交互链（本仓无实体，不适用），重开 = 幂等 ----
-      this.openChest?.({ x: MONEY_TROUGH_USE.openChestX, y: 0, items: this.player.banks[MONEY_TROUGH_USE.bankIndex] });
-      this.sfx.playWavFile(MONEY_TROUGH_USE.sound, 1, this.player.cx, this.player.cy);
-      this.useSwing(heldDef);                            // useStyle 1 举持
-      this.player.useTime = MONEY_TROUGH_USE.useTime;    // :28960 useTime=useAnimation=28
+      // ---- 钱槽 3213（Item.cs:28979-28990：useStyle 1 / useTime=useAnimation 28 /
+      // shoot 525 飞猪 / shootSpeed 4 / UseSound Item59，不消耗）。1:1 发射链
+      // （ItemCheck_Shoot :47463 通用落底 :49957——projPet[525] 未置位不走宠物支,
+      // Main.cs:8979 只有 960）：出生位 = 手持锚点 RotatedRelativePoint(MountedCenter)
+      // （本仓投射物族同款 cx+cos×14 / cy-4+sin×14，:11149 口径）、速度 =
+      // 归一(鼠标-锚点)×shootSpeed（:47687-47717）。弹体 AI/容器交互在
+      // entities/FlyingPiggyBank（aiStyle97 :33640-33744 + TryGetContainerIndex
+      // :80559-80566 → chest=-2 与 Chester 960 共用 piggyBankProjTracker）----
+      const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
+      this.player.facing = Math.cos(ang) > 0 ? 1 : -1;      // :47624-47633 ChangeDir(dot)
+      const speed = itemCombat(3213)?.shootSpeed ?? 4;
+      this.entities.add(new FlyingPiggyBank(this.player.cx + Math.cos(ang) * 14,
+        this.player.cy - 4 + Math.sin(ang) * 14,
+        Math.cos(ang) * speed, Math.sin(ang) * speed,
+        () => (this.player.dead ? null : this.player)), 'projectiles');
+      this.sfx.playWavFile(MONEY_TROUGH_USE.sound, 1, this.player.cx, this.player.cy);   // UseSound Item59（:28985）
+      this.useSwing(heldDef);                               // useStyle 1 举持
+      this.player.useTime = itemCombat(3213)?.useTime ?? 28;
       this.input.mouseDown = false;
     } else if (heldDef && viIdFromKey(heldDef.key) === 3384
       && inp.mouseDown && this.player.useTime === 0) {
@@ -19560,11 +19577,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   closeChestPanel: (() => void) | null = null;
   /** 死亡收背包（Main.cs:46435 dead ⇒ playerInventory=false；UI 注入） */
   closeInventory: (() => void) | null = null;
-  /** Chester 宠物箱追踪（piggyBankProjTracker 本仓等价，Player.cs:31245
+  /** 便携容器宠物追踪（piggyBankProjTracker 本仓等价，Player.cs:31245
    *  TrackedProjectileReference）：Main.cs:38469 Set / Player.cs:31324 Clear——
-   *  非空 = 当前 -2 面板由该 Chester 打开，updateChesterContainerRange 每 tick
-   *  复核存活+射程（HandleBeingInChestRange :31258-31280） */
-  private chesterTrackedPet: PetFollower | null = null;
+   *  非空 = 当前 -2 面板由该容器宠物（960 Chester / 525 飞猪存钱罐，两型共用
+   *  同一追踪器同 vanilla）打开，updateChesterContainerRange 每 tick 复核存活+射程
+   *  （HandleBeingInChestRange :31258-31280） */
+  private containerTrackedPet:
+    | { kind: 'chester'; pet: PetFollower }
+    | { kind: 'pig'; pet: FlyingPiggyBank }
+    | null = null;
 
   private findChest(tx: number, ty: number): ChestData | null {
     for (const c of this.world.chests) {
@@ -21651,13 +21672,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.achievements.notifyProgressionEvent(46);   // NotifyProgressionEvent(46) :40992
         this.sfx.play('menuOpen');
         this.cb.onNpcDialog?.(name, this.formatDialogTags(Lang.text('StardewTalk.PlayerGivesCola')),
-          this.npcDialogButtons(npc), portraitUrl(npc.vanillaId));
+          this.npcDialogButtons(npc), portraitUrl(npc.vanillaId), npc.vanillaId);
         return;
       }
     }
     // chatOverride：唤醒链（AI_000_TransformBoundNPC）传换型前 GetChat 台词
     this.cb.onNpcDialog?.(name, this.formatDialogTags(chatOverride ?? this.townNpcChat(npc)),
-      this.npcDialogButtons(npc), portraitUrl(npc.vanillaId));
+      this.npcDialogButtons(npc), portraitUrl(npc.vanillaId), npc.vanillaId);
   }
 
   /** 对话框按钮组（NPCInteractions.cs 各 NPCInteraction 注册序）：商店/治疗/收税/
@@ -21713,7 +21734,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
     this.cb.onNpcDialog?.(name, this.formatDialogTags(chat),
-      this.npcDialogButtons(npc), portraitUrl(npc.vanillaId));
+      this.npcDialogButtons(npc), portraitUrl(npc.vanillaId), npc.vanillaId);
   }
 
   /** HasSpecialEventText 类目键（NPC.cs 各分支的字符串字面量：type → "Xxx"）。
@@ -21819,15 +21840,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               : p.mount.type === 64 ? 6150 : 6151;
         }
       }
-      // Chester 宠物箱悬停图标（Main.cs:38435-38443 flag2 段：cursorItemIconEnabled +
-      // cursorItemIconID = proj.type==960?5098:3213——本仓悬停只经 Chester 分支,恒
-      // 5098）。帧内后于 TileInteractionsMouseOver 悬停扫描(同帕鲁坐骑支覆写其结果);
+      // 容器宠物悬停图标（Main.cs:38435-38443 flag2 段：cursorItemIconEnabled +
+      // cursorItemIconID = proj.type==960?5098:3213）。帧内后于
+      // TileInteractionsMouseOver 悬停扫描(同帕鲁坐骑支覆写其结果);
       // noThrow=4(:38437,压 T 键投掷)本仓无投掷键建模不接线
       {
-        const ches = this.hoveredChester();
-        if (ches) {
+        const hit = this.containerPetHit();
+        if (hit) {
           p.cursorItemIconEnabled = true;
-          p.cursorItemIconID = CHESTER_CONTAINER.cursorIconVid;   // 5098（:38440-38443）
+          p.cursorItemIconID = hit.kind === 'chester' ? CHESTER_CONTAINER.cursorIconVid : 3213;  // :38440-38443
         }
       }
     }
@@ -25672,75 +25693,138 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         1.1, 1.0, 0.85,
       );
     }
-    // Chester 宠物箱追踪保持（T2，见 updateChesterContainerRange）
+    // 飞猪存钱罐交互态回写（Main.cs:35128 num497——TryInteractingWithMoneyTrough
+    // :38407-38490：纯鼠标路径恒返回 0 不画选圈；智能光标路径射程内=1、光标命中
+    // 命中盒=2。本仓 smartCursor.wanted ≡ Main.SmartCursorIsUsed :2962）
+    {
+      const smartUsed = this.smartCursor.wanted;
+      const inRangeHit = smartUsed ? this.containerPetHit() : null;
+      for (const e of this.entities.projectiles) {
+        if (!(e instanceof FlyingPiggyBank) || e.dead) continue;
+        if (!smartUsed) { e.interactState = 0; continue; }
+        if (!this.petInRange(e)) { e.interactState = 0; continue; }
+        const hitPig = inRangeHit?.kind === 'pig' ? inRangeHit.pet : null;
+        e.interactState = hitPig === e ? 2 : 1;
+      }
+    }
+    // Chester/飞猪容器追踪保持（T2，见 updateChesterContainerRange）
     this.updateChesterContainerRange();
   }
 
-  // ---- Chester 宠物箱便携容器流（proj 960；Main.cs:38411 TryInteractingWithMoneyTrough
-  //      + Player.cs:31245 HandleBeingInChestRange 的 piggyBankProjTracker 子集）----
-  // 语义：Chester 无独立存储——TryGetContainerIndex（Projectile.cs:80556-80564）把
-  // 525/960 都映射到 chest=-2 = 玩家存钱罐 player.bank（本仓 banks[0]，已持久化）。
+  // ---- 便携容器宠物流（proj 525 飞猪存钱罐 / 960 Chester；Main.cs:38411
+  //      TryInteractingWithMoneyTrough + Player.cs:31245 HandleBeingInChestRange
+  //      的 piggyBankProjTracker 子集）----
+  // 语义：TryGetContainerIndex（Projectile.cs:80559-80566）把 525/960 都映射到
+  // chest=-2 = 玩家存钱罐 player.bank（本仓 banks[0]，已持久化）——单一追踪器
+  // piggyBankProjTracker（本仓 containerTrackedPet，两型共用，同 vanilla）。
 
-  /** 光标悬停 Chester 命中。合成门 = IsProjectileInteractableAndInInteractionRange
-   *  （Player.cs:23336-23352：宠物格 TileReachCheckSettings.Simple 射程内 → inTileRange）
-   *  + Hitbox.Contains(鼠标世界点)（Main.cs:38425；光标世界点距宠物中心 <32px，
-   *  同抚摸命中口径 :8371）。右键链与 tickCursorIcon 悬停图标共用 */
-  private hoveredChester(): PetFollower | null {
-    const f = this.petFollower;
-    if (!f || f.dead || f.projId !== CHESTER_CONTAINER.projId) return null;
+  /** 命中盒最近点射程门（IsProjectileInteractableAndInInteractionRange
+   *  Player.cs:23343-23350 + HandleBeingInChestRange :31266-31267/:31273-31274 同式）：
+   *  取宠物命中盒上距玩家中心最近点 → 格坐标 → Simple 射程盒。★用最近点而非中心——
+   *  朝上掷出的飞猪盒底边更近,原版借此保持可开（曾用中心点=比原版严,2026-08-28 用户报
+   *  "飞的过高超出右键打开范围"） */
+  private petInRange(pet: { x: number; y: number; w: number; h: number }): boolean {
+    const p = this.player;
+    // ClosestPointInRect(player.Center)（Player.cs:23346）：盒上距玩家中心最近点
+    const closestX = Math.max(pet.x, Math.min(p.cx, pet.x + pet.w));
+    const closestY = Math.max(pet.y, Math.min(p.cy, pet.y + pet.h));
+    return this.inTileRange(Math.floor(closestX / TILE), Math.floor(closestY / TILE));
+  }
+
+  /** 容器宠物命中体（960 Chester 宠物格 / 525 飞猪弹幕） */
+  private containerPetHit():
+    { kind: 'chester'; pet: PetFollower } | { kind: 'pig'; pet: FlyingPiggyBank } | null {
     const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
-    if (Math.hypot(f.cx - wx, f.cy - wy) >= 32) return null;
-    if (!this.inTileRange(Math.floor(f.cx / TILE), Math.floor(f.cy / TILE))) return null;
-    return f;
+    const chester = this.petFollower;
+    if (chester && !chester.dead && chester.projId === CHESTER_CONTAINER.projId
+      && wx >= chester.x && wx < chester.x + chester.w && wy >= chester.y && wy < chester.y + chester.h
+      && this.petInRange(chester)) {
+      return { kind: 'chester', pet: chester };
+    }
+    for (const e of this.entities.projectiles) {
+      if (!(e instanceof FlyingPiggyBank) || e.dead) continue;
+      if (wx >= e.x && wx < e.x + e.w && wy >= e.y && wy < e.y + e.h
+        && this.petInRange(e)) {
+        return { kind: 'pig', pet: e };
+      }
+    }
+    return null;
+  }
+
+  /** 光标悬停容器宠物命中（Chester 兼容入口）。合成门 =
+   *  IsProjectileInteractableAndInInteractionRange（Player.cs:23336-23352：宠物格
+   *  TileReachCheckSettings.Simple 射程内 → inTileRange）+ Hitbox.Contains(鼠标世界点)
+   *  （Main.cs:38425）。右键链与 tickCursorIcon 悬停图标共用 */
+  private hoveredChester(): PetFollower | null {
+    const hit = this.containerPetHit();
+    return hit?.kind === 'chester' ? hit.pet : null;
+  }
+
+  /** PlayInteractiveProjectileOpenCloseSound（Main.cs:38640-38654）：525 开/关同为
+   *  SoundID.Item59；960 = ChesterOpen/ChesterClose（SoundID.cs:1042/:1044 两变体，
+   *  本仓 chester_open_N/chester_close_N 随机变体 CreateTrackable("chester_open",2)） */
+  private playContainerOpenCloseSound(kind: 'chester' | 'pig', open: boolean): void {
+    if (kind === 'pig') this.sfx.playWavFile('Item_59', 1, this.player.cx, this.player.cy);
+    else this.playSfxWav(`${open ? 'chester_open' : 'chester_close'}_${Math.floor(Math.random() * 2)}`);
   }
 
   /** T1 右键开合容器（Main.cs:38449-38476 mouseRightRelease 段）：面板来源已是存钱罐
    *  （player.chest==-2 ↔ 本仓面板 x===-2 约定，含存钱罐 tile/物品打开的同一容器）
-   *  → 关（:38455-38459 chest=-1 + PlayInteractiveProjectileOpenCloseSound(960,false)，
-   *  Main.cs:38648-38658 case960=SoundID.ChesterClose，SoundID.cs:1044 两变体）；否则
-   *  开 banks[0] 活引用（:38463-38475 chest=-2 + piggyBankProjTracker.Set(proj) +
-   *  playerInventory=true + ChesterOpen，SoundID.cs:1042 两变体）。开箱音/关箱音 =
-   *  chester_open_N/chester_close_N 随机变体（CreateTrackable("chester_open", 2)） */
-  interactChesterContainer(pet: PetFollower): void {
+   *  → 关（:38455-38459 chest=-1 + PlayInteractiveProjectileOpenCloseSound(type,false)）；
+   *  否则开 banks[0] 活引用（:38460-38475 chest=-2 + piggyBankProjTracker.Set(proj) +
+   *  chestX/Y=宠物中心格 + SetTalkNPC(-1) + SetNPCShopIndex(0) + playerInventory=true
+   *  + PlayInteractiveProjectileOpenCloseSound(type,true)）。开箱副作用含关对话/商店
+   *  （closeNpcDialog 级联 npcShopClose） */
+  interactContainerPet(hit: { kind: 'chester'; pet: PetFollower } | { kind: 'pig'; pet: FlyingPiggyBank }): void {
     const cur = this.openChestRef?.() ?? null;
     if (cur && cur.x === CHESTER_CONTAINER.openChestX) {
-      this.chesterTrackedPet = null;                    // tracker Clear（Player.cs:31324）
-      pet.beingTracked = false;                         // 合盖帧段消费位同步复位
+      this.setContainerTracked(null);                   // tracker Clear（Player.cs:31324）
       this.closeChestPanel?.();                         // chest = -1（UI 面板收起）
-      this.playSfxWav(`chester_close_${Math.floor(Math.random() * 2)}`);
+      this.playContainerOpenCloseSound(hit.kind, false);
       return;
     }
     // items 直通 banks[0]（同储物族 openChest({x:-2-bi}) 约定 :16897）——面板写入即存档数据
+    if (this.dialogNpc) this.closeNpcDialog();          // SetTalkNPC(-1) + SetNPCShopIndex(0)（:38471-38472）
     this.openChest?.({
       x: CHESTER_CONTAINER.openChestX, y: 0,
       items: this.player.banks[CHESTER_CONTAINER.bankIndex],
     });
-    this.chesterTrackedPet = pet;                       // piggyBankProjTracker.Set(proj)（:38469）
-    pet.beingTracked = true;
-    this.playSfxWav(`chester_open_${Math.floor(Math.random() * 2)}`);
+    this.setContainerTracked(hit);                      // piggyBankProjTracker.Set(proj)（:38469）
+    this.playContainerOpenCloseSound(hit.kind, true);
+  }
+
+  /** 追踪器赋值/清理（piggyBankProjTracker.Set/Clear）：960 同步 beingTracked 开盖
+   *  帧段消费位（Chester_IsAnyPlayerTrackingThisProjectile :66055-66066 本仓回写位） */
+  private setContainerTracked(hit: { kind: 'chester'; pet: PetFollower } | { kind: 'pig'; pet: FlyingPiggyBank } | null): void {
+    if (this.containerTrackedPet?.kind === 'chester') this.containerTrackedPet.pet.beingTracked = false;
+    this.containerTrackedPet = hit;
+    if (hit?.kind === 'chester') hit.pet.beingTracked = true;
   }
 
   /** T2 跟随关门（Player.HandleBeingInChestRange Player.cs:31245-31327 追踪支的每 tick
-   *  子集）：仅当 -2 面板由 Chester 打开（tracker 在位 ≡ Main.cs:38469 Set）时校验——
-   *  宠物消失（Key.TryGetActive false :31261-31265）或走出交互射程（chestX/Y 每帧回写
-   *  + Simple 射程门 :31268-31278）→ 关面板 + ChesterClose 音（:31263/:31275）。世界箱/
-   *  tile 容器走原版 :31308-31320 tile 支，本仓对应路径不挂追踪、不受影响 */
+   *  子集）：仅当 -2 面板由容器宠物打开（tracker 在位 ≡ Main.cs:38469 Set）时校验——
+   *  宠物消失（Key.TryGetActive false :31261-31265，飞猪 3 分钟 timeLeft 自灭同此路）
+   *  或走出交互射程（chestX/Y 每帧回写 + Simple 射程门 :31268-31278）→ 关面板 +
+   *  PlayInteractiveProjectileOpenCloseSound(type,false)（:31263/:31275）。世界箱/tile
+   *  容器走原版 :31308-31320 tile 支，本仓对应路径不挂追踪、不受影响 */
   private updateChesterContainerRange(): void {
-    const pet = this.chesterTrackedPet;
-    if (!pet) return;
+    const hit = this.containerTrackedPet;
+    if (!hit) return;
+    const pet = hit.pet;
     const open = this.openChestRef?.() ?? null;
     if (!open || open.x !== CHESTER_CONTAINER.openChestX) {
-      pet.beingTracked = false;
-      this.chesterTrackedPet = null;   // 面板已关/已换容器 → 清追踪（Player.cs:31324 Clear）
+      this.setContainerTracked(null);  // 面板已关/已换容器 → 清追踪（Player.cs:31324 Clear）
       return;
     }
-    const ok = !pet.dead && pet.projId === CHESTER_CONTAINER.projId
-      && this.inTileRange(Math.floor(pet.cx / TILE), Math.floor(pet.cy / TILE));
-    pet.beingTracked = ok;             // T3 开盖帧消费（Projectile.cs:66055-66066）
+    const ok = !pet.dead
+      && this.petInRange(pet);
+    if (hit.kind === 'chester') hit.pet.beingTracked = ok;   // T3 开盖帧消费（:66055-66066）
+    // chestX/Y = 命中盒最近点格（:31266-31267/:31273-31274，petInRange 同式）——
+    // 本仓 -2 容器不消费 chestX/Y（面板来源恒 x===-2），不回写（登记）
     if (!ok) {
-      this.chesterTrackedPet = null;
+      this.setContainerTracked(null);
       this.closeChestPanel?.();        // chest = -1（:31264/:31277）
-      this.playSfxWav(`chester_close_${Math.floor(Math.random() * 2)}`);  // :31263/:31275
+      this.playContainerOpenCloseSound(hit.kind, false);  // :31263/:31275
     }
   }
 

@@ -216,16 +216,17 @@ function openChilletEgg(give: BagGive, rnd: BagRand): void {
   give(rnd.next(2) === 0 ? 5666 : 5665);                      // :9191-9195
 }
 
-/** 钱槽 3213 持用契约（Item.cs:28953-28962 + Main.cs:37321-37333）：
- *  原版使用 → 发射飞猪弹幕 525（useTime/useAnimation 28、UseSound Item59、不消耗），
- *  右键弹幕 → chest=-2 开 piggy + PlayInteractiveProjectileOpenCloseSound(525)=Item59
- *  （:37421-37423）。本仓无 525 悬停弹幕实体，Game 持用链按下表【直开】——
- *  表值即测试桩（tests/fishing-crates.test.ts 钉 chest=-2/bank0/28/Item_59/不消耗）。 */
+/** 钱槽 3213 持用契约（Item.cs:28979-28990 + ItemCheck_Shoot :47463 通用落底
+ *  :49957——projPet[525] 未置位不走宠物支）：使用 → 发射飞猪弹幕 525（aiStyle97
+ *  entities/FlyingPiggyBank 1:1），右键弹幕 → chest=-2 开 piggy +
+ *  PlayInteractiveProjectileOpenCloseSound(525)=Item59（Main.cs:38643-38645）。
+ *  表值保留为容器面测试桩（tests/fishing-crates.test.ts 钉 chest=-2/bank0/28/
+ *  Item_59/不消耗）——使用链已 1:1 实装,不再【直开】面板。 */
 export const MONEY_TROUGH_USE = {
   openChestX: -2,          // player.chest = -2（存钱罐容器约定，与储物族 tile 同）
   bankIndex: 0,            // player.banks[0] = piggy
-  useTime: 28,             // Item.cs:28960 useTime = useAnimation = 28
-  sound: 'Item_59',        // 使用音 = 开猪音（两处同 SoundID.Item59）
+  useTime: 28,             // Item.cs:28986 useTime = useAnimation = 28
+  sound: 'Item_59',        // UseSound（:28985）= 容器开/关音（:38643-38645 同值）
 } as const;
 
 /** Chester 宠物箱 960 便携容器契约（Main.cs:38411-38487 TryInteractingWithMoneyTrough

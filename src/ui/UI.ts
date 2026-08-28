@@ -947,8 +947,11 @@ export class UI {
     // 当前打开箱子引用（Game 提取机通电 Wiring.cs:2571 Chest.UsingChest 判定用）
     game.openChestRef = () => this.openChest;
     // Game 侧收起面板（Main.cs:38455-38458 chest=-1 + Player.cs:31264/:31277 追踪失联
-    // ——Chester 宠物箱再右键/走远/宠物消失路径）
-    game.closeChestPanel = () => this.closeChest();
+    // ——容器宠物（Chester 960/飞猪 525）再右键/走远/宠物消失路径）。★须全关
+    // closeInventory：本仓 uiBlocking=背包开着即拦世界输入，若只关箱子、
+    // uiBlocking 残留=自动关后立刻无法攻击/挖掘（2026-08-28 探针实测）；
+    // 原版 chest=-1 后 playerInventory 保持但世界输入不拦——全关即本仓等价
+    game.closeChestPanel = () => this.closeInventory();
     // M4 表情窗口入口（背包表情角按钮 onEmoteMenu——原版 DrawEmoteIcon Main.cs:41854
     // → IngameFancyUI.OpenUIState(UIEmotesMenu)）。打开期间暂停世界+阻断输入
     // （IngameFancyUI 语义,同 BestiaryPanel 惯例;关闭恢复先前态）
@@ -4566,7 +4569,7 @@ export class UI {
     setTimeout(() => this.invPanel.classList.remove('sw-loadout-flash'), 600);
   }
 
-  showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null): void {
+  showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null, vanillaId?: number): void {
     if (!this.npcDialog) {
       this.npcDialog = new NpcDialog(this.root, (id) => {
         this.npcShop?.close();
@@ -4574,7 +4577,7 @@ export class UI {
         this.game?.npcDialogButton(id);
       });
     }
-    this.npcDialog.open(name, chat, buttons, portrait);
+    this.npcDialog.open(name, chat, buttons, portrait, vanillaId);
   }
 
   closeNpcDialog(): void {

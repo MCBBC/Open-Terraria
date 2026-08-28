@@ -1,0 +1,410 @@
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+index-dur1GSS_.js:1934 [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建
+console.warn @ index-dur1GSS_.js:1934
+index-dur1GSS_.js:1934 [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建
+console.warn @ index-dur1GSS_.js:1934
+worldGen.worker-ShP_UCP9.js:1 [worker] 索引帧修复 786 格（索引→像素 ×18）
+index-dur1GSS_.js:1499 [prewarmGL] WebGL 管线预热完成 26ms
+index-dur1GSS_.js:1934 [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建
+console.warn @ index-dur1GSS_.js:1934
+index-dur1GSS_.js:1934 [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建
+console.warn @ index-dur1GSS_.js:1934
+index-dur1GSS_.js:1934 [Renderer] contextlost:GPU 压力自适应 chunk 上限 192→96
+console.warn @ index-dur1GSS_.js:1934
+index-dur1GSS_.js:1934 [Renderer] contextlost:GPU 压力自适应 chunk 上限 96→64
+console.warn @ index-dur1GSS_.js:1934
+index-dur1GSS_.js:1934 [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建
+console.warn @ index-dur1GSS_.js:1934
+index-dur1GSS_.js:1934 [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1470
+index-dur1GSS_.js:1934 [Renderer] GPU 压力熔断(第 1 次):10s 内 3 次画布丢失——暂停渲染冷却 8s + 已释放 GL 纹理池(96MB 档)
+console.warn @ index-dur1GSS_.js:1934
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:1500 [rload] vanilla/Tiles_378.png | vimages=221
+index-dur1GSS_.js:1500 [rload] vanilla/Tiles_27.png | vimages=222
+index-dur1GSS_.js:1500 [rload] vanilla/Tiles_26.png | vimages=223
+index-dur1GSS_.js:1500 [rload] vanilla/Tiles_213.png | vimages=224
+index-dur1GSS_.js:1500 [rload] vanilla/Tiles_20.png | vimages=225
+index-dur1GSS_.js:1500 [rload] vanilla/Tiles_330.png | vimages=226
+index-dur1GSS_.js:1500 [rload] vanilla/Tiles_331.png | vimages=227
+index-dur1GSS_.js:1500 [rload] vanilla/Tiles_332.png | vimages=228
+index-dur1GSS_.js:1500 [rload] vanilla/Extra_58.png | vimages=229
+index-dur1GSS_.js:978 [gpulog] frame=31 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:1500 [rbake] 载入终态保险:全量标脏一次(晚到表对齐)
+index-dur1GSS_.js:978 [gpulog] frame=142 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=251 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=365 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:1934 [Renderer] GPU 冷却结束,恢复渲染(chunk 上限 64;若稳定运行 60s 将回落冷却档)
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1499
+setTimeout
+r @ index-dur1GSS_.js:1499
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+index-dur1GSS_.js:1500 [rload] vanilla/Misc_noise.png | vimages=230
+index-dur1GSS_.js:1500 [rload] vanilla/Misc_Ripples.png | vimages=231
+index-dur1GSS_.js:1500 [rload] vanilla/Flame_0.png | vimages=232
+index-dur1GSS_.js:1500 [rload] vanilla/House_Banner_1.png | vimages=233
+index-dur1GSS_.js:1500 [rload] vanilla/Demolitionist_Default.png | vimages=234
+index-dur1GSS_.js:1500 [rload] vanilla/NPC_38.png | vimages=235
+index-dur1GSS_.js:1500 [rload] vanilla/NPC_1.png | vimages=236
+index-dur1GSS_.js:1500 [rload] vanilla/Merchant_Default.png | vimages=237
+index-dur1GSS_.js:1500 [rload] vanilla/NPC_17.png | vimages=238
+index-dur1GSS_.js:1500 [rload] vanilla/Guide_Default.png | vimages=239
+index-dur1GSS_.js:1500 [rload] vanilla/NPC_22.png | vimages=240
+index-dur1GSS_.js:1500 [rload] vanilla/HealthBar1.png | vimages=241
+index-dur1GSS_.js:1500 [rload] vanilla/HealthBar2.png | vimages=242
+index-dur1GSS_.js:1500 [rload] vanilla/OldMan_Default.png | vimages=243
+index-dur1GSS_.js:1500 [rload] vanilla/NPC_37.png | vimages=244
+index-dur1GSS_.js:1500 [rload] vanilla/Projectile_654.png | vimages=245
+index-dur1GSS_.js:1500 [rload] vanilla/Wings_3.png | vimages=246
+index-dur1GSS_.js:1500 [rload] vanilla/Acc_Shoes_1.png | vimages=247
+index-dur1GSS_.js:1500 [rload] vanilla/Dust.png | vimages=248
+index-dur1GSS_.js:1500 [rload] vanilla/Bubble.png | vimages=249
+index-dur1GSS_.js:1500 [rload] vanilla/Flame.png | vimages=250
+index-dur1GSS_.js:1934 [Renderer] contextlost:GPU 压力自适应 chunk 上限 64→64
+console.warn @ index-dur1GSS_.js:1934
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:1934 [Renderer] contextlost:GPU 压力自适应 chunk 上限 64→64
+console.warn @ index-dur1GSS_.js:1934
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:1500 [rload] vanilla/NPC_Head_4.png | vimages=251
+index-dur1GSS_.js:1500 [rload] vanilla/NPC_Head_2.png | vimages=252
+index-dur1GSS_.js:1500 [rload] vanilla/NPC_Head_1.png | vimages=253
+?gpulog=1:1 [.WebGL-0x114000f6e00] GL_INVALID_OPERATION: invalid mailbox name.
+?gpulog=1:1 [.WebGL-0x114000f6e00] GL_INVALID_OPERATION: texture is not a shared image
+?gpulog=1:1 [.WebGL-0x114000f6e00] GL_INVALID_VALUE: glCopySubTextureCHROMIUM: Source texture is not a valid texture object.
+?gpulog=1:1 [.WebGL-0x114000f6e00] GL_INVALID_OPERATION: texture is not a shared image
+?gpulog=1:1 [.WebGL-0x114000f6e00] GL_INVALID_OPERATION: invalid mailbox name.
+?gpulog=1:1 [.WebGL-0x114000f6e00] GL_INVALID_OPERATION: texture is not a shared image
+?gpulog=1:1 [.WebGL-0x114000f6e00] GL_INVALID_VALUE: glCopySubTextureCHROMIUM: Source texture is not a valid texture object.
+?gpulog=1:1 [.WebGL-0x114000f6e00] GL_INVALID_OPERATION: texture is not a shared image
+index-dur1GSS_.js:1934 [Renderer] GPU 压力熔断(第 2 次):10s 内 3 次画布丢失——暂停渲染冷却 16s + 已释放 GL 纹理池(48MB 档)
+console.warn @ index-dur1GSS_.js:1934
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:978 [gpulog] frame=463 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=9.41MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=12.40MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:1934 [mem] JS堆 513→574MB (+62) | 贴图+24→253 chunk=36 实体=52 粒子=441
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1500
+index-dur1GSS_.js:978 [gpulog] frame=564 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=9.41MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=12.40MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=564 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=9.41MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=12.40MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=564 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=9.41MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=12.40MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=651 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=9.41MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=12.40MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=729 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=9.41MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=12.40MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=729 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=9.41MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=12.40MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:1934 [VUI] ui-canvas 上下文死亡,已自愈重建(光标层)——频繁出现 = GPU 显存压力
+console.warn @ index-dur1GSS_.js:1934
+healCanvas @ index-dur1GSS_.js:831
+frame @ index-dur1GSS_.js:831
+a @ index-dur1GSS_.js:831
+requestAnimationFrame
+startLoop @ index-dur1GSS_.js:831
+(anonymous) @ index-dur1GSS_.js:831
+index-dur1GSS_.js:978 [gpulog] frame=794 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=9.41MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=12.40MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:1934 [mem] JS堆 541→550MB (+9) | 贴图+0→253 chunk=36 实体=65 粒子=555
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1500
+index-dur1GSS_.js:1934 [Renderer] 主画布上下文已死,已重建画布元素
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1499
+setTimeout
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:1934 [Renderer] GPU 冷却结束,恢复渲染(chunk 上限 64;若稳定运行 60s 将回落冷却档)
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1499
+setTimeout
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:1500 [rload] vanilla/NPC_376.png | vimages=254
+index-dur1GSS_.js:1934 [Renderer] contextlost:GPU 压力自适应 chunk 上限 64→64
+console.warn @ index-dur1GSS_.js:1934
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:1934 [Renderer] contextlost:GPU 压力自适应 chunk 上限 64→64
+console.warn @ index-dur1GSS_.js:1934
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:978 [gpulog] frame=894 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=3.14MB(2笔/帧)  新分配=3.14MB  draw=1/帧  延迟p50=0.0ms
+  waterDistortion 驻留=18.61MB  上传=6.33MB(3笔/帧)  新分配=0.00MB  draw=1/帧  延迟p50=0.0ms
+?gpulog=1:1 [.WebGL-0x1142027f000] GL_INVALID_OPERATION: invalid mailbox name.
+?gpulog=1:1 [.WebGL-0x1142027f000] GL_INVALID_OPERATION: texture is not a shared image
+?gpulog=1:1 [.WebGL-0x1142027f000] GL_INVALID_VALUE: glCopySubTextureCHROMIUM: Source texture is not a valid texture object.
+?gpulog=1:1 [.WebGL-0x1142027f000] GL_INVALID_OPERATION: texture is not a shared image
+index-dur1GSS_.js:1934 [Renderer] GPU 压力熔断(第 1 次):10s 内 3 次画布丢失——暂停渲染冷却 8s + 已释放 GL 纹理池(48MB 档)
+console.warn @ index-dur1GSS_.js:1934
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:978 [gpulog] frame=955 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:1934 [Renderer] 主画布上下文已死,已重建画布元素
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1499
+setTimeout
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:1934 [Renderer] GPU 冷却结束,恢复渲染(chunk 上限 64;若稳定运行 60s 将回落冷却档)
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1499
+setTimeout
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:1934 [Renderer] 光照画布已死,已重建
+console.warn @ index-dur1GSS_.js:1934
+recreateAuxCanvases @ index-dur1GSS_.js:1499
+(anonymous) @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:1934 [Renderer] contextlost:GPU 压力自适应 chunk 上限 64→64
+console.warn @ index-dur1GSS_.js:1934
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:978 [gpulog] frame=966 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=15.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=24.81MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:1934 [VUI] ui-canvas 上下文死亡,已自愈重建(光标层)——频繁出现 = GPU 显存压力
+console.warn @ index-dur1GSS_.js:1934
+healCanvas @ index-dur1GSS_.js:831
+frame @ index-dur1GSS_.js:831
+a @ index-dur1GSS_.js:831
+requestAnimationFrame
+startLoop @ index-dur1GSS_.js:831
+(anonymous) @ index-dur1GSS_.js:831
+index-dur1GSS_.js:1934 [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1470
+index-dur1GSS_.js:1934 [Renderer] contextlost:GPU 压力自适应 chunk 上限 64→64
+console.warn @ index-dur1GSS_.js:1934
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:1934 [Renderer] GPU 压力熔断(第 1 次):10s 内 3 次画布丢失——暂停渲染冷却 8s + 已释放 GL 纹理池(48MB 档)
+console.warn @ index-dur1GSS_.js:1934
+r @ index-dur1GSS_.js:1499
+index-dur1GSS_.js:978 [gpulog] frame=992 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=18.82MB  上传=3.14MB(2笔/帧)  新分配=0.00MB  draw=1/帧  延迟p50=0.0ms
+  waterDistortion 驻留=31.01MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=11.36MB  上传=14.90MB(7笔/帧)  新分配=14.90MB  draw=30/帧  延迟p50=0.0ms
+index-dur1GSS_.js:1934 [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1470
+index-dur1GSS_.js:1934 [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建
+console.warn @ index-dur1GSS_.js:1934
+(anonymous) @ index-dur1GSS_.js:1470
+index-dur1GSS_.js:978 [gpulog] frame=1100 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=18.82MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=31.01MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=11.36MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=1211 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=18.82MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=31.01MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=11.36MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+index-dur1GSS_.js:978 [gpulog] frame=1322 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=18.82MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=31.01MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=11.36MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+ [Renderer] 主画布上下文已死,已重建画布元素
+ [Renderer] GPU 冷却结束,恢复渲染(chunk 上限 64;若稳定运行 60s 将回落冷却档)
+?gpulog=1:1 [.WebGL-0x11400105e00] GL_INVALID_OPERATION: invalid mailbox name.
+?gpulog=1:1 [.WebGL-0x11400105e00] GL_INVALID_OPERATION: texture is not a shared image
+?gpulog=1:1 [.WebGL-0x11400105e00] GL_INVALID_VALUE: glCopySubTextureCHROMIUM: Source texture is not a valid texture object.
+?gpulog=1:1 [.WebGL-0x11400105e00] GL_INVALID_OPERATION: texture is not a shared image
+ [gpulog] frame=1437 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=21.95MB  上传=3.14MB(2笔/帧)  新分配=3.14MB  draw=1/帧  延迟p50=0.0ms
+  waterDistortion 驻留=31.01MB  上传=6.33MB(3笔/帧)  新分配=0.00MB  draw=1/帧  延迟p50=0.0ms
+  glfx           驻留=27.68MB  上传=16.32MB(18笔/帧)  新分配=16.32MB  draw=53/帧  延迟p50=0.0ms
+ [Renderer] contextlost:GPU 压力自适应 chunk 上限 64→64
+ [Renderer] contextlost:GPU 压力自适应 chunk 上限 64→64
+ [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建
+ [Renderer] GPU 压力熔断(第 1 次):10s 内 3 次画布丢失——暂停渲染冷却 8s + 已释放 GL 纹理池(48MB 档)
+ [gpulog] frame=1545 围栏滞后(p50/max)=0.0/0.0ms
+  menubg         驻留=4.14MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  worldLight     驻留=21.95MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  waterDistortion 驻留=31.01MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=27.68MB  上传=0.00MB(0笔/帧)  新分配=0.00MB  draw=0/帧  延迟p50=0.0ms
+ [GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建

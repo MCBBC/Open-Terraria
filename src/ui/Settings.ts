@@ -321,7 +321,21 @@ export class SettingsPanel {
             (window as unknown as { __swGame?: { setZoom(z: number): void } }).__swGame?.setZoom(v);
           },
         ),
-        this.slider(Lang.text('Mods.SandboxWorld.Settings.UiScale'), 0.75, 1.5, 0.05, () => d.uiScale, (v) => void options.set('uiScale', v).then(() => this.applyUi())),
+        // 渲染分辨率档(#perf-gpulog 方案A):主画布后备 = CSS×系数;0=自动(饥饿降级)。
+        // 改档即重建后备 + chunk 池(GPU 账本可复核:改后 新分配 应有一次尖峰然后归零)
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.RenderScale'),
+          () => String(d.renderScale),
+          () => d.renderScale === 0 ? Lang.text('Mods.SandboxWorld.Settings.RSAuto') : `${Math.round((d.renderScale as number) * 100)}%`,
+          () => {
+            const CYCLE = [0, 1, 0.75, 0.66, 0.5] as const;   // 自动→100→75→66→50→自动
+            const idx = CYCLE.indexOf(d.renderScale as typeof CYCLE[number]);
+            const next = CYCLE[(idx + 1) % CYCLE.length];
+            void options.set('renderScale', next).then(() =>
+              (window as unknown as { __swGame?: { renderer?: { applyUserRenderScale(): void } } }).__swGame?.renderer?.applyUserRenderScale());
+          },
+        ),
+        this.toggle(Lang.text('Mods.SandboxWorld.Settings.RenderScaleAuto'), () => d.renderScaleAuto, (v) => void options.set('renderScaleAuto', v)),
         // 资源条样式（原版 PlayerResourcesDisplaySet 两主样式：'New'=FancyClassic
         // 金框分格（1.4.4+ 默认）/ 'Default'=Classic 朴素心星）。样式名 = 原版键
         // UI.HealthManaStyle_*（Main.cs:49379 同源;旧硬编码中文 12 语言不可译）
@@ -362,7 +376,7 @@ export class SettingsPanel {
         this.modeRow(
           Lang.text('UI.PortraitsDetailed').replace(/[:：].*$/, ''),
           () => d.dialoguePortraitMode,
-          () => Lang.text(`UI.Portraits_${d.dialoguePortraitMode === 'detailed' ? 'Detailed'
+          () => Lang.text(`UI.Portraits${d.dialoguePortraitMode === 'detailed' ? 'Detailed'
             : d.dialoguePortraitMode === 'closeUp' ? 'CloseUp'
               : d.dialoguePortraitMode === 'fullBodyRetro' ? 'FullBodyRetro' : 'Disabled'}`),
           () => void options.set('dialoguePortraitMode',

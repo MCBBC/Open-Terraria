@@ -159,7 +159,7 @@ export class NpcDialog {
   }
 
   /** 打开对话框:name=NPC 名,chat=台词,buttons=选项(原版 Lang.inter 标签) */
-  open(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null) {
+  open(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null, vanillaId?: number) {
     this.close();
     const panel = document.createElement('div');
     panel.className = 'sw-npc-dialog';
@@ -188,13 +188,32 @@ export class NpcDialog {
     });
     this.parent.appendChild(panel);
     this.panel = panel;
-    if (portraitOn) this.drawPortrait(panel.querySelector('canvas.sw-npc-portrait') as HTMLCanvasElement | null, portrait!);
+    if (portraitOn) this.drawPortrait(panel.querySelector('canvas.sw-npc-portrait') as HTMLCanvasElement | null, portrait!, options.data.dialoguePortraitMode, vanillaId);
     this.escHandler = (e: KeyboardEvent) => { if (e.code === 'Escape') this.onButton('close'); };
     window.addEventListener('keydown', this.escHandler);
   }
 
   /** 头像裁剪填充：alpha 包围盒 → cover 式铺满 76×92 框（canvas 2× 抗糊，pixelated） */
-  private drawPortrait(canvas: HTMLCanvasElement | null, src: string): void {
+  private drawPortrait(canvas: HTMLCanvasElement | null, src: string,
+    mode: string, vanillaId?: number): void {
+    // FullBodyRetro：NPC_XX.png 游戏贴图 2× 缩放、底部对齐、不裁剪（完整身体露出）
+    if (mode === 'fullBodyRetro' && vanillaId) {
+      if (!canvas) return;
+      const game = new Image();
+      game.onload = () => {
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.imageSmoothingEnabled = false;
+        // 帧 0（站定）取上部 frame 区域（帧高 = H / frames，此处取头部+身体全展）
+        const fh = game.naturalHeight / 5;  // 最常见帧数，不同 NPC 可能不同但帧 0 总在顶部
+        ctx.drawImage(game, 0, 0, game.naturalWidth, Math.min(fh * 2, game.naturalHeight),
+          (canvas.width - game.naturalWidth * 2) / 2, canvas.height - fh * 2 * 1,
+          game.naturalWidth * 2, Math.min(fh * 2, game.naturalHeight) * 2);
+      };
+      game.src = `sprites/vanilla/NPC_${vanillaId}.png`;
+      return;
+    }
+    // Detailed / CloseUp：Portrait 头像贴图 cover 填充（CloseUp 略左偏）
     if (!canvas) return;
     const img = new Image();
     img.onload = () => {
@@ -225,8 +244,8 @@ export class NpcDialog {
       // cover：等比放大铺满，居中裁溢出
       const scale = Math.max(canvas.width / bw, canvas.height / bh);
       const dw = bw * scale, dh = bh * scale;
-      ctx.drawImage(img, minX, minY, bw, bh,
-        (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
+      const xOff = mode === 'closeUp' ? (canvas.width - dw) * 0.15 : (canvas.width - dw) / 2;
+      ctx.drawImage(img, minX, minY, bw, bh, xOff, (canvas.height - dh) / 2, dw, dh);
     };
     img.src = src;
   }

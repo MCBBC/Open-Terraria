@@ -184,11 +184,20 @@ export function noteContextLost(tag: string): void {
   if (lossTimes.length > 64) lossTimes.shift();
 }
 let lastStarveLogAt = -Infinity;
+type StarveCb = (active: boolean) => void;
+const starveCbs: StarveCb[] = [];
+let lastActive = false;
+/** 订阅饥饿沿(进入 true / 解除 false)——Renderer 挂 renderScale 自动降档用 */
+export function onStarveTransition(cb: StarveCb): void { starveCbs.push(cb); }
 /** ≥3 次/90s = 饥饿;进入与解除沿各告警一条 */
 export function starvedLock(): boolean {
   const now = performance.now();
   while (lossTimes.length && now - lossTimes[0] > 90_000) lossTimes.shift();
   const active = lossTimes.length >= 3;
+  if (active !== lastActive) {
+    lastActive = active;
+    for (const cb of starveCbs) { try { cb(active); } catch { /* 观察者异常静默 */ } }
+  }
   if (active && now - lastStarveLogAt > 30_000) {
     lastStarveLogAt = now;
     console.warn(`[gpulog] GPU 饥饿锁生效(90s 内丢失 ${lossTimes.length} 次)——GL 层重建暂停,走 2D 回退`);

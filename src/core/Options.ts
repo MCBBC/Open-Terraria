@@ -71,6 +71,12 @@ export interface OptionsData {
    *  NPC 恒开；0 = WaterDistortion 滤镜整体关闭 SceneState.cs:129）；
    *  config.json 键 "WaveQuality"（Main.cs:4215/4465），读档钳 [0,3]（:4466-4473） */
   waveQuality: number;
+  /** 渲染分辨率档(#perf-gpulog 方案A):主画布后备=CSS×此系数;1=原态。
+   *  0=自动(饥饿时沿 [1,0.75,0.66,0.5] 阶梯降级,不回升;世界构图经 camera.renderScale
+   *  补偿保持不变)。**运行期改值走 Renderer.applyRenderScale**(重建后备+chunk 池) */
+  renderScale: number;
+  /** 饥饿时是否允许自动降档(GPU starvation lock 联动) */
+  renderScaleAuto: boolean;
   /** 渲染模式:gpu=硬件加速(默认);cpu=软渲染(willReadFrequently,零 GPU 预算,
    *  多开/弱 GPU 稳定);auto=GPU 优先,连续崩溃自动切 CPU,稳定 2 分钟回 GPU */
   renderMode: 'gpu' | 'cpu' | 'auto';
@@ -156,6 +162,8 @@ export class OptionsStore {
     pvpEnabled: false,
     frameCap: 60,
     frameSkipMode: 'subtle',
+    renderScale: 1,
+    renderScaleAuto: true,
     renderMode: 'auto',
     waveQuality: 3,   // Main.cs:405 WaveQuality = 3（默认高）
     pvpTeam: 0,
@@ -256,6 +264,9 @@ export class OptionsStore {
       if (!PORTRAITS.includes(this.data.dialoguePortraitMode as typeof PORTRAITS[number])) {
         this.data.dialoguePortraitMode = 'detailed';
       }
+      if (typeof this.data.renderScale !== 'number'
+        || ![0, 1, 0.75, 0.66, 0.5].includes(this.data.renderScale)) this.data.renderScale = 1;
+      if (typeof this.data.renderScaleAuto !== 'boolean') this.data.renderScaleAuto = true;
       if (this.data.invasionProgressMode !== 0 && this.data.invasionProgressMode !== 1) {
         this.data.invasionProgressMode = 2;
       }

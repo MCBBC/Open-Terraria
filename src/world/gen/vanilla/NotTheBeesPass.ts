@@ -352,12 +352,44 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
 }
 
 // ============================================================
-// ② OverGrownDungeon（cs:24198-24258）——丛林化地牢
-// ============================================================
+// ② OverGrownDungeon（1457 cs:24237-24299）——丛林化地牢
+//   ★IIII24 批定罪修复（ntb 链 #105 四家族 T62>0×3085/T60>59×2683/T60>43×1659/
+//   T43>59×2587 全聚拢于 dungeon bbox x[3324,3960]y[223,936]，单根因本函数三处
+//   偏离原版——快照对拍实证：d105 家族格链顶上邻 vanilla 直方图 100% type=60，
+//   js 全为空/inact，js57≡dump104 ⇒ 全部为本 pass 新增差）：
+//   ① 写入类型：vanilla cs:24269 `Main.tile[j,k].type = 60`（JungleGrass！id 表
+//      TileID.cs:555/557 Mud=59、JungleGrass=60）——旧版误写 MUD(59)，导致
+//      T60>59×2683（V∩J 覆盖重叠格双方都转但类型相异）；placeJunglePlant 的
+//      PlaceTile(61) 地基门 below∈{60,226} 因基座 mud 恒拒 → T61>0×680；
+//      GrowTree 在 jgrass 基座走 num3+=5 净空分支（TreePass 已支持，FIT 含 60）。
+//   ② 跳过谓词（cs:24262-24268）：flag=!TL||!TC||!TR，skip ⟺ (!flag ∧ L ∧ R ∧ BL
+//      ∧ BC ∧ TR) ∨ ((flag ∨ ¬SolidTile3(j,k-1)) ∧ dualDungeons.Enabled)。
+//      旧版按「8 邻全活性」翻译——**右下角 [j+1,k+1] 原版根本不查**，而 TR 被
+//      flag 与主连与式各查一次；凡 BR 空缺而其余七邻完整时 vanilla 会转化而旧版
+//      跳过 → T60>43（V-only 格），加上掷流错位产生反向 T43>59。
+//      dualDungeons 映射 seedFlags.dualDungeons（纯 NTB 恒 false → 第二支不可达，
+//      SolidTile3 照原文实现备用）。SolidTile3(cs:71005)=nactive&&tileSolid&&!solidTop。
+//   ③ 藤链放置（cs:24276-24294）：PlaceTile(j,k+1..k+6, 62) —— PlaceTile 无 52/62
+//      具名 case，一路穿过 mega else-if 到 TileObject 大 switch 三层 default 最终落
+//      `default: tile.active=true; tile.type=num`（genera 臂，零掷；PlaceTile 内
+//      num==62 不命中任何拒绝门：!tileSolid[62]=true 进 proceed 支，无 moss/alch/
+//      liquid-plant 门）。成功后公共尾奏 SquareTileFrame(i,j)+result=true。旧版
+//      误判「PlaceTile 链无 62 分支→恒败 no-op」→ T62>0×3085 整族悬空。
+//      ★写侧对拍锚：T62>0 全部 3085 格在 d104/dump104 上同为 inactive ghost 砖
+//      （.43/w98），d105 变 A62/w98——排除了「上游藤被杀」假说（S57↔dump104 八通道
+//      逐格零差已证基态无损）。
 function overGrownDungeon(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w, h = st.h;
+  const dualDun = !!gs.seedFlags.dualDungeons;
+  /** SolidTile3（cs:70991-71013）：nactive && Main.tileSolid && !Main.tileSolidTop */
+  const solidTile3Ogd = (x: number, y: number): boolean => {
+    if (!st.inBounds(x, y)) return false;
+    const i3 = st.idx(x, y);
+    if (!st.flags[i3] || ((st.wire[i3] >>> 5) & 1) !== 0) return false;
+    return vanGenSolidType(st.type[i3]!) && !SOLID_TOP.has(sheetOf(st.type[i3]!));
+  };
   for (let i = 0; i < w; i++) {
-    // cs:24201-24206：三掷先于 wallDungeon 门（失败列同样耗掷）；右侧=二次重掷
+    // cs:24244-24248：三掷先于 wallDungeon 门（失败列同样耗掷）；右侧=二次重掷
     let n = rng.int(50, Math.floor(w / 2) - 1);              // Next(50, maxTilesX/2)
     if (gs.dungeonSide >= 1) n = rng.int(Math.floor(w / 2), w - 51);
     const n2 = rng.int(50, h - 51);
@@ -366,36 +398,61 @@ function overGrownDungeon(st: TileStore, rng: RNG, gs: GenState): void {
     for (let j = n - n3; j <= n + n3; j++) {
       for (let k = n2 - n3; k <= n2 + n3; k++) {
         if (!activeAt(st, j, k) || !TILE_DUNGEON.has(sheetAt(st, j, k))) continue;
-        // 8 邻全活性 → 跳过（cs:24209-24212 的连与式）
-        if (activeAt(st, j - 1, k - 1) && activeAt(st, j, k - 1) && activeAt(st, j + 1, k - 1)
-          && activeAt(st, j - 1, k) && activeAt(st, j + 1, k)
-          && activeAt(st, j - 1, k + 1) && activeAt(st, j, k + 1) && activeAt(st, j + 1, k - 1)) {
+        // cs:24262-24268：flag=顶行三格完整性（TL/TC/TR），skip=(!flag∧L∧R∧BL∧BC∧TR)
+        // （BR[j+1,k+1] 不参与！）∨ ((flag∨¬SolidTile3(j,k-1))∧dualDun)
+        const flagTop = !activeAt(st, j - 1, k - 1) || !activeAt(st, j, k - 1)
+          || !activeAt(st, j + 1, k - 1);
+        if ((!flagTop && activeAt(st, j - 1, k) && activeAt(st, j + 1, k)
+          && activeAt(st, j - 1, k + 1) && activeAt(st, j, k + 1) && activeAt(st, j + 1, k - 1))
+          || ((flagTop || !solidTile3Ogd(j, k - 1)) && dualDun)) {
           continue;
         }
         const ki = st.idx(j, k);
-        st.type[ki] = MUD;
+        st.type[ki] = JUNGLE_GRASS;                                // cs:24269 type=60
         st.paint[ki] = 0;                                          // color(0)
         if (!activeAt(st, j, k - 1) && !growTree(st, rng, gs, j, k)) {
-          placeJunglePlantImpl(st, rng, gs, j, k - 1);             // PlaceTile(61)
+          placeJunglePlantImpl(st, rng, gs, j, k - 1);             // PlaceTile(61,mute:true)
         }
+        // 藤链（cs:24275-24293）：PlaceTile(62) 经 genera default 臂实装成功，
+        // Next(3)/Next(4)/Next(3)/Next(2) 条件掷时序 1:1
         if (activeAt(st, j, k + 1) || rng.int(0, 2) === 0) continue;   // Next(3)
-        placeVineNoop(st, j, k + 1);                             // PlaceTile(62)（原版恒败 no-op）
+        placeVine62(st, rng, j, k + 1);
         if (activeAt(st, j, k + 2)) continue;
-        placeVineNoop(st, j, k + 2);
+        placeVine62(st, rng, j, k + 2);
         if (!activeAt(st, j, k + 3)) {
-          placeVineNoop(st, j, k + 3);
-          if (!activeAt(st, j, k + 4) && rng.int(0, 3) !== 0) placeVineNoop(st, j, k + 4);
-          if (!activeAt(st, j, k + 5) && rng.int(0, 2) !== 0) placeVineNoop(st, j, k + 5);
-          if (!activeAt(st, j, k + 6) && rng.int(0, 1) !== 0) placeVineNoop(st, j, k + 6);
+          placeVine62(st, rng, j, k + 3);
+          if (!activeAt(st, j, k + 4) && rng.int(0, 3) !== 0) placeVine62(st, rng, j, k + 4);
+          if (!activeAt(st, j, k + 5) && rng.int(0, 2) !== 0) placeVine62(st, rng, j, k + 5);
+          if (!activeAt(st, j, k + 6) && rng.int(0, 1) !== 0) placeVine62(st, rng, j, k + 6);
         }
       }
     }
   }
 }
 
-/** PlaceTile(62)（cs:60068 通用尾）：原版 PlaceTile 链无 62 分支 → 恒不放置
- *  （藤只能由 Vines pass 生长）。保留调用位仅为条件掷骰时序占位。 */
-function placeVineNoop(st: TileStore, _x: number, _y: number): void { void st; }
+/** PlaceTile(x,y,62) 生成期镜像（PlaceTile mega-default 臂，零 genRand 消费）：
+ *  头部 proceed 门由 !tileSolid[62] 直接放行； rejection 门（23/199/2/109/60/
+ *  661/662/70/633/moss/81/drip/watercut-plants）无一命中；!active 时
+ *  tile.Clear(Tile|Paint|Slope)（残型/漆/坡清掉——8 通道可见面仅 type）；随后
+ *  generic default `tile.active(true); tile.type=62;` 成功 → 公共尾奏
+ *  SquareTileFrame(i,j)（mute=false 分支的 SendTileSquare/sound 在生成期为 no-op，
+ *  TruncatesWalls[62]∉{54,328,459,748} 无 SquareWallFrame）。静默生效不动框架位。 */
+function placeVine62(st: TileStore, rng: RNG, x: number, y: number): void {
+  void rng;
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  if (!(st.flags[i] & 1)) {                    // !active → Clear(Tile|Paint|Slope)
+    st.slope[i] = 0;
+    st.half[i] = 0;                            // Tile.Clear(Slope) 含 halfBrick 清位
+    st.paint[i] = 0;
+  }
+  st.flags[i] |= 1;
+  st.type[i] = JUNGLE_VINE;
+  genSquareTileFrame(st, rng, x, y);           // 公共尾奏（engine TileFrame×9）
+}
+
+/** （IIII24 撤销）PlaceTile(62)「恒败 no-op」旧注——实证为 mega-default genera 臂
+ *  可放置（见 overGrownDungeon 头注③）；实装 placeVine62。 */
 
 /** placeJunglePlant 1:1 副本（SurfaceDecorPasses 私有实现同源，防 import 环；
  *  cs:59603-59652） */
