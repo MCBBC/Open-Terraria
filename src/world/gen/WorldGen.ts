@@ -211,10 +211,16 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // SpawnPoint 19605 < 本 pass < DyePlants 20126）：地表泥土墙洞 → 草墙 63/花墙 65——
     // Vines pass 花藤 382 的上游（藤头墙 ∈ {63,65,66,68} 才出花藤）
     { name: '草墙', run: vanillaGrassWall },
+    // ★IIIIIII6：起始镇民（原版 SpawnStarterNPCs cs:19848-20068，注册序 GrassWalls(19734) <
+    //  本 pass < SunflowersPart2(20043)）：十周年世界播 5 名初始镇民（Andrew/Whitney/
+    //  Yorai/Amanda/白兔掷名）+ GenuineParty 开局派对基态（Reset 域 cs:11156-11163 在 Game
+    //  消费端落地）。非十周年零副作用早退；决定链与掷流宽度考证见 StarterNPCsPass.ts 头。
+    //  此前整 pass 缺失、备案跳过（2026-08-13 口径）
+    { name: '起始镇民', run: starterNpcsSlot },
     // 向日葵（原版 SunflowersPart2 cs:20043-20084）：w*0.002 次带状扫描，草 2 上方
     // 空气处放 2×4 向日葵——普通种子向日葵唯一生成来源（SpreadingGrass 名义上的
     // Sunflowers 段实为 remix 专属 18460-18559）。注册序：GrassWalls(19734) →
-    // SpawnStarterNPCs(19830，十周年专属→普通种子 no-op，备案跳过) → 本 pass →
+    // SpawnStarterNPCs(19830，★IIIIIII6 已实现=「起始镇民」槽，见上) → 本 pass →
     // Trees(20085)。2026-08-13 前整 pass 缺失
     { name: '向日葵', run: sunflowersSlot },
     // 栽树（原版 Planting Trees cs:20085，注册序 GrassWall(19734) < 本 pass <
@@ -402,6 +408,7 @@ import { runFinalCleanupPass, genSquareTileFrame } from './vanilla/FinalCleanupP
 import { runMultitileFragmentSweepPass } from './vanilla/MultitileFragmentSweep';
 import { runMossAndMossCavesPass } from './vanilla/MossPass';
 import { runGrassWallPass } from './vanilla/GrassWallPass';
+import { starterNpcsPass } from './vanilla/StarterNPCsPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
 import { runWavyCavesPass } from './vanilla/WavyCavesPass';
 import { runTreePass, randomizeTreeStyle, randomizeCaveBackgrounds, growAshTree } from './vanilla/TreePass';
@@ -1306,6 +1313,14 @@ function vanillaGrassWall({ store, rng }: GenCtx) {
   runGrassWallPass(store, rng, gs);
 }
 
+// ★IIIIIII6：起始镇民（原版 SpawnStarterNPCs cs:19848-20068）。掷流 = 每命名镇民
+// 2×Next(名字类目宽)（GiveTownUniqueDataToNPCsThatNeedIt），白兔另有 variant/B 两掷；
+// RunPass 每 pass 头重播种子（WorldGenerator.cs:497）故不外溢下游 pass——starterNpcsPass
+// 内部注有逐行锚点
+function starterNpcsSlot(ctx: GenCtx) {
+  starterNpcsPass({ store: ctx.store, rng: ctx.rng, world: ctx.world });
+}
+
 // 海滩装饰：贝壳堆 + 海藻（原版 ShellPiles pass + GrowCheckSeaweed）
 function vanillaBeachDecor({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
@@ -1806,10 +1821,20 @@ export function spawnPointPass({ store, rng, world }: GenCtx) {
   //   期间泡泡块(379)视为非实心——非 skyblock 分支。尾 cs:19731 还原 true（见函数尾）。
   //   本仓生成期从不放置 379，翻转仅存档时间线。
   flipGenSolid([379], false);
+  // ★IIIIIII6：十周年沙滩出生（cs:19689-19695 + SpecialSeedFeatures.cs:95-105）——
+  //   SpawnOnBeach = tenthAnniversary && !remix && !dontStarve；取样中心 num3 =
+  //   genRand.Next(2)!=0 ? maxTilesX−(beachBordersWidth+15) : +(同值)
+  //   （GenVars.beachBordersWidth=275 恒常量，cs:11218）。普通世界中心恒 maxTilesX/2，
+  //   不掷该 Next(2)（★分支首掷，后续循环掷序原序不变）。
+  let baseCenter = Math.floor(store.w / 2);
+  if (!!world.seedFlags?.tenthAnniversary && !world.seedFlags?.remix && !world.seedFlags?.theConstant) {
+    const num10 = 275 + 15;
+    baseCenter = rng.nextInt(2) !== 0 ? store.w - num10 : num10;   // cs:19694
+  }
   let range = 5;
-  let sx = Math.floor(store.w / 2), sy = 0;
+  let sx = baseCenter, sy = 0;
   for (;;) {
-    const x = Math.floor(store.w / 2) + rng.int(-range, range); // Next(-num2, num2+1)
+    const x = baseCenter + rng.int(-range, range); // Next(-num2, num2+1)，中心 cs:19674=num3+
     for (let y = 0; y < store.h; y++) {
       const i = store.idx(x, y);
       // 首个活性格(原版 cs:19683 仅 `active() && type != 379`——无 solid 判据。
@@ -1845,8 +1870,9 @@ export function spawnPointPass({ store, rng, world }: GenCtx) {
   while (gs0 && sy > gs0.worldSurface) {
     // cs:19712 `Next(num3 - num12, num3 + num12)` —— 上界独占（曾 rng.int 闭区间
     // 多 1 个采样位）；谓词与首循环同为 active()+type!=379（cs:19717，曾误用
-    // isGenSolid —— active 含草面/装饰等非实性格，实心语义会跳到更深的首实心行）
-    const x = rng.nextIntRange(Math.floor(store.w / 2) - widen, Math.floor(store.w / 2) + widen);
+    // isGenSolid —— active 含草面/装饰等非实性格，实心语义会跳到更深的首实心行）。
+    // ★IIIIIII6：中心同取沙滩/世界中心 baseCenter
+    const x = rng.nextIntRange(baseCenter - widen, baseCenter + widen);
     for (let y = 0; y < store.h; y++) {
       const i = store.idx(x, y);
       if (store.flags[i] && store.type[i] !== TILE_379) { sx = x; sy = y; break; }

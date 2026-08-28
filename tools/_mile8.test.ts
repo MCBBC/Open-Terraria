@@ -44,21 +44,59 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (typeof s === 'number') SHEET[i] = s;
 }
 
-/** JS 槽末 → dump idx */
-const SLOT_END = new Map<number, number>([
-  [0, 0], [1, 1], [2, 13], [3, 35], [5, 37], [6, 38], [7, 39], [8, 48],
-  [9, 49], [10, 50], [11, 51], [12, 52], [13, 53],
-  // YYYY 批尾段扩展（JS 槽 14..57 ↔ dump 54..105；语义=槽内最后一个原版 pass）：
-  // 18 雕像宝箱止于 SpiderCaves(63)；35 向日葵→81（Guide(80)=NPC pass 不动格，
-  // 与 79 末态逐格同——JS 无槽）；40 地表植物=Weeds(86)+GlowingMushroomPlants(87)；
-  // 45 宝石系统止于 Random_Gems(93)；58 多格残片清扫=JS 补丁无 dump。
-  [14, 54], [15, 55], [16, 56], [17, 57], [18, 63], [19, 64], [20, 65],
-  [21, 66], [22, 67], [23, 68], [24, 69], [25, 70], [26, 71], [27, 72],
-  [28, 73], [29, 74], [30, 75], [31, 76], [32, 77], [33, 78], [34, 79],
-  [35, 81], [36, 82], [37, 83], [38, 84], [39, 85], [40, 87], [41, 88],
-  [42, 89], [43, 90], [44, 91], [45, 93], [46, 94], [47, 95], [48, 96],
-  [49, 97], [50, 98], [51, 99], [52, 100], [53, 101], [54, 102], [55, 103],
-  [56, 104], [57, 105],
+/** JS 槽末 → {d: dump idx, nm: 期望槽名}。
+ * ★IIIIII8（2026-08-28）定罪修复：本表曾纯按【数字槽位】锚定——IIIIII6 批在
+ * 「草墙」(34) 与「向日葵」之间插入「起始镇民」新槽后，≥35 的数字键未随迁：
+ * 槽末#35（起始镇民，普通种子零副作用≈079_Grass_Wall 同值）被对到
+ * 081_Sunflowers、后续全体错一位 → g/s22222/const/m 四链 #81 T27>0×N「全线
+ * 伪红」（向日葵整批"被杀"假象；#82 起 T5×2140/T51×12177 型"万物被杀"扩散同源）
+ * ——而标签驱动行（GlowingMushroomPlants 等）照常全绿=纯对位伪影铁证。
+ * 修复三件：①新增 [35,80]（080_Guide=SpawnStarterNPCs 出口快照；原注「JS 无槽」
+ * 已失效，该槽现已落地）；②原 ≥35 键全体 +1（[36,81]..[58,105]）；③onWorldPartial
+ * 现携 passes[i].name → 逐槽校验期望名，不符即 throw——今后任何管线增删/搬移槽位
+ * 立刻爆红指名道姓，不再静默错位烧全链假红。表内名字按 **SW_MB_1457=1** 口径
+ * （g1457-* 认证链全部走该门；OOOOOOO 批已把「微群系」搬至「二次沉降」前，
+ * 窗口 50..54 名单随门取变体）。多格残片清扫（59）仍无对应 dump（JS 补丁无）。 */
+const SLOT_END = new Map<number, { d: number; nm: string }>([
+  [0, { d: 0, nm: '原版地形' }], [1, { d: 1, nm: '沙丘' }],
+  [2, { d: 13, nm: '洞穴' }], [3, { d: 35, nm: '生物群系' }],
+  [5, { d: 37, nm: '引力沙' }], [6, { d: 38, nm: '微光' }],
+  [7, { d: 39, nm: '清理' }], [8, { d: 48, nm: '结构' }],
+  [9, { d: 49, nm: '水体沉降' }], [10, { d: 50, nm: '沙上清水' }],
+  [11, { d: 51, nm: '绿洲' }], [12, { d: 52, nm: '海滩装饰' }],
+  [13, { d: 53, nm: '半砖平滑' }],
+  // YYYY 批尾段扩展（语义=槽内最后一个原版 pass）：18 雕像宝箱止于 SpiderCaves(63)；
+  // 40 地表植物=Weeds(86)+GlowingMushroomPlants(87)（86 无 JS 子槽钩）；
+  // 46 宝石系统止于 Random_Gems(93)；★IIIIII6 起新增 35=起始镇民→080_Guide；
+  // ★IIIIII8 起 35..58 数字键全体 +1（36 向日葵→81 … 58 终清理→105）。
+  [14, { d: 54, nm: '瀑布唇缘' }], [15, { d: 55, nm: '薄冰' }],
+  [16, { d: 56, nm: '洞穴墙变体' }], [17, { d: 57, nm: '生命水晶' }],
+  [18, { d: 63, nm: '雕像宝箱' }], [19, { d: 64, nm: '宝石洞' }],
+  [20, { d: 65, nm: '苔藓' }], [21, { d: 66, nm: '神庙陈设' }],
+  [22, { d: 67, nm: '洞穴墙' }], [23, { d: 68, nm: '地下丛林树' }],
+  [24, { d: 69, nm: '浮空岛屋' }], [25, { d: 70, nm: '快清理' }],
+  [26, { d: 71, nm: '瓦罐' }], [27, { d: 72, nm: '地狱熔炉' }],
+  [28, { d: 73, nm: '表面' }], [29, { d: 74, nm: '地表矿石' }],
+  [30, { d: 75, nm: '倒木水景' }], [31, { d: 76, nm: '地表装饰' }],
+  [32, { d: 77, nm: '矿骨堆' }], [33, { d: 78, nm: '出生点' }],
+  [34, { d: 79, nm: '草墙' }],
+  // ↓↓ IIIIII6 插入的新槽（080_Guide=SpawnStarterNPCs 出口；十周年零 tile 写入，
+  //    与 079 逐格同值是普通种子的构造性质而非巧合）
+  [35, { d: 80, nm: '起始镇民' }],
+  [36, { d: 81, nm: '向日葵' }], [37, { d: 82, nm: '栽树' }],
+  [38, { d: 83, nm: '炼金草药' }], [39, { d: 84, nm: '染料植物' }],
+  [40, { d: 85, nm: '蛛网蜂巢' }], [41, { d: 87, nm: '地表植物' }],
+  [42, { d: 88, nm: '丛林植物P2' }], [43, { d: 89, nm: '藤蔓' }],
+  [44, { d: 90, nm: '地表花' }], [45, { d: 91, nm: '地表蘑菇' }],
+  [46, { d: 93, nm: '宝石系统' }], [47, { d: 94, nm: '长苔藓' }],
+  [48, { d: 95, nm: '丛林墙' }], [49, { d: 96, nm: '蜂巢幼虫' }],
+  // 50..54 = SW_MB_1457 执行序窗口：gate-on 为 {微群系,二次沉降,仙人掌珊瑚,
+  //   瓦片清理,蜥蜴祭坛}；gate-off 则该五名右移一位（微群系落 54），校验放行两者。
+  [50, { d: 97, nm: '微群系' }], [51, { d: 98, nm: '二次沉降' }],
+  [52, { d: 99, nm: '仙人掌珊瑚' }], [53, { d: 100, nm: '瓦片清理' }],
+  [54, { d: 101, nm: '蜥蜴祭坛' }], [55, { d: 102, nm: '水生植物' }],
+  [56, { d: 103, nm: '钟乳石宝石树' }], [57, { d: 104, nm: '断线陷阱清理' }],
+  [58, { d: 105, nm: '终清理' }],
 ]);
 /** reseed ▶label → dump idx（state=上一原版 pass 末态；_slotdif2/_c33replay 表+IceBiome→14） */
 const LABEL2DUMP = new Map<string, number>([
@@ -239,12 +277,22 @@ function labelOf(file: string, line: number): string {
       await generateWorld({
         width: W, height: H, seedText: SEED, evil: EVIL as -1 | 0 | 1,
         seedFlags: Object.keys(M8_FLAGS).length > 0 ? M8_FLAGS : undefined,
-        onWorldPartial: (w, i) => {
+        // ★IIIIII8：onWorldPartial 第三参=passes[i].name → 槽名实到校验。任何未来
+        // 管线增删/搬移槽位在这里立即报「名实不符」(曾因 II6 插「起始镇民」静默错位
+        // 烧出四链 #81 T27>0 全线伪红)。默认响亮告警不阻断；SW_M8_STRICT_NAMES=1
+        // 升级为 throw（对拍结论须绝对可信时开启）。
+        onWorldPartial: (w, i, pn) => {
           if (!curStore) curStore = w.store as never as typeof curStore;
-          const idx = SLOT_END.get(i);
-          if (idx === undefined || seen.has(idx)) return;
-          seen.add(idx);
-          rows.push(cmp(`槽末#${i}`, idx, w.store as never as typeof curStore));
+          const ent = SLOT_END.get(i);
+          if (ent === undefined) return;
+          if (ent.nm !== pn) {
+            const msg = `[SLOT_END 名实不符] 槽#${i} 期望「${ent.nm}」实到「${pn}」——管线槽序与本表漂移,mile8 结果不可按本表解读!`;
+            console.log(`  ✗✗ ${msg}`);
+            if (process.env.SW_M8_STRICT_NAMES === '1') throw new Error(msg);
+          }
+          if (seen.has(ent.d)) return;
+          seen.add(ent.d);
+          rows.push(cmp(`槽末#${i}·${pn}`, ent.d, w.store as never as typeof curStore));
         },
       });
     } catch (e) { throw e; }

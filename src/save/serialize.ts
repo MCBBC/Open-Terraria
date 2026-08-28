@@ -202,6 +202,7 @@ export interface SaveData {
   /** 世界事件态（原版 header 内 party/灯笼夜段,WF:1361-1368/1381-1384;旧档缺省=无派对无预约） */
   events?: {
     partyManual: boolean;            // BirthdayParty.ManualParty
+    partyGenuine?: boolean;          // ★IIIIIII6：BirthdayParty.GenuineParty（旧档缺省=按 seedFlags 重算）
     partyCooldown?: number;         // BirthdayParty.PartyDaysOnCooldown（旧档缺省 0）
     lanternManual: boolean;          // 服务端手动灯笼（本仓无入口,位保留）
     lanternGenuine: boolean;         // 真灯笼夜兑现中

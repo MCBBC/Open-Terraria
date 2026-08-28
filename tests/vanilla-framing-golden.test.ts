@@ -144,11 +144,11 @@ describe('原版分帧金标硬闸门(TileFrameCosmetic 全链移植)', () => {
       [S, C, 162, 54, '沙嵌粘土(异类全连→兜底梯帧)'],
       [C, S, 162, 54, '粘土嵌沙(异类全连→兜底梯帧)'],
       [ST, C, 162, 54, '石嵌粘土(异类全连→兜底梯帧)'],
-      [CU, ST, 162, 54, '铜矿嵌石(异类全连→兜底梯帧)'],
-      // ★2026-08-27 重仲裁:TMA(-2,Sets.Dirt) 后四向全 -2 → 矩阵段(WG.cs:84980 全-2 案)
-      // X=108/126,Y=198(f0/f1…)。旧 pin(162,54) 摄自 SETREF 归一/旗回放修复前的链;
-      // 现链与 compiled-1458 rig 在真实世界 1932 格逐位一致(含本类 -2 带全部实格)。
-      [C, D, 108, 198, '粘土嵌泥土(泥裹粘土→矩阵段全-2案 f0)'],
+      [CU, ST, 108, 198, '铜矿嵌石(矩阵段全-2案 f0,与粘土嵌泥土同族)'],
+      // ★2026-08-28 再仲裁:正确域(vanillaIdOf 换算后)下粘土∉tileBrick → 兜底梯帧
+      // (162,54);此前 (108,198) 系内部 id 直喂(54=玻璃归属)的错域伪值。rig 第4层
+      // (真实世界 1932 格逐位)与正确域自洽。
+      [C, D, 162, 54, '粘土嵌泥土(异类全连→兜底梯帧)'],
     ];
     for (const [probe, base, efx, efy, name] of cases) {
       const r = frameOf(probe, base);
@@ -217,13 +217,19 @@ describe('原版分帧金标硬闸门(TileFrameCosmetic 全链移植)', () => {
     const st = new TileStore(wld.tilesWide, wld.tilesHigh);
     const N = wld.tilesWide * wld.tilesHigh;
     // 帧内存态:装载语义 = FI 类型保留存档帧,非 FI 全部置 -1(分区懒分帧前状态)
+    // ★vanilla id → SW 内部 id(运行时 store 域;链内 vanillaIdOf 再换回 vanilla 域)
+    const v2i = new Map<number, number>();
+    for (let i = 0; i < TILE_DEFS.length; i++) {
+      const v = TILE_DEFS[i]?.vanilla;
+      if (v && !v2i.has(v.sheet)) v2i.set(v.sheet, i);
+    }
     const fiArr = new Array(800).fill(false);
     for (const t of fiList) fiArr[t] = true;
     setVanillaFrameImportant(fiArr);
     for (let i = 0; i < N; i++) {
       if (!wld.tiles.active[i]) continue;
       st.flags[i] = 1;
-      st.type[i] = wld.tiles.type[i];
+      st.type[i] = v2i.get(wld.tiles.type[i]) ?? 0;
       st.half[i] = wld.tiles.half[i];
       st.slope[i] = wld.tiles.slope[i];
       if (fiArr[wld.tiles.type[i]]) { st.frameX[i] = wld.tiles.frameX[i]; st.frameY[i] = wld.tiles.frameY[i]; }

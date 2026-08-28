@@ -25,6 +25,7 @@
 //  仅登记旗标位（恒 false）——文本/哈希触发链归秘密种子批（批 F）。终扫的落砂静态化
 //  部分不依赖旗标，普通世界照跑。
 import { TILE_DEFS } from '../../../data/tiles';
+import { vanGenSolidType } from './GenSolid';
 import { TileStore } from '../../TileStore';
 import type { SeedFlags } from '../SeedEasterEggs';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
@@ -128,14 +129,23 @@ function canKillTileFSC(st: TileStore, x: number, y: number, blockedChests: Set<
   return true;
 }
 
-/** WorldGen.SolidTile3(i, j)（cs:71005）：nactive && tileSolid && !tileSolidTop */
+/** WorldGen.SolidTile3(i, j)（cs:71005）：nactive && tileSolid && !tileSolidTop。
+ *  ★IIIIII3（2026-08-28）定罪修复：tileSolid 必须经 **生成期覆写表**（Main.tileSolid
+ *  等价）——曾裸读 TILE_DEFS.solid。g 链 #105 (2604,313) 实证：FinalCleanup 主循环
+ *  巨石重帧把 (2604,31{3,4}) 全写成 484 滚地仙人掌后，上方 Falling 沙 (2604,312)
+ *  落入 FinalSeedCleanup；vanilla 此刻 tileSolid[484]=false（cs:22338 pass 头翻转，
+ *  DesertBiome cs:12537 更早）⇒ SolidTile3(below)=false ⇒ else 支把 **下格**
+ *  ResetToType(397)（上格 sand 保留 Falling 态）；JS 曾视 484 为实心 → 整格跳过
+ *  → T397>484×1 分界差。tileSolidTop≈platform 近似同 UUU 口径；
+ *  VAN_TILE_SOLID_EXTRA 兜底经 vanGenSolidType 保持与 GenSolid 权威单源。 */
 function solidTile3FSC(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
   if ((st.wire[i] >>> 5) & 1) return false;   // nactive = active && !inActive
   const d = TILE_DEFS[st.type[i]!];
-  return !!d && !!d.solid && !d.platform;
+  if (!d || d.platform) return false;         // !tileSolidTop（平台/桌族近似）
+  return vanGenSolidType(st.type[i]!);        // tileSolid：生成期 Main.tileSolid
 }
 
 /** Tile.ResetToType（Tile.cs:251）：liquid=0、sTileHeader=32（仅活性位）、帧/漆/线/

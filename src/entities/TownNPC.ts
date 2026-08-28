@@ -528,9 +528,11 @@ export class TownNPC extends Entity {
   facing = 1;
   /** 随机名字（NPC.getNewNPCNameInner 名字池；无池类型如守卫老人为空串） */
   givenName = '';
-  /** NPC.townNpcVariationIndex（宠物三族 637/638/656 六变体；-1 = 未掷走 Default 图）。
+  /** NPC.townNpcVariationIndex（宠物三族 637/638/656 六变体）。缺省 0 = 原版字段
+   *  缺省（NPC.cs:8375）→ VariantNPCProfile 首变体（Siamese/Labrador/White,
+   *  Profiles.GetTextureNPCShouldUse IndexOutOfRange→num=0 同款语义）。
    *  RerollVariation（NPC.cs:81707-81733）换外观+名字池重掷；许可证二用触发 */
-  variationIndex = -1;
+  variationIndex = 0;
   animT = 0;
   frame = 0;       // 当前贴图帧（原版 frame.Y/帧高）
   frameT = 0;      // 行走帧累加器（≈原版 frameCounter）

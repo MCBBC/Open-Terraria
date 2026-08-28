@@ -421,6 +421,13 @@ export class FrameParser {
             const hex = Array.from(this.buf.subarray(p + 3, Math.min(p + len, p + 15))).map((b) => b.toString(16).padStart(2, '0')).join(' ');
             g.__FRAME_ERRS.push({ msgId, len, hex, e: String((e as Error).message) });
           }
+          // 一次性告警：静默吞帧不能完全无声（否则同步 bug 被藏死）；netdbg 时保持抛出便于断点
+          const g2 = globalThis as unknown as { __FRAME_WARNED?: Set<number> };
+          if (!g2.__FRAME_WARNED) g2.__FRAME_WARNED = new Set();
+          if (!g2.__FRAME_WARNED.has(msgId)) {
+            g2.__FRAME_WARNED.add(msgId);
+            if (typeof console !== 'undefined') console.warn('[frame] 解析失败 msgId=' + msgId + ' len=' + len + '（每类一次）', (e as Error).message);
+          }
           if (typeof location !== 'undefined' && location.search.includes('netdbg')) throw e;
         }
         p += len;

@@ -60,6 +60,8 @@ export interface WorldPacket {
   bestiary?: BestiarySave;
   /** 城镇 NPC 段（读档路径回传,Game.loadWorld 消费;旧包缺省=空→新世界出生分支） */
   pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }>;
+  /** ★IIIIIII6：SpawnStarterNPCs 播种记录（生成路径回传,首进消费后清空） */
+  starterTownNpcs?: Array<{ key: string; givenName: string; x: number; y: number; anchor: [number, number]; dir: -1 | 1; variationIndex?: number }>;
   chests: ChestData[];
   signs: Array<{ x: number; y: number; text: string }>;
   /** 挂物族存放物（物品框/武器架/模特/帽架/食物盘/展示罐；生成路径无、读档路径有） */

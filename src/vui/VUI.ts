@@ -67,13 +67,24 @@ export class VUI {
     window.addEventListener('wheel', (e) => { VUI.wheel += Math.sign(e.deltaY); }, { passive: true });
   }
 
+  /** 自愈退避态：风暴期（GPU 显存压力→上下文反复被逐）无脑每帧重建会
+   *  反向喂压力——每次重建都是一次新的全屏画布分配，分配→驱逐→再丢失
+   *  正反馈循环（bad.log 实测：176 次重建/console 622K 行全 rAF 栈刷屏，
+   *  JS 堆稳定 340MB → 压力在 GPU 合成侧）。节流：≤1 次/2s；告警 ≤1 条/30s */
+  private static lastHealAt = 0;
+  private static lastHealWarnAt = 0;
   /** ui-canvas 自愈(2026-08-19 第五场双开:GPU 死后光标永不恢复——vui 画布
    *  与 batch 一次性创建,contextlost 后所有 vui 绘制静默 no-op,游戏内该层
    *  只画光标 = 症状恰好只剩光标;Renderer 看门狗只管主/辅助画布管不到这)。
-   *  每帧检查(一次 isContextLost 调用,零成本),死即原位换新画布重建 batch */
+   *  每帧检查(一次 isContextLost 调用,零成本),死即原位换新画布重建 batch。
+   *  退避：距上次重建 <2s 直接跳过（光标暂隐 2s,游戏不受影响——GL 层看门狗
+   *  同款 diedAt 退避纪律,此前唯独本层裸奔） */
   static healCanvas(): void {
     const ctx = VUI.batch?.ctx as (CanvasRenderingContext2D & { isContextLost?: () => boolean }) | undefined;
     if (!VUI.canvas || !ctx?.isContextLost?.()) return;
+    const now = performance.now();
+    if (now - VUI.lastHealAt < 2000) return;
+    VUI.lastHealAt = now;
     const old = VUI.canvas;
     const c = document.createElement('canvas');
     c.id = 'ui-canvas';
@@ -84,7 +95,10 @@ export class VUI {
     VUI.batch = new UISpriteBatch(c.getContext('2d')!);
     VUI.curMode = '';   // 模式样式作废,下帧 draw() 按当前模式重挂(含光标小型化)
     VUI.resize();
-    console.warn('[VUI] ui-canvas 上下文死亡,已自愈重建(光标层)');
+    if (now - VUI.lastHealWarnAt > 30_000) {
+      VUI.lastHealWarnAt = now;
+      console.warn('[VUI] ui-canvas 上下文死亡,已自愈重建(光标层)——频繁出现 = GPU 显存压力');
+    }
   }
 
   static resize() {

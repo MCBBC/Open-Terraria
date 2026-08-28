@@ -10,6 +10,13 @@
 // SelfFrame8Way 是其近似,本移植取代两者成为 vanilla-exact 路径。
 import type { TileStore } from '../world/TileStore';
 import programJson from '../data/generated/tileframe-program.json';
+import { TILE_DEFS } from '../data/tiles';
+import { vanillaIdOf } from './TileMergeFamily';
+
+// ★ID 域契约(2026-08-28 重定):本链全部集合/比较在 vanilla tile id 域。
+// TileStore.type 为 SW 内部 id → tileFrame/mkTile 入口统一 vanillaIdOf 换算。
+// (此前直喂内部 id = 沙22 读恶魔矿22、粘土54 读玻璃54 归属 → 同型碰巧自洽、
+//  跨型接续全灭。golden layer3/4 的 store 亦须内部 id 域,与运行时一致。)
 // ★ID 域备忘(2026-08-27):本链比较/集合均在 vanilla tile id 域;运行时 TileStore
 // 的 type 域与 vanilla 域的关系未定(部分块数值巧合重合),全链默认停用
 // (VanillaTiler SW_VANILLA_FRAMING),重做对齐时先钉死域再启用。
@@ -425,6 +432,20 @@ export function invalidateVanillaFrameAt(x: number, y: number): void {
 }
 
 let TILE_FI: boolean[] | null = null;
+// 缺省 FI:def.framed(vanilla tileFrameImportant 的 SW 对应位);setVanillaFrameImportant 覆盖
+let _fiDefault: boolean[] | null = null;
+function frameImportantOf(vanillaType: number): boolean {
+  if (TILE_FI) return !!TILE_FI[vanillaType];
+  if (_fiDefault === null) {
+    const b = new Array(800).fill(false);
+    for (let i = 0; i < TILE_DEFS.length; i++) {
+      const v = TILE_DEFS[i]?.vanilla;
+      if (v && v.sheet < 800 && TILE_DEFS[i].framed) b[v.sheet] = true;
+    }
+    _fiDefault = b;
+  }
+  return _fiDefault[vanillaType] ?? false;
+}
 // 注入原版 tileFrameImportant 表(递归协商遇到 FI 邻居时直返存储帧,原版早退语义);
 // 未注入时缺省由 def.framed 推导(运行时)——golden 用反编译表注入
 export function setVanillaFrameImportant(fi: boolean[]): void {
@@ -441,7 +462,7 @@ function tileFrame(env: FrameEnv, i: number, j: number, depth: number): { fx: nu
   if (!st.inBounds(i, j)) return { fx: 0, fy: 0 };
   const idx = st.idx(i, j);
   if (!st.flags[idx]) return { fx: 0, fy: 0 };
-  const typeV = st.type[idx]; // ★回滚 2026-08-27 vanillaIdOf 补丁:换算域与运行时 store 不一致反而全局隔离帧(详见 tests/vanilla-framing-golden 第4层注释与对齐重做任务)
+  const typeV = vanillaIdOf(st.type[idx]); // 内部 id → vanilla id(★域契约,见头注)
   const key = j * st.w + i;
   const cached = env.frameCache.get(key) ?? (env.bypassGlobalCache ? undefined : vanillaFrameCache.get(key));
   if (cached) {
@@ -473,7 +494,7 @@ function mkTile(env: FrameEnv, dx: number, dy: number): object {
   // 源码带调用的成员(active()/slope()/halfBrick()/topSlope()…)暴露为函数;属性访问(.type/.frameY/bare)为值
   return {
     bare: ok,                            // tile3 != null
-    type: act ? st.type[idx] : 0,        // .type
+    type: act ? vanillaIdOf(st.type[idx]) : 0,  // .type(★vanilla 域)
     fx: ok ? st.frameX[idx] : -1,        // .frameX
     fy: ok ? st.frameY[idx] : -1,        // .frameY
     act: () => act,                      // .active()

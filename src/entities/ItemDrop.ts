@@ -228,10 +228,12 @@ export class ItemDrop extends Entity {
           if (def) game.showPickupLabel(def.key, before - left, this.prefix);
         }
         this.stack = left;
-        // MP：他人掉落的残余上报（op0 携余量全态）——原版 msg21 为服务器权威
-        // 单向广播，本仓所有权分散在生成端，拾取端必须把"还剩多少"报回去，否则
-        // 拥有者 60t 重 assert 会用陈旧全量把残余刷回去（人人可再捡 = 物品复制）
-        if (left > 0 && this.netPuppet && this.netId) game.puppetDropResidue?.(this);
+        // MP：他人掉落的残余上报（msg21 op3 携余量全态，形状与 spawn 同）——原版
+        // msg21 为服务器权威单向广播，本仓所有权分散在生成端，拾取端必须把
+        // "还剩多少"报回去，否则拥有者 60t 重 assert 会用陈旧全量把残余刷回去
+        // （人人可再捡 = 物品复制）。★仅在本次拾取真实改变余量时发（背包已满
+        // 的持续重叠不得每拍一帧刷屏——2026-08-28 全面 review 收口） */
+        if (left > 0 && left !== before && this.netPuppet && this.netId) game.puppetDropResidue?.(this);
       } else if (inGrabRange) {
         // PullItem_Common(:34533-34584):每轴 0.45 步进、钳 4(水平含 player.vx),
         // 速度反向时附加 ×0.75 反拉——被拉取帧跳过瓦片碰撞(WorldItem.cs:587-597

@@ -18,12 +18,17 @@ import { cageFamilyOf, drawCageCell } from './CritterCage';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
 import { animFrameIdx, animYOffset, TILE_ANIM_RATE } from './TileAnim';
 import { vanillaFrameFor, setVanillaSolidTables } from './VanillaFraming';
-// 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程)。★默认停用(2026-08-27 回滚):
-// 链的 id 域( vanilla )与运行时 store 域未钉死一致,启用会全局隔离帧——重做对齐
-// (域契约 + rig 逐位对拍)完成后再默认启用。临时启用:localStorage sw_vanilla_framing=1。
-const SW_VANILLA_FRAMING = typeof localStorage !== 'undefined'
-  ? localStorage.getItem('sw_vanilla_framing') === '1'
-  : false;
+// 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程)。★实验旗(默认停用):
+// 启用 = URL ?vf=1 或 localStorage sw_vanilla_framing=1;?vf=0 强制关(压过 localStorage)。
+// id 域契约已在 VanillaFraming 内收敛(内部 id→vanilla 换算),rig 1932 格逐位仲裁通过。
+const SW_VANILLA_FRAMING = (() => {
+  try {
+    const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '').get('vf');
+    if (q === '1') return true;
+    if (q === '0') return false;
+  } catch { /* SSR/无 location */ }
+  return typeof localStorage !== 'undefined' && localStorage.getItem('sw_vanilla_framing') === '1';
+})();
 // vanilla solid/solidTop 表注入(初始化一次;solidTop 用 SW 平台表近似——矩阵对 426-434/727-732
 // 皆整块,不涉 solidTop,误差面为零)
 let _solidTablesInit = false;

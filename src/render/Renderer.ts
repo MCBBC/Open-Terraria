@@ -5312,6 +5312,21 @@ export class Renderer {
         // 碰撞盒保持 base 盒（本仓 e.w/e.h 已按 base 乘，勿在此扩盒）
         const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale
           * expertRenderScale(e.vanillaId ?? 0);
+        // 69 蚁狮身体（Main.cs:23214-23217 原文移植,2026-08-27 用户实报缺下半身）：
+        // AntlionBody.png(36×28 独立贴图) 画在通用帧【之前】= 头压身体层序。
+        // 锚点 = (盒水平中心, 盒底+14)、origin=贴图中心 → 贴图钉 (盒水平中心, 盒底±14)
+        // 即贴图【完全在命中盒下方】向下延伸 28px；旋转 = −rotation×0.3（反向 30%）、
+        // SpriteEffects.None 不翻转——曾漏绘整段 = 蚁狮只剩头（用户对比原版视频实报）
+        if (e.vanillaId === 69) {
+          const abody = this.atlas.ensureVImage('vanilla/AntlionBody.png');
+          if (abody) {
+            ctx.save();
+            ctx.translate(e.x + e.w / 2, e.y + e.h + 14);
+            ctx.rotate(-(e.visAngle || 0) * 0.3);
+            ctx.drawImage(abody, 0, 0, abody.width, abody.height, -abody.width / 2, -abody.height / 2, abody.width, abody.height);
+            ctx.restore();
+          }
+        }
         ctx.save();
         // 锚点（Main.cs:23658-23660 通用尾段 1:1）：position = Center −
         // frameSize×scale/2 + halfSize×scale + (0, num46+num47+gfxOffY)，origin =

@@ -186,6 +186,10 @@ export class World {
   furnitureItems: FurnitureItemRecord[] = [];
   /** 读档/wld 导入携带的城镇 NPC（afterWorldLoad 原位生成后清空；原版 WorldFile town NPC 段） */
   pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }>;
+  /** ★IIIIIII6：SpawnStarterNPCs pass（cs:19848-20068）播种的初始镇民——仅新世界首进
+   *  消费一次后清空（不进存档：实例化后的镇民走 townNpcsForSave 的 town NPC 段，
+   *  与原版一致）。celebrationmk10 五人组/组合分支记录，含 homeless 锚与朝向 */
+  starterTownNpcs?: Array<{ key: string; givenName: string; x: number; y: number; anchor: [number, number]; dir: -1 | 1; variationIndex?: number }>;
   // Boss 进度旗标
   flags: Record<string, boolean> = { downedEyeOfCthulhu: false, downedSkeletron: false, shadowOrbSmashed: false, hardMode: false };
   /** 已砸碎恶魔祭坛数（WorldGen.altarCount，WorldFile.cs:1303/2100 随存档持久化）：
@@ -383,6 +387,7 @@ export class World {
     if (p.weather) w.applyWeather(p.weather);
     if (p.bestiary) w.applyBestiary(p.bestiary);
     w.pendingTownNpcs = p.pendingTownNpcs;
+    w.starterTownNpcs = p.starterTownNpcs;
     w.chests = p.chests;
     w.signs = p.signs;
     w.furnitureItems = p.furnitureItems ?? [];

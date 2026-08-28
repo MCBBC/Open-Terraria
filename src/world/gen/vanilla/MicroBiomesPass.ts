@@ -155,21 +155,27 @@ const activeAt = (st: TileStore, x: number, y: number) =>
  *  (曾用 key 含 'chest'/'dresser' 子串近似,异 key 边界不可证) */
 const CONTAINER_TILES = idsByVanillaSheet(21, 467, 88);
 const isContainer = (t: number): boolean => CONTAINER_TILES.has(t);
-/** Conditions.IsSolid(Conditions.cs:85-97):InWorld(x,y,10) && active && 生成期 tileSolid
- *  ——无 solidTop/half/slope/inActive 排除(与 SolidTile/SolidOrSlopedTile 三者互异) */
+/** Conditions.IsSolid(Conditions.cs:85-97):InWorld(x,y,10) && active && **Main.tileSolid
+ *  [type] 直读**(cs:96)——无 solidTop/half/slope/inActive 排除(与 SolidTile/
+ *  SolidOrSlopedTile 三者互异)。★III12:直读数组含 tileSolid[0]=true(Main.cs:7995,
+ *  全树无复位点)=本仓 alias 域内部 id 0/sheet0 格(active 空 alias=土/伪影格)按实心;
+ *  campsite Circle 门(营:13)/mine R-L·Down 搜索(矿:23-30)/mahog Find 门全消费,
+ *  曾 vanGenSolidType 漏镜像 → 营地 acceptance 面坍缩(915 vs x86 109 attempts)。
+ *  Main.tileDungeon 直读族亦同源,dungeon 砖组不涉 0 无须改。 */
 const condIsSolid = (st: TileStore, x: number, y: number): boolean => {
   if (x < 10 || y < 10 || x >= st.w - 10 || y >= st.h - 10) return false;
   const i = st.idx(x, y);
-  return st.flags[i] !== 0 && vanGenSolidType(st.type[i]!);
+  return st.flags[i] !== 0 && mbTileSolidGen(st.type[i]!);
 };
-/** WorldGen.SolidOrSlopedTile(cs:70046):active && 生成期 tileSolid && !tileSolidTop
- *  && !inActive()（half/slope 不排除）。Modifiers.IsSolid(Modifiers.cs:551)消费。
+/** WorldGen.SolidOrSlopedTile(cs:70515-70547):active && **Main.tileSolid[type] 直读**
+ *  && !tileSolidTop && !inActive()（half/slope 不排除）。Modifiers.IsSolid
+ *  (Modifiers.cs:551-558)消费。★III12 同上换 mbTileSolidGen。
  *  ★XXXX：!inActive() 读 bit 0x40（生成期恒假）——致动旗标(0x800)不是排除项，
  *  曾 `!(wire & WIRE_ACTUATOR)` 误排致动格（ShapeRunner 固体占比门错翻案） */
 const solidOrSlopedAt = (st: TileStore, x: number, y: number): boolean => {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
-  return st.flags[i] !== 0 && vanGenSolidType(st.type[i]!) && !TILE_DEFS[st.type[i]!]?.platform;
+  return st.flags[i] !== 0 && mbTileSolidGen(st.type[i]!) && !TILE_DEFS[st.type[i]!]?.platform;
 };
 /** 原版 SolidTile(i,j)(WorldGen.cs:70155-70172):active && 生成期 tileSolid && !tileSolidTop
  *  && !halfBrick && slope==0 && !inActive()。countTiles(nextCount cs:9559)/MiningExplosives
@@ -183,7 +189,8 @@ function solidTileStrict(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   const t = st.type[i]!;
-  return st.flags[i] !== 0 && vanGenSolidType(t) && !TILE_DEFS[t]?.platform
+  // ★III12：Main.tileSolid 直读（WorldGen.cs:70642-70663 SolidTile(i,j)）→ mbTileSolidGen
+  return st.flags[i] !== 0 && mbTileSolidGen(t) && !TILE_DEFS[t]?.platform
     && st.half[i] === 0 && st.slope[i] === 0;
 }
 
@@ -210,7 +217,8 @@ function place2x2Direct(st: TileStore, x: number, y: number, type: number): bool
     }
     const gi = st.idx(i, y + 1);
     const gt = st.type[gi]!;
-    const solid2 = st.flags[gi] !== 0 && vanGenSolidType(gt)
+    // ★III12：SolidTile2（cs:70665-70680）直读 Main.tileSolid → mbTileSolidGen（无 solidTop 排除）
+    const solid2 = st.flags[gi] !== 0 && mbTileSolidGen(gt)
       && st.slope[gi] === 0 && st.half[gi] === 0;                              // SolidTile2（inActive 生成期恒真）
     if (!st.flags[gi] || (!solid2 && !PLACE2X2_TABLE.has(gt))) return false;   // cs:51395-99 地面门
   }
@@ -232,6 +240,22 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 }
 const TREE_TRUNK_MB = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
 const UP_PROTECT_MB = new Set([21, 26, 72, 77, 88, 467, 488]);
+
+/** ★III7：原版生成期 Main.tileSolid 的直查语义——Main.cs:7995 tileSolid[0]=true
+ *  （原版 sheet 0=Dirt，且全树无复位点 ⇒ 生成期读数组恒真；本仓 TILE_DEFS 内部
+ *  id 0='empty'（solid=false 运行时碰撞语义）、dirt 挂 sheet 0——dump→store 转译域
+ *  x86 真 sheet0 全部落 internal 0+active）。★III12 升级为**本文件全体**「生成期
+ *  Main.tileSolid 直读」消费端的统一镜像：DeadMans 四门(III7)+Conditions.IsSolid/
+ *  SolidOrSlopedTile/SolidTile/SolidTile2(Place2x2·Place3x2·Place1x1 地面门)/
+ *  mahogany Find 门/lava 三段门/boulder shell 致动标注(均数组直读)全走此谓词；
+ *  生产管线内部 id1('dirt')走 vanGenSolidType 同判 true、真空格 flags=0 不入 active
+ *  门 —— 两侧语义等价,仅修转译域伪影。 */
+const mbSheetOf = (t: number): number => (t === 0 ? 0 : (SHEET_OF_MB[t] ?? -1));
+const mbTileSolidGen = (t: number): boolean => {
+  if (t === 0 || (SHEET_OF_MB[t] ?? -1) === 0) return true;   // ★internal 0(air) 无注册行
+  return vanGenSolidType(t);
+};
+
 function canKillTileMB(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
@@ -301,6 +325,18 @@ const segProbe = (name: string, detail?: unknown): void => {
   const g = globalThis as { __swSeg?: (name: string, detail?: unknown) => void };
   try { g.__swSeg?.(name, detail); } catch { /* probe */ }
 };
+/** ★III12：惰性载荷探针——无 __swSeg 钩时零分配（detail 为 thunk,仅钩存在时求值） */
+const mbProbe = (name: string, detail?: () => unknown): void => {
+  const g = globalThis as { __swSeg?: (name: string, detail?: unknown) => void };
+  if (!g.__swSeg) return;
+  try { g.__swSeg(name, detail?.()); } catch { /* probe */ }
+};
+/** ★III12：当次 UnifiedRandom 样本计（探针侧注入 __swMbDraws；缺省恒 0）——
+ *  段账纪律：只比「每次尝试掷数/rc」与受理集,禁值流对拍(vacuous 双实证) */
+const mbDraws = (): number => {
+  const g = globalThis as { __swMbDraws?: () => number };
+  try { return g.__swMbDraws?.() ?? 0; } catch { return 0; }
+};
 
 export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests?: ChestSink): void {
   const g0 = globalThis as { __swMbCap?: (gs: GenState, st: TileStore, chests?: ChestSink) => void };
@@ -333,10 +369,11 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     let guard = 3000;                              // num4
     while (done < deadCount && possible.length > 0) {
       if (--guard <= 0) break;
+      segProbe('DMPICK');
       const pick = rng.int(0, possible.length - 1);
       const c = possible[pick];
       const ok = deadMans.place(c.x, c.y);          // 返回值原版丢弃(cs:21814)
-      segProbe('deadPlace', [c.x, c.y, ok]);
+      segProbe(`DMPLACE ${c.x},${c.y} ok=${ok ? 1 : 0}`);
       done++;
       possible.splice(pick, 1);
     }
@@ -390,8 +427,8 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
           const ox = rng.int(0, 1) === 0                               // Next(2) == 0 → 左 30%
             ? rng.int(50, Math.floor(w * 0.3) - 1)                     // Next(50, w*0.3)
             : rng.int(Math.floor(w * 0.7), w - 51);                    // Next(w*0.7, w-50)
-          segProbe('swordTry', [ox, oy]);
-          if (placeEnchantedSwordShrine(st, rng, gs, ox, oy)) { segProbe('swordOk', [ox, oy]); break; }
+          segProbe(`STRY ${ox},${oy} t=${t}`);
+          if (placeEnchantedSwordShrine(st, rng, gs, ox, oy)) { segProbe(`SOK ${ox},${oy}`); break; }
         }
       }
     }
@@ -408,8 +445,13 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     if (++tries > 1000) break;
     const ox = rng.int(gs.beachDistance, w - gs.beachDistance - 1); // RandomWorldPoint(top,right,bottom,left)
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
-    segProbe('campTry', [ox, oy]);
-    if (placeCampsite(st, rng, gs, ox, oy)) placed++;
+    segProbe('CAMPPRE');
+    // ★III12：per-attempt rc（x86 SW_DMLOG 同格式）——CAMP x,y rc=<掷数> ok=
+    const d0c = mbDraws();
+    if (placeCampsite(st, rng, gs, ox, oy)) {
+      placed++;
+      mbProbe(`CAMP ${ox},${oy} rc=${mbDraws() - d0c} ok=1 gate=1`);
+    } else mbProbe(`CAMP ${ox},${oy} rc=${mbDraws() - d0c} ok=0 gate=1`);
   }
 
   // ---- 4. Mining Explosives(cs:21951-21975,最多 3000 次尝试;cs:21956 notTheBees 门)----
@@ -430,8 +472,13 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     //   曾误用 gs.rockLevel（=Main.rockLayer）→ 矿爆点 Y 域整体偏移 48 格（span
     //   对拍 van Next(523,1000) vs js Next(571,1000) 定罪）
     const oy = rng.int(Math.floor(gs.genRockLayer), h - 201);
-    segProbe('trapTry', [ox, oy]);
-    if (placeMiningExplosives(st, rng, gs, ox, oy)) placed++;
+    segProbe('MINEPRE');
+    // ★III12：per-attempt rc（x86 SW_DMLOG 同格式）
+    const d0m = mbDraws();
+    if (placeMiningExplosives(st, rng, gs, ox, oy)) {
+      placed++;
+      mbProbe(`MINE ${ox},${oy} rc=${mbDraws() - d0m} ok=1 gate=1`);
+    } else mbProbe(`MINE ${ox},${oy} rc=${mbDraws() - d0m} ok=0 gate=1`);
   }
 
   // ---- 4.5 Mahogany 丛林活桃花心木树(cs:22052-22077 + MahoganyTreeBiome.cs)----
@@ -446,8 +493,11 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       // RandomWorldPoint(worldSurface+50, 50, 500, 50):X=Next(50,W-50), Y=Next(ws+50,H-500)
       const ox = rng.int(50, w - 51);
       const oy = rng.int(Math.floor(gs.worldSurface) + 50, h - 501);
-      segProbe('treeTry', [ox, oy]);
-      if (placeMahoganyTree(st, rng, gs, chests, ox, oy)) mDone++;
+      const d0t = mbDraws();
+      const okT = placeMahoganyTree(st, rng, gs, chests, ox, oy);
+      // ★III12：per-attempt rc（x86 SW_DMLOG 同格式）
+      mbProbe(`MAHOG ${ox},${oy} rc=${mbDraws() - d0t} ok=${okT ? 1 : 0} gate=1`);
+      if (okT) mDone++;
       mTries++;
     }
   }
@@ -462,8 +512,12 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   while (tDone < trackCount) {
     const ox = rng.int(10, w - 11);                // RandomWorldPoint(worldSurface, 10, 200, 10)
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
-    if (trackGen.place(ox, oy, scW(400), scW(1000), rng)) {
-      segProbe('longTrackOk', [ox, oy]);
+    // ★III12：per-attempt rc（x86 WorldGen patch 同格式，失败尝试也打点）
+    const d0l = mbDraws();
+    const _okL = trackGen.place(ox, oy, scW(400), scW(1000), rng);
+    mbProbe(`LTRK ${ox},${oy} rc=${mbDraws() - d0l} ok=${_okL ? 1 : 0}`);
+    if (_okL) {
+      segProbe(`LTRK ${ox},${oy} ok=1`);
       tDone++; tFail = 0;
     } else {
       tFail++;
@@ -477,8 +531,12 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   while (tDone < trackCount) {
     const ox = rng.int(10, w - 11);
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
-    if (trackGen.place(ox, oy, scW(150), scW(300), rng)) {
-      segProbe('stdTrackOk', [ox, oy]);
+    // ★III12：per-attempt rc（同上）
+    const d0s = mbDraws();
+    const _okS = trackGen.place(ox, oy, scW(150), scW(300), rng);
+    mbProbe(`STRK ${ox},${oy} rc=${mbDraws() - d0s} ok=${_okS ? 1 : 0}`);
+    if (_okS) {
+      segProbe(`STRK ${ox},${oy} ok=1`);
       tDone++; tFail = 0;
     } else {
       tFail++;
@@ -516,14 +574,16 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
         if (solidOrSlopedAt(st, ox + dx, oy + dy)) solid++;
       }
     }
-    if (solid < total - 5) return false;
+    mbProbe('CScircleRaw', () => [ox, oy, total, solid]);
+    if (solid < total - 5) { mbProbe('CS1circleFail'); return false; }
   }
   const num = rng.int(6, 9);  // Next(6,10)
   const num2 = rng.int(1, 4); // Next(1,5)
   const rect: Rect = { x0: ox - num, y0: oy - num, x1: ox + num + 1, y1: oy + num + 1 };
+  mbProbe('CS2dims', () => [num, num2]);
   // structures.CanPlace(rect, pad 0)（CampsiteBiome.cs:20）——全局保护图互斥
   //   + GeneralPlacementTiles 默认内容扫描（单参重载）
-  if (!canPlaceStructure(gs, rect, 0, st)) return false;
+  if (!canPlaceStructure(gs, rect, 0, st)) { mbProbe('CS3canFail'); return false; }
   // (num+3)² 内禁地牢砖/容器/神庙砖/祭坛(cs:24-35)
   {
     const n3 = num + 3;
@@ -720,7 +780,8 @@ function place3x2MB(st: TileStore, rng: RNG, x: number, y: number, typeJs: numbe
     if (st.inBounds(i, y + 1)) {
       const g = st.idx(i, y + 1);
       if (st.flags[g] && BOULDER_TILES.has(st.type[g]!)) ok = false; // InvalidTileForPiles（186/187，cs:52141）
-      if (!(st.flags[g] !== 0 && vanGenSolidType(st.type[g]!)
+      // ★III12：SolidTile2 直读 → mbTileSolidGen
+      if (!(st.flags[g] !== 0 && mbTileSolidGen(st.type[g]!)
         && st.slope[g] === 0 && st.half[g] === 0)) ok = false;       // SolidTile2(i,y+1)（cs:52149）
     } else ok = false;                                               // OoB 地面列 → 拒
   }
@@ -740,10 +801,10 @@ function place3x2MB(st: TileStore, rng: RNG, x: number, y: number, typeJs: numbe
 
 /** MiningExplosivesBiome.Place(MiningExplosivesBiome.cs:10-76) */
 function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: number): boolean {
-  if (solidTileStrict(st, ox, oy)) return false;   // WorldGen.SolidTile(cs:13)
+  if (solidTileStrict(st, ox, oy)) { mbProbe('MS1solid'); return false; }   // WorldGen.SolidTile(cs:13)
   {
     const wl = st.inBounds(ox, oy) ? st.wall[st.idx(ox, oy)] : -1;
-    if (wl === 216 || wl === 187) return false; // 地下沙漠墙门禁(cs:17-20)
+    if (wl === 216 || wl === 187) { mbProbe('MS2wall', () => wl); return false; } // 地下沙漠墙门禁(cs:17-20)
   }
   const barType = [gs.oreTiers.gold, gs.oreTiers.silver, gs.oreTiers.iron, gs.oreTiers.copper][rng.int(0, 3)];
   const dir = rng.next() * 2 - 1; // cs:22
@@ -755,41 +816,67 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
   {
     const step = dir > 0 ? 1 : -1;
     let found = false;
+    let hitK = -1;
     for (let k = 0; k < 40 && !found; k++) {
-      if (condIsSolid(st, ox + k * step, oy)) { x = ox + k * step; found = true; }
+      if (condIsSolid(st, ox + k * step, oy)) { x = ox + k * step; hitK = k; found = true; }
     }
-    if (!found) return false;
+    if (!found) {
+      // ★诊断：mb 口径全 miss 时，统计 vanilla 直读口径可实心格数（alias 域差）与
+      //   老口径命中数——量化转译域 tileSolid[0] 缺镜像的实际影响面
+      let mbAlias = 0, vanHit = 0;
+      for (let k = 0; k < 40; k++) {
+        const xi = ox + k * step;
+        if (!st.inBounds(xi, oy)) break;
+        const ii = st.idx(xi, oy);
+        const tt = st.type[ii]!;
+        if (st.flags[ii]) {
+          if ((tt === 0 || (SHEET_OF_MB[tt] ?? -1) === 0)) mbAlias++;
+          else if (vanGenSolidType(tt)) vanHit++;
+        }
+      }
+      mbProbe('MS3rlFail', () => [step, mbAlias, vanHit]);
+      return false;
+    }
+    mbProbe('MS3rlHit', () => [x, y, hitK]);
   }
   // Find(origin, Down(80) + IsSolid)(cs:27-30)——起点即 Right 结果(实心),原版恒原格
   {
     let found = false;
+    let hitK = -1;
     for (let k = 0; k < 80 && !found; k++) {
-      if (condIsSolid(st, x, y + k)) { y = y + k; found = true; }
+      if (condIsSolid(st, x, y + k)) { y = y + k; hitK = k; found = true; }
     }
-    if (!found) return false;
+    if (!found) { mbProbe('MS4downFail', () => []); return false; }
+    mbProbe('MS4downHit', () => [y, hitK]);
   }
   // ShapeRunner(10, 20, (dir,1)).Output(shapeData) + Blotches() + Scanner + IsSolid +
   //   Scanner(cs:31-38)。★Output 挂在形状上=raw 格(Blotches 扩张前)——曾把 blotch
   //   扩张格塞进 shapeData,矿石地板(All(shapeData))覆盖范围整体走样
   const data = new Set<number>();
   let total = 0, solid = 0;
+  const dShape0 = mbDraws();
+  let shapeIters = 0, shapeVisited = 0, shapeApplied = 0, blotchHits = 0;
   {
     let steps = 20.0, strength = 10.0;
     let px = x + 0.0, py = y + 0.0;
     let vx = dir + 0.0, vy = 1.0;
     while (steps > 0 && strength > 0) {
+      shapeIters++;
       strength = 10 * (steps / 20);
       steps -= 1;
       const bx0 = Math.max(1, Math.trunc(px - strength * 0.5)), by0 = Math.max(1, Math.trunc(py - strength * 0.5));
       const bx1 = Math.min(st.w, Math.trunc(px + strength * 0.5)), by1 = Math.min(st.h, Math.trunc(py + strength * 0.5));
       for (let i = bx0; i < bx1; i++) {
         for (let j = by0; j < by1; j++) {
+          shapeVisited++;
           if (Math.abs(i - px) + Math.abs(j - py) >= strength * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;
           data.add(j * st.w + i);                     // UnitApply:OutputData.Add(raw 格)
+          shapeApplied++;
           // Blotches()(默认 scale 2, 0.3):丢弃掷+chance 掷;命中四连掷 blotch 矩形
           rng.next();
           const pts: Array<[number, number]> = [];
           if (rng.next() < 0.3) {
+            blotchHits++;
             const ox0 = rng.int(-1, 0), ox1 = rng.int(0, 1), oy0 = rng.int(-1, 0), oy1 = rng.int(0, 1);
             for (let bi = ox0; bi <= ox1; bi++) for (let bj = oy0; bj <= oy1; bj++) pts.push([i + bi, j + bj]);
           } else {
@@ -814,11 +901,14 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
       vy = Math.max(-1, Math.min(1, vy));
     }
   }
-  if (solid < Math.trunc(total / 2)) return false; // cs:35-38
+  // 载荷序：[iter, visited, applied, blotchHits, total, solid, 掷数, data.size]
+  mbProbe('MS5shape', () => [shapeIters, shapeVisited, shapeApplied,
+    blotchHits, total, solid, mbDraws() - dShape0, data.size]);
+  if (solid < Math.trunc(total / 2)) { mbProbe('MS6ratioFail', () => [total, solid]); return false; } // cs:35-38
   const area: Rect = { x0: x - 15, y0: y - 10, x1: x + 15, y1: y + 10 };
   // structures.CanPlace(area, pad 0)（MiningExplosivesBiome.cs:40）——全局保护图互斥
   //   + GeneralPlacementTiles 默认内容扫描（单参重载）
-  if (!canPlaceStructure(gs, area, 0, st)) return false;
+  if (!canPlaceStructure(gs, area, 0, st)) { mbProbe('MS7canFail', () => [area.x0, area.y0]); return false; }
   // 矿石地板(cs:44):All(shapeData)+SetTile(type, setSelfFrames)
   //   SetTile=Clear(~(Wiring|Actuator)) 连墙带液带帧带坡全清后写 type
   //   ★setSelfFrames+setNeighborFrames(默认真)→ 中心+四邻五连 TileFrame(resetFrame:
@@ -872,7 +962,7 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
   const detX = x - (dir > 0 ? -num3 : num3);
   let barGround = findDown(barX, y - 3);
   const detGround = findDown(detX, y - 3);
-  if (barGround < 0 || detGround < 0) return false;
+  if (barGround < 0 || detGround < 0) { mbProbe('MS8findFail', () => [barX, detX, barGround, detGround]); return false; }
   barGround--; // result.Y--
   const detTop = detGround - 1; // result2.Y--
   // 炸药桶地面 slope/half 复位(cs:55-57)
@@ -921,7 +1011,7 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
   //   （CanKillTile 对非活性格恒 false——门必须先验活性,与 vanilla 短路序一致。）
   if (hfIs1457() && st.inBounds(barX, barGround)) {
     const ai0 = st.idx(barX, barGround);
-    if (st.flags[ai0] !== 0 && !canKillTileMB(st, barX, barGround)) return false;
+    if (st.flags[ai0] !== 0 && !canKillTileMB(st, barX, barGround)) { mbProbe('MS9killFail', () => []); return false; }
   }
   // PlaceTile(result, 141)(cs:71)——前奏 Clear(锚格 Tile|TilePaint|Slope,cs:59501)+
   //   Place1x1 门(Wiring.IsAMechanism[141]→下方非巨石族 && SolidTile2(地) && 锚格非活性)
@@ -939,9 +1029,10 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
         const gi = st.idx(barX, barGround + 1);
         if (st.flags[gi] === 0) return false;
         const gt = st.type[gi]!;
-        // SolidTile2（cs:70178）—— !inActive() 生成期恒真（XXXX，见 solidTileStrict 注）
-        return vanGenSolidType(gt) && !TILE_DEFS[gt]?.platform
-          && st.slope[gi] === 0 && st.half[gi] === 0
+        // ★III12：SolidTile2（cs:70665）直读 Main.tileSolid → mbTileSolidGen；C# 无
+        //   solidTop 排除（平台 19 族 tileSolid 亦真曾多排），巨石排除来自 Place1x1
+        //   IsAMechanism 支的 !Boulders[tile2.type]（WorldGen.cs:45610/TileID.cs:132）
+        return mbTileSolidGen(gt) && st.slope[gi] === 0 && st.half[gi] === 0
           && !BOULDER_TILES.has(gt);                                                   // 非巨石族地板
       })();
       if (gOK && !wasActive) {
@@ -1037,11 +1128,15 @@ function placeMahoganyTree(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink | undefined, ox: number, oy: number,
 ): boolean {
   const sink: ChestSink = chests ?? [];
+  // ★III12：相位细分（x86 SW_MTLOG 同名标签）——d 相对树入口的累计掷数
+  const d0t0 = mbDraws();
+  const mtag = (tag: string): void => mbProbe(tag, () => `${ox},${oy} +${mbDraws() - d0t0}`);
   // ① Find((origin.X-3, origin.Y), Chain(Down(200), IsSolid().AreaAnd(6,1)))(cs:11-13)
   const condSolid = (x: number, y: number): boolean => {
     if (x < 10 || y < 10 || x >= st.w - 10 || y >= st.h - 10) return false;   // InWorld(x,y,10)
     const i = st.idx(x, y);
-    return st.flags[i] !== 0 && vanGenSolidType(st.type[i]);                  // Main.tileSolid
+    // ★III12：Conditions.IsSolid 同款 Main.tileSolid 直读 → mbTileSolidGen
+    return st.flags[i] !== 0 && mbTileSolidGen(st.type[i]);                   // Main.tileSolid
   };
   let rx = -1, ry = -1;
   {
@@ -1101,7 +1196,7 @@ function placeMahoganyTree(
     const num4 = c(ICE_T) + c(FROZEN_T) + c(FLOWER_T) + c(FLOWER2_T);
     if (c(SNOW_T) + num4 > num3 || num2 > num3 || num3 < 50) return false;
   }
-  segProbe('mGates');
+  mtag('ok-canplace');
   // ⑤ 摆幅三掷(cs:46-52)
   const num5 = Math.trunc((ry - r2y - 9) / 5);
   const num6 = num5 * 5;
@@ -1109,7 +1204,7 @@ function placeMahoganyTree(
   const num8 = rng.next() + 1.0;
   let num9 = rng.next() + 2.0;
   if (rng.nextInt(2) === 0) num9 = -num9;
-  segProbe('mSwing');
+  mtag('swing');
   // 干身段动作链(纯写入,零掷骰):
   //   A: SkipTiles→SkipWalls(87)→RemoveWall→SetTile(383)→SetFrames
   //   B/C: SkipTiles→SkipWalls(87)→ClearTile(frameNeighbors)→PlaceWall(78)
@@ -1153,6 +1248,7 @@ function placeMahoganyTree(
     genRect(rx + num7 + num11 + 2, ry - (i + 1) * 5, 2 + span, 5, shaftCell);
     genRect(rx + num7 + 2, ry - i * 5, 2, 2, shaftCell);
     num7 = num10;
+    mtag(`shaft${i}`);
   }
   segProbe('mShaft');
   // ⑦⑧ 树冠分枝(ShapeBranch ×4,cs:70-81)+叶球(cs:82-87)
@@ -1211,15 +1307,20 @@ function placeMahoganyTree(
     let num15 = rng.next() * 0.7853981852531433 - 0.7853981852531433 - 0.2;
     if (num12 === 0) num15 -= 1.5707963705062866;
     segProbe(`mB${j}pre`);
+    mtag(`b${j}pre`);
     shapeBranch(num15, rng.int(12, 15), rx + num14, ry - Math.trunc(num5 * 5 * num13));
     segProbe(`mB${j}post`);
+    mtag(`b${j}post`);
     num12 = 6 - num12;
   }
   const num16 = Math.trunc(Math.sin(num5 / 12 * num8 * PI_F) * num9);
   segProbe('mTop1pre');
+  mtag('top1pre');
   shapeBranch(-0.6853981852531433, rng.int(16, 21), rx + 6 + num16, ry - num6);
   segProbe('mTop1post');
+  mtag('top1post');
   segProbe('mTop2pre');
+  mtag('top2pre');
   shapeBranch(-2.45619455575943, rng.int(16, 21), rx + num16, ry - num6);
   segProbe('mTop2post');
   // 叶球:每个 endpoint 的 Circle(4)+Blotches(4,2)+SkipTiles(383,21,467,226,237)+
@@ -1228,6 +1329,7 @@ function placeMahoganyTree(
   //        叶球循环本身不追加(Blotches/Circle 不 OutputEndpoints)——快照安全。
   const LEAF_SKIP = idsByVanillaSheet(383, 21, 467, 226, 237);
   segProbe('mLeafPre');
+  mtag(`leafs-pre n=${endpoints.length}`);
   for (const [cx, cy] of endpoints) {
     const r = 4, rr = (r + 1) * (r + 1);
     for (let dy = -r; dy <= r; dy++) {
@@ -1274,6 +1376,7 @@ function placeMahoganyTree(
     genFrameNeighbors(st, rng, x, y, 'setTile');   // SetTile(383,setSelfFrames)+setNeighborFrames 默认真（cs:88，UUUU 补掷）
   };
   segProbe('mLeafPost');
+  mtag('leafs-post');
   for (let k = 0; k < 4; k++) {
     const angle0 = k / 3 * 2 + 0.57075;
     const distance = rng.int(40, 59);   // Next(40, 60)
@@ -1297,10 +1400,14 @@ function placeMahoganyTree(
     }
   }
   segProbe('mRoots');
+  mtag('roots-post');
   // ⑩ 常春藤箱(cs:93):AddBuriedChest(x+3, y-1, GetNextJungleChestItem(), false, 10, false, 0)
   segProbe('mChestPre');
+  const jungleLoot = nextJungleItem(gs, rng);
+  mtag('jitem');
   placeBuriedChest(st, rng, gs, sink, rx + 3, ry - 1,
-    { style: 10, loot: nextJungleItem(gs, rng), trySlope: false, notNearOtherChests: false, flags: { ivy: true } });
+    { style: 10, loot: jungleLoot, trySlope: false, notNearOtherChests: false, flags: { ivy: true } });
+  mtag('chest-post');
   segProbe('mChestPost');
   // ⑪ structures.AddProtectedStructure(Rectangle(result.X-30, result.Y-30, 60, 60))(cs:94)
   addProtectedStructure(gs, { x0: rx - 30, y0: ry - 30, x1: rx + 30, y1: ry + 30 }, 0);
@@ -1333,6 +1440,34 @@ export function countWires(st: TileStore, x: number, y: number, size: number): n
  *  非实心格洪水填充计数。墙≠0/墙 244/微光液体/贴边 → 直接判满(3500);
  *  结果只与连通域相关,与遍历序无关(< 40 门槛与 3500 封顶均序不变) */
 const MAX_TILE_COUNT = 3500;   // WorldGen.maxTileCount(cs:4194)
+/** ★III7:DeadMans 候选 IsAGoodSpot 专用——同 countTiles 但 SolidTile 含
+ *  原版生成期 tileSolid[0]=true(Main.cs:7995);曾用碰撞语义 air=false ⇒
+ *  洪水填充连通域计算偏小/偏大随机翻转(40 门槛错收)。 */
+export function countTilesDM(st: TileStore, x0: number, y0: number): number {
+  let count = 0;
+  const seen = new Set<number>();
+  const stack: Array<[number, number]> = [[x0, y0]];
+  while (stack.length > 0) {
+    if (count >= MAX_TILE_COUNT) return count;
+    const [x, y] = stack.pop()!;
+    if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) return MAX_TILE_COUNT;
+    const k = y * st.w + x;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const i = st.idx(x, y);
+    if (st.wall[i] === 244) return MAX_TILE_COUNT;
+    if (st.liquid[i] > 0 && st.liquidType[i] === LIQUID_TYPE.SHIMMER) return MAX_TILE_COUNT;
+    if (st.wall[i] !== 0) return MAX_TILE_COUNT;
+    const t = st.type[i];
+    const solid = !(t === 0 || vanGenSolidType(t));
+    if (!solid) {
+      count++;
+      stack.push([x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]);
+    }
+  }
+  return count;
+}
+
 export function countTiles(st: TileStore, x0: number, y0: number): number {
   let count = 0;
   const seen = new Set<number>();
@@ -1384,21 +1519,27 @@ export class DeadMansChestBiome {
     const forbid = new Set(GENERAL_PLACEMENT_FORBID);
     for (const t of idsByVanillaSheet(21, 467, 138, 664, 712, 713, 714, 715)) forbid.delete(t);
     const out: Array<{ x: number; y: number }> = [];
+    let candSlot = -1;
     for (const ch of this.chestList) {
+      candSlot++;
       const { x, y } = ch;
-      if (!st.inBounds(x, y)) continue;
+      if (!st.inBounds(x, y)) { segProbe(`CAND ${x},${y} good=False`); continue; }
       const i = st.idx(x, y);
       // 金箱锚点:type 21 + style 1 + 2×2 左上角(frameX%36==0 且 /36==1 且 frameY==0)
       if (st.type[i] !== CHEST || st.frameY[i] !== 0 || st.frameX[i] % 36 !== 0
-        || Math.trunc(st.frameX[i] / 36) !== 1) continue;
-      if (!this.isAGoodSpot(x, y)) continue;
+        || Math.trunc(st.frameX[i] / 36) !== 1) { segProbe(`CAND ${x},${y} good=False`); continue; }
+      if (!this.isAGoodSpot(x, y)) { segProbe(`CAND ${x},${y} good=False`); continue; }
       this.clearCaches();
       const px = x, py = y + 1;
       this.findBoulderTrapSpots(px, py);
       this.findDartTrapSpots(px, py);
-      if (this.areThereEnoughTraps()
-        && canPlaceStructure(this.gs, { x0: x, y0: y, x1: x + 1, y1: y + 1 }, 10, st, forbid)) {
+      // III7 探针:CAND.good 仅反映 IsAGoodSpot(x86 同口径);CanPlace 结果另记
+      segProbe(`CAND ${x},${y} good=True`);
+      const good = this.areThereEnoughTraps()
+        && canPlaceStructure(this.gs, { x0: x, y0: y, x1: x + 1, y1: y + 1 }, 10, st, forbid);
+      if (good) {
         out.push({ x, y });
+        segProbe(`ADDED slot=${candSlot} ${x},${y}`);
       }
     }
     return out;
@@ -1485,41 +1626,51 @@ export class DeadMansChestBiome {
     }
   }
 
-  /** PlaceBoulderTrapSpot(cs:236-290) */
+  /** PlaceBoulderTrapSpot(cs:236-290)。III7 探针:BCHK 门级行,x86 rig 同格式 */
   private placeBoulderTrapSpot(x: number, y: number, yPush: number): void {
     const st = this.st;
+    let fail = '';
     const counts = new Map<number, number>();
+    gateA:
     for (let i = x; i < x + 2; i++) {
       for (let j = y - 4; j <= y; j++) {
-        if (!st.inBounds(i, j)) return;
+        if (!st.inBounds(i, j)) { fail = `oobA(${i},${j})`; break gateA; }
         const idx = st.idx(i, j);
         const t = st.type[idx];
-        if (st.flags[idx] && !TILE_DEFS[t]?.framed && !!TILE_DEFS[t]?.solid) {
+        if (st.flags[idx] && !TILE_DEFS[t]?.framed && mbTileSolidGen(t)) {
           counts.set(t, (counts.get(t) ?? 0) + 1);
         }
-        if ((st.flags[idx] && NOT_CLEARABLE.has(t)) || (st.flags[idx] && isContainer(t))) return;
+        if ((st.flags[idx] && NOT_CLEARABLE.has(t)) || (st.flags[idx] && isContainer(t))) {
+          fail = `gateA(${i},${j},t${mbSheetOf(t)})`; break gateA;
+        }
       }
     }
-    for (let k = x - 1; k < x + 3; k++) {
-      for (let l = y - 5; l <= y - 2; l++) {
-        if (!st.inBounds(k, l)) return;
-        const idx = st.idx(k, l);
-        if (!st.flags[idx] || isContainer(st.type[idx])) return;
+    if (fail === '') {
+      ringB:
+      for (let k = x - 1; k < x + 3; k++) {
+        for (let l = y - 5; l <= y - 2; l++) {
+          if (!st.inBounds(k, l)) { fail = `oobB(${k},${l})`; break ringB; }
+          const idx = st.idx(k, l);
+          if (!st.flags[idx] || isContainer(st.type[idx])) { fail = `gateB(${k},${l},t${mbSheetOf(st.type[idx])})`; break ringB; }
+        }
       }
     }
-    // ★R3-21（1457 DeadMansChestBiome.cs:262-266 FindBoulderTrapSpot_CheckSpot，
-    //  1456 无此段）：陷阱位正下两格 (x,y+1)/(x+1,y+1) 均实心 → 放弃该位
-    //  （防陷阱巨石被埋/引线布局异形）
-    if (st.inBounds(x, y + 1) && st.inBounds(x + 1, y + 1)
-      && st.flags[st.idx(x, y + 1)] && st.flags[st.idx(x + 1, y + 1)]) return;
-    for (let m = x - 2; m <= x + 3; m++) {
-      for (let n = y - 6; n <= y - 1; n++) {
-        if (!st.inBounds(m, n)) continue;
-        const idx = st.idx(m, n);
-        if (st.flags[idx] && (isContainer(st.type[idx]) || BOULDER_FORBID.has(st.type[idx])
-          || st.type[idx] === LIHARD || st.type[idx] === LIHARD_ALTAR)) return;
+    if (fail === '' && st.inBounds(x, y + 1) && st.inBounds(x + 1, y + 1)
+      && st.flags[st.idx(x, y + 1)] && st.flags[st.idx(x + 1, y + 1)]) fail = 'gateC';
+    if (fail === '') {
+      ringD:
+      for (let m = x - 2; m <= x + 3; m++) {
+        for (let n = y - 6; n <= y - 1; n++) {
+          if (!st.inBounds(m, n)) continue;
+          const idx = st.idx(m, n);
+          if (st.flags[idx] && (isContainer(st.type[idx]) || BOULDER_FORBID.has(st.type[idx])
+            || st.type[idx] === LIHARD || st.type[idx] === LIHARD_ALTAR)) {
+            fail = `gateD(${m},${n},t${mbSheetOf(st.type[idx])})`; break ringD;
+          }
+        }
       }
     }
+    if (fail !== '') { segProbe(`BCHK ${x},${y} FAIL=${fail}`); return; }
     let best = -1;
     // 原版按 type 升序扫全表取严格最大(cs:281-288)——平票取低 id,按 id 升序遍历对齐
     for (const t of [...counts.keys()].sort((a, b) => a - b)) {
@@ -1527,6 +1678,7 @@ export class DeadMansChestBiome {
     }
     // 原版全零计数时 num6 收敛到 0(泥土)——本仓 tile id 空间不同,取 DIRT 兜底
     this.boulders.push({ x, y, yPush: yPush - 1, bestType: best < 0 ? DIRT : best });
+    segProbe(`BCHK ${x},${y} OK push=${yPush - 1}`);
   }
 
   /** FindDartTrapSpots(cs:292-308) */
@@ -1545,19 +1697,21 @@ export class DeadMansChestBiome {
     this.wires.push({ x: px, y: y + num, dirX: 0, dirY: -1, steps });
   }
 
-  /** FindDartTrapSpotSingle(cs:310-328) */
+  /** FindDartTrapSpotSingle(cs:310-328)。III7:DCHK 门级行 */
   private findDartTrapSpotSingle(px: number, py: number, directionX: number): boolean {
     const st = this.st;
     for (let i = 0; i < 20; i++) {
       const x = px + i * directionX;
-      if (!st.inBounds(x, py)) return false;
+      if (!st.inBounds(x, py)) { segProbe(`DCHK ${px},${py} dir=${directionX} i=${i} oob`); return false; }
       const idx = st.idx(x, py);
       const t = st.type[idx];
       const active = st.flags[idx] !== 0;
       // 非容器 && 实心 → 5 格外且可清 → 飞镖锚点;否则失败
-      if (!(active && isContainer(t)) && active && !!TILE_DEFS[t]?.solid) {
-        if (i >= 5 && (st.wire[idx] & WIRE_ACTUATOR) === 0 && !TILE_DEFS[t]?.framed
-          && !NOT_CLEARABLE.has(t)) {
+      if (!(active && isContainer(t)) && active && mbTileSolidGen(t)) {
+        const ok = i >= 5 && (st.wire[idx] & WIRE_ACTUATOR) === 0 && !TILE_DEFS[t]?.framed
+          && !NOT_CLEARABLE.has(t);
+        if (!ok) segProbe(`DCHK ${px},${py} dir=${directionX} i=${i} t=${(t===0?0:SHEET_OF_MB[t])} act=${((st.wire[idx] & WIRE_ACTUATOR) !== 0) ? 1 : 0}`);
+        if (ok) {
           this.darts.push({ x: px, y: py, directionX, xPush: i, trapX: x, trapY: py });
           return true;
         }
@@ -1604,7 +1758,7 @@ export class DeadMansChestBiome {
     const idx = st.idx(x, y);
     const t = st.type[idx];
     if (st.flags[idx] && isContainer(t)) return false;
-    if (st.flags[idx] && !!TILE_DEFS[t]?.solid && !TILE_DEFS[t]?.framed
+    if (st.flags[idx] && mbTileSolidGen(t) && !TILE_DEFS[t]?.framed
       && !TILE_DEFS[t]?.platform) return true;
     return false;
   }
@@ -1704,7 +1858,8 @@ export class DeadMansChestBiome {
             flag = true;
           } while (!st.flags[idx]);
           st.wire[idx] |= WIRE_RED;
-          if (vanGenSolidType(st.type[idx]!)) st.wire[idx] |= WIRE_ACTUATOR;
+          // ★III12：Main.tileSolid[tile.type] 直读（DeadMansChestBiome.cs:578）→ mbTileSolidGen
+          if (mbTileSolidGen(st.type[idx]!)) st.wire[idx] |= WIRE_ACTUATOR;
         } else {
           st.setTileSilent(i, j, 0);                       // ClearTile
         }
@@ -2199,12 +2354,12 @@ function placeEnchantedSwordShrine(
 // 3. placeLavaTrap(WorldGen.cs:8648-8732;调用点 cs:22093-22127)
 // ============================================================
 
-/** placeLavaTrap 湖底/腔底实心门(cs:8677/8690/8715):active 且 type 过
- *  生成期 tileSolid 且非 tileSolidTop——无 half/slope/inActive 排除 */
+/** placeLavaTrap 湖底/腔底实心门(cs:8677/8690/8715):type 过生成期 Main.tileSolid
+ *  直读且非 tileSolidTop——无 half/slope/inActive 排除。★III12：直读数组 → mbTileSolidGen */
 function vanGenSolidSolidTopGate(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const t = st.type[st.idx(x, y)]!;
-  return vanGenSolidType(t) && !TILE_DEFS[t]?.platform;
+  return mbTileSolidGen(t) && !TILE_DEFS[t]?.platform;
 }
 
 /** 地狱熔岩陷阱:岩浆湖底掏腔,湖底层致动石栅 + 压板 135 style7 + 红线。

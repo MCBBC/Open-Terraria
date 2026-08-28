@@ -52,6 +52,7 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     seedFlags: world.seedFlags,
     weather: world.weatherToSave(), bestiary: world.bestiary.toSave(),
     pendingTownNpcs: world.pendingTownNpcs,
+    starterTownNpcs: world.starterTownNpcs,
     chests: world.chests,
     signs: world.signs,
     furnitureItems: world.furnitureItems,

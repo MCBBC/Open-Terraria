@@ -728,7 +728,8 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     // VVVVV：Check1x2 椅族/CheckOrb 珠族/484 巨石仙人掌同列（自读帧族）
     || sheet === 15 || sheet === 20 || sheet === 216 || sheet === 338 || sheet === 390
     || sheet === 493 || sheet === 497 || sheet === 590 || sheet === 595 || sheet === 615
-    || sheet === 12 || sheet === 31 || sheet === 639 || sheet === 696 || sheet === 484)) {
+    || sheet === 12 || sheet === 31 || sheet === 639 || sheet === 696 || sheet === 484
+    || sheet === 91)) {   // IIIIIII3：CheckBanner 组帧校验自读帧族（91 同列 sparse 免疫）
     return true;   // UUUU：178 同列读帧族（sparse 模式下嵌合帧会伪杀 CheckAndAdjust）
   }
   // ★AAAAAA：平台连接帧（TileFrameImportant 的 Platforms 早支，cs:86110-86230）——
@@ -739,6 +740,10 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
   }
   switch (sheet) {
     case 4: checkTorchSweep(st, ctx, x, y); return true;    // AAAAAA：CheckTorch（TileID.Sets.Torches={4}）
+    // IIIIIII3 批补（1457 cs:86979-81 派发 case 91 → CheckBanner cs:46493）：旗帜 1×3
+    //   竖组完整性 + 上锚门整组杀——g #105 (564,328) 孤儿旗帜实证（此前仅 LiquidSim
+    //   前置扫镜像覆盖沉降级联，引擎主臂缺席）。稀疏模式同列豁免见上方 frameSparse 清单。
+    case 91: checkBannerSweep(st, ctx, x, y); return true;
     case 518: checkLilyPadSweep(st, ctx, x, y); return true;
     case 519: checkCatTailSweep(st, ctx, x, y); return true;
     case 549: checkSeaweedSweep(st, ctx, x, y); return true;
@@ -868,6 +873,71 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
       return false;   // 未移植族（见文件头清单）——非 frameImportant 路径由此回落
   }
 }
+
+/** CheckBanner 上锚 NotReallySolid 族（TileID.Sets.NotReallySolid={387,388,10}，
+ *  cs:46541 消费——LiquidSim 前置扫同源常量；本仓"同源副本禁 import"惯例） */
+const NOT_REALLY_SOLID_BANNER = new Set([387, 388, 10]);
+
+/** CheckBanner（1457 cs:46493-46658，派发 cs:86979 case 91）——IIIIII3 批补引擎主臂。
+ *  1×3 竖排旗帜：frameY/18 反解组顶（样式段=3 行/样式）+ 三格组 type/帧全等校验
+ *  + 上格锚门（nactive + 实心族 + 平台特例）→ 任一破 destroyObject 整组 KillTile。
+ *  帧反解 num=j-row、组帧基 k*18+num2*54 与锚门五连判逐句镜像 LiquidSim.checkBannerGen
+ *  （s22222/g 链沉降级联已验证的近似口径：tileSolid≈solid||platform、tileSolidTop≈
+ *  platform、TileID.Sets.Platforms≈platform）。生成期 Item.NewItem 掉落支不移植（无实体）；
+ *  越界格视作 new Tile()（组失配恒杀）。KillTile 二次调用撞 !flags 早退=零掷零写。 */
+function checkBannerSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  if (ctx.destroyObject) return;                                     // cs:46495 头闸
+  const i0 = st.idx(x, y);
+  const selfType = st.type[i0]!;                                     // cs:46494 派发参（字节捕获）
+  let row = Math.trunc(st.frameY[i0]! / 18);
+  let style = 0;
+  while (row >= 3) { row -= 3; style++; }                            // 样式段
+  const top = y - row;                                               // 组顶 y（cs:46503）
+  const fx0 = st.frameX[i0]!;
+  let bad = false;
+  for (let k = 0; k < 3; k++) {                                      // cs:46505-23 组校验
+    const yy = top + k;
+    if (yy < 0 || yy >= st.h) { bad = true; continue; }              // Main.tile==null → 新 Tile→失配
+    const q = st.idx(x, yy);
+    if ((st.flags[q] & 1) === 0) bad = true;
+    else if (st.type[q] !== selfType) bad = true;
+    else if (st.frameY[q] !== k * 18 + style * 54) bad = true;
+    else if (st.frameX[q] !== fx0) bad = true;
+  }
+  const ay = top - 1;                                                // 上锚（cs:46532-53）
+  if (ay < 0 || ay >= st.h) { bad = true; }
+  else {
+    const a = st.idx(x, ay);
+    if ((st.flags[a] & 1) === 0 || (st.wire[a] >>> 5) & 1) { bad = true; }   // !nactive
+    else {
+      const at = st.type[a];
+      const d = TILE_DEFS[at];
+      const topSlope = st.slope[a] === 1 || st.slope[a] === 2;
+      const halfBrick = st.half[a] !== 0;
+      const bottomSlope = st.slope[a] === 3 || st.slope[a] === 4;
+      const tileSolid = !!d && (d.solid || d.platform);
+      const tileSolidTop = !!d?.platform;
+      const isPlatformFamily = !!d?.platform;
+      const anchorSolid = topSlope || halfBrick || tileSolid;        // cs:46541 num3
+      const anchorTopOk = !tileSolidTop || (isPlatformFamily && (halfBrick || topSlope));
+      let ok = anchorSolid && anchorTopOk
+        && !NOT_REALLY_SOLID_BANNER.has(SWEEP_SHEET[at] ?? -1)
+        && !bottomSlope;
+      if (isPlatformFamily || SWEEP_SHEET[at] === 380) ok = true;    // cs:46544 平台/花盆箱特例
+      if (!ok) bad = true;
+    }
+  }
+  if (!bad) return;
+  ctx.destroyObject = true;                                          // cs:46556
+  for (let k = 0; k < 3; k++) {
+    const yy = top + k;
+    if (yy < 0 || yy >= st.h) continue;
+    const q = st.idx(x, yy);
+    if (st.type[q] === selfType) killTileGen(st, ctx, x, yy);   // cs:46560 不查 active（vanilla 同）
+  }
+  ctx.destroyObject = false;                                         // cs:46657
+}
+
 
 /** Check2x2 上方箱族豁免（cs:48483-85：BasicChest{21,467}+BasicChestFake{441,468}
  *  +88 梳妆台+470 人偶架+475 帽架；type 裸读不查 active——ghost type 保真）。
@@ -2409,8 +2479,17 @@ function checkLilyPadSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): 
   }
 }
 
-/** CheckCatTail（cs:58764，生成期 isGeneratingOrLoadingWorld=真：Next(4) 短路为真） */
+/** CheckCatTail（1457 cs:59231-59404，派发 cs:86248 case 519）——IIIIII3 批全量 1:1
+ *  重写。此前整缺「组顶反解」段（cs:59355-59371：num 先复位 num2-1、格失活时向上
+ *  回扫首个活跃 519、再连续上行到组顶）→ 水门 b/d 读到「最高含水格」而非「组顶」，
+ *  孤儿香蒲列判 valid 漏杀 ×7（g #105 x=2864 列：rederive 后闸 d 读 (735/734) 正中
+ *  stem 带 → 整列杀）。另补 frameX>18 中段门（cs:59393-401：num2-1 帧窗 [36,72]、
+ *  组顶 fx≥90 门与 108≤fx≤162 → fx=90 归位【写】）。生成期 isGeneratingOrLoadingWorld
+ *  ⇒ 两处 `|| genRand.Next(4)==0` 恒走真支（零掷）。★AAAAAA 批钉值保持：
+ *  catTailDistance=8（cs:4318）+ 地基档位表 2/477→0、53→18、199/234/662→54、
+ *  23/112/661→72、70→90。Main.tile null 早退点以 inBounds 守卫镜像。 */
 function checkCatTailSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
   let flag = false;
   let num2 = y;
   while (num2 < st.h - 50 && (!st.flags[st.idx(x, num2)]
@@ -2419,20 +2498,21 @@ function checkCatTailSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): 
     if (st.flags[st.idx(x, num2)] && SWEEP_SHEET[st.type[st.idx(x, num2)]] !== 519) flag = true;
     if (!st.flags[st.idx(x, num2)]) break;
     num2++;
+    if (!st.inBounds(x, num2)) return;                                 // cs:59245 null 早退
   }
   let num = num2 - 1;
-  while (num > 50 && st.liquid[st.idx(x, num)]! > 0) {
-    if ((st.flags[st.idx(x, num)] && SWEEP_SHEET[st.type[st.idx(x, num)]] !== 519)
-      || (st.liquid[st.idx(x, num)]! > 0 && st.liquidType[st.idx(x, num)] !== LIQUID_TYPE.WATER)) flag = true;
+  if (!st.inBounds(x, num)) return;
+  while (num > 50 && st.liquid[st.idx(x, num)]! > 0) {                 // cs:59251 liquid>0 且 >50
+    const q = st.idx(x, num);
+    if ((st.flags[q] && SWEEP_SHEET[st.type[q]] !== 519)
+      || (st.liquid[q]! > 0 && st.liquidType[q] !== LIQUID_TYPE.WATER)) flag = true;
     num--;
+    if (!st.inBounds(x, num)) return;                                  // cs:59257 null 早退
   }
   num++;
+  if (!st.inBounds(x, num)) return;
   const num3 = num;
-  // ★AAAAAA：catTailDistance=8（cs:4347 静态值）——曾误 40；地基→fy 档位表
-  //   cs:58822-58841（2/477→0、53→18、199/234/662→54、23/112/661→72、70→90）
-  //   曾整体错一档（36/54/72）+ 幻影 90 支——placeCatTail 侧写对档后本扫把
-  //   蘑菇草 70 基的香蒲重帧成 72（s519 367 格帧债唯一源）。
-  if (num2 - num3 > 8 /* catTailDistance */) flag = true;
+  if (num2 - num3 > 8 /* catTailDistance cs:59322 */) flag = true;
   const g = sheetAt2(st, x, num2);
   let fy = -1;
   if (g === 2 || g === 477) fy = 0;
@@ -2440,14 +2520,35 @@ function checkCatTailSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): 
   else if (g === 199 || g === 234 || g === 662) fy = 54;
   else if (g === 23 || g === 112 || g === 661) fy = 72;
   else if (g === 70) fy = 90;
-  if (!st.flags[st.idx(x, num2)] || (st.wire[st.idx(x, num2)] & 32)) flag = true;
+  if (!st.flags[st.idx(x, num2)] || (st.wire[st.idx(x, num2)] & 32)) flag = true;   // !nactive
   if (fy < 0) flag = true;
-  if (st.inBounds(x, num2 - 1) && st.liquid[st.idx(x, num2 - 1)]! < 127) flag = true;   // 生成期恒真分支
-  const ki = st.idx(x, num);
-  if (st.frameX[ki]! >= 180 && st.liquid[ki]! > 127) flag = true;                       // 同上
+  // ── 组顶反解段（cs:59355-59371）──
+  num = num2 - 1;
+  if (!st.inBounds(x, num)) return;
+  if (!st.flags[st.idx(x, num)]) {                                     // 地基上方格失活 → 回扫组内首株
+    for (let q = num; q >= num3; q--) {
+      if (!st.inBounds(x, q)) return;
+      const qi = st.idx(x, q);
+      if (st.flags[qi] && SWEEP_SHEET[st.type[qi]] === 519) { num = q; break; }
+    }
+  }
+  while (st.inBounds(x, num) && st.flags[st.idx(x, num)]
+    && SWEEP_SHEET[st.type[st.idx(x, num)]] === 519) num--;            // 连续上行过组体
+  num++;                                                              // 收敛到最顶端 519
+  if (!st.inBounds(x, num)) return;
+  // ── 生成期水门（Next(4) 全部短路为零掷；顺序逐句对齐 cs:59374-59401）──
+  if (st.inBounds(x, num2 - 1) && st.liquid[st.idx(x, num2 - 1)]! < 127) flag = true;
+  const topi = st.idx(x, num);
+  if (st.frameX[topi]! >= 180 && st.liquid[topi]! > 127) flag = true;  // 花头没水
+  if (st.frameX[topi]! > 18) {                                         // 中段帧门（此前整缺）
+    const fm1 = st.inBounds(x, num2 - 1) ? st.frameX[st.idx(x, num2 - 1)]! : -1;
+    if (fm1 < 36 || fm1 > 72) flag = true;
+    else if (st.frameX[topi]! < 90) flag = true;
+    else if (st.frameX[topi]! >= 108 && st.frameX[topi]! <= 162) st.frameX[topi] = 90;   // 归位写
+  }
   if (num2 > num + 4 && st.inBounds(x, num + 4) && st.inBounds(x, num + 3)
     && st.liquid[st.idx(x, num + 4)] === 0
-    && SWEEP_SHEET[st.type[st.idx(x, num + 3)]] === 519) flag = true;
+    && SWEEP_SHEET[st.type[st.idx(x, num + 3)]] === 519) flag = true;   // 头探出水面
   if (flag) {
     let from = num3;
     if (num < num3) from = num;

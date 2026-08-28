@@ -91,15 +91,17 @@ export const TOWN_NPC_PROFILE: Record<number, TownNpcProfile> = {
  */
 export function townNpcProfileSheet(id: number, variant: number, alt: number, variationIdx = -1): string | null {
   // 宠物三族（未入 TOWN_NPC_PROFILE——VariantNPCProfile 无 Legacy 档名表）：
-  // root = 变体表键名（Cat/Dog/Bunny），变体档贴图 {root}_{Variant}.png
+  // root = 变体表键名（Cat/Dog/Bunny），变体档贴图 {root}_{Variant}.png。
+  // ★原版 Profiles.GetTextureNPCShouldUse（Profiles.cs）：IndexOutOfRange → num=0
+  //   缺省首变体（townNpcVariationIndex 缺省 0=Siamese/Labrador/White 即"默认外观"）
+  //   ——_Default 基础档在 vanilla 素材里根本不存在（TownNPCs/ 只落 6+6+6 变体),
+  //   曾对 -1 请求 Default = 404+宠物隐身（bad.log 实锤）。
+  //   且宠物 Profile 未链 SetPartyTextures（TownNPCProfiles.cs:139-147）→ 无 _Party
+  //   档,派对期 alt=1 同用常态变体贴图（vanilla 404 兜底=同款行为）
   const petVariants = TOWN_PET_VARIANTS[id];
   if (petVariants && !petVariants.includes('__')) {
-    const root = `vanilla/${id === 637 ? 'Cat' : id === 638 ? 'Dog' : 'Bunny'}`;
-    if (variationIdx >= 0 && variationIdx < petVariants.length) {
-      const vn = petVariants[variationIdx];
-      return alt === 1 ? `${root}_${vn}_Party.png` : `${root}_${vn}.png`;
-    }
-    return alt === 1 ? `${root}_Default_Party.png` : `${root}_Default.png`;
+    const vn = petVariants[variationIdx >= 0 && variationIdx < petVariants.length ? variationIdx : 0];
+    return `vanilla/${id === 637 ? 'Cat' : id === 638 ? 'Dog' : 'Bunny'}_${vn}.png`;
   }
   const p = TOWN_NPC_PROFILE[id];
   if (!p) return null;

@@ -4,7 +4,7 @@
 //  - UpdateLiquid() 分片调度 + kill 清扫（Liquid.cs:691-833）
 //  - Update() 单格流程：实心格/地狱蒸发/岩浆蜂蜜降速与交互/下灌/侧向均流/kill 维护（Liquid.cs:298-674）
 //  - LavaCheck/HoneyCheck：水+岩浆→黑曜石(56)、岩浆+蜂蜜→脆蜂蜜块(230)、水+蜂蜜→蜂蜜块(229)（Liquid.cs:888-1115）
-//  - QuickWater/SettleWaterAt 读档沉降搬运（Liquid.cs:85-212）+ WaterCheck 重建列表（WorldGen.cs:48955）
+//  - QuickWater/SettleWaterAt 读档沉降搬运（Liquid.cs:85-212）+ WaterCheck 重建列表（1456 WorldGen.cs:81154-81225 / 1457 :81692-81763）
 // liquidType 编码沿用本仓库 store 约定：1=水 2=岩浆 3=蜂蜜 4=微光（原版 0/1/2/3）。
 //  微光语义（1456 Liquid.cs，liquidType 4）：
 //  - 流动性与水完全一致（无岩浆/蜂蜜的 delay 降速），Update 分支 Liquid.cs:543-565
@@ -931,7 +931,11 @@ export class LiquidSim {
         const ni = this.idx(nx, ny);
         if (st.liquidType[ni] === 2) this.addWater(nx, ny);
       }
-      if (myType === 3) {
+      // ★G2#98：嵌套分支判定须重读现值——vanilla 在 Liquid.cs:357-365 的
+      //   else-if 链逐句取 tile5.honey()/shimmer() 现场位，本格可能已被上方
+      //   Lava/Honey/ShimmerCheck 的归零支改写。
+      const myTypeNest = st.liquidType[i5];
+      if (myTypeNest === 3) {
         this.trkSig |= 8;
         this.honeyCheck(x, y);
         if (!this.quickFall) {
@@ -947,7 +951,8 @@ export class LiquidSim {
           const ni = this.idx(nx, ny);
           if (st.liquidType[ni] === 3) this.addWater(nx, ny);
         }
-        if (myType === 4) {
+        const myTypeNest2 = st.liquidType[i5];
+        if (myTypeNest2 === 4) {
           this.trkSig |= 0x10;
           // 微光格：自检交互（Liquid.cs:543-546 tile5.shimmer() → ShimmerCheck），
           // 无降速 delay——流动性与水一致
@@ -969,9 +974,14 @@ export class LiquidSim {
     {
       const bi = this.idx(x, y + 1);
       const belowAmt = st.liquid[bi];
-      const belowType = st.liquidType[bi];
       const belowBlocks = y + 1 >= h ? true : this.blocksLiquid(x, y + 1);
-      if (!belowBlocks && (belowAmt <= 0 || belowType === myType) && belowAmt < 255) {
+      // ★G2#98：下灌门逐语句取 tile5.liquidType() 现场值（Liquid.cs:568 等）；
+      //   Lava/Honey/ShimmerCheck 归零把本格改成水型位后，零转移的 pour 支照样
+      //   进入并无条件 addWater(x,y+1)+skip 双标+左右唤醒（g 链 it131 wrap 带
+      //   (1215,869) 单格回灌分歧的真源）。函数头快照使该支整体静默跳过。
+      const myTypeLive = st.liquidType[i5];
+      const belowType = st.liquidType[bi];
+      if (!belowBlocks && (belowAmt <= 0 || belowType === myTypeLive) && belowAmt < 255) {
         this.trkSig |= 0x20;
         let t = 255 - belowAmt;
         if (t > st.liquid[i5]) t = st.liquid[i5];
@@ -979,7 +989,7 @@ export class LiquidSim {
         const flag = t === 1 && st.liquid[i5] === 255;
         if (!flag) st.liquid[i5] -= t;
         st.liquid[bi] += t;
-        st.liquidType[bi] = myType;
+        st.liquidType[bi] = myTypeLive;
         this.addWater(x, y + 1);
         this.skip[bi] = 1;
         this.skip[i5] = 1;
@@ -1257,7 +1267,7 @@ export class LiquidSim {
       const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
       // 水侧无下方裁切植物杀（`thisLiquidType != 0` 门，Liquid.cs:1289 水恒假）
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
-      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
+      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 1; return; } // ★G2#98：vanilla liquidType(0) 即水型位（Tile.cs:220 case0 清 bits5-6）；JS 1 基水=1，曾写 0 使归零后本格类型域不自洽，下灌门类型等值比较永假
       const type = dt === 4 ? AETHERIUM : dt === 3 ? HONEY_BLOCK : OBSIDIAN;
       // ★BBBBBBB 同修 1：合并支类型保留（Liquid.cs:1319-1320 只清 liquid）
       st.liquid[i5] = 0;
@@ -1327,7 +1337,7 @@ export class LiquidSim {
       if (belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
       // 落块门（Liquid.cs:1294）：下方空 / tileObsidianKill / 容器位 三者其一
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
-      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
+      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 1; return; } // ★G2#98：vanilla liquidType(0) 即水型位（Tile.cs:220 case0 清 bits5-6）；JS 1 基水=1，曾写 0 使归零后本格类型域不自洽，下灌门类型等值比较永假
       const type = dt === 4 ? AETHERIUM : dt === 3 ? CRISPY_HONEY : OBSIDIAN;
       // ★BBBBBBB 同 lavaCheck：合并支类型保留（Liquid.cs:1319-1320 只清 liquid）
       st.liquid[i5] = 0;
@@ -1374,7 +1384,7 @@ export class LiquidSim {
       // tileCut`——岩浆/蜂蜜/微光三路恒真,水路无此支;★R8-23 曾误译 selfT!==1）
       if (belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
-      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; } // 1456 统一 24
+      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 1; return; } // ★G2#98：vanilla liquidType(0) 即水型位（Tile.cs:220 case0 清 bits5-6）；JS 1 基水=1，曾写 0 使归零后本格类型域不自洽，下灌门类型等值比较永假 // 1456 统一 24
       const type = dt === 4 ? AETHERIUM : dt === 2 ? CRISPY_HONEY : HONEY_BLOCK;
       // ★BBBBBBB 同 lavaCheck：合并支类型保留（Liquid.cs:1319-1320 只清 liquid）
       st.liquid[i5] = 0;
@@ -1424,7 +1434,7 @@ export class LiquidSim {
       // tileCut`——岩浆/蜂蜜/微光三路恒真,水路无此支;★R8-23 曾误译 selfT!==1）
       if (belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
-      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
+      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 1; return; } // ★G2#98：vanilla liquidType(0) 即水型位（Tile.cs:220 case0 清 bits5-6）；JS 1 基水=1，曾写 0 使归零后本格类型域不自洽，下灌门类型等值比较永假
       // ★BBBBBBB 同 lavaCheck：合并支类型保留（Liquid.cs:1319-1320 只清 liquid）
       st.liquid[i5] = 0;
       st.liquid[id] = 0;
@@ -1460,7 +1470,7 @@ export class LiquidSim {
     }
     if (st.liquid[i5] < 250 && st.liquid[i5 - st.w] > 0) this.addWater(x, y - 1);
     if (st.liquid[i5] === 0) {
-      st.liquidType[i5] = 0;
+      st.liquidType[i5] = 1; // ★G2#98：vanilla DelWater 尾 `tile4.liquidType(0)` 同为水型位回写（Liquid.cs:1576）
     } else {
       const rq = st.liquid[ir], lq = st.liquid[il];
       if (rq > 0 && rq < 250 && !this.blocksLiquid(x + 1, y) && st.liquid[i5] !== rq) this.addWater(x + 1, y);
@@ -1841,7 +1851,7 @@ export class LiquidSim {
     else if (diff(X, Y + 1)) { if (srcIs) check(X, Y); else check(X, Y + 1); }
   }
 
-  // ================= WaterCheck（WorldGen.cs:48955-49009） =================
+  // ================= WaterCheck（1456 WorldGen.cs:81154 / 1457 :81692） =================
 
   /** 全图自底向上重建活动列表：能流的/液面不齐的/岩浆旁有异种的都入列 */
   waterCheck() {
@@ -1893,25 +1903,34 @@ export class LiquidSim {
     const st = this.world.store;
     this.liquids.length = 0;
     this.numLiquid = 0;
-    this.bufCount = 0; // 原版 WaterCheck 首行清 LiquidBuffer（WorldGen.cs:48959）
-    this.checking.fill(0);
+    this.bufCount = 0; // 原版 WaterCheck 首行清 LiquidBuffer（1456 WorldGen.cs:81157）
+    // ★IIIIIII4（ntb #98 掷窗分歧定罪修复）：checking 位必须【扫描到达时逐格清除】
+    // （1456 WorldGen.cs:81160 / 1457 :81698——循环体内、谓词求值前
+    // `tile.checkingLiquid(false)`），不能用全局 fill(0) 等价替换：
+    // 同一次扫描里先行格的入列会把【未到达格】的 checking 置 1；原版在该格到达时
+    // 先清位再评估自身下灌/侧流/岩浆四向三重入列门 ⇒ 自重新入列可达；旧 JS 却因
+    // 残留位被 AddWater 头部拒收 → 重建表缺员/次序漂移（ntb #98 尾段 ±掷分歧源；
+    // 同时已扫格外的残留位还污染邻居谓词 blocksLiquid 的通行性半边）。dry 格同样
+    // 必须先清位（原版无 continue）。清扫域=内圈 [1..w-2]×[1..h-2] 与 AddWater 的
+    // ≥5 边界守卫一致，边界带残留位不影响任何读者。
     for (let x = 1; x < st.w - 1; x++) {
       for (let y = st.h - 2; y > 0; y--) {
         const i = this.idx(x, y);
+        this.checking[i] = 0; // 到场清位（1456 :81160 / 1457 :81698，dry/wet 一视同仁）
         if (st.liquid[i] === 0) continue;
         const t = st.type[i];
         const il = i - 1, ir = i + 1, iu = i - st.w, id = i + st.w;
-        // ★VVV 批全量转写（WorldGen.cs:81168-81221）：
+        // ★VVV 批全量转写（1456 WorldGen.cs:81167-81220 / 1457 :81704-81757）：
         // 原版首分支谓词= liquid>0 ∧ nactive() ∧ Main.tileSolid ∧ !Main.tileSolidTop。
-        // nactive()= active ∧ !checkingLiquid（Tile.cs:270）。★关键结构差异：不满足
+        // nactive()= active ∧ !checkingLiquid（Tile.cs:270）——因到场已清位，
+        // 此处 checkingLiquid 恒 false ⇒ nactive ≡ active。★关键结构差异：不满足
         // 首分支（含【幽灵格 flags=0 但液体>0】与【在列 checking 格】）一律落 else-if，
         // 幽灵格虽跳过死亡检查、但下灌/侧流三重入列判定**照常执行**——JS 曾把
         // 整个 rebuild 尾段折进 active 门内，幽灵湿格整段漏重建 → 下一轮沉降活量/
         // 触点漂移（g#98 初轮 1283 格首见覆盖差 + 罐28×23 组/棺木42/丛林植物233
         // 孤儿块的全部直接根因；x86 W-probe 对拍实证）。
-        // 379（泡泡,QuickWater 已置实心）例外保留液体且不复查（cs:81173-81177）。
-        const chk = this.checking[i] === 1;
-        const nactive = st.flags[i] !== 0 && !chk;
+        // 379（泡泡,QuickWater 已置实心）例外保留液体且不复查（1456 :81170-74）。
+        const nactive = st.flags[i] !== 0;
         let solidBr = false;
         if (t >= 0 && nactive && this.solidNP[t] === 1) {
           solidBr = true;

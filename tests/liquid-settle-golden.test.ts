@@ -55,7 +55,13 @@ describe('液体沉降 golden(优化等价性闸门)', () => {
     const st = world.store;
     const hash = [st.liquid, st.liquidType, st.type, st.flags].map((a) =>
       fnv1a(new Uint8Array(a.buffer, a.byteOffset, a.byteLength))).join(' ');
-    expect(hash).toBe('1719c78f 86f60b22 b6f70ec5 e84ee6b5');
+    expect(hash).toBe('1719c78f 6502c842 b6f70ec5 e84ee6b5');
+    // GGGGGGGG2 批（2026-08-28）golden 再生③：LiquidCheck 族 <24 归零支与 DelWater 尾
+    // 的类型回写改写水型位（vanilla liquidType(0)=清 bits5-6=水，Tile.cs:218-233；
+    // JS 1 基编码水=1，曾写 0）；update() 下灌门/嵌套分支改为逐语句现读
+    // tile5.liquidType()（x86 g 链 it131 wrap 带 (1215,869) 零转移 pour 支实证）。
+    // 仅 liquidType 域哈希变（1719c78f/b6f70ec5/e84ee6b5 三域不变），g 链 mile8 残差
+    // dL 2010→0（/tmp/hhh2-out/g1clean.log）。
     // golden 更新（蓝队 r8 批 2026-08-24）两连：
     // ① R8-19 shimmerCheck 情形 A 的 mergeType!=this 门由误译"三邻有微光则弃"改为
     //    vanilla 真值"三邻有水/岩浆/蜂蜜(带 liquid>0 门)才产块"（GetLiquidMergeTypes

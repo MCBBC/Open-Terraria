@@ -111,6 +111,96 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 export function killTileWhole(st: TileStore, x: number, y: number, rng?: RNG): void {
   killTileWholeCore(st, x, y, rng);
 }
+
+// ---- ★IIIIII5 批（2026-08-28）：KillTile_MakeTileDust 隐藏掷模型 ----
+// vanilla KillTile（1457 cs:64029）在移除本格前恒执行
+//   `int num12 = KillTile_GetTileDustAmount(fail, tile);`  （cs:67119）
+//   `for (k < num12) KillTile_MakeTileDust(i, j, tile);`   （cs:67209）
+// 服务端生成期（dedServ）尘粒本体被 Dust.NewDust 的 dedServ 门吞掉，但
+// MakeTileDust 内 **type 表里约 40 个分支的 genRand.Next 照常消耗 genRand**
+// ——KLOG+taglog 值级实证（m 链 g248：(5881..5882,470..487) 井穿列恰含 6 格
+// 玻璃(25)，25 族 dustAmount=default 10 × 每 call 恰 1 掷 ⇒ +60 掷；其余石/泥
+// 格零掷）。缺此模型 ⇒ 本格后所有掷位平移（m #76 T664>138×4 变体带、notraps
+// 主循环 ±小 blip 族）。该段 1456/1457/1458 三版逐行同构（dust-14*.cs diff 空）
+// ⇒ 无需版本双态门。
+/** KillTile_GetTileDustAmount（cs:67119-67208）1:1（sheet 空间）。 */
+const KDUST_AMT0_A = new Set([654, 630, 631]);
+const KDUST_AMT0_B = new Set([125, 138, 172, 287, 300, 301, 302, 303, 304, 305, 306, 307, 308,
+  354, 355, 373, 374, 375, 376, 461, 484, 499, 564, 565, 593, 594, 617, 664, 665, 699, 709,
+  711, 712, 713, 714, 715, 716]);
+function dustAmount(fail: boolean, sh: number, fx: number): number {
+  if (KDUST_AMT0_A.has(sh)) return 0;
+  if (sh === 231) return fail ? 3 : 6;
+  if (sh === 481 || sh === 482 || sh === 483) return 3;
+  if (sh === 541) return 1;
+  if (sh === 549) return 2;
+  if (KDUST_AMT0_B.has(sh)) return 0;
+  if (sh === 534 || sh === 536 || sh === 539 || sh === 625 || sh === 627) return fail ? 3 : 5;
+  if (sh === 184) return Math.trunc(fx / 22) >= 5 ? 5 : (!fail ? 10 : 3);
+  return fail ? 3 : 10;                                   // cs default 支
+}
+/** KillTile_MakeTileDust 单次调用的 genRand 消耗（cs:67209-69695 内含 Next 的分支
+ *  逐支转录；纯赋值/视觉块不影响掷流故省略——type 各自独占分支，短路序与源一致。
+ *  大型家具列表为 cs:1809-1812 else-if 链（597 为首元，勿展开重排）。 */
+const KDUST_FURN = new Set([358, 359, 360, 361, 362, 363, 364, 275, 276, 277, 278, 279, 280, 281,
+  282, 285, 286, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 309, 310, 339, 538,
+  413, 414, 505, 521, 522, 523, 524, 525, 526, 527, 532, 533, 543, 544, 550, 551, 553, 554, 555,
+  556, 558, 559, 542, 391, 394, 392, 393, 568, 569, 570, 582, 580, 598, 599, 600, 601, 602, 603,
+  604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 620, 629, 632, 640, 643, 644, 645, 710]);
+function kdustRolls(st: TileStore, ci: number, rng: RNG): void {
+  const sh = sheetOf(st.type[ci]!);
+  const fx = st.frameX[ci]!;
+  switch (sh) {                                            // 主 switch 内含掷支（cs 相对 342-386）
+    case 583: case 584: case 585: case 586: case 587: case 588: case 589:
+      rng.int(0, 9); break;                                // Next(10)
+    case 633:
+      rng.int(0, 5); break;                                // Next(6)
+    case 634:
+      rng.int(0, 9); rng.int(0, 11); break;                // Next(10)+Next(12)
+  }
+  if (sh === 641) { rng.int(0, 1); return; }               // rel482
+  if (sh === 370) { rng.int(0, 1); return; }               // rel510
+  if (sh === 171) { rng.int(0, 1); return; }               // rel514
+  if (sh === 254) {                                        // rel1639-1659 frameX 带
+    if (fx < 108 && fx >= 72) rng.int(0, 2);
+    else if (fx < 144 && fx >= 108) rng.int(0, 1);
+    else if (fx >= 144) rng.int(0, 3);
+    // fx<72：无掷
+    return;
+  }
+  if (sh === 2 || sh === 477) { rng.int(0, 1); return; }   // 草/硬化丛林草 rel1675
+  if (sh === 204 || sh === 478) { rng.int(0, 1); return; } // rel1778
+  if (sh === 243) { rng.int(0, 1); return; }               // rel1789
+  if (sh === 244) { rng.int(0, 1); return; }               // rel1801
+  if (sh === 597) return;                                  // rel1807 else-if 首元（无掷）
+  if (KDUST_FURN.has(sh)) { rng.int(0, 2); return; }       // rel1810 Next(3)!=0→num=-1
+  if (sh === 231) { rng.int(0, 2); return; }               // rel2016
+  if (sh === 238) { rng.int(0, 2); return; }               // rel2079 矿脉漆
+  if (sh === 109 || sh === 492) { rng.int(0, 1); return; } // 丛林草 rel2187
+  if (sh === 58 || sh === 76 || sh === 77 || sh === 684) { rng.int(0, 1); return; }  // rel2259
+  if (sh === 37) { rng.int(0, 1); return; }                // rel2263
+  if (sh === 32) { rng.int(0, 1); return; }                // rel2267
+  if (sh === 352) { rng.int(0, 2); return; }               // rel2271
+  if (sh === 23 || sh === 24 || sh === 661) { rng.int(0, 1); return; }               // rel2275
+  if (sh === 31 || sh === 696) {                           // rel2279
+    if (fx < 36) rng.int(0, 1);
+    return;
+  }
+  if (sh === 25) { rng.int(0, 1); return; }                // rel2279 type25 支恒掷
+  if (sh === 26 || sh === 695) {                           // rel2283
+    if (fx < 54) rng.int(0, 1);
+    return;
+  }
+  if (sh === 27) { rng.int(0, 1); return; }                // rel2299
+  if (sh === 385) { rng.int(68, 70); return; }             // rel2311 Next(68,71)
+  if (sh === 35) {                                         // rel2321 短路 && 掷
+    if (fx < 36) rng.int(0, 1);
+    return;
+  }
+  if (sh === 34 || sh === 42) { rng.int(0, 1); return; }   // rel2326 条件尾掷
+  if (sh === 314) { rng.int(-2, 2); rng.int(-2, 2); rng.int(0, 50); return; }  // 尾部 spawn arg ×3
+}
+
 function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void {
   // ★KillTile 1:1 头链（cs:63559-63990）。SSSSS 批（2026-08-20）补三件：
   //   ①CheckTileBreakability 门（cs:62403——容器上格保护/魔金矿/仙人掌基座/
@@ -121,14 +211,64 @@ function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void
   //   ③fail 支类型转化（cs:63787-63810 草→土/丛林草→泥/苔→石…）。
   //   12345 #76 双根因（Check1x1 压板支撑杀 + Check2x2 残缺巨石帧锚杀）见
   //   cascade3x3T 分派注释。陶罐/雕像族仍走旧近似（9293480 golden 四站点实证）。
+  // ★IIIIII5（2026-08-28）：补第④件【KillTile_MakeTileDust 隐藏掷】（见下方
+  //   dustAmount/kdustDraws 与注释）——vanilla 服务端生成期 KillTile 恒跑
+  //   GetTileDustAmount(fail) 次 MakeTileDust，其 type 表内玻璃/草族等分支耗
+  //   genRand（KLOG 值级实证：m 链 g248 巨石井穿 6 格玻璃 25 → 恰 +60 掷，
+  //   rollwin/taglog 锚 /tmp/iii5-out/x-mtaglog*.txt；缺失曾致 m #76
+  //   T664>138×4 变体带错位与 notraps 主循环 ±20/±10 补偿型 blip）。
+  //   次序对齐 vanilla：breakability → 【dust 循环】 → 化石碎裂 → fail 支。
   if (!st.inBounds(x, y)) return;
   const ci = st.idx(x, y);
   if (!st.flags[ci]) return;                          // cs:63573 !active()
   const br = checkBreakabilityT(st, x, y);
   if (br === 2) return;                               // cs:63584 num==2 拒杀
-  // cs:63756 化石碎裂在杀除本格**之前**（邻化石支撑判读本格仍活性）
+  // ★IIIIII5：cs:64213-64218 dust 循环（num12 次 MakeTileDust；本仓只计掷不产尘）
+  if (rng) {
+    const amt = dustAmount(br === 1, sheetOf(st.type[ci]!), st.frameX[ci]!);
+    for (let k = 0; k < amt; k++) kdustRolls(st, ci, rng);
+  }
+  // cs:63756 化石碎裂在杀除本格**之前**（邻化石支撑判读本格仍活性；vanilla 位
+  // 序=dust 之后、effectOnly 早退之后 cs:64222——本语境 effectOnly 恒 false）
   if (rng && sheetOf(st.type[ci]!) === 404) attemptFossilShatterT(st, x, y, rng, br === 1);
-  if (br === 1) { failConvertT(st, x, y); cascade3x3T(st, x, y, rng); return; }
+  if (br === 1) {
+    // ★IIIIII5 备裁：vanilla fail 支内还有 ShakeTree（cs:64214，netMode!=1 且
+    //   IsShakeable 家族——整树摇落长掷链）。本域 trap 杀列未触发过 IsShakeable
+    //   （KLOG 全窗口零摇树），暂不移植；若未来 blip 出现 +50/+300 量级再补。
+    failConvertT(st, x, y);
+    // ★GGGGGGGG2-D 备裁：fail 支 SquareTileFrame(i,j,true) 的合并族帧号掷在生成期
+    //   零耗（cs:82659 `!generatingWorld` 门）；cascade 中心=转化后格仍活性但
+    //   cosmetic 分派不进 → 与旧实现一致零掷。
+    cascade3x3T(st, x, y, rng); return;
+  }
+  // ★IIIIII5：非 fail 支的两个 KillTile 体内隐藏掷+级联（本仓fail支=转化后早退，位置同源）：
+  //   ①裂缝砖系（cs:64290-64342）：type 481-483 时对 8 邻做 `active && Next(num16)==0
+  //     && ∈[481,483]` 短路判读——**Next 只因邻格 active 即消耗**（type 判读在后），
+  //     m==2（上邻）时 num16=3 否则 6；中签者先置本格 !active 再递归 KillTile(noItem)
+  //     （邻居的 dust/web 等隐藏掷在递归内同样生效）。getGood 泥溅射支 cs:64268 仅
+  //     getGoodWorld，两链旗标恒假不移植。OOB 邻格 vanilla 为 null 引用路径，trap 杀列
+  //     不触界，按 skip 处理。
+  if (rng) {
+    const bsh = sheetOf(st.type[ci]!);
+    if (bsh === 481 || bsh === 482 || bsh === 483) {
+      for (let m = 0; m < 8; m++) {
+        const num16 = m === 2 ? 3 : 6;
+        const nx = x + [-1, 1, 0, 0, -1, 1, -1, 1][m]!;
+        const ny = y + [0, 0, -1, 1, -1, -1, 1, 1][m]!;
+        if (!st.inBounds(nx, ny)) continue;
+        if (!st.flags[st.idx(nx, ny)]) continue;
+        const hit = rng.int(0, num16 - 1) === 0;
+        const nsh = sheetOf(st.type[st.idx(nx, ny)]!);
+        if (hit && nsh >= 481 && nsh <= 483) {
+          st.flags[ci] = 0;
+          killTileWholeCore(st, nx, ny, rng);             // 不 break：vanilla 对剩余邻格继续判读
+        }
+      }
+    }
+    // ②蛛网缄默门（cs:64369）：type51(蛛网) && wall62(蜘蛛墙) → Next(4)!=0 ⇒ noItem
+    //   ——**无论走哪个结果都先耗 1 掷**；ShouldTileSurvive 门对 web 恒假故省略。
+    if (bsh === 51 && st.wall[ci] === 62) rng.int(0, 3);
+  }
   killObjectAt(st, x, y);
   cascade3x3T(st, x, y, rng);
 }
@@ -137,7 +277,7 @@ function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void
  *  SSSSS 批按 vanilla TileFrame 真分派重构（12345 #76 双根因：①镖锚杀地基 →
  *  上方压板 Check1x1 支撑杀缺失（cs:45226→86307）；②残缺巨石块帧锚 Check2x2
  *  完整性杀缺失（cs:48405）——旧"整块搜索+支撑列"近似对残块必空转）。 */
-function cascade3x3T(st: TileStore, x: number, y: number, rng?: RNG): void {
+function cascade3x3T(st: TileStore, x: number, y: number, rng?: RNG, multiFallback = true): void {
   // SquareTileFrame 调用序（cs:80925-80933）列优先
   for (const [dx, dy] of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0], [1, 1]] as const) {
     const ux = x + dx, uy = y + dy;
@@ -154,7 +294,11 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng?: RNG): void {
     if (CHEST_SHEETS.has(sh)) { checkChestGen(st, ux, uy, rng); continue; }
     if (CHECK2X2_SHEETS.has(sh)) { check2x2Gen(st, ux, uy, rng); continue; }
     if (sh === 185) { checkPileTrap(st, ux, uy); continue; }
-    if (!MULTI_DEFS.has(ut)) continue;
+    // ★IIII10：墙挂/吊挂族真分派（CheckBanner/CheckXxxWall/CheckChand）——
+    //   与 TileFrameImportant 同族互斥（不在 CHECK1X1/CHEST/CHECK2X2/185 表内），
+    //   命中即消费本次邻格分派，绝不落入下方的地板支撑近似。
+    if (wallArtDispatchT(st, ux, uy, rng)) continue;
+    if (!multiFallback || !MULTI_DEFS.has(ut)) continue;
     // 找含 (ux,uy) 的完整块锚
     const m = MULTI_DEFS.get(ut)!;
     for (let ay = uy; ay > uy - m.h; ay--) {
@@ -198,6 +342,7 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng?: RNG): void {
 const PREVENTS_REMOVAL = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
 /** IsAContainer（cs:48831）：BasicDresser{88}+{470,475}+BasicChest{21,467}+Fake{441,468} */
 const CONTAINER_SHEETS = new Set([88, 470, 475, 21, 467, 441, 468]);
+
 /** Main.tileMoss（Main.cs tileMoss[x]=true 全 11 项）与 TileID.Sets.tileMossBrick（:309） */
 const TILE_MOSS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
 const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
@@ -287,15 +432,16 @@ function attemptFossilShatterT(st: TileStore, x: number, y: number, rng: RNG, fa
   fossilBreakT = false;
 }
 
-/** KillTile fail 支类型转化（cs:63787-63810）：草族→土/丛林草→泥/苔→石/苔砖→石砖。
- *  转化后原格存活（cs:63812 SquareTileFrame 后 return）。 */
+/** KillTile fail 支类型转化（cs:64193-64246）：草族→土/丛林草→泥/苔→石/苔砖→石砖。
+ *  转化后原格存活（cs:64246 SquareTileFrame 后 return，生成期该重置帧链对
+ *  合并族零掷——GGGGGGGG2-D 备裁：TileFrameCosmetic 被 cs:82659
+ *  `!generatingWorld` 门跳过）。 */
 function failConvertT(st: TileStore, x: number, y: number): void {
   const i = st.idx(x, y);
   const sh = sheetOf(st.type[i]!);
   const conv: Record<number, number> = { 2: 0, 23: 0, 109: 0, 199: 0, 477: 0, 492: 0, 633: 57, 60: 59, 661: 59, 662: 59, 70: 59 };
   if (sh in conv) {
-    const to = conv[sh]!;
-    st.type[i] = sheetId(to);
+    st.type[i] = sheetId(conv[sh]!);
     return;
   }
   if (TILE_MOSS.has(sh)) st.type[i] = STONE1;
@@ -325,6 +471,271 @@ let destroyObjectT = false;
 let chestItemAnchors: Set<number> | null = null;
 let chestList: Array<{ x: number; y: number; items: unknown[] }> | null = null;
 export function __setTrapsChestAnchors(s: Set<number> | null): void { chestItemAnchors = s; }
+
+
+// ---- ★IIII10 批（2026-08-28）：TileFrameImportant 墙挂/吊挂族真分派 ----
+// cascade3x3T 的 MULTI_DEFS 兜底支是「地板支撑近似」（陶罐/雕像族金标实证），
+// 但墙面挂件族（画/旗）与天花吊挂族（枝形吊灯）的原版真实判定走
+// TileFrameImportant→CheckXxxWall / CheckBanner / CheckChand——旗挂看**上邻实心
+// 支柱**、画挂看 **wall>0**、吊灯看天花板——地板近似必然误杀（notraps 链实证：
+// T91×9/T240×9/T34×9 被 J 多杀 → g3805 等站点九格受理门分叉 → 主循环断点漂移；
+// x86 klog K11756/242938 同点双杀 + dump076 该族存活交叉印证）。本节按 1457
+// 反编译逐行转录；毁除经 killTileWholeCore（画/旗尘掷 default=10 的隐藏掷流同构）。
+/** TileID.Sets.NotReallySolid（Terraria.ID/TileID.cs:359） */
+const NOT_REALLY_SOLID = new Set([387, 388, 10]);
+/** nactive()＝active 且非致动隐身位（Tile.cs:591-618，与 placeTrap 九格门同式） */
+function nactiveT(st: TileStore, i: number): boolean {
+  return st.flags[i] !== 0 && ((st.wire[i] >>> 5) & 1) === 0;
+}
+/** 毁除矩形内 type 匹配活性格（destroyObject 期=阻断再入分派，各 Check fn 原样）。 */
+function destroyMatchingRectT(st: TileStore, x0: number, y0: number, w: number, h: number, t: number, rng?: RNG): void {
+  destroyObjectT = true;
+  for (let k = x0; k < x0 + w; k++) {
+    for (let l = y0; l < y0 + h; l++) {
+      if (!st.inBounds(k, l)) continue;
+      const ki = st.idx(k, l);
+      if (st.type[ki] === t && st.flags[ki]) killTileWholeCore(st, k, l, rng);
+    }
+  }
+  destroyObjectT = false;
+}
+/** CheckBanner（cs:46493-46560）1:1：1×3 三格完整性 + 上格支柱门，破则整列 KillTile。 */
+function checkBannerT(st: TileStore, x: number, y: number, rng?: RNG): void {
+  if (destroyObjectT) return;
+  const i = st.idx(x, y);
+  const t = st.type[i]!;
+  const rowInObj = ((Math.trunc(st.frameY[i]! / 18) % 3) + 3) % 3;     // fy≥0 恒等；防负模
+  const styleRowBand = Math.floor((st.frameY[i]! | 0) / 54);
+  const ay = y - rowInObj;
+  const fxSelf = st.frameX[i]!;
+  let flag = false;
+  for (let k = 0; k < 3; k++) {
+    const ki = ay + k >= 0 && ay + k < st.h ? st.idx(x, ay + k) : -1;
+    if (ki < 0 || !st.flags[ki] || st.type[ki] !== t || st.frameY[ki] !== k * 18 + styleRowBand * 54 || st.frameX[ki] !== fxSelf) { flag = true; break; }
+  }
+  if (!flag) {
+    const ai = st.inBounds(x, ay - 1) ? st.idx(x, ay - 1) : -1;
+    if (ai >= 0 && !nactiveT(st, ai)) flag = true;
+    else if (ai < 0) flag = true;
+    else {
+      const at = st.type[ai]!, ash = sheetOf(at);
+      const num3 = st.slope[ai] === 1 || st.slope[ai] === 2 || st.half[ai] !== 0 || vanGenSolidType(at);
+      const flag2 = !SOLID_TOP.has(ash) || (PLATFORM_SHEETS.has(ash) && (st.half[ai] !== 0 || st.slope[ai] === 1 || st.slope[ai] === 2));
+      let flag3 = (num3 && flag2) && !NOT_REALLY_SOLID.has(ash) && !(st.slope[ai] === 3 || st.slope[ai] === 4);
+      if (PLATFORM_SHEETS.has(ash) || ash === 380) flag3 = true;
+      if (!flag3) flag = true;
+    }
+  }
+  if (!flag) return;
+  destroyMatchingRectT(st, x, ay, 1, 3, t, rng);
+}
+/** 墙画族：锚反解+带步进逐 fn 转录 → 完整性 ∪ wall<=0 判定 → 整幅毁除。
+ *  Check3x3Wall cs:44690（240/440）/ Check2x3Wall cs:44997（245）/ Check3x2Wall cs:45154（246）
+ *  / Check4x3Wall cs:45284（241）/ Check6x4Wall cs:45377（242）。 */
+function checkWallArtT(st: TileStore, x: number, y: number, rng?: RNG): boolean {
+  if (destroyObjectT) return false;
+  const i = st.idx(x, y);
+  const t = st.type[i]!;
+  const sh = sheetOf(t);
+  const fx = st.frameX[i]!, fy = st.frameY[i]!;
+  let ax = x, ay = y, baseX = 0, baseY = 0, w = 0, h = 0;
+  if (sh === 240 || sh === 440) {              // 3×3：fx/fy 双向 54 步进条带
+    ax = x - (((Math.trunc(fx / 18) % 3) + 3) % 3); baseX = Math.floor(Math.abs(fx / 18) / 3) * 54 * (fx < 0 ? -1 : 1);
+    ay = y - (((Math.trunc(fy / 18) % 3) + 3) % 3); baseY = Math.floor(Math.abs(fy / 18) / 3) * 54 * (fy < 0 ? -1 : 1);
+    w = 3; h = 3;
+  } else if (sh === 245) {                     // 2 宽 × 3 高：fx 带 36 步进、fy 直解
+    ax = x - (((Math.trunc(fx / 18) % 2) + 2) % 2); baseX = Math.floor(Math.abs(fx) / 36) * 36 * (fx < 0 ? -1 : 1);
+    ay = y - Math.trunc(fy / 18); baseY = 0;
+    w = 2; h = 3;
+  } else if (sh === 246) {                     // 3 宽 × 2 高：fx 直解、fy 带 36 步进
+    ax = x - Math.trunc(fx / 18); baseX = 0;
+    ay = y - (((Math.trunc(fy / 18) % 2) + 2) % 2); baseY = Math.floor(Math.abs(fy) / 36) * 36 * (fy < 0 ? -1 : 1);
+    w = 3; h = 2;
+  } else if (sh === 241) {                     // 4 宽 × 3 高：fy 条带 54 步进、fx 直解
+    ax = x - Math.trunc(fx / 18); baseX = 0;
+    ay = y - (((Math.trunc(fy / 18) % 3) + 3) % 3); baseY = Math.floor(Math.abs(fy / 18) / 3) * 54 * (fy < 0 ? -1 : 1);
+    w = 4; h = 3;
+  } else if (sh === 242) {                     // 6×4 大画：27/72/108 复合 stride
+    const cols = Math.trunc(fx / 18), rows = Math.trunc(fy / 18);
+    const n = 27 * Math.floor(cols / 6) + Math.floor(rows / 4);
+    ax = x - (((cols % 6) + 6) % 6); baseX = Math.floor(n / 27) * 108;
+    ay = y - (((rows % 4) + 4) % 4); baseY = ((((n % 27) + 27) % 27)) * 72;
+    w = 6; h = 4;
+  } else return false;
+  for (let dx = 0; dx < w; dx++) {
+    for (let dy = 0; dy < h; dy++) {
+      const k = ax + dx, l = ay + dy;
+      if (!st.inBounds(k, l)) continue;        // vanilla Main.tile[k,l]==null 跳过（flag 不置）
+      const ki = st.idx(k, l);
+      if (!st.flags[ki] || st.type[ki] !== t || st.wall[ki] <= 0
+        || st.frameX[ki] !== baseX + dx * 18 || st.frameY[ki] !== baseY + dy * 18) {
+        destroyMatchingRectT(st, ax, ay, w, h, t, rng);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+/** CheckChand（cs:53254-53346）1:1：枝形吊灯（34 宽 3 / 454 宽 4），中心上格实心柱门。 */
+function checkChandT(st: TileStore, x: number, y: number, rng?: RNG): void {
+  if (destroyObjectT) return;
+  const i = st.idx(x, y);
+  const t = st.type[i]!;
+  const sh = sheetOf(t);
+  const W = sh === 454 ? 4 : 3;
+  const fxc = Math.trunc(st.frameX[i]! / 18);
+  const num4 = Math.floor(fxc / W);
+  const cellX = fxc % W;
+  const ax = x - cellX;
+  const num6 = 18 * W * num4;
+  const fyc = Math.trunc(st.frameY[i]! / 18);
+  let num7 = Math.floor(fyc / 3);
+  const cellY = fyc % 3;
+  if (num6 >= 108) num7 += 37 * Math.floor(num6 / 108);
+  let num8 = 54 * num7;
+  if (num6 >= 108) num8 -= 54 * Math.floor(num6 / 108) * 37;
+  const ay = y - cellY;
+  let flag = false;
+  for (let dx = 0; dx < W; dx++) {
+    for (let dy = 0; dy < 3; dy++) {
+      const k = ax + dx, l = ay + dy;
+      if (!st.inBounds(k, l)) { flag = true; break; }
+      const ki = st.idx(k, l);
+      if (!st.flags[ki] || st.type[ki] !== t || st.frameX[ki] !== (k - ax) * 18 + num6 || st.frameY[ki] !== (l - ay) * 18 + num8) { flag = true; break; }
+    }
+    if (flag) break;
+  }
+  // 中央上格支柱门（vanilla 中心=锚+1 列，不分宽窄恒 +1）
+  const ai = st.inBounds(ax + 1, ay - 1) ? st.idx(ax + 1, ay - 1) : -1;
+  if (ai < 0 || !nactiveT(st, ai) || !vanGenSolidType(st.type[ai]!) || SOLID_TOP.has(sheetOf(st.type[ai]!))) flag = true;
+  if (!flag) return;
+  destroyMatchingRectT(st, ax, ay, W, 3, t, rng);
+}
+/** IIII10 分派入口：命中真分派族返回 true（已消费本次邻格分派）。
+ *  ★III13：并入 CheckSuper 族 {376,443,444,485}（TileFrameImportant cs:86977 真分派
+ *  ——notraps #76 定罪 T0>485×2×(1597..1598,367/368)：x86 plate 尾级联经 CheckSuper
+ *  杀除（boxlog rc=123110952 K×3 连环），J 曾漏派本族 → 残留。 */
+function wallArtDispatchT(st: TileStore, x: number, y: number, rng?: RNG): boolean {
+  const sh = sheetOf(st.type[st.idx(x, y)]!);
+  if (sh === 91) { checkBannerT(st, x, y, rng); return true; }
+  if (sh === 34 || sh === 454) { checkChandT(st, x, y, rng); return true; }
+  if (sh === 240 || sh === 440 || sh === 245 || sh === 246 || sh === 241 || sh === 242) { checkWallArtT(st, x, y, rng); return true; }
+  if (CHECK_SUPER_DEFS[sh]) { checkSuperT(st, x, y); return true; }
+  return false;
+}
+
+// ---- ★III13 批：CheckSuper 族（cs:48523-48700 / 分派表 cs:86971-86980） ----
+/** Terraria.ObjectData 数据面（sheet 空间）：376=Style2x2+StyleHorizontal(
+ *  CoordinateHeights{16,18})、443=Style2x1、444=Style2x2、485=Style2x2+H。
+ *  strideX/Y=CoordinateWidth(16)+padding(2)=18；fullW/fullH=边长×18=36。 */
+const CHECK_SUPER_DEFS: Record<number, { w: number; h: number; horiz: boolean }> = {
+  376: { w: 2, h: 2, horiz: true },
+  443: { w: 2, h: 1, horiz: false },
+  444: { w: 2, h: 2, horiz: false },
+  485: { w: 2, h: 2, horiz: true },
+};
+/** Main.tileNoAttach（Main.cs:7450-7458）＝{568,569,570} */
+const NO_ATTACH_SHEETS = new Set([568, 569, 570]);
+
+/** AnchorValid（cs:52294）子集转录（Traps 域仅用 solid/solidBottom 三旗面）。 */
+function anchorValidT(st: TileStore, x: number, y: number, kind: 'solid' | 'bottom' | 'top' | 'side'): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!nactiveT(st, i)) return false;
+  const t = st.type[i]!, sh = sheetOf(t);
+  const blockType0 = st.half[i] === 0 && st.slope[i] === 0;
+  const topSlope = st.slope[i] === 1 || st.slope[i] === 2;
+  const bottomSlope = st.slope[i] === 3 || st.slope[i] === 4;
+  if (kind === 'solid') {
+    // AnchorType.SolidTile：tileSolid && !tileSolidTop && !noAttach && blockType()==0
+    return vanGenSolidType(t) && !SOLID_TOP.has(sh) && !NO_ATTACH_SHEETS.has(sh) && blockType0;
+  }
+  if (kind === 'side') {
+    // SolidSide：tileSolid && !tileSolidTop && blockType∈{4,5}（bottomSlope 族）
+    return vanGenSolidType(t) && !SOLID_TOP.has(sh) && (st.slope[i] === 3 || st.slope[i] === 4);
+  }
+  if (kind === 'top') {
+    // SolidWithTop：平台 proper-top 或 solidTop 实心
+    if (PLATFORM_SHEETS.has(sh)) {
+      const num = Math.floor(st.frameX[i]! / 18);
+      return (!st.half[i] && num >= 0 && num <= 7) || (num >= 12 && num <= 16) || (num >= 25 && num <= 26);
+    }
+    return vanGenSolidType(t) && SOLID_TOP.has(sh);
+  }
+  // bottom：SolidBottom
+  const solidOk = vanGenSolidType(t)
+    && (!SOLID_TOP.has(sh) || (PLATFORM_SHEETS.has(sh) && (st.half[i] === 1 || topSlope)));
+  return (solidOk || topSlope || st.half[i] === 1) && !NOT_REALLY_SOLID.has(sh) && !bottomSlope;
+}
+
+/** CheckSuper（cs:48523）：FrameImportant 超族完整性 + 各自锚门 → 整块毁除。
+ *  443 的双支锚（落地列/吊挂行）通过即翻转 frameX 变体（cs:48616-48631，无掷）
+ *  ——帧位不进 mile8 通道，略去重写保留杀除判定等价。 */
+function checkSuperT(st: TileStore, x: number, y: number): void {
+  if (destroyObjectT) return;                                   // cs:48526
+  const i = st.idx(x, y);
+  const t = st.type[i]!;
+  const sh = sheetOf(t);
+  const def = CHECK_SUPER_DEFS[sh];
+  if (!def) return;
+  const fx = st.frameX[i] | 0, fy = st.frameY[i] | 0;
+  const wrapW = ((Math.trunc(fx / 18) % def.w) + def.w) % def.w;
+  const wrapH = ((Math.trunc(fy / 18) % def.h) + def.h) % def.h;
+  const ax = x - wrapW, ay = y - wrapH;
+  const styleFullX = def.horiz ? Math.floor(fx / 36) : 0;       // C# 正值 int 除
+  const styleFullY = !def.horiz ? Math.floor(fy / 36) : 0;
+  let bad = false;
+  for (let dx = 0; dx < def.w && !bad; dx++) {
+    for (let dy = 0; dy < def.h && !bad; dy++) {
+      const k = ax + dx, l = ay + dy;
+      if (!st.inBounds(k, l)) { bad = true; break; }
+      const ki = st.idx(k, l);
+      if (!st.flags[ki] || st.type[ki] !== t
+        || st.frameX[ki] !== styleFullX * 36 + dx * 18
+        || st.frameY[ki] !== styleFullY * 36 + dy * 18) bad = true;
+    }
+  }
+  if (sh === 376) {
+    for (let k = ax; k < ax + def.w && !bad; k++) {             // 底行支撑门（实心|桌 且非半砖）
+      const ki = st.inBounds(k, ay + def.h) ? st.idx(k, ay + def.h) : -1;
+      if (ki < 0 || !st.flags[ki] || (!vanGenSolidType(st.type[ki]!) && !TILE_TABLE.has(sheetOf(st.type[ki]!))) || st.half[ki]) bad = true;
+    }
+  }
+  if (sh === 443) {
+    let floorOk = true, hangOk = true;
+    for (let k = ax; k < ax + def.w; k++) {
+      if (!anchorValidT(st, k, ay + def.h, 'solid') && !anchorValidT(st, k, ay + def.h, 'top') && !anchorValidT(st, k, ay + def.h, 'side')) floorOk = false;
+      if (!anchorValidT(st, k, ay - 1, 'bottom')) hangOk = false;
+    }
+    if (!hangOk && !floorOk) bad = true;
+  }
+  if (sh === 444) {
+    for (let k = ax; k < ax + def.w && !bad; k++) {             // 顶行锚（上格 SolidTile）
+      if (!anchorValidT(st, k, ay - 1, 'solid')) bad = true;
+    }
+    for (let dx = 0; dx < def.w && !bad; dx++) {                // 物体内带液体 → 毁除
+      for (let dy = 0; dy < def.h && !bad; dy++) {
+        if (st.liquid[st.idx(ax + dx, ay + dy)] > 0) bad = true;
+      }
+    }
+  }
+  if (sh === 485) {
+    for (let k = ax; k < ax + def.w && !bad; k++) {             // 底行锚（上格 SolidTile）
+      if (!anchorValidT(st, k, ay + def.h, 'solid')) bad = true;
+    }
+  }
+  if (!bad) return;
+  destroyObjectT = true;
+  for (let dx = 0; dx < def.w; dx++) {
+    for (let dy = 0; dy < def.h; dy++) {
+      if (!st.inBounds(ax + dx, ay + dy)) continue;
+      const ki = st.idx(ax + dx, ay + dy);
+      if (st.type[ki] === t && st.flags[ki]) killTileWholeCore(st, ax + dx, ay + dy);
+    }
+  }
+  destroyObjectT = false;
+}
+
 
 /** Check1x1（cs:45226-45244）1:1：地基 SolidTileAllowBottomSlope 失效或巨石地基
  *  → KillTile。★SSSSS 补（12345 #76 根因①：镖锚杀地基后上方压板须碎——
@@ -727,8 +1138,18 @@ function lWire(st: TileStore, x0: number, y0: number, x1: number, y1: number): v
  *  机关×巨石底座互斥门）。门不过=无板（无掷骰副作用——style 已由调用方掷）。
  *  ★SSSSSS：补 Place1x1 的 IsAMechanism×Boulders 底座拒（cs:45213）——trap 调用点
  *  前置 CanGeneratePressurePlateAt 已拒巨石底座（行为中性），FinishNoTraps (B) 的
- *  随机板支无前置门（巨石世界必需）。导出供 FinishNoTrapsPass 复用。 */
-export function placePlate(st: TileStore, x: number, y: number, style: number): boolean {
+ *  随机板支无前置门（巨石世界必需）。导出供 FinishNoTrapsPass 复用。
+ *  ★IIII10（2026-08-28）notraps #76 定罪修复：case 135 尾 SquareTileFrame(i,j)
+ *  （cs:60621-60622 分派表 `{36,135,141,...}` Place1x1 后缀——此前只做了
+ *  「失活格清 half/slope」半个 TileFrame 头，**活性格帧分派整环缺失**。实证：
+ *  notraps g2953 板(1653,604) 落板级联 TileFrame(1654,605) → Check2x2 锚反解
+ *  (fx18 wrap 取 (1653,605)) 完整性破 → 残缺滚地仙人掌右列双格 destroyObject
+ *  （x86 KLOG K2750659 两格帧 18,0/18,18 + dump075→076 该对翻实证）；缺失时残
+ *  仙人掌 (1654,606) 存活 → g3002 attempt278 九格 nactive 门拒收 → 主循环断点
+ *  位移 → 全带 TNT 桶/飞镖投影漂移。复用 killTileWholeCore 尾的同一张
+ *  SquareTileFrame 分派器（SSSSS 批真分派家族），掷流语义与原版逐支同构；
+ *  非 1457 特有语义、无版本门。 */
+export function placePlate(st: TileStore, x: number, y: number, style: number, rng?: RNG): boolean {
   if (x < 2 || y < 2 || x > st.w - 3 || y > st.h - 3) return false;   // InWorld(x,y,2)
   if (st.flags[st.idx(x, y)] !== 0) return false;                     // Place1x1 !tile.active()
   if (!solidTile2V(st, x, y + 1)) return false;
@@ -736,16 +1157,17 @@ export function placePlate(st: TileStore, x: number, y: number, style: number): 
   st.setTileSilent(x, y, PLATE, 0, style * 18);
   const i = st.idx(x, y);
   st.half[i] = 0; st.slope[i] = 0;                                    // PlaceTile 前奏 Clear（cs:59497）
-  // case 135 尾 SquareTileFrame(i,j)（cs:60162-60163）——失活格清 half/slope 支
-  //   （TileFrame cs:82078-82082，零掷零杀；活性格帧派发本种子零命中）。PPPP 补
-  //   （曾缺 → (3952,861) 板 (3953,860) 邻帧本应清的失活残坡 s2 存活）
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      if (!st.inBounds(x + dx, y + dy)) continue;
-      const ni = st.idx(x + dx, y + dy);
-      if (!st.flags[ni]) { st.half[ni] = 0; st.slope[ni] = 0; }
-    }
-  }
+  // case 135 尾 SquareTileFrame(i,j)（cs:60162-60163）全环分派（含中心 Check1x1）
+  //   ——失活格清 half/slope/块漆（TileFrame cs:82077-82082）；活性格按族转派
+  //   （165 钟乳石/178 宝石籽/Check1x1/CheckChest/Check2x2/185 堆/MULTI_DEFS 兜底），
+  //   与 KillTile 尾同构。PPPP 补（曾缺失活清 → (3952,861) 板邻失活残坡存活）+
+  //   IIII10 补活性分派（如上注）。★rng 必传：分派体内的钟乳石样式掷/尘掷等
+  //   在原版同样消耗 genRand（与 KillTile 尾全链同基准）。★multiFallback=false：
+  //   MULTI_DEFS 兜底支是「任一格破坏=整块移除」的地基支撑近似（陶罐/雕像族金标
+  //   实证），但墙面挂件（画 240-246/旗 91 等）的真实分派在原版走 CheckBanner/
+  //   TileObjectData 锚系（墙面悬挂语义），地板支撑近似会误杀 → 板尾新开环先不
+  //   走兜底支（IIII10 实证：notraps g3003+ 段 T240>0×9/T91>0×9 误杀漂移）。 */
+  cascade3x3T(st, x, y, rng, false);
   return true;
 }
 
@@ -817,7 +1239,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     //   （Tile.cs:242-249/591-618）——旧实现只看 flags 漏 inActive 维度，与
     //   solidTileAllowBottomSlope(:647-656) 已有的同位判定不一致。
     const ni = st.idx(x2 + ax, py + ay);
-    if (st.flags[ni] && ((st.wire[ni] >>> 5) & 1) === 0) return false;  // cs:8973 nactive 九格
+    if (st.flags[ni] && ((st.wire[ni] >>> 5) & 1) === 0) return false;  // cs:8973 nactive 九格  // cs:8973 nactive 九格
   }
   {
     const below = st.idx(x2, py + 1);
@@ -917,7 +1339,10 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
       }
     }
     placePlate(st, x2, py, 7);                                        // cs:9252 style7
-    // cs:9253-9254 两块石头（PlaceTile forced=false：EmptyTile 门，非空格不写）
+    // cs:9253-9254 两块石头（PlaceTile forced=false：EmptyTile 门，非空格不写）。
+    // ★GGGGGGGG2-D 实证备裁：PlaceTile 尾 SquareTileFrame→TileFrame 的合并族帧号
+    //   Next(0,3)（cs:82985）在 generatingWorld 下被整段跳过（cs:82659
+    //   `!generatingWorld` 门包住 TileFrameCosmetic）——生成期零掷，勿补掷。
     if (!st.flags[st.idx(colX, top + 2)]) st.setTileSilent(colX, top + 2, STONE1);
     if (!st.flags[st.idx(colX + 1, top + 2)]) st.setTileSilent(colX + 1, top + 2, STONE1);
     // 巨石变体掷（cs:9255-9306）。★SSSSSS-NOTRAPS：maxValue2/3/4（蛛/岩浆/地牢
@@ -1075,69 +1500,83 @@ function isCracked(t: number): boolean {
   return s === 481 || s === 482 || s === 483;                          // Main.tileCracked（Main.cs:7139）
 }
 
+/** ★III13 批：PlaceSandTrap 门序仪（与 x86 rig JJHook.SandEv 同名同位；未注册零开销）。
+ *  B 项（sand-g2 Δln=−2 早退深度）取证专用：逐门记 S0/G1..G9/OK/R1/R2，x86 权威件
+ *  /tmp/iii13-out/x-sand13.txt 与 JS 件逐行对拍锁首个门分叉。 */
+function sandEv(kind: string, a: number, b: number, v: number): void {
+  (globalThis as { __swSandEv?: (kind: string, a: number, b: number, v: number) => void }).__swSandEv?.(kind, a, b, v);
+}
+
 /** PlaceSandTrap（cs:35505-35781）：地下沙漠蜂窝墙内的塌沙陷阱（1456 全尾段） */
 /** PlaceSandTrap（cs:35505-35781）——导出仅供探针对账 */
 export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): boolean {
+  sandEv('S0', i, j, 0);
   const num2 = 4, num3 = 25;
   let k = j;
   while (k < st.h - 200 && !st.flags[st.idx(i, k)]) k++;              // cs:35515 UnderworldLayer
-  if (k >= st.h - 200) return false;
+  if (k >= st.h - 200) { sandEv('G1', i, j, k); return false; }
   {
     const gi = st.idx(i, k);
     const t = st.type[gi]!;
-    if (!vanGenSolidType(t) || st.half[gi] || st.slope[gi] === 1 || st.slope[gi] === 2) return false;  // cs:35522
+    if (!vanGenSolidType(t) || st.half[gi] || st.slope[gi] === 1 || st.slope[gi] === 2) { sandEv('G2', i, j, k); return false; }  // cs:35522
     const s = sheetOf(t);
-    if ((s !== 53 && s !== 397 && s !== 396) || (st.wall[gi] !== 216 && st.wall[gi] !== 187)) return false;  // cs:35526
+    if ((s !== 53 && s !== 397 && s !== 396) || (st.wall[gi] !== 216 && st.wall[gi] !== 187)) { sandEv('G3', i, j, k); return false; }  // cs:35526
   }
   k--;                                                                // cs:35530
+  sandEv('K', i, j, k);
   const pocketW = rng.int(6, 11);                                     // num5（cs:35532 ★掷在 ±25 扫前）
+  sandEv('R1', pocketW, 0, 0);
   const pocketH = rng.int(6, 13);                                     // num6（cs:35533）
+  sandEv('R2', pocketH, 0, 0);
   // ±25 无线/箱/画/门/平台/牌/提取机/矿轨（cs:35534-35571）
   for (let dx = -num3; dx <= num3; dx++) {
     for (let dy = -num3; dy < num3; dy++) {
       const xx = i + dx, yy = k + dy;
       if (!st.inBounds(xx, yy)) continue;
       const ii = st.idx(xx, yy);
-      if (st.wire[ii]) return false;
-      if (SAND_FORBID.has(sheetOf(st.type[ii]!))) return false;       // 无 active 门（cs:35542 原样读 type）
+      if (st.wire[ii]) { sandEv('G4w', xx, yy, 0); return false; }
+      if (SAND_FORBID.has(sheetOf(st.type[ii]!))) {                   // 无 active 门（cs:35542 原样读 type）
+        sandEv('G4', xx, yy, sheetOf(st.type[ii]!));
+        return false;
+      }
     }
   }
   // ±2 下 3 格实心（cs:35572-35581：active && tileSolid）
   for (let dx = -2; dx <= 2; dx++) {
     for (let dy = 1; dy <= 3; dy++) {
       const ii = st.idx(i + dx, k + dy);
-      if (!st.flags[ii] || !vanGenSolidType(st.type[ii]!)) return false;
+      if (!st.flags[ii] || !vanGenSolidType(st.type[ii]!)) { sandEv('G5', i + dx, k + dy, 0); return false; }
     }
   }
-  if (sheetOf(st.type[st.idx(i, k + 1)]!) === 162) return false;      // cs:35582 BreakableIce
+  if (sheetOf(st.type[st.idx(i, k + 1)]!) === 162) { sandEv('G6', i, k + 1, 162); return false; }   // cs:35582 BreakableIce
   // 上扫砂岩顶（cs:35586-35605）
   let sandTop = -1;
   for (let yy = k; yy > k - 30; yy--) {
     const ii = st.idx(i, yy);
     if (st.flags[ii]) {
-      if (sheetOf(st.type[ii]!) !== 396) return false;
+      if (sheetOf(st.type[ii]!) !== 396) { sandEv('G7a', i, yy, sheetOf(st.type[ii]!)); return false; }
       sandTop = yy;
       break;
     }
   }
-  if (sandTop <= -1) return false;
-  if (k - sandTop < pocketH + num2) return false;
+  if (sandTop <= -1) { sandEv('G7b', i, j, 0); return false; }
+  if (k - sandTop < pocketH + num2) { sandEv('G8', i, k, sandTop); return false; }
   // 腰线全空 + 下方实心率 75%（cs:35606-35633：ore 检查对任意 active 格）
   const mid = Math.floor((k + sandTop) / 2);
   let solidN = 0;
   for (let dx = -pocketW; dx <= pocketW; dx++) {
     const ii = st.idx(i + dx, mid);
-    if (st.flags[ii] && vanGenSolidType(st.type[ii]!)) return false;
+    if (st.flags[ii] && vanGenSolidType(st.type[ii]!)) { sandEv('G9m', i + dx, mid, 0); return false; }
     for (let dy = sandTop - pocketH; dy <= sandTop; dy++) {
       const jj = st.idx(i + dx, dy);
       if (st.flags[jj]) {
         const s = sheetOf(st.type[jj]!);
-        if (ORE_SHEETS.has(s) || s === 404) return false;             // cs:35618 Ore ∪ DesertFossil 404
+        if (ORE_SHEETS.has(s) || s === 404) { sandEv('G9o', i + dx, dy, s); return false; }   // cs:35618 Ore ∪ DesertFossil 404
         if (vanGenSolidType(st.type[jj]!)) solidN++;
       }
     }
   }
-  if (solidN < (pocketW * 2 + 1) * (pocketH + 1) * 0.75) return false;
+  if (solidN < (pocketW * 2 + 1) * (pocketH + 1) * 0.75) { sandEv('G9r', i, k, solidN); return false; }
   // 掏沙穴 + 壳（cs:35634-35687）
   for (let dx = -pocketW - 1; dx <= pocketW + 1; dx++) {
     for (let dy = sandTop - pocketH; dy <= sandTop; dy++) {
@@ -1221,6 +1660,7 @@ export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): bo
       }
     }
   }
+  sandEv('OK', i, k, sandTop);
   return true;
 }
 
@@ -1314,7 +1754,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
       const y = nf.remix
         ? rng.int(Math.floor(gs.worldSurface), Math.floor((st.h - 350 + gs.rockLevel) / 2))
         : rng.int(Math.floor(gs.rockLevel), st.h - 201);              // Next(rock, h-200)
-      placeTNTBarrel(st, x, y);
+      placeTNTBarrel(st, x, y, rng);
     }
   }
   __hm('traps-post-tnt');
@@ -1345,9 +1785,19 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
 }
 
 /** placeTNTBarrel（cs:8836-8856）：下扫首个活性格上一格放 654（TNT 桶，2×2
- *  PlaceTile→Place2x2 族）。anyShimmer 拒。零掷（Place2x2 门内读写均不耗）。 */
+ *  PlaceTile→Place2x2 族）。anyShimmer 拒。
+ *  ★III13 批（A 项定罪修复）：vanilla PlaceTile 落成后经 **通用尾 SquareTileFrame(i,j)**
+ *  （cs:60746-60752 `if (tile.active()) { …; SquareTileFrame(i,j); result=true }`——对
+ *  一切走到通用尾的类型生效，含 case654 Place2x2 分支）。notraps #76 定罪：TNT 相位
+ *  四段 KillTile 突发（窗口 ln 73637771/73652389/73655023/73655339 共 11 条）全部 =
+ *  `KillTile←Check2x2|CheckStalactite←TileFrameImportant←TileFrame←SquareTileFrame←
+ *  PlaceTile←placeTNTBarrel`（x86 rig KS 栈轨迹实证，/tmp/iii13-out/x-klog13.txt）：
+ *  桶落点 ±1 邻域内残缺滚地仙人掌/钟乳石经帧完整性级联被清。J 曾无此尾 → T0>484×5
+ *  与 T0>165×4 两簇存留。补：place2x2Traps 成功后跑与 KillTile 尾同款全环分派。
+ *  ★掷流中性实证：四段杀除物属 484（尘掷 0 表）与 165（dustAmount=10 但 type165 无
+ *  内部掷支 ⇒ 零耗），x86 TNT 窗总掷恒 25200 = 12600×2 整，两侧封闭相等。 */
 const TNT_BARREL = sheetId(654);
-export function placeTNTBarrel(st: TileStore, x: number, y: number): boolean {
+export function placeTNTBarrel(st: TileStore, x: number, y: number, rng?: RNG): boolean {
   let py = y;
   while (!st.flags[st.idx(x, py)]) {
     py++;
@@ -1359,7 +1809,9 @@ export function placeTNTBarrel(st: TileStore, x: number, y: number): boolean {
     if (st.liquid[i] > 0 && st.liquidType[i] === 4) return false;     // anyShimmer（LIQ_SHIMMER）
   }
   // PlaceTile(654) → Place2x2（cs:60229 分派；右下锚语义同 MicroBiomes place2x2Direct）
-  return place2x2Traps(st, x, py, TNT_BARREL);
+  const ok = place2x2Traps(st, x, py, TNT_BARREL);
+  if (ok) cascade3x3T(st, x, py, rng, true);   // cs:60752 通用尾 SquareTileFrame(i,j)
+  return ok;
 }
 
 /** WorldGen.PlaceTile→Place2x2（cs:59833 头 + cs:51780-51820）Traps 语境副本：

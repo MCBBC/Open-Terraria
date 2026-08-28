@@ -4224,12 +4224,36 @@ export class Game implements GameHooks {
       }
       // bound 救援 NPC 已由存档条目覆盖（含 bound 态与已获救态），不再重新放置
     } else {
+      // ★IIIIIII6：celebrationmk10（及其他十周年组合）起始镇民消费——SpawnStarterNPCs
+      // pass（cs:19848-20068）播种产物原位实例化后清空记录（不进存档：此后与普通
+      // 城镇 NPC 同走 townNpcsForSave 的 town NPC 段）。homeless 无 home；硬编码名
+      // （Andrew/Whitney/Yorai/Amanda，白兔=生成期 B 掷池名）；朝向=pass direction ±1。
+      const starters = this.world.starterTownNpcs ?? [];
+      this.world.starterTownNpcs = undefined;
+      for (const sRec of starters) {
+        const t = new TownNPC(sRec.key, sRec.x, sRec.y);
+        t.givenName = sRec.givenName;
+        t.facing = sRec.dir;
+        if (sRec.variationIndex !== undefined) t.variationIndex = sRec.variationIndex;
+        this.entities.add(t, 'npcs');
+      }
+      if (starters.length > 0) {
+        // Reset 域（cs:11156-11163）：GenuineParty=true + PartyDaysOnCooldown=5 ——
+        // 开局即派对（CelebratingNPCs=五名 seed 镇民，渲染层派对帽同源）
+        this.partyState.genuineParty = true;
+        this.partyState.daysOnCooldown = 5;
+        this.partyState.celebratingNpcs = starters.map((s) => s.key);
+      }
+      const seededKeys = new Set(starters.map((s) => s.key));
       // 新世界：向导随世界出生(WorldGen.cs:20036)——唯一初始城镇 NPC,无家(homeless)。
       // 商人/护士等由 checkTownArrival 按原版条件 + 房屋系统入住(见 updateTownNpcArrival)。
       // 吸血鬼种子（vampireSeed）：起始 NPC = 动物学家 633（WorldGen.cs:19981-19986，
       // else-if 链在 infectedSeed 后截胡——替代向导出生、homeless、direction=1）
       const starterNpcKey = this.world.seedFlags?.vampireSeed ? 'zoologist' : this.world.seedFlags?.notTheBees ? 'merchant' : 'guide'; // ★UUUUUU：NTB 起始 NPC=商人 17（cs:20007-20014，else-if 链在 vampire 后）
-      if (!this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === starterNpcKey && !n.dead)) {
+      // ★IIIIIII6：十周年世界的向导已含在播种名单 → 跳过默认向导生成
+      // （与 savedNpcs 分支的 some(key===starterKey) 门同语义）
+      if (!seededKeys.has(starterNpcKey)
+        && !this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === starterNpcKey && !n.dead)) {
         this.entities.add(new TownNPC(starterNpcKey, this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
       }
       // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王。
@@ -24058,8 +24082,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  SendData(21)，等下一轮 60t 重 assert 会闪旧值）。返回是否释放了槽位 */
   private emergencyStackMakeSpace(): boolean {
     const players: Array<{ x: number; y: number }> = [{ x: this.player.cx, y: this.player.cy }];
-    const remotes = (this.net as unknown as { remotePlayers?: Array<{ cx: number; cy: number }> } | undefined)?.remotePlayers;
-    if (remotes) for (const r of remotes) players.push({ x: r.cx, y: r.cy });
+    // 远端可视域中心（PlayerViewRectSize 扫描面）：net.players Map 的权威位
+    // （碰撞盒左上 → +10/+21 取中心，与 lootPlayers 同一换算）
+    if (this.net?.active) {
+      for (const [, rp] of this.net.players) {
+        if (!rp.active || rp.dead) continue;
+        players.push({ x: rp.x + 10, y: rp.y + 21 });
+      }
+    }
     const netActive = !!this.net?.active;
     const res = emergencyStackItemsToMakeSpace(
       this.entities.drops as ItemDrop[],
@@ -26352,6 +26382,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   eventsForSave(): SaveData['events'] {
     return {
       partyManual: this.partyState.manualParty,
+      // ★IIIIIII6：GenuineParty 持久位（WF:1054 _tempPartyGenuine=运行时值；
+      // WF:1024-1030 SaveHeader 对十周年世界另恒重算 true——见 applySave 尾的旗标强制）
+      partyGenuine: this.partyState.genuineParty || undefined,
       partyCooldown: this.partyState.daysOnCooldown,
       lanternManual: LanternNight.manualLanterns,
       lanternGenuine: LanternNight.genuineLanterns,
@@ -26362,9 +26395,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 读档恢复事件态（旧档缺省=无派对无预约） */
   eventsApplySave(ev: SaveData['events'] | undefined): void {
-    if (!ev) return;
+    if (!ev) {
+      // ★IIIIIII6：无事件段的存档/导入也按 seed 旗标重算派对基态
+      if (this.world.seedFlags?.tenthAnniversary && !this.world.seedFlags?.skyblock) {
+        this.partyState.genuineParty = true;
+      }
+      return;
+    }
     this.partyState.manualParty = !!ev.partyManual;
+    this.partyState.genuineParty = !!ev.partyGenuine;   // WF:165 GenuineParty=_tempPartyGenuine
     this.partyState.daysOnCooldown = ev.partyCooldown ?? 0;
+    // WF:1024-1030（SaveHeader 序列化侧）：十周年世界 _tempPartyGenuine 恒真——读档/
+    // 导入 .wld 后与原版同语义强制（CelebratingNPCs 列表位登记未接，见批章）
+    if (this.world.seedFlags?.tenthAnniversary && !this.world.seedFlags?.skyblock) {
+      this.partyState.genuineParty = true;
+    }
     LanternNight.manualLanterns = !!ev.lanternManual;
     LanternNight.genuineLanterns = !!ev.lanternGenuine;
     LanternNight.nextNightIsLanternNight = !!ev.lanternNext;

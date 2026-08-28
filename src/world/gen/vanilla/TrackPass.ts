@@ -97,6 +97,17 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (typeof s === 'number') SHEET_OF[i] = s;
 }
 
+/** ★III12：生成期 Main.tileSolid 直读镜像（Main.cs:7995 tileSolid[0]=true，全树无复位）。
+ *  原版 CheckTileBreakability(cs:62432)/SolidOrSlopedTile/SolidTileAllowBottomSlope/
+ *  AllowTop-Left-RightSlope 族都直读该可变数组——本仓转译域 x86 真 sheet0(土)全部
+ *  落内部 id0+active（见 MicroBiomesPass.mbTileSolidGen 同构注释），曾用 vanGenSolidType
+ *  → 轨道避障/坡面门在 alias 土格语义翻转，LTRK 单次成功 place 差 −13 掷。
+ *  生产域 id1('dirt') 本就 solid=true、真空格 flags=0 不入 active 门——两侧等价。 */
+function trkTileSolidGen(t: number): boolean {
+  if (t === 0 || (SHEET_OF[t] ?? -1) === 0) return true;   // internal 0 / sheet0(dirt 别名)
+  return vanGenSolidType(t);
+}
+
 // ============================================================
 // KillTile 尘掷表(RRRR 批 2026-08-19 实测定谳,与 FinalCleanupPass 同源;
 // killTileGen 私有不可导出——全表复刻。轨道巷语境 404 化石连锁/58 地狱岩浆/
@@ -202,13 +213,16 @@ interface TrackHistory { x: number; y: number; slope: number; mode: number }
 const HISTORY_SIZE = 4096;   // _history
 const REWRITE_SIZE = 25;     // _rewriteHistory
 
-/** 原版 SolidTile(i,j)(WorldGen.cs:70155):active && tileSolid && !tileSolidTop && !half && slope==0 */
+/** 原版 SolidTile(i,j)(WorldGen.cs:70487-70513):active && **Main.tileSolid[type] 直读**
+ *  && !tileSolidTop && !halfBrick && slope==0 && !inActive()。
+ *  ★III12：tileSolid 经 trkTileSolidGen（Main.cs:7995 tileSolid[0]=true 缺镜像案——
+ *  calcState 下沉判实心在 alias 土格晚 9 行 → LTRK 起点 Y +9、单次 place 掷 −13）。 */
 function solidTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
-  const d = TILE_DEFS[st.type[i]];
   // !inActive ≈ 未致动(生成期恒无致动位);tileSolidTop 近似 = platform
-  return !!st.flags[i] && !!d?.solid && !d.platform && st.half[i] === 0 && st.slope[i] === 0;
+  return !!st.flags[i] && trkTileSolidGen(st.type[i]) && !TILE_DEFS[st.type[i]]?.platform
+    && st.half[i] === 0 && st.slope[i] === 0;
 }
 
 export class TrackGenerator {
@@ -549,7 +563,7 @@ export class TrackGenerator {
       const below = st.inBounds(x, y + 1) ? st.idx(x, y + 1) : -1;
       if (below >= 0 && st.flags[below] && this.isLockedDoor(x, y + 1)) return 2;
       // 非实心非 solidTop(树干/装饰族)恒可杀(cs:62432)
-      if (!(vanGenSolidType(st.type[i]!) || TILE_DEFS[st.type[i]!]?.platform === true)) return 0;
+      if (!(trkTileSolidGen(st.type[i]!) || TILE_DEFS[st.type[i]!]?.platform === true)) return 0;
       const up = st.inBounds(x, y - 1) ? st.idx(x, y - 1) : -1;
       if (up >= 0 && st.flags[up]) {
         const shUp = SHEET_OF[st.type[up]!] ?? -1;
@@ -652,7 +666,7 @@ export class TrackGenerator {
     const st = this.st;
     if (!st.inBounds(x, y)) return false;
     const i = st.idx(x, y);
-    return st.flags[i] !== 0 && vanGenSolidType(st.type[i]!) && !TILE_DEFS[st.type[i]!]?.platform;
+    return st.flags[i] !== 0 && trkTileSolidGen(st.type[i]!) && !TILE_DEFS[st.type[i]!]?.platform;
   }
 
   /** Tile.active() && !inActive()(生成期 inActive 恒假) */
@@ -928,7 +942,7 @@ export class TrackGenerator {
     if (!st.flags[i]) return false;
     const sh = SHEET_OF[st.type[i]!] ?? -1;
     const plat = TILE_DEFS[st.type[i]!]?.platform === true;
-    const solid = vanGenSolidType(st.type[i]!);
+    const solid = trkTileSolidGen(st.type[i]!);
     const sl = st.slope[i]!;
     return (solid || plat) && ((sl !== 1 && sl !== 2) || (plat && this.platformProperTop(st.frameX[i]!))) && st.half[i] === 0;
   }
@@ -986,7 +1000,7 @@ export class TrackGenerator {
     if (sh < 0 || BOULDER_SS.has(sh) || sh === S_DOOR) return false;   // cs:60320 预门
     const sl = st.slope[i]!, half = st.half[i]!;
     const plat = TILE_DEFS[st.type[i]!]?.platform === true;
-    const solid = vanGenSolidType(st.type[i]!);
+    const solid = trkTileSolidGen(st.type[i]!);
     switch (dir) {
       case 0:  // AllowTopSlope:(solid||380) && ((!plat&&!bottomSlope) || (plat&&half))
         return (solid || sh === 380) && ((!plat && sl !== 3 && sl !== 4) || (plat && half !== 0));
