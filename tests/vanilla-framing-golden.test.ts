@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TileStore } from '../src/world/TileStore';
-import { vanillaFrameFor, setVanillaSolidTables, setVanillaFrameImportant, setVanillaVariantMap, VANILLA_FRAME_SETS } from '../src/render/VanillaFraming';
+import { vanillaFrameFor, setVanillaSolidTables, setVanillaFrameImportant, setVanillaVariantMap, invalidateVanillaFrameAt, invalidateVanillaFrameArea, VANILLA_FRAME_SETS } from '../src/render/VanillaFraming';
 import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';
 
@@ -188,6 +188,39 @@ describe('原版分帧金标硬闸门(TileFrameCosmetic 全链移植)', () => {
       // 值 pin:移植链对「沙上台阶、右下粘土」的拐角输出
       expect({ name: '沙台接粘土拐角', fx: r.fx, fy: r.fy }).toEqual({ name: '沙台接粘土拐角', fx: 18, fy: 72 });
     }
+  });
+
+  // ---------- 第 5 层:失效契约(键写入/失效同公式 + 编辑后现场刷新) ----------
+  // 血案 2026-08-28:写入键 j*st.w+i 与失效键 j*100000+i 公式错位 ⇒ 失效删空,
+  // 挖掘后邻居帧永不刷新(用户实报)。四层金标全是静态正确性,本层专锁动态契约。
+  it('第5层·失效契约:挖掘邻居后帧现场刷新/回填复原/区域失效(键公式同侧)', () => {
+    ensureSolidTables();
+    const st = new TileStore(32, 32);
+    for (let y = 10; y <= 14; y++) for (let x = 10; x <= 14; x++) {
+      const i = st.idx(x, y);
+      st.type[i] = S; st.flags[i] = 1; st.frameX[i] = 0; st.frameY[i] = 0;
+    }
+    const f0 = vanillaFrameFor(st, 12, 12, st, 0, 200);
+    // 挖掉左邻 (11,12)
+    const bi = st.idx(11, 12);
+    st.type[bi] = 0; st.flags[bi] = 0;
+    // 不失效 → 命中旧缓存(证明缓存确实在挡重算 = 本测试有判别力)
+    const stale = vanillaFrameFor(st, 12, 12, st, 0, 200);
+    expect([stale.fx, stale.fy]).toEqual([f0.fx, f0.fy]);
+    // 生产失效路径 → 重算,帧必须变为左暴露族
+    invalidateVanillaFrameAt(11, 12);
+    const f1 = vanillaFrameFor(st, 12, 12, st, 0, 200);
+    expect([f1.fx, f1.fy]).not.toEqual([f0.fx, f0.fy]);
+    // 回填 + 失效 → 复原
+    st.type[bi] = S; st.flags[bi] = 1;
+    invalidateVanillaFrameAt(11, 12);
+    const f2 = vanillaFrameFor(st, 12, 12, st, 0, 200);
+    expect([f2.fx, f2.fy]).toEqual([f0.fx, f0.fy]);
+    // 区域失效(silent 编辑路径:陨石/祭坛族走 markDirtyArea)
+    st.type[bi] = 0; st.flags[bi] = 0;
+    invalidateVanillaFrameArea(10, 11, 12, 13);
+    const f3 = vanillaFrameFor(st, 12, 12, st, 0, 200);
+    expect([f3.fx, f3.fy]).toEqual([f1.fx, f1.fy]);
   });
 
   // ---------- 第 4 层:rig 逐位对拍(compiled-1458 oracle 真世界倾倒) ----------

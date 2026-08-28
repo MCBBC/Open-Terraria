@@ -3,7 +3,7 @@ import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell, drawCactusCell, tileDrawYOffsetOf } from './VanillaTiler';
-import { invalidateVanillaFrameAt } from './VanillaFraming';
+import { invalidateVanillaFrameAt, invalidateVanillaFrameArea } from './VanillaFraming';
 import { treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
 // 树油漆 style 派生已迁 VanillaTiler（2026-08-25：WindSway 同源消费防环）——re-export 保既有引用面
 export { treeGroundVariant, treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
@@ -301,6 +301,9 @@ export class ChunkCache {
 
   /** 区域标脏（tile 范围）：供树冠等大范围精灵清理使用 */
   markDirtyArea(x0: number, y0: number, x1: number, y1: number) {
+    // silent 编辑路径(陨石/祭坛粉碎等 setTileSilent 直写)不触发 onTileChanged,
+    // 原版全链帧缓存须在此一并区域失效(±1 协商边距由 invalidate 内部处理)
+    invalidateVanillaFrameArea(x0, y0, x1, y1);
     for (let cy = Math.floor(y0 / CHUNK); cy <= Math.floor(y1 / CHUNK); cy++) {
       for (let cx = Math.floor(x0 / CHUNK); cx <= Math.floor(x1 / CHUNK); cx++) {
         if (cx < 0 || cy < 0) continue;

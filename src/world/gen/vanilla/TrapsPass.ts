@@ -89,6 +89,17 @@ function trapEv(kind: string, a: number, b: number, v: number): void {
   (globalThis as { __swTrapEv?: (kind: string, a: number, b: number, v: number) => void }).__swTrapEv?.(kind, a, b, v);
 }
 
+// ---- ★IIII29 批（2026-08-28）：TNT 桶受理面流仪 + PlaceTile 头变异触发仪 ----
+// 均未注册零开销，语义与 x86 rig 侧 BW / PTreset_n<type> 标签同位对齐：
+//   - TNT 流：`A` 尝试起点(k,x,y,bss)、`X` 扫描早退(H350/shimmer)、`H` 扫描命中锚行、
+//     `C/G/R` Place2x2 逐门记录（空置门/地基门/决定）、`D` 决定；
+//   - 头变异：`P <tag> x y hx hy(half 前) sl slope前 fxy(帧前)→fxy(帧后)`——
+//     vanilla cs:60113-60121 的 active 非 frameImportant 锚重排分支。
+function tntProbe(msg: string): void {
+  (globalThis as { __swTntEv?: (m: string) => void }).__swTntEv?.(msg);
+}
+let tntSeq = 0;
+
 /** WorldGen.SetBoulderSolidity（cs:11036）＝tileSolid 九巨石族整体翻转。
  *  ★集合不含 665（生命水晶巨石在 Boulders 集但不在本翻转列——1456/1457 逐行同）。
  *  SSSSSS-NOTRAPS 批接线（原 GenSolid.ts「特殊种子专属翻转备案」三处之一）。 */
@@ -202,6 +213,8 @@ function kdustRolls(st: TileStore, ci: number, rng: RNG): void {
 }
 
 function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void {
+  // ★IIII29 watch 钩（__swKillW，未注册零开销）：观察盒内 KillTile 入口事件。
+  (globalThis as { __swKillW?: (m: string) => void }).__swKillW?.(`${x},${y}`);
   // ★KillTile 1:1 头链（cs:63559-63990）。SSSSS 批（2026-08-20）补三件：
   //   ①CheckTileBreakability 门（cs:62403——容器上格保护/魔金矿/仙人掌基座/
   //     巨石骑箱 fail + 含 loot 箱拒杀）——m20260811 #76 双站点实证
@@ -298,7 +311,18 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng?: RNG, multiFallba
     //   与 TileFrameImportant 同族互斥（不在 CHECK1X1/CHEST/CHECK2X2/185 表内），
     //   命中即消费本次邻格分派，绝不落入下方的地板支撑近似。
     if (!i13Legacy() && wallArtDispatchT(st, ux, uy, rng)) continue;   // ★IIII10（SW_I13_LEGACY=1 反演回退）
+    // ★IIII29（2026-08-28）TNT 桶受理面收官定罪修复①：vanilla TileFrameImportant
+    //   对 {172,360,505,521-527,543,568-570,580,598,620,652,654,713-716,751,752}
+    //   是【空 case → break】（cs:86947-86975 区段逐枚转录）＝完全无完整性检查。
+    //   曾让这些类型落入 MULTI_DEFS 兜底「整块支撑近似」，而该近似的支撑谓词
+    //   （vanGenSolidType 严判）比 Place2x2 受理谓词（SolidTile2||tileTable）窄：
+    //   落在桌/梁类地基上的正当 TNT 桶刚写完就在本格尾环分派中被自体静默擦除
+    //   （notraps #76 四站实证：(742,697)/(887,750)+(893,749)/(3610,760) 全部
+    //   tbl1(sol0) 地基；k1622/k6673 双写双自杀遗迹即此）。补空派发表后，
+    //   X/J 两端 TNT 受理面在本域首次全等。
+    if (!i13Legacy() && TILEFRAME_NO_CHECK.has(sh)) continue;
     if (!multiFallback || !MULTI_DEFS.has(ut)) continue;
+    (globalThis as { __swCascW?: (m: string) => void }).__swCascW?.(`${ux},${uy} sh${sh}`);   // ★IIII29 级联分派观察钩
     // 找含 (ux,uy) 的完整块锚
     const m = MULTI_DEFS.get(ut)!;
     for (let ay = uy; ay > uy - m.h; ay--) {
@@ -640,6 +664,11 @@ const CHECK_SUPER_DEFS: Record<number, { w: number; h: number; horiz: boolean }>
 };
 /** Main.tileNoAttach（Main.cs:7450-7458）＝{568,569,570} */
 const NO_ATTACH_SHEETS = new Set([568, 569, 570]);
+
+// ★IIII29：TileFrameImportant 空 case 族（cs:86947-86975 default: 支逐枚转录，
+//   sheet 空间）——FrameImportant 但零完整性检查的类型（TNT 桶 654 为首祸）。
+const TILEFRAME_NO_CHECK = new Set([172, 360, 505, 521, 522, 523, 524, 525, 526, 527,
+  543, 568, 569, 570, 580, 598, 620, 652, 654, 713, 714, 715, 716, 751, 752]);
 
 /** AnchorValid（cs:52294）子集转录（Traps 域仅用 solid/solidBottom 三旗面）。 */
 function anchorValidT(st: TileStore, x: number, y: number, kind: 'solid' | 'bottom' | 'top' | 'side'): boolean {
@@ -1165,7 +1194,7 @@ function lWire(st: TileStore, x0: number, y0: number, x1: number, y1: number): v
  *  非 1457 特有语义、无版本门。 */
 export function placePlate(st: TileStore, x: number, y: number, style: number, rng?: RNG): boolean {
   if (x < 2 || y < 2 || x > st.w - 3 || y > st.h - 3) return false;   // InWorld(x,y,2)
-  placeHeadMirrorT(st, x, y);                                         // ★III13 PlaceTile 头半砖双支（135 可覆盖门恒过）
+  placeHeadMirrorT(st, x, y, 135);                                    // ★III13 PlaceTile 头半砖双支（135 可覆盖门恒过）
   if (st.flags[st.idx(x, y)] !== 0) return false;                     // Place1x1 !tile.active()
   if (!solidTile2V(st, x, y + 1)) return false;
   if (isBoulderType(st.type[st.idx(x, y + 1)]!)) return false;        // cs:45213 机关×巨石底座
@@ -1435,7 +1464,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
       }
     }
     killTileWhole(st, bx, by, rng);                                        // KillTile（cs:9382，清半砖/坡）
-    placeHeadMirrorT(st, bx, by);                                     // ★III13 炸药桶写位头变异（141）
+    placeHeadMirrorT(st, bx, by, 141);                               // ★III13 炸药桶写位头变异（141）
     st.setTileSilent(bx, by, EXPLOSIVES, 0, rng.int(0, 1) * 18);      // cs:9383-9386
     placePlate(st, x2, py, rng.int(2, 3));                            // cs:9387
     lWire(st, x2, py, bx, by);
@@ -1462,7 +1491,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     }
     const fx = rng.int(0, 1);
     for (let k = 0; k < 2; k++) {
-      placeHeadMirrorT(st, x2 + k, py);                               // ★III13 喷泉写位头变异（443）
+      placeHeadMirrorT(st, x2 + k, py, 443);                         // ★III13 喷泉写位头变异（443）
       st.setTileSilent(x2 + k, py, GEYSER, 18 * k + 36 * fx, 0);
     }
     return true;
@@ -1506,7 +1535,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     const wet = (x: number) => st.liquid[st.idx(x, j2)] > 0;
     if (wet(i5) || wet(i5 - 1) || wet(i5 + 1)) num33 = 1;
   }
-  placeHeadMirrorT(st, i5, j2);                                       // ★III13 镖身写位头变异（137 非实心）
+  placeHeadMirrorT(st, i5, j2, 137);                                 // ★III13 镖身写位头变异（137 非实心）
   st.setTileSilent(i5, j2, TRAP137, dir === 1 ? 18 : 0, 18 * num33);  // cs:9115（frameY=18*style）
   trapEv('DTW', num33, dir, 0);
   lWire(st, x2, py, i5, j2);
@@ -1527,13 +1556,15 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
  *  直填走 EmptyTile 门恒 ghost ⇒ 不触此支，勿挂。 */
 const RESETS_HALF_EXEMPT_SHEETS = new Set([2, 23, 661, 60, 70, 199, 662, 109, 477, 492, 179, 512,
   180, 513, 181, 514, 182, 515, 183, 516, 381, 517, 534, 535, 536, 537, 539, 540, 625, 626, 627, 628, 633]);
-function placeHeadMirrorT(st: TileStore, x: number, y: number): void {
+function placeHeadMirrorT(st: TileStore, x: number, y: number, tag?: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (!st.flags[i]) {
+    tntProbe(`P${tag ?? 0} ${x} ${y} ghost h${st.half[i]} s${st.slope[i]} f${st.frameX[i]},${st.frameY[i]} c`);
     st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0;                   // Clear(Tile|TilePaint|Slope)
   } else if (!RESETS_HALF_EXEMPT_SHEETS.has(sheetOf(st.type[i]!) >= 0 ? sheetOf(st.type[i]!) : -1)
     && !TILE_DEFS[st.type[i]!]?.framed) {
+    tntProbe(`P${tag ?? 0} ${x} ${y} reset h${st.half[i]} s${st.slope[i]} f${st.frameX[i]},${st.frameY[i]}->f0,0`);
     st.half[i] = 0;                                                     // halfBrick(false)
     st.frameX[i] = 0 as never; st.frameY[i] = 0 as never;
   }
@@ -1800,6 +1831,8 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
     // ---- TNT 桶（cs:18829-18851）：W*3 次（tenth W/3）----
     let tntTries = st.w * 3;
     if (nf.tenthAnniversary) tntTries = st.w / 3;
+    tntProbe(`MB ${gs.worldSurface},${gs.rockLevel} bs484=${vanGenSolidType(sheetId(484)) ? 1 : 0} tries=${tntTries}`);
+    tntSeq = 0;
     for (let k = 0; k < tntTries; k++) {
       const x = rng.int(50, st.w - 51);                               // Next(50, w-50)
       const y = nf.remix
@@ -1849,19 +1882,23 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
  *  内部掷支 ⇒ 零耗），x86 TNT 窗总掷恒 25200 = 12600×2 整，两侧封闭相等。 */
 const TNT_BARREL = sheetId(654);
 export function placeTNTBarrel(st: TileStore, x: number, y: number, rng?: RNG): boolean {
+  const k = tntSeq++;
+  tntProbe(`A ${k} ${x} ${y}`);
   let py = y;
   while (!st.flags[st.idx(x, py)]) {
     py++;
-    if (py > st.h - 350) return false;
+    if (py > st.h - 350) { tntProbe(`X ${k} H350 anchor=${x},${py}`); return false; }
   }
   py--;
+  tntProbe(`H ${k} ${x} ${py} hit=${st.flags[st.idx(x, py + 1)] ? sheetOf(st.type[st.idx(x, py + 1)]!) : -1}`);
   {
     const i = st.idx(x, py);
-    if (st.liquid[i] > 0 && st.liquidType[i] === 4) return false;     // anyShimmer（LIQ_SHIMMER）
+    if (st.liquid[i] > 0 && st.liquidType[i] === 4) { tntProbe(`X ${k} shimmer anchor=${x},${py}`); return false; }   // anyShimmer（LIQ_SHIMMER）
   }
   // PlaceTile(654) → Place2x2（cs:60229 分派；右下锚语义同 MicroBiomes place2x2Direct）
-  placeHeadMirrorT(st, x, py);                                        // ★III13 桶锚头变异（654 非实心门恒过）
+  placeHeadMirrorT(st, x, py, 654);                                // ★III13 桶锚头变异（654 非实心门恒过）
   const ok = place2x2Traps(st, x, py, TNT_BARREL);
+  tntProbe(`D ${k} ${ok ? 'OK' : 'NO'} at=${x},${py}`);
   if (ok && !i13Legacy()) cascade3x3T(st, x, py, rng, true);   // cs:60752 通用尾 SquareTileFrame(i,j)
   return ok;
 }
@@ -1877,25 +1914,39 @@ const PLACE2X2_TABLE = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278
   542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610,
   611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
 function place2x2Traps(st: TileStore, x: number, y: number, type: number): boolean {
-  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;   // cs:51786
+  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) { tntProbe(`R bounds ${x},${y}`); return false; }   // cs:51786
   // ★PlaceTile 头（cs:59500）：inactive 锚 Clear(Tile|TilePaint|Slope)（654 非实心
   //   → 头门恒过，先清后派发；active 锚不清——ResetsHalfBrick[654]=false）
   if (!st.flags[st.idx(x, y)]) st.setTileSilent(x, y, 0);
   for (let i = x - 1; i <= x; i++) {
     for (let j = y - 1; j <= y; j++) {
-      if (st.flags[st.idx(i, j)]) return false;                       // cs:51376 空置门
+      const ci = st.idx(i, j);
+      if (st.flags[ci]) {
+        tntProbe(`C ${i} ${j} t${sheetOf(st.type[ci]!)} h${st.half[ci]} s${st.slope[ci]} w${(st.wire[ci] >>> 5) & 1}`);   // cs:51376 空置门
+        return false;
+      }
     }
     const gi = st.idx(i, y + 1);
     const gt = st.type[gi]!;
     const solid2 = st.flags[gi] !== 0 && vanGenSolidType(gt)
       && st.slope[gi] === 0 && st.half[gi] === 0
       && ((st.wire[gi] >>> 5) & 1) === 0;                             // SolidTile2（inActive 位）
-    if (!st.flags[gi] || (!solid2 && !PLACE2X2_TABLE.has(sheetOf(gt)))) return false;
+    const table = PLACE2X2_TABLE.has(sheetOf(gt));
+    tntProbe(`S ${i} ${y + 1} t${sheetOf(gt)} h${st.half[gi]} s${st.slope[gi]} ia${(st.wire[gi] >>> 5) & 1} sol${vanGenSolidType(gt) ? 1 : 0} tbl${table ? 1 : 0}`);
+    if (!st.flags[gi]) {
+      tntProbe(`G ${i} ${y + 1} INACTIVE`);
+      return false;
+    }
+    if (!solid2 && !table) {
+      tntProbe(`G ${i} ${y + 1} t${sheetOf(gt)} h${st.half[gi]} s${st.slope[gi]} ia${(st.wire[gi] >>> 5) & 1} sol${vanGenSolidType(gt) ? 1 : 0} tbl${table ? 1 : 0}`);
+      return false;
+    }
   }
   for (let k = x - 1; k <= x; k++) {
     for (let l = y - 1; l <= y; l++) {
       st.setTileSilent(k, l, type, (k - x + 1) * 18, (l - y + 1) * 18);
     }
   }
+  tntProbe(`R ok ${x},${y}`);
   return true;
 }

@@ -501,15 +501,31 @@ function execCall(st: Stmt, env: FrameEnv, scope: Scope): void {
 // 等价 WorldGen.TileFrame(82605-82665) 守卫 + TileFrameCosmetic + 86072-86093 写回
 interface FrameEntry { fx: number; fy: number; fu: boolean; fd: boolean; fl: boolean; fr: boolean; v6?: number }
 export const vanillaFrameCache = new Map<number, FrameEntry>();
+// ★缓存键步长常量(2026-08-28 定谳):写入(tileFrame)与失效(invalidateVanillaFrameAt)
+// 曾是两套公式——写入 j*st.w+i(世界宽)、失效 j*100000+i ⇒ 键永不相等,失效永远
+// 删空 ⇒ 挖掘/放置后邻居帧永不现场刷新(用户实报「被破坏的方块没动态更新」)。
+// 统一常量步长(>最大世界宽 8400;j<2400 ⇒ 键上限 ~2.4e8,安全)。
+const VF_CACHE_STRIDE = 100000;
 let frameCacheWorld: object | null = null;
 export function invalidateVanillaFrames(world: object): void {
   if (frameCacheWorld !== world) { frameCacheWorld = world; vanillaFrameCache.clear(); }
 }
 export function invalidateVanillaFrameAt(x: number, y: number): void {
-  // 局部失效:3×3 邻域(协商旗递归可及 ±1 格;取整防御小数坐标)
+  // 局部失效:5×5 邻域。距离 1 = 直接合并码;距离 2 = Frametest 协商旗两跳路径
+  // (TileMergeAttemptFrametest 先 TileFrame(邻格) 再读其 mergeUp/… 静态旗 ⇒ 邻格的
+  // 旗又依赖它的邻格)。原版无此问题(整 200×150 分区重算);取 ±2 覆盖两跳,成本
+  // 可忽略(codegen 重算 ~µs/格)。取整防御小数坐标。
   const xi = Math.floor(x), yi = Math.floor(y);
-  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-    vanillaFrameCache.delete((yi + dy) * 100000 + (xi + dx));
+  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+    vanillaFrameCache.delete((yi + dy) * VF_CACHE_STRIDE + (xi + dx));
+  }
+}
+/** 区域失效(silent 编辑路径:陨石/祭坛粉碎等走 markDirtyArea 的场景);±1 协商边距 */
+export function invalidateVanillaFrameArea(x0: number, y0: number, x1: number, y1: number): void {
+  const ax0 = Math.floor(x0) - 1, ay0 = Math.floor(y0) - 1;
+  const ax1 = Math.floor(x1) + 1, ay1 = Math.floor(y1) + 1;
+  for (let y = ay0; y <= ay1; y++) for (let x = ax0; x <= ax1; x++) {
+    vanillaFrameCache.delete(y * VF_CACHE_STRIDE + x);
   }
 }
 
@@ -546,7 +562,7 @@ function tileFrame(env: FrameEnv, i: number, j: number, depth: number): { fx: nu
   const idx = st.idx(i, j);
   if (!st.flags[idx]) return { fx: 0, fy: 0 };
   const typeV = vanillaIdOf(st.type[idx]); // 内部 id → vanilla id(★域契约,见头注)
-  const key = j * st.w + i;
+  const key = j * VF_CACHE_STRIDE + i; // ★与 invalidateVanillaFrameAt 同一公式(见常量注)
   const rawHit = env.frameCache.get(key) ?? (env.bypassGlobalCache ? undefined : vanillaFrameCache.get(key));
   // ★变体域戳(2026-08-28):帧是 (世界配置 × num6 变体) 的函数。oracle/区域对拍逐格
   // 注入 variant 时,深层递归会把"外层变体"算出的邻格帧写进全局缓存,顶链再命中即串

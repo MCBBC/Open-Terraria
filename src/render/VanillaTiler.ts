@@ -18,17 +18,31 @@ import { cageFamilyOf, drawCageCell } from './CritterCage';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
 import { animFrameIdx, animYOffset, TILE_ANIM_RATE } from './TileAnim';
 import { vanillaFrameFor, setVanillaSolidTables, deriveVanillaSolidTablesFromDefs } from './VanillaFraming';
-// 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程)。★实验旗(默认停用):
-// 启用 = URL ?vf=1 或 localStorage sw_vanilla_framing=1;?vf=0 强制关(压过 localStorage)。
-// id 域契约已在 VanillaFraming 内收敛(内部 id→vanilla 换算),rig 1932 格逐位仲裁通过。
+// 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程;2026-08-28 转正默认启用)。
+// ★回退开关(发现严重问题时无需改代码):
+//   ①URL ?vf=0 —— 单次强制关,压过一切(含 localStorage);
+//   ②localStorage sw_vanilla_framing=0 —— 持久关;
+//   ③链未命中/越表时逐格自动回落 TEdit blend/auto 旧路径(下方代码原样保留=回退路径本体);
+//   ④引擎回退:localStorage sw_vanilla_framing_codegen=0 → TileFrameCosmetic 解释器
+//     (代码生成 tileframe-codegen 为默认引擎,见 VanillaFraming.ts)。
+// 验收依据:金标四层+rig 1932 格逐位、worldwide 32003 格 interp==gen 零差、
+// 真机 A/B 长任务 7163ms→0、斜坡/半砖 A/B 逐像素一致(用户验收)。
 const SW_VANILLA_FRAMING = (() => {
   try {
     const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '').get('vf');
     if (q === '1') return true;
     if (q === '0') return false;
   } catch { /* SSR/无 location */ }
-  return typeof localStorage !== 'undefined' && localStorage.getItem('sw_vanilla_framing') === '1';
+  try {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('sw_vanilla_framing') === '0') return false;
+  } catch { /* node 测试环境 */ }
+  return true; // ★2026-08-28 转正:默认启用
 })();
+
+/** 探针/测试专用只读:当前链启用态 */
+export function isVanillaFramingEnabled(): boolean {
+  return SW_VANILLA_FRAMING;
+}
 // vanilla solid/solidTop 表注入(初始化一次;solidTop 用 SW 平台表近似——矩阵对 426-434/727-732
 // 皆整块,不涉 solidTop,误差面为零)
 // ★2026-08-28:推导逻辑收敛到 VanillaFraming.deriveVanillaSolidTablesFromDefs——
@@ -1449,8 +1463,17 @@ export const DRAW_Y_OFFSET: Record<number, number> = {
   464: 2, 466: 2, 470: 2, 475: 2, 485: 2, 489: 2, 490: 2, 491: 2, 493: 2, 494: 2, 499: 2,
   505: 2, 506: 2, 519: 2, 520: 2, 521: 2, 522: 2, 523: 2, 524: 2, 525: 2, 526: 2, 527: 2,
   528: -2, 529: -14, 530: 2, 543: 2, 547: 2, 548: 2, 552: 2, 560: 2, 564: 2, 565: 2, 568: 2,
-  569: 2, 570: 2, 571: 2, 579: -2, 593: 2, 594: 2, 597: 2, 598: 2, 613: 2, 614: 2, 617: 2,
-  621: 2, 622: 2, 624: 2, 636: -2, 638: -2, 646: -4, 654: 2, 656: -16, 700: 2, 701: -16, 705: 2,
+  561: -2, 569: 2, 570: 2, 571: 2, 579: -2, 593: 2, 594: 2, 597: 2, 598: 2, 613: 2, 614: 2, 617: 2,
+  621: 2, 622: 2, 624: 2, 636: -2, 638: -2, 646: -4, 654: 2,
+  // ★656/701(Glow Tulip) :5170-5172 tileTop -= 16 ⇒ 恒 −16(2026-08-28 review 勘误:
+  //   曾误改 +2——提取器正则只认 `tileTop =` 漏掉复合赋值 `-=`;579 同款勘误见下)
+  656: -16, 700: 2, 701: -16, 705: 2,
+  // ---- 2026-08-28 全量对账补遗（GetTileDrawData :4580-6100 逐 case 机械对账）：
+  //      补 27 项静态 tileTop 缺失（均经 :5xxx 原文逐条直验为 `tileTop = N` 平赋值）
+  // ★579(Rock Golem Head) :5174-5182 tileTop -= 2 ⇒ 恒 −2（review 勘误：曾误翻 +2）
+  28: 2, 36: 2, 173: 2, 233: 2, 238: 2, 324: -2, 480: 2, 509: 2, 623: 2, 642: 2,
+  647: 2, 648: 2, 649: 2, 650: 2, 651: 2, 652: 2, 653: 2, 657: 2, 658: 2, 699: 2,
+  706: 2, 720: 2, 721: 2, 725: 2, 733: 2, 752: 2, 753: 2,
   // ---- 小动物笼族 93 张（GetTileDrawData 笼族四段全设 tileTop=2：大笼组 :5746、
   //      小笼组 :5873、罐缸 water 组 :5929-5989、水母 small 组 :5994）。
   //      旧表只收 275/285 两张——配套 CritterCage.ts 的顶盖/帧行动画 ----
@@ -1469,6 +1492,7 @@ function tileTopCond(sheet: number, fx: number, fy: number): number | null {
   switch (sheet) {
     case 136: return fx === 0 ? 2 : 0;                                       // :4637-4642
     case 443: return fx / 36 >= 2 ? -2 : 2;                                  // :4612-4621
+    case 81: return fx === 0 ? -6 : -8;   // :4979-4983 tileTop=2 + :5367 -=8 ⇒ fx==0 −6(2026-08-28 对账补)
     case 567: return fy === 0 ? -2 : 0;                                      // :5203-5206
     case 388: case 389: return (fy === 0 || fy === 94) ? -2 : 0;             // :5106-5119
     // ★185/186/187:tileTop 恒 2(:5218-5236 自成一块,内含 187 分带换算)——
@@ -1552,12 +1576,15 @@ const NOT_REALLY_SOLID = new Set([387, 388, 10]);
 const SMOOTH_BORDER = new Set([321, 157, 208, 159, 190, 80, 251, 202, 229, 56, 38, 39, 152, 118, 151, 148, 206, 119, 175, 46, 176, 45, 140, 347, 370, 121, 122, 680, 681, 682, 685, 686, 346, 687, 688, 689, 690, 691, 692, 160, 226, 54, 156, 155, 153, 154, 150, 250, 198, 273, 274, 325, 284, 348, 385, 327, 326, 345, 328, 329, 357, 369, 268, 261, 262, 255, 267, 260, 265, 258, 266, 259, 264, 257, 263, 256, 311, 426, 430, 431, 432, 433, 434, 727, 728, 729, 730, 731, 732, 272, 145, 146, 350, 127, 472, 473, 477, 478, 479, 492, 496, 507, 508, 563, 618, 708, 722, 735, 748]);
 
 /** X 镜像翻转(GetTileDrawData:x % 2 == 0 → FlipHorizontally,植物/藤蔓变体的原版来源) */
-const FLIP_X_EVEN = new Set([3, 20, 24, 52, 61, 62, 71, 73, 74, 81, 82, 83, 84, 110, 113, 115, 201, 205, 227, 270, 271, 324, 382, 519, 528, 529, 571, 572, 581, 590, 595, 615, 624, 636, 638, 656, 660, 700, 701, 703]);
+const FLIP_X_EVEN = new Set([3, 20, 24, 52, 61, 62, 71, 73, 74, 81, 82, 83, 84, 110, 113, 115, 201, 205, 227, 270, 271, 324, 382, 519, 528, 529, 567, 571, 572, 581, 590, 595, 615, 624, 636, 638, 656, 660, 700, 701, 703]); // +567(:5207-5209 x%2 镜像,2026-08-28 对账补)
 /** 源矩形越界 warn-once 键去重(防每帧刷屏;换世界不重置可接受——键含 sheet+矩形) */
 const SRC_OOB_WARNED = new Set<string>();
 
 /** tileHeight=18 组(:4933-4977 + 20/590/595/615/79/90 + 114 高度+2)——grid 仍是 16 的需覆写 */
-const HEIGHT_18 = new Set([16, 17, 20, 26, 32, 69, 72, 77, 79, 90, 114, 124, 137, 138, 352, 462, 487, 488, 574, 575, 576, 577, 578, 590, 595, 615, 664, 695, 704, 712, 713, 714, 715, 716]);
+// ★2026-08-28 全量对账补 19 项（14/15/21/27/132/135/172/376/388/389/410/411/441/
+// 467/468/469/476/497/567）；90/114 为历史遗留（1457 无 h18,18px 多画的 2px 是
+// 步进透明 padding,source-over 无副作用,保留防未知回归）
+const HEIGHT_18 = new Set([14, 15, 16, 17, 20, 21, 26, 27, 32, 69, 72, 77, 79, 90, 114, 124, 132, 135, 137, 138, 172, 352, 376, 388, 389, 410, 411, 441, 462, 467, 468, 469, 476, 487, 488, 497, 567, 574, 575, 576, 577, 578, 590, 595, 615, 664, 695, 704, 712, 713, 714, 715, 716]);
 
 /** 共用慢速旋转计数(Main.tileFrame[type] 的近似:原版各类型速率不同,装饰性轮换取统一慢速) */
 function animRot(): number {
@@ -1644,10 +1671,24 @@ function drawAdjust(
     }
     case 751: if (fit(fx, fy, 56, 46)) { a.sw = 56; a.sh = 46; } break;  // :4582-4589
     case 752: if (fit(fx, fy, 36, 38)) { a.sw = 36; a.sh = 38; } break;  // :4577-4581
+    // ---- 2026-08-28 全量对账补遗（GetTileDrawData :4580-6100 逐 case w/h 对账；
+    //      树冠族 583-589/596/616/634 的 w20 走 drawTreeCell 专道,不在本表）----
+    case 81: if (fit(fx, fy, 24, 26)) { a.sw = 24; a.sh = 26; } break;   // :4979-4983 珊瑚 24×26
+    case 323: case 324: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break; // :5059-5070
+    case 442: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break;  // :5704-5720
+    case 476: if (fit(fx, fy, 20, 18)) { a.sw = 20; a.sh = 18; } break;  // 高尔夫奖杯 w20×h18
+    case 567: if (fit(fx, fy, 26, 18)) { a.sw = 26; a.sh = 18; } break;  // :5203-5206 花园侏儒 26×18
+    case 579: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break;  // 石巨人头 20×20
+    case 656: case 701: if (fit(fx, fy, 24, 34)) { a.sw = 24; a.sh = 34; } break; // :5168-5176 发光郁金香(本/仿) 24×34
+    // h20 植物家具族(:4899-4917 等多组 h=20;摆动成员与静态烘焙共用 drawVanillaCell,表值双向生效)
+    case 3: case 24: case 33: case 49: case 61: case 71: case 82: case 83: case 84:
+    case 110: case 174: case 201: case 372: case 637: case 646: case 703:
+      if (fit(fx, fy, 16, 20)) { a.sh = 20; } break;
+    case 726: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break;  // 炮弹 20×20
     case 184: if (fit(fx, fy, 20, 16)) a.sw = 20; break; // :5289 tileWidth=20 仅 184——曾误落 185-187
     //  (C# 无 fallthrough:187 块 :5218-5236 只设 tileTop+分带换算,宽 20 会让
     //   3×2 石堆每格多绘右邻 4px=接缝错位,2026-08-28 用户报)
-    case 624: a.sh = 16; break;                                            // :5153-5162(20×16)
+    case 624: case 700: if (fit(fx, fy, 20, 16)) { a.sw = 20; a.sh = 16; } break; // :5153-5162(20×16;700 同组,2026-08-28 对账补)
     case 711: if (fx > 0 && fit(fx, fy, 18, 20)) { a.sw = 18; a.sh = 20; } break; // :5000-5008
     case 561: a.sh = 20; break;                                            // 落穿 388 前预置高 20
     case 270: case 271: case 581: {   // :5627-5648:旋转 6 帧
@@ -1711,6 +1752,7 @@ function drawAdjust(
         else if (v === 4) a.sx = fx + 204;
         else if (v === 3) a.sx = fx + 272;
       }
+      if (fit(fx, fy, 32, 38)) { a.sw = 32; a.sh = 38; }   // :5126-5128 w32×h38(2026-08-28 对账补)
       break;
     case 485:   // :4780-4790:恒摆(无风门)
       a.sy = fy + 36 * (((Math.floor(tileAnim.tick / 5) + (y - Math.floor(fy / 18)) + (x - Math.floor(fx / 18))) % 4 + 4) % 4);

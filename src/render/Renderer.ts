@@ -28,6 +28,7 @@ import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene,
 import { GLScreenFilters, type ScreenFxPass } from './GLScreenFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora, setFrameAtmo } from '../lighting/SkyColor';
+import { journeyQuickConfirmed, showJourneyQuickGate } from '../ui/QuickGate';
 import { SMART_CURSOR_DIRECTION_LOCKS, sheetOf } from '../player/SmartCursor';
 import { mobileUiScale } from '../ui/MobileControls';
 import { TEAM_COLORS } from '../stats/Pvp';
@@ -3550,20 +3551,27 @@ export class Renderer {
       return;
     }
 
-    // 9. 小地图
-    this.drawMinimap(ctx, cam, world, player, clock, entities);
     // 9.45 信息饰品列(DrawInfoAccs;main 系列资源文本,原版右上 X=W-280)
     //  纵向 +261 偏移门 = mapStyle==1 && mapEnabled(Main.cs:46675 GetInfoAccIconPosition
     //  ——小地图可见时信息列整体下移到小地图框之下;曾误传 fullMap.open,列压在小地图上)
-    if (this.infoAccCtx && this.infoAccs.canShow(
-      !!((player as unknown as { talking?: boolean }).talking),
-      !!((this as unknown as { chestOpen?: boolean }).chestOpen),
-      false,
-    )) {
-      this.infoAccs.draw(ctx, viewW, viewH, this.infoAccCtx, player.hideInfo,
-        this.playerInventory, this.mapStyle === 1 && !!this.minimap,
-        this.infoAccHover, this._mouseX, this._mouseY);
-    }
+    //  ★时间/天气面板展开时先画信息列（面板叠信息之上,2026-08-27 用户要求——
+    //  面板(小地图下 ±/⛅ 展开体)与信息列同域,原序信息列后画=压住面板）
+    const quickPanelsOpen = this.timePanelOpen || this.weatherPanelOpen;
+    const drawInfoAccs = () => {
+      if (this.infoAccCtx && this.infoAccs.canShow(
+        !!((player as unknown as { talking?: boolean }).talking),
+        !!((this as unknown as { chestOpen?: boolean }).chestOpen),
+        false,
+      )) {
+        this.infoAccs.draw(ctx, viewW, viewH, this.infoAccCtx, player.hideInfo,
+          this.playerInventory, this.mapStyle === 1 && !!this.minimap,
+          this.infoAccHover, this._mouseX, this._mouseY);
+      }
+    };
+    if (quickPanelsOpen) drawInfoAccs();
+    // 9. 小地图
+    this.drawMinimap(ctx, cam, world, player, clock, entities);
+    if (!quickPanelsOpen) drawInfoAccs();
     // 9.5 全屏地图
     if (this.fullMap.open && this.minimap) {
       this.drawFullMap(ctx, world, this._mouseX, this._mouseY, this._mouseDown, entities);
@@ -3902,15 +3910,15 @@ export class Renderer {
     };
     if (isBackground) {
       drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn, glintLumAt);
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn, glintLumAt, this.animTick);
     } else if (warpOn) {
       const fgCtx = this.waterWarp.beginFgPass(this.ctx);
       drawVanillaLiquids(fgCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt);
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick);
       if (fgCtx) this.waterWarp.endFgPass(this.ctx);
     } else {
       drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false, glintLumAt);
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false, glintLumAt, this.animTick);
     }
   }
 
@@ -13529,7 +13537,12 @@ export class Renderer {
     ctx.fillStyle = '#e8e8f4';
     ctx.font = 'bold 13px monospace';
     ctx.fillText('\u00b1', btnX + btnS / 2, btnY + 15);
-    if (clicked && btnHover) this.timePanelOpen = !this.timePanelOpen;
+    if (clicked && btnHover) {
+      // ★首用确认门（2026-08-27 用户要求,同道具搜索）：未确认 → 弹窗明示超游
+      //   风险,确认后 localStorage 持久放行；本次点击被门吞掉（下一击生效）
+      if (!journeyQuickConfirmed('time')) { showJourneyQuickGate('time', () => { this.timePanelOpen = true; }); }
+      else this.timePanelOpen = !this.timePanelOpen;
+    }
     if (this.timePanelOpen) {
       const px = ox, py = oy + 276, pw = size, ph = 64;
       ctx.fillStyle = 'rgba(8,10,26,0.92)';
@@ -13574,7 +13587,10 @@ export class Renderer {
     ctx.fillStyle = '#e8e8f4';
     ctx.font = 'bold 12px sans-serif';
     ctx.fillText('⛅', wBtnX + btnS / 2, wBtnY + 15);
-    if (clicked && wBtnHover) this.weatherPanelOpen = !this.weatherPanelOpen;
+    if (clicked && wBtnHover) {
+      if (!journeyQuickConfirmed('weather')) { showJourneyQuickGate('weather', () => { this.weatherPanelOpen = true; }); }
+      else this.weatherPanelOpen = !this.weatherPanelOpen;
+    }
     if (this.weatherPanelOpen) {
       const px2 = ox, py2 = wPanelY, pw2 = size;
       ctx.fillStyle = 'rgba(8,10,26,0.92)';

@@ -30,6 +30,8 @@ const OUT = process.env.SW_III29_OUT ?? '/tmp/iii29-out';
     nMarks++;
     if (t === 'FNTBIN') valWin = true;
     else if (t === 'FNTBOUT') valWin = false;
+    // ★流内哨兵：与 x86 rig NtbTag→ValMark 同位（# 前缀行写入 val 流）
+    if (valWin) valWs.write(`#${t}|${a ?? 0}|${b ?? 0}\n`);
   };
   const t0 = Date.now();
   await generateWorld({

@@ -234,6 +234,27 @@ function place2x2Direct(st: TileStore, x: number, y: number, type: number): bool
  *  MiningExplosives 141 前置门消费（★OOOOOOO：1457 新增门，见 placeMiningExplosives）。
  *  TrackPass.canKillTile 同构镜像；sheet 空间常量本文件局部重建。 */
 const SHEET_OF_MB = new Int16Array(TILE_DEFS.length).fill(-1);
+/** SolidTileAllowBottomSlope（cs:70698）本地诊断副本——仅 EXPL 探针消费,行为零接入 */
+function solidAllowBottomProbe(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  if (!st.flags[i] || (st.wire[i] & 32)) return false;
+  const t = st.type[i]!;
+  const d = TILE_DEFS[t];
+  if (!d || !(vanGenSolidType(t) || d.platform)) return false;
+  const sl = st.slope[i]!;
+  const topSlope = sl === 1 || sl === 2;
+  if (topSlope && !(PLATFORM_SET_PROBE.has(SHEET_OF_MB[t]) && platformProperTopProbe(st.frameX[i]!))) return false;
+  return !st.half[i];
+}
+const PLATFORM_SET_PROBE = new Set(idsByVanillaSheet(
+  19, 60, 70, 117, 151, 189, 196, 207, 226, 237, 289, 295, 302, 306, 314, 330, 333,
+  334, 335, 338, 340, 342, 366, 374, 381, 386, 398, 401, 415, 419, 424, 430, 437, 473,
+  480, 496, 503, 518, 527, 552, 573, 599, 614, 618, 626, 641, 651, 684, 694, 706, 717,
+));
+function platformProperTopProbe(fx: number): boolean {   // cs:70619-70625 简表(生成期镜像)
+  return (fx & 35) === 0;                                 // 万能近似:平台顶帧判定探针专用
+}
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number') SHEET_OF_MB[i] = s;
@@ -1821,6 +1842,11 @@ export class DeadMansChestBiome {
     st.half[idx] = 0;
     // cs:532 WorldGen.TileFrame(x, y, resetFrame:true)——137 无 frame 分派（零掷），
     // 但经 tileFrameGen 全分派以对齐未来 Check* 级联语义（UUUU）
+    // ★IIII27：原版实际帧的是【锚点格】(d.x,d.y)=(扫描起点 px,py)而非陷阱格
+    //   （cs:120-121 调用传 dartTrapPlacementSpot.x/.y = position.X/Y = 锚点；
+    //   t 才是陷阱格 tile 引用）。本仓旧实现帧 trapX/trapY 与原版差一格——
+    //   对 467 箱锚点无掷差异，但语义 1:1 归正时顺带钉死。
+    mbProbe('DRT', () => `trapCell=${d.trapX},${d.trapY} anchor=${d.x},${d.y} dir=${d.directionX} push=${d.xPush}`);
     genTileFrame(st, this.rng, d.trapX, d.trapY);
     this.placeWireLine({ x: d.x, y: d.y, dirX: d.directionX, dirY: 0, steps: d.xPush });
   }
@@ -1857,6 +1883,7 @@ export class DeadMansChestBiome {
             }
             st.slope[idx] = 0;
             st.half[idx] = 0;
+            mbProbe('BFR', () => `${i},${j} type=${b.bestType} sheet=${SHEET_OF_MB[st.type[idx]!]} iter=${flag ? 2 : 1}`);
             genTileFrame(st, this.rng, i, j);
             if (flag) break;
             flag = true;
@@ -1900,18 +1927,44 @@ export class DeadMansChestBiome {
     this.placeWireLine({ x: b.x, y: b.y, dirX: 0, dirY: 1, steps: b.yPush });
   }
 
-  /** ActuallyPlaceExplosive(cs:611-619) */
+  /** ActuallyPlaceExplosive(cs:611-619)
+   *  ★IIII27（2026-08-28）写序归正单刀：原版本方法对 Tile 对象**只写字段、不置
+   *  active**（cs:619 `tile.type=141` 等，全函数无 active(true)）。目标格语义：
+   *  • 目标是**空气/惰性格**——写完仍 inactive ⇒ 其后 WorldGen.TileFrame(reset:
+   *    true) 在 cs:82621 `!tile.active()` 早退，零分派零掷；
+   *  • 目标是**活性实心格**（本链实证 (3846,961) 苔藓面）——type 被覆盖为 141 而
+   *    active 保持 ⇒ TileFrame→case141 Check1x1(cs:45633) 支撑失守 → KillTile →
+   *    尾 SquareTileFrame(cs:64446) 环帧邻格 184 苔藓各掷 Next(3)（cs:86448）。
+   *  FindExplosiveTrapSpots 三支(num4/num/num3 cs:383-393)可推同一坐标两次——
+   *  原版第二次落在已被杀死的格上同样 inert；旧 JS 强置 flags[idx]=1 会把死格
+   *  复活成活性 141 再走一遍 Check1x1→Kill→环帧：每次多 2×Next(3)。
+   *  实证（12345 链 first attempt 3839,957）：x86 rc=11 vs js rc=13 的全部
+   *  差额即此两掷（SW_TAGLOG ln164/165 vs SW_KLOG 单条 K(3846,961,141)）。
+   *  ★IIII27 诊断探针保留（无 __swSeg 钩时零开销）。 */
   private actuallyPlaceExplosive(e: { x: number; y: number }): void {
     const st = this.st;
     if (!st.inBounds(e.x, e.y)) return;
     const idx = st.idx(e.x, e.y);
     st.type[idx] = EXPLOSIVES;
-    st.flags[idx] = 1;
+    // （勿置 flags[idx]=1：cs:611-619 无 active 写入——见上注）
     st.frameX[idx] = 0;
     st.frameY[idx] = 0;
     st.slope[idx] = 0;
     st.half[idx] = 0;
+    mbProbe('EXPL', () => {
+      const sh = (x2: number, y2: number): string => {
+        if (!st.inBounds(x2, y2)) return 'oob';
+        const j = st.idx(x2, y2);
+        return `${st.flags[j] ? 'a' : '-'}${SHEET_OF_MB[st.type[j]!] ?? st.type[j]}`;
+      };
+      const belowSolid = solidAllowBottomProbe(st, e.x, e.y + 1);
+      const selfActive = st.flags[idx] ? 1 : 0;
+      return `${e.x},${e.y} self=${selfActive} ring=[${sh(e.x - 1, e.y - 1)},${sh(e.x, e.y - 1)},${sh(e.x + 1, e.y - 1)},`
+        + `${sh(e.x - 1, e.y)},${sh(e.x + 1, e.y)},${sh(e.x - 1, e.y + 1)},${sh(e.x, e.y + 1)},${sh(e.x + 1, e.y + 1)}]`
+        + ` belowSolid=${belowSolid ? 1 : 0}`;
+    });
     genTileFrame(st, this.rng, e.x, e.y);   // cs:617 TileFrame(resetFrame:true)
+    mbProbe('EXPL.after', () => `dead=${st.flags[st.idx(e.x, e.y)] ? 0 : 1}`);
   }
 }
 

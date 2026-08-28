@@ -277,6 +277,17 @@ const getSlopeTex = (waterStyle: number): HTMLImageElement | null => {
   return im.width > 0 ? im : null;
 };
 
+/** 同帧准备缓存(#perf-gpulog 水体批):P1-P7 管线每帧被 bg/fg 两次调用,
+ *  输入(窗口/store/waterStyle)在单帧渲染段内不变 → 第二次调用直接复用数组。
+ *  frameToken 由调用方传渲染帧号(animTick),跨帧自动失效重算 */
+let _prepToken: number | undefined;
+let _prepKey = '';
+/** 液体包围盒(内区格坐标,P1 扫描产出):P2-P7 只需遍历液面±邻域——
+ *  典型视野液体占小半格网,包围盒裁剪省 ~6/7 的 pass 扫描。边界外 cell 的
+ *  P2 邻域填充(夹心格)按定义必在包围盒内,裁剪无损 */
+let _boxL = 0, _boxT = 0, _boxR = -1, _boxB = -1;
+let _boxHas = false;
+
 export function drawVanillaLiquids(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null,
   st: TileStore, groundLevel: number,
@@ -290,6 +301,8 @@ export function drawVanillaLiquids(
   /** 场景亮度采样（tile 光照 RGB 均值/255；Renderer 注入 lighting.lightAt）——
    *  波光 glint 的亮度因子（obj19 :106-111 用位移后场景像素亮度，暗处→0） */
   lumAt?: (tx: number, ty: number) => number,
+  /** 渲染帧号(同帧 bg/fg 两调用传同值 → P1-P7 第二次调用走缓存复用) */
+  frameToken?: number,
 ): void {
   if (!atlas) { _liqDebug.atlasReady = false; return; }
   const PAD = 2;
@@ -308,6 +321,13 @@ export function drawVanillaLiquids(
     _isHalfA = new Uint8Array(n);
     _fx = new Int16Array(n); _fy = new Int16Array(n);
   }
+  const prepKey = `${tx0},${ty0},${tx1},${ty1},${waterStyle}`;
+  // ★同帧复用(#perf-gpulog 水体批):bg(:2755)/fg(:3139)两次调用输入相同,
+  // 第二次跳过 P1-P7(数组持本帧早先结果)【直接进绘制段】——绝不可 return 整函数:
+  // fg 返回 = fgCanvas 空白 = 全屏 GL 扭曲/波光失去门控纹理(用户实报"GL效果没了")
+  const needsPrep = frameToken === undefined || _prepToken !== frameToken || _prepKey !== prepKey;
+  if (needsPrep) {
+  _prepToken = frameToken; _prepKey = prepKey;
   // 归零(等价新分配数组;未写格语义为 0)。
   // 例外:opacity 原为 .fill(1)——P3 只写到 ph-10 行,底缘 8 行依赖初始 1,
   // 必须保持 fill(1) 否则视口底缘水体透明度归零(渲染结果变化)
@@ -319,6 +339,8 @@ export function drawVanillaLiquids(
   _hasLE.fill(0); _hasRE.fill(0); _hasTE.fill(0); _hasBE.fill(0);
   _isHalfA.fill(0);
   _fx.fill(0); _fy.fill(0);
+  }   // needsPrep(fills)结束
+  // 别名(守卫外亦消费:绘制段每次调用都跑)——声明零成本
   const level = _level, visLevel = _visLevel, opacity = _opacity;
   const isSolidA = _isSolidA, hasLiquidA = _hasLiquidA, hasWallA = _hasWallA;
   const hasVisA = _hasVisA, typeA = _typeA, visTypeA = _visTypeA;
@@ -327,8 +349,11 @@ export function drawVanillaLiquids(
   const hasLE = _hasLE, hasRE = _hasRE, hasTE = _hasTE, hasBE = _hasBE;
   const isHalfA = _isHalfA;
   const fx = _fx, fy = _fy;
+  const at = (lx: number, ly: number) => lx * ph + ly; // padding 内坐标
+  let bx0 = _boxL, bx1 = _boxR, by0 = _boxT, by1 = _boxB;   // 复用帧沿用本帧早前盒值
 
-  // ---- P1：原始缓存 ----
+  // ---- P1：原始缓存(同帧复用:仅 needsPrep 时执行) ----
+  if (needsPrep) {
   for (let lx = 0; lx < pw; lx++) {
     const x = px0 + lx;
     for (let ly = 0; ly < ph; ly++) {
@@ -347,11 +372,53 @@ export function drawVanillaLiquids(
       isSolidA[i] = d && d.solid ? 1 : 0;
     }
   }
-  const at = (lx: number, ly: number) => lx * ph + ly; // padding 内坐标
+  }   // P1 结束
+  for (let lx = 0; lx < pw; lx++) {
+    const x = px0 + lx;
+    for (let ly = 0; ly < ph; ly++) {
+      const y = py0 + ly;
+      const i = lx * ph + ly;
+      if (!st.inBounds(x, y)) { isSolidA[i] = 1; continue; }
+      const si = st.idx(x, y);
+      const lq = st.liquid[si];
+      level[i] = lq / 255;
+      hasLiquidA[i] = lq > 0 ? 1 : 0;
+      hasWallA[i] = st.wall[si] > 0 ? 1 : 0;
+      typeA[i] = toVanillaType(st.liquidType[si]);
+      visTypeA[i] = typeA[i]; // P3 只跑到底部 10 行外（同原版 L152）——预填本格类型兜底，
+                              // 否则底带格子 visTypeA=0 被当水画（原版靠跨帧残留缓存掩蔽）
+      const d = TILE_DEFS[st.type[si]];
+      isSolidA[i] = d && d.solid ? 1 : 0;
+    }
+  }
+  // 液体包围盒(P1 扫描产出,内区坐标):P2-P7 裁剪用。+1 余量覆盖夹心格邻域
+  if (needsPrep) {
+  let bL = pw, bT = ph, bR = -1, bB = -1, hasAny = false;
+  {
+    const M = PAD + 1;
+    for (let lx = PAD; lx < pw - PAD; lx++) {
+      for (let ly = PAD; ly < ph - PAD; ly++) {
+        if (!hasLiquidA[at(lx, ly)]) continue;
+        hasAny = true;
+        if (lx - M < bL) bL = lx - M;
+        if (ly - M < bT) bT = ly - M;
+        if (lx + M > bR) bR = lx + M;
+        if (ly + M > bB) bB = ly + M;
+      }
+    }
+    // P3 瀑布拖尾最多向下 WATERFALL_LENGTH[?] ≤ 10 行,底部再 +11 覆盖
+    if (hasAny) bB = Math.min(ph - PAD - 1, bB + 11);
+    _boxL = Math.max(PAD, bL); _boxT = Math.max(PAD, bT);
+    _boxR = Math.min(pw - PAD - 1, bR); _boxB = Math.min(ph - PAD - 1, bB);
+    _boxHas = hasAny;
+    bx0 = _boxL; bx1 = _boxR; by0 = _boxT; by1 = _boxB;
+  }
+  }   // needsPrep(bbox)结束
   // 半砖缓存（LiquidRenderer.cs:103-110）：halfBrick && 上格有液体 && 非平台；
   // 无液体时类型继承上格（109-110）。注意 ptr[-1] = y-1 = 上格
-  for (let lx = 0; lx < pw; lx++) {
-    for (let ly = 1; ly < ph; ly++) {
+  // 低清/包围盒裁剪(#perf-gpulog):需要 hasLiquidA[上] → 上格必在液面包围盒±1
+  if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
+    for (let ly = Math.max(1, by0); ly <= by1; ly++) {
       const i = at(lx, ly);
       if (!st.inBounds(px0 + lx, py0 + ly)) continue;
       const si = st.idx(px0 + lx, py0 + ly);
@@ -363,9 +430,9 @@ export function drawVanillaLiquids(
     }
   }
 
-  // ---- P2：可见液位（内区 = 真实视图区） ----
-  for (let lx = PAD; lx < pw - PAD; lx++) {
-    for (let ly = PAD; ly < ph - PAD; ly++) {
+  // ---- P2：可见液位(液体包围盒裁剪 #perf-gpulog:夹心格按定义在盒内,无损) ----
+  if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
+    for (let ly = by0; ly <= by1; ly++) {
       const i = at(lx, ly);
       let v: number;
       if (isHalfA[i] && hasLiquidA[at(lx, ly - 1)]) {
@@ -391,9 +458,9 @@ export function drawVanillaLiquids(
     }
   }
 
-  // ---- P3：瀑布拖尾（向下传播） + 实心格处理 ----
-  for (let lx = 0; lx < pw; lx++) {
-    for (let ly = 0; ly < ph - 10; ly++) {
+  // ---- P3：瀑布拖尾（向下传播） + 实心格处理(包围盒裁剪;拖尾 ≤10 行已计入盒底 +11) ----
+  for (let lx = bx0; lx <= bx1; lx++) {
+    for (let ly = by0; ly <= Math.min(by1, ph - 11); ly++) {
       const i = at(lx, ly);
       if (hasVisA[i] && (!isSolidA[i] || isHalfA[i])) {
         opacity[i] = 1;
@@ -422,9 +489,9 @@ export function drawVanillaLiquids(
     }
   }
 
-  // ---- P4：四壁插值 + 边存在 + 变体 FrameOffset ----
-  for (let lx = PAD; lx < pw - PAD; lx++) {
-    for (let ly = PAD; ly < ph - PAD; ly++) {
+  // ---- P4：四壁插值 + 边存在 + 变体 FrameOffset(包围盒裁剪:P4 只读 ±1 邻居,盒含) ----
+  if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
+    for (let ly = by0; ly <= by1; ly++) {
       const i = at(lx, ly);
       if (!hasVisA[i]) { hasLE[i] = hasRE[i] = hasTE[i] = hasBE[i] = 0; continue; }
       const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
@@ -457,9 +524,9 @@ export function drawVanillaLiquids(
     }
   }
 
-  // ---- P5：壁值平滑 ----
-  for (let lx = PAD; lx < pw - PAD; lx++) {
-    for (let ly = PAD; ly < ph - PAD; ly++) {
+  // ---- P5：壁值平滑(包围盒裁剪) ----
+  if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
+    for (let ly = by0; ly <= by1; ly++) {
       const i = at(lx, ly);
       if (!hasVisA[i]) continue;
       const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
@@ -475,9 +542,9 @@ export function drawVanillaLiquids(
     }
   }
 
-  // ---- P6：瀑布侧/邻接修正 ----
-  for (let lx = PAD; lx < pw - PAD; lx++) {
-    for (let ly = PAD; ly < ph - PAD; ly++) {
+  // ---- P6：瀑布侧/邻接修正(包围盒裁剪) ----
+  if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
+    for (let ly = by0; ly <= by1; ly++) {
       const i = at(lx, ly);
       if (!hasLiquidA[i]) continue;
       const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
@@ -491,9 +558,9 @@ export function drawVanillaLiquids(
     }
   }
 
-  // ---- P7：内角填充 ----
-  for (let lx = PAD; lx < pw - PAD; lx++) {
-    for (let ly = PAD; ly < ph - PAD; ly++) {
+  // ---- P7：内角填充(包围盒裁剪) ----
+  if (needsPrep) for (let lx = bx0; lx <= bx1; lx++) {
+    for (let ly = by0; ly <= by1; ly++) {
       const i = at(lx, ly);
       if (!hasLiquidA[i]) continue;
       const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
@@ -552,9 +619,9 @@ export function drawVanillaLiquids(
   const wldT = ctx.getTransform();
   const devSX = wldT.a, devSY = wldT.d, devTE = wldT.e, devTF = wldT.f;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  for (let lx = PAD; lx < pw - PAD; lx++) {
+  for (let lx = bx0; lx <= bx1; lx++) {
     const x = px0 + lx;
-    for (let ly = PAD; ly < ph - PAD; ly++) {
+    for (let ly = by0; ly <= by1; ly++) {
       const y = py0 + ly;
       const i = at(lx, ly);
       if (!hasVisA[i]) continue;
