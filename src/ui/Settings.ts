@@ -273,7 +273,8 @@ export class SettingsPanel {
         const ok = await Lang.setLanguage(c.name);
         b.disabled = false;
         if (ok) {
-          await options.set('lang', c.name); // 持久化(值已同步,仅落盘)
+          options.data.langExplicit = true;  // 显式选择旗标:此后浏览器语言探测不再覆盖
+          await options.set('lang', c.name); // 持久化(值已同步,仅落盘,整包带 langExplicit)
         } else {
           options.data.lang = prev; // 失败回滚
           this.rebuild();
@@ -335,7 +336,7 @@ export class SettingsPanel {
               (window as unknown as { __swGame?: { renderer?: { applyUserRenderScale(): void } } }).__swGame?.renderer?.applyUserRenderScale());
           },
         ),
-        this.toggle(Lang.text('Mods.SandboxWorld.Settings.RenderScaleAuto'), () => d.renderScaleAuto, (v) => void options.set('renderScaleAuto', v)),
+        // 自动降级开关并入档位'自动'(renderScale=0)——独立 toggle 曾与之语义重复(用户反馈 2026-08-28)
         // 资源条样式（原版 PlayerResourcesDisplaySet 两主样式：'New'=FancyClassic
         // 金框分格（1.4.4+ 默认）/ 'Default'=Classic 朴素心星）。样式名 = 原版键
         // UI.HealthManaStyle_*（Main.cs:49379 同源;旧硬编码中文 12 语言不可译）

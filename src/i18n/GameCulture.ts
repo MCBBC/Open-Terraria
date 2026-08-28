@@ -46,3 +46,36 @@ export function normalizeLang(value: string | number | undefined): string {
   if (!value) return DEFAULT_LANG;
   return byName.has(value) ? value : DEFAULT_CULTURE_NAME;
 }
+
+/** 主子标签 → culture 名（注册表内 12 语言的 BCP-47 主子标签映射） */
+const PRIMARY_SUBTAG: Record<string, string> = {
+  en: 'en-US', de: 'de-DE', it: 'it-IT', fr: 'fr-FR', es: 'es-ES', ru: 'ru-RU',
+  pt: 'pt-BR', pl: 'pl-PL', ja: 'ja-JP', ko: 'ko-KR',
+};
+
+/** 浏览器语言环境探测（首次访问自动切换用;设置面板显式选择后持久化,不再覆盖）。
+ *  按 navigator.languages 优先级逐个匹配:①完整 culture 名大小写不敏感直命中
+ *  ②中文区细分(zh-TW/HK/MO/Hant→zh-Hant,其余 zh-*→zh-Hans)③主子标签映射。
+ *  无注册表语言命中 → null(调用方落 DEFAULT_LANG）。SSR/无 navigator → null */
+export function detectBrowserLang(): string | null {
+  if (typeof navigator === 'undefined') return null;
+  const candidates = (navigator.languages?.length ? navigator.languages : [navigator.language])
+    .filter((v): v is string => !!v);
+  const lowerName = (n: string): string =>
+    byName.has(n) ? n : (byName.get(Object.keys(byName).find((k) => k.toLowerCase() === n.toLowerCase()) ?? '')?.name ?? '');
+  for (const raw of candidates) {
+    const tag = raw.trim();
+    if (!tag) continue;
+    const exact = lowerName(tag);
+    if (exact) return exact;
+    const [primary, sub] = tag.toLowerCase().split('-');
+    if (primary === 'zh') {
+      // 中文区细分:港/澳/繁体惯用 → 繁体;大陆/新加坡/裸 zh → 简体
+      if (['tw', 'hk', 'mo', 'hant'].includes(sub ?? '')) return 'zh-Hant';
+      return 'zh-Hans';
+    }
+    const mapped = PRIMARY_SUBTAG[primary];
+    if (mapped) return mapped;
+  }
+  return null;
+}

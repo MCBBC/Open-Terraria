@@ -88,6 +88,7 @@ import travelshopJson from '../data/vanilla-travelshop.json';
 import { glStatFrame, maybeInstallGpuLoggerFromUrl } from '../render/GLStats';
 import { TileStore, LIQUID_TYPE } from '../world/TileStore';
 import { repairIndexFramesInStore } from '../world/repairIndexFrames';
+import { starvedEver } from '../render/GLStats';
 import { paintTile, paintWall, paintDustColor, paintCoatTile, paintCoatWall, type PaintDustHook, type CoatDustHook } from '../world/Paint';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import {
@@ -3832,6 +3833,12 @@ export class Game implements GameHooks {
     // 直引类静态(曾写 this.chunks?.constructor——afterWorldLoad 头部
     // this.chunks 尚未构造,undefined 上赋值即崩)
     ChunkCache.MAX_CHUNKS = Math.max(64, Math.min(ChunkCache.BASE_MAX_CHUNKS, ChunkCache.MAX_CHUNKS * 2));
+    // 贫困模式(#三开压测批):会话饥饿过 → chunk 页池钳 32(1024² 页=4MB/页,驻留
+    // 大头;渲染分辨率降不了它,只有页数能)。钳后重进世界稳定运行,不反复穿池
+    if (starvedEver()) {
+      ChunkCache.MAX_CHUNKS = Math.min(ChunkCache.MAX_CHUNKS, 32);
+      console.warn(`[afterWorldLoad] 贫困模式:chunk 上限钳 ${ChunkCache.MAX_CHUNKS}`);
+    }
     // 全局替换表 NPC 名解析注入（Lang.cs:102-110 GetFirstNPCNameOrNull：{Nurse}
     // 等 token → 场上第一名该类型城镇 NPC 的随机名；缺位保留 token——null 语义）
     // 全局替换表动态值（Lang.cs:126-144：WorldName/PlayerName/InventoryKey/
@@ -5827,6 +5834,11 @@ export class Game implements GameHooks {
     // ---- 智能选取（Player.cs:24923 selectedItemState.Update：Shift 按住自动换手持
     //      工具/光源；须在 updateUse 前跑，同帧换选即被使用路径看到） ----
     this.updateSmartSelect();
+    // ---- 便携容器宠物右键开合（Main.cs:38411 TryInteractingWithMoneyTrough）----
+    // ★必须在 updateUse 的 uiBlocking 早退【之前】独立处理：原版该交互在界面扫描里
+    // 跑，不受 playerInventory 门限——面板开着时右键同猪=关（:38455-38459）是容器
+    // 宠物的标准关闭路径；被 uiBlocking 拦掉 = 再右键关不掉（2026-08-28 用户报）
+    this.updateContainerPetInteraction();
     // ---- 使用物品（鼠标） ----
     this.updateUse(dt);
     // ---- 棉花糖烤串（holdStyle 1 静持检查，Player.cs:49604-49641）----
@@ -8519,19 +8531,9 @@ export class Game implements GameHooks {
       return;
     }
     if (inp.rightDown) {
-      // ---- 便携容器宠物（proj 525 飞猪 / 960 Chester）右键开合（Main.cs:38411
-      // TryInteractingWithMoneyTrough 的 proj.type∈{525,960} 支）。置于抚摸分派之前：
-      // 原版绘制扫描里 525/960 只进钱槽交互支（Main.cs:35119-35123
-      // `type!=525&&!=960→return`），TryPetting 三支（:33734/:34245/:34819）均不含
-      // 960——右键容器宠物=开关容器，永不触发抚摸 ----
-      {
-        const hit = this.containerPetHit();
-        if (hit) {
-          this.interactContainerPet(hit);
-          this.input.rightDown = false;
-          return;   // tileInteractionHappened（Main.cs:38452-38453）——本点击不再落地块交互
-        }
-      }
+      // ---- 便携容器宠物（525/960）右键开合已上移至 updateContainerPetInteraction
+      //（fixedUpdate 前置,uiBlocking 门之外——面板开着时再右键=关,见该处注）----
+      // 坐骑抚摸（Mount.TryPettingMount :6137-6166，骑乘 62-65 时由 Mount.Draw 挂）：
       // 坐骑抚摸（Mount.TryPettingMount :6137-6166，骑乘 62-65 时由 Mount.Draw 挂）：
       // 门 = |vx|<1（:6140 站立）+ 光标落在 Bottom+(dir*26,-54) 为心的 24×24 盒；
       // 右键 → PetMount（Player.cs:33601-33620 toggle）+ PalChilletJoy（:33615-33618
@@ -25766,6 +25768,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private playContainerOpenCloseSound(kind: 'chester' | 'pig', open: boolean): void {
     if (kind === 'pig') this.sfx.playWavFile('Item_59', 1, this.player.cx, this.player.cy);
     else this.playSfxWav(`${open ? 'chester_open' : 'chester_close'}_${Math.floor(Math.random() * 2)}`);
+  }
+
+  /** T1 前置：容器宠物右键消费（每 tick，uiBlocking 门之外——见 fixedUpdate 调用点注）。
+   *  光标未命中宠物即不消费，右键照常落 updateUse 原链路 */
+  private updateContainerPetInteraction(): void {
+    if (!this.input.rightDown) return;
+    const hit = this.containerPetHit();
+    if (!hit) return;
+    this.interactContainerPet(hit);
+    this.input.rightDown = false;
   }
 
   /** T1 右键开合容器（Main.cs:38449-38476 mouseRightRelease 段）：面板来源已是存钱罐

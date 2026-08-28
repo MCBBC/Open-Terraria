@@ -184,6 +184,8 @@ export function noteContextLost(tag: string): void {
   if (lossTimes.length > 64) lossTimes.shift();
 }
 let lastStarveLogAt = -Infinity;
+let _starvedEver = false;   /** 会话级闩:饥饿发生过一次即真(贫困模式依据) */
+export function starvedEver(): boolean { return _starvedEver; }
 type StarveCb = (active: boolean) => void;
 const starveCbs: StarveCb[] = [];
 let lastActive = false;
@@ -196,6 +198,7 @@ export function starvedLock(): boolean {
   const active = lossTimes.length >= 3;
   if (active !== lastActive) {
     lastActive = active;
+    if (active) _starvedEver = true;
     for (const cb of starveCbs) { try { cb(active); } catch { /* 观察者异常静默 */ } }
   }
   if (active && now - lastStarveLogAt > 30_000) {

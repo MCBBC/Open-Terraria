@@ -1,5 +1,6 @@
 // 菜单/游戏流程编排（VUI 版）：主菜单 → 世界生成/读取 → 进游戏 → 退出回菜单。
 // main.ts 只做启动装配；本模块持有 Game 生命周期与 VUI/背景的 rAF 驱动。
+import { maybeInstallGpuLoggerFromUrl } from './render/GLStats';
 import { Game } from './core/Game';
 import { UI } from './ui/UI';
 import { MobileControls, isTouchDevice, tryFullscreenLandscape } from './ui/MobileControls';
@@ -77,6 +78,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     }
   }
   (window as unknown as { __swAudio?: AudioSystem }).__swAudio = audio; // 探针调试桥
+  // #perf-gpulog:gpulog 安装提前到启动装配——菜单期(Game 未构造)也可观测
+  // menubg 账本(三开压测:菜单页 GL 崩溃此前无任何观测面)。Game 处重复调用幂等
+  maybeInstallGpuLoggerFromUrl();
   let playStart = 0;
   /** 程序化素材总包预热（#perf2026-08-28 三批修订）：buildAssets 是确定性全局单例
    *  （~6700 图标画布+全表，同步 ~400-700ms）。★只允许在【进世界路径起点】触发——

@@ -1,5 +1,5 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
-import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, onStarveTransition, starvedLock } from '../render/GLStats';
+import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, onStarveTransition, starvedEver, starvedLock } from '../render/GLStats';
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { TILE, CHUNK } from '../core/constants';
 import { TintAtlas, type TintRect } from './TintAtlas';
@@ -2867,18 +2867,22 @@ export class Renderer {
     const drawChunkGrid = (layer: 'wall' | 'tile') => {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      if (wK < 1) ctx.scale(wK, wK);   // 低清档:屏空间数学保持全尺寸坐标,落点压缩
       ctx.imageSmoothingEnabled = false;
+      // ★低清档(#perf-gpulog):矩形直接在【低清整数空间】取整——zz=z·wK、中心
+      // lw/lh。防缝前提 = 相邻块共享边同 round 值(整数设备边);若改套 ctx.scale(K),
+      // 整数边被打回半像素,相邻矩形各自取整 → 逐 chunk 边界发丝缝(K=0.5 用户实报
+      // "大量区块裂缝")。状态机:共享边 = round(同一表达式) 恒等,零缝零叠
       // ★世界变换 = translate(round(viewW/2), round(viewH/2)) · scale(z) · translate(-camRX, -camRY)
       //   ——退出变换后必须补回中心偏移（曾漏加 = 整层 chunk 左上偏半屏，2026-08-18 用户实抓）
-      const ox = Math.round(viewW / 2), oy = Math.round(viewH / 2);
+      const ox = Math.round(lw / 2), oy = Math.round(lh / 2);
+      const zz = z * wK;
       for (let cy = y0; cy <= y1; cy++) {
         for (let cx = x0; cx <= x1; cx++) {
           if (!chunkVisible(cx, cy)) continue;
-          const xd0 = ox + Math.round((cx * CHUNK * ts - camRX) * z);
-          const yd0 = oy + Math.round((cy * CHUNK * ts - camRY) * z);
-          const xd1 = ox + Math.round(((cx + 1) * CHUNK * ts - camRX) * z);
-          const yd1 = oy + Math.round(((cy + 1) * CHUNK * ts - camRY) * z);
+          const xd0 = ox + Math.round((cx * CHUNK * ts - camRX) * zz);
+          const yd0 = oy + Math.round((cy * CHUNK * ts - camRY) * zz);
+          const xd1 = ox + Math.round(((cx + 1) * CHUNK * ts - camRX) * zz);
+          const yd1 = oy + Math.round(((cy + 1) * CHUNK * ts - camRY) * zz);
           // chunk atlas 化(2026-08-18):pair.wall/tile 是 1024² atlas 页,
           // cell 用 sx/sy/256 源矩形取(9 参形式;曾 4 参整页误绘)
           const p = chunks.get(cx, cy);
@@ -12617,6 +12621,13 @@ export class Renderer {
    *  惰性工厂——失败走各自既有退避哨兵，与首帧路径零行为差异；重复调用幂等 */
   prewarmGameGL(): void {
     if (this._glPrewarmed || !Renderer.prewarmGL) return;
+    // 贫困模式(#三开压测批):本会话饥饿过 → 不预建五个 GL 上下文,全部留懒建+
+    // 工厂饥饿闸把关——重建竞争中第一个被逐的就是预热的这些
+    if (starvedEver()) {
+      console.warn('[prewarmGL] 会话曾有 GPU 饥饿——跳过预热(贫困模式)');
+      this._glPrewarmed = true;
+      return;
+    }
     this._glPrewarmed = true;
     const t0 = performance.now();
     try { this.worldLightLayer(); } catch { /* 工厂内部已退避 */ }
@@ -12844,7 +12855,10 @@ export class Renderer {
     const y1 = Math.floor((cam.y + viewH / 2 / z) / (CHUNK * ts)) + 1;
     const camRX = Math.round(cam.x * z) / z;
     const camRY = Math.round(cam.y * z) / z;
-    const ox = Math.round(viewW / 2), oy = Math.round(viewH / 2);
+    // 低清档(#perf-gpulog):同 drawChunkGrid——低清整数空间取整,防半像素缝/错位
+    const wKg = this._worldLowK || 1;
+    const lwg = Math.round(viewW * wKg), lhg = Math.round(viewH * wKg);
+    const ox = Math.round(lwg / 2), oy = Math.round(lhg / 2);
     const ctx = this.ctx;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -12855,10 +12869,11 @@ export class Renderer {
         if (cx < 0 || cy < 0 || cx * CHUNK >= world.w || cy * CHUNK >= world.h) continue;
         const p = chunks.get(cx, cy);
         if (!p.glow) continue;
-        const xd0 = ox + Math.round((cx * CHUNK * ts - camRX) * z);
-        const yd0 = oy + Math.round((cy * CHUNK * ts - camRY) * z);
-        const xd1 = ox + Math.round(((cx + 1) * CHUNK * ts - camRX) * z);
-        const yd1 = oy + Math.round(((cy + 1) * CHUNK * ts - camRY) * z);
+        const zz = z * wKg;
+        const xd0 = ox + Math.round((cx * CHUNK * ts - camRX) * zz);
+        const yd0 = oy + Math.round((cy * CHUNK * ts - camRY) * zz);
+        const xd1 = ox + Math.round(((cx + 1) * CHUNK * ts - camRX) * zz);
+        const yd1 = oy + Math.round(((cy + 1) * CHUNK * ts - camRY) * zz);
         ctx.drawImage(p.glow, 0, 0, S, S, xd0, yd0, xd1 - xd0, yd1 - yd0);
       }
     }

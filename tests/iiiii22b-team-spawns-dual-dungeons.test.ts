@@ -13,6 +13,9 @@ import { scanChosenTileZones, canScanDualDungeonCell } from '../src/world/Dungeo
 import { VanillaSpawner } from '../src/world/spawn/VanillaSpawner';
 import { scanScene } from '../src/world/SceneMetrics';
 
+const __m = (k: string): void => { require('node:fs').appendFileSync('/tmp/marks.log', k + ' ' + Math.round(performance.now()) + '\n'); };
+
+
 const W = 1200;
 const SURFACE_Y = 520;      // world.groundLevel（≈Main.worldSurface 快照）
 const ROCK_Y = 760;         // world.rockLevel
@@ -59,18 +62,27 @@ describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManage
   // 共享夹具：分布规则断言全部基于同一份确定性点表（重算幂等性由 A1 另行验证）
   const fx: { world?: World; st?: TileStore } = {};
   it('A1 点表确定性收敛——同种子双实例逐元素相等（跨客户端重放范式 R1）', () => {
+    __m('A1 点-start');
+    console.error('[T] A1 start');
+    console.error('[A1] world-a-begin');
     const a = mkWorld({ royale: true, seed: 424242 });
+    console.error('[A1] world-a-done');
     const b = mkWorld({ royale: true, seed: 424242 });
+    console.error('[A1] world-b-done');
     const pa = ensureExtraSpawnPoints(a.world);
+    console.error('[A1] ensure-a-done', pa[1]);
     const pb = ensureExtraSpawnPoints(b.world);
+    console.error('[A1] ensure-b-done');
     expect(pa.length).toBe(PLAYER_TEAM_COUNT);           // PlayerTeamID.Count=6（PlayerTeamID.cs:17）
     expect(pb).toEqual(pa);
     expect(ensureExtraSpawnPoints(a.world)).toBe(pa);     // 幂等：重复 ensure 不重掷
+    console.error('[T] A1 end');
     // 复用同 seed 世界作为后续断言夹具（已缓存表零成本）
     fx.world = a.world; fx.st = a.st;
   });
 
   it('A2 队 0 恒=世界出生点（cs:101）；队点互不挤进 250 双轴间隔盒（cs:281-290）', () => {
+    __m('A2 队-start');
     const world = fx.world!;
     const pts = ensureExtraSpawnPoints(world);
     expect(pts[0]).toEqual({ x: world.spawnX, y: world.spawnY });
@@ -87,6 +99,7 @@ describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManage
   });
 
   it('A3 落位扫位通过 Spawn_IsAreaValidSpawn 精简核且不嵌格', () => {
+    __m('A3 落-start');
     const world = fx.world!;
     for (let team = 1; team < PLAYER_TEAM_COUNT; team++) {
       const fl = teamSpawnPlacement(world, team, false);
@@ -97,6 +110,7 @@ describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManage
   });
 
   it('A4 双人合成场景：队 0 走世界出生点；队伍玩家取得各自互异队点', () => {
+    __m('A4 双-start');
     const world = fx.world!;
     // 玩家甲未入队（team=0）⇒ 三分支走世界出生点（Place 与队点无关）
     expect(teamSpawnPlacement(world, 0, false)).toBeNull();
@@ -114,6 +128,7 @@ describe('IIIII22b A: royale-with-cheese 队伍出生点（ExtraSpawnPointManage
   });
 
   it('A5 单机对照零漂移：旗关零开销早退 + 床位优先门', () => {
+    __m('A5 单-start');
     const { world } = mkWorld({});                        // 无 teamBasedSpawns
     expect(world.extraSpawnPoints).toBeUndefined();
     expect(ensureExtraSpawnPoints(world)).toEqual([]);
@@ -148,6 +163,7 @@ function probe(sp: VanillaSpawner): SpawnerProbe {
 }
 
 describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 / SceneMetrics.cs:714-738）', () => {
+    __m('B1 S-start');
   it('B1 ScanZonesFor 单臂对拍（sheet id 表 1:1）', () => {
     const { world, st } = mkWorld({ dd: true });
     const blueBrick = TILE_BY_KEY['v_41_blue_brick'];
@@ -189,6 +205,7 @@ describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 /
   });
 
   it('B2 CanScan 受理门（SolidTile3/巨石/232 排除）', () => {
+    __m('B2 C-start');
     const { st } = mkWorld({ dd: true });
     const blueBrick = TILE_BY_KEY['v_41_blue_brick'];
     expect(canScanDualDungeonCell(st, 50, 50)).toBe(false);        // 空气不可判
@@ -205,6 +222,7 @@ describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 /
   });
 
   it('B3 Spawner chosen-tile 尾部支：rand(7) 三层带重掷 + Zone 九位覆盖序（gated dualDungeons）', () => {
+    __m('B3 S-start');
     const { world, st } = mkWorld({ dd: true });
     const blueBrick = TILE_BY_KEY['v_41_blue_brick'];
     const dirt = TILE_BY_KEY['dirt'];
@@ -246,10 +264,15 @@ describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 /
   });
 
   it('B4 非双地牢世界零扰动（旗关零掷骰 + 三层带按基线语义求值）', () => {
+    __m('B4 非-start');
+    console.error('[B4] mkWorld-begin');
     const { world } = mkWorld({});
+    console.error('[B4] mkWorld-done');
     const sp = new VanillaSpawner(world);
+    console.error('[B4] spawner-ctor-done');
     const dirt = TILE_BY_KEY['dirt'];
     const consumed = callSetFlags(sp, 310, 700, dirt, 0);
+    console.error('[B4] setFlags-done consumed=', consumed);
     expect(consumed).toBe(0);                              // rand(7) 未消耗 ⇒ 普通世界骰流不变
     const p = probe(sp);
     expect(p.surfaceSpawn).toBe(700 <= SURFACE_Y);         // 基线 L1046 语义
@@ -258,6 +281,7 @@ describe('IIIII22b B: 双地牢 NPCSpawningFlags 区域扫描（NPC.cs:428-441 /
   });
 
   it('B5 SceneMetrics 玩家 Zone 重写（SceneMetrics.cs:714-738 接线：非 dual 阈值路径不动）', () => {
+    __m('B5 S-start');
     // 高世界（H=1300）让地下带 [701..1099] 存在；单列 31 格地牢砖 < DUNGEON_THRESHOLD 250
     // ⇒ 对照世界窗口计数路径不可达 zoneDungeon。
     const buildTall = (ddFlag: boolean) => {

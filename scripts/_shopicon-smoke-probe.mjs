@@ -301,6 +301,15 @@ const bank = await page.evaluate(async () => {
     const [sx, sy] = g.camera.worldToScreen(pig.cx, pig.cy);
     g.input.mouseX = sx; g.input.mouseY = sy;
   };
+  // ★逐 tick 重瞄×3：相机缓动(传送后追赶)会让单次定瞄漂移出命中盒
+  const rmbPig = () => {
+    for (let i = 0; i < 3; i++) {
+      aim();
+      g.input.rightDown = true;
+      g.fixedUpdate(1 / 60);
+      g.input.rightDown = false;
+    }
+  };
   aim();
   const diag = {
     rect: { x: pig.x, y: pig.y, w: pig.w, h: pig.h, cx: pig.cx, cy: pig.cy },
@@ -314,19 +323,22 @@ const bank = await page.evaluate(async () => {
   g.fixedUpdate(1 / 60);
   g.input.rightDown = false;
   const openOk = ui.openChest?.x === -2 && ui.openChest.items === g.player.banks[0];
-  ui.closeInventory();
-  // ④ 再右键 → 关
+  const pAfter3 = ui.openChest ? ui.openChest.x : null;
+  // ④ 再右键 → 切换关（面板开着时右键同猪=toggle close,Main.cs:38455-38459）
+  const panelWasOpen = ui.openChest?.x === -2;
   aim();
   g.input.rightDown = true;
   g.fixedUpdate(1 / 60);
   g.input.rightDown = false;
-  const closeOk = ui.openChest === null;
+  const closeOk = panelWasOpen && ui.openChest === null;
+  const pAfter4 = ui.openChest ? ui.openChest.x : null;
   // ⑤ 重开 → Shift 存 50 银入猪猪
   aim();
   g.input.rightDown = true;
   g.fixedUpdate(1 / 60);
   g.input.rightDown = false;
   const reopened = ui.openChest?.x === -2;
+  const pAfter5 = ui.openChest ? ui.openChest.x : null;
   g.player.inv.slots[51] = { id: IK[VIK[72]], stack: 50 };
   ui.refreshAll();
   ui.shiftClick(51, 'inv');
@@ -393,8 +405,7 @@ const bank = await page.evaluate(async () => {
   let selHover = -1, selAway = -1, selOff = -1;
   if (pig) {
     g.smartCursor.wanted = true;
-    aim();
-    for (let i = 0; i < 2; i++) g.fixedUpdate(1 / 60);
+    for (let i = 0; i < 3; i++) { aim(); g.fixedUpdate(1 / 60); }
     selHover = pig.interactState;
     g.input.mouseX = 100; g.input.mouseY = 700;
     for (let i = 0; i < 2; i++) g.fixedUpdate(1 / 60);
@@ -405,11 +416,12 @@ const bank = await page.evaluate(async () => {
   }
   ui.closeInventory?.();
   return {
-    diag, spawnOk, hoverOk, openOk, closeOk, reopened, deposited, totalBefore, okBuy,
+    diag, pAfter3, pAfter4, pAfter5, spawnOk, hoverOk, openOk, closeOk, reopened, deposited, totalBefore, okBuy,
     bankSilver, totalAfter, invCopper70: invCoins.includes(70), pigPanel,
     openedForT2, t2Closed, reopened2, pigExpired, dedupOk, selHover, selAway, selOff,
   };
 });
+console.log('BANK:', JSON.stringify(bank));
 check('钱币槽使用=发射飞猪(不消耗,不直开面板)',
   bank.spawnOk === true && bank.hoverOk === true, JSON.stringify(bank).slice(0, 200));
 check('右键飞猪=开 banks[0] 面板;再右键=关', bank.openOk === true && bank.closeOk === true);

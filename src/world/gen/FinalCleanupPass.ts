@@ -2835,9 +2835,12 @@ export function runFinalCleanupPass(
   //    ★UUUUUU 批新增（实现体在 NotTheBeesPass.ts）：notTheBees 专属终转化
   //    （NotTheBees 第七次全域重扫 + FinishNotTheBees 云线/雪冰带/幼虫/重种树/
   //    OverGrownDungeon）。掷流位次敏感——勿移动调用位。
+  const g24 = globalThis as { __swFCMark?: (tag: string) => void };
   if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock && rng) {
-    runNotTheBees(st, rng, gs);
-    runFinishNotTheBees(st, rng, gs);
+    runNotTheBees(st, rng, gs);              // x86 CALLBEGIN/CALLEND 7（NtbCap in/out）
+    try { g24.__swFCMark?.('FNTBIN'); } catch { /* probe */ }
+    runFinishNotTheBees(st, rng, gs);        // x86 FNTBIN..FNTBOUT 域
+    try { g24.__swFCMark?.('FNTBOUT'); } catch { /* probe */ }
   }
 
   // ── ShimmerCleanUp（cs:22639→34750，⑭ 之后同 pass 尾段；ZZZ 批补）──
@@ -2847,7 +2850,9 @@ export function runFinalCleanupPass(
   //    本仓 FinalSeedCleanup 曾挂在 generateWorld 尾（finalize 之后）——时点晚于
   //    dump #105 快照位,mile8 槽 57 对拍把静态化差全记在 #105（const/s22222
   //    T1>332×11 假债）。opts.beforeShimmer 钩子由 WorldGen 接线 FinalSeedCleanup。
+  try { g24.__swFCMark?.('FSIN'); } catch { /* probe */ }
   opts?.beforeShimmer?.();
+  try { g24.__swFCMark?.('FSOUT'); } catch { /* probe */ }
   // ★SSS-CELEB（1458 cs:22668-22670）：FinishTenthAnniversaryWorldPaintTreesAndMushrooms
   //   ——FinalizeSecretSeeds 之后、ShimmerCleanUp 之前（原序 cs:22666→22668→22671）。
   if (gs.seedFlags.tenthAnniversary && !gs.seedFlags.skyblock && rng) {
@@ -2861,6 +2866,7 @@ export function runFinalCleanupPass(
   //    ⇒ 纵向 reach 64<75），且 ShimmerifyArea 拒绝带 ebonsand/crimstone 的池位。
   //    之后：微光池补液 while（cs:34802-34820）+ 全图微光淹没树 5 击杀
   //    （cs:34833-34843）。LiquidCheck 全图环（cs:22645+）= 液体 sim 域，归 #49。
+  try { g24.__swFCMark?.('SCIN'); } catch { /* probe */ }
   if (gs.shimmerX >= 0 && gs.shimmerY >= 0) {
     const SX = gs.shimmerX, SY = gs.shimmerY;
     // ShimmerRemoveWater（cs:34859）：上半球 r<150 清非微光液体 + 162 失活
@@ -2954,6 +2960,7 @@ export function runFinalCleanupPass(
       }
     }
   }
+  try { g24.__swFCMark?.('SCOUT'); } catch { /* probe */ }
 }
 
 // ═══════════════ SSS-CELEB 批（2026-08-27）：FinishTenthAnniversaryWorld 全家 ═══════════════

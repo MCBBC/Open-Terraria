@@ -88,6 +88,8 @@ const CSS = `
   text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;
   pointer-events: none;
 }
+/* 复刻版本基准副行(v0.1.0 下方,用户要求 2026-08-28) */
+.sw-title-baseline { opacity: .85; }
 /* 右下署名（GLM-5.3/GLM-5.3-Flash 协作声明）用【内联样式】——注入样式表的
    getElementById 守卫在 HMR 期会驻留旧 CSS 吞掉变更，内联不受其害 */
 /* 日/月命中层：罩住天空画布里的太阳/月亮（Main.cs:62420 value4），纯命中区
@@ -179,7 +181,7 @@ export class TitleMenu {
         #sw-title-chrome { position: fixed; inset: 0; z-index: 35; pointer-events: none;
           opacity: var(--sw-splash-alpha, 1); }
       </style>
-      <div class="sw-title-version">SandboxWorld v0.1.0</div>
+      <div class="sw-title-version"><div>SandboxWorld v0.1.0</div><div class="sw-title-baseline">${Lang.text('Mods.SandboxWorld.Title.RemakeBaseline')}</div></div>
       <div data-credit style="position:fixed;right:10px;bottom:8px;font-size:13px;color:#fff;text-align:right;line-height:1.6;pointer-events:none;text-shadow:1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000;"></div>
     `;
     document.body.appendChild(this.chrome);
@@ -342,6 +344,9 @@ export class TitleMenu {
       const bs = 'font-weight:700;margin:0 5px;text-shadow:1px 0 0 #fff,1px 0 0 #000,-1px 0 0 #000,0 1px 0 #000,0 -1px 0 #000';
       credit.innerHTML = `${t('Mods.SandboxWorld.Credits.Line1', `<b style="${bs}">GLM-5.3</b>`, `<b style="${bs}">GLM-5.3-Flash</b>`)}<br>${t('Mods.SandboxWorld.Credits.Line2')}`;
     }
+    // 左下复刻版本基准副行（随语言切换刷新）
+    const baseline = this.chrome.querySelector('.sw-title-baseline');
+    if (baseline) baseline.textContent = t('Mods.SandboxWorld.Title.RemakeBaseline');
   }
 
   /** LogoA/LogoB 昼夜交叉淡化（1456 Main.cs:47773-47799 一比一）：

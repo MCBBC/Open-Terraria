@@ -65,45 +65,58 @@ await page.waitForFunction(() => window.__swGame?.world?.store?.w === 4200, { ti
 await new Promise(r => setTimeout(r, 2500));
 
 
-// ---- 方案A 视觉对拍:同机位 K=1 vs K=0.66 ----
+// ---- 方案A 视觉对拍:同机位 K=1 vs 0.66 vs 0.50 ----
 await new Promise(r=>setTimeout(r,1500));
 await page.evaluate(() => {
   const g=window.__swGame;
   g.player.vx=0; g.player.vy=0;
-  // 固定机位:地表上空含背景/HUD 静区
   g.camera.x = g.player.cx; g.camera.y = g.player.cy - 40;
 });
-const shot = async () => await page.screenshot({ type:'png' });
+const fs=await import('node:fs');
+  const shot = async (name) => { const b=await page.screenshot({ type:'png' }); fs.writeFileSync(name,b); return b; };
 const setK = async (K) => { await page.evaluate(async(K)=>{ const m=await import('/src/core/Options.ts'); await m.options.set('renderScale',K); window.__swGame.renderer.applyUserRenderScale(); },K); await new Promise(r=>setTimeout(r,350)); };
 await setK(1);  await new Promise(r=>setTimeout(r,250));
-const pngA = (await shot()).toString('base64');
+const pngA=(await shot('/tmp/rs-A.png')).toString('base64');
 await setK(0.66); await new Promise(r=>setTimeout(r,250));
-const pngB = (await shot()).toString('base64');
+const pngB=(await shot('/tmp/rs-B.png')).toString('base64');
+await setK(0.5); await new Promise(r=>setTimeout(r,250));
+const pngC=(await shot('/tmp/rs-C.png')).toString('base64');
 await setK(1);
 
-// 页面内对比
-const metrics = await page.evaluate(async (aB64,bB64) => {
+const metrics = await page.evaluate(async (aB64,bB64,cB64) => {
   const load=(b)=>new Promise(res=>{const i=new Image();i.onload=()=>res(i);i.src='data:image/png;base64,'+b;});
-  const A=await load(aB64), B=await load(bB64);
+  const A=await load(aB64), B=await load(bB64), C=await load(cB64);
   const mk=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c.getContext('2d',{willReadFrequently:true});};
-  // ① 把 A 缩到 B 的尺寸(模拟理想低清),逐像素比 B
-  const s=mk(B.width,B.height); s.imageSmoothingEnabled=true; s.drawImage(A,0,0,B.width,B.height);
-  const d1=s.getImageData(0,0,B.width,B.height).data, d2=B.getContext? null:null;
-  const bctx=mk(B.width,B.height); bctx.drawImage(B,0,0);
-  const db=bctx.getImageData(0,0,B.width,B.height).data;
-  let diff=0, tot=B.width*B.height;
-  for(let i=0;i<db.length;i+=4){ const d=Math.max(Math.abs(d1[i]-db[i]),Math.abs(d1[i+1]-db[i+1]),Math.abs(d1[i+2]-db[i+2])); if(d>12)diff++; }
-  // ② HUD 区(右上 420×260)原尺寸直比:K 变化下 HUD 应逐位近似
-  const hw=420,hh=260,hx=A.width-hw,hy=0;
-  const ha=mk(hw,hh); ha.drawImage(A,hx,hy,hw,hh,0,0,hw,hh);
-  const hb=mk(hw,hh); hb.drawImage(B,hx,hy,hw,hh,0,0,hw,hh);
-  const da=ha.getImageData(0,0,hw,hh).data, dbb=hb.getImageData(0,0,hw,hh).data;
-  let hd=0; for(let i=0;i<dbb.length;i+=4){ const d=Math.max(Math.abs(da[i]-dbb[i]),Math.abs(da[i+1]-dbb[i+1]),Math.abs(da[i+2]-dbb[i+2])); if(d>12)hd++; }
-  return { worldDiffPct:+(diff/tot*100).toFixed(2), hudDiffPct:+(hd/(hw*hh)*100).toFixed(2), aw:A.width,bw:B.width };
-}, pngA, pngB);
+  const cmp=(imgBig,K)=>{
+    const W=Math.round(imgBig.width*K), H=Math.round(imgBig.height*K);
+    const s=mk(W,H); s.imageSmoothingEnabled=true; s.drawImage(imgBig,0,0,W,H);
+    const d1=s.getImageData(0,0,W,H).data;
+    const t=mk(W,H); t.drawImage(K<1? (K===0.66?B:C):A, 0,0);
+    const d2=t.getImageData(0,0,W,H).data;
+    let diff=0; for(let i=0;i<d2.length;i+=4){ const d=Math.max(Math.abs(d1[i]-d2[i]),Math.abs(d1[i+1]-d2[i+1]),Math.abs(d1[i+2]-d2[i+2])); if(d>12)diff++; }
+    return +(diff/(W*H)*100).toFixed(2);
+  };
+  const hud=(big,K)=>{
+    const hw=420, hh=260;
+    const w2=Math.round(hw*K), h2=Math.round(hh*K);
+    const ca=mk(w2,h2); ca.drawImage(A, A.width-w2, 0, w2, h2, 0,0,w2,h2);       // 基线A该区→降采样
+    const cb=mk(w2,h2); cb.drawImage(big, big.width-w2, 0, w2, h2, 0,0,w2,h2);   // 低清帧同区
+    const da=ca.getImageData(0,0,w2,h2).data, db=cb.getImageData(0,0,w2,h2).data;
+    let hd=0; for(let i=0;i<db.length;i+=4){ const d=Math.max(Math.abs(da[i]-db[i]),Math.abs(da[i+1]-db[i+1]),Math.abs(da[i+2]-db[i+2])); if(d>12)hd++; }
+    return +(hd/(w2*h2)*100).toFixed(2);
+  };
+  return {
+    world066: cmp(A,0.66),
+    world050: cmp(A,0.5),
+    hud066: hud(B,0.66),
+    hud050: hud(C,0.5),
+    aw:A.width, bw:B.width, cw:C.width,
+  };
+}, pngA, pngB, pngC);
 console.log('METRICS:',JSON.stringify(metrics));
 let fail=0;
-if(metrics.worldDiffPct>8){console.log('FAIL 世界构图差超阈值');fail++;}
-if(metrics.hudDiffPct>3){console.log('FAIL HUD 区差异超阈值(HUD 应不随 K 变)');fail++;}
+if(metrics.world066>8){console.log('FAIL 0.66 构图差超阈值');fail++;}
+if(metrics.world050>8){console.log('FAIL 0.5 构图差超阈值(疑似裂缝)');fail++;}
+if(metrics.hud066>3||metrics.hud050>3){console.log('FAIL HUD 区差异超阈值');fail++;}
 console.log(fail?'=== FAIL':'=== VISUAL PARITY PASS');
 await browser.close(); process.exit(fail?3:0);

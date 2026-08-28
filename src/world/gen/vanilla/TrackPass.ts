@@ -50,6 +50,17 @@ export function __setTfCellProbe(fn: ((sheet: number, x: number, y: number, fx: 
   __tfCellProbe = fn;
 }
 
+/** IIII26 临时诊断钩(批后删除):killTileLane 入口 cell 快照 */
+interface KillLaneCell { x: number; y: number; n: number; act: number; sheet: number; fx: number; fy: number; sl: number; h: number; liq: number; wall: number }
+let __killLaneProbe: ((c: KillLaneCell) => void) | undefined;
+let __killLaneRollIdx: (() => number) | undefined;
+export function __setKillLaneProbe(fn: ((c: KillLaneCell) => void) | undefined): void {
+  __killLaneProbe = fn;
+}
+export function __setKillLaneRollIdx(fn: (() => number) | undefined): void {
+  __killLaneRollIdx = fn;
+}
+
 // ============================================================
 // Tile.SmoothSlope 链(cs:822-888 + CanPoundTile cs:81434-81479 +
 // CanKillTile cs:62249-62402)——FFFFF 批 1:1 补齐
@@ -527,8 +538,22 @@ export class TrackGenerator {
    *  九宫(squareFrameTrack)内不可达 314(轨迹未铺,IsTileNearby 30 格隔离) */
   private killTileLane(rng: RNG, x: number, y: number): void {
     const st = this.st;
+    const idxRaw = st.inBounds(x, y) ? st.idx(x, y) : -1;
+    __killLaneProbe?.({
+      x, y,
+      n: __killLaneRollIdx ? __killLaneRollIdx() : -1,
+      act: idxRaw >= 0 ? st.flags[idxRaw] : 0,
+      sheet: idxRaw >= 0 ? SHEET_OF[st.type[idxRaw]!] : -9,
+      fx: idxRaw >= 0 ? st.frameX[idxRaw]! : -1,
+      fy: idxRaw >= 0 ? st.frameY[idxRaw]! : -1,
+      sl: idxRaw >= 0 ? st.slope[idxRaw]! : 0,
+      h: idxRaw >= 0 ? st.half[idxRaw]! : 0,
+      liq: idxRaw >= 0 ? st.liquid[idxRaw]! : 0,
+      wall: idxRaw >= 0 ? st.wall[idxRaw]! : 0,
+      brk: -1,
+    });
     if (!st.inBounds(x, y)) return;
-    const i = st.idx(x, y);
+    const i = idxRaw;
     if (!st.flags[i]) return;
     const sheet = SHEET_OF[st.type[i]!];
     if (sheet < 0) return;

@@ -1,6 +1,6 @@
 // 设置项单例 + KvStore 持久化（M6）。变更通过监听器下发到 Audio/Sfx/UIScale。
 import { kvGet, kvSet } from '../save/KvStore';
-import { DEFAULT_LANG, normalizeLang } from '../i18n/GameCulture';
+import { DEFAULT_LANG, detectBrowserLang, normalizeLang } from '../i18n/GameCulture';
 import { sanitizeKeybinds, type KeybindAction } from './Keybinds';
 
 /** 小地图边框皮肤全集（MinimapFrameManager.PopulateOptionsAndLoadContent 插入序，
@@ -32,6 +32,12 @@ export interface OptionsData {
   uiScale: number;    // 0.75..1.5（作用于 UIScale.userScale）
   devMode: boolean;
   lang: string;       // culture 名(如 zh-Hans);兼容旧数字 legacyId(对齐原版 config.json)
+  /**
+   * 语言是否经设置面板显式选择过（浏览器语言探测的门：首次访问/从未显式选择时
+   * 按 navigator.languages 自动匹配一次；显式选择后永久尊重用户选择）。
+   * 旧档无此键 = 未显式选择过 → 探测放行（首次升级到本版的老用户也能被正确
+   * 切到浏览器语言；之后面板选一次即落盘为 true）。 */
+  langExplicit: boolean;
   // 智能光标（对齐原版 Player.SmartCursorSettings + IngameOptions/Main.cs:49705 设置结构）
   smartCursorMode: 'toggle' | 'hold';  // Main.cSmartCursorModeIsToggleAndNotHold（默认 Toggle）
   smartAxeAfterPickaxe: boolean;       // UseSmartAxeAfterSmartPickaxe（默认 false）
@@ -168,6 +174,7 @@ export class OptionsStore {
     waveQuality: 3,   // Main.cs:405 WaveQuality = 3（默认高）
     pvpTeam: 0,
     lang: DEFAULT_LANG,
+    langExplicit: false,
     smartCursorMode: 'toggle',
     smartAxeAfterPickaxe: false,
     smartBlocksEnabled: false,        // Player.cs:326 static bool 默认 false（R24 勘误）
@@ -213,6 +220,11 @@ export class OptionsStore {
     this.loaded = true;
     try {
       const raw = await kvGet(KEY);
+      // 浏览器语言探测:仅当「从未显式选过语言」(无持久化设置,或 langExplicit
+      // 未置位——含带默认 lang 落盘的老档)时,按 navigator.languages 优先级匹配
+      // 注册表 12 语言一次(探测未命中保持 DEFAULT_LANG);设置面板显式选择即置
+      // langExplicit=true 落盘,此后永久尊重用户选择不再自动覆盖
+      let autoDetectLang = !raw;
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<OptionsData> & { frameSkip?: boolean };
         // 迁移:旧布尔 frameSkip(2026-08-18 当天版本)→ 三态
@@ -220,7 +232,12 @@ export class OptionsStore {
           parsed.frameSkipMode = parsed.frameSkip ? 'on' : 'off';
           delete parsed.frameSkip;
         }
+        if (!parsed.langExplicit) autoDetectLang = true;
         Object.assign(this.data, parsed);
+      }
+      if (autoDetectLang) {
+        const detected = detectBrowserLang();
+        if (detected) this.data.lang = detected;
       }
       // 语言归一化:旧数字 legacyId → culture 名;非法值落 en-US(对齐原版 LoadSettings)
       this.data.lang = normalizeLang(this.data.lang);

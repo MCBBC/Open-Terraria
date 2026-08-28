@@ -17,6 +17,7 @@
 // BiomeBackground 的 menuMode 分支（原版「菜单/游戏内同一 DrawSurfaceBG，仅
 // gameMenu 分支切差异」架构）——本类只剩调度钟 + sky.draw 接线，每 tick 经
 // biomeBg.setMenuStyles/menuTick 驱动、biomeBg.drawMenu 出图。
+import { starvedLock, glStatFrame } from './GLStats';
 import { SkyRenderer } from './SkyRenderer';
 import { BiomeBackground } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
@@ -105,6 +106,9 @@ export class MenuBackground {
       this.glCloud = null;
     }
     if (performance.now() < this.glCloudRetryAt) return null;
+    // 饥饿锁(#三开压测批):菜单云 GL 层不参与重建竞争——死掉走 2D cloudTint 兜底,
+    // 与游戏内四厂同一纪律(此前唯独本入口裸奔 = 三开菜单页死亡螺旋无人闸)
+    if (starvedLock()) return null;
     const inst = new GLSpriteLayer();
     inst.statName = 'menubg';   // #perf-gpulog
     if (inst.unavailable) {
@@ -198,6 +202,7 @@ export class MenuBackground {
 
   tick(dtMs: number) {
     if (this.paused) return;   // 零推进零绘制零 GL 云层获取——加载密集期不抢算力
+    glStatFrame();   // #perf-gpulog:菜单循环推进 GPU 账本(Game 循环未建, gpulog 菜单期可观测)
     const frames = Math.min(8, dtMs / FRAME_MS);   // 后台标签回来防大步进雪崩
     // 星坠落（cs:20048）：夜 rand(12)==0/帧 → 随机星 Fall（抓取中照跑）
     if (!this.dayTime) {
