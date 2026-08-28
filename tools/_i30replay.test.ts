@@ -73,6 +73,25 @@ const le16 = (p: string): Uint16Array => {
   (globalThis as unknown as Record<string, unknown>).__swTntEv = (m: string) => evs.push(m);
   let rollN = 0;
   (globalThis as unknown as Record<string, unknown>).__swOnRoll = () => { rollN++; (globalThis as unknown as Record<string, number>).__swRollN = rollN; };
+  // 主循环写位对拍仪（GW 流，与 rig x-hm/x-BW2 的 GW 同位）
+  {
+    const orig = TileStore.prototype.setTileSilent;
+    const wstack = (): string => {
+      const stk = new Error().stack ?? '';
+      return stk.split('\n').slice(2).filter((l) => l.includes('src/world/gen')).slice(0, 3)
+        .map((l) => l.replace(/^.*?(src\/[A-Za-z0-9_/.]+\.ts).*$/, '$1') + '#' + l.replace(/^.*[^\d](\d+):\d+.*$/, '$1'))
+        .join('<-');
+    };
+    (globalThis as unknown as Record<string, unknown>).__swGwOn = () => { evs.push('GWOFF'); };
+    TileStore.prototype.setTileSilent = function (this: { w: number }, x: number, y: number, t?: number, fx?: number, fy?: number) {
+      const st0 = new Error().stack ?? '';
+      const isMain = /placeTrap|PlaceSandTrap|KillTile|SquareTileFrame|TileFrame|cascade3x3T|checkStalactite|killStalactite/.test(st0.split('\n').slice(0, 6).join(''));
+      void isMain;
+      evs.push(`W ${x},${y} t${t} r${rollN} ${st0.includes('TrapsPass') ? '' : 'OUT'}`);
+      return orig.call(this, x, y, t, fx, fy);
+    } as typeof TileStore.prototype.setTileSilent;
+    void wstack;
+  }
   (globalThis as unknown as Record<string, unknown>).__swTrapHm = (label: string) => evs.push(`HM ${label} ln=${rollN}`);
   {
     const orig = TileStore.prototype.setTileSilent;

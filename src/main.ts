@@ -349,13 +349,8 @@ window.addEventListener('keydown', (e) => {
       }
       break;
     case 'F4':
-      // ★Shift+F4（2026-08-27 用户要求）：改为地图点击传送开关（原全图迷雾消除
-      //  让位退役,world.explored API 仍可经探针/控制台调用）
-      if (e.shiftKey) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        toggleMapClickTeleport();
-      }
+      // Shift+F4 已在上方统一拦截（地图点击传送开关）——此处仅非 Shift 到达
+      // （非 Shift F4 = 相机模式,已在更早 isBound 分支 return,此 case 实际不可达）
       break;
     case 'F5': {
       // 长按 F5 = 行为录制窗开关（按下计时，keyup 判时长——见文件尾 keyup 监听）；
