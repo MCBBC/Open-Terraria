@@ -222,6 +222,31 @@ function enterGameHooks() {
       flow?.game?.chunks?.onSheetReplaced(file);
     };
   }
+  // ---- 移动端虚拟 Inventory/Esc 键入口(mobile-adaptation-plan 模块①):触屏系统
+  //      列的背包/暂停钮 = input.tapVirtual('Inventory') 虚拟边沿在此转调同一优先
+  //      级链。★origin==='virtual' 门防双触发:真实键盘 Escape 既走上方 window
+  //      keydown 监听(preventDefault/打字豁免是物理专属),也会派发进
+  //      keydownHandlers——不过滤则同一次按键链跑两遍(Esc 开面板→瞬关)。
+  //      虚拟沿自带 virtualAction='Inventory',不再经 isBound 反查(code 是绑定
+  //      表首个码,重绑后仍一致)
+  if (g) {
+    g.input.keydownHandlers.push((code, ke) => {
+      if (ke.origin !== 'virtual') return;
+      // action 口(系统列背包/暂停钮):intent 显式携带
+      if (ke.virtualAction === 'Inventory') {
+        runInventoryEscapeChain(g,
+          ke.virtualIntent === 'inventory' ? 'inventory'
+            : ke.virtualIntent === 'escape' ? 'escape'
+            : code === 'Escape' ? 'escape' : 'inventory');
+        return;
+      }
+      // code 口直发 Escape(调试脚本/未来控件):归还 Inventory 链 escape 形态
+      // (默认绑定表含 Escape;用户清空该绑定时按表不响应=重绑一致)
+      if (code === 'Escape' && isBound('Inventory', 'Escape')) {
+        runInventoryEscapeChain(g, ke.virtualIntent === 'inventory' ? 'inventory' : 'escape');
+      }
+    });
+  }
 }
 
 // ---- M6 拍照模式接线（F4）：Input 直连 + DOM HUD 让位 ----
@@ -260,6 +285,51 @@ function toggleMapClickTeleport(): void {
     ui.toast('地图点击传送已启用：全屏地图点击选点，再点同一点传送');
   });
 }
+/** Inventory/Esc 优先级态机(main.ts 原 window keydown 分支提取,逐语句等价;
+ *  mobile-adaptation-plan 模块①:移动端触屏"背包/暂停"钮与物理键盘共用此唯一
+ *  实现——虚拟路径 = Input.tapVirtual('Inventory') → keydownHandlers(origin=
+ *  'virtual') 薄派发(enterGameHooks 注册),重绑即时跟随绑定表)。
+ *  intent 终点形态:'escape'=暂停菜单(物理 Esc / 虚拟无面板默认),
+ *  'inventory'=开背包(物理其它 Inventory 绑定键,如 KeyE) */
+function runInventoryEscapeChain(game: Game, intent: 'escape' | 'inventory'): void {
+  if (game.summonPanel?.open) {
+    // F6 召唤面板打开时,Esc 先收面板不进暂停链
+    game.summonPanel.close();
+    game.input.uiBlocking = false;
+  } else if (game.renderer.fullMap.open) {
+    game.renderer.fullMap.open = false;
+  } else if (pausePanel) {
+    pausePanel.remove();
+    pausePanel = null;
+    game.paused = false;
+    ui.closeInventory();
+    game.input.uiBlocking = false;
+  } else if (ui.invPanel && ui.invPanel.style.display === 'block') {
+    ui.closeInventory();
+  } else if (intent === 'escape') {
+    game.paused = true;
+    pausePanel = ui.showPause({
+      onResume: () => {
+        pausePanel?.remove();
+        pausePanel = null;
+        game!.paused = false;
+      },
+      onSave: () => flow?.doSave(),
+      onExport: () => flow?.doExportSave(),
+      onSettings: () => flow?.openSettings(true),
+      onBestiary: () => flow?.openBestiary(),
+      onQuit: () => {
+        pausePanel = null;
+        game!.paused = false;
+        inGame = false;
+        flow?.quitToMenu();
+      },
+    });
+  } else {
+    ui.openInventory();
+  }
+}
+
 window.addEventListener('keydown', (e) => {
   const game = flow?.game;
   if (!inGame || !game) return;
@@ -268,45 +338,11 @@ window.addEventListener('keydown', (e) => {
   const typing = !!tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable);
   if (typing && e.code !== 'Escape') return;
   // ---- Inventory 动作（M5 键位表：默认 Escape+KeyE 双键——历史行为 E 同开背包；
-  //      判定在 code 无关处，重绑后跟随。原链：Esc=暂停菜单，其余键=开背包）----
+  //      判定在 code 无关处，重绑后跟随。原链：Esc=暂停菜单，其余键=开背包；
+  //      态机本体已提取为 runInventoryEscapeChain(唯一实现,虚拟沿共用)）----
   if (isBound('Inventory', e.code)) {
     e.preventDefault();
-    if (game.summonPanel?.open) {
-      // F6 召唤面板打开时,Esc 先收面板不进暂停链
-      game.summonPanel.close();
-      game.input.uiBlocking = false;
-    } else if (game.renderer.fullMap.open) {
-      game.renderer.fullMap.open = false;
-    } else if (pausePanel) {
-      pausePanel.remove();
-      pausePanel = null;
-      game.paused = false;
-      ui.closeInventory();
-      game.input.uiBlocking = false;
-    } else if (ui.invPanel && ui.invPanel.style.display === 'block') {
-      ui.closeInventory();
-    } else if (e.code === 'Escape') {
-      game.paused = true;
-      pausePanel = ui.showPause({
-        onResume: () => {
-          pausePanel?.remove();
-          pausePanel = null;
-          game!.paused = false;
-        },
-        onSave: () => flow?.doSave(),
-        onExport: () => flow?.doExportSave(),
-        onSettings: () => flow?.openSettings(true),
-        onBestiary: () => flow?.openBestiary(),
-        onQuit: () => {
-          pausePanel = null;
-          game!.paused = false;
-          inGame = false;
-          flow?.quitToMenu();
-        },
-      });
-    } else {
-      ui.openInventory();
-    }
+    runInventoryEscapeChain(game, e.code === 'Escape' ? 'escape' : 'inventory');
     return;
   }
   // MapFull（M）等其余键位动作在 Game 的 keydownHandlers 统一派发（M5）——

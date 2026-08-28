@@ -9,3 +9,5 @@
 .DS_Store
 /chrome-profiles
 /public/assets-zip
+/desktop/node_modules
+/desktop/release

@@ -3276,10 +3276,16 @@ export class Game implements GameHooks {
         // 鼠标/移动(window 级+轮询)活着而数字键死 = 恰好用户症状
         const handlers = this.input.keydownHandlers.slice();
         const onKey = this.input.onKeyEvent;
+        // 虚拟电平随实例销毁(destroy 内 releaseAllVirtual):熔断窗口恰逢摇杆按住
+        // 时,新实例电平自然归零=安全侧(MobileControls 下次 touchstart 重注)
         this.input.destroy();
         this.input = new Input(canvas);
         this.input.keydownHandlers.push(...handlers);
         this.input.onKeyEvent = onKey;
+        // 拍照模式 cm.input 快照刷新(main.ts initCameraModeWiring 曾持久快照旧
+        // 实例 → 熔断后 mouseHeld/rightDown 电平面整体失灵):captureMode 属
+        // renderer 不重建,只回写其 input 引用(CaptureInput 结构子集,直接赋值)
+        if (this.renderer.captureMode) this.renderer.captureMode.input = this.input;
       }
       this.renderer.installGpuPressureGuard();      // 新画布挂回单点监听(window 哨兵常在)
     };

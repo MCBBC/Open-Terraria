@@ -30,7 +30,7 @@ import type { FlickerClock } from '../lighting/SkyColor';
 import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora, setFrameAtmo } from '../lighting/SkyColor';
 import { showJourneyQuickGate } from '../ui/QuickGate';
 import { SMART_CURSOR_DIRECTION_LOCKS, sheetOf } from '../player/SmartCursor';
-import { mobileUiScale } from '../ui/MobileControls';
+import { mobileUiScale, hudTier } from '../ui/MobileControls';
 import { TEAM_COLORS } from '../stats/Pvp';
 
 /** 鼠标目标格（智能光标激活时 smart=true 并附方向锁 arrow） */
@@ -3606,11 +3606,33 @@ export class Renderer {
     // 条自身聚合——Game 侧 boss 槽旧参数（含 EoW ×150 近似分母）自此退役）
     {
       const snap = this.bossBars.tick(this.buildBarContext(entities, player, world, cam, viewW, viewH));
-      if (snap) this.drawBossBar(ctx, viewW, viewH, snap);
+      if (snap) {
+        // 窄屏(手机竖屏~390 CSS px)等比缩放:456px 设计宽必溢出。视口宽判据天然
+        // 隔离桌面(≥560 恒 1=原布局字节不变),横屏 844/ iPad 均无需缩。
+        const bs = viewW < 560 ? Math.max(0.55, (viewW - 56) / 480) : 1;
+        if (bs !== 1) {
+          ctx.save();
+          ctx.translate(viewW / 2, 0);
+          ctx.scale(bs, bs);
+          ctx.translate(-viewW / 2, 0);
+        }
+        this.drawBossBar(ctx, viewW, viewH, snap);
+        if (bs !== 1) ctx.restore();
+      }
     }
     // 入侵进度条（DrawInvasionProgress Main.cs:47071 语义；布局与 Boss 条并列居中，
-    // 原版右下角黄条——偏差记录）
-    if (invasion) this.drawInvasionBar(ctx, viewW, invasion);
+    // 原版右下角黄条——偏差记录）——窄屏同款缩放包裹(与 Boss 条共用判据)
+    if (invasion) {
+      const ivS = viewW < 560 ? Math.max(0.55, (viewW - 56) / 480) : 1;
+      if (ivS !== 1) {
+        ctx.save();
+        ctx.translate(viewW / 2, 0);
+        ctx.scale(ivS, ivS);
+        ctx.translate(-viewW / 2, 0);
+      }
+      this.drawInvasionBar(ctx, viewW, invasion);
+      if (ivS !== 1) ctx.restore();
+    }
 
     // 11. 生命/魔力资源条（原版默认 "New"=FancyClassic 金框分格样式；Classic 为
     //     朴素心/星——PlayerResourceSetsManager2.cs:26-31 五样式，此处两主样式可切）
@@ -13450,7 +13472,10 @@ export class Renderer {
     // 原版锚点（Main.cs:54696-54706 UpdateMinimapAnchors + 54944-54949，MapScale=1）：
     // miniMapX = screenWidth - (52+240) = 屏宽-292，miniMapY = 90
     // —— 让位右上角生命/魔力资源条（心行 y≤80、星列 x≈屏宽-25）
-    const ox = ctx.canvas.width - size - 52, oy = 90;
+    // T3(手机竖屏):hotbar 两行五列占顶部 ~110px——minimap 锚点局部下移到其下
+    // (屏幕 y≈121px),防 canvas HUD 与 DOM hotbar 纵向争顶;桌面/T2 几何不变
+    const oy = hudTier() === 't3' ? 196 : 90;
+    const ox = ctx.canvas.width - size - 52;
     // 原版取景：num14/15 = miniMapWidth/scale —— 正方形窗口（此前按世界纵横比压扁，非原版）
     const viewTiles = Math.max(40, Math.round(size / this.minimapZoom));
     const px = player.cx / TILE, py = player.cy / TILE;

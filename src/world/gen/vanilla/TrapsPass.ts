@@ -111,6 +111,24 @@ export function setBoulderSolidity(solid: boolean): void {
 /** GenVars.boulderPetsPlaced（cs:9302 宠物巨石计数，每局生成清零） */
 let boulderPetsPlaced = 0;
 
+/** ★IIII29：生成期 pass 共享 rng 兜底（runTrapsPass 头灌入）。vanilla SquareTileFrame
+ *  / KillTile 链里的 genRand 是全局单例、永远可用；JS 曾按可选参数传递，CheckSuper/
+ *  Chest 等毁除循环递归调用 killTileWholeCore 时丢参 ⇒ 环内 165 分派跳过
+ *  checkStalactite（要求 rng），反被 MULTI_DEFS 整块近似误杀 —— const#31 两格
+ *  T165>0@1681,480 实证。模块外直调本模块函数且未灌兜底的场景保持旧行为。 */
+let passRngT: RNG | null = null;
+function normRng(r?: RNG | null): RNG | undefined {
+  return (r ?? passRngT) ?? undefined;
+}
+
+// ★IIII29：KillTile 湿尸支所需生成期旗标快照（runTrapsPass 头灌入；模块外调用=
+// 未灌旗标，分支恒假——与旧行为一致，备案）
+let genGetGoodT = false;
+let genRemixT = false;
+let genDrunkT = false;
+/** TileID.Sets.Ices（1457 Terraria.ID/TileID.cs Ice 族表）sheet 空间副本 */
+const ICE_SHEET_SET = new Set([161, 163, 164, 200]);
+
 /** 多格 framed 物体表（KillTile 整块语义：破坏任一格=整块移除，见
  *  MultitileFragmentSweep 注释；Traps 的井杀/镖锚杀会波及陶罐/雕像/滚地仙人掌
  *  等邻接物体——golden (3787..3788,412..413) 陶罐被镖锚 KillTile 整块带走实证）。 */
@@ -234,6 +252,7 @@ function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void
   if (!st.inBounds(x, y)) return;
   const ci = st.idx(x, y);
   if (!st.flags[ci]) return;                          // cs:63573 !active()
+  const killedSheet = st.type[ci]!;                   // ★IIII29 湿尸支需杀前类型（cs:64409）
   const br = checkBreakabilityT(st, x, y);
   if (br === 2) return;                               // cs:63584 num==2 拒杀
   // ★IIIIII5：cs:64213-64218 dust 循环（num12 次 MakeTileDust；本仓只计掷不产尘）
@@ -282,7 +301,28 @@ function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void
     //   ——**无论走哪个结果都先耗 1 掷**；ShouldTileSurvive 门对 web 恒假故省略。
     if (bsh === 51 && st.wall[ci] === 62) rng.int(0, 3);
   }
+  // ★IIII29 定罪修复④（notraps #76 尾差 L/Y×1 @3548,1068）：vanilla KillTile 杀除
+  //   体内的【湿尸】支（cs:64406-64426，紧随 ClearBlockPaintAndCoating、先于 type=0
+  //   与 SquareTileFrame 尾）：type==58 叶子且 j>Main.UnderworldLayer(=h-200) ⇒ 死格
+  //   留 lava 液 128；type==230 && getGoodWorld && Next(2)==0（耗掷!）⇒ 同留 lava128；
+  //   (147||224||Ices) && getGood&&remix&&!drunk && Next(2)==0（耗掷!）⇒ 留水64。
+  //   本域此前直接清空 ⇒ X 深渊叶被镖锚杀后残 lava 半池、J 全净（单格差在 #76 即现，
+  //   且被二次沉降池聚合放大）。netMode!=1 门生成期恒真。行号=1457。
   killObjectAt(st, x, y);
+  {
+    // （湿尸支：死格残留液体——setTileSilent 清 type/帧不触 liquid）
+    const wi = st.idx(x, y);
+    const ksh = sheetOf(killedSheet);
+    const underworld = st.h - 200;                // Main.UnderworldLayer（Main.cs:2886）
+    if (ksh === 58 && y > underworld) {
+      st.liquid[wi] = 128; st.liquidType[wi] = 2; // tile.lava(true)+liquid=128
+    } else if (ksh === 230 && genGetGoodT && normRng(rng)!.int(0, 1) === 0) {
+      st.liquid[wi] = 128; st.liquidType[wi] = 2;
+    } else if (genGetGoodT && genRemixT && !genDrunkT
+      && (ksh === 147 || ksh === 224 || ICE_SHEET_SET.has(ksh)) && normRng(rng)!.int(0, 1) === 0) {
+      st.liquid[wi] = 64; st.liquidType[wi] = 1;  // 水残（vanilla liquidType(0)+64）
+    }
+  }
   cascade3x3T(st, x, y, rng);
 }
 
@@ -290,7 +330,9 @@ function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void
  *  SSSSS 批按 vanilla TileFrame 真分派重构（12345 #76 双根因：①镖锚杀地基 →
  *  上方压板 Check1x1 支撑杀缺失（cs:45226→86307）；②残缺巨石块帧锚 Check2x2
  *  完整性杀缺失（cs:48405）——旧"整块搜索+支撑列"近似对残块必空转）。 */
-function cascade3x3T(st: TileStore, x: number, y: number, rng?: RNG, multiFallback = true): void {
+function cascade3x3T(st: TileStore, x: number, y: number, rng0?: RNG, multiFallback = true): void {
+  // ★IIII29：环分派的 genRand 兜底（见 passRngT 注）
+  const rng = normRng(rng0);
   // SquareTileFrame 调用序（cs:80925-80933）列优先
   for (const [dx, dy] of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0], [1, 1]] as const) {
     const ux = x + dx, uy = y + dy;
@@ -1562,11 +1604,26 @@ function placeHeadMirrorT(st: TileStore, x: number, y: number, tag?: number): vo
   if (!st.flags[i]) {
     tntProbe(`P${tag ?? 0} ${x} ${y} ghost h${st.half[i]} s${st.slope[i]} f${st.frameX[i]},${st.frameY[i]} c`);
     st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0;                   // Clear(Tile|TilePaint|Slope)
-  } else if (!RESETS_HALF_EXEMPT_SHEETS.has(sheetOf(st.type[i]!) >= 0 ? sheetOf(st.type[i]!) : -1)
-    && !TILE_DEFS[st.type[i]!]?.framed) {
-    tntProbe(`P${tag ?? 0} ${x} ${y} reset h${st.half[i]} s${st.slope[i]} f${st.frameX[i]},${st.frameY[i]}->f0,0`);
-    st.half[i] = 0;                                                     // halfBrick(false)
-    st.frameX[i] = 0 as never; st.frameY[i] = 0 as never;
+    return;
+  }
+  // ★IIII29 定罪修复③（notraps #76 Hf10 家族 / 半砖清除债）：vanilla 头重排支
+  //   cs:60113-60121 = `ResetsHalfBrickPlacementAttempt[num]（num=放置类型！）
+  //   && (!tile.active() || !Main.tileFrameImportant[tile.type（既有类型！）])`。
+  //   即对 active 锚：只看【既有类型是否 frameImportant】，放置类型仅查
+  //   Reseta 表本身（CreateBoolSet(default=true, 列表=false，SetFactory.cs 实证)
+  //   ——列表成员（草/苔藓族）是【作为放置类型时】不触发重排，不是【既有类型】
+  //   豁免）。J 曾拿既有类型查豁免表 → 苔藓(625/60/381/182/183)等非 framed 活锚
+  //   被跳过清半砖；x86 halfEv 十格全为 PTreset_n654@placeTNTBarrel 实证。
+  //   RE_RESETS 放置类型侧表：本域放置族 {135,137,141,443,654} 全不在
+  //   CreateBoolSet(false-list) 内 ⇒ 恒触发；tag 未传按可触发处理。
+  {
+    const placedSh = tag ?? -1;
+    const resets = placedSh < 0 || !RESETS_HALF_EXEMPT_SHEETS.has(placedSh);
+    if (resets && !TILE_DEFS[st.type[i]!]?.framed) {
+      tntProbe(`P${tag ?? 0} ${x} ${y} reset h${st.half[i]} s${st.slope[i]} f${st.frameX[i]},${st.frameY[i]}->f0,0`);
+      st.half[i] = 0;                                                   // halfBrick(false)
+      st.frameX[i] = 0 as never; st.frameY[i] = 0 as never;
+    }
   }
 }
 
@@ -1767,6 +1824,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
   //   本仓生成期不放置 379,行为无差,存档时间线。pass 尾 cs:18897 还原 true。
   flipGenSolid([379], false);
   boulderPetsPlaced = 0;   // GenVars.boulderPetsPlaced 每局清零
+  passRngT = rng;          // ★IIII29 环分派 genRand 单例镜像
   destroyObjectT = false; destroyObjectP2 = false; fossilBreakT = false;
   // CheckChest 语境：有物箱锚集（CanDestroyChest cs:590 有物=不可毁）
   chestList = chests ?? null;
@@ -1777,6 +1835,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
     }
   }
   const nf = gs.seedFlags;
+  genGetGoodT = !!nf.getGoodWorld; genRemixT = !!nf.remix; genDrunkT = !!nf.drunkWorld;
   // ★RRRRRRR2 批：分段掷流标定钩（与 x86 rig JJHook.HashMark 同名同位；未注册零开销）
   const __hm = (label: string) => {
     (globalThis as { __swTrapHm?: (l: string) => void }).__swTrapHm?.(label);
@@ -1866,6 +1925,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
   // ★pass 尾还原（cs:18897 `Main.tileSolid[379] = true`）
   flipGenSolid([379], true);
   chestList = null; chestItemAnchors = null;
+  passRngT = null;         // ★IIII29 pass 外清兜底
 }
 
 /** placeTNTBarrel（cs:8836-8856）：下扫首个活性格上一格放 654（TNT 桶，2×2
@@ -1898,9 +1958,18 @@ export function placeTNTBarrel(st: TileStore, x: number, y: number, rng?: RNG): 
   // PlaceTile(654) → Place2x2（cs:60229 分派；右下锚语义同 MicroBiomes place2x2Direct）
   placeHeadMirrorT(st, x, py, 654);                                // ★III13 桶锚头变异（654 非实心门恒过）
   const ok = place2x2Traps(st, x, py, TNT_BARREL);
-  tntProbe(`D ${k} ${ok ? 'OK' : 'NO'} at=${x},${py}`);
-  if (ok && !i13Legacy()) cascade3x3T(st, x, py, rng, true);   // cs:60752 通用尾 SquareTileFrame(i,j)
-  return ok;
+  tntProbe(`D ${k} ${ok ? 'OK' : 'NO'} at=${x},${py} r=${(globalThis as { __swRollN?: number }).__swRollN ?? -1}`);
+  // ★IIII29 定罪修复②（notraps #76 残差四簇 + const 残差同源）：vanilla PlaceTile
+  //   的通用尾在【整条 else-if 链之后】以「if (tile.active())」判定（cs:60746-60752，
+  //   大括号深度扫描实证：尾块是 60463 最终 else 分派的兄弟层）——与放置成败无关，
+  //   只看**锚格此刻是否 active**：被拒路径若锚格本是活物（如扫描命中行上方的
+  //   活蛛网），仍跑 SquareTileFrame(i,j) 全环分派并置 result=true。其尾环的
+  //   CheckStalactite/Check2x2 会清邻格残缺钟乳石/滚地仙人掌。x86 klog13 实证：
+  //   四簇 X-only kill（r73637771/73652389/73655023/73655339）与 J 的四次拒收尝试
+  //   逐 roll 同位、栈顶均为 PlaceTile←placeTNTBarrel。J 曾仅在 ok 时跑环 → 残差。
+  //   注：杀除全走零掷支（支撑缺失短路于 style 重掷之前），掷流中性（组账本已证）。
+  if (!i13Legacy() && st.flags[st.idx(x, py)]) cascade3x3T(st, x, py, rng, true);   // cs:60752 通用尾（锚格 active 即触发）
+  return ok || st.flags[st.idx(x, py)] !== 0;
 }
 
 /** WorldGen.PlaceTile→Place2x2（cs:59833 头 + cs:51780-51820）Traps 语境副本：

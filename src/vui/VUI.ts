@@ -7,6 +7,7 @@ import { UIScale } from './draw/UIScale';
 import { UISpriteBatch, rgb } from './draw/UISpriteBatch';
 import { UITextures } from './assets/UITextures';
 import { isTouchDevice } from '../ui/MobileControls';
+import { options } from '../core/Options';
 
 export class VUI {
   static ui = new UserInterface();
@@ -133,9 +134,21 @@ export class VUI {
     if (VUI.loopRaf) return;
     const gen = ++VUI.loopGen;
     let last = performance.now();
+    // 渲染锁帧时间戳（2026-08-29）：遵循设置的帧率上限——与 Game.start 完全同款
+    // 门公式（cap>0 且 1000/cap-1ms 未到即跳帧;cap=0 跟随 rAF）。背景判例：桌面
+    // 壳解锁 vsync 后本循环曾 ~930fps 空转烧满一核（frameCap 门此前只罩世界主
+    // 循环,菜单页裸奔）。跳帧期 last 不前移 ⇒ dt 按真实间隔累计,菜单时钟平滑。
+    let lastCapTs = 0;
     const loop = () => {
       if (VUI.loopGen !== gen) return; // 已被新循环取代：自杀，不再自我续期
       const now = performance.now();
+      const cap = options.data.frameCap;
+      if (cap > 0 && now - lastCapTs < 1000 / cap - 1) {
+        VUI.lastBeat = now;
+        VUI.loopRaf = requestAnimationFrame(loop);
+        return;
+      }
+      lastCapTs = now;
       const dt = Math.min(100, now - last);
       last = now;
       VUI.lastBeat = now;

@@ -14,7 +14,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
-import { genSquareTileFrame } from './FinalCleanupPass';
+import { genSquareTileFrame, genKillTile, genRangeFrame } from './FinalCleanupPass';
 import { setBoulderSolidity } from './TrapsPass';
 
 const PILE185 = TILE_BY_KEY['v_185_small_decos']!;
@@ -182,9 +182,167 @@ function placePile3x2(st: TileStore, rng: RNG, x: number, y: number, type: numbe
   // case 分支尾帧（cs:60026）：Place3x2 void——放置失败也跑；3×3 TileFrame 头清 +
   // 中心 Check3x2（自击杀/邻堆连杀）+ 邻域各族帧杀
   genSquareTileFrame(st, rng, x, y);
+  pilesSupplementAfterSquareFrame(st, rng, x, y);      // ★IIII31：654 族补派发
   // 成功尾帧（cs:60279-60285）：锚格 active（=放置成功）再跑一次
-  if (st.flags[st.idx(x, y)]) genSquareTileFrame(st, rng, x, y);
+  if (st.flags[st.idx(x, y)]) {
+    genSquareTileFrame(st, rng, x, y);
+    pilesSupplementAfterSquareFrame(st, rng, x, y);    // ★IIII31
+  }
   return ok;
+}
+
+// ============================================================
+// ★IIII31（2026-08-28）：Check2x2 补臂——case 654 派发缺口（notraps #77）
+// vanilla TileFrameImportant 深层默认链：type∈{172,360,505-527,543,568-570,580,
+// 598,620,652,**654**,713-716,751,752} 落空支 break（cs:86945-86972）后经外层
+// `goto case 132`（cs:87208）并入 cs:87209-87226 的 Check2x2 调用列——即 654 与
+// 132/138/142/143/288-295/484/664/665/711/712 同走 Check2x2（巨石族走 Boulders 支，
+// 其余走非巨石通用支）。FinalCleanupPass 引擎此前只派发 {138,411,484,752,751}
+// （CCCCC/VVVVV/YYYYY 批"生成期在场成员均为零掷族，未实证不派发"备案）——
+// notraps #77 卡面正是该备案债现形：三对 TNT 桶（654）坐于巨石叠支之上，
+// Piles 头 SetBoulderSolidity(false)（cs:18937,noTraps 支）令下层 138 系失去
+//   Main.tileSolid → 654 走非巨石逐列地面门 cs:48460-71 判失 → destroyObject 整组杀；
+//   正下方第二块 138 叠层由桶死的 KillTile 尾九宫帧（cs:49245-56）触发 Check2x2
+//   Boulders 支（cs:48473-90：底两格 SolidTileAllowBottomSlope 读翻转后 LUT）
+//   死亡 —— x86 077_Piles dump 实证 T654->E×3 组 + T138->E×32（其中恰一块
+//   (2280,634)/(2281,635) 只经由桶死级联被帧到，故 J 侧缺失发派时整层存活）。
+ //
+// 触发面等价性论证（本文件域内补臂合法性）：① 本族谓词在 Piles 槽内为静态
+//   （tileSolid 翻转集于槽头 cs:18906-18941 定态，尾 cs:19591-19620 才还原；
+//    成败只依赖当下 flags/type/LUT/组完整性）；② 五链 x86 dump 扫描（见批章
+//   IIIII31）：{654 预存在格 ∪ 巨石叠支死亡格} 仅 notraps 链非零，
+//   const/s22222/m/ntb/g 五链恒零（noTraps=false 时巨石实心期无叠支失效面；
+//   654 仅 traps 有旗世界产出 cs:8852）⇒ 全局单次求值 ≡ 原版帧事件可达集；
+// ③ 族内尘掷全零（killTileDustAmount cs:66654：654/138/484 等→0）⇒ RNG 流位
+//   无移。引擎对已派发成员（138/484 等）的帧杀语义与本臂全同（同源自
+//   cs:48405-48807），重复求值幂等。
+ // ============================================================
+
+/** TileID.Sets.Boulders（本地副本，与上方 BOULDERS 同集——补臂独立可读性） */
+const SUP_BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+/** 本臂受理族 = **SetBoulderSolidity 翻转列（138/484/664/711-716）∪ {654}**。
+ *  失效面恰由翻转列失去 Main.tileSolid 而生；654 坐于其上走非巨石支。665 不在
+ *  翻转列（cs:11036 无此 id）恒实心、失效面空；其余 case132 列/exotic 成员
+ *  （132/142/143/288-295/172/360/…/411/751/752）尘掷非零或不涉翻转面，
+ *  未实证不纳入（守引擎"未派发备案"口径）。受理族全部落在
+ *  killTileDustAmount 零档（cs:66654 fail=false：654/138/484/664/≥711≤716）⇒ 补臂零掷。 */
+const SUP_CHECK2X2_FAMILY = new Set([654, 138, 484, 664, 711, 712, 713, 714, 715, 716]);
+/** Check2x2 上方箱族豁免（cs:48483-85） */
+const SUP_CHEST_2X2 = new Set([21, 467, 441, 468, 88, 470, 475]);
+/** Main.tileTable（cs:48463 通用支地面门 ∪ 集；FinalCleanupPass TILE_TABLE 同源副本） */
+const SUP_TILE_TABLE = new Set([
+  280, 275, 276, 277, 278, 279, 281, 605, 604, 603, 602, 601, 599, 600, 612, 611, 610, 609,
+  608, 606, 607, 558, 554, 553, 551, 550, 542, 413, 309, 297, 296, 645, 643, 644, 632, 640,
+  559, 414, 359, 358, 285, 286, 582, 555, 538, 533, 532, 394, 393, 392, 391, 339, 310, 299,
+  298, 629, 619, 556, 544, 364, 363, 362, 361, 710, 376, 380, 14, 469, 18, 19, 114, 101, 87,
+  88, 405, 427,
+]);
+/** 平台族（TileID.Sets.Platforms 引擎同款） */
+const SUP_PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
+
+/** SolidTileAllowBottomSlope（cs:70211-70235）副本——bs 步进已在调用侧处理。 */
+const supSolidAllowBottom = (st: TileStore, x: number, y: number): boolean => {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  if (!st.flags[i] || (st.wire[i]! & 32)) return false;
+  const ti = st.type[i];
+  const d = TILE_DEFS[ti];
+  if (!d || !(genSolidType(ti) || d.platform)) return false;
+  const sl = st.slope[i];
+  const sh = SHEET[ti] ?? -1;
+  const topSlope = sl === 1 || sl === 2;
+  if (topSlope && !(SUP_PLATFORMS.has(sh) && ((): boolean => {
+    const n = Math.floor((st.frameX[i] ?? 0) / 18);
+    return (n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26);
+  })())) return false;
+  return !st.half[i];
+};
+
+/** 单格组评估（镜像 FinalCleanupPass.check2x2Sweep 内核，cs:48405-48807）：
+ *  返回该 2×2 组是否判死；判死则 destroyObject 循环 genKillTile 整组 +
+ *  尾 4×4 RangeFrame（cs:48801-07，genRangeFrame 导出复用）。返回实际杀数。 */
+function supCheck2x2Group(st: TileStore, rng: RNG, x: number, y: number): number {
+  const i0 = st.idx(x, y);
+  let num2 = -Math.trunc(st.frameX[i0]! / 18);
+  let num = 0;
+  if (num2 < -1) { num2 += 2; num = 36; }
+  num2 += x;
+  let num4 = st.frameY[i0]!;
+  let num5 = 0;
+  while (num4 >= 36) { num4 -= 36; num5++; }
+  const num6 = y - Math.trunc(num4 / 18);
+  const sheet = SHEET[st.type[i0]] ?? -1;
+  const isBoulder = SUP_BOULDERS.has(sheet);
+  const inW = (k: number, l: number): boolean => k >= 0 && l >= 0 && k < st.w && l < st.h;
+  let flag = false;
+  for (let k = num2; k < num2 + 2; k++) {
+    for (let l = num6; l < num6 + 2; l++) {
+      if (!inW(k, l)) { flag = true; break; }
+      const q = st.idx(k, l);
+      if (!st.flags[q] || (SHEET[st.type[q]] ?? -1) !== sheet
+        || st.frameX[q] !== (k - num2) * 18 + num
+        || st.frameY[q] !== (l - num6) * 18 + num5 * 36) { flag = true; break; }
+    }
+    if (flag) break;
+    // 非巨石通用支（cs:48460-71）：654 走此——逐列 (k,num6+2) 地面门
+    if (!isBoulder) {
+      if (!inW(k, num6 + 2)) { flag = true; }
+      else {
+        const gi = st.idx(k, num6 + 2);
+        const gt = st.type[gi];
+        if (!st.flags[gi] || !(genSolidType(gt) || SUP_TILE_TABLE.has(SHEET[gt] ?? -1))) flag = true;
+        if (st.half[gi]) flag = true;
+      }
+    }
+  }
+  if (!flag && isBoulder) {
+    // cs:48473-90：上两格箱族豁免（裸 type 读不查 active）+ 底两格 AllowBottomSlope 联合门
+    const chestAbove = (cx: number, cy: number): boolean =>
+      inW(cx, cy) && SUP_CHEST_2X2.has(SHEET[st.type[st.idx(cx, cy)]] ?? -1);
+    if (!chestAbove(num2, num6 - 1) && !chestAbove(num2 + 1, num6 - 1)
+      && !supSolidAllowBottom(st, num2, num6 + 2)
+      && !supSolidAllowBottom(st, num2 + 1, num6 + 2)) flag = true;
+  }
+  if (!flag) return 0;
+  let killed = 0;
+  for (let k = num2; k < num2 + 2; k++) {
+    for (let l = num6; l < num6 + 2; l++) {
+      if (!inW(k, l)) continue;
+      const q = st.idx(k, l);
+      if (st.flags[q] && (SHEET[st.type[q]] ?? -1) === sheet) { genKillTile(st, rng, k, l); killed++; }
+    }
+  }
+  if (killed > 0) genRangeFrame(st, rng, num2 - 1, num6 - 1, num2 + 2, num6 + 2);   // cs:48800-07
+  return killed;
+}
+
+/** Piles 域内帧事件补臂（IIII31）：对一次 genSquareTileFrame(cx,cy) 扫过的九宫，
+ *  补做引擎未派发成员（654 等，见 SUP_CHECK2X2_FAMILY 注）的 TileFrameImportant
+ *  分派等价物——原版在每次 TileFrame 访问时按 type 路由进 Check2x2；引擎跳过
+ *  该族后此处以同谓词重放。仅受理组锚首次命中（单事件内去重）。 */
+function pilesSupplementAfterSquareFrame(st: TileStore, rng: RNG, cx: number, cy: number): void {
+  const seen = new Set<number>();
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const px = cx + dx, py = cy + dy;
+      if (!st.inBounds(px, py)) continue;
+      const i = st.idx(px, py);
+      if (!st.flags[i]) continue;
+      const sh = SHEET[st.type[i]] ?? -1;
+      if (!SUP_CHECK2X2_FAMILY.has(sh)) continue;
+      let num2 = -Math.trunc(st.frameX[i]! / 18);
+      if (num2 < -1) num2 += 2;
+      const ax = px + num2;
+      let fy = st.frameY[i]!;
+      while (fy >= 36) fy -= 36;
+      const ay = py - Math.trunc(fy / 18);
+      const key = ay < 0 || ax < 0 ? -1 : ay * st.w + ax;
+      if (key >= 0 && seen.has(key)) continue;
+      if (ax <= 5 || ay <= 5 || ax >= st.w - 5 || ay >= st.h - 5) continue;
+      if (key >= 0) seen.add(key);
+      supCheck2x2Group(st, rng, ax, ay);
+    }
+  }
 }
 
 /** WorldGen.Place2x2（cs:51780）Piles 语境副本（同源副本禁 import 惯例；与

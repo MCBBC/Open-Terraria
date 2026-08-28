@@ -184,7 +184,9 @@ function tileCutAt(st: TileStore, x: number, y: number): boolean {
 //   CheckRockGolemHead 579、693/694、235、442、128/269、91、35/139、386-389、
 //   92/93/453、Check2x2 族（★CCCCC 已派发 138/411——9293480 在场成员；余
 //   132/142/143/288-295/484/664/665/711/712/335/490/564/565/594/94-100/125/126/
-//   173/282/287/319/621/622 维持备案）、172/360/505-527、171、376/443/444、（★YYYYY 已派发 27 向日葵/34 吊灯/5 树/752 蛋）
+//   173/282/287/319/621/622 维持备案）、172/360/505-527、171、376/443/444、（★YYYYY 已派发 27 向日葵/34 吊灯/5 树/752 蛋；
+//   ★DDDDDD +751 龟；★IIIII33 +654 TNT 桶——notraps #98 Settle_Liquids_Again
+//   沉降域在场实证，Traps 域半段已由 PilesPass.pilesSupplementAfterSquareFrame 补臂清偿 #77）
 //   630/631、723/724。
 //   ★KKKKK 批（2026-08-19）新派发三族（#101 金标 14 格击杀实证，旧"零击杀"
 //   备案作废）：CheckAlch 药草 82/83/84（cs:45981）/ CheckJunglePlant
@@ -718,7 +720,8 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     || sheet === 440 || sheet === 485 || sheet === 72 || sheet === 178 || sheet === 138
     || sheet === 376 || sheet === 443 || sheet === 444   // DDDDDD：CheckSuper 读帧族同列（485 同款）
     || sheet === 245 || sheet === 246 || sheet === 241 || sheet === 242   // DDDDDD：画作墙检读帧族（240/440 同款）
-    || sheet === 411 || sheet === 752 || sheet === 751 || sheet === 5 || sheet === 596 || sheet === 616
+    || sheet === 411 || sheet === 752 || sheet === 751 || sheet === 654   // IIII33：Check2x2 自读帧族同列（138 同款）
+    || sheet === 5 || sheet === 596 || sheet === 616
     || sheet === 34 || sheet === 27
     || C3X2_TYPES.has(sheet)
     // KKKKK：新击杀族同列（自读帧族——嵌合基座伪杀/互喂风险，C3X2 同款处置；
@@ -824,10 +827,22 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   goto case 132 → Check2x2；12345 #97 (3127,926) 蛋下半被岩浆死杀 → 级联
     //   Check2x2 孤儿上半杀——掷流 62,050=62,050 全等，纯零掷杀差实证。同组
     //   172/360/505-527/543/568-570/580/598/620/652/654/713-716/751 同走该
-    //   break-goto——生成期在场成员均为零掷族，未实证不派发（备案）。
+    //   break-goto——生成期在场成员均为零掷族，未实证不派发（备案；654 后由
+    //   IIII33 派发收口，余者维持备案）。
     //   DDDDDD 批：+751 沙漠龟（同 break-goto 组；12345 #105 (1711,743) 2×2 组
     //   底锚蛛网 51 → FinalCleanup 大循环 TileFrame 派发 Check2x2 整组杀实证）。
-    case 138: case 411: case 484: case 752: case 751:
+    // IIII33 批补：+654 TNT 桶（同 break-goto 组）——notraps(1896728457,EVIL1 noTraps)
+    //   mile8 #98 Settle_Liquids_Again @槽末 T0>654×8 @(1487,716)+(1489,761)：二次沉降域
+    //   沉降击杀带走的支座其 KillTile 尾九宫（LiquidSim.killTileGen → 本文件
+    //   genSquareTileFrame 全分派）帧到桶格，vanilla 由 cs:86947-86972 空支出栈经
+    //   cs:87208 `goto case 132` 并入 cs:87209-26 直调列=与巨石族同走 Check2x2
+    //   （非巨石支逐列地面门 cs:48460-71 判失 → 整组杀）；引擎此前落空支无派发。
+    //   Traps 域半段（Piles 头 SetBoulderSolidity(false) 失效窗）已由
+    //   PilesPass.pilesSupplementAfterSquareFrame 补臂清偿 #77——本行收口后该事件窗
+    //   补臂与引擎主臂语义重合（同源自 Check2x2），失效面两处合一。五链 x86 dump 扫描：
+    //   654 仅 notraps 在场 ⇒ g/s22222/m/const/ntb 天然空转；族尘掷全零档
+    //   （killDustAmount cs:66654）⇒ RNG 流位无移。
+    case 138: case 411: case 484: case 752: case 751: case 654:
       check2x2Sweep(st, ctx, x, y, sheet);
       return true;
     // YYYYY 批补（cs:86616/52826）：CheckTree 树坍塌 + CheckChand 吊灯——
@@ -972,7 +987,8 @@ function check2x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
         || st.frameX[q] !== (k - num2) * 18 + num
         || st.frameY[q] !== (l - num6) * 18 + num5 * 36) { flag = true; break; }
     }
-    // cs:48460-71（非巨石支：95/126 未派发、132 除外）——411 地面门
+    // cs:48460-71（非巨石支：95/126 未派发、132 除外）——411/751/752/654 地面门
+    //   （★IIIII33：654 TNT 桶=break-goto 组成员，vanilla 同走本支 cs:86947→87208）
     if (!isBoulder && sheet !== 132) {
       if (!inW(k, num6 + 2)) flag = true;
       else {

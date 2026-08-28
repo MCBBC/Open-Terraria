@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=SandboxWorld
+Comment=SandboxWorld 泰拉瑞亚复刻（零壳启动器：本机 Chromium 浏览器独立 profile + 性能旗集；★勿加 frame-limit/vsync 解锁旗——菜单循环无节流门会整机卡顿）
+Exec=sh -c 'C=""; for c in google-chrome chromium microsoft-edge-stable; do command -v $c >/dev/null && C=$c && break; done; exec "$C" --app=https://sandbox.vinlic.com/ --user-data-dir=$HOME/.config/SandboxWorld/profile --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --disable-features=CalculateNativeWinOcclusion,MemorySaver'
+Icon=sandboxworld
+Terminal=false
+Categories=Game;
+Keywords=game;sandboxworld;terraria;

@@ -24,6 +24,7 @@ import { grassSpreadState } from './MushroomPass';
 import { NOT_CLEARABLE } from './TileRunner';
 import { growTree, growVanityTree } from './TreePass';
 import { placePlantTile } from './SurfaceDecorPasses';
+import { DG_FRAMED_ALL as _DG_FRAMED_ALL } from './DungeonPass';
 
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -131,6 +132,19 @@ const fntbTag = (tag: string, a = 0, b = 0): void => {
 const fntbTagSafe = (tag: string, a = 0, b = 0): void => {
   try { fntbTag(tag, a, b); } catch { /* probe */ }
 };
+// ★IIII29：探针调试窗（globalThis.__swFNTBDBG="m,lo,hi"）——生产恒 false
+let dbgM = NaN, dbgLo = 0, dbgHi = 0, dbgInit = false;
+function dbgMatch(m: number, n: number): boolean {
+  if (!dbgInit) {
+    dbgInit = true;
+    const e = (globalThis as { __swFNTBDBG?: string }).__swFNTBDBG;
+    if (e) {
+      const q = e.split(',');
+      dbgM = Number(q[0]); dbgLo = Number(q[1]); dbgHi = Number(q[2]);
+    }
+  }
+  return m === dbgM && n >= dbgLo && n <= dbgHi;
+}
 
 // ============================================================
 // ① NotTheBees()（cs:25275-25507）
@@ -670,17 +684,26 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
       //      636→62 转化差实证家族 T636>62×172）；③ 各 frameImportant 支撑杀。
       // 本域专用 wrapper：写侧与递归规则与 Spread.spreadGrass 同源副本，
       // 仅把尾奏换成引擎 genSquareTileFrame。
+      const dbg = dbgMatch(m, n);
+      if (dbg) fntbTagSafe('A1pre', m, n);
       if (n > lavaLine + rng.int(-2, 2) + 2) {
+        if (dbg) fntbTagSafe('A1mid', m, n);
         if (!remix) spreadGrassFinishEngine(st, rng, m, n, MUD, MUSHROOM_GRASS);
       } else {
+        if (dbg) fntbTagSafe('A1els', m, n);
         spreadGrassFinishEngine(st, rng, m, n, MUD, JUNGLE_GRASS);
       }
+      if (dbg) fntbTagSafe('A1post', m, n);
       // 雪冰带重分界（cs:25673-25712）
       const num14 = lavaLine + rng.int(0, 4);                        // Next(5)
+      if (dbg) fntbTagSafe('A2', m, n);
       const num15 = Math.trunc(ws) + rng.int(-2, 2) + 35;
+      if (dbg) fntbTagSafe('A3', m, n);
       const num16 = Math.trunc((num14 + num15) / 2);
+      if (dbg) fntbTagSafe('B4pre', m, n);
       if (n > num15 && n <= num14) {
         if (m < bd + 200 - 20 - rng.int(-2, 2) || m > w - bd - 200 + 20 + rng.int(-2, 2)) {
+          if (dbg) fntbTagSafe('B4in', m, n);
           if (st.wall[idx] === HIVE_WALL) { st.wall[idx] = 0; fntbTagSafe('W86', m, n); }
           if (st.liquid[idx]! > 0) { clearHoney(st, idx); clearLava(st, idx); fntbTagSafe('LQ', m, n); }
           if (num8 === 59) {
@@ -702,6 +725,7 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
         }
       }
       // 树族回退（cs:25714-25730）
+      if (dbg) fntbTagSafe('B4end', m, n);
       if (!remix && !dstarve) {
         if (num8 === 6 || num8 === 7 || num8 === 166 || num8 === 167) {
           if (n > (lavaLine + rock * 2) / 3 + rng.int(-2, 2) + 2) { st.type[idx] = DIRT; fntbTagSafe('TF0', m, n); }
@@ -710,11 +734,13 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
         }
       }
       // 幼虫播种（cs:25732-25752）
+      if (dbg) fntbTagSafe('C5pre', m, n);
       if (n <= num || m <= 350 || m >= w - 350
         || (st.liquid[idx]! !== 0 && st.liquidType[idx] !== LIQUID_TYPE.HONEY)
         || (tenth && !remix)) {
         continue;
       }
+      if (dbg) fntbTagSafe('C5mid', m, n);
       if (dstarve || remix) {
         if (rng.int(0, 599) === 0) placeLarva(st, rng, m, n);
       } else if (noTraps) {
@@ -768,41 +794,65 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
   fntbTagSafe('FNTBOUT');
 }
 
-/** PlaceTile(231)（cs:59991→Place3x3 cs:53549 num=-2 支 + SquareTileFrame 尾奏）：
- *  3×3 占位区 (x-1..x+1)×(y-2..y) 全须非活性 + 底行三列 SolidTile2（cs:70178：
- *  active && tileSolid && slope==0 && !half && !inActive——不排 solidTop）。
- *  前置清（cs:59497）与液体门（231 不在拒绝表）照原版链序。 */
+/** TileID.Sets.ResetsHalfBrickPlacementAttempt（TileID.cs:181）：CreateBoolSet(true,
+ *  2,23,661,60,70,199,662,109,477,492,179,512,…633) ——默认全 true、表内 id 反置 false；
+ *  231(幼虫)**不在反置表内** ⇒ [231]=true。本 pass 仅以 num=231 调用 ⇒ 恒真。 */
+const RESETS_HALF_ATTEMPT_231 = true;
+/** Main.tileFrameImportant 精确表（sheet 空间）——IIIII28 批改接 DungeonPass 导出。
+ *  ★曾硬编码「域内恒非 FI」：把 225/231 等 FI 型的帧清零 → mile8 #105 大回归
+ *  （A=3716/T=7606），导出表后逐格同效。 */
+const FI_SHEET = _DG_FRAMED_ALL;
+
 function placeLarva(st: TileStore, rng: RNG, x: number, y: number): void {
-  if (!st.inBounds(x, y)) return;
-  const i0 = st.idx(x, y);
-  if (!st.flags[i0]) {                       // cs:59497 前置清（231 非实心恒过大门）
-    st.type[i0] = 0; st.frameX[i0] = 0; st.frameY[i0] = 0; st.half[i0] = 0; st.slope[i0] = 0; st.paint[i0] = 0;
-  }
-  for (let a = x - 1; a <= x + 1; a++) {
-    for (let b = y - 2; b <= y; b++) {
-      if (activeAt(st, a, b)) return;        // 占位区被占 → Place3x3 失败
+  let ok = true;
+  if (!st.inBounds(x, y)) ok = false;
+  if (ok) {
+    const i0 = st.idx(x, y);
+    if (!st.flags[i0]) {
+      // cs:59497 + PlaceTile 头（cs:60237-60240）：!active → Clear(Tile|TilePaint|Slope)
+      st.type[i0] = 0; st.frameX[i0] = 0; st.frameY[i0] = 0; st.half[i0] = 0; st.slope[i0] = 0; st.paint[i0] = 0;
+    } else if (RESETS_HALF_ATTEMPT_231 && (!FI_SHEET.has(sheetOf(st.type[i0])))) {
+      // ★IIII28 批补漏（cs:60241-60246）：目标格已激活且被放类型 ∈
+      // ResetsHalfBrickPlacementAttempt[231]=true 且现有型非 tileFrameImportant ⇒
+      // 清半砖并重置帧——失败/成功放置都先走这里；此前整缺致 mile8 #105
+      // Hf 残差 34（vanilla hf0 / js hf1，首差 (593,228)，type∈{60,25,8}）。
+      st.half[i0] = 0;
+      st.frameY[i0] = 0;
+      st.frameX[i0] = 0;
     }
   }
-  for (let a = x - 1; a <= x + 1; a++) {
-    if (!st.inBounds(a, y + 1)) return;
-    const bi = st.idx(a, y + 1);
-    const tb = st.type[bi]!;
-    const solid2 = st.flags[bi] !== 0 && vanGenSolidType(tb)
-      && (st.slope[bi] === 0) && !st.half[bi] && ((st.wire[bi] >>> 5) & 1) === 0;
-    if (!solid2) return;
-  }
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dy = -2; dy <= 0; dy++) {
-      if (!st.inBounds(x + dx, y + dy)) continue;
-      const i = st.idx(x + dx, y + dy);
-      st.flags[i] = 1;
-      st.type[i] = LARVA;
-      st.frameX[i] = (dx + 1) * 18;
-      st.frameY[i] = (dy + 2) * 18;
+  if (ok) {
+    outer: for (let a = x - 1; a <= x + 1; a++) {
+      for (let b = y - 2; b <= y; b++) {
+        if (activeAt(st, a, b)) { ok = false; break outer; }        // Place3x3 flag=false
+      }
     }
   }
-  fntbTagSafe('L231', x, y);           // ★IIII29：PlaceTile(231) 成功锚
-  genSquareTileFrame(st, rng, x, y);   // cs:59993 尾奏
+  if (ok) {
+    for (let a = x - 1; a <= x + 1; a++) {
+      if (!st.inBounds(a, y + 1)) { ok = false; break; }
+      const bi = st.idx(a, y + 1);
+      const tb = st.type[bi]!;
+      const solid2 = st.flags[bi] !== 0 && vanGenSolidType(tb)
+        && (st.slope[bi] === 0) && !st.half[bi] && ((st.wire[bi] >>> 5) & 1) === 0;
+      if (!solid2) { ok = false; break; }
+    }
+  }
+  if (ok) {
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -2; dy <= 0; dy++) {
+        if (!st.inBounds(x + dx, y + dy)) continue;
+        const i = st.idx(x + dx, y + dy);
+        st.flags[i] = 1;
+        st.type[i] = LARVA;
+        st.frameX[i] = (dx + 1) * 18;
+        st.frameY[i] = (dy + 2) * 18;
+      }
+    }
+    fntbTagSafe('L231', x, y);           // ★IIII29：PlaceTile(231) 成功锚
+  }
+  // ★无条件尾奏（成功与失败都走；与 PlaceTile 分派支连发结构一致）
+  genSquareTileFrame(st, rng, x, y);
 }
 
 /** SpiderWallRemover（getGood 支；纯 NTB 不可达，占位实现） */

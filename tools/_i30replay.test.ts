@@ -69,8 +69,10 @@ const le16 = (p: string): Uint16Array => {
     items: c.items.map(() => ({ id: 1, stack: 1 })),
   }));
   // ★I30 写位观察：盒内一切 setTileSilent 直写（含整块静默擦除路径）
+  if (process.env.SW_I30_SKIP) (globalThis as unknown as Record<string, string>).__i30Skip = process.env.SW_I30_SKIP;
   const evs: string[] = [];
   (globalThis as unknown as Record<string, unknown>).__swTntEv = (m: string) => evs.push(m);
+  (globalThis as unknown as Record<string, unknown>).__swSandEv = (kind: string, a: number, b: number, v: number) => evs.push(`SAND ${kind} ${a},${b} v${v} r${rollN}`);
   let rollN = 0;
   (globalThis as unknown as Record<string, unknown>).__swOnRoll = () => { rollN++; (globalThis as unknown as Record<string, number>).__swRollN = rollN; };
   // 主循环写位对拍仪（GW 流，与 rig x-hm/x-BW2 的 GW 同位）
@@ -97,7 +99,7 @@ const le16 = (p: string): Uint16Array => {
     const orig = TileStore.prototype.setTileSilent;
     const g1s = (): string => {
       const stk = new Error().stack ?? '';
-      return stk.split('\n').slice(2).filter((l) => l.includes('src/world/gen')).slice(0, 4)
+      return stk.split('\n').slice(2).filter((l) => l.includes('src/world/gen')).slice(0, 9)
         .map((l) => l.replace(/^.*?(src\/[A-Za-z0-9_/.]+\.ts).*$/, '$1') + '#' + l.replace(/^.*[^\d](\d+):\d+.*$/, '$1'))
         .join('<-');
     };
@@ -121,18 +123,21 @@ const le16 = (p: string): Uint16Array => {
       .map((l) => l.replace(/^.*?(src\/[A-Za-z0-9_/.]+\.ts).*$/, '$1') + '#' + l.replace(/^.*[^\d](\d+):\d+.*$/, '$1'))
       .join('<-');
   };
+  const kall = process.env.SW_I30_KALL === '1';
   const inBox = (sx: number, sy: number): boolean => {
     for (const [x0, y0, x1, y1] of boxes) if (sx >= x0 && sx <= x1 && sy >= y0 && sy <= y1) return true;
     return false;
   };
-  if (boxes.length) {
+  if (boxes.length || kall) {
     (globalThis as unknown as Record<string, unknown>).__swKillW = (m: string) => {
       const [sx, sy] = m.split(',').map(Number);
-      if (inBox(sx, sy)) evs.push(`KILL ${sx},${sy} ${g1()}`);
+      if (!kall && !inBox(sx, sy)) return;
+      evs.push(`K ${rollN} ${sx},${sy} ${g1().replace(/src\/world\/gen\/vanilla\//g, '')}`);
     };
     (globalThis as unknown as Record<string, unknown>).__swCascW = (m: string) => {
       const [sx, sy] = m.split(',').map(Number);
-      if (inBox(sx, sy)) evs.push(`CASC ${m} ${g1()}`);
+      if (!kall && !inBox(sx, sy)) return;
+      evs.push(`CASC ${rollN} ${m} ${g1().replace(/src\/world\/gen\/vanilla\//g, '')}`);
     };
   }
   const rng = new RNG(p.seed);

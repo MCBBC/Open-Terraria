@@ -31,6 +31,13 @@ import { matureHerbPlants } from './StructuresPass';
 import { growTree } from './TreePass';
 import { genSquareTileFrame, genTileFrame, genKillTile } from './FinalCleanupPass';
 
+/** ★IIII34：水生植物槽坐标探针（仪用，生产零开销）——tag 词表与 x86 rig
+ *  SW_WPLOG 逐事件镜像（ln|tag|x|y|extra），仅当测试仪挂 __swWpLog 时生效。 */
+const wpEv = (tag: string, x: number, y: number, extra = ''): void => {
+  const f = (globalThis as { __swWpLog?: (t: string, x: number, y: number, e?: string) => void }).__swWpLog;
+  if (f) f(tag, x, y, extra);
+};
+
 // ---------- 内部 tile id → 原版 sheet id 查找表（模块级一次构建，热循环零分配） ----------
 const SHEET = new Int16Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -1863,12 +1870,12 @@ function placeBamboo(st: TileStore, rng: RNG, gs: GenState, x: number, y: number
  *  (386,683) 供后续列放置 61——金标 a61/JS 恒 a28），级联杀不发生 → 后续 61/69
  *  孢子门掷流错位（T61↔69×257 互换带）。掷走 ctx.rng=pass 流（184 恒掷等）。
  *  checkBamboo/checkCatTail/checkUnderwaterPlant 保留（growCheckSeaweed 等直调）。 */
-function squareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
-  genSquareTileFrame(st, rng, x, y);
+function squareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {  genSquareTileFrame(st, rng, x, y);
 }
 
 /** PlaceLilyPad（cs:59109）1:1 */
 function placeLilyPad(st: TileStore, rng: RNG, x: number, y: number): boolean {
+  wpEv('LY', x, y);
   const w = st.w, h = st.h;
   let n = y;
   if (x < 50 || x > w - 50 || n < 50 || n > h - 50) return false;
@@ -1918,6 +1925,11 @@ function placeLilyPad(st: TileStore, rng: RNG, x: number, y: number): boolean {
   st.setTileSilent(x, n, LILY_PAD, fx, fy);
   st.half[ka] = 0;
   st.slope[ka] = 0;
+  wpEv('LYO', x, n, `fy${fy}`);
+  // ★IIII30 定罪①：vanilla PlaceLilyPad 成功尾必调 SquareTileFrame(x,num)
+  //   （1457 cs:59640，放置写序内联级联）——旧移植漏调，睡莲放置后邻域帧/
+  //   级联全缺（#102 首批受理面漂移主源之一）
+  squareTileFrame(st, rng, x, n);
   return true;
 }
 
@@ -2000,6 +2012,7 @@ function checkCatTail(st: TileStore, rng: RNG, x: number, j: number): void {
 
 /** PlaceCatTail（cs:58648）1:1：返回锚点（-1,-1 = 失败） */
 function placeCatTail(st: TileStore, rng: RNG, gs: GenState, x: number, j: number): [number, number] {
+  wpEv('PC', x, j);
   const w = st.w, h = st.h;
   let n = j;
   if (x < 50 || x > w - 50 || n < 50 || n > h - 50) return [-1, -1];
@@ -2052,6 +2065,7 @@ function placeCatTail(st: TileStore, rng: RNG, gs: GenState, x: number, j: numbe
   st.setTileSilent(x, n, CATTAIL, 0, style);
   st.half[st.idx(x, n)] = 0;
   st.slope[st.idx(x, n)] = 0;
+  wpEv('PCO', x, n);
   squareTileFrame(st, rng, x, n);
   return [x, n];
 }
@@ -2072,6 +2086,7 @@ function growCatTail(st: TileStore, rng: RNG, x: number, j: number): void {
   n++;
   const kn = st.idx(x, n);
   if (!st.flags[kn] || SHEET[st.type[kn]] !== 519) return;
+  wpEv('GCT', x, n, `fx${st.frameX[kn]}`);
   const above = st.idx(x, n - 1);
   if (st.frameX[kn] === 90 && st.flags[above] && TILE_CUT.has(SHEET[st.type[above]])) {
     killTile(st, x, n - 1);
@@ -2084,11 +2099,17 @@ function growCatTail(st: TileStore, rng: RNG, x: number, j: number): void {
   };
   if (st.frameX[kn] === 0) {
     st.frameX[kn] = 18;
+    wpEv('GCB', x, n, 'f0');
+    // ★IIII30 定罪②：1457 cs:59115 GrowCatTail 各分支内联 SquareTileFrame(x,num)
+    squareTileFrame(st, rng, x, n);
   } else if (st.frameX[kn] === 18) {
     st.frameX[kn] = 18 * rng.int(2, 4);                                 // Next(2,5)
+    wpEv('GCB', x, n, 'f18');
     sprout(90);
+    squareTileFrame(st, rng, x, n);
   } else if (st.frameX[kn] === 90) {
     if (st.liquid[above] === 0) {
+      wpEv('GCB', x, n, 'f90d');
       const above2 = st.idx(x, n - 2);
       const wet = st.liquid[kn] > 0 || st.liquid[st.idx(x, n + 1)] > 0 || st.liquid[st.idx(x, n + 2)] > 0;
       if (!st.flags[above2] && wet && rng.int(0, 2) === 0) {            // Next(3)
@@ -2100,9 +2121,11 @@ function growCatTail(st: TileStore, rng: RNG, x: number, j: number): void {
         sprout(180 + v * 18);
       }
     } else {
+      wpEv('GCB', x, n, 'f90w');
       st.frameX[kn] = 108;
       sprout(90);
     }
+    squareTileFrame(st, rng, x, n);
   }
   squareTileFrame(st, rng, x, n - 1);
 }
@@ -2119,12 +2142,31 @@ function canUnderwaterPlantGrow(st: TileStore, x: number, y: number, sheet: numb
   }
   if (!st.inBounds(x, y + 1)) return false;
   const g = st.idx(x, y + 1);
-  if (!st.flags[g] || st.half[g] || st.slope[g] !== 0) return false;    // nactive
+  // ★IIII30 定罪③：CanUnderwaterPlantGrowHere 底格门=「nactive()」=active 且未致动
+  //   （1457 cs:58588；Tile.cs (sTileHeader&0x60)==32）——旧移植把 half/slope 一并
+  //   拒掉=过严，与 TopEdgeCanBeAttachedTo 沙支的顶沿门混淆
+  if (!st.flags[g] || ((st.wire[g] >>> 5) & 1) !== 0) return false;     // nactive
   const gs = SHEET[st.type[g]];
-  const sandOk = CONV_SAND.has(gs) && solidAllowBottomSlope(st, x, y + 1);
+  const sandOk = CONV_SAND.has(gs) && topEdgeCanBeAttachedTo(st, x, y + 1);
   if (!sandOk && gs !== sheet) return false;
   const wall = st.wall[k];
-  if (wall !== 0 && (wall - 63 < 0 || wall - 63 > 6) && (wall - 80 < 0 || wall - 80 > 1)) return false;
+  if (wall !== 0 && !((wall - 63 >= 0 && wall - 63 <= 6)) && !(wall === 80 || wall === 81)) return false;
+  return true;
+}
+
+/** TopEdgeCanBeAttachedTo（cs:70911）——活性且（实心∪solidTop）、非顶坡（平台顶帧豁免本世界不涉）、
+ *  非半砖、未致动 */
+function topEdgeCanBeAttachedTo(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !(d.solid || d.platform)) return false;
+  const sl = st.slope[i];
+  const topslope = sl === 1 || sl === 2;
+  if (topslope && !(d.platform)) return false;                          // PlatformProperTopFrame 特例不含此域
+  if (st.half[i]) return false;
+  if (((st.wire[i] >>> 5) & 1) !== 0) return false;                     // inActive
   return true;
 }
 
@@ -2156,6 +2198,7 @@ function growCheckSeaweed(st: TileStore, rng: RNG, x: number, y: number): void {
   const k = st.idx(x, y);
   const ka = st.idx(x, y - 1);
   if ((SHEET[st.type[k]] === 549 && st.flags[k] && st.liquid[k] < 200) || st.liquid[ka] < 200) {
+    wpEv('GSB', x, y, `act${st.flags[k] ? 1 : 0}`);
     if (st.flags[k] && SHEET[st.type[k]] === 549 && rng.int(0, 1) === 0) killTile(st, x, y); // Next(2)
     return;
   }
@@ -2164,6 +2207,7 @@ function growCheckSeaweed(st: TileStore, rng: RNG, x: number, y: number): void {
     || rng.int(0, 0) !== 0
     || !st.inBounds(x, y - 2) || !st.inBounds(x, y - 3)
     || st.liquid[st.idx(x, y - 2)] !== 255 || st.liquid[st.idx(x, y - 3)] !== 255) {
+    wpEv('GSG', x, y);
     return;
   }
   // ±4 × (y..y+12) 内海藻 ≤30
@@ -2180,13 +2224,30 @@ function growCheckSeaweed(st: TileStore, rng: RNG, x: number, y: number): void {
   for (; !solidTile(st, x, k2) && k2 < h - 50; k2++) {
     // 下扫实心底
   }
+  wpEv('GSD', x, y, `k${k2 - y}`);
   if (k2 - y < 17 - rng.int(0, 19)) {                                  // Next(20)
     // PlaceTile(x, y-1, 549) → PlaceUnderwaterPlant（cs:58540）
+    wpEv('GSP', x, y, `k${k2 - y}`);
+    wpEv('PU', x, y - 1, '549');
     if (canUnderwaterPlantGrow(st, x, y - 1, 549, false)) {
+      wpEv('PUO', x, y - 1, '549');
+      // ★IIII30 定罪④：PlaceUnderwaterPlant 先清底格（x,y）slope/half 再写本体
+      //   （1457 cs:59015-59018 写序）
+      const gb = st.idx(x, y);
+      st.slope[gb] = 0;
+      st.half[gb] = 0;
       st.setTileSilent(x, y - 1, SEAWEED, 0, 0);
       const kk = st.idx(x, y - 1);
       st.half[kk] = 0;
       st.slope[kk] = 0;
+      squareTileFrame(st, rng, x, y - 1);
+      // ★IIII34 定罪①：GrowCheckSeaweed 走的是 PlaceTile(x,y-1,549)（cs:59435→
+      //   PlaceTile 内 case549 支调 PlaceUnderwaterPlant（自带一次 SquareTileFrame），
+      //   随后 PlaceTile 成功尾再次无条件 SquareTileFrame(i,j)（rig src
+      //   Terraria/WorldGen.cs cs≈60856 `if (tile.active()) { …; SquareTileFrame(i,j);
+      //   result=true; }`）。旧移植只跑内层一次——每个海藻落位少一轮九宫重帧：
+      //   苔芽184 无条件 Next(3) 第二掷、CU 带外 reroll 双跑全缺 ⇒ 掷流自首个含苔邻格
+      //   的落位起 ±1 漂移级联放大（familyA/B 全部下游形态源）。
       squareTileFrame(st, rng, x, y - 1);
     }
   }

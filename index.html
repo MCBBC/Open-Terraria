@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <link rel="icon" type="image/png" href="/favicon.png" />
   <title>SandboxWorld</title>
+  <!-- PWA/主屏 web app 双端 meta:Android 用 manifest(display fullscreen + landscape
+       由 WebAPK/TWA 遵守);iOS 不读 manifest 的 display/orientation,靠 apple-* meta
+       进 standalone 并以 black-translucent 让状态栏融进画面(viewport-fit=cover
+       已开安全区)。start_url=/ 与 SW 资产链 scope 一致。 -->
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#0a0c10" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SandboxWorld" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
   <script>
     // 非 IP/localhost 的 http 访问强制跳 https（安全上下文:SW/剪贴板/指针锁等
     // 需 https;局域网 IP 与 localhost 直连无证书场景不跳）。置于最前,任何

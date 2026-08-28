@@ -79,12 +79,16 @@ export class SettingsPanel {
   private unsubLang: (() => void) | null = null;
 
   constructor(parent: HTMLElement, private flow: SettingsFlow) {
-    if (!document.getElementById('sw-set-style')) {
-      const style = document.createElement('style');
-      style.id = 'sw-set-style';
-      style.textContent = CSS;
-      document.head.appendChild(style);
+    // ★样式幂等守卫(2026-08-29 对齐菜单侧修法):原"getElementById 只建不更"在
+    // HMR/长驻页面下新断点 CSS 全部失效(半新半旧难排查的家族性坑)——
+    // 改为 id 守卫 + 每次 textContent 重刷
+    let styleEl = document.getElementById('sw-set-style') as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'sw-set-style';
+      document.head.appendChild(styleEl);
     }
+    styleEl.textContent = CSS;
     this.panel = document.createElement('div');
     this.panel.className = 'sw-set-panel';
     this.panel.innerHTML = `
@@ -114,6 +118,7 @@ export class SettingsPanel {
       case 'sound': return Lang.text('LegacyMenu.65'); // 音量
       case 'ui': return Lang.text('Mods.SandboxWorld.Settings.Interface');
       case 'game': return Lang.text('Mods.SandboxWorld.Settings.Gameplay');
+      case 'touch': return Lang.text('Mods.SandboxWorld.Settings.CatTouch');
       case 'controls': return Lang.menu(222);          // 按键绑定（UIManageControls）
       default: return cat;
     }
@@ -123,7 +128,7 @@ export class SettingsPanel {
     const cats = document.createElement('div');
     cats.className = 'sw-set-cats';
     // 资源包/数据栏已摘（2026-08-27 用户要求）——见文件头注
-    const list = ['sound', 'ui', 'game', 'controls'];
+    const list = ['sound', 'ui', 'game', 'touch', 'controls'];
     for (const c of list) {
       const div = document.createElement('div');
       div.dataset.cat = c;
@@ -586,6 +591,52 @@ export class SettingsPanel {
       scHint.className = 'sw-set-hint';
       scHint.textContent = Lang.text('Mods.SandboxWorld.Settings.SmartCursorHint');
       this.content.append(scHint);
+    } else if (this.cat === 'touch') {
+      // ---- 触控(mobile-adaptation-plan docs/mobile-adaptation-plan.md 模块⑤)----
+      // 仅触屏会话有实效;桌面显示但写入无消费方(coarse 总闸隔离纪律)
+      const d2 = options.data;
+      const HUD_MODES = ['auto', 't1', 't2', 't3'] as const;
+      this.content.append(
+        // 摇杆:浮动(官方手游)/固定底盘 二档
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.TouchJoystickFloat'),
+          () => '',
+          () => Lang.text(d2.touchJoystickFloat
+            ? 'Mods.SandboxWorld.Settings.On'
+            : 'Mods.SandboxWorld.Settings.Off'),
+          () => { void options.set('touchJoystickFloat', !d2.touchJoystickFloat); },
+        ),
+        // 按钮透明度/尺寸(--mbtn-alpha/--mbtn-scale,MobileControls onChange 订阅直灌)
+        this.slider(Lang.text('Mods.SandboxWorld.Settings.TouchBtnAlpha'), 0.35, 1, 0.05,
+          () => d2.touchButtonAlpha, (v) => void options.set('touchButtonAlpha', v)),
+        this.slider(Lang.text('Mods.SandboxWorld.Settings.TouchBtnSize'), 0.8, 1.3, 0.05,
+          () => d2.touchButtonSize, (v) => void options.set('touchButtonSize', v)),
+        // 长按时长(tooltip 预览/槽位拿起共用;世界触摸右键交互维持原版 400ms)
+        this.slider(Lang.text('Mods.SandboxWorld.Settings.TouchLongPress'), 200, 700, 50,
+          () => d2.touchLongPressMs, (v) => void options.set('touchLongPressMs', Math.round(v))),
+        // 智能光标触屏初值(仅 toggle 模式生效——Hold 模式语义归电平面)
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.TouchScDefault'),
+          () => '',
+          () => Lang.text(d2.touchSmartCursorDefault
+            ? 'Mods.SandboxWorld.Settings.On'
+            : 'Mods.SandboxWorld.Settings.Off'),
+          () => { void options.set('touchSmartCursorDefault', !d2.touchSmartCursorDefault); },
+        ),
+        // HUD 缩放档(auto=视口判定 D0/T1/T2/T3)+微调(离散档上的乘法带)
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.HudScaleMode'),
+          () => '',
+          () => Lang.text(`Mods.SandboxWorld.Settings.HudTier_${d2.hudScaleMode}`),
+          () => {
+            const i = HUD_MODES.indexOf(d2.hudScaleMode);
+            void options.set('hudScaleMode', HUD_MODES[(i + 1) % HUD_MODES.length]);
+            window.dispatchEvent(new Event('resize'));   // 手动钉档即时生效
+          },
+        ),
+        this.slider(Lang.text('Mods.SandboxWorld.Settings.HudScaleFactor'), 0.85, 1.15, 0.05,
+          () => d2.hudScaleFactor, (v) => { void options.set('hudScaleFactor', v); window.dispatchEvent(new Event('resize')); }),
+      );
     } else if (this.cat === 'controls') {
       // ---- 键位重映射（M5：UIKeybindingListItem 模式——点击监听下一键；
       //      已绑定键反选解绑；Esc 取消；↺ 单项回默认）----

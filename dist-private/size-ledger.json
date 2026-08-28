@@ -1,19 +1,19 @@
 {
- "at": "2026-08-28T10:41:27.494Z",
+ "at": "2026-08-28T11:31:02.940Z",
  "release": true,
- "totalJsMb": 15.85,
+ "totalJsMb": 15.86,
  "chunks": [
   {
-   "file": "assets/index-bd0vX5jP.js",
-   "kb": 9554.1
+   "file": "assets/index-DbzgtRGO.js",
+   "kb": 9560.4
   },
   {
-   "file": "assets/worldGen.worker-C9bw4zU_.js",
-   "kb": 4240.6
+   "file": "assets/worldGen.worker-COnknaKC.js",
+   "kb": 4242.9
   },
   {
    "file": "assets/save.worker-gqQbzpUO.js",
-   "kb": 2390.3
+   "kb": 2390.6
   },
   {
    "file": "sw.js",
@@ -21,15 +21,15 @@
   },
   {
    "file": "assets/asset-warm.worker-CazYtB30.js",
-   "kb": 9.3
+   "kb": 9.2
   },
   {
-   "file": "assets/RemasterPanel-D5n1W8R5.js",
-   "kb": 8.2
+   "file": "assets/RemasterPanel-iErIXZ-y.js",
+   "kb": 8.3
   },
   {
-   "file": "assets/HousingPanel-BU6bBCQQ.js",
-   "kb": 7.4
+   "file": "assets/HousingPanel-Dk700BTf.js",
+   "kb": 7.6
   }
  ]
 }

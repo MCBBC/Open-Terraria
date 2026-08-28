@@ -95,7 +95,12 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 // 全量 tileFrameImportant（Main.cs 404 赋值 + AddEchoFurnitureTile 家族 + 循环 435-439 = 411；
 // 与 FRAMED_NOT_CUT 不同：不扣 tileCut——GenerateDungeonStairs_CanPlaceTile 判定用全表，
 // sheet 空间勿混入内部 id，比较走 TILE_DEFS[t]?.vanilla?.sheet）
-const DG_FRAMED_ALL = new Set<number>([
+/** tileFrameImportant 全表（Main.cs 赋值全集，sheet 空间）。★★IIII28 批改为导出：
+ *  NotTheBeesPass.placeLarva 的 PlaceTile 头 ResetsHalfBrickPlacementAttempt 支
+ *  （cs:60241-60246）需要 `!Main.tileFrameImportant[tile.type]` 精确判定——
+ *  曾硬编码 false 致 mile8 ntb #105 大面积回归（A=3716/T=7606：幼虫尝试域把
+ *  225/231 等 FI 型的帧清零），改接本表后与 vanilla 逐格同效。 */
+export const DG_FRAMED_ALL = new Set<number>([
   3, 4, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 24, 26, 27, 28, 29, 31, 33, 34, 35,
   36, 42, 49, 50, 55, 61, 71, 72, 73, 74, 77, 78, 79, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91,
   92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 110, 113, 114, 125, 126, 128, 129, 132, 133,

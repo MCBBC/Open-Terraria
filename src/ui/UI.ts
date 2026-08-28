@@ -122,6 +122,8 @@ import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { activeVariantOfVid, variantRareOfVid, VARIANT_L10N_KEY } from '../data/vanillaItemVariants';
 import { assembleTooltipLines } from './itemTooltip';
+import { hudTier, safeInsets } from './HudScale';
+import { bindHint } from './bindHint';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
@@ -191,7 +193,9 @@ function internalIdOfVid(vid: number): number {
   return k !== undefined ? (ITEM_BY_KEY[k] ?? -1) : -1;
 }
 
-function iconUrl(game: Game, id: number): string {
+/** 物品图标 dataURL(32×32;模块内多处槽位/钮面共用)。2026-08-29 起导出供
+ *  MobileControls 官方手游形态的"使用"钮实时上当前物品(icons 在 ui 域内闭环) */
+export function iconUrl(game: Game, id: number): string {
   let url = iconCache.get(id);
   if (!url) {
     // 优先原版素材图标（合成 32×32 dataURL）
@@ -332,6 +336,13 @@ const CSS = `
 .sw-hotbar .sw-slot:hover { filter:none; }
 .sw-hotbar .sw-slot .sw-slot-num { position:absolute; left:5px; top:2px; font-size:11px; font-weight:bold;
   color:#fff; text-shadow:1px 1px 0 #000; pointer-events:none; }
+/* 手机紧凑档(mobile-adaptation-plan P0):视觉≈41px 格 → 伪元素扩边补触控热区
+ * 到 ≥44pt(只扩命中不扩视觉);D0 无 compact class=无此伪元素,桌面零新增 */
+.sw-hotbar.compact .sw-slot::after { content:''; position:absolute; inset:-6px; }
+/* 槽位防触摸手势干扰:压掉浏览器滚动/双击缩放保留 tap 合成链(拖放依赖)。
+ * ★只设 touch-action 不 preventDefault —— 浏览器合成 mousedown/mousemove/mouseup
+ * 序列完整保留,触屏拖放与桌面同语义(2026-08-29 探针实证前提) */
+.sw-slot { touch-action:none; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
 .sw-hotbar-name { position:fixed; left:236px; top:0; transform:translateX(-50%); white-space:nowrap;
   font-size:15px; color:#fff; text-shadow:2px 2px 0 #000; pointer-events:none;
   animation:sw-name-pulse 2s ease-in-out infinite alternate; }
@@ -1186,7 +1197,9 @@ export class UI {
       }
       this.dragFrom = { i, where, sx: e.clientX, sy: e.clientY };
     });
-    s.addEventListener('mouseenter', () => this.showTooltipFor(i, where));
+    // hover 型信息通道统一走 bindHint:fine 指针=原 mouseenter(行为不变);
+    // coarse 指针=touchLongPressMs 长按显示(mobile-adaptation-plan 模块④)
+    bindHint(s, () => this.showSlotHintTouch(i, where));
     s.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
     s.addEventListener('contextmenu', (e) => e.preventDefault());
     return s;
@@ -3947,33 +3960,86 @@ export class UI {
 
   // ============ 刷新 ============
 
+  /** 手机紧凑快捷栏布局帧(mobile-adaptation-plan 模块③;D0/T1=null=原版几何):
+   *  cols=每格行数排列(T3 两行五列 / T2 单行十格);q=统一格 scale——紧凑档取消
+   *  选中尺寸跳变(C 方案定案,选中态由 Back14/20 贴图+亮度区分),步进均匀。 */
+  private hotbarCompact(): { cols: number; q: number } | null {
+    const t = hudTier();
+    if (t === 't3') return { cols: 5, q: 0.78 };     // 竖屏两行五列,视觉≈41px 格
+    if (t === 't2') return { cols: 10, q: 0.85 };    // 横屏平排≈44px
+    return null;
+  }
+
   refreshHotbar() {
     if (!this.game) return;
     const inv = this.game.player.inv;
     // 原版布局（Main.cs:43017-43060）：x 从 20 起步进 ⌊52×scale⌋+4；
     // y = 20 + 22×(1-scale)（选中 20，未选中 25→CSS 视觉再随 scale 收缩）；
     // 未选中 alpha = 200×187/255 ≈ 147（Back20 半透明），选中 255（Back14）
-    let x = 20;
-    for (let i = 0; i < 10; i++) {
-      const slotEl = this.slotEl(i, 'inv');
-      if (!slotEl) continue;
-      const sel = i === inv.selected;
-      const scale = sel ? 1 : 0.75;
-      this.paintSlot(slotEl, inv.slots[i]);
-      slotEl.style.left = `${x}px`;
-      slotEl.style.top = `${Math.trunc(20 + 22 * (1 - scale))}px`;
-      slotEl.style.width = slotEl.style.height = '52px';
-      slotEl.style.transform = `scale(${scale})`;
-      slotEl.style.transformOrigin = 'top left';
-      slotEl.style.opacity = sel ? '1' : '0.575';
-      slotEl.style.backgroundImage = `url(sprites/vanilla/Inventory_Back${sel ? 14 : 20}.png)`;
-      slotEl.style.boxShadow = ''; // 原版快捷栏不画收藏高亮（ItemSlot :1987 context!=13）
-      if (!slotEl.querySelector('.sw-slot-num')) {
-        const num = el('span', 'sw-slot-num', i === 9 ? '0' : String(i + 1));
-        slotEl.appendChild(num);
+    //
+    // 手机紧凑档(mobile-adaptation-plan P0):几何单一来源=本函数的 hotbarCompact()
+    // 帧,safe-area 由 HudScale.safeInsets 并入格子 inline 坐标(positionInvPanel 扫
+    // inline left/top=屏幕坐标的既有语义零适配)。D0 分支逐值还原原版公式。
+    const compact = this.hotbarCompact();
+    // 紧凑档挂 class(触控热区扩边 CSS 钩子;D0 移除=无伪元素,桌面 DOM 零新增)
+    this.hotbarEl?.classList.toggle('compact', !!compact);
+    if (compact) {
+      const step = Math.floor(52 * compact.q) + 4;   // 屏幕像素步进(选中差取消→恒定)
+      const rowH = Math.floor(52 * compact.q) + 12;
+      const ox = safeInsets.left + 6;
+      const oy = safeInsets.top + 8;
+      for (let i = 0; i < 10; i++) {
+        const slotEl = this.slotEl(i, 'inv');
+        if (!slotEl) continue;
+        const col = i % compact.cols, row = (i / compact.cols) | 0;
+        this.paintSlot(slotEl, inv.slots[i]);
+        slotEl.style.left = `${ox + col * step}px`;
+        slotEl.style.top = `${oy + row * rowH}px`;
+        slotEl.style.width = slotEl.style.height = '52px';
+        slotEl.style.transform = `scale(${compact.q})`;
+        slotEl.style.transformOrigin = 'top left';
+        slotEl.style.opacity = i === inv.selected ? '1' : '0.62';
+        slotEl.style.backgroundImage = `url(sprites/vanilla/Inventory_Back${i === inv.selected ? 14 : 20}.png)`;
+        slotEl.style.boxShadow = '';
+        if (!slotEl.querySelector('.sw-slot-num')) {
+          const num = el('span', 'sw-slot-num', i === 9 ? '0' : String(i + 1));
+          slotEl.appendChild(num);
+        }
       }
-      x += Math.floor(52 * scale) + 4;
+      const rows = Math.ceil(10 / compact.cols);
+      // 选中名:行尾下方居中(T3 两行/T2 单行各自锚点)
+      this.hotbarNameEl.style.left = `${Math.round(ox + (compact.cols * step - step + 44) / 2)}px`;
+      this.hotbarNameEl.style.top = `${oy + rows * rowH + 2}px`;
+      this.hotbarNameEl.style.fontSize = '11px';
+    } else {
+      let x = 20;
+      for (let i = 0; i < 10; i++) {
+        const slotEl = this.slotEl(i, 'inv');
+        if (!slotEl) continue;
+        const sel = i === inv.selected;
+        const scale = sel ? 1 : 0.75;
+        this.paintSlot(slotEl, inv.slots[i]);
+        slotEl.style.left = `${x}px`;
+        slotEl.style.top = `${Math.trunc(20 + 22 * (1 - scale))}px`;
+        slotEl.style.width = slotEl.style.height = '52px';
+        slotEl.style.transform = `scale(${scale})`;
+        slotEl.style.transformOrigin = 'top left';
+        slotEl.style.opacity = sel ? '1' : '0.575';
+        slotEl.style.backgroundImage = `url(sprites/vanilla/Inventory_Back${sel ? 14 : 20}.png)`;
+        slotEl.style.boxShadow = ''; // 原版快捷栏不画收藏高亮（ItemSlot :1987 context!=13）
+        if (!slotEl.querySelector('.sw-slot-num')) {
+          const num = el('span', 'sw-slot-num', i === 9 ? '0' : String(i + 1));
+          slotEl.appendChild(num);
+        }
+        x += Math.floor(52 * scale) + 4;
+      }
+      // D0 显式回写防手机会话残留(hotbarName CSS 锚 left236/top0 同值)
+      this.hotbarNameEl.style.left = '236px';
+      this.hotbarNameEl.style.top = '0px';
+      this.hotbarNameEl.style.fontSize = '';
     }
+    // 说明按钮:紧凑档让位(467px 定位压 T2 行尾/T3 名区;桌面原位)
+    if (this.manualBtn) this.manualBtn.style.display = compact ? 'none' : '';
     // 选中物品名（:43003-43009：居中 x=236、mouseTextColor 脉动；空手回退 inter[37]）。
     // 走 itemNameByKey 全链（vi_ key 前缀→官方 l10n→id-maps 兜底→place_v_ 方块名→
     // Mods 自有键→def.name）：vi_ def 的 vid 字段不落、name 恒 ''（items.ts 自动注册
@@ -3981,6 +4047,16 @@ export class UI {
     const held = inv.slots[inv.selected];
     const name = held ? Lang.itemNameByKey(ITEM_DEFS[held.id]?.key ?? '') : null;
     this.hotbarNameEl.textContent = name || Lang.inter(37);
+  }
+
+  /** 触屏长按槽位 tooltip(mobile-adaptation-plan 模块④):显示后挂一次性
+   *  document 触摸关闭(桌面 mouseleave 已有;触屏无 leave 语义) */
+  private showSlotHintTouch(i: number, where: string): void {
+    this.showTooltipFor(i, where as never);
+    document.addEventListener('touchstart', () => {
+      this.tooltip.style.display = 'none';
+      cancelAnimationFrame(this.tooltipPulseRaf);
+    }, { once: true, capture: true });
   }
 
   private paintSlot(slotEl: HTMLElement, content: { id: number; stack: number; favorited?: boolean; prefix?: number } | null) {

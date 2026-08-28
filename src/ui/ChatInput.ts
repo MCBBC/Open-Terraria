@@ -5,6 +5,7 @@
 // 原版无聊天历史);点击面板外(blur)关闭。
 // ★ Input.keydown 对 INPUT 元素打字自动豁免游戏键位——输入期不触发跳跃等。
 import { Lang } from '../i18n/Lang';
+import { isTouchDevice } from '../core/input/touchDevice';
 
 export interface ChatInputOpts {
   /** 发送（text 非空;world=true 世界频道） */
@@ -37,21 +38,29 @@ export class ChatInput {
   /** 窗口捕获键监听（开着期间挂在 window capture——不依赖输入框焦点,
    *  消灭焦点目标类玄学;close 时摘除） */
   private winKey: ((e: KeyboardEvent) => void) | null = null;
+  /** 软键盘遮挡补偿监听(touch 会话 open 时挂 visualViewport;close 时摘除) */
+  private onVvShift: (() => void) | null = null;
 
   open() {
     if (this.root) { this.input?.focus(); return; }
     if (Date.now() < this.suppressOpenUntil) return;
+    // 触屏会话判定(单一来源):移动端输入框走"≥16px 字号+软键盘补偿"档,
+    // 桌面 CSS 面逐字节不变
+    const touch = isTouchDevice();
     const root = document.createElement('div');
     root.className = 'sw-chatbox';   // Input mousedown 不穿透门（body 直挂件不在 .sw-root 内）
-    root.style.cssText = 'position:fixed;left:12px;bottom:64px;z-index:60;display:flex;gap:6px;align-items:center;'
+    root.style.cssText = `position:fixed;left:12px;bottom:${touch ? '8px' : '64px'};z-index:60;display:flex;gap:6px;align-items:center;`
       + 'background:rgba(20,24,38,0.82);border:1px solid rgba(255,220,120,0.35);border-radius:4px;padding:4px 8px;'
-      + 'font:13px ui-monospace,monospace;color:#e8e4d8;';
+      + 'font:13px ui-monospace,monospace;color:#e8e4d8;'
+      + (touch ? 'max-width:calc(100vw - 24px);' : '');
     const tag = document.createElement('span');
     tag.style.cssText = 'color:#ffd76e;white-space:nowrap;';
     const input = document.createElement('input');
     input.type = 'text';
     input.maxLength = 200;   // 服务器 200 字符上限（room.ts Text case 同值）
-    input.style.cssText = 'background:transparent;border:none;outline:none;color:#fff;width:340px;font:inherit;';
+    input.style.cssText = 'background:transparent;border:none;outline:none;color:#fff;'
+      // iOS 聚焦自动放大禁令:输入元素 font-size 必须 ≥16px(touch 会话硬约束)
+      + (touch ? 'flex:1;width:auto;min-width:160px;font-size:16px;' : 'width:340px;font:inherit;');
     root.appendChild(tag);
     root.appendChild(input);
     document.body.appendChild(root);
@@ -60,6 +69,18 @@ export class ChatInput {
     this.tag = tag;
     this.refreshTag();
     input.focus();
+    // 软键盘遮挡补偿(mobile-adaptation-plan 模块④):iOS 聚焦压缩 visualViewport,
+    // 把输入条抬到可视区底缘;桌面/无键盘环境 vv.height≈innerHeight=零位移
+    if (touch && window.visualViewport) {
+      const vv = window.visualViewport;
+      this.onVvShift = () => {
+        if (!this.root) return;
+        const kbH = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+        this.root.style.bottom = `${8 + kbH}px`;
+      };
+      vv.addEventListener('resize', this.onVvShift);
+      vv.addEventListener('scroll', this.onVvShift);
+    }
     this.winKey = (e: KeyboardEvent) => {
       if (e.code === 'Enter' && !e.isComposing) {
         e.preventDefault();
@@ -124,6 +145,12 @@ export class ChatInput {
     if (!this.root) return;
     if (byKey) this.suppressOpenUntil = Date.now() + 300;
     if (this.winKey) { window.removeEventListener('keydown', this.winKey, true); this.winKey = null; }
+    // 软键盘补偿监听摘除(open 时 touch 会话挂入)
+    if (this.onVvShift && window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', this.onVvShift);
+      window.visualViewport.removeEventListener('scroll', this.onVvShift);
+      this.onVvShift = null;
+    }
     this.root.remove();
     this.root = null;
     this.input = null;

@@ -13,3 +13,9 @@
   Cache-Control: public, max-age=31536000, immutable
 /assets-zip/manifest.json
   Cache-Control: no-cache
+# PWA 入口清单与主屏图标:manifest 可变文件走 no-cache;图标脚本可再生、
+# 文件名无 hash,一周短缓存平衡新鲜度与请求量(CF 同名 header 合并坑见上)
+/manifest.json
+  Cache-Control: no-cache
+/icons/*
+  Cache-Control: public, max-age=604800

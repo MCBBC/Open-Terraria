@@ -154,6 +154,29 @@ export interface OptionsData {
   manualSeen: boolean;
   /** 永久隐藏说明书（勾选"不再显示"后落真）——按钮整体不建;设置页可重开 */
   manualHidden: boolean;
+  // ---- 触屏/移动端操控(mobile-adaptation-plan docs/mobile-adaptation-plan.md 模块⑤;
+  //      ★隔离纪律:coarse=false 的桌面会话全部不消费——写入面只有 MobileControls/
+  //      HudScale 的触屏分支) ----
+  /** 触屏摇杆浮动模式(true=左半屏下半热区任意触点即盘心[官方手游习惯];
+   *  false=固定底盘+外扩 40px 受理)。消费:MobileControls 摇杆起手判定 */
+  touchJoystickFloat: boolean;
+  /** 触控按钮透明度 [0.35,1]（CSS 变量 --mbtn-alpha;默认 0.82） */
+  touchButtonAlpha: number;
+  /** 触控按钮尺寸倍率 [0.8,1.3]（--mbtn-scale;默认 1）——操控层不吃 mobileUiScale,
+   *  独立因子才保得住 ≥44pt 最小触达红线 */
+  touchButtonSize: number;
+  /** 触屏长按时长 ms [200,700]（tooltip 长按预览与槽位拿起共用;Input 世界触摸的
+   *  右键交互长按维持 400ms 原语义,P0 末统一接参） */
+  touchLongPressMs: number;
+  /** 智能光标触屏初值（用户定案 2026-08-28=开启）:isTouchDevice 会话进世界时
+   *  赋给 smartCursor.wanted 初值;桌面路径恒 false 不消费。Settings 可改 */
+  touchSmartCursorDefault: boolean;
+  /** HUD 缩放档:'auto'=按视口判定 D0/T1(iPad)/T2(横屏)/T3(竖屏);t1-t3=手动钉档。
+   *  消费:HudScale.ts→data-huds/--huds 与 mobileUiScale() 档位读数 */
+  hudScaleMode: 'auto' | 't1' | 't2' | 't3';
+  /** HUD 缩放微调 [0.85,1.15]:离散档之上的乘法微调(不做连续缩放——小屏连续值
+   *  会露出面板悬空缝隙类缺陷,离散步进可控) */
+  hudScaleFactor: number;
 }
 
 const KEY = 'sandboxworld.options';
@@ -206,6 +229,14 @@ export class OptionsStore {
     settingsVersion: 325,                   // LastLaunchedVersion（M57:4241）
     manualSeen: false,                      // 说明书未读=红点气泡闪烁
     manualHidden: false,                    // 说明书按钮显示中
+    // 触屏组(mobile-adaptation-plan 模块⑤;SC 默认开=2026-08-28 用户定案)
+    touchJoystickFloat: false,              // 固定罗盘摇杆=2026-08-29 官方截图定案;浮动转可选档
+    touchButtonAlpha: 0.82,
+    touchButtonSize: 1,
+    touchLongPressMs: 380,                  // tooltip/拿起共用(World 触摸右键恒 400)
+    touchSmartCursorDefault: true,          // SC 触屏默认开(用户定案)
+    hudScaleMode: 'auto',
+    hudScaleFactor: 1,
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];
@@ -213,6 +244,14 @@ export class OptionsStore {
   onChange(fn: (d: OptionsData) => void) {
     this.listeners.push(fn);
     if (this.loaded) fn(this.data);
+  }
+
+  /** 退订(2026-08-29 mobile-adaptation-plan:P0 前 UI 单例长存无退订点;
+   *  MobileControls 每世界销毁重建,不退订则旧闭包逐世界累积)。返回退订是否命中 */
+  removeListener(fn: (d: OptionsData) => void): boolean {
+    const i = this.listeners.indexOf(fn);
+    if (i >= 0) { this.listeners.splice(i, 1); return true; }
+    return false;
   }
 
   async load() {
@@ -293,6 +332,24 @@ export class OptionsStore {
       if (this.data.quickStackMode !== 'quick' && this.data.quickStackMode !== 'smart') {
         this.data.quickStackMode = 'quick';
       }
+      // ---- 触屏字段卫门(mobile-adaptation-plan 模块⑤;坏值回默认防 NaN 入渲染链) ----
+      if (typeof this.data.touchButtonAlpha !== 'number'
+        || !Number.isFinite(this.data.touchButtonAlpha)) this.data.touchButtonAlpha = 0.82;
+      this.data.touchButtonAlpha = Math.min(1, Math.max(0.35, this.data.touchButtonAlpha));
+      if (typeof this.data.touchButtonSize !== 'number'
+        || !Number.isFinite(this.data.touchButtonSize)) this.data.touchButtonSize = 1;
+      this.data.touchButtonSize = Math.min(1.3, Math.max(0.8, this.data.touchButtonSize));
+      if (typeof this.data.touchLongPressMs !== 'number'
+        || !Number.isFinite(this.data.touchLongPressMs)) this.data.touchLongPressMs = 380;
+      this.data.touchLongPressMs = Math.min(700, Math.max(200, Math.round(this.data.touchLongPressMs)));
+      if (typeof this.data.touchJoystickFloat !== 'boolean') this.data.touchJoystickFloat = true;
+      if (typeof this.data.touchSmartCursorDefault !== 'boolean') this.data.touchSmartCursorDefault = true;
+      if (!(['auto', 't1', 't2', 't3'] as const).includes(this.data.hudScaleMode)) {
+        this.data.hudScaleMode = 'auto';
+      }
+      if (typeof this.data.hudScaleFactor !== 'number'
+        || !Number.isFinite(this.data.hudScaleFactor)) this.data.hudScaleFactor = 1;
+      this.data.hudScaleFactor = Math.min(1.15, Math.max(0.85, this.data.hudScaleFactor));
     } catch { /* 无存档用默认 */ }
     this.emit();
   }

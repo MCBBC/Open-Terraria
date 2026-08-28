@@ -193,6 +193,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (isTouchDevice()) {
       mobile?.destroy();
       mobile = new MobileControls(g, ui.root);
+      // 智能光标触屏默认开(2026-08-28 用户定案,touchSmartCursorDefault):toggle
+      // 模式下直接置初值——wanted 仅被按下沿翻转,无电平时维持(桌面恒 false 不进);
+      // Hold 模式的按住语义由 tick 电平面接管,不灌初值
+      if (options.data.touchSmartCursorDefault && options.data.smartCursorMode === 'toggle') {
+        g.smartCursor.wanted = true;
+      }
       void tryFullscreenLandscape();
     }
     // HMR 双实例检测（F5 调试报告 instance 段）：每次挂载计数 +1，>1 即模块分叉
