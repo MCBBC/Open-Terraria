@@ -181,6 +181,10 @@ export class World {
    *  ——各端按世界种子确定性重算（src/world/spawn/ExtraSpawnsRoyale.ts R1 同种子重放
    *  范式），ensureExtraSpawnPoints 幂等填本字段；非 teamBasedSpawns 世界恒 undefined */
   extraSpawnPoints?: Array<{ x: number; y: number }>;
+  /** ★IIIII22b：点表来源标记（与 extraSpawnPoints 同序）：'found'=TryFind 搜索命中，
+   *  'fallback'=500 外层×250 内层预算耗尽后的百分位 fallback（vanilla cs:199 同态——
+   *  fallback 不受 ≥250 分离门约束，合法可与他点相邻近；测试据此放宽哨兵） */
+  extraSpawnMeta?: Array<'found' | 'fallback'>;
   groundLevel = 0; rockLevel = 0;   // tile 坐标
   /** 地狱顶（原版 UnderworldLayer = maxTilesY-200；TerrainPass 设定，SceneMetrics/BGM/背景共用） */
   lavaLine = 0;

@@ -217,7 +217,7 @@ const full = await page.evaluate(async () => {
   const npc = new TownNPC('party_girl', g.player.x + 100, g.player.y - 40);
   g.entities.add(npc, 'npcs');
   g.openNpcDialog(npc);                       // dialogNpc = 派对女孩(买链查货架用)
-  const stone = IK['stone_block'], ball = IK[VIK[859]];
+  const stone = IK[VIK[3]], ball = IK[VIK[859]];
   for (let i = 0; i <= 49; i++) g.player.inv.slots[i] = { id: stone, stack: 999 };
   g.player.inv.slots[50] = { id: IK[VIK[73]], stack: 20 };    // 20 金币
   const coins0 = g.coinsOwned();
@@ -437,6 +437,68 @@ check('同型去重=新猪顶旧猪(单实例)', bank.dedupOk === true);
 check('智能光标选圈态(命中2/射程1/关0)',
   bank.selHover === 2 && bank.selAway === 1 && bank.selOff === 0,
   `hover=${bank.selHover} away=${bank.selAway} off=${bank.selOff}`);
+
+// ---- ⑦ 全部放入 1:1（ChestUI.DepositAll :536 + MoveCoins :998-1203）：
+//      钱币先迁按面额归并（100 小币=1 大币）；非钱币同入（原版无币种过滤）；
+//      热键栏 0-9 不动；收藏跳过；余量入首个空格 ----
+const depo = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const ui = window.__swUI;
+  const VIK = window.__swVANILLA_ITEM_KEY_BY_ID, IK = window.__swItems;
+  const { FlyingPiggyBank } = await import('/src/entities/FlyingPiggyBank.ts');
+  for (let i = 0; i < g.player.inv.slots.length; i++) g.player.inv.slots[i] = null;
+  for (const b of g.player.banks) b.fill(null);
+  if (g.player.dead) g.respawnPlayer?.();
+  g.player.hp = 99999;
+  // 掷猪+右键开面板
+  g.player.inv.slots[0] = { id: IK[VIK[3213]], stack: 1 };
+  g.cb.onInventoryChanged?.();
+  g.input.mouseX = 640; g.input.mouseY = 400;
+  g.input.mouseDown = true; g.input.mouseHeld = true;
+  g.fixedUpdate(1 / 60);
+  g.input.mouseDown = false; g.input.mouseHeld = false;
+  let pig = g.entities.projectiles.find((e) => e instanceof FlyingPiggyBank && !e.dead);
+  for (let i = 0; i < 120 && pig && pig.phase === 0; i++) g.fixedUpdate(1 / 60);
+  for (let t = 0; t < 3; t++) {
+    const [sx, sy] = g.camera.worldToScreen(pig.cx, pig.cy);
+    g.input.mouseX = sx; g.input.mouseY = sy;
+    g.input.rightDown = true;
+    g.fixedUpdate(1 / 60);
+    g.input.rightDown = false;
+    if (ui.openChest?.x === -2) break;
+  }
+  const panelOk = ui.openChest?.x === -2 && ui.openChest.items === g.player.banks[0];
+  // 布景
+  g.player.inv.slots[0] = { id: IK[VIK[3]], stack: 1 };    // 热键:不动（石块）
+  g.player.inv.slots[5] = { id: IK[VIK[3]], stack: 2 };    // 热键:不动
+  g.player.inv.slots[10] = { id: IK[VIK[71]], stack: 250 };       // 250 铜 → 迁入归并
+  g.player.inv.slots[11] = { id: IK[VIK[8]], stack: 5 };          // 非钱币 → 同入
+  const fav = { id: IK[VIK[3]], stack: 3, favorited: true };      // 收藏 → 跳过
+  g.player.inv.slots[12] = fav;                                   // 收藏 → 跳过
+  g.player.banks[0][0] = { id: IK[VIK[73]], stack: 1 };           // 银行:1 金
+  g.player.banks[0][1] = { id: IK[VIK[72]], stack: 1 };           // 银行:1 银
+  ui.refreshAll();
+  ui.chestDepositAll?.();
+  const b = g.player.banks[0];
+  const at = (i, id, stack) => !!b[i] && b[i].id === IK[VIK[id]] && b[i].stack === stack;
+  const dump = b.map((cs, i) => cs ? `${i}:${cs.id}x${cs.stack}` : null).filter(Boolean);
+  const pdump = g.player.inv.slots.map((cs, i) => cs ? `${i}:${cs.id}x${cs.stack}${cs.favorited ? 'F' : ''}` : null).filter(Boolean);
+  return {
+    dump, pdump,
+    panelOk,
+    gold1: at(0, 73, 1), silver3: at(1, 72, 3), copper50: at(2, 71, 50),
+    torchIn: !!b[3] && b[3].id === IK[VIK[8]] && b[3].stack === 5,
+    hotbarKept: g.player.inv.slots[0]?.stack === 1 && g.player.inv.slots[5]?.stack === 2,
+    playerCopperGone: !g.player.inv.slots[10],
+    torchGone: !g.player.inv.slots[11],
+    favKept: g.player.inv.slots[12]?.stack === 3,
+  };
+});
+check('全部放入:面板经飞猪打开', depo.panelOk === true, JSON.stringify(depo));
+check('钱币归并:250铜中200进位成2银入猪猪 → 1金3银50铜终态', depo.gold1 && depo.silver3 && depo.copper50, JSON.stringify(depo));
+check('非钱币(火把)同入猪猪(原版无币种过滤)', depo.torchIn === true);
+check('热键栏 0-9 不动/收藏跳过', depo.hotbarKept === true && depo.favKept === true);
+check('玩家无铜残留(全部入猪猪,总额守恒)', depo.playerCopperGone === true && depo.torchGone === true);
 
 console.log(`\n${pass} pass / ${fail} fail`);
 await browser.close();

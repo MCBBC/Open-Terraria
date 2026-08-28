@@ -153,15 +153,31 @@ export class Inventory {
   loadouts: Array<{ armor: Array<InvItem | null>; dye: Array<InvItem | null>; hide: boolean[] }>;
   /** 当前 Loadout 序号（0-2） */
   currentLoadout = 0;
-  /** 恶魔之心 3335(Player.cs:44575-44583)解锁第六配饰槽(armor[8];基座 5=3-7) */
+  /** 恶魔之心 3335(Player.cs:44575-44583 ItemCheck_UseDemonHeart)解锁第六配饰槽
+   *  (armor[8];基座 5=3-7)。世界难度旗仍存——经典世界旗在但格不生效(cs:18402) */
   extraAccessory = false;
-  /** 功能配饰槽上界(不含):基座 5,恶魔之心 6(UpdateEquipAccessories 语义)。
-   *  ★偏差备案(2026-08-22 补 C 审计 3335 批):原版第 6 槽有世界难度门——
-   *  UpdateAccessories :18139-18145 `extraAccessory && (Main.expertMode ||
-   *  Main.gameMenu) → extraAccessorySlots=1,否则 0`(经典世界不生效,旗标仍存)。
-   *  本仓不设门:玩家档与世界档同槽共存亡(quicksave 单键/WldImport 重置玩家
-   *  WldImport.ts:616),extraAccessory=true 不可能跨难度世界携带,门结构不可达 */
-  get accSlotMax(): number { return ACC_ARMOR_START + 5 + (this.extraAccessory ? 1 : 0); }
+  /** 世界难度门镜像（Game 每帧回写自 world.isExpert/isMaster——旅程滑杆改档即时生效） */
+  gateExpert = false;
+  gateMaster = false;
+  /** 功能配饰槽上界(不含)——★2026-08-28 翻案旧"不设门偏差备案"：门可达
+   *  （.sbw 世界导出/玩家跨世界携带),按原版 1:1 设门：
+   *  cs:18402-18409 `extraAccessory && (expertMode||gameMenu) → extraAccessorySlots=1`
+   *  + cs:IsItemSlotUnlockedAndUsable(9) 大师世界原生第 7 格(9 号槽,无需道具) */
+  get accSlotMax(): number {
+    return ACC_ARMOR_START + 5
+      + ((this.extraAccessory && (this.gateExpert || this.gateMaster)) ? 1 : 0)
+      + (this.gateMaster ? 1 : 0);
+  }
+  /** 绘制格数（Player.cs:4279 GetAmountOfExtraAccessorySlotsToShow：解锁【或】格内
+   *  有物即显示——经典世界带专家档存物也显示,只是不生效）。hasAt(slot,dyeSlot)=
+   *  格/染料格非空判定,由 UI 注入（读自身数组,避免 Inventory←UI 反向依赖） */
+  shownExtraCount(hasAt: (slot: number, dyeSlot: number) => boolean): number {
+    let n = 0;
+    const heartUsable = this.extraAccessory && (this.gateExpert || this.gateMaster);
+    if (heartUsable || hasAt(ACC_ARMOR_START + 5, 8)) n++;
+    if (this.gateMaster || hasAt(ACC_ARMOR_START + 6, 9)) n++;
+    return n;
+  }
   /** 垃圾桶持久槽（Player.trashItem :1380——关背包保留、死亡清空 :53394） */
   trash: InvItem | null = null;
   selected = 0; // 快捷栏选中格

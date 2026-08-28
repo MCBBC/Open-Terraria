@@ -505,6 +505,8 @@ export class UI {
    *  两会话撞字段合并：null=未持取（CountsAsStorage 判定的"非箱取"缺省档） */
   heldFrom: SlotWhere | null = null;
   openChest: ChestData | null = null;
+  /** 装备页追加槽引用（恶魔心 8 / 大师 9 及时装 18/19——refreshEquipExtras 显隐） */
+  private equipExtraSlots: { equip: HTMLElement[]; vanity: HTMLElement[] } | null = null;
   private toastTimer: number | null = null;
   /** 图鉴面板入口（背包按钮/暂停菜单注入；见 BestiaryPanel） */
   onBestiary?: () => void;
@@ -2134,6 +2136,21 @@ export class UI {
     this.game.input.uiBlocking = true;
   }
 
+  /** 装备页追加槽显隐（Player.cs:4279 Shown=解锁∨占格；效果门在 accSlotMax） */
+  private refreshEquipExtras(): void {
+    const inv = this.game?.player.inv;
+    const els = this.equipExtraSlots;
+    if (!inv || !els) return;
+    const hasAt = (slot: number, dyeSlot: number): boolean =>
+      !!inv.armor[slot] || !!inv.dye[dyeSlot];
+    const heartShown = (inv.extraAccessory && (inv.gateExpert || inv.gateMaster)) || hasAt(8, 8);
+    const masterShown = inv.gateMaster || hasAt(9, 9);
+    if (els.equip[0]) els.equip[0].style.display = heartShown ? '' : 'none';
+    if (els.equip[1]) els.equip[1].style.display = masterShown ? '' : 'none';
+    if (els.vanity[0]) els.vanity[0].style.display = heartShown ? '' : 'none';
+    if (els.vanity[1]) els.vanity[1].style.display = masterShown ? '' : 'none';
+  }
+
   closeInventory() {
     this.closeHousingPanel();
     this.invPanel.style.display = 'none';
@@ -2842,6 +2859,31 @@ export class UI {
     eqPage.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor')); // 时装 armor[10-12]+[13-17]
     const equipCol = vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor', true);   // 装备 armor[0-2]+[3-7]（防御计数器挂此列底;配饰段挂眼睛开关）
     eqPage.appendChild(equipCol);
+    // 恶魔之心(armor[8]/dye[8])+大师(dye[9] 无独立时装...armor[9]) 追加槽——
+    // 建面板即建、refreshEquipExtras 按解锁/占格显隐（Player.cs:4279 Shown 判定：
+    // 解锁【或】格内有物；经典世界专家旗存物也显示但不生效=cs:18402 效果门在
+    // Inventory.accSlotMax）。时装列 18/19 同步追加（无眼钮——眼只挂功能段 3-9）
+    const equipExtras: HTMLElement[] = [];
+    const vanityExtras: HTMLElement[] = [];
+    {
+      const equipWrap = equipCol.firstElementChild as HTMLElement | null;
+      const vanityCol = eqPage.children[1] as HTMLElement | null;
+      const vanityWrap = vanityCol?.firstElementChild as HTMLElement | null;
+      for (let k = 0; k < 2; k++) {
+        const es = this.makeSlotEl(8 + k, 'armor');
+        this.attachVisibilityEye(es, 8 + k);
+        if (k === 0) es.style.marginTop = '4px';
+        es.style.display = 'none';
+        equipWrap?.appendChild(es);
+        equipExtras.push(es);
+        const vs = this.makeSlotEl(18 + k, 'armor');
+        if (k === 0) vs.style.marginTop = '4px';
+        vs.style.display = 'none';
+        vanityWrap?.appendChild(vs);
+        vanityExtras.push(vs);
+      }
+      this.equipExtraSlots = { equip: equipExtras, vanity: vanityExtras };
+    }
     left.appendChild(eqPage);
     // 杂项（常驻右缘列，原杂项页 2026-08-27 并入）：miscEquips[5]（宠物/光源/矿车/
     // 坐骑/抓钩，context 19/20/18/17/16）+ miscDyes[5]（context 33）——挂 advRail
@@ -3542,7 +3584,7 @@ export class UI {
       btns.appendChild(b);
     };
     mkBtn(Lang.text('LegacyInterface.29'), () => this.chestLootAll());       // 全部取出
-    mkBtn(Lang.text('LegacyInterface.30'), () => this.chestDepositAll());    // 存入全部（仅箱内尚无的类型，跳钱币）
+    mkBtn(Lang.text('LegacyInterface.30'), () => this.chestDepositAll());    // 存入全部（MoveCoins 钱币归并 + 10-49 全物品,1:1）
     mkBtn(Lang.text('LegacyInterface.31'), () => this.chestQuickStack());    // 快速堆叠（只堆箱内已有类型）
     this.chestPanel.appendChild(btns);
     this.root.appendChild(this.chestPanel);
@@ -3564,22 +3606,134 @@ export class UI {
     this.refreshAll();
   }
 
-  /** Deposit All（ChestUI.DepositAll :531：背包→箱，仅放箱内尚不存在的类型；跳过钱币 71-74） */
+  /** Deposit All（ChestUI.DepositAll :536-…+MoveCoins :998-1203）1:1：
+   *  ① MoveCoins：容器内钱币全清按面额记账（原面额档随槽记 array2,槽入 list2 找零池,
+   *     空格同入 list2）→ 玩家全格钱币并入（j!=58,跳收藏,list=被清的原币格升序）→
+   *     进位（100 小币=1 大币 ×3 档）→ 容器槽按【原面额档】回填（钱币 maxStack=100
+   *     钳制;:35886-35910）→ 溢出面额沿原币格序回填（每槽一档取最大余档;:35911-35943）
+   *     → 普通空格收剩余（:35944-35970）→ 玩家剩余零钱回被清的原币格（:35972-35992,
+   *     有回填即 flag=false=不播 Grab,Main.cs:35993-35996）。
+   *  ② 通用搬移：背包 10-49 降序（不含热键栏 0-9,:35559）跳收藏——可堆叠先并已有堆
+   *     （CanStack=同型同词缀 Item.cs:49870-49877）余量入首个空格（:35779-35793）。
+   *  原版无“跳过已有类型”/“钱币排除”过滤（2026-08-28 用户问“非钱币放入正常吗”——
+   *  正常:猪猪存钱罐/保险箱=40 格通用容器,原版本就全物品放入）。 */
   private chestDepositAll(): void {
     const chest = this.openChest;
     if (!chest) return;
     const inv = this.game.player.inv;
-    for (let i = 0; i < 50; i++) { // 0-49 背包（钱币 50-53 不动）
-      const cur = inv.slots[i];
-      if (!cur || cur.favorited) continue;
-      if (coinIndexOf(cur.id) >= 0) continue; // 钱币不存箱（Coin 槽 50-53 归属）
-      if (chest.items.some((cs) => cs && cs.id === cur.id)) continue; // 箱内已有类型 → 跳过（走 QuickStack）
-      const empty = chest.items.findIndex((cs) => !cs);
-      if (empty < 0) break; // 箱满
-      chest.items[empty] = cur;
-      inv.slots[i] = null;
+    const items = chest.items;
+    const denom = (id: number) => coinIndexOf(id);            // 0 铜..3 铂（=原版 71+num-1 档）
+    const coinId = (d: number) => ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[71 + d]];
+    const coinMax = (d: number) => ITEM_DEFS[coinId(d)].maxStack ?? 100;
+    let anythingMoved = false;                                // 有实际搬移 → 收尾播 Grab
+    // ---- ① MoveCoins（:998-1203）----
+    const tally = [0, 0, 0, 0];                               // array[0铜..3铂]
+    const tier = new Array<number>(items.length).fill(-1);    // array2：槽原面额档/-1
+    const fillable: number[] = [];                            // list2：可收找零槽
+    const playerCoinSlots: number[] = [];                     // list：玩家被清的原币格（升序）
+    let coinNetOut = false;                                   // flag
+    for (let i = 0; i < items.length; i++) {
+      const cs = items[i];
+      if (!cs || cs.stack < 1) { fillable.push(i); items[i] = null; continue; }   // 空格入池（:35910-35914）
+      const d = denom(cs.id);
+      if (d >= 0) {                                           // 容器币清账（:35915-35942）
+        tally[d] += cs.stack;
+        tier[i] = d;
+        fillable.push(i);
+        items[i] = null;
+      }
     }
-    this.game.sfx.play('pickup');
+    for (let j = 0; j < inv.slots.length; j++) {              // j != 58（:35748,本仓垃圾格独立字段）
+      const s = inv.slots[j];
+      if (!s || s.stack <= 0 || s.favorited) continue;
+      const d = denom(s.id);
+      if (d >= 0) {                                           // 玩家币并入（:35948-35977）
+        coinNetOut = true;                                    // flag=true（:35771）
+        tally[d] += s.stack;
+        playerCoinSlots.push(j);                              // list.Add(j) + 清格
+        inv.slots[j] = null;
+        anythingMoved = true;
+      }
+    }
+    for (let k = 0; k < 3; k++) {                             // 进位（:35978-35985）
+      while (tally[k] >= 100) { tally[k] -= 100; tally[k + 1]++; }
+    }
+    // 回填一：槽原面额档（:35886-35910,list2.Remove 无条件）
+    for (let l = 0; l < items.length; l++) {
+      if (tier[l] < 0 || items[l]) continue;
+      const d = tier[l];
+      if (tally[d] > 0) {
+        const stack = Math.min(tally[d], coinMax(d));
+        items[l] = { id: coinId(d), stack };
+        tally[d] -= stack;
+        tier[l] = -1;
+      }
+      const fi = fillable.indexOf(l);
+      if (fi >= 0) fillable.splice(fi, 1);
+    }
+    // 回填二：原币格收溢出面额（:35911-35943,每槽一档取最大余档）
+    for (let m = 0; m < items.length; m++) {
+      if (tier[m] < 0 || items[m]) continue;
+      for (let d = 3; d >= 0; d--) {
+        if (tally[d] > 0) {
+          const stack = Math.min(tally[d], coinMax(d));
+          items[m] = { id: coinId(d), stack };
+          tally[d] -= stack;
+          break;
+        }
+      }
+      const fi = fillable.indexOf(m);
+      if (fi >= 0) fillable.splice(fi, 1);
+    }
+    // 回填三：普通空格收剩余（:35944-35970）
+    for (const l of fillable) {
+      if (items[l]) continue;
+      for (let d = 3; d >= 0; d--) {
+        if (tally[d] > 0) {
+          const stack = Math.min(tally[d], coinMax(d));
+          items[l] = { id: coinId(d), stack };
+          tally[d] -= stack;
+          break;
+        }
+      }
+    }
+    // 玩家剩余零钱回被清的原币格（:35972-35992,回填即 flag=false）
+    let num10 = 3;
+    while (num10 >= 0 && playerCoinSlots.length > 0) {
+      const slot = playerCoinSlots[0];
+      if (tally[num10] > 0) {
+        const stack = Math.min(tally[num10], coinMax(num10));
+        inv.slots[slot] = { id: coinId(num10), stack };
+        tally[num10] -= stack;
+        coinNetOut = false;                                   // :35985 flag=false
+        playerCoinSlots.shift();
+      }
+      if (tally[num10] === 0) num10--;
+    }
+    if (coinNetOut) this.game.sfx.play('pickup');             // :35993-35996（有净搬出才播 Grab）
+    // ---- ② 通用搬移（:35983-35600 区段 for num=49..10 + IntoLocal/WorldChest）----
+    let generalMoved = false;
+    for (let num = 49; num >= 10; num--) {                    // 背包主体降序,不含热键栏（:35559）
+      const cur = inv.slots[num];
+      if (!cur || cur.favorited) continue;
+      for (let i = 0; i < items.length; i++) {                // 合并遍（IntoLocal/WorldChest 共义）
+        const cs = items[i];
+        if (!cs || cs.stack >= (ITEM_DEFS[cs.id].maxStack ?? 1)) continue;
+        if (cs.id !== cur.id || (cs.prefix ?? 0) !== (cur.prefix ?? 0)) continue;   // CanStack :49870
+        const put = Math.min((ITEM_DEFS[cs.id].maxStack ?? 1) - cs.stack, cur.stack);
+        cs.stack += put;
+        cur.stack -= put;
+        anythingMoved = true;
+        generalMoved = true;
+        if (cur.stack <= 0) { inv.slots[num] = null; break; }
+      }
+      if (inv.slots[num]) {                                   // 余量 → 首个空格（:35779-35793）
+        const empty = items.findIndex((cs) => !cs);
+        if (empty >= 0) { items[empty] = inv.slots[num]; inv.slots[num] = null; anythingMoved = true; generalMoved = true; }
+      }
+    }
+    void generalMoved;
+    if (anythingMoved) this.game.sfx.play('pickup');          // SoundID 7（Grab;原版逐事件播,本仓单次,登记）
     this.refreshAll();
   }
 
@@ -3832,6 +3986,7 @@ export class UI {
 
   private refreshAllNow() {
     if (!this.game) return;
+    this.refreshEquipExtras();
     // 快捷栏最先刷（数字键/选槽视觉的最小闭环）——后续任一段抛错也不再吞掉
     // 快捷栏刷新（2026-08-18 用户报"数字键失效"：advisor 段异常曾把 rAF 回调
     // 整体炸掉，selected 已变而画面不动）

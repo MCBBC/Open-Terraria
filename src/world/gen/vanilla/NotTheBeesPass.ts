@@ -640,6 +640,7 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
     // ……（组合种子支；纯 NTB 不可达。掷序全在门内。）
   }
   // 地表重种环（cs:25904-25930）：行 y∈[20,num)，列 x∈[20,w-20]
+  try { (globalThis as { __swFCMark?: (t: string) => void }).__swFCMark?.('RS'); } catch { /* probe */ }
   for (let y = 20; y < num; y++) {
     for (let x = 20; x <= w - 20; x++) {
       if (!st.inBounds(x, y)) continue;
@@ -660,7 +661,9 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
     }
   }
   // tileSolid[379]=true（cs:25933）——同上备案
+  try { (globalThis as { __swFCMark?: (t: string) => void }).__swFCMark?.('RE_ODI'); } catch { /* probe */ }
   if (!remix) overGrownDungeon(st, rng, gs);                        // cs:25937
+  try { (globalThis as { __swFCMark?: (t: string) => void }).__swFCMark?.('ODO2'); } catch { /* probe */ }
 }
 
 /** PlaceTile(231)（cs:59991→Place3x3 cs:53549 num=-2 支 + SquareTileFrame 尾奏）：

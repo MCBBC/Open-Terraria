@@ -4794,6 +4794,10 @@ export class Game implements GameHooks {
     (window as unknown as { __swNatureParticles?: typeof natureParticles }).__swNatureParticles = natureParticles;
     let steps = 0;
     if (!this.paused) {
+      // 配饰格难度门镜像（Inventory.gateExpert/gateMaster——旅程滑杆改档下帧生效）
+      const invGates = this.player.inv;
+      invGates.gateExpert = this.world.isExpert;
+      invGates.gateMaster = this.world.isMaster;
       this.tickChestAutoClose();
       this.acc += elapsed;
       while (this.acc >= FIXED_DT && steps < 5) {
@@ -17249,10 +17253,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.net.requestChestOpen(tx, ty);
         this.input.rightDown = false;
       }
-    } else if (sh === 425) {
-      // 广播盒右键（Player.cs:32231-32250 tileSign 分支 → OpenSign）：按帧回算
+    } else if (sh === 55 || sh === 85 || sh === 425 || sh === 573) {
+      // 告示牌族右键（Player.cs:32231-32250 tileSign 分支 → OpenSign）：按帧回算
       // 2×2 锚点（:32240-32245 frameX/18、frameY/18），Sign.ReadSign(anchor,
-      // CreateIfMissing:true) 懒建空牌项 → 文本编辑面板（保存走 setSignText）
+      // CreateIfMissing:true) 懒建空牌项 → 文本编辑面板（保存走 setSignText）。
+      // Main.tileSign {55 标牌, 85 墓碑, 425 广播盒, 573 破旧木牌}——
+      // 55/573 曾缺 → 标牌放了不能写字（2026-08-27 用户实报）
       const iBox = st.idx(tx, ty);
       this.openSignEditor(tx - Math.floor(st.frameX[iBox] / 18), ty - Math.floor(st.frameY[iBox] / 18));
       this.input.rightDown = false;

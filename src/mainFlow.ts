@@ -89,7 +89,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
    *  ≥100×6窗）+ HealCanvas 空转（2026-08-28 用户实报"菜单页就开始崩"）。fire-
    *  and-forget；Game 构造时 buildAssets 命中热单例（未完成则原地同步补完，语义同旧） */
   function startAssetPrewarm(): void {
-    void import('./assets/AssetGen').then((m) => m.buildAssets()).catch(() => {});
+    // ★必须 setTimeout 宏任务边界(t1547 trace 实锤):AssetGen 已被 Game 静态导入,
+    // 产物里动态 import 被内联为 Promise.resolve → .then 是【微任务】,生成包
+    // (~550ms putImageData)会在点击 EventDispatch 的同一次派发里同步跑完=
+    // "点进入世界卡 0.7s"的主犯。宏任务让点击先落屏,生成块挪进加载页自身 task
+    setTimeout(() => {
+      void import('./assets/AssetGen').then((m) => m.buildAssets()).catch(() => {});
+    }, 0);
   }
   let menuBg: MenuBackground | null = null;
   let menuRunning = false;
@@ -301,9 +307,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   // ---- 世界流程 ----
 
   async function newWorld(seed: string, w: number, h: number) {
-    startAssetPrewarm();   // #perf2026-08-28:与生成 worker 并行,勿占菜单期表面预算
-    const g = makeGame();
+    // ★顺序即正确性(#三开压测批续):先挂进度页与预热,再让出一个宏任务——
+    // 预热定时器(0ms)必然先于本函数的续体执行,buildAssets 在【独立 task】跑完;
+    // 否则 makeGame 同步构造里 Game ctor 冷兜底 buildAssets(~1.2s)会吃掉整个
+    // 点击 EventDispatch(t1547 后续专录 trace 实锤:WorldCreation:151 派发 1232ms)
     ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.GeneratingWorld'), 0.05);
+    startAssetPrewarm();
+    await new Promise((r) => setTimeout(r, 0));
+    const g = makeGame();
     await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(Lang.worldgenText(label), p));
   }
 
@@ -617,6 +628,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   async function importWld(buf: Uint8Array) {
     startAssetPrewarm();   // #perf2026-08-28:同 loadFromKey(wld 转换/沉降段并行)
+    // ★宏任务让路:parseWldToSave 同步重活+makeGame 构造必须与预热定时器分 task
+    await new Promise((r) => setTimeout(r, 0));
     ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.ParsingWld'), 0.1);
     try {
       const { save, report, seedText, gameMode } = parseWldToSave(buf);
@@ -903,6 +916,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   async function createWorldFlow(cfg: { name: string; seed: string; w: number; h: number; size: number; difficulty: number; evil: -1 | 0 | 1 }) {
     const loadState = new UIWorldLoadState(cfg.evil);
     VUI.setState(loadState);
+    // ★宏任务让路(#三开压测批续,与 newWorld 同纪律):makeGame 的 Game ctor 冷兜底
+    // buildAssets(~1.2s)必须发生在点击 EventDispatch 之外的独立 task——本函数才是
+    // 创建 UI 的真实入口(WorldCreationPanel→flow.onCreate),此前补丁打在 legacy
+    // newWorld 上未覆盖此处(t1547 专录 trace 实锤 772-1232ms 派发)
+    startAssetPrewarm();
+    await new Promise((r) => setTimeout(r, 0));
     const g = makeGame();
     await g.newWorld(cfg.seed || String(Date.now()), cfg.w, cfg.h,
       (label, p) => loadState.setProgress(label, p),

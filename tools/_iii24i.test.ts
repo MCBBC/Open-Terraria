@@ -90,7 +90,9 @@ it('segment counters vs x86', async () => {
     const xd = X_CALLS[k][1] - X_CALLS[k][0] + 1;
     console.log(`NTB${k + 1}: j_end=${jNtb[k].s} 段长~${jd} | x 段长=${xd} Δ=${jd - xd}`);
   }
-  const byT = (t: string): number => marks.find((m) => m.t === t)?.s ?? -1;
+  const byT = (t: string): number => { const m = marks.filter((mm) => mm.t === t); return m.length ? m[0].s : -1; };
+  // 全量序列（按序去重后打印段长）
+  console.log('marks seq:', marks.map((m) => `${m.t}@${m.s}`).join(' '));
   const fIn = byT('FNTBIN'), fOut = byT('FNTBOUT'), scIn = byT('SCIN'), scOut = byT('SCOUT');
   console.log(`FNTB: j=[${fIn},${fOut}] len=${fOut - fIn} | x len=${X_FNTB[1] - X_FNTB[0]} Δ=${fOut - fIn - (X_FNTB[1] - X_FNTB[0])}`);
   console.log(`SC  : j=[${scIn},${scOut}] len=${scOut - scIn} | x len=${X_SC[1] - X_SC[0]} Δ=${scOut - scIn - (X_SC[1] - X_SC[0])}`);

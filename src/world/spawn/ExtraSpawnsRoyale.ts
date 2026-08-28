@@ -284,6 +284,7 @@ function specializedFloorOk(
   return true;
 }
 
+
 // ── TryFindSpawnAt（cs:203-317 精简核） ────────────────────────────────────
 
 interface SpawnProbe { x: number; y: number }
@@ -385,7 +386,8 @@ function hurtLiquidWallBad(st: TileStore, px: number, py: number, settings: Extr
 
 function tryFindSpawnRandomly(
   st: TileStore, w: World, settings: ExtraSpawnSettings, rng: UnifiedRandom,
-  acceptedPoints: ExtraSpawnPoint[], fallbackPt: ExtraSpawnPoint,
+  acceptedPoints: ExtraSpawnPoint[], origins: Array<'found' | 'fallback'>,
+  fallbackPt: ExtraSpawnPoint,
 ): void {
   const OUTER_ATTEMPTS = 500;                           // cs:117 num=500
   let leftFirst = true;                                 // flag 初值 true = 先左(cs:120/:127)
@@ -407,10 +409,12 @@ function tryFindSpawnRandomly(
     const probe: SpawnProbe = { x: nx, y: ny };
     if (tryFindSpawnAt(st, w, settings, rng, acceptedPoints, probe, maxY)) {
       acceptedPoints.push({ x: probe.x, y: probe.y });
+      origins.push('found');
       return;                                           // 命中摘候选岛（cs:192-195，R3 无操作）
     }
   }
   acceptedPoints.push(fallbackPt);                      // cs:199
+  origins.push('fallback');
 }
 
 // ── 对外：生成/查询/落位 ──────────────────────────────────────────────────
@@ -428,6 +432,8 @@ function extraSpawnSeed(worldSeed: number): number {
 /**
  * GenerateExtraSpawns（cs:91-113）整体：points[0]=世界出生点；队 1-5 候选搜索+洗牌分配。
  * 结果写 world.extraSpawnPoints（瞬态运行时位，不入档不入包）；幂等（已缓存直接返回）。
+ * 来源标记随 w.extraSpawnMeta 落盘到运行时缓存——'found' 对满足构造性分离保证；
+ * 'fallback' 为预算耗尽后的 fallback 点（vanilla 同样不保证其间隔，见头部 R1 注）。
  */
 export function ensureExtraSpawnPoints(w: World): ExtraSpawnPoint[] {
   if (w.extraSpawnPoints) return w.extraSpawnPoints;
@@ -438,15 +444,20 @@ export function ensureExtraSpawnPoints(w: World): ExtraSpawnPoint[] {
   const rng = new UnifiedRandom(extraSpawnSeed(w.seed));
   const pts: ExtraSpawnPoint[] = new Array(PLAYER_TEAM_COUNT);
   pts[0] = { x: w.spawnX, y: w.spawnY };
+  const meta: Array<'found' | 'fallback'> = ['found'];
   const list: ExtraSpawnPoint[] = [];
+  const origins: Array<'found' | 'fallback'> = [];
   for (let i = 1; i < PLAYER_TEAM_COUNT; i++) {
-    tryFindSpawnRandomly(w.store, w, settings, rng, list, fallbackSpawn(w.store, w, settings, i));
+    tryFindSpawnRandomly(w.store, w, settings, rng, list, origins,
+      fallbackSpawn(w.store, w, settings, i));
   }
   for (let j = 1; j < PLAYER_TEAM_COUNT; j++) {
     const pick = rng.nextIntRange(0, list.length);
     pts[j] = list.splice(pick, 1)[0]!;
+    meta.push(origins.splice(pick, 1)[0]!);
   }
   w.extraSpawnPoints = pts;
+  w.extraSpawnMeta = meta;
   return pts;
 }
 

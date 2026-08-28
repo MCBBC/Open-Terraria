@@ -112,3 +112,42 @@ function GS_STUB(): import('../src/world/gen/vanilla/GenState').GenState {
     seedFlags: {},
   } as unknown as import('../src/world/gen/vanilla/GenState').GenState;
 }
+
+// —— IIII26 扩展:终态 8 通道镜像 dump(x86 JJHook 格式同构) ——
+(it as never as ((n: string, f: () => void) => void))('III26 final dump', () => {
+  const st = buildTruthBase();
+  const chestSink = loadChestSink();
+  const rngObj = new RNG(seed26()) as RNG;
+  runMicroBiomesPass(st, rngObj, GS_STUB(), chestSink as never);
+  const g = globalThis as unknown as { __swOnRoll?: unknown };
+  g.__swOnRoll = undefined;
+
+  const W = 4200, H = 1200, N = W * H;
+  mkdirSync('/tmp/iii26-out/jsdump', { recursive: true });
+  const wbuf = (name: string, arr: Uint16Array) => {
+    const b = new ArrayBuffer(N * 2); new Uint16Array(b).set(arr); writeFileSync(`/tmp/iii26-out/jsdump/${name}`, new DataView(b));
+  };
+  const wbyte = (name: string, arr: Uint8Array) => { writeFileSync(`/tmp/iii26-out/jsdump/${name}`, arr.slice()); };
+  const typ = new Uint16Array(N), act = new Uint8Array(N), wal = new Uint16Array(N);
+  const liq = new Uint8Array(N), lty = new Uint8Array(N), half = new Uint8Array(N), slp = new Uint8Array(N), inact = new Uint8Array(N);
+  // SHEET_OF 与 TrackPass 相同逻辑
+  const SHEET_OF = new Int16Array(TILE_DEFS.length).fill(-1);
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const s = TILE_DEFS[i]?.vanilla?.sheet; if (typeof s === 'number') SHEET_OF[i] = s;
+  }
+  for (let i = 0; i < N; i++) {
+    const a = st.flags[i] ? 1 : 0;
+    act[i] = a;
+    typ[i] = a ? Math.max(0, SHEET_OF[st.type[i]] ?? 9999) : 0;
+    wal[i] = st.wall[i];
+    liq[i] = st.liquid[i];
+    lty[i] = st.liquid[i] > 0 ? Math.max(0, st.liquidType[i] - 1) : 0;
+    half[i] = st.half[i]; slp[i] = st.slope[i];
+    inact[i] = (st.wire[i] >>> 5) & 1;
+  }
+  wbuf('typ', typ); wbyte('act', act); wbuf('wal', wal); wbyte('liq', liq);
+  wbyte('half', half); wbyte('slope', slp); wbyte('lty', lty); wbyte('inact', inact);
+  console.log('III26 jsdump written');
+});
+
+function seed26(): number { return 12345; }

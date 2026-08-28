@@ -1231,6 +1231,20 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   // ★noTraps+tenth 强制巨石（cs:8957-8961）：Next(4)==0 → type=1（掷照耗）
   if (nf.noTraps && nf.tenthAnniversary && rng.int(0, 3) === 0) type = 1;
   trapEv('T', 0, py, type);
+  // ★III24b 批一次性取证：九格 nactive 位模式探针（G4 守卫读域；仅限观测矩形，
+  //   与 x86 rig JJHook 'N' 事件同位同序，用毕删除）。
+  if (x2 >= 1650 && x2 <= 1850 && py >= 550 && py <= 1050) {
+    let m9 = 0, b = 0;
+    for (let dy = 0; dy >= -2; dy--) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const ii = st.idx(x2 + dx, py + dy);
+        const na = st.flags[ii] !== 0 && ((st.wire[ii] >>> 5) & 1) === 0;
+        if (na) m9 |= 1 << b;
+        b++;
+      }
+    }
+    trapEv('N', x2, py, m9);
+  }
   // 共同守卫（cs:8961-8985）
   if (x2 < 3 || py < 3 || x2 > st.w - 4 || py > st.h - 4) return false;   // InWorld(x2,num,3)
   if (lava && type !== 3) return false;
