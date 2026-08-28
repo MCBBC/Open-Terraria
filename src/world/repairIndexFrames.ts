@@ -12,6 +12,13 @@
 import { TILE_DEFS } from '../data/tiles';
 import type { TileStore } from './TileStore';
 
+/** 平台楼梯坡度帧码（WorldGen.cs:86748 平台表分支专码，坡/平两支互斥）：
+ *  slope1 支 {180,360,396,432,468} / slope2 支 {144,342,378,414,450}；
+ *  平支专码 {0..126} ∪ {216,234,252,270,288} 不参与（合法平帧）。
+ *  用于修复「楼梯帧+slope=0」嵌合态（旧 wld 导入门缺陷的存量档，见下） */
+const SLOPE1_FRAME_CODES = new Set([180, 360, 396, 432, 468]);
+const SLOPE2_FRAME_CODES = new Set([144, 342, 378, 414, 450]);
+
 export function repairIndexFramesInStore(st: TileStore): number {
   let fixed = 0;
   for (let y = 0; y < st.h; y++) {
@@ -20,6 +27,15 @@ export function repairIndexFramesInStore(st: TileStore): number {
       const type = st.type[i];
       if (type === 0 || !st.flags[i]) continue;
       const def = TILE_DEFS[type];
+      // 平台楼梯坡度修复（2026-08-28）：旧 wld 导入器 SaveSlopes 门错用本仓碰撞域
+      // solid（平台=false），导入世界的平台坡度全丢 →「楼梯帧+slope=0」嵌合态
+      // （渲染出孤立楼梯碎片+平碰撞；原版不可能产出该态——SaveSlopes 含平台族，
+      // 且坡/平帧码分支互斥）。帧码反推坡度，幂等（修复后 slope≠0 恒跳过）
+      if (def?.platform && st.slope[i] === 0) {
+        const fx = st.frameX[i];
+        if (SLOPE1_FRAME_CODES.has(fx)) { st.slope[i] = 1; fixed++; continue; }
+        if (SLOPE2_FRAME_CODES.has(fx)) { st.slope[i] = 2; fixed++; continue; }
+      }
       const fw = def?.vanilla?.fw ?? 0, fh = def?.vanilla?.fh ?? 0;
       if (!def?.vanilla || def.vanilla.frame !== 'style' || fw < 2) continue;
       // 圣诞树 171 豁免：锚 frameX=10 哨兵 + 列/行裸索引 + frameY 装饰位段（原约定）

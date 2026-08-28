@@ -208,9 +208,11 @@ function pushStarter(
 
 /**
  * SpawnStarterNPCs 主口（槽位注册序 GrassWall(19734) < 本 pass < SunflowersPart2(20043)；
- * WorldGen.ts 中挂在「草墙」与「向日葵」之间）。非十周年世界零副作用早退（NPC 命名掷的
- * ROLL 也一并消失——与原版普通种子 run 该 pass 的 NewNPC(22) 分支【有】名字掷不同，
- * 该差额由 Game.ts 承接域的历史口径吸收，见文件头 ④）。
+ * WorldGen.ts 中挂在「草墙」与「向日葵」之间）。★IIIII20 后的受理面：十周年主支 +
+ * 非十周年 else 链七臂全支（见函数体内 ★IIIII20 注）；未被任何臂受理的世界
+ * （普通种子/dontStarve 单开/notTheBees×theConstant 等——原版落 :20052 向导兜底）
+ * 维持零掷骰零记录早退（NPC 命名掷的 ROLL 也一并消失——与原版普通种子 run 该 pass
+ * 的 NewNPC(22) 分支【有】名字掷不同,该差额由 Game.ts 承接域的历史口径吸收,头注④）。
  */
 export function starterNpcsPass(ctx: { store: TileStore; rng: RNG; world: World }): void {
   const { store, rng, world } = ctx;

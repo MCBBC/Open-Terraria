@@ -548,6 +548,375 @@ export function runDungeonPass(
     }
     st.wall[i] = wl;
   }
+
+  // ==================================================================
+  // ★IIIII21 drunk 死生命树（GenerateDungeonTree + GrowDungeonTree +
+  // GrowDungeonTree_MakePassage，DungeonUtils.cs:615-1151 全量移植）。
+  // 调用面：drunk 世界入口族尾段（Legacy cs:582-585 generateRoots=true；Tower
+  // cs:493-495 / Dome cs:473-475 roots=false）。SpecialSeedFeatures.DungeonEntranceHasATree
+  // （drunk && !NoDungeonGuardian）；掷骰走主流 rng（C# 内 genRand=WorldGen.genRand）。
+  // 主干/枝/叶 = 191 活木 / 192 活叶；paint b=b2=28（notTheBees 组合域才归零——登记不接线）；
+  // 墙写 244 活木墙；MakePassage 平台 PlaceTile(19) style 23（裸）/6（蓝砖平台 item1384，
+  // ItemID.Sets.DerivedPlacementDetails[1384]={19,6}，ItemID.cs PostSetupContent）。
+  // Main.tileSolid[48] 关-复开两拍按原版序经 flipGenSolid 保真（SMOOTH 还原在 Beaches 后，
+  // 本函数尾提前复开=C# 同位）。生成期 SquareTileFrame/SquareWallFrame 段（DU:1141-1144）
+  // 在 !isGeneratingOrLoadingWorld 门内恒跳过，不移植。
+  const TREE_WOOD = TILE_BY_KEY['v_191_living_wood_block']!;
+  const TREE_LEAF = TILE_BY_KEY['v_192_living_leaf_block']!;
+
+  /** ClearTileAndPaint()：清全位含漆/线/帧 */
+  function clearTileAndPaint(i: number): void {
+    st.type[i] = 0; st.flags[i] = 0; st.liquid[i] = 0; st.liquidType[i] = 0;
+    st.wall[i] = 0; st.slope[i] = 0; st.half[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0;
+    st.wire[i] = 0; st.paint[i] = 0; st.paintWall[i] = 0;
+  }
+  /** 树格主写：type=活木+active+Clear(Slope)+color(b)；leaf=true 写活叶 */
+  function treeCell(x: number, y: number, leaf: boolean): void {
+    if (!st.inBounds(x, y)) return;    // 原版裸写；越界域外安全垫（语义等价）
+    const i2 = st.idx(x, y);
+    chTile(i2, leaf ? TREE_LEAF : TREE_WOOD, false);
+    st.paint[i2] = 28;                 // b / b2 同值 28（NTB 才归零，组合域不接线）
+  }
+  /** 非激活树格支写（type+Clear(Slope)+color 不置 active——枝条上向节专用 DU:811-817） */
+  function treeCellGhost(x: number, y: number): void {
+    if (!st.inBounds(x, y)) return;
+    const i2 = st.idx(x, y);
+    st.type[i2] = TREE_WOOD;
+    st.slope[i2] = 0;
+    st.paint[i2] = 28;
+  }
+
+  function generateDungeonTree(x: number, y: number, attachmentY: number, generateRoots = true): void {
+    if (!inW(x, y, 20)) return;                                   // !InWorld(x,y,20)
+    let num = y;
+    for (;;) {                                                    // 上行找 5 行净窗
+      let busy = false;
+      for (let d2 = 0; d2 <= 4; d2++) {
+        const yy = num - d2;
+        if (!st.inBounds(x, yy)) continue;
+        const ti = st.idx(x, yy);
+        if (st.flags[ti] !== 0 || st.wall[ti] > 0) { busy = true; break; }
+      }
+      if (!busy) break;
+      num--;
+      if (num < 50) break;
+    }
+    if (num > 50) growDungeonTree(x, num, attachmentY, false, generateRoots);
+  }
+
+  function growDungeonTree(i: number, j: number, attachmentY: number, patch: boolean, generateRoots: boolean): void {
+    void patch;                       // patch 分支仅 remix 域 MakePassage noSecretRoom 门
+    flipGenSolid([48], false);        // Main.tileSolid[48]=false（DU:738）
+    const arr: number[] = [], arr2: number[] = [], arr3: number[] = [], arr4: number[] = [];
+    const arr5: number[] = [], arr6: number[] = [], arr7: boolean[] = [];
+    let n2 = 0;                       // 游标 array[..]/num2
+    let n3 = i - rng.int(2, 2);       // i - Next(2,3)
+    let n4 = i + rng.int(2, 2);       // i + Next(2,3)
+    if (rng.int(0, 4) === 0) {        // Next(5)==0 → 单侧加宽
+      if (rng.int(0, 1) === 0) n3--; else n4++;
+    }
+    const wdt = n4 - n3;              // num5
+    let n6 = n3, n7c = n4;            // num6/num7 窄化游标
+    const minL0 = n3, minR0 = n4;     // minimumLeft/Right 初值快照（roots 域）
+    let flag = true;
+    let n8 = rng.int(-8, -5);         // Next(-8,-4)
+    let n9 = rng.int(0, 1);
+    let n10 = j;
+    let n11 = rng.int(5, 14);         // Next(5,15)
+    while (flag) {
+      n8++;
+      if (n8 > n11) {
+        n11 = rng.int(5, 14);
+        n8 = 0;
+        arr2[n2] = n10 + rng.int(0, 4);                    // Next(5)
+        if (rng.int(0, 4) === 0) n9 = n9 === 0 ? 1 : 0;
+        if (n9 === 0) {
+          arr3[n2] = -1; arr[n2] = n3; arr4[n2] = n4 - n3;
+          if (rng.int(0, 1) === 0) n3++;
+          n6++; n9 = 1;
+        } else {
+          arr3[n2] = 1; arr[n2] = n4; arr4[n2] = n4 - n3;
+          if (rng.int(0, 1) === 0) n4--;
+          n7c--; n9 = 0;
+        }
+        if (n6 === n7c) flag = false;
+        n2++;
+      }
+      for (let k = n3; k <= n4; k++) treeCell(k, n10, false);   // 行绘制（每迭代必跑）
+      n10--;
+    }
+    // ---- 枝条段（l < num-1）----
+    for (let l = 0; l < n2 - 1; l++) {
+      let n12 = arr[l]! + arr3[l]!;                         // num12=基点内缩一格
+      let n13 = arr2[l]!;
+      let n14 = Math.trunc(arr4[l]! * (1.0 + rng.int(20, 29) * 0.1));
+      treeCell(n12, n13 + 1, false);
+      let n15 = rng.int(3, 4);                              // Next(3,5)
+      while (n14 > 0) {
+        n14--;
+        treeCell(n12, n13, false);
+        if (rng.int(0, 9) === 0) {
+          n13 = rng.int(0, 1) !== 0 ? n13 + 1 : n13 - 1;
+        } else {
+          n12 += arr3[l]!;
+        }
+        if (n15 > 0) n15--;
+        else if (rng.int(0, 1) === 0) {
+          n15 = rng.int(2, 4);                              // Next(2,5)
+          if (rng.int(0, 1) === 0) {                        // 上向节（-1 格不置 active）
+            treeCell(n12, n13, false);
+            treeCellGhost(n12, n13 - 1);
+            arr5[n2] = n12; arr6[n2] = n13; n2++;
+          } else {                                          // 下向节
+            treeCell(n12, n13, false);
+            treeCell(n12, n13 + 1, false);
+            arr5[n2] = n12; arr6[n2] = n13; n2++;
+          }
+        }
+        if (n14 === 0) { arr5[n2] = n12; arr6[n2] = n13; n2++; }   // 枝端叶团锚
+      }
+    }
+    // ---- 冠部（中柱下行 + 双侧横伸；num18 从 Next(num5*3,num5*5) 起）----
+    {
+      let n16 = Math.trunc((n3 + n4) / 2);
+      let n17 = n10;
+      let n18 = rng.int(wdt * 3, wdt * 5 - 1);
+      let n19 = 0, n20 = 0;
+      while (n18 > 0) {
+        treeCell(n16, n17, false);
+        if (n19 > 0) n19--;
+        if (n20 > 0) n20--;
+        for (let m = -1; m <= 1; m++) {
+          if (m === 0 || ((m >= 0 || n19 !== 0) && (m <= 0 || n20 !== 0)) || rng.int(0, 1) !== 0) continue;
+          let n21 = n16, n22 = n17;
+          let n23 = rng.int(wdt, wdt * 3 - 1);              // Next(num5, num5*3)
+          if (m < 0) n19 = rng.int(3, 4);
+          if (m > 0) n20 = rng.int(3, 4);
+          let n24 = 0;
+          while (n23 > 0) {
+            n23--;
+            n21 += m;
+            treeCell(n21, n22, false);
+            if (n23 === 0) { arr5[n2] = n21; arr6[n2] = n22; arr7[n2] = true; n2++; }
+            if (rng.int(0, 4) === 0) {
+              n22 = rng.int(0, 1) !== 0 ? n22 + 1 : n22 - 1;
+              treeCell(n21, n22, false);
+            }
+            if (n24 > 0) n24--;
+            else if (rng.int(0, 2) === 0) {
+              n24 = rng.int(2, 3);                          // Next(2,4)
+              const n25 = n21;
+              let n26 = n22;
+              n26 = rng.int(0, 1) !== 0 ? n26 + 1 : n26 - 1;
+              treeCell(n25, n26, false);
+              arr5[n2] = n25; arr6[n2] = n26; arr7[n2] = true; n2++;
+              arr5[n2] = n25 + rng.int(-5, 5); arr6[n2] = n26 + rng.int(-5, 5); arr7[n2] = true; n2++;   // Next(-5,6)
+            }
+          }
+        }
+        arr5[n2] = n16; arr6[n2] = n17; n2++;
+        if (rng.int(0, 3) === 0) {                          // Next(4)==0 中柱摆动
+          n16 = rng.int(0, 1) !== 0 ? n16 + 1 : n16 - 1;
+          treeCell(n16, n17, false);
+        }
+        n17--;
+        n18--;
+      }
+    }
+    // ---- 根系（generateRoots=true：Legacy 入口座）----
+    if (generateRoots) {
+      for (let n = minL0; n <= minR0; n++) {
+        let n27 = rng.int(1, 5);                            // Next(1,6)
+        let n28 = j + 1;
+        while (n27 > 0) {
+          if (dgSolid(n, n28)) n27--;
+          treeCell(n, n28, false);
+          n28++;
+        }
+        const n29 = n28;
+        const n30 = rng.int(2, wdt);                        // Next(2, num5+1)
+        for (let c = 0; c < n30; c++) {
+          n28 = n29;
+          const n32 = Math.trunc((minL0 + minR0) / 2);
+          let n33 = 0, n34 = 1;
+          n33 = n >= n32 ? 1 : -1;
+          if (n === n32 || (wdt > 6 && (n === n32 - 1 || n === n32 + 1))) n33 = 0;
+          const n35 = n33;
+          let n36 = n;
+          n27 = rng.int(Math.trunc(wdt * 3.5), wdt * 6 - 1);
+          while (n27 > 0) {
+            n27--;
+            n36 += n33;
+            if (!st.inBounds(n36, n28)) continue;
+            if (st.wall[st.idx(n36, n28)] !== 244) treeCell(n36, n28, false);
+            n28 += n34;
+            if (st.inBounds(n36, n28) && st.wall[st.idx(n36, n28)] !== 244) treeCell(n36, n28, false);
+            if (st.inBounds(n36, n28 + 1) && st.flags[st.idx(n36, n28 + 1)] === 0) { n33 = 0; n34 = 1; }
+            if (rng.int(0, 2) === 0) {                      // Next(3)==0 走向换挡
+              n33 = n35 < 0 ? (n33 === 0 ? -1 : 0)
+                : (n35 <= 0 ? rng.int(-1, 1) : (n33 === 0 ? 1 : 0));
+            }
+            if (rng.int(0, 2) === 0) n34 = n34 === 0 ? 1 : 0;
+          }
+        }
+      }
+    }
+    // ---- 叶团（!remixWorldGen 支恒走）----  （root 域快照顺延给 passage ref）
+    for (let idx2 = 0; idx2 < n2; idx2++) {
+      let n38 = rng.int(5, 7);                              // Next(5,8)
+      n38 = Math.trunc(n38 * (1.0 + wdt * 0.05));
+      if (arr7[idx2]) n38 = rng.int(6, 11) + wdt;           // Next(6,12)+num5
+      const ax = arr5[idx2]!, ay = arr6[idx2]!;
+      const x0 = ax - n38 * 2, x1 = ax + n38 * 2, y0 = ay - n38 * 2, y1 = ay + n38 * 2;
+      const n43 = 2.0 - rng.int(0, 4) * 0.1;                // 2.0 - Next(5)*0.1
+      for (let xx = x0; xx <= x1; xx++) {
+        for (let yy = y0; yy <= y1; yy++) {
+          if (!st.inBounds(xx, yy)) continue;
+          const k = st.idx(xx, yy);
+          if (st.type[k] === TREE_WOOD) continue;           // type==191 continue
+          if (arr7[idx2]) {
+            const dx2 = ax - xx, dy2 = ay - yy;
+            if (Math.sqrt(dx2 * dx2 + dy2 * dy2) < n38 * 0.9) {
+              chTile(k, TREE_LEAF, false);
+              st.paint[k] = 28;
+            }
+          } else if (Math.abs(ax - xx) + Math.abs(ay - yy) * n43 < n38) {
+            chTile(k, TREE_LEAF, false);
+            st.paint[k] = 28;
+          }
+        }
+      }
+    }
+    makeTreePassage(j, attachmentY, wdt, minL0, minR0);
+    flipGenSolid([48], true);           // Main.tileSolid[48]=true（DU:1056，passage 之后）
+  }
+
+  /** GrowDungeonTree_MakePassage（DU:1060-1149）：冠底 j-6 下行至 attachmentY 的竖井+
+   *  活木墙廊道。C# 的 ref minimumLeft/Right 只在本函数内部演化且终值回滚（restore 快照），
+   *  无外部消费面 → 传值即可。width=num5（walk 宽），用于 num7 加宽门（<=4 时 2 格）。 */
+  function makeTreePassage(j: number, attachmentY: number, width: number, argL: number, argR: number): void {
+    const GLASS_WALLS = new Set([21, 88, 89, 90, 91, 92, 241, 93, 243, 242]);   // WallID.Sets.Glass
+    const isDWv = (v: number): boolean => v > 0 && DG_DUNGEON_WALLS.has(v);
+    const snapL = argL, snapR = argR;
+    let minLeft = argL, minRight = argR;
+    const PROBE = 5;                    // num3
+    rng.int(5, 15);                     // Next(5,16) 弃掷（DU:1075，结果不消费）
+    let num4 = j - 6;
+    let cnt = 0;                        // num5 局部（与外层 wdt 无关的同名遮蔽）
+    let topFlag = true;                 // flag（首候选强制平台）
+    for (;;) {
+      num4++;
+      if (num4 > attachmentY) break;
+      const n6p = Math.trunc((minLeft + minRight) / 2);
+      const n7s = (num4 > j && width <= 4) ? 2 : 1;
+      for (let i2 = minLeft - n7s; i2 <= minRight + n7s; i2++) {
+        if (i2 > n6p - 2 && i2 <= n6p + 1) {
+          if (num4 > j - 4) {
+            const at = (ax: number, ay: number): { ty: number; wl: number; idx: number } => {
+              const idx0 = st.inBounds(ax, ay) ? st.idx(ax, ay) : -1;
+              return idx0 >= 0
+                ? { ty: st.type[idx0], wl: st.wall[idx0], idx: idx0 }
+                : { ty: -1, wl: 0, idx: -1 };
+            };
+            const c0 = at(i2, num4);
+            const u1 = at(i2, num4 - 1);
+            const d1 = at(i2, num4 + 1);
+            // 竖井芯带：只保平台(19)/椅15?/盆304/箱21/门10 族
+            const keepSelf = c0.ty === 19 || c0.ty === 15 || c0.ty === 304 || c0.ty === 21 || c0.ty === 10;
+            const keepUp = u1.ty === 15 || u1.ty === 304 || u1.ty === 21 || u1.ty === 10;
+            const keepDown = d1.ty === 10;
+            if (!keepSelf && !keepUp && !keepDown && c0.idx >= 0) clearTileAndPaint(c0.idx);
+            if (!isDWv(c0.wl) && c0.idx >= 0) st.wall[c0.idx] = 244;
+            const cl = at(i2 - 1, num4);
+            if (!isDWv(cl.wl) && (cl.wl > 0 || num4 >= ws) && cl.idx >= 0) st.wall[cl.idx] = 244;
+            const cr = at(i2 + 1, num4);
+            if (!isDWv(cr.wl) && (cr.wl > 0 || num4 >= ws) && cr.idx >= 0) st.wall[cr.idx] = 244;
+            if (num4 === j) {
+              const fl = at(i2, num4 + 1);
+              if (fl.idx >= 0) clearTileAndPaint(fl.idx);
+              placePlatformAt(fl.idx, 23);
+            }
+          }
+        } else {
+          const at = (ax: number, ay: number): { ty: number; wl: number; idx: number } => {
+            const idx0 = st.inBounds(ax, ay) ? st.idx(ax, ay) : -1;
+            return idx0 >= 0 ? { ty: st.type[idx0], wl: st.wall[idx0], idx: idx0 } : { ty: -1, wl: 0, idx: -1 };
+          };
+          const c0 = at(i2, num4);
+          const cl = at(i2 - 1, num4);
+          const cr = at(i2 + 1, num4);
+          const keepAll = c0.ty === 15 || c0.ty === 304 || c0.ty === 21 || c0.ty === 10
+            || cl.ty === 10 || cr.ty === 10;
+          if (!keepAll) {
+            if (!isDWv(c0.wl) && c0.idx >= 0) {
+              chTile(c0.idx, TREE_WOOD, false);       // type+active+slope-clear（此处无 paint）
+            }
+            if (cl.ty === 40 && cl.idx >= 0) st.type[cl.idx] = 0;   // 粘土→土
+            if (cr.ty === 40 && cr.idx >= 0) st.type[cr.idx] = 0;
+          }
+          if (num4 <= j && num4 > j - 4 && i2 > minLeft - n7s && i2 <= minRight + n7s - 1 && c0.idx >= 0) {
+            st.wall[c0.idx] = 244;
+          }
+        }
+        // C# !isGeneratingOrLoadingWorld 内的 SquareTileFrame/SquareWallFrame——生成期恒跳过
+      }
+      cnt++;
+      if (cnt < 6) continue;
+      cnt = 0;
+      let d8 = rng.int(0, 2);                         // Next(3)
+      if (d8 === 0) d8 = -1;
+      if (topFlag) d8 = 2;
+      if (d8 === -1 && wallEq(minLeft - PROBE, num4, 244)) d8 = 1;
+      else if (d8 === 1 && wallEq(minRight + PROBE, num4, 244)) d8 = -1;
+      if (d8 === 2) {
+        topFlag = false;
+        let style = 23;
+        let flag2 = false;
+        for (const px2 of [minLeft, minLeft + 1, minLeft + 2]) {
+          if (wallIdx(px2, num4 + 1) >= 0 && isDWv(st.wall[st.idx(px2, num4 + 1)])) { flag2 = true; break; }
+        }
+        if (!dgSolid(minLeft - 1, num4 + 1) && !dgSolid(minRight + 1, num4 + 1) && flag2) continue;
+        for (let k = minLeft; k <= minRight; k++) {
+          if (k > n6p - 2 && k <= n6p + 1) {
+            if (!st.inBounds(k, num4 + 1)) continue;
+            const fi = st.idx(k, num4 + 1);
+            clearTileAndPaint(fi);
+            placePlatformAt(fi, flag2 ? 6 : 23);
+          }
+        }
+      } else {
+        minLeft += d8;
+        minRight += d8;
+      }
+    }
+    minLeft = snapL; minRight = snapR;                 // ref 回滚（无外部消费）
+    for (let l2 = minLeft; l2 <= minRight; l2++) {
+      for (let m2 = j - 3; m2 <= j; m2++) {
+        if (!st.inBounds(l2, m2)) continue;
+        const ti = st.idx(l2, m2);
+        clearTileAndPaint(ti);
+        if (!isDWv(st.wall[ti]) && !GLASS_WALLS.has(st.wall[ti])) st.wall[ti] = 244;
+      }
+    }
+  }
+  // ---- makeTreePassage 小工具（闭包态 ws/inW 可用）----
+  function wallIdx(x: number, y: number): number {
+    return st.inBounds(x, y) ? st.idx(x, y) : -1;
+  }
+  function wallEq(x: number, y: number, v: number): boolean {
+    const ix = wallIdx(x, y);
+    return ix >= 0 && st.wall[ix] === v;
+  }
+  /** PlaceTile(k,l,19,...,-1,style)：静置平台写入（同 dgPlatforms 帧 = style*18） */
+  function placePlatformAt(idxOrMinus: number, style: number): void {
+    if (idxOrMinus < 0) return;
+    const i2 = idxOrMinus;
+    st.flags[i2] = 1; st.type[i2] = PLATFORM;
+    st.slope[i2] = 0; st.half[i2] = 0; st.liquid[i2] = 0; st.liquidType[i2] = 0;
+    st.frameX[i2] = 0; st.frameY[i2] = 18 * style;
+  }
+
+
   // DungeonHall.CanPlaceTileAt（DungeonHall.cs:161）——普通世界：仅非地牢墙置砖
   function canPlaceTileAt(i: number): boolean {
     if (isDW(st.wall[i])) {
@@ -940,6 +1309,13 @@ export function runDungeonPass(
       if (posX < w / 2 && vx < -0.5) vx = -0.5;
       if (posX > w / 2 && vx > 0.5) vx = 0.5;
     }
+    // ★IIIII21（LegacyEntranceDungeonHall.cs:182-186）：drunk/noSurface=入口廊方向
+    //   反转——`num3 *= -1; val2.X *= -1.0`（hall 终态 Direction 与行进向量同翻；
+    //   本仓 hall.Direction 无消费面，翻转只作用 vx；普通世界零扰动）。
+    if (gs.seedFlags.drunkWorld || gs.seedFlags.noSurface) {
+      dir = (dir === 1 ? -1 : 1);
+      vx = -vx;
+    }
     const num5 = 0.5;
     const n6 = 30;
     const hb = new DBnd(w, h);
@@ -1225,7 +1601,9 @@ export function runDungeonPass(
         if (n17 >= n15b) { x += n15b; n17 = 0; }
       }
     }
-    // 0.6 框清墙（cs:465-483：normal 世界必跑）
+    // 0.6 框清墙（cs:465-483：normal 世界必跑；★IIIII21——drunk=入口地下，
+    //   `!dungeonEntranceIsUnderground && !dungeonEntranceIsBuried` 门（cs:540）
+    //   恒假 → 0.6 收窄+清墙段整跳。noSurface 秘种子同支（组合域登记不接线）。
     // ★BBBBB（2026-08-19）：0.6f 乘积按 float 语义取整（Math.fround）——m20260811
     //   入口 (cx=1054.45, cy=319, sx2=43, sy2=10)：double 直乘 10×0.6000000238418579
     //   =6.000000238418579 → 319-x=312.99999976 → b0=312；而 golden 二进制 b0=313
@@ -1235,6 +1613,8 @@ export function runDungeonPass(
     //   同值 235——零回退。金字塔案同族：二进制在刀口边界与反编译 double 算术分歧。
     {
       const f06 = Math.fround(0.6);
+      // ★IIIII21：drunk 跳整段（含 UpdateBounds）——括在门内
+      if (!(gs.seedFlags.drunkWorld)) {
       const a0 = clampX(Math.trunc(cx - Math.fround(sx2 * f06)));
       const a1 = clampX(Math.trunc(cx + Math.fround(sx2 * f06)));
       const b0 = clampY(Math.trunc(cy - Math.fround(sy2 * f06)));
@@ -1247,10 +1627,13 @@ export function runDungeonPass(
           st.liquid[ti] = 0; st.wall[ti] = 0;
         }
       }
-    }    // 0.5 框开放门厅 + 老头锚
+      }
+    }    // 0.5 框开放门厅 + 老头锚（★IIIII21：drunk 入口地下 → num3/num4 右移一格
+    //   ——cs:567-571 `(underground|buried) && num2==-1`；num2 取翻转后值）
     {
-      const a0 = clampX(Math.trunc(cx - sx2 * 0.5));
-      const a1 = clampX(Math.trunc(cx + sx2 * 0.5));
+      const shiftR = gs.seedFlags.drunkWorld && num2 === -1 ? 1 : 0;
+      const a0 = clampX(Math.trunc(cx - sx2 * 0.5) + shiftR);
+      const a1 = clampX(Math.trunc(cx + sx2 * 0.5) + shiftR);
       const b0 = clampY(Math.trunc(cy - sy2 * 0.5));
       const b1 = clampY(Math.trunc(cy + sy2 * 0.5));
       entBounds.upd(a0, b0, a1, b1);
@@ -1262,15 +1645,24 @@ export function runDungeonPass(
         }
       }
       dungeonX = Math.trunc(cx); dungeonY = b1;
+      // ★IIIII21（cs:582-585）：drunk 死生命树座——x=generatingDungeonPositionX、
+      //   y=(int)Main.worldSurface、attachmentY=generatingDungeonPositionY；
+      //   generateRoots=true。掷骰走主流 rng。HasATree=drunk&&!NoDungeonGuardian
+      //   （NoDungeonGuardian=onlyShimmerOcean 组合，不在本仓旗域，登记）。
+      if (gs.seedFlags.drunkWorld) {
+        generateDungeonTree(posX, Math.trunc(gs.worldSurface), posY, true);
+      }
     }    // ★2026-08-17 移植：GenerateDungeonStairs（DungeonUtils.cs:1222-1310，调用点
-    //   LegacyDungeonEntrance.cs:511-516——HasStairs 普通世界=TRUE）。曾整段缺失 →
+    //   LegacyDungeonEntrance.cs:511-516——HasStairs 普通世界=TRUE；★IIIII21：
+    //   drunk=入口地下 → HasStairs 恒假，台阶整跳）。曾整段缺失 →
     //   堡右 45° 阶梯丢失 + 后续段起墙判定/变体锚/掷流全错位（oracle Q 批同补并
     //   真值对拍）。i2=num2==1?0.5盒右缘:左缘（:512 时 num3/num4 已被 0.5 框重算）、
-    //   j=0.5 盒底缘、depth=GetDualDungeonBrickSupportCutoffY(普通世界=outerPotTop-10)-num6+5。
-    {
+    //   j=0.5 盒底缘、depth=GetDualDungeonBrickSupportCutoffY(普通世界=outerPotTop-10)
+    //   -num6+5；drunk 下 cutoff=-5（DungeonUtils.cs:1636）——门关死仅作语义登记。
+    if (!(gs.seedFlags.drunkWorld)) {
       const sti = num2 === 1 ? clampX(Math.trunc(cx + sx2 * 0.5)) : clampX(Math.trunc(cx - sx2 * 0.5));
       const stj = clampY(Math.trunc(cy + sy2 * 0.5));
-      const stdep = (potT - 10) - stj + 5;
+      const stdep = ((gs.seedFlags.drunkWorld ? potT - 5 : potT - 10)) - stj + 5;
       dgStairs(sti, stj, num2, stdep);
     }    // 条纹窗墙（PlaceWall：墙==0 才写）
     {
@@ -2196,7 +2588,11 @@ export function runDungeonPass(
     });
     // 门（cs:264-271）：DomeEntrance_Door 与 TowerEntrance_Door 逐行同源——正常种子
     //   仅 dungeon 侧单门（buried/underground 特典才补镜像门）
+    //   ★IIIII21：drunk=入口地下 → `buried|underground` 支（cs:309-311）追加对侧门
     dgTowerDoor(i, n7, n4, n3, leftSide);
+    if (gs.seedFlags.drunkWorld) {
+      dgTowerDoor(i, n7, n4, n3, !leftSide);
+    }
     // 窗族（cs:272-343）——Dome 点位（Basic 宽恒 5；OverrideGlassPaint=26 墙漆不入
     //   四通道不建模，同 Tower 备案）
     {
@@ -2547,7 +2943,11 @@ export function runDungeonPass(
       while (n5 < num7) {
         n3++;
         const x = ri(bounds.L, bounds.R - 1);
-        const y = ri(ws + 25, bounds.B - 1);
+        // ★IIIII21（DungeonGlobalSpikes.cs:42-45）：drunk/noSurface → 刺采样下限
+        //   worldSurface+25 改 generatingDungeonPositionY+25（入口埋地下后的深刺域；
+        //   此时 genPos=最高房中心——drunk 无爬升厅回写）。同位掷 Next(yMin,Bottom)。
+        const yLo = gs.seedFlags.drunkWorld || gs.seedFlags.noSurface ? posY + 25 : ws + 25;
+        const y = ri(yLo, bounds.B - 1);
         if (wallAt(x, y) === num && actAt(x, y) === 0) {
           const d = rn(2) === 0 ? -1 : 1;
           const oy = y;                                   // num13：原始采样点（第二段起点基准）
@@ -3158,7 +3558,11 @@ export function runDungeonPass(
     return out;
   };
   function dgBiomeChests(): void {
-    for (let i = 0; i < 5; i++) {
+    // ★IIIII21（DungeonGlobalBiomeChests.cs:76-79/:88）：drunk → 箱组数 5→6，
+    //   case5=对侧邪恶箱（crimson?24/1571:25/1569）。switch(i % num) 纯 drunk
+    //   （num=6）与原版枚举一致；普通世界（num=5）i%5≡i 零扰动。
+    const numChests = gs.seedFlags.drunkWorld ? 6 : 5;
+    for (let i = 0; i < numChests; i++) {
       let flag = false;
       let n3 = 1000;
       while (!flag) {
@@ -3168,7 +3572,7 @@ export function runDungeonPass(
         const y = ri(Math.trunc(ws), bounds.B - 1);
         if ((entExists && entBounds.contains(x, y)) || !isDW(wallAt(x, y)) || actAt(x, y) !== 0) continue;
         let chestTile = CHEST, mainItem = 0, chestStyle = 0;
-        switch (i) {
+        switch (i % numChests) {
           case 0: chestStyle = 23; mainItem = 1156; break;
           case 1:
             if (!gs.crimson) { chestStyle = 24; mainItem = 1571; } else { chestStyle = 25; mainItem = 1569; }
@@ -3176,6 +3580,9 @@ export function runDungeonPass(
           case 2: chestStyle = 26; mainItem = 1260; break;
           case 3: chestStyle = 27; mainItem = 1572; break;
           case 4: chestTile = CHEST2; chestStyle = 13; mainItem = 4607; break;
+          case 5: // ★IIIII21：对侧邪恶生物群系箱（同 globalWorldGen.crimson 判定）
+            if (gs.crimson) { chestStyle = 24; mainItem = 1571; } else { chestStyle = 25; mainItem = 1569; }
+            break;
         }
         flag = dgAddBuriedChest(x, y, mainItem, chestStyle, chestTile);
       }

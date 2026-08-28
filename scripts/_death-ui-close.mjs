@@ -21,10 +21,11 @@ const out = await page.evaluate(async () => {
   const ui = window.__swUI;
   const raf = (n) => new Promise((res) => { const st = () => { if (--n <= 0) res(); else requestAnimationFrame(st); }; requestAnimationFrame(st); });
   g.player.debugGod = false;
-  // 找任意真实箱子开面板
-  const chest = g.world.chests.find((c) => c.items && c.items.some(Boolean));
+  // 用已知亡命箱（真实存档坐标）——首件带物箱可能是锁箱走不开分支
+  const chest = g.world.chests.find((c) => c.x === 2243 && c.y === 365)
+    ?? g.world.chests.find((c) => c.items && c.items.some(Boolean));
   if (!chest) return { fail: 'no chest' };
-  g.player.x = (chest.x + 2) * 16; g.player.y = (chest.y - 1) * 16;
+  g.player.x = (chest.x + 2) * 16; g.player.y = (chest.y - 2) * 16;
   g.player.vx = 0; g.player.vy = 0;
   g.tryOpenChest(chest);
   const panelOpen0 = !!g.openChestRef?.();

@@ -1,0 +1,635 @@
+index-94TBzt6R.js:1499 [prewarmGL] WebGL 管线预热完成 25ms
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+Canvas2D: Multiple readback operations using getImageData are faster with the willReadFrequently attribute set to true. See: <URL>
+index-94TBzt6R.js:1500 [rload] vanilla/Misc_noise.png | vimages=294
+index-94TBzt6R.js:1500 [rload] vanilla/Misc_Ripples.png | vimages=295
+index-94TBzt6R.js:1500 [rload] vanilla/LiquidSlope_0.png | vimages=296
+index-94TBzt6R.js:1500 [rload] vanilla/LiquidSlope_1.png | vimages=297
+index-94TBzt6R.js:1500 [rload] vanilla/Flame_2.png | vimages=298
+index-94TBzt6R.js:1500 [rload] vanilla/Flame_10.png | vimages=299
+index-94TBzt6R.js:1500 [rload] vanilla/Flame_9.png | vimages=300
+index-94TBzt6R.js:1500 [rload] vanilla/Flame_12.png | vimages=301
+index-94TBzt6R.js:1500 [rload] vanilla/Flame_11.png | vimages=302
+index-94TBzt6R.js:1500 [rload] vanilla/Flame_0.png | vimages=303
+index-94TBzt6R.js:1500 [rload] vanilla/Flame_4.png | vimages=304
+index-94TBzt6R.js:1500 [rload] vanilla/Waterfall_11.png | vimages=305
+index-94TBzt6R.js:1500 [rload] vanilla/Waterfall_12.png | vimages=306
+index-94TBzt6R.js:1500 [rload] vanilla/House_Banner_1.png | vimages=307
+index-94TBzt6R.js:1500 [rload] vanilla/Angler_Default.png | vimages=308
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_369.png | vimages=309
+index-94TBzt6R.js:1500 [rload] vanilla/Nurse_Default.png | vimages=310
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_18.png | vimages=311
+index-94TBzt6R.js:1500 [rload] vanilla/Dog_Labrador.png | vimages=312
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_638.png | vimages=313
+index-94TBzt6R.js:1500 [rload] vanilla/SlimeOld_Default.png | vimages=314
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_679.png | vimages=315
+index-94TBzt6R.js:1500 [rload] vanilla/SlimeGreen_Default.png | vimages=316
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_678.png | vimages=317
+index-94TBzt6R.js:1500 [rload] vanilla/Cat_Siamese.png | vimages=318
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_637.png | vimages=319
+index-94TBzt6R.js:1500 [rload] vanilla/Bunny_White.png | vimages=320
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_656.png | vimages=321
+index-94TBzt6R.js:1500 [rload] vanilla/OldMan_Default.png | vimages=322
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_37.png | vimages=323
+index-94TBzt6R.js:1500 [rload] vanilla/DyeTrader_Default.png | vimages=324
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_207.png | vimages=325
+index-94TBzt6R.js:1500 [rload] vanilla/Guide_Default.png | vimages=326
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_22.png | vimages=327
+index-94TBzt6R.js:1500 [rload] vanilla/Painter_Default.png | vimages=328
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_227.png | vimages=329
+index-94TBzt6R.js:1500 [rload] vanilla/Merchant_Default.png | vimages=330
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_17.png | vimages=331
+index-94TBzt6R.js:1500 [rload] vanilla/BestiaryGirl_Default.png | vimages=332
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_633.png | vimages=333
+index-94TBzt6R.js:1500 [rload] vanilla/Demolitionist_Default.png | vimages=334
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_38.png | vimages=335
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_26.png | vimages=336
+index-94TBzt6R.js:1500 [rload] vanilla/SlimeCopper_Default.png | vimages=337
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_684.png | vimages=338
+index-94TBzt6R.js:1500 [rload] vanilla/Dust.png | vimages=339
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_1.png | vimages=340
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_3.png | vimages=341
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_2.png | vimages=342
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_27.png | vimages=343
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_39.png | vimages=344
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_22.png | vimages=345
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_14.png | vimages=346
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_17.png | vimages=347
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_4.png | vimages=348
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_53.png | vimages=349
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_48.png | vimages=350
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_33.png | vimages=351
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_Head_47.png | vimages=352
+index-94TBzt6R.js:1500 [rload] vanilla/Bubble.png | vimages=353
+index-94TBzt6R.js:1500 [rload] vanilla/Flame.png | vimages=354
+index-94TBzt6R.js:1500 [rload] vanilla/Tiles_27.png | vimages=355
+index-94TBzt6R.js:1500 [rload] vanilla/Tiles_26.png | vimages=356
+index-94TBzt6R.js:1500 [rload] vanilla/Tiles_213.png | vimages=357
+index-94TBzt6R.js:1500 [rload] vanilla/Tiles_20.png | vimages=358
+index-94TBzt6R.js:1500 [rload] vanilla/Tiles_330.png | vimages=359
+index-94TBzt6R.js:1500 [rload] vanilla/Tiles_331.png | vimages=360
+index-94TBzt6R.js:1500 [rload] vanilla/Wall_4.png | vimages=361
+index-94TBzt6R.js:1500 [rload] vanilla/BestiaryGirl_Default_Transformed.png | vimages=362
+index-94TBzt6R.js:1500 [rload] vanilla/Wings_3.png | vimages=363
+index-94TBzt6R.js:1500 [rload] vanilla/Acc_Shoes_1.png | vimages=364
+index-94TBzt6R.js:1500 [rload] vanilla/Extra_58.png | vimages=365
+index-94TBzt6R.js:1500 [rload] vanilla/Projectile_654.png | vimages=366
+index-94TBzt6R.js:978 [gpulog] frame=54 围栏滞后(p50/max)=28.4/36.5ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=8.48MB  上传=0.00MB(0笔/帧)  draw=40/帧  延迟p50=0.0ms
+  worldLight     驻留=169.34MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=14.9ms
+  waterDistortion 驻留=328.41MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=14.8ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=30.2ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=30.1ms
+index-94TBzt6R.js:1500 [rbake] 载入终态保险:全量标脏一次(晚到表对齐)
+index-94TBzt6R.js:978 [gpulog] frame=169 围栏滞后(p50/max)=28.6/122.1ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=43/帧  延迟p50=0.0ms
+  worldLight     驻留=529.97MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=15.8ms
+  waterDistortion 驻留=1047.20MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=15.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.2ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.2ms
+index-94TBzt6R.js:978 [gpulog] frame=287 围栏滞后(p50/max)=28.4/122.1ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=43/帧  延迟p50=0.0ms
+  worldLight     驻留=900.01MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=15.8ms
+  waterDistortion 驻留=1784.73MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=15.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.1ms
+index-94TBzt6R.js:978 [gpulog] frame=398 围栏滞后(p50/max)=28.4/122.1ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=43/帧  延迟p50=0.0ms
+  worldLight     驻留=1248.10MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=15.9ms
+  waterDistortion 驻留=2478.51MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=15.9ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.1ms
+index-94TBzt6R.js:1500 [rload] vanilla/Projectile_9.png | vimages=367
+index-94TBzt6R.js:978 [gpulog] frame=486 围栏滞后(p50/max)=29.5/122.1ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=45/帧  延迟p50=0.0ms
+  worldLight     驻留=1524.06MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.7ms
+  waterDistortion 驻留=3028.54MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=16.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.5ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.5ms
+index-94TBzt6R.js:1934 [mem] JS堆 393→403MB (+11) | 贴图+1→367 chunk=42 实体=29 粒子=99
+console.warn @ index-94TBzt6R.js:1934
+(anonymous) @ index-94TBzt6R.js:1500
+setInterval
+attachMemSentinel @ index-94TBzt6R.js:1500
+afterWorldLoad @ index-94TBzt6R.js:1500
+loadWorld @ index-94TBzt6R.js:1500
+await in loadWorld
+W @ index-94TBzt6R.js:1933
+await in W
+ge @ index-94TBzt6R.js:1933
+onPlay @ index-94TBzt6R.js:1933
+(anonymous) @ index-94TBzt6R.js:1849
+close @ index-94TBzt6R.js:1849
+_ @ index-94TBzt6R.js:1849
+index-94TBzt6R.js:978 [gpulog] frame=593 围栏滞后(p50/max)=29.3/122.1ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=45/帧  延迟p50=0.0ms
+  worldLight     驻留=1859.61MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.4ms
+  waterDistortion 驻留=3697.32MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=16.4ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.5ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.5ms
+index-94TBzt6R.js:978 [gpulog] frame=711 围栏滞后(p50/max)=29.6/122.1ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=47/帧  延迟p50=0.0ms
+  worldLight     驻留=2229.65MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.0ms
+  waterDistortion 驻留=4434.86MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=17.0ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.9ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.9ms
+index-94TBzt6R.js:978 [gpulog] frame=830 围栏滞后(p50/max)=29.3/67.8ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=47/帧  延迟p50=0.0ms
+  worldLight     驻留=2602.82MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.2ms
+  waterDistortion 驻留=5178.64MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=17.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.9ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.8ms
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_1257.png | vimages=368
+index-94TBzt6R.js:978 [gpulog] frame=946 围栏滞后(p50/max)=28.4/62.5ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=47/帧  延迟p50=0.0ms
+  worldLight     驻留=2966.59MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.0ms
+  waterDistortion 驻留=5903.67MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=17.0ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.1ms
+index-94TBzt6R.js:978 [gpulog] frame=1066 围栏滞后(p50/max)=28.7/62.5ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=47/帧  延迟p50=0.0ms
+  worldLight     驻留=3342.90MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=18.5ms
+  waterDistortion 驻留=6653.71MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=18.6ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.5ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.5ms
+index-94TBzt6R.js:978 [gpulog] frame=1182 围栏滞后(p50/max)=28.7/53.3ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=47/帧  延迟p50=0.0ms
+  worldLight     驻留=3706.67MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.0ms
+  waterDistortion 驻留=7378.74MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=18.6ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.2ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.2ms
+index-94TBzt6R.js:978 [gpulog] frame=1298 围栏滞后(p50/max)=28.8/53.3ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=46/帧  延迟p50=0.0ms
+  worldLight     驻留=4070.44MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.3ms
+  waterDistortion 驻留=8103.78MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=18.9ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.2ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.2ms
+index-94TBzt6R.js:1934 [mem] JS堆 402→413MB (+11) | 贴图+0→368 chunk=48 实体=36 粒子=182
+console.warn @ index-94TBzt6R.js:1934
+(anonymous) @ index-94TBzt6R.js:1500
+index-94TBzt6R.js:978 [gpulog] frame=1396 围栏滞后(p50/max)=29.5/86.0ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=47/帧  延迟p50=0.0ms
+  worldLight     驻留=4377.76MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.3ms
+  waterDistortion 驻留=8716.30MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=18.9ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.4ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.4ms
+index-94TBzt6R.js:978 [gpulog] frame=1493 围栏滞后(p50/max)=31.4/86.0ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=48/帧  延迟p50=0.0ms
+  worldLight     驻留=4681.95MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=18.7ms
+  waterDistortion 驻留=9322.58MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=20.2ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.1ms
+index-94TBzt6R.js:978 [gpulog] frame=1601 围栏滞后(p50/max)=33.2/109.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=47/帧  延迟p50=0.0ms
+  worldLight     驻留=5020.63MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=18.7ms
+  waterDistortion 驻留=9997.61MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=20.2ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.2ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.2ms
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_77.png | vimages=369
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_76.png | vimages=370
+index-94TBzt6R.js:978 [gpulog] frame=1694 围栏滞后(p50/max)=32.2/109.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=49/帧  延迟p50=0.0ms
+  worldLight     驻留=5312.27MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.2ms
+  waterDistortion 驻留=10578.89MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=19.0ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.9ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.9ms
+index-94TBzt6R.js:978 [gpulog] frame=1799 围栏滞后(p50/max)=32.3/109.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=51/帧  延迟p50=0.0ms
+  worldLight     驻留=5641.54MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=19.3ms
+  waterDistortion 驻留=11235.17MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=19.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.0ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.0ms
+index-94TBzt6R.js:978 [gpulog] frame=1918 围栏滞后(p50/max)=32.4/109.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=54/帧  延迟p50=0.0ms
+  worldLight     驻留=6014.72MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=21.7ms
+  waterDistortion 驻留=11978.95MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=21.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.0ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.0ms
+index-94TBzt6R.js:978 [gpulog] frame=2035 围栏滞后(p50/max)=30.5/109.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.15MB  上传=0.00MB(0笔/帧)  draw=54/帧  延迟p50=0.0ms
+  worldLight     驻留=6381.62MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=18.7ms
+  waterDistortion 驻留=12672.74MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=18.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.6ms
+index-94TBzt6R.js:978 [gpulog] frame=2153 围栏滞后(p50/max)=30.9/109.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=16.17MB  上传=0.00MB(0笔/帧)  draw=55/帧  延迟p50=0.0ms
+  worldLight     驻留=6751.66MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=18.8ms
+  waterDistortion 驻留=12672.74MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=21.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.7ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.7ms
+index-94TBzt6R.js:1934 [mem] JS堆 400→437MB (+37) | 贴图+0→370 chunk=71 实体=29 粒子=112
+console.warn @ index-94TBzt6R.js:1934
+(anonymous) @ index-94TBzt6R.js:1500
+index-94TBzt6R.js:1500 [rload] vanilla/Waterfall_4.png | vimages=371
+index-94TBzt6R.js:978 [gpulog] frame=2272 围栏滞后(p50/max)=31.9/87.7ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=49/帧  延迟p50=0.0ms
+  worldLight     驻留=7124.84MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=19.5ms
+  waterDistortion 驻留=12672.74MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=25.6ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.5ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=36.5ms
+index-94TBzt6R.js:1500 [rload] vanilla/Liquid_3.png | vimages=372
+index-94TBzt6R.js:1500 [rload] vanilla/LiquidSlope_3.png | vimages=373
+index-94TBzt6R.js:1500 [rload] vanilla/Misc_water_3.png | vimages=374
+index-94TBzt6R.js:978 [gpulog] frame=2390 围栏滞后(p50/max)=31.8/57.7ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=49/帧  延迟p50=0.0ms
+  worldLight     驻留=7494.88MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=18.7ms
+  waterDistortion 驻留=13372.77MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=23.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.3ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.3ms
+index-94TBzt6R.js:1934 [mem] JS堆 437→454MB (+17) | 贴图+4→374 chunk=114 实体=27 粒子=53
+console.warn @ index-94TBzt6R.js:1934
+(anonymous) @ index-94TBzt6R.js:1500
+index-94TBzt6R.js:978 [gpulog] frame=2509 围栏滞后(p50/max)=31.8/57.7ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=49/帧  延迟p50=0.0ms
+  worldLight     驻留=7868.06MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.7ms
+  waterDistortion 驻留=13791.54MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=21.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.4ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.3ms
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_3.png | vimages=375
+index-94TBzt6R.js:978 [gpulog] frame=2627 围栏滞后(p50/max)=31.7/57.7ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=49/帧  延迟p50=0.0ms
+  worldLight     驻留=8238.10MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.9ms
+  waterDistortion 驻留=14529.07MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=20.1ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.1ms
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_132.png | vimages=376
+index-94TBzt6R.js:1500 [rload] vanilla/Flame_1.png | vimages=377
+index-94TBzt6R.js:978 [gpulog] frame=2746 围栏滞后(p50/max)=31.0/64.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=49/帧  延迟p50=0.0ms
+  worldLight     驻留=8611.27MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.4ms
+  waterDistortion 驻留=15116.60MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=19.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+index-94TBzt6R.js:978 [gpulog] frame=2855 围栏滞后(p50/max)=30.8/64.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=50/帧  延迟p50=0.0ms
+  worldLight     驻留=8953.09MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.1ms
+  waterDistortion 驻留=15116.60MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=19.1ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.1ms
+index-94TBzt6R.js:978 [gpulog] frame=2968 围栏滞后(p50/max)=31.0/64.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=60/帧  延迟p50=0.0ms
+  worldLight     驻留=9307.45MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.1ms
+  waterDistortion 驻留=15116.60MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=19.8ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.2ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=34.3ms
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_187.png | vimages=378
+index-94TBzt6R.js:978 [gpulog] frame=3087 围栏滞后(p50/max)=31.1/64.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=57/帧  延迟p50=0.0ms
+  worldLight     驻留=9680.62MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.3ms
+  waterDistortion 驻留=15285.36MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=29.2ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+index-94TBzt6R.js:1500 [rload] vanilla/HealthBar1.png | vimages=379
+index-94TBzt6R.js:1500 [rload] vanilla/HealthBar2.png | vimages=380
+index-94TBzt6R.js:978 [gpulog] frame=3208 围栏滞后(p50/max)=31.2/64.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=59/帧  延迟p50=0.0ms
+  worldLight     驻留=10060.07MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.2ms
+  waterDistortion 驻留=16041.64MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=20.1ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+index-94TBzt6R.js:978 [gpulog] frame=3328 围栏滞后(p50/max)=32.9/64.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=59/帧  延迟p50=0.0ms
+  worldLight     驻留=10436.38MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.7ms
+  waterDistortion 驻留=16379.16MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.9ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.9ms
+index-94TBzt6R.js:978 [gpulog] frame=3447 围栏滞后(p50/max)=32.8/45.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=57/帧  延迟p50=0.0ms
+  worldLight     驻留=10809.56MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.4ms
+  waterDistortion 驻留=16379.16MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.4ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.5ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.5ms
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_430.png | vimages=381
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_200.png | vimages=382
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_2.png | vimages=383
+index-94TBzt6R.js:978 [gpulog] frame=3568 围栏滞后(p50/max)=31.8/45.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=48/帧  延迟p50=0.0ms
+  worldLight     驻留=11189.01MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.5ms
+  waterDistortion 驻留=16379.16MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=31.4ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.1ms
+index-94TBzt6R.js:1934 [mem] JS堆 379→389MB (+10) | 贴图+3→383 chunk=192 实体=34 粒子=65
+console.warn @ index-94TBzt6R.js:1934
+(anonymous) @ index-94TBzt6R.js:1500
+index-94TBzt6R.js:978 [gpulog] frame=3688 围栏滞后(p50/max)=31.5/39.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=48/帧  延迟p50=0.0ms
+  worldLight     驻留=11565.32MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.3ms
+  waterDistortion 驻留=16379.16MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=31.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.9ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.9ms
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_1.png | vimages=384
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_2.png | vimages=385
+index-94TBzt6R.js:978 [gpulog] frame=3807 围栏滞后(p50/max)=31.5/39.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=47/帧  延迟p50=0.0ms
+  worldLight     驻留=11938.50MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.3ms
+  waterDistortion 驻留=16379.16MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=31.8ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.7ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.7ms
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_552.png | vimages=386
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_551.png | vimages=387
+index-94TBzt6R.js:978 [gpulog] frame=3927 围栏滞后(p50/max)=31.5/39.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=48/帧  延迟p50=0.0ms
+  worldLight     驻留=12314.81MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.3ms
+  waterDistortion 驻留=16529.17MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=32.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.3ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.3ms
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_263.png | vimages=388
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_264.png | vimages=389
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_3.png | vimages=390
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_262.png | vimages=391
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_4.png | vimages=392
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_5.png | vimages=393
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_154.png | vimages=394
+index-94TBzt6R.js:978 [gpulog] frame=4047 围栏滞后(p50/max)=31.3/36.0ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.16MB  上传=0.00MB(0笔/帧)  draw=48/帧  延迟p50=0.0ms
+  worldLight     驻留=12691.12MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=15.9ms
+  waterDistortion 驻留=16610.42MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.1ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.1ms
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_186.png | vimages=395
+index-94TBzt6R.js:978 [gpulog] frame=4167 围栏滞后(p50/max)=31.3/41.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=50/帧  延迟p50=0.0ms
+  worldLight     驻留=13067.43MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.3ms
+  waterDistortion 驻留=16660.42MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=32.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.3ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.3ms
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_190.png | vimages=396
+index-94TBzt6R.js:1934 [mem] JS堆 376→389MB (+13) | 贴图+2→396 chunk=192 实体=80 粒子=169
+console.warn @ index-94TBzt6R.js:1934
+(anonymous) @ index-94TBzt6R.js:1500
+index-94TBzt6R.js:978 [gpulog] frame=4287 围栏滞后(p50/max)=31.3/41.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=47/帧  延迟p50=0.0ms
+  worldLight     驻留=13443.74MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.5ms
+  waterDistortion 驻留=17054.19MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.8ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.0ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.1ms
+index-94TBzt6R.js:978 [gpulog] frame=4407 围栏滞后(p50/max)=31.3/43.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=56/帧  延迟p50=0.0ms
+  worldLight     驻留=13820.06MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.4ms
+  waterDistortion 驻留=17110.44MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=32.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.9ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.9ms
+index-94TBzt6R.js:978 [gpulog] frame=4526 围栏滞后(p50/max)=31.1/43.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=56/帧  延迟p50=0.0ms
+  worldLight     驻留=14193.23MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.2ms
+  waterDistortion 驻留=17422.96MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=31.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.9ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.9ms
+index-94TBzt6R.js:1934 [mem] JS堆 389→399MB (+10) | 贴图+0→396 chunk=192 实体=43 粒子=93
+console.warn @ index-94TBzt6R.js:1934
+(anonymous) @ index-94TBzt6R.js:1500
+index-94TBzt6R.js:978 [gpulog] frame=4645 围栏滞后(p50/max)=31.1/43.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=56/帧  延迟p50=0.0ms
+  worldLight     驻留=14566.41MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.4ms
+  waterDistortion 驻留=18166.74MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=30.8ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+index-94TBzt6R.js:978 [gpulog] frame=4765 围栏滞后(p50/max)=31.3/43.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=59/帧  延迟p50=0.0ms
+  worldLight     驻留=14942.72MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.6ms
+  waterDistortion 驻留=18916.78MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=18.6ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.1ms
+index-94TBzt6R.js:978 [gpulog] frame=4885 围栏滞后(p50/max)=31.3/43.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=15319.03MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.8ms
+  waterDistortion 驻留=19666.81MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=17.9ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=37.2ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=37.2ms
+index-94TBzt6R.js:978 [gpulog] frame=5005 围栏滞后(p50/max)=32.3/43.4ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=15695.34MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.0ms
+  waterDistortion 驻留=20416.85MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=17.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.2ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.2ms
+index-94TBzt6R.js:1500 [rload] vanilla/Gore_249.png | vimages=397
+index-94TBzt6R.js:978 [gpulog] frame=5121 围栏滞后(p50/max)=35.6/65.7ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=16059.11MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.3ms
+  waterDistortion 驻留=21141.88MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=17.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.6ms
+index-94TBzt6R.js:978 [gpulog] frame=5232 围栏滞后(p50/max)=31.2/65.7ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=57/帧  延迟p50=0.0ms
+  worldLight     驻留=16407.20MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.7ms
+  waterDistortion 驻留=21835.66MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=17.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.6ms
+index-94TBzt6R.js:978 [gpulog] frame=5352 围栏滞后(p50/max)=30.4/65.7ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=57/帧  延迟p50=0.0ms
+  worldLight     驻留=16783.51MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.9ms
+  waterDistortion 驻留=22585.70MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=17.9ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.5ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=38.5ms
+index-94TBzt6R.js:978 [gpulog] frame=5471 围栏滞后(p50/max)=30.1/65.7ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=57/帧  延迟p50=0.0ms
+  worldLight     驻留=17156.69MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.9ms
+  waterDistortion 驻留=23329.48MB  上传=6.25MB(3笔/帧)  draw=1/帧  延迟p50=17.9ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=35.6ms
+index-94TBzt6R.js:978 [gpulog] frame=5591 围栏滞后(p50/max)=30.6/65.7ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=59/帧  延迟p50=0.0ms
+  worldLight     驻留=17533.00MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.9ms
+  waterDistortion 驻留=23454.49MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=18.6ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.9ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.9ms
+index-94TBzt6R.js:1500 [rload] vanilla/NPC_1.png | vimages=398
+index-94TBzt6R.js:978 [gpulog] frame=5711 围栏滞后(p50/max)=30.7/65.7ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=59/帧  延迟p50=0.0ms
+  worldLight     驻留=17909.31MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=17.9ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=19.4ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.1ms
+index-94TBzt6R.js:1934 [mem] JS堆 371→381MB (+10) | 贴图+1→398 chunk=192 实体=34 粒子=82
+console.warn @ index-94TBzt6R.js:1934
+(anonymous) @ index-94TBzt6R.js:1500
+index-94TBzt6R.js:978 [gpulog] frame=5831 围栏滞后(p50/max)=31.2/40.5ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=57/帧  延迟p50=0.0ms
+  worldLight     驻留=18285.62MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.9ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=21.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.8ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.9ms
+index-94TBzt6R.js:978 [gpulog] frame=5950 围栏滞后(p50/max)=31.8/40.5ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=61/帧  延迟p50=0.0ms
+  worldLight     驻留=18658.80MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.4ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=32.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.1ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.1ms
+index-94TBzt6R.js:978 [gpulog] frame=6071 围栏滞后(p50/max)=32.3/40.5ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=60/帧  延迟p50=0.0ms
+  worldLight     驻留=19038.25MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.2ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.4ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.4ms
+index-94TBzt6R.js:978 [gpulog] frame=6190 围栏滞后(p50/max)=32.9/47.9ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=62/帧  延迟p50=0.0ms
+  worldLight     驻留=19411.42MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.2ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.5ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.5ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.5ms
+index-94TBzt6R.js:978 [gpulog] frame=6311 围栏滞后(p50/max)=33.0/47.9ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=19790.87MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.4ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+index-94TBzt6R.js:1500 [rload] vanilla/Tiles_23.png | vimages=399
+index-94TBzt6R.js:1500 [rload] vanilla/Tiles_32.png | vimages=400
+index-94TBzt6R.js:1500 [rload] vanilla/Tiles_24.png | vimages=401
+index-94TBzt6R.js:978 [gpulog] frame=6431 围栏滞后(p50/max)=33.0/47.9ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=59/帧  延迟p50=0.0ms
+  worldLight     驻留=20167.18MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.6ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+index-94TBzt6R.js:978 [gpulog] frame=6550 围栏滞后(p50/max)=33.0/47.9ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=20540.36MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.7ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+index-94TBzt6R.js:978 [gpulog] frame=6670 围栏滞后(p50/max)=33.0/47.9ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=20916.67MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.8ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+index-94TBzt6R.js:978 [gpulog] frame=6790 围栏滞后(p50/max)=32.8/47.9ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=21292.98MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.8ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+index-94TBzt6R.js:978 [gpulog] frame=6910 围栏滞后(p50/max)=32.8/42.9ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=21669.30MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.6ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+index-94TBzt6R.js:978 [gpulog] frame=7030 围栏滞后(p50/max)=32.8/42.9ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=22045.61MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.7ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+index-94TBzt6R.js:978 [gpulog] frame=7148 围栏滞后(p50/max)=32.9/67.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=23.24MB  上传=0.00MB(0笔/帧)  draw=57/帧  延迟p50=0.0ms
+  worldLight     驻留=22415.65MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.6ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+index-94TBzt6R.js:1500 [rload] vanilla/Tiles_636.png | vimages=402
+index-94TBzt6R.js:1500 [rload] vanilla/Waterfall_3.png | vimages=403
+index-94TBzt6R.js:978 [gpulog] frame=7264 围栏滞后(p50/max)=32.9/67.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=32.88MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=22779.42MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.6ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.3ms
+index-94TBzt6R.js:978 [gpulog] frame=7383 围栏滞后(p50/max)=33.0/67.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=32.88MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=23152.59MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.6ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.4ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.4ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.4ms
+ [gpulog] frame=7502 围栏滞后(p50/max)=33.1/67.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=32.88MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=23525.77MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.7ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.6ms
+ [mem] JS堆 363→385MB (+22) | 贴图+0→403 chunk=192 实体=42 粒子=160
+ [gpulog] frame=7621 围栏滞后(p50/max)=33.2/67.2ms
+  menubg         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=0.0ms
+  glfx           驻留=32.88MB  上传=0.00MB(0笔/帧)  draw=58/帧  延迟p50=0.0ms
+  worldLight     驻留=23898.94MB  上传=3.14MB(2笔/帧)  draw=1/帧  延迟p50=16.7ms
+  waterDistortion 驻留=23635.75MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+  screenFx       驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms
+  aurora         驻留=0.00MB  上传=0.00MB(0笔/帧)  draw=0/帧  延迟p50=33.7ms

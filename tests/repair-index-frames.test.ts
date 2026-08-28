@@ -84,6 +84,36 @@ describe('repairIndexFramesInStore', () => {
     expect(repairIndexFramesInStore(st)).toBe(0);
     expect(st.frameX[st.idx(4, 2)]).toBe(10);
   });
+
+  it('平台楼梯坡度修复：楼梯帧码反推 slope（wld 导入门缺陷存量档嵌合态）', () => {
+    const st = store20();
+    // 嵌合态（原版不可能产出）：楼梯帧 + slope=0——坡支专码 180→slope1、144→slope2
+    setCell(st, 2, 2, PLATFORM, 180, 576);
+    setCell(st, 3, 2, PLATFORM, 144, 576);
+    setCell(st, 4, 2, PLATFORM, 468, 54);
+    setCell(st, 5, 2, PLATFORM, 450, 54);
+    setCell(st, 6, 2, PLATFORM, 378, 54);
+    // 合法平帧（WorldGen.cs:86748 平支专码，含邻坡平台的 216/234/252/270/288）不动
+    setCell(st, 2, 4, PLATFORM, 90, 576);
+    setCell(st, 3, 4, PLATFORM, 216, 522);
+    setCell(st, 4, 4, PLATFORM, 234, 522);
+    setCell(st, 5, 4, PLATFORM, 270, 522);
+    setCell(st, 6, 4, PLATFORM, 288, 522);
+    // 已带坡（正常游戏内锤炼产物）不动
+    const i = st.idx(7, 2);
+    st.type[i] = PLATFORM; st.flags[i] = 1; st.frameX[i] = 180; st.frameY[i] = 576; st.slope[i] = 1;
+    expect(repairIndexFramesInStore(st)).toBe(5);
+    expect(st.slope[st.idx(2, 2)]).toBe(1);
+    expect(st.slope[st.idx(3, 2)]).toBe(2);
+    expect(st.slope[st.idx(4, 2)]).toBe(1);
+    expect(st.slope[st.idx(5, 2)]).toBe(2);
+    expect(st.slope[st.idx(6, 2)]).toBe(2);
+    for (const [x, y] of [[2, 4], [3, 4], [4, 4], [5, 4], [6, 4]] as const) {
+      expect(st.slope[st.idx(x, y)]).toBe(0);
+    }
+    // 幂等
+    expect(repairIndexFramesInStore(st)).toBe(0);
+  });
 });
 
 function store20(): TileStore {

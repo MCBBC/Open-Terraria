@@ -19568,7 +19568,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   被亡命箱炸药炸死后背包/宝箱界面滞留）。vanilla 是每帧 UI 逻辑门，此处同位。
     if (this.player.dead) {
       this.closeChestPanel?.();
-      this.cb.closeInventory?.();
+      this.closeInventory?.();   // UI 注入到 Game 实例字段（非 cb 包——cb 无此键）
       return;
     }
     const c = this.openChestRef?.();

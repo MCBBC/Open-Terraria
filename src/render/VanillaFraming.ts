@@ -164,6 +164,9 @@ let ROCKLAYER_G = 0;
 function lookupSetFn(raw: string): ((t: number) => boolean) | null {
   const k2 = parseSetRefKey(raw);
   if (k2 == null) return null;
+  // 二维矩阵行(S.tileMerge(var) → __row_N):与 execCall 预重写/tileMergeAttemptFrametest 同款
+  // 合成(原版 SetupTileMerge M.cs:3703-3720 六对活查表;曾漏合成 ⇒ 行谓词恒惰)
+  if (k2.startsWith('__row_')) { const n2 = +k2.slice(6); return (d: number) => tileMerge[n2]?.[d] ?? false; }
   return (SET_REF_FN[k2 as keyof typeof SET_REF_FN] ?? null) as ((t: number) => boolean) | null;
 }
 
@@ -250,6 +253,8 @@ const SET_REF_FN = {
   Ash: (t: number) => SETS_ASH[t] ?? false,
   Snow: (t: number) => SETS_SNOW[t] ?? false,
   IcesSnow: (t: number) => SETS_ICES_SNOW[t] ?? false,
+  // 原版 TileID.cs:295 IcesSlush = CreateBoolSet(161,200,163,164,224)(曾表外死引用)
+  IcesSlush: (t: number) => t === 161 || t === 200 || t === 163 || t === 164 || t === 224,
   DontMergeWithSnow: (t: number) => DONT_MERGE_WITH_SNOW[t] ?? false,
   OreMergesWithMud: (t: number) => ORE_MERGES_WITH_MUD[t] ?? false,
   BlockMergesWithMergeAllBlock: (t: number) => BLOCK_MERGES_ALL(t),

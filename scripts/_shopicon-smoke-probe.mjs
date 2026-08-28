@@ -110,6 +110,12 @@ const shop = await page.evaluate(async (vids) => {
   const oldPath = vids.map((vid) => ({
     vid, correct: VIK[vid] ?? '(缺)', wrongOld: ITEM_DEFS[vid] ? ITEM_DEFS[vid].key : '(越界)',
   }));
+  // 等 HUD 根显示（进游戏后段才放 .sw-root,早拍截不到面板）
+  for (let i = 0; i < 40; i++) {
+    const rootEl = document.querySelector('.sw-root');
+    if (rootEl && getComputedStyle(rootEl).display !== 'none' && document.querySelector('.sw-hotbar')) break;
+    await new Promise((r2) => setTimeout(r2, 300));
+  }
   return { report, oldPath };
 }, PARTY_GIRL_VIDS);
 check('商店行=正确图标(dataURL 全等)', shop.report.every((x) => x.match),
@@ -177,8 +183,15 @@ check('首尘紧跟首发(≤8 tick)', smoke.tFirstDust >= 0 && smoke.tFirstDust
   `first=${smoke.firstThrowTick} firstDust=${smoke.tFirstDust}`);
 check('消耗品扣减', smoke.stackAfter >= 0 && smoke.stackAfter < 99, `stack=${smoke.stackAfter}`);
 
-// 烟尾视觉档：等素材/chunk 烘焙追上（裸世界首帧黑屏）→ 再投一枚,飞行中截屏
+// 烟尾视觉档：等素材/chunk 烘焙追上（裸世界首帧黑屏+HUD 晚挂）→ 重开商店补拍
 await new Promise((r) => setTimeout(r, 7000));
+await page.evaluate(() => {
+  window.__swUI.showNpcShop('probe-shop',
+    [{ key: '', vanillaId: 859, name: '沙滩球', price: 1 }], 999999);
+});
+await new Promise((r) => setTimeout(r, 1200));
+await page.screenshot({ path: '/tmp/shop-icons-fixed.png' });
+await page.evaluate(() => { window.__swUI.npcShop?.close?.(); });
 await page.evaluate(() => {
   const g = window.__swGame;
   g.input.mouseX = g.player.cx + 220; g.input.mouseY = g.player.cy - 50;
@@ -214,19 +227,27 @@ const full = await page.evaluate(async () => {
   const toastFull = (document.querySelector('.sw-toast')?.textContent || '').includes('背包');
   const buyFullBulk = g.npcShopBuy(859, undefined, undefined, true);   // 满包批量 → 拒
   const coinsBulk = g.coinsOwned();
-  // 腾一格 → 单买成功落格、钱只扣一笔
+  // 腾一格 → 单买成功落格、钱只扣一笔（快照深拷贝——slots 元素是活引用,后续
+  // 合并会原地改 stack,浅捕获会读到终值假象）
+  const snap = () => JSON.stringify(g.player.inv.slots.slice(0, 58));
   g.player.inv.slots[49] = null;
+  const ballsBefore3 = JSON.parse(snap()).filter((s) => s && s.id === ball).reduce((a, s) => a + s.stack, 0);
   const coinsP3 = g.coinsOwned();
   const buy3 = g.npcShopBuy(859, undefined);
-  const s49 = g.player.inv.slots[49];
+  const s49 = JSON.parse(snap())[49];
   const coins3 = g.coinsOwned();
   // 再腾一格 → bulk 10 全收进该格
   g.player.inv.slots[48] = null;
   const coinsP4 = g.coinsOwned();
   const buy4 = g.npcShopBuy(859, undefined, undefined, true);
-  const s48 = g.player.inv.slots[48];
+  const s48 = JSON.parse(snap())[48];
   const coins4 = g.coinsOwned();
+  const hits = [];
+  g.player.inv.slots.forEach((s, i) => { if (s && s.id === ball) hits.push([i, s.stack]); });
   return {
+    ballId: ball, ballsBefore3, hits,
+    s49Raw: s49,
+    s48Raw: s48,
     buyFull1, coinsUnchanged1: coins1 === coins0, bagIntact, toastFull,
     buyFullBulk, coinsUnchangedBulk: coinsBulk === coins0,
     buy3, s49IsBall: s49?.id === ball && s49?.stack === 1, coinsSpent3: coinsP3 - coins3,
@@ -238,7 +259,8 @@ check('满包背包内容零扰动', full.bagIntact === true);
 check('满包购买有「背包满」toast', full.toastFull === true);
 check('满包批量买=拒购且钱不动', full.buyFullBulk === false && full.coinsUnchangedBulk === true);
 check('腾一格单买=成功落格', full.buy3 === true && full.s49IsBall === true && full.coinsSpent3 > 0, JSON.stringify(full));
-check('腾一格批量=10 只入格', full.buy4 === true && full.s48IsBall === true && full.s48Stack === 10 && full.coinsSpent4 > 0,
+check('腾一格批量=10 只入账(合并优先,GetItem ③先于④)', full.buy4 === true
+  && full.hits.length === 1 && full.hits[0][1] === 11 && full.coinsSpent4 === full.coinsSpent3 * 10,
   JSON.stringify(full));
 
 console.log(`\n${pass} pass / ${fail} fail`);

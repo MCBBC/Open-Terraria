@@ -424,6 +424,14 @@ const TILE_MAP: Record<number, MapEntry> = {
  *  其余类型的 bits 4-6 直接丢弃（防止家具/装饰类杂波帧被切条/裁剪） */
 const NON_SOLID_SAVE_SLOPES = new Set([131, 351, 336, 340, 342, 341, 343, 344]);
 
+/** 原版 Main.tileSolid 为 true 的平台族（Main.cs:8032 / 10117-10120 / 10123-10127：
+ *  19 平台 + 427 竞技场平台 + 435-439 五色队伍平台）——vanilla SaveSlopes
+ *  （TileID.cs:429-432 = tileSolid ∪ NonSolidSaveSlopes）因此**含平台**，wld
+ *  平台坡度照存照载。★门禁不可用本仓 TILE_DEFS[].solid 近似：本仓碰撞域平台
+ *  solid=false（tileSolidTop 语义）——曾致导入世界平台楼梯坡度全丢，残成
+ *  「楼梯帧+slope=0」嵌合态（一档 576 格实证：渲染出孤立楼梯碎片、碰撞变平）。 */
+const VANILLA_SOLID_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+
 // wld item id → 内部 item key:原 ITEM_MAP 覆盖表已整体移除——本地键段随本地物品退役,
 // vi_ 段与 VANILLA_ITEM_KEY_BY_ID 完全冗余;且旧表曾把 71-74 钱币全折 coin_copper(面额缩水 bug)。
 // 战利品解析一律走 VANILLA_ITEM_KEY_BY_ID(:918)。
@@ -517,10 +525,12 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     if (lq > 0) liquidTypeArr[i] = wld.tiles.liquidType[i] || 1;
     // 电路位直拷（parser 已从 header2 提取 bit0-5）
     wireArr[i] = wld.tiles.wire[i];
-    // half/slope 只对 SaveSlopes 类型应用（WorldFile.cs:2623：tileSolid ∪ 非固体例外表；
-    // 其余类型——家具/装饰/植物——bits 4-6 是杂波,不落地,防切条裁剪）
+    // half/slope 只对 SaveSlopes 类型应用（WorldFile.cs:2623/2637：tileSolid ∪ 非固体
+    // 例外表；其余类型——家具/装饰/植物——bits 4-6 是杂波,不落地,防切条裁剪）。
+    // ★tileSolid 以原版域判（平台族补集见 VANILLA_SOLID_PLATFORM_SHEETS 注）
     if (wld.tiles.half[i] || wld.tiles.slope[i]) {
-      if (TILE_DEFS[type[i]]?.solid || NON_SOLID_SAVE_SLOPES.has(wt)) {
+      if (TILE_DEFS[type[i]]?.solid || VANILLA_SOLID_PLATFORM_SHEETS.has(wt)
+        || NON_SOLID_SAVE_SLOPES.has(wt)) {
         halfArr[i] = wld.tiles.half[i];
         slopeArr[i] = wld.tiles.slope[i];
       }
