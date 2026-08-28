@@ -5,7 +5,7 @@
 // 规格=UIGenProgressBar.ts 常量);面板底=Inventory_Back13 九宫格乘色
 // ((33,15,91)×0.685,与 UI.ts 原版像素面板同源);全程方角/硬边框/像素字体,
 // 无圆角无渐变。
-import { assetCacheState, assetsComplete, assetsCompleteFast, assetsRetriesExhausted, onAssetProgress, readSwTrace, swTrace, warmAllAssets, PHASE_LABEL, type AssetCacheState } from '../net/AssetCache';
+import { assetCacheState, assetCacheEnvOff, assetsComplete, assetsCompleteFast, assetsRetriesExhausted, onAssetProgress, readSwTrace, swTrace, warmAllAssets, PHASE_LABEL, type AssetCacheState } from '../net/AssetCache';
 import { Lang } from '../i18n/Lang';
 
 /** 原版 packed 色(UIGenProgressBar.ts 同源):corrupt 长条填充 4283888223 */
@@ -217,6 +217,9 @@ function phaseText(s: AssetCacheState): string {
  *  订阅一次性等 enabled 翻真再挂 */
 export function mountAssetBadge(): void {
   if (badgeEl || badgePending || typeof document === 'undefined') return;
+  // ★环境性关断不挂(dev 默认无 SW 管线,骨架会永久滞留——2026-08-28 用户实报;
+  //   与 doInitAssetCache 的 !PROD/?nosw 门严格同式;?sw 强制测试路径保留)
+  if (assetCacheEnvOff()) return;
   const s = assetCacheState();
   if (!s.enabled) {
     if (s.phase !== 'done') {

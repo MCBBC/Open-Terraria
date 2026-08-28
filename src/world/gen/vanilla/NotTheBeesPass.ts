@@ -122,6 +122,16 @@ const clearLava = (st: TileStore, i: number): void => {
   else if (t === LIQUID_TYPE.SHIMMER) st.liquidType[i] = LIQUID_TYPE.HONEY;
 };
 
+/** ★IIII29：FinishNotTheBees 细分相锚（x86 rig JJHook.NtbTag 同位镜像；
+ *  探针未注册时零开销——fntbTag 直发，热路径标走 safe 包裹防探针异常外溢）。 */
+let ntbCallSeq = 0;
+const fntbTag = (tag: string, a = 0, b = 0): void => {
+  (globalThis as { __swFCMark?: (t: string, a?: number, b?: number) => void }).__swFCMark?.(tag, a, b);
+};
+const fntbTagSafe = (tag: string, a = 0, b = 0): void => {
+  try { fntbTag(tag, a, b); } catch { /* probe */ }
+};
+
 // ============================================================
 // ① NotTheBees()（cs:25275-25507）
 // ============================================================
@@ -349,6 +359,8 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
   }
+  // ★IIII29：NTB 调用序锚（x86 CALLEND _ntbCallSeq 同位）
+  fntbTagSafe('NCALL', ++ntbCallSeq);
   try { g0.__swNTBCap?.('out', gs, st); } catch { /* probe */ }
 }
 
@@ -555,6 +567,8 @@ function placeJunglePlantImpl(st: TileStore, rng: RNG, gs: GenState, x: number, 
 export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
   const sf = gs.seedFlags;
   if (!sf.notTheBees || sf.skyblock) return;     // cs:25537
+  // ★IIII29：FNTB 窗锚（x86 JJHook.NtbTag 同位；值窗由探针在 marker 上开关）
+  fntbTagSafe('FNTBIN');
   const w = st.w, h = st.h;
   const ws = gs.worldSurface, rock = gs.rockLevel, bd = gs.beachDistance;
   const lavaLine = gs.lavaLine;
@@ -608,10 +622,11 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
         for (let a = m - num9; a <= m + num9; a++) {
           for (let b = n - num9; b <= n + num9; b++) {
             if (activeAt(st, a, b) && sheetAt(st, a, b) === 60) {
-              if (sheetAt(st, a, b + 1) === 444) genKillTile(st, rng, a, b + 1);
+              if (sheetAt(st, a, b + 1) === 444) { fntbTagSafe('KT1', m, n); genKillTile(st, rng, a, b + 1); }
               st.type[st.idx(a, b)] = CORRUPT_JUNGLE;
               if (activeAt(st, a, b - 1) && (sheetAt(st, a, b - 1) === 61 || sheetAt(st, a, b - 1) === 74)) {
                 st.flags[st.idx(a, b - 1)] = 0;
+                fntbTagSafe('P24', a, b - 1);
                 placePlantTile(st, rng, a, b - 1, 24);              // PlaceTile(24)
               }
             } else if (sheetAt(st, a, b - 1) === 233 || sheetAt(st, a, b - 1) === 82) {
@@ -623,10 +638,11 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
         for (let a = m - num9; a <= m + num9; a++) {
           for (let b = n - num9; b <= n + num9; b++) {
             if (activeAt(st, a, b) && sheetAt(st, a, b) === 60) {
-              if (sheetAt(st, a, b + 1) === 444) genKillTile(st, rng, a, b + 1);
+              if (sheetAt(st, a, b + 1) === 444) { fntbTagSafe('KT2', m, n); genKillTile(st, rng, a, b + 1); }
               st.type[st.idx(a, b)] = CRIMSON_JUNGLE;
               if (activeAt(st, a, b - 1) && (sheetAt(st, a, b - 1) === 61 || sheetAt(st, a, b - 1) === 74)) {
                 st.flags[st.idx(a, b - 1)] = 0;
+                fntbTagSafe('P201', a, b - 1);
                 placePlantTile(st, rng, a, b - 1, 201);             // PlaceTile(201)
               } else if (sheetAt(st, a, b - 1) === 233 || sheetAt(st, a, b - 1) === 82) {
                 genKillTile(st, rng, a, b - 1);                     // ★嵌套于草支内（cs:25656）
@@ -697,16 +713,19 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
       } else if (noTraps) {
         if (rng.int(0, 149) === 0) placeLarva(st, rng, m, n);
       } else if (rng.int(0, 224) === 0) {
+        fntbTagSafe('LARV', m, n);
         placeLarva(st, rng, m, n);                                       // PlaceTile(231)
       }
     }
+    // ★IIII29：主扫列尾锚（x86 MSC 同位——外层循环体末）
+    fntbTagSafe('MSC', m);
   }
   // dontStarve 蜘蛛墙/蛛网段（cs:25832-25902）——dstarve 门，纯 NTB 跳过
   if (dstarve && !remix) {
     // ……（组合种子支；纯 NTB 不可达。掷序全在门内。）
   }
   // 地表重种环（cs:25904-25930）：行 y∈[20,num)，列 x∈[20,w-20]
-  try { (globalThis as { __swFCMark?: (t: string) => void }).__swFCMark?.('RS'); } catch { /* probe */ }
+  fntbTagSafe('RS');
   for (let y = 20; y < num; y++) {
     for (let x = 20; x <= w - 20; x++) {
       if (!st.inBounds(x, y)) continue;
@@ -716,20 +735,30 @@ export function runFinishNotTheBees(st: TileStore, rng: RNG, gs: GenState): void
       if (!remix) {
         if (sheetOf(st.type[i]!) === 60) {
           st.type[i] = GRASS;
+          fntbTagSafe('TREE', x, y);
           if (rng.int(0, 1) === 0) growVanityTree(st, rng, x, y, true);   // 616 柳
           else growVanityTree(st, rng, x, y, false);                      // 596 樱
-          if (!activeAt(st, x, y - 1)) placePlantTile(st, rng, x, y - 1, 3);
+          if (!activeAt(st, x, y - 1)) {
+            fntbTagSafe('PL3', x, y - 1);
+            placePlantTile(st, rng, x, y - 1, 3);
+          }
         }
         if (sheetOf(st.type[i]!) === 59) st.type[i] = DIRT;
       } else {
         growTree(st, rng, gs, x, y);                                // TryGrowingTreeByType(5)
       }
+      // ★IIII29：环格锚（x86 RGC 同位——内层循环体末）
+      fntbTagSafe('RGC', x, y);
     }
+    fntbTagSafe('RGR', y, num);
   }
+  fntbTagSafe('RE');
   // tileSolid[379]=true（cs:25933）——同上备案
-  try { (globalThis as { __swFCMark?: (t: string) => void }).__swFCMark?.('RE_ODI'); } catch { /* probe */ }
+  fntbTagSafe('ODI');
   if (!remix) overGrownDungeon(st, rng, gs);                        // cs:25937
-  try { (globalThis as { __swFCMark?: (t: string) => void }).__swFCMark?.('ODO2'); } catch { /* probe */ }
+  fntbTagSafe('ODO2');
+  // ★IIII29：FNTB 出窗锚
+  fntbTagSafe('FNTBOUT');
 }
 
 /** PlaceTile(231)（cs:59991→Place3x3 cs:53549 num=-2 支 + SquareTileFrame 尾奏）：

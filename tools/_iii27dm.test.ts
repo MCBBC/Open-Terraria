@@ -71,17 +71,31 @@ function loadChestSink(): ChestRow[] {
   const origSample = rngObj.ur.internalSample.bind(rngObj.ur);
   let nDraws = 0;
   const drawStacks: string[] = [];
+  const drawVals: string[] = [];
   rngObj.ur.internalSample = () => {
     nDraws++;
     if (nDraws <= 340) {
       const s = new Error().stack ?? '';
-      // 取栈中前 6 个有意义的帧(game/src 内)
       const fr = s.split('\n').map((l) => l.trim()).filter((l) => l.includes('game/src'))
         .slice(0, 6).map((l) => l.replace(/^at /, '').replace(/.*vanilla\//, 'van:').replace(/\/Users[^)]*$/, ''));
       drawStacks.push(`${nDraws}\t${fr.join(' < ')}`);
     }
     return origSample();
   };
+  {
+    // 记录前 340 个样本值(与 x86 win 流同源对拍用)
+    let cnt = 0;
+    const inner = origSample;
+    // 包装采样值:利用 ur.sample 内部不可见,改从 nextIntRange 上层取太绕——直接再包一层 sample:
+    // RNG.ur.internalSample 已被替换为上方闭包;此处在其外套一层记录返回值。
+    const cur = rngObj.ur.internalSample.bind(rngObj.ur);
+    (rngObj.ur as unknown as { internalSample: () => number }).internalSample = () => {
+      const v = cur();
+      cnt++;
+      if (cnt <= 340) drawVals.push(`${cnt}\t${v.toPrecision(17)}`);
+      return v;
+    };
+  }
   void drawStacks;
   try {
     (globalThis as unknown as { __swDrawStacks?: string[] }).__swDrawStacks = drawStacks;
@@ -132,6 +146,7 @@ function loadChestSink(): ChestRow[] {
   writeFileSync(`${OUT}/j27-events.txt`, events.join('\n') + '\n');
   const stacksOut = (globalThis as unknown as { __swDrawStacks?: string[] }).__swDrawStacks ?? [];
   writeFileSync(`${OUT}/j27-stacks.txt`, stacksOut.join('\n') + '\n');
+  writeFileSync(`${OUT}/j27-vals.txt`, drawVals.join('\n') + '\n');
   // seg marks → 与 iii12fix 同视图
   writeFileSync(`${OUT}/j27-seg.txt`, segMarks.map((m) =>
     `${m.c}\t${m.n}${m.d !== undefined ? `\t${JSON.stringify(m.d)}` : ''}`).join('\n') + '\n');

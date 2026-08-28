@@ -954,6 +954,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // newWorld 上未覆盖此处(t1547 专录 trace 实锤 772-1232ms 派发)
     await startAssetPrewarm();
     const g = makeGame();
+    // 生成期预览位图 A/B(?wprev=0,2026-08-28 量化:60 passes × ~20 万像素扫描)
+    const wantPreview = (() => {
+      try { return new URLSearchParams(location.search).get('wprev') !== '0'; } catch { return true; }
+    })();
     await g.newWorld(cfg.seed || String(Date.now()), cfg.w, cfg.h,
       (label, p) => loadState.setProgress(label, p),
       {
@@ -961,8 +965,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         evil: cfg.evil,
         size: cfg.size as import('./world/World').WorldSize, // 尺寸档 0/1/2（generateWorld 按 SIZE_DIMS 派生 W/H）
         difficulty: cfg.difficulty,   // 世界难度 = Main.GameMode（Main.cs:2677；创建 UI 四档）
-        onWorldPartial: (world) => loadState.attachWorld(world), // 主线程 fallback：列扫描预览
-        onPreview: (f) => loadState.attachPreview(f),            // worker 路径：位图预览
+        ...(wantPreview ? {
+          onWorldPartial: (world) => loadState.attachWorld(world), // 主线程 fallback：列扫描预览
+          onPreview: (f) => loadState.attachPreview(f),            // worker 路径：位图预览
+        } : {}),
       });
     // onWorldReady 已进游戏；登记世界槽位并保存初始数据
     const meta = await worldStore.register({

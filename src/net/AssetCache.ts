@@ -447,6 +447,19 @@ let initInFlight: Promise<void> | null = null;
  *  = 版本叠哈希漂移(G→r403ge)⇒ SW 切名、暖存整批"失踪"、菜单贴图全空
  *  (用户 PC trace 06:07:21 实锤:两行 manifest ok + ver 叠变)。并发调用复用
  *  同一 Promise。 */
+/** 环境性关断判定(与 doInitAssetCache 的门严格同式):dev 默认关(!PROD,除非 ?sw
+ *  强制)/?nosw/非安全上下文/无 caches API。★资源徽标在关断环境下无意义——
+ *  无 SW 即无下载管线,骨架会永久滞留(2026-08-28 用户报 npm run dev 徽标永挂) */
+export function assetCacheEnvOff(): boolean {
+  if (typeof navigator === 'undefined' || !navigator.serviceWorker) return true;
+  const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
+  if (q.has('nosw')) return true;
+  if (!q.has('sw') && !import.meta.env.PROD) return true;
+  if (typeof isSecureContext !== 'undefined' && !isSecureContext) return true;
+  if (typeof caches === 'undefined') return true;
+  return false;
+}
+
 export function initAssetCache(): Promise<void> {
   if (!initInFlight) initInFlight = doInitAssetCache();
   return initInFlight;

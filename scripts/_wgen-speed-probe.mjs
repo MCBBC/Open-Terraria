@@ -33,6 +33,12 @@ await page.evaluateOnNewDocument(() => {
           (window).__wgen.events.push({ at: performance.now(), label: d.label, p: d.p });
         }
         if (d.type === 'icons') (window).__wgen.iconsDoneAt = performance.now();
+        if (d.type === 'preview') {
+          (window).__wgen.pv = (window).__wgen.pv || { n: 0, t: 0, last: 0 };
+          (window).__wgen.pv.n++;
+          (window).__wgen.pv.t += performance.now() - ((window).__wgen.pv.last || performance.now());
+          (window).__wgen.pv.last = performance.now();
+        }
         if (d.type === 'result' && d.world) (window).__wgen.total = performance.now();
       });
     }
@@ -62,7 +68,7 @@ await page.waitForFunction(() => window.__swGame?.world?.store?.w, { timeout: 30
 const readyAt = await page.evaluate(() => performance.now());
 const out = await page.evaluate(() => {
   const w = (window).__wgen;
-  return { t0: w.t0, total: w.total, iconsPostedAt: w.iconsPostedAt, iconsDoneAt: w.iconsDoneAt, events: w.events };
+  return { t0: w.t0, total: w.total, iconsPostedAt: w.iconsPostedAt, iconsDoneAt: w.iconsDoneAt, events: w.events, pv: w.pv ?? null };
 });
 console.log('click→ready 总墙钟:', (readyAt - clickAt).toFixed(0), 'ms');
 if (out.t0) {
@@ -70,6 +76,7 @@ if (out.t0) {
   console.log('genIcons:', out.iconsPostedAt?.toFixed(0), '→', out.iconsDoneAt?.toFixed(0), `(占 ${(out.iconsDoneAt - out.iconsPostedAt).toFixed(0)}ms,与 generate 串行)`);
   // pass 段耗时
   const ev = out.events;
+  console.log('preview 位图:', out.pv ? `${out.pv.n} 次(时间值为相邻间隔粗估)` : '未截获');
   console.log('=== generate pass 时间线(相邻差值) ===');
   for (let i = 0; i < ev.length; i++) {
     const prev = i === 0 ? out.t0 : ev[i - 1].at;

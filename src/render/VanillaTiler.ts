@@ -1427,6 +1427,14 @@ function drawSlopedFrame(ctx: CanvasRenderingContext2D, r: { img: ImageBitmap | 
  *  放置预览虚影(TileObject.cs:911),世界渲染唯一权威是 GetTileDrawData 的 tileTop;
  *  两表大量重合但不等同(旧表 16 项多余、3 项值错、条件项全部缺失),已全量换血。
  *  227 仙人掌走 drawCactusCell 专属路径不在此表;518 按水位动态偏移未移植(备案)。 */
+/** 有效绘制 y 位移（tileTopCond 优先、静态表兜底,与 drawVanillaCell 内部同式）——
+ *  ChunkCache 底缝补绘门用：上一 chunk 末行 tile 若本值 >0,其绘制会下溢进本
+ *  chunk 首行,而画布 clip 把溢出裁掉 ⇒ 本 chunk 须按 py=-TILE 重画补带 */
+export function tileDrawYOffsetOf(sheet: number, fx: number, fy: number): number {
+  const cond = tileTopCond(sheet, fx, fy);
+  return cond !== null ? cond : (DRAW_Y_OFFSET[sheet] ?? 0);
+}
+
 export const DRAW_Y_OFFSET: Record<number, number> = {
   // ★12(生命水晶)/31(暗影球) 曾误标 +4：原版 36px 动画组（TileDrawing.cs :5524-5529
   //   case 12/31/96/639/665/696）只设 addFrY、tileTop 恒 0（DrawBasicTile 锚 y*16+0）——
