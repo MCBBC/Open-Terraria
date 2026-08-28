@@ -1,0 +1,800 @@
+// IIIII16 批（2026-08-28）：秘种子「生成终结面」九枚 P0 端点（SecretSeed.Do* 族）。
+// 真值锚 = Terarria1457/Terraria/WorldGen.cs（1458 增量已 diff 对拍——本文件覆盖的全部
+// 函数体（2077-2182 / 2715-2869 / initializeHardMode 31858-31988）两树逐字节相等）。
+//
+// vanilla 调用位（照搬，不新增语义点；JS 接线见 WorldGen.ts 各「★IIIII16」注）：
+//   - DoDigExtraHoles          :2853 → Grass pass 头（:12470，!Skyblock.denyAllGeneration
+//                                 门内、DoRoundLandMasses 与撒草循环之前）
+//   - DoSurfaceIsMushrooms 首掷 :2095 → MudCavesToJungleGrass pass 内 NotTheBees() 之后、
+//                                 SpreadGrass 扫描之前（:12517-12520，仅 !noSurface 臂）
+//   - 南瓜臂                   :20232 → GrassPlantsEvilPlantsAndPumpkinsOnSurface pass 头，
+//                                 halloweenGen || endlessHalloween 门（PlacePumpkin :52898 /
+//                                 GrowPumpkin :52950）
+//   - SecretSeed.FinalizeSecretSeeds() :589-693（原版在 FinalCleanup pass 体 cs:22666、
+//                                 ShimmerCleanUp 之前调用；本仓接线 = WorldGen.ts
+//                                 finalCleanupPass 的 opts.beforeShimmer 钩，在既有
+//                                 finalSeedCleanup 之前执行）。本模块只承接本批九旗标
+//                                 对应的端点子集，执行序按原版 if 链逐条对齐：
+//                                 space(:2077) → mushrooms(:607-614 的 ×2 重复调用怪癖照录)
+//                                 → noInfection(:1911) → hallowOnTheSurface(:1956) →
+//                                 startInHardmode(:1905) → rainbowStuff(:2715)。
+//                                 未承接端点（surfaceIsDesertFinish/extraLiquidFinish/
+//                                 actuallyNoTraps/worldIsFrozen/worldIsInfected/noSurface/
+//                                 coat·paint 家族/randomSpawn/portalGun/teamBased/
+//                                 errorWorld 等）属其他车道债（docs 批章）；旗标未开时
+//                                 原版同样零行为零掷骰 → 普通种子对金标链零扰动。
+//   - graveyardBloodmoonStart 初始态：WorldFile.ResetTempsToDayTime（WorldFile.cs:1011-
+//                                 1024）——首存复位 dayTime=false/bloodMoon=true/time=1.0/
+//                                 moonPhase=0。tile 面（SpawnGraveyardBiomesEverywhere）
+//                                 已在 WorldGen.ts potPass 槽落地（graveyardSeedGate），
+//                                 此处只补时钟初始态。
+//
+// RNG 纪律：每个 Do* 的 genRand 消费逐语句转录，含短路：
+//   case0 墙 63/65 支 Next(10)、wall80 支 Next(3) 左支必掷右支短路；
+//   hallow / mushroom 边界 per-column Next(3)；rainbow 巨石 Next(4)、旗帜 Next(5)||
+//   (j<ws&&Next(2))、播种双掷（Next(w)×2 per attempt）、箱染 Next(3)（满箱无空槽时不掷池）、
+//   苔砖扫掷 Next(50..)/Next(4,13)；南瓜 Next(15)/PlacePumpkin Next(6)/Next(5) 成长串。
+// C# Next(a,b) 右开区间 ⇒ JS rng.nextIntRange(a, b-1)；Next(a,b] 无者即 Next(b−1) 封顶。
+// 普通种子（九旗全关）：模块零钩入零消费。
+//
+// 已知近似（零掷骰差，批章登记）：
+//   ① Convert_ActuallyConvert{Tile,Wall} 后的 SquareTileFrame/SquareWallFrame 邻格重帧未
+//      模拟——转化目标均为 auto-frame 虚拟化类（草/石/泥/冰/沙墙），绘制期虚拟帧兜底
+//      （clay-blend-virtualized-frames 同判据）；
+//   ② TryConvertingOrKillingTreesAboveIfTheyWouldBecomeInvalid 按 profile GroundTest ∪
+//      Conversion 组合判定后杀干基单格（genKillTile 承载 CheckTree 整树坍塌级联）；
+//      ConvertTreeAndGround 整树换种臂（596/616/634↔5/323 双向）未移植——finalize 时点
+//      树基与转化面重叠罕见，出现即落为坍塌级联而非换种；
+//   ③ DoRainbowStuff 播种臂 PlaceTile→Place2x2(126 discoball) 按 acceptance 门直译
+//      （cs:51780-51873），不含通用 PlaceTile 全前置门清单——discoball 相关门已被函数体
+//      自身条件 + 天花板实心门覆盖；
+//   ④ 箱染尾段以 compact items 数组等价实现「首空槽插入」（SW ChestData 无稀疏槽位模型）；
+//   ⑤ OverGrownDungeonWithRainbowMoss 的 PlaceTile(184, style=10) 苔芽简化为空格+任一实心
+//      邻支撑门直写帧 frameX=180。
+
+import type { RNG } from '../../../core/rng';
+import { TILE_DEFS } from '../../../data/tiles';
+import { TileStore, LIQUID_TYPE } from '../../TileStore';
+import type { GenState } from './GenState';
+import type { World } from '../../World';
+import { flipGenSolid, genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
+import { initializeHardMode } from './HardmodePass';
+import { genKillTile } from './FinalCleanupPass';
+import { tileRunner } from './TileRunner';
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../../../data/items';
+import { equipKindOfVid } from '../../../data/vanillaEquip';
+
+// ---------- sheet ↔ 内部 id 映射 ----------
+const SHEET_OF_TYPE = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let _i = 0; _i < TILE_DEFS.length; _i++) {
+  const s = TILE_DEFS[_i]?.vanilla?.sheet;
+  if (typeof s === 'number') SHEET_OF_TYPE[_i] = s;
+}
+const INTERNAL_OF_SHEET = new Map<number, number>();
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const sh = TILE_DEFS[i]?.vanilla?.sheet;
+  if (typeof sh === 'number' && !INTERNAL_OF_SHEET.has(sh)) INTERNAL_OF_SHEET.set(sh, i);
+}
+const idOf = (sheet: number): number => INTERNAL_OF_SHEET.get(sheet) ?? 0;
+
+/** 物品 vid → 内部物品 id（BuriedChestsPass.vid 同型；-1 = 未注册静默丢） */
+const VID_TABLE: Record<number, number> = (() => {
+  const m: Record<number, number> = {};
+  for (const [vidStr, k] of Object.entries(VANILLA_ITEM_KEY_BY_ID)) {
+    m[Number(vidStr)] = ITEM_BY_KEY[k] ?? -1;
+  }
+  return m;
+})();
+
+// ---------- TileID.Sets.Conversion / WallID.Sets.Conversion / Main.tileMoss（1457 终值） ----------
+const CONV_GRASS = new Set([2, 23, 199, 109, 477, 492]);            // TileID.cs:38
+const CONV_JUNGLE_GRASS = new Set([60, 661, 662]);
+const CONV_MUSHROOM_GRASS = new Set([70]);
+const CONV_GOLF_GRASS = new Set([477, 492]);
+const CONV_SNOW = new Set([147]);
+const CONV_STONE = new Set([1, 25, 117, 203]);
+const CONV_ICE = new Set([161, 163, 164, 200]);
+const CONV_SAND = new Set([53, 112, 116, 234]);
+const CONV_HARDENED_SAND = new Set([397, 398, 402, 399]);
+const CONV_SANDSTONE = new Set([396, 400, 403, 401]);
+const CONV_THORN = new Set([32, 352, 69, 655]);
+const TILE_MOSS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]); // Main.cs:7146-7187
+
+const WALL_CONV_GRASS = new Set([63, 64, 65, 66, 67, 68, 69, 70, 81, 264, 265, 268]);
+const WALL_CONV_STONE = new Set([1, 61, 185, 3, 28, 83, 262, 274, 246, 248, 269, 349]);
+const WALL_CONV_HARDENED_SAND = new Set([216, 217, 219, 218, 304, 305, 307, 306]);
+const WALL_CONV_SANDSTONE = new Set([187, 220, 222, 221, 275, 308, 310, 309]);
+const WALL_CONV_NEW1 = new Set([188, 192, 200, 204, 212, 276, 280, 288, 292, 300]);
+const WALL_CONV_NEW2 = new Set([189, 193, 201, 205, 213, 277, 281, 289, 293, 301]);
+const WALL_CONV_NEW3 = new Set([190, 194, 202, 206, 214, 278, 282, 290, 294, 302]);
+const WALL_CONV_NEW4 = new Set([191, 195, 203, 207, 215, 279, 283, 291, 295, 303]);
+const WALL_GLOW_MUSHROOM = new Set([64, 67, 15, 247]);              // WallID.cs CanBeConvertedToGlowingMushroom
+
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161） */
+const IS_A_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+
+/** GrowTreeSettings profile GroundTest 集（TreePass.ts 同值；自持防横向耦合） */
+const GEM_TREE_GROUND = new Set<number>([1, 25, 117, 203, ...TILE_MOSS]);
+const VANITY_TREE_GROUND = new Set([2, 109, 477, 492]);
+const ASH_TREE_GROUND = new Set([633]);
+function treeGroundTest(trunkSheet: number, floorSheet: number): boolean | null {
+  switch (trunkSheet) {
+    case 583: case 584: case 585: case 586: case 587: case 588: case 589:
+      return GEM_TREE_GROUND.has(floorSheet);
+    case 596: case 616:
+      return VANITY_TREE_GROUND.has(floorSheet);
+    case 634:
+      return ASH_TREE_GROUND.has(floorSheet);
+    default:
+      return null;        // 无 profile（森林树 5 等）→ 仅 Conversion 组合判定
+  }
+}
+
+// ---------- 低层助手 ----------
+/** SolidTile(i,j) = active && Main.tileSolid[type]（生成期口径；HalfBrick/slope 衍生语义
+ *  由调用方叠加——仓库既有约定） */
+function solidTileAt(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  return st.flags[i] !== 0 && genSolidType(st.type[i]);
+}
+/** nactive && tileSolid && !tileSolidTop —— discoball 天花板门（cs:51815） */
+function solidNonTopAt(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  if ((st.wire[i] & 32) !== 0) return false;                          // inActive(致动)
+  const sh = SHEET_OF_TYPE[st.type[i]];
+  if (sh < 0 || VAN_TILE_SOLID_EXTRA.has(sh)) return false;           // tileSolidTop 家族豁免
+  return genSolidType(st.type[i]);
+}
+/** ClearBlockPaintAndCoating（Tile.cs:934-939：color/fullbright/invisible 三清，只清方块侧） */
+function clearPaintCoat(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  st.paint[i] = 0;
+  st.coat[i] &= ~TileStore.COAT_BLOCK_MASK;
+}
+
+// ---------- Convert_ActuallyConvert{Tile,Wall,Torch}（cs:56762-56818） ----------
+/** tile 转化：活性且类型真变才写；树护栏上提显式化（vanilla 在 Convert_ActuallyConvertTile
+ *  内部调用 TryConvertingOrKillingTreesAboveIfTheyWouldBecomeInvalid）。不清油漆。 */
+function convertActuallyTile(st: TileStore, rng: RNG, x: number, y: number, newSheet: number): void {
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return;
+  if (SHEET_OF_TYPE[st.type[i]] === newSheet) return;
+  tryConvertingOrKillingTreesAbove(st, rng, x, y, newSheet);          // cs:56792
+  st.type[i] = idOf(newSheet);
+}
+/** Convert_ActuallyConvertWall（cs:56804-56817）：墙 0 或同值跳过；不清墙漆。 */
+function convertActuallyWall(st: TileStore, x: number, y: number, newWall: number): void {
+  const i = st.idx(x, y);
+  if (st.wall[i] === 0 || st.wall[i] === newWall) return;
+  st.wall[i] = newWall;
+}
+/** Convert_ActuallyConvertTorch（cs:56762-56785）：火把样式帧改写；num==22 时净化目标恒 21。 */
+function convertActuallyTorch(st: TileStore, x: number, y: number, newStyle: number): void {
+  const i = st.idx(x, y);
+  if (!st.inBounds(x, y)) return;
+  if (!st.flags[i] || SHEET_OF_TYPE[st.type[i]] !== 4) return;
+  const num = Math.trunc(st.frameY[i] / 22);
+  let style = newStyle;
+  if (num === 22) style = 21;                                         // cs:56769-56772
+  if (num !== style) st.frameY[i] = style * 22;
+}
+
+/** TileID.Conversion.Torch(tile, conversionType)（TileID.cs:44-70） */
+function torchConvertible(sheet: number, frameY: number, conversionType: number): boolean {
+  if (sheet !== 4) return false;
+  const num = Math.trunc(frameY / 22);
+  if (conversionType === 0) return (num >= 18 && num <= 20) || num === 22;
+  return num === 0 || num === 9 || num === 16 || (num >= 18 && num <= 22);
+}
+
+/** TryConvertingOrKillingTreesAboveIfTheyWouldBecomeInvalid（cs:55277-55375，近似②）。 */
+function tryConvertingOrKillingTreesAbove(st: TileStore, rng: RNG, x: number, y: number, newSheet: number): void {
+  if (!st.inBounds(x, y)) return;
+  if (!st.flags[st.idx(x, y)]) return;
+  if (y - 1 < 1 || !st.flags[st.idx(x, y - 1)]) return;               // InWorld(...,2)
+  const upSheet = SHEET_OF_TYPE[st.type[st.idx(x, y - 1)]];
+  if (!IS_A_TREE_TRUNK.has(upSheet) && upSheet !== 323) return;
+  let flag = true;
+  if (upSheet === 5) {
+    flag = CONV_GRASS.has(newSheet) || CONV_JUNGLE_GRASS.has(newSheet)
+      || CONV_SNOW.has(newSheet) || CONV_MUSHROOM_GRASS.has(newSheet);
+  } else if (upSheet === 323) {
+    flag = CONV_SAND.has(newSheet);
+  }
+  if (flag) {
+    const gt = treeGroundTest(upSheet, newSheet);
+    if (gt !== null) flag = gt;
+  }
+  if (!flag) genKillTile(st, rng, x, y - 1);                          // KillTile 干基 → CheckTree 坍塌级联
+}
+
+/** WorldGen.Convert(i,j,conversionType,tiles,walls) 单格版——本批消费面只涉 0/2/3。
+ *  逐支内每次先 fresh 读 sheet（原版每条 if 都重读 Main.tile[..].type/.wall）。 */
+function convertCell(
+  st: TileStore, rng: RNG, gs: GenState,
+  i: number, j: number, conversionType: number, tiles: boolean, walls: boolean,
+): void {
+  if (i < 1 || j < 1 || i >= st.w - 1 || j >= st.h - 1) return;       // InWorld(i,j,1)
+  if (!tiles && !walls) return;
+  const ii = st.idx(i, j);
+  if (!st.flags[ii] && st.wall[ii] <= 0) return;                      // cs:55562 !active&&wall<=0
+  const wall = st.wall[ii];
+
+  if (conversionType === 2) {                                         // ── case 2 神圣 ──
+    if (walls) {
+      if (WALL_CONV_GRASS.has(wall) && wall !== 70) convertActuallyWall(st, i, j, 70);
+      else if (WALL_CONV_STONE.has(wall) && wall !== 28) convertActuallyWall(st, i, j, 28);
+      else if (WALL_CONV_HARDENED_SAND.has(wall) && wall !== 219) convertActuallyWall(st, i, j, 219);
+      else if (WALL_CONV_SANDSTONE.has(wall) && wall !== 222) convertActuallyWall(st, i, j, 222);
+      else if (WALL_CONV_NEW1.has(wall) && wall !== 200) convertActuallyWall(st, i, j, 200);
+      else if (WALL_CONV_NEW2.has(wall) && wall !== 201) convertActuallyWall(st, i, j, 201);
+      else if (WALL_CONV_NEW3.has(wall) && wall !== 202) convertActuallyWall(st, i, j, 202);
+      else if (WALL_CONV_NEW4.has(wall) && wall !== 203) convertActuallyWall(st, i, j, 203);
+    }
+    if (!tiles) return;
+    let t = SHEET_OF_TYPE[st.type[ii]];
+    if (t === 4 && torchConvertible(t, st.frameY[ii], 2)) convertActuallyTorch(st, i, j, 20);
+    else if ((TILE_MOSS.has(t) || CONV_STONE.has(t)) && t !== 117) convertActuallyTile(st, rng, i, j, 117);
+    else if ((t = shOf(st, ii)), CONV_GOLF_GRASS.has(t) && t !== 492) convertActuallyTile(st, rng, i, j, 492);
+    else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 109 && t !== 492) convertActuallyTile(st, rng, i, j, 109);
+    else if ((t = shOf(st, ii)), CONV_ICE.has(t) && t !== 164) convertActuallyTile(st, rng, i, j, 164);
+    else if ((t = shOf(st, ii)), CONV_SAND.has(t) && t !== 116) convertActuallyTile(st, rng, i, j, 116);
+    else if ((t = shOf(st, ii)), CONV_HARDENED_SAND.has(t) && t !== 402) convertActuallyTile(st, rng, i, j, 402);
+    else if ((t = shOf(st, ii)), CONV_SANDSTONE.has(t) && t !== 403) convertActuallyTile(st, rng, i, j, 403);
+    else if ((t = shOf(st, ii)), CONV_THORN.has(t)) genKillTile(st, rng, i, j);
+    else if ((t = shOf(st, ii)) === 59
+      && (shNb(st, i - 1, j) === 109 || shNb(st, i + 1, j) === 109
+        || shNb(st, i, j - 1) === 109 || shNb(st, i, j + 1) === 109)) {
+      convertActuallyTile(st, rng, i, j, 0);                          // cs:55737 泥邻珍珠草回土
+    }
+    return;
+  }
+
+  if (conversionType === 3) {                                         // ── case 3 蘑菇 ──
+    if (walls && WALL_GLOW_MUSHROOM.has(wall)) convertActuallyWall(st, i, j, 80);
+    if (!tiles) return;
+    let t = shOf(st, ii);
+    if (t === 4 && torchConvertible(t, st.frameY[ii], 3)) convertActuallyTorch(st, i, j, 22);
+    else if (t === 60) convertActuallyTile(st, rng, i, j, 70);
+    else if ((t = shOf(st, ii)), CONV_THORN.has(t)) genKillTile(st, rng, i, j);
+    return;
+  }
+
+  if (conversionType === 0) {                                         // ── case 0 净化 ──
+    if (walls) {
+      const wl = st.wall[ii];
+      if (wl === 69 || wl === 70 || wl === 81) {
+        let nw = 64;
+        if (j < Math.floor(gs.worldSurface)) {
+          nw = rng.nextInt(10) !== 0 ? 63 : 65;                       // cs:56000-56004 必掷
+        }
+        convertActuallyWall(st, i, j, nw);
+      } else if (wl === 262) convertActuallyWall(st, i, j, 61);
+      else if (wl === 274) convertActuallyWall(st, i, j, 185);
+      else if (wl === 292) convertActuallyWall(st, i, j, 204);
+      else if (wl === 293) convertActuallyWall(st, i, j, 205);
+      else if (wl === 294) convertActuallyWall(st, i, j, 206);
+      else if (wl === 295) convertActuallyWall(st, i, j, 207);
+      else if (wl === 61 || wl === 185 || wl === 204 || wl === 205 || wl === 206 || wl === 207) {
+        // 空 arm：保持不变（须在 Stone 集判定前拦截——同 cs case 归组顺序）
+      }
+      // 上面 else-if 链中的 61/185/204-207 空 arm 已截流；以下为 default 支
+      else if (WALL_CONV_STONE.has(wl) && wl !== 349) convertActuallyWall(st, i, j, 349);
+      else if (WALL_CONV_NEW1.has(wl) && wl !== 212) convertActuallyWall(st, i, j, 212);
+      else if (WALL_CONV_NEW2.has(wl) && wl !== 213) convertActuallyWall(st, i, j, 213);
+      else if (WALL_CONV_NEW3.has(wl) && wl !== 214) convertActuallyWall(st, i, j, 214);
+      else if (WALL_CONV_NEW4.has(wl) && wl !== 215) convertActuallyWall(st, i, j, 215);
+      else if (wl === 80) {
+        // cs:56054-56062：左支必掷 Next(3)，命中则右支不再掷（|| 短路）
+        if (j < gs.worldSurface + 4 + rng.nextInt(3)) convertActuallyWall(st, i, j, 15);
+        else if (j > (st.h + gs.rockLevel) / 2 - 3 + rng.nextInt(3)) convertActuallyWall(st, i, j, 64);
+        else convertActuallyWall(st, i, j, 64);
+      }
+      else if (WALL_CONV_HARDENED_SAND.has(wl) && wl !== 216) convertActuallyWall(st, i, j, 216);
+      else if (WALL_CONV_SANDSTONE.has(wl) && wl !== 187) convertActuallyWall(st, i, j, 187);
+    }
+    if (!tiles) return;
+    let t = shOf(st, ii);
+    if (t === 4 && torchConvertible(t, st.frameY[ii], 0)) convertActuallyTorch(st, i, j, 0);
+    else if (t === 492) convertActuallyTile(st, rng, i, j, 477);
+    else if ((t = shOf(st, ii)), CONV_JUNGLE_GRASS.has(t) && t !== 60) convertActuallyTile(st, rng, i, j, 60);
+    else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 2 && t !== 477) convertActuallyTile(st, rng, i, j, 2);
+    else if ((t = shOf(st, ii)), CONV_STONE.has(t) && t !== 1) convertActuallyTile(st, rng, i, j, 1);
+    else if ((t = shOf(st, ii)), CONV_SAND.has(t) && t !== 53) convertActuallyTile(st, rng, i, j, 53);
+    else if ((t = shOf(st, ii)), CONV_HARDENED_SAND.has(t) && t !== 397) convertActuallyTile(st, rng, i, j, 397);
+    else if ((t = shOf(st, ii)), CONV_SANDSTONE.has(t) && t !== 396) convertActuallyTile(st, rng, i, j, 396);
+    else if ((t = shOf(st, ii)), CONV_ICE.has(t) && t !== 161) convertActuallyTile(st, rng, i, j, 161);
+    else if ((t = shOf(st, ii)), CONV_MUSHROOM_GRASS.has(t)) convertActuallyTile(st, rng, i, j, 60);
+    else if ((t = shOf(st, ii)), t === 32 || t === 352) genKillTile(st, rng, i, j);
+    return;
+  }
+  // 其余 conversionType（1/4 corrupt/crimson、5/6/7…）不在本批旗标消费面内——
+  // worldIsInfected 的 conversionType 1/4 为其他车道债（见批章）。
+}
+function shOf(st: TileStore, ii: number): number { return SHEET_OF_TYPE[st.type[ii]]; }
+function shNb(st: TileStore, x: number, y: number): number {
+  return st.inBounds(x, y) ? SHEET_OF_TYPE[st.type[st.idx(x, y)]] : -1;
+}
+
+// ============================================================
+// ① DoDigExtraHoles（jagged rocks，cs:2853-2868；Grass pass 头 :12470）
+// ============================================================
+export function doDigExtraHoles(st: TileStore, rng: RNG, gs: GenState): void {
+  const num = Math.trunc(st.w * 0.1);
+  for (let k = 0; k < num; k++) {
+    const i2 = rng.nextIntRange(50, st.w - 51);                         // Next(50, w-50)
+    const j = rng.nextIntRange(50, st.h - 51);                          // Next(50, h-50)
+    let num2 = rng.nextIntRange(5, 15);                                 // Next(5,16)
+    if (rng.nextInt(3) === 0) num2 += rng.nextInt(15);
+    const steps = rng.nextIntRange(30, 200);                            // Next(30,201)
+    tileRunner(st, rng, gs, i2, j, {
+      strength: num2, steps,
+      type: -1, addTile: false,
+      speedX: rng.nextIntRange(-15, 15) * 0.1,                           // Next(-15,16)*0.1f
+      speedY: rng.nextIntRange(10, 25) * 0.1,                            // Next(10,26)*0.1f
+      noYChange: true,
+    });
+  }
+}
+
+// ============================================================
+// ② DoNoInfection（fish mox，cs:1911-1954；全图净化）
+// ============================================================
+export function doNoInfection(st: TileStore, rng: RNG, gs: GenState): void {
+  const F = gs.seedFlags;
+  if (!!F.skyblock) return;                                             // skyblockWorldGen 早退
+  const infected = !!F.infectedSeed;                                    // worldIsInfected.Enabled
+  for (let i = 0; i < st.w; i++) {
+    for (let j = 0; j < st.h; j++) {
+      const ii = st.idx(i, j);
+      const t = shOf(st, ii);
+      let flag = t !== 70;                                              // 蘑菇草豁免（原版字面）
+      let flag2 = st.wall[ii] !== 80;
+      if (infected) {
+        if (flag) { if (t === 203 || t === 25) flag = false; }
+        if (flag2) { if (st.wall[ii] === 83 || st.wall[ii] === 3) flag2 = false; }
+      }
+      if (flag || flag2) convertCell(st, rng, gs, i, j, 0, flag, flag2);
+    }
+  }
+}
+
+// ============================================================
+// ③ DoHallowOnSurface（does that sparkle，cs:1956-2021）
+// ============================================================
+export function doHallowOnSurface(st: TileStore, rng: RNG, gs: GenState): void {
+  const F = gs.seedFlags;
+  if (!!F.skyblock) return;
+  let num = Math.floor(gs.worldSurface);                                // (int)Main.worldSurface
+  if (!!F.noSurface) {
+    num = (!(!!F.infectedSeed) || !(!!F.noInfection))
+      ? Math.floor(gs.rockLevel)
+      : Math.floor(gs.rockLevel / 2);                                   // cs:1963-1966
+  }
+  for (let i = 0; i < st.w; i++) {
+    const lim = num + rng.nextInt(3);                                   // per-column 必掷
+    for (let j = 0; j < lim; j++) {
+      const ii = st.idx(i, j);
+      let t = shOf(st, ii);
+      if (t === 2) convertCell(st, rng, gs, i, j, 2, true, false);
+      if ((t = shOf(st, ii)) === 161) convertCell(st, rng, gs, i, j, 2, true, false);
+      if (!!F.noSurface && shOf(st, ii) === 1) convertCell(st, rng, gs, i, j, 2, true, false);
+      if (shOf(st, ii) === 53) convertCell(st, rng, gs, i, j, 2, true, false);
+      if (shOf(st, ii) === 396) convertCell(st, rng, gs, i, j, 2, true, false);
+      if (shOf(st, ii) === 397) convertCell(st, rng, gs, i, j, 2, true, false);
+      const wl = st.wall[ii];
+      if (wl === 187) convertCell(st, rng, gs, i, j, 2, false, true);
+      if (wl === 216) convertCell(st, rng, gs, i, j, 2, false, true);
+      if (wl === 63) convertCell(st, rng, gs, i, j, 2, false, true);
+      if (wl === 65) convertCell(st, rng, gs, i, j, 2, false, true);
+      if (wl === 66) convertCell(st, rng, gs, i, j, 2, false, true);
+      if (wl === 68) convertCell(st, rng, gs, i, j, 2, false, true);
+    }
+  }
+}
+
+// ============================================================
+// ④ DoSurfaceIsInSpace（such great heights，cs:2077-2093；零掷骰）
+// ============================================================
+export function doSurfaceIsInSpace(st: TileStore, gs: GenState): void {
+  if (!!gs.seedFlags.skyblock) return;
+  const wsInt = Math.floor(gs.worldSurface);
+  for (let i = 0; i < st.w; i++) {
+    for (let j = 0; j < wsInt; j++) {
+      const ii = st.idx(i, j);
+      if (st.wall[ii] === 73 && (!st.flags[ii] || shOf(st, ii) === 53)) {
+        st.wall[ii] = 0;
+      }
+    }
+  }
+}
+
+// ============================================================
+// ⑤ DoSurfaceIsMushrooms（toadstool，cs:2095-2181）
+// ============================================================
+/** MudCavesToJungleGrass 首掷臂门（cs:12517：enabled && !noSurface） */
+export function doSurfaceIsMushroomsEarly(st: TileStore, rng: RNG, gs: GenState): void {
+  if (gs.seedFlags.surfaceIsMushrooms && !gs.seedFlags.noSurface) {
+    doSurfaceIsMushroomsCore(st, rng, gs);
+  }
+}
+
+export function doSurfaceIsMushroomsCore(st: TileStore, rng: RNG, gs: GenState): void {
+  const F = gs.seedFlags;
+  if (!!F.skyblock) return;
+  if (!!F.noSurface) {                                                  // molepeople 组合域（照录）
+    for (let i = 0; i < st.w; i++) {
+      for (let j = 0; j < st.h; j++) {
+        const ii = st.idx(i, j);
+        if (st.flags[ii] && shOf(st, ii) === 60) convertCell(st, rng, gs, i, j, 3, true, true);
+        else {
+          const wl = st.wall[ii];
+          if (wl === 64 || wl === 204 || wl === 205 || wl === 206 || wl === 207) st.wall[ii] = 80;
+          else if (st.flags[ii] && shOf(st, ii) === 70) convertCell(st, rng, gs, i, j, 0, true, true);
+          else if (wl === 80) convertCell(st, rng, gs, i, j, 0, true, true);
+        }
+      }
+    }
+    return;
+  }
+  for (let k = 0; k < st.w; k++) {
+    const lim = Math.floor(gs.worldSurface) + rng.nextInt(3);           // per-column 必掷
+    for (let l = 0; l < lim; l++) {
+      const ii = st.idx(k, l);
+      if (shOf(st, ii) === 60) convertCell(st, rng, gs, k, l, 3, true, true);
+      if (st.wall[ii] === 15) convertCell(st, rng, gs, k, l, 3, true, true);
+      if (shOf(st, ii) === 0) st.type[ii] = idOf(59);                    // 泥土直赋（保位）
+      if (shOf(st, ii) === 2) st.type[ii] = idOf(60);                    // 草直赋
+      const wl = st.wall[ii];
+      if (wl === 63 || wl === 65 || wl === 66 || wl === 68 || wl === 64
+        || wl === 205 || wl === 206 || wl === 207) st.wall[ii] = 80;
+    }
+  }
+}
+
+// ============================================================
+// ⑥ DoStartInHardmode（too easy，cs:1905-1909）
+// ============================================================
+export function doStartInHardmode(world: World, rng: RNG): void {
+  world.flags.hardMode = true;                                          // Main.hardMode = true
+  initializeHardMode(world, rng);                                       // V 带 GERunner + 回填
+}
+
+// ============================================================
+// ⑦ DoRainbowStuff（rainbow road，cs:2715-2851）
+// ============================================================
+const MOSS_CONVERSION = TILE_MOSS;                                      // Conversion.Moss 同集
+const RAINBOW_CHEST_POOL = [3556, 2870, 1067, 1066, 5075, 4469];        // cs:2840 NextFromList
+
+/** OverGrownDungeonWithRainbowMoss（cs:24303-24347） */
+function overGrownDungeonWithRainbowMoss(st: TileStore, rng: RNG, gs: GenState): void {
+  const num = Math.trunc(st.w / 2);
+  const half = Math.trunc(st.w / 2);
+  const sideRight = gs.dungeonSide === 1;
+  const MOSS_BRICK = idOf(628);
+  for (let n = 0; n < num; n++) {
+    let cx = rng.nextIntRange(50, half - 1);                            // Next(50, w/2)
+    if (sideRight) cx = rng.nextIntRange(half, st.w - 51);
+    const cy = rng.nextIntRange(50, st.h - 51);
+    if (!st.inBounds(cx, cy) || !isDungeonWallId(st.wall[st.idx(cx, cy)])) continue;
+    const r = rng.nextIntRange(4, 12);                                  // Next(4,13)
+    for (let j = cx - r; j <= cx + r; j++) {
+      for (let k = cy - r; k <= cy + r; k++) {
+        if (j < 1 || k < 1 || j >= st.w - 1 || k >= st.h - 1) continue;
+        const ii = st.idx(j, k);
+        const hasActiveNeighbor =
+          anyOf8(st, j, k);
+        if (!TILE_DUNGEON_BRICK.has(shOf(st, ii))) continue;
+        if (hasActiveNeighbor) continue;                                // cs:24323 八邻全空气才转
+        st.setTileSilent(j, k, MOSS_BRICK);
+        if (!tileFilledAny(st, j, k - 1)) placeMossTuft(st, j, k - 1);
+        if (!tileFilledAny(st, j, k + 1)) placeMossTuft(st, j, k + 1);
+        if (!tileFilledAny(st, j - 1, k)) placeMossTuft(st, j - 1, k);
+        if (!tileFilledAny(st, j + 1, k)) placeMossTuft(st, j + 1, k);
+      }
+    }
+  }
+}
+const TILE_DUNGEON_BRICK = new Set([41, 43, 44, 677, 678, 679]);        // Main.cs:8131-8136
+function isDungeonWallId(wall: number): boolean {
+  return wall === 7 || wall === 8 || wall === 9 || (wall >= 94 && wall <= 99);
+}
+/** cs:24323 判定逐项：任一八邻 active 即 false（非「有墙」）。注意 vanilla 读的是
+ *  `!Main.tile[j,k±..].active()`——纯 tile 活性，不含墙。 */
+function anyOf8(st: TileStore, j: number, k: number): boolean {
+  const offs: Array<[number, number]> = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+  for (const [dx, dy] of offs) {
+    const x = j + dx, y = k + dy;
+    if (st.inBounds(x, y) && st.flags[st.idx(x, y)]) return true;
+  }
+  return false;
+}
+function tileFilledAny(st: TileStore, x: number, y: number): boolean {
+  return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
+}
+/** 苔藓芽近似⑤：空格 + 任一实心邻 → 直写 style10 帧 */
+function placeMossTuft(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  if (st.flags[i]) return;
+  const supported =
+    solidTileAt(st, x, y + 1) || solidTileAt(st, x, y - 1)
+    || solidTileAt(st, x - 1, y) || solidTileAt(st, x + 1, y);
+  if (!supported) return;
+  st.setTileSilent(x, y, idOf(184), 10 * 18, 0);
+}
+
+/** Place2x2 discoball 臂（cs:51780-51873 的 126 支直译） */
+function placeDiscoball(st: TileStore, x: number, y: number): boolean {
+  const yy = y + 1;                                                     // type126 → y++
+  if (x < 5 || x > st.w - 5 || yy < 5 || yy > st.h - 5) return false;
+  for (let cx = x - 1; cx <= x; cx++) {
+    for (let cy = yy - 1; cy <= yy; cy++) {
+      if (!st.inBounds(cx, cy) || st.flags[st.idx(cx, cy)]) return false;
+    }
+    if (!solidNonTopAt(st, cx, yy - 2)) return false;                   // 天花板门（y++ 后的 y-2）
+  }
+  const tx = x - 1, ty = yy - 1;                                        // x--; y-- 写块左上
+  for (let k = 0; k < 2; k++) {
+    for (let l = 0; l < 2; l++) {
+      const i3 = st.idx(tx + k, ty + l);
+      st.type[i3] = idOf(126);
+      st.flags[i3] = 1;
+      st.frameX[i3] = k * 18;
+      st.frameY[i3] = l * 18;                                           // style=0 → fy ∈ {0,18}
+      st.paint[i3] = 0;
+      st.coat[i3] &= ~TileStore.COAT_BLOCK_MASK;
+    }
+  }
+  return true;
+}
+
+export function doRainbowStuff(st: TileStore, rng: RNG, gs: GenState, chests: World['chests']): void {
+  flipGenSolid([379], false);                                           // cs:2717（spawnPointPass 同通道）
+  try {
+    const flag = !(!!gs.seedFlags.extraLiquid) || !(!!gs.seedFlags.roundLandmasses);
+    const wsFloor = Math.floor(gs.worldSurface);
+    for (let i = 0; i < st.w; i++) {
+      for (let j = 0; j < st.h; j++) {
+        const ii = st.idx(i, j);
+        let t = shOf(st, ii);
+        if (t === 189) { st.type[ii] = idOf(719); clearPaintCoat(st, i, j); }       // 云→彩虹云
+        if ((t = shOf(st, ii)) === 4) {                                   // 火把全局 disco 帧
+          st.frameY[ii] = 308;
+          clearPaintCoat(st, i, j);
+        }
+        if (flag && st.half[ii] !== 0) {                                  // 半砖贴满水侧 → 彩虹砖 160
+          const li = st.idx(Math.max(0, i - 1), j);
+          const ri = st.idx(Math.min(st.w - 1, i + 1), j);
+          const liOk = i - 1 >= 0, riOk = i + 1 < st.w;
+          const fullWaterL = liOk && st.liquid[li] === 255 && st.liquidType[li] === LIQUID_TYPE.WATER;
+          const fullWaterR = riOk && st.liquid[ri] === 255 && st.liquidType[ri] === LIQUID_TYPE.WATER;
+          const rightEmptyOrHalf = !riOk || !st.flags[ri] || st.half[ri] !== 0;
+          const leftEmptyOrHalf = !liOk || !st.flags[li] || st.half[li] !== 0;
+          const rightLiquidZero = !riOk || st.liquid[ri] === 0;
+          const leftLiquidZero = !liOk || st.liquid[li] === 0;
+          if (fullWaterL && rightEmptyOrHalf && rightLiquidZero) { st.type[ii] = idOf(160); clearPaintCoat(st, i, j); }
+          if (fullWaterR && leftEmptyOrHalf && leftLiquidZero) { st.type[ii] = idOf(160); clearPaintCoat(st, i, j); }
+        }
+        if ((t = shOf(st, ii)) === 138 && st.frameX[ii] === 0 && st.frameY[ii] === 0 && rng.nextInt(4) === 0) {
+          for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {  // 巨石 2×2 → 711 彩虹巨石
+            const q = st.idx(i + dx, j + dy);
+            st.type[q] = idOf(711);
+            clearPaintCoat(st, i + dx, j + dy);
+          }
+        }
+        if ((t = shOf(st, ii)) === 202) { st.type[ii] = idOf(692); clearPaintCoat(st, i, j); }
+        if (st.wall[ii] === 82) {
+          st.wall[ii] = 346;                                            // WallID 直赋；ClearBlockPaintAndCoating 不含墙漆但原版此支带 Clear：
+          st.paintWall[ii] = 0;
+          st.coat[ii] &= ~TileStore.COAT_WALL_MASK;
+        }
+        if ((t = shOf(st, ii)) === 91 && st.frameY[ii] % 54 === 0
+          && (rng.nextInt(5) === 0 || (j < wsFloor && rng.nextInt(2) === 0))) {
+          for (let k = 0; k < 3; k++) {                                 // 旗帜三连特帧
+            if (j + k >= st.h) break;
+            const q = st.idx(i, j + k);
+            st.frameX[q] = 1206;
+            st.frameY[q] = 54 + k * 18;
+            clearPaintCoat(st, i, j + k);
+          }
+        }
+        t = shOf(st, ii);
+        if (MOSS_CONVERSION.has(t)) { st.type[ii] = idOf(627); clearPaintCoat(st, i, j); }  // moss→彩虹苔 627
+        else if (t === 184) { st.frameX[ii] = 220; clearPaintCoat(st, i, j); }              // disco 苔芽帧
+      }
+    }
+    // ---- 彩虹巨石播种（cs:2790-2824）----
+    let num = st.w * 2;
+    if (gs.seedFlags.skyblock) num = Math.trunc(num / 2);
+    else if (!flag) num *= 2;
+    const margin = 40;
+    for (let k = 0; k < num; k++) {
+      const px = rng.nextIntRange(margin, st.w - margin - 1);           // Next(40, w-40)
+      let py = rng.nextIntRange(margin, st.h - margin - 1);
+      if (st.flags[st.idx(px, py)]) continue;
+      while (!st.flags[st.idx(px, py)]) {
+        py--;
+        if (px < margin || py < margin || px >= st.w - margin || py >= st.h - margin) break;   // InWorld(...,40)
+      }
+      py++;
+      if (py + 1 >= st.h) continue;
+      const nbR = st.inBounds(px + 1, py) ? shOf(st, st.idx(px + 1, py)) : -1;
+      const nbLUp = st.inBounds(px - 1, py - 1) ? shOf(st, st.idx(px - 1, py - 1)) : -1;
+      const nbMUp = st.inBounds(px, py - 1) ? shOf(st, st.idx(px, py - 1)) : -1;
+      const cond = !st.flags[st.idx(px + 1, py)]
+        && nbR !== 162
+        && solidTileAt(st, px - 1, py - 1) && solidTileAt(st, px, py - 1)
+        && nbLUp !== 48 && nbMUp !== 48
+        && nbLUp !== 232 && nbMUp !== 232
+        && !isTileNearby126(st, px, py, 20);
+      if (cond && placeDiscoball(st, px, py)) {
+        clearPaintCoat(st, px - 1, py); clearPaintCoat(st, px, py);
+        clearPaintCoat(st, px - 1, py + 1); clearPaintCoat(st, px, py + 1);
+      }
+    }
+    // ---- 箱染料尾段（cs:2825-2848，近似④）----
+    for (const chest of chests) {
+      if (rng.nextInt(3) !== 0) continue;                               // cs:2832 必掷
+      const it1 = chest.items[1];
+      if (!it1 || it1.stack === 0) continue;
+      for (let m = 1; m < 40; m++) {                                    // maxItems 域内找首空槽
+        const slot = chest.items[m];
+        if (slot == null || slot.stack === 0 || m >= chest.items.length) {
+          const vidPick = RAINBOW_CHEST_POOL[rng.nextInt(RAINBOW_CHEST_POOL.length)];   // 六选一
+          const iid = VID_TABLE[vidPick];
+          if (iid < 0) break;
+          const stack = equipKindOfVid(vidPick) === 'dye' ? 3 : 1;      // dye>0 → stack=3（cs:2841-2844）
+          chest.items.splice(m, 0, { id: iid, stack });
+          break;
+        }
+      }
+    }
+    overGrownDungeonWithRainbowMoss(st, rng, gs);
+  } finally {
+    flipGenSolid([379], true);                                          // cs:2850 还原
+  }
+}
+/** IsTileNearby(num3,num4,126,20)：方形邻域扫 discoball（裸 active 判定同原版 IsTileNearby） */
+function isTileNearby126(st: TileStore, x: number, y: number, distance: number): boolean {
+  for (let i = x - distance; i <= x + distance; i++) {
+    for (let j = y - distance; j <= y + distance; j++) {
+      if (!st.inBounds(i, j)) continue;
+      if (shOf(st, st.idx(i, j)) === 126) return true;
+    }
+  }
+  return false;
+}
+
+// ============================================================
+// ⑧ 南瓜季（halloweenGen | endlessHalloween，cs:20227-20249）
+// ============================================================
+const PUMPKIN_VINE_SHEET = 254;
+
+/** 南瓜季撒播（cs:20232 门：halloweenGen || endlessHalloween） */
+export function pumpkinSeasonArm(st: TileStore, rng: RNG, gs: GenState): void {
+  if (!(gs.seedFlags.halloweenGen || gs.seedFlags.endlessHalloween)) return;
+  const wsInt = Math.floor(gs.worldSurface);
+  for (let i = 40; i < st.w - 40; i++) {
+    for (let j = 50; j < wsInt; j++) {
+      const ii = st.idx(i, j);
+      if (st.flags[ii] && shOf(st, ii) === 2 && rng.nextInt(15) === 0) {   // 草 2 上撒瓜
+        placePumpkin(st, rng, i, j - 1);
+        const grows = rng.nextInt(5);
+        for (let k = 0; k < grows; k++) growPumpkinStep(st, i, j - 1);
+      }
+    }
+  }
+}
+
+/** PlacePumpkin（cs:52898-52947） */
+function placePumpkin(st: TileStore, rng: RNG, x: number, superY: number): void {
+  const bandTop = rng.nextInt(6) * 36;                                  // style 带
+  if (x < 5 || x > st.w - 5 || superY < 5 || superY > st.h - 5) return;
+  let ok = true;
+  for (let i = x - 1; i < x + 1; i++) {
+    for (let j = superY - 1; j < superY + 1; j++) {
+      if (!st.inBounds(i, j)) return;
+      const ii = st.idx(i, j);
+      const t = shOf(st, ii);
+      if (st.flags[ii]) {
+        if (!(t === 3 || t === 73 || t === 113 || t === 110 || (t === 185 && st.frameY[ii] === 0))) ok = false;
+      }
+      if (st.liquid[ii] > 0) ok = false;
+    }
+    if (!st.inBounds(i, superY + 1)) return;
+    if (!solidTileAt(st, i, superY + 1)) ok = false;
+    else {
+      const bs = shOf(st, st.idx(i, superY + 1));
+      if (bs !== 2 && bs !== 109) ok = false;                           // 地面限草/珍珠草
+    }
+  }
+  if (!ok) return;
+  writeQuad(st, PUMPKIN_VINE_SHEET, x - 1, superY - 1, bandTop);
+}
+function writeQuad(st: TileStore, sheet: number, ax: number, ay: number, bandTop: number): void {
+  for (let l = 0; l < 2; l++) {
+    for (let k = 0; k < 2; k++) {
+      const i = st.idx(ax + k, ay + l);
+      st.type[i] = idOf(sheet);
+      st.flags[i] = 1;
+      st.frameX[i] = k * 18;
+      st.frameY[i] = bandTop + l * 18;
+    }
+  }
+}
+
+/** GrowPumpkin（cs:52950-53015）：块体成长（frameX += 36），次数上限 style≥4 弃 */
+function growPumpkinStep(st: TileStore, i: number, superY: number): void {
+  if (!st.inBounds(i, superY)) return;
+  const bi = st.idx(i, superY);
+  if (!st.flags[bi] || shOf(st, bi) !== PUMPKIN_VINE_SHEET) return;
+  // frameY/18 归约到段首（底部行差 1；多 style 时向下走偶数步恒得 1）
+  let offY = Math.trunc(st.frameY[bi] / 18);
+  for (; offY > 1; offY -= 2) { /* 原版空循环 */ }
+  const topY = superY - offY;
+  let fxUnits = Math.trunc(st.frameX[bi] / 18);
+  let grows = 0;
+  while (fxUnits > 1) { fxUnits -= 2; grows++; }
+  const ax = i - fxUnits;
+  if (grows >= 4) return;
+  if (!st.inBounds(ax, topY) || !st.inBounds(ax + 1, topY + 1)) return;
+  let bad = false;
+  for (let k = ax; k < ax + 2; k++) {
+    for (let l = topY; l < topY + 2; l++) {
+      const q = st.idx(k, l);
+      if (!st.flags[q] || shOf(st, q) !== PUMPKIN_VINE_SHEET
+        || st.frameX[q] !== (k - ax) * 18 + grows * 36) bad = true;
+    }
+    if (!st.inBounds(k, topY + 2)) return;
+    if (!solidTileAt(st, k, topY + 2)) bad = true;
+    else {
+      const bs = shOf(st, st.idx(k, topY + 2));
+      if (bs !== 2 && bs !== 477 && bs !== 492 && bs !== 109) bad = true;
+    }
+  }
+  if (!bad) {
+    for (let m = ax; m < ax + 2; m++) {
+      for (let n = topY; n < topY + 2; n++) {
+        const q = st.idx(m, n);
+        if (st.flags[q] && shOf(st, q) === PUMPKIN_VINE_SHEET) st.frameX[q] += 36;
+      }
+    }
+  }
+}
+
+// ============================================================
+// finalize 入口（FinalizeSecretSeeds 本批子集，序 = 原 if 链 :589-663）
+// ============================================================
+export function finalizeSecretSeedDoEnds(
+  store: TileStore, rng: RNG, gs: GenState, world: World,
+): void {
+  const F = gs.seedFlags;
+  if (F.surfaceIsInSpace) doSurfaceIsInSpace(store, gs);
+  if (F.surfaceIsMushrooms) {
+    if (!F.noSurface) doSurfaceIsMushroomsCore(store, rng, gs);         // cs:607-614 ×2 怪癖照录
+    doSurfaceIsMushroomsCore(store, rng, gs);
+  }
+  if (F.noInfection) doNoInfection(store, rng, gs);
+  if (F.hallowOnTheSurface) doHallowOnSurface(store, rng, gs);
+  if (F.startInHardmode) doStartInHardmode(world, rng);
+  if (F.rainbowStuff) doRainbowStuff(store, rng, gs, world.chests);
+}
+
+/** graveyardBloodmoonStart：ResetTempsToDayTime 臂（WorldFile.cs:1019-1024）。
+ *  夜相映射：Main.time 夜段独立计数 0..32400（7:30PM→4:30AM 九小时窗；celestefix 同判据
+ *  「夜间独立计数」），time=1.0 ≈ 入夜一格 ⇒ SW clock.timeOfDay（0..1 线性 24h）=
+ *  DUSK + n/32400×0.375。moonPhase 保持 0（_tempMoonPhase 缺省值）。 */
+export function applyGraveyardInitialClockState(world: World): void {
+  if (!world.seedFlags?.graveyardBloodmoonStart) return;
+  const c = world.clock;
+  c.timeOfDay = 19.5 / 24 + (1 / 32400) * 0.375;                        // DUSK(+1 tick)
+  c.dayCount = 1;
+  c.moonPhase = 0;
+  c.bloodMoon = true;
+}
+

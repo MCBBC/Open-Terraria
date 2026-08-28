@@ -1,12 +1,19 @@
 // 原版 "Floating Island Houses" pass(L8463 + IslandHouse L48185)移植。
 // 日光板 202 外壳 + Disc Wall 82 室内 + Skyware 门(tile10 style9)+ 天空宝箱(chest,style13 近似帧0)
 // + 桌椅横幅。对 gs.floatingIslands 每个非湖岛建房。
+// 原版 "Floating Island Houses" pass(L8463 + IslandHouse L48185)移植。
+// 日光板 202 外壳 + Disc Wall 82 室内 + Skyware 门(tile10 style9)+ 天空宝箱(chest,style13 近似帧0)
+// + 桌椅横幅。对 gs.floatingIslands 每个非湖岛建房。
+// ★IIIII21：drunk 浮空岛族——islandStyle 1/3 消费面（cs:80543 喷泉 / cs:80630
+//   沙漠岛棕榈 TryGrowingTreeByType(323)）与 runFloatingIslandsPass 的
+//   SnowCloudIsland/DesertCloudIsland 分派配套。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest } from './BuriedChestsPass';
 import { placeFurn } from './DungeonPass';
+import { growPalmTree } from './TreePass';
 
 const SUNPLATE = TILE_BY_KEY['v_202_sunplate_block']!;
 const TABLE = TILE_BY_KEY['table']!;
@@ -42,7 +49,9 @@ export function runIslandHousePass(
     if (isl.isLake) continue;
     // cs:79830-79841 早退的屋整栋放弃且不消耗 skyIslandHouseCount(cs:80022 的
     // 自增在早退 return 之后)——loot 序号只在真正建成时前进(I4)
-    if (islandHouse(st, rng, gs, isl.x, isl.y, chests, houseCount)) houseCount++;
+    // ★IIIII21：style 消费面（cs:80543/80630）——drunk 岛 styles 1 沙漠/3 雪：
+    //   >0 放 207 喷泉、==1 追加岛边棕榈；正常世界 style0=两支全跳过（零扰动）。
+    if (islandHouse(st, rng, gs, isl.x, isl.y, chests, houseCount, isl.style)) houseCount++;
   }
 }
 
@@ -50,6 +59,7 @@ function islandHouse(
   st: TileStore, rng: RNG, gs: GenState, i: number, j: number,
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
   houseIdx: number,
+  islandStyle = 0,
 ): boolean {
   // cs:79830-79841:±30 范围内出现地牢墙(wallDungeon 7-9/94-99,Main.cs:10507-10515)/
   // 神庙墙 87/土墙 3/石墙 83 → 整屋放弃。必须放在所有掷骰之前(原版此处零耗骰)。
@@ -188,6 +198,19 @@ function islandHouse(
   //   （cs:79999 裸调用），skyIslandHouseCount 照常自增（cs:80022）。
   const lootVid = [159, 65, 158, 2219][loot];
   placeBuriedChest(st, rng, gs, chests, i, floorY - 3, { style: 13, loot: lootVid });
+  // ★IIIII21（cs:80543-80558）：islandStyle>0 → 岛上放喷泉（Place2xX 207×4 格 +
+  //   SwitchFountain frameY ±72 开态）。放置位 Next(-50,51)×Next(21) 二掷/轮，
+  //   前 5 万轮要求锚格「原非日光板」，两门全空手才落——break 无骰。
+  if (islandStyle > 0) {
+    for (let attempt = 0; attempt < 100000; attempt++) {
+      const fx = i + rng.int(-50, 50);                   // num18 = Next(-50,51)
+      const fy = floorY + rng.int(0, 20);                // num19 = num13 + Next(21)
+      const okSkip202 = attempt >= 50000 || !st.inBounds(fx, fy) || sheetAt(st, fx, fy) !== 202;
+      if (okSkip202 && !tileActiveAt(st, fx, fy)) {
+        if (placeFountain2xX(st, fx, fy, islandStyle)) break;
+      }
+    }
+  }
   // 窗(Glass Wall 21,cs L48312-48327):halfW>10 → ±2 宽,否则 ±1;
   // 中心 x = i∓halfW/2±1,y = (j1+j2)/2 - 1 ± 1
   const winHalf = halfW > 10 ? 2 : 1;
@@ -224,7 +247,57 @@ function islandHouse(
   }
   const bannerX = dir > 0 ? i - halfW : i + halfW;
   placeFurn(st, bannerX, j1 + 1, BANNER, rng.int(7, 9), 'top', 1, false);
+  // ★IIIII21（cs:80630-80653）：islandStyle==1（沙漠云岛）→ 岛面棕榈丛
+  //   TryGrowingTreeByType(323)=GrowPalmTree；Next(3,6) 目标数、每轮二掷采样
+  //   （Next(-50,51)×Next(-10,21)），成功判定=样本格转活（棕榈写入）。
+  if (islandStyle === 1) {
+    let target = rng.int(3, 5);                          // num29 = Next(3,6)
+    for (let attempt = 0; attempt < 100000 && target > 0; attempt++) {
+      const tx = i + rng.int(-50, 50);                   // num31 = Next(-50,51)
+      const ty = floorY + rng.int(-10, 20);              // num32 = num13 + Next(-10,21)
+      if (!st.inBounds(tx, ty) || st.flags[st.idx(tx, ty)] === 0) {
+        growPalmTree(st, rng, tx, ty + 1, gs);           // checkedY = num32+1
+        if (st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] !== 0) target--;
+      }
+    }
+  }
   return true; // 建成,消耗一个 skyIslandHouseCount 槽位(I4)
+}
+
+/** Place2xX（WorldGen.cs:40056）type207 支：2 列×4 格喷泉；frameX=style*36(+18)、
+ *  frameY=row*18，SwitchFountain（:51599）随后对全部 frameY<72 格 +72＝开态带。 */
+function placeFountain2xX(st: TileStore, x: number, y: number, style: number): boolean {
+  const FOUNTAIN = TILE_BY_KEY['v_207_water_fountains']!;
+  const n3 = 4;
+  const fx = style * 36;
+  let clear = true;
+  for (let dy = y - n3 + 1; dy <= y; dy++) {
+    if (!st.inBounds(x, dy) || !st.inBounds(x + 1, dy)) return false;
+    if (st.flags[st.idx(x, dy)] !== 0 || st.flags[st.idx(x + 1, dy)] !== 0) clear = false;
+  }
+  const solidAnchor = (ax: number): boolean => {
+    if (!st.inBounds(ax, y + 1)) return false;
+    const ti = st.idx(ax, y + 1);
+    return st.flags[ti] !== 0 && !!TILE_DEFS[st.type[ti]]?.solid && st.slope[ti] === 0 && st.half[ti] === 0;
+  };
+  if (clear && solidAnchor(x) && solidAnchor(x + 1)) {
+    for (let row = 0; row < n3; row++) {
+      st.setTileSilent(x, y - n3 + 1 + row, FOUNTAIN, fx, (72 + row * 18));
+      st.setTileSilent(x + 1, y - n3 + 1 + row, FOUNTAIN, fx + 18, (72 + row * 18));
+    }
+    return true;
+  }
+  return false;
+}
+
+/** sheet 定锚读（OOB=-1）；活性读（OOB=false） */
+function sheetAt(st: TileStore, x: number, y: number): number {
+  if (!st.inBounds(x, y)) return -1;
+  const ti = st.idx(x, y);
+  return TILE_DEFS[st.type[ti]]?.vanilla?.sheet ?? -1;
+}
+function tileActiveAt(st: TileStore, x: number, y: number): boolean {
+  return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
 }
 
 /** Place1x2（cs:46665-46691）椅子语义：SolidTile2(x,y+1) && !active(x,y-1)

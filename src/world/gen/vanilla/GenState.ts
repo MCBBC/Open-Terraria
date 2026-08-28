@@ -56,6 +56,11 @@ export interface GenState {
    *  （XX 批 2026-08-18 接线）；undefined=未跑过 Dunes（DungeonPass 兜底自掷） */
   dungeonEntA?: number;
   dungeonEntB?: number;
+  /** drunk 世界地牢墙风格重掷（DungeonCrawler.SetupDungeonGenVarVariables 尾段
+   *  DungeonCrawler.cs:94-110：theme 三选后 `if (drunkWorldGen) switch(Next(3))
+   *  → brickWallType 7/8/9`——墙族与砖色**解耦**（整地牢单一 wallVariants 派生键）。
+   *  骰在 Dunes pass 头（theme 之后、入口三掷之前）消耗。undefined=非 drunk（未掷）。 */
+  dungeonWallStyle?: number;
   dungeonY: number;           // 地牢入口地表 Y（DungeonPass 回填；刷怪门槛 dungeonY+40 用）
   dungeonEntX: number;        // 入口门厅可站立点 X（DungeonPass 回填；原版 dungeonX 语义=老头锚）
   /** GenVars.CurrentDungeonGenVars.generatingDungeonPositionX。终值＝爬升入口走廊终点

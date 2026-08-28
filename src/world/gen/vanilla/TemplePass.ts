@@ -251,6 +251,10 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   tmMark('seed');
   // ---- 房间链(L17185-17231):重投至与全部旧房不相交;overlap 每次相交测试 1% 递增 ----
   let roomCount = rng.int(Math.max(2, Math.floor(10 * s)), Math.floor(16 * s) - 1);
+  // ★IIIII21（cs:33752-33754）：drunk 世界房间预算 ×3（先于 getGood/remix 分支的
+  //   else-if 链首项——纯 drunk 世界只走本支；×3 是纯乘法零掷骰）。神庙规模/箱数/
+  //   tRooms 全随房间链翻三倍。
+  if (gs.seedFlags.drunkWorld) roomCount *= 3;
   const rooms: Room[] = [];
   // ★cs:33596-33599 `int num3 = 1; if (genRand.Next(2) == 0) num3 = -1;`——
   //   Next(2)==0（sample<0.5）取 **-1**。曾写反（<0.5→+1）→ 房间链行进方向整体
@@ -721,6 +725,9 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     const DOOR_T = TILE_BY_KEY['door_closed']!;
     let budget = rooms.length * 1.1;
     budget *= 1 + rng.int(-25, 25) * 0.01;                 // cs:34315-34316
+    // ★IIIII21（cs:34415-34417）：drunk 走廊/墙预算 ×1.5（乘在 ±25% 抖动**之后**，
+    //   与原版序一致）。房间×3 与预算×1.5 复合=木刺总量 ~4.5 倍。
+    if (gs.seedFlags.drunkWorld) budget *= 1.5;
     let fails = 0;                                         // num113
     while (budget > 0) {
       fails++;
@@ -762,6 +769,15 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
                   const ke = st.idx(xx, eyy);
                   st.type[ke] = SPIKE; st.flags[ke] = 1;
                 }
+                // ★IIIII21（cs:34476-34481）：drunk 木刺第三格——沿 flip 同向再外伸
+                //   一格（flip==0→yy-2 / else→yy+2，与一档对称）。
+                if (gs.seedFlags.drunkWorld) {
+                  const e2yy = flip === 0 ? yy - 2 : yy + 2;
+                  if (st.inBounds(xx, e2yy)) {
+                    const k2 = st.idx(xx, e2yy);
+                    st.type[k2] = SPIKE; st.flags[k2] = 1;
+                  }
+                }
                 flip++; if (flip > 1) flip = 0;
               }
             }
@@ -795,6 +811,16 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
                 if (st.inBounds(exx, yy)) {
                   const ke = st.idx(exx, yy);
                   st.type[ke] = SPIKE; st.flags[ke] = 1;
+                }
+                // ★IIIII21（cs:34547-34552 / 34557-34562）：drunk 横向第三格——
+                //   ★原版两侧都写 num119-2（else 支本应 +2，反编译实证为 -2=原版
+                //   复制粘贴笔误，按 1457 逐字保真勿"修"）。
+                if (gs.seedFlags.drunkWorld) {
+                  const e2xx = xx - 2;
+                  if (st.inBounds(e2xx, yy)) {
+                    const k2 = st.idx(e2xx, yy);
+                    st.type[k2] = SPIKE; st.flags[k2] = 1;
+                  }
                 }
                 flip++; if (flip > 1) flip = 0;
               }

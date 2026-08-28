@@ -66,6 +66,7 @@ void main() {
     fragColor = vec4(min(fac.r * k, 1.0), min(fac.g * k, 1.0), min(fac.b * k, 1.0), 0.0);
 }`;
 
+import { glStatUpload, glStatTexCreate, glStatDraw, registerFence } from './GLStats';
 export class GLAurora {
     readonly canvas: HTMLCanvasElement | null = null;
     private gl: WebGL2RenderingContext | null = null;
@@ -93,6 +94,7 @@ export class GLAurora {
         }) as WebGL2RenderingContext | null;
         if (!gl) { this.unavailable = true; this.diedAt = performance.now(); return; }
         this.gl = gl;
+        registerFence('aurora', gl);   // #perf-gpulog
         const compile = (type: number, src: string): WebGLShader => {
             const sh = gl.createShader(type)!;
             gl.shaderSource(sh, src); gl.compileShader(sh);
@@ -135,6 +137,8 @@ export class GLAurora {
             const t = gl.createTexture()!;
             gl.bindTexture(gl.TEXTURE_2D, t);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, size, size, 0, gl.RED, gl.UNSIGNED_BYTE, bytes);
+            glStatUpload('aurora', size * size);   // #perf-gpulog:R8 每像素1字节
+            if (!this._noiseUploaded) glStatTexCreate('aurora', size * size);   // 首传=分配(字段名以 _noiseUploaded 为准)
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -178,6 +182,7 @@ export class GLAurora {
         if (this.uni.uSD) gl.uniform4f(this.uni.uSD, sdX, sdY, 0, 0);
         gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
         gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+        glStatDraw('aurora', count);   // #perf-gpulog
         gl.drawArrays(gl.TRIANGLES, 0, count);
     }
 }

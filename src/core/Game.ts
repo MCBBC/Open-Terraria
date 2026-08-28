@@ -85,6 +85,7 @@ import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonS
 import shopstockJson from '../data/vanilla-shopstock.json';
 import { dryadMoonPhaseStock, rollTownPetVariant, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
 import travelshopJson from '../data/vanilla-travelshop.json';
+import { glStatFrame, maybeInstallGpuLoggerFromUrl } from '../render/GLStats';
 import { TileStore, LIQUID_TYPE } from '../world/TileStore';
 import { repairIndexFramesInStore } from '../world/repairIndexFrames';
 import { paintTile, paintWall, paintDustColor, paintCoatTile, paintCoatWall, type PaintDustHook, type CoatDustHook } from '../world/Paint';
@@ -227,7 +228,7 @@ import { waterWaves, waveTexReady as waterWavesDiagReady } from '../render/Water
 import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha, wormholeHeadHit } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
-import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS } from '../items/Inventory';
+import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS, type InvItem } from '../items/Inventory';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 import { combatMeasure } from '../render/CombatTextFont';
 
@@ -1143,6 +1144,8 @@ export interface GameCallbacks {
    *  _mouseItemGlow=1;本仓成品入包,UI 侧拾取同型即亮。可选=测试/无 UI 兼容 */
   onCraftCursorGlow?: (itemId: number) => void;
   onToast: (msg: string) => void;
+  /** 死亡收背包（Main.cs:46435-46440 dead ⇒ playerInventory=false;UI 实现,缺省=无 UI 兼容） */
+  closeInventory?: () => void;
   /** 住房光标态变化（激活/单发后置 null——UI 侧同步面板高亮） */
   onHousingCursor?: (mode: { kind: 'query' } | { kind: 'assign'; npcKey: string } | null) => void;
   /** 成就解锁弹窗(原版 InGamePopups 底部居中;UI 实现,缺省回退 onToast) */
@@ -3247,6 +3250,7 @@ export class Game implements GameHooks {
     // GPU 压力自适应(2026-08-14 trace⑦):contextlost → chunk 上限减半 + 立即释放超限;
     // 熔断态(2026-08-18 双开崩溃:抖动环 1.7 万次/3s)加一次 toast 提示
     this.renderer.installGpuPressureGuard();
+    maybeInstallGpuLoggerFromUrl();   // #perf-gpulog:?gpulog=1 时开启周期打印
     // 主画布重建(熔断后上下文死亡的最后手段)→ 重绑输入与 resize。
     // ★构造期守卫:options.onChange 注册即派发(Options.ts:95-98 loaded 同步回调),
     // 持久化 renderMode:'cpu' 会在 input 构造(下方 :2270)之前就走进
@@ -4273,14 +4277,24 @@ export class Game implements GameHooks {
       // 向导：存档无向导条目才按新世界语义出生（WorldGen.cs:20036）；吸血鬼种子世界
       // 起始 NPC 换动物学家（:19981-19986 vampireSeed → NewNPC 633 homeless）。
       // ★IIIII14：drunk 支同 newWorld 路径（drunk×const→机械师 / 裸 drunk→派对女孩）。
+      // ★IIIII20：换人兜底链全支对齐 SpawnStarterNPCs else 链（cs:19986-20059，
+      //   infected > vampire > remix > drunk×const > notBees(!const) > getGood >
+      //   裸 drunk > 向导兜底）——与 StarterNPCsPass 臂序逐位同构。
       const sfL = this.world.seedFlags ?? {};
-      const starterKey = sfL.vampireSeed ? 'zoologist'
-        : sfL.notTheBees ? 'merchant'
-        : (sfL.drunkWorld && sfL.theConstant) ? 'mechanic'
-        : sfL.drunkWorld ? 'party_girl'
+      const starterKey = sfL.infectedSeed ? 'dryad'          // cs:19988 NewNPC(20)
+        : sfL.vampireSeed ? 'zoologist'                      // cs:20001 NewNPC(633)
+        : sfL.remix ? 'tax_collector'                        // cs:20009 NewNPC(441)
+        : (sfL.drunkWorld && sfL.theConstant) ? 'mechanic'   // cs:20018
+        : (sfL.notTheBees && !sfL.theConstant) ? 'merchant'  // cs:20027（!dontStarve 门）
+        : sfL.getGoodWorld ? 'demolitionist'                 // cs:20036 NewNPC(38)
+        : sfL.drunkWorld ? 'party_girl'                      // cs:20045
         : 'guide';
       if (!savedNpcs.some((n) => n.key === starterKey)) {
-        this.entities.add(new TownNPC(starterKey, this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
+        const st = new TownNPC(starterKey, this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16);
+        if (sfL.infectedSeed && starterKey === 'dryad') {
+          st.variationIndex = 1;               // Lilith 变体档（cs:19993 townNpcVariationIndex=1）
+        }
+        this.entities.add(st, 'npcs');
       }
       // 守卫老人：存档未击败骷髅王时按原地牢口位置恢复（存档无条目则重扫地牢口）
       if (this.world.dungeonX > 0 && !this.skeletronDowned()
@@ -4314,19 +4328,25 @@ export class Game implements GameHooks {
         this.partyState.celebratingNpcs = starters.map((s) => s.key);
       }
       const seededKeys = new Set(starters.map((s) => s.key));
-      // 新世界：向导随世界出生(WorldGen.cs:20036)——唯一初始城镇 NPC,无家(homeless)。
+      // 新世界：向导随世界出生(WorldGen.cs:20054)——唯一初始城镇 NPC,无家(homeless)。
       // 商人/护士等由 checkTownArrival 按原版条件 + 房屋系统入住(见 updateTownNpcArrival)。
-      // 吸血鬼种子（vampireSeed）：起始 NPC = 动物学家 633（WorldGen.cs:19981-19986，
+      // 吸血鬼种子（vampireSeed）：起始 NPC = 动物学家 633（WorldGen.cs:19999-20005，
       // else-if 链在 infectedSeed 后截胡——替代向导出生、homeless、direction=1）
-      // ★IIIII14（cs:20016-20054）：drunk 支接线——drunk×theConstant → 机械师 124
+      // ★IIIII14（cs:20016-20050）：drunk 支接线——drunk×theConstant → 机械师 124
       //   (savedMech)；裸 drunk → 派对女孩 208(unlockedPartyGirlSpawn)。链序照反编译
-      //   （infected/vampire/remix 在前，notBees/getGood 居中）；infected/remix/getGood
-      //   三支仍为登记债、不在本链（维持既有落 guide 的行为口径）。
+      // ★IIIII20（cs:19986-20058）：else 链全支收齐，序与 StarterNPCsPass 臂逐位同构——
+      //   infected→德鲁伊20(var1,Lilith 族) / vampire→动物学家 / remix→税务员441
+      //   (savedTaxCollector) / notBees(!const)→商人17(unlockedMerchantSpawn) /
+      //   getGood(for the worthy)→爆破匠38(unlockedDemolitionistSpawn)；兜底向导仅由
+      //   本链承接（普通种子零扰动,pass 对其零记录早退）。
       const sfD = this.world.seedFlags ?? {};
-      const starterNpcKey = sfD.vampireSeed ? 'zoologist'
-        : sfD.notTheBees ? 'merchant'                     // ★UUUUUU：NTB 起始 NPC=商人 17（cs:20007-20014）
-        : (sfD.drunkWorld && sfD.theConstant) ? 'mechanic'  // drunk×dontStarve→机械师 124（cs:20016）
-        : sfD.drunkWorld ? 'party_girl'                     // 裸 drunk→派对女孩 208（cs:20045） ★IIIII14
+      const starterNpcKey = sfD.infectedSeed ? 'dryad'          // cs:19988 NewNPC(20)
+        : sfD.vampireSeed ? 'zoologist'                         // cs:20001 NewNPC(633)
+        : sfD.remix ? 'tax_collector'                           // cs:20009 NewNPC(441)
+        : (sfD.drunkWorld && sfD.theConstant) ? 'mechanic'      // drunk×dontStarve→机械师 124（cs:20018）
+        : (sfD.notTheBees && !sfD.theConstant) ? 'merchant'     // ★UUUUUU：NTB 起始 NPC=商人 17（cs:20027）
+        : sfD.getGoodWorld ? 'demolitionist'                    // FTW→爆破匠 38（cs:20036）
+        : sfD.drunkWorld ? 'party_girl'                         // 裸 drunk→派对女孩 208（cs:20045） ★IIIII14
         : 'guide';
       // ★IIIIIII6：十周年世界的向导已含在播种名单 → 跳过默认向导生成
       // （与 savedNpcs 分支的 some(key===starterKey) 门同语义）
@@ -11180,9 +11200,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           return;
         }
         // ---- 烟雾弹 1168 → proj196（aiStyle14 弹跳物理族，SetDefaults :2825-2831
-        //      16×16/penetrate−1/scale0.8；AI_014 尾 :25380 区段重力 0.2/update+
-        //      撞块反弹；逐 tick 1-2×d31 烟尘在 Arrow.smokeTrail196）。非 ai2 抛物
-        //      刀族物理——此前走通用投掷=无弹跳无烟尾（red-team-r35 §E-12 P3）----
+        //      16×16/penetrate−1/scale0.8；AI_014 共享段重力 0.2/update+撞块反弹；
+        //      逐 tick 1-2×d31 烟尘在 Arrow.subStepAI（Projectile.cs:25196-25210）
+        //      。非 ai2 抛物刀族物理——此前走通用投掷=无弹跳无烟尾
+        //      （red-team-r35 §E-12 P3；烟尾曾误挂撞块支=飞行零烟,2026-08-28 修）----
         if (tc.shoot === 196) {
           const smk = new Arrow(px, py,
             Math.cos(ang) * (c?.shootSpeed ?? 6), Math.sin(ang) * (c?.shootSpeed ?? 6),
@@ -17177,9 +17198,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.toggleDoor(tx, ty, true);
     } else if (type === T.DOOR_OPEN) {
       this.toggleDoor(tx, ty, false);
-    } else if (type === T.CHEST) {
-      // 真容器交互走此路；假容器(FakeContainers 441/FakeContainers2 468)不认——
-      // 原版 Chest.FindChest 只收真箱型，装饰箱右键无任何行为
+    } else if (type === T.CHEST || this.wiring?.sheetOf(tx, ty) === 21 || this.wiring?.sheetOf(tx, ty) === 467) {
+      // 真容器交互走此路（Chest.FindChest 族：21 基础箱 ∪ 467 Containers2——
+      // 亡命箱=467 style4 同样开出内容面板，Player.cs:33503 OpenChest 后才 HitSwitch）。
+      // 假容器(FakeContainers 441/FakeContainers2 468)不认——装饰箱右键无任何行为。
+      // （470/475 新防护容器 1457 新增，登记待接）
       // 打开宝箱：精确命中或 3×3 容差（点击宝箱边缘也算）
       const chest = this.findChest(tx, ty) ?? this.findChestNear(tx, ty);
       if (chest) this.tryOpenChest(chest);
@@ -19518,6 +19541,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 收起宝箱/储物面板回调（UI 注入；Main.cs:38455-38458 chest=-1 与 Player.cs
    *  :31264/:31277 追踪失联关面板路径——Game 侧 Chester 容器链用） */
   closeChestPanel: (() => void) | null = null;
+  /** 死亡收背包（Main.cs:46435 dead ⇒ playerInventory=false；UI 注入） */
+  closeInventory: (() => void) | null = null;
   /** Chester 宠物箱追踪（piggyBankProjTracker 本仓等价，Player.cs:31245
    *  TrackedProjectileReference）：Main.cs:38469 Set / Player.cs:31324 Clear——
    *  非空 = 当前 -2 面板由该 Chester 打开，updateChesterContainerRange 每 tick
@@ -19538,6 +19563,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  玩家随身容器(x<0 钱槽/储物族)不判距离（内容随身；vanilla 走
    *  piggyBankProjTracker 等 proj 存活链,本仓自有存活管理,登记） */
   private tickChestAutoClose() {
+    // ★死亡收 UI（Main.cs:46433-46443 DrawInterface_26 verbatim 链）：
+    //   dead ⇒ playerInventory=false ⇒ chest=-1——背包+箱面板全关（用户实报：
+    //   被亡命箱炸药炸死后背包/宝箱界面滞留）。vanilla 是每帧 UI 逻辑门，此处同位。
+    if (this.player.dead) {
+      this.closeChestPanel?.();
+      this.cb.closeInventory?.();
+      return;
+    }
     const c = this.openChestRef?.();
     if (!c || c.x === undefined || c.x < 0 || !this.world) return;
     const st = this.world.store;
@@ -19547,9 +19580,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (sheet === 88) rw = 48;                                 // 大橱柜
     else if (sheet === 29) rh = 16;
     else if (sheet === 463 || sheet === 491) { rx -= 16; ry -= 32; rw = 48; rh = 64; }
-    else if (sheet !== 21 && sheet !== 97) {
+    else if (sheet !== 21 && sheet !== 97 && sheet !== 467) {
       // 原位已非箱（开着时被拆/被电路换型）→ 原版 DestroyChest 即 chest=-1（:606-624），
-      // 不做距离判定直接收面板
+      // 不做距离判定直接收面板。467=Containers2（亡命箱/沙漠锁箱族）同属
+      // Chest.FindChest 开箱面——曾漏判导致面板开秒关（2026-08-28 用户实报）
       this.closeChestPanel?.();
       this.sfx.play('menuClose', 1);
       return;
@@ -23389,9 +23423,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （PickItemMovementAction case 15 ItemSlot.cs:1426-1439：空手→3 买入；同型
    *  CanStack（Item.cs:49446-4954 type+prefix 全等）且未满叠（:1890-1893）→ 3 买入
    *  叠到光标；异型 → result -1 整链无动作）。返回是否成交 */
+  /** 背包能否再收 1 个该物品（购买链扣款前守门）：dry-run inv.add 后逐位回滚——
+   *  add 全程只写 slots（钱币/弹药/背包区全在 slots 内，doCoins 亦然），快照恢复
+   *  零副作用；与 add 判定单源（重写一份容量式必漂移）。仅点击购买时跑，非热点 */
+  private invCanTake(id: number, prefix?: number): boolean {
+    const inv = this.player.inv;
+    const backup: Array<InvItem | null> = inv.slots.map((s) => (s ? { ...s } : null));
+    const left = inv.add(id, 1, prefix || undefined);
+    for (let i = 0; i < backup.length; i++) {
+      inv.slots[i] = backup[i] ? { ...backup[i]! } : null;
+    }
+    return left === 0;
+  }
+
   npcShopBuy(vanillaId: number, buybackIndex?: number,
-    held?: { id: number; stack: number; prefix?: number }, bulk?: boolean): boolean {
-    const bb = buybackIndex === undefined ? undefined : this.shopBuybackStock[buybackIndex];
+    held?: { id: number; stack: number; prefix?: number }, bulk?: boolean): boolean {    const bb = buybackIndex === undefined ? undefined : this.shopBuybackStock[buybackIndex];
     if (buybackIndex !== undefined && (!bb || bb.vid !== vanillaId)) return false;
     const prefix = bb ? bb.prefix : 0;
     // 光标持有门（:1878 !CanStack 早退 + :1890-1893 满叠停买）
@@ -23436,19 +23482,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // CoinsCount<price / 满叠 continue 语义 = 提前停）
     const times = bulk ? bulkBuyAmount(bb ? bb.stack : undefined) : 1;
     let bought = 0;
+    let bagFullBlocked = false;
     for (let i = 0; i < times; i++) {
+      const key = VANILLA_ITEM_KEY_BY_ID[vanillaId];
+      const invId = key !== undefined ? ITEM_BY_KEY[key] : undefined;
+      // 满包停买【先于付款】（原版 HandleShopSlot :2033-2066 买入落光标永不丢件，
+      // 满叠 continue 钱不扣，付款 ⟺ 到手；本仓 UI 空手点击直入背包 = 该不变式靠
+      // 容量预判维持——inv.add 满包静默失败曾致钱扣物蒸发，2026-08-28 用户报）
+      if (!held && (invId === undefined || !this.invCanTake(invId, prefix))) {
+        bagFullBlocked = true;
+        break;
+      }
       // 付款分流（Player.BuyItem :34948-34951 customCurrency 参）：勋章条目扣
       // 勋章（CustomCurrencyManager.BuyItem :79-82 Count<price 拒付 → break）
       if (medalPrice !== undefined) {
         if (this.defenderMedalsOwned() < price
           || !spendDefenderMedals(this.player.inv.slots, price)) break;
       } else if (this.coinsOwned() < price || !this.spendCopper(price)) break;
-      const key = VANILLA_ITEM_KEY_BY_ID[vanillaId];
       if (held) {
         if (held.stack >= (ITEM_DEFS[held.id]?.maxStack ?? 1)) break;   // :1890-1893
         held.stack++;   // :1910-1923 买叠到光标（CanStack 门已保证 prefix 全等）
-      } else if (key && ITEM_BY_KEY[key] !== undefined) {
-        this.player.inv.add(ITEM_BY_KEY[key], 1, prefix || undefined);  // :1912-1916 货架词缀随行
+      } else if (invId !== undefined) {
+        this.player.inv.add(invId, 1, prefix || undefined);  // :1912-1916 货架词缀随行
       }
       if (bb) {
         // buyOnce 不进回购记（:1919-1922 !buyOnce 门）；减库存归零下架（:1925-1928）
@@ -23466,9 +23521,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       bought++;
     }
     if (bought === 0) {
-      this.cb.onToast(medalPrice !== undefined
-        ? Lang.text('Mods.SandboxWorld.NPC.NotEnoughMedals')
-        : Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
+      this.cb.onToast(bagFullBlocked
+        ? Lang.text('Mods.SandboxWorld.NPC.InventoryFull')
+        : medalPrice !== undefined
+          ? Lang.text('Mods.SandboxWorld.NPC.NotEnoughMedals')
+          : Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
       this.openNpcShop();
       return false;
     }
@@ -29218,6 +29275,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 拴绳实体（锚桩 724 小动物 / 风筝桩 723 风筝）——Renderer 3.8 段绘制
       this.leashed,
     );
+    glStatFrame();   // #perf-gpulog:GPU 提交账本帧推进(唯一 tick 点)
   }
 
   /** 聊天输入框（Enter 懒建;ChatInput 自管 Esc/Tab/blur;断线后随 blur 自清） */

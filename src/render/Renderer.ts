@@ -2065,6 +2065,7 @@ export class Renderer {
     }
     if (performance.now() < this.glInitRetryAt) return null;
     const inst = new GLSpriteLayer();
+    inst.statName = 'glfx';   // #perf-gpulog
     if (inst.unavailable) {
       inst.dispose();
       this.glInitRetryAt = performance.now() + 30_000;

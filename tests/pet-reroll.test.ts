@@ -25,10 +25,13 @@ describe('宠物变体表（TownNPCProfiles.cs:131-139）', () => {
     expect(townNpcProfileSheet(637, 0, 0, 3)).toBe('vanilla/Cat_RussianBlue.png');
     expect(townNpcProfileSheet(638, 0, 0, 5)).toBe('vanilla/Dog_Husky.png');
     expect(townNpcProfileSheet(656, 0, 0, 2)).toBe('vanilla/Bunny_Dutch.png');
-    expect(townNpcProfileSheet(656, 0, 1, 4)).toBe('vanilla/Bunny_Lop_Party.png');   // 派对档带后缀
-    // 未掷（-1）/越界 → Default 图（本仓缺省态）
-    expect(townNpcProfileSheet(637, 0, 0, -1)).toBe('vanilla/Cat_Default.png');
-    expect(townNpcProfileSheet(637, 0, 0, 9)).toBe('vanilla/Cat_Default.png');
+    expect(townNpcProfileSheet(656, 0, 1, 4)).toBe('vanilla/Bunny_Lop.png');   // 派对档同变体贴图
+    // （2026-08-27 对齐：宠物 Profile 未链 SetPartyTextures（TownNPCProfiles.cs:139-147）→
+    //   无 _Party 档，alt=1 用常态变体——原版无素材 404 兜底即此行为；且未掷(-1)/越界走
+    //   Profiles.GetTextureNPCShouldUse IndexOutOfRange→num=0 首变体钳制，_Default 基础档
+    //   在 vanilla 素材里不存在（TownNPCs/ 只落 6+6+6 变体），曾指 Default = 宠物隐身 404）
+    expect(townNpcProfileSheet(637, 0, 0, -1)).toBe('vanilla/Cat_Siamese.png');
+    expect(townNpcProfileSheet(637, 0, 0, 9)).toBe('vanilla/Cat_Siamese.png');
     expect(townPetVariantName(637, 1)).toBe('Black');
     expect(townPetVariantName(999, 0)).toBeNull();
   });

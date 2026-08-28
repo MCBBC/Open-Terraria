@@ -12,6 +12,7 @@
 // `ctx.drawImage(layer.canvas, 0, 0)` 单次合成。GL 不可用/上下文丢失时
 // unavailable=true,调用方回退 2D 三步近似(见 Renderer.compositeLight)。
 
+import { glStatUpload, glStatDraw, registerFence } from './GLStats';
 export class GLWorldLight {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | null = null;
@@ -137,6 +138,7 @@ void main() {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     }
     gl.disable(gl.BLEND);   // 单 quad 直写,无需混合
+    registerFence('worldLight', gl);   // #perf-gpulog
   }
 
   /** 每帧合成:world(worldCanvas) × light(lightCanvas @ lightRect 像素矩形) → this.canvas */
@@ -158,15 +160,19 @@ void main() {
     // 预乘上传声明:canvas 源内部即预乘,显式 true = 驱动零转换直拷(实现无关)
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, world);
+    // ★两笔均为【既有纹理逐帧整幅刷新】= 纯带宽,不计驻留(#perf-gpulog 语义修订)
+    glStatUpload('worldLight', w * h * 4);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.texLight);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, light);
+    glStatUpload('worldLight', light.width * light.height * 4);
     gl.uniform1i(this.uni.uWorld, 0);
     gl.uniform1i(this.uni.uLight, 1);
     gl.uniform2f(this.uni.uCanvas, w, h);
     gl.uniform4f(this.uni.uLightRect, lightRect[0], lightRect[1],
       Math.max(1, lightRect[2]), Math.max(1, lightRect[3]));
+    glStatDraw('worldLight', 4);   // #perf-gpulog
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     // WebGL 错误哨兵:上下文丢失即判死,调用方回退 2D
     if (gl.isContextLost()) { this.diedAt = performance.now(); return false; }

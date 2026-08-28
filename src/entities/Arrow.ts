@@ -3076,6 +3076,24 @@ export class Arrow extends Entity {
     if (this.projId === 1114 && this.age % 4 === 0) {
       game.spawnParticles(this.cx, this.cy, '#FFD966', 1, 0.5, { life: 18, grav: 0 });
     }
+    // ---- 烟雾弹 196 烟尾（AI_014 type==196 支 Projectile.cs:25196-25210）：每 tick
+    //      1-2×d31 烟尘——alpha100+Next(100)、初速 0（×0.3 不变）、vx+=Next(-10,11)
+    //      ×0.025、vy−=0.4+Next(-3,14)×0.15 上飘、fadeIn=1.25+Next(20)×0.15=
+    //      生长目标（d31 无重力支在链 A 自管速度,此尘不置 noGravity——原版 NewDust
+    //      未传 noGravity,scale 恒 1 靠 fadeIn 长大）。★必须在逐 tick AI 段：曾有
+    //      版本整串塞在撞块支里=飞行全程零烟（2026-08-28 用户报"没看到烟雾"）----
+    if (this.projId === 196 && game.spawnDust) {
+      const nSmk = 1 + (Math.random() < 0.5 ? 1 : 0);
+      for (let i = 0; i < nSmk; i++) {
+        const dvx = (Math.floor(Math.random() * 21) - 10) * 0.025;
+        const dvy = -(0.4 + (Math.floor(Math.random() * 17) - 3) * 0.15);
+        const d = game.spawnDust(this.x, this.y, this.w, this.h, 31, dvx, dvy, 100, null, 1);
+        if (d) {
+          d.alpha += Math.floor(Math.random() * 100);
+          d.fadeIn = 1.25 + Math.floor(Math.random() * 20) * 0.15;
+        }
+      }
+    }
     // ---- R35 清单①：410 泡泡枪泡体（AI_072,Projectile.cs:30954-30977）----
     // localAI0++ >3 后 alpha −25/t 钳 ≥50（GetAlpha 缺省路径 → 半透渐显）;
     // velocity ×0.96 全向量减速;ai[1] 首拍掷 rand(60,121)/100=scale,盒 14×14×scale 居中
@@ -4783,18 +4801,6 @@ export class Arrow extends Entity {
         }
         // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
         if (this.bounce && this.bounceOff(game)) return;
-        // ---- 烟雾弹 196 拖尾（AI_014 type==196 支 :25200-25211）：每 tick 1-2×d31 烟
-        //      （dust 初速 0→v×0.3 归零,alpha100+rand100、vx+=Next(-10,11)×0.025、
-        //      vy-=0.4+Next(-3,14)×0.15 上飘、fadeIn=1.25+Next(20)×0.15）----
-        if (this.projId === 196 && game.spawnDust) {
-          const nSmk = 1 + (Math.random() < 0.5 ? 1 : 0);
-          for (let i = 0; i < nSmk; i++) {
-            const dvx = (Math.floor(Math.random() * 21) - 10) * 0.025;
-            const dvy = -(0.4 + (Math.floor(Math.random() * 17) - 3) * 0.15);
-            game.spawnDust(this.x, this.y, this.w, this.h, 31, dvx, dvy, 100,
-              null, 1.25 + Math.floor(Math.random() * 20) * 0.15, true);
-          }
-        }
         // 1457 宝石法珠 CanBounce（HandleMovement :18112-18150）：撞块法向反弹 ×0.8 +
         // penetrate--（归零消亡）——琥珀法珠/琥珀长袍臂。hitWall 族旗是 moveAndCollide
         // 分轴碰撞语义、本类裸位移不置位（曾据此判死=分支永假,反弹死代码）——

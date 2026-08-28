@@ -36,8 +36,8 @@ const out = await page.evaluate(async () => {
   info.fx = st.frameX[st.idx(chest.x, chest.y)];
   info.styleRow = Math.floor(info.fx / 36);
   info.rigged = info.sheet === 467 && info.styleRow === 4;
-  // 传送玩家远离杀阵（神化躲伤害）
-  g.player.x = (chest.x + 20) * 16; g.player.y = (chest.y - 6) * 16;
+  // 站到箱旁（神化躲伤害）——★须在开箱交互距离内，否则 tickChestAutoClose 秒关面板
+  g.player.x = (chest.x + 3) * 16; g.player.y = (chest.y - 1) * 16;
   // ---- 捕获弹体生成 ----
   const projLog = [];
   // 爆炸取证：explodeAt 无弹体实体，直接记录锚点
@@ -58,6 +58,19 @@ const out = await page.evaluate(async () => {
     }
     return emAdd(e, bucket);
   };
+  if (!window.__closeHooked) {
+    window.__closeHooked = true;
+    const oc = g.closeChestPanel;
+    g.closeChestPanel = () => {
+      const c0 = g.openChestRef?.();
+      window.__closeInfo = c0 ? {
+        chest: [c0.x, c0.y], sheetNow: (() => { try { return window.__swGame.wiring.sheetOf(c0.x, c0.y); } catch { return -9; } })(),
+        p: [Math.round(g.player.x / 16), Math.round(g.player.y / 16), Math.round(g.player.cx), Math.round(g.player.cy)],
+        dead: g.player.dead,
+      } : { gone: true };
+      if (oc) return oc();
+    };
+  }
   if (!window.__recHooked) {
     window.__recHooked = true;
     const oRec = g.recLog.bind(g);
@@ -67,8 +80,18 @@ const out = await page.evaluate(async () => {
   const beforeN = projLog.length;
   const markBoom = boomLog.length;
   try { g.tryOpenChest(chest); } catch (e) { info.openErr1 = String(e && e.message); }
+  const panelSync = g.openChestRef?.();
+  info.panelSync = panelSync ? { at: [panelSync.x, panelSync.y], items: panelSync.items.filter(Boolean).length } : null;
   await raf(120);
+  const panelPost = g.openChestRef?.();
+  info.closeInfo = window.__closeInfo ?? null;
+  info.panelPost = panelPost ? { at: [panelPost.x, panelPost.y] } : null;
   info.fired1 = projLog.length > beforeN;
+  // ---- 内容面板断言：openChestRef 应指向该箱且 items 非空（真档该箱含 7+ 格战利品）----
+  const panel = g.openChestRef?.();
+  info.panel = panel && panel.x === chest.x && panel.y === chest.y
+    ? { items: panel.items.filter(Boolean).length, first: panel.items.find(Boolean) }
+    : { open: false, at: panel ? [panel.x, panel.y] : null };
   info.boomAnchors1 = boomLog.slice(markBoom).slice(0, 8);
   info.rollLog1 = rollLog.slice();
   // ---- 滚石运动轨迹：t0/t30/t90 三拍采样（错位修复=应从盒心出生；没掉落修复=应有落差与横移）----

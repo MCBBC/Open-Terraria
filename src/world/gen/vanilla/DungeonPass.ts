@@ -298,11 +298,19 @@ export function runDungeonPass(
   const raw = (): number => { dgMainRolls++; return rng.vanilla.next(); };
   const theme = gs.dungeonTheme >= 0 ? gs.dungeonTheme : ri(0, 2);
   const brick = theme === 0 ? BLUE : theme === 1 ? GREEN : PINK;
-  const wall = theme === 0 ? 7 : theme === 1 ? 8 : 9;
+  // ★IIIII21（DungeonCrawler.cs:94-110）：drunk 世界 genVars.brickWallType 被
+  //   Next(3) 重掷（7/8/9 任一）——与砖色解耦（wallVariants 随 wall 派生，
+  //   DungeonCrawler.cs:221-241 同构）。骰已归位 Dunes pass 头（dungeonWallStyle）。
+  const wall = (gs.dungeonWallStyle !== undefined
+    ? [7, 8, 9][gs.dungeonWallStyle] ?? 7
+    : theme === 0 ? 7 : theme === 1 ? 8 : 9);
   const crack = CRACKED_FOR_BRICK[brick] ?? brick;
   const wallVariants: number[] = wall === 8 ? [8, 98, 99] : wall === 9 ? [9, 96, 97] : [7, 94, 95];
   // outerPotentialDungeonBounds（CreatePotentialDungeonBounds，DungeonUtils.cs:2058）
-  const potTp = (ws + 10.0) / h, potBt = ((h - 200) - 10.0) / h;
+  // ★IIIII21（DungeonUtils.cs:2110）：drunk(noSurface 同支)=入口地下 → percentOnTop
+  //   分母换成 GenVars.worldSurfaceHigh（原版 Main.worldSurface→worldSurfaceHigh）。
+  const potTp = (gs.seedFlags.drunkWorld ? gs.genWorldSurfaceHigh + 10.0 : ws + 10.0) / h,
+    potBt = ((h - 200) - 10.0) / h;
   const potL = gs.dungeonSide > 0 ? Math.trunc(w * 0.525) : Math.trunc(w * 0.05);
   const potR = gs.dungeonSide > 0 ? w - Math.trunc(w * 0.05) : Math.trunc(w * 0.45);
   const potT = Math.max(10, Math.min(h - 10, Math.trunc(h * potTp)));
@@ -1030,7 +1038,10 @@ export function runDungeonPass(
     }
     let cx = i + 0.0, cy = j - s1y / 2.0;
     bounds.topSet(Math.trunc(cy));
-    const num2 = i > w / 2 ? -1 : 1;
+    let num2 = i > w / 2 ? -1 : 1;
+    // ★IIIII21（LegacyDungeonEntrance.cs:114-117）：drunk/getGood 入口朝向翻转
+    //   （num2 *= -1，作用于墙簇垛口侧/台阶方向/门洞内半边全部下游）。
+    if (gs.seedFlags.drunkWorld || gs.seedFlags.getGoodWorld) num2 *= -1;
     entBounds.set(Math.trunc(cx), Math.trunc(cy), Math.trunc(cx), Math.trunc(cy));
     entExists = true;    const solidBox = (x0: number, y0: number, x1: number, y1: number, inner: boolean): void => {
       for (let x = x0; x < x1; x++) {
@@ -4529,6 +4540,10 @@ export function runDungeonPass(
   //   currentPos 是**上一厅的 lerp 目标**（非实际走终点—— halls 链由目标点接力，
   //   与 genVars 终值解耦，原版如此）。Legacy 支照旧盲爬。
   entOnSurface = false;
+  // ★IIIII21（DungeonCrawler.cs:404-409）：drunk(noSurface 同支)=
+  //   createdDungeonEntranceOnSurface 恒 true——爬升入口走廊 while 循环**零迭代**
+  //   （含 roomDelay Next(5) 内嵌掷），入口直接在最高房中心生成。
+  if (gs.seedFlags.drunkWorld) entOnSurface = true;
   {
     const TT = (globalThis as { __dgTowerTrace?: Record<string, number | string> }).__dgTowerTrace;
     let curX = posX + 0.0, curY = posY + 0.0;               // currentPos（局部，不随 genVars）

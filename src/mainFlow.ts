@@ -77,21 +77,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     }
   }
   (window as unknown as { __swAudio?: AudioSystem }).__swAudio = audio; // 探针调试桥
-  // #perf2026-08-28（进入世界卡顿第三批）：程序化素材总包 buildAssets——~6700 张
-  // 物品图标画布 + 全部 tile 表/角色表/敌人精灵，同步生成 ~700ms（弱机更长）。
-  // 它是确定性全局单例，但触发点在首次 new Game() = **点击进入世界瞬间**整体砸下
-  // （trace t1104：t≈4.0-4.75s getContext 707ms + putImageData 207ms 连续满载段）。
-  // 菜单空闲期提前预生成 → makeGame/首帧零成本复用。?assetprewarm=0 关闭(A/B)。
-  if ((() => { try {
-    return typeof location === 'undefined'
-      || new URLSearchParams(location.search).get('assetprewarm') !== '0';
-  } catch { return true; } })()) {
-    const kick = () => { void import('./assets/AssetGen').then((m) => m.buildAssets()); };
-    const ric = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
-    if (typeof ric === 'function') ric(kick, { timeout: 2500 });
-    else setTimeout(kick, 1200);
-  }
   let playStart = 0;
+  /** 程序化素材总包预热（#perf2026-08-28 三批修订）：buildAssets 是确定性全局单例
+   *  （~6700 图标画布+全表，同步 ~400-700ms）。★只允许在【进世界路径起点】触发——
+   *  与 worker 读档解析/沉降、素材下载并行吃掉；曾挂菜单启动 idle 钩子，实测在这台
+   *  弱 GPU 上把 ~7k 张画布后备堆进菜单期 → 光标层上下文被逐（canvas哨兵 streak
+   *  ≥100×6窗）+ HealCanvas 空转（2026-08-28 用户实报"菜单页就开始崩"）。fire-
+   *  and-forget；Game 构造时 buildAssets 命中热单例（未完成则原地同步补完，语义同旧） */
+  function startAssetPrewarm(): void {
+    void import('./assets/AssetGen').then((m) => m.buildAssets()).catch(() => {});
+  }
   let menuBg: MenuBackground | null = null;
   let menuRunning = false;
   let titleMenu: TitleMenu | null = null;
@@ -302,6 +297,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   // ---- 世界流程 ----
 
   async function newWorld(seed: string, w: number, h: number) {
+    startAssetPrewarm();   // #perf2026-08-28:与生成 worker 并行,勿占菜单期表面预算
     const g = makeGame();
     ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.GeneratingWorld'), 0.05);
     await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(Lang.worldgenText(label), p));
@@ -478,6 +474,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
    *  才在主线程 kvGet 走 fallback */
   async function loadFromKey(key: string) {
     try {
+      startAssetPrewarm();   // #perf2026-08-28:与读档 worker 并行,勿占菜单期表面预算
       // worker 路径：IDB 读取 + JSON 解析 + RLE 解码 + load 模式沉降全在后台
       const { WorldGenClient } = await import('./workers/WorldGenClient');
       const client = new WorldGenClient();
@@ -514,6 +511,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   async function loadFromJson(text: string) {
     try {
+      startAssetPrewarm();   // #perf2026-08-28:同 loadFromKey
       // worker 路径：JSON 解析 + RLE 解码 + load 模式沉降全在后台（json 源传入）
       const { WorldGenClient } = await import('./workers/WorldGenClient');
       const client = new WorldGenClient();
@@ -614,6 +612,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   async function importWld(buf: Uint8Array) {
+    startAssetPrewarm();   // #perf2026-08-28:同 loadFromKey(wld 转换/沉降段并行)
     ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.ParsingWld'), 0.1);
     try {
       const { save, report, seedText, gameMode } = parseWldToSave(buf);

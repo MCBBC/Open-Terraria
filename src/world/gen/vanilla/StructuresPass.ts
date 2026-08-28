@@ -98,10 +98,18 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
       const y = Math.min(rng.int(90, surf - 101), gs.worldSurfaceLow - 50);
       // GenVars.worldSurfaceLow（raw double 截断）——注意非 gs.worldSurfaceLow
       const isLake = lakes >= isCount;
-          if (isLake) cloudLake(st, rng, x, y);
+      // ★IIIII21（cs:13124-13155）：drunk 世界（非 remix 组合域）50/50 换用
+      // SnowCloudIsland(style3)/DesertCloudIsland(style1)；正常世界 CloudIsland
+      // style0。骰只在 drunk 分支内出现（普通世界零扰动）。
+      let style = 0;
+      if (!isLake && gs.seedFlags.drunkWorld && !gs.seedFlags.remix) {
+        if (rng.int(0, 1) === 0) { style = 3; snowCloudIsland(st, rng, x, y); }
+        else { style = 1; desertCloudIsland(st, rng, x, y); }
+      }
+      else if (isLake) cloudLake(st, rng, x, y);
       else cloudIsland(st, rng, x, y);
           housesX.push(x); housesY.push(y);
-      gs.floatingIslands.push({ x, y, style: 0, isLake });
+      gs.floatingIslands.push({ x, y, style, isLake });
       if (!isLake) lakes++;
     }
   }
@@ -306,6 +314,219 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
       }
     }
   }
+}
+
+// ★IIIII21 浮空岛族重建（drunk 分支 cs:13124-13155）：SnowCloudIsland（cs:78284-78718）
+// 与 DesertCloudIsland（cs:78720-79155）与 CloudIsland 形体骨架逐行同构——差异仅三常量
+// （canon-diff 实证）：
+//   · 凸包/puff 雨云副色：雪岛=460 雪云 / 沙岛=196 雨云（正常世界恒 196）
+//   · 土芯重涂目标：雪岛→147 雪 / 沙岛→53 沙（正常世界→0 土）
+//   · 土面云斑回填目标：三者皆 189 云
+// C# 主盘写死 189（无 extraFloatingIslands 的 num8=718 头），故 ①④ 段与普通云岛同码。
+// ★surfaceIsInSpace 秘种子支不移植（gated off；已有 cloudIsland 同案备案）。
+const SNOW_BLOCK = TILE_BY_KEY['snow']!;        // sheet 147
+const SAND_BLOCK = TILE_BY_KEY['sand']!;        // sheet 53
+const SNOW_CLOUD = TILE_BY_KEY['v_460_snow_cloud_block']!;
+
+function cloudIslandVariant(
+  st: TileStore, rng: RNG, ci: number, cj: number,
+  altTile: number, coreTile: number,
+): void {
+  const tile = CLOUD;
+  let num = rng.int(100, 149);
+  let num2 = num;
+  let num3 = rng.int(20, 29);
+  let b4 = ci, b5 = ci, b6 = cj, b7 = cj;
+  let px = ci + 0.0, py = cj + 0.0;
+  let vx = rng.int(-20, 20) * 0.2;
+  while (vx > -2 && vx < 2) vx = rng.int(-20, 20) * 0.2;
+  let vy = rng.int(-20, -11) * 0.02;
+  while (num > 0 && num3 > 0) {                      // ① 主体云盘（写死 189）
+    num -= rng.int(0, 3);
+    num3 -= 1;
+    const x0 = Math.max(0, Math.trunc(px - num * 0.5)), x1 = Math.min(st.w, Math.trunc(px + num * 0.5));
+    const y0 = Math.max(0, Math.trunc(py - num * 0.5)), y1 = Math.min(st.h, Math.trunc(py + num * 0.5));
+    num2 = num * rng.int(80, 119) * 0.01;
+    let top = py + 1;
+    for (let x = x0; x < x1; x++) {
+      if (rng.int(0, 1) === 0) top += rng.int(-1, 1);
+      if (top < py) top = py;
+      if (top > py + 2) top = py + 2;
+      for (let y = y0; y < y1; y++) {
+        if (y <= top) continue;
+        const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) >= num2 * 0.4) continue;
+        if (x < b4) b4 = x;
+        if (x > b5) b5 = x;
+        if (y < b6) b6 = y;
+        if (y > b7) b7 = y;
+        const ti = st.idx(x, y);
+        st.flags[ti] = 1; st.type[ti] = tile;
+      }
+    }
+    px += vx; py += vy;
+    vx += rng.int(-20, 20) * 0.05;
+    if (vx > 1) vx = 1;
+    if (vx < -1) vx = -1;
+    if (vy > 0.2) vy = -0.2;
+    if (vy < -0.2) vy = -0.2;
+  }
+  let r17 = b4 + rng.int(0, 4);                      // ② 底缘副云凸包：altTile
+  let r19 = 0;
+  for (; r17 < b5; r17 += rng.int(r19, Math.floor(r19 * 1.5) - 1)) {
+    let r18 = b7;
+    while (r17 >= 15 && r17 < st.w - 15 && r18 >= 15 && r18 < st.h - 15 && st.flags[st.idx(r17, r18)] === 0) r18--;
+    r18 += rng.int(-3, 3);
+    r19 = rng.int(4, 7);
+    let mat = tile;
+    if (rng.int(0, 3) === 0) mat = altTile;          // Next(4)==0 → 副色
+    for (let x = r17 - r19; x <= r17 + r19; x++) {
+      for (let y = r18 - r19; y <= r18 + r19; y++) {
+        if (y <= b6 || !st.inBounds(x, y)) continue;
+        const ddx = Math.abs(x - r17), ddy = Math.abs(y - r18) * 2;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < r19 + rng.int(0, 1)) {
+          const ti = st.idx(x, y);
+          st.flags[ti] = 1; st.type[ti] = mat;
+        }
+      }
+    }
+  }
+  num = rng.int(80, 94);                             // ③ 芯核：Next(80,95)
+  num2 = num;
+  num3 = rng.int(10, 14);
+  px = ci + 0.0; py = b6 + 0.0;
+  vx = rng.int(-20, 20) * 0.2;
+  while (vx > -2 && vx < 2) vx = rng.int(-20, 20) * 0.2;
+  vy = rng.int(-20, -11) * 0.02;
+  while (num > 0 && num3 > 0) {
+    num -= rng.int(0, 3);
+    num3 -= 1;
+    const x0 = Math.max(0, Math.trunc(px - num * 0.5)), x1 = Math.min(st.w, Math.trunc(px + num * 0.5));
+    const y0 = Math.max(0, b6 - 1), y1 = Math.min(st.h, Math.trunc(py + num * 0.5));
+    num2 = num * rng.int(80, 119) * 0.01;
+    let top = py + 1;
+    for (let x = x0; x < x1; x++) {
+      if (rng.int(0, 1) === 0) top += rng.int(-1, 1);
+      if (top < py) top = py;
+      if (top > py + 2) top = py + 2;
+      for (let y = y0; y < y1; y++) {
+        if (y <= top) continue;
+        const ti = st.idx(x, y);
+        const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
+        // 雪岛守卫 type==189（与云岛 num8 路径同字面量）、目标=芯块
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4 && st.type[ti] === tile) st.type[ti] = coreTile;
+      }
+    }
+    px += vx; py += vy;
+    vx += rng.int(-20, 20) * 0.05;
+    if (vx > 1) vx = 1;
+    if (vx < -1) vx = -1;
+    if (vy > 0.2) vy = -0.2;
+    if (vy < -0.2) vy = -0.2;
+  }
+  {                                                  // ④ 芯面云斑：找活性芯格向上盖云
+    let cx = b4 + rng.int(0, 4);
+    while (cx < b5) {
+      let cy = b7;
+      while ((cy < 0 || cy >= st.h || cx < 0 || cx >= st.w || !st.flags[st.idx(cx, cy)] || st.type[st.idx(cx, cy)] !== coreTile) && cx < b5) {
+        cy--;
+        if (cy < b6) { cy = b7; cx += rng.int(1, 3); }
+      }
+      if (cx >= b5) continue;
+      cy += rng.int(0, 3);
+      const cr = rng.int(2, 4);
+      for (let x = cx - cr; x <= cx + cr; x++) {
+        for (let y = cy - cr; y <= cy + cr; y++) {
+          if (y <= b6 || !st.inBounds(x, y)) continue;
+          const ddx = Math.abs(x - cx), ddy = Math.abs(y - cy) * 2;
+          if (Math.sqrt(ddx * ddx + ddy * ddy) < cr) st.type[st.idx(x, y)] = tile;
+        }
+      }
+      cx += rng.int(cr, Math.floor(cr * 1.5) - 1);
+    }
+  }
+  for (let x = b4 - 20; x <= b5 + 20; x++) {         // ⑤ 全实心区填墙 73（含 SquareWallFrame 骰）
+    for (let y = b6 - 20; y <= b7 + 20; y++) {
+      if (!st.inBounds(x, y)) continue;
+      let all = true;
+      for (let ox = x - 1; ox <= x + 1; ox++) {
+        for (let oy = y - 1; oy <= y + 1; oy++) {
+          if (!st.inBounds(ox, oy)) { all = false; continue; }
+          const k = st.idx(ox, oy);
+          if (st.flags[k] === 0 || (st.wall[k] > 0 && st.wall[k] !== 73)) all = false;
+        }
+      }
+      if (all) {
+        st.wall[st.idx(x, y)] = 73;
+        wallFrameDraw(st, rng, x, y);
+      }
+    }
+  }
+  for (let x = b4; x <= b5; x++) {                   // ⑥ 岛面水池
+    let y = b6 - 10;
+    while (y + 1 < st.h && st.flags[st.idx(x, y + 1)] === 0) y++;
+    if (y >= b7) continue;
+    if (!st.inBounds(x, y + 1) || st.type[st.idx(x, y + 1)] !== tile) continue;
+    if (rng.int(0, 9) === 0) {
+      const wid = rng.int(1, 2);
+      for (let xx = x - wid; xx <= x + wid; xx++) {
+        if (!st.inBounds(xx, y)) continue;
+        if (st.type[st.idx(xx, y)] === tile && waterStaysPut(st, xx, y)) {
+          const k = st.idx(xx, y);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+        }
+        if (y + 1 < st.h && st.inBounds(xx, y + 1) && st.type[st.idx(xx, y + 1)] === tile && waterStaysPut(st, xx, y + 1)) {
+          const k = st.idx(xx, y + 1);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+        }
+        if (xx > x - wid && xx < x + 2 && y + 2 < st.h && st.inBounds(xx, y + 2)
+          && st.type[st.idx(xx, y + 2)] === tile && waterStaysPut(st, xx, y + 2)) {
+          const k = st.idx(xx, y + 2);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+        }
+      }
+    }
+    if (st.inBounds(x, y)) {
+      if (rng.int(0, 4) === 0 && waterStaysPut(st, x, y)) st.liquid[st.idx(x, y)] = 255;
+      st.liquidType[st.idx(x, y)] = 1;
+    }
+  }
+  const puffs = rng.int(0, 3);                       // ⑦ 岛上方副云 puff：altTile
+  for (let n = 0; n <= puffs; n++) {
+    const cx = rng.int(b4 - 5, b5 + 4);
+    const cy = b6 - rng.int(20, 39);
+    const cr = rng.int(4, 7);
+    let mat = tile;
+    if (rng.int(0, 1) === 0) mat = altTile;
+    for (let x = cx - cr; x <= cx + cr; x++) {
+      for (let y = cy - cr; y <= cy + cr; y++) {
+        if (!st.inBounds(x, y)) continue;
+        const ddx = Math.abs(x - cx), ddy = Math.abs(y - cy) * 2;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < cr + rng.int(-1, 1)) {
+          const k = st.idx(x, y);
+          st.flags[k] = 1; st.type[k] = mat;
+        }
+      }
+    }
+    for (let x = cx - cr + 2; x <= cx + cr - 2; x++) {
+      let y = cy - cr;
+      while (y < st.h && st.flags[st.idx(x, y)] === 0) y++;
+      if (st.inBounds(x, y) && waterStaysPut(st, x, y)) {
+        const k = st.idx(x, y);
+        st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+      }
+    }
+  }
+}
+
+/** SnowCloudIsland（cs:78284）drunk 专建器 */
+function snowCloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
+  cloudIslandVariant(st, rng, ci, cj, SNOW_CLOUD, SNOW_BLOCK);
+}
+
+/** DesertCloudIsland（cs:78720）drunk 专建器 */
+function desertCloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
+  cloudIslandVariant(st, rng, ci, cj, RAIN_CLOUD, SAND_BLOCK);
 }
 
 /** CloudLake（cs:79068-79419）1:1：①云盘 → ②底缘雨云凸包（无 InWorld 门）→

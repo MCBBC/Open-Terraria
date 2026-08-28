@@ -81,9 +81,27 @@ export class RollingBoulder extends Entity {
       if (this.vx < 0 && this.vx > -7) this.vx -= 0.05;
     }
     this.vy = Math.min(this.vy + 0.3, 16);
+    // ---- 碰撞响应（Projectile.cs:19055-19101 巨石族分支 verbatim）----
+    const lastVX = this.vx, lastVY = this.vy;
     // 碰撞位移（Body 旗由 lib 维护：onGround/collideY/hitWall）
     moveAndCollide(this, game.world, this.vx, this.vy);
     this.rotation += this.vx * 0.06;
+    // ① 高速落地（lastVy>5）：弹回 20% + 落地尘/声（SoundID 0 = dig 系）
+    if (this.vy !== lastVY && lastVY > 5) {
+      this.vy = -lastVY * 0.2;
+      game.spawnParticles?.(this.cx, this.y + this.h, '#8A8A8A', 6, 1.2, { life: 14 });
+      game.playSfx?.('dig', 0.8);
+      if (this.projId === 1057) { this.dead = true; return; }   // 1057 落地即碎
+    }
+    // ② 横向撞墙：**Kill()（碎裂）**——不是反弹！ping-pong 根因即漏了这条
+    // （cs:19097-19100 else 支；1055 荧光石球例外不碎走追踪切换）
+    if (this.vx !== lastVX) {
+      if (this.projId !== 1055) {
+        game.spawnParticles?.(this.cx, this.cy, '#9A9A9A', 10, 1.6, { life: 18 });
+        this.dead = true;
+        return;
+      }
+    }
 
     // ---- 生命周期 ----
     this.life--;

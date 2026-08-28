@@ -29,8 +29,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
     }) => void;
     __swNTBChron?: (tag: string, a: number, b: number) => void;
   };
-  // IIII11：chron 流缓冲（call 边界打 CALLBEGIN/CALLEND 与 rig 对齐）+ 全程样本序
-  const chronAll: string[] = [];
+  // IIII11：chron 流（disk 流式，防 OOM）+ 全程样本序
   let jsSeq = 0;
   // 样本流直接落盘（避免内存上限）：64KB 分块 append
   const fs11 = await import('node:fs');
@@ -38,15 +37,30 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   let pend: number[] = [];
   const gs3 = globalThis as unknown as { seedLine?: number };
   const g1 = globalThis as { __swOnRoll?: (value: number, inst: object) => void };
+  // 近样本环形缓冲（16，新→旧）与 rig 同布局
+  const hist = new Int32Array(16);
+  let histN = 0;
   g1.__swOnRoll = (v) => {
     jsSeq++;
+    hist[histN++ & 15] = v;
     pend.push(v);
     if (pend.length >= 65536) {
       fs11.writeSync(fd11, pend.join('\n') + '\n');
       pend = [];
     }
   };
-  g0.__swNTBChron = (tag, a, b) => { chronAll.push(`${tag} ${a} ${b} rc=${jsSeq}`); };
+  const fdCh = fs11.openSync('/tmp/iii11-out/j-chron.txt', 'w');
+  let pendCh: string[] = [];
+  g0.__swNTBChron = (tag, a, b) => {
+    const n2 = Math.min(histN, 16);
+    const parts: string[] = [];
+    for (let h = 0; h < n2; h++) parts.push(String(hist[(histN - 1 - h) & 15]));
+    pendCh.push(`${tag} ${a} ${b} rc=${jsSeq} hist=${parts.join(',')}`);
+    if (pendCh.length >= 8192) {
+      fs11.writeSync(fdCh, pendCh.join('\n') + '\n');
+      pendCh = [];
+    }
+  };
   g0.__swNTBCap = (phase, gsv, st) => {
     if (phase === 'in') {
       if (outstanding) throw new Error('ntbcap pairing broken: in before out');
@@ -54,11 +68,11 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
       outstanding = true;
       const wv = gsv as { worldSurface?: number };
       if (callN === 1 && wv?.worldSurface !== undefined) gs3.seedLine = Math.round(wv.worldSurface * 100);
-      chronAll.push(`CALLBEGIN ${callN} 0 rc=${jsSeq}`);
+      pendCh.push(`CALLBEGIN ${callN} 0 rc=${jsSeq}`);
     } else if (phase === 'out') {
       if (!outstanding) throw new Error('ntbcap pairing broken: out before in');
       outstanding = false;
-      chronAll.push(`CALLEND ${callN} 0 rc=${jsSeq}`);
+      pendCh.push(`CALLEND ${callN} 0 rc=${jsSeq}`);
     } else return;
     const dir = `${OUT}/${phase}-${callN}`;
     const n = st.w * st.h;
@@ -121,7 +135,8 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
     });
     console.log(`[iii11] done calls=${callN}`);
   } finally {
-    writeFileSync('/tmp/iii11-out/j-chron.txt', chronAll.join('\n') + '\n');
+    if (pendCh.length) fs11.writeSync(fdCh, pendCh.join('\n') + '\n');
+    fs11.closeSync(fdCh);
     if (pend.length) fs11.writeSync(fd11, pend.join('\n') + '\n');
     fs11.closeSync(fd11);
     g0.__swNTBCap = undefined;

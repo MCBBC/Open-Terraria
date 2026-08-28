@@ -73,8 +73,11 @@ export class Input {
     }) as EventListener);
     // mousedown 挂 window：不依赖事件目标是否恰好是 canvas
     onWin('mousedown', ((e: MouseEvent) => {
-      // UI 面板上的点击不穿透为游戏输入
-      if ((e.target as HTMLElement)?.closest?.('.sw-panel, .sw-slot, .sw-recipe, .sw-btn')) return;
+      // UI 面板上的点击不穿透为游戏输入。★门 = 事件目标落在 UI 根 .sw-root 内即可：
+      // .sw-root 自身 pointer-events:none，能成为 target 的必是真控件（面板/槽/按钮
+      // 全在里面）——类名白名单曾漏 .sw-npc-shop 族 = 商店点行购买的同时开火/挖掘
+      // （2026-08-28 用户报）。显式类名单保留兜 body 直挂件（聊天输入框 sw-chatbox 等）
+      if ((e.target as HTMLElement)?.closest?.('.sw-root, .sw-panel, .sw-slot, .sw-recipe, .sw-btn, .sw-chatbox')) return;
       if (e.button === 0) {
         // R4-22：delayUseItem 置位期间吞掉本次使用边沿（mouseHeld 保持——按住不松
         // 仍不开火,松键才解除,同 TriggersSet 语义）
@@ -99,7 +102,7 @@ export class Input {
     // 长按 ≥400ms 且位移 <12px = 右键交互脉冲：开箱/对话/开门）。
     // ★ 不改桌面路径：桌面无 touch 事件，本段零影响
     const isUiTarget = (t: EventTarget | null): boolean =>
-      !!t && (t as HTMLElement)?.closest?.('.sw-panel, .sw-slot, .sw-recipe, .sw-btn, .sw-mobile, .sw-hotbar, .sw-tooltip, .sw-ach-panel, .sw-res-panel, .sw-drag-ghost') != null;
+      !!t && (t as HTMLElement)?.closest?.('.sw-root, .sw-panel, .sw-slot, .sw-recipe, .sw-btn, .sw-mobile, .sw-hotbar, .sw-tooltip, .sw-ach-panel, .sw-res-panel, .sw-drag-ghost, .sw-chatbox') != null;
     let worldTouchId: number | null = null;
     let touchStartX = 0, touchStartY = 0, touchStartT = 0;
     let longPressTimer: ReturnType<typeof setTimeout> | null = null;

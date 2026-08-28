@@ -106,6 +106,7 @@ export class MenuBackground {
     }
     if (performance.now() < this.glCloudRetryAt) return null;
     const inst = new GLSpriteLayer();
+    inst.statName = 'menubg';   // #perf-gpulog
     if (inst.unavailable) {
       inst.dispose();
       this.glCloudRetryAt = performance.now() + 30_000;

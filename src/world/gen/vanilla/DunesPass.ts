@@ -50,6 +50,9 @@ export function runDunesPass(st: TileStore, rng: RNG, gs: GenState, onIter?: (i:
   // pass 头：DungeonCrawler.SetupDungeonGenVarVariables（cs:11542 + DungeonCrawler.cs:56）
   // ——地牢主题 Next(3) 在**这里**消耗（曾错放到 DungeonPass=流错位 1 颗）
   gs.dungeonTheme = rng.nextIntRange(0, 3);
+  // ★IIIII21（DungeonCrawler.cs:94-110）：drunk 世界墙风格重掷——紧跟主题 switch
+  //   之后、入口三掷之前。普通世界该 if 整段短路=零掷骰零扰动。
+  gs.dungeonWallStyle = gs.seedFlags.drunkWorld ? rng.nextIntRange(0, 3) : undefined;
   // ★入口三掷归位（2026-08-16 每 pass 重播改造）：SetupDungeonGenVarVariables 尾段的
   //   入口类型掷①② Next(3)（DungeonCrawler.cs:174/177 Legacy→Dome→Tower 门）+
   //   MakeDungeon_GetEntranceSettings.RandomSeed Next()（:856）原版就在 Dunes pass 头

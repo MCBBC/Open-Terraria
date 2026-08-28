@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TileStore } from '../src/world/TileStore';
-import { vanillaFrameFor, setVanillaSolidTables, setVanillaFrameImportant } from '../src/render/VanillaFraming';
+import { vanillaFrameFor, setVanillaSolidTables, setVanillaFrameImportant, setVanillaVariantMap } from '../src/render/VanillaFraming';
 import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';
 
@@ -49,12 +49,11 @@ describe('用户标注区 rig 对拍', () => {
       st.half[i] = wld.tiles.half[i];
       st.slope[i] = wld.tiles.slope[i];
     }
-    // 变体注入:oracle fn 逐格
+    // 变体注入:oracle fn 逐格(与 golden layer4 同款——num6 是外部见证,链内规则按
+    // switch(num6) 选用;缓存命中由 v6 变体域戳守卫,不依赖 forceFresh)
     const vmap = new Map<number, number>();
     for (const d of dump) vmap.set(d.y * wld.tilesWide + d.x, d.fn);
-    // setVanillaVariantMap 不存在则跳过注入(与 golden 主闸一致)
-    const anyVf = vanillaFrameFor as unknown as { __inject?: unknown };
-    void anyVf;
+    setVanillaVariantMap(vmap);
 
     const bad: string[] = [];
     let checked = 0, skippedFI = 0;
@@ -70,7 +69,7 @@ describe('用户标注区 rig 对拍', () => {
     }
     console.log(`checked=${checked} skippedFI=${skippedFI} bad=${bad.length}`);
     for (const b of bad.slice(0, 30)) console.log('  ' + b);
-    expect(checked).toBeGreaterThan(300);
+    expect(checked).toBeGreaterThan(200); // 区域非 FI 活格实况 ~216(416 总格 −31 FI)
     expect(bad, `差格 ${bad.length}:\n${bad.slice(0, 20).join('\n')}`).toEqual([]);
   });
 });

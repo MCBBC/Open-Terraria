@@ -10,6 +10,8 @@
 // SelfFrame8Way 是其近似,本移植取代两者成为 vanilla-exact 路径。
 import type { TileStore } from '../world/TileStore';
 import programJson from '../data/generated/tileframe-program.json';
+import { makeFrame } from '../data/generated/tileframe-codegen.js';
+import type { FrameDRV, FrameTileH } from '../data/generated/tileframe-codegen.js';
 import { TILE_DEFS } from '../data/tiles';
 import { vanillaIdOf } from './TileMergeFamily';
 
@@ -135,11 +137,13 @@ export interface FrameEnv {
   st: TileStore;
   i: number;
   j: number;
-  variant: number;           // num6(变体 0-2;SW 用确定性哈希,原版为存档 frameNumber/genRand)
+  variant: number;
   rockLayer: number;
-  frameCache: Map<number, { fx: number; fy: number; fu: boolean; fd: boolean; fl: boolean; fr: boolean }>; // TileFrame 递归的帧缓存(含协商旗快照,按格)
+  centerVan: number;         // 中心 vanilla id(MERGE_DIRT 跨族结合)
+  frameCache: Map<number, FrameEntry>; // TileFrame 递归的帧缓存(含协商旗快照 + 变体域戳,按格)
   depth: number;
   bypassGlobalCache?: boolean; // 对拍强制新求值通道(顶链绕过全局快照缓存)
+  trace?: TraceSink;           // 测试专用执行轨迹
 }
 
 // 转译器产出两种集合引用形:`SETREF.name`(dotted)与 `SETREF["name"]`(bracketed,
@@ -211,6 +215,8 @@ function tileMergeAttemptWeird(env: FrameEnv, scope: Scope, args: string[]): voi
 function tileMergeAttemptFrametest(env: FrameEnv, scope: Scope, args: string[]): void {
   ROCKLAYER_G = env.rockLayer;
   // (i, j, myType, lookfor, up, down, left, right, upLeft, upRight, downLeft, downRight)
+  // ★单遍处理(vanilla WorldGen.cs:82462 一致;曾双遍 = 正交向二次无条件盖章 bug,
+  //   与代码生成通道在 moss/glass 邻接配置分歧 —— 2026-08-28 定罪修复)
   const myType = sv(scope, args[2]);
   const lookforRaw = args[3];
   let lookforSet: ((t: number) => boolean) | null = null;
@@ -219,24 +225,21 @@ function tileMergeAttemptFrametest(env: FrameEnv, scope: Scope, args: string[]):
     if (k2.startsWith('__row_')) { const n2 = +k2.slice(6); lookforSet = (d: number) => tileMerge[n2]?.[d] ?? false; }
     else lookforSet = (SET_REF_FN[k2 as keyof typeof SET_REF_FN] ?? null) as ((t: number) => boolean) | null;
   }
-  const lookforIsSet = k2 != null;
-  const lookforNum = lookforIsSet ? null : sv(scope, lookforRaw);
-  const tryOrtho = (dn: string, dx: number, dy: number, oppositeFlag: 'up' | 'down' | 'left' | 'right'): void => {
-    const cur = scope[dn] as number;
-    const hit = lookforSet ? (cur > -1 && (lookforSet as (t: number) => boolean)(cur)) : cur === lookforNum;
-    if (!hit) return;
-    tileFrame(env, env.i + dx, env.j + dy, env.depth + 1);
-    if (mergeFlags[oppositeFlag]) scope[dn] = myType;
-  };
-  tryOrtho('up', 0, -1, 'down');
-  tryOrtho('down', 0, 1, 'up');
-  tryOrtho('left', -1, 0, 'right');
-  tryOrtho('right', 1, 0, 'left');
+  const lookforNum = k2 != null ? null : sv(scope, lookforRaw);
+  const OPP: Record<string, 'up' | 'down' | 'left' | 'right'> = { up: 'down', down: 'up', left: 'right', right: 'left' };
+  const DXDY: Record<string, [number, number]> = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
   for (const dn of args.slice(4)) {
     const cur = scope[dn] as number;
-    const lf = lookforIsSet ? resolveSetFn(lookforRaw) : null;
-    const hit = lf ? (cur > -1 && lf(cur)) : cur === lookforNum;
-    if (hit) scope[dn] = myType;
+    const hit = lookforSet ? (cur > -1 && lookforSet(cur)) : cur === lookforNum;
+    if (!hit) continue;
+    const opp = OPP[dn];
+    if (opp) {
+      const [dx, dy] = DXDY[dn];
+      tileFrame(env, env.i + dx, env.j + dy, env.depth + 1);
+      if (mergeFlags[opp]) scope[dn] = myType;
+    } else {
+      scope[dn] = myType;
+    }
   }
 }
 
@@ -324,22 +327,32 @@ function evalExpr(expr: string, scope: Scope): number | boolean {
 }
 
 // 程序执行
+// 执行轨迹(测试专用):env.trace 存在时逐语句记录(kind/命中分支/target=值),
+// 运行时路径不受影响(undefined 检查一次)。
+type TraceSink = { push(line: string): void };
+interface FrameEnvX extends FrameEnv { trace?: TraceSink }
+
 function evalProgram(stmts: Stmt[], env: FrameEnv, scope: Scope): void {
+  const tr = (env as FrameEnvX).trace;
   for (const st of stmts) {
     switch (st.kind) {
       case 'if': {
-        if (evalExpr(st.cond!, scope)) { evalProgram(st.then!, env, scope); }
+        const c = evalExpr(st.cond!, scope) as boolean;
+        tr?.push(`L${st.line} if(${st.cond})=${c ? 'T' : 'F'}`);
+        if (c) { evalProgram(st.then!, env, scope); }
         else if (st.else) { evalProgram(st.else, env, scope); }
         break;
       }
       case 'switch': {
         const disc = evalExpr(st.disc!, scope);
         const body = st.cases![String(disc)] ?? st.cases!.default;
+        tr?.push(`L${st.line} switch(${st.disc})=${disc}->${body ? 'case' : 'none'}`);
         if (body) evalProgram(body, env, scope);
         break;
       }
       case 'assign': {
         const v = evalExpr(st.expr!, scope);
+        tr?.push(`L${st.line} ${st.target}=${String(v)} [${st.expr}]`);
         // 静态协商旗双写:程序赋值 mergeUp/… 须同步到 tileMergeAttemptFrametest 读的全局旗
         // (原版为 WorldGen 静态变量 :4139-4145,每次 Cosmetic 头清零、矩阵段置位)
         if (st.target === 'mergeUp') { mergeFlags.up = v as boolean; }
@@ -362,8 +375,39 @@ function evalProgram(stmts: Stmt[], env: FrameEnv, scope: Scope): void {
   }
 }
 
+// Cull 单向判定(GetTileMergeCulling :86117 的 coat 比较核;解释器与代码生成 DRV 共用)
+function cullDirVisible(st: TileStore, ci: number, cj: number, dx: number, dy: number): boolean {
+  const x = ci + dx, y = cj + dy;
+  if (!st.inBounds(x, y)) return false;
+  const ii = st.idx(x, y);
+  const invSelf = (st.coat[st.idx(ci, cj)] & 2) !== 0; // COAT_INVISIBLE_BLOCK
+  const invNb = (st.coat[ii] & 2) !== 0;
+  return invNb !== invSelf;
+}
+
+// ===================== 代码生成通道(tileframe-codegen.js)=====================
+// gen-codegen.mjs 把 tileframe-program.json 直译为单函数;语义逐位等价于下方解释器
+// (对拍基准 = 同一 store 驱动两路比较)。默认关;localStorage sw_vanilla_framing=1
+// (与 VanillaTiler 同旗)或 setFramingCodegenEnabled 显式开启。解释器保留作 fallback。
+const GEN_FRAME = makeFrame();
+let _codegenOverride: boolean | null = null;
+const _CODEGEN_DEFAULT = (() => {
+  // 模块加载期读一次(VanillaTiler 同款语义);localStorage 缺失(node 测试环境)= 关
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('sw_vanilla_framing') === '1';
+  } catch { return false; }
+})();
+export function setFramingCodegenEnabled(on: boolean | null): void { _codegenOverride = on; }
+export function isFramingCodegenEnabled(): boolean {
+  return _codegenOverride ?? _CODEGEN_DEFAULT;
+}
+const LOC_OBJ = { mergesWithDirtInASpecialWay: (t: number) => MERGES_WITH_DIRT_SPECIAL[t] ?? false };
+
 function execCall(st: Stmt, env: FrameEnv, scope: Scope): void {
   const args = st.args!;
+  const tr = (env as FrameEnvX).trace;
+  const dirNamesAll = ['up', 'down', 'left', 'right', 'upLeft', 'upRight', 'downLeft', 'downRight'];
+  const dirsBefore = tr ? dirNamesAll.map((d) => `${d}=${scope[d]}`).join(',') : '';
   switch (st.fn) {
     case 'TileMergeAttempt':
     case 'TileMergeAttemptWeird':
@@ -393,19 +437,11 @@ function execCall(st: Stmt, env: FrameEnv, scope: Scope): void {
       // GetTileMergeCulling(:86117):邻居 echo 涂层(invisibleBlock)与中心不同 → 该向清 -1
       const st2 = env.st;
       if (st2.showInvisibleBlocks) break; // ShouldShowInvisibleBlocksAndWalls → default cache 全 false
-      const cull = (dx: number, dy: number): boolean => {
-        const x = env.i + dx, y = env.j + dy;
-        if (!st2.inBounds(x, y)) return false;
-        const ii = st2.idx(x, y);
-        const invSelf = (st2.coat[st2.idx(env.i, env.j)] & 2) !== 0; // COAT_INVISIBLE_BLOCK
-        const invNb = (st2.coat[ii] & 2) !== 0;
-        return invNb !== invSelf;
-      };
       const dirs: Array<[string, number, number]> = [
         [args[0], 0, -1], [args[1], 0, 1], [args[2], -1, 0], [args[3], 1, 0],
         [args[4], -1, -1], [args[5], 1, -1], [args[6], -1, 1], [args[7], 1, 1],
       ];
-      for (const [dn, dx, dy] of dirs) if (cull(dx, dy)) scope[dn] = -1;
+      for (const [dn, dx, dy] of dirs) if (cullDirVisible(st2, env.i, env.j, dx, dy)) scope[dn] = -1;
       break;
     }
     case 'CactusFrame':
@@ -413,11 +449,15 @@ function execCall(st: Stmt, env: FrameEnv, scope: Scope): void {
     default:
       throw new Error(`VanillaFraming: 未实现调用 ${st.fn} @L${st.line}`);
   }
+  if (tr) {
+    const after = dirNamesAll.map((d) => `${d}=${scope[d]}`).join(',');
+    if (after !== dirsBefore || st.fn === 'TileFrame') tr.push(`L${st.line} ${st.fn}(${args.join(',')}) [${dirsBefore}] -> [${after}]`);
+  }
 }
 
 // ===================== TileFrame 包装(守卫 + 最终写 + 邻递归) =====================
 // 等价 WorldGen.TileFrame(82605-82665) 守卫 + TileFrameCosmetic + 86072-86093 写回
-interface FrameEntry { fx: number; fy: number; fu: boolean; fd: boolean; fl: boolean; fr: boolean }
+interface FrameEntry { fx: number; fy: number; fu: boolean; fd: boolean; fl: boolean; fr: boolean; v6?: number }
 export const vanillaFrameCache = new Map<number, FrameEntry>();
 let frameCacheWorld: object | null = null;
 export function invalidateVanillaFrames(world: object): void {
@@ -453,8 +493,9 @@ export function setVanillaFrameImportant(fi: boolean[]): void {
 }
 
 
-// FrameEntry 声明见上方 TileFrame 包装段(fx/fy + 四向协商旗快照)
-const toEntry = (fx: number, fy: number): FrameEntry => ({ fx, fy, fu: mergeFlags.up, fd: mergeFlags.down, fl: mergeFlags.left, fr: mergeFlags.right });
+// FrameEntry 声明见上方 TileFrame 包装段(fx/fy + 四向协商旗快照 + v6 变体域戳)
+const toEntry = (fx: number, fy: number, v6: number): FrameEntry =>
+  ({ fx, fy, fu: mergeFlags.up, fd: mergeFlags.down, fl: mergeFlags.left, fr: mergeFlags.right, v6 });
 
 function tileFrame(env: FrameEnv, i: number, j: number, depth: number): { fx: number; fy: number } {
   const st = env.st;
@@ -464,7 +505,12 @@ function tileFrame(env: FrameEnv, i: number, j: number, depth: number): { fx: nu
   if (!st.flags[idx]) return { fx: 0, fy: 0 };
   const typeV = vanillaIdOf(st.type[idx]); // 内部 id → vanilla id(★域契约,见头注)
   const key = j * st.w + i;
-  const cached = env.frameCache.get(key) ?? (env.bypassGlobalCache ? undefined : vanillaFrameCache.get(key));
+  const rawHit = env.frameCache.get(key) ?? (env.bypassGlobalCache ? undefined : vanillaFrameCache.get(key));
+  // ★变体域戳(2026-08-28):帧是 (世界配置 × num6 变体) 的函数。oracle/区域对拍逐格
+  // 注入 variant 时,深层递归会把"外层变体"算出的邻格帧写进全局缓存,顶链再命中即串
+  // 变体(golden layer4 注释同案)。命中时校验 v6 !== 当前变体 → 按 miss 重算覆盖。
+  // 生产路径 num6 恒为位置哈希,戳恒相等 → 行为与旧缓存完全一致。
+  const cached = rawHit && rawHit.v6 === env.variant ? rawHit : undefined;
   if (cached) {
     // ★静态协商旗随缓存一并复放:原版静态旗是该格配置的纯函数(Frametest 在递归返回后
     // 立即读取),快照回放等价于完整重跑,又避免指数级重复求值。
@@ -474,18 +520,18 @@ function tileFrame(env: FrameEnv, i: number, j: number, depth: number): { fx: nu
   }
   // env.frameCache 先挂占位档(存档内存帧)防同一次求值内的协商回环;
   // 完成后被带旗终值覆盖(vanilla tail 写回语义 :86072-86093 的框内等价)。
-  env.frameCache.set(key, toEntry(st.frameX[idx], st.frameY[idx]));
+  env.frameCache.set(key, toEntry(st.frameX[idx], st.frameY[idx], env.variant));
   // ★env.i/j 必须重绑到本次递归的坐标:runCosmeticChain 用 parentEnv 的 i/j 构造
   // 邻居句柄(mkTile),沿用外层坐标会让深层求值读到错误的八邻。
   const res = runCosmeticChain(st, i, j, typeV, { ...env, i, j, depth });
-  const entry = toEntry(res.fx, res.fy);
+  const entry = toEntry(res.fx, res.fy, env.variant);
   vanillaFrameCache.set(key, entry);
   env.frameCache.set(key, entry);
   return res;
 }
 
 // 邻居包装对象(T0/TD/…:求值环境的 tile/tile2-8)
-function mkTile(env: FrameEnv, dx: number, dy: number): object {
+function mkTile(env: FrameEnv, dx: number, dy: number, centerVan: number): FrameTileH {
   const st = env.st;
   const x = env.i + dx, y = env.j + dy;
   const ok = st.inBounds(x, y);
@@ -510,9 +556,10 @@ function mkTile(env: FrameEnv, dx: number, dy: number): object {
 // ===================== 对外主入口 =====================
 // 求解 (i,j) 非 FI 原版块的 vanilla 帧。variant 为 0-2 变体(原版 frameNumber;
 // SW 用确定性哈希,oracle 对拍时按变体归一)。
-export function vanillaFrameFor(st: TileStore, i: number, j: number, world: object, variant: number, rockLayer: number, forceFresh = false): { fx: number; fy: number } {
+export function vanillaFrameFor(st: TileStore, i: number, j: number, world: object, variant: number, rockLayer: number, forceFresh = false, trace?: TraceSink): { fx: number; fy: number } {
   invalidateVanillaFrames(world);
-  return tileFrame({ st, i, j, variant, rockLayer, frameCache: new Map(), depth: 0, bypassGlobalCache: forceFresh }, i, j, 0);
+  const cv = vanillaIdOf(st.type[st.idx(i, j)]);
+  return tileFrame({ st, i, j, variant, rockLayer, centerVan: cv, frameCache: new Map(), depth: 0, bypassGlobalCache: forceFresh, trace }, i, j, 0);
 }
 
 // 变体查表(SW_FRAME 变体注入通道):oracle 对拍时给每格提供原版 frameNumber;缺省回落
@@ -550,10 +597,29 @@ function runCosmeticChain(st: TileStore, i: number, j: number, NUMraw: number, p
   } as unknown as Scope;
   (scope as Scope).__val = (expr: string) => evalExpr(expr, scope) as number;
   const tHandles = {
-    TU: mkTile(parentEnv, 0, -1), TD: mkTile(parentEnv, 0, 1), TL: mkTile(parentEnv, -1, 0),
-    TR: mkTile(parentEnv, 1, 0), TDL: mkTile(parentEnv, -1, 1), TDR: mkTile(parentEnv, 1, 1),
-    TUL: mkTile(parentEnv, -1, -1), TUR: mkTile(parentEnv, 1, -1),
+    TU: mkTile(parentEnv, 0, -1, parentEnv.centerVan), TD: mkTile(parentEnv, 0, 1, parentEnv.centerVan),
+    TL: mkTile(parentEnv, -1, 0, parentEnv.centerVan), TR: mkTile(parentEnv, 1, 0, parentEnv.centerVan),
+    TDL: mkTile(parentEnv, -1, 1, parentEnv.centerVan), TDR: mkTile(parentEnv, 1, 1, parentEnv.centerVan),
+    TUL: mkTile(parentEnv, -1, -1, parentEnv.centerVan), TUR: mkTile(parentEnv, 1, -1, parentEnv.centerVan),
   };
+  // —— 代码生成快路径(语义与下方解释器逐位一致;递归/缓存/协商旗全复用)——
+  if (isFramingCodegenEnabled()) {
+    const envChain: FrameEnv = { ...parentEnv, i, j };
+    const drv: FrameDRV = {
+      inv: () => st.showInvisibleBlocks,
+      cull: (dx: number, dy: number) => !st.showInvisibleBlocks && cullDirVisible(st, i, j, dx, dy),
+      tf: (dx: number, dy: number) => { tileFrame(envChain, i + dx, j + dy, parentEnv.depth + 1); },
+    };
+    const out = GEN_FRAME(
+      mergeFlags, SET_REF_FN, SET_REF_FN, tileMerge, LOC_OBJ,
+      { IsRope: (x: number, y: number) => isRopeAt(st, x, y), IsVine: (x: number, y: number) => isVineAt(st, x, y) },
+      drv, i, j,
+      TILE_STONE[NUMraw] ? 1 : NUMraw, num6v, parentEnv.variant, 0,
+      st.slope[st.idx(i, j)], !!st.half[st.idx(i, j)],
+      tHandles.TU, tHandles.TD, tHandles.TL, tHandles.TR, tHandles.TUL, tHandles.TUR, tHandles.TDL, tHandles.TDR,
+    );
+    return { fx: out[0], fy: out[1] };
+  }
   const fullScope = { ...scope, ...tHandles, S: SET_REF_FN, SETREF: SET_REF_FN, LOC: { mergesWithDirtInASpecialWay: (t: number) => MERGES_WITH_DIRT_SPECIAL[t] ?? false }, PRED: { IsRope: (x: number, y: number) => isRopeAt(st, x, y), IsVine: (x: number, y: number) => isVineAt(st, x, y) } } as unknown as Scope;
   // ★静态协商旗以 getter 实时读全局(WorldGen.mergeUp/… 语义):深层递归改写后,
   // 父链的 if(mergeDown) 等条件必须看到子链刚写入的值,而非本作用域的过期副本。

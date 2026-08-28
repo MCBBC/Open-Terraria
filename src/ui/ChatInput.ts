@@ -42,6 +42,7 @@ export class ChatInput {
     if (this.root) { this.input?.focus(); return; }
     if (Date.now() < this.suppressOpenUntil) return;
     const root = document.createElement('div');
+    root.className = 'sw-chatbox';   // Input mousedown 不穿透门（body 直挂件不在 .sw-root 内）
     root.style.cssText = 'position:fixed;left:12px;bottom:64px;z-index:60;display:flex;gap:6px;align-items:center;'
       + 'background:rgba(20,24,38,0.82);border:1px solid rgba(255,220,120,0.35);border-radius:4px;padding:4px 8px;'
       + 'font:13px ui-monospace,monospace;color:#e8e4d8;';

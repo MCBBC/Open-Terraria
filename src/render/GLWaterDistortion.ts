@@ -53,6 +53,7 @@
 // 里以本模块输出替换直画。GL 不可用/上下文丢失时 composite() 返回 false，调用方
 // 原样直画（无扭曲——CPU 渲染/低端机自动降级，同 ?wwarp=0 逃生门）。
 
+import { glStatUpload, glStatDraw, registerFence, texBytes } from './GLStats';
 export class GLWaterDistortion {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | null = null;
@@ -156,6 +157,7 @@ void main() {
       preserveDrawingBuffer: true,
     })) as WebGLRenderingContext | null;
     if (!gl) { this.unavailable = true; this.diedAt = performance.now(); return; }
+    registerFence('waterDistortion', gl);   // #perf-gpulog
     // 软件渲染器判不可用（同 GLWorldLight：全屏四纹理采样软渲染毫秒级）
     try {
       const renderer = String(gl.getParameter(gl.RENDERER) ?? '');
@@ -236,6 +238,8 @@ void main() {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, noise);
+    const [nw, nh] = texDims(noise);   // #perf-gpulog:字节按实际尺寸计
+    if (nw > 0 && nh > 0) glStatUpload('waterDistortion', nw * nh * 4);
     const [w, h] = texDims(noise);
     if (w > 0) { this.noiseW = w; this.noiseH = h; }
     this.noiseReady = true;
@@ -265,6 +269,7 @@ void main() {
     //   对齐 1 = 紧密排列,与 bytes 长度 w*h 精确匹配
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, w, h, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, bytes);
+    glStatUpload('waterDistortion', w * h);   // #perf-gpulog:LUMINANCE 每像素1字节
   }
 
   /**
@@ -297,6 +302,7 @@ void main() {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, scene);
+    glStatUpload('waterDistortion', scene.width * scene.height * 4);   // #perf-gpulog
     // 前景水门控纹理（α 参与门控；预乘不影响 α 通道）
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, this.texWater);
@@ -304,6 +310,7 @@ void main() {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     if (water && water.width > 0 && water.height > 0) {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, water);
+      glStatUpload('waterDistortion', water.width * water.height * 4);   // #perf-gpulog
     } else {
       // 无水帧：1×1 透明纹理 = 门控恒 0 = 原样直通
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
@@ -322,6 +329,7 @@ void main() {
     const loc = gl.getAttribLocation(this.prog, 'aPos');
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    glStatDraw('waterDistortion', 4);   // #perf-gpulog
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     if (gl.isContextLost()) { this.diedAt = performance.now(); return false; }
     return true;

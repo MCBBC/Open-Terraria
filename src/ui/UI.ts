@@ -182,6 +182,15 @@ function vidOf(itemId: number): number {
   return def ? (def.vid ?? vanillaIdOfItemKey(def.key)) : -1;
 }
 
+/** 原版 item id → 内部 item id（vid→key→ITEM_BY_KEY；未注册 -1）。
+ *  vidOf 的逆映射：iconUrl 收的是内部 id（ITEM_DEFS 下标），商店行等 vid 域
+ *  数据必须先转——曾把 vid 直喂 iconUrl = ITEM_DEFS[vid] 错位取 def，图标
+ *  全部张冠李戴（2026-08-28 用户报派对女孩商店） */
+function internalIdOfVid(vid: number): number {
+  const k = VANILLA_ITEM_KEY_BY_ID[vid];
+  return k !== undefined ? (ITEM_BY_KEY[k] ?? -1) : -1;
+}
+
 function iconUrl(game: Game, id: number): string {
   let url = iconCache.get(id);
   if (!url) {
@@ -932,6 +941,9 @@ export class UI {
     options.onChange(applyTooltipBox);   // UI 单例长存，无退订点
 
     game.openChest = (c) => this.openChestPanel(c);
+    // 死亡收 UI 链用（Main.cs:46435-46440 dead ⇒ playerInventory=false ⇒ chest=-1 的
+    // 引擎等价——Game.tickChestAutoClose 死亡门消费）
+    game.closeInventory = () => this.closeInventory();
     // 当前打开箱子引用（Game 提取机通电 Wiring.cs:2571 Chest.UsingChest 判定用）
     game.openChestRef = () => this.openChest;
     // Game 侧收起面板（Main.cs:38455-38458 chest=-1 + Player.cs:31264/:31277 追踪失联
@@ -4045,7 +4057,9 @@ export class UI {
       this.craftPool = []; this.craftPoolIdx = [];
       for (let k = 0; k < WIN; k++) {
         const row = el('div', 'sw-recipe');
-        row.style.cssText = `height:${UI.CRAFT_ROW_H}px; box-sizing:border-box; padding:3px 8px; margin:0; position:absolute; left:0; right:0; top:0; will-change:transform;`;
+        // ★初始化即 hidden（2026-08-27 用户报"第一行盖遮罩"）：池行一旦漏过 paint
+        //  循环（WIN 竞态）就以 top:0+半透底叠在第一行上=遮罩。未 paint 前不可见
+        row.style.cssText = `height:${UI.CRAFT_ROW_H}px; box-sizing:border-box; padding:3px 8px; margin:0; position:absolute; left:0; right:0; top:0; will-change:transform; visibility:hidden;`;
         row.addEventListener('mouseenter', () => {
           // 悬停预选三段语义保留（2026-08-21/24/25）：只动材料格不动窗、
           // mousemove 门 150ms、滚轮门 350ms——池行持久后 mouseenter 只在
@@ -4183,6 +4197,11 @@ export class UI {
         this.craftPoolIdx[k] = idx;
       }
       row.style.transform = `translateY(${((idx - topF) * H).toFixed(2)}px)`;
+    }
+    // WIN 收缩后的池尾行兜底隐藏（漏网行=top:0 空行叠第一行的遮罩根源）
+    for (let k = WIN; k < this.craftPool.length; k++) {
+      const row = this.craftPool[k];
+      if (row) { row.style.visibility = 'hidden'; row.style.transform = 'translateY(0px)'; }
     }
     // 高度贴内容（min(240, len*H)）：恒 240 会让短列表下方出现大死区（2026-08-26
     //  用户复报"滚动困难不顺滑"后回滚）——抖动源既已由细项盒恒高消除,此处回归自适应
@@ -4588,10 +4607,11 @@ export class UI {
           this.game?.npcShopClose();
         });
     }
-    // 图标由 UI 侧按原版 id 补(atlas 管线)
+    // 图标由 UI 侧按原版 id 补(atlas 管线)——iconUrl 收内部 id,vid 先转
+    // (2026-08-28 修复:此前 vid 直喂=ITEM_DEFS[vid] 错位 def,商店图标张冠李戴)
     const entries: ShopEntry[] = items.map((it) => ({
       ...it,
-      iconUrl: this.game ? iconUrl(this.game, it.vanillaId) || '' : '',
+      iconUrl: this.game ? iconUrl(this.game, internalIdOfVid(it.vanillaId)) || '' : '',
     }));
     this.npcShop.open(title, entries, copper, happinessPct, medals);
     // 懒加载晚到升级(2026-08-13 枚举 review):开店瞬间 iconUrl miss(空串/程序化
@@ -4605,7 +4625,7 @@ export class UI {
         const shop = this.npcShop;
         if (!shop || !shop.isOpen || ++tries > 15) { clearInterval(timer); return; }
         for (const e of entries) {
-          const url = iconUrl(g, e.vanillaId);
+          const url = iconUrl(g, internalIdOfVid(e.vanillaId));
           if (url && url !== initial.get(e.vanillaId)) {
             initial.set(e.vanillaId, url);
             shop.setRowIcon(e.vanillaId, url);

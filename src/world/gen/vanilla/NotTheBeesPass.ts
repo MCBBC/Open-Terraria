@@ -219,6 +219,18 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
         st.type[idx] = JUNGLE_VINE;
         try { g0.__swNTBChron?.('V', i, j); } catch { /* probe */ }
       }
+      // __III11_ENT_TAP__
+      if (i >= 1550 && i <= 1557 && j >= 600 && j <= 1040) {
+        try {
+          const __a = st.flags[idx] !== 0;
+          if (__a && sheetOf(st.type[idx]!) === 484) {
+            g0.__swNTBChron?.('S484js t=' + st.type[idx] + ' solid=' + vanGenSolidType(st.type[idx]) + ' topSet=' + SOLID_TOP.has(484) + ' inact=' + ((st.wire[idx]! >>> 5) & 1), i, j);
+          }
+          const __info = !__a ? 'na' : ('t' + sheetOf(st.type[idx]!) + 'w' + st.wall[idx]! + 's' + st.slope[idx]!);
+          g0.__swNTBChron?.('ENT' + __info, i, j);
+          if (__a && solidOrSloped(st, i, j)) g0.__swNTBChron?.('SG1', i, j);
+        } catch { /* probe */ }
+      }
       // 实心转化主体（cs:25331-25400）
       const cracked = st.flags[idx] !== 0 && CRACKED_BRICKS.has(sheetOf(st.type[idx]!));
       if ((solidOrSloped(st, i, j) || cracked)

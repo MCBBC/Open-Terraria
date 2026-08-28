@@ -16,6 +16,7 @@
 //  · WebGL2 NPOT 纹理可 REPEAT(地下带横向平铺)
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { texId, texReady } from './texId';
+import { glStatUpload, glStatTexCreate, glStatDelete, glStatDraw } from './GLStats';
 
 export interface QuadOpts {
   alpha?: number;                                    // 整体透明度(默认 1)
@@ -136,6 +137,8 @@ export interface CloudFx {
 }
 
 export class GLSpriteLayer {
+  /** GPU 账本命名(glfx/menubg…)——所有方构造后赋值;同名实例共享账页 */
+  statName = 'sprite';
   readonly canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext | null = null;
   private prog: WebGLProgram | null = null;
@@ -370,6 +373,8 @@ export class GLSpriteLayer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    glStatUpload(this.statName, w * h * 4);              // #perf-gpulog:带宽
+    glStatTexCreate(this.statName, w * h * 4);           // #perf-gpulog:新纹理→驻留
     const mipped = !noMip;
     if (mipped) gl.generateMipmap(gl.TEXTURE_2D);   // LINEAR 档三线采样(LINEAR_MIPMAP_LINEAR)
     gl.bindTexture(gl.TEXTURE_2D, null);
@@ -403,6 +408,7 @@ export class GLSpriteLayer {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);   // 同 texFromImage:预乘+mip 能量正确
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, this.scratch);
+    glStatUpload(this.statName, w * h * 4);   // #perf-gpulog
     if (e.mipped) gl.generateMipmap(gl.TEXTURE_2D);   // 子区更新后 mip 链重建
     gl.bindTexture(gl.TEXTURE_2D, null);
     e.stamp = ++this.stamp;
@@ -419,6 +425,7 @@ export class GLSpriteLayer {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    glStatUpload(this.statName, src.width * src.height * 4);   // #perf-gpulog
     if (e.mipped) gl.generateMipmap(gl.TEXTURE_2D);
     gl.bindTexture(gl.TEXTURE_2D, null);
     e.stamp = ++this.stamp;
@@ -431,6 +438,7 @@ export class GLSpriteLayer {
     if (!e) return;
     this.texs.delete(key);
     this.bytes -= e.bytes;
+    glStatDelete(this.statName, e.bytes);   // #perf-gpulog
     this.gl.deleteTexture(e.tex);
   }
 
@@ -477,6 +485,7 @@ export class GLSpriteLayer {
     gl.uniform4f(this.uni.uSrc, u0, v0, u1 - u0, v1 - v0);
     this.setCommon(dx, dy, dw, dh, opts);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    glStatDraw(this.statName, 4);   // #perf-gpulog
     gl.bindSampler(0, null);
   }
 
@@ -498,6 +507,7 @@ export class GLSpriteLayer {
     gl.uniform4f(this.uni.uSrc, u0, v0, span, ((sy + sh - py) - (sy + py)) / e.h);
     this.setCommon(dx, dy, totalW, dh, opts);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    glStatDraw(this.statName, 4);   // #perf-gpulog
     gl.bindSampler(0, null);
   }
 
@@ -537,6 +547,7 @@ export class GLSpriteLayer {
     gl.uniform2f(this.uniCloud.uDrawPos, fx.drawPos[0], fx.drawPos[1]);
     gl.uniform3f(this.uniCloud.uCelestial, fx.celestial[0], fx.celestial[1], fx.celestial[2]);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    glStatDraw(this.statName, 4);   // #perf-gpulog
     gl.bindSampler(0, null);
     // 程序切换回基础 quad 程序(uniform 属程序态;后续 quad() 假定 prog 在位)
     gl.useProgram(this.prog);
@@ -552,6 +563,7 @@ export class GLSpriteLayer {
       const dead = this.texs.get(oldest)!;
       this.texs.delete(oldest);
       this.bytes -= dead.bytes;
+      glStatDelete(this.statName, dead.bytes);   // #perf-gpulog
       this.gl.deleteTexture(dead.tex);
     }
   }
@@ -561,7 +573,11 @@ export class GLSpriteLayer {
   dispose(): void {
     if (!this.gl) return;
     // 上下文已丢失 → 驱动侧资源已蒸发,delete 只会打 INVALID_OPERATION 噪声
-    if (!this.gl.isContextLost() && !this.objectsStale) for (const [, e] of this.texs) this.gl.deleteTexture(e.tex);
+    if (!this.gl.isContextLost() && !this.objectsStale) {
+      let freed = 0;
+      for (const [, e] of this.texs) { this.gl.deleteTexture(e.tex); freed += e.bytes; }
+      glStatDelete(this.statName, freed);   // #perf-gpulog:整包释放记净额
+    }
     this.texs.clear();
     this.bytes = 0;
     this.canvas.width = 0;

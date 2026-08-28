@@ -433,6 +433,7 @@ export function noiseData(): { w: number; h: number; data: Uint8ClampedArray } |
   return noisePixels;
 }
 
+import { glStatUpload, glStatTexCreate, glStatDelete, glStatDraw, registerFence } from './GLStats';
 export class GLScreenFilters {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | null = null;
@@ -478,6 +479,7 @@ export class GLScreenFilters {
     })) as WebGLRenderingContext | null;
     if (!gl) { this.unavailable = true; this.diedAt = performance.now(); return; }
     this.gl = gl;
+    registerFence('screenFx', gl);   // #perf-gpulog
     const buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
@@ -548,6 +550,8 @@ export class GLScreenFilters {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.texNoise);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+    glStatUpload('screenFx', im.naturalWidth * im.naturalHeight * 4);   // #perf-gpulog
+    if (!this.noiseReady) glStatTexCreate('screenFx', im.naturalWidth * im.naturalHeight * 4);   // 首传=分配
     this.noiseW = im.naturalWidth;
     this.noiseH = im.naturalHeight;
     this.noiseReady = true;
@@ -567,6 +571,7 @@ export class GLScreenFilters {
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, this.kindNoiseTex[file]!);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+      if (im.complete && im.naturalWidth > 0) glStatUpload('screenFx', im.naturalWidth * im.naturalHeight * 4);   // #perf-gpulog
       const nearest = file.includes('Noir');
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
@@ -624,6 +629,7 @@ export class GLScreenFilters {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.texScreen);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    glStatUpload('screenFx', src.width * src.height * 4);   // #perf-gpulog
       gl.useProgram(entry.prog);
       const loc = gl.getAttribLocation(entry.prog, 'aPos');
       gl.enableVertexAttribArray(loc);
@@ -688,6 +694,7 @@ export class GLScreenFilters {
         gl.uniform1f(entry.uni.uOpacity, p.opacity);
       }
       gl.uniform3f(entry.uni.uTint, tint[0], tint[1], tint[2]);
+      glStatDraw('screenFx', 4);   // #perf-gpulog
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       if (gl.isContextLost()) { this.diedAt = performance.now(); return false; }
       if (i + 1 < passes.length) {

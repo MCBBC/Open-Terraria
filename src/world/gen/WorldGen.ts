@@ -355,6 +355,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   }
 
   finalize(ctx);
+  // ★IIIII16：night of the living dead 初始态（ResetTempsToDayTime WorldFile.cs:1019-1024
+  //   ——首存复位 dayTime=false/bloodMoon=true/time=1.0/moonPhase=0；tile 面（遍地墓园）
+  //   在 potPass 槽 graveyardSeedGate 已有，此处只补时钟初始态）
+  applyGraveyardInitialClockState(world);
   // 吸血鬼种子终段（WorldGen.cs:22625-22631：GenerateWorld 尾部全部 GenPass 之后
   // vampireSeed → RandomizeWorldSpawn + PlaceTorchesAroundSpawn + PutMonsterVanityInChests）
   vampireSeedFinishPass(ctx);
@@ -405,6 +409,12 @@ import { runCactusPalmTreesAndCoralPass } from './vanilla/StructuresPass';
 import { runTileCleanupPass, sheetId } from './vanilla/TileCleanupPass';
 import { runBrokenTrapCleanupPass } from './vanilla/BrokenTrapCleanupPass';
 import { runFinalCleanupPass, genSquareTileFrame } from './vanilla/FinalCleanupPass';
+import { runFinishDrunkGenPass } from './vanilla/FinishDrunkGenPass';   // ★IIIII21 FinishDrunkGen 1:1（cs:26493-26611）
+// IIIII16 秘种子生成终结面（Do* 族九旗标；接线点见下方各 ★IIIII16 注）
+import {
+  doDigExtraHoles, doSurfaceIsMushroomsEarly, pumpkinSeasonArm,
+  finalizeSecretSeedDoEnds, applyGraveyardInitialClockState,
+} from './vanilla/SecretSeedDoEndsPass';
 import { runMultitileFragmentSweepPass } from './vanilla/MultitileFragmentSweep';
 import { runMossAndMossCavesPass } from './vanilla/MossPass';
 import { runGrassWallPass } from './vanilla/GrassWallPass';
@@ -870,6 +880,8 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   rng.reseed(gs.seed); // ▶IceBiome cs:12343
   runIceBiomePass(store, rng, gs);       // 16 Generate Ice Biome
   rng.reseed(gs.seed); // ▶Grass cs:12454
+  // ★IIIII16：jagged rocks 打孔臂（cs:12470，skyblock 门内、roundLandmasses/撒草之前）
+  if (gs.seedFlags.digExtraHoles && !gs.seedFlags.skyblock) doDigExtraHoles(store, rng, gs);
   runGrassPass(store, rng, gs);          // 17 Grass
   rng.reseed(gs.seed); // ▶JunglePass cs:12497
   const jx = runJunglePass(store, rng, gs); // JunglePass
@@ -884,6 +896,8 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   rng.reseed(gs.seed); // ▶MudCavesToJungleGrass cs:12499（零掷骰）
   // ★UUUUUU：NotTheBees() 首槽（cs:12504——pass 头首掷消费者；纯 NTB 六槽之一）
   if (gs.seedFlags.notTheBees && !gs.seedFlags.skyblock) runNotTheBees(store, rng, gs);
+  // ★IIIII16：toadstool 首掷臂（cs:12517-12520，仅 !noSurface；SpreadGrass 扫描之前）
+  doSurfaceIsMushroomsEarly(store, rng, gs);
   runMudCavesPass(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
   runDesertPass(store, rng, gs); // 19 Full Desert（pass 头重播在 runDesertMoundOnly 内）
   rng.reseed(gs.seed); // ▶GlowingMushroomPatches cs:12581
@@ -1247,28 +1261,45 @@ function finalCleanupPass({ store, rng, world }: GenCtx) {
   //   :692 尾部无条件调 FinalSeedCleanup :695 悬空 Falling 块静态化）。曾挂在
   //   generateWorld 尾（finalize 之后）=时点晚于 dump #105 快照位，mile8 槽 57
   //   对拍把静态化差全记在 #105（const/s22222 T1>332×11 金币堆假债主）。
-  //   ★IIIII17（2026-08-28）：FinalizeSecretSeeds 内已实装端点按原版序挂载——
-  //   #18 portalGunInChests → DoPortalGunInChests(:3004，rainbowStuff 之后、
-  //   worldIsFrozen Finish/errorWorld Finish/FinalSeedCleanup 尾扫之前)。
-  //   掷流走本 pass 自有流(genRand 在 RunPass 头重播;旗关零掷),其余 finalize 端点
-  //   (DoCoatEverything*/DoRainbowStuff/…) 未实装,故此处即 cs:22666 可达面全序;
-  //   后续批次补端点时须按 vanilla 序插在本钩子内 portalGun 与 finalSeedCleanup 间。
+  //   ★IIIII17（2026-08-28）：FinalizeSecretSeeds 内端点按原版序挂载——
+  //   #18 portalGunInChests → DoPortalGunInChests(:3004，rainbowStuff(IIIII16 已落)
+  //   之后、worldIsFrozen Finish/errorWorld Finish/FinalSeedCleanup 尾扫之前)。
+  //   掷流走本 pass 自有流(genRand 在 RunPass 头重播;旗关零掷);后续批次补
+  //   worldIsFrozen Finish/errorWorld Finish/teamBasedSpawns 时按 vanilla 序插在
+  //   本钩子内 portalGun 与 finalSeedCleanup 之间。
   runFinalCleanupPass(store, ctxGs[0]!, rng, {
     chests: world.chests as never,
-    beforeShimmer: hfIs1457()
-      ? () => {
+    beforeShimmer: () => {
+          // ★IIIII16（2026-08-28）：FinalizeSecretSeeds 终结面九旗标子集，按 cs:589-663
+          //   原 if 链序——surfaceIsInSpace(:599) → surfaceIsMushrooms(:607-614 含 !noSurface
+          //   时 **连调两次** 的怪癖照录) → noInfection(:619) → hallowOnTheSurface(:623)
+          //   → startInHardmode(:1905，Main.hardMode+initializeHardMode V 带) →
+          //   rainbowStuff(:2715)。全部位于 portalGun(:663) 之前；逐旗独立门内消费
+          //   genRand ⇒ 普通种子零掷零写。实现体 = vanilla/SecretSeedDoEndsPass.ts。
+          //   ★双态注：本子集函数体 1457≡1458≡1456 三树逐字相同且旗关零掷——
+          //   故不套 hfIs1457 门，两种基线态都按原版位执行（默认运行时也可玩秘种子）。
+          finalizeSecretSeedDoEnds(store, rng, ctxGs[0]!, world);
           // ★IIIII17：FinalizeSecretSeeds 已实装端点按原版序——#18 portalGunInChests
           //   （cs:3004;rainbowStuff 之后、worldIsFrozen Finish/errorWorld Finish/
-          //   FinalSeedCleanup 尾扫之前）。掷流走本 pass 流（旗关零掷）;其余
-          //   finalize 端点未实装=此处即 cs:22666 可达面全序，后续批次按 vanilla 序
-          //   插在本钩子内 portalGun 与 finalSeedCleanup 之间。
-          if (ctxGs[0]!.seedFlags?.portalGunInChests) {
-            doPortalGunInChests(world.chests as never, () => rng.nextInt(7) === 0);
+          //   FinalSeedCleanup 尾扫之前）。掷流走本 pass 流（旗关零掷）;
+          //   ★IIIII16 批已并入 space/mushrooms/noInfection/hallow/startInHardmode/
+          //   rainbowStuff 六端点于上方（均在本钩 rainbow 位之后、portalGun 位之前），
+          //   此处即 cs:22666 可达面全序，后续批次按 vanilla 序插在本钩子内。
+          if (hfIs1457()) {
+            if (ctxGs[0]!.seedFlags?.portalGunInChests) {
+              doPortalGunInChests(world.chests as never, () => rng.nextInt(7) === 0);
+            }
+            finalSeedCleanup(store, ctxGs[0]!.seedFlags ?? {}, world.chests as never);
           }
-          finalSeedCleanup(store, ctxGs[0]!.seedFlags ?? {}, world.chests as never);
-        }
-      : undefined,
+        },
   });
+  // ★IIIII21（2026-08-28）：FinishDrunkGen（WorldGen.cs:26493-26611，调用点 :22630
+  //   FinalCleanup pass 体内 noTraps/tenth 之后、notTheBees/getGood/remix/LiquidCheck
+  //   之前）——paint/wallColor 三链 + 宝箱红药水/月总腿尾修。旗关零掷骰=普通种子
+  //   全流零扰动。
+  if (ctxGs[0]!.seedFlags?.drunkWorld) {
+    runFinishDrunkGenPass(store, rng, ctxGs[0]!, world.chests);
+  }
   // ★DDDDDD 批（2026-08-21）归位：原版 FinalCleanup pass 体末的全图 LiquidCheck
   // (createMergeTilesDuringGen:true)（cs:22639-50，ShimmerCleanUp 之后）——曾挂在
   // #49/#97 沉降尾（settle.ts，时点早 8 pass）。终清理槽直调，掷骰走 pass 链流。
@@ -1318,6 +1349,9 @@ function websInSpiderCavesSlot({ store, rng }: GenCtx) {
 function grassPlantsSlot({ store, rng }: GenCtx) {
   // GrassPlants(20232)/GlowingMushroomPlants(20278) 是两个独立 GenPass
   rng.reseed(ctxGs[0]!.seed); // ▶GrassPlants cs:20232
+  // ★IIIII16：南瓜季臂（cs:20232-20248，halloweenGen||endlessHalloween 门在函数体内；
+  //   位于地表植物散布循环之前=原版 pass 头位）
+  pumpkinSeasonArm(store, rng, ctxGs[0]!);
   runGrassPlantsPass(store, rng);
   rng.reseed(ctxGs[0]!.seed); // ▶GlowingMushroomPlants cs:20278
   const gs = ctxGs[0];

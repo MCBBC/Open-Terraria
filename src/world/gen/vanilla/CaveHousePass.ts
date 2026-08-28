@@ -226,6 +226,10 @@ function createRoomsBigAbandonedHouses(st: TileStore, gs: GenState, rng: RNG, ox
     last = rooms[rooms.length - 1]!;
   }
   for (const r of rooms) r.y += 3;                              // cs:78-82
+  // ★HouseBuilder ctor 的 Top 升序重排（HouseBuilder.cs:73-74）：原版自底向上构造序
+  //   被 ctor 翻成【顶房在前】——楼梯相邻对/支撑梁"后房在下"/宝箱级联 Rooms[0]=顶房
+  //   全依赖该序。塔层 Top 严格互异（每层上移 ≥1 行）,稳定排序无并列歧义。
+  rooms.sort((a, b) => a.y - b.y);
   return rooms;
 }
 
