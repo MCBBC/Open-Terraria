@@ -15,6 +15,9 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   const { w, h } = st;
   const scale = (w / 4200) * 1.5;
   const van = w / 4200;
+  // ★IIIII48 勘误案底：CreateStartPoint 的 (1200+Main.rockLayer)/2 用的是 **Terrain
+  //   尾段六格吸附后的 Main.rockLayer**（=worldSurface+(int)((rockHigh−ws)/6)*6，
+  //   本链恰=769==rockLevel），不是 GenVars.rockLayer(745.8)。原实现正确，勿改。
   let x = gs.jungleX;
   let y = Math.floor((h + gs.rockLevel) / 2);
   let zeroX = 0, zeroY = 0;

@@ -548,6 +548,13 @@ export class LiquidSim {
    *  y > GenVars.waterLine → 类型置岩浆（世界生成期深洞岩浆池的来源——曾整段
    *  漏接，#28 Underworld 债主因之一）。null=不接线（保持旧行为） */
   genWaterLine: number | null = null;
+  /** ★IIIII58 REMIX 落水分型规则（Liquid.cs:182-185 首臂）：真则忽略 waterLine
+   *  规则，改用 (lavaLine, rockLayer−80, maxTilesY−350, oceanDepths) 四条件带——
+   *  入带→岩浆、出带→强制归水。接线值由 GenState 侧注入 */
+  remixWaterRule = false;
+  remixLavaLine = Number.MAX_SAFE_INTEGER;
+  remixRockLevel = -1;
+  remixOceanLevel = -1;
   /** 地牢豁免（Liquid.cs:186-188：InAnyPotentialDungeonBounds(x,y) 且 origin 格墙
    *  为地牢墙族 → 保持水）。QuickWater 调用方按需接线；未接线=null 不豁免 */
   dungeonWaterExempt: ((x: number, y: number, originWall: number) => boolean) | null = null;
@@ -1759,8 +1766,18 @@ export class LiquidSim {
       }
       // Liquid.cs:177-190：生成/读档期且本轮有下落、源非蜜非微光 →
       //   越过 GenVars.waterLine 落点转岩浆（b=1/本仓 2）；地牢墙豁免回水（b=0/本仓 1）
+      // ★IIIII58 REMIX 分支（Liquid.cs:182-185 三元首臂）：remixWorldGen 时**恒改写**
+      //   类型——(y>GenVars.lavaLine && (y<(int)Main.rockLayer-80 || y>maxTilesY-350)
+      //   && !oceanDepths(x,y)) → 岩浆，否则**强制归水**（含原为岩浆的落体）。
       if (flag2 && this.isGeneratingOrLoadingWorld && srcType !== 3 && srcType !== 4) {
-        if (this.genWaterLine !== null && Y > this.genWaterLine) type = 2;
+        if (this.remixWaterRule) {
+          const ok = Y > this.remixLavaLine
+            && (Y < this.remixRockLevel - 80 || Y > st.h - 350)
+            && !(Y <= this.remixOceanLevel && (X < 380 || X > st.w - 380));
+          type = ok ? 2 : 1;
+        } else if (this.genWaterLine !== null && Y > this.genWaterLine) {
+          type = 2;
+        }
         if (this.generatingWorld && this.dungeonWaterExempt?.(X, Y, originWall)) type = 1;
       }
       // 2) 蛇形横向铺开（Liquid.cs:131-195）

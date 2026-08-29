@@ -8,10 +8,23 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
 import { genSolidType } from './GenSolid';
+// ★IIIII58（2026-08-29）REMIX #20 单格残差收官：饰面循环 K/P 支此前裸写
+// flags/type，漏了原版 WorldGen.KillTile / PlaceTile 清链的 halfBrick(false)——
+// x86 侧 (1891,1025) 沙格 h1→h0（KillTile 尾 cs:64406-64407 active(false)+
+// halfBrick(false)），js 只裸关激活保 h1 = mile8 REMIX 唯一 Hf 差。改走引擎
+// killTileGen（尘掷表+拒毁门+setTileSilent 半砖清除+SquareTileFrame 级联）
+// 与 PlaceTile generic-solid 路径镜像。
+import { genKillTile, genSquareTileFrame } from './FinalCleanupPass';
 
 const MUD = TILE_BY_KEY['mud']!;
 const MUSH_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
+/** sheet 反查表（remix 幽灵泥带 type==0 判定用；含未映射 = -1） */
+const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let _i = 0; _i < TILE_DEFS.length; _i++) {
+  const _s = TILE_DEFS[_i]?.vanilla?.sheet;
+  if (typeof _s === 'number') SHEET_OF[_i] = _s;
+}
 const SNOW = TILE_BY_KEY['snow']!;
 const ICE = TILE_BY_KEY['ice']!;
 const THIN_ICE = TILE_BY_KEY['thin_ice']!;
@@ -30,6 +43,10 @@ const SUNFLOWER = TILE_BY_KEY['v_27_sunflower']!;
 export const grassSpreadState = { n: 0 };
 let _wsRef: () => number = () => 300;
 export function setWorldSurfaceRef(fn: () => number): void { _wsRef = fn; }
+/** ★IIIII46：tenthAnniversaryWorldGen 参照（cs:75762-75770 SpreadGrass 中带门 tenth 豁免）
+ * ——CorruptionPass 入口注入 gs.seedFlags.tenthAnniversary；缺省 false=非 tenth 行为不变。 */
+let _tenthRef: () => boolean = () => false;
+export function setTenthRef(fn: () => boolean): void { _tenthRef = fn; }
 
 /** SpreadGrass（cs:75210）：dirt==0 时 j≥worldSurface 拒绝（cs:75243 第二门禁——
  *  corruption 的 0→23/199 只在地表以上铺）。repeat=true 时 3×3 邻格递归（限 1000） */
@@ -41,8 +58,9 @@ export function spreadGrassOnce(
   if (!st.flags[ti] || st.type[ti] !== dirt) return;
   // cs:75223-75234（生成期分支）：邪恶草族（199/23）另有专属门——中央 10%（(0.45w,0.55w]）
   // 与滩带（beachDistance=380）内禁长；其余草走 (j>=worldSurface && dirt==0) 门。
+  // ★IIIII46（cs:75764）：tenthAnniversary 世界跳过中央带拒绝项（仅滩带保留）。
   if (grass === CRIMSON_GRASS_ID || grass === CORRUPT_GRASS_ID) {
-    if ((i > st.w * 0.45 && i <= st.w * 0.55) || i < 380 || i >= st.w - 380) return;
+    if ((!_tenthRef() && i > st.w * 0.45 && i <= st.w * 0.55) || i < 380 || i >= st.w - 380) return;
   } else if (dirt === 0 && j >= _wsRef()) {
     return;                                                            // growGrassUnderground=false
   }
@@ -84,6 +102,19 @@ export function spreadGrassOnce(
 const NOT_CLEARABLE = new Set<number>([
   396, 400, 401, 397, 398, 399, 404, 368, 367, 41, 43, 44, 481, 482, 483, 226, 237,
 ]);
+/** ★IIIII58：PlaceTile(…,59) generic-solid 支镜像（WorldGen.cs:59841 default 分支）。
+ *  原版 !active 目标先 tile.Clear(Tile|TilePaint|Slope)（cs:59501 → Tile.cs:746-774
+ *  ⇒ type=0/帧0/斜坡0/halfBrick(false)），再 active(true)+type=59（cs:60730-60733
+ *  尾 default 支）；调用方随后 SquareTileFrame(i,j)。59 不属液面拒绝清单、不属
+ *  TruncatesWalls——生成期 paint/coating 恒零，半砖/坡面位清链为实际差异面。 */
+function placeMudGen(st: TileStore, x: number, y: number): void {
+  const ii = st.idx(x, y);
+  st.slope[ii] = 0;                  // Clear(TileDataType.Slope)：slope(0)
+  st.half[ii] = 0;                   //                        halfBrick(false)
+  st.frameX[ii] = 0; st.frameY[ii] = 0;   // Clear(TileDataType.Tile)：frameX/Y=0
+  st.type[ii] = MUD;
+  st.flags[ii] = 1;
+}
 export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
   // ▶探针钩（隔离重放 rig tools/_c29iso.test.ts 用）：管线时点 gs 快照 + cleanup 事件
   const __cap = (globalThis as { __swMushGsCap?: (gs: GenState, st: TileStore) => void }).__swMushGsCap;
@@ -91,6 +122,22 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
   const __ev = (globalThis as { __swMushEv?: (s: string) => void }).__swMushEv;
 
   const { w, h } = st;
+  // ★IIIII48 REMIX 头段（1458 cs:12604-12613）：remix 世界把「假地表」带
+  //   [remixMushroomLayerLow(850), maxTilesY-10] 内全部 **幽灵/活性 type=0（土/空气）**
+  //   改写成泥 ghost——逐列 Next(3) 起始行（每列恒耗 1 骰）。vanilla 判 tile.type==0
+  //   不判 active ⇒ JS 以 sheet==0 对齐（含空气幽灵与活/惰性泥土）。
+  if (!!gs.seedFlags.remix) {
+    const MUD59 = TILE_BY_KEY['mud']!;
+    const bandLo = gs.remixMushroomLayerLow;
+    for (let i = 10; i < w - 10; i++) {
+      let j = bandLo + rng.int(0, 2);
+      for (; j < h - 10; j++) {
+        const ti = st.idx(i, j);
+        const sh = SHEET_OF[st.type[ti]];
+        if (sh === 0) st.type[ti] = MUD59;
+      }
+    }
+  }
   setWorldSurfaceRef(() => gs.worldSurface);   // SpreadGrass 的 dirt==0 地表门禁用   // SpreadGrass 的 dirt==0 地表门禁用
   let mCount = w / 700;
   if (mCount > 50) mCount = 50;                    // GenVars.maxMushroomBiomes = 50
@@ -105,7 +152,11 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (tries > Math.floor(w / 4)) {
         x = rng.int(Math.floor(w * 0.025), Math.floor(w * 0.975) - 1); // 兜底带（cs:12620）
       }
-      const y = rng.int(gs.rockLevel + 50, h - 301);                   // Main.rockLayer
+      // ★IIIII48 REMIX（cs:12637）：remix 世界蘑菇中心取「高处」带——
+      //   Next((int)worldSurface+50, (int)rockLevel−50)；普通世界仍为岩层下方。
+      const y = !!gs.seedFlags.remix
+        ? rng.int(gs.worldSurface + 50, gs.rockLevel - 51)
+        : rng.int(gs.rockLevel + 50, h - 301);                       // Main.rockLayer
       flag = false;
       for (let l = x - 100; l < x + 100; l += 3) {
         for (let m = y - 100; m < y + 100; m += 3) {
@@ -160,20 +211,24 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
           const iU = iy > 0 && st.flags[st.idx(ix, iy - 1)];
           const iD = iy < h - 1 && st.flags[st.idx(ix, iy + 1)];
           if (st.flags[ii]) {
-            // ★原版 KillTile（cs:63970 尾）生成期语义：active(false) **且 type=0**
-            // （SquareTileFrame 生成期零掷；70 非 TruncatesWalls 无 SquareWallFrame）。
-            // 曾只清 active 留幽灵 70 → 后续 type==70 的 quirk 读写全踩幽灵 → 级联。
-            if (!iL && !iR) { __ev?.(`K(${ix},${iy})t${st.type[ii]}H`); st.flags[ii] = 0; st.type[ii] = 0; }
-            else if (!iU && !iD) { __ev?.(`K(${ix},${iy})t${st.type[ii]}V`); st.flags[ii] = 0; st.type[ii] = 0; }
+            // ★IIIII58：K 支改走引擎 genKillTile＝KillTile 完整生成期链（cs:64406-
+            // 64433：active(false)+halfBrick(false)+frameX/Y=-1+ClearBlockPaintAndCoating
+            // +type=0+inActive(false)，含 CheckTileBreakability 拒毁头门与 SquareTileFrame
+            // 级联；地形族零尘掷）。此前裸写 flags/type 漏 halfBrick(false)：REMIX
+            // #20 (1891,1025) 沙格 h1→h0 未随=x86,mile8 REMIX 唯一 Hf 残差。
+            if (!iL && !iR) { __ev?.(`K(${ix},${iy})t${st.type[ii]}H`); genKillTile(st, rng, ix, iy); }
+            else if (!iU && !iD) { __ev?.(`K(${ix},${iy})t${st.type[ii]}V`); genKillTile(st, rng, ix, iy); }
             else __ev?.(`N(${ix},${iy})t${st.type[ii]}${iL ? 'l' : '-'}${iR ? 'r' : '-'}${iU ? 'u' : '-'}${iD ? 'd' : '-'}`);
           } else if (iL && iR) {
             __ev?.(`P(${ix},${iy})H`);
-            st.type[ii] = MUD; st.flags[ii] = 1;
+            placeMudGen(st, ix, iy);
+            genSquareTileFrame(st, rng, ix, iy);
             if (ix > 0 && st.type[st.idx(ix - 1, y)] === MUSH_GRASS) { st.type[st.idx(ix - 1, y)] = MUD; }
             if (ix < w - 1 && st.type[st.idx(ix + 1, y)] === MUSH_GRASS) { st.type[st.idx(ix + 1, y)] = MUD; }
           } else if (iU && iD) {
             __ev?.(`P(${ix},${iy})V`);
-            st.type[ii] = MUD; st.flags[ii] = 1;
+            placeMudGen(st, ix, iy);
+            genSquareTileFrame(st, rng, ix, iy);
             // ★cs:12764-12767 原版 quirk：竖桥写的 x 是 **num18（被放格列）**，
             // y 是 num17±1（锚 y）——曾误用锚 x → 偏列一格的 70→59 级联
             if (y > 0 && st.type[st.idx(ix, y - 1)] === MUSH_GRASS) { st.type[st.idx(ix, y - 1)] = MUD; }
@@ -194,7 +249,11 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
 /** ShroomPatch（cs:80540）1:1：泥 blob 随机游走，上空挖空、墙→80、尾端 2 支泥 runner */
 function shroomPatch(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): void {
 
-  const van = st.w / 4200;                          // num3 缩放(cs:80567;FTW ×1.5 未接)
+  // ★IIIII50（1458 cs:81099-81104）：size 缩放 num3=w/4200 —— getGoodWorldGen&&!remix
+  //  再 ×1.5（FTW 蘑菇洞窟显著增大；漏接曾致首个泥 blob 落地后与真值世界态分裂，
+  //  后续 500 距离拒绝采样按放大态重掷 → 全部洞位/形状级联错位）。
+  const van = (st.w / 4200)
+    * ((gs.seedFlags.getGoodWorld && !gs.seedFlags.remix) ? 1.5 : 1);   // cs:81101-81103
   let num = rng.int(80, 99) * van;                 // Next(80,100) × 缩放——num 曾漏乘(2026-08-12 审计)
   let num2 = rng.int(20, 25) * van;                // Next(20,26) × 缩放
   const num4 = num2 - 1;                           // 首圈标记

@@ -7,7 +7,7 @@
 // 走 hudTier() 分支算数;纯静态定位 CSS 块吃 var(--huds) 乘法;同一元素禁止两处
 // 都管(refreshHotbar 每 ~40ms 重写 inline,与之打架必错位)。
 import { options } from '../core/Options';
-import { isTouchDevice } from '../core/input/touchDevice';
+import { resolveTouchMode } from '../core/input/touchMode';
 
 export type HudTier = 'd0' | 't1' | 't2' | 't3';
 
@@ -43,7 +43,9 @@ function readSafeInsets(): void {
 function computeTier(w: number, h: number): HudTier {
   const pinned = options.data.hudScaleMode;
   if (pinned !== 'auto') return pinned;            // 设置页手动钉档(仅触屏会话有意义)
-  if (!isTouchDevice()) return 'd0';
+  if (resolveTouchMode() === 'keyboard') return 'd0';   // 强制键鼠档=整页桌面几何
+  const touch = resolveTouchMode() === 'touch';    // 触屏会话(auto 命中 coarse 或手动 touch)
+  if (!touch) return 'd0';
   if (Math.min(w, h) >= 700) return 't1';
   return w >= h ? 't2' : 't3';
 }
@@ -79,6 +81,8 @@ function armListenersOnce(): void {
   window.addEventListener('resize', () => refreshHudScale());
   window.addEventListener('orientationchange', () => refreshHudScale());
   window.visualViewport?.addEventListener?.('resize', () => refreshHudScale());
+  // 操作模式/HUD 档设置变更即时生效(设置页切换"操作模式"/钉档/微调)
+  options.onChange(() => refreshHudScale(true));
 }
 
 let armed = false;

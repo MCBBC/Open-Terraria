@@ -190,7 +190,11 @@ export function runOceanCavesPass(st: TileStore, rng: RNG, gs: GenState): Array<
     //   就不掷"的误区。此前门只认严格异侧，celeb 中带窄世界两洋各丢一条洞。
     if (side === 0 && !(gs.dungeonSide < 1)) continue;
     if (side === 1 && !(gs.dungeonSide > -1)) continue;
-    if (!(gs.seedFlags.drunkWorld || gs.seedFlags.tenthAnniversary || rng.int(0, 2) === 0)) continue;
+    // ★IIIII46 流序勘误：C# 短路 OR 的**首项** Next(maxValue) 恒先求值——即使 drunk/tenth
+    //   已注定为真，这一掷也必须消耗（此前 JS 把旗标判据放在前面，tenth 世界漏耗每侧一掷，
+    //   oceanCave 内部全体采样错位 → 两洋洞形漂移 ~2 万格）。
+    const oceanRoll = rng.int(0, 2);
+    if (!(oceanRoll === 0 || gs.seedFlags.drunkWorld || gs.seedFlags.tenthAnniversary)) continue;
     // ★cs:15249-15252:`int num = genRand.Next(55, 95); if (i == 1) num = Next(w-95, w-55);`
     //   右洋(i==1)的首次 Next(55,95) 被丢弃但**消耗掷骰流**——此前 JS 只掷一次,
     //   右洋蠕虫后续全部掷骰错位(8888 种子对拍实锤:HARDSAND/SAND 壳层错写 ~13k 格)。

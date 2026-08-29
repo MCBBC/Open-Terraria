@@ -6,7 +6,7 @@ import type { UIState } from './core/UIState';
 import { UIScale } from './draw/UIScale';
 import { UISpriteBatch, rgb } from './draw/UISpriteBatch';
 import { UITextures } from './assets/UITextures';
-import { isTouchDevice } from '../ui/MobileControls';
+import { resolveTouchMode } from '../core/input/touchMode';
 import { options } from '../core/Options';
 
 export class VUI {
@@ -262,7 +262,7 @@ export class VUI {
   /** 光标独占模式的局部系绘制(等价 drawCursor,坐标已平移到画布内) */
   private static drawCursorLocal(lx: number, ly: number) {
     if (!VUI.batch || !VUI.enabled) return;
-    if (isTouchDevice()) return;
+    if (resolveTouchMode() === 'touch') return;
     const tex = UITextures.get(VUI.smartCursorOn ? 'UI_Cursor_1' : 'UI_Cursor_0');
     if (!tex) return;
     const cc = VUI.cursorColorState();
@@ -314,7 +314,7 @@ export class VUI {
    *  offset(+1,+1)、RGB×0.2/A×0.5、scale×1.1（深色描边观感来源）；②主 pass 本色。 */
   private static drawCursor() {
     if (!VUI.batch || !VUI.enabled) return;
-    if (isTouchDevice()) return;
+    if (resolveTouchMode() === 'touch') return;
     const tex = UITextures.get(VUI.smartCursorOn ? 'UI_Cursor_1' : 'UI_Cursor_0');
     if (!tex) return;
     const x = Math.round(UIScale.mouseX);

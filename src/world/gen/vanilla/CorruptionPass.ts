@@ -7,7 +7,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
-import { spreadGrassOnce, grassSpreadState, setWorldSurfaceRef } from './MushroomPass';
+import { spreadGrassOnce, grassSpreadState, setWorldSurfaceRef, setTenthRef } from './MushroomPass';
 import { flipGenSolid, genSolidType } from './GenSolid';
 import { idsByVanillaSheet } from './TileRunner';
 
@@ -66,6 +66,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   const __mark = (globalThis as { __swCorMark?: (s: string) => void }).__swCorMark;
   const { w, h } = st;
   setWorldSurfaceRef(() => gs.worldSurface);   // SpreadGrass 的 dirt==0 地表门禁
+  setTenthRef(() => !!gs.seedFlags.tenthAnniversary);   // ★IIIII46：SpreadGrass 中带门 tenth 豁免（cs:75764）
   // 丛林/雪原横向范围(±10 回避, cs:13936-13952)
   let jMin = w, jMax = 0, sMin = w, sMax = 0;
   for (let x = 0; x < w; x++) {
@@ -79,22 +80,32 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   const avoid = 10;
   const jLo = jMin - avoid, jHi = jMax + avoid, sLo = sMin - avoid, sHi = sMax + avoid;
   const beachAvoid = 380;   // evilBiomeBeachAvoidance = beachSandRandomCenter(320)+60
-  const dungeonAvoid = 100;
   const midFixer = 50;      // evilBiomeAvoidanceMidFixer
   // ★裸 double：4200×0.00045 = 1.89 → 两组！（曾 floor 成 1 → 整片邪恶群系少一半）
   // ★IIIII14：drunk flag 恒 true（猩红分支必跑）且 num10 /= 2（cs:14024-14028）——
   //   两分支各得一半组数；普通世界维持原值单分支。
+  // ★IIIII46（cs:13993-13999）：remix→num10×2；else if tenth&&!dontStarve→num8×2/num9×2
+  //   （两臂互斥 else-if）；drunk 的 flag/num10 减半独立于二者。num8 参与腐化/普通两侧
+  //   中心区间 [num8, w-num8)；num9=地牢回避半径（dungeonAvoid）。tenth 中带拒绝环整段
+  //   跳过（cs:14069/14395 `!tenthAnniversary || dontStarve` 门）——原版允许邪恶带压中线。
   const drunk = !!gs.seedFlags.drunkWorld;
-  const groupCount = drunk ? w * 0.00045 / 2 : w * 0.00045;
+  const remixFlag = !!gs.seedFlags.remix;
+  // ★dontStarveWorldGen 在本仓旗标域=theConstant（Main.dontStarveWorld，SeedEasterEggs.ts:19）
+  const tenthNoDS = !!gs.seedFlags.tenthAnniversary && !gs.seedFlags.theConstant;
+  let groupCount = w * 0.00045;
+  if (remixFlag) groupCount *= 2;
+  if (drunk) groupCount /= 2;
+  const num8 = tenthNoDS ? 1000 : 500;           // cs:13991→13997(tenth ×2)
+  const dungeonAvoid = tenthNoDS ? 200 : 100;     // num9（cs:13992→13998）
   const hearts: Array<[number, number]> = [];
   /** 半侧域锁（cs:14031 猩红 / cs:14370 腐化）：drunk 时 cx 先按 crimsonLeft 锁半侧。
    *  vanilla= (crimsonLeft ? Next(num8, w*0.5) : Next(w*0.5, w-num8))——左侧参数语义：
    *  猩红与腐化取**相反**区间。0 = 全图（普通世界路径）。 */
   const pickCenter = (whichCrimson: boolean): number => {
-    if (!drunk) return rng.int(500, w - 501);                  // Next(num8, maxTilesX-num8)
+    if (!gs.seedFlags.drunkWorld) return rng.int(num8, w - num8 - 1);   // Next(num8, maxTilesX-num8)
     const half = Math.trunc(w * 0.5);
     const onLeft = whichCrimson ? gs.crimsonLeft : !gs.crimsonLeft;
-    return onLeft ? rng.int(500, half - 1) : rng.int(half, w - 501);
+    return onLeft ? rng.int(num8, half - 1) : rng.int(half, w - num8 - 1);
   };
   /**
    * 单邪恶分支执行器（corruption 组循环体逐语句 1:1）。
@@ -126,9 +137,11 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
         if (zLo < gs.dungeonLocation + dungeonAvoid && zHi > gs.dungeonLocation - dungeonAvoid) ok = false;
         // 中央回避带：num19 = drunk?100:200 仅猩红分支（cs:14018-14020）；腐化分支
         // num50 恒 200（cs:14362）——drunk 不放松（非对称，原版如此）。
+        // ★IIIII46（cs:14069/14395）：tenth&&!dontStarve 整段跳过（邪恶带允许压中线）。
         const centralBand = which && drunk ? 100 : 200;
         const mid = w / 2;
-        if (Math.abs(cx - mid) < centralBand || Math.abs(zLo - mid) < centralBand || Math.abs(zHi - mid) < centralBand) ok = false;
+        if (!tenthNoDS
+          && (Math.abs(cx - mid) < centralBand || Math.abs(zLo - mid) < centralBand || Math.abs(zHi - mid) < centralBand)) ok = false;
         const ud = gs.undergroundDesert;
         if (ud && ((cx > ud.x0 && cx < ud.x1) || (zLo > ud.x0 && zLo < ud.x1) || (zHi > ud.x0 && zHi < ud.x1))) ok = false;
         if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }   // cs:14006-14010（先雪后林）

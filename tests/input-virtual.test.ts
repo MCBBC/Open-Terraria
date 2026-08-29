@@ -53,12 +53,19 @@ describe('Input 虚拟通道', () => {
   let inp: Input;
   /** 绑定表临时改动现场(options.data 直改不落盘;set() 才持久化) */
   const savedBinds = options.data.keybinds;
+  const savedOpMode = options.data.touchOpMode;
   beforeEach(() => {
     winReg.clear(); elReg.clear();
     inp = freshInput();
     options.data.keybinds = undefined;
+    // 世界触摸合成的操作模式门(resolveTouchMode)在 node 无触摸硬件=keyboard,
+    // 会吞掉全部 touch 合成用例——本组测试钉触屏档
+    options.data.touchOpMode = 'touch';
   });
-  afterEach(() => { options.data.keybinds = savedBinds; });
+  afterEach(() => {
+    options.data.keybinds = savedBinds;
+    options.data.touchOpMode = savedOpMode;
+  });
 
   it('pressVirtual(code 口):边沿派发 origin/shiftKey/onKeyEvent(true) + 电平入桶', () => {
     const got: KeyEventLite[] = [];

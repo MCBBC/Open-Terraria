@@ -70,13 +70,28 @@ function spreadJungleGrass(st: TileStore, i: number, j: number): void {
   grassSpreadDepth--;
 }
 
-/** SonOfLakinater（L48516）：向下蜿蜒湖腔。lava 恒 false（getGoodWorld 不支持） */
+/** SonOfLakinater（1458 cs:80900）向下蜿蜒湖腔。
+ *  ★IIIII50（cs:80905-80914）：头部 Next(3)==0 时湖味分支——
+ *    drunk∧tenth∧remix∧!ntb → liquidType=3（组合种子域，本仓不触，掷骰保持）；
+ *    否则 getGoodWorldGen ∧ **(i<0.45w ∨ i>0.55w)** → 湖灌熔岩（recon 曾误载
+ *    「getGoodWorld 不支持」——实测 vanilla 1.4.5.8 该臂在案）。漏接曾致 FTW 链
+ *    #30 Slush 起 Y2>1×847（真值熔岩、我方清水）。普通世界掷骰必耗但味恒水。 */
 function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, strengthMultiplier = 1): void {
-  // cs:80357 头部 Next(3)（liquidType——普通世界恒水，但掷骰必消耗！曾缺失致流偏移）
-  rng.int(0, 2);
+  let lakeFlavor = 1;                                     // JS +1 基：1=水
+  if (rng.int(0, 2) === 0) {
+    if (gs.seedFlags.drunkWorld && gs.seedFlags.tenthAnniversary
+      && gs.seedFlags.remix && !gs.seedFlags.notTheBees) {
+      // 组合臂 liquidType=3——非纯 FTW 链域，掷骰序不变；备案不移植
+    } else if (gs.seedFlags.getGoodWorld && (i < st.w * 0.45 || i > st.w * 0.55)) {
+      lakeFlavor = 2;                                     // 熔岩（JS +1 基）
+    }
+  }
   let radius = rng.int(15, 30) * strengthMultiplier;   // num1（1/5 ×1.3）
   let steps = rng.int(30, 60);                         // num2
   if (rng.int(0, 4) === 0) { radius *= 1.3; steps *= 1.3; }
+  // ★IIIII53（cs:80956-80959）：drunk 域半径/步数再 ×1.3（第二次独立乘臂，零掷）。
+  //  曾漏 → 湖腔小 30%（拒绝采样域 y∈[223,316] 三湖簇 A/JS 互差 ~2k 格）。
+  if (gs.seedFlags.drunkWorld) { radius *= 1.3; steps *= 1.3; }
   let px = i + 0.0, py = j + 0.0;
   let wander = rng.next() * (1 / 500);                 // num3
   let vx: number;
@@ -115,7 +130,7 @@ function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: num
             const ti2 = st.idx(x, Math.min(st.h - 1, y));
             if (y <= j + 1 ? willWaterStayPut(st, x, y) : true) {
               st.liquid[ti2] = 255;
-              st.liquidType[ti2] = 1;
+              st.liquidType[ti2] = lakeFlavor;   // ★IIIII50:FTW 带位臂(原生水/熔岩)
             }
           }
           st.flags[ti] = 0;   // ★原版 cs:80469 仅 active(false)——type 保留为幽灵格（曾误清 type）
@@ -189,9 +204,21 @@ export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
     while (budget > 0) {
       let bad = false;
       budget--;
+      // ★IIIII46（cs:14635-14650）：tenth 分支下首个 Next(avoid, w-avoid) 照掷不省
+      // （值即弃，tenth 域必覆写）——漏此掷曾致全 pass 流位±1。
       let x = rng.int(beachAvoid, w - beachAvoid - 1); // Next(avoid, w-avoid)
-      while (x > w * 0.45 && x < w * 0.55) {
-        x = rng.int(beachAvoid, w - beachAvoid - 1);
+      const tenthLake = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags?.remix;
+      if (tenthLake) {
+        // tenth&&!remix 湖中心域 [0.15w, 0.85w)，dontStarve（=theConstant）时中央带重掷同域
+        const lo15 = Math.trunc(w * 0.15), hi85 = Math.trunc(w * 0.85);
+        x = rng.int(lo15, hi85 - 1);                     // Next((int)(w*0.15),(int)(w*0.85))
+        while (!!gs.seedFlags?.theConstant && x > w * 0.45 && x < w * 0.55) {
+          x = rng.int(lo15, hi85 - 1);
+        }
+      } else {
+        while (x > w * 0.45 && x < w * 0.55) {
+          x = rng.int(beachAvoid, w - beachAvoid - 1);
+        }
       }
       for (const lx of lakeX) { if (Math.abs(x - lx) < 150) { bad = true; break; } }
       if (!bad) {

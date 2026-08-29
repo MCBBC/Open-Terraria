@@ -78,7 +78,9 @@ export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurfac
   const { w, h } = st;
   const factor = w / 4200;
   const blockCols = Math.trunc(80 * factor);
-  const blockRows = Math.trunc((rng.next() * 0.5 + 1.5) * 170 * factor);
+  // NextDouble 恒掷（remix 下结果被覆写弃用，仅占流位——cs:67-71）
+  let blockRows = Math.trunc((rng.next() * 0.5 + 1.5) * 170 * factor);
+  if (seedFlagsRef?.remix) blockRows = Math.trunc(340 * factor);   // cs:70-72：固定行数
   const width = Math.trunc(4 * blockCols);   // BlockScale.X=4
   const height = Math.trunc(2 * blockRows);  // BlockScale.Y=2
   const ox = x - Math.trunc(width / 2);      // origin.X -= num4/2（int 除）
@@ -121,12 +123,15 @@ export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurfac
         st.wall[ti] = 0;
       }
     }
-    // PlaceSandColumn：从 surfY 填到 sandBottom（沙/清液体/激活；height 可为负→零次）
+    // PlaceSandColumn：从 surfY 填到 sandBottom（沙/激活；height 可为负→零次）
+    // ★IIIII48 REMIX（SandMound.cs:59-62）：非 remix 才清液体——remix「dont dig up」
+    //   沙柱保留原地液量（水袋），Y 通道对拍的油源之一。
+    const keepLiquid = !!seedFlagsRef?.remix;   // cs:59：非 remix ∧(swap∨nonsurface) 才清；remix 一律保留
     for (let y = surfY + (sandBottom - surfY) - 1; y >= surfY; y--) {
       if (y < 0 || y >= h) continue;
       const ti = st.idx(cx, y);
       st.type[ti] = SAND; st.flags[ti] = 1;
-      st.liquid[ti] = 0; st.liquidType[ti] = 0;
+      if (!keepLiquid) { st.liquid[ti] = 0; st.liquidType[ti] = 0; }
       // PlaceSandColumn 尾的 SquareWallFrame（SandMound.cs:73）——有墙格掷骰
       squareWallFrameDraw(st, rng, cx, y);
     }
@@ -224,8 +229,17 @@ export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): Deser
 //  mound → UpdateSurfaceMap → 入口（33% 门+Next(4)） → DesertHive.Place → CleanupArea。
 //  入口必须在 Hive 之前（两侧共享同一条 genRand 流，次序即流位置）。
 //  afterEntrance：入口完成、Hive 之前的对账钩子（oracle 的 desertentrance 检查点） ----
+/** IIII54 取证钩（默认无钩零开销）：阶段标记，供掷骰计数对拍用 */
+const mark56 = (t: string) => { (globalThis as { __swD56?: (s: string) => void }).__swD56?.(t); };
+/** IIII57 取证钩（缺省零开销）：__swD59v 由仪具（tools/_i59.test.ts）注册 */
+const d59 = (o: Record<string, unknown>): void => {
+  const f = (globalThis as { __swD59v?: (o: Record<string, unknown>) => void }).__swD59v;
+  if (f) f(o);
+};
+
 export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState, desc: DesertDesc, afterEntrance?: () => void): void {
   const W = st.w, H = st.h;
+  mark56('entrance-begin');
   // UpdateSurfaceMap 后的表面图（DesertBiome.cs:22）；Surface[absoluteX]
   const surf2 = (ax: number) => desc.surface2[ax - desc.surface2X];
 
@@ -468,6 +482,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     else if (kind === 2) larvaHoleEntrance();
     else pitEntrance();
   }
+  mark56('entrance-end');
   afterEntrance?.();
 
   // ---- ChambersEntrance.cs 1:1：地表沙盘 + 之字形下行隧道 ----
@@ -626,6 +641,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
 
   // ================= Sub-B：DesertHive（DesertHive.cs 1:1）=================
   // ---- ClusterGroup.Generate（椭圆散点→深度2 DFS→AttemptClaim→≥4 重组）----
+  mark56('clustergen-begin');
   const gw = desc.blockCols, gh = desc.blockRows;
   const blockMap: boolean[][] = [];
   for (let c = 0; c < gw; c++) blockMap.push(new Array(gh).fill(false));
@@ -693,6 +709,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   }
 
   // ---- PlaceClustersArea（场强分层）----
+  mark56('clustergen-end/clustersarea-begin');
   // ★shell 类型骰与 0.25 门走 FastRandom（DesertHive.cs:253/366）——与 genRand
   //  完全独立的第二条流，曾误用 rng.int/rng.next 造成每格 1-2 次幽灵掷骰
   // ★postEffectMap（DesertHive.cs:193-198/310/314/345/361/388）：各层 ResetToType/
@@ -728,37 +745,70 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       const ey = (hj - 1) / hiveH * 2 - 1;
       const isEdge = Math.sqrt(ex * ex + ey * ey) >= 0.8;   // Vector2D.Length()
       const i = st.idx(px, py);
+      // ★IIIII48 REMIX（cs:306-352 各支）：深域「岩层下」suppression——remix 世界
+      //   每进入 3.5/1.8/0.7/0.25 任一支都**先掷一次 Next(-1,2)**，命中
+      //   j>(int)rockLayer+掷值 时跳过 wall/fossil 写入；岩浆/清液子门在 remix 下
+      //   双侧都不走（:339-344 `else if (!remixWorldGen)`）。
+      // ★IIIII54：cs 尾回写只还原 **liquid 数量**——液体【类型位】跟着分支对
+      //   bTileHeader 的操作走：ClearEverything/ResetToType 都把 bTileHeader 清零
+      //   （Tile.cs:112-126/251-262）⇒ 类型位回到默认=水；未过这两者的格类型位
+      //   保持原值。本仓 type 是显式枚举，须按 wiped 标志回填 WATER（否则水袋格
+      //   变成「量 255/类型 NONE」半清除态=Y1>0×7483 的真源）。
+      const remixHive = !!gs.seedFlags.remix;
+      const liquidSaved = st.liquid[i];
+      const liquidSavedTy = st.liquidType[i];
+      let headerWiped = false;
+      const deepSuppress = (): boolean => !remixHive ? false : (py > gs.rockLevel + rng.int(-1, 1));
       if (field > 3.5) {
         smoothMark[(hi + 20) * (hiveH + 40) + (hj + 20)] = 1;          // :314 恒标
         clearEverything(px, py);
-        st.wall[i] = 187;
-        if (f2 % 15 === 2) resetToType(px, py, FOSSIL);     // 获胜簇索引 %15==2
+        headerWiped = true;
+        if (!deepSuppress()) {
+          st.wall[i] = 187;
+          if (f2 % 15 === 2) { resetToType(px, py, FOSSIL); headerWiped = true; }  // 获胜簇索引 %15==2
+        }
       } else if (field > 1.8) {
-        st.wall[i] = 187;
-        if (py < gs.worldSurface) st.liquid[i] = 0;         // else lava()：液量不变
-        else st.liquidType[i] = 2;                          // 仅置岩浆类型位（原版事实）
+        const sup = deepSuppress();
+        if (!sup) st.wall[i] = 187;
+        if (!gs.seedFlags.surfaceIsDesert) {                 // swap 组合链不触
+          if (py < gs.worldSurface) st.liquid[i] = 0;
+          else if (!remixHive) st.liquidType[i] = 2;         // remix 不铺岩浆
+        }
         if (!isEdge || st.flags[i]) {
           resetToType(px, py, SANDSTONE);
+          headerWiped = true;
           smoothMark[(hi + 20) * (hiveH + 40) + (hj + 20)] = 1;        // :345
         }
       } else if (field > 0.7 || !isEdge) {
-        st.wall[i] = 216;
-        st.liquid[i] = 0;
+        const sup = deepSuppress();
+        if (!sup) {
+          st.wall[i] = 216;
+          st.liquid[i] = 0;                                  // swap 门内；纯链照走
+        }
         if (!isEdge || st.flags[i]) {
           resetToType(px, py, shellType);
+          headerWiped = true;
           smoothMark[(hi + 20) * (hiveH + 40) + (hj + 20)] = 1;        // :361
         }
       } else if (field > 0.25) {
         const fr2 = fr.withModifierXY(hi, hj);              // fastRandom.WithModifier(x,y)
         if (fr2.nextDouble() < (field - 0.25) / 0.45) {
-          st.wall[i] = 187;
-          if (py < gs.worldSurface) st.liquid[i] = 0;
-          else st.liquidType[i] = 2;
+          const sup = deepSuppress();
+          if (!sup) st.wall[i] = 187;
+          if (!gs.seedFlags.surfaceIsDesert) {
+            if (py < gs.worldSurface) st.liquid[i] = 0;
+            else if (!remixHive) st.liquidType[i] = 2;
+          }
           if (st.flags[i]) {
             resetToType(px, py, shellType);
+            headerWiped = true;
             smoothMark[(hi + 20) * (hiveH + 40) + (hj + 20)] = 1;      // :388
           }
         }
+      }
+      if (remixHive) {
+        st.liquid[i] = liquidSaved;                          // cs:408-412 尾回写（仅数量）
+        st.liquidType[i] = headerWiped ? 1 /* WATER=vanilla 默认位 */ : liquidSavedTy;
       }
       // flag2（DesertHive.cs:315 每格 true，仅末档 else 置 false）→ UpdateDesertHiveBounds
       //（cs:395-397 + WorldGen.cs:11004）：蜂巢实际雕刻范围，供沙漠箱战利品分层消费
@@ -770,6 +820,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       }
     }
   }
+  mark56('clustersarea-end/smooth-begin');
   // PlaceClusters 尾的 postEffect 循环（DesertHive.cs:213-222）：标记格 SmoothSlope
   //（applyToNeighbors=false；SmoothSlope 只读邻格 active/tileSolid——坡面写入不回灌，
   //  与原版逐格序等价）
@@ -781,6 +832,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     }
   }
 
+  mark56('smooth-end/variance-begin');
   // ---- AddTileVariance（DesertHive.cs:413-499）----
   // 第一遍：沙 53（含幽灵 53，不判 active）下方 2 格有非实心 → 酥化 397。
   // ★SolidTile(Tile)（cs:70018）：nactive && tileSolid && !tileSolidTop && !half &&
@@ -895,18 +947,61 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       }
     }
   };
-  /** PlaceObject→TileObjectData[485] 1:1：Origin(0,1) → 占 (ax..ax+1)×(ay-1..ay)。
-   *  CanPlace 先掷 1×Next(4)（RandomStyleRange=4，成败都掷）；门禁=4 格全空且无
-   *  液体+双底锚 active&&solid（FlattenAnchors=false→blockType()==0 坡度近似为平） */
+  // ★IIIII57 定罪修（TileObject.cs:174-860 + TileObjectData.cs addBaseTile(Style2x2)
+  //  /addTile(485) :3461/:3517）：CanPlace 的液体门是 **LiquidPlace 模块**
+  //  （TileObjectData.cs:1765-1767 基座默认：WaterPlacement=Allowed、
+  //  **LavaPlacement=NotAllowed**；485 未覆写）。液体格判定逐型：
+  //    有液：水/蜂蜜/微光(repo 1/3/4)放行；岩浆(repo 2)拒绝。
+  //    无液：OnlyInLiquid/OnlyInFullLiquid 才拒 ⇒ 485 恒过。
+  //  旧移植自加 dryAt（液体一律即拒）→ 水袋上的 485 全数拒放，而原版照常落格
+  //  ——下游锚点 flag 窗（±3 行 × 双列）被「有物/无物」分叉改写，骰位调度漂移
+  //  把两条窄竖带里的钟乳石/仙人掌/3x2 装饰整族镜像翻转（mile8 #19 A193/T228
+  //  的真正根源；骰值双端逐位全等、差异全在受理面）。
+  //  同时按 CanPlace 实际顺序校正两处：
+  //  ① 早退路径不掷骰：粗界(num<0||num+W>=maxX||num2<0||num2+H>=maxY)与 5 垫界
+  //     （num8<5||num8+W>maxX-5||…）失败直接 return false——RandomStyleRange 掷
+  //     (:792 Main.rand.Next)在门禁求值后、函数尾才执行；旧版无条件先掷=多耗骰。
+  //  ② 占用判定=active && !(tileCut∖{484,654} ∪ BreakableWhenPlacing)（cs:337-343
+  //     的 flag5）——可切覆盖族（草/苗/蛛网等）不算阻挡。表与 BuriedChestsPass
+  //     的 PC_TILE_CUT∖{484,654}/PC_BREAK_PLACE 同源。
+  const AV_LIQ_LAVA = 2;   // 原版 liquidType 1(lava)→ 本仓库 +1 编码
+  const AV_CUT_KEPT = new Set([484, 654]);
+  const AV_BREAK_PLACE = new Set([324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624]);
+  const AV_TILE_CUT = new Set([3, 24, 28, 32, 51, 52, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 201, 205, 231, 236, 254, 352, 382, 444, 454, 484, 485, 518, 519, 528, 529, 549, 636, 637, 638, 654, 655, 711]);
+  const avBlocksAt = (x: number, y: number): boolean => {
+    if (!inW(x, y)) return false;
+    const ti = st.idx(x, y);
+    if (!st.flags[ti]) return false;
+    const sh = TILE_DEFS[st.type[ti]]?.vanilla?.sheet ?? -1;
+    const overwritable = (AV_TILE_CUT.has(sh) && !AV_CUT_KEPT.has(sh)) || AV_BREAK_PLACE.has(sh);
+    return !overwritable;
+  };
+  /** TileObjectData.LiquidPlace（cs:1853-1899）485 视图：lava=NotAllowed。 */
+  const avLiquidPlace = (x: number, y: number): boolean => {
+    if (!inW(x, y)) return false;
+    const ti = st.idx(x, y);
+    if (st.liquid[ti] > 0 && st.liquidType[ti] === AV_LIQ_LAVA) return false;
+    return true;
+  };
+  /** PlaceObject→TileObjectData[485] 1:1（Origin(0,1) → 占 (ax..ax+1)×(ay-1..ay)）。
+   *  骰序=CanPlace 原版顺序：两条界早退（无掷）→ RandomStyleRange 掷 1×Next(4)
+   *  （成败都掷）→ 门禁。液体按 LiquidPlace 默认 Allowed 放行（本函数不再查液体）。 */
   const place485 = (ax: number, ay: number, style: number) => {
-    rng.int(0, 3);                            // CanPlace 的 RandomStyleRange 掷
-    if (ax < 5 || ax + 2 > W - 5 || ay - 1 < 5 || ay + 1 > H - 5) return;
+    const fail = (r: string) => d59({ e: 'p485', x: ax, y: ay, r });
+    // 粗界（cs:180-186：num<0||num+W>=maxTilesX||num2<0||num2+H>=maxTilesY）
+    if (ax < 0 || ax + 2 >= W || ay - 1 < 0 || ay + 1 >= H) { fail('coarse-bounds'); return; }
+    // 5 垫界（cs:270-273）
+    if (ax < 5 || ax + 2 > W - 5 || ay - 1 < 5 || ay + 1 > H - 5) { fail('margin-bounds'); return; }
+    // CanPlace 尾部 RandomStyleRange 掷（cs:792；AlternatesCount=0 ⇒ 每次恰 1 掷）
+    { const gg = globalThis as { __swLeaf?: string | null }; gg.__swLeaf = 'cp485'; try { rng.int(0, 3); } finally { gg.__swLeaf = null; } }
     for (let k = 0; k < 2; k++) {
       for (let l = 0; l < 2; l++) {
-        if (!freeAt(ax + k, ay - 1 + l) || !dryAt(ax + k, ay - 1 + l)) return;
+        if (avBlocksAt(ax + k, ay - 1 + l)) { fail(`free(${ax + k},${ay - 1 + l})`); return; }
+        if (!avLiquidPlace(ax + k, ay - 1 + l)) { fail(`lava(${ax + k},${ay - 1 + l})`); return; }
       }
     }
-    if (!solidGenAt(ax, ay + 1) || !solidGenAt(ax + 1, ay + 1)) return;
+    if (!solidGenAt(ax, ay + 1)) { fail('botL'); return; }
+    if (!solidGenAt(ax + 1, ay + 1)) { fail('botR'); return; }
     for (let k = 0; k < 2; k++) {
       for (let l = 0; l < 2; l++) {
         // ★YYY 批帧轴修正：485 TileObjectData StyleHorizontal=true（TileObjectData.cs
@@ -920,6 +1015,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         st.setTileSilent(ax + k, ay - 1 + l, T485, style * 36 + k * 18, l * 18);
       }
     }
+    d59({ e: 'p485', x: ax, y: ay, r: 'ok', style });
   };
   for (let wk = -20; wk < hiveW + 20; wk++) {
     for (let wl = -20; wl < hiveH + 20; wl++) {
@@ -927,6 +1023,9 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       if (px < 5 || px >= W - 5 || py < 5 || py >= H - 5) continue;   // InWorld(,5)
       const i = st.idx(px, py);
       if (!st.flags[i] || st.type[i] !== SANDSTONE) continue;
+      // ★IIIII48 REMIX（cs:477-480）：岩层下装饰整格跳过（零掷骰 continue）
+      if (gs.seedFlags.remix && py > gs.rockLevel) continue;
+      d59({ e: 'av0', x: px, y: py });
       let flag = true;
       for (let n = -1; n >= -3; n--) {
         const y = py + n;
@@ -937,24 +1036,36 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         const y = py + m;
         if (y < H && ((inW(px, y) && st.flags[st.idx(px, y)]) || (inW(px + 1, y) && st.flags[st.idx(px + 1, y)]))) { flag2 = false; break; }
       }
-      if (flag && rng.int(0, 19) === 0) {      // Next(20)==0 → 485/751
-        const style = rng.int(0, 3);           // style = Next(4)
-        if (rng.int(0, 29) === 0) place2x2(px, py - 1, T751, 0);        // Next(30)==0 → 751
-        else place485(px, py - 1, style);      // 485：PlaceObject 链（含 RandomStyleRange 掷）
-      } else if (flag && rng.int(0, 4) === 0) {          // 484
-        place2x2(px, py - 1, T484, 0);
-      } else if ((flag !== flag2) && rng.int(0, 4) === 0) {
+      d59({ e: 'avf', x: px, y: py, f1: flag ? 1 : 0, f2: flag2 ? 1 : 0 });
+      const vlog56 = (o: Record<string, unknown>) => {
+        (globalThis as { __swD56v?: (o: Record<string, unknown>) => void }).__swD56v?.(o);
+      };
+      let br = 'none', ok = false;
+      const tg = (t: string) => {
+        const gg = globalThis as { __swLeaf?: string | null };
+        return { int: (a: number, b: number) => { gg.__swLeaf = t; try { return rng.int(a, b); } finally { gg.__swLeaf = null; } } };
+      };
+      if (flag && tg('av_g20').int(0, 19) === 0) {      // Next(20)==0 → 485/751
+        const style = tg('av_st4').int(0, 3);           // style = Next(4)
+        if (tg('av_g30').int(0, 29) === 0) { br = '751'; ok = true; place2x2(px, py - 1, T751, 0); }   // Next(30)==0 → 751
+        else { br = '485'; vlog56({ e: 'p485-pre', x: px, y: py }); ok = true; place485(px, py - 1, style); }   // 485：PlaceObject 链
+      } else if (flag && tg('av_g484').int(0, 4) === 0) {          // 484
+        br = '484'; place2x2(px, py - 1, T484, 0);
+      } else if ((flag !== flag2) && tg('av_g165').int(0, 4) === 0) {
         // 165 冰凌（DesertHive.cs:491 → WorldGen.PlaceTile(165) → PlaceTight）：
         // placeTight（ShimmerPass 1:1）按邻接材质分派（396/397 → 沙岩列 378+var*18），
         // 帧序倒挂 0/18、地面 36/54、单格 72/90（地面形顶格列=x 勿偏）。
         // 锚点 = py+(flag?-1:+1)（:491）
-        placeTight(st, rng, px, py + (flag ? -1 : 1));
-      } else if (flag && rng.int(0, 4) === 0) {          // 187：style 29+Next(6)
-        if (place3x2(px, py - 1, T187, 29 + rng.int(0, 5))) check3x2Kill187(px, py - 1);
+        br = '165'; placeTight(st, rng, px, py + (flag ? -1 : 1));
+      } else if (flag && tg('av_g187').int(0, 4) === 0) {          // 187：style 29+Next(6)
+        br = '187';
+        if (place3x2(px, py - 1, T187, 29 + tg('av_st6').int(0, 5))) check3x2Kill187(px, py - 1);
       }
+      vlog56({ e: 'anchor', x: px, y: py, f1: flag ? 1 : 0, f2: flag2 ? 1 : 0, br });
     }
   }
 
+  mark56('variance-end/cleanup-begin');
   // ---- CleanupArea（DesertBiome.cs:55-71）：Hive±20 逐格 SquareWallFrame + TileFrame。
   // TileFrame 生成期零掷（TileFrameCosmetic 被 !generatingWorld 门拦;TileFrameImportant
   // 仅 178/苔藓/仙人掌三支掷 genRand——沙漠区无涉）;SquareWallFrame 的掷骰必须还原。
@@ -968,6 +1079,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     }
   }
 
+  mark56('cleanup-end');
   // ExportDescriptionToEngine（DesertBiome.cs:54-58）：CombinedArea.Inflate(10,10)。
   // 原版在 Place 内、CleanupArea 之前落盘——Mushroom(#20) 等后续 pass 的
   // UndergroundDesertLocation 避让依赖它（曾只在 runDesertPass 包装里设置，
@@ -993,7 +1105,49 @@ export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
   // DesertBiome(12532) 是单个 GenPass——mound/entrance/hive 三个检查点是其内部段，
   // 只在 pass 头（runDesertMoundOnly 头）重播一次，不中间重播。
   const desc = runDesertMoundOnly(st, rng, gs);
+  mark56('mound-end');
   runDesertEntrancesAndHive(st, rng, gs, desc);
   // gs.undergroundDesert 已随 runDesertEntrancesAndHive 落盘（见其尾部）
+  // ★IIIII48 REMIX 尾段（1458 cs:12575-12590）：remix 世界在 Hive/CleanupArea 后、
+  //   pass 收尾处把「裸露沙岩柱」顶部翻成沙——逐列 Next(-1,2) 取起始行（消耗恒
+  //   1 骰/列），行内命中 396/397/53 且上方非实心时再掷 Next(4,7)，向下把连续
+  //   396/397 带翻成 53。surfaceIsDesertSwapDesertAndSnowBiomes 组合种子不触。
+  mark56('tail-begin');
+  if (!!gs.seedFlags.remix && !gs.seedFlags.surfaceIsDesert) {
+    const SAND = TILE_BY_KEY['sand']!;
+    const SS = idsByVanillaSheet(396, 397);
+    const isSandFam = (ti: number) => st.type[ti] === SAND || SS.has(st.type[ti]);
+    const solidAt = (x2: number, y2: number): boolean => {
+      if (y2 < 0 || y2 >= st.h) return false;
+      const t2i = st.idx(x2, y2);
+      return !!st.flags[t2i] && genSolidType(st.type[t2i]) && !st.half[t2i] && st.slope[t2i] === 0;
+    };
+    for (let i = 50; i < st.w - 50; i++) {
+      let j = gs.rockLevel + rng.int(-1, 1);        // for-init：(int)Main.rockLayer + Next(-1,2)（每列一次）
+      for (; j < st.h - 50; j++) {
+        const ti = st.idx(i, j);
+        // 条件三元组：active(j) ∧ t[j]∈{396,397,53} ∧ 上格非实心
+        if (st.flags[ti] && isSandFam(ti) && !solidAt(i, j - 1)) {
+          // ★IIIII54 定罪修（cs:12585-12588）：Next(4,7) 在 **for 条件**里——每次条件
+          //   求值都掷一骰（含命中后每一轮迭代与失败轮），不是「命中行掷一次」。
+          //   旧写法整段少耗骰且带宽不同 → 深域沙↔沙岩边界族 T53>396/T396>53。
+          //   短路序：k<j+Roll() → active(k+1) → t[k]∈{396,397}（cs 逐项）。
+          let k = j;
+          for (;;) {
+            const bound = j + rng.int(4, 6);        // Next(4,7)：每轮条件求值先掷
+            if (k >= bound) break;
+            if (k + 1 >= st.h) break;
+            const ki = st.idx(i, k);
+            const nk = st.idx(i, k + 1);
+            if (!st.flags[nk]) break;
+            if (!SS.has(st.type[ki])) break;
+            st.type[ki] = SAND;
+            k++;
+          }
+        }
+      }
+    }
+  }
+  mark56('tail-end');
 }
 

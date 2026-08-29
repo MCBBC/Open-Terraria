@@ -57,10 +57,14 @@ const PRIMARY_SUBTAG: Record<string, string> = {
  *  按 navigator.languages 优先级逐个匹配:①完整 culture 名大小写不敏感直命中
  *  ②中文区细分(zh-TW/HK/MO/Hant→zh-Hant,其余 zh-*→zh-Hans)③主子标签映射。
  *  无注册表语言命中 → null(调用方落 DEFAULT_LANG）。SSR/无 navigator → null */
-export function detectBrowserLang(): string | null {
-  if (typeof navigator === 'undefined') return null;
-  const candidates = (navigator.languages?.length ? navigator.languages : [navigator.language])
+export function detectBrowserLang(hintOverride?: readonly string[]): string | null {
+  if (typeof navigator === 'undefined' && !hintOverride?.length) return null;
+  // 桌面壳 localeHint 优先(2026-08-29:macOS 的 --lang 开关不可靠,languages 仍
+  // en-US 领先——壳经 preload 注入 localeHint,探测链首位吃提示)
+  const navCandidates = (navigator.languages?.length ? navigator.languages : navigator.language ? [navigator.language] : []);
+  const candidates = [...(hintOverride ?? []), ...navCandidates]
     .filter((v): v is string => !!v);
+  if (!candidates.length) return null;
   const lowerName = (n: string): string =>
     byName.has(n) ? n : (byName.get(Object.keys(byName).find((k) => k.toLowerCase() === n.toLowerCase()) ?? '')?.name ?? '');
   for (const raw of candidates) {

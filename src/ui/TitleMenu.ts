@@ -166,7 +166,9 @@ export class TitleMenu {
         <div class="sw-title-btn" data-act="set">${Lang.text('LegacyMenu.14')}</div>
         <div class="sw-title-btn" data-act="buy">${Lang.text('Mods.SandboxWorld.Menu.BuyTerraria')}</div>
         <div class="sw-title-btn" data-act="replog">${Lang.text('Mods.SandboxWorld.Menu.ReplicaNotes')}</div>
-        <div class="sw-title-btn" data-act="quit">${Lang.text('LegacyMenu.15')}</div>
+        ${(window as unknown as { sandboxDesktop?: { isShell?: boolean } }).sandboxDesktop?.isShell
+          ? `<div class="sw-title-btn" data-act="quit">${Lang.text('LegacyMenu.15')}</div>`
+          : ''}
       </div>
     `;
     // 角标文字层（版本号+署名）：body 级独立层 z35——splash(z30) 之上、下载徽标

@@ -20,6 +20,13 @@ export interface GenState {
   rockLevelHigh: number;
   waterLine: number;      // 雪原上方（原版 waterLine ≈ 0.35×h）
   lavaLine: number;       // 地狱顶（原版 ≈ h-200）
+  /** ★IIIII43 REMIX：TerrainPass 尾四常量（1457 TerrainPass.cs:240-243，无条件赋值）。
+   *  remixSurface 带=「地下假地表」带（rockLevelLow..maxTilesY-350）；
+   *  remixMushroom 带=maxTilesY-350..UnderworldLayer。 */
+  remixMushroomLayerLow: number;
+  remixMushroomLayerHigh: number;
+  remixSurfaceLayerLow: number;
+  remixSurfaceLayerHigh: number;
   beachDistance: number;
   /** GenVars.worldSurface/rockLayer：Terrain 游走**终值**（double，≠ Main.worldSurface
    *  的 worldSurfaceHigh+25；SandPatches/SmallHoles/Tunnels 等按 GenVars 值掷骰） */
@@ -39,6 +46,17 @@ export interface GenState {
    *  （CorruptionAndCrimson cs:14031/14370、祭坛 style cs:15883、TileCleanup style
    *  半侧规则等消费）。曾被照掷照弃——IIIII14 批起落盘。 */
   crimsonLeft: boolean;
+  /** GenVars.worldSpawnHasBeenRandomized（RandomizeWorldSpawn 首句 cs:24114 置位）。
+   *  ★IIIII41-T3①：防重掷互斥门——vanilla 四调用位 DoRandomSpawn(:1898)/DoNoSurface
+   *  (:1048)/vampireSeed(:22659)/remix 岛链尾(:23015) 全部按 `!该旗` 短路；本仓自
+   *  randomSpawn 臂接入起在 randomizeWorldSpawnCore 头置位（此前仅 vampire 直写）。 */
+  worldSpawnHasBeenRandomized?: boolean;
+  /** ★IIIII44：GenVars.landmassData 的 skyblock 子集（SkyblockIsland 尾 cs:23806-23816
+   *  登记）——{x,y,style,extraData}；ExtraSpawnsRoyale 候选/团队落点消费预留。 */
+  skyblockIslands: Array<{ x: number; y: number; style: number; extraData: number }>;
+  /** ★IIIII44：extraLivingTrees 组合下 GenerateSkyBlockWorld 尾的活树锚点（cs:23000-23007）
+   *  ——GSB 内只掷坐标，GrowLivingTree 在管线接线处调用。 */
+  skyblockExtraTreeAt?: { x: number; y: number };
   oreTiers: { copper: number; iron: number; silver: number; gold: number }; // 含替代 id
   dungeonSide: 1 | -1;        // 地牢在地图哪侧
   dungeonX: number;           // 地牢位置（Reset num4：仅作雪原中心）
@@ -251,12 +269,15 @@ export function newGenState(w: number, h: number): GenState {
     worldSurface: Math.floor(h * 0.3), worldSurfaceLow: 0, worldSurfaceHigh: 0,
     rockLevel: Math.floor(h * 0.42), rockLevelLow: 0, rockLevelHigh: 0,
     waterLine: Math.floor(h * 0.35), lavaLine: h - 200,
+    remixMushroomLayerLow: h - 350, remixMushroomLayerHigh: h - 200,
+    remixSurfaceLayerLow: 0, remixSurfaceLayerHigh: h - 350,
     beachDistance: 380,  // 原版 WorldGen.beachDistance = 380（cs:4102 readonly 常量，不随尺寸缩放；曾误用 w*0.06=252 → 大理石/花岗岩采样重掷范围分叉）
     genWorldSurface: 0, genRockLayer: 0, genWorldSurfaceHigh: 0,
     tunnelX: new Array(50).fill(0), numTunnels: 0,
     crimson: false,
     crimsonLeft: false,
     oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
+    skyblockIslands: [],
     dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, generatingDungeonPositionX: 0, lAltarX: -1, lAltarY: -1, jungleX: 0,
     tLeft: 0, tRight: 0, tTop: 0, tBottom: 0, tRooms: 0,    // C# GenVars 静态 int 默认 0
     snowOriginLeft: 0, snowOriginRight: 0,

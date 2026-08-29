@@ -4,6 +4,7 @@ import { maybeInstallGpuLoggerFromUrl } from './render/GLStats';
 import { Game } from './core/Game';
 import { UI } from './ui/UI';
 import { MobileControls, isTouchDevice, tryFullscreenLandscape } from './ui/MobileControls';
+import { resolveTouchMode } from './core/input/touchMode';
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData, playerFromDiskForm } from './save/SaveFile';
@@ -64,6 +65,20 @@ export interface FlowHandle {
 export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI, audio: AudioSystem): FlowHandle {
   let game: Game | null = null;
   let mobile: MobileControls | null = null;
+  // 操作模式(touchOpMode 设置页可切)变更 → 即时增删虚拟控件层(auto=默认按设备,
+  // touch=强制触屏,keyboard=强制键鼠整页桌面几何)。单订阅(createFlow 一生一次);
+  // Input 世界触摸与 HudScale 档位各自读 resolveTouchMode 即席生效
+  {
+    let lastTouch = resolveTouchMode();
+    options.onChange(() => {
+      const cur = resolveTouchMode();
+      if (cur === lastTouch) return;
+      lastTouch = cur;
+      if (!game) return;
+      mobile?.destroy();
+      mobile = cur === 'touch' ? new MobileControls(game, ui.root) : null;
+    });
+  }
   // GOING_OLDSCHOOL B1 收口：菜单级成就句柄（标题屏日月拖拽首访即达——
   // 曾只挂 Game.achOnWorldEnter，直载标题屏拿不到句柄）
   {
@@ -190,7 +205,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     (window as unknown as { __swITEMS?: typeof ITEM_DEFS }).__swITEMS = ITEM_DEFS; // 信息饰品探针:vi_ key → 内部 id
     // 移动端：虚拟控件层（触屏设备启用；桌面零渲染零影响）——在世界触摸的
     // 用户手势内尝试全屏+横屏锁定（ⓞ 进世界点击即手势；失败静默，⛶ 按钮兜底）
-    if (isTouchDevice()) {
+    if (resolveTouchMode() === 'touch') {
       mobile?.destroy();
       mobile = new MobileControls(g, ui.root);
       // 智能光标触屏默认开(2026-08-28 用户定案,touchSmartCursorDefault):toggle

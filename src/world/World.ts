@@ -213,6 +213,22 @@ export class World {
    *  SmashAltar 矿物三档轮换的波次源（%3 选档 /3+1 衰减），海盗入侵自然 roll 的
    *  altarCount>0 门（Main.cs:64938） */
   altarCount = 0;
+  // ---- ★IIIII61 WorldGen.Skyblock 运行时普查旗（SkyblockRuntime.ts 维护；
+  //      原版为 class Skyblock 静态域 :3045-3199。数据不落盘——每次进图暖扫重建）----
+  /** 空岛低格档（Calculate :3181-3184：活跃格占比<0.1 && skyblockWorld）。
+   *  消费面：刷怪率 ÷2 / 史莱姆体内物 / 夜始事件 roll 分母 / 掉落条件族 */
+  skyblockLowTiles = false;
+  /** 全图无恶魔祭坛（Calculate :3150-3177 hasTile[26]——EoC 自然 spawn 豁免臂
+   *  与掉落条件 EyeOfCthulhuDefeatedAndNoAltarsInWorld 数据源；进图暖扫真首态，
+   *  此后随巡检动态） */
+  skyblockNoAltars = false;
+  /** 全图无地牢砖/墙 / 无神庙砖或墙 / 无狱石 / 无化石 / 无生命水晶（Calculate 同段；
+   *  skyblock 世界史莱姆战利品替代表消费：地狱石 174/沙漠化石 3347/生命水晶 29） */
+  skyblockNoDungeon = false;
+  skyblockNoTemple = false;
+  skyblockNoHellstone = false;
+  skyblockNoFossils = false;
+  skyblockNoLifeCrystals = false;
   /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307 随存档持久化）：
    *  每档矿种全世界二选一固定——钴 107/钯 221、秘银 108/山铜 222、精金 111/钛 223。
    *  -1 = 尚未砸过该档（SmashAltar 首砸 roll 一次并锁定）；存 sheet id */
@@ -260,6 +276,10 @@ export class World {
    *  岩浆（Liquid.cs:177-190；SettleLiquids 49/97 消费）。读档期原版把 waterLine
    *  置 maxTilesY 天然豁免（WorldFile.cs:739）——settle.ts 只在 gen 模式设值即同义 */
   genWaterLine = 0;
+  /** ★IIIII58 REMIX 落水分型带（Liquid.cs:182-185 remixWorldGen 首臂——恒改写型）。
+   *  仅 remix 世界置值：lavaLine=GenVars.lavaLine、rockLayer=(int)Main.rockLayer、
+   *  oceanLevel=(worldSurface+rockLayer)/2+40（WorldGen.oceanLevel cs:4364）。 */
+  genRemixWater: { lavaLine: number; rockLevel: number; oceanLevel: number } | null = null;
   /** 地牢豁免盒（DungeonUtils.CreatePotentialDungeonBounds 的 outerPotential
    *  DungeonBounds=半图矩形）。落水点在盒内且水源格墙 ∈ wallDungeon{7,8,9,94-99}
    *  → 回水不转岩浆（Liquid.cs:186-188） */

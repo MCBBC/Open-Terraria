@@ -39,13 +39,45 @@ export function runRocksAndClayPass(st: TileStore, rng: RNG, gs: GenState): void
   rng.reseed(gs.seed); // ▶DirtInRocks cs:11952（内部 pass 边界）
   // Dirt In Rocks（cs:11952）：泥嵌石
   run(area * 0.005, gs.rockLevelLow, h, DIRT, 2, 5, 2, 39);
+  // ★IIIII43 REMIX（1457 cs:11981-11996）：**地下泥↔石全域互换**——每列掷一次
+  //   Next(-1,3) 定起始行（(int)worldSurface+该值），向下把 active 的 0↔1 互换。
+  if (!!gs.seedFlags.remix) {
+    for (let x = 0; x < w; x++) {
+      // ★rng.int(-1,2)=Next(-1,3) 双闭——曾误用 nextIntRange(-1,2)=Next(-1,2) 三值，
+      //   起始行分布 4 值均匀被截成 3 值（mile8 #008 T=2018 的真凶）
+      const k0 = Math.max(0, gs.worldSurface + rng.int(-1, 2));
+      for (let y = k0; y < h; y++) {
+        const i2 = st.idx(x, y);
+        if (!st.flags[i2]) continue;
+        const t2b = st.type[i2];
+        if (t2b === DIRT) st.type[i2] = T.STONE;
+        else if (t2b === T.STONE) st.type[i2] = DIRT;
+      }
+    }
+  }
   // Clay（cs:11985）：三带 + 表层粘土清除。
   // ★计数 (int) 截断（cs:11990/11997/12009）：area*2e-5=100.8 → 100 次，
   //  此前浮点上界多跑 1 发 runner → 其后 RNG 流永久漂移
   rng.reseed(gs.seed); // ▶Clay cs:11985（内部 pass 边界）
   run(Math.trunc(area * 0.00002), 0, gs.worldSurfaceLow - 1, CLAY, 4, 13, 10, 49);
-  run(Math.trunc(area * 0.00005), gs.worldSurfaceLow, gs.worldSurfaceHigh, CLAY, 8, 13, 15, 44);
-  run(Math.trunc(area * 0.00002), gs.worldSurfaceHigh, gs.rockLevelHigh, CLAY, 8, 14, 5, 49);
+  if (!!gs.seedFlags.remix) {
+    // ★IIIII43 REMIX（1457 cs:12006-12012）：粘土主带替换为深域大 runner 单循环
+    //   （数量 area*7e-05；y∈[(int)GenVars.rockLayer-25, maxTilesY-350)；8-15/5-50）
+    //   ——注意下界是 **GenVars.rockLayer（游走终值 raw double 截断，≠Main.rockLayer）**；
+    //   域上界为右开（Next 上界不取到），骰序 x→y→str→stp。
+    const count = Math.trunc(area * 7e-5);
+    const gy0 = Math.max(0, Math.floor(gs.genRockLayer) - 25);
+    for (let n = 0; n < count; n++) {
+      const rx = rng.nextIntRange(0, w);
+      const ry = rng.nextIntRange(gy0, h - 350);
+      tileRunner(st, rng, gs, rx, ry, {
+        strength: rng.nextIntRange(8, 15), steps: rng.nextIntRange(5, 50), type: CLAY,
+      });
+    }
+  } else {
+    run(Math.trunc(area * 0.00005), gs.worldSurfaceLow, gs.worldSurfaceHigh, CLAY, 8, 13, 15, 44);
+    run(Math.trunc(area * 0.00002), gs.worldSurfaceHigh, gs.rockLevelHigh, CLAY, 8, 14, 5, 49);
+  }
   // 表层粘土清除（cs:12023-12025）：type=0（原版 0=泥土）保持 active——转泥而非挖空
   for (let x = 5; x < w - 5; x++) {
     for (let y = 1; y < gs.worldSurface - 1; y++) {
@@ -69,7 +101,9 @@ export function runCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   // Dirt Layer Caves（cs:12094-12134）：(int)(area*3e-5) 次；拒绝判定第一子句用
   // GenVars.worldSurfaceHigh raw double；中部 45-55% 为闭区间 >= <=
   {
-    const num = Math.trunc(area * 0.00003);
+    let num = Math.trunc(area * 0.00003);
+    // ★IIIII43 REMIX（1457 cs:12118-12120）：DirtLayer 洞穴数量 ×2
+    if (!!gs.seedFlags.remix) num = Math.trunc(num * 2);
     for (let i = 0; i < num; i++) {
       const type = rng.nextInt(6) === 0 ? -2 : -1;
       let num2 = rng.nextIntRange(0, w);
@@ -79,22 +113,59 @@ export function runCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
         num2 = rng.nextIntRange(0, w);
         num3 = rng.nextIntRange(gs.worldSurfaceLow, gs.rockLevelHigh + 1);
       }
-      const num4 = rng.nextIntRange(5, 15);
-      const num5 = rng.nextIntRange(30, 200);
-      tileRunner(st, rng, gs, num2, num3, { strength: num4, steps: num5, type });
+      const num4b = rng.nextIntRange(5, 15);
+      const num5b = rng.nextIntRange(30, 200);
+      // ★IIIII43 REMIX（1457 cs:12137-12140）：泥层洞穴强度 ×1.1 / 步长 ×1.9（int 截断）
+      const remixDL = !!gs.seedFlags.remix;
+      tileRunner(st, rng, gs, num2, num3, {
+        strength: remixDL ? Math.trunc(num4b * 1.1) : num4b,
+        steps: remixDL ? Math.trunc(num5b * 1.9) : num5b,
+        type,
+      });
     }
   }
   // Rock Layer Caves（cs:12135-12165）：掷序 type→strength→steps→x→y（曾错位+改 digTunnel）
   rng.reseed(gs.seed); // ▶RockLayerCaves cs:12135（内部 pass 边界）
   {
-    const num = Math.trunc(area * 0.00013);
+    let num = Math.trunc(area * 0.00013);
+    // ★IIIII43 REMIX（1457 cs:12152-12154）：主循环数量 ×1.1
+    if (!!gs.seedFlags.remix) num = Math.trunc(num * 1.1);
     for (let i = 0; i < num; i++) {
       const type = rng.nextInt(10) === 0 ? -2 : -1;
-      const num2 = rng.nextIntRange(6, 20);
-      const num3 = rng.nextIntRange(50, 300);
+      let num2 = rng.nextIntRange(6, 20);
+      let num3 = rng.nextIntRange(50, 300);
+      // ★IIIII43 REMIX（cs:12160-12164）：石层洞穴折减 ×0.7/×0.7
+      if (!!gs.seedFlags.remix) {
+        num2 = Math.trunc(num2 * 0.7);
+        num3 = Math.trunc(num3 * 0.7);
+      }
       tileRunner(st, rng, gs, rng.nextIntRange(0, w), rng.nextIntRange(gs.rockLevelHigh, h), {
         strength: num2, steps: num3, type,
       });
+    }
+    // ★IIIII43 REMIX（1458 cs:12214-12238）：附加双发水平洞穴环——数量 area*0.00013*0.4，
+    //   每轮 type→str→steps→speedX→speedY→x,y，随后正/负速度两发 noYChange runner
+    //   （先掷初速再覆写，与主循环同构）。
+    //   ★IIIII48 定罪修复（vs rig p12 全窗逐样本对拍+dump 字节比对）：四处上界曾把
+    //   C# 半开界直译成「闭区间注释−1」——Next(7,26)/Next(50,200)/Next(100,221)/
+    //   Next(-10,11)。偏位不改变掷耗计数（raw 流前缀仍逐位相等），但改变几何 ⇒
+    //   挖蚀域全体偏差、总耗骰 −476k（mile8 #012 首差根因）。闭区间语义一律改用
+    //   rng.int(a,b)=Next(a,b+1)。
+    if (!!gs.seedFlags.remix) {
+      const count2 = Math.trunc(area * 0.00013 * 0.4);
+      for (let j = 0; j < count2; j++) {
+        if (gs.rockLevelHigh <= h) {
+          const type2 = rng.nextInt(10) === 0 ? -2 : -1;
+          const s2b = rng.int(7, 25);          // Next(7,26)：str ∈[7,25]
+          const stp = rng.int(50, 199);        // Next(50,200)：steps ∈[50,199]
+          const spX = rng.int(100, 220) * 0.1; // Next(100,221)*0.1：∈[10.0,22.0]
+          const spY = rng.int(-10, 10) * 0.02; // Next(-10,11)*0.02：∈[-0.20,+0.20]
+          const x2 = rng.nextIntRange(0, w);
+          const y2 = rng.nextIntRange(gs.rockLevelHigh, h);
+          tileRunner(st, rng, gs, x2, y2, { strength: s2b, steps: stp, type: type2, speedX: spX, speedY: spY, noYChange: true });
+          tileRunner(st, rng, gs, x2, y2, { strength: s2b, steps: stp, type: type2, speedX: -spX, speedY: -spY, noYChange: true });
+        }
+      }
     }
   }
   // Surface Caves（cs:12191-12300）：五组地表入口
@@ -114,16 +185,18 @@ export function runCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
       for (const r of runners) r(x, sy);
     }
   };
+  // ★IIIII43 REMIX（1457 cs:12271-12279）：14a/14b/14c 三组数量 ×3（(int)(w*k)*3）
+  const scMul = !!gs.seedFlags.remix ? 3 : 1;
   // 14a 细入口（cs:12205-12218）
-  surfaceCave(Math.trunc(w * 0.002), 0.45, 0.55, [(x, y) => {
+  surfaceCave(Math.trunc(w * 0.002) * scMul, 0.45, 0.55, [(x, y) => {
     tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(3, 6), steps: rng.nextIntRange(5, 50), type: -1, speedX: rng.nextIntRange(-10, 11) * 0.1, speedY: 1 });
   }]);
   // 14b 中入口（cs:12227-12238）
-  surfaceCave(Math.trunc(w * 0.0007), 0.43, 0.57, [(x, y) => {
+  surfaceCave(Math.trunc(w * 0.0007) * scMul, 0.43, 0.57, [(x, y) => {
     tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(10, 15), steps: rng.nextIntRange(50, 130), type: -1, speedX: rng.nextIntRange(-10, 11) * 0.1, speedY: 2 });
   }]);
   // 14c 大竖井三连（cs:12241-12261）
-  surfaceCave(Math.trunc(w * 0.0003), 0.40, 0.60, [(x, y) => {
+  surfaceCave(Math.trunc(w * 0.0003) * scMul, 0.40, 0.60, [(x, y) => {
     tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(12, 25), steps: rng.nextIntRange(150, 500), type: -1, speedX: rng.nextIntRange(-10, 11) * 0.1, speedY: 4 });
     tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(8, 17), steps: rng.nextIntRange(60, 200), type: -1, speedX: rng.nextIntRange(-10, 11) * 0.1, speedY: 2 });
     tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(5, 13), steps: rng.nextIntRange(40, 170), type: -1, speedX: rng.nextIntRange(-10, 11) * 0.1, speedY: 2 });

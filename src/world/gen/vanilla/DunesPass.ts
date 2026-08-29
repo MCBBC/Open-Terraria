@@ -63,6 +63,10 @@ export function runDunesPass(st: TileStore, rng: RNG, gs: GenState, onIter?: (i:
   gs.dungeonEntA = rng.nextIntRange(0, 3);  // 入口类型掷①（普通世界 flag 即真只跑一轮）
   gs.dungeonEntB = rng.nextIntRange(0, 3);  // 入口类型掷②
   gs.dungeonEntSeed = rng.vanilla.next(); // preGenDungeonEntranceSettings.RandomSeed
+  // ★IIIII44（cs:11561）：Dunes 主门 `if (!Skyblock.denyAllGeneration &&
+  //   !SecretSeed.noSurface.Enabled)`——沙丘/金字塔候选整段天空盒跳过；pass 头的
+  //   地牢主题/入口五掷在门外照常消耗（x86 实证 slot2 rolls=5 恰为头部掷数）。
+  if (gs.seedFlags.skyblock || gs.seedFlags.noSurface) return;
   // WorldGenRange(1,2,ScaleWith:WorldWidth).GetRandom:ScaleValue=(int)(w/4200×v)
   const ws = w / 4200;
   const lo = Math.max(1, Math.trunc(ws * 1));

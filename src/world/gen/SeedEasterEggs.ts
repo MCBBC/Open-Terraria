@@ -204,3 +204,43 @@ export function parseSeedChain(rawSeed: string): { flags: SeedFlags; hitTexts: s
   }
   return { flags, hitTexts };
 }
+
+// ── ★IIIII41-T3② arachnophobia 变体门（WorldGen.cs GenVars.Variations）────────
+//
+// vanilla 语义（Terarria1457 WorldGen.cs:269-291）：
+//   noSpiderCavesActuallyNoSpiderCaves   = noSpiderCaves ∧ activeSecretSeedCount<4
+//   noSpiderCavesILiedMoreSpiderCaves    = noSpiderCaves ∧ activeSecretSeedCount≥4
+// 生成域消费位（1457）：SpiderCaves pass 整跳(:17472)、饥荒草墙蜘蛛墙地表化反向门
+// (:19804)；count≥4 位 :17537/:20185；组合专用位 :13736(NTB+FTW-noCeleb)/:25899；
+// 终结面 NPC.savedStylist=true(:688-691)。
+//
+// activeSecretSeedCount 全量计数器不在本批（另案 master-plan §3 组合专项——46 旗标
+// 注册序计数与 getfixedboi 七依赖展开需先过 S0 层）。单秘种子路由（'arachnophobia'
+// 明文段，count=1）恒命中 count<4 支 ⇒ 本批按「无其他秘种子旗标」单路由精确等价：
+export function noSpiderCavesActuallyNoSpiderCaves(f: SeedFlags): boolean {
+  return f.noSpiderCaves === true && !noOtherSecretFlag(f, 'noSpiderCaves');
+}
+
+/** noSpiderCavesILiedMoreSpiderCaves 对称臂（本仓多秘计数另案，恒 false 并登记）。 */
+export function noSpiderCavesILiedMoreSpiderCaves(_f: SeedFlags): boolean {
+  return false; // 组合债：需要 activeSecretSeedCount≥4 才为真（:17537/:20185 域）
+}
+
+/** SeedFlags 中的派生 Variations 子旗标名（非注册种子位，不计入保守计数）。 */
+const DERIVED_VARIATION_KEYS = new Set([
+  'echoJustSomeThings', 'echoJustInnerBlocks', 'illuminantJustSomeThings',
+  'illuminantJustRandomSpots', 'grayUseWhite', 'grayJustTreasure',
+  'grayJustTheSurface', 'negativeJustUnderground', 'negativeJustSomeThings',
+]);
+
+/** f 中除 skip 指定位外是否还存在任一秘种子/特殊种子位（Variations 计数的保守替代）。
+ *  moreLightning/noLightning 在原版同为 Register 秘种子（#36/#37），计入。 */
+export function noOtherSecretFlag(f: SeedFlags, ...skip: string[]): boolean {
+  for (const [k, v] of Object.entries(f)) {
+    if (!v) continue;
+    if (skip.includes(k)) continue;
+    if (DERIVED_VARIATION_KEYS.has(k)) continue;   // 派生 Variations 子位不计数
+    return true;
+  }
+  return false;
+}

@@ -15,9 +15,15 @@ import { T, TILE_BY_KEY } from '../../../data/tiles';
 const SAND_AVOID = idsByVanillaSheet(53, 151, 274);
 
 /** Mountinater（L48367）：上漂泥土 blob = 山丘本体。只在空气格激活填土(type 0=Dirt) */
-function mountinater(st: TileStore, rng: RNG, i: number, j: number): void {
-  let num1 = rng.int(80, 119) + 0.0;      // Next(80,120)（double，cs:80122）
-  let num2 = rng.int(40, 54) + 0.0;       // Next(40,55)（double！）
+function mountinater(st: TileStore, rng: RNG, i: number, j: number, remix: boolean): void {
+  let num1 = rng.int(80, 119) + 0.0;      // cs num  = Next(80,120)（半径衰减主量）
+  let num2 = rng.int(40, 54) + 0.0;       // cs num3 = Next(40,55)（步数计数器，double！）
+  // ★IIIII43 REMIX（1457 cs:80673-80677）：步数计数 ×1.5 ⇒ while 多跑 ~50%（多耗骰）；
+  //   半径基数 num2(cs) *=1.5 系**死写**（每轮 :80708 先重算再用，初始值无消费者）
+  //   ——只落注释不写死码。val.Y=j+num3/2 初始下移随之放大：remix 山体下沉、时长拉长。
+  if (remix) {
+    num2 *= 1.5;
+  }
   let px = i, py = j + num2 / 2;
   let vx = rng.int(-10, 10) * 0.1;        // Next(-10,11)
   let vy = rng.int(-20, -11) * 0.1;       // Next(-20,-10)
@@ -50,9 +56,13 @@ function mountinater(st: TileStore, rng: RNG, i: number, j: number): void {
   }
 }
 
-/** pass 7 Mount Caves：w*0.001 次尝试，避开中心 ±90/沙族 ±50×25/前丘 ±100（L5095-5148） */
+/** pass 7 Mount Caves：w*0.001 次尝试，避开中心 ±90/沙族 ±50×25/前丘 ±100（L5095-5148）。
+ *  ★IIIII43 REMIX（1457 cs:11829-11832/11839-11844）：条数 ×1.5；**中心 ±90 拒绝环
+ *  在 !remixWorldGen 内**——remix 不避让出生点带。 */
 export function runMountCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const count = Math.floor(st.w * 0.001);
+  const remix = !!gs.seedFlags.remix;
+  let count = Math.floor(st.w * 0.001);
+  if (remix) count = Math.trunc(count * 1.5);
   for (let n = 0; n < count; n++) {
     let x = rng.int(Math.floor(st.w * 0.25), Math.floor(st.w * 0.75) - 1); // Next(w*.25, w*.75)
     let tries = 0;
@@ -60,8 +70,10 @@ export function runMountCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
     let placed = false;
     while (!placed && !giveUp) {
       placed = true;
-      while (x > st.w / 2 - 90 && x < st.w / 2 + 90) {
-        x = rng.int(Math.floor(st.w * 0.25), Math.floor(st.w * 0.75) - 1);
+      if (!remix) {
+        while (x > st.w / 2 - 90 && x < st.w / 2 + 90) {
+          x = rng.int(Math.floor(st.w * 0.25), Math.floor(st.w * 0.75) - 1);
+        }
       }
       for (let k = 0; k < gs.numMCaves; k++) {
         if (Math.abs(x - gs.mCaveX[k]) < 100) { tries++; placed = false; break; }
@@ -87,7 +99,7 @@ export function runMountCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
       }
       if (nearSand) sandLatched = true;
       if (!sandLatched) {
-        mountinater(st, rng, x, y);
+        mountinater(st, rng, x, y, remix);
         gs.mCaveX[gs.numMCaves] = x;
         gs.mCaveY[gs.numMCaves] = y;
         gs.numMCaves++;

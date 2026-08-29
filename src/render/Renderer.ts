@@ -2765,6 +2765,14 @@ export class Renderer {
       if (!bgDone) {
         this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
       }
+      // ★暴风雪/沙尘暴背景色罩(#三开压测批 层位修正):原版 BlizzardSky/
+      //   SandstormSky 经 SkyManager.DrawToDepth 在 DrawBackground 背景段内触发
+      //   (BlizzardSky.cs:52-54 MagicPixel 全屏矩形),随后被墙/方块/家具覆盖——
+      //   绝不能挂最终滤镜链(曾致室内罩白,用户实报)。置于此=天空+远山层之后、
+      //   世界内容之前;地下时 cave 背景随后覆盖(与原版层序一致)
+      if (!this.isCpuRender()) {
+        this.sky.drawWeatherTint2D(ctx, viewW, viewH);
+      }
       // DrawSurfaceBG_DrawChangeOverlay（:60533-60542 BackgroundChangeFlashInfo）：
       // 群系背景切换的黑闪遮罩（flash=1 落定、−0.05/帧衰减 20 帧；ValueChanged
       // !gameMenu 门=仅游戏内，菜单换样式无闪）。原版画在每组层后=世界层之前
@@ -5714,23 +5722,25 @@ export class Renderer {
               Math.min(255, Math.max(e.spawnAlpha, 0)) / 255)  // ★用户校准态 ka=alpha/255（0.686）——原版推导值 1−alpha/255 待肉眼二选一
           : null;
         ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
-        // EoC 锚点修正:NPC_4 每帧 110×166,眼球主体质心在帧内 y≈106(张嘴帧 113),
-        // 帧中心 83——原版通用锚点(帧中心==碰撞盒中心)会让 100×110 的盒偏在
-        // 血管尾/眼球上方。碰撞盒尺寸保持原版,绘制整体下移 (质心−帧中心)
-        // 让眼球主体居中于盒(用户 2026-08-11 拍板;张嘴帧偏移略大)
+        // EoC 锚点:NPC_4 每帧 110×166,眼球质心帧内 y≈106(帧中心 83)——
+        // 原版 DrawNPC 的 halfSize=(55,107) 覆写（Main.cs:23280-23285）在
+        // "position−frameHalf+halfSize" 与 "origin=halfSize" 之间【完全抵消】
+        // （position.y 多加的 107s 被 origin.y 107s 减回）= 帧【居中】钉盒中心,
+        // 眼球质心落盒中心下方 23px（盒内,盒向下 45s 覆盖全眼球）。
+        // ★本仓曾有 eocOff +23/+30 的额外下移 = 双重下移（美术质心已偏下 23,
+        // 再 +23 → 眼球质心落到盒底缘,盒悬在眼球上缘=用户实报 2026-08-29
+        // "盒挂在眼球错位"）——已按原版居中锚移除。
         // 通用锚:帧中心钉盒中心(+num46/num47 下沉,见上方 translate 注)。
         // addY 保持纹理单位（XNA `return num * npc.scale` :22393——偏移随 npc.scale
         // 缩放,ctx.scale(scale) 天然乘回;曾误 /scale 除反,专家档 13-15/134-136
         // ×1.2/×1.05 时与原版差 5-6px）。
-        // EoC 额外 +23/+30 眼球修正（用户校准偏差,叠加在通用锚上）
         const anchorY = -r.sh / 2 + addY;
-        const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
         // 393 飞碟炮塔绘制 origin+UnitY×(−8)（Main.cs:24208-24213 num225=-8 仅 393;
         // 台账登记偏差本批清偿）：XNA origin 上移 8 纹素 = 精灵整体下移 8×scale 世界 px,
         // 且旋转枢轴随 origin 钉死在 position（=本仓局部原点,ctx.rotate 已绕它）——
         // 故只须把本体绘制目标 y+8（draw 系单位,×scale 即 8 世界 px）,枢轴免调。
         // 台账旧注"需通用锚点管线"不成立:单 id 常量偏移即可
-        const bodyY = anchorY + eocOff + (e.vanillaId === 393 ? 8 : 0);
+        const bodyY = anchorY + (e.vanillaId === 393 ? 8 : 0);
         // 回填实际贴图底边（世界 y），供 drawHealthBar 定位兜底（见 Enemy.spriteBottomWorld 注释）
         e.spriteBottomWorld = e.cy + (bodyY + r.sh) * scale;
         if (e.vanillaId === 50) {
@@ -5762,7 +5772,7 @@ export class Renderer {
         }
         // ---- EoC 冲刺残影（Main.cs:25469-25481 1:1）：门 = ai[0]==3 且 ai[1]≥4
         //      （P2 连冲态 4 / 悬下方回冲态 5）→ 沿 oldPos 画 9 层鬼影，每层 RGBA
-        //      × 0.5×(10−i)/20（越旧越淡），同一帧/旋转，锚点同本体（中心+eocOff）。
+        //      × 0.5×(10−i)/20（越旧越淡），同一帧/旋转，锚点同本体（居中锚）。
         //      原版该分支在 DrawNPC 本体 Draw 之后求值 → 鬼影压在本体之上（越近越深）；
         //      此前近似门 dashing && phase≥2 把普通 3 连冲也画了鬼影且画在本体之前。
         //      仓内映射：ai0=ai[0]、state=ai[1]（见 Enemy.eocAI 头注）----
@@ -5778,7 +5788,7 @@ export class Renderer {
             ctx.scale(scale, scale);
             if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1);
             ctx.globalAlpha = ga * (1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255);
-            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2 + eocOff, r.sw, r.sh);
+            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2, r.sw, r.sh);
             ctx.restore();
           }
           ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
@@ -5801,8 +5811,7 @@ export class Renderer {
           //   ③ lighter(tinted, ga=1) → +T·a·color.rgb 预乘加法贡献
           // （GetColor rgb 不乘 color.A——ga=colorA/255 会把贡献也乘 0.392）
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, drawColor);
-          const anchorY2 = -r.sh / 2 + addY;
-          const anchorY = anchorY2 + eocOff;
+          const anchorY = -r.sh / 2 + addY;
           if (tinted) {
             ctx.globalCompositeOperation = 'destination-out';
             ctx.globalAlpha = drawColor[3] / 255;
@@ -5847,7 +5856,7 @@ export class Renderer {
         // NPC GlowMask 发光叠画（Main.cs DrawNPC 内硬编码 switch，见 drawNpcGlow 表）
         // ——与基础精灵同变换叠加（原版同一 position/origin 二次 Draw）
         // bx/by = 基础精灵目标左上（地面型=底锚+pad / 飞行型=中心锚），发光层与本体同锚
-        this.drawNpcGlow(e, r, -r.sw / 2, anchorY + eocOff);
+        this.drawNpcGlow(e, r, -r.sw / 2, anchorY);
         // 546 怒滚草亮核（Main.cs:26156-26158,rotation 台账附带登记本批清偿）：
         // Extra_76 专属 glow 叠画——rotation=Clamp(vx×0.1,±π/8) 瞬时式,与本体
         // 累积滚转 visAngle 不同源 → 共轭换角独立绘制（draw546GlowCore;
@@ -5869,7 +5878,7 @@ export class Renderer {
               ctx.scale(scale, scale);
               if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1);
               ctx.globalAlpha = ((10 - i) / 20) * mOp;
-              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
+              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
               ctx.restore();
             }
             ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
@@ -12779,16 +12788,17 @@ export class Renderer {
     viewW: number, viewH: number, z: number, world?: World,
   ): void {
     const mono = this.monoFilters;
-    // 沙尘暴/暴风雪色罩(SkyWeatherTint,SkyRenderer 状态机产出;头插=天空层在
-    // FilterManager 滤镜链之下——SandstormSky/BlizzardSky 是 SkyManager 层非滤镜)
-    const wxTints = this.sky.weatherTintPasses();
+    // ★SandstormSky/BlizzardSky 色罩已迁出滤镜链(#三开压测批):原版经
+    // SkyManager.DrawToDepth 在【背景层】触发(DrawBackground 内被墙/方块覆盖),
+    // 头插到最终画面会让室内也被罩白(用户实报雪天满屏发白)。现于 render()
+    // 背景阶段(worldLayer 前)以 drawWeatherTint2D 应用。
     const lec = world?.lunarEvent;
     const shakeI = lec && lec.moonLordCountdown > 0
       ? Math.min(1, Math.max(0, Math.sin(lec.moonLordCountdown / 60 * 0.5) * 2))
         * (0.75 - 0.5 * lec.moonLordCountdown / Math.max(1, lec.moonLordCountdownMax))
       : 0;
     const cd = lec?.crystalDeath ?? null;
-    if (!mono.anyInUse && !mono.heatInUse && wxTints.length === 0 && shakeI <= 0 && !cd) return;
+    if (!mono.anyInUse && !mono.heatInUse && shakeI <= 0 && !cd) return;
     // uScreenResolution=UnscaledScreenSize(screen/RenderZoom ScreenShaderData.cs:96);
     // uScreenPosition=屏幕左上世界px(本仓屏幕即全幅,无 offScreenRange=200 垫,
     // 语义等价——vanilla 垫值只是为比屏幕大的离屏采集目标)
@@ -12796,7 +12806,7 @@ export class Renderer {
     const screenPos: [number, number] = [cam.x - screenRes[0] / 2, cam.y - screenRes[1] / 2];
     const gl = this.screenFxLayer();
     if (gl) {
-      const passes: ScreenFxPass[] = [...wxTints];
+      const passes: ScreenFxPass[] = [];
       if (mono.heatVisible) {
         passes.push({
           kind: 'FilterHeatDistortion', screenRes, screenPos,
@@ -12873,8 +12883,6 @@ export class Renderer {
         return;
       }
     }
-    // 2D 回退链(同序:色罩先——天空层在最下)
-    if (wxTints.length) this.sky.drawWeatherTint2D(ctx, viewW, viewH);
     if (mono.heatVisible) {
       mono.drawHeat2D(ctx, this.canvas, viewW, viewH,
         { x: screenPos[0], y: screenPos[1] }, { x: screenRes[0], y: screenRes[1] },

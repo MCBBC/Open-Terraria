@@ -177,6 +177,11 @@ export interface OptionsData {
   /** HUD 缩放微调 [0.85,1.15]:离散档之上的乘法微调(不做连续缩放——小屏连续值
    *  会露出面板悬空缝隙类缺陷,离散步进可控) */
   hudScaleFactor: number;
+  /** 操作模式(2026-08-29 用户需求"默认按设备调整,可手动切换"):
+   *  auto=按 pointer:coarse/maxTouchPoints 判定;touch=强制触屏档(虚拟控件层+
+   *  紧凑 HUD+世界触摸合成);keyboard=强制键鼠档(整页桌面几何+恢复指针+停用
+   *  触摸合成)。消费口唯一=core/input/touchMode.resolveTouchMode */
+  touchOpMode: 'auto' | 'touch' | 'keyboard';
 }
 
 const KEY = 'sandboxworld.options';
@@ -237,6 +242,7 @@ export class OptionsStore {
     touchSmartCursorDefault: true,          // SC 触屏默认开(用户定案)
     hudScaleMode: 'auto',
     hudScaleFactor: 1,
+    touchOpMode: 'auto',                    // 默认按设备
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];
@@ -275,7 +281,9 @@ export class OptionsStore {
         Object.assign(this.data, parsed);
       }
       if (autoDetectLang) {
-        const detected = detectBrowserLang();
+        // 桌面壳 localeHint 优先(2026-08-29 用户定案默认中文;macOS --lang 不可靠)
+        const shellHint = (window as unknown as { sandboxDesktop?: { localeHint?: string } }).sandboxDesktop?.localeHint;
+        const detected = detectBrowserLang(shellHint ? [shellHint] : undefined);
         if (detected) this.data.lang = detected;
       }
       // 语言归一化:旧数字 legacyId → culture 名;非法值落 en-US(对齐原版 LoadSettings)
@@ -350,6 +358,9 @@ export class OptionsStore {
       if (typeof this.data.hudScaleFactor !== 'number'
         || !Number.isFinite(this.data.hudScaleFactor)) this.data.hudScaleFactor = 1;
       this.data.hudScaleFactor = Math.min(1.15, Math.max(0.85, this.data.hudScaleFactor));
+      if (!(['auto', 'touch', 'keyboard'] as const).includes(this.data.touchOpMode)) {
+        this.data.touchOpMode = 'auto';
+      }
     } catch { /* 无存档用默认 */ }
     this.emit();
   }

@@ -143,6 +143,9 @@ export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState): void {
   flipGenSolid([162], false);
   flipGenSolid([226], true);
   flipGenSolid([232], false);
+  // ★IIIII44（cs:17839）：三翻转在 denyAll 门**之外**无条件执行（照录），主段
+  //   `!Skyblock.denyAllGeneration` 整门——天空盒世界翻转后直接跳出。
+  if (gs.seedFlags.skyblock) return;
   // ---- 主段（cs:17827-17871）：w*0.04 次，封闭腔(10≤air<1500)刷洞穴背景墙 ----
   const maxY = st.h - 220;
   const minY = Math.floor((gs.worldSurface + gs.rockLevel) / 2);

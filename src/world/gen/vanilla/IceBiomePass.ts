@@ -10,7 +10,17 @@ import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   gs.snowTop = gs.worldSurface;
-  const num2 = gs.lavaLine - rng.int(160, 199); // 完整转换深度线
+  // ★IIIII48 REMIX（1458 cs:12363-12367）：remix 世界整转线换轴——先掷一次
+  //   Next(160,200)（结果被覆写弃用，纯流位），再取 maxTilesY-250 为底、重掷深度：
+  //   num=(maxTilesY-250)-Next(160,200)，行循环上界同步改为 ≤maxTilesY-250-140。
+  let num2 = gs.lavaLine - rng.int(160, 199); // 完整转换深度线（普通世界）
+  let lineEnd = gs.lavaLine;
+  if (!!gs.seedFlags.remix) {
+    void num2; // 首掷照耗（remix 下被覆写，仅占流位）
+    lineEnd = h - 250;
+    num2 = lineEnd - rng.int(160, 199);
+  }
+  if (process.env.SW_I48PROBE === '1') console.log(`[ice-probe] remix=${!!gs.seedFlags.remix} lineEnd=${lineEnd} num2=${num2} lavaLine=${gs.lavaLine} h=${h}`);
   let left = gs.snowOriginLeft, right = gs.snowOriginRight;
   let thickness = 10;
   // C# 是 int[]：边界与厚度全程整数、`/2` 为整除截断（cs L5408-5411）。
@@ -22,7 +32,7 @@ export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
   const CLAY = TILE_BY_KEY['clay']!;
   const ICE = TILE_BY_KEY['ice']!;
 
-  for (let y = 0; y <= gs.lavaLine - 140; y++) {
+  for (let y = 0; y <= lineEnd - 140; y++) {
     left += rng.int(-4, 3);
     right += rng.int(-3, 4);
     if (y > 0) {

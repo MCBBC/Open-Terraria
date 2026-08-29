@@ -5,7 +5,7 @@
 // 原版无聊天历史);点击面板外(blur)关闭。
 // ★ Input.keydown 对 INPUT 元素打字自动豁免游戏键位——输入期不触发跳跃等。
 import { Lang } from '../i18n/Lang';
-import { isTouchDevice } from '../core/input/touchDevice';
+import { resolveTouchMode } from '../core/input/touchMode';
 
 export interface ChatInputOpts {
   /** 发送（text 非空;world=true 世界频道） */
@@ -46,7 +46,7 @@ export class ChatInput {
     if (Date.now() < this.suppressOpenUntil) return;
     // 触屏会话判定(单一来源):移动端输入框走"≥16px 字号+软键盘补偿"档,
     // 桌面 CSS 面逐字节不变
-    const touch = isTouchDevice();
+    const touch = resolveTouchMode() === 'touch';
     const root = document.createElement('div');
     root.className = 'sw-chatbox';   // Input mousedown 不穿透门（body 直挂件不在 .sw-root 内）
     root.style.cssText = `position:fixed;left:12px;bottom:${touch ? '8px' : '64px'};z-index:60;display:flex;gap:6px;align-items:center;`

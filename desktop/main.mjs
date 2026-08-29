@@ -60,9 +60,10 @@ const EXPLICIT_URL = explicitUrlArg() ? normalizeUrl(explicitUrlArg()) : '';
 
 for (const [sw, val] of CHROMIUM_SWITCHES) app.commandLine.appendSwitch(sw, val);
 
-// 默认语言=中文(2026-08-29 用户定案)：navigator.languages 探测链在壳内恒 zh-CN
-// ⇒ Options.load 的自动探测命中 zh-Hans。玩家在设置里显式选语言后仍永久尊重其
-// 选择(langExplicit 落盘)，此处只决定"从未选过"的初值。
+// 默认语言=中文(2026-08-29 用户定案)。★判例:Electron 37 无 app.setLocale(调用即
+// "App threw an error during load"僵死:无窗无日志进程残留);macOS 也不吃 --lang。
+// 故采用:--lang(Win/Linux 生效) + preload localeHint(三端兜底,Options 探测链
+// 首位消费)。显式选过语言的用户(langExplicit 落盘)永久尊重其选择。
 app.commandLine.appendSwitch('lang', 'zh-CN');
 
 // 页面 → 壳 的退出通道（游戏菜单"退出"按钮走 preload 桥）

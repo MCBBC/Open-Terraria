@@ -537,6 +537,7 @@ const FURNITURE_DUST = new Set([
 function makeTileDustRoll(ctx: SweepCtx, sheet: number, fx: number): void {
   if (!ctx.rng) return;
   const r = ctx.rng;
+  (globalThis as { __swTagDie?: (t: string) => void }).__swTagDie?.('K'); // IIII56 dormant 细分骰标签
   switch (sheet) {
     case 2: case 477: case 27: case 243: case 244: case 204: case 478:
     case 641: case 370: case 171:
@@ -2983,6 +2984,14 @@ export function runFinalCleanupPass(
     try { g24.__swFCMark?.('FNTBOUT'); } catch { /* probe */ }
   }
 
+  // ── FinishGetGoodWorld（1458 cs:22630-22632 调用位：NTB 之后、Remix 之前；
+  //    实现体 runFinishGetGoodWorld——本文件尾）★★IIIII50 FTW 漏接整函数：
+  //    掷流(初始 Next(13,25)+列扫描地牢砖色选+全图 Ash Next(15)+箱 678 注入
+  //    Next(10)×N)与写面(Ash→熔岩/Dirt→23 系)双双缺失 → #105 尾段大族差。
+  if (gs.seedFlags.getGoodWorld && !gs.seedFlags.skyblock && rng) {
+    runFinishGetGoodWorld(st, rng, gs, opts?.chests);
+  }
+
   // ── ShimmerCleanUp（cs:22639→34750，⑭ 之后同 pass 尾段；ZZZ 批补）──
   //    ★TTTTTTT：原版序=…NotTheBees → GG/Remix → vampire 块 →
   //    SecretSeed.FinalizeSecretSeeds()（cs:22666,内含无条件 FinalSeedCleanup
@@ -3398,4 +3407,114 @@ function isSolidTileFC(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return true;
   const i = st.idx(x, y);
   return !!st.flags[i] && !!TILE_DEFS[st.type[i]]?.solid;
+}
+
+// ═══════════════ IIII50 批：FinishGetGoodWorld（1458 cs:26074-26262）1:1 ═══════════════
+// 调用位 cs:22630-22632（NTB 之后、Remix 之前）。八通道可见面＝Ash→熔岩注液(⑧)与
+// 地表 Dirt→23 系腐蚀转化(⑨)；其余为 paint 域(paint/paintWall 通道)与箱内 678 注入。
+// 掷流序＝①初始 Next(13,25) ②逐列地牢砖色选(仅首个含砖列,列内**全行扫完**) ③全图
+// Ash Next(15) ④箱循环 Next(10)×N——位次敏感，勿移动。
+const CLOUD_SHEETS_FGG = new Set([189, 196, 460, 717, 718, 719]);   // TileID.Sets.Clouds
+const DUNGEON_BRICKS_FGG = new Set([41, 43, 44, 677, 678, 679]);    // Main.tileDungeon
+const CRACKED_FGG = new Set([48, 487]);                             // CrackedBricks
+const KILL_ABOVE_FGG = new Set([3, 73, 27, 596, 616, 82, 83, 186, 187, 185, 227]);
+
+export function runFinishGetGoodWorld(
+  st: TileStore, rng: RNG, gs: GenState,
+  chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
+): void {
+  const { w, h } = st;
+  // ① 云线基准 num（cs:26077-26092）：行外层 i∈[20,worldSurface)，列内层 j——命中云族
+  //    记 num=i 且 break **内层**（外层继续，num 取最后一行）。
+  let cloudRow = 0;
+  for (let i = 20; i < gs.worldSurface; i++) {
+    for (let j = 20; j < w - 20; j++) {
+      const t = st.idx(j, i);
+      if (st.flags[t] && CLOUD_SHEETS_FGG.has(SWEEP_SHEET[st.type[t]])) { cloudRow = i; break; }
+    }
+  }
+  // ② 初始色 + 列扫描（cs:26093-26133）：b=Next(13,25) 恒掷一次；k 全列扫，l **不提前
+  //    break**（每颗地牢砖/44/43/41 都照掷），首含砖列扫完后 break k 循环。
+  let b = rng.nextIntRange(13, 25);
+  for (let k = 0; k < w; k++) {
+    let flag = false;
+    for (let l = 0; l < h; l++) {
+      const t = st.idx(k, l);
+      if (!st.flags[t]) continue;
+      const sh = SWEEP_SHEET[st.type[t]];
+      if (!DUNGEON_BRICKS_FGG.has(sh)) continue;
+      if (st.paint[t] === 14) { flag = true; b = 14; continue; }
+      if (sh === 44) {
+        flag = true;
+        b = rng.nextIntRange(13, 15);
+        if (rng.nextIntRange(0, 2) === 0) b = rng.nextIntRange(23, 25);
+      }
+      if (sh === 43) { flag = true; b = rng.nextIntRange(15, 19); }
+      if (sh === 41) { flag = true; b = rng.nextIntRange(19, 23); }
+    }
+    if (flag) break;
+  }
+  // ③④⑤⑥⑦ 全图涂色 + Ash 熔岩化 + Dirt 腐蚀化（cs:26134-26234）
+  const sidStoneGrass = sid(2);   // Dirt(2)
+  const convTo = gs.crimson ? sid(199) : sid(23);   // cs:26193-26199 crimson 分支
+  for (let m = 10; m < w - 10; m++) {
+    for (let n = 10; n < h - 10; n++) {
+      const t = st.idx(m, n);
+      if (st.flags[t] && (DUNGEON_BRICKS_FGG.has(SWEEP_SHEET[st.type[t]]) || CRACKED_FGG.has(SWEEP_SHEET[st.type[t]]))) {
+        st.paint[t] = b;
+      }
+      if (st.paintWall[t] !== undefined && st.wall[t] !== 0) {
+        // wallDungeon 表={7,8,9,94..99}+1458 扩；GT 表近似= DG_DUNGEON_WALLS 同源集
+        const wl = st.wall[t];
+        if ((wl >= 94 && wl <= 99) || wl === 7 || wl === 8 || wl === 9) {
+          if (!gs.seedFlags.drunkWorld && !gs.seedFlags.notTheBees) st.paintWall[t] = b;
+        }
+        if (wl === 87) st.paintWall[t] = 25;
+      }
+      if (st.flags[t] && !gs.seedFlags.notTheBees) {
+        const sh = SWEEP_SHEET[st.type[t]];
+        // cs:26162-26176：226 本格 / 草60 且**下格**(n+1)为 226 / 石板137 style1-4
+        const belowT = st.idx(m, Math.min(h - 1, n + 1));
+        const shBelow = SWEEP_SHEET[st.type[belowT]];
+        if (sh === 226) st.paint[t] = 17;
+        else if (sh === 60 && shBelow === 226) st.paint[t] = 17;
+        else if (sh === 137) {
+          const sty = Math.trunc(st.frameY[t]! / 18);
+          if (sty >= 1 && sty <= 4) st.paint[t] = 17;
+        }
+      }
+      if (!st.flags[t]) continue;
+      // ⑧ Ash→熔岩（!remix 门；Next(15)==0 每灰烬格恒掷）
+      if (!gs.seedFlags.remix && SWEEP_SHEET[st.type[t]] === 57 && rng.nextIntRange(0, 15) === 0) {
+        const above = st.idx(m, Math.max(0, n - 1));
+        if (SWEEP_SHEET[st.type[above]] === 57) st.flags[t] = 0;
+        st.liquid[t] = 255;
+        st.liquidType[t] = 2;                      // lava(true)（JS +1 基）
+      }
+      // ⑨ 近地表 Dirt→腐化草（!tenth&&!ntb&&n<cloudRow）
+      if (!gs.seedFlags.tenthAnniversary && !gs.seedFlags.notTheBees && n < cloudRow
+        && st.type[t] === sidStoneGrass) {
+        st.type[t] = convTo;
+        const above = st.idx(m, Math.max(0, n - 1));
+        const shAbove = SWEEP_SHEET[st.type[above]];
+        if (shAbove === 3) st.flags[above] = 0;
+        else if (KILL_ABOVE_FGG.has(shAbove)) genKillTile(st, rng, m, n - 1);
+      }
+    }
+  }
+  // ⑩ 宝箱 678 注入（cs:26236-26258）：至多前 8000 箱，chest==null 即 break；
+  //    Next(10)!=0 或 item[1].stack==0 → continue（**掷照耗**）；首个空槽写 678。
+  if (chests) {
+    for (let c = 0; c < 8000; c++) {
+      const ch = chests[c];
+      if (!ch) break;
+      if (rng.nextIntRange(0, 10) !== 0) continue;
+      const slot1 = ch.items[1];
+      if (!slot1 || slot1.stack === 0) continue;
+      for (let s = 1; s < ch.items.length; s++) {
+        const it = ch.items[s];
+        if (!it || it.stack === 0) { ch.items[s] = { id: 678, stack: 1 }; break; }
+      }
+    }
+  }
 }

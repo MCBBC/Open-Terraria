@@ -295,6 +295,17 @@ export class VanillaSpawner {
   private ZoneDungeon = false; private ZoneGraveyard = false; private ZoneBeach = false;
   /** 原版 downedBoss3（杀过骷髅王）：地牢分支切换 守卫→常规怪池 */
   private downedBoss3 = false;
+  /** GetZombieSettings :5596：spawnArmedZombies（skyblock 低格未杀前 Boss 时 false） */
+  private spawnArmedZombies = true;
+  /** NPC.DownedAnyPreHardmodeBoss（NPC.cs:5588-5600）：史莱姆王/EoC/EoW/骷髅王/
+   *  蜂王/鹿角怪 任一已败即 true；全无时返回 Main.hardMode（困难世界视为已过肉前段） */
+  private downedAnyPreHardmodeBoss(): boolean {
+    const f = this.world.flags as Record<string, boolean>;
+    if (f.downedSlimeKing || f.downed_50 || f['downed_4'] || f.downedEyeOfCthulhu
+      || f['downed_13'] || f['downed_266'] || f['downed_35'] || f.downedSkeletron
+      || f['downed_222'] || f['downed_657']) return true;
+    return !!f.hardMode;
+  }
   private spawnTileX = 0; private spawnTileY = 0;
   /** FindSpawnTile 的 xRange 输出（L911：落脚点横向在 safeArea 内，传给 SpawnAnNPC） */
   private xRange = false;
@@ -998,8 +1009,12 @@ export class VanillaSpawner {
       spawnRate = Math.trunc(spawnRate / value);
       maxSpawns = Math.trunc(maxSpawns * value);
     }
-    // L696：未杀骷髅王 rate=10（clamp 之后赋值，不受 ≥60 下限影响——守卫快速轮换）
-    if (this.ZoneDungeon && !this.downedBoss3) spawnRate = 10;
+    // L696：未杀骷髅王 rate=10（clamp 之后赋值，不受 ≥60 下限影响——守卫快速轮换）。
+    // ★IIIII61 WorldGen.Skyblock.lowTiles（NPC.cs:791-793）：空岛低格世界 spawnRate ÷2
+    //  ——原版紧跟地牢 arm 之后顺序执行（地牢 rate=10 同样被整除为 5）
+    if (this.world.skyblockLowTiles) {
+      spawnRate = Math.floor(spawnRate / 2);
+    }
     // ---- spawnFriendly 掷骰（NPC.cs:711-832;原版在 SetSpawnFlags 与 rate 同例程内）----
     // 外层门 :709 1:1：!invaders && ((!血月 && !南瓜月 && !霜月) || 白天) && 非日食白天
     //  && !腐化 && !猩红 && !陨石 && !旧军（旧军系统缺席恒 false;infectedSeed 变体省略;
@@ -1017,9 +1032,13 @@ export class VanillaSpawner {
         // 削减只在 friendly 命中分支内，未命中只放宽 spawnRate）。
         // 城镇 noWorms 掷骰（:717/:734/:750）在友好掷骰**之前**（原版同序）
         if (townNPCs === 1) {
-          if (this.rateRng() < 1 / 2) this.townNoWorms = true;              // :717-720
-          if (this.rateRng() < 1 / 10) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.5); } // :722-727
-          else spawnRate = Math.floor(spawnRate * 1.25);
+          // ★IIIII61 WorldGen.Skyblock.lowTiles（NPC.cs:806-821）：空岛低格世界
+          //   地狱侧城镇=1 的两掷（noWorms/friendly）整体跳过——零掷流、零速率修正
+          if (!this.world.skyblockLowTiles) {
+            if (this.rateRng() < 1 / 2) this.townNoWorms = true;              // :717-720
+            if (this.rateRng() < 1 / 10) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.5); } // :722-727
+            else spawnRate = Math.floor(spawnRate * 1.25);
+          }
         } else if (townNPCs === 2) {
           if (this.rateRng() >= 1 / 4) this.townNoWorms = true;             // :734-737 Next(4)!=0
           if (this.rateRng() < 1 / 5) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.5); } // :736-743
@@ -1491,6 +1510,15 @@ export class VanillaSpawner {
     // GetZombieSettings（L1193 调用，L5501：Next(7)）——地表夜最终僵尸 style，
     // 原版在函数入口 roll（此处同位置，保持后续 RNG 流顺序一致）
     this.zombieStyle = rng.int(0, 6);
+    // ★IIIII61 WorldGen.Skyblock.lowTiles 两臂（GetZombieSettings :5602/:5615）：
+    //   ① 未杀任何困难模式前 Boss 且 style∉{4,5} → 1/3 重掷为 style 4/5（swamp 域）
+    //   ② spawnArmedZombies=false（本仓先前恒真——持械僵尸系全部禁刷）
+    const sbDownedPreHM = this.downedAnyPreHardmodeBoss();
+    if (this.world.skyblockLowTiles && !sbDownedPreHM
+      && this.zombieStyle !== 4 && this.zombieStyle !== 5 && rng.int(0, 3) === 0) {
+      this.zombieStyle = rng.int(0, 3) === 0 ? 4 : 5;
+    }
+    this.spawnArmedZombies = !(this.world.skyblockLowTiles && !sbDownedPreHM);
     // GetZombieSettings L5499-5514：torchZombieChance 基础 12；
     //  playerHasStartingHealth（L327：statLifeMax ≤ 100）→ 5 − numberOfActivePlayers/2
     //  （下限 2；活跃玩家数未跟踪 → 单人取 1）。skyblock 的 spawnArmedZombies=false
@@ -2269,7 +2297,23 @@ export class VanillaSpawner {
       return fe;
     }
     // ---- 侏儒 624 两支（NPC.cs:3532-3538，仙女段之后蘑菇段之前；gnomeChance=
-    //      GetGnomeChance 基档 10[:5281]，skyblock lowTiles 档未建模恒 10）----
+    //      GetGnomeChance 基档 10[:5281]）----
+    //  ★IIIII61 lowTiles 档接入（GetGnomeChance :5383-5405）：空岛低格世界——
+    //    remix → 20；否则 ×20（200），场上已有侏儒 624 再 ×20（4000）；remix 尾除 2。
+    //    （本支序：lowTiles 臂先于 remix 尾除,掷流同 vanilla 语句序）
+    const gnomeDenom = (() => {
+      let num = 10;
+      if (this.world.skyblockLowTiles) {
+        if (this.world.seedFlags?.remix) {
+          num = 20;
+        } else {
+          num *= 20;
+          if (this.countNpc(624) > 0) num *= 20;   // AnyNPCs(624)
+        }
+      }
+      if (this.world.seedFlags?.remix) num = Math.floor(num / 2);
+      return num;
+    })();
     //  ① livingTree 支：非 remix && !waterTile && (夜 || 落脚格有墙) && 玩家所站格
     //    墙 244（SetSpawnFlags :324 livingTree）&& !日食 && !血月 &&
     //    RollLuck(10×3)==0 && CountNPCS(624) <= Next(3)（上限 0-2 只随机）
@@ -2283,11 +2327,11 @@ export class VanillaSpawner {
     const gnCap = () => this.countNpc(624) <= rng.int(0, 2);   // Next(3)
     if (!this.world.seedFlags?.remix && !this.waterTile && gnNightOrWall
       && st.wall[st.idx(this.pX, this.pY)] === 244 && gnEvOK
-      && rollLuck(this.playerLuck, 30, () => rng.next()) === 0 && gnCap()) {
+      && rollLuck(this.playerLuck, gnomeDenom * 3, () => rng.next()) === 0 && gnCap()) {
       return D(624);
     }
     if (!this.ZoneCorrupt && !this.ZoneCrimson && !this.waterTile && gnEvOK
-      && rollLuck(this.playerLuck, 10, () => rng.next()) === 0
+      && rollLuck(this.playerLuck, gnomeDenom, () => rng.next()) === 0
       && this.spawnTileY >= this.world.groundLevel * 0.8 && this.spawnTileY <= this.world.groundLevel * 1.1
       && gnCap() && gnNightOrWall
       && (gnWall === 2 || gnWall === 63 || (gnWall >= 196 && gnWall <= 199))) {
@@ -2858,7 +2902,7 @@ export class VanillaSpawner {
       if (iceTile) {
         if (!this.ZoneGraveyard && hardMode && N(4)) return D(169);
         if (!this.ZoneGraveyard && hardMode && N(3)) return D(155);
-        if (expert && N(2)) return D(431);
+        if (this.spawnArmedZombies && expert && N(2)) return D(431);
         return D(161);
       }
       // L4577：雨夜 1/2 → Raincoat Zombie 223（1/3 小变体 -54/-55）
@@ -2866,7 +2910,17 @@ export class VanillaSpawner {
         if (!N(3)) return D(223);
         return D(N(2) ? -55 : -54);
       }
-      // L4585：skyblock 火把僵尸段省略（skyblock 语义未接；原文本支亦带 !ZoneGraveyard 门）
+      // ★IIIII61 WorldGen.Skyblock.lowTiles 火把僵尸前插臂（NPC.cs:4691-4713）：
+      //   !墓园 && 非水 && lowTiles && 未杀任何困难模式前 Boss → 1/3：
+      //   二选一=火把僵尸段（spawnArmedZombies&&expert&&Next(2) → 持械 591 / else 590）
+      //   或 GetBasicSlimeToSpawn(surface:true) 基础史莱姆
+      if (!this.ZoneGraveyard && !this.waterTile && this.world.skyblockLowTiles
+        && !sbDownedPreHM && N(3)) {
+        if (N(2)) {
+          return D(this.spawnArmedZombies && expert && N(2) ? 591 : 590);
+        }
+        return D(this.getBasicSlimeToSpawn(true));
+      }
       // L4612：苔藓僵尸 Moss Zombie 691——墓地专属 RollOnlyBadLuckExtreme(200)
       if (this.ZoneGraveyard && N(200)) return D(691);
       // L4617：蛆僵尸 Maggot Zombie 632——墓地专属 1/maggotZombieChance（GetZombieSettings
@@ -2876,11 +2930,14 @@ export class VanillaSpawner {
       //  与"点燃的火把/营火邻近"无关（590 贴图手持火把故俗名火把僵尸；
       //  GetZombieSettings L5495-5523 全文无火把/营火邻接扫描）。:4624 持械变体 591 需
       //  spawnArmedZombies && expertMode && Next(2)==0（掷骰仅在专家档发生，短路同原版）
-      if (N(this.torchZombieChance)) return D(expert && N(2) ? 591 : 590);
+      if (N(this.torchZombieChance)) {
+        return D(this.spawnArmedZombies && expert && N(2) ? 591 : 590);
+      }
       // L4634：halloween/xMas 节日僵尸 319-321/331-332 段略（节日未接）
       // L4644：专家持械僵尸 430-436——spawnArmedZombies && zombieStyle!=1 &&
       //   expertMode && Next(3)==0，按 zombieStyle 选型（0→430/2→432/3→433/4→434/
       //   5→435/6→436；style 1 无持械变体；switch 缺省 430）
+      if (this.spawnArmedZombies && expert && this.zombieStyle !== 1 && N(3)) {
       if (expert && this.zombieStyle !== 1 && N(3)) {
         const armed = [430, 430, 432, 433, 434, 435, 436][this.zombieStyle] ?? 430;
         return D(armed);

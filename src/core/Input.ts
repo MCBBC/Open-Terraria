@@ -1,6 +1,7 @@
 // 键盘/鼠标输入。UI 打开时屏蔽游戏输入。
 import { bindsOf, type KeybindAction } from './Keybinds';
 import { isDomUiTarget } from './input/domTargets';
+import { resolveTouchMode } from './input/touchMode';
 
 /** 泛化键沿载荷(mobile-adaptation-plan 模块①):keydownHandlers 的统一第二参。
  *  物理键盘派发时由 KeyboardEvent 逐字段映射(origin='physical');虚拟通道
@@ -163,6 +164,8 @@ export class Input {
       this.mouseY = t.clientY - r.top;
     };
     onEl('touchstart', ((e: TouchEvent) => {
+      // 操作模式门(keyboard 强制=触摸屏点击不合成世界输入;键鼠语义接管)
+      if (resolveTouchMode() !== 'touch') return;
       if (isDomUiTarget(e.target)) return;          // UI/控件原生处理
       if (worldTouchId !== null) return;            // 首指驱动光标，次指忽略(P1 FingerRoles 升级)
       const t = e.changedTouches[0];

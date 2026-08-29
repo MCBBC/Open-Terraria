@@ -14,6 +14,7 @@ import { solidTile as solidTileHB, poundTile as poundTileHB } from './HalfBrickP
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';   // SSSS：PlaceTight 尾部 CheckStalactite
+import { noSpiderCavesActuallyNoSpiderCaves } from '../SeedEasterEggs';   // ★IIIII41-T3②
 
 const HIVE = TILE_BY_KEY['v_225_hive_block']!;
 const HONEY = TILE_BY_KEY['v_229_honey_block']!;   // 蜂蜜斑 SetTile(229)（HoneyPatchBiome.cs:37/44）
@@ -49,14 +50,25 @@ function circleEach(r: number, fn: (dx: number, dy: number) => void): void {
 /** CreateHiveTunnel(HiveBiome.cs:135)1:1:基础半径 12-20,步数每迭代净 -2,
  *  三阈值各自独立 ±0.5% 抖动且基于基础半径;±10 格墙 87(神庙)/地表空墙 → 整条作废 */
 function hiveTunnel(st: TileStore, rng: RNG, gs: GenState, sx: number, sy: number): [number, number] {
-  const baseR = rng.int(12, 20);
-  let num2 = rng.int(10, 20);   // 剩余步数
+  // ★IIIII45（HiveBiome.cs CreateHiveTunnel：1458 cs 注记 246-254， drunken 内参批——
+  //   IIIII14 排期⑤清偿）：drunk 域半径/步数重掷并按 (w/4200+1)/2 缩放：
+  //     普通态 num=Next(12,21)=int(12,20) / num2=Next(10,21)=int(10,20)
+  //     drunk 态   num=Next(8,26) =int(8,25)  / num2=Next(10,41)=int(10,40)
+  //                num *= (w/4200+1)/2 ; num2 同乘（double 浮点）
+  const drunk = !!gs.seedFlags.drunkWorld;
+  let baseR = rng.int(drunk ? 8 : 12, drunk ? 25 : 20);
+  let steps = rng.int(10, drunk ? 40 : 20);   // 剩余步数
+  if (drunk) {
+    const scale = (st.w / 4200 + 1) / 2;
+    baseR = baseR * scale;
+    steps = steps * scale;
+  }
   let vx = rng.int(-10, 10) * 0.2, vy = rng.int(-10, 10) * 0.2;
   let px = sx + 0.0, py = sy + 0.0;
-  while (num2 > 0) {
-    if (py > st.h - 250) num2 = 0;
+  while (steps > 0) {
+    if (py > st.h - 250) steps = 0;
     const r = baseR * (1 + rng.int(-20, 19) * 0.01);
-    let next2 = num2 - 1;   // 本迭代后的剩余(可能被截断保护清零)
+    let next2 = steps - 1;   // 本迭代后的剩余(可能被截断保护清零)
     const x0 = Math.max(1, Math.floor(px - r)), x1 = Math.min(st.w - 1, Math.floor(px + r));
     const y0 = Math.max(1, Math.floor(py - r)), y1 = Math.min(st.h - 1, Math.floor(py + r));
     for (let x = x0; x < x1; x++) {
@@ -76,10 +88,11 @@ function hiveTunnel(st: TileStore, rng: RNG, gs: GenState, sx: number, sy: numbe
         const i = st.idx(x, y);
         const d = Math.hypot(x - px, y - py);
         if (d < baseR * 0.4 * (1 + rng.int(-10, 10) * 0.005)) {
-          // cs:251-263:honey(true) 恒置（液量仅 1/3 掷 255）；active(false) 保留幽灵 type；
-          //   cs:262-263 active(false) 后仍 halfBrick(false)+slope(0)——失活格的 slope 位
-          //   原版一并复位（斜面泥/苔核转蜜腔不留残坡，dump slope 通道按位裁决）
+          // cs:251-263:honey(true) 恒置（液量仅 1/3 掷 255；★IIIII45 drunk 态在
+          //   Next(3) 之后无条件 liquid=255——掷序不变、覆盖率翻倍）；active(false)
+          //   保留幽灵 type；halfBrick(false)+slope(0) 一并复位
           if (rng.int(0, 2) === 0) st.liquid[i] = 255;
+          if (drunk) st.liquid[i] = 255;
           st.liquidType[i] = 3;
           st.wall[i] = 86;
           st.flags[i] = 0;
@@ -98,11 +111,16 @@ function hiveTunnel(st: TileStore, rng: RNG, gs: GenState, sx: number, sy: numbe
             st.type[i] = HIVE;
           }
         }
-        if (d < baseR * 0.6 * (1 + rng.int(-10, 10) * 0.005)) st.wall[i] = 86;
+        if (d < baseR * 0.6 * (1 + rng.int(-10, 10) * 0.005)) {
+          st.wall[i] = 86;
+          // ★IIIII45（HiveBiome.cs createHiveTunnel 尾支）：drunk 世界墙带内
+          //   Next(2)==0 再灌满蜜——骰仅 wall 带内消耗（普通世界整支短路零掷）
+          if (drunk && rng.int(0, 1) === 0) { st.liquid[i] = 255; st.liquidType[i] = 3; }
+        }
       }
     }
     px += vx; py += vy;
-    num2 = next2 - 1;   // 原版:num2 = num3 - 1(每迭代净 -2)
+    steps = next2 - 1;   // 原版:num2 = num3 - 1(每迭代净 -2)
     vy += rng.int(-10, 10) * 0.05;
     vx += rng.int(-10, 10) * 0.05;
   }
@@ -395,9 +413,11 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     });
     if (solid === 0 || mudOrGrass / solid < 0.75 || grass < 2) { hvN('rej_soil'); mk?.('PLACEX'); continue; }
     // 隧道链:2-4 段;每段 2-4 条全部从段起点出发,段位置=最后一条终点
+    // ★IIIII45（HiveBiome.cs Place：1458 注记 cs 153-156）：drunk 隧道段数
+    //   num2 += Next(7,10)=int(7,9)（普通世界整支短路零掷）
     let px = x + 0.0, py = y + 0.0;
     const segEnds: Array<[number, number]> = [];
-    const segs = rng.int(2, 4);
+    const segs = rng.int(2, 4) + (gs.seedFlags.drunkWorld ? rng.int(7, 9) : 0);
     for (let seg = 0; seg < segs; seg++) {
       const tunnels = rng.int(2, 4);
       let ex = px, ey = py;
@@ -473,6 +493,32 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
           st.flags[ii] = 0;   // active(false)——type 保留幽灵
         } else {
           st.type[ii] = HIVE; st.flags[ii] = 1; st.slope[ii] = 0; st.half[ii] = 0;
+        }
+      }
+    }
+    // ★IIIII45（HiveBiome.cs Place：1458 注记 cs 108-119）：drunk 追加幼虫台——
+    //   从主台位起每尝试两掷 Next(-51,51)=int(-50,50)×2（X/Y 偏移），首格命中
+    //   「InWorld ∧ 距主台>10 ∧ 失活 ∧ wall==86」即搭第二座并 break；预算 1000 次。
+    //   普通世界整支短路零掷。搭台几何与主台同构 CreateStandForLarva。
+    if (gs.seedFlags.drunkWorld) {
+      for (let l = 0; l < 1000; l++) {
+        const qx = px + rng.int(-50, 50);
+        const qy = py + rng.int(-50, 50);
+        if (!st.inBounds(Math.floor(qx), Math.floor(qy))) continue;
+        const qxi = Math.floor(qx), qyi = Math.floor(qy);
+        const qi = st.idx(qxi, qyi);
+        if (Math.hypot(qx - px, qy - py) > 10 && !st.flags[qi] && st.wall[qi] === 86) {
+          gs.larvaX.push(Math.max(5, Math.min(st.w - 5, qxi)));
+          gs.larvaY.push(Math.max(5, Math.min(st.h - 5, qyi)));
+          for (let ix = qxi - 1; ix <= qxi + 1 && ix > 0 && ix < st.w; ix++) {
+            for (let iy = qyi - 2; iy <= qyi + 1 && iy > 0 && iy < st.h; iy++) {
+              if (!st.inBounds(ix, iy)) continue;
+              const ii = st.idx(ix, iy);
+              if (iy !== qyi + 1) st.flags[ii] = 0;
+              else { st.type[ii] = HIVE; st.flags[ii] = 1; st.slope[ii] = 0; st.half[ii] = 0; }
+            }
+          }
+          break;
         }
       }
     }
@@ -553,6 +599,10 @@ function solidTile2(st: TileStore, x: number, y: number): boolean {
  *  21% 崩溃根因）。逆序压栈后出序 = 递归 pre-order 逐帧等价（先根后子、子序
  *  x-1→x+1→y-1→y+1 不变），封顶/重复访问/shroom 语义全部保持。 */
 function countTiles(st: TileStore, x: number, y: number): { count: number; shroom: number } {
+  const __ft = (globalThis as { __swFloodTrace?: (phase: string, x: number, y: number, count: number, shroom: number, cells?: number[]) => void }).__swFloodTrace;
+  const __fb = (globalThis as { __swFloodBox?: (phase: string, x: number, y: number) => void }).__swFloodBox;
+  if (__ft) __ft('start', x, y, 0, 0);
+  if (__fb) __fb('start', x, y, );
   let count = 0, shroom = 0;
   const counted = new Set<number>();
   const stack: number[] = [x, y];
@@ -573,6 +623,7 @@ function countTiles(st: TileStore, x: number, y: number): { count: number; shroo
       stack.push(cx, cy + 1, cx, cy - 1, cx + 1, cy, cx - 1, cy);
     }
   }
+  if (__ft) __ft('end', x, y, count, shroom, [...counted]);
   return { count, shroom };
 }
 
@@ -800,6 +851,16 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
 /** SpiderCaves pass（L17455）1:1：w*0.005 个巢；采样 x∈[200,w-200) y∈[(ws+rock)/2,h-230)；
  *  countTiles 门 500≤空腔<3500（重试上限 w/2，超限放弃该巢；重掷 y 域换 rockLevel+30） */
 export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
+  // ★IIIII41-T3②（cs:17471-17546）：SpiderCaves pass 的 arachnophobia 门——
+  //   `if (!Skyblock.denyAllGeneration && !Variations.noSpiderCavesActuallyNoSpiderCaves)`
+  //   包住**整段 pass 体**：蜘蛛巢生成（Spread.Spider）与头尾 tileSolid 翻转
+  //   （379→false/225 支/162→true）全部跳过 = 蜘蛛洞穴内容面整域消失。
+  //   门语义（GenVars.Variations :269-278）：noSpiderCaves ∧ activeSecretSeedCount<4；
+  //   本仓单秘路由精确等价（多秘计数另案，SeedEasterEggs.ts 头注）。count≥4
+  //   （noSpiderCavesILiedMoreSpiderCaves :281-290）反而在 pass 尾**加密度**
+  //   （DoNoSpiderCavesILiedMoreSpiderCaves :2626/:17539）+ WebsAndHoney 墙62蜂蜜化
+  //   （:20185-20192）——组合债登记，不在本批。
+  if (noSpiderCavesActuallyNoSpiderCaves(gs.seedFlags)) return;
   const __cap = (globalThis as { __swSpiderGsCap?: (gs: GenState, st: TileStore) => void }).__swSpiderGsCap;
   if (__cap) __cap(gs, st);
   // ★pass 头 tileSolid 翻转（cs:17459 `Main.tileSolid[379] = false`）：泡泡块非实心
@@ -812,7 +873,14 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
   const __m = (globalThis as { __swSpiderNest?: (s: string) => void }).__swSpiderNest;
   // QQQQQ：候选级采样日志（countTiles 门对拍用；无钩零开销）
   const __c = (globalThis as { __swSpiderCand?: (n: number, t: number, x: number, y: number, count: number, shroom: number) => void }).__swSpiderCand;
-  const count = Math.floor(st.w * 0.005);
+  // ★IIIII50（1458 cs:17479-17493）：巢数分支链——if(ntb∧FTW∧!celebration){组合域
+  //   乘子群,本仓未建模(备案)} else if(roundLandmasses){num/=2} else if(getGood)
+  //   {num2×3}。纯 FTW 链此前走基线数量=漏接；本仓先落**互斥门语义**(前两臂均以
+  //   旗标精确判否)，组合域首臂仍备案不半移植。
+  const ntbFtwNoCeleb = !!gs.seedFlags.notTheBees && !!gs.seedFlags.getGoodWorld
+    && !gs.seedFlags.tenthAnniversary;
+  const count = Math.floor(st.w * 0.005)
+    * (!ntbFtwNoCeleb && !gs.seedFlags.roundLandmasses && gs.seedFlags.getGoodWorld ? 3 : 1);
   const retryCap = Math.floor(st.w / 2);
   const yMin = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
   for (let n = 0; n < count; n++) {

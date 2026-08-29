@@ -63,23 +63,39 @@ export function runShiniesPass(st: TileStore, rng: RNG, gs: GenState): void {
   band(st, rng, gs, Math.floor(area * 8e-5), surfHigh, rockHigh, gs.oreTiers.iron, [3, 5], [3, 5], fk('iron'));
   band(st, rng, gs, Math.floor(area * 2e-4), rockLow, st.h, gs.oreTiers.iron, [4, 8], [4, 7], fk('iron'));
   // 银/钨：中层 2.6e-5 / 深层 1.5e-4（cs:13548-13562）；天空带 1.7e-4 在金深层**之后**（cs:13585）
-  band(st, rng, gs, Math.floor(area * 2.6e-5), surfHigh, rockHigh, gs.oreTiers.silver, [3, 5], [3, 5], fk('silver'));
-  band(st, rng, gs, Math.floor(area * 1.5e-4), rockLow, st.h, gs.oreTiers.silver, [4, 8], [4, 7], fk('silver'));
+  // ★IIIII58 REMIX（cs:13299-13317 三元第二支）：中带改 [(int)Main.rockLayer-100,
+  //   h-250)、银深带/金深带改 [(int)Main.worldSurface,(int)Main.rockLayer)；
+  //   其余各带与普通世界逐参相同。
+  const rmx = !!gs.seedFlags.remix;
+  band(st, rng, gs, Math.floor(area * 2.6e-5),
+    rmx ? gs.rockLevel - 100 : surfHigh, rmx ? st.h - 250 : rockHigh,
+    gs.oreTiers.silver, [3, 5], [3, 5], fk('silver'));
+  band(st, rng, gs, Math.floor(area * 1.5e-4),
+    rmx ? gs.worldSurface : rockLow, rmx ? gs.rockLevel : st.h,
+    gs.oreTiers.silver, [4, 8], [4, 7], fk('silver'));
   // 金/铂：深层 1.2e-4（cs:13563-13577）——注册序在银天空带之前（曾倒置致流分叉）
-  band(st, rng, gs, Math.floor(area * 1.2e-4), rockLow, st.h, gs.oreTiers.gold, [4, 7], [4, 7], fk('gold'));
-  // 银/钨天空带 1.7e-4（cs:13585-13598）/ 金近地表带 1.2e-4（cs:13599-13612）
-  band(st, rng, gs, Math.floor(area * 1.7e-4), 0, surfLow, gs.oreTiers.silver, [4, 8], [4, 7], fk('silver'));
-  band(st, rng, gs, Math.floor(area * 1.2e-4), 0, Math.max(1, surfLow - 20), gs.oreTiers.gold, [4, 7], [4, 7], fk('gold'));
-  // 邪恶矿：2.25e-5，仅岩层以下（cs:5932-5949）。
-  // ★IIIII14（cs:13599-13619）：drunk 先跑**双生半密度带**——猩红矿 204 半量 + 魔矿 22
-  //   半量；随后 cs:13621 起的 if(crimson) 全量带照常叠加（净 1.5× 邪恶矿,两族并存）。
+  band(st, rng, gs, Math.floor(area * 1.2e-4),
+    rmx ? gs.worldSurface : rockLow, rmx ? gs.rockLevel : st.h,
+    gs.oreTiers.gold, [4, 7], [4, 7], fk('gold'));
+  // 银/钨天空带 1.7e-4（cs:13585-13598）/ 金近地表带 1.2e-4（cs:13599-13612）——
+  // ★IIIII58 原版双支均挂 !noSurface && !surfaceIsInSpace 门（cs:13361/13486）；补上
+  if (!gs.seedFlags.noSurface && !gs.seedFlags.surfaceIsInSpace) {
+    band(st, rng, gs, Math.floor(area * 1.7e-4), 0, surfLow, gs.oreTiers.silver, [4, 8], [4, 7], fk('silver'));
+    band(st, rng, gs, Math.floor(area * 1.2e-4), 0, Math.max(1, surfLow - 20), gs.oreTiers.gold, [4, 7], [4, 7], fk('gold'));
+  }
+  // 邪恶矿：普通 2.25e-5 仅岩层以下（cs:5932-5949）；★REMIX（cs:13439-13453）
+  //   密度 **4.25E-05**、Y 带 [(int)Main.worldSurface,(int)Main.rockLayer)。
+  // ★IIIII14（cs:13430-13446）：drunk 先跑**双生半密度带**——猩红矿 204 半量 + 魔矿 22
+  //   半量；随后 if(crimson) 全量带照常叠加（净 1.5× 邪恶矿,两族并存）。
   if (drunkE) {
     const halfCnt = Math.trunc(area * 2.25e-05 / 2);
     band(st, rng, gs, halfCnt, gs.rockLevel, st.h, TILE_BY_KEY['ore_crimtane']!, [3, 5], [4, 7]);
     band(st, rng, gs, halfCnt, gs.rockLevel, st.h, TILE_BY_KEY['ore_demonite']!, [3, 5], [4, 7]);
   }
   const evil = gs.crimson ? TILE_BY_KEY['ore_crimtane']! : TILE_BY_KEY['ore_demonite']!;
-  band(st, rng, gs, Math.floor(area * 2.25e-5), gs.rockLevel, st.h, evil, [3, 5], [4, 7]);
+  band(st, rng, gs, Math.floor(area * (rmx ? 4.25e-5 : 2.25e-5)),
+    rmx ? gs.worldSurface : gs.rockLevel, rmx ? gs.rockLevel : st.h,
+    evil, [3, 5], [4, 7]);
 }
 
 /** 宝石 pass 36（cs:6754-6814）：六宝石独立数量（w×[0.3,0.1,0.25,0.45,0.5,0.05]×0.2），

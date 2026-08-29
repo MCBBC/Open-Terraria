@@ -13,6 +13,7 @@ import { TILE_DEFS, T } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { spreadGrass } from './Spread';
 import { genSolidType } from './GenSolid';
+import { noSpiderCavesActuallyNoSpiderCaves } from '../SeedEasterEggs';   // ★IIIII41-T3②
 
 const WALL_DIRT = 2;        // WallID.Dirt
 const WALL_DIRT_UNSAFE = 15; // WallID.DirtUnsafe
@@ -151,11 +152,19 @@ export function runGrassWallPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (found && sx > -1 && sy > -1 && countDirtTiles(st, sx, sy) < MAX_TILE_COUNT) {
         // ★PPPPP（cs:19776-19786）：maxValue=3（FTW 组合 10）；饥荒世界 Next(maxValue)!=0
         //   → 蜘蛛墙 62 地表化（纯 Constant 2/3、FTW+Constant 9/10）。掷骰在 constant
-        //   门内（普通世界零消耗）。Variations.noSpiderCavesActuallyNoSpiderCaves 门
-        //   （noSpiderCaves∧activeSecretSeedCount<4）纯 Constant 恒 false,不接（备案）。
+        //   门内（普通世界零消耗）。
+        // ★IIIII41-T3②（cs:19804）arachnophobia 反向门补齐：`dontStarveWorldGen &&
+        //   genRand.Next(maxValue) != 0 && !Variations.noSpiderCavesActuallyNoSpiderCaves`
+        //   ——Next(maxValue) 在变体门【之前】消耗（短路序），故 arachnophobia+constant
+        //   组合下掷骰照耗、墙型钉回草墙 63。单秘路由等价性见 SeedEasterEggs.ts 头注。
         const maxValue = gs.seedFlags?.getGoodWorld ? 10 : 3;
         let wallType = WALL_GRASS_UNSAFE;
-        if (gs.seedFlags?.theConstant && rng.nextInt(maxValue) !== 0) wallType = WALL_SPIDER_UNSAFE;
+        if (gs.seedFlags?.theConstant) {
+          const roll = rng.nextInt(maxValue);
+          if (roll !== 0 && !noSpiderCavesActuallyNoSpiderCaves(gs.seedFlags)) {
+            wallType = WALL_SPIDER_UNSAFE;
+          }
+        }
         spreadWall2(st, sx, sy, wallType);
       }
     }

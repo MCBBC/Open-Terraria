@@ -357,10 +357,10 @@ window.addEventListener('keydown', (e) => {
     game.renderer.captureMode.toggleRequest(game.player, game.world);
     return;
   }
-  // ★Shift+F2/F4/F6/F7/F8/F9/F10（2026-08-27 用户要求）：统一 = 地图点击传送
-  //  开关（首用确认门;stopImmediatePropagation 防旧迁入键并行——如 Game 的
-  //  Shift+F2 无敌/相机模式等）。F2 在下方 switch 无 case,在此统一拦截
-  if (e.shiftKey && ['F2', 'F4', 'F6', 'F7', 'F8', 'F9', 'F10'].includes(e.code)) {
+  // ★Shift+F10/F4/F6/F7/F8/F9（2026-08-28 用户澄清）：Shift+F10 = 地图点击传送
+  //  开关；★Shift+F2 保持无敌（无限生命和魔力,Game.toggleDebugGod）不被拦截。
+  //  stopImmediatePropagation 防同键旧迁入逻辑并行
+  if (e.shiftKey && ['F10', 'F4', 'F6', 'F7', 'F8', 'F9'].includes(e.code)) {
     e.preventDefault();
     e.stopImmediatePropagation();
     toggleMapClickTeleport();

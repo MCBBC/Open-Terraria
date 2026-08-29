@@ -596,7 +596,20 @@ export class SettingsPanel {
       // 仅触屏会话有实效;桌面显示但写入无消费方(coarse 总闸隔离纪律)
       const d2 = options.data;
       const HUD_MODES = ['auto', 't1', 't2', 't3'] as const;
+      const OP_MODES = ['auto', 'touch', 'keyboard'] as const;
       this.content.append(
+        // 操作模式(2026-08-29 用户需求):默认按设备;可强制触屏档或键鼠档——
+        // 切换即时生效(mainFlow 动态增删控件层/Input 世界触摸门/HudScale 档位
+        // 各自读 resolveTouchMode 即席响应,无需重进世界)
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.TouchOpMode'),
+          () => '',
+          () => Lang.text(`Mods.SandboxWorld.Settings.Op_${d2.touchOpMode}`),
+          () => {
+            const i = OP_MODES.indexOf(d2.touchOpMode);
+            void options.set('touchOpMode', OP_MODES[(i + 1) % OP_MODES.length]);
+          },
+        ),
         // 摇杆:浮动(官方手游)/固定底盘 二档
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.TouchJoystickFloat'),

@@ -30,6 +30,12 @@ import { growGemTree } from './TreePass';
 // HalfBrickPass⇄ShimmerPass 循环依赖;生成期模块体先于全部 pass 执行,时序安全。
 registerTileFrame165(checkStalactite);
 
+/** IIII57 取证钩（缺省零开销）：__swD59v 由仪具（tools/_i59.test.ts）注册 */
+const d59 = (o: Record<string, unknown>): void => {
+  const f = (globalThis as { __swD59v?: (o: Record<string, unknown>) => void }).__swD59v;
+  if (f) f(o);
+};
+
 /** Main.tileMoss（TileID.cs）：苔藓族 sheet 集（石族钟乳石帧判定用） */
 const MOSS_SHEETS = new Set<number>(Array.from(idsByVanillaSheet(182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627)).map((id) => TILE_DEFS[id]?.vanilla?.sheet ?? -1));
 
@@ -76,7 +82,11 @@ export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState, onStage?: 
   const celbShim = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags?.remix;
   const shimYLo = Math.floor(gs.worldSurface) + 150;
   const shimYHiRaw = Math.trunc((gs.rockLevel + gs.worldSurface + 200) / 2);
-  const celbYHi = Math.max(shimYHiRaw, shimYLo + 50);   // cs:15290 if(num7<=num6) num7=num6+50
+  // ★IIIII46 勘误：C# 钳制是**条件式**（仅 num7<=num6 才抬到 num6+50），非恒 max。
+  //   恒 max 曾把带宽 28 拉成 50 —— Next 同一样本在不同带宽下模映射漂移（微光池整体
+  //   平移 +2 的定罪根源；修后全池逐格回归）。
+  let celbYHi = shimYHiRaw;
+  if (celbYHi <= shimYLo) celbYHi = shimYLo + 50;
   // ★cs:15273-15274 首掷是 Y 先 X 后(与重试环内的顺序一致;重试环 cs:15291-15292 同为 Y 先)
   let y = rng.int(yLoBase, yHi - 1);
   let x = pickX(false);
@@ -277,15 +287,23 @@ function shimmerOpening(st: TileStore, rng: RNG, dir: number, X: number, Y: numb
 export function placeTight(st: TileStore, rng: RNG, x: number, y: number): void {
   const yi = st.idx(x, y);
   const liq = st.liquid[yi];
-  if (liq > 0 && st.liquidType[yi] === LIQ_SHIMMER) return;
-  if (st.flags[yi] && st.type[yi] === stLarva()) return;
-  const preferSmall = rng.int(0, 1) === 0;   // genRand.Next(2) == 0
-  const variation = rng.int(0, 2);           // genRand.Next(3)
+  d59({ e: 'pt-in', x, y });
+  if (liq > 0 && st.liquidType[yi] === LIQ_SHIMMER) { d59({ e: 'pt-skip', x, y, r: 'shimmer' }); return; }
+  if (st.flags[yi] && st.type[yi] === stLarva()) { d59({ e: 'pt-skip', x, y, r: 'larva' }); return; }
+  const tagInt = (t: string, a: number, b: number) => {
+    const gg = globalThis as { __swLeaf?: string | null };
+    gg.__swLeaf = t; try { return rng.int(a, b); } finally { gg.__swLeaf = null; }
+  };
+  const preferSmall = tagInt('pt_ps', 0, 1) === 0;   // genRand.Next(2) == 0
+  const variation = tagInt('pt_var', 0, 2);           // genRand.Next(3)
   placeUncheckedStalactite(st, x, y, preferSmall, variation);
   // PlaceTight 尾（cs:38345）：placed 165 → CheckStalactite——本仓库 placeUncheckedStalactite
   // 直写"重定型后"的最终列（材质匹配族 style==desired 不掷）；初始列≠期望列的失配族
   // （117/25/203/163/164/200）原版 UpdateStalagtiteStyle 重掷 1×Next(3)——此处补掷
-  if (st.flags[yi] && st.type[yi] === STALACTITE) {
+  const placed = !!st.flags[yi] && st.type[yi] === STALACTITE;
+  d59({ e: 'pt-done', x, y, ps: preferSmall ? 1 : 0, v: variation, placed: placed ? 1 : 0,
+    fy: placed ? st.frameY[yi] : -1, fx: placed ? st.frameX[yi] : -1 });
+  if (placed) {
     checkStalactite(st, rng, x, y);
   }
 }
@@ -349,9 +367,13 @@ function getDesiredStalagtiteStyle(
 }
 
 function sheetActive(st: TileStore, x: number, y: number): number {
+  // ★IIIII54 定罪修（cs:39130-39170 GetDesiredStalagtiteStyle）：支撑格材质读的是
+  //   **裸 .type 字节，不查 active**——inactive-but-typed 的幽灵残型照常参与分派。
+  //   曾按 flags 门控返回 -1：蜂巢壳 ClearEverything/SandMound 残沙带上的钟乳石
+  //   分派错位 ⇒ T165/T484 一侧多放一族（#19 双窄带残差根因之一）。
   if (!st.inBounds(x, y)) return -1;
   const i = st.idx(x, y);
-  return st.flags[i] ? (TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1) : -1;
+  return TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
 }
 
 /** UpdateStalagtiteStyle（cs:38669）：style!=desired → 掷 1×Next(3) 并重写 height 格列。
@@ -360,14 +382,19 @@ function sheetActive(st: TileStore, x: number, y: number): number {
 function updateStalagtiteStyle(st: TileStore, rng: RNG, x: number, j: number): boolean {
   const i0 = st.idx(x, j);
   const style = STYLE_BY_FX54.get(Math.trunc(st.frameX[i0]! / 54));
-  if (style === undefined) return false;
+  if (style === undefined) { d59({ e: 'us', x, j, r: 'style-undef', fx: st.frameX[i0] }); return false; }
   const d = getDesiredStalagtiteStyle(st, x, j);
-  if (d.fail) return false;
+  if (d.fail) { d59({ e: 'us', x, j, cur: style, r: 'desired-fail' }); return false; }
   if (style !== d.style) {
-    const fx = rng.int(0, 2) * 18 + FX_BASE_BY_STYLE[d.style]!;
+    const gg = globalThis as { __swLeaf?: string | null };
+    gg.__swLeaf = 'us_roll';
+    let rv: number;
+    try { rv = rng.int(0, 2); } finally { gg.__swLeaf = null; }
+    const fx = rv * 18 + FX_BASE_BY_STYLE[d.style]!;
     for (let k = d.y; k < d.y + d.height; k++) {
       if (st.inBounds(x, k)) st.frameX[st.idx(x, k)] = fx;
     }
+    d59({ e: 'us', x, j, cur: style, des: d.style, rolled: fx, y0: d.y, h: d.height });
   }
   return true;
 }
@@ -386,12 +413,16 @@ function killStalactiteTile(
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (!st.flags[i]) return;
+  d59({ e: 'kill', x, y });
   st.flags[i] = 0; st.half[i] = 0;
   st.frameX[i] = 65535; st.frameY[i] = 65535;  // -1（Uint16 环回；inactive 格不读帧）
   st.type[i] = 0;
   for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
-    if (reframe) reframe(st, rng, x + dx, y + dy);
-    else frame165(st, rng, x + dx, y + dy);
+    const nx = x + dx, ny = y + dy;
+    const ni = st.inBounds(nx, ny) ? st.idx(nx, ny) : -1;
+    d59({ e: 'kfr', x: nx, y: ny, t: ni >= 0 ? st.type[ni] : -1 });
+    if (reframe) reframe(st, rng, nx, ny);
+    else frame165(st, rng, nx, ny);
   }
 }
 
@@ -412,13 +443,17 @@ export function checkStalactite(
   if (!st.flags[i0]) return;
   const fy = st.frameY[i0]!;
   if (fy === 72) {
-    let flag = !solidTileSlope(st, x, j - 1);
+    const sUp = solidTileSlope(st, x, j - 1);
+    d59({ e: 'ck', br: 'h72', x, j, sol: sUp ? 1 : 0 });
+    let flag = !sUp;
     if (!flag && !updateStalagtiteStyle(st, rng, x, j)) flag = true;
     if (flag) killStalactiteTile(st, rng, x, j, reframe);
     return;
   }
   if (fy === 90) {
-    let flag2 = !solidTileSlope(st, x, j + 1);
+    const sDn = solidTileSlope(st, x, j + 1);
+    d59({ e: 'ck', br: 'g90', x, j, sol: sDn ? 1 : 0 });
+    let flag2 = !sDn;
     // InvalidTileForPilesOrSpeleothems = TileID.Sets.Boulders（生成期此阶段无巨石）
     if (!flag2 && !updateStalagtiteStyle(st, rng, x, j)) flag2 = true;
     if (flag2) killStalactiteTile(st, rng, x, j, reframe);
@@ -427,12 +462,19 @@ export function checkStalactite(
   if (fy >= 36) {
     let num = j;
     if (st.frameY[i0] === 54) num--;
-    let flag3 = !solidTileSlope(st, x, num + 2);
+    const sB = solidTileSlope(st, x, num + 2);
+    let flag3 = !sB;
     const a = st.inBounds(x, num) ? st.idx(x, num) : -1;
     const b = st.inBounds(x, num + 1) ? st.idx(x, num + 1) : -1;
     if (a < 0 || b < 0) { killStalactiteTile(st, rng, x, num, reframe); return; }
-    if (!st.flags[a] || !st.flags[b] || st.type[b] !== st.type[a]) flag3 = true;
-    if (st.frameX[b]! !== st.frameX[a]!) flag3 = true;
+    const actA = !!st.flags[a], actB = !!st.flags[b];
+    const tEq = st.type[b] === st.type[a];
+    const fxEq = st.frameX[b]! === st.frameX[a]!;
+    d59({ e: 'ck', br: 'g36', x, j: num, fy0: st.frameY[i0], sol: sB ? 1 : 0,
+      aA: actA ? 1 : 0, aB: actB ? 1 : 0, tA: st.type[a], tB: st.type[b],
+      fxA: st.frameX[a], fxB: st.frameX[b] });
+    if (!actA || !actB || !tEq) flag3 = true;
+    if (!fxEq) flag3 = true;
     if (!flag3 && !updateStalagtiteStyle(st, rng, x, num)) flag3 = true;
     // ★原版击杀带类型门（cs:39146-39155/39193-39202）：仅 type == 被查格（165）的
     // 格被 KillTile——num/num+1 被后续放置覆写成大理石等非 165 时**不得连带击杀**
@@ -447,12 +489,19 @@ export function checkStalactite(
   // 垂挂双格（frameY 0/18）
   let num = j;
   if (st.frameY[i0] === 18) num--;
-  let flag4 = !solidTileSlope(st, x, num - 1);
+  const sT = solidTileSlope(st, x, num - 1);
+  let flag4 = !sT;
   const a = st.inBounds(x, num) ? st.idx(x, num) : -1;
   const b = st.inBounds(x, num + 1) ? st.idx(x, num + 1) : -1;
   if (a < 0 || b < 0) { killStalactiteTile(st, rng, x, num, reframe); return; }
-  if (!st.flags[a] || !st.flags[b] || st.type[b] !== st.type[a]) flag4 = true;
-  if (st.frameX[b]! !== st.frameX[a]!) flag4 = true;
+  const actA = !!st.flags[a], actB = !!st.flags[b];
+  const tEq = st.type[b] === st.type[a];
+  const fxEq = st.frameX[b]! === st.frameX[a]!;
+  d59({ e: 'ck', br: 'h18', x, j: num, fy0: st.frameY[i0], sol: sT ? 1 : 0,
+    aA: actA ? 1 : 0, aB: actB ? 1 : 0, tA: st.type[a], tB: st.type[b],
+    fxA: st.frameX[a], fxB: st.frameX[b] });
+  if (!actA || !actB || !tEq) flag4 = true;
+  if (!fxEq) flag4 = true;
   if (!flag4 && !updateStalagtiteStyle(st, rng, x, num)) flag4 = true;
   // ★同上：类型门击杀（cs:39193-39202）——非 165 占位格不连带
   if (flag4) {
@@ -486,9 +535,10 @@ function stLarva(): number {
 export function placeUncheckedStalactite(st: TileStore, x: number, y: number, preferSmall: boolean, variation: number): void {
   if (!st.inBounds(x, y) || !st.inBounds(x, y + 1)) return;
   const sheetOf = (xx: number, yy: number) => {
+    // ★IIIII54 同上：cs:38774-38841 材质分派裸读 .type（不查 active），幽灵残型参与
     if (!st.inBounds(xx, yy)) return -1;
     const i = st.idx(xx, yy);
-    return st.flags[i] ? (TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1) : -1;
+    return TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
   };
   const put = (xx: number, yy: number, fx: number, fy: number) => {
     if (!st.inBounds(xx, yy)) return;

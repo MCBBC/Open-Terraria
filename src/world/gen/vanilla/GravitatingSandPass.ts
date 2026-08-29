@@ -47,8 +47,10 @@ function resetToType(st: TileStore, x: number, y: number, type: number): void {
 
 export function runGravitatingSandPass(st: TileStore, gs: GenState): void {
   // ★R13-5①：门 `!Skyblock.denyAllGeneration && !SecretSeed.roundLandmasses.Enabled`
-  //  （cs:15212）——planetoids 世界跳过整 pass（曾缺门）
-  if (gs.seedFlags?.roundLandmasses) return;
+  //  （cs:15212）——planetoids 世界跳过整 pass（曾缺门）。
+  // ★IIIII44：skyblock 半边补齐——注释既有而谓词未写，天空盒曾误跑引力沙塌落
+  //  （世界无 Falling 系时零写,但 x86 实证该 pass 必须零进;补齐谓词与实证对齐）。
+  if (gs.seedFlags?.roundLandmasses || gs.seedFlags?.skyblock) return;
   for (let x = 0; x < st.w; x++) {
     let flag = false;
     let num = 0;

@@ -70,7 +70,7 @@ const CSS = `
     radial-gradient(circle 3px at 50% 93%, rgba(235,242,255,0.8) 97%, transparent),
     radial-gradient(circle 3px at 7% 50%,  rgba(235,242,255,0.8) 97%, transparent);
   opacity:0.9; }
-.sw-mjoy.idle { opacity:0.26; }
+.sw-mjoy.idle { opacity:0.5; }   /* 幽灵方位记忆:α过低会在亮背景下整盘隐形(实测) */
 .sw-mjoy .knob { position:absolute; left:50%; top:50%; width:56px; height:56px;
   border-radius:50%; transform:translate(-50%,-50%);
   background:rgba(238,244,255,0.42);
@@ -111,7 +111,12 @@ const CSS = `
   background:rgba(20,26,52,0.82); color:#ffe8a0; font-size:12px; padding:5px 14px;
   border-radius:8px; border:1px solid #7d92d6; display:none; pointer-events:none;
   white-space:nowrap; }
-@media (orientation: portrait) { .sw-mobile .sw-mrotate { display:block; top:calc(122px + env(safe-area-inset-top)); } }
+@media (orientation: portrait) {
+  /* T3:提示条贴 hotbar 两行(~110px)下沿左对齐——居中横条会撞下沉后的
+     minimap(T3 oy_local=196×0.62≈屏 y121 起);左侧 x<260 空档无 HUD */
+  .sw-mobile .sw-mrotate { display:block; left:calc(8px + env(safe-area-inset-left));
+    transform:none; top:calc(118px + env(safe-area-inset-top)); max-width:58vw; }
+}
 `;
 
 /** 像素图标:16×16 字符画('.' 透明 / X 白 / o 半透白)→ run-length rect SVG。

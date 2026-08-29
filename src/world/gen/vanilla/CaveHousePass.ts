@@ -47,6 +47,19 @@ const THEMES: Record<Theme, ThemeDef> = {
 };
 
 const PLATFORM = TILE_BY_KEY['platform']!;
+
+/** IIII60 单屋 mark 序仪挂点（dormant）：无 env/globalThis 注入时零路径变化。
+ *  名称/位序与 x86 rig(Terraria1458 JJHook.Mark) 对位：PH 阶段界/STI 梯项/
+ *  DOR 门点/PLT 平台列/BEM 梁柱。 */
+function houseMk(name: string, a?: string | number, b?: string | number): void {
+  if (!a && a !== 0) {
+    (globalThis as { __swHouseMk?: (n: string) => void }).__swHouseMk?.(name);
+  } else if (b === undefined) {
+    (globalThis as { __swHouseMk?: (n: string, s: string | number) => void }).__swHouseMk?.(name, a);
+  } else {
+    (globalThis as { __swHouseMk?: (n: string, s: string | number, t: string | number) => void }).__swHouseMk?.(name, a, b);
+  }
+}
 const CANDELABRA = TILE_BY_KEY['candelabra']!;
 const SMALL_PILE = TILE_BY_KEY['v_185_small_decos']!;
 const COBWEB = TILE_BY_KEY['v_51_cobweb']!;
@@ -66,6 +79,8 @@ const STATUE_105 = sheetTile(105);
 const STATUE_349 = sheetTile(349);
 // BasicChest 族(TileID.cs:315 = {21,467})——CaveHouseBiome 前置拒绝扫描用
 const CHEST21 = TILE_BY_KEY['chest']!;
+// IIII52：chestWide 实验用宽表（BasicChest:: {21,467} + Dresser 等 4 类可放置家具族）
+const BASIC_WIDE = new Set([21, 467, 413, 21]);
 // PlaceTight 短路件:231 幼虫(WorldGen.cs:38343)
 const LARVA231 = TILE_BY_KEY['v_231_larva']!;
 // SkipTilesDuringWallAging(HouseBuilder.cs:22 = {245,246,240,241,242} 画/挂件族)
@@ -142,9 +157,11 @@ function findRoom(st: TileStore, ox: number, oy: number): Rect {
 /** GetRoomSolidPrecentage（HouseUtils.cs:212）：Modifiers.IsSolid→SolidOrSlopedTile
  *  =tileSolid && !tileSolidTop && !inActive——平台族【不】计（roomSolidAt）。 */
 function solidPct(st: TileStore, r: Rect): number {
+  // IIII52 bisect 钩（dormant）：SW_I54_MUT=pctSolid 时换 Conditions.IsSolid 语义
+  const mut = (globalThis as { __I54_MUT?: string }).__I54_MUT;
   let n = 0;
   for (let x = r.x; x < r.x + r.w; x++) {
-    for (let y = r.y; y < r.y + r.h; y++) if (roomSolidAt(st, x, y)) n++;
+    for (let y = r.y; y < r.y + r.h; y++) if (mut === 'pctSolid' ? solidAt(st, x, y) : roomSolidAt(st, x, y)) n++;
   }
   return n / (r.w * r.h);
 }
@@ -240,7 +257,10 @@ function createRooms(st: TileStore, gs: GenState, rng: RNG, ox: number, oy: numb
     return createRoomsBigAbandonedHouses(st, gs, rng, ox, oy);
   }
   let py = oy;
-  for (let i = 0; i < 200 && !solidAt(st, ox, py); i++) py++;
+  // IIII52 bisect 钩（dormant）：down201 起点+1 / down199 深度−1 的 off-by-one 实验
+  const __m = (globalThis as { __I54_MUT?: string }).__I54_MUT;
+  if (__m === 'down201') py++;
+  for (let i = 0; i < (__m === 'down199' ? 199 : 200) && !solidAt(st, ox, py); i++) py++;
   if (!solidAt(st, ox, py) || py === oy) return [];
   const main = findRoom(st, ox, py);
   const above = findRoom(st, main.x + (main.w >> 1), main.y + 1);
@@ -620,8 +640,10 @@ function wallFrameResetRoll(st: TileStore, rng: RNG, x: number, y: number): void
   const w = st.wall[st.idx(x, y)];
   if (w === 0) return;                    // 墙 0 → 无掷
   if (WALL_LARGE_FRAMES.has(w)) return;   // 大帧墙查表分支 → 无掷
+  const __tg = (globalThis as { __swTagDie?: (t: string) => void }).__swTagDie;
+  __tg?.('W');                            // IIII56 dormant 细分骰标签
   rng.int(0, 2);                          // num2 = Next(0,3)
-  if (w === 21) rng.int(0, 1);            // 墙 21 花墙 → Next(2)
+  if (w === 21) { __tg?.('W'); rng.int(0, 1); }   // 墙 21 花墙 → Next(2)
 }
 /** Actions.PlaceWall（neighbors=true 恒真）逐格掷序 */
 function placeWallRolled(st: TileStore, rng: RNG, x: number, y: number, wall: number): void {
@@ -640,10 +662,15 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
   switch (s.k) {
     case 'dither':
       // Modifiers.cs:630-635:NextDouble() >= _failureChance 才 UnitApply
+      (globalThis as { __swTagDie?: (t: string) => void }).__swTagDie?.('D'); // IIII56 dormant
       return rng.next() >= s.p && applyChain(st, rng, steps, i + 1, x, y);
     case 'blotches': {
+      const __tg2 = (globalThis as { __swTagDie?: (t: string) => void }).__swTagDie;
+      __tg2?.('B');                                                  // IIII56 dormant 丢掷
       rng.next();                                                    // 丢 1 掷(Modifiers.cs:132)
+      __tg2?.('B');
       if (rng.next() < s.chance) {                                   // 成斑判定(:133)
+        __tg2?.('B'); __tg2?.('B'); __tg2?.('B'); __tg2?.('B');       // IIII56 dormant 斑矩形四掷
         const x0 = rng.int(1 - s.minX, 0);                           // Next(1-minX, 1)(:136)
         const x1 = rng.int(0, s.maxX - 1);                           // Next(0, maxX)(:137)
         const y0 = rng.int(1 - s.minY, 0);                           // Next(1-minY, 1)(:138)
@@ -959,6 +986,8 @@ function killSnap(st: TileStore, rooms: Rect[]): KillSnap {
  *  (3706,*)，187 骨堆被误杀——vanilla 帧 (3707,70x)=非活性/蛛网零效果即止，骨堆
  *  根本不会被帧（m 链 #59 (3704..3706,705..706) T187>0×6 首差实证）。 */
 function frameKillSweep(st: TileStore, rng: RNG, rooms: Rect[], snap: KillSnap): void {
+  // IIII52 bisect 钩（dormant）：noKills = 帧杀全跳过（act 差异域归因实验）
+  if ((globalThis as { __I54_MUT?: string }).__I54_MUT === 'noKills') return;
   const w = snap.x1 - snap.x0 + 1;
   const ents: Array<{ i: number; probe: boolean }> = [];
   for (let y = snap.y0; y <= snap.y1; y++) {
@@ -1392,6 +1421,8 @@ function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): voi
     else from = { x: cur.x, y: cur.y + 1 };
     const steps = (cur.y + cur.h - 1) - from.y;
     const dir = leftGap > rightGap ? -1 : 1;
+    // IIII60：与 x86 HouseBuilder.PlaceStairs 的 Mark("STI x,y->x2,y2") 对位
+    houseMk('STI', `${from.x},${from.y}`, `${from.x + dir * steps},${from.y + steps}`);
     // ★AAAAAA 备案：梯步连接帧依赖 vanilla ModShapes.All 对 HashSet<Point16> 的
     //   枚举序（非插入序也非倒序——底/顶两向试验 984/970 格均不合）。UUUU 剑冢
     //   HashSet 枚举序同款备案；梯步 fx 帧残差在案（八通道零影响）。
@@ -1404,15 +1435,23 @@ function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): voi
       //   证伪:jungle house3 ① ③ 的 OnlyTiles(158) 通道数+6=vanilla 顶/底竖直
       //   出口平台照写壳行(该语境 tileSolid[19] 表值对门不可见/门恒过),恢复恒写。
       st.setTileSilent(sx, sy, PLATFORM, 0, def.platformStyle * 18);
+      // IIII56 dormant 梯步写入轨迹（平台消失案取证）
+      (globalThis as { __swStairEv?: (n: string, x: number, y: number, t: number, f: number) => void })
+        .__swStairEv?.('W', sx, sy, st.type[st.idx(sx, sy)], st.flags[st.idx(sx, sy)]);
       // ★IIIIIII（2026-08-24）FFF ③ 落刀：PlaceTile(19) 成功尾 SquareTileFrame 九格
       //   派发（1457 cs:60748-60753/1456 cs:60278-60286；中心 reset=true+8 邻 false；
       //   苔 184 每触一粒活性苔掷 Next(3)——屋环帧窗唯一大变量）。链序=PlaceTile
       //   （含尾派发）→SetSlope→SetFrames，故派发在坡写之前。
       genSquareTileFrame(st, rng, sx, sy);
       st.slope[st.idx(sx, sy)] = dir === 1 ? 1 : 2;
+      // IIII56 dormant
+      (globalThis as { __swStairEv?: (n: string, x: number, y: number, t: number, f: number) => void })
+        .__swStairEv?.('F1', sx, sy, st.type[st.idx(sx, sy)], st.flags[st.idx(sx, sy)]);
       // ★AAAAAA：HouseBuilder.cs:518 SetSlope 后 SetFrames(frameNeighbors:true)——
       //   中心+四邻 TileFrame（平台连接码写入 frameX；引擎 framePlatformSweep）
       genFrameNeighbors(st, rng, sx, sy, 'setTile');
+      (globalThis as { __swStairEv?: (n: string, x: number, y: number, t: number, f: number) => void })
+        .__swStairEv?.('F2', sx, sy, st.type[st.idx(sx, sy)], st.flags[st.idx(sx, sy)]);
     }
     // 顶步上方 4×1 平台(HouseBuilder.cs:519)：Gen(Chain(Clear(), PlaceWall(WallType),
     //   PlaceTile(19)))——★PlaceWall 逐格走墙重帧掷（Actions.Clear 清 tile+wall+liquid
@@ -1513,9 +1552,9 @@ function placeDoors(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): void
     // ——曾误用墙体列 X+W-1 → 扫描窗含恒实心墙列,门外洞穴 4×3 极易命中 → 门滥发
     // （house1 vanilla 无门 vs JS 误门 (2045,352) 实锤）
     const exitR = findSideExit(st, r.x + r.w, r.y + 1, r.h - 2, false);
-    if (exitR !== null) tryDoor(r.x + r.w - 1, exitR);
+    if (exitR !== null) { houseMk('DOR', `${r.x + r.w - 1},${exitR}`); tryDoor(r.x + r.w - 1, exitR); }
     const exitL = findSideExit(st, r.x, r.y + 1, r.h - 2, true);
-    if (exitL !== null) tryDoor(r.x, exitL);
+    if (exitL !== null) { houseMk('DOR', `${r.x},${exitL}`); tryDoor(r.x, exitL); }
   }
 }
 
@@ -1555,11 +1594,13 @@ function placePlatforms(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): 
   };
   const exitT = findVerticalExit(st, top.x + 2, top.y, top.w - 4, true);
   if (exitT !== null) {
+    houseMk('PLT', `${exitT},${top.y}`);
     for (let dx = 0; dx < 3; dx++) tryPlatform(exitT + dx, top.y);
   }
   if (rooms.length > 1) {
     const exitB = findVerticalExit(st, bot.x + 2, bot.y + bot.h - 1, bot.w - 4, false);
     if (exitB !== null) {
+      houseMk('PLT', `${exitB},${bot.y + bot.h - 1}`);
       for (let dx = 0; dx < 3; dx++) tryPlatform(exitB + dx, bot.y + bot.h - 1);
     }
   }
@@ -1594,6 +1635,16 @@ function placeSupportBeams(st: TileStore, gs: GenState, rng: RNG, rooms: Rect[],
       if (found < 0) continue;
       const height = found - bottom;
       if (height > 1 && st.type[st.idx(x, bottom - 1)] !== PLATFORM) {
+        // IIII60：与 x86 PlaceSupportBeams 的 Mark("BEM x,y,h") 对位
+        houseMk('BEM', `${x},${bottom},h${height}`);
+        // ★IIIII56 备案：vanilla 每梁格链 = SetTileKeepWall(BeamType) →
+        //   SetFrames(true)（Actions.cs:592-606 = WorldUtils.TileFrame(self reset=true)
+        //   +四邻 reset=true 分派 Check* 击杀链）→ SetTilePaint(BeamPaint)。
+        //   JS 现为静默写（无邻帧派发）。CELEB 蘑菇屋 k=16（2403,610）实测：
+        //   x86 预填充区 K 尘掷 100 vs JS 60、平段 50；本批试加邻帧派发后该屋
+        //   事件面超额（26 家具族杀 6 件×10=60，x86 仅 4 件且散点对位不同），
+        //   且邻帧重排使级联面整体漂移——故回退静默写，欠派发债挂账下批
+        //   （需先解「梁列与平台顺序态」单变量定罪仪，见 /tmp/iii58-out/MANIFEST.md）。
         // SetTileKeepWall(BeamType)：Clear(~(Wiring|Actuator)) → 液体/坡度/半砖全清
         // （WWWW：曾漏清液体 → 梁格带水 78 格 L/Y 差（house12 (3207..3221,361-366)
         // golden 梁无水 JS 有水））；梁底下一格 slope(0)/half(false)（HouseBuilder.cs:604）
@@ -1753,12 +1804,21 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     //   InWorld(origin,30) + 原点 ±25 内有红线或 BasicChest(21/467,TileID.cs:315)
     //   → 整屋放弃。须在 createRooms 之前(不耗 RNG)。
     if (ox < 30 || oy < 30 || ox >= w - 30 || oy >= h - 30) return __fail('inworld');
+    // IIII52 bisect 钩（dormant）：__I54_MUT=preOff/wireAny/chestWide 仅由重放 harness
+    //   （tools/_i54rep）注入；正常生成 __I54_MUT 为空 ⇒ 与原版逐位一致。
+    //   （附带补了 ±25 扫描的越界守卫——原先负索引读 undefined 被静默跳过，语义等价。）
+    const __m2 = (globalThis as { __I54_MUT?: string }).__I54_MUT;
     for (let i = ox - 25; i <= ox + 25; i++) {
-      for (let j = oy - 25; j <= oy + 25; j++) {
+      for (let j = oy - 25; j <= oy + 25 && __m2 !== 'preOff'; j++) {
+        if (!st.inBounds(i, j)) continue;
         const k = st.idx(i, j);
-        if ((st.wire[k] & TileStore.WIRE_RED) !== 0) return __fail('wire'); // tile.wire()(红线位)
+        if (__m2 === 'wireAny'
+          ? (st.wire[k] & 0b11111) !== 0
+          : (st.wire[k] & TileStore.WIRE_RED) !== 0) return __fail('wire'); // tile.wire()
         const t = st.type[k];
-        if (t === CHEST21 || t === CHEST2) return __fail('chest');  // TileID.Sets.BasicChest
+        if (__m2 === 'chestWide'
+          ? BASIC_WIDE.has(TILE_DEFS[t]?.vanilla?.sheet ?? -1)
+          : (t === CHEST21 || t === CHEST2)) return __fail('chest');  // BasicChest
       }
     }
     const rooms = createRooms(st, gs, rng, ox, oy);
@@ -1776,13 +1836,12 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     // ★SSS-CELEB：WoodHouseBuilder ctor 的 PotentiallyConvertToRainbowBrick
     //   （HouseBuilder.cs:92-108）：tenth&&!getGood → Next(2)==0 → 瓷漆砖 160/墙 44。
     //   def 克隆成每屋副本以便覆写（THEMES 是模块级共享表，禁原地改）。
+    // ★IIIII46 顺序勘误：vanilla=CreateBuilder 先跑 AreRoomLocationsValid/AreRoomsValid
+    //   （岩浆+保护区结构门）**之后**才 new WoodHouseBuilder()——ctor 三连掷的次序是
+    //   SeedHouse(float，wood/ice/jungle/desert) → RainbowBrick(Next(2)，tenth+wood)
+    //   → RainbowMoss(rainbowStuff 才掷)。旧 JS 把 RainbowBrick 提到全部验证之前且与
+    //   SeedHouse 分居两端：celeb 世界每个尝试多掷/倒序 → #59 小屋全列位移定罪根因。
     const def: ThemeDef = { ...THEMES[theme] };
-    if (theme === 'wood' && gs.seedFlags?.tenthAnniversary && !gs.seedFlags.getGoodWorld) {
-      if (rng.nextIntRange(0, 2) === 0) {
-        const rb = sheetTile(160);
-        if (rb >= 0) { def.tile = rb; def.wall = 44; }
-      }
-    }
     if (def.tile < 0 || def.beam < 0) return __fail('theme');
     // 岩浆回避(granite 主题豁免,HouseUtils.AreRoomsValid)
     if (theme !== 'granite') {
@@ -1813,8 +1872,11 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       const sh = TILE_DEFS[id]?.vanilla?.sheet;
       if (sh !== undefined && houseSheets.has(sh)) houseForbid.add(id);
     }
+    // IIII52 bisect 钩（dormant）：pad4/pad6 = CanPlace pad 参数实验
+    const mutP = (globalThis as { __I54_MUT?: string }).__I54_MUT;
+    const padMut = mutP === 'pad4' ? 4 : mutP === 'pad6' ? 6 : 5;
     for (const r of rooms) {
-      if (!canPlaceStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, 5, st, houseForbid)) return __fail('structures');
+      if (!canPlaceStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, padMut, st, houseForbid)) return __fail('structures');
     }
 
     houseObjCells.clear();   // 家具登记表生命周期=本屋
@@ -1828,7 +1890,15 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     //   → 不耗。曾整段漏掷：每成功一屋流漂 1 颗，后续所有小屋/宝箱位置级联
     //   （#58 窗 typ≈15k 自因主根因，2026-08-17 隔离重放实锤）
     if (theme === 'wood' || theme === 'ice' || theme === 'jungle' || theme === 'desert') {
-      rng.next(); // NextFloat() > 0.4f —— 普通种子无转化分支，仅保流
+      rng.next(); // PotentiallyConvertToSeedHouse：NextFloat >0.4f 早退，普通种子仅保流
+      // PotentiallyConvertToRainbowBrick（ctor 第 2 掷；WoodHouseBuilder 专属）
+      if (theme === 'wood' && gs.seedFlags?.tenthAnniversary && !gs.seedFlags.getGoodWorld) {
+        if (rng.nextIntRange(0, 2) === 0) {
+          const rb = sheetTile(160);
+          if (rb >= 0) { def.tile = rb; def.wall = 44; }
+        }
+      }
+      // PotentiallyConvertToRainbowMossBlock（第 3 掷）：rainbowStuff 关闭时短路不耗
     }
     __st?.('bld', ox, oy, theme === 'wood' ? 1 : theme === 'ice' ? 2 : theme === 'jungle' ? 3 : theme === 'desert' ? 4 : theme === 'granite' ? 5 : theme === 'marble' ? 6 : 7, __rn());
 
@@ -1856,6 +1926,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
         if (sh === 105 || sh === 349 || sh === 12) kfCheckObject(st, rng, i, new Set(), []);
       }
     };
+    houseMk('PH ER');
     for (const r of rooms) {
       for (let x = r.x; x < r.x + r.w; x++) {
         for (let y = r.y; y < r.y + r.h; y++) {
@@ -1892,42 +1963,53 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     kstage();
     __st?.('er', ox, oy, 0, __rn());
     // 2-4) 楼梯 / 门 / 平台
+    houseMk('PH ST');
     placeStairs(st, rng, rooms, def);
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('st', ox, oy, 0, __rn());
+    houseMk('PH DO');
     placeDoors(st, rng, rooms, def);
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('do', ox, oy, 0, __rn());
+    houseMk('PH PL');
     placePlatforms(st, rng, rooms, def);
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('pl', ox, oy, 0, __rn());
     // 5) 支撑梁
+    houseMk('PH SB');
     placeSupportBeams(st, gs, rng, rooms, def);
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('sb', ox, oy, 0, __rn());
     // 6) 沙漠 Bast 石碑(HouseBuilder.cs:757-831):三级级联(底行→顶行兜底),
     //    上限 bastMax = 2+尺寸档——旧实现单发公式 + 硬编码 2(C7)
+    houseMk('PH BPT');
     if (theme === 'desert' && bastCount < bastMax) {
       if (cascadePlace(st, rng, rooms, 'v_506_bast_statue', true)) bastCount++;
     }
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('bp', ox, oy, 0, __rn());
     // 7) FillRooms:画/烛台 + 装饰(每房)
+    houseMk('PH FR');
     for (const r of rooms) fillRooms(st, rng, r, def, theme, gs);
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('fr', ox, oy, 0, __rn());
     // 8) AgeRoom:七主题蚀变(原版无噪声种子掷骰——旧实现自掷 1<<30 非原版消耗,已删)
+    houseMk('PH AR');
     for (const r of rooms) {
+      houseMk('ARR', `${r.x},${r.y},${r.w}x${r.h}`);
       ageRoom(st, rng, gs, r, theme, def);
+      houseMk('ARE');
       __st?.('ar', ox, oy, r.w * 100 + r.h, __rn());
     }
     // 9) 宝箱(ChestChance=1.0,四级联)
+    houseMk('PH CH');
     placeChests(st, rng, gs, chests, rooms, def, theme);
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('ch', ox, oy, 0, __rn());
     // 10) 主题专属件(HouseBuilder.cs:833-913):丛林磨刀站/沙漠提炼机,均只有底行
     //     级联;上限 _random.Next(2,5) 是【每屋重掷】(:835/:871,条件短路保证仅
     //     对应主题掷)——旧实现 pass 级掷一次全程复用(C7)
+    houseMk('PH BST');
     if (theme === 'jungle' && sharpCount < rng.int(2, 4)) {
       if (cascadePlace(st, rng, rooms, 'v_377_sharpening_station', false)) sharpCount++;
     }
@@ -1940,6 +2022,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     //   墙!=0 格 wallColor，色号=GetRainbowPaintIDForPosition(x,y)=13+(x%44+y%44)%11
     //   非 wiggly——坐标即世界绝对坐标）。
     if (theme === 'wood' && gs.seedFlags?.tenthAnniversary) {
+      houseMk('PH RBF');
       const skip = TILE_DEFS[def.tile]?.vanilla?.sheet === 160 && rng.nextIntRange(0, 2) === 0;
       if (!skip) {
         for (const r of rooms) {
@@ -1955,6 +2038,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       }
     }
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
+    houseMk('PH PSH');
     __st?.('bt', ox, oy, 0, __rn());
     return true;
   };

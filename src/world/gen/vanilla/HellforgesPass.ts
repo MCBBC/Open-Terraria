@@ -5,6 +5,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
+import type { GenState } from './GenState';
 
 const HELLFORGE = TILE_BY_KEY['v_77_hellforge']!;
 
@@ -30,7 +31,10 @@ function anchorValid(st: TileStore, x: number, y: number): boolean {
   const topSlope = st.slope[i] === 1 || st.slope[i] === 2;
   return !!vanGenSolidType(t) && ((plat && topSlope) || st.slope[i] === 0) && st.half[i] === 0;
 }
-export function runHellforgesPass(st: TileStore, rng: RNG): void {
+export function runHellforgesPass(st: TileStore, rng: RNG, gs?: GenState): void {
+  // ★IIIII44（cs:18318）：Hellforges 整门 `if (!Skyblock.denyAllGeneration)`——
+  //   天空盒世界零进（x86 实证 slot72 零掷）。
+  if (gs?.seedFlags.skyblock) return;
   const { w, h } = st;
   const count = Math.floor(w / 200);
   for (let n = 0; n < count; n++) {

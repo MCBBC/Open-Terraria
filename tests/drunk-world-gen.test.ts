@@ -162,7 +162,10 @@ describe('IIIII14 DRUNK(05162020) 世界效应', () => {
     // ---- C3 地牢入口族 ----
     expect(Number.isInteger(D.dungeonWallStyle as number)).toBe(true);   // DC.cs:94-110 重掷已掷
     expect(C.dungeonWallStyle).toBeUndefined();         // 普通世界零骰
-    expect(D.wall25MinY).toBeGreaterThan(Math.trunc(D.ws) - 80);          // 入口族埋于地下
+    // ★IIIII53：入口预计算起点改用 GenVars.rockLayer-20（DC.cs:313，非平滑的
+    //   Main.rockLevel）后整塔上移 ~15 格 ≡ x86 真值（rig dgStartRoom 对位实证），
+    //   塔顶黑涂墙最低点随之抬升——阈值按同款配方 x86 实测放宽。
+    expect(D.wall25MinY).toBeGreaterThan(Math.trunc(D.ws) - 130);         // 入口族埋于地下
     expect(D.has1571).toBeGreaterThan(0);
     expect(D.has1569).toBeGreaterThan(0);               // 双邪恶生物群系箱并存（第 5 箱支）
     expect(C.has1571 > 0 && C.has1569 > 0).toBe(false); // 对照世界单侧邪恶箱

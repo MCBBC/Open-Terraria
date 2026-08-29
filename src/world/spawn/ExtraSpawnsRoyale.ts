@@ -88,10 +88,12 @@ function remap(v: number, inMin: number, inMax: number, outMin: number, outMax: 
 function deriveSettings(w: World): ExtraSpawnSettings {
   const sf = w.seedFlags ?? {};
   // GenVars.worldSpawnHasBeenRandomized（ResetGenerator :8270 归零；RandomizeWorldSpawn
-  // :24114 与 vampire Finish 世界出生重掷置真）——本仓现仅有 vampireSeedFinishPass 重掷臂
-  // 已接线（randomSpawn 端点未接 P0 登记中），故以 vampireSeed 位近似；errorWorld/
+  // :24114 首句置真，randomSpawn(:1898)/noSurface(:1048)/vampireSeed(:22659) 三臂共享
+  // 互斥门）。★IIIII41-T3①：本仓生成期两宿主均已接——randomSpawn 臂（SecretSeedDoEnds
+  // Pass.finalizeSecretSeedDoEnds 内 cs 原位）与 vampireSeed 臂（finalize 后同核），故
+  // settings.surface = (!randomized && isThereAWorldSurface) 按旗标位等价照抄；errorWorld/
   // worldIsFrozen 不改出生点。
-  const spawnRandomized = !!sf.vampireSeed;
+  const spawnRandomized = !!sf.vampireSeed || !!sf.randomSpawn;
   return {
     // surface = (!randomized && Main.isThereAWorldSurface)；isThereAWorldSurface =
     // worldSurface>50.0（Main.cs:2884）——world.groundLevel 即运行时 Main.worldSurface 快照

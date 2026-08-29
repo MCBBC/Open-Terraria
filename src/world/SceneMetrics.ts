@@ -78,6 +78,8 @@ const GRAVEYARD_TILE_MIN = 16;
 /** 地牢墙集合（Main.cs:10507-10514 wallDungeon 全表：主题墙 7/8/9 + 1.4 变体墙 94-99；
  *  41/43/44 是地牢"砖 tile"的 id,不是墙——此前误混入导致变体墙区域 zoneDungeon 永假） */
 const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** ★IIIII61：SkyblockRuntime 复用（WorldGen.Skyblock.Calculate 的 wallDungeon 面） */
+export const DUNGEON_WALL_IDS: number[] = [7, 8, 9, 94, 95, 96, 97, 98, 99];
 /** 地下沙漠墙（SceneMetrics.cs:694 CalculateZones：WallID.Sets.Conversion.Sandstone
  *  {187,220,222,221,275,308,310,309} ∪ HardenedSand {216,217,219,218,304,305,307,306}
  *  ∪ DesertFossil 223，再排除 Main.wallHouse 玩家可放置墙——WallID.cs:21/23/509。

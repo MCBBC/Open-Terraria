@@ -89,6 +89,12 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
   let feature: Feature = Feature.Plateau;
   let num2 = h * 0.3 * (rng.int(90, 109) * 0.005);            // num3 worldSurface(逐列游走,double)
   let num3 = (num2 + h * 0.2) * (rng.int(90, 109) * 0.01);      // num4 rockLayer(逐列游走,double)
+  // ★IIIII43 REMIX（1457 TerrainPass.cs:66-73）：remix 岩层初值整体替换——
+  //   num4 = maxTilesY*0.5（maxTilesX>2500 时 *0.6）×Next(95,106)*0.01
+  //   （Next(95,106) 与普通 Next(90,110) 消耗骰数相同但值域不同 ⇒ 下游整流移位）
+  if (gs.seedFlags.remix) {
+    num3 = h * (w > 2500 ? 0.6 : 0.5) * (rng.int(95, 105) * 0.01);
+  }
   let loSurf = num2, hiSurf = num2, loRock = num3, hiRock = num3;
   const maxSurf = h * 0.23;
   const history: number[] = []; // 近 500 列地表(右海滩 Retarget 用)
@@ -117,8 +123,15 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
     } else if (num2 < surfLo) { num2 = surfLo; runLen = 0; }
     else if (num2 > surfHi) { num2 = surfHi; runLen = 0; }
     while (rng.int(0, 2) === 0) num3 += rng.int(-2, 2);
-    if (num3 < num2 + h * 0.06) num3++;
-    if (num3 > num2 + h * 0.35) num3--;
+    // ★IIIII43 REMIX（1457 TerrainPass.cs:163-176）：逐列顶棚分支替换——remix 无
+    //   下限吸附（`num4<num3+0.06H → num4++` 不执行），仅上限削减（>0.7H 或 >0.6H 逐列 -1）
+    if (gs.seedFlags.remix) {
+      if (w > 2500) { if (num3 > h * 0.7) num3--; }
+      else if (num3 > h * 0.6) num3--;
+    } else {
+      if (num3 < num2 + h * 0.06) num3++;
+      if (num3 > num2 + h * 0.35) num3--;
+    }
     history.push(num2);
     if (history.length > 500) history.shift();
     // 填列（FillColumn cs:246-271）：air 循环 i<num3，dirt 循环从 (int)num3 起覆盖
@@ -150,7 +163,12 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
   const worldSurface = Math.floor(hiSurf + 25);
   const rockLayer = Math.floor(worldSurface + Math.floor((hiRock - worldSurface) / 6) * 6);
   gs.waterLine = Math.floor((rockLayer + h) / 2) + rng.int(-100, 19);
-  gs.lavaLine = gs.waterLine + rng.int(50, 79);
+  let lavaLine = gs.waterLine + rng.int(50, 79);
+  // ★IIIII43 REMIX（1457 TerrainPass.cs:218-221）：lavaLine=(int)(worldSurface*4+num4终值)/5
+  //   ——Next(50,80) 在普通行已照常消耗，remix 仅覆写值（cs 顺序如此）
+  if (gs.seedFlags.remix) {
+    lavaLine = Math.trunc(Math.trunc(worldSurface * 4.0 + num3) / 5);
+  }
   // num11 校正:rockLayerLow 与 worldSurfaceHigh 间距 < 20 → 拉开
   const num11 = 20;
   if (loRock < hiSurf + num11) {
@@ -166,6 +184,13 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
   gs.worldSurfaceHigh = Math.floor(hiSurf);
   gs.rockLevelLow = Math.floor(loRock);
   gs.rockLevelHigh = Math.floor(hiRock);
+  gs.lavaLine = lavaLine;
+  // ★IIIII43 REMIX（1457 TerrainPass.cs:240-243）：四条 remix 带常量**无条件**赋值
+  //   （非 remix 世界同样写入，仅无消费者）。UnderworldLayer = maxTilesY-200（Main.cs:2886）
+  gs.remixMushroomLayerLow = h - 350;
+  gs.remixMushroomLayerHigh = h - 200;
+  gs.remixSurfaceLayerLow = Math.floor(gs.rockLevelLow);
+  gs.remixSurfaceLayerHigh = gs.remixMushroomLayerLow;
   // GenVars 终值（cs:232-237：游走最后一列的 num3/num4 double——注意 ≠ Main.worldSurface）
   gs.genWorldSurface = num2;
   gs.genRockLayer = num3;

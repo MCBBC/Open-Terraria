@@ -553,7 +553,10 @@ export function runMudCavesPass(st: TileStore, dirt: number, grass: number): voi
   let countN = 0;
   const flood = (x: number, y: number): void => {
     if (countN >= MAX) return;
-    if (x < 5 || x >= w - 5 || y < 5 || y >= h - 5) return;
+    // ★IIIII49（tileCounterNext cs:10054 边界）：C# 是 `x > maxX-5 / y > maxY-5` 拒绝
+    //   （=允许 x==4195/y==1195），本仓曾 `>= w-5/h-5` 多拒一列/一行 → 贴图缘簇的
+    //   连通计数少 4 格跌破 20 → DRUNK #18 (4188..4190,1064..1075) 悬空石檐 JS 早杀。
+    if (x < 5 || x > w - 5 || y < 5 || y > h - 5) return;
     const i = st.idx(x, y);
     if (!solidClearable(i)) return;
     for (let n = 0; n < countN; n++) if (counted[n] === i) return;

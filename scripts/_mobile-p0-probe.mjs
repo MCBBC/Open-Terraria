@@ -160,6 +160,60 @@ try {
   ok('C.PC hotbar bytes identical(left20/opacity .575/1)',
     c1.firstLeft === '20px' && c1.firstOpacityUnsel === '0.575' && c1.selOpacity === '1',
     JSON.stringify(c1));
+  // ---------- D: 操作模式动态切换(touchOpMode 设置项,2026-08-29 用户需求) ----------
+  // 触屏会话内切 keyboard=控件层移除+整页回桌面几何;切回 auto=恢复
+  const pd = await bootPage(browser, { width: 844, height: 390, hasTouch: true, isMobile: true });
+  await new Promise((r) => setTimeout(r, 400));
+  const dseq = await pd.evaluate(async () => {
+    const set = async (v, waitMs = 700) => {
+      const mod = await import('/src/core/Options.ts');
+      await mod.options.set('touchOpMode', v);
+      await new Promise((r2) => setTimeout(r2, waitMs));
+      return {
+        layer: !!document.querySelector('.sw-mobile'),
+        huds: document.documentElement.dataset.huds,
+      };
+    };
+    const off = await set('keyboard');
+    const back = await set('auto');
+    return { off, back };
+  }).catch((e) => ({ error: String(e).slice(0, 120) }));
+  ok('D.keyboard mode removes layer+d0', dseq?.off?.layer === false && dseq?.off?.huds === 'd0', JSON.stringify(dseq).slice(0, 140));
+  ok('D.auto restores touch layer', dseq?.back?.layer === true && dseq?.back?.huds !== 'd0');
+  // 键鼠档下世界触摸合成停用(CDP tap 不产生 mouseDown)
+  await pd.evaluate(async () => {
+    const mod = await import('/src/core/Options.ts');
+    await mod.options.set('touchOpMode', 'keyboard');
+  });
+  await new Promise((r) => setTimeout(r, 700));
+  await pd.touchscreen.tap(wx, wy);
+  await new Promise((r) => setTimeout(r, 60));
+  const d3 = await pd.evaluate(() => ({
+    md: window.__swGame.input.mouseDown,
+    mh: window.__swGame.input.mouseHeld,
+  }));
+  ok('D.keyboard mode stops world-touch synthesis', d3.md === false && d3.mh === false, JSON.stringify(d3));
+  await pd.evaluate(async () => {
+    const mod = await import('/src/core/Options.ts');
+    await mod.options.set('touchOpMode', 'auto');
+  });
+
+  // ---------- E: 桌面强制 touch 档(hasTouch=false 也出控件层) ----------
+  const pe = await bootPage(browser, { width: 1280, height: 800, hasTouch: false, isMobile: false }, '/?play=small');
+  await pe.evaluate(async () => {
+    const mod = await import('/src/core/Options.ts');
+    await mod.options.set('touchOpMode', 'touch');
+  });
+  await new Promise((r) => setTimeout(r, 900));
+  const e1 = await pe.evaluate(() => ({
+    layer: !!document.querySelector('.sw-mobile'),
+    huds: document.documentElement.dataset.huds,
+  }));
+  ok('E.desktop forced touch shows layer(non-d0)', e1.layer === true && e1.huds !== 'd0', JSON.stringify(e1));
+  await pe.evaluate(async () => {
+    const mod = await import('/src/core/Options.ts');
+    await mod.options.set('touchOpMode', 'auto');
+  });
 } catch (err) {
   ok('probe crashed', false, String(err));
 }

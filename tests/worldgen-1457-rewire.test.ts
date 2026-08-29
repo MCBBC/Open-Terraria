@@ -112,10 +112,19 @@ describe('1457 对齐档 2：FinalCleanup PlantCheck/case103', () => {
 describe('1457 对齐档 2：HellFort 1457 形（rollback1457/HellFort.1457.ts 即插）', () => {
   it('列界掷序=左翼先（1457 cs:32996-33008;1456 右翼先）', () => {
     const s = read('HellFortPass.ts');
-    const iLeft = s.indexOf('colR[1] = colL[2]; colL[1] = colR[1] - rng.int(8, 19)');
-    const iRight = s.indexOf('colL[3] = colR[2]; colR[3] = colL[3] + rng.int(8, 19)');
+    // ★IIIII45：drunk 双态门（cs:32981-32984 num/=2·num2*=2）——跨距经 colSpan/wingSpan
+    // 双态 helper；翼门 `==0||hfDrunkMode` 恒真（骰恒掷）。字面量断言随本批升级。
+    const iLeft = s.indexOf('colR[1] = colL[2]; colL[1] = colR[1] - wingSpan()');
+    const iRight = s.indexOf('colL[3] = colR[2]; colR[3] = colL[3] + wingSpan()');
     expect(iLeft).toBeGreaterThan(-1);
     expect(iRight).toBeGreaterThan(iLeft);
+    expect(s).toContain('const hfNum = hfDrunkMode ? 4 : 8;');
+    expect(s).toContain('const hfNum2 = hfDrunkMode ? 40 : 20;');
+    expect(s).toContain('const colSpan = (): number => rng.int(hfNum >> 1, (hfNum2 >> 1) - 1);');
+    expect(s).toContain('const wingSpan = (): number => rng.int(hfNum, hfNum2 - 1);');
+    // 翼门四位（左右×外内）均为骰恒掷+drunk 恒真
+    const wingZone = s.slice(s.indexOf('for (let round = 0; round < 2; round++)'), s.indexOf('// ---- 列合法性'));
+    expect(wingZone.match(/=== 0 \|\| hfDrunkMode\)/g)?.length).toBe(4);
   });
 
   it('翼行=Clamp(Next(10),spanLo,spanHi) 不扩 span（1457 cs:33013/33036）+中央跨 Max/Min 钳（cs:33090-33091）', () => {

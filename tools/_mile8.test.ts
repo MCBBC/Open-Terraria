@@ -194,9 +194,14 @@ function cmp(tag: string, idx: number, st: {
     const via = c.ia[i]! ? 1 : 0;
     const jia = (st.wire[i]! >>> 5) & 1;
     if (via !== jia) { r.dIa++; mark(i); if (r.samples.length < 8) r.samples.push(`I(${i % W},${(i / W) | 0}) v${via} j${jia}`); }
-    // ghost（信息位）：非活性残留 type
+    // ghost（信息位）：非活性残留 type。
+    // ★IIIII54 伪影修正：旧式把 JS st.type==0(空气,TILE_DEFS[0] 无 vanilla sheet)
+    //   经 SHEET 映射 -1→9999 哨兵——而 x86 Tile.type 缺省 0，结果「gh 差」恒等于
+    //   非 active 格计数（七链 slot0 全部 ~103万-116万、midworld 216 万，全是空格
+    //   哨兵伪影而非内容债）。现按真值语义：空气照 0 记；未注册 sheet 才 9999。
+    //   （Gh 不参与 ✗ 裁决，本修正只改报表口径。）
     const vg = va ? 0 : c.t[i]!;
-    const jg = ja ? 0 : (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!]! : 9999);
+    const jg = ja ? 0 : (st.type[i]! === 0 ? 0 : (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!]! : 9999));
     if (vg !== jg) r.dGh++;
   }
   if (firstI >= 0) r.first = `(${firstI % W},${Math.floor(firstI / W)})`;

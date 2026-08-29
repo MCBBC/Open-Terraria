@@ -3,10 +3,10 @@
 // touchstart 起 touchLongPressMs 计时的长按通道——move>8px 视为滚动取消,
 // 未满时长的短触不拦截,转交浏览器合成的原生 click/mousedown 语义。
 import { options } from '../core/Options';
-import { isTouchDevice } from '../core/input/touchDevice';
+import { resolveTouchMode } from '../core/input/touchMode';
 
 export function bindHint(el: HTMLElement, fn: () => void): () => void {
-  if (!isTouchDevice()) {
+  if (resolveTouchMode() !== 'touch') {
     el.addEventListener('mouseenter', fn);
     return () => el.removeEventListener('mouseenter', fn);
   }

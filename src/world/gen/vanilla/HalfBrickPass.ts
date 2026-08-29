@@ -1050,7 +1050,16 @@ export function solidOrSlopedTile(st: TileStore, x: number, y: number): boolean 
  *  「哈希无关副作用」省略（#19 残余 7448 act 的根因）。 */
 export function smoothSlope(st: TileStore, x: number, y: number): void {
   const i = st.idx(x, y);
+  const h59 = (globalThis as { __swHalfWatch?: (site: string, x: number, y: number) => void }).__swHalfWatch;
   if (!canPoundTile(st, x, y) || !solidOrSlopedTile(st, x, y)) return;
+  if (h59 && st.flags[i]) {
+    const lim0 = Error.stackTraceLimit; Error.stackTraceLimit = 20;
+    const sk = new Error().stack ?? ''; Error.stackTraceLimit = lim0;
+    const fr = sk.split('\n').slice(2)
+      .map((l) => /(?:src[\\/])(.+\.ts):(\d+):\d+\)?/.exec(l))
+      .filter(Boolean).map((m) => `${m![1]!.replace(/[\\/]/g, '')}:${m![2]}`).join('>');
+    h59(`sm-in|${fr}`, x, y);
+  }
   const flag = !tileEmpty(st, x, y - 1);                                  // 上方有物
   const flag2 = !solidOrSlopedTile(st, x, y - 1) && flag;                 // 上方非实心
   const flag3 = solidOrSlopedTile(st, x, y + 1);                          // 下方实心

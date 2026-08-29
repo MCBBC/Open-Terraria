@@ -8,17 +8,27 @@ import type { GenState } from './GenState';
 import { tileRunner } from './TileRunner';
 import { T } from '../../../data/tiles';
 
-/** SandPatches（cs:11712-11737）：地下沙团（tile 53）。中心避开出生点 ±4-6% 且
- *  y < worldSurface+150 的浅层（拒绝采样）——沙漠雏形之一。 */
+/** SandPatches（1457 cs:11724-11753）：地下沙团（tile 53）。中心避开出生点 ±4-6% 且
+ *  y < worldSurface+150 的浅层（拒绝采样）——沙漠雏形之一。
+ *  ★IIIII43 REMIX 三支（cs:11731 num/=4 / cs:11737-11741 y 双掷：普通域先掷后由
+ *  remix 补掷深域替换 / TileRunner 头 remix strength 抖动）——判定点=rig SW_ROLLWIN
+ *  掷窗总账对拍（x86 pass3 主骰 603,378 ↔ 离线重放 v13-dbl×remix-mult=603,377）。
+ *  **拒绝环重掷仍用普通域**（cs 重掷行无 remix 门，字面转录）。 */
 export function runSandPatchesPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const { w } = st;
-  const num = Math.trunc(w * 0.013); // 4200 → 54
+  const { w, h } = st;
+  const remix = !!gs.seedFlags.remix;
+  let num = Math.trunc(w * 0.013); // 4200 → 54
+  if (remix) num = Math.trunc(num / 4);
   for (let i = 0; i < num; i++) {
     let num2 = rng.nextIntRange(0, w);
-    let num3 = rng.nextIntRange(gs.worldSurface, gs.rockLevel); // (int)Main.worldSurface/rockLayer
+    // cs:11736-11741：普通域 y 掷**无条件执行**；remix 再补掷深域并覆写值
+    let num3 = rng.nextIntRange(gs.worldSurface, gs.rockLevel);
+    if (remix) {
+      num3 = rng.nextIntRange(gs.rockLevel - 100, h - 350);
+    }
     while (num2 > w * 0.46 && num2 < w * 0.54 && num3 < gs.worldSurface + 150) {
       num2 = rng.nextIntRange(0, w);
-      num3 = rng.nextIntRange(gs.worldSurface, gs.rockLevel);
+      num3 = rng.nextIntRange(gs.worldSurface, gs.rockLevel); // 拒绝环重掷恒普通域（cs:11745-11748）
     }
     const num4 = rng.nextIntRange(15, 70);
     const steps = rng.nextIntRange(20, 130);
@@ -27,24 +37,30 @@ export function runSandPatchesPass(st: TileStore, rng: RNG, gs: GenState): void 
   }
 }
 
-/** Tunnels（cs:11745-11808）：地表隧道——10 列锚点列扫描到地表，向上抬 11-15 格
- *  后双向 dirt runner 填充（type 0 + addTile）。array[5] 记入 GenVars.tunnelX。 */
+/** Tunnels（1457 cs:11755-11818）：地表隧道——10 列锚点列扫描到地表，向上抬 11-15 格
+ *  后双向 dirt runner 填充（type 0 + addTile）。array[5] 记入 GenVars.tunnelX。
+ *  ★IIIII43 REMIX（cs:11760-11763/11771-11783）：条数 ×1.5；**remix 无中带拒绝环**
+ *  （tenth 分支与 while 环整体在 `!remixWorldGen` 内）。 */
 export function runTunnelsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w } = st;
+  const remix = !!gs.seedFlags.remix;
   const maxTunnels = 50; // GenVars.maxTunnels（cs:232）
-  const num = Math.trunc(w * 0.0015); // 4200 → 6
+  let num = Math.trunc(w * 0.0015); // 4200 → 6
+  if (remix) num = Math.trunc(num * 1.5);
   for (let i = 0; i < num; i++) {
     if (gs.numTunnels >= maxTunnels - 1) break;
     const array = new Array<number>(10);
     const array2 = new Array<number>(10);
     let num2 = rng.nextIntRange(450, w - 450);
-    // 避开中部 40%-60%（出生点带）
+    // 避开中部 40%-60%（出生点带）——remix 不避让
     // ★SSS-CELEB（1458 cs:11779-11786）：tenth&&!remix → 单掷改走 [0.2w,0.8w)
     //   带无拒绝环（Next((int)(w*0.2), (int)(w*0.8))，**流位=替换而非追加**：
     //   vanilla 是 if/else 二选一，非先掷后覆写）
-    const celbTun = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags?.remix;
-    if (celbTun) num2 = rng.nextIntRange(Math.trunc(w * 0.2), Math.trunc(w * 0.8));
-    else while (num2 > w * 0.4 && num2 < w * 0.6) num2 = rng.nextIntRange(450, w - 450);
+    const celbTun = !!gs.seedFlags?.tenthAnniversary && !remix;
+    if (!remix) {
+      if (celbTun) num2 = rng.nextIntRange(Math.trunc(w * 0.2), Math.trunc(w * 0.8));
+      else while (num2 > w * 0.4 && num2 < w * 0.6) num2 = rng.nextIntRange(450, w - 450);
+    }
     let j = 0;
     let flag: boolean;
     do {
@@ -126,6 +142,11 @@ export function runSmallHolesPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
     let num4 = rng.nextIntRange(2, 5);
     let num5 = rng.nextIntRange(2, 20);
+    // ★IIIII43 REMIX（1457 cs:12086-12090）：深域发炮折减 ×0.8/×0.9（(int) 截断）
+    if (!!gs.seedFlags.remix && num3 > gs.rockLevel) {
+      num4 = Math.trunc(num4 * 0.8);
+      num5 = Math.trunc(num5 * 0.9);
+    }
     tileRunner(st, rng, gs, num2, num3, { strength: num4, steps: num5, type });
     // 发 2：大挖
     num2 = rng.nextIntRange(0, w);
@@ -137,6 +158,11 @@ export function runSmallHolesPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
     num4 = rng.nextIntRange(8, 15);
     num5 = rng.nextIntRange(7, 30);
+    // ★IIIII43 REMIX（1457 cs:12098-12102）：第二发深域折减 ×0.7/×0.9
+    if (!!gs.seedFlags.remix && num3 > gs.rockLevel) {
+      num4 = Math.trunc(num4 * 0.7);
+      num5 = Math.trunc(num5 * 0.9);
+    }
     tileRunner(st, rng, gs, num2, num3, { strength: num4, steps: num5, type });
   }
 }

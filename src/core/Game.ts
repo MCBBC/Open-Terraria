@@ -168,6 +168,9 @@ import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC, isItStormingNext } from '../entities/TownNPC';
 import { spawnStormLightningTick } from '../world/StormLightningSpawner';
 import { stormLightningGenerator } from '../fx/LightningGenerator';
+import { DontStarveDarkness } from '../player/DontStarveDarkness';
+import { SkyblockRuntime } from '../world/SkyblockRuntime';
+import { DUNGEON_WALL_IDS } from '../world/SceneMetrics';
 import { scanScene, EMPTY_SCENE, scanBiomeLightCounts, type SceneFlags } from '../world/SceneMetrics';
 // ★IIIII22b（royale-with-cheese）：队伍出生点系统——TeamBased 世界开局/重生按队点落位
 import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
@@ -1540,6 +1543,16 @@ export class Game implements GameHooks {
   private forceHalloweenForToday = false;
   private forceXMasForToday = false;
   private tickCount = 0;
+  /** ★IIIII61 The Constant 黑暗伤害系统（DontStarveDarknessDamageDealer.cs 全文 1:1：
+   *  Player.Update :24550 本地玩家 && Main.dontStarveWorld 消费；光采样=玩家中心格
+   *  Lighting.GetColor().ToVector3().Length()>=0.1 即安全）。状态字段=原版静态等价，
+   *  WorldGen.resetWorld :6908 Reset → afterWorldLoad 归零 */
+  readonly dontStarveDarkness = new DontStarveDarkness();
+  /** ★IIIII61 WorldGen.Skyblock 运行时普查（SkyblockRuntime.ts——WorldGen.cs:3045-3240
+   *  class Skyblock：30t/列滚动巡检，尾列 Calculate 重算 lowTiles/noAltars 等八旗；
+   *  afterWorldLoad 暖扫一轮取首态）。skyblock 世界运行时消费面的单一数据源 */
+  skyblockRuntime: SkyblockRuntime | null = null;
+  private sbCensusFrameAcc = 0;
   /** 行为录制器（长按 F5 录制窗 / 短按 F5 报告尾）：常开环形 8192 条，
    *  log 恒安全（无窗也写——追溯能力）。GameHooks.recLog 的本体实现 */
   recorder = new BehaviorRecorder();
@@ -3823,14 +3836,33 @@ export class Game implements GameHooks {
     //   旧档带旗缺位则读档修复；无该旗世界零触碰（存量默认值不漂移）。
     if (w.seedFlags?.endlessHalloween && !w.flags.forceHalloweenForever) w.flags.forceHalloweenForever = true;
     if (w.seedFlags?.endlessChristmas && !w.flags.forceXMasForever) w.flags.forceXMasForever = true;
+    // ★IIIII61 The Constant 黑暗伤害状态复位（WorldGen.resetWorld :6908
+    //  DontStarveDarknessDamageDealer.Reset() 的进世界等价点——换世界不残留计时）
+    this.dontStarveDarkness.reset();
     this._autoSaveAt = 0;              // 自动保存墙钟重起（换世界 Stopwatch.Reset）
     this._autoPausedByFocus = false;
     // WorldGen.Skyblock 普查（CountTiles :71160 逐列扫至 X==maxTilesX-1 →
     // Skyblock.Calculate :3146-3167：hasTile[26] 无恶魔祭坛 → noAltars=true）。
-    // 原版读档期一次算清、会话内静态——此处进图即扫缓存（打碎祭坛不回写，与
-    // 原版「重读档才重算」同语义；EyeOfCthulhuDefeatedAndNoAltarsInWorld 坠星
-    // 条件数据源，EoC 击杀重置支偏差见 NpcDrops.evalCond 登记）
-    this._worldNoAltars = this.scanWorldNoAltars();
+    // ★IIIII61 升级：静态单次普查 → SkyblockRuntime 滚动巡检（30t/列，尾列重算
+    // lowTiles/noAltars/noDungeon/noTemple/noHellstone/noFossils/noLifeCrystals/
+    // noHellforge 八旗）；进图先暖扫一轮取真首态（skyblock 世界运行时消费面：
+    // 出界致死/刷怪率/史莱姆体内物/撒种阻断/夜始事件 roll/掉落条件），此后随会话
+    // 逐列滚动保持动态——与原版「worldgen 后 UpdateWorld 持续 CountTiles」同构。
+    // EoC 便携祭坛击杀重置支仍按 NpcDrops.evalCond 登记偏差。
+    this.skyblockRuntime = new SkyblockRuntime(this.world.store,
+      () => !!(this.world.seedFlags?.skyblock || this.world.seedFlags?.everything),
+      DUNGEON_WALL_IDS);
+    this.skyblockRuntime.warmFullScan();
+    const sbf = this.skyblockRuntime.flags;
+    w.skyblockLowTiles = sbf.lowTiles;
+    w.skyblockNoAltars = sbf.noAltars;
+    w.skyblockNoDungeon = sbf.noDungeon;
+    w.skyblockNoTemple = sbf.noTemple;
+    w.skyblockNoHellstone = sbf.noHellstone;
+    w.skyblockNoFossils = sbf.noFossils;
+    w.skyblockNoLifeCrystals = sbf.noLifeCrystals;
+    this._worldNoAltars = sbf.noAltars;
+    this.sbCensusFrameAcc = 0;
     // chunk 上限恢复(2026-08-18 泄漏 review:曾砍到 64 无恢复点=永远 64;
     // ★2026-08-19 三场双开崩溃日志:直回满档是恢复期 herd 共犯——第二窗加载/
     // 崩溃重进恰是内核预算最紧时刻,回满 192 = 立刻重堆 12 张页挤爆边际分配。
@@ -5430,6 +5462,46 @@ export class Game implements GameHooks {
     }
     const achPxBefore = player.x;
     player.fixedUpdate(dt, this);
+    // ★IIIII61 SkyblockRuntime：30t/列滚动巡检（WorldGen.UpdateWorld :72065-72072
+    //  totalD>=30 → CountTiles(totalX)；尾列 Calculate 重算八旗——lowTiles 翻转时
+    //  同步 noAltars 缓存读数）
+    if (++this.sbCensusFrameAcc >= 30) {
+      this.sbCensusFrameAcc = 0;
+      this.skyblockRuntime?.stepColumn();
+      const f = this.skyblockRuntime?.flags;
+      if (f) {
+        this.world.skyblockLowTiles = f.lowTiles;
+        this.world.skyblockNoAltars = f.noAltars;
+        this.world.skyblockNoDungeon = f.noDungeon;
+        this.world.skyblockNoTemple = f.noTemple;
+        this.world.skyblockNoHellstone = f.noHellstone;
+        this.world.skyblockNoFossils = f.noFossils;
+        this.world.skyblockNoLifeCrystals = f.noLifeCrystals;
+      }
+    }
+    // ★IIIII61 The Constant 黑暗伤害（DontStarveDarknessDamageDealer.Update :24550-24552
+    //  原版挂在 Player.Update 内——本仓 player.fixedUpdate 后同 tick 序。光采样按帧
+    //  光照引擎结果（上一帧语义,与原版 Update 先于 Draw 的采样时序一致）；伤害经
+    //  player.damage(250) 全链（防御/无敌帧/闪避族按原版 Hurt 语义内置））
+    if (this.world.seedFlags?.theConstant) {
+      this.dontStarveDarkness.update({
+        lightLengthAtPlayerCenter: () => {
+          const rgb = this.lightAt(player.cx, player.cy);
+          return rgb ? Math.hypot(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255) : 1;
+        },
+        isDead: () => player.dead,
+        isShimmering: () => player.shimmering,
+        outOfFocusOrPaused: () => document.hidden,
+        silentMessages: () => !!this.world.seedFlags?.getGoodWorld,
+        showText: (text, r, g, b) => this.newText(text, r, g, b),
+        playHitSound: () => this.sfx.play('throw', 1, player.cx, player.cy),   // SoundID.Item1
+        hurtByDarkness: (dmg: number) => {
+          if (player.debugGod || journeyPowers().godmode) return false;   // creativeGodMode 早退门（同 damage() 内建）
+          player.lastDamageCause = { kind: 'diedInTheDark' };   // ByOther(17)
+          return player.damage(dmg, player.cx, player.cy, false) > 0;
+        },
+      });
+    }
     // FlameParticle 步进（Main.UpdateParticles Main.cs:3951-3952 的
     // ParticleSystem_World_BehindPlayers——山羊坐骑 47 火焰本体；
     // spawn 在 Player.goatFlames 回调，绘制在 Renderer.drawFlameParticles）
@@ -6476,8 +6548,10 @@ export class Game implements GameHooks {
             }
             // 海盗自然 roll（Main.cs:64938-64944 1:1）：hardMode 且砸过祭坛
             // （altarCount>0，随存档持久化）；已击败 1/60 否则 1/30。
-            // 原版另有 Skyblock.lowTiles 分支（天顶空岛世界恒真），本仓库无该种子体系
-            if (w.invasionType === INVASION_NONE && w.flags.hardMode && w.altarCount > 0) {
+            // ★IIIII61：Skyblock.lowTiles 并联门接入（Main.cs:66441
+            // `(altarCount>0 || Skyblock.lowTiles)`——空岛低格世界无需砸过祭坛）
+            if (w.invasionType === INVASION_NONE && w.flags.hardMode
+              && (w.altarCount > 0 || w.skyblockLowTiles)) {
               const p = w.flags['downedPirates'] ? 1 / 60 : 1 / 30;
               if (Math.random() < p) this.announceNaturalInvasion(INVASION_PIRATE);
             }
@@ -6556,15 +6630,20 @@ export class Game implements GameHooks {
           || this.entities.enemies.some((e) => !((e as Enemy).dead) && (e as Enemy).vanillaId === 398))) {
         const sf = w.seedFlags ?? {};
         const bossesKeepSpawning = !!(sf.getGoodWorld && sf.theConstant && !sf.tenthAnniversary);
-        const eocEligible = !w.flags['downed_4'] || bossesKeepSpawning || !!sf.skyblock;
+        // ★IIIII61：Skyblock.noAltars 由静态近似 (!!sf.skyblock) 升级为动态普查旗；
+        //   EoC 分母 maxVal 三档 3→(lowTiles)10 与机械臂 altarCount>0||lowTiles 同步接入
+        //   （Main.cs:66244-66251 maxValue / :66265 机械门 || Skyblock.lowTiles）
+        const sbLow = () => !!w.skyblockLowTiles;
+        const sbNoAltars = () => !!(w.skyblockNoAltars || sf.skyblock);
+        const eocEligible = !w.flags['downed_4'] || bossesKeepSpawning || sbNoAltars();
         const townCount = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead).length;
         // statLifeMax>=200（:64737）= 永久上限（baseMaxHp）；maxHp 是 statLifeMax2
         // （含生命力药水等临时加成）——挂错会被一瓶药水提前刷出 EoC
         if (eocEligible && player.baseMaxHp >= 200 && player.defense > 10
-          && townCount >= 4 && Math.random() < (sf.skyblock ? 1 / 10 : 1 / 3)) {
+          && townCount >= 4 && Math.random() < (sbLow() ? 1 / 10 : 1 / 3)) {
           this.spawnEyePending = true;
           this.newText(Lang.misc(9), 50, 255, 130);
-        } else if (!this.spawnEyePending && w.flags.hardMode && w.altarCount > 0
+        } else if (!this.spawnEyePending && w.flags.hardMode && (w.altarCount > 0 || sbLow())
           && w.moonEvent.kind === 0 && !w.oldOnesArmy.ongoing && !this.boss
           && !(w.flags['downed_134'] && w.flags['downed_125'] && w.flags['downed_127'])
           && Math.random() < 1 / 10) {
@@ -29397,7 +29476,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return true;
   }
   worldNoAltars(): boolean {
-    return this._worldNoAltars;
+    // ★IIIII61：优先动态普查旗（SkyblockRuntime 暖扫+滚动重算），_worldNoAltars 为
+    // 运行时未初始化时的兜底（单测手搓 Game 壳无 afterWorldLoad）
+    return this.world?.skyblockNoAltars ?? this._worldNoAltars;
   }
 
   /** 角色名（死亡文本/墓碑碑文用；未命名回退） */

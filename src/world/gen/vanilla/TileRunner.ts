@@ -128,6 +128,16 @@ function placeWall(st: TileStore, rng: RNG, x: number, y: number, type: number):
   if (st.wall[i] === 0) { st.wall[i] = type; rng.int(0, 2); }
 }
 
+/** oceanDepths（1457 cs:10990-11001）：y>oceanLevel(=(ws+rock)/2+40) 直接 false；
+ *  x 落在左/右 beachDistance 带内返回 true（=「海洋深处」），否则 false。
+ *  ★IIIII43 REMIX：TileRunner -2 填液 lava 域覆写的排他门。 */
+function oceanDepths(st: { w: number }, gs: GenState, x: number, y: number): boolean {
+  const oceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
+  if (y > oceanLevel) return false;
+  if (x < gs.beachDistance || x > st.w - gs.beachDistance) return true;
+  return false;
+}
+
 export function tileRunner(
   st: TileStore, rng: RNG, gs: GenState,
   i: number, j: number, o: TileRunnerOpts,
@@ -136,13 +146,29 @@ export function tileRunner(
   //   灰烬界上跳格 / cs:77361 加速梯 Next(3) 断续门 / cs:77446 尾段水平摆）——全部
   //   只在 seedFlags.drunkWorld 时生效，普通种子流零扰动（金标链锚定）。
   const drunkTR = !!gs.seedFlags.drunkWorld;
+  // ★IIIII42 FTW 触点（1457 WorldGen.cs:77679-77686）：if(!mudWall){ if(drunk)…else if(remix)…else
+  //   if(getGood && type!=57){ strength*=1+Next(-80,81)*0.015; steps+=Next(3); }} —— 每次
+  //   TileRunner 调用固定多耗 2 掷（flag-on 世界），矿脉/洞穴 runner 几何整体改变。
+  const ftwTR = !!gs.seedFlags.getGoodWorld;
+  const remixTR = !!gs.seedFlags.remix;
   const { strength, steps, type } = o;
   let strengthIn = strength;
   let stepsIn = steps;
-  if (drunkTR && !o.mudWall) {
-    // cs:77133-77139：strength *= 1+Next(-80,81)*0.01；steps=(int)(steps*(1+Next(-80,81)*0.01))
-    strengthIn *= 1 + rng.int(-80, 80) * 0.01;
-    stepsIn = Math.trunc(stepsIn * (1 + rng.int(-80, 80) * 0.01));
+  if (!o.mudWall) {
+    if (drunkTR) {
+      // cs:77133-77139：strength *= 1+Next(-80,81)*0.01；steps=(int)(steps*(1+Next(-80,81)*0.01))
+      strengthIn *= 1 + rng.int(-80, 80) * 0.01;
+      stepsIn = Math.trunc(stepsIn * (1 + rng.int(-80, 80) * 0.01));
+    }
+    // else if (remixWorldGen)：cs:77675-77678 remix 单支（remix 链认证域外，按原版补齐）
+    else if (remixTR) {
+      strengthIn *= 1 + rng.int(-50, 50) * 0.01;
+    }
+    // ★IIIII42：else if (getGoodWorldGen && type != 57)——1457 新增；57=Ash sheet
+    else if (ftwTR && TILE_DEFS[type]?.vanilla?.sheet !== 57) {
+      strengthIn *= 1 + rng.int(-80, 80) * 0.015;
+      stepsIn += rng.int(0, 2);
+    }
   }
 
   // 灰烬块（sheet 57）标志：drunk 世界灰烬 runner 在 y<h-300 段整体跳格（cs:77224）
@@ -165,7 +191,26 @@ export function tileRunner(
   // 结果弃用，num3 恒 0=水）。缺失则每次调用流偏 1 格——种子等价致命。
   // ★BBBBBBB A/B 实证：摘除此掷 → NTB #3 Sand_Patches 即爆（T53>0×68193）——
   //   本掷为流位必需，ZZZZ 批「#53 系本块新增所致」归因证伪（该块正确）。
-  rng.nextIntRange(0, 4);
+  // ★IIIII42 FTW（1457 cs:77707-77716）：Next(4)==0 时 else if(getGoodWorldGen)
+  //   num3=1 → 下文 type==-2 填液改走 liquidType(num3)=熔岩位（1457 Tile.cs:218-237
+  //   编码 0=水 1=岩浆）。纯 FTW 世界 num3∈{0,1}；NTB+dontStarve / drunk+tenth+remix
+  //   两组合臂不适用本链。JS 侧 +1 编码：vanilla1 → JS2。
+  // cs:77707-77716 主序：Next(4)==0 ∧ getGoodWorldGen → num3=1。前置组合臂
+  // NTB∧dontStarve（Next(3)）与 drunk∧tenth∧remix（num3=3）属组合种子域，纯 FTW
+  // 链不触——备案不移植。
+  const r4 = rng.nextIntRange(0, 4);
+  let trNum3 = 0;
+  if (r4 === 0 && ftwTR) {
+    trNum3 = 1;
+  }
+  // ★IIIII50 FTW 池味残差定罪（1458 cs:77764-77768）：每步 x 循环列头——出海滩带
+  //  （k<beachDistance+50 || k>=maxTilesX-beachDistance-50，beachDistance=380 只读
+  //  常量 cs:4071）把 **runner 局部变量** num3 永久归零（=水），后续步不再恢复。
+  //  即熔岩注入被海滩带「烙灭」：SmallHoles/洞穴族 -2 挖掘在 beach 带（左 0..429/
+  //  右 3770..4199）留下的一律是水。漏移植曾致本侧 beach 带洼池错灌熔岩（FTW 链
+  //  #10 Small_Holes 起 Y1>2×4912@(182,323)/(4134,327)，与 #10..#17 单调增长一致）。
+  const beachKillL = gs.beachDistance + 50;
+  const beachKillR = st.w - gs.beachDistance - 50;
 
 
   // 热循环局部化(零语义:typed array 引用与 w 提为局部;idx 内联 y*w+x)
@@ -187,6 +232,8 @@ export function tileRunner(
     const y0 = Math.max(1, Math.floor(py - num1 * 0.5));
     const y1 = Math.min(st.h - 1, Math.floor(py + num1 * 0.5));
     for (let x = x0; x < x1; x++) {
+      // ★IIIII50：海滩带 num3 烙灭（cs:77764-77768，每列判定、永久归零）
+      if (x < beachKillL || x >= beachKillR) trNum3 = 0;
       for (let y = y0; y < y1; y++) {
         // ★IIIII14（cs:77224）：drunk 灰烬 runner 上界门——y<maxTilesY-300 的灰烬格
         //   全跳（**dist 骰不消耗**，vanilla continue 在骰前）
@@ -225,7 +272,18 @@ export function tileRunner(
           if (tf[ti] && ty[ti] === T.SAND) continue;
           if (type === -2 && tf[ti] && (y < gs.waterLine || y > gs.lavaLine)) {
             tliq[ti] = 255;
-            tltype[ti] = y > gs.lavaLine ? 2 : 1;
+            // ★IIIII42：vanilla 序＝liquidType(num3)（cs:77794）→ remix 专用域覆写
+            // （cs:77795-77801，IIIII43 已并）→ else if(l>lavaLine) lava(true)。
+            // 三段式逐一镜像；JS 编码 +1（1=水 2=岩浆）。纯 FTW 世界 num3∈{0,1}：
+            // num3=1 时全格熔岩位；num3=0 按深度二分。remix 组合臂仅在 remix 链生效。
+            tltype[ti] = trNum3 === 1 ? 2 : 1;
+            if (!!gs.seedFlags.remix) {
+              // ★IIIII43 REMIX（1457 cs:77791-77801）：专用 lava 域覆写——否则保持 num3 原味
+              tltype[ti] = (y > gs.lavaLine && (y < gs.rockLevel - 80 || y > st.h - 350)
+                && !oceanDepths(st, gs, x, y)) ? 2 : tltype[ti];
+            } else if (y > gs.lavaLine) {
+              tltype[ti] = 2;
+            }
           }
           // 原版 active(false) **保留 type**（幽灵语义）——挖除清零会让后续
           // 拒绝采样/flag4 判定读错（收尾洞穴循环实测分叉点）
@@ -312,6 +370,7 @@ export function tileRunner(
       if (vy > 1) vy = 1;
       if (vy < -1) vy = -1;
     }
+
     // 泥专用 vy 规则(1456 cs L77484-77500)：±0.5 钳 + 岩层上界/地狱带上界定向推挤——
     // 丛林首轮泥 runner(vy 初始 ±1)靠它被压进 [rockLayer+100, maxTilesY-300] 带；缺失时泥漂出丛林
     if (type === MUD && !noYChange) {

@@ -142,8 +142,11 @@ export function runMarbleGranitePass(st: TileStore, rng: RNG, gs: GenState): voi
 }
 
 /** cs:12800-12883：采样带 = n/num*(w-200)+100 起宽 (w-160)/num；
- *  y∈[GenVars.rockLayer+20, +(h-rockLayer-40-200))；中部 45-55% 重掷 beachDistance..w-；
- *  100 次预算；失败计数 > w*10 收缩 count。Place 内联在采样环（BiomeTileCheck 双查）。 */
+ *  y∈[GenVars.rockLayer+20, +(h-rockLayer-40-200))；★IIIII58 REMIX（cs:12856-12857
+ *  三元第二支）：remixWorldGen 时 y∈[GenVars.worldSurface+100, GenVars.rockLayer)
+ *  （height=rock−ws−100，Next(y0,y0+h)=含端 [ws+100, rock−1]）——remix 把蘑菇/大理石
+ *  整体抬到浅层。中部 45-55% 重掷 beachDistance..w-；100 次预算；失败计数 > w*10
+ *  收缩 count。Place 内联在采样环（BiomeTileCheck 双查）。 */
 export function runMarblePass(st: TileStore, rng: RNG, gs: GenState): void {
   drunkStoneSwap = !!gs.seedFlags.drunkWorld;
   let count = worldGenRangeCount(st, rng, 4, 8, 'area');
@@ -157,8 +160,14 @@ export function runMarblePass(st: TileStore, rng: RNG, gs: GenState): void {
       if (budget <= 0) break;
       const x0 = Math.trunc(frac * (st.w - 200)) + 100;
       x = rng.int(x0, x0 + Math.trunc((st.w - 160) / count) - 1);   // RandomRectanglePoint 先 X
-      const y0 = Math.trunc(gs.genRockLayer) + 20;                   // GenVars.rockLayer（raw 截断）
-      y = rng.int(y0, y0 + (st.h - (Math.trunc(gs.genRockLayer) + 40) - 200) - 1);  // 后 Y
+      // ★IIIII58：REMIX 世界走 cs:12857 第二支——Y 带 worldSurface+100 .. rockLayer
+      const y0 = !!gs.seedFlags.remix
+        ? Math.trunc(gs.genWorldSurface) + 100
+        : Math.trunc(gs.genRockLayer) + 20;                          // GenVars.rockLayer（raw 截断）
+      const yH = !!gs.seedFlags.remix
+        ? Math.trunc(gs.genRockLayer) - Math.trunc(gs.genWorldSurface) - 100
+        : st.h - (Math.trunc(gs.genRockLayer) + 40) - 200;
+      y = rng.int(y0, y0 + yH - 1);                                  // 后 Y
       while (x > st.w * 0.45 && x < st.w * 0.55) x = rng.int(gs.beachDistance, st.w - gs.beachDistance - 1);
       ok = true;
     }
@@ -297,8 +306,14 @@ export function runGranitePass(st: TileStore, rng: RNG, gs: GenState): void {
       if (budget <= 0) break;
       const x0 = Math.trunc(frac * (st.w - 200)) + 100;
       x = rng.int(x0, x0 + Math.trunc((st.w - 200) / count) - 1);
-      const y0 = Math.trunc(gs.genRockLayer) + 20;
-      y = rng.int(y0, y0 + (st.h - (Math.trunc(gs.genRockLayer) + 40) - 200) - 1);
+      // ★IIIII58：REMIX 世界走 cs:12932 第二支——Y 带 worldSurface+100 .. rockLayer
+      const y0 = !!gs.seedFlags.remix
+        ? Math.trunc(gs.genWorldSurface) + 100
+        : Math.trunc(gs.genRockLayer) + 20;
+      const yH = !!gs.seedFlags.remix
+        ? Math.trunc(gs.genRockLayer) - Math.trunc(gs.genWorldSurface) - 100
+        : st.h - (Math.trunc(gs.genRockLayer) + 40) - 200;
+      y = rng.int(y0, y0 + yH - 1);
       while (x > st.w * 0.45 && x < st.w * 0.55) x = rng.int(gs.beachDistance, st.w - gs.beachDistance - 1);
       ok = true;
     }

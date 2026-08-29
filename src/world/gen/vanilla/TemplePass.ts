@@ -253,10 +253,13 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   tmMark('seed');
   // ---- 房间链(L17185-17231):重投至与全部旧房不相交;overlap 每次相交测试 1% 递增 ----
   let roomCount = rng.int(Math.max(2, Math.floor(10 * s)), Math.floor(16 * s) - 1);
-  // ★IIIII21（cs:33752-33754）：drunk 世界房间预算 ×3（先于 getGood/remix 分支的
-  //   else-if 链首项——纯 drunk 世界只走本支；×3 是纯乘法零掷骰）。神庙规模/箱数/
-  //   tRooms 全随房间链翻三倍。
+  // ★IIIII21（cs:33752-33754）+ ★IIIII50（1458 cs:33756-33762）：房间预算分支链
+  //   drunk×3 → else if getGood×3 → else if remix×2（互斥阶梯，纯乘法零掷骰）。
+  //   FTW 漏接曾致神庙房间数走基线 → T226(蜥蜴砖)>0×26k 起的 #46 Jungle_Temple
+  //   域大族差。
   if (gs.seedFlags.drunkWorld) roomCount *= 3;
+  else if (gs.seedFlags.getGoodWorld) roomCount *= 3;
+  else if (gs.seedFlags.remix) roomCount *= 2;
   const rooms: Room[] = [];
   // ★cs:33596-33599 `int num3 = 1; if (genRand.Next(2) == 0) num3 = -1;`——
   //   Next(2)==0（sample<0.5）取 **-1**。曾写反（<0.5→+1）→ 房间链行进方向整体

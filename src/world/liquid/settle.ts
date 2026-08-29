@@ -70,6 +70,14 @@ export async function settleWorldLiquids(
           && (w === 7 || w === 8 || w === 9 || (w >= 94 && w <= 99));
       }
     }
+    // ★IIIII58：REMIX 落水分型带接线（Liquid.cs:182-185 首臂，恒改写型——
+    //   入带岩浆/出带强制归水）；非 remix null=走 waterLine 规则
+    if (world.genRemixWater) {
+      sim.remixWaterRule = true;
+      sim.remixLavaLine = world.genRemixWater.lavaLine;
+      sim.remixRockLevel = world.genRemixWater.rockLevel;
+      sim.remixOceanLevel = world.genRemixWater.oceanLevel;
+    }
     // 生成期 Main.tileSolid 覆写快照注入（裂纹砖 481-483=false/484=false/192=false 等
     // ——原版液体模块读被各 pass 改写后的全局面板，solidNP LUT 须同步）。★先注入
     // 再 wg 包裹——wg 快照须含覆写（否则 191=true 覆写会在 wg(false) 复原时翻回实心）
