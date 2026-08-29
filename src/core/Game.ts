@@ -5074,7 +5074,8 @@ export class Game implements GameHooks {
         const tn = n as TownNPC;
         return !tn.dead && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1200;
       }).length;
-      this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount, partyIsUp(this.partyState));
+      this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount,
+        partyIsUp(this.partyState), this.partyState.genuineParty);
       // 显示隐形块/墙（Main.ShouldShowInvisibleBlocksAndWalls，Main.cs:57403-57408 =
       // SceneMetrics.EchoMonolith ∨ Player.CanSeeInvisibleBlocks）：后者 = 幽灵护目镜
       // 4409（UpdateEquips :14080）∨ 回声腔物品 5345 挂装备/时装格（ApplyEquipVanity
@@ -15562,12 +15563,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     else if (gs === 633) { vid = 5215; acorns = true; }                   // Ash → Ash Wood
     else if (gs === 2 || gs === 477 || gs === 53 || gs === 112 || gs === 116 || gs === 234) { acorns = true; } // Forest/Palm 族基座
     const axePower = this.heldAxePower();
+    // ★IIIII61 SpecialSeedFeatures.ShouldDropExtraWood（SpecialSeedFeatures.cs:15-24 =
+    //  tenth && drunk && !remix && !ntb）：普通树族木材堆叠 ×2（KillTile_GetItemDrops
+    //  普通树 case 尾段 WorldGen.cs:65742）
+    const sfExtraWood = !!(this.world.seedFlags?.tenthAnniversary && this.world.seedFlags?.drunkWorld
+      && !this.world.seedFlags?.remix && !this.world.seedFlags?.notTheBees);
     for (const [kx, ky] of killed) {
       if (mushroomRoll && Math.random() >= 0.5) continue;                 // 50% 无掉落
       const key = VANILLA_ITEM_KEY_BY_ID[mushroomRoll ? 183 : vid];
       if (!key || ITEM_BY_KEY[key] === undefined) continue;
       const bonus = Math.floor(Math.random() * 35) <= axePower || Math.floor(Math.random() * 3) === 0;
-      this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 14, ky * TILE, key, bonus ? 2 : 1,
+      let stack = bonus ? 2 : 1;
+      if (sfExtraWood && !mushroomRoll) stack *= 2;   // dropIsWood 门（蘑菇格非木）
+      this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 14, ky * TILE, key, stack,
         (Math.random() - 0.5) * 2, -2 - Math.random());
     }
     if (crownFX >= 22 && crownFY >= 198 && acorns && Math.random() < 0.5) {
@@ -15779,10 +15787,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         : gs === 116 ? VANILLA_ITEM_KEY_BY_ID[621]
           : gs === 112 ? VANILLA_ITEM_KEY_BY_ID[619]
             : VANILLA_ITEM_KEY_BY_ID[2504];
+      // ★IIIII61：ShouldDropExtraWood 棕榈 ×3（GetItemDrops case 323 尾段 :65778）
+      const sfExtraPalm = !!(this.world.seedFlags?.tenthAnniversary
+        && this.world.seedFlags?.drunkWorld && !this.world.seedFlags?.remix
+        && !this.world.seedFlags?.notTheBees);
       for (let yy = top; yy <= bottom; yy++) {
         if (palmWood && ITEM_BY_KEY[palmWood] !== undefined) {
           this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, yy * TILE,
-            palmWood, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+            palmWood, sfExtraPalm ? 3 : 1, (Math.random() - 0.5) * 2, -2 - Math.random());
         }
         // 树冠格橡实（frameX 88-132 → secondaryItem=27，:65285-65287）——读清格前
         // 捕获段 trunkFX（清格后帧恒 0）
@@ -23152,6 +23164,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (sc.zoneGlowshroom) pylon(4921);                        // :3529-3532
       }
     }
+    // ★IIIII61 吸血鬼种子商店两臂（Main.vampireSeed 消费面,Chest.cs SetupShop）：
+    //   ① 向导 3（case 3 尾段 :1726-1739）：vampireSeed && infectedSeed && !hardMode
+    //      → 火把 8 + (crimson ? 猩红火把 4386 : 腐化火把 4385)
+    //   ② 动物学家 633（case 23 尾段 :3397-3402）：vampireSeed && !infectedSeed → 火把 8
+    {
+      const vs = !!this.world.seedFlags?.vampireSeed;
+      const inf = !!this.world.seedFlags?.infectedSeed;
+      if (npc.vanillaId === 3 && vs && inf && !this.world.flags.hardMode) {
+        add([8]);
+        add([this.world.crimson ? 4386 : 4385]);
+      }
+      if (npc.vanillaId === 633 && vs && !inf) add([8]);
+    }
     return out;
   }
 
@@ -29570,8 +29595,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // :12400-12402 InfoAccMechShowWires——装备即显,builderAccStatus[1] 开关 UI 未实装)
     // 或 F7 强制(Main.cs:43548 DrawWires 开关语义)
     const held = this.player.inv.heldItem();
-    this.renderer.showWires = this.forceShowWires || !!held && !!ITEM_DEFS[held.id]?.wireTool
-      || this.player.equipStats.mechShowWires;
+    // ★IIIII61：WiresUI.DrawWires 的 noTraps 门（WiresUI.cs:31-35）——notraps 世界
+    //   击败骷髅王前整个导线可视化层隐藏（含 F7 强制与透视镜装备两路）
+    const ntWireGate = !(this.world.seedFlags?.noTraps
+      && !this.world.flags['downed_35'] && !this.world.flags.downedSkeletron);
+    this.renderer.showWires = (this.forceShowWires && ntWireGate) || (!!held && !!ITEM_DEFS[held.id]?.wireTool
+      && ntWireGate)
+      || (this.player.equipStats.mechShowWires && ntWireGate);
     const hover = (this.input.uiBlocking || this.renderer.timeUiHover) ? null : (() => {
       // 智能光标激活：hover 指向策略选出的目标格（渲染层据此画原版黄框 + 方向箭头）
       const sc = this.smartCursor;

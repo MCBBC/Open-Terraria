@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SandboxWorld</string>
+    <color name="twa_color">#0a0c10</color>
+    <!-- 全屏过渡底色:近黑深蓝黑,与 index.html body 一致 -->
+    <style name="TwaTheme" parent="android:Theme.Black.NoTitleBar.Fullscreen" />
+</resources>

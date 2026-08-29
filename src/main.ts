@@ -274,17 +274,6 @@ function initCameraModeWiring(game: Game): boolean {
 }
 
 // ---- 键盘：背包/暂停/保存 ----
-/** 地图点击传送开关（Shift+F2/F4/F6-F10 共用,2026-08-27）：首用确认门（同道具
- *  搜索/旅程快捷键）——确认启用后本地持久,后续按键直接开合。默认禁用态下全屏
- *  地图的选点/两次点击传送整链不可达（Game.mapClickTeleportEnabled 门） */
-function toggleMapClickTeleport(): void {
-  const g = flow?.game;
-  if (!g) return;
-  showFeatureGate('mapteleport', '地图点击传送', () => {
-    g.mapClickTeleportEnabled = true;
-    ui.toast('地图点击传送已启用：全屏地图点击选点，再点同一点传送');
-  });
-}
 /** Inventory/Esc 优先级态机(main.ts 原 window keydown 分支提取,逐语句等价;
  *  mobile-adaptation-plan 模块①:移动端触屏"背包/暂停"钮与物理键盘共用此唯一
  *  实现——虚拟路径 = Input.tapVirtual('Inventory') → keydownHandlers(origin=
@@ -351,21 +340,15 @@ window.addEventListener('keydown', (e) => {
   //      :982-987 边沿门（死亡/幽灵不可开,再按可关;截图锁定中由
   //      toggleCamera 内 CameraLock 门自拒）。input 直连 = 相机界面需要
   //      mouseHeld/rightDown 电平（render 参数无右键面）;首次按下时绑一次。
-  //      ★Shift+F4 是迁入的迷雾调试键（下方 case 'F4'）,不触发相机模式 ----
+  //      ★Shift+F4 = 迷雾消除（下方 case 'F4',首用确认门）,不触发相机模式 ----
   if (!e.shiftKey && isBound('ToggleCameraMode', e.code) && initCameraModeWiring(game)) {
     e.preventDefault();
     game.renderer.captureMode.toggleRequest(game.player, game.world);
     return;
   }
-  // ★Shift+F10/F4/F6/F7/F8/F9（2026-08-28 用户澄清）：Shift+F10 = 地图点击传送
-  //  开关；★Shift+F2 保持无敌（无限生命和魔力,Game.toggleDebugGod）不被拦截。
-  //  stopImmediatePropagation 防同键旧迁入逻辑并行
-  if (e.shiftKey && ['F10', 'F4', 'F6', 'F7', 'F8', 'F9'].includes(e.code)) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    toggleMapClickTeleport();
-    return;
-  }
+  // ---- Shift 组合键（2026-08-28 用户澄清终态）：各键保留各自原功能,仅首次使用
+  //  时弹同款确认门（featureGate 按功能分键持久）;★Shift+F10 = 地图点击传送开关,
+  //  ★Shift+F2 = 无限生命和魔力（Game.toggleDebugGod）——均不互相顶替 ----
   switch (e.code) {
     case 'KeyS':
       // Ctrl+S 快速存档（原 F6 让位召唤面板后迁入）
@@ -385,8 +368,16 @@ window.addEventListener('keydown', (e) => {
       }
       break;
     case 'F4':
-      // Shift+F4 已在上方统一拦截（地图点击传送开关）——此处仅非 Shift 到达
-      // （非 Shift F4 = 相机模式,已在更早 isBound 分支 return,此 case 实际不可达）
+      // Shift+F4 = 全图迷雾消除（首用确认门）;非 Shift F4 = 相机模式（更早分支已 return）
+      if (e.shiftKey) {
+        e.preventDefault();
+        showFeatureGate('fog', '全图迷雾消除', () => {
+          game.world.explored.fill(1);
+          game.world.exploredDirty = null; // 全图变化无脏信息 → 渲染端整幅重建
+          game.world.exploredVersion++; // 使迷雾缓存失效重建
+          ui.toast('已消除全图迷雾');
+        });
+      }
       break;
     case 'F5': {
       // 长按 F5 = 行为录制窗开关（按下计时，keyup 判时长——见文件尾 keyup 监听）；
@@ -402,27 +393,47 @@ window.addEventListener('keydown', (e) => {
     }
     case 'F6':
       e.preventDefault();
-      // 召唤面板(调试,原版无;原 F6 快速存档挪 Ctrl+S)
-      game.toggleSummonPanel();
+      // 召唤面板(调试,原版无;原 F6 快速存档挪 Ctrl+S)——首用确认门
+      showFeatureGate('summon', '召唤面板', () => game.toggleSummonPanel());
       break;
     case 'F7':
       e.preventDefault();
-      game.forceShowWires = !game.forceShowWires;
-      ui.toast(game.forceShowWires ? '导线显示:强制开启' : '导线显示:手持电路工具时');
+      // 导线显示——首用确认门（2026-08-28 用户澄清:各键保原功能+确认门）
+      showFeatureGate('wires', '导线显示', () => {
+        game.forceShowWires = !game.forceShowWires;
+        ui.toast(game.forceShowWires ? '导线显示:强制开启' : '导线显示:手持电路工具时');
+      });
       break;
     case 'F8':
       e.preventDefault();
-      game.enemySpawnEnabled = !game.enemySpawnEnabled;
-      ui.toast(game.enemySpawnEnabled ? '怪物生成已开启' : '怪物生成已关闭（已有怪物不受影响）');
+      // 怪物生成开关——首用确认门
+      showFeatureGate('spawn', '怪物生成开关', () => {
+        game.enemySpawnEnabled = !game.enemySpawnEnabled;
+        ui.toast(game.enemySpawnEnabled ? '怪物生成已开启' : '怪物生成已关闭（已有怪物不受影响）');
+      });
       break;
     case 'F9':
       e.preventDefault();
-      game.renderer.fullbright = !game.renderer.fullbright;
-      ui.toast(game.renderer.fullbright ? '已开灯：全画面无暗影' : '已关灯：恢复正常光照');
+      // 全画面照亮——首用确认门
+      showFeatureGate('bright', '全画面照亮', () => {
+        game.renderer.fullbright = !game.renderer.fullbright;
+        ui.toast(game.renderer.fullbright ? '已开灯：全画面无暗影' : '已关灯：恢复正常光照');
+      });
       break;
     case 'F10':
       e.preventDefault();
-      game.teleportToMouse();
+      if (e.shiftKey) {
+        // ★Shift+F10 = 地图点击传送开关（2026-08-28 用户澄清终态：仅此键承担）——
+        //   首用确认门,确认后开合；非 Shift F10 = 鼠标位置传送（保留）
+        showFeatureGate('maptp', '地图点击传送', () => {
+          game.mapClickTeleportEnabled = !game.mapClickTeleportEnabled;
+          ui.toast(game.mapClickTeleportEnabled
+            ? '地图点击传送已启用：全屏地图点击选点，再点同一点传送'
+            : '地图点击传送已禁用');
+        });
+      } else {
+        game.teleportToMouse();
+      }
       break;
   }
 });

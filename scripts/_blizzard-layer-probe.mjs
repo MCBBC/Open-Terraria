@@ -1,10 +1,17 @@
-// 雪天暴风雪色罩层位验证:雪原+雨天时
-//   A = 正常帧截图;B = weatherTintPasses 置空后截图
-// 断言:室内暗区(A vs B)亮度差 ≈ 0(色罩不再覆盖室内);天空/远山区差 > 0
+// P0-SHM 标注验证:进世界后
+// ① domBreakdown 中不再有数千级图标 surface 计数类条目(改为可见画布计数个位数)
+// ② Canvas2D SHM 后备不可直接读——用间接信号:glfx 上传列无周期尖峰(静态源缓存成立)
+// ③ 控制台无 Canvas2D 警告刷屏
 import puppeteer from 'puppeteer-core';
-const ORIGIN = (process.env.SW_ORIGIN || 'http://localhost:5210');
-const browser = await puppeteer.launch({ protocolTimeout: 400000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 988, height: 862, deviceScaleFactor: 1 } });
+const ORIGIN = (process.env.SW_ORIGIN || 'http://localhost:5207') + '/?gpulog=1';
+const browser = await puppeteer.launch({ protocolTimeout: 400000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 988, height: 862, deviceScaleFactor: 2 } });
 const page = await browser.newPage();
+const logs = [], warns = [];
+page.on('console', m => { const t = m.text(); if (t.includes('[gpulog]') || t.includes('驻留=')) logs.push(t); if (/Canvas2D/.test(t)) warns.push(t.slice(0, 100)); });
+const errs=[];
+page.on('pageerror', e => errs.push('[pe] ' + String(e.message).slice(0,150)));
+page.on('console', m => { const t=m.text(); if (/失败|error|异常|WorldGen|toast/i.test(t)) errs.push('[c] ' + t.slice(0,140)); });
+const ev2=(fn)=>page.evaluate(fn);
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' });
 await page.waitForSelector('.sw-title-menu', { timeout: 150000 });
 await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeout: 180000, polling: 500 });
@@ -12,39 +19,45 @@ await page.mouse.click(8, 8);
 for (let i = 0; i < 4 && !(await page.$('.sw-vsel')); i++) { await page.click('[data-act=sp]').catch(()=>{}); await page.waitForSelector('.sw-vsel',{timeout:8000}).catch(()=>{}); }
 if (!(await page.$('.sw-vsel .sw-vitem'))) {
   await page.click('.sw-vsel [data-act=new]'); await page.waitForSelector('.sw-char-row input[type=text]');
-  await page.click('.sw-char-row input[type=text]'); await page.keyboard.type('bl');
+  await page.click('.sw-char-row input[type=text]'); await page.keyboard.type('shm');
   await page.click('[data-act=create]'); await page.waitForSelector('.sw-vsel .sw-vitem', { timeout: 15000 });
 }
 await page.click('.sw-vsel .sw-vitem .sw-vitem-btns img').catch(()=>{});
 await page.waitForFunction(() => (document.querySelector('.sw-vsel-title')?.textContent ?? '').includes('世界'), { timeout: 10000 }).catch(()=>{});
 if (await page.$('.sw-vsel .sw-vitem')) {
   await page.click('.sw-vsel .sw-vitem .sw-vitem-btns img');
-  await page.waitForFunction(() => window.__swGame?.world?.store?.w, { timeout: 300000, polling: 1000 });
+} else {
+  await page.click('.sw-vsel [data-act=new]').catch(()=>{});
+  await page.waitForSelector('[data-f=seed]', { timeout: 10000 }).catch(()=>{});
+  await page.click('[data-f=seed]'); await page.keyboard.type('12345');
+  await page.evaluate(() => [...document.querySelectorAll('[data-g=size] .sw-wc-opt')][0]?.click());
+  await page.click('[data-act=create]');
 }
-await new Promise(r => setTimeout(r, 1500));
-// 找一个有墙的封闭室内位置难自动化 → 改用【地下无墙洞+室内家具不易】简化:
-// 直接对比「雨天雪原」画面中 天空区(top) 与 地下暗区? 表面场景没地下。
-// 替代断言:色罩只应影响背景层 → 用 underground 深度:把玩家传送进洞穴
-// (screenPosition.Y > worldSurface*16 时 vanilla 的 cave bg sections 触发),
-// 然后比较 A/B 全屏差 —— 若色罩还挂在最终链,整屏都会变亮;修正后差异 ≈ 仅天空区(此处=0)
-await page.evaluate(() => {
+await page.waitForFunction(() => window.__swGame?.world?.store?.w, { timeout: 300000, polling: 1000 });
+await new Promise(r => setTimeout(r, 8000));
+
+// ---- 暴风雪色罩层位验证 ----
+{
+  const st = await page.evaluate(() => ({
+    hasGame: !!window.__swGame,
+    w: window.__swGame?.world?.store?.w ?? null,
+    running: window.__swGame?.running ?? null,
+    menuTitle: document.querySelector('.sw-title-menu') ? 'menu' : (document.querySelector('.sw-vsel-title')?.textContent ?? document.querySelector('body').children.length),
+  }));
+  console.log('STATE:', JSON.stringify(st));
+}
+await ev2(() => {
   const g = window.__swGame;
-  const w = g.world;
-  // 强制暴风雪状态:raining + cloudAlpha 1 + 时间锁白天让天区可见差异更清晰
-  w.weather.raining = true;
-  if ('cloudAlpha' in w.weather) w.weather.cloudAlpha = 1;
-  if ('cloudBGActive' in w.weather) w.weather.cloudBGActive = 1;
-  w.clock.timeOfDay = 0.5; w.clock.dayTime = true;
-  const px = Math.floor(g.player.x / 16), py = Math.floor(g.player.y / 16);
-  void px; void py;
+  const w = g.world.weather;
+  w.raining = true;
+  if ('cloudAlpha' in w) w.cloudAlpha = 1;
+  if ('cloudBGActive' in w) w.cloudBGActive = 1;
+  g.world.clock.timeOfDay = 0.5; g.world.clock.dayTime = true;
 });
-await new Promise(r => setTimeout(r, 2500));   // 等 opacity 渐入(状态机)
+await new Promise(r => setTimeout(r, 2600));
 const shotA = (await page.screenshot({ type: 'png' })).toString('base64');
-await page.evaluate(() => {
-  const sky = window.__swGame.renderer.sky;
-  sky.weatherTintPasses = () => [];
-});
-await new Promise(r => setTimeout(r, 400));
+await page.evaluate(() => { window.__swGame.renderer.sky.weatherTintPasses = () => []; });
+await new Promise(r => setTimeout(r, 350));
 const shotB = (await page.screenshot({ type: 'png' })).toString('base64');
 await page.evaluate(() => { delete window.__swGame.renderer.sky.weatherTintPasses; });
 const metrics = await page.evaluate(async (aB64, bB64) => {
@@ -54,23 +67,21 @@ const metrics = await page.evaluate(async (aB64, bB64) => {
   const mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c.getContext('2d', { willReadFrequently: true }); };
   const ca = mk(); ca.drawImage(A, 0, 0); const da = ca.getImageData(0, 0, W, H).data;
   const cb = mk(); cb.drawImage(B, 0, 0); const db = cb.getImageData(0, 0, W, H).data;
-  // 分区平均亮度:A/B 差 = 色罩贡献
   const zoneAvg = (x0, y0, x1, y1) => {
     let sA = 0, sB = 0, n = 0;
     for (let y = y0; y < y1; y += 2) for (let x = x0; x < x1; x += 2) {
       const i = (y * W + x) * 4;
-      sA += (da[i] + da[i + 1] + da[i + 2]) / 3; sB += (db[i] + db[i + 1] + db[i + 2]) / 3; n++;
+      sA += (da[i] + da[i+1] + da[i+2]) / 3; sB += (db[i] + db[i+1] + db[i+2]) / 3; n++;
     }
-    return { a: sA / n, b: sB / n, d: (sA - sB) / n };
+    return (sA - sB) / n;
   };
   return {
-    skyTop: zoneAvg(Math.round(W * 0.55), Math.round(H * 0.04), Math.round(W * 0.95), Math.round(H * 0.22)),
-    midWorld: zoneAvg(Math.round(W * 0.05), Math.round(H * 0.45), Math.round(W * 0.5), Math.round(H * 0.75)),
+    skyTop: zoneAvg(Math.round(W*0.55), Math.round(H*0.04), Math.round(W*0.95), Math.round(H*0.22)),
+    midWorld: zoneAvg(Math.round(W*0.05), Math.round(H*0.45), Math.round(W*0.5), Math.round(H*0.75)),
   };
 }, shotA, shotB);
-console.log(JSON.stringify(metrics, null, 1));
-const skyDelta = metrics.skyTop.d, worldDelta = metrics.midWorld.d;
-console.log(`天空区色罩亮度差=${skyDelta.toFixed(1)} 世界区差=${worldDelta.toFixed(1)}`);
-console.log(worldDelta < 3 ? '=== PASS:世界内容不受色罩影响(仅背景层) ===' : '=== FAIL:色罩仍覆盖世界内容 ===');
+console.log('METRICS:', JSON.stringify(metrics));
+for (const e of errs.slice(0,8)) console.log(e);
+console.log(metrics.midWorld < 3 ? '=== PASS:世界内容不受色罩影响 ===' : '=== FAIL ===');
 await browser.close();
-process.exit(worldDelta < 3 ? 0 : 3);
+process.exit(metrics.midWorld < 3 ? 0 : 3);

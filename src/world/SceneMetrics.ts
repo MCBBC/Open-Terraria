@@ -148,6 +148,9 @@ export interface SceneFlags {
   echoMonolith: boolean;
   /** 派对进行中（BirthdayParty.PartyIsUp：ManualParty/GenuineParty；入夜 CheckNight 结束） */
   partyUp: boolean;
+  /** 生日自然派对（BirthdayParty.GenuineParty——NPC.cs:61055 史莱姆内部物品等判据
+   *  用 GenuineParty 本体而非 PartyIsUp 并集；Game 侧从 partyState 传入） */
+  partyGenuine: boolean;
   /** HasSunflower（SceneMetrics.cs:594/626-630）：窗口内有向日葵 且 墓碑计数 ≤ GraveyardTileMin(16)。
    *  墓地压制向日葵的"快乐！"buff（Player.cs:25262-25265 授予链 → buff 146） */
   hasSunflower: boolean;
@@ -211,6 +214,7 @@ export const EMPTY_SCENE: SceneFlags = {
   zoneGraveyard: false, zoneShadowCandle: false, hasClock: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
   zoneUndergroundDesert: false, townNPCCount: 0,
   musicBoxStyle: -1, fountainColor: -1, monolithType: -1, bloodMoonMonolith: false, echoMonolith: false, partyUp: false,
+  partyGenuine: false,
   hasSunflower: false,
   zoneGranite: false, zoneMarble: false, zoneHive: false, zoneGemCave: false,
   behindBackwall: false, shimmerTileCount: 0, honeyBlockCount: 0, partyMonolithCount: 0,
@@ -243,10 +247,12 @@ const countSet = (counts: Map<number, number>, set: Set<number>): number => {
 };
 
 /** 以玩家中心扫描并计算全部 Zone 标志（对应 ScanAndApplyToPlayer 主链）。
- *  partyUp：BirthdayParty.PartyIsUp（器件态，非 tile 扫描；Game 侧传入） */
+ *  partyUp：BirthdayParty.PartyIsUp（器件态，非 tile 扫描；Game 侧传入）。
+ *  partyGenuine：BirthdayParty.GenuineParty 本体（NPC.cs:61055 史莱姆判据） */
 export function scanScene(
   world: World, centerX: number, centerY: number, townNPCCount: number,
   partyUp = false,
+  partyGenuine = false,
 ): SceneFlags {
   const st = world.store;
   const w = st.w, h = st.h;
@@ -441,6 +447,7 @@ export function scanScene(
     bloodMoonMonolith: bloodMoonMono,
     echoMonolith: echoMono,
     partyUp,
+    partyGenuine,
     zoneGranite,
     zoneMarble,
     zoneHive,

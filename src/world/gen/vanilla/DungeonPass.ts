@@ -23,6 +23,9 @@ import { dualDungeonState, dualDungeonTrapWindow } from './DungeonStyles1457';
 // ★LLL 批（2026-08-25）：placeTrap0 补 noTraps 巨石非实心窗（WorldGen.SetBoulderSolidity
 //   经 GenSolid 全局表翻转,dgSolid/genSolidType 即见）——与 TrapsPass 同源单实现。
 import { setBoulderSolidity } from './TrapsPass';
+// ★IIIII59：双地牢家族二件套（DungeonDropTrap/DungeonTileClump，1457=1458）——
+// 结构位接线见 dgEarlyDualFamilies；现行一切链形参表下纯惰性零掷。
+import { dropTrap as deDropTrap, tileClump as deTileClump } from './DungeonEarlyFeatures';
 // node:fs 动态导入（探针落盘 SW_DG_LIGHTS_GRID 才用）——顶层静态导入会进
 // worker bundle 被 vite 外部化炸构建（2026-08-18 实锤：writeFileSync is not
 // exported by "__vite-browser-external"）。改运行时 require，浏览器恒 false 门
@@ -130,7 +133,11 @@ const DG_BREAK_PLACE = new Set([324, 186, 187, 185, 165, 530, 233, 227, 485, 81,
 const DG_CHEST_ANCH_INVALID = new Set([127, 138, 664, 665, 484, 711, 712, 713, 714, 715, 716]);
 const DG_PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
 const DG_NO_ATTACH = new Set([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 27, 50, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 101, 102, 110, 114, 134, 387, 388, 390, 427, 435, 436, 437, 438, 439, 441, 467, 468, 469, 486, 487, 488, 489, 490, 497, 507, 564, 565, 568, 569, 570, 572, 580, 590, 593, 594, 595, 615, 620, 704, 707]);
-const DG_TILE_TABLE = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** ★IIIII44 复核导出：Main.tileTable（Main.cs:9900 段 + :10131 循环族）唯一权威表
+ *  ——跨模块消费端（SkyblockPass placeMB 支撑臂等）一律 import 本表,禁止局部手抄子集
+ *  （「常量表有/装配漏」家族教训:SkyblockRuntime anchorSets 手写装配漏键案 2026-08-29）。 */
+export const DG_TILE_TABLE: ReadonlySet<number> = new Set([14, 18, 19, 280, // ★IIIII44 审计补位：Main.cs:7018（diff 定罪,曾缺 1/81）
+ 87, 88, 101, 114, 275, 276, 277, 278, 279, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
 // PrefixLegacy.Prefixes 前缀池（PrefixLegacy.cs:9-64）+ ReducedNaturalChance（PrefixID.cs:9）
 const DG_PRE: Record<string, number[]> = {
   swords: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 59, 60, 61, 81],
@@ -3026,19 +3033,32 @@ export function runDungeonPass(
       while (n5 < num7) {
         n3++;
         const x = ri(bounds.L, bounds.R - 1);
-        // ★IIIII21（DungeonGlobalSpikes.cs:42-45）：drunk/noSurface → 刺采样下限
-        //   worldSurface+25 改 generatingDungeonPositionY+25（入口埋地下后的深刺域；
-        //   此时 genPos=最高房中心——drunk 无爬升厅回写）。同位掷 Next(yMin,Bottom)。
-        const yLo = gs.seedFlags.drunkWorld || gs.seedFlags.noSurface ? posY + 25 : ws + 25;
-        const y = ri(yLo, bounds.B - 1);
+        // ★IIIII59（2026-08-30 掷账定罪）：vanilla round1 是【两步掷】——先
+        //   Next(worldSurface+25,Bottom)（cs:352），drunk/noSurface 才**重掷**
+        //   Next(generatingDungeonPositionY+25,Bottom)（cs:353-355）。旧 JS 把两步压成
+        //   单掷 ⇒ drunk 每 attempt 少耗 1 主流骰（≈1050 attempt 级 ×Δ=round1 缺口），
+        //   S→D 段 Δ+508 主源（mile8 row32 W{8,98,99} 家族+尖刺互换的直接根因）。
+        let y = ri(Math.trunc(ws) + 25, bounds.B - 1);   // cs:352/:520 首掷恒 ws 域
+        // ★IIIII59：重掷门按轮取异——round1(cs:353-355)=drunk∨noSurface；
+        //   round2(cs:521-523)=**仅 noSurface**（drunk 不重掷，沿用 ws 域样本）。
+        //   旧 JS 两轮共用单掷且 round2 也吃 drunk 深域——正链(旗关)零暴露、
+        //   DRUNK 双重错位：每 attempt 少 1 骰(round1)+深窗误判(round2)。
+        if (round === 0 ? (gs.seedFlags.drunkWorld || gs.seedFlags.noSurface) : gs.seedFlags.noSurface) {
+          y = ri(posY + 25, bounds.B - 1);               // DeepSpike 重掷支
+        }
         if (wallAt(x, y) === num && actAt(x, y) === 0) {
           const d = rn(2) === 0 ? -1 : 1;
           const oy = y;                                   // num13：原始采样点（第二段起点基准）
           let wx = x, wy = y;
-          while (inW(wx, wy, 0) && actAt(wx, wy) === 0) {
+          // cs:68-70/:168 扫描循环逐句保形：round1【无界】(仅活性终止)；round2 带
+          //   `j>5 && j<maxTilesX-5` 界（cs:171）。越出 store 视同原版异常中止。
+          for (;;) {
+            if (!st.inBounds(wx, wy)) break;
+            if (actAt(wx, wy) !== 0) break;
+            if (round === 1 && !(wx > 5 && wx < w - 5)) break;
             if (round === 0) wy += d; else wx += d;
           }
-          const hit = inW(wx, wy, 0);
+          const hit = st.inBounds(wx, wy);
           let okA: boolean, okB: boolean, okC: boolean, okD2: boolean, okE: boolean;
           if (round === 0) {
             okA = hit && inW(wx - 1, wy, 0) && actAt(wx - 1, wy) !== 0;
@@ -5031,7 +5051,15 @@ export function runDungeonPass(
   const wallAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0);
   const actAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.flags[st.idx(x, y)] : 0);
   const typAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.type[st.idx(x, y)] : 0);
+  {
+    const WV61b = typeof globalThis !== 'undefined' ? (globalThis as { __swWvLog?: unknown }).__swWvLog : undefined;
+    if (WV61b) ((globalThis as { __wvLines?: string[] }).__wvLines ??= []).push(`MARK|d61layoutStart|rc=${dgMainRolls}`);
+  }
   dgLayout(num);
+  {
+    const WV61c = typeof globalThis !== 'undefined' ? (globalThis as { __swWvLog?: unknown }).__swWvLog : undefined;
+    if (WV61c) ((globalThis as { __wvLines?: string[] }).__wvLines ??= []).push(`MARK|d61layoutEnd|rc=${dgMainRolls}`);
+  }
   // cs:374-396：最高已生成房 InnerBounds 顶部中心回写
   {
     const ib = rooms[0].inner;
@@ -5106,6 +5134,27 @@ export function runDungeonPass(
   for (const rm of rooms) if (rm.generated) roomPlatformsDoors(rm);
   for (const hl of halls) if (hl.generated) hallPlatformsDoors(hl);
   snap('dungeonPD');
+  // ★IIIII59 EarlyDual 家族调用面壳（DungeonGlobalEarlyDualDungeonFeatures.EarlyDungeonFeatures
+  //   的 DropTrap/TileClump 段落占位，cs:287/:314/:341 与 cs:395-589）。可达域由
+  //   【房间 style 字典 {3 Desert,2 Snow,1 Cavern}】与【dungeonGenerationStyles 内
+  //   Style∈{3,2} 条目】唯一决定——单地牢世界（现八链全部）：字典键恒 {0}（房间样式
+  //   恒 style0）、样式表恒 [style0] ⇒ 下面两段门恒假、零进入、零主流掷骰（与原版
+  //   同构：ContainsKey false→while 不启；styles 迭代 continue 在任何 Next 之前）。
+  //   函数本体已在 src/world/gen/vanilla/DungeonEarlyFeatures.ts 全量落地（dropTrap/
+  //   tileClump），dualDungeons 链激活时在守卫内展开实参即可——禁止绕过本守卫直呼。
+  const d61RoomStyleKeys: ReadonlySet<number> = new Set();            // 单地牢={}
+  const d61StylesList: ReadonlyArray<{ style: number }> = [{ style: 0 }]; // [style0]
+  if (d61RoomStyleKeys.has(3) || d61RoomStyleKeys.has(2) || d61RoomStyleKeys.has(1)) {
+    // dual-only：按 cs 样式表逐房抽样下扫 + Next(2) 选 Lava/Sand 后调 deDropTrap(ctx,...)
+    void deDropTrap;
+    void deTileClump;
+  }
+  for (const d61s of d61StylesList) {
+    if ((d61s.style === 3 || d61s.style === 2)) {
+      // dual-only：style3=×num7,num7,num7*2（53/397/404 沙族）；style2=×num8,num8（147/224 雪族）
+      void deTileClump;
+    }
+  }
   dgEarly(); snap('dungeonPi');
   dgSpikes(); snap('dungeonS');
   dgDoorsF(); snap('dungeonD');

@@ -11,3 +11,21 @@
 /public/assets-zip
 /desktop/node_modules
 /desktop/release
+
+# —— mobile 壳群(2026-08-29 打包批)——
+# gradle 产物与缓存(app/build ~1.4G 可再产)
+/mobile/android-shell/app/build
+/mobile/android-shell/.gradle
+/mobile/android-shell/build
+# 本机 SDK 绝对路径(Android 官方惯例不入库)
+/mobile/android-shell/local.properties
+# sync-dist.sh 从 /dist 复制的剪枝副本(~477M,可由脚本再产;dist 与 assets 必同代)
+/mobile/android-shell/app/src/main/assets
+# APK 归档(APK 由 ./sync-dist.sh + gradle assembleRelease 再产;sha256 已记 README)
+/mobile/android-shell/releases
+/src/render/gpulog.log                       # 探针调试日志痕迹
+# ★keystore/sw.jks 刻意不 ignore:签名身份不可再生,丢了已装包将无法升级。
+#   若将来建远程仓库推送前,手动移出或加入忽略并另行备份。
+/mobile/twa/app/build
+/mobile/twa/release
+/mobile/twa/.gradle

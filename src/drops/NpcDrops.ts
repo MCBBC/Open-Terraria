@@ -133,6 +133,21 @@ export interface NpcDropCtx {
    *  祭坛，无一存活才 true——1.4.5 skyblock 世专属）；Enemy 注入 Game 侧缓存扫描。
    *  EyeOfCthulhuDefeatedAndNoAltarsInWorld 条件数据源（Conditions.cs:1422-1437） */
   noAltarsInWorld?: boolean;
+  // ---- ★IIIII61 秘种子掉落条件数据源（Enemy 注入 world.seedFlags/SkyblockRuntime） ----
+  /** Main.dontStarveWorld（"the constant"）；DontStarveIsUp/IsNotUp 条件
+   *  （Conditions.cs:1484-1511——录音道具 5089-5097 族） */
+  dontStarveWorld?: boolean;
+  /** Main.tenthAnniversaryWorld（celebrationmk10）；TenthAnniversaryIsUp/IsNotUp 条件 */
+  tenthAnniversaryWorld?: boolean;
+  /** WorldGen.Skyblock.lowTiles（动态普查旗）；SkyblockIsUp 条件（Conditions.cs:1516-1532）
+   *  ——僵尸族 189/435/188/434 掉 9 蜂蜜块（低格世界无蜂巢产蜜的补充面） */
+  skyblockLowTiles?: boolean;
+  /** 玩家背包/虚空袋含物品 1786（幸运马蹄铁? no——镰刀 Sickle：草籽割取工具）；
+   *  SkyblockIsUpNoSickle 条件（Conditions.cs:1552-1566）：lowTiles 且【未持】时才掉 */
+  playerHasSickle?: boolean;
+  /** SpecialSeedFeatures.ShouldDropExtraGel（:5-13 = tenth && drunk && !remix && !ntb）；
+   *  DropExtraGel/NotDropExtraGel 条件数据源（Conditions.cs:448/:466） */
+  extraGelWorld?: boolean;
   /** 死亡 NPC 具名（TownNPC.givenName；NamedNPC 条件数据源——Conditions.cs:957-981
    *  `info.npc.HasGivenName && GivenName == Language[neededName]`，具名随机池抽中
    *  Andrew/Whitney/Jim 时该 NPC 死亡掉专属纪念品）。Enemy 无名 → undefined 恒 false */
@@ -210,9 +225,11 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
       return seasonal && ctx.lifeMax > 1 && ctx.damage > 0 && !ctx.friendly
         && ctx.type !== 121 && ctx.type !== 23 && ctx.value > 0;
     }
-    case 'DontStarveIsUp': return false;
-    case 'TenthAnniversaryIsUp': return false;
-    case 'DontStarveIsNotUp': case 'TenthAnniversaryIsNotUp': return true;
+    // ★IIIII61：Main.dontStarveWorld / Main.tenthAnniversaryWorld 直投（seedFlags 投影）
+    case 'DontStarveIsUp': return !!ctx.dontStarveWorld;
+    case 'TenthAnniversaryIsUp': return !!ctx.tenthAnniversaryWorld;
+    case 'DontStarveIsNotUp': return !ctx.dontStarveWorld;
+    case 'TenthAnniversaryIsNotUp': return !ctx.tenthAnniversaryWorld;
     case 'DownedPlantera': return downed(ctx, 262);
     case 'FirstTimeKillingPlantera': return !downed(ctx, 262); // 掉落先于 downed 写入 → 首杀语义
     case 'DownedAllMechBosses': return downed(ctx, 134, 125, 127);
@@ -272,7 +289,11 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
       // 36/32 看 localAI[3]==1（引擎未承载 localAI[3] → 恒 false，均为不可达内容）
       return (ctx.type === 35 || ctx.type === 33) ? ctx.ai3 === 1
         : (ctx.type === 36 || ctx.type === 32) ? ctx.localAi3 === 1 : false;
-    case 'SkyblockIsUp': case 'SkyblockIsUpNoSickle': return false;
+    // ★IIIII61：低格世界动态普查旗——僵尸族 189/435/188/434 的蜂蜜块 9 补给
+    case 'SkyblockIsUp': return !!ctx.skyblockLowTiles;
+    case 'SkyblockIsUpNoSickle':
+      // Conditions.cs:1552-1566：lowTiles 且玩家背包/虚空袋【无】1786 镰刀
+      return !!ctx.skyblockLowTiles && !ctx.playerHasSickle;
     case 'WindyEnoughForKiteDrops': return !!ex?.windy;
     case 'EyeOfCthulhuDefeatedAndNoAltarsInWorld':
       // Conditions.cs:1422-1437：NPC.downedBoss1 && WorldGen.Skyblock.noAltars——
@@ -357,9 +378,12 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'MechanicalBossesDummyCondition': return true;    // Conditions.cs:372
     case 'PlayerNeedsHealing': return ctx.hp < ctx.hpMax;  // Conditions.cs:561
     case 'IsPumpkinMoon': return ctx.moonEvent?.kind === 2; // Conditions.cs:231
-    case 'SkyblockIsNotUp': return true;                   // Conditions.cs:1534（天空盒世界未实装）
-    case 'DropExtraGel': return false;                     // Conditions.cs:448（zenith 秘密种子特性）
-    case 'NotDropExtraGel': return true;                   // Conditions.cs:466
+    case 'SkyblockIsNotUp': return !ctx.skyblockLowTiles;  // Conditions.cs:1534-1550
+    // ★IIIII61：SpecialSeedFeatures.ShouldDropExtraGel（SpecialSeedFeatures.cs:5-13 =
+    //  tenthAnniversary && drunkWorld && !remixWorld && !notTheBeesWorld——生日庆祝
+    //  世界史莱姆凝胶增益档）
+    case 'DropExtraGel': return !!ctx.extraGelWorld;
+    case 'NotDropExtraGel': return !ctx.extraGelWorld;
     // 备案（无法精确实现，当前 JSON 也未用到）：IsUsingSpecificAIValues(Conditions.cs:27)
     // 需按槽位比对 ai[0..3]——ctx 仅承载 ai3，若未来注册表引用需先扩 ctx
     default:

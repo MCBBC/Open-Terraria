@@ -27,14 +27,22 @@ export function sbDenyAll(sf: SeedFlags | undefined): boolean {
   return !!sf?.skyblock;
 }
 
-/** WorldGen.Skyblock.denySomeGeneration（cs:3099）：纯 skyblock=true；组合种子任一开启
- *  则 false。隐藏种 worldIsInfected（"kbxny…"）本仓无旗标，恒按未开启记（备案）。 */
+/**
+ * denySomeGeneration 的降级旗清单（cs:3099 全枚举，单源）——sbDenySome 由本表
+ * 程序化驱动,新增组合语义只改此一处（「常量表有/装配漏」教训条目落点：
+ * SkyblockRuntime anchorSets 手写装配漏键案 2026-08-29 的同族预防）。
+ * 隐藏种 worldIsInfected（"kbxny…"）本仓无 SeedFlags 项,不在表内=恒未开启（备案）。
+ */
+export const SB_DENYSOME_BREAKERS = [
+  'worldIsFrozen', 'surfaceIsDesert', 'surfaceIsMushrooms',
+  'hallowOnTheSurface', 'noInfection', 'extraFloatingIslands',
+  'extraLiquid', 'extraLivingTrees',
+] as const;
+
+/** WorldGen.Skyblock.denySomeGeneration（cs:3099）：纯 skyblock=true；清单任一开启则 false */
 export function sbDenySome(sf: SeedFlags | undefined): boolean {
   if (!sf?.skyblock) return false;
-  if (sf.worldIsFrozen || sf.surfaceIsDesert || sf.surfaceIsMushrooms ||
-      sf.hallowOnTheSurface || sf.noInfection || sf.extraFloatingIslands ||
-      sf.extraLiquid || sf.extraLivingTrees) return false;
-  return true;
+  return !SB_DENYSOME_BREAKERS.some((k) => !!(sf as Record<string, unknown>)[k]);
 }
 
 /** WorldGen.Skyblock.denyFloatingIslands（cs:3053）＝ skyblock && !extraFloatingIslands */
@@ -87,7 +95,11 @@ function place3x3AnchorUp(st: TileStore, x: number, y: number, internalId: numbe
   return true;
 }
 
-const TILE_TABLE_SHEETS = new Set([14, 19]);          // Main.tileTable 常见集（支撑臂）
+// Main.tileTable 唯一权威表（DungeonPass.DG_TILE_TABLE=Main.cs:9900 段+:10131 循环族全量）——
+// ★IIIII44 复核批：本处曾手写 {14,19} 子集冒充整表＝「常量表有/装配漏」同族缺陷
+// （SkyblockRuntime anchorSets dungeonTile 漏键崩案的同型),改单源程序化消费。
+import { DG_TILE_TABLE } from './DungeonPass';
+const TILE_TABLE_SHEETS = DG_TILE_TABLE;
 
 /** PlaceMB（cs:51729）：139 音乐盒 2×2，锚=cols X..X+1 × rows y-1..y，
  *  frameY=style*36、左列 frameX=0 右列 18。 */
@@ -100,7 +112,8 @@ function placeMB(st: TileStore, X: number, y: number, internalId: number, style:
       if (st.inBounds(i, j) && st.flags[st.idx(i, j)]) { ok = false; break; }
     }
     const below = st.inBounds(i, y + 1) ? st.idx(i, y + 1) : -1;
-    const shOk = below >= 0 && !!st.flags[below] &&
+    // cs:51740 支撑门逐字：!active || halfBrick || (!tileSolid && !tileTable) → 拒
+    const shOk = below >= 0 && !!st.flags[below] && !st.half[below] &&
       (genSolidType(st.type[below]) || TILE_TABLE_SHEETS.has(sheetOfInternal(st.type[below])));
     if (!shOk) { ok = false; break; }
   }

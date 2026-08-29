@@ -48,8 +48,30 @@ const MYOUT = '/tmp/iii62-out';
   const gThis = globalThis as Record<string, unknown>;
   gThis.__swTagDie = (t: string) => { pendingTag = t; };
   const killLog: string[] = [];
+  const kboxLog: string[] = [];
   gThis.__swKillCap = (x: number, y: number, sheet: number) => {
     if (killLog.length < 20000) killLog.push(`${dieVals.length}|${curStage}|${x},${y}|${sheet}`);
+    // IIII60：击杀时刻 13×13 盒态快照（与 rig SW_KBOX 同格式同半径，KB 行；含帧）
+    {
+      const ty = new Uint16Array(169), fl = new Uint8Array(169), wa = new Uint16Array(169);
+      const fx = new Uint16Array(169), fy = new Uint16Array(169);
+      let n = 0;
+      for (let yy = y - 6; yy <= y + 6; yy++) {
+        for (let xx = x - 6; xx <= x + 6; xx++) {
+          const i2 = st.inBounds(xx, yy) ? st.idx(xx, yy) : -1;
+          ty[n] = i2 >= 0 ? st.type[i2] : 0;
+          fl[n] = i2 >= 0 ? (st.flags[i2] ? 1 : 0) : 0;
+          wa[n] = i2 >= 0 ? st.wall[i2] : 0;
+          fx[n] = i2 >= 0 ? st.frameX[i2]! : 0;
+          fy[n] = i2 >= 0 ? st.frameY[i2]! : 0;
+          n++;
+        }
+      }
+      const b64 = Buffer.from(ty.buffer).toString('base64') +
+        Buffer.from(fl).toString('base64') + Buffer.from(wa.buffer).toString('base64') +
+        Buffer.from(fx.buffer).toString('base64') + Buffer.from(fy.buffer).toString('base64');
+      kboxLog.push(`KB ${dieVals.length} ${x} ${y} ${b64}`);
+    }
   };
   const stairLog: string[] = [];
   gThis.__swStairEv = (n: string, x: number, y: number, t: number, f: number) => {
@@ -86,6 +108,16 @@ const MYOUT = '/tmp/iii62-out';
     marks.push(`${dieVals.length}|ROOMS ${ox},${oy}: ${rooms}`);
   };
 
+  // IIII60：SW_I60_FNT=1 时捕获引擎帧链逐访流（TF/TI/TR184…，__swFntProbeI39）
+  const fntLog: string[] = [];
+  if (process.env.SW_I60_FNT === '1') {
+    (gThis as { __swFntProbeI39?: { emit?: (l: string) => void } }).__swFntProbeI39 = {
+      emit: (l: string) => {
+        if (fntLog.length < 400000) fntLog.push(`${dieVals.length}|${l}`);
+      },
+    };
+  }
+
   const chests: unknown[] = [];
   const rng = new RNG(gs.seed);
   flipGenSolid([226, 162, 225, 190], true);
@@ -97,6 +129,8 @@ const MYOUT = '/tmp/iii62-out';
 
   URp.internalSample = oInternal;
   for (const k of ['__swHouseMk', '__swHouseEv', '__swHouseRooms', '__swHouseStage', '__swTagDie']) delete gThis[k];
+  delete (gThis as { __swFntProbeI39?: unknown }).__swFntProbeI39;
+  if (fntLog.length) writeFileSync(`${MYOUT}/js-fntlog.txt`, fntLog.join('\n'));
 
   // ---- 尝试级账本（_i58a 同构）----
   const attempts: Array<Record<string, unknown>> = [];
@@ -138,6 +172,7 @@ const MYOUT = '/tmp/iii62-out';
   }, null, 1));
   writeFileSync(`${MYOUT}/js-marklog.txt`, marks.join('\n'));
   writeFileSync(`${MYOUT}/js-killlog.txt`, killLog.join('\n'));
+  writeFileSync(`${MYOUT}/js-kbox.txt`, kboxLog.join('\n'));
   writeFileSync(`${MYOUT}/js-stairlog.txt`, stairLog.join('\n'));
   writeFileSync(`${MYOUT}/js-dievals.json`, JSON.stringify(dieVals));
   writeFileSync(`${MYOUT}/js-dietags.json`, JSON.stringify({ stage: dieStage, cls: dieClass }));

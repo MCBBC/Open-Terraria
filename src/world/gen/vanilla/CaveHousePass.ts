@@ -1637,17 +1637,17 @@ function placeSupportBeams(st: TileStore, gs: GenState, rng: RNG, rooms: Rect[],
       if (height > 1 && st.type[st.idx(x, bottom - 1)] !== PLATFORM) {
         // IIII60：与 x86 PlaceSupportBeams 的 Mark("BEM x,y,h") 对位
         houseMk('BEM', `${x},${bottom},h${height}`);
-        // ★IIIII56 备案：vanilla 每梁格链 = SetTileKeepWall(BeamType) →
-        //   SetFrames(true)（Actions.cs:592-606 = WorldUtils.TileFrame(self reset=true)
-        //   +四邻 reset=true 分派 Check* 击杀链）→ SetTilePaint(BeamPaint)。
-        //   JS 现为静默写（无邻帧派发）。CELEB 蘑菇屋 k=16（2403,610）实测：
-        //   x86 预填充区 K 尘掷 100 vs JS 60、平段 50；本批试加邻帧派发后该屋
-        //   事件面超额（26 家具族杀 6 件×10=60，x86 仅 4 件且散点对位不同），
-        //   且邻帧重排使级联面整体漂移——故回退静默写，欠派发债挂账下批
-        //   （需先解「梁列与平台顺序态」单变量定罪仪，见 /tmp/iii58-out/MANIFEST.md）。
+        // ★IIIII60 落刀（原版 action 序重排）：vanilla 每梁格链 = SetTileKeepWall(BeamType)
+        //   → SetFrames(true)（Actions.cs:592-606 = WorldUtils.TileFrame(self reset=true)
+        //   +四邻 reset=true 的 Check* 派发，含家具族整件击杀＋尘掷）→
+        //   SetTilePaint(BeamPaint)（普通种子 BeamPaint=0 → no-op）。
+        //   旧 JS 为静默列写（无邻帧派发）→ k16 蘑菇屋（2403,610）x86 梁 phase
+        //   杀 P2(2396-2398,617-618) 五格×10 尘掷 vs JS 零——IIII56 试刀超额的根因
+        //   是先写满全柱再派发（且缺 BEM 事件序基准）；现按 vanilla 逐格交叉序：
+        //   写一格→自+四邻 TileFrame(reset:true)。IIIII56 备案的 SetFrames 债就此清偿。
         // SetTileKeepWall(BeamType)：Clear(~(Wiring|Actuator)) → 液体/坡度/半砖全清
-        // （WWWW：曾漏清液体 → 梁格带水 78 格 L/Y 差（house12 (3207..3221,361-366)
-        // golden 梁无水 JS 有水））；梁底下一格 slope(0)/half(false)（HouseBuilder.cs:604）
+        // （WWWW：曾漏清液体 → 梁格带水 78 格 L/Y 差）；梁底下一格 slope(0)/half
+        // （HouseBuilder.cs:603-605）。
         for (let y = bottom; y < found; y++) {
           const ci = st.idx(x, y);
           st.liquid[ci] = 0;
@@ -1655,6 +1655,7 @@ function placeSupportBeams(st: TileStore, gs: GenState, rng: RNG, rooms: Rect[],
           st.slope[ci] = 0;
           st.half[ci] = 0;
           st.setTileSilent(x, y, def.beam, 0, 0);
+          genFrameNeighbors(st, rng, x, y, 'setTile');
         }
         if (st.inBounds(x, found)) {
           const bi = st.idx(x, found);

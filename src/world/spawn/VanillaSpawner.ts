@@ -2919,7 +2919,7 @@ export class VanillaSpawner {
         if (N(2)) {
           return D(this.spawnArmedZombies && expert && N(2) ? 591 : 590);
         }
-        return D(this.getBasicSlimeToSpawn(true));
+        return D(this.getBasicSlimeToSpawn(true, this.spawnTileType, rng));
       }
       // L4612：苔藓僵尸 Moss Zombie 691——墓地专属 RollOnlyBadLuckExtreme(200)
       if (this.ZoneGraveyard && N(200)) return D(691);
@@ -2938,7 +2938,6 @@ export class VanillaSpawner {
       //   expertMode && Next(3)==0，按 zombieStyle 选型（0→430/2→432/3→433/4→434/
       //   5→435/6→436；style 1 无持械变体；switch 缺省 430）
       if (this.spawnArmedZombies && expert && this.zombieStyle !== 1 && N(3)) {
-      if (expert && this.zombieStyle !== 1 && N(3)) {
         const armed = [430, 430, 432, 433, 434, 435, 436][this.zombieStyle] ?? 430;
         return D(armed);
       }

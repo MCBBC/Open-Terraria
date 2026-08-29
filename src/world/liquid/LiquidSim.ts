@@ -1341,7 +1341,7 @@ export class LiquidSim {
       const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
       // 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1287 `thisLiquidType != 0 &&
       // tileCut`——岩浆/蜂蜜/微光三路恒真,水路无此支;★R8-23 曾误译 selfT!==1）
-      if (belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
+      if (belowAct && this.cutIds.has(belowT)) { (globalThis as unknown as { __swCutProbe?: (x: number, y: number, t: number) => void }).__swCutProbe?.(x, y + 1, belowT); this.killTileAt(x, y + 1); }
       // 落块门（Liquid.cs:1294）：下方空 / tileObsidianKill / 容器位 三者其一
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 1; return; } // ★G2#98：vanilla liquidType(0) 即水型位（Tile.cs:220 case0 清 bits5-6）；JS 1 基水=1，曾写 0 使归零后本格类型域不自洽，下灌门类型等值比较永假
@@ -1389,7 +1389,7 @@ export class LiquidSim {
       const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
       // 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1287 `thisLiquidType != 0 &&
       // tileCut`——岩浆/蜂蜜/微光三路恒真,水路无此支;★R8-23 曾误译 selfT!==1）
-      if (belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
+      if (belowAct && this.cutIds.has(belowT)) { (globalThis as unknown as { __swCutProbe?: (x: number, y: number, t: number) => void }).__swCutProbe?.(x, y + 1, belowT); this.killTileAt(x, y + 1); }
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 1; return; } // ★G2#98：vanilla liquidType(0) 即水型位（Tile.cs:220 case0 清 bits5-6）；JS 1 基水=1，曾写 0 使归零后本格类型域不自洽，下灌门类型等值比较永假 // 1456 统一 24
       const type = dt === 4 ? AETHERIUM : dt === 2 ? CRISPY_HONEY : HONEY_BLOCK;
@@ -1439,7 +1439,7 @@ export class LiquidSim {
       const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
       // 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1287 `thisLiquidType != 0 &&
       // tileCut`——岩浆/蜂蜜/微光三路恒真,水路无此支;★R8-23 曾误译 selfT!==1）
-      if (belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
+      if (belowAct && this.cutIds.has(belowT)) { (globalThis as unknown as { __swCutProbe?: (x: number, y: number, t: number) => void }).__swCutProbe?.(x, y + 1, belowT); this.killTileAt(x, y + 1); }
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 1; return; } // ★G2#98：vanilla liquidType(0) 即水型位（Tile.cs:220 case0 清 bits5-6）；JS 1 基水=1，曾写 0 使归零后本格类型域不自洽，下灌门类型等值比较永假
       // ★BBBBBBB 同 lavaCheck：合并支类型保留（Liquid.cs:1319-1320 只清 liquid）

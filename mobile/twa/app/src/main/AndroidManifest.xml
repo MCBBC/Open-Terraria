@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/TwaTheme">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|density|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- 桌面长按图标直达 URL 的 App Action(TWA 惯例) -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="sandbox.vinlic.com" />
+            </intent-filter>
+
+            <!-- LauncherActivity 编排参数:入口 URL 带 ?twasw=1 → AssetCache 注册
+                 sw-twa.js(文档 SWR + boot precache,离线冷启动面) -->
+            <meta-data
+                android:name="android.support.customtabs.trusted.DEFAULT_URL"
+                android:value="https://sandbox.vinlic.com/?twasw=1" />
+            <!-- 状态栏/导航栏融色(与 manifest theme_color 一致) -->
+            <meta-data
+                android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR"
+                android:resource="@color/twa_color" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR"
+                android:resource="@color/twa_color" />
+            <meta-data
+                android:name="android.support.customtabs.trusted.SPLASH_SCREEN_BACKGROUND"
+                android:resource="@color/twa_color" />
+            <!-- 横屏锁(PWA manifest orientation 的原生执行位) -->
+            <meta-data
+                android:name="android.support.customtabs.trusted.SCREEN_ORIENTATION"
+                android:value="sensorLandscape" />
+            <!-- 身份校验:数字资产链接走线上 /.well-known/assetlinks.json(已备,
+                 指纹=android-shell keystore sw.jks);校验通过前首启可能短暂显示
+                 地址栏,通过后彻底全屏 -->
+            <meta-data
+                android:name="android.support.customtabs.trusted.RELATION"
+                android:value="handle_all_urls" />
+        </activity>
+    </application>
+</manifest>

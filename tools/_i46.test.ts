@@ -5,12 +5,108 @@
 // 五掷+门跳 → 各槽零消耗冻结 → SmoothWorld(4.83M!) 与 Speleothems(8.97M) 无门照跑
 // → FinalCleanup(7)+FinalizeSecretSeeds(-4 探针 5998)。
 // 用法：cd game && SW_I46=1 npx vitest run tools/_i46.test.ts
-import { it } from 'vitest';
+import { it, expect } from 'vitest';
 import { readFileSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 
 process.env.SW_MB_1457 ||= '1';                          // 认证链基准=1457 执行序
+
+// ---------------------------------------------------------------------------
+// ★IIIII44 复核批守卫（无条件常跑，不依赖 SW_I46）：
+//   「常量表有/装配漏」家族回归（SkyblockRuntime anchorSets.dungeonTile 漏键 →
+//   undefined.has 实机崩案 2026-08-29 的域内免疫面）。三条线：
+//   A. anchorSets 全键行为覆盖（每个锚类都过一遍 .has()——含崩案支 dungeonTile）；
+//   B. sbDenySome 由单源清单程序化驱动的不变量（组合旗任一开→false/纯天空盒→true）；
+//   C. Main.tileTable 单源消费冒烟（锁定不再回退局部手抄子集）。
+// ---------------------------------------------------------------------------
+import { SkyblockRuntime } from '../src/world/SkyblockRuntime';
+import { TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
+import { SB_DENYSOME_BREAKERS, sbDenySome } from '../src/world/gen/vanilla/SkyblockPass';
+import { DG_TILE_TABLE } from '../src/world/gen/vanilla/DungeonPass';
+
+it('IIIII44·G1 anchorSets 全键行为面（含 dungeonTile 崩案支 ×2 路）', () => {
+  const W = 10, H = 240;
+  const st = {
+    w: W, h: H,
+    flags: new Uint8Array(W * H), type: new Uint16Array(W * H), wall: new Uint16Array(W * H),
+    idx: (x: number, y: number): number => y * W + x,
+  };
+  const put = (x: number, y: number, internalId: number, wall = 0): void => {
+    const i = st.idx(x, y);
+    st.flags[i] = 1; st.type[i] = internalId; st.wall[i] = wall;
+  };
+  const sh = (sheet: number): number => {
+    const t = TILE_INTERNAL_BY_SHEET.get(sheet);
+    if (t === undefined || t < 0) throw new Error('sheet 未映射 ' + sheet);
+    return t;
+  };
+  const rt = new SkyblockRuntime(st as never, () => true);
+
+  // 非锚点石块走满 else-if 链到 dungeonTile（=崩案触发路径本身）
+  put(1, 100, sh(1));
+  expect(() => rt.warmFullScan()).not.toThrow();
+
+  // 祭坛 26 → noAltars=false
+  {
+    const s2 = { w: W, h: H, flags: new Uint8Array(W * H), type: new Uint16Array(W * H), wall: new Uint16Array(W * H), idx: st.idx };
+    s2.type[s2.idx(2, 100)] = sh(26); s2.flags[s2.idx(2, 100)] = 1;
+    const r = new SkyblockRuntime(s2 as never, () => true); r.warmFullScan();
+    expect(r.flags.noAltars).toBe(false);
+  }
+  // 神庙砖 226 与墙87 双路 → noTemple=false
+  {
+    const s2 = { w: W, h: H, flags: new Uint8Array(W * H), type: new Uint16Array(W * H), wall: new Uint16Array(W * H), idx: st.idx };
+    s2.type[s2.idx(2, 100)] = sh(226); s2.flags[s2.idx(2, 100)] = 1;
+    const r = new SkyblockRuntime(s2 as never, () => true); r.warmFullScan();
+    expect(r.flags.noTemple).toBe(false);
+  }
+  {
+    const s2 = { w: W, h: H, flags: new Uint8Array(W * H), type: new Uint16Array(W * H), wall: new Uint16Array(W * H), idx: st.idx };
+    s2.wall[s2.idx(3, 100)] = 87;
+    const r = new SkyblockRuntime(s2 as never, () => true); r.warmFullScan();
+    expect(r.flags.noTemple).toBe(false);
+  }
+  // 狱石 58 / 化石 404 / 水晶 12 / 熔炉 77 与 133 两臂
+  for (const [sheetNo, flagName] of [[58, 'noHellstone'], [404, 'noFossils'], [12, 'noLifeCrystals'], [77, 'noHellforge'], [133, 'noHellforge']] as Array<[number, 'noHellstone' | 'noFossils' | 'noLifeCrystals' | 'noHellforge']>) {
+    const s2 = { w: W, h: H, flags: new Uint8Array(W * H), type: new Uint16Array(W * H), wall: new Uint16Array(W * H), idx: st.idx };
+    s2.type[s2.idx(2, 100)] = sh(sheetNo); s2.flags[s2.idx(2, 100)] = 1;
+    const r = new SkyblockRuntime(s2 as never, () => true); r.warmFullScan();
+    expect(r.flags[flagName]).toBe(false);
+  }
+  // 地牢双路：tile 41（hasTile 支,即曾漏装配的键）与 wall 7（wallId 默认表）
+  {
+    const s2 = { w: W, h: H, flags: new Uint8Array(W * H), type: new Uint16Array(W * H), wall: new Uint16Array(W * H), idx: st.idx };
+    s2.type[s2.idx(2, 100)] = sh(41); s2.flags[s2.idx(2, 100)] = 1;
+    const r = new SkyblockRuntime(s2 as never, () => true); r.warmFullScan();
+    expect(r.flags.noDungeon).toBe(false);
+  }
+  {
+    const s2 = { w: W, h: H, flags: new Uint8Array(W * H), type: new Uint16Array(W * H), wall: new Uint16Array(W * H), idx: st.idx };
+    s2.wall[s2.idx(2, 100)] = 7;
+    const r = new SkyblockRuntime(s2 as never, () => true); r.warmFullScan();
+    expect(r.flags.noDungeon).toBe(false);
+  }
+});
+
+it('IIIII44·G2 denySome 单源清单不变量', () => {
+  // 非 skyblock 恒 false；纯 skyblock 真；清单逐旗开启各降级 false（新增清单成员自动纳入断言）
+  expect(sbDenySome(undefined)).toBe(false);
+  expect(sbDenySome({} as never)).toBe(false);
+  expect(sbDenySome({ skyblock: true } as never)).toBe(true);
+  for (const k of SB_DENYSOME_BREAKERS) {
+    const f = { skyblock: true, [k]: true } as never;
+    expect(sbDenySome(f)).toBe(false);
+  }
+});
+
+it('IIIII44·G3 tileTable 单源消费冒烟', () => {
+  // 权威表全量位抽样（含 :10131 循环族 435-439 与末尾 710）——防回退为手写子集
+  expect(DG_TILE_TABLE.size).toBe(81);                    // Main.cs 直赋 76 + 循环族5 −重叠0
+  for (const sh of [14, 18, 19, 87, 88, 101, 114, 280, 281, 296, 309, 364, 380, 405, 414, 427, 435, 437, 439, 469, 542, 556, 582, 605, 612, 619, 632, 645, 710]) {
+    if (!DG_TILE_TABLE.has(sh)) throw new Error(`DG_TILE_TABLE 缺 ${sh}`);
+  }
+});
 
 const RUN = process.env.SW_I46 === '1';
 const G2 = process.env.SW_I46_G2 ?? '/tmp/iii46-out/x86-skyblock';

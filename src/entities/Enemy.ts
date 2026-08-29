@@ -2623,9 +2623,16 @@ export class Enemy extends Entity {
     let maxValue = 20;                             // :60753 主桶分母
     let maxValue2 = 40;                            // :60754 副桶分母
     let num2 = 1;                                  // :60755 掷骰次数
-    // WorldGen.Skyblock.lowTiles（:60757-60768：maxValue2=20/num2+4/maxValue=15，-6 再+5）
-    // ——天空盒世界未实装，跳过
-    if (netId === -6) num2 += 4;                   // :60769-60772
+    // ★IIIII61 WorldGen.Skyblock.lowTiles 首臂（NPC.cs:60957-60970）：低格世界
+    //   maxValue2=20 / num2+4 / maxValue=15，且 netID==-6 再 +5（非低格 -6 仅 +4）
+    if (w.skyblockLowTiles) {
+      maxValue2 = 20;
+      num2 += 4;
+      maxValue = 15;
+      if (netId === -6) num2 += 5;
+    } else if (netId === -6) {
+      num2 += 4;                                   // :60769-60772
+    }
     if (w.weather.slimeRain) num2 += 2;            // :60773-60775 Main.slimeRain
     const surfaceY = w.groundLevel;                // Main.worldSurface（tile）
     const yTile = this.y / TILE;
@@ -2637,25 +2644,47 @@ export class Enemy extends Entity {
         if (sf.remix && roll(maxValue) === 0) {    // Main.remixWorld
           this.ai1 = this.slimeGenItemInsideBody(this.ai0 === -999);
         }
-        // else if Skyblock.noHellstone && downedBoss3 && Next(15)==0 → 174 地狱石（:60789-60793）
-        //   ——天空盒未实装跳过
+        // ★IIIII61 Skyblock.noHellstone && downedBoss3 && Next(15)==0 → 174 狱石
+        else if (w.skyblockNoHellstone
+          && !!(w.flags['downed_35'] || w.flags.downedSkeletron)
+          && roll(15) === 0) {
+          this.ai1 = 174;
+        }
       } else if (yTile > surfaceY && (vid === 147 || vid === 184)) {  // :60796 地下棘刺史莱姆
         // 两 lowTiles 子分支（:60800-60811）与普通分支同体 → 合并
         if (roll(maxValue2) === 0) this.ai1 = roll(2) === 0 ? 1103 : 593;  // 淤泥/雪块
       } else if (vid === 537) {                    // :60812 沙漠史莱姆
-        // Skyblock.noFossils && Next(5)==0 → 3347 沙漠化石（:60813-60816）：天空盒未实装跳过
+        // ★IIIII61 Skyblock.noFossils && Next(5)==0 → 3347 沙漠化石（:61023-61027）
+        if (w.skyblockNoFossils && roll(5) === 0) this.ai1 = 3347;
       } else {
         if (vid !== 1 || netId === -5 || netId === -4) continue;   // :60815 仅蓝史莱姆族
         let num4 = 500;                            // :60817 史莱姆法杖分母
         if (sf.noTraps) num4 = 20;                 // Main.noTrapsWorld
         else if (sf.getGoodWorld) num4 = 100;      // Main.getGoodWorld
         else if (this.cy < surfaceY * TILE) num4 = -1;             // 地表蓝史莱姆不掷法杖
-        // isThisInTheRockLayer && (noLifeCrystals||lowTiles) && !AnyLifeCrystalSlimes() &&
-        //   Next(200)==0 → 29 生命水晶（:60822-60826）：天空盒未实装跳过
-        // Skyblock.lowTiles && 地下 && Next(1000)==0 → 语音物品（:60827-60830）：同上连带跳过
-        const genuineParty = !!(game as unknown as { partyState?: { genuineParty?: boolean } })
-          .partyState?.genuineParty;               // BirthdayParty.GenuineParty（真派对）
-        if (genuineParty && this.cy < surfaceY * TILE) {            // :60831-60839 地表真派对
+        // ★IIIII61 蓝史莱姆三臂前置接入（NPC.cs:61047-61078 原版为一条互斥
+        //   else-if 链的【最前两臂】——必须与后续派对/蜜蜂臂共链，不得另起分支）：
+        //   ① rockLayer && (noLifeCrystals||lowTiles) && !AnyLifeCrystalSlimes() &&
+        //      Next(200)==0 → ai[1]=29（水晶史莱姆，死后掉生命水晶）
+        //      （AnyLifeCrystalSlimes :90966-90976 = 场上存在 type==1 && ai[1]==29）
+        //   ② lowTiles && 地下(worldSurface 以深) && Next(1000)==0 →
+        //      Item.GetRandomVoiceItem（Item.cs:49431-49450：Next(14) 池=
+        //      5500-5509/5484/5485/5534/5499 录音道具）；未注册键回退空 -1
+        const genuineParty = !!w.scene?.partyGenuine;       // BirthdayParty.GenuineParty（真派对；NPC.cs:61055 判据=本体非 PartyIsUp）
+        if (rockLayer(yTile) && (w.skyblockNoLifeCrystals || w.skyblockLowTiles)
+          && !(game.enemies() as Array<Enemy>).some((o) => o !== this && !o.dead
+            && o.vanillaId === 1 && o.ai1 === 29)
+          && roll(200) === 0) {
+          this.ai1 = 29;
+        } else if (w.skyblockLowTiles && yTile > surfaceY && roll(1000) === 0) {
+          const VOICE_POOL: Record<number, number> = {
+            1: 5500, 2: 5501, 3: 5502, 4: 5503, 5: 5504, 6: 5505, 7: 5506,
+            8: 5507, 9: 5508, 10: 5509, 11: 5484, 12: 5485, 13: 5534, 0: 5499,
+          };
+          const vidPick = roll(14);
+          const itemId = VOICE_POOL[vidPick] ?? 5499;
+          this.ai1 = VANILLA_ITEM_KEY_BY_ID[itemId] ? itemId : -1;
+        } else if (genuineParty && this.cy < surfaceY * TILE) {    // :60831-60839 地表真派对
           this.ai1 = roll(2) === 0 ? 3736 + roll(3) : 1345;         // Next(3736,3739) 气球/彩纸
         } else if (netId === -10 && roll(20) === 0) {               // :60840-60849 蜜蜂丛林变种
           const num5 = sf.notTheBees ? roll(4) : roll(3);           // notTheBeesWorld 扩到 314/5395
@@ -12495,6 +12524,20 @@ export class Enemy extends Entity {
             || (w.seedFlags?.remix && w.seedFlags?.getGoodWorld)),
           // WorldGen.Skyblock.noAltars（读档全图祭坛普查缓存，Game 侧实现）
           noAltarsInWorld: game.worldNoAltars?.() ?? false,
+          // ★IIIII61 秘种子掉落条件族数据源（Conditions.cs:1448-1566 + SpecialSeedFeatures）
+          dontStarveWorld: !!w.seedFlags?.theConstant,
+          tenthAnniversaryWorld: !!w.seedFlags?.tenthAnniversary,
+          skyblockLowTiles: !!w.skyblockLowTiles,
+          // SpecialSeedFeatures.ShouldDropExtraGel（十周年×醉酒×非 remix×非蜜蜂）
+          extraGelWorld: !!(w.seedFlags?.tenthAnniversary && w.seedFlags?.drunkWorld
+            && !w.seedFlags?.remix && !w.seedFlags?.notTheBees),
+          playerHasSickle: (() => {
+            // Player.HasItemInInventoryOrOpenVoidBag（Conditions.cs:1560）：
+            // 背包+四随身银行扫描计数 ≥1；虚空袋 5412 内物格 SW 未建模（登记）
+            try {
+              return (p.inv.countOf(1786) > 0);
+            } catch { return false; }
+          })(),
           extras: game.dropContext?.(),
         };
         const unmapped = (id: number) => {

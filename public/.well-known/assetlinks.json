@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.vinlic.sandboxworld.twa",
+      "sha256_cert_fingerprints": [
+        "8A:41:96:43:42:E0:44:3A:90:09:9C:62:A9:9B:20:C6:43:86:1B:09:AF:01:9E:26:0E:28:3E:7D:37:67:36:2B"
+      ]
+    }
+  }
+]

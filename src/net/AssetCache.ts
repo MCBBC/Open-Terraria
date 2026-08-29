@@ -502,10 +502,16 @@ async function doInitAssetCache(): Promise<void> {
     // ★register 重试(2026-08-27):手机切网/弱网下 register/ready 偶发抛错或
     //   挂起,原单发失败即静默降级(enabled=false)→ hold 秒放+warm 不跑+SW 裸奔
     //   =菜单背景全 404(用户手机实测第四刷)。3 次退避重试+ready 10s 竞速。
+    // ★TWA 分流(2026-08-30):start_url 带 ?twasw=1 时注册 sw-twa.js——TWA 形态
+    //   需要文档缓存优先(离线冷启动),桌面浏览器保持 sw.js 文档网络优先语义。
+    //   两者唯一差异在文档策略与 boot precache,资产层行为完全同构(生成器见
+    //   scripts/gen-sw-twa.mjs,由 public/sw.js 打补丁产出,fail-loud marker)。
+    const swQ = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
+    const swFile = swQ.has('twasw') ? 'sw-twa.js' : 'sw.js';
     let reg: ServiceWorkerRegistration | null = null;
     for (let a = 0; a < 3 && !reg; a++) {
       try {
-        reg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
+        reg = await navigator.serviceWorker.register(swFile, { updateViaCache: 'none' });
       } catch { await new Promise((r) => setTimeout(r, 1000 * (a + 1))); }
     }
     if (!reg) return;

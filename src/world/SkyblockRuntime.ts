@@ -82,14 +82,12 @@ export class SkyblockRuntime {
     private skyblockWorld: () => boolean,
     private dungeonWallIds: Iterable<number> = [7, 8, 9, 94, 95, 96, 97, 98, 99],
   ) {
-    this.anchorSets = {
-      altar: tileSet(ANCHORS.altar),
-      temple: tileSet(ANCHORS.temple),
-      hellstone: tileSet(ANCHORS.hellstone),
-      fossils: tileSet(ANCHORS.fossils),
-      lifeCrystal: tileSet(ANCHORS.lifeCrystal),
-      hellforge: tileSet(ANCHORS.hellforge),
-    };
+    // ★遍历 ANCHORS 全键构建——曾手写六键漏掉 dungeonTile,calculate 的地牢派生
+    // 判定读 undefined.has 当场炸(2026-08-28 用户实报:进世界 afterWorldLoad
+    // warmFullScan 即抛);按 ANCHORS 键面构建=新增锚点类永不再漏
+    this.anchorSets = Object.fromEntries(
+      Object.entries(ANCHORS).map(([k, sheets]) => [k, tileSet(sheets)]),
+    ) as Record<string, Set<number>>;
   }
 
   /**
@@ -100,10 +98,13 @@ export class SkyblockRuntime {
     const st = this.storeLike;
     for (let y = 40; y < st.h - 40; y++) {
       const i = st.idx(x, y);
+      // ★IIIII44 复核批修正（CountTiles :71743-71748 逐句）：hasWall 记账在
+      //   active() 门【外】——空格背景墙同样入账；曾嵌在活性门内=悬空地牢墙/
+      //   神庙墙永远不识别（守卫测试 G1 wall 双路抓出）。
+      if (st.wall[i] > 0) this.seenWalls.add(st.wall[i]);
       if (st.flags[i] === 0) continue;                      // !tile.active()
       this.activeTiles++;
       this.seenTiles.add(st.type[i]);
-      if (st.wall[i] > 0) this.seenWalls.add(st.wall[i]);
     }
   }
 
