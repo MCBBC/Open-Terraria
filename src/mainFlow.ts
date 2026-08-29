@@ -1076,7 +1076,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     titleMenu = new TitleMenu(root, {
       onSinglePlayer: () => gateAssetsOrRun(() => showCharacterSelect()),
       onSettings: () => openSettings(false),
-      onQuit: () => ui.toast(Lang.text('Mods.SandboxWorld.Toast.QuitUnsupported')),
+      onQuit: () => {
+        // 退出三态(2026-08-29 用户定案)：桌面壳=原生退出；浏览器=window.close()
+        // (脚本打开的窗/单历史标签可关)；关不掉的普通标签页给"告别幕布"兜底
+        const sh = (window as unknown as { sandboxDesktop?: { isShell?: boolean; quit?: () => void } }).sandboxDesktop;
+        if (sh?.isShell && sh.quit) { sh.quit(); return; }
+        window.close();
+        if (!window.closed) showFarewellCurtain(root);
+      },
       onCredits: () => ui.toast(Lang.text('Mods.SandboxWorld.CreditsLine')),
       onMultiplayer: () => showMultiplayerSelect(),
       // 素材包管理(自制:重制热补丁;面板动态 import 分块,HousingPanel 同模式)
@@ -1264,4 +1271,28 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     playStart: 0,
     get playStartNow() { return Date.now() - playStart; },
   } as FlowHandle & { playStartNow: number };
+}
+
+/** 退出告别幕布（浏览器侧 window.close() 被策略拒绝时的兜底,2026-08-29）：
+ *  普通标签页不允许脚本关闭,给出可读终态而非无响应的假死按钮。 */
+function showFarewellCurtain(root: HTMLElement): void {
+  if (document.getElementById('__swFarewell')) return;
+  const el = document.createElement('div');
+  el.id = '__swFarewell';
+  el.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.96);'
+    + 'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;'
+    + 'color:#e8e8e8;font-family:inherit;user-select:none;';
+  const title = document.createElement('div');
+  title.textContent = Lang.text('Mods.SandboxWorld.Farewell.Title');
+  title.style.cssText = 'font-size:22px;letter-spacing:1px;';
+  const hint = document.createElement('div');
+  hint.textContent = Lang.text('Mods.SandboxWorld.Farewell.Hint');
+  hint.style.cssText = 'font-size:13px;opacity:.65;';
+  const btn = document.createElement('button');
+  btn.textContent = Lang.text('Mods.SandboxWorld.Farewell.Reload');
+  btn.style.cssText = 'margin-top:8px;padding:8px 26px;font-size:14px;cursor:pointer;'
+    + 'background:#2b6db3;color:#fff;border:1px solid #4d90d0;border-radius:4px;';
+  btn.onclick = () => location.reload();
+  el.append(title, hint, btn);
+  root.appendChild(el);
 }

@@ -36,7 +36,7 @@ const out = await page.evaluate(async () => {
   // 并排：guide 兔 僵尸 各隔 4 格，玩家居中
   const gy = 68 * 16;
   const guide = new TownNPC('guide', 56 * 16, gy); g.entities.add(guide, 'npcs');
-  const bunny = new Enemy('bunny', 64 * 16, gy); g.entities.add(bunny, 'critters');
+  const bunny = Enemy.fromVanilla(46, 64 * 16, gy); g.entities.add(bunny, 'critters');
   const zomb = new Enemy('zombie', 72 * 16, gy); g.entities.add(zomb, 'enemies');
   const ids = {
     guide: guide.id, bunny: bunny.id, zomb: zomb.id,

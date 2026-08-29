@@ -3964,9 +3964,9 @@ export class UI {
    *  cols=每格行数排列(T3 两行五列 / T2 单行十格);q=统一格 scale——紧凑档取消
    *  选中尺寸跳变(C 方案定案,选中态由 Back14/20 贴图+亮度区分),步进均匀。 */
   private hotbarCompact(): { cols: number; q: number } | null {
-    const t = hudTier();
-    if (t === 't3') return { cols: 5, q: 0.78 };     // 竖屏两行五列,视觉≈41px 格
-    if (t === 't2') return { cols: 10, q: 0.85 };    // 横屏平排≈44px
+    // 2026-08-29 官方截图对齐:横屏(含手机)hotbar 保持原版 52px 一行不缩
+    // (844 宽放得下 ~490px 行,官方平板/手机横屏同样原样);仅竖屏紧凑化
+    if (hudTier() === 't3') return { cols: 5, q: 0.78 };   // 竖屏两行五列,视觉≈41px 格
     return null;
   }
 

@@ -12,7 +12,7 @@
 //   - 性能旗集固化常量（★判例①：默认不带 frame-limit/vsync 解锁旗）
 //   - 前台 powerSaveBlocker；DIAG 注入 remote-debugging-port
 
-import { app, BrowserWindow, Menu, shell, powerSaveBlocker, dialog } from 'electron';
+import { app, BrowserWindow, Menu, shell, powerSaveBlocker, dialog, ipcMain } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import { statSync, existsSync } from 'node:fs';
 import { join, normalize as pathNormalize, sep } from 'node:path';
@@ -59,6 +59,14 @@ function normalizeUrl(u) {
 const EXPLICIT_URL = explicitUrlArg() ? normalizeUrl(explicitUrlArg()) : '';
 
 for (const [sw, val] of CHROMIUM_SWITCHES) app.commandLine.appendSwitch(sw, val);
+
+// 默认语言=中文(2026-08-29 用户定案)：navigator.languages 探测链在壳内恒 zh-CN
+// ⇒ Options.load 的自动探测命中 zh-Hans。玩家在设置里显式选语言后仍永久尊重其
+// 选择(langExplicit 落盘)，此处只决定"从未选过"的初值。
+app.commandLine.appendSwitch('lang', 'zh-CN');
+
+// 页面 → 壳 的退出通道（游戏菜单"退出"按钮走 preload 桥）
+ipcMain.on('sandbox-desktop-quit', () => app.quit());
 
 if (process.env.SW_DIAG || process.env.SANDBOX_DESKTOP_CDP_PORT) {
   const port = Number(process.env.SANDBOX_DESKTOP_CDP_PORT || 9333);

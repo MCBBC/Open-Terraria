@@ -2241,13 +2241,16 @@ function growCheckSeaweed(st: TileStore, rng: RNG, x: number, y: number): void {
       st.half[kk] = 0;
       st.slope[kk] = 0;
       squareTileFrame(st, rng, x, y - 1);
-      // ★IIII34 定罪①：GrowCheckSeaweed 走的是 PlaceTile(x,y-1,549)（cs:59435→
-      //   PlaceTile 内 case549 支调 PlaceUnderwaterPlant（自带一次 SquareTileFrame），
-      //   随后 PlaceTile 成功尾再次无条件 SquareTileFrame(i,j)（rig src
-      //   Terraria/WorldGen.cs cs≈60856 `if (tile.active()) { …; SquareTileFrame(i,j);
-      //   result=true; }`）。旧移植只跑内层一次——每个海藻落位少一轮九宫重帧：
-      //   苔芽184 无条件 Next(3) 第二掷、CU 带外 reroll 双跑全缺 ⇒ 掷流自首个含苔邻格
-      //   的落位起 ±1 漂移级联放大（familyA/B 全部下游形态源）。
+      // ★IIII34 定罪①：GrowCheckSeaweed 走的是 PlaceTile(x,y-1,549,mute)
+      //   （1457 WorldGen.cs:59454）；case 549 分派支（:60140）调
+      //   PlaceUnderwaterPlant（:59007，其内 :59024 自带一次 SquareTileFrame），
+      //   返回后 PlaceTile 成功尾【再次无条件】SquareTileFrame(i,j)
+      //   （:60746-60752：if(tile.active()){ if(TruncatesWalls)SquareWallFrame;
+      //   SquareTileFrame; result=true; }，549 非 TruncatesWalls 跳 SquareWallFrame）。
+      //   ⇒ vanilla 每个海藻落位跑两轮九宫；旧移植只跑内层一轮——邻格苔芽184
+      //   无条件 Next(3) 第二掷、CU 带外 reroll 双跑全缺 ⇒ 掷流自首个含苔邻格的
+      //   落位起 ±1 漂移级联放大（familyA 香蒲沙底 / familyB 海藻塔换位皆下游形态源；
+      //   rig 实证：run5 WPLOG 同一窗口内 (3466,381) 芽 184R 掷两次 ln1189388+1189391）。
       squareTileFrame(st, rng, x, y - 1);
     }
   }

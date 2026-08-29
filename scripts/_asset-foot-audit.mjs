@@ -1,46 +1,34 @@
-// 资产端脚底行审计（用户报：NPC 碰撞盒偏上/视觉沉降）：
-// 对 NPC_22.png(原版帧条) 与 Guide_Default.png(TownNPC profile 变体表) 逐帧测
-// 「非透明像素最低行 F」「最高行 H」，与 repo drawTownNPC 的推导式对比：
-//   vanilla: 绘制中心 = 盒中心(+num47,Guide=0) → 视觉脚底 y = cy - frameH/2 + F
-//            站立地面盒底 = cy + boxH/2 → 脚底相对盒底 = F - frameH/2 - boxH/2
-//   合法取值应为 0（脚踩盒底）;正值=视觉沉降进地。
+// 资产端「美术脚底 vs 碰撞盒底」审计（用户报：NPC/小动物沉降、EoW 盒错位）
+// 公式：repo draw = 帧中心钉盒中心(+addYT,guide/bunny/EoW 均无表项=0) →
+//   美术脚底相对盒底 = (F_bottom_ex - frameH/2) - boxH/2 ；vanilla 同式同资产 → 相等即 1:1。
 import { readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 
-const scanFrame = (png, sx, sy, sw, sh) => {
+const vf = JSON.parse(readFileSync('public/sprites/vanilla-npcs.json', 'utf8'));
+const scan = (png, sy, sh) => {
   let top = -1, bottom = -1;
   for (let y = sy; y < sy + sh; y++) {
-    let rowHas = false;
-    for (let x = sx; x < sx + sw; x++) {
+    for (let x = 0; x < png.width; x++) {
       const idx = (png.width * y + x) << 2;
-      if (png.data[idx + 3] > 16) { rowHas = true; break; }
+      if (png.data[idx + 3] > 16) { if (top < 0) top = y - sy; bottom = y - sy; break; }
     }
-    if (rowHas) { if (top < 0) top = y - sy; bottom = y - sy; }
   }
   return { top, bottom };
 };
-
-const scanFrame = (png, sx, sy, sw, sh) => {
-  let top = -1, bottom = -1;
-  for (let y = sy; y < sy + sh; y++) {
-    let rowHas = false;
-    for (let x = sx; x < sx + sw; x++) {
-      const idx = (png.width * y + x) << 2;
-      if (png.data[idx + 3] > 16) { rowHas = true; break; }
-    }
-    if (rowHas) { if (top < 0) top = y - sy; bottom = y - sy; }
+for (const vid of ['22', '208', '46', '13', '6']) {
+  const m = vf[vid];
+  if (!m) continue;
+  const file = `public/sprites/vanilla/NPC_${vid}.png`;
+  let png;
+  try { png = PNG.sync.read(readFileSync(file)); } catch { console.log(vid, 'no sheet'); continue; }
+  const frames = m.frames ?? 1;
+  const fh = png.height / frames;
+  const boxH = m.height, boxW = m.width;
+  const rows = [];
+  for (const f of [0, Math.floor(frames / 2)]) {
+    const r = scan(png, Math.round(f * fh), Math.round(fh));
+    const feetBelowBox = (r.bottom + 1) - (fh / 2 + boxH / 2);   // 脚底行(exclusive) − 盒底线
+    rows.push({ f, headTop: r.top, artBottomEx: r.bottom + 1, feetBelowBox });
   }
-  return { top, bottom };
-};
-for (const file of ['public/sprites/vanilla/NPC_22.png', 'public/sprites/vanilla/Guide_Default.png']) {
-  const png = PNG.sync.read(readFileSync(file));
-  const FH = png.height / 26;
-  console.log(`\n== ${file}: ${png.width}x${png.height} 帧高=${FH}`);
-  const perFrame = [];
-  for (let f = 0; f < 10 && f < 26; f++) {
-    const r = scanFrame(png, 0, Math.round(f * FH), png.width, Math.round(FH));
-    // 盒：y 中心对齐后盒高 40 → 脚底应落帧内行 = FH/2 + 20（=48 当 FH=56）
-    perFrame.push({ f, top: r.top, bottom: r.bottom, feetVsBoxBottom: r.bottom - (FH / 2 + 20) });
-  }
-  console.log(JSON.stringify(perFrame));
+  console.log(`NPC_${vid} [${m.name}] ${png.width}x${png.height}/${frames}=帧高${fh} 盒${boxW}x${boxH}`, JSON.stringify(rows));
 }

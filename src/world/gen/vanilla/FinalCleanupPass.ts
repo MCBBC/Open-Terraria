@@ -603,6 +603,7 @@ function killTileGen(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
 }
 /** SquareTileFrame（cs:80924）：九宫列主序，中心 resetFrame=true（178 掷门，永不中） */
 function squareTileFrame(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  __swFnt39('SQ', x, y);
   tileFrameGen(st, ctx, x - 1, y - 1, false);
   tileFrameGen(st, ctx, x - 1, y, false);
   tileFrameGen(st, ctx, x - 1, y + 1, false);
@@ -689,8 +690,20 @@ const rollRange = (ctx: SweepCtx, min: number, maxIncl: number): number => {
   return ctx.rng ? ctx.rng.int(min, maxIncl) : min;
 };
 
+
+/** IIII39 级联族标定（probe 钩；无钩零开销） */
+function __swFnt39(tag: string, x: number, y: number, mid?: string): void {
+  const G = globalThis as unknown as { __swFntProbeI39?: { emit?: (l: string) => void; rc?: () => number } | null };
+  const pr = G.__swFntProbeI39;
+  const em = pr?.emit;
+  if (!em) return;
+  if (mid === undefined) em(tag + '|' + x + ',' + y + '|' + (pr?.rc ? pr.rc() : -1));
+  else em(tag + '|' + x + ',' + y + '|' + mid + '|' + (pr?.rc ? pr.rc() : -1));
+}
+
 /** TileFrame 生成期（cs:82067） */
 function tileFrameGen(st: TileStore, ctx: SweepCtx, x: number, y: number, reset: boolean): void {
+  __swFnt39('TF', x, y);
   // 边距 5 早退（cs:82070）；!active 清 half/slope/块漆早退（cs:82078-82082，
   // ClearBlockPaintAndCoating——RRRR 补块漆清）
   if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return;
@@ -698,7 +711,7 @@ function tileFrameGen(st: TileStore, ctx: SweepCtx, x: number, y: number, reset:
   if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0; return; }
   const sheet = SWEEP_SHEET[st.type[i]];
   if (sheet < 0) return;
-  if (frameImportantDispatch(st, ctx, x, y, sheet, reset)) return;
+if (frameImportantDispatch(st, ctx, x, y, sheet, reset)) return;
   // 非实心非 frameImportant：仙人掌 / 藤（cs:82102-82117）
   const d = TILE_DEFS[st.type[i]];
   if (!d?.solid) {
@@ -709,6 +722,7 @@ function tileFrameGen(st: TileStore, ctx: SweepCtx, x: number, y: number, reset:
 
 /** TileFrameImportant 分派（cs:85703+）——返回 true=已处理（含 no-op 族） */
 function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number, reset = false): boolean {
+  __swFnt39('TI', x, y, String(sheet));
   // frameSparse 模式跳过的读帧族（165/185/28/240族/485/72/C3X2 族——见 SweepCtx 注释）
   //   ★CCCCC：+138/411——Check2x2 完整性门读 2×2 四格帧；探针基座（金标 typ×陈旧
   //   JS 帧嵌合）上巨石/起爆器帧不可信 → 锚反解到互指的死区 → 尾 4×4 帧与 184 杀
@@ -1407,6 +1421,7 @@ function check2xXSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
 function frame184Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   const i = st.idx(x, y);
   if (ctx.stats) ctx.stats.mossVisited++;
+  __swFnt39('TR184', x, y);
   const num20 = roll3(ctx) * 18;                                 // 先掷（cs:85916）
   const side = (dx: number, dy: number): number => {
     if (!st.inBounds(x + dx, y + dy)) return -1;
@@ -1438,6 +1453,7 @@ function frame72Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void 
   const below = activeAt2(st, x, y + 1) ? sheetAt2(st, x, y + 1) : -1;
   if (below !== 72 && below !== 70) { killTileGen(st, ctx, x, y); return; }
   if (above !== 72 && st.frameX[i] === 0) {
+    __swFnt39('TR72', x, y);
     const n = roll3(ctx);                                        // cs:86600
     st.frameX[i] = 18;
     st.frameY[i] = n === 0 ? 0 : n === 1 ? 18 : 36;
@@ -1551,6 +1567,7 @@ function frame178Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, reset
   else if (anchorOk(x + 1, y, 3) && solidNS(x + 1, y)) dir = 3;     // 右锚 → 162
   else if (anchorOk(x, y - 1, 0) && solidNS(x, y - 1)) dir = 1;     // 上锚 → 54
   if (dir < 0) { killTileGen(st, ctx, x, y); return; }
+  if (reset && ctx.rng) __swFnt39('TR178', x, y);
   const num21 = (!reset) ? frameY2 % 54 : (ctx.rng ? ctx.rng.nextInt(3) * 18 : 0);
   let num22 = -1;
   if (dir === 0 && (frameY2 < 0 || frameY2 > 36)) num22 = 0;
@@ -2162,6 +2179,12 @@ function checkDoorOpenSweep(st: TileStore, ctx: SweepCtx, x: number, y: number):
 /** Check1x1（cs:45243）：下方非 SolidTileAllowBottomSlope 或巨石族 → 杀（624 特例门
  *  为 AbigailsFlower 运行期逻辑，生成期不触发）。#77 实证 135×1（229 支撑非实心期）。 */
 function check1x1Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  {
+    const bl = st.type[st.idx(x, y + 1)] ?? -1;
+    const bol = BOULDER_SHEETS.has(SWEEP_SHEET[bl] ?? -1) ? 1 : 0;
+    const sab = solidAllowBottom(st, x, y + 1) ? 1 : 0;
+    __swFnt39('C1V', x, y, bol + '' + sab);
+  }
   if (!st.inBounds(x, y + 1)) return;
   if (!solidAllowBottom(st, x, y + 1)) { killTileGen(st, ctx, x, y); return; }
   const below = rawSheetAt(st, x, y + 1);
