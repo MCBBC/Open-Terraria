@@ -1307,6 +1307,8 @@ export class LiquidSim {
    *  desertBlast=false = 跳过头部沙漠分支（生成收尾全图检查口径，见分支注释） */
   private lavaCheck(x: number, y: number, desertBlast = true) {
     const st = this.world.store;
+    // ★IIIII87 取证钩（缺省零开销）：LavaCheck 触发坐标流（kill-带归属用）
+    (globalThis as unknown as { __swI87K?: ((ev: string, x: number, y: number) => void) | undefined }).__swI87K?.('lc', x, y);
     // LavaCheck 头部沙漠分支（Liquid.cs:1457-1465）：`!remixWorldGen &&
     // !Main.dualDungeonsSeed && generatingWorld && UndergroundDesertCheck(x,y)` 时
     // 7×7 液体**类型**转岩浆（lava(true) 不动量）——地下沙漠底岩浆池来源。
@@ -1382,6 +1384,7 @@ export class LiquidSim {
    *  此前只识别水邻——岩浆/微光邻漏触发，1456 对齐补齐 */
   private honeyCheck(x: number, y: number) {
     const st = this.world.store;
+    (globalThis as unknown as { __swI87K?: ((ev: string, x: number, y: number) => void) | undefined }).__swI87K?.('hc', x, y);
     if (this.solidTileFull(x, y)) return; // WorldGen.SolidTile：半砖/坡面放行（Liquid.cs:1020）
     const i5 = this.idx(x, y);
     const il = i5 - 1, ir = i5 + 1, iu = i5 - st.w, id = i5 + st.w;
@@ -1427,6 +1430,7 @@ export class LiquidSim {
   /** 微光格与水/岩浆/蜂蜜任一接触 → Aetherium 块 659（Liquid.cs:1475-1478 →
    *  LiquidCheck(thisLiquidType=3)；GetLiquidMergeTypes L1437-1452 微光行恒为 659） */
   private shimmerCheck(x: number, y: number) {
+    (globalThis as unknown as { __swI87K?: ((ev: string, x: number, y: number) => void) | undefined }).__swI87K?.('sc', x, y);
     const st = this.world.store;
     if (this.solidTileFull(x, y)) return;
     const i5 = this.idx(x, y);

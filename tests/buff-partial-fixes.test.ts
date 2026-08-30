@@ -27,6 +27,7 @@ import { HitTile } from '../src/core/HitTile';
 import { BuffType, BUFF_DEFS } from '../src/stats/Buffs';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
+import type { GameHooks } from '../src/entities/types';
 import { hitPlayer, COLD_DAMAGE_NPCS, COLD_DAMAGE_PROJS } from '../src/entities/projTargets';
 
 const gameSrc = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
@@ -150,37 +151,38 @@ describe('KiteBuff(383)：moveSpeed +0.15 / pickSpeed -0.1（1457 终值）', ()
   });
 });
 
-// ============ 4. Stinky(120) 授予：臭味药水 2353 → 弹 371（:75203-75228） ============
-describe('Stinky(120)：投掷弹 371 消亡 80px 内授予 30s（审计"1332"系 Ichor 误植）', () => {
-  const mkDeath = (px: number, py: number) => {
+// ============ 4. Stinky(120) 授予：臭味药水 2353 → 投掷弹 371 消亡 ============
+// B1 批（2026-08-30）迁移注记：原挂在 Game.onProjectileDeath 的 partial 版（仅本地
+// 玩家 Stinky）已删除并表进 entities/ThrowKillFx.ts 三药水共表——音/尘/gore/80px
+// 圈【玩家+NPC】全量由 Arrow.killNow 尾部挂点承载（P.cs:78889-78962 同构共段；
+// ★工单"4986 NPC 不吃"与反编译相左已按源码定案，见 ThrowKillFx 头注）。全量
+// 行为回归归 tests/orphan-b1.test.ts，此处保留最小接线防退化。
+describe('Stinky(120)：投掷弹 371 消亡授予——B1 批起经 ThrowKillFx 共表（Arrow.killNow 挂点）', () => {
+  it('Arrow(371).killNow：80px 内玩家 AddBuff(120, 1800t=30s)', async () => {
+    const { Arrow } = await import('../src/entities/Arrow');
     const applied: Array<[BuffType, number]> = [];
-    const g = Object.create(Game.prototype) as unknown as {
-      onProjectileDeath: (...a: unknown[]) => void;
-    } & Record<string, unknown>;
-    g.player = {
-      dead: false, cx: px, cy: py, x: px - 10, y: py - 21, w: 20, h: 42,
+    const localPlayer = {
+      dead: false, cx: 100, cy: 100,
       buffs: { apply: (t: BuffType, s: number) => applied.push([t, s]) },
+      equipStats: {},
     };
-    return { g, applied };
-  };
-  it('弹 371 消亡：80px 内玩家 AddBuff(120, 1800t=30s)', () => {
-    const { g, applied } = mkDeath(100, 100);
-    g.onProjectileDeath(371, 95, 95, 10, 10);   // 弹心 (100,100) 距离 0
+    const g = {
+      player: localPlayer,
+      candidatePlayers: () => [localPlayer],   // Game 实现含本地玩家（types.ts 注）
+      enemies: () => [], npcs: () => [], critters: () => [],
+      playSfxFiles: () => {}, playSfx: () => {}, spawnDust: () => null,
+      world: { flags: {} },
+    } as unknown as GameHooks;
+    const a = new Arrow(95, 95, 0, 0, 1, 0, 371, null, {});   // 弹心 ≈ (102,102) 距离 <80
+    (a as unknown as { killNow: (gg: GameHooks) => void }).killNow(g);
     expect(applied).toEqual([[BuffType.Stinky, 30]]);
   });
-  it('80px 外不授；370（恋爱药水弹）/452 等他弹不误授', () => {
-    const far = mkDeath(300, 100);
-    far.g.onProjectileDeath(371, 95, 95, 10, 10);      // 距离 200 > 80
-    expect(far.applied).toEqual([]);
-    const other = mkDeath(100, 100);
-    other.g.onProjectileDeath(370, 95, 95, 10, 10);    // 119 恋爱=纯视觉未实装,不授
-    expect(other.applied).toEqual([]);
-  });
-  it('数据链：itemfunc 2353 shoot=371（投掷桥自动生成弹体）+ 鸟粪弹 1080 既有 10s 半边不回归', () => {
+  it('数据链：itemfunc 2353 shoot=371 + Kill 分派在 entities/ThrowKillFx 共表内', () => {
     const f = itemFuncOfVid(2353)!;
     expect(f.shoot).toBe(371);
     expect(f.consumable).toBeTruthy();
-    expect(gameSrc).toContain('projId === 371');
+    const fxSrc = readFileSync(new URL('../src/entities/ThrowKillFx.ts', import.meta.url), 'utf8');
+    expect(fxSrc).toContain('371: stinkPotionBurst');
   });
 });
 

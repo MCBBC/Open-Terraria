@@ -66,3 +66,81 @@ describe('弹幕命中小动物', () => {
     expect(arrow.dead).toBe(false);
   });
 });
+
+// ============================================================
+// ★F4 木网捕熔岩饵料回归（2026-08-30）：ItemCheck_CatchCritters（1457
+//  Player.cs:45085 flag=金网3183/防火网4821 豁免；:45097-45103 `!flag &&
+//  IsLavaBait[catchItem]` → Hurt(1…WrongBugNet)>0 才 AddBuff(24 OnFire,300t)
+//  且不捕捉不掉落）。IsLavaBait 表 = ItemID.cs:1080 {4845地狱蝴蝶,4847熔岩蝇,
+//  4849熔岩蜗牛} ← NPC 653/654/655。
+// ============================================================
+import { Game } from '../src/core/Game';
+import { Player } from '../src/entities/Player';
+import { Inventory } from '../src/items/Inventory';
+import { ITEM_BY_KEY } from '../src/data/items';
+import { vanillaItemKey } from '../src/data/vanillaRecipes';
+import { TILE } from '../src/core/constants';
+import { BuffType } from '../src/stats/Buffs';
+
+const itemIdOf = (vid: number): number => {
+  const k = vanillaItemKey(vid);
+  const found = k ? ITEM_BY_KEY[k] : undefined;
+  if (found === undefined) throw new Error(`vid ${vid} 未注册`);
+  return found;
+};
+
+/** netCatchCritter 最小驱动桩（同 weapon-melee-leftover 口径的私有方法直调） */
+function netStub(heldVid: number, dealt = 2) {
+  const world = new World(64, 32, 42, 'los-f4');
+  const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+  g.player = new Player(50 * TILE, 90 * TILE, new Inventory());
+  g.swing = { t: 15, dur: 15, item: itemIdOf(heldVid), useStyle: 1 };
+  const drops: string[] = [];
+  g.spawnDrop = (x: number, y: number, key: string) => { drops.push(key); return null; };
+  g.spawnParticles = () => {};
+  const dmgCalls: Array<[number, number]> = [];
+  g.damagePlayer = (dmg: number, _sx: number, _sy: number, attacker: unknown) => {
+    void attacker;
+    dmgCalls.push([dmg, Math.round(dmg)]);
+    return dealt;
+  };
+  return { g, drops, dmgCalls };
+}
+
+describe('★F4 木网捕熔岩饵料（IsLavaBait 门 ItemCheck_CatchCritters :45097-45103）', () => {
+  it('木网 1991 × 地狱蝴蝶 653：拒捕不掉物 + 自伤 1 + OnFire 300t(5s)', () => {
+    const fly = Enemy.fromVanilla(653, 40 * 16 + 8, 20 * 16 + 8)!;
+    const { g, drops, dmgCalls } = netStub(1991);
+    (g as unknown as { netCatchCritter: (c: unknown) => void }).netCatchCritter(fly);
+    expect(fly.dead).toBe(false);                       // 不捕捉（:45097 支无 CatchNPC）
+    expect(drops).toHaveLength(0);                      // 不掉落
+    expect(dmgCalls).toHaveLength(1);
+    expect(dmgCalls[0][0]).toBe(1);                     // Hurt(...,1,...) :45098
+    expect((g.player as Player).buffs.has(BuffType.OnFire)).toBe(true);   // AddBuff(24,300)
+  });
+
+  it('金网 3183 豁免：照常捕到手心（flag=true :45085）', () => {
+    const fly = Enemy.fromVanilla(653, 40 * 16 + 8, 20 * 16 + 8)!;
+    const { g, drops, dmgCalls } = netStub(3183);
+    (g as unknown as { netCatchCritter: (c: unknown) => void }).netCatchCritter(fly);
+    expect(fly.dead).toBe(true);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]).toContain('4845');
+    expect(dmgCalls).toHaveLength(0);
+  });
+
+  it('防火网 4821 同豁免照捕；对照木网×普通松鼠 299 照常捕', () => {
+    const fly = Enemy.fromVanilla(653, 40 * 16 + 8, 20 * 16 + 8)!;
+    const g1 = netStub(4821);
+    (g1.g as unknown as { netCatchCritter: (c: unknown) => void }).netCatchCritter(fly);
+    expect(fly.dead).toBe(true);
+    expect(g1.drops).toHaveLength(1);
+
+    const squirrel = Enemy.fromVanilla(299, 40 * 16 + 8, 20 * 16 + 8)!;
+    const g2 = netStub(1991);
+    (g2.g as unknown as { netCatchCritter: (c: unknown) => void }).netCatchCritter(squirrel);
+    expect(squirrel.dead).toBe(true);                   // 非熔岩饵料生物不受门影响
+    expect(g2.dmgCalls).toHaveLength(0);
+    expect((g2.g.player as Player).buffs.has(BuffType.OnFire)).toBe(false);
+  });
+});

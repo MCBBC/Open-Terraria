@@ -16,8 +16,24 @@
 //     vy−0.1 下限 −8,快到线则收敛 vy=line−cy；高于液面(含 vy≤0)→ 直接 vy=line−cy）
 //   · dry 分支：vy==0 时 vx×0.95;恒 vx×0.98；vy+0.3 终端 15.9
 //   · scale = lerp(timeLeft,60,0)（最后 1s 缩没）;rotation += vx×0.14
-//   · frame 出生 rand(4)
+//   · frame 出生 rand(4)（AI_163 :54531-54534 frameCounter==0 首拍门）——贴图资产
+//     Projectile_820.png 为 12×56 竖排 4 帧格（12×14/格,Main.cs:8591 projFrames[820]=4）
 //   · 出生动量出自射速 7 朝鼠标(ItemCheck_Shoot 向量式)
+//
+// ★2026-08-30 红队 A-5 复核【驳回】——"撞实心即 Kill"不成立,驻留才是原版真态：
+//   HandleMovement 碰撞响应 if(flag) 链 :18097..:18509 共 19 支,末支条件显式
+//   `type != 1036 && type != 500 && type != 820 && aiStyle != 160 && …`(:18509-18510,
+//   1456 同构 :16986)——排除后对 820 【无一分支可达】,链内最深层的通用
+//   `else { position += velocity; Kill(); }`(:19964-19967,位于 :18747
+//   `type!=308&&type!=377&&type!=966` 支的内层子链,红队误引为 :19952-19955 且误判其
+//   可达性)对 820 同样死路。碰撞的实际效果只剩 TileCollision 把撞面速度分量清零
+//   → 弹体贴面驻留;Kill 仅由 timeLeft 自然衰减收口(SetDefaults timeLeft=86400,
+//   AI_163 自身无 Kill;ai[0]>=10 时才经 ReduceRemainingChumsInPool :54652 钳
+//   timeLeft=60 缩没)。岸上桶 spot=Center+UnitY*16 恰落在承托【实心格】→ 消费端
+//   GetFishingPondState 只逐液格累计(:21722)/SharkSpawnChance 只扫液柱水面点
+//   (NPC.cs:5567-5572)→ "岸上一格水边白吃渔力"不成立——AI_163 的上报本身无 wet 门
+//   (:54539-54546 直呼 AddChumLocation),过滤全在消费侧,本仓同构(chumReport 无门,
+//   Bobber/VanillaSpawner 两侧各自带原版过滤)。
 // 登记偏差：泡沫 gore(1201/1208)与浮泡粒子未接 GorePiece 表——以 spawnParticles 最小
 //   视觉近似;同型互斥扫描按 game.projectiles() 只读桶等价(原版 Main.projectile 全扫);
 //   液体 wet 判定 = 弹心格 liquid>0(Arrow 469 同口径近似原版 WetCollision)。
@@ -100,15 +116,21 @@ export class ChumBucketProj extends Entity {
       chumReport(this.cx, this.cy + 16, this.x, this.y, this.w, this.h);
     }
     // scale 缩没段仅视觉（lerp(timeLeft,60)）——画侧 s 由 drawScale 承载
-    // ---- 位移（tileCollide=true:SetDefaults,通用单盒竖撞收口）----
-    const nx = this.cx + this.vx, ny = this.cy + this.vy;
-    const tnx = Math.floor(nx / TILE), tny = Math.floor(ny / TILE);
-    if (st.inBounds(tnx, tny) && st.isActive(tnx, tny)) {
-      // 撞实块停摆贴壁(干态落地待入水;湿态浮水面不会触底)
-      if (this.vy > 0) {
-        this.y = tny * TILE - this.h / 2 - 0.01;
+    // ---- 位移（撞实心贴面驻留=原版真态,无 Kill——见文件头 ★A-5 裁决）----
+    // 竖撞以【底缘】跨行探测钉合块面（原版 TileCollision 以整盒对格面 clamp 并清零
+    // 撞面分量）;曾用"下一中心格"探测——快落下坠时半身沉入块内 1-2 帧、慢落末段
+    // 每 ~20 拍回跳一次的锯齿抖动。
+    if (this.vy > 0) {
+      const fx = Math.floor(this.cx / TILE);
+      const feet = Math.floor((this.cy + this.vy + this.h / 2) / TILE);
+      if (st.inBounds(fx, feet) && st.isActive(fx, feet)) {
+        this.y = feet * TILE - this.h;                      // 底缘(=y+h)恰贴格顶,零间隙静置
         this.vy = 0;
-      } else {
+      }
+    } else {
+      const nx = this.cx + this.vx, ny = this.cy + this.vy;
+      const tnx = Math.floor(nx / TILE), tny = Math.floor(ny / TILE);
+      if (st.inBounds(tnx, tny) && st.isActive(tnx, tny)) { // 顶壁/侧壁推进:分量归零停摆
         this.vx = 0;
         this.vy = 0;
       }
@@ -126,11 +148,17 @@ export class ChumBucketProj extends Entity {
     if (!ctx || !r.atlas) return;
     const img = r.atlas.ensureVImage ? r.atlas.ensureVImage('vanilla/Projectile_820.png') : r.atlas.vimages.get('vanilla/Projectile_820.png');
     if (!img || !img.width) return;
+    // 竖排 4 帧（Main.cs:8591 projFrames[820]=4;真资产 12×56 → 帧格 12×14）。原版
+    // 弹体绘制 = 帧矩形 Rectangle(0, fh*frame, texW, fh) + 帧心原点(EntitySpriteDraw
+    // origin=(w/2,fh/2))绕 Center 旋转缩放——此前整图压进 12×12 盒(A-6)
+    const fh = img.height / 4;
+    const fr = Math.max(0, Math.min(3, this.frame));
     const s = Math.max(0.02, this.drawScale);
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
-    ctx.drawImage(img, (-this.w / 2) * s, (-this.h / 2) * s, this.w * s, this.h * s);
+    ctx.drawImage(img, 0, fr * fh, img.width, fh,
+      (-this.w / 2) * s, (-fh / 2) * s, this.w * s, fh * s);
     ctx.restore();
   }
 }

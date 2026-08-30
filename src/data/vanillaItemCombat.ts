@@ -87,6 +87,13 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '4827': { shoot: 906, noMelee: true },
   '4908': { shoot: 910, noMelee: true },
   '4909': { shoot: 911, noMelee: true },
+  // ---- 甲虫炸弹 4423（Item.cs case 4423 :37462-37474,1457/1458 同锚——useStyle1/
+  //   shootSpeed5/shoot773/20×20/UseSound Item1/consumable/useAnim=useTime25/
+  //   noUseGraphic）——与湿/干土制炸弹同型缺口：SetDefaults【无】noMelee 字面行,
+  //   extract json 缺该标志 → combatWeapon 返 null + thrownCombat 把 773 射成箭体。
+  //   补 combatWeapon `consumable && noMelee` 爆炸物门派发等价门 → aiStyle16 归
+  //   grenade 族（B2 波 2026-08-30；近战面 damage 缺省 0+noUseGraphic,语义等价）----
+  '4423': { noMelee: true },
   // （5334 奥库瑞姆剃刀 consumable/useTime 45 已移出本表——Item.cs:42279-42285
   //   在 `Variant == EnabledVariant` 条件块内，仅 mechdusa 世界生效；现由
   //   vanillaItemVariants.ts ITEM_VARIANT_STATS[5334] 变体层提供）
@@ -384,8 +391,18 @@ const THROWABLE_AMMO_DUAL = new Set([949]);
  *  走 Game 专支承载（同 combatWeapon 3384 先例）：
  *   · 4608 打窝桶 → 弹 820 AI_163 浮筒（entities/ChumBucketProj + chumBucket 注册面）
  *   · 4702 放飞灯笼 → 弹 855 AI_166 飞升发光体（entities/SkyLanternProj）
- *  通用投掷出口会把它俩射成重力抛物 Arrow——vanilla 弹自管物理,AI 家族完全不同 */
-const THROWN_EXPLICIT_NULL = new Set([4608, 4702]);
+ *   · 5438 肥料 / 5518 富集肥料 → 弹 1019/1051 aiStyle 6 肥料云（B2 波,
+ *     entities/WeaponProj FertilizerCloud + Game.growFertilizedSapling 世界管线;
+ *     combatWeapon 对 consumable+noMelee+ai6 先返 null,通用投掷出口再射成箭体）
+ *   · B3 波扩（2026-08-30）：859 沙滩球 → 弹 155 AI_032 玩具球物理+Kill 回收
+ *     （BallProjs.BeachBallProj,踢飞/湿浮/静止杀 :27264-27408+回收 :79351-79354);
+ *     4743 橄榄球 → 弹 861 型专段滚动档/接触回收/Kill 回落堆叠（BallProjs.
+ *     FootballProj,:18484-18502+:23674-23730+回落 :79355-79357)——通用出口会把它俩
+ *     射成重力箭体且 Kill 无回收
+ *  通用投掷出口会把这些件射成重力抛物 Arrow——vanilla 弹自管物理,AI 家族完全不同。
+ *  ★三地球仪 4765/4766/5285 不入本表：弹体就是 aiStyle2 抛物线(P.cs:8336/:9460),
+ *  继续走通用分流,Kill 三重掷(:75111-75131)经 Game.onProjectileDeath 承载 */
+const THROWN_EXPLICIT_NULL = new Set([4608, 4702, 5438, 5518, 859, 4743]);
 
 /** 旧判定（消耗型投掷武器）：shoot+consumable+noMelee 且无 useAmmo；
  *  ammo 双职件仅白名单（雪球）可掷——原版按 useStyle/IsACoin 判定（见上注） */

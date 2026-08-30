@@ -254,12 +254,15 @@ describe('P0-2 帧带基准（FindFrame :69320 num58 族）', () => {
       expect(frames[0]).toBe(21 + 2);   // holdAim=0：-4→1、0≥-0.1 → +1
       expect(frames[1]).toBe(21 + 2);   // 发射档写入 aim 0 同档
     }
-    // 仰射：敌高 96px、dx 96px → aim 钳 -0.5 → <−0.1 档 0（-0.3 的 1 档被覆写）
+    // 仰射：敌高 dy px、dx 96px → aim <−0.1 档 0。
+    // ★2026-08-30 对账批：入态须 |DirectionTo.Y| ≤ 0.5（1457 NPC.cs:56048-56049），
+    //   原值 96px 高差斜率 −0.71 原版不入态；改 45px（斜率≈−0.42，仍在 <−0.1 带内，
+    //   钳界 −0.5 场景在原版入态门下不可达——由 clamp 写入门 :55346 双重保证）
     {
       const world = flatWorld('bow-up');
       const npc = new TownNPC('guide', 100 * 16, F * 16);
       npc.stationary = true;
-      const { game } = makeGame(world, { npcs: [npc], enemies: [enemyAt(106, 96)] });
+      const { game } = makeGame(world, { npcs: [npc], enemies: [enemyAt(106, 45)] });
       const frames: number[] = [];
       for (let t = 0; t < 40; t++) {
         npc.fixedUpdate(1 / 60, game);

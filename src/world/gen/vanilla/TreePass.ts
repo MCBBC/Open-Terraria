@@ -158,8 +158,12 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
  *  运行期树苗成长（AttemptToGrowTreeFromSapling 默认档 :72876-72883）复用本函数。
  *  ignoreWalls（cs:29936 flag=ignoreWalls||DefaultTreeWallTest——Dome 地牢入口柱顶
  *  树 DomeEntrance_TreeOnPillar→TryGrowingTreeByType(5,ignoreWalls:true) 消费，
- *  FFFF 批 2026-08-18）：true 时跳过墙门（wall==0||flag 恒真）。 */
-export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number, ignoreWalls = false): boolean {
+ *  FFFF 批 2026-08-18）：true 时跳过墙门（wall==0||flag 恒真）。
+ *  heightAddon（1458 WorldGen.cs:30056 `GrowTree(i,y,treeHeightAddon,ignoreWalls)`；
+ *  高度掷后加算 `num2 = genRand.Next(5, 17) + treeHeightAddon`（:30078，净空 num3
+ *  同步抬升）——富集肥料 5518 云成树传入 15（B2 波 2026-08-30），缺省 0=零差。 */
+export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number,
+  ignoreWalls = false, heightAddon = 0): boolean {
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
   if (!st.inBounds(i, index1) || index1 < 1) return false;
@@ -182,7 +186,7 @@ export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: nu
     return !!st.flags[si] && FIT.has(st.type[si]);
   };
   if (!fitSide(-1) && !fitSide(1)) return false;
-  const height = rng.int(5, 16);                       // Next(5,17)
+  const height = rng.int(5, 16) + heightAddon;         // Next(5,17)+treeHeightAddon（1458 :30078）
   let clear = height + 4;                              // num3
   if (JUNGLE_GRASS.has(st.type[gi])) clear += 5;
   // 净空盒（cs:29962-29972）：ignoreID=20——蘑菇草(70)基座有专属双段通道，
@@ -335,7 +339,16 @@ function solidTileHB(st: TileStore, x: number, y: number): boolean {
  *  整块清除——II 批 #98 实证：漏此扫时 JS 残留 530 块（2815..2816×252..253 等
  *  9 处）挡掉 vanilla 后续 PlantSeaOat（(2815,253) 首掷差 840350-52）→ 列命中
  *  平移 2913 vs 2940 → band1 -26,863 掷。零掷骰（纯格效应）。 */
-export function growPalmTree(st: TileStore, rng: RNG, i: number, y: number, gs?: GenState): boolean {
+/** heightAddon（1458 WorldGen.cs:27392 `GrowPalmTree(i,y,treeHeightAddon,ignoreWalls)`）：
+ *  侧柱净空 `num2 = 20 + treeHeightAddon`（:27429）、干高 `num3 = Next(10,21)+addon`
+ *  （:27438）——富集肥料成树传入 15。
+ *  ignoreWalls（1457 WorldGen.cs:27412-27414：`flag = ignoreWalls ||
+ *  DefaultTreeWallTest(...); if (!flag || tile2.liquid != 0) return false`——液体门
+ *  **不**参与豁免）：运行期消费面=肥料云成树 Projectile.cs:24486/:24488 恒传 true、
+ *  DomeDungeonEntrance.cs:558 经 TryGrowingTreeByType(323,…,true)。B2-F3 批
+ *  （2026-08-30）补参贯通：缺省 false=既有调用点逐位原状，掷流零差。 */
+export function growPalmTree(st: TileStore, rng: RNG, i: number, y: number, gs?: GenState,
+  heightAddon = 0, ignoreWalls = false): boolean {
   if (!st.inBounds(i, y)) return false;
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
@@ -343,15 +356,17 @@ export function growPalmTree(st: TileStore, rng: RNG, i: number, y: number, gs?:
   const gi = st.idx(i, index1);
   // 基座整砖检查(cs:27282-27286 active && !halfBrick && slope==0)
   if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0) return false;
-  // ★墙门（cs:27288-27292）：DefaultTreeWallTest(AllowsPlantsToGrow 27 项)——
-  //  1405 是 wall==0；1456 放宽。液体门只查 num-1 一格
-  if (!TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)]) || st.liquid[st.idx(i, index1 - 1)] > 0) return false;
+  // ★墙门（1457 cs:27412-27414，旧 1456 号 :27288-27292）：DefaultTreeWallTest
+  //  (AllowsPlantsToGrow 27 项) 或 ignoreWalls 直通——1405 是 wall==0；1456 放宽。
+  //  液体门只查 num-1 一格
+  if (!(ignoreWalls || TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)]))
+    || st.liquid[st.idx(i, index1 - 1)] > 0) return false;
   if (!PALM_GROUND.has(st.type[gi])) return false;
   // 净空盒两段（cs:27296-27304）：中柱 [i,i]×[num-2,num-1] + 侧柱 [i-1,i+1]×[num-20,num-3]，
   // 均 ignoreID=20（1405 无 ignore 语义→杂草/倒木误拒）
   if (!emptyTileCheck(st, i, i, index1 - 2, index1 - 1, 20)) return false;
-  if (!emptyTileCheck(st, i - 1, i + 1, index1 - 20, index1 - 3, 20)) return false;
-  const height = rng.int(10, 20);                 // Next(10,21)
+  if (!emptyTileCheck(st, i - 1, i + 1, index1 - 20 - heightAddon, index1 - 3, 20)) return false;
+  const height = rng.int(10, 20) + heightAddon;   // Next(10,21)+treeHeightAddon（1458 :27438）
   const target = rng.int(-8, 8) * 2;              // Next(-8,9)*2
   let tilt = 0;
   for (let k = 0; k < height; k++) {
@@ -474,9 +489,17 @@ const ASH_PROFILE: TreeProfile = {
   heightMin: 7, heightMax: 12, topPadding: 4,   // Tree_Ash 高度 7-12 / Padding 4（cs:3898-3901）
 };
 
-/** GrowTreeWithSettings（cs:30546-30967）1:1：宝石树/观赏树共用骨架。
- *  干身帧表与 GrowTree 同构（同一 switch，cs:30604-30700），复用 TRUNK。 */
-export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: number, p: TreeProfile): boolean {
+/** GrowTreeWithSettings（1457 cs:30669-30967；旧 1456 号 :30546 起）1:1：宝石树/
+ *  观赏树共用骨架。干身帧表与 GrowTree 同构（同一 switch，cs:30604-30700），复用
+ *  TRUNK。
+ *  heightAddon（1458 :30708 `num3 = genRand.Next(TreeHeightMin, TreeHeightMax+1)
+ *  + treeHeightAddon`，净空 num4=num3+Padding 随行）——富集肥料成树传入 15。
+ *  ignoreWalls（1457 cs:30685 `flag = ignoreWalls || settings.WallTest(...)`）：
+ *  true 时跳过墙白名单（GroundTest/三列液体门不豁免）。运行期消费面=肥料云成树
+ *  Projectile.cs:24486/:24488 恒传 true（B2-F3 批 2026-08-30 补参贯通：缺省
+ *  false=既有调用点逐位原状，掷流零差）。 */
+export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: number, p: TreeProfile,
+  heightAddon = 0, ignoreWalls = false): boolean {
 
   // 越过树苗找地面行（cs:30547-30550）——★active() 读的是**原始 checkedY** 行
   //  （原版反编译实况），type 读推进中的 num 行
@@ -485,16 +508,17 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
   if (!st.inBounds(x, num) || num < 1) return false;
   // 基座上一格三列无液体（cs:30551-30554）
   if (st.liquid[st.idx(x - 1, num - 1)] !== 0 || st.liquid[st.idx(x, num - 1)] !== 0 || st.liquid[st.idx(x + 1, num - 1)] !== 0) return false;
-  // 基座整砖 + 墙白名单 + GroundTest（cs:30555-30566）
+  // 基座整砖 + 墙白名单 + GroundTest（旧号 cs:30555-30566 → 1457 cs:30680-30688，
+  //  墙门 = ignoreWalls || settings.WallTest(:30685)）
   const gi = st.idx(x, num);
   if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0) return false;
-  if (!p.walls.has(st.wall[st.idx(x, num - 1)])) return false;
+  if (!(ignoreWalls || p.walls.has(st.wall[st.idx(x, num - 1)]))) return false;
   if (!p.ground.has(st.type[gi])) return false;
   // 两侧至少一侧同基座（cs:30568-30571）
   const fitSide = (dx: number) => st.inBounds(x + dx, num)
     && st.flags[st.idx(x + dx, num)] && p.ground.has(st.type[st.idx(x + dx, num)]);
   if (!fitSide(-1) && !fitSide(1)) return false;
-  const height = rng.int(p.heightMin, p.heightMax);    // Next(TreeHeightMin, TreeHeightMax+1)
+  const height = rng.int(p.heightMin, p.heightMax) + heightAddon;    // Next(min,max+1)+addon（1458 :30708）
   const num4 = height + p.topPadding;                  // + TreeTopPaddingNeeded
   // EmptyTileCheck(x-2, x+2, num-num4, num-1, 20)（cs:30580-30582）——统一走
   // emptyTileCheck 忠实语义（比旧 GEM_EMPTY_ALLOW 表多容忍 CommonSapling 族）
@@ -556,20 +580,30 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
 }
 
 /** 宝石树（TryGrowingTreeByType 583-589 → GemTree_* profile）。
- *  treeTileType = 583-589（黄玉/紫晶/蓝玉/翡翠/红宝石/钻石/琥珀，cs:35063-35079 num24 映射） */
-export function growGemTree(st: TileStore, rng: RNG, x: number, y: number, treeTileType: number): boolean {
-  return growTreeWithSettings(st, rng, x, y, { ...GEM_PROFILE, treeTile: treeTileType });
+ *  treeTileType = 583-589（黄玉/紫晶/蓝玉/翡翠/红宝石/钻石/琥珀，cs:35063-35079 num24 映射）
+ *  heightAddon：富集肥料云成树传入 15（B2 波）。ignoreWalls：同 GrowTreeWithSettings
+ *  （1457 cs:30685），肥料云恒传 true（Projectile.cs:24488）；缺省 false 零差。 */
+export function growGemTree(st: TileStore, rng: RNG, x: number, y: number, treeTileType: number,
+  heightAddon = 0, ignoreWalls = false): boolean {
+  return growTreeWithSettings(st, rng, x, y, { ...GEM_PROFILE, treeTile: treeTileType },
+    heightAddon, ignoreWalls);
 }
 
-/** 观赏树（TryGrowingTreeByType 616 柳 / 596 樱 → VanityTree_Willow/Sakura profile，cs:3872-3894） */
-export function growVanityTree(st: TileStore, rng: RNG, x: number, y: number, willow: boolean): boolean {
-  return growTreeWithSettings(st, rng, x, y, willow ? WILLOW_PROFILE : SAKURA_PROFILE);
+/** 观赏树（TryGrowingTreeByType 616 柳 / 596 樱 → VanityTree_Willow/Sakura profile，
+ *  cs:3872-3894）：ignoreWalls 同上贯通（B2-F3 批补参）。 */
+export function growVanityTree(st: TileStore, rng: RNG, x: number, y: number, willow: boolean,
+  heightAddon = 0, ignoreWalls = false): boolean {
+  return growTreeWithSettings(st, rng, x, y, willow ? WILLOW_PROFILE : SAKURA_PROFILE,
+    heightAddon, ignoreWalls);
 }
 
 /** 灰烬树（TryGrowingTreeByType 634 → GrowTreeSettings.Profiles.Tree_Ash，cs:3894-3903/
- *  30538）：灰烬草 633 基座、高 7-12。地狱 pass 铺 633 后 1/3 概率逐点尝试（cs:13885） */
-export function growAshTree(st: TileStore, rng: RNG, x: number, y: number): boolean {
-  return growTreeWithSettings(st, rng, x, y, ASH_PROFILE);
+ *  30538）：灰烬草 633 基座、高 7-12。地狱 pass 铺 633 后 1/3 概率逐点尝试（cs:13885）。
+ *  ignoreWalls 同上贯通（B2-F3 批补参）：肥料云 tile20 style10 档（Projectile.cs:24486
+ *  TryGrowingTreeByType(634,…,true)）。 */
+export function growAshTree(st: TileStore, rng: RNG, x: number, y: number, heightAddon = 0,
+  ignoreWalls = false): boolean {
+  return growTreeWithSettings(st, rng, x, y, ASH_PROFILE, heightAddon, ignoreWalls);
 }
 
 /** AddTrees（1456 cs:31523-31578 / 1457 cs:31647-31733）1:1：逐列尝试（~1.6 列间距）；

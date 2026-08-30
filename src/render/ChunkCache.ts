@@ -10,6 +10,7 @@ export { treeGroundVariant, treeTrunkPaintStyle, palmTreePaintStyle } from './Va
 import { frameMergesWith } from './TileMergeFamily';
 import { swayBakeSkip } from './WindSway';
 import { TILE_ANIM_RATE, tileAnim, campfireYOffset, fountainYOffset } from './TileAnim';
+import { tileFrameCapture } from '../debug/TileFrameCapture';
 import { cageAnimRate, cageFamilyOf } from './CritterCage';
 import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
@@ -404,15 +405,26 @@ export class ChunkCache {
       for (const [sheet, set] of this.animChunksBySheet) {
         const rate = TILE_ANIM_RATE[sheet] ?? (cageFamilyOf(sheet) ? cageAnimRate(sheet) : 0);
         if (!rate || tileAnim.tick % rate !== 0) continue;
-        for (const k of set) if (inView(k)) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
+        let marked = 0;
+        for (const k of set) if (inView(k)) { this.markDirty(k & 0xffff, (k >> 16) & 0xffff); marked++; }
+        if (marked) tileFrameCapture.markBake(sheet, marked);
       }
     }
     if (this.animChunksByWall.size) {
       for (const [wallId, set] of this.animChunksByWall) {
         const rate = wallAnimRate(wallId);
         if (!rate || tileAnim.tick % rate !== 0) continue;
-        for (const k of set) if (inView(k)) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
+        let marked = 0;
+        for (const k of set) if (inView(k)) { this.markDirty(k & 0xffff, (k >> 16) & 0xffff); marked++; }
+        if (marked) tileFrameCapture.markBake(1e6 + wallId, marked);
       }
+    }
+    // 帧捕获快照节拍（cam=animView 中点=视野中心；无视野信息时跳过出图）
+    if (tileFrameCapture.recording && this.animView) {
+      const v = this.animView;
+      tileFrameCapture.snapTick((v.x0 + v.x1) / 2, (v.y0 + v.y1) / 2);
+    } else {
+      tileFrameCapture.snapTick(-1, -1);
     }
   }
 

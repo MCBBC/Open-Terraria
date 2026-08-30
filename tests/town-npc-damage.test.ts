@@ -86,7 +86,10 @@ describe('TownNPC 攻击特化(发射端考古销项)', () => {
   it('动物学家(633)满月夜狼人态:proj 929 + dmg×1.5 截断 22;Expert 33', () => {
     for (const [diff, want] of [[0, 22], [1, 33]] as const) {
       const zoo = new TownNPC('zoologist', 100 * 16, 99 * 16);
-      const enemy: TestEnemy = { x: 103 * 16, y: 97 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
+      // ★2026-08-30 实体侧对账批：入态目标须 Distance(Center) ≤ 50px（1457
+      //   NPC.cs:56022-56025 flag36 狼人态门）——原位 103*16 距 ~52px 在原版永不触发,
+      //   移近到 102*16（d≈46px）
+      const enemy: TestEnemy = { x: 102 * 16, y: 97 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
       // 满月夜:timeOfDay 0 = 午夜(isDay false),moonPhase 0 = 满月
       const { game, shots } = makeGame(enemy, diff, (w) => {
         w.clock.timeOfDay = 0;
@@ -101,7 +104,8 @@ describe('TownNPC 攻击特化(发射端考古销项)', () => {
 
   it('动物学家(633)白天非满月:常态 proj 880 / dmg 15', () => {
     const zoo = new TownNPC('zoologist', 100 * 16, 99 * 16);
-    const enemy: TestEnemy = { x: 103 * 16, y: 97 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
+    // 同上：入态 ≤50px 门（NPC.cs:56022-56025）→ 敌移近
+    const enemy: TestEnemy = { x: 102 * 16, y: 97 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(enemy, 0, (w) => { w.clock.moonPhase = 1; }); // 白天缺省 + 非满月
     runUntil(zoo, game, () => shots.length > 0);
     expect(shots.length).toBeGreaterThan(0);
@@ -110,8 +114,17 @@ describe('TownNPC 攻击特化(发射端考古销项)', () => {
   });
 
   it('巫师(108)连发:单次齐射 1-3 发(权重 4:2:1),每发 18(Classic)/27(Expert)', () => {
+    // ★F1 收口（2026-08-30）：入态掷骰已前置到候选过滤之前（1457 NPC.cs:56037 门序
+    //   = 先 Main.rand.Next(num122)==0 再进支内选候选+带检）——旧实现「先选后掷、
+    //   无候选即零骰」曾迫使本测劫持全局 Math.random 做 LCG 替身迁就流位差。
+    //   现恢复实例级确定性 rng 注入：同一 LCG 序列只喂 wiz.rng，全局随机面零污染
     for (const [diff, want] of [[0, 18], [1, 27]] as const) {
       const wiz = new TownNPC('wizard', 100 * 16, 99 * 16);
+      let seed = 987654321;
+      wiz.rng = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 0x100000000;
+      };
       const enemy: TestEnemy = { x: 103 * 16, y: 97 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
       const { game, shots } = makeGame(enemy, diff);                // DangerDetectRange[108]=100
       chaseUntil(wiz, enemy, game, () => shots.length > 0);

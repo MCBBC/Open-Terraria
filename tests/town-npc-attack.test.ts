@@ -95,7 +95,10 @@ describe('城镇 NPC 自卫攻击(AI_007 攻击态)', () => {
   it('持械瞄准值 ai[2](DrawNPCExtras :27121 消费):发射档写入钳 ±0.5,态尽归零', () => {
     const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
     // 敌在右上方:目标中心方向 Y 分量为负(钳下界 -0.5)
-    const enemy = { x: 106 * 16, y: 92 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
+    // ★2026-08-30 对账批:入态另须 |DirectionTo.Y| ≤ 0.5（1457 NPC.cs:56048-56049
+    //   vector8.Y 门）——原位 92*16 斜率≈−0.76 原版不会入态;移到 97*16（斜率≈−0.33,
+    //   负向仰角带不变）
+    const enemy = { x: 106 * 16, y: 97 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(guide, enemy);
     let aimAtFire = 0;
     for (let t = 0; t < 900; t++) {

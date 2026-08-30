@@ -12,8 +12,11 @@
 //   → StrikeNPC 族音效=敌怪自带 HitSound 链；npc.immune[whoAmI]=30。
 //
 // ②史莱姆坐骑弹跳踩踏——JumpMovement 头部三个垂直踩踏循环（1457 Player.cs:20693-
-//   20801 / 1456 :20254-20362），四个相似循环中第三个（水平侧撞族 CollideWithNPCs，
-//   1457 :20268-20330 mounts ?/14/17）不在本通道、见批注报告：
+//   20801 / 1456 :20254-20362；★锚取循环首语句，方法声明行 = :20691 / :20252——
+//   2026-08-30 蓝队复核勘误驳回存档：按体例 20254 正确），第四个相似循环是水平侧撞族
+//   CollideWithNPCs
+//   （1457 :20238-20320 独角兽10/山羊47/马40-42、海盗船44、暗影木45、蜥蜴14、
+//   高尔夫球车17 横向）——不属 JumpMovement，未在本通道内移植，见报告登记：
 //     A 史莱姆坐骑弹跳：IsConsideredASlimeMount(type 3|50) && wetSlime==0 && vy>0
 //       盒 = 身体 rect.Offset(0,height-1).Height=2.Inflate(12,6)（脚底 ±(12,6) 横带）
 //       damage=(int)(40×minionDamage) kb=5 npc.immune=10 **velocity.Y=-10 弹跳**
@@ -23,18 +26,29 @@
 //       ——本仓引擎尚无 DownDash 触发源，入口 ramRuneDownDashStomp 显式暴露不自动挂。
 //     C 高尔夫球车（type 17）下压：vy>0 同盒，damage=40（**无 minionDamage 乘区**）
 //       kb=5 npc.immune=12 GiveImmune(12) sourceItemId=4264(GolfCart)、无弹跳。
-//   ★三循环 ApplyDamageToNPC 一律字面 crit:false（1457 :20717/:20755/:20791）——
+//   ★三循环 ApplyDamageToNPC 一律字面 crit:false（1457 :20722/:20760/:20797）——
 //   与任务书"crit 三择大"说法不符时以反编译源码为准，此处照抄无暴击掷骰。
 //   命中门 = 敌怪 (noTileCollide || Collision.CanHit(position,w,h,nPC...)) 直判短式
 //   CanHit（非四射线长链）→ 本仓 LineOfSight.canHit 等价形复用；
-//   CanNPCBeHitByPlayerOrPlayerProjectile（1457 :20673 / 1456 :20234）的 critter 豁免
-//   分支在本仓天然成立（小动物不入 enemies 桶），friendly 门走 playerCanHitEnemy。
+//   CanNPCBeHitByPlayerOrPlayerProjectile（1457 :20673 / 1456 :20234）：命中否决条件是
+//     `NPCID.Sets.CountsAsCritter[type] && flag`，flag = dontHurtCritters ∪ projectile 小兵/
+//     哨兵语境（:20677），且 IsCritterThatIsHostileToPlayers 强制放行（:20681）。本通道两端
+//     均为玩家实体直击（projectile==null）⇒ flag = dontHurtCritters——仓库无该饰品面
+//     （Player.ts RefreshMechanicalAccs 对 4767·5323 登记"无消费端不接"）⇒ 小动物【可被】
+//     矿车碾/坐骑踩（正例 ThrowKillFx 光环三桶并扫）。2026-08-30 蓝队复核修正：旧头注
+//     "小动物不入 enemies 桶天然豁免"是把 flag≡false 语境当成了无条件豁免，语义做反。
+//     dontHurtCritters 将来若落地面，须补 CountsAsCritter 门（hostile-to-player critter 支
+//     同步放行）；本通道现不含抑制表。
+//
+// ③撞怪块时点：1457 Player.Update 内撞怪块（:27748）先于 Minecart.TrackCollision 调用
+//   （:28315，同一函数体顺序推进）——本 tick 的轨驱增量/端点急停/斜坡起飞不进本帧伤害读数；
+//   Minecart.fixedUpdate 的调用点已对齐到轨驱段之前（2026-08-30 R5 复核修正）。
 //
 // 免疫冷却位映射说明：原版 npc.immune[whoAmI] 是 per-玩家槽（255 格 byte 数组），
 // 本仓单机语境塌缩为 Enemy.iframes 单计数器——命中前 gate 读 iframes==0（等价
 // immune[i]==0）、命中后直写 iframes=30/10/12（等价 immune[i]=N）。若未来多人
 // 需要 per-slot 语义再升级为 Map<playerSlot,n>（现 swingHitSet 族同为单计数器近似，
-// 一致性优先）。玩家侧 GiveImmuneTimeForCollisionAttack（1457 :20654-20666）的
+// 一致性优先）。玩家侧 GiveImmuneTimeForCollisionAttack（1457 :20654-20667）的
 // _immuneStrikes 3 连击豁免规则以 WeakMap 计数器建模（见函数注释）。
 import type { GameHooks } from './types';
 import { damageVar } from '../stats/ScaleStats';
@@ -103,15 +117,21 @@ export function minecartDamageBase(currentSpeed: number,
 
 /** GetMinecartDamage 全链（DamageVar ±15%/luck 波动 + hardMode ×1.5 与 expertMode ×1.5
  *  两个独立 (int) 截断乘区；kb 不吃波动不吃难度乘区）。
- *  rnd 可注入确定性随机（测试/deterministic 复放用，缺省 Math.random）。 */
+ *  rnd 可注入确定性随机（测试/deterministic 复放用，缺省 Math.random）。
+ *  ★掷骰次数对齐原文：1457 GetMinecartDamage 的 switch 各支（含 default）都先掷一次
+ *  DamageVar(:29479-29511)，UsingSuperCart 支 :29512-29515 再掷第二次整体覆写——即
+ *  SuperCart 生效期【消耗两次】DamageVar、终值取第二次（2026-08-30 R1 复核时顺带修复：
+ *  旧版 SuperCart 只掷一次，随机流长度与原版差 1）。半点舍入登记：C# Main.DamageVar
+ *  的 (int)Math.Round 默认 ToEven（52.5→52），本仓项目统一 damageVar = JS Math.round
+ *  half-up（52.5→53，ScaleStats 内已登记的全局口径选择）——精确 .5 中点会有 ±1 偏差，
+ *  属全仓 DamageVar 层既有决策，不在本通道私改。 */
 export function getMinecartDamage(currentSpeed: number, ctx: MinecartDamageCtx,
   luck = 0, rnd: () => number = Math.random): { damage: number; knockback: number } {
   const base = minecartDamageBase(currentSpeed, ctx);
-  // :29486 Main.DamageVar(base,luck)；SuperCart 支 :29514 是第二次独立 DamageVar 掷骰
-  //（覆写在掷骰之后重新掷——同一 luck 参数重抽，等价于对覆写基数再取波动）
-  let dmg = ctx.superCart
-    ? damageVar(50 + 100 * currentSpeed, luck, rnd)
-    : damageVar(ctx.mountType === 13 ? 15 + 30 * currentSpeed : 25 + 55 * currentSpeed, luck, rnd);
+  // :29479-29511 switch 先按车型分档掷一次（default 与枚举支同为 25+55s，13 为低配档）
+  let dmg = damageVar(ctx.mountType === 13 ? 15 + 30 * currentSpeed : 25 + 55 * currentSpeed,
+    luck, rnd);
+  if (ctx.superCart) dmg = damageVar(50 + 100 * currentSpeed, luck, rnd);   // :29512-29515 第二掷覆写
   if (ctx.hardMode) dmg = Math.trunc(dmg * 1.5);                  // :29518-29520 (int)(double*1.5)
   if (ctx.expertMode) dmg = Math.trunc(dmg * 1.5);                // :29521-29523（expert 在 hardmode 上叠——JS 主机专家必含 hardmode 标志，两支幂等）
   return { damage: dmg, knockback: base.knockback };
@@ -126,14 +146,22 @@ interface RampageTarget {
     crit?: boolean, pierce?: number, fromPlayer?: boolean): boolean;
 }
 
+/** 撞怪/踩踏共用扫掠集：enemies ∪ critters（原版 Main.npc 单数组槽遍历的仓内拆分，
+ *  正例 ThrowKillFx 光环段三桶并扫）。critter 支 = Enemy 实例（spawnNpcByVanilla 落桶），
+ *  hurt 同 Enemy.hurt 四参形制直用——命中否决面见文件头注③的 flag 语义说明 */
+function npcHitTargets(game: GameHooks): unknown[] {
+  return [...(game.enemies() ?? []), ...(game.critters?.() ?? [])];
+}
+
 /** 矿车撞怪主入口（1457 Player.cs:27748-27831 / 1456 :27225 起）——
  *  Minecart.fixedUpdate 每 tick 调一次（速度>4f 才进循环）。cart 取结构窄视图
  *  （runSpeed = 生效档 RunSpeed 值，Minecart 的 superCart-aware getter 取值即可）。
+ *  rnd 可注入确定性随机（暴击掷+DamageVar 掷骰；缺省 Math.random=原版 Main.rand 口径）。
  *  返回命中数（测试断言用）。 */
 export function minecartNpcRampage(cart: {
   x: number; y: number; w: number; h: number; vx: number; vy: number;
   mountId: number; superCart: boolean; runSpeed: number;
-}, game: GameHooks): number {
+}, game: GameHooks, rnd: () => number = Math.random): number {
   const p = game.player as unknown as {
     cx: number; cy: number; luck: number;
     critChance(k: 'melee' | 'ranged' | 'magic'): number;
@@ -145,7 +173,6 @@ export function minecartNpcRampage(cart: {
   if (spd <= 4) return 0;                                         // :27748 门
   // 速比分母 = maxRunSpeed = 骑乘态整体覆写后的 mount.RunSpeed（:26329；
   // SuperCart 生效 = 20——Minecart.runSpeed getter 取值已含 SuperCart 覆写）
-  const ratio = spd / cart.runSpeed;
   const box = minecartRampageBox(cart.x, cart.y, cart.w, cart.h, cart.vx, cart.vy);
   const dir = cart.vx < 0 ? -1 : 1;                               // :27802-27806
   // 暴击 = max(melee,ranged,magic) 三择大掷骰（:27777-27792：rand.Next(1,101)<=crit
@@ -157,9 +184,8 @@ export function minecartNpcRampage(cart: {
     hardMode: !!game.world.flags?.hardMode,
     expertMode: game.world.isExpert,
   };
-  const { damage, knockback } = getMinecartDamage(ratio, ctx, p.luck);
   let hits = 0;
-  for (const ent of game.enemies()) {
+  for (const ent of npcHitTargets(game)) {
     const e = ent as RampageTarget;
     // 门串（:27772-27773）active && !dontTakeDamage && !friendly && immune[whoAmI]==0 &&
     // CanNPCBeHitByPlayerOrPlayerProjectile && 盒相交——immune==0 ↔ 本仓 e.iframes==0。
@@ -169,23 +195,32 @@ export function minecartNpcRampage(cart: {
     if (!_playerCanHitEnemy(e, game)) continue;
     if (e.iframes !== undefined && e.iframes !== 0) continue;
     if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
+    // ★逐 NPC 掷序 = 原文位次（:27785-27792 全在循环体内）：暴击掷 →
+    //   TryConsumingTimerCrit → GetMinecartDamage ——2026-08-30 R1 复核修正：旧版在循环外
+    //   求值一次共享 DamageVar 掷骰，同 tick 多目标吃同一波动（原版各自重抽 ±15%/luck）。
+    let crit = (Math.floor(rnd() * 100) + 1) <= critChanceMax;     // :27785 rand.Next(1,101)
     // TryConsumingTimerCrit(Rectangle.Intersect(value3, nPC.Hitbox), ref crit)（:27793）
     const ix = Math.max(box.x, e.x), iy = Math.max(box.y, e.y);
     const iw = Math.min(box.x + box.w, e.x + e.w) - ix, ih = Math.min(box.y + box.h, e.y + e.h) - iy;
-    let crit = (Math.floor(Math.random() * 100) + 1) <= critChanceMax;
     const forced = p.tryConsumingTimerCrit?.(game, ix, iy, iw, ih) ?? false;
     crit = crit || forced;
+    const ratio = spd / cart.runSpeed;                            // :27790 循环内读 velocity.Length()
+    const { damage, knockback } = getMinecartDamage(ratio, ctx, p.luck, rnd);   // :27791
+    // ★本仓暴击惯例=调用侧预倍（Enemy.hurt 不内部翻倍，见 Enemy.ts hurt() 偏差登记——
+    //   原版 StrikeNPC :81990 在减防后 ×2，仓内旧矿车内联版同式 Math.round(dmg*2)）
+    const dmgOut = crit ? damage * 2 : damage;
     // 0<knockBackResist<1 预除抗性（:27807-27810——hurt 管线内部再乘回，净效果击退
     // 不随抗性衰减；resist>=1 或 ==0 不动）
     const resist = e.def?.knockBackResist ?? 1;
     const kb = resist > 0 && resist < 1 ? knockback / resist : knockback;
     // ApplyDamageToNPC(...,sourceItemId=2343)（:27816）——StrikeNPC 族受击音/飘值/
     // 掉物走 Enemy.hurt 单点管线；fromPlayer=true 计入 DPS
-    e.hurt(damage, dir * kb, 0, game, 0, crit, 0, true);
+    e.hurt(dmgOut, dir * kb, 0, game, 0, crit, 0, true);
     hits++;
     e.iframes = 30;                                               // :27819 immune[i]=30
     if (e.dead) {
       // :27821-27823 AchievementsHelper.HandleSpecialEvent(this,9) VEHICULAR_MANSLAUGHTER
+      // （critter 击杀同样成立——判定只看该 NPC 是否失效）
       game.achievements?.handleSpecialEvent(9,
         { statLifeMax: (game.player as unknown as { maxHp: number }).maxHp,
           statManaMax: (game.player as unknown as { maxMana: number }).maxMana });
@@ -251,12 +286,13 @@ const GOLF_CART_STOMP: StompCfg = {
 
 /** 踩踏扇区公共扫掠（对应三个循环的循环体同型部分，1457 :20704-20726 同款）：
  *  盒相交 + (noTileCollide || Collision.CanHit 直判短式) → 结算 → break（每 tick 至多
- *  一个目标， vanilla 循环体 hit 后 break——多目标不连穿） */
+ *  一个目标，vanilla 循环体 hit 后 break——多目标不连穿）；扫掠集含 critters 桶（原版
+ *  循环遍历 Main.npc 全槽，跳过条件只有门串本身，2026-08-30 R6 复核并桶） */
 function stompSweep(p: PlayerLike, game: GameHooks,
   cfg: StompCfg, st: TileStore | undefined): number {
   // rect = getRect().Offset(0,height-1).Height=2.Inflate(12,6)
   const bx = p.x - 12, by = p.y + p.h - 1 - 6, bw = p.w + 24, bh = 2 + 12;
-  for (const ent of game.enemies()) {
+  for (const ent of npcHitTargets(game)) {
     const e = ent as unknown as StompTarget2;
     if (!e || e.dead || e.dontTakeDamage) continue;
     if (!_playerCanHitEnemy(e, game)) continue;
@@ -287,24 +323,28 @@ interface StompTarget2 {
     crit?: boolean, pierce?: number, fromPlayer?: boolean): boolean;
 }
 
-/** GiveImmuneTimeForCollisionAttack（1457 Player.cs:20654-20666）建模：
- *  _timeSinceLastImmuneGet<=20t 内连续获取则 _immuneStrikes++ 否则归 1；
- *  strikes<3 且 (!immune || immuneTime<=time) 才授予（3 连击拒发防无敌滥用）。
- *  本仓无独立 immune/immuneTime 字段 → 以 p.iframes>0 当 immune、lastGrant 存池当
- *  immuneTime 近似；tick 时钟由 mountJumpStomps 每帧推进（玩家侧碰撞攻击仅在
- *  JumpMovement 族内使用，其它 GiveImmuneTimeForCollisionAttack 调用点——日耀盾
- *  滑行 :21351 等——仍走各自旧近似，不并入）。 */
-const IMMUNE_STRIKES = new WeakMap<object, { lastClock: number; strikes: number; lastGrant: number }>();
+/** GiveImmuneTimeForCollisionAttack（1457 Player.cs:20654-20667）建模：
+ *  _timeSinceLastImmuneGet<=20t 内连续获取则 _immuneStrikes++ 否则归 1（计数器自增点
+ *  :24857、ResetTo0 在授予侧 :20664）；授予门 = _immuneStrikes<3 && (!immune ||
+ *  immuneTime <= time)，immune/immuneTime 是玩家通用无敌帧池——immuneTime 逐帧递减
+ *  （UpdateImmunity :18972-18980，调用点 Update :25653）⇔ 本仓 p.iframes（Player.ts
+ *  每 tick `if (this.iframes > 0) this.iframes--`），故 immune⇔iframes>0、剩余量⇔iframes。
+ *  2026-08-30 R4 复核修正：旧版用"上次授予时长 lastGrant<=time"冒充剩余量比较，先授长档
+ *  （如高尔夫球车 12t）再衰减至 ≤6 时对短档(6)授予被误拒——现已直用 p.iframes 当
+ *  immuneTime（授予在门内等价 `immuneTime = time` 直写：gate 已保证 iframes<=time）。
+ *  连击时钟由 mountJumpStomps 每帧推进（stompClock 差 ↔ _timeSinceLastImmuneGet；
+ *  玩家侧碰撞攻击仅在 JumpMovement 族内使用，其它调用点——日耀盾滑行 :21349 等——
+ *  仍走各自旧近似，不并入）。 */
+const IMMUNE_STRIKES = new WeakMap<object, { lastClock: number; strikes: number }>();
 let stompClock = 0;
 
 function giveImmuneTimeForCollisionAttackImpl(p: { iframes?: number }, time: number): void {
   let s = IMMUNE_STRIKES.get(p);
-  if (!s) { s = { lastClock: -999, strikes: 0, lastGrant: 0 }; IMMUNE_STRIKES.set(p, s); }
+  if (!s) { s = { lastClock: -999, strikes: 0 }; IMMUNE_STRIKES.set(p, s); }
   s.strikes = stompClock - s.lastClock <= 20 ? s.strikes + 1 : 1;
   s.lastClock = stompClock;
-  if (s.strikes < 3 && ((p.iframes ?? 0) <= 0 || s.lastGrant <= time)) {
-    p.iframes = Math.max(p.iframes ?? 0, time);
-    s.lastGrant = time;
+  if (s.strikes < 3 && (p.iframes ?? 0) <= time) {              // !immune || immuneTime<=time
+    p.iframes = Math.max(p.iframes ?? 0, time);                 // immune=true; immuneTime=time
   }
 }
 
@@ -313,7 +353,7 @@ function giveImmuneTimeForCollisionAttackImpl(p: { iframes?: number }, time: num
  *  返回命中数。同时推进免疫连击时钟（见上）。 */
 export function mountJumpStomps(p: {
   x: number; y: number; w: number; h: number; vx: number; vy: number;
-  facing: number; cy: number; iframes?: number; wetSlime?: number;
+  facing: number; iframes?: number; wetSlime?: number;
   summonDamageMult: number;
   mount: { active: boolean; type: number };
 }, game: GameHooks): number {
@@ -362,9 +402,11 @@ export function tickSlimeWetState(p: {
   if (p.vy < -4) p.vy = -4;                                       // :28203-28205
 }
 
-/** JumpMovement controlJump 头部的湿清除（1457 :28108-28114 / 1456 :20375-20377）：
- *  按住跳键瞬间清湿史莱姆（wetSlime=0 + flag 让后续起跳门放行水下起跳）。
- *  返回 true = 本帧有清湿发生（调用方可据此放宽水中起跳门）。 */
+/** JumpMovement controlJump 头部的湿清除（1457 :20805-20818——门 :20815-20817 /
+ *  1456 :20366-20379）：按住跳键瞬间清湿史莱姆（wetSlime=0 + flag 让后续起跳门放行
+ *  水下起跳）。★无液体位置要求——gate 只读 mount.Active/IsConsideredASlimeMount/
+ *  wetSlime，controlJump 块内直接置 0：陆上残余同样按跳即清（2026-08-30 R3 复核修正，
+ *  调用方不得把本消费点嵌进水中分支）。返回 true = 本帧有清湿发生。 */
 export function consumeWetSlimeOnJumpControl(p: {
   inputJump?: boolean; wetSlime?: number;
   mount: { active: boolean; type: number };

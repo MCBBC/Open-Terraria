@@ -1,6 +1,7 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
 import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, onStarveTransition, starvedEver, starvedLock } from '../render/GLStats';
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
+import { findBannerAnchorY } from '../world/Housing';
 import { TILE, CHUNK } from '../core/constants';
 import { TintAtlas, type TintRect } from './TintAtlas';
 import { tintedTex } from './StringLine';
@@ -27,12 +28,20 @@ function npcFootBiasY(id: number | undefined): number {
 }
 /** 配置快照:模块加载时读一次 localStorage,运行时零 IO;
  *  控制台改键后调 npcFootCfgReload()(挂 window)重读快照 */
+function footCfgReadNum(storageKey: string, def: number): number {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw === null || raw.trim() === '') return def;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : def;
+  } catch { return def; }
+}
 const footCfg = (() => {
   const cfg = { flushOn: true, extra: -1 as number, overrides: {} as Record<number, number> };
   try {
     cfg.flushOn = localStorage.getItem('sw_npc_foot_flush') !== '0';
-    const n = Number(localStorage.getItem('sw_npc_foot_flush_extra'));
-    if (Number.isFinite(n)) cfg.extra = n;
+    cfg.extra = footCfgReadNum('sw_npc_foot_flush_extra', -1);
+
     const ov = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}') as Record<string, unknown>;
     for (const [k, v] of Object.entries(ov)) if (Number.isFinite(v)) cfg.overrides[+k] = v as number;
   } catch { /* 私隐模式等异常保默认 */ }
@@ -41,8 +50,8 @@ const footCfg = (() => {
   if (typeof window !== 'undefined') {
     (window as unknown as { npcFootCfgReload?: () => void }).npcFootCfgReload = () => {
       cfg.flushOn = localStorage.getItem('sw_npc_foot_flush') !== '0';
-      const n = Number(localStorage.getItem('sw_npc_foot_flush_extra'));
-      if (Number.isFinite(n)) cfg.extra = n;
+    cfg.extra = footCfgReadNum('sw_npc_foot_flush_extra', -1);
+
       const ov = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}') as Record<string, unknown>;
       for (const [k, v] of Object.entries(ov)) if (Number.isFinite(v)) cfg.overrides[+k] = v as number;
     };
@@ -73,7 +82,7 @@ function npcContentBottomRow(img: CanvasImageSource, sy: number, sw: number, sh:
     const d = c2.getImageData(0, 0, sw, sh).data;
     for (let y = sh - 1; y >= 0; y--) {
       let n = 0;
-      for (let x = 0; x < sw; x++) if (d[(y * sw + x) * 4 + 3] > 20) n++;
+      for (let x = 0; x < sw; x++) if (d[(y * sw + x) * 4 + 3] > 90) n++;   // 实心阈值:排除边缘 AA 半透明尾行
       if (n > 0) { out = y; break; }
     }
   } catch { out = -1; }
@@ -81,7 +90,7 @@ function npcContentBottomRow(img: CanvasImageSource, sy: number, sw: number, sh:
   return out;
 }
 /** 落脚豁免:独占绘制路径自带锚点(它们根本不走通用尾段,防御性登记) */
-const FOOT_FLUSH_EXEMPT = new Set<number>([393]);
+const FOOT_FLUSH_EXEMPT = new Set<number>([393, 416]);   // 416 骑手原点=掠兽 Bottom(B路R3备案)
 function npcFootBiasExempt(id: number): boolean {
   return FOOT_FLUSH_EXEMPT.has(id);
 }
@@ -5833,7 +5842,9 @@ export class Renderer {
           const fmaxRow = npcContentBottomRow(r.img, r.sy, r.sw, r.sh);
           if (fmaxRow >= 0) {
             // 目标:cy + dyArg + fmaxRow+1 ≡ 盒底(cy + h/2) ⇒ dyTarget = h/2 − fmax − 1
-            const dyTarget = e.h / 2 - fmaxRow - 1;
+            // ★量纲:dyArg 为纹素空间(ctx.scale(scale) 前),盒半高须同空间
+            //  = e.h/(2·scale)。漏除曾令 v.scale≠1 型系统性沉底(B路R2-b必修)
+            const dyTarget = e.h / (2 * scale) - fmaxRow - 1;
             footFlush = Math.round((dyTarget - (-r.sh / 2 + addY)) * 100) / 100
               + npcFootBiasExtra() + npcFootBiasOverride(idR);
             footFlush = Math.max(-24, Math.min(24, footFlush));
@@ -5858,7 +5869,7 @@ export class Renderer {
             const zeroY = -e.vy + (r.sy === 120 ? 2 : r.sy === 360 ? -2 : r.sy === 480 ? -6 : 0);
             const zeroX = -e.vx * 2;
             ctx.save();
-            ctx.translate(zeroX, zeroY);   // 中心锚后原点=KS 盒中心（原版忍者锚 KS Center :22812）
+            ctx.translate(zeroX, zeroY + footFlush);   // 随本体落脚同步下沉(v6)
             ctx.rotate(e.vx * 0.05);
             ctx.drawImage(ninja.img, -ninja.sw / 2, -ninja.sh / 2, ninja.sw, ninja.sh);
             ctx.restore();
@@ -5916,7 +5927,7 @@ export class Renderer {
           //   ③ lighter(tinted, ga=1) → +T·a·color.rgb 预乘加法贡献
           // （GetColor rgb 不乘 color.A——ga=colorA/255 会把贡献也乘 0.392）
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, drawColor);
-          const anchorY = -r.sh / 2 + addY;
+          const anchorY = -r.sh / 2 + addY + footFlush;   // 复用外层(含落脚),勿遮蔽
           if (tinted) {
             ctx.globalCompositeOperation = 'destination-out';
             ctx.globalAlpha = drawColor[3] / 255;
@@ -5955,7 +5966,7 @@ export class Renderer {
             // 原版锚 = KS Center − (70−num307)×scale（:26476-26478,origin=冠图中心,
             // scale=1f）——中心锚(2026-08-24)后原点即盒中心,曾按底锚写的 −e.h/2
             // 补偿已双重偏移,删
-            ctx.drawImage(crown.img, -crown.sw / 2, -(70 - num223) * scale - crown.sh / 2, crown.sw, crown.sh);
+            ctx.drawImage(crown.img, -crown.sw / 2, -(70 - num223) * scale - crown.sh / 2 + footFlush, crown.sw, crown.sh);
           }
         }
         // NPC GlowMask 发光叠画（Main.cs DrawNPC 内硬编码 switch，见 drawNpcGlow 表）
@@ -9140,14 +9151,10 @@ export class Renderer {
     for (const n of banners) {
       const dup = banners.filter((o) => o !== n && o.home!.x === n.home!.x && o.home!.y === n.home!.y
         && banners.indexOf(o) > banners.indexOf(n)).length;
-      // 从 home.y-1 向上找第一个实心格（天花板/上表面）
-      let cy = n.home!.y - 1;
-      let found = false;
-      while (cy >= 10) {
-        if (st.isSolid(n.home!.x, cy)) { found = true; break; }
-        cy--;
-      }
-      if (!found) continue;
+      // 从 home.y-1 向上找第一格“房界”(tileSolidLike——平台算天花板候选;
+      // ★isSolid 会穿层:loft 下层的旗曾挂进上层同一行,2026-08-30 主因A修复)
+      const cy = findBannerAnchorY(st, n.home!.x, n.home!.y);
+      if (cy === null) continue;
       // 整面旗帜绘制（House_Banner_1 = 吊杆+垂布的完整旗，32×40 ≈ 2×2.5 格；
       // 用户对照官方原版实测旗帜约 4 格方形——此前按 Frame(2,2) 切 16×20 画小了）
       const bx = n.home!.x * 16 + 8;                    // 原版 num8=8 偏移

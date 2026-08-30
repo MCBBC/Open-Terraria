@@ -47,8 +47,11 @@ const SUPPORTED: Record<number, string> = {
   //   位驱动滴水视觉/湿尘 + 与岩浆接触的交互门;施加源新批 = 水枪 2272→弹 358
   //   (AI_060 :29454 AddBuff(103,1500t)=25s)。纯倒计时承载(wetT),视觉在实体侧
   353: 'shimmeredT',   // Shimmered(NPC 微光化,AddBuff(353,100t)):微光枪 5495→弹 1042
-  //   (AI_060 :29456-29458)专属——注意与"浸微光液"(Enemy.shimmerWet/shimmerT 计数)
-  //   是两套:本键只承载【buff 计时】,变形走既有的 npcGetShimmered 液体链
+  //   (AI_060 :29456-29458)专属——原版【单一系统】(X-F4 修正,旧"两套"注释系误读):
+  //   buff 在身即 shimmering=true(NPC.cs:93255-93265),液体接触只是施加端之一
+  //   (:94211-94218 Collision.shimmer→TryAddingRepeatedBuff),变形由透明度累计消费
+  //   (:92634-92644 >0.9 → GetShimmered :92668),不要求浸池。本键=【消费态】:
+  //   Enemy.fixedUpdate 把 shimmeredT>0 并入 shimmerT 累计驱动,阈同 91 拍
   375: 'hemorrhageT',  // Hemorrhage(:92604-92611;-200 = 100 HP/s)
   169: 'javelinT',     // BoneJavelin:层数模型已接(3 HP/s/层×附着 598 计数,
   //   :92740-92758;层池=Enemy.addStickerStack,cap 6)
@@ -69,7 +72,15 @@ const SUPPORTED: Record<number, string> = {
   //   成死代码;施加源 = 鞭 1033 ApplyWhipDebuffs）
   120: 'stinkyT',      // Stinky(苍蝇美食 5129 挥砍命中,Player.cs:6203-6206):敌怪侧
   //   效果 = 其余敌怪以 stinky 者为目标(NPC.cs:53888/53899 TargetClosest 门)——
-  //   本仓敌怪索敌 AI 未建模该转向,登记 GAP;字段仅承载 buff 存量/倒计时
+  //   本仓敌怪索敌 AI 未建模该转向,登记 GAP;字段仅承载 buff 存量/倒计时。
+  //   B1 批新增授予源:恶臭药水弹 371 消亡 80px 圈(P.cs:78947-78956 → ThrowKillFx)
+  // ---- B1 孤儿武器投掷物光环 buff（2026-08-30;Projectile.Kill 圈支 P.cs:78940-78962,
+  //      弹型→buff 映射 370→119/371→120/936→320;ThrowKillFx.applyAura 施加）----
+  //   ★工单"4986 NPC 不吃"与反编译相左——1456(:75203)/1458(:78955) 均为三件共享 NPC
+  //   循环,以源码为准。对 NPC 全为【展示级】无机制消费,纯计时承载（同 stinkyT 先例）:
+  119: 'lovestruckT',  // Lovestruck(爱情药水弹 370,NPC.buffType 挂账无 UpdateNPC case)
+  320: 'gelBalloonT',  // GelBalloonBuff(微光气球弹 936;玩家侧= drippingSparkleSlime
+                       //   :11843-11846 滴落展示,NPC 侧无任何消费)
 };
 
 type StatusEnemy = { [field: string]: number | undefined };

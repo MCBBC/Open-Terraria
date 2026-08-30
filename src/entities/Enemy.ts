@@ -1310,10 +1310,16 @@ export class Enemy extends Entity {
    *  分体)——玩家侧魂镰联动(3006 持械挥击时 player.soulDrain++ 计数,
    *  UpdateNPC_SoulDrainDebuff :91952-91979)依赖魂镰实装,登记 GAP */
   slimedT = 0;
-  /** Wet(103)/Shimmered(353)（2026-08-30 孤儿武器 A 波：水枪弹 358 / 微光枪弹 1042
-   *  施加源落地）：非 DoT 计时位——原版 NPC.AddBuff 后由 buff 更新链驱动滴水/微光
-   *  视觉与交互门(NPC.cs :11319-11352)；本仓先承载倒计时,视觉以施加瞬间湿尘最小近似 */
+  /** Wet(103)（2026-08-30 孤儿武器 A 波：水枪弹 358 施加源落地）：非 DoT 计时位
+   *  ——原版 NPC.AddBuff 后由 buff 更新链驱动滴水视觉与交互门(NPC.cs :11319-
+   *  11352)；本仓先承载倒计时,视觉以施加瞬间湿尘最小近似。
+   *  Shimmered(353)（微光枪弹 1042 同批,现为【消费态】:X-F4 接线后并入 Enemy
+   *  fixedUpdate 的微光链）——原版 buff 在身即 shimmering=true(NPC.cs:93255-93265),
+   *  变形触发不要求浸池(:92634-92644 透明度累计→GetShimmered :92668 四分支);
+   *  秒制时长 100t=5/3s ≥ 阈值 91 拍 ⇒ 满时长命中必触发一次 */
   wetT = 0;
+  /** buff 353 剩余（秒,applyBuffTicks max 合并写入；>0 即等价 shimmering 状态位,
+   *  驱动 shimmerT 累计并在 >90 时 npcGetShimmered 一次 + 自清防重入） */
   shimmeredT = 0;
   bleedT = 0;      bleedDoT = 0;
   hemorrhageT = 0; hemorrhageDoT = 0;
@@ -1360,8 +1366,16 @@ export class Enemy extends Entity {
   eelWhipDoT = 0;
   /** stinky(120)：苍蝇美食 5129 挥砍命中 5s（Player.StatusToNPC :6203-6206）。
    *  原版 NPC 侧效果 = 其余敌怪索敌改以 stinky 者为目标（NPC.cs:53888/53899）——
-   *  本仓敌怪索敌 AI 未建模该转向（登记 GAP），字段仅承载 buff 存量/倒计时 */
+   *  本仓敌怪索敌 AI 未建模该转向（登记 GAP），字段仅承载 buff 存量/倒计时。
+   *  B1 批新增授予源：恶臭药水弹 371 消亡 80px 圈（P.cs:78947-78956 → ThrowKillFx） */
   stinkyT = 0;
+  /** lovestruck(119)：爱情药水弹 370 消亡 80px 圈授予（P.cs:78940/:78955）——
+   *  NPC.buffType 挂账但 UpdateNPC 无任何 case（纯展示位），纯计时承载（B1 批） */
+  lovestruckT = 0;
+  /** gelBalloonBuff(320)：微光气球弹 936 消亡 80px 圈授予（P.cs:78943/:78955）——
+   *  玩家侧 = drippingSparkleSlime 滴落展示（Player.cs:11843-11846），NPC 侧零消费，
+   *  纯计时承载（B1 批） */
+  gelBalloonT = 0;
   /** 实例级 buff 免疫覆写（1457 AI_001 熔岩史莱姆段 :61312-61316 运行时
    *  `buffImmune[70/397/395/20] = false`）：vanilla buff id → false = 静态免疫表
    *  （data/vanillaNpcImmunity）被运行时复位,AddBuff 照常施加。projStatus 施加门
@@ -2051,19 +2065,34 @@ export class Enemy extends Entity {
     this.npcVsNpcContactUpdate(game);
     updateNpcLiquid(this, game, game.world.store);
     // 微光接触（NPC.cs:94268-94274）：WetCollision 盒命中微光 → shimmerWet +
-    // TryAddingRepeatedBuff(353,100)；buff 353 → shimmering（:93313-93321）→
-    // shimmerTransparency +0.01/t（:92468-92483）>0.9 → GetShimmered；离池衰减
-    // :92484-92500 一并 1:1（见下），视觉渐隐侧未接（GAP：shimmerTransparency
-    // 渲染消费）。
-    // 入口门（NPC.cs:17773）：buffImmune[353] = ShimmerImmunity[type]——免表 NPC
-    // （史莱姆王/石巨人/史莱姆皇后/城镇宠物/事件军…，isNpcShimmerImmune）不进
-    // shimmering；非免表 Boss（克苏鲁之眼 4 等）原版照进，GetShimmered 无表项
-    // 时为空操作（npcGetShimmered 同语义提前返回）
+    // TryAddingRepeatedBuff(353,100)；离池衰减 :92484-92500 一并 1:1（见下），
+    // 视觉渐隐侧未接（GAP：shimmerTransparency 渲染消费）。
+    // ---- X-F4 接线（2026-08-30）：原版是【单一系统】，不存在"液体/弹体两套"——
+    //      buff 353 在身即 shimmering=true（:93255-93265,免疫条目 :17870
+    //      buffImmune[353]=NPCID.Sets.ShimmerImmunity[type] 已由下方入口门排除）；
+    //      变形触发只读该状态位导出的透明度累计（:92634-92644,+0.01/t,
+    //      Main.netMode!=1 且 >0.9 → GetShimmered() :92668 四分支），
+    //      【不要求浸在池中】。液体只是施加源之一（TryAddingRepeatedBuff），弹体
+    //      施加同链——微光枪弹 1042 AddBuff(353,100t)（AI_060 :29456-29458,经
+    //      GlobProj→applyBuffTicks 写入本仓秒制 shimmeredT）。故把 buff 位并入
+    //      同一驱动面：shimmeredT>0 ⇔ shimmering=true,与浸池共用 shimmerT 累计器
+    //      与唯一触发点。阈值换算：counter 是 transparency×100,每拍 +1 ⇔ 原版
+    //      +0.01/t；严格不等式 >0.9 需第 91 拍（0.91）跨过；弹体时长 100t≈1.67s
+    //      ≥ 所需 91/60s ⇒ 满时长命中必达阈。差异登记（对照原版空调用语义）：
+    //      原版对无任何表项的 NPC 每 tick 重入 GetShimmered 空调用直至 buff 走完
+    //      （:92668 无 else 兜底）；本仓真实分支在 npcGetShimmered 内自清 shimmerT,
+    //      空分支靠下述【清零 buff 位防重入】剪成一次调用——省掉的必然为空的重放
+    //      调用无可观测行为差。
+    // 入口门（NPC.cs:17773）：免表 NPC（史莱姆王/石巨人/城镇宠物/事件军…）不进；
+    // 非免表 Boss（克苏鲁之眼 4 等）原版照进，npcGetShimmered 无表项时为空操作
     if (this.vanillaId !== null && !isNpcShimmerImmune(this.vanillaId)) {
       // shimmerWet 由 updateNpcLiquid 的 WetCollision（中心小盒）写出——原版同一判定
-      if (this.shimmerWet) {
+      if (this.shimmerWet || this.shimmeredT > 0) {
         this.shimmerT += 1;
-        if (this.shimmerT > 90) this.npcGetShimmered(game);
+        if (this.shimmerT > 90) {
+          this.npcGetShimmered(game);
+          if (this.shimmeredT > 0) this.shimmeredT = 0;   // 弹体位用后清零,防逐拍重入
+        }
       } else if (this.shimmerT > 0) {
         // 离池衰减（:92484-92500）：shimmerTransparency -0.001/t（本仓 shimmerT
         // 为其 ×100 计数 → -0.1/t，90 → 0 需 900t；justHit -0.1、buffImmune[353]
@@ -2205,6 +2234,8 @@ export class Enemy extends Entity {
     // 原版 TargetClosest :78569 应用——不再对 vx 做周期翻转（旧近似已移除）
     if (this.confusedT > 0) this.confusedT -= dt;
     if (this.stinkyT > 0) this.stinkyT -= dt;   // stinky(120) 存量倒数（AI 转向 GAP 见字段注）
+    if (this.lovestruckT > 0) this.lovestruckT -= dt;   // 119 纯展示位倒数（B1 批）
+    if (this.gelBalloonT > 0) this.gelBalloonT -= dt;   // 320 滴落展示位倒数（B1 批）
     // ---- 1457 新 debuff VFX（UpdateNPC_BuffApplyVFX :92263-92330 + A-5 孢子云
     //      :92878-92894）。原版走 Dust/ParticleOrchestrator,本仓以 spawnParticles
     //      近似（颜色/概率/速率 1:1;粒子形态差异登记）----
@@ -6449,7 +6480,13 @@ export class Enemy extends Entity {
       if (this.justHit) this.ai3 = 0;                           // :22859-22862
       this.ai3 += 1;
       if (this.ai3 >= 150) {
-        if (!this.embeddedInSolid(st) && this.canSeePlayer(st, player)) {
+        // ★2026-08-30 实体侧对账批：原版 260 开火门同样带 flag23 =
+        //   AI_GlobalFiringDistanceCheck（1457 NPC.cs:22927 `(!SolidCollision & flag23)
+        //   && Collision.CanHit(this, Main.player[target])`；与 Clinger 101 支 :22892
+        //   同式，aiStyle13 公共 flag23 定义于段首）——此前漏接距离门。
+        if (!this.embeddedInSolid(st)
+          && aiGlobalFiringDistanceCheck(this.cx, this.cy, player.cx, player.cy)
+          && this.canSeePlayer(st, player)) {
           const num225 = 14;                                    // :22870
           let dxS = player.cx - this.cx + (Math.floor(Math.random() * 21) - 10);
           let dyS = player.cy - this.cy + (Math.floor(Math.random() * 21) - 10)
@@ -6465,7 +6502,10 @@ export class Enemy extends Entity {
           }
           this.ai3 = 0;                                         // :22887
         } else {
-          this.ai3 = 250;                                       // :22891
+          // ★F6 回退延时两版分叉（2026-08-30 实体侧对账批）：1456 NPC.cs:22891 =
+          //   localAI[0]=250f；1457 同支 :22950 改 130f（1457 新增 flag23 =
+          //   AI_GlobalFiringDistanceCheck 批同步收紧,CLAUDE.md 冲突以 1457 为准）
+          this.ai3 = 130;                                       // 1456 cs:22891=250f → 1457 :22950=130f
         }
       }
     }

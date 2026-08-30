@@ -5,7 +5,7 @@
 //   八通道（act/typ/wal/liq/half/slope/lty/inact），报首差/pairs/bbox；SW_I70_MAP=1 打 ASCII。
 // 用法：cd game && SW_I70CAP=1 npx vitest run tools/_iii70dg.test.ts
 import { it } from 'vitest';
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, appendFileSync } from 'node:fs';
 import { generateWorld, lastGenState } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
@@ -200,6 +200,23 @@ const le16 = (p: string): Uint16Array => {
     writeFileSync(`${SNAPDIR}/${tag}.wal`, Buffer.from(wal.buffer));
     writeFileSync(`${SNAPDIR}/${tag}.liq`, Buffer.from(liq.buffer));
   };
+  // ★IIIII85：原始样本值窗日志（SW_I70_ROLLLOG）——与 rig JJHook.OnRoll 同口径
+  //   （per-pass 绝对序号 1 基，UnifiedRandom.InternalSample 返回值），供值级归属。
+  const ROLLLOG = process.env.SW_I70_ROLLLOG;
+  if (ROLLLOG) {
+    (globalThis as unknown as { __swRollIdx?: number }).__swRollIdx = 0;
+    writeFileSync(ROLLLOG, '');
+    const onRollPrev = (globalThis as unknown as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll;
+    (globalThis as unknown as { __swOnRoll?: (v: number, inst: object) => void }).__swOnRoll = (v: number) => {
+      if (onRollPrev) onRollPrev(v, {});
+      const box = (globalThis as unknown as { __swRollIdx?: number });
+      box.__swRollIdx = (box.__swRollIdx ?? 0) + 1;
+      if (box.__swRollIdx! >= Number(process.env.SW_I70_ROLLLO ?? 0)
+        && box.__swRollIdx! <= Number(process.env.SW_I70_ROLLHI ?? 1e15)) {
+        try { appendFileSync(ROLLLOG, `${box.__swRollIdx}|${v}\n`); } catch { /* ignore */ }
+      }
+    };
+  }
   const rcBox = { n: 0 };
     const wCount = <T extends Record<string | symbol, unknown>>(o: T): T => new Proxy(o, {
       get(t, k, rec) {
@@ -221,7 +238,13 @@ const le16 = (p: string): Uint16Array => {
       }
       return rng;
     })();
-    (globalThis as unknown as { __ltRc?: { n: number } }).__ltRc = rcBox;
+    // ★IIIII85：ROLLLOG 模式下 MARK|*|rc= 改用【internalSample 绝对序号】（与 rig
+    //   JJHook.RollCount 同单位同位）——旧 wCount 包装按「API 调用」计,GetSampleFor-
+    //   LargeRange 类一次调用耗 2 样本 → 段级 ±N 单位混差伪影（本批实测 gpC→ltR 段
+    //   样本值逐位全等而包装计差 5）。
+    (globalThis as unknown as { __ltRc?: { n: number } }).__ltRc = ROLLLOG
+      ? { get n() { return (globalThis as unknown as { __swRollIdx?: number }).__swRollIdx ?? 0; } }
+      : rcBox;
     // ★IIIII70 基座自检：hydrate 后先对上一层 dump(041) 八通道计数（非零=基座错）
     {
       const pre41 = `${G2}/041_${DUMPNAME.get(41)}`;

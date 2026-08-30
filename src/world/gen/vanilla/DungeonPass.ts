@@ -291,7 +291,12 @@ export function runDungeonPass(
     const WV61 = typeof globalThis !== 'undefined' ? (globalThis as { __swWvLog?: unknown }).__swWvLog : undefined;
     if (WV61) {
       const L = ((globalThis as { __wvLines?: string[] }).__wvLines ??= []);
-      L.push(`MARK|${name}|rc=${dgMainRolls}`);
+      // ★IIIII84：mc=__swOnRoll 主实例样本镜像计数（main 实例逐样本真账；
+      //   dgMainRolls 只记本文件 ri/rn/rd/raw 包装面,树/引擎内部 rng.int 直呼漏计,
+      //   与 x86 JJHook.RollCount2 同口径对拍时以 mc 为准）
+      const mrc = (typeof globalThis !== 'undefined'
+        ? (globalThis as { __swRollN?: number }).__swRollN : undefined);
+      L.push(`MARK|${name}|rc=${dgMainRolls}` + (mrc !== undefined ? `|mc=${mrc}` : ''));
     }
     if (segWatch) segWatch(name, st);
   };
@@ -822,8 +827,12 @@ export function runDungeonPass(
         }
       }
     }
-    // ---- 叶团（!remixWorldGen 支恒走）----  （root 域快照顺延给 passage ref）
-    for (let idx2 = 0; idx2 < nA; idx2++) {   // C#: num37 < num2（叶锚独立游标）
+    // ---- 叶团（DU:1010 `if (!WorldGen.remixWorldGen)` 整段门——★IIIII84 刀①定罪：
+    //   remx/remix 类世界（zenith/dontdigup）整段跳过；旧注释「支恒走」系对 :1013
+    //   读漏 —— JS 曾无门恒跑 ⇒ 每 anchor 多耗 2-3 掷且涂 192 叶块，树区 ±74 掷
+    //   与冠部 192 污染（地牢域掷流/内容双残差根源之一） ----
+    if (!gs.seedFlags.remix) {
+      for (let idx2 = 0; idx2 < nA; idx2++) {   // C#: num37 < num2（叶锚独立游标）
       let n38 = rng.int(5, 7);                              // Next(5,8)
       n38 = Math.trunc(n38 * (1.0 + wdt * 0.05));
       if (arr7[idx2]) n38 = rng.int(6, 11) + wdt;           // Next(6,12)+num5
@@ -846,6 +855,7 @@ export function runDungeonPass(
             st.paint[k] = 28;
           }
         }
+      }
       }
     }
     makeTreePassage(j, attachmentY, wdt, minL0, minR0);
@@ -2494,8 +2504,18 @@ export function runDungeonPass(
     dungeonX = i; dungeonY = n7;
     // ★IIIII21（cs:493-495）：drunk 死生命树——x=i、y=(int)worldSurface、
     //   attachmentY=num7-num16+8、generateRoots=false。
+    // ★IIIII84 刀①取证钩（WVLOG 门控零开销）：树前/树后主流样本序数（x86 侧对照=
+    //   rig dg_tree_0/dg_te_post 段间 Δ）
+    const mark88 = (tag: string): void => {
+      const L = typeof globalThis !== 'undefined' ? (globalThis as { __wvLines?: string[] }).__wvLines : undefined;
+      if (!L) return;
+      const mrc = (typeof globalThis !== 'undefined' ? (globalThis as { __swRollN?: number }).__swRollN : undefined);
+      L.push(`MARK|${tag}|mc=${mrc}`);
+    };
     if (gs.seedFlags.drunkWorld) {
+      mark88('tower.treePre');
       generateDungeonTree(i, Math.trunc(gs.worldSurface), n7 - n16 + 8, false);
+      mark88('tower.treePost');
     }
     // 阶梯双侧（:437-443，depth=num5=100；★IIIII21：drunk 入口地下 → HasStairs 恒假
     //   整跳；num5 地下改 num17-m+5=45 同步登记不接线——阶梯关死无消费面）

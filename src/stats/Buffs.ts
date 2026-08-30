@@ -339,6 +339,16 @@ export enum BuffType {
   IceBarrier = 246,    // 冰障(62,冰冻海龟壳 1253/冰冻护盾 3997 半血挂)：半血以下 endurance+0.25
                        //   （UpdateBuffs :10127-10152；超半血 DelBuff——施加/移除门在
                        //   Player.fixedUpdate 与装备 1253/3997 半血判定联动）
+  // ---- 孤儿武器 B1 波投掷物光环 buff（2026-08-30，Projectile.Kill 圈支
+  //      Projectile.cs:78937-78962 → src/entities/ThrowKillFx.ts）：三件均为
+  //      UpdateBuffs 无属性 case 的视觉位——119 loveStruck 标志（:10359-10362，
+  //      玩家头顶爱心展示）、120 = 既有 Stinky(luck −0.25 已接)、320 drippingSparkle
+  //      Slime 滴落展示（:11843-11846）。120 在 BUFF_NO_SAVE 名单，119/320 同表
+  //      （Main.cs buffNoSave 名单含两 id）不落盘。图标 Buff_119/320.png 已在盘；
+  //      名称/描述走原版 BuffName/BuffDescription（12 语言现成）----
+  Lovestruck = 259,            // 坠入爱河(119,爱情药水弹 370 消亡 80px 圈授予)
+  GelBalloonBuff = 260,        // 微光史莱姆装扮(320,微光气球弹 936 消亡 80px 圈授予)：
+                               //   drenchedGlow / SpawnShimmerSparkle 展示级
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -577,6 +587,11 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.FlinxMinion]: { vanillaBuff: 325, descKey: 'BuffDescription.FlinxMinion', fallbackName: '小雪怪' },
   [BuffType.PalworldMinionCattiva]: { vanillaBuff: 385, descKey: 'BuffDescription.PalworldMinionCattiva', fallbackName: '捣蛋猫' },
   [BuffType.PalworldMinionFoxsparks]: { vanillaBuff: 386, descKey: 'BuffDescription.PalworldMinionFoxsparks', fallbackName: '火绒狐' },
+  // ---- B1 投掷物光环 buff（描述走原版 BuffDescription 键——zh-Hans/en-US 语料在键,
+  //      同 IceBarrier 先例;名称 BuffName.Lovestruck/GelBalloonBuff 由 icon/名字管线
+  //      的同源 key 解析）----
+  [BuffType.Lovestruck]: { vanillaBuff: 119, descKey: 'BuffDescription.Lovestruck', fallbackName: '坠入爱河' },
+  [BuffType.GelBalloonBuff]: { vanillaBuff: 320, descKey: 'BuffDescription.GelBalloonBuff', fallbackName: '微光史莱姆装扮' },
 };
 
 /** BuffID.Sets.IsFedState（BuffID.cs:16 = {26,206,207,332,333,334}——含饥饿链三态：

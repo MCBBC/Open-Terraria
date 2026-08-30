@@ -3287,8 +3287,11 @@ export class FlaironSpike extends Entity {
 
 /** AI_016 全族分类表（Projectile.cs 权威行号） */
 /** 粘性族（SetDefaults tileCollide=false + AI_016 :44325 贴附扫描）。
- *  911 黏性土制炸弹同族（:8371-8379 tileCollide=false + :44325 列表） */
-const STICKY_PROJ = new Set([37, 397, 470, 911]);
+ *  911 黏性土制炸弹同族（:8371-8379 tileCollide=false + :44325 列表）。
+ *  ★1458 锚同值（:47822 扫描列表）：{37,397,470,519,773,911,1087}——519/1087 本仓
+ *  各走专属实体不入此路;773 甲虫炸弹 B2 波接入（tileCollide=false 出膛自管物理 +
+ *  重叠贴附,扫描盒/内缩语义与族共享）。 */
+const STICKY_PROJ = new Set([37, 397, 470, 911, 773]);
 /** 液体炸弹族（903 水/904 岩浆/905 蜂蜜/906 干燥）：入液即爆
  *  （AI_016 :44267 wet && 族列表 → timeLeft=1 次帧爆） */
 const LIQUID_BOMB_PROJ = new Set([903, 904, 905, 906]);
@@ -3302,12 +3305,12 @@ const DYN_PROJ = new Set([29, 470, 637]);
 const BOMB_PROJ = new Set([28, 37, 516]);
 /** 手雷族（不破坏地形；PrepareBombToBlow 128×128 用物品伤害） */
 const NADE_PROJ = new Set([30, 397, 517]);
-/** IsABombWithFuse（ProjectileID.cs:183——引信嘶声循环族；手雷族不在内！）。
- *  原版全集含 519/75/102/681/773/1077/1086/1087——它们在本仓走各自专属实体
+/** IsABombWithFuse（ProjectileID.cs:277（1458 同值）——引信嘶声循环族；手雷族不在内！）。
+ *  原版全集含 519/75/102/681/773/1077/1086/1087——除 773 外在本仓走各自专属实体
  *  （681 DD2GoblinBomb=bossAI_dd2 等），不经过 GrenadeProj,故表内只收
  *  本实体承接的成员 + 湿/干/土制弹族 903-906/910/911（§7 销核批落地，
- *  2026-08-13 主会话补入嘶声资格） */
-const FUSE_SOUND_PROJ = new Set([28, 37, 516, 29, 470, 637, 903, 904, 905, 906, 910, 911]);
+ *  2026-08-13 主会话补入嘶声资格）+ 773 甲虫炸弹（B2 波 2026-08-30）。 */
+const FUSE_SOUND_PROJ = new Set([28, 37, 516, 29, 470, 637, 903, 904, 905, 906, 910, 911, 773]);
 
 export class GrenadeProj extends Entity {
   // 碰撞盒 1:1（Projectile.SetDefaults :846-869/:938/:4508/:5173/:5584/:5592/:6571）：
@@ -3404,8 +3407,10 @@ export class GrenadeProj extends Entity {
     this.fuse = fuse;
     this.projId = projId;
     this.onExplode = onExplode;
-    // 液体炸弹/土制炸弹族碰撞盒 22×22（SetDefaults :8325-8332/:8363-8379 同炸弹族）
+    // 液体炸弹/土制炸弹族碰撞盒 22×22（SetDefaults :8325-8332/:8363-8379 同炸弹族）；
+    // 773 甲虫炸弹同值（:7904-7912 1457/1458 同行号）
     const hb = BOMB_PROJ.has(projId) || LIQUID_BOMB_PROJ.has(projId) || projId === 910 || projId === 911
+      || projId === 773
       ? 22 : DYN_PROJ.has(projId) ? 10 : 14;
     this.w = hb; this.h = hb;
   }
@@ -3713,6 +3718,22 @@ export class GrenadeProj extends Entity {
       }
       if (stuck) {
         this.vx = 0; this.vy = -0.2;                  // 贴附：抵消重力悬停（:44376-44377）
+        // 773 甲虫炸弹贴附段（AI_016 :47891-47907，1458 同锚）：本体朝向玩家姿态
+        // num9 = DirectionTo(player).ToRotation()+π/2、rotation.AngleLerp(num9,0.2)
+        // （AngleTowards 钳未建模登记）；1/3 掷贴附尘 59 活动感近似
+        if (this.projId === 773) {
+          const pc = game.player as unknown as { cx?: number; cy?: number };
+          const dxp = (pc.cx ?? this.cx) - this.cx, dyp = (pc.cy ?? this.cy) - this.cy;
+          const dl = Math.hypot(dxp, dyp);
+          if (dl > 0.001) {
+            const target = Math.atan2(dyp / dl, dxp / dl) + Math.PI / 2;
+            let diff = ((target - this.rot) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+            this.rot += diff * 0.2;
+            if (Math.random() < 1 / 3) {
+              game.spawnParticles?.(this.cx, this.cy, '#B49A72', 2, 1.2, { life: 18, damp: 0.92, size: 2 });
+            }
+          }
+        }
         // 911 推出（:44385-44393）：弹心所在格实心 → 沿（块心−弹心）反向退 4px，
         // 让炸弹停在墙面外侧而非嵌进砖里（SolidOrSlopedTile ≈ isSolid）
         if (this.projId === 911) {
@@ -3969,6 +3990,103 @@ export class PowderProj extends Entity {
       game.spawnParticles(this.cx, this.cy, color, 30, 1.6, { life: 45, damp: 0.94, size: 2 });
     }
     game.applyPowder?.(this.projId, this.x, this.y, this.w, this.h);
+  }
+}
+
+// ================= 肥料云（proj 1019 肥料 / 1051 富集肥料，aiStyle 6） =================
+
+/** item vid → proj id（Item.cs case 5438 :42954-42967 shoot1019 speed3 /
+ *  case 5518 :43433-43446 同构段,差异仅 shoot=1051——1457 终值;extractor json 已收
+ *  useTime15/useAnim15/consumable/noMelee,本表只补 vid→弹映射）。 */
+export const FERTILIZER_PROJ_BY_ITEM: Record<number, number> = { 5438: 1019, 5518: 1051 };
+
+/** AI_006 肥料支 1:1（Projectile.cs:24367-24505,1457 与 1458 同行号锚；PowderProj 同族同构）：
+ *   · SetDefaults（:9646-9658 / :9965-9977）：64×64 命中盒、aiStyle6、friendly、
+ *     tileCollide=false、penetrate=-1、alpha=255 本体不绘制、ignoreWater；
+ *   · 每拍 velocity×0.95 初速漂移（:24369）、ai[0]==180 兜底自灭（:24371）、
+ *     velocity.Length()<0.5 即散（:24504）——shootSpeed 3 出手约 36 拍后飘停散云；
+ *   · 首 tick 尘爆（ai[1] 门 :24375-24420）：flag2 数量 40 型号 0 尘、flag(富集)
+ *     数量 50 且逐粒 rand(3)==0 换抽 309；每粒再走 flag2 后置覆写
+ *     noGravity=i%3!=0 + 重力档 s×1.25/vel÷2/vy−2.2 vs 浮空档 s×1.75/+弹速×0.65
+ *     （P.cs:24379-24418）——spawnDust 第8参=Alpha 非数量（B2-F1 曾塌缩成 1 粒）；
+ *     本仓 spawnDust 缺省宿主回落合成粒子;
+ *   · 覆盖窗苗格成树（owner==myPlayer && flag2 门 :24430-24435 单人恒真；窗=
+ *     floor(pos/16)-1 .. floor((pos+size)/16)+2 双轴,盒-格矩形相交再筛;
+ *     CommonSapling[type] 才调 AttemptToGrowTreeFromSapling(:24501-24505)——
+ *     富集档 treeHeightAddon=15、remixWorld 地下带先 underground:false 补试一次。
+ *     窗扫+苗筛+派发由 Game 注入回调承载（与 PowderProj.applyPowder 同构,
+ *     实体层不持世界引用）。 */
+export class FertilizerCloud extends Entity {
+  w = 64; h = 64;
+  vx: number;
+  vy: number;
+  projId: number;
+  dead = false;
+  private t = 0;
+  private burst = false;
+  /** (盒左x, 盒上y, 盒宽w, 盒高h, treeHeightAddon)——Game.growFertilizedSapling 承载 */
+  private growScan: (gx: number, gy: number, gw: number, gh: number, addon: number) => void;
+
+  constructor(x: number, y: number, vx: number, vy: number, projId: number,
+    growScan: (gx: number, gy: number, gw: number, gh: number, addon: number) => void) {
+    super();
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.projId = projId;
+    this.growScan = growScan;
+  }
+
+  /** alpha=255 本体不可见（SetDefaults :9655/:9974），视觉全靠首 tick 尘团 */
+  draw(): void { /* no-op */ }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    // cs:24370-24372：ai[0]++ 与 ==180 慢杀兜底（先于扫描——Kill 当拍剩余段跳过）
+    this.t++;
+    if (this.t === 180) { this.dead = true; return; }
+    this.vx *= 0.95; this.vy *= 0.95;                      // cs:24369
+    if (!this.burst) {
+      // P.cs:24378-24392 数量/尘型定档：num52=30（本族肥料两型不走）→ flag2 抬
+      // num52=40 且 num51=0 → 富集(flag=1051) 再抬 num52=50。B2-F1 修复：
+      // spawnDust 第 8 参是 Alpha=50（P.cs:24399 NewDust 签名第 7 参——
+      // Dust.cs:75 `int Alpha`），原实现把它当数量只发 1-2 粒 → 塌缩；
+      // 本仓签名 GameHooks.spawnDust(x,y,w,h,type,sx,sy,alpha,color,scale,noGravity)
+      // 单粒语义与原版逐参对齐,数量必须由调用侧循环承载。
+      this.burst = true;
+      const enriched = this.projId === 1051;
+      for (let i = 0; i < (enriched ? 50 : 40); i++) {           // P.cs:24393
+        // P.cs:24395-24398 富集档逐粒重掷尘型 rand(3)==0 ? 309 : 0；普通档恒型 0
+        const dustType = enriched && Math.floor(Math.random() * 3) === 0 ? 309 : 0;
+        // P.cs:24399 NewDust(position,w,h,type,SX,SY,Alpha:50)：速度基线=弹速,
+        // 框内随机落点/±2 速度抖动/scale 抖动在 fx/VanillaDust.spawn(:75-285) 内完成;
+        // 返回 null ≈ Main.dust[6000] 失败哑槽(Main.cs:1692 new Dust[6001])——
+        // 原版 flag2 覆写对哑槽同样空转,此处跳过即可不破坏其余粒的循环节奏
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, dustType,
+          this.vx, this.vy, 50);
+        if (!d) continue;
+        // P.cs:24400-24418 flag2 后置覆写：noGravity = i%3!=0 逐粒轮替——
+        //   重力档(!noGravity,:24405-24409)s×1.25+vel÷2+vy−2.2（沉降下沿团）
+        //   浮空档(noGravity,:24413-24416)s×1.75+vel+弹速×0.65（随云拖尾团）
+        d.noGravity = i % 3 !== 0;
+        if (!d.noGravity) {
+          d.scale *= 1.25;
+          d.vx /= 2; d.vy /= 2;
+          d.vy -= 2.2;
+        } else {
+          d.scale *= 1.75;
+          d.vx += this.vx * 0.65; d.vy += this.vy * 0.65;
+        }
+      }
+      if (!game.spawnDust) {                                     // 无尘宿主回落合成粒子
+        game.spawnParticles?.(this.cx, this.cy, enriched ? '#CCE87A' : '#C8A85A',
+          enriched ? 50 : 40, 1.5, { life: 46, damp: 0.95, size: 2 });
+      }
+    }
+    // 位移在扫描前完成一拍（原版 AI 后 Update 位移同帧序）
+    this.x += this.vx;
+    this.y += this.vy;
+    this.growScan(this.x, this.y, this.w, this.h, this.projId === 1051 ? 15 : 0);  // cs:24501-24505
+    // cs:24504：velocity.Length() < 0.5 → Kill（肥料云的真实寿命门,~36 拍）
+    if (Math.hypot(this.vx, this.vy) < 0.5) { this.dead = true; return; }
   }
 }
 

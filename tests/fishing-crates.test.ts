@@ -273,7 +273,8 @@ describe('蠕虫罐 4345 / 牡蛎 4410 / 麒麟蛋 6142', () => {
 describe('钱槽 3213（Item.cs:28953-28962 + Main.cs:37321-37333）', () => {
   it('持用契约：chest=-2 开 piggy(banks[0]) / useTime 28 / 双处同音 Item_59', () => {
     expect(MONEY_TROUGH_USE).toEqual({
-      openChestX: -2, bankIndex: 0, useTime: 28, sound: 'Item_59',
+      openChestX: -2, bankIndex: 0, cursorIconVid: 3213,
+      useTime: 28, sound: 'Item_59',
     });
   });
   it('3213 非右键开包物（原版 OpenableBag 不含钱槽——走持用链）', () => {

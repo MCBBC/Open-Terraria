@@ -50,6 +50,11 @@ export function runDunesPass(st: TileStore, rng: RNG, gs: GenState, onIter?: (i:
   // pass 头：DungeonCrawler.SetupDungeonGenVarVariables（cs:11542 + DungeonCrawler.cs:56）
   // ——地牢主题 Next(3) 在**这里**消耗（曾错放到 DungeonPass=流错位 1 颗）
   gs.dungeonTheme = rng.nextIntRange(0, 3);
+  // ★IIIII82（DungeonCrawler.cs:56-58）：REMIX 世界主题**不用掷值**——先照掷
+  //   （骰面消耗一致），再被 `num = WorldGen.crimson ? 2 : 0` 钉死（猩红→粉 2 /
+  //   腐化→蓝 0）。此前漏钉 ⇒ zenith(remix∧drunk) 下地牢砖色随裸掷值漂移：
+  //   #32 窗整体 T41>44×~5.2 万（蓝→粉）主体残差（反演重放 THEME_PIN=0 复验收敛）。
+  if (gs.seedFlags.remix) gs.dungeonTheme = gs.crimson ? 2 : 0;
   // ★IIIII21（DungeonCrawler.cs:94-110）：drunk 世界墙风格重掷——紧跟主题 switch
   //   之后、入口三掷之前。普通世界该 if 整段短路=零掷骰零扰动。
   gs.dungeonWallStyle = gs.seedFlags.drunkWorld ? rng.nextIntRange(0, 3) : undefined;

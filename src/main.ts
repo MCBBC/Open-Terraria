@@ -30,6 +30,8 @@ import { VuiDemoState } from './vui/states/VuiDemoState';
 import { createFlow } from './mainFlow';
 import type { FlowHandle } from './mainFlow';
 import { downloadDebugReport } from './debug/DebugReport';
+import { initTileFrameCapture, tileFrameCapture } from './debug/TileFrameCapture';
+import { tileAnim, TILE_ANIM_RATE, TILE_ANIM_PITCH, TILE_ANIM_FRAMES } from './render/TileAnim';
 import { showFeatureGate } from './ui/QuickGate';
 import { installCanvasWatch } from './render/CanvasWatch';
 import { RemasterRuntime } from './remaster/RemasterRuntime';
@@ -128,6 +130,24 @@ let atlas: SpriteAtlas | null = null;
 let flow: FlowHandle | undefined;
 let inGame = false;
 let pausePanel: HTMLElement | null = null;
+
+// ---- 动画帧捕获系统（被动聚合恒开 + 长按 F5 录制窗全量）----
+// 快照/截图/异常像素小样都要主画布与相机；tick 用渲染端动画时钟。
+initTileFrameCapture({
+  tick: () => tileAnim.tick,
+  canvas: () => {
+    const cs = document.querySelectorAll('canvas');
+    let best: HTMLCanvasElement | null = null, area = 0;
+    cs.forEach((c) => { const a2 = c.width * c.height; if (a2 > area) { area = a2; best = c; } });
+    return best;
+  },
+  camera: () => {
+    const g = flow?.game;
+    const cam = g ? (g as unknown as { camera?: { x: number; y: number } }).camera : null;
+    return cam ? [cam.x, cam.y] : null;
+  },
+  zoom: () => (flow?.game as unknown as { camera?: { zoom: number } } | undefined)?.camera?.zoom ?? 1,
+}, { rate: TILE_ANIM_RATE, pitch: TILE_ANIM_PITCH, frames: TILE_ANIM_FRAMES });
 
 async function loadAssets() {
   atlas = new SpriteAtlas();
@@ -475,6 +495,7 @@ window.addEventListener('keyup', (e) => {
     const r = downloadDebugReport(game, {
       playTimeMs: (flow as FlowHandle & { playStartNow: number }).playStartNow,
       behaviorTail: game.recorder.snapshotTail(2000),
+      tileFrames: tileFrameCapture.exportLight(),
     });
     ui.toast(r.triggered ? `调试报告已生成：${r.filename}` : '调试报告已生成（浏览器拦截下载，可从 __swDebugReport 取）');
     return;
@@ -483,10 +504,13 @@ window.addEventListener('keyup', (e) => {
   const rec = game.recorder;
   const recording = rec.toggle();
   if (recording) {
-    ui.toast('行为录制中…再长按 F5 结束并保存');
+    tileFrameCapture.start();   // 录制窗同步开：快照环/截图环/重烘账本全量
+    ui.toast('行为录制中…再长按 F5 结束并保存（含动画帧捕获）');
     return;
   }
   const dump = rec.export();
+  // 帧捕获全量并入录制 dump（聚合+异常环+快照+截图+重烘账本）
+  (dump as unknown as { tileFrames?: unknown }).tileFrames = tileFrameCapture.exportAndStop();
   const worldName = dump.meta.worldName.replace(/\s+/g, '_') || 'world';
   const filename = `behavior-log-${worldName}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   let triggered = false;

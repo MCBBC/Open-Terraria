@@ -387,6 +387,17 @@ export class Minecart extends Entity {
     else this.cartRampTime--;                     // :27036：起飞窗口内不加重力
     if (this.vy > MAX_FALL_SPEED) this.vy = MAX_FALL_SPEED;   // :27039-27043
 
+    // ---- 矿车撞怪（Player.cs:27748-27831 [1456 :27225 起]）——★调用位次对齐原文：
+    //      1457 Player.Update 内撞怪块先于 Minecart.TrackCollision 调用点（:28315，
+    //      同函数体顺序推进），本帧读的是轨驱段之前的车速——端点急停/斜坡起飞/
+    //      脱轨抛出等同一 tick 的速度改写【不进】本帧伤害档位与 >4f 门。旧版在本
+    //      方法尾部（轨驱+位移积分之后）读 velocity.Length()，时序晚一拍，2026-08-30
+    //      R5 复核修正。实现在 MountCombat.minecartNpcRampage（原内联版已收编：
+    //      TryConsumingTimerCrit OR 进 + 暴击掷骰整数分布 + GetMinecartDamage 数值表
+    //      /难度乘区/kb-抗性预除/iframes=30/event9 全链同前；2026-08-30 起 DamageVar
+    //      改为循环内逐 NPC 重抽+SuperCart 双掷，见 MountCombat 函数注释）----
+    minecartNpcRampage(this, game);
+
     // ---- TrackCollision（Player.cs:27795-27850 1:1）----
     // 液体减速（:27802-27806 num108）：湿 0.5 / 蜂蜜·微光 0.25，速度整体缩放后
     // 进碰撞再还原（原版 velocity *= num108 → TrackCollision → velocity /= num108）
@@ -507,12 +518,6 @@ export class Minecart extends Entity {
     p.vy = 0;
     p.onGround = this.onTrackNow || this.wasGrounded;
     p.fallStartY = null;   // 常规摔伤链由本实体 fallStart 接管（脱轨落地段结算）
-
-    // ---- 矿车撞怪（Player.cs:27748-27831 [1456 :27225 起]）：速度>4f 扩盒命中敌怪
-    //      ——实现在 MountCombat.minecartNpcRampage（本文件原内联版已收编：补齐
-    //      TryConsumingTimerCrit OR 进 + 暴击掷骰整数分布修正 rand.Next(1,101)<=crit；
-    //      GetMinecartDamage 数值表/难度乘区/kb-抗性预除/iframes=30/event9 全链同前）----
-    minecartNpcRampage(this, game);
 
     // ---- SuperCart 防御+激光（Mount.cs:4793-4799 UpdateEffects）----
     // _shouldSuperCart = Cart 族 && UsingSuperCart（本实体 superCart 即该旗）；

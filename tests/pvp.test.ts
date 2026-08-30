@@ -3,13 +3,14 @@
 import { describe, it, expect } from 'vitest';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
+import { Game } from '../src/core/Game';
 import { BuffState, BuffType } from '../src/stats/Buffs';
 import {
   inOpposingTeam, meleeEnchantOf, statusPvPProjectile, statusPvPMelee,
   PVP_BUFF_WHITELIST, TEAM_COLORS,
 } from '../src/stats/Pvp';
 
-describe('InOpposingTeam（Player.cs:4287-4299）', () => {
+describe('InOpposingTeam（1457 Player.cs:4490-4501 / 1456 :4290-4301）', () => {
   const P = (hostile: boolean, team: number) => ({ hostile, team });
   it('双方 hostile 且异队 → 敌对（team 0 互视为敌）', () => {
     expect(inOpposingTeam(P(true, 0), P(true, 0))).toBe(true);
@@ -181,5 +182,45 @@ describe('队伍色（Main.cs:6610-6615）', () => {
     expect(TEAM_COLORS[1]).toEqual([218, 59, 59]);
     expect(TEAM_COLORS[4]).toEqual([242, 221, 100]);
     expect(TEAM_COLORS.length).toBe(6);
+  });
+});
+
+// ============ F3(a) 收端免疫门 ============
+describe('收端免疫门（victim-settles 等价位：1457 :44429 门禁串含 player.immune——免疫窗内整条命中体不达）', () => {
+  /** Object.create(Game.prototype) 壳直调 netApplyStrikePlayer（同 spectate-self 口径）：
+   *  damagePlayer 桩化以隔离引擎依赖,被试面 = 门对「续杯 debuff + 扣血调用」的抑制 */
+  const shell = (iframes: number) => {
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    const p = new Player(0, 0, new Inventory());
+    p.baseMaxHp = 100; p.hp = 100;
+    p.hostile = true;                                 // InOpposingTeam 双方 hostile 门
+    p.iframes = iframes;
+    g.player = p;
+    g.remotePlayerProxies = [];                       // netPvpOwnerCtx → 默认空 ctx
+    const dmgCalls: number[] = [];
+    g.damagePlayer = (d: number) => { dmgCalls.push(d); return d; };
+    g.net = {
+      active: true,
+      policy: { pvpAllowed: true },
+      players: new Map([[7, { active: true, name: '甲', hostile: true, team: 0, x: 10, y: 10 }]]),
+    };
+    // flags=4 → bit0 未置 + bits1-4 浸剂 enchant=2（诅咒焰浸剂 → CursedInferno 续杯）
+    (g as unknown as { netApplyStrikePlayer: (s: number, d: number, w: number, f: number) => void })
+      .netApplyStrikePlayer(7, 20, -1, 2 << 1);
+    return { p, dmgCalls };
+  };
+
+  it('免疫窗外（iframes=0）→ 照常续杯浸剂 + 进入扣血结算', () => {
+    const { p, dmgCalls } = shell(0);
+    expect(dmgCalls).toEqual([20]);
+    expect(p.buffs.has(BuffType.CursedInferno)).toBe(true);
+    expect(p.lastDamageCause?.kind).toBe('player');
+  });
+
+  it('免疫窗内（iframes>0，原版 :44429 player.immune 支）→ 整段丢弃：无续杯、无死因覆写、零扣血', () => {
+    const { p, dmgCalls } = shell(8);                 // pvp 受击帧窗 = 8t（damage() 同款）
+    expect(dmgCalls).toEqual([]);
+    expect(p.buffs.has(BuffType.CursedInferno)).toBe(false);
+    expect(p.lastDamageCause).toBeNull();             // Player 默认 null——死因覆写在门之后,未被触达
   });
 });

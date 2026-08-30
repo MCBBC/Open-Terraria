@@ -484,6 +484,11 @@ item({ key: 'vi_832_living_wood_wand', name: '', value: 1 });
 item({ key: 'vi_4066_desert_minecart', name: '', value: 1 });
 item({ key: 'vi_4450_shroom_minecart', name: '', value: 1 });
 item({ key: 'vi_4423_scarab_bomb', name: '', value: 1 });
+// 肥料 5438 / 富集肥料 5518（Item.cs case 5438 :42954-42967 / case 5518 :43433-43446，
+// value=sellPrice(0,0,0,10)——孤儿武器 B2 波补注册：vanilla.json 素材早已有,
+// 使用链=FertilizerCloud 云体成树,见 WeaponProj FERTILIZER_PROJ_BY_ITEM 注）
+item({ key: 'vi_5438_fertilizer', name: '', value: 10 });
+item({ key: 'vi_5518_infused_fertilizer', name: '', value: 10 });
 item({ key: 'vi_159_shiny_red_balloon', name: '', value: 1 });
 item({ key: 'vi_5258_see_the_world_for_what_it_is', name: '', value: 1 });
 item({ key: 'vi_65_starfury', name: '', value: 1 });

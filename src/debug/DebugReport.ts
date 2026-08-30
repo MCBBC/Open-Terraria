@@ -60,6 +60,8 @@ export interface DebugReportOptions {
   /** 行为录制尾段（F5 短按注入 recorder.snapshotTail(2000)）：时序因果事件日志
    *  最近 2000 条——出问题后再按 F5 也能拿到事发前的输入/方块/生死序列 */
   behaviorTail?: Array<{ t: number; k: string; d: unknown }>;
+  /** 动画帧捕获轻量导出（聚合账本+异常环；快照/截图仅长按录制的 dump.tileFrames 有） */
+  tileFrames?: unknown;
 }
 
 /** 区域转储。rows 每行 RLE,token = `sheet:fx:fy:wall:liquid`(空格带墙/液体时 sheet=-1,
@@ -762,6 +764,8 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
     warnings: warns.slice(-50).map((w) => ({ t: w.t, msg: w.msg })),
     // 行为录制尾段（F5 短按注入；时序因果日志 = 输入/方块/生死/掉落/伤害/公告）
     behaviorTail: opts.behaviorTail ?? null,
+    // 动画帧捕获（被动聚合层；长按录制窗另并入 behavior dump.tileFrames 全量）
+    tileFrames: opts.tileFrames ?? null,
     instance: {
       gameMounts: opts.instanceCount ?? (globalThis as unknown as { __swInstanceCount?: number }).__swInstanceCount ?? 0,
       compatReport: !!(globalThis as unknown as { __lastCompatReport?: unknown }).__lastCompatReport,

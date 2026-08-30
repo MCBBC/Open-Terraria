@@ -209,6 +209,16 @@ function isTileNearby(st: TileStore, x: number, y: number, type: number, distanc
   }
   return false;
 }
+/** 同上，但入参是【原版 sheet id】（调用点传 vanilla 常量时用本仓内部 id 不换算）
+ *  ——remix PassageRoom 随机箱的邻域门用原版常量 53 沙/147 雪/59 泥（cs:29613）。 */
+function isTileNearbySheet(st: TileStore, x: number, y: number, sheet: number, distance: number): boolean {
+  for (let i = x - distance; i <= x + distance; i++) {
+    for (let j = y - distance; j <= y + distance; j++) {
+      if (st.inBounds(i, j) && st.flags[st.idx(i, j)] !== 0 && sheetAt(st, i, j) === sheet) return true;
+    }
+  }
+  return false;
+}
 
 /** 活木写入（cs 中 `type=191; active(true); halfBrick(false)` 三连） */
 function setLivingWood(st: TileStore, x: number, y: number): void {
@@ -581,6 +591,33 @@ function growLivingTreePassageRoom(
   // 可入箱——key 路径只影响取用哪个注册键（见 BuriedChestsPass 尾段主件去重注释）
   num8 = num < 0 ? num3 + 8 : num5 - 7;
   const mainItemKey = rng.int(0, 2) === 0 ? 'vi_4281_finch_staff' : 'vi_832_living_wood_wand';
+  // ★IIIII85（cs:29596-29632）：remix 世界箱位替换支——房内主件箱整体换形：
+  //   ①Next(1,3) 只在世界随机点放 1..2 个 style12 主件箱（√避 沙53/雪147/泥59 ±20），
+  //     每点位重试 ≤999 次，AddBuriedChest 失败（含 244 墙降档不成立=wooden 降级照常）
+  //     不占用房间箱位；
+  //   ②房内 num8 位必放一个无主件风格箱（crimson?14:7），loot 走标准埋箱池。
+  //   非 remix 保持既有「墙非 244→木箱无主件」单箱路径（s111/s777 认证域,勿动）。
+  if (gs.seedFlags.remix) {
+    const v1 = Math.trunc(st.w / 8);
+    const n10 = rng.int(1, 2);                                   // cs:29602 Next(1,3)
+    for (let n11 = 0; n11 < n10; n11++) {
+      let okc = false;
+      let tries = 1000;                                          // cs:29604 num12=1000
+      while (!okc) {
+        tries--;
+        if (tries <= 0) break;                                   // cs:29608
+        const nx = rng.int(v1, st.w - v1 - 1);                   // cs:29611 Next(w/8, w-w/8)
+        const ny = rng.int(gs.rockLevel, st.h - 351);            // cs:29612 Next((int)rockLayer, h-350)
+        if (!isTileNearbySheet(st, nx, ny, 53, 20)
+          && !isTileNearbySheet(st, nx, ny, 147, 20)
+          && !isTileNearbySheet(st, nx, ny, 59, 20)) {
+          okc = placeBuriedChest(st, rng, gs, chests, nx, ny, { style: 12, loot: mainItemKey });
+        }
+      }
+    }
+    placeBuriedChest(st, rng, gs, chests, num8, Y, { style: gs.crimson ? 14 : 7 });  // cs:29626/29630
+    return;
+  }
   // 落地行：房内 Y 行空心、Y+1 是活木地板。cs:36176 墙门读 (i-1, num7-1) =
   // 箱体**左列**底行（PlaceChest Origin(0,1) 语义，箱体 (i-1..i)）——曾读右列
   let gy = Y;

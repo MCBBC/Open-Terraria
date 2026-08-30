@@ -174,4 +174,7 @@ writeFileSync(`${out}/spectrum.md`,
   '# IIII84 anyseed spectrum\n\n' +
   '```jsonl\n' + rows.map((r) => JSON.stringify(r)).join('\n') + '\n```\n');
 const sampled = rows.filter((r) => !r.error).length - cmpable;
-console.log(`\n谱系落盘: ${out}/spectrum.jsonl|spectrum.md；绑定对拍 ${cmpable} 行（全绿 ${greens}/${cmpable}），未绑 JS 抽样 ${sampled} 行${g2map.size ? '' : ''}`);
+void greens;
+const boundGreen = rows.filter((r) => !r.error && CH.some((c) => typeof r[c] === 'number' && r[c] !== null)
+  && !CH.some((c) => r[c] > 0) && !CH.some((c) => r[c] === -1)).length;
+console.log(`\n谱系落盘: ${out}/spectrum.jsonl|spectrum.md；绑定对拍 ${cmpable} 行（全绿 ${boundGreen}），未绑 JS 抽样 ${sampled} 行`);

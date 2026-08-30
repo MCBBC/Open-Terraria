@@ -225,6 +225,8 @@ function openChilletEgg(give: BagGive, rnd: BagRand): void {
 export const MONEY_TROUGH_USE = {
   openChestX: -2,          // player.chest = -2（存钱罐容器约定，与储物族 tile 同）
   bankIndex: 0,            // player.banks[0] = piggy
+  cursorIconVid: 3213,     // 悬停光标=MoneyTrough 弹(525)本体支 Main.cs:38433/1456 :37308
+                           // （TryInteractingWithMoneyTrough 默认；==960 支→5098 归 CHESTER_CONTAINER）
   useTime: 28,             // Item.cs:28986 useTime = useAnimation = 28
   sound: 'Item_59',        // UseSound（:28985）= 容器开/关音（:38643-38645 同值）
 } as const;
@@ -238,7 +240,29 @@ export const CHESTER_CONTAINER = {
   projId: 960,             // Projectile.cs:63714 type==960 帧机支
   openChestX: -2,          // Main.cs:38463 localPlayer.chest = -2
   bankIndex: 0,            // GetCurrentContainer → player.bank（本仓 banks[0]）
-  cursorIconVid: 5098,     // Main.cs:38440-38443 cursorItemIconID = 960?5098:3213
+  cursorIconVid: 5098,     // 悬停光标=ChesterPetItem（Main.cs:38436/1456 :37311 proj.type==960 支；默认支 3213=MoneyTrough）
+} as const;
+
+/** 虚空透镜容器 734 契约（孤儿武器 B3 波 工单1；Main.cs:38403-38400 段
+ *  TryInteractingWithVoidLens 的右键支 + Projectile.cs:80568 TryGetContainerIndex
+ *  type==734 → -5 + Player.cs:31245 HandleBeingInChestRange voidLensChest 支 +
+ *  Player.cs:1571 Chest.CreateBank(-5)=bank4）。左键使用不【直开】面板——
+ *  Item.cs case 4131/5325 :35876-35894 两 case 全同数据（useStyle1/shoot 734/
+ *  speed 4/26×24/useAnim=useTime28/UseSound Item130/rare3/不消耗），使用 =
+ *  ItemCheck_Shoot 通用发射弹 734（VoidLensProj）；右键透镜本体才 chest=-5 开
+ *  banks[3] 面板（openChestX=-5 与储物族 tile 容器约定同源）；再右键/超射程/
+ *  弹亡 → 关。开/关音 = SoundID.Item130（Main.cs:38453/:38471 双向同音）。
+ *  关闭视觉态互换：手持 4131↔5325 右键换型（Player.cs:31796-31801 快换表 +
+ *  ChangeItemType :31874,Item.cs IsTheSameBeingFastSwapped :47870-47876）。
+ *  表值即测试桩（tests/orphan-b3.test.ts）。 */
+export const VOID_LENS_CONTAINER = {
+  projId: 734,             // Projectile.cs:80568 type==734 支
+  openChestX: -5,          // Main.cs:38463 支 localPlayer.chest = -5
+  bankIndex: 3,            // GetCurrentContainer → player.bank4（本仓 banks[3],Player.ts 注）
+  cursorIconVid: 4131,     // 悬停光标=VoidLens（Main.cs:38359 TryInteractingWithVoidLens flag2 段；1456 :37233 同值）
+  soundFile: 'Item_130',   // UseSound / PlayInteractiveProjectileOpenCloseSound 共值
+  useTime: 28,             // Item.cs:35890 useTime = useAnimation = 28
+  shootSpeed: 4,           // Item.cs:35880
 } as const;
 
 /** 开包上下文（世界旗 + 锁盒钥匙门）：

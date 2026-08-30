@@ -1062,10 +1062,11 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   rng.reseed(gs.seed); // ▶Webs cs:13659
   runVanillaWebsPass(store, rng, gs); // 27 Webs（cs:13659——原后置防被清，注册序修正回 27 位）
   // ★IIIII87 反演重放窗口仪捕获钩（缺省零开销,仅 GFB-C 取证仪挂载;同 __i54Ctx 先例）：
-  //   band 头 (store,gs,chests) 直递 —— probe 端在 rng.reseed 之前拿到完整生成态。
+  //   band 头 (store,gs,chests) 直递 —— probe 端在 rng.reseed 之前拿到完整生成态;
+  //   probe 以专用 .swAbort 错误停止管线（不吞探针错误）。
   const i87Cap = () => {
     const h = (globalThis as { __swI87Cap?: (st: unknown, g: unknown, ch: unknown) => void }).__swI87Cap;
-    if (h) { try { h(store, gs, world.chests); } catch { /* probe */ } }
+    if (h) h(store, gs, world.chests);
   };
   i87Cap(); // @UWHEAD
   rng.reseed(gs.seed); // ▶Underworld cs:13697（AddHellHouses 是其尾段，不另重播）

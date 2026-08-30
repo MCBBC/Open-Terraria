@@ -35,6 +35,11 @@ import { spawnVanillaEnemy } from './bossAI';
 import { Lang } from '../i18n/Lang';
 import { BuffType } from '../stats/Buffs';
 
+/** 关门/高门关态判定(行走预测器放行用——门列不算坑、不算跳障实体) */
+function isClosedDoorOrGate(t: number): boolean {
+  return t === TILE_BY_KEY_DOOR_TILES['door_closed'] || t === TILE_BY_KEY_DOOR_TILES['tall_gate_closed'];
+}
+
 export interface NpcHome { x: number; y: number; }
 
 // ===================== 坐姿（AI_007 ai[0]==5）纯函数 =====================
@@ -339,6 +344,9 @@ export function walkPrediction(
     if (st.liquid[idx] > 0) {
       depth++;
       if (st.liquidType[idx] === 2) { lava = true; break; }   // :56136-56140
+    }
+    if (st.type[idx] !== 0 && isClosedDoorOrGate(st.type[idx])) {
+      continue;   // ★2026-08-30:关门列=可行走面(门口到达的前提;否则避坠停走死循环在门前)
     }
     if (st.type[idx] !== 0 && st.isSolid(tileX, ty)) {        // nactive && tileSolid
       if (depth > 0) { px = tileX; py = ty; }                 // :56148-56151
@@ -1732,13 +1740,21 @@ export class TownNPC extends Entity {
       this.frameT = 0;
     } else {
       const extra = TOWN_NPC_IDS[this.npcKey]?.extra ?? 2;
+      // ★城镇宠物专项(FindFrame cs:69557-69604):兔656 家宅/进食带自帧7起
+      //  (cs:69559-69575 <10||>16 归位带)、猫637 自帧10(cs:69581 <17||>21)、
+      //  狗638 社交带 23..27。通用「2..frames−extra−1」会把姿态帧卷进行走
+      //  (用户实拍:兔边走边啃萝卜)。上界逐型钳制如下
+      let walkMax = total - extra - 1;
+      if (this.vanillaId === 656) walkMax = Math.min(walkMax, 6);
+      else if (this.vanillaId === 637) walkMax = Math.min(walkMax, 9);
+      else if (this.vanillaId === 638) walkMax = Math.min(walkMax, Math.max(2, 16));
       this.frameT += Math.abs(this.vx) * 2 + 1;
-      if (this.frame < 2) this.frame = 2;
+      if (this.frame < 2 || this.frame > walkMax) this.frame = 2;
       if (this.frameT > 6) {
         this.frameT = 0;
         this.frame++;
       }
-      if (this.frame >= total - extra) this.frame = 2;
+      if (this.frame > walkMax) this.frame = 2;
     }
   }
 
@@ -2342,19 +2358,6 @@ export class TownNPC extends Entity {
       if (!this.onGround || this.atkCd > 0 || this.talking || this.sitting
         || !this.dangerNear) return false;
       const range = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
-      // 入态候选过滤（在已验 CanHit/CanHitLine 基础上的外加门，:56012-56103）：
-      // - 弓族（ai[0]==12 支）入态还须目标方向斜率 |DirectionTo.Y| ≤ 0.5
-      //   （1457 :56048-56049 vector8.Y ∈ [-0.5,0.5]；方向 Y 同时存进 ai[2]=vector8.Y
-      //    做持械仰角）。缺此门前山坡上/竖井里的弓手会对陡上/陡下目标开弓。
-      // - 狼人态 633（近战支）目标额外 ≤50px（:56022-56025 flag36 Vector2.Distance≤50）
-      const target = this.pickSideTarget(
-        world, game, range,
-        atkType === 1 ? { slopeCapY: 0.5 }
-          : (this.vanillaId === 633 && atkType === 0) ? { maxDist: 50 } : undefined,
-      );
-      // 树妖特例（:55936-55940）：目标全失 LOS 仍进入 ai[0]=14 施法态（净化脉冲
-      // 586 是自身光环弹不需瞄准）——else if (type == 20) 无条件入态分支
-      if (!target && this.vanillaId !== 20) return false;
       let chance = TOWN_ATTACK_CHANCE[this.vanillaId] ?? 1;
       // num3 = 进度强化链频率除数(:53413 起 19 项累计;2026-08-14 前恒 2 近似已废)
       // tipsy = 实例位（NPC.tipsy :93179,669 麦酒爆炸施加——非世界旗标）
@@ -2363,9 +2366,32 @@ export class TownNPC extends Entity {
       let num3 = townNpcProgressionBoost(progGate).chanceMul;
       if (this.vanillaId === 209) num3 /= 3;    // :53548 蒸汽朋克人三倍勤
       const gate = Math.max(1, Math.floor(chance * num3));
+      // ★F1 入态掷骰前置（2026-08-30 实体侧对账批）：原版入态门序 =
+      //   flag31 && velocity.Y==0 && AttackType==X && chance>0 &&
+      //   Main.rand.Next(num122)==0 ——【先耗骰】再进支内做候选重验+带检，
+      //   无幸存候选的 tick 同样恰好消耗一次掷（1457 NPC.cs:56012 近战 /
+      //   :56037 弓 / :56061 魔法 / :56090 挥击；1456 同构 :55864/:55889/
+      //   :55913/:55942）。旧实现「无幸存候选先 return 再走掷门」使该类
+      //   tick 骰耗 0 → 相对原版随机流平移（弓族斜率/狼人 ≤50px 新过滤放大
+      //   暴露面）；town-npc-damage 曾以全局 LCG 替身迁就此事——倒果为因，
+      //   已随本次撤回实例注入）
       if (this.rng() >= 1 / gate) return false;     // rand(gate)==0
       const params = this.atkParams(atkType);
       if (!params && atkType !== 3) return false;
+      // 入态候选选择（★F2 check-after-select 形状，2026-08-30）：主候选按危险侧
+      // |dx| 钦定 → 重验失败单次回退次候选 → 带检只对【终选者】判，不过即本 tick
+      // 拒发——不再对另一侧/另一敌重试（弓族斜率 ±0.5 :56048-56049 vector8.Y 带；
+      // 狼人态 ≤50px :56022-56025 flag36；支内重验 :56019-56026/:56052-56057）。
+      // 弓族另带 lineMode=真 CanHitLine 门（:56044/:56058 用 CanHitLine 非 CanHit,
+      // 比扫描期 CanHit 更严）;方向 Y 同时存进 ai[2]=vector8.Y 做持械仰角
+      const target = this.pickSideTarget(
+        world, game, range,
+        atkType === 1 ? { slopeCapY: 0.5, lineMode: true }
+          : (this.vanillaId === 633 && atkType === 0) ? { maxDist: 50 } : undefined,
+      );
+      // 树妖特例（:55936-55940）：目标全失 LOS 仍进入 ai[0]=14 施法态（净化脉冲
+      // 586 是自身光环弹不需瞄准）——else if (type == 20) 无条件入态分支
+      if (!target && this.vanillaId !== 20) return false;
       this.atkState = atkType === 0 ? 10 : atkType === 1 ? 12 : atkType === 2 ? 14 : 15;
       this.holdAim = 0;                       // ai[2] 入态清零(:54931 族)
       this.atkTimer = TOWN_ATTACK_TIME[this.vanillaId] ?? 30;
@@ -2504,17 +2530,27 @@ export class TownNPC extends Entity {
     }
   }
 
-  /** 探测范围内按侧取最近可打敌(:53887-53958 近侧目标;LOS=Collision.CanHit)。
-   *  返回含实体 position/Size——160/663 落点弹几何按原版 Main.npc[n].position/Size 采样。
-   *  opts（入态外加门,NPC.cs:56012-56103 支内条件）：
-   *  - slopeCapY：候选方向斜率上限 |dy/d| ≤ cap(弓族 0.5,:56048-56049)
-   *  - maxDist：候选距离上限(狼人态 633 ≤50px,:56022-56025) */
+  /** 探测范围内按危险侧取可打敌（AI_007 入态/发射共用,NPC.cs:53887-53963 危险扫描
+   *  + :56016-56061 入态支内选择）。三段形状（2026-08-30 实体侧对账批 ★F2:
+   *  maxDist/slopeCapY 由「候选池预过滤」翻修为「选侧→重验→带外拒发」）：
+   *  ① 扫描：!dead && threat(damage>0) && Distance<range(hypot) && canHit——
+   *     即 :53887 大条件串（noTileCollide||CanHit 门；本仓敌恒 tileCollide → canHit 统一）；
+   *     左右两侧各留【|dx| 最近】者（num13/num14 的 dx 口径 :54034-54049 非 hypot,
+   *     存量债顺手收口）
+   *  ② 选侧钦定：num15 危险侧（:53960 仅右→1 / 仅左→−1 / 两侧比 |dx| 近者）选主候选,
+   *     另一侧为次候选
+   *  ③ 重验+带检：主候选过 lineMode?canHitLine(:56044/:56058):canHit(:56019-56026),
+   *     不过单次回退次候选同判;带检（弓 |DirectionTo.Y|≤slopeCapY :56048-56049 /
+   *     狼人 Distance≤maxDist :56022-56025）只对【终选者】判,失败即整次 null——
+   *     不跨侧、不跨同侧他敌再试。旧实现「池预过滤+hypot 择近」双偏差已收口
+   *  返回含实体 position/Size——160/663 落点弹几何按原版 Main.npc[n].position/Size 采样 */
   private pickSideTarget(
     world: import('../world/World').World, game: GameHooks, range: number,
-    opts?: { slopeCapY?: number; maxDist?: number },
+    opts?: { slopeCapY?: number; maxDist?: number; lineMode?: boolean },
   ): { cx: number; cy: number; x: number; y: number; w: number; h: number } | null {
-    let bestL: { cx: number; cy: number; x: number; y: number; w: number; h: number; d: number } | null = null;
-    let bestR: { cx: number; cy: number; x: number; y: number; w: number; h: number; d: number } | null = null;
+    type Cand = { cx: number; cy: number; x: number; y: number; w: number; h: number; dx: number };
+    let bestL: Cand | null = null;
+    let bestR: Cand | null = null;
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
         damage?: number; def?: { damage?: number } };
@@ -2525,18 +2561,41 @@ export class TownNPC extends Entity {
       // 中心由 x/y/w/h 推导(敌实体有 cx/cy,但勿依赖——判距门曾因 NaN 恒假失效)
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       const dx = ecx - this.cx;
-      const d = Math.hypot(dx, ecy - this.cy);
-      if (d >= range) continue;
+      if (Math.hypot(dx, ecy - this.cy) >= range) continue;       // Distance < num11
       if (!canHit(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
-      if (opts?.slopeCapY !== undefined && Math.abs(ecy - this.cy) / (d || 1) > opts.slopeCapY) continue;
-      if (opts?.maxDist !== undefined && d > opts.maxDist) continue;
-      const cand = { cx: ecx, cy: ecy, x: e.x, y: e.y, w: e.w, h: e.h, d };
-      if (dx < 0) { if (!bestL || d < bestL.d) bestL = cand; }
-      else { if (!bestR || d < bestR.d) bestR = cand; }
+      // per-side 最近 = |dx| 最小（左取负值最大 / 右取正值最小,:54034-54049）
+      const cand: Cand = { cx: ecx, cy: ecy, x: e.x, y: e.y, w: e.w, h: e.h, dx };
+      if (dx < 0) { if (!bestL || dx > bestL.dx) bestL = cand; }
+      else { if (!bestR || dx < bestR.dx) bestR = cand; }
     }
-    // num15 侧选择(:53960):两侧都有 → 距离近者;仅一侧 → 该侧
-    if (bestL && bestR) return bestL.d <= bestR.d ? bestL : bestR;
-    return bestL ?? bestR;
+    // num15 选侧（:53960-53962）：仅右→1 / 仅左→−1 / 两侧→右 |dx| 更近者侧为 1
+    const rightFirst = bestL ? (bestR ? bestR.dx < -bestL.dx : false) : true;
+    let sel = rightFirst ? bestR : bestL;
+    if (sel) {
+      // 支内重验+跨侧单次回退（近战/魔法/挥击 CanHit :56019-56026 族 /
+      // 弓族 CanHitLine :56044/:56058——原版即 Center 点对,与 nearestEnemy('line')
+      // 的 rect 版近似口径一致对齐成点对）
+      const losOk = (c: Cand): boolean => opts?.lineMode
+        ? canHitLine(world.store, this.cx, this.cy, 0, 0, c.cx, c.cy, 0, 0)
+        : canHit(world.store, this.x, this.y, this.w, this.h, c.x, c.y, c.w, c.h);
+      if (!losOk(sel)) {
+        const alt = rightFirst ? bestL : bestR;      // 次候选单次回退（原版只试一次）
+        if (!alt || !losOk(alt)) return null;
+        sel = alt;
+      }
+    } else {
+      return null;
+    }
+    // 带检仅对终选者（:56022-56025 flag36 狼人态 Vector2.Distance≤50 /
+    // :56048-56049 弓族 vector8.Y ∈ [-0.5,0.5]），失败 = 本 tick 拒发——不再试对侧
+    if (opts?.maxDist !== undefined) {
+      if (Math.hypot(sel.cx - this.cx, sel.cy - this.cy) > opts.maxDist) return null;
+    }
+    if (opts?.slopeCapY !== undefined) {
+      const dl = Math.hypot(sel.cx - this.cx, sel.cy - this.cy) || 1;
+      if (Math.abs((sel.cy - this.cy) / dl) > opts.slopeCapY) return null;
+    }
+    return sel;
   }
 
   /** 发射(:54903/:55175/:55325 三族瞄准公式统一在此) */
@@ -2674,6 +2733,16 @@ export class TownNPC extends Entity {
     }
     // 撞门开门：前方碰撞点是关着的普通门（10）或高门（388）
     // （原版 54478-54500：Next(10)==0；普通门两方向回退，高门 ShiftTallGate(closing:false)）
+    // ★2026-08-30 二改:不依赖 hitWall —— obstacleJump/避坠停走会让 NPC 永远差半格
+    // 贴不上墙(hitWall 难产),踱步死循环(用户实测「被迫来回踱步从未靠近门」)。改为
+    // 行进态每 tick 先前视扫门(原版即 tile 扫描驱动),hitWall 仅作补充通道。
+    // ★非行进/交互中不扫门(坐姿·对话·攻击·守卫老人——原版开门在行走块内,
+    //  站椅近门时乱开是本修曾引入的回归面);hitWall 兜底同受此门保护
+    const idleInteractive = this.sitting || this.talking || this.atkState !== 0
+      || this.stationary || this.fleeing;
+    if (!this.closeDoor && !idleInteractive && !this.hitWall && this.walkMode === 1) {
+      if (this.tryOpenDoorAhead(st, game)) return;
+    }
     if (!this.hitWall) return;
     const fx = Math.floor((this.cx + this.facing * (this.w / 2 + 2)) / TILE);
     const fy = Math.floor((this.y + this.h - 8) / TILE);
@@ -2703,6 +2772,41 @@ export class TownNPC extends Entity {
         return;
       }
     }
+  }
+
+  /** 前视扫门开门(共享助手;返回 true=本 tick 已处理门分支)。探针点与 hitWall 版同源:
+   *  x = 身缘+2px 处列;y = 脚部行及上一行。门在探测列时优先尝试走态推进开门。 */
+  private tryOpenDoorAhead(st: TileStore, game: GameHooks): boolean {
+    const fx = Math.floor((this.cx + this.facing * (this.w / 2 + 2)) / TILE);
+    const fy = Math.floor((this.y + this.h - 8) / TILE);
+    for (const dy of [0, -1]) {
+      const x = fx, y = fy + dy;
+      if (x < 1 || y < 1 || x >= st.w - 1 || y >= st.h - 1) continue;
+      const t = st.type[st.idx(x, y)];
+      const isDoor = t === TILE_BY_KEY_DOOR_TILES['door_closed'];
+      const isGate = t === TILE_BY_KEY_DOOR_TILES['tall_gate_closed'];
+      if (!isDoor && !isGate) continue;
+      if (Math.random() >= 0.1) return true;   // 概率门未中:本 tick 已被门分支占用
+      if (isDoor) {
+        const before = t;
+        const opened = openDoor(st, x, y, this.facing) || openDoor(st, x, y, -this.facing);
+        if (opened && st.type[st.idx(x, y)] !== before) {
+          this.closeDoor = true;
+          this.doorX = x; this.doorY = y;
+          game.playSfx('door_open', 1, this.cx, this.cy);
+          game.npcDoorNet?.('door', x, y, false, this.facing);
+        }
+        return opened;   // 开失败(侧堵):false → 走原 hitWall 兜底/跳转转向
+      }
+      const anchor = shiftTallGate(st, x, y, false, () => game.playSfx('door_open', 1, this.cx, this.cy));
+      if (anchor) {
+        this.closeDoor = true;
+        this.doorX = anchor[0]; this.doorY = anchor[1];
+        game.npcDoorNet?.('gate', anchor[0], anchor[1], false, this.facing);
+      }
+      return !!anchor;
+    }
+    return false;
   }
 
   /** 坐姿状态机（AI_007 ai[0]==5 族，NPC.cs:53264-53287 入座 / :54682-54710 态推进）。

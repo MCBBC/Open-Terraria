@@ -199,12 +199,30 @@ export class ItemDrop extends Entity {
           return;
         }
         const before = this.stack;
-        const left = player.inv.add(this.itemId, this.stack, this.prefix, this.placeStyle);
+        let left = player.inv.add(this.itemId, this.stack, this.prefix, this.placeStyle);
         // 成就：拾取通知（AchievementsHelper.NotifyItemPickup——仅入包部分；
         //  WorldItem 拾取路径，合成/初始装备不经此）
         if (left < before) {
           const vid = vanillaIdOfItem(this.itemId);
           if (vid > 0) game.achievements?.notifyItemPickup(vid);
+        }
+        // ---- 虚空袋溢流兜底（孤儿武器 B3 波 工单1；Player.GetItem_VoidVault
+        //  :39703-39760：PickupItemFromWorld.CanGoIntoVoidVault=true 门下,背包
+        //  接不住的余量灌 bank4=banks[3]。原版 vaul【不】持续吸物——本支只在
+        //  left>0（有装不下的余量）时触达，即满背包装不下的溢流语义）----
+        if (left > 0 && player.useVoidBag()) {
+          const preVoid = left;
+          const dep = player.depositIntoVoidVault(this.itemId, left);
+          if (dep < preVoid) {
+            const vidV = vanillaIdOfItem(this.itemId);
+            if (vidV > 0) game.achievements?.notifyItemPickup(vidV);   // :39768 NotifyItemPickup
+            game.notifyInventoryChanged();
+            game.recLog?.('pickup', { key: ITEM_DEFS[this.itemId]?.key ?? this.itemId, vid: vidV, n: preVoid - dep, void: true });
+            game.playSfx(coinIndexOf(this.itemId) >= 0 ? 'coin' : 'pickup', 0.75);  // SoundID 7/38(:39753)
+            const defV = ITEM_DEFS[this.itemId];
+            if (defV) game.showPickupLabel(defV.key, preVoid - dep, this.prefix);   // PopupText ItemPickupToVoidContainer(:39760)
+            left = dep;
+          }
         }
         if (left === 0) {
           // MP：整堆拾取即时自报 take（op1）——替代傀儡清扫的对死推断

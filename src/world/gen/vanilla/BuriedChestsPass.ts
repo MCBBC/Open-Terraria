@@ -859,6 +859,9 @@ function placeBuriedChestInner(
         st.slope[k] = 0;
       }
     }
+    // ★IIIII85（cs:36320-36324）remix 中央黑曜柱反爆区拒箱：i∈(0.37w,0.63w) 且
+    //   当前行 > h-250 → 整体失败（Zero-drop 门，零掷）。曾整段缺失。
+    if (gs.seedFlags.remix && i > st.w * 0.37 && i < st.w * 0.63 && gy > st.h - 250) return false;
     // ★±2 巨石/祭坛拒绝在扫描循环内**逐行**执行（cs:35992-36002，锚=当前行 k：
     //   InWorld(n,num6,100) && Boulders{138,484,664,665,711-716} || 26 || 237）。
     //   曾在进循环前以起始行 j 只查一次——起始行下方 2 格内的滚石/祭坛全部漏检
@@ -902,7 +905,10 @@ function placeBuriedChestInner(
   const argStyle = opts.style;
   {
     let num9 = 0;
-    if (gy >= gs.worldSurface + 25) num9 = 1;
+    // ★IIIII85（cs:36363-36365）：flag15 remix 换轴——普通 `gy>=ws+25`，remix 改判
+    //   `gy < h-400`（互斥换轴,非并联）。此门只喂「无显式 style 且 num10==0」的
+    //   基础箱档位（style1 地下）——LE 走带室尾段覆写。曾整段缺失。
+    if (gs.seedFlags.remix ? gy < st.h - 400 : gy >= gs.worldSurface + 25) num9 = 1;
     if (argStyle !== undefined) num9 = argStyle;
     style = num9;
     // wooden flag（cs:36060-36064：tile21 && (chestStyle==0 || (chestStyle==-1 && num9==0))）

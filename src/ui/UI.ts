@@ -487,6 +487,23 @@ export const PVP_TEAM_BUTTONS: readonly { team: number; name: string }[] = [
   { team: 3, name: 'Blue' }, { team: 4, name: 'Yellow' }, { team: 5, name: 'Pink' },
 ];
 
+/** 原版 Lang.LocalizedDuration(Lang.cs:1163-1229,1456/1457/1458 逐字一致;buff 时长
+ *  以 abbreviated:true + showAllAvailableUnits:false 调用,Main.cs:44053-44054):
+ *  只取首个非零单位返回,且"总时长 > 1 单位常量即 +1"向上进位——阈值写死为 1 天/时/
+ *  分常量而非本档位值,故整分余量也多 +1(300s 整 → "6 分",原版如此);
+ *  <60 秒走秒分支精确到整秒。单位词 = Misc.Short{Seconds..Days} 官方键,
+ *  数字与词间恒一个空格(zh-Hans "45 秒" / en "45 s") */
+function localizedDuration(totalSec: number): string {
+  const sec = Math.floor(totalSec);
+  const d = Math.floor(sec / 86400);
+  if (d > 0) return `${d + (sec > 86400 ? 1 : 0)} ${Lang.text('Misc.ShortDays')}`;
+  const h = Math.floor((sec % 86400) / 3600);
+  if (h > 0) return `${h + (sec > 3600 ? 1 : 0)} ${Lang.text('Misc.ShortHours')}`;
+  const m = Math.floor((sec % 3600) / 60);
+  if (m > 0) return `${m + (sec > 60 ? 1 : 0)} ${Lang.text('Misc.ShortMinutes')}`;
+  return `${sec} ${Lang.text('Misc.ShortSeconds')}`;
+}
+
 /** PvP 剑帧（UI_PVP_0 :42094/:42112-42113）：col=(hostile?2:0)+(hover?1:0)、row=team(0-5) */
 export function pvpIconFrame(hostile: boolean, hover: boolean, team: number): readonly [number, number] {
   return [(hostile ? 2 : 0) + (hover ? 1 : 0), Math.max(0, Math.min(5, team))];
@@ -2553,10 +2570,15 @@ export class UI {
   private guideEl: HTMLDivElement | null = null;
   /** Esc 关闭监听（openGuideSearch 挂载/closeGuideSearch 对称摘除） */
   private guideEscHandler: ((e: KeyboardEvent) => void) | null = null;
+  /** 手持材料「光标幽灵」（canvas 手持绘制层级低于 DOM 面板——进入反查浮层会看不见
+   *  拿着什么、误以为放不进去。DOM 影子只在浮层开启期间存在，z1300>面板1200） */
+  private guideGhostEl: HTMLDivElement | null = null;
+  private guideGhostMove: ((e: MouseEvent) => void) | null = null;
+  /** 图标补图轮询句柄（面板关闭即停） */
+  private guideIconTicker: ReturnType<typeof setInterval> | null = null;
   /** 向导反查物理材料槽（Main.guideItem 等价）：放置期间真实持有整组物品，
    *  空手点槽取回、关闭浮层自动归还（NewCraftingUI dropItemCheck 语义）。 */
   private guidePlaced: { id: number; stack: number } | null = null;
-
   /** 反查面板：搜物品 → 列出以它为材料的全部配方（含 RecipeGroup 成员） */
   openGuideSearch(): void {
     this.closeGuideSearch();
@@ -2606,6 +2628,29 @@ export class UI {
     const recipeList = el('div');
     recipeList.style.cssText = 'overflow-y:auto; flex:1; min-height:140px;';
     panel.appendChild(recipeList);
+    overlay.appendChild(panel);
+    // 行卡/幽灵样式（幂等注入一次）
+    if (!document.getElementById('sw-guide-style')) {
+      const st = document.createElement('style');
+      st.id = 'sw-guide-style';
+      st.textContent = [
+        '.sw-guide-overlay .sw-recipe{display:flex;align-items:center;gap:8px;padding:4px 8px;'
+          + 'border-radius:4px;background:#232030;border:1px solid #3a3350;margin-bottom:4px;}',
+        '.sw-guide-overlay .sw-recipe:hover{background:#34406e;border-color:#5566a0;}',
+        '.sw-guide-overlay .sw-recipe.no{opacity:.45;}',
+        '.sw-guide-overlay .sw-recipe.no:hover{background:#232030;border-color:#3a3350;}',
+        '.sw-guide-overlay .sw-recipe>img.prod{width:28px;height:28px;image-rendering:pixelated;flex:none;}',
+        '.sw-guide-overlay .sw-recipe .g-nm{font-size:13px;color:#e8ecf8;white-space:nowrap;}',
+        '.sw-guide-overlay .sw-recipe .g-qty{color:#ffd76e;margin-left:4px;}',
+        '.sw-guide-overlay .sw-recipe .g-req{margin-left:auto;color:#9a8ab8;font-size:11px;text-align:right;max-width:46%;line-height:1.5;}',
+        '.sw-guide-overlay .sw-recipe>img.g-noicon{position:relative;background:#3b3550;border:1px solid #55506a;color:#cfc7ee;font-size:14px;font-weight:bold;display:flex;align-items:center;justify-content:center;}',
+        '#sw-held-ghost{position:fixed;z-index:1300;width:32px;height:32px;pointer-events:none;'
+          + 'image-rendering:pixelated;filter:drop-shadow(0 0 4px rgba(0,0,0,.8));}'
+        + '#sw-held-ghost .n{position:absolute;right:-2px;bottom:-4px;font-size:12px;color:#fff;'
+        + 'text-shadow:1px 1px 0 #000;}',
+      ].join('\n');
+      document.head.appendChild(st);
+    }
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
     this.guideEl = overlay;
@@ -2702,7 +2747,10 @@ export class UI {
           action = 'move';
         }
       }
-      if (action !== 'none') { changed(); }
+      if (action !== 'none') {
+        changed();
+        if (this.guideGhostMove) this.guideGhostMove(e as unknown as MouseEvent);   // 立即重算影子显隐
+      }
     });
     slotBox.addEventListener('contextmenu', (e) => e.preventDefault());
     filterInput.addEventListener('input', () => {
@@ -2721,12 +2769,76 @@ export class UI {
       const vid = this.guidePlaced ? vidOfItem(this.guidePlaced.id) : null;
       if (vid != null && vid >= 0) this.renderGuideRecipes(recipeList, vid);
     };
-    refreshHeader();
+    // ---- 图标补图升级器（面板级有界轮询；结构渲染仍由 renderRecipes 承担）----
+    const upgradeIcons = (): void => {
+      for (const im of Array.from(recipeList.querySelectorAll<HTMLImageElement>('img.prod'))) {
+        if (im.dataset.done === '1') continue;
+        const key = im.dataset.key ?? '';
+        const iid = ITEM_BY_KEY[key];
+        const url = this.game && iid !== undefined ? iconUrl(this.game, iid) : '';
+        if (url) {
+          im.src = url;
+          im.classList.remove('g-noicon');
+          im.dataset.done = '1';
+        } else if (!im.classList.contains('g-noicon')) {
+          im.classList.add('g-noicon');       // 首字占位方块，绝不空白破框
+          im.dataset.letter = (Lang.itemNameByKey(key) ?? '?')[0] ?? '?';
+          im.alt = im.dataset.letter;
+        }
+      }
+    };
+    refreshHeader();                                       // ★曾随 v3 重写丢失：初态 caption 恒空
+    if (this.guideIconTicker) clearInterval(this.guideIconTicker);
+    upgradeIcons();
+    let iconTries = 0;
+    this.guideIconTicker = setInterval(() => {
+      if (!this.guideEl || ++iconTries > 12) { clearInterval(this.guideIconTicker!); this.guideIconTicker = null; return; }
+      upgradeIcons();
+    }, 500);
     renderRecipes();
+    upgradeIcons();
+    // ---- 光标幽灵：mousemove 全局尾随；仅在指针位于浮层面板矩形内且手持非空时显形 ----
+    if (!this.guideGhostEl) {
+      const ghost = el('div') as HTMLDivElement;
+      ghost.id = 'sw-held-ghost';
+      ghost.style.display = 'none';
+      document.body.appendChild(ghost);
+      this.guideGhostEl = ghost;
+    }
+    this.guideGhostMove = (e: MouseEvent) => {
+      const ghost = this.guideGhostEl;
+      const hs = this.heldStack;
+      if (!ghost) return;
+      // ★原版手感对齐：canvas 手持绘制恒在最上层跟随——DOM 影子不做任何区域门，
+      //   手持期间全屏尾随（否则指向面板的路程中物品“消失”，误以为放不进去）
+      if (!hs || hs.stack <= 0) { ghost.style.display = 'none'; return; }
+      const iid = hs.id;
+      if (ghost.dataset.iid !== String(iid)) {
+        ghost.dataset.iid = String(iid);
+        ghost.textContent = '';
+        const img = document.createElement('img');
+        img.src = iconUrl(this.game!, iid) || '';
+        img.style.cssText = 'width:32px;height:32px;image-rendering:pixelated;display:block;';
+        img.draggable = false;
+        ghost.appendChild(img);
+        if (hs.stack > 1) {
+          const n = document.createElement('span');
+          n.className = 'n';
+          n.textContent = String(hs.stack);
+          ghost.appendChild(n);
+        }
+      }
+      ghost.querySelector('.n')!.textContent = String(hs.stack);
+      ghost.style.display = 'block';
+      ghost.style.left = `${e.clientX + 10}px`;
+      ghost.style.top = `${e.clientY + 8}px`;
+    };
+    window.addEventListener('mousemove', this.guideGhostMove);
   }
 
   /** 材料的配方列表（CollectGuideRecipes：items 直接命中或 RecipeGroup 成员命中） */
   private renderGuideRecipes(listEl: HTMLElement, vid: number): void {
+    listEl.dataset.vid = String(vid);
     listEl.textContent = '';
     const game = this.game;
     const avail = new Map<unknown, number>();
@@ -2740,14 +2852,22 @@ export class UI {
       const outKey = vanillaItemKey(r.create);
       if (!outKey) continue;
       const row = el('div', 'sw-recipe' + (avail.has(r) ? '' : ' no'));
+      const outIid = game.itemId(outKey);
       const img = el('img') as HTMLImageElement;
-      img.src = iconUrl(game, game.itemId(outKey));
+      img.className = 'prod';
+      img.dataset.key = outKey;
+      const u0 = outIid !== undefined && outIid >= 0 ? iconUrl(game, outIid) : '';
+      if (u0) { img.src = u0; img.dataset.done = '1'; }   // 热态即出图；冷态走面板级补图轮询
+      img.draggable = false;
       row.appendChild(img);
-      const label = el('span', '', `${Lang.itemNameByKey(outKey)}${r.createStack > 1 ? ` ×${r.createStack}` : ''}`);
+      const label = el('span', 'g-nm', Lang.itemNameByKey(outKey) || outKey);
       row.appendChild(label);
-      const info = el('span', '', `${r.tile >= 0 ? (Lang.tileName(r.tile) ?? `站点 ${r.tile}`) : Lang.text('Mods.SandboxWorld.UI.StationHand')} · ${
+      if (r.createStack > 1) {
+        const qty = el('span', 'g-qty', `×${r.createStack}`);
+        row.appendChild(qty);
+      }
+      const info = el('span', 'g-req', `${r.tile >= 0 ? (Lang.tileName(r.tile) ?? `站点 ${r.tile}`) : Lang.text('Mods.SandboxWorld.UI.StationHand')} · ${
         r.items.map((req) => `${req.id >= 1000000 ? '任何组物' : (Lang.itemNameByKey(ingredientKey(req.id) ?? '') ?? req.id)} ${req.stack}`).join(' +')}`);
-      info.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right; max-width:280px;';
       row.appendChild(info);
       if (avail.has(r)) {
         row.onclick = () => {
@@ -2758,9 +2878,17 @@ export class UI {
       listEl.appendChild(row);
     }
     if (!hits) listEl.appendChild(el('div', 'sw-lbl', '该物品不用于任何配方'));
+    // 图标补图由面板级 ticker 统一驱动（upgradeGuideTicker），此函数只负责结构
   }
 
   closeGuideSearch(): void {
+    // 光标幽灵摘除（元素+mousemove 对称回收）
+    if (this.guideGhostMove) {
+      window.removeEventListener('mousemove', this.guideGhostMove);
+      this.guideGhostMove = null;
+    }
+    this.guideGhostEl?.remove();
+    this.guideGhostEl = null;
     // 放置中的材料自动归还（Main.CloseNPCChatOrSign → dropItemCheck 出口等价；
     // MP 下走背包 add 与 msg5 差分同链）
     {
@@ -3625,9 +3753,10 @@ export class UI {
   }
 
   /** 每秒左右调用一次（由 Game 经 callbacks 驱动）。
-   *  原版行为（Main.cs:42618-42640）：遍历 buff 槽按序显示全部激活 buff；
-   *  背包/华美 UI 打开时整栏不画；时长文字用 LocalizedDuration 缩写格式
-   *  （zh-Hans "30秒"/"2分30秒"），仅剩 >2 tick 时显示 */
+   *  原版行为（1457 Main.cs:43933-44107）：遍历 buff 槽按序显示全部激活 buff；
+   *  背包/华美 UI 打开时整栏不画；剩余时长由 DrawBuffIcon（:44049-44064）常驻
+   *  画在图标正下方，经 TryGetBuffTime（:43985）门控 + LocalizedDuration 缩写
+   *  格式（单最大单位，<60 秒逐秒）——见 localizedDuration */
   refreshBuffs() {
     if (!this.game || !this.buffBar) return;
     const buffs = this.game.player.buffs;
@@ -3658,17 +3787,15 @@ export class UI {
         };
         (ui.icon as HTMLImageElement).src = want;
       }
-      // 吸血鬼世界隐藏火系 buff 倒计时（Main.cs:42715 TryGetBuffTime：vampireSeed 且
-      // buffType∈{24,23,32} 且 buffTime<10【tick】→ 不出文字——日光炽灼三连每帧 3t
-      // 续期恒 <10t，图标上永不显示秒数）
+      // 时长门（1457 Main.cs:43985-44054）：默认路径仅 buffTime>2【tick】出字；
+      // vampireSeed 下火系三连(24/23/32) <10 tick 不出字——日光炽灼三连每帧 3t 续期
+      // 恒 <10t,图标上永不显示时长
+      const ticksLeft = left * 60;
       const vampHideTime = !!this.game.world.seedFlags?.vampireSeed
-        && [24, 23, 32].includes(BUFF_DEFS[t].vanillaBuff) && left * 60 < 10;
-      const s = Math.ceil(left);
-      ui.time.textContent = vampHideTime ? '' : s >= 60
-        ? (s % 60
-          ? Lang.text('Mods.SandboxWorld.Time.MinSec', Math.floor(s / 60), s % 60)
-          : Lang.text('Mods.SandboxWorld.Time.Minutes', Math.floor(s / 60)))
-        : Lang.text('Mods.SandboxWorld.Time.Seconds', s);
+        && [24, 23, 32].includes(BUFF_DEFS[t].vanillaBuff) && ticksLeft < 10;
+      // buffTime/60 先整除到秒再格式化（Main.cs:44053 new TimeSpan(0,0,buffTime/60)）
+      ui.time.textContent = vampHideTime || ticksLeft <= 2
+        ? '' : localizedDuration(left);
     }
     for (const [t, ui] of this.buffBlocks) {
       if (!seen.has(t)) ui.block.style.display = 'none';

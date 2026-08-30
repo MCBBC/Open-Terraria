@@ -1,7 +1,8 @@
-// 宿主功能实装批 III——小件四包回归（2026-08-26）：
-// ① RainbowTownSlime 触发链：闪耀史莱姆气球弹 936 上升期爆裂（Projectile.Kill
-//    aiStyle2 段 :22678-22690 velocity.Y<0）→ unlockedSlimeRainbowSpawn 世界旗 +
-//    巨星史莱姆 681（town_slime_diva）生成；落地爆（vy≥0）不触发
+// 宿主功能实装批 III——小件四包回归（2026-08-26；①段 2026-08-30 B1-X3 触发域修正）：
+// ① RainbowTownSlime 触发链：闪耀史莱姆气球弹 936 浸微光液上升期触达（原版唯一
+//    出处=Shimmer() aiStyle==2 分支 P.cs:22564/:22676-22697，调用域 :17114
+//    `if (shimmerWet) Shimmer()`；与 Kill 无关）→ unlockedSlimeRainbowSpawn 世界旗 +
+//    巨星史莱姆 681（town_slime_diva）生成 + timeLeft>5 钳 5；非微光消亡不触发
 // ② MouseItem：SM2 pass 直连（getPass('MouseItem')，DyeInitializer.cs :443 注册）——
 //    uColor=OurFavoriteColor(255,231,69)/255（Main.cs :886）、uSaturation=num20=glow²
 //    （ItemSlot.cs :2504/:2519）；执行无 NaN 且饱和度提升亮度（辉光语义方向）
@@ -10,6 +11,8 @@
 //    LitNature 无消费内容层（原版 DrawNature 仅 TileDrawing 调用,本仓无该层）=登记
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
+import { LIQUID_TYPE } from '../src/world/TileStore';
+import { TILE } from '../src/core/constants';
 import { Arrow } from '../src/entities/Arrow';
 import { TownNPC } from '../src/entities/TownNPC';
 import { getPass, runPassOnImageData, defaultUniforms } from '../src/fx/SM2Effect';
@@ -34,23 +37,45 @@ function makeGame() {
   return { g: g as unknown as GameHooks, npcs, parts };
 }
 
-describe('批III① RainbowTownSlime 触发链', () => {
-  it('936 上升期爆裂（vy<0）→ 世界旗置位 + 巨星史莱姆 681 入镇 NPC 桶', () => {
+describe('批III① RainbowTownSlime 触发链（B1-X3：解锁段归 Shimmer 浸液域，killNow 已剥离）', () => {
+  /** 弹心格染液（Center→格换算同 Arrow 内 `floor((x+w/2)/TILE)`；LIQUID_TYPE +1 编码） */
+  function seedLiquid(w: World, b: Arrow, lt: number): void {
+    w.store.setLiquid(Math.floor(b.cx / TILE), Math.floor(b.cy / TILE), 255, lt);
+  }
+
+  it('浸微光液上升期触达 → 世界旗置位 + 巨星史莱姆 681 入镇 NPC 桶 + 寿命钳 5', () => {
     const { g, npcs } = makeGame();
     const b = new Arrow(800, 300, 2, -1, 0, 0, 936, null, {});
-    (b as unknown as { vy: number }).vy = -1;                    // 上升中爆
-    (b as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
+    seedLiquid(g.world, b, LIQUID_TYPE.SHIMMER);
+    (b as unknown as { life: number }).life = 300;
+    (b as unknown as { shimmerUnlock: (g: GameHooks) => void }).shimmerUnlock(g);
     expect(g.world.flags['unlockedSlimeRainbowSpawn']).toBe(true);
     const diva = npcs.find((n) => (n as TownNPC).vanillaId === 681);
     expect(diva).toBeDefined();
     expect((diva as TownNPC).npcKey).toBe('town_slime_diva');
+    expect((b as unknown as { life: number }).life).toBe(5);   // timeLeft>5 钳 5（延迟爆）
   });
-  it('已解锁后二次爆裂不再生成（unlockedSlimeRainbowSpawn 门）', () => {
+  it('反例：同格清水（非微光）消亡路径不置位、不出 Diva（killNow 单口已无解锁段）',
+    () => {
+      const { g, npcs } = makeGame();
+      const b = new Arrow(800, 300, 2, -1, 0, 0, 936, null, {});   // 上升中消亡——旧实现在此永久解锁
+      seedLiquid(g.world, b, LIQUID_TYPE.WATER);
+      (b as unknown as { vy: number }).vy = -1;
+      (b as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
+      expect(g.world.flags['unlockedSlimeRainbowSpawn']).toBeUndefined();
+      expect(npcs.length).toBe(0);
+      // 微光液前提成立时同一入口才置位——同仓语义对拍
+      seedLiquid(g.world, b, LIQUID_TYPE.SHIMMER);
+      (b as unknown as { shimmerUnlock: (g: GameHooks) => void }).shimmerUnlock(g);
+      expect(g.world.flags['unlockedSlimeRainbowSpawn']).toBe(true);
+    });
+  it('已解锁后二次触达不再生成（unlockedSlimeRainbowSpawn 门）', () => {
     const { g, npcs } = makeGame();
-    g.world.flags['unlockedSlimeRainbowSpawn'] = true;
     const b = new Arrow(800, 300, 2, -1, 0, 0, 936, null, {});
+    seedLiquid(g.world, b, LIQUID_TYPE.SHIMMER);
+    g.world.flags['unlockedSlimeRainbowSpawn'] = true;
     (b as unknown as { vy: number }).vy = -1;
-    (b as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
+    (b as unknown as { shimmerUnlock: (g: GameHooks) => void }).shimmerUnlock(g);
     expect(npcs.length).toBe(0);
   });
 });

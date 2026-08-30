@@ -3479,17 +3479,21 @@ export class Player extends Entity {
       // 是蛙蹼族配饰/系统设置授予的免松键档（:14507 等）。R5-F11/F12：旧 held 门
       // （inputJump+vy>-2+8t cd）= 全员恒 autoJump 语义，已废）
       const jumpEdge = this.inputJump && !this.jumpEdgePrev;
+    // 控跳清湿（JumpMovement controlJump 头部，1457 :20805-20818 / 1456 :20366-20379）：
+    // 骑史莱姆族坐骑时按住跳键即清 wetSlime——★原版 gate 无液体位置要求：controlJump
+    // 块内直接判 mount.Active/IsSlimeMount/wetSlime>0，陆上残余同样按跳即刻清除（旧版曾
+    // 把消费点嵌进下方水中分支 → 出水湿残余 ~30t 抑制踩踏且陆地按跳无法提前解压，
+    // 2026-08-30 R3 复核外提）。原版 flag 对水下起跳门的完整放行链（flag2&&flag3 组合
+    // :20845）本仓未整体建模，出水跳仍走 vy==0/脚蹼门（近似）；时序登记：原版同一函数内
+    // 先跑三踩踏循环再进 controlJump 清湿，本仓跳跃管线与踩踏段（mountJumpStomps）分置两处
+    // ——清湿在本文件前段、踩踏在后段，同 tick 内仍保持"先清后踩"。
+    consumeWetSlimeOnJumpControl(this);
     // 跳跃 / 游泳
     // 游泳族坐骑（海龟/猪鲨崽/海盗船/熔岩鲨：坐骑 buff 的 ignoreWater，Player.cs:9592-9608）
     // 浸水走干燥分支——水下不降速（Run 段本就无水因子；位移层 liqFactor 由积分段
     // ridingMountSwimFree 门豁免）、正常重力与跳跃（+5 高/+2.5 速
     // 在 Mount.JumpHeight/JumpSpeed 的 frameState==4 支线），帧态机自行切游泳帧
     if ((this.inWater || this.inLava) && !this.ridingMountSwimFree) {
-      // 控跳清湿（1457 :20813-20817 / 1456 :20375-20377）：骑史莱姆族坐骑时按住
-      // 跳键即清 wetSlime（湿态压踩踏 + 放行起跳链）——原版在 JumpMovement 的
-      // if(controlJump) 头部逐帧执行非边沿。原版 flag 对水下起跳门的完整放行链
-      // （flag2&&flag3 组合 :20845）本仓未整体建模，出水跳仍走 vy==0/脚蹼门（近似）
-      consumeWetSlimeOnJumpControl(this);
       // ---- 液体参数档（Player.cs:24130-24155 wet 链；inWater 已含蜂蜜 type3，
       //      岩浆 wet 同链走 else 档）----
       // honeyWet → gravity 0.1/maxFall 3（跳跃参数保持干燥档——原版分支不覆写）；
@@ -6122,9 +6126,11 @@ export class Player extends Entity {
     // 虚空袋扫描(Player.cs:12525-12535):背包持有 4131 虚空透镜时 bank4 逐槽
     // WorksInVoidBag(默认全真,SetFactory.cs:97-107 仅两只海螺除外)→ 袋内四叶草
     // 同样置旗——复审 R1 P2(曾漏,袋内 5574 少 +0.03)
+    // ★B3 修(2026-08-30)：原写 banks[4] 恒 undefined → 循环静默零跑（本仓 bank4
+    // =banks[3],Player.ts:467 注);修正后袋内四叶草才真正计幸运
     const hasVoidLens = this.inv.slots.some((s) => s && vanillaIdOfItem(s.id) === 4131);
-    if (hasVoidLens && this.banks[4]) {
-      for (const s of this.banks[4]) {
+    if (hasVoidLens && this.banks[3]) {
+      for (const s of this.banks[3]) {
         if (s) see(vanillaIdOfItem(s.id));
       }
     }
@@ -6682,6 +6688,38 @@ export class Player extends Entity {
       if (s && s.stack > 0 && vanillaIdOfItem(s.id) === 4131) return true;
     }
     return false;
+  }
+
+  /** GetItem_VoidVault（孤儿武器 B3 波 工单1；Player.cs:39703-39760）：
+   *  【满背包溢流入虚空袋】——PickupItemFromWorld.CanGoIntoVoidVault=true 门下
+   *  （GetItemSettings.cs:13），背包 58 格接不住的余量进 bank4：占用堆叠先合并
+   *  (CanStack=同 type;bank4 槽无词缀位) → 空位整堆落格。CanVoidVaultAccept
+   *  (:39715-39724)：questItem/3822(COFVEVE 恶心物) 拒——WorksInVoidBag 缺省全真
+   *  (SetFactory.cs:97-107 仅两只海螺例外,本仓登记未逐 id 建表)。返回仍未入袋数量。
+   *  ★原版语义澄清：虚袋不持续吸物,只在背包装不下时兜底（ItemSpaceForCofveve
+   *  :39510-39525 只做"空位判定"）；本方法即溢流通道唯一入口。 */
+  depositIntoVoidVault(itemId: number, stack: number): number {
+    if (!this.useVoidBag() || stack <= 0) return stack;
+    const vault = this.banks[3];
+    let left = stack;
+    // 占用堆叠合并（GetItem_FillIntoOccupiedSlot_VoidBag :39747-39780）
+    for (let i = 0; i < vault.length && left > 0; i++) {
+      const s = vault[i];
+      if (!s || s.stack <= 0 || vanillaIdOfItem(s.id) !== vanillaIdOfItem(itemId)) continue;
+      const max = ITEM_DEFS[s.id]?.maxStack ?? 999;
+      const put = Math.min(max - s.stack, left);
+      if (put <= 0) continue;
+      s.stack += put;
+      left -= put;
+    }
+    // 空位落格（GetItem_FillEmptyInventorySlot_VoidBag :39835-39855）
+    for (let i = 0; i < vault.length && left > 0; i++) {
+      if (vault[i]) continue;
+      const put = Math.min(ITEM_DEFS[itemId]?.maxStack ?? left, left);
+      vault[i] = { id: itemId, stack: put };
+      left -= put;
+    }
+    return left;
   }
   /** HasUnityPotion（:41652-41669）：背包 58 格任一 2997；持虚空袋时 bank4（banks[3]）也计 */
   hasUnityPotion(): boolean {

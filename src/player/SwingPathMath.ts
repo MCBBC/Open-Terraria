@@ -1,5 +1,14 @@
-/** 近战挥击命中几何纯函数集（任务A 充能电水母族常量 + 任务B 星怒延长臂）。
+/** 近战挥击命中几何纯函数集（任务A 充能电水母族常量 + 任务B 火之大剑延长臂）。
  *  全部自 Terraria 1.4.5.7 反编译源逐行移植，无 DOM/引擎依赖（vitest 直测）。
+ *
+ *  ★勘误[J1]（蓝队复核 2026-08-30）：历史注释与函数名里的"星怒"系武器身份错挂——
+ *   原版探针门是 `type == 121` = 火之大剑 FieryGreatsword（游戏内显示名 Volcano；
+ *   Terarria1457/Terraria.ID/ItemID.cs:1788；官方改名映射 en-US.Items.json:491
+ *   "FieryGreatsword":"Volcano"），真正的星怒 Starfury=65（ItemID.cs:1676）。
+ *   行为面无错：仓内 swingVid===121 与原版 type==121 是同一物品，命中集本来就对，
+ *   错的只是命名与由其派生的"星怒窗口"等登记说法。函数名 starfurySwingProbes
+ *   作为历史 API 名保留以免跨文件大 diff（Game.ts 调用点等），语义一律按
+ *   火之大剑/Volcano 延长臂读。
  *
  *  移植源锚点：
  *   · Player.GetPointOnSwungItemPath —— Terarria1457/Terraria/Player.cs:45118-45129
@@ -30,7 +39,10 @@ export const ZAPPING_JELLYFISH = new Set<number>([63, 64, 103, 242]);
  * 本仓恒定语境：fullRotation=0 / gfxOffY=0 / mountPlayerOffset=0（无重力旋转、
  * 不建模就坐挥击与坐骑手持偏移——此时 n 分量两两项抵消，函数=恒等映射）；
  * sleeping/sitting 偏移支（:4229-4239）同此语义缺席。reverseRotation/addGfxOffY/
- * pushFromOriginHack 三可选参均取原版调用点实值（false/true/0，唯一调用族未传）。 */
+ * pushFromOriginHack 三可选参均取原版调用点实值（false/true/0，唯一调用族未传）。
+ * ★[N1] 登记（红队 R3 2026-08-30）：探针锚对 gfxOffY/mount.PlayerOffset 按 0 近似
+ * ——坐骑手持偏移与就坐挥击偏移两支未建模；本仓语境下 n 分量两两项抵消、函数退化为
+ * 恒等映射+旋转项，若未来接入坐骑/重力旋转须回到上述结构面重新对拍。 */
 export function rotatedRelativePoint(
   posX: number, posY: number,
   frame: { bottomX: number; bottomY: number; fullRotation?: number;
@@ -103,7 +115,11 @@ function between(x: number, y: number, minX: number, minY: number, maxX: number,
  * 线段任一端 Between(TopLeft,BottomRight) → 0；否则对矩形【四角】分别取
  * 「角到线段的最近距离」（ClosestPointOnLine 投影钳制），返回四者最小值。
  * 注意它不是对矩形边集的真实最小距——线弦穿盒而不过角时仍返回过角的近似值；
- * 原版如此，勿"修正"。星怒命中门即消费该值 ≤16f（Player.cs:44639/1456 :43617）。 */
+ * 原版如此，勿"修正"。火之大剑(type121)命中门消费该值 ≤16f
+ * （1457 Player.cs:44638-44639 / 1456 :43616-43617）。
+ * ★[N2] 登记（红队 R3 2026-08-30）：原版敌盒为 Rectangle((int)nPC.position.X,
+ * (int)nPC.position.Y, …)（:44631 整数截断），本仓直传浮点实体盒坐标——亚像素级
+ * 边界差（≤1px 量级的命中翻转）属登记接受的近似，对拍勿按逐像素判例钉死。 */
 export function lineRectangleDistance(rect: Rect, lineStart: Pt, lineEnd: Pt): number {
   const tlX = rect.x,          tlY = rect.y;
   const trX = rect.x + rect.w, trY = rect.y;
@@ -124,15 +140,23 @@ export function lineRectangleDistance(rect: Rect, lineStart: Pt, lineEnd: Pt): n
 }
 
 /**
- * 星怒 Starfury（type 121）延长臂双探针（Player.ProcessHitAgainstNPC 内
- * 1457 :44634-44645 / 1456 :43612-43617）：
+ * 火之大剑 Fiery Greatsword（type 121，游戏内名 Volcano）延长臂双探针
+ * （Player.ProcessHitAgainstNPC 内 `if (type == 121)` 支：1457 :44634-44639 /
+ * 1456 :43612-43617。★[J1] 函数名沿用历史误挂"starfury*"为零 churn，见文件头勘误）：
  *   GetPointOnSwungItemPath(70,70, 0f , GetAdjustedItemScale(sItem), …→ location )
  *   GetPointOnSwungItemPath(70,70, 0.9f, GetAdjustedItemScale(sItem), …→ location2)
  * flag2 = LineRectangleDistance(enemyRect, location, location2) ≤ 16f
- * sprite 尺寸常量 70×70 为反编译硬编码（与实际贴图帧无关）；itemScale =
- * GetAdjustedItemScale（1457 :42891：item.scale ×ApplyMeleeScale 手套 1.1——本仓
- * 命中盒侧同规则只吃手套档,基 scale 未建模按 1）。返回 [t=0 探针, t=0.9 探针]。
- * 本仓世界系换算见 Game.updateSwingHits 调用点注释（镜像共轭 rot→±rot）。 */
+ * sprite 尺寸常量 70×70 为反编译硬编码字面量——恰与该物贴图 70×70 一致
+ * （vanilla.json items['121'] iw/ih 自证；真·星怒 Starfury(65) 贴图只有 42×42，
+ * 两尺寸可作身份误挂的物证）。原版此处不读 sItem.spriteWidth，勿改成动态尺寸。
+ * itemScale = GetAdjustedItemScale（1457 :42891 → ApplyMeleeScale :42901：
+ * melee 且手套档 ×1.1）。
+ * ★[C7] RESOLVED（红队 R3 2026-08-30）：item 121 基 scale=1f
+ * （src/data/vanilla-itemcombat.json "scale":1，item-stats-golden-1457 闸门背书）
+ * ⇒ 本仓调用侧传 meleeScaleGlove?1.1:1 即精确闭式复刻，早批登记的
+ * "泰坦手套下探针短 10%"偏离担忧作废、不再挂账。
+ * 返回 [t=0 探针, t=0.9 探针]。本仓世界系换算见 Game.updateSwingHits 调用点注释
+ * （镜像共轭 rot→±rot）。 */
 export function starfurySwingProbes(
   itemLocation: Pt, itemRotation: number, direction: number, itemScale: number,
 ): [Pt, Pt] {

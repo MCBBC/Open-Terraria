@@ -255,9 +255,12 @@ export function getAttackDamageForTownNPC(normalDamage: number, difficulty: numb
   return Math.trunc(f32(normalDamage * sampleCurve(TOWN_NPC_DAMAGE_MULTIPLIER, difficulty)));
 }
 
-/** Main.DamageVar（Main.cs:65597-65620）1:1：base ±15% ±luck 重掷。
- *  luck>0：|luck| 概率重掷一次取较大；luck<0：|luck| 概率重掷取较小
- *  （:65604-65620 两段对称）。rnd = [0,1) 均匀随机源。返回 int 截断（(int) 语义）。 */
+/** Main.DamageVar（1457 Main.cs:67097 起 / 1456 Main.cs:65597-65620）1:1：base ±15%
+ *  ±luck 重掷。luck>0：|luck| 概率重掷一次取较大；luck<0：|luck| 概率重掷取较小
+ *  （两版对称双支，1457 :67104-67122）。rnd = [0,1) 均匀随机源。
+ *  返回 int 截断（(int) 语义）。 */
+/* 版本锚勘误存档：旧头注 "Main.cs:65597-65620" 是 1456 行号；2026-08-30 蓝队复核按
+ * 1457 基准改双版标注（DamageVar 在 1457 Main.cs 自 :67097 起）。 */
 export function damageVar(base: number, luck: number, rnd: () => number = Math.random): number {
   let num = base * (1 + (Math.floor(rnd() * 31) - 15) * 0.01);
   if (luck > 0) {
@@ -271,7 +274,7 @@ export function damageVar(base: number, luck: number, rnd: () => number = Math.r
       if (second < num) num = second;
     }
   }
-  return Math.round(num);   // (int)Math.Round（Main.cs:65620——曾误 trunc 系统性偏低 0.5）
+  return Math.round(num);   // (int)Math.Round（1457 :67123 / 1456 :65620——曾误 trunc 系统性偏低 0.5）
 }
 
 /** GetAttackDamage_CappedAtMaster（:7020）：大师以上钳在 Master 档 */

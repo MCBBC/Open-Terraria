@@ -17,6 +17,15 @@ import {
 import { cageFamilyOf, drawCageCell } from './CritterCage';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
 import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, TILE_ANIM_RATE } from './TileAnim';
+import { tileFrameCapture as cap } from '../debug/TileFrameCapture';
+
+/** 捕获用素材宽读取（vmeta.sheet → ensureVImage 缓存直取，无请求副作用路径已有） */
+function vImgW(atlas: SpriteAtlas, sheet: number): number {
+  const m = atlas.vmeta(sheet);
+  if (!m) return 0;
+  const img = atlas.ensureVImage(m.sheet);
+  return img ? img.width : 0;
+}
 import { vanillaFrameFor, vanillaFrameUnified, setVanillaSolidTables, deriveVanillaSolidTablesFromDefs, isVanillaMergeDirtFamily } from './VanillaFraming';
 // 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程;2026-08-28 转正默认启用)。
 // ★回退开关(发现严重问题时无需改代码):
@@ -1206,8 +1215,12 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
         : sheet === 406 ? chimneyAddFrY(fy)
         : animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
       const imgh = (atlas.vmeta(sheet)?.rows ?? 0) * 18;
-      if (imgh > 0 && r.sy + extra + r.sh > imgh) extra = 0;   // 出界回退第 0 带
-      if (extra < -(r.sy)) extra = 0;                           // 负向越界同理
+      const reqExtra = extra;
+      let clampMask = 0;
+      if (imgh > 0 && r.sy + extra + r.sh > imgh) { extra = 0; clampMask |= 1; }   // 出界回退第 0 带
+      if (extra < -(r.sy)) { extra = 0; clampMask |= 2; }                          // 负向越界同理
+      cap.noteDraw('vf', sheet, x, y, fx, fy, r.sx, r.sy, r.sw, r.sh,
+        reqExtra, extra, clampMask, atlas.vImageW(sheet), imgh);
       r = { ...r, sy: r.sy + extra };
     }
   } else if (frame === 'auto') {
@@ -1221,8 +1234,12 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
         : sheet === 406 ? chimneyAddFrY(fy)
         : animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
       const imgh = (atlas.vmeta(sheet)?.rows ?? 0) * 18;
-      if (imgh > 0 && r.sy + extra + r.sh > imgh) extra = 0;
-      if (extra < -(r.sy)) extra = 0;
+      const reqExtra = extra;
+      let clampMask = 0;
+      if (imgh > 0 && r.sy + extra + r.sh > imgh) { extra = 0; clampMask |= 1; }
+      if (extra < -(r.sy)) { extra = 0; clampMask |= 2; }
+      cap.noteDraw('auto', sheet, x, y, fx, fy, r.sx, r.sy, r.sw, r.sh,
+        reqExtra, extra, clampMask, vImgW(atlas, sheet), imgh);
       r = { ...r, sy: r.sy + extra };
     }
   } else if (vfFrame === null) {
@@ -1289,14 +1306,24 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     // 多格物体（dgWr 系放置/存量存档）整物塌成重复碎片。215 篝火与 207 喷泉
     // 例外：帧偏移由 ChunkCache 预加（campfireYOffset/fountainYOffset——两族
     // 均有"带 0 静止态门/相位"专属语义），勿在此重复叠加
+    const reconBaseOfy = ofy;
+    let reconExtra = 0;
     if (sheet !== 215 && sheet !== 207 && !(sheet === 405 && fx >= 54)) {
-      ofy += sheet === 405 ? fireplaceAddFrY(fx)
+      reconExtra = sheet === 405 ? fireplaceAddFrY(fx)
         : animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
+      ofy += reconExtra;
     }
     // 标准 18px stride 像素偏移直取（宝箱 Tiles_21 也是标准网格：
     // 样式横向排列 36px/个，closed 状态占前 2 行，下面是开启动画帧）
     r = atlas.vframeAt(sheet, ofx, ofy);
-    if (!r) r = atlas.vframeAt(sheet, 0, 0);
+    let reconFb = false;
+    if (!r) { reconFb = true; r = atlas.vframeAt(sheet, 0, 0); }   // ★落空回退(0,0)="整物第一格平铺"指纹
+    if (TILE_ANIM_RATE[sheet] || sheet === 405 || reconExtra !== 0 || reconFb) {
+      const rm = atlas.vmeta(sheet);
+      cap.noteDraw('recon', sheet, x, y, fx, fy, ofx, reconBaseOfy,
+        rm?.grid[0] ?? 18, rm?.grid[1] ?? 18,
+        reconExtra, reconExtra, reconFb ? 16 : 0, vImgW(atlas, sheet), (rm?.rows ?? 0) * 18);
+    }
   }
   if (!r) {
     // 取帧双落空:img 加载中(瞬态,onVImageLoaded→重烘焙自愈,**不告警**)或

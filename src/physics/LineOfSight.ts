@@ -137,6 +137,25 @@ export function canHitLine(st: Store, x1: number, y1: number, w1: number, h1: nu
   }
 }
 
+/** WorldGen.SolidTile(i,j) 公共口（Terarria1457 WorldGen.cs:70642-70661；1456 :70155
+ *  同式）：active && tileSolid && !tileSolidTop(platform) && !halfBrick && slope==0
+ *  && !inActuated——与 fullSolid 同判定式的越界安全版。语义要点：
+ *  - 不含平台族（tileSolidTop）——与 TileStore.isSolid（含平台）互斥，消费方须按
+ *    调用点选对：目标格快退（AI_137_CanHit Projectile.cs:71577）等 WorldGen.SolidTile
+ *    站点一律本式；
+ *  - 出界/未加载格原版返回 true（Main.tile[i,j]==null → return true 的守门怪癖
+ *    :70646-70649），照搬保真——目标态常态在界内,少触发。
+ *  （2026-08-30 实体侧对账批新增导出；既有函数体零改动） */
+export function solidTileAt(st: Store, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;                         // Main.tile==null → true（怪癖保真）
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  if (t === 0) return false;                                   // !active()
+  if (st.wire[i] & TS.WIRE_ACTUATED) return false;             // inActive()
+  const d = TILE_DEFS[t];
+  return !!d && d.solid && !d.platform && st.slope[i] === 0 && st.half[i] === 0;
+}
+
 /** 原版 Player.CanHit(Entity ent)（Terarria1457/Terraria/Player.cs:42858-42865；
  *  1456 :41886-41894）1:1——近战挥击对 NPC 的视线门，消费点 = ProcessHitAgainstNPC
  *  （1457 :44641 / 1456 :43619 `!flag || (!nPC.noTileCollide && !CanHit(nPC))`）。
@@ -153,7 +172,17 @@ export function playerCanHitEntity(st: Store, p: LOSBox, e: LOSBox): boolean {
   const pcy = p.cy ?? p.y + p.h / 2;
   const hx = pcx + (p.facing ?? 1) * (p.w / 2), hy = pcy - p.h / 3;
   const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
-  return canHitLine(st, hx, hy, 0, 0, ecx, ecy - e.h / 3, 0, 0)
+  // ★F3 目标锚 ±ent.height/3 是 C# **整型除法**（1457 :42860/:42862 ent.height 为
+  //  int、除字面量 3 无 f 后缀 → int/int 向零截断后转 float 进 Vector2）：h=38 →
+  //  ±12 而非 ±12.667（Player.CanHit(Entity)，1457 :42858-42865 / 1456 :41886-41894）。
+  //  对照：玩家手位 y 偏移是浮点除 `(float)(-height)/3f`（:42859）——hy 保持浮点。
+  //  登记不修：射线 A 的 Collision.CanHit(Vector2) 先 Utils.ToPoint (int) 截断坐标
+  //  （Utils.cs:1911-1914），再纯整型除法求 tile（Collision.cs:390-393）——legacy
+  //  canHit 主循环为既有全仓认证基建不动（Math.floor 对正坐标等价 ToPoint 截断；
+  //  残余差仅在奇数宽高盒的亚像素窗，见 canHit 注释）。
+  const bTop = Math.trunc((0 - e.h) / 3);                        // `-ent.height / 3`
+  const dBot = Math.trunc(e.h / 3);                              // `ent.height / 3`
+  return canHitLine(st, hx, hy, 0, 0, ecx, ecy + bTop, 0, 0)
     || canHitLine(st, hx, hy, 0, 0, ecx, ecy, 0, 0)
-    || canHitLine(st, hx, pcy, 0, 0, ecx, ecy + e.h / 3, 0, 0);
+    || canHitLine(st, hx, pcy, 0, 0, ecx, ecy + dBot, 0, 0);
 }

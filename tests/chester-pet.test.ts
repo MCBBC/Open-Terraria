@@ -16,10 +16,15 @@ import { Enemy } from '../src/entities/Enemy';
 import { Game } from '../src/core/Game';
 import { PetFollower } from '../src/entities/PetFollower';
 import { Player } from '../src/entities/Player';
+import { VoidLensProj } from '../src/entities/VoidLensProj';
+import { FlyingPiggyBank } from '../src/entities/FlyingPiggyBank';
 import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
-import { CHESTER_CONTAINER } from '../src/data/vanillaOpenBags';
+import {
+  CHESTER_CONTAINER, MONEY_TROUGH_USE, VOID_LENS_CONTAINER,
+} from '../src/data/vanillaOpenBags';
+import { ItemIconCache } from '../src/render/CursorItemIcon';
 
 // ===================== Game 最小桩（blue-r2 casterGame 同法） =====================
 /** updateChesterContainerRange/hoveredChester/interactChesterContainer 可驱动的最小
@@ -69,7 +74,75 @@ describe('CHESTER_CONTAINER 契约', () => {
     expect(CHESTER_CONTAINER.projId).toBe(960);           // Projectile.cs:63714
     expect(CHESTER_CONTAINER.openChestX).toBe(-2);        // Main.cs:38463 chest=-2
     expect(CHESTER_CONTAINER.bankIndex).toBe(0);          // player.banks[0] 存钱罐
-    expect(CHESTER_CONTAINER.cursorIconVid).toBe(5098);   // Main.cs:38440-38443
+    expect(CHESTER_CONTAINER.cursorIconVid).toBe(5098);   // Main.cs:38436 proj.type==960 支
+  });
+});
+
+// ===================== 悬停光标 kind 分派（X-F5 回归） =====================
+// 原版三面：525 飞猪/960 Chester 共走 TryInteractingWithMoneyTrough
+// （1457 :38431-38436 flag2 段 icon=3213、==960→5098；1456 :37306-37311 同构）；
+// 透镜弹 734 走独立 TryInteractingWithVoidLens（Main.cs:28348 弹型门）→ icon=4131
+// （:38359，1456 :37233）。分派错误症状 = 悬停虚空透镜显示钱槽罐头(3213)。
+describe('悬停光标 kind 分派（tickCursorIcon 容器宠物支）', () => {
+  it('契约常量：ChesterPetItem=5098 / MoneyTrough=3213 / VoidLens=4131（ItemID.cs:11742/:7972/:9808）', () => {
+    expect(CHESTER_CONTAINER.cursorIconVid).toBe(5098);
+    expect(MONEY_TROUGH_USE.cursorIconVid).toBe(3213);
+    expect(VOID_LENS_CONTAINER.cursorIconVid).toBe(4131);
+  });
+
+  /** tickCursorIcon 最小驱动面：tileInteractionsMouseOver 打桩隔离（本面只验证
+   *  容器宠物分派，tile 悬停族另有测试）、缓存器用真实现、entities 只喂 npcs/projectiles */
+  function cursorGame() {
+    const { g, player } = chesterGame();
+    (g as unknown as Record<string, unknown>).tileInteractionsMouseOver = () => {};
+    (g as unknown as Record<string, unknown>).itemIconCache = new ItemIconCache();
+    (g as unknown as Record<string, unknown>).renderer = {};
+    // 悬停扫描面（hoveringTownNpc/containerPetHit 都走 entities；缺省空桶）
+    (g as unknown as Record<string, unknown>).entities = { npcs: [], projectiles: [] };
+    return { g, player };
+  }
+
+  it('透镜弹 734 悬停 → 图标 4131（X-F5 主回归：曾误落 3213 钱槽图标）', () => {
+    const { g, player } = cursorGame();
+    const lens = new VoidLensProj(player.cx + 2 * TILE, player.cy, 0, 0);
+    (g as unknown as Record<string, unknown>).entities = { npcs: [], projectiles: [lens] };
+    (g.input as { mouseX: number; mouseY: number }).mouseX = lens.x + 15;
+    (g.input as { mouseX: number; mouseY: number }).mouseY = lens.y + 12;
+    (g as unknown as { tickCursorIcon(): void }).tickCursorIcon();
+    expect(player.cursorItemIconEnabled).toBe(true);
+    expect(player.cursorItemIconID).toBe(VOID_LENS_CONTAINER.cursorIconVid);   // 4131 VoidLens :38359
+  });
+
+  it('飞猪存钱罐 525 悬停 → 图标 3213（MoneyTrough 默认支）', () => {
+    const { g, player } = cursorGame();
+    const pig = new FlyingPiggyBank(player.cx + 2 * TILE, player.cy, 0, 0, () => player);
+    (g as unknown as Record<string, unknown>).entities = { npcs: [], projectiles: [pig] };
+    (g.input as { mouseX: number; mouseY: number }).mouseX = pig.x + 15;
+    (g.input as { mouseX: number; mouseY: number }).mouseY = pig.y + 12;
+    (g as unknown as { tickCursorIcon(): void }).tickCursorIcon();
+    expect(player.cursorItemIconEnabled).toBe(true);
+    expect(player.cursorItemIconID).toBe(MONEY_TROUGH_USE.cursorIconVid);      // 3213 :38433
+  });
+
+  it('Chester 宠物格悬停 → 图标 5098（==960 覆写支，wiring 级复核不被泛化改坏）', () => {
+    const { g, player } = cursorGame();
+    const pet = mkChester(g, player);
+    (g as unknown as Record<string, unknown>).petFollower = pet;
+    (g.input as { mouseX: number; mouseY: number }).mouseX = pet.cx;
+    (g.input as { mouseX: number; mouseY: number }).mouseY = pet.cy;
+    (g as unknown as { tickCursorIcon(): void }).tickCursorIcon();
+    expect(player.cursorItemIconEnabled).toBe(true);
+    expect(player.cursorItemIconID).toBe(CHESTER_CONTAINER.cursorIconVid);     // 5098 :38436
+  });
+
+  it('无命中 → 不启用悬停图标（重置链首四字段归零）', () => {
+    const { g, player } = cursorGame();
+    (g as unknown as Record<string, unknown>).entities = { npcs: [], projectiles: [] };
+    (g.input as { mouseX: number; mouseY: number }).mouseX = 200 * TILE;
+    (g.input as { mouseX: number; mouseY: number }).mouseY = 200 * TILE;
+    (g as unknown as { tickCursorIcon(): void }).tickCursorIcon();
+    expect(player.cursorItemIconEnabled).toBe(false);
+    expect(player.cursorItemIconID).toBe(0);
   });
 });
 

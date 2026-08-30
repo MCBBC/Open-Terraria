@@ -1,5 +1,6 @@
 // PvP 关系判定 + 队伍色 + StatusPvP debuff 表（1.4.5.6 1:1）。
-// 权威：Player.InOpposingTeam（Player.cs:4287-4299，全服唯一 PvP 关系判定）：
+// 权威：Player.InOpposingTeam（1457 Player.cs:4490-4501 / 1456 :4290-4301，
+// 全服唯一 PvP 关系判定——旧锚 :4287-4299 为 1456 早期行号,2026-08-30 校准）：
 //   双方都 hostile 且（对方 team==0 或 team 不同）。注意原版不检查"自己 team==0"——
 //   自己无队、对方有队也算敌对。
 // 队伍色：Main.teamColor（Main.cs:1230 数组 + 6610-6615 初始化）。
@@ -26,7 +27,7 @@ export function teamColorCss(team: number): string {
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
-/** Player.InOpposingTeam（cs:4287-4299）：双方 hostile 且（对方无队 或 异队） */
+/** Player.InOpposingTeam（1457 cs:4490-4501 / 1456 :4290-4301）：双方 hostile 且（对方无队 或 异队） */
 export function inOpposingTeam(a: { hostile: boolean; team: number }, b: { hostile: boolean; team: number }): boolean {
   if (!a.hostile || !b.hostile) return false;
   return b.team === 0 || b.team !== a.team;

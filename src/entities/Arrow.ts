@@ -6,6 +6,7 @@ import { Entity } from './Entity';
 import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
+import { applyThrownKillFx } from './ThrowKillFx';
 import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { trySnapStrike } from '../stats/SnapStrike';
@@ -27,6 +28,17 @@ const spriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
  *  未登记=纯扔箭撞块无效果(2026-08-30 孤儿武器 A 波工单1) */
 const ROPE_COIL_TILE: Record<number, string> = {
   171: 'v_213_rope', 475: 'v_353_vine_rope', 476: 'v_213_rope', 505: 'v_365_silk_rope', 506: 'v_366_web_rope',
+};
+/** 绳圈弹→余料返还件 { coil: 原圈件, loose: 散绳件 }（Projectile.cs:79303-79316，
+ *  Kill→Kill_ExplodeTiles(:78995) 四型同构段：ai[1]==0 → 原圈 ×1；1≤ai[1]<10 →
+ *  散绳 ×(10−ai[1])；满 10 无返还。圈/散对配自 Item.cs SetDefaults：
+ *  case 985 shoot=171(:12699)/case 3005→475(:27734)/case 3079→505(:28549)/
+ *  case 3080→506(:28534)；散绳 = 铺下 tile 的 drop 件（tiles.ts D-6）） */
+const ROPE_COIL_RETURN: Record<number, { coil: number; loose: number }> = {
+  171: { coil: 985, loose: 965 },
+  475: { coil: 3005, loose: 2996 },
+  505: { coil: 3079, loose: 3077 },
+  506: { coil: 3080, loose: 3078 },
 };
 /** 晶洞弹 772 尾迹/爆裂宝石尘（Projectile.cs:56499 randFromList(86-91,138) 尾迹、
  *  :76569/:76580 Kill 爆两段 randFromList(86-90)） */
@@ -1330,6 +1342,11 @@ export class Arrow extends Entity {
   private flareStuck = 0;
   /** localAI[1]：≥30 后每拍 vy+0.09（:27477-27482 自增后钳回 30 = 恒触发档） */
   private flareGravT = 0;
+  // ---- 绳圈余料返还计数（aiStyle35 族，Projectile.cs:79303-79316 按 ai[1] 结算）----
+  /** 已铺绳格数 ≡ 原版 ai[1]（AI_035 铺绳循环逐格 ++ :27699）；killNow 余料
+   *  返还口消费——铺绳尾(:27720)与 timeLeft=400 到期(:17307-17311)在原版同达
+   *  Kill() 单口，本仓对应 killNow 全路径 */
+  private ropeAi1 = 0;
   // ---- 钉 514（aiStyle 93，钉枪 3107 弹，AI_093 Projectile.cs:33425-33487）----
   /** ai[0]：0 飞行（20t 后下垂）/ 1 撞块弹开（×0.6/t 衰减）/ <0 刺入敌体
    *  （= −(敌 id+1)，跟随敌心偏移 velocity） */
@@ -2117,25 +2134,49 @@ export class Arrow extends Entity {
       }
       if (this.manaStar) game.spawnDrop?.(this.x, this.y, 'vi_4143_manacloakstar', 1);
     }
-    // ---- 晶洞弹 772 Kill（Projectile.cs:76566-76608，2026-08-30 孤儿武器 A 波工单5）：
-    // dig 音 + 尘 1×6（velocity×1.9 循环写仅视觉残留）+ 宝石尘 86-90 ×20（noGravity、
-    // vel×2.9、vy×0.8、fadeIn）+ ×7 同款 noLight——若 owner==myPlayer 再 DropGeodeGems
+    // ---- 绳圈余料返还（Projectile.cs:79303-79316，2026-08-30 孤儿武器 A 波工单2）：
+    //      Kill→Kill_ExplodeTiles(:78990/:78995) 尾段按 ai[1] 结算——0 铺绳 →
+    //      原圈件 ×1；1≤ai[1]<10 → 散绳 ×(10−ai[1])；满 10 无返还。锚点=
+    //      RequestNewItem(base.Center)：弹体【消亡点】(撞面贴面位/绳列顶端,
+    //      AI_035 position+=vector27 后 Center :27638)——非投掷者位置;
+    //      ReserveForLocalPlayer 仅限拾取归属不改落点(:49644)。挂在 killNow
+    //      单口而非铺绳支：原版铺绳尾 Kill(:27720)与 timeLeft=400 空中到期
+    //      Kill(:17307-17311)同达此口——曾缺 = 投一整圈全吞（蓝队 finding A-1）
+    if (ROPE_COIL_RETURN[this.projId] !== undefined && !this.dead && this.ropeAi1 < 10) {
+      const rc = ROPE_COIL_RETURN[this.projId];
+      if (this.ropeAi1 === 0) {
+        const ck = VANILLA_ITEM_KEY_BY_ID[rc.coil];
+        if (ck) game.spawnDrop?.(this.cx, this.cy, ck, 1);
+      } else {
+        const lk = VANILLA_ITEM_KEY_BY_ID[rc.loose];
+        if (lk) game.spawnDrop?.(this.cx, this.cy, lk, 10 - this.ropeAi1);
+      }
+    }
+    // ---- 晶洞弹 772 Kill（Projectile.cs:76566-76608，2026-08-30 孤儿武器 A 波工单5；
+    // 蓝队 A-7 复核修正）：dig 音 + 尘 1×6 + 宝石尘 86-90 ×20（noGravity、v×2.9、
+    // vy×0.8、fadeIn 1.1）+ ×7 同款再 noLight——owner==myPlayer 再 DropGeodeGems。
+    // ★A-7：循环里对【弹体】的 velocity×1.9 六连写是反编译字面残留（Kill 内宝石尘
+    // NewDustDirect 显式 SpeedX=SpeedY=0、本仓 onProjectileDeath 无 772 分支 → 无下游
+    // 读者）——原样保留但绝不作尘种速：宝石尘初速 = Dust.NewDust 内建抖动
+    // Next(-20,21)×0.1=±2.0px/t（本仓 VanillaDust.spawn 已同式实现），经 v×2.9/Y×0.8
+    // 终值 ±5.8/±4.64；曾错把乘过 ~47× 的弹速当种速再乘 2.9 ⇒ 数百 px/t 一帧暴闪。
     if (this.projId === 772 && !this.dead) {
       game.playSfx?.('dig', 1, this.cx, this.cy);            // PlaySound(0,...)（:76567）
       for (let i = 0; i < 6; i++) {
         game.spawnDust?.(this.x, this.y, this.w, this.h, 1);
         this.vx *= 1.9;
-        this.vy *= 1.9;                                       // :76570 velocity *= 1.9f
+        this.vy *= 1.9;                                       // :76571 velocity *= 1.9f（死码，见头注）
       }
-      for (let i = 0; i < 27; i++) {                          // 20(:76573)+7(:76579)
+      for (let i = 0; i < 27; i++) {                          // 20(:76573)+7(:76582)
         const dd = GEODE_GEM_DUST[(Math.random() * 5) | 0];   // rand.NextFromList(86..90)
         const d2 = game.spawnDust?.(this.x, this.y, this.w, this.h, dd,
-          this.vx, this.vy, 0, null, 0.7);
+          0, 0, 0, null, 0.7);                                // ★A-7：SpeedX=Y=0（:76575/:76584）
         if (d2) {
           d2.noGravity = true;
           d2.vx *= 2.9;
-          d2.vy = (d2.vy * 2.9) * 0.8;
-          if (i >= 20) d2.noLight = true;                     // :76586 第二段尘 noLight
+          d2.vy = (d2.vy * 2.9) * 0.8;                        // 先 ×2.9 后 Y×0.8（:76578/:76588）
+          d2.fadeIn = 1.1;                                    // 生长目标语义（:76580 red 备注补项）
+          if (i >= 20) d2.noLight = true;                     // :76590 第二段尘 noLight
         }
       }
       // DropGeodeGems（:80304-80316）：池 [181,182,180,178,179,177,999] 无放回抽 2 种,
@@ -2256,21 +2297,6 @@ export class Arrow extends Entity {
         const db = game.spawnDust?.(bx, by, 8, 8, 27, this.vx, this.vy, 100, null, 0.9, true);
         if (db) { db.vx *= 0.5; db.vy *= 0.5; }
       }
-    } else if (this.projId === 936 && !this.hostile && this.vy < 0
-      && game.world.flags['unlockedSlimeRainbowSpawn'] !== true) {
-      // ★批III① 闪耀史莱姆气球上升期爆裂解锁（Projectile.Kill aiStyle2 段
-      //   :22678-22690）：velocity.Y<0 = 上升中爆（敌命中/滞空寿命尽；落地爆
-      //   vy≥0/撞地速度归零与原版同闭）→ unlockedSlimeRainbowSpawn 置位
-      //   （世界旗,WorldFile 随存档）+ 巨星史莱姆 681 于爆点生成（继承弹速
-      //   :22684-22687,本仓 TownNPC 出生静止近似登记）+ RealEstateAndTownSlimes
-      //   记账由城镇入住 flags 门承载（Main.cs:66913 townNPCCanSpawn[681]）
-      game.world.flags['unlockedSlimeRainbowSpawn'] = true;
-      const ms = new TownNPC('town_slime_diva', this.cx + 4, this.cy);
-      const entsB = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
-      if (entsB?.add) entsB.add(ms, 'npcs');
-      game.spawnParticles(this.cx, this.cy, '#FFF3D2', 12, 2.2, { life: 26 });
-      game.spawnParticles(this.cx, this.cy, '#BEF5FF', 8, 1.6, { life: 22 });
-      game.spawnParticles(this.cx, this.cy, '#FF96FF', 8, 1.6, { life: 22 });   // WorldItem.cs:1704-1723 彩虹尘四色档
     } else if (this.projId === 295 && !this.hostile) {
       // §2 地狱火叉死亡火柱（Kill :75810-75815,owner 本机门）：Center 生成 296 爆区,
       // damage×0.75(int 截断)、kb 继承——150×150 盒驻留 ~135t 对盒内敌持续结算
@@ -2403,10 +2429,44 @@ export class Arrow extends Entity {
       game.spawnParticles(this.cx, this.cy, '#E8E8FF', 4 + (Math.random() < 0.5 ? 1 : 0), 2.2,
         { life: 18, grav: 0.05, damp: 0.94 });
     }
+    // ---- ★B1 孤儿武器投掷物 Kill 挂点（2026-08-30）----
+    // 183 蜜雷锋爆裂（Projectile.cs:78086-78122——音/尘/壳无门，蜂群 owner 门在方法内）；
+    if (this.projId === 183) this.beenadeBurst(game);
+    // 370 爱情/371 恶臭/936 微光气球三药水共表（弹型→Kill 追加效果见
+    // entities/ThrowKillFx.ts 头注——1085 镜在 Game.onProjectileDeath 不重复挂）
+    if (this.projId === 370 || this.projId === 371 || this.projId === 936) {
+      applyThrownKillFx(this, game);
+    }
     this.dead = true;
     game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h, this.vx, this.vy,
       this.damage, { hostile: this.hostile, ai0: this.starFallGen, kb: this.knockback,
         arpen: this.settlePen, sc: this.drawScale });
+  }
+
+  /** 微光气球 936 巨星解锁支（Shimmer() aiStyle==2 分支的解锁半边，
+   *  Projectile.cs:22676-22697；projId/hostile 门在 subStepAI 调用侧）。
+   *  触发域 = 弹心格液体==微光（shimmerWet 本仓以中心格 liquidType===SHIMMER
+   *  近似——原版是 WetCollision 包围盒级 Collision.shimmer 采样，粒度差异登记）
+   *  && velocity.Y<0（上升期触达）&& !unlockedSlimeRainbowSpawn。
+   *  动作：timeLeft>5 钳 5（延迟爆）→ 置世界旗（WorldFile 随存档，WldParser 读回）
+   *  → NewNPC 681（town_slime_diva）。非微光环境的任何消亡不触发——消亡路径
+   *  （killNow/寿命尽/命中/撞块）已无此段。 */
+  private shimmerUnlock(game: GameHooks): void {
+    if (this.vy >= 0 || game.world.flags['unlockedSlimeRainbowSpawn'] === true) return;
+    const st = game.world.store;
+    if (!st) return;
+    const tx = Math.floor((this.x + this.w / 2) / TILE), ty = Math.floor((this.y + this.h / 2) / TILE);
+    if (!st.inBounds(tx, ty) || st.liquid[st.idx(tx, ty)] <= 0
+      || st.liquidType[st.idx(tx, ty)] !== LIQUID_TYPE.SHIMMER) return;
+    if (this.life > 5) this.life = 5;                       // timeLeft=5 cap（:22680-22682）
+    game.world.flags['unlockedSlimeRainbowSpawn'] = true;   // :22685（netMode!=1 段,本仓单模式）
+    const ms = new TownNPC('town_slime_diva', this.cx + 4, this.cy);   // :22686 Center.X+4
+    const entsS = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
+    entsS?.add?.(ms, 'npcs');
+    // 彩虹尘近似（WorldItem.cs:1704-1723 四色档；弹侧原版解锁支无尘,视觉补位已登记）
+    game.spawnParticles(this.cx, this.cy, '#FFF3D2', 12, 2.2, { life: 26 });
+    game.spawnParticles(this.cx, this.cy, '#BEF5FF', 8, 1.6, { life: 22 });
+    game.spawnParticles(this.cx, this.cy, '#FF96FF', 8, 1.6, { life: 22 });
   }
 
   /** 448 Kill 爆炸（:70544-70580）：position 归心后 width=height=112 重开判定盒
@@ -2447,6 +2507,55 @@ export class Arrow extends Entity {
       bee.pierce = 2;                       // :73390 覆盖 181 表值 penetrate 3
       bee.pierceInit = 2;
       bee.frostEligible = true;             // ranged = true（:73389-73390）
+      bee.critChance = this.critChance;
+      bee.critBonus = this.critBonus;
+      bee.armorPen = this.armorPen;
+      ents.add(bee, 'projectiles');
+    }
+  }
+
+  /** 1130 蜜雷锋 Kill 爆裂（Projectile.cs:78085-78124；2026-08-30 孤儿武器 B1 波）：
+   *  Item14 音 + 尘 31×20(scale1.5/alpha100)（:78088-78092）+ 壳 gore rand.Next(61,64)
+   *  四象限×4（:78094-78113）——速度链严格按原版时序：NewGore(position, default(Vector2))
+   *  内部先自加扰动（Gore.cs:1347-1348 vy-=Next(10,31)*0.1∈[1..3] /
+   *  vx+=Next(-20,21)*0.1∈[-2,2]），出实例后 X/Y ±=1，最后整体 *=0.3——扰动与象限拍
+   *  一并落入缩放，终速域 vx∈[-0.9,0.9]/vy∈[-1.2,0]（曾把 ±0.3 当初速直传 newGore、
+   *  扰动其后全额叠加=散布 ~3×，2026-08-30 B1-2 修）
+   *  ——以上无门。蜂群 owner==myPlayer 门 → !hostile 近似：N = rand.Next(15,25)=
+   *  15..24 只（:78116-78124），弹型/伤/kb = Player.beeType()/beeDamage(damage)/
+   *  beeKB(0f)（Player.cs:12505-12531：strongBees=蜂巢背包 3333 半数 566 巨蜂、强蜂伤
+   *  +Next(1,4)、kb 0.5+KB×1.1），初速 = Next(-35,36)×0.02、出生点 = position 直传。
+   *  蜂体走 SetDefaults 面值（本分支【不】写 magic/ranged/penetrate——那是上一分支
+   *  honeyed 手雷段 :78086 前的写法）；追踪/淡入/入水消亡 = subStepAI aiStyle36 蜂族支 */
+  private beenadeBurst(game: GameHooks): void {
+    game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
+    for (let i = 0; i < 20; i++) {
+      game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100, null, 1.5);
+    }
+    const quad: ReadonlyArray<readonly [number, number]> = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
+    for (const [sx, sy] of quad) {
+      // :78094-78113 时序复刻：初速传 default(0,0)，NewGore 内部扰动（Gore.cs:1347-1348）
+      // 落在实例上，出实例再 X/Y ±=1 → 整体 ×0.3（等效于把扰动与象限拍包含进缩放）
+      const g = GorePiece.newGore(61 + Math.floor(Math.random() * 3), this.x, this.y, 0, 0);
+      if (!g) continue;
+      g.vx = (g.vx + sx) * 0.3;
+      g.vy = (g.vy + sy) * 0.3;
+    }
+    const ents = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
+    if (!ents?.add) return;
+    if (this.hostile) return;                              // owner == Main.myPlayer 门（:78113）
+    const st = game.player?.equipStats?.strongBees === true;
+    const count = 15 + Math.floor(Math.random() * 10);           // Next(15,25)
+    for (let i = 0; i < count; i++) {
+      // 每只独立掷 beeType()（makeStrongBee 态同拍直通 beeDamage/beeKB——:12505 顺序）
+      const strong = st && Math.floor(Math.random() * 2) === 0;
+      const dmg = this.damage + (strong ? 1 + Math.floor(Math.random() * 3)  // Next(1,4)
+                                        : Math.floor(Math.random() * 2));   // Next(2)
+      const kb = strong ? 0.5 : 0;                              // beeKB(0f) 两档
+      const bee = new Arrow(this.x, this.y,
+        (Math.floor(Math.random() * 71) - 35) * 0.02,
+        (Math.floor(Math.random() * 71) - 35) * 0.02,
+        dmg, kb, strong ? 566 : 181, null, {});
       bee.critChance = this.critChance;
       bee.critBonus = this.critBonus;
       bee.armorPen = this.armorPen;
@@ -2851,6 +2960,24 @@ export class Arrow extends Entity {
           if (this.projId === 2) this.projId = 1;   // TransformType(1)（:16929）
         }
       }
+    }
+    // ---- ★B1-X3 微光气球 936 巨星解锁段（2026-08-30 触发域修正：killNow → Shimmer()）----
+    // 原版唯一出处 = Shimmer()（P.cs:22564 方法头）aiStyle==2 分支 :22676-22697，
+    // 调用域 Update :17114-17117 `if (shimmerWet) Shimmer();`——浸微光液才跑，与
+    // Kill 无关；调用次序在 AI()(:16880) 之后、HandleMovement/timeLeft 尾递减之前。
+    // 曾错挂 killNow 且仅查 vy<0 → 任何上升期消亡（空中寿命尽/命中即爆）永久置位
+    // 世界旗+强制入住 Diva（红队 B1-1 实锤）。分解：
+    //   ①每 tick 浸液 velocity.Y -= 0.7 浮升 + else 支 timeLeft -= 20 加速衰变——
+    //     AI_001 弹浮升物理本仓未建模，未移植（备案）；
+    //   ②type==936 && !unlockedSlimeRainbowSpawn && velocity.Y<0（上升期触达）
+    //     → timeLeft>5 钳 5（延迟爆，cap 不上调 ：22680-22682）→ netMode!=1 内
+    //     置旗 + NewNPC 681 于 Center.X+4 借速（本仓 TownNPC 出生静止近似登记，
+    //     :22683-22689）+ CheckAchievement_RealEstateAndTownSlimes 记账由城镇入住
+    //     flags 门承载（Main.cs:66913 townNPCCanSpawn[681]）；
+    // hostile 弹在 Shimmer() 头早退（hostile && aiStyle!=25/17，:22565）→ !hostile 门。
+    if (this.projId === 936 && !this.hostile) {
+      this.shimmerUnlock(game);
+      if (this.dead) return;
     }
     // ---- ★R29 幻象弓载体 630（AI_001 type==630 支 Projectile.cs:68194-68295）----
     // ai[0]++ 计龄;加速窗 num67=(age≥40)+(≥80)+(≥120),interval=24−2×num67（四档
@@ -4934,13 +5061,15 @@ export class Arrow extends Entity {
             stRc.setTile(rcx, rcy, rtId, 0, 0);
             placedRc++;
           }
+          this.ropeAi1 += placedRc;      // ≡ ai[1]++（:27699，killNow 返还口消费）
           if (placedRc > 0) {
             game.recLog?.('tile', { x: rcx, y: rcy, from: 0, to: TILE_DEFS[rtId]?.key ?? rtKey, cause: 'ropeCoil', n: placedRc });
           }
           this.killNow(game);
           return;
         }
-        // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落），然后消失
+        // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落；本仓旧约定偏离——原版恒消耗
+        // 投掷件不入档,清单位置 Game.THROWN_NO_RECOVERY_VIDS）,然后消失
         // ★R29：子弹撞块 HitTiles 近似（Kill :77624-77625 族——Collision.HitTiles 在
         // 弹盒覆盖格撒 3-5 粒砖色尘;本仓以 4×d7 通用碎屑近似,音在 Game.onProjectileDeath
         // BULLET_KILL_SFX 分支）
@@ -4960,16 +5089,20 @@ export class Arrow extends Entity {
     // 敌对弹命中城镇 NPC(原版 flag2 分支:hostile && victim.friendly,Projectile.cs:11975-11976);
     // 不消耗弹体(原版该分支不动 keepIterating)
     if (this.hostile) hitTownNpcs(this, game, this.damage, 0, 'hostile');
-    // 友方弹 → 城镇 NPC 窄门（Damage_PVE_Inner flag :11970-11972：臭鸡蛋 318
-    // 无条件 / 向导 22·裁缝 54 巫毒装备——任意玩家弹（弓/投掷蛋等）可走此门，
-    // 2026-08-18 补；命中不消耗穿透语义（TownNPC.hurt 8t iframes 自去重））
-    else if (!this.reflected && hitTownNpcs(this, game, this.damage, 0, 'playerProj', this.projId)) {
+    // ★红队 A-2 收口①：damage<=0 的友方弹不入城镇 NPC 窄门——原版 Damage_PVE 头
+    //   `if (damage <= 0) return`（P.cs:12576）先于【一切】NPC 命中面,窄门也在段内
+    else if (!this.reflected && this.damage > 0
+      && hitTownNpcs(this, game, this.damage, 0, 'playerProj', this.projId)) {
       if (this.projId === 318) { this.killNow(game); return; }   // 臭蛋砸 NPC 即碎（penetrate 1）
     }
     // 反射后的弹体 friendly 已翻（原版 Damage NPC 需 friendly 门禁，小动物也是 NPC）
     // ——不再伤小动物/敌怪，只走上方 hitPlayer 回打发射者
     if (this.reflected) return;
-    // 小动物:一击致死并消耗弹体(原版小动物是 NPC;近战挥砍同语义)
+    // ★红队 A-2 收口②：零伤友方弹不再一击致死路遇小动物——原版 Damage_PVE 头门
+    //   先于小动物所在的全 NPC 迭代（P.cs:12576）。本仓小动物是独立桶且 hurt 无
+    //   damage 门（固定 5 伤一击致死）——此前晶洞 772 滚石/绳圈族（出口直传 0 后）
+    //   均会误杀。敌对弹不受影响（上方 hostile 分支已 return/continue）
+    if (!this.hostile && this.damage <= 0) return;
     if (hitCritters(this, game)) { this.killNow(game); return; }
     // 敌对弹不入敌怪判定（原版 Damage_PVE_Inner :11902-11905 `hostile && flag2`
     // 门：hostile 弹对非 friendly NPC 整段 return——Boss 自射弹幕不会误伤/消耗在

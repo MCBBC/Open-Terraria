@@ -485,14 +485,21 @@ describe('矿车撞敌伤害', () => {
     const { calls, run } = cartWithEnemy(6, 13, { ex: 9 * 16, ey: 12 * 16 });
     run();
     expect(calls.length).toBe(1);
-    // base = 25+55×(13/13) = 80 → DamageVar +15% = 92；kb = 10+40×1 = 50
-    expect(calls[0].dmg).toBe(92);
-    expect(calls[0].kx).toBe(50);
+    // ★2026-08-30 R5 对齐：撞怪块读的是轨驱段之前的车速 = 本 tick 重力已入（原版
+    //   :27556 cartRampTime<=0 → velocity.Y += gravity 先于 :27748 撞怪块执行，轨驱
+    //   吸附在 :28315 之后才把 vy 归零）→ speed = hypot(vx, 0.4)。
+    const spd = Math.hypot(13, PLAYER_DEFAULT_GRAVITY);           // ≈13.00615
+    const ratio = spd / 13;
+    // base = 25+55×ratio = 80.026 → DamageVar +15% → round(92.030) = 92；kb = 50.0189
+    expect(calls[0].dmg).toBe(Math.round((25 + 55 * ratio) * 1.15));
+    expect(calls[0].kx).toBeCloseTo(10 + 40 * ratio, 3);
     expect(calls[0].crit).toBe(false);
   });
 
-  it('速度≤4 不命中（:27224 velocity.Length() > 4 门）', () => {
-    const { calls, run } = cartWithEnemy(6, 4, { ex: 9 * 16, ey: 12 * 16 });
+  it('速度≤4 不命中（:27224 velocity.Length() > 4 门）——门用含重力的本帧速度原版字面', () => {
+    // ★vx=4 在重力并入后 Length=√(16.16)≈4.02>4 会命中（原版同判）；取 vx=3 钉死
+    //   "低速不结算"语义（hypot(3,0.4)≈3.03<4）
+    const { calls, run } = cartWithEnemy(6, 3, { ex: 9 * 16, ey: 12 * 16 });
     run();
     expect(calls.length).toBe(0);
   });

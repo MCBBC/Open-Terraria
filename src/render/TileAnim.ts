@@ -1,4 +1,5 @@
 // 原版 Main.AnimateTiles（Main.cs:18366-19155）竖直帧动画表：sheet → 每 N tick 推进一帧。
+import { tileFrameCapture } from '../debug/TileFrameCapture';
 // 绘制语义 = TileDrawing.GetTileDrawData addFrY：frameY += frameIdx * pitch。
 // ★ pitch 有多组（TileDrawing.cs:4568+ 实证）：
 //   默认 38px（2 格高物体的帧带 2px 额外间距——熔炉 17(456/38=12帧)/磨刀站 377 走默认；
@@ -14,67 +15,90 @@
 // 304 Living Loom 原版无动画（AnimateTiles 无 304 条目，素材 54×54 单帧）。
 // rate 归一化：原版 counter>N → 每 N+1 tick；counter>=N → 每 N tick。
 export const TILE_ANIM_RATE: Record<number, number> = {
-  405: 5,
-  406: 8,  // 烟囱（6 帧；counter>8，Main.cs:19255-19260）  // 壁炉（8 帧；pitch 走 fireplaceAddFrY 的 38；counter>5，Main.cs:19244）
-  17: 6,   // 熔炉（12 帧，pitch 38；counter>5）
-  106: 5,  // 锯木机（2 帧，pitch 54；counter>4）
-  215: 4,  // 篝火（8 帧；pitch 走 campfireYOffset 的 36，本表只管换帧节奏；counter>=4）
-  220: 5,  // 固化机 Solidifier（4 帧，pitch 54）
-  247: 5,  // 自动锻造机 Autohammer（8 帧，pitch 54）
-  300: 5,  // 骨焊机（7 帧）
-  301: 5,  // 血肉克隆台（8 帧）
-  302: 5,  // 玻璃窑（4 帧）
-  303: 5,  // 神庙熔炉（5 帧）
-  305: 5,  // 天空磨（12 帧）
-  306: 5,  // 制冰机（12 帧）
-  307: 5,  // 蒸汽锅炉（2 帧，TEdit 实名）
-  308: 5,  // 蜂蜜分配机（8 帧，TEdit 实名）
-  354: 5,  // 巫惑台（8 帧）
-  355: 5,  // 炼金台
-  377: 5,  // 磨刀站（4 帧，pitch 38）
-  499: 5,  // 腐变室 Decay Chamber（8 帧）
-  // 矿车轨道加速带（Main.cs:18734-18741：5 帧循环）。★只用于 advanceAnim 重烘焙节奏；
-  // 帧行偏移不走本表 pitch 语义（frameX/frameY 是轨道连接 ID）——由
-  // MinecartTrack.sourceRectOf(frameID, boosterAnimFrame()) 处理，ChunkCache 已特判
+  12 : 6,
+  17 : 6,
+  31 : 8,
+  77 : 6,
+  106: 5,
+  129: 6,
+  133: 4,
+  171: 17,
+  207: 5,
+  215: 4,
+  217: 5,
+  218: 5,
+  219: 5,
+  220: 5,
+  235: 4,
+  238: 4,
+  243: 5,
+  244: 5,
+  247: 5,
+  272: 10,
+  300: 5,
+  301: 5,
+  302: 5,
+  303: 5,
+  305: 5,
+  306: 5,
+  307: 5,
+  308: 5,
   314: 10,
-  // ---- 2026-08 缺表补齐（AnimateTiles 逐 id，Main.cs:18366-19155）----
-  77: 6,    // 地狱熔炉（12 帧，pitch 38；counter>5 同 17，Main.cs:18539-18548）
-  133: 4,  // 精金熔炉（6 帧，pitch 38；`if (++counter >= 4)` = 每 4 tick，Main.cs:18420-18427）
-  207: 5,  // 喷泉（6 帧，pitch 72，Main.cs:18528-18535 counter>4）。
-           //   ★原版逐列错相（TileDrawing.cs:6007-6014 addFrY=(frame+x%6)%6*72）未接——
-           //   此处全池同步换带，视觉近似
-  217: 5,  // 混合机 Blend-O-Matic（5 帧，pitch 36；Main.cs:18565-18572）
-  218: 5,  // 绞肉机（2 帧，pitch 36；Main.cs:18575-18582）
-  219: 5,  // 水晶球（10 帧，pitch 54；Main.cs:18585-18592）
-  243: 5,  // 灌注台（6 帧，pitch 54；Main.cs:18609-18616）
-  244: 5,  // 染料缸（6 帧，pitch 36；Main.cs:18619-18626。
-           //   原版仅左样式列动（TileDrawing.cs:5583-5593 `tileFrameX<54` 门），
-           //   本仓 dye vat 只出 placeStyle 0，恒过门）
-  592: 5,  // 吊火盆（8 帧，pitch 54；Main.cs:18496-18503 counter>=5）
-  12: 6,   // 生命水晶（回卷 10，pitch 36；Main.cs:18367-18376 counter>5——表 396/36=11，
-           //   多出的末带是未用行，TILE_ANIM_FRAMES 钉 10）
-  639: 6,  // 魔力水晶（回卷 10，pitch 36；Main.cs:18378-18387，同 12）
-  31: 8,   // 魔金球（4 帧，pitch 36；Main.cs:18429-18437 counter>=8）
-  739: 11, // 水母砖（4 帧，pitch 90；Main.cs:18389-18397 counter>10）
-  748: 8,  // 水砖（8 帧，pitch 90；Main.cs:18399-18407 counter>7）
-  171: 17, // 圣诞树串灯（Main.cs:18609-18618 counter>16 → 每 17 tick；4 帧回卷。
-           //   ★只管重烘焙节奏：帧行偏移由 VanillaTiler.drawXmasTreeCell 按
-           //   Xmas_4 的 130px 行距自取（不走本表 pitch 语义）
-  // ---- 瀑布族（⚠️3 2026-08-22 批，Main.cs:18743-18793 逐 id counter 档）----
-  // 8 帧回卷（>7→0）；pitch 90（TileDrawing.cs:6085-6094 case 326/327/328/329/345/
-  // 351/421/422/458/459/708 `addFrY = tileFrame*90`，素材 234×720=8 带）。'auto' 帧
-  // 块——帧带偏移由 VanillaTiler auto 分支叠加（style 分支不适用）
-  326: 5,  // 水瀑布（counter>=5）
-  327: 10, // 岩浆瀑（counter>=10）
-  345: 10, // 蜂蜜瀑（counter>=10）
-  458: 10, // 沙瀑（counter>=10）
-  459: 10, // 雪瀑（counter>=10）
+  326: 5,
+  327: 10,
+  328: 5,
+  329: 5,
+  336: 5,
+  345: 10,
+  351: 5,
+  354: 5,
+  355: 5,
+  377: 5,
+  379: 4,
+  390: 7,
+  405: 5,
+  406: 8,
+  410: 8,
+  421: 4,
+  422: 4,
+  452: 15,
+  453: 60,
+  455: 6,
+  456: 80,
+  458: 10,
+  459: 10,
+  463: 6,
+  464: 23,
+  480: 8,
+  485: 20,
+  491: 40,
+  499: 5,
+  509: 8,
+  564: 36,
+  565: 5,
+  572: 4,
+  592: 5,
+  593: 9,
+  594: 9,
+  597: 64,
+  614: 6,
+  639: 6,
+  642: 6,
+  657: 8,
+  658: 10,
+  708: 10,
+  720: 16,
+  721: 32,
+  725: 4,
+  739: 11,
+  748: 8,
 };
 
 /** pitch 特例表（其余走默认 38，TileDrawing GetTileDrawData switch 实证）。
  *  36 组 = :5524（12/31/96/639/665/696）+ :5615-5624（217/218）；54 组见头注；
  *  72 = :6002（207 喷泉）；90 = :4590（739/748） */
-const TILE_ANIM_PITCH: Record<number, number> = {
+/** 捕获系统读表用（生效 pitch 对照） */
+export const TILE_ANIM_PITCH: Record<number, number> = {
   106: 54, 219: 54, 220: 54, 228: 54, 231: 54, 243: 54, 247: 54,
   300: 54, 301: 54, 302: 54, 303: 54, 305: 54, 306: 54, 307: 54, 308: 54,
   354: 54, 355: 54, 499: 54, 592: 54,
@@ -84,16 +108,98 @@ const TILE_ANIM_PITCH: Record<number, number> = {
 };
 
 /** 回卷上限显式覆盖（默认 floor(素材高/pitch)；素材含未用行时以原版回卷为准） */
-const TILE_ANIM_FRAMES: Record<number, number> = {
-  405: 8,
-  406: 6,   // 烟囱：烟雾 6 帧循环（Main.cs:19258 >=6 回卷）   // 壁炉：Tiles_405.png 108×306 = 8×38 步−2（Main.cs:19247 >=8 回卷）
-  12: 10, 639: 10,   // 表 396px=11 带，AnimateTiles 回卷 10（Main.cs:18375/18385）
-  171: 4,            // 圣诞树串灯：Xmas_4 四帧行（Main.cs:18614-18616 >3 回卷）
-  207: 6,            // 喷泉：表 504px/72=7 带，但第 0 带是关态整图非动画帧——
-                     //   动画带只有 6（72..503），AnimateTiles 回卷 6（Main.cs:18797-18800）。
-                     //   曾按默认 7 → 第 7 帧源矩形越界 vframeAt 落空回退 (0,0) 帧，
-                     //   开态喷泉每轮回闪一次关态整图（2026-08-27 用户实报猩红喷泉切帧错误）
+/** 回卷上限显式覆盖（默认 floor(素材高/pitch)；素材含未用行时以原版回卷为准） */
+const TILE_ANIM_FRAMES_OVERRIDE: Record<number, number> = {
+  12: 10, 129: 6, 171: 4, 207: 6, 215: 8, 235: 4, 238: 4, 272: 5,
+  328: 19, 329: 19, 336: 9, 351: 7, 379: 4, 390: 7, 405: 8, 406: 6,
+  410: 8, 421: 4, 422: 9, 452: 15, 453: 6, 455: 6, 456: 6, 463: 6,
+  464: 23, 480: 8, 485: 4, 491: 1, 509: 8, 564: 36, 565: 5, 572: 4,
+  593: 9, 594: 9, 597: 2, 614: 6, 639: 10, 642: 6, 657: 8, 658: 10,
+  708: 19, 720: 16, 721: 32, 725: 4,
 };
+
+/** 捕获系统读表用（生效帧数对照） */
+export const TILE_ANIM_FRAMES: Record<number, number> = {
+  12  : 10,
+  17  : 6,
+  106 : 5,
+  129 : 6,
+  133 : 4,
+  171 : 7,
+  217 : 8,
+  218 : 9,
+  219 : 11,
+  220 : 9,
+  228 : 5,
+  231 : 8,
+  235 : 4,
+  238 : 4,
+  243 : 4,
+  244 : 10,
+  247 : 8,
+  300 : 8,
+  301 : 8,
+  302 : 4,
+  303 : 5,
+  305 : 12,
+  306 : 7,
+  307 : 8,
+  308 : 12,
+  314 : 5,
+  326 : 6,
+  327 : 6,
+  328 : 19,
+  329 : 19,
+  336 : 9,
+  345 : 6,
+  351 : 7,
+  354 : 6,
+  355 : 6,
+  377 : 4,
+  379 : 4,
+  390 : 7,
+  405 : 8,
+  406 : 6,
+  410 : 8,
+  421 : 4,
+  422 : 9,
+  452 : 15,
+  453 : 6,
+  455 : 6,
+  456 : 6,
+  458 : 6,
+  459 : 6,
+  463 : 6,
+  464 : 23,
+  480 : 8,
+  485 : 4,
+  491 : 1,
+  493 : 6,
+  499 : 6,
+  507 : 4,
+  508 : 6,
+  509 : 8,
+  564 : 36,
+  565 : 5,
+  572 : 4,
+  592 : 10,
+  593 : 9,
+  594 : 9,
+  597 : 2,
+  614 : 6,
+  639 : 6,
+  642 : 6,
+  657 : 8,
+  658 : 10,
+  660 : 6,
+  665 : 6,
+  708 : 19,
+  720 : 16,
+  721 : 32,
+  725 : 4,
+  748 : 6,
+};
+;
 
 /** 篝火族（TileDrawing.cs:6124-6133 Campfires 覆盖）：pitch=36（非默认 38！素材帧块
  *  36px 无缝排布——曾按默认 38 导致每帧 +2px 漂移，火焰像胶片滚动）；
@@ -107,7 +213,8 @@ export function campfireYOffset(frameY: number): number {
   // 曾 <288 门:熄灭件（36/54）被误判点燃去动画+扫过点燃带=双态动画同放/
   // 上下行错缝（2026-08-25 用户报,存档帧恰为 36/54 熄灭态）。曾 <36 光照门
   // 反而是对的（熄灭本就无光）。
-  if (frameY < 36) return frameY + animFrameIdx(215, 144) * 36;
+  if (frameY < 36) { const off = frameY + animFrameIdx(215, 144) * 36; tileFrameCapture.yoff('c215', String(frameY), off); return off; }
+  tileFrameCapture.yoff('c215', String(frameY), frameY + 252);
   return frameY + 252;
 }
 
@@ -118,9 +225,10 @@ export function campfireYOffset(frameY: number): number {
  *  右列归左列判据 frameX%36!==0。由 ChunkCache 预加（相位需世界 x，与 215 同款），
  *  drawVanillaCell 通用 animYOffset 叠加须排除 207 防双加。 */
 export function fountainYOffset(frameY: number, x: number, frameX: number): number {
-  if (frameY < 72) return frameY;
+  if (frameY < 72) { tileFrameCapture.yoff('f207', `${frameY}|off`, 0); return frameY; }
   const leftX = frameX % 36 !== 0 ? x - 1 : x;
   const idx = (animFrameIdx(207, 504) + (leftX % 6)) % 6;
+  tileFrameCapture.yoff('f207', `fy${frameY}x${x}`, frameY + idx * 72);
   return frameY + idx * 72;
 }
 
@@ -134,15 +242,20 @@ export function chimneyAddFrY(frameY: number): number {
   let n = idx;
   if (frameY >= 108) n = 6 - Math.floor(frameY / 54);
   else if (frameY >= 54) n = idx - 1;
-  return n * 56 + Math.floor(frameY / 54) * 2;
+  const off = n * 56 + Math.floor(frameY / 54) * 2;
+  tileFrameCapture.yoff('ch406', String(frameY), off);
+  if (off < 0 || off > 392 - 54 + 18) tileFrameCapture.anom('yoff-dup', 406, -1, -1, 0, frameY, `off=${off}`);
+  return off;
 }
 
 /** 壁炉族（TileDrawing.cs:5514-5529 case 405 verbatim）：addFrY = tileFrame[405]×38
  *  （pitch 38 与篝火/家具火焰族同款——Tiles_405.png 108×306 实测 8×38−2 带）；
  *  ★例外：frameX≥54 的列静止（num37=0，cs:5524-5526 烟囱列门）。返回 addFrY 增量 */
 export function fireplaceAddFrY(frameX: number): number {
-  if (frameX >= 54) return 0;
-  return animFrameIdx(405, 306) * 38;
+  if (frameX >= 54) { tileFrameCapture.yoff('fp405', `x${frameX}:s`, 0); return 0; }
+  const off = animFrameIdx(405, 306) * 38;
+  tileFrameCapture.yoff('fp405', String(frameX), off);
+  return off;
 }
 
 /** 全局动画时钟（Game 主循环每帧 +1；暂停时冻结） */

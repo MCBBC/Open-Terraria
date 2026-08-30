@@ -68,7 +68,7 @@ import tileCollisionJson from '../data/vanilla-tilecollision.json';
 const ROOM_BLOCK_SOLIDTOP = new Set<number>(
   ((tileCollisionJson as unknown as { tiles: Array<{ id: number; solid: boolean; solidTop: boolean }> }).tiles)
     .filter((t) => t.solid && t.solidTop).map((t) => t.id));
-const tileSolidLike = (t: number): boolean => {
+export const tileSolidLike = (t: number): boolean => {
   const d = t ? TILE_DEFS[t] : undefined;
   if (!d) return false;
   if (d.solid) return true;
@@ -85,6 +85,25 @@ export interface Room {
    *  CheckRoom 拒绝前先 Add（WorldGen.cs:6076-6080），ScoreRoom 的
    *  Housing_CheckIfInRoom 因此对地板格成立 */
   tiles: Set<number>;
+}
+
+/** 房旗锚行(Main.cs:40212 DrawNPCHousesInWorld):自 fromY-1 向上找第一格房界。
+ *  用 tileSolidLike 而非 isSolid —— 本仓平台 solid=false,若按纯实心判定扫描会
+ *  穿透 loft 楼板把下层房旗挂进上层同一行(2026-08-30 用户实报「两旗重叠」主因A)。 */
+export function findBannerAnchorY(st: TileStore, x: number, fromY: number): number | null {
+  let cy = fromY - 1;
+  while (cy >= 10) {
+    if (st.flags[st.idx(x, cy)] && tileSolidLike(st.type[st.idx(x, cy)])) return cy;
+    cy--;
+  }
+  return null;
+}
+
+/** 读档 home 幽灵校验(副因B):home 格必须落在某真实房间的 tiles 集内。
+ *  legacy 存档(站位直扫穿层时代)可能带房间外坐标,读档时逐 NPC 过滤。 */
+export function validateSavedHome(st: TileStore, x: number, y: number): boolean {
+  const q = queryRoom(st, x, y, { ignoreNeeds: true });
+  return !!(q.room && q.room.tiles.has(st.idx(x, y)));
 }
 
 /** WorldGen.maxRoomTiles / maxRoomSize（WorldGen.cs:4210/4214） */
@@ -340,12 +359,15 @@ interface FloodOpts {
   requireFurniture?: boolean;
   requireStand?: boolean;
   extraSolid?: Set<number>;
+  /** 校验旁路(RoomNeeds 不满足不判负——幽灵 home 校验只关心围合+tiles 归属) */
+  ignoreNeeds?: boolean;
 }
 
 function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFlags, opts: FloodOpts = {}): Room | null {
   const requireFurniture = opts.requireFurniture !== false;
   const requireStand = opts.requireStand !== false;
   const extraSolid = opts.extraSolid;
+  const ignoreNeeds = opts.ignoreNeeds === true;
   const tiles = new Set<number>();
   let hasTable = false, hasChair = false, hasLight = false, hasDoor = false;
   // houseTile 登记（CheckRoom :6089-6090 `if nactive → houseTile[type]=true` 在
@@ -433,15 +455,19 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
     lastRoomCheckFail = 'tooSmall';
     return null;
   }
-  if (requireFurniture && (!hasDoor || !hasTable || !hasChair || !hasLight)) {
+  if (requireFurniture && !ignoreNeeds && (!hasDoor || !hasTable || !hasChair || !hasLight)) {
     lastRoomCheckFail = 'notValid';   // RoomNeeds 家具档（TownNPC 住房用;床围合档跳过）
     return null;
   }
   if (!requireStand) return { standX: sx, standY: sy, tiles };
-  // 站立点：起点列向下找地板
+  // 站立点：起点列向下找【房间边界】(tileSolidLike——平台楼板算房界)。★此前用
+  // isSolid 直扫会穿透平台地板落到下层他室的空气里,产出跨室幽灵 home
+  // (2026-08-30 housing 旗重叠·副因B);且落点必须仍在本次泛洪的 tiles 集内。
   let fy = sy;
-  while (fy < st.h - 2 && !st.isSolid(sx, fy)) fy++;
-  if (st.isSolid(sx, sy) || fy >= st.h - 2) {
+  while (fy < st.h - 2 && !tileSolidLike(st.type[st.idx(sx, fy)])) fy++;
+  const startSolidLike = st.flags[st.idx(sx, sy)] && tileSolidLike(st.type[st.idx(sx, sy)]);
+  const standIdx = st.idx(sx, Math.max(sy, fy - 1));
+  if (startSolidLike || fy >= st.h - 2 || !tiles.has(standIdx)) {
     lastRoomCheckFail = 'notValid';
     return null;
   }
@@ -536,7 +562,8 @@ export interface HousingQueryResult {
 export type RoomCheckFailReason = 'edge' | 'tooBig' | 'tooSmall' | 'hole' | 'unsafeWalls' | 'notValid';
 export let lastRoomCheckFail: RoomCheckFailReason = 'notValid';
 
-export function queryRoom(st: TileStore, x: number, y: number): HousingQueryResult {
+export function queryRoom(st: TileStore, x: number, y: number,
+  opts: Pick<FloodOpts, 'ignoreNeeds'> = {}): HousingQueryResult {
   const flags: RoomNeedsFlags = { table: false, chair: false, light: false, door: false };
   if (x < 10 || y < 10 || x >= st.w - 10 || y >= st.h - 10) {
     return { room: null, flags, reason: 'edge' };
@@ -546,7 +573,7 @@ export function queryRoom(st: TileStore, x: number, y: number): HousingQueryResu
   if (st.flags[st.idx(x, y)] && tileSolidLike(st.type[st.idx(x, y)])) {
     return { room: null, flags, reason: 'solid' };
   }
-  const room = floodRoom(st, x, y, flags);
+  const room = floodRoom(st, x, y, flags, opts);
   if (!room) {
     // floodRoom null 的两种来源：漏墙/世界边（途中 return null）与终检失败。
     // 太小/缺家具可由 flags/无终检区分——终检失败时 flags 已 flush（见 floodRoom 尾），

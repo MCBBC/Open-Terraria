@@ -579,6 +579,106 @@ export class BiomeBackground {
     if (clean.length) void this.loadBg(clean);
   }
 
+  // ---- 世界球 4766 重掷消费口（孤儿武器 B3 波 2026-08-30）----
+  // 原版 WorldGen.RandomizeBackgroundBasedOnPlayer（WorldGen.cs:7742-7895）直接
+  // 写 WorldGen.corruptBG/jungleBG/…（WorldGen.setBG → Main.bgStyle 数据位），本仓
+  // 变体散在私有字段且由 seedFor(seed) 只挑一次——公共 setter 承担【运行时重掷】
+  // 的唯一入口。
+  // ★B3-5 重掷值域：本仓各 STYLES 表是 vanilla 样式号的子集且【行号≠样式号】
+  // （SNOW_STYLES[2..5]=原版样式 5..8 的画；FOREST_STYLES[0]/[1]=style1 复制行；
+  // 全缺口清单锚 Game.applyWorldGlobeReroll）——曾按 vanilla 全域掷完 %表长落行,
+  // 雪 42%6=0/森林 9%7=2 等会把「必异」结果折回原档或错组画。现重掷池改走
+  // biomeVariantRows 可行域 + styleRerolls.rollVariantInDomain（先过滤再掷,保证
+  // 掷即渲染可达+域内必异）；setBiomeVariant 的取模钳降级为防御兜底（正常入参
+  // 恒在界内）。
+
+  /** 变体表长单点（setBiomeVariant 取模钳/biomeVariantRows 同源——扩缩 STYLES 表
+   *  两处自动随动,零另行登记）。kind 兼收 'forest'（四段共用 FOREST_STYLES 行域）。
+   *  underworld=-1 哨兵：无 surface 行表（drawHellLayers SETS 三档直用,不取模不钳）。 */
+  private variantTableLen(kind:
+    | 'corrupt' | 'crimson' | 'jungle' | 'snow' | 'hallow'
+    | 'mushroom' | 'desert' | 'ocean' | 'underworld' | 'forest'
+    | 'forest0' | 'forest1' | 'forest2' | 'forest3'): number {
+    return (kind === 'corrupt') ? CORRUPT_STYLES.length
+      : (kind === 'crimson') ? CRIMSON_STYLES.length
+      : (kind === 'jungle') ? JUNGLE_STYLES.length
+      : (kind === 'snow') ? SNOW_STYLES.length
+      : (kind === 'hallow') ? HALLOW_STYLES.length
+      : (kind === 'mushroom') ? MUSHROOM_STYLES.length
+      : (kind === 'desert') ? DESERT_STYLES.length
+      : (kind === 'ocean') ? OCEAN_STYLES.length
+      : (kind === 'underworld') ? -1   // 地狱无 surface 行表（3 档静态）
+      : FOREST_STYLES.length;
+  }
+
+  /** 变体可行域 = 表长展开成 [0..len-1] 行号列表（世界球重掷池来源,B3-5:
+   *  styleRerolls.rollVariantInDomain 消费；forest 槽传 'forest' 共用一池）。
+   *  underworld 无行表但 drawHellLayers SETS[0..2] 三档全可行,给 [0,1,2]
+   *  （同 seedPick(s,34,3)/vanilla Next(3) 域）。 */
+  biomeVariantRows(kind:
+    | 'corrupt' | 'crimson' | 'jungle' | 'snow' | 'hallow'
+    | 'mushroom' | 'desert' | 'ocean' | 'underworld' | 'forest'
+    | 'forest0' | 'forest1' | 'forest2' | 'forest3'): number[] {
+    const len = this.variantTableLen(kind);
+    return Array.from({ length: len < 0 ? 3 : len }, (_, i) => i);
+  }
+
+  /** 读当前变体（Game 侧重掷的 oldVal 来源，等同 vanilla corruptBG/jungleBG/…直读） */
+  biomeVariant(kind:
+    | 'corrupt' | 'crimson' | 'jungle' | 'snow' | 'hallow'
+    | 'mushroom' | 'desert' | 'ocean' | 'underworld' | 'forest0'
+    | 'forest1' | 'forest2' | 'forest3'): number {
+    switch (kind) {
+      case 'corrupt': return this.corruptStyle;
+      case 'crimson': return this.crimsonStyle;
+      case 'jungle': return this.jungleStyle;
+      case 'snow': return this.snowStyle;
+      case 'hallow': return this.hallowStyle;
+      case 'mushroom': return this.mushroomStyle;
+      case 'desert': return this.desertStyle;
+      case 'ocean': return this.oceanStyle;
+      case 'underworld': return this.underworldStyle;
+      default: return this.forestStyles[kind === 'forest0' ? 0 : kind === 'forest1' ? 1 : kind === 'forest2' ? 2 : 3] ?? 0;
+    }
+  }
+
+  /** 写变体并预热（clamp 后）新档贴图行——若当前 bgStyle 正落在此群系槽则下帧
+   *  即取新行渲染；跨槽无效（update() 会在进入该群系时自动过渡,同原版语义）。
+   *  返回 clamp 后实际写入值；越界传入时取模落界（不产死循环）——★B3-5 起重掷
+   *  正路已在可行域内掷出,此取模仅作防御兜底(存档脏值等),不再是值域治理手段。 */
+  setBiomeVariant(kind:
+    | 'corrupt' | 'crimson' | 'jungle' | 'snow' | 'hallow'
+    | 'mushroom' | 'desert' | 'ocean' | 'underworld' | 'forest0'
+    | 'forest1' | 'forest2' | 'forest3', value: number): number {
+    const tableLen = this.variantTableLen(kind);
+    let v = value;
+    if (tableLen >= 0 && tableLen > 0) v = ((v % tableLen) + tableLen) % tableLen;
+    switch (kind) {
+      case 'corrupt': this.corruptStyle = v; break;
+      case 'crimson': this.crimsonStyle = v; break;
+      case 'jungle': this.jungleStyle = v; break;
+      case 'snow': this.snowStyle = v; break;
+      case 'hallow': this.hallowStyle = v; break;
+      case 'mushroom': this.mushroomStyle = v; break;
+      case 'desert': this.desertStyle = v; break;
+      case 'ocean': this.oceanStyle = v; break;
+      case 'underworld': this.underworldStyle = v; break;
+      default: this.forestStyles[kind === 'forest0' ? 0 : kind === 'forest1' ? 1 : kind === 'forest2' ? 2 : 3] = v; break;
+    }
+    // 当前可见槽对应群系才预热（warmStyle 幂等,已载秒回）：
+    // underworld 不属 bgStyle 槽系（随 pickUnderground/地下带走 ug 渠道）,跳过。
+    if (kind !== 'underworld') {
+      const styleForKind: Partial<Record<typeof kind, number>> = {
+        corrupt: Corruption, crimson: Crimson, jungle: Jungle, snow: Snow,
+        hallow: Hallow, mushroom: Mushroom, desert: Desert, ocean: Ocean,
+        forest0: Forest1, forest1: Forest2, forest2: Forest3, forest3: Forest4,
+      };
+      const slot = styleForKind[kind];
+      if (slot !== undefined && this.bgStyle === slot) this.warmStyle(slot);
+    }
+    return v;
+  }
+
   /** 每帧状态推进：风格切换延迟 + alpha 渐变（UpdateBGVisibility ±0.05/帧，:63534/:63594） */
   update(world: World, scene: SceneFlags, dtMs: number,
     geom?: { centerTileX: number; topTileY: number; bottomTileY: number }) {
