@@ -28,6 +28,29 @@ const LEAF = TILE_BY_KEY['v_192_living_leaf_block']!;
 const LIVINGWOOD = TILE_BY_KEY['v_191_living_wood_block']!;
 const MAHOGANY_LEAF = TILE_BY_KEY['v_384_living_mahogany_leaves_block']!;
 
+
+/** IIII67 段级快照钩（诊断,常态零开销）：与 x86 rig JJHook.Snap 同名同位（ih_chest/ih_fnt/ih_ban）。 */
+function ihSnap(name: string, st: TileStore): void {
+  if (!ihLogOn()) return;
+  const cb = (globalThis as unknown as { __dgSegWatch?: (nm: string, s: TileStore) => void }).__dgSegWatch;
+  cb?.(name, st);
+}
+
+// ★IIIII65 单屋步骰 mark 挂点（dormant）：__swIhMark 未注册时零开销。
+// 与 x86 rig（/tmp/iii67-rig-src WorldGen.IslandHouse 的 JJHook.Mark）同标签同位：
+// stepA(3 骰头)/stepB_door/stepC_chest/FNT_OK(console 直印)/BAN——用于
+// FloatingIslandHouses pass 内步骤级骰账对拍。
+function ihLogOn(): boolean {
+  return typeof process !== 'undefined' && !!process.env.SW_I67IH;
+}
+function ihMark(tag: string): void {
+  if (!ihLogOn()) return;
+  const n = (globalThis as unknown as { __swRollCount?: () => number }).__swRollCount?.();
+  const g = globalThis as unknown as { __swIhLines?: string[] };
+  (g.__swIhLines ??= []).push(`${tag}|n=${n ?? -1}`);
+  console.log(`[IH-mark] ${tag}|n=${n ?? -1}`);
+}
+
 /** WorldGen.SolidTile(cs:42370):active && tileSolid && !tileSolidTop && !halfBrick && slope==0。
  *  与 TileCleanupPass.solidTile 同口径(tileSolidTop 近似为 platform;379 泡泡
  *  覆写在浮空岛上不会出现,省略)。供 I3 地板探测用。 */
@@ -74,6 +97,7 @@ function islandHouse(
   const dir = rng.next() < 0.5 ? -1 : 1;
   const halfW = rng.int(7, 11);
   const hgt = rng.int(5, 6);
+  ihMark(`IH|stepA|i=${i}|j=${j}|${dir},${halfW},${hgt}`);
   // 找地板(cs:79857-79868):探测列上找"wall>0 && active && SolidTile 且
   // type∉{192,191,384}(生命树叶/生命木/红木叶族)"的首行,取其上一格;
   // 不命中 floorY 保持传入 j(不是继续外推)。旧实现只看首个活性格,会把
@@ -117,7 +141,14 @@ function islandHouse(
       if (!st.inBounds(x, y)) continue;
       const idx = st.idx(x, y);
       if (st.wall[idx] === 0) {
-        st.type[idx] = 0; st.flags[idx] = 0;
+        // ★IIIII65（cs:79903-79914 挖空支逐句）：原版此处仅 active(false)+wall=82，
+        //   **不清 type**——壳填刚写入的日光板 202 作为非活性幽灵位残留
+        //   （实测 rig ih_chest 快照单屋 84 格）。该幽灵位被 IslandHouse 喷泉臂
+        //   `(type!=202)&&!active` 采样门直接消费（CELEB 岛 style6 使能本臂）：
+        //   JS 曾置零 ⇒ 采样从室内命中（att≈11）与 x86 穿过整片 202 幽灵带在外侧
+        //   落点（att=230）分叉 ⇒ 全屋骰流/横幅/后续岛头错位（#69 残差根因）。
+        //   类型归零由下游 Quick_Cleanup 等 pass 的原生语义负责，勿在本步代劳。
+        st.flags[idx] = 0;
         st.wall[idx] = 82;
       }
     }
@@ -136,7 +167,8 @@ function islandHouse(
     for (let dy = -2; dy <= 0; dy++) {
       if (!st.inBounds(doorX + dx, floorY + dy)) continue;
       const idx = st.idx(doorX + dx, floorY + dy);
-      st.type[idx] = 0; st.flags[idx] = 0;
+      // ★IIIII65（cs:79940-79947 门洞清空支）：仅 active(false)，同样不清 type。
+      st.flags[idx] = 0;
     }
   }
   // PlaceTile case10(cs:59882-59900)分支 A:!active(j-1)&&!active(j-2)
@@ -174,6 +206,7 @@ function islandHouse(
       }
     }
   }
+  ihMark(`IH|stepB_door|i=${i}`);
   // 对侧补柱(cs L48264-48273)：与壳填同款五连——active/liquid=0/type/wall=0/
   // halfBrick false/slope 0(cs:79969-79974)
   const pillarX = i + (halfW + 1) * -dir - dir;
@@ -197,16 +230,25 @@ function islandHouse(
   //   失败（返回 false）不重试不补写：原版 IslandHouse 对返回值同样不重试
   //   （cs:79999 裸调用），skyIslandHouseCount 照常自增（cs:80022）。
   const lootVid = [159, 65, 158, 2219][loot];
-  placeBuriedChest(st, rng, gs, chests, i, floorY - 3, { style: 13, loot: lootVid });
-  // ★IIIII21（cs:80543-80558）：islandStyle>0 → 岛上放喷泉（Place2xX 207×4 格 +
-  //   SwitchFountain frameY ±72 开态）。放置位 Next(-50,51)×Next(21) 二掷/轮，
-  //   前 5 万轮要求锚格「原非日光板」，两门全空手才落——break 无骰。
+  // ★IIIII65（cs:80001-80005）：chest 样式按 getGoodWorldGen 分支——FTW 走 style2
+  //   （Chest 帧域,非骰差面），其余（含 tenth）走 13。仅帧通道,零掷。
+  const chestStyle = gs.seedFlags.getGoodWorld ? 2 : 13;
+  placeBuriedChest(st, rng, gs, chests, i, floorY - 3, { style: chestStyle, loot: lootVid });
+  ihSnap('ih_chest', st);
+  ihMark(`IH|stepC_chest|i=${i}|fy=${floorY}`);
+  // ★IIIII21（cs:80543-80558）＋★IIIII65：islandStyle>0 → 岛上放喷泉。1458 风格
+  //   矩阵（cs:13156-13170）使 **tenthAnniversary 岛=style6** ⇒ CELEB 每岛必进本臂
+  //   （曾漏 ⇒ CELEB #69 dT207>0×24 三岛喷泉整缺 + 其后横幅/下一屋骰流错位级联；
+  //   drank style1/3 与 FTW getGood/remix style4/5 同臂）。放置位
+  //   Next(-50,51)×Next(21) 二掷/轮，前 5 万轮要求锚格「原非日光板」，
+  //   两门全空手才落——break 无骰；Place2xX 失败（锚腿/净空不过）不 break 续采样。
   if (islandStyle > 0) {
     for (let attempt = 0; attempt < 100000; attempt++) {
       const fx = i + rng.int(-50, 50);                   // num18 = Next(-50,51)
       const fy = floorY + rng.int(0, 20);                // num19 = num13 + Next(21)
       const okSkip202 = attempt >= 50000 || !st.inBounds(fx, fy) || sheetAt(st, fx, fy) !== 202;
       if (okSkip202 && !tileActiveAt(st, fx, fy)) {
+        if (ihLogOn()) console.log(`[IH-mark] FNT_OK|i=${i}|x=${fx}|y=${fy}|att=${attempt}`);
         if (placeFountain2xX(st, fx, fy, islandStyle)) break;
       }
     }
@@ -247,6 +289,7 @@ function islandHouse(
   }
   const bannerX = dir > 0 ? i - halfW : i + halfW;
   placeFurn(st, bannerX, j1 + 1, BANNER, rng.int(7, 9), 'top', 1, false);
+  ihMark(`IH|BAN|i=${i}`);
   // ★IIIII21（cs:80630-80653）：islandStyle==1（沙漠云岛）→ 岛面棕榈丛
   //   TryGrowingTreeByType(323)=GrowPalmTree；Next(3,6) 目标数、每轮二掷采样
   //   （Next(-50,51)×Next(-10,21)），成功判定=样本格转活（棕榈写入）。
@@ -264,8 +307,12 @@ function islandHouse(
   return true; // 建成,消耗一个 skyIslandHouseCount 槽位(I4)
 }
 
-/** Place2xX（WorldGen.cs:40056）type207 支：2 列×4 格喷泉；frameX=style*36(+18)、
- *  frameY=row*18，SwitchFountain（:51599）随后对全部 frameY<72 格 +72＝开态带。 */
+/** Place2xX（WorldGen.cs:40064）type207 支：2 列×4 格喷泉；frameX=style*36(+18)、
+ *  frameY=num2+row*18（num2=0）。★IIIII65（cs:80559-80562）：放置成功后原版再调
+ *  SwitchFountain(:51607) 对 2×4 盒内 type207 活性格 frameY<72 → +72（开态带）——
+ *  净空检查已保证八格全新 ⇒ 带翻后 =72+row*18,与直写等价（骰零）;若未来出现
+ *  与既有喷泉相邻覆写的几何则须换字面两段式。锚腿 SolidTile2(x,y+1)/(x+1,y+1)
+ *  (:70497)=active&&solid&&!half&&!slope。*/
 function placeFountain2xX(st: TileStore, x: number, y: number, style: number): boolean {
   const FOUNTAIN = TILE_BY_KEY['v_207_water_fountains']!;
   const n3 = 4;

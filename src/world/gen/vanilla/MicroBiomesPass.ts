@@ -828,7 +828,12 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
     const wl = st.inBounds(ox, oy) ? st.wall[st.idx(ox, oy)] : -1;
     if (wl === 216 || wl === 187) { mbProbe('MS2wall', () => wl); return false; } // 地下沙漠墙门禁(cs:17-20)
   }
-  const barType = [gs.oreTiers.gold, gs.oreTiers.silver, gs.oreTiers.iron, gs.oreTiers.copper][rng.int(0, 3)];
+  // ★IIII71b：cs=Utils.SelectRandom 按 GenVars.*Bar 重置终值映射矿 tile
+  // （MiningExplosivesBiome.cs:36-40:Bar==19?8:169 / ==21?9:168 / ==22?6:167 /
+  //  ==20?7:166）——GenVars.*Bar 不随 Shinies 翻带改写，改读 savedOreBars 映射的
+  // savedOreTiers 短 tile 面（普通世界两值恒等）。
+  const so = gs.savedOreTiers ?? gs.oreTiers;
+  const barType = [so.gold, so.silver, so.iron, so.copper][rng.int(0, 3)];
   const dir = rng.next() * 2 - 1; // cs:22
   // Find(origin, Right(40)|Left(40) + Conditions.IsSolid) → origin(cs:23-26)
   //   ★Searches.Left/Right/Down 的 i 从 0 起(Searches.cs:15/35/55)——**包含起点格**;
@@ -1545,6 +1550,8 @@ export class DeadMansChestBiome {
     for (const ch of this.chestList) {
       candSlot++;
       const { x, y } = ch;
+      // IIII67：x86 DmLog 'CHEST slot=' 同格式（全箱枚举,非金箱也打行）
+      if (this.__swLogChest !== false) segProbe(`CHEST slot=${candSlot} ${x},${y} t=${mbSheetOf(st.type[st.idx(x, y)])} fx=${st.frameX[st.idx(x, y)]} fy=${st.frameY[st.idx(x, y)]} act=${(st.flags[st.idx(x, y)] & 1)}`);
       if (!st.inBounds(x, y)) { segProbe(`CAND ${x},${y} good=False`); continue; }
       const i = st.idx(x, y);
       // 金箱锚点:type 21 + style 1 + 2×2 左上角(frameX%36==0 且 /36==1 且 frameY==0)
@@ -1557,8 +1564,10 @@ export class DeadMansChestBiome {
       this.findDartTrapSpots(px, py);
       // III7 探针:CAND.good 仅反映 IsAGoodSpot(x86 同口径);CanPlace 结果另记
       segProbe(`CAND ${x},${y} good=True`);
-      const good = this.areThereEnoughTraps()
-        && canPlaceStructure(this.gs, { x0: x, y0: y, x1: x + 1, y1: y + 1 }, 10, st, forbid);
+      const en = this.areThereEnoughTraps();
+      const cp = canPlaceStructure(this.gs, { x0: x, y0: y, x1: x + 1, y1: y + 1 }, 10, st, forbid);
+      segProbe(`GATE slot=${candSlot} ${x},${y} en=${en ? 1 : 0} cp=${cp ? 1 : 0}`);
+      const good = en && cp;
       if (good) {
         out.push({ x, y });
         segProbe(`ADDED slot=${candSlot} ${x},${y}`);
@@ -2138,6 +2147,10 @@ function shrineCanPlace(st: TileStore, gs: GenState, area: Rect, padding: number
 function placeEnchantedSwordShrine(
   st: TileStore, rng: RNG, gs: GenState, ox: number, oy: number,
 ): boolean {
+  // IIII67：x86 EnchantedSwordBiome 'SWD *' 阶段账同构镜像（rc=mbDraws 累计,零钩无开销）
+  const __mbD = (): number => ((globalThis as unknown as { __swMbDraws?: () => number }).__swMbDraws?.() ?? 0);
+  const __swB = __mbD();
+  const __p = (nm: string): void => { segProbe(`SWDS ${nm} rc=${__mbD() - __swB}`); };
   // ① 50×50 泥+石计数门(cs:24-30):TileScanner(0,1) 之和 < 1250 → 拒(errorWorld 625 不建模)
   let dirtStone = 0;
   for (let dx = 0; dx < 50; dx++) {
@@ -2180,6 +2193,7 @@ function placeEnchantedSwordShrine(
   const point2X = ox, point2Y = oy + 30;
   // ⑥ num5 = 0.8 + NextDouble()*0.5(cs:65)——在 canPlace 之前掷
   const num5 = 0.8 + rng.next() * 0.5;
+  __p('num5');
   // ⑦ structures.CanPlace ×2(cs:66-73):洞穴盒(pad 0)+ 竖井盒(pad 2)
   const rect1: Rect = {
     x0: pointX - Math.trunc(20 * num5), y0: pointY - 20,
@@ -2217,6 +2231,7 @@ function placeEnchantedSwordShrine(
       }
     }
   }
+  __p('slime');
   // ⑨ 土丘(cs:76):Mound(14,14) + Blotches(2,1,0.8) + SetTile(0) → shapeData2
   //   SetTile(Actions.cs:221-231)= Clear(~(Wiring|Actuator))(连墙带液全清)+ type + active
   const mound = new ShrineShape();
@@ -2238,6 +2253,7 @@ function placeEnchantedSwordShrine(
       }
     }
   }
+  __p('mound');
   // ⑩ shapeData.Subtract(shapeData2, point, point2)(cs:77)——土丘格从洞穴形状剔除
   mound.each((dx, dy) => cave.remove(dx + (point2X - pointX), dy + (point2Y - pointY)));
   // ⑪ InnerOutline 铺草(cs:78):8 邻域任一不在形状内 → 草(ModShapes.cs:88-117)
@@ -2263,6 +2279,7 @@ function placeEnchantedSwordShrine(
     // ★BBBBBB：SetFrames(frameNeighbors:true) 五连（cs:78）——同 ⑨ 补掷
     genFrameNeighbors(st, rng, px, py, 'setTile');
   }
+  __p('outline');
   // ⑫ 灌水(cs:79):RectangleMask(-40,40,0,40) + IsEmpty + SetLiquid()(默认 水/满)
   //   ——SetLiquid(Actions.cs:int type=0, byte value=255)= 全水。旧实现以为"排水",
   //     实为灌满水潭(Parameters 默认值坑)
@@ -2274,6 +2291,7 @@ function placeEnchantedSwordShrine(
     if (st.flags[i]) return;                                // IsEmpty
     st.liquid[i] = 255; st.liquidType[i] = LIQUID_TYPE.WATER;   // +1 编码:水=1
   });
+  __p('liquid');
   // ⑬ 花墙 68 + 藤蔓(cs:80):Chain(PlaceWall(68), OnlyTiles(2), Offset(0,1),
   //    ActionVines)——★BBBBBB：**同一格流内顺序执行**(每格 PlaceWall→门→vines)，
   //    曾拆两个 each=先全墙后全藤，vines 长度掷(int(3,5))与墙帧掷(Next(0,3))交错
@@ -2300,9 +2318,13 @@ function placeEnchantedSwordShrine(
       st.type[vi] = FLOWER_VINES; st.flags[vi] = 1;
     }
   });
+  __p('wallvines');
   // ⑭ 入口竖井(cs:82-87):ChanceOfEntrance 1/3;Rectangle(1,h)+Blotches(2,0.2)+
   //    SkipTiles(191,192)+ClearTile → Expand(1)+OnlyTiles(53)+SetTile(397)(沙硬化壳)
-  if (rng.next() <= SWORD_CHANCE_ENTRANCE) {
+  // ★IIIII67（1458 cs:83）：`(NextDouble() <= _chanceOfEntrance || tenth)`——C# 短路：
+  //   掷恒耗一次,tenth 世界恒进门（竖井无条件雕刻）。曾漏 tenth 支。
+  const __entD = rng.next();
+  if (__entD <= SWORD_CHANCE_ENTRANCE || !!gs.seedFlags.tenthAnniversary) {
     const shaft = new ShrineShape();
     const sy0 = resultY + 10;
     const syH = oy - resultY - 9;
@@ -2349,6 +2371,7 @@ function placeEnchantedSwordShrine(
   // ⑮ 土丘剑(cs:89-94):ChanceOfRealSword 门(默认 1.0 恒真→187 style17;
   //    否则 186 style15)。PlaceTile 锚 = (point2.X, point2.Y-15) 3×2 底行左锚
   const realSword = rng.next() <= SWORD_CHANCE_REAL;
+  __p('shaft');
   {
     // ★CCCCC：剑冢剑改走 PlaceTile case 186/187 全链（Place3x2 门+双 SquareTileFrame）
     //   ——曾裸写 3×2（门与帧全跳过）：Place3x2 区失活/地面门败时原版不落剑，
@@ -2358,6 +2381,7 @@ function placeEnchantedSwordShrine(
     const sx = point2X, sy = point2Y - 15;
     place3x2MB(st, rng, sx, sy, swordTile, swordStyle);
   }
+  __p('swordtile');
   // ⑯ 土丘表面草(cs:96):Offset(0,-1)→OnlyTiles(2)→Offset(0,-1)→ActionGrass
   //    (ActionGrass.cs:14-22):目标格与上格皆空 → PlaceTile(SelectRandom{3,73})
   //    ★BBBBBB：PlaceTile 掷镜像（van PT 织入实测：SelectRandom=Next(2)；**仅
@@ -2401,6 +2425,7 @@ function placeEnchantedSwordShrine(
     if (pickShort && st.liquid[pi]! > 0) return;
     st.setTileSilent(px, py, pickShort ? SHORT_PLANTS : TALL_PLANTS, frameX, 0);
   });
+  __p('grass');
   // ⑰ structures.AddProtectedStructure(rectangle, 10)(cs:98/EnchantedSwordBiome.cs:110)
   //   ——pad 10 入全局保护图（GenState.protectedRects,addProtectedStructure 内部 Inflate）
   addProtectedStructure(gs, rect1, 10);

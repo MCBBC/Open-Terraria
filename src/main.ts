@@ -432,7 +432,7 @@ window.addEventListener('keydown', (e) => {
             : '地图点击传送已禁用');
         });
       } else {
-        game.teleportToMouse();
+        // 非组合 F10（鼠标位置传送）已禁用（2026-08-28 用户要求）——原版也无此键
       }
       break;
   }

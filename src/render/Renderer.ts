@@ -4598,9 +4598,12 @@ export class Renderer {
   private static readonly DRAW_NUM47_OVERRIDE: Record<number, number> = {
     555: -5, 556: -5, 557: -5,
     561: -8, 562: -8, 563: -8,
+    566: -2, 567: -2,   // DD2 骷髅头冠(:23438-23441,2026-08-30 审计补)
     568: -3, 569: -3,
     570: -2, 571: -2,
     572: -4, 573: -4,
+    578: -2,
+    620: -9,            // case 620(:23561-23563)+origin 平移 -4·sdir
   };
 
   private static readonly HB_ADD_H: Record<number, number> = {
@@ -5540,6 +5543,7 @@ export class Renderer {
           : idA === 490 ? 4
           : idA === 484 ? 2
           : idA === 483 ? 14
+          : idA === 581 ? -6    // num46=-6(Main.cs:23242-23244,2026-08-30 审计补)
           : (idA === 478 || idA === 606 || idA === 612 || idA === 613) ? -2
           : (idA === 469 && e.ai2 === 1) ? 14
           : idA === 692 ? (e.wet ? 10 : 6)
@@ -5566,6 +5570,8 @@ export class Renderer {
         const snapMount = e.vanillaId === 416 && e.master && !e.master.dead ? e.master : null;
         ctx.translate(snapMount ? snapMount.cx : e.cx,
           snapMount ? snapMount.y + snapMount.h : e.cy);
+        // 620 origin 覆写的净位移(Main.cs:23562 origin.x -= 4·sdir ⇒ 纹理右移 4·sdir·scale)
+        if (e.vanillaId === 620) ctx.translate(4 * (e.facing >= 0 ? 1 : -1) * (e.vanilla?.scale ?? 1) * e.vanillaScale, 0);
         // 旋转族:整体随自转角旋转(原版 npc.rotation;朝向翻转不适用)。
         // 4=克眼 visAngle;35/68=骷髅王头 spin;125/126=双子;127-131=Prime 头+部件;134-136=毁灭者链
         const rotId = ROTATION_NPC.has(e.vanillaId);

@@ -225,7 +225,8 @@ const STATUE_349 = statueTileKey(349);
 /** ★PPPPP 导出：MarblePileWithStatues 的 Statue（cs:10547）复用同放置模型 */
 export { STATUE_105, STATUE_349 };
 const TRAP = statueTileKey(135);   // cs:4451 PlaceTile(135)——超级飞镖陷阱（曾误 137）
-const TRAP_162 = statueTileKey(162);
+// ★IIII71b：TRAP_162(旧 statueTileKey(162)) 已删除——薄冰 SW 键不带 v_ 前缀致其
+// 恒为 null、162 基底特判全失效（本批 #59 案定罪，见 placeStatueTrap 内注释）。
 const WIRE_RED = TileStore.WIRE_RED;
 
 /** PlaceStatueTrap(cs:4436-4462)：±10 盒内找"空格+下方 SolidTile2 且非冰(162)"位放
@@ -236,26 +237,44 @@ const WIRE_RED = TileStore.WIRE_RED;
  *  ②PlaceTile case 135 尾 SquareTileFrame(tx,ty)（cs:60162-65）——放置期组拆
  *  级联（邻格 165/187 族惰性帧校验击杀）；③放置校验=PlaceTile 后回读
  *  tile2.active()&&type==135（cs:4453）才拉线返回。 */
+/** ★IIII71b 取证钩（global 门控零开销常驻）：placeStatueTrap 入口/候选判定/结果
+ *  台账。#59 Buried_Chests 残差定位用（DRUNK 51620200），正常生成不受影响。
+ *  形参：phase in / verdict(x,y,tx,ty,why) / chosen(tx,ty) / none */
+type I77StatueEv = (phase: 'in' | 'verdict' | 'chosen' | 'none', x: number, y: number, tx?: number, ty?: number, why?: string) => void;
+function i77Stat(): I77StatueEv | null { return (globalThis as { __swI77Trap?: I77StatueEv }).__swI77Trap ?? null; }
+
 export function placeStatueTrap(st: TileStore, rng: RNG, x: number, y: number, gs?: GenState): void {
   // ★R3-10 同族（W57:4409-4411）：actuallyNoTrapsForRealIMeanIt → return（与 !InWorld 同门）
+  const ev = i77Stat();
+  if (ev) ev('in', x, y);
   if (gs?.seedFlags.actuallyNoTraps) return;
-  if (!st.inBounds(x, y) || x < 20 || x > st.w - 21 || y < 20 || y > st.h - 21 || !TRAP) return;
+  if (!st.inBounds(x, y) || x < 20 || x > st.w - 21 || y < 20 || y > st.h - 21 || !TRAP) {
+    if (ev) ev('none', x, y);
+    return;
+  }
   for (let i = -10; i <= 10; i++) {
     for (let j = -10; j <= 10; j++) {
       const tx = x + i, ty = y + j;
       if (!st.inBounds(tx, ty + 1)) continue;
       const ci = st.idx(tx, ty), bi = st.idx(tx, ty + 1);
-      if (st.flags[ci]) continue;                                   // !tile2.active()
+      if (st.flags[ci]) { if (ev) ev('verdict', x, y, tx, ty, 'occupied'); continue; } // !tile2.active()
       // SolidTile2(tile)（cs:70178）：active && 生成期 tileSolid && slope==0 && !halfBrick && !inActive
       if (!st.flags[bi] || st.half[bi] || st.slope[bi] !== 0 || ((st.wire[bi] >>> 5) & 1) === 1
-        || !vanGenSolidType(st.type[bi])) continue;
-      if (st.type[bi] === TRAP_162) continue;                       // tile.type != 162（冰特判）
+        || !vanGenSolidType(st.type[bi])) { if (ev) ev('verdict', x, y, tx, ty, 'base-not-solid2'); continue; }
+      // tile.type != 162（冰特判）——★IIII71b 定罪修复：旧用 statueTileKey(162) 取
+      // SW id，但薄冰(sheet162)的 SW 键是「thin_ice」不带 v_ 前缀 → statueTileKey
+      // 返回 null → 此门恒失效。DRUNK(51620200) #59 Buried_Chests 实锤：小屋雕像
+      // 陷阱锚 (1322,633) 的扫描列左端整片 162 基底全被 JS 收卡（首中 (1312,629)
+      // 的 base=(1312,630)=162），x86 按 cs:4417 谓词续扫到 (1316,626)（base=60）
+      // ——残差 T135>62×1/T0>135×1+act×1 全家。改按 SHEET 直查。
+      if (SHEET[st.type[bi]] === 162) { if (ev) ev('verdict', x, y, tx, ty, 'base-162'); continue; }
       // Place1x1 cs:45213 机关门：底座是 Boulders 族 → 不落陷阱（续扫）
-      if (BOULDERS.has(SHEET[st.type[bi]])) continue;
+      if (BOULDERS.has(SHEET[st.type[bi]])) { if (ev) ev('verdict', x, y, tx, ty, 'boulder-base'); continue; }
       st.setTileSilent(tx, ty, TRAP, 0, 0);
       statueFrameSweep(st, rng, tx, ty);                            // PlaceTile(135) 尾九宫
       // cs:4453：放置成功（tile2 活性且 type==135）才拉线返回，否则续扫
-      if (!(st.flags[ci] && st.type[ci] === TRAP)) continue;
+      if (!(st.flags[ci] && st.type[ci] === TRAP)) { if (ev) ev('verdict', x, y, tx, ty, 'placereject'); continue; }
+      if (ev) ev('chosen', x, y, tx, ty);
       // WireLine(new Point(x,y), new Point(tx,ty))：横段沿雕像 y、竖段沿陷阱 x
       const x0 = Math.min(x, tx), x1 = Math.max(x, tx);
       const y0 = Math.min(y, ty), y1 = Math.max(y, ty);
@@ -264,6 +283,7 @@ export function placeStatueTrap(st: TileStore, rng: RNG, x: number, y: number, g
       return;
     }
   }
+  if (ev) ev('none', x, y);
 }
 
 /** Statues pass 主体。须在洞穴/生物群系成形后调用(原版序:SettleLiquids 后、地下屋前) */

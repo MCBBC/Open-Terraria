@@ -5,7 +5,13 @@
 import { Lang } from '../i18n/Lang';
 import { UISfx } from '../vui/UISfx';
 import { options } from '../core/Options';
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'hair' | 'quest' | 'plant' | 'happiness' | 'status' | 'close';
+// 2026-08-30 对齐 NPCInteractions.Initialize 全注册表（:489-531）：新增
+// shopDecor(画家装饰店 25) / help+craft(向导 22 GuideTip·GuideReverseCrafting)
+// / music(派对女孩 208) / advice(酒馆老板 550 TavernkeepAdvice) / stardew(树妖
+// Joja 净化独立按钮,ShowExclamation) / home(无家 NPC RequestHome,ShowExclamation)
+export type NpcButtonId = 'shop' | 'shopDecor' | 'heal' | 'curse' | 'collect' | 'reforge'
+  | 'hair' | 'quest' | 'plant' | 'happiness' | 'status' | 'help' | 'craft' | 'music'
+  | 'advice' | 'stardew' | 'home' | 'pet' | 'close';
 
 /** 心情报告条目（Game 侧已做 l10n 渲染的成品文案 + 价格乘子） */
 export interface HappinessInfo {

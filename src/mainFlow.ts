@@ -302,6 +302,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onNpcDialog: (name, chat, buttons, portrait, vanillaId) => ui.showNpcDialog(name, chat, buttons, portrait, vanillaId),
       onNpcDialogClose: () => ui.closeNpcDialog(),
       onReforgeOpen: () => ui.showReforge(),
+      // 向导「制作」（NPCChatText_GuideReverseCrafting :40723）：开背包 + 反查浮层
+      onGuideCraftOpen: () => { ui.openInventory(); ui.openGuideSearch(); },
       onNpcShop: (title, items, copper, happinessMul, medals) => ui.showNpcShop(title, items, copper, happinessMul, medals),
       // NPC 快乐度详情浮层（ReportHappiness.Interact）
       onNpcHappiness: (info) => ui.showNpcHappiness(info),

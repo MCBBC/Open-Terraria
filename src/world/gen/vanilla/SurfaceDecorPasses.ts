@@ -623,8 +623,13 @@ function oreHelper(st: TileStore, x: number, y: number): void {
 
 /** OrePatch（cs:10577）1:1：草面露头矿脉（先竖走丝带后随机游走团） */
 function orePatch(st: TileStore, rng: RNG, gs: GenState, X: number, Y: number): boolean {
-  let type = gs.oreTiers.copper;
-  if (rng.int(0, 2) === 0) type = gs.oreTiers.iron;                    // Next(3)==0 → 铁
+  // ★IIII71b：cs=OrePatch(cs:10601) `type=(ushort)SavedOreTiers.Copper`——重置期
+  // 终值、不随 OresAndShinies 的 drunk 带翻（那只改 GenVars.copper）改写。此前
+  // JS 读动态面 ⇒ DRUNK 世界深层铜带翻成锡后，地表矿 patch 全体错矿种
+  // （#74 Surface_Ore_and_Stone T7>166×71 实锤）。改读 savedOreTiers 快照。
+  const so = gs.savedOreTiers ?? gs.oreTiers;
+  let type = so.copper;
+  if (rng.int(0, 2) === 0) type = so.iron;                             // Next(3)==0 → 铁
   let num = X, num2 = Y;
   while (!solidTile(st, num, num2)) {
     num2++;

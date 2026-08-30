@@ -138,17 +138,26 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
         // 中央回避带：num19 = drunk?100:200 仅猩红分支（cs:14018-14020）；腐化分支
         // num50 恒 200（cs:14362）——drunk 不放松（非对称，原版如此）。
         // ★IIIII46（cs:14069/14395）：tenth&&!dontStarve 整段跳过（邪恶带允许压中线）。
+        // ★IIIII62（cs:14067-14106 / 14393-14432）：整个「中带+地下沙漠+雪带+丛林带」
+        //   四类拒绝检查在原版被一道**外层门 `!remixWorldGen`** 包住——REMIX 世界邪恶
+        //   组完全不避开中带/地下沙漠/雪原/丛林（含相应带收缩 mutation，全部不发生）。
+        //   JS 此前把四类检查常开，只在 tenth 臂部分放行 ⇒ remix 世界组位置整族错位
+        //   （mile8 #29 首差 W=223311；本刀后 #29 红坐标由右岸 (2925,201) 移到左岸，
+        //    即误拒解除后的下一族错位群）。
         const centralBand = which && drunk ? 100 : 200;
         const mid = w / 2;
-        if (!tenthNoDS
-          && (Math.abs(cx - mid) < centralBand || Math.abs(zLo - mid) < centralBand || Math.abs(zHi - mid) < centralBand)) ok = false;
-        const ud = gs.undergroundDesert;
-        if (ud && ((cx > ud.x0 && cx < ud.x1) || (zLo > ud.x0 && zLo < ud.x1) || (zHi > ud.x0 && zHi < ud.x1))) ok = false;
-        if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }   // cs:14006-14010（先雪后林）
-        // ★UUUUUU（cs:14090 `(!notTheBees || remix)` 同款于 cs:14416 猩红侧）：
-        //   NTB 跳过丛林带收缩——蜂蜜世界邪恶带不避让丛林（泥带全域化）
-        if (!(gs.seedFlags.notTheBees && !gs.seedFlags.remix)
-          && zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
+        if (!remixFlag) {
+          if (!tenthNoDS
+            && (Math.abs(cx - mid) < centralBand || Math.abs(zLo - mid) < centralBand || Math.abs(zHi - mid) < centralBand)) ok = false;
+          const ud = gs.undergroundDesert;
+          if (ud && ((cx > ud.x0 && cx < ud.x1) || (zLo > ud.x0 && zLo < ud.x1) || (zHi > ud.x0 && zHi < ud.x1))) ok = false;
+          if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }   // cs:14096-14101（先雪后林）
+          // ★UUUUUU（cs:14102 `(!notTheBees || remix)` 同款于 cs:14426 猩红侧）：
+          //   NTB 跳过丛林带收缩——蜂蜜世界邪恶带不避让丛林（泥带全域化）。
+          //   注：remix 已被外层门短路，此处门只剩 NTB 分量。
+          if (!gs.seedFlags.notTheBees
+            && zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
+        }
       }
       gs.evilZones.push({ x0: zLo, x1: zHi });
       __mark?.(`zone${g}:${zLo}-${zHi}:cx${cx}`);

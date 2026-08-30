@@ -29,3 +29,5 @@
 /mobile/twa/app/build
 /mobile/twa/release
 /mobile/twa/.gradle
+/mobile/gecko-shell
+/js-snaps-*

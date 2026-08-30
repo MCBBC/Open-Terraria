@@ -510,6 +510,28 @@ export function runDungeonPass(
     return true;
   }
 
+  /** ★IIIII65：SpreadWallDungeon 专用 SolidTile（WorldGen.cs:70650-70666 全项版）。
+   *  与 dgSolid 的差异=补齐 `!halfBrick() && slope()==0` 两判项（cs:70664-70665），
+   *  以及 null-tile→true 怪癖（BFS 的 InWorld(item,1) 已挡外圈,tile 恒非 null,省略）。
+   *  ★定罪记录（CELEB #32 四格 W99↔8 @ (3519,185)(3490,186)(3520,186)(3489,187)）：
+   *  塔顶檐角 type43 帽石带 s3/s4 坡位；原版把坡位/半砖判【非实心】⇒ 洪水穿坡面
+   *  继续传播并涂到角柱（写 wall=num 且向四邻派发）；JS dgSolid 漏两判项 ⇒ 坡帽
+   *  石被判实心 → 只"else-if 涂自身不派发"，角柱永不入队 → 留基墙 8。
+   *  反演重放实证：dungeonL..dungeonD 双侧八通道逐字节相等，dungeonW 时点仅此四格
+   *  99>8 分叉、其下游全链零差——分叉源唯一收敛于本谓词。★只在本洪水改用全项版,
+   *  不动共享 dgSolid（七链满绿由既有谓词认证,域外翻转面不可证）。 */
+  function dgSpreadSolid(x: number, y: number): boolean {
+    if (!st.inBounds(x, y)) return false;
+    const ti = st.idx(x, y);
+    if (!st.flags[ti]) return false;                                 // !active()
+    const sheet = TILE_DEFS[st.type[ti]]?.vanilla?.sheet ?? -1;
+    if (!genSolidType(st.type[ti]) || DG_SOLID_TOP.has(sheet)) return false;   // tileSolid/!solidTop
+    if (st.half[ti] !== 0 || st.slope[ti] !== 0) return false;       // cs:70664 !halfBrick() && slope()==0
+    if ((st.wire[ti] >>> 5) & 1) return false;                       // !inActive()（cs:70665）
+    if (sheet === 481 || sheet === 482 || sheet === 483) return false;         // SetCrackedBrickSolidity(false)
+    return true;
+  }
+
   // 锚腿判定（TileObject.cs:376-442 AnchorBottom 链，chest 21/467；sheet 空间）：
   // ①SolidTile：tileSolid&&!solidTop&&!noAttach&&!anchorInvalid（FlattenAnchors=false 须
   //   blockType()==0——pass 内无半砖/坡，恒真）；②SolidWithTop|Table：平台/solidTop/桌
@@ -1195,7 +1217,11 @@ export function runDungeonPass(
       if (lastHallX !== z2x || lastHallY !== z2y) done = true;
     }
     const n13 = w * 0.25, n14 = w * 0.75;
-    const f13 = py < rock + 100.0;
+    // ★IIIII70 REMIX（1457 LegacyDungeonHall.cs:518-523）：remix 下 flag13 的下压阈值
+    //   从 rockLayer+100 换成 Main.worldSurface+100——remix「反向体」里世界 content
+    //   域浅表化（worldSurface=337/rockLevel=769 @ seed 1138154190），未接此支时走廊
+    //   一直被压向下越带，remix 地牢布局整体改向（mile8 #32 T41 大域首差根因之一）。
+    const f13 = py < (gs.seedFlags.remix ? ws : rock) + 100.0;
     const f14 = px < w / 2 && px > n13;
     const f15 = px > w / 2 && px < n14;
     // ★D2 残留偏差（2026-08-13 复核）：原版该 else-if 链只写 zero=(num2,0)/zero=(0,num2)
@@ -1260,7 +1286,11 @@ export function runDungeonPass(
       else if (sdX < 0 && px < 100) num3 = 0;
       else if (sdY > 0 && py >= num6) num3 = 0;
       else if (sdY < 0 && py < 100) num3 = 0;
-      else if (sdY < 0 && py < rock + 50.0) num3 = 0;
+      // ★IIIII70 REMIX（1457 LegacyDungeonHall.cs:720-727）：上爬走廊截停界 remix 支
+      //   =(Main.rockLayer+Main.worldSurface)/2（普通支 rockLayer+50 在后）——remix
+      //   地牢爬升到中带即止，是「反向体」布局的第二个门。
+      else if (gs.seedFlags.remix && sdY < 0 && py < (rock + ws) / 2.0) num3 = 0;
+      else if (!gs.seedFlags.remix && sdY < 0 && py < rock + 50.0) num3 = 0;
       num3--;
       const x0 = Math.max(0, Math.min(w - 1, Math.trunc(px - nnum - 4.0 - hrn(6))));
       const x1 = Math.max(0, Math.min(w - 1, Math.trunc(px + nnum + 4.0 + hrn(6))));
@@ -3308,7 +3338,7 @@ export function runDungeonPass(
         if (entExists && entBounds.contains(p[0], p[1])) {
           if (st.wall[ti] !== wall) { if (m) m.rjOther++; continue; }
         } else if (st.wall[ti] !== wall) { if (m) m.rjOther++; continue; }
-        if (!dgSolid(p[0], p[1])) {
+        if (!dgSpreadSolid(p[0], p[1])) {          // ★IIIII65：cs:70650 全项 SolidTile（含 half/slope 判项）——原误用窄化版 dgSolid
           st.wall[ti] = wallType;
           if (m) m.ch++;
           for (const q of [[p[0] - 1, p[1]], [p[0] + 1, p[1]], [p[0], p[1] - 1], [p[0], p[1] + 1]] as Array<[number, number]>) {
@@ -3575,8 +3605,16 @@ export function runDungeonPass(
     if (num10 > 0) dgLoot.push(num10);
     // ★BBBBB：surface 支门 = flag23 && (flag0 || flag6)（WG.cs:36280）——flag0=地表箱
     //   标记（chestStyle==0）。曾 && false 恒假。
-    const surf = num7 < ws + 25 && flag0;
-    const gold = num7 < rock;
+    // ★IIIII70 REMIX（1457 WorldGen.cs:36740-36745）：flag23 的 remix 覆写——
+    //   阈值从 worldSurface+25 换成 (rockLayer+2*(maxTilesY-350))/3（反向体 content
+    //   域的「地表」翻到下方）；同段 :37020-37024 中深支判定在 remix 下取
+    //   `num7>rockLayer && num7<maxTilesY-250`（与普通支互补）、:37322 深支条件补
+    //   `(remix&&(style==7||style==14))`。REMIX 地牢宝箱因此走【深/地狱】支而非金支，
+    //   战利品掷骰流位整体平移——mile8 REMIX #32 首段级联（C→I→T→F→Pa→Ba 全族
+    //   displaced）根因。本 pass flag6(活木墙 244)/flag11(848/857/934) 恒假不建。
+    const f23 = gs.seedFlags.remix ? num7 >= (rock + 2 * (h - 350)) / 3.0 : num7 < ws + 25;
+    const surf = f23 && flag0;
+    const bandMid = gs.seedFlags.remix ? (num7 > rock && num7 < h - 250) : num7 < rock;
     if (surf) {
       if (num10 > 0) prefixRolls(num10);
       else rn(10);
@@ -3596,7 +3634,7 @@ export function runDungeonPass(
       if (rn(2) === 0) { rn(2); rn(11); }
       if (rn(2) === 0) ri(10, 29);                   // 72 金币 stack=Next(10,30)（cs:36535）
       if (rn(2) === 0) ri(50, 99);                   // 9 铜币 stack=Next(50,100)（cs:36541）
-    } else if (gold) {
+    } else if (bandMid) {
       if (num10 > 0) {
         prefixRolls(num10);
         if (flag9 && !flag10) {
@@ -3620,7 +3658,10 @@ export function runDungeonPass(
       if (rn(3) !== 0) rn(5);
       if (rn(2) === 0) rn(11);
       if (rn(2) === 0) rn(40);
-    } else if (num7 < h - 250) {
+    // ★IIIII70：深支条件补 remix 外延——`(remix&&(chestStyle==7||chestStyle==14))`
+    //   （1457 WorldGen.cs:37322）。REMIX 下中深支条件反转为 y∈(rockLevel,h-350 帽…)
+    //   即 y>rockLevel 段才进金支，本带承接 rock 以上余量。
+    } else if (num7 < h - 250 || (gs.seedFlags.remix && (num9 === 7 || num9 === 14))) {
       if (num10 > 0) {
         prefixRolls(num10);
         // flag2（冰）/flag3（沙）地牢箱恒 false → 两段掷骰不触发（cs:36846-36858）
@@ -3697,6 +3738,9 @@ export function runDungeonPass(
         if (n3 <= 0) break;
         const x = ri(bounds.L, bounds.R - 1);
         const y = ri(Math.trunc(ws), bounds.B - 1);
+        // ★IIIII70 对账仪（SW_DG_BCTRACE）：与 rig MARK|bcA/bcR 同位同格式
+        const bcT = typeof process !== 'undefined' && !!process.env.SW_DG_BCTRACE;
+        if (bcT) console.log(`MARK|bcA|i=${i}|${x},${y}|rc=${dgMainRolls}`);
         if ((entExists && entBounds.contains(x, y)) || !isDW(wallAt(x, y)) || actAt(x, y) !== 0) continue;
         let chestTile = CHEST, mainItem = 0, chestStyle = 0;
         switch (i % numChests) {
@@ -3712,6 +3756,7 @@ export function runDungeonPass(
             break;
         }
         flag = dgAddBuriedChest(x, y, mainItem, chestStyle, chestTile);
+        if (bcT) console.log(`MARK|bcR|i=${i}|st=${chestStyle}|${flag ? 'OK' : 'FAIL'}|rc=${dgMainRolls}`);
       }
     }
   }
@@ -4163,7 +4208,11 @@ export function runDungeonPass(
       ncount++;
       const x = ri(bounds.L, bounds.R - 1);
       const y = ri(Math.trunc(ws), bounds.B - 1);
-      if (isDW(wallAt(x, y)) && placeTrap0(x, y)) ncount = 1000;
+      if (isDW(wallAt(x, y)) && placeTrap0(x, y)) {
+        ncount = 1000;
+        const WV65t = (globalThis as { __wvLines?: string[] }).__wvLines;
+        if (WV65t) WV65t.push(`MARK|dg_trap ok ${num4} ${x},${y}`);
+      }
       if (ncount > 1000) { num4++; ncount = 0; }
     }
     dualDungeonTrapWindow.allowTrapGenerationInDungeon = false;
@@ -4294,6 +4343,34 @@ export function runDungeonPass(
     st.frameX[st.idx(x2, num)] = 0;
     st.frameY[st.idx(x2, num)] = pStyle * 18;
     st.flags[st.idx(num26, num27)] = 0;                         // KillTile（生成期 noItem）
+    {
+      const WVt0 = (globalThis as { __wvLines?: string[] }).__wvLines;
+      if (WVt0 && (globalThis as { __swDgFx?: boolean }).__swDgFx === true) WVt0.push(`MARK|js_t0 KILL x2=${x2},num=${num} anch=${num26},${num27}`);
+      // ★IIIII66 终刀：原版 KillTile 尾部级联（WorldGen.cs:64488-64493 type=0 →
+      //   SquareTileFrame(i,j)=8 邻 TileFrame；上邻若为压板(135, tileFrameImportant
+      //   Main.cs:7860)经 TileFrameImportant case 36/135(:86880-86894) → Check1x1
+      //   (:45663) SolidTileAllowBottomSlope 门——支撑格刚被 Kill ⇒ 必杀）。
+      //   JS 此前只清锚格写 137、无此级联：同 pass 更早 trap 实例压板正压在本锚
+      //   上时成孤儿滞留（drunk x6 实证：trap#2 压板 (3367,671)，trap#3 锚
+      //   ktsrc=(3367,672) Kill 后原版即刻 dg_k135 拆除、JS 滞留 → dungeonF
+      //   c246 中枢活跃门翻转 → Pa/Ba ~530 格漂移）。仅模拟本路径可达面
+      //   （锚格直邻上方压板）；SquareTileFrame 其余邻格对非板件无生成期可见差。
+      const ax2 = num26, ay2 = num27 - 1;
+      if (st.inBounds(ax2, ay2)) {
+        const pi2 = st.idx(ax2, ay2);
+        if (st.flags[pi2] !== 0) {
+          const sh = TILE_DEFS[st.type[pi2]]?.vanilla?.sheet;
+          if (sh === 135) {
+            st.flags[pi2] = 0;                                  // Check1x1 → KillTile
+            st.type[pi2] = 0;                                   // 同 KillTile 尾部 tile.type=0（快照 ghost 面对齐）
+            if ((globalThis as { __wvLines?: string[] }).__wvLines && (globalThis as { __swDgFx?: boolean }).__swDgFx === true) {
+              (globalThis as { __wvLines?: string[] }).__wvLines!.push(`MARK|js_k135 ${ax2},${ay2} wasSheet=${sh}`);
+            }
+          }
+          void sh;
+        }
+      }
+    }
     chTile(st.idx(num26, num27), TILE_BY_KEY['v_137_traps'], false);
     // 朝向（:9069-9085 num32 + :9119-9121 `if (num32==1) frameX += 18`）：
     // 左锚（num28，num32=1）→ fx=18 朝右射向压板；右锚（num29，num32=-1）→
@@ -4340,8 +4417,13 @@ export function runDungeonPass(
       if (isDW(wallAt(x, y)) && actAt(x, y) === 0) {
         while (!dgSolid(x, y) && y < h - 200) y++;
         y--;
+        {
+          const WV65f = (globalThis as { __wvLines?: string[] }).__wvLines;
+          if (WV65f) WV65f.push(`MARK|dg_fC ${x},${y} j=${j}`);
+        }
         dgFurnAt(x, y, alch, bew, j < num2 / 2);
         const res = dgFurnResult as string;
+        if ((globalThis as { __wvLines?: string[] }).__wvLines) (globalThis as { __wvLines?: string[] }).__wvLines!.push(`MARK|dg_fR ${res || 'none'} ${x},${y}`);
         if (res === 'alch') alch--;
         else if (res === 'bew') bew--;
       }
@@ -4356,7 +4438,23 @@ export function runDungeonPass(
     while (inW(k, j, 0) && actAt(k, j) === 0 && dgSolid(k, j + 1)) k++;
     k--;
     const num2 = k - num, num3 = Math.trunc((k + num) / 2);
-    if (!featOK(num3, j, 0)) return;
+    {
+      // IIII68 一次性对账仪（与 iii68-rig dg_fs/dg_fc/dg_fw 同构，仅观测不改行为）
+      const WV68 = (globalThis as { __wvLines?: string[] }).__wvLines;
+      const DGFX = WV68 !== undefined && (globalThis as { __swDgFx?: boolean }).__swDgFx === true;
+      if (DGFX) WV68!.push(`MARK|dg_fs ${i},${j} n=${num} k=${k} n2=${num2} n3=${num3} alch=${alch} bew=${bew} m=${dgMainRolls}`);
+      if (!featOK(num3, j, 0)) { if (DGFX) WV68!.push(`MARK|dg_fX CANREJ ${num3},${j} m=${dgMainRolls}`); return; }
+      const ccA = inW(num3, j, 0) && actAt(num3, j) === 0;
+      const ccW = isDW(wallAt(num3, j));
+      const ccS = dgSolid(num3, j + 1);
+      const ccB = ccA && ccW && ccS ? typAt(num3, j + 1) !== SPIKE : false;
+      if (!(ccA && ccW && ccS && ccB)) { if (DGFX) WV68!.push(`MARK|dg_fc CR a=${ccA ? 1 : 0} w=${ccW ? 1 : 0} s=${ccS ? 1 : 0} b=${ccB ? 1 : 0} ${num3},${j} m=${dgMainRolls}`); }
+      else {
+        (globalThis as { __swDgFxBt?: string }).__swDgFxBt = '-';
+        void 0;
+      }
+      void DGFX;
+    }
     if (inW(num3, j, 0) && actAt(num3, j) === 0 && isDW(wallAt(num3, j)) && dgSolid(num3, j + 1) && typAt(num3, j + 1) !== SPIKE) {
       const base = theme === 0
         ? [1396, 1397, 1398, 1405, 1408, 1414, 1470, 2376, 2386, 2402, 2658, 2664, 2645, 3900]
@@ -4377,6 +4475,11 @@ export function runDungeonPass(
         || (num18 === 7 && iDress === -1) || (num18 === 8 && iSofa === -1) || (num18 === 9 && iTub === -1)
         || (num18 === 10 && iCand === -1) || (num18 === 11 && iLamp === -1) || (num18 === 12 && iClock === -1)) {
         num18 = rn(13);
+      }
+      {
+        // IIII68：rn13 后镜像（rig dg_fw 同位）
+        const WV68b = (globalThis as { __wvLines?: string[] }).__wvLines;
+        if (WV68b && (globalThis as { __swDgFx?: boolean }).__swDgFx === true) WV68b.push(`MARK|dg_fw n3=${num3},${j} st=-9 wl=${wv} n18=${num18} m=${dgMainRolls}`);
       }
       const num19 = [5, 4, 3, 4, 3, 5, 5, 5, 5, 5, 2, 3, 2][num18];
       const num20 = [4, 3, 5, 6, 3, 3, 4, 4, 4, 3, 4, 3, 5][num18];
@@ -4399,6 +4502,10 @@ export function runDungeonPass(
       }
       if (flag3) return;
       if (num2 < num19 * 1.75) num18 = -1;
+      {
+        const WV68c = (globalThis as { __wvLines?: string[] }).__wvLines;
+        if (WV68c && (globalThis as { __swDgFx?: boolean }).__swDgFx === true) WV68c.push(`MARK|dg_fz n3=${num3},${j} n18=${num18} f4=${flag4 ? 1 : 0} n2=${num2} m=${dgMainRolls}`);
+      }
       const fTr = typeof process !== 'undefined' && !!process.env.SW_DG_FURN_TRACE;
       if (fTr) console.log(`DG FU i=${i} j=${j} num3=${num3} span=${num2} flag4=${flag4 ? 1 : 0} alch=${alch} bew=${bew} n18=${num18} n19=${num19} n20=${num20}`);
       if (!flag4 && (alch > 0 || bew > 0)) {
@@ -4492,6 +4599,15 @@ export function runDungeonPass(
       } else if (num18 === 12) {
         if (iClock > -1 && place2xXD(num3, j, DG_ITEM_TILE[iClock], 5, DG_ITEM_STYLE[iClock] ?? 0)) { dgFurnResult = 'ok'; return; }
       }
+      {
+        // IIII68：链尾未命中（=原版 return false 落底）镜像
+        const WV68d = (globalThis as { __wvLines?: string[] }).__wvLines;
+        if (WV68d && (globalThis as { __swDgFx?: boolean }).__swDgFx === true) WV68d.push(`MARK|dg_ff n3=${num3},${j} n18=${num18} f4=${flag4 ? 1 : 0} m=${dgMainRolls}`);
+      }
+    }
+    {
+      const WV68e = (globalThis as { __wvLines?: string[] }).__wvLines;
+      if (WV68e && (globalThis as { __swDgFx?: boolean }).__swDgFx === true) WV68e.push(`MARK|dg_fo ${num3},${j} m=${dgMainRolls}`);
     }
   }
   const dgTileOfSheet = (sheet: number): number => TILE_INTERNAL_BY_SHEET.get(sheet) ?? -1;  // （DG_ITEM_TILE 已源头换算后无内部消费者,留作家具重构期过渡）
@@ -4775,6 +4891,10 @@ export function runDungeonPass(
   // ============ DungeonGlobalPaintings（:28-321）============
   function dgPaintings(): void {
     if (typeof process !== 'undefined' && process.env.SW_DGPA_TRACE) console.log(`P0 rolls=${dgMainRolls}`);
+    // ★IIIII65 对账仪：与 rig JJHook.Mark(dg_pa*) 同位同 tag（__swWvLog 门控零开销）
+    const WV65 = (globalThis as { __wvLines?: string[] }).__wvLines;
+    const t65 = (ln: string): void => { if (WV65) WV65.push(ln); };
+    t65(`MARK|dg_pa0 n4=${Math.trunc(100 * (w / 4200) * Math.max(1, 0.75))} L=${bounds.L} R=${bounds.R} T=${bounds.T} B=${bounds.B} ws=${Math.trunc(ws)} wv0=${wallVariants[0]}`);
     // lihzahrdPaintingsMax（DungeonGlobalPaintings.cs:36-42）：GetWorldSize()（WG:6518）
     // 4200 宽 → **0**（≤4200 case）→ switch default → max=1——**零掷**（仅 >6400 的
     // case 2 才掷 Next(2)）。★#32 终清批 III：此前误按"Large=4200"恒掷 → Pa 段全程
@@ -4789,6 +4909,7 @@ export function runDungeonPass(
       let x = ri(bounds.L, bounds.R - 1);
       let y = ri(Math.trunc(ws), bounds.B - 1);
       let n8 = 1000;
+      if (WV65 && i < 12) WV65.push(`MARK|dg_paT i=${i} ${x},${y}`);
       while (!isDW(wallAt(x, y)) || actAt(x, y) !== 0) {
         n8--;
         if (n8 <= 0) break;
@@ -4824,6 +4945,7 @@ export function runDungeonPass(
       y = Math.trunc((n11 + n12) / 2);
       const n13 = n10 - n9, n14 = n12 - n11;
       if ((typeof process !== 'undefined' && process.env.SW_DGPA_TRACE)) console.log(`A ${n13} ${n14} @${x},${y}`);
+      if (WV65) WV65.push(`MARK|dg_paQ ${x},${y} n13=${n13} n14=${n14}`);
       if (n13 <= 7 || n14 <= 5) continue;
       const arr = [true, false, false];
       if (n13 > n14 * 3 && n13 > 21) arr[1] = true;
@@ -4836,9 +4958,17 @@ export function runDungeonPass(
       // ★D10（2026-08-14）：Paintings 段对齐原版调用序——GetPaintingEntry 的选型掷骰在
       // 门槛判定**之前**消耗（cs:167-168/:183-184/:281-283/:296-298），即使最终不放画也耗；
       // CanGenerateFeatureInArea 的 fluff=3（cs:169/186/281/297 等，7×7 区）非 2。
+      const paTrace = typeof process !== 'undefined' && !!process.env.SW_DGPA_TRACE;
+      if (paTrace && n15 >= 0) {
+        // 拒因分解（仅诊断路径）：fa=CanGenerateFeatureInArea / np=nearPicture / pl=Place*Wall 返回值
+        const fa = featArea3(x, y, 3), np = nearPicture(st, x, y);
+        if (!fa || np) console.log(`RJ i${i} @${x},${y} n15=${n15} fa=${fa ? 1 : 0} np=${np ? 1 : 0}`);
+      }
       if (n15 === 0) {
         const e = paintingEntry(x, y);
-        if (featArea3(x, y, 3) && !nearPicture(st, x, y)) placePaintingD(x, y, e.tile, e.style);
+        if (featArea3(x, y, 3) && !nearPicture(st, x, y)) {
+          if (!placePaintingD(x, y, e.tile, e.style) && paTrace) console.log(`PF i${i} place fail @${x},${y} t=${e.tile} s=${e.style}`);
+        } else if (paTrace && n15 >= 0) console.log(`E1 i${i} miss @${x},${y}`);
       } else if (n15 === 1) {
         let e = paintingEntry(x, y);
         if (!featArea3(x, y, 3)) continue;
@@ -4960,23 +5090,61 @@ export function runDungeonPass(
   // ============ DungeonGlobalBanners（:24-104）============
   function dgBanners(): void {
     const num3 = Math.trunc(200 * (w / 4200) * Math.max(1, 0.75));
+    // ★IIIII65 对账仪：与 rig JJHook.Mark(dg_ba*) 同位同 tag（__swWvLog 门控零开销）
+    const WV65b = (globalThis as { __wvLines?: string[] }).__wvLines;
+    if (WV65b) WV65b.push(`MARK|dg_ba0 n3=${num3} L=${bounds.L} R=${bounds.R} T=${bounds.T} B=${bounds.B}`);
+    // ★IIIII72 实验室快照钩（__swDgLab 由探针注入；生产恒 undefined 零开销）：
+    //   Ba 相位起点的区域全通道真值 + 受理门结构（pits/winBoxes/entBounds/variants/styles）
+    const LAB72 = (globalThis as {
+      __swDgLab?: { dump?: (ctx: unknown) => void };
+    }).__swDgLab;
+    if (LAB72?.dump) LAB72.dump({ st, bounds, pits, winBoxes, entExists, entBounds, wallVariants, bannerStyles });
     for (let i = 0; i < num3; i++) {
       let x = ri(bounds.L, bounds.R - 1);
       let y = ri(bounds.T, bounds.B - 1);
+      if (WV65b && i < 12) WV65b.push(`MARK|dg_baT i=${i} ${x},${y}`);
       let n6 = 1000;
+      let rr = 0;
       while (!isDW(wallAt(x, y)) || actAt(x, y) !== 0) {
         n6--;
         if (n6 <= 0) break;
         x = ri(bounds.L, bounds.R - 1);
         y = ri(bounds.T, bounds.B - 1);
+        rr++;
       }
+      const sxB = x, syB = y, rrB = rr, exB = n6 <= 0 ? 1 : 0;
       n6 = 1000;
-      while (!dgSolid(x, y) && y > 10) {
+      let dd = 0;
+      // ★IIIII68 终刀（2026-08-30）：DungeonGlobalBanners.cs:47 的下降扫描用
+      //   WorldGen.SolidTile(num4,num5)（WorldGen.cs:70650 全项版，含
+      //   !halfBrick() && slope()==0 && !inActive()）——共享 dgSolid 缺坡位/半砖
+      //   两判项，曾把坡帽檐下当实心停靠：x86 在 (3771,419) 域停到下一块平帽后
+      //   锚点自身 active 静默拒置（零掷），JS 却挂上了横幅三格——单点受理差
+      //   触发整支流 +1 掷漂移（115vs114 swap + 尾段两个级联伪对象）。修=
+      //   本循环改用 dgSpreadSolid（IIIII65 已认证的全项版副本），仅此处换刀，
+      //   不动共享 dgSolid（七链满绿由既有谓词认证）。
+      while (!dgSpreadSolid(x, y) && y > 10) {
         n6--;
         if (n6 <= 0) break;
         y--;
+        dd++;
       }
       y++;
+      // ★IIIII72 细化仪（仅 __wvLines 挂钩时输出，零行为差）：每轮受理面全量快照。
+      //   定罪 IIII68 残差三案 (3771,419)/(3490,778)/(3430,852) 的 big-if 谓词域。
+      if (WV65b && (i < 14 || i >= num3 - 8)) {
+        let dr = 0;
+        for (let a2 = x - 1; a2 <= x + 1; a2++) {
+          for (let b2 = y; b2 <= y + 3; b2++) {
+            if (inW(a2, b2, 0) && actAt(a2, b2) !== 0
+              && (typAt(a2, b2) === DOOR || typAt(a2, b2) === TILE_BY_KEY['door_open'] || typAt(a2, b2) === BANNER)) dr = 1;
+          }
+        }
+        WV65b.push(`MARK|dg_bz i=${i} acc=${sxB},${syB} rr=${rrB} ex=${exB} an=${x},${y} drop=${dd}`
+          + ` wl=${wallAt(x, y)} upT=${typAt(x, y - 1)}`
+          + ` f=${actAt(x, y)}${actAt(x, y + 1)}${actAt(x, y + 2)}${actAt(x, y + 3)}`
+          + ` ok=${featOK(x, y, 0) ? 1 : 0}${isDW(wallAt(x, y)) ? 1 : 0} spk=${typAt(x, y - 1) === SPIKE ? 1 : 0} dr=${dr}`);
+      }
       if (!featOK(x, y, 0) || !isDW(wallAt(x, y))
         || typAt(x, y - 1) === SPIKE
         || actAt(x, y) !== 0
@@ -5001,8 +5169,12 @@ export function runDungeonPass(
       //  双侧逐样本轨迹对账实锤（N 426,570 typ=91，2026-08-15）
       // ★NNN 批 ②（2026-08-18）：style 经 bannerStyles[num8] 入帧（DungeonGlobal-
       //  Banners.cs:95 `num7 = data.bannerStyles[num8]`；查表零掷不扰流）
+      if (WV65b) WV65b.push(`MARK|dg_baP ${x},${y} t=${BANNER} s=${bannerStyles[num8]}`);
       placeBannerD(x, y, BANNER, bannerStyles[num8]);   // ★PlaceBanner（cs:46270 竖 3 格）
     }
+    // ★IIIII72 收尾标记（实验室重放锚点；__wvLines 门控）
+    const WV72e = (globalThis as { __wvLines?: string[] }).__wvLines;
+    if (WV72e) WV72e.push(`MARK|dg_baDone n3=${num3}`);
   }
   // ============ DungeonGlobalLateDualDungeonFeatures（:20-69，Default style==0 支）============
   // ★HHHHHHH（2026-08-24）⑤ Late GOTHIC 门替换：1456 该段普通世界纯空转（style==0

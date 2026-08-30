@@ -1654,8 +1654,15 @@ function placeSupportBeams(st: TileStore, gs: GenState, rng: RNG, rooms: Rect[],
           st.liquidType[ci] = 0;
           st.slope[ci] = 0;
           st.half[ci] = 0;
+          // Tile.Clear(~(Wiring|Actuator))（Actions.cs:283-285）连块漆/涂层一并清——
+          // setTileSilent 仅在「非活性→活性」路径清漆，家具覆写为梁时须显式补齐。
+          st.paint[ci] = 0;
+          st.coat[ci] &= ~TileStore.COAT_BLOCK_MASK;
           st.setTileSilent(x, y, def.beam, 0, 0);
-          genFrameNeighbors(st, rng, x, y, 'setTile');
+          // ★诊断旁路（dormant）：仅归因实验用——正常生成恒走 vanilla 派发。
+          if (!(globalThis as { __SW_I60_NOBEAM?: boolean }).__SW_I60_NOBEAM) {
+            genFrameNeighbors(st, rng, x, y, 'setTile');
+          }
         }
         if (st.inBounds(x, found)) {
           const bi = st.idx(x, found);

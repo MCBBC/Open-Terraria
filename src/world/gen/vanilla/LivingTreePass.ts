@@ -36,7 +36,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
-import { flipGenSolid, genSolidType } from './GenSolid';
+import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
 // ★YYYYYY（2026-08-23）：Check3x2 清除环 KillTile 头门（cs:63579）——HalfBrickPass 1:1 实现
 import { checkTileBreakability } from './HalfBrickPass';
@@ -117,6 +117,84 @@ function solidAt(st: TileStore, x: number, y: number): boolean {
   // 裸 TILE_DEFS.solid 会把尖刺当实心挡树（见 growLivingTree 内翻转注释）
   return st.flags[i] !== 0 && genSolidType(st.type[i]);
 }
+
+// ★IIIII73：Main.tileSolidTop 全表（Main.cs:6764-7841，78 项 sheet 集）。与
+// DungeonPass.ts 的 DG_SOLID_TOP 同表拷贝（含桌14/工作台18/箱87/书架101/旗339 等
+// solidTop 族）——SolidTile 判定的第二道门；两处定义勿各自漂移。
+const LT_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
+  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
+  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+
+/** WorldGen.SolidTile(i,j)（Terarria1458 WorldGen.cs:70650-70666 **全项版**）：
+ *  active ∧ tileSolid(genSolidType 生成期语义) ∧ !tileSolidTop ∧ !halfBrick() ∧
+ *  slope()==0 ∧ !inActive()。GrowLivingTree 家族内全部 SolidTile 字面调用取此语义：
+ *  cs:28287 足基门 / cs:28709 根系下探计数 / cs:28875 竖井预检 flag4 /
+ *  cs:29362 终止扫描 flag5 / cs:29384 终止扫描 flag6 —— 坡帽/半砖/致动格一律【非实心】。
+ *  ★IIIII73 定罪：DRUNK #42 树@(1784,310) 竖井终止扫描在洞缘 SL4 帽石带
+ *  （(1787,402)/(1789,405) 等 396 洞缘坡帽，dump41 基座实证）——旧谓词 solidAt 缺
+ *  half/slope/inActive 三判项把它们判成实心 ⇒ JS 比原版多下挖 2 行才退出
+ *  （exit rc 43870↔x86 43868），patch/候选后续全序漂移 ⇒ A=15141 族。
+ *  共享 solidAt 不动：家具支撑等其余读面是 s111/s777 oracle 认证域，翻转面不可证。 */
+function ltSolid(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!(st.flags[i] & 1)) return false;                        // active()
+  if ((st.wire[i] >>> 5) & 1) return false;                    // !inActive()
+  const sheet = V_LT[st.type[i]] ?? -1;
+  if (LT_SOLID_TOP.has(sheet)) return false;                   // !tileSolidTop
+  if (!vanGenSolidType(st.type[i])) return false;              // tileSolid（平台双态族经 VAN_TILE_SOLID_EXTRA）
+  if (st.half[i] !== 0 || st.slope[i] !== 0) return false;     // !halfBrick() && slope()==0
+  return true;
+}
+
+/** WorldGen.SolidTile2(Tile)（Terarria1458 WorldGen.cs:70673）：active ∧ tileSolid ∧
+ *  slope==0 ∧ !halfBrick ∧ !inActive——**不含** !tileSolidTop 判项（平台/桌箱等
+ *  solidTop 族算实心支承；平台双态族 Main.tileSolid=true 经 vanGenSolidType 兑现）。
+ *  本 pass 家具族支承门的原版语义：Place1x2 cs:47086（椅）、PlaceSmallPile
+ *  cs:47266/47288、Place3x2 type186/187 支柱行 cs:52580。
+ *  ★IIIII73 余案：树干腔内叶枝地被石堆落在生命木平台上——vanilla 以 SolidTile2
+ *  放行平台支承，SW 数据 platform solid=false 且旧 solidAt 无 solidTop 豁免 ⇒ JS
+ *  拒置 ⇒ 六格 A1>0 残差 (2660..2662)×(235..236)。 */
+function ltSolid2(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!(st.flags[i] & 1)) return false;                        // active()
+  if ((st.wire[i] >>> 5) & 1) return false;                    // !inActive()
+  if (!vanGenSolidType(st.type[i])) return false;              // tileSolid
+  if (st.half[i] !== 0 || st.slope[i] !== 0) return false;     // slope==0 && !halfBrick
+  return true;
+}
+
+/** WorldGen.SolidTileAllowBottomSlope（cs:70706）：active ∧ (tileSolid ∨ tileSolidTop)
+ *  ∧ [!topSlope() ∨ (平台 ∧ PlatformProperTopFrame)] ∧ !halfBrick ∧ !inActive——
+ *  名为 AllowBottomSlope 实不查坡位 3/4（底坡）；顶坡(1/2)仅平台合法帧放行。
+ *  ★IIIII73 第三案：Check3x2 type187 支撑行校验（cs:49708）用它读支柱——树干腔内
+ *  石堆的支柱是生命木平台：SW platform 数据 solid=false 且旧 solidAt 平台=假实心
+ *  缺失 ⇒ 置堆后自校验失败 → 自 KillTile 六格（watch 实证）⇒ 六格 A1>0。 */
+function ltPlatformProperTopFrame(sheet: number, frameX: number): boolean {
+  if (sheet !== 19) return false;
+  const num = Math.trunc(frameX / 18);
+  if ((num < 0 || num > 7) && (num < 12 || num > 16)) {
+    if (num >= 25) return num <= 26;
+    return false;
+  }
+  return true;
+}
+function ltSolidAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!(st.flags[i] & 1)) return false;                                  // active()
+  if ((st.wire[i] >>> 5) & 1) return false;                              // !inActive()
+  const d = TILE_DEFS[st.type[i]];
+  const sheet = d?.vanilla?.sheet ?? -1;
+  if (!vanGenSolidType(st.type[i]) && !LT_SOLID_TOP.has(sheet)) return false; // tileSolid ∨ tileSolidTop
+  const sl = st.slope[i];
+  const topSlope = sl === 1 || sl === 2;
+  if (topSlope && !(sheet === 19 && ltPlatformProperTopFrame(sheet, st.frameX[i]))) return false;
+  if (st.half[i] !== 0) return false;                                    // !halfBrick
+  return true;
+}
 function isDungeonWall(w: number): boolean { return DUNGEON_WALLS.has(w); }
 function inWorld(st: TileStore, x: number, y: number, slack: number): boolean {
   return x >= slack && y >= slack && x < st.w - slack && y < st.h - slack;
@@ -184,7 +262,7 @@ function place3x2(st: TileStore, x: number, y: number, style: number): boolean {
   for (let c = x - 1; c <= x + 1; c++) {
     for (let d = y - 1; d <= y; d++) if (activeAt(st, c, d)) ok = false;
     if (invalidForPiles(st, c, y + 1)) ok = false;                    // cs:52143
-    if (!solidAt(st, c, y + 1)) ok = false;                           // cs:52150
+    if (!ltSolid2(st, c, y + 1)) ok = false;                          // ★IIIII73:cs:52580 SolidTile2 支柱行（原误 solidAt）
   }
   if (LT_TRACE && x >= 405 && x <= 430 && y >= 140 && y <= 175) {
     console.log(`P3x2? x=${x} y=${y} style=${style} ok=${ok} st=${ltStream()}`);
@@ -219,6 +297,7 @@ function killTileGen(st: TileStore, x: number, y: number): void {
   if (!st.flags[i]) return;
   if (checkTileBreakability(st, x, y) === 2) return;
   st.flags[i] = 0;
+
   st.half[i] = 0;
   st.frameX[i] = -1;
   st.frameY[i] = -1;
@@ -258,7 +337,8 @@ function check3x2Pile(st: TileStore, i: number, j: number): void {
         flag = true;                                 // cs:49235-49241 六格一致
       }
     }
-    if (!solidAt(st, k, num8)) flag = true;          // default 档支撑行（cs:49379-49382）
+    // ★IIIII73：cs:49708 SolidTileAllowBottomSlope 支撑行（原 solidAt——平台支承缺失案）
+    if (!ltSolidAllowBottomSlope(st, k, num8)) flag = true;
   }
   if (!flag) return;                                 // cs:49416
   for (let k = n5; k < n5 + 3; k++) {
@@ -327,7 +407,8 @@ function place3x3(st: TileStore, x: number, y: number): boolean {
  *  仅要求下方 SolidTile2 + (x,y-1) 空（不查 (x,y) 本身——原版如此）。 */
 function place1x2(st: TileStore, x: number, y: number, style: number): boolean {
   if (!st.inBounds(x, y - 1) || !st.inBounds(x, y + 1)) return false;
-  if (!solidAt(st, x, y + 1) || activeAt(st, x, y - 1)) return false;
+  // ★IIIII73:cs:47086 SolidTile2（原 solidAt——平台族支承语义修正）
+  if (!ltSolid2(st, x, y + 1) || activeAt(st, x, y - 1)) return false;
   const d0 = TILE_DEFS[CHAIR];
   const [bx, by] = furnitureStyleBase(d0.vanilla?.sheet ?? -1, style, 1);
   st.setTileSilent(x, y - 1, CHAIR, bx, by);
@@ -373,8 +454,8 @@ function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, 
   const ai = st.idx(x, y);
   if (st.liquid[ai] === 255 && st.liquidType[ai] === 2) return false; // anyLava（本仓岩浆=2）
   if (pileSize === 1) {
-    // cs:46853-46875:下方两格实心 + 上方两格空 + 两侧底非滚石
-    let ok = solidAt(st, x, y + 1) && solidAt(st, x + 1, y + 1)
+    // cs:46853-46875:下方两格实心(SolidTile2) + 上方两格空 + 两侧底非滚石
+    let ok = ltSolid2(st, x, y + 1) && ltSolid2(st, x + 1, y + 1)
       && !activeAt(st, x, y) && !activeAt(st, x + 1, y);
     if (ok && (invalidForPiles(st, x, y + 1) || invalidForPiles(st, x + 1, y + 1))) ok = false;
     if (!ok) return false;
@@ -382,7 +463,7 @@ function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, 
     st.setTileSilent(x + 1, y, SMALL_PILE, pileStyle * 36 + 18, 18);
     return true;
   }
-  if (solidAt(st, x, y + 1) && !activeAt(st, x, y)) {
+  if (ltSolid2(st, x, y + 1) && !activeAt(st, x, y)) {   // ★IIIII73:cs:47288 SolidTile2
     st.setTileSilent(x, y, SMALL_PILE, pileStyle * 18, 0);
     return true;
   }
@@ -652,6 +733,7 @@ function growLivingTreeMakePassage(
   let num8 = 0;
   let flag3 = true;
   let num9 = rng.int(5, 15);
+  if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gpA|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
   let minl = refs.minl, minr = refs.minr;
   if (LT_TRACE) console.log(`MP enter st=${ltStream()} num6=${num6} num9=${num9}`);
   while (num6 > 0) {
@@ -710,6 +792,7 @@ function growLivingTreeMakePassage(
         }
       }
     }
+    if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gw|y=${num4}|ml=${minl}|mr=${minr}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
     num8++;
     if (num8 >= 6) {
       num8 = 0;
@@ -740,6 +823,7 @@ function growLivingTreeMakePassage(
       if (noSecretRoom) {
         num9--;
         if (num9 <= 0) {
+          if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gpB|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
           num9 = growLivingTreeHorizontalTunnel(st, rng, gs, num10, num4)
             ? rng.int(5, 20) : rng.int(2, 10);    // cs:29182-29186
           if (LT_TRACE) console.log(`MPt st=${ltStream()} num4=${num4}`);
@@ -748,6 +832,7 @@ function growLivingTreeMakePassage(
       if (num5 <= 0 && !flag) {
         flag = true;
         growLivingTreePassageRoom(st, rng, gs, chests, minl, minr, num4);  // cs:29190
+        if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gpC|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
         if (LT_TRACE) console.log(`MPr st=${ltStream()} num4=${num4}`);
       }
     }
@@ -755,7 +840,7 @@ function growLivingTreeMakePassage(
       let flag5 = true;
       for (let l = minl; l <= minr; l++) {
         for (let m = num4 + 1; m <= num4 + 2; m++) {
-          if (solidAt(st, l, m)) flag5 = false;
+          if (ltSolid(st, l, m)) flag5 = false;   // cs:29362 SolidTile 全项版
         }
       }
       if (flag5) num6 = 0;                        // cs:29198
@@ -764,7 +849,7 @@ function growLivingTreeMakePassage(
       let flag6 = true;
       for (let n = minl; n <= minr; n++) {
         for (let n13 = num4 + 1; n13 <= num4 + 4; n13++) {
-          if (solidAt(st, n, n13)) flag6 = false;
+          if (ltSolid(st, n, n13)) flag6 = false; // cs:29384 SolidTile 全项版
         }
       }
       if (flag6) num6 = 0;                        // cs:29209
@@ -789,6 +874,7 @@ function growLivingTreeMakePassage(
   }
 }
 
+
 // ---------- GrowLivingTree（cs:28123-28759） ----------
 export function growLivingTree(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, i: number, j0: number, patch = false,
@@ -797,7 +883,8 @@ export function growLivingTree(
   const worldSurface = gs.worldSurface;
   if (LT_TRACE) ltRngCache = rng;
   // 前置门禁（cs:28158-28180）：脚下实心、锚点空、地面类型 dirt/grass/stone/clay/ore
-  if (!solidAt(st, i, j + 1)) {
+  // ★IIIII73：SolidTile 全项版（cs:28287，见 ltSolid 注）
+  if (!ltSolid(st, i, j + 1)) {
     if (LT_TRACE) {
       const gi = st.idx(i, j + 1);
       console.log(`GLT r1 x=${i} j=${j} !solid-foot act=${st.flags[gi]} sheet=${TILE_DEFS[st.type[gi]]?.vanilla?.sheet} key=${TILE_DEFS[st.type[gi]]?.key}`);
@@ -873,6 +960,7 @@ export function growLivingTree(
   const ax5 = new Int32Array(2000), ax6 = new Int32Array(2000), ax7 = new Uint8Array(2000);
   let num2 = 0;
   if (LT_TRACE) console.log(`GLTp head st=${ltStream()} g=${ltGridHash(st)} num3=${num3} num4=${num4} num5=${num5}`);
+  if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gt0|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);; (globalThis as unknown as { __ltSnapBox?: (t: string) => void }).__ltSnapBox?.('gt0')
   // ---- 主干收窄循环（cs:28271-28345） ----
   while (flag2) {
     num12++;
@@ -905,6 +993,7 @@ export function growLivingTree(
     num11--;
   }
   if (LT_TRACE) console.log(`GLTp trunk st=${ltStream()} g=${ltGridHash(st)} num=${num}`);
+  if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gtB|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);; (globalThis as unknown as { __ltSnapBox?: (t: string) => void }).__ltSnapBox?.('gtB')
   // ---- 侧枝（cs:28347-28420） ----
   for (let n15 = 0; n15 < num - 1; n15++) {
     let n16 = ax[n15] + ax3[n15];
@@ -942,6 +1031,7 @@ export function growLivingTree(
     }
   }
   if (LT_TRACE) console.log(`GLTp branches st=${ltStream()} g=${ltGridHash(st)}`);
+  if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gtC|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);; (globalThis as unknown as { __ltSnapBox?: (t: string) => void }).__ltSnapBox?.('gtC')
   // ---- 顶部收尖 + 枝头（cs:28421-28509） ----
   let n20 = Math.floor((num3 + num4) / 2);
   let n21 = num11;
@@ -989,12 +1079,13 @@ export function growLivingTree(
     n22--;
   }
   if (LT_TRACE) console.log(`GLTp top st=${ltStream()} g=${ltGridHash(st)}`);
+  if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gtD|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);; (globalThis as unknown as { __ltSnapBox?: (t: string) => void }).__ltSnapBox?.('gtD')
   // ---- 根系（cs:28511-28600） ----
   for (let n32 = minl; n32 <= minr; n32++) {
     let n33 = rng.int(1, 5);                              // cs:28514
     let n34 = j + 1;
     while (n33 > 0) {
-      if (solidAt(st, n32, n34)) n33--;
+      if (ltSolid(st, n32, n34)) n33--;              // cs:28709 SolidTile 全项版
       setLivingWood(st, n32, n34);
       n34++;
     }
@@ -1031,6 +1122,11 @@ export function growLivingTree(
   }
   if (LT_TRACE) console.log(`GLTp roots st=${ltStream()} g=${ltGridHash(st)}`);
   // ---- 叶簇（cs:28603-28720） ----
+  // ★IIIII70 REMIX（1457 WorldGen.cs:28888-28891）：叶簇簇数 num2 在 remix 下**清零**
+  //   （`if (remixWorldGen) { num2 = 0; }`）——反向体世界树只长活木不长叶/地被，
+  //   簇循环连同其内部掷骰整段跳过。此前缺失 → REMIX 树全冠错写（mile8 #42 首差
+  //   T191>0×3333/T0>192×8543 等），并把本 pass 内主流掷位整体前移。
+  num2 = gs.seedFlags.remix ? 0 : num2;
   for (let n43 = 0; n43 < num2; n43++) {
     let n44 = rng.int(5, 7);
     n44 = Math.trunc(n44 * (1 + num5 * 0.05));
@@ -1086,7 +1182,8 @@ export function growLivingTree(
     const n57 = j + 20;
     for (let n58 = n56; n58 < n57 && n58 < worldSurface - 2; n58++) {
       for (let n59 = minl; n59 <= minr; n59++) {
-        if (wallAt(st, n59, n58) === 0 && !solidAt(st, n59, n58)) {
+        // ★IIIII73：cs:28875 `wall==0 && !SolidTile` 全项版
+        if (wallAt(st, n59, n58) === 0 && !ltSolid(st, n59, n58)) {
           flag4 = true;
           break;
         }
@@ -1095,6 +1192,10 @@ export function growLivingTree(
     }
     if (!flag4) {
       const refs: PassageRefs = { minl, minr };
+      if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) {
+        console.log(`MARK|gp0|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
+        (globalThis as unknown as { __ltSnapBox?: (t: string) => void }).__ltSnapBox?.('gp0');
+      }
       growLivingTreeMakePassage(st, rng, gs, chests, j, num5, refs, patch);
       minl = refs.minl; minr = refs.minr;
     }
@@ -1158,6 +1259,8 @@ export function runLivingTreesPass(
         //   放行丛林草 60（第三析取 tenthAnniversary 系 celebrationmk10 组合,不在
         //   常规路径,按约定不移植）。JS 曾只认 0 → NTB 丛林草带活树锚全拒。
         const baseSheet = sheetAt(st, num6, j);
+        // ★IIIII70 对账仪：与 rig MARK|ltA/ltR 同位同格式（SW_DG_LTMARK 门控）
+        if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltA|${num6},${j}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
         if (baseSheet === 0 || (gs.seedFlags.notTheBees && baseSheet === 60)) {   // cs:15629
           j--;
           if (j > 150) {
@@ -1187,6 +1290,7 @@ export function runLivingTreesPass(
             if (flag2) {
               if (LT_TRACE) console.log(`LT try x=${num6} j=${j} st=${ltStream()}`);
               flag = growLivingTree(st, rng, gs, chests, num6, j);
+              if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltR|${num6},${j}|${flag ? 1 : 0}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
               if (LT_TRACE) console.log(`LT result x=${num6} ok=${flag} st=${ltStream()}`);
               if (flag) {
                 // cs:15692-15763：左右两侧补种 patch 小树

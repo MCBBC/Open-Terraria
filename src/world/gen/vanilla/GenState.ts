@@ -57,7 +57,13 @@ export interface GenState {
   /** ★IIIII44：extraLivingTrees 组合下 GenerateSkyBlockWorld 尾的活树锚点（cs:23000-23007）
    *  ——GSB 内只掷坐标，GrowLivingTree 在管线接线处调用。 */
   skyblockExtraTreeAt?: { x: number; y: number };
-  oreTiers: { copper: number; iron: number; silver: number; gold: number }; // 含替代 id
+  oreTiers: { copper: number; iron: number; silver: number; gold: number }; // 含替代 id（动态面 ≡ GenVars.copper 等，Shinies drunk 翻带会改写）
+  /** ★IIII71b：重置期终值快照（≡SavedOreTiers.* / GenVars.*Bar，此后不改写）——
+   *  OrePatch(cs:10601)/AddBuriedChest 锭(cs:36789)/银弹支(cs:37634)/
+   *  MiningExplosivesBiome(cs:36-40) 均消费此面。普通世界与动态值恒等。 */
+  savedOreTiers?: { copper: number; iron: number; silver: number; gold: number };
+  /** 重置期锭 item id 终值（≡GenVars.copperBar/ironBar/silverBar/goldBar） */
+  savedOreBars?: { copper: number; iron: number; silver: number; gold: number };
   dungeonSide: 1 | -1;        // 地牢在地图哪侧
   dungeonX: number;           // 地牢位置（Reset num4：仅作雪原中心）
   dungeonLocation: number;    // 地牢入口实际位置（Reset 末掷）
@@ -277,6 +283,7 @@ export function newGenState(w: number, h: number): GenState {
     crimson: false,
     crimsonLeft: false,
     oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
+    savedOreTiers: undefined, savedOreBars: undefined,   // WorldGen.ts 重置期填实（IIII71b）
     skyblockIslands: [],
     dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, generatingDungeonPositionX: 0, lAltarX: -1, lAltarY: -1, jungleX: 0,
     tLeft: 0, tRight: 0, tTop: 0, tBottom: 0, tRooms: 0,    // C# GenVars 静态 int 默认 0

@@ -414,7 +414,7 @@ import { runMicroBiomesPass } from './vanilla/MicroBiomesPass';
 import { runDirtToMudAndSiltPass } from './vanilla/DirtToMudPass';
 import { runCleanupPass } from './vanilla/CleanupPass';
 import { runDirtRockWallRunnerPass } from './vanilla/DirtRockWallRunnerPass';
-import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
+import { runSmoothWorldPass, runWaterfallLipPass, setKillTileGetGood } from './vanilla/HalfBrickPass';
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runGemCavesPass, runExposedGemsIcePass, runExposedGemsUndergroundPass, runGemTreesPass } from './vanilla/GemPasses';
 import { runCaveWallsPass, runCaveWallVarietyPass, runJungleMudWallsPass } from './vanilla/CaveWallsPass';
@@ -493,8 +493,10 @@ import { doPortalGunInChests } from './vanilla/FinalSeedCleanupPass';
 //   NotTheBees()（cs:16237）之前**——曾打包在 settleWorldLiquids(oceanStrip=true)
 //   内=NTB 蜜转化后被归水（左缘洞穴 18,022 格蜜→水定罪），现拆到本函数体内
 //   NTB 调用位之前（普通种子该域无非水液体，先后序零差）。
-async function liquidSettlePass({ world, rng, store }: GenCtx, oceanStrip: boolean) {
-  const gs = ctxGs[0];
+// ★IIIII70b：export + 可选 gs 直注（反演重放仪 _iii76st 用——生产调用不传参，
+//   行为逐位不变；hydrate 基座单跑本 pass 时 ctxGs 为空须喂捕获的 gs）
+export async function liquidSettlePass({ world, rng, store }: GenCtx, oceanStrip: boolean, gsOverride?: NonNullable<typeof ctxGs[0]>) {
+  const gs = gsOverride ?? ctxGs[0];
   if (gs) {
     // ★IIIII44：#49 SettleLiquids（cs:16229）与 #97 SettleLiquidsPart2AndNotTheBees
     //   （cs:21426）同为 `!Skyblock.denyAllGeneration` 整门——天空盒世界两沉降槽全跳
@@ -588,6 +590,10 @@ function vanillaTerrain(ctx: GenCtx) {
   // 彩蛋种子旗标——特殊种子 pass 分支消费（GemPasses 等）；cfg.seedFlags 直注优先
   // （S0-1 解耦），缺省回退 seedText 派生。金标种子 flags 恒空集 → 掷骰流位置不受影响
   gs.seedFlags = cfg.seedFlags ?? parseSeedChain(cfg.seedText).flags;
+  // ★IIII67b：KillTile 内 getGoodWorld 灰烬崩塌级联旗标（1457 cs:64251 / 1458 cs:64259）
+  //   ——世界级 Main.getGoodWorld，作用于生成期一切 KillTile 调用方（Smooth/Waterfalls/
+  //   TileCleanup/陷阱等），经本 setter 广播给共享 killTile 引擎，等价 vanilla 全局数组读。
+  setKillTileGetGood(!!gs.seedFlags.getGoodWorld);
   // ===== Reset 掷骰（1456 WorldGen.generateWorld cs:11159-11472 逐行 1:1）=====
   // 原版在 AddPasses 循环之前按此固定顺序消耗 Main.rand（种子等价的流位置契约）。
   // 天气/背景/月亮等值我们未消费——照掷照弃，只保留 GenState 下游字段。
@@ -683,6 +689,24 @@ function vanillaTerrain(ctx: GenCtx) {
     silver: vanillaSheetOf(gs.oreTiers.silver),
     gold: vanillaSheetOf(gs.oreTiers.gold),
   };
+  // ★IIII71b：重置期终值快照（SavedOreTiers.* 与 GenVars.*Bar 同语义——此后
+  // **不再被改写**）。DRUNK 的 ShiniesPass 带内翻转只改「动态面」gs.oreTiers
+  // （≡GenVars.copper 等，cs:13262 起逐带覆写）；cs 面两套变量并存：
+  // OrePatch(cs:10601) 读 SavedOreTiers.Copper、AddBuriedChest 锭族(cs:36789)/
+  // 银弹支(cs:37634)/MiningExplosivesBiome bar 族(MiningExplosivesBiome.cs:36-40)
+  // 全部走重置期值。此前 JS 单变量承载 ⇒ DRUNK 世界翻带后上述消费点集体错矿种
+  // (#74 Surface_Ore_and_Stone T7>166×71 实锤)。普通世界翻转恒不发生，快照与
+  // 动态值恒等（七链零行为差）。锭 item id 与 GenVars.*Bar 重置终值同源：
+  // copper=7→20/166→703、iron=6→22/167→704、silver=9→21/168→705、gold=8→19/169→706。
+  const isAlt = (t: number, altKey: string): boolean => TILE_DEFS[t]?.key === altKey;
+  gs.savedOreTiers = { ...gs.oreTiers };
+  gs.savedOreBars = {
+    copper: isAlt(gs.oreTiers.copper, 'ore_tin') ? 703 : 20,
+    iron: isAlt(gs.oreTiers.iron, 'ore_lead') ? 704 : 22,
+    silver: isAlt(gs.oreTiers.silver, 'ore_tungsten') ? 705 : 21,
+    gold: isAlt(gs.oreTiers.gold, 'ore_platinum') ? 706 : 19,
+  };
+
   // ⑪ crimson（cs:11321）+ UI 覆盖（骰照掷仅覆盖结果，cs:11326-11332）
   gs.crimson = rng.nextIntRange(0, 2) === 0;
   if (cfg.evil === 0) gs.crimson = false;

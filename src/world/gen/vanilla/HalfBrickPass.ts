@@ -556,6 +556,9 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
 
 /** SquareTileFrame（cs:80924）：3×3 逐格 TileFrame,列主序与原版逐条一致。 */
 function squareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
+  // ★IIII66 取证钩（dormant）：SQ 事件与 rig SW_FNTLOG 的 SquareTileFrame 行对位；
+  // 未注册零开销。
+  (globalThis as { __swFntSq?: (x: number, y: number) => void }).__swFntSq?.(x, y);
   tileFrame(st, rng, x - 1, y - 1); tileFrame(st, rng, x - 1, y); tileFrame(st, rng, x - 1, y + 1);
   tileFrame(st, rng, x, y - 1); tileFrame(st, rng, x, y); tileFrame(st, rng, x, y + 1);
   tileFrame(st, rng, x + 1, y - 1); tileFrame(st, rng, x + 1, y); tileFrame(st, rng, x + 1, y + 1);
@@ -853,6 +856,36 @@ function shouldTileSurviveKT(st: TileStore, x: number, y: number): boolean {
   return BASIC_CHEST_S.has(t) || t === 88;
 }
 
+/* ── ★IIII67b：KillTile 内 getGoodWorld 灰烬崩塌级联（1457 cs:64251 / 1458 cs:64259）
+ * ─────────────────────────────────────────────────────────────────────────────
+ * vanilla KillTile 主体（fail 支路 SquareTileFrame 早退之后、裂砖(481-483)连锁之前）：
+ *
+ *   if (Main.getGoodWorld && Main.netMode != 1 && tile.type == 57)
+ *   {
+ *       for (int l = 0; l < 8; l++)            // 邻序与裂砖支完全一致 L,R,U,D,UL,UR,DL,DR
+ *       {
+ *           int maxValue = 2;                  // 每个活性邻格固定掷 1 次 Next(2)
+ *           ...switch 解 8 邻坐标...
+ *           Tile tile2 = Main.tile[num13, num14];
+ *           if (tile2.active() && genRand.Next(maxValue) == 0 && tile2.type == 57
+ *               && !SolidTile(num13, num14 + 1))
+ *           {
+ *               KillTile(num13, num14, fail:false, effectOnly:false, noItem:true);
+ *               ...(落灰弹幕 Projectile 40 / NetMessage——生成期无掷无世界态)
+ *           }
+ *       }
+ *   }
+ *
+ * 要点：① 短路序 = active() 先于 Next(2)——每个活性邻格都占一个掷位（无论其型）；
+ *       ② 命中条件含「邻格下方非实心」——灰烬悬空才崩；
+ *       ③ 被击的子格自身 type==57 ⇒ 递归再扫其 8 邻（链式崩塌，与原版同构无防重入位）；
+ *       ④ 落灰弹幕 Projectile.NewProjectile 与 NetMessage 不掷 genRand、不写 tile 通道。
+ * 此支在 FTW/getGoodWorld 世界**全程活性**（不限 SmoothWorld；凡生成期 KillTile 即判），
+ * 普通/其他种子世界恒 inert——9293480 等七满绿链的金标零扰动由旗标门保证。 */
+let killGetGoodWorld = false;
+/** 由 WorldGen bootstrap 注入（vanillaTerrain 内 gs.seedFlags 就绪后一次；等价 Main.getGoodWorld 全局读） */
+export function setKillTileGetGood(v: boolean): void { killGetGoodWorld = v; }
+
 /** 原版 KillTile(i,j) 生成期路径的完整掷骰模型 + 击杀（type=0 清型）。
  *  生成期 noItem=true 无掉落掷;isGeneratingOrLoadingWorld=true 时尘段恒跑
  *  （cs:63747 dust 段在 effectOnly 早退之前,无 netMode 门）。
@@ -887,6 +920,31 @@ export function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
     //   存活语义=仅 SquareTileFrame 级联。
     squareTileFrame(st, rng, x, y);
     return;
+  }
+  // ★IIII67b（cs:64251/64259）：getGoodWorld 灰烬崩塌级联——见函数头注释。
+  //   掷序 = 裂砖支之前；每活性邻格 1×Next(2)，命中需邻为活性灰烬且其下方非实心。
+  if (killGetGoodWorld && sheet === 57) {
+    for (let m = 0; m < 8; m++) {
+      let qx = x;
+      let qy = y;
+      switch (m) {          // 邻序 L,R,U,D,UL,UR,DL,DR——与裂砖支逐项一致
+        case 0: qx--; break;
+        case 1: qx++; break;
+        case 2: qy--; break;
+        case 3: qy++; break;
+        case 4: qx--; qy--; break;
+        case 5: qx++; qy--; break;
+        case 6: qx--; qy++; break;
+        case 7: qx++; qy++; break;
+      }
+      if (!st.inBounds(qx, qy)) continue;   // 原版索引即安全域；防御等价
+      const qi = st.idx(qx, qy);
+      if (st.flags[qi] && rng.nextInt(2) === 0 && SHEET_OF[st.type[qi]] === 57
+        && !solidTile(st, qx, qy + 1)) {
+        killTile(st, rng, qx, qy);
+        // Projectile.NewProjectile(type40 落灰)+NetMessage：零 genRand 掷、零 tile 通道写，略
+      }
+    }
   }
   // cs:63840-63894 裂砖(481-483)连锁（TTTTTT 批 2026-08-23 补）：8 邻域逐格掷
   //   Next(6)（正上邻 num17=3——仅 case2 减半,正下/斜向恒 6）,掷对「活性邻格」
@@ -1087,8 +1145,74 @@ export function poundTile(st: TileStore, x: number, y: number): boolean {
   return true;
 }
 
+/** ★IIII66 诊断旁路（dormant，x86 输入重放实验专用）：把探针端准备好的 x86 快照
+ *  八通道 TypedArray 整图覆写进 store（sheet 域→内部 id）。逐格优先复用我们自身
+ *  同槽快照的 rawtyp 保真（两世界一致域零近似），仅 sheet 不同的分歧格走
+ *  sheet→内部 id 首注册兜底反查。仅当 globalThis.__SW_I66_PRE_STATE 存在时生效；
+ *  正常生成恒为 no-op。 */
+export function loadI66ReplayStore(st: TileStore): void {
+  interface I66State {
+    t: Uint16Array; a: Uint8Array; w: Uint16Array; l: Uint8Array; lt: Uint8Array;
+    hf: Uint8Array; sl: Uint8Array; ia: Uint8Array; jt: Uint16Array | null;
+  }
+  const ps = (globalThis as unknown as { __SW_I66_PRE_STATE?: I66State }).__SW_I66_PRE_STATE;
+  if (!ps) return;
+  const { t: xt, a: xa, w: xw, l: xl, lt: xlty, hf: xhf, sl: xsl, ia: xia, jt } = ps;
+  const N = st.w * st.h;
+  // sheet→内部 id 兜底表：取该 sheet 首个注册的 def（canonical 先注册；
+  // place_v_ 派生件后注册，天然被跳过）
+  const rev = new Int32Array(4096).fill(-1);
+  const SHEETI = new Int32Array(TILE_DEFS.length).fill(-1);
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const s = TILE_DEFS[i]?.vanilla?.sheet;
+    if (typeof s !== 'number' || s < 0) continue;
+    SHEETI[i] = s;
+    if (rev[s] < 0) rev[s] = i;
+  }
+  let unmappedWarned = 0;
+  let slopeSum = 0; let wallSum = 0;
+  for (let i = 0; i < N; i++) {
+    st.liquid[i] = xl[i]!;
+    st.liquidType[i] = xl[i]! > 0 ? xlty[i]! + 1 : 0;
+    st.half[i] = xhf[i]!;
+    st.slope[i] = xsl[i]!;
+    // ★保真：仅覆写八通道位；paint/coat/frameX/frameY/wire 其余位**保留我方原值**
+    //   （零值化曾破坏 canPoundTile/KillTile 的 framed 判定——g 链重放因此假红
+    //   5.5 万格，IIII66 实证）。act 只取 bit0，其余标志保留。
+    st.flags[i] = (st.flags[i]! & ~1) | (xa[i]! & 1);
+    st.wire[i] = (st.wire[i]! & ~32) | (xia[i] ? /* WIRE_ACTUATED */ 32 : 0);
+    st.wall[i] = xw[i]!;
+    const va = xa[i]!;
+    const wantSheet = va || xt[i]! !== 0 ? xt[i]! : -999;
+    let inner = -1;
+    if (jt && wantSheet >= 0 && SHEETI[jt[i]!] === wantSheet) inner = jt[i]!;
+    else if (wantSheet >= 0) inner = rev[wantSheet];
+    if (inner >= 0) st.type[i] = inner;
+    else if (!va) st.type[i] = 0;
+    else if (unmappedWarned++ < 20) console.warn(`[i66replay] unmapped sheet ${wantSheet} @${i % st.w},${(i / st.w) | 0}`);
+    slopeSum += xsl[i]!; wallSum += xw[i]!;
+  }
+  // ★载入自检：通道校验和打点（确认注入真的发生且逐字节可对齐）
+  console.log(`[i66replay] engaged N=${N} slopeSum=${slopeSum} wallSum=${wallSum}`);
+}
+
+/** ★IIII66：补角支的 vanilla PlaceTile 近似（生成期 default 支）——置格(active+type+
+ *  帧清零+坡/半砖清)后发 SquareTileFrame(i,j) 尾级联（与 killTile 尾同構调度）。 */
+function placeCornerBlock(st: TileStore, rng: RNG, x: number, y: number, mat: number): void {
+  const i = st.idx(x, y);
+  st.type[i] = mat;
+  st.flags[i] = 1;
+  st.half[i] = 0;
+  st.slope[i] = 0;
+  st.frameX[i] = 0;
+  st.frameY[i] = 0;
+  squareTileFrame(st, rng, x, y);
+}
+
 /** 原版 pass "Smooth World"（1456 WorldGen.cs:16507-16687）：地表凸起 → 坡面/半砖/削除 */
 export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void {
+  // ★IIII66 重放钩（dormant）：见 loadI66ReplayStore。诊断旁路,常规路径不读 globalThis。
+  if ((globalThis as Record<string, unknown>).__SW_I66_PRE_STATE) loadI66ReplayStore(st);
   // ★pass 头 tileSolid 翻转（cs:16510 `SetCrackedBrickSolidity(solid: true)` →
   //   481/482/483 短暂回实心）：本仓 TILE_DEFS 已把 481-483 预翻为 solid:false
   //   （数据不可动）,GenSolid 可表达该 true 窗口——SmoothWorld 期间裂纹砖按实心处理,
@@ -1178,7 +1302,13 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
               // 16605：右邻 495（贝壳堆）→ 用右邻材料而非下方材料
               const mat = T.SHELL_495.has(st.type[st.idx(i + 1, j)]) ? st.type[st.idx(i + 1, j)] : belowType;
               swAct('T', i, j, mat);
-              if (!T.PLACE_REFUSE.has(mat)) st.setTileSilent(i, j, mat);
+              // ★IIII66 定罪修复（cs:16605→PlaceTile→尾 SquareTileFrame）：原版走
+              //   WorldGen.PlaceTile(default 支 cs:60280-60294)——放置成功后必发
+              //   SquareTileFrame(i,j) 级联(3×3 TileFrame:活性残坡/残半砖清零 +
+              //   派发)。旧版 setTileSilent 跳过级联 → 幽灵坡/半砖残留改变后续
+              //   SolidTile 门禁 → #53 S0↔S{1..4} 45k 格家庭（SQ 序对拍: X 16004
+              //   vs JS 7227,首差 @ln11 (20,598) 正是补角支缺失级联）。
+              if (!T.PLACE_REFUSE.has(mat)) placeCornerBlock(st, rng, i, j, mat);
               if (rng.int(0, 1) === 0) slopeTile(st, i, j, 2); else poundTile(st, i, j);
             }
             if (!T.NO_FILL_SIDE.has(st.type[st.idx(i - 1, j)])
@@ -1187,7 +1317,8 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
               // 16626：左邻 495 → 用左邻材料
               const mat = T.SHELL_495.has(st.type[st.idx(i - 1, j)]) ? st.type[st.idx(i - 1, j)] : belowType;
               swAct('T', i, j, mat);
-              if (!T.PLACE_REFUSE.has(mat)) st.setTileSilent(i, j, mat);
+              // ★IIII66 同上（左邻腿）
+              if (!T.PLACE_REFUSE.has(mat)) placeCornerBlock(st, rng, i, j, mat);
               if (rng.int(0, 1) === 0) slopeTile(st, i, j, 1); else poundTile(st, i, j);
             }
           }

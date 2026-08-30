@@ -10,6 +10,7 @@ import { petInfoOfVid } from '../data/vanillaPets';
 import { petSlimeHitVoice } from '../data/vanillaNpcAmbience';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { vanillaIdOfItem } from '../stats/Shimmer';
+import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { computeSellValue, canSellFromShopUi, expectedPrices, itemValueWithPrefix, buybackShelfStack } from '../stats/SellChain';
 import { countDefenderMedals, spendDefenderMedals } from '../stats/DefenderMedals';
 import { findExoticPlantSlot, rollDyeTraderReward } from '../stats/DyeTrade';
@@ -1121,8 +1122,35 @@ export function dropInventoryOnDeath(
   });
 }
 
-/** NPC 对话框按钮 id（与 ui/NpcDialog.ts NpcButtonId 同形；quest = 渔夫任务交付） */
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'hair' | 'quest' | 'plant' | 'happiness' | 'status' | 'close';
+/** NPC 对话框按钮 id（与 ui/NpcDialog.ts NpcButtonId 同形；quest = 渔夫任务交付）
+ *  2026-08-30 全表对齐 NPCInteractions.Initialize(:489-531)——新增六类，见 NpcDialog.ts 注 */
+export type NpcButtonId = 'shop' | 'shopDecor' | 'heal' | 'curse' | 'collect' | 'reforge'
+  | 'hair' | 'quest' | 'plant' | 'happiness' | 'status' | 'help' | 'craft' | 'music'
+  | 'advice' | 'stardew' | 'home' | 'pet' | 'close';
+
+/** NPCID.Sets.IsTownPet（NPCID.cs:4446）：城镇猫/狗/兔 + 八只城镇史莱姆 */
+const TOWN_PET_VIDS = new Set<number>([637, 638, 656, 670, 678, 679, 680, 681, 682, 683, 684]);
+
+/** GetPettingInfo 站距表（NPC.cs:81685-81717）：小宠按型缩距，狗等大型 =36 */
+const TOWN_PET_PETTING: Record<number, { reach: number; small: boolean }> = {
+  637: { reach: 28, small: true },   // 猫
+  638: { reach: 36, small: false },  // 狗
+  656: { reach: 24, small: true },   // 兔
+  670: { reach: 26, small: true },   // 蓝
+  678: { reach: 26, small: true },   // 绿(酷)
+  679: { reach: 26, small: true },   // 老
+  680: { reach: 26, small: true },   // 紫(笨)
+  681: { reach: 26, small: true },   // 彩虹
+  682: { reach: 22, small: true },   // 红
+  683: { reach: 26, small: true },   // 黄
+  684: { reach: 20, small: true },   // 铜(侍从)
+};
+
+/** Lang.GetSlimeType（Lang.cs:377-403）：城镇史莱姆 vid → Chatter 分类名段 */
+const TOWN_SLIME_CHATTER: Record<number, string> = {
+  670: 'Blue', 678: 'Green', 679: 'Old', 681: 'Rainbow',
+  680: 'Purple', 682: 'Red', 683: 'Yellow', 684: 'Copper',
+};
 /** 按钮通知图标（NPCChatPanel.cs:136-138 interaction.ShowExclamation →
  *  Utils.DrawNotificationIcon 按钮文字右+8px,rotMul=0 无摇摆仅亮度脉冲） */
 export interface NpcButton {
@@ -1167,6 +1195,9 @@ export interface GameCallbacks {
   onNpcDialogClose?: () => void;
   /** 哥布林重铸界面（Main.InReforgeMenu） */
   onReforgeOpen?: () => void;
+  /** 向导「制作」反查界面（Main.NPCChatText_GuideReverseCrafting :40723：
+   *  playerInventory=true + InGuideCraftMenu——UI 侧开背包 + 向导反查浮层） */
+  onGuideCraftOpen?: () => void;
   /** 商店面板(SetupShop):条目(图标由 UI 按原版 id 补)+ 当前铜币；
    *  happinessMul = 快乐度价格乘子（Main.cs:41231-41243 标题旁表情/百分比显示用）；
    *  buyback = 卖回货架条目下标（Chest.AddItemToShop 的 buyOnce 克隆，购买时
@@ -21797,69 +21828,392 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     // FullName 语义（NPC.FullName:6657 + Game.NPCTitle，zh "{1}{0}"=类型名+个人名）
     const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
-    // ★批III尾窗：Stardew 彩蛋触发（Main.cs:40965 DryadText_WorldPurityOrStardewValleyBit
-    //    + CanDryadPlayStardewAnimation :41158：手持 Joja 可乐 5275 对树妖(20)对话 →
-    //    消耗 1 罐 + 播编排器（弹体 995 ai[0] 计时）+ progression 46 + 彩蛋台词）
-    if (npc.vanillaId === 20) {
-      const held = this.player.inv.heldItem();
-      const hv = held ? viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') : -1;
-      if (held && hv === 5275 && held.stack > 0) {
-        this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.cb.onInventoryChanged?.();
-        startStardewAnimation();
-        this.achievements.notifyProgressionEvent(46);   // NotifyProgressionEvent(46) :40992
-        this.sfx.play('menuOpen');
-        this.cb.onNpcDialog?.(name, this.formatDialogTags(Lang.text('StardewTalk.PlayerGivesCola')),
-          this.npcDialogButtons(npc), portraitUrl(npc.vanillaId), npc.vanillaId);
-        return;
-      }
+    // ★2026-08-30 翻案修正：手持 Joja 可乐对树妖开对话 ≠ 立刻消费——
+    //   NPCChatPanel.OverrideChatTextWithShenanigans(:197-215) 只把台词覆写成
+    //   StardewTalk.PlayerHasColaAndIsHoldingIt（持有期间每帧钉住），消耗/演出/
+    //   event46 都在「净化」按钮 Interact（StardewValleyBit→DryadText_Do_
+    //   StardewValleyBit :40974）里。此前版本开框即吞罐，玩家点关闭也白扣货。
+    let chat = this.townNpcChat(npc);
+    if (npc.vanillaId === 20 && this.dryadCanPlayStardew()) {
+      chat = Lang.text('StardewTalk.PlayerHasColaAndIsHoldingIt');
     }
     // chatOverride：唤醒链（AI_000_TransformBoundNPC）传换型前 GetChat 台词
-    this.cb.onNpcDialog?.(name, this.formatDialogTags(chatOverride ?? this.townNpcChat(npc)),
+    this.cb.onNpcDialog?.(name, this.formatDialogTags(chatOverride ?? chat),
       this.npcDialogButtons(npc), portraitUrl(npc.vanillaId), npc.vanillaId);
   }
 
-  /** 对话框按钮组（NPCInteractions.cs 各 NPCInteraction 注册序）：商店/治疗/收税/
-   *  重铸/诅咒/渔夫任务（AnglerQuest :134-152，标签 Lang.inter[64]「任务」） */
+  /** 对话框按钮组——2026-08-30 按原版注册表逐项对齐并复刻渲染顺序：
+   *  NPCChatPanel.DrawButtons(:98-156) 按 NPCInteractions.All 注册序遍历可见项，
+   *  每 4 个换行——「关闭」不在末尾而是注册位（Initialize :516，紧随 NurseHeal）。
+   *  各项 Interact 行为见 npcDialogButton 对应分支。 */
   private npcDialogButtons(npc: TownNPC): Array<{ id: NpcButtonId; label: string; excl?: boolean }> {
     const buttons: Array<{ id: NpcButtonId; label: string; excl?: boolean }> = [];
-    // 商店按钮(NPCInteractions.cs:489-513 Shop 注册表覆盖的全部 NPC)
-    if (Game.SHOPSTOCK[String(npc.vanillaId)]) buttons.push({ id: 'shop', label: Lang.inter(28) });
-    if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
-    // 树妖：世界状态（NPCInteractions.cs:124-129 Register Status——注册序在商店后）
-    if (npc.npcKey === 'dryad') buttons.push({ id: 'status', label: Lang.text('Mods.SandboxWorld.NPC.WorldStatus') });
-    if (npc.npcKey === 'tax_collector') buttons.push({ id: 'collect', label: Lang.inter(89) }); // 收集税款
-    // 哥布林工匠：重铸（NPCChatText_TinkererReforge Main.cs:39431）
-    if (npc.npcKey === 'goblin_tinkerer') buttons.push({ id: 'reforge', label: Lang.inter(19) });
-    // 造型师：理发（NPCInteractions.StylistHairWindow :426-442——注册序在重铸之后、
-    // 染料商之前；标签 GameUI.HairStyle「发型」，Interact = Main.OpenHairWindow）
-    if (npc.vanillaId === 353) buttons.push({ id: 'hair', label: Lang.text('GameUI.HairStyle') });
-    // 染料商：奇异植物换染料（NPCInteractions.DyeTraderRarePlant :444-463——
-    // 注册序在重铸/发型窗之后；Condition = type 207 && Main.hardMode，
-    // 标签 Lang.inter[107]「奇异植物」）
-    if (npc.npcKey === 'dyer' && this.world.flags.hardMode) {
-      buttons.push({ id: 'plant', label: Lang.inter(107) });
+    // ---- OpenShop ×25（Initialize :489-513 注册最先）----
+    // 商店按钮(NPCInteractions.cs:489-513 Shop 注册表覆盖的全部 NPC)；画家 227
+    // 双店：15=常规（同 :497）+ 25="GameUI.PainterDecor" 装饰墙纸专柜(:513)。
+    // 旅行商(368)走动态股票 buildTravelStock，SHOPSTOCK 无 '368' 静态键——
+    // 曾只按静态表判门=按钮永不出现死路（审计 2026-08-30 TOP1）
+    if (Game.SHOPSTOCK[String(npc.vanillaId)] || npc.npcKey === 'travelling_merchant') {
+      buttons.push({ id: 'shop', label: Lang.inter(28) });
     }
-    // 守卫老人:夜晚出现「诅咒」(白天只闲聊,原版 GetChat 语义)
-    // OldManCurse.Condition（NPCInteractions.cs:173-180）仅 TalkNPCType==37 && !IsItDay()
-    // ——无 hardMode 门（困难模式老人已转裁缝不在场；此前多挂的 !hardMode
-    // 合取已删，2026-08-18 对齐）
+    if (npc.vanillaId === 227) buttons.push({ id: 'shopDecor', label: Lang.text('GameUI.PainterDecor') });
+    // TaxCollectorCollectTaxes(:514)
+    if (npc.npcKey === 'tax_collector') buttons.push({ id: 'collect', label: Lang.inter(89) });
+    // NurseHeal(:515)
+    if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
+    // CloseChat(:516)——关闭按注册序落位，与其它按钮同行/邻行混排
+    buttons.push({ id: 'close', label: Lang.inter(52) });
+    // OpenSign(:517) 条件 LocalPlayer.sign>-1（点路牌弹的对话框路径）——本仓路牌
+    // 走独立阅读/编辑面板不并入 NPC 对话框，无此按钮（登记差异）
+    // StardewValleyBit(:518 ShowExclamation=true)/DryadPurification(:519) 同 type20
+    // 且条件互斥：手持 Joja 可乐且未在演出中 → 只给「净化」
+    if (npc.npcKey === 'dryad' && this.dryadCanPlayStardew()) {
+      buttons.push({ id: 'stardew', label: Lang.text('StardewTalk.GiveColaButtonText'), excl: true });
+    } else if (npc.npcKey === 'dryad') {
+      // 树妖：世界状态。标签 = 原版 inter[49]「状态」（此前自定义键已废）
+      buttons.push({ id: 'status', label: Lang.inter(49) });
+    }
+    // AnglerQuest(:520)：标签 inter[64]，ShowExclamation=!Main.anglerQuestFinished(:135)
+    if (npc.vanillaId === 369) buttons.push({ id: 'quest', label: Lang.inter(64), excl: !this.world.anglerQuestFinished });
+    // PetAnimal(:521)：IsTownPet（NPCID.cs:4446 = 637/638/656/670/678-684）→「抚摸」
+    if (TOWN_PET_VIDS.has(npc.vanillaId)) buttons.push({ id: 'pet', label: Lang.text('UI.PetTheAnimal') });
+    // OldManCurse(:522)：type37 && !IsItDay()；白天只闲聊
     if (npc.npcKey === 'old_man' && !this.world.clock.isDay) {
       buttons.push({ id: 'curse', label: Lang.inter(50) });                                 // 诅咒
     }
-    // 渔夫：任务交付（NPCInteractions.AnglerQuest.GetText = Lang.inter[64]）
-    // 渔夫:任务交付(NPCInteractions.AnglerQuest:GetText=inter[64]、ShowExclamation
-    // = !Main.anglerQuestFinished(NPCInteractions.cs:135)→按钮后通知图标)
-    if (npc.vanillaId === 369) buttons.push({ id: 'quest', label: Lang.inter(64), excl: !this.world.anglerQuestFinished });
-    // 快乐度（ReportHappiness，NPCInteractions.cs:289-314；注册序在全部商店/其它交互之后）：
-    // 无家 NPC 换成 RequestHome 不显示（NPC.CanShowHomelessText NPC.cs:96048-96060），
-    // 旅行商/骷髅商/老人 HappinessReport 为空也不显示
-    if (!this.canShowHomelessText(npc) && (this.dialogHappiness?.report.length ?? 0) > 0) {
-      buttons.push({ id: 'happiness', label: Lang.text('UI.NPCCheckHappiness') });
+    // GuideTip(:523)：帮助 → HelpText() 情境建议写入台词区
+    if (npc.vanillaId === 22) buttons.push({ id: 'help', label: Lang.inter(51) });
+    // PartyGirlMusicSwap(:524)：标签 GameUI.Music「音乐」
+    if (npc.vanillaId === 208) buttons.push({ id: 'music', label: Lang.text('GameUI.Music') });
+    // GuideReverseCrafting(:525)：制作反查（InGuideCraftMenu）
+    if (npc.vanillaId === 22) buttons.push({ id: 'craft', label: Lang.inter(25) });
+    // TinkererReforge(:526)
+    if (npc.npcKey === 'goblin_tinkerer') buttons.push({ id: 'reforge', label: Lang.inter(19) });
+    // StylistHairWindow(:527)：标签 GameUI.HairStyle「发型」
+    if (npc.vanillaId === 353) buttons.push({ id: 'hair', label: Lang.text('GameUI.HairStyle') });
+    // DyeTraderRarePlant(:528)：type207 && Main.hardMode，标签 inter[107]
+    if (npc.npcKey === 'dyer' && this.world.flags.hardMode) {
+      buttons.push({ id: 'plant', label: Lang.inter(107) });
     }
-    buttons.push({ id: 'close', label: Lang.inter(52) });                                   // 关闭
+    // TavernkeepAdvice(:529)：标签 UI.BartenderHelp「永恒水晶」
+    if (npc.vanillaId === 550) buttons.push({ id: 'advice', label: Lang.text('UI.BartenderHelp') });
+    // ReportHappiness(:530) 与 RequestHome(:531 ShowExclamation) 互斥对
+    // （CanShowHomelessText 门 NPC.cs:96048-96060）；旅行商/骷髅商/老人报告为空也不显示
+    if (!this.canShowHomelessText(npc)) {
+      if ((this.dialogHappiness?.report.length ?? 0) > 0) {
+        buttons.push({ id: 'happiness', label: Lang.text('UI.NPCCheckHappiness') });
+      }
+    } else {
+      buttons.push({ id: 'home', label: Lang.text('UI.NPCHousing'), excl: true });
+    }
     return buttons;
   }
+
+  /** CanDryadPlayStardewAnimation（Main.cs:41152-41159）：手持 Joja 可乐 5275 且
+   *  树妖未在演出中（ai[0]!=24——本仓演出为全局 FX 无 ai 态，只挡重复触发） */
+  private dryadCanPlayStardew(): boolean {
+    const held = this.player.inv.heldItem();
+    if (!held || held.stack <= 0) return false;
+    return vanillaIdOfItem(held.id) === 5275;
+  }
+
+  /** 向导帮助建议计数器（Main.helpText Main.cs:1292——跨对话滚动的静态游标，
+   *  每次「帮助」点击 ++；原版存档不持久化，此处会话内有效） */
+  private guideHelpCounter = 0;
+  /** 酒馆老板建议循环游标（Main.BartenderHelpTextIndex，Help_1..11 循环）+ 首聊礼 */
+  private bartenderHelpIndex = 0;
+  private bartenderFirstGiftDone = false;
+  /** 派对女孩换曲开关（Main.swapMusic，会话态不入档；alt-track 曲库未导入挂账） */
+  swapMusic = false;
+
+  /** Main.HelpText()（Main.cs:39721-40473）1:1 转写：向导按背包/世界状态给出
+   *  下一步建议。结构 = helpText 计数器每次 ++ 后走分支链，首个「计数命中 &&
+   *  条件成立」分支把建议写入台词区并 return；越过 1200 归零；计数走到 1159 且
+   *  (downedBoss1&&downedBoss2&&!Deerclops) 时 break → 兜底 Help_1160。
+   *  转写差异（登记）：①Phase 0（GuideHelpText.Help_N 条件内嵌型提示）现语言包
+   *  仅含 Help_1063/1064/1065 且其 hjson conditions 元数据不在反编译树内，对拍
+   *  不可得——跳过该段，计数器照常推进；②物品扫描遍历主背包（inv.slots），原版
+   *  另含钱币/弹药槽（58 槽全扫对结果面等价——钱币弹药无工具力/无表列 vid）；③
+   *  安全护栏：单次调用最多迭代 1200 次，极端状态落 Help_1160 兜底防死循环 */
+  private guideHelpText(): string {
+    const D = (n: number): string => Lang.text(`LegacyDialog.${n}`);
+    const S = (n: number): string => Lang.text(`GuideHelpTextSpecific.Help_${n}`);
+    const w = this.world;
+    const p = this.player;
+    const f = w.flags;
+    const hardMode = !!f.hardMode;
+    const crimson = w.crimson;
+    const journey = p.appearance?.difficulty === 3;
+    // ---- C# 前段逐物扫描（Main.cs:39723-39805）----
+    // 豁免 ids：镐 journey?1:3509、斧 journey?10:3506（3507 系铜短工具族）、锤仅 journey 免 7
+    const exemptPick = journey ? 1 : 3509;
+    const exemptAxe = journey ? 10 : 3506;
+    let starterGear = true;                       // flag4 仍是初始三件套
+    let hasOre = false, hasBar = false;           // flag5 矿石(11-14/699-702)/flag6 锭(19-22/703-706)
+    let hasFallenStar = false;                    // flag7 75
+    let hasEye = false;                           // flag8 38 可疑眼球
+    let hasEvilSummon = false;                    // flag9 67/68/70/1330/1331/2886
+    let grappleFlag = !!(p.inv.miscEquips?.[4]);  // flag10 初始=miscEquips[4] 钩爪槽非空(:39740)
+    let hasDesertFossil = false;                  // flag11 3347
+    let hasHellstone = false;                     // flag12 174
+    let hasTempleKey = false;                     // flag13 1141
+    let hasAnyBiomeKey = false;                   // flag14 1533-1537/4714
+    const ORES = new Set([11, 12, 13, 14, 699, 700, 701, 702]);
+    const BARS = new Set([19, 20, 21, 22, 703, 704, 705, 706]);
+    const EVIL_SUMMON = new Set([67, 68, 70, 1330, 1331, 2886]);
+    const BIOME_KEYS = new Set([1533, 1534, 1535, 1536, 1537, 4714]);
+    for (const sl of p.inv.slots) {
+      if (!sl || sl.stack <= 0) continue;
+      const vid = vanillaIdOfItem(sl.id);
+      const tool = ITEM_DEFS[sl.id]?.tool ?? this.itemFuncTool(sl.id);
+      if (tool) {
+        if ((tool.pickPower ?? tool.power ?? 0) > 0 && vid !== exemptPick) starterGear = false;
+        if ((tool.axePower ?? 0) > 0 && vid !== exemptAxe) starterGear = false;
+        if ((tool.hammerPower ?? 0) > 0 && (!journey || vid !== 7)) starterGear = false;
+      }
+      if (ORES.has(vid)) hasOre = true;
+      if (BARS.has(vid)) hasBar = true;
+      if (vid === 75) hasFallenStar = true;
+      if (vid === 38) hasEye = true;
+      if (EVIL_SUMMON.has(vid)) hasEvilSummon = true;
+      if (hookItemOf(vid)) grappleFlag = true;    // projHook[item.shoot] 门(:39784)
+      if (vid === 3347) hasDesertFossil = true;
+      if (vid === 174) hasHellstone = true;
+      if (vid === 1141) hasTempleKey = true;
+      if (BIOME_KEYS.has(vid)) hasAnyBiomeKey = true;
+    }
+    // ---- 世界级聚合旗（映射见 :6253/:6325 同口径；——NPC.cs SetEventFlagCleared）----
+    const d1 = !!(f['downed_4'] || f.downedEyeOfCthulhu);                       // downedBoss1
+    const d2 = !!(f['downed_13'] || f['downed_266']);                           // downedBoss2
+    const d3 = !!(f['downed_35'] || f.downedSkeletron);                         // downedBoss3
+    const mech1 = !!f['downed_134'], mech2 = !!(f['downed_125'] || f['downed_126']), mech3 = !!f['downed_127'];
+    const mechAll = mech1 && mech2 && mech3;
+    const mechAny = mechAll || mech1 || mech2 || mech3;
+    const plantDown = !!f['downed_262'];
+    const golemDown = !!f['downed_245'];
+    const fishronDown = !!(f.downedFishron || f['downed_370']);
+    const beeDown = !!(f.downedQueenBee || f['downed_222']);
+    const deerclopsDown = !!f['downed_668'];
+    const hallTree = !!(f.downedHalloweenTree || f['downed_325']);
+    const hallKing = !!(f.downedHalloweenKing || f['downed_327']);
+    const iceQueen = !!(f.downedChristmasIceQueen || f['downed_344']);
+    const xmasTree = !!(f.downedChristmasTree || f['downed_346']);
+    const santank = !!(f.downedChristmasSantank || f['downed_345']);
+    const moonlordDown = !!f['downed_398'];
+    const lunarUp = !!f.lunarApocalypseUp;
+    // ---- 城镇 NPC 在场检测（Main.cs:39806-39941：15-39 号 flag 表）----
+    let num3 = 0;                                 // 在镇城镇 NPC 数（除老人 37）
+    let hasMerchant = false, hasNurse = false, hasArmsDealer = false, hasDryad = false;
+    let hasMechanic = false, hasClothier = false, hasDemo = false, hasGoblin = false;
+    let hasWizard = false, hasWitchDoctor = false, hasSteampunker = false, hasCyborg = false;
+    let hasStylist = false, hasAngler = false, hasTaxCollector = false, hasPirate = false;
+    let hasDyer = false, hasTruffle = false, hasGolfer = false, hasPainter = false;
+    let hasPartyGirl = false, hasTavernkeep = false, hasTravelMerchant = false, hasSkeleton = false;
+    let hasZoologist = false;
+    for (const n of this.entities.npcs) {
+      if (!(n instanceof TownNPC) || n.dead) continue;
+      num3++;
+      switch (n.vanillaId) {
+        case 17: hasMerchant = true; break;
+        case 18: hasNurse = true; break;
+        case 19: hasArmsDealer = true; break;
+        case 20: hasDryad = true; break;
+        case 54: hasClothier = true; break;
+        case 124: hasMechanic = true; break;
+        case 38: hasDemo = true; break;
+        case 108: hasWizard = true; break;
+        case 107: hasGoblin = true; break;
+        case 228: hasWitchDoctor = true; break;
+        case 178: hasSteampunker = true; break;
+        case 209: hasCyborg = true; break;
+        case 353: hasStylist = true; break;
+        case 633: hasZoologist = true; break;
+        case 369: hasAngler = true; break;
+        case 441: hasTaxCollector = true; break;
+        case 229: hasPirate = true; break;
+        case 207: hasDyer = true; break;
+        case 160: hasTruffle = true; break;
+        case 588: hasGolfer = true; break;
+        case 227: hasPainter = true; break;
+        case 208: hasPartyGirl = true; break;
+        case 550: hasTavernkeep = true; break;
+        case 368: hasTravelMerchant = true; break;
+        case 453: hasSkeleton = true; break;
+      }
+    }
+    void hasDryad;   // 20 只置位未消费（vanilla 同款：flag17 无分支引用）
+    // ---- 分支链（与原分支逐条同序同谓词；帮助计数器语义同前注）----
+    for (;;) {
+      this.guideHelpCounter++;
+      const h = this.guideHelpCounter;
+      // 工具入门组（:39949-40055）
+      if (starterGear) {
+        if (h === 1) return D(177);
+        if (h === 2) return D(178);
+        if (h === 3) return D(179);
+        if (h === 4) return D(180);
+        if (h === 5) return D(181);
+        if (h === 6) return D(182);
+      }
+      if (starterGear && !hasOre && !hasBar && h === 11) return D(183);
+      if (starterGear && hasOre && !hasBar) {
+        if (h === 21) return D(184);
+        if (h === 22) return D(185);
+      }
+      if (starterGear && hasBar) {
+        if (h === 31) return D(186);
+        if (h === 32) return D(187);
+      }
+      if (p.maxHp <= 100 && h === 41) return D(188);     // !flag(statLifeMax>100)
+      if (p.maxMana <= 20 && h === 42) return D(189);
+      if (p.maxMana <= 20 && !hasFallenStar && h === 43) return D(190);
+      if (!hasMerchant && !hasNurse) {
+        if (h === 51) return D(191);
+        if (h === 52) return D(192);
+        if (h === 53) return D(193);
+        if (h === 54) return D(194);
+        if (h === 55) return Lang.text('GuideHelpText.Help_1065');
+      }
+      if (!hasMerchant && h === 61) return D(195);
+      if (!hasNurse && h === 62) return D(196);
+      if (!hasArmsDealer && h === 63) return D(197);
+      if (!hasDryad && h === 64) return D(198);
+      if (!hasMechanic && d3 && h === 65) return D(199);
+      if (!hasClothier && d3 && h === 66) return D(200);
+      if (!hasDemo && h === 67) return D(201);
+      if (!hasGoblin && d2 && h === 68) return D(202);
+      if (!hasWizard && hardMode && h === 69) return D(203);
+      if (!hasWitchDoctor && d2 && h === 70) return S(1100);
+      if (!hasSteampunker && hardMode && h === 71) return S(1101);
+      if (!hasCyborg && mech1 && mech2 && mech3 && h === 72) return S(1102);
+      if (!hasStylist && h === 73) return S(1103);
+      if (!hasAngler && h === 74) return S(1104);
+      if (!hasTaxCollector && hardMode && h === 75) return S(1105);
+      if (!hasPirate && hardMode && h === 76) return S(1106);
+      if (!hasDyer && h === 77) return S(1107);
+      if (!hasTruffle && hardMode && h === 78) return S(1108);
+      if (!hasGolfer && h === 79) return S(1109);
+      if (!hasPainter && num3 >= 5 && h === 80) return S(1110);
+      if (!hasPartyGirl && num3 >= 17 && h === 81) return S(1111);
+      if (!hasTavernkeep && d2 && h === 82) return S(1112);
+      if (!hasTravelMerchant && hasMerchant && h === 83) return S(1113);
+      if (!hasSkeleton && !hardMode && h === 84) return S(1114);
+      if (!hasZoologist && !hardMode && h === 85) return S(1115);
+      // 召唤线（:40181-40200）
+      if (hasEye && !crimson && h === 100) return D(204);
+      if (hasEvilSummon && h === 101) return crimson ? D(403) : D(205);
+      if ((hasEye || hasEvilSummon) && h === 102) return crimson ? D(402) : D(206);
+      if (hasEye && crimson && h === 103) return S(1159);
+      // 进度建议带 201-216（:40201-40280）
+      if (!grappleFlag && !hardMode && !d3 && !d2 && h === 201) return D(207);
+      if (!hardMode && p.maxHp >= 140 && h === 202) return S(1120);
+      if (hardMode && mechAny && h === 203) return S(1121);
+      if (!f.downedGoblins && p.maxHp >= 200 && f.shadowOrbSmashed && h === 204) return S(1122);
+      if (hardMode && !f.downedPirates && p.maxHp >= 200 && h === 205) return S(1123);
+      if (hardMode && golemDown && !f.downedMartians && h === 206) return S(1124);
+      if ((d1 || d2 || d3) && h === 207) return S(1125);
+      if (!hardMode && h === 208) return S(1130);
+      if (!hardMode && h === 209) return S(1131);
+      if (!hardMode && h === 210) return S(1132);
+      if (!hardMode && h === 211) return S(1133);
+      if (!hardMode && h === 212) return S(1134);
+      if (!hardMode && h === 213) return S(1135);
+      if (!hardMode && (hasOre || hasBar) && h === 214) return S(1136);
+      if (p.anglerQuestsFinished < 1 && h === 215) return S(1137);
+      if (!hardMode && h === 216) return S(1138);
+      // Boss 冲刺带 1000-1062（:40281-40367）
+      if (!d1 && !d2 && h === 1000) return D(208);
+      if (!d1 && !d2 && h === 1001) return D(209);
+      if (!d2 && h === 1002) return crimson ? D(331) : D(210);
+      if (!d1 && p.maxHp < 200 && h === 1050) return D(211);
+      if (!d1 && p.defense <= 10 && h === 1051) return D(212);
+      if (!d1 && p.maxHp >= 200 && p.defense > 10 && h === 1052) return crimson ? D(404) : D(213);
+      if (d1 && !d2 && p.maxHp < 300 && h === 1053) return D(214);
+      if (d1 && !d2 && !crimson && p.maxHp >= 300 && h === 1054) return D(215);
+      if (d1 && !d2 && !crimson && p.maxHp >= 300 && h === 1055) return D(216);
+      if (d1 && d2 && !d3 && h === 1056) return D(217);
+      if (d1 && d2 && d3 && !hardMode && p.maxHp < 400 && h === 1057) return D(218);
+      if (d1 && d2 && d3 && !hardMode && p.maxHp >= 400 && h === 1058) return D(219);
+      if (d1 && d2 && d3 && !hardMode && p.maxHp >= 400 && h === 1059) return D(220);
+      if (d1 && d2 && d3 && !hardMode && p.maxHp >= 400 && h === 1060) return D(221);
+      if (hardMode && !plantDown && h === 1061) return crimson ? D(401) : D(222);
+      if (hardMode && !plantDown && h === 1062) return D(223);
+      // 特化带 1140-1159（:40368-40462）
+      if (d1 && !d2 && crimson && p.maxHp >= 300 && h === 1140) return S(1140);
+      if (d1 && !d2 && crimson && p.maxHp >= 300 && h === 1141) return S(1141);
+      if (d2 && !hardMode && h === 1142) return S(1142);
+      if (d2 && !beeDown && p.maxHp >= 300 && h === 1143) return S(1143);
+      if (hasDesertFossil && h === 1144) return S(1144);
+      if (hasHellstone && !hardMode && h === 1145) return S(1145);
+      // wingsLogic==0 = 未装备翅膀（Player.cs:12584 翼槽 logic；本仓 equipStats.wing）
+      if (hardMode && (p.equipStats.wing?.logic ?? 0) === 0 && !p.mount.active && !plantDown && h === 1146) return S(1146);
+      if (hardMode && w.savedOreTiers?.adamantite === 111 && !mechAny && h === 1147) return S(1147);
+      if (hardMode && w.savedOreTiers?.adamantite === 223 && !mechAny && h === 1148) return S(1148);
+      if (hardMode && mechAny && p.maxHp < 500 && h === 1149) return S(1149);
+      if (hardMode && mechAll && !plantDown && h === 1150) return S(1150);
+      if (hardMode && plantDown && !golemDown && hasTempleKey && h === 1151) return S(1151);
+      if (hardMode && plantDown && !golemDown && !hasTempleKey && h === 1152) return S(1152);
+      if (hardMode && hasAnyBiomeKey && h === 1153) return S(1153);
+      if (hardMode && !fishronDown && h === 1154) return S(1154);
+      if (hardMode && golemDown && !hallTree && !hallKing && h === 1155) return S(1155);
+      if (hardMode && golemDown && !iceQueen && !xmasTree && !santank && h === 1156) return S(1156);
+      if (hardMode && golemDown && this.anyVanillaNpcAlive(437) && !moonlordDown && h === 1157) return S(1157);
+      if (hardMode && lunarUp && !moonlordDown && h === 1158) return S(1158);
+      if (d1 && d2 && !deerclopsDown && h === 1159) break;         // 全灭门 → 兜底
+      if (h > 1200) this.guideHelpCounter = 0;                      // 归零回卷(:40467)
+    }
+    return Lang.text('GuideHelpTextSpecific.Help_1160');
+  }
+
+  /** NPC.AnyNPCs 近似（enemies 桶活体扫描；cultist 437/特例查询用） */
+  private anyVanillaNpcAlive(vid: number): boolean {
+    return this.entities.enemies.some((e) => !e.dead && (e as { vanillaId?: number }).vanillaId === vid);
+  }
+
+  /** PetAnimal.Interact（NPCInteractions.cs:165-168）→ Player.PetAnimal
+   *  （Player.cs:33621-33666）+ NPC.GetPettingInfo（NPC.cs:81682-81717 站距表）。
+   *  本仓 player.petAnimal 已按 :32901-32942 落地（弹体宠物路径共用）——此处只补
+   *  对话按钮接线：snap 成功 → 下坐 + 成就事件21；站位不可达 = 静默（原版同款）。
+   *  抚摸中复点 toggle 停止由 petAnimal 内部语义承接（对话面板随即关闭）。 */
+  private petDialogAnimal(npc: TownNPC): void {
+    const info = TOWN_PET_PETTING[npc.vanillaId];
+    const started = this.player.petAnimal(this, {
+      cx: npc.cx, bottomY: npc.y + npc.h,
+      isSmall: info?.small ?? false,
+      reach: info?.reach ?? 36,
+      valid: () => !npc.dead,
+    });
+    if (started) {
+      if (this.player.ridingMount) this.player.mount.tryDismount(this.player);
+      this.achievements.handleSpecialEvent(21,
+        { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+    }
+    this.sfx.play('menuTick', 1);     // 与弹体抚摸支同款反馈音（PetMount 支 id12 档）
+    this.closeNpcDialog();            // snap 后原对话失焦收起（UI 映射决策，注释登记）
+  }
+
+  /** Lang.BartenderHelpText（Lang.cs:312-330）：bartenderQuestLog==0 首聊 =
+   *  QuickSpawnItem 10×3817 护卫勋章 + BartenderSpecialText.FirstHelp；
+   *  其后按 Main.BartenderHelpTextIndex 循环 BartenderHelpText.Help_1..11。
+   *  登记差异：bartenderQuestLog 为角色持久字段，本仓暂以会话旗近似（DD2 存档批补） */
+  private bartenderAdviceText(npc: TownNPC): string {
+    void npc;
+    this.guideHelpText();                            // Main.cs:40692 直调 HelpText()（副作用=推进计数器，台词随后被覆写）
+    if (!this.bartenderFirstGiftDone) {
+      this.bartenderFirstGiftDone = true;
+      const key = VANILLA_ITEM_KEY_BY_ID[3817];
+      if (key && ITEM_BY_KEY[key] !== undefined) this.player.inv.add(ITEM_BY_KEY[key], 10);
+      this.cb.onInventoryChanged?.();
+      return Lang.text('BartenderSpecialText.FirstHelp');
+    }
+    const idx = this.bartenderHelpIndex % 11;
+    this.bartenderHelpIndex++;
+    return Lang.has(`BartenderHelpText.Help_${idx + 1}`)
+      ? Lang.text(`BartenderHelpText.Help_${idx + 1}`)
+      : Lang.text('UI.BartenderHelp');
+  }
+
+  private guideHelpCountLoopGuard(): void { /* 保留占位：直调 HelpText() 即本方法本身 */ }
 
   /** NPC.CanShowHomelessText（NPC.cs:96048-96060）：无家且非 37/368/453 → true
    *  （此时 ReportHappiness 让位 RequestHome，快乐度按钮不显示） */
@@ -22524,6 +22878,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const npc = this.dialogNpc;
     if (id === 'close' || !npc) { this.closeNpcDialog(); return; }
     if (id === 'shop') { this.openNpcShop(); return; }
+    // 画家装饰专柜（OpenShop(227,25,"GameUI.PainterDecor") Main.instance.OpenShop(:41160)：
+    // 同开商店管线，仅换货架来源——见 painterDecorStock）
+    if (id === 'shopDecor' && npc.vanillaId === 227) { this.openNpcShop(true); return; }
     if (id === 'heal') { this.nurseHeal(); return; }
     if (id === 'collect' && npc.npcKey === 'tax_collector') { this.taxCollect(); return; }
     if (id === 'reforge' && npc.npcKey === 'goblin_tinkerer') {
@@ -22553,27 +22910,114 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (id === 'quest' && npc.vanillaId === 369) { this.anglerQuestTurnIn(); return; }
     // 奇异植物换染料（Main.NPCChatText_DyeTraderRarePlant Main.cs:39411-39429）
     if (id === 'plant' && npc.npcKey === 'dyer') { this.dyeTraderRarePlant(); return; }
+    // GuideTip.Interact（NPCInteractions.cs:213-218）：sound12 + Main.HelpText()
+    // （Main.cs:39721——情境建议写进 npcChatText，同一对话面板台词区替换）+
+    // DoNPCPortraitHop。本仓 refreshNpcDialog 重开 DOM 面板自带弹跳
+    if (id === 'help' && npc.vanillaId === 22) {
+      this.sfx.play('menuTick');
+      this.refreshNpcDialog(npc, this.guideHelpText());
+      return;
+    }
+    // GuideReverseCrafting → NPCChatText_GuideReverseCrafting（Main.cs:40723-40734）：
+    // playerInventory=true + 关闭对话 + InGuideCraftMenu=true（原版重开合成面板并
+    // 切反查模式）。本仓 = 关对话 + 回调 UI 开背包 + 向导配方反查浮层
+    if (id === 'craft' && npc.vanillaId === 22) {
+      this.closeNpcDialog();
+      this.cb.onGuideCraftOpen?.();
+      return;
+    }
+    // PartyGirlMusicSwap → NPCChatText_PartyGirlSwapMusic（Main.cs:40739-40746）：
+    // sound12 + swapMusic 翻转 + Music1-3 三选一随机台词（切换后继续站在对话框里）
+    if (id === 'music' && npc.vanillaId === 208) {
+      this.sfx.play('menuTick');
+      this.swapMusic = !this.swapMusic;   // Main.swapMusic；alt-track 曲库未导入，翻转录登记挂账
+      this.refreshNpcDialog(npc, Lang.text(`PartyGirlSpecialText.Music${1 + Math.floor(Math.random() * 3)}`));
+      return;
+    }
+    // TavernkeepAdvice → NPCChatText_TavernkeepAdvice（Main.cs:40688-40694）：
+    // sound12 + HelpText()（原版怪癖：白推进向导 helpText 计数器一轮）+ 覆写为
+    // Lang.BartenderHelpText（首聊赠 10 护卫勋章，其后 Help_1..11 循环）
+    if (id === 'advice' && npc.vanillaId === 550) {
+      this.sfx.play('menuTick');
+      this.refreshNpcDialog(npc, this.bartenderAdviceText(npc));
+      return;
+    }
+    // PetAnimal 按钮派发（见 petDialogAnimal）
+    if (id === 'pet' && TOWN_PET_VIDS.has(npc.vanillaId)) {
+      this.petDialogAnimal(npc);
+      return;
+    }
+    // RequestHome.Interact（NPCInteractions.cs:328-369）：npcChatCornerItem=-1 +
+    // sound12 + portrait hop + 台词 = TownNPCMood_<Internal>.NoHome + 空行 +
+    // HousingText.HousingRequirements（松露 160 用 _Truffle 变体带 {NPCName} 槽；
+    // 宠物 chatter 分支(638/637/656/城镇史莱姆)未实装对应实体，随宠物批次补）
+    if (id === 'home' && this.canShowHomelessText(npc)) {
+      this.sfx.play('menuTick');
+      // 文案族（RequestHome.GetText :339-355）：宠物走 Cat/Dog/BunnyChatter、
+      // 城镇史莱姆走 Slime<Type>Chatter 的 NoHome；动物学家变身态(633 altTexture==2)
+    // 走 BestiaryGirlTransformed 分节；其余 = TownNPCMood_<Internal>.NoHome
+      let firstLine: string;
+      if (npc.vanillaId === 638) firstLine = Lang.text('DogChatter.NoHome');
+      else if (npc.vanillaId === 637) firstLine = Lang.text('CatChatter.NoHome');
+      else if (npc.vanillaId === 656) firstLine = Lang.text('BunnyChatter.NoHome');
+      else if (TOWN_SLIME_CHATTER[npc.vanillaId]) {
+        firstLine = Lang.has(`Slime${TOWN_SLIME_CHATTER[npc.vanillaId]}Chatter.NoHome`)
+          ? Lang.text(`Slime${TOWN_SLIME_CHATTER[npc.vanillaId]}Chatter.NoHome`)
+          : Lang.text('CatChatter.NoHome');        // 分类齐备（已验 zh/en），兜底仅防缺键
+      } else if (npc.vanillaId === 633 && npc.altTexture === 2) {
+        firstLine = Lang.text('TownNPCMood_BestiaryGirlTransformed.NoHome');
+      } else {
+        const internal = NPC_NAME_BY_ID[npc.vanillaId] ?? 'Guide';
+        const moodKey = `TownNPCMood_${internal}.NoHome`;
+        firstLine = Lang.has(moodKey) ? Lang.text(moodKey)
+          : Lang.text('TownNPCMood_Guide.NoHome');  // 缺键兜底
+      }
+      let text = firstLine;
+      text += '\n\n';
+      if (npc.vanillaId === 160) {
+        text += Lang.text('HousingText.HousingRequirements_Truffle')
+          .replace('{NPCName}', npc.givenName || (Lang.npcName(160) ?? '松露人'));
+      } else {
+        text += Lang.text('HousingText.HousingRequirements');
+      }
+      this.refreshNpcDialog(npc, text);
+      return;
+    }
     // 快乐度详情（ReportHappiness.Interact NPCInteractions.cs:303-313：音效 12 + 报告展示）
     if (id === 'happiness') {
       this.sfx.play('menuTick');
       this.openNpcHappinessPanel();
       return;
     }
-    if (id === 'status') {
-      // 树妖世界状态（NPCInteractions.cs:124-129 Actions.GetDryadWorldStatus：
-      // GetDryadWorldStatusDialog → 纯净世界触发 HandleSpecialEvent(27)）
-      this.sfx.play('menuTick');
-      // 星露谷彩蛋（DryadText_WorldPurityOrStardewValleyBit Main.cs:39697-39700：
-      // 手持 Joja Cola 5275（CanDryadPlayStardewAnimation :39885-39894：held==5275
-      // && npc.type==20）→ 消耗可乐 + event 46 INTERDIMENSIONAL_RECYCLING——优先于纯净门）
-      const heldNow = this.player.inv.heldItem();
-      if (heldNow && vanillaIdOfItem(heldNow.id) === 5275) {
-        this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.JojaCola'));
-        this.achievements.notifyProgressionEvent(46);
-        this.cb.onInventoryChanged?.();
-        return;
+    // StardewValleyBit.Interact（NPCInteractions.cs:97-102）→
+    // DryadText_Do_StardewValleyBit（Main.cs:40974-40985）：消耗 1 罐 Joja 可乐
+    // （ConsumeItem(5275, reverseOrder:true)=从后往前找首个持有槽）+
+    // HaveDryadDoStardewAnimation（本仓全局编排器 startStardewAnimation）+
+    // 台词 PlayerGivesCola + NotifyProgressionEvent(46)。开框瞬间的台词覆写已挪到
+    // openNpcDialog（对齐 NPCChatPanel.OverrideChatTextWithShenanigans :197-215）——
+    // 此前版本把消费挪进开框/状态按钮属误读，点关闭也白扣货（2026-08-30 翻案修正）
+    if (id === 'stardew' && npc.npcKey === 'dryad') {
+      const slots = this.player.inv.slots;
+      let colaIdx = -1;
+      for (let i = slots.length - 1; i >= 0; i--) {   // reverseOrder:true
+        const sl = slots[i];
+        if (sl && sl.stack > 0 && vanillaIdOfItem(sl.id) === 5275) { colaIdx = i; break; }
       }
+      if (colaIdx >= 0) {
+        this.player.inv.removeAt(colaIdx, 1);
+        this.cb.onInventoryChanged?.();
+      }
+      startStardewAnimation();
+      this.sfx.play('menuTick');                      // Interact 首行 PlaySound(12)
+      this.refreshNpcDialog(npc, Lang.text('StardewTalk.PlayerGivesCola'));
+      this.achievements.notifyProgressionEvent(46);   // INTERDIMENSIONAL_RECYCLING :40992
+      return;
+    }
+    if (id === 'status') {
+      // 树妖世界状态（DryadPurification.Interact NPCInteractions.cs:121-130：
+      // portrait hop + sound12 + GetDryadWorldStatusDialog → 纯净世界触发
+      // HandleSpecialEvent(27)）；Joja 彩蛋已拆独立「净化」按钮，不再混入此路）
+      this.sfx.play('menuTick');
       const pcts = alignmentPcts(this.world.store, Math.floor(this.world.groundLevel));
       const { text, pure } = dryadWorldStatus(pcts, this.world.name);
       this.cb.onNpcDialog?.(Lang.npcName(20) ?? '树妖', text,
@@ -22955,6 +23399,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private static readonly SHOPSTOCK: Record<string, Array<{ id: number; price: number | null; cond: string | null; customPrice?: number; currency?: 'DefenderMedals' }>> =
     (shopstockJson as { shops: Record<string, Array<{ id: number; price: number | null; cond: string | null; customPrice?: number; currency?: 'DefenderMedals' }>> }).shops;
 
+  /** 画家 case25 装饰专柜（Chest.cs:2477-2611）物品全集——提取器把两 case 合并进
+   *  JSON '227'，主店行过滤用；专柜台账= painterDecorStock() */
+  private static readonly PAINTER_DECOR_IDS = new Set<number>([
+    ...Array.from({ length: 10 }, (_, i) => 1948 + i),            // xMas 墙纸 ×10
+    ...Array.from({ length: 3 }, (_, i) => 2158 + i),
+    ...Array.from({ length: 7 }, (_, i) => 2008 + i),
+    1490, 1481, 1482, 1483, 1484, 5245, 1492, 1488, 1489,
+    5491, 1487, 1486, 1491, 1493, 1485, 1494, 5251,
+    4723, 4724, 4725, 4726, 4727, 5257, 4728, 4729,
+  ]);
+
   /** 当前对话 NPC 的商店商品表（Chest.SetupShop 数据驱动提取，tools/extract-shops.mjs）。
    *  元组第三位 = 勋章价（shopSpecialCurrency=DefenderMedals 条目；GetStoreValue
    *  = shopCustomPrice ?? value 优先级在此落定，Item.cs:49492-49500） */
@@ -22965,7 +23420,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 勋章条目（Chest.cs case 21 shopSpecialCurrency=DefenderMedals 全段 37 条）：
     // 第三位 = shopCustomPrice（勋章枚数）；铜币 price 位保留 item.value 备案
     const out: Array<[number, number] | [number, number, number]> =
-      stock.filter((s) => this.shopCondOk(s.cond)).map((s) => (s.currency === 'DefenderMedals'
+      stock.filter((s) => !(npc.vanillaId === 227 && Game.PAINTER_DECOR_IDS.has(s.id)))
+        .filter((s) => this.shopCondOk(s.cond)).map((s) => (s.currency === 'DefenderMedals'
         ? [s.id, s.price ?? 0, s.customPrice ?? 0] as [number, number, number]
         : [s.id, s.price ?? 0] as [number, number]));
     // 永恒水晶 3828 三档 shopCustomPrice（Chest.cs:2947-2959 if/else-if：石人已败
@@ -23120,20 +23576,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
     }
-    // Painter 第二商店（case 25 :2456-2587）画作——并入主列表（月相四画 :2482-2506 + 常驻 1490）
-    if (npc.vanillaId === 227) {
-      add([1490]);
-      add([[1481], [1482], [1483], [1484]][Math.floor(phase / 2)]);
-      // R14-C12：4743 橄榄球画移回派对女孩(208, Chest.cs:2271-2274 case 13)——曾错挂
-      // 画家(227)且门 >500(原版 >=500)；JSON shop 208 golfer500 承接
-    }
-    // ---- 晶塔尾段（Chest.cs:3466-3533 SetupShop 末尾，除军火商 19/树妖 20/向导 21
-    //      外全城镇商店通用）——R14-C4：此前整段缺失=晶塔无处可买 ----
+    // Painter 第二商店已拆独立「装饰」专柜（painterDecorStock/case25 权威）——
+    // 主店不再并挂 1490+月相画（2026-08-30 审计 TOP5：曾与主店 JSON 装饰行双列）。
+    // R14-C12 备案：4743 橄榄球画归派对女孩(208, Chest.cs:2271-2274 case 13)。
+    // ---- 晶塔尾段（Chest.cs:3466-3533 SetupShop 末尾，除商店索引 19 旅行商/
+    //      20 骷髅商/21 酒保外全城镇商店通用）——R14-C4：此前整段缺失=晶塔无处可买
+    //      ★2026-08-30 修正排除集坐标空间：原版判的是 SetupShop 的 type 形参=商店
+    //      索引（Main.cs:41168 SetNPCShopIndex→shop[npcShop].SetupShop(npcShop)），
+    //      索引 19=旅行商(vid368)/20=骷髅商(453)/21=酒保(550)——曾误按 NPC vid 直比，
+    //      把军火商19/树妖20错排挤出、酒保/骷髅商反而进晶塔货 ----
     // 门：DoesPositionHaveEnoughNPCs(2, 玩家中心格)（TeleportPylonsSystem.cs:224-247，
     // 复用 positionHasEnoughNpcs 同款 169×124 窗扫描）+ 玩家不在腐化/猩红；
     // 群系分支逐条 num<39 上限（num=货架已入条数）。remix 分支（:3472-3484/:3499-3516）
     // 本仓无颠倒世界不接（登记 R14-C33 同批）。
-    if (npc.vanillaId !== 19 && npc.vanillaId !== 20 && npc.vanillaId !== 21 && this.scene) {
+    if (npc.vanillaId !== 368 && npc.vanillaId !== 453 && npc.vanillaId !== 550 && this.scene) {
       const sc = this.scene;
       const ptx = Math.floor(this.player.cx / TILE);
       const pty = Math.floor(this.player.cy / TILE);
@@ -23456,7 +23912,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return hit && hit[2] !== undefined ? hit[2] : null;
   }
 
-  private openNpcShop() {
+  private openNpcShop(decor = false) {
     const npc = this.dialogNpc;
     if (!npc) return;
     // 快乐度价格乘子：Player.SetTalkNPC（Player.cs:4189-4193）在开对话时快照
@@ -23475,17 +23931,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 勋章条目（shopSpecialCurrency≠-1，Player.cs:34909-34913 → CustomCurrency
     // System.GetItemExpectedPrice :266-271）：双价 = GetStoreValue() 原值——无折扣/
     // 快乐度乘区、无 min-1，medal 字段带勋章枚数（UI 以勋章文案渲染）
-    const entries: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number }> =
-      this.shopStockFor(npc).map(([vid, price, medal]) => ({
-      key: VANILLA_ITEM_KEY_BY_ID[vid] ?? '',
-      vanillaId: vid,
-      name: Lang.itemName(vid) ?? VANILLA_ITEM_KEY_BY_ID[vid] ?? String(vid),
-      price: medal !== undefined ? medal : Math.max(1, expectedPrices(price, {
-        priceAdjustment: mul,
-        discountAvailable: this.player.equipStats.discount,
-      }).buying),
-      ...(medal !== undefined ? { medal } : {}),
-    }));
+    const entries: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number }> = [];
+    // 常规货首现去重（动物学家/骷髅商动态表与 JSON 静态行存在成片双列——审计
+    // 2026-08-30 TOP3/TOP4；首现保留 = 与原版 else-if 上架链同序。数据源合一后可撤）
+    for (const [vid0, price0, medal0] of (decor ? this.painterDecorStock() : this.shopStockFor(npc))) {
+      if (!decor && entries.some((e) => e.vanillaId === vid0)) continue;
+      entries.push({
+        key: VANILLA_ITEM_KEY_BY_ID[vid0] ?? '',
+        vanillaId: vid0,
+        name: Lang.itemName(vid0) ?? VANILLA_ITEM_KEY_BY_ID[vid0] ?? String(vid0),
+        price: medal0 !== undefined ? medal0 : Math.max(1, expectedPrices(price0, {
+          priceAdjustment: mul,
+          discountAvailable: this.player.equipStats.discount,
+        }).buying),
+        ...(medal0 !== undefined ? { medal: medal0 } : {}),
+      });
+    }
     // 卖回货架条目（Chest.AddItemToShop Chest.cs:658-663 克隆 buyOnce）追加在常规
     // 货之后（原版落 item[0-39] 首空位）。买回价 = buyOnce 分支（Player.cs:34930
     // round(value/pa) → :34940 ÷5 → :34941-34944 min1；折扣不参与——:34920 的
@@ -23509,6 +23970,47 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const hasMedals = entries.some((e) => e.medal !== undefined);
     this.cb.onNpcShop?.(Lang.inter(28), entries, this.coinsOwned(), mul,
       hasMedals ? this.defenderMedalsOwned() : undefined);
+  }
+
+  /** 画家装饰专柜货架（OpenShop(227,25,"GameUI.PainterDecor") → Chest.SetupShop
+   *  case 25 Chest.cs:2477-2611 全量：墙纸族条件行——extract-shops.mjs 只覆盖
+   *  case 15 主店，本专柜为代码直补。价格为 Item.value 原值（无 shopCustomPrice），
+   *  num<39 槽位帽不适用（本仓货架无上限，38+ 条极端组合仍全列出）。 */
+  private painterDecorStock(): Array<[number, number]> {
+    const out: Array<[number, number]> = [];
+    const price = (id: number) => ITEM_VALUES[String(id)] ?? 0;
+    const cond = (c: string | null, id: number) => { if (this.shopCondOk(c)) out.push([id, price(id)]); };
+    // Main.xMas 圣诞墙纸 ×10（:2480-2488）
+    for (let i = 1948; i <= 1957; i++) cond('xMas', i);
+    for (let i = 2158; i <= 2160; i++) cond(null, i);       // :2491-2495
+    for (let i = 2008; i <= 2014; i++) cond(null, i);       // :2496-2503
+    const gy = this.shopCondOk('zoneGraveyard');
+    if (!gy) {
+      // !ZoneGraveyard → 墙纸 1490 + 月相分档一幅（≤1→1481 ≤3→1482 ≤5→1483 else 1484）
+      out.push([1490, price(1490)]);
+      const ph = this.world.clock.moonPhase;                // moonPhase 0..7
+      out.push([ph <= 1 ? 1481 : ph <= 3 ? 1482 : ph <= 5 ? 1483 : 1484,
+        price(ph <= 1 ? 1481 : ph <= 3 ? 1482 : ph <= 5 ? 1483 : 1484)]);
+    }
+    cond('zoneForest', 5245);
+    cond('zoneCrimson', 1492);
+    cond('zoneCorrupt', 1488);
+    cond('zoneHallow', 1489);
+    cond('zoneJungle', 1486);
+    if (this.shopCondOk('zoneSnow')) { for (const id of [5491, 1487]) out.push([id, price(id)]); }
+    cond('zoneDesert', 1491);
+    cond('bloodMoon', 1493);
+    if (!gy) {
+      if (this.shopCondOk('zoneSkyHeight')) out.push([1485, price(1485)]);
+      if (this.shopCondOk('zoneSkyHeight&&hardMode')) out.push([1494, price(1494)]);
+    }
+    cond('storming', 5251);
+    if (gy) {
+      for (let id = 4723; id <= 4727; id++) out.push([id, price(id)]);
+      out.push([5257, price(5257)]);
+      for (let id = 4728; id <= 4729; id++) out.push([id, price(id)]);
+    }
+    return out;
   }
 
   /** ShopHelper.ProcessMood 输入装配（:99-180——同屋/村扫描 + zone 快照 + 危险群系） */

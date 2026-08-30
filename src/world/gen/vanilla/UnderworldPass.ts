@@ -83,6 +83,9 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       sim.remixRockLevel = gs.rockLevel;
       sim.remixOceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
     }
+    // ★IIIII62：LavaCheck 沙漠 blast 门旗标（Liquid.cs:1457）——remix/dual 不喷洒
+    sim.remixWorldGen = !!gs.seedFlags.remix;
+    sim.dualDungeonsSeed = !!gs.seedFlags.dualDungeons;
     sim.quickWater();
     sim.dispose();
   }
@@ -201,6 +204,9 @@ export function generateUnderworldStartingMound(st: TileStore, rng: RNG, gs: Gen
       sim.remixRockLevel = gs.rockLevel;
       sim.remixOceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
     }
+    // ★IIIII62：LavaCheck 沙漠 blast 门旗标（Liquid.cs:1457）——remix/dual 不喷洒
+    sim.remixWorldGen = !!gs.seedFlags.remix;
+    sim.dualDungeonsSeed = !!gs.seedFlags.dualDungeons;
     sim.quickWater();
     sim.dispose();
   }
@@ -251,6 +257,9 @@ export function generateUnderworldStartingMound(st: TileStore, rng: RNG, gs: Gen
       sim.remixRockLevel = gs.rockLevel;
       sim.remixOceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
     }
+    // ★IIIII62：LavaCheck 沙漠 blast 门旗标（Liquid.cs:1457）——remix/dual 不喷洒
+    sim.remixWorldGen = !!gs.seedFlags.remix;
+    sim.dualDungeonsSeed = !!gs.seedFlags.dualDungeons;
     sim.quickWater();
     sim.dispose();
   }

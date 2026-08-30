@@ -101,13 +101,29 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
       // ★IIIII21（cs:13124-13155）：drunk 世界（非 remix 组合域）50/50 换用
       // SnowCloudIsland(style3)/DesertCloudIsland(style1)；正常世界 CloudIsland
       // style0。骰只在 drunk 分支内出现（普通世界零扰动）。
+      // ★IIIII65（cs:13156-13170 浮空岛风格矩阵）：天湖外第二臂分支全量——
+      //   remix&&drunk&&(!tenth||getGood) → crimsonLeft 双支式 4/5；
+      //   否则 (!notTheBees||remix) 内门：getGood||(remix&&!tenth) → !crimson?4:5；
+      //   否则 tenthAnniversary → **6**（CELEB 岛为 style6 ⇒ IslandHouse 喷泉臂使能，
+      //   曾漏=CELEB #69 dT207>0×24/壳体位移主根因）。全部确定性赋值零掷；
+      //   notTheBees(无 remix) 整段跳过 = 保持 style0。
+      const sfI65 = gs.seedFlags;
       let style = 0;
-      if (!isLake && gs.seedFlags.drunkWorld && !gs.seedFlags.remix) {
+      if (!isLake && sfI65.drunkWorld && !sfI65.remix) {
         if (rng.int(0, 1) === 0) { style = 3; snowCloudIsland(st, rng, x, y); }
         else { style = 1; desertCloudIsland(st, rng, x, y); }
       }
       else if (isLake) cloudLake(st, rng, x, y);
-      else cloudIsland(st, rng, x, y);
+      else {
+        if (sfI65.remix && sfI65.drunkWorld && (!sfI65.tenthAnniversary || sfI65.getGoodWorld)) {
+          style = ((gs.crimsonLeft && x < Math.trunc(w / 2)) ? 5 : ((gs.crimsonLeft || x <= Math.trunc(w / 2)) ? 4 : 5));
+        }
+        else if (!sfI65.notTheBees || sfI65.remix) {
+          if (sfI65.getGoodWorld || (sfI65.remix && !sfI65.tenthAnniversary)) style = !gs.crimson ? 4 : 5;
+          else if (sfI65.tenthAnniversary) style = 6;
+        }
+        cloudIsland(st, rng, x, y);
+      }
           housesX.push(x); housesY.push(y);
       gs.floatingIslands.push({ x, y, style, isLake });
       if (!isLake) lakes++;

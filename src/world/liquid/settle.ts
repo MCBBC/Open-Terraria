@@ -78,6 +78,10 @@ export async function settleWorldLiquids(
       sim.remixRockLevel = world.genRemixWater.rockLevel;
       sim.remixOceanLevel = world.genRemixWater.oceanLevel;
     }
+    // ★IIIII62：LavaCheck 沙漠 blast 门旗标（Liquid.cs:1457 `!remixWorldGen &&
+    //   !Main.dualDungeonsSeed`）——生成期沉降按原版逐字接线，remix/dual 世界不喷洒
+    sim.remixWorldGen = !!world.seedFlags?.remix;
+    sim.dualDungeonsSeed = !!world.seedFlags?.dualDungeons;
     // 生成期 Main.tileSolid 覆写快照注入（裂纹砖 481-483=false/484=false/192=false 等
     // ——原版液体模块读被各 pass 改写后的全局面板，solidNP LUT 须同步）。★先注入
     // 再 wg 包裹——wg 快照须含覆写（否则 191=true 覆写会在 wg(false) 复原时翻回实心）

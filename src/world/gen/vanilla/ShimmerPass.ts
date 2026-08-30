@@ -433,10 +433,19 @@ function solidTileSlope(st: TileStore, x: number, y: number): boolean {
   return st.flags[i] !== 0 && genSolidType(st.type[i]) && st.half[i] === 0 && st.slope[i] === 0;
 }
 
-/** CheckStalactite（cs:39022）四分支 1:1 */
+/** CheckStalactite（cs:39022）四分支 1:1。
+ *  ★IIIII68b：dCtx = destroyObject 窗口载体（vanilla 为 WorldGen 静态字段；本仓
+ *  以 ctx.destroyObject 携带）。原版各杀支均为字面赋值对 `destroyObject=true;
+ *  KillTile…; destroyObject=false`（1458 cs:39640-46/39676-82/39715-27/39759-79）
+ *  ——**关闭沿为无条件赋 false，不做 prev 恢复**。在嵌套级联下（外层杀的九邻
+ *  重帧打中另一枚 165 ⇒ 内层支尾把外层窗口提前"关掉"），外层环剩余兄弟帧将以
+ *  d=false 自由分派（CELEB #105 (1650,652) 三连杀的 x86 实证）。无 dCtx 的调用
+ *  位（钟乳石独立 pass / 洞屋 / 宝石等）不受影响——它们的历史等价性未被本批
+ *  重审，保持原路径零扰动。 */
 export function checkStalactite(
   st: TileStore, rng: RNG, x: number, j: number,
   reframe?: (st: TileStore, rng: RNG, x: number, y: number) => void,
+  dCtx?: { destroyObject: boolean },
 ): void {
   if (!st.inBounds(x, j)) return;
   const i0 = st.idx(x, j);
@@ -447,7 +456,13 @@ export function checkStalactite(
     d59({ e: 'ck', br: 'h72', x, j, sol: sUp ? 1 : 0 });
     let flag = !sUp;
     if (!flag && !updateStalagtiteStyle(st, rng, x, j)) flag = true;
-    if (flag) killStalactiteTile(st, rng, x, j, reframe);
+    // ★IIIII68b：destroyObject 窗口=字面赋值对（cs:39640-46）——嵌套支尾会提前
+    //   "关窗"，故禁用 prev 恢复/finally 语义
+    if (flag) {
+      if (dCtx) dCtx.destroyObject = true;
+      killStalactiteTile(st, rng, x, j, reframe);
+      if (dCtx) dCtx.destroyObject = false;
+    }
     return;
   }
   if (fy === 90) {
@@ -456,7 +471,11 @@ export function checkStalactite(
     let flag2 = !sDn;
     // InvalidTileForPilesOrSpeleothems = TileID.Sets.Boulders（生成期此阶段无巨石）
     if (!flag2 && !updateStalagtiteStyle(st, rng, x, j)) flag2 = true;
-    if (flag2) killStalactiteTile(st, rng, x, j, reframe);
+    if (flag2) {
+      if (dCtx) dCtx.destroyObject = true;
+      killStalactiteTile(st, rng, x, j, reframe);
+      if (dCtx) dCtx.destroyObject = false;
+    }
     return;
   }
   if (fy >= 36) {
@@ -466,7 +485,12 @@ export function checkStalactite(
     let flag3 = !sB;
     const a = st.inBounds(x, num) ? st.idx(x, num) : -1;
     const b = st.inBounds(x, num + 1) ? st.idx(x, num + 1) : -1;
-    if (a < 0 || b < 0) { killStalactiteTile(st, rng, x, num, reframe); return; }
+    if (a < 0 || b < 0) {
+      if (dCtx) dCtx.destroyObject = true;
+      killStalactiteTile(st, rng, x, num, reframe);
+      if (dCtx) dCtx.destroyObject = false;
+      return;
+    }
     const actA = !!st.flags[a], actB = !!st.flags[b];
     const tEq = st.type[b] === st.type[a];
     const fxEq = st.frameX[b]! === st.frameX[a]!;
@@ -480,9 +504,12 @@ export function checkStalactite(
     // 格被 KillTile——num/num+1 被后续放置覆写成大理石等非 165 时**不得连带击杀**
     // （曾无条件双双击杀 → 刚放的板格被抹 → SmoothSlope/SolidTile 门级联分叉，
     // biome2 slab78 van48/js63 掷混合分歧根因）
+    // ★IIIII68b：双格连杀共用**一个**窗口（vanilla 同序：true→两杀→false）
     if (flag3) {
+      if (dCtx) dCtx.destroyObject = true;
       if (st.type[a] === st.type[i0]) killStalactiteTile(st, rng, x, num, reframe);
       if (st.type[b] === st.type[i0]) killStalactiteTile(st, rng, x, num + 1, reframe);
+      if (dCtx) dCtx.destroyObject = false;
     }
     return;
   }
@@ -493,7 +520,12 @@ export function checkStalactite(
   let flag4 = !sT;
   const a = st.inBounds(x, num) ? st.idx(x, num) : -1;
   const b = st.inBounds(x, num + 1) ? st.idx(x, num + 1) : -1;
-  if (a < 0 || b < 0) { killStalactiteTile(st, rng, x, num, reframe); return; }
+  if (a < 0 || b < 0) {
+    if (dCtx) dCtx.destroyObject = true;
+    killStalactiteTile(st, rng, x, num, reframe);
+    if (dCtx) dCtx.destroyObject = false;
+    return;
+  }
   const actA = !!st.flags[a], actB = !!st.flags[b];
   const tEq = st.type[b] === st.type[a];
   const fxEq = st.frameX[b]! === st.frameX[a]!;
@@ -503,10 +535,12 @@ export function checkStalactite(
   if (!actA || !actB || !tEq) flag4 = true;
   if (!fxEq) flag4 = true;
   if (!flag4 && !updateStalagtiteStyle(st, rng, x, num)) flag4 = true;
-  // ★同上：类型门击杀（cs:39193-39202）——非 165 占位格不连带
+  // ★同上：类型门击杀（cs:39193-39202）——非 165 占位格不连带；双格共一窗口
   if (flag4) {
+    if (dCtx) dCtx.destroyObject = true;
     if (st.type[a] === st.type[i0]) killStalactiteTile(st, rng, x, num, reframe);
     if (st.type[b] === st.type[i0]) killStalactiteTile(st, rng, x, num + 1, reframe);
+    if (dCtx) dCtx.destroyObject = false;
   }
 }
 

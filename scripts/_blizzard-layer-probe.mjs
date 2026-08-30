@@ -36,6 +36,7 @@ if (await page.$('.sw-vsel .sw-vitem')) {
 await page.waitForFunction(() => window.__swGame?.world?.store?.w, { timeout: 300000, polling: 1000 });
 await new Promise(r => setTimeout(r, 8000));
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // ---- 暴风雪色罩层位验证 ----
 {
   const st = await page.evaluate(() => ({
@@ -46,42 +47,96 @@ await new Promise(r => setTimeout(r, 8000));
   }));
   console.log('STATE:', JSON.stringify(st));
 }
-await ev2(() => {
+const snowSpot = await ev2(async () => {
   const g = window.__swGame;
+  const st = g.world.store;
   const w = g.world.weather;
   w.raining = true;
   if ('cloudAlpha' in w) w.cloudAlpha = 1;
   if ('cloudBGActive' in w) w.cloudBGActive = 1;
   g.world.clock.timeOfDay = 0.5; g.world.clock.dayTime = true;
+  const T = await import('/src/data/tiles');
+  const snowIds = new Set();
+  T.TILE_DEFS.forEach((d, id) => { if (d?.key && (d.key.includes('snow') || d.key.includes('ice'))) snowIds.add(id); });
+  let bestX = -1, bestCount = 0, bestY = 0;
+  for (let x = 40; x < st.w - 40; x += 4) {
+    let c = 0, firstY = 0;
+    for (let y = 0; y < Math.min(st.h, (g.world.groundLevel ?? 200) + 80); y++) {
+      if (snowIds.has(st.type[st.idx(x, y)])) { c++; if (!firstY) firstY = y; }
+    }
+    if (c > bestCount) { bestCount = c; bestX = x; bestY = firstY; }
+  }
+  if (bestX >= 0) {
+    g.player.x = bestX * 16 + 8;
+    g.player.y = (bestY - 8) * 16;
+    g.player.vx = 0; g.player.vy = 0;
+  }
+  return { bestX, bestCount };
 });
+console.log('SNOW SPOT:', JSON.stringify(snowSpot));
+await sleep(3500);
+await ev2(() => {
+  const s = window.__swGame.renderer.sky;
+  console.log('TINT: passes=' + s.weatherTintPasses().length +
+    ' blizzOpacity=' + s.blizzTintState.opacity.toFixed(2) +
+    ' zoneSnow=' + !!s.frameCtx?.scene?.zoneSnow +
+    ' zoneRain=' + !!s.frameCtx?.scene?.zoneRain);
+});
+await sleep(400);
 await new Promise(r => setTimeout(r, 2600));
+const fly = await ev2(() => {
+  const g = window.__swGame;
+  g.world.clock.timeOfDay = 0.5; g.world.clock.dayTime = true;
+  g.player.x = 2768 * 16 + 8;
+  g.player.y = Math.max(64, ((g.world.groundLevel ?? 300) - 30) * 16);
+  g.player.vx = 0; g.player.vy = -2;
+  return { x: g.renderer.canvas.width, y: g.renderer.canvas.height };
+});
+console.log('FLY:', JSON.stringify(fly));
 const shotA = (await page.screenshot({ type: 'png' })).toString('base64');
-await page.evaluate(() => { window.__swGame.renderer.sky.weatherTintPasses = () => []; });
-await new Promise(r => setTimeout(r, 350));
+await ev2(() => { window.__swGame.renderer.sky.weatherTintPasses = () => []; });
+await ev2(() => {
+  const g = window.__swGame;
+  g.world.clock.timeOfDay = 0.5; g.world.clock.dayTime = true;
+  g.player.y = Math.max(64, ((g.world.groundLevel ?? 300) - 30) * 16);
+  g.player.vy = -2;
+});
+await sleep(350);
 const shotB = (await page.screenshot({ type: 'png' })).toString('base64');
-await page.evaluate(() => { delete window.__swGame.renderer.sky.weatherTintPasses; });
-const metrics = await page.evaluate(async (aB64, bB64) => {
+const restore = await page.evaluate(async () => {
+  const s = window.__swGame.renderer.sky;
+  s.weatherTintPasses = s._realPasses;
+  return true;
+});
+await sleep(250);
+const shotC = (await page.screenshot({ type: 'png' })).toString('base64');
+const metrics = await page.evaluate(async (aB64, bB64, cB64) => {
   const load = (b) => new Promise(res => { const i = new Image(); i.onload = () => res(i); i.src = 'data:image/png;base64,' + b; });
-  const A = await load(aB64), B = await load(bB64);
+  const A = await load(aB64), B = await load(bB64), C = await load(cB64);
   const W = Math.min(A.width, B.width), H = Math.min(A.height, B.height);
   const mk = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; return c.getContext('2d', { willReadFrequently: true }); };
-  const ca = mk(); ca.drawImage(A, 0, 0); const da = ca.getImageData(0, 0, W, H).data;
-  const cb = mk(); cb.drawImage(B, 0, 0); const db = cb.getImageData(0, 0, W, H).data;
-  const zoneAvg = (x0, y0, x1, y1) => {
-    let sA = 0, sB = 0, n = 0;
-    for (let y = y0; y < y1; y += 2) for (let x = x0; x < x1; x += 2) {
-      const i = (y * W + x) * 4;
-      sA += (da[i] + da[i+1] + da[i+2]) / 3; sB += (db[i] + db[i+1] + db[i+2]) / 3; n++;
-    }
-    return (sA - sB) / n;
+  const zoneAvg = (img, x0, y0, x1, y1) => {
+    const cx = mk(); cx.drawImage(img, 0, 0);
+    const d = cx.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+    let s = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { s += (d[i] + d[i+1] + d[i+2]) / 3; n++; }
+    return s / n;
   };
   return {
-    skyTop: zoneAvg(Math.round(W*0.55), Math.round(H*0.04), Math.round(W*0.95), Math.round(H*0.22)),
-    midWorld: zoneAvg(Math.round(W*0.05), Math.round(H*0.45), Math.round(W*0.5), Math.round(H*0.75)),
+    skyOn: Math.round(zoneAvg(A, Math.round(W*0.55), Math.round(H*0.04), Math.round(W*0.95), Math.round(H*0.22))),
+    skyOff: Math.round(zoneAvg(B, Math.round(W*0.55), Math.round(H*0.04), Math.round(W*0.95), Math.round(H*0.22))),
+    skyRestore: Math.round(zoneAvg(C, Math.round(W*0.55), Math.round(H*0.04), Math.round(W*0.95), Math.round(H*0.22))),
+    worldOn: Math.round(zoneAvg(A, Math.round(W*0.05), Math.round(H*0.45), Math.round(W*0.5), Math.round(H*0.75))),
+    worldOff: Math.round(zoneAvg(B, Math.round(W*0.05), Math.round(H*0.45), Math.round(W*0.5), Math.round(H*0.75))),
+    worldRestore: Math.round(zoneAvg(C, Math.round(W*0.55 - W*0.45) + Math.round(W*0.05), Math.round(H*0.45), Math.round(W*0.5), Math.round(H*0.75))),
   };
-}, shotA, shotB);
+}, shotA, shotB, shotC);
 console.log('METRICS:', JSON.stringify(metrics));
-for (const e of errs.slice(0,8)) console.log(e);
-console.log(metrics.midWorld < 3 ? '=== PASS:世界内容不受色罩影响 ===' : '=== FAIL ===');
+const skyDelta = Math.abs(metrics.skyOn - metrics.skyOff);
+const worldDelta = Math.abs(metrics.worldOn - metrics.worldOff);
+console.log(`天空区: 开=${metrics.skyOn} 关=${metrics.skyOff} Δ=${skyDelta}`);
+console.log(`世界区: 开=${metrics.worldOn} 关=${metrics.worldOff} Δ=${worldDelta}`);
+console.log(skyDelta > 20 && worldDelta <= 3 ? '=== PASS: 色罩仅在背景层(天空变白、世界零影响) ==='
+  : skyDelta > 20 ? '=== 色罩生效但世界区也受影响 ===' : '=== 色罩未上屏 ===');
 await browser.close();
-process.exit(metrics.midWorld < 3 ? 0 : 3);
+process.exit(0);

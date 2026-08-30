@@ -20,7 +20,7 @@ export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
     lineEnd = h - 250;
     num2 = lineEnd - rng.int(160, 199);
   }
-  if (process.env.SW_I48PROBE === '1') console.log(`[ice-probe] remix=${!!gs.seedFlags.remix} lineEnd=${lineEnd} num2=${num2} lavaLine=${gs.lavaLine} h=${h}`);
+  if (typeof process !== 'undefined' && process.env.SW_I48PROBE === '1') console.log(`[ice-probe] remix=${!!gs.seedFlags.remix} lineEnd=${lineEnd} num2=${num2} lavaLine=${gs.lavaLine} h=${h}`);
   let left = gs.snowOriginLeft, right = gs.snowOriginRight;
   let thickness = 10;
   // C# 是 int[]：边界与厚度全程整数、`/2` 为整除截断（cs L5408-5411）。

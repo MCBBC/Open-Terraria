@@ -581,6 +581,17 @@ function makeTileDustRoll(ctx: SweepCtx, sheet: number, fx: number): void {
 function killTileGen(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
+  // IIII68b：KillTile 入口时序探针（x86 KTPRE 同位；无钩零开销）
+  try {
+    const gt = (globalThis as unknown as { __swShimTargets?: Set<string> }).__swShimTargets;
+    if (gt !== undefined && gt.has(x + ',' + y)) {
+      const s2 = 'a' + st.flags[i] + 't' + SWEEP_SHEET[st.type[i]] + 'fx' + st.frameX[i] + 'fy' + st.frameY[i];
+      const stk = (new Error().stack ?? '').split('\n').slice(2, 7);
+      const who = stk.map((s) => { const m = s.match(/\(?([^\s()/]*\.ts):(\d+):\d+/); return m ? `${m[1]!.split('/').pop()}:${m[2]}` : ''; })
+        .filter(Boolean).join('<');
+      (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('KTPRE @' + x + ',' + y + ' st=' + s2 + ' by=' + who);
+    }
+  } catch { /* noop */ }
   if (!st.flags[i]) return;
   // ★YYYYYY（2026-08-23）NOTRAPS #58：cs:63579 `num==2 → return`（尘段之前,零掷零写）
   //   ——神庙锁门三格拒毁（下方格活性锁门门 cs:62422-625 / HasReasonToReturnEarly
@@ -591,6 +602,8 @@ function killTileGen(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   //   走本引擎,拒毁差经尘掷流位+瞬时支撑态扰动 254→255 Next(30) 均分掷 → 纯 L 通道
   //   差（A/T/W 末态零差）。__swBrkRefuse=永久零开销探针钩（__swKillCap 同款）。
   if (checkTileBreakability(st, x, y) === 2) {
+    try { const g2 = globalThis as unknown as { __swShimTargets?: Set<string>; __swSeg?: (n: string, d?: unknown) => void };
+      if (g2.__swShimTargets?.has(x + ',' + y)) g2.__swSeg?.('REFUSE ' + x + ',' + y + ' t' + st.type[i]); } catch { /* noop */ }
     (globalThis as { __swBrkRefuse?: (x: number, y: number, sheet: number) => void }).__swBrkRefuse?.(x, y, SWEEP_SHEET[st.type[i]]);
     return;
   }
@@ -704,6 +717,18 @@ function __swFnt39(tag: string, x: number, y: number, mid?: string): void {
 
 /** TileFrame 生成期（cs:82067） */
 function tileFrameGen(st: TileStore, ctx: SweepCtx, x: number, y: number, reset: boolean): void {
+  // IIII68b：时序线探针（与 x86 JJHook.Fc 事件同词表；无钩零开销）
+  try {
+    const gt = (globalThis as unknown as { __swShimTargets?: Set<string> }).__swShimTargets;
+    if (gt !== undefined && gt.has(x + ',' + y)) {
+      const q = st.inBounds(x, y) ? st.idx(x, y) : -1;
+      const s2 = q >= 0 ? 'a' + st.flags[q] + 't' + SWEEP_SHEET[st.type[q]] + 'fx' + st.frameX[q] + 'fy' + st.frameY[q] : 'oob';
+      const stk = (new Error().stack ?? '').split('\n').slice(2, 7);
+      const who = stk.map((s) => { const m = s.match(/\(?([^\s()/]*\.ts):(\d+):\d+/); return m ? `${m[1]!.split('/').pop()}:${m[2]}` : ''; })
+        .filter(Boolean).join('<');
+      (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('TF @' + x + ',' + y + ' st=' + s2 + ' by=' + who);
+    }
+  } catch { /* noop */ }
   __swFnt39('TF', x, y);
   // 边距 5 早退（cs:82070）；!active 清 half/slope/块漆早退（cs:82078-82082，
   // ClearBlockPaintAndCoating——RRRR 补块漆清）
@@ -771,8 +796,17 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     case 165:
       // ShimmerPass 1:1（UpdateStalagtiteStyle 掷+杀）；reframe 钩子改走本扫全分派
       // （击杀级联的邻格 184 等须掷骰重查——彼时 165-only 的 frame165 不再等价）
+      // ★IIIII68b（定罪锚：1458 CheckStalactite 四支 `destroyObject=true; KillTile…;
+      //   destroyObject=false` 字面对（cs:39640-46/39676-82/39715-27/39759-79）+
+      //   KillTile 尾 SquareTileFrame 九邻重帧（cs:64461）+ Check2x2 头门
+      //   `if(destroyObject) return`（cs:49022-25）+ 尾扫 cs:48800-07 在窗**外**）
+      //   ——窗口载体改传 ctx.destroyObject，ShimmerPass 内做与原版同构的**字面**
+      //   赋值对（开窗包 kill+级联、支尾无条件 false 关窗，不恢复 prev）。
+      //   x86 实证两形态：Site A 单杀无嵌套 165 ⇒ 邻格巨石全程窗口内免检存活
+      //   （@1806,487 三连伪杀根因）；Site B 双杀的内层支尾提前关窗 ⇒ 外层环剩余
+      //   兄弟帧 d=false 自由分派 ⇒ Check2x2 实查整组灭（@1650,652 与原版一致）。
       if (ctx.rng) {
-        checkStalactite(st, ctx.rng, x, y, (s2, _r, xx, yy) => tileFrameGen(s2, ctx, xx, yy, false));
+        checkStalactite(st, ctx.rng, x, y, (s2, _r, xx, yy) => tileFrameGen(s2, ctx, xx, yy, false), ctx);
       }
       return true;
     case 3: case 24: case 61: case 71: case 73: case 74:
@@ -2758,7 +2792,20 @@ export function runFinalCleanupPass(
   for (const k of Object.keys(stats) as Array<keyof ZzzStats>) stats[k] = 0;
   const { w, h } = st;
 
+  // IIII68b：目标列穿越标记（时序线归段用）
+  let fcTgtCols: Set<string> | null = null;
+  try {
+    const gt = (globalThis as unknown as { __swShimTargets?: Set<string> }).__swShimTargets;
+    if (gt !== undefined) {
+      fcTgtCols = new Set();
+      for (const k of gt) fcTgtCols.add(k.split(',')[0]!);
+    }
+  } catch { /* noop */ }
+
   for (let i = 0; i < w; i++) {
+    if (fcTgtCols?.has(String(i))) {
+      try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.('FCCOL ' + i); } catch { /* noop */ }
+    }
     for (let j = 0; j < h; j++) {
       const t = st.idx(i, j);
       const type = st.type[t];
@@ -2820,9 +2867,13 @@ export function runFinalCleanupPass(
       }
 
       // ⑥ 巨石重帧+补支撑(cs:22400-22458)
+      try { const gp2 = globalThis as unknown as { __swShimTargets?: Set<string>; __swSeg?: (n: string, d?: unknown) => void };
+        if (gp2.__swShimTargets?.has(i + ',' + j)) gp2.__swSeg?.('BCHECK ' + i + ',' + j + ' fl=' + st.flags[t] + ' t=' + type); } catch { /* noop */ }
       if (st.flags[t] && BOULDERS.has(type)) {
         const x0 = i - Math.floor(st.frameX[t] / 18);
         const y0 = j - Math.floor(st.frameY[t] / 18);
+        try { const gp = globalThis as unknown as { __swShimTargets?: Set<string>; __swSeg?: (n: string, d?: unknown) => void };
+          if (gp.__swShimTargets?.has(i + ',' + j)) gp.__swSeg?.('BANCHOR ' + i + ',' + j + ' fx=' + st.frameX[t] + ' fy=' + st.frameY[t] + ' a=' + x0 + ',' + y0); } catch { /* noop */ }
         let hasAltar = false;
         for (let l = 0; l < 2; l++) {
           if (st.inBounds(x0 + l, y0 - 1)) {
@@ -3005,8 +3056,12 @@ export function runFinalCleanupPass(
   // ★SSS-CELEB（1458 cs:22668-22670）：FinishTenthAnniversaryWorldPaintTreesAndMushrooms
   //   ——FinalizeSecretSeeds 之后、ShimmerCleanUp 之前（原序 cs:22666→22668→22671）。
   if (gs.seedFlags.tenthAnniversary && !gs.seedFlags.skyblock && rng) {
+    const sp2 = (nm: string): void => { try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.(nm); } catch { /* noop */ } };
+    sp2('PT-A');
     paintTheTreesTenth(st, rng, gs);
+    sp2('P-Trees');
     paintTheMushroomsTenth(st, rng, gs);
+    sp2('P-Mush');
   }
   //    苔藓计数平权的关键写侧：r<120 环带内 moss 块→石 1 / 184 苔藓芽+51/56/
   //    229/230/659 击杀（本种子实测 vanilla 侧 625→1×1358 + 184 杀×558）。
@@ -3130,13 +3185,26 @@ const rainbowPaintIdWiggly = (x: number, y: number): number => {
 /** FinishTenthAnniversaryWorld（1458 cs:24508-24553）：纯 celeb 路径
  *  （remix/gg/drunk/ntb/dontStarve 组合域支不移植，各自线另案）。 */
 function runFinishTenthAnniversaryWorld(st: TileStore, rng: RNG, gs: GenState, chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>): void {
+  // IIII67：x86 tenth-tail 段账镜像（同名 MARK 行）
+  const __mbD2 = (): number => ((globalThis as unknown as { __swMbDraws?: () => number }).__swMbDraws?.() ?? 0);
+  void __mbD2;
+  const sp = (nm: string): void => { try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.(nm); } catch { /* noop */ } };
+  sp('FTW-A');
+  sp('CSI-A');
   convertSkyIslandsTenth(st, rng, gs);          // ConvertSkyIslands(2, growTrees:true)
+  sp('CSI-Z');
   paintTheDungeonTenth(st, gs, 24, 24);
+  sp('P-Dungeon');
   paintTheLivingTreesTenth(st, gs, 12, 12);
+  sp('P-LivingTrees');
   paintTheTempleTenth(st, gs, 10, 5);
+  sp('P-Temple');
   paintTheCloudsTenth(st, gs, 12, 12);
+  sp('P-Clouds');
   paintTheSandTenth(st, rng, gs, 7, 7);
+  sp('P-Sand');
   paintThePyramidsTenth(st, gs, 12, 12);
+  sp('P-Pyramids');
   // —— 巨石 138→665 生命水晶巨石（cs:24530-24544）：全图扫 [50,w-50)×[50,h-50)，
   //    Next(4) **每格无条件消耗**（&&链首项），命中锚格(frameX/Y==0 → JS 用
   //    左/上同型邻格不存在判定)才改写 2×2。
@@ -3157,21 +3225,27 @@ function runFinishTenthAnniversaryWorld(st: TileStore, rng: RNG, gs: GenState, c
       if (i + 1 < st.w && j + 1 < st.h) st.type[st.idx(i + 1, j + 1)] = b665s2;
     }
   }
+  sp('MOSS-END');
   void b138s;
   // ★EEEEE 批（1458 cs:24552-24554）：ImproveAllChestContents——巨石扫之后、
   //  Finish 子段最后一步（掷流位次在此，勿前移）。实现体 TenthAnniversaryImprove.ts。
+  sp('IMPROVE-A');
   improveAllChestContents(chests, rng);
+  sp('IMPROVE-Z');
 }
 
 /** ConvertSkyIslands(2, growTrees:true)（1458 cs:24947-24986）。
  *  带上界=num=`从 y=20 下扫首个含云族的行`（Skyblock denyAllGeneration 门恒过）。 */
 function convertSkyIslandsTenth(st: TileStore, rng: RNG, gs: GenState): void {
   let num = 0;
-  outer:
+  // ★IIIII67 定罪（1458 cs:25058-25068）：原版云线扫描【内层 break 只跳出本行】，
+  //  外层 i 一路扫到 worldSurface ⇒ num=最后一个含云行（最低浮岛基座），非首个。
+  //  曾用 outer·break=取最高岛云线 ⇒ 转换域整体上收、hallowed 化/树苗 growTrees
+  //  全体少掷（celeb 实测 CSI 段 0 vs van 765 掷，岛屿草未 hallowed/trees 未种）。
   for (let i = 20; i < gs.worldSurface; i++) {
-    for (let j = 20; j < st.w - 20; j++) {   // ★原版即以 w-20 为列界（bug-for-bug）
+    for (let j = 20; j < st.w - 20; j++) {
       const ti = st.idx(j, i);
-      if (st.flags[ti] && CLOUDS.has(st.type[ti])) { num = i; break outer; }
+      if (st.flags[ti] && CLOUDS.has(st.type[ti])) { num = i; }
     }
   }
   const ctxF: SweepCtx = { rng, destroyObject: false, frameSparse: false };
@@ -3188,6 +3262,23 @@ function convertSkyIslandsTenth(st: TileStore, rng: RNG, gs: GenState): void {
       void SAPLING596; void SAPLING616;
       if ((sh3 === 82 || sh3 === 83 || sh3 === 185 || sh3 === 186 || sh3 === 187 || sh3 === 227)) {
         killTileGen(st, ctxF, k, l - 1);                                     // 向日葵/药草族杀
+      }
+      // ★IIIII67（PlantCheck_TryGetNewType，1458 cs:82152+）：Convert 把格转为
+      //   神圣草 109 后，上方植物走 PlantCheck 重映射 3→110 / 73→113——
+      //   曾漏重映射 ⇒ 岛链残留 17 格普通植物（celeb 实测）。
+      if (SWEEP_SHEET[st.type[t2]] === 109) {
+        const ta = st.idx(k, l - 1);
+        if (st.flags[ta]) {
+          const sha = SWEEP_SHEET[st.type[ta]];
+          if (sha === 3 || sha === 110 || sha === 24) {
+            const downNow = SWEEP_SHEET[st.type[t2]];
+            let ntype = sha;
+            if (downNow === 109 || downNow === 492) ntype = (sha === 73 ? 113 : 110);
+            st.type[ta] = sid(ntype);
+          } else if (sha === 73) {
+            st.type[ta] = sid(113);
+          }
+        }
       }
       if (rng.int(0, 2) === 0) growTree(st, rng, gs, k, l);                  // TryGrowingTreeByType(5)
     }
@@ -3348,7 +3439,9 @@ function paintTheMushroomsTenth(st: TileStore, rng: RNG, _gs: GenState): void {
       const i2 = st.idx(k, l);
       if (!st.flags[i2]) continue;
       const sh = SWEEP_SHEET[st.type[i2]];
-      if (MUSH_SHEETS.has(sh) || sh === 519) {
+      // ★IIIII67：原版对 519 巨菇要求 frameY==90（cs:24566）——生成期帧通道在！
+      //  曾按「无帧通道」近似全量匹配 ⇒ 列段 num3=10 复位点偏移、Next(1,3) 掷数差。
+      if (MUSH_SHEETS.has(sh) || (sh === 519 && st.frameY[i2] === 90)) {
         st.paint[i2] = b & 31;
         num3 = 10;
       }
@@ -3359,6 +3452,7 @@ function paintTheMushroomsTenth(st: TileStore, rng: RNG, _gs: GenState): void {
     }
     num3--;
     if (num3 === 0) {
+      try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.(`PMB ${k}`); } catch { /* noop */ }
       b += rng.int(1, 2);                      // Next(1,3)
       if (b > 12) b = 1;
     }
@@ -3367,41 +3461,59 @@ function paintTheMushroomsTenth(st: TileStore, rng: RNG, _gs: GenState): void {
 
 /** Shimmerator（1458 cs:35487-35528：洪泛收集 + Shimminate）。
  *  maxTileCount=300（GlobalGems 段 cs:17545 最后写值，celeb ×1.5 不变该常量）。 */
-const SHIMMERATOR_CAP = 300;
+// ★IIIII67 定罪（1458 cs:22309 AddSpikeCaves 尾 maxTileCount=3500）：FinalCleanup 时点
+//   全局帽=3500 而非 GlobalGems 遗留 300——SpikeCaves pass（FinalCleanup 前注册）尾写。
+//   旧 300 ⇒ celeb ±170 洪泛每源最多 300 格，池右缘缺 27 列/底部 47 行未转微光。
+const SHIMMERATOR_CAP = 3500;
 function shimmeratorTenth(
   st: TileStore, _rng: RNG, x0: number, y0: number,
-  countedGlobal: Set<number>, ctx: SweepCtx,
+  _countedGlobal: Set<number>, ctx: SweepCtx,
 ): void {
+  // ★IIIII67 定罪（1458 WorldGen.cs:35667-35716）：原版 Shimmerator 每调用
+  //  清空 CountedTiles、递归 DFS（左→右→上→下）、入口谓词=WorldGen.SolidTile
+  //  （active+tileSolid+!top+!half+slope0+!inActuator 全项）＋OOB 恒置满额放弃。
+  //  旧实现=持久全局 Set + 显式栈右先 ⇒ 分区顺序错位 + 经由半砖/坡面渗漏，
+  //  celeb 微光池右缘缺 27 列、边缘水格未转微光（fc4 分账 541+103+94 型差）。
+  let num = 0;
   const counted = new Set<number>();
-  const cells: Array<[number, number]> = [];
-  let n = 0;
-  const stack: Array<[number, number]> = [[x0, y0]];
-  while (stack.length) {
-    const [x, y] = stack.pop()!;
-    if (n >= SHIMMERATOR_CAP) break;
-    if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) { n = SHIMMERATOR_CAP; break; }
+  const rec = (x: number, y: number): void => {
+    if (num >= SHIMMERATOR_CAP) return;
+    if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) { num = SHIMMERATOR_CAP; return; }
     const key = st.idx(x, y);
-    if (counted.has(key) || countedGlobal.has(key)) continue;
+    if (counted.has(key)) return;
     const i = key;
-    const liquidOk = !isSolidTileFC(st, x, y) && st.liquidType[i] !== LIQUID_TYPE.SHIMMER && st.liquid[i]! > 0;
+    try { const g = globalThis as unknown as { __swShimTargets?: Set<string>; __swSeg?: (n: string, d?: unknown) => void };
+      if (g.__swShimTargets?.has(x + ',' + y)) g.__swSeg?.('TVISIT ' + x + ',' + y + ' n=' + num); } catch { /* noop */ }
+    const solidVan = !!st.flags[i] && !!TILE_DEFS[st.type[i]]?.solid
+      && !PC_SOLID_TOP_F10.has(SWEEP_SHEET[st.type[i]])
+      && st.half[i] === 0 && st.slope[i] === 0 && (st.wire[i] & 32) === 0;
+    const liquidOk = !solidVan && st.liquidType[i] !== LIQUID_TYPE.SHIMMER && st.liquid[i]! > 0;
     const block56 = st.flags[i] && SWEEP_SHEET[st.type[i]] === 56;
-    if (!(liquidOk || block56)) continue;
+    if (!(liquidOk || block56)) return;
     counted.add(key);
-    countedGlobal.add(key);
-    cells.push([x, y]);
-    n++;
-    stack.push([x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]);
-  }
-  if (n > 0 && n < SHIMMERATOR_CAP) {
-    for (const [x, y] of cells) {
-      const i = st.idx(x, y);
+    num++;
+    rec(x - 1, y);
+    rec(x + 1, y);
+    rec(x, y - 1);
+    rec(x, y + 1);
+  };
+  rec(x0, y0);
+  try { (globalThis as unknown as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg?.(`SHIMA ${x0},${y0} n=${num}`); } catch { /* noop */ }
+  if (num > 0 && num < SHIMMERATOR_CAP) {
+    for (const key of counted) {
+      const i = key;
+      try { const g = globalThis as unknown as { __swShimTargets?: Set<string>; __swSeg?: (n: string, d?: unknown) => void };
+        if (g.__swShimTargets?.has((i % st.w) + ',' + ((i / st.w) | 0))) g.__swSeg?.('TCOUNT'); } catch { /* noop */ }
       st.liquidType[i] = LIQUID_TYPE.SHIMMER;
       st.liquid[i] = 255;
       const sh = SWEEP_SHEET[st.type[i]];
-      if (sh === 5 || sh === 56 || (TILE_CUT_FC.has(st.type[i]) && sh !== 28)) killTileGen(st, ctx, x, y);
+      if (sh === 5 || sh === 56 || (TILE_CUT_FC.has(sh) && sh !== 28)) killTileGen(st, ctx, i % st.w, (i / st.w) | 0);
     }
   }
 }
+
+/** PC_SOLID_TOP_F10：Main.tileSolidTop 集（桌族等,同 MicroBiomesPass DG_SOLID_TOP） */
+const PC_SOLID_TOP_F10 = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281]);
 
 function isSolidTileFC(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return true;

@@ -171,6 +171,22 @@ export class LiquidSim {
   static trkBox: { x0: number; x1: number; y0: number; y1: number } | null = null;
   /** 当前迭代号（包装层在调用 updateLiquid 前写入；迹数值仅作参考，对拍按出现序） */
   static trkIterCur = 0;
+  /** ★IIIII70b 取证钩：SettleWaterAt 落点写回盒内观察（drunk #49 反演；生产恒 null
+   *  零开销）——记 (origin→落点, 携带量/类型/下落标志)，盆域写入审计用 */
+  static settleProbe: ((phase: string, ox: number, oy: number, x: number, y: number, amt: number, lty: number, fell: boolean, wall: number) => void) | null = null;
+  static settleBox: { x0: number; x1: number; y0: number; y1: number } | null = null;
+  /** ★IIIII70b：SettleWaterAt 全量事件流（S=入场携带/L=落点写回，与 x86 rig
+   *  SW_SETLLOG 同格式同序——首分叉逐行对拍用；生产恒 null 零开销） */
+  static settleEv: ((kind: 'S' | 'L', tag: string) => void) | null = null;
+  /** 微观测辅助（仪具注入：trOn+trX/trY 指定观测 origin；trSeq 步进计数） */
+  static trOn = false;
+  static trX = -1;
+  static trY = -1;
+  static trSeq = 0;
+  private inSettleBox(x: number, y: number): boolean {
+    const b = LiquidSim.settleBox;
+    return b !== null && x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1;
+  }
   private trkSig = 0;
   private preAmt = 0;
   private preLty = 0;
@@ -555,6 +571,10 @@ export class LiquidSim {
   remixLavaLine = Number.MAX_SAFE_INTEGER;
   remixRockLevel = -1;
   remixOceanLevel = -1;
+  /** ★IIIII62：原版 WorldGen.remixWorldGen（Liquid.cs:1457 LavaCheck 沙漠 blast 门）
+   *  与 Main.dualDungeonsSeed——生成期沉降/LavaCheck 类门按原版逐字对齐接线 */
+  remixWorldGen = false;
+  dualDungeonsSeed = false;
   /** 地牢豁免（Liquid.cs:186-188：InAnyPotentialDungeonBounds(x,y) 且 origin 格墙
    *  为地牢墙族 → 保持水）。QuickWater 调用方按需接线；未接线=null 不豁免 */
   dungeonWaterExempt: ((x: number, y: number, originWall: number) => boolean) | null = null;
@@ -678,24 +698,23 @@ export class LiquidSim {
 
   private idx(x: number, y: number): number { return y * this.world.store.w + x; }
 
-  /** 格子是否阻挡液体（原版 nactive() && tileSolid && !tileSolidTop）。
-   *  nactive() 要求 active 位——生成期 TileRunner 会在空气格写幽灵 type（flags=0），
-   *  无 active 的一律视为空气（否则微光池会被 waterCheck 当实心格清零泄流）。
-   *  ★EEEEEEE（2026-08-24）补 checking 半边：原版 nactive()=`(sTileHeader&0x60)==32`
-   *  （Tile.cs:270-277）= **active && !checkingLiquid**（skip 位不在掩码）——在列/
-   *  缓冲格（checking=1）对一切通行性谓词视为「可通行」。活动列表格在 AddWater 时
-   *  置位、DelWater 尾清位，故 Update/DelWater 全部邻格谓词读到的在列格恒 nactive=
-   *  false：Update 头实心格 kill=999 分支对在列格**恒不可达**（cs:458）、下灌可灌入
-   *  在列实心格（cs:568）、DelWater 早退支自格腿恒真（cs:1516）。JS 曾只看 active 位
-   *  → 在列实心格（岩浆烧除泥化 59 等在列入列后变实心的格）被当墙：下灌拒灌/侧流
-   *  截断/DelWater 误删——列表内容 ±1 与尾元置换（dw0 #10666 (1954,896) 槽位
-   *  v3292/j3296 族）的谓词面根因 */
+  /** 格子是否阻挡液体（原版逐字：nactive() && tileSolid && !tileSolidTop）。
+   *  ★IIIII70b 修正（2026-08-30）：原版 Tile.nactive()=`(sTileHeader&0x60)==32`
+   *  （Tile.cs:242-248）= **active && !inActive(致动位)**，与 checkingLiquid
+   *  （bTileHeader3 bit3，另一字节）完全无关！旧实现把 checking 半边并进通行性
+   *  谓词是 EEEEEEE 批的误读——常规七链无致动格时零差，DRUNK 世界地牢入口
+   * （DungeonCrawler 预埋触发器机构,actuator-off 的 PinkDungeonBrick 等）在
+   * #49 沉降被判当墙：水塔穿顶失败→10,455 单位屋顶假池（rig P-trace 实证：
+   * probe(3801..3806,500) aheadT=44 abl=0 而 JS=1）。
+   *  检查位的真实用途=C# 各处的 tile.checkingLiquid() 直读（AddWater 头 cs:1172
+   *  早退、Update/DelWater 在列自判等），本仓库由 this.checking 位图独立承担，
+   *  不再混入本谓词。liquidType==4 与 nactive 无关。幽灵 type（flags=0）视为空气。 */
   private blocksLiquid(x: number, y: number): boolean {
     const st = this.world.store;
     if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
     const i = this.idx(x, y);
-    if (!st.flags[i]) return false;
-    if (this.checking[i]) return false; // nactive() = active && !checkingLiquid（Tile.cs:270）
+    if (!st.flags[i]) return false;                    // active 位
+    if ((st.wire[i] >>> 5) & 1) return false;          // !inActive()（Tile.cs:608-611 bit6）
     return this.solidNP[st.type[i]] === 1;
   }
 
@@ -722,8 +741,9 @@ export class LiquidSim {
     if (this.checking[i] || st.liquid[i] === 0) return;
     const t = st.type[i];
     if (t !== 0 && st.flags[i]) {
-      // Liquid.cs:1165：546（栅栏）例外——实心但允许液体驻留入列
-      if (this.solidNP[t] === 1 && t !== this.id546) return;
+      // Liquid.cs:1172：nactive() && tileSolid && type!=546 && !tileSolidTop——
+      // ★IIIII70b 补 !inActive 半边（致动格恒可入列,原版同字面）
+      if (this.solidNP[t] === 1 && t !== this.id546 && !(st.wire[i] >>> 5 & 1)) return;
     }
     if (this.numLiquid >= this.curMaxLiquid - 1) {
       // LiquidBuffer.AddBuffer（cs:840-843 → LiquidBuffer.cs:12-19）：尾接 +
@@ -1287,18 +1307,22 @@ export class LiquidSim {
    *  desertBlast=false = 跳过头部沙漠分支（生成收尾全图检查口径，见分支注释） */
   private lavaCheck(x: number, y: number, desertBlast = true) {
     const st = this.world.store;
-    // LavaCheck 头部沙漠分支（Liquid.cs:1457-1465）：生成期 + 7×7 含地下沙漠墙 →
-    // 整块 7×7 液体**类型**转岩浆（lava(true) 不动量）——地下沙漠底岩浆池来源，且使
-    // 沙漠内水岩接触不互湮（转同型后 LiquidCheck 无异种邻）。★此分支只属于
-    // LavaCheck 包装——原版生成收尾全图检查（WorldGen.cs:22639-22650）对湿格直接
-    // 调 Liquid.LiquidCheck(x,y,type,createMergeTilesDuringGen:true)，**不带本
-    // 前导**（finalGenMergeCheck 以 desertBlast=false 走此口径）：密闭岩浆格
-    // （不在活动列表、四邻无液体→AttemptToMoveLava 不触发）在原版沉降全程无人调
-    // LavaCheck；若收尾全扫带 blast，会把 7×7 内异型液体（如对角密闭水袋）整片
-    // 转岩浆（12345 链 #49 Lt=1 @ (1982,661) 根因——vanilla 同位恒水）。
-    // remixWorldGen/dualDungeonsSeed 为特殊种子旗标，本工程不启用。须在
-    // SolidTile 门之前（原版序）。
-    if (desertBlast && this.generatingWorld && this.undergroundDesertCheck(x, y)) {
+    // LavaCheck 头部沙漠分支（Liquid.cs:1457-1465）：`!remixWorldGen &&
+    // !Main.dualDungeonsSeed && generatingWorld && UndergroundDesertCheck(x,y)` 时
+    // 7×7 液体**类型**转岩浆（lava(true) 不动量）——地下沙漠底岩浆池来源。
+    // ★IIIII62 定罪补门：remix/dualDungeons 下原版恒跳过本支；JS 曾缺前两道门，
+    //   remix 世界的每次 AttemptToMoveLava 都在沙石墙(187/216)带喷洒 7×7 岩浆型位
+    //   ⇒ 下游异种相遇/合并/裁切族结算全面漂移（REMIX #28 七枚滚动仙人掌 cut-kill
+    //   缺失 + Y/L 场差 2223 格的直接根因，rig SevSnap 窗对拍逐事件实证：
+    //   首分歧 k=724 @(1733,682) js 单调多 spray 一批 (0,0,lt0→lt1) 型位写）。
+    // ★此分支只属于 LavaCheck 包装——原版生成收尾全图检查（WorldGen.cs:22639-22650）
+    //   对湿格直接调 Liquid.LiquidCheck(x,y,type,createMergeTilesDuringGen:true)，
+    //   **不带本前导**（finalGenMergeScan 以 desertBlast=false 走此口径）：密闭岩浆格
+    //   在原版沉降全程无人调 LavaCheck；若收尾全扫带 blast，会把 7×7 内异型液体
+    //   （如对角密闭水袋）整片转岩浆（12345 链 #49 Lt=1 @ (1982,661) 根因）。
+    // 门序按原版：旗标门在 SolidTile 门之前。
+    if (desertBlast && this.generatingWorld && !this.remixWorldGen && !this.dualDungeonsSeed
+      && this.undergroundDesertCheck(x, y)) {
       for (let j = y - 3; j <= y + 3; j++) {
         for (let i = x - 3; i <= x + 3; i++) {
           if (i < 0 || j < 0 || i >= st.w || j >= st.h) continue;
@@ -1754,9 +1778,16 @@ export class LiquidSim {
     const originWall = st.wall[oi];
     let type = srcType;   // b：可变类型（下落越线转换后落点/配对判定用它）
     let liquid = st.liquid[oi];
+    LiquidSim.settleEv?.('S', `${originX}|${originY}|${liquid}|${type}`);
+    // ★IIIII70b 定点状态转储：指定 origin 调用前抓 129×129 邻域 13 通道（py 复刻器输入）
+    if (globalThis.__sw76OrigSnap !== undefined && globalThis.__sw76OrigSnap === originX * st.h + originY && globalThis.__sw76Grab instanceof Function) {
+      globalThis.__sw76Grab(originX, originY);
+    }
     st.liquid[oi] = 0;
     let flag1 = true;
+    let fellAny = false; // ★IIIII70b 取证钩伴生：全程是否发生过下落（观测用）
     for (;;) {
+      LiquidSim.settleEv?.('O', `${X}|${Y}|${liquid}|${type}`);
       // 1) 垂直下落：下方空且可通行就一直落（Liquid.cs:121-130）
       let flag2 = false;
       while (Y < st.h - 5 && st.liquid[this.idx(X, Y + 1)] === 0 && !this.blocksLiquid(X, Y + 1)) {
@@ -1805,9 +1836,18 @@ export class LiquidSim {
         if (dir === -1 && probeX < 5) hitL = true;
         else if (dir === 1 && probeX > st.w - 5) hitR = true;
         const bi = this.idx(probeX, Y + 1);
+        if (LiquidSim.trOn && originX === LiquidSim.trX && originY === LiquidSim.trY && LiquidSim.settleEv) {
+          const ahx = X + (step + 1) * dir;
+          const aIn = ahx >= 0 && ahx < st.w;
+          LiquidSim.settleEv('P', `it${++LiquidSim.trSeq} probe=(${probeX},${Y}) below=(${probeX},${Y + 1}) bl=${st.liquid[bi]} bt=${SHEET_OF[st.type[bi]] ?? -1} act=${st.flags[bi] ? 1 : 0} blk=${this.blocksLiquid(probeX, Y + 1) ? 1 : 0} dir=${dir} st=${step} aheadT=${aIn ? (SHEET_OF[st.type[this.idx(ahx, Y)]] ?? -1) : -2} awet=${aIn ? st.liquid[this.idx(ahx, Y)] : -2} abl=${aIn && this.blocksLiquid(ahx, Y) ? 1 : 0} f3=${flag1 ? 1 : 0}`);
+        }
         // 侧下方同类型未满 → 直接灌入（Liquid.cs:149-159；类型比较用转换后的 b）
         if (st.liquid[bi] !== 0 && st.liquid[bi] !== 255 && st.liquidType[bi] === type) {
+          LiquidSim.settleEv?.('M', `${probeX}|${Y + 1}|${st.liquid[bi]}|${type - 1}`);
           let t = 255 - st.liquid[bi];
+          if (LiquidSim.trOn && originX === LiquidSim.trX && originY === LiquidSim.trY && LiquidSim.settleEv) {
+            LiquidSim.settleEv('P', `it${++LiquidSim.trSeq} MERGE@${probeX},${Y + 1} amt=${t} left=${liquid - t} step=${step} dir=${dir}`);
+          }
           if (t > liquid) t = liquid;
           st.liquid[bi] += t;
           liquid -= t;
@@ -1832,15 +1872,26 @@ export class LiquidSim {
           break;
         }
       }
+      if (flag2 || dropped) fellAny = true;
+      // ★IIIII70b 微观测：指定 origin 的逐 probe 决策迹（SW_I76TRACEORG 配套）
+      if (LiquidSim.trOn && originX === LiquidSim.trX && originY === LiquidSim.trY && LiquidSim.settleEv) {
+        LiquidSim.settleEv('P', `it${++LiquidSim.trSeq} descEnd=${X},${Y} f1=${flag1 ? 1 : 0} dropped=${dropped ? 1 : 0} dir=${dir} step=${step} lastDir=${lastDir} lastStep=${lastStep} hitL=${hitL ? 1 : 0} hitR=${hitR ? 1 : 0}`);
+      }
       // 落点写回钳制到有效列（防 lastDir/lastStep 记录异常时把液体写出世界）
       X = Math.max(2, Math.min(st.w - 3, X + lastStep * lastDir));
-      if (liquid !== 0 && dropped) Y++;
-      else break;
+      if (liquid !== 0 && dropped) {
+        Y++;
+        LiquidSim.settleEv?.('F', `${X}|${Y}|${liquid}|${type}|${step}|${lastStep}|${lastDir}`);
+      } else break;
     }
     // 3) 写回落点（Liquid.cs:204-205：类型用转换后的 b）
     const fi = this.idx(X, Y);
+    LiquidSim.settleEv?.('L', `${X}|${Y}|${liquid}|${type}`);
     st.liquid[fi] = liquid;
     st.liquidType[fi] = type;
+    if (LiquidSim.settleProbe !== null && liquid > 0 && this.inSettleBox(X, Y)) {
+      LiquidSim.settleProbe('settle', originX, originY, X, Y, liquid, srcType, fellAny, originWall);
+    }
     if (st.liquid[fi] > 0) {
       // 落地即交互（Liquid.cs:206-210 / AttemptToMoveLava/Honey/Shimmer 248-432）
       this.attemptToMoveLiquid(X, Y, srcType, 2);

@@ -122,8 +122,12 @@ function vanillaIdOfKey(key: string): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
-/** 锭 id(GenVars.copperBar 等语义:按本世界替代矿档位) */
+/** 锭 id(GenVars.copperBar 等语义:按本世界替代矿档位)
+ *  ★IIII71b：cs 侧 GenVars.*Bar 是重置期终值、Shinies 翻带不改写（cs:11305-11323
+ *  唯一赋值点）——DRUNK 带翻后旧实现会跟着 gs.oreTiers 动态面漂移错锭种，改读
+ *  savedOreBars（WorldGen.ts 重置期快照）。 */
 function barIds(gs: GenState): { copper: number; iron: number; silver: number; gold: number } {
+  if (gs.savedOreBars) return gs.savedOreBars;
   const keyOf = (t: number) => TILE_DEFS[t]?.key ?? '';
   return {
     copper: keyOf(gs.oreTiers.copper).includes('tin') ? 703 : 20,
@@ -584,8 +588,9 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (rng.int(0, 2) === 0) push(167);                       // 1/3 炸药
     if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 117 : bars.gold, rng.nextInt(15) + 15); // 陨铁锭/金锭 cs:37254 Next(15)+15
     if (rng.int(0, 1) === 0) {
-      // 地狱火箭矢 或 银弹(银矿为钨时换钨弹 4915,cs:37242)
-      const silverIsTungsten = (TILE_DEFS[gs.oreTiers.silver]?.key ?? '').includes('tungsten');
+      // 地狱火箭矢 或 银弹(银矿为钨时换钨弹；cs:37634 谓词=SavedOreTiers.Silver==168
+      // ——重置期值，★IIII71b 改读 savedOreTiers 快照，勿随翻带漂移)
+      const silverIsTungsten = (TILE_DEFS[(gs.savedOreTiers ?? gs.oreTiers).silver]?.key ?? '').includes('tungsten');
       push(rng.int(0, 1) === 0 ? 265 : (silverIsTungsten ? 4915 : 278), rng.nextInt(25) + 50);   // cs:37269 Next(25)+50
     }
     if (rng.int(0, 1) === 0) push(227, rng.nextInt(6) + 15);      // 再生药水 cs:37290 Next(6)+15（曾 15,29;UUUU 改单参+偏移真形）

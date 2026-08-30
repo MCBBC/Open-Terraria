@@ -55,17 +55,31 @@ function hiveTunnel(st: TileStore, rng: RNG, gs: GenState, sx: number, sy: numbe
   //     普通态 num=Next(12,21)=int(12,20) / num2=Next(10,21)=int(10,20)
   //     drunk 态   num=Next(8,26) =int(8,25)  / num2=Next(10,41)=int(10,40)
   //                num *= (w/4200+1)/2 ; num2 同乘（double 浮点）
+  // ★★IIIII75 定罪主案（HiveBiome.cs:165-175）：普通态两初始化骰在 drunk/remix 域
+  //   **恒掷后被覆写**——C# 先 `num=Next(12,21); num2=Next(10,21)` 再进分支，
+  //   drunk 支再各补一掷覆盖（remix 支不重掷、只加 Next(3)）。旧 JS 按「域选一掷」
+  //   实现每隧道少耗 2 骰 → 全部隧道阈值/游走全漂（#47 双向位移 A=18904 主根因）。
   const drunk = !!gs.seedFlags.drunkWorld;
-  let baseR = rng.int(drunk ? 8 : 12, drunk ? 25 : 20);
-  let steps = rng.int(10, drunk ? 40 : 20);   // 剩余步数
+  const remix = !!gs.seedFlags.remix;
+  let baseR = rng.int(12, 20);              // Next(12,21)：普通值；drunk 弃用重掷
+  let steps = rng.int(10, 20);              // Next(10,21)：同上
   if (drunk) {
+    baseR = rng.int(8, 25);                 // Next(8,26)
+    steps = rng.int(10, 40);                // Next(10,41)
     const scale = (st.w / 4200 + 1) / 2;
     baseR = baseR * scale;
     steps = steps * scale;
+  } else if (remix) {
+    baseR += rng.int(0, 2);                 // Next(3) 加算（HiveBiome.cs:178）
   }
   let vx = rng.int(-10, 10) * 0.2, vy = rng.int(-10, 10) * 0.2;
   let px = sx + 0.0, py = sy + 0.0;
+  // ★IIIII75 取证钩（零开销，仅探针挂载时输出；与 rig hv_tp/hv_te 同字段）
+  const __tunLog = (globalThis as { __swHvLog?: (s: string) => void }).__swHvLog;
+  let tunIters = 0;
+  __tunLog?.(`TUNP ${sx},${sy} r=${baseR} s=${steps} vX=${vx} vY=${vy}`);
   while (steps > 0) {
+    tunIters++;
     if (py > st.h - 250) steps = 0;
     const r = baseR * (1 + rng.int(-20, 19) * 0.01);
     let next2 = steps - 1;   // 本迭代后的剩余(可能被截断保护清零)
@@ -124,6 +138,7 @@ function hiveTunnel(st: TileStore, rng: RNG, gs: GenState, sx: number, sy: numbe
     vy += rng.int(-10, 10) * 0.05;
     vx += rng.int(-10, 10) * 0.05;
   }
+  __tunLog?.(`TUNE ${sx},${sy} it=${tunIters} x=${px} y=${py}`);
   { const f2 = (globalThis as { __swHvLog?: (s: string, n?: number) => void }).__swHvLog; if (f2 && Math.abs(px - sx) + Math.abs(py - sy) > 50) f2(`BIGWALK ${sx},${sy} -> ${Math.floor(px)},${Math.floor(py)} d=${(px - sx).toFixed(1)},${(py - sy).toFixed(1)}`); }
   return [px, py];
 }
