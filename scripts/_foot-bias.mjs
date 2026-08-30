@@ -1,6 +1,6 @@
 // 落脚深度实测:settled 人形,量「精灵最低不透明行」vs「F3 盒底线」,纯像素裁决
 import puppeteer from 'puppeteer-core';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync as fs0 } from 'node:fs';
 const CHROME = process.env.HOME + '/.cache/puppeteer/chrome/mac_arm-150.0.7871.24/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
 const IDS = (process.env.FOOT_IDS || '3,21,22,20,17').split(',').map(Number);
 const browser = await puppeteer.launch({
@@ -73,7 +73,11 @@ const out = await page.evaluate(async ({ ids, cal }) => {
         const i = (y * cv.width + x) * 4;
         const dch = Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]);
         if (dch < 40) continue;
-        if (A[i] > 200 && A[i + 1] < 115 && A[i + 2] < 115) { sawBox = true; continue; }   // F3 红框
+        // F3 描边宽谱:红=怪物 橙=城镇 蓝=动物
+        const R0 = A[i], G0 = A[i + 1], B0 = A[i + 2];
+        const isStroke = (R0 > 170 && B0 < 150 && R0 - B0 > 60 && R0 - G0 > -10)
+          || (B0 > 170 && B0 - R0 > 50 && R0 < 160);
+        if (isStroke) { sawBox = true; continue; }
         diffDark++;
       }
       if (sawBox) { boxTop = Math.min(boxTop, y); boxBot = Math.max(boxBot, y); }

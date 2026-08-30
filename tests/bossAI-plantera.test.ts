@@ -250,6 +250,39 @@ describe('保底灯泡爆发（WorldGen.cs:74180-74329）', () => {
     for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) if (w.store.get(x, y) === BULB) bulbs++;
     expect(bulbs).toBe(0);
   });
+
+  // PlaceJunglePlant 裸数组直写语义（cs:48191-48256）：非实体植物可与带水格共存
+  // （不清液）；写入不得走普通 setTile——本仓液体监听器会按"保水"语义把新块
+  // kill 成 L 形残件（2026-08-30 用户存档实测定罪，曾 10/10 次 burst 只剩 3 格）。
+  it('写入走静默口：水共存 + 监听器不见花苞写', () => {
+    const w = makeWorld(true);
+    const st = w.store;
+    const idx = (x: number, y: number) => y * st.w + x;
+    // 花苞可落区（锚点向上搜索带）全部灌水——任何命中锚的 2×2 必在水中
+    for (let x = 30; x < 70; x++) for (let y = 50; y < GRASS_TOP; y++) st.liquid[idx(x, y)] = 200;
+    let plainWriteOfBulb = 0;
+    st.onTileChanged((x, y) => { if (st.type[idx(x, y)] === BULB) plainWriteOfBulb++; });
+    const evo = new WorldEvolution({
+      store: st, worldSurface: 50, rockLevel: 120,
+      dungeonX: 150, difficulty: 0,
+      flags: { hardMode: true }, crimson: false, isDay: true, raining: false,
+      maxRaining: 0, windSpeedCurrent: 0, playerTile: () => null,
+    });
+    expect(evo.planteraBulbBurst()).toBe(true);
+    let bulbs: Array<[number, number]> = [];
+    for (let x = 30; x < 70; x++) for (let y = 50; y < 60; y++) {
+      if (st.type[idx(x, y)] === BULB) bulbs.push([x, y]);
+    }
+    expect(bulbs.length).toBe(4);   // 完整 2×2
+    bulbs.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+    // 四格连体
+    expect(bulbs[1][0]).toBe(bulbs[0][0] + 1);
+    expect(bulbs[3][0]).toBe(bulbs[2][0] + 1);
+    expect(bulbs[2][1]).toBe(bulbs[0][1] + 1);
+    // 水保留在原格（原版不清液）且未触发普通 setTile 的花苞写（静默口）
+    for (const [x, y] of bulbs) expect(st.liquid[idx(x, y)]).toBe(200);
+    expect(plainWriteOfBulb).toBe(0);
+  });
 });
 
 describe('钩蔓 263', () => {

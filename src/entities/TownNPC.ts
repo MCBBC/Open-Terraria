@@ -736,12 +736,17 @@ export class TownNPC extends Entity {
   constructor(key: string, x: number, y: number) {
     super();
     this.npcKey = key;
-    this.x = x;
-    this.y = y - this.h;
     const town = TOWN_NPC_IDS[key];
     this.vanillaId = town?.id ?? 22; // 未登记 key 兜底向导贴图
-    this.givenName = newNpcName(this.vanillaId);
     const v = VANILLA_NPCS[String(this.vanillaId)];
+    // ★碰撞盒按型同步（原版 SetDefaults width/height）：Town Cat/Bunny 官方
+    // 18×20、Dog 18×28——此前硬编码 Entity 默认 20×42,小动物顶着两格高盒
+    // 会卡进矮门(2026-08-30 用户实拍)
+    if (v?.width) this.w = v.width;
+    if (v?.height) this.h = v.height;
+    this.x = x;
+    this.y = y - this.h;
+    this.givenName = newNpcName(this.vanillaId);
     this.maxHp = this.hp = v?.lifeMax ?? 250;
   }
 
@@ -2624,11 +2629,17 @@ export class TownNPC extends Entity {
       if (tx > this.doorX + 2 || tx < this.doorX - 2) {
         const doorType = st.type[st.idx(this.doorX, this.doorY)];
         if (doorType === DOOR_OPEN) {
-          if (closeDoorTile(st, this.doorX, this.doorY)) this.closeDoor = false;
+          if (closeDoorTile(st, this.doorX, this.doorY)) {
+            this.closeDoor = false;
+            game.npcDoorNet?.('door', this.doorX, this.doorY, true, this.facing);  // msg19:关门
+          }
         } else if (doorType === GATE_OPEN) {
           // 高门关门（原版 54266-54274：ShiftTallGate(closing:true)，tile 389 → 388）
           if (shiftTallGate(st, this.doorX, this.doorY, true,
-            () => game.playSfx('door_close', 1, this.cx, this.cy))) this.closeDoor = false;
+            () => game.playSfx('door_close', 1, this.cx, this.cy))) {
+            this.closeDoor = false;
+            game.npcDoorNet?.('gate', this.doorX, this.doorY, true, this.facing);  // msg19:闸关
+          }
         } else {
           this.closeDoor = false;
         }
@@ -2656,6 +2667,7 @@ export class TownNPC extends Entity {
           this.closeDoor = true;
           this.doorX = x; this.doorY = y;
           game.playSfx('door_open', 1, this.cx, this.cy);
+          game.npcDoorNet?.('door', x, y, false, this.facing);  // msg19:开门
         }
         return;
       }
@@ -2664,6 +2676,7 @@ export class TownNPC extends Entity {
         if (anchor) {
           this.closeDoor = true;
           this.doorX = anchor[0]; this.doorY = anchor[1];
+          game.npcDoorNet?.('gate', anchor[0], anchor[1], false, this.facing);  // msg19:闸开
         }
         return;
       }

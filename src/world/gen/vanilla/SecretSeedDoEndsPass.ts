@@ -34,7 +34,9 @@
 //   hallow / mushroom 边界 per-column Next(3)；rainbow 巨石 Next(4)、旗帜 Next(5)||
 //   (j<ws&&Next(2))、播种双掷（Next(w)×2 per attempt）、箱染 Next(3)（满箱无空槽时不掷池）、
 //   苔砖扫掷 Next(50..)/Next(4,13)；南瓜 Next(15)/PlacePumpkin Next(6)/Next(5) 成长串。
-// C# Next(a,b) 右开区间 ⇒ JS rng.nextIntRange(a, b-1)；Next(a,b] 无者即 Next(b−1) 封顶。
+// ★IIIII80 勘误：C# Next(a,b) 右开区间 ⇔ JS rng.nextIntRange(a, b)**原样直传**（helper
+// 即 Exclusive-upper 镜像）；「-1 再收一格」系历史误读（曾全文件所有 b 偏低一格）。
+// 整数掷 Next(n) 用 rng.nextInt(n)；含上界掷用 rng.int(a,b)。
 // 普通种子（九旗全关）：模块零钩入零消费。
 //
 // 已知近似（零掷骰差，批章登记）：
@@ -273,26 +275,26 @@ function convertTreeAndGround(
     const base = j === 0, top = j === num2;
     if (base) {
       if (newTreeSheet === 5 || newTreeSheet === 596 || newTreeSheet === 616) {
-        if (oldTreeSheet === 323) { st.frameX[q] = 0; st.frameY[q] = 22 * rng.nextIntRange(0, 2); }
+        if (oldTreeSheet === 323) { st.frameX[q] = 0; st.frameY[q] = 22 * rng.nextIntRange(0, 3); }
         else convertTreeAndGroundBranches(st, x, y - j, newTreeSheet);
       } else if (newTreeSheet === 323) { st.frameX[q] = 66; st.frameY[q] = 0; }
       continue;
     }
     if (top) {
       if (newTreeSheet === 5 || newTreeSheet === 596 || newTreeSheet === 616) {
-        if (oldTreeSheet === 323) { st.frameX[q] = 22; st.frameY[q] = 22 * rng.nextIntRange(9, 11); }
+        if (oldTreeSheet === 323) { st.frameX[q] = 22; st.frameY[q] = 22 * rng.nextIntRange(9, 12); }
         else convertTreeAndGroundBranches(st, x, y - j, newTreeSheet);
-      } else if (newTreeSheet === 323) { st.frameX[q] = 22 * rng.nextIntRange(4, 6); st.frameY[q] = 0; }
+      } else if (newTreeSheet === 323) { st.frameX[q] = 22 * rng.nextIntRange(4, 7); st.frameY[q] = 0; }
       continue;
     }
     if (newTreeSheet === 5 || newTreeSheet === 596 || newTreeSheet === 616) {
       if (oldTreeSheet === 323) {
-        if (rng.nextIntRange(0, 1) === 0) { st.frameX[q] = 44; st.frameY[q] = 22 * rng.nextIntRange(3, 5); }
-        else if (rng.nextIntRange(0, 1) === 0) { st.frameX[q] = 22; st.frameY[q] = 22 * rng.nextIntRange(0, 5); }
-        else { st.frameX[q] = 0; st.frameY[q] = 22 * rng.nextIntRange(0, 5); }
+        if (rng.nextInt(2) === 0) { st.frameX[q] = 44; st.frameY[q] = 22 * rng.nextIntRange(3, 6); }
+        else if (rng.nextInt(2) === 0) { st.frameX[q] = 22; st.frameY[q] = 22 * rng.nextIntRange(0, 6); }
+        else { st.frameX[q] = 0; st.frameY[q] = 22 * rng.nextIntRange(0, 6); }
       } else convertTreeAndGroundBranches(st, x, y - j, newTreeSheet);
     } else if (newTreeSheet === 323) {
-      st.frameX[q] = 22 * rng.nextIntRange(0, 2); st.frameY[q] = 0;
+      st.frameX[q] = 22 * rng.nextIntRange(0, 3); st.frameY[q] = 0;
     }
   }
   st.type[st.idx(x, y)] = idOf(newFloorSheet);                          // tile.type=newFloorType
@@ -453,16 +455,16 @@ function shNb(st: TileStore, x: number, y: number): number {
 export function doDigExtraHoles(st: TileStore, rng: RNG, gs: GenState): void {
   const num = Math.trunc(st.w * 0.1);
   for (let k = 0; k < num; k++) {
-    const i2 = rng.nextIntRange(50, st.w - 51);                         // Next(50, w-50)
-    const j = rng.nextIntRange(50, st.h - 51);                          // Next(50, h-50)
-    let num2 = rng.nextIntRange(5, 15);                                 // Next(5,16)
+    const i2 = rng.nextIntRange(50, st.w - 50);                         // Next(50, w-50)
+    const j = rng.nextIntRange(50, st.h - 50);                          // Next(50, h-50)
+    let num2 = rng.nextIntRange(5, 16);                                 // Next(5,16)
     if (rng.nextInt(3) === 0) num2 += rng.nextInt(15);
-    const steps = rng.nextIntRange(30, 200);                            // Next(30,201)
+    const steps = rng.nextIntRange(30, 201);                            // Next(30,201)
     tileRunner(st, rng, gs, i2, j, {
       strength: num2, steps,
       type: -1, addTile: false,
-      speedX: rng.nextIntRange(-15, 15) * 0.1,                           // Next(-15,16)*0.1f
-      speedY: rng.nextIntRange(10, 25) * 0.1,                            // Next(10,26)*0.1f
+      speedX: rng.nextIntRange(-15, 16) * 0.1,                           // Next(-15,16)*0.1f
+      speedY: rng.nextIntRange(10, 26) * 0.1,                            // Next(10,26)*0.1f
       noYChange: true,
     });
   }
@@ -604,11 +606,11 @@ function overGrownDungeonWithRainbowMoss(st: TileStore, rng: RNG, gs: GenState):
   const sideRight = gs.dungeonSide === 1;
   const MOSS_BRICK = idOf(628);
   for (let n = 0; n < num; n++) {
-    let cx = rng.nextIntRange(50, half - 1);                            // Next(50, w/2)
-    if (sideRight) cx = rng.nextIntRange(half, st.w - 51);
-    const cy = rng.nextIntRange(50, st.h - 51);
+    let cx = rng.nextIntRange(50, half);                               // Next(50, w/2)
+    if (sideRight) cx = rng.nextIntRange(half, st.w - 50);
+    const cy = rng.nextIntRange(50, st.h - 50);
     if (!st.inBounds(cx, cy) || !isDungeonWallId(st.wall[st.idx(cx, cy)])) continue;
-    const r = rng.nextIntRange(4, 12);                                  // Next(4,13)
+    const r = rng.nextIntRange(4, 13);                                  // Next(4,13)
     for (let j = cx - r; j <= cx + r; j++) {
       for (let k = cy - r; k <= cy + r; k++) {
         if (j < 1 || k < 1 || j >= st.w - 1 || k >= st.h - 1) continue;
@@ -741,8 +743,8 @@ export function doRainbowStuff(st: TileStore, rng: RNG, gs: GenState, chests: Wo
     else if (!flag) num *= 2;
     const margin = 40;
     for (let k = 0; k < num; k++) {
-      const px = rng.nextIntRange(margin, st.w - margin - 1);           // Next(40, w-40)
-      let py = rng.nextIntRange(margin, st.h - margin - 1);
+      const px = rng.nextIntRange(margin, st.w - margin);               // Next(40, w-40)
+      let py = rng.nextIntRange(margin, st.h - margin);
       if (st.flags[st.idx(px, py)]) continue;
       while (!st.flags[st.idx(px, py)]) {
         py--;

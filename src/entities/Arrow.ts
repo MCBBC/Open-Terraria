@@ -21,10 +21,19 @@ import type { Camera } from '../render/Camera';
 /** 原版投射物贴图懒加载（Projectile_1.png = 木箭、Projectile_2.png = 燃烧箭，泛用所有 id） */
 const spriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
 /** 绳索线圈弹→绳 tile key（aiStyle35 撞块铺绳,AI_035 :27655-27662 num274 映射:
- *  475→353 藤/506→366 蛛网/505→365 丝/default→213——3005 藤蔓绳圈等线圈件共用） */
+ *  475→353 藤/506→366 蛛网/505→365 丝/default→213——171/3005 等线圈件共用。
+ *  ★1458 AI_035 默认支 num274=213 对任意 aiStyle35 弹生效(:27619 Projectile.cs),
+ *  985 普通绳圈 shoot 171(SetDefaults :2572 同族 14×14/tileCollide=false/t400)此前
+ *  未登记=纯扔箭撞块无效果(2026-08-30 孤儿武器 A 波工单1) */
 const ROPE_COIL_TILE: Record<number, string> = {
-  475: 'v_353_vine_rope', 476: 'v_213_rope', 505: 'v_365_silk_rope', 506: 'v_366_web_rope',
+  171: 'v_213_rope', 475: 'v_353_vine_rope', 476: 'v_213_rope', 505: 'v_365_silk_rope', 506: 'v_366_web_rope',
 };
+/** 晶洞弹 772 尾迹/爆裂宝石尘（Projectile.cs:56499 randFromList(86-91,138) 尾迹、
+ *  :76569/:76580 Kill 爆两段 randFromList(86-90)） */
+const GEODE_GEM_DUST = [86, 87, 88, 89, 90];
+/** DropGeodeGems 池（Projectile.cs:80305——181 红宝石/182 钻石/180 绿宝石/
+ *  178 黄玉/179 蓝晶/177 紫晶/999 琥珀，顺序=源码字面序,RNG 序敏感勿重排） */
+const GEODE_GEM_POOL = [181, 182, 180, 178, 179, 177, 999];
 /** 在飞去重 + 失败 10s 冷却(2026-08-19 前把未加载完的 Image 先塞缓存:一次失败
  *  = 坏 Image(width 0)永久驻缓存,该弹幕本会话隐形且无重试——与 ensureVImage
  *  的 TTL 语义对齐;失败顺带驱逐 SW 缓存同路径条目防重吃坏字节) */
@@ -97,6 +106,7 @@ import projFramesJson from '../data/vanilla-projframes.json';
 import { projectileData } from '../data/vanillaProjectiles';
 import { isGemBolt, type GemStaffFlags, gemDamageMultiplier } from '../data/vanillaGemStaff';
 import { projGravSpec } from '../data/vanillaItemCombat';
+import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { GorePiece } from './GorePiece';
 import { TownNPC } from './TownNPC';
 import { MedusaHeadProj } from './MedusaHeadProj';
@@ -1477,6 +1487,22 @@ export class Arrow extends Entity {
     this.flare = FLARE_PROJS.has(projId);
     // 钉自动激活（SetDefaults aiStyle 93 :5843-5852，钉枪 3107 / 钉弹 3108 shoot）
     this.nail93 = projId === 514;
+    // ---- 绳圈弹出生自校正（aiStyle35 族 171/475/505/506，2026-08-30 工单1）----
+    // ① 通用投掷出口按 aiStyle2 抛物档传参(grav0.4@20/terminal32/tumble)——对
+    //   aiStyle35 弹逐项覆写原版档(AI_035 :27581-27590：ai0>30 后 vy+0.2、vx×0.985、
+    //   vy 终端 14；无翻滚)。AI1_GRAV 表已有同值四条目,但发射链显式 grav 覆盖了它。
+    // ② SetDefaults tileCollide=false(:2572-2579)仅指【通用位移】,AI 自带
+    //   Collision.TileCollision 撞块检测(:27602 flag14)=可撞块——本仓铺绳支挂在
+    //   实心命中块内,数据表置 noTileCollide=true 会把整段变死代码(实测 171/475/
+    //   505/506 全被排除零铺绳),此处恢复碰撞参与
+    if (ROPE_COIL_TILE[projId] !== undefined) {
+      this.noTileCollide = false;
+      this.grav = 0.2;
+      this.gravDelay = 30;
+      this.drag = 0.985;             // :27585 velocity.X *= 0.985f（与重力同一门内生效）
+      this.maxFall = 14;
+      this.tumble = false;
+    }
     if (opts?.starFall) {
       this.starFallLine = opts.starFall.lineY;
       this.starFallGen = opts.starFall.gen ?? 0;
@@ -2090,6 +2116,36 @@ export class Arrow extends Entity {
         if (d) { d.noGravity = true; d.vx *= 2; }
       }
       if (this.manaStar) game.spawnDrop?.(this.x, this.y, 'vi_4143_manacloakstar', 1);
+    }
+    // ---- 晶洞弹 772 Kill（Projectile.cs:76566-76608，2026-08-30 孤儿武器 A 波工单5）：
+    // dig 音 + 尘 1×6（velocity×1.9 循环写仅视觉残留）+ 宝石尘 86-90 ×20（noGravity、
+    // vel×2.9、vy×0.8、fadeIn）+ ×7 同款 noLight——若 owner==myPlayer 再 DropGeodeGems
+    if (this.projId === 772 && !this.dead) {
+      game.playSfx?.('dig', 1, this.cx, this.cy);            // PlaySound(0,...)（:76567）
+      for (let i = 0; i < 6; i++) {
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 1);
+        this.vx *= 1.9;
+        this.vy *= 1.9;                                       // :76570 velocity *= 1.9f
+      }
+      for (let i = 0; i < 27; i++) {                          // 20(:76573)+7(:76579)
+        const dd = GEODE_GEM_DUST[(Math.random() * 5) | 0];   // rand.NextFromList(86..90)
+        const d2 = game.spawnDust?.(this.x, this.y, this.w, this.h, dd,
+          this.vx, this.vy, 0, null, 0.7);
+        if (d2) {
+          d2.noGravity = true;
+          d2.vx *= 2.9;
+          d2.vy = (d2.vy * 2.9) * 0.8;
+          if (i >= 20) d2.noLight = true;                     // :76586 第二段尘 noLight
+        }
+      }
+      // DropGeodeGems（:80304-80316）：池 [181,182,180,178,179,177,999] 无放回抽 2 种,
+      // 各 Next(3,7)=3-6 个——RequestNewItem(Center) 本仓落点取弹心
+      const pool = [...GEODE_GEM_POOL];
+      for (let g = 0; g < 2; g++) {
+        const vid = pool.splice((Math.random() * pool.length) | 0, 1)[0];
+        const key = VANILLA_ITEM_KEY_BY_ID[vid];
+        if (key) game.spawnDrop?.(this.cx, this.cy, key, 3 + ((Math.random() * 4) | 0));
+      }
     }
     // ★2026-08-26 宝石法珠 Kill 公共段（Projectile.cs:76985-77010,1458；用户实报批）：
     // SoundEngine.PlaySound(0)=Dig 音 + 15 枚同色尘（noGravity、scale×1.25、
@@ -4945,6 +5001,9 @@ export class Arrow extends Entity {
         return;
       }
     } else {
+    // 原版零伤害弹不进 PVE 管线（Damage_PVE :12572 头 `if (damage <= 0) return;`
+    // ——水枪/微光枪/晶洞等 damage0 玩具件曾漏 = 命中侧把 0 伤硬结成实伤）
+    if (this.damage <= 0) return;
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
       if (e.dead) continue;

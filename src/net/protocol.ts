@@ -42,6 +42,10 @@ export const enum Msg {
   PlayerActive = 14,  // S→C 广播 {slot, active, name}
   TileBatch = 17,     // C→S→广播 {count, ops[]}（tile 操作批量，对齐 msg17 语义）
   SetTime = 18,       // S→C {timeOfDay, dayCount}
+  DoorEvent = 19,     // C→S→广播（原版 MessageID 同号 DoorOpen；NPC.cs:54398/54610）：
+                      //   {u8 flags(bit0=closing bit1=gate), i32 x(门/闸锚格), i32 y, i8 dir}
+                      //   仅 NPC 模拟端（房主/SimHost）发送；远端立即重放开闭动作+音效。
+                      //   tile 终态仍由 TileBatch 权威收敛，本包只补「即时性」= 原版 msg19 语义
   // ---- v3 实体同步（房主权威 + 服务器中继；ID 对齐原版 MessageID.cs） ----
   PlayerLifeMana = 16, // 双向 {u8 slot, i16 hp, i16 maxHp}（原版同号：客户端权威 HP，服务器中继）
   SyncItem = 21,       // 房主→广播 {u32 netId, u8 op(0=spawn/1=take/2=despawn), str key,
@@ -518,6 +522,24 @@ export interface TileOp {
   x: number; y: number;
   v: number;
   fx: number; fy: number;
+}
+
+// ================= DoorEvent（msg19，NPC 开关门即时事件） =================
+export interface DoorEventMsg { closing: boolean; gate: boolean; x: number; y: number; dir: number; }
+
+export function writeDoorEvent(e: DoorEventMsg): Uint8Array {
+  const w = new NetWriter(Msg.DoorEvent);
+  w.u8((e.closing ? 1 : 0) | (e.gate ? 2 : 0));
+  w.i32(e.x); w.i32(e.y); w.i8(e.dir);
+  return w.finish();
+}
+
+export function readDoorEvent(r: NetReader): DoorEventMsg | null {
+  if (r.remaining < 10) return null; // u8 + i32*2 + i8
+  const flags = r.u8();
+  const x = r.i32(), y = r.i32();
+  const dir = r.i8();
+  return { closing: (flags & 1) !== 0, gate: (flags & 2) !== 0, x, y, dir };
 }
 
 export function writeTileBatch(ops: TileOp[]): Uint8Array {

@@ -98,6 +98,27 @@ export class ChunkCache {
   private pageUsed: number[] = [];
   /** 空闲 cell 栈(page*16+slot;栈顶复用 = 热页优先) */
   private cellFree: number[] = [];
+  /**
+   * ★槽位粘滞表（2026-08-30 动画邻域抖扭修复）：chunkKey → 已占用的 atlas 页内 cell。
+   * 【根因】Chromium GPU 光栅化的缩放 drawImage 不严格守最近邻——同一 256² 位图
+   * 放在共享大图不同偏移处放大绘制，输出会因【页邻域纹理渗色】而不同
+   * （scripts/_atlas-sampling-semantics.mjs 实验：z1.25 差 4572px、z2 整数倍也差
+   * 一圈边界 8128px）。动画件每 tick 触发整 chunk 重烘，若 allocCell 把 chunk 分到
+   * 新 slot = 换了页邻居 = 渗色模式变化 = 静态块以动画频率"抖扭"（用户实报：
+   * 锯木机最明显、特定缩放比才出现、最大放大消失——全部吻合）。
+   * 【修法】chunk 生命周期内 cell 只分配一次：标脏不还池、重烘原位覆写。
+   * 不变量：粘滞表中持有的 cell 绝不入 cellFree 池；所有回收入口（LRU 淘汰/
+   * dispose/烘炸兜底）必须先删粘滞登记再归还。 */
+  private stickyCell = new Map<number, number>();
+  /** 取 cell：优先本 chunk 的粘滞槽位（不存在才新分配） */
+  private acquireCell(k: number): number {
+    let c = this.stickyCell.get(k);
+    if (c === undefined || c < 0) {
+      c = this.allocCell();
+      this.stickyCell.set(k, c);
+    }
+    return c;
+  }
   /** 调试/F5:当前 atlas 页数(墙+tile 双层各一摞,画布张数 = 2×页数) */
   get pageCount(): number { return this.wallPages.length; }
 
@@ -156,6 +177,7 @@ export class ChunkCache {
     this.tilePages.length = 0;
     this.pageUsed.length = 0;
     this.cellFree.length = 0;
+    this.stickyCell.clear();
     this.chunks.clear();
     this.dirtyQueue.length = 0;
     this.dirtySet.clear();
@@ -286,7 +308,11 @@ export class ChunkCache {
   markDirty(cx: number, cy: number) {
     const k = ChunkCache.key(cx, cy);
     if (!this.chunks.has(k)) return; // 未生成的 chunk 惰性创建
-    this.releasePair(this.chunks.get(k)); // 旧画布丢弃前先释放,防 detached canvas 积压
+    // ★槽位粘滞：不再 releasePair——cell 保留在 stickyCell 中（页占用计数不回退），
+    //   原位重烘覆写。这里补登记是防御性的（正常路径 renderChunk→acquireCell 已登
+    //   记）；stub pair(cell<0) 不入表。
+    const oldCell = (this.chunks.get(k) as ChunkPair | undefined)?.cell;
+    if (typeof oldCell === 'number' && oldCell >= 0) this.stickyCell.set(k, oldCell);
     this.chunks.set(k, undefined as unknown as ChunkPair); // 标记删除，重绘时重建
     this.chunkSheets.delete(k);  // 重建时会重新登记缺表
     this.chunkConsumed.delete(k);
@@ -328,7 +354,9 @@ export class ChunkCache {
   invalidateAll(): void {
     for (const k of this.chunks.keys()) {
       if (this.chunks.get(k) === undefined) continue; // 已是待重建哨兵
-      this.releasePair(this.chunks.get(k)); // 同 markDirty:旧画布丢弃前释放
+      // ★槽位粘滞：同 markDirty——补登记后不还池，原位重烘
+      const oldCell = (this.chunks.get(k) as ChunkPair | undefined)?.cell;
+      if (typeof oldCell === 'number' && oldCell >= 0) this.stickyCell.set(k, oldCell);
       this.chunks.set(k, undefined as unknown as ChunkPair);
       this.enqueueDirty(k);
     }
@@ -404,6 +432,8 @@ export class ChunkCache {
     while (this.chunks.size > ChunkCache.MAX_CHUNKS) {
       const oldest = this.chunks.keys().next().value as number | undefined;
       if (oldest === undefined) break;
+      // ★槽位粘滞：淘汰=连粘滞登记一起注销再还池（不变量：还池的 cell 必无主人）
+      this.stickyCell.delete(oldest);
       this.releasePair(this.chunks.get(oldest)); // 淘汰画布同样释放,防 detached 积压
       this.chunkSheets.delete(oldest);
       this.chunkConsumed.delete(oldest);
@@ -437,11 +467,14 @@ export class ChunkCache {
     this._bakingKey = ChunkCache.key(cx, cy);
     this.chunkSheets.delete(this._bakingKey); // 重烘焙 = 重新登记
     this.chunkConsumed.delete(this._bakingKey);
-    const cell = this.allocCell();
+    // ★槽位粘滞：优先复用本 chunk 原槽位（见 stickyCell 注——页邻域渗色敏感性）
+    const cell = this.acquireCell(this._bakingKey);
     try {
       const page = Math.floor(cell / ChunkCache.CELLS_PER_PAGE);
       return this.bakeChunkInto(cx, cy, this.wallPages[page], this.tilePages[page], cell);
     } catch (e) {
+      // 烘焙异常：本次放弃粘滞占位，连同 cell 一起归还（防泄漏；正常路径不至此）
+      this.stickyCell.delete(this._bakingKey);
       this.cellFree.push(cell); // 烘焙异常:cell 归还,防页池泄漏
       this.pageUsed[Math.floor(cell / ChunkCache.CELLS_PER_PAGE)]--;
       throw e;

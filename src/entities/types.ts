@@ -167,6 +167,11 @@ export interface GameHooks {
   // 世界坐标声（原版 SoundEngine.PlaySound 带 x/y）：x/y 省略 = UI/玩家动作声不衰减
   playSfx(name: string, vol?: number, x?: number, y?: number): void;
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number): void; // 怪物专属声效（原版文件名列表）
+  /** 城镇 NPC 开关门即时事件广播（原版 msg19 DoorOpen 的等价通道，NPC.cs:54398/54610）：
+   *  仅 NPC 模拟端（房主/SimHost）发送；远端立即重放开闭动作+音效（tile 终态由
+   *  TileBatch 收敛）。kind='door' 普通 2×3 门 / 'gate' 高门(388/389)；closing=false=开。
+   *  缺省 = 单人/旧客户端零发送 */
+  npcDoorNet?(kind: 'door' | 'gate', x: number, y: number, closing: boolean, dir: number): void;
   playSfxWav?(file: string, vol?: number, x?: number, y?: number, pitch?: number, replace?: boolean): void;   // 单 wav 直播（环境声三表;pitch=变调/EoC 连冲 0.6;replace=case36 ForceRoar 覆盖语义;可选=测试 mock 兼容）
   /** 跟踪式循环音（SoundEngine.PlayTrackedLoopedSound——AI_016 引信嘶声等；
    *  返回句柄 stop/setPos；Game 实现 = Sfx.startTrackedLoop，缺省无循环音） */

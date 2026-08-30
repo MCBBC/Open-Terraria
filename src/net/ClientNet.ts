@@ -7,6 +7,7 @@ import {
   NetWriter, NetReader, FrameParser, TileOp, TileOpAction, readTileBatch, decodeStrip,
   ItemContainer, ItemSyncEntry, INV_SYNC_SIZES, writePlayerItems, readPlayerItems,
   RoomRules, DEFAULT_ROOM_RULES, rulesFromBits,
+  writeDoorEvent, readDoorEvent,
 } from './protocol';
 import {
   writeLeashedFullSync, writeLeashedPartialSync, writeLeashedRemove, writeLeashedPlaceRequest,
@@ -130,6 +131,8 @@ export interface ClientNetHooks {
   onChestSync?: (chestIdx: number, x: number, y: number, items: Array<{ id: number; stack: number } | null>) => void;
   /** NPC 快照到达（msg23；Game 维护傀儡池） */
   onNpcSnapshot?: (snaps: NpcSnap[]) => void;
+  /** NPC 开关门事件到达（msg19 等价通道；Game 重放动作+音效） */
+  onDoorEvent?: (ev: { closing: boolean; gate: boolean; x: number; y: number; dir: number }) => void;
   /** 掉落物操作到达（msg21；Game 维护傀儡/移除本地真掉落） */
   onItemOp?: (op: ItemOpMsg) => void;
   /** 弹幕快照到达（msg27；Game 维护傀儡池） */
@@ -662,6 +665,13 @@ export class ClientNet {
         this.hooks.onNpcSnapshot?.(snaps);
         return;
       }
+      case Msg.DoorEvent: {
+        // msg19 等价：NPC 开关门即时事件——立即重放（netSuppress 防回环）+ 音效。
+        // tile 终态随后由 TileBatch 收敛为同值，双写幂等
+        const ev = readDoorEvent(r);
+        if (ev) this.hooks.onDoorEvent?.(ev);
+        return;
+      }
       case Msg.SyncItem: {
         // 原版 msg21/145 双态（NetMessage.cs:88-92：微光物品升格 145 附尾段）——
         // 本协议在 op0 尾段条件携带（下方 r.remaining>=5 读）。msg146 ShimmerActions
@@ -986,6 +996,12 @@ export class ClientNet {
     } finally {
       st.netSuppress = false; // R5：异常安全复位（否则 suppress 永久卡死上报）
     }
+  }
+
+  /** NPC 开关门即时事件上行（msg19 等价）：仅 NPC 模拟端 = 房主发送 */
+  sendDoorEvent(kind: 'door' | 'gate', x: number, y: number, closing: boolean, dir: number) {
+    if (!this.active || !this.policy.isHost) return;
+    this.send(writeDoorEvent({ gate: kind === 'gate', closing, x, y, dir }));
   }
 
   // ================= v3 实体同步（msg16/21/23/27/42，房主权威+服务器中继） =================

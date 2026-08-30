@@ -136,3 +136,24 @@ export function canHitLine(st: Store, x1: number, y1: number, w1: number, h1: nu
     if (done || lastSingle) return true;
   }
 }
+
+/** 原版 Player.CanHit(Entity ent)（Terarria1457/Terraria/Player.cs:42858-42865；
+ *  1456 :41886-41894）1:1——近战挥击对 NPC 的视线门，消费点 = ProcessHitAgainstNPC
+ *  （1457 :44641 / 1456 :43619 `!flag || (!nPC.noTileCollide && !CanHit(nPC))`）。
+ *  四条射线任一通过即可命中：A) Collision.CanHit 整盒对整盒；B/C/D) 三条
+ *  "手位点→目标锚点"的 CanHitLine。手位 = Center+(direction*width/2,
+ *  gravDir*-height/3)（反重力未实装恒 gravDir=1，与 SmartSelect.ts 同口径）。
+ *  目标三锚点 = Center±(0,height/3) 与 Center 本体。p 只需 Player 盒面
+ *  （Entity 基类即满足），e 为目标盒。 */
+export interface LOSBox { x: number; y: number; w: number; h: number; cx?: number; cy?: number; facing?: number }
+
+export function playerCanHitEntity(st: Store, p: LOSBox, e: LOSBox): boolean {
+  if (canHit(st, p.x, p.y, p.w, p.h, e.x, e.y, e.w, e.h)) return true;
+  const pcx = p.cx ?? p.x + p.w / 2;
+  const pcy = p.cy ?? p.y + p.h / 2;
+  const hx = pcx + (p.facing ?? 1) * (p.w / 2), hy = pcy - p.h / 3;
+  const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
+  return canHitLine(st, hx, hy, 0, 0, ecx, ecy - e.h / 3, 0, 0)
+    || canHitLine(st, hx, hy, 0, 0, ecx, ecy, 0, 0)
+    || canHitLine(st, hx, pcy, 0, 0, ecx, ecy + e.h / 3, 0, 0);
+}

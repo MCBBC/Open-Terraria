@@ -356,8 +356,10 @@ const TORCH_EXPLICIT: Record<number, number> = {
  *  ★失谐门同族防御钳制（2026-08-30，与 styleDropVidOfFrames 门支同一口径体系）：
  *  【背景】原版 KillTile case 4（WorldGen.cs:65106-65163）switch 的 default 分支
  *  本身就是【无界算术外推】dropItem = 426 + num——case 枚举只覆盖合法域
- *  （0 = 普通火把、8..23 = 显式档，default 本职是服务彩炬连续段 1..7），
- *  num ≥ 24 即帧漂出贴图域的产物 → 426+num 可落到任意物品 id。这是"失谐门/
+ *  （0 = 普通火把、8..23 = 显式档，default 本职是服务 style 1..7 连续火把带
+ *    427 蓝/428 红/429 绿/430 紫/431 白/432 黄/433 恶魔——ItemID.cs:2393-2407 核实），
+ *  num ≥ 24 即帧漂出贴图域的产物 → 426+num 可落到任意物品 id（外推域可命中任意
+ *  物品，含 Zenith 4956 一类嬗变目标）。这是"失谐门/
  *  哲学家之石"家族在原版里最直白的一个无界 sink，我们曾按 C# default 同构忠实
  *  移植（`?? 426+style`），本次封死。
  *  【可达性现状】火把是单格物、掉落读 frameY/22：当前引擎所有多格翻转支
@@ -586,7 +588,8 @@ export function styleDropVidOfFrames(sheet: number, fx: number, fy: number): num
   //   DropDoorItem 的 doorItem!=0 门拦下 = 不掉落（:69466）。
   // 【本仓策略】显式区间钳制，越界一律回落 Doors[0]=木门 25：
   //   - 为什么不照抄"不掉落"？C-4 备案口径取更兜底侧：合法但怪异的帧宁可掉错
-  //     材质门也不静默吞掉破坏产物；两档偏差均已在 docs 审计备案，勿"顺手统一"。
+  //     材质门也不静默吞掉破坏产物；该偏差已随 C-4 在 docs/audit/tile-audit-
+  //     2026-08-23.md 备案（2026-08-30 修订条目），勿"顺手统一"。
   //   - 为什么安全？Doors 表仅含 GetDoorItem 输出值域（69 档门族,25..6120,
   //     含 style11=0 神庙锁门不掉档）——天顶剑 4956 等嬗变目标 id 物理不在表内，
   //     无论帧怎么漂移最坏结果只是"掉错材质门"，永不产生表外物品。

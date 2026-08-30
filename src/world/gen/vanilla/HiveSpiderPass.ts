@@ -16,6 +16,10 @@ import { flipGenSolid, genSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';   // SSSS：PlaceTight 尾部 CheckStalactite
 import { noSpiderCavesActuallyNoSpiderCaves } from '../SeedEasterEggs';   // ★IIIII41-T3②
 
+/** ★IIIII81：探针掷流计数器读数（_iii85win 挂 __swOnRoll/__swRollCount；无钩恒 0，
+ *  生产路径零开销）——与 rig JJHook.RollCount 同语义，仅用于对拍流水。 */
+const __swRc = (): number => (globalThis as { __swRollCount?: number }).__swRollCount ?? 0;
+
 const HIVE = TILE_BY_KEY['v_225_hive_block']!;
 const HONEY = TILE_BY_KEY['v_229_honey_block']!;   // 蜂蜜斑 SetTile(229)（HoneyPatchBiome.cs:37/44）
 const LARVA = TILE_BY_KEY['v_231_larva']!;
@@ -72,12 +76,18 @@ function hiveTunnel(st: TileStore, rng: RNG, gs: GenState, sx: number, sy: numbe
   } else if (remix) {
     baseR += rng.int(0, 2);                 // Next(3) 加算（HiveBiome.cs:178）
   }
+  // ★IIIII75 取证钩（零开销，仅探针挂载时输出；与 rig hv_tp/hv_te 同字段）
+  // （2026-08-30 并行编辑遗留 TDZ 修复：__tunMk 曾在首个调用点(:79)之后才声明——
+  //   worker 在本段直接 ReferenceError，全链开新世界的探针一齐被堵；仅上提声明，
+  //   钩点次序与语义不变）
+  const __tunLog = (globalThis as { __swHvLog?: (s: string) => void }).__swHvLog;
+  const __tunMk = (globalThis as { __swMark?: (s: string) => void }).__swMark;
+  __tunMk?.(`HV_TPM i=${sx} j=${sy} r=${baseR} s=${steps} rc=${__swRc()}`);   // ★IIIII81：与 rig HV_TP 同位（速度骰之前）
   let vx = rng.int(-10, 10) * 0.2, vy = rng.int(-10, 10) * 0.2;
   let px = sx + 0.0, py = sy + 0.0;
-  // ★IIIII75 取证钩（零开销，仅探针挂载时输出；与 rig hv_tp/hv_te 同字段）
-  const __tunLog = (globalThis as { __swHvLog?: (s: string) => void }).__swHvLog;
   let tunIters = 0;
   __tunLog?.(`TUNP ${sx},${sy} r=${baseR} s=${steps} vX=${vx} vY=${vy}`);
+  __tunMk?.(`HV_TVEL v=${vx},${vy} rc=${__swRc()}`);   // ★IIIII81：镜像 rig HV_TV（速度对之后的计数锚）
   while (steps > 0) {
     tunIters++;
     if (py > st.h - 250) steps = 0;
@@ -133,6 +143,7 @@ function hiveTunnel(st: TileStore, rng: RNG, gs: GenState, sx: number, sy: numbe
         }
       }
     }
+    __tunMk?.(`HV_TTE x=${px} y=${py} sl=${next2} rc=${__swRc()}`);
     px += vx; py += vy;
     steps = next2 - 1;   // 原版:num2 = num3 - 1(每迭代净 -2)
     vy += rng.int(-10, 10) * 0.05;
@@ -197,7 +208,7 @@ function placeHoneyPatch(
   const mkP = (globalThis as { __swMark?: (s: string) => void }).__swMark;
   { const dg = (globalThis as { __swPatchDiag?: (ox: number, oy: number, st: TileStore) => void }).__swPatchDiag; if (dg) dg(ox, oy, st); }
   // HoneyPatchBiome.cs:10-13
-  if (st.inBounds(ox, oy) && st.flags[st.idx(ox, oy)] && solidTileHB(st, ox, oy)) { mkP?.('PREJ anchor'); return false; }
+  if (st.inBounds(ox, oy) && st.flags[st.idx(ox, oy)] && solidTileHB(st, ox, oy)) { mkP?.('PREJ anchor'); mkP?.('HP_R1'); return false; }
   // cs:14-18:Searches.Down(80)+Conditions.IsSolid（Conditions.cs:84：InWorld(,10)+
   //   active+tileSolid——**无** solidTop/inActive/形状门,与 Modifiers.IsSolid 又不同）
   let ry = -1;
@@ -209,9 +220,45 @@ function placeHoneyPatch(
   for (let k = 0; k < 80 && oy + k < st.h; k++) {
     if (condSolid(ox, oy + k)) { ry = oy + k; break; }
   }
-  if (ry < 0) { mkP?.('PREJ down'); return false; }
+  if (ry < 0) { mkP?.('PREJ down'); mkP?.('HP_R2'); return false; }
   ry += 2;
   const rx = ox;
+  // ★IIIII81 阶段写集对拍（SW_HVWS=1 时启用；与 rig WSDump 盒±14/编码同构——
+  //   inactive 编码=(sheet<<1)|1，active=sheet。无 env 零开销）
+  // （2026-08-30 浏览器侧解堵：worker 无 Node global，裸 process 在网页构建直接
+  //   ReferenceError——typeof 卫门保持"无 env 零开销"本意，Node 工具链下读值不变）
+  const wsOn = typeof process !== 'undefined' && process.env?.SW_HVWS === '1';
+  const wsT = new Int32Array(29 * 29);
+  const wsA = new Uint8Array(29 * 29);
+  const shOf = (t: number): number => { const v = TILE_DEFS[t]?.vanilla?.sheet; return typeof v === 'number' ? v : 9999; };
+  const wsV = (x: number, y: number): number => {
+    if (!st.inBounds(x, y)) return -1;
+    const i = st.idx(x, y);
+    return st.flags[i] & 1 ? shOf(st.type[i]) : ((shOf(st.type[i]) << 1) | 1);
+  };
+  const wsDump = (tag: string): void => {
+    if (!wsOn) return;
+    for (let dy = -14; dy <= 14; dy++) {
+      for (let dx = -14; dx <= 14; dx++) {
+        const qx = rx + dx, qy = ry + dy;
+        const k = (dx + 14) * 29 + (dy + 14);
+        const nv = wsV(qx, qy);
+        const na = st.inBounds(qx, qy) && (st.flags[st.idx(qx, qy)] & 1) ? 1 : 0;
+        const ov = wsT[k], oa = wsA[k];
+        if (ov !== nv || oa !== na) mkP?.(`${tag}C ${qx},${qy} t=${ov}/${nv} a=${oa}/${na}`);
+        wsT[k] = nv; wsA[k] = na;
+      }
+    }
+  };
+  if (wsOn) {
+    for (let dy = -14; dy <= 14; dy++) {
+      for (let dx = -14; dx <= 14; dx++) {
+        const k = (dx + 14) * 29 + (dy + 14);
+        wsT[k] = wsV(rx + dx, ry + dy);
+        wsA[k] = st.inBounds(rx + dx, ry + dy) && (st.flags[st.idx(rx + dx, ry + dy)] & 1) ? 1 : 0;
+      }
+    }
+  }
   // cs:22-26:圆 15 三计数门(Scanner 链:实心 / 60∪59 / 60)
   const circleRows = (hR: number, vR: number, fn: (dx: number, dy: number) => void): void => {
     const rr = (hR + 1) * (hR + 1);
@@ -231,37 +278,46 @@ function placeHoneyPatch(
     if (sheet === 60 || sheet === 59) mudOrGrass++;
     if (sheet === 60) grass++;
   });
-  if (solid === 0 || mudOrGrass / solid < 0.75 || grass < 2) { mkP?.(`PREJ soil s=${solid} mg=${mudOrGrass} g=${grass}`); return false; }
+  if (solid === 0 || mudOrGrass / solid < 0.75 || grass < 2) { mkP?.(`PREJ soil s=${solid} mg=${mudOrGrass} g=${grass}`); mkP?.(`HP_R3 s=${solid} mg=${mudOrGrass} g=${grass}`); return false; }
+  mkP?.(`HP_G s=${solid} mg=${mudOrGrass} g=${grass}`);
   // cs:28-32:圆 8 实心 ≥20
   let solid8 = 0;
   circleRows(8, 8, (dx, dy) => {
     if (solidOrSloped(st, rx + dx, ry + dy)) solid8++;
   });
-  if (solid8 < 20) { mkP?.(`PREJ solid8=${solid8}`); return false; }
+  if (solid8 < 20) { mkP?.(`PREJ solid8=${solid8}`); mkP?.(`HP_R4 s8=${solid8}`); return false; }
   // cs:33-36:保护图 CanPlace(16×16)——全局 StructureMap（GenState.protectedRects）,
   // 与蜂巢主巢/神龛/微光/地下小屋等全部已保护结构互斥 + GeneralPlacementTiles
   // 内容扫描（单参 CanPlace 默认黑名单——蜂巢块 225/神庙砖 226 等活性格拒放）
   const rect = { x0: rx - 8, y0: ry - 8, x1: rx + 8, y1: ry + 8 };
-  if (!canPlaceStructure(gs, rect, 0, st)) { mkP?.('PREJ canplace'); return false; }
+  if (!canPlaceStructure(gs, rect, 0, st)) { mkP?.('PREJ canplace'); mkP?.('HP_R5'); return false; }
   // cs:37-40 + TooCloseToImportantLocations(cs:50-81)
   // cs:50-52 TooCloseToImportantLocations 首门:y >= Main.UnderworldLayer-30。
   //   ★UnderworldLayer = **maxTilesY-200 恒值属性**（Main.cs:2863）,非 GenVars.
   //   lavaLine（Terrain 游走产物,更深）——曾误用 gs.lavaLine 把 (4126,924:ry=943
   //   <1000-230=770?非——943≥lavaLine-30) 的合法斑误拒
-  if (ry >= st.h - 200 - 30) { mkP?.('PREJ lava'); return false; }
+  if (ry >= st.h - 200 - 30) { mkP?.('PREJ lava'); mkP?.('HP_R6'); return false; }
   for (let i = rx - 150; i < rx + 150; i += 10) {
     if (i <= 0 || i > st.w - 1) continue;
     for (let j = ry - 150; j < ry + 150; j += 10) {
       if (j <= 0 || j > st.h - 1) continue;
       const ii = st.idx(i, j);
-      if (st.flags[ii] && st.type[ii] === LIHARD) { mkP?.(`PREJ tooclose226 ${i},${j}`); return false; }
-      if (st.wall[ii] === 83 || st.wall[ii] === 3 || st.wall[ii] === 87) { mkP?.(`PREJ toocloseW${st.wall[ii]} ${i},${j}`); return false; }
+      if (st.flags[ii] && st.type[ii] === LIHARD) { mkP?.(`PREJ tooclose226 ${i},${j}`); mkP?.('HP_R6'); return false; }
+      if (st.wall[ii] === 83 || st.wall[ii] === 3 || st.wall[ii] === 87) { mkP?.(`PREJ toocloseW${st.wall[ii]} ${i},${j}`); mkP?.('HP_R6'); return false; }
     }
   }
   // cs:41:圆 8 + RadialDither(0,10) + IsSolid → SetTile(229)
+  const __rect = (() => { if (typeof process === 'undefined') return null; const wv = process.env?.SW_HVRECT; if (!wv) return null; const pr = wv.split(',').map(Number); return pr.length === 4 ? pr : null; })();
   circleRows(8, 8, (dx, dy) => {
     const num2 = Math.max(0, Math.min(1, Math.sqrt(dx * dx + dy * dy) / 10));
-    if (rng.next() > num2 && solidOrSloped(st, rx + dx, ry + dy)) {
+    const _hitVal = rng.next();
+    const _hitBool = _hitVal > num2;
+    const _solid = solidOrSloped(st, rx + dx, ry + dy);
+    if (__rect && rx + dx >= __rect[0] && ry + dy >= __rect[1] && rx + dx <= __rect[2] && ry + dy <= __rect[3]) {
+      const pi = st.inBounds(rx + dx, ry + dy) ? st.idx(rx + dx, ry + dy) : -1;
+      mkP?.(`RD ${rx + dx},${ry + dy} hit=${_hitBool ? 1 : 0} act=${pi >= 0 && (st.flags[pi] & 1) ? 1 : 0} ty=${pi >= 0 ? shOf(st.type[pi]) : -1} rc=${__swRc()}`);
+    }
+    if (_hitBool && _solid) {
       const i = st.idx(rx + dx, ry + dy);
       // Actions.SetTile(229) clearTile=true：先 Clear(~Wire|Actuator)——墙/液体/
       //   slope/half/帧全清,再写 type+active（vanilla 墙被清 0,曾保留 → W64/W15 残差）
@@ -274,6 +330,8 @@ function placeHoneyPatch(
       genFrameNeighbors(st, rng, rx + dx, ry + dy, 'setTile');
     }
   });
+  wsDump('HP_S1');
+  mkP?.(`HP_S1 rc=${__swRc()}`);
   // cs:43:圆(4,3) + Blotches(scale2,chance0.3) + IsSolid + ClearTile
   //   + RectangleMask(-6,6,0,3).Output(data) + SetLiquid(2=蜂蜜)
   const key = (qx: number, qy: number) => (qx + 16) * 64 + (qy + 16);
@@ -304,6 +362,8 @@ function placeHoneyPatch(
       }
     }
   });
+  wsDump('HP_S2');
+  mkP?.(`HP_S2 rc=${__swRc()}`);
   // cs:44:InnerOutline(data)@origin+(0,1) + IsEmpty + RectangleMask(-6,6,1,3) → 泥 59
   const NEIGH8: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   for (const k of data) {
@@ -324,6 +384,8 @@ function placeHoneyPatch(
     st.slope[i] = 0; st.half[i] = 0;
     genFrameNeighbors(st, rng, px, py, 'setTile');
   }
+  wsDump('HP_S3');
+  mkP?.(`HP_S3 rc=${__swRc()}`);
   // cs:45:All(data)@origin + Expand(1) + IsBelowHeight(ry,inclusive) + IsNotSolid
   //   + NoLiquid(蜂蜜) → 蜂壳 229
   for (const k of data) {
@@ -343,7 +405,10 @@ function placeHoneyPatch(
       }
     }
   }
+  wsDump('HP_S4');
+  mkP?.(`HP_S4 rc=${__swRc()}`);
   addProtectedStructure(gs, rect, 0);   // cs:46（pad 默认 0）
+  mkP?.('HP_E');
   return true;
 }
 
@@ -385,6 +450,7 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
       rng.int(Math.trunc(gs.worldSurface), st.h - 301);
     }
     { const f2 = (globalThis as { __swHvLog?: (s: string) => void }).__swHvLog; if (f2) f2(`HIVE ${x},${y}`); }
+    mk?.(`HV_PNT ${x},${y}`);
     mk?.(`PLACE ${x},${y}`);
     { const dg = (globalThis as { __swHvDiag?: (x: number, y: number, st: TileStore, gs: GenState) => void }).__swHvDiag; if (dg) dg(x, y, st, gs); }
     // ★原版 HiveBiome.Place **无锚点 active 门**（Place 首门=CanPlace 矩形,随后
@@ -398,7 +464,7 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     //     + GeneralPlacementTiles 内容扫描（StructureMap.cs:21 单参重载默认表——
     //     矩形内活性蜂巢块 225/神庙砖 226/蘑菇草 70 等 28 id 即拒。曾缺失 →
     //     蜂巢候选可落在既有蜂巢块上,#47 hive#3 选址分歧的主嫌疑）
-    if (!canPlaceStructure(gs, { x0: x - 50, y0: y - 50, x1: x + 50, y1: y + 50 }, 0, st)) { mk?.('PLACEX'); continue; }
+    if (!canPlaceStructure(gs, { x0: x - 50, y0: y - 50, x1: x + 50, y1: y + 50 }, 0, st)) { mk?.('HV_R1'); mk?.('PLACEX'); continue; }
     // (b) TooCloseToImportantLocations(:295-321:±150 步进 10,活性蜥蜴砖 226
     //     或墙 83/3/87 → 弃;神庙 pass 先于蜂巢,此门在原版是活的)
     let tooClose = false;
@@ -412,7 +478,7 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
     }
-    if (tooClose) { hvN('rej_tooclose'); mk?.('PLACEX'); continue; }
+    if (tooClose) { hvN('rej_tooclose'); mk?.('HV_R2'); mk?.('PLACEX'); continue; }
     // 原版验证(HiveBiome.cs:48-52):Circle(15)（(15+1)² 判据行主序）内 IsSolid
     //   (=SolidOrSlopedTile,斜面/半砖泥也算)中 60/59 占比 ≥75% 且 60 ≥2。
     //   曾用 dx²+dy²≤225 圆盘+SolidTile 语义 → 圆小一圈+斜面泥漏计,边缘候选
@@ -426,13 +492,16 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
       if (st.type[i] === JUNGLE_GRASS || st.type[i] === MUDT) mudOrGrass++;
       if (st.type[i] === JUNGLE_GRASS) grass++;
     });
-    if (solid === 0 || mudOrGrass / solid < 0.75 || grass < 2) { hvN('rej_soil'); mk?.('PLACEX'); continue; }
+    if (solid === 0 || mudOrGrass / solid < 0.75 || grass < 2) { hvN('rej_soil'); mk?.(`HV_R3 s=${solid} mg=${mudOrGrass} g=${grass}`); mk?.('PLACEX'); continue; }
+    mk?.(`HV_G s=${solid} mg=${mudOrGrass} g=${grass} rc=${__swRc()}`);
     // 隧道链:2-4 段;每段 2-4 条全部从段起点出发,段位置=最后一条终点
     // ★IIIII45（HiveBiome.cs Place：1458 注记 cs 153-156）：drunk 隧道段数
     //   num2 += Next(7,10)=int(7,9)（普通世界整支短路零掷）
     let px = x + 0.0, py = y + 0.0;
     const segEnds: Array<[number, number]> = [];
-    const segs = rng.int(2, 4) + (gs.seedFlags.drunkWorld ? rng.int(7, 9) : 0);
+    const segBase = rng.int(2, 4);
+    mk?.(`HV_S0 ${segBase}`);   // ★IIIII81：镜像 rig HV S0（bonus 前基值,流位取证用）
+    const segs = segBase + (gs.seedFlags.drunkWorld ? rng.int(7, 9) : 0);
     for (let seg = 0; seg < segs; seg++) {
       const tunnels = rng.int(2, 4);
       let ex = px, ey = py;
@@ -444,6 +513,7 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
       px = ex; py = ey;
       segEnds.push([Math.floor(px), Math.floor(py)]);
+      mk?.(`HV_SEGEND ${px},${py}`);   // ★IIIII81：镜像 rig HV SEGEND（R 格式段落终点）
     }
     // ★FrameOutAllHiveContents(HiveBiome.cs:128-146):±50 盒(钳 [10,max-10)) 行主序
     //   扫描——wall==86 的每格 SquareWallFrame(i,j)(九邻仅中心 resetFrame=true 耗
@@ -467,15 +537,19 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     }
     mk?.('FOUTX');
     // 蜂蜜坠落块:每个段终点 2×2 实心处放封蜜块+凹槽
-    for (const [ex, ey] of segEnds) {
+    for (let hk = 0; hk < segEnds.length; hk++) {
+      const [ex, ey] = segEnds[hk];
       const dir = rng.int(0, 1) === 0 ? -1 : 1;
-      let hx = ex, guard = 0;
+      let hx = ex, guard = 0, flagged = false;
       while (guard++ < 60 && Math.abs(hx - ex) <= 50
         && !(st.flags[st.idx(hx, ey)] && st.flags[st.idx(hx, ey + 1)]
           && st.flags[st.idx(hx + 1, ey)] && st.flags[st.idx(hx + 1, ey + 1)])) {
         hx += dir;
+        if (Math.abs(hx - ex) > 50) { flagged = true; break; }
       }
-      if (Math.abs(hx - ex) > 50) continue;
+      flagged = flagged || Math.abs(hx - ex) > 50;
+      mk?.(`HV_HF k=${hk} d=${dir} flag=${flagged} end=${hx},${ey}`);
+      if (flagged) continue;
       const x2 = hx + dir;
       // SpotActuallyNotInHive:4×4 内有非蜂巢实心则跳过
       let notInHive = false;
@@ -489,7 +563,7 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
       if (!notInHive) {
         blockedHoneyCube(st, x2, ey);
         dentForHoneyFall(st, x2, ey, dir);
-      }
+      } else { mk?.('HV_HFSKIP'); }
     }
     // 幼虫托台(BOSS 房):CreateStandForLarva(HiveBiome.cs:394)——登记 Clamp(5,max-5)
     //   坐标 + **立即**物理搭台（3 列×4 行：上 3 行清空(幽灵保留)、底行铺 225）。
@@ -497,6 +571,7 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     //   （幂等兜底）,但 pass 47 现场缺台 = 本 pass 后续蜂蜜斑圆扫描/后续巢选址门
     //   读到错状态。幼虫 tile 231 仍由 BeeLarva pass 放置
     mk?.(`STAND ${Math.floor(px)},${Math.floor(py)}`);
+    mk?.(`HV_LA ${px},${py}`);
     const lx = Math.floor(px), ly = Math.floor(py);
     gs.larvaX.push(Math.max(5, Math.min(st.w - 5, lx)));
     gs.larvaY.push(Math.max(5, Math.min(st.h - 5, ly)));
@@ -523,6 +598,7 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
         const qxi = Math.floor(qx), qyi = Math.floor(qy);
         const qi = st.idx(qxi, qyi);
         if (Math.hypot(qx - px, qy - py) > 10 && !st.flags[qi] && st.wall[qi] === 86) {
+          mk?.(`HV_L2 l=${l}`);
           gs.larvaX.push(Math.max(5, Math.min(st.w - 5, qxi)));
           gs.larvaY.push(Math.max(5, Math.min(st.h - 5, qyi)));
           for (let ix = qxi - 1; ix <= qxi + 1 && ix > 0 && ix < st.w; ix++) {
@@ -543,15 +619,18 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     //   矩形语义:Rectangle(x-50, y-50, 100, 100) 半开区间 + Inflate(5) → 存 x±55/y±55
     //   （旧局部近似 {x-45..x+55} 左上偏 10 格,已按原版校正）
     addProtectedStructure(gs, { x0: x - 50, y0: y - 50, x1: x + 50, y1: y + 50 }, 5);
+    mk?.('HV_E');
     mk?.('PLACEX');
     // ★cs:16036-16053:主巢落成后是"蜂蜜斑"(HoneyPatchBiome)而非卫星巢——
     //   目标数 Next(5)、预算 10000、每次先掷半径 NextDouble*60+30 再掷角度
     //   NextDouble*2π,y 无压缩;落点横向 50 边距内或放置失败则不计
     const patches = rng.int(0, 4);
     let done = 0, budget = 10000;
+    mk?.(`HV_PATCHN ${patches}`);
     while (done < patches && budget > 0) {
       const rad = rng.next() * 60 + 30;
       const ang = rng.next() * 6.2831854820251465;
+      mk?.(`HV_PR r=${rad} a=${ang}`);
       const hx = Math.trunc(Math.cos(ang) * rad) + x;
       const hy = Math.trunc(Math.sin(ang) * rad) + y;
       budget--;

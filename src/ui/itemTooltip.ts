@@ -76,7 +76,8 @@ const T = (key: string, ...args: (string | number)[]) => Lang.text(key, ...args)
  *  解析到【运行时】内部 id（VANILLA_ITEM_KEY_BY_ID→ITEM_BY_KEY，免疫 json
  *  烘焙期与运行期的下标漂移），两域并集供 has() */
 let MATERIAL_IIDS: Set<number> | null = null;
-function materialIids(): Set<number> {
+/** context7 材料门用（ItemSlot.cs:1502-1507 checkItem.material）——复用本近似集 */
+export function materialIids(): Set<number> {
   if (MATERIAL_IIDS) return MATERIAL_IIDS;
   const s = new Set<number>();
   for (const r of VANILLA_RECIPES) {

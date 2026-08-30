@@ -380,11 +380,18 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
  *  PickAmmo 的币槽扫描非投掷链）；种子 283 等无 useStyle 永不入使用链。 */
 const THROWABLE_AMMO_DUAL = new Set([949]);
 
+/** thrownCombat 显式退出群（2026-08-30 孤儿武器 A 波）：消耗型但弹体非 ai2 抛物刀——
+ *  走 Game 专支承载（同 combatWeapon 3384 先例）：
+ *   · 4608 打窝桶 → 弹 820 AI_163 浮筒（entities/ChumBucketProj + chumBucket 注册面）
+ *   · 4702 放飞灯笼 → 弹 855 AI_166 飞升发光体（entities/SkyLanternProj）
+ *  通用投掷出口会把它俩射成重力抛物 Arrow——vanilla 弹自管物理,AI 家族完全不同 */
+const THROWN_EXPLICIT_NULL = new Set([4608, 4702]);
+
 /** 旧判定（消耗型投掷武器）：shoot+consumable+noMelee 且无 useAmmo；
  *  ammo 双职件仅白名单（雪球）可掷——原版按 useStyle/IsACoin 判定（见上注） */
 export function thrownCombat(def: CombatWeaponItemLike): { shoot: number; damage: number } | null {
   const vid = def.vid ?? viIdFromKey(def.key);
-  if (vid < 0) return null;
+  if (vid < 0 || THROWN_EXPLICIT_NULL.has(vid)) return null;
   const c = itemCombat(vid);
   if (!c?.shoot || !c.consumable || !c.noMelee || c.useAmmo) return null;
   if (c.ammo && !THROWABLE_AMMO_DUAL.has(vid)) return null;

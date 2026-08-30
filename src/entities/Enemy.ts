@@ -1310,6 +1310,11 @@ export class Enemy extends Entity {
    *  分体)——玩家侧魂镰联动(3006 持械挥击时 player.soulDrain++ 计数,
    *  UpdateNPC_SoulDrainDebuff :91952-91979)依赖魂镰实装,登记 GAP */
   slimedT = 0;
+  /** Wet(103)/Shimmered(353)（2026-08-30 孤儿武器 A 波：水枪弹 358 / 微光枪弹 1042
+   *  施加源落地）：非 DoT 计时位——原版 NPC.AddBuff 后由 buff 更新链驱动滴水/微光
+   *  视觉与交互门(NPC.cs :11319-11352)；本仓先承载倒计时,视觉以施加瞬间湿尘最小近似 */
+  wetT = 0;
+  shimmeredT = 0;
   bleedT = 0;      bleedDoT = 0;
   hemorrhageT = 0; hemorrhageDoT = 0;
   javelinT = 0;    javelinDoT = 0;
@@ -2086,6 +2091,9 @@ export class Enemy extends Entity {
       || this.frostburnT > 0 || this.frostburn2T > 0 || this.shadowFlameT > 0;
     if (this.oiledT > 0 && fireOn) this.oiledDoT += 25 * dt;
     if (this.slimedT > 0) this.slimedT -= dt;
+    // Wet(103)/Shimmered(353) 纯计时递减（非 DoT 族,UpdateNPC_BuffApplyDOTs 无条目）
+    if (this.wetT > 0) this.wetT -= dt;
+    if (this.shimmeredT > 0) this.shimmeredT -= dt;
     // :92733 FTW 豁免门:onFire && (type != 1 || ai[1] != 8 || !getGoodWorld) 才
     // AddFlamable(8)——getGood 下 type 1 且变体 ai[1]==8 的蓝史莱姆免着火 DoT
     // (1456 :92616 同款;蓝队 R1-10 补,1456/1457 两版皆有非新改)

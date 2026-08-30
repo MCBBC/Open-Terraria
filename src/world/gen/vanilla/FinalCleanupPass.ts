@@ -2375,6 +2375,8 @@ function check3x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
   const x0 = x - num5;
   const styleCol = num6;
   let yEnd = y0 + 2;
+  (globalThis as unknown as { __swAltarDbg?: (msg: string) => void }).__swAltarDbg
+    ?.(`C32 ${x},${y} sh=${sheet} fx=${st.frameX[i]} fy=${st.frameY[i]} grp=[${x0},${y0}] yEnd=${yEnd}`);
   for (let k = x0; k < x0 + 3; k++) {
     for (let l = y0; l < yEnd; l++) {
       if (!st.inBounds(k, l)) { bad = true; continue; }
@@ -2402,7 +2404,20 @@ function check3x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
           break;
         }
         case 26: case 695:
-          if (!solidAllowBottom(st, k, yEnd) || invalidForPiles(st, k, yEnd)) bad = true;
+          // ★IIIII81（GFB-B #46 定罪案）：vanilla cs:49730-49738——祭坛支撑门只有
+          //   「底格非实心 ‖ 底格活性且为 Boulder(138/484/664/665/711-716)」两支，
+          //   **没有** InvalidTileForPilesOrSpeleothems 检查（那是 case186 专属）。
+          //   JS 曾误挂 invalidForPiles → zenith 蜂蜜斑挖池 ClearTile 后 honey(229)
+          //   ∈invalid 表 ⇒ 支撑判死 → 整组祭坛 KillTile + 尘掷滚流，蜂窝带
+          //   x86-vs-JS 写面错位（rig RD trace @+60 骰六连跳实锤）。按原文字面修。
+          {
+            const _okB = solidAllowBottom(st, k, yEnd);
+            const _bs = activeAt2(st, k, yEnd) ? sheetAt2(st, k, yEnd) : -1;
+            const _bad = !_okB || (_bs >= 0 && BOULDER_SHEETS.has(_bs));
+            const _dbg = (globalThis as unknown as { __swAltarDbg?: (msg: string) => void }).__swAltarDbg;
+            _dbg?.(`BAD=${_bad} col=${k} yEnd=${yEnd} okBottom=${_okB ? 1 : 0} underSheet=${_bs}`);
+            if (_bad) bad = true;
+          }
           break;
         case 186: {
           if (!solidAllowBottom(st, k, yEnd) || invalidForPiles(st, k, yEnd)) { bad = true; break; }
@@ -2462,6 +2477,22 @@ function check3x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
     return;
   }
   if (!bad) return;
+  { // ★IIIII81：击杀前网格台账
+    const _g = (globalThis as unknown as { __swAltarDbg?: (msg: string) => void }).__swAltarDbg;
+    if (_g && (sheet === 26 || sheet === 695)) {
+      const g2 = (xq: number, yq: number): string => {
+        if (!st.inBounds(xq, yq)) return 'oob';
+        const iq = st.idx(xq, yq);
+        return `${SWEEP_SHEET[st.type[iq]]}/${st.flags[iq]}/${st.frameX[iq]}/${st.frameY[iq]}`;
+      };
+      let acc = '';
+      for (let lq = y0 - 1; lq <= yEnd; lq++) {
+        for (let kq = x0 - 1; kq <= x0 + 3; kq++) acc += `[${kq},${lq}]=${g2(kq, lq)} `;
+        acc += '\\n';
+      }
+      _g(`KILLGRID ${x},${y} sh=${sheet} grp=[${x0},${y0}] ${acc}`);
+    }
+  }
   // cs:49420：击杀前捕获锚格 frameX（KillTile 会写 -1；186 金币堆掉落掷的门）
   const fxChk = st.frameX[i]!;
   ctx.destroyObject = true;

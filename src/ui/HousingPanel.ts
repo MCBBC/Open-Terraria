@@ -42,8 +42,11 @@ export class HousingPanel {
   private disposed = false;
   private readonly closeBtn: HTMLButtonElement;
   private readonly scale: number;   // inventoryScale 近似(1.0;UIScale 影响下的 DOM canvas 走 1:1 像素)
-  private readonly startX: number;
-  private colX = 0;                 // 当前列相对 startX 偏移(换列 -48)
+  /** 列布局（layout() 每刷回写）：列数、画布宽——★右缘锚定+列向左生长
+   *  （2026-08-28 用户报"侧栏溢出到外面了"：曾 left=屏宽-92 定宽 448 锚定,
+   *  窄屏/多列时整块探出屏幕右缘） */
+  private colsN = 1;
+  private colsW = 56;
 
   constructor(
     private game: Game,
@@ -51,24 +54,25 @@ export class HousingPanel {
     private onClosed: () => void,
   ) {
     this.scale = 1;
-    this.startX = window.innerWidth - 64 - 28;
     const h = Math.min(448, window.innerHeight - 160);
     this.canvas = document.createElement('canvas');
-    this.canvas.width = 448;   // 4 列最大宽(3×48+56)
+    this.canvas.width = 56;
     this.canvas.height = h;
+    // ★右缘锚定（right:36 = 原版首列槽右缘 W-36）——窄屏不探出屏幕外；
+    //  列数增长时宽度向左扩展（layout()），✕ 钮随动挂左外侧
     this.canvas.style.cssText =
-      `position:fixed;left:${this.startX}px;top:160px;width:448px;height:${h}px;`
+      'position:fixed;right:36px;top:160px;'
       + 'z-index:60;image-rendering:pixelated;pointer-events:auto;cursor:pointer;';
     this.canvas.className = 'sw-panel';   // Input mousedown UI 过滤器
     document.body.appendChild(this.canvas);
     // ✕ 关闭钮（2026-08-27 用户要求：探查/分配后面板不自动收——关闭收口到此钮；
-    //  挂条首列左外侧,不遮 0 号查询器槽）
+    //  挂条左外侧,不遮 0 号查询器槽；位置随列宽在 layout() 回写)
     this.closeBtn = document.createElement('button');
     this.closeBtn.className = 'sw-btn sw-housing-x';
     this.closeBtn.textContent = '✕';
     this.closeBtn.title = '✕';
     this.closeBtn.style.cssText =
-      `position:fixed; left:${this.startX - 26}px; top:160px; width:22px; height:22px;`
+      'position:fixed; right:64px; top:160px; width:22px; height:22px;'
       + 'margin:0; padding:0; font-size:11px; line-height:1; z-index:61; cursor:pointer;';
     this.closeBtn.addEventListener('mousedown', (e) => {
       e.stopPropagation();
@@ -102,7 +106,28 @@ export class HousingPanel {
       const held = this.cursor.npcKey;
       if (!this.rows.some((r) => r.npcKey === held)) this.setCursor({ kind: 'query' });
     }
+    this.layout();
     this.draw();
+  }
+
+  /** 画布几何（refresh 每刷回写）：列数=⌈(行数+1)/perCol⌉ 钳 4,宽=56+3×48 随列数
+   *  收展；★右缘锚定不动（style.right 恒 36px）——尺寸变化只向左生长 ✕ 钮随动 */
+  private layout(): void {
+    const h = Math.min(448, window.innerHeight - 160);
+    const per = Math.max(1, Math.floor(h / (56 * this.scale)));
+    const total = this.rows.length + 1;
+    this.colsN = Math.min(4, Math.max(1, Math.ceil(total / per)));
+    this.colsW = this.colsN > 1 ? 3 * 48 + 56 : 56;
+    if (this.canvas.width !== this.colsW) this.canvas.width = this.colsW;   // 变更即清位图,draw() 全量重画
+    if (this.canvas.height !== h) { this.canvas.height = h; }
+    this.canvas.style.width = `${this.colsW}px`;
+    this.canvas.style.height = `${h}px`;
+    this.closeBtn.style.right = `${36 + this.colsW + 6}px`;
+  }
+
+  /** 第 c 列的槽左缘画布 x（列向左生长：0 号列贴画布右缘,原版换列左移语义） */
+  private colXFor(col: number): number {
+    return this.colsW - 56 - col * 48;
   }
 
   private bind(): void {
@@ -136,14 +161,22 @@ export class HousingPanel {
   }
 
   private hitTest(mx: number, my: number): number {
-    // 行高 56×scale;列 = floor(mx / 48)(第 0 列宽 56,后续列 48 间隔换算近似——
-    // 原版换列条件是纵坐标越屏,不是等宽列;此处按实际绘制几何求)
+    // 行高 56×scale;列向左生长（镜像 drawSlot 几何）——从右往左逐列查命中,
+    // 槽宽 56 与列距 48 有 8px 原生叠带,右列后画=重叠带归右列
+    const w = this.canvas.width;
+    const dFromRight = w - mx;
+    if (dFromRight < 0 || my < 0 || my >= this.canvas.height) return -1;
     const rowH = 56 * this.scale;
-    const col = Math.floor(mx / 48);
-    const row = Math.floor(my / rowH);
-    const idx = row + col * this.perCol();
-    if (mx - col * 48 > 56 * this.scale) return -1;   // 列间隙
-    return idx;
+    const per = this.perCol();
+    for (let c2 = 0; c2 < this.colsN; c2++) {
+      const colX = this.colsW - 56 - c2 * 48;
+      if (mx >= colX && mx <= colX + 56) {
+        const row = Math.floor(my / rowH);
+        if (row >= per) return -1;
+        return row + c2 * per;
+      }
+    }
+    return -1;
   }
 
   private perCol(): number {
@@ -184,7 +217,8 @@ export class HousingPanel {
     const drawSlot = (i: number, headImg: HTMLImageElement | null, gray: boolean) => {
       const col = Math.floor(i / per);
       const row = i % per;
-      const x = col * 48;
+      // ★列向左生长（原版换列左移）：0 号列贴画布右缘——曾向右生长=溢出屏幕外
+      const x = this.colXFor(col);
       const y = row * rowH;
       if (y + rowH > this.canvas.height) return;
       const back = (i === this.hoverIdx ? slotFocus : slot) ?? null;

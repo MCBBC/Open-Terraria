@@ -14,6 +14,8 @@
 // 304 Living Loom 原版无动画（AnimateTiles 无 304 条目，素材 54×54 单帧）。
 // rate 归一化：原版 counter>N → 每 N+1 tick；counter>=N → 每 N tick。
 export const TILE_ANIM_RATE: Record<number, number> = {
+  405: 5,
+  406: 8,  // 烟囱（6 帧；counter>8，Main.cs:19255-19260）  // 壁炉（8 帧；pitch 走 fireplaceAddFrY 的 38；counter>5，Main.cs:19244）
   17: 6,   // 熔炉（12 帧，pitch 38；counter>5）
   106: 5,  // 锯木机（2 帧，pitch 54；counter>4）
   215: 4,  // 篝火（8 帧；pitch 走 campfireYOffset 的 36，本表只管换帧节奏；counter>=4）
@@ -83,6 +85,8 @@ const TILE_ANIM_PITCH: Record<number, number> = {
 
 /** 回卷上限显式覆盖（默认 floor(素材高/pitch)；素材含未用行时以原版回卷为准） */
 const TILE_ANIM_FRAMES: Record<number, number> = {
+  405: 8,
+  406: 6,   // 烟囱：烟雾 6 帧循环（Main.cs:19258 >=6 回卷）   // 壁炉：Tiles_405.png 108×306 = 8×38 步−2（Main.cs:19247 >=8 回卷）
   12: 10, 639: 10,   // 表 396px=11 带，AnimateTiles 回卷 10（Main.cs:18375/18385）
   171: 4,            // 圣诞树串灯：Xmas_4 四帧行（Main.cs:18614-18616 >3 回卷）
   207: 6,            // 喷泉：表 504px/72=7 带，但第 0 带是关态整图非动画帧——
@@ -118,6 +122,27 @@ export function fountainYOffset(frameY: number, x: number, frameX: number): numb
   const leftX = frameX % 36 !== 0 ? x - 1 : x;
   const idx = (animFrameIdx(207, 504) + (leftX % 6)) % 6;
   return frameY + idx * 72;
+}
+
+/** 烟囱族（TileDrawing.cs:5448-5462 case 406 verbatim）：
+ *  num55 = tileFrame[406](6 帧循环)；按存储带折算：
+ *    fy≥108 → 6-floor(fy/54)(高样式静态带)、54≤fy<108 → idx-1、fy<54 → idx；
+ *  addFrY = num55×56 + floor(fy/54)×2（pitch 56，Tiles_406.png 54×392=7×56 实测）。
+ *  露天默认档（fy=18/36，本案）即循环 6 帧烟雾明暗 */
+export function chimneyAddFrY(frameY: number): number {
+  const idx = animFrameIdx(406, 392);
+  let n = idx;
+  if (frameY >= 108) n = 6 - Math.floor(frameY / 54);
+  else if (frameY >= 54) n = idx - 1;
+  return n * 56 + Math.floor(frameY / 54) * 2;
+}
+
+/** 壁炉族（TileDrawing.cs:5514-5529 case 405 verbatim）：addFrY = tileFrame[405]×38
+ *  （pitch 38 与篝火/家具火焰族同款——Tiles_405.png 108×306 实测 8×38−2 带）；
+ *  ★例外：frameX≥54 的列静止（num37=0，cs:5524-5526 烟囱列门）。返回 addFrY 增量 */
+export function fireplaceAddFrY(frameX: number): number {
+  if (frameX >= 54) return 0;
+  return animFrameIdx(405, 306) * 38;
 }
 
 /** 全局动画时钟（Game 主循环每帧 +1；暂停时冻结） */

@@ -11,7 +11,8 @@ import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { runBeehivePass } from '../src/world/gen/vanilla/HiveSpiderPass';
-import { TILE_DEFS } from '../src/data/tiles';
+import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
+import { genSolidType } from '../src/world/gen/vanilla/GenSolid';
 import { TileStore } from '../src/world/TileStore';
 import { RNG } from '../src/core/rng';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
@@ -38,6 +39,8 @@ for (const f of (process.env.SW_III85_FLAGS
   M8_FLAGS[FLAG_ALIAS[f.toLowerCase()] ?? f] = true;
 }
 
+const TILE_BY_KEY_REV = new Map<number, string>();
+for (const [k, v] of Object.entries(TILE_BY_KEY)) { if (v !== undefined && !TILE_BY_KEY_REV.has(v)) TILE_BY_KEY_REV.set(v, k); }
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
@@ -49,19 +52,24 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number' && !REV.has(s)) REV.set(s, i);
 }
-REV.set(0, 0);
+// ★IIIII81 修正：不得强行 REV.set(0,0)——dump typ 原版 id 0=Dirt（活性），首个
+//   sheet-0 定义已是内部 dirt(id 1)；曾强写 0 号键把活性泥土打成空气 → 首门
+//   IsSolid 计数普遍 -11/-N 全域漂移（rig s=760 vs js 749 实测钉案）
 
 interface Ch {
   t: Uint16Array; a: Uint8Array; w: Uint16Array; l: Uint8Array;
   hf: Uint8Array; sl: Uint8Array; lt: Uint8Array; ia: Uint8Array;
+  frx?: Uint16Array; fry?: Uint16Array;   // ★IIIII81：帧通道（x86-gfb-c 起才有）
 }
 function chOf(idx: number, nm: string): Ch {
   const le16 = (p: string) => new Uint16Array(readFileSync(p).buffer.slice(0));
   const rd = (p: string) => readFileSync(p);
   const pre = `${G2}/${String(idx).padStart(3, '0')}_${nm}`;
+  const hasFrames = (() => { try { readFileSync(`${pre}.frx`); return true; } catch { return false; } })();
   return {
     t: le16(`${pre}.typ`), a: rd(`${pre}.act`), w: le16(`${pre}.wal`), l: rd(`${pre}.liq`),
     hf: rd(`${pre}.half`), sl: rd(`${pre}.slope`), lt: rd(`${pre}.lty`), ia: rd(`${pre}.inact`),
+    ...(hasFrames ? { frx: le16(`${pre}.frx`), fry: le16(`${pre}.fry`) } : {}),
   };
 }
 
@@ -77,6 +85,7 @@ function loadStore(c: Ch): TileStore {
     st.liquidType[i] = c.l[i] > 0 ? c.lt[i] + 1 : 0;
     st.half[i] = c.hf[i];
     st.slope[i] = c.sl[i];
+    if (c.frx && c.fry) { st.frameX[i] = c.frx[i]; st.frameY[i] = c.fry[i]; }
     if (c.ia[i]) st.wire[i] |= 32;
   }
   return st;
@@ -148,6 +157,15 @@ function diffBoard(tag: string, xs: Ch, st: StoreView, cellCap = 40): DiffRow {
   let cap: Cap | null = null;
   let live: StoreView | null = null;
   const marks: string[] = [];
+  const rcMarks: number[] = [];   // ★IIIII81：mark 时点掷流计数（与 rig JJHook.RollCount 同语义）
+  const rollVals: number[] = [];  // ★IIIII81：per-sample 原始 InternalSample 值（phase2，rollwin 对拍）
+  let fntLog: string[] = [];
+  const dieCalls: string[] = [];
+  { const killLog: string[]=[]; (globalThis as unknown as { __swKillCap?: (x:number,y:number,sheet:number)=>void }).__swKillCap = (x,y,sheet)=>{ if(rcNow>=Number(process.env.SW_DIEWIN?.split(',')[0]??0)&&rcNow<=Number(process.env.SW_DIEWIN?.split(',')[1]??9e9)){const stk=(new Error().stack??'').split('\n').slice(3,22).map((l2:string)=>{const mm:string|undefined=l2.match(/\(?([^\s()/]*\.ts):(\d+):\d+/)?.[0];return mm??'';}).filter(Boolean).join('<'); killLog.push(`${rcNow}|KILL ${x},${y} sheet=${sheet} by=${stk}`);} }; (globalThis as unknown as { __swKillLog?: string[] }).__swKillLog=killLog; }
+  if (process.env.SW_ALTARDBG === '1') { const altLog: string[]=[]; (globalThis as unknown as { __swAltarDbg?: (msg: string) => void }).__swAltarDbg = (msg)=>{ altLog.push(`${rcNow}|${msg}`); }; (globalThis as unknown as { __swAltarLog?: string[] }).__swAltarLog = altLog; }
+  const DIE_WIN = [0, 999999999];
+  { const wv=(process.env.SW_DIEWIN??'').split(',').map(Number); if(wv.length===2&&!isNaN(wv[0])){DIE_WIN[0]=wv[0];DIE_WIN[1]=wv[1];} }
+  let rcNow = 0;
   const hvStats: Record<string, number> = {};
   const gg = globalThis as {
     __swHvDiag?: (x: number, y: number, st: unknown, gs: GenState) => void;
@@ -155,8 +173,8 @@ function diffBoard(tag: string, xs: Ch, st: StoreView, cellCap = 40): DiffRow {
     __swHvLog?: (s: string) => void;
     __swHvStat?: (k: string, v?: number) => number;
   };
-  gg.__swMark = (s) => marks.push(s);
-  gg.__swHvLog = (s) => marks.push('#' + s);
+  gg.__swMark = (s) => { marks.push(s); rcMarks.push(rcNow); };
+  gg.__swHvLog = (s) => { marks.push('#' + s); rcMarks.push(rcNow); };
   gg.__swHvStat = (k, v = 1) => { hvStats[k] = (hvStats[k] ?? 0) + v; return hvStats[k]; };
   gg.__swHvDiag = (x, y, _st, gs) => {
     if (!cap) {
@@ -170,6 +188,39 @@ function diffBoard(tag: string, xs: Ch, st: StoreView, cellCap = 40): DiffRow {
       throw new Error('SW_III85_ABORT');
     }
   };
+  // ── 相 0：围栏探针（SW_III85_GATE=x,y）——给定 origin 重放首门扫描逐格分类 ──
+  const gateAt = process.env.SW_III85_GATE;
+  if (gateAt) {
+    const [gx, gy] = gateAt.split(',').map(Number);
+    const stg = loadStore(chOf(46, 'Jungle_Temple'));
+    const hist = new Map<string, { n: number; act: number; plat: number }>();
+    let solidN = 0, totN = 0;
+    for (let dy = -15; dy <= 15; dy++) {
+      const half = Math.min(15, Math.trunc(Math.sqrt(256 - dy * dy)));
+      for (let dx = -half; dx <= half; dx++) {
+        const x = gx + dx, y = gy + dy;
+        if (!stg.inBounds(x, y)) continue;
+        const i = stg.idx(x, y);
+        const d = TILE_DEFS[stg.type[i]];
+        const solid = !!stg.flags[i] && !!d && genSolidType(stg.type[i]) && !d?.platform && (stg.wire[i] & 32) === 0;
+        totN++;
+        if (!solid) {
+          if (stg.flags[i] && d) {
+            const keyN = `NS ${SHEET[stg.type[i]] >= 0 ? SHEET[stg.type[i]] : 'x' + stg.type[i]}@${TILE_BY_KEY_REV[stg.type[i]] ?? '?'}`;
+            hist.set(keyN, ((hist.get(keyN)?.n ?? 0) + 1, { n: (hist.get(keyN)?.n ?? 0) + 1, act: 0, plat: 0 }));
+          }
+          continue;
+        }
+        solidN++;
+        const key = `${SHEET[stg.type[i]] >= 0 ? SHEET[stg.type[i]] : 'x' + stg.type[i]}@${TILE_BY_KEY_REV[stg.type[i]] ?? '?'}`;
+        const h = hist.get(key) ?? { n: 0, act: 0, plat: 0 };
+        h.n++; if (stg.wire[i] & 32) h.act++;
+        hist.set(key, h);
+      }
+    }
+    console.log(`[gate@${gx},${gy}] circleCells=${totN} jsSolid=${solidN}`);
+    for (const [k, v] of [...hist.entries()].sort((a, b) => b[1].n - a[1].n)) console.log(`   ${k}: n=${v.n}`);
+  }
   const t0 = Date.now();
   try {
     await generateWorld({
@@ -199,17 +250,49 @@ function diffBoard(tag: string, xs: Ch, st: StoreView, cellCap = 40): DiffRow {
   diffBoard('sanity base', baseX, st85 as unknown as StoreView, 4);
 
   // live(管线相) 尝试流与重放流共享：清空后重挂收集器只收相 2
-  marks.length = 0;
+  marks.length = 0; rcMarks.length = 0; rcNow = 0;
   for (const k of Object.keys(hvStats)) delete hvStats[k];
-  gg.__swMark = (s) => marks.push(s);
-  gg.__swHvLog = (s) => marks.push('#' + s);
+  const GSW = globalThis as { __swRollCount?: number };
+  GSW.__swRollCount = 0;
+  rollVals.length = 0;
+  if (process.env.SW_FNT === '1') {
+    (globalThis as unknown as { __swFntProbeI39?: { emit?: (l: string) => void } }).__swFntProbeI39 = {
+      emit: (l: string) => { fntLog.push(`${rcNow}|${l}`); },
+    };
+  }
+  (gg as { __swOnRoll?: (v: number) => void }).__swOnRoll = (v?: number) => { if (v !== undefined) rollVals.push(v); rcNow++; GSW.__swRollCount = rcNow; };
+  gg.__swMark = (s) => { marks.push(s); rcMarks.push(rcNow); };
+  gg.__swHvLog = (s) => { marks.push('#' + s); rcMarks.push(rcNow); };
   gg.__swHvStat = (k, v = 1) => { hvStats[k] = (hvStats[k] ?? 0) + v; return hvStats[k]; };
   const rng85 = new RNG(gsc.seed);   // ▶Beehives 重播种子语义（WorldGenerator.cs:497）
+  // ★IIIII81：SW_DIECALL=1 时给 RNG 打调用栈指纹（仅窗口模式下启用，生产无碍）
+  if (process.env.SW_DIECALL === '1') {
+    const URp = Object.getPrototypeOf(rng85.ur) as Record<string, unknown>;
+    for (const m of ['nextDouble', 'nextIntRange', 'nextInt'] as const) {
+      const fn = URp[m] as ((...a: never[]) => number);
+      URp[m] = function (...a: never[]) {
+        const v = fn.apply(this, a) as number;
+        if (rcNow >= DIE_WIN[0] && rcNow <= DIE_WIN[1]) {
+          const stk = (new Error().stack ?? '').split('\n').slice(2, 8)
+            .map((l2) => { const mm = l2.match(/\(?([^\s()/]*\.ts):(\d+):\d+/); return mm ? `${mm[1]!.split('/').pop()}:${mm[2]}` : ''; })
+            .filter(Boolean).join('<');
+          dieCalls.push(`${rcNow}|${m}|${stk}`);
+        }
+        return v;
+      };
+    }
+  }
   const t1 = Date.now();
   runBeehivePass(st85, rng85, gsc);
   console.log(`[replay] runBeehivePass ${((Date.now() - t1) / 1000).toFixed(1)}s`);
+  delete (globalThis as unknown as { __swFntProbeI39?: unknown }).__swFntProbeI39;
   gg.__swMark = undefined; gg.__swHvLog = undefined; gg.__swHvStat = undefined;
 
+  { const _kl=(globalThis as unknown as { __swKillLog?: string[] }).__swKillLog; if(_kl&&_kl.length)writeFileSync('/tmp/iii85-out/js-killlog.txt',_kl.join('\n')); delete (globalThis as unknown as { __swKillLog?: unknown }).__swKillLog; }
+  const _alt = (globalThis as unknown as { __swAltarLog?: string[] }).__swAltarLog;
+  if (_alt && _alt.length) writeFileSync('/tmp/iii85-out/js-altardbg.txt', _alt.join('\n'));
+  if (dieCalls.length) writeFileSync('/tmp/iii85-out/js-diecalls.txt', dieCalls.join('\n'));
+  if (fntLog.length) writeFileSync('/tmp/iii85-out/js-fntlog.txt', fntLog.join('\n'));
   console.log(`[stats] ${JSON.stringify(hvStats)}`);
   console.log('attempt stream:', marks.join(' | '));
   const rowB = diffBoard('replay(46→47)', postX, st85 as unknown as StoreView);
@@ -249,6 +332,6 @@ function diffBoard(tag: string, xs: Ch, st: StoreView, cellCap = 40): DiffRow {
       console.log(`  diff(${cx},${cy}) nearest-hive#${bi}(${centers[bi]?.[0]},${centers[bi]?.[1]}) d≈${Math.sqrt(bd).toFixed(0)}`);
     }
   }
-  writeFileSync(OUT, JSON.stringify({ cap: { seed: gsc.seed, ws: gsc.worldSurface, rock: gsc.rockLevel }, marks, hvStats, rowB, rowP }));
+  writeFileSync(OUT, JSON.stringify({ cap: { seed: gsc.seed, ws: gsc.worldSurface, rock: gsc.rockLevel }, marks, rcMarks, rollVals, hvStats, rowB, rowP }));
   console.log(`written ${OUT}; larva=${cap.larvaX.length} prot=${cap.prot.length}`);
 }, 900_000);

@@ -121,7 +121,7 @@ import { bannerNpcOfItem } from '../world/Banners';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { activeVariantOfVid, variantRareOfVid, VARIANT_L10N_KEY } from '../data/vanillaItemVariants';
-import { assembleTooltipLines } from './itemTooltip';
+import { assembleTooltipLines, materialIids } from './itemTooltip';
 import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
@@ -2553,85 +2553,176 @@ export class UI {
   private guideEl: HTMLDivElement | null = null;
   /** Esc 关闭监听（openGuideSearch 挂载/closeGuideSearch 对称摘除） */
   private guideEscHandler: ((e: KeyboardEvent) => void) | null = null;
+  /** 向导反查物理材料槽（Main.guideItem 等价）：放置期间真实持有整组物品，
+   *  空手点槽取回、关闭浮层自动归还（NewCraftingUI dropItemCheck 语义）。 */
+  private guidePlaced: { id: number; stack: number } | null = null;
 
   /** 反查面板：搜物品 → 列出以它为材料的全部配方（含 RecipeGroup 成员） */
   openGuideSearch(): void {
     this.closeGuideSearch();
     const overlay = el('div') as HTMLDivElement;
     overlay.className = 'sw-guide-overlay';   // 稳定标识（探针/脚本定点清理用）
-    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1200; display:flex; align-items:center; justify-content:center;';
+    // ★容器纯定位层 + 鼠标穿透；面板停靠右上（原版合成窗方位，让开左侧背包）——
+    //   playerInventory=true 的本意就是背包与反查同屏交互（用户二轮实报后定案形态）
+    overlay.style.cssText = 'position:fixed; inset:0; z-index:1200; pointer-events:none;';
     const panel = el('div');
-    panel.style.cssText = 'width:620px; max-height:76vh; background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;';
-    const titleRow = el('div');
-    titleRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
-    titleRow.appendChild(el('div', 'sw-lbl', Lang.inter(21)));
+    panel.style.cssText = 'position:absolute; right:16px; top:88px;'
+      + 'width:520px; max-width:min(520px, calc(100vw - 32px));'
+      + 'max-height:calc(100vh - 128px); background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px;'
+      + 'padding:10px; display:flex; flex-direction:column; gap:8px;'
+      + 'box-shadow:0 8px 40px rgba(0,0,0,.55); pointer-events:auto;';
+    // ---- 头行：材料槽(实体格) + caption + 关闭（Main.cs:441-447 同位）----
+    const slotRow = el('div');
+    slotRow.style.cssText = 'display:flex; align-items:center; gap:10px;';
+    const vidOfItem = (iid: number): number => {
+      const def = ITEM_DEFS[iid];
+      const m = def && /^vi_(\d+)_/.exec(def.key);
+      return m ? Number(m[1]) : -1;
+    };
+    const itemNameOfVid = (vid: number): string => {
+      const k = VANILLA_ITEM_KEY_BY_ID[vid];
+      return (k && Lang.itemNameByKey(k)) || String(vid);
+    };
+    const slotBox = el('div', 'sw-guide-slot');
+    const slotCaption = el('div');
+    slotCaption.style.cssText = 'flex:1; color:#e8e8f4; font-size:13px; line-height:1.5;';
+    slotBox.title = Lang.inter(24);
+    slotBox.style.cssText = 'width:56px; height:56px; flex:none; display:flex; align-items:center;'
+      + 'justify-content:center; border:2px dashed #55506a; border-radius:6px; background:#232030;'
+      + 'cursor:pointer; image-rendering:pixelated;';
     const closeBtn = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Close'));
     closeBtn.style.cssText = 'cursor:pointer; width:auto; margin:0;';
     closeBtn.addEventListener('click', () => this.closeGuideSearch());
-    titleRow.appendChild(closeBtn);
-    panel.appendChild(titleRow);
-    const input = el('input') as HTMLInputElement;
-    input.placeholder = '材料名称 / key / 原版 id…';
-    input.style.cssText = 'width:100%; box-sizing:border-box; padding:6px 8px; background:#1a1a22; color:#eee; border:1px solid #555; border-radius:4px; font-size:14px;';
-    panel.appendChild(input);
-    const itemRow = el('div');
-    itemRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px; overflow-y:auto; max-height:120px; align-content:flex-start;';
-    panel.appendChild(itemRow);
+    slotRow.appendChild(slotBox);
+    slotRow.appendChild(slotCaption);
+    slotRow.appendChild(closeBtn);
+    panel.appendChild(slotRow);
+    // ---- 配方名筛选（对齐 Modern 合成窗自带按名筛列——非“选材料”网格）----
+    const filterInput = el('input') as HTMLInputElement;
+    filterInput.placeholder = '筛选配方名…';
+    filterInput.style.cssText = 'width:100%; box-sizing:border-box; padding:5px 8px; background:#1a1a22; color:#eee; border:1px solid #555; border-radius:4px; font-size:12px;';
+    panel.appendChild(filterInput);
+    let filterQ = '';
     const recipeList = el('div');
-    recipeList.style.cssText = 'overflow-y:auto; flex:1;';
+    recipeList.style.cssText = 'overflow-y:auto; flex:1; min-height:140px;';
     panel.appendChild(recipeList);
     overlay.appendChild(panel);
-    overlay.addEventListener('mousedown', (e) => {
-      if (e.target === overlay) this.closeGuideSearch();
-    });
     document.body.appendChild(overlay);
     this.guideEl = overlay;
-    // Esc 关闭（键盘对等关闭路径；NpcDialog Esc 捕获已让位于 chatInput 卫门场景）
     this.guideEscHandler = (e: KeyboardEvent) => {
       if (e.code === 'Escape') this.closeGuideSearch();
     };
     window.addEventListener('keydown', this.guideEscHandler);
-
-    const entries = ITEM_DEFS.map((d, id) => {
-      const vid = d.key.startsWith('vi_') ? parseInt(d.key.slice(3, d.key.indexOf('_', 3)), 10) : -1;
-      const name = Lang.itemNameByKey(d.key) || d.key;
-      return { id, vid, name, lc: (name + ' ' + d.key + ' ' + vid).toLowerCase() };
-    }).filter((e) => e.vid >= 0);
-    const renderItems = () => {
-      const q = input.value.trim().toLowerCase();
-      itemRow.textContent = '';
-      // ★初态=空候选（对齐原版 InGuideCraftMenu 空槽语义 NewCraftingUI.cs:256-261：
-      //   guideItem 未放 ⇒ 配方恒 0），引导语 = inter[24]「在此放置材料」——
-      //   曾直接铺注册表前 40 个静态切片（与角色无关的假列表，2026-08-30 用户指认）
-      if (!q) {
-        const hint = el('div', 'sw-lbl', Lang.inter(24));
-        hint.style.cssText = 'grid-column:1/-1; color:#9a8ab8; padding:4px 2px;';
-        itemRow.appendChild(hint);
-        return;
-      }
-      let shown = 0;
-      for (const e of entries) {
-        if (!e.lc.includes(q)) continue;
-        if (++shown > 40) break;
-        const chip = el('div');
-        chip.title = e.name;
-        chip.style.cssText = 'display:flex; align-items:center; gap:3px; width:150px; padding:2px 4px; background:#1f1f28; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:12px; color:#ddd;';
+    // ---- 槽位驱动（guideItem 变化 → ResetRecipes 即刻刷新，NewCraftingUI 同义）----
+    const refreshHeader = () => {
+      slotBox.textContent = '';
+      if (this.guidePlaced) {
+        slotBox.style.borderStyle = 'solid';
+        slotBox.style.borderColor = '#8fa1e0';
         const img = el('img') as HTMLImageElement;
-        img.src = iconUrl(this.game!, e.id);
-        img.style.cssText = 'width:22px; height:22px; image-rendering:pixelated; flex:none;';
-        chip.appendChild(img);
-        const lbl = el('span');
-        lbl.textContent = e.name;
-        lbl.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
-        chip.appendChild(lbl);
-        chip.addEventListener('click', () => this.renderGuideRecipes(recipeList, e.vid));
-        itemRow.appendChild(chip);
+        img.src = iconUrl(this.game!, this.guidePlaced.id) || '';
+        img.style.cssText = 'max-width:46px; max-height:46px; image-rendering:pixelated;';
+        img.draggable = false;
+        slotBox.appendChild(img);
+        slotCaption.textContent = `${Lang.inter(21)} ${itemNameOfVid(vidOfItem(this.guidePlaced.id))} ×${this.guidePlaced.stack}`;
+      } else {
+        slotBox.style.borderStyle = 'dashed';
+        slotBox.style.borderColor = '#55506a';
+        slotCaption.textContent = Lang.inter(24);   // 「在此放置材料」
       }
-      if (!shown) itemRow.appendChild(el('div', 'sw-lbl', '无匹配'));
     };
-    input.addEventListener('input', renderItems);
-    renderItems();
-    input.focus();
+    /** 取回放置组回背包（溢出→脚下掉落；CloseNPCChatOrSign 出口等价） */
+    const takeBackPlaced = (): void => {
+      const pl = this.guidePlaced;
+      if (!pl || !this.game) return;
+      const left = this.game.player.inv.add(pl.id, pl.stack);
+      if (left > 0) {
+        const key = ITEM_DEFS[pl.id]?.key ?? '';
+        this.game.spawnDrop(this.game.player.cx, this.game.player.y, key, left);
+      }
+      this.game.cb.onInventoryChanged?.();
+      this.guidePlaced = null;
+    };
+    // ---- 点击语义 = ItemSlot.cs 对 context7 的通用处理 1:1 ----
+    //   放置门(:1502 checkItem.material——本仓以配方原料反查集近似,itemTooltip 注)
+    //   左键(PickAction=0 整组迁移)：空手取整组 / 手持→空槽整组 / 同型合并至槽
+    //   maxStack / 异型双方皆材料则 SwapItem 对换；右键(RightClick 尾段单枚机)：
+    //   每击移动 1 枚（空手取 1 / 手持同型放 1；满格或异型不动）。取→Grab(7)、
+    //   右键动一枚→MenuTick(12)、左键放置原版无音效（:920-960 区间零 PlaySound）
+    const isMaterialVid = (vid: number): boolean => vidOfItem(vid) >= 0 && materialIids().has(vid);
+    const maxStackOf = (iid: number): number => ITEM_DEFS[iid]?.maxStack ?? 999;
+    slotBox.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const cur = this.heldStack;
+      const pl = this.guidePlaced;
+      let action: 'none' | 'take' | 'move' = 'none';
+      if (cur && !isMaterialVid(vidOfItem(cur.id))) return;          // 放置门不过=原样拒
+      const changed = (): void => { refreshHeader(); renderRecipes(); applyFilter(); };
+      if (e.button === 0) {
+        if (!cur && pl) {                                            // 空手 → 取整组
+          const hadPrefix = (pl as { prefix?: number }).prefix;
+          this.heldStack = { id: pl.id, stack: pl.stack,
+            ...(hadPrefix !== undefined ? { prefix: hadPrefix } : {}) };
+          this.guidePlaced = null;
+          this.game?.sfx.play('pickup');                             // SoundID.Grab(7)
+          action = 'take';
+        } else if (cur && !pl && isMaterialVid(vidOfItem(cur.id))) { // 手持 → 空槽整组
+          this.guidePlaced = { id: cur.id, stack: cur.stack };
+          this.heldStack = null;                                     // 原版左键放置无音效
+          action = 'move';
+        } else if (cur && pl) {
+          if (vidOfItem(cur.id) === vidOfItem(pl.id)) {              // 同型合并至上限
+            const cap = Math.max(0, maxStackOf(pl.id) - pl.stack);
+            const mv = Math.min(cur.stack, cap);
+            if (mv > 0) { pl.stack += mv; cur.stack -= mv; if (cur.stack <= 0) this.heldStack = null; }
+            action = 'move';
+          } else if (isMaterialVid(vidOfItem(pl.id))) {              // 异型 SwapItem 对换
+            const oldPl = { id: pl.id, stack: pl.stack };
+            this.guidePlaced = { id: cur.id, stack: cur.stack };
+            this.heldStack = oldPl;
+            action = 'move';
+          }
+        }
+      } else if (e.button === 2) {
+        if (!cur && pl && pl.stack > 0) {                            // 空手右键 = 取 1
+          const one: { id: number; stack: number; prefix?: number } = { id: pl.id, stack: 1 };
+          const pref = (pl as { prefix?: number }).prefix;
+          if (pref !== undefined) one.prefix = pref;
+          this.heldStack = one;
+          pl.stack -= 1;
+          if (pl.stack <= 0) this.guidePlaced = null;
+          UISfx.click();                                             // RightClick 内 PlaySound(12)
+          action = 'take';
+        } else if (cur && pl && vidOfItem(cur.id) === vidOfItem(pl.id)
+          && cur.stack < maxStackOf(cur.id) && pl.stack > 0) {       // 手持同型不满 → 放 1
+          pl.stack += 1; cur.stack -= 1;
+          if (cur.stack <= 0) this.heldStack = null;
+          UISfx.click();
+          action = 'move';
+        }
+      }
+      if (action !== 'none') { changed(); }
+    });
+    slotBox.addEventListener('contextmenu', (e) => e.preventDefault());
+    filterInput.addEventListener('input', () => {
+      filterQ = filterInput.value.trim().toLowerCase();
+      applyFilter();
+    });
+    const applyFilter = (): void => {
+      for (const row of Array.from(recipeList.querySelectorAll('.sw-recipe'))) {
+        (row as HTMLElement).style.display =
+          !filterQ || (row.textContent || '').toLowerCase().includes(filterQ) ? '' : 'none';
+      }
+    };
+    const renderRecipes = (): void => {
+      recipeList.textContent = '';
+      filterInput.value = ''; filterQ = '';
+      const vid = this.guidePlaced ? vidOfItem(this.guidePlaced.id) : null;
+      if (vid != null && vid >= 0) this.renderGuideRecipes(recipeList, vid);
+    };
+    refreshHeader();
+    renderRecipes();
   }
 
   /** 材料的配方列表（CollectGuideRecipes：items 直接命中或 RecipeGroup 成员命中） */
@@ -2670,6 +2761,20 @@ export class UI {
   }
 
   closeGuideSearch(): void {
+    // 放置中的材料自动归还（Main.CloseNPCChatOrSign → dropItemCheck 出口等价；
+    // MP 下走背包 add 与 msg5 差分同链）
+    {
+      const pl = this.guidePlaced;
+      if (pl && this.game) {
+        const left = this.game.player.inv.add(pl.id, pl.stack);
+        if (left > 0) {
+          const key = ITEM_DEFS[pl.id]?.key ?? '';
+          this.game.spawnDrop(this.game.player.cx, this.game.player.y, key, left);
+        }
+        this.game.cb.onInventoryChanged?.();
+      }
+      this.guidePlaced = null;
+    }
     if (this.guideEscHandler) {
       window.removeEventListener('keydown', this.guideEscHandler);
       this.guideEscHandler = null;

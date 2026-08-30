@@ -122,6 +122,8 @@ for (let from = 0; from < ALL_IDS.length; from += BATCH) {
     console.log(`批次 ${from}-${from + ids.length}:完成 ${res.length}`);
   } catch (e) { console.log('[批次异常跳过]', String(e).slice(0, 90)); }
 }
-writeFileSync('/tmp/npc-audit/calib.json', JSON.stringify(outAll));
+const OUTP = process.env.CAL_OUT || '/tmp/npc-audit/calib.json';
+writeFileSync(OUTP, JSON.stringify(outAll));
+console.log('落盘', OUTP);
 console.log(`校准完成 ${Object.keys(outAll).length} 型 → /tmp/npc-audit/calib.json`);
 await browser.close();

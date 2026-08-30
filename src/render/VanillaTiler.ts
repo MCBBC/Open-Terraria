@@ -16,7 +16,7 @@ import {
 } from '../world/MinecartTrack';
 import { cageFamilyOf, drawCageCell } from './CritterCage';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
-import { animFrameIdx, animYOffset, TILE_ANIM_RATE } from './TileAnim';
+import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, TILE_ANIM_RATE } from './TileAnim';
 import { vanillaFrameFor, vanillaFrameUnified, setVanillaSolidTables, deriveVanillaSolidTablesFromDefs, isVanillaMergeDirtFamily } from './VanillaFraming';
 // 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程;2026-08-28 转正默认启用)。
 // ★回退开关(发现严重问题时无需改代码):
@@ -1199,7 +1199,16 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     fy = vfFrame.fy;
     // 动画块叠加与 auto 分支同款(瀑布族 326/327/345/458/459:addFrY=帧序×90)
     if (TILE_ANIM_RATE[sheet]) {
-      r = { ...r, sy: r.sy + animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18) };
+      // 405 壁炉：frameX≥54 列静止（TileDrawing.cs:5524 门）；406 烟囱：带折算
+      // （cs:5448-5462）——offset 后须钳制在素材界内，防止“播到透明区”整块消失
+      // （2026-08-28 用户双帧实拍：烟囱周期性整体隐形）
+      let extra = sheet === 405 ? fireplaceAddFrY(fx)
+        : sheet === 406 ? chimneyAddFrY(fy)
+        : animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
+      const imgh = (atlas.vmeta(sheet)?.rows ?? 0) * 18;
+      if (imgh > 0 && r.sy + extra + r.sh > imgh) extra = 0;   // 出界回退第 0 带
+      if (extra < -(r.sy)) extra = 0;                           // 负向越界同理
+      r = { ...r, sy: r.sy + extra };
     }
   } else if (frame === 'auto') {
     r = frameFor(atlas, sheet, st, x, y, type, same);
@@ -1208,7 +1217,13 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     // = sy + 帧序×90。与 style 分支的 animYOffset 叠加语义一致（ChunkCache 已按
     // TILE_ANIM_RATE 登记重烘焙）
     if (r && TILE_ANIM_RATE[sheet]) {
-      r = { ...r, sy: r.sy + animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18) };
+      let extra = sheet === 405 ? fireplaceAddFrY(fx)
+        : sheet === 406 ? chimneyAddFrY(fy)
+        : animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
+      const imgh = (atlas.vmeta(sheet)?.rows ?? 0) * 18;
+      if (imgh > 0 && r.sy + extra + r.sh > imgh) extra = 0;
+      if (extra < -(r.sy)) extra = 0;
+      r = { ...r, sy: r.sy + extra };
     }
   } else if (vfFrame === null) {
     // 重建帧偏移：只针对帧数据全 0 的残缺物体（wld 部分家具）。
@@ -1274,8 +1289,9 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     // 多格物体（dgWr 系放置/存量存档）整物塌成重复碎片。215 篝火与 207 喷泉
     // 例外：帧偏移由 ChunkCache 预加（campfireYOffset/fountainYOffset——两族
     // 均有"带 0 静止态门/相位"专属语义），勿在此重复叠加
-    if (sheet !== 215 && sheet !== 207) {
-      ofy += animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
+    if (sheet !== 215 && sheet !== 207 && !(sheet === 405 && fx >= 54)) {
+      ofy += sheet === 405 ? fireplaceAddFrY(fx)
+        : animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
     }
     // 标准 18px stride 像素偏移直取（宝箱 Tiles_21 也是标准网格：
     // 样式横向排列 36px/个，closed 状态占前 2 行，下面是开启动画帧）

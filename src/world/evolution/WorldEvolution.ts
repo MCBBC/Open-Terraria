@@ -121,6 +121,9 @@ export interface EvolutionHost {
   windSpeedCurrent: number;
   /** 玩家 tile 坐标（LOS 近似用；null = 无玩家） */
   playerTile: () => { x: number; y: number } | null;
+  /** 静默直写后的渲染补标（陨石同款：chunks.markDirtyArea+lighting.dirty）。
+   *  缺省 = 宿主无 chunk 缓存（离线测试），仅写数据不通知渲染。 */
+  afterSilentTileWrite?: (x0: number, y0: number, x1: number, y1: number) => void;
   /** WorldGen.GetWorldUpdateRate（cs:72056-72063）= min(desiredWorldTilesUpdateRate, 24)、
    *  FreezeTime 时 0。desiredWorldTilesUpdateRate 随 dayRate 走（Main.cs:6290——全员熟睡
    *  ×5；快进中恒 1 与 dayRate=60 解耦）。缺省 1 = 无时间倍率系统（单测/离线宿主） */
@@ -342,22 +345,33 @@ export class WorldEvolution {
     return false;
   }
 
-  /** AttemptToGeneratePlanteraBulbAt（cs:74250-74329）。锚 (i,j)=灯泡 2×2 右下角
-   *  （底行 j 之下两列须为实心丛林草,cs:47820-47827）；2×2 须空或仅藤蔓/蘑菇/
-   *  丛林植物 233（cs:47795-47812，可覆写）。forceBulb 档：4×4 邻域计分
-   *  （泥/草 +1,其余活动格 -1,黑名单格直接 -1）≥12 才放,且清 4×4 + 外环转草 60。 */
+  /** AttemptToGeneratePlanteraBulbAt（cs:74250-74329）+ PlaceJunglePlant 238 支
+   *  （cs:48191-48256）。锚 (i,j)=灯泡 2×2 右下角；底承两列须实心泥 60。
+   *  2×2 允许族（cs:48204-48212）：空 / 强势草61 / 藤62 / 丛林植物233 /
+   *  短草69 / 香蒲74 / 幌菊703 / 655 / 旗185(fy=0)——其余活动格即拒。
+   *  非 force 先 KillTile(noItem) 覆写允许族再直写；force 档 4×4 计分
+   *  （泥/草 +1,其余活动格 -1,黑名单 -1）≥12 才放,清 4×4+外环转草。
+   *  ★写入走 setTileSilent：PlaceJunglePlant 是裸数组直写——非实体植物可与
+   *  带水格共存（不清液）；普通 setTile 会唤起本仓液体监听器按"保水"语义把
+   *  新块 kill 成 L 形残件（2026-08-30 实测定罪）。写完经 afterSilentTileWrite
+   *  补渲染脏标（陨石同款）。 */
   private attemptBulbAt(i: number, j: number, forceBulb: boolean): boolean {
     const st = this.host.store;
+    // PlaceJunglePlant 边距门（cs:48197-48199）：±5 内圈禁放
+    if (i < 5 || i > st.w - 5 || j < 5 || j > st.h - 5) return false;
     // 底承:两列 j+1 行须实心丛林草
     if (!(st.inBounds(i - 1, j + 1) && st.inBounds(i, j + 1))) return false;
     if (!(this.solidTile(i - 1, j + 1) && sheetOf(this.typeAt(i - 1, j + 1)) === 60)) return false;
     if (!(this.solidTile(i, j + 1) && sheetOf(this.typeAt(i, j + 1)) === 60)) return false;
-    // 2×2 清场校验（藤 62 / 蘑菇植物 63-71 / 丛林植物 233 可覆写）
+    // 2×2 允许族校验（原版字面集合；185 旗须 frameY===0）
     for (let dx = -1; dx <= 0; dx++) {
       for (let dy = -1; dy <= 0; dy++) {
-        const sh = sheetOf(this.typeAt(i + dx, j + dy));
-        if (this.active(i + dx, j + dy)
-          && sh !== 62 && sh !== 233 && !(sh >= 63 && sh <= 71)) return false;
+        const ii = st.idx(i + dx, j + dy);
+        if (!st.flags[ii]) continue;
+        const sh = sheetOf(st.type[ii]!);
+        const allow = sh === 61 || sh === 62 || sh === 233 || sh === 69 || sh === 74
+          || sh === 703 || sh === 655 || (sh === 185 && (st.frameY[ii] ?? 0) === 0);
+        if (!allow) return false;
       }
     }
     if (forceBulb) {
@@ -380,8 +394,25 @@ export class WorldEvolution {
           if (m === -2 || m === 1 || n === -2 || n === 1) this.setType(i + m, j + n, S(60)!);
         }
       }
+    } else {
+      // 覆写允许族（cs:48238-48245 KillTile noItem）——非活动水格不动（原版同款共存）
+      for (let dx = -1; dx <= 0; dx++) {
+        for (let dy = -1; dy <= 0; dy++) {
+          if (this.active(i + dx, j + dy)) this.kill(i + dx, j + dy);
+        }
+      }
     }
-    return this.placeBlock(i - 1, j - 1, 238, 2, 2);
+    // 直写 2×2（frames：fx=36*styleX 列步 18,fy=行步 18;238 styleX=0 → 0/18 双列）,
+    // 原版 num3=0（cs:48252-48268）。静默口=绕开液体监听保水互斥(见头注)
+    const t = S(238);
+    if (!t) return false;
+    for (let dx = -1; dx <= 0; dx++) {
+      for (let dy = -1; dy <= 0; dy++) {
+        st.setTileSilent(i + dx, j + dy, t, dx === 0 ? 18 : 0, dy === 0 ? 18 : 0);
+      }
+    }
+    this.host.afterSilentTileWrite?.(i - 1, j - 1, i, j);
+    return true;
   }
 
   // ================= 采样子分发（OvergroundTile cs:72066） =================

@@ -5,31 +5,81 @@ import { TILE, CHUNK } from '../core/constants';
 import { TintAtlas, type TintRect } from './TintAtlas';
 import { tintedTex } from './StringLine';
 import { NPC_GRIDS } from '../remaster/NpcGridLayouts';
-import { NPC_FOOT_BIAS } from '../data/npcFootBias.gen';
 
 /** ★「落脚贴合」开关(2026-08-30 用户拍板):人形/常规族贴图按首帧扫描上移,
  *  鞋底与碰撞盒底线对齐。刻意偏离反编译中心锚定数学——parity 对账跑批前
  *  必须 localStorage.sw_npc_foot_flush='0' 关闭(见 Renderer.npcFootFlushOn) */
 export function npcFootFlushOn(): boolean {
-  try { return localStorage.getItem('sw_npc_foot_flush') !== '0'; } catch { return true; }
+  return footCfg.flushOn;
 }
-/** 全局下沉微调(px,正=整体下移)。默认 2:校准基准(F3 描边框线)与肉眼地面参照
- *  (瓦顶硬边/草叶带)存在 ~2px 恒定系统差,v3 收敛到"框线齐平"在真机上即呈浮空 */
+/** 全局微调旋钮(px,**正 = 整体向地面下沉**)。缺省 −1 = 用户实玩定档(2026-08-30,
+ *  浮点补偿基线上再提 1px 消除末位可见下沉)。控制台改键后 npcFootCfgReload() 重读 */
 function npcFootBiasExtra(): number {
-  try { const n = Number(localStorage.getItem('sw_npc_foot_flush_extra')); return Number.isFinite(n) ? n : 2; } catch { return 2; }
+  return footCfg.extra;
 }
-/** 逐型人工覆写(localStorage sw_npc_foot_bias_over = {"46":-2,...}):正=下移。
- *  小动物/多姿态族单帧扫描不可靠,由用户目测旋钮定档后回灌生成表 */
-let OVER_CACHE: Record<number, number> | null = null;
+/** 逐型人工覆写(sw_npc_foot_bias_over = {"46":-2,...}):正=下移。 */
 function npcFootBiasOverride(id: number): number {
-  try {
-    if (!OVER_CACHE) OVER_CACHE = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}');
-    return OVER_CACHE[id] ?? 0;
-  } catch { return 0; }
+  return footCfg.overrides[id] ?? 0;
 }
 function npcFootBiasY(id: number | undefined): number {
   if (!npcFootFlushOn() || id === undefined) return 0;
-  return ((NPC_FOOT_BIAS[id] ?? 0) - npcFootBiasExtra()) + npcFootBiasOverride(id);
+  return npcFootBiasExtra() + npcFootBiasOverride(id);
+}
+/** 配置快照:模块加载时读一次 localStorage,运行时零 IO;
+ *  控制台改键后调 npcFootCfgReload()(挂 window)重读快照 */
+const footCfg = (() => {
+  const cfg = { flushOn: true, extra: -1 as number, overrides: {} as Record<number, number> };
+  try {
+    cfg.flushOn = localStorage.getItem('sw_npc_foot_flush') !== '0';
+    const n = Number(localStorage.getItem('sw_npc_foot_flush_extra'));
+    if (Number.isFinite(n)) cfg.extra = n;
+    const ov = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}') as Record<string, unknown>;
+    for (const [k, v] of Object.entries(ov)) if (Number.isFinite(v)) cfg.overrides[+k] = v as number;
+  } catch { /* 私隐模式等异常保默认 */ }
+  (window as unknown as { npcFootCfgReload?: () => void }).npcFootCfgReload = () => {
+    cfg.flushOn = localStorage.getItem('sw_npc_foot_flush') !== '0';
+    const n = Number(localStorage.getItem('sw_npc_foot_flush_extra'));
+    if (Number.isFinite(n)) cfg.extra = n;
+    const ov = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}') as Record<string, unknown>;
+    for (const [k, v] of Object.entries(ov)) if (Number.isFinite(v)) cfg.overrides[+k] = v as number;
+  };
+  return cfg;
+})();
+/** ★v6 内禀「落脚贴合」:按实际切片扫描内容底行(fMax),返回使其贴住盒底的
+ *  额外位移(世界 px)。扫描结果按位图身份+切片键缓存,首帧一次性开销。 */
+const FOOT_ROW_CACHE = new Map<string, number>();
+const BMAP_UIDS = new WeakMap<object, string>();
+let BMP_UID_SEQ = 0;
+function bmpUidOf(src: unknown): string {
+  let u = BMAP_UIDS.get(src as object);
+  if (!u) { u = 'b' + (++BMP_UID_SEQ); BMAP_UIDS.set(src as object, u); }
+  return u;
+}
+function npcContentBottomRow(img: CanvasImageSource, sy: number, sw: number, sh: number): number {
+  if (!(img instanceof HTMLImageElement) && !(img instanceof HTMLCanvasElement) && typeof ImageBitmap !== 'undefined' && !(img instanceof ImageBitmap)) return -1;
+  const key = `${bmpUidOf(img)}|${sy}|${sw}|${sh}`;
+  const hit = FOOT_ROW_CACHE.get(key);
+  if (hit !== undefined) return hit;
+  let out = -1;
+  try {
+    const oc = document.createElement('canvas');
+    oc.width = Math.max(1, sw); oc.height = Math.max(1, sh);
+    const c2 = oc.getContext('2d', { willReadFrequently: true })!;
+    c2.drawImage(img as CanvasImageSource, 0, sy, sw, sh, 0, 0, sw, sh);
+    const d = c2.getImageData(0, 0, sw, sh).data;
+    for (let y = sh - 1; y >= 0; y--) {
+      let n = 0;
+      for (let x = 0; x < sw; x++) if (d[(y * sw + x) * 4 + 3] > 20) n++;
+      if (n > 0) { out = y; break; }
+    }
+  } catch { out = -1; }
+  FOOT_ROW_CACHE.set(key, out);
+  return out;
+}
+/** 落脚豁免:独占绘制路径自带锚点(它们根本不走通用尾段,防御性登记) */
+const FOOT_FLUSH_EXEMPT = new Set<number>([393]);
+function npcFootBiasExempt(id: number): boolean {
+  return FOOT_FLUSH_EXEMPT.has(id);
 }
 import type { Camera } from './Camera';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
@@ -5593,8 +5643,8 @@ export class Renderer {
         // ★落脚贴合补偿（2026-08-30 用户拍板,刻意偏离反编译中心锚定数学）：
         // 官方人形族贴图内容底行系统性低于盒底 ≈5px(cell56 内容[8..53]),F3 精确框线
         // 下呈"陷地"。此表按首帧扫描逐型抵消;排除旋转/独占路径(gen 时已剔除)。
-        // ★parity 对账跑批前必须 localStorage.sw_npc_foot_flush='0' 关闭本表!
-        addY += npcFootBiasY(idA);   // 表值为带方向位移(负=上移)+ 全局基准微调
+        // ★parity 对账跑批前必须 localStorage.sw_npc_foot_flush='0' 关闭落脚贴合!
+        // v6 起补偿为「内禀计算」(见 anchorY 前的 footFlush 段),本查表通道退役。
         // 416 日耀掠兽骑手（Main.cs:24508-24515 case 416 独占）：绘制位置吸附坐骑
         // 415 的 Bottom（AI 锚 Center+(-spriteDir*10,-30) 只喂碰撞盒——骑手视觉上
         // 双脚踩在掠兽脚平面）。其余 aiStyle 75 骑手（390）原版无此绘制覆写，仍用 AI 位
@@ -5771,7 +5821,21 @@ export class Renderer {
         // addY 保持纹理单位（XNA `return num * npc.scale` :22393——偏移随 npc.scale
         // 缩放,ctx.scale(scale) 天然乘回;曾误 /scale 除反,专家档 13-15/134-136
         // ×1.2/×1.05 时与原版差 5-6px）。
-        const anchorY = -r.sh / 2 + addY;
+        // ★「落脚贴合」v6 内禀计算(2026-08-30 终版):不再查表——按本次实际绘制的
+        // 切片内容底行,实时求"让内容底行贴住盒底"的位移。对所有竖条路径/形态/
+        // 姿态天然成立;旋转族绕枢轴转无地面概念故豁免。
+        let footFlush = 0;
+        if (npcFootFlushOn() && !rotationDriven && !npcFootBiasExempt(idR)) {
+          const fmaxRow = npcContentBottomRow(r.img, r.sy, r.sw, r.sh);
+          if (fmaxRow >= 0) {
+            // 目标:cy + dyArg + fmaxRow+1 ≡ 盒底(cy + h/2) ⇒ dyTarget = h/2 − fmax − 1
+            const dyTarget = e.h / 2 - fmaxRow - 1;
+            footFlush = Math.round((dyTarget - (-r.sh / 2 + addY)) * 100) / 100
+              + npcFootBiasExtra() + npcFootBiasOverride(idR);
+            footFlush = Math.max(-24, Math.min(24, footFlush));
+          }
+        }
+        const anchorY = -r.sh / 2 + addY + footFlush;
         // 393 飞碟炮塔绘制 origin+UnitY×(−8)（Main.cs:24208-24213 num225=-8 仅 393;
         // 台账登记偏差本批清偿）：XNA origin 上移 8 纹素 = 精灵整体下移 8×scale 世界 px,
         // 且旋转枢轴随 origin 钉死在 position（=本仓局部原点,ctx.rotate 已绕它）——
@@ -9379,9 +9443,7 @@ export class Renderer {
       } else {
         r = n.bound ? this.boundNpcSheet(n) : this.atlas.vnpc(n.vanillaId, n.frame);
       }
-      // 落脚补偿只作用于「默认竖条 NPC_{id}」——微光/派对/狼人档案表与捆绑表
-      // 几何独立,套同一 bias 会浮空(2026-08-30 用户实拍:微光镇史莱姆)
-      const onBaseSheet = !profileImg && !n.bound;
+      // (落脚补偿 v6 起为内禀计算,不再依赖本处路径判定)
       if (r) {
         ctx.save();
         // 中心锚（2026-08-24 勘误,同 drawEnemy）：城镇 NPC 原版走同一 DrawNPC 通用
@@ -9393,9 +9455,18 @@ export class Renderer {
         let addYT = (nidT === 108 ? 2 : 0) + (Renderer.HB_ADD_H[nidT] ?? 0)
           + (n.sitting ? -4 + (nidT === 124 ? -2 : 0)
             + (nidT === 637 || nidT === 656 || Renderer.TOWN_SLIME_IDS.has(nidT) ? -10 : 0) : 0);
-        // ★落脚贴合(同 drawEnemy):站立态按生成表+全局微调上移;坐姿原版档不叠加;
-        // 仅默认竖条路径消费
-        if (!n.sitting && npcFootFlushOn() && onBaseSheet) addYT += npcFootBiasY(nidT);
+        // ★「落脚贴合」v6 内禀计算(同 drawEnemy):按本次切片内容底行实时对齐盒底。
+        // 坐姿保持原版 -4/-10 档不叠加
+        if (!n.sitting && npcFootFlushOn() && !npcFootBiasExempt(nidT)) {
+          const fmaxRow = npcContentBottomRow(r.img, r.sy, r.sw, r.sh);
+          if (fmaxRow >= 0) {
+            const dyTargetT = n.h / 2 - fmaxRow - 1;
+            let flushT = Math.round((dyTargetT - (-r.sh / 2 + addYT)) * 100) / 100
+              + npcFootBiasExtra() + npcFootBiasOverride(nidT);
+            flushT = Math.max(-24, Math.min(24, flushT));
+            addYT += flushT;
+          }
+        }
         ctx.translate(n.cx, n.cy); // 盒中心
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
         // 微光转化渐显/渐隐（GetAlpha NPC.cs:94874-94878：CurrentlyShimmerTransparent

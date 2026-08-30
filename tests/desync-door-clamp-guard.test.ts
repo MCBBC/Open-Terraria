@@ -83,11 +83,12 @@ describe('失谐系防御钳制（door 支 styleDropVidOfFrames）', () => {
 
 describe('失谐系防御钳制（torch 支 torchDropVid）', () => {
   // 原版 default=426+num 无界外推（WorldGen.cs:65162）；合法域 = 显式 case
-  // {0,8..23} + 彩炬连续段 1..7。本组断言域内逐点一致 + 域外回落普通火把 8。
+  // {0,8..23} + style 1..7 连续火把带（427 蓝/…/432 黄/433 恶魔）。断言域内逐点
+  // 一致 + 域外回落普通火把 8。
   it('域内：显式档命中表值、彩炬连续段走 426+style（与原版合法行为逐点一致）', () => {
     expect(torchDropVid(0)).toBe(8);      // 普通火把（case 0）
-    expect(torchDropVid(1)).toBe(427);    // 彩炬段首（default 连续式）
-    expect(torchDropVid(7)).toBe(433);    // 彩炬段尾
+    expect(torchDropVid(1)).toBe(427);    // 连续带首：蓝火把（default 连续式）
+    expect(torchDropVid(7)).toBe(433);    // 连续带尾：恶魔火把
     expect(torchDropVid(8)).toBe(523);    // case 8 起显式档
     expect(torchDropVid(22)).toBe(5293);
     expect(torchDropVid(23)).toBe(5353);  // 合法域上界

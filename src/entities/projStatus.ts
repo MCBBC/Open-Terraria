@@ -43,6 +43,12 @@ const SUPPORTED: Record<number, string> = {
   //   层数 = WeaponProj.daybreakStacks 场上附着 636 计数,Enemy 侧消费)
   30: 'bleedT',        // Bleeding(:92592-92601;-24 = 12 HP/s)
   137: 'slimedT',      // Slimed(drippingSlime):六火系 DoT 翻倍(:92623 等 6 处)
+  103: 'wetT',         // Wet(潮湿,NPC.cs :11319-11352 AddBuff 同族):非 DoT——NPC.wet
+  //   位驱动滴水视觉/湿尘 + 与岩浆接触的交互门;施加源新批 = 水枪 2272→弹 358
+  //   (AI_060 :29454 AddBuff(103,1500t)=25s)。纯倒计时承载(wetT),视觉在实体侧
+  353: 'shimmeredT',   // Shimmered(NPC 微光化,AddBuff(353,100t)):微光枪 5495→弹 1042
+  //   (AI_060 :29456-29458)专属——注意与"浸微光液"(Enemy.shimmerWet/shimmerT 计数)
+  //   是两套:本键只承载【buff 计时】,变形走既有的 npcGetShimmered 液体链
   375: 'hemorrhageT',  // Hemorrhage(:92604-92611;-200 = 100 HP/s)
   169: 'javelinT',     // BoneJavelin:层数模型已接(3 HP/s/层×附着 598 计数,
   //   :92740-92758;层池=Enemy.addStickerStack,cap 6)

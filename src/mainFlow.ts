@@ -1171,8 +1171,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (!game) return;
     // 存档序列化走后台 worker(RLE+base64+JSON 全套离主线程;主线程只付一次
     // 全图数组结构化克隆的 memcpy),不可用时 SaveClient 内部回退同步 saveGame
+    // ★槽位元数据必须调用帧快照:quitToMenu 在 doSave 返回后【同步】置空
+    // game/currentWorld(2026-08-13 泄露 review),而 worldStore 落盘发生在 worker
+    // 序列化完成的异步 .then 里——届时再读全局已为 null,「保存并退出」整段
+    // worldStore.save 被跳过,世界列表槽位停在最近一次自动保存,重进即回退
+    // (2026-08-30 用户报)。序列化输入(world/player 等)经实参同步取值不受影响
+    const slotMeta = currentWorld;
+    const hardModeNow = !!game.world.flags.hardMode;
+    const playTimeMs = Date.now() - playStart;
     saveClient.ensure();
-    void saveClient.save(game.world, game.player, Date.now() - playStart, game.townNpcsForSave(), game.eventsForSave()).then((json) => {
+    void saveClient.save(game.world, game.player, playTimeMs, game.townNpcsForSave(), game.eventsForSave()).then((json) => {
       void kvSetCompat(json).then((where) => {
         if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
         else {
@@ -1186,10 +1194,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         console.error('kvSet failed', e);
         ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
       });
-      // 多世界槽位（M3）：登记到 WorldStore
-      if (currentWorld && game) {
-        currentWorld.hardMode = !!game.world.flags.hardMode;
-        void worldStore.save(currentWorld, json, Date.now() - playStart).catch((e) => console.error('worldStore.save failed', e));
+      // 多世界槽位（M3）：登记到 WorldStore（slotMeta=退出置空前的调用帧快照）
+      if (slotMeta) {
+        slotMeta.hardMode = hardModeNow;
+        void worldStore.save(slotMeta, json, playTimeMs).catch((e) => console.error('worldStore.save failed', e));
       }
       // 角色随身态同步（原版 .plr 语义）：存档 JSON 的 player 段即磁盘稳定 id 形,
       // 原样入 CharacterStore——与读侧 playerFromDiskForm 对称。同步失败不阻断存档
