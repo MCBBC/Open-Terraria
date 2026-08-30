@@ -128,6 +128,29 @@ class TileFrameCapture {
   /** 快照节拍要把窗内实例清零（snapTick 已出图） */
   clearSnapWindow(): void { this.snapCells.clear(); }
 
+  // ---- 绘制尾部（drawAdjust 后）记账：第四动画应用点（烟囱悬案曾在此盲飞）----
+  /** skip=true = 尾部越界守卫静默丢格 → 永久计入 oob/anom（不再只靠 warn-once） */
+  noteTail(sheet: number, x: number, y: number, fx: number, fy: number,
+    syBefore: number, syAfter: number, overrode: boolean, skip: boolean,
+    imgW: number, imgH: number): void {
+    const pitch = this.tblPitch[sheet] ?? 38;
+    const s = this.stat(sheet, this.tblRate[sheet] ?? 0, pitch,
+      this.tblFrames[sheet] ?? Math.floor(imgH / pitch || 1), imgW, imgH);
+    if (skip) {
+      s.oob++;
+      this.anom('tail-skip', sheet, x, y, fx, fy,
+        `tail sy${syBefore}→${syAfter}${overrode ? '(override)' : ''} 越界弃画`);
+      return;
+    }
+    this.trackSy(s, syAfter);
+    if (overrode) {
+      // 绝对覆写会丢弃站点侧偏移——差值即"双钟漂移"仪表
+      const delta = syAfter - syBefore;
+      if (delta !== 0 && Math.abs(delta) > 4 * (pitch + 38))
+        this.anom('tail-override', sheet, x, y, fx, fy, `Δ${delta}`);
+    }
+  }
+
   // ---- 被动聚合入口（全部零分配快速路径） ----
   stat(sheet: number, rate: number, pitch: number, frames: number, imgW: number, imgH: number): SheetStat {
     let s = this.sheets.get(sheet);

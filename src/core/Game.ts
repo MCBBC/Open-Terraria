@@ -30,7 +30,7 @@ import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDo
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, IS_BIOME_TORCH_STYLE } from '../world/Torch';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
-import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome } from '../world/Housing';
+import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, dedupeHomes } from '../world/Housing';
 import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS, containerHover, dresserHover } from '../render/CursorItemIcon';
 import hoverIcons from '../data/vanilla-hovericons.json';
 
@@ -322,6 +322,7 @@ import { WorldEvolution } from '../world/evolution/WorldEvolution';
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
+import { isDomUiTarget } from './input/domTargets';
 import {
   MapPingStore, BestiarySub, PylonSub, ParticleOrchestraType,
   type LiquidCell, type BestiaryNetEvent, type PylonNetMsg, type ParticleSettings,
@@ -354,6 +355,7 @@ import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
 import type { GameHooks, LootPlayerCtx } from '../entities/types';
 import { BehaviorRecorder } from '../debug/BehaviorRecorder';
+import { tileFrameCapture } from '../debug/TileFrameCapture';
 import { Dart } from '../entities/Dart';
 import { TrapShot, TowerBolt } from '../entities/Dart';
 import type { TrapShotKind } from '../entities/Dart';
@@ -971,15 +973,11 @@ export const ORPHAN_B3_VIDS = new Set([4131, 5325, 859, 4743]);
  *  蜜雷锋 throwBeenade dropKey=null 注(:27608)。SetDefaults 本身无回收语义
  *  （Item.cs case 2352 :23667 / 2353 :23681 / 4986 :40164 / 5577 :43927）。 */
 export const THROWN_NO_RECOVERY_VIDS = new Set([949, 2352, 2353, 4986, 5577]);
-/** 绳圈族投射物（红队 A-2，2026-08-30）：普通/藤/丝/蛛网绳圈（物品 985/3005/3079/
- *  3080）shoot 的四弹。原版 Item.damage 全为 0 且 Player.GetWeaponDamage 头
- *  `if (damage <= 0) return damage`（Player.cs:54059-54065）零伤原样透传不钳；
- *  弹 SetDefaults penetrate=-1（P.cs:2572-2579 三型同段 / :5498 475 同值）→
- *  damage<=0 时 Projectile.Damage_PVE 头整段 return（P.cs:12576）——纯铺绳工具，
- *  零战斗面。此四弹是【唯一】走通用投掷出口的 damage0 来源（vanilla-itemcombat.
- *  json 反查 shoot∈{171,475,505,506} 仅此四件；476 虽在 Arrow.ROPE_COIL_TILE 表内
- *  但 aiStyle185 魔法弹，无任何物品 shoot 它，不入本表） */
-const ROPE_COIL_PROJS = new Set([171, 475, 505, 506]);
+// （红队 A-2 收口）：绳圈族特例表 ROPE_COIL_PROJS={171,475,505,506} 已删除——
+// 通用投掷出口已升级为 GetWeaponDamage 原式（基伤≤0 原样透传 + penetrate raw 直读，
+// 见 updateUse 内 thrownCombat 分支注释），四弹 damage0/pen−1 由通用式自然覆盖。
+// 曾记"damage0 唯一来源"系误判：vanilla-itemcombat.json 无 damage 行的消耗投掷件
+// 还有一批（2352/2353/4986/4765/4766/5285/1168 等），详见该分支注释的受益面清单。
 /** 停发窗族（Player.cs:43820-43852 同式族,vid → useTime 倍数）：动画末 useTime×N
  *  静默（itemAnimation < max − useTime×N → flag=false）。3852 书杖/4952 夜光书 ×4、
  *  6152 日耀花法杖 ×4；4956/5669 ×3=zenithFireCycle cycle≤2 帽、4953 ×5=定数 5 连发
@@ -2183,8 +2181,43 @@ export class Game implements GameHooks {
     }
   }
 
+  /** GameHooks.behavioLog：实体侧决策事件入行为环(F5 窗/报告尾段可见) */
+  behavioLog(k: string, d: unknown): void {
+    this.recorder.log(k, d);
+  }
+
   /** housing 幽灵 home 读档过滤:每次会话仅告警一次(2026-08-30 副因B修复) */
   private _ghostHomeWarned = false;
+
+  /** housing 写盘期共室去重告警:save 路径调用频繁(autosave),汇总行全会话只首发 */
+  private _housingDupWarned = false;
+
+  /** ★home 共室去重执行器(Housing.dedupeHomes 的实体侧适配;2026-08-30 报告§3/§6
+   *  加固增量):对全部活镇民的 home 跑一轮去重——两个不可合法共住(housingCategory
+   *  同类)且 npcKey 不同的镇民落进同一房间 tiles 集(floodRoom 同一闭包)时,保留距
+   *  房间中心更近者,dropped 一律置 homeless(leashHome 同步清零,下一入驻轮自然重
+   *  分配)。source 仅作日志定位;warnOnce=true(save 高频路径)时 console 汇总本会话
+   *  只首发一次。返回被清人数。读档 pass / 入驻轮收尾 / 写盘前三路共用这一份逻辑。 */
+  private clearDuplicateHomes(source: 'load' | 'arrival' | 'assign' | 'save', warnOnce = false): number {
+    const claims = (this.entities.npcs
+      .filter((n): n is TownNPC => n instanceof TownNPC && !n.dead && !!n.home) as TownNPC[])
+      .map((n) => ({ npc: n, key: n.npcKey, x: n.home!.x, y: n.home!.y, npcId: n.vanillaId }));
+    if (claims.length === 0) return 0;
+    const { dropped } = dedupeHomes(this.world.store, claims);
+    if (dropped.length === 0) return 0;
+    const who = dropped.map((d) => `${d.key}@(${d.x},${d.y})`);
+    for (const d of dropped) {
+      d.npc.home = null;
+      d.npc.leashHome = false;
+    }
+    // 每处调用点单轮最多执行一次 ⇒ 行为环天然每轮 ≤1 条;console 面按需首发限制
+    if (!warnOnce || !this._housingDupWarned) {
+      if (warnOnce) this._housingDupWarned = true;
+      console.warn(`[housing] ${source} 去重:${who.length} 个同室冲突 home 转 homeless(${who.join(', ')})`);
+    }
+    this.behavioLog('housing', { dup: true, source, count: who.length, who });
+    return who.length;
+  }
 
   /** GameHooks.npcDoorNet：房主侧 NPC 开关门即时事件上行(msg19 等价原版通道)。
    *  仅 net 活跃且本端为房主时真正发送；单机 = net 为 null 自然零操作 */
@@ -3079,6 +3112,9 @@ export class Game implements GameHooks {
   waterCandleNear = false;
   /** 和平蜡烛光环在場（光环扫描写入；getSpawnRate ×1.3/×0.7，NPC.cs:645） */
   peaceCandleNear = false;
+  /** 环境光环标志缓存（%20 场景扫描写入,pinSceneAuras 每帧消费——原版这些
+   *  标志每帧被 Player.Update 直读 SceneMetrics 字段,本仓为免逐帧整图扫描落此一级缓存） */
+  sceneAuras = { fire: false, star: false, sun: false, bast: false, peace: false };
   heldWaterCandle = false;
   trackTile = TILE_BY_KEY['v_314_minecart_track'] ?? 0;
   minecart: import('../entities/Minecart').Minecart | null = null;
@@ -3531,6 +3567,8 @@ export class Game implements GameHooks {
     };
     // 探针口（puppeteer / 控制台）：__swRec.toggle()/.buffer/.export()
     (window as unknown as { __swRec?: BehaviorRecorder }).__swRec = this.recorder;
+    // 帧捕获探针口：__swTileCap.sheets/.anoms/.snaps/.exportAndStop()（控制台手取）
+    (window as unknown as { __swTileCap?: typeof tileFrameCapture }).__swTileCap = tileFrameCapture;
     // ---- 键位动作边沿派发（M5：全部经 core/Keybinds.ts 绑定表读用户自定义；
     //      默认值=迁移前硬编码，重绑前行为 100% 不变）。
     // 快捷栏数字键：事件驱动（避免单帧内 down+up 被轮询漏掉）。
@@ -4626,6 +4664,13 @@ export class Game implements GameHooks {
       this.anglerQuestSwap();
       this.placeSleepingAngler();
     }
+    // ---- ★housing 读档装配完成后一次性「home 相互重复」清理（2026-08-30 增量#1）----
+    // 上面两分支已把活镇民全部入库且逐 NPC 过滤过幽灵 home（validateSavedHome）；
+    // 此处补第二轮：两个不可合法共住的镇民 home 落进同一房间 tiles 集时只留距房间
+    // 中心更近者，另一转 homeless —— legacy 双认领（旗重叠·副因B 的存量脏数据）
+    // 读入即收敛，updateTownNpcArrival 自然给被清者重分配。存档侧另有同款护栏
+    // （townNpcsForSave 前置），防已清理的档再被运行期新双占污染。
+    this.clearDuplicateHomes('load');
     // 昼夜事件基线：季节旗标 + 时钟快照
     this.checkSeasonal();
     // MysticLogFairiesEvent.StartWorld（WorldGen.cs:3303 OnWorldLoad）：读图/新世界
@@ -6281,14 +6326,30 @@ export class Game implements GameHooks {
         }
       }
       this.waterCandleNear = water;
-      if (fire) this.player.buffs.apply(BuffType.Campfire, 0.5);
+      const sa = this.sceneAuras;
+      sa.fire = fire;
       this.player.buffs.lanternHeal = heart ? 1 : 0;
-      const b = this.player.buffs;
-      if (star) b.apply(BuffType.StarInBottle, 0.5);
-      if (sun && this.scene.hasSunflower) b.apply(BuffType.Sunflower, 0.5);
-      if (bast) b.apply(BuffType.CatBast, 0.5);
-      if (peace) b.apply(BuffType.PeaceCandle, 0.5);
+      sa.star = star;
+      sa.sun = sun && this.scene.hasSunflower;
+      sa.bast = bast;
+      sa.peace = peace;
       this.peaceCandleNear = peace;
+    }
+    // ---- 环境光环每帧重钉（原版:Player.Update 每帧 AddBuff(id,2)——Player.cs:
+    //      25723-25764 十族全表(水蜡烛86/和平157/暗影350/篝火87/猫堡垒215/瓶中星
+    //      158/心灯89/向日葵146/旗帜147/沙暴194),AddBuff max 合并(:5411-5414)把
+    //      剩余稳态恰钉在 2 tick;而 DrawBuffIcon 显示门 buffTime>2(Main.cs:44050)
+    //      恰好吞掉 2t → 环境光环图标【恒无时长文字】。★门值与钉值是成对设计——
+    //      曾按 %20 扫描节拍写 0.5s(30t),钉进可显示区常驻"0 秒"（2026-08-30 报）。
+    //      改=%20 扫描写缓存+每帧 max 重钉 2t:稳态与原版逐位同(2/60*60=
+    //      1.9999…≤2 恒隐);离场清旗滞后 ≤20tick 视觉不可感 ----
+    {
+      const ab = this.player.buffs, PIN = 2 / 60, au = this.sceneAuras;
+      if (au.fire) ab.apply(BuffType.Campfire, PIN);
+      if (au.star) ab.apply(BuffType.StarInBottle, PIN);
+      if (au.sun) ab.apply(BuffType.Sunflower, PIN);
+      if (au.bast) ab.apply(BuffType.CatBast, PIN);
+      if (au.peace) ab.apply(BuffType.PeaceCandle, PIN);
     }
     // 原版 Main.SpawnNPC 每帧调用（Main.cs:17724），概率门在 TrySpawnAnNPC L30
     // （Next(spawnRate)==0；spawnRate 修正表见 VanillaSpawner.getSpawnRate）。
@@ -8739,8 +8800,45 @@ export class Game implements GameHooks {
    *  本字段非 null 时 updateUse 首拍拦截,Performer/TryMovingNPC 语义） */
   housingMode: { kind: 'query' } | { kind: 'assign'; npcKey: string } | null = null;
 
+  /** 按住鼠标期间的朝向跟随（原版 useTurn 家族语义的持续档；判据基座 =
+   *  ItemCheck_Shoot :47614 Dot 门的逐 tick 形态——按住期间光标跨过中心即翻面,
+   *  非"仅起手一次"。例外 = 非转向武器(近战大剑族 useTurn=false)挥动动画窗内
+   *  锁向(Player.cs :19546-19556 等价;本仓门在 Player 移动轴 + 本处双保险)。
+   *  UI 面板悬停不跟(同 Input.isDomUiTarget 门);无鼠标输入零成本早退 */
+  private tryFaceHeldAim(): void {
+    const inp = this.input;
+    if (!(inp.mouseDown || inp.mouseHeld) || inp.rightDown) return;
+    const def = this.player.inv.heldDef();
+    if (!def) return;
+    const vid = def.vid ?? viIdFromKey(def.key);
+    const c = vid >= 0 ? itemCombat(vid) : null;
+    // 相关面：武器/工具/放置/漆线族 —— 药水与杂项静持不转身
+    const relevant = !!def.tool || !!def.paintTool || !!def.wireTool
+      || def.wallId != null || !!def.tile
+      || (c ? (!!c.melee || !!c.ranged || !!c.magic || !!c.summon || (c.shoot ?? 0) > 0) : false);
+    if (!relevant) return;
+    const p = this.player;
+    // 非转向武器动画窗锁向（:19546-19556）
+    const animating = p.itemAnimTicks > 0 || p.useTime > 0;
+    if (animating && c?.useTurn === false) return;
+    if (this.inpOverDomUi()) return;
+    const [mwx] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+    p.facing = mwx >= p.cx ? 1 : -1;
+  }
+
+  /** 当前光标落点是否悬在 DOM UI 上（elementFromPoint 同名单判定;按住横扫期间
+   *  掠过背包/面板时朝向不得跟着世界坐标乱翻） */
+  private inpOverDomUi(): boolean {
+    const r = this.renderer.canvas.getBoundingClientRect();
+    const el = document.elementFromPoint(
+      Math.max(0, r.left + this.input.mouseX),
+      Math.max(0, r.top + this.input.mouseY));
+    return isDomUiTarget(el ?? null);
+  }
+
   private updateUse(_dt: number) {
     const inp = this.input;
+    this.tryFaceHeldAim();
     // 住房光标激活（mouseNPC 持续态,Main.cs:44664-44688）：左键点世界 = 查询/
     // 分配并吞点击；右键/开背包取消由 UI 侧处理（清 housingMode + Sound 12）
     if (this.housingMode) {
@@ -11594,21 +11692,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.entities.add(new PowderProj(this.player.cx - 32, this.player.cy - 32,
           Math.cos(ang) * (c?.shootSpeed ?? 4), Math.sin(ang) * (c?.shootSpeed ?? 4), powderProj), 'projectiles');
       } else {
-        // 穿透取原版 penetrate（手里剑 4；-1 无限上限 6）。
+        // 穿透 = SetDefaults 终值原样透传（手里剑 4 / 烟雾弹·绳圈族 −1 无限不递减）。
+        // 曾 `-1→6` 药钳（max(1,min(...,6))）是本仓发明：原版 NewProjectile 不经手
+        // penetrate（P.cs SetDefaults 面值直入弹体），Damage_PVE 只按 `penetrate > 0`
+        // 递减消费——−1 恒不递减=真无限穿透，Arrow 命中侧本就承载该语义（:5386
+        // `pierce > 0` 门）。通用化对齐其它出口先例（melee :9541 去 min-3 钳 /
+        // magic :13638 去 [1,3] 钳均已是 raw 直读）。
         // ★伤害对账修正：投掷族是 ranged（手里剑 42/投刀 279/毒刀 287 I:1851-1868
         // ranged=true；277 是长矛非手里剑——曾误认）乘区=远程链×词缀（审计 §5）；
         // ⑥ armorPen 移 hit 时（hurt 第 5 参减防语义），磨刀不适用投掷
         const psT = this.heldPrefixStat();
-        // ★红队 A-2：绳圈族（985/3005/3079/3080→171/475/505/506）照 throwGeode
-        //   同款——damage=0 原样直传、penetrate=-1 保留原值；命中侧由 Arrow 零伤门
-        //   （Damage_PVE :12576 同构）接管。其余件仍走 min1×ranged 链与 -1→6 钳
-        //   （手里剑 4 等非 -1 家族不受影响）
-        const ropeCoilThrow = ROPE_COIL_PROJS.has(tc.shoot);
-        const dmgT = ropeCoilThrow ? tc.damage
+        // ★红队 A-2 根治（RopeCoil 特例已并入此式后删表去重）：伤 = GetWeaponDamage
+        // （1457 P.cs:54059-54065 头 `if (damage <= 0) return damage`；经
+        //   :43060 ItemCheck_Shoot(sItem, GetWeaponDamage(sItem)) 注入弹伤）——
+        // 【基伤 ≤0 时原样透传，不乘词缀/远程链、不取 max(1)】；>0 才走乘区链。
+        // 受益面=vanilla-itemcombat.json 无 damage 行的消耗投掷件（Item.SetDefaults
+        // 全无 damage 行→ResetStats 缺省 damage=-1（I.cs:49014），提取器记空由
+        // thrownCombat 归 0，两值同落 ≤0 门）：爱情药水 2352→弹370 / 恶臭 2353→371 /
+        // 微光气球 4986→936 / 三地球仪 4765·4766·5285→868·869·996 / 烟雾弹 1168→196 /
+        // 绳圈族 985|3005|3079|3080→171|475|505|506 等（曾全被钳成 1 白嫖伤+触发
+        // critters）。命中侧零结算由 Arrow 零伤门接管（Damage_PVE :12576 同构：
+        // `damage<=0` 先于一切 NPC 迭代）。非零件维持 ranged 乘区链不变。
+        const dmgT = tc.damage <= 0 ? tc.damage
           : Math.max(1, Math.round(tc.damage * (psT?.dmg ?? 1) * this.player.damageMult('ranged')));
-        const rawPen = projectileData(tc.shoot)?.penetrate ?? 1;
-        const pen = ropeCoilThrow ? rawPen
-          : Math.max(1, Math.min(rawPen < 0 ? 6 : rawPen, 6));
+        const pen = projectileData(tc.shoot)?.penetrate ?? 1;
         // 物理档 = aiStyle 2 投掷族默认档（Projectile.cs:21955-21977）：前 20t
         // 平飞 → vy+0.4/vx×0.97/tick，终端 32；全体翻滚（:21508），刀族
         // （48/54/93/520/599）平飞期姿态锁定 atan2（:21971-21972）。此前误用
@@ -11644,10 +11751,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //      。非 ai2 抛物刀族物理——此前走通用投掷=无弹跳无烟尾
         //      （red-team-r35 §E-12 P3；烟尾曾误挂撞块支=飞行零烟,2026-08-28 修）----
         if (tc.shoot === 196) {
+          // dmgT：1168 无 damage 行（I.cs:14336 段无 damage）→ 上方 ≤0 门直传 0，
+          // 烟雾弹零战斗面（Damage_PVE :12576 头门）——此处仅消费共享终值，无独立钳
           const smk = new Arrow(px, py,
             Math.cos(ang) * (c?.shootSpeed ?? 6), Math.sin(ang) * (c?.shootSpeed ?? 6),
             dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), 196,
-            null, { grav: 0.2, life: 600, pierce: -1, bounce: true });
+            null, { grav: 0.2, life: 600, pierce: -1, bounce: true });   // penetrate −1 = SetDefaults :2825-2831 面值
           smk.critBonus = this.player.critChance('ranged') + (psT?.crt ?? 0);
           this.entities.add(smk, 'projectiles');
           this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -22339,6 +22448,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.homelessSpawnTimeout = 54000;   // ★1457 cs:4988：成功入住后一天一户节流
       this.newText(Lang.text(`Announcement.HomelessArrived_${Math.floor(Math.random() * 6)}`, name), 50, 125, 255);
     }
+    // ---- 分配收尾不变量（2026-08-30 增量#2）：本轮 ①''房况复核重锚 / ①QuickFindHome
+    //  / ③SpawnTownNPC 三条写 home 路径全部落定后统一跑一遍共室去重——scoreRoom 占用
+    //  判定（tiles 含对判）漏网的极端几何双占，后者（离房间中心更远者）强制转 homeless
+    //  并记 behavioLog(housing dup)。本函数每轮仅此一处调用 ⇒ 行为环每轮 ≤1 条；函数中
+    //  部各早退分支都发生在任何 home 写入之前（写 home 的路径必滑落到此处），唯一例外是
+    //  ①'' 复核重锚后命中 `anchorPool.length===0` 早退——该分支 findFreeHouse 已带
+    //  scoreRoom 占用校验且读档 pass 已清过存量，双占无生成通路，不为它加第二处调用。
+    this.clearDuplicateHomes('arrival');
   }
 
   /** 绑缚 NPC 触碰解救（原版 AI_007 玩家接触 bound → 转正；右键解救保留为便捷兜底）：
@@ -23249,6 +23366,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // moveRoom（:4797-4803）：置 homeless→SpawnTownNPC(x,y) 在点击房内重新安家
     npc.home = { x: q.room.standX, y: q.room.standY };
     npc.leashHome = true;
+    // ★分配收尾不变量（2026-08-30 增量#2·UI 手动分配侧）：q 已过 housingCheckAt
+    //  （scoreRoom tiles 含对判）几乎不可能形成共室双认领，此为该防线之上的兜底断言
+    //  ——一旦极端几何仍漏网，点击即收敛而非等下一入驻轮。宠物+主人异类别合法共住
+    //  不受影响（dedupeHomes 同 vanilla CanNPCsLiveWithEachOther 口径豁免）。
+    this.clearDuplicateHomes('assign');
     this.sfx.play('menuTick');    // SoundID 12（TryMovingNPC :44618）
     this.newText(Lang.text('Announcement.HasArrived', Lang.npcName(npc.vanillaId) ?? npcKey), 50, 125, 255);
     return true;
@@ -23651,7 +23773,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // playerInventory=true + 关闭对话 + InGuideCraftMenu=true（原版重开合成面板并
     // 切反查模式）。本仓 = 关对话 + 回调 UI 开背包 + 向导配方反查浮层
     if (id === 'craft' && npc.vanillaId === 22) {
-      this.closeNpcDialog();
+      // 原版本路径唯一音效 = 开场 MenuTick(12)（Main.cs:40726）；对话收起是
+      // npcChatText="" 的静默变化——本仓 closeNpcDialog 的 menuClose 会双音，
+      // 故走静默参数（专项审计修复：曾 tick+close 双响）
+      this.sfx.play('menuTick');
+      this.closeNpcDialog(true);
       this.cb.onGuideCraftOpen?.();
       return;
     }
@@ -24114,12 +24240,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  closeNpcDialog(): void {
+  closeNpcDialog(silent = false): void {
     if (this.dialogNpc) this.dialogNpc.talking = false;
     this.dialogNpc = null;
     this.dialogHappiness = null;   // currentShoppingSettings = NotInShop（Player.cs:4189）
     this.npcShopClose();           // 店面板随对话关闭（Main.npcShop=-1 + 回购记清）
-    this.sfx.play('menuClose');
+    if (!silent) this.sfx.play('menuClose');
     this.cb.onNpcDialogClose?.();
   }
 
@@ -28639,6 +28765,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 城镇 NPC 存档快照（原版 WorldFile town NPC 段：位置+home+bound+自定义名） */
   townNpcsForSave(): Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }> {
+    // ★写盘前置护栏（2026-08-30 增量#3）：autosave / 手动存档 / 退出存档 / 断线保存
+    //  四条路径（mainFlow.ts ×3 + main.ts ×1）全部汇经本函数 ⇒ 这里是唯一统一的
+    //  "SaveFile data 构造前"闸口。serialize 前再跑一遍读档同款共室去重，防运行期
+    //  新形成的双占反复进档；warnOnce=true 压 console 噪音（汇总行全会话只首发）。
+    //  快照返回形状（contract）不变，只是先让脏数据出清再取快照——不去 saveClient/
+    //  SaveData 层补钩是因其需要把 Game 实体侧上下文翻过层去，侵入更大。
+    this.clearDuplicateHomes('save', true);
     return this.entities.npcs
       .filter((n): n is TownNPC => n instanceof TownNPC && !n.dead)
       .map((n) => ({

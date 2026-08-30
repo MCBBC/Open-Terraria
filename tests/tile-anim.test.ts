@@ -3,7 +3,7 @@
 //   特例组 54（3 格高：锯木机/固化机/自动锻造机/300-308/354/355/499）
 // - 帧数从素材像素高推导：frames = floor(height / pitch)，与 AnimateTiles 回卷上限互证
 import { describe, it, expect } from 'vitest';
-import { TILE_ANIM_RATE, tileAnim, animFrameIdx, animYOffset } from '../src/render/TileAnim';
+import { TILE_ANIM_RATE, TILE_ANIM_FRAMES, tileAnim, animFrameIdx, animYOffset } from '../src/render/TileAnim';
 
 describe('动画陈设帧表（AnimateTiles + GetTileDrawData pitch）', () => {
   it('熔炉 17：pitch 38（默认），12 帧 = 456/38，每 6 tick 推进', () => {
@@ -54,8 +54,14 @@ describe('动画陈设帧表（AnimateTiles + GetTileDrawData pitch）', () => {
     expect(animFrameIdx(304, 54)).toBe(0);
   });
 
-  it('单帧素材恒 0，不越界', () => {
+  it('帧号只由 AnimateTiles 权威表驱动（2026-08-30 契约更新）：传入残缺高度也回全局周期，不再随调用参数缩水', () => {
+    // 曾以 floor(height/pitch) 推帧数——上一轮审计把风格带总数当帧数写入表后
+    // 该回退掩盖不了越界采样（vframeAt 落空→整物平铺第一格）。现显式表值
+    // （Main.cs 权威）恒胜出：传错高度不会造出"局部单帧"假象。
     tileAnim.tick = 999;
-    expect(animFrameIdx(306, 54)).toBe(0);
+    expect(animFrameIdx(306, 54)).toBe(animFrameIdx(306, 648));   // 同钟同相
+    expect(TILE_ANIM_FRAMES[306]).toBe(12);                        // 制冰机权威 12 帧
+    expect(animFrameIdx(106, 108)).toBeLessThan(2);                // 锯木机恒 0..1
+    expect(animFrameIdx(220, 216)).toBeLessThan(4);                // 固化机恒 0..3
   });
 });

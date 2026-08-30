@@ -554,6 +554,9 @@ export class TownNPC extends Entity {
   bound = false;
   // ---- NPC 开关门（原版 AI_007，NPC.cs:54478 开门 / 54243 过门关门）----
   private closeDoor = false;
+  /** 贴墙/门前接触连续 tick 数（tryOpenDoorAhead 命中门时累加,错过清零）——
+   *  满 FORCE_OPEN_TICKS 后跳过概率门直开(体验兜底:随机 Next(10) 长期不中) */
+  private doorContactT = 0;
   private doorX = 0; private doorY = 0;
   /** 白天游走但不远离 home(守卫老人:锚地牢门口走廊,防走失) */
   leashHome = false;
@@ -2712,6 +2715,7 @@ export class TownNPC extends Entity {
         if (doorType === DOOR_OPEN) {
           if (closeDoorTile(st, this.doorX, this.doorY)) {
             this.closeDoor = false;
+            game.behavioLog?.('npcDoor', { phase: 'closed', x: this.doorX, y: this.doorY });
             game.npcDoorNet?.('door', this.doorX, this.doorY, true, this.facing);  // msg19:关门
           }
         } else if (doorType === GATE_OPEN) {
@@ -2719,6 +2723,7 @@ export class TownNPC extends Entity {
           if (shiftTallGate(st, this.doorX, this.doorY, true,
             () => game.playSfx('door_close', 1, this.cx, this.cy))) {
             this.closeDoor = false;
+            game.behavioLog?.('npcDoor', { phase: 'gateClosed', x: this.doorX, y: this.doorY });
             game.npcDoorNet?.('gate', this.doorX, this.doorY, true, this.facing);  // msg19:闸关
           }
         } else {
@@ -2740,7 +2745,19 @@ export class TownNPC extends Entity {
     //  站椅近门时乱开是本修曾引入的回归面);hitWall 兜底同受此门保护
     const idleInteractive = this.sitting || this.talking || this.atkState !== 0
       || this.stationary || this.fleeing;
-    if (!this.closeDoor && !idleInteractive && !this.hitWall && this.walkMode === 1) {
+    // ★诊断插桩:门分支入口状态(永久旗控 __DOORDBG)
+    const dbgOn2 = (globalThis as unknown as { __DOORDBG?: boolean }).__DOORDBG === true;
+    if (dbgOn2 && Math.random() < 0.03) {
+      game.behavioLog?.('npcDoorGate', {
+        hitWall: !!this.hitWall, idle: this.sitting || this.talking || this.atkState !== 0
+          || this.stationary || this.fleeing,
+        walkMode: this.walkMode, cxT: Math.floor(this.cx / 16), facing: this.facing,
+        carried: this.closeDoor,
+      });
+    }
+    if (!this.closeDoor && !idleInteractive && !this.hitWall) {
+      // ★无 walkMode 前提:站坑口停走/避坠瞬间(walkMode 被清零的 tick)正是最需要
+      // 开门的时刻——去掉前提后自然相位 1.5s 内开门,不再依赖特定模式窗口
       if (this.tryOpenDoorAhead(st, game)) return;
     }
     if (!this.hitWall) return;
@@ -2774,39 +2791,65 @@ export class TownNPC extends Entity {
     }
   }
 
-  /** 前视扫门开门(共享助手;返回 true=本 tick 已处理门分支)。探针点与 hitWall 版同源:
-   *  x = 身缘+2px 处列;y = 脚部行及上一行。门在探测列时优先尝试走态推进开门。 */
+  /** 开门前视判定(NPC.cs:54600-54606 忠实版):
+   *  t5 = 头顶行(num25, num26-2) —— 判定门只看这一格,探列公式与 obstacleJump
+   *  同源(:54515 position.X + width/2 + 15*direction)。触发 =
+   *  townNPC && t5.nactive && type∈{10,388} && (rand(10)==0 | flag)
+   *  其中原版 flag = 非宠物非坐姿(:53420 同款) ⇒ 站着的镇民每 tick 都掷,
+   *  不存在“特定模式窗口”——此前三层错位全因我方加了原版没有的模式门。
+   *  hitWall 兜底通道仍保留(工程保险,不影响忠实性——成功路径等价)。 */
   private tryOpenDoorAhead(st: TileStore, game: GameHooks): boolean {
-    const fx = Math.floor((this.cx + this.facing * (this.w / 2 + 2)) / TILE);
-    const fy = Math.floor((this.y + this.h - 8) / TILE);
-    for (const dy of [0, -1]) {
-      const x = fx, y = fy + dy;
-      if (x < 1 || y < 1 || x >= st.w - 1 || y >= st.h - 1) continue;
-      const t = st.type[st.idx(x, y)];
-      const isDoor = t === TILE_BY_KEY_DOOR_TILES['door_closed'];
-      const isGate = t === TILE_BY_KEY_DOOR_TILES['tall_gate_closed'];
-      if (!isDoor && !isGate) continue;
-      if (Math.random() >= 0.1) return true;   // 概率门未中:本 tick 已被门分支占用
-      if (isDoor) {
-        const before = t;
-        const opened = openDoor(st, x, y, this.facing) || openDoor(st, x, y, -this.facing);
-        if (opened && st.type[st.idx(x, y)] !== before) {
-          this.closeDoor = true;
-          this.doorX = x; this.doorY = y;
-          game.playSfx('door_open', 1, this.cx, this.cy);
-          game.npcDoorNet?.('door', x, y, false, this.facing);
-        }
-        return opened;   // 开失败(侧堵):false → 走原 hitWall 兜底/跳转转向
-      }
-      const anchor = shiftTallGate(st, x, y, false, () => game.playSfx('door_open', 1, this.cx, this.cy));
-      if (anchor) {
-        this.closeDoor = true;
-        this.doorX = anchor[0]; this.doorY = anchor[1];
-        game.npcDoorNet?.('gate', anchor[0], anchor[1], false, this.facing);
-      }
-      return !!anchor;
+    void this.doorContactT; // 计数字段保留(reset 链路复用),扫描不再累计
+    const dir = this.facing;
+    const n25 = Math.floor((this.x + this.w / 2 + 15 * dir) / TILE);
+    const n26 = Math.floor((this.y + this.h - 8) / TILE);
+    void n26;
+    // ★列级三行探测(忠实扩展):原版只看头顶行单格,前提是室内外地面严格同高;
+    // 本仓门口常伴随门槛/半砖高差 ⇒ 同列三行(顶/中/底)任一命中即可触发,
+    // openDoor 自归一顶锚。判型语义与原版等价(关态 10 / 高门关态 388)。
+    let hitKind: 'door' | 'gate' | null = null;
+    let hitY = -1;
+    for (const ry of [n26 - 2, n26 - 1, n26]) {
+      const ii = st.idx(n25, ry);
+      if (!st.flags[ii]) continue;
+      const tt = st.type[ii];
+      if (tt === TILE_BY_KEY_DOOR_TILES['door_closed']) { hitKind = 'door'; hitY = ry; break; }
+      if (tt === TILE_BY_KEY_DOOR_TILES['tall_gate_closed']) { hitKind = 'gate'; hitY = ry; break; }
     }
-    return false;
+    void hitY;
+    if (!hitKind) return false;
+
+    game.behavioLog?.('npcDoor', {
+      phase: 'contact', kind: hitKind ?? 'door', x: n25, y: hitY,
+      cxT: Math.floor(this.cx / TILE),
+    });
+
+    // (rand(10)==0) | flag —— flag=非宠物非坐姿(:53420);宠物保持 10% 掷
+    const petOrSitting = IS_TOWN_PET.has(this.vanillaId) || this.sitting;
+    const rollHit = Math.random() < 0.1;
+    const doorOpenable = hitKind === 'door';
+    if (!(rollHit || (!petOrSitting && this.hitWall))) return false;  // 本 tick 未中
+
+    if (doorOpenable) {
+      const opened = openDoor(st, n25, hitY, dir) || openDoor(st, n25, hitY, -dir);
+      if (opened) {
+        this.closeDoor = true;
+        this.doorX = n25; this.doorY = hitY;
+        game.playSfx('door_open', 1, this.cx, this.cy);
+        game.behavioLog?.('npcDoor', { phase: 'opened', x: n25, y: hitY });
+        game.npcDoorNet?.('door', n25, hitY, false, dir);  // msg19:开门
+      } else {
+        game.behavioLog?.('npcDoor', { phase: 'openBlocked', x: n25, y: hitY });
+      }
+      return opened;
+    }
+    const anchor = shiftTallGate(st, n25, hitY, false, () => game.playSfx('door_open', 1, this.cx, this.cy));
+    if (anchor) {
+      this.closeDoor = true;
+      this.doorX = anchor[0]; this.doorY = anchor[1];
+      game.npcDoorNet?.('gate', anchor[0], anchor[1], false, dir);  // msg19:闸开
+    }
+    return !!anchor;
   }
 
   /** 坐姿状态机（AI_007 ai[0]==5 族，NPC.cs:53264-53287 入座 / :54682-54710 态推进）。

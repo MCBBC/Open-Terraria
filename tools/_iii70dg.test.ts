@@ -218,6 +218,20 @@ const le16 = (p: string): Uint16Array => {
     };
   }
   const rcBox = { n: 0 };
+  // ★IIIII85：API 调用操作日志（SW_I70_OPLOG）——每笔 rng 调用记
+  //   `[样本起点序号) 方法(参数)]`，供段级消费归属对拍（rig ctx 同源）。
+  const OPLOG = process.env.SW_I70_OPLOG;
+  const ops: string[] = [];
+  const opPush = (kind: string, args: unknown[]): void => {
+    if (!OPLOG) return;
+    ops.push(`[${(globalThis as unknown as { __swRollIdx?: number }).__swRollIdx ?? -1}) ${kind}(${args.map((a) => String(a)).join(',')})`);
+  };
+  if (OPLOG) {
+    writeFileSync(OPLOG, '');
+    (globalThis as unknown as { __swOpFlush?: () => void }).__swOpFlush = () => {
+      try { appendFileSync(OPLOG, ops.join('\n') + '\n'); } catch { /* ignore */ }
+    };
+  }
     const wCount = <T extends Record<string | symbol, unknown>>(o: T): T => new Proxy(o, {
       get(t, k, rec) {
         const v = Reflect.get(t, k, rec);
@@ -227,9 +241,19 @@ const le16 = (p: string): Uint16Array => {
     // 计数（近似主流口径：int/nextInt/next/vanilla.next 全包）
     const wRng = (() => {
       const anyRng = rng as unknown as Record<string, unknown>;
+      const OPSTACK = process.env.SW_I70_OPSTACK;
       for (const k of ['int', 'nextInt', 'next']) {
         const orig = anyRng[k] as (...a: unknown[]) => unknown;
-        anyRng[k] = ((...a: unknown[]) => { rcBox.n++; return orig.apply(rng, a); });
+        anyRng[k] = ((...a: unknown[]) => {
+          opPush(k, a);
+          if (OPSTACK) {
+            const st = (new Error().stack ?? '').split('\n').slice(2, 9)
+              .map((l) => l.trim().replace(/^at\s+/, ''))
+              .filter((l) => !l.includes('node_modules') && !l.includes('_iii70dg') && !l.includes('core/rng'));
+            ops.push(`@STK ${st.join(' <- ')}`);
+          }
+          return orig.apply(rng, a);
+        });
       }
       const van = anyRng['vanilla'] as unknown as Record<string, unknown>;
       if (van && typeof van.next === 'function') {
@@ -284,9 +308,25 @@ const le16 = (p: string): Uint16Array => {
       };
       let boxSeq = 0;
       const gAny = globalThis as unknown as { __ltSnapBox?: (tag: string) => void };
-      gAny.__ltSnapBox = (tag) => { dumpBox(`${String(boxSeq).padStart(3, '0')}_${tag}`); boxSeq++; };
+      gAny.__ltSnapBox = (tag) => {
+        const rollIdx = (globalThis as unknown as { __swRollIdx?: number }).__swRollIdx ?? -1;
+        dumpBox(`${String(boxSeq).padStart(3, '0')}_${tag}_rc${rollIdx}`);
+        boxSeq++;
+      };
+    }
+    // ★IIIII85：宝箱尝试事件钩（placeBuriedChest 自带 __swChestEv）——与 rig
+    //   JJHook.RollTag(REMX …) 对拍。打印 事件|序号|x,y|结果。
+    if (process.env.SW_I70_ABTRACE) {
+      const box = globalThis as unknown as { __swRollIdx?: number };
+      (globalThis as unknown as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void }).__swChestEv = (p, i, j, x) => {
+        if (p === 'ab' || p === 'abx') console.log(`ABEV|${p}|rc=${box.__swRollIdx ?? -1}|${i},${j}|${x}`);
+      };
+      (globalThis as unknown as { __swIceGate?: (i: number, gy: number, tBelow: number, mainId: number, style: number, fired: number) => void }).__swIceGate = (i, gy, tBelow, mainId, style, fired) => {
+        console.log(`ICE|i=${i}|gy=${gy}|tBelow=${tBelow}|mainId=${mainId}|style=${style}|fired=${fired}`);
+      };
     }
     runPass(st, rng, gs);
+    if (OPLOG) (globalThis as unknown as { __swOpFlush?: () => void }).__swOpFlush?.();
   console.log(`runDungeonPass ${Date.now() - t0}ms snaps=${snapCount}`);
   {
     const wv = (globalThis as unknown as { __wvLines?: string[] }).__wvLines ?? [];

@@ -269,8 +269,11 @@ describe('工单1 绳圈弹 171/475 铺绳（Arrow aiStyle35 自校正+ROPE_COIL
 //   Projectile.Damage_PVE 头整段 return（P.cs:12576）＝纯铺绳工具零战斗面。
 //   此前出口 Math.max(1,…)+(-1→6) 钳曾给绳圈白嫖 6×1 伤+触发 critters。
 //   断言走真实 updateUse 分派链（updUseGame 桩,X-F1 先例）而非直构弹体——
-//   覆盖发射面数值口径本身。修复=ROPE_COIL_PROJS 四照 throwGeode 同款直传 0/
-//   保留原值，其余件 min1×ranged 链与 -1→6 钳不动（对照件锁定回归）。
+//   覆盖发射面数值口径本身。修复沿革：曾以 ROPE_COIL_PROJS 四件特例直传（2026-08-30），
+//   现已升级为通用式根治（2026-08-31）：出口改 GetWeaponDamage 原式——基伤≤0 原样
+//   直传不乘区、penetrate raw 透传（去 -1→6 钳），特例表删除。绳圈四弹由通用式
+//   自然覆盖；非零基伤件维持 min1×ranged 链（对照件锁定回归）。
+//   受益面还有爱情/恶臭/微光气球/三地球仪/烟雾弹等（orphan-b1 B1-6 批断言）。
 // ===========================================================================
 describe('红队 A-2 绳圈通用出口数值（damage0 直传 + penetrate −1 保留原值）', () => {
   /** 经 updateUse 真实分派链发射并取出生弹（generic 分流产物 = Arrow 实例） */
@@ -307,7 +310,7 @@ describe('红队 A-2 绳圈通用出口数值（damage0 直传 + penetrate −1 
     }
   });
 
-  it('对照件不受影响：投刀 279 仍 min1×ranged 链 + penetrate2 原样（非 -1 不参与放行）', () => {
+  it('对照件不受影响：投刀 279 基伤>0 仍 min1×ranged 链 + penetrate2 raw 直读（非 -1 不涉放行）', () => {
     const p = shootGeneric(279);
     expect(p.projId).toBe(48);
     expect(itemCombat(279)?.damage).toBe(12);          // 数据面非零 ⇒ 出口乘区链应得 ≥1
@@ -323,7 +326,7 @@ describe('红队 A-2 绳圈通用出口数值（damage0 直传 + penetrate −1 
     e.hp = 25;
     const hurtCalls: number[] = [];
     (e as unknown as { hurt: (...a: unknown[]) => boolean }).hurt =
-      (d: number) => { hurtCalls.push(d); return false; };
+      (...a: unknown[]) => { hurtCalls.push(a[0] as number); return false; };
     (g as unknown as { enemies(): unknown[] }).enemies = () => [e];
     // 直接按出口终值构造（damage0/pierce−1）——物理自校正走 ctor 绳圈块
     const coil = new Arrow(100, 96, 2, 0, 0, 0, 171, null, { pierce: -1 });
@@ -525,7 +528,7 @@ describe('工单2b buff 353 消费接通（X-F4：Enemy 侧不要求浸池的变
       enemies.push(e);
       expect(e.vanillaId).toBe(3);
       expect(isNpcShimmerImmune(3)).toBe(false);           // 非免表才进链
-      applyBuffTicks(e, 353, 100);                         // GlobProj 1042 同施加路
+      applyBuffTicks(e as unknown as Parameters<typeof applyBuffTicks>[0], 353, 100);  // GlobProj 1042 同施加路
       expect(e.shimmeredT).toBeCloseTo(100 / 60, 5);
       const { spy, restore } = fireSpy();
       let crossed = -1;
@@ -554,7 +557,7 @@ describe('工单2b buff 353 消费接通（X-F4：Enemy 侧不要求浸池的变
       enemies.push(e);
       expect(isNpcShimmerImmune(4)).toBe(false);
       expect(npcShimmerTransformTo(4)).toBe(-1);           // 无 NPC 转化项
-      applyBuffTicks(e, 353, 100);
+      applyBuffTicks(e as unknown as Parameters<typeof applyBuffTicks>[0], 353, 100);
       const { spy, restore } = fireSpy();
       try {
         let liveTicks = 0;
@@ -578,7 +581,7 @@ describe('工单2b buff 353 消费接通（X-F4：Enemy 侧不要求浸池的变
     enemies.push(e);
     // 原版 ApplyBuff→AddBuff 的 buffImmune[353] 门在施加入口(表内无 353 条目;
     // 登记差异:本仓 applyBuffTicks 不读 ShimmerImmunity)——终态等价靠消费门兜底
-    applyBuffTicks(e, 353, 100);
+    applyBuffTicks(e as unknown as Parameters<typeof applyBuffTicks>[0], 353, 100);
     expect(e.shimmeredT).toBeGreaterThan(0);
     const { spy, restore } = fireSpy();
     try {

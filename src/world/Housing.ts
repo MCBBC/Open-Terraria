@@ -106,6 +106,73 @@ export function validateSavedHome(st: TileStore, x: number, y: number): boolean 
   return !!(q.room && q.room.tiles.has(st.idx(x, y)));
 }
 
+// ================= home 共室去重（2026-08-30 报告 §3-3 加固·增量小批，
+//  Game 读档 pass / 入驻轮分配收尾 / 写盘前三路共用的纯函数） =================
+
+/** dedupeHomes 入参记录：npcKey（「同 key 豁免」）/ 格坐标 / 原版 NPC id
+ * （可缺省；缺省按 housingCategory 0=城镇 NPC 参与互斥判定） */
+export interface HomeClaim { key: string; x: number; y: number; npcId?: number }
+
+/**
+ * 「home 相互重复」清理（纯函数）：
+ *   ① 每个 home 自身坐标泛出所在房间（queryRoom ignoreNeeds——只关心围合与 tiles
+ *     归属，家具缺失不判负）。泛不出房间/越界的幽灵 home 一律原样进 kept：
+ *     per-NPC 幽灵过滤是 validateSavedHome 的职责，这里只裁「同室双认领」；
+ *   ② 同一物理围合自任一内点泛洪必得唯一 BFS 闭包集 ⇒ 组指纹 = min(tile idx)+格数；
+ *   ③ 组内按「距房间包围盒中心」升序（同距按 npcKey/x/y 定序，纯确定性）逐个收编：
+ *     与先收者同 housingCategory（canNPCsLiveWithEachOther=false ⇒ 同类别互斥——
+ *     城镇 NPC+城镇宠物异类别可合法共室，TownRoomManager.cs:153-155，勿误杀共住宠物）、
+ *     npcKey 不同、且两 home 点【双向】落在彼此房间 tiles 集内（防指纹巧合误伤异室者）
+ *     三者同时成立才判双占，后到者（离房间中心更远）进 dropped，由调用方置 homeless。
+ * 返回把入参逐一分桶：kept ∪ dropped = 输入全量（引用不变，稳定复现）。
+ */
+export function dedupeHomes<C extends HomeClaim>(
+  st: TileStore, homes: readonly C[],
+): { kept: C[]; dropped: C[] } {
+  const kept: C[] = [];
+  const dropped: C[] = [];
+  interface Cand { h: C; room: Room; idx: number; d2: number }
+  const groups = new Map<string, Cand[]>();
+  for (const h of homes) {
+    const x = Math.round(h.x), y = Math.round(h.y);
+    if (!(x >= 10 && y >= 10 && x < st.w - 10 && y < st.h - 10)) { kept.push(h); continue; }
+    const room = queryRoom(st, x, y, { ignoreNeeds: true }).room;
+    if (!room || !room.tiles.has(st.idx(x, y))) { kept.push(h); continue; }
+    let rx1 = st.w, rx2 = 0, ry1 = st.h, ry2 = 0, minI = Infinity;
+    for (const ti of room.tiles) {
+      if (ti < minI) minI = ti;
+      const tx = ti % st.w, ty = (ti / st.w) | 0;
+      if (tx < rx1) rx1 = tx;
+      if (tx > rx2) rx2 = tx;
+      if (ty < ry1) ry1 = ty;
+      if (ty > ry2) ry2 = ty;
+    }
+    const dx = x - (rx1 + rx2) / 2, dy = y - (ry1 + ry2) / 2;
+    const fp = `${minI}:${room.tiles.size}`;
+    const cand: Cand = { h, room, idx: st.idx(x, y), d2: dx * dx + dy * dy };
+    const arr = groups.get(fp);
+    if (arr) arr.push(cand);
+    else groups.set(fp, [cand]);
+  }
+  const keyLess = (p: string, q: string): number => (p < q ? -1 : p > q ? 1 : 0);
+  for (const cands of groups.values()) {
+    cands.sort((a, b) => a.d2 - b.d2 || keyLess(a.h.key, b.h.key)
+      || a.h.x - b.h.x || a.h.y - b.h.y);
+    const winners: Array<{ key: string; cat: 0 | 1; room: Room; idx: number }> = [];
+    for (const c of cands) {
+      const cat = npcHousingCategory(c.h.npcId ?? -1);
+      const clash = winners.some((w) => w.cat === cat && w.key !== c.h.key
+        && w.room.tiles.has(c.idx) && c.room.tiles.has(w.idx));
+      if (clash) dropped.push(c.h);   // 双占冲突 → 后到者弃置(调用方置 homeless)
+      else {
+        winners.push({ key: c.h.key, cat, room: c.room, idx: c.idx });
+        kept.push(c.h);               // 收编入胜者桶(kept∪dropped 必须覆盖输入全量)
+      }
+    }
+  }
+  return { kept, dropped };
+}
+
 /** WorldGen.maxRoomTiles / maxRoomSize（WorldGen.cs:4210/4214） */
 const MAX_TILES = 750;
 const MAX_ROOM_SPAN = 100;

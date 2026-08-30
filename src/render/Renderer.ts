@@ -13,7 +13,7 @@ import { NPC_GRIDS } from '../remaster/NpcGridLayouts';
 export function npcFootFlushOn(): boolean {
   return footCfg.flushOn;
 }
-/** 全局微调旋钮(px,**正 = 整体向地面下沉**)。缺省 −1 = 用户实玩定档(2026-08-30,
+/** 全局微调旋钮(px,**正 = 整体向地面下沉**)。缺省 **+1** = 用户实玩定档(2026-08-30,
  *  浮点补偿基线上再提 1px 消除末位可见下沉)。控制台改键后 npcFootCfgReload() 重读 */
 function npcFootBiasExtra(): number {
   return footCfg.extra;
@@ -40,7 +40,7 @@ const footCfg = (() => {
   const cfg = { flushOn: true, extra: -1 as number, overrides: {} as Record<number, number> };
   try {
     cfg.flushOn = localStorage.getItem('sw_npc_foot_flush') !== '0';
-    cfg.extra = footCfgReadNum('sw_npc_foot_flush_extra', -1);
+    cfg.extra = footCfgReadNum('sw_npc_foot_flush_extra', +1);
 
     const ov = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}') as Record<string, unknown>;
     for (const [k, v] of Object.entries(ov)) if (Number.isFinite(v)) cfg.overrides[+k] = v as number;
@@ -50,7 +50,7 @@ const footCfg = (() => {
   if (typeof window !== 'undefined') {
     (window as unknown as { npcFootCfgReload?: () => void }).npcFootCfgReload = () => {
       cfg.flushOn = localStorage.getItem('sw_npc_foot_flush') !== '0';
-    cfg.extra = footCfgReadNum('sw_npc_foot_flush_extra', -1);
+    cfg.extra = footCfgReadNum('sw_npc_foot_flush_extra', +1);
 
       const ov = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}') as Record<string, unknown>;
       for (const [k, v] of Object.entries(ov)) if (Number.isFinite(v)) cfg.overrides[+k] = v as number;

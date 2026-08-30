@@ -69,6 +69,10 @@ const res = await page.evaluate(async () => {
     ok('B1 caption=使用 木材×10 且列表驱动',
       /木材 ×10/.test(overlay.textContent) && rowsB.length > 0,
       `rows=${rowsB.length}`);
+    // ★反查列表全亮锚（CollectGuideRecipes Recipe.cs:441 不做环境/材料过滤——
+    //   用户截图实锤偏差：曾错套常规列表“缺料变灰”，满包木材站徒手仍全灰）
+    const noCount = [...rowsB].filter((r) => r.classList.contains('no')).length;
+    ok('P2b 反查列表全亮（零 .no 行）', noCount === 0, `noRows=${noCount}/${rowsB.length}`);
     // ---- 筛选（Modern 式按名筛列）----
     const filterInput = overlay.querySelector('input');
     filterInput.value = '工作台';

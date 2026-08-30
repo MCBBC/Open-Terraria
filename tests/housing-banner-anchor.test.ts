@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
-import { findBannerAnchorY, validateSavedHome, lastRoomCheckFail, queryRoom } from '../src/world/Housing';
+import { findBannerAnchorY, validateSavedHome, lastRoomCheckFail, queryRoom, dedupeHomes } from '../src/world/Housing';
 
 const S = TILE_BY_KEY['stone'];
 const PLAT = (() => { for (const d of TILE_DEFS) if (d?.vanilla?.sheet === 19) return TILE_DEFS.indexOf(d); return -1; })();
@@ -67,3 +67,77 @@ function put2(st: TileStore, x: number, y: number, idxId: number) {
   const i = st.idx(x, y);
   st.type[i] = idxId; st.flags[i] = 1;
 }
+
+// ================= 增量批(2026-08-30 报告§3/§6):dedupeHomes 共室双认领清理 =================
+// 封闭石室×2 构造:边界一圈 stone,内部空气背铺房墙(dedupe 走 queryRoom ignoreNeeds,
+// 只关心围合+tiles 归属,不查家具)。每室含边界壳 ≥60 格才算合格房。
+function buildBoxes(): TileStore {
+  const st = new TileStore(100, 100);
+  const carveWall = (x1: number, y1: number, x2: number, y2: number) => {
+    for (let y = y1; y <= y2; y++) for (let x = x1; x <= x2; x++) {
+      const border = y === y1 || y === y2 || x === x1 || x === x2;
+      const i = st.idx(x, y);
+      if (border) { st.type[i] = S; st.flags[i] = 1; }
+      else { st.type[i] = 0; st.flags[i] = 0; st.wall[i] = WALL_ID; }   // 空气须背靠房墙
+    }
+  };
+  // 室 A 内域 [21..33]×[21..31]=13×11=143 格;室 B 同规格,与 A 相互隔绝
+  carveWall(20, 20, 34, 32);
+  carveWall(45, 20, 59, 32);
+  return st;
+}
+
+describe('dedupeHomes 共室双认领清理', () => {
+  it('① 两 NPC home 同处一间房 → 只留距房间中心更近者,另一进 dropped(调用方置 null)', () => {
+    const st = buildBoxes();
+    // 交换立场:boxA 独立小世界语义也成立——同盒两点,m 比 ad 更近包围盒中心 (27,26)
+    const m = { key: 'merchant', x: 26, y: 25 };
+    const ad = { key: 'arms_dealer', x: 32, y: 30 };
+    const r = dedupeHomes(st, [ad, m]);
+    expect(r.dropped).toHaveLength(1);
+    expect(r.dropped[0].key).toBe('arms_dealer');     // d² 41 > m 的 2 → 后者让位
+    expect(r.kept).toHaveLength(1);
+    expect(r.kept[0]).toBe(m);                        // 引用原样保序(kept∪dropped=输入)
+    // 与两 home 各自泛洪的房间指纹无关:双方 validateSavedHome 均真(即真正的「双认领」,
+    // 非 ghost 差异所致)
+    expect(validateSavedHome(st, 26, 25)).toBe(true);
+    expect(validateSavedHome(st, 32, 30)).toBe(true);
+  });
+
+  it('② 不同房间两 NPC → 双双保留(dropped 空)', () => {
+    const st = buildBoxes();
+    const a = { key: 'guide', x: 26, y: 31 };     // boxA
+    const b = { key: 'nurse', x: 52, y: 31 };     // boxB
+    const r = dedupeHomes(st, [a, b]);
+    expect(r.dropped).toHaveLength(0);
+    expect(r.kept.map((k) => k.key).sort()).toEqual(['guide', 'nurse']);
+  });
+
+  it('③ 幽灵 home(房间外)→ validateSavedHome=false 且不影响他人去重结果', () => {
+    const st = buildBoxes();
+    const g = { key: 'angler', x: 80, y: 80 };    // 无墙旷野:floodRoom hole 失败
+    expect(validateSavedHome(st, 80, 80)).toBe(false);
+    const base = dedupeHomes(st, [
+      { key: 'merchant', x: 26, y: 25 },
+      { key: 'arms_dealer', x: 32, y: 30 },
+    ]);
+    const withGhost = dedupeHomes(st, [
+      { key: 'merchant', x: 26, y: 25 },
+      { key: 'arms_dealer', x: 32, y: 30 },
+      g,
+    ]);
+    // 幽灵被原样保留(kept 引用不变),不参与分组也不改变同室对的裁决
+    expect(withGhost.kept.some((k) => k === g)).toBe(true);
+    expect(withGhost.dropped.map((d) => d.key)).toEqual(base.dropped.map((d) => d.key));
+    expect(withGhost.kept).toHaveLength(base.kept.length + 1);
+  });
+
+  it('④ 城镇 NPC + 城镇宠物同室合法共住(vanilla CanNPCsLiveWithEachOther 异类别)不被误杀', () => {
+    const st = buildBoxes();
+    const owner = { key: 'merchant', npcId: 17, x: 52, y: 24 };
+    const pet = { key: 'town_cat', npcId: 637, x: 56, y: 28 };   // cat0 vs cat1
+    const r = dedupeHomes(st, [owner, pet]);
+    expect(r.dropped).toHaveLength(0);
+    expect(r.kept.map((k) => k.key).sort()).toEqual(['merchant', 'town_cat']);
+  });
+});

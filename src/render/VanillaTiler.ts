@@ -976,7 +976,9 @@ function drawXmasTreeCell(
     if (!img || !(img.width > 0) || img.width === 0) continue;
     const vx = (style - 1) * 66 + col * 16;
     let vy = row * 16;
-    if (obj === 3) vy += animFrameIdx(171, XMAS_LIGHT_FRAMES * 130) * 130;   // 串灯帧行
+    // 串灯帧行：Main.cs AnimateTiles case 171 counter>16 → period17、frame>3 回卷
+    // （17t/4f）——sheet 171 本体静态已从 TILE_ANIM_RATE 移除，此处自算解耦
+    if (obj === 3) vy += (Math.floor(tileAnim.tick / 17) % 4) * 130;
     if (vx + 16 <= img.width && vy + 16 <= img.height) {
       ctx.drawImage(img, vx, vy, 16, 16, px, py, TILE, TILE);
     }
@@ -1220,7 +1222,7 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       if (imgh > 0 && r.sy + extra + r.sh > imgh) { extra = 0; clampMask |= 1; }   // 出界回退第 0 带
       if (extra < -(r.sy)) { extra = 0; clampMask |= 2; }                          // 负向越界同理
       cap.noteDraw('vf', sheet, x, y, fx, fy, r.sx, r.sy, r.sw, r.sh,
-        reqExtra, extra, clampMask, atlas.vImageW(sheet), imgh);
+        reqExtra, extra, clampMask, vImgW(atlas, sheet), imgh);
       r = { ...r, sy: r.sy + extra };
     }
   } else if (frame === 'auto') {
@@ -1309,7 +1311,10 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     const reconBaseOfy = ofy;
     let reconExtra = 0;
     if (sheet !== 215 && sheet !== 207 && !(sheet === 405 && fx >= 54)) {
+      // ★406 烟囱走 chimneyAddFrY（带折算 56 步距）——此前 recon 路径漏接，
+      //   会叠加 animYOffset 默认 pitch 的错误偏移再与 drawAdjust 尾部二次相加
       reconExtra = sheet === 405 ? fireplaceAddFrY(fx)
+        : sheet === 406 ? chimneyAddFrY(fy)
         : animYOffset(sheet, (atlas.vmeta(sheet)?.rows ?? 0) * 18);
       ofy += reconExtra;
     }
@@ -1469,7 +1474,13 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       console.warn(`[VanillaTiler] 源矩形越界,该格不绘制(每键仅一次): sheet ${sheet} ` +
         `帧(${fx},${fy}) → 调整后(${asx},${asy} ${asw}x${ash}) > 表 ${r.img.width}x${r.img.height}`);
     }
+    cap.noteTail(sheet, x, y, fx, fy, r.sy, asy, adj.sy !== undefined, true,
+      r.img.width, r.img.height);   // ★2026-08-30:静默跳过必须现形(烟囱悬案盲区教训)
     return;
+  }
+  if (TILE_ANIM_RATE[sheet] || sheet === 405 || sheet === 406) {
+    cap.noteTail(sheet, x, y, fx, fy, r.sy, asy, adj.sy !== undefined, false,
+      r.img.width, r.img.height);
   }
   // 尺寸覆写后重新居中(711 豁免)
   const fdx = px - (sheet === 711 ? 0 : (asw - TILE) / 2);
@@ -1753,8 +1764,12 @@ function drawAdjust(
     }
     case 751: if (fit(fx, fy, 56, 46)) { a.sw = 56; a.sh = 46; } break;  // :4582-4589
     case 752: if (fit(fx, fy, 36, 38)) { a.sw = 36; a.sh = 38; } break;  // :4577-4581
-    // ---- 2026-08-28 全量对账补遗（GetTileDrawData :4580-6100 逐 case w/h 对账；
-    //      树冠族 583-589/596/616/634 的 w20 走 drawTreeCell 专道,不在本表）----
+    // ★2026-08-30 移除 case 405/406 残案（TileDrawing.cs:5443-5529 原样语义已由
+    //   VanillaTiler 顶层的 fireplaceAddFrY/chimneyAddFrY 专属 helper 承担——本处旧式
+    //   `animRot()%8` 走针钟与原版 rate 钟不同相、且给烟囱算出 ≥6 的相位落进纹理
+    //   未用带（sy 最高 410>378），被末尾越界守卫静默跳过整格绘制 = 用户实报
+    //   "烟囱一闪一闪/瞬间消失"真凶；同时其绝对值覆写曾使 helper 偏移整体失效。
+    //   捕获报告实证：站点侧 fb/clamp 全零而视觉仍闪 ⇒ 盲区即在此。）----
     case 81: if (fit(fx, fy, 24, 26)) { a.sw = 24; a.sh = 26; } break;   // :4979-4983 珊瑚 24×26
     case 323: case 324: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break; // :5059-5070
     case 442: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break;  // :5704-5720
@@ -1880,18 +1895,7 @@ function drawAdjust(
       }
       break;
     }
-    case 405:   // :5443-5462
-      if (fy > 0) a.sh = 18;
-      a.sy = fy + 38 * (fx >= 54 ? 0 : animRot() % 8);
-      break;
-    case 406: {  // :5509-5523
-      if (fy % 54 >= 36) a.sh = 18;
-      let n = animRot() % 8;
-      if (fy >= 108) n = 6 - Math.floor(fy / 54);
-      else if (fy >= 54) n = (animRot() - 1) % 8;
-      a.sy = fy + n * 56 + Math.floor(fy / 54) * 2;
-      break;
-    }
+    // （case 405/406 已删：见上方 2026-08-30 移除注——chimney/fireplace 走顶层 helper）
     case 452: a.sy = fy + (fx >= 54 ? 0 : animRot() % 8) * 54; break;  // :5463-5470
     case 454: a.sy = fy + (animRot() % 8) * 54; break;                 // :5494-5496
     case 453: a.sy = fy + 54 * (((Math.floor(tileAnim.tick / 20) + (y - Math.floor(fy / 18)) + x) % 3 + 3) % 3); break; // :5485-5493

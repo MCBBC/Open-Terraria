@@ -2841,8 +2841,6 @@ export class UI {
     listEl.dataset.vid = String(vid);
     listEl.textContent = '';
     const game = this.game;
-    const avail = new Map<unknown, number>();
-    for (const { r, count } of game.vanillaAvailableRecipes()) avail.set(r, count);
     let hits = 0;
     for (const r of VANILLA_RECIPES) {
       const used = r.items.some((req) => req.id === vid
@@ -2851,7 +2849,11 @@ export class UI {
       if (++hits > 60) { listEl.appendChild(el('div', 'sw-lbl', '…更多结果请细化')); break; }
       const outKey = vanillaItemKey(r.create);
       if (!outKey) continue;
-      const row = el('div', 'sw-recipe' + (avail.has(r) ? '' : ' no'));
+      // ★原版反查列表全亮：CollectGuideRecipes（Recipe.cs:441）不做环境/材料
+      //   过滤就入列——常规列表的“缺料变灰”逻辑不适用于本面板（用户截图实锤：
+      //   满包木材站徒手前仍全灰=把两套语义混了）。点击仍经 vanillaCraft 材料门，
+      //   不可合成时静默无效=原版同款表现
+      const row = el('div', 'sw-recipe');
       const outIid = game.itemId(outKey);
       const img = el('img') as HTMLImageElement;
       img.className = 'prod';
@@ -2869,12 +2871,11 @@ export class UI {
       const info = el('span', 'g-req', `${r.tile >= 0 ? (Lang.tileName(r.tile) ?? `站点 ${r.tile}`) : Lang.text('Mods.SandboxWorld.UI.StationHand')} · ${
         r.items.map((req) => `${req.id >= 1000000 ? '任何组物' : (Lang.itemNameByKey(ingredientKey(req.id) ?? '') ?? req.id)} ${req.stack}`).join(' +')}`);
       row.appendChild(info);
-      if (avail.has(r)) {
-        row.onclick = () => {
-          game.vanillaCraft(r, 1);
-          this.refreshAll();
-        };
-      }
+      row.onclick = () => {
+        // 全行可点：不可合成时 consumeMaterials 静默无效=原版 guide 模式同款表现
+        game.vanillaCraft(r, 1);
+        this.refreshAll();
+      };
       listEl.appendChild(row);
     }
     if (!hits) listEl.appendChild(el('div', 'sw-lbl', '该物品不用于任何配方'));
@@ -3696,6 +3697,32 @@ export class UI {
     // 19 种，战斗/镇静/挖矿/糖分冲刺等 20+ 种永不显示）
   }
 
+  /** buff 悬停即时气泡——原版悬停走 MouseTextHackZoom(buffName,buffTooltip)
+   *  （Main.cs:43964-43974）与物品 tooltip 同字体同底板;本仓曾用浏览器原生
+   *  title（出泡延迟秒级、样式不可控），改复用 sw-tooltip 面板（九宫底+brightness
+   *  脉冲+18px 边距屏幕钳制，定位式与物品槽路径 ：2036-2043 同款）。文本由三个
+   *  buff 通道（普通/宠物/星云）在 refreshBuffs 里写 data-sw-tip-* 再入此口 */
+  private showBuffTooltip(anchor: HTMLElement, name: string, desc: string): void {
+    let html = `<span style="color:#ffffff">${name}</span>`;
+    for (const ln of desc.split('\n')) if (ln) html += `<br>${ln}`;
+    this.tooltip.innerHTML = `<div class="sw-tooltip-lines">${html}</div>`;
+    this.tooltip.style.display = 'block';
+    this.startTooltipPulse();
+    this.applyTooltipBg();
+    const r = anchor.getBoundingClientRect();
+    const tw = this.tooltip.offsetWidth, th = this.tooltip.offsetHeight;
+    let left = r.right + 8, top = r.top;
+    if (left + tw > window.innerWidth - 18) left = Math.max(0, window.innerWidth - tw - 18);
+    if (top + th > window.innerHeight - 18) top = Math.max(0, window.innerHeight - th - 18);
+    this.tooltip.style.left = `${left}px`;
+    this.tooltip.style.top = `${top}px`;
+  }
+
+  private hideBuffTooltip(): void {
+    this.tooltip.style.display = 'none';
+    cancelAnimationFrame(this.tooltipPulseRaf);
+  }
+
   /** 单个 buff 块（原版 DrawBuffIcon Main.cs:42725 的 DOM 化）。
    *  t=null 时为宠物 buff 通道块（BuffType 无宠物成员，不进 BuffState.active）：
    *  无倒计时（buffNoTimeDisplay）+ 右键 = 收宠（原版 TryRemovingBuff
@@ -3714,12 +3741,20 @@ export class UI {
     time.style.cssText = 'position:absolute; left:-4px; right:-4px; top:34px; text-align:center; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
     block.appendChild(time);
     // 悬停提亮（原版 buffAlpha 悬停 +0.1/t 至 1、离开 -0.05/t 至 0.4 的 CSS 近似）
-    block.addEventListener('mouseenter', () => { icon.style.opacity = '1'; });
-    block.addEventListener('mouseleave', () => { icon.style.opacity = '0.4'; });
+    block.addEventListener('mouseenter', () => {
+      icon.style.opacity = '1';
+      const nm = block.dataset.swTipName ?? '';
+      if (nm) this.showBuffTooltip(block, nm, block.dataset.swTipDesc ?? '');
+    });
+    block.addEventListener('mouseleave', () => {
+      icon.style.opacity = '0.4';
+      this.hideBuffTooltip();
+    });
     // 右键取消（TryRemovingBuff L42793+：非 debuff → DelBuff + SoundID 12；
     //  宠物 buff 走 CheckBuffHideMisc 收宠，不走 buffs.remove——其不在 BuffState 里）
     block.addEventListener('contextmenu', (e) => {
       e.preventDefault();
+      this.hideBuffTooltip();   // 右键后块可能消失/上移，先收气泡
       if (!this.game) return;
       if (t === null) this.game.togglePetSlot(petSlot);
       else {
@@ -3762,6 +3797,7 @@ export class UI {
     const buffs = this.game.player.buffs;
     const invOpen = this.invPanel.style.display === 'block';
     this.buffBar.style.display = invOpen ? 'none' : 'flex';
+    if (invOpen) this.hideBuffTooltip();   // 整栏隐藏时_pointer 不触发 leave（挂护栏）
     const seen = new Set<BuffType>();
     for (const [t, left] of buffs.active) {
       seen.add(t);
@@ -3773,7 +3809,8 @@ export class UI {
         this.buffBlocks.set(t, ui);
       }
       ui.block.style.display = 'flex';
-      ui.block.title = `${buffName(t)}：${buffDesc(t)}`;
+      ui.block.dataset.swTipName = buffName(t);
+      ui.block.dataset.swTipDesc = buffDesc(t);
       // 原版 DrawBuffIcon（Main.cs:42736）：TextureAssets.Buff[type] 原大绘制——
       // 用原版 Buff_{vanillaBuff} 贴图（2026-08-13 前：误用对应药水物品图标）
       const want = remasterBuffIcon?.(BUFF_DEFS[t].vanillaBuff)
@@ -3821,7 +3858,8 @@ export class UI {
       // 名/描述 = Lang.buffName/buffDesc（BuffName/BuffDescription.<Internal>，
       //  62 款宠物 buff 全有内名；缺名回退投射物名）
       const nm = Lang.buffName(pb.buff) ?? Lang.projectileName(pb.proj);
-      u.block.title = nm ? `${nm}：${Lang.buffDesc(pb.buff) ?? ''}` : '';
+      u.block.dataset.swTipName = nm ?? '';
+      u.block.dataset.swTipDesc = nm ? (Lang.buffDesc(pb.buff) ?? '') : '';
       // buffNoTimeDisplay：宠物 buff 不显示剩余时长（原版 TryGetBuffTime 不出文字）
       u.time.textContent = '';
       const want = remasterBuffIcon?.(pb.buff) ?? `/sprites/vanilla/Buff_${pb.buff}.png`;
@@ -3861,7 +3899,8 @@ export class UI {
         continue;
       }
       u.block.style.display = 'flex';
-      u.block.title = `${Lang.buffName(nb.vanillaBuff) ?? '星云'}：${Lang.buffDesc(nb.vanillaBuff) ?? ''}`;
+      u.block.dataset.swTipName = Lang.buffName(nb.vanillaBuff) ?? '星云';
+      u.block.dataset.swTipDesc = Lang.buffDesc(nb.vanillaBuff) ?? '';
       u.time.textContent = Lang.text('Mods.SandboxWorld.Time.Seconds', nb.secs);
       const want = remasterBuffIcon?.(nb.vanillaBuff) ?? `/sprites/vanilla/Buff_${nb.vanillaBuff}.png`;
       if (!(u.icon as HTMLImageElement).src.endsWith(want)) {

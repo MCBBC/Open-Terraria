@@ -167,6 +167,8 @@ export interface GameHooks {
   // 世界坐标声（原版 SoundEngine.PlaySound 带 x/y）：x/y 省略 = UI/玩家动作声不衰减
   playSfx(name: string, vol?: number, x?: number, y?: number): void;
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number): void; // 怪物专属声效（原版文件名列表）
+  /** 行为决策日志（debug-report behaviorTail 段;缺省=单人安静路径不记） */
+  behavioLog?(k: string, d: unknown): void;
   /** 城镇 NPC 开关门即时事件广播（原版 msg19 DoorOpen 的等价通道，NPC.cs:54398/54610）：
    *  仅 NPC 模拟端（房主/SimHost）发送；远端立即重放开闭动作+音效（tile 终态由
    *  TileBatch 收敛）。kind='door' 普通 2×3 门 / 'gate' 高门(388/389)；closing=false=开。

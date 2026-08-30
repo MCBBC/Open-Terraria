@@ -906,6 +906,10 @@ export class BuffState {
     for (const [t, sec] of this.active) {
       const v = BUFF_DEFS[t]?.vanillaBuff;
       if (v === undefined || BUFF_NO_SAVE.has(v)) continue;
+      // 亚 0.05s 残余 = 每帧续钉型环境光环稳态（Player.cs:25723-25764 AddBuff(id,2)
+      // → 2t=1/30s;原版存原始 2t,读档即刻消散）。本仓序列化强制 ≥1s 会造读档后
+      // ~1 秒的"1 秒/0 秒"幻影倒计时——亚 50ms 一律不落盘
+      if (sec < 0.05) continue;
       out.push([v, Math.max(1, Math.round(sec))]);
     }
     return out;

@@ -178,6 +178,8 @@ export class LiquidSim {
   /** ★IIIII70b：SettleWaterAt 全量事件流（S=入场携带/L=落点写回，与 x86 rig
    *  SW_SETLLOG 同格式同序——首分叉逐行对拍用；生产恒 null 零开销） */
   static settleEv: ((kind: 'S' | 'L', tag: string) => void) | null = null;
+  // ★IIIII84 刀②：UpdateLiquid 尾盒迹回调（SW_LIQBOX 对照；缺省 null 零开销）
+  static liqBoxSink: ((st: unknown) => void) | null = null;
   /** 微观测辅助（仪具注入：trOn+trX/trY 指定观测 origin；trSeq 步进计数） */
   static trOn = false;
   static trX = -1;
@@ -794,6 +796,9 @@ export class LiquidSim {
     } finally {
       this.tilesIgnoreWater(false);
     }
+    // ★IIIII84 刀②盒迹仪：每次 UpdateLiquid 尾把 store 交给探针（x86 rig
+    //   JJHook.OnUpdateLiquid→BoxDiff 同位同口径；缺省 null 零开销）
+    LiquidSim.liqBoxSink?.(this.world.store);
   }
 
   private updateLiquidInner() {

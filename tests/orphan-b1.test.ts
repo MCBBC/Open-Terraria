@@ -32,7 +32,11 @@ import { Game, THROWN_NO_RECOVERY_VIDS } from '../src/core/Game';
 import { LIQUID_TYPE } from '../src/world/TileStore';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
-import { thrownCombat, combatWeapon } from '../src/data/vanillaItemCombat';
+import { thrownCombat, combatWeapon, itemCombat } from '../src/data/vanillaItemCombat';
+import { invIndexOfVanilla } from '../src/data/vanillaRecipes';
+import { Player } from '../src/entities/Player';
+import { Enemy } from '../src/entities/Enemy';
+import { Inventory } from '../src/items/Inventory';
 import type { GameHooks } from '../src/entities/types';
 
 const CX = 800;
@@ -579,5 +583,163 @@ describe('⑤ 恒消耗门：撞块消亡不回收（P.cs Kill 无掉落段）',
     } finally {
       rnd.mockRestore();
     }
+  });
+});
+
+// ===========================================================================
+// B1-6 零伤投掷出口根治（红队 A-2 移交批,2026-08-31）：通用投掷出口升格为
+//   GetWeaponDamage 原式（1457 P.cs:54059-54065 头 `if (damage <= 0) return
+//   damage`,经 :43060 ItemCheck_Shoot(sItem, GetWeaponDamage(sItem)) 注入弹伤），
+//   penetrate 亦 raw 直读（去 -1→6 药钳；melee :9541/magic :13638 同先例）。
+//   受益面=vanilla-itemcombat.json 无 damage 行的消耗投掷件（SetDefaults 无
+//   damage 行 → ResetStats 缺省 damage=-1,I.cs:49014）：本文件 B1 波三件
+//   2352→370 / 2353→371 / 4986→936 + 三地球仪 4765/4766/5285→868/869/996 +
+//   烟雾弹 1168→196（专支消费同 dmgT）+ 绳圈族四件（orphan-weapons-a 已锁）。
+//   出膛面走真实 updateUse 分派链（orphan-weapons-a updUseGame 桩先例）；
+//   命中面=出口终值直构 Arrow 与敌怪重叠——零结算零飘字（Damage_PVE :12576 头门,
+//   hurt 单点不达 ⇒ addDamageNumber 链也不达）。
+// ===========================================================================
+describe('B1-6 零伤投掷出口根治：damage≤0 直传 + penetrate raw（2352/4986/4765 及对照组）', () => {
+  const TILE = 16;
+
+  /** updateUse 可驱动的最小 Game 桩（orphan-weapons-a updUseGame 同款,本文件独立副本） */
+  function updUseGame(heldVid: number, stack = 1) {
+    const g = Object.create(Game.prototype) as Record<string, any>;
+    const player = new Player(50 * TILE, 90 * TILE, new Inventory());
+    const iidV = invIndexOfVanilla(heldVid);
+    expect(iidV).toBeGreaterThanOrEqual(0);
+    player.inv.add(iidV, stack);
+    player.inv.selected = Math.max(0, player.inv.slots.findIndex((s) => s && s.id === iidV));
+    g.player = player;
+    g.world = new World(200, 200, 30);
+    g.camera = {
+      screenToWorld: () => [player.cx + 240, player.cy - 60],
+      tileUnder: () => [80, 80],
+    };
+    g.enemies = () => [];
+    g.candidatePlayers = undefined;
+    g.housingMode = null;
+    g.input = { mouseX: 500, mouseY: 300, mouseDown: false, rightDown: false,
+      uiBlocking: false, downAction: () => false };
+    g.entities = { projectiles: [] as unknown[], add(e: unknown) { this.projectiles.push(e); } };
+    g.sfxFiles = [];
+    g.synthFallbacks = [];
+    g.playSfxFile = (f: string) => { g.sfxFiles.push(f); return true; };
+    g.playSfxFiles = () => {};
+    g.sfx = { play: (n: string) => { g.synthFallbacks.push(n); }, playWavFile: () => true };
+    g.cb = { onInventoryChanged: () => {}, onToast: () => {} };
+    g.renderer = { canvas: { width: 800, height: 600 }, fullMap: { open: false },
+      timeUiHover: false, weatherUiHover: false };
+    g.smartCursor = { showing: false };
+    g.annotateMode = false;
+    g.prevSwingMouse = false;
+    g.mining = null;
+    g.swingHitSet = new Set<number>();
+    g.swingTileCutSet = new Set<number>();
+    g._prevMouseDown = false;
+    g._prevRightDown = false;
+    g.spawnParticles = () => {};
+    g.useSwing = () => {};
+    return { g, player };
+  }
+
+  function useBeat(g: Record<string, any>): void {
+    g.updateUse(1 / 60);
+    g._prevMouseDown = !!g.input.mouseDown;
+  }
+
+  /** 经真实分派链发射并取最后出膛的 Arrow（generic/smoke 专支产物皆是 Arrow） */
+  function shootGeneric(vid: number): Arrow {
+    const { g } = updUseGame(vid, 3);
+    g.input.mouseDown = true;
+    useBeat(g);
+    const projs = (g.entities.projectiles as unknown[]).filter((p) => p instanceof Arrow);
+    expect(projs.length).toBeGreaterThanOrEqual(1);
+    return projs[projs.length - 1] as Arrow;
+  }
+
+  it('数据面：六件 shoot 映射 + 全员无 damage 行（thrownCombat 归 0）+ 弹 json 面值', () => {
+    for (const [vid, pid] of [[2352, 370], [2353, 371], [4986, 936],
+      [4765, 868], [4766, 869], [5285, 996], [1168, 196]] as const) {
+      expect(itemCombat(vid)?.shoot).toBe(pid);
+      expect(itemCombat(vid)?.damage ?? 0).toBe(0);            // 提取器无列=原版无 damage 行
+      const t = thrownCombat({ vid, key: `vi_${vid}` });
+      expect(t && t.damage).toBe(0);                           // ≤0 门同语义侧
+    }
+    // 三地球仪/药水族弹 penetrate=1；烟雾弹 −1（I/O 面值,B1-3 批已锁 aiStyle）
+    for (const pid of [370, 371, 936, 868, 869, 996]) {
+      expect(projectileData(pid)?.penetrate).toBe(1);
+    }
+    expect(projectileData(196)?.penetrate).toBe(-1);
+  });
+
+  it('出膛面：2352/4986/4765 出膛 damage===0（不再钳成 1）且 pierce=数据面 1', () => {
+    for (const [vid, pid] of [[2352, 370], [4986, 936], [4765, 868]] as const) {
+      const p = shootGeneric(vid);
+      expect(p.projId).toBe(pid);
+      expect(p.damage).toBe(0);
+      expect(p.pierce).toBe(1);
+    }
+  });
+
+  it('出膛面扩展：2353/4766/5285 同族同档；1168 烟雾弹专支 dmgT 同源=0、penetrate−1', () => {
+    for (const [vid, pid] of [[2353, 371], [4766, 869], [5285, 996]] as const) {
+      const p = shootGeneric(vid);
+      expect(p.projId).toBe(pid);
+      expect(p.damage).toBe(0);
+      expect(p.pierce).toBe(1);
+    }
+    const smk = shootGeneric(1168);
+    expect(smk.projId).toBe(196);
+    expect(smk.damage).toBe(0);                                // GetWeaponDamage 原式（曾 1）
+    expect(smk.pierce).toBe(-1);
+  });
+
+  it('命中面：370/936/868 以出口终值与敌怪重叠——零受击调用、血量原封、零飘字',
+    () => {
+      for (const pid of [370, 936, 868]) {
+        const world = new World(64, 32, 42, 'b16-zero-dmg');
+        const numbers: Array<{ x: number; y: number; n: number }> = [];
+        const e = Enemy.fromVanilla(1, 20 * TILE, 16 * TILE)!;       // 开阔空中,无实心邻格
+        (e as unknown as { lifeMax: number }).lifeMax = 25;
+        e.hp = 25;
+        const hurtCalls: number[] = [];
+        (e as unknown as { hurt: (...a: unknown[]) => boolean }).hurt =
+          (...a: unknown[]) => { hurtCalls.push(a[0] as number); return false; };
+        const game = {
+          world,
+          player: null,
+          enemies: () => [e], critters: () => [], npcs: () => [],
+          spawnDrop: () => null,
+          damagePlayer: () => {},
+          addDamageNumber: (x: number, y: number, n: number) =>
+            void numbers.push({ x, y, n }),
+          cutTile: () => {}, onProjectileDeath: () => {},
+          playSfx: () => {}, playSfxFile: () => true, spawnDust: () => null,
+          showPickupLabel: () => {}, notifyInventoryChanged: () => {},
+        } as unknown as GameHooks;
+        // 出口终值规格：dmgT=0、pierce=数据面 1、物理档 opts 通用投掷尾同款
+        const a = new Arrow(20 * TILE, 16 * TILE, 5, 0, /* dmgT */ 0, 0, pid, null,
+          { pierce: projectileData(pid)?.penetrate ?? 1,
+            grav: 0.4, gravDelay: 20, drag: 0.97, maxFall: 32 } as never);
+        let ticks = 0;
+        while (!a.dead && ticks < 30 && hurtCalls.length === 0) {
+          a.fixedUpdate(1 / 60, game);
+          ticks++;
+        }
+        expect(ticks).toBeGreaterThan(10);                   // 重叠窗充分展开
+        expect(hurtCalls.length).toBe(0);                    // ★零结算：hurt 单点不达
+        expect(e.hp).toBe(25);                               // 血量原封
+        expect(numbers).toEqual([]);                         // ★零飘字：addDamageNumber 不达
+        void world;
+      }
+    });
+
+  it('对照面：基伤>0 件维持 min1×ranged 链（雪球 949 真弹 dmg≥1,出口钳不得误扩到正伤件）', () => {
+    const t949 = thrownCombat({ vid: 949, key: 'vi_949_snowball' });
+    expect(t949 && t949.shoot).toBe(166);
+    expect((t949?.damage ?? 0)).toBeGreaterThan(0);
+    // 出口乘区恒 ≥1 的口径只对 tc.damage>0 成立——用 0 基伤断言反守门不被钳:
+    // 正伤链不动由 orphan-weapons-a 投刀对照锁定,此处仅钉雪球映射防回退。
   });
 });

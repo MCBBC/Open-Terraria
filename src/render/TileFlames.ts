@@ -33,9 +33,10 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
-import { flameTileTop } from './VanillaTiler';
+import { flameTileTop, renderEnv } from './VanillaTiler';
 import { swayBakeSkip } from './WindSway';
 import { campfireYOffset, animYOffset } from './TileAnim';
+import { GorePiece } from '../entities/GorePiece';
 import type { FlickerClock } from '../lighting/SkyColor';
 
 /** 火苗族 tile → Flame_{n} 贴图索引（TileDrawing.cs:2857-2893 的 num9 switch 1:1；
@@ -486,6 +487,26 @@ export function drawTileFlames(
       if (!st.flags[i]) continue;
       const def = TILE_DEFS[st.type[i]];
       const sheet = def?.vanilla?.sheet ?? -1;
+      // ★烟囱烟发射器（TileDrawing.cs:6933-6953 1:1）：仅 fx==0 && fy==54 的烟囱
+      // 锚格，1/3 概率/帧放出 GoreID.ChimneySmoke1..3(825-827)；出点=(x*16+16, y*16+8)，
+      // 初速 0 + 负风给正向 X；scale 分档 0.2-0.4/0.3-0.6/0.4-0.8 按原版嵌套掷序。
+      // 烟体 AI 在 GorePiece.updateChimneySmoke（SpecialAI==2）。暂停期不发射
+      // （原版 NewGore 内 gamePaused 守卫等价）。渲染期调用天然视口限域，烘焙路径不进。
+      if (sheet === 406 && st.frameX[i] === 0 && st.frameY[i] === 54
+        && (window as unknown as { __swGame?: { paused?: boolean } }).__swGame?.paused !== true) {
+        const wind = renderEnv.wind;
+        const svx = wind < 0 ? -wind : 0;                 // :6940-6943
+        const goreType = 825 + Math.floor(Math.random() * 3);   // :6946 Next(825,828)
+        let gscale: number;
+        if (Math.random() * 4 < 1) {                        // :6949 Next(4)==0
+          gscale = Math.random() * 0.2 + 0.2;
+        } else if (Math.random() * 2 < 1) {                 // :6952 Next(2)==0
+          gscale = Math.random() * 0.3 + 0.3;
+        } else {
+          gscale = Math.random() * 0.4 + 0.4;               // :6955 else 支
+        }
+        GorePiece.newGore(goreType, x * 16 + 16, y * 16 + 8, svx, 0, gscale, true);
+      }
       // 摆动族（草/藤/吊挂灯笼 42/吊灯 34 等 MultiTileVine/Basic/Vine 全家）：原版主循环
       // AddSpecialPoint 后 continue——普通绘制路径（含 DrawSingleTile_Flames :1746）整体
       // 跳过，摆动 tile【没有火焰叠画层】。曾照画 = 火焰用自身贴图 tint 副本钉在静态格位
