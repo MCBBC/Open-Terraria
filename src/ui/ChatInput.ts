@@ -36,6 +36,8 @@ export class ChatInput {
   /** 角落物品点击（Main.cs:40505-40512）：未开则 OpenPlayerChat → AddChatText 在
    *  光标处插入物品 tag（[i:vid]）并同步草稿 */
   insertItemTag(tag: string): void {
+    // 程序化插签不受抑制窗（Enter/Esc 关框后 300ms 内点角标曾静默丢标签，审查 P2）
+    this.suppressOpenUntil = 0;
     this.open();
     if (!this.input || !this.root) return;
     const el = this.input;

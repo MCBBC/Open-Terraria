@@ -196,25 +196,147 @@ function torchConvertible(sheet: number, frameY: number, conversionType: number)
   return num === 0 || num === 9 || num === 16 || (num >= 18 && num <= 22);
 }
 
-/** TryConvertingOrKillingTreesAboveIfTheyWouldBecomeInvalid（cs:55277-55375，近似②）。 */
+/** TileID.Sets.IsATreeTrunk（不含 323 的分支/根判定用；vanilla 分支检测内部排除 323） */
+function isTileATreeBranchCore(st: TileStore, x: number, y: number): -1 | 0 | 1 {
+  if (!st.inBounds(x, y)) return 0;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return 0;
+  const sh = SHEET_OF_TYPE[st.type[i]];
+  if (sh === 323 || !IS_A_TREE_TRUNK.has(sh)) return 0;
+  const fx = st.frameX[i], fy = st.frameY[i];
+  // cs:55468-55477：fx44|fy198/220/242 与 fx66|fy0/22/44 → trunk 在右(+1)
+  if ((fx === 44 && (fy === 198 || fy === 220 || fy === 242))
+    || (fx === 66 && (fy === 0 || fy === 22 || fy === 44))) return 1;
+  // fx66|fy198/220/242 与 fx88|fy66/88/110 → trunk 在左(−1)
+  if ((fx === 66 && (fy === 198 || fy === 220 || fy === 242))
+    || (fx === 88 && (fy === 66 || fy === 88 || fy === 110))) return -1;
+  return 0;
+}
+function isTileATreeRootCore(st: TileStore, x: number, y: number): -1 | 0 | 1 {
+  if (!st.inBounds(x, y)) return 0;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return 0;
+  const sh = SHEET_OF_TYPE[st.type[i]];
+  if (sh === 323 || !IS_A_TREE_TRUNK.has(sh)) return 0;
+  const fx = st.frameX[i], fy = st.frameY[i];
+  if (fx === 44 && (fy === 132 || fy === 154 || fy === 176)) return 1;   // +1 右根
+  if (fx === 22 && (fy === 132 || fy === 154 || fy === 176)) return -1;  // −1 左根
+  return 0;
+}
+
+/** ConvertTreeAndGround_Branches（cs:55372）：左右邻枝/根换种（零掷） */
+function convertTreeAndGroundBranches(st: TileStore, x: number, y: number, newTreeSheet: number): void {
+  const nt = idOf(newTreeSheet);
+  const lB = isTileATreeBranchCore(st, x - 1, y), lR = isTileATreeRootCore(st, x - 1, y);
+  if ((lB === 1) || (lR === 1)) st.type[st.idx(x - 1, y)] = nt;
+  const rB = isTileATreeBranchCore(st, x + 1, y), rR = isTileATreeRootCore(st, x + 1, y);
+  if ((rB === -1) || (rR === -1)) st.type[st.idx(x + 1, y)] = nt;
+}
+
+/** ConvertTreeAndGround（cs:55385-55519）整树换种+地面改型。x,y=地面格；掷骰域仅在
+ *  old=323 支（base/top/middle 三段 Next）。全部帧写即原版字面量。 */
+function convertTreeAndGround(
+  st: TileStore, rng: RNG, gs: GenState,
+  x: number, y: number, newFloorSheet: number, oldTreeSheet: number, newTreeSheet: number,
+): void {
+  if (!(x >= 5 && y >= 5 && x < st.w - 5 && y < st.h - 5)) return;       // InWorld(...,5)
+  if (!st.flags[st.idx(x, y + 1)]) return;
+  let num = 100, num2 = 1;
+  while (num > 0) {
+    num--;
+    if (!(x >= 5 && (y - 1 - num2) >= 5 && x < st.w - 5 && (y - 1 - num2) < st.h - 5)) break;
+    const k = st.idx(x, y - 1 - num2);
+    const sh = st.flags[k] ? SHEET_OF_TYPE[st.type[k]] : -1;
+    if (!st.flags[k] || (sh !== 323 && !IS_A_TREE_TRUNK.has(sh))) break;
+    if (isTileATreeBranchCore(st, x, y - 1) !== 0) break;               // cs:55411 字面（注意查的是 y-1）
+    num2++;
+  }
+  if (isTileATreeBranchCore(st, x, y) !== 0 || isTileATreeRootCore(st, x, y) !== 0) {
+    genKillTile(st, rng, x, y);
+    return;
+  }
+  const nt = idOf(newTreeSheet);
+  if (newTreeSheet === 323) {
+    for (let i2 = 0; i2 <= num2; i2++) {
+      if (!st.inBounds(x, y - i2) || !st.flags[st.idx(x, y - i2)]) continue;
+      if ((isTileATreeBranchCore(st, x - 1, y - i2) === 1)
+        || (isTileATreeRootCore(st, x - 1, y - i2) === 1)) genKillTile(st, rng, x - 1, y - i2);
+      if ((isTileATreeBranchCore(st, x + 1, y - i2) === -1)
+        || (isTileATreeRootCore(st, x + 1, y - i2) === -1)) genKillTile(st, rng, x + 1, y - i2);
+    }
+  }
+  for (let j = 0; j <= num2; j++) {
+    if (!st.inBounds(x, y - j)) continue;
+    const q = st.idx(x, y - j);
+    if (!st.flags[q]) continue;
+    st.type[q] = nt;
+    const base = j === 0, top = j === num2;
+    if (base) {
+      if (newTreeSheet === 5 || newTreeSheet === 596 || newTreeSheet === 616) {
+        if (oldTreeSheet === 323) { st.frameX[q] = 0; st.frameY[q] = 22 * rng.nextIntRange(0, 2); }
+        else convertTreeAndGroundBranches(st, x, y - j, newTreeSheet);
+      } else if (newTreeSheet === 323) { st.frameX[q] = 66; st.frameY[q] = 0; }
+      continue;
+    }
+    if (top) {
+      if (newTreeSheet === 5 || newTreeSheet === 596 || newTreeSheet === 616) {
+        if (oldTreeSheet === 323) { st.frameX[q] = 22; st.frameY[q] = 22 * rng.nextIntRange(9, 11); }
+        else convertTreeAndGroundBranches(st, x, y - j, newTreeSheet);
+      } else if (newTreeSheet === 323) { st.frameX[q] = 22 * rng.nextIntRange(4, 6); st.frameY[q] = 0; }
+      continue;
+    }
+    if (newTreeSheet === 5 || newTreeSheet === 596 || newTreeSheet === 616) {
+      if (oldTreeSheet === 323) {
+        if (rng.nextIntRange(0, 1) === 0) { st.frameX[q] = 44; st.frameY[q] = 22 * rng.nextIntRange(3, 5); }
+        else if (rng.nextIntRange(0, 1) === 0) { st.frameX[q] = 22; st.frameY[q] = 22 * rng.nextIntRange(0, 5); }
+        else { st.frameX[q] = 0; st.frameY[q] = 22 * rng.nextIntRange(0, 5); }
+      } else convertTreeAndGroundBranches(st, x, y - j, newTreeSheet);
+    } else if (newTreeSheet === 323) {
+      st.frameX[q] = 22 * rng.nextIntRange(0, 2); st.frameY[q] = 0;
+    }
+  }
+  st.type[st.idx(x, y)] = idOf(newFloorSheet);                          // tile.type=newFloorType
+}
+
+/** 草族四集合合并（Conversion.Grass ∪ JungleGrass ∪ Snow ∪ MushroomGrass） */
+function convGrassFamily(sheet: number): boolean {
+  return CONV_GRASS.has(sheet) || CONV_JUNGLE_GRASS.has(sheet)
+    || CONV_SNOW.has(sheet) || CONV_MUSHROOM_GRASS.has(sheet);
+}
+
+/** TryConvertingOrKillingTreesAboveIfTheyWouldBecomeInvalid（cs:55281-55463 全臂）。
+ *  ★IIIII80 翻案：原近似②只做「Keep 或 Kill」二态——official 有 596/616/5/323 的
+ *  整树换种支（ConvertTreeAndGround），fish mox 全图净化把大量树基落在转化面上时该
+ *  支高频命中（曾 ~200 格 sapling/树残差）。 */
 function tryConvertingOrKillingTreesAbove(st: TileStore, rng: RNG, x: number, y: number, newSheet: number): void {
   if (!st.inBounds(x, y)) return;
   if (!st.flags[st.idx(x, y)]) return;
   if (y - 1 < 1 || !st.flags[st.idx(x, y - 1)]) return;               // InWorld(...,2)
-  const upSheet = SHEET_OF_TYPE[st.type[st.idx(x, y - 1)]];
+  const upIdx = st.idx(x, y - 1);
+  const upSheet = SHEET_OF_TYPE[st.type[upIdx]];
   if (!IS_A_TREE_TRUNK.has(upSheet) && upSheet !== 323) return;
   let flag = true;
-  if (upSheet === 5) {
-    flag = CONV_GRASS.has(newSheet) || CONV_JUNGLE_GRASS.has(newSheet)
-      || CONV_SNOW.has(newSheet) || CONV_MUSHROOM_GRASS.has(newSheet);
-  } else if (upSheet === 323) {
-    flag = CONV_SAND.has(newSheet);
-  }
+  if (upSheet === 5) flag = convGrassFamily(newSheet);
+  else if (upSheet === 323) flag = CONV_SAND.has(newSheet);
   if (flag) {
     const gt = treeGroundTest(upSheet, newSheet);
     if (gt !== null) flag = gt;
   }
-  if (!flag) genKillTile(st, rng, x, y - 1);                          // KillTile 干基 → CheckTree 坍塌级联
+  if (!flag) {
+    if (upSheet === 596 || upSheet === 616) {
+      if (convGrassFamily(newSheet)) convertTreeAndGround(st, rng, gs, x, y, newSheet, upSheet, 5);
+      else if (CONV_SAND.has(newSheet)) convertTreeAndGround(st, rng, gs, x, y, newSheet, upSheet, 323);
+      else genKillTile(st, rng, x, y - 1);
+    } else if (upSheet === 5) {
+      if (CONV_SAND.has(newSheet)) convertTreeAndGround(st, rng, gs, x, y, newSheet, upSheet, 323);
+      else genKillTile(st, rng, x, y - 1);
+    } else if (upSheet === 323) {
+      if (convGrassFamily(newSheet)) convertTreeAndGround(st, rng, gs, x, y, newSheet, upSheet, 5);
+      else genKillTile(st, rng, x, y - 1);
+    } else {
+      genKillTile(st, rng, x, y - 1);
+    }
+  }
 }
 
 /** WorldGen.Convert(i,j,conversionType,tiles,walls) 单格版——本批消费面只涉 0/2/3。

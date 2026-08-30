@@ -17,7 +17,7 @@ import {
 import { cageFamilyOf, drawCageCell } from './CritterCage';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
 import { animFrameIdx, animYOffset, TILE_ANIM_RATE } from './TileAnim';
-import { vanillaFrameFor, setVanillaSolidTables, deriveVanillaSolidTablesFromDefs } from './VanillaFraming';
+import { vanillaFrameFor, vanillaFrameUnified, setVanillaSolidTables, deriveVanillaSolidTablesFromDefs, isVanillaMergeDirtFamily } from './VanillaFraming';
 // 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程;2026-08-28 转正默认启用)。
 // ★回退开关(发现严重问题时无需改代码):
 //   ①URL ?vf=0 —— 单次强制关,压过一切(含 localStorage);
@@ -61,6 +61,38 @@ function ensureSolidTables(): void {
 // (坡面切条 drawSlopedFrame/半砖下半切片/半砖衔接帧/drawAdjust/vectorOffset)——
 // 链帧本就是普通合并帧(rig 实证:斜坡格存 (54,54) 等),斜坡/半砖的形状完全由
 // 绘制层切出;此前链命中直画整块 ⇒ vf=1 斜坡/半砖全变完整方块(用户实报根因)。
+//
+// ★跨族边界统一视图(2026-08-30 用户实报「异族结合透背景墙」两批收敛):
+// compiled-1458 rig 逐位仲裁证实——链输出的MERGE_DIRT跨族交界帧与原版服务器完全一致,
+// 且这些官方过渡帧自带真透明缺口(绿底合成实验),即"细缝咬合"是原版本相;但用户实测
+// 权威认定接缝应封闭。第一批尝试「该格回落旧近似路径」,第二批标注证明旧规则在这些
+// 构型同样留缝(audit 34 格 notDiverted=0 全已走旧路径仍被标)⇒ 终态=仍用链、把
+// 异族合并族邻居【视同本族】求帧(vanillaFrameUnified,独立缓存/不污染全局语义),
+// 输出全连内帧族闭合接缝且与周边链格同几何家族。纯原版查验开关
+// localStorage sw_vanilla_framing_strict=1 可切回逐位原版(含缝)。
+const _VANILLA_STRICT = (() => {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('sw_vanilla_framing_strict') === '1';
+  } catch { return false; }
+})();
+function crossesForeignMergeDirt(st: TileStore, x: number, y: number): boolean {
+  const ci = st.idx(x, y);
+  if (!st.flags[ci]) return false;
+  const van0 = vanillaIdOf(st.type[ci]);
+  if (!isVanillaMergeDirtFamily(van0)) return false; // ★family 含 dirt(0),官方表无 tileMergeDirt[0]
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue;
+      const nx = x + dx, ny = y + dy;
+      if (!st.inBounds(nx, ny)) continue;
+      const ni = st.idx(nx, ny);
+      if (!st.flags[ni]) continue;
+      const nv = vanillaIdOf(st.type[ni]);
+      if (nv !== van0 && isVanillaMergeDirtFamily(nv)) return true;
+    }
+  }
+  return false;
+}
 function vanillaChainFrame(
   atlas: SpriteAtlas, sheet: number,
   st: TileStore, x: number, y: number, type: number,
@@ -69,7 +101,14 @@ function vanillaChainFrame(
   if (!SW_VANILLA_FRAMING) return null;
   ensureSolidTables();
   const meta = atlas.vmeta(sheet);
-  const v = vanillaFrameFor(st, x, y, st, ((x * 7) + (y * 11)) % 3, world?.rockLevel ?? 0);
+  const variant = ((x * 7) + (y * 11)) % 3;
+  let v: { fx: number; fy: number };
+  if (!_VANILLA_STRICT && crossesForeignMergeDirt(st, x, y)) {
+    // ★跨族统一视图:异族合并族邻居视同本族求帧 ⇒ 全连内帧族闭合接缝(独立缓存)
+    v = vanillaFrameUnified(st, x, y, variant, world?.rockLevel ?? 0);
+  } else {
+    v = vanillaFrameFor(st, x, y, st, variant, world?.rockLevel ?? 0);
+  }
   if (v.fx < 0 || v.fy < 0) return null;
   if (meta && (v.fx + 16 > (meta.cols) * 18 || v.fy + 16 > (meta.rows) * 18)) return null; // 越表回退旧路径
   const r = atlas.vframe(sheet, Math.floor(v.fx / 18), Math.floor(v.fy / 18));

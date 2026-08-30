@@ -293,6 +293,14 @@ function runInventoryEscapeChain(game: Game, intent: 'escape' | 'inventory'): vo
     game.paused = false;
     ui.closeInventory();
     game.input.uiBlocking = false;
+  } else if (game.npcDialogActive) {
+    // Player.cs:4960-5025 ToggleInv 优先序：talkNPC≥0 先关对话（Sound11 +
+    // playerInventory=false），不落背包/暂停——NpcDialog 自身 Esc 捕获监听已拦截
+    // 物理键，此分支承接虚拟沿（触屏暂停钮/重绑键）与 dialogNpc 残余态
+    game.closeNpcDialog();
+  } else if (ui.signDialogActive) {
+    // 同链路牌支：sign≥0 关牌先于背包（Player.cs ToggleInv 后段）
+    ui.closeSignDialog();
   } else if (ui.invPanel && ui.invPanel.style.display === 'block') {
     ui.closeInventory();
   } else if (intent === 'escape') {

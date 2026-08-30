@@ -143,6 +143,8 @@ export interface ClientNetHooks {
   onStrike?: (netId: number, rawDmg: number, kbx: number, kby: number, fromSlot?: number) => void;
   /** 其他端玩家表情到达（msg120；Game 在对应远端代理头顶出泡 360t） */
   onEmoteBubble?: (slot: number, emoteId: number) => void;
+  /** 树妖星露谷彩蛋广播到达（msg144；各端本地启动编排器——双向免回显） */
+  onDryadStardewAnim?: () => void;
   /** PvP 近战命中意向到达（v7 msg44；被打方本地结算——Game 过 InOpposingTeam 门禁后走
    *  damagePlayer(pvp)）。fromSlot=攻击者槽位（服务器回填）；flags bit0=crit
    *  bits1-4=武器浸剂 meleeEnchant（StatusPvP 消费） */
@@ -706,6 +708,11 @@ export class ClientNet {
         this.hooks.onStrike?.(netId, dmg, kbx, kby, fromSlot);
         return;
       }
+      case Msg.DryadStardew: {
+        // msg144 S→C：载荷空——其他端树妖演出（发送端已本地播）
+        if (this.hooks.onDryadStardewAnim) this.hooks.onDryadStardewAnim();
+        return;
+      }
       case Msg.EmoteBubble: {
         // msg120 S→C：{u8 slot, u8 emoteId}——其他端玩家表情,锚到对应代理头顶
         const slot = r.u8();
@@ -1110,6 +1117,12 @@ export class ClientNet {
    *  各端在对应玩家代理头顶出泡（原版 C→S 120 → 服务器 msg91 全体广播） */
   sendEmote(emoteId: number) {
     this.send(new NetWriter(Msg.EmoteBubble).u8(emoteId).finish());
+  }
+
+  /** 树妖星露谷彩蛋广播（msg144）：载荷空，服务器中继排除发送者
+   *  （原版 DryadText_Do_StardewValleyBit netMode==1 分支 SendData(144)） */
+  sendDryadStardewAnim() {
+    this.send(new NetWriter(Msg.DryadStardew).finish());
   }
 
   // ================= MP 同步轻件包（net/syncModules.ts：module0/2/4/7 + msg203） =================

@@ -177,12 +177,18 @@ export function computeHappiness(inp: HappinessInput): HappinessResult {
     return { priceMul: 1, report: [] };
   }
   // 无家 / 离家 >120 / 危险群系 → 置 1000（:111-122；末尾钳回 1.5）
+  const ruined = inp.homeless || inp.distFromHome > 120;
   if (inp.homeless) line('NoHome');                                  // RuinMoodIfHomeless :334-341
   else if (inp.distFromHome > 120) line('FarFromHome');              // IsFarFromHome :343-353
+  // HateBiome 守门对齐 ShopHelper.cs:116-124 `_currentPriceAdjustment < 1000f`——
+  // NoHome/FarFromHome 已把价乘置 1000 时不再叠发（审查 P2：原版差一行语义）
   for (const [flag, nameKey] of [
     [inp.playerInCorrupt, 'Corruption'], [inp.playerInCrimson, 'Crimson'], [inp.playerInDungeon, 'Dungeon'],
   ] as Array<[boolean, string]>) {
-    if (flag) { line('HateBiome', { biomeNameKey: nameKey }); break; }  // IsPlayerInEvilBiomes :355-370（首命中）
+    if (flag && mul < 1000) { line('HateBiome', { biomeNameKey: nameKey }); break; }  // IsPlayerInEvilBiomes :355-370（首命中）
+  }
+  if (ruined || inp.playerInCorrupt || inp.playerInCrimson || inp.playerInDungeon) {
+    mul = 1000;
   }
   if (inp.homeless || inp.distFromHome > 120
     || inp.playerInCorrupt || inp.playerInCrimson || inp.playerInDungeon) {

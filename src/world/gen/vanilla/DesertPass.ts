@@ -200,8 +200,14 @@ export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): Deser
   // DesertBiome pass 放置循环（cs:12538-12562 1:1）：失败重掷**永不早退**，
   // 2 次换向后 skipDesertTileCheck 恒过（此前 tries>w/2 早退=可能整图无沙漠）
   let side = gs.dungeonSide, tries = 0, flips = 0, skipCheck = false;
-  // ★UUUUUU：RowHasInvalidTiles 的 NTB/Remix 泥豁免旗（DesertDescription.cs:101）
-  const ntbSkipMud = !!gs.seedFlags.notTheBees || !!gs.seedFlags.remix;
+  // ★IIIII83 定罪（1458 DesertDescription.cs:101 复合门反转修正）：RowHasInvalidTiles
+  //   的泥/丛林草非法判据 = `(!notTheBees || remix) && (type==59||60)` —— 即「只要
+  //   非 NTB 或带 remix，59/60 行一律拒」；NTB 单链（无 remix）才豁免。旧移植把
+  //   豁免旗写成 `ntb||remix`＝德摩根弄反：zenith(ntb∧remix 同真)被当豁免 ⇒ 沙漠
+  //   首选带一次命中 ⇒ 整个地下沙漠落在 x86 另一侧（真值侧 2100 连败+双翻后
+  //   skipCheck 随机落点, jaccard=0）⇒ #19..27 全线爆窗。正确语义= !(A∧B) 仅当
+  //   「NTB ∧ 非 remix」才豁免。
+  const ntbSkipMud = !!gs.seedFlags.notTheBees && !gs.seedFlags.remix;
   let num4 = Math.trunc(rng.nextIntRange(0, half) / 8) + Math.trunc(half / 8);
   let x = half + num4 * -side;
   let desc: DesertDesc | null = null;

@@ -19,8 +19,11 @@ const SEED = process.env.SW_M8_SEED ?? '51620200';
   mkdirSync(`${OUT}/mb-post`, { recursive: true });
   const g = globalThis as unknown as Record<string, unknown>;
   const marks: string[] = [];
+  let rollN = 0;
+  g.__swOnRoll = (): void => { rollN++; };
+  g.__swMbDraws = (): number => rollN;
   g.__swSeg = (n: string, d?: unknown): void => {
-    marks.push(d === undefined ? n : `${n} ${JSON.stringify(d)}`);
+    marks.push(n);   // detail 与 rc 已并入 name（IIII71b 探针）
   };
   let n = 0;
   const saved = new Set<string>();
@@ -54,8 +57,15 @@ const SEED = process.env.SW_M8_SEED ?? '51620200';
         const TAGS: Record<string, string> = {
           '蜂巢幼虫': 'mb-pre', '微群系': 'mb-post',
           '二次沉降': 'cc-pre', '仙人掌珊瑚': 'cc-post',
+          '瓦片清理': 'al-pre', '蜥蜴祭坛': 'al-post',
+          '断线陷阱清理': 'fc-pre', '终清理': 'fc-post',
         };
         if (TAGS[pn]) snap(w2, TAGS[pn]!);
+        {
+          const stA = (w2 as { store: TileStore }).store as unknown as Record<string, Uint8Array | Uint16Array>;
+          const iA = 891 * 4200 + 1232, iB = 891 * 4200 + 1233;
+          console.log(`cellwatch ${pn}: f=${stA.flags[iA]} t=${stA.type[iA]} | f=${stA.flags[iB]} t=${stA.type[iB]}`);
+        }
       },
     });
     void n;

@@ -877,7 +877,7 @@ export function runTemplePart2Pass(st: TileStore, rng: RNG, gs: GenState, chests
  *  强制 226 地板（slope/halfBrick/liquid 复位）——原版注册序在 TileCleanup(21327)
  *  之后，对中途 Pots/Traps/TileCleanup 的祭坛扰动做最终回滚（顺带达成
  *  cs:21744-21746 的 232→226；TileCleanupPass ⑪ 段同效双保险）。 */
-export function runLihzahrdAltarPass(st: TileStore, gs: GenState): void {
+export function runLihzahrdAltarPass(st: TileStore, gs: GenState, rng?: RNG): void {
   const altarX = gs.lAltarX, altarY = gs.lAltarY;
   if (altarX < 0) return;   // 无神庙世界（Skyblock 等）跳过
   for (let dx = 0; dx <= 2; dx++) {
@@ -890,6 +890,14 @@ export function runLihzahrdAltarPass(st: TileStore, gs: GenState): void {
     if (bj >= 0) {
       st.type[bj] = BRICK; st.flags[bj] = 1;
       st.slope[bj] = 0; st.half[bj] = 0; st.liquid[bj] = 0;
+    }
+  }
+  // ★IIII71b 主案定罪：cs 尾六连 SquareTileFrame(k/l 双循环，x 外 y 内)——本仓
+  // 此前整缺 ⇒ 邻接多格件(例 DRUNK 51620200 神庙陈设期跨锚雕像对 (1232..33,891))
+  // 不被级联复检击杀，mile8 #101 T0>105×2 实锤。vanilla cs:22241-22251。
+  for (let k = 0; k < 3; k++) {
+    for (let l = 0; l < 2; l++) {
+      genSquareTileFrame(st, rng ?? new RNG(gs.seed), altarX + k, altarY + l);
     }
   }
 }

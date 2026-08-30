@@ -5,6 +5,32 @@ import { TILE, CHUNK } from '../core/constants';
 import { TintAtlas, type TintRect } from './TintAtlas';
 import { tintedTex } from './StringLine';
 import { NPC_GRIDS } from '../remaster/NpcGridLayouts';
+import { NPC_FOOT_BIAS } from '../data/npcFootBias.gen';
+
+/** ★「落脚贴合」开关(2026-08-30 用户拍板):人形/常规族贴图按首帧扫描上移,
+ *  鞋底与碰撞盒底线对齐。刻意偏离反编译中心锚定数学——parity 对账跑批前
+ *  必须 localStorage.sw_npc_foot_flush='0' 关闭(见 Renderer.npcFootFlushOn) */
+export function npcFootFlushOn(): boolean {
+  try { return localStorage.getItem('sw_npc_foot_flush') !== '0'; } catch { return true; }
+}
+/** 全局下沉微调(px,正=整体下移)。默认 2:校准基准(F3 描边框线)与肉眼地面参照
+ *  (瓦顶硬边/草叶带)存在 ~2px 恒定系统差,v3 收敛到"框线齐平"在真机上即呈浮空 */
+function npcFootBiasExtra(): number {
+  try { const n = Number(localStorage.getItem('sw_npc_foot_flush_extra')); return Number.isFinite(n) ? n : 2; } catch { return 2; }
+}
+/** 逐型人工覆写(localStorage sw_npc_foot_bias_over = {"46":-2,...}):正=下移。
+ *  小动物/多姿态族单帧扫描不可靠,由用户目测旋钮定档后回灌生成表 */
+let OVER_CACHE: Record<number, number> | null = null;
+function npcFootBiasOverride(id: number): number {
+  try {
+    if (!OVER_CACHE) OVER_CACHE = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}');
+    return OVER_CACHE[id] ?? 0;
+  } catch { return 0; }
+}
+function npcFootBiasY(id: number | undefined): number {
+  if (!npcFootFlushOn() || id === undefined) return 0;
+  return ((NPC_FOOT_BIAS[id] ?? 0) - npcFootBiasExtra()) + npcFootBiasOverride(id);
+}
 import type { Camera } from './Camera';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
@@ -5564,6 +5590,11 @@ export class Renderer {
         // DrawNPC switch 内的【绘制侧】num47 覆写（:23445-23477）——血条不走此段,
         // 故不入 HB_ADD_H（覆盖语义,非累加）
         addY = Renderer.DRAW_NUM47_OVERRIDE[idA] ?? addY;
+        // ★落脚贴合补偿（2026-08-30 用户拍板,刻意偏离反编译中心锚定数学）：
+        // 官方人形族贴图内容底行系统性低于盒底 ≈5px(cell56 内容[8..53]),F3 精确框线
+        // 下呈"陷地"。此表按首帧扫描逐型抵消;排除旋转/独占路径(gen 时已剔除)。
+        // ★parity 对账跑批前必须 localStorage.sw_npc_foot_flush='0' 关闭本表!
+        addY += npcFootBiasY(idA);   // 表值为带方向位移(负=上移)+ 全局基准微调
         // 416 日耀掠兽骑手（Main.cs:24508-24515 case 416 独占）：绘制位置吸附坐骑
         // 415 的 Bottom（AI 锚 Center+(-spriteDir*10,-30) 只喂碰撞盒——骑手视觉上
         // 双脚踩在掠兽脚平面）。其余 aiStyle 75 骑手（390）原版无此绘制覆写，仍用 AI 位
@@ -9348,6 +9379,9 @@ export class Renderer {
       } else {
         r = n.bound ? this.boundNpcSheet(n) : this.atlas.vnpc(n.vanillaId, n.frame);
       }
+      // 落脚补偿只作用于「默认竖条 NPC_{id}」——微光/派对/狼人档案表与捆绑表
+      // 几何独立,套同一 bias 会浮空(2026-08-30 用户实拍:微光镇史莱姆)
+      const onBaseSheet = !profileImg && !n.bound;
       if (r) {
         ctx.save();
         // 中心锚（2026-08-24 勘误,同 drawEnemy）：城镇 NPC 原版走同一 DrawNPC 通用
@@ -9356,9 +9390,12 @@ export class Renderer {
         // num46:108 巫师 +2（:23227）;坐姿运行时减档（NPCAddHeight 尾 :22377-22386
         // townNPC&&ai[0]==5：−4,124 再 −2,637 猫/656 兔/城镇史莱姆 670+678-684 再 −10）
         const nidT = n.vanillaId ?? -1;
-        const addYT = (nidT === 108 ? 2 : 0) + (Renderer.HB_ADD_H[nidT] ?? 0)
+        let addYT = (nidT === 108 ? 2 : 0) + (Renderer.HB_ADD_H[nidT] ?? 0)
           + (n.sitting ? -4 + (nidT === 124 ? -2 : 0)
             + (nidT === 637 || nidT === 656 || Renderer.TOWN_SLIME_IDS.has(nidT) ? -10 : 0) : 0);
+        // ★落脚贴合(同 drawEnemy):站立态按生成表+全局微调上移;坐姿原版档不叠加;
+        // 仅默认竖条路径消费
+        if (!n.sitting && npcFootFlushOn() && onBaseSheet) addYT += npcFootBiasY(nidT);
         ctx.translate(n.cx, n.cy); // 盒中心
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
         // 微光转化渐显/渐隐（GetAlpha NPC.cs:94874-94878：CurrentlyShimmerTransparent

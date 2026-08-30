@@ -110,10 +110,10 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
       const sfI65 = gs.seedFlags;
       let style = 0;
       if (!isLake && sfI65.drunkWorld && !sfI65.remix) {
-        if (rng.int(0, 1) === 0) { style = 3; snowCloudIsland(st, rng, x, y); }
-        else { style = 1; desertCloudIsland(st, rng, x, y); }
+        if (rng.int(0, 1) === 0) { style = 3; snowCloudIsland(st, rng, gs, x, y); }
+        else { style = 1; desertCloudIsland(st, rng, gs, x, y); }
       }
-      else if (isLake) cloudLake(st, rng, x, y);
+      else if (isLake) cloudLake(st, rng, gs, x, y);
       else {
         if (sfI65.remix && sfI65.drunkWorld && (!sfI65.tenthAnniversary || sfI65.getGoodWorld)) {
           style = ((gs.crimsonLeft && x < Math.trunc(w / 2)) ? 5 : ((gs.crimsonLeft || x <= Math.trunc(w / 2)) ? 4 : 5));
@@ -122,7 +122,7 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
           if (sfI65.getGoodWorld || (sfI65.remix && !sfI65.tenthAnniversary)) style = !gs.crimson ? 4 : 5;
           else if (sfI65.tenthAnniversary) style = 6;
         }
-        cloudIsland(st, rng, x, y);
+        cloudIsland(st, rng, gs, x, y);
       }
           housesX.push(x); housesY.push(y);
       gs.floatingIslands.push({ x, y, style, isLake });
@@ -142,9 +142,28 @@ function waterStaysPut(st: TileStore, x: number, y: number): boolean {
   return side(x, y + 1) && side(x - 1, y) && side(x + 1, y);
 }
 
+// ★IIIII80（2026-08-30）：such great heights 的天域云清臂——四座 CloudIsland 族建器
+// （CloudIsland cs:79269 / Snow :78392 / Desert :78828 / CloudLake :79719）在逐列
+// 盘顶钳制之后、落盘之前都有同构支：
+//   num14 = clamp(num13(本列盘顶), [y0int, y1int]); for l=0..num14 → Clouds 格 active=false
+// 即「本列从天空到新云盘顶的既有云全部熄灭」（残留 type 幽灵照留），errorWorld 不跑。
+// TileID.Sets.Clouds = {189,196,460,717,718,719}（TileID.cs:197）。
+const SGIS_CLOUD_IDS = new Set(idsByVanillaSheet(189, 196, 460, 717, 718, 719));
+function sgisClearSkyAbove(st: TileStore, gs: GenState, x: number, topRow: number, y0Int: number, y1Int: number): void {
+  if (!gs.seedFlags.surfaceIsInSpace || gs.seedFlags.errorWorld) return;
+  let n14 = topRow;
+  if (n14 < y0Int) n14 = y0Int;
+  if (n14 > y1Int) n14 = y1Int;
+  for (let l = 0; l <= n14; l++) {
+    if (!st.inBounds(x, l)) continue;
+    const i = st.idx(x, l);
+    if (st.flags[i] !== 0 && SGIS_CLOUD_IDS.has(st.type[i])) st.flags[i] = 0;   // 仅熄灭，幽灵保留
+  }
+}
+
 /** CloudIsland（cs:78618-79066）1:1：①云盘(189) → ②底缘雨云凸包 → ③土芯(云→土) →
  *  ④土面云斑 → ⑤墙 73 → ⑥岛面水池 → ⑦岛上方云 puff + 中心注水 */
-function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
+function cloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number): void {
   const tile = CLOUD;                                // num8 = 189（雨云只在凸包/puff 出现）
   let num = rng.int(100, 149);                       // Next(100,150)
   let num2 = num;
@@ -165,6 +184,7 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
       if (rng.int(0, 1) === 0) top += rng.int(-1, 1);   // Next(2)==0 → Next(-1,2)
       if (top < py) top = py;
       if (top > py + 2) top = py + 2;
+      sgisClearSkyAbove(st, gs, x, top, y0, y1);   // ★IIIII80 sgis 天域云清
       for (let y = y0; y < y1; y++) {
         if (y <= top) continue;
         const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
@@ -345,7 +365,7 @@ const SAND_BLOCK = TILE_BY_KEY['sand']!;        // sheet 53
 const SNOW_CLOUD = TILE_BY_KEY['v_460_snow_cloud_block']!;
 
 function cloudIslandVariant(
-  st: TileStore, rng: RNG, ci: number, cj: number,
+  st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number,
   altTile: number, coreTile: number,
 ): void {
   const tile = CLOUD;
@@ -368,6 +388,7 @@ function cloudIslandVariant(
       if (rng.int(0, 1) === 0) top += rng.int(-1, 1);
       if (top < py) top = py;
       if (top > py + 2) top = py + 2;
+      sgisClearSkyAbove(st, gs, x, top, y0, y1);   // ★IIIII80 sgis 天域云清
       for (let y = y0; y < y1; y++) {
         if (y <= top) continue;
         const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
@@ -536,18 +557,18 @@ function cloudIslandVariant(
 }
 
 /** SnowCloudIsland（cs:78284）drunk 专建器 */
-function snowCloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
-  cloudIslandVariant(st, rng, ci, cj, SNOW_CLOUD, SNOW_BLOCK);
+function snowCloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number): void {
+  cloudIslandVariant(st, rng, gs, ci, cj, SNOW_CLOUD, SNOW_BLOCK);
 }
 
 /** DesertCloudIsland（cs:78720）drunk 专建器 */
-function desertCloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
-  cloudIslandVariant(st, rng, ci, cj, RAIN_CLOUD, SAND_BLOCK);
+function desertCloudIsland(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number): void {
+  cloudIslandVariant(st, rng, gs, ci, cj, RAIN_CLOUD, SAND_BLOCK);
 }
 
 /** CloudLake（cs:79068-79419）1:1：①云盘 → ②底缘雨云凸包（无 InWorld 门）→
  *  ③湖盆挖除+灌水（阈值 top-2、Y 下限 0）→ ④墙 73 → ⑤湖面水 */
-function cloudLake(st: TileStore, rng: RNG, ci: number, cj: number): void {
+function cloudLake(st: TileStore, rng: RNG, gs: GenState, ci: number, cj: number): void {
   const tile = CLOUD;
   let num = rng.int(100, 149);
   let num2 = num;
@@ -568,6 +589,7 @@ function cloudLake(st: TileStore, rng: RNG, ci: number, cj: number): void {
       if (rng.int(0, 1) === 0) top += rng.int(-1, 1);
       if (top < py) top = py;
       if (top > py + 2) top = py + 2;
+      sgisClearSkyAbove(st, gs, x, top, y0, y1);   // ★IIIII80 sgis 天域云清
       for (let y = y0; y < y1; y++) {
         if (y <= top) continue;
         const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
@@ -1391,7 +1413,8 @@ function frameAroundCactus(st: TileStore, x: number, y: number): void {
   }
 }
 
-export function growCactus(st: TileStore, rng: RNG, i: number, j: number): void {
+export function growCactus(st: TileStore, rng: RNG, i: number, j: number, gs?: GenState): void {
+  segProbe77(`GC IN ${i},${j} rc=${rc77()}`);   // ★IIII71b（与 rig GrowCactus 同位）
   if (j <= 0 || !st.inBounds(i, j) || !st.inBounds(i, j - 1)) return;   // cs:56586 + C# OOB 读 = 空格
   const anchor = st.idx(i, j);
   const anchorType = st.type[anchor];
@@ -1469,7 +1492,22 @@ export function growCactus(st: TileStore, rng: RNG, i: number, j: number): void 
       if (isCactus(num10, num11)) num9++;
     }
   }
-  if (num9 >= rng.int(11, 12)) return;       // cs:56678：num9 >= Next(11,13)
+  // ★IIII71b 主案定罪：GrowCactus 高度门 drunk 双态（Terarria1458 rig 源
+  //  GrowCactus 内段，cs:56678 基准）——`if (Main.drunkWorld) { num9 >= Next(11,20) }
+  //  else if (num9 >= Next(11,13)) return;`。旧 JS 只落非 drunk 态 ⇒ DRUNK 世界
+  //  仙人掌簇密度上限分布偏窄（阈值域 11..19 vs 11..12），plantCactus 150 邻域
+  //  尝试内整群生长轨迹漂移（CC 流 x=1746 起点列门错位；mile8 #99 A≈250/T≈252）。
+  {
+    const thr = rng.int(11, gs?.seedFlags.drunkWorld ? 19 : 12);   // Next(11, drunk?20:13)
+    if (gs?.seedFlags.drunkWorld) {
+      if (num9 >= thr) {
+        segProbe77(`GC CAP ${num},${num2} n9=${num9} thr=${thr} drunk=1 rc=${rc77()}`);
+        return;
+      }
+      segProbe77(`GC PASS ${num},${num2} n9=${num9} thr=${thr} drunk=1 rc=${rc77()}`);
+    } else if (num9 >= thr) return;
+  }
+
   num = i;
   num2 = j;
   if (num7 === 0) {
@@ -1507,15 +1545,15 @@ export function growCactus(st: TileStore, rng: RNG, i: number, j: number): void 
 
 /** PlantCactus（cs:54176-54187）：锚点一次 GrowCactus + 150 次随机邻域尝试
  *  （x∈[i-1,i+1]、y∈[j-10,j+1]）→ 天然成簇 */
-export function plantCactus(st: TileStore, rng: RNG, i: number, j: number): void {
+export function plantCactus(st: TileStore, rng: RNG, i: number, j: number, gs?: GenState): void {
   ccTraceHook?.plant(i, j);
-  growCactus(st, rng, i, j);
+  growCactus(st, rng, i, j, gs);
   const hook = ccTraceHook?.grow;
   if (hook) {
     for (let k = 0; k < 150; k++) {
       const i2 = rng.int(i - 1, i + 1);        // Next(i-1, i+2)
       const j2 = rng.int(j - 10, j + 1);       // Next(j-10, j+2)
-      growCactus(st, rng, i2, j2);
+      growCactus(st, rng, i2, j2, gs);
       hook(i2, j2);
     }
     return;
@@ -1523,7 +1561,7 @@ export function plantCactus(st: TileStore, rng: RNG, i: number, j: number): void
   for (let k = 0; k < 150; k++) {
     const i2 = rng.int(i - 1, i + 1);        // Next(i-1, i+2)
     const j2 = rng.int(j - 10, j + 1);       // Next(j-10, j+2)
-    growCactus(st, rng, i2, j2);
+    growCactus(st, rng, i2, j2, gs);
   }
 }
 
@@ -1692,6 +1730,12 @@ function segProbe77(n: string): void {
   try { g0.__swSeg?.(n); } catch { /* probe */ }
 }
 
+/** ★IIII71b：当前 RNG 样本计（__swMbDraws 由仪具注入，缺省 0） */
+function rc77(): number {
+  const g0 = globalThis as { __swMbDraws?: () => number };
+  try { return g0.__swMbDraws?.() ?? 0; } catch { return 0; }
+}
+
 /** pass 96 本体。Skyblock.denyAllGeneration（cs:21117）→ 整段跳过（零掷骰）。 */
 export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenState): void {
   const g0 = globalThis as { __swCcCap?: (gs: GenState, st: TileStore) => void };
@@ -1700,6 +1744,8 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
   const w = st.w;
   const num = 8;                             // cs:21120（remixWorldGen=2 不触发）
   const num7 = 380;                          // cs:21127
+  segProbe77(`CC H rc=${rc77()}`);
+  segProbe77(`CC OS rc=${rc77()}`);
   const maxL = rng.int(3, 12);               // cs:21123 Next(3,13)——左段列距骰
   const maxR = rng.int(3, 12);               // cs:21124 Next(3,13)——右段列距骰
   rng.int(2, 5); rng.int(2, 5);              // cs:21125-21126 Next(2,6)×2——死骰（声明后未用）
@@ -1717,7 +1763,7 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
             if (st.inBounds(l, m) && st.flags[st.idx(l, m)] && st.type[st.idx(l, m)] === PALM) num9 = 0.13;
           }
         }
-        if (rng.next() < num9) growPalmTreeAt(st, rng, gs, j, k);   // cs:21151-21152 NextDouble < num9
+        if (rng.next() < num9) { segProbe77(`CC PG ${j},${k} rc=${rc77()}`); growPalmTreeAt(st, rng, gs, j, k); }   // cs:21151-21152 NextDouble < num9
         if (plantSeaOat(st, rng, gs, j, k)) {                   // cs:21154
           if (rng.nextInt(2) === 0) growSeaOat(st, j, k);       // cs:21156
           if (rng.nextInt(2) === 0) growSeaOat(st, j, k);       // cs:21160
@@ -1726,6 +1772,7 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
       }
     }
   }
+  segProbe77(`CC OD rc=${rc77()}`);
   const yTop = gs.worldSurface - 1;          // cs:21198：num13 = worldSurface - 1
   for (let n = 0; n < 3; n++) {
     let x0: number, x1: number, flag: boolean, maxValue: number;
@@ -1734,7 +1781,7 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
     else { x0 = w - num7; x1 = w - 5; flag = false; maxValue = maxR; }
     for (let x = x0; x < x1; x++) {
       const hitGate = rng.nextInt(maxValue) === 0;
-      segProbe77(`CC ${hitGate ? 'HIT' : 'MISS'} ${n},${x}`);
+      segProbe77(`CC COL ${n},${x} ${hitGate ? 'G' : 'M'} rc=${rc77()}`);
       if (!hitGate) {
         // ---- 尾部燕麦段（cs:21302-21320）：列距骰未命中的列，y 自 0 起整列铺燕麦/530 ----
         for (let y = 0; y < yTop && y < st.h; y++) {
@@ -1753,13 +1800,13 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
         if (!st.flags[ti] || !SAND_GATE.has(st.type[ti])) continue;   // cs:21208-21211
         const ai = st.idx(x, y - 1);
         if (st.flags[ai] || st.wall[ai] !== 0) continue;              // cs:21213-21216
-        segProbe77(`CC ANCH ${x},${y} l2=${st.liquid[st.idx(x, y - 2)]}`);
+        segProbe77(`CC ANCH ${x},${y} l2=${st.liquid[st.idx(x, y - 2)]} rc=${rc77()}`);
         if (flag) {
           // ---- 中段：湖畔水盒棕榈 / 仙人掌（cs:21257-21279；水盒逻辑在
           //      TreePass.waterBoxPalmCheck——超限已掷 Next(4) 时不再 PlantCactus）----
           if (!waterBoxPalmCheck(st, rng, x, y, gs)) {
-            segProbe77(`CC PLANT ${x},${y}`);
-            plantCactus(st, rng, x, y);
+            segProbe77(`CC PLANT ${x},${y} rc=${rc77()}`);
+            plantCactus(st, rng, x, y, gs);
           }
         } else {
           // ---- 两端海滩段：珊瑚 81 / 贝壳 324（cs:21283-21299）----
@@ -1767,13 +1814,13 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
             && st.liquid[st.idx(x, y - 2)] === 255
             && st.liquid[st.idx(x, y - 3)] === 255
             && st.liquid[st.idx(x, y - 4)] === 255) {
-            if (rng.int(0, 1) === 0) { segProbe77(`CC CORAL ${x},${y - 1}`); placeCoral(st, rng, x, y - 1); }
-            else { const sh77 = rollRandomSeaShellStyle(rng); segProbe77(`CC SHELL ${x},${y - 1}`); placeSeaShell(st, rng, x, y - 1, sh77); }
+            if (rng.int(0, 1) === 0) { segProbe77(`CC CORAL ${x},${y - 1} rc=${rc77()}`); placeCoral(st, rng, x, y - 1); }
+            else { const sh77 = rollRandomSeaShellStyle(rng); segProbe77(`CC SHELL ${x},${y - 1} rc=${rc77()}`); placeSeaShell(st, rng, x, y - 1, sh77); }
             break;                          // cs:21292：放置后跳出本列扫描
           }
           if (st.inBounds(x, y - 2) && st.liquid[st.idx(x, y - 2)] === 0 && y < gs.worldSurface) {
             const sh77 = rollRandomSeaShellStyle(rng);
-            segProbe77(`CC SHELL0 ${x},${y - 1}`);
+            segProbe77(`CC SHELL0 ${x},${y - 1} rc=${rc77()}`);
             placeSeaShell(st, rng, x, y - 1, sh77);
             break;                          // cs:21299
           }

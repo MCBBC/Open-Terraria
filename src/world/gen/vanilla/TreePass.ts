@@ -391,9 +391,9 @@ export function waterBoxPalmCheck(st: TileStore, rng: RNG, x: number, y: number,
     }
   }
   if (Math.trunc(sum / 255) > 25) {
-    segProbe77(`CC WBOX ${x},${y} total=${sum}`);
+    segProbe77(`CC WBOX ${x},${y} total=${sum} rc=${rc77()}`);
     if (rng.int(0, 3) === 0) {
-      segProbe77(`CC PALMTRY ${x},${y}`);
+      segProbe77(`CC PALMTRY ${x},${y} rc=${rc77()}`);
       growPalmTree(st, rng, x, y, gs);
     }
     return true;
@@ -405,6 +405,12 @@ export function waterBoxPalmCheck(st: TileStore, rng: RNG, x: number, y: number,
 function segProbe77(n: string): void {
   const g0 = globalThis as { __swSeg?: (name: string, detail?: unknown) => void };
   try { g0.__swSeg?.(n); } catch { /* probe */ }
+}
+
+/** ★IIII71b：当前 RNG 样本计（__swMbDraws 由仪具注入，缺省 0） */
+function rc77(): number {
+  const g0 = globalThis as { __swMbDraws?: () => number };
+  try { return g0.__swMbDraws?.() ?? 0; } catch { return 0; }
 }
 
 // ===================== GrowTreeWithSettings 族（宝石树 + 观赏树柳/樱） =====================

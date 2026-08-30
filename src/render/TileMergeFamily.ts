@@ -59,6 +59,14 @@ const DONT_MERGE_SNOW = new Set([161, 200, 163, 164, 224, 170, 738]);
 /** 内部 tile id → 原版 tile id（vanilla.sheet；非原版类型 = -1）。
  *  TILE_DEFS 是数组（id=下标），线性缓存避免每格重复属性链 */
 const vidCache: number[] = [];
+// ★三域契约(2026-08-30 收口备案,防再犯):
+//   ①运行时 store.type = 当前构建 TILE_DEFS 的数组下标(def 注册序;装载器按 key 换算,
+//     同会话内自洽——vanillaIdOf 本函数即唯一权威换算);
+//   ②磁盘存档 v3 起 = stable-id 双表(data/tiles.ts 尾部,'sheet'+私有段方案),**不是**
+//     数组下标域——外部文件(marks 工具/旧脚本)给出的 typeId 可能属于此域或更老 v2 域,
+//     与①比对前必须经装载链换算,禁止裸比;
+//   ③vanilla sheet id = 官方 TileID.cs 域,全部分帧集合(MERGE_DIRT 等)按下标域即本表。
+//   血案:2026-08-30 第三批曾把 marks 的外部 id 直接当①用引发方向性误判。
 export function vanillaIdOf(t: number): number {
   const c = vidCache[t];
   if (c !== undefined) return c;

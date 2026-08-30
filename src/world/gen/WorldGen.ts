@@ -878,6 +878,13 @@ function vanillaShimmer({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   if (sbDenyAll(gs.seedFlags)) return;                 // ★IIIII44 cs:15272
+  if (gs.seedFlags.dualDungeons) {
+    // ★IIIII78：Shimmer 在 :22692 十二禁表——dual 跳过但 shimmerX/Y 维持 Reset 值回填
+    // （vanilla Disable 后 GenVars.shimmerPosition 无写入端）。
+    world.shimmerX = gs.shimmerX;
+    world.shimmerY = gs.shimmerY;
+    return;
+  }
   rng.reseed(gs.seed); // ▶Shimmer cs:15256（shell/pillars/open 是内部段，不中间重播）
   runShimmerPass(store, rng, gs);
   // GenVars.shimmerPosition 落到 World（中途沉降 pass 在 finalize 之前就需要它）
@@ -1003,15 +1010,31 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   //   注册期即被排除）。tileSolid[481-483] 翻转窗口也随 Dungeon 跳过不触。
   if (sbDenyAll(gs.seedFlags)) return;
   // ★每个都是独立 GenPass——RunPass 每 pass 前重播种子（WorldGenerator.cs:497）。
-  rng.reseed(gs.seed); // ▶IceBiome cs:12343
-  runIceBiomePass(store, rng, gs);       // 16 Generate Ice Biome
+  // ★IIIII78 dualDungeons（double daring dangers）：DisablePassesForSpecialSeeds
+  //   （WorldGen.cs:22692-22706，调用点 :11113 CreateNewWorld 尾）把 IceBiome/
+  //   DesertBiome/Jungle/JungleShrines/ChestsInJungleShrines/Beehives/
+  //   BeeLarvaInBeehives/LihzahrdTemple/LihzahrdTemplePart2/LihzahrdAltar/
+  //   CorruptionAndCrimson/Shimmer 十二 GenPass `genPass.Disable()` 整跳——
+  //   RunPass 对 Skipped pass 不执行不掷骰（cs:491-497 Enabled 早退）。插桩 rig 的
+  //   WorldGenerator.cs:456 对 Skipped pass 仍发 dump（=前态冻结快照、pc.txt 照常
+  //   出行）⇒ 本仓同样零写、reseed 锚保持（reseed 无流消费,后续 pass 头重播使流位
+  //   两引擎等价）；对应子束的双地牢专属内容（样式房间族）在 DungeonPass 内承接。
+  if (!gs.seedFlags.dualDungeons) {
+    rng.reseed(gs.seed); // ▶IceBiome cs:12343
+    runIceBiomePass(store, rng, gs);       // 16 Generate Ice Biome
+  } else { rng.reseed(gs.seed); } // ▶IceBiome（dual 跳过锚）
   rng.reseed(gs.seed); // ▶Grass cs:12454
   // ★IIIII16：jagged rocks 打孔臂（cs:12470，skyblock 门内、roundLandmasses/撒草之前）
   if (gs.seedFlags.digExtraHoles && !gs.seedFlags.skyblock) doDigExtraHoles(store, rng, gs);
   runGrassPass(store, rng, gs);          // 17 Grass
   rng.reseed(gs.seed); // ▶JunglePass cs:12497
-  const jx = runJunglePass(store, rng, gs); // JunglePass
-  world.jungleX = jx;
+  let jx = gs.jungleX;
+  if (!gs.seedFlags.dualDungeons) {
+    jx = runJunglePass(store, rng, gs); // JunglePass
+    world.jungleX = jx;
+  }
+  // dual 跳过：world.jungleX 维持 Reset 期估值（gs.jungleX）——vanilla JunglePass 被
+  // Disable 后 jungleX 无写入端（下游 WetJungle 等零 RNG 面与流位不受影响）。
   // （自造「丛林表面泥化补偿块」已删 2026-08-16：原为 ±0.12w 表层 10 格 dirt→mud
   //  的自创改写——补的是 noYChange 修复前巨型泥 runner 够不到地表的旧缺陷
   //  （JunglePass.ts:67 注释「曾致泥柱矮」）；runner noYChange 修复后 JunglePass/
@@ -1025,7 +1048,9 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   // ★IIIII16：toadstool 首掷臂（cs:12517-12520，仅 !noSurface；SpreadGrass 扫描之前）
   doSurfaceIsMushroomsEarly(store, rng, gs);
   runMudCavesPass(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
-  runDesertPass(store, rng, gs); // 19 Full Desert（pass 头重播在 runDesertMoundOnly 内）
+  if (!gs.seedFlags.dualDungeons) {
+    runDesertPass(store, rng, gs); // 19 Full Desert（pass 头重播在 runDesertMoundOnly 内）
+  }
   rng.reseed(gs.seed); // ▶GlowingMushroomPatches cs:12581
   runMushroomPass(store, rng, gs); // 20 Mushroom Patches
   runMarbleGranitePass(store, rng, gs); // 21/22 Marble/Granite（函数内部含两 pass 边界重播）
@@ -1049,8 +1074,8 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   else if (!gs.seedFlags.drunkWorld) underworldAshGrassTrees(store, rng, gs, false);
   runHellFortPass(store, rng, gs, undefined, world.chests); // TTTT:梳妆台 88 烧 chest 注册槽(cs:52169)
   if (gs.seedFlags.drunkWorld) underworldAshGrassTrees(store, rng, gs, true);
-  rng.reseed(gs.seed); // ▶CorruptionAndCrimson cs:13919
-  runCorruptionPass(store, rng, gs); // 29 Corruption/Crimson
+  rng.reseed(gs.seed); // ▶CorruptionAndCrimson cs:13919（dual 跳过,同 :22692 十二禁表）
+  if (!gs.seedFlags.dualDungeons) runCorruptionPass(store, rng, gs); // 29 Corruption/Crimson
   rng.reseed(gs.seed); // ▶Lakes cs:14613
   runLakesPass(store, rng, gs); // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
   rng.reseed(gs.seed); // ▶Slush cs:14756（零掷骰）
@@ -1143,13 +1168,17 @@ function vanillaStructures({ store, rng, world }: GenCtx) {
   rng.reseed(gs.seed); // ▶SurfaceWaterInJungle cs:15887（零掷骰）
   runWetJunglePass(store, rng, gs);             // SurfaceWaterInJungle(1456 cs:15887 逐列灌水,零 RNG)
   rng.reseed(gs.seed); // ▶LihzahrdTemple cs:15911
-  runTemplePass(store, rng, gs);                // Jungle Temple(之字形房间链+走廊+门+祭坛+木刺;尾写 gs.tLeft… 供「神庙陈设」槽)
+  if (!gs.seedFlags.dualDungeons) {
+    runTemplePass(store, rng, gs);                // Jungle Temple(之字形房间链+走廊+门+祭坛+木刺;尾写 gs.tLeft… 供「神庙陈设」槽)
+  }
   rng.reseed(gs.seed); // ▶Beehives cs:16005
-  runBeehivePass(store, rng, gs);               // Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
+  if (!gs.seedFlags.dualDungeons) {
+    runBeehivePass(store, rng, gs);               // Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
+  }
   // 丛林神龛(壳+腔+火把+金字塔顶)——坐标经 ctxShrineSpots 跨槽传给「雕像宝箱」槽
   // 的 ChestsInJungleShrines(17308)
   rng.reseed(gs.seed); // ▶JungleShrines cs:16059
-  ctxShrineSpots[0] = runJungleShrinePass(store, rng, gs);
+  ctxShrineSpots[0] = gs.seedFlags.dualDungeons ? [] : runJungleShrinePass(store, rng, gs);
   // Webs(51) 已按注册序回到 #27 位（vanillaBiomes 前段）——此处旧迟置调用已删
   // 附魔剑圣地已归位到 MicroBiomes pass 内(ThinIce 与 Campsite 之间,原版 cs:21858-21908)
   // ——SwordShrinePass 曾在此槽近似执行(管线错位+洞穴中心方向颠倒),2026-08-13 移除;
@@ -1198,7 +1227,9 @@ function statuesChestsPass({ store, rng, world }: GenCtx) {
   rng.reseed(gs.seed); // ▶SurfaceChests cs:17226
   runSurfaceChestsPass(store, rng, gs, world.chests);    // Surface Chests(地表木箱/天空箱;只放一次——曾双调致密度翻倍)
   rng.reseed(gs.seed); // ▶ChestsInJungleShrines cs:17308
-  runJungleChestsPass(store, rng, gs, world.chests, ctxShrineSpots[0]); // 常春藤箱(神龛中心)
+  if (!gs.seedFlags.dualDungeons) {
+    runJungleChestsPass(store, rng, gs, world.chests, ctxShrineSpots[0]); // 常春藤箱(神龛中心)
+  }
   rng.reseed(gs.seed); // ▶UnderwaterChests(+WaterChests) cs:17343
   runUnderwaterChestsPass(store, rng, gs, world.chests, ctxOceanTreasures[0]); // 海洋洞窟水箱
   runWaterChestsPass(store, rng, gs, world.chests);      // Water Chests(水中 style17;1.4.4 概念保留)
@@ -1213,7 +1244,7 @@ function templePart2Slot({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   if (sbDenyAll(gs.seedFlags)) return;                 // ★IIIII44 cs:17826
-  runTemplePart2Pass(store, rng, gs, world.chests);
+  if (!gs.seedFlags.dualDungeons) runTemplePart2Pass(store, rng, gs, world.chests); // ★IIIII78 禁表
 }
 
 // 浮空岛日光板房屋（FloatingIslandHouses cs:17971；前置「地下丛林树」槽已 2026-08-16
@@ -1279,7 +1310,7 @@ function fragileIcePass({ store, rng }: GenCtx) {
 function beeLarvaPass({ store }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs || sbDenyAll(gs.seedFlags)) return;          // ★IIIII44 cs:21038
-  runBeeLarvaPass(store, gs);
+  if (!gs.seedFlags.dualDungeons) runBeeLarvaPass(store, gs); // ★IIIII78 禁表（双地牢无蜂巢）
 }
 
 // 地狱熔炉(原版 Hellforges,cs:18298)
@@ -1368,11 +1399,11 @@ function jungleMudWallsSlot({ store, rng }: GenCtx) {
 }
 
 /** LihzahrdAltar 终保 pass（cs:21753-21791）——TileCleanup 后重放祭坛 */
-function lihzahrdAltarSlot({ store }: GenCtx) {
+function lihzahrdAltarSlot({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   if (sbDenyAll(gs.seedFlags)) return;                 // ★IIIII44 cs:22133
-  runLihzahrdAltarPass(store, gs);
+  if (!gs.seedFlags.dualDungeons) runLihzahrdAltarPass(store, gs, rng); // ★IIIII78 禁表
 }
 
 // 洞穴墙（CaveWallsInEnclosedSpaces cs:17819）+ 墙变体（CaveWallVariety cs:16786）

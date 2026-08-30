@@ -391,7 +391,7 @@ try {
 
     // ---- msg5 物品/装备同步：手持物 + useItem 远端挥舞 ----
     const itemSync = await pageA.evaluate(async () => {
-      const torch = window.__swFlow.itemByKey('torch'); // 探针桥（生产构建可用）
+      const torch = window.__swFlow.itemByVid(8); // 探针桥（生产构建可用）
       const g = window.__swGame;
       g.player.inv.slots[2] = { id: torch, stack: 5 };
       g.player.inv.selected = 2;
@@ -562,7 +562,7 @@ try {
       check('访客拾取→take→房主真身移除', hostDrops === 0 && bDrop === 0, `host=${hostDrops} B傀儡=${bDrop}`);
       // B 背包拿到火把
       const bTorch = await pageB.evaluate(async () => {
-        const torch = window.__swFlow.itemByKey('torch');
+        const torch = window.__swFlow.itemByVid(8);
         return window.__swGame.player.inv.slots.some((s) => s && s.id === torch);
       });
       check('访客拾取入包（物品保护豁免拾取）', bTorch === true);

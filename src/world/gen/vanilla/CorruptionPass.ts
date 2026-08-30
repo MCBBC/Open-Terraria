@@ -59,6 +59,27 @@ const HARDSAND = TILE_BY_KEY['hardened_sand']!;
 const DEMONITE = TILE_BY_KEY['ore_demonite']!;   // tile 22（侧裂隙末端魔矿脉 + 挖空保护 :76191）
 const CRIMTANE = TILE_BY_KEY['ore_crimtane']!;  // tile 204 猩红矿（挖空保护 :76191）
 
+// ★IIIII80（2026-08-30，1458 WorldGen.cs:25637）：such great heights 的邪恶带锚改点。
+// FindLowestCloud()：在 y∈[20, worldSurface) 行逐行扫 x∈[20, w-20) 任一活性
+// TileID.Sets.Clouds{189,196,460,717,718,719}（TileID.cs:197）格——取**最下面**一行
+// （外层循环不 break），无云则 0；GenVars.lowestCloud 单值缓存。noSurface 钉 150
+// （本旗标组合域未接，组合另案）。
+const CLOUD_IDS = new Set(idsByVanillaSheet(189, 196, 460, 717, 718, 719));
+/** 真·FindLowestCloud（带 worldSurface 上界；缓存语义=pass 内单调用，无需跨 pass） */
+function lowestCloudRow(st: TileStore, wsDouble: number): number {
+  let num = 0;
+  const xHi = st.w - 20;
+  for (let y = 20; y < wsDouble; y++) {
+    let hit = false;
+    for (let x = 20; x < xHi; x++) {
+      const i = st.idx(x, y);
+      if (st.flags[i] && CLOUD_IDS.has(st.type[i])) { hit = true; break; }
+    }
+    if (hit) num = y;
+  }
+  return num;
+}
+
 export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   // ▶探针钩（隔离重放 rig tools/_c29iso.test.ts 用）：管线时点 gs 快照 + 分段标记
   const __cap = (globalThis as { __swCorGsCap?: (gs: GenState) => void }).__swCorGsCap;
@@ -90,6 +111,15 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   //   跳过（cs:14069/14395 `!tenthAnniversary || dontStarve` 门）——原版允许邪恶带压中线。
   const drunk = !!gs.seedFlags.drunkWorld;
   const remixFlag = !!gs.seedFlags.remix;
+  // ★IIIII80（1458 WorldGen.cs:13936-13945）：surfaceIsInSpace（such great heights）时
+  //   num = FindLowestCloud()+10 —— 邪恶带各纵环的起点锚替换 GenVars.worldSurfaceLow；
+  //   num2 维持 Main.worldSurface。转换带内层（convertSurface）另有 `num25=0` 臂
+  //   （cs:14179-14181 / 14503-14505）——起点从 num 直落 0，云带以下全图纳入。
+  const sSpace = !!gs.seedFlags.surfaceIsInSpace && !gs.seedFlags.noSurface;
+  const numDouble = sSpace ? lowestCloudRow(st, gs.worldSurface) + 10 : gs.worldSurfaceLow;
+  const bandTop = Math.trunc(numDouble);                   // (int)num
+  // （noSurface 组合臂 num2/num = rockLayer / rockLayer/2 属其他车道债——本批未接）
+  void sSpace;
   // ★dontStarveWorldGen 在本仓旗标域=theConstant（Main.dontStarveWorld，SeedEasterEggs.ts:19）
   const tenthNoDS = !!gs.seedFlags.tenthAnniversary && !gs.seedFlags.theConstant;
   let groupCount = w * 0.00045;
@@ -163,10 +193,10 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       __mark?.(`zone${g}:${zLo}-${zHi}:cx${cx}`);
 
       if (which) {
-        crimStart(st, rng, gs, cx, gs.worldSurfaceLow - 10, hearts);
+        crimStart(st, rng, gs, cx, bandTop - 10, hearts);
         // 丛林草→猩红丛林草（cs:14110-14122：仅 type 60→662；曾误把泥也清成 0）
         for (let x = zLo; x < zHi; x++) {
-          for (let y = gs.worldSurfaceLow; y < gs.worldSurface - 1; y++) {
+          for (let y = bandTop; y < gs.worldSurface - 1; y++) {
             if (!st.flags[st.idx(x, y)]) continue;
             const depth = y + rng.int(10, 13);                  // Next(10,14)
             for (let y2 = y; y2 < depth; y2++) {
@@ -178,7 +208,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
             break;
           }
         }
-        convertSurface(st, rng, gs, zLo, zHi, true);
+        convertSurface(st, rng, gs, zLo, zHi, true, bandTop);
         // 猩红**逐组**祭坛（cs:14241，本 pass 猩红分支内）——原版就在 Corruption pass 里，
         // 与独立 pass "Demon And Crimson Altars"(cs:15825，全图随机撒) 是两处放置,
         // 勿把这里挪到 15825 位（会同时丢流序与逐组锚定，见 runAltarsPass 头注）。
@@ -190,7 +220,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
           if (cooldown > 0) cooldown--;
           if (x === cx || cooldown === 0) {
             let sy = -1;
-            for (let y = gs.worldSurfaceLow; y < gs.worldSurface - 1; y++) {
+            for (let y = bandTop; y < gs.worldSurface - 1; y++) {
               if (st.flags[st.idx(x, y)] || st.wall[st.idx(x, y)] > 0) {
                 sy = y;
                 if (x === cx) {
@@ -209,7 +239,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
             }
             void sy;
           }
-          for (let y = gs.worldSurfaceLow; y < gs.worldSurface - 1; y++) {
+          for (let y = bandTop; y < gs.worldSurface - 1; y++) {
             if (!st.flags[st.idx(x, y)]) continue;
             const depth = y + rng.int(10, 13);
             for (let y2 = y; y2 < depth; y2++) {
@@ -221,7 +251,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
             break;
           }
         }
-        convertSurface(st, rng, gs, zLo, zHi, false);
+        convertSurface(st, rng, gs, zLo, zHi, false, bandTop);
         __mark?.('converted');
         // 暗影球周黑檀石囊（cs:14546-14581，★仅本组区间；第二条件仅清 active 保 type 幽灵）
         cleanOrbPockets(st, rng, zLo, zHi);
@@ -298,14 +328,17 @@ export function runAltarsPass(st: TileStore, rng: RNG, gs: GenState): void {
 /** 地表转换带（cs:14131-14199 猩红 / cs:14406-14484 腐化）1:1。
  *  每格两道 Next(2) 边缘抖动门（内圈免骰）；53/1 的 ±Next(5) 门按类型各自独掷；
  *  首个活性格 SpreadGrass：0→199/23（递归）与 59→662/661（递归）双分支。 */
-function convertSurface(st: TileStore, rng: RNG, gs: GenState, zLo: number, zHi: number, crimson: boolean): void {
+function convertSurface(st: TileStore, rng: RNG, gs: GenState, zLo: number, zHi: number, crimson: boolean, bandTopInt?: number): void {
   let bandY = gs.worldSurface + 40;
   for (let x = zLo; x < zHi; x++) {
     bandY += rng.int(-2, 2);                                    // Next(-2,3)
     if (bandY < gs.worldSurface + 30) bandY = gs.worldSurface + 30;
     if (bandY > gs.worldSurface + 50) bandY = gs.worldSurface + 50;
     let first = false;
-    const bandStart = gs.worldSurfaceLow;                       // (int)num
+    // ★IIIII80：bandStart = (int)num25 —— 非 sgis 时 num25=num(=worldSurfaceLow)；
+    //   sgis 直落 0（cs:14179-14181 猩红 num25 / cs:14503-14505 腐化 num59）。
+    const sSpace2 = !!gs.seedFlags.surfaceIsInSpace && !gs.seedFlags.noSurface;
+    const bandStart = sSpace2 ? 0 : Math.trunc(bandTopInt ?? gs.worldSurfaceLow);
     for (let y = bandStart; y < bandY; y++) {
       // 边缘抖动门（cs:14145-14147）：x/y 内圈免骰，外圈 Next(2)!=0 才过
       if (!((x > zLo + 1 && x < zHi - 2) || rng.int(0, 1) !== 0)) continue;

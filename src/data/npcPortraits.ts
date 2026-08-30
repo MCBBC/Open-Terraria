@@ -64,5 +64,28 @@ export function portraitForNpc(npc: PortraitNpcCtx): string | null {
     const name = npc.altTexture === 2 ? 'Zoologistb' : 'Zoologista';
     return `sprites/portraits/Portrait_${name}${npc.shimmered ? '_shimmer' : ''}.png`;
   }
-  return portraitUrl(v);
+  const base = portraitUrl(v);
+  if (!base) return null;
+  // 微光变体通用臂（ShimmeredPortraitCondition，NPCID.cs:4959-4970 = talkNPC.IsShimmer
+  // Variant；本仓 shimmered 承接）——30 张 _shimmer 资产已全量入库（2026-08-30 续批）
+  if (npc.shimmered && SHIMMER_HAVE.has(base)) return base.replace('.png', '_shimmer.png');
+  return base;
+}
+
+/** 已入库微光头像的静态 url 集（与 public/sprites/portraits 实盘一一对应） */
+const SHIMMER_HAVE: ReadonlySet<string> = new Set([
+  'Angler', 'ArmsDealer', 'Clothier', 'Cyborg', 'Demolitionist', 'Dryad',
+  'DyeTrader', 'GoblinTinkerer', 'Golfer', 'Guide', 'Mechanic', 'Merchant',
+  'Nurse', 'OldMan', 'Painter', 'PartyGirl', 'Pirate', 'Princess', 'Santa',
+  'SkeletonMerchant', 'Steampunker', 'Stylist', 'Tavernkeep', 'TaxCollector',
+  'TravellingMerchant', 'Truffle', 'WitchDoctor', 'Wizard',
+].map((n) => `sprites/portraits/Portrait_${n}.png`));
+
+/** 对话头像全载荷（Game 侧装配一次、三模式共用）：Detailed=url 头像图；
+ *  CloseUp/Retro 由 NpcDialog 用 NPC 变体贴图行 0 现算（Main.DrawNPCPortrait
+ *  :41075-41172 两 dummy 支路 1:1——**不需要额外资产**， texture=
+ *  Profiles.GetTextureNPCShouldUse → 本仓 townNpcProfileSheet） */
+export interface DialoguePortraitPayload extends PortraitNpcCtx {
+  /** Detailed 模式 url（portraitForNpc 结果；null=原版无头像不画） */
+  url: string | null;
 }

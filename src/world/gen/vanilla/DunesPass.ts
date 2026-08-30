@@ -62,6 +62,20 @@ export function runDunesPass(st: TileStore, rng: RNG, gs: GenState, onIter?: (i:
   //   entSeed 落 gs 供 DungeonPass 的 DgEntrance 消费。
   gs.dungeonEntA = rng.nextIntRange(0, 3);  // 入口类型掷①（普通世界 flag 即真只跑一轮）
   gs.dungeonEntB = rng.nextIntRange(0, 3);  // 入口类型掷②
+  // ★IIIII80（2026-08-30，DungeonCrawler.cs:184-209）：surfaceIsInSpace（such great
+  //   heights）时拒绝环——Tower（②==0）被拒则 flag=false 整循环重掷（guard num3=50，
+  //   耗尽回退 Legacy；每轮各耗 Next(3)×2）。普通世界恰好一轮=上方两掷不变。
+  if (gs.seedFlags.surfaceIsInSpace) {
+    let num3 = 50;
+    let flagged = gs.dungeonEntB !== 0;
+    while (!flagged) {
+      num3--;
+      if (num3 <= 0) { gs.dungeonEntA = -1; gs.dungeonEntB = -1; break; }   // 强制 Legacy（-1 哨兵：DungeonPass 的 ?? 兜底掷不触发）
+      gs.dungeonEntA = rng.nextIntRange(0, 3);
+      gs.dungeonEntB = rng.nextIntRange(0, 3);
+      flagged = gs.dungeonEntB !== 0;
+    }
+  }
   gs.dungeonEntSeed = rng.vanilla.next(); // preGenDungeonEntranceSettings.RandomSeed
   // ★IIIII44（cs:11561）：Dunes 主门 `if (!Skyblock.denyAllGeneration &&
   //   !SecretSeed.noSurface.Enabled)`——沙丘/金字塔候选整段天空盒跳过；pass 头的

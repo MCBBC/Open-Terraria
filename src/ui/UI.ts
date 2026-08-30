@@ -130,6 +130,7 @@ import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
 import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, type NpcButtonId, type ShopEntry, type HappinessInfo } from './NpcDialog';
+import type { DialoguePortraitPayload } from '../data/npcPortraits';
 import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventory';
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
@@ -645,35 +646,74 @@ export class UI {
     this.root.appendChild(panel);
   }
 
-  /** 广播盒文本编辑（Player.cs:32231-32250 OpenSign → 原版聊天行输入框；
-   *  DOM 近似为文本域 + 保存按钮）。保存写回 Sign 登记（Sign.TextSign） */
-  editSign(x: number, y: number, text: string) {
+  // ---- 路牌双态对话框（2026-08-30 形态改造，对齐原版复用对话面板语义：
+  //   OpenSign Main.cs:40699-40694→tileSign 分支 Player.cs:32231-32250：第一次右键 =
+  //   ReadSign 台词区展示 + [编辑(inter48)][关闭]；点编辑 → 编辑态（DOM 近似
+  //   OpenVirtualKeyboard(1)），按钮变 [保存(inter47)]（SubmitSignText Sound12
+  //   Main.cs:41397-41403）；**同一块牌再右键一次 = 关牌**（Player.cs:32952-32977
+  //   ReadSign toggle 语义项）----
+  private signDialogEl: HTMLElement | null = null;
+  private signDialogAnchor: { x: number; y: number } | null = null;
+
+  /** 路牌对话框是否开着（Inventory/Esc 链优先级用：关牌先于关背包） */
+  get signDialogActive(): boolean { return this.signDialogEl !== null; }
+
+  showSignDialog(x: number, y: number, text: string): void {
+    // toggle：同锚点已开着 → 关闭返回（原版二次交互语义）
+    if (this.signDialogEl && this.signDialogAnchor?.x === x && this.signDialogAnchor.y === y) {
+      this.closeSignDialog();
+      return;
+    }
+    this.closeSignDialog();
+    this.signDialogAnchor = { x, y };
     const panel = el('div', 'sw-panel');
     panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:420px; max-height:70vh; overflow:auto;';
     panel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.Sign.Title')));
     const body = el('div');
-    body.style.cssText = 'font-size:12px; color:#9a8ab8; margin:8px 0 4px;';
-    body.textContent = Lang.text('Mods.SandboxWorld.Sign.Hint');
+    body.style.cssText = 'font-size:13px; line-height:1.8; white-space:pre-wrap; color:#d8d4e4; margin:8px 0; min-height:30px;';
+    body.textContent = text || '…';
     panel.appendChild(body);
+    const hint = el('div');
+    hint.style.cssText = 'font-size:11px; color:#9a8ab8; margin-top:2px;';
+    hint.textContent = text ? '' : Lang.text('Mods.SandboxWorld.Sign.Hint');
+    panel.appendChild(hint);
     const input = el('textarea') as HTMLTextAreaElement;
     input.value = text;
-    input.style.cssText = 'width:100%; height:110px; resize:vertical; font-size:13px; color:#d8d4e4; background:#14121c; border:1px solid #3a3350; border-radius:4px; padding:6px;';
+    input.style.cssText = 'width:100%; box-sizing:border-box; height:110px; resize:vertical; font-size:13px; color:#d8d4e4; background:#14121c; border:1px solid #3a3350; border-radius:4px; padding:6px; display:none;';
     input.placeholder = Lang.text('Mods.SandboxWorld.Sign.Placeholder');
     panel.appendChild(input);
     const row = el('div');
     row.style.cssText = 'display:flex; gap:8px; margin-top:10px; justify-content:flex-end;';
-    const cancel = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Close'));
-    cancel.addEventListener('click', () => panel.remove());
-    row.appendChild(cancel);
-    const save = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Sign.Save'));
-    save.addEventListener('click', () => {
-      this.game?.setSignText(x, y, input.value);
-      panel.remove();
+    const closeBtn = el('button', 'sw-btn', Lang.inter(52));        // 关闭 inter[52]
+    closeBtn.addEventListener('click', () => this.closeSignDialog());
+    const saveBtn = el('button', 'sw-btn', Lang.inter(47));         // 保存 inter[47]（编辑态标签）
+    saveBtn.style.display = 'none';
+    saveBtn.addEventListener('click', () => {
+      this.game?.setSignText(x, y, input.value);                    // Sign.TextSign :63-77
+      UISfx.click();                                                // SubmitSignText PlaySound(12)
+      this.closeSignDialog();
     });
-    row.appendChild(save);
+    const editBtn = el('button', 'sw-btn', Lang.inter(48));         // 编辑 inter[48]
+    editBtn.addEventListener('click', () => {
+      body.style.display = 'none';
+      hint.style.display = 'none';
+      input.style.display = 'block';
+      editBtn.style.display = 'none';
+      saveBtn.style.display = '';
+      input.focus();
+    });
+    row.appendChild(closeBtn);
+    row.appendChild(editBtn);
+    row.appendChild(saveBtn);
     panel.appendChild(row);
     this.root.appendChild(panel);
-    input.focus();
+    this.signDialogEl = panel;
+  }
+
+  closeSignDialog(): void {
+    this.signDialogEl?.remove();
+    this.signDialogEl = null;
+    this.signDialogAnchor = null;
   }
 
   /** 兼容报告弹窗：降级/清空/跳过内容列表 + 导出详情 JSON */
@@ -2511,11 +2551,14 @@ export class UI {
   // ============ 向导配方反查（guideItem → CollectGuideRecipes，组匹配生效） ============
 
   private guideEl: HTMLDivElement | null = null;
+  /** Esc 关闭监听（openGuideSearch 挂载/closeGuideSearch 对称摘除） */
+  private guideEscHandler: ((e: KeyboardEvent) => void) | null = null;
 
   /** 反查面板：搜物品 → 列出以它为材料的全部配方（含 RecipeGroup 成员） */
   openGuideSearch(): void {
     this.closeGuideSearch();
     const overlay = el('div') as HTMLDivElement;
+    overlay.className = 'sw-guide-overlay';   // 稳定标识（探针/脚本定点清理用）
     overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1200; display:flex; align-items:center; justify-content:center;';
     const panel = el('div');
     panel.style.cssText = 'width:620px; max-height:76vh; background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;';
@@ -2543,6 +2586,11 @@ export class UI {
     });
     document.body.appendChild(overlay);
     this.guideEl = overlay;
+    // Esc 关闭（键盘对等关闭路径；NpcDialog Esc 捕获已让位于 chatInput 卫门场景）
+    this.guideEscHandler = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') this.closeGuideSearch();
+    };
+    window.addEventListener('keydown', this.guideEscHandler);
 
     const entries = ITEM_DEFS.map((d, id) => {
       const vid = d.key.startsWith('vi_') ? parseInt(d.key.slice(3, d.key.indexOf('_', 3)), 10) : -1;
@@ -2552,9 +2600,18 @@ export class UI {
     const renderItems = () => {
       const q = input.value.trim().toLowerCase();
       itemRow.textContent = '';
+      // ★初态=空候选（对齐原版 InGuideCraftMenu 空槽语义 NewCraftingUI.cs:256-261：
+      //   guideItem 未放 ⇒ 配方恒 0），引导语 = inter[24]「在此放置材料」——
+      //   曾直接铺注册表前 40 个静态切片（与角色无关的假列表，2026-08-30 用户指认）
+      if (!q) {
+        const hint = el('div', 'sw-lbl', Lang.inter(24));
+        hint.style.cssText = 'grid-column:1/-1; color:#9a8ab8; padding:4px 2px;';
+        itemRow.appendChild(hint);
+        return;
+      }
       let shown = 0;
       for (const e of entries) {
-        if (q && !e.lc.includes(q)) continue;
+        if (!e.lc.includes(q)) continue;
         if (++shown > 40) break;
         const chip = el('div');
         chip.title = e.name;
@@ -2613,6 +2670,10 @@ export class UI {
   }
 
   closeGuideSearch(): void {
+    if (this.guideEscHandler) {
+      window.removeEventListener('keydown', this.guideEscHandler);
+      this.guideEscHandler = null;
+    }
     if (this.guideEl) {
       this.guideEl.remove();
       this.guideEl = null;
@@ -4850,26 +4911,34 @@ export class UI {
     setTimeout(() => this.invPanel.classList.remove('sw-loadout-flash'), 600);
   }
 
-  showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string; coins?: number }>, portrait?: string | null, vanillaId?: number, cornerItem?: number): void {
+  showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string; coins?: number }>, portrait?: DialoguePortraitPayload | null, vanillaId?: number, cornerItem?: number): void {
     if (!this.npcDialog) {
       this.npcDialog = new NpcDialog(this.root, (id) => {
         this.npcShop?.close();
         this.npcShop = null;
         this.game?.npcDialogButton(id);
       }, (vid) => {
+        if (vid === -1) {
+          // EquipPage[5] 快捷图标（Main.cs:40534-40539）：CloseNPCChatOrSign(quiet)+
+          // OpenInventory()+EquipPageSelected=1——本仓装备列常驻，开背包即达
+          this.game?.closeNpcDialog();
+          this.openInventory();
+          return;
+        }
         // 渔夫任务鱼角标点击 → 开聊天框插 [i:vid]（Main.cs:40505-40512）
-        this.game?.chatInput?.insertItemTag(`[i:${vid}]`);
+        this.game?.insertChatItemTag(vid);   // 懒建兜底（首次点击时 chatInput 尚为 null）
       });
     }
-    // 角标：iconUrl 懒加载即时解析一次 + title 名（URL miss 时降级空 src 不显示,
-    // 与商店行同族近似——任务鱼为常驻 icon 表命中率高）
+    // 角标：>0=任务鱼(iconUrl 懒加载即时解析一次,title 名);-1=装备页快捷图标
+    // （由 NpcDialog 渲染 DisplaySlots_5）
     const corner = cornerItem !== undefined && cornerItem > 0
-      ? {
-          vid: cornerItem,
-          url: this.game ? (iconUrl(this.game, internalIdOfVid(cornerItem)) || '') : '',
-          name: Lang.itemName(cornerItem) ?? '',
-        }
-      : undefined;
+      && this.game && iconUrl(this.game, internalIdOfVid(cornerItem))
+      ? { vid: cornerItem,
+          url: iconUrl(this.game, internalIdOfVid(cornerItem)) || '',
+          name: Lang.itemName(cornerItem) ?? '' }
+      : cornerItem === -1
+        ? { vid: -1, url: '', name: '' }   // -1 态 NpcDialog 渲染 DisplaySlots_5
+        : undefined;   // 任务鱼 icon miss 时整角标不画（防 <img src=""> 破图占位）
     this.npcDialog.open(name, chat, buttons, portrait, vanillaId, corner);
   }
 

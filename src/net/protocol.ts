@@ -90,6 +90,11 @@ export const enum Msg {
                       //   原版：客户端 msg120 → 服务器权威 NewBubble + msg91 广播全体
                       //   （含发送者）；本仓中继模型=发送端本地即刻出泡 + 服务器校验
                       //   范围后中继其他端按 slot 出泡——观察行为等价,不升 PROTO_VER
+  DryadStardew = 144, // C→S→广播（原版 MessageID 144：DryadText_Do_StardewValleyBit
+                      //   netMode==1 时 SendData(144)——载荷空；服务器 HaveDryadDoStardew
+                      //   Animation 经 NPC ai 同步传导。本仓演出=全局编排器无 ai 态，
+                      //   等价=各端本地 startStardewAnimation()：发送端已本地播，
+                      //   服务器中继排除发送者。语义对齐 Main.cs:40978-40983）
                       //   （旧 server default 忽略未知号,同 SpectateFocus=150 先例）
   Ping = 154,         // 简化独立心跳（module2 并存预留）
   // ---- v3 房间制扩展（docs/multiplayer-design.md §房间） ----

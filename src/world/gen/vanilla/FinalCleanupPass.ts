@@ -374,6 +374,18 @@ function plantNewType(sheet: number, down: number, fx: number): { type: number; 
  *  恒 false（分布式帧完整）。 */
 interface SweepCtx { rng: RNG | undefined; destroyObject: boolean; frameSparse: boolean; stats?: ZzzStats }
 /** ZZZ 开发统计钩子（探针用;生产恒缺省） */
+
+/** ★IIII71b 取证钩（门控零开销） */
+function segProbe77(n: string): void {
+  const g0 = globalThis as { __swSeg?: (name: string, detail?: unknown) => void };
+  try { g0.__swSeg?.(n); } catch { /* probe */ }
+}
+/** ★IIII71b：RNG 样本计（仪具注入） */
+function rc77(): number {
+  const g0 = globalThis as { __swMbDraws?: () => number };
+  try { return g0.__swMbDraws?.() ?? 0; } catch { return 0; }
+}
+
 export interface ZzzStats {
   roll184: number; mossKilled: number; mossVisited: number;
   kills184Other: number; kills165: number; killsPlant: number; killsVine: number;
@@ -897,6 +909,14 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     // YYYYY 批补（cs:86616/52826）：CheckTree 树坍塌 + CheckChand 吊灯——
     //   s22222 #97 vanilla 杀链实证（KillTile 织入：CheckTree 系 118 杀/吊灯 8 杀，
     //   引擎缺臂=JS 树 21 格存活/吊灯 3 格存活）。454 掉落掷族未实证不派发。
+    // ★IIII71b 主案定罪：case323 棕榈（cs:87199 → CheckPalmTree cs:54829）——
+    //   引擎缺派发 ⇒ TileFrame 到棕榈恒 no-op，KillTile(液体棕榈根 cs:22460)/
+    //   沙族处理尾上邻棕榈重帧(cs:22516) 的支撑级联杀在 JS 全部落空。
+    //   DRUNK 终清理残差 T0>323×9+A×9 @(3530,116..124) 实锤；重帧掷门
+    //   Next(7,10)*22（num!=type 且 frameX<=44 时）一并落地保流位对齐。
+    case 323:
+      checkPalmTreeSweep(st, ctx, x, y);
+      return true;
     case 5:
       checkTreeSweep(st, ctx, x, y);
       return true;
@@ -1137,6 +1157,37 @@ const VANITY_GROUND = new Set([2, 109, 477, 492]);
  *  AshTreeGroundTest cs:30480 {633}）。 */
 const GEM_TREE_GROUND = new Set([1, 25, 117, 203, 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
 const ASH_TREE_GROUND = new Set([633]);
+/** ★IIII71b：CheckPalmTree（cs:54829-54879）1:1 —— 掷面：re-root 分支 Next(7,10)。 */
+function checkPalmTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  const idxOf = (xx: number, yy: number): number => st.idx(xx, yy);
+  const at = (xx: number, yy: number): boolean => st.inBounds(xx, yy) && st.flags[idxOf(xx, yy)] !== 0;
+  const shOf = (xx: number, yy: number): number => SWEEP_SHEET[st.type[idxOf(xx, yy)]];
+  const t0 = idxOf(x, y);
+  const type = SWEEP_SHEET[st.type[t0]];
+  const frameX0 = st.frameX[t0];
+  const frameY0 = st.frameY[t0];
+  let num = -1;
+  let num2 = -1;
+  if (at(x, y - 1)) num = SWEEP_SHEET[st.type[idxOf(x, y - 1)]];
+  if (at(x, y + 1)) num2 = SWEEP_SHEET[st.type[idxOf(x, y + 1)]];
+  if (num2 === 234 || num2 === 116 || num2 === 112) num2 = 53;
+  if (num2 !== 53 && num2 !== type) killTileGen(st, ctx, x, y);            // cs:54850-54852
+  if ((st.frameX[t0] === 66 || st.frameX[t0] === 220) && num2 !== 53) {
+    killTileGen(st, ctx, x, y);                                            // cs:54854-54856
+  }
+  if (num !== type && st.frameX[t0] <= 44) {
+    st.frameX[t0] = (ctx.rng ? ctx.rng.int(7, 9) : 7) * 22;                 // Next(7,10)*22
+  } else if (num !== type && st.frameX[t0] === 66) {
+    st.frameX[t0] = 220;
+  }
+  if (st.frameX[t0] !== frameX0 && st.frameY[t0] !== frameY0 && frameX0 >= 0 && frameY0 >= 0) {
+    tileFrameGen(st, ctx, x - 1, y, false);
+    tileFrameGen(st, ctx, x + 1, y, false);
+    tileFrameGen(st, ctx, x, y - 1, false);
+    tileFrameGen(st, ctx, x, y + 1, false);
+  }
+}
+
 function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, vanity = false,
   groundSet?: Set<number>): void {
   const k = st.idx(x, y);
@@ -2853,6 +2904,14 @@ export function runFinalCleanupPass(
           st.type[t] = SAND_FALL_BASE.get(type)!;
         }
         // 棕榈重帧(cs:22386)——TileFrame 跳过(帧管线负责)
+        // ★IIII71b 主案定罪：cs:22516-22520 沙族处理尾（仍在沙族外层 if 内）——
+        // 上格(i,j-1)为棕榈 323 时无条件 TileFrame（可触发 CheckPalmTree 支撑级联
+        // 杀整株）。旧 JS 整缺 ⇒ DRUNK 终清理未杀 x86 已杀的棕榈列
+        // （mile8 #105 T0>323×9/A×9 实锤）。
+        if (j > 0 && SWEEP_SHEET[st.type[st.idx(i, j - 1)]] === 323) {
+          segProbe77(`FC PTF ${i},${j - 1} rc=${rc77()}`);
+          tileFrameGen(st, ctx, i, j - 1, false);
+        }
       }
 
       // ④ 墙 187/216 液体 → 满岩浆(cs:22387-22392;remix/dualDungeons 种子门不适用)
@@ -2906,6 +2965,7 @@ export function runFinalCleanupPass(
 
       // ⑦ 液体中棕榈杀(cs:22460-22463;原版无 active 门,经 KillTile 内部门兜底)
       if (type === PALM_TREE && st.liquid[t] > 0) {
+        segProbe77(`FC PKILL ${i},${j} liq=${st.liquid[t]} rc=${rc77()}`);
         killTileGen(st, ctx, i, j);   // KillTile 含尾部 SquareTileFrame 级联（ZZZ）
       }
 

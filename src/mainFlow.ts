@@ -13,7 +13,7 @@ import { maybeShowWelcomeAnnounce } from './ui/WelcomeAnnounce';
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
 import { kvGet, kvHas } from './save/KvStore';
-import { ITEM_BY_KEY } from './data/items';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from './data/items';
 import { VI_KEY } from './data/itemKeys';
 import { parseWldToSave } from './wld/WldImport';
 import { Inventory } from './items/Inventory';
@@ -299,7 +299,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 观战启动关全 UI（IngameUIWindows.CloseAll :43017）
       onCloseAllUI: () => ui.closeAll(),
       // NPC 对话系统(SetTalkNPC + GetChat)
-      onNpcDialog: (name, chat, buttons, portrait, vanillaId) => ui.showNpcDialog(name, chat, buttons, portrait, vanillaId),
+      // 角标第 6 参（npcChatCornerItem 值态）透传——曾漏传导致任务鱼图标永不显示
+      onNpcDialog: (name, chat, buttons, portrait, vanillaId, cornerItem) => ui.showNpcDialog(name, chat, buttons, portrait, vanillaId, cornerItem),
       onNpcDialogClose: () => ui.closeNpcDialog(),
       onReforgeOpen: () => ui.showReforge(),
       // 向导「制作」（NPCChatText_GuideReverseCrafting :40723）：开背包 + 反查浮层
@@ -308,7 +309,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // NPC 快乐度详情浮层（ReportHappiness.Interact）
       onNpcHappiness: (info) => ui.showNpcHappiness(info),
       onReadSign: (text) => ui.showSign(text),
-      onEditSign: (x, y, text) => ui.editSign(x, y, text),
+      // 路牌双态对话框（读/编辑/同锚关牌——Player.cs:32231 OpenSign 语义）
+      onSignDialog: (x, y, text) => ui.showSignDialog(x, y, text),
       onDayNight: (isDay) => audio.setDayNight(isDay),
       onMusic: (id) => audio.playMusic(id),
       // ★R22 月总召唤倒计时音乐压制（Main.cs:11646-11664 渐熄+曲首硬切）
@@ -1252,7 +1254,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     joinRoom: (url: string, token: string) => joinRoom(url, token), // 探针桥：房间制加入
     createRoom: (addr: string, opts: Record<string, unknown>) => createRoom(addr, opts as never), // 探针桥：建房
     loadJson: (text: string) => loadFromJson(text), // 读自有 json 存档（探针）
-    itemByKey: (key: string) => ITEM_BY_KEY[key] ?? -1, // 探针桥：物品 id（生产构建也可用——页内 import('/src/...') 仅 dev 可达）
+    itemByKey: (key: string) => ITEM_BY_KEY[key]
+      ?? (key.startsWith('vi_') ? undefined : undefined), // 探针桥：物品 id（key=完整定义键）
+    /** 探针桥：原版 id → 定义键 → 内部 id（键名卫生批后 roomprobe 等老探针的
+     *  裸 'torch' 键已不存在——本桥以 vid 兜底解析，vi_<id> 前缀稳定） */
+    itemByVid: (vid: number) => {
+      const k = VANILLA_ITEM_KEY_BY_ID[vid];
+      return k ? (ITEM_BY_KEY[k] ?? -1) : -1;
+    },
     spawnVanillaEnemy: async (id: number, x: number, y: number) => {
       const { Enemy } = await import('./entities/Enemy');
       if (!game) return null;

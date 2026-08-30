@@ -186,23 +186,41 @@ export function tileRunner(
   if ((o.speedX ?? 0) !== 0 || (o.speedY ?? 0) !== 0) {
     vx = o.speedX ?? 0; vy = o.speedY ?? 0;
   }
-  // 原版 num3 液体类型掷骰（1456 cs:77163-77176）：notTheBees&&dontStarve 分支
-  // 普通世界短路不掷；else if (Next(4)==0) 的 Next(4) **每次调用必掷**（普通世界
-  // 结果弃用，num3 恒 0=水）。缺失则每次调用流偏 1 格——种子等价致命。
-  // ★BBBBBBB A/B 实证：摘除此掷 → NTB #3 Sand_Patches 即爆（T53>0×68193）——
-  //   本掷为流位必需，ZZZZ 批「#53 系本块新增所致」归因证伪（该块正确）。
-  // ★IIIII42 FTW（1457 cs:77707-77716）：Next(4)==0 时 else if(getGoodWorldGen)
-  //   num3=1 → 下文 type==-2 填液改走 liquidType(num3)=熔岩位（1457 Tile.cs:218-237
-  //   编码 0=水 1=岩浆）。纯 FTW 世界 num3∈{0,1}；NTB+dontStarve / drunk+tenth+remix
-  //   两组合臂不适用本链。JS 侧 +1 编码：vanilla1 → JS2。
-  // cs:77707-77716 主序：Next(4)==0 ∧ getGoodWorldGen → num3=1。前置组合臂
-  // NTB∧dontStarve（Next(3)）与 drunk∧tenth∧remix（num3=3）属组合种子域，纯 FTW
-  // 链不触——备案不移植。
-  const r4 = rng.nextIntRange(0, 4);
+  // ★原版 num3 液体类型选择梯（★IIIII83 补全 1458 WorldGen.cs:77707-77716 三臂全量）：
+  //   ①notTheBees&&dontStarve&&!remix && Next(3)==0 → num3=2 蜜（蜜池）——C# 短路：
+  //     **前三项全真才掷 Next(3)**；zenith 因 remix=T 在此臂**零掷**直接落 else-if。
+  //   ②else if (Next(4)==0)：此掷**每次调用必耗**（普通世界结果弃用，num3 恒 0=水；
+  //     ★BBBBBBB A/B 实证摘除即爆——流位必需）；命中后内层二选一：
+  //     drunk∧tenth∧remix∧!ntb → num3=3 微光，否则 getGoodWorldGen → num3=1 岩浆。
+  //   ※vanilla 编码 0=水 1=岩浆 2=蜜 3=微光；JS 内部 +1（1 水/2 岩浆/3 蜜/4 微光），
+  //     映射在下文 -2 填液点统一做。
+  // ★IIIII83 复合门定罪（zenith 链 #19 蘑菇主带 T+35.7 万根因链首环）：纯 FTW 链绿、
+  //   zenith 却爆的缺口=此前漏移植两条组合臂——①因三联前置在非 zen 组合恒不可达而
+  //   挂账无误；②下面的「**tenth 中央带归水**」步内复位臂（cs:77732-77734）曾整个
+  //   缺失：num3==1 ∧ tenthAnniversaryWorldGen ∧ val.X>0.45w ∧ val.Y<0.55w(**宽!*)
+  //   ∧ val.Y<worldSurface ⇒ num3 归零。纯 FTW tenth=false 惰性、tennith 单链无岩浆
+  //   源亦惰性——唯 zenith 七依赖同真时激活：ftw 熔岩池撞上 tenth 复位带全体归水。
+  //   （Y 条件比的是 maxTilesX*0.55 非 Y——反编译即此形，bug-compat 照抄。）
+  //   缺失曾致 SmallHoles #10 起 1162 格「x86 水/js 岩浆」错味，进而 MudCavesToGrass
+  //   spreadGrassAll 的 lava-enclosed 门在泥草转换边界卡死 61 格 → DesertBiome
+  //   RowHasInvalidTiles 行校验分叉 → 整个地下沙漠换边（jaccard=0）→ 蘑菇主带全线
+  //   放大爆窗。
+  const trNtbDsNoRemix = !!gs.seedFlags.notTheBees && !!gs.seedFlags.theConstant
+    && !gs.seedFlags.remix;
   let trNum3 = 0;
-  if (r4 === 0 && ftwTR) {
-    trNum3 = 1;
+  if (trNtbDsNoRemix && rng.int(0, 2) === 0) {
+    trNum3 = 2;                                              // 蜜臂（Next(3)==0 命中，else-if 整体短路不掷 Next(4)）
+  } else if (rng.nextIntRange(0, 4) === 0) {
+    if (!!gs.seedFlags.drunkWorld && !!gs.seedFlags.tenthAnniversary
+      && !!gs.seedFlags.remix && !gs.seedFlags.notTheBees) {
+      trNum3 = 3;                                            // 微光组合臂
+    } else if (ftwTR) {
+      trNum3 = 1;                                            // FTW 岩浆臂
+    }
   }
+  // C# 掷骰短路面（精确流位）：arm① 三前置全真 ⇒ 掷 Next(3)；Next(3)!=0 ⇒ 继续
+  //   掷 Next(4)（该世界每调用可能双掷）；前置任一假 ⇒ 只掷 Next(4)。上面的
+  //   `trNtbDsNoRemix && …` + else-if 链即逐项镜像，勿改成互斥单掷。
   // ★IIIII50 FTW 池味残差定罪（1458 cs:77764-77768）：每步 x 循环列头——出海滩带
   //  （k<beachDistance+50 || k>=maxTilesX-beachDistance-50，beachDistance=380 只读
   //  常量 cs:4071）把 **runner 局部变量** num3 永久归零（=水），后续步不再恢复。
@@ -211,6 +229,17 @@ export function tileRunner(
   //  #10 Small_Holes 起 Y1>2×4912@(182,323)/(4134,327)，与 #10..#17 单调增长一致）。
   const beachKillL = gs.beachDistance + 50;
   const beachKillR = st.w - gs.beachDistance - 50;
+
+  // ▶探针钩（调用级取证仪用，缺省零开销）：每次调用报告入参与液型选择
+  {
+    const f = (globalThis as { __swTrCall?: (o2: Record<string, unknown>) => void }).__swTrCall;
+    if (f) {
+      f({
+        i, j, type: o.type, strength: strengthIn, steps: stepsIn,
+        trNum3, wsLava: gs.lavaLine,
+      });
+    }
+  }
 
 
   // 热循环局部化(零语义:typed array 引用与 w 提为局部;idx 内联 y*w+x)
@@ -222,6 +251,14 @@ export function tileRunner(
     if (drunkTR && rng.int(0, 29) === 0) {
       px += rng.int(-100, 100) * 0.05;
       py += rng.int(-100, 100) * 0.05;
+    }
+    // ★IIIII83（cs:77732-77734）：tenth 中央带归水复位臂——每步循环头判一次。
+    //   ftw 熔岩位 runner 步入 {X>0.45w, Y<0.55w(**宽*), Y<worldSurface} 即归水；
+    //   zenith 七依赖同真时激活，纯 FTW(tenth=false) 惰性零影响。Y 比宽度是
+    //   反编译原文形态，bug-compat 照抄勿"纠正"。
+    if (trNum3 === 1 && !!gs.seedFlags.tenthAnniversary
+      && px > stW * 0.45 && py < stW * 0.55 && py < gs.worldSurface) {
+      trNum3 = 0;
     }
     // 泥向上钻出世界顶即停(原版)
     if (py < 0 && num2 > 0 && type === MUD) num2 = 0;
@@ -272,11 +309,11 @@ export function tileRunner(
           if (tf[ti] && ty[ti] === T.SAND) continue;
           if (type === -2 && tf[ti] && (y < gs.waterLine || y > gs.lavaLine)) {
             tliq[ti] = 255;
-            // ★IIIII42：vanilla 序＝liquidType(num3)（cs:77794）→ remix 专用域覆写
-            // （cs:77795-77801，IIIII43 已并）→ else if(l>lavaLine) lava(true)。
-            // 三段式逐一镜像；JS 编码 +1（1=水 2=岩浆）。纯 FTW 世界 num3∈{0,1}：
-            // num3=1 时全格熔岩位；num3=0 按深度二分。remix 组合臂仅在 remix 链生效。
-            tltype[ti] = trNum3 === 1 ? 2 : 1;
+            // ★IIIII42/83：vanilla 序＝liquidType(num3)（cs:77794）→ remix 专用域覆写
+            //   （cs:77795-77801，IIIII43 已并）→ else if(l>lavaLine) lava(true)，
+            // 三段式逐一镜像。★IIIII83 起 num3 全梯四值可用（0水/1岩浆/2蜜/3微光），
+            // JS 内部编码 +1 映射表在此统一换算（此前仅 {0,1} 双值硬映射）。
+            tltype[ti] = [1, 2, 3, 4][trNum3];
             if (!!gs.seedFlags.remix) {
               // ★IIIII43 REMIX（1457 cs:77791-77801）：专用 lava 域覆写——否则保持 num3 原味
               tltype[ti] = (y > gs.lavaLine && (y < gs.rockLevel - 80 || y > st.h - 350)

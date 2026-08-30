@@ -78,10 +78,13 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
   const leftBeach = gs.beachLeftEnd, rightBeach = w - gs.beachRightStart;
   // num10（cs:117-131）：0.17 基线，小世界（GetWorldSize()==0，maxTilesX==4200）+0.02
   // ★IIIII14（1457 TerrainPass.cs:123-127）：drunk → num10=0.15 / num11=0.28
-  //  （surfaceIsInSpace 分支在前、remix 在后——组合域未接）。地表/岩层带比例整体
-  //  下移加宽 = 「mirror/mixed 地形」主参数之一。
-  const pLo = gs.seedFlags.drunkWorld ? 0.15 : 0.17;
-  const pHi = gs.seedFlags.drunkWorld ? 0.28 : 0.26;
+  // ★IIIII80（2026-08-30，1458 TerrainPass.cs:119-121）：surfaceIsInSpace（such great
+  //   heights）分支在 drunk **之前**——num11→(float)0.22（二进制 double 字面量照录
+  //   0.2199999988079071；JS 的 0.22 是另一个 double，边界列会翻），num10 不变。
+  const pLo = gs.seedFlags.drunkWorld && !gs.seedFlags.surfaceIsInSpace ? 0.15 : 0.17;
+  const pHi = gs.seedFlags.surfaceIsInSpace
+    ? 0.2199999988079071
+    : (gs.seedFlags.drunkWorld ? 0.28 : 0.26);
   const surfLo = h * (pLo + (w === 4200 ? 0.02 : 0));
   const surfHi = h * pHi;
   // ★IIIII14：drunk/getGood/remix 世界走长爬升表的可能位（判定骰在 genSurfaceOffset 内）
@@ -137,7 +140,12 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
     // 填列（FillColumn cs:246-271）：air 循环 i<num3，dirt 循环从 (int)num3 起覆盖
     // → 最终态 y < trunc(num3) 空气、[trunc(num3), num4) 泥土、≥num4 石头。
     // （此前按 y<num3 空气 = ceil 边界，小数列整体低一格）
-    const surfTrunc = Math.trunc(num2);
+    // ★IIIII80（1458 TerrainPass.cs:189-192）：surfaceIsInSpace && !noSurface →
+    //   FillColumn(i, num3 - maxTilesY*0.08, num4)：整列实心从「地表-8%H」起；
+    //   且 `continue` 跳过右海滩 Retarget/Plateau 段（cs:194-204 整块在该 continue 之后）。
+    //   注意 Main.worldSurface 终值仍 = max(num3)+25（未含 -0.08 位移）。
+    const sSpace = !!gs.seedFlags.surfaceIsInSpace && !gs.seedFlags.noSurface;
+    const surfTrunc = sSpace ? Math.trunc(num2 - h * 0.08) : Math.trunc(num2);
     for (let y = 0; y < h; y++) {
       const i = st.idx(x, y);
       if (y < surfTrunc) {
@@ -152,7 +160,8 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
       }
     }
     // 右海滩入口:若地表高于 maxSurf,回溯改写近 500 列向下收平(cs:196-204)
-    if (x === w - rightBeach - flatBeachPadding) {
+    // （IIIII80：sgis 臂 continue 到下一列，此块整段跳过）
+    if (!sSpace && x === w - rightBeach - flatBeachPadding) {
       if (num2 > maxSurf) retargetSurfaceHistory(st, history, x, maxSurf);
       feature = Feature.Plateau;
       runLen = w - x;

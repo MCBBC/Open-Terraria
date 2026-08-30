@@ -761,7 +761,9 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
   //   (2065,352)=36/(2065,353)=54）；锚判定=锚格(ox,num4) active&&type==215。
   //   曾左锚 [ox..ox+2] 且漏 +36（#101 T215 残 12 格根因）。
   if (rng.vanilla.next() % 10 !== 0) {
-    place3x2MB(st, rng, ox, num4, CAMPFIRE, 0, true);
+    // ★IIIII80（CampsiteBiome.cs:96-101）：rainbow road → PlaceTile(215,…,-1,5)
+    //   篝火 style5（frameY/帧面不同）；掷骰与成功路径完全同构，仅样式差。
+    place3x2MB(st, rng, ox, num4, CAMPFIRE, gs.seedFlags.rainbowStuff ? 5 : 0, true);
     const ai = st.idx(ox, num4);
     if (st.flags[ai] && st.type[ai] === CAMPFIRE) {
       for (let dx = -1; dx <= 1; dx++) {

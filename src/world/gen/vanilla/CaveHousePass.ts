@@ -1906,7 +1906,13 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
           if (rb >= 0) { def.tile = rb; def.wall = 44; }
         }
       }
-      // PotentiallyConvertToRainbowMossBlock（第 3 掷）：rainbowStuff 关闭时短路不耗
+      // PotentiallyConvertToRainbowMossBlock（第 3 掷，HouseBuilder.cs:82-91）：
+      //   rainbowStuff && Next(2)==0 → 主题整体换彩虹苔砖 692/墙 346/平台 style43/
+      //   门 style44。旗关时短路不耗（普通世界零扰动）。仅 WoodHouseBuilder ctor 链。
+      if (theme === 'wood' && gs.seedFlags?.rainbowStuff && rng.nextIntRange(0, 2) === 0) {
+        const rmT = sheetTile(692);
+        if (rmT >= 0) { def.tile = rmT; def.wall = 346; def.platformStyle = 43; def.door = 44; }
+      }
     }
     __st?.('bld', ox, oy, theme === 'wood' ? 1 : theme === 'ice' ? 2 : theme === 'jungle' ? 3 : theme === 'desert' ? 4 : theme === 'granite' ? 5 : theme === 'marble' ? 6 : 7, __rn());
 

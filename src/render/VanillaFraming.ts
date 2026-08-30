@@ -174,6 +174,7 @@ export interface FrameEnv {
   frameCache: Map<number, FrameEntry>; // TileFrame 递归的帧缓存(含协商旗快照 + 变体域戳,按格)
   depth: number;
   bypassGlobalCache?: boolean; // 对拍强制新求值通道(顶链绕过全局快照缓存)
+  noGlobalWrite?: boolean;     // 统一视图求帧专用:递归结果不写全局缓存(视图态不得驻留)
   trace?: TraceSink;           // 测试专用执行轨迹
 }
 
@@ -508,7 +509,7 @@ export const vanillaFrameCache = new Map<number, FrameEntry>();
 const VF_CACHE_STRIDE = 100000;
 let frameCacheWorld: object | null = null;
 export function invalidateVanillaFrames(world: object): void {
-  if (frameCacheWorld !== world) { frameCacheWorld = world; vanillaFrameCache.clear(); }
+  if (frameCacheWorld !== world) { frameCacheWorld = world; vanillaFrameCache.clear(); ghostFrameCache.clear(); }
 }
 export function invalidateVanillaFrameAt(x: number, y: number): void {
   // 局部失效:5×5 邻域。距离 1 = 直接合并码;距离 2 = Frametest 协商旗两跳路径
@@ -518,6 +519,7 @@ export function invalidateVanillaFrameAt(x: number, y: number): void {
   const xi = Math.floor(x), yi = Math.floor(y);
   for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
     vanillaFrameCache.delete((yi + dy) * VF_CACHE_STRIDE + (xi + dx));
+    ghostFrameCache.delete((yi + dy) * VF_CACHE_STRIDE + (xi + dx)); // 统一视图帧同步失效
   }
 }
 /** 区域失效(silent 编辑路径:陨石/祭坛粉碎等走 markDirtyArea 的场景);±1 协商边距 */
@@ -526,6 +528,7 @@ export function invalidateVanillaFrameArea(x0: number, y0: number, x1: number, y
   const ax1 = Math.floor(x1) + 1, ay1 = Math.floor(y1) + 1;
   for (let y = ay0; y <= ay1; y++) for (let x = ax0; x <= ax1; x++) {
     vanillaFrameCache.delete(y * VF_CACHE_STRIDE + x);
+    ghostFrameCache.delete(y * VF_CACHE_STRIDE + x);
   }
 }
 
@@ -583,7 +586,7 @@ function tileFrame(env: FrameEnv, i: number, j: number, depth: number): { fx: nu
   // 邻居句柄(mkTile),沿用外层坐标会让深层求值读到错误的八邻。
   const res = runCosmeticChain(st, i, j, typeV, { ...env, i, j, depth });
   const entry = toEntry(res.fx, res.fy, env.variant);
-  vanillaFrameCache.set(key, entry);
+  if (!env.noGlobalWrite) vanillaFrameCache.set(key, entry); // 统一视图态不得驻留全局缓存
   env.frameCache.set(key, entry);
   return res;
 }
@@ -609,6 +612,78 @@ function mkTile(env: FrameEnv, dx: number, dy: number, centerVan: number): Frame
     rights: () => ok && (st.slope[idx] === 2 || st.slope[idx] === 4), // .rightSlope()
     bots: () => ok && (st.slope[idx] === 3 || st.slope[idx] === 4),   // .bottomSlope()
   };
+}
+
+// ===================== 跨族统一视图求帧(2026-08-30 第二批回落)=====================
+// 需求演变:第一批「回落旧近似路径」后,第二批标注证明【旧规则自身在这些构型仍有缝】
+// (34 格审计 notDiverted=0 ⇒ 全部已走旧路径仍被标)。终极方案=仍用链、但把 MERGE_DIRT
+// 异族邻居【视同本族】求帧——链输出自然落到全连内帧族,接缝闭合且与周边链格同几何家族。
+// 实现:零拷贝 Proxy 商店视图(type 读穿重映射),独立小缓存,任何编辑失效钩同步清理;
+// 不写全局缓存(noGlobalWrite)⇒ 金标/rig 对拍语义完全不受影响。
+let _vanToInternal: Int16Array | null = null;
+function vanToInternalTable(): Int16Array {
+  if (_vanToInternal) return _vanToInternal;
+  const t = new Int16Array(1200).fill(-1);
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const v = TILE_DEFS[i]?.vanilla;
+    if (v && v.sheet < 1200 && t[v.sheet] === -1) t[v.sheet] = i;
+  }
+  _vanToInternal = t;
+  return t;
+}
+// ★合并族扩展谓词(仅用于回落门/统一视图,**不改链自身盖章语义**——rig 对拍仍按严格表):
+// 官方 SetupTileMerge 没有 tileMergeDirt[0](泥土本身不进表,由 num==type 自然处理),
+// 但跨族闭合的偏离域若不含 0,则「任何 X↔泥土」交界全部漏网(2026-08-30 第三批实证,
+// sandstone_brick 151 被四邻泥土围死却判非异族)。family 定义 = {0} ∪ MERGE_DIRT。
+export function isVanillaMergeDirtFamily(van: number): boolean {
+  return van === 0 || !!MERGE_DIRT[van];
+}
+const ghostFrameCache = new Map<number, { fx: number; fy: number }>();
+function clearGhostCache(): void {
+  ghostFrameCache.clear();
+}
+// 统一视图按【中心类型】缓存(视图是中心van的纯函数;Proxy 读穿实时数组 ⇒ 编辑天然
+// 自愈,无需失效钩)。同类型所有格共享一个代理,bake 冷路径从每格一建降到每类一建。
+const ghostViewCache = new Map<number, WeakMap<object, TileStore>>();
+function buildUnifiedView(st: TileStore, centerVan: number): TileStore {
+  const targetInternal = vanToInternalTable()[centerVan];
+  const realType = st.type;
+  const flags = st.flags;
+  const ghost = Object.create(st) as { type: TileStore['type'] };
+  Object.defineProperty(ghost, 'type', {
+    value: new Proxy(realType, {
+      get(t: unknown, prop: string | symbol) {
+        if (typeof prop !== 'string') return (realType as unknown as Record<string | symbol, unknown>)[prop];
+        const i = +prop;
+        if (!Number.isInteger(i)) return (realType as unknown as Record<string | symbol, unknown>)[prop];
+        if (!flags[i]) return realType[i];
+        const van = vanillaIdOf(realType[i]);
+        if (van !== centerVan && isVanillaMergeDirtFamily(van) && targetInternal >= 0) return targetInternal;
+        return realType[i];
+      },
+    }) as TileStore['type'],
+  });
+  return ghost as TileStore;
+}
+function unifiedStoreView(st: TileStore, x: number, y: number): TileStore {
+  const centerVan = vanillaIdOf(st.type[st.idx(x, y)]);
+  let per = ghostViewCache.get(centerVan);
+  if (!per) { per = new WeakMap(); ghostViewCache.set(centerVan, per); }
+  let g = per.get(st);
+  if (!g) { g = buildUnifiedView(st, centerVan); per.set(st, g); }
+  return g;
+}
+/** 跨族统一视图下的帧(回落分支专用;不污染常规缓存与语义) */
+export function vanillaFrameUnified(st: TileStore, x: number, y: number, variant: number, rockLayer: number): { fx: number; fy: number } {
+  const key = Math.floor(y) * VF_CACHE_STRIDE + Math.floor(x);
+  const hit = ghostFrameCache.get(key);
+  if (hit) return hit;
+  const ghost = unifiedStoreView(st, x, y);
+  const cv = vanillaIdOf(ghost.type[ghost.idx(x, y)]);
+  const r = tileFrame({ st: ghost, i: x, j: y, variant, rockLayer, centerVan: cv, frameCache: new Map(), depth: 0, bypassGlobalCache: true, noGlobalWrite: true }, x, y, 0);
+  const out = { fx: r.fx, fy: r.fy };
+  ghostFrameCache.set(key, out);
+  return out;
 }
 
 // ===================== 对外主入口 =====================

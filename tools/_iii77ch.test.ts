@@ -41,7 +41,8 @@ if (RUN) {
     proto[fn] = function (this: TileStore, ...a: unknown[]) {
       try {
         const x = Number(a[0]), y = Number(a[1]), t = Number(a[2]);
-        if (t === SH135) {
+        const WATCH = String(process.env.SW_I77_WATCH ?? '').split(';').filter(Boolean);
+        if (WATCH.includes(`${x},${y}`)) {
           count++;
           const st = new Error().stack ?? '';
           let writer = '?'; let rc = -1;

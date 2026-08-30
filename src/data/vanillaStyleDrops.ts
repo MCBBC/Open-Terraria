@@ -94,8 +94,10 @@ const Chests_2: T = [3884, 3885, 3939, 3965, 3988, 4153, 4174, 4195, 4216, 4265,
  *  :87093-87094——开态 fx=72*列+(direction==-1?36:0),❌3 复核 2026-08-23：两式不可混用）。
  *  ★C-1（2026-08-23）：补 1.4.5 新门 9 档 style 60-68（5941 天鹫/5964 云/5984 暮色/
  *  6007 馆员/6030 尖刺/6053 办公室/6076 禁忌/6098 水族/6120 巨石）——两版 GetDoorItem
- *  case 0-68 逐档同值（1457 :69900-69926 ≡ 1456 :69400-69442）,旧转录漏抄尾 9 case */
-const Doors: T = [25, 650, 651, 652, 816, 817, 818, 819, 820, 837, 912, 0, 1137, 1138, 1139, 1140, 1411, 1412, 1413, 1458, 1709, 1710, 1711, 1712, 1793, 1815, 1924, 2044, 2265, 2528, 2561, 2576, 2815, 3129, 3131, 3130, 3888, 3941, 3967, 4155, 4176, 4197, 4218, 4307, 4415, 4576, 5158, 5179, 5200, 5558, 5611, 5699, 5722, 5747, 5765, 5786, 5807, 5828, 5867, 5907,
+ *  case 0-68 逐档同值（1457 :69900-69926 ≡ 1456 :69400-69442）,旧转录漏抄尾 9 case。
+ *  ★导出仅供 tests/desync-door-clamp-guard.test.ts 读表值域做封闭性断言 +
+ *  表长锁定；生产消费一律走 styleDropVidOfFrames 的钳制块，勿直读 */
+export const Doors: T = [25, 650, 651, 652, 816, 817, 818, 819, 820, 837, 912, 0, 1137, 1138, 1139, 1140, 1411, 1412, 1413, 1458, 1709, 1710, 1711, 1712, 1793, 1815, 1924, 2044, 2265, 2528, 2561, 2576, 2815, 3129, 3131, 3130, 3888, 3941, 3967, 4155, 4176, 4197, 4218, 4307, 4415, 4576, 5158, 5179, 5200, 5558, 5611, 5699, 5722, 5747, 5765, 5786, 5807, 5828, 5867, 5907,
   5941, 5964, 5984, 6007, 6030, 6053, 6076, 6098, 6120];   // style 60-68（1457 新门 9 件）
 
 // ===== S2 多 style 家族 + D-7（审计 docs/audit/tile-audit-2026-08-23.md S2 ❌×27 + D-7 ⚠️×7,
@@ -350,8 +352,24 @@ const TORCH_EXPLICIT: Record<number, number> = {
   16: 4383, 17: 4384, 18: 4385, 19: 4386, 20: 4387, 21: 4388, 22: 5293, 23: 5353,
 };
 
-/** 火把 style → 原版物品 vid（default=彩炬 426+style 档,与 C# default 同构） */
+/** 火把 style → 原版物品 vid。
+ *  ★失谐门同族防御钳制（2026-08-30，与 styleDropVidOfFrames 门支同一口径体系）：
+ *  【背景】原版 KillTile case 4（WorldGen.cs:65106-65163）switch 的 default 分支
+ *  本身就是【无界算术外推】dropItem = 426 + num——case 枚举只覆盖合法域
+ *  （0 = 普通火把、8..23 = 显式档，default 本职是服务彩炬连续段 1..7），
+ *  num ≥ 24 即帧漂出贴图域的产物 → 426+num 可落到任意物品 id。这是"失谐门/
+ *  哲学家之石"家族在原版里最直白的一个无界 sink，我们曾按 C# default 同构忠实
+ *  移植（`?? 426+style`），本次封死。
+ *  【可达性现状】火把是单格物、掉落读 frameY/22：当前引擎所有多格翻转支
+ *  （devices.ts flipBlock/flipCell 族）中轴向 'y' 的仅篝火 case 215 且带整块同型
+ *  校验（R20-I11），没有任何已登记路径能写火把 frameY 越域——本钳制属防御纵深，
+ *  防未来新增翻转支/放置怪癖把漂移变成可达。
+ *  【策略】style 出 [0,23]（含负值/NaN/非整数）一律回落族基物品 8（普通火把）。
+ *  C-4 口径：宁可掉错不掉空；域内行为与原版逐点一致（显式表命中→表值，
+ *  彩炬段 1..7 → default 连续式）。勿"顺手改回裸外推"。
+ *  【回归锁定】tests/desync-door-clamp-guard.test.ts 失谐系钳制 describe */
 export function torchDropVid(style: number): number {
+  if (style < 0 || style > 23 || !Number.isInteger(style)) return 8;
   return TORCH_EXPLICIT[style] ?? 426 + style;
 }
 
@@ -463,6 +481,9 @@ export const styleFromFrame: Record<number, (fx: number, fy: number) => number> 
   696: (fx) => Math.floor(fx / 36),                                   // 仿制暗影珠（CheckOrb :54642 flag）
 };
 
+/** 表查档兜底（C-4 备案口径）：越界 style 回落 t[0]。
+ *  ★门路径勿用本助手——sheet 10/11 走 styleDropVidOfFrames 内的显式钳制块
+ *  （失谐门防御，2026-08-30 固化），其余各族保持本口径不变 */
 const pick = (t: T, style: number): number => t[style] ?? t[0];
 
 /** sheet+style → 原版物品 vid（0=该族无样式掉落表/无物品）。
@@ -551,8 +572,36 @@ export function styleDropVidOfFrames(sheet: number, fx: number, fy: number): num
   if (sheet === 50) return fx === 90 ? 165 : 149;   // 书（KillTile case 50 :65709-65716）——水书伪装帧 fx==90 → Water Bolt 165,其余 Book 149。审计 E ❌3：特判自 Game object 支移入（v_50_books def 1×1 永远到不了 object 支,旧分支死码）
   if (sheet === 129) return fx >= 324 ? 4988 : 502; // 水晶碎晶基座（KillTile case 129 :65031-65039）——大晶簇帧带 fx≥324 → Gelatin Crystal 4988（女王史莱姆召唤物,原版 hardUpdateWorld 生长 pass 播种,本仓仅 wld 导入档可达）,常规簇 → Crystal Shard 502。审计 E ❌4
   if (sheet === 133) return fx >= 54 ? 1221 : 524;  // 熔炉二档（Check3x2 case 133 :49716-49724）——fx≥54（style≥1）→ Titanium Forge 1221,else Adamantite Forge 524。审计 E ❌10
-  if (sheet === 10) return pick(Doors, Math.floor(fx / 54) * 36 + Math.floor(fy / 54));
-  if (sheet === 11) return pick(Doors, Math.floor(fx / 72) * 36 + Math.floor(fy / 54));
+  // ==================== 失谐门防御钳制（2026-08-30 用户要求固化）====================
+  // ★sheet 10/11 门两态唯一出口，禁改回裸 pick(Doors, style)。
+  // 【背景】社区"失谐门/哲学家之石"利用链（TapTap/B站 民考据 + 原版源码核实）：
+  //   ① 雕像/篝火通电按整块区域批量平移 frame——巴斯特雕像 tile 506 对 2×3 六格
+  //     无条件 frameX += ±72（Wiring.cs:2536-2543,触发前整块同型校验 :2526）、
+  //     篝火 tile 215 对 3×2 frameY += ±36（ToggleCampFire :3021-3060）；利用沙塌/
+  //     扫格等放置怪癖把门格叠进该区域后可反复累积漂移。
+  //   ② 门破坏时掉落物品【不做值域校验】，纯按帧线性反推 style：
+  //     关门 fx/54*36+fy/54、开门 fy/54+fx/72*36 → GetDoorItem 查表（:69257）。
+  //   两者叠加 = 帧漂出贴图域后线性外推撞表内其他档 → "一扇门变出别的物品"。
+  // 【原版行为】style 超出 case 0..68 落 switch default → result 保持 0 →
+  //   DropDoorItem 的 doorItem!=0 门拦下 = 不掉落（:69466）。
+  // 【本仓策略】显式区间钳制，越界一律回落 Doors[0]=木门 25：
+  //   - 为什么不照抄"不掉落"？C-4 备案口径取更兜底侧：合法但怪异的帧宁可掉错
+  //     材质门也不静默吞掉破坏产物；两档偏差均已在 docs 审计备案，勿"顺手统一"。
+  //   - 为什么安全？Doors 表仅含 GetDoorItem 输出值域（69 档门族,25..6120,
+  //     含 style11=0 神庙锁门不掉档）——天顶剑 4956 等嬗变目标 id 物理不在表内，
+  //     无论帧怎么漂移最坏结果只是"掉错材质门"，永不产生表外物品。
+  // 【正常域不受影响】常规放置/开关下 frame 自在域内（wire 翻转助手是二值自限
+  //   翻转而非单向累积），本钳制对正常玩法零行为差异——曾用裸 pick 时行为与
+  //   此处逐点一致（负索引/越界同样 ?? 回落），固化仅为防未来重构回退成无界外推。
+  // 【回归锁定】tests/desync-door-clamp-guard.test.ts——表长/域内锚点/极端漂移
+  //   值域封闭性/NaN 兜底四处断言，改动本块或 Doors 表必须先过它。
+  if (sheet === 10 || sheet === 11) {
+    const dStyle = sheet === 10
+      ? Math.floor(fx / 54) * 36 + Math.floor(fy / 54)
+      : Math.floor(fx / 72) * 36 + Math.floor(fy / 54);
+    if (dStyle >= 0 && dStyle < Doors.length) return Doors[dStyle];
+    return Doors[0];   // 越界/负值/NaN 统一钳回木门（C-4 口径）
+  }
   const der = styleFromFrame[sheet];
   if (!der) return 0;
   const vid = styleDropVid(sheet, der(fx, fy));

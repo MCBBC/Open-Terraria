@@ -5302,6 +5302,10 @@ export function runDungeonPass(
   if (entKind === 2) { raw(); dgTowerEntrance(posX, posY, entSeed); }
   else if (entKind === 1) { raw(); dgDomeEntrance(posX, posY, entSeed); }
   else dgEntrance(raw(), entSeed);
+  // ★IIIII80（2026-08-30，DungeonCrawler.cs:467-470）：surfaceIsInSpace →
+  //   入口生成后 dungeonBounds.Top=25（Clamp[10,h-10] 同 DBnd.topSet）——房间
+  //   Processing/平台门刷与装饰的上下文界面向天空扩展。仅 sgis 世界改值。
+  if (gs.seedFlags.surfaceIsInSpace) bounds.topSet(25);
   snap('dungeonE');
   for (const rm of rooms) if (rm.generated) roomPlatformsDoors(rm);
   for (const hl of halls) if (hl.generated) hallPlatformsDoors(hl);

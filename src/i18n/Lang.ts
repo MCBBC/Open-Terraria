@@ -53,6 +53,9 @@ export const Lang = {
   /** 聊天池随机一条（XxxChatter 类目；原版 Language.SelectRandom(Lang.CreateDialogFilter)） */
   chatter(category: string): string | null { return languageManager.randomFromCategory(category); },
 
+  /** 类目键数（LanguageManager.categorySize）——循环池游标取模用（动态随语言包） */
+  categorySize(category: string): number { return languageManager.categorySize(category); },
+
   /** CreateDialogFilter 前缀随机（NPC.HasSpecialEventText 的 "XxxSpecialText.Yyy" 族；
    *  原版 Language.SelectRandom(Lang.CreateDialogFilter(prefix))，Lang.cs:425-428） */
   specialText(prefix: string): string | null { return languageManager.randomFromPrefix(prefix); },
