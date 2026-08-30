@@ -1,0 +1,18 @@
+f47038e9ddd8eb7c9c746cc4b6bd8d2f mile8-12345-seed12345.json
+ef67edb23e8e0f2455e9fc802da45cd8 mile8-const-seed1321365005.json
+375de8f3a165726243e219ece06d6dc8 mile8-g-seed9293480.json
+e6998e73fa207e7aeccaf21f6c90e04f mile8-m-seed20260811.json
+852363146cedf00bcf6e0d5e15d070b0 mile8-notraps-seed1896728457.json
+e8d587874e94554141015411b5ea1613 mile8-ntb-seed1372357239.json
+0ca0be2686ff73081b86f8a4d9bdea7e mile8-s22222-seed22222.json
+# --- IIII90b 2026-08-31 追加（fresh 重产链锚点 + spotcheck 绿基线）---
+# fresh 六链 pc-unique.txt sha256 (canon rig md5=3248fc76ee0aeb376990361371690de4)
+1a26aa7fd3f163b8035bc3071db95da69fa0319992c90fb852f035c8e3413c99  golden-g/pc-unique.txt
+f2682182acaa9bea4cff78c1fc986bee26d85170aab6ec574596cd37952794db  golden-m/pc-unique.txt
+73b46f8b3e9ea8c6b2bb96c9dd88fd3fd62a340aaadf3969b8ccfe78d426903b  golden-ftw/pc-unique.txt
+58fbfdc9c380efdb57580c76786d298ec45c26381ed16e1b3f761fc2e8c3880d  golden-drunk/pc-unique.txt
+4f0ba8492c89de4231d047c0ca04c2828ec7d8da87731856633ee5bd0e417d7d  golden-celeb/pc-unique.txt
+# spot-check 绿基线 mile8 result JSON (game/docs/worldgen/golden-spotcheck/)
+d543afa6c0b65095686cf77fda9f45b3  spotcheck/mile8-iiiii90b-g-seed9293480.json
+bc52fad8064dcc8e269cdb6aec91da3f  spotcheck/mile8-iiiii90b-celeb-seed1999040562.json
+# 参照: 末期树(非 endgame 时代)对同 G2 的 g 链结果 = d543afa6… 与本批 fresh 一致
