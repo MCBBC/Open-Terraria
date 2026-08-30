@@ -1061,6 +1061,13 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   runShiniesPass(store, rng, gs); // 26 Ores And Shinies（原在很后"矿石"槽——移到 Silt 后=Webs 位）
   rng.reseed(gs.seed); // ▶Webs cs:13659
   runVanillaWebsPass(store, rng, gs); // 27 Webs（cs:13659——原后置防被清，注册序修正回 27 位）
+  // ★IIIII87 反演重放窗口仪捕获钩（缺省零开销,仅 GFB-C 取证仪挂载;同 __i54Ctx 先例）：
+  //   band 头 (store,gs,chests) 直递 —— probe 端在 rng.reseed 之前拿到完整生成态。
+  const i87Cap = () => {
+    const h = (globalThis as { __swI87Cap?: (st: unknown, g: unknown, ch: unknown) => void }).__swI87Cap;
+    if (h) { try { h(store, gs, world.chests); } catch { /* probe */ } }
+  };
+  i87Cap(); // @UWHEAD
   rng.reseed(gs.seed); // ▶Underworld cs:13697（AddHellHouses 是其尾段，不另重播）
   runUnderworldPass(store, rng, gs); // 28 Underworld（cs:13697——原管线末"地狱"槽）
   // AddHellHouses（cs:13893，Underworld pass **尾**段调用，Corruption(13919) 之前）：
@@ -1074,10 +1081,13 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   else if (!gs.seedFlags.drunkWorld) underworldAshGrassTrees(store, rng, gs, false);
   runHellFortPass(store, rng, gs, undefined, world.chests); // TTTT:梳妆台 88 烧 chest 注册槽(cs:52169)
   if (gs.seedFlags.drunkWorld) underworldAshGrassTrees(store, rng, gs, true);
+  i87Cap(); // @CORRHEAD
   rng.reseed(gs.seed); // ▶CorruptionAndCrimson cs:13919（dual 跳过,同 :22692 十二禁表）
   if (!gs.seedFlags.dualDungeons) runCorruptionPass(store, rng, gs); // 29 Corruption/Crimson
+  i87Cap(); // @LAKESHEAD
   rng.reseed(gs.seed); // ▶Lakes cs:14613
   runLakesPass(store, rng, gs); // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
+  i87Cap(); // @SLUSHHEAD
   rng.reseed(gs.seed); // ▶Slush cs:14756（零掷骰）
   runSlushPass(store, gs); // 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756，紧随 Lakes）
   // ★生成期 tileSolid 翻转（DungeonCrawler.cs:344 MakeDungeon 头
@@ -1087,6 +1097,7 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   //   还原点 = SmoothWorld 头 cs:16510 翻 true（本仓数据无法表达该窗口,备案）→
   //   SmoothWorld 尾 cs:16695 翻回 false（HalfBrickPass 接线）。
   flipGenSolid([481, 482, 483], false);
+  i87Cap(); // @DGHEAD
   rng.reseed(gs.seed); // ▶Dungeon cs:14816（17 内部段不中间重播）
   runDungeonPass(store, rng, gs, world.chests); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算(legacy 入口)不迁移 dungeonLocation——但入口塔列仍可能与
@@ -1097,8 +1108,10 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
   world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
   // 33 MountainCaveOpenings + 34 Beaches（原紧跟 SurfaceCaves——注册序修正移到 Dungeon 后）
+  i87Cap(); // @MCOHEAD
   rng.reseed(gs.seed); // ▶MountainCaveOpenings cs:14932
   runMountainCavesPass(store, rng, gs);
+  i87Cap(); // @BEACHHEAD
   rng.reseed(gs.seed); // ▶BeachesAndOceanCleanup cs:14947
   runBeachesPass(store, rng, gs);
   // 海盆挖完后刷新 surface[](后续旧 pass 依赖;本函数之后才到那些 pass)

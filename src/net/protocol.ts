@@ -437,7 +437,7 @@ export class FrameParser {
             g2.__FRAME_WARNED.add(msgId);
             if (typeof console !== 'undefined') console.warn('[frame] 解析失败 msgId=' + msgId + ' len=' + len + '（每类一次）', (e as Error).message);
           }
-          if (typeof location !== 'undefined' && location.search.includes('netdbg')) throw e;
+          if ((globalThis as { location?: { search?: string } }).location?.search?.includes('netdbg')) throw e;
         }
         p += len;
         any = true;

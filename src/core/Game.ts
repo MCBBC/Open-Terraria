@@ -1630,6 +1630,21 @@ export class Game implements GameHooks {
   private swingHitSet = new Set<number>();
   /** 同一挥击内 tileCut 格只处理一次（与 swingHitSet 同生命周期） */
   private swingTileCutSet = new Set<number>();
+  /** ★近战任务A 充能电水母反噬冷却面（vanilla Player.cs 的仓内映射）：
+   *  · meleeNpcCd ≡ meleeNPCHitCooldown[i]（原版按 NPC 槽位 Main.maxNPCs 数组，
+   *    本仓按实体 id Map——槽位复用语义天然修正；衰减同式每帧 −1：
+   *    UpdateMeleeHitCooldowns :44572-44580 / 1456 :43550-43558）
+   *  · meleeAttackCd ≡ attackCD（TakeDamageFromJellyfish→ApplyAttackCooldown
+   *    置 max(1,(int)(itemAnimationMax*0.33)) :44793-44795 / 1456 :43771-43773；
+   *    每帧递减同段语义，ItemCheck_MeleeHitNPCs 门消费 :44549-44551）
+   *  两面都于新挥击首帧重置 ≡ 原版每次起手 attackCD=0 + ResetMeleeHitCooldowns()
+   *  （1457 :52312-52313 / 1456 :50931-50932），以挥击实例引用比对等价实现。
+   *  登记近似：原版 :44549-44551 冷却门覆盖全部 Main.npc（敌怪/城镇/小动物），
+   *  本仓只挂在 enemies 桶循环（netCatch/town/voodoo/PvP 未挂），见 leftovers。 */
+  private meleeNpcCd = new Map<number, number>();
+  private meleeAttackCd = 0;
+  /** 起手重置哨兵：与 this.swing 引用比对（swing 对象在每次起手重建） */
+  private meleeCdSwingRef: object | null = null;
 
   /** 滚动 FPS（最近 60 帧均值；样本不足返回 null）——F5 调试报告 meta/perf 段 */
   get fps(): number | null {
@@ -10491,6 +10506,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const bowVid = rg?.vid ?? viIdFromKey(heldDef.key);
       const bowC = bowVid >= 0 ? itemCombat(bowVid) : null;
       const useAmmo = bowC?.useAmmo ?? AMMO_ARROW;
+      // ★翻转先于弹药判定（ItemCheck_Shoot :47614-47633 ChangeDir(dot) 逐次执行、
+      //   先于 PickAmmo/canShoot；StartActualUse :52291 ApplyItemAnimation 与弹药
+      //   解耦）——空枪点击同样转身+持举动画,仅不发声不射弹。曾把朝向赋值关进
+      //   "有弹药"门内 = 无弹药点击角色不转身、武器倒到身后（2026-08-31 用户报）
+      const [mwxDry, mwyDry] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+      const angFace = Math.atan2(mwyDry - this.player.cy, mwxDry - this.player.cx);
+      this.player.facing = Math.cos(angFace) > 0 ? 1 : -1;
       // PickAmmo：弹药栏 54-57 优先，再背包 0-53 第一组 useAmmo 匹配
       // （def.ammoId = legacy 注册；vi_ 弹药经 combat.ammo 反查）
       // ★金币枪 905（useAmmo==AmmoID.Coin 71）：先扫钱币槽 50-53（PickAmmo
@@ -11363,6 +11385,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           : GUN_SHOTGUN_VIDS.has(bowVid) ? 'gunShotgun'
           : GUN_HANDGUN_VIDS.has(bowVid) ? 'gunHandgun' : 'gunShot');
         this.cb.onInventoryChanged();
+      } else {
+        // 空仓干放（PickAmmo 无果）：原版照常起手动画+持举姿势（useStyle 5 →
+        // swing.aim 让 Renderer 持械指向鼠标），仅无音效无弹——翻转已在分支头
+        // 按上方 :47614 注解先行完成。不推进弹药轮换（PickAmmo :54209 无弹早退）
+        this.useSwing(heldDef, angFace);
+        this.player.useTime = Math.max(1, Math.round((bowC?.useTime ?? rg?.speed ?? 6)
+          * (this.heldPrefixStat()?.spd ?? 1)));
       }
     } else if (heldDef && cw && ((cw as { autoReuse?: boolean }).autoReuse
       ? (inp.mouseDown || inp.mouseHeld)   // ★autoReuse=电平语义（mouseHeld）——mouseDown
@@ -20414,6 +20443,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   private updateSwingHits() {
+    // ★近战任务A 冷却衰减/起手重置（字段注释见 swingTileCutSet 下声明块）：
+    // 原版 UpdateMeleeHitCooldowns/attackCD 每帧递减不依赖挥击态,起手清零在本仓
+    // 等价为「挥击新实例首帧」——引用比对覆盖全部 swing 创建点
+    if (this.swing !== this.meleeCdSwingRef) {
+      this.meleeCdSwingRef = this.swing;
+      this.meleeNpcCd.clear();
+      this.meleeAttackCd = 0;
+    }
+    if (this.meleeAttackCd > 0) this.meleeAttackCd--;
+    for (const [k, v] of this.meleeNpcCd) {
+      if (v <= 1) this.meleeNpcCd.delete(k);
+      else this.meleeNpcCd.set(k, v - 1);
+    }
     if (!this.swing) return;
     this.swing.t--;
     if (this.swing.t <= 0) {
@@ -20571,6 +20613,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const p = this.player;
     let bx = p.cx + p.facing * offX;
     let by = p.y + offY;
+    // ★近战任务B 星怒延长臂锚点快照：此二值 = 三段持位结果（与 Renderer.drawUseItem
+    //  case 1 双表同源）≡ C# ItemCheck_ApplyUseStyle(1457 :51292 / 1456 :49921)
+    //  写入的 player.itemLocation（useStyle1 各段 X=position.X+w/2±(fw/2−num)·dir、
+    //  Y=position.Y+tier）。其后逐段镜像/扩展原地改写 bx/by,探针必须用未改写快照
+    const swingLocX = bx;
+    const swingLocY = by;
     // ★基底 = 手持贴图帧宽高(Player.cs:44485-44498 !Main.dedServ 分支:num/num2 =
     // heldItemFrame 尺寸,×adjustedItemScale——:44483 的 32×32 仅 dedServ 兜底。
     // 曾误读成"恒 32 与贴图无关"导致长武器判定缩半:村正贴图 64×64 → 判定盒被
@@ -20847,7 +20895,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       if (killed && e.def.boss) { /* boss 死亡处理在 fixedUpdate */ }
     }
-    // ---- 近战 PvP：远端玩家命中（原版 ItemCheck_MeleeHitPVP Player.cs:43401-43415）----
+    // ---- 近战 PvP：远端玩家命中（原版 ItemCheck_MeleeHitPVP 1457 Player.cs:44420
+    //      / 1456 :43398——门禁链 continue 在 :44429/:43407）----
     // 权威=被打方本地结算（victim-settles）：本端只检测相交并广播 msg44 意向，
     // 不对 proxy 扣血（proxy.hp 由被击端 msg16 回报刷新）。门禁：pvpAllowed 房 +
     // 自己 hostile + 对方 hostile/异队（InOpposingTeam）——与 Damage_PVP :13506-13510
@@ -20860,6 +20909,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (this.swingHitSet.has(rp.id)) continue;             // 同一挥击只中一次
         if (!inOpposingTeam(this.player, rp)) continue;         // :4287（含双方 hostile 门）
         if (!hitRect(rp.x, rp.y, rp.w, rp.h)) continue;
+        // ★1457 视线门（ItemCheck_MeleeHitPVP 命中循环门禁串 :44429
+        //  `!itemRectangle.Intersects(player.Hitbox) || !CanHit(player)` → continue；
+        //  1456 :43407 同值）——CanHit = Player.CanHit(Entity ent) 四射线链（1457
+        //  :42858-42865 / 1456 :41886），隔实心块挥不出。与 enemies 桶同式补接，
+        //  穿墙怪 noTileCollide 豁免三处同构（远端代理无此字段，照旧按可选动态面读）
+        if (!(rp as unknown as { noTileCollide?: boolean }).noTileCollide
+          && !playerCanHitEntity(this.world.store, this.player, rp)) continue;
         this.swingHitSet.add(rp.id);
         // 命中意向：裸伤（对方端自行结算防御/endurance/无敌帧）+ 击退方向 + 凶器 id。
         // ★原版近战 PvP 暴击 = 恒 10%（:43410 Next(1,101)<=10,不吃 meleeCrit 装备链）

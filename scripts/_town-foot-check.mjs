@@ -37,7 +37,8 @@ await page.evaluate(async () => {
   for (let t = 0; t < 60; t++) { let gone = true; for (const b of document.querySelectorAll('button')) if ((b.textContent || '').includes('我已知晓')) { b.click(); gone = false; break; } if (gone) break; await new Promise((r) => setTimeout(r, 100)); }
   if (g.player.dead) g.respawnPlayer?.();
   g.renderer.debugMode = true;
-  try { localStorage.setItem('sw_npc_foot_flush', '1'); localStorage.setItem('sw_npc_foot_flush_extra', '-1'); } catch {}
+  try { localStorage.setItem('sw_npc_foot_flush', '1'); localStorage.setItem('sw_npc_foot_flush_extra', process.env.FLUSH_EXTRA || '-1'); } catch {}
+  window.__FLUSHDBG = true;
   g.paused = true;
 });
 
@@ -77,18 +78,41 @@ for (let from = 0; from < KEYS.length; from += BATCH) {
       const px = g.player.cx + ((col - (keys.length - 1) / 2) * 110) / z;
       n.x = px - n.w / 2; n.y = surfY - n.h / 2;
       g.entities.npcs.push(n);
-      placed.push({ key, ref: n });
+      placed.push({ key, ref: n, vid });
       col++;
     }
     if (!placed.length) return [];
     await raf2();
-    // 贴图就绪门
+    // ★贴图就绪门:懒加载期主体跳画只余地面阴影 ⇒ 等每型带内差异像素 ≥50 再放行
+    for (const p of placed) p.ref.x += 1e6;
+    await raf2(); await raf2();
+    const EMPTY = grab();
+    for (const p of placed) p.ref.x -= 1e6;
+    await raf2(); await raf2();
+    const bandCounts = () => {
+      const now = grab();
+      const per = new Map();
+      for (const p of placed) {
+        const [scx] = g.camera.worldToScreen(p.ref.cx, p.ref.cy);
+        const bwPx = Math.max(4, Math.round(p.ref.w * z / 2)) + 6;
+        let n2 = 0;
+        const yLo = Math.max(0, Math.round(surfY * z) - 260), yHi = Math.min(cv.height - 1, Math.round(surfY * z) + 60);
+        for (let y = yLo; y <= yHi; y++) {
+          for (let x = Math.max(0, Math.round(scx - bwPx)); x <= Math.min(cv.width - 1, Math.round(scx + bwPx)); x++) {
+            const j = (y * cv.width + x) * 4;
+            const dx0 = Math.abs(now[j] - EMPTY[j]) + Math.abs(now[j + 1] - EMPTY[j + 1]) + Math.abs(now[j + 2] - EMPTY[j + 2]);
+            if (dx0 > 25) n2++;
+          }
+        }
+        per.set(p.key, n2);
+      }
+      return per;
+    };
     for (let t = 0; t < 240; t++) {
-      const want = new Set(placed.map((p) => p.key));
-      break;
+      const per = bandCounts();
+      if ([...per.values()].every((n2) => n2 >= 120)) break;
+      await new Promise((r) => requestAnimationFrame(r));
     }
-    await raf2();
-    await raf2();
     const A = grab();
     for (const p of placed) p.ref.x += 1e6;
     await raf2();
@@ -116,18 +140,15 @@ for (let from = 0; from < KEYS.length; from += BATCH) {
         if (dd >= 2) sprBot = Math.max(sprBot, y);
       }
       out.push({
-        key: p.key, vid,
+        key: p.key, vid: p.vid,
         expW: dv.width ?? null, expH: dv.height ?? null,
-        boxW: p.w0 ?? null, boxH: p.h0 ?? null,   // 构造后的初始盒尺寸(清park前无法回收)
-        curW: null, curH: null,
+        boxW: p.ref.w, boxH: p.ref.h,
         boxBotRow: boxBot === -1 ? null : boxBot,
         sprBotRow: sprBot === -1 ? null : sprBot,
         bury_screen: (boxBot !== -1 && sprBot !== -1) ? sprBot - boxBot : null,
         anyDiff: (boxBot === -1 ? 0 : 1) + (sprBot !== -1 ? 1 : 0),
       });
-      void ref_w_h_capture;
     }
-    function ref_w_h_capture() {}
     for (const p of placed) {
       const arr = g.entities.npcs;
       const idx = arr.indexOf(p.ref);
@@ -144,6 +165,10 @@ for (let from = 0; from < KEYS.length; from += BATCH) {
     if (st < 0) { console.error('[camera stuck]'); break; }
   }
 }
+const dbgOut = await page.evaluate(() => (window.__flushDbg ?? null));
+if (dbgOut) writeFileSync('/tmp/npc-audit/flush-dbg.json', JSON.stringify(dbgOut, null, 1));
+const dbgMap = Object.fromEntries((dbgOut ?? []).map((e) => [e.vid, e]));
+for (const r of results) { const d0 = dbgMap?.[r.vid]; if (d0) { r.fmaxRow = d0.fmaxRow; r.rsh = d0.sh; r.addYTB = d0.addYTBefore; r.flushT = d0.flushT; } }
 writeFileSync('/tmp/npc-audit/town-v2.json', JSON.stringify(results, null, 1));
 console.log(`共 ${results.length} 条 → /tmp/npc-audit/town-v2.json`);
 function RAWV_DimsForKeys(keys) {

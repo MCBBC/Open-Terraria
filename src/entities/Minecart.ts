@@ -16,7 +16,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
-import { damageVar } from '../stats/ScaleStats';
+import { minecartNpcRampage } from './MountCombat';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import {
@@ -508,63 +508,11 @@ export class Minecart extends Entity {
     p.onGround = this.onTrackNow || this.wasGrounded;
     p.fallStartY = null;   // 常规摔伤链由本实体 fallStart 接管（脱轨落地段结算）
 
-    // ---- 矿车撞怪（Player.cs:27225-27296）：速度>4 扩盒命中敌怪 ----
-    //  盒 = 坐骑盒（width/height 即车盒 20×52，非 20×42 玩家盒）+ 速度扩张
-    //  （vx<-1 x-15 / vx>1 w+15 / |vx|>10 再 ±10 / vy<-1 y-10 / vy>1 h+10）；
-    //  敌怪 only（friendly 城镇 NPC 不伤，:27253）；伤害 GetMinecartDamage（:28776-
-    //  28822）：默认 25+55×速比、mount 13 木质车 15+30×速比、SuperCart 50+100×速比，
-    //  hardMode ×1.5 且 expertMode ×1.5；击退 = 10+40×速比（knockBackResist 由
-    //  hurt() 内乘）；暴击 = max(近/远/魔) 掷骰（:27261-27270）；immune 30t（:27286）；
-    //  击杀 → HandleSpecialEvent(9) VEHICULAR_MANSLAUGHTER（:27288-27290）
-    {
-      const spd = Math.hypot(this.vx, this.vy);
-      if (spd > 4) {
-        // 速比分母 = maxRunSpeed = mount.RunSpeed（骑乘态 :26329 整体覆写）
-        const ratio = spd / maxRun;
-        let rx = this.x, ry = this.y, rw = this.w, rh = this.h;
-        if (this.vx < -1) rx -= 15;
-        if (this.vx > 1) rw += 15;
-        if (this.vx < -10) rx -= 10;
-        if (this.vx > 10) rw += 10;
-        if (this.vy < -1) ry -= 10;
-        if (this.vy > 1) rh += 10;
-        const dir = this.vx < 0 ? -1 : 1;
-        let kb = 10 + 40 * ratio;
-        let base: number;
-        if (this.superCart) base = 50 + 100 * ratio;         // :28814-28817
-        else if (this.mountId === WOOD_CART_MOUNT) base = 15 + 30 * ratio;  // :28809-28811 case 13
-        else base = 25 + 55 * ratio;                          // :28786-28807
-        // Main.DamageVar :65597-65620（±15% + luck 重掷）
-        let dmg = Math.max(1, damageVar(base, p.luck));
-        // :28818-28822 hardMode 与 expertMode 两个独立 ×1.5（C# (int) 截断）
-        if (game.world.flags?.hardMode) dmg = Math.trunc(dmg * 1.5);
-        if (game.world.isExpert) dmg = Math.trunc(dmg * 1.5);
-        const crit = Math.random() * 100 + 1
-          <= Math.max(p.critChance('melee'), p.critChance('ranged'), p.critChance('magic'));
-        if (crit) dmg = Math.round(dmg * 2);
-        for (const ent of game.enemies()) {
-          const e = ent as unknown as {
-            x: number; y: number; w: number; h: number; dead: boolean;
-            iframes: number; dontTakeDamage?: boolean; vanillaId?: number; friendly?: boolean;
-            hurt: (d: number, kx: number, ky: number, g: GameHooks, ap: number, c: boolean, p: number, fp?: boolean) => boolean;
-          };
-          if (e.dead || e.dontTakeDamage || !playerCanHitEnemy(e, game)) continue;   // friendly 门（e.friendly 是空字段 no-op——真旗在 def.friendly）
-          if (!(rx < e.x + e.w && rx + rw > e.x && ry < e.y + e.h && ry + rh > e.y)) continue;
-          // :27277-27281：0<knockBackResist<1 时预除抗性（StrikeNPC 内部再乘回 →
-          //  矿车击退净效果不随抗性衰减）。hurt() 管线按 kbx×resist 结算，故先除抵消
-          const resist = (ent as { def?: { knockBackResist?: number } }).def?.knockBackResist ?? 1;
-          const kbx = resist > 0 && resist < 1 ? kb / resist : kb;
-          // 命中：pierce=0 走 hurt 自带免疫门；命中后覆写 30t（原版 immune[i]=30）
-          if (e.hurt(dmg, dir * kbx, 0, game, 0, crit, 0, true)) {   // 矿车碾压=玩家伤害=DPS 计
-            e.iframes = 30;
-            if (e.dead) {
-              game.achievements?.handleSpecialEvent(9,
-                { statLifeMax: p.maxHp, statManaMax: p.maxMana });
-            }
-          }
-        }
-      }
-    }
+    // ---- 矿车撞怪（Player.cs:27748-27831 [1456 :27225 起]）：速度>4f 扩盒命中敌怪
+    //      ——实现在 MountCombat.minecartNpcRampage（本文件原内联版已收编：补齐
+    //      TryConsumingTimerCrit OR 进 + 暴击掷骰整数分布修正 rand.Next(1,101)<=crit；
+    //      GetMinecartDamage 数值表/难度乘区/kb-抗性预除/iframes=30/event9 全链同前）----
+    minecartNpcRampage(this, game);
 
     // ---- SuperCart 防御+激光（Mount.cs:4793-4799 UpdateEffects）----
     // _shouldSuperCart = Cart 族 && UsingSuperCart（本实体 superCart 即该旗）；

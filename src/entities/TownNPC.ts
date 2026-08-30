@@ -2321,7 +2321,8 @@ export class TownNPC extends Entity {
    *  tipsy=实例位(669 麦酒爆炸施加,TownShot.kill669→applyTipsy,本类
    *  tipsyT/tipsyNow 承接——消费点按 this.tipsy 覆盖 fromWorld 的 false)。
    *  已销项:633 狼人变体 proj929+×1.5/108 连发 1-3(权重 4:2:1)±3.4/160·663
-   *  落点弹原版几何+重掷次数(10/5)。
+   *  落点弹原版几何+重掷次数(10/5);入态外加门(:56012-56103)=弓族斜率 ±0.5
+   *  (:56048-56049)+狼人态目标 ≤50px(:56022-56025),2026-08-30 实体侧对账批补。
    *  登记未接:挥击态逐 tick 弧形判定(GetSwingStats/TweakSwingStats,近似中段
    *  一击);:55864 族 flag28 LOS 掷骰直存;对话中 num3×0.8(:55617,本仓 talking
    *  不入攻击态不可达);防御链 :53401-53531(dryadWard+Boss 防,另批) */
@@ -2341,7 +2342,16 @@ export class TownNPC extends Entity {
       if (!this.onGround || this.atkCd > 0 || this.talking || this.sitting
         || !this.dangerNear) return false;
       const range = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
-      const target = this.pickSideTarget(world, game, range);
+      // 入态候选过滤（在已验 CanHit/CanHitLine 基础上的外加门，:56012-56103）：
+      // - 弓族（ai[0]==12 支）入态还须目标方向斜率 |DirectionTo.Y| ≤ 0.5
+      //   （1457 :56048-56049 vector8.Y ∈ [-0.5,0.5]；方向 Y 同时存进 ai[2]=vector8.Y
+      //    做持械仰角）。缺此门前山坡上/竖井里的弓手会对陡上/陡下目标开弓。
+      // - 狼人态 633（近战支）目标额外 ≤50px（:56022-56025 flag36 Vector2.Distance≤50）
+      const target = this.pickSideTarget(
+        world, game, range,
+        atkType === 1 ? { slopeCapY: 0.5 }
+          : (this.vanillaId === 633 && atkType === 0) ? { maxDist: 50 } : undefined,
+      );
       // 树妖特例（:55936-55940）：目标全失 LOS 仍进入 ai[0]=14 施法态（净化脉冲
       // 586 是自身光环弹不需瞄准）——else if (type == 20) 无条件入态分支
       if (!target && this.vanillaId !== 20) return false;
@@ -2441,6 +2451,11 @@ export class TownNPC extends Entity {
       // 376 等）与零伤体不吃城镇卫兵挥击；damage=0 对 friendly 已天然成立，双条件保语义）
       if (e.def?.friendly || (e.damage ?? e.def?.damage ?? 0) <= 0) continue;
       if (!(rx < e.x + e.w && rx + rect > e.x && ry < e.y + e.h && ry + rect > e.y)) continue;
+      // 视线门（1457 NPC.cs:55635 / 1456 :43749）：矩形相交后每敌须
+      // `nPC2.noTileCollide || Collision.CanHit(position..→nPC2.position..)`——
+      // 隔实心块打不到；本仓敌实体均 tileCollide → 统一 canHit 直判。
+      // 与 Player 近战挥击门（ProcessHitAgainstNPC）同族,2026-08-30 实体侧对账批补
+      if (!canHit(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
       // 伤害结算(:55466):GetAttackDamage_ForTownNPC(num82*num2)——(int) 截断
       if (e.hurt(getAttackDamageForTownNPC(dmg * num2, mainDifficulty(world)), this.facing * kb, 0, game)) {
         game.addDamageNumber(e.x, e.y, dmg, false, '#FFD060');
@@ -2490,9 +2505,14 @@ export class TownNPC extends Entity {
   }
 
   /** 探测范围内按侧取最近可打敌(:53887-53958 近侧目标;LOS=Collision.CanHit)。
-   *  返回含实体 position/Size——160/663 落点弹几何按原版 Main.npc[n].position/Size 采样 */
-  private pickSideTarget(world: import('../world/World').World, game: GameHooks, range: number):
-    { cx: number; cy: number; x: number; y: number; w: number; h: number } | null {
+   *  返回含实体 position/Size——160/663 落点弹几何按原版 Main.npc[n].position/Size 采样。
+   *  opts（入态外加门,NPC.cs:56012-56103 支内条件）：
+   *  - slopeCapY：候选方向斜率上限 |dy/d| ≤ cap(弓族 0.5,:56048-56049)
+   *  - maxDist：候选距离上限(狼人态 633 ≤50px,:56022-56025) */
+  private pickSideTarget(
+    world: import('../world/World').World, game: GameHooks, range: number,
+    opts?: { slopeCapY?: number; maxDist?: number },
+  ): { cx: number; cy: number; x: number; y: number; w: number; h: number } | null {
     let bestL: { cx: number; cy: number; x: number; y: number; w: number; h: number; d: number } | null = null;
     let bestR: { cx: number; cy: number; x: number; y: number; w: number; h: number; d: number } | null = null;
     for (const ent of game.enemies()) {
@@ -2508,6 +2528,8 @@ export class TownNPC extends Entity {
       const d = Math.hypot(dx, ecy - this.cy);
       if (d >= range) continue;
       if (!canHit(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+      if (opts?.slopeCapY !== undefined && Math.abs(ecy - this.cy) / (d || 1) > opts.slopeCapY) continue;
+      if (opts?.maxDist !== undefined && d > opts.maxDist) continue;
       const cand = { cx: ecx, cy: ecy, x: e.x, y: e.y, w: e.w, h: e.h, d };
       if (dx < 0) { if (!bestL || d < bestL.d) bestL = cand; }
       else { if (!bestR || d < bestR.d) bestR = cand; }

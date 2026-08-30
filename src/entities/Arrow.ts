@@ -4904,16 +4904,29 @@ export class Arrow extends Entity {
           this.sbAx = this.cx; this.sbAy = this.cy;
           return;
         }
-        // ---- 绳索线圈弹 475 藤/476/505 丝/506 蛛网（aiStyle35 :27581-27720）：
+        // ---- 绳索线圈弹 171/475/505/506（aiStyle35 :27581-27720，2026-08-30 工单1
+        //      扩 171=普通绳圈,AI_035 默认支 num274=213 :27619 对任意 aiStyle35 生效）：
         //      撞块 → 自撞点列向下先滑过既有绳(WorldGen.IsRope),再向空格铺 ≤10 格
         //      绳(num274 映射 475→353/506→366/505→365/default213;平台翻门 flag15/
-        //      斩草 KillTile 分支未建模登记),铺完 Kill。飞行物理=AI1_GRAV[0.2@30]----
+        //      斩草 KillTile 分支未建模登记),铺完 Kill。飞行物理=AI_035 原版档
+        //      (0.2@30/vx×0.985,ctor 绳圈自校正块)。
+        //      ★锚点=碰撞格沿速度主轴回退一格——原版 position+=vector27 后 Center
+        //      落在【贴近撞面的空气格】(:27637-27641 从钳制后位取格),本仓检测位是
+        //      实心格本身,不回退则起铺格 isActive 直接 break(零铺绳,实测坑)----
         if (ROPE_COIL_TILE[this.projId] !== undefined) {
           const stRc = game.world.store;
           const rtKey = ROPE_COIL_TILE[this.projId];
           const rtId = TILE_BY_KEY[rtKey];
           let rcx = Math.floor(this.cx / TILE);
           let rcy = Math.floor(this.cy / TILE);
+          // 撞面回退（见上注）：沿速度主轴向反方向退一格取空气邻格作起铺锚
+          if (Math.abs(this.vx) >= Math.abs(this.vy)) {
+            const bx2 = rcx - Math.sign(this.vx);
+            if (stRc.inBounds(bx2, rcy) && !stRc.isActive(bx2, rcy)) rcx = bx2;
+          } else {
+            const by2 = rcy - Math.sign(this.vy);
+            if (stRc.inBounds(rcx, by2) && !stRc.isActive(rcx, by2)) rcy = by2;
+          }
           while (stRc.inBounds(rcx, rcy) && TILE_DEFS[stRc.get(rcx, rcy)]?.rope) rcy++;   // IsRope 下滑
           let placedRc = 0;
           for (let n = 0; n < 10; n++, rcy++) {

@@ -4317,11 +4317,16 @@ export class Enemy extends Entity {
           if (this.vanillaId === 26) {
             game.breakTile?.(dtx, dty);                // 哥布林苦力直接拆门（:60643-60650）
           } else if (atDoorTile === 10) {
-            if (!openDoor(st, dtx, dty, dir)) {
+            const opened = openDoor(st, dtx, dty, dir);
+            if (!opened) {
               this.ai3 = num58F;                       // 开门失败 → ai[3]=num58 停索敌（:60658）
+            } else {
+              game.npcDoorNet?.('door', dtx, dty, false, dir); // msg19 等价：即时广播
             }
           } else if (!shiftTallGate(st, dtx, dty, false)) {
             this.ai3 = num58F;                         // 高门开启失败（:60668-60673）
+          } else {
+            game.npcDoorNet?.('gate', dtx, dty, false, dir); // msg19 等价：闸开即时广播
           }
         }
       }

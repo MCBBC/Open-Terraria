@@ -16,6 +16,13 @@ await page.waitForFunction(() => !!window.__swFlow, { timeout: 60000 });
 await page.evaluate(() => window.__swFlow.newWorld('', 4200, 1200));
 await page.waitForFunction(() => !!window.__swGame?.player, { timeout: 300000 });
 
+// 欢迎弹窗先关（遮罩会顶掉首屏 DOM 截图）
+await page.evaluate(() => {
+  for (const b of [...document.querySelectorAll('button')]) {
+    if (/我已知晓/.test(b.textContent ?? '')) b.click();
+  }
+});
+await new Promise((r) => setTimeout(r, 800));
 // 一次性 spawn 商人
 await page.evaluate(() => (async () => {
   const g = window.__swGame;
@@ -23,7 +30,6 @@ await page.evaluate(() => (async () => {
   const n = new TownNPC('merchant', g.player.x + 30, g.world.groundLevel * 16 - 48);
   n.home = { x: Math.floor(n.cx / 16), y: Math.floor(n.cy / 16) };
   g.entities.add(n, 'npcs');
-  g.player.x = n.cx - 30; g.player.y = n.cy - 8;
 })());
 for (const m of ['detailed', 'closeUp', 'fullBodyRetro']) {
   await page.evaluate(async (mm) => {
@@ -33,17 +39,18 @@ for (const m of ['detailed', 'closeUp', 'fullBodyRetro']) {
     g.closeNpcDialog();
     const npc = [...g.entities.npcs][0];
     g.player.x = npc.cx - 30; g.player.y = npc.cy - 8;
-    for (let i = 0; i < 10; i++) g.fixedUpdate(1 / 60);
+    g.player.vx = 0; g.player.vy = 0;
     g.openNpcDialog.call(g, npc);
-    window.__portraitMode = mm;
-    window.__portraitDone = false;
-    setTimeout(() => { window.__portraitDone = true; }, 600);
   }, m);
-  await page.waitForFunction(() => window.__portraitDone === true, { timeout: 5000 });
-  await new Promise((r) => setTimeout(r, 300));
+  // 等头像框真正出现（自动关对话/时序竞态防假红）
+  const found = await page.waitForFunction(
+    () => !!document.querySelector('.sw-npc-dialog canvas.sw-npc-portrait'),
+    { timeout: 6000 },
+  ).then(() => true).catch(() => false);
+  if (!found) console.log(`no portrait canvas for ${m}`);
+  await new Promise((r) => setTimeout(r, 500));   // img onload 绘制窗
   const dlg = await page.$('.sw-npc-dialog');
   if (dlg) await dlg.screenshot({ path: `${OUT}/dlg-${m}.png` });
-  else console.log(`no dialog element for ${m}`);
 }
 console.log('shots done ->', OUT);
 await browser.close();

@@ -83,13 +83,15 @@ describe('R35-D 3005 绳索线圈弹道化(aiStyle35)', () => {
     const cs = readFileSync(new URL('../src/data/vanillaItemCombat.ts', import.meta.url), 'utf8');
     expect(cs).toMatch(/475: \[0\.2, 30\], 476: \[0\.2, 30\], 505: \[0\.2, 30\], 506: \[0\.2, 30\]/);
   });
-  it('D-2 Arrow 撞块铺绳:≤10 格向下+IsRope 滑过+四弹映射(:27655-27720)', () => {
+  it('D-2 Arrow 撞块铺绳:≤10 格向下+IsRope 滑过+五弹映射(:27655-27720)', () => {
     const as = readFileSync(new URL('../src/entities/Arrow.ts', import.meta.url), 'utf8');
     expect(as).toMatch(/ROPE_COIL_TILE\[this\.projId\] !== undefined/);
     expect(as).toContain("475: 'v_353_vine_rope'");
     expect(as).toContain("506: 'v_366_web_rope'");
     expect(as).toContain("505: 'v_365_silk_rope'");
-    const blk = as.match(/ROPE_COIL_TILE\[this\.projId\] !== undefined[\s\S]{0,900}?killNow/);
+    // 2026-08-30 工单1：171 普通绳圈(985 shoot 171,AI_035 默认支 num274=213)
+    expect(as).toContain("171: 'v_213_rope'");
+    const blk = as.match(/ROPE_COIL_TILE\[this\.projId\] !== undefined[\s\S]{0,2200}?killNow/);
     expect(blk).toBeTruthy();
     expect(blk![0]).toContain('n < 10');
     expect(blk![0]).toContain('TILE_DEFS[stRc.get(rcx, rcy)]?.rope');   // IsRope 下滑

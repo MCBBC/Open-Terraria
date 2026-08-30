@@ -53,6 +53,36 @@ const AURA_TOWER = new Set([688, 689, 690]);
  *  中心上方 48px 处 144×144 盒内有敌 → 原地爆炸（proj 694/695/696 等价 AoE），
  *  冷却 GetExplosiveTrapCooldown=90 */
 const TRAP_TOWER = new Set([691, 692, 693]);
+
+/** AI_137_LightningAura_CanHit（Projectile.cs:71574-71614）1:1：塔顶(+20) 到目标点
+ *  的三试视线门——①直线 CanHitLine；②不过则走中点垂直偏移 |v|×0.2 的两段弧线
+ *  （先 +π/2 绕行侧，再 −π/2），两段全通才算见着；③目标格本身实心直接 false。
+ *  2026-08-30 实体侧对账批补（此前只有单段直线近似）。调用点：
+ *  Colliding aiStyle==137 支（Projectile.cs:15888-15897 敌盒中心/敌盒上沿中两点）
+ *  与 AI_137 尘/声采样（:70040/:70063）。 */
+export function lightningAuraCanHitFrom(
+  st: import('../world/TileStore').TileStore,
+  fx: number, fy: number, tx: number, ty: number,
+): boolean {
+  const tIx = Math.floor(tx / TILE), tIy = Math.floor(ty / TILE);
+  if (st.inBounds(tIx, tIy) && st.isSolid(tIx, tIy)) return false;   // SolidTile(:71577)
+  if (canHitLine(st, fx, fy, 0, 0, tx, ty, 0, 0)) return true;        // 直线支(:71581)
+  // 弧线参数(:71584-71600)：v = 目标−起点；中点 M=Lerp(起,终,0.5)；
+  // 弧点 = M ± SafeNormalize(v,UnitY).RotatedBy(±π/2) × |v| × 0.2
+  const vx = tx - fx, vy = ty - fy;
+  const vl = Math.hypot(vx, vy) || 1;
+  let nx = vx / vl, ny = vy / vl;                                     // SafeNormalize 默认 UnitY
+  if (vx === 0 && vy === 0) { nx = 0; ny = 1; }
+  const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+  const off = vl * 0.2;
+  for (const s of [1, -1]) {                                          // RotatedBy(±π/2)
+    const px = mx - ny * s * off;                                     // (nx,ny) 转 ±90°
+    const py = my + nx * s * off;
+    if (!canHitLine(st, fx, fy, 0, 0, px, py, 0, 0)) continue;
+    if (canHitLine(st, px, py, 0, 0, tx, ty, 0, 0)) return true;
+  }
+  return false;
+}
 /** 随从帧循环表（源码提取，Projectile.cs 各 AI 内 frameCounter 规则）：
  *  [每帧 tick, 循环帧数, 攻击帧偏移]。375 小鬼攻击中 +4（ai[1]<24 → 真攻击帧）；
  *  未列入的家族（758 吸血蛙 24 帧/951 雪怪 12 帧/1022 蘑菇 16 帧/
@@ -3109,7 +3139,12 @@ export class MinionProj extends Entity {
       // Bottom+(dir*6,-46) 发火球 668）→ 24t 结束回待机并冷却 60t（num8）
       if (FLAMEBURST_TOWER.has(this.projId)) {
         if (this.sFire === 0) {
-          const tgt = this.nearestEnemy(game, 900);
+          // 索敌门 = AI_130_FlameBurstTower_FindTarget（Projectile.cs:69418-69462）：
+          // 候选须 `Collision.CanHitLine(shootingSpot→NPC.Center)`（:69434/:69456），
+          // 调用点 :69375（待机选向 canChangeDirection=true）。本仓补视线门
+          // （nearestEnemy 'line'，rect 版近似原版 Center→Center 0×0 点对）；
+          // 角度比 angleRatioMax/分层 shot_range 未接——登记，不影响 LOS 语义。
+          const tgt = this.nearestEnemy(game, 900, 'line');
           if (tgt && this.sCool <= 0) {
             this.facing = tgt.cx >= this.cx ? 1 : -1; // direction = Sign(指向)（:65386）
             this.sFire = 1; this.sFireT = 0;
@@ -3117,7 +3152,9 @@ export class MinionProj extends Entity {
           if (this.sCool > 0) this.sCool--;
         } else {
           if (this.sFireT === 12) {
-            const tgt = this.nearestEnemy(game, 900);
+            // 开火帧重索敌（:69391，canChangeDirection=false）同样带 CanHitLine 门：
+            // 门不过 → 沿入态朝向直射（原版 num11==-1 支 vector2=(direction,0)）
+            const tgt = this.nearestEnemy(game, 900, 'line');
             game.playSfxFiles(soundTrackFiles('dd2_flameburst_tower_shot'), 0.9, this.cx, this.cy); // AI_131 :65536（弹幕首帧）
             const mx = this.cx + this.facing * 6, my = this.y + this.h - 46; // 炮口（:65316）
             let vx = this.facing * 9, vy = 0;
@@ -3144,13 +3181,17 @@ export class MinionProj extends Entity {
           this.sCool = ballistraShotDelayOf(game.player);
         }
         if (this.sFire === 0) {
-          const tgt = this.nearestEnemy(game, 900);
+          // 索敌门 = AI_134_Ballista_FindTarget（Projectile.cs:69465-69507）：
+          // 候选须 `Collision.CanHitLine(shootingSpot→NPC.Center)`（:69481/:69503），
+          // 调用点 :69647（选向+入态）。deadBottomAngle 角度门未接——登记。
+          const tgt = this.nearestEnemy(game, 900, 'line');
           if (tgt) this.facing = tgt.cx >= this.cx ? 1 : -1;
           if (tgt && this.sCool <= 0) { this.sFire = 1; this.sFireT = 0; }
           if (this.sCool > 0) this.sCool--;
         } else {
           if (this.sFireT === 12) {
-            const tgt = this.nearestEnemy(game, 900);
+            // 开火帧重索敌（:69685）同样带 CanHitLine 门——门不过沿 direction 直射
+            const tgt = this.nearestEnemy(game, 900, 'line');
             game.playSfxFiles(soundTrackFiles('dd2_ballista_tower_shot'), 0.9, this.cx, this.cy); // AI_134 :65674（开火帧同弩箭）
             // 原版瞄准与出弹都从本体 Center（:65590 center=base.Center → :65693
             // NewProjectile(center)；680 弩箭 16×16 → 左上 = Center−8。曾误把
@@ -3212,8 +3253,16 @@ export class MinionProj extends Entity {
             const nx = Math.max(en.x, Math.min(en.x + en.w, this.cx));
             const ny = Math.max(en.y, Math.min(en.y + en.h, this.auraCy));
             if (Math.hypot(this.cx - nx, this.auraCy - ny) >= side / 2 - 20) continue;
-            // AI_137_CanHit（:67170-67195）：塔顶+20 到敌中心的视线（两次弧线绕行未实装）
-            if (!canHit(game.world.store, this.cx, this.auraCy - 20, 0, 0, en.cx, en.cy, 0, 0)) continue;
+            // AI_137_CanHit 视线门（Projectile.cs:71574-71614，2026-08-30 补弧线三试
+            // +目标双点:15890/:15894 敌盒中心/敌盒上沿中任一通过即命中；目标格实心直接 false）。
+            // ★起点基点核对（Entity.cs:86-96）：base.Top=(X+width/2, position.Y)=场盒顶沿中点，
+            //   +UnitY×20 → 起点 = (Center.X, cy − 场盒半高 + 20)；本仓场盒高=auraSide、
+            //   场盒竖中心=auraCy → 起点为 (cx, auraCy − side/2 + 20)。旧实现锚在
+            //   (cx, auraCy−20) 无 side 归属——小盒(64~160)差 ≤60px 档位级偏移，已对齐。
+            if (!lightningAuraCanHitFrom(game.world.store, this.cx, this.auraCy - side / 2 + 20, en.cx, en.cy)
+              && !lightningAuraCanHitFrom(game.world.store, this.cx, this.auraCy - side / 2 + 20, en.x + en.w / 2, en.y)) {
+              continue;
+            }
             if (!this.hitCd.ready(en.id, 3)) continue; // localNPCHitCooldown=3（:7055）
             zapped = true;
             // 命中 armorPenetrationPercent=1（100% 护穿，:12443——penPercent 通道
@@ -3347,7 +3396,11 @@ export class MinionProj extends Entity {
       // 其他哨兵（aiStyle 123：月门/彩虹水晶）
       const ss = SENTRY_SHOOT[this.projId];
       if (ss) {
-        const tgt = this.nearestEnemy(game, 1000);
+        // 索敌门 = AI_123_FloatingTurrets（Projectile.cs:37840/:37854）：最近敌选择
+        // 内联 `Collision.CanHitLine(base.Center→NPC.Center)`（浮动炮台不隔墙开火）；
+        // 集火目标 OwnerMinionAttackTargetNPC 同门（:37840,本仓 minionTargetId 路径
+        // 未过此门——登记）
+        const tgt = this.nearestEnemy(game, 1000, 'line');
         if (tgt) this.facing = tgt.cx >= this.cx ? 1 : -1;
         if (tgt && this.sCool <= 0) {
           this.sCool = ss.cd;

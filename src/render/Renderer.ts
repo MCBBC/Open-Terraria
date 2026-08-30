@@ -36,13 +36,17 @@ const footCfg = (() => {
     const ov = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}') as Record<string, unknown>;
     for (const [k, v] of Object.entries(ov)) if (Number.isFinite(v)) cfg.overrides[+k] = v as number;
   } catch { /* 私隐模式等异常保默认 */ }
-  (window as unknown as { npcFootCfgReload?: () => void }).npcFootCfgReload = () => {
-    cfg.flushOn = localStorage.getItem('sw_npc_foot_flush') !== '0';
-    const n = Number(localStorage.getItem('sw_npc_foot_flush_extra'));
-    if (Number.isFinite(n)) cfg.extra = n;
-    const ov = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}') as Record<string, unknown>;
-    for (const [k, v] of Object.entries(ov)) if (Number.isFinite(v)) cfg.overrides[+k] = v as number;
-  };
+  // ★2026-08-30 补卫:node 测试环境无 window(此前裸赋值把 vitest 全套件炸成
+  //   ReferenceError,slime-gun 等既有用例全红)——浏览器侧 reload 挂载语义不变
+  if (typeof window !== 'undefined') {
+    (window as unknown as { npcFootCfgReload?: () => void }).npcFootCfgReload = () => {
+      cfg.flushOn = localStorage.getItem('sw_npc_foot_flush') !== '0';
+      const n = Number(localStorage.getItem('sw_npc_foot_flush_extra'));
+      if (Number.isFinite(n)) cfg.extra = n;
+      const ov = JSON.parse(localStorage.getItem('sw_npc_foot_bias_over') || '{}') as Record<string, unknown>;
+      for (const [k, v] of Object.entries(ov)) if (Number.isFinite(v)) cfg.overrides[+k] = v as number;
+    };
+  }
   return cfg;
 })();
 /** ★v6 内禀「落脚贴合」:按实际切片扫描内容底行(fMax),返回使其贴住盒底的
@@ -9465,6 +9469,17 @@ export class Renderer {
               + npcFootBiasExtra() + npcFootBiasOverride(nidT);
             flushT = Math.max(-24, Math.min(24, flushT));
             addYT += flushT;
+            // ★临时示波器(window.__FLUSHDBG 开启时记录首帧)
+            if ((window as unknown as { __FLUSHDBG?: boolean }).__FLUSHDBG && !(window as unknown as { __flushDbgSeen?: Set<number> }).__flushDbgSeen?.has(nidT)) {
+              const seen = (window as unknown as { __flushDbgSeen?: Set<number> }).__flushDbgSeen ?? new Set();
+              seen.add(nidT);
+              (window as unknown as { __flushDbgSeen?: Set<number> }).__flushDbgSeen = seen;
+              ((window as unknown as { __flushDbg?: unknown[] }).__flushDbg ??= []).push({
+                vid: nidT, h: n.h, sh: r.sh, fmaxRow,
+                addYTBefore: addYT - flushT, flushT,
+                sw: r.sw, sheetIsProfile: true,
+              });
+            }
           }
         }
         ctx.translate(n.cx, n.cy); // 盒中心

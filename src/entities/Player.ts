@@ -8,6 +8,7 @@ import {
 } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { wetCollision } from './npcLiquid';
+import { mountJumpStomps, tickSlimeWetState, consumeWetSlimeOnJumpControl } from './MountCombat';
 import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
 import { randomizeFriendlyInsanityShadow } from './InsanityShadowFriendly';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
@@ -490,6 +491,11 @@ export class Player extends Entity {
   /** 出入水 10t 去抖（Player.wetCount，Player.cs:27464/27558 置 10、:27651 每tick 递减、
    *  :37203 重生清零）——水波涟漪尺寸因子（WaterShaderData.cs:263 h·wetCount/9） */
   wetCount = 0;
+  /** 史莱姆坐骑湿态（Player.wetSlime，1457 Player.cs:1538 / 1456 :1472）：骑史莱姆族
+   *  坐骑（3 粘粘鞍/50 史莱姆皇后）浸液置 30、每 tick 递减；>0 期间压制 JumpMovement
+   *  的弹跳踩踏循环（:20693 门）+ 起跳瞬间清除（:28108-28114，出水跳门）。滴答/
+   *  浮力档 = MountCombat.tickSlimeWetState（液体解析段调用） */
+  wetSlime = 0;
   headUnderwater = false;
   /** 税务员累积税款（Player.cs:792 taxMoney，铜币；对话「收集」领取） */
   taxMoney = 0;
@@ -2789,6 +2795,12 @@ export class Player extends Entity {
     // BuffState.apply 是 max 合并（AddBuff 语义），浸着恒 30s，离开后自然倒计时
     this.inHoney = liquidCollision(world.store, this.x, this.y, this.w, this.h, 3);
     if (this.inHoney) this.buffs.apply(BuffType.Honey, 30);
+    // ---- 史莱姆坐骑液体态（1457 :28160-28207 / 1456 :27653-27689）：wetSlime--
+    //      + 骑史莱姆族（3/50）浸液 → wetSlime=30 + 浮力档（vy>2 ×0.9 / vy-=0.5 /
+    //      vy<-4 钳回）。原版 switch 在 mount.Active 段的 `if (wet)` 内、不分液体种类
+    //      （水/蜜/岩浆同支）→ wet ≙ inWater∪inLava∪inHoney。踩踏循环 A 的
+    //      wetSlime==0 门消费此值（MountCombat.mountJumpStomps）----
+    tickSlimeWetState(this);
     // 微光浸入（Player.cs:27420-27434）：shimmerWet + 地狱层之上 → AddBuff(353, 60t=1s)。
     // shimmerImmune（:14981 原版旗标来源未移植）恒 false；地狱层内不授予
     // （:27430 采样处即有 position.Y/16 < UnderworldLayer 门）
@@ -3473,6 +3485,11 @@ export class Player extends Entity {
     // ridingMountSwimFree 门豁免）、正常重力与跳跃（+5 高/+2.5 速
     // 在 Mount.JumpHeight/JumpSpeed 的 frameState==4 支线），帧态机自行切游泳帧
     if ((this.inWater || this.inLava) && !this.ridingMountSwimFree) {
+      // 控跳清湿（1457 :20813-20817 / 1456 :20375-20377）：骑史莱姆族坐骑时按住
+      // 跳键即清 wetSlime（湿态压踩踏 + 放行起跳链）——原版在 JumpMovement 的
+      // if(controlJump) 头部逐帧执行非边沿。原版 flag 对水下起跳门的完整放行链
+      // （flag2&&flag3 组合 :20845）本仓未整体建模，出水跳仍走 vy==0/脚蹼门（近似）
+      consumeWetSlimeOnJumpControl(this);
       // ---- 液体参数档（Player.cs:24130-24155 wet 链；inWater 已含蜂蜜 type3，
       //      岩浆 wet 同链走 else 档）----
       // honeyWet → gravity 0.1/maxFall 3（跳跃参数保持干燥档——原版分支不覆写）；
@@ -4438,6 +4455,15 @@ export class Player extends Entity {
         }
       }
     }
+
+    // ---- JumpMovement 头部踩踏段（1457 Player.cs:20693-20801 / 1456 :20254-20362，
+    //      vanilla :26945 移动尾每 tick 无条件调 JumpMovement）：史莱姆坐骑弹跳踩踏
+    //      （A 支 wetSlime==0 && vy>0 → 命中 velocity.Y=-10 回弹）+ 高尔夫球车下压
+    //      （C 支 type17）——damage=40×minionDamage(截断)/kb5/npc immune 10|12/玩家
+    //      GiveImmuneTimeForCollisionAttack(6|12)；B 支死亡细胞冲撞符文无触发源未接线
+    //      （MountCombat.ramRuneDownDashStomp 显式入口）。挂碰撞后（落地门在上方摔伤
+    //      段收尾，vy 已是本 tick 终值——原版同样读碰撞后速度）----
+    mountJumpStomps(this, game);
 
     // 走跑动画计时（仅地面；空中贴图静态不参与动画）
     if (Math.abs(this.vx) > 0.3 && this.onGround) this.animTime += Math.abs(this.vx);
