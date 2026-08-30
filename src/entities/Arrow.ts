@@ -27,7 +27,9 @@ const spriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
  *  985 普通绳圈 shoot 171(SetDefaults :2572 同族 14×14/tileCollide=false/t400)此前
  *  未登记=纯扔箭撞块无效果(2026-08-30 孤儿武器 A 波工单1) */
 const ROPE_COIL_TILE: Record<number, string> = {
-  171: 'v_213_rope', 475: 'v_353_vine_rope', 476: 'v_213_rope', 505: 'v_365_silk_rope', 506: 'v_366_web_rope',
+  // ★476 非绳圈(=aiStyle185 魔法弹 200×200,P.cs:5502-5509,无物品 shoot 它),
+    // A 簇审计防御性移除——曾有误员会让假想 476 弹也能铺绳
+  171: 'v_213_rope', 475: 'v_353_vine_rope', 505: 'v_365_silk_rope', 506: 'v_366_web_rope',
 };
 /** 绳圈弹→余料返还件 { coil: 原圈件, loose: 散绳件 }（Projectile.cs:79303-79316，
  *  Kill→Kill_ExplodeTiles(:78995) 四型同构段：ai[1]==0 → 原圈 ×1；1≤ai[1]<10 →
@@ -1515,7 +1517,7 @@ export class Arrow extends Entity {
     if (ROPE_COIL_TILE[projId] !== undefined) {
       this.noTileCollide = false;
       this.grav = 0.2;
-      this.gravDelay = 30;
+      this.gravDelay = 31;             // ★A 簇审计:原版门严格 >30(P.cs:27581),本仓消费面 >= → 等价存 31
       this.drag = 0.985;             // :27585 velocity.X *= 0.985f（与重力同一门内生效）
       this.maxFall = 14;
       this.tumble = false;

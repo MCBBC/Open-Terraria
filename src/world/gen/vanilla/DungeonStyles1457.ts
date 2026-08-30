@@ -459,14 +459,37 @@ export function isConsideredDungeonWallEdge(gv: DungeonGenVars1457, wallType: nu
 export const dualDungeonTrapWindow = { allowTrapGenerationInDungeon: false };
 
 /** 潜在地牢界域（GenVars.dungeonGenVars[i].outerPotentialDungeonBounds 的 JS 投影）。
- *  DungeonPass 生成时回填（每地牢一套）;TrapsPass 门消费。 */
+ *  DungeonPass/DunesPass 头生成时回填（每地牢一套）;TrapsPass 门消费。 */
 export interface PotentialDungeonBounds { l: number; t: number; r: number; b: number; }
+
+/** 双地牢各套 genvars 的生成域投影（GenVars.dungeonGenVars[i] 最小面）。
+ *  side：DungeonSide.Left=-1/Right=1；location：genVars.dungeonLocation（Reset 掷,
+ *  入口 precalc 成功时被改写）;theme：SetupDungeonGenVarVariables 的 Next(3) 砖色掷值
+ *  （dungeonColor/brickTileType/WallType/Cracked 全由它派生）;entA/B/seed：
+ *  入口三掷（preGenDungeonEntranceSettings.RandomSeed=Next()）。 */
+export interface DualDungeonGenEntry {
+  side: number;
+  location: number;
+  theme: number;
+  entA: number;
+  entB: number;
+  entSeed: number;
+}
 
 export const dualDungeonState: {
   enabled: boolean;
   /** InAnyPotentialDungeonBounds 的界域集（普通世界=1 套,双地牢=2 套） */
   potentialBounds: PotentialDungeonBounds[];
-} = { enabled: false, potentialBounds: [] };
+  /** ★IIIII88：双地牢 genvars 列表（index=dungeon 序号;dungeon0 与普通单地牢共用
+   *  gs.dungeonSide/dungeonLocation/dungeonTheme 面,本表只作双态消费端来源）。
+   *  Reset 期填充 side/location（WorldGen.cs:11371/:11486）,Dunes 头补 theme/
+   *  ent* 四掷与界域（cs:11552-11559 SetupDungeonGenVarVariables×2）。 */
+  dungeons: DualDungeonGenEntry[];
+  /** GenVars.DualDungeon_NormalizedDistanceSafeFromDither
+   *  （WorldGen.cs:11488-11490 Reset 双地牢支：1-0.075×maxTilesY/1200）——
+   *  DitherSnake 控制线边界带宽系数（DungeonControlLine 静态字段同源）。 */
+  normalizedDistanceSafeFromDither: number;
+} = { enabled: false, potentialBounds: [], dungeons: [], normalizedDistanceSafeFromDither: 1 };
 
 /** DungeonUtils.InAnyPotentialDungeonBounds（:2136-2165,ContainsWithFluff fluff=0 语义
  *  =半开矩形含端判定;JS 侧 DungeonPass.potContains 同构）。 */
@@ -482,4 +505,47 @@ export function inAnyPotentialDungeonBounds(x: number, y: number): boolean {
  *  普通世界 dualDungeons=false → 恒不拒（与 1456 行为一致）。 */
 export function placeTrapDualDungeonReject(x: number, y: number): boolean {
   return dualDungeonState.enabled && !dualDungeonTrapWindow.allowTrapGenerationInDungeon && inAnyPotentialDungeonBounds(x, y);
+}
+
+// ── 双地牢 genvars 界域/装配套（IIIII88 · 接线壳展开前置件）──
+
+/** CreatePotentialDungeonBounds（DungeonUtils.cs:2106-2133）调用形：
+ *  SetupDungeonGenVarVariables :109 传 (leftDungeon, 0.10000000149011612,
+ *  0.05000000074505806) —— percentOnTop 缺省 = (worldSurface+10)/maxTilesY
+ *  （drunk/underground 特典支→worldSurfaceHigh,本仓入口地下支=drunk 世界沿用原语义);
+ *  percentOnBottom = (UnderworldLayer-10)/maxTilesY,UW=maxTilesY-200。
+ *  num=percentInMiddle/2；左:num2=(int)(w×edges),num3=(int)(w×(0.5-num))；
+ *  右:num2=(int)(w×(0.5+num)),num3=w-(int)(w×edges)。innerBuffer=10（inner 不外泄,
+ *  现消费面全 outer）。返回 **Hitbox 终态**四界：SetBounds 经 Left/Top 属性写入带
+ *  Clamp[10,max-10]（DungeonBounds.cs:61-85）,CalculateHitbox 再强制 Right>Left/
+ *  Bottom>Top——半开矩形 [l,r)×[t,b)，Contains 全走该值。
+ *  @param undergroundEntrance drunk/surfaceIsNoSurface 入口地下特典支（percentOnTop 换算）
+ */
+export function createPotentialDungeonBounds(
+  w: number, h: number, worldSurface: number, worldSurfaceHigh: number,
+  leftDungeon: boolean, undergroundEntrance: boolean,
+): PotentialDungeonBounds {
+  const percentInMiddle = 0.10000000149011612;
+  const percentOnEdges = 0.05000000074505806;
+  const percentOnTop = (undergroundEntrance ? (worldSurfaceHigh + 10.0) : (worldSurface + 10.0)) / h;
+  const percentOnBottom = ((h - 200) - 10.0) / h;
+  const num = percentInMiddle / 2.0;
+  const clamp10 = (v: number, cap: number): number => Math.max(10, Math.min(cap - 10, Math.trunc(v)));
+  let l = clamp10(leftDungeon ? w * percentOnEdges : w * (0.5 + num), w);
+  let r = clamp10(leftDungeon ? w * (0.5 - num) : w - Math.trunc(w * percentOnEdges), w);
+  let t = clamp10(h * percentOnTop, h);
+  let b = clamp10(h * percentOnBottom, h);
+  // int 化次序：C# 全程 int 运算——num2/num3/t/b 均先 (int) 后入属性（Clamp 保 int）
+  if (r <= l) r = l + 1;
+  if (b <= t) b = t + 1;
+  return { l, t, r, b };
+}
+
+/** 把双地牢界域集写回 dualDungeonState.potentialBounds（每地牢一套,序号=列表序）。
+ *  Dunes 头（setup 后）与 DungeonPass 头都要刷新——Marble/Granite/Mushroom/
+ *  EnchantedSword/LivingTree/Pyramids/FinalCleanup 等消费面在 #20..#105 全程读它。 */
+export function refreshDualPotentialBounds(w: number, h: number, worldSurface: number, worldSurfaceHigh: number, undergroundEntrance: boolean): void {
+  if (!dualDungeonState.enabled || dualDungeonState.dungeons.length === 0) return;
+  dualDungeonState.potentialBounds = dualDungeonState.dungeons.map((d) =>
+    createPotentialDungeonBounds(w, h, worldSurface, worldSurfaceHigh, d.side < 0, undergroundEntrance));
 }

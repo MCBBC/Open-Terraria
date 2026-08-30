@@ -457,6 +457,7 @@ import { runPilesPass } from './vanilla/PilesPass';
 import { runRemoveSurfaceWaterAboveSandPass, runFragileIcePass } from './vanilla/WaterIcePasses';
 import { tileRunner } from './vanilla/TileRunner';
 import { runDungeonPass } from './vanilla/DungeonPass';
+import { dualDungeonState } from './vanilla/DungeonStyles1457';   // ★IIIII88 双地牢共享态（Reset/Dunes 头装配）
 import { runTemplePass, runTemplePart2Pass, runLihzahrdAltarPass } from './vanilla/TemplePass';
 import { runIslandHousePass } from './vanilla/IslandHousePass';
 import { runHellFortPass, hfIs1457 } from './vanilla/HellFortPass';
@@ -598,6 +599,7 @@ function vanillaTerrain(ctx: GenCtx) {
   // 原版在 AddPasses 循环之前按此固定顺序消耗 Main.rand（种子等价的流位置契约）。
   // 天气/背景/月亮等值我们未消费——照掷照弃，只保留 GenState 下游字段。
   const W = store.w;
+  const H = store.h;
   // ① jungleHut（cs:11182 Next(5)，cs:11333-11352 映射 0-4→119/120/158/175/45）
   //    JungleShrinePass 复用本值（曾照掷照弃致 pass 内重掷、流位+样式双偏）
   gs.jungleHut = rng.nextInt(5);
@@ -834,6 +836,29 @@ function vanillaTerrain(ctx: GenCtx) {
     gs.dungeonLocation = rng.nextIntRange(Math.trunc(W * 0.8), gs.beachRightStart - 50);
   }
   world.dungeonX = gs.dungeonLocation;
+  // ★IIIII88 双地牢 Reset 分支（WorldGen.cs:11477-11494）：dualDungeons 启用时在
+  //   dungeon#0 入口掷后追加第二套 genvars——① GenerateWorld_SetupDungeonGenVars(1)
+  //  （零掷,列表追加）;② dungeonSide 翻面（`num2 != Left ? Left : Right`）;③ 同公式
+  //  再掷一颗 dungeonLocation（对侧海滩内带）;④ outer/inner potential bounds 复位
+  //  （真值在 Dunes pass 头 SetupDungeonGenVarVariables 里才 Create 出）;⑤
+  //  GenVars.CurrentDungeon 回 0;⑥ DualDungeon_NormalizedDistanceSafeFromDither =
+  //  1-0.075×maxTilesY/1200（DitherSnake 控制线边界带宽系数,dungeonDitherSnake/
+  //  DungeonControlLine 共用）。dungeon#0 的 gs.* 面照旧（单地牢消费端不变）。
+  dualDungeonState.enabled = !!gs.seedFlags?.dualDungeons;
+  dualDungeonState.dungeons = [];
+  dualDungeonState.normalizedDistanceSafeFromDither = 1;
+  if (gs.seedFlags.dualDungeons) {
+    const s1 = gs.dungeonSide === -1 ? 1 : -1;                       // cs:11484 翻面
+    const loc1 = s1 === -1
+      ? rng.nextIntRange(gs.beachLeftEnd + 50, Math.trunc(W * 0.2)) // cs:11485-11490
+      : rng.nextIntRange(Math.trunc(W * 0.8), gs.beachRightStart - 50);
+    dualDungeonState.dungeons.push(
+      { side: gs.dungeonSide, location: gs.dungeonLocation, theme: -1, entA: -1, entB: -1, entSeed: -1 },
+      { side: s1, location: loc1, theme: -1, entA: -1, entB: -1, entSeed: -1 },
+    );
+    // cs:11488-11490：num12=maxTilesY/1200（f64）
+    dualDungeonState.normalizedDistanceSafeFromDither = 1.0 - 0.075 * (H / 1200.0);
+  }
   // ===== Terrain pass（原版第一个注册 pass，cs:11526）=====
   // ★RunPass 重播（num4 悬案根因，2026-08-16 Tier B IL 探针裁决）：
   // 原版每个 GenPass 执行前 `Main.rand = new UnifiedRandom(_seed)`

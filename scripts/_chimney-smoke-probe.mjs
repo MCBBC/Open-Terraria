@@ -8,7 +8,7 @@ import fs from 'node:fs';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5201';
 const MAP = process.env.MAP || '/Users/vinlic/Downloads/map-FTW_V2 (10).json';
 if (!fs.existsSync(MAP)) { console.error('NO MAP'); process.exit(2); }
-const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 988, height: 862 } });
+const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 988, height: 862 }, protocolTimeout: 600000 });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', String(e.message).slice(0, 100)));
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });

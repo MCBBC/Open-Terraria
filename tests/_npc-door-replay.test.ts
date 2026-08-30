@@ -54,8 +54,20 @@ describe('door 重放', () => {
     const doorCol = 4140 - X0 + 4000;
     let totalDoors = 0;
     for (let yy = 400; yy < 520; yy++) for (let xx = 3950; xx < 4150; xx++) if (st.type[st.idx(xx, yy)] === TILE_BY_KEY['door_closed']) totalDoors++;
-    console.log('postbuild doors near region:', totalDoors);
+
     const doorTop = 447 - Y0 + 400;
+    const nm=(t:number)=>{ if(t===0)return '.'; if(t===DOOR_C)return 'D'; const o=TILE_BY_KEY['door_open']; if(t===o)return 'O';
+      for(const [k2,vv] of Object.entries(TILE_BY_KEY)) if(vv===t) return k2.slice(0,3); return String(t); };
+    console.log('MAP cols', doorCol-6, '..', doorCol+8);
+    for (let yy = doorTop - 5; yy <= doorTop + 7; yy++) {
+      let line = String(yy).padStart(4) + ' ';
+      for (let xx = doorCol - 6; xx <= doorCol + 8; xx++) {
+        const i2 = st.idx(xx, yy);
+        line += st.flags[i2] ? (st.type[i2] === TILE_BY_KEY['door_closed'] ? 'D' : st.type[i2] === TILE_BY_KEY['door_open'] ? 'O' : '#') : '.';
+      }
+      console.log(line);
+    }
+
 
     const n = new TownNPC('guide', 0, 0);
     // 原报告位置:tile(4149,445)→新 x=4149-X0+4000

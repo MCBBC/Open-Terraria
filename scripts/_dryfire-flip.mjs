@@ -29,6 +29,7 @@ await page.waitForFunction(() => !document.querySelector('#sw-splash'), { timeou
 await new Promise((r) => setTimeout(r, 600));
 
 const out = await page.evaluate(async (saveText) => {
+  window.__SAVE_TEXT__ = saveText;
   await window.__swLoadJson(saveText);
   await new Promise((r) => setTimeout(r, 1200));
   const g = window.__swGame;
@@ -48,116 +49,100 @@ const out = await page.evaluate(async (saveText) => {
   p.inv.slots.fill(null);
   give(gunId, 0);
   p.inv.selected = 0;
-  const snapInput = () => {
-    // 输入坐标 = canvas CSS px；把鼠标钉到玩家屏幕位右侧 300px
-    const [sx] = g.camera.worldToScreen(p.cx, p.cy);
-    return [sx + 300, Math.round(g.renderer.canvas.getBoundingClientRect().height / 2)];
-  };
-  const stage = async () => {
-    p.facing = -1; p.vx = 0; p.useTime = 0;
-    g.input.mouseHeld = false; g.input.mouseDown = false;
-    const [mx, my] = snapInput();
-    g.input.mouseX = mx; g.input.mouseY = my;
-    await new Promise((r2) => setTimeout(r2, 60));
-  };
-  const fireClick = async () => {
+  let dry, loaded, melee, place; const sweepFacing = []; const swordSweep = [];
+  const fireClick = async (g) => {
     g.input.mouseDown = true;
-    await new Promise((r2) => setTimeout(r2, 420));   // ≈25 帧：覆盖起手+useTime 窗
+    await new Promise((r) => setTimeout(r, 420));
     g.input.mouseDown = false;
   };
-  const projCount = () => g.entities.projectiles.filter((e) => !e.dead).length;
-  let projBase = projCount();
-  let ammoStackBefore = 0;
-  const readState = () => ({
+  const readState = (g, p) => ({
     facing: p.facing,
     useTime: p.useTime,
-    swingAlive: !!g.swing || (p.useTime > 0),
-    projsFired: Math.max(0, projCount() - projBase),
-    ammoLeft54: p.inv.slots[54]?.stack ?? null,
+    swingAlive: !!g.swing || p.useTime > 0,
+    projsAlive: g.entities.projectiles.filter((e) => !e.dead).length,
   });
-  const armSample = () => { projBase = projCount(); ammoStackBefore = p.inv.slots[54]?.stack ?? 0; };
-  // ── 场景 A：无弹药 ──
-  await stage(); armSample();
-  await fireClick();
-  const dry = readState();
-  // ── 场景 B'：按住不松,横扫光标左→右→左,朝向应实时跟随(loaded autoReuse) ──
-  const ballSlot2 = ballId != null ? 54 : -1;
-  if (ballSlot2 >= 0) give(ballId, ballSlot2);
-  p.useTime = 0;
-  await stage();
-  g.input.mouseDown = true; g.input.mouseHeld = true;
-  const sweepFacing = [];
-  for (const side of [-1, 1, -1]) {
-    const [sx0] = g.camera.worldToScreen(p.cx, p.cy);
-    g.input.mouseX = sx0 + side * 300;
-    await new Promise((r2) => setTimeout(r2, 140));
-    sweepFacing.push(p.facing);
-  }
-  g.input.mouseDown = false; g.input.mouseHeld = false;
-  const sweepOk = sweepFacing[0] === -1 && sweepFacing[1] === 1 && sweepFacing[2] === -1;
-  void sweepOk;
-
-  // ── 场景 C2：非连发件按住横扫（铜短剑,swing 锁窗后仍应跟随）──
-  p.inv.slots.fill(null);
-  give(swordId ?? ITEM_BY_KEY['vi_3507_copper_shortsword'], 0);
-  if (swordId == null) { /* 找不到键位也不崩 */ }
-  p.inv.selected = 0;
-  p.useTime = 0;
-  await stage();
-  g.input.mouseDown = true; g.input.mouseHeld = true;
-  const swordSweep = [];
-  for (const side of [1, -1]) {
-    const [sx0] = g.camera.worldToScreen(p.cx, p.cy);
-    g.input.mouseX = sx0 + side * 300;
-    await new Promise((r2) => setTimeout(r2, 260));   // 越过单次挥窗
-    swordSweep.push(p.facing);
-  }
-  g.input.mouseDown = false; g.input.mouseHeld = false;
-  const swordSweepOk = swordSweep[0] === 1 && swordSweep[1] === -1;
-  void swordSweepOk;
-
-  // ── 场景 B：给火枪弹（放 54 弹药槽） ──
-  const ballSlot = ballId != null ? 54 : -1;
-  if (ballSlot >= 0) give(ballId, ballSlot);
-  p.useTime = 0;
-  await stage(); armSample();
-  await fireClick();
-  const loaded = readState();
-  loaded.ammoConsumed = ammoStackBefore - (p.inv.slots[54]?.stack ?? 0);
-  // ── 场景 C/D：同类异常排查——近战剑 & 可放置块（站定朝左,点右侧应同样翻转）──
-  const findKey = (pred) => (Object.keys(window.__swITEMS ?? {}).length, null);
-  void findKey;
-  const { ITEM_DEFS } = await import('/src/data/items.ts');
-  const pick = (pred) => {
-    for (const d of ITEM_DEFS) {
-      if (!d) continue;
-      try { if (pred(d)) return d; } catch { /* skip */ }
+  // 每场景独立冷加载（消除前一场景残留的存活弹/冷却窗串扰）
+  const boot = async (items) => {
+    await window.__swLoadJson(window.__SAVE_TEXT__);
+    await new Promise((r) => setTimeout(r, 1100));
+    const g = window.__swGame;
+    const p = g.player;
+    p.inv.slots.fill(null);
+    for (const [key, slot] of items) {
+      const id = ITEM_BY_KEY[key];
+      if (id != null) p.inv.slots[slot] = { id, stack: 99 };
     }
-    return null;
+    p.inv.selected = 0;
+    return g;
   };
-  // 近战剑：清弹药避免走远程支
-  p.inv.slots.fill(null);
-  give(swordId, 0);
-  if (swordId == null) { /* 找不到键位也不崩 */ }
-  p.inv.selected = 0;
-  p.useTime = 0;
-  await stage();
-  await fireClick();
-  const melee = readState();
-  // 可放置块：同姿势放置尝试
-  p.inv.slots.fill(null);
-  give(blockId, 0);
-  if (blockId == null) { /* 同上 */ }
-  p.inv.selected = 0;
-  p.useTime = 0;
-  await stage();
-  await fireClick();
-  const place = readState();
-  return {
-    gunIdOk: gunId != null, ballIdOk: ballId != null,
-    dry, loaded, melee, place,
-    sweepFacing, swordSweep,
+  const makeStage = (g, p) => {
+    return async () => {
+      p.facing = -1; p.vx = 0; p.useTime = 0;
+      g.input.mouseHeld = false; g.input.mouseDown = false;
+      const [mx, my] = snapInput(g, p);
+      g.input.mouseX = mx; g.input.mouseY = my;
+      await new Promise((r2) => setTimeout(r2, 60));
+    };
   };
+  const snapInput = (g, p) => {
+    const [sx] = g.camera.worldToScreen(p.cx, p.cy);
+    void sx;
+    const rect = g.renderer.canvas.getBoundingClientRect();
+    const [sxCss] = (() => {
+      const dprX = rect.width / g.renderer.canvas.width || 1;
+      const [wx2, wy2] = g.camera.worldToScreen(p.cx, p.cy);
+      // camera 返回设备像素 → 除 DPR 得 CSS px
+      return [wx2 * dprX * (g.renderer.canvas.width / rect.width ? 1 : 1), wy2];
+    })();
+    void sxCss;
+    // 直接用：鼠标坐标=canvas CSS px；camera.worldToScreen 输出同样 CSS 空间
+    const [cxs, cys] = g.camera.worldToScreen(p.cx, p.cy);
+    return [cxs + 300, cys];
+  };
+  window.__SAVE_TEXT__ = saveTxt;
+
+  // ── 场景 A：枪·无弹药 ──
+  { const { g, p } = await boot([['vi_98_迷你鲨', 0]]); const stage = makeStage(g, p); p.useTime = 0; await stage(); await fireClick(g); dry = readState(g, p); }
+
+  // ── 场景 B：枪·有弹 ──
+  { const { g, p } = await boot([['vi_98_迷你鲨', 0], ['vi_97_火枪子弹', 54]]);
+    const stage = makeStage(g, p); const before = p.inv.slots[54].stack;
+    p.useTime = 0; await stage(); await fireClick(g);
+    loaded = readState(g, p); loaded.ammoConsumed = before - (p.inv.slots[54]?.stack ?? 0); }
+
+  // ── 场景 C：连发枪按住横扫 ──
+  { const { g, p } = await boot([['vi_98_迷你鲨', 0], ['vi_97_火枪子弹', 54]]);
+    const stage = makeStage(g, p); await stage();
+    g.input.mouseDown = true; g.input.mouseHeld = true;
+    for (const side of [-1, 1, -1]) {
+      const [sx0] = g.camera.worldToScreen(p.cx, p.cy);
+      g.input.mouseX = sx0 + side * 300;
+      await new Promise((r2) => setTimeout(r2, 140));
+      sweepFacing.push(p.facing);
+    }
+    g.input.mouseDown = false; g.input.mouseHeld = false; }
+
+  // ── 场景 D：铜短剑起手翻向 + 按住横扫 ──
+  { const { g, p } = await boot([['vi_3507_copper_shortsword', 0]]);
+    const stage = makeStage(g, p); p.useTime = 0; await stage(); await fireClick(g);
+    melee = readState(g, p);
+    p.useTime = 0; await stage();
+    g.input.mouseDown = true; g.input.mouseHeld = true;
+    for (const side of [1, -1]) {
+      const [sx0] = g.camera.worldToScreen(p.cx, p.cy);
+      g.input.mouseX = sx0 + side * 300;
+      await new Promise((r2) => setTimeout(r2, 260));
+      swordSweep.push(p.facing);
+    }
+    g.input.mouseDown = false; g.input.mouseHeld = false; }
+
+  // ── 场景 E：石块放置 ──
+  { const { g, p } = await boot([['vi_3_stone_block', 0]]);
+    const stage = makeStage(g, p); p.useTime = 0; await stage(); await fireClick(g);
+    place = readState(g, p); }
+
+  return { dry, loaded, place, sweepFacing, swordSweep, melee };
+
 }, txt);
 out.pageErrors = errs.slice(0, 3);
 console.log(JSON.stringify(out, null, 2));
