@@ -27,6 +27,7 @@
 //   切换，2026-08-20 接；对话侧 Lycantrope 池与商店门另见 Game.ts）。
 
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
+import { TOWN_PET_VIDS } from './townPets';
 
 export interface BiomeZones {
   forest: boolean; ocean: boolean; snow: boolean; desert: boolean;
@@ -169,7 +170,10 @@ export function computeHappiness(inp: HappinessInput): HappinessResult {
     report.push({ key: `${npcMoodCategory(inp.npcVanillaId, inp.altTexture2)}.${sub}`, ...extra });
   };
   // remix/旅行商(368)/骷髅商(453)/城镇宠物/IsNotReallyTownNPC(老人37)——1.0 且无报告（:107-110）
-  if (inp.npcVanillaId === 368 || inp.npcVanillaId === 453 || inp.npcVanillaId === 37) {
+  // ★2026-08-30 补漏：注释声称含城镇宠物但条件表漏排（ShopHelper.cs:104-110 含
+  // IsTownPet 分支）——潜伏债已清（宠物因永无家被 canShowHomelessText 遮蔽才无表象）
+  if (inp.npcVanillaId === 368 || inp.npcVanillaId === 453 || inp.npcVanillaId === 37
+    || TOWN_PET_VIDS.has(inp.npcVanillaId)) {
     return { priceMul: 1, report: [] };
   }
   // 无家 / 离家 >120 / 危险群系 → 置 1000（:111-122；末尾钳回 1.5）

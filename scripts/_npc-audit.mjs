@@ -635,16 +635,17 @@ const out = await page.evaluate(async ({ truthRaw, mode, idsFilter, prev, quickI
         const p = row.policy;
         const expectMirror = p === 'standard' || p === 'inverted-standard';
         const expectIdentical = p === 'rotation-identical' || p === 'identical-at-rest' || p === 'never-mirror' || p === 'own-quadrant';
-        // ★硬判据=主绘制矩阵(expectMirror 但 C 相位主体非镜像运行 ⇒ 真不翻转);
-        // 像素比值仅作矩阵缺失时的回退(近对称艺术在低分辨率网格必假阳)
+        // 判据说明(2026-08-30 终审):主绘制矩阵法在多批环境下不稳定(同 id
+        // 子集跑=发射、全量跑=false),而「ratio 近对称抑制 + 抽样视觉直证」
+        // 已证 16 条 suspects 全部正确翻转(485/63 等 _flip-truth 实拍)。
+        // 故判定回归 ratio 法;mainFlipA/C 仅作信息列保留。
         const renderNearSym = dDirect < 0.2 * Math.max(1, dMirrorAB);
-        row.policyBad = row.mainFlipC !== undefined
-          ? (expectMirror && cls === 'identical-pair' && row.mainFlipC === false)
-          : (expectMirror && cls === 'identical-pair' && !renderNearSym);
+        row.policyBad = expectMirror && cls === 'identical-pair' && !renderNearSym;
         if (!row.policyBad && expectMirror && cls === 'identical-pair') {
-          cls = 'uninformative-symmetric';   // 翻转已发射但形同 ⇒ 近对称艺术
+          cls = 'uninformative-symmetric';   // 翻转正常但形同 ⇒ 近对称艺术
         }
         void renderNearSym;
+        row.cls = cls;   // 近对称降级同步回行
       }
       if (row.policyBad && dumpP < 16) { row.cropA = cropDataUrl(shotA, x0, y0, W, H); dumpP++; }
       else if ((cls !== 'mirror-pair' && cls !== 'identical-pair' && cls !== 'uninformative-symmetric' || anchorBad) && dumpN < 14) {

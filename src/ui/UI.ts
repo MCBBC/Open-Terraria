@@ -4850,15 +4850,27 @@ export class UI {
     setTimeout(() => this.invPanel.classList.remove('sw-loadout-flash'), 600);
   }
 
-  showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null, vanillaId?: number): void {
+  showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string; coins?: number }>, portrait?: string | null, vanillaId?: number, cornerItem?: number): void {
     if (!this.npcDialog) {
       this.npcDialog = new NpcDialog(this.root, (id) => {
         this.npcShop?.close();
         this.npcShop = null;
         this.game?.npcDialogButton(id);
+      }, (vid) => {
+        // 渔夫任务鱼角标点击 → 开聊天框插 [i:vid]（Main.cs:40505-40512）
+        this.game?.chatInput?.insertItemTag(`[i:${vid}]`);
       });
     }
-    this.npcDialog.open(name, chat, buttons, portrait, vanillaId);
+    // 角标：iconUrl 懒加载即时解析一次 + title 名（URL miss 时降级空 src 不显示,
+    // 与商店行同族近似——任务鱼为常驻 icon 表命中率高）
+    const corner = cornerItem !== undefined && cornerItem > 0
+      ? {
+          vid: cornerItem,
+          url: this.game ? (iconUrl(this.game, internalIdOfVid(cornerItem)) || '') : '',
+          name: Lang.itemName(cornerItem) ?? '',
+        }
+      : undefined;
+    this.npcDialog.open(name, chat, buttons, portrait, vanillaId, corner);
   }
 
   closeNpcDialog(): void {

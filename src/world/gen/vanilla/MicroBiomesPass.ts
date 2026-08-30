@@ -1196,8 +1196,13 @@ function placeMahoganyTree(
   }
   // ③ structures.CanPlace(Rectangle(result.X-30, result.Y-60, 60, 90))(cs:23-25)
   if (!canPlaceStructure(gs, { x0: rx - 30, y0: ry - 60, x1: rx + 30, y1: ry + 30 }, 0, st)) return false;
-  // ④ 50×50 TileScanner 材质门(cs:27-44):非 drunk 必扫(零掷骰)
-  {
+  // ★IIII71b 主案定罪：cs:22 drunk 预掷门 `if (!drunkWorldGen || genRand.Next(50) > 0)`
+  // ——DRUNK 世界每次走到此处的尝试【先掷一枚 Next(50)】再决定是否扫描；旧 JS 无门
+  // 直扫（零掷）⇒ 自首个过 CanPlace 的尝试起每 attempt −1 掷、点流漂移。DRUNK
+  // 51620200 实证：MAHOG 前 320 个 attempt 点逐对相等，x86 于 #319 首次过门掷骰后
+  // 双方 RandomWorldPoint 全体错位 → LTRK/STRK 候选点全不同 → 轨道家族 ~15k 格
+  // 残差（mile8 #97 A=12868/T=13333）。普通世界短路零行为差（七链不 drunk）。
+  if (!gs.seedFlags.drunkWorld || rng.int(0, 49) > 0) {  // Next(50)>0 ⇒ 入扫描
     const idOf = (vanilla: number): number => {
       for (const t of idsByVanillaSheet(vanilla)) return t;
       return -1;

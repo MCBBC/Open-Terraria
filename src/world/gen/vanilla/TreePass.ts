@@ -391,10 +391,20 @@ export function waterBoxPalmCheck(st: TileStore, rng: RNG, x: number, y: number,
     }
   }
   if (Math.trunc(sum / 255) > 25) {
-    if (rng.int(0, 3) === 0) growPalmTree(st, rng, x, y, gs);
+    segProbe77(`CC WBOX ${x},${y} total=${sum}`);
+    if (rng.int(0, 3) === 0) {
+      segProbe77(`CC PALMTRY ${x},${y}`);
+      growPalmTree(st, rng, x, y, gs);
+    }
     return true;
   }
   return false;
+}
+
+/** ★IIII71b 取证钩（门控零开销） */
+function segProbe77(n: string): void {
+  const g0 = globalThis as { __swSeg?: (name: string, detail?: unknown) => void };
+  try { g0.__swSeg?.(n); } catch { /* probe */ }
 }
 
 // ===================== GrowTreeWithSettings 族（宝石树 + 观赏树柳/樱） =====================

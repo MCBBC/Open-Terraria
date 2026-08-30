@@ -1686,6 +1686,12 @@ function placeOasisPlant(st: TileStore, rng: RNG, gs: GenState, X: number, Y: nu
   }
 }
 
+/** ★IIII71b 取证钩（门控零开销） */
+function segProbe77(n: string): void {
+  const g0 = globalThis as { __swSeg?: (name: string, detail?: unknown) => void };
+  try { g0.__swSeg?.(n); } catch { /* probe */ }
+}
+
 /** pass 96 本体。Skyblock.denyAllGeneration（cs:21117）→ 整段跳过（零掷骰）。 */
 export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenState): void {
   const g0 = globalThis as { __swCcCap?: (gs: GenState, st: TileStore) => void };
@@ -1727,7 +1733,9 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
     else if (n === 1) { x0 = 400; x1 = w - 400; flag = true; maxValue = num; }
     else { x0 = w - num7; x1 = w - 5; flag = false; maxValue = maxR; }
     for (let x = x0; x < x1; x++) {
-      if (rng.nextInt(maxValue) !== 0) {
+      const hitGate = rng.nextInt(maxValue) === 0;
+      segProbe77(`CC ${hitGate ? 'HIT' : 'MISS'} ${n},${x}`);
+      if (!hitGate) {
         // ---- 尾部燕麦段（cs:21302-21320）：列距骰未命中的列，y 自 0 起整列铺燕麦/530 ----
         for (let y = 0; y < yTop && y < st.h; y++) {
           if (plantSeaOat(st, rng, gs, x, y)) {                // cs:21309
@@ -1745,22 +1753,28 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
         if (!st.flags[ti] || !SAND_GATE.has(st.type[ti])) continue;   // cs:21208-21211
         const ai = st.idx(x, y - 1);
         if (st.flags[ai] || st.wall[ai] !== 0) continue;              // cs:21213-21216
+        segProbe77(`CC ANCH ${x},${y} l2=${st.liquid[st.idx(x, y - 2)]}`);
         if (flag) {
           // ---- 中段：湖畔水盒棕榈 / 仙人掌（cs:21257-21279；水盒逻辑在
           //      TreePass.waterBoxPalmCheck——超限已掷 Next(4) 时不再 PlantCactus）----
-          if (!waterBoxPalmCheck(st, rng, x, y, gs)) plantCactus(st, rng, x, y);
+          if (!waterBoxPalmCheck(st, rng, x, y, gs)) {
+            segProbe77(`CC PLANT ${x},${y}`);
+            plantCactus(st, rng, x, y);
+          }
         } else {
           // ---- 两端海滩段：珊瑚 81 / 贝壳 324（cs:21283-21299）----
           if (st.inBounds(x, y - 4)
             && st.liquid[st.idx(x, y - 2)] === 255
             && st.liquid[st.idx(x, y - 3)] === 255
             && st.liquid[st.idx(x, y - 4)] === 255) {
-            if (rng.int(0, 1) === 0) placeCoral(st, rng, x, y - 1);
-            else placeSeaShell(st, rng, x, y - 1, rollRandomSeaShellStyle(rng));
+            if (rng.int(0, 1) === 0) { segProbe77(`CC CORAL ${x},${y - 1}`); placeCoral(st, rng, x, y - 1); }
+            else { const sh77 = rollRandomSeaShellStyle(rng); segProbe77(`CC SHELL ${x},${y - 1}`); placeSeaShell(st, rng, x, y - 1, sh77); }
             break;                          // cs:21292：放置后跳出本列扫描
           }
           if (st.inBounds(x, y - 2) && st.liquid[st.idx(x, y - 2)] === 0 && y < gs.worldSurface) {
-            placeSeaShell(st, rng, x, y - 1, rollRandomSeaShellStyle(rng));
+            const sh77 = rollRandomSeaShellStyle(rng);
+            segProbe77(`CC SHELL0 ${x},${y - 1}`);
+            placeSeaShell(st, rng, x, y - 1, sh77);
             break;                          // cs:21299
           }
         }

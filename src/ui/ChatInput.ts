@@ -33,6 +33,21 @@ export class ChatInput {
 
   get isOpen() { return this.root !== null; }
 
+  /** 角落物品点击（Main.cs:40505-40512）：未开则 OpenPlayerChat → AddChatText 在
+   *  光标处插入物品 tag（[i:vid]）并同步草稿 */
+  insertItemTag(tag: string): void {
+    this.open();
+    if (!this.input || !this.root) return;
+    const el = this.input;
+    const s = el.selectionStart ?? el.value.length;
+    const e2 = el.selectionEnd ?? s;
+    el.value = el.value.slice(0, s) + tag + el.value.slice(e2);
+    const np = s + tag.length;
+    el.setSelectionRange(np, np);
+    this.draft = el.value;      // Esc 收框再开不丢（草稿态同源）
+    el.focus();
+  }
+
   /** 重开抑制窗（发送的 Enter 关框后,同一次按键风暴不应立刻重开——双端 Enter 语义） */
   private suppressOpenUntil = 0;
   /** 窗口捕获键监听（开着期间挂在 window capture——不依赖输入框焦点,

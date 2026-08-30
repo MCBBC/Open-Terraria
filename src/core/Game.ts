@@ -186,7 +186,7 @@ import { resetGorePool, liveGorePieces, setGoreScreen, GorePiece } from '../enti
 import { Lang } from '../i18n/Lang';
 import { setNpcNameResolver, setGlobalSubstitutionContext } from '../i18n/LanguageManager';
 import { clearPaperDollCache } from '../player/PaperDoll';
-import { portraitUrl } from '../data/npcPortraits';
+import { portraitForNpc, portraitUrl } from '../data/npcPortraits';
 import { oreRunner } from '../world/gen/vanilla/TileRunner';
 import { growTree, growPalmTree, growVanityTree, growAshTree, growGemTree } from '../world/gen/vanilla/TreePass';
 import type { GenState } from '../world/gen/vanilla/GenState';
@@ -1128,29 +1128,8 @@ export type NpcButtonId = 'shop' | 'shopDecor' | 'heal' | 'curse' | 'collect' | 
   | 'hair' | 'quest' | 'plant' | 'happiness' | 'status' | 'help' | 'craft' | 'music'
   | 'advice' | 'stardew' | 'home' | 'pet' | 'close';
 
-/** NPCID.Sets.IsTownPet（NPCID.cs:4446）：城镇猫/狗/兔 + 八只城镇史莱姆 */
-const TOWN_PET_VIDS = new Set<number>([637, 638, 656, 670, 678, 679, 680, 681, 682, 683, 684]);
-
-/** GetPettingInfo 站距表（NPC.cs:81685-81717）：小宠按型缩距，狗等大型 =36 */
-const TOWN_PET_PETTING: Record<number, { reach: number; small: boolean }> = {
-  637: { reach: 28, small: true },   // 猫
-  638: { reach: 36, small: false },  // 狗
-  656: { reach: 24, small: true },   // 兔
-  670: { reach: 26, small: true },   // 蓝
-  678: { reach: 26, small: true },   // 绿(酷)
-  679: { reach: 26, small: true },   // 老
-  680: { reach: 26, small: true },   // 紫(笨)
-  681: { reach: 26, small: true },   // 彩虹
-  682: { reach: 22, small: true },   // 红
-  683: { reach: 26, small: true },   // 黄
-  684: { reach: 20, small: true },   // 铜(侍从)
-};
-
-/** Lang.GetSlimeType（Lang.cs:377-403）：城镇史莱姆 vid → Chatter 分类名段 */
-const TOWN_SLIME_CHATTER: Record<number, string> = {
-  670: 'Blue', 678: 'Green', 679: 'Old', 681: 'Rainbow',
-  680: 'Purple', 682: 'Red', 683: 'Yellow', 684: 'Copper',
-};
+/** NPCID.Sets.IsTownPet / GetPettingInfo 站距表 / GetSlimeType——抽至 data/townPets 共用 */
+import { TOWN_PET_VIDS, TOWN_PET_PETTING, TOWN_SLIME_CHATTER } from '../data/townPets';
 /** 按钮通知图标（NPCChatPanel.cs:136-138 interaction.ShowExclamation →
  *  Utils.DrawNotificationIcon 按钮文字右+8px,rotMul=0 无摇摆仅亮度脉冲） */
 export interface NpcButton {
@@ -1190,8 +1169,10 @@ export interface GameCallbacks {
   onChat?: (text: string, r: number, g: number, b: number, width?: number) => void;
   /** 观战启动时关闭全 UI（原版 IngameUIWindows.CloseAll :43017——5644 使用成功支） */
   onCloseAllUI?: () => void;
-  /** NPC 对话框(SetTalkNPC):name/chat/buttons → UI 渲染 */
-  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null, vanillaId?: number) => void;
+  /** NPC 对话框(SetTalkNPC):name/chat/buttons → UI 渲染；
+   *  cornerItem = Main.npcChatCornerItem 值态（>0=渔夫任务鱼 vid,-1=RequestHome 态
+   *  [本仓不画 EquipPage 快捷图标],缺省/0=无——DrawNPCChatBottomRightItem :40480） */
+  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string; coins?: number }>, portrait?: string | null, vanillaId?: number, cornerItem?: number) => void;
   onNpcDialogClose?: () => void;
   /** 哥布林重铸界面（Main.InReforgeMenu） */
   onReforgeOpen?: () => void;
@@ -21361,8 +21342,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return p.inv.slots.some((s) => s && bombKeys.has(ITEM_DEFS[s.id]?.key ?? ''));
       }
       case 'dryad':
-        // 任意邪恶 Boss 已败（vanilla downedBoss1/2/3 = EoC/世吞|克脑/骷髅王）
-        return !!(this.world.flags['downed_4'] || this.world.flags['downed_13']
+        // 任意邪恶 Boss 已败（vanilla downedBoss1/2/3 = EoC/世吞|克脑/骷髅王）或
+        // infectedSeed 直通臂（Main.cs:66795 `(infectedSeed || downedBoss1||2||3)`,
+        // 2026-08-30 审计 TOP10 补齐——颠倒世界种子开荒即可入住树妖）
+        return !!(this.world.seedFlags?.infectedSeed
+          || this.world.flags['downed_4'] || this.world.flags['downed_13']
           || this.world.flags['downed_266'] || this.world.flags['downed_35']
           || this.world.flags.downedSkeletron || this.world.flags.downedEyeOfCthulhu);
       case 'clothier':
@@ -21372,9 +21356,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 松露人(cs:65322)：困难模式（原版还要求发光蘑菇生物群系有空房，暂按全域找房）
         return !!this.world.flags.hardMode;
       case 'steampunker':
-        // 蒸汽朋克(cs:65303)：任一机械 Boss 已败（双子 125/126 / 铁骷髅 127 / 毁灭者 134）
+        // 蒸汽朋克(cs:65303)：任一机械 Boss 已败（双子 125/126 / 铁骷髅 127 / 毁灭者
+        // 134）**或** 十周年直通臂（cs:66827 tenthAnniversaryWorld && !getGoodWorld，
+        // celebrationmk10 种子开荒即可入住——2026-08-30 审计 TOP10 补齐）
         return !!(this.world.flags['downed_125'] || this.world.flags['downed_126']
-          || this.world.flags['downed_127'] || this.world.flags['downed_134']);
+          || this.world.flags['downed_127'] || this.world.flags['downed_134']
+          || (this.world.seedFlags?.tenthAnniversary && !this.world.seedFlags?.getGoodWorld));
       case 'witch_doctor':
         // 巫医(cs:65298)：蜂后已败（NPC 222）
         return !!this.world.flags['downed_222'];
@@ -21837,17 +21824,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (npc.vanillaId === 20 && this.dryadCanPlayStardew()) {
       chat = Lang.text('StardewTalk.PlayerHasColaAndIsHoldingIt');
     }
+    // 角落物品态（AnglerQuestChat Lang.cs:438-440：!finished 时挂当日任务鱼图标）
+    this.dialogCornerItem = (npc.vanillaId === 369 && !this.world.anglerQuestFinished)
+      ? this.anglerQuestItemId() : 0;
     // chatOverride：唤醒链（AI_000_TransformBoundNPC）传换型前 GetChat 台词
     this.cb.onNpcDialog?.(name, this.formatDialogTags(chatOverride ?? chat),
-      this.npcDialogButtons(npc), portraitUrl(npc.vanillaId), npc.vanillaId);
+      this.npcDialogButtons(npc), portraitForNpc(npc), npc.vanillaId, this.dialogCornerItem);
   }
 
   /** 对话框按钮组——2026-08-30 按原版注册表逐项对齐并复刻渲染顺序：
    *  NPCChatPanel.DrawButtons(:98-156) 按 NPCInteractions.All 注册序遍历可见项，
    *  每 4 个换行——「关闭」不在末尾而是注册位（Initialize :516，紧随 NurseHeal）。
    *  各项 Interact 行为见 npcDialogButton 对应分支。 */
-  private npcDialogButtons(npc: TownNPC): Array<{ id: NpcButtonId; label: string; excl?: boolean }> {
-    const buttons: Array<{ id: NpcButtonId; label: string; excl?: boolean }> = [];
+  private npcDialogButtons(npc: TownNPC): Array<{ id: NpcButtonId; label: string; excl?: boolean; coins?: number }> {
+    const buttons: Array<{ id: NpcButtonId; label: string; excl?: boolean; coins?: number }> = [];
     // ---- OpenShop ×25（Initialize :489-513 注册最先）----
     // 商店按钮(NPCInteractions.cs:489-513 Shop 注册表覆盖的全部 NPC)；画家 227
     // 双店：15=常规（同 :497）+ 25="GameUI.PainterDecor" 装饰墙纸专柜(:513)。
@@ -21857,10 +21847,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       buttons.push({ id: 'shop', label: Lang.inter(28) });
     }
     if (npc.vanillaId === 227) buttons.push({ id: 'shopDecor', label: Lang.text('GameUI.PainterDecor') });
-    // TaxCollectorCollectTaxes(:514)
-    if (npc.npcKey === 'tax_collector') buttons.push({ id: 'collect', label: Lang.inter(89) });
-    // NurseHeal(:515)
-    if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
+    // TaxCollectorCollectTaxes(:514)——TryAddCoins(:238-243) 应收税款>0 时按钮旁
+    // 画金币条（DrawMoney,NPCChatPanel.cs:140-144；本仓=按钮上方绝对定位价签）
+    if (npc.npcKey === 'tax_collector' && this.player.taxMoney > 0) {
+      buttons.push({ id: 'collect', label: Lang.inter(89), coins: Math.floor(this.player.taxMoney) });
+    } else if (npc.npcKey === 'tax_collector') {
+      buttons.push({ id: 'collect', label: Lang.inter(89) });
+    }
+    // NurseHeal(:515)——GetNurseHealCost(Main.cs:39463)>0 同款金币条
+    if (npc.npcKey === 'nurse') {
+      const cost = this.nurseHealCost();
+      buttons.push(cost > 0 ? { id: 'heal', label: Lang.inter(54), coins: cost }
+        : { id: 'heal', label: Lang.inter(54) });                            // 治疗
+    }
     // CloseChat(:516)——关闭按注册序落位，与其它按钮同行/邻行混排
     buttons.push({ id: 'close', label: Lang.inter(52) });
     // OpenSign(:517) 条件 LocalPlayer.sign>-1（点路牌弹的对话框路径）——本仓路牌
@@ -22201,10 +22200,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.guideHelpText();                            // Main.cs:40692 直调 HelpText()（副作用=推进计数器，台词随后被覆写）
     if (!this.bartenderFirstGiftDone) {
       this.bartenderFirstGiftDone = true;
-      const key = VANILLA_ITEM_KEY_BY_ID[3817];
-      if (key && ITEM_BY_KEY[key] !== undefined) this.player.inv.add(ITEM_BY_KEY[key], 10);
-      this.cb.onInventoryChanged?.();
-      return Lang.text('BartenderSpecialText.FirstHelp');
+      // 持久化近似（登记）：原版 bartenderQuestLog 是 .plr 角色字段——本仓暂以
+      // 「种子×角色名」localStorage 键防重领（读档跨会话生效；隐私模式降级为
+      // 会话内一次性）。真正的角色档字段位随存档批次再迁。
+      const giftKey = `sbw.bartenderGift.${this.world.seed}.${this.playerName()}`;
+      let gifted = false;
+      try { gifted = window.localStorage.getItem(giftKey) === '1'; } catch { /* 隐私模式 */ }
+      if (!gifted) {
+        const key = VANILLA_ITEM_KEY_BY_ID[3817];
+        if (key && ITEM_BY_KEY[key] !== undefined) this.player.inv.add(ITEM_BY_KEY[key], 10);
+        this.cb.onInventoryChanged?.();
+        try { window.localStorage.setItem(giftKey, '1'); } catch { /* 隐私模式 */ }
+        return Lang.text('BartenderSpecialText.FirstHelp');
+      }
     }
     const idx = this.bartenderHelpIndex % 11;
     this.bartenderHelpIndex++;
@@ -22221,12 +22229,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return !npc.home && npc.vanillaId !== 37 && npc.vanillaId !== 368 && npc.vanillaId !== 453;
   }
 
-  /** 已开对话框的台词区重绘（交付结算后替换为 AnglerQuestChat 文案，不重开面板） */
-  private refreshNpcDialog(npc: TownNPC, chat: string): void {
+  /** 已开对话框的台词区重绘（交付结算后替换为 AnglerQuestChat 文案，不重开面板）。
+   *  corner：显式传 -1/0/vid 覆写角标（RequestHome=-1,AnglerQuest 结算按 finished），
+   *  缺省保持当前 dialogCornerItem 不动 */
+  private refreshNpcDialog(npc: TownNPC, chat: string, corner?: number): void {
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
+    if (corner !== undefined) this.dialogCornerItem = corner;
     this.cb.onNpcDialog?.(name, this.formatDialogTags(chat),
-      this.npcDialogButtons(npc), portraitUrl(npc.vanillaId), npc.vanillaId);
+      this.npcDialogButtons(npc), portraitForNpc(npc), npc.vanillaId, this.dialogCornerItem);
   }
 
   /** HasSpecialEventText 类目键（NPC.cs 各分支的字符串字面量：type → "Xxx"）。
@@ -22567,6 +22578,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (cake && ITEM_BY_KEY[cake] !== undefined) this.player.inv.add(ITEM_BY_KEY[cake], 1);
       return Lang.specialText('PartyGirlSpecialText.Cake')
         ?? Lang.text('PartyGirlSpecialText.Cake1');
+    }
+    // 城镇宠物/史莱姆台词（NPC.cs:95962-95979 GetChat 尾段 type 637/638/656/
+    // IsTownSlime）：Lang.CatChat/DogChat/BunnyChat/SlimeChat = CreateDialogFilter
+    // ("XxxChatter.Chatter") 前缀随机池（NoHome 键不入池，RequestHome 专用）——
+    // HasSpecialEventText("Cat"/"Dog"/"Bunny"/"Slime") 事件文案本仓无注册（原版同空）。
+    // 此前宠物对话落『……』兜底（审计 2026-08-30 TOP7 一并清偿）
+    if (npc.vanillaId === 637) return Lang.specialText('CatChatter.Chatter') ?? dialog(183);
+    if (npc.vanillaId === 638) return Lang.specialText('DogChatter.Chatter') ?? dialog(183);
+    if (npc.vanillaId === 656) return Lang.specialText('BunnyChatter.Chatter') ?? dialog(183);
+    if (TOWN_SLIME_CHATTER[npc.vanillaId]) {
+      return Lang.specialText(`Slime${TOWN_SLIME_CHATTER[npc.vanillaId]}Chatter.Chatter`) ?? dialog(183);
     }
     // HasSpecialEventText（cs:96081-96105，各类型分支首位）：哥布林/巫师/机械师
     // 的流浪态优先于事件文案（cs:95286/95336/95429 homeless 先行），其余类型事件优先
@@ -22953,6 +22975,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 宠物 chatter 分支(638/637/656/城镇史莱姆)未实装对应实体，随宠物批次补）
     if (id === 'home' && this.canShowHomelessText(npc)) {
       this.sfx.play('menuTick');
+      this.dialogCornerItem = -1;                     // NPCInteractions.cs:330 npcChatCornerItem=-1
+                                                  // （原版画 EquipPage[5] 快捷图标开装备页——本仓无资产不画，登记）
       // 文案族（RequestHome.GetText :339-355）：宠物走 Cat/Dog/BunnyChatter、
       // 城镇史莱姆走 Slime<Type>Chatter 的 NoHome；动物学家变身态(633 altTexture==2)
     // 走 BestiaryGirlTransformed 分节；其余 = TownNPCMood_<Internal>.NoHome
@@ -23021,7 +23045,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const pcts = alignmentPcts(this.world.store, Math.floor(this.world.groundLevel));
       const { text, pure } = dryadWorldStatus(pcts, this.world.name);
       this.cb.onNpcDialog?.(Lang.npcName(20) ?? '树妖', text,
-        this.npcDialogButtons(this.dialogNpc!), portraitUrl(this.dialogNpc!.vanillaId));
+        this.npcDialogButtons(this.dialogNpc!), portraitForNpc(this.dialogNpc!));
       if (pure) {
         this.achievements.handleSpecialEvent(27,
           { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
@@ -23132,7 +23156,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         || Lang.text('Mods.SandboxWorld.NPC.AnglerNoQuest');
     }
     this.sfx.play('menuTick');
-    this.refreshNpcDialog(npc, chat);
+    // 角标随 AnglerQuestChat 结算态刷新（:438-440：!finished 保持鱼图标,finished/无鱼=0）
+    this.refreshNpcDialog(npc, chat,
+      !w.anglerQuestFinished ? this.anglerQuestItemId() : 0);
     this.cb.onInventoryChanged?.();
   }
 
@@ -23531,7 +23557,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           add(golferShopScoreGates(this.player.golferScoreAccumulated, phase,
             !!(this.world.flags['downed_35'] || this.world.flags.downedSkeletron)));
           break;
-        case 663: // 公主（Chest.cs:3427-3445：十周年+hardMode+击败海盗 → 相位对海盗四件）
+        case 663: // 公主（Chest.cs:3435-3458：十周年专属三画 + 沙漠/血月门 + 海盗相位四件）
+          if (this.world.seedFlags?.tenthAnniversary) {
+            add([1309]);                                   // :3436 复古海报
+            add([1859]);                                   // :3437
+            add([1358]);                                   // :3438
+            if (this.shopCondOk('zoneDesert')) add([857]); // :3440-3442 沙暴瓶画门
+            if (this.world.clock.bloodMoon) add([4144]);   // :3443-3445 血月画
+          }
           if (this.world.seedFlags?.tenthAnniversary && this.world.flags.hardMode && this.world.flags['downedPirates']
             && ![2584, 854, 855, 905].some((id) => out.some((e) => e[0] === id))) {
             add([[2584], [854], [855], [905]][Math.floor(phase / 2)]);
@@ -24079,6 +24112,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 对话 NPC 的快乐度快照（Player.currentShoppingSettings，SetTalkNPC 时计算；
    *  价格乘子 + 心情报告行，商店/购买/心情浮层共用） */
   private dialogHappiness: { priceMul: number; report: HappinessReportLine[] } | null = null;
+  /** Main.npcChatCornerItem 值态（对话期缓存）：0=无/-1=RequestHome/>0=渔夫任务鱼 vid。
+   *  置位点：openNpcDialog（AnglerQuestChat Lang.cs:438-440 仅 !finished 挂角标）、
+   *  quest 结算、home 按钮（NPCInteractions.cs:330）、其余交互=0 */
+  private dialogCornerItem = 0;
 
   /** 心情报告行 → l10n 文案（ShopHelper.AddHappinessReportText :194-203 的渲染侧）：
    *  {BiomeName} ← TownNPCMoodBiomes.<nameKey>，{NPCName} ← NPC.GetFullnameByID（Lang.npcName） */

@@ -36,6 +36,7 @@ const SEED = process.env.SW_M8_SEED ?? '51620200';
   function snap(w2: unknown, tag: string): void {
     if (saved.has(tag)) return;
     saved.add(tag);
+    mkdirSync(`${OUT}/${tag}`, { recursive: true });
     const st = (w2 as { store: TileStore }).store;
     const chans = ['flags', 'type', 'frameX', 'frameY', 'wall', 'liquid', 'liquidType', 'half', 'slope', 'wire', 'paint', 'paintWall', 'coat'] as const;
     const rec = st as unknown as Record<string, Uint8Array | Uint16Array>;
@@ -50,8 +51,11 @@ const SEED = process.env.SW_M8_SEED ?? '51620200';
       width: W, height: H, seedText: SEED, evil: -1,
       seedFlags: { drunkWorld: true },
       onWorldPartial: (w2, i, pn) => {
-        if (pn === '蜂巢幼虫') snap(w2, 'mb-pre');
-        else if (pn === '微群系') { snap(w2, 'mb-post'); }
+        const TAGS: Record<string, string> = {
+          '蜂巢幼虫': 'mb-pre', '微群系': 'mb-post',
+          '二次沉降': 'cc-pre', '仙人掌珊瑚': 'cc-post',
+        };
+        if (TAGS[pn]) snap(w2, TAGS[pn]!);
       },
     });
     void n;

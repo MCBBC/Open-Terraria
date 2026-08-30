@@ -14,6 +14,14 @@ export type NpcButtonId = 'shop' | 'shopDecor' | 'heal' | 'curse' | 'collect' | 
   | 'advice' | 'stardew' | 'home' | 'pet' | 'close';
 
 /** 心情报告条目（Game 侧已做 l10n 渲染的成品文案 + 价格乘子） */
+export type NpcButtonMeta = { id: NpcButtonId; label: string; excl?: boolean; coins?: number };
+
+/** NPC 对话框右下角物品（Main.npcChatCornerItem 三态模型）：
+ *  >0 = 渔夫任务鱼图标（32px 帽缩放,悬停 tooltip,点击把 [i:id] 插聊天——
+ *  DrawNPCChatBottomRightItem Main.cs:40480-40543）；-1 = RequestHome 态
+ *  （原版画 EquipPage[5] 快捷图标开装备页,本仓无该单图资产不画,登记）；0 = 无。 */
+export type CornerItemState = { vid: number } | 'equip-page' | null;
+
 export interface HappinessInfo {
   name: string;
   /** 逐条心情文案（TownNPCMood_<NPC>.<键> 渲染后） */
@@ -78,8 +86,18 @@ const CSS = `
 .sw-npc-main { flex: 1; min-width: 0; }
 .sw-npc-name { color: #ffe8a0; font-size: 15px; margin-bottom: 6px;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000; }
-.sw-npc-chat { font-size: 14px; line-height: 1.6; color: #e8e8f4; min-height: 44px; }
-.sw-npc-btns { display: flex; gap: 8px; margin-top: 8px; }
+.sw-npc-chat { font-size: 14px; line-height: 1.6; color: #e8e8f4; min-height: 44px; position: relative; }
+.sw-npc-btns { display: flex; gap: 8px; margin-top: 8px; position: relative;
+  /* 原版每 4 个换行（NPCChatPanel.DrawButtons :103-107 num%4）——按钮流式排布
+     以 wrap 近似同观感 */
+  flex-wrap: wrap; row-gap: 6px; align-items: center; }
+/* 金币条（TryAddCoins→ItemSlot.DrawMoney 画在按钮左上 −45,−44,NPCChatPanel.cs:142） */
+.sw-npc-coins { position: absolute; transform: translateY(-120%); color: #ffd76e;
+  font-size: 11px; white-space: nowrap; text-shadow: 1px 1px 0 #000;
+  pointer-events: none; }
+/* 渔夫任务鱼角标（npcChatCornerItem>0,32px 帽缩放 Main.cs:40486-40492） */
+.sw-corner-item { position: absolute; right: -34px; bottom: 0px; width: 30px; height: 30px;
+  image-rendering: pixelated; cursor: pointer; filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
 .sw-npc-btns button {
   background: #3a4680; color: #e8e8f4; border: 1px solid #7d92d6; border-radius: 4px;
   padding: 5px 16px; cursor: pointer; font-family: inherit;
@@ -155,7 +173,8 @@ export class NpcDialog {
   private panel: HTMLElement | null = null;
   private escHandler: ((e: KeyboardEvent) => void) | null = null;
 
-  constructor(private parent: HTMLElement, private onButton: (id: NpcButtonId) => void) {
+  constructor(private parent: HTMLElement, private onButton: (id: NpcButtonId) => void,
+    private onCornerItem?: (vid: number) => void) {
     if (!document.getElementById('sw-npc-style')) {
       const style = document.createElement('style');
       style.id = 'sw-npc-style';
@@ -164,12 +183,15 @@ export class NpcDialog {
     }
   }
 
-  /** 打开对话框:name=NPC 名,chat=台词,buttons=选项(原版 Lang.inter 标签) */
-  open(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null, vanillaId?: number) {
+  /** 打开对话框:name=NPC 名,chat=台词,buttons=选项(原版 Lang.inter 标签);
+   *  corner>0 = 渔夫任务鱼角标(Main.npcChatCornerItem 值态,DrawNPCChatBottomRightItem
+   *  Main.cs:40480-40543 等价——url/name 由 UI 层经 iconUrl 解析注入),缺省/-1 不画 */
+  open(name: string, chat: string, buttons: NpcButtonMeta[], portrait?: string | null,
+    vanillaId?: number, corner?: { vid: number; url: string; name: string }) {
     this.close();
     const panel = document.createElement('div');
     panel.className = 'sw-npc-dialog';
-    const btns = buttons.map((b) => `<button data-b="${b.id}">${b.label}${(b as { excl?: boolean }).excl ? '<img class="sw-npc-excl" src="sprites/vanilla-ui/UI_quickicon1.png" alt="!" draggable="false">' : ''}</button>`).join('');
+    const btns = buttons.map((b) => `<button data-b="${b.id}">${b.label}${b.excl ? '<img class="sw-npc-excl" src="sprites/vanilla-ui/UI_quickicon1.png" alt="!" draggable="false">' : ''}</button>`).join('');
     // 头像(原版 Main.npcChatPortrait = Images/TownNPCs/Portraits/Portrait_<Name>，SetTalkNPC :4196;
     // 打开时 DoNPCPortraitHop 弹跳)——无头像类型(如骷髅商人外的野兽)原版也不显示。
     // ★原版画法（Main.cs DrawNPCPortrait :39745）：200×200 原尺寸画在圆形底框上、
@@ -183,10 +205,35 @@ export class NpcDialog {
     const portraitHtml = portraitOn
       ? `<canvas class="sw-npc-portrait" width="152" height="184"></canvas>`
       : '';
+    // 角落物品图标（32px 帽缩放 ：40486-40492；悬停 tooltip 名 :40514）
+    const cornerHtml = corner
+      ? `<img class="sw-corner-item" data-corner="${corner.vid}" src="${corner.url}" title="${corner.name}" alt="" draggable="false">`
+      : '';
     panel.innerHTML = `<div class="sw-npc-body">${portraitHtml}<div class="sw-npc-main">`
-      + `<div class="sw-npc-name">${name}</div><div class="sw-npc-chat">${chat}</div>`
+      + `<div class="sw-npc-name">${name}</div><div class="sw-npc-chat">${chat}${cornerHtml}</div>`
       + `<div class="sw-npc-btns">${btns}</div></div></div>`;
+    // 金币条（TryAddCoins → ItemSlot.DrawMoney 画在该按钮左上 −45,−44 处
+    // NPCChatPanel.cs:140-144——护士治疗费/税务官应收税款）绝对定位节点
+    for (const b of buttons) {
+      if ((b.coins ?? 0) <= 0) continue;
+      const host = panel.querySelector(`button[data-b="${b.id}"]`);
+      if (!host?.parentElement) continue;
+      const tag = document.createElement('span');
+      tag.className = 'sw-npc-coins';
+      tag.textContent = formatCopper(b.coins!);
+      host.parentElement.insertBefore(tag, host);
+    }
+    // 渔夫任务鱼角标：点击把 [i:vid] 物品标签送进聊天输入框（AddChatText 等价；
+    // 悬停改名已在 title 注入，:40498-40513 光标形变略）
+    const cornerImg = panel.querySelector<HTMLImageElement>('img.sw-corner-item');
+    if (cornerImg) {
+      cornerImg.addEventListener('click', () => {
+        UISfx.click();
+        this.onCornerItem?.(Number(cornerImg.dataset.corner));
+      });
+    }
     panel.querySelectorAll('button').forEach((el) => {
+      el.addEventListener('mouseenter', () => UISfx.hover());   // DrawButtons :157-161 悬停换行即响(12)
       el.addEventListener('click', () => {
         UISfx.click(); // 原版对话按钮 MenuTick(id 12)
         this.onButton((el as HTMLElement).dataset.b as NpcButtonId);
@@ -195,8 +242,16 @@ export class NpcDialog {
     this.parent.appendChild(panel);
     this.panel = panel;
     if (portraitOn) this.drawPortrait(panel.querySelector('canvas.sw-npc-portrait') as HTMLCanvasElement | null, portrait!, options.data.dialoguePortraitMode, vanillaId);
-    this.escHandler = (e: KeyboardEvent) => { if (e.code === 'Escape') this.onButton('close'); };
-    window.addEventListener('keydown', this.escHandler);
+    // Esc 优先序对齐 Player.cs:4960-5025 ToggleInv：talkNPC≥0 时 Esc 只关对话、
+    // 不落背包/暂停链——捕获阶段拦截截胡其余 window 监听（main.ts Inventory 链）
+    this.escHandler = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        this.onButton('close');
+      }
+    };
+    window.addEventListener('keydown', this.escHandler, true);
   }
 
   /** 头像裁剪填充：alpha 包围盒 → cover 式铺满 76×92 框（canvas 2× 抗糊，pixelated） */
