@@ -83,13 +83,30 @@ describe('鞭半程鞭尖音分档（:45051-45070）', () => {
       const half = Math.floor(w.timeToFlyOut / 2);
       expect(w.timeToFlyOut).toBe(60);
       expect(half).toBe(30);
-      const tip = w.pointsAt(half, false)[w.pointsAt(half, false).length - 1]; // :45054 鞭尖
-      for (let i = 0; i < 60 && w.dead === false; i++) w.fixedUpdate(1, hooks);
+      // 播音点 = 半程鞭尖。★2026-08-31 台账批：锚点已由"玩家盒心近似"升级为
+      // Player.GetArmPosition（Player.cs:51206 + Main.OffsetsPlayerOnhand）——臂位
+      // 随持械帧行在挥动进程内移动，鞭形随行，故鞭尖坐标须以【过半沿当拍】同帧
+      // 状态取参照（旧 ctor 期快照=挥动前帧行,与发拍帧行错一档 → 整链平移 14px）。
+      let fired = false;
+      let tipX = NaN; let tipY = NaN;
+      for (let i = 0; i < 60 && w.dead === false; i++) {
+        w.fixedUpdate(1, hooks);
+        if (!fired && sfx.length > 0) {
+          fired = true;
+          const pts = (w as unknown as { pointsAt: (n: number) => Array<{ x: number; y: number }> })
+            .pointsAt(w.timeToFlyOut / 2);
+          const t = pts[pts.length - 1];
+          tipX = t.x; tipY = t.y;
+        }
+      }
       expect(sfx.length).toBe(1);                       // 每挥一次（原版 ==half 精确一拍）
       expect(sfx[0]!.files).toEqual([file]);
       expect(sfx[0]!.vol).toBe(vol);                    // NPCDeath1 音量 ×0.6（:45057）
-      expect(sfx[0]!.x).toBeCloseTo(tip.x, 5);          // 播音点 = 半程鞭尖
-      expect(sfx[0]!.y).toBeCloseTo(tip.y, 5);
+      expect(sfx[0]!.x).toBeCloseTo(tipX, 5);           // 播音点 = 发拍鞭尖（同一帧行臂位）
+      expect(sfx[0]!.y).toBeCloseTo(tipY, 5);
+      // 臂位锚面校验：播音点明显偏离玩家中心（曾为"恒中心"近似——平移债已清）
+      expect(Math.hypot((sfx[0]!.x ?? 0) - player.cx, (sfx[0]!.y ?? 0) - player.cy))
+        .toBeGreaterThan(10);
     });
   }
 

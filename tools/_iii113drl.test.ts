@@ -117,13 +117,14 @@ function hydrate(): { st: TileStore; gs: GenState } {
 
   const xtAll = readFileSync(X86, 'utf8').split('\n').filter((l) => l.startsWith('MARK|DR|')).map((l) => l.slice(5))
     .filter((l) => !l.startsWith('DR|S|MD'))   // MakeDungeon 头探针：JS 无同位钩，剔除
-    .map((l) => l.replace(/^(DR\|(?:R|Ro))\|i(\d+)\|/, (_, tag, n) => `${tag}|i${Number(n) + 1}|`)); // R/Ro/CP 用 CurrentDungeon(0基)，统一到 drlInst(1基)
+    .map((l) => l.replace(/^(DR\|(?:R|Ro|RV))\|i(\d+)\|/, (_, tag, n) => `${tag}|i${Number(n) + 1}|`)); // R/Ro/RV/CP 用 CurrentDungeon(0基)，统一到 drlInst(1基)
 
   console.log(`[i113] x86 rows=${xtAll.length} js rows=${lines.length} mainSample=${rollN} totalSample=${totalN}`);
 
-  const segOnly = (rows: string[]) => rows.filter((l) => !/^DR\|R(o)?\|/.test(l) && !/^DR\|CP\|/.test(l) && !/^DR\|HCW\|/.test(l));
+  const segOnly = (rows: string[]) => rows.filter((l) => !/^DR\|R(o)?\|/.test(l) && !/^DR\|CP\|/.test(l) && !/^DR\|HCW\|/.test(l) && !/^DR\|RV\|/.test(l));
   const cpOnly = (rows: string[]) => rows.filter((l) => /^DR\|CP\|/.test(l));
   const hcwOnly = (rows: string[]) => rows.filter((l) => /^DR\|HCW\|/.test(l));
+  const rvOnly = (rows: string[]) => rows.filter((l) => /^DR\|RV\|/.test(l));
   const attOnly = (rows: string[]) => rows.filter((l) => /^DR\|R(o)?\|/.test(l));
 
   const diffPair = (label: string, xr0: string[], jr0: string[]) => {
@@ -151,11 +152,11 @@ function hydrate(): { st: TileStore; gs: GenState } {
       return l.replace(/(^|[| ])rc=-?\d+$/, `$1rc=${d}`);
     });
   };
-  for (const want of ['SEG', 'ATT', 'CP', 'HCW'] as const) {
+  for (const want of ['SEG', 'ATT', 'CP', 'HCW', 'RV'] as const) {
     const xf = want === 'ATT' ? attOnly(xtAll) : want === 'CP' ? cpOnly(xtAll)
-      : want === 'HCW' ? hcwOnly(xtAll) : segOnly(xtAll);
+      : want === 'HCW' ? hcwOnly(xtAll) : want === 'RV' ? rvOnly(xtAll) : segOnly(xtAll);
     const jf = want === 'ATT' ? attOnly(lines) : want === 'CP' ? cpOnly(lines)
-      : want === 'HCW' ? hcwOnly(lines) : segOnly(lines);
+      : want === 'HCW' ? hcwOnly(lines) : want === 'RV' ? rvOnly(lines) : segOnly(lines);
     diffPair(`${want}`, withDeltas(xf), withDeltas(jf));
   }
 });

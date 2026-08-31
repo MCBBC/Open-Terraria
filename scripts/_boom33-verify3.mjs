@@ -146,6 +146,55 @@ const res = await page.evaluate(() => {
     bornDY: +(wb.y + wb.h / 2 - wb.vy - g.player.cy).toFixed(2),
     maxDist8: (() => { let m = 0; for (let i = 0; i < 8 && chaks(52).includes(wb); i++) { g.fixedUpdate(1 / 60); m = Math.max(m, Math.hypot(wb.cx - g.player.cx, wb.cy - g.player.cy)); } return Math.round(m); })(),
   } : null;
+  cleanUpToIdle();
+  // ---- E 半砖站立发射（2026-08-31 二次报修）----
+  const gyHalf = py + 30;
+  const buildHalfRow = () => {
+    for (let dx = -24; dx <= 24; dx++) {
+      for (let dy = -16; dy <= 6; dy++) st.setTile(px0 + dx, gyHalf + dy, dy === 0 ? 2 : 0);
+      st.setHalfBrick(px0 + dx, gyHalf, true);
+      // ★不得再调 setSlope 清余波——store.setSlope 无条件 halfBrick(false),
+      //   会把刚置的半砖位抹掉（终审实录：footInCellPx 落回 0 的根因）
+    }
+  };
+  buildHalfRow();
+  const settleOnRow = (row) => {
+    g.player.x = px0 * 16 + 8 - g.player.w / 2;
+    g.player.y = (row - 4) * 16 - g.player.h;
+    if ('vx' in g.player) g.player.vx = 0;
+    if ('vy' in g.player) g.player.vy = 0;
+    for (let i = 0; i < 120; i++) g.fixedUpdate(1 / 60);
+    g.camera.x = g.player.cx; g.camera.y = g.player.cy;
+  };
+  out.E = {};
+  for (const [name, sx, sy] of [['horizRight', 320, 0], ['up', 0, -360]]) {
+    equipKey('vi_191_ThornChakram');
+    const dbgHalf0 = !!st.half[st.idx(px0, gyHalf)];
+    const dbgSolid0 = st.isSolid(px0, gyHalf);
+    const dbgType0 = st.type[st.idx(px0, gyHalf)];
+    settleOnRow(gyHalf);
+    const dbgHalfAfter = !!st.half[st.idx(px0, gyHalf)];
+    out.E.standFootInCellPx = +(g.player.y + g.player.h - gyHalf * 16).toFixed(2);
+    out.E.dbg = { half0: dbgHalf0, halfAfter: dbgHalfAfter, solid0: dbgSolid0, type0: dbgType0 };
+    g.input.mouseX = 640 + sx; g.input.mouseY = 400 + sy;
+    g.input.mouseDown = true; g.input.mouseHeld = true;
+    g.fixedUpdate(1 / 60);
+    g.input.mouseDown = false; g.input.mouseHeld = false;
+    const p0 = chaks()[0];
+    let maxDist = 0, alive10 = false;
+    if (p0) for (let i = 0; i < 14; i++) {
+      g.fixedUpdate(1 / 60);
+      if (!chaks().includes(p0)) break;
+      maxDist = Math.max(maxDist, Math.hypot(p0.cx - g.player.cx, p0.cy - g.player.cy));
+      if (i >= 9) { alive10 = true; break; }
+    }
+    out.E[name] = { spawned: !!p0, maxDist: Math.round(maxDist), alive10 };
+    cleanUpToIdle();
+  }
+  // ---- F(平台穿透):浏览器鼠标→世界 Y 映射对探针环境过敏不可靠,已改为
+  //        tests/halfbrick-boomerang-collision.test.ts 对 boomerangCellBlocks 直测
+  //        (平台 tile 在本仓 TILE_DEFS.solid=false ⇒ isSolid=false 恒不拦=原版
+  //         flag6 fallThrough 缺省 true 同义),不再做端到端断言。
   return out;
 });
 
@@ -158,6 +207,9 @@ check('B 连点拦截+消亡后重生', res.B.firstAlive === 1 && res.B.afterBlo
 check('C 持握:回手后自动再掷(spawns>=2)', res.C.spawns >= 2, JSON.stringify(res.C));
 check('D 木回旋镖站立盒心+飞出', !!res.D && Math.abs(res.D.bornDX) < 0.5 && Math.abs(res.D.bornDY) < 0.5 && res.D.maxDist8 > 20,
   JSON.stringify(res.D));
+check('E 半砖横掷不再原地锁死(foot=+8, 飞≥10t)', !!res.E && res.E.standFootInCellPx === 8
+  && res.E.horizRight.spawned && res.E.horizRight.alive10 && res.E.horizRight.maxDist > 40
+  && res.E.up.alive10, JSON.stringify(res.E));
 if (errors.length) console.log('[pageerrors]', errors.slice(0, 4));
 console.log(`${pass} pass / ${fail} fail`);
 process.exitCode = fail ? 1 : 0;

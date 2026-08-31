@@ -11,7 +11,8 @@ import {
 } from '../src/player/SmartSelect';
 
 // ---------- 世界/玩家基准 ----------
-const W = 120, H = 80;
+const W = 120, H = 300;   // H≥py/16+41+40：wetCollision 原版扫描界钳 maxTilesY−40（Collision.cs:1591-1594）
+                          // 需要水体行 < h−40 才可扫到——曾用 80 使 row41 落在钳外（与旧浮点宽松版偶合通过）
 const PTX = 60, PTY = 40;                 // 玩家所在格
 const PX = PTX * 16, PY = PTY * 16;       // position（px）
 const PW = 20, PH = 42;                   // width / height
@@ -378,16 +379,27 @@ describe('SmartSelectLookup_GetTargetTile（SmartSelectGamepadPointer.cs:23-38�
 describe('wetCollision（Collision.cs:1575-1625）', () => {
   it('命中盒中心盒与液面求交：格内液量即可浸湿下半身', () => {
     const st = mkSt();
-    // 玩家 y 640..682 → 中心盒 y 650.5..671.5（height/2=21）
-    st.liquid[st.idx(60, 41)] = 200;            // 格 (60,41) y 656..672，液面下移 (256-200)/32*2=3.75
+    // 玩家 y 640..682 → 原版中心盒 y 651..672（Height/2=21 整除,num2/2=10——
+    // ★2026-08-31 整除 parity 修正:曾浮点算成 650.5..671.5 整体上移半像素）
+    st.liquid[st.idx(60, 41)] = 200;            // 格 (60,41) y 656..672，液面下移 (256-200)/32*2=3.5
     expect(wetCollision(st, PX, PY, PW, PH)).toBe(true);
     st.liquid[st.idx(60, 41)] = 0;
     expect(wetCollision(st, PX, PY, PW, PH)).toBe(false);
   });
 
-  it('液量极低（液面低于命中盒底）不湿', () => {
+  it('液量极低：膜水顶恰在原版盒底上方 0.5px 内 → 腿尖沾水仍湿（C# 截断 effH=16−⌊15.5⌋=1）', () => {
+    // 旧断言"不湿"钉的是浮点错版盒 [650.5,671.5] 恰触不到膜带的现象——原版盒
+    // [651,672] 盒底 672 已越过膜顶 671.5(严格 >)且膜带宽 trunc 后仍有 1px → wet。
+    // l=8: surfY=671.5、effH=1 → 带 [671.5,672.5)
     const st = mkSt();
-    st.liquid[st.idx(60, 41)] = 8;              // 液面下移 (256-8)/32*2=15.5 → y=671.5，与盒底 671.5 不严格相交
+    st.liquid[st.idx(60, 41)] = 8;
+    expect(wetCollision(st, PX, PY, PW, PH)).toBe(true);
+    // 对照：液量归零必然干
+    st.liquid[st.idx(60, 41)] = 0;
     expect(wetCollision(st, PX, PY, PW, PH)).toBe(false);
+    // 对照：膜带降到盒底之下（行43 surfY=688.5 > 盒底672）→ 不湿
+    st.liquid[st.idx(60, 43)] = 248;
+    expect(wetCollision(st, PX, PY, PW, PH)).toBe(false);
+    st.liquid[st.idx(60, 43)] = 0;
   });
 });

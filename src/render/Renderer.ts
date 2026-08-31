@@ -366,11 +366,15 @@ export function heldItemTipWorld(
     //  而非右缘(右缘取法在斜 45° 上下时偏出 20px+,2026-08-31 用户截图定罪)
     lx = fw * 0.5; ly = -fh * 0.85;
   } else {
-    alpha = aimL;
+    // ★枪族 v7 极坐标(2026-08-31 终版):出生点 = 中心 + 瞄准单位·前伸 + (0,−4)。
+    //  前伸 = dp[0]+fw(每武器全 barrel reach,pivot→管口)。**无垂直于瞄准的分量**
+    //  ——v5 用完整绘制尖端(含 dp[1]+fh/2 ≈11-14px 垂直旁偏)→ 近垂直瞄时旁偏
+    //  变横向"弹射到右边";v6 极坐标丢 dp[0] → 发射筒(−8+52)前伸只算 34 非 44。
+    //  v7 = 两者并集:dp[0] 调前伸、零横向分量,任何朝向翻转零跳变。
+    //  常数 −4 手抬 = 备案偏离(原版字面=盒中心,2026-08-31 用户拍板枪口出膛)。
     const dp = ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF;
-    px = cx + sg * -2;                                      // offX=-2*dir(:50387)
-    py = cy - fh * 0.5;                                     // offY=p.h/2−fh/2
-    lx = dp[0] + fw; ly = dp[1] + fh * 0.5;                 // 管口=精灵右缘中点
+    const fwd = dp[0] + fw;
+    return { x: cx + Math.cos(aimWorld) * fwd, y: cy + Math.sin(aimWorld) * fwd - 4 };
   }
   const wr = sg * alpha;
   const c = Math.cos(wr), s = Math.sin(wr);
@@ -9315,20 +9319,19 @@ export class Renderer {
           bx - hw / 2, by - hh / 2 + 2, hw, hh);
       }
       // 光照色调（原版 Lighting.GetColor(homeTileX, num3)：旗布头像受所在格光照染色。
-      //  lightCanvas 为屏幕空间 2× 超采样光照图（合成在本层之后，此处取上一帧数据——
-      //  光照变化平缓一帧滞后无感；首帧全黑跳过）
+      //  ★2026-08-31 改走 lightAt(tile) 纯数据通道——此前每旗每帧 1×1 回读合成
+      //  lightCanvas（GPU-backed，无 willReadFrequently）= Chrome
+      //  "Multiple readback operations" 警告源 + 每次回读强制管线停顿；
+      //  且 vanilla 语义本就是【格光照】而非屏幕合成图，纯数据查表反而更忠实。
+      //  越界/未就绪 → lightAt 回 [0,0,0] = 跳过染色（首帧全黑跳过语义同旧）。
       const rectW = cloth.sw, rectH = cloth.sh + 4;
-      const [lsx, lsy] = cam.worldToScreen(bx, by - 12);
-      const lx = Math.round(lsx * 2), ly = Math.round(lsy * 2);
-      if (lx >= 0 && ly >= 0 && lx < this.lightCanvas.width && ly < this.lightCanvas.height) {
-        const ld = this.lightCtx.getImageData(lx, ly, 1, 1).data;
-        if (ld[0] + ld[1] + ld[2] > 0) {
-          ctx.save();
-          ctx.globalCompositeOperation = 'multiply';
-          ctx.fillStyle = `rgb(${ld[0]},${ld[1]},${ld[2]})`;
-          ctx.fillRect(bx - rectW / 2, by - rectH / 2, rectW, rectH);
-          ctx.restore();
-        }
+      const lt = this.lighting?.lightAt(n.home!.x, cy) ?? [0, 0, 0];
+      if (lt[0] + lt[1] + lt[2] > 0 && (lt[0] < 252 || lt[1] < 252 || lt[2] < 252)) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'multiply';
+        ctx.fillStyle = `rgb(${lt[0]},${lt[1]},${lt[2]})`;
+        ctx.fillRect(bx - rectW / 2, by - rectH / 2, rectW, rectH);
+        ctx.restore();
       }
       // hover 名条（原版 40255+：鼠标悬停旗帜显示 NPC 名）
       if (this._mouseX >= 0) {

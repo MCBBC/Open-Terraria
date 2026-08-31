@@ -589,20 +589,36 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     try {
       startAssetPrewarm();   // #perf2026-08-28:同 loadFromKey
       // worker 路径：JSON 解析 + RLE 解码 + load 模式沉降全在后台（json 源传入）
+      // 加载分段标尺（perf mark，F5 报告/探针经 performance.getEntriesByType 读取）
+      const __m = (n: string) => { try { performance.mark(n); } catch { /* 非浏览器环境 */ } };
+      __m('load.begin');
+      __m('load.prewarm.begin');
       const client = await sharedGenClient();
+      __m('load.clientReady');
       if (await client.probe()) {
         try {
           const loadState = new UIWorldLoadState();
           VUI.setState(loadState);
+          __m('load.roundtrip.begin');
           const { world, player, save } = await client.loadSave({ json: text }, {
             onProgress: (phase, p) => loadState.setProgress(loadProgressLabel(phase, p), p),
           });
+          __m('load.roundtrip.end');
           const g = makeGame();
+          __m('load.makeGame.done');
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
           // ★进世界恒出生点(Main.cs:6800 Spawn(SpawningIntoWorld),存档位置不用于落点)
           await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: world.spawnX * 16, y: world.spawnY * 16 } });
+          __m('load.loadWorld.done');
           await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
+          __m('load.player.done');
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
+          __m('load.end');
+          try {
+            const e = performance.getEntriesByType('mark').filter((m2) => m2.name.startsWith('load.'));
+            for (let i2 = 1; i2 < e.length; i2++)
+              console.log(`[load] ${e[i2].name.slice(5)} +${Math.round((e[i2].startTime - e[i2 - 1].startTime))}ms`);
+          } catch { /* 只读诊断 */ }
           return;
         } catch (e) {
           if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;

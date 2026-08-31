@@ -4461,14 +4461,13 @@ export class Player extends Entity {
         }
       }
       if (!this.onGround && eq.spikedBoots && this.hitWall && this.inputX !== 0 && this.vy > 0) {
-        this.vy = Math.min(this.vy, 1.5); // 贴墙缓降
-        this.fallStartY = null;
-        this.wallCling = true;
-        if (this.inputJump) { // 蹬墙跳（:21588-21590 同 jumpSpeed/jumpHeight 链）
-          this.vy = -(PLAYER_JUMP_SPEED + this.equipStats.jumpSpd) * this.gravDir;
-          this.jumpHold = Math.max(PLAYER_JUMP_TICKS, this.equipStats.jumpBoost ? 20 : 0);
-          this.vx = -Math.sign(this.vx || this.facing) * 3;
-        }
+        this.vy = Math.min(this.vy, 1.5); // 贴墙缓降（:21963 velocity 钳）
+        this.fallStartY = null;           // fallStart 重置（:21958 WallslideMovement 同支）
+        this.wallCling = true;            // sliding=true 仓内承载位 → 起跳统一走
+                                          // 上方 JumpMovement 门（外门 sliding 支 +
+        // autoJump 抑制 ：20805-20808）。★2026-08-31 台账清偿⑤：旧内嵌 inputJump
+        // 直写蹬墙跳退役——原版 WallslideMovement 自身不处理跳键，滑行起跳一律经
+        // JumpMovement 外门（releaseJump 边沿、无 vx 反踢项），单路权归一。
       }
       // 翅膀滑翔（:27015-27027）：wingTime 尽后按住跳 = 重力/3 + 终端 maxFallSpeed/3
       // （!hoverDown）——原版此段在 else-if 链替换常规重力，此处以等价条件并入
@@ -4948,7 +4947,9 @@ export class Player extends Entity {
     // 参数面,46065 半血/22464-22511 WOF 千伤为异源）——本站为本仓引擎护栏,接漏斗
     // 只统一死亡面不加伤害语义。
     const maxY = world.h * TILE;
-    if (this.y > maxY + 100) this.envHurtThroughFunnel(game, 9999, this.cx, this.y);
+    if (this.y > maxY + 100) {
+      this.envHurtThroughFunnel(game, 9999, this.cx, this.y, ImmunityCooldownID.General);
+    }
     this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
     this.jumpEdgePrev = this.inputJump;  // 跳键边沿（tick 尾快照——水中起跳 releaseJump :20409 消费；prevInputJump 在 tick 头快照故不可用）
     // 血肉墙舌头（Player.WOFTongue :21993-22056，Update 内 myPlayer 段调用）

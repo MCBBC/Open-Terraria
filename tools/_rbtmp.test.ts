@@ -11,6 +11,9 @@ const X0 = 3470, X1 = 3560, Y0 = 640, Y1 = 720;
 (RUN ? it : it.skip)('temple kill forensic', async () => {
   const evs: string[] = [];
   let n32 = 0;
+  const p2: string[] = [];
+  const Gp2 = globalThis as unknown as { __swTmP2?: string[] };
+  Gp2.__swTmP2 = p2;
   // A) 引擎九宫/击杀钩（FinalCleanupPass.__swFnt39 消费点）
   const G = globalThis as unknown as Record<string, any>;
   G.__swFntProbeI39 = {
@@ -35,7 +38,12 @@ const X0 = 3470, X1 = 3560, Y0 = 640, Y1 = 720;
     });
   } finally {
     delete G.__swFntProbeI39;
+    Gp2.__swTmP2 = undefined;
   }
-  console.log(`window events=${evs.length}`);
+  console.log(`window events=${evs.length} p2rows=${p2.length}`);
+  console.log(p2.slice(0, 6).join('\n'));
+  console.log('...bbox first line above; window-filtered part2:');
+  console.log(p2.filter((l) => /@(3[45]\d\d),(6[5-9]\d|7[01]\d)/.test(l)).join('\n'));
   writeFileSync('/tmp/iii118-out/rbalt/tf-window.log', evs.join('\n') + '\n');
+  writeFileSync('/tmp/iii118-out/rbalt/p2.log', p2.join('\n') + '\n');
 }, 900_000);

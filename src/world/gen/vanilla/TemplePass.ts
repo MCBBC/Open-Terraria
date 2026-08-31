@@ -5,7 +5,7 @@
 // templePart2 五段(陷阱→箱→雕像→家具→挂饰)是独立注册的 LihzahrdTemplePart2 pass
 // (cs:17809,Moss 之后 CaveWalls 之前)——见 runTemplePart2Pass(2026-08-16 拆分)。
 import { TileStore } from '../../TileStore';
-import type { RNG } from '../../../core/rng';
+import { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
@@ -998,6 +998,7 @@ function templePart2(
   {
     let budget = tRooms * 0.35 * (1 + rng.int(-15, 15) * 0.01);
     let fails = 0;
+    let oks = 0;
     while (budget > 0) {
       const x2 = rng.int(lx, rx);
       const y2 = rng.int(ty, by);
@@ -1162,7 +1163,17 @@ function placeStatueTemple(st: TileStore, rng: RNG, x: number, y: number, style:
 
 /** 家具三族（cs:34608-34630）：18→Place2x1（cs:47371，**左锚**）/ 14→Place3x2
  *  （cs:52097，中锚 (x-1..x+1)×(y-1..y)）/ 15→Place1x2（cs:46665，(x,y-1..y)，
- *  帧行 stride=40）。门/帧全按原版；PlaceTile 前奏 Clear 锚格 + 尾 SquareTileFrame×2 */
+ *  帧行 stride=40）。门/帧全按原版；PlaceTile 前奏 Clear 锚格 + 尾 SquareTileFrame×2。
+ *  ★IIIII99e（2026-08-31，rainbow #66 定罪）失败路径补齐原版语义：
+ *  ①外门恒开——三族皆非实心 id（Main.tileSolid[14/15/18]=false），PlaceTile 外门
+ *   `forced||EmptyTile||!tileSolid[num]`（cs:59874-88）对家具必达前奏：非活性锚格
+ *   Clear(Tile|Paint|Slope)（cs:59997-99）——与放不成功无关；
+ *  ②dispatch 层尾帧无条件——case14 派发 `Place3x2(i,j)+SquareTileFrame(i,j)`
+ *   （cs:60492-503，Place2x1/Place1x2 同构），失败也发。曾缺：rainbow 链家具段
+ *   (3515,667) 采样扫描落锚 (3515,679)（kind=1 桌,底座行=232 木刺且段内已翻非实心）
+ *   失败后既没清锚格幽灵 t226、也没九宫重帧——左邻 Statue 六格组（底锚恰是木刺）
+ *   在 x86 被 Check2xX 底锚门败整组杀（含锚格清型,八通道实证),JS 全留=#44 清偿后
+ *   的 #66 T0>105×6 唯一族。（雕像支同款修复见 QQQQQQQQ/notraps#66 先例。） */
 function placeFurnTemple(st: TileStore, rng: RNG, x: number, y: number, sheet: number, style: number): boolean {
   const tileId = sheetToIdTP(sheet);
   if (tileId < 0) return false;
@@ -1171,25 +1182,30 @@ function placeFurnTemple(st: TileStore, rng: RNG, x: number, y: number, sheet: n
     const i = st.idx(cx, cy);
     if (!st.flags[i]) { st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0; st.slope[i] = 0; st.half[i] = 0; }
   };
+  // ★IIIII99e①前奏 Clear 提到门判定之前（原版在外门之后、写手派发之前）
+  if (st.inBounds(x, y)) clearAnchor(x, y);
+  // ★IIIII99e②失败同样吃 dispatch 无条件尾帧（成功路保持二连不变）
+  const failWithFrame = (): false => {
+    genSquareTileFrame(st, rng, x, y);
+    return false;
+  };
   if (sheet === 18) {
     // Place2x1：门 = 两下格 SolidTile2 + 两本格空（cs:47388）
-    if (!st.inBounds(x + 1, y)) return false;
-    if (!solidTile2TP(st, x, y + 1) || !solidTile2TP(st, x + 1, y + 1)) return false;
-    if (st.flags[st.idx(x, y)] || st.flags[st.idx(x + 1, y)]) return false;
-    clearAnchor(x, y);
+    if (!st.inBounds(x + 1, y)) return failWithFrame();
+    if (!solidTile2TP(st, x, y + 1) || !solidTile2TP(st, x + 1, y + 1)) return failWithFrame();
+    if (st.flags[st.idx(x, y)] || st.flags[st.idx(x + 1, y)]) return failWithFrame();
     const fx = 36 * style;
     st.setTileSilent(x, y, tileId, fx, 0);
     st.setTileSilent(x + 1, y, tileId, fx + 18, 0);
   } else if (sheet === 14) {
     // Place3x2：3×2 全空 + 三列 SolidTile2（cs:52115-52151）
-    if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;
+    if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return failWithFrame();
     for (let i = x - 1; i <= x + 1; i++) {
       for (let j = y - 1; j <= y; j++) {
-        if (st.flags[st.idx(i, j)]) return false;
+        if (st.flags[st.idx(i, j)]) return failWithFrame();
       }
-      if (!solidTile2TP(st, i, y + 1)) return false;
+      if (!solidTile2TP(st, i, y + 1)) return failWithFrame();
     }
-    clearAnchor(x, y);
     const bx = 54 * style;
     for (let i = 0; i < 3; i++) {
       st.setTileSilent(x - 1 + i, y - 1, tileId, bx + i * 18, 0);
@@ -1197,9 +1213,8 @@ function placeFurnTemple(st: TileStore, rng: RNG, x: number, y: number, sheet: n
     }
   } else {
     // Place1x2（15）：门 = SolidTile2(x,y+1) && (x,y-1) 空（cs:46685）
-    if (!st.inBounds(x, y - 1)) return false;
-    if (!solidTile2TP(st, x, y + 1) || st.flags[st.idx(x, y - 1)]) return false;
-    clearAnchor(x, y);
+    if (!st.inBounds(x, y - 1)) return failWithFrame();
+    if (!solidTile2TP(st, x, y + 1) || st.flags[st.idx(x, y - 1)]) return failWithFrame();
     const by = style * 40;
     st.setTileSilent(x, y - 1, tileId, 0, by);
     st.setTileSilent(x, y, tileId, 0, by + 18);

@@ -1048,12 +1048,103 @@ describe('★F10 城镇被动回血（CheckLifeRegen NPC.cs:93622-93641）', () 
     const dmgColors: Array<string | undefined> = [];
     const { game } = makeGame(world, { npcs: [npc] });
     (game as unknown as { addDamageNumber: (...a: unknown[]) => void }).addDamageNumber =
-      (_x: number, _y: number, _amt: number, _crit: boolean, color?: string) => {
-        dmgColors.push(color);
+      (...a: unknown[]) => {
+        dmgColors.push(a[4] as string | undefined);   // 第 5 参 = color（单源色链）
       };
     npc.hp = npc.maxHp - 30;
     for (let t = 0; t < 600; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.hp).toBeGreaterThan(npc.maxHp - 30);        // 已开始恢复
     expect(dmgColors.length).toBe(0);                      // 回血静默(原版无 CombatText)
+  });
+});
+
+// =====================================================================
+// ★C3② 清零收敛批：危险扫描臭味双支（NPC.cs:54045-47 敌支 / :54080-96 玩家
+// 第二扫 / 消费点 :55769 flag31 的 !flag17）。载体在库=Enemy.stinkyT（苍蝇美食
+// 5129/恶臭弹 371 授予链）与 player.buffs Stinky(120)——此前缺城域消费,现补
+// 最小版；614 鳄鱼特判(:54066-75)本仓无该型入口,缺席即正确（存档见批报告）。
+// =====================================================================
+describe('★C3② 危险扫描臭味双支(stinky 载体最小落地)', () => {
+  /** 臭源敌 mock：damage 可为 0（原版准入续链 `(friendly||dmg<=0)&&!stinky`
+   *  ——唯臭味让零伤体入扫描） */
+  function foe(dxPx: number, dmg: number, stinkT = 0) {
+    return { x: 100 * 16 + 10 + dxPx - 9, y: F * 16 - 40 - 42, w: 18, h: 42,
+      dead: false, damage: dmg, stinkyT: stinkT, def: { friendly: false } };
+  }
+  const stinkPlayer = (dxPx: number) => ({
+    x: 100 * 16 + 8 + dxPx - 9, y: F * 16 - 60, w: 20, h: 42, dead: false,
+    sitting: false,
+    buffs: { has: (b: number) => b === 76 },        // BuffType.Stinky 运行时位
+  });
+
+  it('敌支:零伤臭怪过扫描门+置 flag17 → 有可打敌仍不入自卫攻击态(flag31 灭)', () => {
+    stubRand(0);                                     // 攻击门恒中——隔离纯门禁差
+    const stinker = foe(60, 0, 999);
+    const shooterBait = foe(150, 30);                // 远侧真靶(带 LOS)
+    const world = flatWorld('c3-stink-enemy');
+    const npc = new TownNPC('guide', 100 * 16, F * 16);
+    npc.stationary = true;
+    const { game, shots } = makeGame(world, {
+      enemies: [stinker, shooterBait], npcs: [npc],
+    });
+    const foes = [stinker, shooterBait];
+    /** 钉距（本体逃逸会走出探测窗,与 chase 探针同款）：逐拍把臭源/靶位拉回 */
+    const pin = (): void => {
+      stinker.x = npc.cx + 60 - stinker.w / 2;
+      shooterBait.x = npc.cx + 150 - shooterBait.w / 2;
+      stinker.y = shooterBait.y = npc.y + npc.h / 2 - 21;   // 与本体盒调平(|Y| 带)
+    };
+    let sawStinkyGate = false;
+    for (let t = 0; t < 400; t++) {
+      pin();
+      npc.fixedUpdate(1 / 60, game);
+      if ((npc as unknown as Record<string, unknown>).dangerStinky === true) sawStinkyGate = true;
+      if (shots.length > 0) break;
+    }
+    // 臭味窗口内：候选虽可查(近敌刷新位+可通过 CanBeChasedBy)但 :55769 !flag17
+    // 先断——零弹、零入态、旗确曾置位
+    expect(sawStinkyGate).toBe(true);
+    expect(shots.length).toBe(0);
+    expect(npc.attackState).toBe(0);
+    // 臭源除味 → 同几何立即可打（驱动位就是 flag17 本身）
+    (stinker as { stinkyT: number }).stinkyT = 0;
+    let fired = false;
+    for (let t = 0; t < 400 && !fired; t++) {
+      pin();
+      npc.fixedUpdate(1 / 60, game);
+      if (shots.length > 0) fired = true;
+    }
+    expect(fired).toBe(true);
+  });
+
+  it('玩家第二扫(!scanHit 才执行):臭味玩家视为威胁 → 逃+不攻,无臭对照全静默', () => {
+    stubRand(0);
+    const world = flatWorld('c3-stink-player');
+    const npc = new TownNPC('guide', 100 * 16, F * 16);
+    npc.stationary = true;
+    const p = stinkPlayer(-96);                      // 左侧 96px < PrettySafe 200
+    const { game } = makeGame(world, { npcs: [npc], player: p });
+    p.x = npc.cx - 96 + p.w / 2 - 10;                // 钉距（防漂出窗）
+    for (let t = 0; t < 12; t++) {
+      p.x = npc.cx - 96 + p.w / 2 - 10;
+      npc.fixedUpdate(1 / 60, game);
+    }
+    const n = npc as unknown as Record<string, unknown>;
+    expect(n.threatRaw).toBe(true);                  // flag16 由第二扫置位(:54090-91)
+    expect(n.dangerNear).toBe(true);                 // 无 PrettySafe 收口(96<200)
+    expect(n.dangerStinky).toBe(true);               // flag17 同置——攻门灭
+    expect(npc.vx).toBeGreaterThan(0);               // 逃离向右(背危险侧)
+    expect((p.buffs.has as (b: number) => boolean)(76)).toBe(true);
+    // 对照:同位置非臭味玩家 → 全静默(既不逃也不算险)
+    const world2 = flatWorld('c3-stink-none');
+    const npc2 = new TownNPC('guide', 100 * 16, F * 16);
+    npc2.stationary = true;
+    const calm = { ...stinkPlayer(-96), buffs: { has: () => false } };
+    const { game: game2 } = makeGame(world2, { npcs: [npc2], player: calm });
+    for (let t = 0; t < 12; t++) npc2.fixedUpdate(1 / 60, game2);
+    const n2 = npc2 as unknown as Record<string, unknown>;
+    expect(n2.threatRaw).toBe(false);
+    expect(n2.dangerNear).toBe(false);
+    expect(n2.vx).toBe(0);
   });
 });

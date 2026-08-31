@@ -59,9 +59,9 @@ describe('① 滚轴鞋 RollerSkateMovement 两改（1458 Player.cs:28736-28778�
     const r = mountRollerSkateStep(-3, 0, true, false, 6, 6, 0.2, 1.6, false);
     expect(r.dampedVx).toBeDefined();
     expect(Math.abs((r.dampedVx ?? 0) - (-2.58))).toBeLessThan(1e-9);
-    // 空中门关闭时同参数不改写 vx
-    const air = mountRollerSkateStep(-3, -1, true, false, 6, 6, 0.2, 1.6, false);
-    expect(air.dampedVx).toBeCloseTo(-3, 12);
+    // 空中且超低速带（|vx|=4>3 空中门 false）不改写 vx（:28752 门语义）
+    const air = mountRollerSkateStep(-4, -1, true, false, 6, 6, 0.2, 1.6, false);
+    expect(air.dampedVx).toBeCloseTo(-4, 12);
     // 大上限（accRun=9）同值仍收敛 —— 带顶缩放语义生效（与旧 6.5f 固定档相异）
     const wide = mountRollerSkateStep(-3, 0, true, false, 9, 9, 0.2, 1.6, false);
     expect(wide.dampedVx).toBeCloseTo(-2.58, 9);
@@ -72,9 +72,9 @@ describe('① 滚轴鞋 RollerSkateMovement 两改（1458 Player.cs:28736-28778�
     // 空中低速（|vx|≤3）仍收敛 :28752 后半支：lerp(2.5→1.6,.3)=2.23
     const lowAir = mountRollerSkateStep(2.5, -1, true, false, 6, 6, 0.2, 1.6, false);
     expect(lowAir.dampedVx).toBeCloseTo(2.23, 9);
-    // 低速收尾段（|vx|<1.5）lerp→0 且 <0.03 归零
+    // 低速收尾段（|vx|<1.5）：lerp 后 0.04×0.7≈0.028 < 0.03 → 归零（float 路径同原版）
     const tiny = mountRollerSkateStep(0.04, 0, true, false, 6, 6, 0.2, 1.6, false);
-    expect(tiny.dampedVx).toBeCloseTo(0.028, 9);
+    expect(tiny.dampedVx).toBe(0);
   });
 
   it('runSlowdown 尾钳 clamp(|vx|−max(maxRun,accRun),0,slow)，沥青特支 ×2.25/×1.6', () => {
@@ -205,16 +205,16 @@ describe('⑤ 鞭臂位锚 —— Player.GetArmPosition（Player.cs:51206-51225 
 describe('⑥ 1104 湿旗盒级 WetCollision 出生快照', () => {
   const shallowWorld = (): World => {
     const w = mkWorld();
-    // 地面上方一格拉水带（水量 120 → 水面带 top≈j·16+8.5，吃进盒底缘）
+    // 地面上方一格浅水（水量 208 → drop=(48/32)*2=3，水面带 top=j·16+3）
     w.store.setTileSilent(40, 81, 0);
-    w.store.liquid[w.store.idx(40, 81)] = 120;
+    w.store.liquid[w.store.idx(40, 81)] = 208;
     return w;
   };
 
-  it('盒缘浸水即湿（旧弹心格单检漏判）', async () => {
+  it('盒级 WetCollision 探针命中水面带（1104 wet 消费源）', async () => {
     const { wetCollisionProbe } = await import('../src/entities/MinionProj');
     const w = shallowWorld();
-    // 18×18 盒底缘压住水面带（水面 top = j*16 + (256−120)/32*2 ≈ j*16+8.5）
+    // 18×18 盒心内探针下缘触及水面段 [1299, 1312)——盒缘浸液即湿
     const y = 81 * TILE - 10;
     const wet = wetCollisionProbe(
       w.store as unknown as Parameters<typeof wetCollisionProbe>[0],
@@ -340,7 +340,7 @@ describe('⑩ 宝箱怪态3 反射管线（NPC.cs :37851/:37966-37982/:67189-672
   };
   const reflectableProj = (over: Record<string, unknown>) => ({
     x: 110, y: 105, w: 10, h: 10, vx: -6, vy: 0, damage: 48,
-    hostile: false, reflected: false, projId: 9,
+    hostile: false, reflected: false, projId: 1,   // 木箭 aiStyle1 ∈ REFLECTABLE_AI_STYLES
     ...over,
   });
 
@@ -351,6 +351,7 @@ describe('⑩ 宝箱怪态3 反射管线（NPC.cs :37851/:37966-37982/:67189-672
     const untouched = reflectableProj({ x: 900, y: 900 });     // 盒外不反射
     const nonReflectable = reflectableProj({ damage: 0 });     // CanBeReflected 伤 0 门
     const game = Object.assign(fakeHooks(w), {
+      player: new Player(700, 1060, new Inventory()),   // reflectProjectile 朝发射者向
       projectiles: () => [p, untouched, nonReflectable],
     }) as never;
     reflectPlayerProjsInHitbox(game, e);
@@ -393,16 +394,18 @@ describe('⑪ 飞蛾魔同 tick 重摇选招（NPC.cs aiStyle88 :38328-38348）'
     return { e, p, game: fakeHooks(world, p) as never };
   };
 
-  it('掷出无效招（pick0 无视线）→ 同 tick 重摇至得招 ai0=3', () => {
+  it('掷出恒无效招（pick0 无视线）→ 同 tick 反复重摇（护栏 <100 次）', () => {
     const { e, p, game } = harness(walledWorld());
-    let call = 0;
+    let draws = 0;
     const spy = vi.spyOn(Math, 'random').mockImplementation(() => {
-      // justHit=false 不消费；掷序：pick=0（无视线重摇）→ pick=1（直接落招）
-      return (call++ === 0) ? 0.05 : 0.42;
+      draws++;
+      return 0.05;                      // 恒 pick=0，视线被石墙阻断 → 无效持续重摇
     });
     mothronAI(e, game, p);
-    expect(e.ai0).toBe(3);
-    expect(call).toBeGreaterThanOrEqual(2);   // 确证发生重摇
+    // 旧"单帧一次近似"每 tick 只掷 1 次；重摇式应远超 1 且护栏封顶
+    expect(draws).toBeGreaterThan(50);
+    expect(draws).toBeLessThanOrEqual(101);
+    expect(e.ai0).toBe(0);              // 全程无有效落招
     spy.mockRestore();
   });
 
@@ -440,10 +443,11 @@ describe('C 档 · mountLights 三处补齐', () => {
   });
 
   it('扫帚 23：露天档位改变挂件位（windExposed → num3=1f,:3597-3602）', () => {
-    // 找一个露天/室内输出有别的相位（风摆连续相位内必有分档差）
+    // 风摆项对 wind 幅值线性（num2 ∝ WindForVisuals）——大风的露天 ×1 与室内 ×0.5
+    // 档在挂件角上分档，连续相位内必有落格差
     let differ = false;
-    for (let mc = 0; mc < 900 && !differ; mc += 7) {
-      const ctx = { wind: 0.8, miscCounter: mc };
+    for (let mc = 0; mc < 900 && !differ; mc += 3) {
+      const ctx = { wind: 8, miscCounter: mc };
       const indoor = lightsOf(23, ctx);
       const outdoor = lightsOf(23, { ...ctx, windExposed: true });
       if (indoor.length > 0) {

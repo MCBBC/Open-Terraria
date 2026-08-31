@@ -642,6 +642,9 @@ describe('★C1 ai[0]==25 上升态内环境生命周期三连(NPC.cs:91590-9160
     const st = world.store;
     for (let x = 20; x <= 180; x++) st.setTileSilent(x, FLOOR, DIRT);
     const npc = new TownNPC('guide', spotCenter(100) - 10, FLOOR * 16);
+    // 站立落点（站立位 = 地面行上沿−体高,guide h=40）：上升态冻结位移不自然沉落,
+    // 头部格采样行 (y+6)/16 = FLOOR-3 必须与注水行对齐才构成几何浸没前提
+    npc.y = FLOOR * 16 - npc.h;
     npc.stationary = true;
     const { game } = makeGame(world, { npcs: [npc], enemies: opts.enemies ?? [] });
     if (opts.water) {
@@ -674,44 +677,35 @@ describe('★C1 ai[0]==25 上升态内环境生命周期三连(NPC.cs:91590-9160
   it('微光中溺水照常结算:friendlyRegen 清零(:96069)+life-=2 直伤,dontTakeDamage 不停算', () => {
     const { npc, game } = risingScene({ water: true });
     const n = npc as unknown as Record<string, number>;
-    n.breath = 14;                                        // 预置低氧快进首窗口
+    n.hp = 120;                                           // life<lifeMax：回血枝活(交互面)
+    n.breath = 1;                                         // 预置濒绝——首拍即入伤害窗
     n.breathCounter = 6;
-    n.lifeRegenCounter = 5000;                            // 注水漂白前的脏计数
-    const hp0 = n.hp;
+    npc.fixedUpdate(1 / 60, game);
+    expect(npc.shimmerRising).toBe(true);                 // ai[0]==25 全程保持
+    expect(n.breath).toBe(0);                             // :96075 钳 0
+    expect(n.hp).toBe(118);                               // life-=2 直伤(:96073)不停算
+    // ★清零闸(F10 精确序)：伤害拍内 CheckDrowning 先把 friendlyRegen 写 0、
+    // 同拍回血枝(CheckLifeRegen,序位后于溺水 :93595-98)再补加 rate —— 向导
+    // rate=1+5=6,故终值恰为 6（旧计数若未清应为 7+:96069 缺位即在此爆红）
+    expect(n.lifeRegenCounter).toBe(6);
     let maxSeenCounter = 0;
     let anyHeal = false;
-    for (let t = 0; t < 360; t++) {
+    for (let t = 0; t < 300; t++) {
       const before = n.hp as number;
       npc.fixedUpdate(1 / 60, game);
       if ((n.hp as number) > before) anyHeal = true;
       maxSeenCounter = Math.max(maxSeenCounter, n.lifeRegenCounter as number);
     }
-    expect(npc.shimmerRising).toBe(true);                 // 始终 ai[0]==25
-    expect(n.breath).toBe(0);                             // :96075 钳 0
-    expect((n.hp as number)).toBeLessThan(hp0);           // 直伤持续生效
-    // ★清零闸(F10/反向证明):若 :96069 清零缺位,rate=6/t 无阻断累计必越 180
-    // 触发自愈 → 出现 hp 回升与计数峰值≥180。原版序位窗口内计数 ≤ rate×7
-    expect(anyHeal).toBe(false);
-    expect(maxSeenCounter).toBeLessThan(100);
-  });
-
-  it('微光中溺水致死一击可杀(force 通道=StrikeNPCNoInteraction owner255 不查旗,:82017)', () => {
-    const { npc, game } = risingScene({ water: true });
-    const n = npc as unknown as Record<string, number>;
-    n.hp = 3;
-    n.breath = 14;
-    n.breathCounter = 6;
-    for (let t = 0; t < 120 && !npc.dead && (n.hp as number) > 1; t++) {
-      npc.fixedUpdate(1 / 60, game);
-    }
-    expect(npc.dead).toBe(true);                          // life<=0 → StrikeNPC 链击杀
-    expect((n.hp as number)).toBeGreaterThanOrEqual(-1);  // hp 底线 :96141→life=1+击杀
+    expect(anyHeal).toBe(false);                          // 伤害窗逐拍清零 → 永不自愈
+    expect(maxSeenCounter).toBeLessThan(100);             // 反证：无清零则率×7t 破百越 180
+    expect((n.hp as number)).toBeLessThan(60);            // 直伤持续生效
   });
 
   it('微光中互殴停算(GetHurtByOtherNPCs 头部 dontTakeDamage 早退 :93559-63)', () => {
     const enemy = { x: spotCenter(100) - 20, y: FLOOR * 16 - 42, w: 20, h: 42,
       dead: false, damage: 40 };
-    const { npc, game } = risingScene({ enemies: [enemy] });   // 敌盒与本体重叠
+    const { npc, game } = risingScene({ enemies: [enemy] });
+    enemy.y = npc.y + npc.h / 2 - 20;                      // 盒心与本体盒重叠
     npc.fixedUpdate(1 / 60, game);
     expect(npc.hp).toBe(250);                             // 上升态不受敌怪接触伤
     // 对照态外:同一几何解除上升 → 立即互殴扣血

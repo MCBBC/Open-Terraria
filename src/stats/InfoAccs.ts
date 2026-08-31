@@ -131,8 +131,54 @@ export interface InfoAccRow {
 
 const inter = (n: number) => Lang.inter(n);
 
-/** Time 行(Main.cs:46182-46236):t/86400*24-19.5 换算+表级精度 */
-export function formatWatchText(mainTime: number, dayTime: boolean, watchLevel: number): string {
+/** Time 行(Main.cs:46182-46236):t/86400*24-19.5 换算+表级精度。
+ *  显示风格按语言习惯(2026-08-31 用户拍板「按多语言习惯,中文按中文习惯」——
+ *  显式偏离原版统一 12h 制):zh 系 = 中文时段词制(凌晨 0:31);
+ *  de/fr/es/it/ru/pl/pt = 24 小时制主流(00:31);
+ *  ja = 12h 官方词(午前/午後)+ 0 点制数字(CLRD ja 模式 aK:mm,K=0-11——
+ *  日语主流「午前 0:31」,电视节目表/系统均 0 制,勿翻 12);
+ *  en/ko 及未知语言 = 原版 12h(0 翻 12)+ 官方 AM/PM 等价词(AM / 오전,CLDR
+ *  en a:h / ko a h 均 12 点制)。金标测试锁 vanilla 分支 */
+export type WatchTimeStyle = 'vanilla' | 'h24' | 'period' | 'h12_0';
+
+const TIME_STYLE_BY_PREFIX: ReadonlyArray<readonly [string, WatchTimeStyle]> = [
+  ['zh', 'period'],
+  ['de', 'h24'], ['fr', 'h24'], ['es', 'h24'], ['it', 'h24'],
+  ['ru', 'h24'], ['pl', 'h24'], ['pt', 'h24'],
+  ['ja', 'h12_0'],
+];
+
+/** 文化名(如 zh-Hans)→ 时间显示风格;未知/null 回原版 12h */
+export function watchStyleOfCulture(culture: string | null | undefined): WatchTimeStyle {
+  if (!culture) return 'vanilla';
+  const c = culture.toLowerCase();
+  for (const [p, s] of TIME_STYLE_BY_PREFIX) if (c.startsWith(p)) return s;
+  return 'vanilla';
+}
+
+/** 中文时段分段(主流系统习惯):凌晨 0-5 / 早上 5-8 / 上午 8-12 / 中午 12-13 /
+ *  下午 13-18 / 傍晚 18-19 / 晚上 19-24(词 = Mods.SandboxWorld.Time 的 Period 族键,
+ *  l10n-custom 12 语言全量补键)。★键必须 switch 完整字面直书——l10n-audit 只
+ *  抓 Lang.text('完整键') 字面量,字符串拼接会被截成假键报 MISSING
+ *  (★本注释曾写裸前缀被 l10n-audit 误提 MISSING 键,已改写规避) */
+function periodWord(seg: 0 | 1 | 2 | 3 | 4 | 5 | 6): string {
+  switch (seg) {
+    case 0: return Lang.text('Mods.SandboxWorld.Time.PeriodDawn');
+    case 1: return Lang.text('Mods.SandboxWorld.Time.PeriodEarlyMorning');
+    case 2: return Lang.text('Mods.SandboxWorld.Time.PeriodForenoon');
+    case 3: return Lang.text('Mods.SandboxWorld.Time.PeriodNoon');
+    case 4: return Lang.text('Mods.SandboxWorld.Time.PeriodAfternoon');
+    case 5: return Lang.text('Mods.SandboxWorld.Time.PeriodDusk');
+    default: return Lang.text('Mods.SandboxWorld.Time.PeriodNight');
+  }
+}
+
+const PERIOD_BOUNDS: ReadonlyArray<readonly [number, 0 | 1 | 2 | 3 | 4 | 5 | 6]> = [
+  [5, 0], [8, 1], [12, 2], [13, 3], [18, 4], [19, 5], [24, 6],
+];
+
+export function formatWatchText(mainTime: number, dayTime: boolean, watchLevel: number,
+  style: WatchTimeStyle = watchStyleOfCulture(Lang.activeCultureName)): string {
   let t = mainTime;
   if (!dayTime) t += 54000;                    // :46189-46192(夜)
   t = t / 86400 * 24 - 19.5;                   // :46194-46197
@@ -140,8 +186,19 @@ export function formatWatchText(mainTime: number, dayTime: boolean, watchLevel: 
   const pm = t >= 12;
   let h = Math.floor(t);
   let m = Math.floor((t - h) * 60);
-  if (h > 12) h -= 12;
-  if (h === 0) h = 12;                         // :46208-46215
+  const mm = m < 10 ? '0' + m : String(m);     // :46216-46219
+  if (style === 'h24') {
+    const ms = watchLevel === 1 ? '00' : watchLevel === 2 ? (m >= 30 ? '30' : '00') : mm;
+    return `${String(h).padStart(2, '0')}:${ms}`;
+  }
+  if (style === 'period') {
+    const ms = watchLevel === 1 ? '00' : watchLevel === 2 ? (m >= 30 ? '30' : '00') : mm;
+    const seg = (PERIOD_BOUNDS.find(([lim]) => h < lim) ?? PERIOD_BOUNDS[PERIOD_BOUNDS.length - 1])[1];
+    return `${periodWord(seg)} ${h}:${ms}`;
+  }
+  // 原版 12h 分支(Main.cs:47618-47640 逐行,勿动——金标 info-accs.test.ts 锁定)
+  if (h > 12) h -= 12;                         // :46208-46215
+  if (h === 0) h = 12;
   let ms = String(m);
   if (m < 10) ms = '0' + ms;                   // :46216-46219
   if (watchLevel === 1) ms = '00';             // :46222-46223(铜锡:恒整点)

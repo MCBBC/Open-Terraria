@@ -3146,9 +3146,13 @@ class DualProvider {
       }
       for (let k = 0; k < 20; k++) {
         let value = this.ctx.rng.next() * 2.0 - 1.0;
-        // ★IIIII100c sqrt 单刀实验（k0 li=8 单 attempt nf 末位 ULP …e1ecce vs …e1eccf）：
-        //   多数 CRT 对 pow(x,0.5) 走 sqrt 短路；试换 Math.sqrt 单点归位。
-        value = Math.sign(value) * Math.sqrt(Math.abs(value));
+        {
+          const h = (globalThis as { __swI113?: unknown }).__swI113;
+          if (h !== undefined) {
+            drlMark(`DR|RV|i${_drlInstNext}|li=${i}|k=${k}|in=${bits64x(value)}|out=${bits64x(Math.sign(value) * Math.pow(Math.abs(value), 0.5))}`);
+          }
+        }
+        value = Math.sign(value) * Math.pow(Math.abs(value), 0.5);
         const room = this.tryMakeRegularRoomOnLine(item, this.ctx.rng.next(), value, { li: i, phase: 'r20', ri: k });
         if (room) out.push(room);
       }

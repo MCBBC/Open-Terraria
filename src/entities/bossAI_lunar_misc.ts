@@ -1033,9 +1033,14 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
     let guard = 0;
     while (e.ai0 === 0 && guard++ < 100) {                // :38328（护栏防掷序病态长转）
       const pick = rnd(3);
-      if (pick === 0 && losClear(game, e.cx, e.cy, p.cx, p.cy)) e.ai0 = 2;
-      else if (pick === 1) e.ai0 = 3;
-      else if (countNpc(game, 478) + countNpc(game, 479) < eggCap) e.ai0 = 4;
+      if (pick === 0) {
+        // num1305==0 支：CanHitLine 命中才落态2；未命中落空（switch case0 无
+        // 赋值）——不得串入卵量支，否则"无视线"被误转扫地产卵（本轮实测钉出）
+        if (losClear(game, e.cx, e.cy, p.cx, p.cy)) e.ai0 = 2;
+        continue;                                         // :38334
+      }
+      if (pick === 1) e.ai0 = 3;                          // case1 直落侧掠
+      else if (countNpc(game, 478) + countNpc(game, 479) < eggCap) e.ai0 = 4;  // case2 卵量门
     }
     return;
   }

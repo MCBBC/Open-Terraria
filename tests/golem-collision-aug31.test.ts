@@ -73,7 +73,6 @@ describe('石巨人本体 245 落地( TileCollision 全盒语义)', () => {
     const body = Enemy.fromVanilla(245, 10 * TILE, (FLOOR) * TILE - 140)!;
     body.x = 10 * TILE;                       // 左上对齐
     body.y = FLOOR * TILE - body.h;           // 底边与支撑行顶齐平(静止站立初值)
-    body.bInit = true;                        // 部件已建(本测只驱动本体)
     for (let i = 0; i < 60; i++) body.fixedUpdate(1 / 60, h);
     expect(body.onGround).toBe(true);         // ★旧采样在此必为 onGround=false 周期坠落
     expect(body.vy).toBe(0);
@@ -89,7 +88,6 @@ describe('石巨人本体 245 落地( TileCollision 全盒语义)', () => {
     const body = Enemy.fromVanilla(245, 10 * TILE, (FLOOR - 4) * TILE - 140)!;
     body.x = 10 * TILE;
     body.y = (FLOOR - 4) * TILE - body.h;
-    body.bInit = true;
     for (let i = 0; i < 40; i++) body.fixedUpdate(1 / 60, h);
     expect(body.onGround).toBe(false);
     expect(body.y + body.h).toBeGreaterThan(FLOOR * TILE + 32);   // 已穿过原支撑层
@@ -106,7 +104,6 @@ describe('石巨人本体 245 落地( TileCollision 全盒语义)', () => {
     body.x = 7.6 * TILE;                          // 右缘伸入坡列(col 11 内)
     body.y = (FLOOR - 5) * TILE - body.h;
     body.vy = 4;                                  // 下落中接近座位
-    body.bInit = true;
     for (let i = 0; i < 50; i++) {
       body.fixedUpdate(1 / 60, h);
     }
@@ -116,5 +113,27 @@ describe('石巨人本体 245 落地( TileCollision 全盒语义)', () => {
     expect(body.y + body.h).toBeGreaterThan((FLOOR - 2) * TILE);
     expect(body.vy).toBe(0);
     expect(body.onGround || body.vy === 0).toBe(true);
+  });
+
+  it('整周期时序:平地蓄力→起跳→落地回环(迁移后 ai0/vy/onGround 链不漂移)', () => {
+    const w = makeWorld();
+    const { hooks: h } = makeHooks(w);
+    const body = Enemy.fromVanilla(245, 10 * TILE, FLOOR * TILE - 140)!;
+    body.x = 10 * TILE;
+    body.y = FLOOR * TILE - body.h;             // 底边与支撑行顶齐平
+    let landings = 0;
+    let airborne = false;
+    for (let i = 0; i < 600; i++) {
+      const wasJumpPhase = body.ai0 === 1;
+      body.fixedUpdate(1 / 60, h);
+      if (wasJumpPhase && body.ai0 === 0 && body.vy === 0) {
+        landings++;
+        // 落地当拍底边必须回到支承面(位移被 TileCollision 吸附)
+        expect(Math.abs(body.y + body.h - FLOOR * TILE)).toBeLessThan(2);
+      }
+      if (body.ai0 === 1) airborne = true;
+    }
+    expect(airborne).toBe(true);                // 经历跳跃态
+    expect(landings).toBeGreaterThanOrEqual(1); // 且至少完整落地一次
   });
 });

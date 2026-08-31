@@ -71,7 +71,7 @@ describe('Collision.WetCollision（Collision.cs:1575）中心小盒 + 液面收�
     st.setLiquid(20, 35, 0, 0);
     expect(wetCollision(st, 20 * TILE, 35 * TILE - 16, 18, 40).wet).toBe(false);
   });
-  it('★奇数半高 int 截断（Collision.cs:1580/:1586 num2=11→num2/2=5）：鸭形贴面钉浮恒湿', () => {
+  it('★奇数半高 int 截断（Collision.cs:1581 num2=11→:1590 num2/2=5）：鸭形贴面钉浮恒湿', () => {
     // 鸭 363/365/603/609 h=22：单行部分深度水 l=100（自然岸线膜水典型值）
     //   钉水面目标 = (j+1)*16 − trunc(100/16) − 6 = j*16+10−6 = j*16+4
     // 原版盒 [cy−5, cy+6] → 盒底 j*16+10 > 液面带顶 j*16+(256−100)/32*2≈9.75 → wet
@@ -86,6 +86,22 @@ describe('Collision.WetCollision（Collision.cs:1575）中心小盒 + 液面收�
     // 对照：cy 在膜水上一行整（完全离带）仍干——int 截断不放大判定圈
     expect(wetCollision(st, 20 * TILE, 35 * TILE - 11 + 0, 28, 22).wet).toBe(false);
     expect(wetCollision(st, 20 * TILE, 33 * TILE - 11, 28, 22).wet).toBe(false);
+  });
+  it('★中心项 int 截断（Collision.cs:1579 Width/2·Height/2 亦整除）：奇窄体分数位左尾触水', () => {
+    // 窄体 W=9（num=min(10,9)=9）：原版盒 x = px + ⌊9/2⌋ − ⌊9/2⌋ = px（顶齐实体左缘）
+    // 浮点错版 = px + 4.5 − 4 = px+0.5 → 右移半像素。实体 px=20*16−0.4 时：
+    //   原版盒 [px, px+9] 左尾 0.4px 掉进相邻水柱 col19[304,320) → wet
+    //   错版盒 [px+0.5, …] 恰好错过 → 假阴性（同类病灶第二面,锁中心项整除）
+    const s = new World(W, H, 11, 'npc-wet-oddw-test');
+    const st = s.store;
+    st.setTile(19, 40, 1);                 // 水柱托底
+    st.setLiquid(19, 36, 255, 1);          // col19 整行满水(唯一水源)
+    st.setTile(21, 40, 1);
+    const px = 20 * TILE - 0.4;            // 实体跨在 col19/col20 边界左侧 -0.4px
+    expect(wetCollision(st, px, 35 * TILE, 9, 40).wet).toBe(true);
+    // 完全离开水体 ±1 格照旧恒干（不放大判定圈）
+    expect(wetCollision(st, 22 * TILE + 0.4, 35 * TILE, 9, 40).wet).toBe(false);
+    expect(wetCollision(st, 17 * TILE + 0.6, 35 * TILE, 9, 40).wet).toBe(false);
   });
   it('蜂蜜/微光格带类型标记（选减速档用）', () => {
     const h = liquidWorld(3);

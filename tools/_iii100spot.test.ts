@@ -38,6 +38,8 @@ const CHAINS: Record<string, ChainCfg> = {
   toadstool: { name: 'toadstool', seed: '771002',     evil: 0,  flags: { surfaceIsMushrooms: true }, g2: C('golden-toadstool') },
   // ★IIIII96b：fishmox 桶由 /tmp/iii80-out/x86-fishmox 迁居 ~/GoldenChains/golden-fishmox
   fishmox:   { name: 'fishmox',   seed: '771003',     evil: 0,  flags: { noInfection: true }, g2: C('golden-fishmox') },
+  // ★IIIII99e：FTW 链五点接入（G2=IIIII90b 迁址权威 ~/GoldenChains/golden-ftw）
+  ftw:       { name: 'ftw',       seed: '1671560105', evil: 0,  flags: { getGoodWorld: true }, g2: C('golden-ftw') },
 };
 
 const KEY = process.env.SW_SPOT_CHAIN ?? '';

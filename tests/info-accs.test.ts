@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { Lang } from '../src/i18n/Lang';
 import {
   emptyInfoAccGates, refreshInfoAccsFromItemType, infoAccGatesOf,
-  formatWatchText, formatCompassText, formatDepthText, mphOf,
+  formatWatchText, formatCompassText, formatDepthText, mphOf, watchStyleOfCulture,
   type InfoAccGates,
 } from '../src/stats/InfoAccs';
 
@@ -159,5 +159,51 @@ describe('换算器(Main.cs 字面)', () => {
     // trident(手持三叉戟 277)只免水分支,蜜仍减速(:46494)
     expect(mphOf(1, w({ water: true, trident: true }))).toBeCloseTo(5.1136, 3);
     expect(mphOf(1, w({ honey: true, trident: true }))).toBeCloseTo(5.1136 / 4, 3);
+  });
+});
+
+// ---- 时间行按语言显示风格(2026-08-31 用户拍板「按多语言习惯,中文按中文习惯」)----
+// 原版统一 12h(0 点显示 12,凌晨→「12:31 上午」中文版同款);用户判偏离:
+// zh 系=时段词制 / de fr es it ru pl pt=24h 主流 / en ja ko=原版 12h(官方文案已合习惯)
+describe('formatWatchText 按语言风格(watchStyleOfCulture 路由 + period/h24)', () => {
+  it('路由表:zh→period、欧语 24h 族→h24、en/ja/ko/未知→vanilla', () => {
+    expect(watchStyleOfCulture('zh-Hans')).toBe('period');
+    expect(watchStyleOfCulture('zh-Hant')).toBe('period');
+    expect(watchStyleOfCulture('de-DE')).toBe('h24');
+    expect(watchStyleOfCulture('pt-BR')).toBe('h24');
+    expect(watchStyleOfCulture('en-US')).toBe('vanilla');
+    expect(watchStyleOfCulture('ja-JP')).toBe('vanilla');
+    expect(watchStyleOfCulture('ko-KR')).toBe('vanilla');
+    expect(watchStyleOfCulture(null)).toBe('vanilla');
+    expect(watchStyleOfCulture('xx-XX')).toBe('vanilla');
+  });
+
+  it('h24:00:31 不再翻 12 点;铜表恒整点/银表半点语义保留', () => {
+    // 采样取 :30 秒偏移(避开整分钟 double 尾差翻转 floor,同 clock-daylength 纪律)
+    // 00:31:30 → mainTime = 16200+31.5*60 = 18090(夜)
+    expect(formatWatchText(18090, false, 3, 'h24')).toBe('00:31');
+    // 13:05:30 → mainTime = (13+5.5/60-4.5)*3600 = 30930(昼)
+    expect(formatWatchText(30930, true, 3, 'h24')).toBe('13:05');
+    expect(formatWatchText(18090, false, 1, 'h24')).toBe('00:00');
+    expect(formatWatchText(18090, false, 2, 'h24')).toBe('00:30');
+  });
+
+  it('period:中文时段词七段边界(词走 l10n 键,打桩环境断言键名)', () => {
+    // 输入统一 +30s 偏移防整分钟尾差;断言字符串为 floor 后的显示
+    const at = (h: number, m: number, day: boolean) =>
+      formatWatchText(day ? (h + (m + 0.5) / 60 - 4.5) * 3600 : (h + (m + 0.5) / 60 + (h < 12 ? 24 : 0) - 19.5) * 3600,
+        day, 3, 'period');
+    expect(at(0, 31, false)).toBe('Mods.SandboxWorld.Time.PeriodDawn 0:31');      // 凌晨 0:31
+    expect(at(4, 59, false)).toBe('Mods.SandboxWorld.Time.PeriodDawn 4:59');
+    expect(at(5, 0, true)).toBe('Mods.SandboxWorld.Time.PeriodEarlyMorning 5:00'); // 早上 5:00
+    expect(at(8, 15, true)).toBe('Mods.SandboxWorld.Time.PeriodForenoon 8:15');    // 上午 8:15
+    expect(at(12, 0, true)).toBe('Mods.SandboxWorld.Time.PeriodNoon 12:00');       // 中午 12:00
+    expect(at(13, 5, true)).toBe('Mods.SandboxWorld.Time.PeriodAfternoon 13:05');  // 下午 13:05
+    expect(at(18, 30, true)).toBe('Mods.SandboxWorld.Time.PeriodDusk 18:30');      // 傍晚 18:30
+    expect(at(23, 59, false)).toBe('Mods.SandboxWorld.Time.PeriodNight 23:59');    // 晚上 23:59
+  });
+
+  it('缺省风格 = Lang.activeCultureName 推导(未初始化→vanilla,金标稳定)', () => {
+    expect(formatWatchText(18090, false, 3)).toBe('12:31 GameUI.TimeAtMorning');
   });
 });

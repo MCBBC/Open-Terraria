@@ -937,6 +937,13 @@ function placeBuriedChestInner(
     // wooden flag（cs:36060-36064：tile21 && (chestStyle==0 || (chestStyle==-1 && num9==0))）
     if (tile === CHEST && (argStyle === 0 || (argStyle === undefined && num9 === 0))) flags.wooden = true;
   }
+  // ★IIIII99e：AddBuriedChest 内七处 `getGoodWorldGen && genRand.Next(num)==0 → num10=52`
+  //   FTW 专用骰（cs:36477 沙漠 / 36517 冰箱 / 36543 地牢flag4 / 36554 地狱 /
+  //   36562 style17 水 / 36578 天空降档else支 / 36587 style32 蘑菇；num=15,十周年×3）。
+  //   箱内容不进八通道 dump ⇒ 普通 seed 恒不达、FTW 才显形（ftw #59 Δ 掷定罪家族,
+  //   与 #42 同族根因）。
+  const ftwChestDie = (): number => (gs.seedFlags.getGoodWorld ? rng.int(0, (gs.seedFlags.tenthAnniversary ? 45 : 15) - 1) : -1);
+  const ftwTake52 = (): void => { mainId = 52; mainKey = VANILLA_ITEM_KEY_BY_ID[52] ?? null; };
   // ★BBBBBBB（2026-08-24）NTB #59 定罪修复：门序勘误——1457 原版门序（AddBuriedChest
   //   cs:36416 沙漠 → cs:36433 NTB 蜂箱带(flag21) → cs:36445 冰箱 → cs:36496 地狱 →
   //   cs:36515 天空降档 → cs:36544 地牢 → cs:36582 noTraps）——JS 曾按 1456 反编译
@@ -983,6 +990,8 @@ function placeBuriedChestInner(
         ? [4061, 4062, 4276][rng.int(0, 2)]
         : [4056, 4055, 4262, 4263][rng.int(0, 3)];
     }
+    // ★IIIII99e（cs:36477-36479）：沙漠池后 FTW 恒掷 Next(num)，命中主件改 52
+    if (ftwChestDie() === 0) ftwTake52();
   }
 
   // ★AAAAAA：cs:36112 冰系地基四元 {147,161,162,197}——197 冻胶块曾漏。
@@ -1021,6 +1030,7 @@ function placeBuriedChestInner(
         mainId = [670, 724, 950, 1319, 987, 1579, 6153][rng.nextInt(7)]; // cs:36456 Next(7) 七选
         if (gs.seedFlags.remix && mainId === 1319) mainId = 725;   // cs:36457-36459
         if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机 cs:36460
+        if (ftwChestDie() === 0) ftwTake52();   // ★IIIII99e cs:36517-36519
       } else {
         mainId = [670, 724, 950, gs.seedFlags.remix ? 725 : 1319, 987, 1579][rng.nextInt(6)]; // cs:36117-36124 Next(6) 六选
         if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机 cs:36126-36129
@@ -1036,6 +1046,7 @@ function placeBuriedChestInner(
     style = 4;
     flags.hell = true;
     if (!mainId) mainId = nextHellItem(gs);
+    if (ftwChestDie() === 0) ftwTake52();   // ★IIIII99e cs:36554-36556（地狱池后 FTW 恒掷）
   }
   // ---- 天空箱降档门（cs:36180-36189，原版位于 hell 门后）：style12 的落定格
   //   （i-1, gy-1）邻墙非 244 → num9=0 + num10=0 + wooden flag（地表蓄水池支的
@@ -1049,8 +1060,13 @@ function placeBuriedChestInner(
       flags.wooden = true; flags.sky = false;
     } else {
       flags.sky = true;
+      if (ftwChestDie() === 0) ftwTake52();   // ★IIIII99e cs:36578-36580（天空降档 else 支,主件仍可被 52 覆写）
     }
   }
+  // ★IIIII99e：水(chestTileType21&&num9==17, cs:36562-36564) 与蘑菇(num9==32,
+  //   cs:36585-36587) 两门的 FTW 恒掷——C# 位于天空降档块之后、IsDungeon 判定之前。
+  if (tile === CHEST && style === 17 && ftwChestDie() === 0) ftwTake52();
+  if (tile === CHEST && style === 32 && ftwChestDie() === 0) ftwTake52();
 
 
   // ---- 位置地牢门（cs:36211-36213）：tile21 && style≠0 && IsDungeon(i,gy)

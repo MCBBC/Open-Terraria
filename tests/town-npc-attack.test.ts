@@ -780,3 +780,164 @@ describe('★F8 战斗判定掷骰全走实例注入面(Math.random 仅限演出
     }
   });
 });
+
+// =====================================================================
+// ★C2 清零收敛批：pickSideTarget 与危险扫描池统一化定案落地回归
+// （原版 :56016-56105 入态支 + :55105-55112/:54868 发射位全部直读本拍
+//   num13..num17 快照；独立重扫已删除。行号锚=Terarria1457/NPC.cs。）
+// =====================================================================
+describe('★C2 池统一（threatPool 单点产出 → 入态消费一致面）', () => {
+  const eY = 96 * 16;
+
+  /** 真实危险扫描 + 注 rng 探针的入态直调 */
+  function entryViaScan(npc: AnyNpc, world: World, game: never,
+    rolls: { n: number }): boolean {
+    npc.rng = () => { rolls.n++; return 0.0000001; };
+    callDanger(npc, world, game);
+    return callEntry(npc, world, game);
+  }
+  const poolOf = (npc: AnyNpc) =>
+    (npc as unknown as { threatPool: { left: unknown; right: unknown } }).threatPool;
+
+  it('同拍死亡一致性：扫描后、消费前死亡仍按快照入态（原版 Main.npc[numXX] 槽读法），下拍池刷新失效', () => {
+    // 红 β「同拍死亡影响重扫结果」议题的对偶锁定：
+    //  - 统一形：扫描产出候选 → 死亡发生在同一拍消费前 → 入态照常（池快照
+    //    与原版槽位读尸等价,B1② 面形状不变）；
+    //  - 旧独立重扫形：死亡使重扫落空 → 同一几何整次拒绝——行为分叉即此回归锚。
+    const { world, game, npc } = entryHarness('guide',
+      [{ x: 104 * 16, y: eY, w: 18, h: 40 }]);
+    Object.assign(npc, { onGround: true });
+    const rolls = { n: 0 };
+    expect(entryViaScanPreKill(npc, world, game)).toBe(true);   // 见下方组合器
+    expect(npc.attackState).toBe(12);
+    expect(npc.facing).toBe(1);
+    void rolls; void world; void game;
+  });
+
+  /** 组合器：danger 扫描 → 立即杀敌（同拍既成）→ 入态消费 */
+  function entryViaScanPreKill(npc: AnyNpc, world: World, game: never): boolean {
+    npc.rng = () => 0.0000001;
+    callDanger(npc, world, game);
+    const es = (game as unknown as { enemies: () => unknown[] }).enemies();
+    for (const e of es) (e as { dead: boolean }).dead = true;   // 同拍死亡
+    expect((npc as unknown as { threatRaw: boolean }).threatRaw).toBe(true);
+    expect(poolOf(npc).right).not.toBeNull();                   // 快照仍在
+    return callEntry(npc, world, game);
+  }
+
+  it('对照·死亡发生在扫描之前：池同步收口,零候选拒发(掷骰照耗 1 次)', () => {
+    const { world, game, npc } = entryHarness('guide',
+      [{ x: 104 * 16, y: eY, w: 18, h: 40 }]);
+    Object.assign(npc, { onGround: true });
+    ((game as unknown as { enemies: () => Array<{ dead?: boolean }> })
+      .enemies())[0].dead = true;                               // 死亡先于扫描
+    callDanger(npc, world, game);
+    expect((npc as unknown as { threatRaw: boolean }).threatRaw).toBe(false);
+    expect(poolOf(npc).right).toBeNull();
+    let rolls = 0;
+    npc.rng = () => { rolls++; return 0.0000001; };
+    expect(callEntry(npc, world, game)).toBe(false);
+    expect(rolls).toBe(0);                                      // dangerNear=false 先断(:55769)
+  });
+
+  it('索敌门外近敌只占 num13/14 位不产候选 → 入态无靶（删除独立重扫的判别面）', () => {
+    // 近敌 dontTakeDamage 过扫描门但 CanBeChasedBy=false(flag19 :54042)——
+    // 只刷 num13/num14 不写 num16/17;远敌 dx 更大永远不触发刷新窗。旧
+    // 重扫式 pickSideTarget 会自立最近表并选中近敌;统一后必为整 tick 拒发。
+    const mkFoe = (x: number, extra: Record<string, unknown>) => ({
+      x, y: eY, w: 18, h: 40, dead: false, damage: 30,
+      def: { friendly: false }, ...extra,
+    });
+    const { world, game, npc } = entryHarness('guide',
+      [{ x: 100 * 16 + 50, y: eY, w: 18, h: 40 }, { x: 100 * 16 + 120, y: eY, w: 18, h: 40 }]);
+    const es = (game as unknown as { enemies: () => Array<Record<string, unknown>> }).enemies();
+    Object.assign(es[0], { dontTakeDamage: true });             // 近敌:chase 门假
+    Object.assign(npc, { onGround: true });
+    npc.rng = () => 0.0000001;
+    callDanger(npc, world, game);
+    expect((npc as unknown as { threatRaw: boolean }).threatRaw).toBe(true);
+    expect((npc as unknown as { dangerNear: boolean }).dangerNear).toBe(true);
+    expect(poolOf(npc).right).toBeNull();                       // 两敌皆未入候选
+    let rolls = 0;
+    npc.rng = () => { rolls++; return 0.0000001; };
+    expect(callEntry(npc, world, game)).toBe(false);
+    expect(rolls).toBe(1);                                      // 触达掷门(:56012 形状)
+    expect(npc.attackState).toBe(0);
+    // 对照:去掉挡位的近敌(变成普通) → 远敌被拒出刷新窗,近敌正常入候选并命中
+    delete (es[0] as { dontTakeDamage?: boolean }).dontTakeDamage;
+    callDanger(npc, world, game);
+    expect(poolOf(npc).right).not.toBeNull();
+    const state0 = npc.attackState;
+    void state0;
+    expect(callEntry(npc, world, game)).toBe(true);
+    expect(npc.attackState).toBe(12);
+  });
+
+  it('发射瞄准面 num58 规则(:55105-12/:54868 族)：面向≠危险侧 → 无目标;同向取该侧候选', () => {
+    const { world, npc } = entryHarness('guide', []);
+    const p = npc as unknown as Record<string, unknown>;
+    p.threatPool = { left: null, right: { x: 500, y: 0, w: 10, h: 10, cx: 505, cy: 5 } };
+    const callShotPick = () =>
+      (TownNPC.prototype as unknown as Record<string,
+        (w: unknown, o?: { shotFaceMatch?: boolean }) => unknown>).pickSideTarget
+        .call(npc, { store: world.store }, { shotFaceMatch: true });
+    Object.assign(p, { dangerSide: 1, facing: 1 });
+    expect((callShotPick() as { cx: number }).cx).toBe(505);    // 同向右侧=num17
+    Object.assign(p, { facing: -1 });
+    expect(callShotPick()).toBeNull();                          // 面向左:背向候选不作数
+    Object.assign(p, { dangerSide: -1, threatPool: { left: { x: -520, y: 0, w: 10, h: 10, cx: -515, cy: 5 }, right: null } });
+    expect((callShotPick() as { cx: number }).cx).toBe(-515);   // 左侧同向=num16
+    void npc;
+  });
+});
+
+// =====================================================================
+// ★C3③ 清零收敛批（医师弹尾巴双件核对之一）：C3①定案「bouncesLeft 新判序下
+// timeLeft 缺省档 3600 与 AI 内患者 Kill 的优先序已对」——本组留证锁序：
+// vanilla Projectile.Update 体序 = AI(:16880,内含患者失活/抵达 Kill+:34704 治疗)
+// → HandleMovement(tile 反弹 :18233-54) → 尾部 timeLeft--(:17307)/penetrate==0
+// (:17312)。故【同一拍】timeLeft 临期与患者抵达并存时,AI 步的 Kill+治疗先行
+// 生效——旧式「尾门在 AI 前」的实现会让临期弹静默蒸发、零治疗。
+// =====================================================================
+describe('★C3③ 医师弹消亡优先序（患者 Kill 先于 timeLeft 尾门,留证）', () => {
+  /** 平地 game 桩（F4 段 buildGame 的本地复制——该 helper 描述内局部作用域） */
+  function mkGame(world: World) {
+    return {
+      world,
+      player: { x: -9999, y: -9999, w: 0, h: 0, dead: true },
+      enemies: () => [], critters: () => [], npcs: () => [],
+      spawnTownShot: () => {}, spawnParticles: () => {}, spawnBurst: () => {},
+      playSfx: () => {}, playSfxFiles: () => {}, addDamageNumber: () => {},
+    } as never;
+  }
+  it('timeLeft 临期与患者抵达同拍：AI 步 Kill+治疗生效,弹不以尾门先行作废', () => {
+    const world = new World(200, 200, 100, 'syr-order');
+    const patient = { x: 118, y: 150, w: 30, h: 40, hp: 100, maxHp: 130, dead: false };
+    const heals: Array<{ amt: number }> = [];
+    // 出生位即与患者盒相交(暂停窗桌案态:原版玩家侧桌旁低距发射可入此几何)
+    const shot = new NurseSyringeShot(120, 165, 8, 0, patient as never,
+      (amt: number) => { heals.push({ amt }); });
+    const game = mkGame(world);
+    (shot as unknown as { life: number }).life = 1;       // 缺省档收尾前一拍
+    expect((shot as unknown as { bouncesLeft: number }).bouncesLeft).toBe(3);
+    shot.fixedUpdate(1 / 60, game);
+    expect(shot.dead).toBe(true);                          // 患者支 Kill(:34703)
+    expect(heals.length).toBe(1);                          // ★优先序证据:治疗已入账
+    expect(heals[0].amt).toBe(20);                         // min(lifeMax−life,20)
+    expect((shot as unknown as { life: number }).life).toBe(1);   // AI 支先行短路,尾门未及递减
+    expect((shot as unknown as { bouncesLeft: number }).bouncesLeft).toBe(3);
+  });
+
+  it('反向形态:无患者接触时尾门照常行权(life-- 至尽即灭,延迟表无误置)', () => {
+    const world = new World(200, 200, 100, 'syr-order2');
+    const patient = { x: 5000, y: 5000, w: 20, h: 40, hp: 90, maxHp: 110, dead: false };
+    const heals: Array<{ amt: number }> = [];
+    const shot = new NurseSyringeShot(300, 300, 4, 0, patient as never,
+      (amt: number) => { heals.push({ amt }); });
+    const game = mkGame(world);
+    (shot as unknown as { life: number }).life = 1;
+    shot.fixedUpdate(1 / 60, game);
+    expect(shot.dead).toBe(true);                          // :17307-11 timeLeft 段
+    expect(heals.length).toBe(0);
+  });
+});

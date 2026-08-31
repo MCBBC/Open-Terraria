@@ -192,27 +192,31 @@ export interface SmartSelectHost {
  * 以命中盒中心的 (min(10,width) × height/2) 盒与液体面（液量换算的表面下移）求交。
  */
 export function wetCollision(st: TileStore, x: number, y: number, w: number, h: number): boolean {
-  // :1579-1590 盒中心 + num=10 / num2=Height/2（各自截到宽/高）
+  // :1578-1592 盒中心 + num=10 / num2=Height/2（各自截到宽/高）。
+  // ★整除陷阱×5：Width/2·Height/2(中心两项)+Height/2(num2 推导)+num/2·num2/2(偏移两项)
+  //   全部为 C# int/int 截断——浮点除会整体偏 ≤0.5px。2026-08-31 鸭面跳切定罪后，
+  //   本副本与 npcLiquid.wetCollision 同步修（曾漏整除+effH 漏 (int) 截断+环扫界闭区间）
   let num = 10;
   let num2 = Math.floor(h / 2);
   if (num > w) num = w;
   if (num2 > h) num2 = h;
-  const vx = x + w / 2 - num / 2;
-  const vy = y + h / 2 - num2 / 2;
-  // :1591-1594 扫描区外扩 1-2 格
+  const vx = x + Math.floor(w / 2) - Math.floor(num / 2);
+  const vy = y + Math.floor(h / 2) - Math.floor(num2 / 2);
+  // :1591-1594 扫描区外扩（C# for(i=val;i<val2;i++) 半开区间——value2/value4 已 +2）
   const x0 = Math.max(0, Math.floor(x / 16) - 1);
   const x1 = Math.min(st.w - 1, Math.floor((x + w) / 16) + 2);
   const y0 = Math.max(0, Math.floor(y / 16) - 1);
-  const y1 = Math.min(st.h - 1, Math.floor((y + h) / 16) + 2);
-  for (let i = x0; i <= x1; i++) {
-    for (let j = y0; j <= y1; j++) {
+  const y1 = Math.min(st.h - 40, Math.floor((y + h) / 16) + 2);
+  for (let i = x0; i < x1; i++) {
+    for (let j = y0; j < y1; j++) {
       const idx = st.idx(i, j);
+      if (!st.inBounds(i, j)) continue;
       const liquid = st.liquid[idx];
       if (liquid <= 0) continue;                       // :1607-1610
-      // :1612-1617 液面下移：num5=(256-liquid)/32，表面 y += num5*2，有效高 16-=num5*2
+      // :1612-1617 液面下移：num5=(256-liquid)/32f，表面 y += num5*2；有效高 16 −=(int)(num5*2f)
       const drop = (256 - liquid) / 32;
       const surfY = j * 16 + drop * 2;
-      const surfH = 16 - drop * 2;
+      const surfH = 16 - Math.trunc(drop * 2);         // ★C# int 强转截断（曾浮点直减）
       // :1618 与中心盒 AABB 求交
       if (vx + num > i * 16 && vx < i * 16 + 16 && vy + num2 > surfY && vy < surfY + surfH) {
         return true;

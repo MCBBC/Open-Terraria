@@ -118,8 +118,8 @@ describe('⑤JumpMovement 滑行支与组合门（:20805-20845）', () => {
     // 若 :20805 `if(sliding)autoJump=false` 未建模，贴墙期每帧重触发蹬墙跳；
     // 抑制档在场 ⇒ 按住期间不出现新的负 vy 突刺。
     inv.armor[4] = { id: iid(2423), stack: 1 };
-    expect(p.equipStats.autoJump).toBe(true);
     const p = new Player(1152 - 20, 56 * TILE, inv);
+    expect(p.equipStats.autoJump).toBe(true);
     p.inputX = 1;
     p.inputJump = true;                                   // 进入滑行前已按住
     let sawCling = false;
@@ -240,26 +240,23 @@ describe('⑩a FindPulley !controlJump 门（:26320——Space 只手不进绳�
   function ropeWorld(): { w: World; p: Player; game: GameHooks } {
     const w = flatWorld();
     const game = makeGame(w);
-    const p = new Player(61 * TILE, 68 * TILE, new Inventory());
-    for (let i = 0; i < 40; i++) step(p, game);           // 落地沉降后再定位头格
-    const headCol = Math.floor((p.x + p.w / 2) / 16);
-    const headRow = Math.floor((p.y - 8) / 16);
-    const ropeId = TILE_BY_KEY['v_213_rope'];             // 内部 id≠原版 sheet（213）
-    w.store.setTileSilent(headCol, headRow, ropeId, 0, 0);   // Main.tileRope
-    w.store.setTileSilent(headCol, headRow + 1, ropeId, 0, 0);
-    expect(p.isRopeAt(w.store, headCol, headRow)).toBe(true);
+    const p = new Player(61 * TILE + 2, 56 * TILE, new Inventory());   // 空中
+    // 绳带覆盖头部行带（空中下落头格必经）；内部 tile id ≠ 原版 sheet(213)
+    const ropeId = TILE_BY_KEY['v_213_rope'];
+    for (let r = 48; r <= 56; r++) w.store.setTileSilent(61, r, ropeId, 0, 0);
     return { w, p, game };
   }
-  it('按 ↑（无 Space）吸附成功', () => {
+  it('按 ↑（无 Space）空中吸附成功', () => {
     const { p, game } = ropeWorld();
     p.inputUp = true;
-    for (let t = 0; t < 6 && !p.pulley; t++) step(p, game);
-    expect(p.pulley).toBe(true);
+    let grabbed = false;
+    for (let t = 0; t < 20 && !grabbed; t++) { step(p, game); grabbed = p.pulley; }
+    expect(grabbed).toBe(true);
   });
   it('纯 Space（inputJump ∧ ¬inputUp ≙ controlJump）不吸附', () => {
     const { p, game } = ropeWorld();
     p.inputJump = true;
-    for (let t = 0; t < 6; t++) step(p, game);
+    for (let t = 0; t < 20; t++) step(p, game);
     expect(p.pulley).toBe(false);
   });
   it('Space+↑ 同按（本仓合并输入的歧义面）：仓内谓词视 ↑ 主导 → 允许抓绳（钉死声明）', () => {
@@ -269,7 +266,8 @@ describe('⑩a FindPulley !controlJump 门（:26320——Space 只手不进绳�
     const { p, game } = ropeWorld();
     p.inputUp = true;
     p.inputJump = true;
-    for (let t = 0; t < 6; t++) step(p, game);
-    expect(p.pulley).toBe(false);
+    let grabbed = false;
+    for (let t = 0; t < 20 && !grabbed; t++) { step(p, game); grabbed = p.pulley; }
+    expect(grabbed).toBe(true);
   });
 });

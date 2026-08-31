@@ -2115,6 +2115,10 @@ const V_SHEET_DIM: Record<number, [number, number]> = (() => {
   }
   return out;
 })();
+// ★IIIII99d：Place1xX 竖排样式带家族（cs(1458):60561-65 PlaceTile case
+//   92/93/453 → Place1xX；frameY=hgt*style*18+row*18 原样落盘可越表底）——
+//   finalize 帧净化纵向豁免的消费面（见 finalize 内注）。
+const VERTICAL_STYLE_SHEETS = new Set([92, 93, 453]);
 function finalize({ store, world }: GenCtx) {
   // 幽灵净化:生成期 TileRunner 会在空气格写残留 type(原版语义,渲染不可见),
   // 但我们的存档格式无 active 位——进入存档前归零(防重读激活成浮空块)
@@ -2161,6 +2165,28 @@ function finalize({ store, world }: GenCtx) {
             if (styleIdx >= colsPerBand) {
               const wx = (styleIdx % colsPerBand) * objW + (fxv % objW);
               const wy = fyv + Math.floor(styleIdx / colsPerBand) * bandH;
+              if (wx + 16 <= w && wy + 16 <= h2) legal = true;
+            }
+          }
+        }
+        // ★IIIII99d 纵向多带样式豁免（fx 分带的对称补支，【限 Place1xX 家族】）——
+        //   Place1xX(cs(1458):39578,case 92/93/453) 的样式带为竖排且**不换表底**，
+        //   wld 原样存 raw 帧：沙岩房 style47 灯 fy=2538..2590 越 H2032（渲染端
+        //   VanillaTiler case93 折列 num70=floor(fy/1998)、ofx+=36n 同构解码）。
+        //   曾被本净化清零 ⇒ m 链实测 (1302,952)/(1512,1292) 两塔 x86 fy=2538..2574
+        //   而 JS 终态 fy=0 差 9 格。合法性判据：带高=objH=fh*18、页数=
+        //   floor(h2/objH)；wy=(页%页数)*objH+(fy%objH)、wx+页位移在表内即放行。
+        //   非该家族维持旧行为（垃圾帧照清），零外溢。
+        if (!legal && fyv >= 0 && fyv >= h2 && VERTICAL_STYLE_SHEETS.has(sh)) {
+          const dvan = d.vanilla!;
+          const objW = (dvan.fw ?? 1) * 18;
+          const objH = (dvan.fh ?? 1) * 18;
+          const rowsPerBand = objH > 0 ? Math.floor(h2 / objH) : 0;
+          if (rowsPerBand > 0) {
+            const styleIdx = Math.floor(fyv / objH);
+            if (styleIdx >= rowsPerBand) {
+              const wy = (styleIdx % rowsPerBand) * objH + (fyv % objH);
+              const wx = fxv + Math.floor(styleIdx / rowsPerBand) * objW;
               if (wx + 16 <= w && wy + 16 <= h2) legal = true;
             }
           }

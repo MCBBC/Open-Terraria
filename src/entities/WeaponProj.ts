@@ -409,6 +409,25 @@ const BOOMERANG_RETURN: Record<number, [number, number]> = {
 export const PHASEBLADE_PROJ = new Set([1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067,
   1068, 1069, 1070, 1071, 1072, 1074, 1075, 1076, 1101, 1102]);
 
+/** 单格形状阻挡判定（Boomerang solidBox 复用；exported：halfbrick 单测共面）。
+ *  口径 = 原版弹体 Collision.TileCollision 简化投射物面：
+ *   · isSolid 格 = 全格实心；
+ *   · halfBrick 格 = 仅【下半 8px】实心（C.cs:2174-2177 vector.Y+=8/num2-=8）,
+ *     盒与 [top,top+8) 无纵向交集即不撞（「站半砖上原地飞不出」的修复本体）;
+ *   · slope 位维持全格近似（坡面斜线分段语义差异登记）。
+ *  st 需要 isSolid/idx/half 表（TileStore 结构兼容子集）。 */
+export function boomerangCellBlocks(
+  st: { isSolid(x: number, y: number): boolean; idx(x: number, y: number): number; half: ArrayLike<number> },
+  tx: number, ty: number, rectTop: number, rectBottom: number): boolean {
+  if (!st.isSolid(tx, ty)) return false;
+  if (st.half[st.idx(tx, ty)]) {
+    const bandTop = ty * TILE + 8;
+    const lo = Math.max(rectTop, bandTop), hi = Math.min(rectBottom, bandTop + 8);
+    if (hi <= lo) return false;
+  }
+  return true;
+}
+
 /** 使用起点【同型在场门】（ItemCheck_CheckCanUse_Inner,Player.cs:52801-52856）：弹型在
  *  列表内时,同 owner 已存在同型 active 弹 ⇒ 该物品本次使用被【静默拒绝】——原版
  *  ItemCheck_TryStartUse 失败即不进 StartActualUse：无挥动动画/无 UseSound/不耗
@@ -930,11 +949,23 @@ export class Boomerang extends Entity {
   private moveStep(game: GameHooks, isPhase: boolean): void {
     if (this.ai0 === 1) { this.x += this.vx; this.y += this.vy; return; } // 穿墙（:37145）
     const st = game.world.store;
+    // ★形状感知阻挡盒（2026-08-31 定罪「站半砖旋刃原地飞不出」）：
+    //  旧实现 = 全格布尔（isSolid），忽略 halfBrick——玩家站在半砖顶时脚线落在
+    //  格内 +8px 处，回旋镖出生盒下缘位于格上半区（跨过该行）⇒ 帧 0 即判撞，
+    //  双轴互斥反弹钉死原地；原版 Collision.TileCollision 对 halfBrick 只取
+    //  【下半 8px】为实心（C.cs:2174-2177 `vector.Y += 8f; num2 -= 8f`），格上半
+    //  区自由。tileSolidTop 家族（平台/家具顶）isSolid 本就 false 且原版弹体
+    //  flag6(fallThrough) 缺省 true（P.cs:17587 系）⇒ 弹体全域穿透平台，天然对齐。
+    //  slope>0 沿用旧全格近似（TileCollision 坡面为斜线分段，此处沿用既有口径，
+    //  差异登记不改）。
     const solidBox = (x: number, y: number): boolean => {
       const x0 = Math.floor(x / TILE), y0 = Math.floor(y / TILE);
       const x1 = Math.floor((x + this.w - 1) / TILE), y1 = Math.floor((y + this.h - 1) / TILE);
-      for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
-        if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) return true;
+      for (let ty = y0; ty <= y1; ty++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          if (!st.inBounds(tx, ty)) continue;
+          if (boomerangCellBlocks(st, tx, ty, y, y + this.h)) return true;
+        }
       }
       return false;
     };

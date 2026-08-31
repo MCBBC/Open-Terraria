@@ -105,7 +105,34 @@ function ensureRawImg(path: string): HTMLImageElement | null {
   const rec = { img: null as HTMLImageElement | null, failedAt: 0 };
   rawImgs.set(path, rec);
   const im = new Image();
-  im.onload = () => { rec.img = im; };
+  im.onload = () => {
+    // ★内容区裁剪重映射（2026-08-31 定谳）：Extra_201/209 实际内容仅底左角
+    //   ~16×16px（其余全透明），全范围 uv 采样必然切成细丝（用户实报"拖尾过细"）。
+    //   裁出内容块作为纹理，(sfrac,across) 即扫满整块 = 原版胖带观感。
+    //   XNA 侧同图全范围采样得胖带的机制待考（疑导出管线行序差），此为等价修复。
+    try {
+      if (/Extra_20[19]/.test(path)) {
+        const cv = document.createElement('canvas');
+        cv.width = 16; cv.height = 16;
+        const cx = cv.getContext('2d', { willReadFrequently: true })!;
+        // 内容块 = 底左 (0, H-16, 16, 16)
+        cx.drawImage(im, 0, im.naturalHeight - 16, 16, 16, 0, 0, 16, 16);
+        // ★黑底键控（2026-08-31 黑十字定谳）：内容块背景=不透明黑，预乘混合下
+        //   rgb=0∧a=1 的段把天空压暗=剑指向哪哪出黑框（横/竖=十字）。
+        //   按亮度键控 alpha（黑=无贡献），XNA 侧等价于预乘贴图黑=无贡献语义。
+        const id = cx.getImageData(0, 0, 16, 16);
+        const dd = id.data;
+        for (let i = 0; i < dd.length; i += 4) {
+          const lum = Math.max(dd[i], dd[i + 1], dd[i + 2]);
+          dd[i + 3] = Math.min(dd[i + 3], lum);
+        }
+        cx.putImageData(id, 0, 0);
+        rec.img = cv as unknown as HTMLImageElement;
+        return;
+      }
+    } catch { /* 回退原图 */ }
+    rec.img = im;
+  };
   im.onerror = () => { rec.failedAt = performance.now(); };
   im.src = `sprites/${encodeURI(path)}`;
   return null;

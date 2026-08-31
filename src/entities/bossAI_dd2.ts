@@ -1593,7 +1593,9 @@ export class DD2BetsyFireball extends Entity {
   w = 30;
   h = 30;
   dead = false;
-  dmg: number;
+  /** NewProjectile 伤害参数（DMG_FIREBALL=35 经典；公共字段名对齐 dd2 弹族
+   *  DD2GoblinBomb.damage——bossAI-dd2.test.ts 的 projectiles 桶断言面） */
+  readonly damage: number;
   /** timeLeft 默认 3600（SetDefaults 未覆写；实际由撞块终结） */
   private life = 3600;
   private t = 0;                                    // ai[0]（flag3 表：686 每拍自增）
@@ -1606,7 +1608,7 @@ export class DD2BetsyFireball extends Entity {
     this.y = y - this.h / 2;
     this.vx = vx;
     this.vy = vy;
-    this.dmg = dmg;
+    this.damage = dmg;
     // 出膛音（AI_001 type686 支 localAI[0]==0 首帧 PlayTrackedSound,Projectile.cs
     // :57487-57490;shootD 时代同源承接）
     const shot = PROJ_SHOT_SFX[686];
@@ -1645,7 +1647,7 @@ export class DD2BetsyFireball extends Entity {
     if (hit) {
       // 弹幕命中：attacker 缺省仅做死亡归因（contactOnly=false 不触发荆棘反伤）
       const dealt = game.damagePlayer(
-        hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2,   // :14912-14917
+        hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2,   // :14912-14917
         this.cx, this.cy);
       if (dealt > 0) statusPlayer(game, 686);        // 实扣落地才走 statusPlayer 链
     }

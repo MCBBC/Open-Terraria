@@ -41,13 +41,15 @@ export function wetCollision(
   let num2 = Math.floor(ph / 2);      // 盒高（>Height 时取 Height）
   if (num > pw) num = pw;
   if (num2 > ph) num2 = ph;
-  // ★C# 整数除法语义：原版 `(float)(Width/2)` 与 `(float)(num2/2)` 均为 int/int 截断
-  //   （Collision.cs:1580/:1586）。奇数半高（如鸭 22→num2=11）时 num2/2=5（非 5.5），
-  //   盒跨 [centerY−5, centerY+6]——浮点写会整体上移 0.5px，令贴液面钉浮的鸭心盒底
-  //   恰差 0.25px 触不到部分深度水带（l<255 表层行）→ wet 逐帧抖 → 飞行/游水态
-  //   渲染键同时按 wet 选帧 → 用户实报"水面上飞行/游水态疯狂跳切"（2026-08-31 定罪）
-  const vx = px + pw / 2 - Math.floor(num / 2);
-  const vy = py + ph / 2 - Math.floor(num2 / 2);
+  // ★C# 整除陷阱×5（Collision.cs:1578-1592）：Width/2·Height/2(中心两项)、
+  //   num2=Height/2(推导)、num/2·num2/2(偏移两项)全部是 int/int 截断。
+  //   仅修偏移不足以 parity：奇数宽/高体（鸟虫类比比皆是）中心项浮点除即偏差 ≤0.5px。
+  //   实锤病灶（2026-08-31 定罪）：鸭 22 半高时 num2=11→11/2=5，盒跨 [cy−5, cy+6]；
+  //   浮点错版整体上移 0.5px → 贴液面钉浮的鸭心盒底恰差 0.25px 触不到部分深度水带
+  //   （l<255 表层行）→ wet 逐帧抖 → AI 离水起飞分支与渲染飞/游选帧同频跳变 =
+  //   用户实报"水面上飞行/游水态疯狂跳切"
+  const vx = px + Math.floor(pw / 2) - Math.floor(num / 2);
+  const vy = py + Math.floor(ph / 2) - Math.floor(num2 / 2);
   const i0 = Math.max(0, Math.floor(px / TS) - 1);
   const i1 = Math.min(st.w - 1, Math.floor((px + pw) / TS) + 2);
   const j0 = Math.max(0, Math.floor(py / TS) - 1);

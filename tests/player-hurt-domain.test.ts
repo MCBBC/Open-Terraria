@@ -122,6 +122,7 @@ describe('A1 荆棘反射面（Game.damagePlayer contactOnly 前置段）', () =
     s.hit(900);
     expect(s.hurtCalls[base].d).toBe(1000);           // min(1000, trunc(1800))
     s.p.hp = s.p.maxHp;                               // 补满防死亡拦截
+    s.p.dead = false;                                 // 首拍已致死的漏斗死亡态复位
     s.p.iframes = 0;                                  // 出无敌窗再二次命中(flag3 门)
     base = s.hurtCalls.length;
     s.hit(26);                                        // trunc(26×2)=52（round 为 53）
@@ -156,7 +157,7 @@ describe('A1 荆棘反射面（Game.damagePlayer contactOnly 前置段）', () =
   it('CanParryAgainst：盾窗+面向+敌速非零 ⇒ 免伤(Hurt 跳过)+反 ×2+kb5+碰撞免疫窗+buff198', () => {
     const s = mkShell();
     s.p.facing = 1;
-    s.enemy.cx = 70 * 16;
+    (s.enemy as unknown as { cx: number }).cx = 70 * 16;
     s.p.shieldParryTimeLeft = 5;
     s.p.buffs.apply(BuffType.Thorns, 30);
     const hpBefore = s.p.hp;
@@ -367,7 +368,8 @@ describe('A2 环境伤四站 msg117 漏斗（dir/kb/桶/飘字单点）', () => 
     for (let x = 20; x <= 40; x++) for (let y = 26; y <= 46; y++) st.setLiquid(x, y, 220, 1);
     const p = new Player(28 * 16, 32 * 16, new Inventory());
     const { hooks, captures } = envHarness(w, p);
-    p.breath = 3;                                     // 快进：两拍内见血
+    p.breath = 3;                                     // 快进：两拍即见直扣
+    p.hp = 4;                                         // 低血量促死（直扣 2/批）
     const hpBefore = p.hp;
     for (let i = 0; i < 120 && !p.dead; i++) {
       p.fixedUpdate(1 / 60, hooks as never);
@@ -384,13 +386,14 @@ describe('A2 环境伤四站 msg117 漏斗（dir/kb/桶/飘字单点）', () => 
     const r1 = (s1.g.damagePlayer as (...a: unknown[]) => number)
       .call(s1.g, 40, s1.enemy.cx, s1.enemy.cy, s1.enemy, false, false, false, { hitDir: 0 });
     expect(r1).toBeGreaterThan(0);
-    expect((s1.g.net.sendPlayerHurt as ReturnType<typeof vi>).mock.calls.length).toBe(1);
-    expect((s1.g.net.sendPlayerHurt as ReturnType<typeof vi>).mock.calls[0][3]).toBe(0);
+    const sent1 = (s1.g.net.sendPlayerHurt as ReturnType<typeof vi.fn>).mock.calls as Array<unknown[]>;
+    expect(sent1.length).toBe(1);
+    expect(sent1[0][3]).toBe(0);
 
     const s2 = mkShell({ net: true });
     (s2.g.damagePlayer as (...a: unknown[]) => number)
       .call(s2.g, 40, s2.enemy.cx, s2.enemy.cy, s2.enemy, false);
-    const calls = (s2.g.net.sendPlayerHurt as ReturnType<typeof vi>).mock.calls;
+    const calls = (s2.g.net.sendPlayerHurt as ReturnType<typeof vi.fn>).mock.calls as Array<unknown[]>;
     expect(calls.length).toBe(1);
     expect(calls[0][3]).toBe(Math.sign(s2.p.cx - s2.enemy.cx) || 1);
   });

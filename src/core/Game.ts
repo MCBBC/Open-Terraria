@@ -12936,6 +12936,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
+    // ★回旋镖族【同型在场门】（ItemCheck_CheckCanUse_Inner,Player.cs:52801-52856）：
+    //   列表型同 owner 已有同型活弹 ⇒ 本次使用静默拒绝。必须【最先执行】:原版
+    //   ItemCheck_TryStartUse 失败连 StartActualUse 都不进,facing/useSwing/useTime
+    //   全部无副作用(2026-08-31 终审发现门置于 case 内时被拒帧仍跑 useSwing 重登记)。
+    //   拒绝也【不消费 mouseDown】,持握/连点在飞行期间空转,弹消亡后下一帧放行 =
+    //   "回手后再掷"节奏。门表 = WeaponProj.ts BOOMERANG_OWN_LIMIT。
+    if (cwIn.kind === 'boomerang' && boomerangBlockedByOwned(this.entities.projectiles, cwIn.shoot)) return;
     const inp = this.input;
     // 瞄准角 = 玩家中心→鼠标世界坐标（ItemCheck_Shoot :47610 vector = MouseWorld −
     // pointPosition 起算）。曾用"鼠标−画布中心"——相机被世界边缘钳制时玩家不在屏心
@@ -12945,8 +12952,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ★出手挂点收口（R30 §4.2 落点清单 #1 清偿,2026-08-31）：原版 ItemCheck_Shoot
     //  通用尾支 pointPosition = RotatedRelativePoint(MountedCenter)（1458 Player.cs:47603;
     //  :4209-4227 无旋转恒等玩家中心）——本域三族曾共用的 px/py(中心前14px/y−4) 已全数
-    //  拆除:'grenade'(GrenadeProj)/glowstick 直构即玩家中心,boomerang 构造即中免二次
-    //  placeAtShootSpawn;'magic' 杖头锚(+18/重瞄)为 2026-08-26 用户拍板备案偏离非债
+    //  拆除;★2026-08-31 终审修正:'grenade'(GrenadeProj)/glowstick/boomerang 三族
+    //  构造器均收【盒左上】坐标,直传 (cx,cy) 曾令出生盒右下偏 (w/2,h/2)——荆棘旋刃
+    //  (38×38)站立底缘陷地 17px=「贴地发射不出」,三族现统一 placeAtShootSpawn 回正
+    //  盒心;'magic' 杖头锚(+18/重瞄)为 2026-08-26 用户拍板备案偏离非债
     // （见 :12957 批注）;'ranged' 弹药链 ax/ay 本就中心精确(Player.cs:10989 注)。
     //  per-item 显式出生偏移（{281,986}/{3007}/{517}/{2611,5526}/{3827}/proj9·12·728）
     //  在各自实体链已有对应支或随族未实装,新增武器接入时以 Player.cs:47618-47687 全表为准
@@ -13143,12 +13152,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         break;
       }
       case 'boomerang': {
-        // ★同型在场门（ItemCheck_CheckCanUse_Inner,Player.cs:52801-52856）：列表型
-        //   同 owner 已有同型弹在场 ⇒ 使用静默拒绝——不进 StartActualUse = 无挥动/
-        //   无音/不耗 useTime（连点与按住在飞行期间均空转;返回消失后下一帧放行 =
-        //   "回手后再掷"节奏）。拒绝时【不消费 mouseDown】:持械电平由 use 门重评,
-        //   与长矛支同电平语义。
-        if (boomerangBlockedByOwned(this.entities.projectiles, cw.shoot)) break;
+        // ★同型在场门已前置为本函数首守卫——被拒尝试必须零副作用（原版 TryStartUse
+        //   失败连 facing/useSwing 都不走）;此处不再拦。门表见 WeaponProj.ts
+        //   BOOMERANG_OWN_LIMIT(=ItemCheck_CheckCanUse_Inner Player.cs:52801-52856)。
         // AI_003 1:1：出程无摩擦直线/命中·撞墙·计数三门回收/返回段目标速度制/回手消失
         // （AI_003_Boomerang :36623-37352;第 8 参 = 掷出瞬间玩家 facing → 原版 direction,
         //   自旋符号由 Projectile.Update :15674-15682 每 tick=sign(vx) 接管）
@@ -14629,6 +14635,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           zap.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           zap.lightRGB = [0.75, 0.75, 0.75];   // SetDefaults light=0.75
           this.entities.add(zap, 'projectiles');
+          // ★仪表:弹速度方向 vs 鼠标方向——"向上射弹向下"定罪用(_swZapDbg)
+          try {
+            if ((globalThis as Record<string, unknown>).swDebugMuzzle === true
+              || (typeof localStorage !== 'undefined' && localStorage.getItem('swDebugMuzzle') === '1')) {
+              const [scx, scy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+              console.log('[swZap]', `shoot=${cw.shoot}`,
+                `aim_deg=${Math.round(ang * 180 / Math.PI)}`,
+                `v=(${(Math.cos(ang) * cw.shootSpeed).toFixed(1)},${(Math.sin(ang) * cw.shootSpeed).toFixed(1)})`,
+                `mouse=(${Math.round(scx)},${Math.round(scy)}) player=(${Math.round(this.player.cx)},${Math.round(this.player.cy)})`,
+                `spawn=(${zapA.x.toFixed(0)},${zapA.y.toFixed(0)})`);
+            }
+          } catch { /* noop */ }
           this.useSwing(def, ang, ps?.spd ?? 1);   // ★曾漏=持枪姿势滞留旧瞄准角
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           this.player.onManaItemUsed();
@@ -14641,7 +14659,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // pierce 1——蜂枪 181/黄蜂枪 189 表值 3、巨蜂 566 表值 4、幽灵法杖弹 297 表值 3、
         // 灵魂之焰 659/剃刀台风 409 表值 −1（命中侧走全局 immune 帧冷却再命中）全被压成 1
         const HOMING_FAMILY_PIERCE = new Set([181, 189, 307, 316, 566, 297, 659, 409]);
-        const shotArrow = new Arrow(this.player.cx, this.player.cy,
+        const shotTip = this.resolveShotAnchor(def.key, ang);
+        const shotArrow = new Arrow(shotTip.x, shotTip.y,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
           { grav: gsS.grav, gravDelay: gsS.delay, grav2: gsS.grav2, grav2At: gsS.grav2At,

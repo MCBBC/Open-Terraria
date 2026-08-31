@@ -1508,7 +1508,9 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
   }
   if (!e.bInit) { e.bInit = true; e.ai0 = -1; e.ai1 = 0; e.ai2 = 0; e.lai3 = 1; } // :36780-36785（localAI[3]=1 首帧哨兵——MoonLordProgressBar.IsInBadAI 的 type398&&localAI[3]==0 剔除门消费）
   // 原版 checkDead(:78859-78867):血尽 → ai0=2 死亡演出,满血续命 600t 后真死
-  if (e.hp <= 0 && e.ai0 !== 2) { e.ai0 = 2; e.ai1 = 0; e.hp = e.maxHp; e.iframes = 2; }
+  // PrepareForDeathAnimation(:78836-78841:life=lifeMax/dontTakeDamage/netUpdate)——
+  // ★台账①家族收口:iframes=2 近似退役(pierce===1 转换帧白嫖直伤)
+  if (e.hp <= 0 && e.ai0 !== 2) { e.ai0 = 2; e.ai1 = 0; e.hp = e.maxHp; e.dontTakeDamage = true; }
 
   if (e.ai0 === -2) { // 远距传送归位(1458 :41599-41618 / 1456 :37250 同构)
     // ★台账①:真旗标 dontTakeDamage(:41601)——iframes=2 近似被 pierce===1 单发弹
@@ -1784,7 +1786,8 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
   if (!core || core.dead) { e.dead = true; return; }
   // 原版 checkDead(:78845-78857):血尽 → ai0=-2 闭眼残肢(满血续命+无敌)+召真眼 400
   if (e.hp <= 0 && e.ai0 !== -2) {
-    e.ai0 = -2; e.ai1 = 0; e.hp = e.maxHp; e.iframes = 2;
+    // PrepareForDeathAnimation(:78836-78841)——★台账①家族收口:真旗标
+    e.ai0 = -2; e.ai1 = 0; e.hp = e.maxHp; e.dontTakeDamage = true;
     spawnTrueEye(game, e);
   }
 
@@ -1808,7 +1811,7 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
     // 手的 ai[1] 推进在原版整体被 `ai[0] != -2` 门住(:42028)= 残肢期冻结(与头相反),
     // 本分支只保持无敌近似 + 归位悬停。
     e.def.damage = 0;
-    e.iframes = 2;                    // dontTakeDamage = true（:42068）
+    e.dontTakeDamage = true;          // ★台账①家族收口(:42068 真旗标,iframes 近似退役)
     handHover(e, core, side);
   } else if (e.ai0 === 0) { // 闭眼悬停(:37281-37303)
     frameT = 3;
@@ -1998,7 +2001,8 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
   // 1457 :78856 追加相位槽清理 ai[(type!=396)?1:2]=0——头 396 清 ai[2]、手 397 清
   // ai[1];头的 ai[1] 保留 = 真眼生成相位的基准（spawnTrueEye 读它）
   if (e.hp <= 0 && e.ai0 !== -2 && e.ai0 !== -3) {
-    e.ai0 = -2; e.ai2 = 0; e.hp = e.maxHp; e.iframes = 2;
+    // PrepareForDeathAnimation(:78836-78841)——★台账①家族收口:真旗标
+    e.ai0 = -2; e.ai2 = 0; e.hp = e.maxHp; e.dontTakeDamage = true;
     spawnTrueEye(game, e);
   }
 
