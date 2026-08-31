@@ -582,6 +582,9 @@ export class Player extends Entity {
    *  本仓渲染未消费——状态位保留） */
   swimTime = 0;
   inWater = false;
+  /** WorldGen.InAPlaceWithWind(中心格) 每 tick 缓存（Player.fixedUpdate 头刷新）——
+   *  扫帚坐骑挂件摆幅的露天 1f/室内 0.5f 档（Mount.cs :3597-3602）渲染端消费 */
+  mountWindExposed = false;
   /** 出入水 10t 去抖（Player.wetCount，Player.cs:27464/27558 置 10、:27651 每tick 递减、
    *  :37203 重生清零）——水波涟漪尺寸因子（WaterShaderData.cs:263 h·wetCount/9） */
   wetCount = 0;
@@ -1553,7 +1556,11 @@ export class Player extends Entity {
         if (fx.autoPaint) autoPaint = true;      // 喷漆器族（:14720/:14726-14734）
         if (fx.chiselSpeed) chiselSpeed = true;  // 古凿/创造之手（:12610-12612/:13981）
         if (fx.toolbelt) toolbelt = true;        // 工具腰带 407（:14873 blockRange++）
-        if (fx.skyStone) skyStone = true;
+        // skyStone 表消费收窄：原版三源 = 1865∪3110【无门】(:15527-15529)、
+        // 899&&dayTime、900&&(!day||eclipse)（:15531-15535）。json '899' 无条件档
+        // 是旧"恒开"登记偏差的表源——899/900 改走上方功能槽昼夜门(:1363-1364)，
+        // 此处仅保留无门族（moon shell/celestial shell）。
+        if (fx.skyStone && !(accVid === 899 || accVid === 900)) skyStone = true;
         if (fx.pStone) pStone = true;
         if (fx.flowerBoots) flowerBoots = true;   // 花靴/仙灵靴（:12688）
         if (fx.manaMagnet) manaMagnet = true;
@@ -2565,6 +2572,10 @@ export class Player extends Entity {
   fixedUpdate(dt: number, game: GameHooks) {
     const world = game.world;
     this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
+    // 扫帚挂件露天位（WorldGen.InAPlaceWithWind 中心格 :3597——GetWitchBroomTrinket
+    // Rotation 的 num3 露天 1f/室内 0.5f 档消费源；渲染端 mountLights 直读）
+    this.mountWindExposed = inAPlaceWithWind(world.store, this.x, this.y, this.w, this.h,
+      world.groundLevel);
     this.prevInputJump = this.inputJump;   // 坐骑 releaseJump 边沿（Mount.tryStartHover 消费）
     this.oldX = this.x; this.oldY = this.y;   // oldPosition（尘埃 customData 跟随差值）
     // ---- 派对染发剂彩纸（UpdateHairDyeDust Player.cs:23994-24023；2026-08-14 接通，
@@ -4931,9 +4942,13 @@ export class Player extends Entity {
     if (Math.abs(this.vx) > 0.3 && this.onGround) this.animTime += Math.abs(this.vx);
     else this.animTime = 0;
 
-    // 越界保护
+    // 越界保护（引擎安全网）：★A2 接漏斗——General 桶、hitDirection=0（kb=false）、
+    // 无本地飘字（floatDealt 缺省 ⇒ noLocalFloat）,msg117 广播与死亡结算随漏斗单点。
+    // 原版注记：1457 Player.cs 无 Out-of-world KillMe 站（全树 9999 直死仅 KillMe
+    // 参数面,46065 半血/22464-22511 WOF 千伤为异源）——本站为本仓引擎护栏,接漏斗
+    // 只统一死亡面不加伤害语义。
     const maxY = world.h * TILE;
-    if (this.y > maxY + 100) this.damage(9999, this.cx, this.y);
+    if (this.y > maxY + 100) this.envHurtThroughFunnel(game, 9999, this.cx, this.y);
     this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
     this.jumpEdgePrev = this.inputJump;  // 跳键边沿（tick 尾快照——水中起跳 releaseJump :20409 消费；prevInputJump 在 tick 头快照故不可用）
     // 血肉墙舌头（Player.WOFTongue :21993-22056，Update 内 myPlayer 段调用）
@@ -6925,21 +6940,26 @@ export class Player extends Entity {
     game.broadcastParticleOrchestra?.(ParticleOrchestraType.ShimmerTownNPC, this.cx, this.y + this.h);
   }
 
-  /** ApplyTouchDamage（Player.cs:28507）1:1:直接伤害(护甲结算)→灼烧/流血 buff→
-   *  窒息延迟→荆棘族触碰毁块。伤害被完全抵消(含无敌帧)时跳过 buff 授予(原版 num83==0 分支) */
+  /** ApplyTouchDamage（1457 Player.cs:29194-29240；1456 注 :28507 同物）1:1：
+   *  直接伤害(DamageVar 后护甲结算)→灼烧/流血 buff→窒息延迟→荆棘族触碰毁块。
+   *  伤害被完全抵消(含无敌帧)时跳过 buff 授予(原版 flag==true 分支 :29213-29215)。
+   *  ★A2（清零批·受击域）：改走 Game.damagePlayer msg117 通用漏斗——原版
+   *  `Hurt(ByOther(3), num, 0, quiet:false, cooldownCounter=TileContactDamage)`
+   *  （:29212 字面）：hitDirection=0 ⇒ kb=false/hitDir=0；桶=独立 TileContactDamage
+   *  桶（旧实现传参只关太阳门,免疫门仍走 General iframes 位——分桶门先于此修正,
+   *  接触伤与敌怪接触无敌窗互不遮挡,同 :27889 岩浆门构型）；飘字=damagePreview
+   *  预演回填、音由漏斗单点承载（本地双发源删除）。 blocked 判据保持原版
+   *  「Hurt 返回 0.0」= 实扣为 0（闪避/免伤早退族全命中该语义）。 */
   private suffocateDelay = 0;
   private applyTouchDamage(game: GameHooks, ht: HurtTile): void {
     let blocked = false;
     const dmg = TOUCH_IMMEDIATE.get(ht.type);
     if (dmg !== undefined) {
-      this.lastDamageCause = { kind: 'defaultWrap' }; // ByOther(3) → DeathText.Default 包裹 generic
-      // cooldownCounter=TileContactDamage(0)——Counter 集 {General,BossNoCheese}
-      // 不含（R5-F23：仙人掌/荆棘触格伤不耗日曜盾）
-      if (!this.damage(dmg, this.cx, this.y - 10, false, false, 0)) {
+      this.lastDamageCause = { kind: 'defaultWrap' }; // PlayerDeathReason.ByOther(3)
+      const shown = this.damagePreview(dmg);
+      if (this.envHurtThroughFunnel(game, dmg, this.cx, this.y - 10,
+        ImmunityCooldownID.TileContactDamage, shown) === 0) {
         blocked = true;
-      } else {
-        playHurtVoice(game, this.voiceState);   // PlayHurtSound 全分派(:38867-39011)
-        game.addDamageNumber(this.cx, this.y, this.damagePreview(dmg), false, playerHurtFloatColor(false));
       }
     }
     if (!blocked) {

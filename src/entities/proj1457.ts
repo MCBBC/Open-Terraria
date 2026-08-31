@@ -19,7 +19,7 @@ import { canHit } from '../physics/LineOfSight';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { damageVarRoll } from '../stats/DamageVar';
 import { applyProjStatus } from './projStatus';
-import { mainDifficulty, sampleCurve, remap, GDL, type CurveKey } from '../stats/ScaleStats';
+import { mainDifficulty, sampleCurve, remap, GDL, f32, type CurveKey } from '../stats/ScaleStats';
 import { ITEM_BY_KEY } from '../data/items';
 import { projSprite } from './Arrow';
 import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
@@ -135,10 +135,11 @@ export function lightningEvpFinalDamage(
   o: { luck?: number; sweater?: boolean; rnd?: () => number } = {},
 ): number {
   let dmg = damageVarRoll(base, -(o.luck ?? 0), o.rnd);            // :14905 幸运方差项(取负!)
-  dmg = Math.trunc(dmg * sampleCurve(LIGHTNING_PLAYER_DAMAGE_SCALING, difficultyFloat));   // :14916 (int)
+  // (int)((float)num3 * Sample)——乘积按 float32 求值再截断（100×.08f=8.0f 而非双精度 7.9999→7）
+  dmg = Math.trunc(f32(f32(dmg) * sampleCurve(LIGHTNING_PLAYER_DAMAGE_SCALING, difficultyFloat)));   // :14916 (int)
   dmg *= 2;                                                        // :14917-14918 num4=2
   if (o.sweater) {                                                 // :14919-14922 死囚毛衣:trap 减半+帽 300
-    dmg = Math.trunc(dmg * 0.5);
+    dmg = Math.trunc(f32(f32(dmg) * 0.5));
     dmg = Math.min(dmg, 300);
   }
   return dmg;

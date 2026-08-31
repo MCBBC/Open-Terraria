@@ -622,3 +622,103 @@ describe('★F6 随机坐椅 !wet 门（flag30 :55768 字面）', () => {
     expect(sitWithDuration(0.9999999)).toBe(SIT_TIME_BASE + SIT_TIME_RAND - 1);
   });
 });
+
+// =====================================================================
+// ★C1 清零收敛批：微光上升态 × 环境生命周期三连（NPC.cs:91590-91600）
+// vanilla 判读定案：CheckLifeRegen(:93622)与 CheckDrowning(:96056)挂在 Update 层
+// townNPC 门下,与 AI() 的 ai[0]==25 早退正交——上升帧照常跑;
+// GetHurtByOtherNPCs 头部 dontTakeDamage 早退(:93559-63)→ 互殴在 ai25 停算。
+// 溺水伤害链无任何 dontTakeDamage 闸:life-=2 直写(:96073)+friendlyRegen 清零
+// (:96069)+致死一击 StrikeNPCNoInteraction(owner=255,:82012→82017 全链不查旗)
+// ——「微光中溺水仍清零 + 伤害不停算」为原文行为,非近似。
+// =====================================================================
+describe('★C1 ai[0]==25 上升态内环境生命周期三连(NPC.cs:91590-91600)', () => {
+  /** 平地世界 + 定姿上升态 NPC。直注私有态（本文件既有 any 注入口径）：
+   *  shimmerRise=ai[0]==25 / shimmerRisePause=ai[2]>0 早退支(:53612-53618)使
+   *  落点传送与上浮全程挂起、位置冻结;wet = 微光池上岸残留真值面(上升期
+   *  updateNpcLiquid 不推进,wet 冻结)。 */
+  function risingScene(opts: { water?: boolean; enemies?: unknown[] } = {}) {
+    const world = new World(200, 200, 100, 'c1-rising');
+    const st = world.store;
+    for (let x = 20; x <= 180; x++) st.setTileSilent(x, FLOOR, DIRT);
+    const npc = new TownNPC('guide', spotCenter(100) - 10, FLOOR * 16);
+    npc.stationary = true;
+    const { game } = makeGame(world, { npcs: [npc], enemies: opts.enemies ?? [] });
+    if (opts.water) {
+      // 头部行普通水(type 1)——非岩浆(2)非微光(4),DrownCollision 受理档
+      st.setLiquid(100, FLOOR - 3, 255, 1);
+      st.setLiquid(100, FLOOR - 4, 255, 1);
+    }
+    const priv = npc as unknown as Record<string, number | boolean>;
+    priv.shimmerRise = true;
+    priv.shimmerRiseT = 0;
+    priv.shimmerRisePause = SHIMMER_RISE_PAUSE + 400;     // 长暂停窗冻结位移
+    priv.wet = !!opts.water;
+    return { world, npc, game };
+  }
+
+  it('微光中回血照常(CheckLifeRegen 无 ai 门 :93622;F10 面语义不变)', () => {
+    const { npc, game } = risingScene();
+    (npc as unknown as { hp: number }).hp = 100;          // life<lifeMax
+    let healedAt = -1;
+    for (let t = 0; t < 80 && healedAt < 0; t++) {
+      npc.fixedUpdate(1 / 60, game);
+      if (npc.hp === 101) healedAt = t;
+    }
+    expect(npc.shimmerRising).toBe(true);                 // 全程滞留上升态
+    // 向导 rate=1+5=6/t → 计数破 180 恰在第 31 tick(hp++ :93639-41)
+    expect(healedAt).toBeGreaterThanOrEqual(30);
+    expect(healedAt).toBeLessThanOrEqual(32);
+  });
+
+  it('微光中溺水照常结算:friendlyRegen 清零(:96069)+life-=2 直伤,dontTakeDamage 不停算', () => {
+    const { npc, game } = risingScene({ water: true });
+    const n = npc as unknown as Record<string, number>;
+    n.breath = 14;                                        // 预置低氧快进首窗口
+    n.breathCounter = 6;
+    n.lifeRegenCounter = 5000;                            // 注水漂白前的脏计数
+    const hp0 = n.hp;
+    let maxSeenCounter = 0;
+    let anyHeal = false;
+    for (let t = 0; t < 360; t++) {
+      const before = n.hp as number;
+      npc.fixedUpdate(1 / 60, game);
+      if ((n.hp as number) > before) anyHeal = true;
+      maxSeenCounter = Math.max(maxSeenCounter, n.lifeRegenCounter as number);
+    }
+    expect(npc.shimmerRising).toBe(true);                 // 始终 ai[0]==25
+    expect(n.breath).toBe(0);                             // :96075 钳 0
+    expect((n.hp as number)).toBeLessThan(hp0);           // 直伤持续生效
+    // ★清零闸(F10/反向证明):若 :96069 清零缺位,rate=6/t 无阻断累计必越 180
+    // 触发自愈 → 出现 hp 回升与计数峰值≥180。原版序位窗口内计数 ≤ rate×7
+    expect(anyHeal).toBe(false);
+    expect(maxSeenCounter).toBeLessThan(100);
+  });
+
+  it('微光中溺水致死一击可杀(force 通道=StrikeNPCNoInteraction owner255 不查旗,:82017)', () => {
+    const { npc, game } = risingScene({ water: true });
+    const n = npc as unknown as Record<string, number>;
+    n.hp = 3;
+    n.breath = 14;
+    n.breathCounter = 6;
+    for (let t = 0; t < 120 && !npc.dead && (n.hp as number) > 1; t++) {
+      npc.fixedUpdate(1 / 60, game);
+    }
+    expect(npc.dead).toBe(true);                          // life<=0 → StrikeNPC 链击杀
+    expect((n.hp as number)).toBeGreaterThanOrEqual(-1);  // hp 底线 :96141→life=1+击杀
+  });
+
+  it('微光中互殴停算(GetHurtByOtherNPCs 头部 dontTakeDamage 早退 :93559-63)', () => {
+    const enemy = { x: spotCenter(100) - 20, y: FLOOR * 16 - 42, w: 20, h: 42,
+      dead: false, damage: 40 };
+    const { npc, game } = risingScene({ enemies: [enemy] });   // 敌盒与本体重叠
+    npc.fixedUpdate(1 / 60, game);
+    expect(npc.hp).toBe(250);                             // 上升态不受敌怪接触伤
+    // 对照态外:同一几何解除上升 → 立即互殴扣血
+    const priv = npc as unknown as Record<string, number | boolean>;
+    priv.shimmerRise = false;
+    enemy.x = npc.x - 4;                                  // 保持重叠
+    npc.fixedUpdate(1 / 60, game);
+    expect(npc.hp).toBeLessThan(250);
+  });
+});

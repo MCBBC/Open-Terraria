@@ -1438,8 +1438,9 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
 /** 身体埋实心块判定（原版 Collision.SolidCollision(position,width,height) 全盒 any 等价件
  *  ★台账⑨(2026-08-31)：曾按五点采样（四角+中心）近似——半砖骑线/边缘外扩一格的
  *  小妖魔贴墙角落在采样点间穿透,自爆门漏爆。现按盒覆盖的全部 tile 列行扫描,
- *  任一实心即真（与 bossAI_duke_moonlord.inSolid 同款修法）。 */
-function solidBody(game: GameHooks, e: Enemy): boolean {
+ *  任一实心即真（与 bossAI_duke_moonlord.inSolid 同款修法）。
+ *  导出面：tests/boss-dd-ledger-clean.test.ts 消费（回归锚）。 */
+export function solidBody(game: GameHooks, e: Enemy): boolean {
   const st = game.world.store;
   const x0 = Math.floor(e.x / TILE), x1 = Math.floor((e.x + e.w - 0.001) / TILE);
   const y0 = Math.floor(e.y / TILE), y1 = Math.floor((e.y + e.h - 0.001) / TILE);
@@ -2464,7 +2465,11 @@ function w107WalkAccel(e: Enemy, p: Walker107P): void {
 
 /** AI_107 主入口（NPC.cs:63372-64919） */
 export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player | null): void {
-  if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
+  if (!e.bInit) {
+    e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
+    // ★台账⑩：小妖精引信跟踪轨随实体剔除拆轨（Entity.compact 对 dead 回调 destroy）
+    (e as { destroy?: () => void }).destroy = () => fuseLoopStop(e);
+  }
   const x = dd2LocalAI(e);
   const id = e.vanillaId ?? 0;
   // flag（:63614）：tick 初 vx==vy==0 且未受击——卡死小跳（:65030）消费
@@ -2554,9 +2559,10 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
       }
     }
   }
-  // ---- 小妖精地面型自爆链（cs:63680-63846） ----
+  // ---- 小妖精地面型自爆链（cs:63680-63846,1458 段 :63881-64047） ----
   if (id === 572 || id === 573) {
     if (e.ai1 === 2) {
+      fuseLoopStop(e);                     // 起爆即拆轨
       // 起爆（:63692-63749）：192² 盒、伤 80、3t 消散（不走掉落管线）
       e.x = e.cx; e.y = e.cy;
       e.w = 192; e.h = 192;
@@ -2602,6 +2608,13 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
       // 接近档（:63836-63841）：700px 内点火
       p.melee = true; p.windup = 40; p.triggerRange = 700;
     }
+    // ★台账⑩：引信跟踪轨统一驱动——点火窗 localAI[2]>=30 起双轨、冲锋窗持续,
+    // 其余态拆轨（原版 :63957-64005 的 GetActiveSound-null→重播 + Position 跟随）
+    fuseLoopManage(
+      e, game,
+      [['ignite', 'dd2_kobold_ignite_loop'], ['scream', 'dd2_kobold_scream_charge_loop']],
+      (e.ai1 === 1 && e.ai0 === 0) || (e.ai1 === 0 && e.ai0 > 0 && x[2] >= 30),
+      e.cx, e.cy);
   }
   // ---- 食人魔招式音（cs:63562-63600）:ai[0]==40 近挥/跺地,==80 吐息 ----
   if ((id === 576 || id === 577) && e.ai0 === 40) {

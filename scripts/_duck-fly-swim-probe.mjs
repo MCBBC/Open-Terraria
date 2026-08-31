@@ -71,72 +71,50 @@ const res = await page.evaluate(async () => {
   await waitMs(400);
 
   const p = g.player;
-  // ---- 高空人工台址:不依赖地表扫描(v2 教训:丛林树冠位采到高位假地面把池子封顶) ----
-  let baseX = (p.cx / T | 0) + 20;
-  // 找一段地表相对平坦区间的列作为 x 锚即可,x 锚仅决定水平位置
-  let anchorTried = 0;
-  while (anchorTried++ < 50) { baseX += 8; }
-  const surfGuess = Math.round(p.y / T);
-  const ALT = surfGuess - 30;                       // 台面基准行(空中)
-  // 挖出干净的空域:横向 baseX..baseX+92,纵向 ALT-46..ALT+2 全部置空气
-  for (let x = baseX - 4; x <= baseX + 96; x++) {
-    for (let y = ALT - 46; y <= ALT + 2; y++) {
-      if (st.inBounds(x, y) && st.isActive(x, y)) st.setTile(x, y, 0);
-    }
-  }
-  // 砌墙材质:取玩家正下方深处任意实心块 id
-  let wallType = 0;
-  outer: for (let y = surfGuess; y < st.h - 40; y++) {
-    for (const dx of [0, 1, 2]) {
-      const tx = (p.x / T | 0) + dx;
-      if (st.inBounds(tx, y) && st.isActive(tx, y) && st.isSolid(tx, y)) { wallType = st.type[st.idx(tx, y)]; break outer; }
-    }
-  }
-  if (!wallType) return { fail: '找不到砌墙材质' };
+  const liq = (x, y) => (st.inBounds(x, y) ? st.liquid[st.idx(x, y)] : 0);
 
-  function buildPool(bx, innerW, depthRows, fillMode /* 'full'|'partial' */) {
-    const left = bx, right = bx + innerW - 1;
-    const floorY = ALT;                    // 底壁行
-    for (let x = left - 1; x <= right + 1; x++) {
-      for (let d = 0; d < 2; d++) st.setTile(x, floorY + 1 + d, wallType);     // 双层底
-    }
-    // 左右柱:水面带(floorY-depthRows..floorY-1)整段 + 上沿超高 3 行防起跳出墙
-    for (let y = floorY - depthRows - 3; y <= floorY; y++) {
-      st.setTile(left - 1, y, wallType);
-      st.setTile(right + 1, y, wallType);
-    }
-    // 水腔行区间:[floorY-depthRows .. floorY-1],floorY 行为底壁
-    let n = 0;
-    if (fillMode === 'full') {
-      for (let x = left; x <= right; x++) for (let y = floorY - depthRows; y < floorY; y++) { st.setLiquid(x, y, 255, 1); n += 255; }
-    } else {
-      for (let x = left; x <= right; x++) { st.setLiquid(x, floorY - 1, 100, 1); n += 100; }
-    }
-    const audit = () => {
-      let sum = 0, cnt = 0;
-      for (let x = left; x <= right; x++) for (let y = floorY - depthRows; y < floorY; y++) {
-        const l = st.liquid[st.idx(x, y)]; sum += l; if (l > 0) cnt++;
+  // ---- 找天然地表水塘:表面暴露(上方 3 行无实心)、≥4 列连片、底有实心 ----
+  function findPonds(maxN = 4) {
+    const found = [];
+    const startY = Math.max(1, (p.cy / T | 0) - 140);
+    const endY = Math.min(st.h - 60, (p.cy / T | 0) + 160);
+    for (let sx = Math.max(4, (p.cx / T | 0) - 320); sx < Math.min(st.w - 4, (p.cx / T | 0) + 500) && found.length < maxN; sx += 3) {
+      for (let sy = startY; sy < endY; sy++) {
+        if (!(liq(sx, sy) > 120)) continue;
+        if (liq(sx, sy - 1) > 0) continue;                        // 已是该列水下,跳过非表层
+        // 表层要求:上邻无液体且上方两行无实心遮挡
+        if (st.isActive(sx, sy - 1) && st.isSolid(sx, sy - 1)) continue;
+        if (st.isActive(sx, sy - 2) && st.isSolid(sx, sy - 2)) continue;
+        // 连片宽度
+        let L = sx, R = sx;
+        while (L > sx - 24 && liq(L - 1, sy) > 120 && !(st.isActive(L - 1, sy - 1) && st.isSolid(L - 1, sy - 1))) L--;
+        while (R < sx + 24 && liq(R + 1, sy) > 120 && !(st.isActive(R + 1, sy - 1) && st.isSolid(R + 1, sy - 1))) R++;
+        const width = R - L + 1;
+        if (width < 5) continue;
+        // 底部有实心托底(沿中间列向下找 ≤4 行)
+        let okFloor = false;
+        for (let d = 1; d <= 4; d++) if (st.isActive(sx, sy + d) && st.isSolid(sx, sy + d)) { okFloor = true; break; }
+        if (!okFloor) continue;
+        // 深度轮廓:统计每列最上部液面到托底的格数
+        let depthSum = 0;
+        for (let x = L; x <= R; x++) {
+          for (let d = 1; d <= 5; d++) { if (st.isActive(x, sy + d) && st.isSolid(x, sy + d)) { depthSum += d; break; } }
+        }
+        found.push({ left: L, right: R, top: sy, width, avgDepth: +(depthSum / width).toFixed(2),
+          cxPx: ((L + R + 1) / 2) * T });
+        sx += width + 4;
+        break;                                                    // 本列只取一处,推进 sx
       }
-      return { sum, cnt };
-    };
-    return { left, right, topY: floorY - depthRows, botY: floorY - 1,
-      cxPx: ((left + right + 1) / 2) * T, floorTopPx: floorY * T, audit,
-      solidOk: st.isSolid(left - 1, floorY) && st.isSolid(right + 1, floorY)
-        && st.isSolid((left + right) >> 1, floorY + 1) && !st.isSolid(left, floorY - 1) };
+    }
+    return found.slice(0, maxN);
   }
 
-  const poolDeep = buildPool(baseX + 4, 6, 4, 'full');
-  const poolShallow = buildPool(baseX + 60, 6, 2, 'partial');
-  if (!poolDeep || !poolShallow || !poolDeep.solidOk || !poolShallow.solidOk) {
-    return { fail: '池体构建失败', wallType };
-  }
-  const auditsAtBuild = { deep: poolDeep.audit(), shal: poolShallow.audit() };
+  const ponds = findPonds(4);
+  if (ponds.length < 2) return { fail: '找不到足够天然水塘', pondsFound: ponds };
 
-  await waitMs(4000);                                        // 液体 sim 稳定
-  const auditsAfterSettle = { deep: poolDeep.audit(), shal: poolShallow.audit() };
-
-  // ---- 钩子:按实体 id 分流 ----
+  // ---- 钩子:按实体 id 分流(含每帧原始液三行+脚盒) ----
   const { Enemy } = await import('/src/entities/Enemy.ts');
+  const { wetCollision } = await import('/src/entities/npcLiquid.ts');
   const proto = Enemy.prototype;
   const origFly = proto.duckFlyAI;
   if (typeof origFly !== 'function') return { fail: '无 duckFlyAI 可钩' };
@@ -149,49 +127,54 @@ const res = await page.evaluate(async () => {
       if ((game.tickCount % 30) === 0 || rec.last?.ai0 !== this.ai0 || rec.last?.wet !== (this.wet ? 1 : 0)
         || rec.last?.vy !== +this.vy.toFixed(2)) {
         const mcx = this.cx / T | 0, mcy = this.cy / T | 0;
-        const liq = (x, y) => (st.inBounds(x, y) ? st.liquid[st.idx(x, y)] : 0);
+        const wb = wetCollision(st, this.x, this.y, this.w, this.h);
         rec.rows.push({ t: game.tickCount, ai0: this.ai0, ai1: +this.ai1.toFixed(0), wet: this.wet ? 1 : 0,
           cx: +this.cx.toFixed(1), cy: +this.cy.toFixed(1), vy: +this.vy.toFixed(2), og: this.onGround ? 1 : 0,
-          lmid: liq(mcx, mcy), lup: liq(mcx, mcy - 1), ldn: liq(mcx, mcy + 1), lft: liq(mcx, (this.y + this.h - 1) / T | 0),
+          lup: liq(mcx, mcy - 1), lmid: liq(mcx, mcy), ldn: liq(mcx, mcy + 1),
+          lft: liq(mcx, (this.y + this.h - 1) / T | 0), wc: wb.wet ? 1 : 0,
           vid: this.vanillaId, hp: this.hp, f: this.facing, vx: +this.vx.toFixed(2) });
         rec.last = { ai0: this.ai0, wet: this.wet ? 1 : 0, vy: +this.vy.toFixed(2) };
       }
     };
   }
-  function putDuck(vid, pool) {
-    const d = Enemy.fromVanilla(vid, pool.cxPx, pool.floorTopPx - 44);  // 生在水里(中心近底)
+  function putDuck(vid, pond) {
+    // 表液面线下方一点:水面(row*16+liquidOffset) 下潜 ~10px
+    const d = Enemy.fromVanilla(vid, pond.cxPx, pond.top * T + 10);
     if (!d) return null;
     d.id = g.entities.nextId++;
     g.entities.add(d, 'enemies');
-    g.__duckLogs[d.id] = { rows: [], last: null };
+    g.__duckLogs[d.id] = { rows: [], last: null, pond };
     return d;
   }
-  const duckDeep = putDuck(365, poolDeep);
-  const duckShal = putDuck(365, poolShallow);
-  if (!duckDeep || !duckShal) return { fail: '放鸭失败' };
 
-  // ---- 四阶段:深/浅 × 远/近,每相 18s ----
+  // 深塘优先放一号(平均深度大者),浅塘放二号
+  const sorted = [...ponds].sort((a, b) => b.avgDepth - a.avgDepth);
+  const duckA = putDuck(365, sorted[0]);
+  const duckB = putDuck(365, sorted[Math.min(1, sorted.length - 1)]);
+  if (!duckA || !duckB) return { fail: '放鸭失败', ponds };
+
+  // ---- 四阶段:A 远/A 近/B 远/B 近,每相 16s。玩家同屏跟随但按远近贴边 ----
   const phases = [];
-  async function phase(name, fn, ms) {
-    const mark = { name, startT: g.tickCount }; phases.push(mark); fn(); await waitMs(ms);
+  async function runPhase(name, teleport) {
+    const mark = { name, startT: g.tickCount }; phases.push(mark);
+    teleport(); await waitMs(16000);
     mark.endT = g.tickCount;
   }
-  await phase('deepFar', () => { p.x = poolDeep.cxPx - 480 - p.w / 2; p.y = poolDeep.floorTopPx - 120 - p.h; }, 18000);
-  await phase('deepNear', () => { p.x = poolDeep.cxPx + 100 - p.w / 2; p.y = poolDeep.floorTopPx - 120 - p.h; }, 18000);
-  await phase('shalFar', () => { p.x = poolShallow.cxPx - 480 - p.w / 2; p.y = poolShallow.floorTopPx - 120 - p.h; }, 18000);
-  await phase('shalNear', () => { p.x = poolShallow.cxPx + 100 - p.w / 2; p.y = poolShallow.floorTopPx - 120 - p.h; }, 18000);
+  const pondA = sorted[0], pondB = sorted[Math.min(1, sorted.length - 1)];
+  await runPhase('pondA-far', () => { p.x = pondA.cxPx - 480 - p.w / 2; p.y = (pondA.top * T) - 140 - p.h; });
+  await runPhase('pondA-near', () => { p.x = pondA.cxPx + 100 - p.w / 2; p.y = (pondA.top * T) - 140 - p.h; });
+  await runPhase('pondB-far', () => { p.x = pondB.cxPx - 480 - p.w / 2; p.y = (pondB.top * T) - 140 - p.h; });
+  await runPhase('pondB-near', () => { p.x = pondB.cxPx + 100 - p.w / 2; p.y = (pondB.top * T) - 140 - p.h; });
 
-  const timelineAudits = [{ t: g.tickCount, deep: poolDeep.audit(), shal: poolShallow.audit() }];
   const stateEnd = {
-    deep: { alive: !duckDeep.dead, vid: duckDeep.vanillaId, cx: +duckDeep.cx.toFixed(0), cy: +duckDeep.cy.toFixed(0), wet: duckDeep.wet ? 1 : 0, hp: duckDeep.hp },
-    shal: { alive: !duckShal.dead, vid: duckShal.vanillaId, cx: +duckShal.cx.toFixed(0), cy: +duckShal.cy.toFixed(0), wet: duckShal.wet ? 1 : 0, hp: duckShal.hp },
+    A: { alive: !duckA.dead, vid: duckA.vanillaId, cx: +duckA.cx.toFixed(0), cy: +duckA.cy.toFixed(0), wet: duckA.wet ? 1 : 0 },
+    B: { alive: !duckB.dead, vid: duckB.vanillaId, cx: +duckB.cx.toFixed(0), cy: +duckB.cy.toFixed(0), wet: duckB.wet ? 1 : 0 },
     player: { cx: +p.cx.toFixed(0), cy: +p.cy.toFixed(0) },
   };
   return {
-    wallType, auditsAtBuild, auditsAfterSettle, timelineAudits, phases,
-    poolBox: { deep: { l: poolDeep.left, r: poolDeep.right, tp: poolDeep.topY, bt: poolDeep.botY },
-               shal: { l: poolShallow.left, r: poolShallow.right, tp: poolShallow.topY, bt: poolShallow.botY } },
-    logs: { deep: g.__duckLogs[duckDeep.id].rows, shal: g.__duckLogs[duckShal.id].rows },
+    pondsFound: ponds.map(q => ({ l: q.left, r: q.right, top: q.top, width: q.width, avgDepth: q.avgDepth })),
+    phases,
+    logs: { A: g.__duckLogs[duckA.id].rows, B: g.__duckLogs[duckB.id].rows },
     stateEnd,
   };
 });
@@ -203,7 +186,7 @@ if (!res || res.fail) {
   process.exit(3);
 }
 
-// ---- 分析:每鸭腿长分布 + 跳变样本 ----
+// ---- 分析:每鸭腿长分布 + 跳变样本(含跳变时 wet/液列/姿态) ----
 function analyze(rows) {
   const legs = []; let cur = null;
   const flips = [];
@@ -219,17 +202,19 @@ function analyze(rows) {
     dist[key] = (dist[key] ?? 0) + 1;
   }
   const wetTicks = rows.filter(e => e.wet === 1).length;
-  return { total: rows.length, dist, wetTicks, flips: flips.slice(0, 30), tail: rows.slice(-14) };
+  // 极短飞行腿(鬼畜指纹):飞行段 <45t
+  const shortFlight = legs.filter(l => l.a === 1 && l.n <= 45);
+  return { total: rows.length, legCount: legs.length, dist, wetTicks,
+    shortFlightCount: shortFlight.length,
+    flips: flips.slice(0, 30), shortFlights: shortFlight.map(l => ({ n: l.n, t0: l.t0 })).slice(0, 20),
+    tail: rows.slice(-14) };
 }
-const summary = {
-  deep: analyze(res.logs.deep), shal: analyze(res.logs.shal),
-};
+const A = analyze(res.logs.A), B = analyze(res.logs.B);
 console.log(JSON.stringify({
-  meta: { wallType: res.wallType, poolBox: res.poolBox, stateEnd: res.stateEnd },
-  audits: { atBuild: res.auditsAtBuild, afterSettle: res.auditsAfterSettle, timeline: res.timelineAudits.slice(-4) },
-  deep: { ...summary.deep, tail: undefined, flips: summary.deep.flips.slice(0, 18) },
-  shal: { ...summary.shal, tail: undefined, flips: summary.shal.flips.slice(0, 18) },
+  ponds: res.pondsFound, phases: res.phases, stateEnd: res.stateEnd,
+  duckA: { ...A, tail: undefined, flips: A.flips.slice(0, 18) },
+  duckB: { ...B, tail: undefined, flips: B.flips.slice(0, 18) },
 }, null, 2));
-fs.writeFileSync('/tmp/sw-duck-result.json', JSON.stringify({ res, summary }, null, 2));
+fs.writeFileSync('/tmp/sw-duck-result.json', JSON.stringify({ res, A, B }, null, 2));
 fs.writeFileSync('/tmp/sw-duck-stage.png', Buffer.from(await page.screenshot({ type: 'png' })));
 await browser.close();

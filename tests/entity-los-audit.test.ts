@@ -73,84 +73,84 @@ describe('★F5 AI_130 三档分层表（Projectile.cs:69166-69398 case 链）',
 });
 
 type PickFn = (
-  w: unknown, g: unknown, r: number,
+  w: unknown,
   o?: { slopeCapY?: number; maxDist?: number; lineMode?: boolean },
 ) => { cx: number; cy: number } | null;
 
-describe('城镇 NPC 入态目标选择 pickSideTarget（NPC.cs:53887-53963 扫描+56012-56103 支内）', () => {
-  // ★F2 翻修口径（2026-08-30）：主候选按危险侧 |dx| 钦定 → 重验失败单次回退次候选 →
-  // 带检（slopeCapY/maxDist）只对【终选者】判，失败即整 tick 拒发——不再是
-  // 「带检预过滤候选池后择近」
-  /** 挥击型假身借方法（过滤路径与攻击表无关） */
-  function npcAt(cx: number, cy: number) {
-    return {
-      vanillaId: 227,
-      x: cx - 10, y: cy - 21, w: 20, h: 42, cx, cy,
-    };
+/**
+ * 城镇 NPC 入态目标选择 pickSideTarget（★C2 统一定案：入态选靶直读 dangerUpdate
+ * 产出的 threatPool 快照,独立重扫已删除）——本组用例经真实 dangerUpdate 生成池
+ * 后调 pickSideTarget,断言选侧钦定/重验回退/带检拒发语义(锚行号同旧口径)：
+ */
+describe('城镇 NPC 入态目标选择 pickSideTarget(池直读,threatPool 单点产出)', () => {
+  /** 敌 mock（damage>0 即过扫描门;不带 dontTakeDamage → 过 CanBeChasedBy :91141 族） */
+  function foe(me: { cx: number; cy: number }, dx: number, dy = 0) {
+    return { x: me.cx + dx - 9, y: me.cy + dy - 20, w: 18, h: 40, dead: false, damage: 10,
+      def: { friendly: false } };
   }
+  /** 真实 dangerUpdate 产出候选池 → pickSideTarget(缺省/带检/lineMode 面不变)。
+   *  实例取 guide(22):TOWN_DANGER_RANGE 无表项 → num11=200(等价旧显式 range 入参)。 */
   function callPick(
-    thisArg: Record<string, number>,
-    store: World['store'],
     enemies: Array<{ x: number; y: number; w: number; h: number }>,
-    range: number, opts?: { slopeCapY?: number; maxDist?: number; lineMode?: boolean },
+    opts?: { slopeCapY?: number; maxDist?: number; lineMode?: boolean },
   ) {
+    const world = makeWorld();
+    const n = new TownNPC('guide', 32 * 16 - 2, 16 * 16 + 8 - 21);
+    (TownNPC.prototype as unknown as Record<string, (wd: unknown, g: unknown) => void>)
+      .dangerUpdate.call(n, { store: world.store }, { enemies: () => enemies } as never);
+    expect((n as unknown as { threatRaw: boolean }).threatRaw).toBe(true);   // 池非空前提
     const fn = (TownNPC.prototype as unknown as Record<string, PickFn>).pickSideTarget;
-    return fn.call(thisArg, { store }, { enemies: () => enemies }, range, opts);
+    return fn.call(n, { store: world.store }, opts);
   }
 
   it('无门:同侧双敌取 |dx| 近者（原版 num13/num14 dx 口径,:54034-54049）', () => {
-    const w = makeWorld();
-    const me = npcAt(32 * 16 + 8, 16 * 16 + 8);
-    const shallowFar = { x: me.cx + 150, y: me.cy - 10, w: 18, h: 40, damage: 10 };   // d≈150 斜率≈0.07
-    const steepNear = { x: me.cx + 40, y: me.cy + 96, w: 18, h: 40, damage: 10 };     // 右下 d≈106 斜率≈0.91
-    const got = callPick(me, w.store, [shallowFar, steepNear], 200);
+    const me = { cx: 32 * 16 + 8, cy: 16 * 16 + 8 };
+    const shallowFar = { ...foe(me, 150), damage: 10 };     // d≈150 斜率≈0.07
+    const steepNear = { ...foe(me, 40, 96), damage: 10 };    // 右下 d≈106 斜率≈0.91
+    const got = callPick([shallowFar, steepNear]);
     expect(got?.cx).toBe(steepNear.x + 9);
   });
 
   it('弓族 slopeCapY=0.5(:56048-56049):终选者出带 → 整 tick 拒发(null),不再试他敌', () => {
-    const w = makeWorld();
-    const me = npcAt(32 * 16 + 8, 16 * 16 + 8);
-    const shallowFar = { x: me.cx + 150, y: me.cy - 10, w: 18, h: 40, damage: 10 };
-    const steepNear = { x: me.cx + 40, y: me.cy + 96, w: 18, h: 40, damage: 10 };
+    const me = { cx: 32 * 16 + 8, cy: 16 * 16 + 8 };
+    const shallowFar = foe(me, 150);
+    const steepNear = foe(me, 40, 96);
     // 主候选 = |dx| 近的 steepNear(dx 40<150)，斜率 0.91>0.5 出带 → 原版本 tick 拒发:
     // 支内 vector8.Y 门只对 num127 终选判（:56052-56057），不回落 shallowFar
-    const got = callPick(me, w.store, [shallowFar, steepNear], 200, { slopeCapY: 0.5, lineMode: true });
+    const got = callPick([shallowFar, steepNear], { slopeCapY: 0.5, lineMode: true });
     expect(got).toBeNull();
   });
 
   it('全陡:弓族入态候选为空(退回 null)', () => {
-    const w = makeWorld();
-    const me = npcAt(32 * 16 + 8, 16 * 16 + 8);
-    const steepOnly = { x: me.cx + 40, y: me.cy + 96, w: 18, h: 40, damage: 10 };
-    expect(callPick(me, w.store, [steepOnly], 200, { slopeCapY: 0.5 })).toBeNull();
+    const me = { cx: 32 * 16 + 8, cy: 16 * 16 + 8 };
+    const steepOnly = foe(me, 40, 96);
+    expect(callPick([steepOnly], { slopeCapY: 0.5 })).toBeNull();
   });
 
   it('狼人态 maxDist=50(:56022-56025):主候选 Distance>50 整次拒发', () => {
-    const w = makeWorld();
-    const me = npcAt(32 * 16 + 8, 16 * 16 + 8);
-    const far = { x: me.cx + 70, y: me.cy, w: 18, h: 40, damage: 10 };
-    expect(callPick(me, w.store, [far], 200, { maxDist: 50 })).toBeNull();
-    expect(callPick(me, w.store, [far], 200)?.cx).toBe(far.x + 9);
+    const me = { cx: 32 * 16 + 8, cy: 16 * 16 + 8 };
+    const far = foe(me, 70);
+    expect(callPick([far], { maxDist: 50 })).toBeNull();
+    expect(callPick([far])?.cx).toBe(far.x + 9);
   });
 
   it('★F2 回归·双敌异侧:危险侧(|dx| 近)主候选出格 → 整 tick 无攻击目标,对侧幸存者不救场'
     + '(:56019-56026/:56052-56057 失败即拒发不跨侧重试)', () => {
-    const w = makeWorld();
-    const me = npcAt(32 * 16 + 8, 16 * 16 + 8);
+    const me = { cx: 32 * 16 + 8, cy: 16 * 16 + 8 };
     // 右侧近敌（|dx| 40 < 左侧 150）＝主候选/危险侧；其斜率 0.91 > 弓族带 0.5（出格）
-    const rightSteep = { x: me.cx + 40, y: me.cy + 96, w: 18, h: 40, damage: 10 };
+    const rightSteep = foe(me, 40, 96);
     // 左侧远敌在带内——旧「池过滤+hypot 择近」会改打它;原版在本 tick 一发都不打
-    const leftShallow = { x: me.cx - 150, y: me.cy - 10, w: 18, h: 40, damage: 10 };
-    const refused = callPick(me, w.store, [rightSteep, leftShallow], 200,
+    const leftShallow = foe(me, -150);
+    const refused = callPick([rightSteep, leftShallow],
       { slopeCapY: 0.5, lineMode: true });
     expect(refused).toBeNull();                     // 主候选带检失败 → null（无攻击）
     // 对照:无带检门时钦定规则照常命中主候选（同一几何,门位差异可证）
-    const ungated = callPick(me, w.store, [rightSteep, leftShallow], 200);
+    const ungated = callPick([rightSteep, leftShallow]);
     expect(ungated?.cx).toBe(rightSteep.x + 9);
     // 反向对照:把右侧主候选拉远(|dx| 180>左侧 150)→ 危险侧钦定翻到左，带内正常入态
     // （排除"永远打不到"假阳性——拒发只发生在钦定者出带的 tick）
-    const flipped = callPick(me, w.store,
-      [{ ...leftShallow }, { ...rightSteep, x: me.cx + 180 }], 200, { slopeCapY: 0.5, lineMode: true });
+    const flipped = callPick([{ ...leftShallow }, { ...rightSteep, x: me.cx + 180 - 9 }],
+      { slopeCapY: 0.5, lineMode: true });
     expect(flipped?.cx).toBe(leftShallow.x + 9);
   });
 });

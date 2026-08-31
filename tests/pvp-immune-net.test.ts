@@ -17,7 +17,7 @@
 // ============================================================================
 import { describe, it, expect } from 'vitest';
 import { NetWriter, NetReader, Msg, PlayerHurtFlags, PLAYER_HURT_LEN, readPlayerHurt, writePlayerHurt } from '../src/net/protocol';
-import { ClientNet } from '../src/net/ClientNet';
+import { ClientNet, beetlePvpCredit } from '../src/net/ClientNet';
 import type { RemotePlayerState } from '../src/net/ClientNet';
 
 // ---------------------------------------------------------------------------
@@ -108,10 +108,12 @@ function seedPeer(net: ClientNet, slot: number): RemotePlayerState {
   return p;
 }
 
-/** 构造 msg16 帧（与 ClientNet.syncHp 写序逐字段同构）；withImmune=false 模拟旧端形状 */
+/** 构造 msg16 帧（与 ClientNet.syncHp 写序逐字段同构）；withImmune=false 模拟旧端形状；
+ *  def=★F14 第三尾段 statDefense 镜像（位置序恒跟在免疫段后） */
 function lifeManaFrame(slot: number, opts?: {
   hp?: number; maxHp?: number; dPve?: number; dPvp?: number;
   mana?: number; manaMax?: number; luck?: number; immune?: number; withImmune?: boolean;
+  def?: number;
 }): Uint8Array {
   const o = { hp: 70, maxHp: 100, dPve: 1, dPvp: 2, mana: 50, manaMax: 120, luck: 0.25, immune: 8, ...(opts ?? {}) };
   const w = new NetWriter(Msg.PlayerLifeMana);
@@ -119,6 +121,7 @@ function lifeManaFrame(slot: number, opts?: {
   w.u16(o.dPve).u16(o.dPvp);
   w.i16(o.mana); w.i16(o.manaMax); w.f32(o.luck);
   if (o.withImmune !== false) w.i16(o.immune);
+  if (o.def !== undefined) w.u16(o.def);
   return w.finish();
 }
 
@@ -252,8 +255,8 @@ describe('msg16 免疫尾：新旧双向降级矩阵', () => {
     expect(mirrorOf(net, 2)).toBe(0);              // 缺省 0 = 不拦 = 改动前行为
   });
 
-  it('syncHp 上行写序回归：尾段含 [mana i16][manaMax i16][luck f32][iframes i16]', () => {
-    const net = mkNet(0, {}, { hp: 70, iframes: 80 });
+  it('syncHp 上行写序回归：尾段含 [mana i16][manaMax i16][luck f32][iframes i16][defense u16]', () => {
+    const net = mkNet(0, {}, { hp: 70, iframes: 80, defense: 63 });
     syncHpNow(net);
     const raw = framesRaw(wsOf(net).sent, Msg.PlayerLifeMana);
     expect(raw.length).toBe(1);
@@ -264,7 +267,37 @@ describe('msg16 免疫尾：新旧双向降级矩阵', () => {
     expect(r.i16()).toBe(50); expect(r.i16()).toBe(100);
     expect(r.f32()).toBeCloseTo(0);
     expect(r.i16()).toBe(80);                      // General 免疫余量随包上行
+    expect(r.u16()).toBe(63);                      // ★F14 statDefense 镜像尾段
     expect(r.remaining).toBe(0);
+  });
+
+  // ---- ★F14（2026-08-31 清零批四）statDefense 镜像尾：编解码 + 降级矩阵 ----
+  it('★F14 新形状：免疫段后第三尾段 u16 进镜像；初始 null=未知语义', () => {
+    const net = mkNet(0);
+    seedPeer(net, 3);
+    expect(net.players.get(3)!.pvpDefense).toBeNull();       // 初始未知——非零值占位
+    feedNet(net, lifeManaFrame(3, { hp: 90, immune: 8, def: 63 }));
+    expect(net.players.get(3)!.pvpDefense).toBe(63);
+    // 免疫位面行为不变
+    expect(mirrorOf(net, 3)).toBe(8);
+  });
+
+  it('★F14 两尾全无的旧形状帧：def 镜像保持 null（消费侧弃账不虚增，免疫不重置）', () => {
+    const net = mkNet(0);
+    seedPeer(net, 3);
+    feedNet(net, lifeManaFrame(3, { hp: 80, immune: 40 }));
+    feedNet(net, lifeManaFrame(3, { hp: 79, withImmune: false }));   // 旧 server 重建形态
+    expect(net.players.get(3)!.pvpDefense).toBeNull();
+    expect(mirrorOf(net, 3)).toBe(40);                       // 免疫混合环境不清窗先例延续
+  });
+
+  it('★F14 字节级：新帧在旧客户端读法下恰余 4 字节（免疫2+防御2，len 前缀互不干扰无害未读）', () => {
+    const frame = lifeManaFrame(2, { immune: 8, def: 50 });
+    const r = new NetReader(frame.subarray(3));
+    r.u8(); r.i16(); r.i16();
+    r.u16(); r.u16();
+    r.i16(); r.i16(); r.f32();
+    expect(r.remaining).toBe(4);
   });
 });
 
@@ -428,6 +461,23 @@ describe('Room 中继：msg16 免疫尾透传 + msg117 定向广播', () => {
     expect(rr.remaining).toBe(0);                      // 广播层无多余字节
   });
 
+  it('★F14 statDefense 尾透传：上行带第三尾段 → 其他端重打包帧保留同值（排除发送者）', async () => {
+    const rig = await mkRig();
+    const hostBefore = rig.host.ws.sent.length;
+    rig.relay(rig.guest, Msg.PlayerLifeMana,
+      lifeManaFrame(99 /* 占位,服务器覆写 */, { hp: 88, immune: 8, def: 63 }));
+    expect(rig.guest.ws.sent.filter((f) => parseFrames([f]).some((x) => x.msgId === Msg.PlayerLifeMana)).length).toBe(0);
+    const back = rig.host.ws.sent[hostBefore];
+    expect(back[2]).toBe(Msg.PlayerLifeMana);
+    const rr = new NetReader(back.subarray(3));
+    rr.u8();                                           // 权威 slot=1
+    rr.i16();                                          // hp（值断言在免疫尾用例）
+    rr.i16(); rr.u16(); rr.u16(); rr.i16(); rr.i16(); rr.f32();
+    rr.i16();                                          // 免疫尾
+    expect(rr.u16()).toBe(63);                         // ★def 尾逐值存活——双尾同批转发不互吞
+    expect(rr.remaining).toBe(0);
+  });
+
   it('msg117：伪造他人 slot 被权威覆写为发送者本人 + 排除发送者', async () => {
     const rig = await mkRig();
     const hostBefore = rig.host.ws.sent.length;
@@ -525,15 +575,16 @@ describe('端到端链路（victim-settles 权威展示闭环）', () => {
 
   it('弱环境降级：victim 帧经「剥尾中继」仍可解（attacker 查询退化 0=不拦，不炸）', async () => {
     const e = await bootE2E();
-    e.victim.notifyPlayerHurtSettled();             // 造一条带免疫尾的 msg16 上行
+    e.victim.notifyPlayerHurtSettled();             // 造一条带尾的 msg16 上行
     syncHpNow(e.victim);
-    // 模拟旧 server 重打包（已知退化路径）：msg16 尾段 2 字节被剥后入站
+    // 模拟旧 server 重打包（已知退化路径）：上行帧解析到已知字段为止、未知尾全剥
+    // （★F14 起,msg16 尾段=免疫 2B + statDefense 2B——旧 server 一并剥除）
     for (const joined of wsOf(e.victim).sent.splice(0)) {
       let p = 0;
       while (p + 3 <= joined.length) {
         const len = joined[p] | (joined[p + 1] << 8);
         const msgId = joined[p + 2];
-        const stripTail = (msgId === Msg.PlayerLifeMana) ? -2 : 0;
+        const stripTail = (msgId === Msg.PlayerLifeMana) ? -4 : 0;
         e.room.handle(e.victimRc, msgId, new NetReader(joined.subarray(p + 3, p + len + stripTail)));
         p += len;
       }
@@ -542,6 +593,41 @@ describe('端到端链路（victim-settles 权威展示闭环）', () => {
     e.pumpServerToAttacker();
     expect(mirrorOf(e.attacker, 1)).toBe(0);        // 尾被剥 → 镜像缺省 0 = 不拦 = 现状
     expect(e.attacker.players.get(1)!.hp).toBe(45); // 基础镜像不受影响
-    e.attacker.tick();                              // 本地衰减照常运转、无异常抛出
+    expect(e.attacker.players.get(1)!.pvpDefense).toBeNull();   // ★def 同批剥离=null 弃账面
+    e.attacker.tick();                              // 本地衰减/prune 照常运转、无异常抛出
+  }, 20000);
+
+  it('★F14 甲虫记账端到端：victim(statDefense=20) settle 两包（msg16 尾先行）→ attacker 未决挥击经 msg117 消费入账 = vanilla 返回段式', async () => {
+    const { room, mkClient, clientToRoom, roomToNets } = await mkRoom();
+    const victimRc = mkClient(1);
+    const attackerRc = mkClient(0);
+    const victim = mkNet(1, {}, { hp: 45, iframes: 8, defense: 20 });
+    const attacker = mkNet(0, {});
+    seedPeer(attacker, 1);
+    const credits: Array<{ slot: number; credit: number; off: boolean }> = [];
+    attacker.onMeleePvpBeetleCredit = (slot, credit, off) => credits.push({ slot, credit, off });
+
+    // —— 攻端受理命中登记（Game 近战 PvP 区等价动作；rawDmg=36 crit=off=true）——
+    attacker.notePendingMeleeHit(1, 36, true, true);
+
+    // —— 并轨链①：victim hp 变化包先行（携 statDefense=20 的第三尾段）——
+    victim.notifyPlayerHurtSettled();
+    syncHpNow(victim);
+    clientToRoom(victimRc, victim);
+    roomToNets(attackerRc.ws.sent, [attacker]);
+    expect(attacker.players.get(1)!.pvpDefense).toBe(20);   // 镜像新鲜到位
+
+    // —— 并轨链②：victim 实扣结算权威广播（Pvp|crit 位）——
+    victim.sendPlayerHurt(23, 48.5, 96.25, 1, PlayerHurtFlags.Crit | PlayerHurtFlags.Pvp);
+    clientToRoom(victimRc, victim);
+    roomToNets(attackerRc.ws.sent, [attacker]);
+
+    expect(credits.length).toBe(1);
+    expect(credits[0]).toEqual({
+      slot: 1,
+      credit: beetlePvpCredit(36, true, 20),        // trunc(36×2 − 10)=62 ≡ vanilla num2
+      off: true,
+    });
+    void room; void victimRc;
   }, 20000);
 });

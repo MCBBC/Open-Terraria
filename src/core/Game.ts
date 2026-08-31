@@ -12899,10 +12899,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
 
   /** ★出膛锚解析(2026-08-31 终版):heldItemTipWorld 直算绘制尖端(与 drawUseItem
-   *  同变换,射击瞬间零滞后)。★实心回退钳制已删——室内测试时尖端常落进墙体/
-   *  家具格,回退把出生点拉短 20%+,表现为"很多角度弹道诡异偏短"(2026-08-31
-   *  用户 [swAnchor] 数据定罪);原版贴墙开火弹即生于墙内并即刻撞墙消亡,
-   *  属正常行为,勿再引回。
+   *  同变换,射击瞬间零滞后)+ 实心回退:尖端落在实心格(贴墙/朝下地面)时沿
+   *  玩家→尖端射线 2px 步进回退到最后非实心位——**必须保留**:尖端在体外 30-40px,
+   *  无回退时贴墙=穿墙射击、朝下=扎进地板(2026-08-31 用户双报定罪)。回退的
+   *  "缩短"是正确行为(不能隔墙开火);原版出生=盒中心同样永远够不到墙外语义。
    *  flag=localStorage.swDebugMuzzle → [swAnchor] 打印最终位移 */
   private resolveShotAnchor(spriteKey: string, ang: number): { x: number; y: number } {
     const vid = viIdFromKey(spriteKey);
@@ -12910,14 +12910,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const tip = heldItemTipWorld(
       this.player.cx, this.player.cy, this.player.facing === -1 ? -1 : 1, ang,
       vid, swAr?.sw ?? 16, swAr?.sh ?? 16);
+    let x = tip.x, y = tip.y;
+    const st2 = this.world.store;
+    if (st2.isSolid(Math.floor(x / TILE), Math.floor(y / TILE))) {
+      const dx = this.player.cx - x, dy = this.player.cy - y;
+      for (let i = 1; i <= 24; i++) {
+        const t = i / 24;
+        const qx = Math.floor((x + dx * t) / TILE), qy = Math.floor((y + dy * t) / TILE);
+        if (!st2.inBounds(qx, qy) || !st2.isSolid(qx, qy)) { x += dx * t; y += dy * t; break; }
+      }
+    }
     try {
       if ((globalThis as Record<string, unknown>).swDebugMuzzle === true
         || (typeof localStorage !== 'undefined' && localStorage.getItem('swDebugMuzzle') === '1')) {
         console.log('[swAnchor]', spriteKey.slice(0, 12),
-          `d=(${(tip.x - this.player.cx).toFixed(1)},${(tip.y - this.player.cy).toFixed(1)})`);
+          `d=(${(x - this.player.cx).toFixed(1)},${(y - this.player.cy).toFixed(1)})`);
       }
     } catch { /* noop */ }
-    return { x: tip.x, y: tip.y };
+    return { x, y };
   }
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {

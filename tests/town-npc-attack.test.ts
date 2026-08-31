@@ -188,9 +188,10 @@ describe('★F7 入态掷骰序（先掷后验）+ 触发面注入', () => {
 
   it('幸存候选存在 → 同样 1 骰后直接入挥击态', () => {
     const eY = 96 * 16;
-    const { world, game, npc } = entryHarness('dyer',
-      [{ x: 100 * 16 + 36, y: eY, w: 18, h: 40 }]);   // dx≈+45 < range60、LOS 畅通
+    const fBox = { x: 100 * 16 + 36, y: eY, w: 18, h: 40 };   // dx≈+45 < range60、LOS 畅通
+    const { world, game, npc } = entryHarness('dyer', [fBox]);
     Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true });
+    seedPool(npc, 'right', fBox);                     // ★C2:池注入(主候选=num17)
     let rolls = 0;
     npc.rng = () => { rolls++; return 0.0000001; };
     expect(callEntry(npc, world, game)).toBe(true);
@@ -204,8 +205,10 @@ describe('★F2 边聊边打（总伞 !flag5|flag16 + num3×0.8 减频）', () =
    *  (1/48)。阈值探针 r=0.019 ∈ (1/60, 1/48] —— 两 gate 的分界值 */
   function guideTalk(r: number, talking: boolean) {
     const eY = 96 * 16;                                 // 与本体视线近乎水平(|slope|<0.5)
-    const { world, game, npc } = entryHarness('guide', [{ x: 104 * 16, y: eY, w: 18, h: 40 }]);
+    const eBox = { x: 104 * 16, y: eY, w: 18, h: 40 };
+    const { world, game, npc } = entryHarness('guide', [eBox]);
     Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true });
+    seedPool(npc, 'right', eBox);                          // ★C2:池注入(num15=1→num17)
     (npc as unknown as { talking: boolean }).talking = talking;
     npc.rng = () => r;
     return { entered: callEntry(npc, world, game), state: npc.attackState };
@@ -262,9 +265,10 @@ describe('★F2 边聊边打（总伞 !flag5|flag16 + num3×0.8 减频）', () =
 describe('★F3 入态前特判（机械师 124 侦察弹 + 树妖 20 buff165 门）', () => {
   it('机械师:侦察弹 582 在途(owned ai1 tag)→ 入态抑制且不耗骰', () => {
     const eY = 96 * 16;
-    const { world, game, shots, npc } = entryHarness('mechanic',
-      [{ x: 106 * 16, y: eY, w: 18, h: 40 }]);
+    const eBox = { x: 106 * 16, y: eY, w: 18, h: 40 };
+    const { world, game, shots, npc } = entryHarness('mechanic', [eBox]);
     Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true });
+    seedPool(npc, 'right', eBox);                           // ★C2:池注入
     npc.rng = () => 0.0000001;
     expect(callEntry(npc, world, game)).toBe(true);          // 首次正常入近战态
     const meleeTick = (TownNPC.prototype as unknown as Record<string, (w: World, g: never) => boolean>).attackUpdate;
@@ -283,9 +287,11 @@ describe('★F3 入态前特判（机械师 124 侦察弹 + 树妖 20 buff165 �
 
   it('树妖:1200px 内缺 buff165 的城镇 NPC 仅自己(self 含缺 ward)→ 放行入态', () => {
     const eY = 96 * 16;
+    const dBox = { x: 110 * 16, y: eY, w: 18, h: 40 };
     const { world, game, npc } = entryHarness('dryad',
       [{ x: 110 * 16, y: eY, w: 18, h: 40 }]);
     Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true });
+    seedPool(npc, 'right', dBox);                           // ★C2:池注入
     npc.rng = () => 0.0000001;
     expect(callEntry(npc, world, game)).toBe(true);
     expect(npc.attackState).toBe(14);
@@ -324,7 +330,7 @@ describe('★F5 入态朝向 = 盒左缘 position.X 比较(:56031 族)', () => {
   it('左缘在其身后而中心在前:原版面向左(-1),中心比较会给右(+1)', () => {
     const eY = 96 * 16;
     const { world, game, enemies, npc } = entryHarness('guide', [{ x: 0, y: eY, w: 0, h: 0 }]);
-    Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true });
+    Object.assign(npc, { dangerNear: true, threatRaw: true });
     npc.rng = () => 0.001;
     // 重排敌盒(宽64):盒心在本体中心右、左缘已越过本体左缘;盒心与本体中心
     // 调平满足弓族 |DirectionTo.Y|≤0.5 带(:56048-56049)
@@ -334,6 +340,10 @@ describe('★F5 入态朝向 = 盒左缘 position.X 比较(:56031 族)', () => {
     box.y = nTop + npc.h / 2 - 20;
     box.w = 64; box.h = 40;
     expect(box.x + 32).toBeGreaterThan(nLeft + npc.w / 2);   // 前置自检:盒心偏右
+    // 盒心在右侧而左缘已越过本体左缘——num16/17 记录按 |dx| 口径归【右】侧,
+    // 但 :56031 入态朝向以 position.X（盒左缘）字面比较 → 面向左
+    Object.assign(npc, { dangerSide: -1 });
+    seedPool(npc, 'left', { x: box.x, y: box.y, w: box.w, h: box.h });
     void world; void game;
     expect(callEntry(npc, world, game)).toBe(true);
     expect(npc.facing).toBe(-1);                             // :56031 左缘比较字面
@@ -593,6 +603,18 @@ function callDanger(npc: AnyNpc, world: World, game: never): void {
   fn.call(npc, world, game);
 }
 
+/** ★C2 池注入：入态选靶直读 threatPool(危险扫描是唯一产出位)。attackUpdate
+ *  单测经此注入代替旧「重扫面隐式可见」——ref 形状与 dangerUpdate 记录位同构 */
+function seedPool(npc: AnyNpc,
+  side: 'left' | 'right' | null, box?: { x: number; y: number; w: number; h: number } | null): void {
+  const ref = box
+    ? { x: box.x, y: box.y, w: box.w, h: box.h, cx: box.x + box.w / 2, cy: box.y + box.h / 2 }
+    : null;
+  Object.assign(npc as unknown as Record<string, unknown>, {
+    threatPool: { left: side === 'left' ? ref : null, right: side === 'right' ? ref : null },
+  });
+}
+
 describe('★F4 危险管线双窗拆分 + PrettySafe 收口伞（NPC.cs:54033/:54040-41/:54102-29）', () => {
   /** 敌盒（相对本体中心右移 dxPx、同一走廊行 row97——LOS 畅通面) */
   function foe(dxPx: number) {
@@ -738,9 +760,10 @@ describe('★F8 战斗判定掷骰全走实例注入面(Math.random 仅限演出
   it('巫师入态+连发射程全程零 Math.random 直呼', () => {
     // 世界先建（WeatherState 构造种子面属既有豁免域）——之后再接管 Math.random
     const eY = 96 * 16;
-    const { world, game, shots, npc } = entryHarness('wizard',
-      [{ x: 104 * 16, y: eY, w: 18, h: 40 }]);
+    const wBox = { x: 104 * 16, y: eY, w: 18, h: 40 };
+    const { world, game, shots, npc } = entryHarness('wizard', [wBox]);
     Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true });
+    seedPool(npc, 'right', wBox);                 // ★C2:池注入
     npc.rng = () => 0.0000001;                 // 攻击门 1/gate 恒中、散布序列确定
     const realRandom = Math.random;
     let strayCalls = 0;

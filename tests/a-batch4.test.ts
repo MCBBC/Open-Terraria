@@ -333,18 +333,23 @@ describe('A4-4b 毁灭者链门淡入（NPC.cs:50162-50182）', () => {
 });
 
 // ===========================================================================
-// 5. 猪鲨爆裂泡泡 371（StrikeNPC cs:82102-82107 / aiStyle 70 :35180-35194）
+// 5. 猪鲨爆裂泡泡 371（★1458 行为裁定 2026-08-31——旧档 1456 StrikeNPC cs:82102-
+//   82107 零伤转引信已退役；1457/1458 命中照常扣血、血尽走 checkDead NPC.cs:
+//   78850-78855 转 ai[0]=1/ai[1]=4 引信态,由 dukeBubbleAI 首行接管。本块改判 =
+//   台账清偿批回归锚,详见 tests/boss-dd-ledger-clean.test.ts）
 // ===========================================================================
-describe('A4-5 爆裂泡泡 371 受击即爆（cs:82102-82107）', () => {
-  it('受击不扣血（num=0），直接转爆炸态 ai0=1/ai1=4 + 不可再受击', () => {
+describe('A4-5 爆裂泡泡 371（1458 裁定:命中真实化+血尽转引信）', () => {
+  it('命中照常扣血（StrikeNPC 无零伤特例）,血尽后经 AI 首行转引信态且不可再受击', () => {
     const w = emptyWorld();
     const game = makeGame(w);
     const b = Enemy.fromVanilla(371, 100 * TILE, 100 * TILE)!;
     const hp0 = b.hp;
-    expect(b.hurt(500, 0, 0, game)).toBe(true);       // 受击成立但不掉血
-    expect(b.hp).toBe(hp0);
+    expect(b.hurt(500, 0, 0, game)).toBe(false);      // 扣血真实发生(血尽放行,非死)
+    expect(b.hp).toBeLessThan(hp0);
+    dukeBubbleAI(b, game, null);                      // AI 首行接管转换
     expect(b.ai0).toBe(1);
     expect(b.ai1).toBe(4);
+    expect(b.dontTakeDamage).toBe(true);
     expect(b.hurt(500, 0, 0, game)).toBe(false);      // 爆炸窗口不可再受击（dontTakeDamage）
   });
 

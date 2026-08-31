@@ -11830,16 +11830,20 @@ export class Renderer {
     // ---- 坐骑点光注入（Mount.cs 各 AddLight 段；同岩浆瀑布惯例走渲染端 lighting 引用，
     //      次帧生效）。仅背层走一遍，避免双层重复累加 ----
     if (layer === 'back' && this.lighting) {
-      // Colors.CurrentLiquidColor 近似（Colors.cs _liquidColors 表）：按玩家浸入液体
-      // 取色，未浸入取当前群系水色档 0；背层液色渐变由下方 case-12 背层段以
-      // mnt.fishronCounter 直读实现（Mount.Draw :5780-5787）
-      const lc: [number, number, number] = p.inLava ? [253, 32, 3]
-        : p.inHoney ? [59, 29, 131] : [9, 61, 191];
+      // Colors.CurrentLiquidColor 近似（Colors.cs:97-120）：按玩家浸入液体取色，
+      // 无液 → null（CurrentLiquidColor 的 Transparent 档 = 光贡献归零，台账批）；
+      // 背层液色渐变由下方 case-12 背层段以 mnt.fishronCounter 直读实现
+      const lc: [number, number, number] | null = p.inLava ? [253, 32, 3]
+        : p.inHoney ? [59, 29, 131]
+        : p.inWater ? [9, 61, 191] : null;
       // WindForVisuals = Main.windSpeedCurrent（Main.cs:2896）——扫帚挂件风摆项
-      // （Mount.cs :3553 num2）取真实风值，缺省 0（无风）
+      // （GetWitchBroomTrinketRotation :3553 num2/:3601）取真实风值，缺省 0（无风）
       const wind = renderEnv.wind ?? 0;
       for (const l of mountLights(mnt, p, {
         liquidColor: lc, worldSurface, miscCounter: p.miscCounter, wind,
+        // 露天档（WorldGen.InAPlaceWithWind 中心格,GetWitchBroomTrinketRotation
+        // :3597-3602 num3=1f；非露天 0.5f）——台账批接通（此前恒 ×0.5）
+        windExposed: (p as unknown as { mountWindExposed?: boolean }).mountWindExposed === true,
       })) {
         this.lighting.addLight(l.tx, l.ty, l.r, l.g, l.b);
       }

@@ -340,9 +340,9 @@ function killTileGen(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (!st.flags[i]) return;
-  // ★IIIII100b KIL 对位仪：生成期 Kill 逐格取证（SW_I109_MARK 门控；区域盒内全量）
-  if (MK109 && inWorld(st, x, y, 0) && x >= 1030 && x <= 1120 && y >= 205 && y <= 260) {
-    mk109(`KIL|x=${x}|y=${y}|t=${TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1}|fx=${st.frameX[i]}|fy=${st.frameY[i]}`);
+  // ★IIIII100b KIL 对位仪：生成期 Kill 逐格取证（SW_I109_MARK/SW_I118_WATCH 门控）
+  if ((MK109 || W118) && inWorld(st, x, y, 0) && (x >= 1030 && x <= 1120 && y >= 205 && y <= 260 || w118(x, y))) {
+    (W118 ? mk118 : mk109)(`KIL|x=${x}|y=${y}|t=${TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1}|fx=${st.frameX[i]}|fy=${st.frameY[i]}`);
   }
   if (checkTileBreakability(st, x, y) === 2) return;
   st.flags[i] = 0;

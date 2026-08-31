@@ -2839,8 +2839,9 @@ export class YoyoShotProj extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
-      // ★焰爆石 6178 kind1 弹幕侧（Projectile.cs:13439-42）——悠悠球射弹/鞭箭族
-      //   （1125/1130/1134/1135…）结算位；类门 pyroclastProjectileGate 单源
+      // ★焰爆石 6178 kind1 弹幕侧（Projectile.cs:13439-42）——悠悠球伴生弹
+      //   （1125 Cascade 爆裂/1130 EoC 冲撞/1134 晶簇/1135 Kraken 波，SetDefaults
+      //   friendly/melee）结算位；类门 pyroclastProjectileGate 单源
       if (pyroclastProjectileGate(game, this)) {
         trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2, e.id,
           { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });

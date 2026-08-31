@@ -4,9 +4,11 @@
 //                                              六角螺旋/幻影眼 452 洒射/死亡之光 455;锚核心 398
 //                                              ai[3],核心亡→静默消散;SetDefaults dontTakeDamage
 //                                              =true → 恒无敌）
-//   aiStyle 82  月总水蛭块 401            NPC.cs:38668-38792（ai[2] 90t 从弹着点插值飞向
-//                                              头额(0,+216);到位把 1000 点治疗按
-//                                              头396→核心398→手397(ai2=0)→手(ai2=1) 亏血序回灌）
+//   aiStyle 82  月总水蛭块 401            NPC.cs aiStyle82 :36986-37116（ai[2] 90t 从
+//                                              源弹456当帧位插值飞向头额(0,+216);到位把
+//                                              1000 点治疗按 头396→核心398→手397(ai2=0)
+//                                              →手(ai2=1) 亏血序回灌）——台账批:插值起点
+//                                              由出生点近似改接真源弹(bInit 配对认领)
 //   aiStyle 83  神秘石碑 437/忠实信徒 438  NPC.cs:38793-38962（石碑 CheckFloor 落地校验后召
 //                                              4 教徒(379×2 外侧/438×2 内侧,ai[3]=-(碑id+1));
 //                                              信徒受击→石碑 localAI[0]=1→弓手激活;四教徒全灭
@@ -35,7 +37,8 @@
 //   （文件尾段），Enemy.ts 一期近似档（swarmerAI/casterAI）退役；421 头顶吸附的
 //   Obstructed(buff 163)已实装（每 tick AddBuff 续期 + Renderer 遮屏滤镜）。
 // 弹幕贴图 Projectile_{452,454,462}.png 已入 sprites/vanilla(原 RENDER_PROXY 代渲退役,
-//   见 shootL 注释);455 走 MLDeathray 类自绘;526 仪式粒子有贴图但带 ai[0..1] 归巢弹道,降级为粒子。
+//   见 shootL 注释);455 走 MLDeathray 类自绘;526 仪式余烬已升回真弹 TabletShardProj
+//   （台账批,归巢 AI 1:1 + d228 尾迹,降级粒子退役）。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -47,7 +50,8 @@ import { Arrow } from './Arrow';
 import { projFrameImg, projSprite, volleyPhantomOrbs, nudgePhantomOrbs } from './Arrow';
 import { Entity } from './Entity';
 import { canHitLine } from '../physics/LineOfSight';
-import { MLDeathray, type NetProjMeta } from './bossAI_duke_moonlord';
+import { MLDeathray, MoonLeechProj, type NetProjMeta } from './bossAI_duke_moonlord';
+import { tryReflectProjectile, type ReflectableProj } from './projTargets';
 import { LightningBoltProj } from './LightningBoltProj';
 import { TtlSprite } from '../assets/ttlSprite';
 import type { Renderer } from '../render/Renderer';
@@ -166,7 +170,7 @@ function reflectPlayerProjsInHitbox(game: GameHooks, e: Enemy): void {
       damage?: number; hostile?: boolean; reflected?: boolean; projId?: number;
     };
     if (!pr || pr.dead || pr.projId === undefined || typeof pr.damage !== 'number') continue;
-    if (pr.x === undefined || pr.w === undefined) continue;
+    if (pr.x === undefined || pr.w === undefined || pr.y === undefined || pr.h === undefined) continue;
     if (pr.x >= e.x + e.w || pr.x + pr.w <= e.x || pr.y >= e.y + e.h || pr.y + pr.h <= e.y) continue;
     tryReflectProjectile(pr as unknown as ReflectableProj, pr.projId, e, game);
   }
@@ -442,48 +446,75 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
 }
 
 // ---------------------------------------------------------------------------
-// AI_082 月总水蛭块 401(NPC.cs:38668-38792)
-// ai[0]=头 396 id+1 / ai[1]=源弹索引(本仓 Arrow 无索引,以出生点代源弹 456 弹着点);
-// ai[2] 90t 插值 头额(0,+216);到位 1000 点治疗按 头→核心→手0→手1 亏血序回灌后消散。
+// AI_082 月总水蛭块 401（1458 NPC.cs aiStyle82 :36986-37116）
+// ai[0]=头 396 id+1 / ai[1]=源弹 456 ProjectileKey / ai[2] 90t 计数。
+// ★台账批：插值起点由“出生点近似”改接真弹——Center = Lerp(proj.Center,
+// 头心+(0,216), ai2/90)（:37091-37093 式,proj=Main.projectile[(int)ai[1]]）。
+// 本仓 MoonLeechProj 由 bossAI_duke_moonlord 出膛、srcId 标识源 NPC；本模块在
+// bInit 时按 srcId+“回程未认领”配对一枚源弹并 WeakMap 落存，插值全程取其当帧
+// 实时位置（多弹同拍认领顺序±1 对微差登记）；无候选回退出生点（原实现语义）。
+// 到位 1000 点治疗按 头→核心→手0→手1 亏血序回灌后消散（:37026-37083,序已对齐）。
 // ---------------------------------------------------------------------------
+const leechSrcProj = new WeakMap<Enemy, MoonLeechProj | null>();
+
+function claimSourceLeechProj(game: GameHooks, head: Enemy): MoonLeechProj | null {
+  for (const q of game.projectiles?.() ?? []) {
+    if (!(q instanceof MoonLeechProj)) continue;
+    const p = q as unknown as MoonLeechProj & { claimed?: boolean };
+    if ((p as unknown as { srcId?: number }).srcId !== head.id) continue;
+    if (p.claimed || p.dead) continue;
+    p.claimed = true;
+    return p;
+  }
+  return null;
+}
+
 export function moonLeechAI(e: Enemy, game: GameHooks, _player: Player | null) {
   const x = lunarLocalAI(e);
+  // ---- 头锚定(:36992-36998：头 396 消失即消散——bInit 前置校验对齐) ----
+  const head = enemies(game).find((n) => n.id === Math.floor(e.ai0) - 1 && n.vanillaId === 396);
+  if (!head || head.dead) { e.dead = true; return; }
   if (!e.bInit) {
     e.bInit = true;
     e.ai2 = 0;
-    x[0] = e.cx; x[1] = e.cy;    // 源弹 456 弹着点(=玩家处)近似:出生点即弹着点(:37832)
+    x[0] = e.cx; x[1] = e.cy;    // 回退锚（无活源弹时的出生点近似）
+    leechSrcProj.set(e, claimSourceLeechProj(game, head));
   }
-  // ---- 头锚定(:38676-38684) ----
-  const head = enemies(game).find((n) => n.id === Math.floor(e.ai0) - 1 && n.vanillaId === 396);
-  if (!head || head.dead) { e.dead = true; return; }
   e.ai2 += 1;
-  const LEECH_T = 90;                                       // num1321
+  const LEECH_T = 90;                                       // :36988 num1212
   if (e.ai2 >= LEECH_T) {
-    // ---- 治疗回灌(:38689-38772):池 1000,按 头→核心→手0→手1 亏血序 ----
+    // ---- 治疗回灌(:37026-37083):池 1000,按 头→核心→手0→手1 亏血序 ----
     const core = enemies(game).find((n) => n.id === head.ai3 && n.vanillaId === 398);
     const hands = enemies(game).filter((n) => !n.dead && n.vanillaId === 397 && n.ai3 === head.ai3);
     const hand0 = hands.find((n) => n.ai2 === 0);
     const hand1 = hands.find((n) => n.ai2 === 1);
-    let pool = 1000;                                        // num1329
+    let pool = 1000;                                        // :37026 num1219
     for (const tgt of [head, core, hand0, hand1]) {
       if (!tgt || tgt.dead || pool <= 0) continue;
       const deficit = tgt.maxHp - tgt.hp;
       if (deficit <= 0) continue;
-      const amt = Math.min(pool, deficit);                  // num1335 = pool+min(deficit-pool,0)
+      const amt = Math.min(pool, deficit);                  // num1224 = min(deficit,pool)
       tgt.hp += amt;
       pool -= amt;
       game.spawnParticles(tgt.cx, tgt.cy, '#5AE86A',
         Math.min(8, 2 + Math.floor(amt / 100)), 1.6, { life: 30 });   // HealEffect 近似
     }
-    e.dead = true;                                          // :38770-38772 静默消散
+    e.dead = true;                                          // HitEffect+active=false(:37084)
     return;
   }
-  // ---- 插值飞行(:38775-38791):出生点 → 头额 ----
+  // ---- 插值飞行(:37090-37093)：Lerp(proj.Center, 头心+(0,216), ai2/90) ----
   e.vx = 0; e.vy = 0;
   const k = e.ai2 / LEECH_T;
+  const src = leechSrcProj.get(e) ?? undefined;
+  if (src && !src.dead) {
+    x[0] = src.x + src.w / 2;                               // proj.Center 当帧实位
+    x[1] = src.y + src.h / 2;
+  } else if (src) {
+    leechSrcProj.set(e, null);                              // 源弹亡 → 冻结最后坐标
+  }
   e.x = lerp(x[0], head.cx, k) - e.w / 2;
   e.y = lerp(x[1], head.cy + 216, k) - e.h / 2;
-  game.spawnParticles(e.cx, e.cy - e.h / 2, '#B040D0', 3, 0.7, { life: 20 });   // 紫尘双环
+  game.spawnParticles(e.cx, e.cy - e.h / 2, '#B040D0', 3, 0.7, { life: 20 });   // d229 双环近似
 }
 
 // ---------------------------------------------------------------------------

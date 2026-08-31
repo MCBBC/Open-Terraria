@@ -2344,7 +2344,7 @@ export class SantankShellProj extends TownShot {
       if (box.x >= e.x + e.w || box.x + box.w <= e.x || box.y >= e.y + e.h || box.y + box.h <= e.y) continue;
       // DamageVar ±15%（Main.DamageVar :15090 ±15% 浮动惯例）
       const dmg = Math.max(1, Math.round(this.damage * (1 + (Math.random() * 30 - 15) / 100)));
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(e.cx - this.cx) * 8, 0, game, 0, false, 0, true); // kb=8(PrepareBombToBlow :47683)
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(e.x + e.w / 2 - this.cx) * 8, 0, game, 0, false, 0, true); // kb=8(PrepareBombToBlow :47683)
     }
     // SelfHurtPlayers（Kill→friendly&&owner==myPlayer 分支 :71788-71795）：重盒相交伤主人
     const p = game.player;

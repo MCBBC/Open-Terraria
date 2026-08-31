@@ -9,7 +9,7 @@ import { TileStore } from '../src/world/TileStore';
 import type { GameHooks } from '../src/entities/types';
 import {
   ChloroSporeCloud, ChloroBladeSlam, PetalstormShot, StormLightning,
-  findSporeCloudSpawn,
+  findSporeCloudSpawn, ThunderBoltShot,
   LIGHTNING_PLAYER_DAMAGE_SCALING, lightningEvpFinalDamage, lightningNpcMultiplier,
 } from '../src/entities/proj1457';
 import { sampleCurve } from '../src/stats/ScaleStats';
@@ -107,115 +107,136 @@ describe('L1 LightningPlayerDamageScaling / NPC Remap(GameDifficultyData.cs:71 +
     // 死囚毛衣：48→trunc×0.5=24 <帽300;帽子截断用大伤验证
     expect(lightningEvpFinalDamage(100, 3, { rnd: zero, sweater: true })).toBe(24);
     expect(lightningEvpFinalDamage(50000, 3, { rnd: zero, sweater: true })).toBeLessThanOrEqual(300);
-    // 幸运方差符号：DamageVar(damage, -ownerLuck) —— 正幸运对自伤取小重掷（:14905 取负入参）
-    let flip = 0;
-    const biased = (): number => { flip++; return flip % 2 === 1 ? 0 : 1; };   // 首档最差,重掷必然更优→可判定是否重掷
-    expect(lightningEvpFinalDamage(100, 1, { luck: 0.9, rnd: biased })).toBeGreaterThan(
-      lightningEvpFinalDamage(0.001, 1, { rnd: zero }));
+  });
+
+  it('幸运方差取负号(:14905 DamageVar(damage, -owner.luck))：正幸运经负参→低档保持取小(12),误作正参则取大(18)', () => {
+    // 队列 [0.001 首档−15%→85, 0.9 触发重掷, 0.999 重掷+15%→115]：
+    //   经负号(luck<0 分支,take-min) → num=85 → trunc f32(85×.08f)=6 ×2 = 12;
+    //   若把 -luck 写成 +luck(take-max) → num=115 → trunc f32(9.2)=9 ×2 = 18 —— 锁死方向
+    const q = (() => {
+      const vals = [0.001, 0.9, 0.999];
+      let i = 0;
+      return (): number => (i < vals.length ? vals[i++] : 0.5);
+    })();
+    expect(lightningEvpFinalDamage(100, 1, { luck: 0.99, rnd: q })).toBe(12);
   });
 });
 
 describe('L1 1091 Kill 帧 EVP 全口径（doKill → evpStormBolt）', () => {
-  function run(difficulty: number, player: Record<string, unknown>) {
-    const { world } = mkWorld({ solids: [[100, 105], [101, 105]] });   // 下方实心→撞块吸附落点
+  const STRIKE = { x: 1680, y: 1664 };
+  /** 全空世界 → bolt 未撞块（localAI0=1,爆域门开）;玩家盒压住落点心。 */
+  function run(difficulty: number, player: Record<string, unknown> = {}, weather?: unknown) {
+    const { world } = mkWorld();
     world.difficulty = difficulty;
-    const g = mkHooks([], world, player);
-    const b = new StormLightning(1091, 1680, 1664, 500, 0);
+    (world as unknown as { weather?: unknown }).weather = weather;
+    const g = mkHooks([], world, {
+      x: 1670, y: 1654, w: 20, h: 42, dead: false, facing: 1,
+      shieldParryTimeLeft: 0, luck: 0, ...player,
+      // 玩家盒中心(1680,1675)≈落点——覆盖多点点集∪64×64 爆域
+      ...(player.x === undefined ? { x: 1670, y: 1654, w: 20, h: 42 } : {}),
+    });
+    const b = new StormLightning(1091, STRIKE.x, STRIKE.y, 500, 0);
     b.seed = 98765;
+    b.critChance = 0;                    // 关暴击掷保区间断言纯净
     (b as unknown as { doKill: (g: GameHooks) => void }).doKill(g);
+    expect((b as unknown as { boltLocalAI0: number }).boltLocalAI0).toBe(1);
     return { g, b };
   }
   it('经典玩家吃 雷伤×.08×2（DamageVar 掷后落区间 [68,92]）;大师 ×.24×2=[204,276]', () => {
-    const r1 = run(0, {});
+    const r1 = run(0);
     const d1 = callsOf(r1.g).damagePlayer[0]?.[0] as number;
     expect(callsOf(r1.g).damagePlayer.length).toBe(1);
     expect(d1).toBeGreaterThanOrEqual(68);
     expect(d1).toBeLessThanOrEqual(92);
-    const r2 = run(2, {});
+    const r2 = run(2);
     const d2 = callsOf(r2.g).damagePlayer[0]?.[0] as number;
     expect(d2).toBeGreaterThanOrEqual(204);
     expect(d2).toBeLessThanOrEqual(276);
   });
-  it('专家（旧错键表曾给 .08）现取 .16 中段——区间与经典不相交', () => {
-    const r = run(1, {});
+  it('专家（旧错键表曾给 .08）现取 .16 中段——区间 [136,184] 与经典不相交', () => {
+    const r = run(1);
     const d = callsOf(r.g).damagePlayer[0]?.[0] as number;
     expect(d).toBeGreaterThanOrEqual(136);
     expect(d).toBeLessThanOrEqual(184);
   });
   it('旅程（难度键 D=0.5 滑杆缺省）→ .04×2 区间 [34,46]（旧错键表给成 .24）', () => {
-    const r = run(3, {});
+    const r = run(3);
     const d = callsOf(r.g).damagePlayer[0]?.[0] as number;
     expect(d).toBeGreaterThanOrEqual(34);
     expect(d).toBeLessThanOrEqual(46);
   });
   it('盾反击窗 CanParryAgainst(:31673)：shieldParryTimeLeft>0 且持盾朝向雷击 → 零伤', () => {
-    const r = run(0, { shieldParryTimeLeft: 10, facing: Math.sign(1680 - 200) });
+    const r = run(0, { shieldParryTimeLeft: 10 });        // 盒心在雷心左 → sign=+1=缺省 facing
     expect(callsOf(r.g).damagePlayer.length).toBe(0);
+  });
+  it('A⑦ 打屏/背景白闪挂 1091：frames 45、强度=Lerp(2,10,intensity)（天气0.5→6）、origin=bolt 落点', () => {
+    let flashes = 0;
+    const wx = { outsideWeatherEffect: 0.5, newLightning: () => { flashes++; } };
+    const r = run(0, {}, wx);
+    const p = callsOf(r.g).punchCamera[0] as unknown[];
+    expect(p).toBeTruthy();
+    expect(p[2]).toBe(45);               // frames
+    expect(p[3]).toBeCloseTo(6);         // 2+8×0.5（旧恒 6 近似的真值来源）
+    expect(p[4]).toBeDefined();
+    expect(flashes).toBe(1);             // Main.NewLightning(instant:true)
+  });
+  it('A⑦ 对照组：1117 武器雷无打屏无背景白闪（!flag 分支专属 :1049-1052）', () => {
+    const { world } = mkWorld();
+    const g = mkHooks([], world);
+    const b = new StormLightning(1117, 800, 800, 120, 2);
+    b.seed = 42;
+    (b as unknown as { doKill: (g: GameHooks) => void }).doKill(g);
+    expect(callsOf(g).punchCamera.length).toBe(0);
   });
 });
 
 // ================= A① 液体导通三段（StormLightningCollisionCheck :16206-16243） =================
 
 describe('A① 液体导通/Colliding 三段', () => {
-  const boltOf = (b: StormLightning): { collides: (wx: number, wy: number, ww: number, wh: number) => boolean; setAI0: (v: number) => void } => ({
-    collides: (wx, wy, ww, wh) =>
-      (b as unknown as { stormBoltCollides: (g: GameHooks, x: number, y: number, ww: number, ww2: number) => boolean })
-        .stormBoltCollides({} as unknown as GameHooks, wx, wy, ww, wh),
-    setAI0: (v: number) => { (b as unknown as { boltLocalAI0: number }).boltLocalAI0 = v; },
+  /** 直测 stormBoltCollides：参数为目标盒左上+宽高 */
+  function collideAt(
+    b: StormLightning, world: ReturnType<typeof mkWorld>['world'],
+    ecx: number, ecy: number,
+  ): boolean {
+    return (b as unknown as { stormBoltCollides: (g: GameHooks, x: number, y: number, ww: number, wh: number) => boolean })
+      .stormBoltCollides({ world } as unknown as GameHooks, ecx - 8, ecy - 12, 16, 24);
+  }
+
+  it('段一·爆域：localAI[0]==1 → CenteredRectangle(Center,64)：中心距36 内中 / 超40 外出', () => {
+    const { world } = mkWorld();
+    const b = new StormLightning(1091, 1600, 1600, 500, 0);
+    (b as unknown as { boltLocalAI0: number }).boltLocalAI0 = 1;
+    expect(collideAt(b, world, 1636, 1600)).toBe(true);      // 36 ≤ 32+8
+    expect(collideAt(b, world, 1645, 1600)).toBe(false);     // 45 > 40 且无折线点
   });
 
-  it('段一：localAI[0]==1 → CenteredRectangle(Center,64) 半沿32 域（±40 内中 / 超 40 外出）', () => {
-    const { world } = mkWorld();                 // 无实体 bolt（多点点集空）,只看域门
-    const g = mkHooks([], world);
-    const b = new StormLightning(1091, 1600, 1600, 500, 0);
-    b.seed = 1;
-    const h = boltOf(b);
-    h.setAI0(1);
-    const wet = h.collides(1600 + 36, 1600, 16, 24);       // 中心距 36 ≤ 32+8
-    const dry = h.collides(1600 + 45, 1600, 16, 24);       // 45 > 40
-    void g;
-    expect(wet).toBe(true);
-    expect(dry).toBe(false);
-  });
-  it('段二：localAI[0]==3 且距心<500 且 PlotLine 全程液体 → 远端隔空导通命中', () => {
+  it('段二·导通命中：localAI[0]==3 + 距心<500 + 全程液体 PlotLine → 远端隔水跨导', () => {
     const liquids = new Map<string, number>();
-    for (let tx = 96; tx <= 116; tx++) liquids.set(`${tx},110`, 255);   // 一整条水平水带
-    const { world } = mkWorld({ liquids });
-    const g = mkHooks([], world);
-    const b = new StormLightning(1091, 1560, 1776, 500, 0);             // 落点 = (97.5*,110) 行内起点格内
-    b.seed = 2;
-    const h = boltOf(b);
-    h.setAI0(3);
-    // 敌在 320px 开外、无 bolt 折线可达（bolt=null）——只有导通面能及
-    expect(h.collides(1592 + 320, 1776, 16, 24)).toBe(true);
-    void g;
-  });
-  it('段三：localAI[0]==3 但中途干格打断 PlotLine → 不导通（世界雷不隔地电人）', () => {
-    const liquids = new Map<string, number>();
-    for (let tx = 96; tx <= 104; tx++) liquids.set(`${tx},110`, 255);   // 只到一半
+    for (let tx = 97; tx <= 116; tx++) liquids.set(`${tx},111`, 255);   // 起落心(1560,1776)=tile(97.5→97,111)
     const { world } = mkWorld({ liquids });
     const b = new StormLightning(1091, 1560, 1776, 500, 0);
-    const h = boltOf(b);
-    h.setAI0(3);
-    expect(h.collides(1560 + 480, 1776, 16, 24)).toBe(false);
+    (b as unknown as { boltLocalAI0: number }).boltLocalAI0 = 3;
+    expect(collideAt(b, world, 1880, 1776)).toBe(true);      // 中心距 320px,bolt 折线为空
   });
-  it('Kill 帧状态机：落地格浸液 → boltLocalAI0=3 并触发放射电化粒子;空中未撞 → 1', () => {
+
+  it('段三·干格截断：localAI[0]==3 但中途断水 → 不导通', () => {
     const liquids = new Map<string, number>();
-    for (let tx = 90; tx <= 115; tx++) for (let ty = 105; ty <= 107; ty++) liquids.set(`${tx},${ty}`, 255);
-    const { world } = mkWorld({ solids: [[100, 105], [101, 105], [102, 105]] , liquids });
-    world.difficulty = 0;
-    const g = mkHooks([], world);
-    const b = new StormLightning(1091, 1656, 1648, 500, 0);
-    b.seed = 555;
+    for (let tx = 97; tx <= 103; tx++) liquids.set(`${tx},111`, 255);   // 只铺一半
+    const { world } = mkWorld({ liquids });
+    const b = new StormLightning(1091, 1560, 1776, 500, 0);
+    (b as unknown as { boltLocalAI0: number }).boltLocalAI0 = 3;
+    expect(collideAt(b, world, 2040, 1776)).toBe(false);
+  });
+
+  it('A② 归属：爆域门对 1091 同样生效（world 雷主消费面）——多点点集为空仍可凭域命中', () => {
+    const { world } = mkWorld();
+    const g = mkHooks([mkEnemy(9, 1636, 1600)], world);
+    const b = new StormLightning(1091, 1600, 1600, 400, 0);
+    b.seed = 7;
+    b.critChance = 0;
     (b as unknown as { doKill: (g: GameHooks) => void }).doKill(g);
-    expect((b as unknown as { boltLocalAI0: number }).boltLocalAI0).toBe(1);   // 由种子折线落点决定,断言合法组值
-    const dryWorld = mkWorld({});
-    const g2 = mkHooks([], dryWorld.world);
-    const b2 = new StormLightning(1091, 1656, 1648, 500, 0);
-    b2.seed = 555;
-    (b2 as unknown as { doKill: (g: GameHooks) => void }).doKill(g2);
-    const v2 = (b2 as unknown as { boltLocalAI0: number }).boltLocalAI0;
-    expect(v2 === 1 || v2 === 2).toBe(true);
+    const hits = ((g.enemies()[0] as unknown as { hurtLog: unknown[] }).hurtLog.length);
+    expect(hits).toBeGreaterThanOrEqual(1);                  // 折线到不了横向 36px,全靠 64×64 域
   });
 });
 
@@ -254,15 +275,18 @@ describe('L2 ChloroSporeCloud 尾孢子零伤 / ×3 加速老化 / 型级 IDStat
 // ================= A④ 1129 大爆盒 ownerHitCheck + timeLeft=5 =================
 
 describe('A④ ChloroBladeSlam(SetDefaults :3346-3360 + AI_209 :70705)', () => {
-  it('ownerHitCheckDistance=1000 门：本体远端 (>1000px) 的重叠敌不吃大爆盒 (:11896/:12416)', () => {
+  it('ownerHitCheckDistance=1000 门：owner 超距 (>1000px) 时盒内重叠敌零结算;拉近后恢复(:11896/:12416)', () => {
     const { world } = mkWorld();
-    const eFar = mkEnemy(1, 200 + 1280, 420);             // 落点外左半沿 → 与 128 盒相交但超距
-    const eNear = mkEnemy(2, 280, 424);                   // 近端在内
-    const g = mkHooks([eFar, eNear], world, { cx: 220, cy: 420 });
-    const s = new ChloroBladeSlam(200, 420, 128, 96, 95);
-    for (let i = 0; i < 6; i++) s.fixedUpdate(1 / 60, g);
-    expect(eFar.hurtLog.length).toBe(0);                  // ★主缺口：旧实现隔墙/远端照样吃 128×96
-    expect(eNear.hurtLog.length).toBe(1);
+    // 盒锚 (200,420) 128×96：敌心 (240,434) 在盒内
+    const runCase = (ownerCx: number): number => {
+      const e = mkEnemy(1, 240, 434);
+      const g = mkHooks([e], world, { cx: ownerCx, cy: 430 });
+      const s = new ChloroBladeSlam(200, 420, 128, 96, 95);
+      for (let i = 0; i < 8; i++) s.fixedUpdate(1 / 60, g);
+      return e.hurtLog.length;
+    };
+    expect(runCase(1560)).toBe(0);        // 距 owner ≈1320 >1000 → CanHitWithMeleeWeapon 拒
+    expect(runCase(230)).toBe(1);         // 邻近恢复命中
   });
   it('timeLeft=5 → 第 5 拍末即亡（ai[0]>20 为永不可达死代码,寿命曾虚置 21+ 拍）', () => {
     const { world } = mkWorld();
@@ -305,15 +329,44 @@ describe('A③ FindChlorophyteSporeCloudSpawn 度量用候选列/返回钉基准
   });
 });
 
+// ================= B1 花瓣软反弹按轴独立（HandleMovement :18181-18191） =================
+
+describe('B1 PetalstormShot 单轴软反弹', () => {
+  it('撞竖墙：只翻 X（反号 ×0.25=-1.9）,Y 动量原样保留（旧实现双轴同翻=斜撞丢 Y）', () => {
+    const { world } = mkWorld({ solids: Array.from({ length: 30 }, (_, i): [number, number] => [64, 36 + i]) });
+    const g = mkHooks([], world);
+    // 构造器按中心定位：盒心 x=1020（tile63 列末沿）,首拍 vx'=8×0.95=7.6 跨入实心列 64
+    const p = new PetalstormShot(1020, 42 * 16, 8, 3, 20, 3.5, 0);
+    p.fixedUpdate(1 / 60, g);
+    expect(p.vx).toBeCloseTo(-1.9, 5);     // -(8×0.95)×0.25
+    expect(p.vy).toBeCloseTo(3 * 0.95, 5); // 减速段后 Y 未被翻转/未归零
+  });
+  it('坠向隧道顶板：只翻 Y 上弹,X 水平动量保留（按轴独立语义面补全）', () => {
+    const { world } = mkWorld({ solids: Array.from({ length: 200 }, (_, i): [number, number] => [i, 41]) });
+    const g = mkHooks([], world);
+    // 盒心 y 649(tile40),首拍 vy'=20×0.95=19 直插顶板行 41
+    const p = new PetalstormShot(30 * 16, 640, 4, 20, 20, 3.5, 0);
+    p.fixedUpdate(1 / 60, g);
+    expect(p.vy).toBeLessThan(-4);         // -(19)×0.25
+    expect(p.vx).toBeCloseTo(4 * 0.95, 5); // X 未被翻转
+  });
+});
+
 // ================= A⑥ 731 extraUpdates=1 双子步（SetDefaults :7696-7705） =================
 
 describe('A⑥ ThunderBoltShot Update 双跑折叠修正', () => {
-  it('每拍位移 = 2×velocity(射程翻倍还原);命中中途实心即亡', () => {
-    const { world } = mkWorld();
-    const g = mkHooks([], world);
-    const tb = new (require('../src/entities/proj1457') as typeof import('../src/entities/proj1457')).ThunderBoltShot
-      ? null : null;
-    void tb;
-    void g;
+  it('每拍位移 = 2×velocity（射程减半修复）;实心格中途命中当拍即亡不再穿行', () => {
+    const empty = mkWorld();
+    const gEmpty = mkHooks([], empty.world);
+    const a = new ThunderBoltShot(400, 300, 6, 0, 45, 2);
+    a.fixedUpdate(1 / 60, gEmpty);
+    expect(a.cx - 400).toBe(12);
+
+    const blocked = mkWorld({ solids: [[25, 18]] });
+    const gBlocked = mkHooks([], blocked.world);
+    const b = new ThunderBoltShot(400, 300, 6, 0, 45, 2);
+    b.fixedUpdate(1 / 60, gBlocked);
+    expect(b.dead).toBe(true);             // 第一子步踩中实心即死（tileCollide=true）
+    expect(b.cx - 400).toBe(6);            // 不再滑完整步
   });
 });

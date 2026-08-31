@@ -767,8 +767,14 @@ describe('★F14 Game 近战 PvP 区接线（updateSwingHits 直驱）', () => {
     const g = protGame();
     const player = new Player(800, 1440, new Inventory());
     player.inv.add(iid(3013), 1);                      // 臭臭爪：melee 无特判分支（GA1 同杆）
+    if (opts.beetleOff) {
+      // 进攻甲三件（Player.ts:1748 hVid2199&&bVid2200&&lVid2202）——equipStats 冻结
+      // 记忆化对象禁直写（用例走真装备推导，与生产面同源）
+      player.inv.armor[0] = { id: iid(2199), stack: 1 };
+      player.inv.armor[1] = { id: iid(2200), stack: 1 };
+      player.inv.armor[2] = { id: iid(2202), stack: 1 };
+    }
     player.hostile = true;
-    (player.equipStats as unknown as { beetleOff?: boolean }).beetleOff = opts.beetleOff === true;
     const meter = new BeetleMeter();
     (player as unknown as { __swBeetle?: BeetleMeter }).__swBeetle = meter;
     g.swing = { t: 15, dur: 30, dmg: 10, kb: 3, item: iid(3013), useStyle: 1 };
