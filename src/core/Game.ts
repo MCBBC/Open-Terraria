@@ -426,7 +426,13 @@ import { ChainsawProj } from '../entities/ChainsawProj';
 import { MinionProj, pickSentryLandingSpot, minionTrueBox } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
-import { updateFakeFishSchool, clearFakeFish } from '../entities/FakeFish';
+import { updateFakeFishSchool, clearFakeFish, repelParticlesAt } from '../entities/FakeFish';
+import { requestMushroomBoiExplosion } from '../entities/DeadCellsMushroom';
+// module8 编排粒子 Spawn_* 收编池（fx/orchestraFx.ts;台账 L5 批 2026-08-31）
+import {
+  rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx,
+  classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, shadowbeamLineFx,
+} from '../fx/orchestraFx';
 import { type InfoAccCtx, mphOf } from '../stats/InfoAccs';
 import { npcRarityOf } from '../data/vanillaNpcs';
 import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../entities/GolfBall';
@@ -2735,6 +2741,11 @@ export class Game implements GameHooks {
    *  早退不发。dir = 击退向 ±1；发送前 notifyPlayerHurtSettled() 强推 msg16 免疫
    *  余量镜像（原版结算尾无条件连发 msg13/msg16/msg117 三包的时序等价，
    *  见 ClientNet.notifyPlayerHurtSettled 注）。flags = Pvp | crit 位。
+   *  ★F-1（四轮蓝队）：flags 另备 MeleeSource 来源位——五支中【仅近战支】传
+   *  （vanilla 只在 ItemCheck_MeleeHitPVP :44456-44460 记 beetleCounter;另处
+   *  :44826-44828 在 PvE 近战支），收端甲虫回执 FIFO 消费门按此分账,其余四支
+   *  （bit7 爆炸/bit5 盾转移/bit6 狱火/PvP 弹）不得置位,否则他端未决挥击被
+   *  非近战命中错配充能（新发明行为）。
    *  ★攻端不再有本地预测反馈（GA 已删 'hit' 音 + InPVP 公式预览飘字），他端对本次
    *  命中的唯一可见面 = 本包经服务器中继 → onPlayerHurt hook → addDamageNumber。
    *  ★FR3-F（三轮蓝队）：dir 形制三站统一——dir 参显式位（缺省 = 旧位置符号式）：
@@ -2746,7 +2757,7 @@ export class Game implements GameHooks {
    *  注释钉死语义；收端当前不消费 dir（Game.onPlayerHurt 形参 _dir 弃用），此事实
    *  连同语义一并写入 protocol.ts msg117 注——防未来误把 0 当「未定」再放大。 */
   private reportPlayerHurt(hpBefore: number, srcX: number, critFlag: boolean,
-    dir?: number): void {
+    dir?: number, extraFlags?: number): void {
     const net = this.net;
     if (!net?.active || net.mySlot < 0) return;
     const p = this.player;
@@ -2754,9 +2765,10 @@ export class Game implements GameHooks {
     const dealt = Math.max(0, Math.trunc(Math.min(hpBefore, Math.max(0, hpBefore - p.hp))));
     if (!(dealt > 0)) return;
     net.notifyPlayerHurtSettled();
+    // extraFlags：来源身份扩展位（★F-1 MeleeSource——仅近战支传,详见其调用点注）
     net.sendPlayerHurt(dealt, p.cx, p.cy,
       dir ?? (Math.sign(p.cx - srcX) || 1),
-      PlayerHurtFlags.Pvp | (critFlag ? PlayerHurtFlags.Crit : 0));
+      PlayerHurtFlags.Pvp | (critFlag ? PlayerHurtFlags.Crit : 0) | (extraFlags ?? 0));
   }
 
   /** ★FR2-F 通用通道出口（damagePlayer 尾自动接——非 PvP 全路径 msg117 生产面）。
@@ -2896,8 +2908,11 @@ export class Game implements GameHooks {
     const hpBeforeMeleePvp = p.hp;
     this.damagePlayer(dmg, srcXCenter, rp.y, undefined, false, true);
     // rp.facing = msg13 ctrlBits[6] 权威面（RemotePlayerState 必有字段）
+    // ★F-1：本支是全站唯一 vanilla 记 beetleCounter 的 PvP 结算面（:44456-44460），
+    // 携 MeleeSource 位——攻端回执 FIFO 的消费门按此分账（其余四支 bit7/bit5/bit6/
+    // PvP 弹不置位,收端不抽队不充能）
     this.reportPlayerHurt(hpBeforeMeleePvp, srcXCenter, (flags & 1) !== 0,
-      rp.facing >= 0 ? 1 : -1);
+      rp.facing >= 0 ? 1 : -1, PlayerHurtFlags.MeleeSource);
     // ★R22:删第二声 'hit'（damagePlayer 内 Player_Hit 已播,原版无第二声）
   }
 
@@ -4076,7 +4091,7 @@ export class Game implements GameHooks {
 
   // ================= 生命周期 =================
 
-  async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; /** 世界尺寸档（0 小/1 中/2 大，UIWorldCreation 三档；给出时 generateWorld 以 SIZE_DIMS 派生 W/H） */ size?: import('../world/World').WorldSize; /** 世界难度 = Main.GameMode（Main.cs:2677：0 经典 1 专家 2 大师 3 旅程） */ difficulty?: number; /** 彩蛋种子旗标直注（GenConfig.seedFlags，S0-1 解耦；缺省=parseSeed 派生） */ seedFlags?: import('../world/gen/SeedEasterEggs').SeedFlags; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void; /** worker 路径的降采样预览帧回调（位图模式） */ onPreview?: (f: import('../workers/WorldGenClient').PreviewFrame) => void }) {
+  async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string | undefined, p: number, local?: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; /** 世界尺寸档（0 小/1 中/2 大，UIWorldCreation 三档；给出时 generateWorld 以 SIZE_DIMS 派生 W/H） */ size?: import('../world/World').WorldSize; /** 世界难度 = Main.GameMode（Main.cs:2677：0 经典 1 专家 2 大师 3 旅程） */ difficulty?: number; /** 彩蛋种子旗标直注（GenConfig.seedFlags，S0-1 解耦；缺省=parseSeed 派生） */ seedFlags?: import('../world/gen/SeedEasterEggs').SeedFlags; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void; /** worker 路径的降采样预览帧回调（位图模式） */ onPreview?: (f: import('../workers/WorldGenClient').PreviewFrame) => void }) {
     this.freshlyCreated = true; // NPC 入驻公告只在新生成的世界播(WorldGen 语义)
     // 原版 gen[27]"正在安置液体"(SettleLiquids :16219;UIWorldLoadState 经
     // worldgenText('水体沉降') 同键转换,双路一致)
@@ -4095,8 +4110,9 @@ export class Game implements GameHooks {
           {
             onPreview: opts?.onPreview,
             // 进度区间映射与主线程路径一致：generate 0–0.7、settle 0.72–0.87
-            onProgress: (phase, label, p) => {
-              if (phase === 'generate') onProgress?.(label, p * 0.7);
+            // ★local（当前原版 pass 段内 Value）不参与外层区间缩放，原样直通
+            onProgress: (phase, label, p, local) => {
+              if (phase === 'generate') onProgress?.(label, p * 0.7, local);
               else onProgress?.(settleLabel(), 0.72 + p * 0.15);
             },
           },
@@ -4114,7 +4130,7 @@ export class Game implements GameHooks {
       }
     }
     // ---- 主线程 fallback（原路径原样保留：worker 不可用 + 探针依赖） ----
-    this.world = await generateWorld({ width, height, size: opts?.size, seedText, name: opts?.name, evil: opts?.evil, seedFlags: opts?.seedFlags, onWorldPartial: opts?.onWorldPartial }, (label, p) => onProgress?.(label, p * 0.7));
+    this.world = await generateWorld({ width, height, size: opts?.size, seedText, name: opts?.name, evil: opts?.evil, seedFlags: opts?.seedFlags, onWorldPartial: opts?.onWorldPartial }, (label, p, local) => onProgress?.(label ?? undefined, p * 0.7, local));
     // 新生成世界免索引帧修复扫描（生成端写像素帧终态；与 worker 路径同置位语义）
     this.world.indexFramesRepaired = true;
     // 水体预沉降：原版二次沉降(cs:21051)自 2026-08-17 起已归位 generateWorld 管线内
@@ -4334,15 +4350,20 @@ export class Game implements GameHooks {
       // 活水极少，单轮快速收敛；残留交给运行时——不再跑生成期的 10 轮全沉降）
       await this.settleLiquids((p) => onProgress?.(loadSettleLabel(p), p * 0.8), 'load');
     }
+    try { performance.mark('load.preload.begin'); } catch { /* 诊断 */ }
     await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.8 + p * 0.2), opts?.playerAt);
+    try { performance.mark('load.preload.end'); } catch { /* 诊断 */ }
     // 烟囱顶帽行修复（导入丢失型残缺，见 world/ChimneyCapRepair.ts 头注）：
     // 放在读档沉降后、场景预热后——TileFrameCosmetic 链已初始化，重写即触发本格重烘
     try {
       const n = repairChimneyCaps(this.world.store);
       if (n > 0) console.info(`[ChimneyCapRepair] 补齐烟囱帽行 ${n} 格`);
     } catch { /* 修复失败不阻塞进图 */ }
+    try { performance.mark('load.afterWorld.begin'); } catch { /* 诊断 */ }
     this.afterWorldLoad();
+    try { performance.mark('load.afterWorld.end'); } catch { /* 诊断 */ }
     await this.minimapReady;       // 同生成路径:大世界拆带构建完成再进图
+    try { performance.mark('load.minimap.end'); } catch { /* 诊断 */ }
     this.cb.onWorldReady();
   }
 
@@ -6139,6 +6160,25 @@ export class Game implements GameHooks {
     // ParticleSystem_World_BehindPlayers,Main.cs:4004;生成门在 Bobber.fishingCheck,
     // 绘制在 Renderer 实体层 drawFlameParticles 同带）
     updateFakeFishSchool(this);
+    // 玩家粒子排斥面（Player.UpdateParticles :28781-28792 → ParticleOrchestrator.RepelAt
+    // :1411-1427,L5 批收编）：velocity≠0 的每个玩家（本机 + 联机镜像）以 Base.Bottom
+    // 为源、height/2 为半径广播 BeRepelled——本仓 IParticleRepel 面 = FakeFish 全群。
+    // 原版按端逐玩家本地直生不进 module8;屏内门(Main.screenPosition 包含判定)从略
+    // ——装饰面无实差,登记。远端体宽缺省 20×42(msg13 镜像档)
+    {
+      const movers: Array<{ x: number; y: number; vx: number; vy: number; w?: number; h?: number }> =
+        this.player.dead ? [] : [this.player];
+      for (const rp of this.net?.players.values() ?? []) {
+        if (!rp.active || rp.dead) continue;
+        movers.push(rp);
+      }
+      for (const mv of movers) {
+        if (mv.vx === 0 && mv.vy === 0) continue;          // velocity == Vector2.Zero 门（:28784）
+        const pw = mv.w ?? 20, ph = mv.h ?? 42;
+        repelParticlesAt(this.world.store,
+          mv.x + pw / 2, mv.y + ph, ph / 2, false);        // SourcePosition=Base.Bottom、Radius=height/2
+      }
+    }
     // 原版 Dust 步进（UpdateDust :423——customData 跟随差值 = 主角本 tick 位移；
     // 视口世界矩形用于屏底清除）+ 逐尘光照推 LightingEngine
     {
@@ -6625,6 +6665,18 @@ export class Game implements GameHooks {
               return 'af';
             } catch (e) { return 'ERR:' + String(e).slice(0, 60); }
           })(),
+        });
+      }
+    }
+    // 玩家采样(同周期)
+    if (this.tickCount % 30 === 15) {
+      const p = this.player;
+      if (p && !p.dead) {
+        this.recorder.log('playerMove', {
+          x: Math.round(p.cx), y: Math.round(p.cy),
+          vx: +p.vx.toFixed(2), vy: +p.vy.toFixed(2),
+          g: !!p.onGround, hw: !!p.hitWall, hh: !!p.hitHead,
+          h: p.h,
         });
       }
     }
@@ -8493,10 +8545,11 @@ export class Game implements GameHooks {
     const r = Math.random();
     const frames = r <= 0.1 ? 240 : r <= 0.3 ? 120 : r <= 0.6 ? 60 : 0;
     if (frames > 0) {
-      this.player.iframes = Math.max(this.player.iframes, frames);
-      // ★F13：原版此处即 SetImmuneTimeForAllTypes(num4)（Player.cs:52549-52553）——
-      //   全特殊桶（WrongBugNet/Lava）一并无条件满填。（?. 仅测试桩 Object.create
-      //   面；生产恒经构造器初始化）
+      // ★Notes②（四轮蓝队）：:52551 SetImmuneTimeForAllTypes(num4) 无条件覆写
+      //   `immune=true; immuneTime=time; for(...) hurtCooldowns[i]=time;`（:38298-38306）
+      //   ——旧 Math.max 合并会保住更高的既有帧，原版可直接【缩短】免疫窗；
+      //   桶表 setAll 已是无条件满填形。
+      this.player.iframes = frames;
       this.hurtBuckets?.setAll(frames);
     }
     return heal;
@@ -12908,31 +12961,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  玩家→尖端射线 2px 步进回退到最后非实心位——**必须保留**:尖端在体外 30-40px,
    *  无回退时贴墙=穿墙射击、朝下=扎进地板(2026-08-31 用户双报定罪)。回退的
    *  "缩短"是正确行为(不能隔墙开火);原版出生=盒中心同样永远够不到墙外语义。
-   *  flag=localStorage.swDebugMuzzle → [swAnchor] 打印最终位移 */
+   **/
   private resolveShotAnchor(spriteKey: string, ang: number): { x: number; y: number } {
-    const vid = viIdFromKey(spriteKey);
-    const swAr = this.renderer?.atlas ? atlasIconForKey(this.renderer.atlas, spriteKey) : null;
-    const tip = heldItemTipWorld(
-      this.player.cx, this.player.cy, this.player.facing === -1 ? -1 : 1, ang,
-      vid, swAr?.sw ?? 16, swAr?.sh ?? 16);
-    let x = tip.x, y = tip.y;
-    const st2 = this.world.store;
-    if (st2.isSolid(Math.floor(x / TILE), Math.floor(y / TILE))) {
-      const dx = this.player.cx - x, dy = this.player.cy - y;
-      for (let i = 1; i <= 24; i++) {
-        const t = i / 24;
-        const qx = Math.floor((x + dx * t) / TILE), qy = Math.floor((y + dy * t) / TILE);
-        if (!st2.inBounds(qx, qy) || !st2.isSolid(qx, qy)) { x += dx * t; y += dy * t; break; }
-      }
-    }
-    try {
-      if ((globalThis as Record<string, unknown>).swDebugMuzzle === true
-        || (typeof localStorage !== 'undefined' && localStorage.getItem('swDebugMuzzle') === '1')) {
-        console.log('[swAnchor]', spriteKey.slice(0, 12),
-          `d=(${(x - this.player.cx).toFixed(1)},${(y - this.player.cy).toFixed(1)})`);
-      }
-    } catch { /* noop */ }
-    return { x, y };
+    // ★v8(2026-08-31 终案):原版字面=盒中心(Player.cs:47603)。枪口出膛观感
+    //  由渲染层实现(Arrow.draw 角色盒内不渲染弹体,穿出后可见)——不再用任何
+    //  几何出生点近似(heldItemTipWorld 保留在 Renderer 备查但本函数不再消费)。
+    return { x: this.player.cx, y: this.player.cy };
   }
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
@@ -14360,15 +14394,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  A=35 U=34 shots=2 实测定罪)。spray 族 937/6152/6173 同批统一
         const animDur27 = cw.useAnimation ?? this.swing?.dur ?? 0;
         const spray27 = sprayCyclePlan(animDur27, cw.useTime);
-        // ★仪表:补发计划实际值(A/U/shots/词缀spd/慢施)——U<A 才会有 mid=true 补发
-        //  (_swGemDbg,定案后随 [swAnchor] 一并摘)
-        try {
-          if ((globalThis as Record<string, unknown>).swDebugMuzzle === true
-            || (typeof localStorage !== 'undefined' && localStorage.getItem('swDebugMuzzle') === '1')) {
-            console.log('[swSpray]', `A=${animDur27} U=${cw.useTime} shots=${spray27?.shots ?? 'null'}`,
-              `spd=${ps?.spd ?? 1} slow=${this.player.slowMagicUse}`);
-          }
-        } catch { /* noop */ }
         if (spray27 && this.swing) {
           const fireAgain27 = (): void => {
             const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
@@ -14409,6 +14434,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           gmzY += Math.sin(a206) * 12 * u206 - Math.sin(mzAng) * cw.shootSpeed;
         }
         this.fireGemStaffBolts(cw, def, ps, mzAng, gmzX, gmzY, critVid, pen, false);
+        // ★useSwing 补漏（2026-08-31）：magic case 此前无 useSwing 调用 → swing.aim
+        //  永远是旧武器/旧角度的快照,持枪/持杖姿势不跟手（用户报"向上射弹向下/
+        //  弹到右边"终案根因之一——zap 分支的 useSwing 在 case 'shot' 里是死代码,
+        //  magic 武器走不到）。逐帧跟手(updateSwingHits 顶部)从此帧的 swing.aim 起步
+        this.useSwing(def, ang, ps?.spd ?? 1);
         if (spray27 && this.swing) {
           // 周期窗冷却覆盖（fireGemStaffBolts 内置的 per-shot 冷却被抬到整窗）：
           // mana 下次扣减要等 itemAnimation 归零（:43072 门）→ 一动画窗一扣
@@ -14635,18 +14665,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           zap.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           zap.lightRGB = [0.75, 0.75, 0.75];   // SetDefaults light=0.75
           this.entities.add(zap, 'projectiles');
-          // ★仪表:弹速度方向 vs 鼠标方向——"向上射弹向下"定罪用(_swZapDbg)
-          try {
-            if ((globalThis as Record<string, unknown>).swDebugMuzzle === true
-              || (typeof localStorage !== 'undefined' && localStorage.getItem('swDebugMuzzle') === '1')) {
-              const [scx, scy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-              console.log('[swZap]', `shoot=${cw.shoot}`,
-                `aim_deg=${Math.round(ang * 180 / Math.PI)}`,
-                `v=(${(Math.cos(ang) * cw.shootSpeed).toFixed(1)},${(Math.sin(ang) * cw.shootSpeed).toFixed(1)})`,
-                `mouse=(${Math.round(scx)},${Math.round(scy)}) player=(${Math.round(this.player.cx)},${Math.round(this.player.cy)})`,
-                `spawn=(${zapA.x.toFixed(0)},${zapA.y.toFixed(0)})`);
-            }
-          } catch { /* noop */ }
           this.useSwing(def, ang, ps?.spd ?? 1);   // ★曾漏=持枪姿势滞留旧瞄准角
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           this.player.onManaItemUsed();
@@ -21528,15 +21546,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   ): boolean {
     // 窄化 magic 支（shoot/shootSpeed 必有）；非 magic kind 不消费（调用方兜底）
     if (cw.kind !== 'magic') return false;
-    // ★仪表(localStorage.swDebugMuzzle='1'):每次宝石链调用打一行——单击应恰 1 行
-    //  (内含孪生 2 弹);两行/单击=真双派发(_swGemDbg,定案后摘)
-    try {
-      if ((globalThis as Record<string, unknown>).swDebugMuzzle === true
-        || (typeof localStorage !== 'undefined' && localStorage.getItem('swDebugMuzzle') === '1')) {
-        console.log('[swGem]', `shoot=${cw.shoot}`, `mid=${midSwing}`,
-          `px=${px.toFixed(0)} py=${py.toFixed(0)}`);
-      }
-    } catch { /* noop */ }
     const isGem = isGemBolt(cw.shoot);
     const chestDef = ITEM_DEFS[this.player.inv.armor[1]?.id ?? -1];
     const chestVid = chestDef ? (chestDef.vid ?? viIdFromKey(chestDef.key) ?? -1) : -1;
@@ -22263,7 +22272,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           Math.trunc(tn.y) + Math.floor(Math.random() * tn.h),
           VANILLA_ITEM_KEY_BY_ID[71] ?? 'vi_71', 1 + luckRollBadLuck(this.player.luck ?? 0, 25),
           vxx, vyy);
+        // ClassyCane 编排（Player.cs:44722-44732 与铜币同支门;clientOnly:false）——
+        // 本地纸屑+尘10 复放 + module8 上行（L5 批接线,此前仅登记）
+        classyCaneFx(this, tn.cx, tn.cy);
+        this.broadcastParticleOrchestra(ParticleOrchestraType.ClassyCane, tn.cx, tn.cy);
       }
+      // SlapHand 3258 / WaffleIron 5382 / FlyMeal 5129 命中音编排（:44707-44745 命中侧,
+      // 敌怪/城镇两循环同位;城镇支原版 FlyMeal 额外成就位已在此前 isFlyMeal 分支承担）
+      this.meleeOrchestraStrike(heldVidFly, tn.cx, tn.cy);
       tn.hurt(swDmg, (Math.sign(tn.cx - p.cx) || this.player.facing) * 2, 0, this,
         isFlyMeal ? 1 : 0,
         this.player.equipStats.armorPen + this.player.meleeArmorPen,
@@ -22443,7 +22459,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           Math.trunc(e.y) + Math.floor(Math.random() * e.h),
           VANILLA_ITEM_KEY_BY_ID[71] ?? 'vi_71', 1 + luckRollBadLuck(this.player.luck ?? 0, 25),
           vxx, vyy);
+        // ClassyCane 编排（Player.cs:44722-44732 与铜币同支门;clientOnly:false;
+        // 此前"走既有注册口径"仅登记——L5 批接线）
+        classyCaneFx(this, e.cx, e.cy);
+        this.broadcastParticleOrchestra(ParticleOrchestraType.ClassyCane, e.cx, e.cy);
       }
+      // SlapHand 3258 / WaffleIron 5382 / FlyMeal 5129 命中音编排（:44707-44745 命中侧,
+      // 敌怪/城镇两循环同位）
+      this.meleeOrchestraStrike(swingVid, e.cx, e.cy);
       // ================= ★α-H6（终局扫尾批 A5）StatusToNPC 位次搬前 =================
       // 原版浸剂/debuff 施加 = StatusToNPC(sItem.type, npcIndex)（Player.cs:6499 起，
       // 调用位 :44755）在【StrikeNPC :44773 之前】；本仓此前排在 e.hurt 之后。这不
@@ -23101,8 +23124,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** module8 编排粒子到达（原版客户端 SpawnParticlesDirect → Spawn_<type>）。
    *  本仓已接消费子集 = 微光族两型 + 2026-08-21 生产者补齐批四型（PetExchange/
-   *  VampireOnFire/Digestion/LoadoutChange——视觉与产生端本地同款；逐型评估与
-   *  登记清单见 syncModules.ParticleOrchestraType 注）；其余型静默忽略（前向兼容） */
+   *  VampireOnFire/Digestion/LoadoutChange——视觉与产生端本地同款）+ 2026-08-31
+   *  台账 L5 清偿批九型（RainbowRodHit/SlapHand/FlyMeal/WaffleIron/ClassyCane/
+   *  DeadCells 族三型/ShadowbeamHostile·Friendly/PaladinsHammerShockwave——
+   *  视觉本体统一收编 fx/orchestraFx.ts,生产/消费两面对同一函数）；逐型评估与
+   *  登记清单见 syncModules.ParticleOrchestraType 注；其余型静默忽略（前向兼容） */
   netApplyParticleOrchestra(type: number, s: ParticleSettings): void {
     if (type === ParticleOrchestraType.ShimmerTownNPC) {
       // Spawn_ShimmerTownNPC :1696-1752（= TownNPC shimmerRise 到场三色爆发同款）
@@ -23129,6 +23155,37 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 切配装视觉 = UI 槽闪（GetColorByLoadout 语义）,世界侧按白闪词汇以白色
       // 升腾粒复放（含 uniqueInfo 配装档序,消费暂不分色））
       this.spawnParticles(s.posX, s.posY, '#FFFFFF', 20, 1.2, { life: 30, grav: -0.1 });
+    } else if (type === ParticleOrchestraType.RainbowRodHit) {
+      // Spawn_RainbowRodHit :3462-3512 → fx/orchestraFx.rainbowRodHitFx 收编本体
+      rainbowRodHitFx(this, s.posX, s.posY, s.moveX, s.moveY);
+    } else if (type === ParticleOrchestraType.SlapHand) {
+      slapHandFx(this, s.posX, s.posY);            // Spawn_SlapHand :2860-2863 纯 Item175 音
+    } else if (type === ParticleOrchestraType.FlyMeal) {
+      flyMealFx(this, s.posX, s.posY);             // Spawn_FlyMeal :2914-2917 纯 Item16 音
+    } else if (type === ParticleOrchestraType.WaffleIron) {
+      waffleIronFx(this, s.posX, s.posY);          // Spawn_WaffleIron :2865-2868 纯 Item178 音
+    } else if (type === ParticleOrchestraType.ClassyCane) {
+      classyCaneFx(this, s.posX, s.posY);          // Spawn_ClassyCane :2887-2912 纸屑+尘10
+    } else if (type === ParticleOrchestraType.DeadCellsMushroomBoiExplosion) {
+      // Spawn_DeadCellsMushroomBoiExplosion :2426-2516（收编 DeadCellsMushroom 三槽音+红爆;
+      //   producer MinionProj 1044 爆点 broadcast 补远端——原版 clientOnly:true 偏差登记）
+      requestMushroomBoiExplosion(this, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.DeadCellsDownDashExplosion) {
+      // Spawn_DeadCellsDownDashExplosion :2128-2223（uniqueInfo==1 满蓄强化档;下坠跳
+      //   producer 未移植,vanillaWingVisuals 登记④——当前仅远端广播可达）
+      deadCellsDownDashExplosionFx(this, s.posX, s.posY, s.uniqueInfo === 1);
+    } else if (type === ParticleOrchestraType.DeadCellsFlint) {
+      // Spawn_DeadCellsFlint :1786-1901（火石枪刺出地表释放特效;movementY=gravDir 档位保留）
+      deadCellsFlintFx(this, s.posX, s.posY, s.moveY || 1);
+    } else if (type === ParticleOrchestraType.ShadowbeamHostile
+      || type === ParticleOrchestraType.ShadowbeamFriendly) {
+      // Spawn_Shadowbeam :1987-2005（锚点→当前位置 d173 直线铺撒;Arrow.SHADOWBEAM_
+      // ORCHESTRA_IDX 广播载荷同语义,movementVector=上一锚点、uniqueInfo=|v|×1000）
+      shadowbeamLineFx(this, s.moveX, s.moveY, s.posX, s.posY,
+        Math.max(1, Math.abs(s.uniqueInfo)) / 1000, type === ParticleOrchestraType.ShadowbeamHostile);
+    } else if (type === ParticleOrchestraType.PaladinsHammerShockwave) {
+      // Spawn_PaladinsHammerShockwave :816-881（MovementVector=Size 载荷还原命中盒）
+      paladinsHammerShockwaveFx(this, s.posX, s.posY, s.moveX, s.moveY);
     }
   }
 
@@ -23139,6 +23196,32 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       uniqueInfo,
       invoker: this.net.mySlot & 0xff,
     });
+  }
+
+  /** 近战命中编排四连（Player.cs ProcessHitAgainstNPC :44707-44745 的命中侧编排,
+   *  敌怪/城镇 NPC 两循环同位——原版 Main.npc 单循环,本仓双桶镜像同锚）：
+   *  SlapHand 3258/:44707-44713 → Item175 音、WaffleIron 5382/:44715-44721 →
+   *  Item178 音、FlyMeal 5129/:44736-44740 → Item16 音——三者无条件于每次命中；
+   *  本地直生（fx/orchestraFx 同款）+ broadcast 上行（clientOnly:false 原版即全网）。
+   *  ClassyCane 3351 不在此列——原版挂铜币支（:44722-44732,type!=488&&lifeMax>5 门）
+   *  内,见敌怪/城镇两处铜币块内联调用 */
+  private meleeOrchestraStrike(vid: number, cx: number, cy: number): void {
+    switch (vid) {
+      case 3258:
+        slapHandFx(this, cx, cy);
+        this.broadcastParticleOrchestra(ParticleOrchestraType.SlapHand, cx, cy);
+        break;
+      case 5382:
+        waffleIronFx(this, cx, cy);
+        this.broadcastParticleOrchestra(ParticleOrchestraType.WaffleIron, cx, cy);
+        break;
+      case 5129:
+        flyMealFx(this, cx, cy);
+        this.broadcastParticleOrchestra(ParticleOrchestraType.FlyMeal, cx, cy);
+        break;
+      default:
+        break;
+    }
   }
 
   /** module100 天空氛围到达（原版 AmbientSky.Spawn(player, type, seed)）：锚玩家位
@@ -23282,11 +23365,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           : (w.flags['downed_13'] || w.flags['downed_266']) ? 2
             : (w.flags.downedSlimeKing || w.flags['downed_50'] || w.flags['downed_4']
               || w.flags.downedEyeOfCthulhu) ? 1 : 0;
+    // AnyDanger 快照（NPC.cs:81040-81108）→ 探测器 399 天空/地表两支的"无危险"门
+    // （:1388/:4171）；Pal 收集物 5663/5664 → 695/696 遇袭双宠池强制档
+    // （Player.HasItem，NPC.cs:4376-4385；本仓物品池未注册时恒 false = 纯幸运档）
+    const palA = invIndexOfVanilla(5663);
+    const palB = invIndexOfVanilla(5664);
     this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon,
       !!(w.flags.downedSkeletron || w.flags['downed_35']),
       invaders, activeIds, moonCtx, lunar, this.player.maxHp, this.player.luck,
       !!w.seedFlags?.everything && this.player.insideUnbreakableWalls && ddCan < ddNeeds,
-      partyIsUp(this.partyState));
+      partyIsUp(this.partyState),
+      this.npcAnyDanger(),
+      palA >= 0 && this.player.inv.countOf(palA) > 0,
+      palB >= 0 && this.player.inv.countOf(palB) > 0);
     this.vanillaSpawner.starfallBoost = this.starfallBoost;   // 流星夜附魔夜爬虫支（NPC.cs:2316）
     // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）。第三参 = NPC.cs:302 读
     // player.ZoneSandstorm（SceneMetrics zoneSandstorm 派生位——已含地表大气门，
@@ -26038,6 +26129,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** CultistRitual 宿主上下文（RuntimeEvents.CultistHost）——437 自然重生链 */
+  /** NPC.AnyDanger（NPC.cs:81040-81108）：月总倒计时/入侵/月事件/旧军开场/DD2 进行态
+   *  /任一活跃 Boss/DangerThatPreventsOtherDangers（NPCID.cs:4869 = 天界柱 517/422/
+   *  507/493、月总核心 399、世吞体 13/14/15）。消费端：石碑 recheck（此处）与
+   *  VanillaSpawner 的火星探测器 399 "无危险"上下文门（NPC.cs:1388/:4171）。
+   *  ★此前仅石碑侧有内联版；spawner 门长期缺上下文（探测器略偏多）——本方法提
+   *  取共用后两处同源 */
+  npcAnyDanger(): boolean {
+    const w = this.world;
+    if (w.lunarEvent.moonLordCountdown > 0 || w.invasionType > 0
+      || w.moonEvent.kind !== 0 || w.oldOnesArmy.ongoing) return true;
+    for (const n of this.entities.enemies) {
+      const en = n as Enemy;
+      if (en.dead) continue;
+      if (en.def.boss) return true;
+      const vid = en.vanillaId ?? -1;
+      if (vid === 517 || vid === 422 || vid === 507 || vid === 493
+        || vid === 399 || vid === 13 || vid === 14 || vid === 15) return true;
+    }
+    return false;
+  }
+
   private cultistCtx(): CultistHost {
     const w = this.world;
     return {
@@ -26057,16 +26169,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 还认 DangerThatPreventsOtherDangers（NPCID.cs:4869）={四天界柱 517/422/
       // 507/493, 月总核心 399, 世吞体 13/14/15}——天启四柱阶段/lunarEvent 未开
       // 倒计时时该集合是唯一危险源（此前缺它→石碑 recheck 只有 600 而非 ×6）
-      anyDanger: () => w.lunarEvent.moonLordCountdown > 0 || w.invasionType > 0
-        || w.moonEvent.kind !== 0 || w.oldOnesArmy.ongoing
-        || this.entities.enemies.some((n) => {
-          const en = n as Enemy;
-          if (en.dead) return false;
-          if (en.def.boss) return true;
-          const vid = en.vanillaId ?? -1;
-          return vid === 517 || vid === 422 || vid === 507 || vid === 493
-            || vid === 399 || vid === 13 || vid === 14 || vid === 15;
-        }),
+      anyDanger: () => this.npcAnyDanger(),
       // WorldGen.PlayerLOS 近似（WorldEvolution.playerLOS 同款：50 格内视为可见）
       // WorldGen.PlayerLOS（:69500-69515）真义 = 点 16×16 矩形 ∩ 以玩家为中心
       // sWidth*1.2 × sHeight*1.2 屏幕矩形（非视线）——曾 ±50×±40 格硬编码盒，
@@ -27429,8 +27532,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 旗 buff 接触减伤（1457 Player.cs:31626-31628 GetBannerBuffEffect×DamageReceived:
     //  经典 ×0.75/专家 ×0.5——1456 行号注 :30930-30933 同物）。此段后、resistCold 前
     //  的 dmg 即原版 num4——反射与 Hurt 共同基准（A1 位次定锚）。
+    // ★Notes①（四轮蓝队）：原文 `(int)((float)num4 * …)` = (int) 截断非四舍五入
+    //   （round 会把 ×0.5/×0.75 的 .5 中点抬 +1）；连带反射基准随 dmg 微漂移——
+    //   反射量 = trunc(num4×num2)，num4 本身截断后也向零收紧 ≤1 点，方向一致非反向。
     if (attacker && attacker.vanillaId != null && contactOnly && this.bannerNpcActive(attacker.vanillaId)) {
-      dmg = Math.max(1, Math.round(dmg * bannerReceivedMult(mainExpertMode(this.world))));
+      dmg = Math.max(1, Math.trunc(dmg * bannerReceivedMult(mainExpertMode(this.world))));
     }
     // ★A1 荆棘反射前置面（1457 Player.cs Update_NPCCollision :31605-31668，
     //   位次=【banner 后 / resistCold·防御·闪避·Hurt 前】逐值钉死）：
@@ -27712,67 +27818,88 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 格挡的接触命中不再先扣血再返 0；③ 攻端 DamageDealt 旗乘区统一包装。
       if (p.hp <= 0) {
         p.dead = true;
-        // KillMe :38228-38235：pvpDeath 分道计数（numberOfDeathsPVP/PVE）
-        if (p.lastPvpDeath) p.deathsPvp++;
-        else p.deathsPve++;         // numberOfDeathsPVE（PL:53840,存档持久化）
-        p.respawnTimer = 0;
-        p.deadTime = 0;             // :37182 Spawn 归零（双计数器分立）
-        // 死亡文本/墓碑由 handlePlayerDeath 统一处理（此处不再 toast「你死了」）
-        // ==== 死亡惩罚按【角色难度】（Player.difficulty：0 软核 1 中核 2 硬核 3 旅程）====
-        // 世界难度不参与死亡惩罚（只管掉落/伤害倍率等），曾两轴混接
-        const charDiff = p.appearance?.difficulty ?? 0;
-        // PvP 死亡不掉钱（KillMe :38318-38326：pvp → lostCoins=0 跳过 DropCoins）
-        const pvpDeathNoCoins = p.lastPvpDeath;
-        // 先记死亡时身家（Player.cs:38247-38250 lostCoins=coinsOwned——死亡 UI「掉了{0}」；
-        // 软核/旅程随后被 DropCoins 实际掉落额覆盖 :38318-38324，中核/硬核的钱随
-        // 物品全掉 → 身家即损失额）
-        this.lostCoins = pvpDeathNoCoins ? 0 : this.coinsOwned();
-        // 中核/硬核：掉落全部物品（Player.cs:38254 DropItems(gemsOnly=false)：软核/旅程
-        // 才走 gemsOnly=true 只掉宝石——本仓无背包宝石，近似为不掉）
-        if (dropsAllItemsOnDeath(charDiff)) {
-          dropInventoryOnDeath(p.inv, (key, stack) => {
-            this.spawnDrop(p.cx, p.cy, key, stack, (Math.random() - 0.5) * 8, -2 - Math.random() * 2);
-          });
-        }
-        // 硬核：角色消亡（Player.cs:38255-38257 HardcoreDeathPenalty → KillMeForGood :38173+
-        // 删 .plr 角色档 + ghost 化 :16894；本仓最小集 = 标记不可重生 + 流程层回写角色存档）
-        if (charDiff === 2 && p.appearance && !p.appearance.hardcoreDead) {
-          p.appearance = { ...p.appearance, hardcoreDead: true };
-          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HardcoreDeath', this.playerName()));
-          this.cb.onHardcoreDeath?.(p.appearance);
-        }
-        // 软核/旅程：掉钱（Player.cs:38318-38326 difficulty==0||3 才走 DropCoins；
-        // DropCoins :53351-53390 掉钱档按**世界难度**：经典掉一半/专家 3/4/大师全掉）
-        // PvP 死亡不掉（:38321-38322 pvp → lostCoins=0，无 DropCoins）
-        if (dropsCoinsOnDeath(charDiff) && !pvpDeathNoCoins) {
-          // 死亡掉钱档（Player.DropCoins :53351-53380 读 Main.expertMode/masterMode =
-          // Difficulty 轴——旅程强度滑杆 ≥2× 同样按专家/大师掉钱）
-          const keep = deathCoinKeepFraction(this.world.isMaster ? 2 : this.world.isExpert ? 1 : 0);
-          let lost = 0;
-          const face = [1, 100, 10000, 1000000];
-          // vi_71-74 单轨(本地 coin_* 双轨兼容段已随退役移除)
-          COIN_KEYS.forEach((ck, ci) => {
-            const id = ITEM_BY_KEY[ck];
-            if (id === undefined) return;
-            const n = p.inv.countOf(id);
-            if (n > 0) {
-              const dropN = n - Math.floor(n * keep);
-              lost += dropN * face[ci];
-              p.inv.remove(id, dropN);
-              // ★ 掉出的钱要落地（DropCoins→TryDroppingSingleItem :53386 掉的是
-              //   coin 物品实体，死亡点可拾回——此前只 remove 没生成=钱凭空蒸发）
-              if (dropN > 0) {
-                this.spawnDrop(p.cx, p.cy, ck, dropN, (Math.random() - 0.5) * 8, -2 - Math.random() * 2);
-              }
-            }
-          });
-          this.lostCoins = lost; // DrawInterface_35 "掉了{0}"（重生于 respawnPlayer 清零）
-        }
-        // 垃圾桶死亡清空（Player.cs:53394 mouseItem/trashItem 语义）
-        p.inv.trash = null;
+        // ★F2（四轮蓝队）：死亡管线单点化——计数/DropItems/DropCoins/Hardcore 死亡
+        // 全量迁至 settlePlayerDeath（本致分支 + Player.fixedUpdate hp<=0 过渡块共用，
+        // 幂等门防双计）。直扣型致死站（溺水/舌 DoT/墙舌世界边）据此补齐管线。
+        this.settlePlayerDeath(p.lastPvpDeath === true);
       }
     }
     return ok;
+  }
+
+  /** ★F2（四轮蓝队）死亡结算单点（KillMe 尾段家族——原 damagePlayer 内联块抽出）。
+   *  入口两类：
+   *   ① damagePlayer 致死分支（msg117/Hurt 全族同步结算）；
+   *   ② 直改 hp 的致死站经 Player.fixedUpdate `hp<=0 && !dead` 过渡块兜入：
+   *     溺水 statLife-=2 → KillMe(ByOther(1),10)（:23449-23455）、tongued DoT 分块
+   *     lifeRegenCount≤−600 → KillMe(ByOther(7)/(8)/(12),10)（:19142-19148）、
+   *     墙舌 >3000px/世界墙边 KillMe(ByOther(11)/(12),1000)（:22507/:22511）。
+   *  幂等门 __swDeathSettled = respawnPlayer 复位——同一死两入口只结算一次。
+   *  块体与拆出前逐字一致（只 lostCoins/pvp 归因参数化），死亡文本/墓碑仍由
+   *  handlePlayerDeath 流程层处理。 */
+  settlePlayerDeath(pvp: boolean): void {
+    const p = this.player;
+    const guard = p as unknown as { __swDeathSettled?: boolean };
+    if (guard.__swDeathSettled || !p.dead) return;   // 已结算 / 非致死调用直接早退
+    guard.__swDeathSettled = true;
+    // KillMe :39107 起（1456 注 :38228-38235）：pvpDeath 分道计数
+    if (pvp) p.deathsPvp++;
+    else p.deathsPve++;           // numberOfDeathsPVE（PL:53840,存档持久化）
+    p.respawnTimer = 0;
+    p.deadTime = 0;               // :37182 Spawn 归零（双计数器分立）
+    // 死亡文本/墓碑由 handlePlayerDeath 统一处理（此处不再 toast「你死了」）
+    // ==== 死亡惩罚按【角色难度】（Player.difficulty：0 软核 1 中核 2 硬核 3 旅程）====
+    // 世界难度不参与死亡惩罚（只管掉落/伤害倍率等），曾两轴混接
+    const charDiff = p.appearance?.difficulty ?? 0;
+    // PvP 死亡不掉钱（KillMe :38318-38326：pvp → lostCoins=0 跳过 DropCoins）
+    const pvpDeathNoCoins = pvp;
+    // 先记死亡时身家（Player.cs:38247-38250 lostCoins=coinsOwned——死亡 UI「掉了{0}」；
+    // 软核/旅程随后被 DropCoins 实际掉落额覆盖 :38318-38324，中核/硬核的钱随
+    // 物品全掉 → 身家即损失额）
+    this.lostCoins = pvpDeathNoCoins ? 0 : this.coinsOwned();
+    // 中核/硬核：掉落全部物品（Player.cs:38254 DropItems(gemsOnly=false)：软核/旅程
+    // 才走 gemsOnly=true 只掉宝石——本仓无背包宝石，近似为不掉）
+    if (dropsAllItemsOnDeath(charDiff)) {
+      dropInventoryOnDeath(p.inv, (key, stack) => {
+        this.spawnDrop(p.cx, p.cy, key, stack, (Math.random() - 0.5) * 8, -2 - Math.random() * 2);
+      });
+    }
+    // 硬核：角色消亡（Player.cs:38255-38257 HardcoreDeathPenalty → KillMeForGood :38173+
+    // 删 .plr 角色档 + ghost 化 :16894；本仓最小集 = 标记不可重生 + 流程层回写角色存档）
+    if (charDiff === 2 && p.appearance && !p.appearance.hardcoreDead) {
+      p.appearance = { ...p.appearance, hardcoreDead: true };
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HardcoreDeath', this.playerName()));
+      this.cb.onHardcoreDeath?.(p.appearance);
+    }
+    // 软核/旅程：掉钱（Player.cs:38318-38326 difficulty==0||3 才走 DropCoins；
+    // DropCoins :53351-53390 掉钱档按**世界难度**：经典掉一半/专家 3/4/大师全掉）
+    // PvP 死亡不掉（:38321-38322 pvp → lostCoins=0，无 DropCoins）
+    if (dropsCoinsOnDeath(charDiff) && !pvpDeathNoCoins) {
+      // 死亡掉钱档（Player.DropCoins :53351-53380 读 Main.expertMode/masterMode =
+      // Difficulty 轴——旅程强度滑杆 ≥2× 同样按专家/大师掉钱）
+      const keep = deathCoinKeepFraction(this.world.isMaster ? 2 : this.world.isExpert ? 1 : 0);
+      let lost = 0;
+      const face = [1, 100, 10000, 1000000];
+      // vi_71-74 单轨(本地 coin_* 双轨兼容段已随退役移除)
+      COIN_KEYS.forEach((ck, ci) => {
+        const id = ITEM_BY_KEY[ck];
+        if (id === undefined) return;
+        const n = p.inv.countOf(id);
+        if (n > 0) {
+          const dropN = n - Math.floor(n * keep);
+          lost += dropN * face[ci];
+          p.inv.remove(id, dropN);
+          // ★ 掉出的钱要落地（DropCoins→TryDroppingSingleItem :53386 掉的是
+          //   coin 物品实体，死亡点可拾回——此前只 remove 没生成=钱凭空蒸发）
+          if (dropN > 0) {
+            this.spawnDrop(p.cx, p.cy, ck, dropN, (Math.random() - 0.5) * 8, -2 - Math.random() * 2);
+          }
+        }
+      });
+      this.lostCoins = lost; // DrawInterface_35 "掉了{0}"（重生于 respawnPlayer 清零）
+    }
+    // 垃圾桶死亡清空（Player.cs:53394 mouseItem/trashItem 语义）
+    p.inv.trash = null;
   }
 
   /** CombatText.NewText 1:1（CombatText.cs:59-118）：普通 vy=-7/life=60、暴击
@@ -32955,6 +33082,8 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     // 否则 ReviveFromDeath 180t（Player.cs:37229-37235;旧 90t/1.5s）
     const wasPvpDeath = p.lastPvpDeath;
     p.lastPvpDeath = false;
+    // ★F2：死亡结算幂等门复位——下一次死从零结算（否则重生后的第 N 死被吞计数）
+    (p as unknown as { __swDeathSettled?: boolean }).__swDeathSettled = false;
     p.hp = p.maxHp;
     p.dead = false;
     p.iframes = wasPvpDeath ? 300 : 180;

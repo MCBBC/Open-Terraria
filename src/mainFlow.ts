@@ -377,7 +377,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.GeneratingWorld'), 0.05);
     await startAssetPrewarm();
     const g = makeGame();
-    await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(Lang.worldgenText(label), p));
+    await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(Lang.worldgenText(label ?? ''), p));   // label=undefined（粘滞文案）仅此合成探针路径，直收窄空串
   }
 
   /** 把选中角色的外观应用到玩家（进游戏后调用）。联机时补发 SyncPlayer——
@@ -1003,7 +1003,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       try { return new URLSearchParams(location.search).get('wprev') !== '0'; } catch { return true; }
     })();
     await g.newWorld(cfg.seed || String(Date.now()), cfg.w, cfg.h,
-      (label, p) => loadState.setProgress(label, p),
+      // ★第三参 local=当前原版 pass 段内 Value（GenProgress；undefined=无短条语义路径）
+      (label, p, local) => loadState.setProgress(label ?? undefined, p, local),
       {
         name: cfg.name,
         evil: cfg.evil,

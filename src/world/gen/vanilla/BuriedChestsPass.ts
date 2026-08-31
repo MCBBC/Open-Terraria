@@ -1038,6 +1038,16 @@ function placeBuriedChestInner(
       }
     }
   }
+  // ---- 地牢主件门 flag4（cs:36526-36550）：tile21 && (chestStyle==10 ||
+  //   num10∈{211,212,213,753})。生成期 CurrentDungeonGenVars.GeneratingDungeon=false
+  //   ⇒ 无条件 num9=10（生成期 tile 恒 21 不变）；随后 **getGoodWorldGen 恒掷**
+  //   （cs:36543-36545，命中主件改 52）——★IIIII99e：神龛常春藤箱 style10 在 FTW
+  //   世界逐箱耗此骰；曾缺 ⇒ 神龛箱列流相移（ftw #61 首差 (1051,428) 足迹列错位,
+  //   行扫全同 ⇒ 唯 jitter 上游骰流偏移可解释）。C# 位在冰门后、地狱门前。
+  if (tile === CHEST && (argStyle === 10 || mainId === 211 || mainId === 212 || mainId === 213 || mainId === 753)) {
+    style = 10;
+    if (ftwChestDie() === 0) ftwTake52();
+  }
   // ---- 地狱门（1457 cs:36496）：tile21 && (style4 显式 || 深层无主件) → num9=4 +
   //   地狱武器序。★同门置 flag13（消费点 = 尾段 2195 蜥蜴炉恒给 + 日耀碑 1/5 门）。
   //   ★原版位在冰门后（num10 已可能被冰/沙漠池占用 → 深层箱若 flag21 命中则冰池

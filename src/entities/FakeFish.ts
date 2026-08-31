@@ -8,7 +8,8 @@
 //     CanHit :124-141、CheckLatch :143-166、RemoveLatch :168-172、
 //     EmitWaterPulse :174-188、DoStandardWaterSplash :190-261、
 //     SetAndGetLatchDetails :361-379、Rotate :381-400、PickNewVelocity :402-413、
-//     BeRepelled :521-561（本仓无 ParticleRepel 广播面,登记未移植）
+//     BeRepelled :521-561（2026-08-31 L5 批收编——FakeFish.beRepelled + 模块级
+//     repelParticlesAt,玩家 UpdateParticles 门接入 Game 主循环,非 wire 面）
 //   - 生成门 Projectile.SpawnFakeFishInWater（Projectile.cs:20594-20696）——
 //     FishingCheck 内 TryBuildFishingContext 成功即跑（:20704-20712），先于咬钩掷骰、
 //     与其独立；AI_061 经 localAI[1]>660 累积器触发（:54780-54784）
@@ -184,7 +185,7 @@ export class FakeFish {
   private selectedSonar = false;
   private wasWet = false;       // _wasWet
   private delayTime = 0;        // _delayTime（出生/起跳 0..10t 迟启,Update :265）
-  private gotRepelled = false;  // _gotRepelled（BeRepelled 面,本仓未消费）
+  private gotRepelled = false;  // _gotRepelled（BeRepelled 消费位,L5 批接 RepelAt 广播面）
   dead = false;                 // ShouldBeRemovedFromRenderer
   restingInPool = false;        // IsRestingInPool
   private latched: FakeFishLatchTarget | null = null;
@@ -262,6 +263,52 @@ export class FakeFish {
     if (Math.hypot(cx - this.x, cy - this.y) > 80) return false;   // :130-134 固定 80
     if (!canHitLine(st, cx, cy, 0, 0, this.x, this.y, 0, 0)) return false;
     return true;
+  }
+
+  /** BeRepelled（IParticleRepel,FakeFishParticle.cs:521-561——玩家 UpdateParticles 每
+   *  tick RepelAt(bottom, height/2, wet) 的被推面,L5 批收编）。门序 :522-529：
+   *  静物/已推过/跳跃/吸附四态豁免;距离环 = Position−Source − Radius ≥100 静默。
+   *  推速 = Remap(环差,100,0,2,5) × 离源方向归一(RotatedByRandom π/4),Rotation 跟随、
+   *  位置预退一步;前向 32px 探干 → 立即重掷游向(Velocity=target×0.1 收幅)。末段
+   *  _delayTime=−1/_steerTime=Next(30,121)/态归 FreeRoaming/_gotRepelled=true +
+   *  寿命压缩（剩 <70% 时按进度 lerp 1→0.85 截断,:551-560）。*/
+  beRepelled(st: TileStore, sx: number, sy: number, radius: number): void {
+    if (this.inanimate || this.gotRepelled
+      || this.state === State.Jumping || this.state === State.Latched) return;   // :522-525
+    const ring = Math.hypot(this.x - sx, this.y - sy) - radius;   // num（:526）
+    if (ring >= 100) return;                             // :527-529
+    if (!this.gotRepelled || next(10) === 0) {           // :531（首次必推,后续 1/10 掷）
+      const k = remap(ring, 100, 0, 2, 5);               // num2（:532 Utils.Remap clamped）
+      const headingFallback = Math.atan2(this.vy, this.vx);
+      const away = safeNormalize(this.x - sx, this.y - sy,
+        Math.cos(headingFallback), Math.sin(headingFallback));       // DirectionFrom(SourcePosition)
+      const jit = (randFloat() * 2 - 1) * Math.PI / 4;   // RotatedByRandom(0.785398…)（:533）
+      const cj = Math.cos(jit), sj = Math.sin(jit);
+      this.vx = (away.x * cj - away.y * sj) * k;
+      this.vy = (away.x * sj + away.y * cj) * k;
+      this.rotation = Math.atan2(this.vy, this.vx);      // Rotation = Velocity.ToRotation()（:534）
+      this.x -= this.vx; this.y -= this.vy;              // Position -= Velocity（:535）
+      this.targetVx = this.vx; this.targetVy = this.vy;  // _targetVelocity（:536）
+      if ((this.vx !== 0 || this.vy !== 0)) {            // Velocity != Zero 门（:537）
+        const fn = safeNormalize(this.vx, this.vy, 0, 0);
+        if (!wetCollision(st, this.x + fn.x * 32, this.y + fn.y * 32, 0, 0).wet) {   // :538-541
+          this.steerTime = 0;
+          this.pickNewVelocity();                        // 重掷游向（:542）
+          this.vx = this.targetVx * 0.1;                 // Velocity = target×0.1（:543）
+          this.vy = this.targetVy * 0.1;
+        }
+      }
+    }
+    this.delayTime = -1;                                 // _delayTime = −1（:545）
+    this.steerTime = nextRange(30, 121);                 // _steerTime（:546）
+    this.state = State.FreeRoaming;                      // :547
+    this.gotRepelled = true;                             // :548
+    if (this.lifeCounted < this.lifeTotal * 0.7) {       // 寿命压缩（:551-560）
+      const prog = remap(this.lifeCounted / this.lifeTotal, 0, 0.25, 0, 1);   // num3
+      let mult = 1 + (0.85 - 1) * prog;                  // Lerp(1f,0.85f,num3)（:554）
+      if (prog === 1) mult = 0.7;                        // :555-556
+      this.lifeCounted = Math.trunc(this.lifeTotal * mult);   // :557
+    }
   }
 
   /** CheckLatch（:143-166）：脱钩三路——失活/换型/超距、停咬（ai0==0∧ai1≥0）、收线 */
@@ -737,6 +784,18 @@ export function pushAwayFakeFish(st: TileStore, cx: number, cy: number, searched
   const ordered = [...school].sort((a, b) =>
     Math.hypot(a.x - cx, a.y - cy) - Math.hypot(b.x - cx, b.y - cy));
   for (const f of ordered) f.tryToPushAway(st, cx, cy, searchedItemType);
+}
+
+/** RepelAt（ParticleOrchestrator.cs:1411-1427,L5 批收编）：玩家 UpdateParticles 每 tick
+ *  （Player.cs:28781-28792,velocity≠0 门）以脚底为源、height/2 为半径对所有
+ *  IParticleRepel 粒广播 BeRepelled——本仓可推面 = FakeFish 全群。原版各端对本机
+ *  全体玩家本地直生（不进 module8 wire 面,FakeFish.ts 头注同口径）。
+ *  wet 形参对齐 ParticleRepelDetails.IsInWater（鱼群支本体未读值,:552 距离环仅
+ *  Position/Radius 两轴——保留形参备其他 IParticleRepel 实现者复用） */
+export function repelParticlesAt(
+  st: TileStore, sx: number, sy: number, radius: number, _wet: boolean,
+): void {
+  for (const f of school) f.beRepelled(st, sx, sy, radius);
 }
 
 /** 收竿带渔获（Player.cs:53082 bobber.ai[1]=localAI[1] 的可观测镜像）：被该浮标

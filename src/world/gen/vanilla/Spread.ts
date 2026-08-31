@@ -488,7 +488,8 @@ export function spreadGrassAll(st: TileStore, dirt: number, grass: number, cente
  * 原版泥→丛林草无中心限距（自创 centerX/maxDist 与 2 轮快照扩散均偏离原版）。
  * 零 RNG——纯状态机，与掷骰流无关。
  */
-export function runMudCavesPass(st: TileStore, dirt: number, grass: number): void {
+export function runMudCavesPass(st: TileStore, dirt: number, grass: number,
+  gp?: import('../GenProgress').GenProgress): void {
   const { w, h } = st;
   let grassSpread = 0;
   // 热循环局部化 + solid LUT(定义同源=原判定式逐 id 预计算;洪水逐格 3×3 窗判定)
@@ -535,6 +536,7 @@ export function runMudCavesPass(st: TileStore, dirt: number, grass: number): voi
 
   // ① 全图逐 tile 播种（cs:12510-12520）
   for (let x = 0; x < w; x++) {
+    gp?.set3(x / w, 0, 0.2);   // ≡ cs:12530 Set(0.2*((i*Y+j)/(X*Y)))（播种扫描占窗前 20%）
     for (let y = 0; y < h; y++) {
       if (st.flags[st.idx(x, y)]) {
         grassSpread = 0;
@@ -564,6 +566,7 @@ export function runMudCavesPass(st: TileStore, dirt: number, grass: number): voi
     flood(x - 1, y); flood(x + 1, y); flood(x, y - 1); flood(x, y + 1);
   };
   for (let x = 10; x < w - 10; x++) {
+    gp?.set3((x - 10) / Math.max(1, w - 20), 0.2, 1);   // ≡ cs:12540 Set(0.2+num2*0.8)（清散块余量）
     let run = 0, runY = 0;
     for (let y = 10; y < h - 10; y++) {
       if (solidClearable(st.idx(x, y))) {

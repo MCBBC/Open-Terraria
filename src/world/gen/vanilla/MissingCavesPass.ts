@@ -14,12 +14,14 @@ import { T } from '../../../data/tiles';
  *  remix 补掷深域替换 / TileRunner 头 remix strength 抖动）——判定点=rig SW_ROLLWIN
  *  掷窗总账对拍（x86 pass3 主骰 603,378 ↔ 离线重放 v13-dbl×remix-mult=603,377）。
  *  **拒绝环重掷仍用普通域**（cs 重掷行无 remix 门，字面转录）。 */
-export function runSandPatchesPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runSandPatchesPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   const { w, h } = st;
   const remix = !!gs.seedFlags.remix;
   let num = Math.trunc(w * 0.013); // 4200 → 54
   if (remix) num = Math.trunc(num / 4);
   for (let i = 0; i < num; i++) {
+    gp?.set(i / num);   // ≡ cs:11737 progress.Set((float)i / num)
     let num2 = rng.nextIntRange(0, w);
     // cs:11736-11741：普通域 y 掷**无条件执行**；remix 再补掷深域并覆写值
     let num3 = rng.nextIntRange(gs.worldSurface, gs.rockLevel);
@@ -41,13 +43,15 @@ export function runSandPatchesPass(st: TileStore, rng: RNG, gs: GenState): void 
  *  后双向 dirt runner 填充（type 0 + addTile）。array[5] 记入 GenVars.tunnelX。
  *  ★IIIII43 REMIX（cs:11760-11763/11771-11783）：条数 ×1.5；**remix 无中带拒绝环**
  *  （tenth 分支与 while 环整体在 `!remixWorldGen` 内）。 */
-export function runTunnelsPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runTunnelsPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   const { w } = st;
   const remix = !!gs.seedFlags.remix;
   const maxTunnels = 50; // GenVars.maxTunnels（cs:232）
   let num = Math.trunc(w * 0.0015); // 4200 → 6
   if (remix) num = Math.trunc(num * 1.5);
   for (let i = 0; i < num; i++) {
+    gp?.set(i / num);   // ≡ cs:11768 progress.Set((float)i / num)
     if (gs.numTunnels >= maxTunnels - 1) break;
     const array = new Array<number>(10);
     const array2 = new Array<number>(10);
@@ -92,11 +96,13 @@ export function runTunnelsPass(st: TileStore, rng: RNG, gs: GenState): void {
 
 /** DirtWallBackgrounds（cs:11883-11921）：地表自然墙（wall 2 泥墙；147 雪面 → 40 冰墙）。
  *  每列一个 Next(-1,2) 随机游走定墙深（worldSurface+0..10）；从"六邻实心"首格向下刷墙。 */
-export function runDirtWallBgPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runDirtWallBgPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   const { w } = st;
   const wallTarget = (t: number) => (t !== T.SNOW ? 2 : 40); // 原版 147=雪→冰墙 40;内部 147 是熔岩滴,曾直传原版 id
   let num = 0;
   for (let i = 1; i < w - 1; i++) {
+    gp?.set(i / w);     // ≡ cs:11899-11905 域内逐列 value Set
     let wall = 2;
     num += rng.nextIntRange(-1, 2);
     if (num < 0) num = 0;
@@ -118,7 +124,8 @@ export function runDirtWallBgPass(st: TileStore, rng: RNG, gs: GenState): void {
 
 /** SmallHoles（cs:12034-12092）：小空洞（每轮 2 发 runner：小挖 2-4×2-19 / 大挖 7-14×6-29，
  *  type -1 普通 / 1/5 挖穿地表 -2）。锚点避海滩浅层与出生点浅层（拒绝采样）。 */
-export function runSmallHolesPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runSmallHolesPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   const { w, h } = st;
   // ▶探针钩（隔离重放 rig 用，缺省零开销）：pass 头 gs+store 快照捕获
   (globalThis as { __swShGsCap?: (gs: GenState, st: TileStore) => void }).__swShGsCap?.(gs, st);
@@ -133,6 +140,7 @@ export function runSmallHolesPass(st: TileStore, rng: RNG, gs: GenState): void {
   //   bug-compat 移植：直接跳过拒绝环，不加自造的 || 表达式（那会改变掷骰流）。
   const celbSkip = !!gs.seedFlags?.tenthAnniversary && !gs.seedFlags?.remix;
   for (let i = 0; i < num; i++) {
+    gp?.set(i / num);   // ≡ cs:12001-12020 域内分段 value（gen6 四段 .25/.5/.75 公式同域）
     const type = rng.nextInt(5) === 0 ? -2 : -1;
     // 发 1：小挖
     let num2 = rng.nextIntRange(0, w);

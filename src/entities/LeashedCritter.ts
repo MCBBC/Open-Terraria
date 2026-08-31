@@ -37,6 +37,10 @@ import { TILE_DEFS } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { vanillaNpc } from '../data/vanillaNpcs';
 import type { NetWriter, NetReader } from '../net/protocol';
+// ★1457 拆分探针族只借「原版 tileSolid 超集」常量（GenSolid 只依赖 data/tiles，
+// 无回环）：19 平台/239/380/427/435-439 九类 sheet 原版 tileSolid=true 而
+// TILE_DEFS.solid=false——运行时等价读法见下方 vanTileSolid
+import { VAN_TILE_SOLID_EXTRA } from '../world/gen/vanilla/GenSolid';
 
 // ============================================================================
 // msg82 module13 拴绳实体信封（原版 LeashedEntity.NetModule，LeashedEntity.cs:13-107）
@@ -75,6 +79,9 @@ export interface LeashedNetMsg {
 /** 世界常量（LeashedCritter.cs:41-43） */
 const GRAVITY = 0.3;
 const MAX_FALL_SPEED = 10;
+/** ★1457 JumperLeashedCritter.buoyancy（JumperLeashedCritter.cs:31 static readonly
+ *  0.4f）：跳跃族在水中每 tick 反浮 vy-=0.4（消费点 :145，Move 的液体门） */
+const JUMPER_BUOYANCY = 0.4;
 /** Recall 越界拉回的等待帧（State_Recalling 持续 20t，LeashedCritter.cs:45） */
 const RECALL_DURATION = 20;
 /** tile 像素边长 */
@@ -134,6 +141,184 @@ export function solidTile2(st: TileStore, x: number, y: number): boolean {
   const slope = st.slope[i];
   const topSlope = slope === 1 || slope === 2;              // Tile.tileData.topSlope()
   return (!!d.platform && topSlope) || slope === 0;
+}
+
+// ============================================================================
+// ★1457 拆分探针族（WorldGen.cs:70686-70919 区；1456 无此族——拴绳三引擎
+//   Walker/Flyer/Jumper 在 1457 对站位/邻格/坡面各换各的函数，语义随调用点拆分）
+//
+//   原版真值表映射（沿用 GenSolid.vanGenSolidType 的既有约定，偏差登记）：
+//     Main.tileSolid[t]     = TILE_DEFS.solid ∪ VAN_TILE_SOLID_EXTRA（19 平台/
+//       239/380 PlanterBox/427/435-439 玻璃平台九类——Main.cs:8032/:9797/:9799/
+//       :10119-10129 tileSolid=true 而 TILE_DEFS.solid=false）
+//     Main.tileSolidTop[t]  ≈ d.platform（本仓近似口径：HalfBrickPass cs:70211 注
+//       与 VanillaFraming.deriveVanillaSolidTablesFromDefs 的 solidTop 行同规则，
+//       家具台面族以 platform 旗承载"可站顶面"）
+//     TileID.Sets.Platforms[t]（TileID.cs:243）= sheet ∈ {19,427,435,436,437,438,
+//       439}；★380 PlanterBox 不在其列——它吃 AllowTopSlope 的 type==380 特例
+//       （:70864），且 NoPlatforms 不拒之（可被跳跃族横移穿行）。
+//   halfBrick/slope 编码与原版同构（topSlope=1|2、bottomSlope=3|4、half 独立位）。
+// ============================================================================
+
+const SETS_PLATFORMS_VANILLA_SHEETS: ReadonlySet<number> =
+  new Set([19, 427, 435, 436, 437, 438, 439]);
+
+/** 运行时 Main.tileSolid[type] 等价（静态初值——生成期翻转不适用实体域） */
+function vanTileSolid(t: number): boolean {
+  const d = TILE_DEFS[t];
+  if (!d) return false;
+  if (d.solid) return true;
+  return VAN_TILE_SOLID_EXTRA.has(d.vanilla?.sheet ?? -1);
+}
+
+/** (tileSolid || tileSolidTop) 合取门——AllowBottomSlope/NoPlatforms/AllowPlatformTopFrame 的站位基底 */
+function vanTileStandable(t: number): boolean {
+  return vanTileSolid(t) || !!TILE_DEFS[t]?.platform;
+}
+
+/** TileID.Sets.Platforms 成员判定（按原版 sheet id 反查，非本仓 platform 旗！） */
+function vanPlatformSet(t: number): boolean {
+  return SETS_PLATFORMS_VANILLA_SHEETS.has(TILE_DEFS[t]?.vanilla?.sheet ?? -1);
+}
+
+/** WorldGen.PlatformProperTopFrame（WorldGen.cs:70686-70697）：平台 frameX 除以
+ *  PlatformFrameWidth(18) 得帧档 ∈ [0,7]∪[12,16]∪[25,26]（其余档=切缺帧不承重）。
+ *  与 world/gen 四 pass（HalfBrickPass.cs:70205 等）同式复刻 */
+export function platformProperTopFrame(frameX: number): boolean {
+  const n = Math.trunc(frameX / 18);
+  if ((n < 0 || n > 7) && (n < 12 || n > 16)) return n >= 25 && n <= 26;
+  return true;
+}
+
+/**
+ * SolidTileAllowTopSlope（WorldGen.cs:70859-70878）：active ∧ (tileSolid∥type==380)
+ * ∧ [(!Platforms ∧ !bottomSlope()) ∨ (Platforms ∧ halfBrick)] ∧ !inActive。
+ * 名为 TopSlope 实按 bottomSlope 拒度：底坡(3/4)与非平台上半坡皆不算；
+ * ★半砖平块在此可通行（无 !halfBrick 支）。消费点=Walker 台阶上行的头顶格 (:42)
+ */
+export function solidTileAllowTopSlope(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;                     // 本仓越界恒空（solidTile2 同口径登记）
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  if (t === 0 || (st.wire[i] & 32) !== 0) return false;     // !nactive
+  if (!vanTileSolid(t)) return false;                       // type==380 已并入 EXTRA
+  if (vanPlatformSet(t)) return !!st.half[i];               // Platforms 分支只认 halfBrick
+  return !(st.slope[i] === 3 || st.slope[i] === 4);         // !bottomSlope()
+}
+
+/**
+ * SolidTileAllowBottomSlope（WorldGen.cs:70706-70729）：InWorld 界外/null 返 true；
+ * active ∧ (tileSolid ∥ tileSolidTop) ∧ [!topSlope() ∨ (Platforms ∧
+ * PlatformProperTopFrame)] ∧ !halfBrick ∧ !inActive——**可站**落点格（名字里的
+ * Allow 只豁免平台的合法顶帧，土坡 1/2 一律不可站）。消费点=Walker 台阶下行的
+ * 落点与再下一格（:44/:48）
+ */
+export function solidTileAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;                      // InWorld 门（:70710）：界外=承放
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  if (t === 0 || (st.wire[i] & 32) !== 0 || !!st.half[i]) return false;
+  if (!vanTileStandable(t)) return false;
+  if (!(st.slope[i] === 1 || st.slope[i] === 2)) return true;  // 非顶坡直通
+  return vanPlatformSet(t) && platformProperTopFrame(st.frameX[i]);
+}
+
+/**
+ * SolidTileNoPlatforms（WorldGen.cs:70735-70753）：界外/null 返 true；active ∧
+ * !Sets.Platforms ∧ (tileSolid ∥ tileSolidTop)。消费点=Walker 所在格占用判断 (:43)、
+ * Jumper 撞墙后水平邻格复核（JumperLeashedCritter.cs:169）
+ */
+export function solidTileNoPlatforms(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  if (t === 0 || (st.wire[i] & 32) !== 0) return false;
+  if (vanPlatformSet(t)) return false;
+  return vanTileStandable(t);
+}
+
+/**
+ * SolidTileAllowPlatformTopFrame（WorldGen.cs:70759-70781）：界外/null 返 true；
+ * active ∧ (!Platforms ∨ PlatformProperTopFrame(frameX)) ∧ (tileSolid ∥ tileSolidTop)。
+ * 半砖/坡面照算顶面（无排除支）；平台仅合法顶帧可站。★三引擎共用站面/前路格：
+ * Walker HandleFalling (:109)、Flyer Spawn (:45) 与运动探针 (:102/:114/:119)、
+ * Jumper Move 目标格 (:151) / 纵向邻格 (:162) + TryGetReachableTile + CanStandOnTile
+ */
+export function solidTileAllowPlatformTopFrame(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  if (t === 0 || (st.wire[i] & 32) !== 0) return false;
+  if (vanPlatformSet(t) && !platformProperTopFrame(st.frameX[i])) return false;
+  return vanTileStandable(t);
+}
+
+// ============================================================================
+// Flyer 液体遮挡门（★1457 FlyerLeashedCritter.cs:139-197 新增，1456 无此门：
+//   Flyer.Update 探针段 `|| IsBlockedByMedium(origin, destination)` → 鱼不出水、
+//   鸟不入液、任何 flyer 不扎进「深水面上方边界格」）
+// ============================================================================
+
+/** 原版 liquidType()（Water=0/Lava=1/Honey=2/Shimmer=3）——本仓 +1 编码反算。
+ *  ⚠️ >0 即异液（岩浆/蜂蜜/微光），照抄 C# 会把水当异液（LIQUID_TYPE 同案血证） */
+function vanLiquidTypeOf(storeType: number): number { return storeType - 1; }
+
+/**
+ * IsLiquidBoundary（FlyerLeashedCritter.cs:159-197）：出参 [边界?, 液量, 异液?]。
+ *  GetTileSafely 越界 = 共享空 tile（nactive=false、液量 0）→ 各空转分支同原版；
+ *  实心非台面格先定 out 参再折返 boundary=false（:164-167）；0<液<255 = 边界；
+ *  液=0 下视一格（255 才边界，彼格实心时让位给 tileSolidTop 判定——平台上承深水
+ *  是边界、实心块承深水不是）；液=255 上视一格对称（出水方向）。
+ */
+export function isFlyerLiquidBoundary(
+  st: TileStore, x: number, y: number,
+): [boundary: boolean, liquidAmount: number, weirdLiquid: boolean] {
+  const k = st.inBounds(x, y) ? st.idx(x, y) : -1;
+  const amount = k >= 0 ? st.liquid[k] : 0;
+  const weird = k >= 0 && amount > 0 && vanLiquidTypeOf(st.liquidType[k]) > 0;
+  if (k >= 0) {
+    const t = st.type[k];
+    const nactive = t !== 0 && (st.wire[k] & 32) === 0;
+    if (nactive && vanTileSolid(t) && !TILE_DEFS[t]?.platform) {
+      return [false, amount, weird];                        // :164-167 实心非台面
+    }
+  }
+  if (amount > 0 && amount < 255) return [true, amount, weird];      // :168-171
+  if (amount === 0) {                                           // :172-185 液面下探
+    const kb = st.inBounds(x, y + 1) ? st.idx(x, y + 1) : -1;
+    if (kb >= 0 && st.liquid[kb] === 255) {
+      const tb = st.type[kb];
+      const nB = tb !== 0 && (st.wire[kb] & 32) === 0;
+      if (nB && vanTileSolid(tb)) return [!!TILE_DEFS[tb]?.platform, amount, weird]; // :178-181
+      return [true, amount, weird];
+    }
+    return [false, amount, weird];                             // 越界空 tile 液 0 ≠255
+  }
+  const ka = st.inBounds(x, y - 1) ? st.idx(x, y - 1) : -1;    // :186-196 满液上探
+  if (ka >= 0 && st.liquid[ka] === 0) {
+    const ta = st.type[ka];
+    const nA = ta !== 0 && (st.wire[ka] & 32) === 0;
+    if (nA && vanTileSolid(ta)) return [!!TILE_DEFS[ta]?.platform, amount, weird];
+    return [true, amount, weird];
+  }
+  return [false, amount, weird];
+}
+
+/**
+ * IsBlockedByMedium（FlyerLeashedCritter.cs:139-157）：origin==destination→false；
+ * threshold = isAquatic ? 255 : 0。两段对称谓词 =「干净态」：非边界 ∧ 非异液 ∧
+ * 液量恰等于 threshold。仅 origin 干净且 destination 不净才阻挡——origin 处在
+ * partial 入水/异液中即整段免检（原版原文的 & 双位，非简化）。导出供回归对拍。
+ */
+export function flyerIsBlockedByMedium(
+  st: TileStore, isAquatic: boolean, ox: number, oy: number, dx: number, dy: number,
+): boolean {
+  if (ox === dx && oy === dy) return false;
+  const threshold = isAquatic ? 255 : 0;
+  const [oBoundary, oAmount, oWeird] = isFlyerLiquidBoundary(st, ox, oy);
+  if (!((!oBoundary && !oWeird) && oAmount === threshold)) return false;
+  const [dB, dAmount, dWeird] = isFlyerLiquidBoundary(st, dx, dy);
+  return !((!dB && !dWeird) && dAmount === threshold);
 }
 
 /**
@@ -216,6 +401,22 @@ export function leashedBubbleVisible(st: TileStore, cx: number, cy: number, isAq
   if (left && requires(tx - 1, ty)) return true;
   if (right && requires(tx + 1, ty)) return true;
   return false;
+}
+
+/**
+ * DrawBubble 档缩放（★1457 LeashedCritter.DrawBubble :295-307——1456 恒 1:1 贴图）：
+ *   vector = frame.Size() * _dummy.scale / (goreFrame.Size() - (4*2))
+ *   num2   = max(1, max(vector.X, vector.Y))，泡按 num2 整倍放大
+ * 帧体（当前动画帧 × 随机缩放）宽或高大于 Gore_413 内域（贴图减去上下左右 8px）
+ * 才升档，小个体恒 1。渲染端消费 = Renderer.drawLeashedBubble。
+ */
+export function bubbleScaleTier(
+  frameW: number, frameH: number, scale: number, goreW: number, goreH: number,
+): number {
+  if (!(frameW > 0 && frameH > 0 && goreW > 8 && goreH > 8)) return 1;
+  const sx = (frameW * scale) / (goreW - 8);
+  const sy = (frameH * scale) / (goreH - 8);
+  return Math.max(1, Math.max(sx, sy));
 }
 
 // ============================================================================
@@ -774,7 +975,8 @@ export class LeashedCritterEntity {
     this.ty = this.ay;
     if (this.proto.move === 'flyer') {
       // FlyerLeashedCritter.Spawn :43-50：锚桩下非实心 → vy=0.0001（走悬停分支）
-      if (st && !solidTile2(st, this.ax, this.ay + 1)) this.vy = HOVER_Y_VELOCITY;
+      // ★1457 探针换 SolidTileAllowPlatformTopFrame（FlyerLeashedCritter.cs:45）
+      if (st && !solidTileAllowPlatformTopFrame(st, this.ax, this.ay + 1)) this.vy = HOVER_Y_VELOCITY;
       this.pickFlyTarget();
     } else if (this.proto.move === 'jumper') {
       this.pickJumpTarget(); // JumperLeashedCritter.Spawn :40-42 → PickNewTarget
@@ -877,9 +1079,10 @@ export class LeashedCritterEntity {
     this.afterMove();
   }
 
-  /** HandleFalling（★1457 WalkerLeashedCritter.cs:141-175；拉回门 :132 用 Y 分量） */
+  /** HandleFalling（★1457 WalkerLeashedCritter.cs:141-175；拉回门 :132 用 Y 分量；
+   *  站面格探针 = SolidTileAllowPlatformTopFrame (:109)——半砖/平台合法帧均可承放） */
   private handleFallingWalker(st: TileStore, tpx: number, tpy: number, strayingY: number): void {
-    if (solidTile2(st, tpx, tpy + 1)) {
+    if (solidTileAllowPlatformTopFrame(st, tpx, tpy + 1)) {
       this.vy = 0;
       if (this.state === W_FALLING || this.state === W_RECALLING) {
         this.cx = this.tx * T + 8;
@@ -921,7 +1124,12 @@ export class LeashedCritterEntity {
     }
   }
 
-  /** AdvanceTargetPosition（WalkerLeashedCritter.cs:36-73）：台阶升降决策 */
+  /**
+   * AdvanceTargetPosition（★1457：WalkerLeashedCritter.cs:36-73）——探针四函数拆分：
+   * 头顶格 SolidTileAllowTopSlope (:42)、所在格 SolidTileNoPlatforms (:43)、
+   * 落点/再下格 SolidTileAllowBottomSlope (:44/:46)。flag6 组合式按原文 (flag&flag2)
+   * 加括号（与逐 && 同值，保留字面构型）
+   */
   private advanceTarget(st: TileStore, straying: number): boolean {
     if (Math.abs(this.tx - this.ax) >= straying) {
       this.direction = Math.sign(this.ax - this.tx) || 1;
@@ -932,14 +1140,14 @@ export class LeashedCritterEntity {
     this.spriteDirection = this.direction;
     const nx = this.tx + this.direction;
     const ny = this.ty;
-    const stepUpFree = !solidTile2(st, nx, ny - 1);
-    const curFree = !solidTile2(st, nx, ny);
-    const belowFree = !solidTile2(st, nx, ny + 1);
-    const liquidBelow = anyLiquidAt(st, nx, ny + 1);
-    const below2Free = !solidTile2(st, nx, ny + 2);
-    const canStepUp = stepUpFree && !curFree;                    // flag5
+    const stepUpFree = !solidTileAllowTopSlope(st, nx, ny - 1);      // num2 (:42)
+    const curFree = !solidTileNoPlatforms(st, nx, ny);               // flag (:43)
+    const belowFree = !solidTileAllowBottomSlope(st, nx, ny + 1);    // flag2 (:44)
+    const liquidBelow = anyLiquidAt(st, nx, ny + 1);                 // flag3 (:45)
+    const below2Free = !solidTileAllowBottomSlope(st, nx, ny + 2);   // flag4 (:46)
+    const canStepUp = stepUpFree && !curFree;                        // flag5
     const canStepDown = curFree && belowFree && !liquidBelow && !below2Free; // flag6
-    const canWalkLevel = curFree && !belowFree;                  // flag7
+    const canWalkLevel = curFree && !belowFree;                      // flag7
     if (canStepUp) {
       this.tx = nx; this.ty = ny - 1;
     } else if (canStepDown) {
@@ -976,7 +1184,10 @@ export class LeashedCritterEntity {
       this.waitTime = this.rand.range(p.minWaitTime ?? 60, (p.maxWaitTime ?? 300) + 1);
       this.pickFlyTarget();
     }
-    // :79-92：朝目标加速 + 距离刹车限速
+    // :79-80：origin = 本帧运动前的中心格（停驻 vy 判读全用 origin，勿用移动后位置）
+    const ox = Math.floor(this.cx) >> 4;
+    const oy = Math.floor(this.cy) >> 4;
+    // :81-97：朝目标加速 + 距离刹车限速
     const twx = this.tx * T + 8, twy = this.ty * T + 8;
     const dx = twx - this.cx, dy = twy - this.cy;
     const dist = Math.hypot(dx, dy);
@@ -992,26 +1203,27 @@ export class LeashedCritterEntity {
       this.vy *= cap / speed;
       speed = cap;
     }
-    // :94-115：抵近或前路实心 → 停驻贴地；否则位移 + 落空时恢复悬空微速度
+    // :98-115：抵近或前路实心/跨液面 → 停驻贴地；否则位移 + 落空时恢复悬空微速度
     const near = dist < maxFlySpeed;
     let blocked = near;
     if (!blocked) {
-      const probeX = this.cx + this.w * 0.5 * dirX + this.vx;
-      const probeY = this.cy + this.h * 0.5 * dirY + this.vy;
-      blocked = solidTile2(st, Math.floor(probeX) >> 4, Math.floor(probeY) >> 4);
+      // ★1457（:102-103）：前路格探针换 SolidTileAllowPlatformTopFrame，并叠加
+      // IsBlockedByMedium 液体遮挡门（鱼不出水面/鸟不扎水）
+      const probeX = Math.floor(this.cx + this.w * 0.5 * dirX + this.vx) >> 4;
+      const probeY = Math.floor(this.cy + this.h * 0.5 * dirY + this.vy) >> 4;
+      blocked = solidTileAllowPlatformTopFrame(st, probeX, probeY)
+        || flyerIsBlockedByMedium(st, !!p.isAquatic, ox, oy, probeX, probeY);
     }
     if (blocked) {
-      if (near) { this.cx = twx; this.cy = twy; }
-      const px = Math.floor(this.cx) >> 4;
-      const py = Math.floor(this.cy) >> 4;
+      let snapped = false;                                    // flag3（:110）
+      if (near) { this.cx = twx; this.cy = twy; snapped = true; }
       this.vx = 0;
-      this.vy = solidTile2(st, px, py + 1) ? 0 : HOVER_Y_VELOCITY;
+      // ★1457（:114）：snapped ∧ origin 下格可站才归零——否则悬空微速度
+      this.vy = (snapped && solidTileAllowPlatformTopFrame(st, ox, oy + 1)) ? 0 : HOVER_Y_VELOCITY;
     } else {
       this.cx += this.vx;
       this.cy += this.vy;
-      const px = Math.floor(this.cx) >> 4;
-      const py = Math.floor(this.cy) >> 4;
-      if (this.vy === 0 && !solidTile2(st, px, py + 1)) this.vy = HOVER_Y_VELOCITY;
+      if (this.vy === 0 && !solidTileAllowPlatformTopFrame(st, ox, oy + 1)) this.vy = HOVER_Y_VELOCITY;
     }
     // :117-121：spriteDirection = -direction（飞行族贴图朝向反转）
     const sx = Math.sign(this.vx);
@@ -1048,7 +1260,10 @@ export class LeashedCritterEntity {
       this.pickJumpTarget();
       this.setJumpCooldown();
     }
-    if (Math.hypot(this.tx * T + 8 - this.cx, this.ty * T + 8 - this.cy) < 8) {
+    // ★1457（:82-88）：落点先过 CanStandOnTile 复核再吸附——目标格悬空（浮空选中
+    // 档）不再瞬移贴点
+    if (Math.hypot(this.tx * T + 8 - this.cx, this.ty * T + 8 - this.cy) < 8
+      && this.canStandOnTileJumper(st, this.tx, this.ty)) {
       this.cx = this.tx * T + 8;
       this.cy = this.ty * T + 8;
       this.vx = 0; this.vy = 0;
@@ -1064,27 +1279,36 @@ export class LeashedCritterEntity {
     this.waitTime = this.rand.range(p.minWaitTime ?? 180, (p.maxWaitTime ?? 300) + 1);
   }
 
-  /** TryStartJump（JumperLeashedCritter.cs:71-96）——弹道初值解算 */
+  /** TryStartJump（★1457 重排：JumperLeashedCritter.cs:104-128）——先解 Y 初速
+   *  并过 `num4 < -gravity` 门，通过后才写 direction/velocity/WaitTime；1456 为
+   *  先写方向速度再验 vy>=0 回滚失败（失败态残留三字段）。（short) 截断语义用 trunc */
   private tryStartJump(): boolean {
     const p = this.proto;
     const dvx = this.tx * T + 8 - this.cx;
     const dvy = this.ty * T + 8 - this.cy;
     if (-dvy > (p.maxJumpHeight ?? 64)) return false;
-    const num = Math.min(Math.abs(dvx), p.maxJumpWidth ?? 112);
-    if (num <= (p.minJumpWidth ?? 48)) return false;
-    this.direction = Math.sign(dvx) || 1;
+    const num = Math.min(Math.abs(dvx), p.maxJumpWidth ?? 112);   // :111
+    if (num <= (p.minJumpWidth ?? 48)) return false;              // :113
     const num2 = num / (p.maxJumpWidth ?? 112);
     const num3 = (p.maxJumpDuration ?? 30) * num2;
+    const num4 = (dvy * num2) / num3 - 0.5 * GRAVITY * num3;      // :118
+    if (!(num4 < -GRAVITY)) return false;                         // :119-122
+    this.direction = Math.sign(dvx);                              // :123（Math.Sign 直写）
     this.vx = (num / num3) * this.direction;
-    this.vy = (dvy * num2) / num3 - 0.5 * GRAVITY * num3;
-    if (this.vy >= 0) return false;
-    this.waitTime = Math.round(num3 + (p.jumpCooldown ?? 60));
+    this.vy = num4;
+    this.waitTime = Math.trunc(num3 + (p.jumpCooldown ?? 60));    // :126 (short)
     return true;
   }
 
-  /** Move（JumperLeashedCritter.cs:98-139） */
+  /**
+   * Move（★1457：JumperLeashedCritter.cs:130-183）——液体浮力门（:143-150）+
+   * 三探针换装（目标格 :151 AllowPlatformTopFrame / 纵向邻格 :162 同 /
+   * 水平邻格 :169 NoPlatforms）。浮力门先于遮挡判定：本体格有**水**（liquidType
+   * 本仓=1，AnyLiquidAt(_,0) 原版 Water 档）→ vy 反浮且冷却钉最短档（召回态除外）
+   */
   private moveJumper(st: TileStore): boolean {
     let hitSomething = false;
+    const p = this.proto;
     const px = Math.floor(this.cx) >> 4;
     const py = Math.floor(this.cy) >> 4;
     const sx = Math.sign(Math.trunc(this.vx));
@@ -1092,26 +1316,42 @@ export class LeashedCritterEntity {
     const sy = Math.sign(Math.trunc(this.vy));
     const probeX = this.cx + sx * this.w * 0.5 + this.vx;
     const probeY = this.cy + sy * this.h * 0.5 + this.vy;
-    if (!solidTile2(st, Math.floor(probeX) >> 4, Math.floor(probeY) >> 4)) {
+    if (anyLiquidAt(st, px, py, true)) {                       // AnyLiquidAt(point, 0)
+      this.vy -= JUMPER_BUOYANCY;                              // velocity.Y -= buoyancy
+      if (this.state !== J_RECALLING) {
+        this.waitTime = p.minWaitTime ?? 180;                  // WaitTime=(short)minWaitTime
+      }
+    }
+    if (!solidTileAllowPlatformTopFrame(st, Math.floor(probeX) >> 4, Math.floor(probeY) >> 4)) {
       this.moveNoObstruction(st, px, py, probeY);
       return false;
     }
     hitSomething = true;
-    const ySolid = sy !== 0 && solidTile2(st, px, py + sy);
-    const xSolid = sx !== 0 && solidTile2(st, px + sx, py);
+    const ySolid = sy !== 0 && solidTileAllowPlatformTopFrame(st, px, py + sy);
+    const xSolid = sx !== 0 && solidTileNoPlatforms(st, px + sx, py);
     if (ySolid) this.vy = 0;
     if (xSolid) this.vx = 0;
     if (!ySolid && !xSolid) { this.vx = 0; this.vy = 0; }
     return hitSomething;
   }
 
-  /** Move_NoObstruction（JumperLeashedCritter.cs:141-170） */
+  /** CanStandOnTile（★1457 抽方法 JumperLeashedCritter.cs:273-284）：可站台面或
+   *  站水面（canStandOnWater 族）——水面只认表面格（上一格无水才算「面」） */
+  private canStandOnTileJumper(st: TileStore, x: number, y: number): boolean {
+    if (solidTileAllowPlatformTopFrame(st, x, y)) return true;
+    if (!!this.proto.canStandOnWater && anyLiquidAt(st, x, y, true)) {
+      return !anyLiquidAt(st, x, y - 1, true);
+    }
+    return false;
+  }
+
+  /** Move_NoObstruction（★1457：JumperLeashedCritter.cs:185-205）——落点复核
+   *  走 CanStandOnTile、重力段改 Clamp(vy+g, −maxFallSpeed, maxFallSpeed)（浮力
+   *  可把 vy 推负）、游走拉回门 |curY−AnchorY| 取绝对值（上行同样触发召回） */
   private moveNoObstruction(st: TileStore, curX: number, curY: number, nextY: number): void {
     const p = this.proto;
     if (this.vy >= 0 && nextY % T >= 8) {
-      const belowSolid = solidTile2(st, curX, curY + 1)
-        || (!!p.canStandOnWater && anyLiquidAt(st, curX, curY + 1, true));
-      if (belowSolid) {
+      if (this.canStandOnTileJumper(st, curX, curY + 1)) {     // :189-196
         this.cx = curX * T + 8; // currentTile.ToWorldCoordinates()（格中心）
         this.cy = curY * T + 8;
         this.vx = 0; this.vy = 0;
@@ -1120,9 +1360,10 @@ export class LeashedCritterEntity {
     }
     this.cx += this.vx;
     this.cy += this.vy;
-    this.vy += GRAVITY;
-    if (this.vy > MAX_FALL_SPEED) this.vy = MAX_FALL_SPEED;
-    if (this.state !== J_RECALLING && curY - this.ay > strayingYOf(p)) {   // :200 Y 分量
+    this.vy = Math.max(-MAX_FALL_SPEED,
+      Math.min(MAX_FALL_SPEED, this.vy + GRAVITY));            // MathHelper.Clamp(:199)
+    if (this.state !== J_RECALLING
+      && Math.abs(curY - this.ay) > strayingYOf(p)) {          // :200 Abs 化（Y 分量）
       this.state = J_RECALLING;
       this.waitTime = RECALL_DURATION;
     }
@@ -1149,28 +1390,39 @@ export class LeashedCritterEntity {
     if (tile) { this.tx = tile[0]; this.ty = tile[1]; }
   }
 
-  /** TryGetReachableTile（JumperLeashedCritter.cs:209-242） */
+  /**
+   * TryGetReachableTile（★1457 重写：JumperLeashedCritter.cs:233-271）——
+   * 扫描起点 Y 改 min(AnchorY, CenterY/16 整除)（已跳离锚高层时从当前层起步，
+   * :241）；占用列 = AllowPlatformTopFrame ∨ 有水（与原版 AnyLiquidAt(tile,0)
+   * 水档同义，非 canStandOnWater 门）→ 向上找腾空点；未占列从起点+1 下探到
+   * AnchorY+strayingY，落点用 CanStandOnTile 复核（平台顶帧/水面可达）
+   */
   private reachableTileFrom(st: TileStore, startX: number): [number, number] | null {
     const p = this.proto;
     const step = Math.sign(this.ax - startX);
-    if (step === 0) return null;
+    if (step === 0) return null;                              // :236-240
+    const startTy = Math.min(this.ay, Math.floor(this.cy / T));      // num2（:241）
+    const climbLim = Math.floor((p.maxJumpHeight ?? 64) / T);        // num3（:247）
     for (let i = startX; i !== this.ax; i += step) {
       const tx = i;
-      let ty = this.ay;
-      if (solidTile2(st, tx, ty)) {
-        const num2 = Math.floor((p.maxJumpHeight ?? 64) / T);
-        for (let j = 0; j < num2; j++) {
+      let ty = startTy;                                       // tile = (i, num2)
+      if (solidTileAllowPlatformTopFrame(st, tx, ty)
+        || anyLiquidAt(st, tx, ty, true)) {                   // :245-256 占用列
+        for (let j = 0; j < climbLim; j++) {
           ty--;
-          if (!solidTile2(st, tx, ty)) return [tx, ty];
+          if (!solidTileAllowPlatformTopFrame(st, tx, ty)
+            && !anyLiquidAt(st, tx, ty, true)) return [tx, ty];
         }
         continue;
       }
-      for (let k = 0; k < strayingYOf(p); k++) {              // :258 Y 分量下探界
-        ty++;
-        if (solidTile2(st, tx, ty)
-          || (!!p.canStandOnWater && anyLiquidAt(st, tx, ty, true))) {
-          return [tx, ty - 1];
+      const limY = this.ay + strayingYOf(p);                  // num4（:258）
+      ty = startTy + 1;
+      while (ty < limY) {                                     // :259-268
+        if (this.canStandOnTileJumper(st, tx, ty)) {
+          ty--;
+          return [tx, ty];
         }
+        ty++;
       }
     }
     return null;
@@ -1234,12 +1486,18 @@ export class LeashedCritterEntity {
     if (d) { d.vx *= 0; d.vy *= 0; }                        // :158-159 velocity *= 0
   }
 
-  /** Recall 尘（LeashedCritter.cs:119-133）：前后各 10 颗 Dust 15（alpha 150 / scale 1.1） */
+  /**
+   * Recall 尘（LeashedCritter.cs:119-133 → Recall_CreateDustAtLocation :134-141）：
+   * 前后各 10 颗 Dust 15（alpha 150 / scale 1.1），★1457 每颗补
+   * `noLight = noLightEmittance = true`（:139——返还不进光照缓冲/不照环境）
+   */
   recallDust(env: LeashedEnv): void {
     const dust = env.dust;
     if (!dust) return;                                      // netMode==2 语义：无尘
     for (let i = 0; i < 10; i++) {
-      dust.spawn(this.cx - this.w / 2, this.cy - this.h / 2, this.w, this.h, 15, 0, 0, 150, null, 1.1);
+      const d = dust.spawn(this.cx - this.w / 2, this.cy - this.h / 2, this.w, this.h,
+        15, 0, 0, 150, null, 1.1);
+      if (d) { d.noLight = true; d.noLightEmittance = true; }          // :139 双旗
     }
   }
 
@@ -2712,16 +2970,27 @@ function hue2rgb(p: number, q: number, tIn: number): number {
 //     旗（LeashedCritter.cs:43；三族 false）+ ShouldDrawBubble/TileRequiresBubble
 //     （:213-278，leashedBubbleVisible 已换 1457 形态）+ straying X/Y 拆分
 //     （:37/:39；waterStrider Y=12，WaterStrider.cs:13-14）。
-//     登记（1457 有、本批未迁移——影响面为既有族引擎，逐项待批）：
-//     a) SolidTile2 → 四函数拆分（SolidTileAllowTopSlope/NoPlatforms/
-//        AllowBottomSlope/AllowPlatformTopFrame，WorldGen.cs:70500 区新增）——
-//        Walker AdvanceTargetPosition :42-48 / Flyer Spawn :45 与探针 :102 换函数；
-//     b) Flyer IsBlockedByMedium（FlyerLeashedCritter.cs:104 探针段新增液体遮挡门）；
-//     c) Jumper buoyancy=0.4（JumperLeashedCritter.cs:31 水中浮力）+ TryStartJump
-//        初速重排（:116-118）+ Move 落点 CanStandOnTile 复核（:82）+
-//        TryGetReachableTile 重写（num2=min(AnchorY,CenterY/16) 起扫 :238-268）；
-//     d) DrawBubble 绘制档缩放 num2=max(1, frame.Size()*scale/(rect.Size()-8))
-//        （LeashedCritter.cs:301-306，大个体气泡放大——Renderer.drawLeashedBubble）；
-//     e) Recall 尘 noLight=noLightEmittance=true（:133-139 Recall_CreateDustAtLocation，
-//        本仓 recallDust 未带此二旗）。
+//   ⑧ ★1457 L4 五项引擎迁移批（2026-08-31 清偿，台账 approx-registry-2026-08-31
+//     L4；1457↔1458 Jumper/Flyer/LeashedCritter 三文件 diff 全等，行号同源）：
+//     a) ✅ SolidTile2 → 四函数拆分全量换装（solidTileAllowTopSlope /
+//        solidTileNoPlatforms / solidTileAllowBottomSlope / solidTileAllowPlatform-
+//        TopFrame + platformProperTopFrame，WorldGen.cs:70686-70919）——Walker
+//        AdvanceTargetPosition (:42/:43/:44/:46) + HandleFalling (:109)、Flyer Spawn
+//        (:45) 与 Update 探针 (:102/:114/:119)、Jumper Move 目标格 (:151)/纵向邻格
+//        (:162)/水平邻格 (:169) + CanStandOnTile/TryGetReachableTile；
+//     b) ✅ Flyer IsBlockedByMedium/IsLiquidBoundary（FlyerLeashedCritter.cs:139-197）
+//        全式移植：origin==dest 早退、threshold=aquatic?255:0、边界+异液+满液
+//        三判读对称谓词（flyerIsBlockedByMedium 导出供回归对拍）；Update 停驻支
+//        1457 形态（snapped ∧ origin 下格可站才 vy=0，:110-115）；
+//     c) ✅ Jumper 浮力族全套：buoyancy=0.4 水中反浮+冷却钉最短档（:31/:143-150）、
+//        TryStartJump 初速重排（num4 < -gravity 门先行，:104-128）、Move_NoObstruction
+//        Clamp(vy±maxFallSpeed)+|dy|>strayingY 召回门（:199-200）、落点吸附
+//        CanStandOnTile 复核（:82-88）、TryGetReachableTile 起点 min(AnchorY,
+//        CenterY/16) + 下探改 while<AnchorY+strayingY（:233-271）；
+//     d) ✅ DrawBubble 档缩放 num2=max(1, max(frame.Size()*scale/(rect.Size()-8)))
+//        （bubbleScaleTier + Renderer.drawLeashedBubble；贴点校正 = _dummy.Center
+//        的 (0,8) 纵移与 GetDrawOffset 同源叠加——Draw :205 次序原文）；
+//     e) ✅ Recall 尘 noLight=noLightEmittance=true 双旗（:134-141 recallDust）。
+//     原版真值表映射登记见四函数头注（tileSolid=EXTRA 并集 / tileSolidTop≈platform
+//     旗 / Sets.Platforms 按 sheet 反查，380 PlanterBox 特例走 AllowTopSlope）。
 // ============================================================================

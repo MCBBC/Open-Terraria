@@ -41,6 +41,9 @@ import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
+// Spawn_DeadCellsFlint 编排本体（收编池;L5 批 2026-08-31——本地直生 + broadcast 上行同用）
+import { deadCellsFlintFx } from '../fx/orchestraFx';
+import { ParticleOrchestraType } from '../net/syncModules';
 
 /** 玩家侧挂点（MonkOwner 同口径；cx/cy/facing 实时引用） */
 export interface FlintOwner {
@@ -114,7 +117,7 @@ function angDiff(a: number, b: number): number {
  * （flag :1822/:1882）→ deadcells_flint_release（vol .5,SoundID.cs:1116,:1884）+
  * 尘 228 ×30（:1885-1890）+ 叠播 dd2_monk_staff_ground_impact 一声
  * （PlayTrackedSound :1888,SoundID.cs:1008 三变体组）；无合格格静默返回（:1879-1882）。
- * 视觉从简：碎屑/火花走 spawnParticles 近似（音/门 1:1）。
+ * L5 批：本段视觉/音已收编 fx/orchestraFx.deadCellsFlintFx（本地直生 + module8 上行）。
  */
 export function emitFlintSpikes(
   game: GameHooks, startX: number, startY: number, dir: number, damage: number,
@@ -126,34 +129,14 @@ export function emitFlintSpikes(
   const tx0 = Math.floor(px / 16);
   let ty = Math.floor(py / 16);
   // ---- DeadCellsFlint 编排粒子（先于尖刺掷,RequestParticleSpawn :53240-53245）----
-  // 资格门近似 Spawn_DeadCellsFlint 的 flag：扫描盒内存在「实心且上格非实心」格
-  // （原版逐 tile 条件 :1808-1818 的主因子;frameImportant/平台排除从简并入）
+  // L5 批收编：视觉/音/资格门全部迁 fx/orchestraFx.deadCellsFlintFx（本地与联机
+  // netApply 两面共用本体）;此处本地直生 + module8 上行（原版 clientOnly:false 即
+  // 全网广播——PositionInWorld=start+(16,16)×Directions、MovementVector=(32,gravDir)
+  // 载荷按枚举注同口径发送）
+  deadCellsFlintFx(game, px + 16 * dir, py + 16, 1);
+  game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsFlint,
+    px + 16 * dir, py + 16, 32, 1);
   const st = game.world.store;
-  const cxT = Math.floor((px + 16 * dir) / 16), cyT = Math.floor((py + 16) / 16);
-  let groundFound = false;
-  for (let i = cxT - 4; i <= cxT + 4; i++) {
-    for (let j = cyT - 4; j <= cyT + 4; j++) {
-      if (!st.inBounds(i, j)) continue;
-      if (!st.isSolid(i, j)) continue;
-      if (st.inBounds(i, j - 1) && st.isSolid(i, j - 1)) continue;
-      groundFound = true;
-      // KillTile_GetTileDustAmount 碎屑 + PrettySparkle 橙火花近似（:1837-1868）
-      game.spawnParticles(i * 16 + 8, j * 16, '#9A7B52', 2, 1.6,
-        { life: 24, vy: -(4 + Math.random() * 4), vx: (Math.random() * 2 - 1) * 2 });
-    }
-  }
-  if (groundFound) {
-    // deadcells_flint_release（:1884;SoundID.cs:1116 vol .5 单变体组）
-    game.playSfxFiles(['deadcells_flint_release'], 0.5, px + 16 * dir, py + 16);
-    for (let m = 0; m < 8; m++) {                     // 尘 228 ×30 从简（:1885-1890）
-      game.spawnParticles(px + 16 * dir + (Math.random() * 2 - 1) * 7,
-        py + 16 - Math.random() * 3, '#FFB400', 1, 0.7 + Math.random() * 0.8,
-        { life: 18, vx: (Math.random() * 2 - 1) * 5, vy: -(Math.random() * 5), grav: 0 });
-    }
-    // 叠播 monk_ground_impact 一声（:1888 PlayTrackedSound;SoundID.cs:1008 三变体整组）
-    game.playSfxFiles(['dd2_monk_staff_ground_impact_0', 'dd2_monk_staff_ground_impact_1',
-      'dd2_monk_staff_ground_impact_2'], 1, px + 16 * dir, py + 16);
-  }
   // ---- 尖刺列（:53246-53276）——列游标每根右移 2 格,y 引用贯穿复用（ref p.Y）----
   let colX = tx0;
   let colY = ty;

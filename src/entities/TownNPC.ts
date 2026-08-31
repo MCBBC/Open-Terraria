@@ -327,12 +327,56 @@ export const INTERACTABLE_BY_NPC_SHEETS = new Set([
 const AVOIDED_BY_NPC_TILES = sheetTileIds(AVOIDED_BY_NPC_SHEETS);
 const INTERACTABLE_BY_NPC_TILES = sheetTileIds(INTERACTABLE_BY_NPC_SHEETS);
 
-/** 头部浸水（Collision.DrownCollision 近似——envHurtUpdate submerged 同式）：
- *  头顶行液体 >30 即没顶（城镇 NPC 无鳃族 canBreathUnderWater 恒 false） */
-export function headSubmerged(st: TileStore, x: number, y: number, w: number): boolean {
-  const hx = Math.max(0, Math.min(st.w - 1, Math.floor((x + w / 2) / TILE)));
-  const hy = Math.max(0, Math.min(st.h - 1, Math.floor((y + 6) / TILE)));
-  return st.liquid[st.idx(hx, hy)] > 30;
+/** Collision.DrownCollision 1:1（Collision.cs:1385-1430；★蓝队 F4 定案：替换旧
+ *  「中心格 liquid>30」单点近似）。城镇 NPC 四个调用面全走 gravDir=1 档——
+ *  CheckDrowning :96058、跌水跳跃/逃速 flag21 :54361 与 idle 起身 :54285
+ *  （后两者 includeSlopes:true）、walkPrediction 落点检验 ：56311。
+ *  几何要素：
+ *  - 探针盒 = 中心 X 对齐、宽 min(10,W) × 高 min(12,H)，顶 = Top−2px
+ *    （gravDir=1 无 `vector.Y += Height/2-6` 上移项——玩家档才有）；
+ *  - 扫描窗 = 盒外扩 tile：[floor(X/16)−1 .. floor((X+W)/16)+2] × [同式 Y]
+ *    （上缘钳 maxTilesY−40）；gravDir=1 的实心排除行 num4 = value3 = 扫描【首行】：
+ *    该行 active 实心非 solidTop 的格不计水（includeSlopes=true 时 blockType!=0
+ *    即半砖/坡面反而计水——本仓 half/slope 双数组承接）；
+ *  - 液格顶面降面 = Y += ((256−liquid)/32)×2，有效高 = 16 − (int)(((256−liquid)/32)×2)
+ *    （npcLiquid drop 同式；C# 侧 Y 偏移用 float 原值、高取 (int) 截断）；
+ *  - lava/shimmer 显式不计（原文本面）;命中 = 探针盒与液面子盒四严格不等式
+ *    (:1422-26)。
+ *  ★无 wet 锁存依赖——传送落水首拍即计；带 wet 外伞的是 idle 起身支
+ *  （:54177 `wet && !flag11` 包裹 currentlyDrowning3），由调用方区分。 */
+export function drownCollision(
+  st: TileStore, x: number, y: number, w: number, h: number, includeSlopes = false,
+): boolean {
+  const pw = Math.min(10, w);                      // num
+  const ph = Math.min(12, h);                      // num2
+  const x0 = x + w / 2 - Math.floor(pw / 2);       // vector.X（num/2 整数除法同 C#）
+  const y0 = y - 2;                                // vector.Y（gravDir=1）
+  const clampI = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
+  const i0 = clampI(Math.floor(x / 16) - 1, 0, st.w - 1);
+  const i1 = clampI(Math.floor((x + w) / 16) + 2, 0, st.w - 1);
+  const j0 = clampI(Math.floor(y / 16) - 1, 0, st.h - 40);
+  const j1 = clampI(Math.floor((y + h) / 16) + 2, 0, st.h - 40);
+  for (let i = i0; i < i1; i++) {
+    for (let j = j0; j < j1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const idx = st.idx(i, j);
+      if (!(st.liquid[idx] > 0)) continue;
+      const lt = st.liquidType[idx];
+      if (lt === 2 || lt === 4) continue;          // !tile.lava() && !tile.shimmer()
+      if (j === j0 && st.type[idx] !== 0 && st.isSolid(i, j)
+        && !(includeSlopes && (st.slope[idx] !== 0 || st.half[idx] !== 0))) {
+        continue;                                  // 首行实心排除（num4 = value3）
+      }
+      const dropPx = ((256 - st.liquid[idx]) / 32) * 2;
+      const wy = j * 16 + dropPx;
+      const wh = 16 - Math.trunc(dropPx);
+      // :1422-26 字面四不等式（X 轴用满格 16,Y 用降面子高）
+      if (x0 + pw > i * 16 && x0 < i * 16 + 16 && y0 + ph > wy && y0 < wy + wh) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /** AI_007_TownEntities_GetWalkPrediction（NPC.cs:56093-56165）1:1：
@@ -350,7 +394,7 @@ export function headSubmerged(st: TileStore, x: number, y: number, w: number): b
 export function walkPrediction(
   st: TileStore, myTileX: number, homeFloorX: number, isTownCritter: boolean,
   dir: number, tileX: number, tileY: number, heightPx: number,
-  startLeg = false, drowning = false, crowdedOrBlocked = false,
+  startLeg = false, drowning = false, crowdedOrBlocked = false, widthPx = 20,
 ): { keepwalking: boolean; avoidFalling: boolean } {
   // ---- keepwalking（:56098-56117）----
   let keepwalking = false;
@@ -393,8 +437,12 @@ export function walkPrediction(
   const bodyTiles = Math.ceil(heightPx / 16);
   if (depth >= bodyTiles) avoidFalling = true;                // :56156-56159
   if (!avoidFalling && px !== 0 && py !== 0) {
-    // 落点检验（:56160-56164）：站位在 p 格上是否没顶
-    avoidFalling = headSubmerged(st, px * TILE + 2, py * TILE - heightPx, 8);
+    // 落点没顶检验（:56298-56312：ToWorldCoordinates(8,0) + (−W/2,−H) 后走
+    // DrownCollision(width,height,gravDir=1)——★F4 换真探针几何，宽度取
+    // widthPx（缺省 20 = 本仓城镇盒宽；仅影响 min(10,W) 探针 ±1px 级）
+    avoidFalling = drownCollision(
+      st, px * TILE + 8 - widthPx / 2, py * TILE - heightPx, widthPx, heightPx,
+    );
   }
   return { keepwalking, avoidFalling };
 }
@@ -1635,41 +1683,54 @@ export class TownNPC extends Entity {
       }
       wantDir = 0;
     } else if (!this.talking && this.dangerNear && this.atkState === 0 && !this.healing) {
-      // :54102-54156 非攻击态臂（亦须 !flag5——逃离布线整段挂在收口伞内,对话中不逃）：
-      // 背向最近敌走逃——
-      // 坐姿不豁免（原版 ai[0]==5 不在攻击态排除列，扫描直接改 ai[0]=1 = 拽起逃跑）；
-      // 社交态同被打断（:54000-54015：ai[0]∈{3,4,16,17} 时对偶 NPC 也被踢回
-      // 走态 ai[1]=120+rand(120)——"聊着跟一起跑"）。前视有坑（avoidFalling）
-      // 时不逃不转身（原版 :53991-54024 的 !avoidFalling 门同构——坑前站定，
-      // 攻击态照常接管还击）
-      if (this.sitting) {
-        this.sitting = false;
-        this.sitTimer = 0;
-        this.sitKickLock = 1;   // 原刻防坐回（见字段注）
-      }
+      // ★F1① 三臂结构面（原版 ：54102-54171，总伞 `flag16 && !flag5`；ai[0]!=
+      //   {10,12,13,14,15} ≡ 本仓 atkState===0 && !healing；ai[0]==8 臂由上方
+      //   corneredT 块承接）。前坑（avoidFalling）只锁「非行走态」的逃离布线——
+      //   社交对【不拆】、坐姿5【不起身】、腿程/朝向不重写（坑前站定）：
+      //   - 行走臂（ai[0]==1，:54166-54171）：【无条件】转向背险侧（flag2 恒 false
+      //     ——仅 infectedSeed type20 免疫路径置真，本域不存在），不避坑、不动腿程；
+      //     fleeing 置位 = flag16 | flag21 逃速档的行走态消费面（:54467）
+      //   - 非行走臂（ai[0]!=1：停 0 / 坐 5 / 社交 3·4·16·17）：!avoidFalling 才整段
+      //     布线（:54143-54165）——社交拆对 + ai[0]=1（坐姿起身即此链的改写效应）+
+      //     ai[1]=120+Next(120) + localAI[3]=0 + direction=-num15
       const fleeDir = -this.dangerSide;
-      const homeX = this.home?.x ?? this.anchorTile?.x ?? -1;
-      const ax0 = Math.floor((this.cx + 15 * fleeDir) / TILE);
-      const fy0 = Math.floor((this.y + this.h - 16) / TILE);
-      const fleeBlocked = this.onGround && walkPrediction(
-        world.store, Math.floor(this.cx / TILE), homeX, false,
-        fleeDir, ax0, fy0, this.h,
-      ).avoidFalling;
-      if (!fleeBlocked) {
-        if (this.social) {
-          const other = this.social.other;
-          this.social = null;
-          if (other && !other.dead && other.social
-            && (other.social.kind === 3 || other.social.kind === 4
-              || other.social.kind === 16 || other.social.kind === 17)) {
-            other.social = null;                                   // :54000-54015
-            other.walkMode = 1;
-            other.walkT = 120 + Math.floor(other.rng() * 120);
-            other.facing = -this.dangerSide;
-          }
-        }
-        this.fleeing = true;
+      if (this.walkMode === 1) {
+        // 行走臂（:54166-54171 字面 `direction != -num15 → direction=-num15`）
+        if (this.facing !== fleeDir) this.facing = fleeDir;
+        this.fleeing = true;                                   // :54467 逃速档
         wantDir = fleeDir;
+      } else {
+        const homeX = this.home?.x ?? this.anchorTile?.x ?? -1;
+        const ax0 = Math.floor((this.cx + 15 * fleeDir) / TILE);
+        const fy0 = Math.floor((this.y + this.h - 16) / TILE);
+        const fleeBlocked = this.onGround && walkPrediction(
+          world.store, Math.floor(this.cx / TILE), homeX, false,
+          fleeDir, ax0, fy0, this.h,
+        ).avoidFalling;
+        if (!fleeBlocked) {
+          if (this.social) {
+            const other = this.social.other;
+            this.social = null;
+            if (other && !other.dead && other.social
+              && (other.social.kind === 3 || other.social.kind === 4
+                || other.social.kind === 16 || other.social.kind === 17)) {
+              other.social = null;                                 // :54146-54153
+              other.walkMode = 1;
+              other.walkT = 120 + Math.floor(other.rng() * 120);
+              other.facing = -this.dangerSide;
+            }
+          }
+          if (this.sitting) {
+            this.sitting = false;                              // ai[0]=5→1 改写链起身
+            this.sitTimer = 0;
+            this.sitKickLock = 1;   // 原刻防坐回（见字段注）
+          }
+          this.fleeing = true;
+          wantDir = fleeDir;
+          this.walkMode = 1;                                   // ai[0]=1（:54154）
+          this.walkT = 120 + Math.floor(this.rng() * 120);     // ai[1]=120+Next(120)
+          this.turnLock = 0;                                   // localAI[3]=0（:54156）
+        }
       }
     }
 
@@ -1700,7 +1761,10 @@ export class TownNPC extends Entity {
     //      1/0.07；逃命中（friendly && flag16）或溺水 flag21 → 1.5+失血×0.9/0.1。
     //      超速（贴地）×0.8 软回落（非硬钳）；未达帽按 direction ±num23 ——本仓
     //      wantDir 即 direction（0 = 站定走驻留刹车 ±0.1，:54096-54106）----
-    const drowningNow = this.wet && headSubmerged(world.store, this.x, this.y, this.w);
+    // flag21（:54361）= !flag11 && DrownCollision(includeSlopes:true)——★F4 换
+    // DrownCollision 真几何且【无 wet 锁存】（城镇 NPC flag11 恒 false，非 616/617/
+    // 625/361/445/687 族）；逃速提档 :54467 与 walkPrediction keepwalking③ 同源消费
+    const drowningNow = drownCollision(world.store, this.x, this.y, this.w, this.h, true);
     const speedup = this.fleeing || drowningNow;
     const spdCap = speedup
       ? FLEE_SPEED_BASE + (1 - this.hp / this.maxHp) * FLEE_HURT_FACTOR
@@ -1827,50 +1891,6 @@ export class TownNPC extends Entity {
     // 54243-54274：走过门 >2 格关门，>4 格或 y 层差 >4 放弃）
     this.npcDoorUpdate(world, game);
 
-    // ---- 挤压检测+水平弹出(2026-08-31):站台行走时头顶有 solid(钢琴/吊灯/斜面
-    //      等)即头部嵌入;重力落回站台+头部碰撞上推=无限弹跳。修=检测头顶行任一
-    //      实心格(slope>0 或纯 solid)与身体纵带重叠 → 水平推到最近净空列 ----
-    if (this.onGround) {
-      const stD = world.store;
-      const headRow = Math.floor(this.y / TILE);
-      const feetRow = Math.floor((this.y + this.h - 1) / TILE);
-      if (headRow < feetRow) {
-        const col0 = Math.floor(this.x / TILE);
-        const col1 = Math.floor((this.x + this.w - 1) / TILE);
-        let headBlocked = false;
-        for (let tx = col0; tx <= col1; tx++) {
-          if (!stD.inBounds(tx, headRow)) continue;
-          const hi = stD.idx(tx, headRow);
-          if (!stD.flags[hi]) continue;
-          const tt = stD.type[hi];
-          if (stD.isSolid(tx, headRow) || (stD.slope[hi] > 0 && stD.isSolid(tx, headRow))) { headBlocked = true; break; }
-        }
-        if (headBlocked) {
-          // 水平搜索最近净空列(向 facing 方向优先,最大 8 格)
-          const dirP = this.facing;
-          let target: number | null = null;
-          for (let off = 1; off <= 8; off++) {
-            for (const sgn of [dirP, -dirP]) {
-              const cx2 = Math.floor(this.cx / TILE) + sgn * off;
-              let clear = true;
-              for (let yy = headRow; yy <= feetRow; yy++) {
-                if (!stD.inBounds(cx2, yy) || stD.isSolid(cx2, yy)) { clear = false; break; }
-              }
-              if (clear) { target = cx2; break; }
-            }
-            if (target !== null) break;
-          }
-          if (target !== null) {
-            this.x = target * TILE + (TILE - this.w) / 2;  // 对齐格中心
-            this.vx = 0;
-          } else {
-            // 无水平出口:推下(等于蹲下穿过头顶障碍)
-            this.y = (headRow + 1) * TILE;
-          }
-        }
-      }
-    }
-
     // ---- NPC 液体交互（NPC.cs UpdateCollision :93712-93805，Enemy 侧同款）：
     //      wet 判定/溅落/岩浆伤害/liqFactor 位移减速/湿身落速帽。时序与原版
     //      一致：AI 与重力/碰撞读上一 tick 的 wet（本块最后跑，更新下 tick 值）。
@@ -1926,7 +1946,9 @@ export class TownNPC extends Entity {
         // 常态站定（:54117-54168）：倒计时；溺水起身（:54138-54152）；
         // 到点起身（:54153-54165：前视有坑 → 转身再站 60+rand(120)，否则走态）
         if (this.walkT > 0) this.walkT--;
-        const drowning = this.wet && headSubmerged(st, this.x, this.y, this.w);
+        // 溺水起身（:54177-54186 外伞 `wet && !flag11` → currentlyDrowning3 =
+        // DrownCollision(includeSlopes:true)，:54285）——wet 门保留、几何换真探针
+        const drowning = this.wet && drownCollision(st, this.x, this.y, this.w, this.h, true);
         if (drowning) {
           this.walkMode = 1;
           this.walkT = WALK_LEG_BASE + Math.floor(this.rng() * WALK_LEG_RAND);
@@ -1960,10 +1982,10 @@ export class TownNPC extends Entity {
         this.walkT = REST_LEG_BASE + Math.floor(this.rng() * REST_LEG_RAND);
         this.turnLock = 60;
       } else {
-        // 溺水不停倒计时（:54216-54231）；背离 home 超 ±35 格再 −5/t
-        // （:54219 的 !homeless 门：无家者不加速归家）
-        const drowning = this.wet && headSubmerged(st, this.x, this.y, this.w);
-        if (!drowning) {
+        // flag21（:54361，同 fixedUpdate drowningNow 面）：行走态倒计时只在非溺水
+        // 几何下挂上归家 −5/t 附加扣减——无 wet 门（★F4 换真探针）
+        const drownGeom = drownCollision(st, this.x, this.y, this.w, this.h, true);
+        if (!drownGeom) {
           if (this.home && rest != null
             && (myX < rest.x - HOME_DRIFT_RANGE || myX > rest.x + HOME_DRIFT_RANGE)
             && this.facing === Math.sign(this.x - (rest.x * TILE + 8))) {
@@ -2923,6 +2945,7 @@ export class TownNPC extends Entity {
     world: import('../world/World').World, game: GameHooks, wantDir: number,
   ): boolean {
     if (wantDir === 0 || !this.onGround || this.sitting || this.talking
+      || this.social !== null                            // flag30 的 ai[0]<2 面（★F1②）
       || this.atkState !== 0 || this.corneredT > 0
       || this.dangerNear                                  // flag30 的 !flag16（:55768）
       || this.wet                                         // flag30 的 !wet（:55768 字面）
@@ -2987,7 +3010,9 @@ export class TownNPC extends Entity {
       && shouldBestiaryGirlBeLycantrope(world.clock.moonPhase, world.clock.bloodMoon, world.clock.isDay);
     if (this.atkState === 0) {
       // 触发门:站地 + 冷却尽 + 探测范围内有 LOS 敌(:55769 flag31)
-      // 坐姿 ai[0]==5 不满足 flag31 的 ai[0]<2 门(:55769)——坐着不打,起身再打;
+      // ★F1② ai[0]<2 结构面（:55769 字面 `(ai[0]<2 || ai[0]==8)`）：除坐姿 5 外，
+      //   社交态 3/4/16/17 与驻足 9 等一切 >2 态同不入攻击触发列（本仓 social!==null
+      //   承接）——被逼停 8 唯一豁免,其余按 <2 面逐项排除。
       // flag31 的 (flag16||flag18) 门(:55769)= 危险扫描命中(dangerNear,PrettySafe
       // 收口后)——远程族"敌在 PrettySafe 外"时逃/打一起停;flag18 全文无置位恒
       // false(死旗),`flag16|flag18` ≡ flag16;flag17(stinky 臭源在场,:55769 `!flag17`
@@ -2996,7 +3021,7 @@ export class TownNPC extends Entity {
       //   = 仅「对话且无险」整段跳过——对话中有险照常掷骰入态（num3×0.8 减频,
       //   :55762-55765;num15 重算位次值与扫描伞位次公式同形同源,池统一后由
       //   threatPool/dangerSide 承接）
-      if (!this.onGround || this.atkCd > 0 || this.sitting
+      if (!this.onGround || this.atkCd > 0 || this.sitting || this.social !== null
         || this.healing || !this.dangerNear || this.dangerStinky) return false;
       this.prevAi0 = this.corneredT > 0 ? 8 : this.walkMode;   // localAI[2]=ai[0]（:56028 族）
       let chance = TOWN_ATTACK_CHANCE[this.vanillaId] ?? 1;

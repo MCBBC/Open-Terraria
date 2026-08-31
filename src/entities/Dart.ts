@@ -70,8 +70,13 @@ export const TRAP_SHOT_STYLE: Record<string, {
   flame: { w: 10, h: 10, color: '#FF8030', grav: 0, proj: 'vanilla/Projectile_187.png', fw: 16, fh: 16, kb: 2,
     trail: { colors: ['#FF8030', '#FFC040', '#FF5010'], count: 2, life: 16, grav: -0.03 } },
   spear: { w: 6, h: 14, color: '#B8B8C0', grav: 0, proj: 'vanilla/Projectile_186.png', fw: 10, fh: 16, rotOff: Math.PI / 2, kb: 2 },
-  // 185 尖刺球(SetDefaults 1405:2255/1456:2449):14×14 aiStyle14 penetrate-1 timeLeft 900
-  spiky: { w: 14, h: 14, color: '#8A8F96', grav: 0.3, proj: 'vanilla/Projectile_185.png', fw: 16, fh: 16, spin: true, spinK: 0.14, kb: 2 },
+  // 185 尖刺球(1458 SetDefaults Projectile.cs:2719-2728):14×14 aiStyle14 friendly+
+  //  hostile penetrate-1 timeLeft 900 trap。物理 = AI_014 具名缺省尾(:25441-25453):
+  //  ai[0]>5 起 vy==0 且 vx≠0 → vx*=0.97 + |vx|≤0.01 截停归零(静止不 Kill——
+  //  静止 Kill 属 261/277 专属支),重力 0.2 同门;终端 16(:25624-25627);
+  //  rotation += vx*0.1 每拍(:25452)。反弹响应(Update :19818-19826)= 分轴被挡
+  //  → -lastV×0.9(Y 需 lastVy>1,否则落定 0)——见 spiky 运动段注释
+  spiky: { w: 14, h: 14, color: '#8A8F96', grav: 0, proj: 'vanilla/Projectile_185.png', fw: 16, fh: 16, kb: 2 },
   // 99 巨石(SetDefaults :1561-1568):31×31 aiStyle25 penetrate-1 trap;物理全在
   // boulderStep(AI_025 :24662-24723 + 撞块 :17530-17551)——grav/vCap 值仅表占位
   boulder: { w: 31, h: 31, color: '#9A8C72', grav: 0, proj: 'vanilla/Projectile_99.png', fw: 32, fh: 32, spin: true, spinK: 0.06, kb: 10 },
@@ -172,11 +177,28 @@ export const FW_DUST: Record<string, string> = {
 export const FW_RAINBOW = [FW_DUST.d219_red, FW_DUST.d220_green, FW_DUST.d221_blue,
   FW_DUST.d222_yellow, FW_DUST.d223_pink];
 
-/** 弹体中心点是否入实心块(尖刺球分轴碰撞用;近似原版 Collision.TileCollision 的轴阻挡) */
-function shotCenterSolid(game: GameHooks, e: { x: number; y: number; w: number; h: number }): boolean {
-  const tx = Math.floor((e.x + e.w / 2) / TILE);
-  const ty = Math.floor((e.y + e.h / 2) / TILE);
-  return game.world.store.isSolid(tx, ty);
+/** 尖刺球整盒实心探针(B 档清偿 2026-08-31:原版 Projectile.Update 走
+ *  Collision.TileCollision 全盒分轴检测,曾只测弹体中心格——擦角穿墙/半嵌天花板
+ *  两向漏检;位置修正维持"取消整步+反射响应"形态) */
+function shotBoxSolid(game: GameHooks, x: number, y: number, w: number, h: number): boolean {
+  const st = game.world.store;
+  const x0 = Math.floor(x / TILE), y0 = Math.floor(y / TILE);
+  const x1 = Math.floor((x + w - 0.01) / TILE), y1 = Math.floor((y + h - 0.01) / TILE);
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      if (st.isSolid(tx, ty)) return true;
+    }
+  }
+  return false;
+}
+
+/** 弹型 → SetDefaults penetrate 数据档(1458 实测:镖 98/184/980、尖刺球 185、
+ *  矛 186、喷泉 654、巨石 99 均 -1;炮弹 162=4;166 雪球/187 烈焰球未赋值=缺省 1。
+ *  无表项 kinds 回退单发档) */
+function trapPen(kind: TrapShotKind): number {
+  const id = TRAP_PROJ_ID[kind];
+  const p = id !== undefined ? projectileData(id)?.penetrate : undefined;
+  return p ?? 1;
 }
 
 export class TrapShot extends Entity {
@@ -205,6 +227,16 @@ export class TrapShot extends Entity {
   /** 已反射（原版 Projectile.reflected）：被反射源（419 旋刃冲刺等）打回后置位，
    *  弹体转 hostile 伤玩家、不再入敌怪判定（原版 Damage NPC 需 friendly 门禁） */
   reflected = false;
+  /** 剩余可结算命中数（Penetrate 计数面：pen≥2 每次成功命中递减、归零 Kill；
+   *  pen=-1 = Infinity 永存续）。单发档恒 1 —— 命中即灭与旧行为一致 */
+  pierceLeft: number;
+  /** Damage 尾梯免工件窗启用门（Projectile.Damage :12635 flag3 反面 = penetrate≠1
+   *  且非 local-immunity：每次成功命中写 targetNPC.immune[owner]=10(:14178-14185)，
+   *  同目标 10t 内再入 Damage 头门直接早退） */
+  readonly windowGate: boolean;
+  /** 逐目标剩余窗口 tick（本仓承载 targetNPC.immune[owner] 语义的弹级镜像表；
+   *  键=目标对象引用，随 fixedUpdate 每 tick 递减到 0 删档） */
+  private hitCdT = new Map<object, number>();
 
   /** 全透明贴图缓存(xnb 解包异常的 187/654 等):检出一次后走色块回退,避免隐形弹幕。
    *  ★未加载(懒加载 pending)不得判 blank——否则 null 会被永久缓存,贴图晚到也不恢复
@@ -243,6 +275,12 @@ export class TrapShot extends Entity {
     if (kind === 'spiky') this.life = 900; // 原版 185 timeLeft 900(1405/1456 SetDefaults 同)
     if (s.life !== undefined) this.life = s.life; // 炮弹族 timeLeft（SetDefaults 默认 3600 / 281=600）
     this.hostile = !s.friendly;
+    {
+      // 穿透数据面（SetDefaults penetrate；见 trapPen 注）：-1=∞，≥2=计数穿透，1/缺省=单发
+      const pen = trapPen(kind);
+      this.windowGate = pen !== 1;
+      this.pierceLeft = pen > 0 ? pen : Infinity;
+    }
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -287,6 +325,10 @@ export class TrapShot extends Entity {
     }
     const st = TRAP_SHOT_STYLE[this.kind];
     this.age++;
+    // 逐目标免工件窗递减（NPC.immune[owner] 原版在 NPC.Update 全实体每拍扣 1）
+    for (const [k, v] of this.hitCdT) {
+      if (v <= 1) this.hitCdT.delete(k); else this.hitCdT.set(k, v - 1);
+    }
     // 首帧发射音（Projectile.AI：162=Projectile.cs:21542-21546 / 281=26830-26833 SoundID.Item14）
     if (this.age === 1 && st.launchSfx) game.playSfx(st.launchSfx, 1, this.x + this.w / 2, this.y + this.h / 2);
     // 滚转：尖刺球 aiStyle14 = vx*0.14(1405 :21630)/巨石近似 0.03 | 炮弹族按原版
@@ -343,20 +385,28 @@ export class TrapShot extends Entity {
       // 落下不 return:继续走下方对玩家/敌怪命中段(穿透语义在 hostile/pierce 链)
     }
     if (this.kind === 'spiky') {
-      // aiStyle 14 默认尾部(1405 :21600-21608 / 1456 同):vy==0 贴地时额外 vx*=0.95;
-      // 每帧 vx*=0.98、重力 0.3、终端速度 15.9
-      if (this.vy === 0) this.vx *= 0.95;
-      this.vx *= 0.98;
-      this.vy += 0.3;
-      if (this.vy > 15.9) this.vy = 15.9;
-      // 分轴积分 + type 185 反弹响应(1405 :13302-13307 / 1456 :18289-18297,
-      // 原 TileCollision 把被挡轴速度清零、本段按 lastVelocity 以 0.9 系数弹回):
-      // X 阻挡 → vx=-lastVx*0.9;Y 阻挡且 lastVy>1 → vy=-lastVy*0.9,否则 vy=0 落定不微弹
+      // ---- aiStyle14 缺省尾（1458 P.cs:25441-25453 + 块尾终端 :25624-25627）----
+      // 滚转恒跑：rotation += velocity.X*0.1(:25452，曾误 spinK 0.14)；
+      // ai[0]>5 门内：贴地摩擦 vx*=0.97(仅 vy==0 且 vx≠0)+|vx|≤0.01 截停归零
+      // (:25449-25452 置 0 非 Kill——静止 Kill 属 261/277 具名支)+重力 0.2；
+      // 终端速度 16(:25624,曾误 15.9)。首 5 更新无重力/摩擦(ai[0] 计数门)
+      this.rot += this.vx * 0.1;
+      if (this.age > 5) {
+        if (this.vy === 0 && this.vx !== 0) {
+          this.vx *= 0.97;
+          if (this.vx > -0.01 && this.vx < 0.01) this.vx = 0;
+        }
+        this.vy += 0.2;
+      }
+      if (this.vy > 16) this.vy = 16;
+      // 分轴积分 + type185 反弹响应（1458 P.cs:19818-19826）：
+      // X 阻挡 → vx=-lastVx*0.9；Y 阻挡且 lastVy>1 → vy=-lastVy*0.9，否则落定 0。
+      // ★探针升级整盒（B-M：曾只测中心格——擦角穿墙/半嵌天花板两向漏检）
       const lvx = this.vx, lvy = this.vy;
       this.x += this.vx;
-      if (shotCenterSolid(game, this)) { this.x -= this.vx; this.vx = -lvx * 0.9; }
+      if (shotBoxSolid(game, this.x, this.y, this.w, this.h)) { this.x -= this.vx; this.vx = -lvx * 0.9; }
       this.y += this.vy;
-      if (shotCenterSolid(game, this)) { this.y -= this.vy; this.vy = lvy > 1 ? -lvy * 0.9 : 0; }
+      if (shotBoxSolid(game, this.x, this.y, this.w, this.h)) { this.y -= this.vy; this.vy = lvy > 1 ? -lvy * 0.9 : 0; }
     } else if (st.gravDelay !== undefined) {
       // 炮弹族弧线：前 gravDelay tick 直线，之后 vy+=grav / vx*=xDamp
       // （162/281=Projectile.cs:21546-21550/26844-26849 的 ai[0]>=18；166=:21879-21884 的 >=20）
@@ -420,15 +470,24 @@ export class TrapShot extends Entity {
       }
     }
 
-    // ---- 命中怪物/小动物/城镇 NPC（原版陷阱弹幕对全实体敌对，Projectile.DamageNPC 语义） ----
-    // 穿透规则（近似原版）：巨石碾压穿透；尖刺球/火焰穿透（靠受击者无敌帧节流连击）；
-    // 镖/超级飞镖/热喷泉一碰即碎（与对玩家一致）；
-    // 炮弹族：162 penetrate4 / 281 penetrate-1（SetDefaults）→ 穿透，撞块/超时才 Kill 爆炸；
-    // 166 雪球 penetrate1 → 一碰即碎
-    const pierce = this.kind === 'boulder' || this.kind === 'spiky' || this.kind === 'flame'
-      || this.kind === 'cannonball' || this.kind === 'bunny';
+    // ---- 命中怪物/小动物/城镇 NPC（原版陷阱弹幕对全实体敌对，Projectile.Damage 语义） ----
+    // ★穿透规则数据面清偿（2026-08-31 台账 A1）：存续与免工件窗一律按 SetDefaults
+    // penetrate 取值（trapPen()）——1458 实测:镖 98(:1825)/超级镖 184(:2709)/尖刺球
+    // 185(:2719)/矛 186(:2730)/喷泉 654(:7026)/毒镖 980(:9332)/巨石 99 均 -1=无限穿透,
+    // 每敌 10t 免工件窗(Damage 尾梯 :14178-14185 写 immune[owner]=10,头门 :12635-12638
+    // immune>0 整体早退→同怪 10t 一跳、不同怪同拍各结算);炮弹 162=4(计数穿透);
+    // 166 雪球未赋值=缺省 1 单发。曾用 kind 白名单近似("boulder/spiky/flame/
+    // cannonball/bunny 其余首杀")——镖族四型+喷泉命中首怪即灭、187 烈焰球反向恒穿,
+    // 两向缺口就此闭合。
     const overlaps = (e: { x: number; y: number; w: number; h: number }) =>
       this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y;
+    /** 可结算？（immune[owner]>0 时 Damage 头门早退,不消耗任何效果） */
+    const windowOpen = (k: object): boolean => !this.windowGate || ((this.hitCdT.get(k) ?? 0) <= 0);
+    /** 成功命中尾：写 10t 免工件窗 + Penetrate 计数递减;返回 false = 应 Kill */
+    const afterHit = (k: object): boolean => {
+      if (this.windowGate) this.hitCdT.set(k, 10);
+      return --this.pierceLeft > 0;
+    };
     // 怪物桶（Enemy.hurt 自带 8tick 无敌帧，穿透弹不会同帧连击）。
     // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 门禁）
     if (!this.reflected) {
@@ -439,7 +498,12 @@ export class TrapShot extends Entity {
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
         if (e.dead || !overlaps(e)) continue;
         // 反射源命中（Projectile.cs:12050-12060）：友方炮弹/雪球可反射（aiStyle2）
+        // （独立于 immune 窗——原版反射扫描不经 Damage()，照常受理）
         if (trapProjId !== undefined && tryReflectProjectile(this, trapProjId, e, game)) return;
+        // 免工件窗门（Damage 头 :12635-12638 同构：窗口未到期=整体早退,
+        // StatusNPC/焰爆石/幽灵头/伤害/击退全部不触发）
+        const targetKey = e as unknown as object;
+        if (!windowOpen(targetKey)) continue;
         // StatusNPC 命中 debuff（Projectile.cs:10555 表驱动——毒飞镖 98 掷中必染
         // Poison 600t / 超级镖 184 900t :11041/:11045;矛/尖球/巨石/喷泉等表内无条目
         // 天然空掷）。曾整类漏接 = 飞镖陷阱永不上毒（2026-08-19 补）
@@ -472,6 +536,13 @@ export class TrapShot extends Entity {
           noteVanillaProjImmune(game, trapProjId,
             (e as unknown as { id?: number }).id ?? -1);
         }
+        // 命中尾梯（P.cs:14178-14185）：写目标 10t 免工件窗 + Penetrate 计数递减
+        // ——计数归零(炮弹 4 发族)即 Kill;无限档(-1)永存续
+        if (!afterHit(targetKey)) {
+          if (st.shatterDust) this.shatter(game);
+          this.dead = true;
+          return;
+        }
         // ★GB1（GC 契约，2026-08-31）：幽灵伤害头 ghostHurt（Projectile.cs:13881 →
         //  :12021）——按弹 id 的 magic 归属面数据门挂接（与 Arrow/MagicProj/MissileProj
         //  同构;StrikeNPC(:13712) 后调用位）。本族现役弹 id 表（TRAP_PROJ_ID：
@@ -488,11 +559,6 @@ export class TrapShot extends Entity {
               vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
               dealt: v156.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
         }
-        if (!pierce) {
-          if (st.shatterDust) this.shatter(game);
-          this.dead = true;
-          return;
-        }
       }
     }
     // 友方弹幕（炮弹族 friendly=true）到此为止：不误伤小动物/城镇 NPC
@@ -504,14 +570,18 @@ export class TrapShot extends Entity {
     if (buckets) {
       for (const c of buckets.critters) {
         if (c.dead || !overlaps(c)) continue;
+        const ck = c as unknown as object;
+        if (!windowOpen(ck)) continue;
         c.hurt(game);
-        if (!pierce) { this.dead = true; return; }
+        if (!afterHit(ck)) { this.dead = true; return; }
       }
       // 城镇 NPC（TownNPC.hurt：防御减伤+无敌帧+死亡移除）
       for (const n of buckets.npcs) {
         if (n.dead || !overlaps(n)) continue;
+        const nk = n as unknown as object;
+        if (!windowOpen(nk)) continue;
         n.hurt(this.damage, Math.sign(this.vx) * (st.kb ?? 2), 0, game);
-        if (!pierce) { this.dead = true; return; }
+        if (!afterHit(nk)) { this.dead = true; return; }
       }
     }
   }
@@ -969,12 +1039,15 @@ export class Dart extends Entity {
     }
     if (st.bomb) {
       // ---- aiStyle16 炸弹族位移（75 HappyBomb）：轴分离 + 撞块反弹
-      //      （Projectile.cs:19868-19876：X 碰 → −lastVX×0.4；Y 碰且 lastVY>0.7
-      //      → −lastVY×0.4,否则停）+ 贴地摩擦 vx×0.97（:48390-48396 velocity.Y==0
-      //      门的脚下实心近似）----
-      const belowSolid = game.world.store.isSolid(
-        Math.floor(this.cx / TILE), Math.floor((this.y + this.h + 1) / TILE));
-      if (belowSolid && this.vy >= 0) this.vx *= 0.97;
+      //      （Projectile.cs:19866-19872：X 碰 → −lastVX×0.4；Y 碰且 lastVY>0.7
+      //      → −lastVY×0.4,否则停）。贴地摩擦走 AI_016_Bombs 尾原式
+      //      (:48379-48413)：门=上一拍碰撞后的 velocity.Y==0 且 vx≠0 +
+      //      |vx|≤0.01 静止截停——★B 档清偿:曾用"脚下实心"探针近似且缺截停,
+      //      慢速爬行永不休止 ----
+      if (this.vy === 0 && this.vx !== 0) {
+        this.vx *= 0.97;
+        if (this.vx > -0.01 && this.vx < 0.01) this.vx = 0;
+      }
       const lvx = this.vx, lvy = this.vy;
       this.x += this.vx;
       if (game.world.store.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
@@ -1094,10 +1167,13 @@ export class Dart extends Entity {
   // G3 宿主绑定弹（2026-08-19）：411→537 激光 / 424→573 蓄能弹。
   // 原版 NPC 发射把 whoAmI 传 NewProjectile 末参（落 ai[1]），弹体按 id+type 回查
   // 宿主（Main.npc[i].active && type==N 的双门）——单人真实行为（非 netcode）：
-  //  · 537（aiStyle84，Projectile.cs:30286-30549）：束原点逐 t 锁回活宿主眼部
-  //    :30308；宿主死→解除锁定原地照完剩余寿命（不 Kill——同族 455 头死即灭是
-  //    :30296-30297 专属分支，537 无）。UpdatePosition 跳过表含 aiStyle84（:19028）
-  //    → 永不积分位移，velocity 只当束向单位向量。
+  //  · 537（aiStyle84，1458 P.cs:31969-31975 锁位支/:32044-32052 ≥90t Kill）：
+  //    束原点逐 t 锁回活宿主 Center+(direction*6,−4)；★宿主死即灭（台账 A2 清偿,
+  //    2026-08-31）——aiStyle84 链的位锁 if/else 链全部落空时进尾支
+  //    `if (type != 632 || !TryGetActive(633)) { Kill(); return; }`(:31993-31999),
+  //    type==537 不等于 632 → 下拍立即 Kill、不残留束线伤害。旧注"解除锁定原地
+  //    照完剩余寿命"系把 455 专属前置支误读成全族语义。UpdatePosition 跳过表含
+  //    aiStyle84 → 永不积分位移，velocity 只当束向单位向量。
   //  · 573（aiStyle102 case573，:32040-32280）：蓄能 90t（悬停漂移+隐形 alpha255+
   //    尘 242）；宿主死中途 → ai[0]=90 当 t 齐射（目标 Player.FindClosest 兜底）；
   //    宿主活 → 继承其目标。齐射 = ±50 抖动 ×0.8-1.2 距离档、速 20；此后 alpha0
@@ -1109,21 +1185,23 @@ export class Dart extends Entity {
    *  （难度×2，:13770-13781——hitPlayer 同式，此处在束判定内联） */
   private stargazerBeamStep(game: GameHooks): void {
     this.age++;
-    if (this.age >= 90) { this.dead = true; return; }          // :30444-30447 localAI[0]>=90 Kill
+    if (this.age >= 90) { this.dead = true; return; }          // localAI[0]>=90 Kill（:32048-32051）
     const vl = Math.hypot(this.vx, this.vy) || 1;
     const dirX = this.vx / vl, dirY = this.vy / vl;
-    this.vx = dirX; this.vy = dirY;                            // :30477-30479 归一（束向）
+    this.vx = dirX; this.vy = dirY;                            // 归一（束向）
     this.rot = Math.atan2(dirY, dirX) - Math.PI / 2;           // rotation = num731 − π/2
-    // 宿主位锁（:30308）：active 且 type==411 才每 t 锁回 Center+(direction*6,−4)
-    // ——gfxOffY 本仓敌怪恒 0；宿主死/换型 → 不锁，束钉在最后位置照完寿命
+    // ★A2 清偿（2026-08-31）：宿主失联（死亡/消失/换型）= 位锁链尾支 → 本拍先于
+    // 一切束效果/伤害直接 Kill（:31993-31999），不再残留束线伤害
     const host = this.hostOf(game, 411);
-    if (host) {
-      this.x = host.cx + host.facing * 6 - this.w / 2;
-      this.y = host.cy - 4 - this.h / 2;
-    }
-    this.scale = Math.min(0.8, Math.sin((this.age * Math.PI) / 90) * 10 * 0.8);  // :30448-30450
-    // 束长：LaserScan 2 采样（宽 0 → 双线同点）取均值，0.5/t Lerp（:30483-30510）
-    this.beamLen += (this.laserScanLen(game, dirX, dirY) - this.beamLen) * 0.5;
+    if (!host) { this.dead = true; return; }
+    this.x = host.cx + host.facing * 6 - this.w / 2;
+    this.y = host.cy - 4 - this.h / 2;
+    this.scale = Math.min(0.8, Math.sin((this.age * Math.PI) / 90) * 10 * 0.8);  // :32052-32056
+    // 束长：Collision.LaserScan 2 采样（num703=0 → 宽 0 同点）取均值，0.5/t Lerp
+    // （实参 :32145/:32152-32166,消账 B5——曾以 8px 步进测距,端点恒差半步量化）
+    const scanAvg = laserScanTiles(game, this.cx, this.cy, dirX, dirY,
+      0 * this.scale, 2400, 2);
+    this.beamLen += ((scanAvg[0] + scanAvg[1]) / 2 - this.beamLen) * 0.5;
     // 光照 PlotTileLine (0.4,0.85,0.9)（:30612-30613）：沿束向逐格三线带（中±半宽）
     const half = (22 * this.scale) / 2;
     for (let d = 0; d <= this.beamLen; d += TILE) {
@@ -1216,19 +1294,6 @@ export class Dart extends Entity {
     return n && !n.dead && n.vanillaId === type ? n : undefined;
   }
 
-  /** Collision.LaserScan 近似（537 档：2 采样宽 0 → 单线，最大 2400，8px 步进） */
-  private laserScanLen(game: GameHooks, dirX: number, dirY: number): number {
-    const st = game.world.store;
-    const steps = Math.ceil(2400 / 8);
-    for (let i = 1; i <= steps; i++) {
-      const t = i * 8;
-      const tx = Math.floor((this.cx + dirX * t) / TILE);
-      const ty = Math.floor((this.cy + dirY * t) / TILE);
-      if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) return t - 8;
-    }
-    return 2400;
-  }
-
   // ---- 原版 Projectile 字段映射 ----
   private age = 0;          // ai[0]/localAI 计数
   private tick = 0;         // 拖尾节拍
@@ -1239,6 +1304,131 @@ export class Dart extends Entity {
   private dir = 1;          // projectile.direction(旋转符号)
   private pulseDir = 0;     // 115 呼吸相位
 }
+
+// =============================================================================
+// Collision.LaserScan / HitLine（537 束长测距,2026-08-31 台账 B5 清偿）
+// 原 C#：Collision.cs:4599-4614(LaserScan) + :782-1147(HitLine);曾用 8px 步进
+// 测距近似——原版端点量化在整格 Bresenham 且距离按格距×16 返回,步进式结果存在
+// 半步级系统差。
+// =============================================================================
+
+interface ScanStore {
+  inBounds(x: number, y: number): boolean;
+  isSolid(x: number, y: number): boolean;
+  readonly w: number;
+  readonly h: number;
+}
+
+/** HitLine(Collision.cs:782-1147) 整格 Bresenham 粗扫逐字移植。
+ *  返回 true 的面：①撞到实心(含"行进方向侧邻格",LaserScan 的 ignoreX/Y=0 使
+ *  方向门全开)——col=命中格;②自然走到钳后终点——col=终点格。
+ *  返回 false 面：越界邻格(null 面)——col=该越界点,LaserScan 照样按起点→col
+ *  格距折算 px。ignoreTargets 恒空表不建模 */
+function dartHitLine(st: ScanStore, x1: number, y1: number, x2: number, y2: number,
+  out: { col: [number, number] }): boolean {
+  // Utils.Clamp 到 [1,maxTilesX-1] / [1,maxTilesY-40]
+  let value = x1 < 1 ? 1 : x1 > st.w - 1 ? st.w - 1 : x1;
+  let value2 = y1 < 1 ? 1 : y1 > st.h - 40 ? st.h - 40 : y1;
+  const tx2 = x2 < 1 ? 1 : x2 > st.w - 1 ? st.w - 1 : x2;
+  const ty2 = y2 < 1 ? 1 : y2 > st.h - 40 ? st.h - 40 : y2;
+  const num = Math.abs(value - tx2);
+  const num2 = Math.abs(value2 - ty2);
+  if (num === 0 && num2 === 0) {
+    out.col = [value, value2];
+    return true;
+  }
+  let num3 = 1;
+  let num4 = 1;
+  if (num === 0 || num2 === 0) {
+    if (num === 0) num3 = 0;
+    if (num2 === 0) num4 = 0;
+  } else if (num > num2) {
+    num3 = num / num2;
+  } else {
+    num4 = num2 / num;
+  }
+  let num5 = 0;                                   // case2(X 步)分数累加
+  let num6 = 0;                                   // case1(Y 步)分数累加
+  let phase = value2 < ty2 ? 2 : 1;
+  let num8 = Math.trunc(num);                     // X 剩余步
+  let num9 = Math.trunc(num2);                    // Y 剩余步
+  const num10 = Math.sign(tx2 - value);
+  const num11 = Math.sign(ty2 - value2);
+  let flag = false;
+  let flag2 = false;
+  do {
+    if (phase === 2) {
+      num5 += num3;
+      const num13 = Math.trunc(num5);
+      num5 -= num13;
+      for (let j = 0; j < num13; j++) {
+        // 行邻格(null=越界面直接折返)
+        if (!st.inBounds(value, value2 - 1)) { out.col = [value, value2 - 1]; return false; }
+        if (!st.inBounds(value, value2 + 1)) { out.col = [value, value2 + 1]; return false; }
+        // 方向侧邻格实心(LaserScan ignoreY=0:方向门恒开)
+        if (num11 < 0 && st.isSolid(value, value2 - 1)) { out.col = [value, value2 - 1]; return true; }
+        if (num11 > 0 && st.isSolid(value, value2 + 1)) { out.col = [value, value2 + 1]; return true; }
+        // 本格实心
+        if (st.isSolid(value, value2)) { out.col = [value, value2]; return true; }
+        if (num8 === 0 && num9 === 0) { flag = true; break; }
+        value += num10;
+        num8--;
+        if (num8 === 0 && num9 === 0 && num13 === 1) flag2 = true;
+      }
+      if (num9 !== 0) phase = 1;
+    } else {
+      num6 += num4;
+      const num12 = Math.trunc(num6);
+      num6 -= num12;
+      for (let i = 0; i < num12; i++) {
+        if (!st.inBounds(value - 1, value2)) { out.col = [value - 1, value2]; return false; }
+        if (!st.inBounds(value + 1, value2)) { out.col = [value + 1, value2]; return false; }
+        if (num10 < 0 && st.isSolid(value - 1, value2)) { out.col = [value - 1, value2]; return true; }
+        if (num10 > 0 && st.isSolid(value + 1, value2)) { out.col = [value + 1, value2]; return true; }
+        if (st.isSolid(value, value2)) { out.col = [value, value2]; return true; }
+        if (num8 === 0 && num9 === 0) { flag = true; break; }
+        value2 += num11;
+        num9--;
+        if (num8 === 0 && num9 === 0 && num12 === 1) flag2 = true;
+      }
+      if (num8 !== 0) phase = 2;
+    }
+    // 主循环尾：中心格终检(null/实心)
+    if (!st.inBounds(value, value2)) { out.col = [value, value2]; return false; }
+    if (st.isSolid(value, value2)) { out.col = [value, value2]; return true; }
+  } while (!(flag || flag2));
+  out.col = [value, value2];
+  return true;
+}
+
+/** LaserScan(Collision.cs:4599-4614)：samples 个采样点沿 directionUnit±(π/2) 带
+ *  samplingWidth 展开,各自从采样点格向 +maxDistance 终点跑 HitLine——
+ *  走到终点(col=终点) → maxDistance;否则按「起点格→col 格距」×16 折算 px。
+ *  AI_084/537 档:num703=width,samplingWidth=num703*scale、maxDistance=2400、
+ *  samples=2 后取均值(:32145/:32152-32166) */
+function laserScanTiles(game: GameHooks, cx: number, cy: number, dxu: number, dyu: number,
+  samplingWidth: number, maxDistance: number, samples: number): number[] {
+  const st = game.world.store as unknown as ScanStore;
+  const out: number[] = [];
+  for (let i = 0; i < samples; i++) {
+    const frac = i / (samples - 1);                       // num = i/(Length-1)
+    // RotatedBy(π/2)：(x,y)→(-y,x)；偏移=(frac−0.5)*samplingWidth
+    const ox = cx + (-dyu) * ((frac - 0.5) * samplingWidth);
+    const oy = cy + (dxu) * ((frac - 0.5) * samplingWidth);
+    const sx = Math.trunc(ox / TILE), sy = Math.trunc(oy / TILE);   // 起/终点整格化((int)v/16)
+    const ex = Math.trunc((ox + dxu * maxDistance) / TILE);
+    const ey = Math.trunc((oy + dyu * maxDistance) / TILE);
+    const res = { col: [sx, sy] as [number, number] };
+    const ok = dartHitLine(st, sx, sy, ex, ey, res);
+    const dist = Math.hypot(Math.abs(sx - res.col[0]), Math.abs(sy - res.col[1])) * TILE;
+    out.push(ok && res.col[0] === ex && res.col[1] === ey ? maxDistance : dist);
+  }
+  return out;
+}
+
+// =============================================================================
+// 敌怪弹幕样式表(见 DART_STYLE)——以下为文件原有表区
+// =============================================================================
 
 /** 敌怪弹幕样式表——每条对应原版 Projectile 的 SetDefaults(Projectile.cs) + AI 行为。
  *  射击怪→弹型映射（NPC.cs 发射点行号见 Enemy.ts 各调用点注释）。

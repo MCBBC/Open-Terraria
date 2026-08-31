@@ -304,8 +304,11 @@ describe('三批结构锚', () => {
     expect(g.includes('heldVidPvp === 3211')).toBe(true);
     expect(g.includes('heldVidPvp === 1123')).toBe(true);
     expect(g.includes('Math.trunc(rawDmg / 3)')).toBe(true);
-    // 甲虫 MP 记账 blocker 登记在案
-    expect(g.includes('BLOCKER 登记')).toBe(true);
+    // 甲虫 MP 记账已由 MB-B 收敛（原 BLOCKER 登记注释被合法替换）：
+    // 断言翻转 = 回执关联制接线在场（FIFO 登记 + vanilla 精确式）
+    expect(g.includes('notePendingMeleeHit(')).toBe(true);
+    expect(g.includes('beetlePvpCredit')).toBe(true);
+    expect(g.includes('BLOCKER 登记')).toBe(false);
   });
 
   it('F15：!flagImmortal 已从 5094/795 两支摘除（BatBat/Volcano 不动）', () => {

@@ -133,7 +133,8 @@ function spreadWall(st: TileStore, sx: number, sy: number, wallType: number): vo
 /** CaveWallsInEnclosedSpaces（cs:17819-17948）主段 + 丛林泥墙次段。
  *  RNG 消费顺序严格 1:1（主段：每迭代 2 掷 + 重掷 2 掷/次 + 恒 Next(2) +
  *  else 分支补 Next(4)；次段：每迭代 2 掷 + 重掷按墙值条件掷） */
-export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   const __cap = (globalThis as { __swWallCap?: (tag: string, gs: GenState, st: TileStore) => void }).__swWallCap;
   if (__cap) __cap('cavewalls', gs, st);
   // ★pass 头 tileSolid 翻转（cs:17821-17823,原版写在 denyAll 门之外无条件执行）：
@@ -151,6 +152,7 @@ export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const minY = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
   const n1 = Math.floor(st.w * 0.04);
   for (let i = 0; i < n1; i++) {
+    gp?.set3(i / Math.max(1, n1), 0, 0.8);   // 进度锚：主段（估；次段丛林墙占尾 20%）
     let tries = 0;
     let x = rng.int(200, st.w - 201);
     let y = rng.int(minY, maxY - 1);
@@ -197,7 +199,8 @@ export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState): void {
  *  选点 active 格（丛林草 60 → 墙 204-207；石头 1 且上格无墙 → 泥 196-199 /
  *  石 208-215 按深度），上格为空气则洪泛（≤1000，非实心），全腔不触碰无效集
  *  且 >50 格 → OuterOutline（含内腔+8 邻外环）铺墙（跳过墙 87/86/244） */
-export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   // 一次性探针钩（同 WebsPass 模式）：WallVariety 入口快照（债时间线用）
   {
     const g0 = globalThis as { __swCwvCap?: (gs: GenState, st: TileStore) => void };
@@ -206,6 +209,7 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
   const num2 = Math.floor(300 * (st.w * st.h) / 5040000);
   let remaining = num2;
   let budget = 100000;
+  const __num2 = num2;
   // ★IIIII95 A/B 回归仪：SW_SPOT_NOFIX=1 时哨兵＝关掉本批新增 remix 臂拍摄基线（见文件头）
   const noFixArms = (globalThis as { __swSpNoFixArms?: boolean }).__swSpNoFixArms === true;
   // ★CW3 PlaceWall 掷骰债（rig 陷阱①框架耗掷）：Actions.PlaceWall 置墙后调
@@ -236,6 +240,7 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
   };
   let wallTypeCache = 0;
   while (remaining > 0 && budget > 0) {
+    gp?.set(1 - remaining / __num2);   // 进度锚：预算消耗比例（num2 剩余倒数）
     // RandomWorldPoint((int)GenVars.worldSurface, 2, 190, 2)（cs:16799）：x∈[2,w-3]、
     // y∈[ws,h-191]。★CW1：下界是 **GenVars.worldSurface**（Terrain 游走终值 double，
     // = gs.genWorldSurface），非 Main.worldSurface（= worldSurfaceHigh+25≈gs.worldSurface），

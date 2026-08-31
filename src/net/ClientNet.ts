@@ -369,6 +369,16 @@ export class ClientNet {
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     this.ws?.close();
     this.ws = null;
+    // ★F-4：断线清 PvP 记账面——未决挥击 FIFO 与远端 statDefense/免疫镜像随会话
+    //  失效。players 表条目保留（PlayerListPanel 等消费方可能还持有引用），但全部
+    //  置离线并重置易失镜像字段；同端复连走 PlayerActive 复用支再兜底一次（见
+    //  PlayerActive case 注）。不清则回执窗口内复连会把旧债配到新会话头上。
+    this.pendingMeleeHits.clear();
+    for (const rp of this.players.values()) {
+      rp.active = false;
+      rp.pvpDefense = null;
+      rp.pvpImmuneT = 0;
+    }
   }
 
   // ================= 收包分发（对齐原版 MessageBuffer switch） =================
@@ -475,11 +485,23 @@ export class ClientNet {
               deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
             };
             this.players.set(slot, p);
+          } else if (!p.active) {
+            // ★F-4 slot 复用：上一 occupant 的易失 PvP 记账态不得跨会话残留——
+            // 镜像 def/免疫随人走，换人即弃（新 occupant 的 msg16/msg13 立即重建）；
+            // 未决挥击 FIFO 同键位一并作废。
+            p.pvpDefense = null;
+            p.pvpImmuneT = 0;
+            this.pendingMeleeHits.delete(slot);
           }
           p.active = true;
           p.name = name || p.name;
         } else if (p) {
           p.active = false;
+          // ★F-4 离场清账：此人 slot 的未决挥击与他名下的 statDefense/免疫镜像
+          // 即刻失效（服务器不会再为此人回执 msg117；复用前先归零防错配）
+          this.pendingMeleeHits.delete(slot);
+          p.pvpDefense = null;
+          p.pvpImmuneT = 0;
         }
         return;
       }
@@ -802,7 +824,11 @@ export class ClientNet {
         // 只靠 decayProxyImmune 本地衰减归零,绝不残存“永续免伤”——缺省 0 = 不拦）
         const pvpImmune = r.remaining >= 2 ? r.i16() : undefined;
         // 尾部 statDefense 镜像（★F14 甲虫 MP 记账批——位置序跟在免疫段后；旧 server
-        // 剥离/对端缺发 → null 保持既有值（null 才代表「未知」,消费侧弃账不虚增））
+        // 剥离/对端缺发 → null 保持既有值（null 才代表「未知」,消费侧弃账不虚增））。
+        // ★F-3② 宽度口径统一：线字段=syncHp 写侧同款 u16（0..65535），读侧曾遗留
+        // i16 域的 min(32767) 截帽——两层不同宽,>32767 的防御终值会被单侧扭曲。
+        // 统一取【线字段自然宽度】：u16 解码本身保证非负有限，仅需保持原值即等宽；
+        // 消费面 beetlePvpCredit 对 def 单调递减且有 min1 地板，无溢出放大路径。
         const pvpDef = r.remaining >= 2 ? r.u16() : undefined;
         // 缓存进状态表（proxy.hp 接线在 Game.simulateRemotePlayers 每帧读取）
         const rp = this.players.get(slot);
@@ -814,7 +840,7 @@ export class ClientNet {
           if (manaMax !== undefined) rp.manaMax = manaMax;
           if (luck !== undefined && Number.isFinite(luck)) rp.luck = luck;
           if (pvpImmune !== undefined) rp.pvpImmuneT = Math.max(0, Math.min(32767, pvpImmune));
-          if (pvpDef !== undefined) rp.pvpDefense = Math.min(32767, Math.max(0, pvpDef));
+          if (pvpDef !== undefined) rp.pvpDefense = pvpDef;
         }
         if (slot !== this.mySlot) this.hooks.onHp?.(slot, hp, maxHp);
         return;
@@ -828,16 +854,28 @@ export class ClientNet {
         if (!m || m.slot === this.mySlot) return;
         this.hooks.onPlayerHurt?.(m.slot, m.dmg, m.x, m.y, m.dir, m.flags);
         // ★F14 甲虫蓄能回执关联消费：仅 Pvp 位帧参与（PvE/环境伤 flags=0 不冲账，
-        //  避免「目标掉岩浆」清走我的未决挥击）。FIFO 取队头 = 同目标窗口交叠的裁决序；
+        //  避免「目标掉岩浆」清走我的未决挥击）；★F-1 再加 MeleeSource 位门——
+        //  vanilla 全部五条 PvP 结算支只有近战支记 beetleCounter（Player.cs:44456-44460;
+        //  爆炸 bit7 :13981 / 狱火 bit6 :10348 / 盾转移 bit5 / PvP 弹 Damage_PVP 族
+        //  均无此记账面），故 bit7/bit5/bit6/PvP 弹的 msg117【抽队但不充能】会把他人的
+        //  命中错配进我的未决挥击——非近战源不抽队不充能。降级矩阵见 PROTO_VER 注 h)
+        //  （旧端无位 = 不充能 = 保守欠计）。FIFO 取队头 = 同目标窗口交叠的裁决序；
         //  队空 = 纯观战帧不动作。入账式 beetlePvpCredit 用【意向裸伤+crit】×镜像 def
         //  重算 vanilla 返回段真值——非本包 dmg 实扣值（防近似,见 notePendingMeleeHit 注①）。
-        if ((m.flags & PlayerHurtFlags.Pvp) !== 0) {
+        if ((m.flags & PlayerHurtFlags.Pvp) !== 0
+          && (m.flags & PlayerHurtFlags.MeleeSource) !== 0) {
           const q = this.pendingMeleeHits.get(m.slot);
           if (q && q.length > 0) {
             const e = q.shift()!;
-            const def = this.players.get(m.slot)?.pvpDefense;
-            if (def !== null && def !== undefined) {
-              this.onMeleePvpBeetleCredit?.(m.slot, beetlePvpCredit(e.base, e.crit, def), e.off);
+            // ★F-2 消费点硬闸：prune 仅定期跑（tick 每 fixedUpdate），两次扫描之间
+            //  到达的回执须按登记时刻自证新鲜——exp≤now 一律丢弃。注意已过期的条目
+            //  也照常 shift 出队（一帧一账配对纪律,注④）：只跳过充能,队列对齐关系不变,
+            //  否则过期残项会把后续合法回执整体错位一格。
+            if (e.exp > performance.now()) {
+              const def = this.players.get(m.slot)?.pvpDefense;
+              if (def !== null && def !== undefined) {
+                this.onMeleePvpBeetleCredit?.(m.slot, beetlePvpCredit(e.base, e.crit, def), e.off);
+              }
             }
           }
         }
@@ -1033,6 +1071,9 @@ export class ClientNet {
   // ByPlayer,num,direction,pvp:true,quiet:false,flag)` 后 `if(beetleOffense){ beetleCounter
   // += num2; beetleCountdown = 0; }`。victim-settles 架构下该同步返回不可达（F14 BLOCKER),
   // 收敛方案 = 回执关联制：意向端登记未决挥击 → 被击端实扣广播 msg117(Pvp 位) 到包消费。
+  // ★F-1（四轮蓝队）：消费门再加 MeleeSource 位（近战支独置,PROTO 注 h)）——vanilla
+  // 五条 PvP 结算支只有近战支记 beetleCounter,Pvp-only 门会让爆炸/狱火/盾转移/PvP 弹
+  // 的飘字帧抽队错配充能（新发明近似,已封）。
   // ★F14 定谳要点（防止再发明「近似」）：
   //  ① 入账值【不是】被击者实扣 HP —— Hurt 对 pvp:true 在【返回前】整体重算
   //     num2 = CalculateDamagePlayersTakeInPVP(num×(crit?2:1), statDefense)
@@ -1067,13 +1108,17 @@ export class ClientNet {
    *  未安装 = 关联结果静默丢弃（对未接 meter 的消费方零影响）。 */
   onMeleePvpBeetleCredit?: (victimSlot: number, credit: number, offenseSet: boolean) => void;
 
-  /** 近战 PvP 受理命中意向登记（Game 近战 PvP 区调用；异常防御静默吞脏数据）。 */
+  /** 近战 PvP 受理命中意向登记（Game 近战 PvP 区调用；异常防御静默吞脏数据）。
+   *  ★F-3①：不再设 min(9999) 上帽——vanilla Damage 形参无帽（Hurt/返回段重算
+   *  全链 int 直通;唯一 9999 字面量在 :38625 圣骑士盾转移分支,与本域无关），自设
+   *  帽=新发明近似。数值天然受 msg44 线格 i16 域约束（±32767,编码层自然上限，
+   *  超界值过不了线根本到不了这里）；base≤0 脏数据照旧静默吞。 */
   notePendingMeleeHit(victimSlot: number, rawDmg: number, critFlag: boolean, offenseSet: boolean): void {
     if (victimSlot === this.mySlot || victimSlot < 0) return;
     const base = Math.trunc(rawDmg);
     if (!(base > 0)) return;
     const q = this.pendingMeleeHits.get(victimSlot) ?? [];
-    q.push({ base: Math.min(9999, base), crit: critFlag === true, off: offenseSet === true,
+    q.push({ base, crit: critFlag === true, off: offenseSet === true,
       exp: performance.now() + this.MELEE_RECEIPT_WINDOW_MS });
     this.pendingMeleeHits.set(victimSlot, q);
   }

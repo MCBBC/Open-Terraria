@@ -84,6 +84,9 @@ export interface GameHooks {
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown,
     contactOnly?: boolean, pvp?: boolean, knockback?: boolean,
     opts?: { hitDir?: number; floatDealt?: number; floatColor?: string; noLocalFloat?: boolean }): number;
+  /** ★F2 死亡结算单点（deaths 计数/掉落/硬核消亡——damagePlayer 致死分支与
+   *  直扣 hp 致死站共用的幂等管线；Game 实现 settlePlayerDeath） */
+  settlePlayerDeath?(pvp: boolean): void;
   /** 伤害数字飘字（dot=true 走 CombatText dot 样式:更小更短带重力,DoT 族用） */
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string, dot?: boolean): void;
   /** 入侵开启 + 逼近公告（Game.startInvasionAndAnnounce 实体侧通道——火星探测器

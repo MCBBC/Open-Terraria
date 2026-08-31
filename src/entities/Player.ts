@@ -4888,49 +4888,64 @@ export class Player extends Entity {
     //      Update :24760-24763 同段连排）----
     this.update1457AccBodies(game);
 
-    // 落地摔伤结算（Player.cs:25005-25091：25 格 + extraFall 起伤，超格数 ×10 线性；
-    // 翼豁免 flag9=任一盔甲槽 wingSlot>-1；幸运马掌 noFallDmg；落在水里豁免）
+    // 落地摔伤结算（Player.cs:25495-25580：velocity.Y==0 段逐 tick——num11 整数格距
+    // 两端截断(:25503)、num10=25+extraFall(+mount.ExtraFall)；结算后无条件重置
+    // fallStart(:25574)，本仓以单发后清 fallStartY 等价）。
+    // ★F1（四轮蓝队）：①immune 次序两形分开——石化支=先 Hurt 后 `immune=false`
+    //   （:25549-25550 字面）；常规支=先 `immune=false`（:25559）再算伤 Hurt（:25567）。
+    //   ②取整式纠偏——常规 `(int)((float)num11*gravDir − num10) * 10`（:25560，
+    //   格差【截断】后才 ×10）；石化 `(int)((num11*gravDir − 2f) * 20f)`（:25546，
+    //   ×20 在截断窗内）。删旧 round + Math.max(1,…) 补底：半格落差原版不结伤
+    //   （trunc→0 ⇒ num16/num17≤0 直接跳过），0 档补 1 点属越权。
     if (this.onGround && this.fallStartY !== null) {
-      const fallTiles = (this.y - this.fallStartY) / TILE;
+      const startTileY = Math.trunc(this.fallStartY / TILE);
+      const landTileY = Math.trunc(this.y / TILE);
       this.fallStartY = null;
+      const gd = this.gravDir === -1 ? -1 : 1;         // 倒挂世界 num11*gravDir 归正
       const feetLiq = world.store.liquid[world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 1) / TILE))];
       const landedInWater = feetLiq > 60 || this.inWater;
+      const fallSigned = (landTileY - startTileY) * gd; // ≙ 原 num11*gravDir（顺势落为正）
       if (landedInWater) { /* 落水缓冲：不计摔伤 */ }
       else if (this.buffs.has(BuffType.Stoned)) {
-        // 石化摔伤：（格数×gravDir−2）×20——无 25 格安全阈值、不吃翼/马掌/noFallDmg
-        // 豁免（1457 :25530-25545 字面，独立于常规链）；幸存 ≤10% → event 8。
-        // ★A2 接漏斗：原版 Hurt(ByOther(5), num16, hitDirection=0)（:25540）且 Hurt 前
-        // 无条件 `immune=false`（:25539）——先清 iframes 再走通用 msg117 出站；
-        // 飘字=老值直传 floatDealt（原样 dmg 字面）、音由漏斗单点承载。
-        if (fallTiles > 2) {
-          const dmg = Math.max(1, Math.round((fallTiles - 2) * 20));
+        // 石化摔伤（:25544-25556）：(num11*gravDir−2)×20——无 25 格安全阈值、不吃
+        // 翼/马掌/noFallDmg 豁免（独立于常规链）；幸存 ≤10% → event 8。
+        // ★A2 接漏斗：原版 Hurt(ByOther(5), num16, hitDirection=0)（:25549）；
+        // 飘字=num16 字面直传 floatDealt、音由漏斗单点承载；immune 清除在 Hurt
+        // 【之后】（:25550 先后序=F1 分形②）。带免疫帧落地时本拍 Hurt 被吞、下一
+        // tick immune 已清照常结伤（与原版同拍语义一致）。
+        const num16 = Math.trunc((fallSigned - 2) * 20);
+        if (num16 > 0) {
           this.lastDamageCause = { kind: 'fell' };
-          this.iframes = 0;
-          this.envHurtThroughFunnel(game, dmg, this.cx, this.y - 10, -1, dmg);
+          this.envHurtThroughFunnel(game, num16, this.cx, this.y - 10, -1, num16);
+          this.iframes = 0;                            // :25550 原版在 Hurt 之后清
           if (!this.dead && this.hp > 0 && this.hp <= this.maxHp / 10) {
             game.achievements?.handleSpecialEvent(8,
               { statLifeMax: this.maxHp, statManaMax: this.maxMana });
           }
         }
       }
-      else if (fallTiles > 25 + this.equipStats.extraFall + (this.ridingMount ? this.mount.extraFall : 0)
-        && !(this.equipStats.wing || this.hasHorseshoe || this.equipStats.noFallDmg)) {
+      else {
         const safeT = 25 + this.equipStats.extraFall + (this.ridingMount ? this.mount.extraFall : 0);
-        // 坐骑摔伤系数（1457 :25563 num17 *= mount.FallDamage）：兔兔 Type==1 直清零
-        // （:25523）/飞行族 etc；extraFall 起步豁免。★A2 接漏斗同上：
-        // `immune=false`（:25566）→ Hurt(ByOther(0), num17, 0)（:25569）。
-        let dmg = Math.max(1, Math.round((fallTiles - safeT) * 10));
-        if (this.ridingMount) {
-          if (this.mount.type === 1) { this.fallStartY = null; return; }
-          dmg = Math.max(1, Math.round(dmg * this.mount.fallDamageFactor));
-        }
-        this.lastDamageCause = { kind: 'fell' };
-        this.iframes = 0;
-        this.envHurtThroughFunnel(game, dmg, this.cx, this.y - 10, -1, dmg);
-        // 成就：摔落幸存（:25570-25575 `!dead && statLife<=statLifeMax2/10` → event 8）
-        if (!this.dead && this.hp > 0 && this.hp <= this.maxHp / 10) {
-          game.achievements?.handleSpecialEvent(8,
-            { statLifeMax: this.maxHp, statManaMax: this.maxMana });
+        // 常规链门槛（:25557）：((gd==1&&num11>num10)||(gd==-1&&num11<-num10))
+        // && !noFallDmg && !hasWings。extraFall/坐骑 extraFall 并入门槛；
+        // 坐骑 FallDamage 乘后再截断（:25563 `(int)(num17×FallDamage)`）。
+        if (fallSigned > safeT
+          && !(this.equipStats.wing || this.hasHorseshoe || this.equipStats.noFallDmg)) {
+          this.iframes = 0;                            // :25559 原版在算伤/Hurt 之前清
+          let num17 = Math.trunc(fallSigned - safeT) * 10;
+          if (this.ridingMount) {
+            if (this.mount.type === 1) { return; }     // 兔兔 :25512 归零→不可达伤害（既有早退面保留）
+            num17 = Math.trunc(num17 * this.mount.fallDamageFactor);
+          }
+          if (num17 > 0) {                             // :25565 字面守门（≤0 不入漏斗）
+            this.lastDamageCause = { kind: 'fell' };
+            this.envHurtThroughFunnel(game, num17, this.cx, this.y - 10, -1, num17);
+            // 成就：摔落幸存（:25568-25571 `!dead && statLife<=statLifeMax2/10` → event 8）
+            if (!this.dead && this.hp > 0 && this.hp <= this.maxHp / 10) {
+              game.achievements?.handleSpecialEvent(8,
+                { statLifeMax: this.maxHp, statManaMax: this.maxMana });
+            }
+          }
         }
       }
     }

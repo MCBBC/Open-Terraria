@@ -652,9 +652,14 @@ function seedPeerF14(net: ClientNet, slot: number, defense: number | null = null
   return p;
 }
 
+const syncHpNow4 = (net: ClientNet): void =>
+  (net as unknown as { syncHp(): void }).syncHp();
+
 /** msg117 合成帧（writePlayerHurt 直通；flags 非近战支=去 Pvp 位） */
 const hurtFrameF14 = (slot: number, flags: number, dmg = 25): Uint8Array =>
   writePlayerHurt({ slot, dmg, x: 100, y: 200, dir: 1, flags });
+/** 近战支标准位组（★F-1：回执 FIFO 消费门=Pvp|MeleeSource 双位） */
+const MELEE_PVP_HURT = PlayerHurtFlags.Pvp | PlayerHurtFlags.MeleeSource;
 
 interface F14Credit { slot: number; credit: number; off: boolean }
 
@@ -686,9 +691,9 @@ describe('★F14 回执关联消费层（ClientNet 实例直驱）：聚合/FIFO
     net.notePendingMeleeHit(9, 12, true, true);
     net.notePendingMeleeHit(4, 20, false, true);
     // 到达序反转（服务器转发并不保证跨目标有序）
-    feedNetF14(net, hurtFrameF14(4, PlayerHurtFlags.Pvp));
-    feedNetF14(net, hurtFrameF14(9, PlayerHurtFlags.Pvp));
-    feedNetF14(net, hurtFrameF14(7, PlayerHurtFlags.Pvp));
+    feedNetF14(net, hurtFrameF14(4, MELEE_PVP_HURT));
+    feedNetF14(net, hurtFrameF14(9, MELEE_PVP_HURT));
+    feedNetF14(net, hurtFrameF14(7, MELEE_PVP_HURT));
     expect(credits).toEqual([
       { slot: 4, credit: beetlePvpCredit(20, false, 40), off: true },   // 0→min1
       { slot: 9, credit: beetlePvpCredit(12, true, 8), off: true },     // 24−4
@@ -701,9 +706,9 @@ describe('★F14 回执关联消费层（ClientNet 实例直驱）：聚合/FIFO
     seedPeerF14(net, 5, 4);
     net.notePendingMeleeHit(5, 30, false, true);       // 第一击 intent A
     net.notePendingMeleeHit(5, 12, true, true);        // 第二击 intent B（镜像未及仍可交叠）
-    feedNetF14(net, hurtFrameF14(5, PlayerHurtFlags.Pvp));
-    feedNetF14(net, hurtFrameF14(5, PlayerHurtFlags.Crit | PlayerHurtFlags.Pvp));
-    feedNetF14(net, hurtFrameF14(5, PlayerHurtFlags.Pvp));          // 第三发=他人击（窗口已排空）
+    feedNetF14(net, hurtFrameF14(5, MELEE_PVP_HURT));
+    feedNetF14(net, hurtFrameF14(5, PlayerHurtFlags.Crit | MELEE_PVP_HURT));
+    feedNetF14(net, hurtFrameF14(5, MELEE_PVP_HURT));               // 第三发=他人近战击（窗口已排空）
     expect(credits.map((c) => c.credit)).toEqual([
       beetlePvpCredit(30, false, 4),                   // A 消费 A
       beetlePvpCredit(12, true, 4),                    // B 消费 B —— FIFO 序裁决
@@ -716,12 +721,12 @@ describe('★F14 回执关联消费层（ClientNet 实例直驱）：聚合/FIFO
     seedPeerF14(net, 8, 0);
     net.notePendingMeleeHit(8, 25, false, true);
     pruneOf(net).pruneMeleeReceipts(performance.now() + 2001);      // 过期窗（2000ms+1）
-    feedNetF14(net, hurtFrameF14(8, PlayerHurtFlags.Pvp));
+    feedNetF14(net, hurtFrameF14(8, MELEE_PVP_HURT));
     expect(credits.length).toBe(0);                    // 迟到丢弃——不记他人的伤进自己壳
     // 对照臂：未过期的同类回执照常消费
     net.notePendingMeleeHit(8, 25, false, true);
     pruneOf(net).pruneMeleeReceipts(performance.now());
-    feedNetF14(net, hurtFrameF14(8, PlayerHurtFlags.Pvp));
+    feedNetF14(net, hurtFrameF14(8, MELEE_PVP_HURT));
     expect(credits.length).toBe(1);
   });
 
@@ -732,7 +737,7 @@ describe('★F14 回执关联消费层（ClientNet 实例直驱）：聚合/FIFO
     feedNetF14(net, hurtFrameF14(6, 0));               // PvE/environmental 权威飘字帧
     feedNetF14(net, hurtFrameF14(6, 0, 999));
     expect(credits.length).toBe(0);                    // 未冲账、未消耗
-    feedNetF14(net, hurtFrameF14(6, PlayerHurtFlags.Pvp));
+    feedNetF14(net, hurtFrameF14(6, MELEE_PVP_HURT));
     expect(credits.length).toBe(1);                    // 真 PvP 结算帧随后正常闭环
     expect(credits[0].credit).toBe(beetlePvpCredit(18, false, 10));
   });
@@ -740,7 +745,7 @@ describe('★F14 回执关联消费层（ClientNet 实例直驱）：聚合/FIFO
   it('观战帧：从未挥向的目标来了 PvP 帧（他人命中的广播）→ 无未决集零动作', () => {
     const { net, credits } = f14clientShell();
     seedPeerF14(net, 3, 10);
-    expect(() => feedNetF14(net, hurtFrameF14(3, PlayerHurtFlags.Pvp))).not.toThrow();
+    expect(() => feedNetF14(net, hurtFrameF14(3, MELEE_PVP_HURT))).not.toThrow();
     expect(credits.length).toBe(0);
   });
 
@@ -748,14 +753,14 @@ describe('★F14 回执关联消费层（ClientNet 实例直驱）：聚合/FIFO
     const { net, credits } = f14clientShell();
     seedPeerF14(net, 6, null);                         // 对端从未送来 def 尾段
     net.notePendingMeleeHit(6, 18, false, true);
-    feedNetF14(net, hurtFrameF14(6, PlayerHurtFlags.Pvp));
+    feedNetF14(net, hurtFrameF14(6, MELEE_PVP_HURT));
     expect(credits.length).toBe(0);                    // 弃账——宁欠不虚增
-    feedNetF14(net, hurtFrameF14(6, PlayerHurtFlags.Pvp));   // 第二帧不得把旧债配到新事件上
+    feedNetF14(net, hurtFrameF14(6, MELEE_PVP_HURT));   // 第二帧不得把旧债配到新事件上
     expect(credits.length).toBe(0);
     // def 尾到达后的下一笔恢复记账能力
     (net.players.get(6) as RemotePlayerState).pvpDefense = 33;
     net.notePendingMeleeHit(6, 18, false, true);
-    feedNetF14(net, hurtFrameF14(6, PlayerHurtFlags.Pvp));
+    feedNetF14(net, hurtFrameF14(6, MELEE_PVP_HURT));
     expect(credits.length).toBe(1);
   });
 });
@@ -842,5 +847,216 @@ describe('★F14 Game 近战 PvP 区接线（updateSwingHits 直驱）', () => {
     (g as unknown as { updateSwingHits: () => void }).updateSwingHits();
     expect(noted.length).toBe(0);
     expect(sinks.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★四轮蓝队批回归（2026-08-31）：F-1 来源位门 / F-2 消费点 TTL 硬闸 /
+//   F-3 两处自设帽 / F-4 断线·slot 复用清账。
+//   定谳锚（Terarria1457）：
+//   · beetleCounter += num2 全仓唯一 PvP 位 = ItemCheck_MeleeHitPVP :44456-44460
+//     （另一处 :44826-44828 在 PvE 近战支；爆炸 bit7/狱火 bit6/盾转移 bit5/PvP 弹
+//     四支均无记账面——grep beetleCounter 全仓仅此两处入账位佐证）；
+//   · vanilla Damage 形参无帽（Hurt/返回段重算 int 直通；唯一 9999 字面量在
+//     :38625 圣骑士盾转移分支,与本域无关）；
+//   · msg117 flags 为独立 u8 位域、dmg 为独立 i16——bit2 无位段冲突
+//     （msg44 的 bits1-4=enchant 属另一条消息的载荷域,自查备案见 Msg.PlayerHurt 注）。
+// ---------------------------------------------------------------------------
+
+/** GA4 同款发送侧壳（本 describe 域内独立装配,避免跨块引用作用域） */
+function hurtShell4() {
+  const g = protGame();
+  const sent: Array<{ dmg: number; dir: number; flags: number }> = [];
+  const p = new Player(1000, 1000, new Inventory());
+  g.player = p;
+  g.net = {
+    active: true,
+    mySlot: 3,
+    notifyPlayerHurtSettled: vi.fn(),
+    sendPlayerHurt: (dmg: number, _x: number, _y: number, dir: number, flags: number) =>
+      sent.push({ dmg, dir, flags }),
+  };
+  return { g, p, sent };
+}
+
+describe('★F-1 MeleeSource 来源位：仅近战支置位 + 收端 FIFO 分账', () => {
+  it('发送侧：reportPlayerHurt(extraFlags=MeleeSource) 携位（近战支形态）；缺省调用不带（另四支守恒）', () => {
+    const h = hurtShell4();
+    h.p.hp = 100; h.p.hp = 70;
+    (h.g as unknown as { reportPlayerHurt: (...a: unknown[]) => void })
+      .reportPlayerHurt(100, 900, false, 1, PlayerHurtFlags.MeleeSource);
+    expect(h.sent.length).toBe(1);
+    expect(h.sent[0].flags).toBe(PlayerHurtFlags.Pvp | PlayerHurtFlags.MeleeSource);
+    // 其余四支（bit7/bit5/bit6/PvP 弹）走缺省 extraFlags——不得带来源位
+    const h2 = hurtShell4();
+    h2.p.hp = 100; h2.p.hp = 90;
+    (h2.g as unknown as { reportPlayerHurt: (...a: unknown[]) => void })
+      .reportPlayerHurt(100, 900, false);
+    expect(h2.sent.length).toBe(1);
+    expect(h2.sent[0].flags & PlayerHurtFlags.MeleeSource).toBe(0);
+    expect(h2.sent[0].flags & PlayerHurtFlags.Pvp).not.toBe(0);   // Pvp 位不随 extraFlags 缺失而丢
+  });
+
+  it('收端：爆炸(bit7)/狱火(bit6)/盾转移(bit5)/PvP 弹四支的 Pvp-only 帧【不抽队】——我的未决挥击原样保留', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 6, 10);
+    net.notePendingMeleeHit(6, 18, false, true);
+    const qOf = () => ((net as unknown as { pendingMeleeHits: Map<number, unknown[]> })
+      .pendingMeleeHits.get(6)!).length;
+    expect(qOf()).toBe(1);
+    // 四个非近战 PvP 生产支的标准形制：Pvp 位 ∈ {0x02}，crit 视支而定,恒无 bit2
+    for (const flags of [PlayerHurtFlags.Pvp,
+      PlayerHurtFlags.Crit | PlayerHurtFlags.Pvp]) {
+      feedNetF14(net, hurtFrameF14(6, flags));
+    }
+    expect(credits.length).toBe(0);   // 不充能
+    expect(qOf()).toBe(1);            // ★核心断言：不抽队（红队指认的错配充能面已封）
+    // 随后同目标的真近战回执照常闭环——非近战帧既没偷队列也没污染配对
+    feedNetF14(net, hurtFrameF14(6, MELEE_PVP_HURT));
+    expect(credits.length).toBe(1);
+    expect(credits[0].credit).toBe(beetlePvpCredit(18, false, 10));
+    expect(qOf()).toBe(0);
+  });
+
+  it('降级矩阵·旧端发（无 bit2）：新收端不抽队不充能 = 保守欠计,不虚增', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 5, 4);
+    net.notePendingMeleeHit(5, 20, false, true);
+    feedNetF14(net, hurtFrameF14(5, PlayerHurtFlags.Pvp));      // 旧端形制
+    expect(credits.length).toBe(0);
+    // 队列里该未决项仍在（旧端面只欠计,不影响新回执的 FIFO 配对）
+    feedNetF14(net, hurtFrameF14(5, MELEE_PVP_HURT));
+    expect(credits.length).toBe(1);
+  });
+
+  it('协议层：bit2 走线字节往返存活（服务器 read→write 整字节透传的等价保证）', () => {
+    const f = writePlayerHurt({ slot: 1, dmg: 9, x: 1, y: 2, dir: 1,
+      flags: PlayerHurtFlags.Crit | PlayerHurtFlags.Pvp | PlayerHurtFlags.MeleeSource });
+    const m = readPlayerHurt(new NetReader(f.subarray(3)))!;
+    expect(m.flags & PlayerHurtFlags.MeleeSource).not.toBe(0);
+  });
+});
+
+describe('★F-2 消费点 TTL 硬闸（prune 定期 + 消费路径逐条自证新鲜）', () => {
+  it('过期条目恰逢 prune 空窗到达：shift 照常（一帧一账）但跳过充能；后续合法对不受影响', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 7, 8);
+    // 登记时刻即过期：负窗注册 → exp = now-1000 <now。不经 pruneMeleeReceipts，
+    // 直打「消费点 exp 门」这一刀
+    (net as unknown as { MELEE_RECEIPT_WINDOW_MS: number }).MELEE_RECEIPT_WINDOW_MS = -1000;
+    net.notePendingMeleeHit(7, 30, false, true);
+    (net as unknown as { MELEE_RECEIPT_WINDOW_MS: number }).MELEE_RECEIPT_WINDOW_MS = 2000;
+    feedNetF14(net, hurtFrameF14(7, MELEE_PVP_HURT));
+    expect(credits.length).toBe(0);                    // 硬闸：过期弃账不充能
+    expect(((net as unknown as { pendingMeleeHits: Map<number, unknown[]> })
+      .pendingMeleeHits.get(7)) ?? []).toEqual([]);    // 已照常 shift（配对纪律不变）
+    // 新鲜对随后正常出账（消费点门对在窗内条目零干扰）
+    net.notePendingMeleeHit(7, 30, false, true);
+    feedNetF14(net, hurtFrameF14(7, MELEE_PVP_HURT));
+    expect(credits.length).toBe(1);
+    expect(credits[0].credit).toBe(beetlePvpCredit(30, false, 8));
+  });
+
+  it('prune 截断量级：队头连续过期整段截除、半截截断保留尾段新条目；全过期连键位一并删', () => {
+    const { net } = f14clientShell();
+    type Ent = { base: number; crit: boolean; off: boolean; exp: number };
+    const map = (net as unknown as { pendingMeleeHits: Map<number, Ent[]> }).pendingMeleeHits;
+    const t = performance.now();
+    map.set(1, [
+      { base: 10, crit: false, off: true, exp: t - 500 },   // 头两条过期(500ms/1ms 前)
+      { base: 11, crit: false, off: true, exp: t - 1 },
+      { base: 12, crit: false, off: true, exp: t + 1999 },  // 尾段在窗内
+    ]);
+    map.set(2, [{ base: 9, crit: false, off: true, exp: t - 700 }]);   // 全过期
+    pruneOf(net).pruneMeleeReceipts(t);
+    expect(map.get(2)).toBeUndefined();                // 全过期 → delete 键位
+    const rest = map.get(1)!;
+    expect(rest.length).toBe(1);                       // 半截截断量级 = 过期头数(2)
+    expect(rest[0]).toMatchObject({ base: 12 });       // 保留的是首个未过期条目
+    expect(rest.every((e) => e.exp > t)).toBe(true);   // 残余全部满足硬闸谓词
+    expect(Math.max(...rest.map((e) => e.exp))).toBeLessThanOrEqual(
+      (t + ((net as unknown as { MELEE_RECEIPT_WINDOW_MS: number }).MELEE_RECEIPT_WINDOW_MS)));  // 窗口包住残余寿命
+  });
+});
+
+describe('★F-3 自设帽清偿', () => {
+  it('① 高伤意向不再 min(9999)：入账基值全量保留（受 msg44 i16 线域自然约束）', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 6, 20);
+    net.notePendingMeleeHit(6, 30000, true, true);     // >9999 的合法 i16 线值
+    feedNetF14(net, hurtFrameF14(6, MELEE_PVP_HURT));
+    expect(credits[0].credit).toBe(beetlePvpCredit(30000, true, 20));   // trunc(60000−10)=59990
+    expect(credits[0].credit).toBeGreaterThan(9999);   // 修复前会被钳到 9999×2−10=19880
+  });
+
+  it("② statDefense 镜像读↔写同宽 u16：>32767 终值不再被单侧截帽", () => {
+    // 写侧：syncHp 第三尾段以 u16 全宽编码 defense=60000
+    const a = mkF14Net(2);
+    Object.assign((a as unknown as { game: { player: Record<string, unknown> } }).game.player,
+      { hp: 45, maxHp: 500, deathsPve: 0, deathsPvp: 0, mana: 40, maxMana: 100, luck: 0,
+        iframes: 0, defense: 60000 });
+    syncHpNow4(a);
+    const sentLm = (a as unknown as { ws: { sent: Uint8Array[] } }).ws.sent
+      .filter((f) => f[2] === Msg.PlayerLifeMana);
+    const out = sentLm[sentLm.length - 1];
+    expect(out).toBeDefined();
+    const rr = new NetReader(out.subarray(3));
+    rr.u8(); rr.i16(); rr.i16(); rr.u16(); rr.u16(); rr.i16(); rr.i16(); rr.f32(); rr.i16();
+    expect(rr.u16()).toBe(60000);                      // 写侧未被 32767 折损
+    // 读侧：同一帧喂给对端 → 镜像取全宽原值（修复前 min(32767) 扭曲为 32767）
+    const b = mkF14Net(3);
+    seedPeerF14(b, 2);
+    (b as unknown as { handle(msgId: number, r: NetReader): void }).handle(out[2], new NetReader(out.subarray(3)));
+    expect(b.players.get(2)!.pvpDefense).toBe(60000);
+  });
+});
+
+describe('★F-4 断线/slot 复用清账（防旧债配新会话）', () => {
+  it('disconnect()：未决挥击 FIFO 清空 + 全表 pvpDefense/pvpImmuneT 镜像归零', () => {
+    const { net } = f14clientShell();
+    seedPeerF14(net, 5, 33);
+    seedPeerF14(net, 7, null);
+    (net.players.get(7)!).pvpImmuneT = 25;
+    net.notePendingMeleeHit(5, 18, false, true);
+    net.disconnect();
+    expect((net as unknown as { pendingMeleeHits: Map<number, unknown[]> })
+      .pendingMeleeHits.size).toBe(0);
+    expect(net.players.get(5)!.pvpDefense).toBeNull();
+    expect(net.players.get(7)!.pvpImmuneT).toBe(0);
+    // 断线即离线：同端复连必走 msg14 复用支重新兜底（活性标记随会话失效）
+    expect(net.players.get(5)!.active).toBe(false);
+    expect(net.players.get(7)!.active).toBe(false);
+  });
+
+  /** msg14 原始帧（leave/join 驱动用） */
+  const activeFrame = (slot: number, active: boolean): Uint8Array =>
+    new NetWriter(Msg.PlayerActive).u8(slot).bool(active).str(`玩家${slot}`).finish();
+
+  it('msg14 leave：该 slot 未决挥击删除 + 名下镜像归零；rejoin（复用槽位）不得复活旧态', () => {
+    const { net } = f14clientShell();
+    seedPeerF14(net, 5, 33);
+    (net.players.get(5)!).pvpImmuneT = 60;
+    net.notePendingMeleeHit(5, 18, false, true);
+    feedNetF14(net, activeFrame(5, false));
+    expect(net.players.get(5)!.active).toBe(false);
+    expect(net.players.get(5)!.pvpDefense).toBeNull();
+    expect(net.players.get(5)!.pvpImmuneT).toBe(0);
+    expect((net as unknown as { pendingMeleeHits: Map<number, unknown[]> })
+      .pendingMeleeHits.has(5)).toBe(false);
+    // 同 slot 换人 rejoin：复用的 RemotePlayerState 上不得残留上一 occupant 记账态
+    feedNetF14(net, activeFrame(5, true));
+    expect(net.players.get(5)!.active).toBe(true);
+    expect(net.players.get(5)!.pvpDefense).toBeNull();
+    expect(net.players.get(5)!.pvpImmuneT).toBe(0);
+  });
+
+  it('重连窗口内的迟到回执（slot 复用后）：旧债已清,不会把他人伤害记进新会话甲虫账', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 5, 33);
+    net.notePendingMeleeHit(5, 50, true, true);
+    feedNetF14(net, activeFrame(5, false));            // 断开（FIFO 同步作废）
+    feedNetF14(net, activeFrame(5, true));             // 新 occupant 复用 slot
+    feedNetF14(net, hurtFrameF14(5, MELEE_PVP_HURT));  // 迟到的旧会话回执
+    expect(credits.length).toBe(0);                    // 无旧债可配——零充能
   });
 });

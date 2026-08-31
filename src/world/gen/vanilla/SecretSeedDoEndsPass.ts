@@ -146,6 +146,18 @@ function solidTileAt(st: TileStore, x: number, y: number): boolean {
   const i = st.idx(x, y);
   return st.flags[i] !== 0 && genSolidType(st.type[i]);
 }
+/** WorldGen.SolidTile(i,j)（cs:70650）1:1：nactive && tileSolid[type] && !tileSolidTop &&
+ *  !halfBrick() && slope()==0 && !inActive()——南瓜季臂支柱门专用（PlacePumpkin
+ *  cs:52922/GrowPumpkin cs:53005 均走本谓词；旧 solidTileAt 缺后四门=坡/半砖草上误收瓜） */
+function solidTileGround(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if ((st.flags[i] & 1) === 0) return false;
+  if ((st.wire[i] & 32) !== 0) return false;                          // inActive(致动)
+  const sh = SHEET_OF_TYPE[st.type[i]];
+  if (sh < 0 || VAN_TILE_SOLID_EXTRA.has(sh)) return false;           // tileSolid / tileSolidTop 家族门
+  return genSolidType(st.type[i]) && !st.half[i] && st.slope[i] === 0;
+}
 /** nactive && tileSolid && !tileSolidTop —— discoball 天花板门（cs:51815） */
 function solidNonTopAt(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
@@ -505,6 +517,87 @@ export function doDigExtraHoles(st: TileStore, rng: RNG, gs: GenState): void {
       speedY: Math.fround(rng.nextIntRange(10, 26) * Math.fround(0.1)),  // (float)y*0.1f
       noYChange: true,
     });
+  }
+}
+
+// ============================================================
+// ①b DoRoundLandMasses（planetoids，cs:2870-2973；Grass pass 头 :12474-12476）
+// ============================================================
+/** XNA Vector2.Distance 的 f32 每步舍入链镜像：(a-b)、平方、求和、开方逐 op fround。
+ *  骰源恒为整格点/整数半径，dx·dy 平方和 >2^24 时 f32 精度损失与 double 可差
+ *  一个边界格——mile8 字节平价必须走同构。 */
+function distLT(ax: number, ay: number, bx: number, by: number, r: number): boolean {
+  const FR = Math.fround;
+  const dx = FR(bx - ax), dy = FR(by - ay);
+  const sum = FR(FR(FR(dx * dx)) + FR(FR(dy * dy)));
+  return FR(Math.sqrt(sum)) < r;
+}
+
+export function doRoundLandMasses(st: TileStore, rng: RNG, gs: GenState): void {
+  const { w, h } = st;
+  // 天空盒世界原版也无此调用冲突（pass 内 !denyAll 门由接线处承担）
+  const num = w * 10;                       // cs:2871 maxTilesX*10 个小圆机会窗
+  const clearMargin = 25;                   // cs:2872 num2=25（清场外沿）
+  // fullbrightBlock 标记位（vanilla 用 tile 标志位+尾段全局清零；JS 局部位图等价,
+  // 三固定圆 + 小圆受理写 1、清场读 1、外圈碰撞扫描读 1）
+  const N = w * h;
+  let fb: Uint8Array;
+  try {
+    fb = new Uint8Array(N);
+  } catch { throw new Error('doRoundLandMasses: 标记位分配失败'); }
+  const markCircle = (cx: number, cy: number, r: number): void => {
+    for (let j = cy - r; j <= cy + r; j++) {
+      for (let i = cx - r; i <= cx + r; i++) {
+        if (i >= 0 && i < w && j >= 0 && j < h && distLT(cx, cy, i, j, r)) fb[j * w + i] = 1;
+      }
+    }
+  };
+  // ——三个固定圆（cs:2876-2902；掷序=num3 先行、初值 Vector2 必掷两颗、case 覆写再掷）——
+  for (let i = 0; i < 3; i++) {
+    let radius = rng.nextIntRange(235, 266);                     // Next(235,266)
+    // 初值分支永远先掷（C# 初始化语句在 switch 前）
+    let cx = 115 + rng.nextInt(20);                              // Next(20)
+    let cy = Math.trunc(gs.worldSurface) - 100 + rng.nextIntRange(-20, 21); // Next(-20,21)
+    if (i === 1) {
+      cx = w - 115 - rng.nextInt(20);
+      cy = Math.trunc(gs.worldSurface) - 100 + rng.nextIntRange(-20, 21);
+    } else if (i === 2) {
+      cx = Math.trunc(w / 2) + rng.nextIntRange(-50, 51);        // Next(-50,51)
+      cy = Math.trunc(gs.worldSurface) - rng.nextInt(101);       // Next(101)
+      radius = rng.nextIntRange(100, 201);                       // Next(100,201)
+    }
+    markCircle(cx, cy, radius);
+  }
+  // ——随机小圆（cs:2907-2955）：半径 30..169（后半减半）、+10/+5 外沿碰撞豁免——
+  let half = num / 2;                                          // l > num/2 用浮点比较语义
+  for (let l = 0; l < num; l++) {
+    const cx = rng.nextIntRange(50, w - 50);                   // Next(50, maxX-50)
+    const cy = rng.nextIntRange(50, h - 50);                   // Next(50, maxY-50)
+    const margin = 10;
+    let r = rng.nextIntRange(30, 170);                         // Next(30,170)
+    if (l > half) { r = Math.trunc(r / 2); }                   // num5/=2（int 除法截断）
+    let collide = false;
+    for (let m = cx - r - margin; m <= cx + r + margin && !collide; m++) {
+      for (let n = cy - r - margin; n <= cy + r + margin; n++) {
+        if (m >= 0 && m < w && n >= 0 && n < h && distLT(cx, cy, m, n, r + margin) && fb[n * w + m]) {
+          collide = true;
+          break;
+        }
+      }
+    }
+    if (collide) continue;
+    markCircle(cx, cy, r);
+  }
+  // ——清场（cs:2956-2971）：仅 [25, w-25) × [25, h-100) 开窗外全部熄灭（wall 同清；
+  //   liquid/type 存留不触碰）。原版此后全图清 fullbright 位=局部位图自弃。
+  for (let x = clearMargin; x < w - clearMargin; x++) {
+    for (let y = clearMargin; y < h - 100; y++) {
+      if (!fb[y * w + x]) {
+        const i = y * w + x;
+        st.flags[i] &= ~1;
+        st.wall[i] = 0;
+      }
+    }
   }
 }
 
@@ -883,7 +976,7 @@ function placePumpkin(st: TileStore, rng: RNG, x: number, superY: number): void 
       if (st.liquid[ii] > 0) ok = false;
     }
     if (!st.inBounds(i, superY + 1)) return;
-    if (!solidTileAt(st, i, superY + 1)) ok = false;
+    if (!solidTileGround(st, i, superY + 1)) ok = false;
     else {
       const bs = shOf(st, st.idx(i, superY + 1));
       if (bs !== 2 && bs !== 109) ok = false;                           // 地面限草/珍珠草
@@ -927,7 +1020,7 @@ function growPumpkinStep(st: TileStore, i: number, superY: number): void {
         || st.frameX[q] !== (k - ax) * 18 + grows * 36) bad = true;
     }
     if (!st.inBounds(k, topY + 2)) return;
-    if (!solidTileAt(st, k, topY + 2)) bad = true;
+    if (!solidTileGround(st, k, topY + 2)) bad = true;
     else {
       const bs = shOf(st, st.idx(k, topY + 2));
       if (bs !== 2 && bs !== 477 && bs !== 492 && bs !== 109) bad = true;

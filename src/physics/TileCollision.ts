@@ -48,6 +48,11 @@ export interface Body {
   liqFactor?: number;
   /** 连续中心格嵌入 tick 计数（unembedPass 延迟门用；脱出/未嵌入即复位） */
   embedTicks?: number;
+  /** ★斜坡 G2 门入口快照（2026-08-31 统一阻尼修复）：moveAndCollide 每 tick 在
+   *  速度辅助/分轴解析【前】记录——slopeCollide 的贴合门用（原版
+   *  `y = Position.Y + Velocity.Y`，Collision.cs G2 `Position.Y + num7 < y`） */
+  vyEntry?: number;
+  feetEntry?: number;
 }
 
 /** Collision.StepUp（Collision.cs:3641-3770，gravDir=1、holdsMatching=false）：
@@ -259,6 +264,24 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
   return { hitX, hitY };
 }
 
+/** ★斜坡贴合 G2 速度门 + collideY 回写（2026-08-31 统一"阻尼陷入/逃出"修复）：
+ *  原版 SlopeCollision 的贴合带两道我们缺失的门——
+ *  · G2（:1947 `Position.Y + num7 < y`，y=入口英尺+本帧速度Y）：只有当贴合把
+ *    身体抬到【高于本帧速度目标】时才生效——上升中/掠过的碰撞盒（飞行眼球/
+ *    上抛物/高速穿越）被拒贴，杜绝逐帧拉拽（=用户报"阻尼陷入/逃出"，任何
+ *    走 moveAndCollide 的主体统一中招：玩家/NPC/眼球/掉落物）；
+ *  · collideY 回写（:1954 bitsByte[num3]=true）：贴合成功置 collideY——飞行
+ *    AI（AI_002 collideY→oldVy×-0.5 弹跳）与掉落物结算靠它离场，缺失=贴着
+ *    坡面爬行不反弹。
+ *  天花板坡对称：门取 max(当前头，入口头+速度Y)。
+ *  ★回退开关：localStorage sw_slope_g2='0'（重进世界生效）恢复旧无条件贴合。 */
+const SLOPE_G2 = (() => {
+  try { return typeof localStorage === 'undefined' || localStorage.getItem('sw_slope_g2') !== '0'; }
+  catch { return true; }
+})();
+/** 回退审计用（tests/slope-g2 kill-switch 断言）：G2 门当前是否启用 */
+export const SLOPE_G2_ENABLED = SLOPE_G2;
+
 /** 原版 Collision.SlopeCollision（1456 Collision.cs:1796-2036）适配：
  *  常规碰撞后对重叠坡面格做对角线贴合——身体沉到斜面下时抬回斜面上
  *  （走路沿坡爬升;多格取最高贴合位,与原版 y 最小值机制一致）。
@@ -269,7 +292,7 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
  *  - num4 钳 ≥0（原版 num4<0 跳过）：坡顶过渡瞬间防脱钩下沉
  *  - 未移植 :2003 的"重跑 TileCollision 校验"本体（分轴结构代价高,
  *    钳位已覆盖其主收益;受阻回退语义由嵌入守卫分支等价提供） */
-function slopeCollide(b: Body, world: World): void {
+function slopeCollide(b: Body, world: World, feetEntry: number, vyEntry: number): void {
   const st = world.store;
   const x0 = Math.floor(b.x / TILE), x1 = Math.floor((b.x + b.w - 0.01) / TILE);
   const y0 = Math.floor(b.y / TILE), y1 = Math.floor((b.y + b.h - 0.01) / TILE);
@@ -316,13 +339,21 @@ function slopeCollide(b: Body, world: World): void {
         // 天花板坡（:1883-1921）：头在斜面上方才贴合下推
         if (b.y <= vy0 + TILE - num4) {
           const num5 = vy0 + TILE - b.y - num4;
-          if (num5 > bestDrop) bestDrop = num5;
+          // G2 对称门（头目标=入口头+速度Y 与当前头取大）+ 命中即回写 collideY
+          if (SLOPE_G2 && b.y + num5 <= Math.max(b.y, feetEntry - b.h + vyEntry)) continue;
+          if (num5 > bestDrop) { bestDrop = num5; if (SLOPE_G2) b.collideY = true; }
         }
       } else {
         // 地面坡（:1935-1966）：脚沉到斜面之下才抬回（num7<0 即抬升）
         if (b.y + b.h < vy0 + num4) continue;
         const num7 = vy0 - (b.y + b.h) + num4;
-        if (num7 < bestLift) bestLift = num7;
+        // ★G2 速度门（:1947）：贴合结果必须高于「入口英尺+本帧速度Y」与当前
+        //   落地位的较小者——上升/掠过者拒贴（阻尼根因）
+        if (SLOPE_G2 && !(b.y + num7 < Math.min(b.y + b.h, feetEntry + vyEntry))) continue;
+        if (num7 < bestLift) {
+          bestLift = num7;
+          if (SLOPE_G2) b.collideY = true;   // bitsByte[num3]=true（:1954）
+        }
       }
     }
   }
@@ -491,6 +522,11 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
       }
     }
   }
+  // ★G2 入口快照（速度辅助之后、分轴之前——原版 y = Position.Y + Velocity.Y
+  //   在 TileCollision 头部、速度辅助(:1773)之前）
+  const feetEntry = b.y + b.h;
+  const vyEntry = b.vy;
+  b.vyEntry = vyEntry; b.feetEntry = feetEntry;
   const maxStep = 8;
   const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / maxStep));
   for (let i = 0; i < steps; i++) {
@@ -500,7 +536,7 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     if (hitY) { b.collideY = true; dy = 0; }
     if (dx === 0 && dy === 0) break;
   }
-  slopeCollide(b, world);
+  slopeCollide(b, world, feetEntry, vyEntry);
   unembedPass(b, world);
 }
 
@@ -524,56 +560,28 @@ function unembedPass(b: Body, world: World): void {
     for (let tx = nx0; tx <= nx1; tx++) {
       if (!st.inBounds(tx, topRow)) continue;
       const ti = st.idx(tx, topRow);
-      if (st.flags[ti] && st.slope[ti] > 0 && !st.half[ti]) {
-        // ★坡面格:头顶 Y 在坡面 solid 三角内才算嵌入(开放三角=正常贴站不触发;
-        //  原排除坡面格=天花板斜面穿透 bug——头缓入 solid 三角后无检出无弹出)
-        const slopeV2 = st.slope[ti];
-        const headRelX = (b.x + b.w / 2) - tx * TILE;
-        const headRelY = b.y - topRow * TILE;
-        let inSolidTri = false;
-        if (slopeV2 === 1) inSolidTri = headRelY < headRelX;
-        else if (slopeV2 === 2) inSolidTri = headRelY < TILE - headRelX;
-        else if (slopeV2 === 3) inSolidTri = headRelY > headRelX;
-        else if (slopeV2 === 4) inSolidTri = headRelY > TILE - headRelX;
-        if (inSolidTri) { topEmbedded = true; break; }
-      } else if (st.isSolid(tx, topRow) && !st.half[ti] && !st.isPlatform(tx, topRow)) {
+      if (st.isSolid(tx, topRow) && st.slope[ti] === 0 && !st.half[ti] && !st.isPlatform(tx, topRow)) {
         topEmbedded = true;
         break;
-      }
-    }
+      }    }
   }
   // ★中心格判据须排除坡/半砖/平台(与上方顶行变体及函数头注释同款)——掉落物
   //  12px 高,站斜面对角线低侧时中心点必沉入坡面实心三角(合法贴合姿态,
   //  slopeCollide 逐 tick 管理),无排除=被判真嵌入→15t 后上抬 16px→重力落回
   //  →循环("掉落物在斜坡上下移-瞬移-再下移",2026-08-25 用户实报+存档标记定位)
   const centerSolid = st.isSolid(cx, cy) && st.slope[ci] === 0 && !st.half[ci] && !st.isPlatform(cx, cy);
-  // ★坡面 solid 三角嵌入检测(2026-08-31 天花板斜面穿透 bug 修复):
-  //  坡面格不全部排除——中心点在【开放三角】(斜面低侧)= 正常贴合(slopeCollide 管理不触发);
-  //  中心点在【solid 三角】(斜面高侧实体区)= 真嵌入(slopeCollide 只管脚底贴面不管
-  //  头部穿入 solid 区),连续 15t 后照常推出。
-  //  各坡向 solid 三角判定(中心相对 tile 原点的 cpx/cpy):
-  //  slope 1: solid=左下三角 ⇒ cpy > cpx
-  //  slope 2: solid=右下三角 ⇒ cpy > (TILE - cpx)
-  //  slope 3: 天花板左 ⇒ solid=上方三角 ⇒ cpy < cpx
-  //  slope 4: 天花板右 ⇒ solid=上方三角 ⇒ cpy < (TILE - cpx)
-  let slopeSolidEmbed = false;
-  if (!centerSolid && st.slope[ci] > 0 && !st.half[ci] && !st.isPlatform(cx, cy)) {
-    const slopeV = st.slope[ci];
-    const cpx = (b.x + b.w / 2) - cx * TILE;
-    const cpy = (b.y + b.h / 2) - cy * TILE;
-    if (slopeV === 1) slopeSolidEmbed = cpy > cpx;
-    else if (slopeV === 2) slopeSolidEmbed = cpy > TILE - cpx;
-    else if (slopeV === 3) slopeSolidEmbed = cpy < cpx;
-    else if (slopeV === 4) slopeSolidEmbed = cpy < TILE - cpx;
-  }
-  const embedded = centerSolid || topEmbedded || slopeSolidEmbed;
+  const embedded = centerSolid || topEmbedded;
   if (!embedded) {
     b.embedTicks = 0;   // 脱出/未嵌入:计数复位(瞬态嵌片靠原版物理自愈)
     return;
   }
   const emb = (b.embedTicks ?? 0) + 1;
   b.embedTicks = emb;
-  if (emb < EMBED_DELAY_TICKS) return;
+  // ★topEmbedded 快速响应(2026-08-31):头顶 solid 区嵌入的 15t 延迟期 = 无限上下
+  //  弹跳期(站台+上方家具 1 格空隙),观感不可接受。top-embed 检出可靠性高(逐列扫
+  //  solid 含坡面三角判定),2t 即可确认非瞬态。
+  const delay = topEmbedded ? 2 : EMBED_DELAY_TICKS;
+  if (emb < delay) return;
   // ① 向上:从盒顶行上方起找连续净空(≤3 格),每 tick 至多上移 1 格
   let clear = 0;
   for (let k = 1; k <= 3; k++) {
@@ -613,7 +621,7 @@ function unembedPass(b: Body, world: World): void {
   // ② 水平:左右各探 2 格,取连续净空更宽的一侧平移
   const sideClear = (dir: number): number => {
     let n = 0;
-    for (let k = 1; k <= 2; k++) {
+    for (let k = 1; k <= 4; k++) {
       const tx = cx + dir * k;
       if (!st.inBounds(tx, cy) || st.isSolid(tx, cy)) break;
       n = k;
@@ -623,7 +631,8 @@ function unembedPass(b: Body, world: World): void {
   const l = sideClear(-1), r = sideClear(1);
   if (l === 0 && r === 0) return;
   const dir = r >= l ? 1 : -1;
-  const push = Math.min(Math.max(l, r), 1) * TILE;   // 每 tick 至多平移 1 格（同上限速）
+  // ★topEmbedded 一口气推到最远净空(上限 4 格)——原 1 格/tick 期=连续弹跳窗口
+  const push = Math.min(Math.max(l, r), 4) * TILE;
   const nx = b.x + dir * push;
   // 增量条带验证（同上移支）：只验新扫入的前缘列
   const leadCol = dir > 0 ? Math.floor((nx + b.w - 0.01) / TILE) : Math.floor(nx / TILE);

@@ -21,7 +21,8 @@ const ASH = T.ASH;
 const HELLSTONE = TILE_BY_KEY['ore_hellstone']!;
 const ASH_GRASS = TILE_BY_KEY['v_633_ash_grass_block']!;
 
-export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   // 一次性探针钩（同 WebsPass 模式）：Underworld 入口快照（债时间线用）
   const g0 = globalThis as { __swUwCap?: (gs: GenState, st: TileStore) => void };
   try { g0.__swUwCap?.(gs, st); } catch { /* probe */ }
@@ -30,6 +31,7 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
   let boundary = h - rng.int(150, 189);               // Next(150,190)
   const lavaSeed = h - rng.int(40, 69);               // Next(40,70)
   for (let x = 0; x < w; x++) {
+    gp?.set3(x / w, 0, 0.15);   // 进度锚：边界游走≈窗前 15%（包内估计）
     boundary += rng.int(-3, 3);                       // Next(-3,4)
     if (boundary < h - 190) boundary = h - 190;
     if (boundary > h - 160) boundary = h - 160;
@@ -56,6 +58,7 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   // ③ 1/50 列大灰烬丘陵
   for (let x = 0; x < w; x++) {
+    gp?.set3(x / w, 0.15, 0.35);   // 进度锚：岩浆线散布（估）
     if (rng.next() * 50 >= 1) continue;               // ≡ Next(50)==0
     let y = h - 65;
     while (!st.flags[st.idx(x, y)] && y > h - 135) y--;
@@ -98,6 +101,7 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
   const remixUW = !!gs.seedFlags.remix;
   const inCentralBandUW = (x: number) => x > w * 0.4 && x < w * 0.6;
   for (let x = 0; x < w; x++) {
+    gp?.set3(x / w, 0.35, 0.75);   // 进度锚：灰烬丘陵主体（估）
     if (rng.next() * 13 >= 1) continue;               // ≡ Next(13)==0
     let y = h - 65;
     while ((st.liquid[st.idx(x, y)] > 0 || st.flags[st.idx(x, y)]) && y > h - 140) y--;
@@ -144,6 +148,7 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   // ⑤ 随机小挖掘（w 个）
   for (let n = 0; n < w; n++) {
+    gp?.set3(n / w, 0.75, 1);   // 进度锚：挖掘隧道尾段（估）
     tileRunner(st, rng, gs, rng.int(20, w - 21), rng.int(h - 180, h - 11), {
       strength: rng.int(2, 6), steps: rng.int(2, 6), type: -2,
     });

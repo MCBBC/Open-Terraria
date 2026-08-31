@@ -18,6 +18,10 @@ import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { trySnapStrike } from '../stats/SnapStrike';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
+// RainbowRodHit 编排本体（收编池;L5 批 2026-08-31——kaleidoscope 鞭 tag 命中
+// 本地直生 + broadcast 上行同用此函数）
+import { rainbowRodHitFx } from '../fx/orchestraFx';
+import { ParticleOrchestraType } from '../net/syncModules';
 
 /** NPCID.Sets.DebuffImmunitySets.ImmuneToWhips（1457 NPCID.cs 全表解析,
  *  CanApplyTagToNPC 门 WhipTagEffect.cs:20-31）：11 种敌不吃鞭 tag */
@@ -345,19 +349,13 @@ export class TagEffectState {
         break;
       case 'kaleidoscope':
         // WhipTagEffect_Kaleidoscope.cs:9-15：OnTaggedHit → ParticleOrchestrator
-        //  RequestParticleSpawn(RainbowRodHit)@弹心——tag 敌被吃鞭的随从每次命中都
-        //  触发。此前空 case 零发射（注释称"本仓粒子管线近似"实为无实现,R31 §B④）。
-        //  RainbowRodHit 编排粒子本仓无 Orchestrator 管线 → 彩虹径向粒子簇占位
-        //  （六向径向,hue 随时钟轮转——最小可见反馈）。
-        {
-          const g2 = game;
-          const hue0 = (typeof performance !== 'undefined' ? performance.now() / 5000 : 0) % 1;
-          for (let k = 0; k < 6; k++) {
-            const ang = (k / 6) * Math.PI * 2;
-            g2.spawnBurst?.(ctx.hx, ctx.hy, whipHslCss((hue0 + k / 6) % 1), 2, 3.2,
-              ang, Math.PI / 8, { life: 22 });
-          }
-        }
+        //  RequestParticleSpawn(clientOnly:false, RainbowRodHit, PositionInWorld=
+        //  optionalProjectile.Center)。L5 批（2026-08-31）：Spawn_RainbowRodHit
+        //  收编真值本体（fx/orchestraFx.rainbowRodHitFx,六掷虹彩簇+12×d267）+
+        //  module8 上行——此前彩虹径向占位 burst 退役。
+        rainbowRodHitFx(game, ctx.hx, ctx.hy);
+        game.broadcastParticleOrchestra?.(ParticleOrchestraType.RainbowRodHit,
+          ctx.hx, ctx.hy);
         break;
       default:
         break;

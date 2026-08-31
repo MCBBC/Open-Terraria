@@ -1193,6 +1193,10 @@ export class Arrow extends Entity {
   *  （rotation = 相位 + t×2π/480 :33192-33194） */
   private cloudT = 0;
   private cloudPhase = 0;
+  /** ★2026-08-31 云间互斥推挤用 whoAmI 序（ctor 自增,Main.projectile 槽位等价物）：
+   *  原版 P.cs:33237-33245 重合零向量按 num797<whoAmI 定向——实例序仅作稳定性断向,
+   *  非数值面 */
+  cloudWho = 0;
   /** 337 固定起始帧（发射侧 ai[1]=rand.Next(5)，AI 不推进 :57927） */
   pinFrame: number | null = null;
   /** usesIDStaticNPCImmunity 组共享免疫键（非 null = 启用；511-513 毒云
@@ -1608,14 +1612,25 @@ export class Arrow extends Entity {
       if (l659 > 0.01) { this.sf659DirX = vx / l659; this.sf659DirY = vy / l659; }
       this.sf659Birth = !this.hostile;
     }
-    // 511-513 毒云泡：aiStyle92 AI 头 tileCollide=false 每 update 直写（:33159）+
-    // UseGroupStaticImmunity(511)=IDStatic 共享免疫 10t（:10678-10687——提取器
-    // 未建模该两列,常量补）
+    // 511-513 毒云泡：aiStyle92 AI 头 tileCollide=false 每 update 直写（1458
+    // P.cs:33159）+ UseGroupStaticImmunity(511)=IDStatic 共享免疫 10t（三型调用处
+    // :5816/:5828/:5840,方法体 :10678-10683——提取器未建模该两列,常量补）。
+    // whoAmI 序（全场唯一自增）供云间互斥推挤重合零向量断向 :33237-33245
     if (projId >= 511 && projId <= 513) {
       this.noTileCollide = true;
       this.idStaticGroup = 511;   // 组共享免疫键（命中环 idStaticCheck(511,…) 消费）
       this.idStaticCdMs = 167;    // idStaticNPCHitCooldown=10t ≈167ms
       this.cloudPhase = Math.random() * Math.PI * 2;
+      this.cloudWho = ++Arrow.cloudWhoSeq;
+    }
+    // 181/566 蜂族：UseGroupStaticImmunity(181)（SetDefaults type==181 两版同段
+    // :2680-2688 / type==566 两版同段 :6177-6186,方法体 :10678-10683）——与毒云同
+    // 机制：usesIDStaticNPCImmunity + idStaticNPCHitCooldown=10、组键共用 181 ⇒
+    // 蜂群齐扑同敌只结算一颗（2026-08-31 台账无标记缺口,idStaticGroup 表级共享接线,
+    // proj1457 IdStaticSharedTable 先例;idStaticCdMs=10t≈167ms 同换算基数)
+    if (projId === 181 || projId === 566) {
+      this.idStaticGroup = 181;
+      this.idStaticCdMs = 167;
     }
   }
 
@@ -1785,10 +1800,18 @@ export class Arrow extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    // 世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标——
-    // 曾双变换把箭甩出屏幕,表现为"箭隐形但能命中")
     const ctx = r.ctx;
     if (!ctx) return;
+    // ★HOUSE(2026-08-31 终案):原版出生=盒中心,弹穿出身体后可见——
+    //  角色盒内不渲染弹体,替代全部几何出生点近似(用户拍板禁对齐回去)。
+    //  仅限 age<30 的新生弹,不影响环绕/驻留类投射物
+    const mp = r.mainPlayer;
+    if (mp && this.age < 30) {
+      if (this.cx > mp.x && this.cx < mp.x + mp.w &&
+          this.cy > mp.y && this.cy < mp.y + mp.h) {
+        return;
+      }
+    }
     // 泰拉刃光束 985 独占（DrawProj_TerraBlade2Shot Main.cs:27670-27712）：
     // Frame(1,4) 四帧 170×170（帧 0 主体/帧 3 白芯）；多层镜像叠画：
     // 蓝(45,124,205)×2 对称 ±π/8 张开 + 绿白内芯 ×2 + 绿(34,177,76) ×2
@@ -2493,21 +2516,27 @@ export class Arrow extends Entity {
         arpen: this.settlePen, sc: this.drawScale });
   }
 
+  /** 弹心格浸微光液（shimmerWet 本仓以中心格 liquidType===SHIMMER 近似——原版是
+   *  WetCollision 包围盒级 Collision.shimmer 采样，粒度差异既案）。浮升/衰变两支与
+   *  解锁支共用触发域。 */
+  private shimmerImmersed(game: GameHooks): boolean {
+    const st = game.world.store;
+    if (!st) return false;
+    const tx = Math.floor((this.x + this.w / 2) / TILE), ty = Math.floor((this.y + this.h / 2) / TILE);
+    return st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0
+      && st.liquidType[st.idx(tx, ty)] === LIQUID_TYPE.SHIMMER;
+  }
+
   /** 微光气球 936 巨星解锁支（Shimmer() aiStyle==2 分支的解锁半边，
-   *  Projectile.cs:22676-22697；projId/hostile 门在 subStepAI 调用侧）。
-   *  触发域 = 弹心格液体==微光（shimmerWet 本仓以中心格 liquidType===SHIMMER
-   *  近似——原版是 WetCollision 包围盒级 Collision.shimmer 采样，粒度差异登记）
-   *  && velocity.Y<0（上升期触达）&& !unlockedSlimeRainbowSpawn。
-   *  动作：timeLeft>5 钳 5（延迟爆）→ 置世界旗（WorldFile 随存档，WldParser 读回）
-   *  → NewNPC 681（town_slime_diva）。非微光环境的任何消亡不触发——消亡路径
-   *  （killNow/寿命尽/命中/撞块）已无此段。 */
+   *  Projectile.cs:22676-22697；projId/hostile 门与浸液域在 subStepAI 调用侧）。
+   *  触发域 = 浸微光液（shimmerImmersed）&& velocity.Y<0（上升期触达）
+   *  && !unlockedSlimeRainbowSpawn。
+   *  动作：timeLeft>5 钳 5（延迟爆，当拍【不】走 timeLeft-=20 else 支）→ 置世界旗
+   *  （WorldFile 随存档，WldParser 读回）→ NewNPC 681（town_slime_diva）。非微光环境
+   *  的任何消亡不触发——消亡路径（killNow/寿命尽/命中/撞块）已无此段。 */
   private shimmerUnlock(game: GameHooks): void {
     if (this.vy >= 0 || game.world.flags['unlockedSlimeRainbowSpawn'] === true) return;
-    const st = game.world.store;
-    if (!st) return;
-    const tx = Math.floor((this.x + this.w / 2) / TILE), ty = Math.floor((this.y + this.h / 2) / TILE);
-    if (!st.inBounds(tx, ty) || st.liquid[st.idx(tx, ty)] <= 0
-      || st.liquidType[st.idx(tx, ty)] !== LIQUID_TYPE.SHIMMER) return;
+    if (!this.shimmerImmersed(game)) return;   // 域重查（调用侧已判,防漂移双保险）
     if (this.life > 5) this.life = 5;                       // timeLeft=5 cap（:22680-22682）
     game.world.flags['unlockedSlimeRainbowSpawn'] = true;   // :22685（netMode!=1 段,本仓单模式）
     // :22686 Center.X+4 —— 经注册表取构造器（环切见 townNpcFactory.ts 头注；
@@ -2522,9 +2551,12 @@ export class Arrow extends Entity {
     game.spawnParticles(this.cx, this.cy, '#FF96FF', 8, 1.6, { life: 22 });
   }
 
-  /** 448 Kill 爆炸（:70544-70580）：position 归心后 width=height=112 重开判定盒
-   *  结算 Damage_EVP（爆炸即是本弹的伤害投递方式——接触路径在 42px 近爆门前
-   *  恒先消亡），尘近似 31×4 + 228×80（gore 61-63 略） */
+  /** 448 Kill 爆炸（1458 P.cs:75003-75033 / 1456 :70544-70580）：position 归心后
+   *  width=height=112 重开判定盒结算 Damage_EVP（爆炸即是本弹的伤害投递方式——
+   *  接触路径在 42px 近爆门前恒先消亡），尘近似 31×4 + 228×80。★2026-08-31 C 档
+   *  清偿：壳 gore rand.Next(61,64)×1 经 GorePiece.newGore 通道接入——出生点 =
+   *  盒内随机位 −(10,10)、速度链 = NewGore 内部扰动（Gore.cs:1347-1348）→ ×0.3 →
+   *  X/Y += Next(-10,11)×0.05（:75030-75033 时序,beenadeBurst 同构） */
   private rocketExplode(game: GameHooks): void {
     const cx = this.cx, cy = this.cy;
     this.x = cx - 56;
@@ -2534,32 +2566,49 @@ export class Arrow extends Entity {
     game.playSfxFiles?.(['Item_14'], 1, cx, cy);
     game.spawnParticles(cx, cy, '#FFC860', 22, 4, { life: 26, damp: 0.93 });
     game.spawnParticles(cx, cy, '#907858', 4, 2, { life: 24 });
-    hitPlayer(this, game, this.damage);   // :70580 Kill 内 Damage() 二次结算
+    // :75029 gore 单枚（同 beenade/183 壳族;NewGore 传入 default(Vector2),扰动落实例）
+    const gRk = GorePiece.newGore(61 + Math.floor(Math.random() * 3),
+      this.x + Math.random() * this.w - 10, this.y + Math.random() * this.h - 10, 0, 0);
+    if (gRk) {
+      gRk.vx *= 0.3; gRk.vy *= 0.3;
+      gRk.vx += (Math.floor(Math.random() * 21) - 10) * 0.05;   // Next(-10,11) 右开
+      gRk.vy += (Math.floor(Math.random() * 21) - 10) * 0.05;
+    }
+    hitPlayer(this, game, this.damage);   // :70580(:75033) Kill 内 Damage() 二次结算
   }
 
-  /** 469 蜂箭 Kill 放蜂（Projectile.cs:73369-73390）：6 拍循环、奇数拍（1/3/5）
-   *  再掷 Next(3)==0 才放（期望 4 只、3-6 只区间）；出生点 = position −
-   *  oldVelocity 归一×8×i；速度 = Next(-35,36)×0.01 + oldVelocity/6（aiStyle 36
-   *  追踪 AI 未建模——直线漂移近似，同 Game 蜂蜜斗篷反击蜂先例，登记）；
-   *  蜂型 = beeType()（Player.cs:12006 Hive Pack 3333 半数 566 巨蜂——equipStats
-   *  无 strongBees 通道恒 181，登记）/ 伤 = beeDamage(damage/3)（:12017 181 档
-   *  +Next(2)）/ kb = beeKB(0)=0（:12026）；penetrate=2、magic=false/ranged=true
-   *  （:73388-73390——ranged 走冰霜引擎门 frostEligible） */
+  /** 469 蜂箭 Kill 放蜂（1458 Projectile.cs:78058-78081 / 1456 :73369-73390）：6 拍
+   *  循环、奇数拍（1/3/5）再掷 Next(3)==0 才放（期望 4 只、3-6 只区间）；出生点 =
+   *  position − oldVelocity 归一×8×i；速度 = Next(-35,36)×0.01 + oldVelocity/6
+   *  （aiStyle 36 追踪 AI 未建模——直线漂移近似，同 Game 蜂蜜斗篷反击蜂先例，登记）；
+   *  蜂型 = beeType()（1458 Player.cs:12505-12513：Hive Pack strongBees 半数掷 566 巨蜂
+   *  ——★2026-08-31 台账清偿：原经 equipStats 恒 181,现接 beenadeBurst 同源通道;
+   *  每只独立重掷 makeStrongBee 态）/ 伤 = beeDamage(damage/3)（:12517-12524 强蜂
+   *  +Next(1,4)、弱蜂 +Next(2)）/ kb = beeKB(0)=强蜂 0.5（:12526-12532 0.5+KB×1.1）；
+   *  penetrate=2、magic=false/ranged=true（:78076-78079——ranged 走冰霜引擎门
+   *  frostEligible） */
   private spawnBeeSwarm(game: GameHooks): void {
     const ents = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
     if (!ents?.add) return;
+    const stBee = game.player?.equipStats?.strongBees === true;
     const ol = Math.hypot(this.vx, this.vy);
     const nx = ol > 0 ? (this.vx / ol) * 8 : 0;   // vector65 = oldVelocity 归一 ×8
     const ny = ol > 0 ? (this.vy / ol) * 8 : 0;
     for (let i = 0; i < 6; i++) {
-      if (i % 2 === 1 && Math.floor(Math.random() * 3) !== 0) continue;   // :73374 奇数拍 1/3
+      if (i % 2 === 1 && Math.floor(Math.random() * 3) !== 0) continue;   // :78064 奇数拍 1/3
+      // 每只独立掷 beeType()（strongBees 半数巨蜂;makeStrongBee 态同拍直通 beeDamage/
+      // beeKB——Player.cs:12505-12527 三链顺序）
+      const strong = stBee && Math.floor(Math.random() * 2) === 0;
+      const dmgBee = Math.trunc(this.damage / 3)
+        + (strong ? 1 + Math.floor(Math.random() * 3)          // Next(1,4) 强蜂
+                  : Math.floor(Math.random() * 2));            // Next(2) 弱蜂
       const bee = new Arrow(this.x - nx * i, this.y - ny * i,
         (Math.floor(Math.random() * 71) - 35) * 0.01 + this.vx / 6,
         (Math.floor(Math.random() * 71) - 35) * 0.01 + this.vy / 6,
-        Math.trunc(this.damage / 3) + Math.floor(Math.random() * 2), 0, 181, null, {});
-      bee.pierce = 2;                       // :73390 覆盖 181 表值 penetrate 3
+        dmgBee, strong ? 0.5 : 0, strong ? 566 : 181, null, {});
+      bee.pierce = 2;                       // :78079 覆盖 181/566 表值 penetrate 3/4
       bee.pierceInit = 2;
-      bee.frostEligible = true;             // ranged = true（:73389-73390）
+      bee.frostEligible = true;             // ranged = true（:78078-78079）
       bee.critChance = this.critChance;
       bee.critBonus = this.critBonus;
       bee.armorPen = this.armorPen;
@@ -2798,31 +2847,54 @@ export class Arrow extends Entity {
       }
       } finally { Arrow.birthLock = false; }
     }
-    // ---- §9 337 暴雪法杖天顶双锥（Player.cs:48089-48117）----
-    // ★R27 multishot 已按 useTime5<anim10 泛化出每击 2 发（vanilla flag4 同数）→
-    // 本弹=1 雪片,目标线高度档由静态奇偶轮替（Y−600/Y−700）;原版双发同拍,
-    // 本仓两拍相隔 useTime=5 子步窗,登记近似。X = 枪口+rand(201)(−dir)+(鼠标X−玩家X)
-    // 折叠玩家中点 ±200;瞄准向 |dy|≥20 恒向下 + 归一 ×speed(10) + rand(±40)×0.02 抖动
+    // ---- §9 337 暴雪法杖天顶双锥（1458 Player.cs:48092-48119/1456 :48045-48072）----
+    // ★2026-08-31 台账清偿：原版 for(num36<2) 同【拍】两掷——i=0 锥 Y−600、i=1 锥
+    // Y−700,各自独立掷 X 散布 rand(201)(−dir)+rand(-200,201)、双轴抖动
+    // rand(±40)×0.02【各掷一次均加号】、ai[1]=rand.Next(5)。旧实现静态奇偶轮替 +
+    // multishot 两拍相隔 useTime=5 子步窗 → 退役：本弹按首发槽实现并【同拍】补生
+    // 次锥(独立全参重掷);同挥第二发 shell 到达时经 blz337LatchAt 时间锁静默退役。
+    // X 折叠式: pointPosition.X=(枪口+rand(201)(−dir)+鼠标世界X+Center.X)/2+rand(-200,201)
     if (this.blz337Pending) {
       this.blz337Pending = false;
+      const now337 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const isFollower337 = now337 - Arrow.blz337LatchAt < 350;   // 补发窗(见 latch 注)
+      Arrow.blz337LatchAt = isFollower337 ? -Infinity : now337;
       const p = game.player;
       const facing = (p.facing ?? 1);
-      const slot = (Arrow.blz337Alt++) % 2;                 // 目标线高度档轮替
       const pcx = p.x + p.w * 0.5;
-      let sx = pcx + Math.floor(Math.random() * 201) * -facing + (p.aimWX - p.x);
-      sx = (sx + p.cx) / 2 + Math.floor(Math.random() * 401) - 200;
-      const sy = p.cy - 600 - 100 * slot;
-      let dx = p.aimWX - sx;
-      let dy = p.aimWY - sy;
-      if (dy < 0) dy *= -1;                                 //（:48103-48106 翻负）
-      if (dy < 20) dy = 20;                                 //（:48107-48109 钳 ≥20）
-      const len = Math.hypot(dx, dy) || 1;
-      const jit = (Math.floor(Math.random() * 81) - 40) * 0.02;
-      const vx = dx / len * 10 + jit;
-      const vy = dy / len * 10 - jit;                       // 双轴独立掷（:48111-48112）
-      this.x = sx; this.y = sy;
-      this.vx = vx; this.vy = vy;
-      void 0;
+      // 原式逐参发射器（slot=0 首发本弹直写 / slot=1 补生兄弟）——每锥全参独立重掷
+      const coneGeom337 = (slot: number): { x: number; y: number; vx: number; vy: number } => {
+        let sxc = pcx + Math.floor(Math.random() * 201) * -facing + (p.aimWX - p.x);
+        sxc = (sxc + p.cx) / 2 + Math.floor(Math.random() * 401) - 200;
+        const syc = p.cy - 600 - 100 * slot;                // Y −600 / −700（:48100-48101）
+        let dxc = p.aimWX - sxc;
+        let dyc = p.aimWY - syc;
+        if (dyc < 0) dyc *= -1;                             //（:48104-48107 翻负）
+        if (dyc < 20) dyc = 20;                             //（:48108-48110 钳 ≥20）
+        const lenc = Math.hypot(dxc, dyc) || 1;
+        const jx = (Math.floor(Math.random() * 81) - 40) * 0.02;   // :48116 两轴各掷一码,
+        const jy = (Math.floor(Math.random() * 81) - 40) * 0.02;   // 均【加】号（曾共用
+        return { x: sxc, y: syc,                            // 一码且 Y 反号=B 档漂移,修）
+          vx: dxc / lenc * 10 + jx, vy: dyc / lenc * 10 + jy };
+      };
+      if (isFollower337) {                                  // 同挥第二发——原版已无此弹
+        this.dead = true;                                   // 静默让位（无尘无声,535 先例）
+        return;
+      }
+      Arrow.birthLock = true;                               // 兄弟构造期抑制 ctor 自挂
+      try {
+        const cone0 = coneGeom337(0);
+        this.x = cone0.x; this.y = cone0.y;
+        this.vx = cone0.vx; this.vy = cone0.vy;
+        //（pinFrame 本弹已由 ctor 掷定=原版 spawn 侧 rand.Next(5);次锥走构造器自掷）
+        const g1 = coneGeom337(1);                          // i=1 次锥 Y−700
+        const cone1 = new Arrow(g1.x, g1.y, g1.vx, g1.vy,
+          this.damage, this.knockback, 337, null, {});
+        cone1.critChance = this.critChance;
+        cone1.critBonus = this.critBonus;
+        cone1.armorPen = this.armorPen;
+        ents?.add(cone1, 'projectiles');
+      } finally { Arrow.birthLock = false; }
     }
     // ---- §3 316 蝙蝠杖 2-3 只散布（Player.cs:48820-48830）----
     // num124 = rand.Next(2,4)；每只 num4/num5 += rand(±35)×0.05 双轴散布
@@ -2884,8 +2956,14 @@ export class Arrow extends Entity {
    *  （实际消费在 MedusaHeadProj 同名静态字段,此处注释锚点） */
   static readonly MEDUSA_REFUND_LEGACY_CHARGE = true;
 
-  /** 静态奇偶轮替（337 天顶双锥目标线高度档） */
-  private static blz337Alt = 0;
+  /** ★2026-08-31 云间互斥 whoAmI 序发生器（见 cloudWho 字段注） */
+  private static cloudWhoSeq = 0;
+  /** ★2026-08-31 天顶双锥同拍锁：首发实现拍盖时间戳,同挥第二发（multishot 补发,
+   *  最迟 useTime×2.5 空蓝慢施≈217ms 后到达）消费退役——替代旧静态奇偶轮替。
+   *  残留风险登记：若补发 shell 因任何分支缺失未到,下一挥首发的判定窗内(350ms)
+   *  会被误认作补发而让位一次,几何分布不变、随后自愈（当前泛化注册与 1931
+   *  同源 useTime 恒伴生,实际不可达）。 */
+  private static blz337LatchAt = -Infinity;
   /** ★R28 出生自校正互斥锁：兄弟弹构造期抑制 ctor 的 pending 自挂（防递归展开） */
   private static birthLock = false;
 
@@ -3119,9 +3197,23 @@ export class Arrow extends Entity {
     //     :22683-22689）+ CheckAchievement_RealEstateAndTownSlimes 记账由城镇入住
     //     flags 门承载（Main.cs:66913 townNPCCanSpawn[681]）；
     // hostile 弹在 Shimmer() 头早退（hostile && aiStyle!=25/17，:22565）→ !hostile 门。
+    // ★2026-08-31 台账清偿：浸液物理两支落地——浮升/衰变消费位在下方调用块;
+    // 触发域=弹心格微光（中心格近似,盒级采样粒度差异既案）;936 为 aiStyle2 档
+    // 当前本仓唯一成员,未扩族。
     if (this.projId === 936 && !this.hostile) {
-      this.shimmerUnlock(game);
-      if (this.dead) return;
+      // ★2026-08-31 台账清偿：Shimmer() aiStyle2 分支浸液物理逐拍化（原文每 Update
+      //   一次；本仓无 extraUpdates 弹=子步即 tick 等价）——浮升恒算、解锁支不成立时
+      //   加速衰变（if/else 同构），触发域仍为弹心格微光（粒度差异既案）
+      if (this.shimmerImmersed(game)) {
+        this.vy -= 0.7;                                   // :22677 velocity.Y -= 0.7f
+        const flgUnlocked = game.world.flags['unlockedSlimeRainbowSpawn'] === true;
+        if (!flgUnlocked && this.vy < 0) {                // :22678 解锁支条件
+          this.shimmerUnlock(game);                       // 内部自含同谓词早退（防漂移）
+          if (this.dead) return;
+        } else {
+          this.life -= 20;                                // :22697 timeLeft -= 20
+        }
+      }
     }
     // ---- ★R29 幻象弓载体 630（AI_001 type==630 支 Projectile.cs:68194-68295）----
     // ai[0]++ 计龄;加速窗 num67=(age≥40)+(≥80)+(≥120),interval=24−2×num67（四档
@@ -4139,7 +4231,7 @@ export class Arrow extends Entity {
       // ai[0]>260 Kill;不透明度包络 Remap(t,0,.3,0,1)×Remap(t,.3,1,1,0)×0.7
       // （:33196-33198——涌出后消散）;rotation=出生相位+t×2π/480（whoAmI 相位项以
       // 出生掷近似 :33192-33194）;velocity ×0.96/update。伤害面 = 组共享 IDStatic
-      // 免疫（ctor idStaticGroup=511,10t 同敌再结算）;云间互斥推挤(P2 未接,登记)
+      // 免疫（ctor idStaticGroup=511,10t 同敌再结算）
       this.cloudT++;
       if (this.cloudT > 260) { this.killNow(game); return; }     //（:33168-33177）
       const t260 = this.cloudT / 260;
@@ -4148,6 +4240,33 @@ export class Arrow extends Entity {
       this.alpha = Math.round(255 - opacity * 255);              // 引擎 alpha 反相语义
       this.spinRot = this.cloudPhase + this.cloudT * (Math.PI * 2) / 480;
       this.vx *= 0.96; this.vy *= 0.96;
+      // ★2026-08-31 台账清偿：云间互斥推挤（flag45 群体运动学,P.cs:33225-33257——
+      //   两版同段）对桶内其它活跃 511-513 且盒相交的云逐对结算：push =
+      //   SafeNormalize(他心−我心)×0.005;我方 velocity=Lerp(v,v−push,.6)=v−.6·push、
+      //   对方 Lerp(v,v+push,.6)=v+.6·push【本扫描内直写对方】——原版每云独立循环,
+      //   同拍两向各算一次=每弹净推 ×2,照原文承载。重合零向量按 num797<whoAmI 定向
+      //   （:33237-33243）;原版扫 Main.projectile[1000],本仓桶扫描等价。旋转相位项仍以
+      //   出生掷近似（whoAmI×0.4002029f 与实例序分布等价,保持不动）
+      const bucketC = (game as unknown as { projectiles?: () => unknown[] }).projectiles?.();
+      if (bucketC) {
+        for (const rawC of bucketC) {
+          if (rawC === this || !(rawC instanceof Arrow)) continue;
+          const oC = rawC;
+          if (oC.dead || oC.projId < 511 || oC.projId > 513) continue;
+          if (oC.x >= this.x + this.w || oC.x + oC.w <= this.x
+            || oC.y >= this.y + this.h || oC.y + oC.h <= this.y) continue;   // 盒不相交(XNA Intersects 同严格界)
+          let dxc = oC.cx - this.cx;
+          let dyc = oC.cy - this.cy;
+          if (dxc === 0 && dyc === 0) {                       // 重合：按 whoAmI 序断向
+            if (oC.cloudWho < this.cloudWho) { dxc = -1; dyc = 1; }
+            else { dxc = 1; dyc = -1; }
+          }
+          const dlC = Math.hypot(dxc, dyc) || 1;              // SafeNormalize(UnitX) 兜底
+          const pxC = (dxc / dlC) * 0.005, pyC = (dyc / dlC) * 0.005;
+          this.vx -= pxC * 0.6; this.vy -= pyC * 0.6;
+          oC.vx += pxC * 0.6; oC.vy += pyC * 0.6;
+        }
+      }
     } else if (this.projId === 337) {
       // ---- ★R28 §9 暴雪雪片（AI_001 337 支 :57920-57933,1931 暴雪法杖）----
       // 动态穿墙门:低于玩家(y>player.y−300)或高于地表线(<worldSurface×16)才开
@@ -5716,8 +5835,14 @@ export class Arrow extends Entity {
     return !solidAt(this.x + this.w / 2, this.y + this.h / 2);
   }
 
-  /** 荆棘球 277 撞块反弹（Projectile.cs:18306-18314）：vx 恒反 ×0.9；
-   *  竖向仅入撞 |vy|>3 才 ×-0.9（否则贴地滚动）。逐轴回退探测，脱困失败 false。 */
+  /** 荆棘球 277 撞块反弹（HandleMovement type==277 支：1458 P.cs:19838-19845 /
+   *  1457 :19829-19836 两版一致）：vx 恒反 ×0.9；竖向仅入撞 lastVelocity.Y>3f 才
+   *  ×-0.9——1<vy≤3 轻着陆落定滚动而非弹起（2026-08-31 台账 B 档清偿：旧门 vy>1
+   *  系与 type185 的 >1f 门混串,回滚修正）。本仓碰撞解算进本函数前未改写速度,
+   *  velocity ≙ lastVelocity（原式判 `velocity.Y != lastVelocity.Y` 后取后值）。
+   *  缓落地(vy≤3 的下落撞地)才滚动 = vy 归零 + 摩擦 ×0.97 + |vx|≤0.01 静止自灭
+   *  （滚动衰减为本仓承载件,原文无显式支;空中侧撞勿砍 vy——曾 `bounced||` 门
+   *  误伤,review 修）。逐轴回退探测，脱困失败 false。 */
   private thornBounceOff(game: GameHooks): boolean {
     const st = game.world.store;
     const solidAt = (px: number, py: number) => {
@@ -5730,10 +5855,9 @@ export class Arrow extends Entity {
       this.vx *= -0.9;
       bounced = true;
     }
-    // :23389-23399 Y 反弹门 vy>1（曾 >3）;缓慢落地(vy≤1 的下落撞地)才滚动
-    // = vy 归零 + 摩擦 ×0.97 + |vx|≤0.01 静止自灭（空中侧撞勿砍 vy——曾
-    // `bounced||` 门误伤,review 修）
-    if (this.vy > 1 && !solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+    // :19841-19845 Y 反弹门 lastVelocity.Y>3（1458）/ :19832-19836（1457）;
+    // 原注释引 ":23389-23399 vy>1" 系 aiStyle14 默认档误锚
+    if (this.vy > 3 && !solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
       this.y -= this.vy;
       this.vy *= -0.9;
       bounced = true;

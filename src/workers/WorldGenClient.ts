@@ -18,7 +18,8 @@ export class WorldGenUnavailable extends Error {
 interface Pending {
   resolve: (w: World) => void;
   reject: (e: unknown) => void;
-  onProgress?: (phase: string, label: string, p: number) => void;
+  /** 第 4 参 local=当前原版 pass 段内 Value（generate 相位；其余相位 undefined） */
+  onProgress?: (phase: string, label: string, p: number, local?: number) => void;
   lastPhase?: string;
   onPreview?: (f: PreviewFrame) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -99,7 +100,7 @@ export class WorldGenClient {
   async generate(
     cfg: GenConfigDTO,
     cb?: {
-      onProgress?: (phase: string, label: string, p: number) => void;
+      onProgress?: (phase: string, label: string, p: number, local?: number) => void;
       onPreview?: (f: PreviewFrame) => void;
       timeoutMs?: number;
     },
@@ -180,7 +181,10 @@ export class WorldGenClient {
         reject,
         onProgress: cb?.onProgress as Pending['onProgress'],
         timer,
-        onLoadResult: (ev) => resolve({ world: World.fromPacket(ev.world), player: ev.player, save: ev.save }),
+        onLoadResult: (ev) => {
+          if (ev.wkLog?.length) (globalThis as unknown as { __swWkLog?: string[] }).__swWkLog = ev.wkLog;
+          resolve({ world: World.fromPacket(ev.world), player: ev.player, save: ev.save });
+        },
       });
       w.postMessage({ id, type: 'saveParse', key: args.key, json: args.json, save: args.save as never } satisfies WorldWorkerRequest);
     });
@@ -214,7 +218,7 @@ export class WorldGenClient {
     }
     if (ev.type === 'progress') {
       if (p) { p.lastEventAt = Date.now(); p.lastLabel = ev.label ?? ''; p.lastPhase = ev.phase; }
-      p?.onProgress?.(ev.phase, ev.label ?? '', ev.p);
+      p?.onProgress?.(ev.phase, ev.label ?? '', ev.p, ev.local);
       return;
     }
     if (ev.type === 'preview') {

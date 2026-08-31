@@ -59,11 +59,13 @@ function mountinater(st: TileStore, rng: RNG, i: number, j: number, remix: boole
 /** pass 7 Mount Caves：w*0.001 次尝试，避开中心 ±90/沙族 ±50×25/前丘 ±100（L5095-5148）。
  *  ★IIIII43 REMIX（1457 cs:11829-11832/11839-11844）：条数 ×1.5；**中心 ±90 拒绝环
  *  在 !remixWorldGen 内**——remix 不避让出生点带。 */
-export function runMountCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runMountCavesPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   const remix = !!gs.seedFlags.remix;
   let count = Math.floor(st.w * 0.001);
   if (remix) count = Math.trunc(count * 1.5);
   for (let n = 0; n < count; n++) {
+    gp?.set(n / count);   // ≡ cs:11835 progress.Set((float)i / num)（山丘条目循环）
     let x = rng.int(Math.floor(st.w * 0.25), Math.floor(st.w * 0.75) - 1); // Next(w*.25, w*.75)
     let tries = 0;
     let giveUp = false;

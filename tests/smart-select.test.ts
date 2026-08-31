@@ -376,7 +376,7 @@ describe('SmartSelectLookup_GetTargetTile（SmartSelectGamepadPointer.cs:23-38�
   });
 });
 
-describe('wetCollision（Collision.cs:1575-1625）', () => {
+describe('wetCollision（Collision.cs:1575-1656）', () => {
   it('命中盒中心盒与液面求交：格内液量即可浸湿下半身', () => {
     const st = mkSt();
     // 玩家 y 640..682 → 原版中心盒 y 651..672（Height/2=21 整除,num2/2=10——
@@ -401,5 +401,28 @@ describe('wetCollision（Collision.cs:1575-1625）', () => {
     st.liquid[st.idx(60, 43)] = 248;
     expect(wetCollision(st, PX, PY, PW, PH)).toBe(false);
     st.liquid[st.idx(60, 43)] = 0;
+  });
+
+  it('坡面格+上方液体支（:1631-1654）：斜坡干格上邻有液 ⇒ 整格判湿', () => {
+    // 自定小盒隔离三态：body(x,y,22,28) → 中心盒 = [tx*16, tx*16+10) × [ct+1, ct+15)
+    // （w=22:num=10/vx 偏移=w/2−num/2=6；h=28:num2=14/vy 偏移=h/2−num2/2=7）。
+    // 目标格 = 斜坡干格 (50,50)；其上一行 (50,49) 的液体带约在 [784.06,800)
+    // ——盒顶 ct+1=801 恰好够不到 ⇒ 正判只能来自本坡面支，与普通液面支正交。
+    const CT = 50 * 16;
+    const mkCase = (withSlope: boolean, withWaterAbove: boolean) => {
+      const st = mkSt();
+      st.setTile(50, 50, T.DIRT);
+      if (withSlope) st.setSlope(50, 50, 1);
+      if (withWaterAbove) st.liquid[st.idx(50, 49)] = 255;
+      return st;
+    };
+    const X = 50 * 16 - 6, Y = CT - 6;
+    expect(wetCollision(mkCase(true, true), X, Y, 22, 28)).toBe(true);
+
+    // 上方无液 ⇒ 干
+    expect(wetCollision(mkCase(true, false), X, Y, 22, 28)).toBe(false);
+
+    // 非斜坡格即便上方有液：普通液面支因盒顶差 1px 触不到、坡面支被 slope==0 拦 ⇒ 干
+    expect(wetCollision(mkCase(false, true), X, Y, 22, 28)).toBe(false);
   });
 });

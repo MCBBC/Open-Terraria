@@ -195,6 +195,7 @@ function canKillTile(st: TileStore, x: number, y: number): boolean {
 export function runTileCleanupPass(
   st: TileStore, rng: RNG, gs: GenState,
   chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
+  gp?: import('../GenProgress').GenProgress,
 ): void {
   // ★① pass 头 tileSolid 翻转（cs:21331 `Main.tileSolid[379] = false`）：泡泡块非实心
   //   ——原 solidTile/isSaveSlope 内的 BUBBLE 特判已并入 GenSolid（genSolidType）。
@@ -204,6 +205,7 @@ export function runTileCleanupPass(
 
   // ② 全图清坡(cs:21333-21343,全图含边缘,先于内层 40 收缩圈)
   for (let i = 0; i < w; i++) {
+    gp?.set3(i / w, 0, 0.1);   // 进度锚：清坡扫≈窗前 10%（估；主体在内层收缩圈）
     for (let j = 0; j < h; j++) {
       const t = st.idx(i, j);
       if (!st.flags[t] || !isSaveSlope(st.type[t])) {
@@ -214,6 +216,7 @@ export function runTileCleanupPass(
   }
 
   for (let k = 40; k < w - 40; k++) {
+    gp?.set3((k - 40) / Math.max(1, w - 80), 0.1, 1);   // 进度锚：主收缩圈扫
     for (let l = 40; l < h - 40; l++) {
       const i = st.idx(k, l);
 

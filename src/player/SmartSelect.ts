@@ -24,7 +24,7 @@
 //   - 方块集 Main.tileHammer（4 条）              Main.cs:7153-7156
 //             Main.tileAxe（16 条）               Main.cs:7157-7171
 //   - 叶绿提取机兑换表                            ItemTrader.cs:82-108（TryGetTradeOption :66-80）
-//   - 玩家湿身 Collision.WetCollision             Collision.cs:1575-1625（Player.cs:27540 置位）
+//   - 玩家湿身 Collision.WetCollision             Collision.cs:1575-1656（Player.cs:27540 置位）
 //
 // tile 桥接与 SmartCursor 共用 sheetOf / vanillaItemIdOf（src/player/SmartCursor.ts）。
 import type { TileStore } from '../world/TileStore';
@@ -185,11 +185,14 @@ export interface SmartSelectHost {
   onSelectionChanged: () => void;
 }
 
-// ===================== 玩家湿身（Collision.WetCollision，Collision.cs:1575-1625） =====================
+// ===================== 玩家湿身（Collision.WetCollision，Collision.cs:1575-1656） =====================
 
 /**
- * 玩家是否浸在液体中——Collision.WetCollision 1:1（不含 honey/shimmer 位，Smart Select 只用 wet）。
- * 以命中盒中心的 (min(10,width) × height/2) 盒与液体面（液量换算的表面下移）求交。
+ * 玩家是否浸在液体中——Collision.WetCollision 1:1（不含 honey/shimmer 位，Smart Select 只用 wet；
+ * npcLiquid.wetCollision 同款 :73-84 含完整三态返回）。以命中盒中心的
+ * (min(10,width) × height/2) 盒与液体面（液量换算的表面下移）求交。
+ * ★2026-08-31 补缺：:1632-1654 坡面格+上方液体支曾整段漏移植(结构性缺口，
+ *   由 ledger 线移交补齐)——斜坡贴水处 wet 低估影响 Smart Select 荧光棒/信号枪等策略。
  */
 export function wetCollision(st: TileStore, x: number, y: number, w: number, h: number): boolean {
   // :1578-1592 盒中心 + num=10 / num2=Height/2（各自截到宽/高）。
@@ -212,14 +215,29 @@ export function wetCollision(st: TileStore, x: number, y: number, w: number, h: 
       const idx = st.idx(i, j);
       if (!st.inBounds(i, j)) continue;
       const liquid = st.liquid[idx];
-      if (liquid <= 0) continue;                       // :1607-1610
-      // :1612-1617 液面下移：num5=(256-liquid)/32f，表面 y += num5*2；有效高 16 −=(int)(num5*2f)
-      const drop = (256 - liquid) / 32;
-      const surfY = j * 16 + drop * 2;
-      const surfH = 16 - Math.trunc(drop * 2);         // ★C# int 强转截断（曾浮点直减）
-      // :1618 与中心盒 AABB 求交
-      if (vx + num > i * 16 && vx < i * 16 + 16 && vy + num2 > surfY && vy < surfY + surfH) {
-        return true;
+      if (liquid > 0) {                                // :1607-1629
+        // :1612-1617 液面下移：num5=(256-liquid)/32f，表面 y += num5*2；有效高 16 −=(int)(num5*2f)
+        const drop = (256 - liquid) / 32;
+        const surfY = j * 16 + drop * 2;
+        const surfH = 16 - Math.trunc(drop * 2);       // ★C# int 强转截断（曾浮点直减）
+        // :1618 与中心盒 AABB 求交
+        if (vx + num > i * 16 && vx < i * 16 + 16 && vy + num2 > surfY && vy < surfY + surfH) {
+          return true;
+        }
+      } else {
+        // :1631-1654 坡面格+上方液体支——本格无液但为斜坡时，若上一行格有液，
+        // 整格按满高 16 计判湿（水体沿坡面浸润；不做液面下移）。上方格只读
+        // liquid>0，不查 active/nactive（原版即如此）；j<=0 为世界顶界守门。
+        // honey/shimmer 位取上方液型——本副本不承（同 npcLiquid 版差异登记）。
+                // ★语义登记：原版此判断走 tile.active()（纯在场位,含致动态）——本仓
+        //   isActive 实为 nactive()（active && !inActuated）⇒ 接线致动的斜坡不判湿。
+        //   与 npcLiquid 版同口径(继承性偏差);若要对齐原版需同步三副本+重校湿身回归。
+if (!st.isActive(i, j) || st.slope[idx] === 0 || j <= 0) continue;
+        const above = st.idx(i, j - 1);
+        if (st.liquid[above] <= 0) continue;
+        if (vx + num > i * 16 && vx < i * 16 + 16 && vy + num2 > j * 16 && vy < j * 16 + 16) {
+          return true;
+        }
       }
     }
   }

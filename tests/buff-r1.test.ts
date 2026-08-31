@@ -40,11 +40,11 @@ describe('R1 药水 Buff 数值', () => {
     expect(p.attackSpeedMult).toBeCloseTo(1 / 1.1, 5);
     expect(p.defense).toBe(-4);
   });
-  it('拾心 105：红心拾取范围 +60；挖矿 104/建筑工 107 判定位', () => {
+  it('拾心 105：红心拾取范围 +250（★2026-08-31 台账批:P.cs:35425-35427+Item.cs:47 lifeGrabRange=250;旧 +60 档退役）；挖矿 104/建筑工 107 判定位', () => {
     const p = mk();
     expect(p.heartGrabBonus).toBe(0);
     p.buffs.apply(BuffType.Heartreach, 180);
-    expect(p.heartGrabBonus).toBe(60);
+    expect(p.heartGrabBonus).toBe(250);
   });
   it('刷怪系数（VanillaSpawner.getSpawnRate 尾段）：镇静 ×1.65/×0.6、战斗 ×0.5/×2', async () => {
     const { VanillaSpawner } = await import('../src/world/spawn/VanillaSpawner');

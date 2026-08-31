@@ -617,8 +617,9 @@ describe('端到端链路（victim-settles 权威展示闭环）', () => {
     roomToNets(attackerRc.ws.sent, [attacker]);
     expect(attacker.players.get(1)!.pvpDefense).toBe(20);   // 镜像新鲜到位
 
-    // —— 并轨链②：victim 实扣结算权威广播（Pvp|crit 位）——
-    victim.sendPlayerHurt(23, 48.5, 96.25, 1, PlayerHurtFlags.Crit | PlayerHurtFlags.Pvp);
+    // —— 并轨链②：victim 实扣结算权威广播（近战支=Pvp|crit|MeleeSource，★F-1）——
+    victim.sendPlayerHurt(23, 48.5, 96.25, 1,
+      PlayerHurtFlags.Crit | PlayerHurtFlags.Pvp | PlayerHurtFlags.MeleeSource);
     clientToRoom(victimRc, victim);
     roomToNets(attackerRc.ws.sent, [attacker]);
 

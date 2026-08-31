@@ -789,13 +789,6 @@ describe('★F8 战斗判定掷骰全走实例注入面(Math.random 仅限演出
 describe('★C2 池统一（threatPool 单点产出 → 入态消费一致面）', () => {
   const eY = 96 * 16;
 
-  /** 真实危险扫描 + 注 rng 探针的入态直调 */
-  function entryViaScan(npc: AnyNpc, world: World, game: never,
-    rolls: { n: number }): boolean {
-    npc.rng = () => { rolls.n++; return 0.0000001; };
-    callDanger(npc, world, game);
-    return callEntry(npc, world, game);
-  }
   const poolOf = (npc: AnyNpc) =>
     (npc as unknown as { threatPool: { left: unknown; right: unknown } }).threatPool;
 

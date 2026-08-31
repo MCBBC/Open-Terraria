@@ -766,6 +766,21 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
     behaviorTail: opts.behaviorTail ?? null,
     // 动画帧捕获（被动聚合层；长按录制窗另并入 behavior dump.tileFrames 全量）
     tileFrames: opts.tileFrames ?? null,
+    // 加载分段时间线（load.* performance.mark 族 + worker 检查点；2026-08-31 仪器）
+    load: (() => {
+      try {
+        const marks = performance.getEntriesByType('mark')
+          .filter((m) => m.name.startsWith('load.'))
+          .map((m) => ({ n: m.name.slice(5), t: Math.round(m.startTime) }));
+        const segs: Array<{ seg: string; ms: number }> = [];
+        for (let i = 1; i < marks.length; i++)
+          segs.push({ seg: marks[i].n, ms: marks[i].t - marks[i - 1].t });
+        return {
+          marks, segs,
+          wkLog: (globalThis as unknown as { __swWkLog?: string[] }).__swWkLog ?? null,
+        };
+      } catch { return null; }
+    })(),
     instance: {
       gameMounts: opts.instanceCount ?? (globalThis as unknown as { __swInstanceCount?: number }).__swInstanceCount ?? 0,
       compatReport: !!(globalThis as unknown as { __lastCompatReport?: unknown }).__lastCompatReport,

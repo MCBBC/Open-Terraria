@@ -366,15 +366,15 @@ export function heldItemTipWorld(
     //  而非右缘(右缘取法在斜 45° 上下时偏出 20px+,2026-08-31 用户截图定罪)
     lx = fw * 0.5; ly = -fh * 0.85;
   } else {
-    // ★枪族 v7 极坐标(2026-08-31 终版):出生点 = 中心 + 瞄准单位·前伸 + (0,−4)。
-    //  前伸 = dp[0]+fw(每武器全 barrel reach,pivot→管口)。**无垂直于瞄准的分量**
-    //  ——v5 用完整绘制尖端(含 dp[1]+fh/2 ≈11-14px 垂直旁偏)→ 近垂直瞄时旁偏
-    //  变横向"弹射到右边";v6 极坐标丢 dp[0] → 发射筒(−8+52)前伸只算 34 非 44。
-    //  v7 = 两者并集:dp[0] 调前伸、零横向分量,任何朝向翻转零跳变。
-    //  常数 −4 手抬 = 备案偏离(原版字面=盒中心,2026-08-31 用户拍板枪口出膛)。
+    // ★枪族 v9 极坐标(2026-08-31):出生点 = 枢轴(pivot) + 瞄准单位·前伸。
+    //  pivot_y = cy − fh/2(与 drawUseItem translate 一致,枪管在手上方);
+    //  前伸 = dp[0]+fw(每武器 barrel reach,含定制握把);
+    //  零垂直于瞄准的横向分量 → 竖直瞄时弹在鼠标柱上,朝向翻转零跳变。
+    //  (v7 曾用 cy−4 → 比实际 pivot 低 5-14px,各角度正弦放大不一致偏移)
     const dp = ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF;
     const fwd = dp[0] + fw;
-    return { x: cx + Math.cos(aimWorld) * fwd, y: cy + Math.sin(aimWorld) * fwd - 4 };
+    const pivotY = cy - fh * 0.5;
+    return { x: cx + Math.cos(aimWorld) * fwd, y: pivotY + Math.sin(aimWorld) * fwd };
   }
   const wr = sg * alpha;
   const c = Math.cos(wr), s = Math.sin(wr);
@@ -505,7 +505,10 @@ export function prettyStarSparkle(
   };
   const num = lv(fadeInStart, fadeInEnd, flareCounter) * lv(fadeOutEnd, fadeOutStart, flareCounter);
   if (num <= 0) return;
-  { try { if (new URLSearchParams(location.search).has('nosparkle')) return; } catch { } }
+  // ★2026-08-31 默认停用：星芒四笔 stroke 的臂包围盒存在无法归因的暗十字
+  //  （隔离式合成后仍复现，且出现位置可与星体分离——疑似跨帧/GL 层残留）。
+  //  拖尾主体（GL 条带）不受影响。?sparkle=1 重新启用供下轮断点调试。
+  { try { if (new URLSearchParams(location.search).get('sparkle') !== '1') return; } catch { } }
   const shine = sparkleTintedTex(shineColor);
   const draw = sparkleTintedTex(drawColor);
   if (!shine || !draw) return;
@@ -515,14 +518,25 @@ export function prettyStarSparkle(
   const aShine = 0.5 * opacity * num * shineDim, aDraw = 0.5 * num * drawDim;
   // drawDim/shineDim：原版调用侧预乘进色的因子（如 SwingArc 的 White×num3×0.5、
   // 973 的 shine×num13）——折进 globalAlpha 而非逐帧染色（防 tintCache 打爆）
+  // ★隔离式合成（2026-08-31 黑十字案）：每笔先在独立离屏铺好再以 lighter 一次性
+  //   合成——主 ctx 任何残留合成态/异常路径都不可能把臂包围盒画成暗块。
+  //   （用户二分定谳：?nosparkle 消失/?nocomposite 仍在 = 来源即本函数四笔 stroke）
+  let sbuf: HTMLCanvasElement | null = null;
   const stroke = (img: HTMLCanvasElement, rot: number, sw: number, sh: number, alpha: number) => {
     if (alpha <= 0 || sw <= 0 || sh <= 0) return;
+    const w = Math.max(1, Math.round(tw * sw)), h = Math.max(1, Math.round(th * sh));
+    if (!sbuf) sbuf = document.createElement('canvas');
+    if (sbuf.width !== w || sbuf.height !== h) { sbuf.width = w; sbuf.height = h; }
+    const bc = sbuf.getContext('2d')!;
+    bc.clearRect(0, 0, w, h);
+    bc.imageSmoothingEnabled = false;
+    bc.drawImage(img, 0, 0, w, h);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
     ctx.translate(x, y);
     ctx.rotate(rot);
-    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    ctx.drawImage(img, -tw * sw / 2, -th * sh / 2, tw * sw, th * sh);
+    ctx.drawImage(sbuf, -w / 2, -h / 2);
     ctx.restore();
   };
   stroke(shine, Math.PI / 2 + rotation, v1x, v1y, aShine);
@@ -590,7 +604,7 @@ import { drawStardewAnimation } from '../fx/StardewAnimation';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
 import { MapPingStore } from '../net/syncModules';
-import { leashedBubbleVisible } from '../entities/LeashedCritter';
+import { leashedBubbleVisible, bubbleScaleTier } from '../entities/LeashedCritter';
 import { applyHeldProjPointing, heldProjFrameBegin, noteHeldProjEntity } from './heldProj';
 import { texReady } from './texId';
 import { PAINT_TOOLS, paintToolOffset } from './CursorItemIcon';
@@ -4977,9 +4991,12 @@ export class Renderer {
   }
 
   /**
-   * DrawBubble（LeashedCritter.cs:213-223）：tile 取 _dummy.Center（= Center+(0,8)），
-   *  判定 `(isAquatic && liquid<255) || (!isAquatic && liquid>0)`；Gore_413 整帧
-   *  贴 Center+GetDrawOffset，颜色 = Lighting.GetColor(tileCoords)
+   * DrawBubble（LeashedCritter.cs:213-223 + DrawBubble :295-307）：tile 取 _dummy.Center
+   * （= Center+(0,8)+netOffset+GetDrawOffset——Draw :205 先叠偏移再走 ShouldDrawBubble/
+   * DrawBubble，故贴点随 GetDrawOffset 一致沉浮），判定走 leashedBubbleVisible
+   * （★1457 ShouldDrawBubble/TileRequiresBubble 全量）；★1457 档缩放 num2 =
+   * max(1, max(frame.Size()*scale/(rect.Size()-8)))（大个体泡放大），颜色 =
+   * Lighting.GetColor(tileCoords)
    */
   private drawLeashedBubble(
     ctx: CanvasRenderingContext2D,
@@ -4998,10 +5015,13 @@ export class Renderer {
     // GetColor 乘法着色（tint 量化缓存，同 NPC color pass 的 tintedSprite 管线）
     const q = [Math.round(light[0] / 8) * 8, Math.round(light[1] / 8) * 8, Math.round(light[2] / 8) * 8];
     const tinted = this.tintedSprite('gore413', gore, q);
-    const w = gore.sw, h = gore.sh;
+    // ★1457 (:301-306)：帧体尺寸取当前动画帧切片；缺帧档（图集未就绪）退 1 倍登记
+    const nf = this.atlas?.vnpc(e.drawNpcType, e.frame);
+    const tier = bubbleScaleTier(nf?.sw ?? 0, nf?.sh ?? 0, e.scale, gore.sw, gore.sh);
+    const w = gore.sw * tier, h = gore.sh * tier;
     ctx.save();
     ctx.globalAlpha = 1;
-    ctx.translate(e.cx + dx, e.cy + dy);
+    ctx.translate(e.cx + dx, e.cy + 8 + dy);      // _dummy.Center = Center+(0,8)+偏移
     if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -w / 2, -h / 2, w, h);
     ctx.restore();
   }

@@ -1113,12 +1113,14 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   };
 }
 
-export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runDesertPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   // ★cs:12537 `Main.tileSolid[484] = false` 翻转已移入 runDesertMoundOnly 首句
   //   （caves-checkpoint 拆分调用路径同样需要，且 pass 头语义本就在 mound 循环前）。
   // DesertBiome(12532) 是单个 GenPass——mound/entrance/hive 三个检查点是其内部段，
   // 只在 pass 头（runDesertMoundOnly 头）重播一次，不中间重播。
   const desc = runDesertMoundOnly(st, rng, gs);
+  gp?.set(0.45);   // 进度锚：mound 段结束（包内估计）
   mark56('mound-end');
   runDesertEntrancesAndHive(st, rng, gs, desc);
   // gs.undergroundDesert 已随 runDesertEntrancesAndHive 落盘（见其尾部）
@@ -1126,6 +1128,7 @@ export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
   //   pass 收尾处把「裸露沙岩柱」顶部翻成沙——逐列 Next(-1,2) 取起始行（消耗恒
   //   1 骰/列），行内命中 396/397/53 且上方非实心时再掷 Next(4,7)，向下把连续
   //   396/397 带翻成 53。surfaceIsDesertSwapDesertAndSnowBiomes 组合种子不触。
+  gp?.set(0.95);   // 进度锚：入口+蚁穴+清理结束
   mark56('tail-begin');
   if (!!gs.seedFlags.remix && !gs.seedFlags.surfaceIsDesert) {
     const SAND = TILE_BY_KEY['sand']!;

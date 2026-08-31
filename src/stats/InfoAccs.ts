@@ -196,6 +196,11 @@ export function formatWatchText(mainTime: number, dayTime: boolean, watchLevel: 
     const seg = (PERIOD_BOUNDS.find(([lim]) => h < lim) ?? PERIOD_BOUNDS[PERIOD_BOUNDS.length - 1])[1];
     return `${periodWord(seg)} ${h}:${ms}`;
   }
+  if (style === 'h12_0') {
+    // 12h + 官方午前/午後词,数字 K = h%12 不翻 12(CLRD ja aK:mm):午前 0:31/午後 0:31
+    const ms = watchLevel === 1 ? '00' : watchLevel === 2 ? (m >= 30 ? '30' : '00') : mm;
+    return `${h % 12}:${ms} ${Lang.text(pm ? 'GameUI.TimePastMorning' : 'GameUI.TimeAtMorning')}`;
+  }
   // 原版 12h 分支(Main.cs:47618-47640 逐行,勿动——金标 info-accs.test.ts 锁定)
   if (h > 12) h -= 12;                         // :46208-46215
   if (h === 0) h = 12;

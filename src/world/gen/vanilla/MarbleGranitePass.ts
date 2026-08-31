@@ -134,11 +134,13 @@ function isOreType(t: number): boolean {
   return v != null && VANILLA_ORE.has(v);
 }
 
-export function runMarbleGranitePass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runMarbleGranitePass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   // Marble(12800)/Granite(12884) 各自是独立 GenPass——RunPass 每 pass 前重播种子
-  rng.reseed(gs.seed); // ▶Marble cs:12800
+  // ★进度：Marble 窗由包装层 beginVan；本层只补 Granite 子窗
+  rng.reseed(gs.seed);                          // ▶Marble cs:12800
   runMarblePass(st, rng, gs);
-  rng.reseed(gs.seed); // ▶Granite cs:12884
+  rng.reseed(gs.seed); gp?.beginVan('Granite'); // ▶Granite cs:12884
   runGranitePass(st, rng, gs);
 }
 

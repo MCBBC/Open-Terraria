@@ -23,6 +23,7 @@ import { runMountainCavesPass } from '../src/world/gen/vanilla/MountCavesPass';
 import { flipGenSolid } from '../src/world/gen/vanilla/GenSolid';
 import { TILE_DEFS } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
+import { LiquidSim } from '../src/world/liquid/LiquidSim';
 import { RNG } from '../src/core/rng';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 
@@ -332,19 +333,65 @@ function deepCopyGs(g: GenState): GenState {
             (globalThis as unknown as { __swI87Evs?: string[] }).__swI87Evs = evs;
           }
           runUnderworldPass(st, rng, gsc!);
+          map118('ph1-afterUWbody');
           if (boxEnv) dumpBoxEvents(`uw${step}`, 'underworld');
           if (step >= 2 && !!gsc!.seedFlags.remix) generateUnderworldStartingMound(st, rng, gsc!);
           else if (step >= 2 && !gsc!.seedFlags.drunkWorld) underworldAshGrassTrees(st, rng, gsc!, false);
+          map118('ph2-afterMound');
           if (boxEnv) dumpBoxEvents(`uw${step}`, 'mound');
           if (step >= 3) runHellFortPass(st, rng, gsc!, undefined, chestSnap);
+          map118('ph3-afterHellFort');
           if (boxEnv) dumpBoxEvents(`uw${step}`, 'hellfort');
           if (step >= 4 && gsc!.seedFlags.drunkWorld) underworldAshGrassTrees(st, rng, gsc!, true);
+          map118('ph4-afterAshtrees');
           if (boxEnv) {
             dumpBoxEvents(`uw${step}`, 'ashtrees');
             delete (globalThis as unknown as { __swI87K?: unknown }).__swI87K;
             delete (globalThis as unknown as { __swI87Evs?: unknown }).__swI87Evs;
           }
-          // 活性 sheet-165 扫描（cave deco 写者定位）
+          // ★IIIII118 定域仪（SW_III118_MAP=1）：四子步逐相把盒区 (1660..1700×700..760)
+          //   的全量格状态写文件 —— 液杀三格定罪用（机器可读，避人眼格式错位）。
+          function map118(phase: string) {
+            if (process.env.SW_III118_MAP !== '1') return;
+            const outDir = process.env.SW_III118_MAPDIR ?? '/tmp/iii118-out/boxes';
+            const parts: string[] = [];
+            for (let y = 700; y <= 760; y++) {
+              for (let x = 1660; x <= 1700; x++) {
+                const i = st.idx(x, y);
+                const sh = SHEET[st.type[i]];
+                const act = st.flags[i] & 1;
+                const qty = st.liquid[i], lty = st.liquidType[i];
+                const fx = st.frameX[i] ?? 0, fy = st.frameY[i] ?? 0;
+                if (act || qty > 0 || lty > 0 || st.wall[i]) {
+                  parts.push(`${y},${x}: a${act} t${sh >= 0 ? sh : 'x' + st.type[i]} q${qty} y${lty} w${st.wall[i]} f${fx}/${fy}`);
+                } else {
+                  parts.push(`${y},${x}: 0`);
+                }
+              }
+            }
+            writeFileSync(`${outDir}/js-box-${phase}.txt`, parts.join('\n') + '\n');
+            console.log(`[map ${phase}] → ${outDir}/js-box-${phase}.txt (${parts.length})`);
+          };
+          map118('ph0-base');
+          // ★IIIII118 击杀归因仪（SW_III118_KILL=1）：盒内 killTileAt/killTileGen
+          //   调用点栈回显（调用方=src/world|src/gen 帧前 5 层）。
+          if (process.env.SW_III118_KILL === '1' && !(LiquidSim.prototype as unknown as Record<string, unknown>).__sw118Wrap) {
+            const LQP = LiquidSim.prototype as unknown as Record<string, (x: number, y: number) => void>;
+            for (const fn of ['killTileAt', 'killTileGen'] as const) {
+              const orig = LQP[fn];
+              LQP[fn] = function (this: unknown, x: number, y: number) {
+                if (x >= 1650 && x <= 1710 && y >= 690 && y <= 770) {
+                  const frames = (new Error().stack ?? '').split('\n')
+                    .map((l) => l.trim())
+                    .filter((l) => /src[\\/](world|gen)/.test(l))
+                    .slice(0, 5);
+                  console.log(`[kt ${fn}] ${x},${y} :: ${frames.join(' <- ')}`);
+                }
+                return orig.call(this, x, y);
+              };
+            }
+            (LQP as unknown as { __sw118Wrap: boolean }).__sw118Wrap = true;
+          }
           const hits: string[] = [];
           for (let i = 0; i < N && hits.length < 16; i++) {
             if ((st.flags[i] & 1) && SHEET[st.type[i]] === 165) hits.push(`(${i % W},${Math.floor(i / W)})`);

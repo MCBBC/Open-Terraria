@@ -72,6 +72,9 @@ export function wetCollision(
         }
       } else {
         // 坡面格 + 上方格有液体 → 整格按满高 16 计（:1635-1654）
+                // ★语义登记：原版走 tile.active()（纯在场位,含致动态）——本仓 isActive 为
+          //   nactive() 口径 ⇒ 接线致动斜坡不判湿。SmartSelect 副本同差;对齐原版需
+          //   三副本同步+重校湿身回归(鸭面跳切锚定过的几何勿轻动)。
         if (!st.isActive(i, j) || st.slope[idx] === 0 || j <= 0) continue;
         const above = st.idx(i, j - 1);
         if (st.liquid[above] <= 0) continue;

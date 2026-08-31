@@ -26,6 +26,8 @@ import { projDrawOffsetFor } from './WeaponProj';
 import { hitCritters, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
+// DeadCellsMushroomBoiExplosion 编排（L5 批 2026-08-31——随从 owner 权威模拟侧广播补远端）
+import { ParticleOrchestraType } from '../net/syncModules';
 import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
 import { ITEM_DEFS } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
@@ -1736,6 +1738,11 @@ export class MinionProj extends Entity {
         tgt.x, tgt.y, tgt.w, tgt.h)) dP = Infinity;
       if (dMe <= 60 || dP <= 60) {                        // closerIsMe 择近 ≤60（:52420-52422）
         this.mbA2 = -120;                                 // :50604
+        // 编排补远端：原版 RequestParticleSpawn(clientOnly:true)（P.cs:35277）各客户端
+        // 自跑随从 AI 同刻直生;本仓随从仅 owner 权威模拟 → owner 广播 DeadCellsMushroom-
+        // BoiExplosion 让访客侧 netApply 复放（偏差登记,module8 枚举注同口径）
+        game.broadcastParticleOrchestra?.(ParticleOrchestraType.DeadCellsMushroomBoiExplosion,
+          this.cx, this.cy);
         const boom = new MushroomBoiExplosionProj(this.cx, this.cy,
           Math.max(1, Math.round(dmg0 * 1.33)), this.knockback * 3,   // :50606-50607
           (bx, by) => { requestMushroomBoiExplosion(game, bx, by); });

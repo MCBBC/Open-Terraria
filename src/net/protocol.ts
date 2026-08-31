@@ -63,7 +63,20 @@ export const PROTO_MAGIC = 'SW1';
  *       必有该目标的新鲜 hp 包在途。降级矩阵：新 client 发 → 旧 server 只读已知段
  *       重打包剥此尾 = 对端镜像缺省 null → 收包侧保守弃账（不虚增,见 ClientNet
  *       消费门注释）；旧 client/新 server 同理；解析为位置序容错读（remaining 门）
- *       与 a) 免疫余量尾段同构,不动既有序。*/
+ *       与 a) 免疫余量尾段同构,不动既有序。
+ *    h) msg117 flags 新增 bit2=MeleeSource（★F-1 四轮蓝队,2026-08-31 增量通道,
+ *       不升版不改线格式——flags 本为 u8 位域,bit2 在同号帧内只做加位）：
+ *       【melee-source 来源标记】,仅 Game 近战 PvP 支（ItemCheck_MeleeHitPVP 同构位
+ *       :2899 的 reportPlayerHurt 调用）置位。缘由=msg117 不携伤害来源身份,而
+ *       vanilla 全部五条 PvP 结算支中【只有近战支】给任何人记甲虫蓄能
+ *       （beetleCounter += num2 / beetleCountdown = 0,Player.cs:44456-44460——
+ *       另一处入账在 PvE 近战支 :44826-44828;爆炸 bit7/狱火 bit6/盾转移 bit5/
+ *       PvP 弹四支均无）→ 接收端甲虫回执 FIFO 消费门必须按来源分支分账,否则
+ *       「目标被狱火跳伤/被第三方弹幕命中」会抽走攻击端未决挥击造成错配充能。
+ *       降级矩阵（双向）：新 client 发 → 旧 server readPlayerHurt/writePlayerHurt
+ *       整字节透传 flags → 旧 client 仅读 bit0/bit1 = 飘字样式不受影响;
+ *       旧 client 发 → flags 无 bit2 → 新收端不抽队不充能 = 甲虫少记账（保守
+ *       欠计方向——宁可漏记不可把他人伤记进自己壳,与⑤TTL 弃账同向）。*/
 export const PROTO_VER = 7;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
@@ -152,7 +165,14 @@ export const enum Msg {
                        //   dir = 击退向 ±1（0=零击退形制：狱火/盾转移原文 hitDirection 0,
                        //   近战=攻端 facing——语义与「收端当前不消费」事实见 PROTO_VER 注 f）、
                        //   flags bit0=crit / bit1=pvp（原版 SendPlayerHurt bitsByte[0]/[1]
-                       //   同义,NetMessage.cs:2615-2621）。原版接收端以 msg117 重放 Hurt
+                       //   同义,NetMessage.cs:2615-2621）/ bit2=melee-source 标记
+                       //   （★F-1,h) 注——仅近战支置位,收端甲虫回执消费门分账用;
+                       //   bits3-7 前向保留）。
+                       //   ★位域自查备案（F-1 兼容论证）：msg44 StrikePlayer 的
+                       //   bits1-4=enchant 位域（enchant<<1 打包,收端 (flags>>1)&15）
+                       //   属【另一条消息】的载荷域,msg117 无浸剂字段不存在撞位——
+                       //   dmg 为独立 i16（非 flags 内打包位段）故 i16 安全区证明分支
+                       //   无涉;bit2 在本帧 u8 内首个空位。原版接收端以 msg117 重放 Hurt
                        //   （MessageBuffer.cs:3882-3897：Hurt(quiet:true) → 音效+尘+飘字）；
                        //   本仓重放面只剩飘字 = 接收端 showPickupLabel 族 addDamageNumber
                        //   直出（Game 接线,见 ClientNet.onPlayerHurt 契约注）
@@ -580,10 +600,16 @@ export function readPlayerItems(r: NetReader): Array<ItemSyncEntry & { playerSlo
 
 // ================= PlayerHurt（msg117，被击端实扣权威飘字帧；2026-08-30 批） =================
 
-/** flags 位（未知高位双端忽略——前向兼容；bit1 原版 SendPlayerHurt bitsByte[1]=pvp 同义） */
+/** flags 位（未知高位双端忽略——前向兼容；bit1 原版 SendPlayerHurt bitsByte[1]=pvp 同义）
+ *  ★F-1 bit2=MeleeSource：伤害来源身份标记（PROTO_VER 注 h)。msg117 五条 PvP 生产支
+ *  中仅近战支（ItemCheck_MeleeHitPVP 同构位,Game:2899）置位——收端甲虫回执 FIFO
+ *  消费门按此分账：vanilla 只在近战支记 beetleCounter（Player.cs:44456-44460;
+ *  PvE 近战另一处 :44826-44828,爆炸/狱火/盾转移/PvP 弹四支均无）。撞位自查见
+ *  Msg.PlayerHurt 注（msg44 的 bits1-4 enchant 位域是另一条消息的载荷域,不冲突）。 */
 export const enum PlayerHurtFlags {
   Crit = 1 << 0,
   Pvp = 1 << 1,
+  MeleeSource = 1 << 2,
 }
 
 /** C→S / S→C 同形状。slot 段上行可填任意占位（服务器以发送者覆写——被击者本人

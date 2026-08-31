@@ -9,11 +9,11 @@ const _iid = (vid: number): number => ITEM_BY_KEY[vanillaItemKey(vid)!];
 const mk = () => new Player(0, 0, new Inventory());
 
 describe('R4 魔力星经济', () => {
-  it('魔力磁石（天界磁石 2219）：星拾取范围 +80', () => {
+  it('魔力磁石（天界磁石 2219）：星拾取范围 +300（★2026-08-31 台账批:P.cs:35417-35419+Item.cs:44 manaGrabRange=300;旧 +80 档退役）', () => {
     const p = mk();
     expect(p.manaMagnetBonus).toBe(0);
     p.inv.armor[3] = { id: _iid(2219), stack: 1 };
-    expect(p.manaMagnetBonus).toBe(80);
+    expect(p.manaMagnetBonus).toBe(300);
   });
 
   it('魔力手铐 1595：受伤回蓝 = 原始伤害 1:1', () => {

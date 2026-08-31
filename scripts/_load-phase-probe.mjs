@@ -20,7 +20,9 @@ await page.evaluate(async(t)=>{await window.__swFlow.loadJson(t);},fs.readFileSy
 await page.waitForFunction(()=>!!window.__swGame?.world?.store?.w,{timeout:240000});
 const total=Date.now()-t0;
 const fp=await page.evaluate(()=>window.__fpMs);
-const marks=await page.evaluate(()=>performance.getEntriesByType('mark').filter(m=>m.name.startsWith('load.')).map(m=>({n:m.name,t:Math.round(m.startTime)})));
+const wkLog=await page.evaluate(()=>window.__swWkLog??null);
+  const marks=await page.evaluate(()=>performance.getEntriesByType('mark').filter(m=>m.name.startsWith('load.')).map(m=>({n:m.name,t:Math.round(m.startTime)})));
+  void 0;
   const seq=marks.map((m,i)=>`${m.n.replace('load.','')}${i?` +${m.t-marks[i-1].t}`:''}`).join(' | ');
-  console.log(JSON.stringify({totalMs:total, fromPacketMs:+(fp||0).toFixed(0), worker:wkLogs, marks:seq}));
+  console.log(JSON.stringify({totalMs:total, fromPacketMs:+(fp||0).toFixed(0), worker:wkLog ?? wkLogs, marks:seq}));
 process.exit(0);

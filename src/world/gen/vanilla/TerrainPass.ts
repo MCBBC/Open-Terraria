@@ -73,7 +73,9 @@ function genSurfaceOffset(rng: RNG, f: Feature, specialPossible: boolean): numbe
   return n;
 }
 
-export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachPadding = 5): void {
+export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachPadding = 5,
+  // ★进度对齐：TerrainPass.cs 内 progress.Set((double)i/(double)maxTilesX) 逐列锚
+  gp?: import('../GenProgress').GenProgress): void {
   const { w, h } = st;
   const leftBeach = gs.beachLeftEnd, rightBeach = w - gs.beachRightStart;
   // num10（cs:117-131）：0.17 基线，小世界（GetWorldSize()==0，maxTilesX==4200）+0.02
@@ -104,6 +106,7 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
 
   let runLen = leftBeach + flatBeachPadding;
   for (let x = 0; x < w; x++) {
+    gp?.set(x / w);   // ≡ cs:11576 同型逐列 Set((double)i / maxTilesX)
     loSurf = Math.min(num2, loSurf);
     hiSurf = Math.max(num2, hiSurf);
     loRock = Math.min(num3, loRock);

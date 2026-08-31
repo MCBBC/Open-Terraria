@@ -166,13 +166,13 @@ describe('换算器(Main.cs 字面)', () => {
 // 原版统一 12h(0 点显示 12,凌晨→「12:31 上午」中文版同款);用户判偏离:
 // zh 系=时段词制 / de fr es it ru pl pt=24h 主流 / en ja ko=原版 12h(官方文案已合习惯)
 describe('formatWatchText 按语言风格(watchStyleOfCulture 路由 + period/h24)', () => {
-  it('路由表:zh→period、欧语 24h 族→h24、en/ja/ko/未知→vanilla', () => {
+  it('路由表:zh→period、欧语 24h 族→h24、ja→h12_0、en/ko/未知→vanilla', () => {
     expect(watchStyleOfCulture('zh-Hans')).toBe('period');
     expect(watchStyleOfCulture('zh-Hant')).toBe('period');
     expect(watchStyleOfCulture('de-DE')).toBe('h24');
     expect(watchStyleOfCulture('pt-BR')).toBe('h24');
     expect(watchStyleOfCulture('en-US')).toBe('vanilla');
-    expect(watchStyleOfCulture('ja-JP')).toBe('vanilla');
+    expect(watchStyleOfCulture('ja-JP')).toBe('h12_0');
     expect(watchStyleOfCulture('ko-KR')).toBe('vanilla');
     expect(watchStyleOfCulture(null)).toBe('vanilla');
     expect(watchStyleOfCulture('xx-XX')).toBe('vanilla');
@@ -201,6 +201,16 @@ describe('formatWatchText 按语言风格(watchStyleOfCulture 路由 + period/h2
     expect(at(13, 5, true)).toBe('Mods.SandboxWorld.Time.PeriodAfternoon 13:05');  // 下午 13:05
     expect(at(18, 30, true)).toBe('Mods.SandboxWorld.Time.PeriodDusk 18:30');      // 傍晚 18:30
     expect(at(23, 59, false)).toBe('Mods.SandboxWorld.Time.PeriodNight 23:59');    // 晚上 23:59
+  });
+
+  it('h12_0(ja):午前/午後词 + 0 点制数字(CLRD aK:mm),0 翻 12 语义豁除', () => {
+    // 午前 0:31(夜)
+    expect(formatWatchText(18090, false, 3, 'h12_0')).toBe('0:31 GameUI.TimeAtMorning');
+    // 正午 12:31 → 午後 0:31(昼 mainTime = (12.5258-4.5)*3600 ≈ 28893;精确 (12+31.5/60-4.5)*3600)
+    expect(formatWatchText((12 + 31.5 / 60 - 4.5) * 3600, true, 3, 'h12_0'))
+      .toBe('0:31 GameUI.TimePastMorning');
+    // 午後 11:59(23:59 为夜间:mainTime = (23.9917-19.5)*3600 = 16170)
+    expect(formatWatchText(16170, false, 3, 'h12_0')).toBe('11:59 GameUI.TimePastMorning');
   });
 
   it('缺省风格 = Lang.activeCultureName 推导(未初始化→vanilla,金标稳定)', () => {

@@ -194,9 +194,11 @@ describe('Player 装备属性聚合', () => {
     p.hp = 100; p.iframes = 0;
     p.damage(5, 0, 0, false);
     expect(p.iframes).toBe(80); // 40×2
-    // 宝藏磁石 5010：grabRangeBonus +94
+    // 宝藏磁石 5010：grabRangeBonus +150（★2026-08-31 台账批:P.cs:35429-35431+
+    // Item.cs:46 treasureGrabRange=150;旧 +94 档退役,金戒指币族项迁
+    // getItemGrabRangeBonus 正解位不再全类生效）
     p.inv.armor[5] = { id: _iid(5010), stack: 1 };
-    expect(p.grabRangeBonus).toBe(94);
+    expect(p.grabRangeBonus).toBe(150);
     p.inv.armor[5] = null;
     // 白绳 3306：yoyoString（Item.stringColor>0 通道，Player.cs:14170）
     p.inv.armor[6] = { id: _iid(3306), stack: 1 };

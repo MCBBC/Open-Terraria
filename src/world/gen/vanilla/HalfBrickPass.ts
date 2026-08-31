@@ -1459,7 +1459,8 @@ function placeCornerBlock(st: TileStore, rng: RNG, x: number, y: number, mat: nu
 }
 
 /** 原版 pass "Smooth World"（1456 WorldGen.cs:16507-16687）：地表凸起 → 坡面/半砖/削除 */
-export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void {
+export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   // ★IIII66 重放钩（dormant）：见 loadI66ReplayStore。诊断旁路,常规路径不读 globalThis。
   if ((globalThis as Record<string, unknown>).__SW_I66_PRE_STATE) loadI66ReplayStore(st);
   // ★pass 头 tileSolid 翻转（cs:16510 `SetCrackedBrickSolidity(solid: true)` →
@@ -1470,6 +1471,7 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
   const { w, h } = st;
   // —— 第一遍：主凸起模式（16511-16652）——
   for (let i = 20; i < w - 20; i++) {
+    gp?.set3((i - 20) / Math.max(1, w - 40), 0, 0.85);   // 进度锚：主遍（估）
     for (let j = 20; j < h - 20; j++) {
       const ti = st.idx(i, j);
       const t = st.type[ti];
@@ -1628,7 +1630,8 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
 }
 
 /** 原版 pass "Waterfalls"（WorldGen.cs:7697-7743）：水边唇缘砸半砖（瀑布触发的来源） */
-export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState): void {
+export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   // IIIII：#54 单格定罪探针（与 vanilla WFProbe 织入逐行对拍；无钩零开销）
   const __wf = (globalThis as { __swWfLog?: (s: string) => void }).__swWfLog;
   // ★pass 头 tileSolid 翻转（cs:16702 `Main.tileSolid[191] = false`）——活木非实心,
@@ -1644,6 +1647,7 @@ export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState): voi
   const OBSIDIAN_HELL = idsByVanillaSheet(75, 76);
   // —— 第一遍（L7701-7723）：实心顶格、左右空、侧旁有水 → 砸半砖 ——
   for (let i = 20; i < w - 20; i++) {
+    gp?.set((i - 20) / Math.max(1, w - 40));   // ≡ cs:16721-16733 域内逐列 Set
     for (let j = 20; j < h - 20; j++) {
       const ti = st.idx(i, j);
       if (!solidWF(i, j)) continue;

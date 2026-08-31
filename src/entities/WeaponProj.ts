@@ -19,6 +19,10 @@ import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectP
 import { ConfettiBurstProj } from './meleeOnHitProjs';
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+// Spawn_PaladinsHammerShockwave 编排本体（收编池;L5 批 2026-08-31——301 撞墙本地
+// 直生 + broadcast 上行同用此函数）
+import { paladinsHammerShockwaveFx } from '../fx/orchestraFx';
+import { ParticleOrchestraType } from '../net/syncModules';
 import { noteVanillaProjImmune, pyroclastProjectileGate } from './projTargets';
 import { trySnapStrike } from '../stats/SnapStrike';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -606,47 +610,10 @@ function hitTilesInACircleFx(game: GameHooks, cx: number, cy: number, radiusPx: 
   }
 }
 
-/** ParticleOrchestrator.Spawn_PaladinsHammerShockwave 粒本体（1458 ParticleOrchestrator.cs
- *  :816-880;台账 C 批清偿——此前只接 Item180 音）。三段:
- *  ①50 掷放射环:1/2 → d57(alpha200,scale1.8) / 1/3 → d43(alpha254,scale1.3),
- *    velocity = (尘落点−盒心)归一 ×9.5 ×rand,noGravity（NewDust 在弹体盒内掷位后定向重写,
- *    本仓 spawn 后覆写 x/vx 等价 NewDustPerfect 语义差登记≈±2px 抖动）;
- *  ②命中点 ±3 格(7×7) KillTile_GetTileDustAmount 块尘,上抛调制（num5=4）——本仓冒烟
- *    粒逐格近似（同圈档上限 32）;gore 池无 API 不接,登记;
- *  ③音 Item180 已在调用侧（Boomerang.moveStep 301 支）播放 */
-function paladinHammerShockwaveFx(game: GameHooks, x: number, y: number, w: number, h: number): void {
-  const ccx = x + w / 2, ccy = y + h / 2;
-  for (let i = 0; i < 50; i++) {
-    if (Math.random() < 0.5) {
-      const d = game.spawnDust?.(x, y, w, h, 57, 0, 0, 200, null, 1.8);
-      if (d) {
-        const dl = Math.hypot(d.x - ccx, d.y - ccy) || 1;
-        d.noGravity = true;
-        d.vx = ((d.x - ccx) / dl) * 9.5 * Math.random();
-        d.vy = ((d.y - ccy) / dl) * 9.5 * Math.random();
-      }
-    }
-    if (Math.random() < 1 / 3) {
-      const d = game.spawnDust?.(x, y, w, h, 43, 0, 0, 254, null, 1.3);
-      if (d) {
-        const dl = Math.hypot(d.x - ccx, d.y - ccy) || 1;
-        d.noGravity = true;
-        d.vx = ((d.x - ccx) / dl) * 9.5 * Math.random();
-        d.vy = ((d.y - ccy) / dl) * 9.5 * Math.random();
-      }
-    }
-  }
-  // ②7×7 格块尘（:851-871）
-  const ptx = Math.floor(ccx / TILE), pty = Math.floor(ccy / TILE);
-  let n = 0;
-  for (let j = pty - 3; j <= pty + 3 && n < 32; j++) {
-    for (let i2 = ptx - 3; i2 <= ptx + 3 && n < 32; i2++) {
-      if (!game.world.store.inBounds(i2, j) || !game.world.store.isSolid(i2, j)) continue;
-      game.spawnDust?.(i2 * TILE, j * TILE, TILE, TILE, 14, 0, -3, 0, null, 1.12);   // 上抛块尘近似
-      n++;
-    }
-  }
-}
+/** ParticleOrchestrator.Spawn_PaladinsHammerShockwave 粒本体已收编至
+ *  fx/orchestraFx.paladinsHammerShockwaveFx（顶部 import;2026-08-31 L5 批——本地/
+ *  远端 netApply 两面共用同一 rng 注入函数,Item180 音并入 Spawn_ 本体:822,C 批
+ *  曾误注"调用侧已播"实缺） */
 
 export class Boomerang extends Entity {
   w = 22; h = 22; // 默认（型号表覆盖）
@@ -1003,7 +970,13 @@ export class Boomerang extends Entity {
         this.boomBox = 300;                                     // localAI[0]=num71(:15065-15068 GetHitbox)
         genericDust = false;
       } else if (this.projId === 301) {
-        paladinHammerShockwaveFx(game, this.x, this.y, this.w, this.h);
+        // Spawn_PaladinsHammerShockwave（:816-881 收编本体,含 Item180 音——原 :822 直播
+        // 在 C 批注释里误注"调用侧已播"实缺,本体收编后随本地/远端两面各响一次）+
+        // broadcast（Projectile.cs:19649-19661 clientOnly:false——PositionInWorld=
+        // position 左上、MovementVector=Size 载荷;owner 门原版同式 owner==Main.myPlayer）
+        paladinsHammerShockwaveFx(game, this.x, this.y, this.w, this.h);
+        game.broadcastParticleOrchestra?.(ParticleOrchestraType.PaladinsHammerShockwave,
+          this.x, this.y, this.w, this.h);
         this.boomBox = 200;                                     // localAI[0]=num72(:15059-15063)
         genericDust = false;
       }

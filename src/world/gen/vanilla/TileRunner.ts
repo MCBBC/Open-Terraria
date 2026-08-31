@@ -393,7 +393,8 @@ export function tileRunner(
     {
       const f4 = (globalThis as { __swTrStep?: (o2: Record<string, unknown>) => void }).__swTrStep;
       if (f4) {
-        const histBuf = trDbg ? Uint8Array.from(tf) : undefined;
+        // ★IIIII121：全量直方图副本仅 SW_TR_STEP_HIST=1 时挂载（10MB/步，探针专项）
+        const histBuf = (trDbg && !!(globalThis as { __swTrStepHist?: unknown }).__swTrStepHist) ? Uint8Array.from(tf) : undefined;
         f4({ iter, px, py, vx, vy, num1, sN2: num2, rolled: iRolls, kills: iKills, skips: iSkips,
           h: histBuf });
       }

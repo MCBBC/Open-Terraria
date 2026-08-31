@@ -11,7 +11,8 @@ import { tileRunner } from './TileRunner';
 const MUD = TILE_BY_KEY['mud']!;
 const GEMS = ['gem_sapphire', 'gem_ruby', 'gem_emerald', 'gem_topaz', 'gem_amethyst', 'gem_diamond'].map((k) => TILE_BY_KEY[k]!);
 
-export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
+export function runJunglePass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): number {
   const { w, h } = st;
   const scale = (w / 4200) * 1.5;
   const van = w / 4200;
@@ -81,9 +82,18 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   // （原 `(gs as any).jungleCoreX = i` 记录已删 2026-08-16：唯一消费者=vanillaBiomes 的
   //  自造「丛林表面泥化补偿块」，随该块一并退役；巨型 runner 的表面覆盖已由本函数
   //  1:1 保证（caves-checkpoint jungle/mudcaves 双种子全绿））
-  const jungleXOut = generateTunnelToSurface(st, rng, gs, i, cy);
+  // ★IIIII101（waterpark）：JunglePass.cs:55-57——`if (!SecretSeed.extraLiquid.Enabled)
+  //   { GenerateTunnelToSurface(x,y); }`——extraLiquid 世界地表隧道整段不生成（该支
+  //   的全部掷骰被跳过，后续 MudWallRunner/FinishingTouches 流位随之前移）；返回值
+  //   仅 SW 存档元数据面（jungleX，原版无此概念），旗标态取巨 runner 中心 i。
+  const jungleXOut = gs.seedFlags.extraLiquid
+    ? i
+    : generateTunnelToSurface(st, rng, gs, i, cy);
   generateHolesInMudWalls(st, rng, gs);
-  generateFinishingTouches(st, rng, gs, oldX, oldY, scale, van);
+  // ★进度锚（包内估计值，非反编译字面——丛林收尾三段为时长主体）：
+  //   巨型泥 runner/表通结束≈窗内 0.35，finishing 三段循环 0.35→0.6→0.75→1
+  gp?.set(0.35);
+  generateFinishingTouches(st, rng, gs, oldX, oldY, scale, van, gp);
   return jungleXOut;
 }
 
@@ -216,11 +226,13 @@ function mudWallRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: numb
   }
 }
 
-function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: number, oldY: number, scale: number, van: number): void {
+function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: number, oldY: number,
+  scale: number, van: number, gp?: import('../GenProgress').GenProgress): void {
   void van;
   let x = oldX, y = oldY;
   // 大泥簇
   for (let n = 0; n <= 20 * scale; n++) {
+    gp?.set3(n / Math.max(1, 20 * scale), 0.35, 0.6);   // 进度锚：段 1/3（估）
     // 原版 Next((int)(-5*ws), (int)(6*ws))：上界 6 非 5（曾写对称 ±5）
     x += rng.int(-Math.floor(5 * scale), Math.floor(6 * scale) - 1);
     y += rng.int(-Math.floor(5 * scale), Math.floor(6 * scale) - 1);
@@ -230,6 +242,7 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
   }
   // 洞穴(1/7 填液体)
   for (let n = 0; n <= 10 * scale; n++) {
+    gp?.set3(n / Math.max(1, 10 * scale), 0.6, 0.75);   // 进度锚：段 2/3（估）
     // Next(-A, A) 上界开 → int(-A, A-1)；拒绝采样无界 while（原版，无 40 次上限）
     let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
     let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
@@ -249,6 +262,7 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
   }
   // 泥内石囊 + 宝石
   for (let n = 0; n <= 300 * scale; n++) {
+    gp?.set3(n / Math.max(1, 300 * scale), 0.75, 1);    // 进度锚：段 3/3（估）
     let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
     let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
     while (!(i2 >= 1 && i2 < st.w - 1 && j2 >= 1 && j2 < st.h - 1 && st.type[st.idx(i2, j2)] === MUD)) {

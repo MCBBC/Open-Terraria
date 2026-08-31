@@ -71,12 +71,17 @@ export const Lang = {
   misc(l: number): string { return languageManager.getTextValue(`LegacyMisc.${l}`); },
 
   /** 世界生成进度文案:pass 名 → 原版条目(worldgenKeys 映射;数字=LegacyWorldGen.N,
-   *  字符串=完整 l10n 键如 WorldGeneration.Oasis;无映射回退 pass 名原文) */
+   *  字符串=完整 l10n 键如 WorldGeneration.Oasis;无映射回退 pass 名原文)
+   *  ★GenProgress(2026-08-31)还会直发两种"裸词条"：纯数字串('27')与命名空间完整键
+   *  （worker 端无 l10n,翻译集中在 UI——见 game/src/world/gen/GenProgress 头注） */
   worldgenText(passKey: string): string {
     const strKey = worldgenProgressStringKey[passKey];
     if (strKey) return Lang.text(strKey);
     const legacyKey = worldgenProgressKey[passKey];
-    return legacyKey != null ? Lang.text(`LegacyWorldGen.${legacyKey}`) : passKey;
+    if (legacyKey != null) return Lang.text(`LegacyWorldGen.${legacyKey}`);
+    if (/^\d+$/.test(passKey)) return Lang.text(`LegacyWorldGen.${passKey}`);
+    if (passKey.includes('.') && Lang.has(passKey)) return Lang.text(passKey);
+    return passKey;
   },
 
   /** Language.RandomFromCategory 便捷门面：类别内等概率随机一条。缺失返回 fallback */

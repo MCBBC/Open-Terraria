@@ -37,11 +37,46 @@ import { applyProjStatus } from './projStatus';
 import { noteVanillaProjImmune, applyBannerDamageDealt, pyroclastProjectileGate } from './projTargets';
 import { trySnapStrike } from '../stats/SnapStrike';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+// RainbowRodHit 编排本体（收编池;L5 批 2026-08-31——79 命中/Kill 爆本地直生 +
+// broadcast 上行同用此函数）
+import { rainbowRodHitFx } from '../fx/orchestraFx';
+import { ParticleOrchestraType } from '../net/syncModules';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { canHit } from '../physics/LineOfSight';
 import { projectileData } from '../data/vanillaProjectiles';
 
 // ===================== 数学原语（逐字对源码） =====================
+
+/**
+ * Player.LimitPointToPlayerReachableArea（Player.cs:45830-45858，2026-08-31 台账清偿）
+ * ——光标点钳进"玩家可达区"：以玩家中心为心、Main.MaxWorldViewSize(1920×1200,
+ * Main.cs:754-758) 的矩形经 WorldUtils.ClampToWorldBorders（:26-33 = Utils.Clamp 到
+ * GetWorldPlayArea(:18-24)——世界四边各留 640px 缓冲）裁剪后的盒；盒外点沿中心射线
+ * 等比回拉到盒面（X/Y 各取更紧的半宽比例，方向不变、距离归界）。
+ * 消费位：AI_009_MagicMissiles_Old :44247-44249（491 飞刀）与 AI_009_MagicMissiles
+ * :44045-44046（16/34/79 新导弹族）都在算距离前先钳。★本批按台账只接飞刀（A6），
+ * 新导弹族接线登记为遗漏判定（各自 fixture 相对几何依赖大世界,见台账同日注）。
+ */
+export function limitPointToPlayerReachableArea(
+  px: number, py: number, pcx: number, pcy: number, worldWPx: number, worldHPx: number,
+): [number, number] {
+  // worldRect = CenteredRectangle(Center, MaxWorldViewSize)（Utils.CenteredRectangle：左上=心−Size/2）
+  let rx = pcx - 960;
+  let ry = pcy - 600;
+  // ∩ GetWorldPlayArea()：世界边框(px 域 0..worldW/H)内缩 640
+  const pl = 640, pt = 640, pr = Math.max(pl, worldWPx - 640), pb = Math.max(pt, worldHPx - 640);
+  rx = Math.max(rx, pl);
+  ry = Math.max(ry, pt);
+  rx = Math.min(rx + 1920, pr) - 1920;     // Utils.Clamp(Rectangle)：宽恒 1920（超窄世界才收缩）
+  ry = Math.min(ry + 1200, pb) - 1200;
+  const cx = rx + 960, cy = ry + 600;
+  const vx = px - cx, vy = py - cy;
+  const ax = Math.abs(vx), ay = Math.abs(vy);
+  let k = 1;
+  if (ax > 960) k = Math.min(k, 960 / ax);
+  if (ay > 600) k = Math.min(k, 600 / ay);
+  return [cx + vx * k, cy + vy * k];
+}
 
 /** Utils.GetLerpValue（Utils.cs:283-307，clamped=true）——含 from>to 倒置区间 */
 function lerpValue(from: number, to: number, t: number): number {
@@ -179,8 +214,11 @@ export class MagicMissileProj extends Entity {
   private prevCy: number;
   /** 79 彩虹拖尾采样环（RainbowRodDrawer oldPos 链） */
   private trail: number[] = [];
-  /** Main.GlobalTimeWrappedHourly 近似（拖尾色相推进） */
-  private globalT = 0;
+  /** Main.GlobalTimeWrappedHourly（Main.cs:17014 游戏运行秒 %3600）——拖尾色相相位
+   *  基准。★2026-08-31 台账 C1 清偿：曾用逐弹本地钟（每 tick +1/60 自起点起算），
+   *  同帧发射的多弹色相恒差一个常数偏移、也和世界的 GlobalTime 不同相；改为直读
+   *  共享墙钟 %3600（与本仓 Game.ts:7435 沙暴节拍的既有口径一致） */
+  private globalT = (performance.now() / 1000) % 3600;
   /** Main.DiscoR/G/B（Main.cs:19441 六段 ±7/帧；79 点光 :15157-15160） */
   private discoR = 255;
   private discoG = 0;
@@ -230,7 +268,7 @@ export class MagicMissileProj extends Entity {
     if (--this.timeLeft <= 0) { this.killNow(game); return; }
     this.pvx = this.vx; this.pvy = this.vy;
     this.prevCx = this.cx; this.prevCy = this.cy;
-    this.globalT += 1 / 60;
+    this.globalT = (performance.now() / 1000) % 3600;   // GlobalTimeWrappedHourly（Main.cs:17014）
     this.steer(game);
     if (this.dead) return;
     this.x += this.vx;
@@ -497,10 +535,17 @@ export class MagicMissileProj extends Entity {
       noteVanillaProjImmune(game, this.projId, e.id,
         { penetrate: this.pierce, localFace: this.projId === 34 || this.projId === 79 });
       // 命中清追踪（StrikeNPC :13260-13283：34 仅 ai[0]==-1 档清 / 79 恒清 + 彩虹粒子；
-      // 34 的 ai[0]==-2 终段不再清——逐字对源码）
+      // 34 的 ai[0]==-2 终段不再清——逐字对源码）。79 命中的 RainbowRodHit 编排
+      // （Projectile.cs:14293-14304:ai[0]==-1 门→ RequestParticleSpawn clientOnly:false,
+      //   PositionInWorld=targetNPC.Center、MovementVector=velocity）——L5 批真值升级
+      // （原 #FFB0FF 占位紫粒退役）+ module8 上行
       if (this.projId === 79 && this.mode !== 0) {
         this.homingId = -1;
-        game.spawnParticles(this.cx, this.cy, '#FFB0FF', 4, 1.6, { life: 18 });
+        const ecx = (e as { cx?: number }).cx ?? e.x + e.w / 2;
+        const ecy = (e as { cy?: number }).cy ?? e.y + e.h / 2;
+        rainbowRodHitFx(game, ecx, ecy, this.vx, this.vy);
+        game.broadcastParticleOrchestra?.(ParticleOrchestraType.RainbowRodHit,
+          ecx, ecy, this.vx, this.vy);
       } else if (this.projId === 34 && this.mode === 1) {
         this.homingId = -1;
       }
@@ -533,7 +578,8 @@ export class MagicMissileProj extends Entity {
   /** 统一消亡出口。★R27：79 彩虹魔杖补 Kill 爆（Projectile.cs:72426-72503，1458 同）：
    *  Resize(128,128) → maxPenetrate=−1 → Damage()（128px 死亡 AoE 二次结算）→
    *  Item10 音 + 沿 oldPos 全程彩虹 d267 尾迹迸散（逐点 hue 相位/数量按距离衰减/
-   *  白影 CloneDust）+ RainbowRodHit 编排粒子×2 + 14×d66 随机色 vel×3 */
+   *  白影 CloneDust）+ RainbowRodHit 编排粒子×2（L5 批收编 fx/orchestraFx 真值本体）
+   *  + 14×d66 随机色 vel×3 */
   private killNow(game: GameHooks): void {
     if (this.projId === 79 && !this.dead) {
       // Resize(128,128) 死亡 AoE（:72428-72434）：以弹心为心 128px 盒重结算一次伤害
@@ -569,9 +615,10 @@ export class MagicMissileProj extends Entity {
             { r: 255, g: 255, b: 255, a: 255 }, sc / 2, true);   // CloneDust 白影
         }
       }
-      // RainbowRodHit 编排粒子 ×2（:72488-72495——本仓无编排器池,spawnParticles 近似）
-      game.spawnParticles(this.cx, this.cy, '#FFB0FF', 8, 2.2, { life: 22 });
-      game.spawnParticles(this.cx, this.cy, '#FFFFFF', 6, 1.8, { life: 18 });
+      // RainbowRodHit 编排粒子 ×2（:72488-72495）——L5 批收编真值本体（六掷虹彩
+      // 簇+12×d267 双层）;原版 clientOnly:true 不上网,本地直驱同口径
+      rainbowRodHitFx(game, this.cx, this.cy);
+      rainbowRodHitFx(game, this.cx, this.cy);
       // 14×d66 随机色 vel×3（:72496-72502）
       for (let i = 0; i < 14; i++) {
         const [rr, gg, bb] = hueToRgb(Math.random());
@@ -678,8 +725,9 @@ export interface FlyingKnifeCtor {
   /** channel 电平（:40757 player.channel && HeldItem.shoot==491——Game 侧
    *  mouseHeld+持物 id+未死 的既有口径） */
   channelCb: () => boolean;
-  /** 光标世界坐标（Main.MouseWorld :40769）。LimitPointToPlayerReachableArea
-   *  （:40770）未建模——仅影响 <100px 近距档的进入判定，登记偏差 */
+  /** 光标世界坐标（Main.MouseWorld :40769）。★2026-08-31 台账 A6 清偿：消费侧
+   *  steer() 先经 limitPointToPlayerReachableArea 钳进玩家可达区（原版
+   *  Projectile.cs:44249 同位），"未建模登记偏差"就此关闭 */
   aimCb: () => { x: number; y: number };
 }
 
@@ -739,8 +787,14 @@ export class FlyingKnifeProj extends Entity {
     if (this.ai0 <= 0) {
       if (this.channelCb()) {
         const num = 20;                    // :40764-40767（491 专属上限）
-        const aim = this.aimCb();
-        const dx = aim.x - this.cx, dy = aim.y - this.cy;
+        // ★2026-08-31 台账 A6 清偿（Projectile.cs:44247-44249）：光标先钳进玩家可达区
+        // （LimitPointToPlayerReachableArea，Player.cs:45830-45858 盒=1920×1200 中心
+        // 玩家∩世界边框内缩 640px）再算距离——曾直追原始 MouseWorld 导致"距光标<100px
+        // 刹车/悬停环"在大屏/越界光标下永远不可达（未建模登记就此关闭）
+        const raw = this.aimCb();
+        const lim = limitPointToPlayerReachableArea(raw.x, raw.y, p.cx, p.cy,
+          game.world.store.w * TILE, game.world.store.h * TILE);
+        const dx = lim[0] - this.cx, dy = lim[1] - this.cy;
         const d = Math.hypot(dx, dy);      // :40773
         if (this.ai0 < 0) this.ai0 += 1;   // :40774-40777（自锁计数回卷）
         if (d < 100) {                     // :40778-40793 近距：只加速 + 自锁 −10

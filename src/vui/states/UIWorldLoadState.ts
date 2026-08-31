@@ -42,29 +42,46 @@ export class UIWorldLoadState extends UIState {
     this.append(tip);
   }
 
-  /** 进度回调（WorldGen/Game 的 (label, p)） */
-  setProgress(label: string, rawP: number) {
-    const p = Number.isFinite(rawP) ? rawP : 0;   // NaN 防御(旧缓存/瞬断事件)
+  /** 进度回调（WorldGen/Game 的 (label,p[,local])）。
+   *  ★原版对齐（2026-08-31）：长条=p=加权 TotalProgress（GenerationProgress.TotalProgress，
+   *  经 Game 端 0.7 外层缩放）；短条=local=当前原版 pass 的段内 Value——与
+   *  UIWorldLoad.DrawSelf :113-133 双杆逐字同义。local 缺省的兼容路径（读档
+   *  tiles/settle/preload 等）保留旧十分位窗口回退。 */
+  setProgress(label: string | undefined, rawP: number, local?: number) {
+    const p = Number.isFinite(rawP) ? Math.max(0, Math.min(1, rawP)) : 0;   // NaN/越界防御
+    const lc = local !== undefined && Number.isFinite(local)
+      ? Math.max(0, Math.min(1, local)) : null;
     this.pct = p;
     this.bar.totalProgress = p;
-    // 段内进度：10% 窗口的局部比例（长 pass 内也有可见移动）
-    const win = Math.floor(p * 10) / 10;
-    this.bar.currentProgress = Math.max(0, Math.min(1, (p - win) * 10));
-    if (label !== this.lastLabel) {
-      this.lastLabel = label;
+    if (lc !== null) {
+      this.bar.currentProgress = lc;               // 原版短条=当前 GenPass 段内 Value
+    } else {
+      // 兼容回退（原十分位窗口）：非生成管线的合成进度没有"段内"概念
+      const win = Math.floor(p * 10) / 10;
+      this.bar.currentProgress = Math.max(0, Math.min(1, (p - win) * 10));
+    }
+    // 后缀百分比优先用 local（0..100% 段内水位,同原版 Message 的 {0:0.0%} 填充位）；
+    // 无 local（读档等合成标尺）维持既有总进度读数。
+    const pctShown = lc !== null ? Math.round(lc * 100) : Math.round(p * 100);
+    if (label !== undefined && label !== this.lastLabelKey) {
+      this.lastLabelKey = label;
       const text = Lang.worldgenText(label);
       // 标签自带百分比时(读档 tiles/settle 原版水位文案"…X%")不再追加
       // " - X%"后缀——曾拼出"正在安置液体50% - 0%"双重百分比,且追加用的是
       // 阶段内 p 与标签水位不同标尺(2026-08-14)
       this.suffixMode = !text.includes('%');
       this.baseText = text;
-      this.header.setText(this.suffixMode ? `${text} - ${Math.round(p * 100)}%` : text);
-    } else if (this.suffixMode) {
-      this.header.setText(`${this.baseText} - ${Math.round(p * 100)}%`);
+      this.header.setText(this.suffixMode ? `${text} - ${pctShown}%` : text);
+    } else if (this.suffixMode && this.baseText) {
+      // label=undefined（GenProgress 粘滞文案）沿用 baseText，仅推进后缀数字；
+      // 首条粘滞文案到达前（baseText 空,如 Reset 窗先于 Terrain 词条）不画空后缀
+      this.header.setText(`${this.baseText} - ${pctShown}%`);
     }
   }
   private suffixMode = true;   // 标签不含 % 时才追加 " - X%" 后缀
   private baseText = '';
+  /** 最近一次显示键（undefined 文案=粘滞沿用,不触发重翻译/换行计算） */
+  private lastLabelKey: string | undefined = '';
 
   /** WorldGen.onWorldPartial 回调：挂上部分世界，开启实时预览（主线程 fallback 路径） */
   attachWorld(world: World) {

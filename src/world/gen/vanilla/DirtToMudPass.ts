@@ -56,10 +56,12 @@ export function runSiltPass(st: TileStore, rng: RNG, gs: GenState): void {
 }
 
 /** 合并入口（WorldGen.ts 原调用点：两 pass 注册序相邻）。DirtToMud(13172)/Silt(13192)
- *  各自是独立 GenPass——RunPass 每 pass 前重播种子。 */
-export function runDirtToMudAndSiltPass(st: TileStore, rng: RNG, gs: GenState): void {
-  rng.reseed(gs.seed); // ▶DirtToMud cs:13172
+ *  各自是独立 GenPass——RunPass 每 pass 前重播种子。★进度：DirtToMud 窗由包装层
+ *  beginVan；本层只补 Silt 子窗。 */
+export function runDirtToMudAndSiltPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
+  rng.reseed(gs.seed);                        // ▶DirtToMud cs:13172
   runDirtToMudPass(st, rng, gs);
-  rng.reseed(gs.seed); // ▶Silt cs:13192
+  rng.reseed(gs.seed); gp?.beginVan('Silt');  // ▶Silt cs:13192
   runSiltPass(st, rng, gs);
 }

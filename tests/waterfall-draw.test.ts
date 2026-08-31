@@ -35,6 +35,8 @@ let calls: any[] = [];
 const ctx: any = {
   globalAlpha: 1,
   imageSmoothingEnabled: true,
+  canvas: { width: 988, height: 862 },   // 环境音距离衰减段读取 ctx.canvas 尺寸（另一会话新增），mock 补齐
+
   save() {}, restore() {},
   translate(x: number, y: number) { this._tx = x; this._ty = y; },
   scale() { this._flip = true; },

@@ -259,7 +259,10 @@ export function readPylonModule(r: NetReader): PylonNetMsg | null {
 // 服务器中继就位，生产/消费子集 = 微光族两型（TownNPC shimmerRise 链本地已有
 // 同款视觉,NPC.cs:53674/:56004 原版广播位 1:1）+ 2026-08-21 生产者补齐批四型
 // （PetExchange/VampireOnFire/Digestion/LoadoutChange——逐型评估清单见下方枚举注,
-// 原则 = 只接本仓已有视觉, 无视觉型登记不硬造）；其余型到达时静默忽略（前向兼容）。
+// 原则 = 只接本仓已有视觉, 无视觉型登记不硬造）；2026-08-31 L5 批再收编九型
+// （RainbowRodHit/SlapHand/FlyMeal/WaffleIron/ClassyCane/DeadCells 族三型/
+//   ShadowbeamHostile·Friendly/PaladinsHammerShockwave——消费+生产双侧,见枚举注）
+// 其余型到达时静默忽略（前向兼容）。
 
 /** ParticleOrchestraType.cs 摘录（本仓已接消费/生产子集；全表 72 型见源文件）。
  *  2026-08-21 生产者补齐批（全 wire 面逐型评估，clientOnly:true 型原版永不上
@@ -267,21 +270,44 @@ export function readPylonModule(r: NetReader): PylonNetMsg | null {
  *  NPC.cs:81733 广播位）/ VampireOnFire（Item_20 点火音=本地既有, Player.cs:28178）/
  *  Digestion（马桶消化棕粒=本地既有, Player.cs:18751）/ LoadoutChange（切配装白闪
  *  词汇世界化, Player.cs:5444——白闪本体是 UI 槽闪, 世界侧重放为白色升腾粒）。
- *  登记未接（本仓无对应视觉, 不硬造）：剑刃轨迹/近战编排族（NightsEdge×4/
- *  StardustPunch/MoonLordWhipHit/MoonLordWhipEye/PaladinsHammerShockwave/
- *  SlapHand/WaffleIron/ClassyCane/FlyMeal——命中特效走本地 dust/弹幕近似且弹幕
- *  已走 msg27 快照, 编排化会双画）、ItemTransfer（快速堆叠无飞行物视觉）、
- *  TownSlimeTransform/InScreenDungeonSpawn/Keybrand/GasTrap/ChlorophyteLeafCrystalShot/
- *  RainbowBoulder4/CattivaHit/HeroicisSetSpawnSound/PlayerVoiceOverrideSound/
- *  DeadCells 族/BlackLightningHit/RainbowRodHit（鞭签特效本地近似=Arrow916+紫粒,
- *  Arrow 走 msg27 同步, 粒子部分孤立不补）等——原版调用位见上表头注行号 */
+ *  2026-08-31 台账 L5 清偿批（fx/orchestraFx.ts 收编池;每型 Spawn_ 段 derive）：
+ *  新接 RainbowRodHit(5)/SlapHand(20)/FlyMeal(21)/WaffleIron(30)/ClassyCane(55)/
+ *  DeadCellsMushroomBoiExplosion(34)/DeadCellsDownDashExplosion(35)/
+ *  DeadCellsFlint(41)/ShadowbeamHostile·Friendly(58/59——Arrow.ts:2470/:5209 已在
+ *  广播 59,收包侧此前静默丢,消费面本次补齐)/PaladinsHammerShockwave(68)。
+ *  登记仍未接（本仓无对应视觉/无 producer 锚, 不硬造）：剑刃轨迹族（NightsEdge×4/
+ *  StardustPunch/PrincessWeapon/MoonLordWhipHit/MoonLordWhipEye/PaladinsHammer=
+ *  3302 命中尘近似的命中侧——68 冲击波已接）、Keybrand/GasTrap/ShimmerArrow/
+ *  ShimmerBlock/TownSlimeTransform/ChlorophyteLeafCrystal×2/RainbowBoulder1-4+
+ *  PetBounce/CattivaHit/HeroicisSetSpawnSound/PlayerVoiceOverrideSound/
+ *  InScreenDungeonSpawn/BlackLightning×族/ArcSurge/BlueLightningSmallLong、
+ *  DeadCells 余三型（BarnacleShotFiring :27036 clientOnly:true 无锚→register;
+ *  BarrelExplosion≈Arrow1023 killNow 内联近似不另走编排通道;MushroomBoiTargetFound
+ *  挂点父弹键缺省）、ItemTransfer/PooFly/LakeSparkle/NatureFly/FakeFish±Jump
+ *  （clientOnly:true 本地直驱族,FakeFish.ts 同口径）、UFOLaser/MagnetSphereBolt/
+ *  HeatRay/SnappingStone×6/HarpyCharm/PhoenixQuiver/SeraphNecklace 等——原版
+ *  调用位见上表头注行号 */
 export const enum ParticleOrchestraType {
+  RainbowRodHit = 5,        // 万花筒鞭 tag+彩虹魔杖弹命中虹彩簇（WhipTagEffect_Kaleidoscope.cs:9 /
+                            //   Projectile.cs:14299 clientOnly:false;Kill 双掷 :72412/:72490 本地）
   PetExchange = 19,         // 城镇宠物变体重掷成功（NPC.cs:81733 Broadcast）
+  SlapHand = 20,            // 巴掌拍击命中音（Player.cs:44707-44713;Spawn_=纯 Item175 音）
+  FlyMeal = 21,             // 苍蝇美食命中音（Player.cs:44736-44740;Spawn_=纯 Item16 音）
   VampireOnFire = 22,       // 吸鬼灼阳点火音（Player.cs:28178；Spawn_=纯 Item20 音）
   LoadoutChange = 27,       // F1-F3 切配装（Player.cs:5444；UniqueInfo=配装档序）
   Digestion = 29,           // 马桶消化（Player.cs:18751；MovementVector=−direction）
+  WaffleIron = 30,          // 华夫饼烙印命中音（Player.cs:44715-44721;Spawn_=纯 Item178 音）
   ShimmerTownNPC = 32,      // 城镇 NPC 微光转化到位（NPC.cs:53674 / Player.cs:28402）
   ShimmerTownNPCSend = 33,  // 微光上升态远距落点传送（NPC.cs:56004）
+  DeadCellsMushroomBoiExplosion = 34,  // 蘑菇小伙伴爆炸（P.cs:35277 clientOnly:true→本仓
+                                       //   owner 权威模拟改 broadcast 补远端,偏差登记）
+  DeadCellsDownDashExplosion = 35,     // 下坠砸地爆（Player.cs:29005-29022 clientOnly:false；
+                                       //   下坠跳系统未移植→当前仅消费面，producer 缺口登记）
+  DeadCellsFlint = 41,      // 火石枪满蓄刺出土面释放（P.cs:53240-53245 clientOnly:false）
+  ShadowbeamHostile = 58,   // 暗影束（敌型,Projectile.cs :71840 Kill 铺撒）
+  ShadowbeamFriendly = 59,  // 暗影束（友型,HandleMovement 反弹铺撒 P.cs:18976-18984）
+  ClassyCane = 55,          // 税官杖铜币命中小奖纸屑（Player.cs:44726-44732 clientOnly:false）
+  PaladinsHammerShockwave = 68,  // 圣骑锤撞墙冲击波（P.cs:19649-19661;MovementVector=Size）
 }
 
 /** ParticleOrchestraSettings（21B：Vector2 pos + Vector2 move + i32 unique + u8 invoker） */

@@ -362,7 +362,8 @@ const mbDraws = (): number => {
 };
 
 
-export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests?: ChestSink): void {
+export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests?: ChestSink,
+  gp?: import('../GenProgress').GenProgress): void {
   const g0 = globalThis as { __swMbCap?: (gs: GenState, st: TileStore, chests?: ChestSink) => void };
   try { g0.__swMbCap?.(gs, st, chests); } catch { /* probe */ }
   segProbe('passStart');
@@ -382,6 +383,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   const scW = (v: number): number => Math.trunc(widthScale * v);
 
   // ---- 1. Dead Man's Chests(cs:21801-21919 段 21801-21819)----
+  gp?.set(0);   // 进度锚：段首平台（包内估计,非反编译字面）
   {
     const deadMans = new DeadMansChestBiome(st, rng, gs, chests ?? []);
     // GetPossibleChestsToTrapify 先于计数掷骰(cs:21806-21807)——每候选 4 掷
@@ -403,6 +405,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   }
 
   // ---- 2. Thin Ice(cs:21825-21854)----
+  gp?.set(0.06);   // 进度锚：段首平台（包内估计,非反编译字面）
   if (!gs.seedFlags.notTheBees || gs.seedFlags.remix) {
     const iceCount = rng.int(scW(3), scW(5));      // ThinIcePatchCount 3-5 ×WorldWidth
     segProbe('iceCount', iceCount);    let iceDone = 0, iceFail = 0;
@@ -423,6 +426,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   }
 
   // ---- 2.5 Enchanted Sword Shrines(cs:21858-21908 + EnchantedSwordBiome.cs)----
+  gp?.set(0.12);   // 进度锚：段首平台（包内估计,非反编译字面）
   // ★原版在 MicroBiomes pass 内、ThinIce 与 Campsite 之间注册(cs:21858-21908)——
   //   曾拆在独立 SwordShrinePass(结构槽,微群系之前执行)= 管线错位 + 逻辑近似
   //   (洞穴中心放种子点上方 10-20 格,原版是 origin.Y+20 **下方**)。2026-08-13 归位重写。
@@ -457,6 +461,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   }
 
   // ---- 3. Campsites(cs:21915-21936,最多 1000 次尝试;cs:21914 notTheBees 门)----
+  gp?.set(0.25);   // 进度锚：段首平台（包内估计,非反编译字面）
   const campOk = !gs.seedFlags.notTheBees || gs.seedFlags.remix;
   const campCount = campOk
     ? rng.int(Math.max(1, Math.trunc(areaScale * 6)), Math.max(1, Math.trunc(areaScale * 11)))
@@ -477,6 +482,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   }
 
   // ---- 4. Mining Explosives(cs:21951-21975,最多 3000 次尝试;cs:21956 notTheBees 门)----
+  gp?.set(0.45);   // 进度锚：段首平台（包内估计,非反编译字面）
   const trapOk = campOk;
   let trapCount = trapOk
     ? rng.int(Math.max(1, Math.trunc(areaScale * 14)), Math.max(1, Math.trunc(areaScale * 29)))
@@ -504,6 +510,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   }
 
   // ---- 4.5 Mahogany 丛林活桃花心木树(cs:22052-22077 + MahoganyTreeBiome.cs)----
+  gp?.set(0.6);   // 进度锚：段首平台（包内估计,非反编译字面）
   // ★2026-08-17 前整段缺失:原版在 MiningExplosives 与 TrackGenerator 之间,
   //   LivingTreeCount 6-11 ×WorldWidth 棵(尝试上限 20000)——缺失 = 尾部全部
   //   子群系(矿轨/岩浆陷阱)及 @101 摆放整体掷流漂移(尾批 2-A 实锤 -43,845 掷)。
@@ -525,6 +532,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   }
 
   // ---- 5. TrackGenerator(cs:22014-22091)----
+  gp?.set(0.68);   // 进度锚：段首平台（包内估计,非反编译字面）
   const trackGen = new TrackGenerator(st, gs, chests);
   const trackFailLimit = Math.floor(w / 2);        // num25
   // 长轨:LongTrackCount 1-2 ×WorldWidth,长 400-1000 ×WorldWidth
@@ -567,6 +575,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   }
 
   // ---- 6. placeLavaTrap(cs:22093-22127):w*0.02 次 × 10150 尝试 ----
+  gp?.set(0.82);   // 进度锚：段首平台（包内估计,非反编译字面）
   if (!gs.seedFlags.notTheBees) {
     const lavaTries = w * 0.02;                    // num31(裸 double 比较,不取整)
     for (let j = 0; j < lavaTries; j++) {

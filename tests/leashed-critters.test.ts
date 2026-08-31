@@ -13,11 +13,15 @@ import { vanillaNpc } from '../src/data/vanillaNpcs';
 import {
   ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, PLACE_TILE_ON_ALT_USE,
 } from '../src/data/items';
+import { TILE_BY_KEY } from '../src/data/tiles';
 import {
   LeashedEntityManager, LCG32Random,
   PROTOTYPES, NPC_FAMILY, prototypeOfNpc, ITEM_MAKE_NPC, KITE_ITEM_PROJ,
   IS_GOLD_CRITTER, solidTile2, anchorStyleOfItem,
   inAPlaceWithWind, leashedBubbleVisible, KITE_TRAIL_LENGTH,
+  solidTileAllowTopSlope, solidTileAllowBottomSlope, solidTileNoPlatforms,
+  solidTileAllowPlatformTopFrame, platformProperTopFrame,
+  flyerIsBlockedByMedium, isFlyerLiquidBoundary, bubbleScaleTier,
   type LeashedEnv, type LeashedFamily, type LeashedDust,
 } from '../src/entities/LeashedCritter';
 
@@ -1104,5 +1108,320 @@ describe('VisualEffects 尘通道（各族源码行号）', () => {
     const pool = fakeDustPool();
     for (let i = 0; i < 600; i++) m.update({ store: st }, mkEnv({ dust: pool }), e.cx, e.cy);
     expect(pool.spawned.some((d) => d.type === 6)).toBe(true);
+  });
+
+  it('★1457 Recall 尘双旗 noLight=noLightEmittance=true（Recall_CreateDustAtLocation :134-141）', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const e = m.spawnCritter(60, 39, 2019, { seed: 3 })!;       // 兔（walker）
+    const flagged = recallDustCapture(e);                       // 单次调用批（Recall 事件前后各一批）
+    expect(flagged).toHaveLength(10);
+    for (const d of flagged) {
+      expect(d.type).toBe(15);
+      expect(d.noLight).toBe(true);                             // :139 前旗
+      expect(d.noLightEmittance).toBe(true);                    // :139 双旗（链式赋值）
+      expect(d.alpha).toBe(150);
+      expect(d.scale).toBe(1.1);
+    }
+  });
+});
+
+/** Recall 尘捕获替身：spawn 返回的 LeashedDust 引用直接入列（读旗标用） */
+function recallDustCapture(e: import('../src/entities/LeashedCritter').LeashedCritterEntity): LeashedDust[] {
+  const out: LeashedDust[] = [];
+  e.recallDust({
+    timeForVisualEffects: 0,
+    dayTime: true,
+    worldSurface: 100,
+    windForVisuals: 0,
+    cloudAlpha: 0,
+    playerCx: 0,
+    playerCy: 0,
+    addLight: () => { },
+    dust: {
+      spawn: (x: number, y: number, w: number, h: number, type: number): LeashedDust => {
+        void x; void y; void w; void h;
+        const d: LeashedDust = {
+          type, x, y, vx: 0, vy: 0, scale: 1.1, fadeIn: 0, alpha: 150,
+          noGravity: false, noLight: false, noLightEmittance: false, color: null,
+        };
+        out.push(d);
+        return d;
+      },
+    },
+  });
+  return out;
+}
+
+// ============================================================================
+// ★1457 L4 五项引擎迁移批回归（2026-08-31；真值 Terarria1458，与 1457 同段全等）
+// ============================================================================
+
+describe('★1457 拆分探针族（WorldGen.cs:70686-70919；原版真值表映射见实现头注）', () => {
+  /** 单格世界工具：类型 + 可选 slope/half/frameX/wire（未给位一律清零，防用例间残态） */
+  function cell(
+    st: TileStore, x: number, y: number, type: number,
+    opt?: { slope?: number; half?: number; frameX?: number; actuated?: boolean },
+  ) {
+    st.setTile(x, y, type, opt?.frameX ?? 0, 0);
+    const i = st.idx(x, y);
+    st.slope[i] = opt?.slope ?? 0;
+    st.half[i] = opt?.half ?? 0;
+    if (opt?.actuated) st.wire[i] |= 32; else st.wire[i] &= ~32;
+  }
+
+  it('solidTileAllowBottomSlope：平实心可站；土顶坡 1/2 拒、底坡 3/4 不设防；半砖拒；平台看合法顶帧（:70706-70729）', () => {
+    const st = new TileStore(8, 8);
+    cell(st, 2, 2, T.DIRT);
+    expect(solidTileAllowBottomSlope(st, 2, 2)).toBe(true);
+    cell(st, 2, 2, T.DIRT, { slope: 1 });
+    expect(solidTileAllowBottomSlope(st, 2, 2)).toBe(false);       // 土坡上半不可站
+    cell(st, 2, 2, T.DIRT, { slope: 3 });
+    expect(solidTileAllowBottomSlope(st, 2, 2)).toBe(true);        // 名为 Allow 实只查 topSlope
+    cell(st, 2, 2, T.DIRT, { half: 1 });
+    expect(solidTileAllowBottomSlope(st, 2, 2)).toBe(false);       // !halfBrick 支
+    cell(st, 2, 2, T.DIRT, { actuated: true });
+    expect(solidTileAllowBottomSlope(st, 2, 2)).toBe(false);       // !inActive 支
+    expect(solidTileAllowBottomSlope(st, -1, 5)).toBe(true);       // InWorld 界外返 true（:70710）
+    // 平台：合法顶帧 [0,7]∪[12,16]∪[25,26] 以外不承放；顶坡+合法帧可站（:70722）
+    cell(st, 3, 2, T.PLATFORM, { frameX: 54 });                    // 54/18=3 → 合法
+    expect(solidTileAllowBottomSlope(st, 3, 2)).toBe(true);
+    cell(st, 3, 2, T.PLATFORM, { frameX: 144 });                   // 144/18=8 → 切缺档
+    expect(solidTileAllowBottomSlope(st, 3, 2)).toBe(false);
+    cell(st, 3, 2, T.PLATFORM, { frameX: 54, slope: 1 });
+    expect(solidTileAllowBottomSlope(st, 3, 2)).toBe(true);        // 平台顶坡合法帧豁免
+    // PlanterBox（sheet380）：不在 Sets.Platforms，tileSolid 经 EXTRA 并集直通
+    cell(st, 4, 2, TILE_BY_KEY['v_380_planter_boxes']);
+    expect(solidTileAllowBottomSlope(st, 4, 2)).toBe(true);
+  });
+
+  it('solidTileNoPlatforms / solidTileAllowPlatformTopFrame：Sets.Platforms 分野 + 半砖坡面照算顶面（:70735/:70759）', () => {
+    const st = new TileStore(9, 9);
+    cell(st, 2, 2, T.DIRT);
+    expect(solidTileNoPlatforms(st, 2, 2)).toBe(true);
+    cell(st, 2, 2, T.PLATFORM);
+    expect(solidTileNoPlatforms(st, 2, 2)).toBe(false);            // 平台族被拒
+    cell(st, 3, 2, TILE_BY_KEY['v_380_planter_boxes']);
+    expect(solidTileNoPlatforms(st, 3, 2)).toBe(true);             // ★380 非 Sets.Platforms
+    cell(st, 5, 2, T.PLATFORM, { frameX: 162 });                   // n=9 切缺档
+    expect(solidTileAllowPlatformTopFrame(st, 5, 2)).toBe(false);
+    cell(st, 5, 2, T.PLATFORM, { frameX: 36 });                    // n=2 合法
+    expect(solidTileAllowPlatformTopFrame(st, 5, 2)).toBe(true);
+    cell(st, 2, 2, T.DIRT, { half: 1 });
+    expect(solidTileAllowPlatformTopFrame(st, 2, 2)).toBe(true);   // 半砖照算顶面（无排除支）
+    cell(st, 2, 2, T.DIRT, { slope: 3 });
+    expect(solidTileAllowPlatformTopFrame(st, 2, 2)).toBe(true);
+    cell(st, 2, 2, T.DIRT, { actuated: true });
+    expect(solidTileAllowPlatformTopFrame(st, 2, 2)).toBe(false);
+    expect(solidTileNoPlatforms(st, -1, -1)).toBe(true);
+    expect(solidTileAllowPlatformTopFrame(st, -1, -1)).toBe(true);
+  });
+
+  it('solidTileAllowTopSlope：平实心通行；底坡/非平台上半坡拒；半砖与 380 特例通行；平台只认半砖臂（:70859-70878）', () => {
+    const st = new TileStore(8, 8);
+    cell(st, 2, 2, T.DIRT);
+    expect(solidTileAllowTopSlope(st, 2, 2)).toBe(true);
+    cell(st, 2, 2, T.DIRT, { slope: 3 });
+    expect(solidTileAllowTopSlope(st, 2, 2)).toBe(false);          // bottomSlope()
+    cell(st, 2, 2, T.DIRT, { slope: 1 });
+    expect(solidTileAllowTopSlope(st, 2, 2)).toBe(true);           // 非平台 !bottomSlope 直通
+    cell(st, 2, 2, T.DIRT, { half: 1 });
+    expect(solidTileAllowTopSlope(st, 2, 2)).toBe(true);           // 无 !halfBrick 支
+    cell(st, 2, 2, T.PLATFORM);                                    // Platforms ∧ 无 halfBrick → 双臂皆否
+    expect(solidTileAllowTopSlope(st, 2, 2)).toBe(false);
+    cell(st, 2, 2, T.PLATFORM, { half: 1 });
+    expect(solidTileAllowTopSlope(st, 2, 2)).toBe(true);           // Platforms ∧ halfBrick 臂
+    cell(st, 3, 2, TILE_BY_KEY['v_380_planter_boxes']);
+    expect(solidTileAllowTopSlope(st, 3, 2)).toBe(true);           // type==380 tileSolid 特例
+    cell(st, 2, 2, T.DIRT, { actuated: true });
+    expect(solidTileAllowTopSlope(st, 2, 2)).toBe(false);
+    expect(solidTileAllowTopSlope(st, -1, -1)).toBe(false);        // 本仓越界恒空口径（登记）
+  });
+
+  it('platformProperTopFrame：18px 帧档 [0,7]∪[12,16]∪[25,26]（WorldGen.cs:70686-70697）', () => {
+    for (let n = 0; n <= 7; n++) expect(platformProperTopFrame(n * 18), `n=${n}`).toBe(true);
+    for (let n = 8; n <= 11; n++) expect(platformProperTopFrame(n * 18), `n=${n}`).toBe(false);
+    for (let n = 12; n <= 16; n++) expect(platformProperTopFrame(n * 18), `n=${n}`).toBe(true);
+    for (const n of [17, 20, 24]) expect(platformProperTopFrame(n * 18), `n=${n}`).toBe(false);
+    for (const n of [25, 26]) expect(platformProperTopFrame(n * 18), `n=${n}`).toBe(true);
+    expect(platformProperTopFrame(27 * 18)).toBe(false);
+  });
+
+  it('Walker/Flyer/Jumper 引擎全部换装（老 SolidTile2 调用点清零回归——实测引擎行为）', () => {
+    // Walker 台阶：上台阶仍可登（advanceTarget 头顶格换 AllowTopSlope 后）
+    const st = groundWorld(120, 80, 40);
+    st.setTile(61, 39, T.DIRT);
+    const m = mkManager(st);
+    const w = m.spawnCritter(60, 38, 2003, { seed: 7 })!;
+    w.direction = 1; w.state = 2; w.tx = 60; w.ty = 39;
+    w.cx = 60 * 16 + 8; w.cy = 39 * 16 + 8;
+    runTicks(m, st, 400, w.cx, w.cy);
+    expect(w.cy).toBeLessThanOrEqual(40 * 16 + 8);
+    // Jumper：蚱蜢弹跳不穿地不越界（Move 目标格 AllowPlatformTopFrame）
+    const m2 = mkManager(st);
+    const g = m2.spawnCritter(80, 39, 2740, { seed: 21 })!;
+    runTicks(m2, st, 2000, 80 * 16 + 8, 39 * 16 + 8);
+    expect(g.cy).toBeLessThanOrEqual(40 * 16 + 8);
+    expect(Math.abs(g.cx - (80 * 16 + 8))).toBeLessThanOrEqual((PROTOTYPES.jumper.straying + 1) * 16 + 8);
+    // Flyer：蜻蜓巡飞贴悬停分支（Spawn 悬空门换 AllowPlatformTopFrame）
+    const m3 = mkManager(st);
+    const f = m3.spawnCritter(90, 30, 4334, { seed: 11 })!;
+    runTicks(m3, st, 600, 90 * 16 + 8, 30 * 16 + 8);
+    expect(f.cy).toBeLessThanOrEqual(40 * 16 + 8 + 1);
+  });
+});
+
+describe('★1457 Jumper 水中浮力（JumperLeashedCritter.cs:31 buoyancy=0.4 + :143-150 门）', () => {
+  it('本体格满水（水档 liquidType==Water）→ vy 每拍 −0.4 反浮（Clamp 下界）且冷却钉 minWaitTime', () => {
+    const st = groundWorld(120, 80, 40);                        // 地面 y=40
+    for (let x = 56; x <= 64; x++) {
+      for (let y = 36; y <= 39; y++) st.setLiquid(x, y, 255, 1);   // 本仓编码 Water=+1
+    }
+    const m = mkManager(st);
+    const e = m.spawnCritter(60, 35, 2740, { seed: 5 })!;       // 蚱蜢（jumper）
+    // 置于满水格中心，静水沉降态驱动单拍 Move
+    e.cx = 60 * 16 + 8; e.cy = 38 * 16 + 8;
+    e.vx = 0; e.vy = -1; e.state = 0;                           // J_NORMAL
+    e.waitTime = 999;
+    let vy = e['moveJumper'](st);                                // 单拍直驱（hitSomething=false）
+    expect(vy).toBe(false);
+    expect(e.vy).toBeCloseTo(-1.1, 6);                          // -1 −0.4（浮力）→ +0.3（重力 Clamp 内）
+    expect(e.waitTime).toBe(PROTOTYPES.jumper.minWaitTime ?? 180);  // :148 冷却钉最短档
+    e.vy = -1.1;
+    e['moveJumper'](st);
+    expect(e.vy).toBeCloseTo(-1.2, 6);                          // 稳态净 −0.1/t（浮力−重力差）
+    expect(e.waitTime).toBe(PROTOTYPES.jumper.minWaitTime ?? 180);
+    void vy;
+  });
+
+  it('无水对照：同一位形不吃浮力门（vy 只受重力），冷却不被钉', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const e = m.spawnCritter(60, 35, 2740, { seed: 5 })!;
+    e.cx = 60 * 16 + 8; e.cy = 38 * 16 + 8;
+    e.vx = 0; e.vy = -1; e.state = 0; e.waitTime = 999;
+    e['moveJumper'](st);
+    expect(e.vy).toBeCloseTo(-0.7, 6);                          // -1 + 0.3（纯重力）
+    expect(e.waitTime).toBe(999);                               // 无钉
+    // 岩浆不算水档（AnyLiquidAt(point, 0) 只认 vanilla liquidType==Water）
+    const m2 = mkManager(st);
+    const l = m2.spawnCritter(60, 35, 2740, { seed: 5 })!;
+    st.setLiquid(60, 38, 255, 2);                               // 本仓编码 Lava=2（vanilla 1）
+    l.cx = 60 * 16 + 8; l.cy = 38 * 16 + 8;
+    l.vx = 0; l.vy = -1; l.state = 0; l.waitTime = 999;
+    l['moveJumper'](st);
+    expect(l.vy).toBeCloseTo(-0.7, 6);                          // 浮力门不触发
+    expect(l.waitTime).toBe(999);
+  });
+
+  it('召回态不吃冷却钉（State!=1 门 :146-149）但浮力照算', () => {
+    const st = groundWorld(120, 80, 40);
+    for (let x = 58; x <= 62; x++) st.setLiquid(x, 38, 255, 1);
+    const m = mkManager(st);
+    const e = m.spawnCritter(60, 35, 2740, { seed: 5 })!;
+    e.cx = 60 * 16 + 8; e.cy = 38 * 16 + 8;
+    e.vx = 0; e.vy = -1; e.state = 1;                           // J_RECALLING
+    e.waitTime = 20;
+    e['moveJumper'](st);
+    expect(e.vy).toBeCloseTo(-1.1, 6);                          // 浮力照常
+    expect(e.waitTime).toBe(20);                                // WaitTime 保持
+  });
+});
+
+describe('★1457 Flyer IsBlockedByMedium 液体遮挡门（FlyerLeashedCritter.cs:139-197）', () => {
+  /** 干净地形世界：水/异液按格手注 */
+  function basin(): TileStore {
+    return new TileStore(24, 24);
+  }
+  const liq = (st: TileStore, x: number, y: number, amount: number, type = 1) => {
+    st.liquid[st.idx(x, y)] = amount;
+    if (amount > 0 || type !== 1) st.liquidType[st.idx(x, y)] = type;
+  };
+
+  it('IsLiquidBoundary 三分支：partial=边界 / 满液面顶格=边界 / 实心·平台承满液按 tileSolidTop 分流 / 异液', () => {
+    const st = basin();
+    liq(st, 2, 4, 80);                                          // partial（:168-171）
+    expect(isFlyerLiquidBoundary(st, 2, 4)).toEqual([true, 80, false]);
+    liq(st, 6, 6, 255);                                         // 满液+上方空气 → 出水方向边界
+    expect(isFlyerLiquidBoundary(st, 6, 6)[0]).toBe(true);
+    liq(st, 10, 8, 255);
+    st.setTile(10, 7, T.STONE);                                 // 洞底满液上压实心块
+    expect(isFlyerLiquidBoundary(st, 10, 8)[0]).toBe(false);    // 实心非台面 → :178-181 假支
+    liq(st, 14, 6, 255);
+    st.setTile(14, 5, T.PLATFORM, 54);                          // 平台承满液
+    expect(isFlyerLiquidBoundary(st, 14, 6)[0]).toBe(true);     // tileSolidTop[19]=true → 真
+    // 干燥空域（上下皆干，两端走空 tile 分支）
+    expect(isFlyerLiquidBoundary(st, 20, 20)).toEqual([false, 0, false]);
+    // 异液判读：本仓 honey 编码=3 → vanilla 2 >0 ⇒ weird
+    liq(st, 18, 4, 100, 3);
+    expect(isFlyerLiquidBoundary(st, 18, 4)).toEqual([true, 100, true]);
+  });
+
+  it('IsBlockedByMedium 对称谓词：鱼不出水面 / 鸟不入液 / 异液免检 / 同格免检（:139-157）', () => {
+    const st = basin();
+    // 池体：(10..14, 10..12) 全 255 水
+    for (let x = 10; x <= 14; x++) for (let y = 10; y <= 12; y++) liq(st, x, y, 255);
+    const O = [12, 11] as const;                                // 水腹地（amount=255）
+    // 鱼（aquatic threshold 255）：留在水里不拦，离水拦
+    expect(flyerIsBlockedByMedium(st, true, ...O, 12, 11)).toBe(false);     // 同格
+    expect(flyerIsBlockedByMedium(st, true, ...O, 13, 11)).toBe(false);     // 水内移动
+    expect(flyerIsBlockedByMedium(st, true, ...O, 17, 17)).toBe(true);      // 出水（目的格干）
+    // 鸟（threshold 0）：从干处扎进水 / 扎进界面上方边界格都拦
+    expect(flyerIsBlockedByMedium(st, false, 8, 8, 12, 11)).toBe(true);     // 入液
+    expect(flyerIsBlockedByMedium(st, false, 12, 8, 12, 9)).toBe(true);     // 目的格=水面边界（下邻 255）
+    expect(flyerIsBlockedByMedium(st, false, 8, 8, 5, 5)).toBe(false);      // 干对干放行
+    // origin 异液中（蜂蜜）整段免检——partial/异液起点保持运动自由度
+    liq(st, 20, 20, 200, 3);                                    // honey 本仓 3 = vanilla 2
+    expect(flyerIsBlockedByMedium(st, false, 20, 20, 12, 11)).toBe(false);
+    // origin 已在边界格同样免检（对称谓词第一段不过）
+    expect(flyerIsBlockedByMedium(st, false, 12, 9, 12, 11)).toBe(false);
+  });
+
+  it('遮挡门接入 Update 探针段：前路立即入液 → 停摆（vx 归零、位置不动）；干路对照照飞', () => {
+    const build = () => {
+      const st = new TileStore(120, 80);
+      for (let y = 41; y < 60; y++) for (let x = 50; x < 110; x++) st.setTile(x, y, T.DIRT);
+      return st;
+    };
+    // 有水：蝴蝶在 (60,20) 朝右飞，(61..63,19..21) 全水。
+    // 先暖一帧让 section 激活跑完 Spawn(false)（否则激活帧会归位并重掷目标）
+    const stW = build();
+    for (let x = 61; x <= 63; x++) for (let y = 19; y <= 21; y++) stW.setLiquid(x, y, 255, 1);
+    const mW = mkManager(stW);
+    const bw = mW.spawnCritter(60, 20, 1994, { seed: 1 })!;     // normalButterfly（flyer 引擎）
+    mW.update({ store: stW }, mkEnv(), bw.cx, bw.cy);
+    bw.waitTime = 600;                                          // 冻结目标重掷
+    bw.tx = 90; bw.ty = 20;                                     // 远目标 → near=false
+    bw.vx = 1; bw.vy = 0;
+    const startX = bw.cx, startY = bw.cy;
+    mW.update({ store: stW }, mkEnv(), bw.cx, bw.cy);
+    expect(bw.cx).toBe(startX);                                 // 未动
+    expect(bw.cy).toBe(startY);
+    expect(bw.vx).toBe(0);                                      // 速度归零
+    expect(bw.vy).toBe(0.0001);                                 // 悬空微速度恢复（:114 非 snap 支）
+    // 干路对照：同一出发位无水 → 正常位移
+    const stD = build();
+    const mD = mkManager(stD);
+    const bd = mD.spawnCritter(60, 20, 1994, { seed: 1 })!;
+    mD.update({ store: stD }, mkEnv(), bd.cx, bd.cy);           // 暖帧同上
+    bd.waitTime = 600; bd.tx = 90; bd.ty = 20; bd.vx = 1; bd.vy = 0;
+    const startDx = bd.cx;
+    mD.update({ store: stD }, mkEnv(), bd.cx, bd.cy);
+    expect(bd.cx).toBeGreaterThan(startDx);
+  });
+});
+
+describe('★1457 DrawBubble 档缩放（LeashedCritter.DrawBubble :295-307）', () => {
+  it('bubbleScaleTier：帧体内域小于泡时恒 1，大个体（大帧×scale）整体放大', () => {
+    const gw = 26, gh = 30;                                     // Gore_413 语义尺寸示例
+    // 小个体 0.75 缩随机档 + 小帧 → 两轴均 <1 → 下限 1
+    expect(bubbleScaleTier(16, 20, 0.75, gw, gh)).toBe(1);
+    // 大帧 X 主导
+    expect(bubbleScaleTier(100, 20, 1, gw, gh)).toBeCloseTo(100 / (gw - 8), 6);
+    // scale 参与（Y 主导）
+    expect(bubbleScaleTier(30, 44, 1.1, gw, gh)).toBeCloseTo((44 * 1.1) / (gh - 8), 6);
+    // 退化输入退 1 倍（图集未就绪兜底）
+    expect(bubbleScaleTier(0, 0, 1, gw, gh)).toBe(1);
+    expect(bubbleScaleTier(16, 20, 0.75, 4, 4)).toBe(1);
   });
 });
