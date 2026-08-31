@@ -110,7 +110,7 @@ function stellarStrike(
   const critGuitar = Math.random() < critChance;
   const snapBonusGuitar = projectileSnapStrikeBonus(game, proj ?? null,
     e.x + e.w / 2, e.y + e.h / 2, e.id,
-    { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+    { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
   e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage))
     + (snapBonusGuitar ? Math.trunc(snapBonusGuitar * (critGuitar ? 2 : 1)) : 0),
     kx, 0, game, armorPen,

@@ -4976,6 +4976,15 @@ export class Game implements GameHooks {
             console.warn(`[housing] 读档过滤幽灵 home: ${n.key} @(${n.home[0]},${n.home[1]}) 不在任何房间内 —— 已转 homeless`);
           }
         }
+        // 守卫老人特例（2026-08-31）：原版老人锚=地牢口【开敞】走廊，不套围合——
+        // 导入 wld 的老人条目 home 落地牢口无房墙区域属正常态,snap 必失败。此时
+        // 丢弃存档条目走下方 !some(old_man) 分支 maybeRespawnOldMan 重扫门口重建
+        // （Game.ts:5361 同款 door 锚+leashHome），与自有存档老人生成语义合流。
+        // 骷髅王已败/无地牢世界维持直加（t 无 home,同旧导入行为）。
+        if (n.key === 'old_man' && !t.home
+          && this.world.dungeonX > 0 && !this.skeletronDowned()) {
+          continue;
+        }
         this.entities.add(t, 'npcs');
       }
       // 向导：存档无向导条目才按新世界语义出生（WorldGen.cs:20036）；吸血鬼种子世界

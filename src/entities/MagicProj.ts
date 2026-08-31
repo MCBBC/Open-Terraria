@@ -141,7 +141,7 @@ export class MagicProj extends Entity {
         // 未来分流时自动生效）。返回 num14 加伤随暴击并入实伤参。
         const snapBonusMagic = projectileSnapStrikeBonus(game, this, e.x + e.w / 2, e.y + e.h / 2,
           (e as unknown as { id?: number }).id ?? -1,
-          { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+          { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
         e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
           + (snapBonusMagic ? Math.trunc(snapBonusMagic * (crit ? 2 : 1)) : 0),
           Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点

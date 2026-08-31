@@ -343,16 +343,16 @@ describe('诡药 3001：随机回复 + 10/20/30% 档 240/120/60 i-帧', () => {
       spy.mockRestore();
     }
   });
-  it('i-帧只取 max 不缩短既有无敌帧；值域 70..120 全域可达', () => {
+  it('★Notes② i-帧无条件覆写形（:38298 字面）——可缩短既有无敌帧；值域 70..120 全域可达', () => {
     const { g, p } = mkRoll();
     p.iframes = 100;
     vi.spyOn(Math, 'random').mockReturnValueOnce(0.5).mockReturnValueOnce(0.05);
     g.strangeBrewRoll();
-    expect(p.iframes).toBe(240);            // max(100,240)
+    expect(p.iframes).toBe(240);            // 100 → 240 提升
     p.iframes = 300;
     vi.spyOn(Math, 'random').mockReturnValueOnce(0.5).mockReturnValueOnce(0.05);
     g.strangeBrewRoll();
-    expect(p.iframes).toBe(300);            // 既有更长不缩短
+    expect(p.iframes).toBe(240);            // 旧 max 合并保 300；原版 :38298 无条件覆写 → 缩短为档位 240
     vi.restoreAllMocks();
     const seen = new Set<number>();
     for (let i = 0; i < 4000; i++) seen.add(mkRoll().g.strangeBrewRoll());

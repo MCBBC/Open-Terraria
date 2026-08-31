@@ -13,9 +13,9 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
-import { RNG } from '../src/core/rng';
+import { RNG, UnifiedRandom } from '../src/core/rng';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
-import { runMicroBiomesPass } from '../src/world/gen/vanilla/MicroBiomesPass';
+import { runMicroBiomesPass, placeLavaTrap } from '../src/world/gen/vanilla/MicroBiomesPass';
 import { snapshotGenSolid, restoreGenSolid } from '../src/world/gen/vanilla/GenSolid';
 
 const RUN_CAP = process.env.SW_I121CAP === '1';
@@ -177,9 +177,14 @@ const le16 = (p: string): Uint16Array => {
   // 118MB/118LT 镜像流（SW_I121_SEG=1）：对拍 rig drlog 用；rc 同源 mbDraws
   const segLog: string[] = [];
   (globalThis as unknown as { __swMbDraws?: () => number }).__swMbDraws = () => rcBox.n;
+  // ★真·样本计数（__swOnRoll = x86 JJHook.OnRoll 织入位）——rcBox 含包装层重复计数,
+  //   与 RollCount2 语义不同;本计数与 x86 drlog 的第6列同语义可直接对拍
+  let trueRolls = 0;
+  const oRoll = (globalThis as unknown as { __swOnRoll?: unknown }).__swOnRoll;
+  (globalThis as unknown as { __swOnRoll?: unknown }).__swOnRoll = () => { trueRolls++; };
   if (process.env.SW_I121_SEG === '1') {
     (globalThis as unknown as { __swSeg?: (name: string, d?: unknown) => void }).__swSeg =
-      (name: string, d?: unknown) => { segLog.push(`${name}|${d === undefined ? '' : JSON.stringify(d)}|${rcBox.n}`); };
+      (name: string, d?: unknown) => { segLog.push(`${name}|${d === undefined ? '' : JSON.stringify(d)}|rc=${trueRolls}`); };
   }
   // MBWRITE 全域写监视：记录本 pass 内每个写入格（act/type/wall/liq 任一变化）+ 掷位序
   const beforeAct = xa.slice().subarray(0, 0); void beforeAct;
@@ -195,7 +200,8 @@ const le16 = (p: string): Uint16Array => {
     segLog.length = 0;
     (globalThis as unknown as { __swSeg?: unknown }).__swSeg = undefined;
   }
-  console.log(`runMicroBiomesPass ${Date.now() - t0}ms rolls=${rcBox.n} chestsIn=${chests.length}`);
+  console.log(`runMicroBiomesPass ${Date.now() - t0}ms rolls=${rcBox.n} TRUE-rolls=${trueRolls} chestsIn=${chests.length}`);
+  (globalThis as unknown as { __swOnRoll?: unknown }).__swOnRoll = oRoll;
   // 八通道对拍（mile8 同构）
   let dA = 0, dT = 0, dW = 0, dL = 0, dHf = 0, dSl = 0, dLt = 0, dIa = 0, dGh = 0;
   const pair = new Map<string, number>();
@@ -247,3 +253,42 @@ const le16 = (p: string): Uint16Array => {
   console.log(`replay cmp vs #${CMP_IDX}_${DUMPNAME.get(CMP_IDX)}: A=${dA} T=${dT} W=${dW} L=${dL} Hf=${dHf} Sl=${dSl} Lt=${dLt} Ia=${dIa} (Gh=${dGh}) ` +
     `${bad ? `✗ first=${fI < 0 ? '' : `(${fI % W},${Math.floor(fI / W)})`} pairs=` + [...pair.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, n]) => `${k}×${n}`).join(' ') : '✓ zero'}`);
 }, 900_000);
+
+const RUN_MATCH = process.env.SW_I121MATCH === '1';
+
+(RUN_MATCH ? it : it.skip)('locate x86 lava-phase start sample index', () => {
+  const drl = process.env.SW_I121_DRL ?? `${OUT}/x86r-i121/drl.txt`;
+  const xs: number[][] = [];
+  for (const l of readFileSync(drl, 'utf8').split('\n')) {
+    if (!l.startsWith('118LT|')) continue;
+    const p = l.split('|');
+    xs.push([Number(p[1]), Number(p[2]), Number(p[3]), Number(p[4]), Number(p[5])]);
+  }
+  console.log(`x86 records=${xs.length}`);
+  const F = xs.findIndex(r => r[4] === 1);
+  const chain = xs.slice(0, F + 1);   // 失败链 + 首成功
+  console.log(`first success idx=${F} x,y=(${chain[F][2]},${chain[F][3]})`);
+  const seedNum = Math.abs(Number(SEED));
+  // 正向快进 + 候选起点：需要先有样本序列。做法：维护克隆式状态检查成本高，
+  // 改为**逐候选重放**：从 0 快进到 s（next() 消耗），再验证链。300k×重放太大
+  // ⇒ 反转：线性扫描时对每个位置 p 记录 (pair) 是否等于首失败尝试坐标，再浅验。
+  // 简化实现：一次遍历，缓存连续两 raw? Next(min,max) 由 sample 映射而非裸 int——
+  // 因此直接在每个消费点做映射判断不可行 ⇒ 采用「顺序推进 + 链匹配」贪心：
+  // 只有当当前连续两次 Next(200,4000)/Next(795,990) 恰好等于首条记录才进入链验。
+  let attempts = 0; const cands: number[] = [];
+  for (;;) {
+    // 读一对 draw
+    const r1 = ur.peek();
+    void r1;
+    const a = ur.nextIntRange(200, 4000);
+    const b = ur.nextIntRange(795, 990);
+    if (a === chain[0][2] && b === chain[0][3] && chain[0][4] === 0) {
+      cands.push(attempts);
+    }
+    attempts++;
+    // placeLavaTrap 只在成功分支写盘；失败链纯读。找到全部候选后停止扩展上限
+    if (attempts > 320000) break;
+  }
+  console.log(`scan done cands=[${cands}]`);
+  void placeLavaTrap; void st;
+});

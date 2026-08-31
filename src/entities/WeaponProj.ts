@@ -354,8 +354,8 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     // （banner 采样在 :13387 先于加伤 :14457 ⇒ 加伤不进 applyBannerDamageDealt 面）。
     const snapBonusHitEnemies = projectileSnapStrikeBonus(game, self,
       (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
-      e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
-        cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+      e.id, { victimBox: { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+        cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
     e.hurt(applyBannerDamageDealt(game, e, dmg)
       + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0),
       kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
@@ -2849,7 +2849,7 @@ export class YoyoShotProj extends Entity {
       // 1135 Kraken 波，SetDefaults friendly/melee 数据面）结算位；门+触发 =
       // projectileSnapStrikeBonus 单源，加伤随暴击并入实伤参（不吃旗乘区）
       const snapBonusYoyoSib = projectileSnapStrikeBonus(game, this, e.x + e.w / 2, e.y + e.h / 2, e.id,
-        { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+        { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
         + (snapBonusYoyoSib ? Math.trunc(snapBonusYoyoSib * (crit ? 2 : 1)) : 0),
         kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
@@ -3902,7 +3902,8 @@ export class GrenadeProj extends Entity {
           // 双支（Projectile.cs:13439-13446）随接触生效；手雷族数据面 ranged。
           // 加伤随暴击并入实伤参（F1 迁移注见 stats/SnapStrike.ts）。
           const snapBonusGrenade = projectileSnapStrikeBonus(game, this, e.x + e.w / 2, e.y + e.h / 2,
-            e.id, { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+            (e as unknown as { id?: number }).id ?? -1,
+            { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
           e.hurt?.(this.damage
             + (snapBonusGrenade ? Math.trunc(snapBonusGrenade * (crit ? 2 : 1)) : 0),
             dir * this.contactKb, 0, game, this.contactPen, crit, 0, true);
@@ -4129,8 +4130,8 @@ export class GrenadeProj extends Entity {
           // ★F3 接线（蓝队四轮）：投掷支接触环 = 第二处引爆面（发射支 3906 同款）——
           // 焰爆石/拍击石双支随标准 Damage_PVE 生效,加伤随暴击并入实伤参
           const snapBonusGrenadeThrow = projectileSnapStrikeBonus(game, this,
-            e.x + e.w / 2, e.y + e.h / 2, e.id,
-            { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+            e.x + e.w / 2, e.y + e.h / 2, (e as unknown as { id?: number }).id ?? -1,
+            { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
           e.hurt?.(this.damage
             + (snapBonusGrenadeThrow ? Math.trunc(snapBonusGrenadeThrow * (crit ? 2 : 1)) : 0),
             dir * this.contactKb, 0, game, this.contactPen, crit, 0, true);
@@ -4936,8 +4937,8 @@ export class DaybreakFlare extends Entity {
       const snapBonusFlare = projectileSnapStrikeBonus(game, this,
         (e as { cx?: number }).cx ?? e.x + e.w / 2,
         (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
-        { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
-          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+        { victimBox: { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
         + (snapBonusFlare ? Math.trunc(snapBonusFlare * (crit ? 2 : 1)) : 0),
         (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计

@@ -9,6 +9,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const b = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
 const p = await b.newPage();
+if (process.env.SW_STRICT === '1') {
+  await p.evaluateOnNewDocument(() => { try { localStorage.setItem('sw_vanilla_framing_strict', '1'); } catch {} });
+}
 p.on('pageerror', (e) => console.log('[pageerror]', String(e).slice(0, 160)));
 await p.goto(`${ORIGIN}/?nosw`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await p.waitForFunction(() => typeof window.__swLoadJson === 'function', { timeout: 180000 });

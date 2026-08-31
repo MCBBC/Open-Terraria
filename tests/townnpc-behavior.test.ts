@@ -706,7 +706,10 @@ describe('P1-5 社交掷骰（NPC.cs:55630-55835）', () => {
     npc.rng = () => 0.9;
     for (let t = 0; t < 3; t++) npc.fixedUpdate(1 / 60, game);   // 落地
     let i = 0;
-    npc.rng = () => [0.9, 0.9, 0.9, 0][i++ % 4];   // 聊天/RPS/舞不中 → 发呆中
+    // 掷序标定（★蓝队 F1 批重标定，2026-08-31）：新两支（550 啤酒/229 海盗）入链 +
+    // 分支阶梯「命中即收尾」语义落地后，实测每拍耗掷 = 拴绳1 + 链五支各1，
+    // 发呆槽落在周期 5 的第 2 位（其余位 0.9 恒不中——聊天/RPS/舞/酒馆全让路）。
+    npc.rng = () => [0.9, 0.9, 0, 0.9, 0.9][i++ % 5];
     for (let t = 0; t < 3 && npc.socialKind !== 2; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.socialKind).toBe(2);
     for (let t = 0; t < 44; t++) npc.fixedUpdate(1 / 60, game);
@@ -725,7 +728,9 @@ describe('P1-5 社交掷骰（NPC.cs:55630-55835）', () => {
     npc.rng = () => 0.9;
     for (let t = 0; t < 3; t++) npc.fixedUpdate(1 / 60, game);
     let i = 0;
-    npc.rng = () => [0.9, 0.9, 0.9, 0.9, 0][i++ % 5];   // 聊天/RPS/舞/发呆不中 → 看玩家中
+    // 掷序标定（同上，2026-08-31）：看玩家槽 = 周期 4 第 2 位；前一位 + 本位
+    // 前置的链上先行掷不中（0.9）。海盗支在发呆后、看玩家前各一掷已计入周期。
+    npc.rng = () => [0.9, 0.9, 0, 0.9][i++ % 4];
     for (let t = 0; t < 3 && npc.socialKind !== 7; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.socialKind).toBe(7);
     expect(npc.facing).toBe(1);       // 玩家在右
@@ -779,7 +784,9 @@ describe('P1-6 派对跳舞（NPC.cs:55704-55730/:69645-69700）', () => {
     npc.rng = () => 0.9;
     for (let t = 0; t < 3; t++) npc.fixedUpdate(1 / 60, game);
     let i = 0;
-    npc.rng = () => [0.9, 0.9, 0][i++ % 3];   // 聊天/RPS 不中 → 舞掷中
+    // 掷序标定（2026-08-31）：舞槽 = 周期 3 首位（0 命中）；其后两拍 0.9 让链上
+    // 其余支全部落空。护士 AttackType==0 + 派对开着 + 玩家 150px 内。
+    npc.rng = () => [0, 0.9, 0.9][i++ % 3];
     for (let t = 0; t < 3 && npc.socialKind !== 6; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.socialKind).toBe(6);
     const frames: number[] = [];
@@ -800,7 +807,8 @@ describe('P1-6 派对跳舞（NPC.cs:55704-55730/:69645-69700）', () => {
     npc.rng = () => 0.9;
     for (let t = 0; t < 3; t++) npc.fixedUpdate(1 / 60, game);
     let i = 0;
-    npc.rng = () => [0.9, 0.9, 0][i++ % 3];
+    // 掷序标定（2026-08-31，同护士案）：208 无条件支首位命中即入舞态
+    npc.rng = () => [0, 0.9, 0.9][i++ % 3];
     for (let t = 0; t < 3 && npc.socialKind !== 6; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.socialKind).toBe(6);
   });

@@ -2190,15 +2190,16 @@ export class TownNPC extends Entity {
         // （CanBeTalkedTo 不满足 / >200px / Top 锚无 LOS）→ t=0；否则面向玩家。
         // ★2026-08-31 台账批：补 Player.CanBeTalkedTo(:3872 stealth==1f 面)；
         //   LOS 端点由盒左上角改 Entity.Top（中心-X,顶-Y）
-        const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean } }).player;
+        const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; dead: boolean } }).player;
         const pStealth = pl ? ((pl as unknown as { stealth?: number }).stealth ?? 1) : 1;
         const talkable = !!pl && !pl.dead && pStealth >= 1;
+        const pTopX = pl ? pl.x + pl.w / 2 : 0;
         if (!talkable
-          || Math.hypot(pl!.x + pl!.w / 2 - this.cx, pl!.y + pl!.h / 2 - this.cy) > 200
-          || !canHitLine(world.store, this.cx, this.y, 0, 0, pl!.cx, pl!.y, 0, 0)) {
+          || Math.hypot(pTopX - this.cx, pl!.y + pl!.h / 2 - this.cy) > 200
+          || !canHitLine(world.store, this.cx, this.y, 0, 0, pTopX, pl!.y, 0, 0)) {
           s.t = 0;                                           // :54870-54874
         } else {
-          this.facing = pl!.x + pl!.w / 2 < this.cx ? -1 : 1;  // :54876-54882
+          this.facing = pTopX < this.cx ? -1 : 1;            // :54876-54882
         }
       }
       if (s.kind === 24) {
@@ -2271,10 +2272,10 @@ export class TownNPC extends Entity {
         || (!!world.scene?.partyUp && (TOWN_ATTACK_TYPE[this.vanillaId] ?? -1) === 0))) {
       // ③ 派对舞（:55860-55884 前段）：208 派对女孩恒掷；其余=派对中近战族
       // （AttackType[208]=0 同族）；玩家 150px + LOS（Top 锚）
-      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean } }).player;
+      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; dead: boolean } }).player;
       if (pl && !pl.dead
-        && Math.hypot(pl.cx - this.cx, pl.cy - this.cy) < 150
-        && canHitLine(world.store, this.cx, this.y, 0, 0, pl.cx, pl.y, 0, 0)) {
+        && Math.hypot(pl.x + pl.w / 2 - this.cx, pl.y + pl.h / 2 - this.cy) < 150
+        && canHitLine(world.store, this.cx, this.y, 0, 0, pl.x + pl.w / 2, pl.y, 0, 0)) {
         this.social = { kind: 6, t: 300, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
         this.facing = pl.x + pl.w / 2 < this.cx ? -1 : 1;
         return true;
@@ -2284,10 +2285,10 @@ export class TownNPC extends Entity {
       // ④' 酒馆老板扔麦酒演出（:55886-55905 新批）：站定 1/600，玩家 150px +
       // CanHitLine(Top→Top) 才演——ai0=18 / ai1=300 / ai2=玩家槽 / 面向玩家。
       // FindFrame 档见 socialFrame case 18（终值帧常驻 npcFrameCount−2 反编译原文）
-      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean } }).player;
+      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; dead: boolean } }).player;
       if (pl && !pl.dead
-        && Math.hypot(pl.cx - this.cx, pl.cy - this.cy) < 150
-        && canHitLine(world.store, this.cx, this.y, 0, 0, pl.cx, pl.y, 0, 0)) {
+        && Math.hypot(pl.x + pl.w / 2 - this.cx, pl.y + pl.h / 2 - this.cy) < 150
+        && canHitLine(world.store, this.cx, this.y, 0, 0, pl.x + pl.w / 2, pl.y, 0, 0)) {
         this.social = { kind: 18, t: 300, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
         this.facing = pl.x + pl.w / 2 < this.cx ? -1 : 1;
         return true;
@@ -2311,10 +2312,10 @@ export class TownNPC extends Entity {
       //   &&stealth==1f——隐身衣/潜行未满格不点头)+UI 占用工程门(input.uiBlocking≈
       //   原版 mouseInterface/smartInteract 家族,背包/挂牌/商店开着不点头,登记择优叠加);
       //   LOS 端点改 Entity.Top 中心锚。220t；帧 16t 冒 112、160t 冒 60
-      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean } }).player;
+      const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; dead: boolean } }).player;
       if (pl && !pl.dead
-        && Math.hypot(pl.cx - this.cx, pl.cy - this.cy) < 150
-        && canHitLine(world.store, this.cx, this.y, 0, 0, pl.cx, pl.y, 0, 0)) {
+        && Math.hypot(pl.x + pl.w / 2 - this.cx, pl.y + pl.h / 2 - this.cy) < 150
+        && canHitLine(world.store, this.cx, this.y, 0, 0, pl.x + pl.w / 2, pl.y, 0, 0)) {
         this.social = { kind: 7, t: 220, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
         this.facing = pl.x + pl.w / 2 < this.cx ? -1 : 1;
         return true;
@@ -3699,7 +3700,7 @@ export class TownNPC extends Entity {
     if (a >= 500) radius = 600 + (1200 - 600) * Math.min(1, (a - 500) / 100);
     else if (a >= 100) radius = 300 + (600 - 300) * Math.min(1, (a - 100) / 200);
     if (a >= 30) {
-      const pl = (game as { player?: typeof import('./Player').Player | undefined }).player;   // 测试桩可能不载 player——生产恒有，防御读
+      const pl = (game as unknown as { player?: import('./Player').Player | undefined }).player;   // 测试桩可能不载 player——生产恒有，防御读
       if (pl && !pl.dead
         && Math.hypot(pl.cx - this.cx, pl.cy - this.cy) <= radius) {
         pl.buffs.apply(BuffType.DryadsWard, 2);   // AddBuff(165,120)=2s
