@@ -239,6 +239,10 @@ function setLivingWood(st: TileStore, x: number, y: number): void {
 function setLeaf(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
+  // ★IIIII100b LF 对位仪：叶写覆盖取证（active 覆盖 / 幽灵上覆写均记录）
+  if (MK109 && x >= 1030 && x <= 1120 && y >= 205 && y <= 260 && st.type[i] !== 0 && st.type[i] !== LEAF) {
+    mk109(`LF|x=${x}|y=${y}|prev=${TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1}|a=${st.flags[i] ? 1 : 0}`);
+  }
   st.type[i] = LEAF;
   st.flags[i] = 1;
   st.half[i] = 0;
@@ -316,6 +320,10 @@ function killTileGen(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (!st.flags[i]) return;
+  // ★IIIII100b KIL 对位仪：生成期 Kill 逐格取证（SW_I109_MARK 门控；区域盒内全量）
+  if (MK109 && inWorld(st, x, y, 0) && x >= 1030 && x <= 1120 && y >= 205 && y <= 260) {
+    mk109(`KIL|x=${x}|y=${y}|t=${TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1}|fx=${st.frameX[i]}|fy=${st.frameY[i]}`);
+  }
   if (checkTileBreakability(st, x, y) === 2) return;
   st.flags[i] = 0;
 
@@ -348,20 +356,28 @@ function check3x2Pile(st: TileStore, i: number, j: number): void {
   const num7 = n6 * 54;
   const num8 = num + 2;
   let flag = false;
+  // ★IIIII100b K3X 对位仪：失败谓词取证（区域盒内逐因记录）
+  const dbgK = MK109 && num >= 205 && num <= 260 && n5 >= 1030 && n5 <= 1120;
+  let whyK = '';
   for (let k = n5; k < n5 + 3; k++) {
     for (let l = num; l < num8; l++) {
-      if (!st.inBounds(k, l)) { flag = true; continue; }
+      if (!st.inBounds(k, l)) { flag = true; whyK += `oob(${k},${l})`; continue; }
       const idx = st.idx(k, l);
       if (!st.flags[idx] || st.type[idx] !== PILE2
         || st.frameX[idx] !== (k - n5) * 18 + num7
         || st.frameY[idx] !== (l - num) * 18 + num3 * 36) {
         flag = true;                                 // cs:49235-49241 六格一致
+        if (dbgK) whyK += `c6(${k},${l},a${st.flags[idx] ? 1 : 0},t${TILE_DEFS[st.type[idx]]?.vanilla?.sheet ?? -1})`;
       }
     }
     // ★IIIII73：cs:49708 SolidTileAllowBottomSlope 支撑行（原 solidAt——平台支承缺失案）
-    if (!ltSolidAllowBottomSlope(st, k, num8)) flag = true;
+    if (!ltSolidAllowBottomSlope(st, k, num8)) {
+      flag = true;
+      if (dbgK) whyK += `sup(${k},${num8},a${activeAt(st, k, num8) ? 1 : 0},t${TILE_DEFS[st.type[st.idx(k, num8)]]?.vanilla?.sheet ?? -1})`;
+    }
   }
   if (!flag) return;                                 // cs:49416
+  if (dbgK) mk109(`K3X|i=${i}|j=${j}|o=${n5},${num}|why=${whyK}`);
   for (let k = n5; k < n5 + 3; k++) {
     for (let l = num; l < num8; l++) {
       if (!st.inBounds(k, l)) continue;
@@ -1229,6 +1245,10 @@ export function growLivingTree(
           } else {
             mk109(`TPs|c=${n43}|x=${n50}|bt=${sheetAt(st, n50, n52 + 1)}`);
           }
+        } else if (MK109) {
+          // ★IIIII100b 对位仪：外门跳过支（与 rig TPG 同构,对齐用零掷）
+          const bt = TILE_DEFS[typeAt(st, n50, n52)]?.vanilla?.sheet ?? -1;
+          mk109(`TPG|c=${n43}|x=${n50}|t=${bt}|a=${activeAt(st, n50, n52) ? 1 : 0}`);
         }
       }
       if (ax7[n43]) continue;

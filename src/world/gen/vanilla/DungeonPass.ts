@@ -4884,7 +4884,8 @@ const snap: SnapFn = (name) => {
       } else if (num18 === 2) {
         if (iVase > -1 && place2xXD(num3, j, DG_ITEM_TILE[iVase], 3, DG_ITEM_STYLE[iVase] ?? 0)) { dgFurnResult = 'ok'; return; }
       } else if (num18 === 3) {
-        if (iBook > -1) place3x4D(num3, j, DG_ITEM_TILE[iBook]);
+        // ★IIIII99d：style 透传（vanilla PlaceTile(101,style)，曾丢 style=帧带恒 0）
+        if (iBook > -1) place3x4D(num3, j, DG_ITEM_TILE[iBook], DG_ITEM_STYLE[iBook] ?? 0);
       } else if (num18 === 4) {
         // ★cs:794-807 椅分支：Next(2) 方向掷（0=翻转镜像帧 +=18；掷必耗）
         if (iChair > -1) {
@@ -4902,7 +4903,8 @@ const snap: SnapFn = (name) => {
         // ★cs:820-829 床分支：Next(2) direction 掷 → Place4x2(dir)
         if (iBed > -1) {
           const dir = rn(2) === 0 ? 1 : -1;
-          if (place4x2D(num3, j, DG_ITEM_TILE[iBed], dir)) { dgFurnResult = 'ok'; return; }
+          // ★IIIII99d：style 透传（Place4x2(...,direction,style) 原版形）
+          if (place4x2D(num3, j, DG_ITEM_TILE[iBed], dir, DG_ITEM_STYLE[iBed] ?? 0)) { dgFurnResult = 'ok'; return; }
         }
       } else if (num18 === 6) {
         if (iPiano > -1 && place3x2D(num3, j, DG_ITEM_TILE[iPiano], DG_ITEM_STYLE[iPiano] ?? 0)) { dgFurnResult = 'ok'; return; }
@@ -4914,7 +4916,8 @@ const snap: SnapFn = (name) => {
         // ★cs:833-842 浴缸分支：Next(2) direction 掷
         if (iTub > -1) {
           const dir = rn(2) === 0 ? 1 : -1;
-          if (place4x2D(num3, j, DG_ITEM_TILE[iTub], dir)) { dgFurnResult = 'ok'; return; }
+          // ★IIIII99d：style 透传（浴缸 item2658-60→21/22/23、5739→47）
+          if (place4x2D(num3, j, DG_ITEM_TILE[iTub], dir, DG_ITEM_STYLE[iTub] ?? 0)) { dgFurnResult = 'ok'; return; }
         }
       } else if (num18 === 10) {
         if (iLamp > -1 && place1xXD(num3, j, DG_ITEM_TILE[iLamp], 3, DG_ITEM_STYLE[iLamp] ?? 0)) { dgFurnResult = 'ok'; return; }
@@ -5061,24 +5064,47 @@ const snap: SnapFn = (name) => {
     }
     return true;
   }
-  // Place3x4（cs:51943 书架101）
-  function place3x4D(x: number, y: number, t: number): boolean {
+  // Place3x4（cs(1458):52379 书架101）
+  // ★IIIII99d 帧写落地（cs:52416-52434）+ style 参数补通（vanilla 经 PlaceTile
+  //   style 入参，item1414-16→1/2/3、1512→5）：frameX=style*54+col*18、frameY=row*18。
+  //   曾裸 dgWr 帧全 0——Check3x4(cs:50526) 锚反解必得假原点（派发于本批
+  //   FinalCleanupPass check3x4Sweep 同批启用，消费者照原版读帧）。
+  function place3x4D(x: number, y: number, t: number, style = 0): boolean {
+    if (x < 5 || x > w - 5 || y < 5 || y > h - 5) return false;
     for (let i = x - 1; i < x + 2; i++) {
       for (let j = y - 3; j < y + 1; j++) if (!dgClr(i, j)) return false;
       if (!solidTile2D(i, y + 1)) return false;
     }
-    for (let i = x - 1; i < x + 2; i++) for (let j = y - 3; j < y + 1; j++) dgWr(i, j, t);
+    const bx = style * 54;
+    for (let k = 0; k < 3; k++) for (let l = 0; l < 4; l++) {
+      dgWr(x - 1 + k, y - 3 + l, t);
+      const fi = st.idx(x - 1 + k, y - 3 + l);
+      st.frameX[fi] = bx + k * 18;
+      st.frameY[fi] = l * 18;
+    }
     return true;
   }
-  // Place4x2（cs:50534 床79/浴缸90 direction）
-  function place4x2D(x: number, y: number, t: number, dir: number): boolean {
+  // Place4x2（cs(1458):50969 床79/浴缸90 direction）
+  // ★IIIII99d 帧写落地（cs:51010-51064）——旧版 fx0 算而未用、style 行缺失：
+  //   frameX=col*18+(direction==1?72:0)（72=镜像帧页基，Tiles_79 带二页）、
+  //   frameY=36*style+row*18（样式【竖带】，床 item1470-72→5/6/7、5740→47；
+  //   浴缸 item2658-60→21/22/23、5739→47）。Check4x2(cs:47825) 按 fx≥72 反解
+  //   镜像锚（num+=4），写侧错锚即整组误杀——本批 FinalCleanupPass
+  //   check4x2Sweep 同批启用，两公式对拍成立。
+  function place4x2D(x: number, y: number, t: number, dir: number, style = 0): boolean {
     if (x < 5 || x > w - 5 || y < 5 || y > h - 5) return false;
     for (let a = x - 1; a < x + 3; a++) {
       for (let b = y - 1; b < y + 1; b++) if (!dgClr(a, b)) return false;
       if (!solidTile2D(a, y + 1)) return false;
     }
     const fx0 = dir === 1 ? 72 : 0;
-    for (let a = x - 1; a < x + 3; a++) for (let b = y - 1; b < y + 1; b++) dgWr(a, b, t);
+    const fy0 = 36 * style;
+    for (let k = 0; k < 4; k++) for (let l = 0; l < 2; l++) {
+      dgWr(x - 1 + k, y - 1 + l, t);
+      const fi = st.idx(x - 1 + k, y - 1 + l);
+      st.frameX[fi] = fx0 + k * 18;
+      st.frameY[fi] = fy0 + l * 18;
+    }
     return true;
   }
   // Place2x2（cs:51352 烛台100）
@@ -5088,13 +5114,20 @@ const snap: SnapFn = (name) => {
       const bi = st.idx(i, y + 1);
       if (st.flags[bi] === 0 || (!solidTile2D(i, y + 1) && !TILE_TABLE_D.has(st.type[bi]))) return false;
     }
-    // ★IIIII99b 备案（本批不落地，挂账下批「地牢家具帧正确化」）：真值应写
-    //   frameY=style*36+row*18（烛台 item1408-10→style46/47/48；x86 实测 1692/1710）。
-    //   本批试修后 Piles/Stalac 域掷流二次漂移（toad 全程复跑实证：(3696,566)
-    //   小堆 185 多置 1 格起连片投影）⇒ 下游存在以帧字节为读数的隐性消费者，
-    //   单刀直改写侧不可收口，须连带定罪后再动。残余域=终清理
-    //   (3509..10,529..30)/(3851..52,696..97) 两组烛台 ×8 格挂账。
-    for (let i = x - 1; i < x + 1; i++) for (let j = y - 1; j < y + 1; j++) dgWr(i, j, t);
+    // ★IIIII99d 帧写落地（Place2x2 cs(1458):51872-51881 逐句）：frameX=k*18（列
+    //   偏移）、frameY=style*36+l*18（样式【竖带】，烛台 item2664-66→22/23/24、
+    //   5742→47；x86 实测绿链读数 1692/1710=47*36+{0,18} 同式）。Tiles_100 表高
+    //   2014px 容纳至 style≈55 带，finalize 帧净化(fy<2014)不劫持。
+    //   99b「Piles/Stalac 掷流二次漂移」经查证为并行车道 WIP 混流伪影（同签名亦随
+    //   睡莲臂出现且 XIII 章『并行车道单次回归不可采信』在案），非隐性读帧消费者；
+    //   连带收口=Check2x2 主组派发全集启用（FinalCleanupPass C2X2_MAIN_GROUP），
+    //   写侧与验侧同批落刀保流水线自洽。
+    for (let k = 0; k < 2; k++) for (let l = 0; l < 2; l++) {
+      dgWr(x - 1 + k, y - 1 + l, t);
+      const fi = st.idx(x - 1 + k, y - 1 + l);
+      st.frameX[fi] = k * 18;
+      st.frameY[fi] = style * 36 + l * 18;
+    }
     return true;
   }
   // Place3x3（cs:53549 354/355 分支A；★53650 起 = PlaceSunflower，勿混——

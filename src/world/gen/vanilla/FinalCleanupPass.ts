@@ -186,8 +186,10 @@ function tileCutAt(st: TileStore, x: number, y: number): boolean {
 //   矿轨 314、CheckDye 227、CheckOrb 12/31/639/696、CheckGnome 567、
 //   CheckRockGolemHead 579、693/694、235、442、128/269、91、35/139、386-389、
 //   92/93/453、Check2x2 族（★CCCCC 已派发 138/411——9293480 在场成员；余
-//   132/142/143/288-295/484/664/665/711/712/335/490/564/565/594/94-100/125/126/
-//   173/282/287/319/621/622 维持备案）、172/360/505-527、171、376/443/444、（★YYYYY 已派发 27 向日葵/34 吊灯/5 树/752 蛋；
+//   132/142/143/288-295/484/664/665/711/712/335/490/564/565/594 维持备案；
+//   ★IIIII99d 主组 14 成员 94/95/97/98/99/100/125/126/173/282/287/319/621/622
+//   经 C2X2_MAIN_GROUP 全集派发 + Check3x4 书架族 101/102/463/617 +
+//   Check4x2 床浴缸组 79/90/487 三臂同步启用——写侧帧公式同批清偿）、172/360/505-527、171、376/443/444、（★YYYYY 已派发 27 向日葵/34 吊灯/5 树/752 蛋；
 //   ★DDDDDD +751 龟；★IIIII33 +654 TNT 桶——notraps #98 Settle_Liquids_Again
 //   沉降域在场实证，Traps 域半段已由 PilesPass.pilesSupplementAfterSquareFrame 补臂清偿 #77）
 //   630/631、723/724。
@@ -783,6 +785,8 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   #101 槽 frameSparse=false 不受影响，真实行为由生产管线承载）
     || (sheet >= 82 && sheet <= 84) || sheet === 233 || sheet === 236 || sheet === 238
     || sheet === 702 || CHECK2XX_TYPES.has(sheet) || C2X2_MAIN_GROUP.has(sheet)
+    // IIII99d：Check3x4/Check4x2 自读帧族同列（101-族/床浴缸组，138 同款处置）
+    || CHECK3X4_TYPES.has(sheet) || CHECK4X2_TYPES.has(sheet)
     // VVVVV：Check1x2 椅族/CheckOrb 珠族/484 巨石仙人掌同列（自读帧族）
     || sheet === 15 || sheet === 20 || sheet === 216 || sheet === 338 || sheet === 390
     || sheet === 493 || sheet === 497 || sheet === 590 || sheet === 595 || sheet === 615
@@ -914,6 +918,17 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   （killDustAmount cs:66654）⇒ RNG 流位无移。
     case 138: case 411: case 484: case 752: case 751: case 654:
       check2x2Sweep(st, ctx, x, y, sheet);
+      return true;
+    // ★IIIII99d 批补（cs(1458):87030-33 → Check3x4 cs:50526；case 87035-38 →
+    //   Check4x2 cs:47825）：书架族 + 床/浴缸/野餐桌——写侧帧债（place3x4D 裸写/
+    //   place4x2D fx0 算而未用+style 行缺失）本批清偿后随写侧同批派发，
+    //   #105 大循环 TileFrame 对这些族的完整性校验与原版同流。463/617/102/487
+    //   本仓生成域暂无写入方（零在场=零效应），照原版全组收录备案。
+    case 101: case 102: case 463: case 617:
+      check3x4Sweep(st, ctx, x, y);
+      return true;
+    case 79: case 90: case 487:
+      check4x2Sweep(st, ctx, x, y, sheet);
       return true;
     // YYYYY 批补（cs:86616/52826）：CheckTree 树坍塌 + CheckChand 吊灯——
     //   s22222 #97 vanilla 杀链实证（KillTile 织入：CheckTree 系 118 杀/吊灯 8 杀，
@@ -1106,6 +1121,107 @@ function check2x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
   ctx.destroyObject = false;                                                // cs:48800
   for (let k = num2 - 1; k < num2 + 3; k++) {
     for (let l = num6 - 1; l < num6 + 3; l++) tileFrameGen(st, ctx, k, l, false);   // cs:48801-07
+  }
+}
+
+/* ── Check3x4（cs(1458):50526）书架族 101/102/463/617（IIIII99d 批补派发）──
+ * 3×4 带页完整性：锚反解=frameX/18 列带（54px 页步）+ frameY/18 行带（72px 页步，
+ * Tiles_102 类纵排多页表）；12 格 type+两轴帧位全等 + 逐列 (k,oy+4) 地面门
+ * SolidTileAllowBottomSlope。败 → destroyObject 闸内整组 KillTile（尘掷默认 10/
+ * 格、dice 零档——cs KillTile_MakeTileDust 无 case 101-617 分支实测）+ item 掉落
+ * 不建模（生成域惯例备案）+ 尾 [ox-1..ox+3]×[oy-1..oy+3) TileFrame 复扫
+ * （cs:50598-605）。写侧=DungeonPass.place3x4D/HellFortPass.place3x4HF（同批帧公式
+ * 对拍成立）。 */
+const CHECK3X4_TYPES = new Set([101, 102, 463, 617]);
+function check3x4Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  if (ctx.destroyObject) return;                                            // cs:50529
+  const i0 = st.idx(x, y);
+  const type = SWEEP_SHEET[st.type[i0]!] ?? -1;
+  let num3 = 0, num4 = 0;
+  let num5 = Math.trunc(st.frameX[i0]! / 18);                               // cs:50540
+  let num6 = Math.trunc(st.frameY[i0]! / 18);
+  while (num5 >= 3) { num3++; num5 -= 3; }                                  // cs:50542-47
+  while (num6 >= 4) { num4++; num6 -= 4; }
+  const ox = x - num5;
+  const oy = y - num6;
+  let flag = false;
+  for (let k = ox; k < ox + 3; k++) {                                       // cs:50549（无 break 短路）
+    for (let l = oy; l < oy + 4; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }                    // null→new Tile→!active
+      const qi = st.idx(k, l);
+      if (!st.flags[qi] || (SWEEP_SHEET[st.type[qi]!] ?? -1) !== type
+        || st.frameX[qi] !== num3 * 54 + (k - ox) * 18
+        || st.frameY[qi] !== num4 * 72 + (l - oy) * 18) flag = true;        // cs:50555-56
+    }
+    if (!st.inBounds(k, oy + 4)) { flag = true; continue; }
+    if (!solidAllowBottom(st, k, oy + 4)) flag = true;                      // cs:50561-62
+  }
+  if (!flag) return;                                                        // cs:50564-67
+  ctx.destroyObject = true;                                                 // cs:50569
+  for (let m = ox; m < ox + 3; m++) {
+    for (let n = oy; n < oy + 4; n++) {
+      if (!st.inBounds(m, n)) continue;
+      const qi = st.idx(m, n);
+      if ((SWEEP_SHEET[st.type[qi]!] ?? -1) === type && st.flags[qi]) killTileGen(st, ctx, m, n);
+    }
+  }
+  ctx.destroyObject = false;                                                // cs:50597
+  for (let n7 = ox - 1; n7 < ox + 4; n7++) {
+    for (let n8 = oy - 1; n8 < oy + 4; n8++) tileFrameGen(st, ctx, n7, n8, false);   // cs:50598-605
+  }
+}
+
+/* ── Check4x2（cs(1458):47825）床79/浴缸90/野餐桌487（IIIII99d 批补派发）──────
+ * 4×2 完整性：非 487 锚反解=i-frameX/18（fx≥72 镜像页再 +4，cs:47838-40）、行带
+ * 2 行/36px 步（num3=样式页序）；期望 fx 非 487=(k-num)*18、镜像支 (k-num+4)*18、
+ * fy=(l-top)*18+num3*36；逐列地面门 SolidTileAllowBottomSlope ∪ active&&Platforms
+ * （床可立平台，cs:47906-17 与 Check2x2 的纯实心门互异）。败 → destroyObject 整组杀
+ * （尘掷 dice 零档，amount 默认 10/格）+ GetItemDrop_* 掉落不建模 + 尾
+ * [num-1..num+4)×[top-1..top+4) TileFrame 复扫（cs:47920-29）。写侧=
+ * DungeonPass.place4x2D/HellFortPass.place4x2HF（镜像 72 基与样式行同批落地）。 */
+const CHECK4X2_TYPES = new Set([79, 90, 487]);
+function check4x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
+  if (ctx.destroyObject) return;                                            // cs:47828
+  const i0 = st.idx(x, y);
+  let num = x + Math.trunc(st.frameX[i0]! / 18) * -1;                       // cs:47837（type≠487）
+  if ((sheet === 79 || sheet === 90) && st.frameX[i0]! >= 72) num += 4;     // cs:47838-41 镜像页锚
+  let num2v = Math.trunc(st.frameY[i0]! / 18);
+  let num3 = 0;
+  while (num2v > 1) { num2v -= 2; num3++; }                                 // cs:47842-47（2 行/带）
+  const top = y - num2v;
+  const mirrored = sheet !== 487 && st.frameX[i0]! >= 72;                   // 79/90 镜像判定（487 走自身式）
+  let flag = false;
+  for (let k = num; k < num + 4; k++) {                                     // cs:47856（无 break 短路）
+    for (let l = top; l < top + 2; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }                    // null→new Tile→!active
+      const qi = st.idx(k, l);
+      let wantFx = (k - num) * 18;                                          // cs:47859-65
+      if (mirrored) wantFx = (k - num + 4) * 18;
+      else if (sheet === 487) wantFx += num3 * 72;
+      const wantFy = sheet === 487 ? (l - top) * 18 : (l - top) * 18 + num3 * 36;
+      if (!st.flags[qi] || (SWEEP_SHEET[st.type[qi]!] ?? -1) !== sheet
+        || st.frameX[qi] !== wantFx || st.frameY[qi] !== wantFy) flag = true;
+    }
+    // 地面门（cs:47906-17）：SolidTileAllowBottomSlope(k,top+2) ∨ active&&Platforms——
+    // 床/浴缸/野餐桌允许平台支撑（TileID.Sets.Platforms 下垫），与 Check2x2 门互异
+    if (!st.inBounds(k, top + 2)) { flag = true; continue; }
+    if (!solidAllowBottom(st, k, top + 2)) {
+      const gi = st.idx(k, top + 2);
+      if (!(st.flags[gi] && PLATFORMS.has(SWEEP_SHEET[st.type[gi]!] ?? -1))) flag = true;
+    }
+  }
+  if (!flag) return;                                                        // cs:47922-25
+  ctx.destroyObject = true;                                                 // cs:47927
+  for (let m = num; m < num + 4; m++) {
+    for (let n = top; n < top + 3; n++) {                                   // 三行窗（含地面行,type 过滤兜底）
+      if (!st.inBounds(m, n)) continue;
+      const qi = st.idx(m, n);
+      if ((SWEEP_SHEET[st.type[qi]!] ?? -1) === sheet && st.flags[qi]) killTileGen(st, ctx, m, n);
+    }
+  }
+  ctx.destroyObject = false;                                                // cs:47918
+  for (let n6 = num - 1; n6 < num + 4; n6++) {
+    for (let n7 = top - 1; n7 < top + 4; n7++) tileFrameGen(st, ctx, n6, n7, false);   // cs:47920-29
   }
 }
 
@@ -1469,12 +1585,18 @@ const CHECK2XX_TYPES = new Set([104, 105, 207, 320, 337, 349, 356, 378, 410, 456
  *   WaterCheck→KillTile←SquareTileFrame←TileFrameImportant←case94 Check2x2）。
  *   96=Check2x2Style 独立支仍未派发（cs:87357 备案：未观测族）。95/126 上锚支
  *   （cs:49055-59=上格 solid 非平台门）按原文落地于 check2x2Sweep 内 k 列循环。 */
-/* ★IIIII99b 收口裁剪：真值全集=上注 14 成员，但 100/125/126/173/…等在本仓写侧
- *   （DungeonPass.place2x2D 裸 dgWr 全 f0,0）帧不一致 ⇒ 派发即误杀（g 链 #105
- *   T100>0×8 @(441,729) 复归实证；toad 两地牢组同源）。keg(94) 的本仓放置侧
- *   （CaveHousePass.placeFurniture case94 → frameY=style*36+row*18）自洽，故先单开
- *   94 收口 toad #98/#99；其余成员随「地牢家具帧正确化」专项连带派发。 */
-const C2X2_MAIN_GROUP = new Set([94]);
+/* ★IIIII99b 收口裁剪（2026-08-31 批窗时点）：真值全集=上注 14 成员，但当时
+ *   DungeonPass.place2x2D 写侧裸 dgWr 全 f0,0（烛台 item2664-66→style22-24 帧带
+ *   缺失）⇒ 派发即误杀（g 链 #105 T100>0×8 @(441,729) 复归实证）。keg(94) 的本仓
+ *   放置侧自洽故先单开 94 收口 toad #98/#99。★IIIII99d：写侧帧公式三族清偿
+ *   （place2x2D/place3x4D/place4x2D）+ 消费者 Check3x4/Check4x2 两臂补齐后，
+ *   主组全集与书架族/床浴缸族一并启用。 */
+// ★IIIII99d：Check2x2 主组全集派发（cs(1458):87074-87 直调列 case 94/95/97/98/99/
+//   100/125/126/173/282/287/319/621/622）。烛台 100 写侧帧债本批清偿
+//   （DungeonPass.place2x2D frameY=style*36+row*18，cs:51872-81 同式）→ 派发后
+//   #105 大循环 TileFrame 对烛台的完整性校验与原版同流（g/s22222/m 终清理残差
+//   T100×8 组=vanilla 由本臂判杀而 JS 落空支无派发的杀链面）。
+const C2X2_MAIN_GROUP = new Set([94, 95, 97, 98, 99, 100, 125, 126, 173, 282, 287, 319, 621, 622]);
 function check2xXSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
   if (ctx.destroyObject) return;
   const i = st.idx(x, y);

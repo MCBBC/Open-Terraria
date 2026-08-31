@@ -4933,37 +4933,6 @@ export class Arrow extends Entity {
         }
       }
     }
-    // ---- 宝石弹族 723 紫晶/724 黄玉/725 蓝玉/726 翡翠/1133 粉钻（AI_005 专支
-    //      Projectile.cs:24243-24296,1:1）：1/3 拍宝石星尘(num48: 基础 86 星尘/
-    //      1133=87 且 1/6 拍加 89 粉尘,noGravity,v×0.5,alpha 127);723 另有 3 点
-    //      267 蓝白双色螺旋((0,12·scale).RotBy(posY/200+k·2π+rot) − v·0.5 后拖,
-    //      v×0.2·k)——宝石弹的"GL 光晕"观感即此星尘加色层,缺失=平贴图(2026-08-31
-    //      用户报蓝玉法杖"效果不对/没用 GL");alpha 渐显门(-15/拍,ai[1] 地板)本仓
-    //      Arrow.alpha 未建模,星尘直接常开(视觉差 17t 渐显,登记)
-    if (this.projId === 723 || this.projId === 724 || this.projId === 725
-      || this.projId === 726 || this.projId === 1133) {
-      if (Math.random() < 1 / 3) {
-        const dt48 = this.projId === 1133 ? 87 : 86;
-        const d86 = game.spawnDust?.(this.x, this.y, this.w, this.h, dt48, 0, 0, 127, null, 1, true);
-        if (d86) { d86.vx = this.vx * 0.5; d86.vy = this.vy * 0.5; }
-        if (this.projId === 1133 && Math.floor(Math.random() * 6) === 0) {
-          const d89 = game.spawnDust?.(this.x, this.y, this.w, this.h, 89, 0, 0, 127, null, 1, true);
-          if (d89) { d89.vx = 0; d89.vy = 0; }
-        }
-      }
-      if (this.projId === 723) {
-        const rot723 = Math.atan2(this.vy, this.vx);
-        for (let k = 0; k < 3; k++) {
-          const phi = this.y / 200 + k * Math.PI * 2 + rot723;
-          const sx723 = this.cx - Math.sin(phi) * 12 - this.vx * 0.5;
-          const sy723 = this.cy + Math.cos(phi) * 12 - this.vy * 0.5;
-          game.spawnDust?.(sx723 - 2, sy723 - 2, 4, 4, 267, this.vx * 0.2 * k, this.vy * 0.2 * k,
-            0, { r: 0, g: 0, b: 255, a: 255 }, 1, true);
-          game.spawnDust?.(sx723 - 2, sy723 - 2, 4, 4, 267, this.vx * 0.2 * k, this.vy * 0.2 * k,
-            0, { r: 255, g: 255, b: 255, a: 255 }, 0.4, true);
-        }
-      }
-    }
     // AI_001 尾 ±16 钳（:58736-58752）：flag7 = type != 577，全体 aiStyle 1 弹每
     // update 无条件 vy ≤ 16（vy < −16 仅 flag4=1006，重力分支已对称钳 −maxFall）。
     // 蓝队 R7-8：曾钳在重力门内——grav=0 型（flag3 免重力子弹族等）全程不钳；

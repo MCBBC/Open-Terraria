@@ -126,6 +126,23 @@ function killDustRollsPer(sheet: number, frameX: number): number {
  *  9293480 单种子足迹恰好为零,12345 地下沙漠构型触发 (1856,476) 首分叉,见
  *  checkSuper 注）。 */
 const CHEST_PROTECT_2X2 = idsByVanillaSheet(21, 467, 441, 468, 88, 470, 475);
+// ★IIIII99d：Check2x2 主组直调列（cs(1458):87074-87 case 表,sheet 空间）与
+//   Check4x2 床浴缸组（cs:87035-38）。本域(#53 Smooth World)在 Dungeon/HellFort
+//   之后,级联帧事件覆盖地牢家具——写侧(DungeonPass.place2x2D/place3x4D/
+//   place4x2D 与 HellFortPass 同名族)帧公式本批已对拍清偿。
+const C2X2_MAIN_SHEETS = new Set([94, 95, 97, 98, 99, 100, 125, 126, 173, 282, 287, 319, 621, 622]);
+const CHECK4X2_SHEETS = new Set([79, 90, 487]);
+/** Main.tileTable 副本（Check2x2 非巨石支地面门 tileTable 腿;PilesPass.SUP_TILE_TABLE
+ *  /FinalCleanupPass.TILE_TABLE 同源;同源副本禁 import 惯例） */
+const TILE_TABLE_2X2KT = new Set([
+  280, 275, 276, 277, 278, 279, 281, 605, 604, 603, 602, 601, 599, 600, 612, 611, 610, 609,
+  608, 606, 607, 558, 554, 553, 551, 550, 542, 413, 309, 297, 296, 645, 643, 644, 632, 640,
+  559, 414, 359, 358, 285, 286, 582, 555, 538, 533, 532, 394, 393, 392, 391, 339, 310, 299,
+  298, 629, 619, 556, 544, 364, 363, 362, 361, 710, 376, 380, 14, 469, 18, 19, 114, 101, 87,
+  88, 405, 427,
+]);
+/** TileID.Sets.Platforms（Check4x2 床支平台腿;HalfBrickPass 域无此表副本） */
+const PLATFORMS_4X2 = idsByVanillaSheet(19, 427, 435, 436, 437, 438, 439);
 /** WorldGen.destroyObject（Check2x2 再入闸,cs:48408/48564/48799）：
  *  级联击杀期间嵌套 TileFrame 不再发起新 Check2x2（非活性清残基不受闸限）。 */
 let destroyObject = false;
@@ -469,6 +486,56 @@ function check3x4KT(st: TileStore, rng: RNG, x: number, y: number): void {
   }
 }
 
+/** Check4x2（cs(1458):47825）床79/浴缸90/野餐桌487（★IIIII99d 补派发）——与
+ *  FinalCleanupPass.check4x2Sweep 同源副本（禁互 import）：4×2 带页完整性，
+ *  fx≥72 镜像页锚 num+=4、行带 2 行/36px；期望 fx 非 487=(k-num)*18（镜像支
+ *  (k-num+4)*18）、487 += num3*72；fy=(l-top)*18+num3*36（487 无带）。逐列地面门
+ *  SolidTileAllowBottomSlope ∪ active&&Platforms。败 → destroyObject 整组杀 +
+ *  尾 [num-1..num+4)×[top-1..top+4) 复扫（cs:47920-29）。 */
+function check4x2KT(st: TileStore, rng: RNG, x: number, y: number, sheet: number): void {
+  if (destroyObject) return;                                   // cs:47828
+  const i0 = st.idx(x, y);
+  let num = x + Math.trunc(st.frameX[i0]! / 18) * -1;          // cs:47837
+  if ((sheet === 79 || sheet === 90) && st.frameX[i0]! >= 72) num += 4;
+  let num2v = Math.trunc(st.frameY[i0]! / 18);
+  let num3 = 0;
+  while (num2v > 1) { num2v -= 2; num3++; }                    // cs:47842-47
+  const top = y - num2v;
+  const mirrored = sheet !== 487 && st.frameX[i0]! >= 72;
+  let flag = false;
+  for (let k = num; k < num + 4; k++) {                        // cs:47856（无 break 短路）
+    for (let l = top; l < top + 2; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }
+      const qi = st.idx(k, l);
+      let wantFx = (k - num) * 18;
+      if (mirrored) wantFx = (k - num + 4) * 18;
+      else if (sheet === 487) wantFx += num3 * 72;
+      const wantFy = sheet === 487 ? (l - top) * 18 : (l - top) * 18 + num3 * 36;
+      if (!st.flags[qi] || (SHEET_OF[st.type[qi]] ?? -1) !== sheet
+        || st.frameX[qi] !== wantFx || st.frameY[qi] !== wantFy) flag = true;
+    }
+    // 地面门（cs:47906-17）：AllowBottomSlope ∨ active&&Platforms（床可立平台）
+    if (!st.inBounds(k, top + 2)) { flag = true; continue; }
+    if (!solidTileAllowBottomSlope(st, k, top + 2)) {
+      const gi = st.idx(k, top + 2);
+      if (!(st.flags[gi] && PLATFORMS_4X2.has(st.type[gi]))) flag = true;
+    }
+  }
+  if (!flag) return;                                           // cs:47922-25
+  destroyObject = true;                                        // cs:47927
+  for (let m = num; m < num + 4; m++) {
+    for (let n = top; n < top + 3; n++) {                      // 三行窗（type 过滤兜底）
+      if (!st.inBounds(m, n)) continue;
+      const qi = st.idx(m, n);
+      if ((SHEET_OF[st.type[qi]] ?? -1) === sheet && st.flags[qi]) killTile(st, rng, m, n);
+    }
+  }
+  destroyObject = false;                                       // cs:47918
+  for (let n6 = num - 1; n6 < num + 4; n6++) {
+    for (let n7 = top - 1; n7 < top + 4; n7++) tileFrame(st, rng, n6, n7);
+  }
+}
+
 /** Check3x3Wall（cs:44690）/Check4x3Wall（cs:45284）/Check6x4Wall（cs:45377）：
  *  墙饰画族 240/241/242——帧完整性 + 逐格 wall>0 门;破 → 整组杀。同上 KKKKKKK 定罪
  *  （CONST #32 残画柱 (3277,752-755)=6×4 画被 caverer 半杀后的孤儿列）。尘掷零
@@ -524,6 +591,12 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
   const i = st.idx(x, y);
   if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; return; }  // cs:82078-83
   if (BOULDERS.has(st.type[i])) check2x2(st, rng, x, y);
+  // ★IIIII99d：Check2x2 主组派发（cs(1458):87074-87）——Smooth World(#53) 在
+  //   Dungeon(#32)/HellFort 之后,killTile→squareTileFrame 级联会帧到地牢家具；
+  //   vanilla 于该时点走 Check2x2 完整性臂,JS 落空支=烛台/箱族等时序差源
+  else if (C2X2_MAIN_SHEETS.has(TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1)) {
+    check2x2(st, rng, x, y);
+  }
   else if (LARVA.has(st.type[i])) checkSuper(st, rng, x, y);      // cs:86437-40 case 485
   else {
     const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
@@ -542,6 +615,8 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
       check3x2KT(st, rng, x, y, sheet);                            // cs:87270 组→Check3x2（★祭坛族）
     } else if (sheet === 101 || sheet === 102 || sheet === 463 || sheet === 617) {
       check3x4KT(st, rng, x, y);                                   // cs:87030 组→Check3x4（★KKKKKKK 书架族）
+    } else if (CHECK4X2_SHEETS.has(sheet)) {
+      check4x2KT(st, rng, x, y, sheet);                            // cs:87035-38 组→Check4x2（★IIIII99d 床/浴缸/野餐桌）
     } else if (sheet === 240) {
       checkWallDecorKT(st, rng, x, y, 'w3x3');                     // cs:86765→Check3x3Wall
     } else if (sheet === 241) {
@@ -594,6 +669,8 @@ function check2x2(st: TileStore, rng: RNG, x: number, y: number): void {
   if (destroyObject) return; // cs:48408
   const i0 = st.idx(x, y);
   const type = st.type[i0];
+  const sheet = SHEET_OF[type] ?? -1;
+  const isBoulder = BOULDERS.has(type);   // ★IIIII99d：巨石支/通用支分派（cs:48460-71 vs 48473-90）
   let num2 = -Math.floor(st.frameX[i0] / 18);
   let num = 0;
   if (num2 < -1) { num2 += 2; num = 36; }
@@ -613,14 +690,33 @@ function check2x2(st: TileStore, rng: RNG, x: number, y: number): void {
         || st.frameX[q] !== (k - num2) * 18 + num
         || st.frameY[q] !== (l - num6) * 18 + num5 * 36) { flag = true; break; }
     }
+    // ★IIIII99d：95/126 上锚支（cs:49055-59——num6-1 行须 active+solid 非 solidTop；
+    //   主组派发后首次可走通的原版臂）
+    if (!isBoulder && (sheet === 95 || sheet === 126)) {
+      if (!inW(k, num6 - 1)) flag = true;
+      else {
+        const ai = st.idx(k, num6 - 1);
+        const ad = TILE_DEFS[st.type[ai]];
+        if (!st.flags[ai] || !vanGenSolidType(st.type[ai]) || !!ad?.platform) flag = true;
+      }
+    } else if (!isBoulder) {
+      // 非巨石通用支：逐列 (k,num6+2) 地面门=solid ∪ tileTable，且拒半砖（cs:48460-71）
+      if (!inW(k, num6 + 2)) { flag = true; continue; }
+      const gi = st.idx(k, num6 + 2);
+      if (!st.flags[gi]
+        || !(vanGenSolidType(st.type[gi]) || TILE_TABLE_2X2KT.has(SHEET_OF[st.type[gi]] ?? -1))) flag = true;
+      if (st.half[gi]) flag = true;
+    }
   }
   // 巨石族专属：上方箱族豁免 + 底部支撑（cs:48473-48490）。type 读取不查
-  // active（ghost type 保真,同原版裸读）
-  const chestAbove = (cx: number, cy: number): boolean =>
-    inW(cx, cy) && CHEST_PROTECT_2X2.has(st.type[st.idx(cx, cy)]);
-  if (!chestAbove(num2, num6 - 1) && !chestAbove(num2 + 1, num6 - 1)
-    && !solidTileAllowBottomSlope(st, num2, num6 + 2)
-    && !solidTileAllowBottomSlope(st, num2 + 1, num6 + 2)) flag = true;
+  // active（ghost type 保真,同原版裸读）；★IIIII99d 主组成员走非巨石支不进此门
+  if (isBoulder) {
+    const chestAbove = (cx: number, cy: number): boolean =>
+      inW(cx, cy) && CHEST_PROTECT_2X2.has(st.type[st.idx(cx, cy)]);
+    if (!chestAbove(num2, num6 - 1) && !chestAbove(num2 + 1, num6 - 1)
+      && !solidTileAllowBottomSlope(st, num2, num6 + 2)
+      && !solidTileAllowBottomSlope(st, num2 + 1, num6 + 2)) flag = true;
+  }
   if (!flag) return;
   // 整组杀（cs:48562-48574;巨石族尘掷 0 → 流位不动）+ 尾 4×4 TileFrame（cs:48799）
   destroyObject = true;

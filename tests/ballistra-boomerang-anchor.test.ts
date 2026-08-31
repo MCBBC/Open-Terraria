@@ -83,6 +83,11 @@ describe('1457 回力镖回程攻速缩放(:40172-40186 num30 = 1.5×asm−0.5 �
     const player = {
       attackSpeedMult, dead: false,
       x: 1490, y: 990, w: 20, h: 42, cx: 1500, cy: 1011,   // 距弹 1000px(<3000 Kill 门)
+      // hitEnemies 预取面（α-H3 浸剂/parry 查询 2026-08-31 补齐——裸 stub 缺 buffs
+      // 会让 hitEnemies 首查 .has 崩,与本闸门的回程缩放无关）
+      buffs: { has: () => false },
+      critChance: () => 0,
+      equipStats: { frostBurn: false, magmaStone: false },
     };
     const { hooks } = makeHooks({ player });
     const b = new Boomerang(500, 1000, 0, 0, 10, 2, projId);

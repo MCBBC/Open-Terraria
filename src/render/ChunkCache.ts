@@ -9,7 +9,7 @@ import { treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
 export { treeGroundVariant, treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
 import { frameMergesWith } from './TileMergeFamily';
 import { swayBakeSkip } from './WindSway';
-import { TILE_ANIM_RATE, tileAnim, campfireYOffset, fountainYOffset } from './TileAnim';
+import { tileAnim, isDynamicAnimSheet } from './TileAnim';
 import { tileFrameCapture } from '../debug/TileFrameCapture';
 import { cageAnimRate, cageFamilyOf } from './CritterCage';
 import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
@@ -401,24 +401,9 @@ export class ChunkCache {
       return cx + s > v.x0 && cx < v.x1 && cy + s > v.y0 && cy < v.y1;
     };
     tileAnim.tick++;
-    if (this.animChunksBySheet.size) {
-      for (const [sheet, set] of this.animChunksBySheet) {
-        const rate = TILE_ANIM_RATE[sheet] ?? (cageFamilyOf(sheet) ? cageAnimRate(sheet) : 0);
-        if (!rate || tileAnim.tick % rate !== 0) continue;
-        let marked = 0;
-        for (const k of set) if (inView(k)) { this.markDirty(k & 0xffff, (k >> 16) & 0xffff); marked++; }
-        if (marked) tileFrameCapture.markBake(sheet, marked);
-      }
-    }
-    if (this.animChunksByWall.size) {
-      for (const [wallId, set] of this.animChunksByWall) {
-        const rate = wallAnimRate(wallId);
-        if (!rate || tileAnim.tick % rate !== 0) continue;
-        let marked = 0;
-        for (const k of set) if (inView(k)) { this.markDirty(k & 0xffff, (k >> 16) & 0xffff); marked++; }
-        if (marked) tileFrameCapture.markBake(1e6 + wallId, marked);
-      }
-    }
+    // sheet 侧重烘循环已随「动画格不进烘焙」根治移除（animChunksBySheet 恒空，
+    // 保留字段供回滚安全）；墙动画仍走 chunk 失效（未迁移）。
+    // 墙侧重烘循环已随「动画墙不进烘焙」根治移除（animChunksByWall 恒空保留回滚位）。
     // 帧捕获快照节拍（cam=animView 中点=视野中心；无视野信息时跳过出图）
     if (tileFrameCapture.recording && this.animView) {
       const v = this.animView;
@@ -590,14 +575,11 @@ export class ChunkCache {
           if ((st.coat[i] & TileStore.COAT_INVISIBLE_WALL) !== 0 && !st.showInvisibleBlocks) continue;
           const px = lx * TILE, py = ly * TILE;
           if (this.wallTiler.hasTexture(wallId)) {
+            // ★2026-08-31 根治（墙版）：动画墙（DoUpdate_AnimateWalls 换带 +
+            // 星彩玻璃逐格错相）不进烘焙，由 Renderer.drawAnimatedWallLayer 逐帧
+            // 补画——同 tiles 侧判例（密度放大 ⇒ 重烘风暴）
+            if (wallAnimRate(wallId) !== 0) continue;
             this.wallTiler.draw(wctx, st, x, y, wallId, this.truncatesWalls, px, py);
-            // 动画墙（DoUpdate_AnimateWalls 换带 + 星彩玻璃逐格错相）：登记进换带
-            // 重烘焙行列——墙无 sheet 概念，按 wallId 另建 map（tiles 侧同款机制）
-            if (wallAnimRate(wallId) !== 0) {
-              let wset = this.animChunksByWall.get(wallId);
-              if (!wset) { wset = new Set(); this.animChunksByWall.set(wallId, wset); }
-              wset.add(ChunkCache.key(cx, cy));
-            }
           } else {
             const wd = WALL_DEFS[wallId];
             if (wd) {
@@ -641,7 +623,8 @@ export class ChunkCache {
           continue;
         }
         // 动态/覆盖绘制族不参与静态补绘（主遍/Renderer overlay 自管）
-        if (sheet === 215 || sheet === 207 || sheet === 314 || sheet === 378) continue;
+        if (sheet === 378) continue;
+        if (isDynamicAnimSheet(sheet)) continue;   // 动画格统一动态层（含 215/207/314/笼/瀑布族）
         if (swayBakeSkip(type, st.frameX[i]) || cageFamilyOf(sheet)) continue;
         if (tileDrawYOffsetOf(sheet, st.frameX[i], st.frameY[i]) > 0) {
           drawVanillaCell(
@@ -685,48 +668,20 @@ export class ChunkCache {
         // 烘焙静止行垫底+动画行覆盖会出现"同朝向重影"：后仰姿态的底部/边缘
         // 透明像素会透出烘焙层的静止行（2026-08-23 用户实报）
         if (def.vanilla?.sheet === 378) continue;
+        // 齿轮块（tile 272）：摘出静态烘焙，由 Renderer drawAnimatedTileLayer 逐帧动态
+        // 绘制（dummy 378 同款先例）——rate10 的整块重烘风暴曾致船区掉帧主因
+        // （海盗船体 329 块 ⇒ 覆盖 chunk 每 10t 全量重画 + 油漆 tintRegion 重刷）
+        if (def.vanilla?.sheet === 272) continue;
         // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
         if (def.vanilla && this.autotiler) {
-          // 动画陈设（原版 AnimateTiles/GetTileDrawData addFrY）：frameY += 帧索引*pitch
-          // （pitch 默认 38，3 格高特例组 54，篝火族特例 36+熄灭行静止——见 TileAnim）
-          let fy = st.frameY[i];
-          if (def.vanilla.sheet === 215) {
-            fy = campfireYOffset(st.frameY[i]);   // 返回完整绘制 y（基行归位+动画帧）
-            let set215 = this.animChunksBySheet.get(215);
-            if (!set215) { set215 = new Set(); this.animChunksBySheet.set(215, set215); }
-            set215.add(ChunkCache.key(cx, cy));
-          } else if (def.vanilla.sheet === 314) {
-            // 矿车轨道加速带动画（Main.cs:18734-18741 每 10 tick 推进、5 帧回卷）：
-            // 只注册重烘焙——frameY 是后轨连接 ID，勿走 addFrY 帧偏移；
-            // 帧行偏移由 drawMinecartTrackCell → sourceRectOf(frameID, anim) 处理
-            let set314 = this.animChunksBySheet.get(314);
-            if (!set314) { set314 = new Set(); this.animChunksBySheet.set(314, set314); }
-            set314.add(ChunkCache.key(cx, cy));
-          } else if (def.vanilla.sheet === 207) {
-            // 喷泉（GetTileDrawData case 207 :6007-6028 1:1）：关态（frameY<72,
-            // 放置默认）主体带静止不动画；开态（frameY≥72,SwitchFountain 线控
-            // frameY±72）6 帧水花带 + 逐喷泉 x%6 错相——相位需世界 x,故在烘焙侧
-            // 预加完整绘制 y（与 215 campfire 同款），drawVanillaCell 勿重复叠加
-            fy = fountainYOffset(st.frameY[i], x, st.frameX[i]);
-            let set207 = this.animChunksBySheet.get(207);
-            if (!set207) { set207 = new Set(); this.animChunksBySheet.set(207, set207); }
-            set207.add(ChunkCache.key(cx, cy));
-          } else if (cageFamilyOf(def.vanilla.sheet)) {
-            // 小动物笼族（CritterCage.ts）：帧行偏移由 drawVanillaCell→drawCageCell
-            // 内部按 (族,槽位,tick) 计算，此处只注册重烘焙
-            let setC = this.animChunksBySheet.get(def.vanilla.sheet);
-            if (!setC) { setC = new Set(); this.animChunksBySheet.set(def.vanilla.sheet, setC); }
-            setC.add(ChunkCache.key(cx, cy));
-          } else if (TILE_ANIM_RATE[def.vanilla.sheet]) {
-            // 动画家具换帧行：此处只登记重烘焙——帧带偏移由 drawVanillaCell 在
-            // 零帧重建/分带换算之后叠加（原版 GetTileDrawData addFrY 语义）。
-            // 曾在此预加进 fy：零帧多格物体（生成端 dgWr 系放置未写帧）的
-            // 重建门 (ofx===0 && ofy===0) 被动画偏移破坏 → 炼金台 355/巫惑台 354
-            // 在 idx≥1 帧整物塌成 9 块重复左上角碎片（idx=0 时偶发正常）
-            let set = this.animChunksBySheet.get(def.vanilla.sheet);
-            if (!set) { set = new Set(); this.animChunksBySheet.set(def.vanilla.sheet, set); }
-            set.add(ChunkCache.key(cx, cy));
-          }
+          // ★2026-08-31 根治：动画格一律不进烘焙（isDynamicAnimSheet 谓词 =
+          //   TILE_ANIM_RATE 全表 ∪ 笼族 ∪ 314），由 Renderer.drawAnimatedTileLayer
+          //   逐帧补画。机制=含动画格的 chunk 在 rate 节拍整块失效（256 格×完整
+          //   管线），密度放大即"重烘风暴"（判例：272 齿轮船区 20% CPU、215 篝火
+          //   rate4 潜在更凶）。动态层画在整屏世界坐标系无 chunk 边界裁剪，顺带
+          //   消灭动画家具跨 chunk 的 2px 陈旧溢出行隐患。215/207 的相位预加
+          //   （campfireYOffset/fountainYOffset）随格子移入动态层。
+          if (isDynamicAnimSheet(def.vanilla.sheet)) continue;
           drawVanillaCell(
             ctx, this.autotiler.atlas, def.vanilla.sheet, def.vanilla.frame,
             def.vanilla.fw ?? 1, def.vanilla.fh ?? 1,
@@ -734,7 +689,7 @@ export class ChunkCache {
             // 同 id 融合 + 原版跨类型合并家族（TileMergeFamily:砖/沙/冰雪族互连,
             // 群系交界按已连接取帧——边缘帧圆角透明像素会透出远景背景亮光）
             (t) => t === type || frameMergesWith(type, t),
-            px, py, st.frameX[i], fy,
+            px, py, st.frameX[i], st.frameY[i],
             { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
               worldSurface: this.world.groundLevel, worldW: this.world.w,
               rockLevel: this.world.rockLevel },

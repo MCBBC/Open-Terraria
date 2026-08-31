@@ -262,7 +262,9 @@ export class VolcanoBlastProj extends Entity {
       const kdir = ((pEnt?.cx ?? this.cx) < (e.cx ?? this.cx)) ? 1 : -1;
       // ★R2-04 ③Main.DamageVar ±15% + 暴击 ×2（crit 在 Strike 时点实时取玩家近战 crit）
       //   ★F9/F1（2026-08-31 蓝队三批）：DamageVar 单源 + Damage_PVE :13388 攻端旗乘区
-      const crit = (this.critChanceFn?.() ?? 0.04) > Math.random();
+      let crit = (this.critChanceFn?.() ?? 0.04) > Math.random();
+      // ★F11：TryConsumingTimerCrit 强制暴击（Damage_PVE :12928，978 结算接入）
+      if (((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false)) crit = true;
       let dmgVar = damageVarRoll(this.damage,
         ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
       dmgVar = applyBannerDamageDealt(game, e, dmgVar);

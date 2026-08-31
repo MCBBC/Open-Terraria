@@ -91,8 +91,9 @@ const out = await page.evaluate(async () => {
     g.player.x = (p.bx + 1) * 16; g.player.y = (p.top + 4) * 16;
     g.player.vx = 0; g.player.vy = 0; g.player.fallStartY = null;
     await new Promise((r) => setTimeout(r, 1700));
-    const d0 = { n: cap.bakes.get(p.sheet)?.n ?? 0, draws: cap.sheets.get(p.sheet)?.n ?? 0,
-                 fb: cap.sheets.get(p.sheet)?.fallback ?? 0 };
+    const SHEET = Number(p.sheet);   // ★Map 键为数字，placed.sheet 是字符串（曾致 delta 恒 0）
+    const d0 = { n: cap.bakes.get(SHEET)?.n ?? 0, draws: cap.sheets.get(SHEET)?.n ?? 0,
+                 fb: cap.sheets.get(SHEET)?.fallback ?? 0 };
     const sx = Math.round((p.bx * 16 - (cam.x - viewW / 2)) * cam.zoom);
     const sy = Math.round((p.top * 16 - (cam.y - viewH / 2)) * cam.zoom);
     const w = Math.round(18 * cam.zoom);
@@ -105,9 +106,9 @@ const out = await page.evaluate(async () => {
     }
     const tot = [...sigSet.values()].reduce((a, b) => a + b, 0);
     return {
-      bakeDelta: (cap.bakes.get(p.sheet)?.n ?? 0) - d0.n,
-      drawDelta: (cap.sheets.get(p.sheet)?.n ?? 0) - d0.draws,
-      fbGrow: (cap.sheets.get(p.sheet)?.fallback ?? 0) - d0.fb,
+      bakeDelta: (cap.bakes.get(SHEET)?.n ?? 0) - d0.n,
+      drawDelta: (cap.sheets.get(SHEET)?.n ?? 0) - d0.draws,
+      fbGrow: (cap.sheets.get(SHEET)?.fallback ?? 0) - d0.fb,
       modes: [...sigSet.values()].filter((c) => c >= tot * 0.08).length,
     };
   };
@@ -129,7 +130,9 @@ try {
     // A 权威 rate 生效 / B 偏移域纯净 / C 巡访期有重烘+绘制 / D 离散形态佐证 / fb 零增长
     const aOk = Number(tc.rate) === 5;
     const bOk = out.domainCheck[s] === 'OK';
-    const cOk = (po.bakeDelta ?? -1) > 0 && (po.drawDelta ?? -1) > 0;
+    // ★2026-08-31 根治后烘焙节律归零是【预期】：动画格改走动态层，判据只看
+    //    动态层绘制流（capture noteDraw 经 drawVanillaCell 计数）
+    const cOk = (po.drawDelta ?? -1) > 0;
     const dOk = (po.modes ?? 0) >= 2 || Number(s) === 218;   // 绞肉机双帶内容相近，D 仅佐证
     const fOk = (po.fbGrow ?? -1) === 0;
     verdicts[s] = { aOk, bOk, cOk, dOk, fOk };

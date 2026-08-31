@@ -296,7 +296,10 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
         : cls === 'ranged' ? (4 + playerPct('ranged')) / 100
           : cls === 'magic' ? (4 + playerPct('magic')) / 100
             : 0;
-    const crit = Math.random() < (me.critChance ?? autoCritPct ?? 0);
+    // ★F11（2026-08-31 蓝队三批）：TryConsumingTimerCrit（Damage_PVE :12928——
+    //   蓄能暴击 6170 对一切玩家弹结算的强制 crit 面，食 target Hitbox）。
+    const crit = Math.random() < (me.critChance ?? autoCritPct ?? 0)
+      || ((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
     // ★α-H3③④（A3 弹幕侧消费面）：parryDamageBuff ×5 与 Nano ×1.05——原位
     // Projectile.cs:13631-36（门 melee && !DontApplyParryDamageBuff[type]，apply 在
     // DamageVar 之后、StrikeNPC 前逐敌生效）/:13688-96（门 melee||IsAWhip——nano 乘
@@ -3482,7 +3485,8 @@ export class FlailProj extends Entity {
         const idx = st.idx(tx, ty);
         const liq = st.liquid[idx];
         if (liq <= 0) continue;
-        if (type !== undefined && type !== 2 && st.liquidType[idx] !== type) continue;
+        // 液体型过滤：LavaCollision(:1675 tile.lava())同样按型筛——仅形状(全盒)与 Wet 分家
+        if (type !== undefined && st.liquidType[idx] !== type) continue;
         // 表面带（ Wet :1609-1616 / Lava :1672-1680 同式）
         const surfY = ty * TILE + ((256 - liq) / 32) * 2;
         const depth = 16 - Math.trunc(((256 - liq) / 32) * 2);

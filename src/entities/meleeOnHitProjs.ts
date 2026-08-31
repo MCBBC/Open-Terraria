@@ -258,7 +258,9 @@ export class MuramasaSlashProj extends Entity {
       if (gate.meleeNpcImmuneGateOf && !gate.meleeNpcImmuneGateOf(e.id)) continue;
       if (!boxHit(px, py, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
       // ★F9/F1（2026-08-31 蓝队三批）：DamageVar 单源 + Damage_PVE :13388 攻端旗乘区
-      const crit = (this.critChanceFn?.() ?? 0) > Math.random();
+      let crit = (this.critChanceFn?.() ?? 0) > Math.random();
+      // ★F11：TryConsumingTimerCrit 强制暴击（Damage_PVE :12928，977 结算接入）
+      if (((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false)) crit = true;
       let dmgVar = damageVarRoll(this.damage,
         ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
       dmgVar = applyBannerDamageDealt(game, e, dmgVar);
@@ -422,7 +424,9 @@ export class BladetongueGlobProj extends Entity {
         if (!boxHit(px, py, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
         // ★F9/F1：DamageVar 单源 + Damage_PVE :13388 攻端旗乘区；命中回写 ai[0]+=50
         // （type==524 特例 :13261-63）
-        const crit = (this.critChanceFn?.() ?? 0) > Math.random();
+        let crit = (this.critChanceFn?.() ?? 0) > Math.random();
+        // ★F11：TryConsumingTimerCrit 强制暴击（Damage_PVE :12928，524 结算接入）
+        if (((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false)) crit = true;
         let dmgVar = damageVarRoll(this.damage,
           ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
         dmgVar = applyBannerDamageDealt(game, e, dmgVar);

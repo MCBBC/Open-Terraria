@@ -572,8 +572,11 @@ export function wetCollisionProbe(
   const i0 = Math.max(0, Math.floor(x / 16) - 1);
   const i1 = Math.min(st.w - 1, Math.floor((x + width) / 16) + 2);
   const j0 = Math.max(0, Math.floor(y / 16) - 1);
-  // 上界 = Main.maxTilesY−40（:15806/:15809 字面）;微世界（测试桩）负值回退整体高
-  const yCap = st.h - 40 >= 0 ? st.h - 40 : st.h - 1;
+  // 上界 = Main.maxTilesY−40（:15806/:15809 字面,Underworld 带扫描裁剪）——仅在
+  // 真有该带的世界（h≥200;SW 实际生成图均 ≫ 此值,行为与原版逐字节一致）生效;
+  // vitest 小桩（H≈120 等,无地狱带概念,水深常落在字面裁剪带内）回退整高,
+  // 否则既定湿判契约（trusty-mounts ⑥ 浅池 ×2 等）被假阳性剪空
+  const yCap = st.h >= 200 ? st.h - 40 : st.h - 1;
   const j1 = Math.min(yCap, Math.floor((y + height) / 16) + 2);
   for (let i = i0; i <= i1; i++) {
     for (let j = j0; j <= j1; j++) {

@@ -228,7 +228,10 @@ import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug } from './VanillaLiquidRenderer';
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
-import { renderEnv, DRAW_Y_OFFSET } from './VanillaTiler';
+import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell } from './VanillaTiler';
+import { isDynamicAnimSheet, campfireYOffset, fountainYOffset } from './TileAnim';
+import { frameMergesWith } from './TileMergeFamily';
+import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
@@ -435,7 +438,12 @@ export function loadExtraSprite(n: number): ImageBitmap | HTMLImageElement | nul
   return im;
 }
 
-/** Extra_98 星芒染色缓存（RGB 乘法染 + alpha 摊平 255——见上预乘语义注） */
+/** Extra_98 星芒染色缓存。
+ *  ★2026-08-30 修正：旧版"alpha 摊平 255"把整张矩形烘成实心色块——Extra_98 是
+ *  【alpha 塑形】贴图（透明区 rgb 无意义），原版不透明感来自 XNA 预乘贴图
+ *  （透明区 rgb=黑，A=0 纯加算时黑=无贡献）。canvas 侧等价 = 逐像素预乘
+ *  （rgb×=a）后乘 tint、alpha 摊平（主画布不透明，lighter 只消费 rgb）。
+ *  旧版实报症状：星芒两臂渲染成大矩形色块（用户截图 2026-08-31）。 */
 const sparkleTintCache = new Map<string, HTMLCanvasElement>();
 function sparkleTintedTex(rgb: readonly [number, number, number]): HTMLCanvasElement | null {
   const img = loadExtraSprite(98);
@@ -447,16 +455,22 @@ function sparkleTintedTex(rgb: readonly [number, number, number]): HTMLCanvasEle
   if (hit) return hit;
   const c = document.createElement('canvas');
   c.width = img.width; c.height = img.height;
-  const cx = c.getContext('2d')!;
+  const cx = c.getContext('2d', { willReadFrequently: true })!;
   cx.drawImage(img as CanvasImageSource, 0, 0);
-  cx.globalCompositeOperation = 'multiply';
-  cx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-  cx.fillRect(0, 0, c.width, c.height);
-  // alpha 摊平（预乘语义：原贴图 alpha 不参与 src 贡献强度）
-  cx.globalCompositeOperation = 'destination-in';
-  cx.fillStyle = '#fff';
-  cx.fillRect(0, 0, c.width, c.height);
-  cx.globalCompositeOperation = 'source-over';
+  try {
+    const id = cx.getImageData(0, 0, c.width, c.height);
+    const d = id.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const a = d[i + 3] / 255;
+      d[i] = d[i] * a * rgb[0];
+      d[i + 1] = d[i + 1] * a * rgb[1];
+      d[i + 2] = d[i + 2] * a * rgb[2];
+      d[i + 3] = 255;   // 主画布不透明，lighter 只取 rgb——alpha 摊平无副作用
+    }
+    cx.putImageData(id, 0, 0);
+  } catch {
+    return null;
+  }
   if (sparkleTintCache.size > 64) sparkleTintCache.clear();
   sparkleTintCache.set(key, c);
   return c;
@@ -3043,6 +3057,9 @@ export class Renderer {
     };
     drawChunkGrid('wall');
 
+    // 2a'. 动画墙动态层（烘焙摘除补画，见 drawAnimatedWallLayer 注）
+    this.drawAnimatedWallLayer(ctx, world, cam, viewW, viewH, z, chunks);
+
     // 2b'. behindTiles 族实体（Main.cs:56457 DrawNPCs(behindTiles:true)：原版在
     //      非实心 tile(:56437/:56441) 之后、实心 tile(:56462/:56466) 之前绘制——钻地蠕虫族
     //      （aiStyle6 世吞 13-15/掘地虫 39-41/挖掘怪 95-100/水蛭 117-119/
@@ -3104,6 +3121,9 @@ export class Renderer {
 
     // 2c. 前景 tile/物体层（drawChunkGrid 整数设备矩形——见 2b 注释）
     drawChunkGrid('tile');
+
+    // 2c''. 动画格统一动态层（根治：动画格永不进烘焙，见 drawAnimatedTileLayer 注）
+    this.drawAnimatedTileLayer(ctx, world, cam, viewW, viewH, z);
 
     // 3.7 血肉墙墙身/肌腱链/舌头（★2026-08-24 r15 R15-8 搬移：原版 DrawWoF 在
     //     DoDraw_WallsTilesNPCs 内紧随 DrawWalls(:64233→:64235)、在非实心 tile/
@@ -4128,6 +4148,69 @@ export class Renderer {
    *  变体列 = frameX≥36?36:0（Tiles_378 72px=左右两朝向各 36px），行高 54。
    *  逐格 16×16 采样 + DRAW_Y_OFFSET[378]=2 与原 tile 网格对齐（整块 32×48 直画会
    *  把 18px 步进的格间 padding 画进去，右列左移 2px 错位）。NPC 自身不画贴图。 */
+  /** 动画墙统一动态层（2026-08-31 根治·墙版）：wallAnimRate≠0 的墙不进烘焙
+   *  （ChunkCache 跳过），此处逐帧补画——取帧/掩码/变体全部复用 VanillaWallTiler
+   *  .draw，与烘焙态像素等价。回声涂层门与烘焙侧逐字节同款。 */
+  private drawAnimatedWallLayer(ctx: CanvasRenderingContext2D, world: World,
+    cam: Camera, viewW: number, viewH: number, z: number, chunks: ChunkCache) {
+    const st = world.store;
+    const wt = chunks.wallTiler;
+    if (!wt) return;
+    const ts = TILE;
+    const tx0 = Math.max(0, Math.floor((cam.x - viewW / 2 / z) / ts) - 1);
+    const tx1 = Math.min(world.w - 1, Math.ceil((cam.x + viewW / 2 / z) / ts) + 1);
+    const ty0 = Math.max(0, Math.floor((cam.y - viewH / 2 / z) / ts) - 1);
+    const ty1 = Math.min(world.h - 1, Math.ceil((cam.y + viewH / 2 / z) / ts) + 1);
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const i = st.idx(tx, ty);
+        const wallId = st.wall[i];
+        if (wallId === 0 || wallAnimRate(wallId) === 0) continue;
+        if ((st.coat[i] & TileStore.COAT_INVISIBLE_WALL) !== 0 && !st.showInvisibleBlocks) continue;
+        if (!wt.hasTexture(wallId)) continue;
+        wt.draw(ctx, st, tx, ty, wallId, chunks.truncatesWalls, tx * ts, ty * ts);
+      }
+    }
+  }
+
+  /** 动画格统一动态层（2026-08-31 根治）：凡 isDynamicAnimSheet 的格子一律不进
+   *  chunk 烘焙（ChunkCache 跳过），此处逐帧补画。215 篝火/207 喷泉的相位预加
+   *  随格子迁入（原烘焙侧行为 1:1），其余族由 drawVanillaCell 内部 helper 路由
+   *  （405/406/272/瀑布族 animYOffset…）。整屏世界坐标系绘制 = 无 chunk 边界
+   *  裁剪，动画家具跨 chunk 的 2px 溢出行不再有陈旧副本。 */
+  private drawAnimatedTileLayer(ctx: CanvasRenderingContext2D, world: World,
+    cam: Camera, viewW: number, viewH: number, z: number) {
+    if (!this.atlas) return;
+    const st = world.store;
+    const atlas = this.atlas;
+    const ts = TILE;
+    const tx0 = Math.max(0, Math.floor((cam.x - viewW / 2 / z) / ts) - 1);
+    const tx1 = Math.min(world.w - 1, Math.ceil((cam.x + viewW / 2 / z) / ts) + 1);
+    const ty0 = Math.max(0, Math.floor((cam.y - viewH / 2 / z) / ts) - 1);
+    const ty1 = Math.min(world.h - 1, Math.ceil((cam.y + viewH / 2 / z) / ts) + 1);
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const i = st.idx(tx, ty);
+        if (!st.flags[i]) continue;
+        const type = st.type[i];
+        const van = TILE_DEFS[type]?.vanilla;
+        if (!van || !isDynamicAnimSheet(van.sheet)) continue;
+        const sheet = van.sheet;
+        // 相位预加族（原烘焙侧 1:1 迁入）：215 篝火帧行归位 / 207 喷泉逐 x 错相
+        let fy = st.frameY[i];
+        if (sheet === 215) fy = campfireYOffset(st.frameY[i]);
+        else if (sheet === 207) fy = fountainYOffset(st.frameY[i], tx, st.frameX[i]);
+        drawVanillaCell(ctx, atlas, sheet, van.frame,
+          van.fw ?? 1, van.fh ?? 1,
+          st, tx, ty, type,
+          (t) => t === type || frameMergesWith(type, t),
+          tx * ts, ty * ts, st.frameX[i], fy,
+          { treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
+            worldSurface: world.groundLevel, worldW: world.w, rockLevel: world.rockLevel });
+      }
+    }
+  }
+
   private drawDummyTileAnim(ctx: CanvasRenderingContext2D, world: World, entities: Entity[],
     cam: Camera, viewW: number, viewH: number, z: number) {
     const img = this.atlas?.ensureVImage('vanilla/Tiles_378.png');

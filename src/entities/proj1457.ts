@@ -113,7 +113,9 @@ function dealContacts(
     }
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     if (!cd.ready(e.id, cooldown)) continue;
-    const crit = Math.random() < self.critChance;
+    // ★F11：蓄能暴击强制面（TryConsumingTimerCrit，Damage_PVE :12928 同位）
+    const crit = Math.random() < self.critChance
+      || ((game.player as unknown as { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean } | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
     // ★F1（2026-08-31 蓝队三批）：Damage_PVE :13388 攻端旗乘区 + ★F9 DamageVar 单源
     //   （原版序：DamageVar(:12959) → …→ banner(:13388) → armorPen 弹侧 :13679 在
     //   banner 后 ⇒ 不吃旗乘——armorPen 独立参传，此处序一致）。

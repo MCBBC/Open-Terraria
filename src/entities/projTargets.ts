@@ -70,10 +70,13 @@ export function hitTownNpcs(
 // 数据面唯一标杆 = 原版 SetDefaults 逐弹型直写的 Projectile.melee/magic/ranged/minion
 // 字段（Terarria1457/Terraria/Projectile.cs）——投影到四类：melee/ranged/magic/summon。
 // 消费面（Projectile.Damage :12898 起）：①crit 轮**按类各掷各的**——`if (melee &&
-// Next(1,101)<=owner.meleeCrit)` 三连，**无类的弹（蜂 181/566、村正刀气 155、钛金碎片
-// 908 等在 1457 SetDefaults 不置任何类别旗）不掷 crit**；②浸剂族门 `(melee||IsAWhip)`
-// （Projectile.StatusNPC :11211 / nano·confetti :13688）；③parryDamageBuff ×5 门
-// `melee && !DontApplyParryDamageBuff[type]`（:13631）。summon 类不参与 crit 掷。
+// Next(1,101)<=owner.meleeCrit)` 三连，**SetDefaults 无类别旗且 spawn 位未覆写的弹
+// 不掷 crit**（★Z-F1 勘误，2026-08-31：蜂 181/566 在 SetDefaults 确实零旗，但原版
+// 发蜂位在 NewProjectile 后显式 `.melee=true`（Player.cs:43977/:44479/:44873 +
+// Projectile.cs:13759）→ 运行时近战弹照掷；仓内对应 = Arrow.projClass 实例字段，
+// 本数据查表仍保持 SetDefaults 直写真值）；②浸剂族门 `(melee||IsAWhip)`
+// （Projectile.StatusNPC :11197 / nano·confetti :13687）；③parryDamageBuff ×5 门
+// `melee && !DontApplyParryDamageBuff[type]`。summon 类不参与 crit 掷。
 
 export type ProjClass = 'melee' | 'ranged' | 'magic' | 'summon';
 

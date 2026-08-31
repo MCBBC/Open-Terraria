@@ -237,8 +237,11 @@ export function drawStripTrail(
         // 语义对不齐且慢；此处顶点交错后一次 drawElements，主链每帧单次合成）。
         // p 沿 XNA 约定：pts[0] = 最新（[0]=newest），p=0 为刃后最近段。
         // ?trailgl=0 = 逃生门（SwiftShader/驱动白名单问题强制 CPU 路径）
+        // ★dbg 声明必须先于任何 dbg() 调用——曾因 TDZ 在首像素抛
+        //   ReferenceError 且被调用方静默 catch = 整条拖尾消失（2026-08-30 定罪）
         const dbgOn = (() => { try { return new URLSearchParams(location.search).has('traildbg'); } catch { return false; } })();
         const dbg = (why: string): void => { if (dbgOn) { const w = (renderer as unknown as { __trailDbg?: Record<string, number> }).__trailDbg ??= {}; w[why] = (w[why] ?? 0) + 1; } };
+        dbg('tech-enter');
         const glfx = (() => {
           try {
             if (new URLSearchParams(location.search).get('trailgl') === '0') { dbg('gate-off'); return null; }

@@ -15,7 +15,7 @@ import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
 import { drawVanillaCell, drawTreeCell, scanTreeType, treeTrunkPaintStyle, palmTreePaintStyle,
   type TreeStyleData } from './VanillaTiler';
-import { animYOffset } from './TileAnim';
+import { animYOffset, tileAnim } from './TileAnim';
 import { drawVineTileFlame, vineAdvanceSeed } from './TileFlames';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { getTilePaintSettings } from '../world/Paint';
@@ -354,12 +354,25 @@ function drawCell(
     // Canvas 等价 'lighter'），本体贴图不画、油漆色被覆写。源矩形同 GetTileDrawData
     // （含 tileFrame[592] 动画行 addFrY，Main.cs:18483-18486 8 帧 ×54）
     if (rec.sheet === 592) {
-      const g = atlas.ensureVImage('vanilla/Glow_294.png');
-      if (g) {
-        const gy = fy + animYOffset(592, (atlas.vmeta(592)?.rows ?? 0) * 18);
+      // ★完整绘制 = 本体(Tiles_592 18px 格) + Glow_294 加算覆盖
+      // 原版双 pass：主 pass 画本体（GetTileDrawData case 592 :5585 addFrY），
+      // Glow pass 画 GlowMask[294]（TileDrawing.cs:980/:1196 标准发光管线）。
+      // vine 路径 :9614-9619 把 texture2D 换成 GlowMask 是【发光 pass 的替换】，
+      // 不是替代本体——曾只画 glow 丢本体=只看到一团火（2026-08-31 用户实锤）
+      const animIdx = Math.floor(tileAnim.tick / 5) % 8;   // TILE_ANIM_RATE[592]=5, frames=8
+      const colX = fx === 0 ? 0 : 18;                      // 两列 fx∈{0,18}
+      const syB = Math.min(fy + animIdx * 54, 432 - 18);   // 本格 18px 切片 y
+      // ★本格只画自己的 18×18 切片（此前画 48px 高跨 3 行=组内互相叠帧错乱）
+      const bodyImg = atlas.ensureVImage('vanilla/Tiles_592.png');
+      if (bodyImg) {
+        ctx.drawImage(bodyImg, colX, syB, 18, 18, dpx, dpy, 18, 18);
+      }
+      const glowImg = atlas.ensureVImage('vanilla/Glow_294.png');
+      if (glowImg) {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
-        ctx.drawImage(g, fx, gy, TILE, TILE, dpx, dpy, TILE, TILE);
+        ctx.globalAlpha = 0.6;
+        ctx.drawImage(glowImg, colX, syB, 18, 18, dpx, dpy, 18, 18);
         ctx.restore();
       }
       return;

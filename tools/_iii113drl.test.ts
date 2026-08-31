@@ -117,11 +117,12 @@ function hydrate(): { st: TileStore; gs: GenState } {
 
   const xtAll = readFileSync(X86, 'utf8').split('\n').filter((l) => l.startsWith('MARK|DR|')).map((l) => l.slice(5))
     .filter((l) => !l.startsWith('DR|S|MD'))   // MakeDungeon 头探针：JS 无同位钩，剔除
-    .map((l) => l.replace(/^(DR\|(?:R|Ro|CP))\|i(\d+)\|/, (_, tag, n) => `${tag}|i${Number(n) + 1}|`)); // R/Ro/CP 用 CurrentDungeon(0基)，统一到 drlInst(1基)
+    .map((l) => l.replace(/^(DR\|(?:R|Ro))\|i(\d+)\|/, (_, tag, n) => `${tag}|i${Number(n) + 1}|`)); // R/Ro/CP 用 CurrentDungeon(0基)，统一到 drlInst(1基)
 
   console.log(`[i113] x86 rows=${xtAll.length} js rows=${lines.length} mainSample=${rollN} totalSample=${totalN}`);
 
-  const segOnly = (rows: string[]) => rows.filter((l) => !/^DR\|R(o)?\|/.test(l));
+  const segOnly = (rows: string[]) => rows.filter((l) => !/^DR\|R(o)?\|/.test(l) && !/^DR\|CP\|/.test(l));
+  const cpOnly = (rows: string[]) => rows.filter((l) => /^DR\|CP\|/.test(l));
   const attOnly = (rows: string[]) => rows.filter((l) => /^DR\|R(o)?\|/.test(l));
 
   const diffPair = (label: string, xr0: string[], jr0: string[]) => {
@@ -149,9 +150,9 @@ function hydrate(): { st: TileStore; gs: GenState } {
       return l.replace(/(^|[| ])rc=-?\d+$/, `$1rc=${d}`);
     });
   };
-  for (const want of ['SEG', 'ATT'] as const) {
-    const xf = want === 'SEG' ? segOnly(xtAll) : attOnly(xtAll);
-    const jf = want === 'SEG' ? segOnly(lines) : attOnly(lines);
-    diffPair(`${want}`, withDeltas(xf), withDeltas(jf), false);
+  for (const want of ['SEG', 'ATT', 'CP'] as const) {
+    const xf = want === 'ATT' ? attOnly(xtAll) : want === 'CP' ? cpOnly(xtAll) : segOnly(xtAll);
+    const jf = want === 'ATT' ? attOnly(lines) : want === 'CP' ? cpOnly(lines) : segOnly(lines);
+    diffPair(`${want}`, withDeltas(xf), withDeltas(jf));
   }
 });

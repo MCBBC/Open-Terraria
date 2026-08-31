@@ -18,6 +18,8 @@ export interface Body {
   collideY?: boolean;
   /** 平台单向碰撞：仅当开启且下落时与平台碰撞 */
   dropThrough?: boolean;
+  /** slopeEmbedRevert 回退锚:moveAndCollide 入口处记录的本 tick 移动前位置 */
+  px?: number; py?: number;
   /** Projectile.tileCollide 镜像（AI 逐态直写,如蜘蛛 :62843-62860 穿平台/归位飞行
    *  :61410、蛙 :50648/:51266）——false 时 Collision.TileCollision 整段跳过、位移直写
    *  （原版弹幕 Update :17000+ 同构）。缺省 true=照常碰撞 */
@@ -180,26 +182,10 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
     const sl = st.slope[j];
     if (sl === 0 || st.half[j]) return false;
     const top = ty * TILE;
-    // ★缓嵌防护(2026-08-31):中心点在坡面 solid 三角内时不放行——否则贴墙态
-    //  (touching≠colliding)下每 tick 微移进 solid 区永不弹出。原版条件只看
-    //  "底/顶 vs tile 界"够不到坡面几何精度。
-    //  各坡向 solid 三角判定(cpx=中心相对 tile 左,cpy=中心相对 tile 顶):
-    //  1: solid=左下(cpy>cpx) / 2: solid=右下(cpy>TILE-cpx)
-    //  3: solid=上左(cpy<cpx) / 4: solid=上右(cpy<TILE-cpx)
-    const basePass = (() => {
-      if (sl === 1) return oy + b.h - avx <= top + TILE && ox >= tx * TILE;
-      if (sl === 2) return oy + b.h - avx <= top + TILE && ox + b.w <= tx * TILE + TILE;
-      if (sl === 3) return oy + avx >= top && ox >= tx * TILE;
-      return oy + avx >= top && ox + b.w <= tx * TILE + TILE; // 4
-    })();
-    if (!basePass) return false;
-    // 中心在开放三角内才放行(否则挡下,等同嵌入预防)
-    const cpx = (ox + b.w / 2) - tx * TILE;
-    const cpy = (oy + b.h / 2) - ty * TILE;
-    if (sl === 1) return cpy <= cpx;           // 开放=对角线上方
-    if (sl === 2) return cpy <= TILE - cpx;    // 开放=对角线上方
-    if (sl === 3) return cpy >= cpx;           // 天花板开放=对角线下方
-    return cpy >= TILE - cpx;                   // 4
+    if (sl === 1) return oy + b.h - avx <= top + TILE && ox >= tx * TILE;
+    if (sl === 2) return oy + b.h - avx <= top + TILE && ox + b.w <= tx * TILE + TILE;
+    if (sl === 3) return oy + avx >= top && ox >= tx * TILE;
+    return oy + avx >= top && ox + b.w <= tx * TILE + TILE; // 4
   };
   // X 轴
   if (dx !== 0) {
@@ -518,22 +504,6 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   unembedPass(b, world);
 }
 
-/** 嵌入自救 pass(2026-08-24 僵尸卡地形终案):盒【中心格】为实心(非坡/半砖/平台)
- *  = 真嵌入(正常站立/贴墙时中心必在空中)——坡面贴合/StepUp/生成期残留在极端
- *  地形(坡格上压实心盖等)下会把实体楔进实心,此后 X/Y 碰撞互相锁死(移动后仍
- *  与实心相交=恒拦),AI 跳跃(vy=-7)在实心顶盖下无效 → 永久卡死(用户实报:
- *  火把僵尸半嵌土丘,vy=-7 反复跳不出)。
- *  脱出:向上找最近连续净空(≤3 格)直接上移(重力场景天然出口);上方封死 →
- *  测左右 2 格净空宽的一侧平移。每 tick 至多一次,脱出后交还常规碰撞。
- *  ★延迟门+限速(2026-08-25 弹射/贴顶双症状修复):原版【无】自救 pass——嵌入
- *  实体靠常规碰撞自行走出(嵌入格不拦已跨入的 X,TileCollision 旧位放行语义)。
- *  瞬态嵌片(低顶隧道口 StepUp 抬升/坡顶过渡)零点几秒内自愈,不该被瞬移;
- *  沙埋/塌方类真嵌入才救援。故:
- *  - 中心格实心须连续 ≥EMBED_DELAY_TICKS(≈0.25s)才动手——期间原版物理照常
- *    尝试自行走出;
- *  - 每 tick 至多脱 1 格(16px)——曾一次抬 clear×16(≤48px)+逐 tick 棘轮 =
- *    2880px/s 竖直弹射(用户报"僵尸从屏幕外被弹射抛入"),落到地表顶后沿顶
- *    行走 = "贴着方块顶部走像飞"。限速后观感=快速爬出而非弹射。 */
 const EMBED_DELAY_TICKS = 15;
 function unembedPass(b: Body, world: World): void {
   const st = world.store;

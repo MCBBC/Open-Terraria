@@ -208,11 +208,14 @@ const PITCH = parseTable(path.join(ROOT, 'src/render/TileAnim.ts'), 'TILE_ANIM_P
 const FRAMES = parseTable(path.join(ROOT, 'src/render/TileAnim.ts'), 'TILE_ANIM_FRAMES');
 
 // 关键自检锚点（提取器自身健康度；若反编译路径变动会先在这爆）
-const ANCHORS = [[106, 5, 2], [220, 5, 4], [218, 5, 2], [17, 6, 12], [405, 5, 8], [406, 8, 6]];
+const ANCHORS = [[106, 5, 2], [220, 5, 4], [218, 5, 2], [17, 6, 12], [405, 5, 8], [406, 8, 6], [272, 10, 2]];
+// pitch 锚点（防提取器跨案渗漏复发——272 曾被 PIN 锁错值 38，判例见 2026-08-31 船区漂移案）
+const PITCH_ANCHORS = [[272, 90], [405, 38], [406, 56], [215, 36], [106, 54], [207, 72]];
 for (const [id, ep, ef] of ANCHORS) {
   must(anim[id]?.period === ep && anim[id]?.frames === ef,
     `提取器锚点失守 id=${id}: 得到 ${JSON.stringify(anim[id])} 期望 period=${ep},frames=${ef}`);
 }
+
 
 // 期望表 = 提取值，应用策略层：
 //  · 专属绘制段不在主 switch 内（提取器不可见），以反编译行号为据手工钉死：
@@ -245,6 +248,11 @@ for (const [k, v] of Object.entries(anim)) {
 }
 
 // 钉值层：机理未反解键以【现行生效值】入金标（锁现值防漂移；缺失则提示补键）
+for (const [id, ep] of PITCH_ANCHORS) {
+  const got = pitches[id] ?? pitchOverride[id];
+  if ((pitchOverride[id] ?? pitches[id]) !== ep)
+    must(false, `pitch 锚点失守 id=${id}: 得到 ${got} 期望 ${ep}`);
+}
 const pins = { rate: PIN_RATE, frames: PIN_FRAMES, pitch: PIN_PITCH };
 const liveTables = { rate: RATE, frames: FRAMES, pitch: PITCH };
 const expTables = { rate: eRate, frames: eFrames, pitch: ePitch };

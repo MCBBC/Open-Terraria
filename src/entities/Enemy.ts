@@ -2069,8 +2069,10 @@ export class Enemy extends Entity {
       if (this.vanillaId === 454 || !prev || prev.spawnAlpha < 85) {
         this.dontTakeDamage = this.spawnAlpha > 0;    // :51381-51382
         if (this.spawnAlpha > 0 && this.hp > 0) {
-          game.spawnParticles(this.x + Math.random() * this.w, this.y + Math.random() * this.h,
-            '#A060E0', 2, 0, { life: 40, size: 2 });
+          // 尘 228（:51535-51540）——C 批改真实尘型（scale2/alpha100/noGravity/noLight;
+          // type228 的烟雾族初速特例由 VanillaDust.spawn 镜像承担）
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 228, 0, 0, 100, null, 2);
+          if (d) { d.noGravity = true; d.noLight = true; }
         }
         this.spawnAlpha = Math.max(0, this.spawnAlpha - 42);
         if (this.spawnAlpha === 0) this.alphaFade = false;
@@ -2085,15 +2087,14 @@ export class Enemy extends Entity {
       this.dontTakeDamage = this.spawnAlpha > 0;      // :51402（含现身后的持续重置）
       if (this.vanillaId === 621 || !prev || prev.spawnAlpha < 85) {
         if (this.spawnAlpha > 0 && this.hp > 0) {
-          game.spawnParticles(this.x + Math.random() * this.w, this.y + Math.random() * this.h,
-            '#9E1B1B', 2, 0, { life: 40, size: 2 });
+          // 尘 5 血尘 ×2/t（:51556-51561）——C 批改真实尘型
+          for (let k = 0; k < 2; k++) game.spawnDust?.(this.x, this.y, this.w, this.h, 5);
         }
         this.spawnAlpha = Math.max(0, this.spawnAlpha - 42);
         if (this.spawnAlpha === 0) this.alphaFade = false;
       }
       if (this.spawnAlpha === 0 && Math.floor(Math.random() * 5) === 0) {
-        game.spawnParticles(this.x + Math.random() * this.w, this.y + Math.random() * this.h,
-          '#9E1B1B', 1, 0, { life: 40, size: 2 });    // :51419-41421 现身后续尘
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 5);   // :51565-51566 现身后续尘——C 批真实尘型
       }
     }
 
@@ -2101,10 +2102,12 @@ export class Enemy extends Entity {
       const prev = this.wormFollow;
       if (this.vanillaId === 13 || !prev || prev.spawnAlpha < 85) {
         if (this.spawnAlpha > 0 && this.hp > 0) {
-          game.spawnParticles(
-            this.x + Math.random() * this.w, this.y + Math.random() * this.h,
-            '#8A62C0', 2, 0, { life: 40, size: 2 },
-          );
+          // 尘 14 ×2/t（AI_006 尾段 :52807-52811：vel0、alpha100、scale2、
+          // noGravity/noLight——C 批真实尘型）：
+          for (let i2 = 0; i2 < 2; i2++) {
+            const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 14, 0, 0, 100, null, 2);
+            if (d) { d.noGravity = true; d.noLight = true; }
+          }
         }
         if (Math.hypot(this.x - this.prevX, this.y - this.prevY) > 2) {
           this.spawnAlpha = Math.max(0, this.spawnAlpha - 42);

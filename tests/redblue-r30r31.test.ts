@@ -44,7 +44,7 @@ function makeHooks() {
     spawnParticles: () => {},
     notifyInventoryChanged: () => {},
     playSfx: () => {},
-    playSfxFiles: (files) => sfx.push(files.join(',')),
+    playSfxFiles: (files: string[]) => sfx.push(files.join(',')),
     showPickupLabel: () => {},
     spawnDust: (x: number, y: number, w: number, h: number, type: number, _sx?: number, _sy?: number, _al?: number, _col?: unknown, scale?: number) => {
       dusts.push({ x, y, w, h, type, scale: scale ?? 1 });
@@ -388,11 +388,16 @@ const gameSrcOf = (): string =>
 
 describe('批次5 集成收编（落点清单 ①-⑧）', () => {
   // ① 回旋镖出手点收口：原版 ItemCheck_Shoot 通用尾支 pointPosition=玩家中心
-  //（1458 Player.cs:47603 + RotatedRelativePoint :4209-4227 无旋转时偏移恒 0）
-  it('① boomerang 出手点:Game 发射链 placeAtShootSpawn 收口;magic/shot/grenade 偏差登记在场', () => {
+  //（1458 Player.cs:47603 + RotatedRelativePoint :4209-4227 无旋转时偏移恒 0）。
+  // 断言同步（2026-08-31 注）：Game boomerang 支改为【直构即中】——Boomerang 构造
+  // 直取 this.player.cx/cy，不再二次 placeAtShootSpawn 回正（同一落点语义,少一跳
+  // 中间盒回正;见 Game.ts boomerang 支注释）。正则同步新形态。
+  it('① boomerang 出手点:Game 发射链直构即中(玩家中心)', () => {
     const src = gameSrcOf();
-    expect(src).toMatch(/placeAtShootSpawn\(bom, this\.player\.cx, this\.player\.cy\)/);
-    expect(src).toMatch(/'magic'\/'shot'\/'grenade' 同式偏差登记不改/);   // 裁定登记载体
+    expect(src).toMatch(/new Boomerang\(this\.player\.cx, this\.player\.cy,/);
+    // 断言同步（2026-08-31 注）：magic/shot/grenade 的“同式偏差登记”注释已被后续
+    // 批次改写移除,原第二正则失效——该偏差的裁定载体改由 approx-registry 台账
+    // 承载（文档面）,此处不再对注释字面做源码断言。
   });
 
   // ② 链枷多球门放宽(R30 §5.2):原版 AI_015 无同型存在门,唯一约束=channel;

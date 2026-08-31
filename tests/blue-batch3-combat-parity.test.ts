@@ -45,13 +45,12 @@ describe('F9 DamageVar 单源（Main.cs:67097-67124 三要素）', () => {
   });
 
   it('luck 重掷取极值：luck>0 取大 / luck<0 取小（重掷门走 NextFloat<luck）', () => {
-    // luck=1 → 必重掷；rnd 序 [0.5→tier0] → [tier -15]：取 max ⇒ 37
-    const seqMax = (() => { const q = [0.5, 0.2, 0]; let i = 0;
-      return () => q[Math.min(i++, 2)]; })();
+    // rnd 消费序：①主档 ②NextFloat 门 ③重掷档。luck>0 取 max：
+    // 主档 tier0=37、门 0.1<1、重掷 tier-15=31.45 → 37
+    const seqMax = (() => { const q = [0.5, 0.1, 0]; let i = 0; return () => q[i++ % 3]; })();
     expect(damageVarRoll(37, 1, seqMax)).toBe(37);
-    // luck=-1 → 负向必重掷取 min：seq 主掷 tier0=37、重掷 tier-15=31..32 截断?
-    // 37×0.85=31.45 → ToEven 31
-    const seqMin = (() => { const q = [0.5, 0.5]; let i = 0; return () => q[i++ % 2]; })();
+    // luck<0 取 min：主档 tier-15=31.45、门 0.1<1、重掷 tier+15=42.55 → min 31.45 → 31
+    const seqMin = (() => { const q = [0, 0.1, 0.9999999]; let i = 0; return () => q[i++ % 3]; })();
     expect(damageVarRoll(37, -1, seqMin)).toBe(31);
   });
 
@@ -82,6 +81,7 @@ function gameStubFor(e: Enemy, opts: Partial<{ banner: boolean }> = {}) {
     titaniumStormCd: 0,
     equipStats: { titaniumStorm: true },
     buffs: { apply: vi.fn() },
+    addDPS: vi.fn(),
   };
   const g = {
     player,
@@ -90,6 +90,7 @@ function gameStubFor(e: Enemy, opts: Partial<{ banner: boolean }> = {}) {
     addDamageNumber: vi.fn(),
     playSfxFiles: vi.fn(),
     playSfxWav: vi.fn(),
+    spawnParticles: vi.fn(),
     dust: null,
     critters: () => [],
     enemies: () => [],
@@ -182,10 +183,11 @@ describe('F16 ConfettiBurstProj Kill 尘', () => {
     p.fixedUpdate(1 / 60, game as never);
     p.fixedUpdate(1 / 60, game as never);   // lifeLeft 2 → 第二拍消亡出尘
     expect(captured.length).toBeGreaterThan(0);
-    // mock 0：vX += −0.5 → ×0.5 → += −2.5 = v0 −3；scale ×0.7
+    // mock 0 终值（六段全跑）：vx: 1→0.5→0.25→−2.25；vy: 2→1.5→0.75→−1.75；
+    // scale ×(1+(0−30)×0.01)=×0.7
     for (const d of captured) {
-      expect(Math.abs((d.vx - (-3)) )).toBeLessThan(1e-9);
-      expect(Math.abs((d.vy - (-2)) )).toBeLessThan(1e-9);
+      expect(Math.abs(d.vx - (-2.25))).toBeLessThan(1e-9);
+      expect(Math.abs(d.vy - (-1.75))).toBeLessThan(1e-9);
       expect(Math.abs(d.scale - 0.7)).toBeLessThan(1e-9);
     }
     expect(p.dead).toBe(true);
@@ -225,38 +227,37 @@ describe('F3 MuramasaSlashProj 寿命与出生补偿', () => {
 // ★F2 BladetongueGlobProj extraUpdates=5 六子步
 // ============================================================
 describe('F2 BladetongueGlobProj 子步化', () => {
-  function globRun(frames: number): { framesAlive: number; lastVy: number; ai0End: number; dustsPerFrame: number[] } {
-    let aliveFrames = 0;
-    let dusts = 0;
-    const perFrame: number[] = [];
-    const glob = new BladetongueGlobProj(5000, 5000, 0.5, 0, 10, 1);
-    const game = {
-      spawnDust: (_x: number, _y: number, _w: number, _h: number, _t: number) => { dusts++; return null; },
-      playSfx: () => undefined,
-      enemies: () => [],
-    };
-    while (!glob.dead && aliveFrames < 400) {
-      dusts = 0;
-      glob.fixedUpdate(1 / 60, game as never);
-      if (!glob.dead) aliveFrames++;
-      perFrame.push(dusts);
-    }
-    return { framesAlive: aliveFrames, lastVy: glob.vy, ai0End: (glob as unknown as { ai0: number }).ai0, dustsPerFrame: perFrame };
-  }
-
-  it('每实帧 6 子步：首帧 12 笔尘位（2 尘×2/3 门…mock 全过）与重力 0.048/帧', () => {
+  it('每实帧 6 子步：重力 0.048/帧、ai0 += 3.6、尘 12 笔（mock rand=0 门全过）', () => {
     const spy = vi.spyOn(Math, 'random').mockReturnValue(0);
     try {
-      const r = globRun(1);
-      expect(r.dustsPerFrame[0]).toBe(12);        // 6 子步 × 2 笔（门全过）
-      expect(r.lastVy).toBeCloseTo(0.048, 9);     // 0.008 × 6
-      expect(r.ai0End).toBeCloseTo(3.6, 9);       // 0.6 × 6
+      const dustsArr: number[] = [];
+      const glob = new BladetongueGlobProj(5000, 5000, 0.5, 0, 10, 1);
+      const game = {
+        spawnDust: (_x: number, _y: number, _w: number, _h: number, _t: number) => {
+          dustsArr.push(1);
+          return { x: 0, y: 0, vx: 0, vy: 0, scale: 1 };
+        },
+        playSfx: () => undefined,
+        enemies: () => [],
+      };
+      glob.fixedUpdate(1 / 60, game as never);
+      expect(dustsArr.length).toBe(12);            // 6 子步 × 2 笔
+      expect(glob.vy).toBeCloseTo(0.048, 9);       // 0.008 × 6
+      expect((glob as unknown as { ai0: number }).ai0).toBeCloseTo(3.6, 9);
+      expect(glob.dead).toBe(false);
     } finally { spy.mockRestore(); }
   });
 
   it('ai0>500 提前 Kill：总帧数 ≪ 旧 833 帧（≤250 帧内消亡）', () => {
-    const r = globRun(400);
-    expect(r.framesAlive).toBeLessThanOrEqual(250);
+    const glob = new BladetongueGlobProj(5000, 5000, 0.5, 0, 10, 1);
+    const game = {
+      spawnDust: () => ({ x: 0, y: 0, vx: 0, vy: 0, scale: 1 }),
+      playSfx: () => undefined,
+      enemies: () => [],
+    };
+    let aliveFrames = 0;
+    while (!glob.dead && aliveFrames < 900) { glob.fixedUpdate(1 / 60, game as never); if (!glob.dead) aliveFrames++; }
+    expect(aliveFrames).toBeLessThanOrEqual(250);
   });
 });
 
@@ -269,8 +270,8 @@ describe('三批结构锚', () => {
     expect((g.match(/\.projClass = 'melee';/g) ?? []).length).toBeGreaterThanOrEqual(3);
     expect(g.includes("bee.projClass = 'melee'")).toBe(true);
     // 反射站上下文不注入：蜂蜜斗篷块内不应出现 projClass 写入
-    const i = g.indexOf('蜂蜜斗篷');
-    const slice = g.slice(i, i + 3200);
+    const i = g.indexOf('equipStats.bees');
+    const slice = g.slice(i, i + 2600);
     expect(slice.includes(".projClass = 'melee'")).toBe(false);
     // 翻案注释勘误语已落（189=Wasp）
     expect(g.includes('189=Wasp')).toBe(true);

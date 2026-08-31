@@ -7,6 +7,7 @@
 // 改值流程：先读 Terarria1457 反编译源逐 case 确证 → --fix 再生金标 → diff 人工过目 →
 // 跑双测。禁止凭截图/感觉手改数值——曾因此炸出全物平铺第一格（病根=风格带总数被当帧数）。
 import { tileFrameCapture } from '../debug/TileFrameCapture';
+import { cageFamilyOf } from './CritterCage';
 // 绘制语义 = TileDrawing.GetTileDrawData addFrY：frameY += frameIdx * pitch。
 // ★ pitch 有多组（TileDrawing.cs:4568+ 实证）：
 //   默认 38px（2 格高物体的帧带 2px 额外间距——熔炉 17(456/38=12帧)/磨刀站 377 走默认；
@@ -278,6 +279,16 @@ export function fireplaceAddFrY(frameX: number): number {
   const off = animFrameIdx(405, 306) * 38;
   tileFrameCapture.yoff('fp405', String(frameX), off);
   return off;
+}
+
+/** ★根治标记（2026-08-31）：凡此谓词为真的 sheet 一律【不进 chunk 烘焙】，
+ *  由 Renderer.drawAnimatedTileLayer 逐帧动态补画。机制=含动画格的 chunk 在
+ *  rate 节拍下整块失效重烘（256 格×完整管线），密度放大后即"重烘风暴"（齿轮
+ *  272 判例：船区 329 块 ⇒ 20% CPU）。动态层画在整屏世界坐标系，无 chunk 边界
+ *  裁剪，顺带消灭动画家具跨 chunk 的陈旧溢出行隐患。范围=TILE_ANIM_RATE 全表
+ *  ∪ 笼族 ∪ 矿车轨道 314。 */
+export function isDynamicAnimSheet(sheet: number): boolean {
+  return TILE_ANIM_RATE[sheet] !== undefined || sheet === 314 || !!cageFamilyOf(sheet);
 }
 
 /** 齿轮块 272（TileDrawing.cs:1137-1147 case 272 verbatim）：addFrY =
