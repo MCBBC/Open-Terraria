@@ -1,7 +1,8 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, applyBannerDamageDealt } from './projTargets';
+import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, applyBannerDamageDealt, pyroclastProjectileGate } from './projTargets';
+import { trySnapStrike } from '../stats/SnapStrike';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, VANILLA_TILE_ID } from '../data/tiles';
@@ -447,6 +448,18 @@ export class TrapShot extends Entity {
         // StatusNPC :11192-11196 的 catalystBand 门对陷阱镖同样生效
         if (trapProjId !== undefined) applyProjStatus(trapProjId, e as unknown as Record<string, number>,
           { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
+        // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42）：陷阱弹由 Wiring 发射时
+        // 尾参 owner=Main.myPlayer（Wiring.cs case 137 :1764/:1786/:1965-1983 取证）
+        // ⇒ ownedBySomeone 面成立；仅数据面带类旗的型号能过门——现役 TRAP_PROJ_ID
+        // 表内镖族 98/184/185/186/187/980 均【无类旗】原版本就不触发，唯一可达 =
+        // 巨石族（若 id 带类旗则自动生效）。此处故意不复写实例 hostile 投影（本仓
+        // hostile 承载"伤玩家"档，与原版 Projectile.hostile/friendly 数据面不同域）；
+        // 反射弹已由外层 !this.reflected 拦截。
+        if (trapProjId !== undefined && pyroclastProjectileGate(game, { projId: trapProjId })) {
+          trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2,
+            (e as unknown as { id?: number }).id ?? -1,
+            { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+        }
         // 击退方向 = 弹 direction（Projectile.cs:13652 num40=direction,水平 ±1）
         e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
         // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
@@ -531,6 +544,14 @@ export class TrapShot extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
+      // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42）——TRAP_PROJ_ID 兜底
+      //  查 id（162/281 无类旗原版恒不触发），站位补齐同命中环注
+      const blProjId = TRAP_PROJ_ID[this.kind];
+      if (blProjId !== undefined && pyroclastProjectileGate(game, { projId: blProjId })) {
+        trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2,
+          (e as unknown as { id?: number }).id ?? -1,
+          { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+      }
       e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);   // 音/飘值=单点
     }
   }

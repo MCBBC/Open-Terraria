@@ -85,6 +85,9 @@ describe('任务① 攻端 PvP：无受击音/无预览飘字；循环尾写 att
       active: true, policy: { pvpAllowed: true },
       players: new Map(),
       getProxyPvpImmuneRemaining: () => 0,
+      // ★F14 甲虫蓄能回执关联（Game 近战 PvP 区新增意向登记位点——本套壳只关心
+      // msg44 面，登记动作为空实现；记账语义在 pvp-settle-broadcast 全测）
+      notePendingMeleeHit: () => {},
       sendStrikePlayer: (...a: unknown[]) => { strikes.push(a); },
     };
     (player as unknown as { hostile: boolean }).hostile = true;

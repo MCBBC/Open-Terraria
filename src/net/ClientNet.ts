@@ -9,6 +9,7 @@ import {
   RoomRules, DEFAULT_ROOM_RULES, rulesFromBits,
   writeDoorEvent, readDoorEvent,
   writePlayerHurt, readPlayerHurt,
+  PlayerHurtFlags,
 } from './protocol';
 import {
   writeLeashedFullSync, writeLeashedPartialSync, writeLeashedRemove, writeLeashedPlaceRequest,
@@ -77,6 +78,14 @@ export interface RemotePlayerState {
    *  Main.player[victim].immune 同构,1457 Player.cs:44429）。旧端无尾段 → 镜像
    *  不重置,仅靠本地衰减归零（缺省 0 = 不拦,改动前行为） */
   pvpImmuneT: number;
+  /** statDefense 终值镜像（msg16 尾段 u16,★F14 甲虫 MP 记账批,PROTO 注 g）——
+   *  近战 PvP 甲虫蓄能入账式的唯一攻端不可知输入（vanilla :38864-38868 返回段
+   *  重算 CalculateDamagePlayersTakeInPVP(Damage×(crit?2:1), statDefense)——
+   *  【不是】实扣 HP!Main.cs:67136-43 = Dmg−0.5×Def,min1,无难度乘区/endurance）。
+   *  null = 对端缺尾段（旧 server 剥离/旧 client 未发）→ 消费侧保守弃账。
+   *  新鲜度语义=原版攻端 Main.player[远端].statDefense 本地代理同层
+   *  （都滞后一个状态批次;结算强制位保证命中瞬间必有新鲜 hp 包在途）。 */
+  pvpDefense: number | null;
   /** msg13 flagBits[0]（原版 bitsByte26[0]）:躺床态 */
   sleeping: boolean;
 }
@@ -204,6 +213,16 @@ export interface ClientNetHooks {
   /** module14 per-client 掉落到达（房主/SimHost 经服务器定向转发——原版 msg90
    *  InstancedItem 等价;Boss 袋族各端私有实例。Game 侧 netLocalOnly 落地） */
   onInstancedLoot?: (entries: InstancedLootEntry[]) => void;
+}
+
+/** vanilla 近战 PvP 甲虫蓄能入账【精确】式（★F14；Player.cs:38864-38868 返回段重算 +
+ * Main.cs:67136-67143 CalculateDamagePlayersTakeInPVP + Player.cs:38533-35 crit 先折乘）：
+ * = (int)max(1, rawDmg×(crit?2:1) − statDefense×0.5)。double 域仅 .0/.5 尾数（两输入皆
+ * 整数×0.5），IEEE754 精确表示 → JS 算术零舍入差；(int) 截断=trunc，min1 钳在 double 段
+ * 内先于截断（vanilla 语义：-0.5 双倍罚底仍收 1）。 */
+export function beetlePvpCredit(rawDmg: number, crit: boolean, def: number): number {
+  const v = Math.trunc(Math.trunc(rawDmg) * (crit ? 2 : 1) - def * 0.5);
+  return v < 1 ? 1 : v;
 }
 
 export class ClientNet {
@@ -453,7 +472,7 @@ export class ClientNet {
               up: false, down: false, left: false, right: false, jump: false, useItem: false,
               facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
               hostile: false, team: 0, hp: 100, maxHp: 100, sleeping: false,
-              deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0,
+              deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
             };
             this.players.set(slot, p);
           }
@@ -498,7 +517,7 @@ export class ClientNet {
             facing: ctrl & 64 ? 1 : -1, selectedItem: sel, dead: !!(flag & 64),
             fresh: true, active: true, lastFresh: performance.now(),
             hostile, team, hp: 100, maxHp: 100, sleeping: false,
-            deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0,
+            deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
           };
           this.players.set(slot, p);
         }
@@ -782,6 +801,9 @@ export class ClientNet {
         // 2026-08-31 复核：旧 server 重打包剥此尾 → undefined 分支保持既有镜像,
         // 只靠 decayProxyImmune 本地衰减归零,绝不残存“永续免伤”——缺省 0 = 不拦）
         const pvpImmune = r.remaining >= 2 ? r.i16() : undefined;
+        // 尾部 statDefense 镜像（★F14 甲虫 MP 记账批——位置序跟在免疫段后；旧 server
+        // 剥离/对端缺发 → null 保持既有值（null 才代表「未知」,消费侧弃账不虚增））
+        const pvpDef = r.remaining >= 2 ? r.u16() : undefined;
         // 缓存进状态表（proxy.hp 接线在 Game.simulateRemotePlayers 每帧读取）
         const rp = this.players.get(slot);
         if (rp) {
@@ -792,6 +814,7 @@ export class ClientNet {
           if (manaMax !== undefined) rp.manaMax = manaMax;
           if (luck !== undefined && Number.isFinite(luck)) rp.luck = luck;
           if (pvpImmune !== undefined) rp.pvpImmuneT = Math.max(0, Math.min(32767, pvpImmune));
+          if (pvpDef !== undefined) rp.pvpDefense = Math.min(32767, Math.max(0, pvpDef));
         }
         if (slot !== this.mySlot) this.hooks.onHp?.(slot, hp, maxHp);
         return;
@@ -804,6 +827,20 @@ export class ClientNet {
         const m = readPlayerHurt(r);
         if (!m || m.slot === this.mySlot) return;
         this.hooks.onPlayerHurt?.(m.slot, m.dmg, m.x, m.y, m.dir, m.flags);
+        // ★F14 甲虫蓄能回执关联消费：仅 Pvp 位帧参与（PvE/环境伤 flags=0 不冲账，
+        //  避免「目标掉岩浆」清走我的未决挥击）。FIFO 取队头 = 同目标窗口交叠的裁决序；
+        //  队空 = 纯观战帧不动作。入账式 beetlePvpCredit 用【意向裸伤+crit】×镜像 def
+        //  重算 vanilla 返回段真值——非本包 dmg 实扣值（防近似,见 notePendingMeleeHit 注①）。
+        if ((m.flags & PlayerHurtFlags.Pvp) !== 0) {
+          const q = this.pendingMeleeHits.get(m.slot);
+          if (q && q.length > 0) {
+            const e = q.shift()!;
+            const def = this.players.get(m.slot)?.pvpDefense;
+            if (def !== null && def !== undefined) {
+              this.onMeleePvpBeetleCredit?.(m.slot, beetlePvpCredit(e.base, e.crit, def), e.off);
+            }
+          }
+        }
         return;
       }
       case Msg.SscSync: {
@@ -876,6 +913,7 @@ export class ClientNet {
   tick() {
     if (!this.active) return;
     this.decayProxyImmune();
+    this.pruneMeleeReceipts(performance.now());   // ★F14 回执窗 TTL 扫描
     this.syncInventory(performance.now());
     this.syncHp();
     this.flushPending(); // P1.3 msg21 合帧冲洗
@@ -988,6 +1026,66 @@ export class ClientNet {
   notifyPlayerHurtSettled() {
     this.pvpImmuneHintPending = true;
     this.lastHpAt = 0;
+  }
+
+  // ================= ★F14 甲虫攻套 PvP 蓄能·回执关联制（2026-08-31 清零批四） =================
+  // 判例锚：ItemCheck_MeleeHitPVP :44434-44460 —— 攻机同帧 `int num2=(int)player.Hurt(
+  // ByPlayer,num,direction,pvp:true,quiet:false,flag)` 后 `if(beetleOffense){ beetleCounter
+  // += num2; beetleCountdown = 0; }`。victim-settles 架构下该同步返回不可达（F14 BLOCKER),
+  // 收敛方案 = 回执关联制：意向端登记未决挥击 → 被击端实扣广播 msg117(Pvp 位) 到包消费。
+  // ★F14 定谳要点（防止再发明「近似」）：
+  //  ① 入账值【不是】被击者实扣 HP —— Hurt 对 pvp:true 在【返回前】整体重算
+  //     num2 = CalculateDamagePlayersTakeInPVP(num×(crit?2:1), statDefense)
+  //     （:38862-38868 + Main.cs:67136-67143：Dmg−Def×0.5,min1;无难度乘区/无 endurance/
+  //     无闪避早退面——那三者在重算发生前已定型于各自分支）。crit 的 ×2 只经重算段进入
+  //     返回值（与 GA-F2 勘误注一致），因此致敌致死（实扣被残血钳小）时 vanilla 反而按
+  //     全额公式入账——feed「117 实扣值」=系统性欠账（暴击全漏 ×2、高防/击杀态大偏），
+  //     为本实现明确规避的新近似形态。
+  //  ② 式中唯一攻端不可知输入 = 受方 statDefense → 由 msg16 第三尾段镜像上行
+  //     （RemotePlayerState.pvpDefense；新鲜度语义 = 原版攻端 Main.player[远端].statDefense
+  //     本地代理同层——都滞后一个状态批次，且结算强制位保证命中瞬间一帧内有新鲜 hp 包在途）。
+  //  ③ 同挥多目标聚合：pending 按 victimSlot 独立成键，各目标回执乱序到达互不干扰。
+  //  ④ 同目标二次命中窗口交叠：per-slot FIFO 队列，先受理先出账（每个 117 只消费一条）。
+  //  ⑤ 迟到包 = TTL 丢弃窗（MELEE_RECEIPT_WINDOW_MS，tick 每 fixedUpdate 扫队头过期剔除；
+  //     队内单调到期 ⇒ 头扫即完备）。原版攻机累计发生在同一世界步内、不存在「迟到」概念；
+  //     网络化后的必然相位滞后 <RTT，正常链路远小于窗口。过期丢弃的语义等价性说明：
+  //     丢弃只可能损失本端合法账目（保守侧欠计——被击端 flash 免疫/断流导致的意图丢失同因
+  //     也不产生任何 117），不会把他人伤害记进自己的壳；窗口上限同时封住「他人对我未决目标
+  //     的同期 PvP 命中被错配到自己头上」的面——两全由窗口宽度折衷（2000ms 覆盖最劣抖动,
+  //     错配暴露面≈竞技场混战中同人 2 秒双打，量级受击者双方 damage 波动 ±1 档，登记残余）。
+
+  /** 回执等待窗（ms）；见上⑤。私有字段保留可注入性（测试驱动加速时钟用入口为主） */
+  private MELEE_RECEIPT_WINDOW_MS = 2000;
+
+  /** 未决近战挥击（victimSlot → FIFO{意向裸伤,crit位,攻端攻套在身钉值,到期时刻}）。
+   *  off 攻套钉于【受理瞬间】——与原版 ：44456 的求值位次同源（beetleOffense 门挂
+   *  在产生这笔 rawDmg 的同一挥击上,且猛攻套 dmg 乘区本就参与了该裸伤的构成）。 */
+  private pendingMeleeHits = new Map<number, Array<{ base: number; crit: boolean; off: boolean; exp: number }>>();
+
+  /** F14 回执闭环 sink：Game 在甲虫蓄能区一次性安装（闭包持本人 BeetleMeter 面）。
+   *  未安装 = 关联结果静默丢弃（对未接 meter 的消费方零影响）。 */
+  onMeleePvpBeetleCredit?: (victimSlot: number, credit: number, offenseSet: boolean) => void;
+
+  /** 近战 PvP 受理命中意向登记（Game 近战 PvP 区调用；异常防御静默吞脏数据）。 */
+  notePendingMeleeHit(victimSlot: number, rawDmg: number, critFlag: boolean, offenseSet: boolean): void {
+    if (victimSlot === this.mySlot || victimSlot < 0) return;
+    const base = Math.trunc(rawDmg);
+    if (!(base > 0)) return;
+    const q = this.pendingMeleeHits.get(victimSlot) ?? [];
+    q.push({ base: Math.min(9999, base), crit: critFlag === true, off: offenseSet === true,
+      exp: performance.now() + this.MELEE_RECEIPT_WINDOW_MS });
+    this.pendingMeleeHits.set(victimSlot, q);
+  }
+
+  /** 过期队头清扫（tick 每 fixedUpdate；FIFO 单调到期 ⇒ 只扫队头即完备） */
+  private pruneMeleeReceipts(nowMs: number): void {
+    for (const [slot, q] of this.pendingMeleeHits) {
+      let head = 0;
+      while (head < q.length && q[head].exp <= nowMs) head++;
+      if (head === 0) continue;
+      if (head === q.length) this.pendingMeleeHits.delete(slot);
+      else q.splice(0, head);
+    }
   }
 
   private lastSentCtrl = -1;
@@ -1365,7 +1463,7 @@ export class ClientNet {
   private lastDeathsSent = '';
   syncHp() {
     if (this.mySlot < 0) return;
-    const p = this.game.player as unknown as { hp: number; maxHp: number; deathsPve: number; deathsPvp: number; mana: number; maxMana: number; luck: number; iframes?: number };
+    const p = this.game.player as unknown as { hp: number; maxHp: number; deathsPve: number; deathsPvp: number; mana: number; maxMana: number; luck: number; iframes?: number; defense?: number };
     const now = performance.now();
     // 结算强制位（notifyPlayerHurtSettled）：仅下一次发送绕过节流，消费即清
     const forced = this.pvpImmuneHintPending;
@@ -1385,7 +1483,11 @@ export class ClientNet {
       .i16(Math.max(-32768, Math.min(32767, p.mana)))
       .i16(Math.max(-32768, Math.min(32767, p.maxMana)))
       .f32(Number.isFinite(p.luck) ? p.luck : 0)
-      .i16(Math.max(0, Math.min(32767, p.iframes ?? 0))).finish());
+      .i16(Math.max(0, Math.min(32767, p.iframes ?? 0)))
+      // ★F14 尾段：statDefense 终值镜像（PROTO 注 g）——甲虫 PvP 蓄能式的攻端不可知输入。
+      //  随每次 hp 包捎带；结算强制位保证命中瞬间必有新鲜帧在途。防御独立变化不单独触发
+      //  上行（与免疫尾段同款取材面——需要它的消费场景恰好都是受击事件，随包必达）
+      .u16(Math.max(0, Math.min(65535, Math.trunc(p.defense ?? 0)))).finish());
   }
 
   /** per-client 掉落上行（module14；结算端=房主——服务器按 targetSlot 定向转发,

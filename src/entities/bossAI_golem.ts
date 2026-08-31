@@ -22,6 +22,10 @@ import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
 import { vanillaNpc } from '../data/vanillaNpcs';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
+// 台账批 2026-08-31:私有三列采样 collideGround 退役 → 本仓 physics 基建 moveAndCollide
+// 1:1(Collision.cs:2299 TileCollision + SlopeCollision + StepUp/StepDown 全语义——
+// 140px 体宽的旧采样点 [x+2,cx,x+w−2] 间各有 ~68px 盲带,四列实心可悬空/坡面不贴合)
+import { moveAndCollide } from '../physics/TileCollision';
 
 /** 原版 NPC 通用重力/maxFall(NPC.UpdateNPC 非 noGravity 族:0.3/2t、maxFall 10) */
 const GRAV = 0.3;
@@ -113,47 +117,14 @@ const fadeAlpha = (e: Enemy, x: { alpha: number }): number => {
 };
 
 // ---------------------------------------------------------------------------
-// 碰撞(本族私有拷贝:bossAI.collideGround 是 private;140px 宽本体需多列采样防半悬空)
+// 碰撞:私有三列采样 collideGround 已退役(台账批 2026-08-31)。石巨人族走
+// physics/TileCollision.moveAndCollide —— Collision.cs:2299 TileCollision 全语义
+// (整盒逐 tile 扫描/半砖 carve/坡面整块+对角线贴合 SlopeCollision/平台单向),
+// 修正旧采样器 [x+2,cx,x+w−2] 三点间 ~68px×2 盲带导致的悬空站立与坡面漂移。
+// 原版 NPC 族物理(Collision_MoveNormal :93866)= velocity = TileCollision(...) 后
+// position += velocity;moveAndCollide 的分轴实现同样在碰撞时清零对应轴速度并置
+// collideX/collideY/onGround(消费点见拳态机冲拳撞停分支)。
 // ---------------------------------------------------------------------------
-
-/** 落地/顶墙/侧墙判定(原版共享 Collision 的 AABB 近似:底/顶三列、侧墙三点) */
-function collideGround(e: Enemy, game: GameHooks): void {
-  const st = game.world.store;
-  const cols = [e.x + 2, e.cx, e.x + e.w - 2];
-  if (e.vy >= 0) {
-    const ty = Math.floor((e.y + e.h) / TILE);
-    let top = Infinity;
-    for (const cx of cols) {
-      const tx = Math.floor(cx / TILE);
-      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) top = Math.min(top, ty * TILE);
-    }
-    if (top < Infinity) { e.y = top - e.h; e.vy = 0; e.onGround = true; }
-    else e.onGround = false;
-  } else {
-    e.onGround = false;
-    const ty = Math.floor(e.y / TILE);
-    let bottom = -Infinity;
-    for (const cx of cols) {
-      const tx = Math.floor(cx / TILE);
-      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) bottom = Math.max(bottom, (ty + 1) * TILE);
-    }
-    if (bottom > -Infinity) { e.y = bottom; e.vy = 0; }
-  }
-  const rows = [e.y + 2, e.cy, e.y + e.h - 2];
-  if (e.vx > 0) {
-    const tx = Math.floor((e.x + e.w) / TILE);
-    for (const ry of rows) {
-      const ty = Math.floor(ry / TILE);
-      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { e.x = tx * TILE - e.w; e.vx = 0; break; }
-    }
-  } else if (e.vx < 0) {
-    const tx = Math.floor(e.x / TILE);
-    for (const ry of rows) {
-      const ty = Math.floor(ry / TILE);
-      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { e.x = (tx + 1) * TILE; e.vx = 0; break; }
-    }
-  }
-}
 
 /** AABB 与实心块相交(原版 Collision.SolidTiles 近似):拳冲拳段关闭穿墙后的撞停判定 */
 function hitSolid(game: GameHooks, e: Enemy): boolean {
@@ -302,8 +273,7 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.iframes = 2;
     e.vx *= 0.9;
     e.vy = Math.min(e.vy + GRAV, MAX_FALL);
-    e.x += e.vx; e.y += e.vy;
-    collideGround(e, game);
+    moveAndCollide(e, game.world, e.vx, e.vy);
     x.deadT++;
     if (x.deadT % 6 === 0) {
       game.spawnParticles(
@@ -417,12 +387,12 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
     return;
   }
 
-  // ---- 重力+位移+落地(原版共享物理:noGravity=false → 0.3/2t、maxFall 10) ----
+  // ---- 重力+位移+落地(原版共享物理:noGravity=false → 0.3/2t、maxFall 10):
+  //      TileCollision(velocity)→position+=velocity 全语义(moveAndCollide 承载,
+  //      落地清 vy 置 onGround——蓄力段 `e.vy === 0` 门依赖此语义;穿墙跳态直积分) ----
   e.vy = Math.min(e.vy + GRAV, MAX_FALL);
-  e.x += e.vx;
-  e.y += e.vy;
-  if (!x.noTC) collideGround(e, game);
-  else e.onGround = false;
+  if (!x.noTC) moveAndCollide(e, game.world, e.vx, e.vy);
+  else { e.x += e.vx; e.y += e.vy; e.onGround = false; }
 }
 
 // ---------------------------------------------------------------------------
@@ -597,14 +567,17 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
     // :31721-31740 排焰尘(纯视觉,略)
   }
 
-  // :31512-31520 穿墙开关(曾恒直积分):自由头看不到玩家 → 穿墙;有视线且已嵌块
-  // → 关穿墙走碰撞(撤出墙体的手段);有视线未嵌块保持穿墙直飞。挂载头恒穿墙(:31284)
+  // 穿墙开关(:31581-31597 两版本同段):看不到玩家 → noTileCollide=true 直飞;
+  // 有视线且【已嵌实心】(SolidTiles 整盒重叠=hitSolid)→ 关穿墙本拍起走 TileCollision
+  // 撤出(moveAndCollide 分轴解析替代旧 collideGround 半吊抬升);有视线未嵌块保持
+  // 穿墙直飞。挂载头(246)恒穿墙直飞(:31284)
   const freeNoLos = !player || !losClear(game, e.cx, e.cy, player.cx, player.cy);
   if (!x.free || freeNoLos || !hitSolid(game, e)) {
     e.x += e.vx;
     e.y += e.vy;
+    e.onGround = false;
   } else {
-    collideGround(e, game);
+    moveAndCollide(e, game.world, e.vx, e.vy);
   }
 }
 
@@ -740,13 +713,20 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.spin = isLeft ? Math.atan2(-e.vy, -e.vx) : Math.atan2(e.vy, e.vx);
   }
 
-  // ---- 位移(蓄力态已整帧钉锚;冲拳非穿墙段撞墙即回位) ----
+  // ---- 位移(蓄力态已整帧钉锚;冲拳非穿墙段撞墙即回位):
+  //      TileCollision 分轴解析(moveAndCollide)——碰撞轴速度被改写即 collideX/Y
+  //      (Collision_MoveWhileDry :93734-93747 oldVelocity≠velocity 语义),替代旧
+  //      "先嵌进墙体再整盒重叠"的 hitSolid 近似,冲拳贴地滑行/半砖不再误停 ----
   if (x.state !== 1) {
-    e.x += e.vx;
-    e.y += e.vy;
-    if (x.state === 2 && !x.noTC && hitSolid(game, e)) {
-      x.noTC = true;
-      x.state = 0;                          // :19389-19392 collideX/collideY → 回位
+    if (!x.noTC) {
+      moveAndCollide(e, game.world, e.vx, e.vy);
+      if (x.state === 2 && (e.collideX || e.collideY)) {
+        x.noTC = true;
+        x.state = 0;                          // :19449-19453 collideX||collideY → 回位
+      }
+    } else {
+      e.x += e.vx;
+      e.y += e.vy;
     }
   }
 }

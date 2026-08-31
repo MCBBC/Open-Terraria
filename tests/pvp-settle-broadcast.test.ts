@@ -4,6 +4,8 @@
 //   GA2 PvP 弹幕免疫门（Damage_PVP 循环门禁串 Projectile.cs:14650，吸血反馈前置；
 //       且门插位先于 pvpProjHitSet.add——免疫期接触不入账）
 //   GA4 被击端四结算点 sendPlayerHurt(msg117)+notifyPlayerHurtSettled 收口
+//   F14 甲虫攻套 PvP 记账 BLOCKER 收敛（清零批四）：回执关联制——Game 区登记未决挥击、
+//       ClientNet 消费 msg117(Pvp 位) 以 beetlePvpCredit 重算 vanilla 返回段精确入账式
 //   ——原型桩口径同 weapon-melee-leftover / melee-pvp-los-gate（Object.create(Game.prototype)）。
 import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
@@ -12,7 +14,13 @@ import { Inventory } from '../src/items/Inventory';
 import { MagicProj } from '../src/entities/MagicProj';
 import { SparkleGuitarProj } from '../src/entities/SparkleGuitarProj';
 import { BuffType } from '../src/stats/Buffs';
-import { PlayerHurtFlags } from '../src/net/protocol';
+import {
+  NetWriter, NetReader, Msg, PlayerHurtFlags,
+  writePlayerHurt, readPlayerHurt,
+} from '../src/net/protocol';
+import { ClientNet, beetlePvpCredit } from '../src/net/ClientNet';
+import type { RemotePlayerState } from '../src/net/ClientNet';
+import { BeetleMeter } from '../src/player/BeetleMeter';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import type { TileStore } from '../src/world/TileStore';
 import { Game } from '../src/core/Game';
@@ -113,15 +121,19 @@ function pvpShell(immuneMirror: number) {
   (rp as unknown as { __netSlot?: number }).__netSlot = 1;
   g.remotePlayerProxies = [rp];
   const strikeSent: unknown[][] = [];
+  const noteCalls: Array<[number, number, boolean, boolean]> = [];
   g.net = {
     active: true,
     policy: { pvpAllowed: true },
     players: new Map([[1, { pvpImmuneT: immuneMirror }]]),
     getProxyPvpImmuneRemaining: (s: number) =>
       (g.net as { players: Map<number, { pvpImmuneT: number }> }).players.get(s)?.pvpImmuneT ?? 0,
+    // ★F14：Game 近战 PvP 区新增的未决挥击登记位点——GA1 套壳只关心门禁/msg44 面
+    notePendingMeleeHit: (slot: number, rawDmg: number, critFlag: boolean, off: boolean) =>
+      noteCalls.push([slot, rawDmg, critFlag, off]),
     sendStrikePlayer: (...a: unknown[]) => { strikeSent.push(a); },
   };
-  return { g, player, rp, strikeSent };
+  return { g, player, rp, strikeSent, noteCalls };
 }
 
 describe('GA1 近战 PvP 免疫门（mirror=getProxyPvpImmuneRemaining，1457 :44429 同构支）', () => {
@@ -574,5 +586,255 @@ describe('FR5-F kind9 旋转相位通道（aux 千分位 t01）', () => {
     expect(spark.phase01).toBeCloseTo(0, 5);
     spark.netPhaseApply(7);                              // clamp→1 → t=90 → wrap 0
     expect(spark.phase01).toBe(0);                       // 2π×90/90 ≡ 2π×0 视觉恒等
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ★F14（2026-08-31 清零批四）甲虫攻套 PvP 记账·回执关联制 BLOCKER 收敛
+//
+// 定谳锚（Player.cs / Main.cs 1457）：
+//   · ItemCheck_MeleeHitPVP :44434-44460 —— 攻机同帧 num2=(int)player.Hurt(...) 后
+//     `if (beetleOffense) { beetleCounter += num2; beetleCountdown = 0; }`；
+//   · num2【不是】被击者实扣：Hurt 对 pvp:true 在返回前重算
+//     num2 = CalculateDamagePlayersTakeInPVP(num×(crit?2:1), statDefense)
+//     （:38862-38868 + Main.cs:67136-67143 —— Dmg−0.5×Def,min1;无难度乘区/无
+//     endurance/致敌致死时实扣被残血钳小而入账仍按全额公式）→ feed msg117 实扣值
+//     = 系统性近似,禁走；
+//   · 式中唯一攻端不可知输入 = 受方 statDefense → msg16 第三尾段镜像
+//     （RemotePlayerState.pvpDefense,null=对端缺尾段→保守弃账不虚增）。
+// 覆盖矩阵：聚合(多目标乱序) / 同目标二次命中窗口交叠(FIFO) / 迟到包 TTL 丢弃 /
+//   非近战武器与 PvE/环境伤不充能不冲账 / 缺防御镜像降级弃账 / Game 区接线四元组。
+// ---------------------------------------------------------------------------
+
+/** 真 ClientNet 桩（journey-mp / pvp-immune-net 同款假 ws 字节流直连口径） */
+function fakeWsF14() {
+  const sent: Uint8Array[] = [];
+  const ws = {
+    sent,
+    readyState: 1,
+    bufferedAmount: 0,
+    send: (data: ArrayBuffer | Uint8Array) => { sent.push(new Uint8Array(data as ArrayBuffer)); },
+    close: () => { ws.readyState = 3; },
+    onopen: null as null, onmessage: null as null, onclose: null as null, onerror: null as null,
+  };
+  return ws;
+}
+type NetPrivF14 = { ws: { sent: Uint8Array[] } };
+const feedNetF14 = (net: ClientNet, frame: Uint8Array): void =>
+  (net as unknown as { handle(msgId: number, r: NetReader): void })
+    .handle(frame[2], new NetReader(frame.subarray(3)));
+const pruneOf = (net: ClientNet) =>
+  (net as unknown as { pruneMeleeReceipts(nowMs: number): void });
+
+function mkF14Net(mySlot: number): ClientNet {
+  const net = new ClientNet(
+    { player: { appearance: null, hostile: false, team: 0, hp: 100, maxHp: 100,
+      deathsPve: 0, deathsPvp: 0, mana: 50, maxMana: 100, luck: 0,
+      inv: { slots: [], armor: [], dye: [], selected: 0 } } } as never,
+    { onWorldReady: () => {} } as never);
+  net.mySlot = mySlot;
+  net.active = true;
+  (net as unknown as NetPrivF14).ws = fakeWsF14();
+  return net;
+}
+
+function seedPeerF14(net: ClientNet, slot: number, defense: number | null = null):
+  RemotePlayerState {
+  const p: RemotePlayerState = {
+    slot, name: `玩家${slot}`, appearance: '{}', x: 0, y: 0, vx: 0, vy: 0,
+    up: false, down: false, left: false, right: false, jump: false, useItem: false,
+    facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
+    hostile: true, team: 0, hp: 100, maxHp: 100, sleeping: false,
+    deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0,
+    pvpDefense: defense,
+  };
+  net.players.set(slot, p);
+  return p;
+}
+
+/** msg117 合成帧（writePlayerHurt 直通；flags 非近战支=去 Pvp 位） */
+const hurtFrameF14 = (slot: number, flags: number, dmg = 25): Uint8Array =>
+  writePlayerHurt({ slot, dmg, x: 100, y: 200, dir: 1, flags });
+
+interface F14Credit { slot: number; credit: number; off: boolean }
+
+/** 消费层套壳：attacker 视角 net + sink 记录 */
+function f14clientShell(): { net: ClientNet; credits: F14Credit[] } {
+  const net = mkF14Net(2);                       // 攻端自身 slot=2
+  const credits: F14Credit[] = [];
+  net.onMeleePvpBeetleCredit = (slot, credit, off) => credits.push({ slot, credit, off });
+  return { net, credits };
+}
+
+describe('★F14 入账式精确性：beetlePvpCredit ≡ vanilla 返回段重算真值', () => {
+  it('Dmg−0.5×Def 截断 + min-1 双钳 + crit ×2 只经本式进入（38864-38868/Main.cs:67136-43 向量）', () => {
+    expect(beetlePvpCredit(10, false, 25)).toBe(1);      // −12.5 → double 段 min1 → cast 1
+    expect(beetlePvpCredit(11, false, 7)).toBe(7);       // 11−3.5=7.5 → trunc 7
+    expect(beetlePvpCredit(11, true, 3)).toBe(20);       // crit×2=22−1.5=20.5 → 20
+    expect(beetlePvpCredit(20, true, 20)).toBe(30);      // 40−10 精确整
+    expect(beetlePvpCredit(36, true, 20)).toBe(62);      // 72−10 E2E 参照值
+    expect(beetlePvpCredit(9, false, 999)).toBe(1);      // 全防下仍保底 1（原版 :44456 无 immortal 免账）
+  });
+});
+
+describe('★F14 回执关联消费层（ClientNet 实例直驱）：聚合/FIFO/TTL/防污染/降级', () => {
+  it('聚合——三目标各自 pending，回执乱序到达互不串账（各 slot FIFO 独立键）', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 7, 6); seedPeerF14(net, 9, 8); seedPeerF14(net, 4, 40);
+    // 多目标受理登记（同挥聚合形态；off 全 true）
+    net.notePendingMeleeHit(7, 30, false, true);
+    net.notePendingMeleeHit(9, 12, true, true);
+    net.notePendingMeleeHit(4, 20, false, true);
+    // 到达序反转（服务器转发并不保证跨目标有序）
+    feedNetF14(net, hurtFrameF14(4, PlayerHurtFlags.Pvp));
+    feedNetF14(net, hurtFrameF14(9, PlayerHurtFlags.Pvp));
+    feedNetF14(net, hurtFrameF14(7, PlayerHurtFlags.Pvp));
+    expect(credits).toEqual([
+      { slot: 4, credit: beetlePvpCredit(20, false, 40), off: true },   // 0→min1
+      { slot: 9, credit: beetlePvpCredit(12, true, 8), off: true },     // 24−4
+      { slot: 7, credit: beetlePvpCredit(30, false, 6), off: true },    // 30−3
+    ]);
+  });
+
+  it('同 victim 二次命中窗口交叠：per-slot FIFO 先受理先出账，队空后纯观战帧零动作', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 5, 4);
+    net.notePendingMeleeHit(5, 30, false, true);       // 第一击 intent A
+    net.notePendingMeleeHit(5, 12, true, true);        // 第二击 intent B（镜像未及仍可交叠）
+    feedNetF14(net, hurtFrameF14(5, PlayerHurtFlags.Pvp));
+    feedNetF14(net, hurtFrameF14(5, PlayerHurtFlags.Crit | PlayerHurtFlags.Pvp));
+    feedNetF14(net, hurtFrameF14(5, PlayerHurtFlags.Pvp));          // 第三发=他人击（窗口已排空）
+    expect(credits.map((c) => c.credit)).toEqual([
+      beetlePvpCredit(30, false, 4),                   // A 消费 A
+      beetlePvpCredit(12, true, 4),                    // B 消费 B —— FIFO 序裁决
+    ]);
+    expect(credits.length).toBe(2);
+  });
+
+  it('迟到包 = TTL 丢弃窗：过期队头剔除后到达的回执不再充能（在窗内的对照臂正常出账）', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 8, 0);
+    net.notePendingMeleeHit(8, 25, false, true);
+    pruneOf(net).pruneMeleeReceipts(performance.now() + 2001);      // 过期窗（2000ms+1）
+    feedNetF14(net, hurtFrameF14(8, PlayerHurtFlags.Pvp));
+    expect(credits.length).toBe(0);                    // 迟到丢弃——不记他人的伤进自己壳
+    // 对照臂：未过期的同类回执照常消费
+    net.notePendingMeleeHit(8, 25, false, true);
+    pruneOf(net).pruneMeleeReceipts(performance.now());
+    feedNetF14(net, hurtFrameF14(8, PlayerHurtFlags.Pvp));
+    expect(credits.length).toBe(1);
+  });
+
+  it('非近战/PvE/环境伤不充能也不冲账：无 Pvp 位帧不动队列（防止「掉岩浆」清走我的未决挥击）', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 6, 10);
+    net.notePendingMeleeHit(6, 18, false, true);
+    feedNetF14(net, hurtFrameF14(6, 0));               // PvE/environmental 权威飘字帧
+    feedNetF14(net, hurtFrameF14(6, 0, 999));
+    expect(credits.length).toBe(0);                    // 未冲账、未消耗
+    feedNetF14(net, hurtFrameF14(6, PlayerHurtFlags.Pvp));
+    expect(credits.length).toBe(1);                    // 真 PvP 结算帧随后正常闭环
+    expect(credits[0].credit).toBe(beetlePvpCredit(18, false, 10));
+  });
+
+  it('观战帧：从未挥向的目标来了 PvP 帧（他人命中的广播）→ 无未决集零动作', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 3, 10);
+    expect(() => feedNetF14(net, hurtFrameF14(3, PlayerHurtFlags.Pvp))).not.toThrow();
+    expect(credits.length).toBe(0);
+  });
+
+  it('缺防御镜像（旧 server 剥尾/旧 client）：弃账保守欠计且该未决项已被消费（不成僵尸错配后续帧）', () => {
+    const { net, credits } = f14clientShell();
+    seedPeerF14(net, 6, null);                         // 对端从未送来 def 尾段
+    net.notePendingMeleeHit(6, 18, false, true);
+    feedNetF14(net, hurtFrameF14(6, PlayerHurtFlags.Pvp));
+    expect(credits.length).toBe(0);                    // 弃账——宁欠不虚增
+    feedNetF14(net, hurtFrameF14(6, PlayerHurtFlags.Pvp));   // 第二帧不得把旧债配到新事件上
+    expect(credits.length).toBe(0);
+    // def 尾到达后的下一笔恢复记账能力
+    (net.players.get(6) as RemotePlayerState).pvpDefense = 33;
+    net.notePendingMeleeHit(6, 18, false, true);
+    feedNetF14(net, hurtFrameF14(6, PlayerHurtFlags.Pvp));
+    expect(credits.length).toBe(1);
+  });
+});
+
+describe('★F14 Game 近战 PvP 区接线（updateSwingHits 直驱）', () => {
+  /** GA1 套壳扩展：挂真 BeetleMeter + equipStats.beetleOff + note/sink 采集 */
+  function f14Shell(opts: { beetleOff?: boolean; immuneMirror?: number }) {
+    const world = new World(160, 160, 42, 'f14');
+    const g = protGame();
+    const player = new Player(800, 1440, new Inventory());
+    player.inv.add(iid(3013), 1);                      // 臭臭爪：melee 无特判分支（GA1 同杆）
+    player.hostile = true;
+    (player.equipStats as unknown as { beetleOff?: boolean }).beetleOff = opts.beetleOff === true;
+    const meter = new BeetleMeter();
+    (player as unknown as { __swBeetle?: BeetleMeter }).__swBeetle = meter;
+    g.swing = { t: 15, dur: 30, dmg: 10, kb: 3, item: iid(3013), useStyle: 1 };
+    g.swingHitSet = new Set<number>();
+    g.swingTileCutSet = new Set<number>();
+    g.entities = { critters: [], npcs: [], enemies: [] };
+    g.world = world;
+    g.player = player;
+    g.sfx = { playWavFile: () => true, playFiles: () => true, play: () => {} };
+    g.addDamageNumber = () => {};
+    g.spawnParticles = () => {};
+    g.spawnDrop = () => null;
+    g.bannerNpcActive = () => false;
+    const rp = new Player(player.cx + 6, player.y, new Inventory());
+    rp.hostile = true;
+    (rp as unknown as { __netSlot?: number }).__netSlot = 1;
+    g.remotePlayerProxies = [rp];
+    const strikeSent: unknown[][] = [];
+    const noted: Array<[number, number, boolean, boolean]> = [];
+    const sinks: Array<unknown> = [];
+    g.net = {
+      active: true,
+      policy: { pvpAllowed: true },
+      players: new Map([[1, { pvpImmuneT: opts.immuneMirror ?? 0 }]]),
+      getProxyPvpImmuneRemaining: (s: number) =>
+        (g.net as { players: Map<number, { pvpImmuneT: number }> }).players.get(s)?.pvpImmuneT ?? 0,
+      notePendingMeleeHit: (slot: number, rawDmg: number, critFlag: boolean, off: boolean) =>
+        noted.push([slot, rawDmg, critFlag, off]),
+      set onMeleePvpBeetleCredit(fn: unknown) { sinks.push(fn); },
+      get onMeleePvpBeetleCredit() { return sinks[sinks.length - 1]; },
+      sendStrikePlayer: (...a: unknown[]) => { strikeSent.push(a); },
+    };
+    return { g, player, meter, rp, strikeSent, noted, sinks };
+  }
+
+  it('受理命中即登记四元组并装机 sink；sink 透传 registerHit 为 vanilla 式单点（credit 原值进 counter）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.9);     // crit 门 90≥10 → 非暴击
+    const { g, meter, noted } = f14Shell({ beetleOff: true });
+    (g as unknown as { updateSwingHits: () => void }).updateSwingHits();
+    expect(noted.length).toBe(1);
+    expect(noted[0][0]).toBe(1);                       // victimSlot
+    expect(Number.isInteger(noted[0][1]) && noted[0][1] > 0).toBe(true);   // 受理意向裸伤
+    expect(noted[0][2]).toBe(false);                   // @rand0.9 非暴击
+    expect(noted[0][3]).toBe(true);                    // beetleOff 受理瞬间钉值
+    const sink = (g.net as unknown as { onMeleePvpBeetleCredit?: unknown }).onMeleePvpBeetleCredit;
+    expect(typeof sink).toBe('function');
+    (sink as (s: number, c: number, o: boolean) => void)(1, 777, true);
+    expect(meter.stateForTest()).toEqual({ counter: 777, countdown: 0 });   // beetleCounter += credit / countdown=0
+  });
+
+  it('攻套不在身：off=false 登记原样钉值，sink 传 false 时 registerHit 早退（vanilla :44456 门）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.9);
+    const { g, meter, noted } = f14Shell({ beetleOff: false });
+    (g as unknown as { updateSwingHits: () => void }).updateSwingHits();
+    expect(noted.length).toBe(1);
+    expect(noted[0][3]).toBe(false);
+    const sink = (g.net as unknown as { onMeleePvpBeetleCredit?: unknown }).onMeleePvpBeetleCredit;
+    (sink as (s: number, c: number, o: boolean) => void)(1, 777, false);
+    expect(meter.stateForTest().counter).toBe(0);      // 未充能——蓄能域零污染
+  });
+
+  it('免疫窗内（GA1 门 continue）：既不发意向也不登记未决挥击、更不装 sink', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.9);
+    const { g, noted, sinks } = f14Shell({ beetleOff: true, immuneMirror: 8 });
+    (g as unknown as { updateSwingHits: () => void }).updateSwingHits();
+    expect(noted.length).toBe(0);
+    expect(sinks.length).toBe(0);
   });
 });

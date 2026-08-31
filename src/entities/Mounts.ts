@@ -26,7 +26,10 @@ import { TownShot } from './TownShot';
 import { TILE } from '../core/constants';
 import { playerCanHitEnemy, projOverlap, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
+import { canHitLine } from '../physics/LineOfSight';
 import type { GameHooks } from './types';
+import type { Renderer } from '../render/Renderer';
+import type { Camera } from '../render/Camera';
 
 // ---- 原版 tile id（sheet）集 → 本仓内部 id 集（CanKillTile/CanPoundTile 子集用） ----
 //  内部 id 与 sheet 非一一对应（同 sheet 变体共享判定）——按 TILE_DEFS.vanilla.sheet
@@ -69,12 +72,10 @@ const DOOR_CLOSED_IDS = idsWithSheets(10);
 const ALTAR_IDS = idsWithSheets(77);
 
 // ---- 数据表类型（vanilla-mounts.json 提取产物） ----
-// ★1457 RollerSkateMovement 两改（Player.cs:28738-28778,1456 :28037-28062）——
-// 滑行减速带 6.5f → `accRunSpeed - 1f`（:28744,随装备/难度缩放）+ 空中门
-// `flag2 = vy==0 || |vx|<=originalRunSpeed`（:28752,空中不再向巡航速收敛）。
-// 本仓滚轴鞋坐骑在仓（vanilla-mounts.json 57-60,物品 5600 族）但 Player 的
-// RollerSkateMovement 专属分支未移植（Mounts.ts 无 skate 段,滑行阻尼走通用链）
-// → 两改无宿主。备案：移植滑行分支时按 1457 两处落地。
+// ★滚轴鞋 RollerSkateMovement 已实装（Player.cs:28736-28778,1456 :28037-28062）：
+// 无输入阻尼带 mountRollerSkateStep（Mounts.ts 块尾导出）+ Player.Run 挂点。
+// 1457 两改已按终值落地：减速带 num2 = accRunSpeed−1f（:28743,随装备缩放非旧
+// 字面 6.5f）+ 空中门 flag2 = vy==0|||vx|≤originalRunSpeed(3f,:28752)。
 export interface MountData {
   buff: number;
   /** 变身坐骑（52/54-56/61）与滚轴鞋（57-60）原版未设 = 0 */
@@ -196,6 +197,80 @@ export const FRAME_DASHING = 5;
 const DEFAULT_GRAVITY = 0.4;
 
 // ============================================================================
+// 滚轴鞋（MountID.Sets.IsRollerSkates = {57,58,59,60}，MountID.cs:19）
+// ============================================================================
+
+/** Player.originalRunSpeed（Player.cs:2491 = 3f）——空中门 flag2 的收敛上限 */
+export const ORIGINAL_RUN_SPEED = 3;
+/** MovementStatsAreAdditive 坐骑集（Mount.cs SetAsRollerSkate :2580 全四坐骑置真；
+ *  全表唯一 additive 族——Player.cs:26836-26853 走 `+=` 叠加支而非赋值/取大）。 */
+const ROLLER_SKATE_IDS = new Set([57, 58, 59, 60]);
+
+/** Player.RollerSkateMovement 的无输入阻尼带 + runSlowdown 尾钳（1458
+ *  Player.cs:28736-28778；1456 :28037-28062 的两处变更按 1457 终值落地：
+ *  · 减速带 num2 = accRunSpeed − 1f（:28743——随装备/难度缩放,旧字面 6.5f 已废）；
+ *  · 空中门 flag2 = vy==0 || |vx| ≤ originalRunSpeed(3f)（:28752——空中不再向巡航速
+ *    收敛,只在地面或低速段滑行衰减）。
+ *  调用时序：骑乘 stats 叠加/覆盖之后、地面材质链与 HorizontalMovement 摩擦之前——
+ *  尾钳 runSlowdown 由 HM 无输入摩擦照常消费（vanilla 两链叠加语义不变）。
+ *
+ *  参数:
+ *   vx/vy            本 tick 开始时玩家速度；
+ *   inputZero        controlLeft−controlRight==0（本仓 inputX===0）；
+ *   grappling        grappling[0]>=0——抓钩中整段阻尼跳过（:28738-28739）；
+ *   accRun/maxRun    已含坐骑叠加上限与本 tick 减速 debuff 后的最终值；
+ *   runSlow          地面材质链乘区后的 friction 备选值（clamp 上界）；
+ *   glideCap         巡航挡 num6 = max(1.5, 16/(num3×tileSpeed))（:28747-28751——
+ *                    手持可放置物时以其 useTime 缩放；未建模物品面恒用基准 10 → 1.6，
+ *                    登记于调用侧）；
+ *   powerrun         沥青跑道位（:28767-28772 maxRunSpeed×2.25/runSlowdown×1.6——
+ *                    与场地链 ×3.5/×2 是两条独立乘区，按 vanilla 时序先后叠加）。
+ *  返回: dampedVx 仅在 (inputZero&&!grappling) 且带内改写时给出；runSlow 为本 tick
+ *        生效的减速带值（HM 摩擦步长），恒返回。 */
+export interface RollerSkateStepResult {
+  dampedVx?: number;
+  runSlow: number;
+}
+export function mountRollerSkateStep(
+  vx: number, vy: number, inputZero: boolean, grappling: boolean,
+  accRun: number, maxRunIn: number, runSlowIn: number,
+  glideCap: number, powerrun: boolean,
+): RollerSkateStepResult {
+  let mr = maxRunIn;
+  let slow = runSlowIn;
+  if (powerrun) {                     // :28767-28772
+    mr *= 2.25;
+    slow *= 1.6;
+  }
+  let outVx = vx;
+  if (inputZero && !grappling) {      // :28739（flag = 未挂抓钩才进阻尼带）
+    const amount = 0.3;               // :28741
+    const minSpeed = 1.5;             // :28742（num）
+    const bandTop = accRun - 1;       // :28743 ★1457 终值（accRunSpeed−1f）
+    const airGate = vy === 0 || Math.abs(vx) <= ORIGINAL_RUN_SPEED; // :28752 ★1457
+    const dampBand = Math.abs(vx) < bandTop && airGate;
+    if (Math.abs(vx) < minSpeed) {
+      // 低速收尾 lerp→0（:28753-28759）
+      outVx += (0 - vx) * amount;
+      if (Math.abs(outVx) < 0.03) outVx = 0;
+    } else if (dampBand) {
+      // 减速带：lerp 向 ±巡航挡（:28761-28764）
+      const target = Math.sign(vx) * glideCap;
+      outVx += (target - vx) * amount;
+    }
+  }
+  const runSlow = clamp01band(Math.abs(outVx) - Math.max(mr, accRun), 0, slow); // :28774 Utils.Clamp
+  return inputZero && !grappling ? { dampedVx: outVx, runSlow } : { runSlow };
+}
+
+/** Utils.Clamp(float,float,float) 直译（负差位返回下界） */
+function clamp01band(value: number, min: number, max: number): number {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
+// ============================================================================
 // 钻头坐骑（mount 8 Drill Mounted Containment）常量（Mount.cs :303-319）
 // ============================================================================
 
@@ -265,6 +340,10 @@ export interface MountEffectsCtx {
   /** 冲刺尘（UpdateFrame case 10/47 :3855-3873：14 粒环向尘——原版为 176/177/179（独角兽）
    *  或 6（山羊）dust + shader 着色；本仓以原版 dust 池/程序粒子近似） */
   dashDust?(x: number, y: number, n: number, spreadPx: number, type: 6 | 176 | 177 | 179): void;
+  /** 独角兽追尾尘（UpdateFrame case 10 :3924-3932）：dashing 每 tick 玩家盒内
+   *  1 粒 d176/177/179——velocity=0、noGravity、scale 0.5+r×0.8、fadeIn 1+r×2。
+   *  与 dashBurst 的环形爆发独立两条链 */
+  dashDustBody?(type: 6 | 176 | 177 | 179): void;
   /** 山羊火焰粒子（:3888-3896 ParticleOrchestrator.WallOfFleshGoatMountFlames，
    *  Spawn_WallOfFleshGoatMountFlames ParticleOrchestrator.cs:3259-3306——地面冲刺
    *  且落脚格 SolidTileAllowBottomSlope+无液时）。入参 = PositionInWorld
@@ -980,6 +1059,9 @@ export class MountInstance {
    *  上方 dashSpeed 的 runSpeed 回退是旧接入的近似（accRunSpeed 用途下与 0 等价），
    *  冲刺门（免击退/冲刺帧）按原版取裸值 */
   get dashSpeedRaw(): number { return this.data?.dashSpeed ?? 0; }
+  /** MovementStatsAreAdditive（Mount.cs :2580 SetAsRollerSkate 全四坐骑置真——
+   *  Player.cs:26836-26853 上限/跳跃参数走 `+=` 叠加支而非赋值） */
+  get movementStatsAdditive(): boolean { return ROLLER_SKATE_IDS.has(this.type); }
 
   /** UpdateEffects :4933/:4877/:4956/:4963 授予的空中再跳（hasJumpOption_*）。
    *  独角兽 10 / 圣诞坦克 46 / 山羊 47 / 蜥蜴 14——JumpMovement :20435-20688 链消费 */
@@ -1354,17 +1436,22 @@ export class MountInstance {
       this.updateScutlix(p, target, ctx.fireScutlixShot ?? (() => { /* 无投射物桶：静默 */ }),
         ctx.fireSantankShot);
     }
-    // 冲刺尘（UpdateFrame case 10/47 flag7 :3848-3873 / case 14 :4081-4091）：
-    // 独角兽 = 176/177/179 任选，山羊/蜥蜴 = 6；山羊地面冲刺另发火焰粒子
-    if (this.dashBurst && ctx.dashDust) {
-      if (this.type === 10 || this.type === 47) {
-        const t: 6 | 176 | 177 | 179 = this.type === 10
-          ? ([176, 177, 179] as const)[Math.floor(Math.random() * 3)] : 6;
-        ctx.dashDust(p.x + p.w / 2 + p.w * p.facing, p.y + p.h / 2, 14, this.frameExtra, t);
-        if (this.type === 10) ctx.dashDust(p.x + p.w / 2, p.y + p.h / 2, 1, 0, t);
-      } else if (this.type === 14) {
-        ctx.dashDust(p.x, p.y + p.h - 6, 2, 0, 6);
+    // 冲刺尘（UpdateFrame case 10/47 flag7 :3896-3922 / case 14 :4081-4091）：
+    // 独角兽 = 176/177/179 任选，山羊/蜥蜴 = 6；山羊地面冲刺另发火焰粒子。
+    // 独角兽追尾尘 = dashing 每 tick 盒内 1 粒（:3924-3932，与 burst 环独立链）
+    if ((this.type === 10 || this.type === 47 || this.type === 14)
+      && (this.dashing || this.dashBurst)) {
+      const t: 6 | 176 | 177 | 179 = this.type !== 10
+        ? 6
+        : ([176, 177, 179] as const)[Math.floor(Math.random() * 3)];
+      if (this.dashBurst && ctx.dashDust) {
+        if (this.type === 10 || this.type === 47) {
+          ctx.dashDust(p.x + p.w / 2 + p.w * p.facing, p.y + p.h / 2, 14, this.frameExtra, t);
+        } else if (this.type === 14) {
+          ctx.dashDust(p.x, p.y + p.h - 6, 2, 0, 6);
+        }
       }
+      if (this.type === 10 && this.dashing && ctx.dashDustBody) ctx.dashDustBody(t);
     }
     if (this.type === 47 && this.dashing && p.vy === 0 && ctx.goatFlames && p.store) {
       // :3885-3896：落脚格 = (Center.X/16, (Y+H-1)/16)+1 须 active 且无液体且
@@ -1954,11 +2041,13 @@ export interface MountLight {
 }
 
 export interface MountLightCtx {
-  /** Colors.CurrentLiquidColor 近似（0-255 RGB；猪鲨崽光/背层渐染用）。玩家当前
-   *  浸入液体取其色，未浸入取当前群系水色。背层液色渐变（Mount.Draw case 12
-   *  drawType 0 :5780-5787，alpha = 127/255×clamp(计数器/60,0,1)）由渲染层
+  /** Colors.CurrentLiquidColor 近似（0-255 RGB；猪鲨崽光/背层渐染用）。
+   *  ★透明档已接：CurrentLiquidColor 首帧起自 Color.Transparent，11 层
+   *  liquidAlpha 全 0 时【原样返回 Transparent】（Colors.cs:97-120）→ 猪鲨崽
+   *  无可见液层时点光=零贡献。null = 无液（调用方按浸入态给值）。
+   *  背层液色渐变（Mount.Draw case 12 drawType 0 :5780-5787）仍由渲染层
    *  drawMountLayer 以 mnt.fishronCounter 直读实现 */
-  liquidColor: [number, number, number];
+  liquidColor: [number, number, number] | null;
   /** worldSurface 格线（蜥蜴地下红光门 :4077 position.Y > worldSurface*16+160） */
   worldSurface: number;
   /** miscCounter（扫帚挂件摆动相位 :3553；缺省 0） */
@@ -1966,6 +2055,10 @@ export interface MountLightCtx {
   /** WindForVisuals（Main.cs:2896 = windSpeedCurrent，±0.8——扫帚挂件风摆项
    *  :3553；由渲染层传 weather.windSpeedCurrent，缺省 0 = 无风近似） */
   wind?: number;
+  /** 扫帚挂件露天档（Mount.cs GetWitchBroomTrinketRotation :3591-3604——
+   *  WorldGen.InAPlaceWithWind(中心格) 命中 → num3=1f，否则 0.5f）。旧实现恒
+   *  ×0.5（室内档），露天位风摆幅度低估一半 */
+  windExposed?: boolean;
 }
 
 /** 坐骑点光清单（UpdateFrame :3614/:4079 + Hover :3481 + UpdateEffects
@@ -1975,9 +2068,31 @@ export interface MountLightCtx {
  *  - 巫婆扫帚 23：挂件火光 (1,0.75,0.5)×0.85（:4811-4814，挂件位随速度/风摆动）
  *  - Scutlix 9：瞄准+充能中 → 眼部红光 ×充能比（:5392-5412）
  *  - Santank 46：瞄准+充能中 → 炮口 (0.7,0.4,0.4)×2（:5447-5457 双点累加）
- *  - 猪鲨崽 12：增益态 → 环境液色×0.4 于身前点（落点实心则退回身侧 :4981-4991）
- *  - 蜥蜴 14：worldSurface 以下 → 身中心红光 (0.5,0.1,0.1)（:4077-4080）
- *  未建模登记：mount 61 仙灵武库色光（:3624，纯装饰） */
+ *  - 猪鲨崽 12：增益态 → CurrentLiquidColor×0.4 于身前点（落点实心则退回身侧
+ *    :5038-5056；无可见液层透明档已接,ctx.liquidColor=null）
+ *  - 仙灵武库 61：GetFairyQueenWeaponsColorFull 通名支 hslToRgb ×0.55（:3670-3673）
+ *  - 蜥蜴 14：worldSurface 以下 → 身中心红光 (0.5,0.1,0.1)（:4077-4080） */
+/** Main.hslToRgb 直译（Main.cs:48695-48747 + hue2rgb :48724）——仙灵武库色光的
+ *  色相轮基准；输入 [0,1) 相位，输出 0-255 RGB。dev 名 easter-egg 分支不在此表 */
+export function fairyQueenHslToRgb(hue: number): [number, number, number] {
+  const sat = 1, lum = 0.5;
+  const q = lum < 0.5 ? lum * (1 + sat) : lum + sat - lum * sat;   // :48709
+  const p = 2 * lum - q;                                            // :48710
+  const hue2rgb = (c: number): number => {
+    let cc = c;
+    if (cc < 0) cc += 1;
+    if (cc > 1) cc -= 1;
+    if (6 * cc < 1) return p + (q - p) * 6 * cc;
+    if (2 * cc < 1) return q;
+    if (3 * cc < 2) return p + (q - p) * (2 / 3 - cc) * 6;
+    return p;
+  };
+  return [
+    Math.round(hue2rgb(hue + 1 / 3) * 255),
+    Math.round(hue2rgb(hue) * 255),
+    Math.round(hue2rgb(hue - 1 / 3) * 255),
+  ];
+}
 export function mountLights(m: MountInstance, p: MountedPlayerView, ctx: MountLightCtx): MountLight[] {
   const out: MountLight[] = [];
   const d = m.data;
@@ -2001,9 +2116,11 @@ export function mountLights(m: MountInstance, p: MountedPlayerView, ctx: MountLi
       const num = Math.max(-1, Math.min(1, p.vx / 10));
       const wind = ctx.wind ?? 0;
       const mc = ctx.miscCounter ?? 0;
+      // 露天档（GetWitchBroomTrinketRotation :3596-3602）：InAPlaceWithWind → ×1，
+      // 否则 ×0.5——摆角乘区与挂件火光共用同一旋转量
       let num2 = Math.sin(mc / 300 * Math.PI * 6) * (Math.PI / 4) * Math.abs(wind) * 0.5
         + Math.PI / 4 * -wind * 0.5;
-      num2 *= 0.5;   // InAPlaceWithWind 未建模：恒取非露天 0.5 档（登记）
+      num2 *= ctx.windExposed === true ? 1 : 0.5;
       const rot = num * Math.sin(mc / 150 * Math.PI * 6) * (Math.PI / 4) * 0.5
         + num * (Math.PI / 4) * 0.5 + num2;
       const px = cx + 29 * p.facing + Math.cos(rot + Math.PI / 2) * 11;
@@ -2041,10 +2158,11 @@ export function mountLights(m: MountInstance, p: MountedPlayerView, ctx: MountLi
       break;
     }
     case 12: {
-      // 增益态液色光（:4981-4991）：身前点（速度外推 10 帧），实心则退回身侧。
-      // 落点门 = WorldGen.SolidTile（:4984）——半砖/坡面/平台（solidTop）与致动
-      // 缩入态均不算实心（旧实现只查 flags+isSolid，半砖/坡面误判实心）
-      if (m.fishronBoost) {
+      // 增益态液色光（:5038-5056）：Colors.CurrentLiquidColor 透明档——11 层
+      // liquidAlpha 全 0 → Color.Transparent → 光贡献归零（ctx.liquidColor=null
+      // 由调用方按"无可见液层"给出）。身前点（速度外推 10 帧），实心则退回身侧；
+      // 落点门 = WorldGen.SolidTile（:5044）
+      if (m.fishronBoost && lc) {
         const [lr, lg, lb] = [lc[0] / 255 * 0.4, lc[1] / 255 * 0.4, lc[2] / 255 * 0.4];
         const fx = cx + p.facing * 20 + p.vx * 10, fy = cy + p.vy * 10;
         const tx = Math.trunc(fx / 16), ty = Math.trunc(fy / 16);
@@ -2053,6 +2171,24 @@ export function mountLights(m: MountInstance, p: MountedPlayerView, ctx: MountLi
         else out.push({ tx: Math.trunc((cx + p.facing * 20) / 16), ty: Math.trunc(cy / 16),
           r: lr, g: lg, b: lb });
       }
+      break;
+    }
+    case 61: {
+      // 仙灵武库 AddLight（Mount.cs UpdateFrame case 61 :3670-3673）：
+      // GetFairyQueenWeaponsColorFull(playerIndex, Center, hueRaw=0.41, alphaMult=1,
+      // lerpToWhite=0.1)（Projectile.cs:21791-22060 通名支：num=(hue+0.5)%1、sat=1、
+      // lum=0.5 → hslToRgb(0.91,1,0.5)，lerpToWhite 0.1 向白插值）×0.55 于中心格。
+      // dev 名 easter-egg 分色表（Cenx/Crowno/… switch :21800-22042）本仓无玩家名
+      // 消费面，通名支即全量（登记）
+      const num = (0.41 + 0.5) % 1;                                  // (hueRaw+0.5)%1
+      const base = fairyQueenHslToRgb(num);                          // hslToRgb(num,1,0.5)
+      const white = (c: number) => c * 0.9 + 255 * 0.1;              // Lerp(color,White,0.1)
+      out.push({
+        tx: ctxTile, ty: ctyTile,
+        r: white(base[0]) * 0.55 / 255,
+        g: white(base[1]) * 0.55 / 255,
+        b: white(base[2]) * 0.55 / 255,
+      });
       break;
     }
     case 14: {
@@ -2088,9 +2224,8 @@ export function mountOfBuff(buffId: number): number {
  *  - extraUpdates 1:1（Projectile.extraUpdates+1 个子步/tick：606=3 子步 ×14 速 =
  *    42px/tick 与原版一致——TownShot 单步/tick 会使激光慢三倍）；
  *  - timeLeft 每tick 递减 1（子步不额外扣——原版 AI 多跑但 timeLeft 单调）；
- *  - 直线（noGravity）/ 抛物线（重力 0.3，Santank 炮击）两型；
- *  - 命中敌怪或实心 tile 即消散（penetrate 1 近似；930 穿透 -1 的弹跳/引信未实装——
- *    登记为命中消散近似） */
+ *  - 直线（noGravity）/ 抛物线两型；命中敌怪或实心 tile 即消散。
+ *  ★930 圣坦炮击已拆出本类 → SantankShellProj（penetrate −1/归航/爆散全量）。 */
 export class MountShot extends TownShot {
   /** 每 tick 子步数（extraUpdates + 1） */
   private substeps = 1;
@@ -2128,5 +2263,169 @@ export class MountShot extends TownShot {
         return;
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 圣坦炮击弹 930（SetDefaults Projectile.cs:8819-8827：14×14/aiStyle16/friendly/
+// penetrate −1/ranged/timeLeft 继承 ResetDefaults 3600）——从 MountShot 的
+// "penetrate 1 命中即消散"近似拆出为完整 aiStyle16 弹：
+//   · AI_016 归航段（:48067-48180）：ai[0]++ 钳 30，>30 后索敌
+//     NPC.CanBeChasedBy ∪ Collision.CanHit 中曼哈顿最近 <650px（:48143-48146），
+//     目标向量 SafeNormalize(−UnitY)×12（:48175-48178 type==930 num23=12f）、
+//     velocity=Lerp(velocity,value,1/12f)（:48180）；无目标外推 vel×100 直飞（:48169-48173）；
+//   · 无限穿敌（penetrate=−1）命中不结算生死、只 localNPCImmunity 不设——vanilla 同名
+//     连击由每 update 重复 Damage 判定（同帧内靠 invulnWindow 天然限频）；
+//   · 触 tile（Damage() 管道 bounce：velocity.X!=lastVelocity.X 反射分支 :19863-19894）
+//     → velocity×0/alpha=255/timeLeft=3 引信拍（lingering），timeLeft 尽 → Kill：
+//     PrepareBombToBlow Resize(128×128)/kb8（:47680-47684）→ Damage()（重盒结算，
+//     SelfHurtPlayers 对主人真伤 :15104 族）→ Kill_Bombs_DoUsualKillCode case133-930
+//     Item_14 音 + d31×30/d6×20+20 爆尘（:79828-79856；gore 段无 API 不接,登记）。
+// ---------------------------------------------------------------------------
+
+export class SantankShellProj extends TownShot {
+  /** 索敌半径（650f，:48143-48145 type==930 专属档；族基档 600 未用） */
+  static SEEK_RANGE = 650;
+  /** 收敛速度（12f，:48174-48178 type==930 档；族基档 16 未用） */
+  static HOME_SPEED = 12;
+  /** 巡航重力（弹以抛物线上抛出生,UseAbility case 46 :3304-3314） */
+  gravity = 0.25;
+  /** AI_016 不施加重力族（338-341/803-810/930 完全悬浮收敛——AI 无 velY 加项） */
+  private ai0 = 0;
+  /** 敌怪免工件窗（Damage 管道 per-target 门近似：被命中后 20t 内不再结算同目标） */
+  private hitCd = new Map<number, number>();
+  /** 已触 tile 的引信相（timeLeft=3 lingering） */
+  private fuse = -1;
+  /** 弹体透明度消费旗（诊断/渲染） */
+  explodedAlpha = false;
+  bounced = false;
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
+    projId: number, opts?: { gravity?: number; life?: number }) {
+    super(x, y, vx, vy, damage, knockback, projId, { noGravity: false, life: opts?.life });
+    this.gravity = opts?.gravity ?? 0.25;
+  }
+
+  /** AI_016 索敌：曼哈顿距 <seek、CanHit 视线、取最小（:48152-48168） */
+  private findTarget(game: GameHooks): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bd = SantankShellProj.SEEK_RANGE;
+    const px = this.cx, py = this.cy;
+    const st = game.world.store;
+    for (const ent of game.enemies()) {
+      const n = ent as unknown as { x?: number; y?: number; w?: number; h?: number; maxHp?: number;
+        dead?: boolean; def?: { friendly?: boolean; critter?: boolean } };
+      if (!n || !n.def || n.dead || n.maxHp === undefined || (n.maxHp ?? 0) <= 5 || n.def.friendly || n.def.critter) continue;
+      if (n.x === undefined || n.w === undefined) continue;
+      const nx = (n.x ?? 0) + (n.w ?? 0) / 2, ny = (n.y ?? 0) + (n.h ?? 0) / 2;
+      const dist = Math.abs(px - nx) + Math.abs(py - ny);      // 曼哈顿（:48158）
+      if (dist >= bd) continue;
+      // Collision.CanHit（:48159）——弹盒 → 敌整盒视线
+      if (!canHitLine(st, this.x, this.y, this.w, this.h,
+        n.x ?? 0, n.y ?? 0, n.w ?? 0, n.h ?? 0)) continue;
+      bd = dist;
+      best = { x: nx, y: ny };
+    }
+    return best;
+  }
+
+  /** 爆散（Kill 管线）：128×128 重结算盒 Damage + 主人自伤 + 爆尘音（注释同上） */
+  private explode(game: GameHooks): void {
+    this.explodedAlpha = true;
+    const R = 64;                                  // Resize(128,128) 半径
+    const bx = this.cx - R, by = this.cy - R;
+    const box = { x: bx, y: by, w: R * 2, h: R * 2 };
+    for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id?: number; dead: boolean;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
+          pierce?: number, fromPlayer?: boolean) => boolean };
+      if (e.dead) continue;
+      if (box.x >= e.x + e.w || box.x + box.w <= e.x || box.y >= e.y + e.h || box.y + box.h <= e.y) continue;
+      // DamageVar ±15%（Main.DamageVar :15090 ±15% 浮动惯例）
+      const dmg = Math.max(1, Math.round(this.damage * (1 + (Math.random() * 30 - 15) / 100)));
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(e.cx - this.cx) * 8, 0, game, 0, false, 0, true); // kb=8(PrepareBombToBlow :47683)
+    }
+    // SelfHurtPlayers（Kill→friendly&&owner==myPlayer 分支 :71788-71795）：重盒相交伤主人
+    const p = game.player;
+    if (p && !p.dead && !(p as unknown as { immune?: boolean }).immune
+      && box.x < p.x + p.w && box.x + box.w > p.x && box.y < p.y + p.h && box.y + box.h > p.y) {
+      p.lastDamageCause = { kind: 'projectile', name: 'Santank Cannon' };
+      p.damage(Math.max(1, Math.round(this.damage * (1 + (Math.random() * 30 - 15) / 100))),
+        Math.sign(p.cx - this.cx) || 1, 0, game as never);
+    }
+    game.playSfxFile?.('Item_14', 0.9, this.cx, this.cy);
+    const pool = game.spawnDust;
+    if (pool) {
+      for (let i = 0; i < 30; i++) pool(bx, by, 22, 22, 31, 0, 0, 100, null, 1.5);       // d31 ×30（:79844-79848）
+      for (let i = 0; i < 40; i++) {                                                     // d6 ×20+20（:79849-79855）
+        const d = pool(bx, by, 22, 22, 6, 0, 0, 100, null, i < 20 ? 3.5 : 1.5, i < 20);
+        if (d && i < 20) d.vx *= 7; else if (d) d.vx *= 3;
+      }
+    } else {
+      game.spawnBurst?.(this.cx, this.cy, '#E8A24A', 24, 5, 0, Math.PI * 2, { life: 26 });
+    }
+    this.dead = true;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    for (const [k, v] of this.hitCd) { if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1); }
+    // ---- 引信相（触 tile 后 timeLeft=3 lingering：定格+隐身+重盒 Damage 一拍） ----
+    if (this.fuse >= 0) {
+      if (--this.fuse <= 0) this.explode(game);
+      return;
+    }
+    // ---- AI_016 主段：先位移子步（重力）再归航 lerp ----
+    const substeps = 2;                            // extraUpdates=1（vanillaProjectiles 930）→ 2 子步
+    for (let s = 0; s < substeps; s++) {
+      this.vy += this.gravity / substeps;          // AI_016 本型族无重力项——悬浮收敛前保留出膛抛线手感
+      this.ai0++;
+      // 归航门 ai[0]>30（:48149——ai[0] 每 update 递增,extraUpdates=1 → 本仓子步计数
+      // 同口径;cap 钳 30 后恒索敌）
+      const seek = this.ai0 > 30 ? this.findTarget(game) : null;
+      let tx: number, ty: number;
+      if (seek) { tx = seek.x; ty = seek.y; }
+      else {
+        tx = this.cx + this.vx * 100;              // :48171-48172 无目标外推
+        ty = this.cy + this.vy * 100;
+      }
+      let dx = tx - this.cx, dy = ty - this.cy;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.0001) { dx /= len; dy /= len; } else { dx = 0; dy = -1; }  // SafeNormalize(-UnitY)
+      dx *= SantankShellProj.HOME_SPEED; dy *= SantankShellProj.HOME_SPEED;
+      // Vector2.Lerp(velocity, value, 1/12f) 子步口径各半
+      const t = 1 / 12 / substeps;
+      this.vx += (dx - this.vx) * t;
+      this.vy += (dy - this.vy) * t;
+      this.x += this.vx; this.y += this.vy;
+      // 触 tile（tileCollide=true 默认）→ 入引信相
+      const sttx = Math.floor(this.cx / 16), stty = Math.floor(this.cy / 16);
+      if (sttx >= 0 && stty >= 0 && sttx < game.world.store.w && stty < game.world.store.h
+        && game.world.store.isSolid(sttx, stty)) {
+        this.vx = 0; this.vy = 0;                  // :19891 velocity *= 0
+        this.explodedAlpha = true;                 // alpha = 255（:19892,渲染侧隐身）
+        this.bounced = true;
+        this.fuse = 3;                             // timeLeft = 3（:19893）
+        break;
+      }
+      // 无限穿敌（penetrate=-1）：命中结算但不死；per-target 免工件窗防连帧连击
+      for (const ent of game.enemies()) {
+        if (!playerCanHitEnemy(ent, game)) continue;
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean;
+          hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
+            pierce?: number, fromPlayer?: boolean) => boolean };
+        if (e.dead || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
+        if ((this.hitCd.get(e.id) ?? 0) > 0) continue;
+        const dmg = Math.max(1, Math.round(this.damage * (1 + (Math.random() * 30 - 15) / 100)));
+        e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, true);
+        this.hitCd.set(e.id, 10);
+      }
+    }
+    if (--this.life <= 0) { this.explode(game); }  // timeLeft 尽 → Kill 爆散（3600s 档罕至）
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    if (this.explodedAlpha && this.fuse >= 0) return;   // 引信相 alpha=255 不可见（:19892）
+    super.draw(r, cam);
   }
 }

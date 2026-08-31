@@ -69,9 +69,21 @@ export interface GameHooks {
   /** 在世界上生成掉落物（返回实体便于染色等后处理） */
   spawnDrop(x: number, y: number, itemKey: string, count?: number, vx?: number, vy?: number): import('./ItemDrop').ItemDrop | null;
   /** 对玩家造成伤害（attacker 用于荆棘反伤/死亡归因；contactOnly=true 表示伤害源是
-   *  NPC 接触（Player.cs:30880-30970 分支）——荆棘只在接触分支反伤，弹幕命中不触发；
-   *  pvp=true 走 Hurt 的 PvP 语义：8t 无敌帧 + pvpDeath 标记） */
-  damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown, contactOnly?: boolean, pvp?: boolean): void;
+   *  NPC 接触（1457 Player.cs:31555-31692 Update_NPCCollision 循环）——荆棘只在接触
+   *  分支反伤，弹幕命中不触发；pvp=true 走 Hurt 的 PvP 语义：8t 无敌帧 + pvpDeath 标记。
+   *  返回值 = 实扣 HP（0=被无敌帧/闪避吞掉——Player.Hurt 返回 0 语义直通）。
+   *  ★清零批·受击域（2026-08-31）：knockback/opts 两参为 A2 环境伤族接 msg117 通用
+   *  漏斗新增（additive 透传位，缺省不动既有调用方语义）：
+   *    · knockback=false：hitDirection=0 型站（岩浆/摔落/虚空/触格伤）不进击退段
+   *      （Player.damage :37908-37912 的 hitDirection≠0 才写速度），此前环境站手调
+   *      p.damage 有误传默认导致落地弹起 ±4.5px 的漂移，接漏斗后按原文关断；
+   *    · opts.hitDir：msg117 命中向字面透传（FR3-F 钉语义允许 0=零击退，缺省仍按
+   *      sign(cx−srcX)||1 推算不改五 PvP 支）；
+   *    · opts.floatDealt/floatColor/noLocalFloat：本地飘字单点化控制——漏斗是唯一
+   *      显示点，环境站经 damagePreview 预演回填终值保像素零漂移并消除双发。 */
+  damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown,
+    contactOnly?: boolean, pvp?: boolean, knockback?: boolean,
+    opts?: { hitDir?: number; floatDealt?: number; floatColor?: string; noLocalFloat?: boolean }): number;
   /** 伤害数字飘字（dot=true 走 CombatText dot 样式:更小更短带重力,DoT 族用） */
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string, dot?: boolean): void;
   /** 入侵开启 + 逼近公告（Game.startInvasionAndAnnounce 实体侧通道——火星探测器

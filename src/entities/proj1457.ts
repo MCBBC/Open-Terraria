@@ -16,9 +16,11 @@ import type { Camera } from '../render/Camera';
 import { TILE } from '../core/constants';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
-import { playerCanHitEnemy, hitPlayer, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { damageVarRoll } from '../stats/DamageVar';
 import { applyProjStatus } from './projStatus';
+import { mainDifficulty, sampleCurve, remap, GDL, type CurveKey } from '../stats/ScaleStats';
+import { ITEM_BY_KEY } from '../data/items';
 import { projSprite } from './Arrow';
 import { LCG32, arcSurgeWeaponGenerator, lightningStrikeWeaponGenerator,
   type Bolt, stormLightningGenerator } from '../fx/LightningGenerator';
@@ -75,9 +77,153 @@ function stormTexBrightness(r: import('../render/Renderer').Renderer, v: number)
   return stormTexLut[Math.min(stormTexLut.length - 1, Math.max(0, (v * stormTexLut.length) | 0))];
 }
 
-/** 1122 ArcSurge 的 IDStatic 免疫共享表（usesIDStaticNPCImmunity + cooldown 10,
- *  :10567-10569——IDStatic 语义 = 全场同型一张表,非每弹一张） */
-const ID_STATIC_1122 = new HitCdImpl();
+/** usesIDStaticNPCImmunity 型级共享免疫表：Projectile.perIDStaticNPCImmunity[
+ *  immunityIdentity, npcIndex] 按 GameUpdateCount 到期（Projectile.cs:606-611 +
+ *  :784 immunityIdentity 缺省=type）——全场【同型】一张表，衰减与「正在结算的弹数」
+ *  无关。墙钟实现（Arrow.idStaticCheck 先例同构）：ready() 到期即写新窗。
+ *  ★账 L2 配套：1128 曾用每弹一张 HitCd(30)=N 颗云同拍 N 连击且 N 倍加速衰减。 */
+class IdStaticSharedTable {
+  private m = new Map<number, number>();
+  constructor(private readonly cooldownMs: number) {}
+  /** dealContacts 循环头调用位——时间驱动衰减,无需逐弹递减 */
+  tick(): void {}
+  ready(id: number, _cooldown?: number): boolean {
+    const now = Date.now();
+    if ((this.m.get(id) ?? 0) > now) return false;
+    this.m.set(id, now + this.cooldownMs);
+    if (this.m.size > 512) {
+      for (const [k, v] of this.m) if (v <= now) this.m.delete(k);
+    }
+    return true;
+  }
+}
+
+/** 1 tick 的毫秒当量（vanilla 60fps——「cooldown 10t≈167ms」的换算基数） */
+const TICK_MS = 1000 / 60;
+
+/** 1122 ArcSurge（usesIDStaticNPCImmunity + idStaticNPCHitCooldown=10 :10567-10569
+ *  段;Kill 帧 localAI[0]=2 :71924） */
+const ID_STATIC_1122_TABLE = new IdStaticSharedTable(10 * TICK_MS);
+
+/** 1128 孢子云（usesIDStaticNPCImmunity + idStaticNPCHitCooldown=30 :10574-10575）——
+ *  全场同型一张 30t 窗：多颗云同拍扑同敌只结算一颗 */
+const ID_STATIC_1128_TABLE = new IdStaticSharedTable(30 * TICK_MS);
+
+// ================= L1 GameMode 难度乘区正解（风暴家 EVP/PVE 双轴） =================
+
+/** LightningPlayerDamageScaling（GameDifficultyData.cs:71；**曲线键在 Main.Difficulty
+ *  浮点轴上**,非 GameMode int——Main.Difficulty getter Main.cs:2783-2809:
+ *  Classic→GameDifficultyLevel.Classic(1)/Expert→Expert(2)/Master→Master(3)/
+ *  Journey→【不进 Expert/Master 分支】=Classic 值 1.0,仅被旅程"给 NPC 强度"滑杆
+ *  (_gameModeDifficultyOverride)+FTW 种子 +1 抬档）。1091 SetDefaults :10186
+ *  `hostileDamageScaling = LightningPlayerDamageScaling` 接线本表 */
+export const LIGHTNING_PLAYER_DAMAGE_SCALING: readonly CurveKey[] = [
+  { input: GDL.JOURNEY, output: 0.04 },
+  { input: GDL.CLASSIC, output: 0.08 },
+  { input: GDL.MASTER, output: 0.24 },
+  { input: GDL.LEGENDARY, output: 0.4 },
+];
+
+/** 玩家侧终值 = DamageVar(base,-luck) × curve(Difficulty) ×2 ×死囚毛衣(trap ×0.5 帽300)
+ *  ——Damage_EVP 全序（Terarria1458/Terraria/Projectile.cs:14905-14922；
+ *  1457 同段 :14905-14922）：`(int)num3` 截断逐级,banner/resistCold 两步对 1091 无源
+ *  （bannerIdToRespondTo=0 / coldDamage=false）跳过;1091 trap=true、reflected=false。
+ *  所得 <1 由 Player.Hurt 丢弃,此处不强钳 */
+export function lightningEvpFinalDamage(
+  base: number,
+  difficultyFloat: number,
+  o: { luck?: number; sweater?: boolean; rnd?: () => number } = {},
+): number {
+  let dmg = damageVarRoll(base, -(o.luck ?? 0), o.rnd);            // :14905 幸运方差项(取负!)
+  dmg = Math.trunc(dmg * sampleCurve(LIGHTNING_PLAYER_DAMAGE_SCALING, difficultyFloat));   // :14916 (int)
+  dmg *= 2;                                                        // :14917-14918 num4=2
+  if (o.sweater) {                                                 // :14919-14922 死囚毛衣:trap 减半+帽 300
+    dmg = Math.trunc(dmg * 0.5);
+    dmg = Math.min(dmg, 300);
+  }
+  return dmg;
+}
+
+/** NPC 侧乘区（:14632 `if (type == 1091) num *= Utils.Remap(Main.Difficulty,
+ *  GameDifficultyLevel.Classic, Master, 1f, 3f)`;1457 :14632 同值）——Remap 默认 clamp,
+ *  D≥3 钉 3（ legendary 不外推） */
+export function lightningNpcMultiplier(difficultyFloat: number): number {
+  return remap(difficultyFloat, GDL.CLASSIC, GDL.MASTER, 1, 3);
+}
+
+// ================= 地形/液体/装备槽小工具（A① 导通链 + L1 连带消费位） =================
+
+/** Main.tile[x,y].liquid != 0（StormLightningLiquidCollisionCheck 谓词 :16237-16242）
+ *  ——tile 中心像素采样 World.liquidAt（0-255 原始液体量） */
+function tileHasLiquid(game: GameHooks, tx: number, ty: number): boolean {
+  const w = game.world as unknown as { liquidAt?: (px: number, py: number) => number };
+  if (typeof w.liquidAt !== 'function') return false;
+  return w.liquidAt((tx + 0.5) * TILE, (ty + 0.5) * TILE) > 0;
+}
+
+/** Utils.PlotLine int 重载 1:1（Utils.cs:2359-2415,Bresenham,jump=true 缺省;visit 返回
+ *  false 即短路报 false）——A① 液体导通链与电化粒子两用 */
+function plotTiles(
+  x0: number, y0: number, x1: number, y1: number,
+  visit: (x: number, y: number) => boolean,
+): boolean {
+  if (x0 === x1 && y0 === y1) return visit(x0, y0);
+  const steep = Math.abs(y1 - y0) > Math.abs(x1 - x0);
+  let ax = x0, ay = y0, bx = x1, by = y1;
+  if (steep) { [ax, ay] = [ay, ax]; [bx, by] = [by, bx]; }
+  let acc = Math.abs(bx - ax) / 2;
+  let cur = ay;
+  const dxT = Math.abs(bx - ax), dyT = Math.abs(by - ay);
+  const incX = ax < bx ? 1 : -1, incY = ay < by ? 1 : -1;
+  for (let i = ax; i !== bx; i += incX) {
+    if (!visit(steep ? cur : i, steep ? i : cur)) return false;
+    acc -= dyT;
+    if (acc >= 0) continue;
+    cur += incY;
+    acc += dxT;
+  }
+  return true;
+}
+
+/** Utils.PlotTileLine 的切格面实现（Utils.cs:283-320：中心线步进+法向厚度带全覆盖,
+ *  局部 tile 内含外沿一格）——aiStyle190/191 旋转厚带与 1127 突刺共用。
+ *  A⑤ 转正：旧"三采样窗(端+中)"近似退役——PlotTileLine 是【连续带】,三窗漏中段草。 */
+function cutThickTileLine(
+  game: GameHooks, x0: number, y0: number, x1: number, y1: number, width: number,
+): void {
+  const minTx = Math.floor(Math.min(x0, x1) / TILE), maxTx = Math.floor(Math.max(x0, x1) / TILE);
+  const minTy = Math.floor(Math.min(y0, y1) / TILE), maxTy = Math.floor(Math.max(y0, y1) / TILE);
+  const segLen = Math.hypot(x1 - x0, y1 - y0) || 1;
+  const bandR = width / 2 + 8;          // 带半径 + 8px 窗沿(PlotTileLine 部分覆盖邻格同型)
+  for (let tx = minTx; tx <= maxTx; tx++) {
+    for (let ty = minTy; ty <= maxTy; ty++) {
+      // 点(tile 中心)到线段距离 ≤ bandR → 在带内
+      const px = (tx + 0.5) * TILE, py = (ty + 0.5) * TILE;
+      const t = Math.min(1, Math.max(0, ((px - x0) * (x1 - x0) + (py - y0) * (y1 - y0)) / (segLen * segLen)));
+      const qx = x0 + (x1 - x0) * t, qy = y0 + (y1 - y0) * t;
+      if (Math.hypot(px - qx, py - qy) <= bandR) game.cutTile(tx, ty);
+    }
+  }
+}
+
+/** 死囚毛衣（Dead Man's Sweater 5007）佩戴态：Player.deadMansSweater(:2087,armorPiece
+ *  switch :13226-13228 只扫功能槽 armor[0..9])。equipStats 未建此键（projTargets GAP 登记项),
+ *  就近读装备槽 vid;vid 表查不到（注册缺失）按未戴处理 */
+function playerDeadMansSweater(game: GameHooks): boolean {
+  const p = game.player as unknown as { inv?: { armor?: Array<{ id?: number } | null> } };
+  const armor = p?.inv?.armor;
+  if (!Array.isArray(armor)) return false;
+  const n = Math.min(10, armor.length);
+  for (let i = 0; i < n; i++) {
+    const slot = armor[i];
+    if (!slot || slot.id == null) continue;
+    if (slot.id === DEAD_MANS_SWEATER_ID) return true;
+  }
+  return false;
+}
+
+/** 死囚毛衣本仓 item id（vi_5007 → 内部 id;注册缺失时 NaN → 消费恒 false） */
+const DEAD_MANS_SWEATER_ID = ITEM_BY_KEY['vi_5007_dead_man_s_sweater'] ?? NaN;
 
 /** 敌怪最小命中面（Enemy/TownNPC 共用形状） */
 interface HitTarget {
@@ -95,7 +241,7 @@ interface HitTarget {
 function dealContacts(
   self: { x: number; y: number; w: number; h: number; cx: number; cy: number; damage: number; knockback: number; armorPen: number; critChance: number; projId: number },
   game: GameHooks,
-  cd: HitCdImpl,
+  cd: HitCdImpl | IdStaticSharedTable,
   cooldown: number,
   onHit?: (t: HitTarget) => void,
   gate?: { ownerCx: number; ownerCy: number; maxDist: number; sharedHits?: Set<number> },
@@ -249,16 +395,16 @@ export class ChloroClaymoreBlade extends Entity {
     // 挥击亦无 LOS 门）；usesOwnerMeleeHitCD（:10556）→ 与玩家挥击共享命中表
     dealContacts(this, game, this.hitCd, -1, undefined,
       { ownerCx: p.cx, ownerCy: p.cy, maxDist: 300, sharedHits: this.sharedMeleeHits ?? undefined });
-    // CutTiles（aiStyle190||191 线支 :15341-15343：rotation±π/4 两端连线宽 60×scale——
-    // flag=false 无弹盒支）。PlotTileLine 厚线以三采样窗近似（1127 单点刃尖先例同款登记）
+    // CutTiles（aiStyle190||191 线支 :15341-15343）：PlotTileLine(Center+v(rot−π/4)*60*scale,
+    // Center+v(rot+π/4)*60*scale, width=60×scale)——★A⑤ 转正：带状全扫（cutThickTileLine）
+    // 替换旧"端+中三采样窗"近似,中段草再不漏砍
     {
       const r60 = 60 * this.itemScale;
       const a0 = this.rot - Math.PI / 4, a1 = this.rot + Math.PI / 4;
-      const ex = Math.cos(a0) * r60, ey = Math.sin(a0) * r60;
-      const fx = Math.cos(a1) * r60, fy = Math.sin(a1) * r60;
-      for (const k of [0, 0.5, 1]) {
-        cutTilesBox(game, this.cx + ex + (fx - ex) * k - 4, this.cy + ey + (fy - ey) * k - 4, 8, 8);
-      }
+      cutThickTileLine(game,
+        this.cx + Math.cos(a0) * r60, this.cy + Math.sin(a0) * r60,
+        this.cx + Math.cos(a1) * r60, this.cy + Math.sin(a1) * r60,
+        r60);
     }
     // ---- 绿光（:42948-42953）----
     game.addLightAt?.(this.cx, this.cy, 0, 0.42, 0);
@@ -347,8 +493,15 @@ export class ChloroSaberStab extends Entity {
     // 朝向随出手向量（:48510-48512 spriteDirection；:48496-48499 1127 ChangeDir）
     if (this.dx !== 0) p.facing = this.dx > 0 ? 1 : -1;
     if (this.t >= life) { this.dead = true; return; }
-    // CutTiles += 1127（切割长度 88f,Projectile.cs:15498 段）——刃尖 44px 扫草
-    game.cutTile(Math.floor((this.cx + this.dx * 44) / TILE), Math.floor((this.cy + this.dy * 44) / TILE));
+    // CutTiles（802/842/938-945/1127 线支 :15326-15331）：PlotTileLine(Center,
+    // Center+SafeNormalize(velocity,−UnitY)×88f, width=10×scale)——★A⑤ 转正：
+    // 全程带扫替换旧"单点刃尖"近似
+    {
+      const vl = Math.hypot(this.dx * this.spd, this.dy * this.spd) || 1;
+      const cdx = vl > 0.001 ? (this.dx * this.spd) / vl : 0;   // SafeNormalize(−UnitY 回退)
+      const cdy = vl > 0.001 ? (this.dy * this.spd) / vl : -1;
+      cutThickTileLine(game, this.cx, this.cy, this.cx + cdx * 88, this.cy + cdy * 88, 10);
+    }
     // 尘 157 + Item1 每 12t（:48522-48545；音效本仓 Item_1）
     if (this.t % 12 === 1) game.playSfxAt?.('hit', this.cx, this.cy);
     game.spawnParticles(this.cx, this.cy, '#4C8C3C', 2, 1.2, { life: 16, grav: 0, damp: 0.9 });
@@ -385,13 +538,15 @@ export class ChloroSaberStab extends Entity {
 // ================= 1128 叶绿孢子云（aiStyle 92 flag46 支） =================
 
 /** SpawnChlorophyteSporeCloud 撒下的漂浮孢子（Projectile.cs:33143-33405 flag46）：
- *  - 寿命 = ai[1]（挥击尾孢子 90+rand(60)；砸地大云走同型 220 缺省——本类由
- *    SpawnChlorophyteSporeCloud 生成时 ai[1] 缺省 0 → 220）
+ *  - ai[1] = 出生传入寿命：挥击尾孢子 90+rand(60)/砸地大云缺省 0 → num796=220（:33171）
+ *  - ★L2 转正（三处,锚 Terarria1458 P.cs,1457 同值）：①`ai[0]++; if(ai[1]>=1f) ai[0]+=2f`
+ *    （AI_92 :33167-33170）——尾孢子每拍老去 3 帧即【1/3 实效寿命】;②Damage_CanDealDamage
+ *    :12463 `(type==1128 && ai[1]>=1f)` → 尾孢子纯视觉零伤,只有 ai[1]==0 的砸地大云结算;
+ *    ③免疫面 usesIDStaticNPCImmunity + idStaticNPCHitCooldown=30（SetDefaults :10574-10575,
+ *    immunityIdentity 缺省=型 :784）→ 全场 1128 一张表（ID_STATIC_1128_TABLE）
  *  - scale = Remap(t/T,0,0.1,0.25,1.1)；盒 = 30×scale/1.1 居中回写（:33182-33188）
- *  - Opacity = Remap(T,0,0.25,0,1)×Remap(T,0.5,1,1,0)×0.75；vy −= 0.01（上飘）
- *  - velocity ×0.97；同型互斥（:33268-33300 互推 0.005）；撞实心点反弹（简化=停）
- *  - 命中：usesIDStaticNPCImmunity + cooldown 30（:10574-10575）——全场 1128 共享
- *    一张 30t 表（本类经 Game 注入共享 HitCd 语义：cooldown 30 每弹独立近似,登记） */
+ *  - Opacity = Remap(T,0,0.25,0,1)×Remap(T,0.5,1,1,0)×0.75；vy −= 0.01（上飘）、×0.97
+ *  - 同型互斥（:33268-33300 互推 0.005）；撞实心点反弹（简化=停,登记） */
 export class ChloroSporeCloud extends Entity {
   damage: number;
   knockback = 0;
@@ -400,10 +555,14 @@ export class ChloroSporeCloud extends Entity {
   meleeProj = true;
   dead = false;
   readonly projId = 1128;
+  /** num796（:33173-33177 ai[1]==0 → 220） */
   private readonly life: number;
+  /** ai[1] 原值（>=1 → 纯视觉零伤 + 老化 ×3;==0 → 结算云） */
+  private readonly ai1: number;
+  /** ai[0]（老化计数,步长 1 或 3） */
   private t = 0;
   private readonly spawnFrame = Math.floor(Math.random() * 5);   // :33149 frame=rand(frames)
-  private hitCd = new HitCdImpl();
+  private hitCd = ID_STATIC_1128_TABLE;
 
   constructor(cx: number, cy: number, vx: number, vy: number, damage: number, life: number) {
     super();
@@ -411,13 +570,15 @@ export class ChloroSporeCloud extends Entity {
     this.x = cx - this.w / 2; this.y = cy - this.h / 2;
     this.vx = vx; this.vy = vy;
     this.damage = Math.max(1, Math.round(damage));
+    this.ai1 = life;
     this.life = life > 0 ? life : 220;                          // :33168 ai[1]==0 → 220
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
-    if (this.t > this.life) { this.dead = true; return; }       // :33172-33176
+    if (this.ai1 >= 1) this.t += 2;                             // :33168-33170 加速老化(尾孢子)
+    if (this.t > this.life) { this.dead = true; return; }       // :33179-33183
     const T = this.t / this.life;
     const scl = 0.25 + (1.1 - 0.25) * Math.min(1, T / 0.1);     // :33182
     const side = 30 * scl / 1.1;                                // :33184-33186
@@ -431,7 +592,9 @@ export class ChloroSporeCloud extends Entity {
     const tx = Math.floor((this.cx + Math.sign(this.vx) * 16) / TILE);
     const ty = Math.floor((this.cy + Math.sign(this.vy) * 16) / TILE);
     if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.vx = 0; this.vy = 0; }
-    dealContacts(this, game, this.hitCd, 30);
+    // ★L2②：ai[1]>=1 尾孢子 CanDealDamage=false → 不进 Damage()（零接触伤、零
+    //   CritTimer 消费）;仅砸地大云（ai[1]==0）按 IDStatic 30t 共享窗结算
+    if (this.ai1 < 1) dealContacts(this, game, this.hitCd, 30);
     if (this.t % 3 === 0) {
       game.spawnParticles(this.cx, this.cy, '#32C864', 1, 0.6, { life: 24, grav: -0.02, damp: 0.94 });
     }
@@ -468,10 +631,13 @@ export class ChloroSporeCloud extends Entity {
 
 // ================= 1129 叶绿巨剑砸地爆（AI_209） =================
 
-/** SpawnChlorophyteSporeCloud 尾段的视觉大爆炸伤害盒（:42741-42748）：
- *  width=(int)ai[1]=128 / height=(int)ai[2]=96、ai[0]++>20 Kill、无位移无绘制
- *  （alpha=255 原版即全透明）。ownerHitCheck（:10588）= 不与本体挥击重复结算,
- *  本仓无该共享 CD 通道 → 每敌一次（cooldown −1）近似。 */
+/** SpawnChlorophyteSporeCloud 尾段的砸地大爆炸伤害盒（SetDefaults :3346-3360 +
+ *  AI_209 :70705-70715）：盒每拍回写 width=(int)ai[1]=128 / height=(int)ai[2]=96；
+ *  timeLeft=5 → Update(:17308-17312) 5 拍即亡——ai[0]>20 的 Kill 是永不可达死代码
+ *  （★A④ 勘误：曾按该死代码活到 21+ 拍=3 倍寿命窗）。usesLocalNPCImmunity + cooldown −1
+ *  （每敌一次）;**ownerHitCheck=true（:3358）**→ Damage_PVE_Inner 走 CanHitWithMeleeWeapon
+ *  :11896 门 = Distance(owner) > ownerHitCheckDistance(缺省 1000f,:306/:701) 即不结算
+ *  ——隔墙/远端敌不吃大爆盒（★A④ 主缺口；LOS 四探针同 1126 登记近似只取距离段）。 */
 export class ChloroBladeSlam extends Entity {
   damage: number;
   knockback = 0;
@@ -493,15 +659,20 @@ export class ChloroBladeSlam extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
-    cutTilesBox(game, this.x, this.y, this.w, this.h);         // CutTiles（:12517/:15276;两门排除表均无 1129）
-    dealContacts(this, game, this.hitCd, -1);
+    // ownerHitCheckDistance=1000 距离段门（CanHitWithMeleeWeapon :12416-12418;usesOwnerMeleeHitCD
+    // 未开 → 不吃玩家挥击共享表,仅独立 local 免疫）
+    const p = game.player as unknown as { cx?: number; cy?: number };
+    const gate = (p && p.cx != null && p.cy != null)
+      ? { ownerCx: p.cx, ownerCy: p.cy, maxDist: 1000 } : undefined;
+    cutTilesBox(game, this.x, this.y, this.w, this.h);         // CutTiles（Damage() 内旁路先于结算,:12519/:15276;排除表无 1129）
+    dealContacts(this, game, this.hitCd, -1, undefined, gate);
     if (this.t === 1) {
       game.spawnParticles(this.cx, this.cy, '#32C864', 16, 3.4, { life: 26, grav: -0.03, damp: 0.93 });
     }
-    if (this.t > 20) this.dead = true;                          // :42746-42748
+    if (this.t >= 5) this.dead = true;                          // timeLeft=5（:3353）
   }
 
-  draw(): void { /* alpha=255 原版本体不绘制（:10583） */ }
+  draw(): void { /* alpha=255 原版本体不绘制（:3351） */ }
 }
 
 // ================= 1116 花瓣风暴弹（AI_196 1116 支） =================
@@ -603,19 +774,25 @@ export class PetalstormShot extends Entity {
     dealContacts(this, game, this.hitCd, -1, () => { this.dead = true; });
   }
 
-  /** HandleMovement tileCollide 段（:18178-18187 type==1116 支）：撞实心双轴翻号×0.25
-   *  软反弹、弹体不亡（原版由通用碰撞解算翻轴后本支再阻尼;此处两轴同翻=近似登记）。
-   *  Colliding() 1116 盒 Inflate(+5,+5)（:15521）以中心探测近似 */
+  /** HandleMovement tileCollide 段（:18181-18191 type==1116 支）：TileCollision 解算把被
+   *  挡轴速度置零（velocity.X != lastVelocity.X 即该轴受阻）→ 本支按【单轴独立】翻向
+   *  ×0.25 软反弹、另一轴照常推进、弹体不亡（★B1 转正：曾两轴同翻=斜角贴墙时竖直
+   *  动量也归零成"粘墙",原版只翻被挡轴）。X/Y 探针按行进终点中心格分轴取。 */
   private moveWithBounce(game: GameHooks): void {
     const nx = this.x + this.vx, ny = this.y + this.vy;
     const st = game.world.store;
-    const tx = Math.floor((nx + this.w / 2) / TILE), ty = Math.floor((ny + this.h / 2) / TILE);
-    if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) {
-      this.vx = -this.vx * 0.25;
-      this.vy = -this.vy * 0.25;
-      return;                                                   // 反弹拍不位移
-    }
-    this.x = nx; this.y = ny;
+    const probeSolid = (px: number, py: number): boolean => {
+      const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+      return !st.inBounds(tx, ty) || st.isSolid(tx, ty);
+    };
+    const blockedX = this.vx !== 0 && probeSolid(nx + this.w / 2, this.y + this.h / 2);
+    const blockedY = this.vy !== 0 && probeSolid(this.x + this.w / 2, ny + this.h / 2);
+    // 被挡轴翻向不推进（原版解算回卷位移）;自由轴照常走
+    const vxNew = blockedX ? -this.vx * 0.25 : this.vx;         // :18183-18186 单轴 −×0.25
+    const vyNew = blockedY ? -this.vy * 0.25 : this.vy;         // :18187-18189 同式
+    this.vx = vxNew; this.vy = vyNew;
+    if (!blockedX) this.x += this.vx;
+    if (!blockedY) this.y += this.vy;
   }
 
   /** Kill() 1116 尘（:72202-72217）：306×4（Center±Circular(10,10)×scale,scale
@@ -698,7 +875,7 @@ export class StormLightning extends Entity {
   private readonly searchR: number;
   private t = 0;
   private hitCd = new HitCdImpl();
-  private sharedCd: HitCdImpl | null;
+  private sharedCd: HitCdImpl | IdStaticSharedTable | null;
   /** ai[0] 目标锁（≥0=NPC 桶序；1091 玩家目标=布尔,单玩家足够——原版 ai[0]=-2-idx） */
   private targetIdx = -1;
   /** 1091 玩家目标态（:40419-40438 num3=14 半径+localAI[2] 5 次豁免计数） */
@@ -708,6 +885,9 @@ export class StormLightning extends Entity {
   comboSeed = false;
   /** Kill 帧 bolt 折线（视觉 + 命中域）；visualT>0 = 尸检期（弹已停 AI,仅画 bolt） */
   private bolt: Bolt | null = null;
+  /** localAI[0] 组值（Kill 帧 :71944-71952）：0=飞行期 / 1=未撞块 / 2=撞块 / 3=落点浸液。
+   *  消费面 = StormLightningCollisionCheck(:16205) 爆域(1)/液体导通(3) 双门 */
+  private boltLocalAI0 = 0;
   /** 全 bolt 列表（主雷+分支叉——StormLightningParticle.Draw foreach bolts 全画,
    *  叉强度 0.5×0.8^(depth−1);曾 generateMainBoltPath 传 null 列表=叉生成即丢弃） */
   private bolts: Bolt[] = [];
@@ -739,7 +919,7 @@ export class StormLightning extends Entity {
     //   noLightning+moreLightning 组合种子 → 绿 (80,220,80) 且伤害变治疗）
     this.life = projId === 1117 ? 30 : (projId === 1091 ? 240 : 1);
     this.searchR = projId === 1117 ? 12 : 32;
-    this.sharedCd = projId === 1122 ? ID_STATIC_1122 : null;     // 1122 IDStatic 10（全场同型一张表）
+    this.sharedCd = projId === 1122 ? ID_STATIC_1122_TABLE : null;   // 1122 IDStatic 10（全场同型一张表）
     this.boltColor = projId === 1117 ? [60 / 255, 120 / 255, 1]
       : projId === 1091 ? [80 / 255, 220 / 255, 220 / 255]
       : [1, 60 / 255, 60 / 255]; // GetLightningColor :40566
@@ -936,47 +1116,66 @@ export class StormLightning extends Entity {
     const bolt = gen.generate(this.bolts, this.seed >>> 0, center,
       dir ?? { x: 0, y: 1 }, true, true);
     this.bolt = bolt;
-    // 1117：撞块 → 中心吸附 bolt 末点（:71945-71949）；液体 → localAI[0]=3
-    if (this.projId === 1117) {
-      if (bolt.collidedWithTile) {
-        const last = bolt.positions[bolt.positions.length - 1];
-        this.x = last.x - this.w / 2; this.y = last.y - this.h / 2;
+    // ---- 撞块吸附 + localAI[0] 组值（Kill :71933-71955）：flag8=!collided →
+    //   未撞=1 / 撞块=2；两型【都】把中心吸附到 bolt 末点后取落点格液体；
+    //   浸液覆写 localAI[0]=3 并触发整链电化粒子（A① 导通链门）。
+    //   1122 例外：ArcSurge 分支在生成前显式 localAI[0]=2（:71924）＝无爆域/导通 ----
+    if (bolt.collidedWithTile && this.projId !== 1122) {
+      const last = bolt.positions[bolt.positions.length - 1];
+      this.x = last.x - this.w / 2; this.y = last.y - this.h / 2;
+    }
+    if (this.projId === 1122) {
+      this.boltLocalAI0 = 2;                                    // :71924 显式 2
+    } else {
+      this.boltLocalAI0 = bolt.collidedWithTile ? 2 : 1;         // :71944 flag8
+      if (tileHasLiquid(game, Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
+        this.boltLocalAI0 = 3;                                  // :71950-71952 浸液导通态
+        this.spawnLiquidElectrification(game);                  // :14502-14520 电化粒子链
+        // :71956-71957 SelfHurtPlayers（1117 owner==本地 入水自伤）——本仓玩家弹不伤主
+        // 维持既有登记；导通对玩家的伤害面由下方 1091 EVP 命中口径覆盖
       }
-      // localAI[0]=3 液体链导电（SelfHurtPlayers 玩家自伤——本仓玩家弹不伤主,登记）
-      void (typeof game.world.liquidAt === 'function' ? game.world.liquidAt(this.cx, this.cy) : 0);
-      // 震屏（Spawn_StormLightning 尾 PunchCameraModifier：随机向×(0.5,1),
-      // 强度 Lerp(2,10,室外天气强度)——本仓恒 6 近似,天气强度通道登记）
-      game.punchCamera?.((Math.random() * 2 - 1) * 0.5, Math.random(), 12, 6);
+    }
+    // ---- 打屏/背景白闪（Spawn_StormLightning，ParticleOrchestrator.cs:1027-1053）：
+    //   flag = IndexOfPlayerWhoInvokedThis != 255 → 1117(武器,value=owner)/1091(世界,value=255)。
+    //   ★A⑦ 转正：PunchCameraModifier + Main.NewLightning(instant:true) 只在 !flag 支
+    //   （:1044-1052）＝【1091 世界雷】专属演出,1117 从无打屏（曾错装）。强度=
+    //   Lerp(2,10,outsideWeatherEffectIntensity)（"恒 6"近似随之退役）;frames=45;
+    //   起源=bolt 落点。vibrationCyclesPerSecond=3/falloff=1500 本仓 punchCamera
+    //   形参无该两通道（hook 内定 cps 6/falloff 1000）维持登记 */
+    if (this.projId === 1091) {
+      const weather = (game.world as unknown as {
+        weather?: { outsideWeatherEffect?: number; newLightning?: (instant?: boolean) => void };
+      }).weather;
+      const inten = Math.max(0, Math.min(1, weather?.outsideWeatherEffect ?? 1));
+      const th = Math.random() * Math.PI * 2;
+      const end9 = bolt.positions[bolt.positions.length - 1];
+      game.punchCamera?.(Math.cos(th) * 0.5, Math.sin(th), 45, 2 + 8 * inten, end9.x, end9.y);
+      weather?.newLightning?.(true);                            // 背景白闪系统瞬发档
     }
     // ---- MultiPointHitbox 16×16 沿 bolt 折线一次性结算（:71918-71919/:71957-71962）----
     this.damageAlongBolt(game, bolt);
-    // ---- 1091 玩家侧结算（friendly+hostile+trap 三态弹:玩家同样吃 bolt 路径伤害;
-    //   :14915 专属缩放表 LightningPlayerDamageScaling（Journey.5→.04/Classic1→.08/
-    //   Master3→.24/Legendary4→.4,按 Main.Difficulty int 采样）× Damage_EVP ×2;
-    //   noLightning+moreLightning 组合种子 → Heal(80) 免伤（:14896-14900））----
+    // ---- 1091 玩家侧结算（friendly+hostile+trap 三态弹）:Damage_EVP 全口径 —---
+    //   命中面走 Colliding 的 aiStyle203 分流（bolt 折线 ±8 / 64×64 爆域 / 液体导通,
+    //   与 NPC 同源——曾仅按 bolt 路径判=浸液连锁近旁玩家漏劈）;缩放序见
+    //   lightningEvpFinalDamage（curve 在 Main.Difficulty 浮点轴,{Journey .04/Classic .08/
+    //   Master .24/Legendary .4} ×2 ×死囚毛衣）。noLightning+moreLightning 组合种子 →
+    //   Heal(80) 免伤（Damage_EVP :14931-14935）
     if (this.projId === 1091) {
-      const p = game.player;
-      if (p && !p.dead) {
-        // 玩家判定用【整条 bolt 路径】（Kill 帧 customHitbox 对 NPC/Player 两环同效
-        // ——曾用标记盒=路径上远端玩家漏劈）
-        const pts = bolt.positions;
+      const p = game.player as unknown as
+        { x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number; dead?: boolean } | null | undefined;
+      if (p && !p.dead && !(p as { iframes?: number }).iframes) {
+        const pbox = {
+          x: p.x ?? (p.cx ?? this.cx) - 10, y: p.y ?? (p.cy ?? this.cy) - 21,
+          w: p.w ?? 20, h: p.h ?? 42,
+        };
+        // MultiPoint 点优先取实触点（击退源坐标），否则爆域/导通面命中用落点心
         let hitPt: { x: number; y: number } | null = null;
-        for (let i = 0; i < pts.length; i++) {
-          const q = pts[i];
-          if (q.x >= p.x - 8 && q.x < p.x + p.w + 8 && q.y >= p.y - 8 && q.y < p.y + p.h + 8) { hitPt = q; break; }
+        for (const q of bolt.positions) {
+          if (q.x >= pbox.x - 8 && q.x < pbox.x + pbox.w + 8
+            && q.y >= pbox.y - 8 && q.y < pbox.y + pbox.h + 8) { hitPt = { x: q.x, y: q.y }; break; }
         }
-        if (hitPt) {
-          if (this.comboSeed) {
-            p.hp = Math.min(p.maxHp, p.hp + 80);   // Heal(80)（:14898——组合种子雷改治疗）
-          } else {
-            // Sample(Main.Difficulty int GameMode 0-3) 对曲线键(0.5→.04/1→.08/3→.24/4→.4):
-            // 经典0→.04 专家1→.08 大师2→lerp(1,3 段)=.16 旅程3→.24
-            const diff = game.world.difficulty;
-            const scale = diff === 1 ? 0.08 : diff === 2 ? 0.16 : diff === 3 ? 0.24 : 0.04;
-            // 零尺寸盒@命中点=projOverlap 必交（判定已按 bolt 路径完成）
-            hitPlayer({ x: hitPt.x, y: hitPt.y, w: 0, h: 0 }, game,
-              Math.max(1, Math.round(this.damage * scale * 2)), true);
-          }
+        if (hitPt || this.stormBoltCollides(game, pbox.x, pbox.y, pbox.w, pbox.h)) {
+          this.evpStormBolt(game, hitPt ?? { x: this.cx, y: this.cy });
         }
       }
     }
@@ -999,40 +1198,115 @@ export class StormLightning extends Entity {
     return p.rotatedRelativePoint ? p.rotatedRelativePoint(mc.x, mc.y) : mc;
   }
 
-  /** MultiPointHitbox.Intersects（MultiPointHitbox.cs:26-38）：目标盒 ±8px 膨胀后
-   *  含任一 bolt 点 → 命中。逐敌结算（crit/击退/StatusNPC 同 dealContacts 管线；
-   *  1117 local 免疫 −1 / 1122 IDStatic 10） */
+  /** aiStyle203 命中面全口径（Colliding aiStyle203 分流 :15954-15965 +
+   *  StormLightningCollisionCheck :16205-16243；1457 :15954/:16205 同值序）：
+   *   ①1117 先置支 —— localAI[0]==1 时本体盒 Inflate(60)（半沿 68）；
+   *   ②通用·爆域 —— localAI[0]==1 → GetStormLightningExplosionRect=
+   *     CenteredRectangle(Center,64)（半沿 32,:16232-16235。★A② 勘误：此域三型共有,
+   *     主消费面是 1091 世界雷——曾只挂 1117 用 ±68 近似充数）；
+   *   ③通用·液体导通 —— localAI[0]==3 且 Distance(center,targetCenter)<500px 且
+   *     Utils.PlotLine 落点心→目标心【全程】liquid!=0（StormLightningLiquidCollisionCheck
+   *     :16237-16242,A① 导通链）；④尾段 MultiPointHitbox ±8 含容。
+   *  命中即真（原生 OR 语序与原版一致）。 */
+  private stormBoltCollides(game: GameHooks, wx: number, wy: number, ww: number, wh: number): boolean {
+    const ecx = wx + ww / 2, ecy = wy + wh / 2;
+    const dxT = Math.abs(ecx - this.cx), dyT = Math.abs(ecy - this.cy);
+    const halfW = ww / 2, halfH = wh / 2;
+    if (this.boltLocalAI0 === 1) {
+      if (this.projId === 1117 && dxT <= 68 + halfW && dyT <= 68 + halfH) return true;
+      if (dxT <= 32 + halfW && dyT <= 32 + halfH) return true;
+    }
+    if (this.boltLocalAI0 === 3 && Math.hypot(ecx - this.cx, ecy - this.cy) < 500) {
+      const allWet = plotTiles(
+        Math.floor(this.cx / TILE), Math.floor(this.cy / TILE),
+        Math.floor(ecx / TILE), Math.floor(ecy / TILE),
+        (x, y): boolean => tileHasLiquid(game, x, y));
+      if (allWet) return true;
+    }
+    const pts = this.bolt?.positions ?? [];
+    for (let i = 0; i < pts.length; i++) {
+      const q = pts[i];
+      if (q.x >= wx - 8 && q.x < wx + ww + 8 && q.y >= wy - 8 && q.y < wy + wh + 8) return true;
+    }
+    return false;
+  }
+
+  /** SpawnLightningLiquidElectrificationParticles（:14502-14520）：以落点为心 40 条放射
+   *  PlotLine（半径 500px、只走液体格、遇干格即止）逐格 1/4 率 白光 AddLight+电花编排
+   *  粒子。编排粒子形态池缺——spawnParticles 白火花近似 */
+  private spawnLiquidElectrification(game: GameHooks): void {
+    const sx9 = Math.floor(this.cx / TILE), sy9 = Math.floor(this.cy / TILE);
+    for (let i = 1; i < 40; i++) {
+      const ang = Math.PI * i / 20;
+      const ex9 = Math.floor((this.cx + Math.cos(ang) * 500) / TILE);
+      const ey9 = Math.floor((this.cy + Math.sin(ang) * 500) / TILE);
+      plotTiles(sx9, sy9, ex9, ey9, (x, y): boolean => {
+        if (!tileHasLiquid(game, x, y)) return false;
+        if (Math.random() * 4 >= 1) return true;                  // Main.rand.Next(4)==0 才出
+        game.spawnParticles((x + 0.5) * TILE, (y + 0.5) * TILE, '#FFFFFF', 1, 1.2,
+          { life: 14, grav: 0, damp: 0.92 });
+        game.addLightAt?.((x + 0.5) * TILE, (y + 0.5) * TILE, 1, 1, 1);
+        return true;
+      });
+    }
+  }
+
+  /** Damage_EVP type==1091 终值序列（:14846-14949;1457 :14846-14949 同值序）：
+   *  门禁(死亡/无敌 General 免疫槽) → CanParryAgainst(:31673 盾反击窗) /
+   *  comboSeed Heal(80)(:14931-14935,置 flag2 吞伤害同效) → 终值链
+   *  lightningEvpFinalDamage(DamageVar(-luck) → ×curve(Difficulty) → ×2 → 死囚毛衣)
+   *  → Player.Hurt/Game.damagePlayer → trap 成就(WATCH_YOUR_STEP HandleSpecialEvent(4))。
+   *  敌体 velocity 本仓未建模（天降雷按 UnitY 参与朝向判别,登记）；
+   *  banner/resistCold 两步对 1091 无源跳过（bannerIdToRespondTo=0/coldDamage=false）。 */
+  private evpStormBolt(game: GameHooks, hitPt: { x: number; y: number }): void {
+    const p = game.player as unknown as {
+      cx: number; cy: number; facing?: number; shieldParryTimeLeft?: number;
+      luck?: number; hp: number; maxHp: number; dead?: boolean; maxMana?: number;
+    };
+    // CanParryAgainst（:31673-31679）：shieldParryTimeLeft>0 && sign(boltCenterX−playerCenterX)
+    // ==direction && enemyVelocity!=Zero && !immune —— 格挡成功 = 零伤（EVP flag2 短路）
+    const parried = ((p.shieldParryTimeLeft ?? 0) > 0)
+      && Math.sign(this.cx - p.cx) === (p.facing ?? 1);
+    if (this.comboSeed) {
+      p.hp = Math.min(p.maxHp, p.hp + 80);                        // Heal(80)（:14933）
+      return;
+    }
+    if (parried) return;
+    const dmg = lightningEvpFinalDamage(this.damage, mainDifficulty(game.world), {
+      luck: p.luck ?? 0,
+      sweater: playerDeadMansSweater(game),
+    });
+    if (dmg < 1) return;                                          // Hurt <1 丢弃语义
+    game.damagePlayer(dmg, hitPt.x, hitPt.y, undefined, false, false);
+    // trap 尾段（:14942-14948）：trapDebuffSource 标记本仓无位；成就致死分支保留
+    if ((game.player as unknown as { dead?: boolean }).dead) {
+      game.achievements?.handleSpecialEvent(4, {
+        statLifeMax: p.maxHp,
+        statManaMax: (game.player as unknown as { maxMana?: number }).maxMana ?? 20,
+      });
+    }
+  }
+
+  /** 命中域逐敌结算（Damage_PVE_Inner 链——crit/击退/StatusNPC 同 dealContacts 管线;
+   *  免疫窗：1117 local −1 / 1122 IDStatic 10 型级共享表 / 1091 local −1） */
   private damageAlongBolt(game: GameHooks, bolt: Bolt): void {
     const cd = this.sharedCd ?? this.hitCd;
     cd.tick();
-    const pts = bolt.positions;
     for (const ent of game.enemies()) {
       const e = ent as unknown as HitTarget & { vanillaId?: number; hp: number; maxHp: number };
       if (!e || e.dead) continue;
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
-      // 膨胀盒含点判定（BoundingRect 粗筛省略——敌量小,逐点直测）
-      let hit = false;
-      for (let i = 0; i < pts.length; i++) {
-        const p = pts[i];
-        if (p.x >= e.x - 8 && p.x < e.x + e.w + 8 && p.y >= e.y - 8 && p.y < e.y + e.h + 8) {
-          hit = true; break;
-        }
-      }
-      // 1117 附加爆炸域（Colliding :15955-15961 localAI[0]==1 → myRect.Inflate(60)；
-      // 64×64 爆炸矩形为其子域）——本仓 localAI 恒按"未撞块"档处理
-      if (!hit && this.projId === 1117 && !bolt.collidedWithTile) {
-        hit = Math.abs(e.x + e.w / 2 - this.cx) <= 8 + 60 && Math.abs(e.y + e.h / 2 - this.cy) <= 8 + 60;
-      }
-      if (!hit) continue;
+      // aiStyle203 Colliding 全口径（bolt 折线 ±8 含容 / 爆域 / 液体导通——A①②）
+      if (!this.stormBoltCollides(game, e.x, e.y, e.w, e.h)) continue;
       if (!cd.ready(e.id, this.projId === 1122 ? 10 : -1)) continue;
       const crit = Math.random() < this.critChance;
       let dmg = crit ? this.damage * 2 : this.damage;
-      // 1091 NPC 伤难度乘区（Damage_GetProjectileSpecificDamageMultiplier :14630-14633:
-      //   ×Remap(Main.Difficulty int GameMode 0-3, Classic1, Master3, 1, 3)——
-      //   经典0→1 专家1→1 大师2→2 旅程3→3）
+      // 1091 NPC 伤难度乘区（Damage_GetProjectileSpecificDamageMultiplier :14630-14633,
+      // 1457 :14632 同式）：×Remap(Main.Difficulty 浮点轴, Classic1, Master3, 1, 3)——
+      // 经典 D=1→1 / 专家 D=2→2 / 大师 D=3→3 / 旅程滑杆缺省 D=0.5→clamp 1
+      // （★L1 错键修正：曾按 GameMode int 直采 {0..3}）
       if (this.projId === 1091) {
-        const d = game.world.difficulty;
-        dmg = Math.round(dmg * (d === 3 ? 3 : d === 2 ? 2 : 1));
+        dmg = Math.round(dmg * lightningNpcMultiplier(mainDifficulty(game.world)));
         // noLightning+moreLightning 组合种子：NPC 伤害改治疗 10% lifeMax（:12795-12807）
         if (this.comboSeed) {
           const heal = Math.min(Math.round(e.maxHp * 0.1), e.maxHp - e.hp);
@@ -1185,7 +1459,9 @@ export class StormLightning extends Entity {
     waveInP: number, waveOutP: number): void {
     const pts = bolt.positions;
     if (pts.length < 2) return;
-    const W = 12;                                          // Prepare width 12f（两型同）
+    // Prepare 的 width 参（StormLightningParticle._Prepare → Spawn_StormLightning
+    // :1048 `num2 = flag ? 12 : 16`——1117 武器雷 12 / 1091 世界雷 16）
+    const W = this.projId === 1091 ? 16 : 12;
     // 波前双门（WaveTransition :88-91,anim 按型——R35 勘误:1117=DefaultAnim 曾误套 ArcSurge）
     const waveIn = Math.min(1, Math.max(0, waveInP));
     const waveOut = Math.min(1, Math.max(0, waveOutP));
@@ -1471,9 +1747,13 @@ export class GlacierFangShot extends Entity {
 
 // ================= 1128/1129 生成器（SpawnChlorophyteSporeCloud :42616-42733 纯函数） =================
 
-/** FindChlorophyteSporeCloudSpawn（:42565-42590）：从刃尖前方格起,朝出手反侧扫 5 格
- *  （velocity.X>0 → i∈[−5,0] 否则 [0,5]）×竖 [−2,2],找"solid 且上格非 solid"的台面,
- *  取距候选点最近者 → 落点 = (台面格中心, 台面顶 −8)。找不到返回 null。 */
+/** FindChlorophyteSporeCloudSpawn（:42565-42590；1457 :42565 同构）：
+ *  扫描窗 = 刃尖列 num2/行 num3 ± 出手侧 5 格 ×竖 [−2..2]，筛"solid 且上格空"台面；
+ *  距离度量 num6 = |原 spawnPosition(刃尖) − 候选格中心((num2+i)*16+8,(num3+j)*16−8)|
+ *  **按候选自己那列**取近（★A③ 勘误：曾以返回位 sx=基准列横距代替——跨列候选全
+ *  同距，行选择退化为"最左扫描命中"，最多偏一行）；返回值仍钉
+ *  `spawnPosition.X = vector2.X`（基准列中心,:42587——winning 列只进度量不进返回!）
+ *  与 `spawnPosition.Y = (num3+j)*16 − 8`（中奖行顶）。找不到返回 null。 */
 export function findSporeCloudSpawn(
   st: { inBounds(x: number, y: number): boolean; isSolid(x: number, y: number): boolean },
   tipX: number, tipY: number, dirX: number,
@@ -1482,21 +1762,22 @@ export function findSporeCloudSpawn(
   const ty0 = Math.floor(tipY / TILE);
   const iLo = dirX > 0 ? -5 : 0;
   const iHi = dirX > 0 ? 0 : 5;
-  let best: { x: number; y: number } | null = null;
+  let bestSy: number | null = null;
   let bd = Number.POSITIVE_INFINITY;
   for (let i = iLo; i <= iHi; i++) {
     for (let j = -2; j <= 2; j++) {
       const tx = tx0 + i, ty = ty0 + j;
       if (!st.inBounds(tx, ty) || !st.inBounds(tx, ty - 1)) continue;
       if (st.isSolid(tx, ty) && !st.isSolid(tx, ty - 1)) {
-        const sx = tx0 * TILE + 8;
-        const sy = ty * TILE - 8;
-        const d = Math.hypot(tipX - sx, tipY - sy);
-        if (d < bd) { bd = d; best = { x: sx, y: sy }; }
+        // 度量用【候选列】中心（:42583 num6 右操作数）;基准列 X 只决定返回值
+        const cx9 = tx * TILE + 8;
+        const cy9 = ty * TILE - 8;
+        const d = Math.hypot(tipX - cx9, tipY - cy9);
+        if (d < bd) { bd = d; bestSy = ty * TILE - 8; }
       }
     }
   }
-  return best;
+  return bestSy == null ? null : { x: tx0 * TILE + 8, y: bestSy };
 }
 
 export interface SporeCloudSpawnCtx {
@@ -1626,12 +1907,15 @@ export class ThunderBoltShot extends Entity {
       }
     }
     game.addLightAt?.(this.cx, this.cy, 0.2, 0.5, 0.7);        // :38508
-    // 位移（extraUpdates=1 → 原版双子步全速;单步全速视觉等效,登记近似）;
-    // tileCollide 缺省 true → 撞块亡
-    this.x += this.vx; this.y += this.vy;
-    const st = game.world.store;
-    const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
-    if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) { this.die(game); return; }
+    // 位移（SetDefaults extraUpdates=1 :7702-7704 → Update 每帧双跑,射程/位移×2——
+    // ★A⑥ 转正：曾折叠为单步全速=射程减半。双子步各带 tileCollide 判（440 先例）,
+    // AI/音尘按拍单跑登记差异（原版连 AI 亦双跑,仓内惯例折只剩运动面））
+    for (let s9 = 0; s9 < 2; s9++) {
+      this.x += this.vx; this.y += this.vy;
+      const st = game.world.store;
+      const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+      if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) { this.die(game); return; }
+    }
     cutTilesBox(game, this.x, this.y, this.w, this.h);         // CutTiles（:12517/:15276;排除表无 731）
     dealContacts(this, game, this.hitCd, 10);                  // 缺省免疫窗（非 local 表族）
   }

@@ -366,11 +366,13 @@ export function heldItemTipWorld(
     //  而非右缘(右缘取法在斜 45° 上下时偏出 20px+,2026-08-31 用户截图定罪)
     lx = fw * 0.5; ly = -fh * 0.85;
   } else {
-    alpha = aimL;
-    const dp = ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF;
-    px = cx + sg * -2;                                      // offX=-2*dir(:50387)
-    py = cy - fh * 0.5;                                     // offY=p.h/2−fh/2
-    lx = dp[0] + fw; ly = dp[1] + fh * 0.5;                 // 管口=精灵右缘中点
+    // ★枪族 v6 极坐标(2026-08-31 终版):出生点 = 中心 + 瞄准单位·(dp0+fw−10)
+    //  + (0,−4 手抬)——纯沿瞄准零横向分量。v5 曾用绘制尖端全量(握把轴+垂直
+    //  偏移 dp1+fh/2≈14px):水平瞄准=枪口在手上方 ✓,但**竖直瞄准时该垂直分量
+    //  变成横向旁偏**,且朝向翻转(sg 变号)使旁偏左右换边 → 用户报"向上射弹
+    //  到右边"(2026-08-31 终案)。极坐标下弹恒在鼠标柱上,翻转零跳变。
+    const fwd = (ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF)[0] + fw - 10;
+    return { x: cx + Math.cos(aimWorld) * fwd, y: cy + Math.sin(aimWorld) * fwd - 4 };
   }
   const wr = sg * alpha;
   const c = Math.cos(wr), s = Math.sin(wr);
@@ -501,6 +503,7 @@ export function prettyStarSparkle(
   };
   const num = lv(fadeInStart, fadeInEnd, flareCounter) * lv(fadeOutEnd, fadeOutStart, flareCounter);
   if (num <= 0) return;
+  { try { if (new URLSearchParams(location.search).has('nosparkle')) return; } catch { } }
   const shine = sparkleTintedTex(shineColor);
   const draw = sparkleTintedTex(drawColor);
   if (!shine || !draw) return;
@@ -3293,7 +3296,8 @@ export class Renderer {
     // 此处单次 drawImage 回主链——层级=实体之后、表情气泡之前；设备像素直绘）
     {
       const gx = this.glfx;
-      if (gx && gx.trailDirty && !gx.unavailable) {
+      const _noComp = (() => { try { return new URLSearchParams(location.search).has('nocomposite'); } catch { return false; } })();
+      if (gx && gx.trailDirty && !gx.unavailable && !_noComp) {
         const c2 = this.ctx;
         if (c2) {
           c2.save();

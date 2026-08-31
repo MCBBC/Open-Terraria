@@ -8,7 +8,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
 import { spreadGrassOnce, grassSpreadState, setWorldSurfaceRef, setTenthRef } from './MushroomPass';
-import { flipGenSolid, genSolidType } from './GenSolid';
+import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { idsByVanillaSheet } from './TileRunner';
 
 const EBONSTONE = TILE_BY_KEY['v_25_ebonstone_block']!;
@@ -458,8 +458,16 @@ function place3x2(st: TileStore, x: number, y: number, type: number, style: numb
   for (let dx = -1; dx <= 1; dx++) {
     const bi = st.idx(x + dx, y + 1);
     if (!st.flags[bi]) return;
-    // tileSolid 走 GenSolid（本 pass 时点 484 滚动仙人掌 cs:12537 已翻非实心）
-    if (!genSolidType(st.type[bi])) return;
+    // tileSolid 走 GenSolid（本 pass 时点 484 滚动仙人掌 cs:12537 已翻非实心）。
+    // ★IIIII99e（2026-08-31，rainbow #44 定罪）：须读【生成期 Main.tileSolid】
+    // 而非运行时碰撞初值——原版 Main.cs:8032 `tileSolid[19]=true`（435-439 经
+    // cs:10126 循环登记,平台族 9 sheet=VAN_TILE_SOLID_EXTRA 全集），生成期
+    // SolidTile2（cs:71031）对**平坦平台底座**经 `(Platforms&&(half||topSlope))
+    // ||slope==0` 分支放行；本函数曾用 genSolidType()（=TILE_DEFS.solid 运行时
+    // 碰撞语义,platform 不登记）→ 平台底座一律拒放 → rainbow 链 Altars 内
+    // (876,535) 底座 y536 t19 三格,x86 收货/JS 拒放一坛错位（尾坛 (885,500)
+    // 补位）。改 vanGenSolidType():239/380 与 19 同族入内,484 翻转照常生效。
+    if (!vanGenSolidType(st.type[bi])) return;
     // SolidTile2（cs:70497）坡位/半砖门（s111 定罪 2026-08-17：底座 (2702/2704,413) 带坡，
     // 原版拒放祭坛 → 祭坛重试环继续耗掷 → JS 早退 = 腐化 pass -63 万掷的根因）：
     // 平台族半砖/上坡特赦，其余 slope!=0 一律拒；半砖恒拒（inActive 生成期恒 false 不建）

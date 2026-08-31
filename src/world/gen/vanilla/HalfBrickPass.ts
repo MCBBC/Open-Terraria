@@ -594,7 +594,7 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
   // ★IIIII99d：Check2x2 主组派发（cs(1458):87074-87）——Smooth World(#53) 在
   //   Dungeon(#32)/HellFort 之后,killTile→squareTileFrame 级联会帧到地牢家具；
   //   vanilla 于该时点走 Check2x2 完整性臂,JS 落空支=烛台/箱族等时序差源
-  else if (C2X2_MAIN_SHEETS.has(TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1)) {
+  else if (!_i99dNoDispatch && C2X2_MAIN_SHEETS.has(TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1)) {
     check2x2(st, rng, x, y);
   }
   else if (LARVA.has(st.type[i])) checkSuper(st, rng, x, y);      // cs:86437-40 case 485
@@ -616,7 +616,7 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
     } else if (sheet === 101 || sheet === 102 || sheet === 463 || sheet === 617) {
       check3x4KT(st, rng, x, y);                                   // cs:87030 组→Check3x4（★KKKKKKK 书架族）
     } else if (CHECK4X2_SHEETS.has(sheet)) {
-      check4x2KT(st, rng, x, y, sheet);                            // cs:87035-38 组→Check4x2（★IIIII99d 床/浴缸/野餐桌）
+      if (!_i99dNoDispatch) check4x2KT(st, rng, x, y, sheet);      // cs:87035-38 组→Check4x2（★IIIII99d 床/浴缸/野餐桌）
     } else if (sheet === 240) {
       checkWallDecorKT(st, rng, x, y, 'w3x3');                     // cs:86765→Check3x3Wall
     } else if (sheet === 241) {
@@ -1131,6 +1131,8 @@ export function solidTile(st: TileStore, x: number, y: number): boolean {
 const POUND_BLACKLIST = idsByVanillaSheet(10, 48, 137, 232, 380, 387, 388, 476, 484);
 // ★IIIII93：CheckPile 分派取证开关缓存（SW_I93_LEGACYP=1 复归旧行为；缺省启用分派）
 const _i93LegacyCheckPile = typeof process !== 'undefined' && process.env.SW_I93_LEGACYP === '1';
+/** ★IIIII99d A/B 哨兵（tools/_iii116ab 对拍隔离本批消费者面贡献；缺省 false 派发） */
+const _i99dNoDispatch = typeof process !== 'undefined' && process.env.SW_I99D_NODISP === '1';
 const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
 const POUND_GEN_SKIP = idsByVanillaSheet(190, 30);
 const FORBIDS_SLOPING = idsByVanillaSheet(21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597);

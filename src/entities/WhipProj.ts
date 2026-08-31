@@ -24,6 +24,8 @@ import { BuffType } from '../stats/Buffs';
 import { ConfettiBurstProj } from './meleeOnHitProjs';
 import type { Player } from './Player';
 import { projSprite } from './Arrow';
+import { wetCollisionProbe } from './MinionProj';
+import { meleeThirdOf } from '../player/SwingPathMath';
 import { MinionProj } from './MinionProj';
 import { Arrow } from './Arrow';
 import { tintedTex } from '../render/StringLine';
@@ -46,6 +48,17 @@ export type { WhipTagged } from './WhipTag';
 /** 2D 向量最小形状 */
 interface V2 { x: number; y: number }
 const v2 = (x: number, y: number): V2 => ({ x, y });
+
+/** Main.OffsetsPlayerOnhand 原表（1458 Main.cs:506-528，20 档按 bodyFrame.Y/56 行索引）
+ *  ——GetArmPosition 的持械帧臂位基准；×2 后参与锚点合成（Player.cs:51211）。 */
+export const OFFSETS_PLAYER_ONHAND: ReadonlyArray<readonly [number, number]> = [
+  [6, 19], [5, 10], [12, 10], [13, 17], [12, 19], [5, 10], [7, 17], [6, 16],
+  [6, 16], [6, 16], [6, 17], [7, 17], [7, 17], [7, 17], [8, 17], [9, 16],
+  [9, 12], [8, 17], [7, 17], [7, 17],
+];
+/** Player 身架帧矩形（Player.cs bodyFrame 固定 40 宽/56 高——:4188/:4192 取值面） */
+export const PLAYER_BODY_FRAME_W = 40;
+export const PLAYER_BODY_FRAME_H = 56;
 const lerpV = (a: V2, b: V2, t: number): V2 => v2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
 const rotV = (ang: number): V2 => v2(Math.cos(ang), Math.sin(ang));
 /** Vector2.RotatedBy(angle, origin) */
@@ -122,6 +135,9 @@ export class WhipProj extends Entity {
   private lai1: number;
   /** 蛇环补挥标记（补挥不再级联补挥;原版经 withAudioVisualFeedback=false 分支无动画自然不触发） */
   isEcho = false;
+  /** projectile.wet 出生时刻快照（NewProjectile :10887-10891 Collision.WetCollision
+   *  盒级判定,aiStyle165 不重评）——1104 火鞭 OnFire 窗口消费;undefined=未求值 */
+  private wetSnapshot?: boolean;
   /** proc 启用门（case 913/1031/1032 localAI[0]==0 :13970-13977；847/1033/1035 无门） */
   private procEnabled = false;
   private ownerRef: () => Player | null;
@@ -174,10 +190,62 @@ export class WhipProj extends Entity {
     if (this.ai2 >= 1000) return this.ai2 - 1000;
     return (this.ai2 >= 10 && this.projId === 1035 ? 30 : this.anim) * this.maxUpdates;
   }
-  /** 锚点 = 玩家手部（GetPlayerArmPosition :37071 按持械帧偏移，此处取玩家中心近似） */
+  /** 锚点 = Player.GetArmPosition 1:1（1458 Player.cs:51206-51225；:4185-4198 同式
+   *  ItemLocation 支）。台账批 B 档：曾取玩家中心近似 → 鞭形整体平移 ~8-10px；
+   *  现按持械帧臂位偏移链落地：
+   *    vector = Main.OffsetsPlayerOnhand[bodyFrame.Y/56] × 2（Main.cs:506-528）
+   *    direction≠1 → vector.X = bodyFrame.Width−vector.X（40 宽镜像 :4186-4189）
+   *    gravDir≠1   → vector.Y = bodyFrame.Height−vector.Y（56 高翻转 :4190-4193）
+   *    pos = MountedCenter − (20,42)/2 + [onhand×2 − ((40−20)/2,(56−42)/2)]（:4195-4196）
+   *    坐骑 52（狼形态）支：pos.Y −= mount.PlayerOffsetHitbox、pos += (12×dir,−12)
+   *    （:51617-51620——offsetHitbox = −PlayerOffset+heightBoost,Mount.cs:427-433）；
+   *    ApplyItemPositionOffsetFromMount 的 52/54 手持位偏移大表（:52017-52060+）未接,
+   *    登记在案（骑乘态鞭锚的 ±14px 级微差）；RotatedRelativePoint 经 owner 同名
+   *    方法走 fullRotation 旋转（本仓 Player.rotatedRelativePoint 1:1 已存）。
+   *  持械帧行（bodyFrame 行）= useStyle1 三相 行1/2/3，与 Renderer.useStyleBodyRow
+   *  共表 meleeThirdOf(:35882-35895/:36596)：itemAnimation 计数下行 =
+   *  max − ai0/MaxUpdates；挥窗已尽（echo/补挥通道）退回行 3 收势档，登记。 */
   private armPos(): V2 {
-    const o = this.ownerRef();
-    return o ? v2(o.cx, o.cy) : v2(this.x, this.y);
+    const o = this.ownerRef() as unknown as {
+      x: number; y: number; w: number; h: number;
+      facing: number; gravDir?: number; mountedCenter?: { x: number; y: number };
+      rotatedRelativePoint?(px: number, py: number): { x: number; y: number };
+      mount?: { active?: boolean; type?: number; playerOffset?: number;
+        data?: { heightBoost?: number } | null } | null;
+    } | null;
+    if (!o) return v2(this.x, this.y);
+    // bodyFrame 行：useStyle1 三相（Renderer 共表 meleeThirdOf；倒计时窗内换行）
+    let row = 3;
+    const maxAnim = Math.max(1, this.anim);                       // itemAnimationMax
+    if (this.ai0 < this.timeToFlyOut) {
+      const remain = Math.max(0, this.timeToFlyOut - this.ai0) / this.maxUpdates;
+      row = meleeThirdOf(remain, maxAnim) === 'tail' ? 3
+        : meleeThirdOf(remain, maxAnim) === 'mid' ? 2 : 1;
+    }
+    let vx = OFFSETS_PLAYER_ONHAND[row][0] * 2;
+    let vy = OFFSETS_PLAYER_ONHAND[row][1] * 2;
+    if (o.facing !== 1) vx = PLAYER_BODY_FRAME_W - vx;            // :4188
+    if ((o.gravDir ?? 1) !== 1) vy = PLAYER_BODY_FRAME_H - vy;    // :4192
+    vx -= (PLAYER_BODY_FRAME_W - o.w) / 2;                        // :4194 前半
+    vy -= (PLAYER_BODY_FRAME_H - 42) / 2;                         // BaseHeight=42
+    const mcx = o.x + o.w / 2;
+    const mcy = o.mountedCenter?.y ?? o.y + o.h / 2;
+    let px = mcx - o.w / 2 + vx;                                  // :4196 MC − (w,BH)/2 + vector
+    let py = mcy - 42 / 2 + vy;
+    const mnt = o.mount;
+    if (mnt?.active && mnt.type === 52) {                          // :51617-51620
+      // PlayerOffsetHitbox = −PlayerOffset + heightBoost（Mount.cs:427-433）→
+      // pos.Y −= offsetHitbox ≡ pos.Y += PlayerOffset − heightBoost；再加 (12×dir,−12)
+      py += (mnt.playerOffset ?? 0) - (mnt.data?.heightBoost ?? 0);
+      px += 12 * o.facing;
+      py += -12;
+    }
+    // ApplyItemPositionOffsetFromMount 表（:52017+）与 Wolf/Raptor 贴图层修正未接(登记)
+    if (o.rotatedRelativePoint) {
+      const rp = o.rotatedRelativePoint(px, py);
+      return v2(rp.x, rp.y);
+    }
+    return v2(px, py);
   }
   /** owner.whipRangeMultiplier（:45642；提基/星尘/黑曜来源） */
   private get whipRangeMultiplier(): number {
@@ -389,17 +457,21 @@ export class WhipProj extends Entity {
   private tryHit(game: GameHooks, owner: Player | null, pts: V2[], ai0At?: number): void {
     // 1104 火鞭 OnFire 窗口（蓝队 R7-41）：buff 24 仅当鞭身 !wet && ai[0] ∈
     // ((t/3)×2 ± 1) && 鞭尖 50×50 盒与敌盒相交（StatusNPC :11255-11272——中段
-    // "溅火"专属;曾表驱动无条件每击必上）。wet = 鞭心格有液体（原版 Collision
-    // wet 旗近似）;鞭尖 = 命中曲线末控制点
+    // "溅火"专属;曾表驱动无条件每击必上）。
+    // ★台账批：wet 旗升级盒级 WetCollision 且为【出生时刻快照】——原版 projectile.wet
+    // 只在 NewProjectile 里以 Collision.WetCollision(整盒) 判定一次（Projectile.cs:
+    // 10887-10891），AI_165 全程不重评；旧实现取弹心格每帧液检=浅缘漏判/半浸早判双向漂移。
+    if (this.projId === 1104 && this.wetSnapshot === undefined) {
+      this.wetSnapshot = wetCollisionProbe(
+        game.world.store as unknown as Parameters<typeof wetCollisionProbe>[0],
+        this.x, this.y, this.w, this.h);
+    }
     let spark1104 = false;
     let tipBox1104: { x: number; y: number; w: number; h: number } | null = null;
     if (this.projId === 1104) {
-      const stW = game.world.store;
-      const wxW = Math.floor(this.cx / 16), wyW = Math.floor(this.cy / 16);
-      const wet = stW.inBounds(wxW, wyW) && stW.liquid[stW.idx(wxW, wyW)] > 0;
       const num2 = Math.trunc(this.timeToFlyOut / 3) * 2;      // :11259-11260
       const a0 = ai0At ?? this.ai0;
-      if (!wet && a0 >= num2 - 1 && a0 <= num2 + 1) {          // :11262 中段 ±1
+      if (!this.wetSnapshot && a0 >= num2 - 1 && a0 <= num2 + 1) {   // :11262 中段 ±1
         const tip = pts[pts.length - 1];
         tipBox1104 = { x: tip.x - 25, y: tip.y - 25, w: 50, h: 50 };   // :11266 50×50 盒
         spark1104 = true;
@@ -655,6 +727,9 @@ const WHIP_TRAIL_DUST: Record<number, (c: WhipDustCtx) => void> = {
     if (Math.random() < 0.5) {
       c.game.spawnParticles(tip.x, tip.y, '#2A104A', 2, 2.2, { life: 20 }); // BlackLightningSmall 编排近似
     }
+    // AddLight(r2.Center, 0.2, 0, 0.4)（:48721——r2=CenteredRectangle(尖端,(30,30)),
+    // 尖端近似;经 Game.addLightAt 注入光照引擎,R18 备案域就此接通）
+    c.game.addLightAt?.(tip.x, tip.y, 0.2, 0, 0.4);
   },
   // 915 万花筒（:48741-48776）：env>0.1 → 尖端 d267(hue=miscCounterNormalized×9%1——
   //    本仓 whipHueClock 时钟档,scale0.9+r×0.9,fadeIn r×0.9,v×r×0.8+段向×2)+

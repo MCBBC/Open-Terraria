@@ -172,7 +172,7 @@ function makeSwingSelf(cx: number, cy: number, over: Partial<Record<string, unkn
     rng: () => 0.2,
     swingImmune: new Map<number, number>(),
     prevAi0: 0, dangerSide: 1, threatRaw: false,
-    threatLeft: null, threatRight: null,
+    threatPool: { left: null, right: null },
     corneredT: 0, fleeing: false,
     ...over,
   } as SwingSelf;
@@ -244,7 +244,7 @@ describe('★对齐批② 挥击退出链(NPC.cs:55645-55686)', () => {
       atkState: 15, atkTimer: 0, holdAim: 0, atkTick: 3,
       walkMode: 0, walkT: 100, turnLock: 0,
       rng: () => 0.2, prevAi0: 0, dangerSide: 1, threatRaw: false,
-      threatLeft: null as unknown, threatRight: null as unknown,
+      threatPool: { left: null as unknown, right: null as unknown },
       corneredT: 0, fleeing: false,
       ...over,
     })) me[k] = v;
@@ -261,7 +261,7 @@ describe('★对齐批② 挥击退出链(NPC.cs:55645-55686)', () => {
       for (let ty = 10; ty <= 22; ty++) { st.setTile(31, ty, STONE); st.setTile(32, ty, STONE); }
     }, {
       threatRaw: true, dangerSide: -1, facing: -1,
-      threatLeft: threatRef(CX - 60, CY - 20, 18, 40),
+      threatPool: { left: threatRef(CX - 60, CY - 20, 18, 40), right: null },
     });
     expect(me.atkTimer).toBe(15);              // num87 = NPCID.Sets.AttackTime[207]
     expect(me.atkState).toBe(15);              // ai[0] 保持 15(重起手)
@@ -273,7 +273,7 @@ describe('★对齐批② 挥击退出链(NPC.cs:55645-55686)', () => {
   it('入态时是被逼停(prevAi0==8)→ 无墙也连击(:55650 ||localAI[2]==8f 支)', () => {
     const me = runExit(undefined, {
       threatRaw: true, dangerSide: 1, facing: 1, prevAi0: 8,
-      threatRight: threatRef(CX + 40, CY - 20, 18, 40),
+      threatPool: { left: null, right: threatRef(CX + 40, CY - 20, 18, 40) },
     });
     expect(me.atkState).toBe(15);
     expect(me.atkTimer).toBe(15);
@@ -286,8 +286,10 @@ describe('★对齐批② 挥击退出链(NPC.cs:55645-55686)', () => {
       for (let ty = 10; ty <= 22; ty++) st.setTile(28, ty, STONE);   // 本体与左敌间柱列
     }, {
       threatRaw: true, dangerSide: -1, facing: -1, prevAi0: 8,
-      threatLeft: threatRef(CX - 96, CY - 20, 18, 40),               // 柱后→CanHit 点对失败
-      threatRight: threatRef(CX + 44, CY - 20, 18, 40),
+      threatPool: {
+        left: threatRef(CX - 96, CY - 20, 18, 40),                   // 柱后→CanHit 点对失败
+        right: threatRef(CX + 44, CY - 20, 18, 40),
+      },
     });
     expect(me.facing).toBe(1);                 // 换向朝右侧幸存者
     expect(me.atkState).toBe(15);
@@ -302,7 +304,7 @@ describe('★对齐批② 挥击退出链(NPC.cs:55645-55686)', () => {
         threatRaw: true, dangerSide: 1, facing: 1,
         // 主候选(num17 右)缺位;左侧候选拒救——vanilla 只在【主候选存在但 LOS 断】
         // 时才动用 num89 回退
-        threatLeft: threatRef(CX - 120, CY - 20, 18, 40),
+        threatPool: { left: threatRef(CX - 120, CY - 20, 18, 40), right: null },
       });
       expect(me.atkState).toBe(0);               // 标准退出
       expect(me.walkT).toBe(13);                 // legT = 12 + floor(0.2×6)
@@ -315,8 +317,7 @@ describe('★对齐批② 挥击退出链(NPC.cs:55645-55686)', () => {
       threatRaw: true, dangerSide: 1, prevAi0: 8, facing: 1,
       // prevAi0==8 触发连击尝试,但主候选(num17 右)缺位 → 放弃连击走标准退出,
       // cornered 复位分支接管
-      threatRight: null,
-      threatLeft: null,
+      threatPool: { left: null, right: null },
     });
     expect(me.atkState).toBe(0);               // ai[0] 归位由 cornered 承载
     expect(me.corneredT).toBe(13);             // ai[1] = legT 同值
@@ -344,7 +345,7 @@ describe('★B1① 危险扫描候选记录前置 CanBeChasedBy 门（NPC.cs:540
     const fn = (TownNPC.prototype as unknown as Record<string,
       (wd: unknown, g: unknown) => void>).dangerUpdate;
     fn.call(n, w, { enemies: () => foes } as never);
-    return n as unknown as { threatLeft: unknown; threatRight: unknown; threatRaw: boolean };
+    return n as unknown as { threatPool: { left: unknown; right: unknown }; threatRaw: boolean };
   }
 
   /** 右侧两敌：近者 dontTakeDamage（过扫描门但不入索敌 :91141 族）、远者普通 */
@@ -358,7 +359,7 @@ describe('★B1① 危险扫描候选记录前置 CanBeChasedBy 门（NPC.cs:540
     // ——不过门的更近威胁【保留】此前最近合格候选
     const r = scan([farNormal(CX + 100), nearDonT(CX + 50)]);
     expect(r.threatRaw).toBe(true);                    // 威胁面照旧置位(:53887 串)
-    const cand = r.threatRight as { cx: number };
+    const cand = r.threatPool.right as { cx: number };
     expect(cand).not.toBeNull();
     // 盒心几何：x=CX+90（farNormal 内 -10 偏置）→ cx = x+w/2 = CX+99
     expect(cand.cx).toBeCloseTo(CX + 99, 5);           // 远者保位（近敌未覆盖）
@@ -367,13 +368,13 @@ describe('★B1① 危险扫描候选记录前置 CanBeChasedBy 门（NPC.cs:540
   it('扫描序 [先近后远]:近敌不过门且 num14 未再刷 → num17 全程空缺(null)', () => {
     const r = scan([nearDonT(CX + 50), farNormal(CX + 100)]);
     expect(r.threatRaw).toBe(true);
-    expect(r.threatRight).toBeNull();                  // 远者 dx 更大不入 num14 刷新窗
+    expect(r.threatPool.right).toBeNull();             // 远者 dx 更大不入 num14 刷新窗
   });
 
   it('双侧皆合格:左右候选各记各的', () => {
     const r = scan([farNormal(CX + 60), farNormal(CX - 70)]);
-    expect((r.threatRight as { cx: number }).cx).toBeGreaterThan(CX);
-    expect((r.threatLeft as { cx: number }).cx).toBeLessThan(CX);
+    expect((r.threatPool.right as { cx: number }).cx).toBeGreaterThan(CX);
+    expect((r.threatPool.left as { cx: number }).cx).toBeLessThan(CX);
   });
 });
 
@@ -391,8 +392,7 @@ describe('★B1② 重接消费无活性门（:55652-55669 直读 Main.npc 无 .
       walkMode: 0, walkT: 100, turnLock: 0, rng: () => 0.2,
       prevAi0: 0, dangerSide: -1, threatRaw: true, corneredT: 0, fleeing: false,
       swingImmune: new Map<number, number>(),
-      threatLeft: threatRef(CX - 80, CY - 20, 18, 40),
-      threatRight: null,
+      threatPool: { left: threatRef(CX - 80, CY - 20, 18, 40), right: null },
     });
     const victim = { id: 11, dead: true };              // 同拍致死——Ref 快照仍在
     void victim;
@@ -416,8 +416,7 @@ describe('★B1② 重接消费无活性门（:55652-55669 直读 Main.npc 无 .
         walkMode: 0, walkT: 100, turnLock: 0, rng: () => 0.2,
         prevAi0: 0, dangerSide: 1, threatRaw: true, corneredT: 0, fleeing: false,
         swingImmune: new Map<number, number>(),
-        threatRight: threatRef(CX + 90, CY - 20, 18, 40),   // 柱后断视
-        threatLeft: null,
+        threatPool: { left: null, right: threatRef(CX + 90, CY - 20, 18, 40) },   // 柱后断视
       });
       (TownNPC.prototype as unknown as Record<string, SwingFn>).swingUpdate.call(
         n, { store: w.store, flags: {}, difficulty: 0 },

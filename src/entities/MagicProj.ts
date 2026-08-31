@@ -9,7 +9,8 @@
 //   通用贴图绘制,勿把那族特例搬进来。
 import { Entity } from './Entity';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
-import { hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy, applyBannerDamageDealt, pyroclastProjectileGate } from './projTargets';
+import { trySnapStrike } from '../stats/SnapStrike';
 import { projSprite, projFrameImg, projFrameCount, PROJ_ROT_RIGHT } from './Arrow';
 import { projectileData } from '../data/vanillaProjectiles';
 import { TILE } from '../core/constants';
@@ -134,6 +135,14 @@ export class MagicProj extends Entity {
         // + 冷却 300t → 法力星 723(ai2=1)落地掉 4143 法力斗篷之星
         (game as unknown as { tryManaCloakStarOnMagicHit?: (x: number, y: number) => void })
           .tryManaCloakStarOnMagicHit?.(e.x, e.y);
+        // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42）：本类现役弹型均
+        //   magic 数据面（resolveProjClass 单源）→ 原版同样不触发，接线为站位补齐
+        //   （类门自带 melee|ranged 过滤,未来分流时自动生效）
+        if (pyroclastProjectileGate(game, this)) {
+          trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2,
+            (e as unknown as { id?: number }).id ?? -1,
+            { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+        }
         e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage), Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
         // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
         // 本类承载一碰即碎魔法弹（穿透数缺省 1）——无三旗 face 时末档

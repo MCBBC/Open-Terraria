@@ -19,7 +19,8 @@ import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectP
 import { ConfettiBurstProj } from './meleeOnHitProjs';
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
-import { noteVanillaProjImmune } from './projTargets';
+import { noteVanillaProjImmune, pyroclastProjectileGate } from './projTargets';
+import { trySnapStrike } from '../stats/SnapStrike';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
@@ -341,6 +342,17 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
           (e as unknown as { vy?: number }).vy ?? 0), { netSync: true });
       }
     }
+    // ★焰爆石 6178 kind1 弹幕侧（Projectile.cs:13439-42 `(melee||ranged)&ownedBySomeone
+    //  && accPyroclast → TryMakingSnappingStoneStrike(…,1)`）：回旋镖/长矛/悠悠球/
+    // 飞刀等投射在 Damage() 的结算位——vanilla 在 DamageVar 前、StrikeNPC 前，本仓
+    // 对齐 hurt 前同一节拍。类门 pyroclastProjectileGate 单源；45×meleeDamage/300px/
+    // 2 目标弹 1131+323（:14396-14401），共用 360t 冷却去重。
+    if (pyroclastProjectileGate(game, self)) {
+      trySnapStrike(game, game.player, 1,
+        (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
+        e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+    }
     e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
     onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
@@ -396,6 +408,34 @@ const BOOMERANG_RETURN: Record<number, [number, number]> = {
  *  exported：Game 发射侧接线再掷召回门（recallGate）/回归测试共面 */
 export const PHASEBLADE_PROJ = new Set([1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067,
   1068, 1069, 1070, 1071, 1072, 1074, 1075, 1076, 1101, 1102]);
+
+/** 使用起点【同型在场门】（ItemCheck_CheckCanUse_Inner,Player.cs:52801-52856）：弹型在
+ *  列表内时,同 owner 已存在同型 active 弹 ⇒ 该物品本次使用被【静默拒绝】——原版
+ *  ItemCheck_TryStartUse 失败即不进 StartActualUse：无挥动动画/无 UseSound/不耗
+ *  itemTime（"必须回到手中才能再掷"的本体实现）。单发组 {6,19,33,52,113,320,333,
+ *  383,491,867,1052,902,866}∪IsAPhaseblade∪{301} 恒 1;光碟 106 上限 6、272 上限 10、
+ *  无头回旋镖 1000 上限 3。未列表型号不限。exported：Game 发射侧调用 */
+export const BOOMERANG_OWN_LIMIT: Record<number, number> = {};
+for (const id of [6, 19, 33, 52, 113, 320, 333, 383, 491, 867, 1052, 902, 866]) BOOMERANG_OWN_LIMIT[id] = 1;
+for (const id of PHASEBLADE_PROJ) BOOMERANG_OWN_LIMIT[id] = 1;
+BOOMERANG_OWN_LIMIT[301] = 1;
+BOOMERANG_OWN_LIMIT[106] = 6;
+BOOMERANG_OWN_LIMIT[272] = 10;
+BOOMERANG_OWN_LIMIT[1000] = 3;
+
+/** 发射侧同型在场判定（boomerangBlockedByOwned）：与原版扫描同口径——只数本机弹
+ *  （netPuppet 为远端傀儡,非 owner==whoAmI 域）;dead 未及清桶的剔除。
+ *  projectiles = entities.projectiles 桶（unknown 收口,instanceof 缩窄同 anchoredActive） */
+export function boomerangBlockedByOwned(projectiles: readonly unknown[], shoot: number): boolean {
+  const lim = BOOMERANG_OWN_LIMIT[shoot];
+  if (lim === undefined) return false;
+  let n = 0;
+  for (const e of projectiles) {
+    if (!(e instanceof Boomerang) || e.dead || e.netPuppet || e.projId !== shoot) continue;
+    if (++n >= lim) return true;
+  }
+  return false;
+}
 
 /** 撞墙反弹族（:18142-18151）：33 荆棘轮/106 光碟/866 飞刀——撞墙不回收,
  *  命中轴速度取反（lastVelocity 语义）续飞 */
@@ -2799,6 +2839,12 @@ export class YoyoShotProj extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
+      // ★焰爆石 6178 kind1 弹幕侧（Projectile.cs:13439-42）——悠悠球射弹/鞭箭族
+      //   （1125/1130/1134/1135…）结算位；类门 pyroclastProjectileGate 单源
+      if (pyroclastProjectileGate(game, this)) {
+        trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2, e.id,
+          { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+      }
       e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
       // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
       // 蓝队二轮 F1/F5 裁决：四型 face 不再依赖调用点硬编码——
@@ -4854,6 +4900,15 @@ export class DaybreakFlare extends Entity {
       if (!(this.x < rx + rw && this.x + this.w > rx && this.y < ry + rh && this.y + this.h > ry)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
+      // ★焰爆石 6178 kind1 弹幕侧（Projectile.cs:13439-42）——镖/标枪附着族首击
+      //   结算位；类门 pyroclastProjectileGate 单源
+      if (pyroclastProjectileGate(game, this)) {
+        trySnapStrike(game, game.player, 1,
+          (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
+          { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+            cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+      }
       e.hurt(applyBannerDamageDealt(game, e, dmg), (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       // ★GC1 写方桥：镖/标枪附着族（598/636/614）走 Projectile.cs:14039-14051 顶层
       //  分派旁路——纯表返回无写档（附着节流全靠 per-javelin 表与上限管理），其余

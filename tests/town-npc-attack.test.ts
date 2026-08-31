@@ -403,7 +403,7 @@ describe('★F1 corneredT 残值清偿 + exitAttackCommon 收尾', () => {
     Object.assign(npc, {
       atkState: 15, atkTimer: 0, holdAim: 0, atkTick: 3,
       prevAi0: 8, corneredT: 200, facing: -1,
-      dangerSide: 1, threatRaw: true, threatLeft: null, threatRight: null,
+      dangerSide: 1, threatRaw: true, threatPool: { left: null, right: null },
       walkMode: 0, walkT: 100, turnLock: 0, vx: -3, fleeing: true,
     });
     npc.rng = () => 0.2;
@@ -615,8 +615,8 @@ describe('★F4 危险管线双窗拆分 + PrettySafe 收口伞（NPC.cs:54033/:
     expect((npc as unknown as { admitWide: boolean }).admitWide).toBe(true);     // flag15
     expect((npc as unknown as { threatRaw: boolean }).threatRaw).toBe(false);    // flag16 无
     expect((npc as unknown as { dangerNear: boolean }).dangerNear).toBe(false);
-    expect((npc as unknown as { threatLeft: unknown }).threatLeft).toBeNull();   // 簿记不进宽窗
-    expect((npc as unknown as { threatRight: unknown }).threatRight).toBeNull();
+    expect((npc as unknown as { threatPool: { left: unknown; right: unknown } }).threatPool.left).toBeNull();   // 簿记不进宽窗
+    expect((npc as unknown as { threatPool: { right: unknown } }).threatPool.right).toBeNull();
   });
 
   it('对照:非对话同几何连准入都没有(扩窗条件须 flag5,:54036-38)', () => {

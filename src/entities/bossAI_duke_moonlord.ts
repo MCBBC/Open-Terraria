@@ -17,7 +17,12 @@
 // netcode 跳过。
 // 无敌语义:R23b(2026-08-24)起手/头/核心各态改写真旗标 dontTakeDamage
 // (iframes=2 近似被 hurt 免疫门的 pierce!==1 豁免绕过——单发弹直伤无敌期;
-// 同 golem/四柱先例);猪鲨 371 泡泡与旋冲 invuln 段仍为 iframes 近似(登记)。
+// 同 golem/四柱先例)。★2026-08-31 台账①收口:猪鲨四态(-1 出生/4·9 变身/12 瞬移,
+// NPC.cs :50278 dontTakeDamage=!flag7)+鲨鱼龙起扑窗(AI_071 :35300/:35381)与月总
+// 核心两态(-2 归位/:41601、-1 出生/:41625)全部落真旗标——iframes=2 白嫖近似退役。
+// 死光/幻影族命中改走 BossNoCheese 独立 40t 免工件槽(见 MLDeathray 与
+// projTargets.DAMAGE_EVP_NO_CHEESE_PROJS,台账⑥);371 泡泡按 1458 行为裁定重做
+// (台账②,报告顶部单列)。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -30,6 +35,7 @@ import { spawnPart, shoot, shootBolt462, accelTo, losClear } from './bossAI';
 import { projSprite, projFrameCount, volleyPhantomOrbs } from './Arrow';
 import { GorePiece } from './GorePiece';
 import { BuffType } from '../stats/Buffs';
+import { damageEvPNoCheese } from './projTargets';   // ★台账⑥ BossNoCheese 分桶命中通道
 
 // ---------------------------------------------------------------------------
 // 通用工具
@@ -122,11 +128,20 @@ const coreOf = (e: Enemy): CoreX => {
   return x;
 };
 
-/** 实心块内判定(原版 Collision.SolidCollision 的中心点近似) */
-const inSolid = (game: GameHooks, e: Enemy): boolean => {
+/** 实心块内判定(原版 Collision.SolidCollision(position,width,height) 全盒 any 等价件):
+ *  扫描矩形覆盖到的【全部】tile 列行,任一实心即真——曾按中心格单点近似,
+ *  半砖/边缘骑线时猪鲨隐身渐变与鲨龙蓄力/起扑窗判定集体漏检(台账④,
+ *  与 bossAI_dd2 solidBody 同款修法;对应 dd2 文件内五点采样版)。 */
+const inSolid = (game: GameHooks, e: { x: number; y: number; w: number; h: number }): boolean => {
   const st = game.world.store;
-  const tx = Math.floor(e.cx / TILE), ty = Math.floor(e.cy / TILE);
-  return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+  const x0 = Math.floor(e.x / TILE), x1 = Math.floor((e.x + e.w - 0.001) / TILE);
+  const y0 = Math.floor(e.y / TILE), y1 = Math.floor((e.y + e.h - 0.001) / TILE);
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) return true;
+    }
+  }
+  return false;
 };
 
 /** 原版"攻击时间表"推进(NPC.cs :37229-37251 / :37740-37762 / :38243-38264 同构):
@@ -544,7 +559,12 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
     }
     default: break;
   }
-  if (invuln) e.iframes = 2;
+  // ★台账①(2026-08-31):猪鲨无敌真旗标。原版 AI_069 尾句每 tick 双向赋值
+  // `dontTakeDamage = !flag7`(1458 NPC.cs:50278;flag7 初值 true :49398,态 -1/:49519、
+  // 4/:49815、9/:50040、12/:50202 置 false ⇒ 这四态无敌)——出生/变身/瞬移段单发弹
+  // 直伤白嫖窗(iframes=2 近似被 hurt 的 pierce!==1 豁免绕过)就此闭合;非四态每拍
+  // 显式清旗(可受击),受击免疫帧仍由 Enemy.hurt 通用通道承担。
+  e.dontTakeDamage = invuln;
   e.facing = st.spr;
   e.x += e.vx;
   e.y += e.vy;
@@ -880,7 +900,9 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
   }
   const RISE_T = 90; // num1077
   if (e.ai0 === 0) {
-    e.iframes = 2;              // dontTakeDamage(:35211)
+    // ★台账①:升空蓄力段真旗标(:35300 每 tick 置位)——iframes 近似被单发弹绕过。
+    // 原版无"每拍清旗"(dash 支内自行解除),受阻蓄势窗持续无敌
+    e.dontTakeDamage = true;
     e.vx = 0;
     e.vy = e.ai3;               // velocity.Y = ai[3](:35212)
     if (e.vanillaId === 373) {
@@ -910,7 +932,10 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
     if (e.ai1 < 1 && !inSolid(game, e)) e.ai1 = 1;
     if (inSolid(game, e)) e.spawnAlpha = Math.min(150, e.spawnAlpha + 15); // :35280-35284
     if (e.ai1 >= 1) {
-      e.spawnAlpha = Math.max(0, e.spawnAlpha - 60); // :35288 渐显
+      e.spawnAlpha = Math.max(0, e.spawnAlpha - 60); // :35378 渐显
+      // :35381 起扑生效拍解除无敌(1458 `dontTakeDamage = false;`)——蓄势窗
+      // (ai0=0 尾+被困延后段)维持升空态的无敌,起扑离块才开始可受击(台账①)
+      e.dontTakeDamage = false;
       e.ai1 += 1;
       if (inSolid(game, e)) {
         // :35295-35303 撞墙即死:PlaySound(DeathSound)——372/373 SetDefaults
@@ -933,19 +958,50 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
   e.y += e.vy;
 }
 
-/** AI_070 爆裂泡泡(NPC 371,NPC.cs:35122-35195):
- *  朝玩家漂移(风偏+微上浮),玩家贴近(外扩 40px)或 150t 后爆炸(体积扩到 100×100,
- *  4t 后消散)。原版命中是 justHit→爆炸而非死亡;本工程近似为 hp 受损即转爆炸。
- *  简化:ai3 的随机 scale(:35134)无 Enemy 对应字段,仅记录不应用。 */
+/** AI_070 爆裂泡泡(NPC 371,NPC.cs 1458 :35210-35279 / 1456 :35122-35195):
+ *  朝玩家漂移(风偏+微上浮),玩家贴近(外扩 40px)或 150t 后进入爆裂态(体积扩到
+ *  100×100,dontTakeDamage,4t 后消散)。
+ *  ★★1458 行为裁定(2026-08-31 台账②,Claude.md「1458 未触数值面」与反编译冲突,
+ *  按仓规取最新版真值)★★:
+ *   · 1456 曾在 StrikeNPC 内把每次命中【伤害清零】并立即转引信态(cs:82102-82107)
+ *     ——本仓旧档即此语义(Enemy.hurt 内挂同构块);
+ *   · 1457/1458 已删该支:命中照常扣血(SetDefaults lifeMax=1 ⇒ 任一实弹命中皆
+ *     致命),血尽走 checkDead(NPC.cs:78850-78855 `type==371` 支)→ ai[0]=1/ai[1]=4 +
+ *     PrepareForDeathAnimation(life=lifeMax/dontTakeDamage=true/netUpdate);每次命中
+ *     另在 StrikeNPC(:85185-85190)播 legacy 死音库 style3 音(「啵」破裂声)、致命拍
+ *     撒 60 粒蓝环尘(d212)。aiStyle70 的 `justHit || ai[0]==1` 扩盒支(:35270-35278)
+ *     本就存在——非致命擦伤同样进扩盒态(本仓 justHit 分支保留=不再是近似而是真值);
+ *   · 引信到期消散 = `life=0; HitEffect(); active=false`(:35262-35268)不走掉落管线,
+ *     本仓沿用 dead=true 直出桶。 */
 export function dukeBubbleAI(e: Enemy, game: GameHooks, player: Player | null) {
   void game;
-  // :35180-35194 受击（justHit 单帧旗标）→ 无敌 + 爆炸体积；hp 损失本身不触发——
-  // 真身是 StrikeNPC cs:82102-82107（371 伤害清零、ai0=1/ai1=4/dontTakeDamage），
-  // 已由 Enemy.hurt() 同构处理，此处 justHit 为 AI 侧兜底
-  if (e.ai0 !== 1 && e.justHit) { e.ai0 = 1; e.ai1 = 4; }
   // ai0/ai1 复位先于任何读点(原在 player 门内——无玩家时 ai0 留 -1120 会让
   // :844 `ai0===0` 落空直入爆炸分支 1 tick 即死;2026-08-13 ai0 清查)
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; }
+  // :35226 `scale = ai[3]`(每拍恒等式)——C 条目回归:随机尺寸真实应用到渲染
+  if (e.ai3 > 0) e.vanillaScale = e.ai3;
+  // :35270-35278 命中(justHit 单帧旗标)/已在爆裂态 → 无敌 + 扩盒 100×100 +
+  // EncourageDespawn(3)(消散计时由下方 ai1 引信承担)。1458 该支与血尽转换并存:
+  // 非致命擦伤同样即刻进入引信态(不再有"吃下伤害继续漂浮"的中间相);
+  // 每次命中播 legacy 死音库 style3 破裂音(StrikeNPC :85185 PlaySound(4,…,3),
+  // SetDefaults HitSound=NPCHit3/DeathSound=NPCDeath3 叠加面按通用管线,
+  // 本拍 maxHp>1 才发声 —— lifeMax=1 恒静音)
+  if (e.ai0 !== 1 && e.justHit) {
+    e.ai0 = 1; e.ai1 = 4;
+    game.playSfxWav?.('NPC_Killed_3', 1, e.cx, e.cy);
+  }
+  // checkDead 血尽转换(:78850-78855):ai[0]=1/ai[1]=4 + PrepareForDeathAnimation
+  // (life=lifeMax/dontTakeDamage=true)——转换逻辑由 AI 首行接管(hp<0 已被
+  // Enemy.hurt 放行,同月总部件模式);此后 hurt 的 dontTakeDamage 门拒后续弹。
+  // 致命拍尘环 = StrikeNPC 371 支(:85190-85211)60 粒 d212 蓝环(hslToRgb(.4±.2,.9,.5)
+  // lerp 白 .3,径向 45..91/10),本仓粒子近似(#5AA6D8 色带)
+  if (e.ai0 !== 1 && e.hp <= 0) {
+    e.ai0 = 1; e.ai1 = 4;
+    e.hp = e.maxHp;
+    e.dontTakeDamage = true;
+    game.playSfxWav?.('NPC_Killed_3', 1, e.cx, e.cy);
+    game.spawnParticles(e.cx, e.cy, '#5AA6D8', 24, 5.5, { life: 26, damp: 0.92 });
+  }
   if (e.bInit && player && e.ai3 <= 0) { // :35124-35131 初速 = 朝玩家 ±100px 随机偏移 × 11~17.7 速
     e.ai3 = (80 + Math.random() * 41) / 100;
     const jx = e.cx - player.cx + (Math.random() - 0.5) * 200;
@@ -984,9 +1040,9 @@ export function dukeBubbleAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.w = 100; e.h = 100;
       game.spawnParticles(e.cx, e.cy, '#BFE8FF', 8, 2, { life: 20 });
     }
-    e.iframes = 2; // dontTakeDamage
+    e.dontTakeDamage = true; // :35273 爆裂态每拍置位（真旗标,台账①面）
     e.ai1 -= 1;
-    if (e.ai1 <= 0) { e.dead = true; return; }
+    if (e.ai1 <= 0) { e.dead = true; return; } // :35262-35268 消散不走掉落管线
   }
   e.x += e.vx;
   e.y += e.vy;
@@ -1056,7 +1112,8 @@ function spawnTrueEye(game: GameHooks, part: Enemy): void {
  *  玩家 min(16, 距离) 直飞，贴身 <20px 时 AddBuff(145 MoonLeech, 840t/专家 960t)
  *  （:30722-30732，本仓经典模式恒 840t = 14s）；age≥330 或玩家失联 → ai[0] 翻负
  *  回程段：朝 额前(0,+216) 直飞，<20px Kill（吸血视觉闭环）。
- *  弹体自旋角 = (源心 - 玩家心 + (0,216)).ToRotation() + π/2（:30717）。 */
+ *  弹体自旋角 = (源心 - 玩家心 + (0,216)).ToRotation() + π/2（1458 :32353 / 1456
+ *  :30717 稳态式——2026-08-31 台账 C 条目回归,此前用自身速度角近似）。 */
 export class MoonLeechProj extends Entity {
   w = 16; h = 16;
   vx = 0; vy = 0;
@@ -1068,6 +1125,9 @@ export class MoonLeechProj extends Entity {
   /** 冻结追踪目标（原版 ai[1]=出弹瞬的玩家槽，Projectile.cs:30682-30747 全程
    *  Main.player[ai[1]]——追踪/失联回程/授 buff 三处同一冻结目标） */
   private tgt: Player;
+  /** 姿态角（aiStyle85 :32353 每 tick 重算的稳态旋转，见下方注释；C 条目回归：
+   *  曾按自身速度角近似——出膛加速相与回程折返相姿态滞后失真） */
+  private poseAng = 0;
   dead = false;
 
   constructor(src: Enemy, player: Player) {
@@ -1079,6 +1139,15 @@ export class MoonLeechProj extends Entity {
     const dx = player.cx - this.cx, dy = player.cy - this.cy;
     const d = Math.hypot(dx, dy) || 1;
     this.vx = (dx / d) * 6; this.vy = (dy / d) * 6;   // :37823 出速 6（AI 段接管为 16 上限）
+    this.poseAng = this.recalcPose(src);
+  }
+
+  /** aiStyle85 稳态旋转公式(P.cs :32353,1458 / :28417 1456 同式):
+   *  rotation = (npc.Center − player.Center + vector79).ToRotation() + π/2,
+   *  vector79=(0,216)——姿态只由源心↔玩家心的连线决定,与本弹自身位置/相位无关
+   *  (出攻击/回程两相同一公式)。玩家死亡后坐标仍可读(原版同取 Main.player 值)。 */
+  private recalcPose(src: Enemy): number {
+    return Math.atan2(src.cy - this.tgt.cy + 216, src.cx - this.tgt.cx) + Math.PI / 2;
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -1088,6 +1157,7 @@ export class MoonLeechProj extends Entity {
     // 独占），联机目标为访客代理时 buff 施加不上链（引擎级缺口，同 proxy buff 类）
     const player = this.tgt;
     if (--this.life <= 0 || !src || src.dead) { this.dead = true; return; }
+    this.poseAng = this.recalcPose(src);   // aiStyle85 :32353 每拍稳态旋转（台账 C 回归）
     if (!player || player.dead) { if (this.out) this.out = false; }   // :30706-30712 玩家失联即回程
     this.age++;
     if (this.age >= 330 && this.out) this.out = false;                // :30702-30705
@@ -1113,8 +1183,8 @@ export class MoonLeechProj extends Entity {
     if (!ctx) return;
     const img = projSprite(456);
     if (!img || !(img.width > 0) || img.width === 0) return;
-    // 自旋（:30717）：(源心 - 玩家心 + (0,216)) 角 + π/2——回程矢量已同向，直接用速度角近似
-    const ang = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+    // 自旋（:32353 稳态公式，C 条目回归——曾用自身速度角近似出膛/折返相滞后）
+    const ang = this.poseAng;
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(ang);
@@ -1156,9 +1226,11 @@ function spawnMoonLeech(game: GameHooks, head: Enemy, player: Player): void {
 // 「源心 → 源心+dir·束长」线段,线宽 36·scale(Colliding :14673-14682);
 // 伤害 = NewProjectile 原值(头 75 / 真眼 50) × 敌弹标准乘区(难度缩放 ×2,
 // :13770-13781 Damage_EVP——projTargets.hitPlayer 同式,经典 ×2=150/100、专家 ×4=300/200;
-// G8 定谳 2026-08-19:×2 是通用敌弹规则非 iframes 补偿,漏乘难度缩放已修;原版
-// 455 走 BossNoCheese 独立 40t 无敌槽(:13710-13728),束自身节拍与本仓通用 40t
-// iframes 等价,跨源穿透差异=单槽引擎差异备案)。
+// G8 定谳 2026-08-19:×2 是通用敌弹规则非 iframes 补偿,漏乘难度缩放已修。
+// ★台账⑥(2026-08-31):455 免工件独立 BossNoCheese 40t 槽已接线(原版 Damage_EVP
+// 按弹型分槽 P.cs:14853-14858/1456 :13710-13720)——束不吃玩家 General 无敌帧、按独立桶
+// 节流,跨源穿透(旧"单槽引擎差异备案")就此闭合;接线复用 projTargets
+// .damageEvPNoCheese + Player.damage 的 __swNextHitBucket 通道)。
 export class MLDeathray extends Entity {
   w = 36; h = 36; // SetDefaults 455
   private srcId: number;
@@ -1278,16 +1350,16 @@ export class MLDeathray extends Entity {
       }
     }
 
-    // 命中:玩家矩形 vs 束线段(线宽 36·scale),伤害走 damagePlayer(iframes 节流)。
+    // 命中:玩家矩形 vs 束线段(线宽 36·scale)。
     // 弹幕命中：attacker 仅做死亡归因，contactOnly 缺省 false → 荆棘不反伤
     // （反伤只在 NPC 接触分支 Player.cs:30910-30944）
     // 伤害 = NewProjectile 原值 75/50 × 敌弹标准乘区（hostileDamageScaling ×2，
     // Projectile.cs:13770-13781 Damage_EVP——projTargets.hitPlayer 同式内联；
-    // ★G8 定谳 2026-08-19：×2 是 :13781 通用敌弹规则【非】iframes 补偿——455 走
-    // ImmunityCooldownID.BossNoCheese 独立 40t 槽（:13710-13728 + Player.Hurt
-    // :37600/:37777-37783），对束自身节拍与本仓通用 iframes（40t）等价；原实现
-    // 只手乘 ×2 漏了难度乘区（专家 300 打成 150），且跨源无敌帧互斥差异（原版
-    // 死光可穿透 General 免疫帧命中）= 单槽 iframes 引擎差异，备案偏差不硬改）
+    // ★G8 定谳 2026-08-19：×2 是 :13781 通用敌弹规则【非】iframes 补偿）
+    // ★台账⑥(2026-08-31)：455 命中改走 BossNoCheese 独立免工件槽（Damage_EVP 分槽
+    // 表 P.cs:14853-14858 / projTargets.DAMAGE_EVP_NO_CHEESE_PROJS 接线）——
+    // 不吃玩家 General 无敌帧、按独立 40t 桶节流（桶写面在 Player.damage 内）；
+    // 桶表缺失(纯单测)由 damageEvPNoCheese 回退直连。
     // ★victim-settles：命中判定恒本地玩家（damagePlayer 只结算本地血；kind7 傀儡
     //  在访客端本地重建各查各的 game.player）——与上方 LOS 钳制的索敌目标分离
     const p = game.player;
@@ -1296,7 +1368,8 @@ export class MLDeathray extends Entity {
     // 发射瞬间贴脸即吃束曾变相加强死光
     if (this.age < 20) return;
     if (p && !p.dead && segHitsRect(this.cx, this.cy, dirX * this.len, dirY * this.len, wSq, p)) {
-      game.damagePlayer(
+      damageEvPNoCheese(
+        game,
         hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2,
         this.cx, this.cy, src);
     }
@@ -1443,15 +1516,17 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
   // 原版 checkDead(:78859-78867):血尽 → ai0=2 死亡演出,满血续命 600t 后真死
   if (e.hp <= 0 && e.ai0 !== 2) { e.ai0 = 2; e.ai1 = 0; e.hp = e.maxHp; e.iframes = 2; }
 
-  if (e.ai0 === -2) { // 远距传送归位(:36786-36809)
-    e.iframes = 2;
+  if (e.ai0 === -2) { // 远距传送归位(1458 :41599-41618 / 1456 :37250 同构)
+    // ★台账①:真旗标 dontTakeDamage(:41601)——iframes=2 近似被 pierce===1 单发弹
+    // 绕过 = 归位演出期白嫖直伤
+    e.dontTakeDamage = true;
     e.ai1 += 1;
     // :36792-36795 ai1==30 PlaySound(29,…,92)=Zombie_92(case29 style92 ×0.5 自动档;
     // 曾整段无声,2026-08-19 渲染断链批补)
     if (e.ai1 === 30) game.playSfxWav?.('Zombie_92', 1, e.cx, e.cy);
     if (e.ai1 >= 60) { e.ai1 = 0; e.ai0 = 0; }
-  } else if (e.ai0 === -1) { // 出生演出(:36810-36853)
-    e.iframes = 2;
+  } else if (e.ai0 === -1) { // 出生演出(1458 :41623-41663)
+    e.dontTakeDamage = true;   // ★台账①:真旗标(:41625),同 -2 归位态
     e.ai1 += 1;
     // :36816-36817 ai1==30 PlaySound(29,…,92)(曾误在 >=60 段尾播,2026-08-19 修)
     if (e.ai1 === 30) game.playSfxWav?.('Zombie_92', 1, e.cx, e.cy);

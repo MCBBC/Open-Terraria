@@ -925,10 +925,10 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   #105 大循环 TileFrame 对这些族的完整性校验与原版同流。463/617/102/487
     //   本仓生成域暂无写入方（零在场=零效应），照原版全组收录备案。
     case 101: case 102: case 463: case 617:
-      check3x4Sweep(st, ctx, x, y);
+      if ((__swProcessEnv ?? {}).SW_I99D_NODISP !== '1') { check3x4Sweep(st, ctx, x, y); }
       return true;
     case 79: case 90: case 487:
-      check4x2Sweep(st, ctx, x, y, sheet);
+      if ((__swProcessEnv ?? {}).SW_I99D_NODISP !== '1') { check4x2Sweep(st, ctx, x, y, sheet); }
       return true;
     // YYYYY 批补（cs:86616/52826）：CheckTree 树坍塌 + CheckChand 吊灯——
     //   s22222 #97 vanilla 杀链实证（KillTile 织入：CheckTree 系 118 杀/吊灯 8 杀，
@@ -1596,7 +1596,11 @@ const CHECK2XX_TYPES = new Set([104, 105, 207, 320, 337, 349, 356, 378, 410, 456
 //   （DungeonPass.place2x2D frameY=style*36+row*18，cs:51872-81 同式）→ 派发后
 //   #105 大循环 TileFrame 对烛台的完整性校验与原版同流（g/s22222/m 终清理残差
 //   T100×8 组=vanilla 由本臂判杀而 JS 落空支无派发的杀链面）。
-const C2X2_MAIN_GROUP = new Set([94, 95, 97, 98, 99, 100, 125, 126, 173, 282, 287, 319, 621, 622]);
+//   SW_I99D_NODISP=1 = 回退哨兵（A/B 定域仪：恢复 99b 收口态 [94]，配
+//   tools/_iii116ab 对拍隔离本批消费者面的四通道贡献，缺省零开销）。
+const C2X2_MAIN_GROUP = (__swProcessEnv ?? {}).SW_I99D_NODISP === '1'
+  ? new Set<number>([94])
+  : new Set<number>([94, 95, 97, 98, 99, 100, 125, 126, 173, 282, 287, 319, 621, 622]);
 function check2xXSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
   if (ctx.destroyObject) return;
   const i = st.idx(x, y);

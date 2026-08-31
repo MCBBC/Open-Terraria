@@ -90,6 +90,88 @@ const enemies = (game: GameHooks): Enemy[] => game.enemies() as Enemy[];
 const countNpc = (game: GameHooks, id: number): number =>
   enemies(game).filter((n) => !n.dead && n.vanillaId === id).length;
 
+// ---------------------------------------------------------------------------
+// 神秘石碑仪式余烬弹 526（Projectile.cs SetDefaults :5964-5972 + AI_098 :33746-
+// 33766；出生参数 NPC.cs :37219-37248）——台账批 A 档清偿：降级纯粒子升回真弹。
+//   SetDefaults：8×8 / aiStyle98 / tileCollide=false / timeLeft=120 / alpha=255
+//   （alpha 满格=不可见本体，可见性全靠尾迹尘 d228）/ damage=0 非敌非友 → 无伤害
+//   判定面（原版即纯视觉实体,归巢+尾迹）。AI：
+//     目标位 (ai[0],ai[1])；vel.Length() > 距目标 → Kill（抵靶消散 :33750-33753）；
+//     否则 normalize(Δ)×15、velocity=Lerp(velocity,val,0.1)（:33755-33757）；
+//     每 tick 2×d228 于 Center+(4,4)、noGravity、scale+=rand（:33758-33765）。
+//   本体渲染 alpha255 → 不画；额外登记：磁尘 customData 吸附支未接（视觉微差）。
+// ---------------------------------------------------------------------------
+export class TabletShardProj extends Entity {
+  w = 8;
+  h = 8;
+  dead = false;
+  private age = 0;
+  constructor(x: number, y: number, vx: number, vy: number,
+    private tgtX: number, private tgtY: number) {
+    super();
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
+    this.vx = vx;
+    this.vy = vy;
+  }
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (++this.age > 120) { this.dead = true; return; }          // timeLeft=120(:5970)
+    const dx = this.tgtX - this.cx, dy = this.tgtY - this.cy;
+    const dist = Math.hypot(dx, dy);
+    const vel = Math.hypot(this.vx, this.vy);
+    if (dist < vel) {                                            // 抵靶 Kill(:33750)
+      this.spawnTrail(game);
+      this.dead = true;
+      return;
+    }
+    let ux = dx / dist, uy = dy / dist;                          // Normalize×15(:33755)
+    ux *= 15; uy *= 15;
+    this.vx += (ux - this.vx) * 0.1;                             // Lerp(velocity,val,.1)(:33757)
+    this.vy += (uy - this.vy) * 0.1;
+    this.x += this.vx;                                           // AI_098 无重力项
+    this.y += this.vy;
+    this.spawnTrail(game);
+  }
+  /** 2×d228 尾迹（:33758-33765）：NewDust(Center,0,0,228)→position+=(4,4)、
+   *  noGravity、scale+=rand*1 */
+  private spawnTrail(game: GameHooks): void {
+    for (let i = 0; i < 2; i++) {
+      const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 228, 0, 0, 100, null, 1);
+      if (!d) continue;
+      d.x += 4; d.y += 4;
+      d.noGravity = true;
+      d.scale += Math.random();
+    }
+  }
+  draw(): void { /* alpha=255（:5971）——本体不画 */ }
+}
+
+/** 入投射物桶（同 MLDeathray 经 entities.add(obj,'projectiles) 通道） */
+function addShardProj(game: GameHooks, x: number, y: number,
+  vx: number, vy: number, tgtX: number, tgtY: number): void {
+  (game as unknown as { entities: { add: (en: unknown, b: string) => void } }).entities
+    .add(new TabletShardProj(x, y, vx, vy, tgtX, tgtY), 'projectiles');
+}
+
+// ---------------------------------------------------------------------------
+// 宝箱怪态3 全弹反射扫描（NPC.ReflectProjectiles :67156-67165 + CanReflectProjectile
+// :67167-67176 = 命中盒相交门）：遍历玩家投射物桶,凡 projCanBeReflected 且与宿主盒
+// 相交者执行 ReflectProjectile（:67189-67212 反向归属——projTargets.reflectProjectile
+// 同构移植负责音/尘/速度/伤÷4/penetrate 归一）。速查无 projId/裸枚举对象跳过。
+// ---------------------------------------------------------------------------
+function reflectPlayerProjsInHitbox(game: GameHooks, e: Enemy): void {
+  for (const q of game.projectiles?.() ?? []) {
+    const pr = q as unknown as {
+      x?: number; y?: number; w?: number; h?: number; dead?: boolean;
+      damage?: number; hostile?: boolean; reflected?: boolean; projId?: number;
+    };
+    if (!pr || pr.dead || pr.projId === undefined || typeof pr.damage !== 'number') continue;
+    if (pr.x === undefined || pr.w === undefined) continue;
+    if (pr.x >= e.x + e.w || pr.x + pr.w <= e.x || pr.y >= e.y + e.h || pr.y + pr.h <= e.y) continue;
+    tryReflectProjectile(pr as unknown as ReflectableProj, pr.projId, e, game);
+  }
+}
+
 /** 矩形区域含实心——签名 1:1 对齐 C# `Collision.SolidTiles(x0, x1, y0, y1)`
  *  的【区间序】(xMin,xMax,yMin,yMax)。★R23b-L1 修:曾用角点序 (x0,y0,x1,y1),
  *  而 :429-432/:491 按 C# 区间序传参 → 被解释成对角巨域(左侧地牢世界巨域必含
@@ -507,20 +589,38 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
       // CultistRitual.TabletDestroyed()(复活延迟账)——事件延迟系统未引入,略
     }
   }
-  // ---- 仪式倒计时(:38881-38954):300t 满 → 爆散;120t 起每 10t 一枚 526(粒子代) ----
+  // ---- 仪式倒计时(:37209-37249):300t 满 → 爆散;120t 起每 10t 一枚 526 ----
+  // ★台账批：526 从“纯粒子代”升回真弹实体（A 档清偿）——弹本体归巢 AI 在
+  // Projectile.cs:33746-33766，出生参数在 NPC.cs:37217-37248，见 spawnTabletShard。
   if (e.ai0 === -1) {
     e.ai3 += 1;
     if (e.ai3 > 300) {
       e.dead = true;
-      for (let k = 0; k < 6; k++) {                     // :38893-38903 六枚直飞
-        game.spawnParticles(e.cx, e.cy, '#B080FF', 3, 3, { life: 30 });
+      const cultist = enemies(game).find((n) => n.id === Math.floor(e.ai2));
+      const tgtX = cultist ? cultist.cx : e.cx, tgtY = cultist ? cultist.cy : e.cy;
+      for (let k = 0; k < 6; k++) {                     // :37219-37226 六枚直飞
+        const spd = 3 + Math.random() * 6;
+        const ang = Math.PI / 2 * 2 * Math.random();    // UnitY.RotatedByRandom(2π)
+        const dxs = -Math.sin(ang), dys = Math.cos(ang);
+        addShardProj(game, e.cx + dxs * 30, e.cy + dys * 30, dxs * spd, dys * spd, tgtX, tgtY);
       }
-      for (let k = 0; k < 20; k++) {                    // :38905-38919 二十枚上抛(1/2 保留)
-        if (Math.random() < 0.5) continue;
-        game.spawnParticles(e.cx, e.cy, '#B080FF', 3, 3, { life: 30 });
+      for (let k = 0; k < 20; k++) {                    // :37227-37239 二十枚(1/2 保留)
+        if (Math.floor(Math.random() * 2) !== 0) continue;
+        const spd = 3 + Math.random() * 6;
+        const ang = Math.PI / 2 * 2 * Math.random();
+        const dxs = -Math.sin(ang), dys = Math.cos(ang);
+        const off = Math.random() * 45 + 45;
+        addShardProj(game, e.cx + dxs * 30, e.cy + dys * 30, dxs * spd, -20,
+          e.cx + dxs * off, e.cy + dys * off + 20);     // 目标位 += UnitY*20
       }
-    } else if (e.ai3 % 10 === 1 && e.ai3 > 120) {       // :38921-38931
-      game.spawnParticles(e.cx, e.cy, '#B080FF', 2, 2.4, { life: 34 });
+    } else if (e.ai3 % 10 === 1 && e.ai3 > 120) {       // :37241-37248 仪式期间余烬
+      const cultist = enemies(game).find((n) => n.id === Math.floor(e.ai2));
+      if (!cultist || cultist.dead) return;             // 原版 ai[2] 取空会越界——缺省跳过
+      const spd = 3 + Math.random() * 6;
+      const ang = Math.PI / 2 * 2 * Math.random();
+      const dxs = -Math.sin(ang), dys = Math.cos(ang);
+      addShardProj(game, e.cx + dxs * 25, e.cy + dys * 25, dxs * spd, dys * spd,
+        cultist.cx, cultist.cy);
     }
   }
   // 石碑静止(noGravity,noTileCollide;SetDefaults :14115 段)
@@ -664,6 +764,10 @@ export function phantomAI(e: Enemy, game: GameHooks, player: Player | null) {
 // ---------------------------------------------------------------------------
 export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.ai0 < 0 || e.ai0 > 8) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
+  // reflectsProjectiles 每 tick 复位（1458 :37851——aiStyle87 头段恒写 false,
+  // 态3 专家支再置真；旧注"原版闩锁不清=离态后仍置位"系对 1456 行段的误读,
+  // 台账批按 1458 真值改为逐拍复位+全弹扫描,见下方态3 段）
+  e.reflectsProjectiles = false;
   // noGravity 运行时位（:39525 起始 false；4/4.1 俯冲分支/5 空中态置 true——
   // 4.1 仅"未过玩家 Y 且 ai[2]==0 的真俯冲段"(:39724-39730)，过顶回落段 false）。
   // StrikeNPC :82217 受击档（def.flying=false 覆盖不到，2026-08-17 补）
@@ -722,16 +826,24 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
     grounded();
   } else if (e.ai0 === 3) {
-    // ---- 蓄能无敌 180t（1458 :37964-37981）。★R23b-F3 修：态 3 由 roll pick==0
+    // ---- 蓄能无敌 180t（1458 :37966-37982）。★R23b-F3 修：态 3 由 roll pick==0
     //      全难度进入（:37941），「expert 弹反不可达」注释系误读——只有弹反是 expert 门；
     //      且 dontTakeDamage 改真旗标（iframes 近似被 pierce===1 单发弹绕过）。
-    //      反射走本仓 reflectsProjectiles 旗标（Arrow 命中前反射,419 先例;
-    //      ReflectProjectile 反向归属管线未接=登记依赖），原版闩锁不清=离态后仍置位 ----
+    // ★台账批：反射管线两路接全——①每 tick ReflectProjectiles(Hitbox) 全弹扫描
+    //   （:37979 NPC.ReflectProjectiles :67156-67165 → ReflectProjectile :67189-67212
+    //   反向归属：reflected/hostile=true、速度=随机向×原速+朝主×20 归一×原速、
+    //   damage÷2÷2、penetrate=1——projTargets.reflectProjectile 已是同构移植），
+    //   覆盖玩家投射物桶内一切 CanBeReflected 命中盒相交弹（旧实现仅 Arrow 类
+    //   弹幕命中沿触发）；②reflectsProjectiles 置真供 Damage() 管道侧命中即反
+    //   （:12781-12791 flag6 分支），复位见函数头（:37851 逐拍 false，闩锁不清登记作废）----
     e.vx *= 0.85;
     e.dontTakeDamage = true;
     e.ai1 += 1;
     if (e.ai1 >= 180) { e.ai0 = 2; e.ai1 = 0; }
-    if (expertMode(game)) e.reflectsProjectiles = true;   // :37978-37981
+    if (expertMode(game)) {
+      reflectPlayerProjsInHitbox(game, e);                // :37979
+      e.reflectsProjectiles = true;                       // :37980
+    }
     grounded();
   } else if (e.ai0 === 4) {
     // ---- 飞天(:39639-39677):悬玩家上方 350px → ai[2]=1 短瞄 6t → 4.1 俯冲 ----
@@ -880,15 +992,20 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.vy = (e.vy * 29 + (dy / d) * 6) / 30;
     } else if (Math.hypot(e.vx, e.vy) > 2) { e.vx *= 0.95; e.vy *= 0.95; }
     else if (Math.hypot(e.vx, e.vy) < 1) { e.vx *= 1.05; e.vy *= 1.05; }
-    // ---- 180t 轮换(:39962-39992):受击 +10..30;2 需视线,4 需卵量 ----
+    // ---- 180t 轮换(:38328-38348):受击 +10..30;同 tick 重摇选招 ----
+    // ★台账批：原版为 `while (ai[0]==0f)` 重摇循环——掷 0 无视线/掷 2 卵满时不落招,
+    // 同 tick 反复重掷直至得招；曾"单帧一次近似"会把无效轮空成整轮 180t 再选。
     e.ai1 += 1;
     if (e.justHit) e.ai1 += rndRange(10, 30);
     if (e.ai1 < 180) return;
     e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
-    const pick = rnd(3);                                  // 原版 while 重摇,单帧一次近似
-    if (pick === 0 && losClear(game, e.cx, e.cy, p.cx, p.cy)) e.ai0 = 2;
-    else if (pick === 1) e.ai0 = 3;
-    else if (countNpc(game, 478) + countNpc(game, 479) < eggCap) e.ai0 = 4;
+    let guard = 0;
+    while (e.ai0 === 0 && guard++ < 100) {                // :38328（护栏防掷序病态长转）
+      const pick = rnd(3);
+      if (pick === 0 && losClear(game, e.cx, e.cy, p.cx, p.cy)) e.ai0 = 2;
+      else if (pick === 1) e.ai0 = 3;
+      else if (countNpc(game, 478) + countNpc(game, 479) < eggCap) e.ai0 = 4;
+    }
     return;
   }
   if (e.ai0 === 1) {

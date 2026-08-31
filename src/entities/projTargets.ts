@@ -10,6 +10,9 @@ import { projGlobalImmuneWriteTicks, PROJ_IMMUNE_SLOW_MAGIC_TIER } from '../data
 import { projImmuneFaceOf } from '../data/vanillaProjImmuneFaces';
 import { petSlimeHitVoice } from '../data/vanillaNpcAmbience';
 import statusPlayerJson from '../data/vanilla-statusplayer.json';
+import {
+  getGlobalHurtBuckets, ImmunityCooldownID,
+} from '../player/HurtCooldownBuckets';
 
 export interface CritterLike {
   x: number; y: number; w: number; h: number;
@@ -37,6 +40,8 @@ export function hitTownNpcs(
   kbx = 0,
   source: 'playerProj' | 'hostile' = 'playerProj',
   projId = 0,
+  /** 同 hitPlayer 的 Colliding 自定义判定通道（2026-08-31 双件批）——缺省 AABB */
+  collide?: (n: { x: number; y: number; w: number; h: number }) => boolean,
 ): boolean {
   const list = (game as unknown as { npcs?: () => unknown[] }).npcs?.() ?? [];
   // player 可为 null(测试 fakeHooks/导入早期帧)——加空守卫
@@ -51,7 +56,7 @@ export function hitTownNpcs(
     };
     if (n.dead || typeof n.hurt !== 'function') continue;
     if (n.bound) continue; // 被缚待救不可打(近似;原版 bound 型有独立受击语义)
-    if (!projOverlap(self.x, self.y, self.w, self.h, n)) continue;
+    if (!(collide ? collide(n) : projOverlap(self.x, self.y, self.w, self.h, n))) continue;
     if (source === 'playerProj') {
       // 巫毒窄门(:11970-11972):22→killGuide / 54→killClothier,其余 false;
       // ★臭鸡蛋 318 无条件例外（:11971 `flag |= type == 318`——整蛊蛋专属,
@@ -104,6 +109,37 @@ export function resolveProjClass(
   const byId = projClassOfProjId(p.projId);
   if (byId) return byId;
   return p.meleeProj === true ? 'melee' : null;
+}
+
+// ================= ★焰爆石 6178 弹幕侧 kind1 触发门（清零收敛批，2026-08-31） =================
+// 唯一标杆：Projectile.Damage（Terarria1457/Terraria/Projectile.cs:13439-13442）
+//   `((melee || ranged) & ownedBySomeone) && Main.player[owner].accPyroclast
+//    → TryMakingSnappingStoneStrike(GetProjectileSource_FromThis(), this, owner,
+//      targetNPC, ref dmg, 1)`——弹幕命中侧的共用节拍门。三消费位分工：
+//   · kind1 焰爆石 6178 = 本谓词（各玩家弹结算站逐一接入：Arrow.dealContacts/
+//     piranha、WeaponProj.hitEnemies/YoyoShotProj/DaybreakFlare、MagicProj、
+//     MissileProj 三 hitStep、Dart.TrapShot 双环、SparkleGuitarProj.stellarStrike）；
+//   · kind0 拍击石 6167（:13443-45 `(ranged & ownedBySomeone)`）已接 Arrow.dealContacts；
+//   · kind2 毁灭臂镗 6179（:13447-50 tag 面 changes.AddProjectileTagDamage）
+//     已接 WhipTag.resolveWhipTagHit。
+// 门序本仓单源三段：
+//   ①ownedBySomeone ≈ !hostile（hostile 弹 owner≠本地玩家/Damage_PVE 整段拦截 :11902-05）
+//   ②类 ∈ {melee,ranged} —— 走 resolveProjClass 单源（显式 projClass 字段 → 弹 id
+//     SetDefaults 类旗投影 → meleeProj 兜底），禁止散抄 projectileData 表；
+//   ③accPyroclast 在身（equipStats 聚合 Player.ts:1442）。
+// 冷却/去重 = Player.accSnappingStoneCooldown 360t（:14382-83）三 kind 共用、由
+// stats/SnapStrike.trySnapStrike 在扫描前先置——同帧多弹连击被冷却门天然去重，
+// 与原版 Damage() 每次有效命中的节拍一致。
+export function pyroclastProjectileGate(
+  game: GameHooks,
+  proj: { hostile?: boolean; projClass?: ProjClass; projId?: number;
+    meleeProj?: boolean } | null | undefined,
+): boolean {
+  if (!proj || proj.hostile === true) return false;           // ownedBySomeone 档
+  const cls = resolveProjClass(proj);
+  if (cls !== 'melee' && cls !== 'ranged') return false;      // melee|ranged 位门
+  return ((game.player as unknown as { equipStats?: { accPyroclast?: boolean } } | null)
+    ?.equipStats?.accPyroclast) === true;
 }
 
 /** ProjectileID.Sets.IsAWhip（Terarria1457/Terraria.ID/ProjectileID.cs:35 全 18 型，
@@ -323,6 +359,47 @@ export function canBeChasedBy(e: unknown): boolean {
  *  的 FixedSelfDamageForPlayers 定伤链） */
 const SKIP_DAMAGE_EVP = new Set([108, 164, 1002]);
 
+/** ★Boss 面⑥（2026-08-31 台账清偿）Damage_EVP 免工件分槽表——bossAI 双件批。
+ *  原版 Projectile.Damage_EVP（1458 :14847-14858 / 1456 :13704-13720）在命中玩家
+ *  门禁前按弹型选冷却槽：下列弹型走 ImmunityCooldownID.BossNoCheese 独立桶，
+ *  其余走 General（player.immune 位）。月总幻影族（452 幻影之眼 / 454 幻影能量球 /
+ *  455 死亡之光 / 462 幻影矢）+ 灾厄柱族 871-874 / 天界雾 919 / 光束 923-924。
+ *  语义双面（玩家 Player.Hurt :38493 桶门）：
+ *   ①原版 flag = active && !dead && (!immune || num != General) ⇒ BossNoCheese 弹
+ *     【不吃通用无敌帧】——旧档"单桶引擎差异备案"（死光被敌弹无敌窗吸收/反之
+ *     只按通用 iframes 节流）就此闭合；
+ *   ②命中后写独立 hurtCooldowns[id] 槽，num10 常规公式（40/80）=「独立 40t 槽」。 */
+export const DAMAGE_EVP_NO_CHEESE_PROJS: ReadonlySet<number> = new Set([
+  452, 454, 455, 462, 871, 872, 873, 874, 919, 923, 924,
+]);
+
+/** 弹型是否走 BossNoCheese 桶（hitPlayer 门/MoonLord 类直伤共用）。 */
+export const evpNoCheeseSlot = (projId: number | undefined): boolean =>
+  projId !== undefined && DAMAGE_EVP_NO_CHEESE_PROJS.has(projId);
+
+/** ★Boss 面⑥：把一次敌弹伤害经「免疫分桶」瞬态通道送达 Player.damage
+ *  （Player.Hurt(…, cooldownCounter) 的仓内投影）。桶表 = getGlobalHurtBuckets()
+ *  （Game 构造期登记，HurtCooldownBuckets.ts F13）；缺表（纯单元测/极早期）
+ *  回退直连 damagePlayer（= General 旧行为，本函数不引入新失败路径）。
+ *  通道注入后 Player.damage 的门面（:6520-6527 blocksHit 早退）与写面
+ *  （:6619-6626 applyAfterHit num10）自动接管——调用方零重复。 */
+export function damageEvPNoCheese(
+  game: GameHooks, dmg: number, sx: number, sy: number, attacker?: unknown,
+): number {
+  const buckets = getGlobalHurtBuckets();
+  const p = game.player;
+  if (!buckets || !p) return game.damagePlayer(dmg, sx, sy, attacker);
+  const chan = p as unknown as {
+    __swNextHitBucket?: { id: number; table: ReturnType<typeof getGlobalHurtBuckets> } | undefined;
+  };
+  chan.__swNextHitBucket = { id: ImmunityCooldownID.BossNoCheese, table: buckets };
+  try {
+    return game.damagePlayer(dmg, sx, sy, attacker);
+  } finally {
+    chan.__swNextHitBucket = undefined;
+  }
+}
+
 /** NPC.coldDamage 寒冷系敌弹表（Projectile.cs SetDefaults 逐型 coldDamage = true，
  *  1.4.5.6 全 29 型——冰雪族弹幕：冰块 80/敌雪球 109/冰回力镖 113/冰霜弹 118-120/
  *  霜燃箭 172/冰锥 174/霜弹 253/霜光束 257/冰镰 263/北地长矛族 342-344/霜波 348 等）
@@ -361,6 +438,12 @@ export function hitPlayer(
   dmg: number,
   trap = false,
   pvp = false,
+  /** ★2026-08-31 bossAI 双件批（Projectile.Colliding 自定义判定通道）：
+   *  非 AABB 判定盒的弹（919 光枪线段/923 扫束三段锥）传本谓词替代默认
+   *  projOverlap——原版 Damage_EVP 同样以 Colliding(myRect,targetRect) 为受理门
+   *  （Projectile.cs:15421 起），其余管线（immune 门/DamageVar/banner/cold/
+   *  难度乘区）与本函数完全一致。缺省 undefined = 保持旧 AABB 重叠语义 */
+  collide?: (p: { x: number; y: number; w: number; h: number }) => boolean,
 ): boolean {
   if (dmg <= 0) return false;
   // 1457 :14846-14850（1456 :13706-13710 无此门）:SkipDamage_EVP 表早退。
@@ -369,10 +452,16 @@ export function hitPlayer(
   //   noLightningSeed/moreLightningSeed,本仓 SeedFlags 未登记——不实装,随种子批）
   const evpId = (self as { projId?: number }).projId;
   if (evpId !== undefined && SKIP_DAMAGE_EVP.has(evpId)) return false;
+  const noCheese = evpNoCheeseSlot(evpId);
   const p = game.player;
   if (p.dead) return false;
-  if (p.iframes > 0) return false; // 原版 :13732 player.immune 门禁（General 槽）
-  if (!projOverlap(self.x, self.y, self.w, self.h, p)) return false;
+  // 原版门禁（Damage_EVP 段）：`flag = active && !dead && (!player.immune || num != General)`
+  // （1458 P.cs:14965-14967）——General 弹查 player.immune 位；BossNoCheese 弹不吃通用
+  // 无敌帧、改由独立桶计时拦（桶写面在 Player.damage 内经 __swNextHitBucket 通道完成，
+  // 见下方 game.damagePlayer 调用的 noCheese 分支）。★Boss 面⑥分槽接线。
+  if (!noCheese && p.iframes > 0) return false;
+  else if (noCheese && getGlobalHurtBuckets()?.blocksHit(ImmunityCooldownID.BossNoCheese)) return false;
+  if (!(collide ? collide(p) : projOverlap(self.x, self.y, self.w, self.h, p))) return false;
   // R5-F21：DamageVar ±15% 掷骰（Projectile.cs:13762 `num3 = Main.DamageVar(damage,
   // -Main.player[owner].luck)`——Damage_EVP 首段,先掷后吃 banner/resistCold/缩放）。
   // ★附带⑤（2026-08-31 二轮蓝队）：PvP 弹【不在此再掷】——Damage_PVP 族在弹被击端
@@ -408,19 +497,29 @@ export function hitPlayer(
   //   但接触伤害同样吃这 ×2？否——×2 只在 Projectile.Damage_EVP（弹幕侧），
   //   接触侧是 Player.Hurt 直入（Enemy.def.damage 已是 ScaleStats 终值）。
   //   （本函数调用方均为 hostile 弹幕，无 reflected 路径——反射弹转 friendly 打怪）
-  game.damagePlayer(
+  const evpDmg = pvp
+    ? dmg
+    : hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2;
+  let dealt = 0;
+  if (noCheese) {
+    // ★Boss 面⑥：452/454/455/462 等走独立 BossNoCheese 槽（damageEvPNoCheese 内部
+    // 经 __swNextHitBucket 注入——门/写两面都在 Player.damage 原位发生）。该路径下
+    // iframes 不动，落地判定改读实扣值（= 原版 Hurt 返回 num>0 语义）。
+    dealt = damageEvPNoCheese(game, evpDmg, self.x + self.w / 2, self.y + self.h / 2);
+  } else {
     // pvp=true 不乘敌弹难度缩放与 ×2——那是 Damage_EVP（NPC 敌弹）专属（:14912-14917）；
     // 玩家 PvP 弹走 Damage_PVP 的 Main.DamageVar 直传
-    pvp ? dmg : hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2,
-    self.x + self.w / 2, self.y + self.h / 2,
-    undefined, false, pvp);
+    game.damagePlayer(evpDmg, self.x + self.w / 2, self.y + self.h / 2, undefined, false, pvp);
+  }
   // 成就：陷阱弹致死（Projectile.cs:13804-13808 trap→trapDebuffSource，死则
   // HandleSpecialEvent(4) WATCH_YOUR_STEP；仅 trap 类、非反射弹）
   if (trap && (p.dead || p.hp <= 0)) {
     game.achievements?.handleSpecialEvent(4,
       { statLifeMax: p.maxHp, statManaMax: p.maxMana });
   }
-  return p.iframes > ifr; // damage 落地才置无敌帧（闪避不置，对应 Hurt 返回 0）
+  // damage 落地才置无敌帧（闪避不置，对应 Hurt 返回 0）；BossNoCheese 弹不吃
+  // iframes 位（无 "ifr>0 早退"），落地判定 = 实扣值 dealt>0
+  return noCheese ? dealt > 0 : p.iframes > ifr;
 }
 
 // ================= 弹幕反射管线（原版 Projectile.cs:12050-12060 + NPC.cs:67003-67059） =================

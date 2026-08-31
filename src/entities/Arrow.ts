@@ -7,7 +7,7 @@ import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
-import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile , applyBannerDamageDealt } from './projTargets';
+import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile , applyBannerDamageDealt, pyroclastProjectileGate } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { trySnapStrike } from '../stats/SnapStrike';
@@ -542,7 +542,34 @@ const PROJ_ALPHA0: Record<number, number> = {
   616: 255,                                                          // 星旋涡旋弹（−25/t 渐显 :58378-58384）
   297: 255,                                                          // 幽灵法杖弹（SetDefaults :5685-5695 alpha=255，AI 不消费恒全显）
   659: 255,                                                          // 灵魂之焰（SetDefaults :8571-8580 alpha=255，−12/t 渐显 :36901-36903）
+  467: 255,                                                          // 教徒火球制导支（AI 支 α−40/update 渐显 :55194-55200）
 };
+
+/** MathHelper.WrapAngle(XNA)：IEEE remainder 2π 后钳回 (−π,π]。AngleLerp 消费 */
+function wrapAngle(angle: number): number {
+  const twoPi = Math.PI * 2;
+  let a = angle - twoPi * Math.round(angle / twoPi);   // IEEEERemainder(fmod 取最近整周)
+  if (a <= -Math.PI) a += twoPi;
+  else if (a > Math.PI) a -= twoPi;
+  return a;
+}
+
+/** Utils.AngleLerp(cur,target,amount)（Utils.cs 两版本同段 :2154-2172）——最短弧
+ *  插值：目标差 <π 走直插、>π 经 ±2π 绕行；结果 WrapAngle。467 保速转向消费 */
+function angleLerp(cur: number, target: number, amount: number): number {
+  let angle: number;
+  const lerp = (a: number, b: number): number => a + (b - a) * amount;
+  if (target < cur) {
+    const num = target + Math.PI * 2;
+    angle = (num - cur > cur - target) ? lerp(cur, target) : lerp(cur, num);
+  } else if (!(target > cur)) {
+    return cur;
+  } else {
+    const num = target - Math.PI * 2;
+    angle = (target - cur > cur - num) ? lerp(cur, target) : lerp(cur, num);
+  }
+  return wrapAngle(angle);
+}
 
 /** usesIDStaticNPCImmunity 共享免疫表（全场同型一张表,非每弹一张）：
  *  376 小鬼火球 cooldown 6t（SetDefaults :4612-4615）/ 604 孢子云 cooldown 10t
@@ -1137,6 +1164,17 @@ export class Arrow extends Entity {
   private sf659DirY = -1;
   /** 659 三臂旋尘相位 ai[1]（每 update 自增 :36916） */
   private sf659Phase = 0;
+  // ---- 教徒火球 467 真制导（AI_001 type==467 支,1458 P.cs:55133-55253 /
+  //      1457 :55132-55252 两版本同段;2026-08-31 台账批实体化支）----
+  /** ai[1] 态机：0 首拍 →1 扫描窗 →21..199 锁定转向（≥200 停止=直飞到寿终/撞块） */
+  private f467Ai1 = 0;
+  /** 锁定玩家引用（ai[0]=whoAmI 的对象化；null=未锁） */
+  private f467Target: { cx: number; cy: number; dead: boolean } | null = null;
+  /** localAI[0]：尾尘环节拍（==12 重置并撒 12 粒,:55204-55230） */
+  private f467Local = 0;
+  /** 帧：frameCounter≥3 推帧 4 帧循环（:55208-55218；draw fIdx 选择器消费） */
+  f467Frame = 0;
+  private f467FrameT = 0;
   /** 522 子蛇 ai[1] 计数（>40 Kill + 尘 scale 衰减 num7=(60−ai1)/60 :38428-38433） */
   private sn522Ai1 = 0;
   /** 316 蝙蝠杖出生基准速（ctor 快照——兄弟弹散布叠加基准,原版 num4/num5） */
@@ -1640,6 +1678,7 @@ export class Arrow extends Entity {
       // 728 超级星（AI_151 −10/t 钳 100 :22340-22343）
       case 630: return 0;
       case 410: return (255 - this.alpha) / 255;   // 泡泡枪泡体（ai72 alpha 255→50,缺省 GetAlpha 路径同式）
+      case 467: return (255 - this.alpha) / 255;   // 教徒火球（AI_001 467 支 α−40/update 渐显 :55194-55200,同式）
       case 631: case 661: case 819: case 955: case 728: return (255 - this.alpha) / 255;
       // 337 暴雪法杖雪片（GetAlpha :81157 = (250,250,250,150) 半透白——恒定档,
       // 不随 alpha 字段变化）
@@ -2078,7 +2117,8 @@ export class Arrow extends Entity {
             : this.projId === 485 ? this.hwFrame   // 485 狱翼扇翅帧：2 拍/帧 5 帧循环（:54834-54843）
               : this.bee36Tilt !== null ? this.bee36Frame   // aiStyle 36 蜂族：3/6 拍/帧（:27699/:27720）
                 : this.pinFrame !== null ? this.pinFrame    // ★R28 337 帧恒 ai[1]（发射掷,AI 不推进 :57927）
-                  : Math.floor(this.age / 5) % frames;
+                  : this.projId === 467 ? this.f467Frame    // 教徒火球：3 拍/帧 4 帧循环（:55208-55218）
+                    : Math.floor(this.age / 5) % frames;
     const frameImg = frames > 1 ? projFrameImg(this.projId, fIdx) : null;
     let drawImg: CanvasImageSource | null = frameImg ?? img;
     // R4-32（GetAlpha,Projectile.cs:80604-80613）：aiStyle1 且 PhoenixQuivered||
@@ -2957,6 +2997,97 @@ export class Arrow extends Entity {
       if (st469.inBounds(wx, wy) && st469.liquid[st469.idx(wx, wy)] > 0) {
         const lt = st469.liquidType[st469.idx(wx, wy)];
         if (lt === LIQUID_TYPE.WATER || lt === LIQUID_TYPE.LAVA) { this.killNow(game); return; }
+      }
+    }
+    // ---- 教徒火球 467 真制导（AI_001 type==467 支；1458 P.cs:55133-55253 /
+    //      1457 :55132-55252 两版本逐字同段。2026-08-31 台账批——此前 Arrow 直飞桶
+    //      未建模制导，直线弹道系登记近似）。ai[1] 态机逐 update：
+    //      ==0 首拍置 1（出膛音 Item34 由 bossAI_lategame 发射点代播）;==1 扫描锁定
+    //      ——CanHit(1×1 点对) 玩家里取最近（上限 2000px;次序同原文:先距门后 or
+    //      num2==-1 兜底首收),<20px 即 Kill 自爆;紧随其后的 [1,20) 计数器令扫描节拍
+    //      化为【每 19 个 AI 更新一回】(extraUpdates=1 → ≈10 tick 一查)——
+    //      ★旧注"每 tick 重试锁定"系转述失真,原文循环即此节奏。
+    //      锁定态 ai[1]∈(20,200)：保速转向 AngleLerp(targetAngle,0.008)/update
+    //      (Utils.cs :2154;speed=|velocity| 恒定),目标失效回扫描态,<20px 自爆;
+    //      ≥200 停止转向 = 直飞至撞块/寿终。alpha −40/update 渐显、AddLight(1.1,.9,.4)、
+    //      localAI[0]==12 尾尘环 ×12 + 随机尾尘三式、帧 3 拍推进(:55201-55330)。 ----
+    if (this.projId === 467) {
+      this.f467Local++;
+      if (this.f467Ai1 === 0) {
+        this.f467Ai1 = 1;
+      } else if (this.f467Ai1 === 1) {
+        let bestP: { cx: number; cy: number } | null = null;
+        let num3 = 2000;
+        for (const cand of (game.candidatePlayers?.() ?? [game.player])) {
+          if (!cand || cand.dead) continue;
+          const dist = Math.hypot(cand.cx - this.cx, cand.cy - this.cy);
+          const los = canHit(world.store, this.cx, this.cy, 1, 1, cand.cx, cand.cy, 1, 1);
+          if ((dist < num3 || !bestP) && los) { num3 = dist; bestP = cand; }
+        }
+        if (num3 < 20) { this.killNow(game); return; }          // :55158-55160 最近可锁定者贴脸自爆
+        if (bestP) { this.f467Ai1 = 21; this.f467Target = bestP; }   // :55165-55168 锁定
+      } else if (this.f467Ai1 > 20 && this.f467Ai1 < 200) {
+        this.f467Ai1++;
+        const t = this.f467Target;
+        if (!t || t.dead) {                                       // :55176-55180 失效重扫
+          this.f467Ai1 = 1; this.f467Target = null;
+        } else {
+          const dx = t.cx - this.cx, dy = t.cy - this.cy;
+          const dl = Math.hypot(dx, dy);
+          if (dl < 20) { this.killNow(game); return; }            // :55185-55187 贴脸自爆
+          const cur = Math.atan2(this.vy, this.vx);
+          const tgtA = Math.atan2(dy, dx);
+          const ang = angleLerp(cur, tgtA, 0.008);                // :55192-55194
+          const spd = Math.hypot(this.vx, this.vy);               // :55195 保速
+          this.vx = Math.cos(ang) * spd;
+          this.vy = Math.sin(ang) * spd;
+        }
+      }
+      if (this.f467Ai1 >= 1 && this.f467Ai1 < 20) {               // :55199-55205 扫描节拍环
+        this.f467Ai1++;
+        if (this.f467Ai1 === 20) this.f467Ai1 = 1;
+      }
+      this.alpha = Math.max(0, this.alpha - 40);                  // :55194-55200(SetDefaults α=255)
+      game.addLightAt?.(this.cx, this.cy, 1.1, 0.9, 0.4);         // :55201 AddLight
+      // 帧推进(:55208-55218 frameCounter≥3 → 4 帧循环)
+      if (++this.f467FrameT >= 3) {
+        this.f467FrameT = 0;
+        this.f467Frame = (this.f467Frame + 1) % 4;
+      }
+      // 尾尘环节拍(localAI[0]==12 → 重置+12 粒 d6 环,:55204-55230)
+      if (this.f467Local >= 12) {
+        this.f467Local = 0;
+        const rotA = Math.atan2(this.vy, this.vx) + Math.PI / 2;   // AI_001 缺省姿态角
+        for (let l = 0; l < 12; l++) {
+          const th = -(l * Math.PI) / 6;                            // −UnitY.RotatedBy(lπ/6)
+          // spinningpoint=(−w/2+8·sinθ,−16·cosθ) 再 RotatedBy(rotation−π/2)(:55209-55217)
+          const px = -this.w / 2 + 8 * Math.sin(th);
+          const py = -16 * Math.cos(th);
+          const ca = Math.cos(rotA - Math.PI / 2), sa = Math.sin(rotA - Math.PI / 2);
+          const ox = px * ca - py * sa, oy = px * sa + py * ca;
+          const d = game.spawnDust?.(this.cx + ox, this.cy + oy, 0, 0, 6, 0, 0, 160, null, 1.1, true);
+          if (d) {
+            const nvx = this.cx - this.vx * 3 - d.x, nvy = this.cy - this.vy * 3 - d.y;
+            const nl = Math.hypot(nvx, nvy) || 1;
+            d.vx = (nvx / nl) * 1.25; d.vy = (nvy / nl) * 1.25;     // :55221-55222
+          }
+        }
+      }
+      // 随机尾尘三式(:55235-55325 简并移植):d31×1/4(fadeIn .9)/d31×1/32(scale .8,
+      // 1/2 带 fadeIn1.4)/d6×1/2 双粒(noGravity)
+      if (Math.random() * 4 < 1) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100);
+        if (d) { d.vx *= 0.1; d.fadeIn = 0.9; }
+      }
+      if (Math.random() * 32 < 1) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 155, null, 0.8);
+        if (d) { d.vx *= 0.3; if (Math.random() < 0.5) d.fadeIn = 1.4; }
+      }
+      if (Math.random() * 2 < 1) {
+        for (let m = 0; m < 2; m++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 0, null, 1.2, true);
+          if (d) { d.vx *= 0.3; if (Math.random() < 0.5) d.fadeIn = 1.4; }
+        }
       }
     }
     // 入水块（AI_001 共享 wet 段 Projectile.cs:16921-16931）：wet && !lavaWet →
@@ -5401,6 +5532,16 @@ export class Arrow extends Entity {
             e as unknown as Record<string, number>);
         }
         if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
+        // ★焰爆石 6178 kind1 弹幕侧（Damage_PVE_Inner :13439-13442
+        //  `((melee||ranged) & ownedBySomeone) && accPyroclast → TryMakingSnappingStoneStrike(…,1)`）：
+        // 位次在拍击石 kind0(:13443-46)【之前】，两 kind 共用 360t 冷却先到先得；
+        // 类门 pyroclastProjectileGate 单源（resolveProjClass——显式 projClass 字段→
+        // 数据面类旗），随从/哨兵/魔法弹自然排除。45×meleeDamage/300px/2 目标弹
+        // 1131 + 目标 Hellfire(323) 3s，脉冲本体见 stats/SnapStrike.trySnapStrike。
+        if (pyroclastProjectileGate(game, this)) {
+          trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2, e.id,
+            { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });   // R4-33 victim 自脉冲
+        }
         // 拍击石 6167 kind0 远程脉冲（Damage_PVE_Inner :13443-13446 `(ranged &
         // ownedBySomeone) && accSnappingStone → TryMakingSnappingStoneStrike(…,0)`）：
         // 门 = 玩家弹（!hostile ≈ ownedBySomeone,本仓同 :1019 owner==myPlayer 近似）
@@ -5919,6 +6060,12 @@ export class Arrow extends Entity {
       if (this.frostEligible) {
         applyFrostBurn((game.player as unknown as { equipStats?: { frostBurn?: boolean } })
           .equipStats?.frostBurn ?? false, e as unknown as Record<string, number>);
+      }
+      // ★焰爆石 6178 kind1 弹幕侧（:13439-42）——食人鱼弹 190 数据面 ranged，
+      // 过 pyroclastProjectileGate 类门即脉冲（共用 360t 冷却）
+      if (pyroclastProjectileGate(game, this)) {
+        trySnapStrike(game, game.player, 1, e.cx ?? e.x + e.w / 2, e.cy ?? e.y + e.h / 2,
+          e.id, { w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2, cy: e.cy ?? e.y + e.h / 2 });
       }
       // pierce=1 档：命中不设敌方免疫帧（:13154-13158 immune[owner]=0 语义），
       // fromPlayer=true 走 DPS/掉落门链；音/飘值=StrikeNPC 单点

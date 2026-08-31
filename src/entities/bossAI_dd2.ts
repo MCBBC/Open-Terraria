@@ -158,6 +158,53 @@ function portalLoopManage(e: Enemy, game: GameHooks, vol: number): void {
   if (vol <= 0) { h.stop(); portalLoops.delete(e); return; }
   h.setVolume(Math.min(1, vol));
 }
+
+// ---------------------------------------------------------------------------
+// ★台账⑩（2026-08-31）：小妖精族引信/冲锋跟踪循环轨
+// 原版语义 = GetActiveSound(SlotId)==null → PlayTrackedSound + 每 tick
+// activeSound.Position = Center 跟随：
+//   · AI_107 地面小妖精（1458 NPC.cs:63957-64005）：点火窗（ai[0]>0 && ai[1]==0，
+//     localAI[2]==30 拍）起 KoboldIgniteLoop + KoboldScreamChargeLoop 双轨；
+//     冲锋窗（ai[0]==0 && ai[1]==1）两轨持续跟随重建。
+//   · AI_108 俯冲小妖精滑翔怪（:66388-66406）：俯冲态 ai[1]>=20 起
+//     KoboldIgniteLoop 单轨。
+// 句柄 = GameHooks.startTrackedLoop（Sfx.startTrackedLoop：loop=true、atten/pan 随
+// setPos 逐帧刷新）。停轨 = 状态退出/自爆/消亡——原版靠 PlayTrackedSound 的实体
+// 追踪绑定在 NPC 失效后自然熄灭，本仓显式 stop 对齐听感。曾以"60t 一拍补播"
+// 近似（档内注释备案）退役；俯冲滑翔怪的引信环此前整段缺失。
+// ---------------------------------------------------------------------------
+interface TrackedLoopHandle { stop(): void; setPos(px: number, py: number): void }
+const fuseLoops = new Map<Enemy, Map<string, TrackedLoopHandle>>();
+
+/** 引信跟踪轨 manage：active=false 即全拆；缺基建（纯单测 mock）静默跳过。 */
+function fuseLoopManage(
+  e: Enemy, game: GameHooks,
+  tracks: ReadonlyArray<readonly [string, string]>,    // [槽键, wav 名]
+  active: boolean, x: number, y: number,
+): void {
+  if (!active) { fuseLoopStop(e); return; }
+  if (!game.startTrackedLoop) return;
+  let m = fuseLoops.get(e);
+  if (!m) { m = new Map(); fuseLoops.set(e, m); }
+  for (const [key, file] of tracks) {
+    const h = m.get(key);
+    if (!h) {
+      const nh = game.startTrackedLoop(file, 1, x, y);
+      if (nh) m.set(key, nh);
+      continue;                                        // 建轨失败下拍重试（GetActiveSound null 同语义）
+    }
+    h.setPos(x, y);
+  }
+}
+
+/** 全拆（状态退出/死亡兜底 destroy 注入共用）。 */
+function fuseLoopStop(e: Enemy): void {
+  const m = fuseLoops.get(e);
+  if (!m) return;
+  for (const h of m.values()) h.stop();
+  fuseLoops.delete(e);
+}
+
 /** 原版 oldVelocity（碰撞前一帧速度,cs:93795 collideX/collideY 判定源）→ WeakMap */
 const oldVel = new WeakMap<Enemy, { x: number; y: number }>();
 /** 黑魔法师施法期瞄准快照（AI_109 头部 GetTargetData 一次取值,施法全程不重定向） */
@@ -1228,7 +1275,11 @@ function flyerParams(id: number): FlyerP {
 }
 
 export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) {
-  if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
+  if (!e.bInit) {
+    e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
+    // ★台账⑩：循环轨随实体剔除拆轨（Entity.compact 对 dead 实体回调）
+    (e as { destroy?: () => void }).destroy = () => fuseLoopStop(e);
+  }
   const x = dd2LocalAI(e);
   const p = flyerParams(e.vanillaId ?? 0);
   const LOS_GRACE = 120;   // num14（:66003）
@@ -1355,7 +1406,13 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
   if (p.explode && e.ai0 !== 3 && Math.hypot(txc - e.cx, tyc - e.cy) < 64) {
     e.ai0 = 3; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
   }
+  // ★台账⑩：俯冲小妖精滑翔怪引信循环音（AI_108,1458 NPC.cs:66388-66406）——
+  // 俯冲态 ai[1]>=20 起 KoboldIgniteLoop 单轨跟随重建;曾整段缺失
+  if (p.explode && e.ai0 === 2 && e.ai1 >= 20) {
+    fuseLoopManage(e, game, [['ignite', 'dd2_kobold_ignite_loop']], true, e.cx, e.cy);
+  }
   if (e.ai0 === 3) {
+    fuseLoopStop(e);                    // 自爆即拆轨（原版实体失效连带熄灭）
     // ---- 自爆（:66326-66380）：扩盒 192²、伤 80、3t 后消散 ----
     e.x = e.cx; e.y = e.cy;
     e.w = 192; e.h = 192;
@@ -1378,14 +1435,20 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
   fly(e);
 }
 
-/** 身体任意角/中心埋实心块（Collision.SolidCollision 近似） */
+/** 身体埋实心块判定（原版 Collision.SolidCollision(position,width,height) 全盒 any 等价件
+ *  ★台账⑨(2026-08-31)：曾按五点采样（四角+中心）近似——半砖骑线/边缘外扩一格的
+ *  小妖魔贴墙角落在采样点间穿透,自爆门漏爆。现按盒覆盖的全部 tile 列行扫描,
+ *  任一实心即真（与 bossAI_duke_moonlord.inSolid 同款修法）。 */
 function solidBody(game: GameHooks, e: Enemy): boolean {
-  const pts = [
-    [e.x + 2, e.y + 2], [e.x + e.w - 2, e.y + 2],
-    [e.x + 2, e.y + e.h - 2], [e.x + e.w - 2, e.y + e.h - 2],
-    [e.cx, e.cy],
-  ];
-  return pts.some(([px, py]) => solidAt(game, Math.floor(px / TILE), Math.floor(py / TILE)));
+  const st = game.world.store;
+  const x0 = Math.floor(e.x / TILE), x1 = Math.floor((e.x + e.w - 0.001) / TILE);
+  const y0 = Math.floor(e.y / TILE), y1 = Math.floor((e.y + e.h - 0.001) / TILE);
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) return true;
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -1507,6 +1570,132 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   }
   walkerKernel(e, game, tgt ? { cx: txc, cy: tyc, dead: false } as unknown as Player : null, x, p, castDamp);
+}
+
+// ---------------------------------------------------------------------------
+// 686 双足翼龙空袭火球（ProjectileID.cs:1724；SetDefaults :7307-7315：30×30
+// aiStyle1/hostile/penetrate -1/alpha255）——★台账⑧(2026-08-31)回归,曾走 Arrow
+// 单盒单测命中：
+// · 运动 = AI_001 两段式（1458 P.cs:58513-58529 / 1456 :54640-54659）：vx*=0.99 每
+//   update 恒定；ai[0]>=10 起 vy+=0.1、>=20 再 +0.1（合计 0.2/t），计数钳 20、vy 上限 32。
+// · 命中 = Colliding oldPos 全轨迹扫掠（:16156-16172；TrailCacheLength[686]=20,
+//   ProjectileID.cs:387）——当前盒 + 移动前逐 tick 尾迹盒任一相交皆可伤，高速掠射
+//   不再漏检身后走廊（原版玩家体感"Betsy 火球判定极肥"即此尾迹面）。
+// · 伤害走 Damage_EVP（General 槽——686 不在 BossNoCheese 分槽表）难度乘区×2；
+//   实扣>0 才授 StatusPlayer debuff 链。
+// · Kill 视觉(:74101-74126 oldPos 环 d6/55/158)与飞行尘(:57485-57512)粒子近似承担。
+// 联机：不带 netProjMeta——快照链按 projId 桶落 kind1(tag='686')傀儡重建为 Arrow
+// 直飞档（两段重力经 projGravSpec 保持；oldPos 扫掠仅在权威端实装，登记）。
+export class DD2BetsyFireball extends Entity {
+  readonly projId = 686;
+  w = 30;
+  h = 30;
+  dead = false;
+  dmg: number;
+  /** timeLeft 默认 3600（SetDefaults 未覆写；实际由撞块终结） */
+  private life = 3600;
+  private t = 0;                                    // ai[0]（flag3 表：686 每拍自增）
+  /** 移动前位置尾迹盒（unshift 头插,length 钳 20=TrailCacheLength[686]） */
+  private trail: Array<{ x: number; y: number }> = [];
+
+  constructor(x: number, y: number, vx: number, vy: number, dmg: number) {
+    super();
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
+    this.vx = vx;
+    this.vy = vy;
+    this.dmg = dmg;
+    // 出膛音（AI_001 type686 支 localAI[0]==0 首帧 PlayTrackedSound,Projectile.cs
+    // :57487-57490;shootD 时代同源承接）
+    const shot = PROJ_SHOT_SFX[686];
+    if (shot) game.playSfxFiles(soundTrackFiles(shot), 0.8, this.cx, this.cy);
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (--this.life <= 0) { this.dead = true; return; }
+    // 尾迹记录先于运动（原版 oldPos 存【移动前】快照,Colliding 全数组回看）
+    this.trail.unshift({ x: this.x, y: this.y });
+    if (this.trail.length > 20) this.trail.length = 20;
+    // ---- AI_001 两段式重力 + 恒定 X 衰减 + vy 上限 32 ----
+    this.t++;
+    const tA = Math.min(this.t, 20);               // ai[0]>20 → 钳 20(:58521-58523)
+    if (tA >= 10) this.vy += 0.1;                  // :58514-58516
+    if (tA >= 20) this.vy += 0.1;                  // :58517-58519（两段并存=0.2/t）
+    this.vx *= 0.99;                               // :58524
+    if (this.vy > 32) this.vy = 32;                // :58525-58527
+    // 飞行尘近似（:57495-58497 新尘 d55 ×1/4 + trail 旧位 ×1/3 择一采样降频）
+    if (Math.random() < 0.25) game.spawnParticles?.(this.cx, this.cy, '#D08840', 1, 1.2, { life: 22 });
+    // ---- 位移 + tileCollide 撞块即亡（aiStyle1 缺省档,方形直检同 Arrow 精神）----
+    const nx = this.x + this.vx, ny = this.y + this.vy;
+    if (this.hitsSolid(game, nx, ny)) { this.killNow(game); return; }
+    this.x = nx;
+    this.y = ny;
+    const stx = Math.floor(this.cx / TILE), sty = Math.floor(this.cy / TILE);
+    if (!game.world.store.inBounds(stx, sty)) { this.dead = true; return; }
+    // ---- Damage_EVP 命中面（player 盒 vs 当前盒∪尾迹盒;General 免疫帧内部去重）----
+    // ★victim-settles：恒本地玩家（damagePlayer 只结算本地血）
+    const p = game.player as { x: number; y: number; w: number; h: number; dead?: boolean } | null;
+    if (!p || p.dead) return;
+    let hit = projTargetsOverlap(this.x, this.y, this.w, this.h, p);
+    for (const tr of this.trail) {
+      if ((tr.x !== 0 || tr.y !== 0) && projTargetsOverlap(tr.x, tr.y, this.w, this.h, p)) { hit = true; break; }
+    }
+    if (hit) {
+      // 弹幕命中：attacker 缺省仅做死亡归因（contactOnly=false 不触发荆棘反伤）
+      const dealt = game.damagePlayer(
+        hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2,   // :14912-14917
+        this.cx, this.cy);
+      if (dealt > 0) statusPlayer(game, 686);        // 实扣落地才走 statusPlayer 链
+    }
+  }
+
+  /** tileCollide 探测：目标位弹盒覆盖格任一实心即真 */
+  private hitsSolid(game: GameHooks, nx: number, ny: number): boolean {
+    const st = game.world.store;
+    const x0 = Math.floor(nx / TILE), x1 = Math.floor((nx + this.w - 0.001) / TILE);
+    const y0 = Math.floor(ny / TILE), y1 = Math.floor((ny + this.h - 0.001) / TILE);
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** 撞块消亡（tileCollide kill）——烟尘 + 音效缺失面登记为 C 近似 */
+  private killNow(game: GameHooks): void {
+    this.dead = true;
+    game.onProjectileDeath?.(686, this.x, this.y, this.w, this.h);
+    game.spawnParticles?.(this.cx, this.cy, '#806040', 6, 2.2, { life: 26 });
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projSprite(686);
+    ctx.save();
+    if (img && img.width > 0) {
+      // 贴图朝上、旋转 = velocity.ToRotation() + π/2（AI_001 rotation 链 :58641-58644）
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(Math.atan2(this.vy, this.vx) + Math.PI / 2);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    } else {
+      ctx.fillStyle = '#FF9A3C';
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, this.w / 2, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+/** AABB 相交（projTargets.projOverlap 同式的本地投影,避免导出面依赖反转） */
+function projTargetsOverlap(
+  ax: number, ay: number, aw: number, ah: number,
+  b: { x: number; y: number; w: number; h: number },
+): boolean {
+  return ax < b.x + b.w && ax + aw > b.x && ay < b.y + b.h && ay + ah > b.y;
 }
 
 // ---------------------------------------------------------------------------
@@ -1804,10 +1993,12 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
       const ry = e.cy + ox * Math.sin(e.visAngle) + oy * Math.cos(e.visAngle);
       const n = Math.floor(e.ai1 - BOMB_APR_T + 1);
       if (n <= FIREBALL_N && n % FIREBALL_EVERY === 0) {
-        // 686 重力=两段式(:54640-54659)——Arrow 单 grav2 档近似(第三段 @20 登记);
-        // life 3600/穿透族原版 -1(仓内 pierce 口径 1,登记)
-        shootD2(game, rx, ry, e.vx, e.vy, DMG_FIREBALL, 686, 3600,
-          { grav: 0.1, grav2: 0.1, grav2At: 10, dragAlways: 0.99, pierce: 3 });
+        // ★台账⑧(2026-08-31)：686 空袭火球改专用实体——NewProjectile 继承机速
+        // （base.velocity 同源 :62551-62554）+ AI_001 两段式运动 + Colliding
+        // oldPos 全轨迹扫掠命中（见 DD2BetsyFireball 头注）；曾走 Arrow 单盒
+        // 单测命中=高速掠射漏检尾迹走廊
+        (game as unknown as { entities: { add: (en: unknown, b: string) => void } })
+          .entities.add(new DD2BetsyFireball(rx, ry, e.vx, e.vy, DMG_FIREBALL), 'projectiles');
       }
     }
     if (e.ai1 > BOMB_TOTAL - TAIL_T) e.vy -= 0.1;   // 尾段拉起（:62545-62547）
@@ -1982,7 +2173,10 @@ export function dd2LightningBugAI(e: Enemy, game: GameHooks, player: Player | nu
         sy = (sy / sl) * ZAP_SPD;
         sx *= 1 + rndRange(-20, 21) * (1 / 160);
         sy *= 1 + rndRange(-20, 21) * (1 / 160);
-        shootD(game, muzzleX, muzzleY, sx, sy, ZAP_DMG, ZAP_PROJ, 300, 0, 3);
+        // 682 电弧：timeLeft=30 / 无重力（SetDefaults :7281-7285 timeLeft=30+aiStyle1
+        // 但 flag3 表豁免 ai[0] 自增=无重力支；数据列 tl:30）——旧 life300/pierce3
+        // 近似退役（台账⑦同批）；scale 1.2 视觉档未接（C 面，登记）
+        shootD2(game, muzzleX, muzzleY, sx, sy, ZAP_DMG, ZAP_PROJ, 3600, {});
       }
     }
   }
@@ -2214,9 +2408,19 @@ function fireWalkerProj(
       (game as unknown as { entities: { add: (en: unknown, b: string) => void } })
         .entities.add(new DD2OgreSmash(sx, sy, p.projDmg), 'projectiles');
     } else {
-      // 662/685 标枪、671 德拉肯弹、676 食人魔涎（均 aiStyle 1,:6843/:6907/:6952）
-      // ——grav 0.3 抛物线,penetrate -1（Arrow 以大值近似无限穿透）
-      shootD(game, sx, sy, jx, jy, p.projDmg, p.proj, 180, 0.3, 999);
+      // 662/685 标枪、671 德拉肯弹、676 食人魔涎（均 aiStyle 1）——★台账⑦(2026-08-31)
+      // 重力日程逐型回归：显式 grav/life/pierce 覆盖全部退役，改由 projGravSpec +
+      // vanilla-projectiles.json 列驱动（Arrow ctor :1397-1406 缺省回退路径）：
+      // · 662/685（1458 P.cs:58454-58460 / 1456 :54589-54594）：ai[0]>60 才弧化——
+      //   此后 vy+=0.3/t 且 vx*=0.98/t 同拍组合（Arrow 的 drag 恒在重力门内生效）；
+      //   曾显式 grav .3 覆盖 spec = 标枪前 60t 直飞相缺失 + 全程重弧化。
+      // · 671/676（1458 P.cs:58653-58666 / 1456 :54686-54699 AI_001 兜底支）：
+      //   ai[0]>=15 才 +0.1/t（计数钳 15）——"德拉肯两式"斜率即此。
+      // · timeLeft=3600 / penetrate=-1 均取数据列（SetDefaults :7124-7132/:7188-7201/
+      //   :7233-7244 未覆写；-1=无限穿透按通用 immune 冷却再命中，旧 pierce 999 近似退役）
+      const javelin = p.proj === 662 || p.proj === 685;
+      shootD2(game, sx, sy, jx, jy, p.projDmg, p.proj, 3600,
+        javelin ? { drag: 0.98 } : {});
     }
   }
 }
@@ -2373,29 +2577,22 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
       return;
     }
     if (e.ai0 > 0 && e.ai1 === 0) {
-      // 点火（:63751-63770）：DD2_KoboldIgnite + 30t 后引信/冲锋循环音
+      // 点火（1458 :63957-63969）：one-shot DD2_KoboldIgnite（localAI[0] 槽空才播,
+      // 以 x[2]==0 门近似）+ localAI[2]==30 拍起 引信/冲锋双循环轨——★台账⑩:
+      // 60t 补播近似退役,改 startTrackedLoop 跟踪轨（manage 在下方统一驱动,
+      // active 面 = 本窗 x[2]>=30 ∪ 冲锋窗）
       if (x[2] === 0) game.playSfxFiles(soundTrackFiles('dd2_kobold_ignite'), 0.6, e.cx, e.cy);
       x[2] += 1;
-      if (x[2] === 30) {
-        game.playSfxFiles(soundTrackFiles('dd2_kobold_ignite_loop'), 0.5, e.cx, e.cy);
-        game.playSfxFiles(soundTrackFiles('dd2_kobold_scream_charge_loop'), 0.5, e.cx, e.cy);
-      }
     }
     if (e.ai0 > 0 && e.ai1 === 1) {
-      e.ai0 = 0; e.ai1 = 2;                // 冲锋中再触发 → 起爆（:63771-63777）
+      e.ai0 = 0; e.ai1 = 2;                // 冲锋中再触发 → 起爆（:63962-63967）
+      fuseLoopStop(e);                     // 拆轨再进起爆态
       return;
     }
-    if (e.ai0 === 1) e.ai1 = 1;            // 前摇倒数到 1 → 冲锋态（:63779-63782）
+    if (e.ai0 === 1) e.ai1 = 1;            // 前摇倒数到 1 → 冲锋态（:63969-63971）
     if (e.ai1 > 0 && e.ai0 === 0) {
-      // 冲锋档（:63808-63835）：触发距 64、4 速直冲;引信/冲锋循环音（:63783-63807
-      // 原版为跟踪 loop,本仓按 60t 一拍补播近似——音轨库无 loop 句柄时不可续）
-      if (x[1] === 0 || x[1] >= 60) {
-        x[1] = 1;
-        game.playSfxFiles(soundTrackFiles('dd2_kobold_ignite_loop'), 0.4, e.cx, e.cy);
-        game.playSfxFiles(soundTrackFiles('dd2_kobold_scream_charge_loop'), 0.4, e.cx, e.cy);
-      } else {
-        x[1] += 1;
-      }
+      // 冲锋档（:63979-64005）：触发距 64、4 速直冲;引信/冲锋循环音由下方 manage
+      // 驱动（GetActiveSound==null → PlayTrackedSound + Position 跟随,台账⑩）
       if (Math.random() < 1 / 6) {
         game.spawnParticles(e.cx + e.facing * 12, e.cy, '#FFD0A0', 1, 0.8, { life: 30 });
       }

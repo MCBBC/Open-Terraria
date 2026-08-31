@@ -2,11 +2,13 @@
 //   aiStyle 84  拜月教邪教徒 439  AI_084_LunaticCultist()        NPC.cs:64921-65957
 //   aiStyle 120 光之女皇     636  AI_120_HallowBoss()           NPC.cs:46299-47302(+DashTo :47304)
 //   aiStyle 121 史莱姆皇后   657  AI_121_QueenSlime()           NPC.cs:45543-46177(+FlyMovement :45467)
-// 由 Enemy.fixedUpdate 的 aiStyle 分发调用(接线见文件尾「接线清单」);本文件不改动任何已有文件。
-// 弹幕统一走 bossAI.shoot(Arrow 直飞桶);原版「定点预告→延时冲刺」类投射物中
-// 465 闪电球/464 冰雾母云已实体化(IceMistCloud/LightningOrb,见各类头注),
-// 919/923 仍收敛为带初速直飞(见各处注释)。getGoodWorld 分支已实装(女皇招式间隔折半/
-// 史后空中横移+砸地蓄力+凝胶环抬档);expert/大师分支只注释不实现;netcode 跳过。
+// 由 Enemy.fixedUpdate 的 aiStyle 分发调用(接线见文件尾「接线清单」)。
+// 弹幕走 bossAI.shoot(Arrow 直飞桶)+三类实体化弹:IceMistCloud/LightningOrb(原批)、
+// FairyQueenLance 919/SunDanceBeam 923(2026-08-31 台账清偿批——AI_179/AI_180:
+// 60t 零速预告(localAI[0] 门,★非 ai[1] 延时参)→40 速发射+旋转锁定+线形判定盒;
+// 扫束锚本体 Center 随拍旋转,scale 三段梯度,timeLeft=180)。getGoodWorld 分支已
+// 实装(女皇招式间隔折半/史后空中横移+砸地蓄力+凝胶环抬档);expert 数值链已实装
+// (邪教徒选拍末日替换+间隔/伤害 Remap,NPC.cs:65134-65171/:65462-65477);netcode 跳过。
 import { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -17,9 +19,11 @@ import { TILE_DEFS } from '../data/tiles';
 import { spawnPart, shoot, losClear, addEnemy } from './bossAI';
 import { Entity } from './Entity';
 import { projSprite, projFrameImg } from './Arrow';
-import { hitPlayer, hitTownNpcs, hitCritters } from './projTargets';
+import { hitPlayer, hitTownNpcs, hitCritters, projOverlap } from './projTargets';
 import { canHit } from '../physics/LineOfSight';
 import { LightningBoltProj } from './LightningBoltProj';
+import { segHitsRect } from './bossAI_duke_moonlord';   // 线段×AABB(CheckAABBvLineCollision 胶囊近似,共用)
+import { getAttackDamageForProjectiles } from '../stats/ScaleStats';
 import { TtlSprite } from '../assets/ttlSprite';
 
 // ===================== 共用工具(与 bossAI.ts 同语义,私有副本) =====================
@@ -120,13 +124,14 @@ const rot = (x: number, y: number, a: number): [number, number] =>
 //   NPC522 轨道弹 + 第三拍克隆体补射 468×5) / 8 远古末日 NPC523(经典不可达,状态体保留)。
 // 经典数值: 冰 35 伤(:64930)/火 30 伤·18t×3(:64941-64946)/闪电 45 伤(:64953)/
 //   光 20t×2(:64963-64967)/末日 20t×3(:64970-64973);克隆体补射 468 恒 18 伤(:65491)。
-// 选招表(1458 :65381-65458 两张 switch 表合一;表尾拍把 ai3 复位 -1 → 下次完成攻击后回 0 重循环):
-//   一阶段 12 拍 [冲,火,冲,冰,冲,雷,冲,火,冲,冰,冲,仪式] 循环;
-//   二阶段 14 拍 [冲,火,冲,光,冲,雷,冲,光,冲,冰,冲,雷,冲,仪式] 循环
-//   ★R23b-D1 修:二阶段表曾缺末两拍(第 13/14 拍)且头注断言「二阶段不再仪式」——
-//   与原文相反:1458 case 13 = `num13=4; ai[3]=-1f`(:65407-65409),即二阶段每轮末尾
-//   仍举行一次远古仪式(可打断的输出窗口)。曾 14→12 拍=P2 循环周期缩短、克隆体预算
-//   节奏漂移、玩家永远失去仪式打断期。
+// expert 数值链(1457/1458 逐字同段 NPC.cs:65130-65174;2026-08-31 台账批):
+//   冰间隔 num 120→90(:65135-65137,g 再 −30 :65139-65142)、火 18×3→12×4
+//   (:65146-65149,g 覆写 10×5 :65151-65154)、雷 num4 80→40(:65157-65160,g 再
+//   −20 :65162-65165)、光拍距 num5 20→30(:65165-65171);打断清场预算 num9 10→3
+//   (:65270-65273);弹伤 Remap = GetAttackDamage_ForProjectiles(normal,expert)
+//   (NPC.cs:7079 Remap(difficulty,Classic,Expert,…)):冰 (35,25) :65133/
+//   火 (30,20) :65144/雷 (45,30) :65156——克隆体 468 为字面 18 不参与。
+//   getGoodWorld 沿用原文次序:expert 先赋值、g 再减/覆写(与 expert 叠加时同样规则)。
 const CULTIST_CYCLE_P1 = [0, 1, 0, 2, 0, 3, 0, 1, 0, 2, 0, 4];
 const CULTIST_CYCLE_P2 = [0, 1, 0, 5, 0, 3, 0, 5, 0, 2, 0, 3, 0, 4];
 
@@ -145,6 +150,13 @@ export function cultistPick(e: Enemy, phase2: boolean): number {
 function cultistClones(game: GameHooks, parent: Enemy): Enemy[] {
   return (game.enemies() as Enemy[]).filter(
     (n) => !n.dead && n.vanillaId === 440 && laOf(n).la3 === parent);
+}
+
+/** NPC.CountNPCS(typeId)(NPC.cs 调用点 :65471——全存活同型计数,与归属无关) */
+function countVanillaNpcs(game: GameHooks, vanillaId: number): number {
+  let n = 0;
+  for (const e of game.enemies() as Enemy[]) if (!e.dead && e.vanillaId === vanillaId) n++;
+  return n;
 }
 
 /** 仪式圈弹 490（Projectile.cs:5383 SetDefaults + aiStyle 89 :31193-31326）：
@@ -506,7 +518,10 @@ export class LightningOrb extends Entity {
 }
 
 /** 克隆体生成出口(:65646-65650 NewNPC 440:X,Y 是底部中心坐标且 Y 再 +真身 height/2;
- *  ai[3]=真身 whoAmI / localAI[1]=仪式代数)。本仓:la3=真身引用、la1=代数、跳过出生显影 */
+ *  ai[3]=真身 whoAmI / localAI[1]=仪式代数)。本仓:la3=真身引用、la1=代数、跳过出生显影。
+ *  入场音:原版 localAI[0]==0 的入场演出块(:65298-65307,两版本同段)对克隆体同样生效
+ *  ——NewNPC 首个 AI tick 也播 case29 style89(Zombie_89)且置 ai[0]=-1 显影,本仓跳过
+ *  显影态但补播该声(等效出生点),2026-08-31 台账批 */
 function spawnCultistClone(game: GameHooks, parent: Enemy, x: number, y: number, gen: number): Enemy | null {
   const c = spawnPart(game, parent, 440);
   if (!c) return null;
@@ -516,6 +531,7 @@ function spawnCultistClone(game: GameHooks, parent: Enemy, x: number, y: number,
   c.x = x - c.w / 2;
   c.y = y + parent.h / 2 - c.h;
   c.bInit = true; // 原版克隆体会落入 1t 的 -1 显影态(:65047),无实际效果,直接跳过
+  game.playSfxWav?.('Zombie_89', 1, c.cx, c.cy);   // :65299(克隆体首个 AI tick 等效点)
   return c;
 }
 
@@ -623,9 +639,25 @@ function cultistFrameTick(e: Enemy, st: number): void {
 
 export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | null): void {
   const la = laOf(e);
-  // getGoodWorld 弹幕节奏抬档(:64932-64958):冰 num120−30 / 火 18×3→10×5 /
-  // 闪电 num80−20(expert 基线未实装,g 照原文在经典值上调整)
+  // expert 数值链 + getGoodWorld 抬档(NPC.cs:65130-65174,次序照原文:expert 先赋、g 再减/覆写):
   const ftw = !!game.world.seedFlags?.getGoodWorld;
+  const expert = game.world.isExpert;              // Main.expertMode(:65130)
+  const diff = e.difficulty;                       // npc.difficulty → GetAttackDamage_ForProjectiles
+  // 冰间隔 num(:65132-65142):120 →(expert)90 →(g)−30
+  let numIce = 120; if (expert) numIce = 90; if (ftw) numIce -= 30;
+  // 火间隔/拍数 num2/num3(:65142-65154):18×3 →(expert)12×4 →(g)覆写 10×5
+  let numFire = 18, fireCount = 3;
+  if (expert) { numFire = 12; fireCount = 4; }
+  if (ftw) { numFire = 10; fireCount = 5; }
+  // 雷间隔 num4(:65155-65165):80 →(expert)40 →(g)−20
+  let numBolt = 80; if (expert) numBolt = 40; if (ftw) numBolt -= 20;
+  // 光拍距 num5/expert 30(:65165-65171)、拍数 num6 恒 2;末日节拍 num7=20×num8=3 不分档(:65173-65174)
+  const lightIv = expert ? 30 : 20;
+  const lightN = 2;
+  // 弹伤 Remap(NPC.cs:7079 ForProjectiles=(int)Remap(difficulty,Classic,Expert,n,e)):冰 :65133/火 :65144/雷 :65156
+  const iceDmg = getAttackDamageForProjectiles(35, 25, diff);
+  const fireDmg = getAttackDamageForProjectiles(30, 20, diff);
+  const boltDmg = getAttackDamageForProjectiles(45, 30, diff);
   const isReal = e.vanillaId !== 440; // flag2 = type==439(:64971);440 = 克隆体
   let parent: Enemy | null = null;
   // ---- 克隆体镜像段(:64998-65015):真身失效 → 消散;ai0/ai1 逐 tick 镜像;
@@ -683,7 +715,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
   if (isReal && e.ai0 === 5 && e.ai1 >= 120 && e.ai1 < 420 && e.justHit) {
     e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; // :65014-65016
     e.vx = 0; e.vy = 0;
-    let budget = 10; // num9 经典 10(expert 3,:65027-65031);两分支同为清场,差异仅联网消息
+    let budget = expert ? 3 : 10; // num9 经典 10/expert 3(:65270-65273);两分支同为清场,差异仅联网消息
     for (const c of cultistClones(game, e)) {
       if (budget <= 0) break;
       budget--;
@@ -727,6 +759,18 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     if (isReal && e.ai1 >= 40) {
       e.ai1 = 0;
       const pick = cultistPick(e, phase2);
+      // ---- 远古末日随机替换(:65462-65477,两版同段):expert ∧ 半血(flag) ∧ 拍号
+      //      非 0 冲/4 仪式/5 光 → 按 maxValue 概率阶梯改拍末日 num13=6;
+      //      CountNPCS(523) < 10 上限门(本仓=统计存活 vanillaId 523)。
+      //      梯度原文:life<maxHp/3 → 4、再 <maxHp/4 → 3(逐条覆写式 if),否则 6。
+      //      经典模式该支恒假(expertMode 门)——此前态体已在而选拍永不给(:65134 注)
+      let doomRoll = false;
+      if (isReal && expert && phase2 && pick !== 0 && pick !== 4 && pick !== 5
+        && countVanillaNpcs(game, 523) < 10) {
+        const maxValue = e.hp < e.maxHp / 4 ? 3 : e.hp < e.maxHp / 3 ? 4 : 6; // :65462-65466
+        doomRoll = Math.floor(Math.random() * maxValue) === 0;                 // :65471 Next(maxValue)==0
+      }
+      if (doomRoll) pick = 6;
       if (pick === 0) {
         // 飞掠占位(:65277-65336):真身 + 全部克隆体一起入环——环位角
         // num16 = ((序号+flag5+1)/2)·2π·0.4/总数,奇数序取负(flag5=总数偶数),
@@ -758,7 +802,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       else if (pick === 3) { e.ai0 = 4; }   // 闪电
       else if (pick === 4) { e.ai0 = 5; }   // 仪式瞬移
       else if (pick === 5) { e.ai0 = 7; }   // 远古之光
-      // pick === 6(远古末日)仅 expert 随机替换会命中(:65270-65275),经典不触发
+      else if (pick === 6) { e.ai0 = 8; e.ai1 = 0; }   // 远古末日(:65543-65546 expert∧半血随机替换,见上 doomRoll)
     }
     flyIntegrate(e);
     return;
@@ -774,10 +818,10 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     return;
   }
 
-  // ---- ai0 == 2 冰雾 464(:65362-65429):4t 时克隆体各补 1 发 468 + 真身 1 发 464(35 伤);
-  //      持续 4+num(num=120,FTW −30 :64932-64936) ----
+  // ---- ai0 == 2 冰雾 464(:65362-65429):4t 时克隆体各补 1 发 468 + 真身 1 发 464
+  //      (伤=ForProjectiles(35,25),2026-08-31 remap);持续 4+num(num=120/expert90,
+  //      g 再 −30 :65132-65142) ----
   if (e.ai0 === 2) {
-    const numIce = ftw ? 90 : 120;
     if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % numIce === 0) {
       cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622); // :65375-65397
       // :65411-65421 发的是 ai[1]=1 母云(IceMistCloud 实体,Projectile.cs:30763-30790)——
@@ -785,7 +829,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       // Item_120 首帧音随实体化迁入 IceMistCloud 首帧(母云+每颗子体各播,:30749-30752)
       const aim = aimLead(e, player, e.facing);
       const cloud = new IceMistCloud(e.cx + e.facing * 30, e.cy + 12,
-        aim.x * 4, aim.y * 4, 35, true);
+        aim.x * 4, aim.y * 4, iceDmg, true);
       (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities
         .add(cloud, 'projectiles');
       // 原版冰雾发射零吼(:65040-65900 全段仅 65093/65122 两声)——曾借 roar 0.35,2026-08-18 对账删
@@ -795,19 +839,18 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     return;
   }
 
-  // ---- ai0 == 3 火球 467(:65430-65530):每 num2t 一发×num3,30 伤,(6+rand4) 速
-  //      ±0.52rad 散布(18×3,FTW 10×5 :64941-64949);第三拍克隆体各补 1 发
-  //      468(:65462-65499);持续 4+num2*num3。
-  //      ★弹道备案升级(2026-08-26 工单⑧):原版 467 为制导弹(AI_001 :55133-55279)
-  //      ——首拍音 Item34(:55136-55139)→ ai[1]==1 锁定 2000px 内最近 CanHit 玩家
-  //      (:55140-55163)→ 速度模长不变、AngleLerp(targetAngle,0.008)/t 转向
-  //      (:55172-55186),距玩家 <20px 自爆 Kill(:55158-55160/:55171)。本仓走 Arrow
-  //      直飞桶【未移植制导】,直线弹道系登记近似;命中侧 OnFire(24)已由
-  //      vanillaProjStatusPlayer 表覆盖。消亡爆(Kill :74390-74441)在
-  //      Game.onProjectileDeath 467/468 分支结算 ----
+  // ---- ai0 == 3 火球 467(:65430-65530):每 num2t 一发×num3(经典 18×3/expert 12×4/
+  //      g 覆写 10×5 :65142-65154),(6+rand4) 速 ±0.52rad 散布,伤=ForProjectiles
+  //      (30,20)(:65144);第三拍克隆体各补 1 发 468(:65462-65499);持续 4+num2*num3。
+  //      ★弹道升级(2026-08-31 台账批):原版 467 为制导弹(AI_001 type==467 支,
+  //      1458 P.cs:55133-55253/1457 :55132-55252),制导已由 Arrow 直飞桶内的
+  //      projId===467 专支实装——ai[1] 状态机:0 首拍(播 Item34,发射点已代播)
+  //      → 每 19 个 AI 更新回查锁定(CanHit 1×1 点对,首轮 [1..20) 计数循环语义,
+  //      ★非每 tick 重试)→ 锁定后 ai[1]∈(20,200) 保速转向 AngleLerp(target,0.008),
+  //      <20px 自爆 Kill;alpha −40/update 渐显 + AddLight + 尾尘环。命中侧
+  //      OnFire(24)=vanillaProjStatusPlayer 表、消亡爆=Game.onProjectileDeath
+  //      467 分支(P.cs:74390)双通道不变 ----
   if (e.ai0 === 3) {
-    const numFire = ftw ? 10 : 18;
-    const fireCount = ftw ? 5 : 3;
     if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % numFire === 0) {
       // 原版硬编码第 3 拍(:65442 /num2==2)——FTW 5 拍下仍在第 3 拍补射,1:1 保留
       if ((e.ai1 - 4) / numFire === 2) {
@@ -816,8 +859,8 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       const aim = aimLead(e, player, e.facing);
       const spd = 6 + Math.random() * 4;
       const [dvx, dvy] = rot(aim.x * spd, aim.y * spd, (Math.random() - 0.5) * 2 * 0.5235987901687622);
-      shoot(game, e.cx + e.facing * 30, e.cy + 12, dvx, dvy, 30, 467); // :65505-65517
-      // 弹 467 首拍音(Projectile.cs:55133-55139 ai[1]==0 → SoundID.Item34,逐弹一声)
+      shoot(game, e.cx + e.facing * 30, e.cy + 12, dvx, dvy, fireDmg, 467); // :65505-65517
+      // 弹 467 首拍音(Projectile.cs:55133-55139 ai[1]==0 → SoundID.Item34,逐弹一声,弹位=出膛点)
       game.playSfxWav?.('Item_34', 1, e.cx + e.facing * 30, e.cy + 12);
     }
     e.ai1 += 1;
@@ -826,10 +869,9 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
   }
 
   // ---- ai0 == 4 闪电 465(:65531-65622):ai1==20 时克隆体各补 1 发 468(:65531-65562),
-  //      之后每逢 (ai1-20)%num4==0 在头顶 100px 撒 465(45 伤)(num4=80,FTW −20
-  //      :64952-64958);持续 20+num4 ----
+  //      之后每逢 (ai1-20)%num4==0 在头顶 100px 撒 465(伤=ForProjectiles(45,30)
+  //      :65156)(num4=80/expert40,g 再 −20 :65155-65165);持续 20+num4 ----
   if (e.ai0 === 4) {
-    const numBolt = ftw ? 60 : 80;
     if (isReal && e.ai1 >= 20 && (e.ai1 - 20) % numBolt === 0) {
       if (e.ai1 === 20) {
         cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622);
@@ -837,7 +879,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       }
       // 原版 465 零速定点 180t(LightningOrb 实体,Projectile.cs:30860-30937),每 30t
       // 朝 ≤5 玩家掷 466 闪电链——曾坍缩为 6 速直飞 Arrow,实体化还原定点悬停
-      const orb = new LightningOrb(e.cx, e.cy - 100, 45);   // :65563-65566(速度 0/45 伤)
+      const orb = new LightningOrb(e.cx, e.cy - 100, boltDmg);   // :65563-65566(速度 0)
       (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities
         .add(orb, 'projectiles');
       game.playSfxWav?.('Item_121', 1, e.cx, e.cy - 100);   // 弹 465 首帧音(:30864-30867,保留调用点播,防实体内双播)
@@ -928,15 +970,16 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     return;
   }
 
-  // ---- ai0 == 7 远古之光(:65796-65877):每 20t 一轮×2;第三拍克隆体各补 5 发 468
-  //      (±1.2566rad,:65796-65822),真身每轮以扇面(步进 2π/25,8 速)召 5 只 NPC522
-  //      (:65862-65865,ai1=逐 t 弯转角 → AI_100 轨道弹);持续 4+20*2 ----
+  // ---- ai0 == 7 远古之光(:65796-65877):每 num5t 一轮×num6(经典 20×2/expert 30×2,
+  //      :65165-65171);第三拍克隆体各补 5 发 468(±1.2566rad,:65796-65822),真身每轮以
+  //      扇面(步进 2π/25,8 速)召 5 只 NPC522(:65862-65865,ai1=逐 t 弯转角 → AI_100
+  //      轨道弹);持续 4+num5*num6 ----
   if (e.ai0 === 7) {
-    if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % 20 === 0) {
+    if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % lightIv === 0) {
       e.facing = Math.sign(player.cx - e.cx) || e.facing; // :65839-65843
       const aim = aimLead(e, player, e.facing);
       const num47 = (Math.PI * 2) / 25; // :65856
-      if ((e.ai1 - 4) / 20 === 2) {
+      if ((e.ai1 - 4) / lightIv === 2) {
         cloneSupplement(game, cultistClones(game, e), player, 5, 1.2566370964050293);
       }
       for (let i = 0; i < 5; i++) {
@@ -955,12 +998,12 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       // 原版火球(522)发射零吼(同上全段普查)——曾借 roar 0.5,2026-08-18 对账删
     }
     e.ai1 += 1;
-    if (e.ai1 >= 4 + 20 * 2) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 >= 4 + lightIv * lightN) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
   // ---- ai0 == 8 远古末日(:65873-65932):玩家附近随机空位撒 NPC523,数量 = min(克隆体+1, 3)
-  //      (:65892-65897);经典选招表不含 6(expert 随机替换专属,:65270-65275),状态体保留 ----
+  //      (:65892-65897);选拍表不含 6——expert∧半血随机替换可达(见选拍 doomRoll),状态体常驻 ----
   if (e.ai0 === 8) {
     if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % 20 === 0) {
       const st = game.world.store;
@@ -1035,6 +1078,229 @@ function empressHover(e: Enemy, player: Player, ox: number, oy: number, spdMul =
     const dx = tx - e.cx, dy = ty - e.cy;
     const d = Math.hypot(dx, dy) || 1;
     simpleFly(e, (dx / d) * 12 * spdMul, (dy / d) * 12 * spdMul, 0.5 * accMul);
+  }
+}
+
+/** 实体化弹入桶(IceMistCloud/LightningOrb 同款 casts 的共口封装) */
+function addProj(game: GameHooks, p: Entity): void {
+  (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities.add(p, 'projectiles');
+}
+
+// ---------------------------------------------------------------------------
+// 光枪 919(AI_179_FairyQueenLance,Projectile.cs 两版本同段:1458 :45852-45872 /
+// 1457 :45853-45873;SetDefaults :8716-8727)。原版 NewProjectile 以【零速】出生、
+// ai[0]=出射角(rad)/ai[1]=发射点参(仅 GetColor 色相源,AI 不消费——旧注"ai1 延时
+// 参"系误读);真实预告门是 localAI[0]<60:
+//   · localAI[0]<60:速度恒零原地渐显(alpha=Lerp(255,0,lerpValue(0,20,la0)) 20t 显形),
+//     rotation 锁定 ai[0](旋转锁定);
+//   · ≥60:每 update 速度覆写为 ai[0].ToRotationVector2()×40,1/3 概率尘 267(
+//     NewDustPerfect fadeIn=1/noGravity/alpha100/色=GetColor→White lerp,scale×1.5);
+//   · ≥360 Kill;
+//   · CanDamage 门 =(type==919 && localAI[0]<=60)(P.cs:12463 大表臂)→ 预告期不结算伤害。
+// 命中判定(P.cs Colliding :15711-15727):300×300 粗筛盒(_lanceHitboxBounds,弹心
+// 居中)∩目标后,沿 rotation 方向 center±40px 线段 × 宽 8(CheckAABBvLineCollision
+// 线形判定盒——本仓 segHitsRect 胶囊近似,与 Dart/Betsy 同源)。
+// 绘制(Main.cs DrawProj_FairyQueenLance :36492):Extra_178 光带 + Projectile_919
+// 按 rotation 旋,色=hslToRgb((ai[1]+0.5)%1)·Opacity(暴怒→White→OurFavoriteColor 渐变)
+// ——本仓 sprite 白画+hue-rotate 滤镜近似(色彩非命中面,C 档登记)。
+// ---------------------------------------------------------------------------
+export class FairyQueenLance extends Entity {
+  readonly projId = 919;
+  damage: number;
+  w = 8; h = 8;                      // SetDefaults :8717-8718
+  private la0 = 0;                   // localAI[0]
+  private readonly ang: number;      // ai[0] 出射角
+  private readonly ai1v: number;     // ai[1](绘制色相)
+  private alpha = 255;
+  dead = false;
+
+  constructor(x: number, y: number, ang: number, ai1: number, damage: number) {
+    super();
+    this.x = x - this.w / 2;         // NewProjectile X/Y 为中心锚
+    this.y = y - this.h / 2;
+    this.ang = ang;
+    this.ai1v = ai1;
+    this.damage = damage;
+  }
+
+  /** Colliding :15711:粗筛盒 + ±40px 线段宽 8 */
+  private hits(t: { x: number; y: number; w: number; h: number }): boolean {
+    if (!projOverlap(this.cx - 150, this.cy - 150, 300, 300, t)) return false;
+    const dirX = Math.cos(this.ang), dirY = Math.sin(this.ang);
+    return segHitsRect(this.cx - dirX * 40, this.cy - dirY * 40, dirX * 80, dirY * 80, 8, t);
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    this.la0++;
+    if (this.la0 >= 60) {                                    // :45855-45866 发射相
+      this.vx = Math.cos(this.ang) * 40;
+      this.vy = Math.sin(this.ang) * 40;
+      if (Math.random() < 1 / 3) {                           // :45857 Next(3)==0 尘 267
+        game.spawnDust?.(this.cx, this.cy, 0, 0, 267, 0, 0, 100, null, 1.5, true);
+      }
+    }
+    if (this.la0 >= 360) { this.dead = true; return; }       // :45863-45866
+    // alpha = Lerp(255,0,lerpValue(0,20,la0))(:45868-45869)——渐显面
+    this.alpha = Math.round(vLerp(255, 0, clamp(this.la0 / 20, 0, 1)));
+    if (this.la0 > 60) {                                     // CanDamage 表 la0<=60 免伤门(:12463)
+      this.x += this.vx;
+      this.y += this.vy;
+      // Damage_EVP 同式结算(hitPlayer 内嵌 immune 门/DamageVar/banner/cold/敌弹乘区)
+      hitPlayer(this, game, this.damage, false, false, (p) => this.hits(p));
+      hitTownNpcs(this, game, this.damage, 0, 'hostile', this.projId, (n) => this.hits(n));
+    }
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const bright = 1 - this.alpha / 255;
+    if (bright <= 0) return;
+    const img = projSprite(919);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.ang);
+    if (img && img.width > 0) {
+      ctx.globalAlpha = bright;
+      // GetColor = hslToRgb((ai[1]+0.5)%1,1,.5)（P.cs:46399）——hue-rotate 近似
+      const hueDeg = ((this.ai1v + 0.5) % 1) * 360;
+      ctx.filter = `hue-rotate(${hueDeg.toFixed(0)}deg) saturate(1.3)`;
+      const s = 1;
+      ctx.drawImage(img, -img.width * s / 2, -img.height * s / 2, img.width * s, img.height * s);
+      // 出膛拖影（:36531-36536 num4 循环三帧近似；speed==0 时跳过）
+      if (Math.hypot(this.vx, this.vy) > 1) {
+        ctx.globalCompositeOperation = 'lighter';
+        for (let k = 2; k >= 1; k--) {
+          ctx.globalAlpha = bright * 0.22 * k;
+          ctx.drawImage(img, -img.width * s / 2 - 120 / 6 * k,
+            -img.height * s / 2, img.width * s, img.height * s);
+        }
+      }
+      ctx.filter = 'none';
+    } else {
+      // 贴图缺失兜底：细长光条
+      ctx.globalAlpha = bright;
+      ctx.fillStyle = '#FFD9F0';
+      ctx.fillRect(-24, -4, 48, 8);
+    }
+    ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 太阳舞扫束 923(AI_180_FairyQueenSunDance,Projectile.cs 1458 :45791-45851 /
+// 1457 :45804-45851 同段;SetDefaults :8759-8772 timeLeft=180——发射点曾误传 ttl240)。
+// 原版 ai[0]=扫束起始角、ai[1]=女皇 whoAmI 锚:
+//   · 本体 Center 每 update 锚回 type==636 的 NPC(ai[1] 反查),速度恒零(更新态位移只剩锚定);
+//   · alpha −15/t 钳 0;scale = lerpValue(0,20)·lerpValue(180,120)(前 20t 张合到位、
+//     ≥120t 收尾归零,全程 180t 后 Kill);
+//   · rotation = ai[0] + π/9·lerpValue(50,180,la0)(50t 起转 20° 收拍);
+//   · CanDamage 同上表臂(type==923 && localAI[0]<=60);命中(Colliding :15729-15753)
+//     = 由心沿 rotation 三段锥形线束:scale·{510,660,800} 长 × scale·0.7·{100,60,10} 宽,
+//     任一段相交即受理(近似=三次 segHitsRect);
+//   · 束身 CastLightOpen 12 采样(纯视觉光通道)≈ addLightAt 六步采样;
+//   · 首帧 Item_159 @base.Center(:45794)——移出调用点逐辐重复播,位置化 C 项收口。
+// 绘制(Main.cs :28702-28742):802×208 双帧行彩虹束,hsl 相位循环 + 暴怒 OurFavoriteColor
+// ——本仓取上帧行白画 hue-rotate 近似(C 档登记)。
+// ---------------------------------------------------------------------------
+export class SunDanceBeam extends Entity {
+  readonly projId = 923;
+  damage: number;
+  w = 30; h = 30;                    // SetDefaults :8760-8761
+  private la0 = 0;                   // localAI[0]
+  private alpha = 255;
+  private scaleV = 0;
+  private rotation = 0;
+  private readonly baseAng: number;  // ai[0]
+  private readonly bossId: number;   // ai[1]
+  private readonly enraged: boolean; // ShouldEmpressBeEnraged() 出生档快照(绘制配色)
+  private sndPlayed = false;
+  dead = false;
+
+  constructor(x: number, y: number, ang: number, bossId: number, damage: number, enraged: boolean) {
+    super();
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
+    this.baseAng = ang;
+    this.bossId = bossId;
+    this.damage = damage;
+    this.enraged = enraged;
+  }
+
+  private get scaleNow(): number {
+    return lerpValue(0, 20, this.la0) * lerpValue(180, 120, this.la0);   // :45807
+  }
+
+  /** Colliding :15729-15753:三段锥形束(近似胶囊三次相交) */
+  private hits(t: { x: number; y: number; w: number; h: number }): boolean {
+    const dirX = Math.cos(this.rotation), dirY = Math.sin(this.rotation);
+    const L = [510, 660, 800], W = [70, 42, 7];
+    for (let i = 0; i < 3; i++) {
+      if (segHitsRect(this.cx, this.cy,
+        dirX * L[i] * this.scaleV, dirY * L[i] * this.scaleV,
+        W[i] * this.scaleV, t)) return true;
+    }
+    return false;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (!this.sndPlayed) {
+      this.sndPlayed = true;
+      game.playSfxWav?.('Item_159', 1, this.cx, this.cy);      // :45794-45797 base.Center
+    }
+    this.la0++;
+    if (this.la0 >= 180) { this.dead = true; return; }         // :45799-45802
+    this.alpha = Math.max(0, this.alpha - 15);                 // :45803-45806
+    this.scaleV = this.scaleNow;
+    this.rotation = this.baseAng                               // :45808-45810
+      + lerpValue(50, 180, this.la0) * (Math.PI / 9);
+    // 锚本体(:45812-45816:ai[1] 反查 type==636 → Center 吸附;槽失活保持末位不灭)
+    const boss = (game.enemies() as Enemy[])
+      .find((n) => !n.dead && n.id === this.bossId && n.vanillaId === 636);
+    if (boss) { this.x = boss.cx - this.w / 2; this.y = boss.cy - this.h / 2; }
+    this.vx = 0; this.vy = 0;
+    // CastLightOpen 12 采样 → addLightAt 六步(hslToRgb 因子近似,v3_·scale :45818-45826)
+    const dirX = Math.cos(this.rotation), dirY = Math.sin(this.rotation);
+    for (let i = 1; i <= 6; i++) {
+      game.addLightAt?.(this.cx + dirX * 800 * this.scaleV * (i / 12),
+        this.cy + dirY * 800 * this.scaleV * (i / 12),
+        this.scaleV, 0.25 * this.scaleV, this.scaleV * 0.85);
+    }
+    if (this.la0 > 60) {                                       // CanDamage la0<=60 免伤门(:12463)
+      hitPlayer(this, game, this.damage, false, false, (p) => this.hits(p));
+      hitTownNpcs(this, game, this.damage, 0, 'hostile', this.projId, (n) => this.hits(n));
+      // 敌对弹对小动物零伤(Damage_PVE_Inner 受理式裁决,同 464/465 语义锚)
+      hitCritters(this, game);
+    }
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    if (this.scaleV <= 0.01) return;
+    const img = projSprite(923);
+    if (!img || !(img.width > 0)) return;
+    const bandH = img.height / 2;                              // Frame(1,2) 双帧行(:28708-28709)
+    const rotDeg = ((this.baseAng + this.la0 / 180) % 1) * 360;// hsl 相位(num24 :28711)近似驱动滤镜
+    const wob = 1 + 0.15 * lerpValue(40, 60, this.la0);        // vector=(1,lerp(.25,.7)) 径向收敛近似
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rotation);
+    ctx.filter = this.enraged ? 'none' : `hue-rotate(${rotDeg.toFixed(0)}deg) saturate(1.35)`;
+    ctx.globalAlpha = Math.min(1, this.scaleV * 0.85);
+    // 帧 1 双层(外 ×1.2/内 ×1.05)+ 帧 0 芯层(:28727/:28738 顺序简化为三层)
+    const drawBand = (band: 0 | 1, sw: number, alpha: number) => {
+      ctx.globalAlpha = Math.min(1, this.scaleV * alpha);
+      ctx.drawImage(img, 0, band * bandH, img.width, bandH,
+        -0.03 * img.width * sw, -bandH * sw / 2, img.width * sw, bandH * sw);
+    };
+    drawBand(1, this.scaleV * 1.2 * wob, 0.5);
+    drawBand(1, this.scaleV * 1.05 * wob, 0.65);
+    drawBand(0, this.scaleV * wob, 0.5);
+    ctx.filter = 'none';
+    ctx.restore();
   }
 }
 
@@ -1177,8 +1443,12 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         }
         const ax = leadX - px, ay = leadY - py;
         const al = Math.hypot(ax, ay) || 1;
-        // 原版 919 零速预告后沿 v4 方向冲刺(Projectile.AI 收敛:12 速直飞)
-        shoot(game, px, py, (ax / al) * 12, (ay / al) * 12, dayEnrage ? 9999 : phase2 ? 60 : 50, 919, 240);  // num6 :46332
+        // 原版 NewProjectile(Vector2.Zero 速度,919, ai[0]=v4.ToRotation() 出射角,
+        // ai[1]=this.ai[1]/100)(:46909):AI_179 localAI[0]<60 零速预告渐显→60t 起
+        // 沿锁定角 40 速发射(2026-08-31 台账批实体化;旧「Projectile.AI 收敛:12 速
+        // 直飞/弹 ai1 延时参」说法系误读——ai[1] 仅作色相源,AI 不消费)
+        addProj(game, new FairyQueenLance(px, py, Math.atan2(ay / al, ax / al), e.ai1 / 100,
+          dayEnrage ? 9999 : phase2 ? 60 : 50));   // num6 :46332
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
@@ -1214,10 +1484,12 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         for (let t = 0; t < 1; t += 1 / spokes) {
           const slot = (t + (1 / spokes) * 0.5 + volley * (1 / spokes) * 0.5) % 1;
           const a = Math.PI * 2 * (slot + flip);
-          // 原版 923 零速绕体公转(收敛:8 速放射)
-          shoot(game, e.cx, e.cy - 100, Math.cos(a) * 8, Math.sin(a) * 8,
-            dayEnrage ? 9999 : phase2 ? 60 : 50, 923, 240);   // num10 :46335
-            game.playSfxWav?.('Item_159', 1, e.cx, e.cy);   // 弹 923 首帧音(pcs:42324)
+          // 原版 NewProjectile(Vector2.Zero,923,ai[0]=扫束起始角,ai[1]=whoAmI 本体锚)
+          // (:47022):AI_180 锚本体 Center 随拍旋转 +π/9·lerp(50..180),scale 三段梯度,
+          // timeLeft=180(SetDefaults :8766——曾误传 ttl 240);首帧音 Item159 移入
+          // SunDanceBeam 弹位播(C 光音位置化,2026-08-31)
+          addProj(game, new SunDanceBeam(e.cx, e.cy - 100, a, e.id,
+            dayEnrage ? 9999 : phase2 ? 60 : 50, dayEnrage));   // num10 :46335
         }
       }
       e.ai1 += 1;
@@ -1265,7 +1537,10 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
             const ll = Math.hypot(lx, ly) || 1;
             vx = (lx / ll) * 12; vy = (ly / ll) * 12;
           }
-          shoot(game, ox, oy, vx, vy, dayEnrage ? 9999 : phase2 ? 65 : 70, 919, 240);  // num7 :46336
+          // 原版 NewProjectile(Vector2.Zero,919,ai[0]=v3.ToRotation() 锁定角,
+          // ai[1]=num80 线上分位)(:47122)——AI_179 60t 预告→40 速发射(实体化 FairyQueenLance)
+          addProj(game, new FairyQueenLance(ox, oy, Math.atan2(vy, vx), t,
+            dayEnrage ? 9999 : phase2 ? 65 : 70));   // num7 :46336
         }
       }
       e.ai1 += 1;
@@ -1339,13 +1614,13 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           if (el === 0) { ex = ux; ey = uy; } else { ex /= el; ey /= el; }
           px = player.cx - ex * 100; py = player.cy - ey * 100;
         }
-        // v2 = 预测位 − 布枪点 → 弹向（:47105-47108;919 收敛实现:12 速直飞,弹 ai1=
-        // ai1/100 延时参随收敛省略）;Boss_CanShootExtraAt 多人补射(:47114-47140)恒跳
-        // 主目标(:47324),单人无效,略
+        // v2 = 预测位 − 布枪点 → ai[0] 出射角（:47105-47108;实体化 FairyQueenLance——
+        // AI_179 60t 零速预告→40 速发射,弹体侧 ai1 参仅色相源）;Boss_CanShootExtraAt
+        // 多人补射(:47114-47140)恒跳主目标(:47324),单人无效,略
         const ax = leadX - px, ay = leadY - py;
         const al = Math.hypot(ax, ay) || 1;
-        shoot(game, px, py, (ax / al) * 12, (ay / al) * 12,
-          dayEnrage ? 9999 : phase2 ? 60 : 50, 919, 240);  // num6 :46332
+        addProj(game, new FairyQueenLance(px, py, Math.atan2(ay / al, ax / al), e.ai1 / 100,
+          dayEnrage ? 9999 : phase2 ? 60 : 50));   // num6 :46332
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
@@ -1825,8 +2100,10 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
 //   case 121: queenSlimeAI(this, game, p); break;       // 657 史莱姆皇后(俯仰用 spin)
 // 召唤 key: spawnPart(game, src, id)——史后仆从 658/659/660(数据/贴图齐,直连真身;
 //   FALLBACK 仅防御);邪教徒仪式态生成 440 克隆体、ai0=7 态召 522 远古之光、ai0=8 态撒 523。
-// 弹幕 key: shoot(game, x, y, vx, vy, dmg, projId)——464 冰雾/465 闪电球/467 火球/468 光珠;
-//   872 永恒彩虹/873 虹迹/874 极光/919 光枪/923 日舞/922 砸地冲击/926 凝胶弹。
+// 弹幕 key: shoot(game, x, y, vx, vy, dmg, projId)——468 光珠(克隆补射)/872 永恒彩虹/
+//   873 虹迹/874 极光/922 砸地冲击/926 凝胶弹;实体化类——IceMistCloud 464/LightningOrb 465/
+//   FairyQueenLance 919(AI_179 预告→40 速)/SunDanceBeam 923(AI_180 锚本体扫束);
+//   467 火球走 Arrow 直飞桶 + projId===467 制导支(AngleLerp 0.008 保速转向)。
 // 贴图:Projectile_464/465/467/468/872/873/874/919/922/923/926.png 均已在
 //   public/sprites/vanilla/(Arrow 按 projId 懒加载自动生效)。
 

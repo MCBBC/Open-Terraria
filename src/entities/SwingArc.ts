@@ -749,30 +749,82 @@ export class ZenithSword extends Entity {
     }
   }
 
-  /** 线形（capsule 近似：膨胀 AABB + Liang-Barsky 线段裁剪）与敌盒相交 */
-  private static segHitsRect(x1: number, y1: number, x2: number, y2: number,
-    rx: number, ry: number, rw: number, rh: number, pad: number): boolean {
-    const minX = rx - pad, minY = ry - pad, maxX = rx + rw + pad, maxY = ry + rh + pad;
-    if (x1 >= minX && x1 <= maxX && y1 >= minY && y1 <= maxY) return true;
-    if (x2 >= minX && x2 <= maxX && y2 >= minY && y2 <= maxY) return true;
-    let t0 = 0, t1 = 1;
-    const dx = x2 - x1, dy = y2 - y1;
-    const clip = (p: number, q: number): boolean => {
-      if (p === 0) return q >= 0;
-      const r = q / p;
-      if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
-      else { if (r < t0) return false; if (r < t1) t1 = r; }
-      return true;
+  /** Collision.CheckAABBvLineCollision 六参全式 1:1（1458 Collision.cs:275-371）——
+   *  台账批 B：刃线命中由“膨胀 AABB+Liang-Barsky 胶囊裁剪”近似换原式：
+   *   · 先取线段 AABB（沿长两端各外扩 lineWidth/2）与目标盒粗测（:300 AABB 门）；
+   *   · 目标盒四角旋转到线空间（−atan2(lineDir) :308-317），四角入带判定
+   *     |Y|<halfWidth 且 X∈[0,len]（:320-327）；
+   *   · 四边与上下轨 (0,±hw)-(len,±hw) 的段交穷举（:332-369，任一相交即真）。
+   *  与胶囊近似的差异在端部几何（矩形直角端 vs 圆帽），±10px 尖锋擦碰判定对齐。 */
+  private static segHitsRectVanilla(x1: number, y1: number, x2: number, y2: number,
+    rx: number, ry: number, rw: number, rh: number, lineWidth: number): boolean {
+    const hw = lineWidth * 0.5;
+    // 线段外包盒（按轴向正负分别外扩半宽,:280-299）
+    let bx = x1, bw = x2 - x1;
+    if (bw > 0) { bx -= hw; bw += lineWidth; }
+    else { bx += bw - hw; bw = -bw + lineWidth; }
+    let by = y1, bh = y2 - y1;
+    if (bh > 0) { by -= hw; bh += lineWidth; }
+    else { by += bh - hw; bh = -bh + lineWidth; }
+    // CheckAABBvAABBCollision（Collision.cs:2368-2377）
+    if (!(bx < rx + rw && by < ry + rh && bx + bw > rx && by + bh > ry)) return false;
+    // 目标盒四角旋转到线空间
+    const dxl = x2 - x1, dyl = y2 - y1;
+    const len = Math.hypot(dxl, dyl);
+    const ang = Math.atan2(dyl, dxl);
+    const c = Math.cos(-ang), s = Math.sin(-ang);
+    const rot = (qx: number, qy: number): [number, number] => {
+      const ax = qx - x1, ay = qy - y1;
+      return [ax * c - ay * s, ax * s + ay * c];
     };
-    return clip(-dx, x1 - minX) && clip(dx, maxX - x1) && clip(-dy, y1 - minY) && clip(dy, maxY - y1);
+    const corners: Array<[number, number]> = [
+      rot(rx, ry), rot(rx, ry + rh), rot(rx + rw, ry + rh), rot(rx + rw, ry),
+    ];
+    // :320-327 角点入带
+    let result = false;
+    for (const [px, py] of corners) {
+      if (Math.abs(py) < hw && px < len && px >= 0) { result = true; break; }
+    }
+    if (result) return true;
+    // :332-369 四边 vs 上下轨段交（XNA Vector2 叉积同构）
+    const railTest = (
+      eA: [number, number], eB: [number, number],
+      rA: [number, number], rB: [number, number],
+    ): boolean => {
+      const rvx = rB[0] - rA[0], rvy = rB[1] - rA[1];
+      const evx = eB[0] - eA[0], evy = eB[1] - eA[1];
+      const den = rvx * evy - rvy * evx;
+      if (den === 0) return false;
+      const s1 = ((eA[0] - rA[0]) * evy - (eA[1] - rA[1]) * evx) / den;
+      if (s1 < 0 || s1 > 1) return false;
+      const s2 = ((eA[0] - rA[0]) * rvy - (eA[1] - rA[1]) * rvx) / den;
+      return !(s2 < 0 || s2 > 1);
+    };
+    const rails: Array<[[number, number], [number, number]]> = [
+      [[0, hw], [len, hw]],          // vector3→vector4(:328-329)
+      [[0, -hw], [len, -hw]],        // vector5→vector6(:330-331)
+    ];
+    for (let j = 0; j < 4; j++) {
+      const eA = corners[j], eB = corners[(j + 1) % 4];
+      if (railTest(eA, eB, rails[0][0], rails[0][1])) return true;
+      if (railTest(eA, eB, rails[1][0], rails[1][1])) return true;
+    }
+    return result;
   }
 
-  /** 刃线（中心 ±40 沿 (rot+π/2) 向、厚 20）判定：当前位 + 拖尾采样位（:14337-14355） */
+  /** 刃线判定 1:1（Projectile.Colliding type 933/1100 分支 :15626-15660）：
+   *  每采样位先 _lanceHitboxBounds（Projectile.cs:498 静态 300×300）过靶门再进
+   *  CheckAABBvLineCollision(tgtRect.TopLeft, tgtRect.Size, lineStart, lineEnd,
+   *  lineWidth=20)。旧版本无 300×300 前置闸。 */
   private bladeHits(ex: number, ey: number, ew: number, eh: number): boolean {
     const lineAt = (cx: number, cy: number, rot: number): boolean => {
+      // _lanceHitboxBounds 300×300 过靶门（:15641-15643/:15654-15656 同式）
+      const gateHalf = 150;
+      if (ex >= cx + gateHalf || ex + ew <= cx - gateHalf
+        || ey >= cy + gateHalf || ey + eh <= cy - gateHalf) return false;
       const dx = Math.cos(rot + Math.PI / 2), dy = Math.sin(rot + Math.PI / 2);
-      return ZenithSword.segHitsRect(cx - dx * 40, cy - dy * 40, cx + dx * 40, cy + dy * 40,
-        ex, ey, ew, eh, 10);
+      return ZenithSword.segHitsRectVanilla(cx - dx * 40, cy - dy * 40, cx + dx * 40, cy + dy * 40,
+        ex, ey, ew, eh, 20);
     };
     if (lineAt(this.cx, this.cy, this.rot)) return true;
     // oldPos[i]（i update 前）= trail 尾起倒数第 i 条（条目 0=最新）

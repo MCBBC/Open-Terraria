@@ -117,6 +117,9 @@ function pvpShell() {
     policy: { pvpAllowed: true },
     players: new Map(),
     getProxyPvpImmuneRemaining: () => 0,
+    // ★F14 甲虫蓄能回执关联（Game 近战 PvP 区新增意向登记位点——本套壳只关心
+    // msg44 面，登记动作为空实现；记账语义在 pvp-settle-broadcast 全测）
+    notePendingMeleeHit: () => {},
     sendStrikePlayer: (...args: [number, number, number, number, number, number]) => { sent.push(args); },
   };
   return { g, player, sent };

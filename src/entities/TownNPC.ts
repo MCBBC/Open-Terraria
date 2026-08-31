@@ -574,6 +574,17 @@ export interface ThreatRef {
   cx: number; cy: number;
 }
 
+/** 危险扫描候选池快照（★C2 统一定案：原版 num13..num17 结构面单点产出——
+ *  dangerUpdate 每 tick 全量重建,入态选靶(:56016-56105 直读 `Main.npc[num16/17]`)
+ *  与态内发射瞄准(:55105-55112 num58 同源 / 近战段 :54868 族、魔法 :55333 段)
+ *  一律【直读本快照】,不再独立重扫。left/right 即 num16/num17（记录前置
+ *  CanBeChasedBy 门 :54054-57,B1①）；num15(危险侧) = this.dangerSide,
+ *  num13/num14(|dx| 值)不出接口——侧选公式同源已并入消费端）。 */
+export interface ThreatPoolSnapshot {
+  left: ThreatRef | null;    // num16
+  right: ThreatRef | null;   // num17
+}
+
 /** 医师治疗弹受疗对象结构面（TownNPC/任意城镇体均满足） */
 interface PatientBox {
   x: number; y: number; w: number; h: number;
@@ -975,13 +986,16 @@ export class TownNPC extends Entity {
   /** 机械师 124 侦察弹归属 tag（首次发射时取号;== -1 未发射）——localAI[0] 的
    *  「owned 弹在途」判定键,cyborgProbeAlive/shootAt 共用 */
   private probeTag = -1;
-  /** 原 num16/num17：本拍危险扫描左右两侧最近敌（|dx| 口径,:54034-54049 记录）
-   *  ——挥击「换敌再接」候选池(:55652-55658)。dangerUpdate 每 tick 刷新；
-   *  ★记录前置 CanBeChasedBy 门（:54042 flag19，治理批 B1①），不过门的更近
-   *  威胁只刷 num13/num14 不写 num16/num17——沿用上一合格候选（原版字面形状），
-   *  引用可指向已消亡敌（消费端无 .active 门，见 ThreatRef 注/B1②）。 */
-  private threatLeft: ThreatRef | null = null;
-  private threatRight: ThreatRef | null = null;
+  /** 危险扫描候选池快照（num16/num17，见 ThreatPoolSnapshot 注）——挥击
+   *  「换敌再接」候选(:55652-55658)、入态选靶与态内发射瞄准（C2 统一）共用。
+   *  dangerUpdate 每 tick 全量重建；引用可指向已消亡敌（消费端无 .active 门，
+   *  见 ThreatRef 注/B1②）。 */
+  private threatPool: ThreatPoolSnapshot = { left: null, right: null };
+  /** 原 flag17：本拍候选中出现 stinky 敌怪/玩家（:54045-47/:54090-92）。唯一
+   *  消费点 = 攻击触发门 flag31 的 `!flag17` 因子（:55769——有臭源在场时城镇 NPC
+   *  不发起自卫攻击,逃跑面不受影响）。flag18 恒 false（全文无置位,死旗）,
+   *  `(flag16|flag18)` 恒等于 flag16 本身。 */
+  private dangerStinky = false;
   /** 原 flag16 的【原始】值：本拍危险扫描命中即 true，未经 PrettySafe 收口
    *  （收口只发生在非攻击态的逃离支内 :53998-54002 原地清 flag16；攻击态
    *  10..15 与其并列互斥,不落那段）。挥击退出链 :55646 判定须用原始位 */
@@ -1104,14 +1118,23 @@ export class TownNPC extends Entity {
    *    "先 round 再 ×2"使奇防每击多伤 0~1，已废）。
    *    与 Enemy.hurt 的既有 pen 链同序。
    *
-   *   ★参数序警示：hurt(dmg,kbX,kbY,game,penPercent?,flatPen?,crit?) 第 5/6/7 参与
+   *   ★参数序警示：hurt(dmg,kbX,kbY,game,penPercent?,flatPen?,crit?,force?) 第 5/6/7 参与
    *   Enemy.hurt（armorPen 前置位、penPercent 居后段第 9 参）语义错位——未来把城镇
    *   受害弹幕从 Enemy.hurt 改道至此传参时必须按本签名核对（当前无此类调用方，
-   *   纯防御性备注）。 */
+   *   纯防御性备注）。
+   *
+   *  ★force（★C1，第 8 参缺省 false）：绕过 dontTakeDamage 早退的内部直击通道——
+   *   仅溺水致死一击使用。原版 StrikeNPCNoInteraction(owner=255)（NPC.cs:82012 →
+   *   :82017 StrikeNPC 全链）【不查】dontTakeDamage（该旗只在 Projectile.Damage/
+   *   GetHurtByOtherNPCs 等调用方门禁消费）——微光上升态(ai[0]==25)内 CheckDrowning
+   *   的 StrikeNPCNoInteraction(2) 照常结算可致死。 */
   hurt(dmg: number, kbx: number, _kby: number, game: GameHooks,
-    penPercent = 0, flatPen = 0, crit = false): boolean {
-    if (this.iframes > 0 || this.dead) return false;
-    if (this.shimmerRise) return false;   // ai[0]==25 dontTakeDamage（NPC.cs:53596）
+    penPercent = 0, flatPen = 0, crit = false, force = false): boolean {
+    if (this.dead) return false;
+    // force=true = 内部直击通道(StrikeNPCNoInteraction owner=255 同形):不查
+    // 无敌帧也不查 dontTakeDamage(原版 StrikeNPC 全链两者皆不读)
+    if ((this.iframes > 0 || this.shimmerRise) && !force) return false;
+    // ↑ ai[0]==25 dontTakeDamage 承接位(NPC.cs:53596);force 仅溺水致死一击使用
     const prog = townNpcProgressionFromWorld(game.world);
     prog.tipsy = this.tipsy;
     const defBase = VANILLA_NPCS[String(this.vanillaId)]?.defense ?? 15;
@@ -1423,9 +1446,17 @@ export class TownNPC extends Entity {
     }
     if (this.shimmerRise && this.shimmerRiseUpdate(world, game, st0.liquid[si] > 0)) {
       // ai[0]==25 块整段 return（:53682）：AI_007 游走/坐姿/攻击/开门全跳过；
-      // 只补 UpdateNPC 尾段的重力 + 碰撞 + 找帧（:91521-91565，AI() 之后照常执行）。
+      // 补齐 UpdateNPC 层在 AI() 之后照常运行的各块（:91521-91600）：
+      // ① 环境生命周期三连（★C1 重排定案：CheckLifeRegen :93622 无任何 ai 门、
+      //    CheckDrowning 仅 townNPC 门——两者随 Update 层每帧运行,与 ai[0]==25 正交;
+      //    GetHurtByOtherNPCs 头部 dontTakeDamage 早退 :93560 → 上升态内互殴停算,
+      //    但溺水直伤 life-=2(:96065)与 friendlyRegen 清零(:96069)不受 dontTakeDamage
+      //    管——微光中溺水伤害【照常】结算;致死一击 StrikeNPCNoInteraction(owner=255)
+      //    同样不查 dontTakeDamage(:82012→:82017)）。序位 = AI 之后、碰撞之前。
+      // ② 重力 + 碰撞 + 找帧。
       // ★重力 = 0（UpdateNPC_UpdateGravity :91918-91922 aiStyle7 && ai[0]==25 档）：
       //   微光上升演出期不坠，仅落速帽——曾加 ENEMY_GRAVITY = 上升被拽下坠
+      this.envHurtUpdate(world, game);
       this.vy = Math.min(this.vy, MAX_FALL_SPEED);
       moveAndCollide(this, world, this.vx, this.vy);
       this.updateWalkFrame(game);
@@ -1658,8 +1689,10 @@ export class TownNPC extends Entity {
     //      马桶且无其他坐姿 NPC/玩家占位 → 坐 900+rand(10800)）----
     if (this.tryRandomChairSit(world, game, wantDir)) wantDir = 0;
 
-    // ---- 环境与互殴受击(NPC.cs:91534-91544:townNPC 每帧 CheckDrowning +
-    //      GetHurtByOtherNPCs;岩浆走 Collision_LavaCollision :94511-94530)----
+    // ---- 环境与互殴受击(NPC.cs:91590-91600:townNPC 每帧 CheckDrowning +
+    //      CheckLifeRegen + GetHurtByOtherNPCs;岩浆走 Collision_LavaCollision
+    //      :94511-94530)。★C1：ai[0]==25 微光上升帧不走本调用点——上升早退分支内
+    //      显式补调（序位同为 AI 后/碰撞前）----
     this.envHurtUpdate(world, game);
 
 
@@ -1793,6 +1826,50 @@ export class TownNPC extends Entity {
     // 开关门（原版 54478-54500：撞到关着的门 → 1/10（或卡住必试）开门，两方向回退；
     // 54243-54274：走过门 >2 格关门，>4 格或 y 层差 >4 放弃）
     this.npcDoorUpdate(world, game);
+
+    // ---- 挤压检测+水平弹出(2026-08-31):站台行走时头顶有 solid(钢琴/吊灯/斜面
+    //      等)即头部嵌入;重力落回站台+头部碰撞上推=无限弹跳。修=检测头顶行任一
+    //      实心格(slope>0 或纯 solid)与身体纵带重叠 → 水平推到最近净空列 ----
+    if (this.onGround) {
+      const stD = world.store;
+      const headRow = Math.floor(this.y / TILE);
+      const feetRow = Math.floor((this.y + this.h - 1) / TILE);
+      if (headRow < feetRow) {
+        const col0 = Math.floor(this.x / TILE);
+        const col1 = Math.floor((this.x + this.w - 1) / TILE);
+        let headBlocked = false;
+        for (let tx = col0; tx <= col1; tx++) {
+          if (!stD.inBounds(tx, headRow)) continue;
+          const hi = stD.idx(tx, headRow);
+          if (!stD.flags[hi]) continue;
+          const tt = stD.type[hi];
+          if (stD.isSolid(tx, headRow) || (stD.slope[hi] > 0 && stD.isSolid(tx, headRow))) { headBlocked = true; break; }
+        }
+        if (headBlocked) {
+          // 水平搜索最近净空列(向 facing 方向优先,最大 8 格)
+          const dirP = this.facing;
+          let target: number | null = null;
+          for (let off = 1; off <= 8; off++) {
+            for (const sgn of [dirP, -dirP]) {
+              const cx2 = Math.floor(this.cx / TILE) + sgn * off;
+              let clear = true;
+              for (let yy = headRow; yy <= feetRow; yy++) {
+                if (!stD.inBounds(cx2, yy) || stD.isSolid(cx2, yy)) { clear = false; break; }
+              }
+              if (clear) { target = cx2; break; }
+            }
+            if (target !== null) break;
+          }
+          if (target !== null) {
+            this.x = target * TILE + (TILE - this.w) / 2;  // 对齐格中心
+            this.vx = 0;
+          } else {
+            // 无水平出口:推下(等于蹲下穿过头顶障碍)
+            this.y = (headRow + 1) * TILE;
+          }
+        }
+      }
+    }
 
     // ---- NPC 液体交互（NPC.cs UpdateCollision :93712-93805，Enemy 侧同款）：
     //      wet 判定/溅落/岩浆伤害/liqFactor 位移减速/湿身落速帽。时序与原版
@@ -2535,20 +2612,29 @@ export class TownNPC extends Entity {
     }
   }
 
-  /** 环境与互殴受击(NPC.cs:91534-91544 的 townNPC 分支):
+  /** 环境与互殴受击(NPC.cs:91590-91600 的 townNPC 分支;★C1 定案：本块在 Update 层
+   *  与 AI() 正交——ai[0]==25 微光上升帧同样运行,早退分支现于 fixedUpdate 内显式
+   *  调用本方法承接。整块挂 :91593 门 `netMode!=1 && type!=37 && friendly`——老人
+   *  (37) 不入三连）：
    *  ① 岩浆已移交 npcLiquid.updateNpcLiquid（30t 冷却+50 直伤同语义）
-   *  ② 溺水(NPC.CheckDrowning :96118-96154):水内每 7t breath--;breath≤0 后
-   *    每 7t life-=2,归零一击 StrikeNPC(2);离水 breath+3/t cap 200
-   *  ③ 敌怪互殴(GetHurtByOtherNPCs :93605-93690):任一 !friendly 且 damage>0 的
-   *    NPC 接触 → StrikeNPC(DamageVar(attacker.damage), 6, 方向),immune[255]=30;
-   *    后置两枝（2026-08-20 补）：dryadWard 荆棘反伤(⌊实伤/3⌋,:93666-93681) +
-   *    HurtingBees 蜂攻击者受【本体 damage】反蜇(:93682-93696)
+   *  ② 溺水(CheckDrowning :96056-96088):几何判头浸(Collision.DrownCollision
+   *    Collision.cs:1385,非 wet 旗)——水内每 7t breath--;breath≤0 后每 7t
+   *    life-=2 直写(:96073,dontTakeDamage 管不着)+friendlyRegen 清零(:96069);
+   *    归零一击 StrikeNPCNoInteraction(2)(:96077-81,owner=255 链不查
+   *    dontTakeDamage/immune → 微光中同样可致死,hurt 的 force 通道承接);
+   *    离水 breath+3/t cap 200
+   *  ③ 敌怪互殴(GetHurtByOtherNPCs :93555-93690):头部 dontTakeDamage 早退(:93559-
+   *    63) → 微光上升态停算;接触命中 → StrikeNPC(DamageVar(attacker.damage), 6,
+   *    方向),immune[255]=30;后置两枝（2026-08-20 补）：dryadWard 荆棘反伤
+   *    (⌊实伤/3⌋,:93666-93681) + HurtingBees 蜂攻击者受【本体 damage】反蜇
+   *    (:93682-93696)
    *  Enemy.def.damage 已含难度缩放(ScaleStats),DamageVar≈1(Classic)直用。 */
   /** 城镇 NPC 被动回血（CheckLifeRegen NPC.cs:93622-93641，★F10 移植）——
    *  受伤期每 tick 累加 friendlyRegen += 回血率[1 + dryadWard?10 + {22:+5|209:+9}]，
    *  >180 → 清零并 life+1；不设难度倍率、无 CombatText、无音效。困难态唯一不变式 =
-   *  与原版同为线性计数制。调用面与原版同块（:91593-91601 CheckDrowning +
-   *  CheckLifeRegen + GetHurtByOtherNPCs 三连），由 envHurtUpdate 承接，type 37 豁免。 */
+   *  与原版同为线性计数制。调用面与原版同块（:91595 CheckDrowning +
+   *  CheckLifeRegen + GetHurtByOtherNPCs 三连），由 envHurtUpdate 承接，type 37
+   *  整块豁免同门；★C1：微光上升帧无任何 ai 门照常累计（F10 面语义不变）。 */
   private lifeRegenUpdate(): void {
     if (this.dead || this.hp >= this.maxHp) return;         // :93624 life < lifeMax 门
     let rate = 1;                                           // num = 1 基础
@@ -2567,33 +2653,44 @@ export class TownNPC extends Entity {
     const st = world.store;
     if (this.npcVsCd > 0) this.npcVsCd--;
     if (this.dryadWardT > 0) this.dryadWardT--;    // buffTime 165 逐 tick 衰减
-    // ② 溺水(:96118-96154;DrownCollision=头部浸水,headSubmerged 同式)
-    const submerged = this.wet && st.liquidType[st.idx(
-      Math.max(0, Math.min(st.w - 1, Math.floor(this.cx / TILE))),
-      Math.max(0, Math.min(st.h - 1, Math.floor((this.y + 6) / TILE))),
-    )] !== 2;
-    if (submerged) {
-      if (++this.breathCounter >= 7) {
-        this.breathCounter = 0;
-        this.breath--;
-        if (this.breath <= 0) {
-          this.breath = 0;
-          this.lifeRegenCounter = 0;   // :96069 溺水伤害 tick 清零 friendlyRegen（★F10）
-          this.hp -= 2; // life-=2 直伤(不过防御,原版 :96137)
-          if (this.hp <= 0) { this.hp = 1; this.hurt(2, 0, 0, game); } // :96141-96144 致死一击
-          else game.addDamageNumber(this.cx, this.y, 2, false, '#FFD060');   // [本仓视觉添加]原版 CheckDrowning 无飘字(NPC.cs:96118-96154 静默 life-=2),观感保留标注
+    // 整块豁免门（:91593 字面 `type != 37 && friendly…`——老人(37)不在三连受理面,
+    // ★C1 上提覆盖面：豁免从「仅回血」扩为整段三连,与原版同门）
+    if (this.vanillaId !== 37) {
+      // ② 溺水(CheckDrowning :96056-96088):几何判头浸(Collision.DrownCollision,
+      // Collision.cs:1385)——非 wet 标志位驱动!近似 = 头部格有液 且 非 lava(2)
+      // 且 非 shimmer(4)（DrownCollision 显式 `!tile.lava() && !tile.shimmer()`）
+      const hi = st.idx(
+        Math.max(0, Math.min(st.w - 1, Math.floor(this.cx / TILE))),
+        Math.max(0, Math.min(st.h - 1, Math.floor((this.y + 6) / TILE))),
+      );
+      const submerged = this.wet && st.liquid[hi] > 0
+        && st.liquidType[hi] !== 2 && st.liquidType[hi] !== 4;
+      if (submerged) {
+        if (++this.breathCounter >= 7) {
+          this.breathCounter = 0;
+          this.breath--;
+          if (this.breath <= 0) {
+            this.breath = 0;
+            this.lifeRegenCounter = 0;   // :96069 溺水伤害 tick 清零 friendlyRegen（★F10/
+                                         // ★C1:ai25 帧同样走此表）
+            this.hp -= 2; // life-=2 直伤(不过防御,原版 :96073 静默扣——ai25 帧同样生效,
+                          // dontTakeDamage 只挡外部攻击链不挡直写)
+            if (this.hp <= 0) { this.hp = 1; this.hurt(2, 0, 0, game, 0, 0, false, true); } // :96077-81 致死一击
+            else game.addDamageNumber(this.cx, this.y, 2, false, '#FFD060');   // [本仓视觉添加]原版 CheckDrowning 无飘字(NPC.cs:96118-96154 静默 life-=2),观感保留标注
+          }
         }
+      } else {
+        this.breath = Math.min(200, this.breath + 3);
+        this.breathCounter = 0;
       }
-    } else {
-      this.breath = Math.min(200, this.breath + 3);
-      this.breathCounter = 0;
-    }
-    // ②' 城镇被动回血 CheckLifeRegen（:91596-91601 与 CheckDrowning 同块依序,
-    //    位于互殴段之前;老人 type==37 豁免门同块 :91595）★F10
-    if (this.vanillaId !== 37) this.lifeRegenUpdate();
-    // ③ 敌怪互殴(:93605-93690)——BeHurtByOtherNPC 全段（含 dryadWard 荆棘 +
-    //    HurtingBees 蜂反蜇两后置枝，:93666-93681）
-    if (this.npcVsCd <= 0) {
+      // ②' 城镇被动回血 CheckLifeRegen（:93598 与 CheckDrowning 同块依序,
+      //    位于互殴段之前）★F10/★C1(ai25 帧照常累计)
+      this.lifeRegenUpdate();
+      // ③ 敌怪互殴(GetHurtByOtherNPCs :93555-93690)——BeHurtByOtherNPC 全段（含
+      //    dryadWard 荆棘 + HurtingBees 蜂反蜇两后置枝，:93666-93696）。
+      //    ★C1：头部早退门 (:93559-63 `dontTakeDamage||immortal||…`) —— 微光上升态
+      //    (ai[0]==25 → this.hurt 的 dontTakeDamage 承接位)互殴停算。
+      if (!this.shimmerRise && this.npcVsCd <= 0) {
       for (const ent of game.enemies()) {
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
           damage?: number; def?: { damage?: number }; vanillaId?: number };
@@ -2625,6 +2722,7 @@ export class TownNPC extends Entity {
         }
         break;
       }
+      }
     }
   }
 
@@ -2642,6 +2740,13 @@ export class TownNPC extends Entity {
    *    （num13 左最大负 / num14 右最小正,:54052-54068），候选 num16/17 记录在最近值
    *    刷新时且过 CanBeChasedBy（:54054-54057 flag19 字面嵌套,不过门保留旧候选——
    *    治理批 B1① 形状不变,仅改锚行号）；
+   *  - ★C2：本方法即 num13..num17 候选池的唯一产出位（this.threatPool 快照）——
+   *    入态选靶/态内发射瞄准直读快照,不再独立重扫（原版 :56016-56105/:55105-12
+   *    同为池直读;红 β 三轮「同拍死亡影响重扫」议题由此结构性消解）；
+   *  - ★C3②：flag17（dangerStinky）= 候选中出现 stinky 源——敌怪支(:54045-47,
+   *    零伤敌唯臭味可入扫描)与玩家第二扫(:54080-96,stinky 玩家视为威胁并录
+   *    num16/17);消费点只有 flag31 的 `!flag17`(:55769)。614 鳄鱼特判(:54066-75)
+   *    本仓无该型入口 → 缺席即正确（存档见清零收敛批报告）;
    *  - PrettySafe 收口【不是】无条件段：整支挂在 `if (flag16 && !flag5)` 总伞内
    *    （:54102），ai[0]==8 有独立臂(:54107-54115 解冻)、`else if (ai[0]!=10..15)`
    *    支才含收口(:54120-22)/逃离布线(:54124+)——即对话中不收口、被逼停不收口、
@@ -2653,19 +2758,24 @@ export class TownNPC extends Entity {
     this.admitWide = false;
     this.dangerSide = 0;
     this.threatRaw = false;                           // flag16 原始位（逐拍重扫）
-    this.threatLeft = null; this.threatRight = null;  // num16/num17（引用同拍重建）
+    this.dangerStinky = false;                        // flag17（逐拍重置,:55769 消费）
+    const pool: ThreatPoolSnapshot = { left: null, right: null };
     const num11 = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
     let num12 = num11;                                // 准入窗(:54010)
     if (this.talking && TOWN_ATTACK_TYPE[this.vanillaId] === 3 && num12 < 250) {
       num12 = 250;                                    // 对话挥击族扩窗(:54036-54038)
     }
     let bestL = -1, bestR = -1;                       // num13/num14
+    let scanHit = false;                              // flag16 原始位（:54043 候选点）
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
-        damage?: number; def?: { damage?: number } };
+        damage?: number; def?: { damage?: number }; stinkyT?: number };
       if (e.dead) continue;
       const edmg = e.damage ?? e.def?.damage ?? 0;
-      if (edmg <= 0) continue;                        // friendly||damage<=0 不算
+      // 准入续链（:54031-33 字面子句 `((friendly||damage<=0) && !stinky)`）：零伤体
+      // 只有带 stinky(120) 才入扫描——恶臭源的敌怪对城镇 NPC 计为威胁（C3②）
+      const estinky = (e.stinkyT ?? 0) > 0;
+      if (edmg <= 0 && !estinky) continue;
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       const dx = ecx - this.cx;
       const dist = Math.hypot(dx, ecy - this.cy);
@@ -2676,27 +2786,55 @@ export class TownNPC extends Entity {
       this.admitWide = true;                          // flag15 置位（:54037）
       if (dist >= num11) continue;                    // ★窄窗截断（:54040-54041）——
                                                       // flag15 与威胁簿记在此分立
-      // flag16 = true（:54043）→ threatRaw 由本敌贡献（下 bestX 刷新即命中证据）
+      scanHit = true;                                 // flag16 = true（:54043 候选点）
+      if (estinky) this.dangerStinky = true;          // flag17 置位（:54045-47）
       if (dx < 0) {
         if (bestL === -1 || dx > bestL) {
           bestL = dx;
           // ★B1①（:54054-54056 flag19）：候选记录在最近值刷新时发生——过 CanBeChasedBy
           // 才写 num16/17；不过门时保留上一合格候选（原版嵌套 `if(flag19)` 字面）。
           if (canBeChasedBy(e)) {
-            this.threatLeft = { x: e.x, y: e.y, w: e.w, h: e.h, cx: ecx, cy: ecy };
+            pool.left = { x: e.x, y: e.y, w: e.w, h: e.h, cx: ecx, cy: ecy };
           }
         }
       } else {
         if (bestR === -1 || dx < bestR) {
           bestR = dx;
           if (canBeChasedBy(e)) {                  // 同上：num14 刷不刷与 flag19 无关
-            this.threatRight = { x: e.x, y: e.y, w: e.w, h: e.h, cx: ecx, cy: ecy };
+            pool.right = { x: e.x, y: e.y, w: e.w, h: e.h, cx: ecx, cy: ecy };
           }
         }
       }
     }
-    if (bestL !== -1 || bestR !== -1) this.threatRaw = true;   // flag16 = 扫描命中未收口
-    if (bestL === -1 && bestR === -1) return;                  // 无窄窗威胁（flag16=false）
+    // ---- stinky 玩家第二扫（★C3②落地，NPC.cs:54080-96；本仓无 614 鳄鱼载体，
+    //      :54066-54075 特判缺席即正确——见文件头清零收敛批注）。仅当敌人第一扫
+    //      零命中且非对话时执行；玩家槽不需要 CanBeChasedBy 门（原版直写
+    //      num16/17）；stinky 载体 = player.buffs.has(BuffType.Stinky)（buff 120,
+    //      臭味药水 2353/弹 371/PoopProj 授予链）----
+    if (!scanHit && !this.talking) {
+      for (const ent of (game.candidatePlayers?.() ?? [game.player])) {
+        const p = ent as unknown as { x?: number; y?: number; w?: number; h?: number;
+          dead?: boolean; buffs?: { has(b: number): boolean } } | null | undefined;
+        if (!p || p.dead) continue;
+        if (!(p.buffs?.has(BuffType.Stinky))) continue;   // stinky=buff 120 运行时位
+        // （原版尾段 `(p.stinky || type!=633/37/441/228/107/453)` 恒真——死条件，
+        // 反编译原文如此；无免疫分支,臭味玩家对全城镇体一律生效）
+        const px = p.x ?? 0, py = p.y ?? 0, pw = p.w ?? 0, ph = p.h ?? 0;
+        if (Math.hypot(px + pw / 2 - this.cx, py + ph / 2 - this.cy) >= num11) continue;
+        scanHit = true;                               // :54090-91 flag16+flag17 同置
+        this.dangerStinky = true;
+        const dx = px + pw / 2 - this.cx;
+        const ref: ThreatRef = { x: px, y: py, w: pw, h: ph, cx: px + pw / 2, cy: py + ph / 2 };
+        if (dx < 0) {                                 // 无 CanBeChasedBy 门（玩家槽直录
+          if (bestL === -1 || dx > bestL) { bestL = dx; pool.left = ref; }   // num16/17)
+        } else {
+          if (bestR === -1 || dx < bestR) { bestR = dx; pool.right = ref; }
+        }
+      }
+    }
+    this.threatPool = pool;                           // ★C2 单点产出
+    if (scanHit) this.threatRaw = true;               // flag16 = 扫描命中未收口(:54043)
+    if (bestL === -1 && bestR === -1) return;         // 无窄窗威胁（flag16=false 或仅玩家）
     this.dangerSide = bestL === -1 ? 1 : (bestR !== -1 ? (bestR < -bestL ? 1 : -1) : -1);
     // —— num15 选侧（:54099-54100）：仅右→1 / 仅左→−1 / 两侧取近者侧（平局判左）；
     // vanilla 在对话里另有同式重算位（:55763-55764,num3×0.8 处）,值恒同,合算。
@@ -2851,15 +2989,16 @@ export class TownNPC extends Entity {
       // 触发门:站地 + 冷却尽 + 探测范围内有 LOS 敌(:55769 flag31)
       // 坐姿 ai[0]==5 不满足 flag31 的 ai[0]<2 门(:55769)——坐着不打,起身再打;
       // flag31 的 (flag16||flag18) 门(:55769)= 危险扫描命中(dangerNear,PrettySafe
-      // 收口后)——远程族"敌在 PrettySafe 外"时逃/打一起停;flag18/flag17=stinky
-      // 双路,本仓无 stinky 载体恒空。被逼停 ai[0]==8 在 flag31 豁免列——站定仍还击。
+      // 收口后)——远程族"敌在 PrettySafe 外"时逃/打一起停;flag18 全文无置位恒
+      // false(死旗),`flag16|flag18` ≡ flag16;flag17(stinky 臭源在场,:55769 `!flag17`
+      // 因子,C3②)→ 不发起自卫攻击。被逼停 ai[0]==8 在 flag31 豁免列——站定仍还击。
       // ★对话不豁免（2026-08-31 对账批②原版总伞翻案）：`(!flag5|flag16)`(:55761)
       //   = 仅「对话且无险」整段跳过——对话中有险照常掷骰入态（num3×0.8 减频,
-      //   :55762-55765,num15 重算位次已由 pickSideTarget 每拍重扫承责）
+      //   :55762-55765;num15 重算位次值与扫描伞位次公式同形同源,池统一后由
+      //   threatPool/dangerSide 承接）
       if (!this.onGround || this.atkCd > 0 || this.sitting
-        || this.healing || !this.dangerNear) return false;
+        || this.healing || !this.dangerNear || this.dangerStinky) return false;
       this.prevAi0 = this.corneredT > 0 ? 8 : this.walkMode;   // localAI[2]=ai[0]（:56028 族）
-      const range = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
       let chance = TOWN_ATTACK_CHANCE[this.vanillaId] ?? 1;
       // num3 = 进度强化链频率除数(:53413 起 19 项累计;2026-08-14 前恒 2 近似已废)
       // tipsy = 实例位（NPC.tipsy :93179,669 麦酒爆炸施加——非世界旗标）
@@ -2910,14 +3049,15 @@ export class TownNPC extends Entity {
       if (this.rng() >= 1 / gate) return false;     // rand(gate)==0
       const params = this.atkParams(atkType);
       if (!params && atkType !== 3) return false;
-      // 入态候选选择（★F2 check-after-select 形状，2026-08-30）：主候选按危险侧
-      // |dx| 钦定 → 重验失败单次回退次候选 → 带检只对【终选者】判，不过即本 tick
-      // 拒发——不再对另一侧/另一敌重试（弓族斜率 ±0.5 :56048-56049 vector8.Y 带；
-      // 狼人态 ≤50px :56022-56025 flag36；支内重验 :56019-56026/:56052-56057）。
+      // 入态候选选择（★F2 check-after-select 形状 + ★C2 池直读定案）：主候选按
+      // 危险侧 num15 钦定（直读本拍 threatPool 快照,不再独立重扫——原版 :56019 起
+      // 直读 Main.npc[num16/num17]）→ 重验失败单次回退次候选 → 带检只对【终选者】
+      // 判，不过即本 tick 拒发——不再对另一侧/另一敌重试（弓族斜率 ±0.5 :56048-56
+      // vector8.Y 带；狼人态 ≤50px :56022-25 flag36；支内重验 :56019-26/:56052-57）。
       // 弓族另带 lineMode=真 CanHitLine 门（:56044/:56058 用 CanHitLine 非 CanHit,
       // 比扫描期 CanHit 更严）;方向 Y 同时存进 ai[2]=vector8.Y 做持械仰角
       const target = this.pickSideTarget(
-        world, game, range,
+        world,
         // 重验形状（★F5①）：近战 CanHit 点对（:56019-56023）/ 弓 CanHitLine 点对
         // （:56044-56046）+ 斜率带 ±0.5(:56048-49)/ 魔法同为 CanHitLine 点对
         // （:56066-56068——旧注释"仅弓族 lineMode"系漏读,:56061 支与 :56037 支同族
@@ -3174,8 +3314,9 @@ export class TownNPC extends Entity {
       // 前探点对（CanHit(base.Center,0,0,…)：退路堵死 或 入态时是被逼停）
       if (!canHitPoint(store, this.cx, this.cy, probeX, this.cy) || this.prevAi0 === 8) {
         // 「换敌再接」候选（:55652-55658）：主候选 = 危险侧【同】侧最近敌(num15==1→num17)
-        const primary = sideRight ? this.threatRight : this.threatLeft;
-        const alternate = sideRight ? this.threatLeft : this.threatRight;
+        //（★C2 后与本仓其他消费位同源：直读 threatPool 快照）
+        const primary = sideRight ? this.threatPool.right : this.threatPool.left;
+        const alternate = sideRight ? this.threatPool.left : this.threatPool.right;
         let chosen = primary;
         if (chosen && !canHitPoint(store, this.cx, this.cy, chosen.cx, chosen.cy)) {
           // 单次回退（num89 侧不过即放弃——原版嵌套三元,无第二轮回退）
@@ -3271,61 +3412,45 @@ export class TownNPC extends Entity {
     }
   }
 
-  /** 探测范围内按危险侧取可打敌（AI_007 入态/发射共用,NPC.cs:53887-53963 危险扫描
-   *  + :56016-56061 入态支内选择）。三段形状（2026-08-30 实体侧对账批 ★F2:
-   *  maxDist/slopeCapY 由「候选池预过滤」翻修为「选侧→重验→带外拒发」）：
-   *  ① 扫描：!dead && threat(damage>0) && Distance<range(hypot) && CanHit 点对——
-   *     即 :53887 大条件串（noTileCollide||CanHit(Center,0,0,…Center) 点对
-   *     NPC.cs:54030 字面形态；本仓敌恒 tileCollide → canHitPoint 直判）；
-   *     左右两侧各留【|dx| 最近】者（num13/num14 的 dx 口径 :54034-54049 非 hypot,
-   *     存量债顺手收口）
-   *  ② 选侧钦定：num15 危险侧（:53960 仅右→1 / 仅左→−1 / 两侧比 |dx| 近者）选主候选,
-   *     另一侧为次候选
-   *  ③ 重验+带检：主候选过 lineMode?canHitLine:canHitPoint —— 分支实形态（★F5①
-   *     按字面钉定）：近战 CanHit 点对(:56019-56023)/弓 CanHitLine 点对(:56044-46)/
-   *     魔法 CanHitLine 点对(:56066-68)/挥击 CanHit 点对(:56094-98),
-   *     不过单次回退次候选同判;带检（弓 |DirectionTo.Y|≤slopeCapY :56048-56049 /
-   *     狼人 Distance≤maxDist :56022-56025）只对【终选者】判,失败即整次 null——
-   *     不跨侧、不跨同侧他敌再试。旧实现「池预过滤+hypot 择近」双偏差已收口;旧注
-   *     「点对同构零差/仅弓族 lineMode」按魔法支实形态废除
-   *  返回含实体 position/Size——160/663 落点弹几何按原版 Main.npc[n].position/Size 采样 */
+  /** 按危险侧取可打敌（★C2 统一定案：直读 dangerUpdate 产出的 this.threatPool
+   *  候选池快照，独立重扫已删除——原版 :56016-56105 入态支与 :55105-55112/:54868
+   *  发射位同样直读 num13..num17 池；红 β 三轮「同拍死亡影响重扫结果」议题由
+   *  删除重扫结构性消解）。两种消费形状：
+   *  - 入态模式（缺省,attackUpdate :56016-56103）：①选侧钦定 num15（this.dangerSide,
+   *    与扫描伞内成值公式同源）定主候选,另一侧为次候选；②重验 lineMode?canHitLine:
+   *    canHitPoint —— 分支实形态（★F5① 按字面钉定）：近战 CanHit 点对(:56019-56023)/
+   *    弓 CanHitLine 点对(:56044-46)/魔法 CanHitLine 点对(:56066-68)/挥击 CanHit 点对
+   *    (:56094-98),不过单次回退次候选同判；③带检（弓 |DirectionTo.Y|≤slopeCapY
+   *    :56048-56049 / 狼人 Distance≤maxDist :56022-56025）只对【终选者】判,失败即
+   *    整次 null——不跨侧、不跨同侧他敌再试。
+   *  - 发射模式（shotFaceMatch,shootAt）：num58 规则（:55105-55112 / 近战段
+   *    :54868 族两连 if）= 面向与危险侧同向才取该侧候选,无重验/带检（NaN 与背向
+   *    的兜底在 shootAt 向量链内）。返回含实体 position/Size——160/663 落点弹几何
+   *    按原版 Main.npc[n].position/Size 采样 */
   private pickSideTarget(
-    world: import('../world/World').World, game: GameHooks, range: number,
-    opts?: { slopeCapY?: number; maxDist?: number; lineMode?: boolean },
-  ): { cx: number; cy: number; x: number; y: number; w: number; h: number } | null {
-    type Cand = { cx: number; cy: number; x: number; y: number; w: number; h: number; dx: number };
-    let bestL: Cand | null = null;
-    let bestR: Cand | null = null;
-    for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
-        damage?: number; def?: { damage?: number } };
-      if (e.dead) continue;
-      // 原版扫描门(:53887):!friendly && damage>0 才算威胁(0 伤敌/友好不算)
-      const edmg = e.damage ?? e.def?.damage ?? 0;
-      if (edmg <= 0) continue;
-      // 中心由 x/y/w/h 推导(敌实体有 cx/cy,但勿依赖——判距门曾因 NaN 恒假失效)
-      const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
-      const dx = ecx - this.cx;
-      if (Math.hypot(dx, ecy - this.cy) >= range) continue;       // Distance < num11
-      // ★对齐批③：扫描 LOS 门 = Center 点对（NPC.cs:54030 字面形态）
-      if (!canHitPoint(world.store, this.cx, this.cy, ecx, ecy)) continue;
-      // per-side 最近 = |dx| 最小（左取负值最大 / 右取正值最小,:54034-54049）
-      const cand: Cand = { cx: ecx, cy: ecy, x: e.x, y: e.y, w: e.w, h: e.h, dx };
-      if (dx < 0) { if (!bestL || dx > bestL.dx) bestL = cand; }
-      else { if (!bestR || dx < bestR.dx) bestR = cand; }
+    world: import('../world/World').World,
+    opts?: { slopeCapY?: number; maxDist?: number; lineMode?: boolean; shotFaceMatch?: boolean },
+  ): ThreatRef | null {
+    const pool = this.threatPool;
+    // 态内发射瞄准面（num58 两连 if）：
+    //   num15==1 && spriteDirection==1 → num17；num15==-1 && spriteDirection==-1 → num16；
+    //   否则 -1。hazard 侧与面向不同向 → 直取默认直线向量（shootAt 兜底承担）。
+    if (opts?.shotFaceMatch) {
+      if ((this.facing === 1) !== (this.dangerSide === 1)) return null;
+      return this.facing === 1 ? pool.right : pool.left;
     }
-    // num15 选侧（:53960-53962）：仅右→1 / 仅左→−1 / 两侧→右 |dx| 更近者侧为 1
-    const rightFirst = bestL ? (bestR ? bestR.dx < -bestL.dx : false) : true;
-    let sel = rightFirst ? bestR : bestL;
+    // ---- 入态选靶（:56018-56027/:56051-57/:56064-70/:56093-99 四支同形）----
+    const rightFirst = this.dangerSide === 1;
+    let sel = rightFirst ? pool.right : pool.left;
     if (sel) {
       // 支内重验+跨侧单次回退（近战/魔法/挥击 CanHit 点对 :56019-56026 族 /
       // 弓族 CanHitLine 点对 :56044/:56058——★对齐批③全部改为字面 0 尺寸点对,
       // 端点 tile 与旧 rect 写法同构、行为零差）
-      const losOk = (c: Cand): boolean => opts?.lineMode
+      const losOk = (c: ThreatRef): boolean => opts?.lineMode
         ? canHitLine(world.store, this.cx, this.cy, 0, 0, c.cx, c.cy, 0, 0)
         : canHitPoint(world.store, this.cx, this.cy, c.cx, c.cy);
       if (!losOk(sel)) {
-        const alt = rightFirst ? bestL : bestR;      // 次候选单次回退（原版只试一次）
+        const alt = rightFirst ? pool.left : pool.right;   // 次候选单次回退（原版只试一次）
         if (!alt || !losOk(alt)) return null;
         sel = alt;
       }
@@ -3352,9 +3477,12 @@ export class TownNPC extends Entity {
     let speed = params.speed;
     let kb = params.kb;
     let spread = params.spread;
-    // 229 PrettySafe 近距保命换炮弹(:55128-55135)
+    // 229 PrettySafe 近距保命换炮弹(:55128-55135;同样只认 num58 规则的目标)
+    // 瞄准目标（★C2 池直读 + num58 规则 :55105-55112/:54868 族）：仅当面向与
+    // 危险侧同向且该侧有池候选才取——背向/无候选 → target=null 走默认直线向量,
+    // 原版 num58==-1 分支同形;态内【不做】LOS 重验/带检(原版射出位亦无)
     const pretty = TOWN_PRETTY_SAFE[this.vanillaId];
-    const target = this.pickSideTarget(world, game, range);
+    const target = this.pickSideTarget(world, { shotFaceMatch: true });
     if (params.panic && pretty && target && Math.hypot(target.cx - this.cx, target.cy - this.cy) < pretty
       && this.atkTick === params.shootTick) {
       proj = params.panic.proj; dmg = params.panic.dmg; speed = params.panic.speed;

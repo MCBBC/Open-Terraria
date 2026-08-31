@@ -34,7 +34,8 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, projFrameImg, projFrameCount } from './Arrow';
 import { applyProjStatus } from './projStatus';
-import { noteVanillaProjImmune, applyBannerDamageDealt } from './projTargets';
+import { noteVanillaProjImmune, applyBannerDamageDealt, pyroclastProjectileGate } from './projTargets';
+import { trySnapStrike } from '../stats/SnapStrike';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { canHit } from '../physics/LineOfSight';
@@ -477,6 +478,15 @@ export class MagicMissileProj extends Entity {
       applyProjStatus(this.projId, e as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
       if (this.nebulaCb) this.nebulaCb();
+      // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42）：可控导弹族三型
+      //   （16/34/79）均 magic 数据面 → 原版同样不触发；类门 pyroclastProjectileGate
+      //   单源（melee|ranged 过滤），站位补齐
+      if (pyroclastProjectileGate(game, this)) {
+        trySnapStrike(game, game.player, 1,
+          (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
+          e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+            cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+      }
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);   // 音/飘值=单点
       // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
       // 16 显型档=immune[owner]=8（:14096-14098）→ 非 local 面按表写；
@@ -821,6 +831,14 @@ export class FlyingKnifeProj extends Entity {
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, e as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
+      // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42）——飞刀 491 数据面
+      //   melee（SetDefaults 类旗投影）→ 过类门即脉冲；共用 360t 冷却
+      if (pyroclastProjectileGate(game, this)) {
+        trySnapStrike(game, game.player, 1,
+          (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
+          e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+            cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+      }
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点
     }
   }
@@ -858,6 +876,8 @@ export class FlyingKnifeProj extends Entity {
  * （:22325-22337）。
  */
 export class StarfuryStar extends Entity {
+  /** 原版弹型 id（SetDefaults :626-636 melee 旗——resolveProjClass 类门数据源） */
+  readonly projId = 9;
   damage: number;
   /** 出生注入的穿透（SetDefaults 2） */
   pierce: number;
@@ -924,6 +944,14 @@ export class StarfuryStar extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
+      // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42）——老星怒落星 9 数据面
+      //   melee → 过类门即脉冲；共用 360t 冷却（vanilla 在 DamageVar 前、StrikeNPC 前）
+      if (pyroclastProjectileGate(game, this)) {
+        trySnapStrike(game, game.player, 1,
+          (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
+          e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+            cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+      }
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * 5, 0, game, this.armorPen, crit, this.pierce, true);   // 音/飘值=单点
       if (--this.pierce <= 0) { this.killNow(game); return; }
     }

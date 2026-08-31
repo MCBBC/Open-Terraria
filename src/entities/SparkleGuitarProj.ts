@@ -44,7 +44,8 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { canHit } from '../physics/LineOfSight';
-import { playerCanHitEnemy, hitCritters, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, hitCritters, applyBannerDamageDealt, pyroclastProjectileGate } from './projTargets';
+import { trySnapStrike } from '../stats/SnapStrike';
 import { cutTilesBox } from './ProjCutTiles';
 
 /** ★三轮蓝队 F6：immune[owner] 读清双语义（:12636-12641/:14169）。原版 flag3 单发族
@@ -93,12 +94,23 @@ function stellarHitDir(vx: number): number {
   return vx < 0 ? -1 : 1;
 }
 
-/** 命中结算共用形参包（直击与 Kill 爆裂同链，区别只在弹盒尺寸与免疫排除面）。 */
+/** 命中结算共用形参包（直击与 Kill 爆裂同链，区别只在弹盒尺寸与免疫排除面）。
+ *  proj = 出手弹体（焰爆石 kind1 类门用；两调用点传 this）。 */
 function stellarStrike(
-  e: { hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
-    pierce?: number, fromPlayer?: boolean) => boolean },
+  e: { id: number; x: number; y: number; w: number; h: number;
+    hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
+      pierce?: number, fromPlayer?: boolean) => boolean },
   damage: number, kx: number, game: GameHooks, armorPen: number, critChance: number,
+  proj?: { hostile?: boolean; projId?: number },
 ): void {
+  // ★焰爆石 6178 kind1 弹幕位（Projectile.cs:13439-42 `(melee||ranged)&ownedBySomeone
+  //   && accPyroclast → TryMakingSnappingStoneStrike(…,1)`）：直击与 Kill 爆裂共用的
+  //   唯一结算口——弹 856 数据面 magic（resolveProjClass 单源）→ 原版同样不触发，
+  //   接线为站位补齐（类门 melee|ranged 过滤,未来分流时自动生效）。
+  if (proj && pyroclastProjectileGate(game, proj)) {
+    trySnapStrike(game, game.player, 1, e.x + e.w / 2, e.y + e.h / 2, e.id,
+      { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+  }
   e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage)), kx, 0, game, armorPen,
     Math.random() < critChance, 0, true);          // StrikeNPC 单点（Enemy.hurt 同构）
 }
@@ -331,7 +343,8 @@ export class SparkleGuitarProj extends Entity {
         const blocked = !canHit(game.world.store, this.x, this.y, this.w, this.h,
           p.x, p.y, p.w, p.h);
         stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
-          stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance);
+          stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance,
+          { hostile: false, projId: this.projId });   // ★焰爆石 kind1 类门入参
         // ★F6 命中尾显式清窗（:14169 usesLocalNPCImmunity 支 immune[owner]=0）——
         //   近战桥留下的全局窗在本弹命中面被覆盖清零（noteNpcPlayerImmune(id,0) 出表）
         sparkImmuneWindowClear(e, game);
@@ -383,7 +396,8 @@ export class SparkleGuitarProj extends Entity {
       if (this.hitOnce.has(e.id)) continue;        // flag2（:12598 usesLocalNPCImmunity array[i]==0）
       this.hitOnce.add(e.id);
       stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
-        stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance);
+        stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance,
+        { hostile: false, projId: this.projId });   // ★焰爆石 kind1 类门入参
       sparkImmuneWindowClear(e, game);
     }
   }

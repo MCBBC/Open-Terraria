@@ -12471,13 +12471,17 @@ export class Enemy extends Entity {
       }
     }
     this.justHitT = 2; // 原版 justHit 单帧旗标（AI_023 飞行武器/陆龟受击回态消费）
-    // 猪鲨爆裂泡泡（NPC 371，StrikeNPC cs:82102-82107）：伤害清零(num=0)不扣血，
-    // 直接转入爆炸态 ai[0]=1/ai[1]=4 + dontTakeDamage——"被击即爆"而非"被打死"；
-    // aiStyle 70 (:35180-35194) 据此扩 100×100 并 EncourageDespawn(3) 消散
+    // 猪鲨爆裂泡泡（NPC 371）★1458 行为裁定（台账②，2026-08-31 报告单列）：
+    //   · 旧档（1456 StrikeNPC cs:82102-82107）：命中【伤害清零】+ 就地转引信态
+    //     （ai0=1/ai1=4 + iframes 近似）——已在本次清偿移除；
+    //   · 1457/1458：命中照常扣血（本函数通用管线照走——lifeMax=1 时 CombatText/
+    //     HitSound 的 lifeMax>1 门天然静音,与原版一致）；每次命中播 legacy 破裂音
+    //     （StrikeNPC :85185 PlaySound(4,…,3)=死音库 style3）,致命拍另撒蓝环尘
+    //     （:85190-85211,d212×60,视觉面在 dukeBubbleAI 转换点近似承担）；
+    //   · 血尽转换移交 dukeBubbleAI 首行（checkDead NPC.cs:78850-78855 → ai0=1/
+    //     ai1=4 + PrepareForDeathAnimation），本函数下方 hp<=0 死亡段对其放行。
     if (this.vanillaId === 371) {
-      this.ai0 = 1; this.ai1 = 4;
-      this.iframes = 8; // dontTakeDamage（爆炸 4t 内不可再受击）
-      return true;
+      game.playSfxWav?.('NPC_Killed_3', 1, this.cx, this.cy);
     }
     // 原版结算序（Projectile.cs:12796-12808 + Main.cs:65626-65635）：
     //   弹幕侧最终伤 num12 先 += checkArmorPenetration（穿甲加成【加进伤害】，
@@ -12683,6 +12687,12 @@ export class Enemy extends Entity {
       // = 零掉落(boss 袋/夜明矿/武器池全不出,2026-08-19 终审修)
       if (this.vanillaId === 396 || this.vanillaId === 397
         || (this.vanillaId === 398 && this.ai0 !== 2)) return false;
+      // 猪鲨爆裂泡泡（NPC 371）：血尽不直死——checkDead（NPC.cs:78850-78855）
+      // 转 ai[0]=1/ai[1]=4 引信态 + PrepareForDeathAnimation（life=lifeMax/
+      // dontTakeDamage=true），转换逻辑在 dukeBubbleAI 首行接管（★1458 行为裁定,
+      // 台账②——旧 1456 零伤早退档已退役,见上方 hurt 头部注释）。
+      // 爆裂态（ai0==1）内再次血尽（理论不可达,dontTakeDamage 拒后续弹）直接放行死亡。
+      if (this.vanillaId === 371 && this.ai0 !== 1) return false;
       // 石巨人族:仅挂载头 246 放行且须【本体活】(血尽转自由态在 golemHeadAI
       // 首行——一阶段本体无敌,玩家先打头的场景本体必活;本体死后原版头是
       // StrikeNPCNoInteraction 标准死 :31287-31290,落回通用管线)。

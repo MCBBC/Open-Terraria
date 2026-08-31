@@ -43,6 +43,18 @@ import { checkTileBreakability } from './HalfBrickPass';
 
 /** 世界树对拍探针开关（种子等价期临时；默认关闭零开销） */
 const LT_TRACE = typeof process !== 'undefined' && !!process.env.LT_TRACE;
+// ★IIIII99e 微域写监视仪：SW_I118_WATCH="x0,x1,y0,y1" 盒内每次活木/叶/掏空/杀格/
+//   平台写入打一行 M118 事件（FTW #42 @3265..3277×324..354 对位用；未设零开销）
+const W118 = typeof process !== 'undefined' && process.env.SW_I118_WATCH
+  ? process.env.SW_I118_WATCH.split(',').map(Number)
+  : null;
+function w118(x: number, y: number): boolean {
+  return !!W118 && x >= W118[0]! && x <= W118[1]! && y >= W118[2]! && y <= W118[3]!;
+}
+function mk118(s: string): void {
+  const rc = (globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1;
+  console.log(`M118|${s}|rc=${rc}`);
+}
 // ★IIIII97c 微段仪：叶簇/走道域每事件打印（SW_I109_MARK 门控；与 x86 taglog 主实例流对位）
 const MK109 = typeof process !== 'undefined' && !!process.env.SW_I109_MARK;
 if (typeof process !== 'undefined') console.log(`[LT109load] mark=${process.env.SW_I109_MARK} mk=${MK109}`);
@@ -232,6 +244,8 @@ function isTileNearbySheet(st: TileStore, x: number, y: number, sheet: number, d
 function setLivingWood(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
+  // ★IIIII99e 微域写监视仪（SW_I118_WATCH 盒内打点）
+  if (w118(x, y)) mk118(`WW|x=${x}|y=${y}|pt=${TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1}|a=${st.flags[i] ? 1 : 0}|w=${st.wall[i]}|hf=${st.half[i]}|sl=${st.slope[i]}`);
   st.type[i] = LIVING_WOOD;
   st.flags[i] = 1;
   st.half[i] = 0;
@@ -258,6 +272,8 @@ function deactivate(st: TileStore, x: number, y: number): void {
   //  清零 → 竖井+房间腔幽灵态与原版分叉 → 房间陈设 PlaceTile 读幽灵态的成败搜索循环
   //  掷数漂移（CONST 链 #42 patch 树相位整段位移的根因：主树逐字节同、patch 树
   //  JS=左 1217/vanilla=右 ~1307）。改 flags=0（与 JungleShrinePass 清腔同款幽灵语义）。
+  // ★IIIII99e 微域写监视仪（SW_I118_WATCH 盒内打点）
+  if (w118(x, y)) mk118(`DV|x=${x}|y=${y}|pt=${TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet ?? -1}|a=${st.flags[st.idx(x, y)] ? 1 : 0}|w=${st.wall[st.idx(x, y)]}`);
   st.flags[st.idx(x, y)] = 0;
 }
 
@@ -310,12 +326,16 @@ function place3x2(st: TileStore, x: number, y: number, style: number): boolean {
 // 石堆(187),原版下一次该区域的 SquareTileFrame 触发 Check3x2 校验失败 → KillTile 清除
 // 残件；JS 残件永生 → 树冠多出 187 残格（对拍实锤 (414,154)/(511-513,140) 等）。
 
-/** WorldGen.KillTile 生成期语义（cs:63559,cs:63955-63960 收尾）：active(false)+
- *  halfBrick(false)+frameX/frameY=-1+清漆；**type/slope 保留**（幽灵 187）；
- *  无掉落掷骰（isGeneratingOrLoadingWorld → noItem=true；type51/wall62 掷骰分支不触及）。
- *  ★YYYYYY（2026-08-23）：补 CheckTileBreakability 头门（cs:63579 num==2 拒毁,尘段
- *  之前零掷零写）——vanilla Check3x2 清除环（cs:49428-49432）走的就是带门 KillTile；
- *  本副本与 FCP 引擎同款只拒杀不加 fail 支。 */
+/** WorldGen.KillTile 生成期语义——★IIIII100b 按 Terarria1458 原文重钉（cs:64037 起，
+ *  标准支尾 cs:64428-64441）：active(false)+halfBrick(false)+frameX/frameY=-1+
+ *  ClearBlockPaintAndCoating+frameNumber(0)，随后 **tile.type=0（类型一并清零——
+ *  旧注释"幽灵 187/仅碰 frame"系误读,实证 X86#42 终态无 187 幽灵而 JS 曾有 1 格）**
+ *  + inActive(false) + **尾 SquareTileFrame(i,j) 级联再扫**（cs:64440!此前缺失=
+ *  本批定罪主根因之一：被杀组六格各自级联 SquareTileFrame→邻组在 kill 循环内
+ *  虽被 destroyObject 头门挡住,但 vanilla Check3x2 尾窗扫会补上；JS 缺级联时
+ *  邻组残活 ⇒ (1062,228) 堆顶存活差 ⇒ c37 col1062 扫描分叉）。无掉落掷骰
+ *  （isGeneratingOrLoadingWorld → noItem=true；type51/wall62 掷骰分支不触及）。
+ *  ★YYYYYY（2026-08-23）：CheckTileBreakability 头门保留（cs:63579 num==2 拒毁）。 */
 function killTileGen(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
@@ -331,6 +351,11 @@ function killTileGen(st: TileStore, x: number, y: number): void {
   st.frameX[i] = -1;
   st.frameY[i] = -1;
   st.paint[i] = 0;
+  st.paintWall[i] = 0;                       // ClearBlockPaintAndCoating 补齐
+  st.coat[i] = 0;
+  st.wire[i] &= ~(1 << 5);                   // inActive(false)
+  st.type[i] = 0;                            // ★IIIII100b cs:64438 类型清零
+  squareTileFrameGen(st, x, y);              // ★IIIII100b cs:64440 Kill 尾级联
 }
 
 /** WorldGen.Check3x2 type=187 分支（cs:49190-49438）：由 (i,j) 格帧重建 3×2 原点,
@@ -340,8 +365,12 @@ function killTileGen(st: TileStore, x: number, y: number): void {
  *  的样式布局解耦（vanilla 54*style 平铺与本仓 35-wrap 帧均自洽重建）。
  *  187→186 草变体转化（cs:49382,frameX∈[756,900]）不移植：vanilla 帧平铺下仅
  *  style 14-16 可达,活树石堆 style 47-51 帧为 2538+ 恒出界。 */
+/** ★IIIII100b：destroyObject 递归门（cs:49627 头拒 / cs:49856 置位 / cs:50291 复位）*/
+let ltDestroyObject = false;
+
 function check3x2Pile(st: TileStore, i: number, j: number): void {
   if (!st.inBounds(i, j)) return;
+  if (ltDestroyObject) return;                        // cs:49627（Kill 级联期间静默）
   const ii = st.idx(i, j);
   if (!st.flags[ii] || st.type[ii] !== PILE2) return;
   const frameX = st.frameX[ii] | 0;
@@ -378,11 +407,23 @@ function check3x2Pile(st: TileStore, i: number, j: number): void {
   }
   if (!flag) return;                                 // cs:49416
   if (dbgK) mk109(`K3X|i=${i}|j=${j}|o=${n5},${num}|why=${whyK}`);
+  ltDestroyObject = true;                            // cs:49856
   for (let k = n5; k < n5 + 3; k++) {
     for (let l = num; l < num8; l++) {
       if (!st.inBounds(k, l)) continue;
       const idx = st.idx(k, l);
       if (st.flags[idx] && st.type[idx] === PILE2) killTileGen(st, k, l);  // cs:49428-49432
+    }
+  }
+  ltDestroyObject = false;                           // cs:50291
+  // ★IIIII100b 定罪主修：Check3x2 杀组尾窗扫（cs:50291-50300）——
+  //   destroyObject 复位后对组原点 5×4 邻域逐格 TileFrame 重验：邻接石堆组的
+  //   残活成员由此补杀（spk7 实证 c33 置堆事件 tick 内 x86 连环清 c18+c19 两堆,
+  //   而 JS 曾漏 c19 组 ⇒ 列顶活性差 ⇒ TPs/TP 分叉 +1 骰流移位全 pass 失步）。
+  //   本 pass 域 TileFrame 其余分支无破坏性写（既档备案），直调本函数即等价。
+  for (let nx = n5 - 1; nx < n5 + 4; nx++) {
+    for (let ny = num - 1; ny < num + 4; ny++) {
+      check3x2Pile(st, nx, ny);                      // cs:50296-50299 TileFrame(nx,ny)
     }
   }
 }
@@ -837,11 +878,21 @@ function growLivingTreeMakePassage(
             deactivate(st, i, num4);
           }
           const wl = wallAt(st, i, num4);
-          if (!isDungeonWall(wl) && wl !== 3 && wl !== 83) st.wall[st.idx(i, num4)] = WALL_LIVING_WOOD;
+          if (!isDungeonWall(wl) && wl !== 3 && wl !== 83) {
+            // ★IIIII99e 微域写监视仪
+            if (w118(i, num4)) mk118(`WP|x=${i}|y=${num4}|side=C|pw=${wl}`);
+            st.wall[st.idx(i, num4)] = WALL_LIVING_WOOD;
+          }
           const wlL = wallAt(st, i - 1, num4);
-          if (!isDungeonWall(wlL) && (wlL > 0 || num4 >= worldSurface)) st.wall[st.idx(i - 1, num4)] = WALL_LIVING_WOOD;
+          if (!isDungeonWall(wlL) && (wlL > 0 || num4 >= worldSurface)) {
+            if (w118(i - 1, num4)) mk118(`WP|x=${i - 1}|y=${num4}|side=L|pw=${wlL}`);
+            st.wall[st.idx(i - 1, num4)] = WALL_LIVING_WOOD;
+          }
           const wlR = wallAt(st, i + 1, num4);
-          if (!isDungeonWall(wlR) && (wlR > 0 || num4 >= worldSurface)) st.wall[st.idx(i + 1, num4)] = WALL_LIVING_WOOD;
+          if (!isDungeonWall(wlR) && (wlR > 0 || num4 >= worldSurface)) {
+            if (w118(i + 1, num4)) mk118(`WP|x=${i + 1}|y=${num4}|side=R|pw=${wlR}`);
+            st.wall[st.idx(i + 1, num4)] = WALL_LIVING_WOOD;
+          }
           if (num4 === j && flag4) {
             deactivate(st, i, num4 + 1);
             placePlatform(st, rng, i, num4 + 1, 23);   // 生命木平台（cs:29109）

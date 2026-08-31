@@ -50,7 +50,20 @@ export const PROTO_MAGIC = 'SW1';
  *       0=零击退/未定义——狱火光环（原版 hitDirection=0 :10348）/圣骑士盾转移
  *       （:37751 同式）按原文传 0,近战类=攻端 facing 字段（:44434/:44491,非位置
  *       符号推算）。⚠ 当前接收端不消费 dir（Game.onPlayerHurt 形参 _dir 弃用），
- *       改造消费面前勿把 0 当「缺省未定」重新编码成 ±1——会放大成假击退。*/
+ *       改造消费面前勿把 0 当「缺省未定」重新编码成 ±1——会放大成假击退。
+ *    g) msg16 PlayerLifeMana 再追加尾段 [u16 pvpDefenseMirror]（★F14 甲虫 MP 记账
+ *       BLOCKER 收敛,2026-08-31 清零批四）：statDefense 终值镜像——F14 定谳 vanilla
+ *       近战 PvP 甲虫蓄能入账值【不是】被击者实扣 HP，而是攻击机 Hurt 返回段重算的
+ *       CalculateDamagePlayersTakeInPVP(num×(crit?2:1), statDefense)（Player.cs:
+ *       38864-38868 + Main.cs:67136-67143,num=DamageVar 卷终伤,crit 在 :38533-35
+ *       先折乘）；该式所需唯一攻击机不可知输入 = 受方 statDefense → 以 msg16
+ *       尾段随被击端「hp 变化包」上行镜像。语义位次=原版攻击机 Main.player[远端]
+ *       .statDefense 本地代理（其同步链同样滞后一个状态批次）——镜像新鲜度与
+ *       原版同层而非更劣：结算强制位 notifyPlayerHurtSettled 保证命中瞬间一帧内
+ *       必有该目标的新鲜 hp 包在途。降级矩阵：新 client 发 → 旧 server 只读已知段
+ *       重打包剥此尾 = 对端镜像缺省 null → 收包侧保守弃账（不虚增,见 ClientNet
+ *       消费门注释）；旧 client/新 server 同理；解析为位置序容错读（remaining 门）
+ *       与 a) 免疫余量尾段同构,不动既有序。*/
 export const PROTO_VER = 7;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
@@ -84,6 +97,9 @@ export const enum Msg {
                       //   tile 终态仍由 TileBatch 权威收敛，本包只补「即时性」= 原版 msg19 语义
   // ---- v3 实体同步（房主权威 + 服务器中继；ID 对齐原版 MessageID.cs） ----
   PlayerLifeMana = 16, // 双向 {u8 slot, i16 hp, i16 maxHp}（原版同号：客户端权威 HP，服务器中继）
+                       // 尾段（位置序容错,均 remaining 门）：[u16 deathsPve][u16 deathsPvp]
+                       // [i16 mana][i16 maxMana][f32 luck][i16 pvpImmuneRemaining（2026-08-30 批）]
+                       // [u16 pvpDefenseMirror（2026-08-31 ★F14 甲虫记账批,g) 注）]
   SyncItem = 21,       // 房主→广播 {u32 netId, u8 op(0=spawn/1=take/2=despawn), str key,
                        //   u16 stack, f32 x,y,vx,vy}（原版同号 SyncItem）
   SyncNPC = 23,        // C→S（房主上行）：{u16 count, [u32 netId, str key, f32 x,y,vx,vy,
