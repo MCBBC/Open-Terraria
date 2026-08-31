@@ -2885,21 +2885,26 @@ class HallwayCalculator {
     for (const cand of candidates) {
       if (!this.canConnect(source, cand)) { ST.connFails++; continue; }
       const liquidFlag2 = cand.room.settings.style.LiquidType >= 0;
-      // 连接点（base 实现；Override 分支经 room 覆写面走）
+      // 连接点第一回合=裸查对（base 实现；Override 分支经 room 覆写面走），仅供液门 Y 判定——
+      // C# SelectGoodRoomForHallway :298-299。
       let connS: V2, connT: V2;
-      let qGood: number = CPQuality.Good as number;
       {
         const r1 = roomGetHallwayConnectionPoint(source.room, this.ctx, v2(cand.centerX, cand.centerY));
         const r2 = roomGetHallwayConnectionPoint(cand.room, this.ctx, v2(source.centerX, source.centerY));
         connS = r1.point; connT = r2.point;
-        const qN1 = r1.quality as number, qN2 = r2.quality as number;
-      qGood = Math.max(qN1, qN2) as typeof CPQuality.Good;
       }
       if ((liquidFlag && (connS.y >= source.centerY || connS.y <= connT.y))
         || (liquidFlag2 && (connT.y >= cand.centerY || connS.y > connT.y))) { ST.liquidFails++; continue; }
       drlCands++;
       let num = r.next();
-      const hallLine: HallLineRef = { source, target: cand, sourcePoint: connS, targetPoint: connT };
+      // ★IIIII100c γ 定谳修复：C#:311 对每 candidate 再走静态 wrapper
+      // GetHallwayConnectionPoints（Provider.cs:1096/1147）重算两端点+质量
+      // （base 房 ⇒ 每 candidate 四次 GtHCP、两次同向；旧镜像把裸点复用为 hallLine 点=
+      //   整段缺二调 ⇒ 随机点不同+每 candidate 少耗 2 掷。CP-WALK 内层即此）。
+      // 注意次序：wrapper 在液门+drlCands++/NextDouble 之后（与 C# 一致，掷流中性）。
+      const wPts = getHallwayConnectionPoints(source.room, cand.room, this.ctx);
+      const qGood: number = wPts.qm;
+      const hallLine: HallLineRef = { source, target: cand, sourcePoint: wPts.p1, targetPoint: wPts.p2 };
       num -= (qGood === CPQuality.Okay ? 2 : qGood === CPQuality.Bad ? 10 : (qGood as number) === CPQuality.VeryBad ? 1000 : 0);
       num += kind === ScoreKind.Hallway ? this.scoreHallway(hallLine) : this.scoreStairwell(hallLine);
       if (num <= bestScore) continue;
@@ -3141,7 +3146,9 @@ class DualProvider {
       }
       for (let k = 0; k < 20; k++) {
         let value = this.ctx.rng.next() * 2.0 - 1.0;
-        value = Math.sign(value) * Math.pow(Math.abs(value), 0.5);
+        // ★IIIII100c sqrt 单刀实验（k0 li=8 单 attempt nf 末位 ULP …e1ecce vs …e1eccf）：
+        //   多数 CRT 对 pow(x,0.5) 走 sqrt 短路；试换 Math.sqrt 单点归位。
+        value = Math.sign(value) * Math.sqrt(Math.abs(value));
         const room = this.tryMakeRegularRoomOnLine(item, this.ctx.rng.next(), value, { li: i, phase: 'r20', ri: k });
         if (room) out.push(room);
       }
@@ -3495,11 +3502,19 @@ function getBiomeRoomTypeFor(style: DungeonStyleData): number {
   return STYLE_BIOME_ROOM_TYPE[style.Style] ?? DPRoomType.Legacy;
 }
 
-/** GetHallwayConnectionPoints（Provider.cs:1096-1104）。 */
-function getHallwayConnectionPoints(roomA: DRoomBase, roomB: DRoomBase, ctx: DualLayoutCtx): { p1: V2; p2: V2 } {
+/** GetHallwayConnectionPoints（Provider.cs:1096-1104；i113rsrc 构建号 1147）。
+ *  ★IIIII100c：补 x86 rig 同位出口 Mark DR|HCW（两 q 值+两端点），并返回两侧质量——
+ *  wrapper 内部对两端各重调一次 GtHCP，质量/点都可能异于裸查对。 */
+function getHallwayConnectionPoints(roomA: DRoomBase, roomB: DRoomBase, ctx: DualLayoutCtx): { p1: V2; p2: V2; qm: number } {
   const r1 = roomGetHallwayConnectionPoint(roomA, ctx, v2(roomB.centerX(), roomB.centerY()));
   const r2 = roomGetHallwayConnectionPoint(roomB, ctx, v2(roomA.centerX(), roomA.centerY()));
-  return { p1: r1.point, p2: r2.point };
+  const q1 = r1.quality as number;
+  const q2 = r2.quality as number;
+  drlMark(`DR|HCW|i${_drlInstNext}|c1=${roomA.centerX()},${roomA.centerY()}|c2=${roomB.centerX()},${roomB.centerY()}`
+    + `|q1=${q1}|q2=${q2}`
+    + `|p1=${Math.trunc(r1.point.x)},${Math.trunc(r1.point.y)}|p2=${Math.trunc(r2.point.x)},${Math.trunc(r2.point.y)}`
+    + `|mr=${drlMr()}|rc=${drlRc()}`);
+  return { p1: r1.point, p2: r2.point, qm: Math.max(q1, q2) };
 }
 
 /** IsAnyRoomInBounds（DungeonData.cs:195-217）。 */

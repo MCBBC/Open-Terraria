@@ -12183,16 +12183,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.player.useTime = Math.max(1, Math.round((bowC?.useTime ?? rg?.speed ?? 6)
           * (this.heldPrefixStat()?.spd ?? 1)));
       }
-    } else if (heldDef && cw && ((cw as { autoReuse?: boolean }).autoReuse
+    } else if (heldDef && cw && (((cw as { autoReuse?: boolean }).autoReuse || options.data.autoReuseAllItems)
       ? (inp.mouseDown || inp.mouseHeld)   // ★autoReuse=电平语义（mouseHeld）——mouseDown
       : inp.mouseDown)                     //   是边沿消费量,发射即被清=按住只出一发
       && this.player.useTime === 0 && cw.kind !== 'melee'
-      && ((cw as { autoReuse?: boolean }).autoReuse || (inp.mouseDown && !this._prevMouseDown))) { // ⑩ autoReuse 门
+      && ((cw as { autoReuse?: boolean }).autoReuse || options.data.autoReuseAllItems
+        || (inp.mouseDown && !this._prevMouseDown))) { // ⑩ autoReuse 门（★全局档并列：
+        // Main.SettingsEnabled_AutoReuseAllItems 归 Player.cs:24182 autoReuseAllWeapons,
+        // TryAllowingItemReuse(P.cs:52044) 对【一切 damage>0 物品】生效——此前本支漏并
+        // 全局档(挥砍支 9821 已并),回旋镖族在全局连发开时持握不自动再掷(2026-08-31)
       // vi_* 数据驱动武器（1456 aiStyle 家族）：回旋镖/长矛/悠悠球/连枷/手雷/魔法/直射兜底。
       // 必须排在 thrownCombat 之前——手雷(166 等)满足投掷判定但语义是 ai16 弹跳引信
       this.useCombatWeapon(cw, heldDef);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && thrownCombat(heldDef)
-      && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse || (inp.mouseDown && !this._prevMouseDown))) { // ⑩
+      && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse || options.data.autoReuseAllItems
+        || (inp.mouseDown && !this._prevMouseDown))) { // ⑩（全局档并列,同上支 :12186 注记）
       // 消耗型投掷武器（手里剑/飞刀/毒刀等，Item.shoot + consumable + noMelee 且无 useAmmo）：
       // 朝鼠标投出 item.shoot 投射物，消耗 1 个，数值全取 vanilla-itemcombat.json；
       // 投射物复用 Arrow（重力 0.3/tick = 原版 aiStyle 2 抛物线同值；命中可回收）
@@ -22807,7 +22812,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // statDefense)（Player.cs:38862-38868 + Main.cs:67136-67143；crit ×2 只经该重算段
         // 进入返回值，与 GA-F2 勘误注一致；致敌致死时实扣被残血钳小而 vanilla 反按全额
         // 公式入账）→ feed msg117 实扣值本身即系统性近似（暴击全漏 ×2、高防/击杀大偏），
-        // 禁走；②「msg17 只携实扣」不足记账，但式中唯一攻端不可知输入仅 statDefense →
+        // 禁走；②「msg117 实扣值」不足构成入账输入，但式中唯一攻端不可知输入仅 statDefense →
         // 以 msg16 第三尾段镜像上行（PROTO 注 g）。收敛实现：
         //   · 每次受理命中 notePendingMeleeHit(slot, rawDmg, crit, 攻套钉值) 登记未决挥击
         //     （ClientNet 内 per-victim FIFO+TTL 窗；聚合/交叠/迟到丢弃语义见其注③④⑤）；

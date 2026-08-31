@@ -1,8 +1,10 @@
 // IIII99d 批帧对拍仪：DungeonPass 家族（sheet 100 烛台/101 书架/79 床/90 浴缸/
 // 34 吊灯/104 时钟/105 雕像/93 灯）终态 frameX/frameY 与 x86 dump 帧通道逐格对拍。
-//   A) toadstool 链：x86 双锚 -004_PostFinSeed.frx/.fry（带帧八通道+2）
-//   B) m 链：gen2-m/105_Final_Cleanup.frx/.fry（gen2 载帧链）
-// 读数=match/mismatch 计数 + 首 8 个不匹配样点（无样点时打 match 证词）。
+//   A) toadstool 链：x86 双锚 -004_PostFinSeed.frx/.fry（载帧双锚，4200×1200）
+//   B) m 链：gen2-m/105_Final_Cleanup.frx/.fry（gen2 载帧链，6400×1800）
+// ★SW_MB_1457 必须在 generateWorld 之前置位（1457 门控 HellFort 布局——晚置会
+//   生成本库旧形地牢 ⇒ 与 dump 同位格全错开=零匹配假差）。
+process.env.SW_MB_1457 = '1';
 import { it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
@@ -17,57 +19,58 @@ const FAMS: Record<string, number[]> = {
   candelabra100: [100], bookcase101: [101], bed79_tub90: [79, 90], chandelier34: [34],
   clock104_statue105: [104, 105], lamp93: [93],
 };
-const N = 4200 * 1200;
 
-async function runChain(tag: string, typPath: string, frxPath: string, fryPath: string): Promise<void> {
+interface ChainCfg { seed: string; evil: 0 | 1; w: number; h: number; typ: string; frx: string; fry: string }
+const CHAINS: Record<string, ChainCfg> = {
+  toad: { seed: '771002', evil: 0, w: 4200, h: 1200,
+    typ: `${HOME}/GoldenChains/golden-toadstool/-004_PostFinSeed.typ`,
+    frx: `${HOME}/GoldenChains/golden-toadstool/-004_PostFinSeed.frx`,
+    fry: `${HOME}/GoldenChains/golden-toadstool/-004_PostFinSeed.fry` },
+  m:    { seed: '20260811', evil: 0, w: 6400, h: 1800,
+    typ: `${HOME}/GoldenChains/gen2-m/105_Final_Cleanup.typ`,
+    frx: `${HOME}/GoldenChains/gen2-m/105_Final_Cleanup.frx`,
+    fry: `${HOME}/GoldenChains/gen2-m/105_Final_Cleanup.fry` },
+};
+
+async function runChain(tag: string, c: ChainCfg): Promise<void> {
   const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
   for (let i = 0; i < TILE_DEFS.length; i++) {
     const s = TILE_DEFS[i]?.vanilla?.sheet;
     if (typeof s === 'number') SHEET[i] = s;
   }
-  const world = await generateWorld({ width: 4200, height: 1200, seedText: tag === 'toad' ? '771002' : '20260811', evil: tag === 'toad' ? 0 : 0 });
-  process.env.SW_MB_1457 = '1';
-  // evil for m-chain(g2m)=0（spot 表）——toadstool evil=0
-  void EVIL_UNUSED;
+  const world = await generateWorld({ width: c.w, height: c.h, seedText: c.seed, evil: c.evil });
   const st = world.store;
-  const xTyp = le16(typPath), xFrx = le16(frxPath), xFry = le16(fryPath);
-  const total = { jsCells: 0, xCells: 0, bothSameTypeFrameEq: 0, typeMismatch: 0, frameMismatch: 0 };
-  const samples: string[] = [];
+  const N = c.w * c.h;
+  const xTyp = le16(c.typ), xFrx = le16(c.frx), xFry = le16(c.fry);
+  if (xTyp.length < N || xFrx.length < N) throw new Error(`${tag}: dump 尺寸不足 typ=${xTyp.length} frx=${xFrx.length} N=${N}`);
+  let grandChecked = 0, grandBad = 0;
   for (const famKey of Object.keys(FAMS)) {
-    let famFramesBad = 0, famChecked = 0;
-    const famSamples: string[] = [];
     const want = new Set(FAMS[famKey]);
+    let checked = 0, typeSide = 0, frameBad = 0;
+    const samples: string[] = [];
     for (let i = 0; i < N; i++) {
       const sj = SHEET[st.type[i]];
       const sx = xTyp[i];
-      const jIn = want.has(sj);
-      const xIn = want.has(sx);
-      if (jIn && !xIn) { total.typeMismatch++; famFramesBad++; continue; }
-      if (!jIn && xIn) { total.typeMismatch++; famFramesBad++; continue; }
-      if (!jIn || sx !== sj) continue;   // 两端同型才比帧
-      famChecked++;
-      const ejf = st.frameX[i] === xFrx[i] && st.frameY[i] === xFry[i];
-      if (!ejf) {
-        famFramesBad++;
-        if (famSamples.length < 4) {
-          const xy = `@(${Math.floor(i % 4200)},${Math.floor(i / 4200)})`;
-          famSamples.push(`${xy} fx=${st.frameX[i]} vs ${xFrx[i]} fy=${st.frameY[i]} vs ${xFry[i]}`);
-        }
+      const jIn = want.has(sj), xIn = want.has(sx);
+      if (jIn !== xIn) { typeSide++; continue; }        // 一侧在族一侧不在=型面差(不比帧)
+      if (!jIn) continue;
+      if (sx !== sj) continue;                           // 两端各属同族不同成员（如 79↔90）→ 型面差计
+      checked++;
+      if (!(st.frameX[i] === xFrx[i] && st.frameY[i] === xFry[i])) {
+        frameBad++;
+        if (samples.length < 4) samples.push(`@(${Math.floor(i % c.w)},${Math.floor(i / c.w)}) fx=${st.frameX[i]} vs ${xFrx[i]} fy=${st.frameY[i]} vs ${xFry[i]}`);
       }
     }
-    console.log(`[${tag}] ${famKey}: cells_checked=${famChecked} frame_or_type_bad=${famFramesBad}${famSamples.length ? ' 样例:' + famSamples.join(' | ') : ''}`);
-    total.bothSameTypeFrameEq += famChecked - famFramesBad;
+    console.log(`[${tag}] ${famKey}: sameTypeChecked=${checked} typeSideDiff=${typeSide} frameBad=${frameBad}${samples.length ? '\n    样例 ' + samples.join('\n    样例 ') : ''}`);
+    grandChecked += checked; grandBad += frameBad;
   }
-  console.log(`[${tag}] summary sameTypeAndFrame=${total.bothSameTypeFrameEq} typeSideMismatchCells=${total.typeMismatch}`);
+  console.log(`[${tag}] summary framesSame=${grandChecked - grandBad}/${grandChecked}`);
 }
-const EVIL_UNUSED = undefined;
 
-it('frame parity dungeon furniture vs x86', async () => {
-  await runChain('toad', `${HOME}/GoldenChains/golden-toadstool/-004_PostFinSeed.typ`,
-    `${HOME}/GoldenChains/golden-toadstool/-004_PostFinSeed.frx`, `${HOME}/GoldenChains/golden-toadstool/-004_PostFinSeed.fry`);
-}, 500_000);
+it('frame parity dungeon furniture vs x86 (toad dual anchor)', async () => {
+  await runChain('toad', CHAINS.toad);
+}, 600_000);
 
-it('frame parity m-chain final cleanup', async () => {
-  await runChain('m', `${HOME}/GoldenChains/gen2-m/105_Final_Cleanup.typ`,
-    `${HOME}/GoldenChains/gen2-m/105_Final_Cleanup.frx`, `${HOME}/GoldenChains/gen2-m/105_Final_Cleanup.fry`);
-}, 500_000);
+it('frame parity dungeon furniture vs x86 (m final cleanup)', async () => {
+  await runChain('m', CHAINS.m);
+}, 900_000);

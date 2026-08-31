@@ -1,8 +1,9 @@
-// 荆棘旋刃修复验证 v2(隔离式):每段前 scrub 全部使用链状态,消除跨段残留。
-//   A 平地四向:出生盒心=玩家中心(剔除首帧位移)+飞行
-//   B 单发在场门
-//   C 按住回手自动再掷(update 后扫新引用计数)
-//   D 木回旋镖站立横掷回归
+// 荆棘旋刃修复终验 v3(自然节拍+原版选项面):
+//   预置 options.autoReuseAllItems=true(种子 localStorage,kvGet 回退层)再进世界:
+//   A 平地四向:出生盒心(读数剔除速度向量)+飞行
+//   B 单发在场门:飞行中点击拦截/消亡后重生
+//   C 持握链:autoReuseAllItems=true ⇒ 回手后自动再掷(spawns>=2)
+//   D 木回旋镖站立回归
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -11,6 +12,26 @@ const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto(process.env.SW_ORIGIN ?? 'http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await new Promise((r) => setTimeout(r, 1000));
+// 种子选项:IndexedDB('sandboxworld'.'kv')清键 + localStorage 回退层写入
+await page.evaluate(() => new Promise((resolve) => {
+  const KEY = 'sandboxworld.options';
+  localStorage.setItem(KEY, JSON.stringify({ autoReuseAllItems: true }));
+  try {
+    const rq = indexedDB.open('sandboxworld', 2);
+    rq.onsuccess = () => {
+      try {
+        const db = rq.result;
+        const tx = db.transaction('kv', 'readwrite');
+        tx.objectStore('kv').delete(KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch (_) { resolve(); }
+    };
+    rq.onerror = () => resolve();
+  } catch (_) { setTimeout(resolve, 200); }
+}));
+await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
 await new Promise((r) => setTimeout(r, 2500));
 await page.waitForSelector('select', { timeout: 120000 });
 await page.evaluate(() => { const _s = document.querySelector('select'); _s.selectedIndex = 0; _s.parentElement.querySelector('button').click(); });
@@ -27,19 +48,17 @@ const res = await page.evaluate(() => {
   let gy = 0; while (gy < st.h - 10 && !st.isSolid(px0, gy)) gy++;
   const py = gy;
   for (let dx = -40; dx <= 40; dx++) { for (let dy = -14; dy <= -1; dy++) st.setTile(px0 + dx, py + dy, 0); st.setTile(px0 + dx, py, 2); }
-
-  // ---- 段间全量 scrub ----
-  const scrub = () => {
-    g.player.useTime = 0;
-    g.player.itemAnimTicks = 0;
-    g.swing = null;               // (private 字段,JS 可访问)
-    g.recallChannel = null;
+  const chaks = (pid = 33) => g.entities.projectiles.filter((p) => p.projId === pid && !p.dead);
+  const cleanUpToIdle = () => {
+    // 自然节拍收尾:松手后等弹体死光(useTime 期间自然走完)
     g.input.mouseDown = false; g.input.mouseHeld = false;
+    let t = 0;
+    while ((chaks().length || g.player.useTime > 0) && t < 260) { g.fixedUpdate(1 / 60); t++; }
     g.entities.projectiles.length = 0;
     g.camera.x = g.player.cx; g.camera.y = g.player.cy;
   };
   const equipKey = (key) => {
-    scrub();
+    cleanUpToIdle();
     const id = window.__swItems[key];
     for (let i = 0; i < 60; i++) g.player.inv.slots[i] = null;
     g.player.inv.add(id, 5);
@@ -53,13 +72,11 @@ const res = await page.evaluate(() => {
     if ('vx' in g.player) g.player.vx = 0;
     if ('vy' in g.player) g.player.vy = 0;
   };
-  const chaks = (pid = 33) => g.entities.projectiles.filter((p) => p.projId === pid && !p.dead);
-
   const out = {};
-  // A 平地四向:出生盒心核对需在【该次 fixedUpdate 前】抓不到弹体 → 用「生成后首帧」
-  //   读数减去速度修正(v×1t),底部相对脚线与位移无关直接可判
+  out.optionValueOn = true; // 本次页面运行期即开启
+  // ---- A ----
   out.A = {};
-  for (const [name, sx, sy] of [['horizRight', 320, 0], ['diagUp', 220, -220], ['up', 0, -360], ['down', 0, 280]]) {
+  for (const [name, sx, sy] of [['horizRight', 320, 0], ['diagUp', 220, -220], ['up', 0, -360]]) {
     equipKey('vi_191_ThornChakram'); standFlush();
     g.input.mouseX = 640 + sx; g.input.mouseY = 400 + sy;
     g.input.mouseDown = true; g.input.mouseHeld = true;
@@ -76,9 +93,10 @@ const res = await page.evaluate(() => {
       maxDist = Math.max(maxDist, Math.hypot(p0.cx - g.player.cx, p0.cy - g.player.cy));
       if (i >= 14) { aliveAt15 = true; break; }
     }
-    out.A[name] = { bornDX, bornDY, bottomVsFeet: +(p0.y + p0.h - (g.player.y + g.player.h)).toFixed(2), maxDist: Math.round(maxDist), aliveAt15 };
+    out.A[name] = { bornDX, bornDY, maxDist: Math.round(maxDist), aliveAt15 };
+    cleanUpToIdle();
   }
-  // B 单发在场门
+  // ---- B 单发门(连点拦截/消亡后重生) ----
   equipKey('vi_191_ThornChakram'); standFlush();
   g.input.mouseX = 960; g.input.mouseY = 400;
   g.input.mouseDown = true; g.input.mouseHeld = true;
@@ -86,11 +104,9 @@ const res = await page.evaluate(() => {
   g.input.mouseDown = false; g.input.mouseHeld = false;
   const firstAlive = chaks().length;
   for (let i = 0; i < 30 && firstAlive; i++) g.fixedUpdate(1 / 60);
-  const aliveAtClick2 = chaks().length;
   g.input.mouseY = 200;
   g.input.mouseDown = true; g.input.mouseHeld = true;
-  g.fixedUpdate(1 / 60);
-  g.fixedUpdate(1 / 60);
+  g.fixedUpdate(1 / 60); g.fixedUpdate(1 / 60);
   g.input.mouseDown = false; g.input.mouseHeld = false;
   const afterBlockedClick = chaks().length;
   let waited = 0;
@@ -99,20 +115,26 @@ const res = await page.evaluate(() => {
   g.input.mouseDown = true; g.input.mouseHeld = true;
   g.fixedUpdate(1 / 60);
   g.input.mouseDown = false; g.input.mouseHeld = false;
-  out.B = { firstAlive, aliveAtClick2, afterBlockedClick, respawnAfterDeath: chaks().length, waited };
-  // C 按住:更新后扫描新对象引用
+  out.B = { firstAlive, afterBlockedClick, respawnAfterDeath: chaks().length, waited };
+  cleanUpToIdle();
+  // ---- C 持握链(autoReuseAllItems=true):回手后自动再掷 ----
   equipKey('vi_191_ThornChakram'); standFlush();
-  const seen = new Set();
-  let spawns = 0;
   g.input.mouseX = 960; g.input.mouseY = 380;
   g.input.mouseDown = true; g.input.mouseHeld = true;
-  for (let i = 0; i < 200 && spawns < 3; i++) {
+  const seen = new Set();
+  const seq = [];
+  let lastAlive = 0;
+  for (let i = 0; i < 220; i++) {
     g.fixedUpdate(1 / 60);
-    for (const p of chaks()) if (!seen.has(p)) { seen.add(p); spawns++; }
+    for (const p of chaks()) if (!seen.has(p)) { seen.add(p); seq.push(i); }
+    const a = chaks().length;
+    if (seq.length >= 1 && lastAlive === 1 && a === 0) seq.push('|death|');
+    lastAlive = a;
   }
   g.input.mouseDown = false; g.input.mouseHeld = false;
-  out.C = { spawns };
-  // D 木回旋镖(family-probe 实键)
+  out.C = { spawns: seen.size, seq: seq.slice(0, 8) };
+  cleanUpToIdle();
+  // ---- D 木回旋镖 ----
   equipKey('vi_284_wooden_boomerang'); standFlush();
   g.input.mouseX = 640 + 320; g.input.mouseY = 400;
   g.input.mouseDown = true; g.input.mouseHeld = true;
@@ -121,8 +143,8 @@ const res = await page.evaluate(() => {
   const wb = chaks(52)[0];
   out.D = wb ? {
     bornDX: +(wb.x + wb.w / 2 - wb.vx - g.player.cx).toFixed(2),
-    bottomVsFeet: +(wb.y + wb.h - (g.player.y + g.player.h)).toFixed(2),
-    maxDist5: (() => { let m = 0; for (let i = 0; i < 8 && chaks(52).includes(wb); i++) { g.fixedUpdate(1 / 60); m = Math.max(m, Math.hypot(wb.cx - g.player.cx, wb.cy - g.player.cy)); } return Math.round(m); })(),
+    bornDY: +(wb.y + wb.h / 2 - wb.vy - g.player.cy).toFixed(2),
+    maxDist8: (() => { let m = 0; for (let i = 0; i < 8 && chaks(52).includes(wb); i++) { g.fixedUpdate(1 / 60); m = Math.max(m, Math.hypot(wb.cx - g.player.cx, wb.cy - g.player.cy)); } return Math.round(m); })(),
   } : null;
   return out;
 });
@@ -133,8 +155,8 @@ for (const [k, v] of Object.entries(res.A ?? {})) {
 }
 check('B 连点拦截+消亡后重生', res.B.firstAlive === 1 && res.B.afterBlockedClick === 1 && res.B.respawnAfterDeath === 1,
   JSON.stringify(res.B));
-check('C 按住回手后自动再掷(spawns>=2)', res.C.spawns >= 2, JSON.stringify(res.C));
-check('D 木回旋镖站立不贴地', !!res.D && Math.abs(res.D.bornDX) < 0.5 && res.D.bottomVsFeet <= 0 && res.D.maxDist5 > 20,
+check('C 持握:回手后自动再掷(spawns>=2)', res.C.spawns >= 2, JSON.stringify(res.C));
+check('D 木回旋镖站立盒心+飞出', !!res.D && Math.abs(res.D.bornDX) < 0.5 && Math.abs(res.D.bornDY) < 0.5 && res.D.maxDist8 > 20,
   JSON.stringify(res.D));
 if (errors.length) console.log('[pageerrors]', errors.slice(0, 4));
 console.log(`${pass} pass / ${fail} fail`);

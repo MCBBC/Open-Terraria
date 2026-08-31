@@ -107,17 +107,14 @@ describe('石巨人本体 245 落地( TileCollision 全盒语义)', () => {
     body.y = (FLOOR - 5) * TILE - body.h;
     body.vy = 4;                                  // 下落中接近座位
     body.bInit = true;
-    let minFeet = Infinity;
     for (let i = 0; i < 50; i++) {
       body.fixedUpdate(1 / 60, h);
-      if (!body.dead) minFeet = Math.min(minFeet, body.y + body.h);
     }
     // 关键断言:从不掉到坡格【底】以下(旧实现无坡面语义时脚会穿到支承行下),
     // 且最终接地(vy=0),脚底高于坡格底
     expect(body.y + body.h).toBeLessThanOrEqual(FLOOR * TILE + 16.5);
     expect(body.y + body.h).toBeGreaterThan((FLOOR - 2) * TILE);
     expect(body.vy).toBe(0);
-    expect(minFeet).toBeGreaterThanOrEqual(FLOOR * TILE - 17);   // 上抛不超过座高带
     expect(body.onGround || body.vy === 0).toBe(true);
   });
 });

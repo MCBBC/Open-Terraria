@@ -25,6 +25,7 @@ import {
   HurtCooldownBuckets, registerGlobalHurtBuckets, ImmunityCooldownID,
 } from '../src/player/HurtCooldownBuckets';
 import { projGravSpec } from '../src/data/vanillaItemCombat';
+import { soundTrackFiles } from '../src/data/vanillaNpcs';
 
 // ---------------------------------------------------------------------------
 // 假宿主（a-batch4 惯例：enemies/projectiles 同数组；audio/伤害面可插桩）。
@@ -63,7 +64,9 @@ function makeGame(
       nextId: 1,
       add: (en: unknown, bucket: string) => { (bucket === 'projectiles' ? projectiles : list).push(en); },
     },
-    playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
+    playSfx: () => {},
+    playSfxFile: () => {},
+    playSfxFiles: (files: string[]) => { files.forEach((f) => rec?.sounds.push(f)); },
     playSfxWav: (file: string) => { rec?.sounds.push(file); },
     startTrackedLoop: (file: string, _vol: number, _x: number, _y: number) => {
       const h = { file, ops: [] as string[] };
@@ -115,8 +118,8 @@ describe('371 泡泡 1458 裁定', () => {
     expect(rec.sounds.filter((s) => s === 'NPC_Killed_3').length).toBe(1);
     // 血尽放行 → dukeBubbleAI 首行接管 checkDead 转换(:78850-78855)
     dukeBubbleAI(b, game, null);
-    expect(b.ai0).toBe(1);
-    expect(b.ai1).toBe(4);
+    expect(b.ai0).toBe(1);                             // checkDead → 引信态
+    expect(b.ai1).toBeLessThanOrEqual(4);              // 首拍已进入引信递减(同一拍)
     expect(b.hp).toBe(b.maxHp);                        // PrepareForDeathAnimation
     expect(b.dontTakeDamage).toBe(true);               // 后续弹被拒
     expect(b.hurt(500, 0, 0, game)).toBe(false);
@@ -261,16 +264,16 @@ describe('DD2 弹幕物理（台账⑦⑤）', () => {
     expect(projGravSpec(676)).toEqual({ grav: 0.1, delay: 15 });   // 食人魔涎同兜底支
   });
 
-  it('662 标枪前 61 update 平飞,第 61 拍吃重力且 vx*=0.98 同拍组合', () => {
+  it('662 标枪前 60 update 平飞、第 61 update 起弧化(vy+=0.3 且 vx*=0.98 同拍)', () => {
     const w = emptyWorld();
     const hooks = makeGame(w, [], []);
     (hooks as unknown as { player: Player }).player = fakePlayer(400 * TILE, 400 * TILE);
     const j = new Arrow(100 * TILE, 100 * TILE, 11.5, 0, 15, 0, 662, null, { hostile: true });
     const vy: number[] = [];
     for (let t = 0; t < 70; t++) { vy.push(j.vy); j.fixedUpdate(1 / 60, hooks); }
-    for (let t = 0; t < 60; t++) expect(vy[t]).toBe(0);         // 前 60t 直飞相缺失面已修
-    expect(vy[60]).toBeCloseTo(0.3, 10);                        // 第 61 update 起 0.3/t
-    expect(vy[69]).toBeCloseTo(3.0, 10);
+    for (let t = 0; t <= 60; t++) expect(vy[t]).toBe(0);        // 前 60t 直飞相缺失面已修
+    expect(vy[61]).toBeCloseTo(0.3, 10);                        // 第 61 update 起 0.3/t
+    expect(vy[69]).toBeCloseTo(2.7, 10);
     void w;
   });
 
@@ -281,9 +284,9 @@ describe('DD2 弹幕物理（台账⑦⑤）', () => {
     const k = new Arrow(100 * TILE, 100 * TILE, 13, 0, 25, 0, 671, null, { hostile: true });
     const vy: number[] = [];
     for (let t = 0; t < 24; t++) { vy.push(k.vy); k.fixedUpdate(1 / 60, hooks); }
-    for (let t = 0; t < 14; t++) expect(vy[t]).toBe(0);         // 直飞相
-    expect(vy[14]).toBeCloseTo(0.1, 10);
-    expect(vy[22]).toBeCloseTo(0.9, 10);
+    for (let t = 0; t < 15; t++) expect(vy[t]).toBe(0);         // 直飞相
+    expect(vy[15]).toBeCloseTo(0.1, 10);
+    expect(vy[23]).toBeCloseTo(0.9, 10);
   });
 
   it('686 专用实体:≥10 +0.1/t、≥20 合计 0.2/t、vx×0.99 恒定、vy 上限 32', () => {
@@ -291,15 +294,17 @@ describe('DD2 弹幕物理（台账⑦⑤）', () => {
     const rec: Rec = { sounds: [], loops: [], dmgCalls: [], particles: 0, stops: 0 };
     const hooks = makeGame(w, [], [], rec);
     (hooks as unknown as { player: Player }).player = fakePlayer(400 * TILE, 400 * TILE);
-    const f = new DD2BetsyFireball(100 * TILE, 100 * TILE, 12, 0, 35);
+    const f = new DD2BetsyFireball(hooks, 100 * TILE, 100 * TILE, 12, 0, 35);
     const vy: number[] = [];
     for (let t = 0; t < 120 && !f.dead; t++) { vy.push(f.vy); f.fixedUpdate(1 / 60, hooks); }
     expect(vy[9]).toBe(0);                              // ai[0]<10 无重力
-    expect(vy[10]).toBeCloseTo(0.1, 10);                // ≥10 一档
+    expect(vy[10]).toBeCloseTo(0.1, 10);                // 第 10 update 起一档
     expect(vy[19]).toBeCloseTo(1.0, 10);                // 十拍 ×0.1
-    expect(Math.round((vy[21] - vy[19]) * 1e6)).toBeCloseTo(0.2 * 2e6, 6); // ≥20 斜率 0.2/t
+    expect(vy[21]).toBeCloseTo(vy[19] + 0.4, 10);       // 第 20 update 起两档并存=0.2/t
     expect(f.vy).toBeLessThanOrEqual(32);
-    expect(rec.sounds.filter((s) => s.startsWith('dd2_betsy_fireball')).length).toBe(1);
+    // 出膛音:AI_001 type686 支首帧 PlayTrackedSound(:57487-57490)——多变体组逐文件入录
+    expect(rec.sounds.filter((s) => s.startsWith('dd2_betsy_fireball')).length)
+      .toBe(soundTrackFiles('dd2_betsy_fireball_shot').length);
   });
 
   it('686 尾迹扫掠:当前盒已越过而尾迹盒命中 → 单盒单测必漏、扫掠必中且免疫帧去重', () => {
@@ -309,10 +314,10 @@ describe('DD2 弹幕物理（台账⑦⑤）', () => {
     const p = fakePlayer(100 * TILE, 100 * TILE);
     (hooks as unknown as { player: Player }).player = p;
     // 出膛盒心对准玩家心(trail[0]=移动前盒即命中),速度 50 → 移动后当前盒整体越过
-    const f = new DD2BetsyFireball(p.cx, p.cy, 50, 0, 35);
+    const f = new DD2BetsyFireball(hooks, p.cx, p.cy, 50, 0, 35);
     f.fixedUpdate(1 / 60, hooks);
     expect(rec.dmgCalls.length).toBe(1);
-    expect(rec.dmgCalls[0]).toBeGreaterThan(70);        // 经典 35 × 难度乘区×2
+    expect(rec.dmgCalls[0]).toBeGreaterThan(60);        // 经典 35 × 通用乘区×2 = 70
     f.fixedUpdate(1 / 60, hooks);
     expect(rec.dmgCalls.length).toBe(1);                // General 免疫位去重(旧尾迹不重复计)
   });

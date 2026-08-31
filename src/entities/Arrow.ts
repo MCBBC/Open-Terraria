@@ -1168,8 +1168,8 @@ export class Arrow extends Entity {
   //      1457 :55132-55252 两版本同段;2026-08-31 台账批实体化支）----
   /** ai[1] 态机：0 首拍 →1 扫描窗 →21..199 锁定转向（≥200 停止=直飞到寿终/撞块） */
   private f467Ai1 = 0;
-  /** 锁定玩家引用（ai[0]=whoAmI 的对象化；null=未锁） */
-  private f467Target: { cx: number; cy: number; dead: boolean } | null = null;
+  /** 锁定玩家引用（ai[0]=whoAmI 的对象化；null=未锁。dead 可选=fakeHooks 兼容） */
+  private f467Target: { cx: number; cy: number; dead?: boolean } | null = null;
   /** localAI[0]：尾尘环节拍（==12 重置并撒 12 粒,:55204-55230） */
   private f467Local = 0;
   /** 帧：frameCounter≥3 推帧 4 帧循环（:55208-55218；draw fIdx 选择器消费） */

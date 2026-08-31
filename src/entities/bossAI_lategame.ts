@@ -758,19 +758,17 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     e.ai1 += 1;
     if (isReal && e.ai1 >= 40) {
       e.ai1 = 0;
-      const pick = cultistPick(e, phase2);
+      let pick = cultistPick(e, phase2);
       // ---- 远古末日随机替换(:65462-65477,两版同段):expert ∧ 半血(flag) ∧ 拍号
       //      非 0 冲/4 仪式/5 光 → 按 maxValue 概率阶梯改拍末日 num13=6;
       //      CountNPCS(523) < 10 上限门(本仓=统计存活 vanillaId 523)。
       //      梯度原文:life<maxHp/3 → 4、再 <maxHp/4 → 3(逐条覆写式 if),否则 6。
       //      经典模式该支恒假(expertMode 门)——此前态体已在而选拍永不给(:65134 注)
-      let doomRoll = false;
       if (isReal && expert && phase2 && pick !== 0 && pick !== 4 && pick !== 5
         && countVanillaNpcs(game, 523) < 10) {
         const maxValue = e.hp < e.maxHp / 4 ? 3 : e.hp < e.maxHp / 3 ? 4 : 6; // :65462-65466
-        doomRoll = Math.floor(Math.random() * maxValue) === 0;                 // :65471 Next(maxValue)==0
+        if (Math.floor(Math.random() * maxValue) === 0) pick = 6;              // :65471 Next(maxValue)==0
       }
-      if (doomRoll) pick = 6;
       if (pick === 0) {
         // 飞掠占位(:65277-65336):真身 + 全部克隆体一起入环——环位角
         // num16 = ((序号+flag5+1)/2)·2π·0.4/总数,奇数序取负(flag5=总数偶数),
@@ -1142,9 +1140,13 @@ export class FairyQueenLance extends Entity {
     if (this.la0 >= 360) { this.dead = true; return; }       // :45863-45866
     // alpha = Lerp(255,0,lerpValue(0,20,la0))(:45868-45869)——渐显面
     this.alpha = Math.round(vLerp(255, 0, clamp(this.la0 / 20, 0, 1)));
-    if (this.la0 > 60) {                                     // CanDamage 表 la0<=60 免伤门(:12463)
+    if (this.la0 >= 60) {
+      // 发射相当拍积分(原版 AI 置速度后引擎同帧位移);伤害门另用 >60——
+      // CanDamage 表臂 `localAI[0]<=60`(:12463)使首拍免伤 1:1
       this.x += this.vx;
       this.y += this.vy;
+    }
+    if (this.la0 > 60) {                                     // CanDamage 表 la0<=60 免伤门(:12463)
       // Damage_EVP 同式结算(hitPlayer 内嵌 immune 门/DamageVar/banner/cold/敌弹乘区)
       hitPlayer(this, game, this.damage, false, false, (p) => this.hits(p));
       hitTownNpcs(this, game, this.damage, 0, 'hostile', this.projId, (n) => this.hits(n));

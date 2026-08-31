@@ -209,25 +209,35 @@ describe('1128 ChloroSporeCloud(aiStyle 92 flag46 支)', () => {
     for (let i = 0; i < 221; i++) c2.fixedUpdate(1 / 60, g);     // ai[0]>220 Kill(:33172-33176)
     expect(c2.dead).toBe(true);
   });
-  it('IDStatic 免疫 30(:10574-10575)→ 同敌 30t 内不重复结算', () => {
+  it('IDStatic 免疫 30(:10574-10575)→ 同敌 30t 内不重复结算——✅2026-08-31 迁移:L2 转正后'
+    + '仅 ai[1]==0 的砸地大云结算（尾孢子 CanDealDamage=false）,免疫表型级共享', () => {
+    // 砸地大云 = 出生不传 ai[1]（SpawnChlorophyteSporeCloud 缺省 0→num796=220）
     const e = mkEnemy(1, 790, 790);
-    const c = new ChloroSporeCloud(800, 800, 0, 0, 70, 220);
+    const c = new ChloroSporeCloud(800, 800, 0, 0, 70, 0);
     const g = makeHooks([e]);
     for (let i = 0; i < 29; i++) c.fixedUpdate(1 / 60, g);
     expect(e.hurtLog.length).toBe(1);
+  });
+  it('★L2：挥击尾孢子(ai[1]>=1)纯视觉零伤(Damage_CanDealDamage :12463 排除表)', () => {
+    const e = mkEnemy(2, 790, 790);
+    const c = new ChloroSporeCloud(800, 800, 0, 0, 70, 220);
+    const g = makeHooks([e]);
+    for (let i = 0; i < 40 && !c.dead; i++) c.fixedUpdate(1 / 60, g);
+    expect(e.hurtLog.length).toBe(0);                            // 曾越权结算接触伤害
   });
 });
 
 // ================= 1129 大爆炸盒(AI_209 :42741-42748) =================
 
 describe('1129 ChloroBladeSlam(AI_209)', () => {
-  it('ai[0]++>20 Kill(:42746-42748);命中盒 = ai[1]×ai[2](128×96)', () => {
-    const e = mkEnemy(1, 700, 700);
+  it('timeLeft=5 → 第5拍亡(SetDefaults :3353;ai[0]>20 为永不可达死代码——✅2026-08-31 A④ 迁移);'
+    + 'ownerHitCheck 距离段门(:11896/:12416)', () => {
+    const e = mkEnemy(1, 700, 700);                              // 盒 x∈[656..784] y∈[672..816] 内
     const s = new ChloroBladeSlam(720, 720, 128, 96, 95);
     const g = makeHooks([e]);
     let ticks = 0;
     while (!s.dead && ticks < 40) { s.fixedUpdate(1 / 60, g); ticks++; }
-    expect(ticks).toBe(21);
+    expect(ticks).toBe(5);                                       // 曾按死代码活到 21 拍
     expect(e.hurtLog.length).toBe(1);                            // 每敌一次(cooldown −1)
   });
 });

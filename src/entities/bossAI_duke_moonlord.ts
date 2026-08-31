@@ -980,28 +980,22 @@ export function dukeBubbleAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; }
   // :35226 `scale = ai[3]`(每拍恒等式)——C 条目回归:随机尺寸真实应用到渲染
   if (e.ai3 > 0) e.vanillaScale = e.ai3;
-  // :35270-35278 命中(justHit 单帧旗标)/已在爆裂态 → 无敌 + 扩盒 100×100 +
-  // EncourageDespawn(3)(消散计时由下方 ai1 引信承担)。1458 该支与血尽转换并存:
-  // 非致命擦伤同样即刻进入引信态(不再有"吃下伤害继续漂浮"的中间相);
-  // 每次命中播 legacy 死音库 style3 破裂音(StrikeNPC :85185 PlaySound(4,…,3),
-  // SetDefaults HitSound=NPCHit3/DeathSound=NPCDeath3 叠加面按通用管线,
-  // 本拍 maxHp>1 才发声 —— lifeMax=1 恒静音)
-  if (e.ai0 !== 1 && e.justHit) {
-    e.ai0 = 1; e.ai1 = 4;
-    game.playSfxWav?.('NPC_Killed_3', 1, e.cx, e.cy);
-  }
-  // checkDead 血尽转换(:78850-78855):ai[0]=1/ai[1]=4 + PrepareForDeathAnimation
-  // (life=lifeMax/dontTakeDamage=true)——转换逻辑由 AI 首行接管(hp<0 已被
-  // Enemy.hurt 放行,同月总部件模式);此后 hurt 的 dontTakeDamage 门拒后续弹。
+  // checkDead 血尽转换(:78850-78855):先于扩盒判定执行——ai[0]=1/ai[1]=4 +
+  // PrepareForDeathAnimation(life=lifeMax/dontTakeDamage=true)。原版时序=
+  // StrikeNPC 扣血之后、本 tick NPC.Update 内的 AI 段之前跑转换,故与 justHit 并存。
   // 致命拍尘环 = StrikeNPC 371 支(:85190-85211)60 粒 d212 蓝环(hslToRgb(.4±.2,.9,.5)
-  // lerp 白 .3,径向 45..91/10),本仓粒子近似(#5AA6D8 色带)
-  if (e.ai0 !== 1 && e.hp <= 0) {
+  // lerp 白 .3,径向 45..91/10),本仓粒子近似(#5AA6D8 色带)。命中破裂音在
+  // Enemy.hurt 的每次 Strike 面(:85185 PlaySound(4,…,3))承担,此处不重播。
+  if (e.hp <= 0) {
     e.ai0 = 1; e.ai1 = 4;
     e.hp = e.maxHp;
     e.dontTakeDamage = true;
-    game.playSfxWav?.('NPC_Killed_3', 1, e.cx, e.cy);
     game.spawnParticles(e.cx, e.cy, '#5AA6D8', 24, 5.5, { life: 26, damp: 0.92 });
   }
+  // :35270-35278 命中(justHit 单帧旗标)/已在爆裂态 → 无敌 + 扩盒 100×100 +
+  // EncourageDespawn(3)(消散计时由下方 ai1 引信承担)。1458 该支与血尽转换并存:
+  // 非致命擦伤同样即刻进入引信态(不再有"吃下伤害继续漂浮"的中间相)
+  if (e.ai0 !== 1 && e.justHit) { e.ai0 = 1; e.ai1 = 4; }
   if (e.bInit && player && e.ai3 <= 0) { // :35124-35131 初速 = 朝玩家 ±100px 随机偏移 × 11~17.7 速
     e.ai3 = (80 + Math.random() * 41) / 100;
     const jx = e.cx - player.cx + (Math.random() - 0.5) * 200;

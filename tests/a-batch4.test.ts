@@ -346,9 +346,9 @@ describe('A4-5 爆裂泡泡 371（1458 裁定:命中真实化+血尽转引信）
     const hp0 = b.hp;
     expect(b.hurt(500, 0, 0, game)).toBe(false);      // 扣血真实发生(血尽放行,非死)
     expect(b.hp).toBeLessThan(hp0);
-    dukeBubbleAI(b, game, null);                      // AI 首行接管转换
+    dukeBubbleAI(b, game, null);                      // AI 首行接管转换（首拍已入引信递减）
     expect(b.ai0).toBe(1);
-    expect(b.ai1).toBe(4);
+    expect(b.ai1).toBeLessThanOrEqual(4);
     expect(b.dontTakeDamage).toBe(true);
     expect(b.hurt(500, 0, 0, game)).toBe(false);      // 爆炸窗口不可再受击（dontTakeDamage）
   });

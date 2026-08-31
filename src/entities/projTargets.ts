@@ -454,7 +454,7 @@ export function hitPlayer(
   if (evpId !== undefined && SKIP_DAMAGE_EVP.has(evpId)) return false;
   const noCheese = evpNoCheeseSlot(evpId);
   const p = game.player;
-  if (p.dead) return false;
+  if (!p || p.dead) return false;
   // 原版门禁（Damage_EVP 段）：`flag = active && !dead && (!player.immune || num != General)`
   // （1458 P.cs:14965-14967）——General 弹查 player.immune 位；BossNoCheese 弹不吃通用
   // 无敌帧、改由独立桶计时拦（桶写面在 Player.damage 内经 __swNextHitBucket 通道完成，

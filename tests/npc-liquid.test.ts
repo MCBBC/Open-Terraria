@@ -71,6 +71,22 @@ describe('Collision.WetCollision（Collision.cs:1575）中心小盒 + 液面收�
     st.setLiquid(20, 35, 0, 0);
     expect(wetCollision(st, 20 * TILE, 35 * TILE - 16, 18, 40).wet).toBe(false);
   });
+  it('★奇数半高 int 截断（Collision.cs:1580/:1586 num2=11→num2/2=5）：鸭形贴面钉浮恒湿', () => {
+    // 鸭 363/365/603/609 h=22：单行部分深度水 l=100（自然岸线膜水典型值）
+    //   钉水面目标 = (j+1)*16 − trunc(100/16) − 6 = j*16+10−6 = j*16+4
+    // 原版盒 [cy−5, cy+6] → 盒底 j*16+10 > 液面带顶 j*16+(256−100)/32*2≈9.75 → wet
+    // 浮点错版盒 [cy−5.5, cy+5.5] → 盒底 j*16+9.5 < 9.75 → 恒干
+    // （干态逐帧抖 → AI 离水起飞分支 + 渲染飞/游按 wet 选帧疯狂跳切,2026-08-31 实报）
+    const s = new World(W, H, 11, 'npc-duck-film-test');
+    const st = s.store;
+    st.setTile(20, 37, 1);                 // 池底
+    st.setLiquid(20, 36, 100, 1);          // 单行膜水
+    const py = 36 * TILE + 4 - 11;         // cy=j*16+4（钉浮平衡点）→ py = cy−h/2
+    expect(wetCollision(st, 20 * TILE, py, 28, 22).wet).toBe(true);
+    // 对照：cy 在膜水上一行整（完全离带）仍干——int 截断不放大判定圈
+    expect(wetCollision(st, 20 * TILE, 35 * TILE - 11 + 0, 28, 22).wet).toBe(false);
+    expect(wetCollision(st, 20 * TILE, 33 * TILE - 11, 28, 22).wet).toBe(false);
+  });
   it('蜂蜜/微光格带类型标记（选减速档用）', () => {
     const h = liquidWorld(3);
     expect(wetCollision(h.store, 20 * TILE, 36 * TILE, 18, 40)).toMatchObject({ wet: true, honey: true });

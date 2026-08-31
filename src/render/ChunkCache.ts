@@ -111,10 +111,26 @@ export class ChunkCache {
    * 不变量：粘滞表中持有的 cell 绝不入 cellFree 池；所有回收入口（LRU 淘汰/
    * dispose/烘炸兜底）必须先删粘滞登记再归还。 */
   private stickyCell = new Map<number, number>();
-  /** 取 cell：优先本 chunk 的粘滞槽位（不存在才新分配） */
+  /** 取 cell：优先本 chunk 的粘滞槽位（不存在才新分配）。
+   *  ★槽位亲和（2026-08-31 船区往返渗色案根治）：LRU 淘汰→重访若换槽，
+   *  页邻域内容改变 ⇒ 非整数 zoom 的 upscale 边缘采样随邻域漂移 = 静态块
+   *  "渲染层面扭曲"复发（_slot-churn-probe 实证：往返后同窗 15.9% 像素漂移、
+   *  带状分布在 chunk 缝行）。修=chunkKey 哈希亲和：优先取回自己的历史槽位
+   *  （空闲时），被占才退回空闲链——邻域趋于恒定。 */
   private acquireCell(k: number): number {
     let c = this.stickyCell.get(k);
     if (c === undefined || c < 0) {
+      const total = this.wallPages.length * ChunkCache.CELLS_PER_PAGE;
+      if (total > 0) {
+        const pref = hash2(k) % total;
+        const fi = this.cellFree.indexOf(pref);
+        if (fi >= 0) {
+          this.cellFree.splice(fi, 1);
+          this.pageUsed[Math.floor(pref / ChunkCache.CELLS_PER_PAGE)]++;
+          this.stickyCell.set(k, pref);
+          return pref;
+        }
+      }
       c = this.allocCell();
       this.stickyCell.set(k, c);
     }

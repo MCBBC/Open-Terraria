@@ -1407,9 +1407,10 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
     e.ai0 = 3; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
   }
   // ★台账⑩：俯冲小妖精滑翔怪引信循环音（AI_108,1458 NPC.cs:66388-66406）——
-  // 俯冲态 ai[1]>=20 起 KoboldIgniteLoop 单轨跟随重建;曾整段缺失
-  if (p.explode && e.ai0 === 2 && e.ai1 >= 20) {
-    fuseLoopManage(e, game, [['ignite', 'dd2_kobold_ignite_loop']], true, e.cx, e.cy);
+  // 俯冲态 ai[1]>=20 起 KoboldIgniteLoop 单轨跟随重建,其余态拆轨;曾整段缺失
+  if (p.explode) {
+    fuseLoopManage(e, game, [['ignite', 'dd2_kobold_ignite_loop']],
+      e.ai0 === 2 && e.ai1 >= 20, e.cx, e.cy);
   }
   if (e.ai0 === 3) {
     fuseLoopStop(e);                    // 自爆即拆轨（原版实体失效连带熄灭）
@@ -1599,7 +1600,7 @@ export class DD2BetsyFireball extends Entity {
   /** 移动前位置尾迹盒（unshift 头插,length 钳 20=TrailCacheLength[686]） */
   private trail: Array<{ x: number; y: number }> = [];
 
-  constructor(x: number, y: number, vx: number, vy: number, dmg: number) {
+  constructor(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number) {
     super();
     this.x = x - this.w / 2;
     this.y = y - this.h / 2;
@@ -1999,7 +2000,7 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
         // oldPos 全轨迹扫掠命中（见 DD2BetsyFireball 头注）；曾走 Arrow 单盒
         // 单测命中=高速掠射漏检尾迹走廊
         (game as unknown as { entities: { add: (en: unknown, b: string) => void } })
-          .entities.add(new DD2BetsyFireball(rx, ry, e.vx, e.vy, DMG_FIREBALL), 'projectiles');
+          .entities.add(new DD2BetsyFireball(game, rx, ry, e.vx, e.vy, DMG_FIREBALL), 'projectiles');
       }
     }
     if (e.ai1 > BOMB_TOTAL - TAIL_T) e.vy -= 0.1;   // 尾段拉起（:62545-62547）

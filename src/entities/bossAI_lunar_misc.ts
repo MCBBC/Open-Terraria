@@ -163,7 +163,7 @@ function addShardProj(game: GameHooks, x: number, y: number,
 // 相交者执行 ReflectProjectile（:67189-67212 反向归属——projTargets.reflectProjectile
 // 同构移植负责音/尘/速度/伤÷4/penetrate 归一）。速查无 projId/裸枚举对象跳过。
 // ---------------------------------------------------------------------------
-function reflectPlayerProjsInHitbox(game: GameHooks, e: Enemy): void {
+export function reflectPlayerProjsInHitbox(game: GameHooks, e: Enemy): void {
   for (const q of game.projectiles?.() ?? []) {
     const pr = q as unknown as {
       x?: number; y?: number; w?: number; h?: number; dead?: boolean;

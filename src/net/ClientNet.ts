@@ -1062,7 +1062,8 @@ export class ClientNet {
    *  在产生这笔 rawDmg 的同一挥击上,且猛攻套 dmg 乘区本就参与了该裸伤的构成）。 */
   private pendingMeleeHits = new Map<number, Array<{ base: number; crit: boolean; off: boolean; exp: number }>>();
 
-  /** F14 回执闭环 sink：Game 在甲虫蓄能区一次性安装（闭包持本人 BeetleMeter 面）。
+  /** F14 回执闭环 sink：Game 在甲虫蓄能区受理命中时安装（每次重装=重绑当前
+   *  player 对象，防重装世界后闭包持陈旧实例；幂等且命中频度受 msg44 频闸约束）。
    *  未安装 = 关联结果静默丢弃（对未接 meter 的消费方零影响）。 */
   onMeleePvpBeetleCredit?: (victimSlot: number, credit: number, offenseSet: boolean) => void;
 

@@ -1048,8 +1048,9 @@ describe('★F10 城镇被动回血（CheckLifeRegen NPC.cs:93622-93641）', () 
     const dmgColors: Array<string | undefined> = [];
     const { game } = makeGame(world, { npcs: [npc] });
     (game as unknown as { addDamageNumber: (...a: unknown[]) => void }).addDamageNumber =
-      (_x: number, _y: number, _amt: number, _crit: boolean, color?: string) =>
+      (_x: number, _y: number, _amt: number, _crit: boolean, color?: string) => {
         dmgColors.push(color);
+      };
     npc.hp = npc.maxHp - 30;
     for (let t = 0; t < 600; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.hp).toBeGreaterThan(npc.maxHp - 30);        // 已开始恢复

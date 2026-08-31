@@ -686,7 +686,8 @@ export class ChloroBladeSlam extends Entity {
  *  scale×0.75、索敌 400px【CanHit 视线门恒须——num4=0 时 !(dist>0) 恒假,:41257-41258,
  *  ★R34-① 勘误旧注「无 LOS 门」】、追踪 v=(v×30+dir×6)/31、无目标漂移
  *  vx→sin(ai0×0.1)×1.5 / vy→0.3；前 20t 减速 ×0.95（:41220-41227）;撞块软反弹 ×0.25
- *  （:18178-18187）/penetrate=1 命中即亡/Kill 尘 306×4（:72202）。
+ *  （:18181-18191 单轴独立翻向——TileCollision 解算被挡轴置零后本支按轴重翻,
+ *  另一轴照常推进;B1 转正）/penetrate=1 命中即亡/Kill 尘 306×4（:72202）。
  *  SetDefaults（:10415-10426）：18×18、timeLeft 120、penetrate 1、
  *  usesLocalNPCImmunity + cooldown −1（每敌一次）、magic、ignoreWater。 */
 export class PetalstormShot extends Entity {

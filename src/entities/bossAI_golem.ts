@@ -719,8 +719,11 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
   //      "先嵌进墙体再整盒重叠"的 hitSolid 近似,冲拳贴地滑行/半砖不再误停 ----
   if (x.state !== 1) {
     if (!x.noTC) {
+      // Collision_MoveWhileDry 语义:碰撞即 oldVelocity≠velocity(轴速度被改写),
+      // 以速度差分判定替代旧 hitSolid 整盒重叠
+      const ovx = e.vx, ovy = e.vy;
       moveAndCollide(e, game.world, e.vx, e.vy);
-      if (x.state === 2 && (e.collideX || e.collideY)) {
+      if (x.state === 2 && (e.vx !== ovx || e.vy !== ovy)) {
         x.noTC = true;
         x.state = 0;                          // :19449-19453 collideX||collideY → 回位
       }

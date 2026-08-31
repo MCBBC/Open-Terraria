@@ -121,8 +121,9 @@ function hydrate(): { st: TileStore; gs: GenState } {
 
   console.log(`[i113] x86 rows=${xtAll.length} js rows=${lines.length} mainSample=${rollN} totalSample=${totalN}`);
 
-  const segOnly = (rows: string[]) => rows.filter((l) => !/^DR\|R(o)?\|/.test(l) && !/^DR\|CP\|/.test(l));
+  const segOnly = (rows: string[]) => rows.filter((l) => !/^DR\|R(o)?\|/.test(l) && !/^DR\|CP\|/.test(l) && !/^DR\|HCW\|/.test(l));
   const cpOnly = (rows: string[]) => rows.filter((l) => /^DR\|CP\|/.test(l));
+  const hcwOnly = (rows: string[]) => rows.filter((l) => /^DR\|HCW\|/.test(l));
   const attOnly = (rows: string[]) => rows.filter((l) => /^DR\|R(o)?\|/.test(l));
 
   const diffPair = (label: string, xr0: string[], jr0: string[]) => {
@@ -150,9 +151,11 @@ function hydrate(): { st: TileStore; gs: GenState } {
       return l.replace(/(^|[| ])rc=-?\d+$/, `$1rc=${d}`);
     });
   };
-  for (const want of ['SEG', 'ATT', 'CP'] as const) {
-    const xf = want === 'ATT' ? attOnly(xtAll) : want === 'CP' ? cpOnly(xtAll) : segOnly(xtAll);
-    const jf = want === 'ATT' ? attOnly(lines) : want === 'CP' ? cpOnly(lines) : segOnly(lines);
+  for (const want of ['SEG', 'ATT', 'CP', 'HCW'] as const) {
+    const xf = want === 'ATT' ? attOnly(xtAll) : want === 'CP' ? cpOnly(xtAll)
+      : want === 'HCW' ? hcwOnly(xtAll) : segOnly(xtAll);
+    const jf = want === 'ATT' ? attOnly(lines) : want === 'CP' ? cpOnly(lines)
+      : want === 'HCW' ? hcwOnly(lines) : segOnly(lines);
     diffPair(`${want}`, withDeltas(xf), withDeltas(jf));
   }
 });

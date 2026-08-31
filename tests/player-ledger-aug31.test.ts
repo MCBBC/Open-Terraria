@@ -16,6 +16,7 @@ import { Player } from '../src/entities/Player';
 import { BuffType } from '../src/stats/Buffs';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
+import { TILE_BY_KEY } from '../src/data/tiles';
 import type { GameHooks } from '../src/entities/types';
 import { HurtCooldownBuckets, registerGlobalHurtBuckets } from '../src/player/HurtCooldownBuckets';
 
@@ -33,9 +34,11 @@ function makeGame(w: World, hooks?: Partial<GameHooks>): GameHooks {
   } as unknown as GameHooks;
 }
 
-/** 平地世界：70/71 行铺实心 */
+/** 平地世界：70/71 行铺实心。宽高取 480×80——与 run-parity 同基：任一边像素
+ *  长度须 ≤ 边框带×2（1280px）才豁免 bordersMovement 越界钳杀，90 行高会被
+ *  当成越界传送+处决（kind 'underground'），详见 Player.bordersMovement */
 function flatWorld(): World {
-  const w = new World(200, 90, 30, 'open');
+  const w = new World(480, 80, 30, 'open');
   for (let x = 0; x < w.w; x++) {
     w.store.setTileSilent(x, 70, 1, 0, 0);
     w.store.setTileSilent(x, 71, 1, 0, 0);
@@ -66,7 +69,7 @@ describe('①太阳石/月亮石天界石复合门（1458 :15529-15533）', () =
     p.nightPhase = true;
     const night = p.equipStats;
     expect(night.meleeSpeed).toBeCloseTo(day.meleeSpeed + 0.1, 6);
-    expect(day.critMelee).toBe(night.critMelee);
+    expect(night.critMelee).toBe(day.critMelee + 2);
   });
 });
 
@@ -110,21 +113,24 @@ describe('⑤JumpMovement 滑行支与组合门（:20805-20845）', () => {
     const game = makeGame(w);
     const inv = new Inventory();
     inv.armor[3] = { id: iid(953), stack: 1 };            // 攀爬爪 spikedBoots
-    const p = new Player(71 * TILE - 6, 68 * TILE, inv);
-    for (let i = 0; i < 40; i++) step(p, game);           // 落地沉降
-    p.inputX = 1;                                         // 压向墙 → 贴壁缓降
+    // 高空贴墙自由落体（墙面左缘 x=72*16=1152；玩家宽 20 → 贴脸 x=1132），
+    // 下落全程压向墙（inputX=1）+ 配蛙蹼族 autoJump（2423）并【先按住跳】——
+    // 若 :20805 `if(sliding)autoJump=false` 未建模，贴墙期每帧重触发蹬墙跳；
+    // 抑制档在场 ⇒ 按住期间不出现新的负 vy 突刺。
+    inv.armor[4] = { id: iid(2423), stack: 1 };
+    expect(p.equipStats.autoJump).toBe(true);
+    const p = new Player(1152 - 20, 56 * TILE, inv);
+    p.inputX = 1;
+    p.inputJump = true;                                   // 进入滑行前已按住
     let sawCling = false;
-    // 走向墙至贴壁（无跳输入）
     for (let t = 0; t < 90 && !sawCling; t++) { step(p, game); if (p.wallCling) sawCling = true; }
-    expect(sawCling).toBe(true);
-    // 已贴墙且下落：继续按住跳键 30 tick（边沿早已消费）→ 不得再起跳
-    p.inputJump = true;
-    let minY = Infinity;
-    for (let t = 0; t < 30; t++) {
+    expect(sawCling).toBe(true);                          // 已进入贴墙缓降态
+    let minYAfterCling = Infinity;
+    for (let t = 0; t < 30 && sawCling; t++) {
       step(p, game);
-      minY = Math.min(minY, p.vy);
+      minYAfterCling = Math.min(minYAfterCling, p.vy);
     }
-    expect(minY).toBeGreaterThanOrEqual(-0.01);           // 无蹬墙跳重触发
+    expect(minYAfterCling).toBeGreaterThanOrEqual(-0.01); // autoJump 被滑行抑制（:20805）
   });
   it('裸装平地按住跳（autoJump 位关闭）也不自动连跳——门语义未被打穿', async () => {
     const game = makeGame(flatWorld());
@@ -236,9 +242,12 @@ describe('⑩a FindPulley !controlJump 门（:26320——Space 只手不进绳�
     const game = makeGame(w);
     const p = new Player(61 * TILE, 68 * TILE, new Inventory());
     for (let i = 0; i < 40; i++) step(p, game);           // 落地沉降后再定位头格
+    const headCol = Math.floor((p.x + p.w / 2) / 16);
     const headRow = Math.floor((p.y - 8) / 16);
-    w.store.setTileSilent(61, headRow, 10, 0, 0);         // type 10 = rope
-    w.store.setTileSilent(61, headRow + 1, 10, 0, 0);
+    const ropeId = TILE_BY_KEY['v_213_rope'];             // 内部 id≠原版 sheet（213）
+    w.store.setTileSilent(headCol, headRow, ropeId, 0, 0);   // Main.tileRope
+    w.store.setTileSilent(headCol, headRow + 1, ropeId, 0, 0);
+    expect(p.isRopeAt(w.store, headCol, headRow)).toBe(true);
     return { w, p, game };
   }
   it('按 ↑（无 Space）吸附成功', () => {
