@@ -13,8 +13,12 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { Arrow, projSprite } from './Arrow';
-import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile } from './projTargets';
+import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile,
+  resolveProjClass, IS_A_WHIP_PROJS, DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS } from './projTargets';
+import { ConfettiBurstProj } from './meleeOnHitProjs';
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
+import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+import { noteVanillaProjImmune } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
@@ -162,7 +166,7 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
 /** 同敌命中去重 + 冷却的通用伤害结算。
  *  hitCd 记录每敌剩余冷却 tick，每 fixedUpdate 调用方先 tickCd() 递减；
  *  cooldown >= 9999 视作单次结算（突刺类：一击每敌只中一次） */
-class HitCooldown {
+export class HitCooldown {   // exported：combat-stitch-final 确定性测试用
   private map = new Map<number, number>();
   tick(): void {
     for (const [k, v] of this.map) {
@@ -192,7 +196,7 @@ type ReflectableWeaponProj = {
   meleeProj?: boolean;
 };
 
-function hitEnemies(
+export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③④/A5 弹幕侧确定性对拍面）
   self: { x: number; y: number; w: number; h: number; vx: number; damage: number; knockback: number; projId?: number },
   game: GameHooks,
   hitCd: HitCooldown,
@@ -239,6 +243,20 @@ function hitEnemies(
     }
     extRects.push(extBox);                                     // :14573-14575
   }
+  // ★α-H1/H3（终局扫尾批 A3）：类别通道解析（弹级一次）+ 玩家侧旗快照。
+  //   projClass 解析序 = 实体显式字段 → 弹 id 数据面（vanilla SetDefaults 类旗投影）
+  //   → 旧 meleeProj 旗兜底；cls=null = 无类弹（原版 crit 掷/浸剂门都轮不到）。
+  const cls = resolveProjClass(me);
+  const pl = game.player as unknown as {
+    buffs: { has: (b: BuffType) => boolean };
+    equipStats: { frostBurn: boolean; magmaStone: boolean };
+    critChance: (k: 'melee' | 'ranged' | 'magic') => number;
+    parryDamageBuff?: boolean;
+    parryDamageBuffT?: number;
+  };
+  const playerPct = (k: 'melee' | 'ranged' | 'magic'): number => pl.critChance(k);
+  const imbuNano = pl.buffs.has(BuffType.ImbueNano);
+  const imbuParty = pl.buffs.has(BuffType.ImbueParty);
   for (const ent of game.enemies()) {
     if (!playerCanHitEnemy(ent, game, self.projId ?? 0)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
     const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
@@ -256,22 +274,37 @@ function hitEnemies(
       if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;
     } else if (!hitCd.ready(e.id, cooldown)) continue;
     // 暴击 = GetWeaponCrit 语义:4 基础 + 武器 item.crit + 装备/buff（Game 侧合并传入；
-    // 此前全族写死 4%——Sunfury 原版 crit=7 应为 11%）
-    const crit = Math.random() < (me.critChance ?? 0.04);
-    // (int) 截断 + 命中乘区（悠悠球无视线 ×0.75，:12504）
-    const dmg = Math.trunc((crit ? self.damage * 2 : self.damage) * (dmgScale?.(e) ?? 1));
+    // 此前全族写死 4%——Sunfury 原版 crit=7 应为 11%）。
+    // ★α-H1/A3①：缺省阈值改按 projClass 投影（Projectile.Damage :12898-12912 三连掷
+    // 只列 melee/ranged/magic 三类各对 owner 侧统计；**无类弹与 summon 不掷**——此前
+    // `?? 0.04` 把 4% 兜给了所有无类弹=登记偏差）。发射端显式注入仍最优先。
+    const autoCritPct = me.critChance !== undefined ? undefined
+      : cls === 'melee' ? (4 + playerPct('melee')) / 100
+        : cls === 'ranged' ? (4 + playerPct('ranged')) / 100
+          : cls === 'magic' ? (4 + playerPct('magic')) / 100
+            : 0;
+    const crit = Math.random() < (me.critChance ?? autoCritPct ?? 0);
+    // ★α-H3③④（A3 弹幕侧消费面）：parryDamageBuff ×5 与 Nano ×1.05——原位
+    // Projectile.cs:13631-36（门 melee && !DontApplyParryDamageBuff[type]，apply 在
+    // DamageVar 之后、StrikeNPC 前逐敌生效）/:13688-96（门 melee||IsAWhip——nano 乘
+    // dmg、confetti NewProjectile(289)。此前仅玩家侧已有=R2-07(b)，弹幕侧漏接）。
+    const meleeGateHere = cls === 'melee' || IS_A_WHIP_PROJS.has(self.projId ?? 0);   // :13688 门
+    let mul = 1;
+    if (pl.parryDamageBuff === true && cls === 'melee'
+      && !DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS.has(self.projId ?? 0)) {
+      mul *= 5;
+      pl.parryDamageBuff = false;                       // parryDamageBuff=false（:13633）
+      pl.parryDamageBuffT = 0;                          // ClearBuff(198)（倒计时承载清零）
+    }
+    if (meleeGateHere && imbuNano) mul *= 1.05;   // GetNanoFlaskDamageBoost()=1.05f（Player.cs:44790-44792）
+    // (int) 截断 + 命中乘区（悠悠球无视线 ×0.75，:12504）。两旗皆关时 mul==1 与旧式
+    // 完全同值（舍入面零漂移）
+    const dmg = Math.trunc((crit ? self.damage * 2 : self.damage) * (dmgScale?.(e) ?? 1) * mul);
     const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
-    e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
-    onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
-    // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
-    // + 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意命中;
-    //   本环仅玩家弹路径可达=天然 !npcProj,同 Arrow.ts:3260 先例）
-    applyProjStatus(me.projId, e as unknown as Record<string, number>,
-      { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
-    // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
-    // 时长 Player.cs:6141-6171;挥砍侧同表在 Game 挥击结算）
-    if (me.meleeProj) {
-      const pl = game.player as unknown as { buffs: { has: (b: never) => boolean }; equipStats: { frostBurn: boolean; magmaStone: boolean } };
+    // ★α-H6/A5 弹幕侧：浸剂/debuff 施加搬前到【StrikeNPC 前】（原版 StatusNPC(victimIndex)
+    // :13640 → armorPen add :13686 → nano :13688 → StrikeNPC :13716。ichor 池反例与
+    // 挥砍侧同一案，见 Game.ts 敌怪循环 A5 注）。
+    if (meleeGateHere) {
       applyMeleeImbue(pl.buffs, e as unknown as Record<string, number>,
         () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
           ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
@@ -279,7 +312,25 @@ function hitEnemies(
       applyFrostBurn(pl.equipStats.frostBurn, e as unknown as Record<string, number>);
       // 岩浆石/火焰护手（melee 门,:10866 1/7 → OnFire3 6s）
       applyMagmaStoneProj(pl.equipStats.magmaStone, e as unknown as Record<string, number>);
+      // ★α-H3④ confetti 真弹 289（vanilla 就在 nano 同支、StrikeNPC 前——
+      // Projectile.cs:13693-96 NewProjectile(GetProjectileSource_FromThis(), targetNPC
+      // .Center.X/.Y, targetNPC.velocity.X/.Y, 289)）——弹幕侧独占位，无双发风险。
+      // 289 实体 = meleeOnHitProjs.ConfettiBurstProj（挥砍侧同款）
+      if (imbuParty) {
+        game.spawnFriendlyProj?.(new ConfettiBurstProj(
+          (e as unknown as { cx?: number }).cx ?? e.x + e.w / 2,
+          (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2,
+          (e as unknown as { vx?: number }).vx ?? 0,
+          (e as unknown as { vy?: number }).vy ?? 0));
+      }
     }
+    e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
+    onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
+    // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
+    // + 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意命中;
+    //   本环仅玩家弹路径可达=天然 !npcProj,同 Arrow.ts:3260 先例）
+    applyProjStatus(me.projId, e as unknown as Record<string, number>,
+      { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
   }
 }
 
@@ -2502,6 +2553,32 @@ export class YoyoShotProj extends Entity {
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
       e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
+      // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
+      // 蓝队二轮 F1/F5 裁决：四型 face 不再依赖调用点硬编码——
+      //   1125/1130 usesLocalNPCImmunity(cd=-1) → 写 0 清全局窗（:10541/:10610）；
+      //   1134 idStatic + appliesImmunityTimeOnSingleHits(pen1) → 写 0（:10645/:10652）；
+      //   1135 idStatic(pen -1) → 写 0（:10666）。face 源 = data/vanillaProjImmuneFaces.ts
+      //   （SetDefaults :10530-10668 逐型抓取），bridge 自动解析；旧「全走末档 10t」
+      //   会反向压制近战循环门（meleeNpcImmuneGateOf immune 分量）。
+      noteVanillaProjImmune(game, this.projId, e.id);
+      // ★GB1（GC 契约，2026-08-31）：幽灵伤害头 ghostHurt（Projectile.cs:13881 →
+      //  :12021）——StrikeNPC(:13712) 后调用位。武器族弹按弹 id 的 magic 归属面
+      //  数据门挂接（与 Arrow/MagicProj/MissileProj 同构；现役表内非 magic 弹恒
+      //  空掷零行为变化，未来 magic 类武器弹自动生效）。dealt=Enemy.lastStrikeDealt
+      if (this.projId > 0 && projectileData(this.projId)?.magic === true
+        && playerHasGhostHurt(game.player)) {
+        const v156 = e as unknown as { lastStrikeDealt?: number };
+        // dealt 合同 = 本拍 Enemy.hurt 结算面（无结算=0；蓝队 F2② 修订后 ??dmg
+        // 陈值兜底撤除——虚增幽灵预算头的路径封死）
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: e.x, y: e.y, w: e.w, h: e.h, cx: (e as unknown as { cx?: number }).cx ?? e.x + e.w / 2,
+            cy: (e as unknown as { cy?: number }).cy ?? e.y + e.h / 2,
+            vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
+            dealt: v156.lastStrikeDealt ?? 0 });
+      }
       if (this.projId === 1134) break;                       // penetrate 1（:10643）
     }
   }
@@ -4373,6 +4450,26 @@ export class DaybreakFlare extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       e.hurt(dmg, (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★GC1 写方桥：镖/标枪附着族（598/636/614）走 Projectile.cs:14039-14051 顶层
+      //  分派旁路——纯表返回无写档（附着节流全靠 per-javelin 表与上限管理），其余
+      //  id（未来扩种）自动落缺省档。
+      noteVanillaProjImmune(game, this.projId, e.id);
+      // ★GB1（GC 契约，2026-08-31）：幽灵伤害头 ghostHurt（Projectile.cs:13881 →
+      //  :12021）——StrikeNPC 后调用位，magic 归属面按弹 id 数据门（同上）。
+      if (this.projId > 0 && projectileData(this.projId)?.magic === true
+        && playerHasGhostHurt(game.player)) {
+        const v156 = e as unknown as { lastStrikeDealt?: number };
+        // dealt 合同 = 本拍 Enemy.hurt 结算面（无结算=0；蓝队 F2② 修订）
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: e.x, y: e.y, w: e.w, h: e.h,
+            cx: ((e as unknown as { cx?: number }).cx ?? e.x + e.w / 2),
+            cy: ((e as unknown as { cy?: number }).cy ?? e.y + e.h / 2),
+            vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
+            dealt: v156.lastStrikeDealt ?? 0 });
+      }
       // :10691-10693 + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, e as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });

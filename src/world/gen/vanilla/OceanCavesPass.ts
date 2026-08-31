@@ -8,7 +8,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
-import { genSolidType } from './GenSolid';
+import { genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 
 const SAND = TILE_BY_KEY['sand']!;            // 53
 const HARDSAND = TILE_BY_KEY['hardened_sand']!; // 397
@@ -21,6 +21,31 @@ const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
 
 const activeAt = (st: TileStore, x: number, y: number) =>
   st.inBounds(x, y) && !!st.flags[st.idx(x, y)];
+
+/** IIII98b 探针钩（dormant，零开销：optional-call 短路不实参求值）——oceanCave 逐迭代
+ *  行走轨迹（vt=vx vy dirX dirY r life big box），供单 pass 反演重放仪对账用 */
+/** ★IIIII98b（2026-08-31）：WorldGen.SolidTile(i,j) 全口径 1:1（cs:70650-70672）：
+ *  active && Main.tileSolid[生成期] && !Main.tileSolidTop && !halfBrick && slope==0 && !inActive。
+ *  oceanCave 竖井断轴谓词 cs:77432 曾只做 active+tileSolid 近似——jagged 对拍
+ *  (91,365) 处草 tile slope=3：原版非实心(不断轴,+6 行=+12 掷)，本仓误判实心
+ *  提前断轴 ⇒ 自该竖井起掷流错位 12 槽、全后续几何漂移（#37 首差根因）。
+ *  x86 实证：iii106rig octlog VT|36 起方向抖动项取值槽位偏移 +12。 */
+function solidTileFull(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!(st.flags[i]! & 1)) return false;                    // active()
+  if (((st.wire[i]! >>> 5) & 1) !== 0) return false;        // inActive()(致动位)
+  const t = st.type[i]!;
+  if (!genSolidType(t)) return false;                       // Main.tileSolid[tile.type](生成期覆写表)
+  const sh = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+  if (VAN_TILE_SOLID_EXTRA.has(sh)) return false;           // !Main.tileSolidTop（平台族）
+  if (st.half[i]! !== 0) return false;                      // !halfBrick()
+  if (st.slope[i]! !== 0) return false;                     // slope()==0
+  return true;
+}
+
+const ocTrace = (): undefined | ((s: string) => void) =>
+  (globalThis as { __swOcTrace?: (s: string) => void }).__swOcTrace;
 
 /** badOceanCaveTiles(cs:76679):墙 83/3/地牢墙 或 tile 203/25/tileDungeon 族/26/31 → 跳过
  *  (原版无 chest;sheet id 比较) */
@@ -45,6 +70,7 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
   let life = rng.int(600, 799);
   const MIN_R = 4;
   let steep = true;   // flag:初期陡降
+  let itN = 0;
 
   while (radius > MIN_R && life > 0) {
     // ★flag3/flag4/flag5 每轮重置(cs:76756-76758)
@@ -57,12 +83,15 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
     // ★big 判定在衰减**之后**(cs:76765-76767:先 ×0.96 再比 num6+2/20)——衰减跨阈
     // 的收尾轮原版立即转 small;曾放在循环首衰减前,多刻 264 腔体标记
     const big = radius >= MIN_R + 2 && life >= 20;
+    itN++;
+    ocTrace()?.(`VT|${itN}|x=${vx}|y=${vy}|dx=${dirX}|dy=${dirY}|r=${radius}|life=${life}|big=${big ? 1 : 0}|start=${i},${j}`);
     if (steep) { radius -= 0.01 + rng.next() * 0.01; life -= 0.5; }
     else { radius -= 0.02 + rng.next() * 0.02; life -= 1; }
     if (big) treasure = { x: Math.floor(vx), y: Math.floor(vy) };
     // 半径 ×3 盒内雕刻(盒体与扫描在 flag5 门外,cs:76803-76805)
     const x0 = Math.max(1, Math.floor(vx - radius * 3)), x1 = Math.min(w - 1, Math.floor(vx + radius * 3));
     const y0 = Math.max(1, Math.floor(vy - radius * 3)), y1 = Math.min(st.h - 1, Math.floor(vy + radius * 3));
+    ocTrace()?.(`BOX|${itN}|${x0},${x1},${y0},${y1}`);
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
         if (badOceanCaveTiles(st, x, y)) continue;
@@ -98,6 +127,7 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
               let depth = 50 + rng.int(0, 2);
               let wide = 43 + rng.int(0, 2);
               let len = 20 + rng.int(0, 2);
+              ocTrace()?.(`SH0|${itN}|at=${x},${y}|pre=${depth},${wide},${len}`);
               // ★cs:76856-76862:xa/xb 在缩放前就从 len 取值(原版 num15/num16 先算,缩放只影响循环上界)
               let xa = x, xb = x + len;
               if (dirX < 0) { xa = x - len; xb = x; }
@@ -113,13 +143,15 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
                 wide = Math.floor(wide * k);
                 len = Math.floor(len * k);
               }
+              ocTrace()?.(`SH1|${itN}|scaled=${depth},${wide},${len}|xa=${xa},xb=${xb}`);
               for (let sx = xa; sx <= xb; sx++) {
                 for (let sy = y; sy < y + depth && !badOceanCaveTiles(st, sx, sy); sy++) {
                   if (sy > y + wide) {
-                    // cs:76886:`SolidTile(m,n) && type != num2` break——实心判定用
-                    // tileSolid 族(非 active 非 sand 即断),海床上的非实心活性饰物
-                    // (海草等)不挡;曾误 active&&!sand 提前断轴(8888 对拍:浅轴)。
-                    if (activeAt(st, sx, sy) && genSolidType(st.type[st.idx(sx, sy)])
+                    // cs:76886:`SolidTile(m,n) && type != num2` break——★IIIII98b 起用
+                    // SolidTile 全口径(cs:70650 active/tileSolid/!tileSolidTop/!half/
+                    // slope==0/!inActive 六件套),斜坡海床不再提前断轴;
+                    // 旧近似(active+tileSolid 二件套)=#37 首差根因(91,365 slope=3 案)。
+                    if (solidTileFull(st, sx, sy)
                       && st.type[st.idx(sx, sy)] !== SAND) break;
                     st.setTileSilent(sx, sy, HARDSAND);
                   } else {
@@ -137,6 +169,7 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
         // 中心列水柱(本轮 flag4 一次,cs:76913-76930)——flag5 门外
         if (firstWater && x === Math.floor(vx) && y > vy) {
           firstWater = false;
+          ocTrace()?.(`WC|${itN}|col=${x},${y}-100`);
           for (let sx = x - 2; sx <= x + 2; sx++) {
             for (let sy = y; sy < y + 100; sy++) {
               if (!badOceanCaveTiles(st, sx, sy)) st.setLiquid(sx, sy, 255, 1);

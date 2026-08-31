@@ -6,6 +6,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { intersectsAnyPotentialDungeonBounds } from './DungeonStyles1457'; // ★IIIII88 dual 拒带
 import { tileRunner } from './TileRunner';
 import { genSolidType } from './GenSolid';
 // ★IIIII58（2026-08-29）REMIX #20 单格残差收官：饰面循环 K/P 支此前裸写
@@ -152,12 +153,17 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (tries > Math.floor(w / 4)) {
         x = rng.int(Math.floor(w * 0.025), Math.floor(w * 0.975) - 1); // 兜底带（cs:12620）
       }
-      // ★IIIII48 REMIX（cs:12637）：remix 世界蘑菇中心取「高处」带——
-      //   Next((int)worldSurface+50, (int)rockLevel−50)；普通世界仍为岩层下方。
       const y = !!gs.seedFlags.remix
         ? rng.int(gs.worldSurface + 50, gs.rockLevel - 51)
         : rng.int(gs.rockLevel + 50, h - 301);                       // Main.rockLayer
       flag = false;
+      // ★IIIII88 双地牢拒带（WorldGen.cs:12655-12667）：dual 时先查
+      //   IntersectsAnyPotentialDungeonBounds(rect(±100)) —— 命中直接置 flag 重掷，
+      //   ±100 网格扫描（147/161/162/60/368/367+地下沙漠）随后才跑。potentialBounds
+      //   在 Dunes 头装配；非 dual 空表恒 false。零掷骰差异。
+      if (gs.seedFlags.dualDungeons && intersectsAnyPotentialDungeonBounds(x - 100, y - 100, x + 100, y + 100)) {
+        flag = true;
+      }
       for (let l = x - 100; l < x + 100; l += 3) {
         for (let m = y - 100; m < y + 100; m += 3) {
           if (l >= 0 && l < w && m >= 0 && m < h) {

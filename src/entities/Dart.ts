@@ -14,6 +14,9 @@ import { projFrameImg, projSprite } from './Arrow';
 import { segHitsRect } from './bossAI_duke_moonlord';   // 线段命中（bossAI_duke_moonlord 导出共用）
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import { applyProjStatus } from './projStatus';
+import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+import { noteVanillaProjImmune } from './projTargets';
+import { projectileData } from '../data/vanillaProjectiles';
 
 /** 电路陷阱投射物(Wiring.cs:1495-1743)。贴图 = 原版 projectile id;
  *  帧尺寸按实际解包 PNG 整图(素材为完整单帧:98 竖镖 10×28 / 184 竖火舌 10×18 /
@@ -446,6 +449,32 @@ export class TrapShot extends Entity {
           { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
         // 击退方向 = 弹 direction（Projectile.cs:13652 num40=direction,水平 ±1）
         e.hurt(this.damage, Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
+        // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
+        // 陷阱弹 id 的全局档按纯表取（现役表内无显型定档/三旗——penetrate 走数据面：
+        // 98/184/185/186/980 均 penetrate=-1 ⇒ 末档每次命中写 immune[owner]=10
+        // （:14180-14183,1457 SetDefaults 实测值,非 flag3!）;★蓝队二轮重审计修正旧注
+        // "单发族无写"的错误叙事——trap 弹不做穿透计数,immune[owner]=10 全局面语义,
+        // 消费面=近战三重门 immune 分量）。
+        if (trapProjId !== undefined) {
+          noteVanillaProjImmune(game, trapProjId,
+            (e as unknown as { id?: number }).id ?? -1);
+        }
+        // ★GB1（GC 契约，2026-08-31）：幽灵伤害头 ghostHurt（Projectile.cs:13881 →
+        //  :12021）——按弹 id 的 magic 归属面数据门挂接（与 Arrow/MagicProj/MissileProj
+        //  同构;StrikeNPC(:13712) 后调用位）。本族现役弹 id 表（TRAP_PROJ_ID：
+        //  98/184/185/186/187/980 等 vanilla-projectiles.json）全部无 magic 位 →
+        //  恒空掷零行为变化;接缝保持弹型忠实——若未来新增 magic 陷阱弹即自动生效。
+        if (trapProjId !== undefined && projectileData(trapProjId)?.magic === true
+          && playerHasGhostHurt(game.player)) {
+          const v156 = e as unknown as { lastStrikeDealt?: number };
+          ghostHurtOnHit(game,
+            { magic: true, projDamage: this.damage,
+              projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+              ownerCx: game.player.cx, ownerCy: game.player.cy },
+            { x: e.x, y: e.y, w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+              vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
+              dealt: v156.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
+        }
         if (!pierce) {
           if (st.shatterDust) this.shatter(game);
           this.dead = true;

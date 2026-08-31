@@ -107,6 +107,7 @@ import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
 import { MALE_VARIANTS } from '../player/Appearance';
 import type { Appearance } from '../player/Appearance';
+import { meleeThirdOf } from '../player/SwingPathMath';
 import { hairDyeColor } from '../player/HairDyeColor';
 import type { Inventory } from '../items/Inventory';
 import { options } from '../core/Options';
@@ -3062,6 +3063,13 @@ export class Renderer {
     //       DrawLiquidBehindTiles :449-466 背景层调用,两 pass 并存）
     this.drawLiquidBehindSolidTiles(world, cam, viewW, viewH, z);
 
+    // 2c-'. behindTiles Gore 通道（★2026-08-31 自研放宽：烟囱烟后置）——原版
+    //     DrawGore 恒在实体层(Main.cs:63230)全体前绘；但标准烟囱的发射门对
+    //     Style3x3 是死支(fy==54 永 false)，无实机基线。本仓激活该粒子后按用户
+    //     观感裁定烟体【被烟囱/地形遮挡、只在口上方显形】→ 标记 behindTiles 的
+    //     gore 在墙层后、tile 层前单列绘制（对应 tile 语义=可被实体盖住）。
+    this.drawGorePieces(ctx, cam, viewW, viewH, { onlyBehind: true });
+
     // 2c. 前景 tile/物体层（drawChunkGrid 整数设备矩形——见 2b 注释）
     drawChunkGrid('tile');
 
@@ -4348,10 +4356,18 @@ export class Renderer {
    *  光照合成在后自动受光（同 wind-sway/natureParticles 层）。贴图多帧行取
    *  GorePiece.frameRows（1217/1218 等竖条）；落地不归零 rotation（Gore.cs 无此步，
    *  翻滚随 vx 摩擦冻结）。 */
-  private drawGorePieces(ctx: CanvasRenderingContext2D, cam: Camera, viewW: number, viewH: number) {
+  private drawGorePieces(ctx: CanvasRenderingContext2D, cam: Camera, viewW: number, viewH: number,
+    opts?: { onlyBehind?: boolean }) {
     if (!this.atlas) return;
     const pieces = liveGorePieces();
     if (!pieces.length) return;
+    // behindTiles 分流：烟囱烟等后层粒子只进 2c-' 通道，主实体层跳过
+    const wantBehind = !!opts?.onlyBehind;
+    let any = false;
+    for (const p of pieces) {
+      if (!p.dead && (!!p.behindTiles === wantBehind)) { any = true; break; }
+    }
+    if (!any) return;
     const z = cam.zoom;
     // 视区外剔除（扩半贴图防边缘闪断）
     const x0 = cam.x - viewW / 2 - 64, x1 = cam.x + viewW / 2 + 64;
@@ -4359,6 +4375,7 @@ export class Renderer {
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (const p of pieces) {
+      if (p.dead || (!!p.behindTiles !== wantBehind)) continue;
       if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
       this.drawGorePiece(ctx, p, z);
     }
@@ -5741,7 +5758,7 @@ export class Renderer {
         else if (stR === 93) ctx.rotate(e.visAngle);   // AI_093 荷兰飞盗船:rotation=vx*0.025(cs:41011);spriteDirection=-sign(vx) 仍镜像
         else if (stR === 102 || stR === 109) ctx.rotate(e.visAngle); // AI_102/109 沙尘精/黑暗魔法师:rotation=vx*0.04(cs:42249/:66415)
         else if (stR === 103) ctx.rotate(e.visAngle);  // AI_103 沙鲨族:rotation=vy*dir*0.1 钳±0.2(cs:42765)
-        else if (stR === 18) ctx.rotate(e.visAngle);   // AI_018 水母族:漂移形 rotation=vx*0.4 / 攻击形 atan2(v)+π/2 / 离水 vx*0.1(cs:24371/24422/24459)
+        else if (stR === 18) ctx.rotate(e.visAngle);   // AI_018 水母族:漂移形 rotation=vx*0.4(cs:24453) / 攻击形 atan2(v)+π/2(cs:24409) / 离水 vx*0.1(cs:24509)——★F 锚校正(旧 24371/24422/24459 为漂移行段误记)
         else if (stR === 76) ctx.rotate(e.visAngle);   // AI_076 火星飞碟核心 395:相位摆动→整周自旋(martianSaucerAI 写 visAngle,ai0==1 态 cs:36644-36662;ai0==2 归 0 :36748)。
           // 原版 case 392-395 专属绘制 base+GlowMask 同 rotation 同 origin 二次 Draw(cs:24202-24231)
           // ——本仓 drawNpcGlow 在本体同一变换内叠画(见调用点注),rotate 一次即双层跟随,glow 管线零改动。
@@ -11963,7 +11980,10 @@ export class Renderer {
       case 1:
       case 13:
         // :35882-35890 / :35971-35985：三段 行1/2/3（13 与 1 同表）
-        return pAnim > 2 / 3 ? 1 : pAnim > 1 / 3 ? 2 : 3;
+        // ★[N5] 分档统一到 meleeThirdOf（C# double 阈值 anim<0.333max / ≥0.666max，
+        // :36596/:36600——三等分点 ±1 帧抖动闭式修正，与 Game.updateSwingHits 共表）
+        return meleeThirdOf(swing.t, swing.dur) === 'tail' ? 3
+          : meleeThirdOf(swing.t, swing.dur) === 'mid' ? 2 : 1;
       case 2:
       case 3:
         return 3; // :35908 / :35948（3 两段都是行3）
@@ -12009,7 +12029,9 @@ export class Renderer {
       case 16:
         return -1;
       default:
-        return pAnim > 2 / 3 ? 1 : pAnim > 1 / 3 ? 2 : 3;
+        // ★[N5] 同上：meleeThirdOf 共表
+        return meleeThirdOf(swing.t, swing.dur) === 'tail' ? 3
+          : meleeThirdOf(swing.t, swing.dur) === 'mid' ? 2 : 1;
     }
   }
 
@@ -12175,7 +12197,9 @@ export class Renderer {
         rot = (pAnim - 0.5) * -3.5 - 0.3;
         // Item.claw（1827）/2320·2330·2341/671/426 特例持位在 swingTier 内统一
         // 分流（:49930-50104，与 Game.updateSwingHits 命中盒侧同源双表）
-        const seg = pAnim <= 1 / 3 ? swingTier(0) : pAnim < 2 / 3 ? swingTier(1) : swingTier(2);
+        // ★[N5] 分档=meleeThirdOf 共表（C# double 阈值 :51294 段，三等分点修正）
+        const third = meleeThirdOf(swing.t, swing.dur);
+        const seg = third === 'tail' ? swingTier(0) : third === 'mid' ? swingTier(1) : swingTier(2);
         offX = seg.x; offY = seg.y;
         break;
       }
@@ -12189,8 +12213,9 @@ export class Renderer {
         break;
       }
       case 3: {
-        // 雨伞（:50279-50312）：起手段（anim>0.666max ⟺ pAnim>0.666）itemLocation=-1000 不画
-        if (pAnim > 0.666) { hide = true; break; }
+        // 雨伞（:50279-50312）：起手段（ItemCheck_GetMeleeHitbox :45553 `itemAnimation >
+        // itemAnimationMax * 0.666`——double 阈值原式，勿换 pAnim 比值式）
+        if (swing.t > swing.dur * 0.666) { hide = true; break; }
         rot = 0.8;
         offX = fw * 0.5 - 4 - Math.max(pAnim * fw * 1.2 - 10, 8);
         offY = 24;
@@ -12301,7 +12326,9 @@ export class Renderer {
       default: {
         // 7/8/10/11/12 等未入表族回退 useStyle 1 挥砍（三段持位与 case 1 同款同步）
         rot = (pAnim - 0.5) * -3.5 - 0.3;
-        const seg = pAnim <= 1 / 3 ? swingTier(0) : pAnim < 2 / 3 ? swingTier(1) : swingTier(2);
+        // ★[N5] 同上：meleeThirdOf 共表
+        const third = meleeThirdOf(swing.t, swing.dur);
+        const seg = third === 'tail' ? swingTier(0) : third === 'mid' ? swingTier(1) : swingTier(2);
         offX = seg.x; offY = seg.y;
         break;
       }
@@ -12326,9 +12353,11 @@ export class Renderer {
     ctx.translate(p.cx + p.facing * offX, p.y + offY);
     if (p.facing === -1) ctx.scale(-1, 1); // 镜像空间：旋转自动随镜像取反（与原版 -direction 因子等价）
     ctx.rotate(rot);
-    // GetAdjustedItemScale（Player.cs:41919-41930；PlayerDrawLayers.cs:3170 DrawData
+    // GetAdjustedItemScale（★F 锚校正：1457 Player.cs:42891，ApplyMeleeScale :42901；
+    // 旧 :41919-41930 为 1456 行段；PlayerDrawLayers.cs:3170 DrawData
     // scale）：melee 武器且手套族 meleeScaleGlove 在身 → 手持贴图 ×1.1（缩放绕握点
-    // ——translate 后 scale，与原版 origin 锚定等价；Game 命中盒侧同乘 :44509-44511）
+    // ——translate 后 scale，与原版 origin 锚定等价；Game 命中盒侧同乘,消费位=
+    // GetPointOnSwungItemPath(70f…) :44636-44637）
     if (p.equipStats.meleeScaleGlove
       && (heldVid >= 0 ? itemCombat(heldVid)?.melee : false)) {
       ctx.scale(1.1, 1.1);

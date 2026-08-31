@@ -7,8 +7,9 @@ import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
-import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
+import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
+import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { trySnapStrike } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { LIQUID_TYPE } from '../world/TileStore';
@@ -122,7 +123,7 @@ import { isGemBolt, type GemStaffFlags, gemDamageMultiplier } from '../data/vani
 import { projGravSpec } from '../data/vanillaItemCombat';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { GorePiece } from './GorePiece';
-import { TownNPC } from './TownNPC';
+import { createTownNpcByShellKey } from './townNpcFactory';   // ★环切：原 `import { TownNPC }`（TownNPC→TownShot→Arrow 三节环）
 import { MedusaHeadProj } from './MedusaHeadProj';
 const PROJ_FRAMES = projFramesJson as Record<string, number>;
 
@@ -2462,7 +2463,10 @@ export class Arrow extends Entity {
       || st.liquidType[st.idx(tx, ty)] !== LIQUID_TYPE.SHIMMER) return;
     if (this.life > 5) this.life = 5;                       // timeLeft=5 cap（:22680-22682）
     game.world.flags['unlockedSlimeRainbowSpawn'] = true;   // :22685（netMode!=1 段,本仓单模式）
-    const ms = new TownNPC('town_slime_diva', this.cx + 4, this.cy);   // :22686 Center.X+4
+    // :22686 Center.X+4 —— 经注册表取构造器（环切见 townNpcFactory.ts 头注；
+    // 生产链恒注册,未装配=弹幕域孤立调用面静默跳过）
+    const ms = createTownNpcByShellKey('town_slime_diva', this.cx + 4, this.cy);
+    if (!ms) return;
     const entsS = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
     entsS?.add?.(ms, 'npcs');
     // 彩虹尘近似（WorldItem.cs:1704-1723 四色档；弹侧原版解锁支无尘,视觉补位已登记）
@@ -3647,14 +3651,35 @@ export class Arrow extends Entity {
     } else if (this.projId === 181 || this.projId === 189 || this.projId === 307
       || this.projId === 316 || this.projId === 566) {
       // ---- aiStyle 36 蜂族（AI() 派发器 Projectile.cs:27683-27862）----
+      // ★批⑤（2026-08-31）覆盖实证收口——「已实证对齐行号表」（1457 逐段对读）：
+      //   :27685-27688 入水消亡(wet && !honeyWet && !shimmerWet;307 豁免)
+      //     = 本处 liquidType∈{WATER,LAVA} 才 kill ——蜂蜜(3)/微光(4) 天然豁免,等价式成立;
+      //   :27690-27697 alpha −50 / 归零后 extraUpdates=0 → 本处 + :2904 tick 头生效位 ✓
+      //   :27698-27701 307 rotation=atan2−π/2、6 拍 2 帧 → bee36Tilt/bee36Frame(draw 消费) ✓
+      //   :27702-27716 307 尘 184 ×3(position=Center−v/3×i,v=0,scale .5) ✓
+      //   :27717-27727 其余 spriteDirection±/rotation=vX×.1、3 拍 3 帧 ✓(同上字段)
+      //   :27761-27764 ai[0]++ >30 后【每 update】重搜 → bee36Delay 钳 30 ✓
+      //   :27766-27776 候选 = CanBeChasedBy && (!wet||type370||307) ；曼哈顿 CENTER 对
+      //     CENTER <800（注意此段是正常中心距!与 ghostHurt/AI_059 的怪癖式不同源）
+      //     视线 = Collision.CanHit(position,width,height → npc.position,width,height)
+      //     （:27776 步行族整盒对整盒——F5/F6 归位后：vanillaId!==370 湿拒 + canHit
+      //     盒形调用，非 canHitLine；可复核=physics/LineOfSight.ts canHit 契约注）；
+      //   :27784-27788 无标瞄心 = center+v×100 ✓
+      //   :27789-27792 仅 307 锁定帧 friendly=true → friendly307 位 ✓
+      //   :27793-27822 speed/accel 逐型：181 6/.1、189 9/.2、307 13/.35、
+      //     316 锁13/.325 自由10/.25、566 6.8/.14 → P36 表逐值核对 ✓
+      //   :27823-27862 逐轴步进 + 变号双步(+/-2×accel)转向 ✓
+      // 上述各值另有 tests/spectre-stellar-procs.test.ts 兄弟批面；数据面
+      // vanilla-projectiles.json 181/189/307/316/566 行由 recon-item 双闸门守护。
       // 181 蜂枪蜂(1121)/566 巨蜂(beeType 强蜂 20%)/189 黄蜂枪蜂(1155)/
       // 316 蝙蝠杖蝠(1801)/307 腐化者天罚小吞噬者(1571 命中 Kill 链 :78052-78062 掷)：
       // ① 入水消亡（307 豁免——:27685 `type != 307 && wet && !honeyWet && !shimmerWet`）；
       // ② alpha −50/update 渐显，归零后 extraUpdates=0（:27690-27697，SetDefaults 3 →
       //    淡入期 4 子步/帧、全显后 1——速度观感先快后常）；
       // ③ 30 update 索敌延迟（:27762-27764 ai[0]++ 钳 30）后【每 update 重搜】最近敌
-      //   （800 曼哈顿 + CanHit 全盒视线；湿敌豁免表：Duke Fishron 370 或 307 自身，
-      //    :27769）——无持久锁，每拍重选最近；
+      //   （800 曼哈顿 + CanHit 步行族全盒视线 :27776；湿敌豁免：NPC.type==370 Duke
+      //    Fishron 或 307 自身，:27769——本仓比较 vanillaId（F5 归位））——
+      //   无持久锁，每拍重选最近；
       // ④ 无目标 → 瞄准点 = 弹心 + v×100（保持直飞，:27784-27788）；307 锁到目标瞬间
       //    friendly = true（:27789-27792——出生非 friendly，锁定才可伤敌）；
       // ⑤ 逐轴步进转向（:27823-27862）：目标速度向量 = 归一(目标−弹心)×speed，
@@ -3702,14 +3727,23 @@ export class Arrow extends Entity {
         this.bee36Delay = 30;                              //（:27763-27764 钳）
         let best36 = 800;
         for (const ent of game.enemies()) {
-          const e = ent as unknown as { id: number; x: number; y: number; w: number; h: number; dead?: boolean; wet?: boolean };
+          const e = ent as unknown as {
+            id: number; x: number; y: number; w: number; h: number; dead?: boolean;
+            wet?: boolean; vanillaId?: number | null;
+          };
           if (e.dead) continue;
           if (!canBeChasedBy(ent)) continue;      // CanBeChasedBy
-          // 湿敌豁免（:27769）：Duke Fishron 370 或 307 自身可追湿敌
-          if (e.wet && this.projId !== 307 && e.id !== 370) continue;
+          // 湿敌豁免（:27769）：`Main.npc[i].type == 370`（Duke Fishron）或 307 自身可追
+          //   湿敌——★F5 归位（2026-08-31 二轮蓝队）：比较面是【原版 NPC 型号】
+          //   vanillaId，非运行时槽 id（旧 `e.id !== 370` 对 Duke 恒真 ⇒ 豁免永不命中）。
+          //   Bobber.ts 松露虫 370 同口径先例。
+          if (e.wet && this.projId !== 307 && e.vanillaId !== 370) continue;
           const d36 = Math.abs(this.cx - (e.x + e.w / 2)) + Math.abs(this.cy - (e.y + e.h / 2));
           if (d36 >= best36) continue;
-          if (!canHitLine(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+          // CanHit 全盒步行族（★F6 归位：原版 :27776 字面
+          //   Collision.CanHit(base.position,width,height → npc.position,width,height)，
+          //   非积分步进 CanHitLine——两族在斜坡/半砖/夹缝与三 tile 判定组上互异）
+          if (!canHit(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
           best36 = d36;
           this.bee36Aim = { cx: e.x + e.w / 2, cy: e.y + e.h / 2 };
           this.bee36AimLocked = true;
@@ -5190,6 +5224,16 @@ export class Arrow extends Entity {
         if (!canHitLine(game.world.store, this.cx, this.cy, 0, 0,
           e.x + e.w / 2, e.y + e.h / 2, 0, 0)) hitBox = false;
       }
+      // ★批③（2026-08-31）弹 661 黑爆 Colliding 重载（Projectile.cs:15887-15893）：
+      // dist(myRect.Center→targetRect.Center) > 500f 或 !CanHitLine(双盒心点对 0×0)
+      // ⇒ 本拍不命中（原版 Colliding 直接 return false——掷出去的玛瑙爆破弹
+      // 越过 500px 或被墙隔断后连擦身都不结算）。顺序=先距离后视线,1:1。
+      else if (this.projId === 661 && hitBox) {
+        const ec661X = e.x + e.w / 2, ec661Y = e.y + e.h / 2;
+        if (Math.hypot(ec661X - this.cx, ec661Y - this.cy) > 500) hitBox = false;
+        else if (!canHitLine(game.world.store, this.cx, this.cy, 0, 0,
+          ec661X, ec661Y, 0, 0)) hitBox = false;
+      }
       if (gem && !hitBox && gem.fastThenSlow) {
         // ① 拖尾扫掠：oldPos[1..5]（本仓 gemTrail 每 tick 记录出生位置，1=上一 tick）
         const stG = game.world.store;
@@ -5224,16 +5268,23 @@ export class Arrow extends Entity {
         // （immunityIdentity :10686,idStaticNPCHitCooldown=10t）
         if ((this.projId === 376 || this.projId === 604)
           && !idStaticCheck(this.projId, e.id, this.projId === 376 ? 100 : 167)) continue;
-        if (this.idStaticGroup !== null
-          && !idStaticCheck(this.idStaticGroup, e.id, this.idStaticCdMs)) continue;
+        let immFaceIdStatic = false;
+        if (this.idStaticGroup !== null) {
+          immFaceIdStatic = true;   // ★GC1 写方桥 face 记录（命中尾统一写用）
+          if (!idStaticCheck(this.idStaticGroup, e.id, this.idStaticCdMs)) continue;
+        }
+        if ((this.projId === 376 || this.projId === 604)) immFaceIdStatic = true;
         // 502 喵刀弹：localNPCHitCooldown=10t 同敌再命中（穿透弹 hitSet 是永久免疫，
         // 502 是"同一敌 10t 冷却后可再咬"——SetDefaults :5466-5468）
+        let immFaceLocal = false;
         if (this.projId === 502) {
+          immFaceLocal = true;      // ★GC1 face 记录（同 usesLocalNPCImmunity 形）
           const cd = this.meowHitCd.get(e.id) ?? 0;
           if (cd > 0) continue;
           this.meowHitCd.set(e.id, 10);
         } else if (this.localImmune > 0) {
           // 1457: 通用局部免疫（usesLocalNPCImmunity+localNPCHitCooldown=N，数据列驱动）
+          immFaceLocal = true;      // ★GC1 face 记录
           const cd = this.localImmuneCd.get(e.id) ?? 0;
           if (cd > 0) continue;
           this.localImmuneCd.set(e.id, this.localImmune);
@@ -5354,6 +5405,18 @@ export class Arrow extends Entity {
         //   消费）——弹幕 damage 字段即终值，命中侧不再乘（蓝队 R2-06：命中侧
         //   Math.round 曾致 SwirlTwins 0.6/ArPenSpread 0.5 档在 x.5 处系统性 +1）
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);   // 音/飘值=StrikeNPC 单点
+        // ★GC1 写方桥（清零批二波，2026-08-31；蓝队二轮 F4 校准行号 F5 补表面）：
+        //  命中尾 npc.immune[owner] 统一写（Projectile.Damage :14031-14183 梯子,
+        //  StrikeNPC 后原位）。face 由上方去重支记录：idStatic/local 面 = 原版写 0
+        //  （全局窗显式清零,节流归弹内局部表）；全局面 = 纯表档位（缺省
+        //  `penetrate!=1→10`；单发弹 flag3 族无写——与 :12636 绕门语义同源）。
+        //  ★F5：bridge 未显式传 true 时自动读 data/vanillaProjImmuneFaces.ts 三旗补表,
+        //  本处显参仍恒覆盖（防 Arrow 自家局部表时序与原版 SetDefaults 静态面漂移）。
+        //  写前现存穿透数 = this.pierce（本行之后才递减，与原版"判定用未减值"同拍）。
+        //  消费面 = Game.meleeNpcImmuneGateOf（Player.cs:44598 近战三重门 immune 分量)
+        //  与后续新读域。
+        noteVanillaProjImmune(game, this.projId, e.id,
+          { penetrate: this.pierce, localFace: immFaceLocal, idStaticFace: immFaceIdStatic });
         // ★R29 幻象弓命中侧补刀（Projectile.cs:13935）：arrow 弹（type≠631）命中且
         // 630 载体在场（phantasmTime>0）→ 从玩家身体随机点补 3 枚 631 追踪矢。
         // 原版门 = projectile.arrow && type != 631 && phantasmTime > 0（本仓以
@@ -5374,6 +5437,23 @@ export class Arrow extends Entity {
           game.applyLifeSteal?.('vampire', Math.round(dmg), this.hitSet.size, this.x, this.y);
         } else if (projectileData(this.projId)?.magic) {
           game.applyLifeSteal?.('ghost', Math.round(dmg), this.hitSet.size, this.x, this.y, true);
+          // ★批⑥（2026-08-31）幽灵伤害头 ghostHurt（Projectile.cs:13881 调用点 /
+          // :12021 方法体,SpectreSoulProj.ts 承载全套）：magic 弹命中且防后实扣
+          // （Enemy.lastStrikeDealt≈StrikeNPC 返回值 num41）>1 → 预算池闸门后从
+          // 受害者 Center 放追踪浮魂弹 356（伤=弹基伤）
+          if (!this.hostile && playerHasGhostHurt(game.player)) {
+            const v661 = e as unknown as { vanillaId?: number | null; lastStrikeDealt?: number;
+              maxHp?: number; def?: { lifeMax?: number } };
+            ghostHurtOnHit(game,
+              { magic: true, projDamage: this.damage,
+                projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+                ownerCx: game.player.cx, ownerCy: game.player.cy },
+              { x: e.x, y: e.y, w: e.w, h: e.h,
+                cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+                vanillaId: v661.vanillaId,
+                lifeMax: v661.maxHp ?? v661.def?.lifeMax,
+                dealt: v661.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
+          }
         }
         // 710 空中祸害命中撒裂片（Damage() :13165-13168 → BetsySharpnel :51075-51091，
         // 在 penetrate-- 前）：本体（ai[1]≠-1）每跳撒 5 枚 710 裂片（abShard 标不再链）

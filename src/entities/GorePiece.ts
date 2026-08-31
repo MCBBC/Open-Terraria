@@ -62,6 +62,14 @@ const isBubble = (t: number) => t >= 411 && t <= 430;
 /** SpecialAI==2 烟囱烟三型（GoreID.cs:464-471 ChimneySmoke1..3 = 825..827，
  *  SpecialAI 注册见 :9 `Factory.CreateIntSet(0, …, 825, 2, 826, 2, 827, 2, …)`） */
 const CHIMNEY_SMOKE_AI: ReadonlySet<number> = new Set([825, 826, 827]);
+/** ★自研调参备案（2026-08-31 用户裁定：原版发射门对 Style3x3 死支，无实机基线；
+ *  观感要求烟更稀、消散更早）——
+ *  SMOKE_SPAWN_LIFE：出生 timeLeft（原版 GORE_TIME 600 ≈14s 稳态 ~80 只；
+ *  现 360 + 随机衰减(≈0.7/t) → 实际存活 ~210t≈3.5s，稳态 ~10 只）
+ *  SMOKE_FADE_TICKS：渐隐提前窗（原版尾段 60t；现 140t = 后 2.3 秒缓缓变淡，
+ *  避免由近实直接消失的突兀感）。AI 其余数学仍按 Gore.cs:775-860。 */
+export const SMOKE_SPAWN_LIFE = 360;
+const SMOKE_FADE_TICKS = 140;
 /** 气泡族贴图尺寸（terraria-assets/Images/Gore_411-430.png 实测 10/20/32/48/64；
  *  TEX 表（_meta.tex）只含 HitEffect 提取面，该族不在其中——NewGore 尾段定位 /
  *  Update 爆裂尘计数 / 玩家与实心碰撞矩形都以贴图原尺寸为准，故独立登记） */
@@ -317,6 +325,9 @@ export class GorePiece extends Entity {
   sticky = true;
   /** Gore.light（NewGore :1487-1490 仅 16/17 置 1；Update 尾段据此 AddLight） */
   light = 0;
+  /** 后层通道标记（★自研放宽备案：原版 DrawGore 恒全体前绘，但烟囱烟激活是
+   *  自研行为、按用户观感裁定被地形遮挡 → 走 Renderer 2c-' 墙后/tile 前单列） */
+  behindTiles = false;
   /** 贴图原始尺寸（碰撞盒与绘制基准；缺失回退 32） */
   texW: number;
   texH: number;
@@ -622,7 +633,7 @@ export class GorePiece extends Entity {
    */
   private updateChimneySmoke(game: GameHooks): void {
     const wind = game.world.weather?.windSpeedCurrent ?? 0;   // Main.WindForVisuals
-    if (this.timeLeft < 60) {
+    if (this.timeLeft < SMOKE_FADE_TICKS) {
       this.alpha += 1 + irand(6);                             // :777-779 rand.Next(1,7)
     } else if (this.alpha > 100) {
       this.alpha -= 1 + irand(3);                             // :781-782 rand.Next(1,4)

@@ -89,6 +89,7 @@ import travelshopJson from '../data/vanilla-travelshop.json';
 import { glStatFrame, maybeInstallGpuLoggerFromUrl } from '../render/GLStats';
 import { TileStore, LIQUID_TYPE } from '../world/TileStore';
 import { repairIndexFramesInStore } from '../world/repairIndexFrames';
+import { repairChimneyCaps } from '../world/ChimneyCapRepair';
 import { starvedEver } from '../render/GLStats';
 import { paintTile, paintWall, paintDustColor, paintCoatTile, paintCoatWall, type PaintDustHook, type CoatDustHook } from '../world/Paint';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
@@ -333,6 +334,8 @@ import {
   type PowerPermissionLevel,
 } from '../net/journeySync';
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
+import { PlayerHurtFlags } from '../net/protocol';
+import { bindGhostBudgetHost } from '../entities/SpectreSoulProj';
 import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
 import { cround } from './csCompat';
@@ -364,11 +367,27 @@ import { XenoBubbleProj, xenoBubbleCount, xenoBubbleVelocity } from '../entities
 import { ElectroSphereProj } from '../entities/ElectroSphereProj';
 import { resetCageAnim } from '../render/CritterCage';
 import { prefetchTrapProjectiles } from '../entities/Dart';
-import { hitPlayer, playerCanHitEnemy, statusPlayer, COLD_DAMAGE_NPCS } from '../entities/projTargets';
+import { hitPlayer, playerCanHitEnemy, statusPlayer, canBeChasedBy, playerProjectileCanHitNpcGate, isCritterThatIsHostileToPlayers, hittableForOnHitRewards, COLD_DAMAGE_NPCS } from '../entities/projTargets';
+import { applyBuffTicks, type StatusEnemyLike } from '../entities/projStatus';
+import { npcImmuneTo } from '../data/vanillaNpcImmunity';
+import { grantCollisionAttackImmunity } from '../entities/MountCombat';
+import {
+  SparkleGuitarProj, computeStellarTuneShot, sparkleGuitarTargetRect,
+  stellarTuneCritChance, modifyStellarTuneDamage,
+} from '../entities/SparkleGuitarProj';
 // 近战任务A/B 纯几何：ZappingJellyfish 族表 + 火之大剑(Volcano,type121;
 //   历史注误标"星怒"[J1],真星怒=65——ItemID.cs:1676/:1788,见 SwingPathMath.ts 头勘误)
 //   延长臂探针/LineRectangleDistance
-import { ZAPPING_JELLYFISH, lineRectangleDistance, starfurySwingProbes } from '../player/SwingPathMath';
+import { ZAPPING_JELLYFISH, lineRectangleDistance, starfurySwingProbes,
+  intRect, rectIntersects, meleeThirdOf } from '../player/SwingPathMath';
+import { ImmunityCooldownID, HurtCooldownBuckets, hurtImmunityFrames } from '../player/HurtCooldownBuckets';
+// ★R2-01/R2-06⑤/R2-07（蓝队二轮）：连击加成 + 甲虫实扣蓄能 + on-hit 五弹实体
+import { applyRapidAttackBonus, decayRapidAttackBonus, newRapidBonusState,
+  type RapidBonusState } from '../player/RapidAttackBonus';
+import { BeetleMeter } from '../player/BeetleMeter';
+import { JavelinStickerProj, MuramasaSlashProj, ConfettiBurstProj, BladetongueGlobProj,
+  killOldestJavelin } from '../entities/meleeOnHitProjs';
+import { VolcanoBlastProj } from '../entities/VolcanoBlastProj';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
@@ -464,6 +483,56 @@ const SHOTGUN_PELLETS: Record<number, [number, number, number, number]> = {
  *  （原版散布全部是整数掷：Main.rand.Next(-40,41) 等） */
 function nrand(b: number): number {
   return Math.floor(Math.random() * (b * 2 + 1)) - b;
+}
+
+/** ★GA4 弹幕 crit 掷点上下文编码（PvP 弹快照 aux 高位段）。
+ *  ★ε#3（终局扫尾批）位语义升级——携【持械 item.crit 含词缀折入】的完整终值：
+ *  原版 meleeCrit 每帧累计链 = Player.Update :25712-714
+ *  `meleeCrit += inventory[selectedItem].crit`（跨武器类型无条件——当前持有物品的
+ *  item.crit 直接入列,与所持武器系别无关）+ Item.Prefix（Item.cs:585 `crit += crt`）
+ *  词缀在重铸时已折进 item.crit 字段 ⇒ 终值 = 基础4 + equipStats.critMelee +
+ *  药水/食物链（ApplyEquipFunctional/critChance('melee') 面）+ **持械 item.crit
+ *  （武器基值 + 词缀 crt×1,前缀贡献不乘 2）**。此前 aux 只携前三项 → 跨端偏低
+ *  ≤20pp（词缀暴击档 crt 至 +12~15）。修复 = 复用位 4-11 直携终值（8bit 满量程
+ *  clamp≤100 足够,原版暴击率有效上限 100；无需扩容新位段——aux 线格式是 i16,
+ *  位12起仅剩符号位前 3bit,任何"扩高位段"方案都会撞溢出）。
+ *  新旧双向降级矩阵（增量通道纪律）：①新端发→旧端收——旧端 `(aux>>4)&255` 读到
+ *  即新终值,**自动变准**（无破坏性变更）；②旧端发→新端收——读到旧语义(缺持械
+ *  加成)＝与旧行为一致,不劣化于现状；③两端新旧同款完全对齐。快照时点偏差登记：
+ *  GA4 架构即"广播拍现值快照"非发射拍冻结（装备/切枪窗口内的漂移与既有 base 段
+ *  同构,弹速快窗短,接受）——Projectile.Damage_PVP 原版为命中拍实读 owner 全态。 */
+export function ownerMeleeCritBits(
+  p: { critChance(k: 'melee'): number },
+  heldItem?: { vid?: number; key?: string; prefix?: number } | null,
+): number {
+  // 持械加成 = 武器基值 crit 字段 + 词缀 crt（Item.Prefix Item.cs:585 `crit += crt`
+  // ——直加,无倍率）。vi_ 表缺失返回 0（无伤大雅：基值并入全表数据链）
+  let heldBonus = 0;
+  if (heldItem) {
+    heldBonus = (itemCombat(heldItem.vid ?? viIdFromKey(heldItem.key ?? ''))?.crit ?? 0)
+      + (heldItem.prefix ? prefixStat(heldItem.prefix).crt : 0);
+  }
+  return (Math.max(0, Math.min(100,
+    Math.round(4 + p.critChance('melee') + heldBonus))) & 255) << 4;
+}
+
+// ---- 受击飘字色单源（★二轮蓝队 FR4-F：曾三面互异 #FF7060/#FFD040/#FF5050 硬编码；
+// ★附带④ 全表收口进 fx/CombatTextColors.ts——hostile/Others×0.4 族一并入列，
+// Enemy.ts StrikeNPC 单点/Player 摔伤四站/Minecart 碾压站同源消费）----
+export {
+  COMBAT_TEXT_DAMAGED_FRIENDLY,
+  COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT,
+  COMBAT_TEXT_DAMAGED_HOSTILE,
+  COMBAT_TEXT_DAMAGED_HOSTILE_CRIT,
+  OTHERS_DAMAGED_HOSTILE,
+  OTHERS_DAMAGED_HOSTILE_CRIT,
+} from '../fx/CombatTextColors';
+import { COMBAT_TEXT_DAMAGED_FRIENDLY, COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT } from '../fx/CombatTextColors';
+/** 玩家受击飘字色分档（普伤/暴击）——本地实扣位、PvP 四结算点广播接收位共用
+ *  （Player.Hurt 文本位 Player.cs:38670 `Crit?DamagedFriendlyCrit:DamagedFriendly`——
+ *  摔伤等一切 Hurt 系直扣同一组） */
+export function playerHurtFloatColor(crit: boolean): string {
+  return crit ? COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT : COMBAT_TEXT_DAMAGED_FRIENDLY;
 }
 
 /** AmmoID.Sets 匹配表与解析已抽至 data/vanillaItemCombat.resolveAmmoProjId
@@ -862,6 +931,34 @@ export const TILE_CUT = new Set<number>(
   }, []),
 );
 const POT_TILE = TILE_BY_KEY['pot'] ?? -1;
+/** ★R2-06②（蓝队二轮）TileID.Sets 挥击砍切忽略/加砍清单（Terarria1457/
+ *  Terraria.ID/TileID.cs:82-92 + :307 bonusCutTiles；Player.ItemCheck_CutTiles
+ *  :43987-44018 逐项消费面）：
+ *  · TileCutIgnore.Regrowth（:88 允许再生法杖挥击支——213 再生法杖/5295 员工杖
+ *    `allowRegrowth=true` 走该忽略表）： herbs/grass 族不砍，保护成熟植株；
+ *  · TileCutIgnore.IgnoreDontHurtNature（:87 dontHurtNature 支：5309/5323 壳件）
+ *    ——花丛等自然物不砍；
+ *  · TileID.Sets.bonusCutTiles = {233}（金网 3183/防火网 4821 cutExtraTiles 面，
+ *    Player.cs:43984-43989 调用点 :42991-42993）。
+ *  三表按 vanilla sheet id 建表、经 TILE_DEFS 映到内部 tile id（TILE_CUT 同构式）。 */
+function internalIdsOfVanSheets(sheets: readonly number[]): Set<number> {
+  const s = new Set(sheets);
+  return new Set(TILE_DEFS.reduce<number[]>((acc, d, id) => {
+    if (d.vanilla && s.has(d.vanilla.sheet)) acc.push(id);
+    return acc;
+  }, []));
+}
+// TileID.cs:89 Regrowth 表逐项
+const CUT_IGNORE_REGROWTH = internalIdsOfVanSheets([
+  3, 24, 52, 382, 61, 703, 62, 71, 73, 74, 82, 83, 84, 110, 113, 115,
+  184, 205, 201, 519, 518, 528, 529, 530, 705, 549, 637, 638, 636,
+]);
+// TileID.cs:87 IgnoreDontHurtNature 表逐项
+const CUT_IGNORE_NATURE = internalIdsOfVanSheets([
+  654, 444, 485, 231, 484, 32, 352, 655, 69, 51, 481, 482, 483,
+]);
+// TileID.cs:307 bonusCutTiles = {233}
+const BONUS_CUT_TILES = internalIdsOfVanSheets([233]);
 /** Chest.CanDestroyChest（Chest.cs:590-606）：锚格记录含非空物品（id>0 且 stack>0）
  *  → false（不可毁）。world.chests 登记锚=物件左上格（放置链 :13404 注），梳妆台 88
  *  共用同表。破坏门（breakTile→shouldTileSurviveAt）与钻头链（killTileCtx）同源 */
@@ -1095,6 +1192,38 @@ export function beeRetaliateRoll(strongBees: boolean, rnd: () => number): { coun
  *  Next(100)==0 升 73 金（顺序覆盖）；stack = Next(1,11)（1-10）；
  *  velocity.Y = Next(-20,1)*0.2、X = Next(10,31)*0.2*direction（玩家朝向）。
  *  门（value>0 && hasLuckyCoin && Next(5)==0）由调用侧判定 */
+/** ★R2-07(a)（蓝队二轮）ItemID.BannerEffect.DamageDealt 攻端乘区采样
+ *  （Terarria1457/Terraria.ID/ItemID.cs:11-40 BannerEffect 构造 + ItemID.cs:1072
+ *  BannerStrength 表 + GameDifficultyData.LinearCurve.Sample）：
+ *  · 普通旗 strength=1f → keys{Classic(1):1.5, Expert(2):2.0}；
+ *  · DD2 族 itemId 3837-3846 → BannerStrength=BannerEffect(0.2f) → keys{1.1,1.2}；
+ *  · Sample(Main.Difficulty) 为【分段线性 + 越尾键同斜率外推】——大师档(3) 经外推
+ *    得 2.5/1.3，Main.Difficulty 走浮点难度轴（GameDifficultyLevel.cs:8-16，
+ *    旅程 0.5 ≤ 首键 → 取首键值）。闭合式：k1+(difficulty−1)·(k2−k1)，x≤1 时取 k1。 */
+export function bannerDamageDealtSample(itemId: number, difficulty: number): number {
+  const dd2 = itemId >= 3837 && itemId <= 3846;
+  const k1 = dd2 ? 1.1 : 1.5;
+  const k2 = dd2 ? 1.2 : 2;
+  if (difficulty <= 1) return k1;
+  return Math.fround(k1 + Math.fround(k2 - k1) * (difficulty - 1));
+}
+
+/** Luck.RollBadLuck（Terarria1457/Terraria.GameContent/Luck.cs:593-606）：
+ *  幸运>0 且 NextFloat<luck → Next(Next(range,range*2))（内层均匀 [range,2r−1]，
+ *  外层 [0,inner−1]）；幸运<0 对称内层 [r/2, r−1]；否则 Next(range)。 */
+export function luckRollBadLuck(luck: number, range: number): number {
+  if (luck > 0 && Math.random() < luck) {
+    const inner = range + Math.floor(Math.random() * range);
+    return Math.floor(Math.random() * inner);
+  }
+  if (luck < 0 && Math.random() < -luck) {
+    const half = Math.trunc(range / 2);
+    const inner = half + Math.floor(Math.random() * (range - half));
+    return Math.floor(Math.random() * inner);
+  }
+  return Math.floor(Math.random() * range);
+}
+
 export function luckyCoinRoll(rnd: () => number, direction: number): { key: string; stack: number; vx: number; vy: number } {
   let key = VI_KEY.COIN.COPPER;
   if (Math.floor(rnd() * 10) === 0) key = VI_KEY.COIN.SILVER;
@@ -1517,6 +1646,19 @@ export const FIXED_SELF_DAMAGE_FOR_PLAYERS: Record<number, number> = (() => {
   return t;
 })();
 
+/** ★HOUSE 弹药出生抬升（2026-08-31 用户特定要求,刻意偏离原版的观感修正）:
+ *  反编译字面里 ItemCheck_Shoot 的弹药出生点 = RotatedRelativePoint(MountedCenter)
+ *  ≡ 玩家碰撞盒中心（腰腹线,1458 Player.cs:47603;无逐物品"枪口"通用式）。原版
+ *  实机里大口径慢速弹(火箭/手雷发射器族)头几帧尾焰因此叠在角色下半身——本仓
+ *  2026-08-30 用户报"几乎所有弹药弹道偏下",拍板全弹药族出生点整体上移 8px 抬到
+ *  胸线（肩部与下巴之间）。
+ *  ★性质 = 与魔法域杖头锚(Game.useCombatWeapon :12957 批注,2026-08-26 拍板)同款
+ *  备案偏离:**禁止对齐回去**。只做 Y 向平移不带前伸——贴脸(<距离)射击弹仍在玩家
+ *  盒内不进敌方背后,不复发 2021-08-21 "靠太近没伤害"案;
+ *  逐物品原版显式支({281,986}/{3007},Player.cs:47632-47637)在本常量之上叠加,
+ *  相互关系保持原样 */
+export const HOUSE_SHOT_ORIGIN_LIFT_Y = -8;
+
 export class Game implements GameHooks {
   /** FlexibleWandCycleOffset（Player.cs:3028 静态；持碎块魔杖族按 ↑/↓ 循环样式，
    *  UpdateControlHolds :28614-28626） */
@@ -1683,6 +1825,16 @@ export class Game implements GameHooks {
      *  （:44639）。以 swing 实例惰性初始化 ≡ ItemAnimationJustStarted */
     volcanoInit?: boolean;
     volcanoWindow?: boolean;
+    /** ★R2-07（蓝队二轮）挥击首拍窗口旗（Player.cs:43803-43818
+     *  ItemAnimationJustStarted 置位族，ApplyNPCOnHitEffects 对应支消费）：
+     *  · batbatHeal ≡ _batbatCanHeal（type==5097；BatBat_TryLifeLeeching :44544 消费）
+     *  · tentacleSpikes ≡ _spawnTentacleSpikes（type==5094；TentacleSpike_TrySpiking）
+     *  · bloodButchererSpawns ≡ _spawnBloodButcherer（type==795；BloodButcherer_TryButchering）
+     *  · muramasaCut ≡ _spawnMuramasaCut（type==155；ApplyNPCOnHitEffects Muramasa 支） */
+    batbatHeal?: boolean;
+    tentacleSpikes?: boolean;
+    bloodButchererSpawns?: boolean;
+    muramasaCut?: boolean;
     /** R27：一挥多发（useTime<useAnimation 的 flag4 循环,Player.cs:43875/:43899——
      *  Golden Shower 三连发/Aqua Scepter 双发）。updateSwingHits 在每越 useTime 边界
      *  调 fire() 重发一发（midSwing=true 不重播音效/不重置冷却）。
@@ -1698,29 +1850,46 @@ export class Game implements GameHooks {
   private swingHitSet = new Set<number>();
   /** 同一挥击内 tileCut 格只处理一次（与 swingHitSet 同生命周期） */
   private swingTileCutSet = new Set<number>();
-  /** ★近战任务A 冷却面（vanilla Player.cs 的仓内映射）——写面非电水母专属：
+  /** ★近战任务A 冷却面（vanilla Player.cs 的仓内映射；2026-08-31 对齐清零批把
+   *  ①递减门/②三桶门覆盖/③普通命中写面全部补齐，此前"只挂 enemies 桶+仅反噬写面"
+   *  的登记缺口已清除，勿据旧注释判"未建模"）：
    *  · meleeNpcCd ≡ meleeNPCHitCooldown[i]（原版按 NPC 槽位 Main.maxNPCs 数组，
-   *    本仓按实体 id Map——槽位复用语义天然修正；递减仅"正在使用 dmg>0 物品"
-   *    帧（UpdateMeleeHitCooldowns 调用点 ItemCheck_OwnerOnlyCode dmg>0 支
-   *    :43999-44001 → 函数体 :44572-44580；1456 :43550-43558），idle 冻结）；
-   *    写点：反噬本体 :44611 SetMeleeHitCooldown(npcIndex,itemAnimation)
-   *    【与】普通命中尾 :44779 SetMeleeHitCooldown（每成功近战皆写）
+   *    本仓按实体 id Map——槽位复用语义天然修正）；【值】=SetMeleeHitCooldown(
+   *    npcIndex, itemAnimation)=当次挥击 itemAnimation 剩余量（Player.cs:44779/
+   *    :44611，本仓 swing.t 同义同拍——updateSwingHits 先 t-- 再结算命中，
+   *    与 vanilla :43145 在 :43177 AnimateAndGetItemFrame/MeeleHit 前先递减同序）；
+   *    【递减】仅「正在使用 dmg>0 且非 noMelee」的挥动帧（UpdateMeleeHitCooldowns
+   *    调用点 Player.cs:43999-44001 → 函数体 :44572-44580；外层 :43984 门内层
+   *    damage>0 —— 见 updateSwingHits 的 swingDecayGate 调用处），idle 冻结；
+   *    【门】ItemCheck_MeleeHitNPCs 循环 `nPC.immune[whoAmI]==0 &&
+   *    CanHitNPCWithMeleeHit(i) && attackCD<=0`（:44598）覆盖【全 NPC 桶】——本批起
+   *    enemies/townNPC/critters 三桶命中循环都挂同一门（catch 支不进此循环=原文本）。
    *  · meleeAttackCd ≡ attackCD（max(1,(int)(itemAnimationMax*0.33))，
-   *    ApplyAttackCooldown :44793-44795 / 1456 :43777-43779；Player.Update 内
-   *    每帧无条件递减且 itemAnimation==0 即清零 :24904-24911）。写点【双头】：
-   *    反噬本体 TakeDamageFromJellyfish→ApplyAttackCooldown(:44612) +
-   *    普通命中尾 ApplyAttackCooldown(:44784)——即全场成功近战命中都会写；
-   *    消费 = ItemCheck_MeleeHitNPCs 循环门 `attackCD <= 0`（:44598，1456 同位）
-   *    ⇒ 全场近战节流（冷却窗内所有目标一概不受理）
+   *    ApplyAttackCooldown :44793-44795；Player.Update 内每帧无条件递减且
+   *    itemAnimation==0 即清零 :24904-24911）。写点【三头】：反噬本体
+   *    TakeDamageFromJellyfish(:44612) + 普通命中尾 (:44784) + PvP 命中循环尾
+   *    (ItemCheck_MeleeHitPVP :44494 ApplyAttackCooldown()——PvP 只【写】不消费)
+   *    ⇒ 场上任何受理近战命中都会开全场节流窗。
    *  两面都于新挥击首帧重置 ≡ 原版每次起手 attackCD=0 + ResetMeleeHitCooldowns()
-   *  （1457 :52312-52313 / 1456 :50931-50932），以挥击实例引用比对等价实现。
-   *  登记近似：原版 :44598 冷却门覆盖全部 Main.npc 桶（敌怪/城镇/小动物），
-   *  本仓只挂在 enemies 桶循环（netCatch/town/voodoo/PvP 未挂）；该缺口已登记
-   *  于 game/docs/wiki-mechanics-audit-2026-08-13.md 表行18「attackCD」（此前
-   *  注释误把 attackCD 写面归给电水母反噬独占,2026-08-30 附带修正口径——
-   *  勿据旧注释判"未建模",节流主体已在）。 */
+   *  （1457 :52312-52313 ItemCheck_StartActualUse），以挥击实例引用比对等价实现。
+   *  · nPC.immune[whoAmI] 面：vanilla 写方=Projectile.Damage/AddImmuneTime 等
+   *    弹幕域与 NPC 自身 lava(255 位)；近战命中管线【从不】写 immune[whoAmI]
+   *    （ProcessHitAgainstNPC :44615-44786 全文仅 SetMeleeHitCooldown）。本仓
+   *    敌怪侧弹幕免疫面仍以各 Projectile 类自带 hitSet/hitCd 承载（Arrow 等文件
+   *    属主外）⇒ 当前零值是【事实恒等】而非省略：门的 immune 分量按
+   *    meleeNpcImmuneGateOf() 读实体级表 `npcImmuneByAttacker`（Task② 交付面，
+   *    到期制计时应答 Player 主键 0），写入 API noteNpcPlayerImmune 已备好，
+   *    弹幕域接桥时零改动生效（本批 blocker 账目见交接注记）。 */
   private meleeNpcCd = new Map<number, number>();
+  /** ★任务② nPC.immune[whoAmI] 实体级承载：key=NPC 实体 id，value=本地玩家的
+   *  免疫到期绝对 tick（等价 vanilla 逐帧递减的到期形态；写实 0/缺位=可命中）。
+   *  本批范围内合法写入方为空（vanilla 近战不写、弹幕域属主不在本批文件清单），
+   *  门与 API 先行落地保证行为与结构双就位。 */
+  private npcImmuneByAttacker = new Map<number, number>();
   private meleeAttackCd = 0;
+  /** ★任务③ WrongBugNet/General 分桶计时表（player/HurtCooldownBuckets.ts，
+   *  vanilla hurtCooldowns[ImmunityCooldownID.Count] 最小建模） */
+  private hurtBuckets = new HurtCooldownBuckets();
   /** 起手重置哨兵：与 this.swing 引用比对（swing 对象在每次起手重建） */
   private meleeCdSwingRef: object | null = null;
 
@@ -1863,7 +2032,9 @@ export class Game implements GameHooks {
 
   private netNpcPuppets = new Map<number, { e: Enemy; seen: number }>();
   private netDropPuppets = new Map<number, { d: ItemDrop; seen: number }>();
-  private netProjPuppets = new Map<number, { p: Entity; seen: number; pvp?: boolean; ownerSlot?: number; pvpImmuneT?: number; kind7?: number; enchant?: number }>();
+  /** ownerMeleeCrit：★GA4 弹幕 crit 掷点上下文（Projectile.cs:14713 owner.meleeCrit）——
+   *  发射端快照 aux 高位段携带（见 netProjBroadcast kind0/kind1 位），结算端掷骰用 */
+  private netProjPuppets = new Map<number, { p: Entity; seen: number; pvp?: boolean; ownerSlot?: number; pvpImmuneT?: number; kind7?: number; enchant?: number; ownerMeleeCrit?: number }>();
   private netNpcLast = new Map<number, { x: number; y: number; hp: number; t: number }>();
   private netProjLast = new Map<number, { x: number; y: number; t: number }>();
   private netDropSeen = new Map<number, ItemDrop>();
@@ -1914,7 +2085,8 @@ export class Game implements GameHooks {
   }
 
   /** 双向：本地弹幕快照（15Hz 变化驱动；kind: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot
-   *  4=MagicProj；v6 增 5=DukeSharknadoBolt 6=龙卷 7=MLDeathray 8=LunarOrb——见 netMakeProj） */
+   *  4=MagicProj；v6 增 5=DukeSharknadoBolt 6=龙卷 7=MLDeathray 8=LunarOrb；
+   *  2026-08-31 增 9=SparkleGuitar（真类重建）——见 netMakeProj） */
   private netProjBroadcast() {
     const net = this.net!;
     const snaps: ProjSnap[] = [];
@@ -1923,6 +2095,9 @@ export class Game implements GameHooks {
     // v7 PvP：pvpAllowed 房且自己 hostile 时，玩家弹幕（kind0 友方/1 武器族/4 法弹）
     // 携带 kind bit6——被击端傀儡过 InOpposingTeam 门禁后本地结算（victim-settles）
     const pvpOn = net.policy.pvpAllowed && this.player.hostile;
+    // ★ε#3：持械 crit 快照源（广播拍现值——ownerMeleeCritBits 内消费,见彼处注）
+    const heldNow = this.player.inv.heldItem();
+    const heldDefNow = heldNow ? ITEM_DEFS[heldNow.id] : null;
     let examined = 0;
     for (; examined < n && snaps.length < 24; examined++) {
       const p = list[(this.netProjCursor + examined) % n] as Entity & { projId?: number; damage?: number; kind?: string; color?: string; life?: number };
@@ -1936,13 +2111,30 @@ export class Game implements GameHooks {
       last.x = p.x; last.y = p.y; last.t = this.tickCount;
       let kind = -1, tag = '', dmg = Math.max(-32768, Math.min(32767, Math.round(p.damage ?? 0))), aux = 0;
       let exVx: number | undefined, exVy: number | undefined; // v6：meta 通道的角度方向覆写
-      if (p instanceof Arrow) {
+      // ★FR3-F（二轮蓝队）分派序前置：856 真类重建支必须先于 projId!==undefined 的
+      //  kind1 武器族通判——曾落进该支被整链 melee 化（aux 携浸剂+crit 位、收端视线门/
+      //  crit 掷/浸剂 melee 位三重错位）。原版弹 SetDefaults(:8208-8220) magic=true 且
+      //  不置 ownerHitCheck ⇒ Damage_PVP :14654-58 门全开、:14714 不掷 crit。
+      // kind=9 走增量通道（Proto 演进注 c 条）：旧 server 白名单剥条/旧 client default
+      // 落空 → 该弹不显影，零崩溃；新旧结算面由 netPuppetProjContact 按 projId 真值裁决。
+      // （局部窄化会把交叉类型折叠成 never——私有 life 与泛面 life 冲突，显式重取别名）
+      const tuneShot: SparkleGuitarProj | null = p instanceof SparkleGuitarProj
+        ? (p as unknown as SparkleGuitarProj)
+        : null;
+      if (tuneShot) {
+        kind = 9; tag = String(tuneShot.projId);
+        if (pvpOn) kind |= 0x40;
+        aux = 0;
+      }
+      else if (p instanceof Arrow) {
         kind = 0; tag = String(p.projId ?? 1);
         // v5：敌对弹带 bit7（原版 Projectile.hostile）——访客端据此本地结算 Damage_EVP
         if (p.hostile) kind |= 0x80;
         else {
           if (pvpOn) kind |= 0x40;   // v7：玩家 PvP 弹（友方 Arrow = 玩家射出）
           aux = meleeEnchantOf(this.player.buffs);  // StatusPvP 浸剂通道（aux 低 4 位）
+          // ★ε#3：终值含持械 item.crit（Player.Update :25712-14 每帧链）——heldDefNow 快照
+          aux |= ownerMeleeCritBits(this.player, heldDefNow);   // 高位段（结算端掷点上下文）
         }
       }
       else if (p instanceof Dart) {
@@ -1960,6 +2152,7 @@ export class Game implements GameHooks {
         kind = 1; tag = String(p.projId);
         if (pvpOn) kind |= 0x40;   // v7：武器族弹幕（回旋镖/剑气等，恒玩家来源）
         aux = meleeEnchantOf(this.player.buffs);    // melee 族：浸剂/冰霜/熔岩石均生效
+        aux |= ownerMeleeCritBits(this.player, heldDefNow);   // ★ε#3 同上：含持械加成终值
       }
       else if (p instanceof TrapShot) {
         kind = 3; tag = p.kind ?? 'dart';
@@ -2403,7 +2596,8 @@ export class Game implements GameHooks {
     }
   }
 
-  /** msg27 回包：弹幕傀儡 upsert（按 kind 重建真类；kind0-4 纯视觉，5-8 本地跑确定性 AI） */
+  /** msg27 回包：弹幕傀儡 upsert（按 kind 重建真类；kind0-4 纯视觉，5-8 本地跑确定性 AI，
+   *  9=SparkleGuitar 真类重建纯视觉快照驱动——2026-08-31 FR3-F） */
   private netApplyProjSnaps(snaps: ProjSnap[]) {
     for (const s of snaps) {
       let pup = this.netProjPuppets.get(s.netId);
@@ -2421,6 +2615,11 @@ export class Game implements GameHooks {
           ownerSlot: s.netId >>> 24,
           kind7: s.kind & 0x3f,   // ★0x3f（bit6=PvP 位勿入 kind 值）
           enchant: s.aux & 15,
+          // ★GA4/ε#3：aux 高位段 = 发射端 meleeCrit 终值（base4+装备链+**持械
+          //  item.crit 含词缀折入**,快照通道语义见 ownerMeleeCritBits 注）——旧端
+          //  （升级前）发的值缺持械加成＝维持旧行为；新端发出的终值对旧接收端
+          //  自动生效（位域未扩容,同一字段换语义,双向均无破坏）
+          ownerMeleeCrit: (s.aux >> 4) & 255,
         };
         this.netProjPuppets.set(s.netId, pup);
       } else {
@@ -2455,6 +2654,13 @@ export class Game implements GameHooks {
       case 2: { const d = new Dart(s.x, s.y, s.vx, s.vy, s.dmg, parseInt(s.tag, 10) || 0); d.hostile = hostile; return d; }
       case 3: { const t = new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind); t.hostile = hostile; return t; }
       case 4: return new MagicProj(s.x, s.y, s.vx, s.vy, s.dmg, Math.max(60, s.aux), s.tag || '#8090FF');
+      case 9: {
+        // ★FR3-F：星璇之音真类重建（SetDefaults 32×32）。快照 = 左上角 → 构造参取中心
+        //  （构造内再 -w/2 回写）；ai 锚点不上线——收端傀儡 netPuppetStep 快照插值跟随，
+        //  曲线特征由发送端差分快照流还原（fixedUpdate 已 netPuppet 早退）。
+        const tcx = s.x + 16, tcy = s.y + 16;
+        return new SparkleGuitarProj(tcx, tcy, s.vx, s.vy, s.dmg, tcx, tcy);
+      }
       // ---- v6：Boss 锚定弹体——重建真类，本地跑确定性 AI（锚=msg23 傀儡）。
       // 终审 M3：Bolt/Orb 构造函数按**中心**坐标入参，快照是左上角——须换算，
       // 否则访客端整体偏移 (-w/2,-h/2) 且快照不写 x/y 无法自纠 ----
@@ -2509,6 +2715,31 @@ export class Game implements GameHooks {
    *  InOpposingTeam（Player.cs:4287 全服唯一 PvP 关系判定）：任一门不过即丢弃——
    *  伪造意向包最多触发一次受击表现，扣血与否完全由本地决定（victim-settles）。
    *  伤害走 damagePlayer(pvp)（8t 无敌帧 + pvpDeath 标记），死因 = DeathSource.Player */
+  /** ★GA4 被击端实扣权威广播收口（msg117 发送侧——四个结算点统一出口）：
+   *  原版 SendPlayerHurt 在 Hurt 实扣段调用（NetMessage.cs:2615-2621）；1457 生产者
+   *  全集 = Player.Hurt 实扣段 :38664（含爆炸/环境等一切非 quiet 路径）/
+   *  UpdateBuffs 狱火支 :10348 / Damage_PVP :14756 / ItemCheck_MeleeHitPVP :44492
+   *  （曾注 :44497/:14735/:10346/:13981 四处为旧值或错引——二轮蓝队勘正）——
+   *  闪避/免伤早退不达（num2<=0 无包）。dmg 取「结算窗内
+   *  hp 真实净减量」= hpBefore − 当前 hp：天然含防御/endurance 链终值与圣骑士盾
+   *  转移回补的修正（damagePlayer 内转移分支会把 HP 回补一部分），≤0 即闪避/免伤
+   *  早退不发。dir = 击退向 ±1；发送前 notifyPlayerHurtSettled() 强推 msg16 免疫
+   *  余量镜像（原版结算尾无条件连发 msg13/msg16/msg117 三包的时序等价，
+   *  见 ClientNet.notifyPlayerHurtSettled 注）。flags = Pvp | crit 位。
+   *  ★攻端不再有本地预测反馈（GA 已删 'hit' 音 + InPVP 公式预览飘字），他端对本次
+   *  命中的唯一可见面 = 本包经服务器中继 → onPlayerHurt hook → addDamageNumber */
+  private reportPlayerHurt(hpBefore: number, srcX: number, critFlag: boolean): void {
+    const net = this.net;
+    if (!net?.active || net.mySlot < 0) return;
+    const p = this.player;
+    if (!p.dead && !(hpBefore > p.hp)) return;   // 死亡结算(hp≤0)必发;否则无净减不发
+    const dealt = Math.max(0, Math.trunc(Math.min(hpBefore, Math.max(0, hpBefore - p.hp))));
+    if (!(dealt > 0)) return;
+    net.notifyPlayerHurtSettled();
+    net.sendPlayerHurt(dealt, p.cx, p.cy, Math.sign(p.cx - srcX) || 1,
+      PlayerHurtFlags.Pvp | (critFlag ? PlayerHurtFlags.Crit : 0));
+  }
+
   private netApplyStrikePlayer(fromSlot: number, dmg: number, weaponId: number, flags: number) {
     if (!this.net) return;
     const p = this.player;
@@ -2527,12 +2758,16 @@ export class Game implements GameHooks {
       const pvpHit = projType !== 108 && projType !== 1002;
       // ★走 damagePlayer 而非直调 p.damage：死亡结算块（pvpDeath 计数/不掉钱/复活
       // 计时）挂在 damagePlayer 尾部——直调会绕过,_pvp-e2e 实抓"炸死无计数"）
+      const hpBeforeBit7 = p.hp;
       if (this.damagePlayer(rolled, rp.x, rp.y, undefined, false, pvpHit)) {
         // ★R22:删第二声 'hit'（NPC_Hit_1-5=怪物受击库）——原版玩家受伤只有
         // Player_Hit(case1),damagePlayer 内已播,此处叠声
         // ★hostile=false（爆炸无敌我门 :13979-13980——!hostile 分支（285 二块/253/
         // 399-402）唯一可触发路径）
         if (!p.dead && p.hp > 0) statusPlayer(this, projType, false);
+        // ★GA4 被击端实扣权威广播（爆炸支，Projectile.cs 爆炸族 SendPlayerHurt
+        //  同构位 :13981 族；crit 恒 false——Damage_PVP 式暴击掷不存在于爆炸面）
+        this.reportPlayerHurt(hpBeforeBit7, rp.x, false);
       }
       return;
     }
@@ -2550,23 +2785,36 @@ export class Game implements GameHooks {
       // 防系数 0.5/0.75/1.0 + endurance 以**持有者自身**数值再结算（Main.cs:65646-65657）
       // ——damagePreview 即该口径；黑带 10% 闪避不吃（dodgeable:false）；日曜层
       // 消耗/甲虫壳等 Hurt 内副作用未模拟（极端叠装场景，登记）
+      const hpBeforeBit5 = p.hp;
       const d = p.damagePreview(dmg);
       p.hp = Math.max(0, p.hp - d);
-      this.addDamageNumber(p.cx, p.y, d, false, '#FF7060');
+      this.addDamageNumber(p.cx, p.y, d, false, playerHurtFloatColor(false));   // FR4-F：曾 #FF7060
+      // ★GA4 被击端实扣权威广播（圣骑士盾转移支）：本端=盾持有者，转移额全额落账。
+      //  原版 :37751 持有者完整 Hurt → 其结算尾 SendPlayerHurt（own loss 权威帧）
+      //  ——主受击端（发起 bit5 的队友）另行广播其自身剩余扣量，两包之和=全队 HP
+      //  净减（无临界差：两端各自报自己那份）。crit 恒 false（转移非暴击事件）。
+      this.reportPlayerHurt(hpBeforeBit5, rp.x, false);
       return;
     }
     // InOpposingTeam（Player.cs:4287）：双方 hostile 且（对方无队或异队）——单调用
     // 完成原版 MessageBuffer.cs:3864 双向 hostile 校验的等价判定
     if (!inOpposingTeam(p, rp)) return;
-    // ---- bit6 狱火光环（Player.cs:9931-9946：200px 内敌对玩家 60t 一跳 20 + 323 2s）----
+    // ---- bit6 狱火光环（UpdateBuffs buffType==116 支 Player.cs:10300-10348：200px 内
+    //      敌对玩家 infernoCounter%60 一跳 damage=20 + AddBuff 323 120t）----
     // 死因 ByOther(16) inferno；per-owner 冷却防伪造刷屏（原版按持有者 infernoCounter 节拍）
     if (flags & 0x40) {
       const cd = this.pvpAuraCd.get(fromSlot) ?? 0;
       if (cd > 0) return;
       this.pvpAuraCd.set(fromSlot, 60);
-      p.buffs.apply(BuffType.OnFire3, 2);
+      p.buffs.apply(BuffType.OnFire3, 2);          // :10344-45（FindBuffIndex==-1 才补——本仓 merge 语义）
       p.lastDamageCause = { kind: 'inferno' };
+      // ★FR1-F（二轮蓝队）：实扣权威广播曾漏——原版该支是 SendPlayerHurt 第五生产者
+      // （:10346-48 `player.Hurt(ByOther(16),20,0,pvp:true)` → `SendPlayerHurt(l,…,
+      //  critical:false,pvp:true,General)`，NetMessage.cs:2615-2621 编码），缺报 =
+      //  PvP 房狱火跳伤其他端零飘字。crit 恒 false / dir=击退向：形制与近战支同构。
+      const hpBeforeBit6 = p.hp;
       this.damagePlayer(dmg, rp.x, rp.y, undefined, false, true);
+      this.reportPlayerHurt(hpBeforeBit6, rp.x, false);
       return;
     }
     // ---- 近战命中（ItemCheck_MeleeHitPVP）----
@@ -2590,7 +2838,13 @@ export class Game implements GameHooks {
       frostBurn: ownerCtx.frostBurn,
       magmaStone: ownerCtx.magmaStone,
     });
+    // ★GA4 被击端实扣权威广播（近战尾，ItemCheck_MeleeHitPVP :44492
+    //  `SendPlayerHurt(i, reason, num, direction, flag, pvp:true, General)` 同构位）：
+    //  crit 位 = msg44 bit0（攻端 :44434 `Main.rand.Next(1,101) <= 10` 掷后随包下行）；
+    //  dmg = 实扣终值（reportPlayerHurt 内取 hp 净减量——含防御/endurance 链与盾转移回补）
+    const hpBeforeMeleePvp = p.hp;
     this.damagePlayer(dmg, rp.x, rp.y, undefined, false, true);
+    this.reportPlayerHurt(hpBeforeMeleePvp, rp.x, (flags & 1) !== 0);
     // ★R22:删第二声 'hit'（damagePlayer 内 Player_Hit 已播,原版无第二声）
   }
 
@@ -2623,7 +2877,13 @@ export class Game implements GameHooks {
     const alive = new Set<number>();
     for (const ent of this.entities.projectiles) {
       const pr = ent as Entity & { projId?: number; damage?: number; hostile?: boolean; netPuppet?: boolean; dead?: boolean; x: number; y: number; w: number; h: number };
-      if (!(pr instanceof Arrow) && !(pr instanceof MagicProj)) continue;
+      // ★联机③ 族面补全（Damage_PVP :14731-34：ghost/vampire 分支只看弹幕自身
+      //   friendly&&!hostile，非 Arrow/MagicProj 类专属——SparkleGuitarProj 等其余
+      //   friendly 弹型同享幽灵吸血；304 弹任意类触发 vampire）。受理面 =
+      //   projectileData.friendly ∪ minion（敌对/环境弹按 hostile 标志排除）
+      const pdFb = pr.projId ? projectileData(pr.projId) : null;
+      if (!(pr instanceof Arrow) && !(pr instanceof MagicProj)
+        && pdFb?.friendly !== true && pdFb?.minion !== true) continue;
       if (pr.netPuppet || pr.dead || (pr as { hostile?: boolean }).hostile) continue;
       alive.add(pr.id);
       const dmg0 = pr.damage ?? 0;
@@ -2633,14 +2893,29 @@ export class Game implements GameHooks {
         const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
         if (slot === undefined || rp.dead) continue;
         if (!inOpposingTeam(this.player, rp)) continue;
+        // ★GA2 契约补位（PvP 弹幕免疫门）：原版 Damage_PVP 循环门禁串
+        //  1457 Projectile.cs:14650 `!player.active || player.dead || player.immune ||
+        //  !player.hostile || playerImmune[i] > 0 || …` 含两支免疫面——全局
+        //  player.immune 与本弹×该玩家独立 40t 冷却。二者都在 StatusPvP(:14727)/
+        //  Hurt(:14730)/ghostHeal·vampireHeal(:14731-34) **之前**短路整条命中体。
+        //  本仓 victim-settles：global immune 走攻端镜像 getProxyPvpImmuneRemaining；
+        //  独立冷却面在受害端由 hitPlayer 的 p.iframes 门承担（40t 每弹记账在 pup.pvpImmuneT，
+        //  见 netPuppetProjContact）。吸血反馈必须越过 iframes 门后才生效，故把镜像门
+        //  插在 pvpProjHitSet.add（每弹×每目标一次的记账）之前——免疫期接触不入账，
+        //  出窗后同弹重入仍可结算；若插在 add 之后会把免疫窗当命中吞掉整次吸血。
+        if (this.net.getProxyPvpImmuneRemaining(slot) > 0) continue;
         const key = `${pr.id}:${slot}`;
         if (this.pvpProjHitSet.has(key)) continue;
         if (!(pr.x < rp.x + rp.w && pr.x + pr.w > rp.x && pr.y < rp.y + rp.h && pr.y + pr.h > rp.y)) continue;
         this.pvpProjHitSet.add(key);
         // :13563 Main.DamageVar ±15% → :37954 InPVP 口径
         const num2 = Math.max(1, Math.round(dmg0 * (1 + (Math.random() * 30 - 15) / 100) - rp.defense * 0.5));
-        if (pr instanceof MagicProj) this.applyLifeSteal('ghost', num2, 1, rp.cx, rp.cy, true);
-        else if (pr.projId === 304) this.applyLifeSteal('vampire', num2, 1, rp.cx, rp.cy, false);
+        // ★联机③：两支【独立】if（原文顺序 ghost :14731-34 → vampire :14735），均不
+        //   再以弹幕类为门——ghost 的旗标门（setBonus+月噬+预算池）由 applyLifeSteal
+        //   内自证；vampire = 弹型 304 吸血鬼飞刀，任意类照触发。304 同帧可双支
+        //   入账（原文即如此——吸血刀戴幽灵帽）
+        if (num2 > 0) this.applyLifeSteal('ghost', num2, 1, rp.cx, rp.cy, true);
+        if (pr.projId === 304) this.applyLifeSteal('vampire', num2, 1, rp.cx, rp.cy, false);
       }
     }
     // 清理已消亡弹的命中键（防 Set 无界）
@@ -2927,10 +3202,10 @@ export class Game implements GameHooks {
       const pr = pup.p as Entity & { hostile?: boolean; damage?: number; projId?: number };
       if (pr.dead) continue;
       // ---- v7 PvP 弹（kind bit6）：玩家命中链（原版 Projectile.Damage_PVP
-      //      :13497-13620 的被打方本地结算等价）。门禁与原版 :13506-13510 同构：
+      //      :14637-14770 的被打方本地结算等价）。门禁与原版 :14650 同构：
       //      dmg>0 / 跳过自己（netId 高位=own slot 不会出现在傀儡表，天然满足）/
       //      对方 hostile（InOpposingTeam 含双方）/ playerImmune 40t 每弹独立冷却
-      //      （:13618——本地单玩家模型下退化为傀儡单计数器）
+      //      （:14758 置/:17369 衰减——本地单玩家模型下退化为傀儡单计数器）
       if (pup.pvp) {
         if (!net || !net.policy.pvpAllowed) continue;
         if ((pup.pvpImmuneT ?? 0) > 0) { pup.pvpImmuneT = pup.pvpImmuneT! - 1; continue; }
@@ -2938,28 +3213,55 @@ export class Game implements GameHooks {
         if (dmg0 <= 0) continue;
         const owner = net.players.get(pup.ownerSlot ?? -1);
         if (!owner || !owner.active || !inOpposingTeam(this.player, owner)) continue;
-        // CanHitWithMeleeWeapon（:13513-13515 ownerHitCheck 族 + Projectile.cs:11734-11744）：
-        // 近战弹（回旋镖/剑气等 kind1）不许隔墙命中——线段被实心格挡即跳过。
-        // 箭/弹（kind0）无 ownerHitCheck,原版不检查——此处同构只拦 kind1
-        if (pup.kind7 === 1 && !canHitLine(this.world.store, pr.x, pr.y, pr.w, pr.h, this.player.x, this.player.y, this.player.w, this.player.h)) continue;
-        // Main.DamageVar（:13563±15% 幅度,打在被击端）+ 死因 player（凶器=弹型名）
-        const rolled = Math.max(1, Math.round(dmg0 * (1 + (Math.random() * 30 - 15) / 100)));
+        // ★FR3-F（二轮蓝队）：856 判别先于 kind7 族位——按弹型真值裁决（旧端仍把
+        //  856 以 kind1 发来 / 新端 kind9 在此归一同支）。修复前 856 被 kind7==1 套上
+        //  melee 结算三重错位（视线门/crit 掷/浸剂 melee 位）
+        const isTune = (pr.projId ?? 0) === 856;
+        // CanHitWithMeleeWeapon（Damage_PVP ownerHitCheck 门 :14654-14658；字段缺省
+        //  false @SetDefaults :756，仅部分近战型显式置位）：近战弹（回旋镖/剑气等
+        //  kind1 型）不许隔墙命中——线段被实心格挡即跳过。箭（kind0）与 856 原版
+        //  不置 ownerHitCheck ⇒ 门全开不检查——此处同构只拦 kind1 且非 856
+        if (!isTune && pup.kind7 === 1 && !canHitLine(this.world.store, pr.x, pr.y, pr.w, pr.h, this.player.x, this.player.y, this.player.w, this.player.h)) continue;
+        // Main.DamageVar（Damage_PVP :14718，±15% 打在被击端）+ 死因 player（凶器=弹型名）
+        let rolled = Math.max(1, Math.round(dmg0 * (1 + (Math.random() * 30 - 15) / 100)));
+        if (isTune) {
+          // ★ModifyStellarTuneDamage（Damage_PVP 消费点 :14720-14723，消费序 =
+          //  DamageVar 掷后、Hurt 前；本体 :15268-15273 = 弹盒对「发射者」CanHit 断线
+          //  ⇒ ×0.75 截断。本地 PVE 折算在发射端 SparkleGuitarProj.fixedUpdate，
+          //  此处为收端独占路径，两处各一乘不存在双乘面）
+          const ownProxy = this.remotePlayerProxies.find(
+            (q) => (q as unknown as { __netSlot?: number }).__netSlot === (pup.ownerSlot ?? -1));
+          const ownBox = ownProxy ?? { x: owner.x, y: owner.y, w: 20, h: 42 };   // 代理未就绪兜底=msg13 态 + 原版身材
+          rolled = modifyStellarTuneDamage(rolled,
+            !canHitLine(this.world.store, pr.x, pr.y, pr.w, pr.h, ownBox.x, ownBox.y, ownBox.w, ownBox.h));
+        }
         this.player.lastDamageCause = {
           kind: 'player', name: owner.name,
           weapon: Lang.projectileName(pr.projId ?? 0) ?? '?',
         };
-        // StatusPvP（Projectile.cs:11092：Hurt 前授予,immune 时跳过 :13561）——
-        // 弹幕性质按 kind 还原（0=箭 ranged / 1=武器族 melee / 其余 neither）
+        // StatusPvP（调用点 :14738 !immune 时、Hurt 前；本体 :11761 起——浸剂门
+        //  :11764 `(melee||IsAWhip)`/冰霜 :11860 `(melee||ranged)`/熔岩石 :11864 仅 melee）
+        // 弹幕性质按 kind 还原（0=箭 ranged / 1=武器族 melee / 其余 neither）；856 magic ⇒ neither
         if (this.player.iframes <= 0) {
           const ownerCtx = this.netPvpOwnerCtx(pup.ownerSlot ?? -1);
           statusPvPProjectile(this.player.buffs, pr.projId ?? 0, {
-            melee: pup.kind7 === 1, ranged: pup.kind7 === 0,
+            melee: !isTune && pup.kind7 === 1, ranged: !isTune && pup.kind7 === 0,
             meleeEnchant: pup.enchant ?? 0,
             frostBurn: ownerCtx.frostBurn, magmaStone: ownerCtx.magmaStone,
           });
         }
+        const hpBeforePvp = this.player.hp;
         if (hitPlayer(pr, this, rolled, false, true)) {
-          pup.pvpImmuneT = 40;   // :13618 每弹×每玩家独立冷却
+          pup.pvpImmuneT = 40;   // :14758 每弹×每玩家独立冷却
+          // ★GA4 被击端实扣权威广播（PvP 弹支，Damage_PVP :14756
+          //  `SendPlayerHurt(i, reason, num, direction, flag2, pvp:true, General)` 同构位）：
+          //  crit 位掷点 = Projectile.cs:14714 `if (melee && Main.rand.Next(1,101)
+          //  <= Main.player[owner].meleeCrit)`——melee 弹才掷（856 magic 不掷）；
+          //  owner 掷点阈值不可跨端同步 ⇒ 经快照 aux 高位段携带（发射端
+          //  ownerMeleeCritBits，★ε#3 后携值含持械 item.crit 完整终值，见彼处注
+          //  与 netApplyProjSnaps），掷骰在结算端落地。
+          const puppetCrit = !isTune && pup.kind7 === 1 && Math.random() * 100 < (pup.ownerMeleeCrit ?? 0);
+          this.reportPlayerHurt(hpBeforePvp, pr.x + pr.w / 2, puppetCrit);
           // ★R22:删第二声 'hit'（damagePlayer 内 Player_Hit 已播）
         }
         continue;
@@ -3954,6 +4256,12 @@ export class Game implements GameHooks {
       await this.settleLiquids((p) => onProgress?.(loadSettleLabel(p), p * 0.8), 'load');
     }
     await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.8 + p * 0.2), opts?.playerAt);
+    // 烟囱顶帽行修复（导入丢失型残缺，见 world/ChimneyCapRepair.ts 头注）：
+    // 放在读档沉降后、场景预热后——TileFrameCosmetic 链已初始化，重写即触发本格重烘
+    try {
+      const n = repairChimneyCaps(this.world.store);
+      if (n > 0) console.info(`[ChimneyCapRepair] 补齐烟囱帽行 ${n} 格`);
+    } catch { /* 修复失败不阻塞进图 */ }
     this.afterWorldLoad();
     await this.minimapReady;       // 同生成路径:大世界拆带构建完成再进图
     this.cb.onWorldReady();
@@ -4481,6 +4789,9 @@ export class Game implements GameHooks {
     cultistWorldClear();            // CultistRitual.recheck 运行时位复位（delay 走存档）
     this.golfState.worldClear();    // GolfState.WorldClear（GolfState.cs:69-76）：轨迹记录/跟踪态不进存档
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
+    // ★GB2 预算池真源钉接（Spectre Mask ghostDmg——Projectile.cs:12034/:12038
+    //  全部读写 Main.player[Main.myPlayer]，本仓等价 = 本地玩家实例面）
+    bindGhostBudgetHost(this.player);
     // ★IIIII22b：开局/加入联机的首次落位同样走 Player.Spawn 三分支队点臂（床位=世界级，
     // 未挂床时 teamBased 世界按队伍点表放置；applyTeamSpawnPlacement 内含旗门/床位/队号三道
     // 早退，非 royale-with-cheese 世界零触碰）
@@ -6197,6 +6508,23 @@ export class Game implements GameHooks {
     // 恰一次，读侧（Bobber 渔力/VanillaSpawner 鲨鱼概率）同 vanilla 全帧延迟语义
     chumOnPreUpdateAll();
     this.entities.update(dt, this);
+    // 行走遥测:城镇 NPC 每 30t 采样一次(决策链卡点取证,2026-08-30)
+    if (this.tickCount % 30 === 0) {
+      for (const n of this.entities.npcs) {
+        if (!(n instanceof TownNPC) || n.dead) continue;
+
+        const nx = n as unknown as { cx: number; cy: number; vx: number; facing: number;
+          hitWall: boolean; onGround: boolean; stuckT: number; walkMode: number;
+          walking?: boolean; doorCarry?: boolean; doorContactT?: number };
+        this.recorder.log('npcMove', {
+          id: (n as unknown as { entityId?: number }).entityId ?? -1,
+          key: n.npcKey, x: Math.round(nx.cx), y: Math.round(n.cy / 1),
+          vx: +n.vx.toFixed(2), dir: n.facing,
+          hw: !!nx.hitWall, g: !!n.onGround, stuck: nx.stuckT, wm: nx.walkMode,
+          carry: nx.doorCarry === true, ct: nx.doorContactT ?? 0,
+        });
+      }
+    }
     // 亡命箱窗口递减（Player.cs:24811 Update 每 tick）+死亡结算（KillMe :39126
     // `window>0 → HandleSpecialEvent(23)`——任何死法,window 自然排干）
     if (this.deadmanWindow > 0) {
@@ -8827,8 +9155,12 @@ export class Game implements GameHooks {
   }
 
   /** 当前光标落点是否悬在 DOM UI 上（elementFromPoint 同名单判定;按住横扫期间
-   *  掠过背包/面板时朝向不得跟着世界坐标乱翻） */
+   *  掠过背包/面板时朝向不得跟着世界坐标乱翻）。
+   *  Node 测试环境兼容:canvas 无 getBoundingClientRect/document 缺席 → 恒 false
+   *  (= 测试桩视为不悬 DOM UI,与既有 spawnDust/vanillaDust 可选桩同款约定) */
   private inpOverDomUi(): boolean {
+    if (typeof document === 'undefined'
+      || typeof this.renderer?.canvas?.getBoundingClientRect !== 'function') return false;
     const r = this.renderer.canvas.getBoundingClientRect();
     const el = document.elementFromPoint(
       Math.max(0, r.left + this.input.mouseX),
@@ -10335,12 +10667,64 @@ export class Game implements GameHooks {
         }
         case 4715: { // Stellar Tune（Player.cs:46989-47004 独支）：门多 `| ItemAnimationJustStarted`
           // （:46989）——autoReuse 按住循环重启动画每周期一响,不吞 mouseDown（竖琴复读同款）。
-          // ★攻击面未实装备案：shoot 856 弹幕/mana 12/crit 20/damage 85（Item.cs:38755-38768,
-          // GetSparkleGuitarTarget 索敌 :47034-47052）属武器族批,本批只接演奏通道
           this.useSwing(heldDef);
           this.sfx.playWavFile(guitarChordFile(drumRange), 0.45, p.cx, p.cy,
             guitarBadLuckDetune(p.luck, Math.random));
           this.achievements.notifyProgressionEvent(37);   // :47003
+          // ★GB3 攻击面清偿（GC 契约；ItemCheck_Shoot 4715 支 Player.cs:48448-48477）：
+          // GetSparkleGuitarTarget（:47030-47051：CenteredRectangle(Center,1000×800) ∩
+          // CanBeChasedBy）→ computeStellarTuneShot 出手向量 → NewProjectile(856,
+          // Damage, KnockBack, ai[0]/ai[1]=vector33)。发射侧参数对齐：
+          //   耗魔 = mana 12 × GetManaCostToPay 链（Item.cs:38755-38768 数据面 → checkMana）
+          //   damage = 85 × damageMult('magic') × 词缀 dmg（NewProjectile Damage 实参链；
+          //     ±15% 方差由命中端 StrikeNPC 结算侧承担,发射侧不入——与书杖风暴/宝石法珠同构）
+          //   crit   = (4 + magicCrit 装备/药水链 + item.crit 20 + 词缀 crt)/100
+          //     （GetWeaponCrit 链——词缀位折算见 stellarTuneCritChance 注；二轮 FR2-F 曾漏 crt 位）
+          //   击退   = 数据面 knockBack（Item.cs:38757 缺省 0；修正项词缀 kb）
+          const stTune = itemCombat(4715);
+          const psTune = this.heldPrefixStat();
+          const tuneCost = Math.trunc(Math.round((stTune?.mana ?? 12) * (psTune?.mcst ?? 1))
+            * (1 - p.equipStats.manaCostOff) * p.equipStats.manaCostMul);
+          p.slowMagicUse = false;                       // CheckMana 入口复位（:53216）
+          if (!(tuneCost > 0 && p.buffs.has(BuffType.Silenced))) {
+            p.checkMana(tuneCost);                      // ManaV2 空蓝照放语义单点端口
+            const targets: Array<{ cx: number; cy: number; vx?: number; vy?: number }> = [];
+            const rect = sparkleGuitarTargetRect(p.cx, p.cy);
+            for (const ent of this.entities.enemies) {
+              if (!canBeChasedBy(ent)) continue;        //（:47039 CanBeChasedBy(this) 门）
+              const e = ent as unknown as { x: number; y: number; w: number; h: number };
+              if (e.x + e.w <= rect.left || e.x >= rect.right
+                || e.y + e.h <= rect.top || e.y >= rect.bottom) continue;   // Hitbox.Intersects(value)
+              targets.push({ cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+            }
+            const shot = computeStellarTuneShot({
+              playerCx: p.cx, playerCy: p.cy,
+              mouseWorldX: mwx, mouseWorldY: mwy,
+              targets,
+              targetRoll: () => Math.random(),           // Next(validTargets.Count) 等价取下标
+              nextJitter: () => ({                        // NextVector2Circular(24,24)：角度均匀+√半径盘均匀
+                x: Math.cos(Math.random() * Math.PI * 2) * Math.sqrt(Math.random()) * 24,
+                y: Math.sin(Math.random() * Math.PI * 2) * Math.sqrt(Math.random()) * 24,
+              }),
+              nextEdgeUnit: () => {                       // NextVector2CircularEdge(1,1)：单位圆均匀边缘
+                const a = Math.random() * Math.PI * 2;
+                return { x: Math.cos(a), y: Math.sin(a) };
+              },
+              nextFloat01: () => Math.random(),           // Main.rand.NextFloat()（:48475 上扬保底）
+            });
+            const orb = new SparkleGuitarProj(
+              shot.spawnX, shot.spawnY, shot.vx, shot.vy,
+              Math.max(1, Math.trunc((stTune?.damage ?? 85)
+                * p.damageMult('magic') * (psTune?.dmg ?? 1))),
+              shot.aimX, shot.aimY);
+            // ★FR2-F（二轮蓝队）：crit 补 psTune 词缀位——原版 Item.Prefix(:585)把词缀
+            //  crt 折进 item.crit、随 :25713 计入 magicCrit；本仓 base/prefix 分账求和
+            // （同族近战链形制 `+ (ps?.crt ?? 0)` 对照 Game.arcCritZ 支）
+            orb.critChance = stellarTuneCritChance(p.critChance('magic'), stTune?.crit, psTune?.crt);
+            orb.knockback = (stTune?.knockBack ?? 0) * (psTune?.kb ?? 1);
+            orb.armorPen = p.equipStats.armorPen + (psTune?.arpen ?? 0);
+            this.entities.add(orb, 'projectiles');
+          }
           // 数据面 useTime=6/useAnimation=12（Item.cs:38758-38759 /=2）,但和弦门 =
           // ItemAnimationJustStarted（每动画周期一响,周期=12t）——本仓单计时器模型
           // 无独立"动画首拍"事件,取 useAnimation=12 承载周期保可闻节拍（若填 6 会
@@ -10986,13 +11370,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const ang = Math.atan2(mwy - this.player.cy, mwx - this.player.cx);
         // 弓/枪面向鼠标（shoot>0 发射型同款 :46578）
         this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
-        // 出生点 = 玩家中心（RotatedRelativePoint(MountedCenter) 无旋转等价 = MountedCenter
-        // ≈ Center，Player.cs:46560/:4063-4076/:3189-3193）
+        // 出生点 = 玩家中心（原版字面:RotatedRelativePoint(MountedCenter) 无旋转等价
+        // = MountedCenter ≈ Center，Player.cs:46560/:4063-4076/:3189-3193）
         // ★曾 +朝向×14 前移 = 贴脸(<14px)射击时弹出生在敌盒后方 → 整条路径无判定
-        //   (2026-08-21 用户报"靠太近没伤害")；★又曾 −4px 抬高 = 枪口系统性偏上
-        //   （2026-08-22 修）。原版无此二偏移。
+        //   (2026-08-21 报)；★又曾 −4px 抬高 = 无口径的枪口系统性偏上（2026-08-22 修,
+        //   原版确无此二偏移）。
+        // ★★现行 +HOUSE_SHOT_ORIGIN_LIFT_Y(-8px) = 2026-08-31 用户特定要求的观感修正:
+        //   原版字面锚点=腰腹线,慢速大口径弹尾焰叠下半身显"弹道偏下"——全弹药族抬到
+        //   胸线。刻意备案偏离(与 magic 杖头锚同性质)禁止对齐回去;只 Y 移不带前伸,
+        //   不复发贴脸穿背案;逐物品显式支(下方 281/986/3007)在其上叠加,关系不变。
         let ax = this.player.cx;
-        let ay = this.player.cy;
+        let ay = this.player.cy + HOUSE_SHOT_ORIGIN_LIFT_Y;
         // 逐枪枪口偏移（Player.cs:46632-46641）：吹箭筒 281/吹箭枪 986 (+6×dir,−6×gravDir)、
         // 飞镖手枪 3007 (−4×dir,−2×gravDir)；gravDir 本仓恒 1（无重力翻转建模）
         if (bowVid2 === 281 || bowVid2 === 986) { ax += 6 * this.player.facing; ay -= 6; }
@@ -12373,16 +12761,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
     const inp = this.input;
-    const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
-    // ★出手挂点裁定（R30 §4.2 落点清单 #1 顺带项，2026-08-25）：原版 ItemCheck_Shoot
+    // 瞄准角 = 玩家中心→鼠标世界坐标（ItemCheck_Shoot :47610 vector = MouseWorld −
+    // pointPosition 起算）。曾用"鼠标−画布中心"——相机被世界边缘钳制时玩家不在屏心
+    // = 整械方向偏斜（ranged 弹药链 2026-08-22 同案已修,本链 2026-08-31 对齐）
+    const [mwx0, mwy0] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+    const ang = Math.atan2(mwy0 - this.player.cy, mwx0 - this.player.cx);
+    // ★出手挂点收口（R30 §4.2 落点清单 #1 清偿,2026-08-31）：原版 ItemCheck_Shoot
     //  通用尾支 pointPosition = RotatedRelativePoint(MountedCenter)（1458 Player.cs:47603;
-    //  :4209-4227 无旋转时 vector2=(0,-n)+(0,n)=0、addGfxOffY=0 → 即玩家中心），per-item
-    //  出生偏移仅 {281,986}+6X/−6Y、{3007}−4X/−2Y、{517}±10.5 抖动等显式支——【无】
-    //  "中心前 14px"通用式。本仓 px/py 属发射挂点通用偏差：回旋镖族已按
-    //  placeAtShootSpawn 收口；'magic'/'shot'/'grenade' 同式偏差登记不改（三族覆盖
-    //  枪械/魔法全量发射链与散布/命中探针锚点，14px 挂点差收益低改动面大，待专批统一）
-    const px = this.player.cx + Math.cos(ang) * 14;
-    const py = this.player.cy - 4 + Math.sin(ang) * 14;
+    //  :4209-4227 无旋转恒等玩家中心）——本域三族曾共用的 px/py(中心前14px/y−4) 已全数
+    //  拆除:'grenade'(GrenadeProj)/glowstick 直构即玩家中心,boomerang 构造即中免二次
+    //  placeAtShootSpawn;'magic' 杖头锚(+18/重瞄)为 2026-08-26 用户拍板备案偏离非债
+    // （见 :12957 批注）;'ranged' 弹药链 ax/ay 本就中心精确(Player.cs:10989 注)。
+    //  per-item 显式出生偏移（{281,986}/{3007}/{517}/{2611,5526}/{3827}/proj9·12·728）
+    //  在各自实体链已有对应支或随族未实装,新增武器接入时以 Player.cs:47618-47687 全表为准
     // 发射型武器使用期间面向鼠标（ItemCheck_Shoot :46578-46590：num=Dot(朝向轴,瞄准向)
     // >0→1 否则 −1；全 itemAnimation 每 useTime tick 重评。723/3611 豁免（:46563））。
     // ★纯近战阔剑不在此列——挥砍期间方向锁定（:19546-19556 useTurn 门）
@@ -12531,7 +12922,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // ★2026-08-23 esbuild 快检修：并行会话在途编辑把本构造误改为
         //  this.entities.add(new GrenadeProj(…)) 且丢闭合括号——恢复 const 句柄
         //  （下方 contactPen/contactKb/critChance 与 add(thrownBomb) 四处引用依赖它）
-        const thrownBomb = new GrenadeProj(px, py,
+        // 出手锚点 = 玩家中心（ItemCheck_Shoot 通用尾支 RotatedRelativePoint(
+        // MountedCenter)，1458 Player.cs:47603;投掷族无逐物品出生偏移显式支）。
+        // ★R30 §4.2 落点清单 #1 收口（2026-08-30）：曾吃通用偏差 px/py(中心前14px/y−4)
+        const thrownBomb = new GrenadeProj(this.player.cx, this.player.cy,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           dmg, fuse, cw.shoot, (ex, ey, edmg) => {
             // 773 不走圆盘 explodeAt：Kill 尾段专支（P.cs:79951-80058）沿
@@ -12560,9 +12954,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'glowstick': {
         // aiStyle 14（AI_014 弹跳物理/粘性粘墙/妖精排斥场）：消耗 1 支掷出；
         // 光照走通用弹幕点光（projectileData.light=1）
-        this.entities.add(new GlowstickProj(px, py,
+        this.entities.add(new GlowstickProj(this.player.cx, this.player.cy,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
-          cw.shoot), 'projectiles');
+          cw.shoot), 'projectiles');   // 锚点同上:玩家中心(R30 收口)
         consume();
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
@@ -12576,13 +12970,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 初速 = shootSpeed/meleeSpeed（ItemCheck_Shoot :46430-46434 melee 弹速缩放,
         //   回旋镖族不在 NoMeleeSpeedVelocityScaling 排除表;attackSpeedMult=1/meleeSpeed）
         const throwSpd = meleeThrowSpeed(cw.shootSpeed, this.player.attackSpeedMult);
-        const bom = new Boomerang(px, py,
+        // 出手锚点 = 玩家中心（R30 §4.2/B-3 落点清单 #1）：ItemCheck_Shoot 通用尾支
+        // pointPosition = RotatedRelativePoint(MountedCenter)（1458 Player.cs:47603——
+        // 无旋转/坐骑/睡坐时 vector2 恒 (0,-n)+(0,n)=0 → 即玩家中心）；直构即中,
+        // 不再二次 placeAtShootSpawn
+        const bom = new Boomerang(this.player.cx, this.player.cy,
           Math.cos(ang) * throwSpd, Math.sin(ang) * throwSpd,
           cw.damage, cw.knockback, cw.shoot, this.player.facing);
-        // 出手点收口 = 玩家中心（R30 §4.2/B-3 落点清单 #1）：ItemCheck_Shoot 通用尾支
-        // pointPosition = RotatedRelativePoint(MountedCenter)（1458 Player.cs:47603——
-        // 无旋转/坐骑/睡坐时 vector2 恒 (0,-n)+(0,n)=0 → 即玩家中心,无 ±14px/y−4 偏移）
-        placeAtShootSpawn(bom, this.player.cx, this.player.cy);
         bom.critChance = critTotal;
         bom.armorPen = this.player.equipStats.armorPen; // ⑥
         // 301 Bouncing Shield 按 20t/100t 双门需 channel（其余族不用,空挂无害）
@@ -13843,7 +14237,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             },
           };
           for (let i = 0; i < 3 - pgAlive; i++) {
-            const pg = new Arrow(px, py,
+            const pg = new Arrow(this.player.cx, this.player.cy,
               Math.cos(ang) * cw.shootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
               Math.sin(ang) * cw.shootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
               cw.damage, cw.knockback, PIRANHA_PROJ, null,
@@ -13891,7 +14285,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (cw.shoot === 491) {
           const fkOwner = this.player;
           const fkItemId = def.key;
-          const knife = new FlyingKnifeProj(px, py,
+          const knife = new FlyingKnifeProj(this.player.cx, this.player.cy,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback,
             {
@@ -13913,7 +14307,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // :92807-92830，上限 8/敌）——直飞 Arrow 无法表达附着态。3543 同为
         // melee+noMelee → 'shot' 兜底路径，同点分流
         if (cw.shoot === 636) {
-          const flare = new DaybreakFlare(px, py,
+          const flare = new DaybreakFlare(this.player.cx, this.player.cy,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback);
           flare.critChance = critTotal;
@@ -14016,7 +14410,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 默认魔法路径曾硬编码 pierce 1）、extraUpdates 2/4 与 timeLeft 600 由弹表驱动、
         // 点光 0.75（:1026/:1710）
         if (cw.shoot === 20 || cw.shoot === 88) {
-          const zap = new Arrow(px, py,
+          const zap = new Arrow(this.player.cx, this.player.cy,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback, cw.shoot, null,
             { grav: 0, life: pd?.timeLeft ?? 600, pierce: pd?.penetrate ?? 3 });
@@ -14037,7 +14431,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // pierce 1——蜂枪 181/黄蜂枪 189 表值 3、巨蜂 566 表值 4、幽灵法杖弹 297 表值 3、
         // 灵魂之焰 659/剃刀台风 409 表值 −1（命中侧走全局 immune 帧冷却再命中）全被压成 1
         const HOMING_FAMILY_PIERCE = new Set([181, 189, 307, 316, 566, 297, 659, 409]);
-        const shotArrow = new Arrow(px, py,
+        const shotArrow = new Arrow(this.player.cx, this.player.cy,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
           { grav: gsS.grav, gravDelay: gsS.delay, grav2: gsS.grav2, grav2At: gsS.grav2At,
@@ -19091,24 +19485,71 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.newText(Lang.gen(weather.slimeRainTime > 0 ? 74 : 75), 50, 255, 130);
     }
     // 狱火药水（buff 116，Player.cs:9896-9938）：200px 光环烧敌——每 60t 对范围内敌
-    // 直伤 20（不绕 iframes）；视觉光效由粒子近似
+    // 直伤 20（不绕 iframes）；视觉光效由粒子近似。
+    // ★F1 门禁串对齐原文（1457 Player.cs:10315）：`nPC.active && !nPC.friendly &&
+    //   nPC.damage > 0 && !nPC.dontTakeDamage && !nPC.buffImmune[num3=323] &&
+    //   CanNPCBeHitByPlayerOrPlayerProjectile(nPC) && 距离≤200`——含小动物面
+    // （projectile=null ⇒ flag=dontHurtCritters，戴 4767/5323 时普通小动物不吃灼烧；
+    // 黑化松鼠经 IsCritterThatIsHostileToPlayers 复权照烧）。遍历桶 = enemies ∪
+    // critters（原版 Main.npc 单数组）。直伤 = ApplyDamageToNPC(:10326 → :20592)
+    // 内部链：20 平值【无玩家面板乘区】×旗 DamageDealt → +checkArmorPenetration
+    // (GetArmorPenetration(melee:false))；AddBuff(323,120) 与直伤同受 buffImmune 门。
     if (this.player.buffs.has(BuffType.Inferno)) {
       this.infernoCounter++;
       const hitTick = this.infernoCounter % 60 === 0;
       if (hitTick) this.spawnParticles(this.player.cx, this.player.cy, '#FF8C2A', 4, 1.8, { life: 24, grav: -0.08 });
-      for (const eent of this.entities.enemies) {
+      const playerAP = this.player.equipStats.armorPen ?? 0;   // GetArmorPenetration(melee:false)（:20597 链内消费）
+      const critterBucket = new Set<unknown>(this.entities.critters);
+      for (const eent of [...this.entities.enemies, ...this.entities.critters]) {
         const en = eent as Enemy;
-        if (en.dead) continue;
-        // 狱火光环是玩家伤害源（Player.cs:9896 走 DamageNPCLikeProjectiles 族）
-        // ——friendly NPC（睡渔夫 376 等）同受 :43605 门保护
+        if (en.dead || (eent as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
+        // nPC.damage > 0（:10315 第三门——未激活攻击态的小动物伤害恒 0 不进光环；
+        // 黑化后 def.damage=20 过门）
+        if ((en.def?.damage ?? 0) <= 0) continue;
+        // !nPC.friendly 门：playerCanHitEnemy 是其超集（多巫毒/臭蛋例外支，狱火无触发物）
         if (!playerCanHitEnemy(en, this)) continue;
+        // CanNPCBeHitByPlayerOrPlayerProjectile(null)：统一出口（CountsAsCritter∧
+        // dontHurtCritters 拒收 + 敌对小动物复权）——critter 桶成员显式传桶位源
+        const fromCritterBucket = critterBucket.has(eent);
+        if (!isCritterThatIsHostileToPlayers(en)
+          && !playerProjectileCanHitNpcGate(this, en, fromCritterBucket)) continue;
+        // !nPC.buffImmune[323]（静态表 NPCID.Sets.DebuffImmunitySets ∪ 实例覆写位，
+        // 同 projStatus.applyBuffTicks 的门语义）——免疫者 buff 与直伤双双跳过
+        {
+          const ovr = en.debuffImmuneOverride?.get(323);
+          const vid323 = en.vanillaId ?? 0;
+          if (ovr !== false && vid323 > 0 && npcImmuneTo(vid323, 323)) continue;
+        }
         if (Math.hypot(en.cx - this.player.cx, en.cy - this.player.cy) > 200) continue;
-        en.cursedT = Math.max(en.cursedT, 2); // AddBuff(323,120) 灼烧 2s
-        if (hitTick) en.hurt(Math.max(1, Math.round(20 * this.player.damageMult('melee'))), 0, 0, this, 0, false, 0, true);   // 玩家伤害源(:9896)=DPS 计
+        applyBuffTicks(en as unknown as StatusEnemyLike, 323, 120);   // AddBuff(323,120) 灼烧 2s（max 合并+门内自证）
+        if (hitTick) {
+          let dmg = 20;                          // int damage = 20（:10307）平值——无玩家面板乘区
+          // ApplyDamageToNPC :20593-20595：banner 在先 —— GetBannerBuffEffect →
+          // damage=(int)(damage×effect.DamageDealt.Sample(Main.Difficulty))——
+          // 与近战链 :22012 同一采样器（BannerStrength 普通族 1.5/专家 2，DD2 族 0.2 档）
+          const vidB = en.vanillaId ?? -1;
+          if (vidB > 0 && this.bannerNpcActive(vidB)) {
+            const bItem = bannerItemId(bannerOfNpc(vidB));
+            if (bItem > 0) dmg = Math.max(1, Math.round(dmg * bannerDamageDealtSample(bItem, mainDifficulty(this.world))));
+          }
+          // StrikeNPC 单点（音/飘值/击杀全在 hurt 管线）：crit=false；armorPen 参 =
+          // GetArmorPenetration(melee:false)，AP 加算在 Enemy.hurt 内部
+          // npcCheckArmorPenetration 链完成（ApplyDamageToNPC :20597 同式）
+          en.hurt(dmg, 0, 0, this, playerAP, false, 0, true);
+        }
       }
-      // PvP 半边（Player.cs:9931-9946）：hostile 时 200px 内敌对玩家 60t 一跳 20 直伤
+      // PvP 半边（Player.cs:9931-9946 行号勘误：真原文 = UpdateBuffs buffType[j]==116 支
+      //  1457 Player.cs:10302-10350）：hostile 时 200px 内敌对玩家 60t 一跳 20 直伤
       // （死因 16 inferno）+ 地狱火 323 2s——经 msg44 bit6 广播意向、被击端本地结算
       // （光环为 buff 驱动不随弹幕同步,故走独立意向位；被击端 per-owner 60t 冷却）
+      // ★GA2 终态核验（狱火意向循环【不】加免疫门）：原文本循环门禁串 =
+      //  `player == this || !player.active || player.dead || !player.hostile ||
+      //   player.buffImmune[num3] || (player.team == team && player.team != 0) ||
+      //   !(Vector2.Distance(...) <= num4)`（1457 Player.cs:10332-10334），**无**
+      //  player.immune 支——与 Damage_PVP(:14650)/ItemCheck_MeleeHitPVP(:44429) 不同，
+      //  狱火光环对免疫窗内的敌对玩家照常施加 buff 与伤害意向（其节流面是
+      //  infernoCounter % 60 跳拍 + 受害端 Hurt 内部 immune 早退）。按原文消费序
+      //  不插门。
       if (this.net?.active && this.net.policy.pvpAllowed && this.player.hostile && hitTick) {
         for (const rp of this.remotePlayerProxies) {
           const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
@@ -20641,6 +21082,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const catchItemId = npcId > 0 ? CRITTER_CATCH_BY_NPC[npcId] : undefined;
     if (!catchItemId) return;                          // :44084 catchItem<=0 跳过（不伤不死）
+    // ★任务④ 仙灵捕捉微门（ItemCheck_CatchCritters :45104-45107）：583 粉/584 绿/
+    //  585 蓝仙灵仅 `Main.npc[i].ai[2] <= 1f` 才可捕——ai[2] 是 AI_112 仙灵状态机
+    //  （本仓 Enemy.fairyAI 同名字段 ai2）：0=绕出生点微漂、1=玩家逃逸飞 ⇒ 可捕；
+    //  2-7=被释放后的引导链（玩家引导/绕宝箱/找不到宝箱/寿终离场）⇒ 拒捕。
+    //  引导态进入唯一通道是虫网释放（ReleaseNPC 预置 ai[2]=2），捕后不再捕=原版
+    //  "宠物栏外的仙灵只在野生态可入笼"。
+    if ((npcId === 583 || npcId === 584 || npcId === 585)
+      && (((c as unknown as { ai2?: number }).ai2 ?? 0) > 1)) return;
     // ★F4 木网捕熔岩饵料（ItemCheck_CatchCritters :45083-45113，1457 Player.cs）：
     //  :45085 flag = 金网 3183 / 防火网 4821 豁免；:45097-45103
     //  `!flag && ItemID.Sets.IsLavaBait[catchItem]` → Hurt(PlayerDeathReason.ByNPC(i),
@@ -20648,15 +21097,40 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  且【不捕捉不掉落】——此前 653 地狱蝴蝶→4845 / 654 熔岩蝇→4847 /
     //  655 熔岩蜗牛→4849 被任何网白捕（IsLavaBait 表=ItemID.cs:1080 恰三成员）。
     //  自伤通道=damagePlayer(源=小动物)——推离向(npc.Center.X<player.Center.X?1:-1
-    //  :45098) 与 damagePlayer 按源点推离同构；WrongBugNet 独立无敌帧冷却桶未建模
-    //  （登记），以 damagePlayer 常规无敌帧承担"挥击窗每帧重入、无效帧不加 buff"
-    //  的原版节流（调用方不预占 swingHitSet 即为对齐此重入面）
+    //  :45098) 与 damagePlayer 按源点推离同构。
+    //  ★任务③ WrongBugNet 分桶落地：Hurt(:38493) 非 General 桶查 hurtCooldowns[id]
+    //  （player/HurtCooldownBuckets.ts 最小建模）——挥击窗每帧重入由【独立桶】承担
+    //  节流（damagePlayer 常规无敌帧不动；两桶互不共享计时，原版同构）：
+    //  · 门内早退 ：38495-38498（返回 0.0 无副作用）
+    //  · 命中后写 ：38674 num10=(实扣==1?longInvince?40:20:longInvince?80:40)
+    //              → :38680-38683 仅空位写入
+    const bkSelf = this as unknown as { hurtBuckets?: HurtCooldownBuckets };
+    if (!bkSelf.hurtBuckets) bkSelf.hurtBuckets = new HurtCooldownBuckets();
     if (catchItemId === 4845 || catchItemId === 4847 || catchItemId === 4849) {
       const netDef = ITEM_DEFS[this.swing?.item ?? -1];
       const netVid = netDef?.vid ?? viIdFromKey(netDef?.key ?? '') ?? -1;
       if (netVid !== 3183 && netVid !== 4821) {
-        const dealt = this.damagePlayer(1, c.cx, c.cy, c);
-        if (dealt > 0 && !this.player.dead) this.player.buffs.apply(BuffType.OnFire, 5);   // AddBuff(24,300)=5s
+        // ImmunityCooldownID.WrongBugNet(=3)：与 General(=-1,玩家 immune 位)分离
+        if (bkSelf.hurtBuckets.blocksHit(ImmunityCooldownID.WrongBugNet)) return;   // :38495-38498
+        // ★R2-02（蓝队二轮）：经 Player.damage 的瞬态桶通道 __swNextHitBucket 携
+        // 桶 id+表引用进 Hurt 门/写面（:38493/:38677-83）——General 无敌窗不再误拦
+        // 本桶受理（旧「统一 iframes>0 整体早退」缺口就此闭合）。damagePlayer 内部
+        // 对该次调用以 WrongBugNet 桶判定；finally 摘除通道保证邻位调用不受影响。
+        const pChan = this.player as unknown as
+          { __swNextHitBucket?: { id: number; table: HurtCooldownBuckets } | undefined };
+        pChan.__swNextHitBucket = { id: ImmunityCooldownID.WrongBugNet, table: bkSelf.hurtBuckets! };
+        let dealt = 0;
+        try {
+          dealt = this.damagePlayer(1, c.cx, c.cy, c);
+        } finally {
+          pChan.__swNextHitBucket = undefined;
+        }
+        if (dealt > 0 && !this.player.dead) {
+          this.player.buffs.apply(BuffType.OnFire, 5);   // AddBuff(24,300)=5s 固定（非随机）
+          bkSelf.hurtBuckets.applyAfterHit(ImmunityCooldownID.WrongBugNet,
+            hurtImmunityFrames(dealt,
+              (this.player.equipStats as unknown as { longInvince?: boolean }).longInvince === true));
+        }
         return;
       }
     }
@@ -20900,21 +21374,69 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** ★F1 Player.CanNPCBeHitByPlayerOrPlayerProjectile（Player.cs:20673-20689）
-   *  的最小等价谓词——仅近战命中面（projectile=null 支）：
-   *  `flag = dontHurtCritters || (projectile召唤/哨兵集)`——近战无弹 → 只剩
-   *  dontHurtCritters；`projectile?.trap → flag=false` 不涉；
-   *  `npc.IsCritterThatIsHostileToPlayers() → flag=false`（敌对生物复权）;
-   *  `CountsAsCritter[type] ∧ flag` → 拒收。
-   *  登记差：dontHurtCritters（4767·5323）本仓无承载位——Player.ts
-   *  RefreshMechanicalAccs 段"无消费端登记不接"，经可选字段读取、未建模=恒
-   *  false ⇒ 敌对桶里该谓词实际恒真；CountAsCritter 成员 ≡ def.critter
-   *  （vanillaNpcs 提取表，tools/extract-critters.mjs）。保留结构判断以承接
-   *  未来 dontHurtCritters 建模面（挂此一处即全链生效）。 */
+   *  的近战命中面（projectile=null 支）。★E 起（2026-08-31）本体移交 projTargets.
+   *  playerProjectileCanHitNpcGate 统一出口——dontHurtCritters（4767/5323，
+   *  Player.ts RefreshMechanicalAccs 段已建模 equipStats.dontHurtCritters）与
+   *  IsCritterThatIsHostileToPlayers 复权、CountsAsCritter 成员源判定全部收口；
+   *  本包装仅保持既有调用形。
+   */
   private canNpcBeHitByPlayerMelee(e: Enemy): boolean {
-    const countsAsCritter = e.vanillaId != null && e.def?.critter === true;
-    if (!countsAsCritter) return true;
-    return !((this.player.equipStats as unknown as { dontHurtCritters?: boolean })
-      .dontHurtCritters === true);
+    return playerProjectileCanHitNpcGate(this, e, false);
+  }
+
+  /** ★任务② meleeNPCHitCooldown[] 挥动帧递减门（Player.cs:43999-44001 调用点的
+   *  受理条件闭式）：`((sItem.damage >= 0 && sItem.type > 0 && !sItem.noMelee)
+   *  || sItem.type == 1991/3183/4821) && itemAnimation > 0` 外层 + 内层
+   *  `if (sItem.damage > 0)` ⇒ 只有 dmg>0 且非 noMelee 的挥动帧递减。
+   *  本仓命中盒段用 noMelee = heldDef.magic || combat.noMelee、伤害链 =
+   *  swing.dmg ?? tool.damage ?? combat.damage——冷却衰减与命中消费必须同窗，
+   *  故此处取完全同一谓词源（免"有冷却无消费/有消费无冷却"错拍）。 */
+  private swingDecayGate(): boolean {
+    const sw = this.swing;
+    if (!sw) return false;
+    const heldDef = ITEM_DEFS[sw.item];
+    if (!heldDef) return false;
+    const vid = heldDef.vid ?? viIdFromKey(heldDef.key ?? '');
+    const combat = vid >= 0 ? itemCombat(vid) : null;
+    const tool = heldDef.tool ?? this.itemFuncTool(sw.item);
+    const dmgRaw = sw.dmg ?? tool?.damage ?? combat?.damage ?? 0; // :43999 sItem.damage>0
+    const isNet = vid === 1991 || vid === 3183 || vid === 4821;   // 网 damage=0 天然排除，显式短路
+    if (isNet) return false;
+    if (heldDef.magic || combat?.noMelee) return false;           // :43984 !sItem.noMelee（本仓口径含 magic）
+    return dmgRaw > 0;
+  }
+
+  /** ★任务② 近战循环门 immune 分量（Player.cs:44598 `nPC.immune[whoAmI] == 0`）。
+   *  返回 true = 该 NPC 对本地玩家无弹幕域免疫窗，可进近战命中。到期制承载
+   *  （绝对 tick 比较 ≡ vanilla 逐帧递减表减到 0 的同一时刻翻转；差异仅在
+   *  「暂停期间不衰减」一种语境，本仓 tick 循环停摆时绝对帧同样冻结）。 */
+  private meleeNpcImmuneGateOf(npcId: number): boolean {
+    // 桩驱动兼容（Object.create(Game.prototype) 无构造期字段）惰性补建，
+    // 同 updateSwingHits 冷却面口径
+    const self = this as unknown as { npcImmuneByAttacker?: Map<number, number> };
+    const map = self.npcImmuneByAttacker ??= new Map<number, number>();
+    const exp = map.get(npcId);
+    if (exp === undefined || exp <= this.tickCount) {
+      if (exp !== undefined) map.delete(npcId);                        // :91564-91566 减至 0 后出表
+      return true;
+    }
+    return false;
+  }
+
+  /** 写入 API：NPC.AddImmuneTime(fromWho,time)/Projectile.Damage 落 immune[owner]
+   *  等价形（NPC.cs:93656-93661）——弹幕域文件接桥零改动生效。
+   *  ★GC1（2026-08-31）：ticks==0 支 = 原版写 0 段（usesLocalNPCImmunity 族
+   *  Projectile.cs:14177 / usesIDStaticNPCImmunity :14032 显式 `immune[owner]=0`
+   *  ——全局窗被新命中面【清零】,节流责任移交弹内局部表;非正数跳过的旧语义会
+   *  让旧窗残留,与原版「后写面覆盖前窗」不符）。负帧（哨兵值）不落表不删表。 */
+  noteNpcPlayerImmune(npcId: number, ticks: number): void {
+    const self = this as unknown as { npcImmuneByAttacker?: Map<number, number> };
+    const map = self.npcImmuneByAttacker ??= new Map<number, number>();
+    if (ticks > 0) {
+      map.set(npcId, this.tickCount + ticks);
+    } else if (ticks === 0) {
+      map.delete(npcId);                        // :14178 immune[owner]=0 同拍出表
+    }
   }
 
   private updateSwingHits() {
@@ -20927,9 +21449,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  即清零（:24904-24911）。起手全清=原版 ItemCheck_StartActualUse 里 attackCD=0 +
     //  ResetMeleeHitCooldowns()（Array.Clear 整数组 :44564-44570 / 调用点 :52312-52313）
     //  ——本仓「挥击新实例首帧」全清与之同构（引用比对覆盖全部 swing 创建点）。
-    //  本仓无挥击期也照常递减的唯一残差被下次起手全清支配：冷却面唯一消费方
-    //  CanHitNPCWithMeleeHit 只在挥击期 ItemCheck_MeleeHitNPCs 循环门上生效
-    //  （:44583-44585/:44598），idle 冻结 vs 继续衰减无可观测差。
+    //  ★2026-08-31 对齐批落地：idle 冻结不再靠"下次起手全清"兜底——本函数无挥击
+    //  早退、meleeNPCHitCooldown 侧只挂挥动帧门（swingDecayGate），attackCD 侧每帧
+    //  递减+无挥击清零，两件套拍点各自贴合 vanilla（见下修正点 A/B）。
     // ★桩驱动兼容：测试桩用 Object.create(Game.prototype) 无构造期字段
     //  （weapon-melee-leftover/handover 口径）→ 冷却面在此惰性补建后再用
     const cdSelf = this as unknown as {
@@ -20945,12 +21467,52 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.meleeNpcCd.clear();
       this.meleeAttackCd = 0;
     }
-    if (this.meleeAttackCd > 0) this.meleeAttackCd--;
-    for (const [k, v] of this.meleeNpcCd) {
-      if (v <= 1) this.meleeNpcCd.delete(k);
-      else this.meleeNpcCd.set(k, v - 1);
+    // ★WrongBugNet/General 分桶（HurtCooldownBuckets）：hurtCooldowns[i] 每 tick
+    //  无条件递减（Player.cs:19003-19009）——与本函数其余冷却面同拍推进即可
+    const bkSelf = this as unknown as { hurtBuckets?: HurtCooldownBuckets };
+    if (!bkSelf.hurtBuckets) bkSelf.hurtBuckets = new HurtCooldownBuckets();
+    bkSelf.hurtBuckets.tick();
+    // ★R2-H2 parry buff198 倒计时推进（buffTime 链的管线承载；授予点=接触反伤区
+    // Game.ts 盾反段，消费点=下方 R2-07(b) ×5 面）
+    {
+      const ppt = this.player as unknown as { parryDamageBuff?: boolean; parryDamageBuffT?: number };
+      if ((ppt.parryDamageBuffT ?? 0) > 0 && --(ppt.parryDamageBuffT as number) <= 0) {
+        ppt.parryDamageBuff = false;
+      }
     }
-    if (!this.swing) return;
+    // ★R2-01 rapidAttackBonus 每帧衰减（Player.ResetEffects :18392-18401：-0.005/t 至 0）
+    {
+      const ps = this.player as unknown as { __swRapid?: RapidBonusState };
+      if (!ps.__swRapid) ps.__swRapid = newRapidBonusState();
+      decayRapidAttackBonus(ps.__swRapid);
+    }
+    // ★R2-06⑤ 甲虫套装蓄能实扣梯子（ApplySetBonus_BeetleDamage :16619 /
+    //  ApplySetBonus_BeetleDefense :16596——原版 UpdateArmorSets 每帧调度，计数与
+    //  球数窗口在此推进；命中加账见 enemies 循环 ApplyNPCOnHitEffects 镜像位）
+    {
+      const pm = this.player as unknown as { __swBeetle?: BeetleMeter };
+      const eqs = this.player.equipStats ?? {};
+      if (!pm.__swBeetle) pm.__swBeetle = new BeetleMeter();
+      pm.__swBeetle.tick(this.player, eqs.beetleOff === true, eqs.beetleDef === true);
+    }
+    // attackCD：每帧无条件递减（:24904-24907）且无挥击（itemAnimation==0）即清零
+    // （:24908-24911）——〔任务②〕修正点 A：此前 idle 也照跑既不清零也不冻结两不符
+    if (this.meleeAttackCd > 0) this.meleeAttackCd--;
+    if (!this.swing) {
+      this.meleeAttackCd = 0;
+      return;   // meleeNPCHitCooldown[] 侧 idle 冻结（见下挥动帧门）
+    }
+    // ★任务② 修正点 B：meleeNPCHitCooldown[] 的逐项递减挂在「正在使用 dmg>0 且
+    // 非 noMelee」的挥动帧——调用点 Player.cs:43999-44001，其外层 ：43984 门 =
+    // `((damage>=0 && type>0 && !noMelee) || 网) && itemAnimation>0`、内层再套
+    // `if (sItem.damage > 0)` ⇒ 网(1991/3183/4821,damage=0)/药水(noMelee/damage=0)
+    // 挥动帧都【不】递减。此前实现每帧无条件递减=未按此分层（2026-08-31 对齐批）
+    if (this.swingDecayGate()) {
+      for (const [k, v] of this.meleeNpcCd) {
+        if (v <= 1) this.meleeNpcCd.delete(k);
+        else this.meleeNpcCd.set(k, v - 1);
+      }
+    }
     // ★J2 Volcano(type121 火之大剑,ItemID.cs:1788——非"星怒"Starfury=65)爆炸窗口
     //  _spawnVolcanoExplosion 惰性初始化 ≡ ItemAnimationJustStarted（:43809-43812
     //  `type==121 && ItemAnimationJustStarted → =true`；swing 对象每次起手重建，
@@ -20959,8 +21521,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (this.swing.volcanoInit !== true) {
       this.swing.volcanoInit = true;
       const vDef = ITEM_DEFS[this.swing.item];
-      this.swing.volcanoWindow =
-        (vDef?.vid ?? viIdFromKey(vDef?.key ?? '')) === 121;
+      const sv0 = (vDef?.vid ?? viIdFromKey(vDef?.key ?? ''));
+      // ★R2-07 挥击首拍窗口旗（Player.cs:43803-43818——type 判定族照抄）
+      this.swing.volcanoWindow = sv0 === 121;                    // _spawnVolcanoExplosion
+      this.swing.batbatHeal = sv0 === 5097;                      // _batbatCanHeal
+      this.swing.tentacleSpikes = sv0 === 5094;                  // _spawnTentacleSpikes
+      this.swing.bloodButchererSpawns = sv0 === 795;             // _spawnBloodButcherer
+      this.swing.muramasaCut = sv0 === 155;                      // _spawnMuramasaCut
     }
     this.swing.t--;
     if (this.swing.t <= 0) {
@@ -21072,11 +21639,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       : h > 64 ? 14 : h > 52 ? 12 : phase === 1 && h > 32 ? 8 : 10;
     let offX: number, offY: number;
     // ★两套三段阈值同源但产物不同，须拆开：命中盒扩展 phase（cs:44520-44541：
-    // 早段(anim≥0.666max ⟺ pAnim≥2/3)×2/×1.4、晚段(anim<0.333max ⟺ pAnim≤1/3)×1.4/×1.1）
+    // 早段(head,anim≥0.666max)×2/×1.4、晚段(tail,anim<0.333max)×1.4/×1.1）
     // 与基座持位 tier（cs:49957-50095，同 Renderer.drawUseItem case 1——末段→前持位、
     // 起手→后举位）。此前共用一个 phase，把基座持位也接反（早段取了前持位）
-    const phase: 0 | 1 | 2 = pAnim > 2 / 3 ? 0 : pAnim > 1 / 3 ? 1 : 2;
-    const tier: 0 | 1 | 2 = pAnim <= 1 / 3 ? 0 : pAnim < 2 / 3 ? 1 : 2;
+    // ★[N5] RESOLVED（2026-08-31 对齐批）：分档统一到 meleeThirdOf 闭式——C# 判定是
+    // `(double)itemAnimation < (double)itemAnimationMax * 0.333` 双精度阈值
+    // （Player.cs:45526 命中盒 / :51294 持位 / :36596 bodyFrame 三处同式），JS number
+    // 同为 IEEE754 double ⇒ 直接照抄即位级同构。旧式 `pAnim>2/3`/`pAnim≤1/3` 在
+    // max 可整除 3 的三等分点各有一帧误档（anim=max·2/3 处 pAnim==2/3 应判早挥、
+    // anim=max/3 处应判中段），Renderer.useStyleBodyRow/drawUseItem 已同步换表。
+    const third = meleeThirdOf(this.swing.t, this.swing.dur);
+    const phase: 0 | 1 | 2 = third === 'head' ? 0 : third === 'tail' ? 2 : 1;
+    const tier: 0 | 1 | 2 = third === 'tail' ? 0 : third === 'mid' ? 1 : 2;
     const hitUs = this.swing.useStyle ?? 1;
     // 特例持位（Player.cs:49930-50104，与 Renderer.drawUseItem case 1 同源双表）：
     // · 1827 利刃手套爪族（Item.claw={1827}，Main.cs:6742-6744）三段独立持位
@@ -21116,22 +21690,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     else if (tier === 1) { offX = holdOffset(1).x; offY = holdOffset(1).y; }
     else { offX = holdOffset(2).x; offY = holdOffset(2).y; }
     const p = this.player;
+    // ★[N1] RESOLVED（2026-08-31 对齐批）mountOffset 支落地：vanilla itemLocation.Y
+    // 各段都 `+ mountOffset`，实参 = HeightOffsetHitboxCenter（Player.cs:43177 调用点
+    // 传 heightOffsetHitboxCenter；定义 :3237-3250）：mount.Active → mount.
+    // PlayerOffsetHitbox = −PlayerOffset + data.heightBoost（Mount.cs:424-431）；
+    // 折叠凳 → HeightBoost−VisualYOffset；徒手 → 0。本仓骑乘【不改玩家盒】（Player.ts
+    // mountedCenter 注 :5744-5751 自证：Bottom 同锚一致），y 无 vanilla 式 heightBoost
+    // 上浮 ⇒ 原式 world-Y = (bottom−42−boost)+tier+(boost−playerOffset) 可折叠为
+    // 本仓坐标 p.y+tier−playerOffset——即仅剩「−当前帧 playerYOffsets[frame]」一项，
+    // 徒手/坐凳两支在本仓坐标闭式下恰恒 0（凳走物理位移 Player.ts:3047-3050）。
+    const mountRiding = (p as unknown as {
+      ridingCart?: boolean; mount?: { active?: boolean; playerOffset?: number };
+    });
+    const playerOffNow = mountRiding.ridingCart || mountRiding.mount?.active
+      ? Math.floor(((p as unknown as { anchorPlayerOffset: number }).anchorPlayerOffset ?? 0)) : 0;
     let bx = p.cx + p.facing * offX;
-    let by = p.y + offY;
+    let by = p.y + offY - playerOffNow;
     // ★近战任务B 火之大剑(Volcano,type121)[★J1 勘误:历史注误标"星怒"]延长臂锚点快照：此二值 = 三段持位结果（与 Renderer.drawUseItem
     //  case 1 双表同源）≡ C# ItemCheck_ApplyUseStyle(1457 :51292 / 1456 :49921)
     //  写入的 player.itemLocation（useStyle1 各段 X=position.X+w/2±(fw/2−num)·dir、
-    //  Y=position.Y+tier）。其后逐段镜像/扩展原地改写 bx/by,探针必须用未改写快照
-    //  ★[N5] 登记（红队 R3 2026-08-30）：三段持位分档门 pAnim≤1/3 / pAnim<2/3
-    //  （本函数 tier 选择行）在阈值帧附近有 ±1 帧分档跳变，属登记接受的近似——
-    //  对拍以命中面(探针/判定盒)为准，勿按逐帧贴图位钉死
+    //  Y=position.Y+tier+mountOffset）。其后逐段镜像/扩展原地改写 bx/by,探针必须用未改写快照
     const swingLocX = bx;
     const swingLocY = by;
     // ★基底 = 手持贴图帧宽高(Player.cs:44485-44498 !Main.dedServ 分支:num/num2 =
     // heldItemFrame 尺寸,×adjustedItemScale——:44483 的 32×32 仅 dedServ 兜底。
     // 曾误读成"恒 32 与贴图无关"导致长武器判定缩半:村正贴图 64×64 → 判定盒被
     // 砍到 32(体感"够不着"),小剑反而超打。5094-5097 缩框特例(仓内无此物)不涉及)
-    // GetAdjustedItemScale（Player.cs:41919-41930，消费 :44509-44511）：melee 武器
+    // GetAdjustedItemScale（★F 锚校正：1457 Player.cs:42891——旧 :41919-41930 为
+    // 1456 行段；消费位 = ProcessHitAgainstNPC 双探针 GetPointOnSwungItemPath
+    // (70f/0.9f, GetAdjustedItemScale(sItem)) :44636-44637）：melee 武器
     // 且 meleeScaleGlove（泰坦手套 536/力量手套 897/机械手套 936/火焰护手 1343/
     // 狂战士手套 3992，:13997/:14754/:14761/:14824/:15032）→ ×1.1（(int) 截断）；
     // Renderer 手持贴图同乘（PlayerDrawLayers.cs:3170 DrawData scale）
@@ -21143,9 +21730,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (p.facing === -1) bx -= bw;
     by -= bh;
     if (hitUs === 3) {
-      // useStyle 3（cs:44545-44560 + :50279-50312）：anim>0.666 收势段 dontAttack；
+      // useStyle 3（cs:44545-44560 + :50279-50312）：anim>0.666max 收势段 dontAttack
+      // （:45553 double 阈值原式——[N5] 同源闭式，勿换 pAnim 比值式）；
       // 判定段宽×1.4 / 高×0.6（Y 下移 0.6 高）；雨伞本体再 高+14 宽-10（朝左 X+10）
-      if (pAnim > 0.666) return;
+      if (this.swing.t > this.swing.dur * 0.666) return;
       if (p.facing === -1) bx -= Math.floor(bw * 1.4 - bw);
       bw = Math.floor(bw * 1.4);
       by += Math.floor(bh * 0.6);
@@ -21167,6 +21755,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       by += Math.floor(bh * 0.5);
       bh = Math.floor(bh * 1.1);
     }
+    // ★[N6] 任务⑥ 整型化锚（2026-08-31 对齐批）：原版 itemRectangle 自 GetMeleeHitbox
+    // 起【全程 int 字段】——Player.cs:45511 `new Rectangle((int)itemLocation.X,
+    // (int)itemLocation.Y,num,num2)` 起步、各扩展段逐一 (int) 截断累加；敌盒 =
+    // Rectangle((int)nPC.position.X,(int)nPC.position.Y,w,h)（ProcessHitAgainstNPC
+    // :44631）、小动物捕捉盒同式（ItemCheck_CatchCritters :45089）。C# (int) 截断朝零
+    // 非 floor，负半轴差异经 SwingPathMath.intRect 承载。此处统一落一次截断（宽高链上
+    // 全为整值；坐标可带半格累积），此后命中相交/探针测距/timer-crit 交盒/粒子出生点
+    // 一律消费该整盒——上方粒子支（泡泡棒/蜂巢）亦用同一盒（原版传的就是它）。
+    const mHit = intRect(bx, by, bw, bh);
+    const mHX = mHit.x, mHY = mHit.y, mHW = mHit.w, mHH = mHit.h;
     // ---- §5 1450 泡泡棒（Player.cs:44431-44461，ItemCheck_GetMeleeHitboxParticles
     //      的 1450 支）：挥动期每帧 1/3 掷骰 → 判定盒内随机点喷气泡 gore。
     //      档位链 415/414/413/412/411（1/500/250/80/10/3）+ scale 0.51-1.00 见
@@ -21177,8 +21775,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const roll = bubbleWandGoreRoll(Math.random);
       if (roll) {
         const g = GorePiece.newGore(roll.goreType,
-          bx + Math.floor(Math.random() * bw),
-          by + Math.floor(Math.random() * bh),
+          mHX + Math.floor(Math.random() * mHW),
+          mHY + Math.floor(Math.random() * mHH),
           0, 0, roll.scale);            // 常规 NewGore（非 Perfect）：含 :1347-1348 初速扰动
         if (g) { g.vx += p.facing * 2; g.vy *= 0.3; }
       }
@@ -21199,41 +21797,63 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const beeType = strong && Math.random() < 0.5 ? 566 : 181;
         const [smx, smy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
         const bd = Math.hypot(smx - p.cx, smy - p.cy) || 1;
-        const bee = new Arrow(bx + bw / 2, by + bh / 2,   // :42953-42954 判定盒中心
+        const bee = new Arrow(mHX + mHW / 2, mHY + mHH / 2,   // :42953-42954 判定盒中心
           (smx - p.cx) / bd * 6, (smy - p.cy) / bd * 6,   // DirectionTo(MouseWorld)*6
           // 强蜂 566 伤 = beeDamage(5)=5+Next(1,4)=6..8（:12021 Next(1,4)=1..3;
           // ★RV2 勘误：曾写 5+Next(4)=5..8 低端差 1）
           beeType === 566 ? 6 + Math.floor(Math.random() * 3) : roll.damage,
           beeType === 566 ? 0.5 : 0, beeType, null, {});
-        bee.critChance = p.critChance('melee');
+        // ★α-H1（终局扫尾批）：旧注"原版弹体 melee=true"系误读——弹 181/566 在
+        // 1457 SetDefaults（:2675-2686/:6174-6186）【不置任何类别旗】（对照同段
+        // :2777 蜂王针 189 才有 magic=true），Projectile.Damage 的 crit 三连掷
+        // （:12898-12912）与浸剂门(:13688 melee||IsAWhip)都轮不到无类弹 ⇒ 此处
+        // 注入玩家近战 crit 阈值是凭感觉对齐的登记偏差，撤除（蜂零暴击=原版）。
         this.entities.add(bee, 'projectiles');
       }
     }
     // ---- 近战整体门（原 :42962，门位见上注——判定盒算完才判，noMelee/damage=0
     //      只跳过砍草与命中，不影响上方粒子支）
     if (!isNet && (noMelee || meleeDmg <= 0)) return;
-    // 原版 ItemCheck_CutTiles（Player.cs:44002 + :42972-42976：仅金/防火网调
-    //  CutTiles(cutExtraTiles)，普通虫网 1991 不砍草）
-    if (swingVid !== 1991) for (let ty = Math.floor(by / TILE); ty <= Math.floor((by + bh - 1) / TILE); ty++) {
-      for (let tx = Math.floor(bx / TILE); tx <= Math.floor((bx + bw - 1) / TILE); tx++) {
-        const tk = tx * 100000 + ty;
-        if (this.swingTileCutSet.has(tk)) continue;
-        const t = this.world.store.get(tx, ty);
-        if (t === POT_TILE) {
-          this.swingTileCutSet.add(tk);
-          this.smashPot(tx, ty);
-        } else if (TILE_CUT.has(t)) {
-          this.swingTileCutSet.add(tk);
-          this.breakTile(tx, ty);
+    // 原版 ItemCheck_CutTiles（Player.cs:44002 调用点 :43984-44008）：
+    //  · 金网 3183/防火网 4821 → CutTiles(cutExtraTiles:true)（:43986-43989 独立支，
+    //    bonusCutTiles {233} 一并受理）；普通虫网 1991 不砍；
+    //  · 其余武器在 damage>0 内 CutTiles(shouldIgnore)（:44001-44003）；
+    //  · 忽略表：213 再生法杖/5295 员工杖（:43976-43982 allowRegrowth=true）→
+    //    TileCutIgnore.Regrowth；dontHurtNature（5309/5323）→ IgnoreDontHurtNature
+    //    （GetTileCutIgnorance :44020-44030——nature 支覆盖 Regrowth 支，原式如此）。
+    //  ★R2-06② ignore/bonus 三表全量建模。
+    if (swingVid !== 1991) {
+      const goldFireNetCut = swingVid === 3183 || swingVid === 4821;
+      const regrowthStaff = swingVid === 213 || swingVid === 5295;
+      const accIds = accessoryVanillaIds(p);
+      const natureGuard = accIds.includes(5309) || accIds.includes(5323);
+      // GetTileCutIgnorance（Player.cs:44020-44030）：nature 支【后置覆盖】
+      // Regrowth 支——原式 if(!fromTrap&&dontHurtNature) result=Ignore…，次序照抄
+      const shouldIgnore = natureGuard ? CUT_IGNORE_NATURE
+        : regrowthStaff ? CUT_IGNORE_REGROWTH : null;   // shouldIgnore=TileCutIgnore.None
+      for (let ty = Math.floor(mHY / TILE); ty <= Math.floor((mHY + mHH - 1) / TILE); ty++) {
+        for (let tx = Math.floor(mHX / TILE); tx <= Math.floor((mHX + mHW - 1) / TILE); tx++) {
+          const tk = tx * 100000 + ty;
+          if (this.swingTileCutSet.has(tk)) continue;
+          const t = this.world.store.get(tx, ty);
+          if (t === POT_TILE) {
+            this.swingTileCutSet.add(tk);
+            this.smashPot(tx, ty);
+          } else if ((TILE_CUT.has(t) || (goldFireNetCut && BONUS_CUT_TILES.has(t)))
+            && !(shouldIgnore?.has(t))) {
+            this.swingTileCutSet.add(tk);
+            this.breakTile(tx, ty);
+          }
         }
       }
     }
-    // 矩形-AABB 相交判定（原版 ItemCheck_MeleeHitNPCs 的 npc.getRect().Intersects(itemRectangle)）
+    // 矩形-AABB 相交判定（原版 ItemCheck_MeleeHitNPCs 的 npc.getRect().Intersects(
+    // itemRectangle)）——★[N6] 两侧 intRect 截断（:44631/:45089 同式）
     const prog = 1 - pAnim;
     // 法杖系 noMelee=true 已在入口门整体跳过（含 CutTiles——原版 noMelee 连
     // GetMeleeHitbox 都不进，cs:42964；此前的 magic 后置 return 只挡实体不挡砍草）
     const hitRect = (ex: number, ey: number, ew: number, eh: number) =>
-      ex < bx + bw && ex + ew > bx && ey < by + bh && ey + eh > by;
+      rectIntersects(intRect(ex, ey, ew, eh), { x: mHX, y: mHY, w: mHW, h: mHH });
     // ---- ★近战任务B 火之大剑 Fiery Greatsword（游戏内名 Volcano,type 121）挥击路径
     //      延长臂双探针 [★勘误 J1：历史注误标"星怒 Starfury"——真星怒=65
     //      (ItemID.cs:1676)，本物=121 FieryGreatsword(ItemID.cs:1788,贴图 70×70)，
@@ -21258,31 +21878,51 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         { x: swingLocX, y: swingLocY },
         p.facing === 1 ? rotLocal : -rotLocal,
         p.facing,
-        this.player.equipStats.meleeScaleGlove && swingCombat?.melee ? 1.1 : 1);
+        this.player.equipStats.meleeScaleGlove && swingCombat?.melee ? 1.1 : 1,
+        // ★[N1] RESOLVED：RotatedRelativePoint 三面全量接线——gfxOffY 取 Player 实值
+        // （Player.ts:565/:5683 挂绳跳变置位、:5693 衰减，非恒 0）、pivot Bottom+
+        // gfxOffY（:4070）、num2=floor(mount.PlayerOffset/2)+4（:4071，矿车 8/10、
+        // vanilla-mounts.json playerYOffsets 帧经 anchorPlayerOffset）、fullRotation
+        // =anchorFullRotation（矿车 TrackRotation/坐骑 Hover 机身倾斜）。此前按 0
+        // 近似的 [N1] 登记废除：探针锚=player.rotatedRelativePoint 同构式
+        {
+          bottomX: p.x + p.w / 2,
+          bottomY: p.y + p.h,
+          fullRotation: (p as unknown as { anchorFullRotation?: number }).anchorFullRotation ?? 0,
+          gfxOffY: p.gfxOffY,
+          mountPlayerOffset: playerOffNow,
+        });
     }
     // 小动物：网 → 捕捉（ItemCheck_CatchCritters :45083-45113 纯矩形相交，无视线
-    // 门——原版隔墙也可捕）；其余挥击一击致死走 ProcessHitAgainstNPC 视线门
-    // （CanHit(nPC)）→ 隔实心块打不到
+    // 门、无冷却门——catch 原文本就不进 ItemCheck_MeleeHitNPCs 循环）；其余挥击
+    // 一击致死走 ItemCheck_MeleeHitNPCs→ProcessHitAgainstNPC 全套：三重门
+    // （nPC.immune[whoAmI]==0 && CanHitNPCWithMeleeHit && attackCD<=0，:44598）+
+    // 视线门 CanHit(nPC)（隔实心块打不到）
     for (const cent of this.entities.critters) {
       const c = cent as Enemy;
       if (this.swingHitSet.has(c.id)) continue;
-      if (hitRect(c.x, c.y, c.w, c.h)) {
-        if (isNet) {
-          // ★F4 不预占 swingHitSet：木网熔岩饵料支拒捕自伤后须逐帧重入（原版
-          //  ItemCheck_CatchCritters 挥击窗内每帧重扫,Hurt 无效帧内返回 0 不加
-          //  buff、不捕不放）——由 damagePlayer 内部无敌帧门承担重试节流
-          this.netCatchCritter(c);
-        } else if ((c as unknown as { noTileCollide?: boolean }).noTileCollide
-          || this.meleeCanHitLOS(c.x, c.y, c.w, c.h)) {
-          this.swingHitSet.add(c.id);
-          (c as unknown as import('../entities/projTargets').CritterLike).hurt(this);
-        }
+      if (!hitRect(c.x, c.y, c.w, c.h)) continue;
+      if (isNet) {
+        // ★F4 不预占 swingHitSet：木网熔岩饵料支拒捕自伤后须逐帧重入（原版
+        //  ItemCheck_CatchCritters 挥击窗内每帧重扫,Hurt 无效帧内返回 0 不加
+        //  buff、不捕不放）——由 WrongBugNet 桶承担节流（hurtCooldownBuckets）
+        this.netCatchCritter(c);
+      } else if (this.meleeAttackCd <= 0 && this.meleeNpcImmuneGateOf(c.id)
+        && (this.meleeNpcCd.get(c.id) ?? 0) <= 0
+        && ((c as unknown as { noTileCollide?: boolean }).noTileCollide
+          || this.meleeCanHitLOS(c.x, c.y, c.w, c.h))) {
+        this.swingHitSet.add(c.id);
+        (c as unknown as import('../entities/projTargets').CritterLike).hurt(this);
+        // :44779/:44784 —— 小动物处刑同走命中尾两写面
+        this.meleeNpcCd.set(c.id, Math.max(1, Math.trunc(this.swing?.t ?? 0)));
+        this.meleeAttackCd = Math.max(1, Math.trunc((this.swing?.dur ?? 0) * 0.33));
       }
     }
     if (isNet) return;   // 网不砍草不打怪（金/防火网的 cutExtraTiles 登记近似省略）
     // 城镇 NPC:巫毒窄门(原版 ApplyItemToNPC/Damage_PVE_Inner :11970-11972——
     // 向导 22 需装备向导巫毒娃娃 267、裁缝师 54 需裁缝娃 1307,其余免疫玩家近战);
-    // 同一挥击只中一次(swingHitSet 按 Entity.id 去重)
+    // 同一挥击只中一次(swingHitSet 按 Entity.id 去重)。★任务②：城镇 NPC 同在
+    // Main.npc 桶 ⇒ 近战命中走同一三重门（immune/meleeNpcCd/attackCD :44598）
     for (const nent of this.entities.npcs) {
       const tn = nent as TownNPC;
       if (!(tn instanceof TownNPC) || tn.dead || tn.bound) continue;
@@ -21291,21 +21931,42 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const doll = tn.vanillaId === 22 ? eq.killGuide : tn.vanillaId === 54 ? eq.killClothier : false;
       // 1457: friendly 门豁免 FlyMeal（ProcessHitAgainstNPC :44627 `!nPC.isLikeATownNPC
       // || sItem.type != 5129 && sItem.type != 3351`——苍蝇美食可打 likeATownNPC 族;
-      // 3351 为 1457 新弱版未移植。本仓 likeATownNPC 面 = TownNPC 实体）
+      // ★R2-06③：3351 税官杖为 :44628 第三豁免（`sItem.type != 3351`），isLikeATownNPC
+      // 目标 damage 钉 1（:44647-448 `if (isLikeATownNPC && type==3351) damage=1;`）。
       const heldVidFly = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1;
       const isFlyMeal = heldVidFly === 5129;
+      const isStickOfDoom = heldVidFly === 3351;
       // 视线门（ProcessHitAgainstNPC friendly 支同样过 CanHit(nPC)，1457 :44641）：
-      // 巫毒击杀/苍蝇美食隔实心块打不出；noTileCollide 豁免同原版式
-      if ((!doll && !isFlyMeal) || !hitRect(tn.x, tn.y, tn.w, tn.h)
+      // 巫毒击杀/苍蝇美食隔实心块打不出；noTileCollide 豁免同原版式。
+      // ★任务② 三重门前置（:44598）：immune/meleeNpcCd/attackCD 任一不过即跳过
+      if (!(this.meleeAttackCd <= 0 && this.meleeNpcImmuneGateOf(tn.id)
+        && (this.meleeNpcCd.get(tn.id) ?? 0) <= 0)) continue;
+      if ((!doll && !isFlyMeal && !isStickOfDoom) || !hitRect(tn.x, tn.y, tn.w, tn.h)
         || (!(tn as unknown as { noTileCollide?: boolean }).noTileCollide
           && !this.meleeCanHitLOS(tn.x, tn.y, tn.w, tn.h))) continue;
       this.swingHitSet.add(tn.id);
-      const swBase = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
-        * this.player.damageMult('melee')); // ⑥ pen 移 hit 时（挥击处传）
+      // ★ζ-L1（终局扫尾批 A1 城镇近战暴击接线）：ProcessHitAgainstNPC :44651-57
+      // 同构掷骰——城镇 NPC 与敌怪同在 Main.npc 桶走同一管线，此前敌怪循环有
+      // crit 链而本分支漏掷。位次 = 判定 flag 后、伤害乘区（FlyMeal×2 / Nano
+      // /DamageVar）前；阈值 = GetWeaponCrit(melee) 终值链（基础4 + 玩家装备/
+      // 药水食物面 critChance('melee') + 武器 item.crit 数据面，与敌怪循环同式）。
+      // TimerCrit 消费（:44656 Rectangle.Intersect(itemRectangle, npcRect)）一并接：
+      // 蓄能暴击对城镇 NPC 命中同判同消费。接收端 = TownNPC.hurt 第 7 形参 crit
+      // （ζ 已建：防后 ×2，StrikeNPC_Inner NPC.cs:82067 口径——见 hurt 内 F6 注）。
+      let tnCrit = Math.random() < 0.04 + this.player.critChance('melee') / 100
+        + (itemCombat(heldVidFly)?.crit ?? 0) / 100;
+      if (this.player.tryConsumingTimerCrit(this,
+        Math.max(mHX, Math.trunc(tn.x)), Math.max(mHY, Math.trunc(tn.y)),
+        Math.min(mHX + mHW, Math.trunc(tn.x) + tn.w) - Math.max(mHX, Math.trunc(tn.x)),
+        Math.min(mHY + mHH, Math.trunc(tn.y) + tn.h) - Math.max(mHY, Math.trunc(tn.y)))) tnCrit = true;
+      // ★R2-06③：likeATownNPC × 3351 → damage=1（乘区链前的钉值，原位 :44647-448）
+      const swBase = isStickOfDoom ? 1
+        : ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
+          * this.player.damageMult('melee')); // ⑥ pen 移 hit 时（挥击处传）
       let swDmg = Math.max(1, Math.round(swBase * (1 + (Math.random() * 30 - 15) / 100)));
       // 1457: FlyMeal 打 likeATownNPC ×2、type 18（护士,Nurse——17=商人 Merchant/
       // 22=向导 Guide;批 1 注释误标"商人",review D6 勘误）再 ×2 = ×4（:44700-44708）。
-      // armorPenetrationPercent=1f 未接（TownNPC.hurt 无 pen 参,登记）
+      // armorPenetrationPercent=1f 未接——待 GB 侧 TownNPC.hurt 扩参后接线（见下锚）
       if (isFlyMeal) {
         swDmg *= 2;
         if (tn.vanillaId === 18) swDmg *= 2;
@@ -21315,16 +21976,40 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // `(int)(num3 × GetNanoFlaskDamageBoost())`,meleeEnchant==6）——曾乘在
       // ±15% 方差前,±1 舍入差。对城镇 NPC 命中同乘
       if (this.player.buffs.has(BuffType.ImbueNano)) swDmg = Math.trunc(swDmg * 1.05);
-      tn.hurt(swDmg, (Math.sign(tn.cx - p.cx) || this.player.facing) * 2, 0, this);
+      // ★C2 pen 缝线收口（1457 Player.cs:44765 原位）：
+      //   num3 += nPC.checkArmorPenetration(GetArmorPenetration(melee), armorPenetrationPercent)
+      // pct = FlyMeal(5129) × isLikeATownNPC → 1f（:44699-44703，仅该支置位，巫毒支恒 0f）；
+      // flat = GetArmorPenetration(melee)（玩家近战穿甲池——与敌怪侧命中同一取值链
+      // :21618/e.hurt(armorPen) 同源：equipStats.armorPen + meleeArmorPen）
+      // ★R2-06③：3351 打目标除 488 靶台外（城镇 NPC 同在 Main.npc 桶——同一
+      // ProcessHitAgainstNPC 流 :44707-44723 也给铜币）铜币 RequestNewItem 面。
+      if (isStickOfDoom && tn.vanillaId !== 488 && tn.maxHp > 5) {
+        const vxx = Math.fround((2 + Math.random() * 2) * p.facing);
+        const vyy = Math.fround(-2 - Math.random() * 2);
+        this.spawnDrop(
+          Math.trunc(tn.x) + Math.floor(Math.random() * tn.w),
+          Math.trunc(tn.y) + Math.floor(Math.random() * tn.h),
+          VANILLA_ITEM_KEY_BY_ID[71] ?? 'vi_71', 1 + luckRollBadLuck(this.player.luck ?? 0, 25),
+          vxx, vyy);
+      }
+      tn.hurt(swDmg, (Math.sign(tn.cx - p.cx) || this.player.facing) * 2, 0, this,
+        isFlyMeal ? 1 : 0,
+        this.player.equipStats.armorPen + this.player.meleeArmorPen,
+        tnCrit);   // ★ζ-L1：暴击位进 StrikeNPC_Inner 防后 ×2（TownNPC.hurt F6 注）
+      // :44779/:44784 —— 城镇 NPC 受理命中同写双冷却面
+      this.meleeNpcCd.set(tn.id, Math.max(1, Math.trunc(this.swing?.t ?? 0)));
+      this.meleeAttackCd = Math.max(1, Math.trunc((this.swing?.dur ?? 0) * 0.33));
     }
     for (const ent of this.entities.enemies) {
       const e = ent as Enemy;
-      // ★近战任务A 冷却门（ItemCheck_MeleeHitNPCs 循环门 :44549-44551 / 1456 :43576：
-      //  nPC.immune[whoAmI]==0 与 CanHitNPCWithMeleeHit(i)、attackCD<=0。immune 面
-      //  本仓未建模=登记；attackCD 全循环拦截,电水母反噬后连普通命中也冻结至过期）。
-      //  原版该门覆盖全部 Main.npc 桶,本仓仅敌怪桶挂门（netCatch/town/PvP 未挂,
-      //  leftovers 登记）
-      if (this.meleeAttackCd > 0) continue;
+      // ★任务② 三桶统一循环门（ItemCheck_MeleeHitNPCs 循环门 Player.cs:44598：
+      //  nPC.immune[whoAmI]==0 && CanHitNPCWithMeleeHit(i)=meleeNPCHitCooldown[i]<=0
+      //  （:44583-44585）&& attackCD<=0）。原版该门覆盖全部 Main.npc 桶——本批起
+      //  enemies/critters/townNPC 三命中循环同挂此链；反噬写入 :44611/:44612、
+      //  普通命中尾写入 :44779/:44784（见下），PvP 只写不消费（:44494）
+      if (!(this.meleeNpcImmuneGateOf(e.id)
+        && (this.meleeNpcCd.get(e.id) ?? 0) <= 0
+        && this.meleeAttackCd <= 0)) continue;
       // ★★★任务A 充能电水母反噬（ProcessHitAgainstNPC 开头双支 :44617-44625 /
       //  1456 :43597-43603）。★F1 翻案重构（2026-08-30 蓝队）：原文外层门 =
       //  `if (nPC.dontTakeDamage || !CanNPCBeHitByPlayerOrPlayerProjectile(nPC))`
@@ -21338,11 +22023,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  命中与否都必须 continue：原版 if/else 里窄门目标绝不进伤害路径
       if (e.dontTakeDamage === true || !this.canNpcBeHitByPlayerMelee(e)) {
         if ((e.vanillaId != null) && ZAPPING_JELLYFISH.has(e.vanillaId)) {
-          // 三重门（:44620）：itemRectangle.Intersects(nPC.Hitbox) &&
-          // (nPC.noTileCollide || CanHit(nPC)) —— LOS 门与下方主门同式；
-          // 另过 CanHitNPCWithMeleeHit 冷却面（:44583 外层门/写入自反噬本体）
-          if ((this.meleeNpcCd.get(e.id) ?? 0) <= 0
-            && hitRect(e.x, e.y, e.w, e.h)
+          // 双门（:44620）：itemRectangle.Intersects(nPC.Hitbox) &&
+          // (nPC.noTileCollide || CanHit(nPC)) —— CanHitNPCWithMeleeHit/attackCD 面
+          // 已由上方统一循环门消费（vanilla 反噬支同样只在 ：44598 门通过后可达）
+          if (hitRect(e.x, e.y, e.w, e.h)
             && ((e as unknown as { noTileCollide?: boolean }).noTileCollide
               || this.meleeCanHitLOS(e.x, e.y, e.w, e.h))) {
             this.takeDamageFromJellyfish(e);
@@ -21362,20 +22046,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★★★任务B 火之大剑(Volcano,type121)延长臂主路径（type==121 支：1457 :44634-44639 /
       //  1456 :43612-43617。★J1 勘误:历史注误标"星怒",真星怒=65,本物=121——
       //  见 SwingPathMath.ts 头勘误;行为门 swingVid===121 与原版同一物品无需动）：
-      //  ★[N2] 登记（红队 R3 2026-08-30）：原版敌盒为 Rectangle((int)nPC.position.X/
-      //  Y,…)(:44631 整数截断)，本仓直传浮点实体盒→亚像素边界差登记接受；
+      //  ★[N2] RESOLVED（2026-08-31 对齐批）：原版敌盒 = Rectangle((int)nPC.position.X/
+      //  Y,…)(:44631 整数截断)，本仓经 intRect 截断后传入测距——亚像素登记差废除；
       //  两条 GetPointOnSwungItemPath(70,70,{0,0.9},scale) 探针连线对命中盒取
-      //  Utils.LineRectangleDistance ≤16f（纯几何移植 SwingPathMath,非中心距近似）。
-      //  ★★★J2 窗口语候已落地（此前按 flag|flag2 主路径落地系欠账,本轮翻案补齐）：
-      //  `flag = (!_spawnVolcanoExplosion) ? (flag | flag2) : flag2`(:44639 /
-      //  1456 :43617)——_spawnVolcanoExplosion 于 type121 起手置位（:2883 声明/
-      //  :43809-43812），窗口期(首杀未发生前)**纯探针支**:盒相交一律拒收;首个
-      //  受理命中消费窗口(消费点见下方 Volcano_TrySpawningVolcano 镜像),其后回并集。
-      //  消费门 = HittableForOnHitRewards(NPC.cs:91152 !(CountsAsACritter||immortal))
-      //  → 对小动物/不朽体命中不消耗窗口。proj 978 星坠弹本体仍未移植(登记),
-      //  仅旗面/判定语义对齐。
+      //  Utils.LineRectangleDistance ≤16f（纯几何移植 SwingPathMath）。
+      //  ★★★J2 窗口语候（`flag = !_spawnVolcanoExplosion ? (flag|flag2) : flag2`
+      //  :44639 / 1456 :43617）——_spawnVolcanoExplosion 于 type121 起手置位
+      //  （:2883/:43809-43812），窗口期**纯探针支**:盒相交一律拒收;首个受理命中
+      //  消费窗口（见下方 Volcano_TrySpawningVolcano 镜像点，978 弹已随本批移植），
+      //  其后回并集。消费门 = HittableForOnHitRewards
+      //  （NPC.cs:91152 !(CountsAsACritter||immortal))——对小动物/不朽体不消耗窗口。
       const probeHit = sfA !== null && sfB !== null
-        && lineRectangleDistance({ x: e.x, y: e.y, w: e.w, h: e.h }, sfA!, sfB!) <= 16;
+        && lineRectangleDistance(intRect(e.x, e.y, e.w, e.h), sfA!, sfB!) <= 16;
       let hitFlag = this.swing?.volcanoWindow === true ? probeHit : boxHit || probeHit;
       if (!hitFlag) continue;
       // ★1457 视线门（ProcessHitAgainstNPC :44641 `!flag || (!nPC.noTileCollide &&
@@ -21392,23 +22074,142 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         + (itemCombat(this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1)?.crit ?? 0) / 100;
       // 1457 蓄能暴击 6170（TryConsumingTimerCrit :28564-28595,近战命中调用点
       // :44657 ItemCheck）：满蓄(≥1000)/负冷却窗(<0) → 强制暴击并消费(−15)。
-      // 传入盒 = itemRectangle∩npcRect（:44656 Rectangle.Intersect——仅粒子定位面）
+      // 传入盒 = itemRectangle∩npcRect（:44656 Rectangle.Intersect——仅粒子定位面；
+      // ★[N6] 两矩形皆 int 域，交集坐标按截断盒计算）
       if (this.player.tryConsumingTimerCrit(this,
-        Math.max(bx, e.x), Math.max(by, e.y),
-        Math.min(bx + bw, e.x + e.w) - Math.max(bx, e.x),
-        Math.min(by + bh, e.y + e.h) - Math.max(by, e.y))) crit = true;
+        Math.max(mHX, Math.trunc(e.x)), Math.max(mHY, Math.trunc(e.y)),
+        Math.min(mHX + mHW, Math.trunc(e.x) + e.w) - Math.max(mHX, Math.trunc(e.x)),
+        Math.min(mHY + mHH, Math.trunc(e.y) + e.h) - Math.max(mHY, Math.trunc(e.y)))) crit = true;
       // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急；
       // vi_ 数据驱动近战武器优先取挥击时缓存的 combat 表伤害/击退（swing.dmg/kb）；
       // 装备全系伤害乘区（徽章/险恶词缀等，ApplyEquipFunctional dmgMelee 段）。
-      const baseDmg = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
+      // origDmg ≡ ProcessHitAgainstNPC 的 originalDamage 形参（骨弹出生面消费它，
+      // Player.cs:44752 `(int)(originalDamage*0.75)`——吃链上乘区之前的值）。
+      const origDmg = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
         * this.player.damageMult('melee')); // ⑥ pen 移 hit 时（挥击处传）
-      this.player.onMeleeHit(); // 甲虫进攻套蓄能（命中结算前计数无碍）
-      // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
-      let dmg = Math.max(1, Math.round(baseDmg * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
+      // ---- ★R2-01 ApplyRapidAttackBonus（Player.cs:44646：一切命中链乘区之前；
+      //      increaseBonus=!nPC.immortal——不朽体不蓄能但本击已生效加成照吃）----
+      const pRapid = this.player as unknown as { __swRapid?: RapidBonusState };
+      if (!pRapid.__swRapid) pRapid.__swRapid = newRapidBonusState();
+      let chainDmg = applyRapidAttackBonus(pRapid.__swRapid!, origDmg, swingVid,
+        (e as unknown as { immortal?: boolean }).immortal !== true);
+      // ---- ★R2-07(a) GetBannerBuffEffect 攻端乘区（:44658-61 →
+      //   damage=(int)(damage×effect.DamageDealt.Sample(Main.Difficulty))）：
+      //   BannerStrength 普通族 BannerEffect(1f)：DamageDealt 曲线 keys
+      //   {Classic:1.5, Expert:2}（ItemID.cs:23-31）；DD2 族 itemId 3837-3846 →
+      //   BannerEffect(0.2)：keys{1.1,1.2}；Sample=分段线性+越尾键外推。
+      if (e.vanillaId != null && this.bannerNpcActive(e.vanillaId)) {
+        const bItem = bannerItemId(bannerOfNpc(e.vanillaId));
+        if (bItem > 0) {
+          chainDmg = Math.trunc(chainDmg * bannerDamageDealtSample(bItem, mainDifficulty(this.world)));
+        }
+      }
+      // ---- ★R2-07(b) parryDamageBuff ×5 + 清 buff198（:44662-63；
+      //      Projectile.cs:13634 弹幕面同式。授予点 = 盾反成功 AddBuff(198,300)
+      //      （Player.cs:31668）——接触反伤区属并行领地，授予接线见移交条目
+      //      R2-H2；buff198 枚举未建模故 ClearBuff 侧由授予点按 buff 链消费，
+      //      本端只负责旗位翻转 ----
+      {
+        const pp = this.player as unknown as
+          { parryDamageBuff?: boolean; parryDamageBuffT?: number };
+        if (pp.parryDamageBuff === true && swingCombat?.melee !== false) {
+          chainDmg *= 5;
+          pp.parryDamageBuff = false;                // parryDamageBuff=false
+          pp.parryDamageBuffT = 0;                   // ClearBuff(198)（倒计时承载清零）
+        }
+      }
+      // ---- ★R2-07(c) Breaker Blade 426（:44664-66：nPC.life ≥ lifeMax×0.9 → ×2.5）----
+      if (swingVid === 426 && e.hp >= e.maxHp * 0.9) {
+        chainDmg = Math.trunc(chainDmg * 2.5);
+      }
+      // ---- ★R2-07(d) Ham Bat 5096（:44667-79：target 三 buff 层位 {26,206,207}
+      //      取最高档 num → ×(1+0.05·num)）。victim 侧 buff 26/206/207 施加面未在
+      //      本仓 NPC 域建模（FindBuffIndex 桥读 __swBuffIds——施加点接入即生效）----
+      if (swingVid === 5096) {
+        const vb = e as unknown as { __swBuffIds?: Set<number> };
+        let hbNum = 0;
+        if (vb.__swBuffIds?.has(26)) hbNum = 1;
+        if (vb.__swBuffIds?.has(206)) hbNum = 2;
+        if (vb.__swBuffIds?.has(207)) hbNum = 3;
+        chainDmg = Math.trunc(chainDmg * (1 + 0.05 * hbNum));
+      }
+      // ---- ★R2-07(e) Keybrand 671（:44680-82 → NPC.KeyBrandStrike NPC.cs:81998-82012：
+      //      t=life/lifeMax、GetLerpValue(1f,0.1f,t,true)→num、dmg=(int)(dmg*(1+num))、
+      //      Keybrand 编排走既有注册口径（syncModules.ts 注册近似注）本批不另造视觉）----
+      if (swingVid === 671) {
+        const tK = e.hp / e.maxHp;
+        let lv = (tK - 1) / (0.1 - 1);
+        lv = Math.min(1, Math.max(0, lv));
+        chainDmg = Math.trunc(chainDmg * (1 + lv));
+      }
+      // ---- ★焰爆石 6178 位次归位（原位 Player.cs:44684-44697 accPyroclast →
+      //      TryMakingSnappingStoneStrike kind 1：45×近战伤/300px/2 目标弹 1131+323；
+      //      共用 360t 冷却，见 stats/SnapStrike）—— vanilla 在【DamageVar 之前】，
+      //      此前被排在 e.hurt 之后，A5 批一并搬回此位 ----
+      trySnapStrike(this, this.player, 1, e.cx, e.cy, e.id);
+      // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）。dmgRandomized =
+      // DamageVar 后的 num3（不含 crit 翻倍——ApplyNPCOnHitEffects 的 bees/muramasa
+      // 支按 dmgRandomized/2 取值，Player.cs:44762 传参序 :44893/:44879）。
+      const varMul = 1 + (Math.random() * 30 - 15) / 100;
+      const dmgRandomized = Math.max(1, Math.round(chainDmg * varMul));
+      let dmg = Math.max(1, Math.round(dmgRandomized * (crit ? 2 : 1)));
       // D8（1457 :44760-44764）：Nano 灌注 ×1.05（meleeEnchant==6 →
       // GetNanoFlaskDamageBoost()=1.05）乘在 DamageVar【后】——曾乘在方差前,±1 舍入差
       if (this.player.buffs.has(BuffType.ImbueNano)) dmg = Math.trunc(dmg * 1.05);
       const kdir = Math.sign(e.cx - p.cx) || this.player.facing;
+      // ★R2-06③ TaxCollector's Stick of Doom 3351（Player.cs:44707-44723，除 488
+      // 靶台外全 NPC 受击面）：铜币 RequestNewItem(71, stack=1+RollBadLuck(25)) 于
+      // 目标盒内随机点、velocity=((2+NextFloat×2)×direction, −2−NextFloat×2)；
+      // ClassyCane 编排走既有注册口径（syncModules.ts 注册近似注）。593 老者专杖。
+      if (swingVid === 3351 && e.vanillaId !== 488 && e.maxHp > 5) {
+        const vxx = Math.fround((2 + Math.random() * 2) * p.facing);
+        const vyy = Math.fround(-2 - Math.random() * 2);
+        this.spawnDrop(
+          Math.trunc(e.x) + Math.floor(Math.random() * e.w),
+          Math.trunc(e.y) + Math.floor(Math.random() * e.h),
+          VANILLA_ITEM_KEY_BY_ID[71] ?? 'vi_71', 1 + luckRollBadLuck(this.player.luck ?? 0, 25),
+          vxx, vyy);
+      }
+      // ================= ★α-H6（终局扫尾批 A5）StatusToNPC 位次搬前 =================
+      // 原版浸剂/debuff 施加 = StatusToNPC(sItem.type, npcIndex)（Player.cs:6499 起，
+      // 调用位 :44755）在【StrikeNPC :44773 之前】；本仓此前排在 e.hurt 之后。这不
+      // 是纯"观察面"差异，有实值反例（声称 max 合并等效被证伪）：
+      //   NPC.checkArmorPenetration（NPC.cs:81972-81980）读 npc.ichor/brokenArmor/
+      //   betsysCurse 算穿甲池，而命中链 num3 += checkArmorPenetration 在 StatusToNPC
+      //   之后执行（:44765）⇒ 原版【首轮】命中就吃 ichor(+15) 池加成——池>0 时
+      //   截断加成差 ≥ trunc(min(pool+15,def)/2 − min(pool,def)/2)，最高 +7/击。
+      //   反例场景：异速双击（长浸剂先置满池不再显差）之外的一切首击/单发；
+      //   时长计算（Next(a,b) 掷）与 max 合并语义本身两序等价,唯 debuff→strike
+      //   同拍消费面（穿甲池/HamBat 读 __swBuffIds 在 vanilla 本就在施加前,不受扰）
+      //   构成真分歧 ⇒ 按原文搬前。
+      // 冰霜盔甲引擎（StatusToNPC frostBurn 支 :6537-6540）/岩浆石·火焰护手
+      // （:6541-6546）/催化指环（:6533-6536）/持械武器专属表——全部同函数域一并搬前。
+      // （挥砍侧 applyMagmaStoneSwing 的时长掷公式保持 :6184-6198 三段掷不变）
+      {
+        const heldVidStatus = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1;
+        if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
+        if (this.player.buffs.has(BuffType.ImbueCursed)) e.cursedT = Math.max(e.cursedT, 3 + Math.random() * 4);
+        if (this.player.buffs.has(BuffType.ImbueFire)) {
+          e.onFireT = Math.max(e.onFireT, 3 + Math.random() * 4);
+          // ★1457 火浸剂伴发 PotentAcid(meleeEnchant==1 → AddBuff(395, 60t))
+          e.potentAcidT = Math.max(e.potentAcidT ?? 0, 1);
+        }
+        if (this.player.buffs.has(BuffType.ImbueGold)) e.midasT = 2;
+        if (this.player.buffs.has(BuffType.ImbueIchor)) e.ichorT = Math.max(e.ichorT, 10 + Math.random() * 10);
+        if (this.player.buffs.has(BuffType.ImbueNano)) e.confusedT = Math.max(e.confusedT, 1 + Math.random() * 3);
+        if (this.player.buffs.has(BuffType.ImbuePoison)) e.poisonT = Math.max(e.poisonT, 5 + Math.random() * 5);
+        // 冰霜盔甲引擎(melee 挥砍门,StatusNPC :93712-93716 → Frostburn2 5-14s)
+        applyFrostBurn(this.player.equipStats.frostBurn, e as unknown as Record<string, number>);
+        // 岩浆石/火焰护手（Player.cs:6184-6198 三段掷：1/4→6s / 3/8→4s / 3/8→1s OnFire3）
+        applyMagmaStoneSwing(this.player.equipStats.magmaStone, e as unknown as Record<string, number>);
+        // 持械武器专属 StatusNPC 表（Player.StatusToNPC type 分支——2330/3352/3211/
+        // 5129 + switch 121/3823/5382/122/190/217/1123）
+        applyWeaponStatusSwing(heldVidStatus, e as unknown as Record<string, number>);
+        // 催化指环 6185（Player 侧 StatusNPC :6534-6537）：近战命中 398 300t
+        if (this.player.equipStats.catalystBand) {
+          e.acceleratePoisonsT = Math.max(e.acceleratePoisonsT ?? 0, 5);
+        }
+      }
       // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
       // 力量手套族 kbGlove 近战击退翻倍
       // ★1457 变态刀 3106 潜行击退（Player.cs:44013-44016 `knockBack += knockBack *
@@ -21417,67 +22218,243 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1) // 0.65 自造已摘（glove×2/Titan×1.5=P:52477-52498）
         * (swingVid === 3106 ? 1 + (1 - this.player.stealth) : 1);
       const killed = e.hurt(dmg, kdir * kb, 0, this, this.player.equipStats.armorPen + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165);音/飘值=StrikeNPC 单点
-      // ★J2 Volcano_TrySpawningVolcano（:44498-44506；ApplyNPCOnHitEffects 内调用点
-      //  :44850-44854——受理命中即消费 _spawnVolcanoExplosion=false,首个受理命中
-      //  "先到先清"此后同帧余敌恢复并集判）。消费门 = HittableForOnHitRewards
-      //  （NPC.cs:91152 `!(CountsAsACritter || immortal)`）;门内原版另 NewProjectile
-      //  978 星坠（未移植,见上方窗口注登记）。
-      if (this.swing?.volcanoWindow === true && !e.def.critter
-        && (e as unknown as { immortal?: boolean }).immortal !== true) {
+      // ================= ★R2-07(g) ApplyNPCOnHitEffects 五条 spawn 面 + 蓄能位
+      // （Player.cs:44809-44906——受理命中【后】镜像区，依原文顺序排布；
+      //   damage/knockBack/dmgRandomized 形参 = chainDmg / kb / dmgRandomized）=================
+      {
+        const flagImmortal = (e as unknown as { immortal?: boolean }).immortal === true;
+        // —— Bladetongue 3211（:44826-44836）：vector = (dir×100+Next(-25,26),
+        //    Next(-75,76)) 归一化 × Next(30,41)×0.1；出生点 = (判定盒随机点 +
+        //    目标 Center×2)/3；弹 524 血舌球 (int)(damage×0.5)、kb×0.7（无 immortal 门）----
+        if (swingVid === 3211) {
+          const gxRaw = p.facing * 100 + Math.floor(Math.random() * 51) - 25;
+          const gyRaw = Math.floor(Math.random() * 152) - 75;
+          const glen = Math.hypot(gxRaw, gyRaw);
+          const speedMul = Math.floor(Math.random() * 11 + 30) * 0.1;
+          const gvx = glen > 0 ? Math.fround((gxRaw / glen) * speedMul) : 0;
+          const gvy = glen > 0 ? Math.fround((gyRaw / glen) * speedMul) : 0;
+          const sxp = mHX + Math.floor(Math.random() * mHW);
+          const syp = mHY + Math.floor(Math.random() * mHH);
+          const glob = new BladetongueGlobProj(
+            Math.fround((sxp + e.cx * 2) / 3), Math.fround((syp + e.cy * 2) / 3),
+            gvx, gvy,
+            Math.max(1, Math.trunc(chainDmg * 0.5)), kb * 0.7);
+          glob.critChanceFn = (): number => Math.min(1, 0.04 + this.player.critChance('melee') / 100);
+          glob.armorPenInject = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+          this.entities.add(glob, 'projectiles');
+        }
+        // —— 甲虫攻套实扣加账（:44840-44 `beetleOffense & !immortal →
+        //    beetleCounter += dmgDone; beetleCountdown = 0`。dmgDone = StrikeNPC
+        //    返回 = Enemy.lastStrikeDealt；旧 onMeleeHit 时间蓄能调用点就此退役）----
+        {
+          const pm = this.player as unknown as { __swBeetle?: BeetleMeter };
+          pm.__swBeetle?.registerHit(
+            (e as unknown as { lastStrikeDealt?: number }).lastStrikeDealt ?? 0,
+            this.player.equipStats.beetleOff === true && !flagImmortal);
+        }
+        // —— 派对浸剂 confetti（:44847-449 meleeEnchant==7 → NewProjectile(289)
+        //    at npc.Center、速度=目标速度；曾以彩色粒子近似，升格真弹实体）----
+        if (this.player.buffs.has(BuffType.ImbueParty)) {
+          this.entities.add(new ConfettiBurstProj(e.cx, e.cy,
+            e.vx ?? 0, e.vy ?? 0), 'projectiles');
+        }
+        // —— 变态刀 3106（:44851-44854 hit 面潜行归零；PvP 支 :44487 同式在 PvP 段）----
+        if (swingVid === 3106) this.player.stealth = 1;
+        // —— TentacleSpike 5094（TentacleSpike_TrySpiking :44509-44526 + 调用位
+        //    :44855-56）：窗口旗消费；门 = CanBeChasedBy(this)；出生点 =
+        //    敌盒最近点 ClosestPointInRect(MountedCenter)+单位向；弹速 =
+        //    (Center−该点)×0.8；弹 971 出生即钉扎态（ai0=1/ai1=target）；StatusNPC →
+        //    AddBuff(337,540)=9s 贴附层；KillOldestJavelin(cap 5) ----
+        if (swingVid === 5094 && this.swing?.tentacleSpikes === true && !flagImmortal
+          && canBeChasedBy(e)) {
+          this.swing.tentacleSpikes = false;
+          let nXx = e.cx - p.cx, nYy = e.cy - p.cy;
+          const nLen = Math.hypot(nXx, nYy);
+          if (nLen > 0) { nXx /= nLen; nYy /= nLen; }
+          const clx = Math.min(Math.max(p.cx, e.x), e.x + e.w);
+          const cly = Math.min(Math.max(p.cy, e.y), e.y + e.h);
+          const spikeVx = Math.fround((e.cx - (clx + nXx)) * 0.8);
+          const spikeVy = Math.fround((e.cy - (cly + nYy)) * 0.8);
+          const spike = new JavelinStickerProj(971, clx + nXx, cly + nYy,
+            spikeVx, spikeVy, e.id);
+          this.entities.add(spike, 'projectiles');
+          e.addStickerStack?.(337, 9);
+          killOldestJavelin(this, spike, 971, e.id, 5);
+        }
+        // —— BloodButcherer 795（BloodButcherer_TryButchering :44528-44544 +
+        //    调用位 :44857-58）：同构带旋向抖动 RotatedBy(NextFloatDirection×π×0.25)，
+        //    弹 975、buff344(540t)、KillOldestJavelin(cap 5) ----
+        if (swingVid === 795 && this.swing?.bloodButchererSpawns === true && !flagImmortal
+          && canBeChasedBy(e)) {
+          this.swing.bloodButchererSpawns = false;
+          let nXx = e.cx - p.cx, nYy = e.cy - p.cy;
+          const nLen = Math.hypot(nXx, nYy);
+          if (nLen > 0) { nXx /= nLen; nYy /= nLen; }
+          const clx = Math.min(Math.max(p.cx, e.x), e.x + e.w);
+          const cly = Math.min(Math.max(p.cy, e.y), e.y + e.h);
+          const ang = (Math.random() * 2 - 1) * Math.PI * 0.25;
+          const ca = Math.cos(ang), sa = Math.sin(ang);
+          const rbx = Math.fround((e.cx - (clx + nXx)) * 0.8);
+          const rby = Math.fround((e.cy - (cly + nYy)) * 0.8);
+          const spike = new JavelinStickerProj(975, clx + nXx, cly + nYy,
+            Math.fround(rbx * ca - rby * sa), Math.fround(rbx * sa + rby * ca), e.id);
+          this.entities.add(spike, 'projectiles');
+          e.addStickerStack?.(344, 9);
+          killOldestJavelin(this, spike, 975, e.id, 5);
+        }
+        // —— BatBat 5097（BatBat_TryLifeLeeching :44544-44551）：窗口旗 _batbatCanHeal
+        //    （起手置位 Player.cs:43803-43806）+ 受害者 HittableForOnHitRewards
+        //    + hp<max → Heal(1)。★ζ#3：旧裸读 `!e.def.critter && !immortal` 改走
+        //    统一出口谓词 projTargets.hittableForOnHitRewards（NPC.cs:91152,
+        //    含 countsAsCritterOf 桶位源）----
+        if (swingVid === 5097 && this.swing?.batbatHeal === true
+          && this.player.hp < this.player.maxHp
+          && hittableForOnHitRewards(e)) {
+          this.swing.batbatHeal = false;
+          this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
+        }
+        // —— Bee Keeper 1123（PvE 面 :44872-90 `(sItem.type == 1123) & flag`）：
+        //    count=Next(1,4)；strongBees(3333 在身) 再 1/3 补一枚；蜂向 =
+        //    ((dir×2+rand(-35,36)×0.02)×0.2, rand(-35,36)×0.02×0.2)；伤
+        //    beeDamage(dmgRandomized/3)、kb beeKB(0f)、beeType()→566/181
+        //    （Player.cs:12506-29，makeStrongBee 由 strongBees 1/2 掷驱动）。★弹
+        //    melee=true 类别通道属 Arrow 基建缺口（消费面 meleeCrit 轮/浸剂/
+        //    parry/armorPen）——移交条目 R2-H1，产生侧数值面按原文落地 ----
+        if ((swingVid === 1123) && !flagImmortal) {
+          const strongBeeOwner = accessoryVanillaIds(p).includes(3333);
+          let beeN = 1 + Math.floor(Math.random() * 3);                   // Next(1,4)=1..3
+          if (strongBeeOwner && Math.floor(Math.random() * 3) === 0) beeN++;
+          for (let bi = 0; bi < beeN; bi++) {
+            const bIsStrong = strongBeeOwner && Math.floor(Math.random() * 2) === 0;  // beeType()
+            const bType = bIsStrong ? 566 : 181;
+            const baseD = dmgRandomized / 3;
+            const bDmg = bIsStrong
+              ? baseD + 1 + Math.floor(Math.random() * 3)
+              : baseD + Math.floor(Math.random() * 2);
+            const bKb = bIsStrong ? 0.5 : 0;
+            const bvx = Math.fround((p.facing * 2 + (Math.floor(Math.random() * 71) - 35) * 0.02) * 0.2);
+            const bvy = Math.fround(((Math.floor(Math.random() * 71) - 35) * 0.02) * 0.2);
+            const bee = new Arrow(mHX + mHW / 2, mHY + mHH / 2, bvx, bvy,
+              Math.trunc(bDmg), bKb, bType, null, {});
+            // ★α-H1：蜂无类别旗（同上蜂巢案注）→ 原版不掷 crit，撤注入
+            this.entities.add(bee, 'projectiles');
+          }
+        }
+        // —— Muramasa 155（ApplyNPCOnHitEffects 尾支 :44893-44906，`& flag` +
+        //    `_spawnMuramasaCut` 窗口消费）：敌盒 Inflate(30,16) 后 Y−8 内随机点为
+        //    起，spinningpoint=(中心−随机点).SafeNormalize((direction,gravDir))×8 后
+        //    RotatedBy(π/4)，再自中心回退 15 步（num10=num9×num7、num8=10×num7）逐步
+        //    RotatedBy(−num6/30)；终态位置与速度进 NewProjectile(ai[0]=num6)；伤 =
+        //    dmgRandomized×0.5 截断、kb=0f；RNG 占位掷 NextFloat 照抄保流序 ----
+        if (((swingVid === 155) && !flagImmortal) && this.swing?.muramasaCut === true) {
+          this.swing.muramasaCut = false;
+          const deadRoll = 1 + Math.floor(Math.random() * 3);   // int num5 = Next(1,4)——原文随写 num5=1（掷保留）
+          void deadRoll;
+          const ihW = e.w + 60, ihH = e.h + 32;                 // Inflate(30,16)
+          const rpx = Math.trunc(e.x) - 30 + Math.floor(Math.random() * ihW);
+          const rpy = Math.trunc(e.y) - 30 - 8 + Math.floor(Math.random() * ihH);  // hitbox.Y -= 8
+          const vcx = e.x + e.w / 2, vcy = e.y + e.h / 2;
+          const ndx = vcx - rpx, ndy = vcy - rpy;
+          const nl = Math.hypot(ndx, ndy);
+          // SafeNormalize(Vector2(direction, gravDir))：零向量回退取原值（不归一化）
+          const nxv = nl > 0 ? ndx / nl : p.facing;
+          const nyv = nl > 0 ? ndy / nl : 1;
+          let spx = Math.fround(nxv * 8);
+          let spy = Math.fround(nyv * 8);
+          void Math.random();                                   // Main.rand.NextFloat(); 流占位掷照抄
+          let num6 = (Math.floor(Math.random() * 2) * 2 - 1)
+            * (Math.PI / 5 + Math.PI * 4 / 5 * Math.random());
+          num6 *= 0.5;
+          {
+            const rq = 0.7853981852531433;                      // RotatedBy(π/4 字面量)
+            const cq = Math.cos(rq), sq = Math.sin(rq);
+            const txq = Math.fround(spx * cq - spy * sq);
+            spy = Math.fround(spx * sq + spy * cq);
+            spx = txq;
+          }
+          {
+            const num8 = 30;                                    // num8 = 10*num7、num7=3
+            const steps = 15;                                   // num10 = num9*num7 = 5*3
+            let wx = vcx, wy = vcy;
+            for (let k = 0; k < steps; k++) {
+              wx -= spx; wy -= spy;
+              const dq = -num6 / num8;
+              const cq2 = Math.cos(dq), sq2 = Math.sin(dq);
+              const nxq = Math.fround(spx * cq2 - spy * sq2);
+              spy = Math.fround(spx * sq2 + spy * cq2);
+              spx = nxq;
+            }
+            const cut = new MuramasaSlashProj(wx, wy, spx, spy,
+              Math.max(1, Math.trunc(dmgRandomized * 0.5)), 0, num6);
+            // ★α-H1：弹 155 SetDefaults（:2855-2862 netImportant/44×44/aiStyle32/
+            // friendly）【无任何类别旗】→ 原版 Damage 不掷 crit，撤玩家近战阈值注入
+            cut.armorPenInject = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+            this.entities.add(cut, 'projectiles');
+          }
+        }
+      }
+      // ★任务⑤ Volcano_TrySpawningVolcano 全量落地（Player.cs:44496-44506；
+      // ApplyNPCOnHitEffects 内调用点 :44853——受理命中即消费 _spawnVolcanoExplosion=
+      // false,首个受理命中"先到先清"此后同帧余敌恢复并集判）。消费门 =
+      // HittableForOnHitRewards（NPC.cs:91152 `!(CountsAsACritter || immortal)`）。
+      // 门内 NewProjectile(GetProjectileSource_Item(sItem), npc.Center.X, npc.Center.Y,
+      // 0f, -1f*gravDir, 978, (int)((float)damage*0.75f), knockBack, whoAmI, 0f, 2f)
+      // （:44500-44504）：damage = ProcessHitAgainstNPC 局部 damage（★R2-01/07 起为
+      // rapid/banner/parry/breaker/hambat/keybrand 全乘区【后】的 chainDmg 同位值）
+      // ×0.75 截断；knockBack = num4 调后值（glove×2/Titan×1.5/
+      // 3106 潜行链 ≡ 主命中 kb）；出生点=受害者 center；velocity=(0,-gravDir)。
+      // 弹本体 SetDefaults/AI_189/StatusNPC(24,180) 见 entities/VolcanoBlastProj.ts。
+      // ★R2-04：暴击面改 live 注入（Strike 时点实时取玩家近战 crit；原版该 proc
+      // 不吃武器 item.crit——旧式冻结注入+武器 crit 双偏已废）。
+      // ★ζ#4：窗口消费门旧裸读 `!e.def.critter && immortal!==true` 改走统一出口
+      // 谓词 hittableForOnHitRewards（NPC.cs:91152 同式,含桶位源）。
+      if (this.swing?.volcanoWindow === true && hittableForOnHitRewards(e)) {
+        const blast = new VolcanoBlastProj(e.cx, e.cy,
+          0, -1 * (p.gravDir ?? 1),
+          Math.max(1, Math.trunc(chainDmg * 0.75)), kb, p.facing);
+        blast.critChanceFn = (): number =>
+          Math.min(1, 0.04 + this.player.critChance('melee') / 100);
+        blast.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+        this.entities.add(blast, 'projectiles');
         this.swing.volcanoWindow = false;
       }
+      // ★任务② 受理命中尾双写面（:44779 SetMeleeHitCooldown(npcIndex,itemAnimation)=
+      // 当次挥击剩余帧 + :44784 ApplyAttackCooldown()=max(1,(int)(itemAnimationMax×
+      // 0.33))——普通命中管线的两写点，此前仅反噬支有写、登记缺口就此闭合）
+      this.meleeNpcCd.set(e.id, Math.max(1, Math.trunc(this.swing?.t ?? 0)));
+      this.meleeAttackCd = Math.max(1, Math.trunc((this.swing?.dur ?? 0) * 0.33));
       // 丰盛大餐 336（OnKillNPC :20627-20630：externalKillingBlowSource is Item
       // { type: 5096 }（火腿棍）→ AddBuff(336, 420)=7s。R5-F4：近战击杀通道接线——
       // 效果端 lifeRegen+6（:19283-19287）在 Player 再生累加器）
       if (killed && swingVid === 5096) this.player.buffs.apply(BuffType.HeartyMeal, 7);
-      // 武器浸剂（meleeEnchant 表 Player.cs:11604 → 敌 debuff :6141-6171 时长 Next(a,b) 秒）
-      if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
-      if (this.player.buffs.has(BuffType.ImbueCursed)) e.cursedT = Math.max(e.cursedT, 3 + Math.random() * 4);
-      if (this.player.buffs.has(BuffType.ImbueFire)) {
-        e.onFireT = Math.max(e.onFireT, 3 + Math.random() * 4);
-        // ★1457 火浸剂伴发 PotentAcid(StatusNPC meleeEnchant==1 → AddBuff(395, 60t))
-        e.potentAcidT = Math.max(e.potentAcidT ?? 0, 1);
-      }
-      if (this.player.buffs.has(BuffType.ImbueGold)) e.midasT = 2;
-      if (this.player.buffs.has(BuffType.ImbueIchor)) e.ichorT = Math.max(e.ichorT, 10 + Math.random() * 10);
-      if (this.player.buffs.has(BuffType.ImbueNano)) e.confusedT = Math.max(e.confusedT, 1 + Math.random() * 3);
-      if (this.player.buffs.has(BuffType.ImbuePoison)) e.poisonT = Math.max(e.poisonT, 5 + Math.random() * 5);
+      // ★α-H6：武器浸剂块已搬前至 StrikeNPC 前（StatusToNPC :44755 位次,见上）——
+      // 此处旧"击后施加"面退役。
       // ★1457 骨弹换号（ProcessHitAgainstNPC :44748-44754：sItem.type==1166 骨剑/
       // 1320 骨镐 近战命中 → 75% 基伤骨弹,1456 :43732-43738 为 proj 21,1457 换
       // 1111 BoneArrow 友方款）。1457 批 C：按备案直接以 1111 落地——出生点 =
       // 挥击命中盒上半随机点（itemRectangle.Left+rand(W), Top+rand(H/2)）,
       // 速度 = (dir×(1+rand×5), −1−rand×3),伤 = originalDamage×0.75（:44751-44753）;
       // 1111 = aiStyle 2 抛物线骨弹（SetDefaults :10355-10362:16×16/scale1.2/melee）
+      // ★R2-03（蓝队二轮）：出生盒从【敌怪盒】勘误回【判定盒 itemRectangle 上半】
+      // （原文字面 `itemRectangle.Left + Next(itemRectangle.Width)`、
+      //   `Top + Next(itemRectangle.Height/2)` —— 整数采样，近战判定盒域非敌怪盒；
+      //   Next(W) 与 NextFloat 不同源：int 值 [0,W)，故 x/y 以整格抖动）。
       const heldVidBone = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1;
       if (heldVidBone === 1166 || heldVidBone === 1320) {
-        const bx = e.x + Math.random() * e.w;
-        const by = e.y + Math.random() * (e.h / 2);
-        const bone = new Arrow(bx, by,
+        const bxBone = mHX + Math.floor(Math.random() * mHW);              // Left+Next(W)
+        const byBone = mHY + Math.floor(Math.random() * (mHH / 2));         // Top+Next(H/2)
+        const bone = new Arrow(bxBone, byBone,
           kdir * (1 + Math.random() * 5), -1 - Math.random() * 3,
-          Math.max(1, Math.round(baseDmg * 0.75)), kb, 1111, null,
+          Math.max(1, Math.trunc(origDmg * 0.75)), kb, 1111, null,
           { grav: 0.3, life: 1200, pierce: 1 });
         bone.critChance = 0.04 + this.player.critChance('melee') / 100
           + (itemCombat(heldVidBone)?.crit ?? 0) / 100;
         bone.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
         this.entities.add(bone, 'projectiles');
       }
-      // 冰霜盔甲引擎(melee 挥砍门,StatusNPC :93712-93716 → Frostburn2 5-14s)
-      applyFrostBurn(this.player.equipStats.frostBurn, e as unknown as Record<string, number>);
-      // 岩浆石/火焰护手（Player.cs:6184-6198 三段掷：1/4→6s / 3/8→4s / 3/8→1s OnFire3）
-      applyMagmaStoneSwing(this.player.equipStats.magmaStone, e as unknown as Record<string, number>);
-      // 持械武器专属 StatusNPC 表（Player.StatusToNPC :6139-6249 的 type 分支——
-      // 调用点 :43739 StatusToNPC(sItem.type, npcIndex)；浸剂/冰霜/岩浆石三块已各自
-      // 实装如上,此处补 2330/3352/3211/5129 + switch 121/3823/5382/122/190/217/1123）
-      applyWeaponStatusSwing(heldVidBone, e as unknown as Record<string, number>);
-      // 焰爆石 6178（Player.cs:44694-44697 accPyroclast → TryMakingSnappingStoneStrike
-      // kind 1：45×近战伤/300px/2 目标弹 1131+323;共用 360t 冷却,见 stats/SnapStrike）
-      trySnapStrike(this, this.player, 1, e.cx, e.cy, e.id);
-      // 催化指环 6185（Player 侧 StatusNPC :6534-6537）：近战命中 398 300t
-      if (this.player.equipStats.catalystBand) {
-        e.acceleratePoisonsT = Math.max(e.acceleratePoisonsT ?? 0, 5);
-      }
       if (this.player.buffs.has(BuffType.ImbueParty)) {
-        this.spawnParticles(e.cx, e.cy, ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 });
+        // ★R2-06④：彩纸升格真弹 289（敌怪面 :44847-449 已在 ApplyNPCOnHitEffects
+        // 镜像区生成——此旧粒子行退役避免双发）
       }
       // 幸运币（Player.cs:43892-43916，近战 on-hit）：门 = NPC.value>0（雕像产怪
       // value=0，Wiring.cs:2479）&& hasLuckyCoin && rand.Next(5)==0；
@@ -21522,6 +22499,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  穿墙怪 noTileCollide 豁免三处同构（远端代理无此字段，照旧按可选动态面读）
         if (!(rp as unknown as { noTileCollide?: boolean }).noTileCollide
           && !playerCanHitEntity(this.world.store, this.player, rp)) continue;
+        // ★GA1 契约补位（近战 PvP 免疫门）：原版循环门禁串 1457 Player.cs:44429
+        //  `!player.active || !player.hostile || player.immune || player.dead || …`
+        //  含公开免疫布尔旗 player.immune 支——受害者处于免疫窗时整条命中体被
+        //  continue 挡死（StatusToPlayerPvP :44439 / Hurt :44442 / OnHit / 甲虫蓄能
+        //  一并不达；1456 :43407 同式）。victim-settles 架构下攻端读不到受害者
+        //  immune 实态，等价位 = msg16 尾段镜像 getProxyPvpImmuneRemaining(slot)
+        //  （ClientNet.decayProxyImmune 每 tick 衰减）。门插在 swingHitSet.add 之前：
+        //  免疫期接触不占同挥去重键（原版免疫期该 target 本就不进命中体），出窗后
+        //  同一挥击窗内重扫仍可受理。
+        if (this.net.getProxyPvpImmuneRemaining(slot) > 0) continue;
         this.swingHitSet.add(rpKey);
         // 命中意向：裸伤（对方端自行结算防御/endurance/无敌帧）+ 击退方向 + 凶器 id。
         // ★原版近战 PvP 暴击 = 恒 10%（:43410 Next(1,101)<=10 / 1457 :44434 同式,
@@ -21541,13 +22528,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const enchant = meleeEnchantOf(this.player.buffs);
         this.net.sendStrikePlayer(slot, rawDmg, kdir, 0, this.swing?.item ?? -1,
           (enchant << 1) | (crit ? 1 : 0));
-        // 攻击端命中后效（ItemCheck_MeleeHitPvP :43420-43457,与原版同在 Hurt 后）：
-        // ①甲虫进攻套窗口刷新（beetleCounter+=num2 :43434——本仓时间蓄能模型近似）
-        this.player.onMeleeHit();
-        // ②派对浸剂（enchant 7）彩纸（原版 spawn 弹 289——纯视觉,粒子近似,同敌怪侧）
+        // 攻击端命中后效（ItemCheck_MeleeHitPvP :43420-43457 / 1457 :44430-44494，
+        // 与原版同在 Hurt 后）：
+        // ★R2-06⑤：①甲虫攻套实扣加账（:44456-60 beetleCounter += num2、countdown=0
+        // ——被击端 Hurt 实扣在 victim-settles 架构下攻端不可知，dmgDone 记 0 等价
+        // 净账差见移交注；时间蓄能 onMeleeHit 调用退役）
+        {
+          const pm = this.player as unknown as { __swBeetle?: BeetleMeter };
+          pm.__swBeetle?.registerHit(0, this.player.equipStats.beetleOff === true);
+        }
+        // ②派对浸剂（enchant 7）彩纸升格真弹 289（:44465-44468 NewProjectile
+        //   at player.Center=远端代理位、速度=目标速度）
         if (enchant === 7) {
-          this.spawnParticles(rp.cx, rp.cy, ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)],
-            6, 2.4, { life: 40, damp: 0.96 });
+          this.entities.add(new ConfettiBurstProj(rp.cx, rp.cy,
+            rp.vx ?? 0, rp.vy ?? 0), 'projectiles');
         }
         // ③蝙蝠棒 5097（BatBat_TryLifeLeeching :43518-43525：命中且 hp<max → Heal(1)）
         // ④变态刀 3106（:43455-43460）：命中玩家 → stealth=1 满潜行
@@ -21556,10 +22550,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
         }
         if (pvpHeldVid === 3106) this.player.stealth = 1;
-        // 本端反馈：受击音 + InPVP 公式预览飘字（Main.cs:65636：dmg−def×0.5 下限 1，
-        // 与 Hurt 返回值同源——实扣以被击端为准）
-        this.sfx.play('hit', 1, rp.cx, rp.cy);
-        this.addDamageNumber(rp.cx, rp.y, Math.max(1, Math.round(rawDmg - rp.defense * 0.5)), crit, crit ? '#FFD040' : '#FF7060');
+        // ★任务①【删】原版攻端无本地预测反馈：伤验音效与飘字全部来自被击端
+        // 真实结算广播（ItemCheck_MeleeHitPVP :44420-44494 攻端只跑 StatusToPlayerPvP/
+        // OnHit/Hurt 意向包/SendPlayerHurt——攻端不经 CombatText/NewText 本地面，
+        // 被击端 Player.Hurt 内 :38671 CombatText.NewText 才生飘字、Hit 音随其
+        // Hurt 链）。原实现的 'hit' 音 + InPVP 公式预览飘字两行系自造预测反馈，
+        // 与被击端广播叠加成双响双飘，删除。
+        // ★任务② 写面：PvP 命中循环尾 ApplyAttackCooldown()（:44494）——
+        // 原版 PvP 不【消费】attackCD（循环门链 :44429 无此面）但照常写，
+        // ⇒ 对敌怪近战节流窗生效（写面跨桶共享）
+        this.meleeAttackCd = Math.max(1, Math.trunc((this.swing?.dur ?? 0) * 0.33));
       }
     }
     void prog;
@@ -26230,7 +27230,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       else playHurtVoice(this as unknown as GameHooks, p.voiceState);
       // 实际扣血 = max(1, dmg - defense*0.5)（在 Player.damage 内）
       const dealt = Math.max(1, dmg - p.defense * 0.5);
-      this.addDamageNumber(p.cx, p.y, Math.round(dealt), false, '#FF5050');
+      this.addDamageNumber(p.cx, p.y, Math.round(dealt), false, playerHurtFloatColor(false));   // FR4-F：曾 #FF5050（本地实扣位同 CombatText.DamagedFriendly）
       // 荆棘 Buff（1.4.5.6 Player.cs:30910-30944，NPC 接触分支内——contactOnly 门：
       // 弹幕命中不反伤）：thorns=1 → 反弹 num4 × thorns，上限 1000。
       // num4 = Main.DamageVar(npc.damage, -luck)（:30934，±15% 浮动）——我们的接触伤害
@@ -26242,13 +27242,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  ② cactusThorns:仙人掌套定值 15/专家 30/大师 45（不乘伤害）
       if (attacker && contactOnly && !attacker.dead) {
             // 格挡盾反击（Player.cs:30910-30920 CanParryAgainst:shieldParryTimeLeft>0
-    // 且面向来敌 → 本次免伤 + 反伤 2×(kb 5),清格挡窗口）
+    // 且面向来敌 → 本次免伤 + 反伤 2×(kb 5),清格挡窗口。
+    // ★F5③（:31666-31668 消费段补齐）：成功格挡另授 GiveImmuneTimeForCollisionAttack(
+    // longInvince?60:30)（D3 统一时钟出口，与踩踏/横向冲撞/日耀同座）+ 置 parryDamageBuff
+    // （buff 198 ParryDamageBuff 300t 窗口——枚举未建模以字段+倒计时承载；消费点 =
+    // 近战命中链 Game.ts R2-07(b) ×5 并清旗，Projectile.cs:13634 弹幕面同式未接）
     if (attacker && contactOnly && p.shieldParryTimeLeft > 0) {
       const facing = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? -1 : 1;
       if (p.facing === facing) {
         p.shieldParryTimeLeft = 0;
         const reflect = Math.max(1, Math.round(dmg * 2));
         attacker.hurt(reflect, -facing * 5, -2, this);   // 音/飘值=单点
+        grantCollisionAttackImmunity(p, (p.equipStats?.longInvince ? 60 : 30));   // :31667
+        p.parryDamageBuff = true;                        // AddBuff(198,300)→parryDamageBuff 旗（:31668/:11945）
+        p.parryDamageBuffT = 300;                        // buff 时长 300t（无 BuffType 枚举的倒计时承载）
         return 0;   // 完全免伤
       }
     }
@@ -31721,9 +32728,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (alive >= 7) return;                                    // ownedProjectileCounts 门
     const dmg = Math.max(1, Math.round(50 * this.player.damageMult('melee')));
     const shard = new TitaniumStormShard(x, y, dmg, 15);
-    shard.critChance = 0.04 + this.player.critChance('melee') / 100;
+    // ★α-H1：弹 908 SetDefaults（:8628-8640 aiStyle175/friendly/penetrate1/timeLeft）
+    // 【无类别旗】→ 原版 Damage 不掷 crit，撤玩家近战阈值注入
     shard.armorPen = this.player.equipStats.armorPen;
     this.entities.add(shard, 'projectiles');
+  }
+
+  /** GameHooks.spawnFriendlyProj（★α-H3④：玩家命中后效真弹出口——WeaponProj
+   *  hitEnemies 浸剂门 confetti 289 支用；Projectile.cs:13693-96 NewProjectile 等价） */
+  spawnFriendlyProj(e: import('../entities/Entity').Entity): void {
+    this.entities.add(e, 'projectiles');
   }
 
   /** GameHooks.spawnRainForced（Rain.NewRainForced——眼球伞 5101 滴水） */
@@ -31858,6 +32872,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         },
         onStrikePlayer: (fromSlot, _targetSlot, dmg, _kbx, _kby, weaponId, flags) =>
           this.netApplyStrikePlayer(fromSlot, dmg, weaponId, flags),
+        // ★GA3 msg117 被击端实扣权威飘字落地（victim-settles 权威展示链的接收端）：
+        //  d=被击端实扣终值（协议层已拒 dmg≤0 帧）；crit 位分档走 playerHurtFloatColor
+        //  单源——真值 CombatText.cs:8 DamagedFriendly(255,80,90)/:10 Crit(255,100,30)
+        //  （橙红系非金色；曾硬编码 '#FFD040'/'#FF7060' 偏离真值，二轮 FR4-F 统一）。
+        //  原版 quiet Hurt 重放的飘字面——MessageBuffer.cs:3882-3897；本仓重放面
+        //  只剩飘字故直通 addDamageNumber。坐标 = 发送端（被击者）结算时位置：世界
+        //  系权威，不换算本地插值代理位。self slot 的帧 ClientNet 已排除（被击端本地
+        //  damagePlayer 已自显，不双显）
+        onPlayerHurt: (slot, dmg, x, y, _dir, flags) => {
+          void slot;
+          const critBit = (flags & PlayerHurtFlags.Crit) !== 0;
+          this.addDamageNumber(x, y, dmg, critBit, playerHurtFloatColor(critBit));
+        },
         onHp: (slot, hp, maxHp) => {
           // ClientNet.msg16 已缓存进 RemotePlayerState；此处仅兜底（正常恒同步命中）
           const rp = net.players.get(slot);

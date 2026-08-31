@@ -34,6 +34,8 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, projFrameImg, projFrameCount } from './Arrow';
 import { applyProjStatus } from './projStatus';
+import { noteVanillaProjImmune } from './projTargets';
+import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import { canHit } from '../physics/LineOfSight';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -476,6 +478,14 @@ export class MagicMissileProj extends Entity {
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
       if (this.nebulaCb) this.nebulaCb();
       e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);   // 音/飘值=单点
+      // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
+      // 16 显型档=immune[owner]=8（:14096-14098）→ 非 local 面按表写；
+      // 34/79 usesLocalNPCImmunity（1457 SetDefaults :1173/:1605,cd=12）→ 写 0
+      // 清全局窗（节流归上方 hitCd 局部表）。蓝队二轮 F5 起该 face 由补表自动解析,
+      // 此处显参保留为历史锚。penetrate 取写前现存 this.pierce（未递减——
+      // :14189 的 penetrate-- 在梯子后）
+      noteVanillaProjImmune(game, this.projId, e.id,
+        { penetrate: this.pierce, localFace: this.projId === 34 || this.projId === 79 });
       // 命中清追踪（StrikeNPC :13260-13283：34 仅 ai[0]==-1 档清 / 79 恒清 + 彩虹粒子；
       // 34 的 ai[0]==-2 终段不再清——逐字对源码）
       if (this.projId === 79 && this.mode !== 0) {
@@ -487,6 +497,23 @@ export class MagicMissileProj extends Entity {
       // 幽灵套吸血（Projectile.cs:12883-12888：magic 弹 ghostHeal；numHits 含本次）
       game.applyLifeSteal?.('ghost', Math.round(dmg), this.pierceInit - this.pierce + 1,
         this.x, this.y, true);
+      // ★GB1（GC 契约，2026-08-31）：幽灵伤害头 ghostHurt（Projectile.cs:13881 →
+      //  :12021 方法体）——触发位在 StrikeNPC(:13712)/ghostHeal(:13879) 之后、同一
+      //  flag10 on-hit 段内。导弹族三型（16 魔法飞弹 /34 Flamelash /79 彩虹魔杖弹）
+      //  的 SetDefaults 均为 magic=true（vanilla-projectiles.json 三条 magic 位）；
+      //  按弹 id 数据门（magic 归属面）+ Spectre Mask 套装 → 受害者 Center 放浮魂
+      //  弹 356。dealt = Enemy.lastStrikeDealt（StrikeNPC num41 等价位）
+      if (this.projId > 0 && projectileData(this.projId)?.magic === true
+        && playerHasGhostHurt(game.player)) {
+        const v156 = e as unknown as { lastStrikeDealt?: number };
+        ghostHurtOnHit(game,
+          { magic: true, projDamage: this.damage,
+            projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+            ownerCx: game.player.cx, ownerCy: game.player.cy },
+          { x: e.x, y: e.y, w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2, cy: e.cy ?? e.y + e.h / 2,
+            vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
+            dealt: v156.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
+      }
       if (--this.pierce <= 0) { this.killNow(game); return; }
     }
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)

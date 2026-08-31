@@ -25,6 +25,12 @@ import { genSquareTileFrame } from './FinalCleanupPass';
 const BRICK = TILE_BY_KEY['v_226_lihzahrd_brick']!;
 const ALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
+/** ★IIIII94 remix 锚点支（cs:15944 `(type == 60 || type == 59)`——泥块与丛林草同格接受） */
+const MUD_TP = TILE_BY_KEY['mud']!;
+/** cs:15961 `type == 191`（活木块,LivingTrees 已写入的树干/枝干壳） */
+const LIVING_WOOD_TP = TILE_BY_KEY['v_191_living_wood_block']!;
+/** Main.tileDungeon（Main.cs:7941-7946，NotTheBeesPass 同表副本——防耦合） */
+const TILE_DUNGEON_SHEETS_TP = new Set([41, 43, 44, 677, 678, 679]);
 
 // ---- mayanTrap（cs:8314-8644）实心谓词族（生成期 tileSolid = vanGenSolidType） ----
 const SHEET_OF_TP = new Int32Array(TILE_DEFS.length).fill(-1);
@@ -222,7 +228,20 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   // num3 = min(0.35, num3+0.05) 递增(cs:15978-15989);落点须为丛林草 60(cs:15972)。
   // num3==0.35 后再失败 10 轮放弃——★T7(cs:15992-16001):失败后原版**无条件**
   // 强制补建 makeTemple(maxTilesX - generatingDungeonPositionX, rockLayer + 100)
-  // (remix 分支除外,本仓不支持),不缺席(见下方 sx<0 分支)。
+  // 不缺席(见下方 sx<0 分支)。
+  //
+  // ★IIIII94（2026-08-31）REMIX 深度换轴支（1458 cs:15932-16014）：`if (remixWorldGen &&
+  //   !noSurface)` 在每轮掷完 y/x 头两骰后整段改道——x 覆掷 Next(0.2w,0.8w) 并
+  //   while 拒绝中央带 (0.4w,0.6w)（双闭边界入带；曾被「深度锚不换轴」误判为非债，
+  //   实证本种子 x86 神庙 bbox=[873,224]-[1189,501] 全落左叶,而 vanilla 支
+  //   x=((d×band+0.1)×(-side)+0.5)w 只能给出右侧地带）；随后自该格向上游走
+  //   （active||wall>0||j>worldSurface-5 即减,退出后 +1）,锚点须 active 且为
+  //   丛林草60或泥59,±10 邻域无 191 活木/tileDungeon{41,43,44,677,678,679} 才接受,
+  //   成功时再 `y -= 10 + Next(10)` 下修锚并落 makeTemple。掷流三骰/轮与 vanilla
+  //   同头,x 覆掷(+拒绝环重掷)为 remix 增耗段。兜底(x86 !flag 时)y 取
+  //   worldSurface<150?Next(200,(int)rockLayer):(int)worldSurface-100、x 取
+  //   dungeonSide≥Right?0.3w:0.7w（:16003-16012,双 notTheBees 臂恒等式）。
+  const tmRemix = !!gs.seedFlags.remix && !gs.seedFlags.noSurface;
   let sx = -1, sy = -1;
   {
     let band = 0.25, fails = 0, giveups = 0;
@@ -230,11 +249,44 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       let yTop = Math.floor(gs.rockLevel);
       const yBot = h - 600;
       if (yTop > yBot - 1) yTop = yBot - 1;
-      const y = rng.int(yTop, yBot - 1);
-      const x = Math.floor(((rng.next() * band + 0.1) * -gs.dungeonSide + 0.5) * w);
-      if (st.inBounds(x, y)) {
-        const i = st.idx(x, y);
-        if (st.flags[i] && st.type[i] === JUNGLE_GRASS) { sx = x; sy = y; break; }
+      let y = rng.int(yTop, yBot - 1);
+      const xVan = Math.floor(((rng.next() * band + 0.1) * -gs.dungeonSide + 0.5) * w);
+      if (tmRemix) {
+        // cs:15937-15951：x 覆掷 + 中央带拒绝环（Next(int)double 边界语义照抄）
+        const xLo = Math.floor(w * 0.2), xHi = Math.floor(w * 0.8);
+        let ax = rng.int(xLo, xHi - 1);
+        while (ax > w * 0.4 && ax < w * 0.6) ax = rng.int(xLo, xHi - 1);
+        // cs:15953-15956：向上游走到首个「虚空且无墙且 j≤worldSurface-5」格的下一行
+        while (st.inBounds(ax, y)) {
+          const i0 = st.idx(ax, y);
+          if (!st.flags[i0] && st.wall[i0] === 0 && y <= gs.worldSurface - 5) break;
+          y--;
+        }
+        y++;
+        if (st.inBounds(ax, y)) {
+          const iA = st.idx(ax, y);
+          if (st.flags[iA] && (st.type[iA] === JUNGLE_GRASS || st.type[iA] === MUD_TP)) {
+            // cs:15957-15968：±10 邻域不得含 191 活木/地牢砖族
+            let tainted = false;
+            for (let ix = ax - 10; ix <= ax + 10 && !tainted; ix++) {
+              for (let iy = y - 10; iy <= y + 10; iy++) {
+                if (!st.inBounds(ix, iy)) continue;
+                const it = st.idx(ix, iy);
+                if (st.flags[it] && (st.type[it] === LIVING_WOOD_TP || TILE_DUNGEON_SHEETS_TP.has(sheetOfTP(st.type[it]!)))) {
+                  tainted = true; break;
+                }
+              }
+            }
+            if (!tainted) {
+              sx = ax;
+              sy = y - (10 + rng.int(0, 9));   // cs:15972 `num6 -= 10 + genRand.Next(10)`
+              break;
+            }
+          }
+        }
+      } else if (st.inBounds(xVan, y)) {
+        const i = st.idx(xVan, y);
+        if (st.flags[i] && st.type[i] === JUNGLE_GRASS) { sx = xVan; sy = y; break; }
       }
       if (fails++ > 1000000) {
         if (band === 0.35 && ++giveups > 10) break;
@@ -243,12 +295,20 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
   }
-  // ★T7(cs:15992-16001):种子点失败时原版无条件强制补建——锚点
-  //   (maxTilesX - generatingDungeonPositionX, rockLayer + 100)。此前直接
-  //   return,异常种子/丛林草缺失时神庙整体缺席(祭坛+神庙箱+木刺全失)。
+  // ★T7(cs:15992-16001):种子点失败时原版无条件强制补建——vanilla 锚点
+  //   (maxTilesX - generatingDungeonPositionX, rockLayer + 100)；★IIIII94 remix
+  //   兜底换轴(:16003-16012)：x=dungeonSide≥Right?0.3w:0.7w,y=worldSurface<150?
+  //   Next(200,(int)rockLayer):(int)worldSurface-100。
   if (sx < 0) {
-    sx = st.w - gs.generatingDungeonPositionX;
-    sy = Math.floor(gs.rockLevel) + 100;
+    if (tmRemix) {
+      sx = gs.dungeonSide === 1 ? Math.floor(w * 0.3) : Math.floor(w * 0.7);
+      sy = gs.worldSurface < 150
+        ? rng.int(200, Math.floor(gs.rockLevel) - 1)
+        : Math.floor(gs.worldSurface) - 100;
+    } else {
+      sx = st.w - gs.generatingDungeonPositionX;
+      sy = Math.floor(gs.rockLevel) + 100;
+    }
   }
   tmMark('seed');
   // ---- 房间链(L17185-17231):重投至与全部旧房不相交;overlap 每次相交测试 1% 递增 ----

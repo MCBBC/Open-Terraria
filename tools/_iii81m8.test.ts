@@ -39,6 +39,9 @@ const M8_FLAGS: Record<string, boolean> = {};
 for (const f of (process.env.SW_I81_FLAGS ?? '').split(',').filter(Boolean)) {
   M8_FLAGS[FLAG_ALIAS[f.toLowerCase()] ?? f] = true;
 }
+// ★IIIII88 双地牢链形状适配：dual 世界在 Dungeon 前插了 Dual_Dungeons_Dither_Snake 槽
+// ——『▶Dungeon』锚（=该 pass 开始时的快照）在此链对应的是蛇槽末态 dump #032。
+const IS_DUAL = !!M8_FLAGS.dualDungeons;
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
@@ -179,6 +182,12 @@ const LAB2NAME = new Map<string, string>([
   ['ExposedGemsInIceBiome', 'Mushrooms'],
   ['ExposedGemsUnderground', 'Gems_In_Ice_Biome'],
 ]);
+// ★IIIII88 dual 链形状适配（上面 IS_DUAL 计算后注入）：蛇槽落在 Slush 与 Dungeon 之间
+if (IS_DUAL) {
+  LAB2NAME.set('Dungeon', 'Dual_Dungeons_Dither_Snake');   // ▶Dungeon 锚=蛇槽末态(#032)
+  LAB2NAME.set('SnakeEnd', 'Dual_Dungeons_Dither_Snake');
+  LAB2NAME.set('DitherSnake', 'Slush');                    // ▶DitherSnake 锚=蛇前态(=#031)
+}
 /** 每链 dump 目录实际形态（name→idx），列目录后填充 */
 const NAME2IDX = new Map<string, number>();
 function labIdx(lab: string): number | undefined {

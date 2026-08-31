@@ -534,6 +534,8 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
       destroyObject = true;
       tileFrame165(st, rng, x, y, (s, r, xx, yy) => tileFrame(s, r, xx, yy));
       destroyObject = false;
+    } else if (sheet === 185 && !_i93LegacyCheckPile) {
+      checkPileKT(st, rng, x, y);                                  // cs:86561 case 185→CheckPile（★IIIII93 补口）
     } else if (sheet === 186 || sheet === 187) {
       check3x2PileKT(st, rng, x, y, sheet);                        // cs:86713 组→Check3x2
     } else if (CHECK3X2_SHEETS.has(sheet)) {
@@ -1031,6 +1033,8 @@ export function solidTile(st: TileStore, x: number, y: number): boolean {
  *    实心/平台/框架,活性非实心非框架格（草木/根须族）原版可砸而本仓拒——pass 53
  *    足迹零命中（clean 重放 0 差实证）,保留备案 */
 const POUND_BLACKLIST = idsByVanillaSheet(10, 48, 137, 232, 380, 387, 388, 476, 484);
+// ★IIIII93：CheckPile 分派取证开关缓存（SW_I93_LEGACYP=1 复归旧行为；缺省启用分派）
+const _i93LegacyCheckPile = typeof process !== 'undefined' && process.env.SW_I93_LEGACYP === '1';
 const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
 const POUND_GEN_SKIP = idsByVanillaSheet(190, 30);
 const FORBIDS_SLOPING = idsByVanillaSheet(21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597);
@@ -1194,6 +1198,153 @@ export function loadI66ReplayStore(st: TileStore): void {
   }
   // ★载入自检：通道校验和打点（确认注入真的发生且逐字节可对齐）
   console.log(`[i66replay] engaged N=${N} slopeSum=${slopeSum} wallSum=${wallSum}`);
+}
+
+/* ── ★IIIII93：SmallPiles(185) 完整性检查（WorldGen.cs:47289 CheckPile +
+ *  :47408 Check2x1 派生）──────────────────────────────────────────────────────
+ *  定罪：tileFrame 分派表此前缺 case 185 —— x86 端 Smooth 的 KillTile 尾级联会触发
+ *  CheckPile 杀掉「伴格异型/底支失格」的小堆（bigcrc #53 单格 T0>185 @(1036,295),
+ *  living-tree 碎石堆族通病）；JS 无此分派 ⇒ 该格以 active pile 存活到收尾。
+ *  三支语义：
+ *   a) frameY==18 ∨ type==649 → Check2x1 双联校验（伴帧失配=整组杀,含掉落掷）；
+ *   b) 底支非 SolidTileAllowBottomSlope → 单杀（cs:47328）；
+ *   c) 堆型样式段核下方材质（雪族 36..47 / 沙族 54..59∪73..76）。 */
+const PILE_SNOW_OK = new Set([147, 161, 163, 164, 200]);           // Sets.Snow{147}∪Conversion.Ice
+const PILE_SAND_OK = new Set([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
+let _cacheSmallPiles = -1;
+function smallPilesId(): number {
+  if (_cacheSmallPiles < 0) _cacheSmallPiles = TILE_BY_KEY['v_185_small_decos'] ?? 0;
+  return _cacheSmallPiles;
+}
+
+function invalidTileForPilesOrSpeleothemsKT(st: TileStore, x: number, y: number): boolean {
+  if (x < 2 || y < 2 || x >= st.w - 2 || y >= st.h - 2) return false;   // InWorld(x,y,2)
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  return BOULDERS.has(st.type[i]);
+}
+
+/** cs:47328-47379（switch 段逐 case 对拍） */
+function checkPileKT(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (!st.inBounds(x + 1, y + 1)) return;
+  const i = st.idx(x, y);
+  if (st.frameY[i] === 18 || SHEET_OF[st.type[i]] === 649) {
+    check2x1PilesKT(st, rng, x, y);
+    return;
+  }
+  if (!solidTileAllowBottomSlope(st, x, y + 1)) {
+    killTile(st, rng, x, y);
+    return;
+  }
+  if (st.type[i] !== smallPilesId()) return;               // cs:47332 非 185 堆无样式约束
+  const bi = st.idx(x, y + 1);
+  if (!st.flags[bi]) return;                               // cs:47335
+  const bs = SHEET_OF[st.type[bi]] ?? -1;
+  const num = Math.floor(st.frameX[i] / 18);
+  if (num >= 36 && num <= 47) {                            // 雪族段
+    if (!PILE_SNOW_OK.has(bs) && bs !== 162 && bs !== 224) killTile(st, rng, x, y);
+  } else if ((num >= 54 && num <= 59) || (num >= 73 && num <= 76)) {   // 沙族段
+    if (!PILE_SAND_OK.has(bs)) killTile(st, rng, x, y);
+  }
+}
+
+/** Check2x1（cs:47408-47766）。仅 185/649 两类经 CheckPile 可达；本实现按通用骨架
+ *  走 default 底支双检 + 185 的帧重映射/num5 样式核；case103/134/29/462 掉落臂
+ *  生成期不可达略。 */
+function check2x1PilesKT(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (destroyObject) return;
+  let num = x;
+  const selfI = st.idx(x, y);
+  const fx0 = st.frameX[selfI];
+  let num2 = Math.floor(fx0 / 18);
+  const num3 = num2 >> 1;                                  // cs:47412（649 掉落分支才消费）
+  let num4 = Math.floor(st.frameY[selfI] / 18);            // cs:47413
+  num2 %= 2;
+  num -= num2;
+  if (!st.inBounds(num + 1, y + 1)) return;
+  const pi = st.idx(num, y);
+  const qi = st.idx(num + 1, y);
+  let flag = true;
+  const tSelf = st.type[selfI];
+  const shSelf = SHEET_OF[tSelf] ?? -1;
+  if (st.frameX[qi] === fx0 + 18 && st.type[pi] === tSelf && st.type[qi] === tSelf
+    && st.flags[pi] && st.flags[qi]) flag = false;
+  if (shSelf !== 103 && shSelf !== 29 && shSelf !== 462) {
+    // default 支（cs:47454-47462）：双下格 SolidTileAllowBottomSlope
+    if (!solidTileAllowBottomSlope(st, num, y + 1)) flag = true;
+    if (!solidTileAllowBottomSlope(st, num + 1, y + 1)) flag = true;
+  }
+  if (shSelf === 185) {
+    // cs:47471-47481 帧重映射（草皮款 1368 段,下方非土/553 族时还原）
+    const sheetAt2 = (ti: number): number => (st.flags[ti] ? SHEET_OF[st.type[ti]] ?? -1 : -1);
+    const bl = sheetAt2(st.idx(num, y + 1));
+    const br = sheetAt2(st.idx(num + 1, y + 1));
+    const remap = (ti: number): void => {
+      const v = st.frameX[ti];
+      if (v >= 1368 && v <= 1458) st.frameX[ti] = v - 1368;
+    };
+    if (bl !== 2 && br !== 2 && bl !== 477 && br !== 477 && bl !== 492 && br !== 492) {
+      remap(pi); remap(qi);
+    }
+    // cs:47482-47542 样式轴核（num5 轴；两格分别核）
+    const lfx = st.frameX[pi];
+    const lfy = st.frameY[pi];
+    const num5 = Math.floor(lfx / 36) + (Math.floor(lfy / 18) - 1) * 52;
+    for (let j = num; j < num + 2; j++) {
+      if (invalidTileForPilesOrSpeleothemsKT(st, j, y + 1)) { flag = true; break; }
+      const li = st.idx(j, y + 1);
+      if (!st.flags[li]) continue;
+      const t2 = SHEET_OF[st.type[li]] ?? -1;
+      if (num5 >= 25 && num5 <= 30) {
+        if (!PILE_SNOW_OK.has(t2) && t2 !== 224) { flag = true; break; }
+      } else if ((num5 >= 41 && num5 <= 46) || (num5 >= 62 && num5 <= 64)) {
+        if (!PILE_SAND_OK.has(t2)) { flag = true; break; }
+      }
+    }
+  }
+  if (!flag) return;
+  // cs:47500 掉落取帧：左格活性用左帧,否则右帧
+  const fxDrop = st.flags[pi] ? st.frameX[pi] : st.frameX[qi];
+  destroyObject = true;
+  for (const k of [num, num + 1]) {
+    const ki = st.idx(k, y);
+    if (st.type[ki] === tSelf) killTile(st, rng, k, y);
+  }
+  if (shSelf === 185) pileDropRollsKT(rng, fxDrop);
+  if (shSelf === 649) void num3; void num4;
+  destroyObject = false;
+  squareTileFrame(st, rng, num, y);                        // cs:47764-65 尾双九宫
+  squareTileFrame(st, rng, num + 1, y);
+}
+
+/** cs:47137?↔cs:47547..47650 内容掉落掷（生成期 Item.NewItem noItem 无产物但实参先求值；
+ *  与 FinalCleanupPass.pileDropRollsGen 同源,值序一致——此处实为 cs:47547 起 coin 带） */
+function pileDropRollsKT(rng: RNG, fx: number): void {
+  if (fx >= 576 && fx <= 610) {
+    rng.nextIntRange(10, 100);
+    rng.nextIntRange(20, 100);
+    if (rng.nextInt(3) !== 0) rng.nextIntRange(10, 100);
+    if (rng.nextInt(3) !== 0) rng.nextIntRange(20, 100);
+    if (rng.nextInt(2) === 0) rng.nextIntRange(10, 100);
+    if (rng.nextInt(2) === 0) rng.nextIntRange(20, 100);
+    if (rng.nextInt(3) === 0) rng.nextIntRange(10, 100);
+    if (rng.nextInt(3) === 0) rng.nextIntRange(20, 100);
+    if (rng.nextInt(4) === 0) rng.nextIntRange(10, 100);
+    if (rng.nextInt(4) === 0) rng.nextIntRange(20, 100);
+    if (rng.nextInt(5) === 0) rng.nextIntRange(10, 100);
+    if (rng.nextInt(5) === 0) rng.nextIntRange(20, 100);
+  } else if (fx >= 612 && fx <= 646) {
+    rng.nextIntRange(10, 100);
+    if (rng.nextInt(2) === 0) rng.nextIntRange(20, 100);
+    if (rng.nextInt(3) === 0) rng.nextIntRange(30, 100);
+  } else if (fx >= 648 && fx <= 682) {
+    rng.nextIntRange(1, 6);
+    if (rng.nextInt(2) === 0) rng.nextIntRange(2, 6);
+    if (rng.nextInt(3) === 0) rng.nextIntRange(3, 6);
+  } else if ((fx >= 684 && fx <= 718) || (fx >= 720 && fx <= 754) || (fx >= 756 && fx <= 790)
+    || (fx >= 792 && fx <= 826) || (fx >= 828 && fx <= 862) || (fx >= 864 && fx <= 898)) {
+    rng.nextIntRange(1, 4);
+  }
 }
 
 /** ★IIII66：补角支的 vanilla PlaceTile 近似（生成期 default 支）——置格(active+type+

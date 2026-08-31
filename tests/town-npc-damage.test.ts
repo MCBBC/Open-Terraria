@@ -178,3 +178,112 @@ describe('TownNPC 攻击特化(发射端考古销项)', () => {
     expect(py).toBeLessThanOrEqual(ey + eh * 3);
   });
 });
+
+// =====================================================================
+// 医师 ai[0]==13 治疗城镇 NPC 整支（对齐批①,NPC.cs:55986-56005 触发 /
+// :55360-55391 态推进 / 弹 AI_110 Projectile.cs:34691-34727）
+// =====================================================================
+describe('医师治疗城镇 NPC(NurseHeal 整链)', () => {
+  /** 平地双 NPC 环境:护师在左、患者在右,3 格距,均站定不游走;rng 注入 0.9
+   *  (攻击门/社交掷骰全不入——治疗触发无掷骰) */
+  function nurseEnv(patientHp = 250, npcList?: TownNPC[]) {
+    const world = new World(200, 200, 100, 'nurse-heal');
+    for (let x = 20; x <= 180; x++) world.store.setTileSilent(x, 100, 1);
+    world.clock.timeOfDay = 0.5;
+    const nurse = new TownNPC('nurse', 96 * 16, 99 * 16);
+    nurse.stationary = true;
+    nurse.rng = () => 0.9;
+    const patient = new TownNPC('guide', 99 * 16, 99 * 16);
+    patient.stationary = true;
+    patient.rng = () => 0.9;
+    if (patientHp < patient.maxHp) patient.hp = patientHp;
+    const healEvents: Array<{ amt: number; color?: string }> = [];
+    const shots: TownShot[] = [];
+    const spawnedIds: number[] = [];
+    const game = {
+      world,
+      player: { x: -9999, y: -9999, w: 0, h: 0, dead: true },
+      enemies: () => [] as unknown[],
+      critters: () => [],
+      npcs: () => (npcList ?? [nurse, patient]),
+      spawnTownShot: (s: TownShot) => { shots.push(s); spawnedIds.push(s.projId); },
+      addDamageNumber: (_x: number, _y: number, amt: number, _c: boolean, color?: string) => {
+        healEvents.push({ amt, color });
+      },
+      spawnParticles: () => {}, playSfx: () => {}, playSfxFiles: () => {},
+      behavioLog: () => {},
+    } as never;
+    return { world, nurse, patient, healEvents, shots, spawnedIds, game };
+  }
+
+  /** Game 投射物桶步进等价：测试端自驱 AI_110 弹（同帧序 NPC 后弹面） */
+  function stepShots(shots: TownShot[], game: never): void {
+    for (const s of shots) if (!s.dead) s.fixedUpdate(1 / 60, game);
+    for (let i = shots.length - 1; i >= 0; i--) if (shots[i].dead) shots.splice(i, 1);
+  }
+
+  it('缺血患者在场→入态发弹 584→绿字 HealLife 每波 ≤20 回满(55988-55997/:34704-34712)', () => {
+    const env = nurseEnv(210);                       // 缺血 40 → 至少两波 +20
+    let ticks = 0;
+    while (env.patient.hp < env.patient.maxHp && ticks++ < 4000) {
+      env.nurse.fixedUpdate(1 / 60, env.game);
+      env.patient.fixedUpdate(1 / 60, env.game);
+      stepShots(env.shots, env.game);
+    }
+    expect(env.patient.hp).toBe(env.patient.maxHp);
+    expect(env.spawnedIds.length).toBeGreaterThanOrEqual(2);   // 每波一弹 584
+    for (const id of env.spawnedIds) expect(id).toBe(584);     // NurseSyringeHeal
+    for (const e of env.healEvents) {
+      expect(e.amt).toBeLessThanOrEqual(20);                  // min(lifeMax−life,20) 帽
+      expect(e.amt).toBeGreaterThan(0);
+      expect(e.color).toBe('#64FF64');                        // CombatText.HealLife(100,255,100)
+    }
+  });
+
+  it('满血患者:永不触发(55990 life==lifeMax 排除),零弹零飘字', () => {
+    const env = nurseEnv(250);
+    for (let t = 0; t < 600; t++) {
+      env.nurse.fixedUpdate(1 / 60, env.game);
+      env.patient.fixedUpdate(1 / 60, env.game);
+    }
+    expect(env.shots).toHaveLength(0);
+    expect(env.healEvents).toHaveLength(0);
+    expect(env.nurse.healing).toBe(false);
+  });
+
+  it('★原版无 !=self 门:医师带伤独处时自我治疗(self 同权参与扫描 :55990)', () => {
+    const solo = nurseEnv(250);
+    solo.patient.dead = true;   // 其他 NPC 失活——可疗对象只剩护师本体
+    solo.nurse.hp = 190;        // 缺血 60
+    let ticks = 0;
+    while (solo.nurse.hp < solo.nurse.maxHp && ticks++ < 8000) {
+      solo.nurse.fixedUpdate(1 / 60, solo.game);
+      stepShots(solo.shots, solo.game);
+    }
+    expect(solo.nurse.hp).toBe(solo.nurse.maxHp);
+    expect(solo.spawnedIds.length).toBeGreaterThanOrEqual(3);
+    for (const id of solo.spawnedIds) expect(id).toBe(584);
+  });
+
+  it('治疗态被打断:hurt() 命中即取消 ai[0]==13(StrikeNPC town 分支改写 ai[0] 的窄承接)', () => {
+    const env = nurseEnv(210);
+    let t = 0;
+    while (!env.nurse.healing && t++ < 3000) {
+      env.nurse.fixedUpdate(1 / 60, env.game);
+      env.patient.fixedUpdate(1 / 60, env.game);
+    }
+    expect(env.nurse.healing).toBe(true);
+    env.nurse.hurt(30, 1, 0, env.game);                        // 受击
+    expect(env.nurse.healing).toBe(false);                     // 治疗态取消
+  });
+
+  it('治疗期不入自卫攻击态(flag31 的 ai[0]<2 门 :55645)', () => {
+    const env = nurseEnv(210);
+    let t = 0;
+    while (!env.nurse.healing && t++ < 3000) {
+      env.nurse.fixedUpdate(1 / 60, env.game);
+      env.patient.fixedUpdate(1 / 60, env.game);
+    }
+    expect(env.nurse.attackState).toBe(0);                     // 治疗中恒非攻击态
+  });
+});

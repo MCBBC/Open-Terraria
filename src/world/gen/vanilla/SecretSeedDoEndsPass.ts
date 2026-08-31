@@ -64,6 +64,7 @@ import { noSpiderCavesActuallyNoSpiderCaves } from '../SeedEasterEggs';   // ★
 import { flipGenSolid, genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { initializeHardMode } from './HardmodePass';
 import { genKillTile, genSquareTileFrame } from './FinalCleanupPass';
+import { genSquareWallFrame } from './DesertPass';                       // ★IIIII87 Convert 墙写尾级联掷骰镜像
 import { sheetId } from './TileCleanupPass';
 import { tileRunner } from './TileRunner';
 import { hurtTiles } from '../../../stats/TouchDamage';
@@ -166,18 +167,33 @@ function clearPaintCoat(st: TileStore, x: number, y: number): void {
 // ---------- Convert_ActuallyConvert{Tile,Wall,Torch}（cs:56762-56818） ----------
 /** tile 转化：活性且类型真变才写；树护栏上提显式化（vanilla 在 Convert_ActuallyConvertTile
  *  内部调用 TryConvertingOrKillingTreesAboveIfTheyWouldBecomeInvalid）。不清油漆。 */
-function convertActuallyTile(st: TileStore, rng: RNG, x: number, y: number, newSheet: number): void {
+function convertActuallyTile(st: TileStore, rng: RNG, x: number, y: number, newSheet: number,
+  cascades = false, gs?: GenState): void {
   const i = st.idx(x, y);
   if (!st.flags[i]) return;
   if (SHEET_OF_TYPE[st.type[i]] === newSheet) return;
-  tryConvertingOrKillingTreesAbove(st, rng, x, y, newSheet);          // cs:56792
+  tryConvertingOrKillingTreesAbove(st, rng, gs ?? ({ seedFlags: {} } as never), x, y, newSheet);          // cs:56792
   st.type[i] = idOf(newSheet);
+  if (!cascades) return;
+  // ★IIIII87（cs:56801）：Convert_ActuallyConvertTile 尾级联 SquareTileFrame(x,y)——
+  //   九宫 FrameTile 把上下格的腐化/绯红植被按新地基重挂种
+  //   （PlantCheck_TryGetNewType cs:81886：down∈{2,477}→24→3 / 199 族→201…；
+  //    CheckVines cs:86145：锚变纯草→636→52 等整藤换种）并消费级联掷骰。
+  //   缺失曾致 fish mox #105 净化面 decor 残差 A21/T141（truth 保 sapling/tallgrass/
+  //   藤 52 vs JS 残留 corrupt-plants 24/vine 636 及 herb 未清族）。sink 侧亦为原版序。
+  genSquareTileFrame(st, rng, x, y);
 }
-/** Convert_ActuallyConvertWall（cs:56804-56817）：墙 0 或同值跳过；不清墙漆。 */
-function convertActuallyWall(st: TileStore, x: number, y: number, newWall: number): void {
+/** Convert_ActuallyConvertWall（cs:56804-56817）：墙 0 或同值跳过；不清墙漆。
+ *  ★IIIII87：尾级联 SquareWallFrame(x,y)（cs:56813）=中心格 WallFrame(resetFrame=true)
+ *  掷骰镜像（有墙非大幅墙→Next(0,3)，墙21 再掷 Next(2)；帧位不入库仅掷骰还原，
+ *  DesertPass.wallFrameDraw 同构复用——IIIII16 批 #19 流错位同根，勿省略）。 */
+function convertActuallyWall(st: TileStore, rng: RNG, x: number, y: number, newWall: number,
+  cascades = false): void {
   const i = st.idx(x, y);
   if (st.wall[i] === 0 || st.wall[i] === newWall) return;
   st.wall[i] = newWall;
+  if (!cascades) return;
+  genSquareWallFrame(st, rng, x, y);
 }
 /** Convert_ActuallyConvertTorch（cs:56762-56785）：火把样式帧改写；num==22 时净化目标恒 21。 */
 function convertActuallyTorch(st: TileStore, x: number, y: number, newStyle: number): void {
@@ -310,7 +326,7 @@ function convGrassFamily(sheet: number): boolean {
  *  ★IIIII80 翻案：原近似②只做「Keep 或 Kill」二态——official 有 596/616/5/323 的
  *  整树换种支（ConvertTreeAndGround），fish mox 全图净化把大量树基落在转化面上时该
  *  支高频命中（曾 ~200 格 sapling/树残差）。 */
-function tryConvertingOrKillingTreesAbove(st: TileStore, rng: RNG, x: number, y: number, newSheet: number): void {
+function tryConvertingOrKillingTreesAbove(st: TileStore, rng: RNG, gs: GenState, x: number, y: number, newSheet: number): void {
   if (!st.inBounds(x, y)) return;
   if (!st.flags[st.idx(x, y)]) return;
   if (y - 1 < 1 || !st.flags[st.idx(x, y - 1)]) return;               // InWorld(...,2)
@@ -347,6 +363,9 @@ function convertCell(
   st: TileStore, rng: RNG, gs: GenState,
   i: number, j: number, conversionType: number, tiles: boolean, walls: boolean,
 ): void {
+  const cascades = conversionType === 0;   // ★IIIII87：净化面(0) 才启用尾级联（fish mox 实证）；
+                                           // 其余 conversionType 的级联面待逐支还原后开放（toadstool
+                                           // 蘑菇臂回归实证：case3 级联含尚未镜像的掷骰/重帧副作用）。
   if (i < 1 || j < 1 || i >= st.w - 1 || j >= st.h - 1) return;       // InWorld(i,j,1)
   if (!tiles && !walls) return;
   const ii = st.idx(i, j);
@@ -355,40 +374,40 @@ function convertCell(
 
   if (conversionType === 2) {                                         // ── case 2 神圣 ──
     if (walls) {
-      if (WALL_CONV_GRASS.has(wall) && wall !== 70) convertActuallyWall(st, i, j, 70);
-      else if (WALL_CONV_STONE.has(wall) && wall !== 28) convertActuallyWall(st, i, j, 28);
-      else if (WALL_CONV_HARDENED_SAND.has(wall) && wall !== 219) convertActuallyWall(st, i, j, 219);
-      else if (WALL_CONV_SANDSTONE.has(wall) && wall !== 222) convertActuallyWall(st, i, j, 222);
-      else if (WALL_CONV_NEW1.has(wall) && wall !== 200) convertActuallyWall(st, i, j, 200);
-      else if (WALL_CONV_NEW2.has(wall) && wall !== 201) convertActuallyWall(st, i, j, 201);
-      else if (WALL_CONV_NEW3.has(wall) && wall !== 202) convertActuallyWall(st, i, j, 202);
-      else if (WALL_CONV_NEW4.has(wall) && wall !== 203) convertActuallyWall(st, i, j, 203);
+      if (WALL_CONV_GRASS.has(wall) && wall !== 70) convertActuallyWall(st, rng, i, j, 70, cascades);
+      else if (WALL_CONV_STONE.has(wall) && wall !== 28) convertActuallyWall(st, rng, i, j, 28, cascades);
+      else if (WALL_CONV_HARDENED_SAND.has(wall) && wall !== 219) convertActuallyWall(st, rng, i, j, 219, cascades);
+      else if (WALL_CONV_SANDSTONE.has(wall) && wall !== 222) convertActuallyWall(st, rng, i, j, 222, cascades);
+      else if (WALL_CONV_NEW1.has(wall) && wall !== 200) convertActuallyWall(st, rng, i, j, 200, cascades);
+      else if (WALL_CONV_NEW2.has(wall) && wall !== 201) convertActuallyWall(st, rng, i, j, 201, cascades);
+      else if (WALL_CONV_NEW3.has(wall) && wall !== 202) convertActuallyWall(st, rng, i, j, 202, cascades);
+      else if (WALL_CONV_NEW4.has(wall) && wall !== 203) convertActuallyWall(st, rng, i, j, 203, cascades);
     }
     if (!tiles) return;
     let t = SHEET_OF_TYPE[st.type[ii]];
     if (t === 4 && torchConvertible(t, st.frameY[ii], 2)) convertActuallyTorch(st, i, j, 20);
-    else if ((TILE_MOSS.has(t) || CONV_STONE.has(t)) && t !== 117) convertActuallyTile(st, rng, i, j, 117);
-    else if ((t = shOf(st, ii)), CONV_GOLF_GRASS.has(t) && t !== 492) convertActuallyTile(st, rng, i, j, 492);
-    else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 109 && t !== 492) convertActuallyTile(st, rng, i, j, 109);
-    else if ((t = shOf(st, ii)), CONV_ICE.has(t) && t !== 164) convertActuallyTile(st, rng, i, j, 164);
-    else if ((t = shOf(st, ii)), CONV_SAND.has(t) && t !== 116) convertActuallyTile(st, rng, i, j, 116);
-    else if ((t = shOf(st, ii)), CONV_HARDENED_SAND.has(t) && t !== 402) convertActuallyTile(st, rng, i, j, 402);
-    else if ((t = shOf(st, ii)), CONV_SANDSTONE.has(t) && t !== 403) convertActuallyTile(st, rng, i, j, 403);
+    else if ((TILE_MOSS.has(t) || CONV_STONE.has(t)) && t !== 117) convertActuallyTile(st, rng, i, j, 117, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_GOLF_GRASS.has(t) && t !== 492) convertActuallyTile(st, rng, i, j, 492, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 109 && t !== 492) convertActuallyTile(st, rng, i, j, 109, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_ICE.has(t) && t !== 164) convertActuallyTile(st, rng, i, j, 164, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_SAND.has(t) && t !== 116) convertActuallyTile(st, rng, i, j, 116, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_HARDENED_SAND.has(t) && t !== 402) convertActuallyTile(st, rng, i, j, 402, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_SANDSTONE.has(t) && t !== 403) convertActuallyTile(st, rng, i, j, 403, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_THORN.has(t)) genKillTile(st, rng, i, j);
     else if ((t = shOf(st, ii)) === 59
       && (shNb(st, i - 1, j) === 109 || shNb(st, i + 1, j) === 109
         || shNb(st, i, j - 1) === 109 || shNb(st, i, j + 1) === 109)) {
-      convertActuallyTile(st, rng, i, j, 0);                          // cs:55737 泥邻珍珠草回土
+      convertActuallyTile(st, rng, i, j, 0, cascades, gs);                          // cs:55737 泥邻珍珠草回土
     }
     return;
   }
 
   if (conversionType === 3) {                                         // ── case 3 蘑菇 ──
-    if (walls && WALL_GLOW_MUSHROOM.has(wall)) convertActuallyWall(st, i, j, 80);
+    if (walls && WALL_GLOW_MUSHROOM.has(wall)) convertActuallyWall(st, rng, i, j, 80, cascades);
     if (!tiles) return;
     let t = shOf(st, ii);
     if (t === 4 && torchConvertible(t, st.frameY[ii], 3)) convertActuallyTorch(st, i, j, 22);
-    else if (t === 60) convertActuallyTile(st, rng, i, j, 70);
+    else if (t === 60) convertActuallyTile(st, rng, i, j, 70, cascades, gs);
     else if ((t = shOf(st, ii)), CONV_THORN.has(t)) genKillTile(st, rng, i, j);
     return;
   }
@@ -401,43 +420,43 @@ function convertCell(
         if (j < Math.floor(gs.worldSurface)) {
           nw = rng.nextInt(10) !== 0 ? 63 : 65;                       // cs:56000-56004 必掷
         }
-        convertActuallyWall(st, i, j, nw);
-      } else if (wl === 262) convertActuallyWall(st, i, j, 61);
-      else if (wl === 274) convertActuallyWall(st, i, j, 185);
-      else if (wl === 292) convertActuallyWall(st, i, j, 204);
-      else if (wl === 293) convertActuallyWall(st, i, j, 205);
-      else if (wl === 294) convertActuallyWall(st, i, j, 206);
-      else if (wl === 295) convertActuallyWall(st, i, j, 207);
+        convertActuallyWall(st, rng, i, j, nw);
+      } else if (wl === 262) convertActuallyWall(st, rng, i, j, 61, cascades);
+      else if (wl === 274) convertActuallyWall(st, rng, i, j, 185, cascades);
+      else if (wl === 292) convertActuallyWall(st, rng, i, j, 204, cascades);
+      else if (wl === 293) convertActuallyWall(st, rng, i, j, 205, cascades);
+      else if (wl === 294) convertActuallyWall(st, rng, i, j, 206, cascades);
+      else if (wl === 295) convertActuallyWall(st, rng, i, j, 207, cascades);
       else if (wl === 61 || wl === 185 || wl === 204 || wl === 205 || wl === 206 || wl === 207) {
         // 空 arm：保持不变（须在 Stone 集判定前拦截——同 cs case 归组顺序）
       }
       // 上面 else-if 链中的 61/185/204-207 空 arm 已截流；以下为 default 支
-      else if (WALL_CONV_STONE.has(wl) && wl !== 349) convertActuallyWall(st, i, j, 349);
-      else if (WALL_CONV_NEW1.has(wl) && wl !== 212) convertActuallyWall(st, i, j, 212);
-      else if (WALL_CONV_NEW2.has(wl) && wl !== 213) convertActuallyWall(st, i, j, 213);
-      else if (WALL_CONV_NEW3.has(wl) && wl !== 214) convertActuallyWall(st, i, j, 214);
-      else if (WALL_CONV_NEW4.has(wl) && wl !== 215) convertActuallyWall(st, i, j, 215);
+      else if (WALL_CONV_STONE.has(wl) && wl !== 349) convertActuallyWall(st, rng, i, j, 349, cascades);
+      else if (WALL_CONV_NEW1.has(wl) && wl !== 212) convertActuallyWall(st, rng, i, j, 212, cascades);
+      else if (WALL_CONV_NEW2.has(wl) && wl !== 213) convertActuallyWall(st, rng, i, j, 213, cascades);
+      else if (WALL_CONV_NEW3.has(wl) && wl !== 214) convertActuallyWall(st, rng, i, j, 214, cascades);
+      else if (WALL_CONV_NEW4.has(wl) && wl !== 215) convertActuallyWall(st, rng, i, j, 215, cascades);
       else if (wl === 80) {
         // cs:56054-56062：左支必掷 Next(3)，命中则右支不再掷（|| 短路）
-        if (j < gs.worldSurface + 4 + rng.nextInt(3)) convertActuallyWall(st, i, j, 15);
-        else if (j > (st.h + gs.rockLevel) / 2 - 3 + rng.nextInt(3)) convertActuallyWall(st, i, j, 64);
-        else convertActuallyWall(st, i, j, 64);
+        if (j < gs.worldSurface + 4 + rng.nextInt(3)) convertActuallyWall(st, rng, i, j, 15, cascades);
+        else if (j > (st.h + gs.rockLevel) / 2 - 3 + rng.nextInt(3)) convertActuallyWall(st, rng, i, j, 64, cascades);
+        else convertActuallyWall(st, rng, i, j, 64, cascades);
       }
-      else if (WALL_CONV_HARDENED_SAND.has(wl) && wl !== 216) convertActuallyWall(st, i, j, 216);
-      else if (WALL_CONV_SANDSTONE.has(wl) && wl !== 187) convertActuallyWall(st, i, j, 187);
+      else if (WALL_CONV_HARDENED_SAND.has(wl) && wl !== 216) convertActuallyWall(st, rng, i, j, 216, cascades);
+      else if (WALL_CONV_SANDSTONE.has(wl) && wl !== 187) convertActuallyWall(st, rng, i, j, 187, cascades);
     }
     if (!tiles) return;
     let t = shOf(st, ii);
     if (t === 4 && torchConvertible(t, st.frameY[ii], 0)) convertActuallyTorch(st, i, j, 0);
-    else if (t === 492) convertActuallyTile(st, rng, i, j, 477);
-    else if ((t = shOf(st, ii)), CONV_JUNGLE_GRASS.has(t) && t !== 60) convertActuallyTile(st, rng, i, j, 60);
-    else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 2 && t !== 477) convertActuallyTile(st, rng, i, j, 2);
-    else if ((t = shOf(st, ii)), CONV_STONE.has(t) && t !== 1) convertActuallyTile(st, rng, i, j, 1);
-    else if ((t = shOf(st, ii)), CONV_SAND.has(t) && t !== 53) convertActuallyTile(st, rng, i, j, 53);
-    else if ((t = shOf(st, ii)), CONV_HARDENED_SAND.has(t) && t !== 397) convertActuallyTile(st, rng, i, j, 397);
-    else if ((t = shOf(st, ii)), CONV_SANDSTONE.has(t) && t !== 396) convertActuallyTile(st, rng, i, j, 396);
-    else if ((t = shOf(st, ii)), CONV_ICE.has(t) && t !== 161) convertActuallyTile(st, rng, i, j, 161);
-    else if ((t = shOf(st, ii)), CONV_MUSHROOM_GRASS.has(t)) convertActuallyTile(st, rng, i, j, 60);
+    else if (t === 492) convertActuallyTile(st, rng, i, j, 477, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_JUNGLE_GRASS.has(t) && t !== 60) convertActuallyTile(st, rng, i, j, 60, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_GRASS.has(t) && t !== 2 && t !== 477) convertActuallyTile(st, rng, i, j, 2, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_STONE.has(t) && t !== 1) convertActuallyTile(st, rng, i, j, 1, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_SAND.has(t) && t !== 53) convertActuallyTile(st, rng, i, j, 53, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_HARDENED_SAND.has(t) && t !== 397) convertActuallyTile(st, rng, i, j, 397, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_SANDSTONE.has(t) && t !== 396) convertActuallyTile(st, rng, i, j, 396, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_ICE.has(t) && t !== 161) convertActuallyTile(st, rng, i, j, 161, cascades, gs);
+    else if ((t = shOf(st, ii)), CONV_MUSHROOM_GRASS.has(t)) convertActuallyTile(st, rng, i, j, 60, cascades, gs);
     else if ((t = shOf(st, ii)), t === 32 || t === 352) genKillTile(st, rng, i, j);
     return;
   }
@@ -454,17 +473,29 @@ function shNb(st: TileStore, x: number, y: number): number {
 // ============================================================
 export function doDigExtraHoles(st: TileStore, rng: RNG, gs: GenState): void {
   const num = Math.trunc(st.w * 0.1);
+  // ★IIIII93 每 runner 边界标记（缺省零开销）：'r|k' 在该 runner 固定参数掷之前发——
+  //   seg_k 区间=固定 7/8 掷 + tileRunner 内耗，与 x86 taglog 的 DoDigExtraHoles 帧
+  //   簇+TileRunner 帧串逐一对应。
+  const i93gb = (globalThis as { __swGBand?: (t: string, d?: unknown) => void }).__swGBand;
   for (let k = 0; k < num; k++) {
+    if (i93gb) i93gb('r', k);
     const i2 = rng.nextIntRange(50, st.w - 50);                         // Next(50, w-50)
     const j = rng.nextIntRange(50, st.h - 50);                          // Next(50, h-50)
     let num2 = rng.nextIntRange(5, 16);                                 // Next(5,16)
     if (rng.nextInt(3) === 0) num2 += rng.nextInt(15);
     const steps = rng.nextIntRange(30, 201);                            // Next(30,201)
+    // ★IIIII93 定罪（cs:2853-2868）：原版调用点速度参数走 **float 域**——
+    //   (float)genRand.Next(-15,16) * 0.1f / (float)genRand.Next(10,26) * 0.1f，
+    //   反编译文本显式 f 强转。TileRunner 的菱形盒截断边界对 px/py 累计轨迹
+    //   的 ulp 级差敏感（speeds 是 0.05 格点量子叠加），曾致 jagged 链 #16
+    //   从第 10 个 runner 起轨迹分叉（记账差首现于该处：k10 +2 掷、其后世界态
+    //   全体漂移）。修=双参镜像 fround。cs 锚：DoDigExtraHoles cs:2853；
+    //   TileRunner 参数为 double 形参，转换发生在调用点乘法期。
     tileRunner(st, rng, gs, i2, j, {
       strength: num2, steps,
       type: -1, addTile: false,
-      speedX: rng.nextIntRange(-15, 16) * 0.1,                           // Next(-15,16)*0.1f
-      speedY: rng.nextIntRange(10, 26) * 0.1,                            // Next(10,26)*0.1f
+      speedX: Math.fround(rng.nextIntRange(-15, 16) * Math.fround(0.1)), // (float)x*0.1f
+      speedY: Math.fround(rng.nextIntRange(10, 26) * Math.fround(0.1)),  // (float)y*0.1f
       noYChange: true,
     });
   }
@@ -571,8 +602,16 @@ export function doSurfaceIsMushroomsCore(st: TileStore, rng: RNG, gs: GenState):
     return;
   }
   for (let k = 0; k < st.w; k++) {
-    const lim = Math.floor(gs.worldSurface) + rng.nextInt(3);           // per-column 必掷
-    for (let l = 0; l < lim; l++) {
+    // ★IIIII97b（toad #18 单刀定罪，wg.cs:2127-2129 照录；同族裸查 :782/:2522/:18520/
+    // :25911 在案未触）：C# 内层 for 条件
+    // `(double)l < Main.worldSurface + (double)genRand.Next(3)` 是【每迭代求值】
+    // ——判定即掷骰、负判亦耗骰 ⇒ 每列耗 B+1 掷（B=覆盖行数；整值 ws 下
+    // l≤ws 无条件通过仍各耗一掷，l=ws 需掷≥1 才继续，l=ws+1 需次掷=2）。
+    // 旧实现「一列一掷 upfront lim=floor(ws)+r」覆盖律同分布但掷流逐列错位，
+    // 两个边界行(y=326/327)的覆盖集合互相翻转 ⇒ toad mile8 #18 单行带指纹
+    // T0>59×349/T59>0×238/T0>60×86/T60>0×73（#19..#105 为其级联投影）。
+    let l = 0;
+    while (l < gs.worldSurface + rng.nextInt(3)) {
       const ii = st.idx(k, l);
       if (shOf(st, ii) === 60) convertCell(st, rng, gs, k, l, 3, true, true);
       if (st.wall[ii] === 15) convertCell(st, rng, gs, k, l, 3, true, true);
@@ -581,6 +620,7 @@ export function doSurfaceIsMushroomsCore(st: TileStore, rng: RNG, gs: GenState):
       const wl = st.wall[ii];
       if (wl === 63 || wl === 65 || wl === 66 || wl === 68 || wl === 64
         || wl === 205 || wl === 206 || wl === 207) st.wall[ii] = 80;
+      l++;
     }
   }
 }

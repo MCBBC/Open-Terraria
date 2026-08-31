@@ -144,12 +144,41 @@ interface Cap { gs: GenState; chests: ChestSink }
     runUnderworldPass(st, rng, gsc!);
     if (!!gsc!.seedFlags.remix) generateUnderworldStartingMound(st, rng, gsc!);
     else if (!gsc!.seedFlags.drunkWorld) underworldAshGrassTrees(st, rng, gsc!, false);
-    runHellfort();
-    async function runHellfort() {
+    {
       const m = await import('../src/world/gen/vanilla/HellFortPass');
       m.runHellFortPass(st, rng, gsc!, undefined, cap!.chests);
     }
     if (gsc!.seedFlags.drunkWorld) underworldAshGrassTrees(st, rng, gsc!, true);
+    // ── 刀② finalize 合并扫描复演（WorldGen.cs:22639-50 口径）+ 三格事件流 ──
+    const evs: string[] = [];
+    (globalThis as unknown as { __swI87K?: ((ev: string, x: number, y: number) => void) | undefined }).__swI87K =
+      (ev, x, y) => { if (x >= bx0 - 25 && x <= bx1 + 25 && y >= by0 - 25 && y <= by1 + 25) evs.push(`${ev}@${x},${y}`); };
+    const trioState = (): string => [[1682, 730], [1681, 731], [1682, 731]].map(([x, y]) => {
+      const i = st.idx(x, y);
+      return `(${x},${y}) act=${st.flags[i] & 1} sheet=${SHEET[st.type[i]]} l=${st.liquid[i]} ty${st.liquidType[i]}`;
+    }).join(' | ');
+    console.log('[pre-scan]', trioState());
+    {
+      const rows: string[] = [];
+      for (let y = 726; y <= 736; y++) {
+        let r = `y${y}: `;
+        for (let x = 1677; x <= 1691; x++) {
+          const i = st.idx(x, y);
+          const sheet = SHEET[st.type[i]];
+          r += `${sheet >= 100 ? String(sheet).slice(0, 3) : String(sheet).padStart(3)}/a${st.flags[i] & 1}/l${String(st.liquid[i]).padStart(3)}/t${st.liquidType[i] - 1} `;
+        }
+        rows.push(r);
+        console.log(rows.at(-1));
+      }
+      void rows;
+    }
+    console.log('[evs-in-box pre]', evs.length);
+    const settleMod = await import('../src/world/liquid/settle');
+    settleMod.finalGenMergeScan(st);
+    console.log('[post-scan]', trioState());
+    console.log(`[evs-in-box total]=${evs.length}`);
+    for (const e of evs.slice(0, 40)) console.log('  ', e);
+    delete (globalThis as unknown as { __swI87K?: unknown }).__swI87K;
   } finally {
     LiquidSim.liqBoxSink = null;
     lines.push('---END');

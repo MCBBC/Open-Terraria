@@ -109,7 +109,10 @@ it('IIIII44·G3 tileTable 单源消费冒烟', () => {
 });
 
 const RUN = process.env.SW_I46 === '1';
-const G2 = process.env.SW_I46_G2 ?? '/tmp/iii46-out/x86-skyblock';
+// ★IIIII96b（2026-08-31）重锚：真值桶迁居 ~/GoldenChains/golden-skyblock（与旧
+// /tmp/iii46-out/x86-skyblock 经 diff -rq 全树逐字节同批份,IIIII90b 收养）。
+// /tmp 直引一律退役（/tmp 清理已多次灭失认证桶）。
+const G2 = process.env.SW_I46_G2 ?? `${process.env.HOME}/GoldenChains/golden-skyblock`;
 const SEED = process.env.SW_I46_SEED ?? '20260829';
 const EVIL = Number(process.env.SW_I46_EVIL ?? 1);
 const W = Number(process.env.SW_I46_W ?? 4200), H = Number(process.env.SW_I46_H ?? 1200);

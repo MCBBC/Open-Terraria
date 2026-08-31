@@ -2,7 +2,8 @@
 // 帧格式对齐原版：[u16 len][u8 msgId][payload...]，小端，包上限 65535B。
 // 消息 ID 尽量沿用原版 MessageID 编号（Hello=1/SLOT=3/WorldData=7/TileSection=10/
 // PlayerSpawn=12/PlayerControls=13/TileManipulation=17/SetTime=18/NetModules=82/Ping=154）；
-// 编码字段为本仓库简化集（protoVer 门禁，当前 v6——演进史见 PROTO_VER 注释）。
+// 编码字段为本仓库简化集（protoVer 门禁——当前版本号以 PROTO_VER 常量为唯一真值,
+// 演进史见其注释；曾在此硬编码「当前 v6」与常量漂移脱节，已移除字面量，二轮 FR5-F）。
 
 export const PROTO_MAGIC = 'SW1';
 /** v2：msg13 对齐原版 PlayerControls 布局（控制位+position+velocity）。
@@ -14,7 +15,29 @@ export const PROTO_MAGIC = 'SW1';
  *      tag 打包锚参数，访客重建真类本地跑确定性 AI）+ msg28 弹幕消亡上报（消幽灵弹窗口）+
  *      msg201 SSC 角色档下发（--ssc）。server 与 game 同仓库同时发布，不做向后兼容
  *  v7：PvP——msg13 flagBits[7]=hostile + 尾部 u8 team(0-5)；RoomPolicy 尾部 u8 pvpAllowed；
- *      msg44 StrikePlayer（近战 PvP 命中意向，被打方本地结算 HP——客户端权威模型）*/
+ *      msg44 StrikePlayer（近战 PvP 命中意向，被打方本地结算 HP——客户端权威模型）
+ *  2026-08-30 批（增量通道，不升版——同 SpectateFocus=150 / NetModule 先例纪律：
+ *      升版会踢掉在跑的旧 server 进程；两路均向后兼容，见各条目注释的降级矩阵）：
+ *    a) msg16 PlayerLifeMana 再追加尾段 [i16 pvpImmuneRemaining]——被击端 PvP 免疫
+ *       余量 tick 镜像（攻端 ItemCheck_MeleeHitPVP 门禁串含 player.immune 的
+ *       victim-settles 等价位）。旧 server 只读已知段后重打包 → 免疫尾被剥 =
+ *       接收端缺省 0（不拦 = 改动前行为）；新 server 结构透传。
+ *    b) 新增 msg117 PlayerHurt（原版 MessageID.PlayerHurtV2 同号）：被击端实扣后
+ *       的权威飘字/暴击广播帧。旧端 default 忽略未知号 = 看不到飘字，零影响。
+ *  2026-08-31 批（增量通道，不升版——同上先例纪律）：
+ *    c) msg27 kind=9 SparkleGuitarProj 真类重建支（分派序前置，弹 856 星璇之音）。
+ *       降级矩阵：新端发 → 旧 server（白名单 (kind&0x3f)>8）剥条 / 旧 client switch
+ *       落空建不出傀儡 = 弹体不显影，无崩溃无行为毒化；旧端发 → 新 client 结算面
+ *       按 projId===856 在 netPuppetProjContact 归一（视线门豁免/crit 不掷/浸剂
+ *       neither/×0.75 结算惩罚全按弹真值），故 kind9 主改的是【真类重建+盒尺寸
+ *       32×32+贴图渲染】非结算正确性。
+ *    d) msg27 aux 高位段（位 4-11）语义升级（不升版、不改线格式——GA4 同字段换
+ *       真值口径，★ε#3）：携值由「base4+装备链」升级为含**持械 item.crit（词缀
+ *       crt 已折入,Item.cs:585）**的 meleeCrit 完整终值——原版 Player.Update
+ *       :25712-714 每帧 `meleeCrit += inventory[selectedItem].crit` 无条件跨系别
+ *       加算,此前快照漏项致 PvP 暴击率跨端偏低 ≤20pp。双向降级矩阵：
+ *       新端发→旧端收 = 旧端照常 (aux>>4)&255 读到即新终值（自动变准）；
+ *       旧端发→新端收 = 缺持械加成＝旧行为不变。低 4 位浸剂段不动。*/
 export const PROTO_VER = 7;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
@@ -57,9 +80,15 @@ export const enum Msg {
                        //             bit1=boss；否则仅 u16 codeId（客户端 codeId→netId/key 表）]}
   SyncProjectile = 27, // 双向（各自的弹幕互播，原版同号）：
                        //   {u16 count, [u32 netId, u8 kind, str tag, i16 dmg, i16 aux, f32 x,y,vx,vy]}
-                       //   （kind 低 7 位: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot 4=MagicProj
+                       //   （kind 低 6 位（接收掩码 0x3f）: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot
+                       //    4=MagicProj
                        //    5=DukeSharknadoBolt 6=DukeSharknadoTornado 7=MLDeathray 8=LunarOrb（v6：
-                       //    Boss 锚定弹体，tag 打包锚参数——见 Game.netProjBroadcast 各分支注释）；
+                       //    Boss 锚定弹体，tag 打包锚参数——见 Game.netProjBroadcast 各分支注释）
+                       //    9=SparkleGuitarProj（2026-08-31 增量通道，真类重建纯视觉快照驱动；
+                       //    曾落进 kind1 武器族支被收端 melee 化结算——二轮 FR3-F。降级矩阵：
+                       //    新端发→旧 server 白名单剥条/旧 client switch 落空 = 该弹不显影，
+                       //    零崩溃零误伤；旧端发→新端结算面按 projId===856 真值归一，见
+                       //    Game.netPuppetProjContact isTune 支）；
                        //    bit7(0x80)=hostile——原版 Projectile.hostile，v5 起 kind0/2/3 携带
                        //    （服务器剥除非房主置位），访客端对 hostile 傀儡本地结算 Damage_EVP；
                        //    bit6(0x40)=pvp——v7 玩家 PvP 弹：pvpAllowed 房内 hostile 玩家的
@@ -84,6 +113,17 @@ export const enum Msg {
                        //   权威模型=被打方本地结算（与 msg16 客户端权威 HP 同构）：
                        //   攻击端只报意向，被打端过 InOpposingTeam 门禁后自行结算扣血，
                        //   伪造包最多影响显示、无法强制扣血。武器 id 供死因文案（DeathSource.Player）
+  PlayerHurt = 117,    // C→S→广播（2026-08-30 批，原版 MessageID.PlayerHurtV2 同号）：
+                       //   被击端实扣结算后的权威飘字帧（victim-settles 权威展示链）。
+                       //   线格式 {u8 slot, i16 dmg, f32 x, f32 y, i8 dir, u8 flags}——
+                       //   slot 服务器权威覆写为发送者（被击者本人,防冒名假飘字）、
+                       //   dmg = 本地实扣值（hp 减量,含防御/endurance 链终值,与原版
+                       //   CombatText 显示的 num2 同口径）、dir = 击退向 ±1、
+                       //   flags bit0=crit / bit1=pvp（原版 SendPlayerHurt bitsByte[0]/[1]
+                       //   同义,NetMessage.cs:2615-2621）。原版接收端以 msg117 重放 Hurt
+                       //   （MessageBuffer.cs:3882-3897：Hurt(quiet:true) → 音效+尘+飘字）；
+                       //   本仓重放面只剩飘字 = 接收端 showPickupLabel 族 addDamageNumber
+                       //   直出（Game 接线,见 ClientNet.onPlayerHurt 契约注）
   SpectateFocus = 150, // C→S {i16 targetSlot}（v8 观战，对齐原版 msg150 SetOrRequestSpectating
                        //   语义子集）：服务器把该端 AOI 过滤中心从自身 avatar 切到观战目标
                        //   （-1 = 恢复）。旧 server 不识别此号 → default 忽略，AOI 退回
@@ -504,6 +544,49 @@ export function readPlayerItems(r: NetReader): Array<ItemSyncEntry & { playerSlo
     out.push({ playerSlot, container, itemSlot, itemId, stack, prefix });
   }
   return out;
+}
+
+// ================= PlayerHurt（msg117，被击端实扣权威飘字帧；2026-08-30 批） =================
+
+/** flags 位（未知高位双端忽略——前向兼容；bit1 原版 SendPlayerHurt bitsByte[1]=pvp 同义） */
+export const enum PlayerHurtFlags {
+  Crit = 1 << 0,
+  Pvp = 1 << 1,
+}
+
+/** C→S / S→C 同形状。slot 段上行可填任意占位（服务器以发送者覆写——被击者本人
+ *  权威，杜绝「伪造他人受伤」假飘字）；dmg = 被击端实扣值（≤0 视为脏数据）。 */
+export interface PlayerHurtMsg {
+  slot: number;
+  dmg: number;
+  x: number; y: number;   // 世界 px（飘字锚点）
+  dir: number;            // 击退向 ±1（0 容忍,原版 hitDirection byte+1 编码的等价位）
+  flags: number;          // PlayerHurtFlags
+}
+
+export const PLAYER_HURT_LEN = 13; // u8 + i16 + f32*2 + i8 + u8
+
+export function writePlayerHurt(h: PlayerHurtMsg): Uint8Array {
+  const w = new NetWriter(Msg.PlayerHurt);
+  w.u8(h.slot & 0xff);
+  w.i16(Math.max(-32768, Math.min(9999, h.dmg)));
+  w.f32(h.x); w.f32(h.y);
+  w.i8(Math.max(-1, Math.min(1, h.dir | 0)));
+  w.u8(h.flags & 0xff);
+  return w.finish();
+}
+
+/** 截断/缺字段返回 null（调用方静默丢弃——同 readDoorEvent 先例）。
+ *  注意 remaining 判等严格 ==：多出的尾字节视为未知扩展拒收本帧
+ *  （flags 高位才承载前向兼容;结构级变更应走新 msgId） */
+export function readPlayerHurt(r: NetReader): PlayerHurtMsg | null {
+  if (r.remaining !== PLAYER_HURT_LEN) return null;
+  const slot = r.u8();
+  const dmg = r.i16();
+  if (!(dmg > 0)) return null;                       // 零伤/负伤无展示语义
+  const x = r.f32(), y = r.f32(), dir = r.i8(), flags = r.u8();
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;   // S6 NaN 清洗
+  return { slot, dmg, x, y, dir, flags };
 }
 
 // ================= tile 操作批量（msg17，对齐原版单点操作语义的批量变体） =================

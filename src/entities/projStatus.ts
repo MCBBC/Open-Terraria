@@ -84,6 +84,8 @@ const SUPPORTED: Record<number, string> = {
 };
 
 type StatusEnemy = { [field: string]: number | undefined };
+/** 导出别名（F1 狱火光环 Game 侧调用 applyBuffTicks 的形参面）——结构同 StatusEnemy */
+export type StatusEnemyLike = StatusEnemy;
 
 /** 运行时门上下文(对应表内 gate 标记;缺省 = 门条件按"可施加"处理) */
 export interface ProjStatusCtx {

@@ -17,6 +17,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
 import { Arrow } from '../src/entities/Arrow';
+import { canHit, canHitLine } from '../src/physics/LineOfSight';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 120;
@@ -288,5 +289,71 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
       { grav: 0, life: 600, pierce: 1, aimPoint: { tx: 60 + 500, ty: 90 } });
     step(orb2, 200, hooks);
     expect(orb2.dead).toBe(true);              // :55708-55712 localAI[1] ≥ 120
+  });
+
+  it('★F6 蜂族索敌视线=CanHit 步行族全盒(:27776)：非对称走廊判别场钉案', () => {
+    // 独立高世界（y 帽=maxTilesY−40=100；row≤76 不受 groundFill 干扰）。
+    // 初速置 0：索敌门开启（ai[0]>30）前弹不位移 ⇒ 判定几何完全静态可复核。
+    const st = new TileStore(220, 140);
+    // 近敌嵌入 5×5 实心单体内（自身格也被石覆）：任意逼近射线必踏到实心落脚格,
+    // 步行族/线族皆断——静态拓扑保证,不受斜向步进细节影响。
+    for (let x = 42; x <= 46; x++) {
+      for (let y = 58; y <= 62; y++) st.setTile(x, y, 1);
+    }
+    // 走廊地板带 row71 col40..56：步行族「垂直对偶双实心才夹杀」放行 / 线族三组 ANY 断。
+    // row70 上方全开 ⇒ 单侧邻接不构成步行夹杀——非对称性正是两族分叉点。
+    for (let x = 40; x <= 56; x++) st.setTile(x, 71, 1);
+    const decoy = mkEnemy(1, 44 * 16, 60 * 16);              // 近敌 (704,960) 埋单体、曼哈顿更近
+    const target = mkEnemy(2, 55 * 16, 70 * 16);             // 远敌 (880,1120) 走廊尽头
+    const player = new Player(30 * 16, 40 * 16, new Inventory());
+    const hooks = ({
+      world: { store: st, flags: { hardMode: false } } as never,
+      player: player as never,
+      enemies: () => [decoy, target],
+      critters: () => [], spawnDrop: () => null, damagePlayer: () => {},
+      addDamageNumber: () => {}, cutTile: () => {}, onEnemyKilled: () => {},
+      spawnEnemy: () => {}, spawnParticles: () => {}, notifyInventoryChanged: () => {},
+      playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
+      spawnDust: (() => null) as never,
+    }) as unknown as GameHooks;
+    const bee = new Arrow(30 * 16, 0, 0, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
+    (bee as unknown as { y: number }).y = 70 * 16 - bee.h / 2;   // 弹心精确落在 row70 走廊线
+    // 双向自证（与实现同参）：D 两族皆断 / T 步行通·积分线断 ⇒ 行为分叉只在 T 面
+    const ray = (e: MockEnemy) => [bee.x, bee.y, bee.w, bee.h, e.x, e.y, e.w, e.h] as const;
+    expect(canHit(st, ...ray(decoy))).toBe(false);
+    expect(canHitLine(st, ...ray(decoy))).toBe(false);
+    expect(canHit(st, ...ray(target))).toBe(true);
+    expect(canHitLine(st, ...ray(target))).toBe(false);
+    // 实弹：锁远者（近者板后被隔）——旧 canHitLine 挂法两候选全灭 → 恒不锁定。
+    // 只取【首次锁定拍】：一旦开始追踪即停步，防后续位移改变可达性结论。
+    const aimOf = () => bee as unknown as { bee36AimLocked: boolean; bee36Aim?: { cx: number } };
+    let lockedSeen = false;
+    for (let i = 0; i < 60 && !lockedSeen; i++) {
+      bee.fixedUpdate(1, hooks);
+      lockedSeen = aimOf().bee36AimLocked;
+    }
+    expect(lockedSeen).toBe(true);
+    expect(aimOf().bee36Aim?.cx).toBe(55 * 16);
+  });
+
+  it('★F5 湿敌豁免按 vanillaId(:27769 type==370)：湿 Duke 可追、湿常怪拒', () => {
+    const mkWet = (id: number, cx: number, cy: number, vanillaId?: number) =>
+      Object.assign(mkEnemy(id, cx, cy), { wet: true, vanillaId });
+    // A. 只有湿常怪（vanillaId 缺省≠370）→ 豁免永不命中,恒不锁定（旧 e.id!==370 同病此面）
+    const onlyWet = mkWet(9, 60 * 16 + 100, 90 * 16);
+    const hA = makeHooks([onlyWet]).hooks;
+    const beeA = new Arrow(60 * 16, 90 * 16, 5, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
+    step(beeA, 45, hA);
+    expect((beeA as unknown as { bee36AimLocked: boolean }).bee36AimLocked).toBe(false);
+    // B. 湿常怪近(240px)/湿 Duke 远(曼哈顿 600<800)→ 候选集只剩 Duke,锁定取远者
+    const wetNorm = mkWet(8, 60 * 16 + 240, 90 * 16);
+    const duke = mkWet(3, 60 * 16 + 400, 90 * 16 - 200, 370);
+    const hB = makeHooks([wetNorm, duke]).hooks;
+    const beeB = new Arrow(60 * 16, 90 * 16, 5, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
+    step(beeB, 45, hB);
+    const aimB = () => beeB as unknown as { bee36AimLocked: boolean; bee36Aim?: { cx: number; cy: number } };
+    expect(aimB().bee36AimLocked).toBe(true);
+    expect(aimB().bee36Aim?.cx).toBe(60 * 16 + 400);
+    expect(aimB().bee36Aim?.cy).toBe(90 * 16 - 200);
   });
 });

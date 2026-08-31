@@ -1,0 +1,274 @@
+// IIII95：REMIX 修面回归「关键槽五点」仪（#0 地形 / #45 Wet_Jungle / #46 Jungle_Temple /
+// #47 Hives / #105 Final_Cleanup——对被改 HiveSpiderPass+CaveWallsPass 的前后夹逼+两端锚）。
+// 三模式（互斥；恒一测试跳过另二）：
+//   A · DUMP：   SW_SPOT_CHAIN=g …            —— G2 八通道对拍（mile8 同口径、无 act-continue）
+//   B · AB-WRT： SW_SPOT_ABW=/dir             —— 无 G2 桶（const 等）：当前树基线快照落盘
+//                （须配 SW_SPOT_NOFIX=1 关掉本批两支新 remix 臂＝A 侧，目录充当回归基线）
+//   C · AB-CMP： SW_SPOT_ABC=/dir             —— 默认树（臂在位＝B 侧）vs 基线快照逐字节
+// 用法示例：
+//   cd game && SW_MB_1457=1 SW_SPOT_CHAIN=g npx vitest run tools/_iii100spot.test.ts
+//   cd game && SW_MB_1457=1 SW_SPOT_CHAIN=const SW_SPOT_NOFIX=1 SW_SPOT_ABW=/tmp/iii100-out/ab-const npx vitest run tools/_iii100spot.test.ts
+//   cd game && SW_MB_1457=1 SW_SPOT_CHAIN=const SW_SPOT_ABC=/tmp/iii100-out/ab-const npx vitest run tools/_iii100spot.test.ts
+import { it } from 'vitest';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { generateWorld } from '../src/world/gen/WorldGen';
+import { TILE_DEFS } from '../src/data/tiles';
+import { RNG } from '../src/core/rng';
+import type { TileStore } from '../src/world/TileStore';
+
+interface ChainCfg { name: string; seed: string; evil: -1 | 0 | 1; flags?: Record<string, boolean>; w?: number; h?: number; g2?: string }
+const HOME = process.env.HOME ?? '';
+const C = (...p: string[]): string => `${HOME}/GoldenChains/${p.join('/')}`;
+const CHAINS: Record<string, ChainCfg> = {
+  g:         { name: 'g',         seed: '9293480',    evil: 0,  g2: C('golden-g') },
+  s22222:    { name: 's22222',    seed: '22222',      evil: 1,  g2: C('gen2-s22222') },
+  m:         { name: 'm',         seed: '20260811',   evil: 0,  w: 6400, h: 1800, g2: C('gen2-m') },
+  const:     { name: 'const',     seed: '1321365005', evil: -1, flags: { theConstant: true } },
+  ntb:       { name: 'ntb',       seed: '1372357239', evil: -1, flags: { notTheBees: true }, g2: C('gen2-ntb') },
+  // ★IIIII97b：notraps/c12345 桶收养迁居（原直引 /tmp 灭失高危路径，照 fishmox §0-1
+  //   前例迁 ~/GoldenChains；golden-notraps 含 pc2.txt sha256 9de78680…fdb，两桶
+  //   五点 8 通道完备性迁移前实测通过）
+  notraps:   { name: 'notraps',   seed: '1896728457', evil: 1,  flags: { noTraps: true }, g2: C('golden-notraps') },
+  c12345:    { name: 'c12345',    seed: '12345',      evil: 1,  g2: C('gen2-12345') },
+  // ★IIIII97b 笔误纠偏：认证配方=20260829/E1/skyblock（专用仪 _i46 实证 rc0；
+  // IIII96b §④ 警示项落地——旧值 evil:0 为 spot 表笔误）
+  skyblock:  { name: 'skyblock',  seed: '20260829',   evil: 1,  flags: { skyblock: true }, g2: C('golden-skyblock') },
+  drunk:     { name: 'drunk',     seed: '51620200',   evil: -1, flags: { drunkWorld: true }, g2: C('golden-drunk') },
+  celeb:     { name: 'celeb',     seed: '1999040562', evil: 0,  flags: { tenthAnniversary: true }, g2: C('golden-celeb') },
+  toadstool: { name: 'toadstool', seed: '771002',     evil: 0,  flags: { surfaceIsMushrooms: true }, g2: C('golden-toadstool') },
+  // ★IIIII96b：fishmox 桶由 /tmp/iii80-out/x86-fishmox 迁居 ~/GoldenChains/golden-fishmox
+  fishmox:   { name: 'fishmox',   seed: '771003',     evil: 0,  flags: { noInfection: true }, g2: C('golden-fishmox') },
+};
+
+const KEY = process.env.SW_SPOT_CHAIN ?? '';
+const cfg = CHAINS[KEY];
+const RUN = !!cfg;
+const ABW = process.env.SW_SPOT_ABW;
+const ABC = process.env.SW_SPOT_ABC;
+const NOFIX = process.env.SW_SPOT_NOFIX === '1';
+/** A/B 写读侧快照文件名（含槽位名；NOFIX 基线只认 -nofix 文件前缀区分两侧） */
+const SNAPSHOT_CHANS = ['flags', 'type', 'wall', 'liquid', 'liquidType', 'half', 'slope', 'wire'] as const;
+
+if (NOFIX) {
+  // A 侧环境哨兵：关掉本批新增的两支 remix 臂（HiveSpiderPass segCount/remix 加算与
+  // CaveWallsPass 石墙分档），供 AB 基线拍摄。HiveSpiderPass/CaveWallsPass 各自读取。
+  (globalThis as unknown as { __swSpNoFixArms?: boolean }).__swSpNoFixArms = true;
+}
+
+const SLOT_END_NAMES = new Map<number, string>([[0, '原版地形'], [58, '终清理']]);
+const LABEL2DUMP = new Map<string, number>([
+  ['LihzahrdTemple', 45], ['Beehives', 46], ['JungleShrines', 47],
+]);
+const N_POINTS = [0, 45, 46, 47, 105];
+
+let DUMPNAME = new Map<number, string>();
+{
+  try {
+    if (cfg?.g2) for (const f of readdirSync(cfg.g2)) {
+      const m = f.match(/^(\d{3})_(.+)\.typ$/);
+      if (m) DUMPNAME.set(Number(m[1]), m[2]);
+    }
+  } catch { /* ab/golden 模式无 g2 */ }
+}
+const le16 = (p: string): Uint16Array => {
+  const b = readFileSync(p);
+  return new Uint16Array(b.buffer, b.byteOffset, b.length >> 1);
+};
+const chansMissing = (idx: number): string[] => {
+  const nm = DUMPNAME.get(idx);
+  if (nm === undefined) return ['typ'];
+  const pfx = `${cfg!.g2}/${String(idx).padStart(3, '0')}_${nm}`;
+  if (!existsSync(`${pfx}.typ`)) return ['typ'];
+  return (['act', 'wal', 'liq', 'half', 'slope', 'lty', 'inact'] as const)
+    .filter((c) => !existsSync(`${pfx}.${c}`));
+};
+
+(RUN ? it : it.skip)(`five-key-slot parity chain=${KEY}${NOFIX ? '[A侧·noFix]' : ''}`, async () => {
+  if (!cfg) throw new Error(`unknown SW_SPOT_CHAIN=${KEY}`);
+  if ((ABW ? 1 : 0) + (ABC ? 1 : 0) > 1) throw new Error('ABW 与 ABC 互斥');
+  const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const s = TILE_DEFS[i]?.vanilla?.sheet;
+    if (typeof s === 'number') SHEET[i] = s;
+  }
+  const W = Number(process.env.SW_SPOT_W ?? cfg.w ?? 4200);
+  const H = Number(process.env.SW_SPOT_H ?? cfg.h ?? 1200);
+  const N = W * H;
+
+  if (cfg.g2) {
+    const miss = N_POINTS.flatMap((i) => chansMissing(i).map((c) => `#${i}[${c}]`));
+    if (miss.length) throw new Error(`${KEY}: G2 五点通道不全 ${miss.join(',')} (dir=${cfg.g2})`);
+  }
+
+  let store: TileStore | null = null;
+  interface Row { idx: number; tag: string; bad: boolean; desc: string }
+  const rows: Row[] = [];
+  const seenIdx = new Set<number>();
+
+  /** cmp vs G2 dump（mile8 全通道独立计数口径） */
+  const cmpDump = (idx: number, tag: string): Row => {
+    const nm = DUMPNAME.get(idx)!;
+    const pfx = `${cfg!.g2}/${String(idx).padStart(3, '0')}_${nm}`;
+    const xa = readFileSync(`${pfx}.act`); const xt = le16(`${pfx}.typ`);
+    const xw = le16(`${pfx}.wal`); const xl = readFileSync(`${pfx}.liq`);
+    const xhf = readFileSync(`${pfx}.half`); const xsl = readFileSync(`${pfx}.slope`);
+    const xlt = readFileSync(`${pfx}.lty`); const xia = readFileSync(`${pfx}.inact`);
+    const st = store!;
+    const cnt = [0, 0, 0, 0, 0, 0, 0, 0];
+    let fI = -1; const pairs = new Map<string, number>();
+    for (let i = 0; i < N; i++) {
+      const va = xa[i]!, ja = st.flags[i]! & 1;
+      if (va !== ja) { cnt[0]++; fI = fI < 0 ? i : fI; }
+      const vt = va ? xt[i]! : 0;
+      const jt = ja ? (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!]! : 9999) : 0;
+      if (vt !== jt) { cnt[1]++; fI = fI < 0 ? i : fI; const k = `T${vt}>${jt}`; pairs.set(k, (pairs.get(k) ?? 0) + 1); }
+      if (xw[i] !== st.wall[i]) { cnt[2]++; fI = fI < 0 ? i : fI; }
+      if (xl[i] !== st.liquid[i]) { cnt[3]++; fI = fI < 0 ? i : fI; }
+      if (xhf[i] !== st.half[i]) { cnt[4]++; fI = fI < 0 ? i : fI; }
+      if (xsl[i] !== st.slope[i]) { cnt[5]++; fI = fI < 0 ? i : fI; }
+      const vl = xl[i]! > 0 ? xlt[i]! + 1 : 0;
+      const jl = st.liquid[i]! > 0 ? st.liquidType[i]! : 0;
+      if (vl !== jl) { cnt[6]++; fI = fI < 0 ? i : fI; }
+      const via = xia[i]! ? 1 : 0;
+      const jia = (st.wire[i]! >>> 5) & 1;
+      if (via !== jia) { cnt[7]++; fI = fI < 0 ? i : fI; }
+    }
+    const desc = `${cnt.map((v, k) => `${['A', 'T', 'W', 'L', 'Hf', 'Sl', 'Lt', 'Ia'][k]}=${String(v).padStart(6)}`).join(' ')}` +
+      (cnt.some(Boolean) ? ` ✗ @(${fI % W},${(fI / W) | 0}) ${[...pairs.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${k}×${n}`).join(' ')}` : ' ✓');
+    console.log(`#${String(idx).padStart(3, '0')}_${nm} ← ${tag.padEnd(20)} ${desc}`);
+    return { idx, tag, bad: cnt.some(Boolean), desc };
+  };
+
+  /** serialize/deserialize（_iii98tm 同构，仅八通道 + 八通道判定用 type 半字节无帧通道） */
+  const serSt = (st: TileStore): Record<string, Uint8Array | Uint16Array> => {
+    const rec = st as unknown as Record<string, Uint8Array | Uint16Array>;
+    const out: Record<string, Uint8Array | Uint16Array> = {};
+    for (const c of SNAPSHOT_CHANS) out[c] = rec[c];
+    return out;
+  };
+  const writeSnap = (tagDir: string, slotName: string, idx: number): void => {
+    const d = `${ABW}/${slotName.replace(/[^\w]/g, '_')}_${String(idx).padStart(3, '0')}${NOFIX ? '' : ''}`;
+    mkdirSync(d, { recursive: true });
+    const snap = serSt(store!);
+    for (const c of Object.keys(snap)) writeFileSync(`${d}/${c}.bin`, Buffer.from(snap[c].buffer, snap[c].byteOffset, snap[c].byteLength));
+    writeFileSync(`${d}/hdr.json`, JSON.stringify({ w: W, h: H }));
+    console.log(`snap→ ${d}`);
+  };
+  const cmpSnap = (tagDir: string, slotName: string, idx: number): void => {
+    const d = `${ABC}/${slotName.replace(/[^\w]/g, '_')}_${String(idx).padStart(3, '0')}`;
+    if (!existsSync(`${d}/hdr.json`)) throw new Error(`${d}: AB 基线缺失`);
+    const hdr = JSON.parse(readFileSync(`${d}/hdr.json`, 'utf8')) as { w: number; h: number };
+    const snap = serSt(store!);
+    let diffs = '';
+    for (const c of Object.keys(snap)) {
+      const cur = snap[c];
+      const bytesPer = c === 'type' || c === 'wall' ? 2 : 1;
+      const buf = readFileSync(`${d}/${c}.bin`);
+      if (buf.length !== cur.length * bytesPer) throw new Error(`${d}/${c}: 尺寸漂移 ${buf.length}!=${cur.length * bytesPer}`);
+      let n = 0, fI = -1;
+      if (bytesPer === 2) {
+        const ref = new Uint16Array(buf.buffer, buf.byteOffset, buf.length >> 1);
+        for (let i = 0; i < N; i++) if (ref[i] !== cur[i]) { n++; if (fI < 0) fI = i; }
+      } else {
+        for (let i = 0; i < N; i++) if (buf[i] !== cur[i]) { n++; if (fI < 0) fI = i; }
+      }
+      if (n) diffs += ` ${c}:${n}@(${fI % hdr.w},${(fI / hdr.w) | 0})`;
+    }
+    console.log(`#${String(idx).padStart(3, '0')} ← ${tagDir.padEnd(20)} ${diffs ? `✗ A/B 差${diffs}` : '✓ byte-identical'}`);
+    rows.push({ idx, tag: slotName, bad: !!diffs, desc: diffs });
+  };
+
+  const RNGp = RNG.prototype as unknown as Record<string, unknown>;
+  const oReseed = RNGp.reseed as (this: unknown, s: number) => void;
+  const srcCache = new Map<string, string[]>();
+  const labelOf = (file: string, line: number): string => {
+    let src = srcCache.get(file);
+    if (!src) { try { src = readFileSync(file, 'utf8').split('\n'); } catch { src = []; } srcCache.set(file, src); }
+    for (let l = Math.min(line, src.length) - 1; l >= 0 && l >= line - 40; l--) {
+      const m = src[l]!.match(/▶([^（(]+?)[（(\s]/);
+      if (m) return m[1].trim();
+    }
+    return `${file.split('/').pop()}:${line}`;
+  };
+  // ABW/ABC 显式给出时优先（即使链带 G2）——本批的跨车道免疫 A/B 通道
+  const abMode = !!(ABW || ABC);
+  // ABW 写侧：三个 reseed 锚点也照常拍快照（写模式无 G2 也可独立成立）
+  RNGp.reseed = function (this: unknown, s: number) {
+    if (store && ABW) {
+      const stack = new Error().stack ?? '';
+      for (const line of stack.split('\n')) {
+        const m = line.match(/((?:\/|[\w./-]*)src\/[^\s()]+\.ts):(\d+):\d+/);
+        if (m && !m[1].includes('/core/rng')) {
+          const lab = labelOf(m[1], Number(m[2]));
+          const idx = LABEL2DUMP.get(lab);
+          if (idx !== undefined && !seenIdx.has(idx)) {
+            seenIdx.add(idx);
+            writeSnap(ABW, lab, idx);
+          }
+          break;
+        }
+      }
+      return oReseed.call(this, s);
+    }
+    if (store && !ABW && abMode) {
+      const stack = new Error().stack ?? '';
+      for (const line of stack.split('\n')) {
+        const m = line.match(/((?:\/|[\w./-]*)src\/[^\s()]+\.ts):(\d+):\d+/);
+        if (m && !m[1].includes('/core/rng')) {
+          const lab = labelOf(m[1], Number(m[2]));
+          const idx = LABEL2DUMP.get(lab);
+          if (idx !== undefined && !seenIdx.has(idx)) {
+            seenIdx.add(idx);
+            cmpSnap(lab, lab, idx);
+          }
+          break;
+        }
+      }
+    } else if (store && !ABW) {
+      const stack = new Error().stack ?? '';
+      for (const line of stack.split('\n')) {
+        const m = line.match(/((?:\/|[\w./-]*)src\/[^\s()]+\.ts):(\d+):\d+/);
+        if (m && !m[1].includes('/core/rng')) {
+          const lab = labelOf(m[1], Number(m[2]));
+          const idx = LABEL2DUMP.get(lab);
+          if (idx !== undefined && !seenIdx.has(idx)) {
+            seenIdx.add(idx);
+            if (ABC) cmpSnap(lab, lab, idx);
+            else if (cfg.g2) rows.push(cmpDump(idx, lab));
+          }
+          break;
+        }
+      }
+    }
+    return oReseed.call(this, s);
+  };
+  try {
+    await generateWorld({
+      width: W, height: H, seedText: cfg.seed, evil: cfg.evil,
+      seedFlags: cfg.flags,
+      onWorldPartial: (w, i, pn) => {
+        store = w.store as never as TileStore;
+        if (i === 0 || i === 58) {
+          if (pn !== SLOT_END_NAMES.get(i)) {
+            // skyblock 等 D 特形桶：终清理前存在额外特形槽（断线陷阱清理挂 #58 名），
+            // 只在该链首差点记录，不阻断（「名实不符」=命名约定差异而非内容差）
+            console.log(`[slot 命名差异] 槽末#${i} 实到「${pn}」（期望 ${SLOT_END_NAMES.get(i)}，记录不阻断）`);
+          }
+          const idx = i === 0 ? 0 : 105;
+          if (!seenIdx.has(idx)) {
+            seenIdx.add(idx);
+            if (ABC) cmpSnap('abcmp', pn, idx);
+            else if (ABW) writeSnap(ABW, pn, idx);
+            else if (cfg.g2) rows.push(cmpDump(idx, `槽末#${i}·${pn}`));
+          }
+        }
+      },
+    });
+  } finally { RNGp.reseed = oReseed; }
+
+  const missingPts = N_POINTS.filter((i) => !seenIdx.has(i));
+  if (missingPts.length) throw new Error(`${KEY}: 五点未全部取到,缺 ${missingPts}`);
+  const bad = rows.filter((r) => r.bad);
+  if (bad.length) throw new Error(`${KEY}: 五点出现差 → ${bad.map((r) => `#${r.idx}`).join(',')}${bad[0]?.desc ?? ''}`);
+  console.log(`${KEY}: 五点全绿 ✓`);
+}, 900_000);

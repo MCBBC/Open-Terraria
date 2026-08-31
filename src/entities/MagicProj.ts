@@ -8,7 +8,8 @@
 //   其 Main.cs:32420-32442 的 lerp 缩放/拖尾专属分支【不在此实现】——本类只做
 //   通用贴图绘制,勿把那族特例搬进来。
 import { Entity } from './Entity';
-import { hitCritters, hitTownNpcs, playerCanHitEnemy } from './projTargets';
+import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+import { hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy } from './projTargets';
 import { projSprite, projFrameImg, projFrameCount, PROJ_ROT_RIGHT } from './Arrow';
 import { projectileData } from '../data/vanillaProjectiles';
 import { TILE } from '../core/constants';
@@ -134,6 +135,33 @@ export class MagicProj extends Entity {
         (game as unknown as { tryManaCloakStarOnMagicHit?: (x: number, y: number) => void })
           .tryManaCloakStarOnMagicHit?.(e.x, e.y);
         e.hurt(crit ? this.damage * 2 : this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
+        // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
+        // 本类承载一碰即碎魔法弹（穿透数缺省 1）——无三旗 face 时末档
+        // `penetrate != 1 || applies` 判定为假 ⇒ 无写（:14180-14183 单发 flag3 族既绕
+        // :12636 免疫门也不回写窗口）。蓝队二轮 F5 起 bridge 自动读
+        // data/vanillaProjImmuneFaces.ts 三旗补表：带 usesLocal/idStatic 面的弹 id
+        // （如 gem-staff bolts 121-126/597 usesLocal cd60）在此处自动落「写 0 清窗」
+        // 档,调用点无需硬编码。
+        noteVanillaProjImmune(game, this.projId, (e as unknown as { id?: number }).id ?? -1);
+        // ★批⑥（2026-08-31）幽灵伤害头 ghostHurt（Projectile.cs:13881 / :12021,
+        // SpectreSoulProj.ts 承载）：magic 弹 + Spectre Mask 套装 → 受害者 Center
+        // 放浮魂弹 356。dealt 读 Enemy.lastStrikeDealt（ StrikeNPC num41 等价位）
+        {
+          const v156 = ent as unknown as { vanillaId?: number | null; lastStrikeDealt?: number;
+            maxHp?: number; def?: { lifeMax?: number } };
+          if (this.projId > 0 && projectileData(this.projId)?.magic
+            && playerHasGhostHurt(game.player)) {
+            ghostHurtOnHit(game,
+              { magic: true, projDamage: this.damage,
+                projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+                ownerCx: game.player.cx, ownerCy: game.player.cy },
+              { x: e.x, y: e.y, w: e.w, h: e.h,
+                cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+                vanillaId: v156.vanillaId,
+                lifeMax: v156.maxHp ?? v156.def?.lifeMax,
+                dealt: v156.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
+          }
+        }
         this.dead = true;
         return;
       }

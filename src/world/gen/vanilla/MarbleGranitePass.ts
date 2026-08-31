@@ -8,6 +8,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { FastRandom } from '../../../core/rng';
+import { intersectsAnyPotentialDungeonBounds } from './DungeonStyles1457'; // ★IIIII88 dual 钉角/拒带
 
 const MARBLE = TILE_BY_KEY['v_367_marble_block']!;
 const GRANITE = TILE_BY_KEY['v_368_granite_block']!;
@@ -150,6 +151,9 @@ export function runMarbleGranitePass(st: TileStore, rng: RNG, gs: GenState): voi
 export function runMarblePass(st: TileStore, rng: RNG, gs: GenState): void {
   drunkStoneSwap = !!gs.seedFlags.drunkWorld;
   let count = worldGenRangeCount(st, rng, 4, 8, 'area');
+  // ★IIIII88（WorldGen.cs:12821-12824）：dual 时 Marble Count GetRandom 后减半
+  if (gs.seedFlags.dualDungeons) count = Math.trunc(count / 2);
+  const isDual = !!gs.seedFlags.dualDungeons;
   let placed = 0, fails = 0;
   while (placed < count) {
     const frac = placed / count;
@@ -158,18 +162,39 @@ export function runMarblePass(st: TileStore, rng: RNG, gs: GenState): void {
     while (!ok) {
       budget--;
       if (budget <= 0) break;
-      const x0 = Math.trunc(frac * (st.w - 200)) + 100;
-      x = rng.int(x0, x0 + Math.trunc((st.w - 160) / count) - 1);   // RandomRectanglePoint 先 X
-      // ★IIIII58：REMIX 世界走 cs:12857 第二支——Y 带 worldSurface+100 .. rockLayer
-      const y0 = !!gs.seedFlags.remix
-        ? Math.trunc(gs.genWorldSurface) + 100
-        : Math.trunc(gs.genRockLayer) + 20;                          // GenVars.rockLayer（raw 截断）
-      const yH = !!gs.seedFlags.remix
-        ? Math.trunc(gs.genRockLayer) - Math.trunc(gs.genWorldSurface) - 100
-        : st.h - (Math.trunc(gs.genRockLayer) + 40) - 200;
-      y = rng.int(y0, y0 + yH - 1);                                  // 后 Y
-      while (x > st.w * 0.45 && x < st.w * 0.55) x = rng.int(gs.beachDistance, st.w - gs.beachDistance - 1);
-      ok = true;
+      if (!isDual) {
+        const x0 = Math.trunc(frac * (st.w - 200)) + 100;
+        x = rng.int(x0, x0 + Math.trunc((st.w - 160) / count) - 1);   // RandomRectanglePoint 先 X
+        // ★IIIII58：REMIX 世界走 cs:12857 第二支——Y 带 worldSurface+100 .. rockLayer
+        const y0 = !!gs.seedFlags.remix
+          ? Math.trunc(gs.genWorldSurface) + 100
+          : Math.trunc(gs.genRockLayer) + 20;                          // GenVars.rockLayer（raw 截断）
+        const yH = !!gs.seedFlags.remix
+          ? Math.trunc(gs.genRockLayer) - Math.trunc(gs.genWorldSurface) - 100
+          : st.h - (Math.trunc(gs.genRockLayer) + 40) - 200;
+        y = rng.int(y0, y0 + yH - 1);                                  // 后 Y
+        while (x > st.w * 0.45 && x < st.w * 0.55) x = rng.int(gs.beachDistance, st.w - gs.beachDistance - 1);
+        ok = true;
+      } else {
+        // ★IIIII88 双地牢钉角支（WorldGen.cs:12836-12858）：origin 按 placed 序号钉两侧
+        //   （case0=左上 120..220、case1=右上 w-220..w-120、default=全幅 120..w-120），
+        //   ±40 拒带门=IntersectsAnyPotentialDungeonBounds 取反——命中则整环重掷。
+        let xa = 120, xb = 121;
+        switch (placed) {
+          case 0: xa = 120; xb = 220; break;
+          case 1: xa = st.w - 120 - 100; xb = st.w - 120; break;
+          default: xa = 120; xb = st.w - 120; break;
+        }
+        const y0r = !!gs.seedFlags.remix
+          ? Math.trunc(gs.genWorldSurface) + 100
+          : Math.trunc(gs.genRockLayer) + 20;
+        const yHr = !!gs.seedFlags.remix
+          ? Math.trunc(gs.genRockLayer) - Math.trunc(gs.genWorldSurface) - 100
+          : st.h - (Math.trunc(gs.genRockLayer) + 40) - 200;
+        x = rng.int(xa, xa + (xb - xa) - 1);
+        y = rng.int(y0r, y0r + yHr - 1);
+        ok = !intersectsAnyPotentialDungeonBounds(x - 40, y - 40, x + 40, y + 40);
+      }
     }
     fails++;
     if (ok && marblePlace(st, rng, x, y)) { placed++; fails = 0; }
@@ -295,6 +320,9 @@ function marblePlace(st: TileStore, rng: RNG, ox0: number, oy0: number): boolean
 export function runGranitePass(st: TileStore, rng: RNG, gs: GenState): void {
   drunkStoneSwap = !!gs.seedFlags.drunkWorld;
   let count = worldGenRangeCount(st, rng, 4, 8, 'width');
+  // ★IIIII88（WorldGen.cs:12892-12895）：dual 时 Granite Count GetRandom 后减半
+  if (gs.seedFlags.dualDungeons) count = Math.trunc(count / 2);
+  const isDual = !!gs.seedFlags.dualDungeons;
   const pts: Array<[number, number]> = [];
   let placed = 0, fails = 0;
   while (placed < count) {
@@ -304,18 +332,37 @@ export function runGranitePass(st: TileStore, rng: RNG, gs: GenState): void {
     while (!ok) {
       budget--;
       if (budget <= 0) break;
-      const x0 = Math.trunc(frac * (st.w - 200)) + 100;
-      x = rng.int(x0, x0 + Math.trunc((st.w - 200) / count) - 1);
-      // ★IIIII58：REMIX 世界走 cs:12932 第二支——Y 带 worldSurface+100 .. rockLayer
-      const y0 = !!gs.seedFlags.remix
-        ? Math.trunc(gs.genWorldSurface) + 100
-        : Math.trunc(gs.genRockLayer) + 20;
-      const yH = !!gs.seedFlags.remix
-        ? Math.trunc(gs.genRockLayer) - Math.trunc(gs.genWorldSurface) - 100
-        : st.h - (Math.trunc(gs.genRockLayer) + 40) - 200;
-      y = rng.int(y0, y0 + yH - 1);
-      while (x > st.w * 0.45 && x < st.w * 0.55) x = rng.int(gs.beachDistance, st.w - gs.beachDistance - 1);
-      ok = true;
+      if (!isDual) {
+        const x0 = Math.trunc(frac * (st.w - 200)) + 100;
+        x = rng.int(x0, x0 + Math.trunc((st.w - 200) / count) - 1);
+        // ★IIIII58：REMIX 世界走 cs:12932 第二支——Y 带 worldSurface+100 .. rockLayer
+        const y0 = !!gs.seedFlags.remix
+          ? Math.trunc(gs.genWorldSurface) + 100
+          : Math.trunc(gs.genRockLayer) + 20;
+        const yH = !!gs.seedFlags.remix
+          ? Math.trunc(gs.genRockLayer) - Math.trunc(gs.genWorldSurface) - 100
+          : st.h - (Math.trunc(gs.genRockLayer) + 40) - 200;
+        y = rng.int(y0, y0 + yH - 1);
+        while (x > st.w * 0.45 && x < st.w * 0.55) x = rng.int(gs.beachDistance, st.w - gs.beachDistance - 1);
+        ok = true;
+      } else {
+        // ★IIIII88 双地牢钉角支（WorldGen.cs:12907-12933）：与 Marble 同形,±40 拒带
+        let xa = 120, xb = 121;
+        switch (placed) {
+          case 0: xa = 120; xb = 220; break;
+          case 1: xa = st.w - 120 - 100; xb = st.w - 120; break;
+          default: xa = 120; xb = st.w - 120; break;
+        }
+        const y0r = !!gs.seedFlags.remix
+          ? Math.trunc(gs.genWorldSurface) + 100
+          : Math.trunc(gs.genRockLayer) + 20;
+        const yHr = !!gs.seedFlags.remix
+          ? Math.trunc(gs.genRockLayer) - Math.trunc(gs.genWorldSurface) - 100
+          : st.h - (Math.trunc(gs.genRockLayer) + 40) - 200;
+        x = rng.int(xa, xa + (xb - xa) - 1);
+        y = rng.int(y0r, y0r + yHr - 1);
+        ok = !intersectsAnyPotentialDungeonBounds(x - 40, y - 40, x + 40, y + 40);
+      }
     }
     fails++;
     if (ok && !biomeTileCheck(st, x, y) && !(st.inBounds(x, y) && st.flags[st.idx(x, y)])) {

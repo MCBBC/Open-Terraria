@@ -43,6 +43,14 @@ import { checkTileBreakability } from './HalfBrickPass';
 
 /** 世界树对拍探针开关（种子等价期临时；默认关闭零开销） */
 const LT_TRACE = typeof process !== 'undefined' && !!process.env.LT_TRACE;
+// ★IIIII97c 微段仪：叶簇/走道域每事件打印（SW_I109_MARK 门控；与 x86 taglog 主实例流对位）
+const MK109 = typeof process !== 'undefined' && !!process.env.SW_I109_MARK;
+if (typeof process !== 'undefined') console.log(`[LT109load] mark=${process.env.SW_I109_MARK} mk=${MK109}`);
+function mk109(s: string): void {
+  if (!MK109) return;
+  const rc = (globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1;
+  console.log(`M109|${s}|rc=${rc}`);
+}
 function ltStream(): string {
   if (!LT_TRACE) return '';
   const ur = (ltRngCache as unknown as { ur: { seedArray: Int32Array; inext: number } }).ur;
@@ -504,13 +512,13 @@ function growLivingTreePassageRoom(
   if (num < 0) num3--;
   if (num > 0) num3++;
   const num4 = rng.int(15, 29);
-  if (LT_TRACE) console.log(`R1 st=${ltStream()} num=${num} num3=${num3} num5num=${num4}`);
   let num5 = num3 + num4;
   if (num < 0) { num5 = num3; num3 -= num4; }
+  mk109(`PR0|ml=${minl}|mr=${minr}|Y=${Y}|sgn=${num}|num3=${num3}|w=${num4}`);
   // cs:29321-29330:候选矩形碰到露天（无墙空气+地表以上）直接放弃
   for (let i = num3; i < num5; i++) {
     for (let j = Y - 20; j < Y + 10; j++) {
-      if (wallAt(st, i, j) === 0 && !activeAt(st, i, j) && j < worldSurface) return;
+      if (wallAt(st, i, j) === 0 && !activeAt(st, i, j) && j < worldSurface) { mk109(`PR1|airgate|i=${i}|j=${j}`); return; }
     }
   }
   // 第一腔（cs:29333-29360）：3×(Y+2-(Y-4)) 壳 + 内腔空心
@@ -642,16 +650,21 @@ function growLivingTreeHorizontalTunnel(st: TileStore, rng: RNG, gs: GenState, i
   const num3 = 80;                                               // cs:28786
   let num4 = 1;
   if (rng.int(0, 1) === 0) num4 *= -1;                           // cs:28793
+  mk109(`TU0|i=${i}|j=${j}|dir=${num4}`);
   for (let k = 0; k < 2; k++) {
     // ---- 向右探测（cs:28796-28860） ----
     if (right === i && num4 > 0) {
       for (let l = i + 5; l < i + num3; l++) {
         if (!inWorld(st, l, j, 10)) return false;
-        if (typeAt(st, l, j) === 48) break;                      // 荆棘阻挡
+        // ★IIIII97c 定罪①（cs:28803 `type==48`）：尖刺排除须比对原版 sheet 48——
+        //   本仓 tile id≠原版 TileID（v_48_spike 内部 id=102），旧 typeAt(...)===48
+        //   恒假 ⇒ JS 从不在尖刺列截断扫描，横隧走位/成败与原版分叉。
+        if (sheetAt(st, l, j) === 48) { mk109(`TUs|R|spike|l=${l}`); break; }
         if (typeAt(st, l, j) === LIVING_WOOD) {
           // cs:28827-28837：三行墙全 244（=邻树树干内腔）→ 从 l+2 接管
           let hit = true;
           for (let n = j - 2; n <= j; n++) if (wallAt(st, l + 2, n) !== WALL_LIVING_WOOD) hit = false;
+          mk109(`TUs|R|wood191|l=${l}|hit=${hit ? 1 : 0}`);
           if (hit) { k = 2; right = l + 2; }
           break;
         }
@@ -664,17 +677,19 @@ function growLivingTreeHorizontalTunnel(st: TileStore, rng: RNG, gs: GenState, i
           }
           if (activeAt(st, l, n5) || activeAt(st, l + 1, n5) || activeAt(st, l + 2, n5)) flag2 = false;
         }
-        if (flag2) { k = 2; right = l; break; }
+        if (flag2) { mk109(`TUs|R|acc|l=${l}`); k = 2; right = l; break; }
       }
     }
     // ---- 向左探测（cs:28861-28916） ----
     if (left === i && num4 < 0) {
       for (let l = i - 5; l > i - num3; l--) {
         if (!inWorld(st, l, j, 10)) return false;
-        if (typeAt(st, l, j) === 48) break;
+        // ★IIIII97c 定罪①镜像（cs:28868）
+        if (sheetAt(st, l, j) === 48) { mk109(`TUs|L|spike|l=${l}`); break; }
         if (typeAt(st, l, j) === LIVING_WOOD) {
           let hit = true;
           for (let n8 = j - 2; n8 <= j; n8++) if (wallAt(st, l - 3, n8) !== WALL_LIVING_WOOD) hit = false;
+          mk109(`TUs|L|wood191|l=${l}|hit=${hit ? 1 : 0}`);
           if (hit) { k = 2; left = l - 2; }
           break;
         }
@@ -687,14 +702,15 @@ function growLivingTreeHorizontalTunnel(st: TileStore, rng: RNG, gs: GenState, i
             }
             if (activeAt(st, l, n9) || activeAt(st, l - 1, n9) || activeAt(st, l - 2, n9)) flag3 = false;
           }
-          if (flag3) { k = 2; left = l; break; }
+          if (flag3) { mk109(`TUs|L|acc|l=${l}`); k = 2; left = l; break; }
         }
       }
     }
     num4 *= -1;
     if (k >= 2) break;
   }
-  if (left === right) return false;                              // cs:28919
+  if (left === right) { mk109(`TU1|fail|left===right`); return false; }   // cs:28919
+  mk109(`TU1|dig|left=${left}|right=${right}`);
   // ---- 挖通（cs:28921-29015） ----
   let flag4 = false, flag5 = false;
   for (let n10 = j - 5; n10 <= j + 1; n10++) {
@@ -857,12 +873,14 @@ function growLivingTreeMakePassage(
         minr += num12;
       }
       if (LT_TRACE) console.log(`MP6 st=${ltStream()} num4=${num4} num12=${num12} minl=${minl} minr=${minr}`);
+      mk109(`MP6|y=${num4}|n12=${num12}|ml=${minl}|mr=${minr}`);
       if (noSecretRoom) {
         num9--;
         if (num9 <= 0) {
           if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gpB|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
-          num9 = growLivingTreeHorizontalTunnel(st, rng, gs, num10, num4)
-            ? rng.int(5, 20) : rng.int(2, 10);    // cs:29182-29186
+          const tun = growLivingTreeHorizontalTunnel(st, rng, gs, num10, num4);
+          mk109(`MPtun|y=${num4}|ok=${tun ? 1 : 0}`);
+          num9 = tun ? rng.int(5, 20) : rng.int(2, 10);    // cs:29182-29186
           if (LT_TRACE) console.log(`MPt st=${ltStream()} num4=${num4}`);
         }
       }
@@ -1158,6 +1176,7 @@ export function growLivingTree(
     }
   }
   if (LT_TRACE) console.log(`GLTp roots st=${ltStream()} g=${ltGridHash(st)}`);
+  if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gtE|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);; (globalThis as unknown as { __ltSnapBox?: (t: string) => void }).__ltSnapBox?.('gtE')
   // ---- 叶簇（cs:28603-28720） ----
   // ★IIIII70 REMIX（1457 WorldGen.cs:28888-28891）：叶簇簇数 num2 在 remix 下**清零**
   //   （`if (remixWorldGen) { num2 = 0; }`）——反向体世界树只长活木不长叶/地被，
@@ -1173,6 +1192,7 @@ export function growLivingTree(
     const n46 = ax5[n43] + n44 * 2;
     const n47 = ax6[n43] - n44 * 2;
     const n48 = ax6[n43] + n44 * 2;
+    mk109(`LC|c=${n43}|round=${ax7[n43] ? 1 : 0}|x=${ax5[n43]}|y=${ax6[n43]}|n44=${n44}|box=${n45},${n46},${n47},${n48}`);
     const n49 = 2.0 - rng.int(0, 4) * 0.1;                // cs:28618
     for (let n50 = n45; n50 <= n46; n50++) {
       for (let n51 = n47; n51 <= n48; n51++) {
@@ -1190,28 +1210,39 @@ export function growLivingTree(
         if (inWorld(st, n50, n52, 5) && !activeAt(st, n50, n52)) {
           while (!activeAt(st, n50, n52 + 1) && n52 < n48) n52++;
           if (sheetAt(st, n50, n52 + 1) === 192) {
-            placeTilePile(st, n50, n52, rng.int(50, 51));
+            const sty = rng.int(50, 51);
+            const okT = placeTilePile(st, n50, n52, sty);
+            mk109(`TP|c=${n43}|x=${n50}|y=${n52}|st=${sty}|ok=${okT ? 1 : 0}`);
+          } else {
+            mk109(`TPs|c=${n43}|x=${n50}|bt=${sheetAt(st, n50, n52 + 1)}`);
           }
         }
       }
-      if (ax7[n43] || rng.int(0, 14) !== 0) continue;
+      if (ax7[n43]) continue;
+      const hit15 = rng.int(0, 14) === 0;                   // cs:28657 Next(15)
+      mk109(`BPG|c=${n43}|x=${n50}|h=${hit15 ? 0 : 1}`);
+      if (!hit15) continue;
       // cs:28666-28691 叶下地被（LargePiles2 47-49 / SmallPiles 59-61,72）
       let n53 = n48;
       const n54 = n53 + 100;
-      if (activeAt(st, n50, n53)) continue;
+      if (activeAt(st, n50, n53)) { mk109(`BPa|c=${n43}|x=${n50}`); continue; }
       while (!activeAt(st, n50, n53 + 1) && n53 < n54) n53++;
-      if (sheetAt(st, n50, n53 + 1) === 192) continue;
+      if (sheetAt(st, n50, n53 + 1) === 192) { mk109(`BPt|c=${n43}|x=${n50}|y=${n53 + 1}`); continue; }
       if (rng.int(0, 1) === 0) {
-        placeTilePile(st, n50, n53, rng.int(47, 49));
+        const sty = rng.int(47, 49);
+        const okB = placeTilePile(st, n50, n53, sty);
+        mk109(`BP3|c=${n43}|x=${n50}|y=${n53}|st=${sty}|ok=${okB ? 1 : 0}`);
         continue;
       }
       const n55 = rng.int(0, 1);
       let pileStyle = 72;
       if (n55 === 1) pileStyle = rng.int(59, 61);
-      placeSmallPile(st, n50, n53, pileStyle, n55);
+      const okS = placeSmallPile(st, n50, n53, pileStyle, n55);
+      mk109(`BPS|c=${n43}|x=${n50}|y=${n53}|ps=${pileStyle}|sz=${n55}|ok=${okS ? 1 : 0}`);
     }
   }
   if (LT_TRACE) console.log(`GLTp leaves st=${ltStream()} g=${ltGridHash(st)} num2=${num2}`);
+  if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|gtF|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);; (globalThis as unknown as { __ltSnapBox?: (t: string) => void }).__ltSnapBox?.('gtF')
   // ---- 树干贯通竖井（cs:28722-28754）：宽干(num5>=4)且地表下无既有空腔时 ----
   if (flag) {
     let flag4 = false;
@@ -1296,8 +1327,6 @@ export function runLivingTreesPass(
         //   放行丛林草 60（第三析取 tenthAnniversary 系 celebrationmk10 组合,不在
         //   常规路径,按约定不移植）。JS 曾只认 0 → NTB 丛林草带活树锚全拒。
         const baseSheet = sheetAt(st, num6, j);
-        // ★IIIII70 对账仪：与 rig MARK|ltA/ltR 同位同格式（SW_DG_LTMARK 门控）
-        if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltA|${num6},${j}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
         if (baseSheet === 0 || (gs.seedFlags.notTheBees && baseSheet === 60)) {   // cs:15629
           j--;
           if (j > 150) {
@@ -1326,6 +1355,9 @@ export function runLivingTreesPass(
             }
             if (flag2) {
               if (LT_TRACE) console.log(`LT try x=${num6} j=${j} st=${ltStream()}`);
+              // ★IIIII96 对账仪：ltA/ltR 移到与 rig 同位（j-- 减基之后、gates 全过）；
+              //   旧位置在减基前打印 → 与 rig 值恒差 +1（探针伪差，勿作真差解读）
+              if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltA|${num6},${j}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
               flag = growLivingTree(st, rng, gs, chests, num6, j);
               if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltR|${num6},${j}|${flag ? 1 : 0}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
               if (LT_TRACE) console.log(`LT result x=${num6} ok=${flag} st=${ltStream()}`);
@@ -1364,7 +1396,13 @@ export function runLivingTreesPass(
                           if (CLOUD_SHEETS.has(sh)) { flag2 = false; break outer2; }
                         }
                       }
-                      if (flag2) { if (LT_TRACE) console.log(`LT patch x=${num7} j=${num10} st=${ltStream()}`); const okP = growLivingTree(st, rng, gs, chests, num7, num10, true); if (LT_TRACE) console.log(`LT patchDone x=${num7} ok=${okP} st=${ltStream()}`); }
+                      if (flag2) {
+                        if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltPA|${num7},${num10}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
+                        if (LT_TRACE) console.log(`LT patch x=${num7} j=${num10} st=${ltStream()}`);
+                        const okP = growLivingTree(st, rng, gs, chests, num7, num10, true);
+                        if (typeof process !== 'undefined' && process.env.SW_DG_LTMARK) console.log(`MARK|ltPD|${num7},${num10}|rc=${(globalThis as unknown as { __ltRc?: { n: number } }).__ltRc?.n ?? -1}`);
+                        if (LT_TRACE) console.log(`LT patchDone x=${num7} ok=${okP} st=${ltStream()}`);
+                      }
                     }
                   }
                 }

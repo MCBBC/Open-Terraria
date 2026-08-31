@@ -59,7 +59,7 @@ export interface AccFx {
   huntressSave?: number; // 10% 概率不耗弹
   kbGlove?: number;      // 力量手套族：近战击退翻倍
   autoReuseGlove?: number; // 力量手套族：近战武器自动连挥（Player.TryAllowingItemReuse :52040-52042）
-  meleeScaleGlove?: number; // 手套族近战放大：GetAdjustedItemScale ×1.1（Player.cs:41919-41930）
+  meleeScaleGlove?: number; // 手套族近战放大：GetAdjustedItemScale ×1.1（★F 锚校正：1457 Player.cs:42891,旧 41919 为 1456 行段）
   flowerBoots?: number;    // 花靴 3017/仙灵靴 3993（GrantArmorBenefits :12682-12688 行走生花）
   yoyoString?: number;   // 悠悠球线：射程 +
   tileSpeed?: number;    // 放置加速（砌砖刀族;手持可放置非火把时 tileSpeed+0.5，:12604-12610）

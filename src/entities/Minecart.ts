@@ -1,3 +1,4 @@
+import { playerHurtFloatColor } from '../fx/CombatTextColors';
 // 矿车坐骑实体（原版语义 = Mount：坐骑位锁定 + Minecart.cs 轨道跟随运动学）。
 // 原版矿车不是独立实体——玩家 mount 后玩家 hitbox 即车（20×(42+heightBoost)），
 // 每帧走 Player.cs:27783-27850 的 TrackCollision 段 + 常规 DryCollision。本作以
@@ -497,7 +498,7 @@ export class Minecart extends Entity {
           p.lastDamageCause = { kind: 'fell' };
           p.damage(dmg, this.cx, this.y - 10);
           game.playSfx?.('hurt');
-          game.addDamageNumber?.(this.cx, this.y, dmg, false, '#FF5050');
+          game.addDamageNumber?.(this.cx, this.y, dmg, false, playerHurtFloatColor(false));   // ★附带④单源
           // 成就：摔落幸存（:25078-25082）
           if (!p.dead && p.hp > 0 && p.hp <= p.maxHp / 10) {
             game.achievements?.handleSpecialEvent(8,

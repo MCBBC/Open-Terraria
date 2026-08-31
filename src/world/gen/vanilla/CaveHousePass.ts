@@ -2066,13 +2066,21 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
   //   返 min（非 JS Math.min/max 链）；remix 重掷臂 cs:17184-17188 随 remix 债另行登记。
   const __hc = (globalThis as { __swHouseEv?: (phase: string, x: number, y: number) => void }).__swHouseEv;
   let fail = 10000;
+  // ★★★IIIII95（Terarria1458 cs:17178-17191）remix 债清偿：①Y 覆写重掷——普通域
+  //   Next((int)(wsHigh+20), maxY-230)，remix 再掷 Next((int)Main.worldSurface, maxY-400)
+  //   **覆写**（先掷后覆写双骰恒耗）；②GenerateBiggerAbandonedHouses 钳制带同步换轴
+  //   （num11=(int)Main.worldSurface / num12=maxY-400）。此前两句均未建模（批内注释
+  //   已登记「随 remix 债另行登记」）→ 小屋全族深度带错位。
+  const remixCH = !!gs.seedFlags.remix;
   for (let n = 0; n < count; ) {
     if (fail <= 0) break;
     const ox = rng.int(80, w - 81);
     let oy = rng.int(Math.ceil(gs.worldSurfaceHigh + 20), h - 231);
+    if (remixCH) oy = rng.int(Math.trunc(gs.worldSurface), h - 401);
     if (genBiggerAbandonedHouses(gs, rng)) {                  // getter 读=骰面(errorWorld 臂)
-      const lo = gs.worldSurfaceHigh + 20 + getMaxPossibleRoomsInBigHouse(gs) * 10;  // (int)(…)截断=GenState 已 floor
-      const hi = h - 230;
+      const loBase = remixCH ? Math.trunc(gs.worldSurface) : gs.worldSurfaceHigh + 20;
+      const lo = loBase + getMaxPossibleRoomsInBigHouse(gs) * 10;  // (int)(…)截断=GenState 已 floor
+      const hi = remixCH ? h - 400 : h - 230;
       oy = oy < lo ? lo : oy > hi ? hi : oy;
     }
     __hc?.('try', ox, oy);

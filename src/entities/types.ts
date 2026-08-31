@@ -55,6 +55,10 @@ export interface GameHooks {
   spawnTownShot?(shot: import('./TownShot').TownShot): void;
   /** 小动物产生的弹幕入投射物桶（AI_024 鸟粪 1080 等；仅本地——MP 门禁在产生端） */
   spawnCritterProj?(e: import('./Entity').Entity): void;
+  /** 玩家侧命中后效真弹入投射物桶（★α-H3④ WeaponProj.hitEnemies confetti 289 支
+   *  ——Projectile.cs:13693-96 NewProjectile(289) 等价出射口。Game 实现 =
+   *  entities.add(e,'projectiles')，联机由弹幕互播通道自然覆盖） */
+  spawnFriendlyProj?(e: import('./Entity').Entity): void;
   /** 小动物列表(弹幕命中判定用;近战挥砍在 Game 内直接遍历桶) */
   critters(): unknown[];
   /** 城镇 NPC 列表(受击判定用;Game 实现 = entities.npcs 桶) */

@@ -6,6 +6,8 @@ import { BuffType, buffTypeByVanilla, type BuffState } from '../stats/Buffs';
 import { projectileData } from '../data/vanillaProjectiles';
 import { hostileProjectileDamage, mainDifficulty, mainExpertMode, damageVar } from '../stats/ScaleStats';
 import { bannerReceivedMult } from '../world/Banners';
+import { projGlobalImmuneWriteTicks, PROJ_IMMUNE_SLOW_MAGIC_TIER } from '../data/vanillaProjImmuneTiers';
+import { projImmuneFaceOf } from '../data/vanillaProjImmuneFaces';
 import { petSlimeHitVoice } from '../data/vanillaNpcAmbience';
 import statusPlayerJson from '../data/vanilla-statusplayer.json';
 
@@ -64,15 +66,123 @@ export function hitTownNpcs(
   return any;
 }
 
-export function hitCritters(self: { x: number; y: number; w: number; h: number }, game: GameHooks): boolean {
+// ================= ★α-H1/H3 projClass 类别通道（终局扫尾·战斗缝合批） =================
+// 数据面唯一标杆 = 原版 SetDefaults 逐弹型直写的 Projectile.melee/magic/ranged/minion
+// 字段（Terarria1457/Terraria/Projectile.cs）——投影到四类：melee/ranged/magic/summon。
+// 消费面（Projectile.Damage :12898 起）：①crit 轮**按类各掷各的**——`if (melee &&
+// Next(1,101)<=owner.meleeCrit)` 三连，**无类的弹（蜂 181/566、村正刀气 155、钛金碎片
+// 908 等在 1457 SetDefaults 不置任何类别旗）不掷 crit**；②浸剂族门 `(melee||IsAWhip)`
+// （Projectile.StatusNPC :11211 / nano·confetti :13688）；③parryDamageBuff ×5 门
+// `melee && !DontApplyParryDamageBuff[type]`（:13631）。summon 类不参与 crit 掷。
+
+export type ProjClass = 'melee' | 'ranged' | 'magic' | 'summon';
+
+/** 弹 id → 类别通道（projectileData 类旗投影；缺数据/无类 → null）。实体侧显式
+ *  projClass 字段优先于本表（resolveProjClass），本函数是纯数据面查表。 */
+export function projClassOfProjId(projId: number | undefined | null): ProjClass | null {
+  if (!projId || projId <= 0) return null;
+  const pd = projectileData(projId);
+  if (!pd) return null;
+  // 投影序 = 原版三连掷书写序（melee → ranged → magic；minion 即 summon）
+  if (pd.minion === true) return 'summon';
+  if (pd.melee === true) return 'melee';
+  if (pd.ranged === true) return 'ranged';
+  if (pd.magic === true) return 'magic';
+  return null;
+}
+
+/** 实体侧统一解析：显式 projClass（个别无 projId 的自研弹声明面）→ 弹 id 数据面
+ *  → 旧 meleeProj 旗兜底（历史类字段,新代码勿再散写）。 */
+export function resolveProjClass(
+  p: { projClass?: ProjClass; projId?: number; meleeProj?: boolean } | null | undefined,
+): ProjClass | null {
+  if (!p) return null;
+  if (p.projClass) return p.projClass;
+  const byId = projClassOfProjId(p.projId);
+  if (byId) return byId;
+  return p.meleeProj === true ? 'melee' : null;
+}
+
+/** ProjectileID.Sets.IsAWhip（Terarria1457/Terraria.ID/ProjectileID.cs:35 全 17 型）：
+ *  浸剂/nano/confetti 门的 whip 并集臂（`melee||IsAWhip[type]`,:11211/:13688）。 */
+export const IS_A_WHIP_PROJS: ReadonlySet<number> = new Set(
+  [847, 841, 848, 849, 912, 913, 914, 915, 952, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1104]);
+
+/** ProjectileID.Sets.DontApplyParryDamageBuff（ProjectileID.cs:23）：盾反 ×5 排除族
+ *  （Bladetongue 血舌 524 / 血 butcherer 标枪 321 / 蜂两型 181·566——buff 链自带
+ *  proc 的弹不吃盾反乘区）。 */
+export const DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS: ReadonlySet<number> = new Set([524, 321, 181, 566]);
+
+/** ProjectileID.Sets.MinionShot（ProjectileID.cs MinionShot = Factory.CreateBoolSet
+ *  行全 12 型）：随从弹家族。Player.CanNPCBeHitByPlayerOrPlayerProjectile :20675 的
+ *  flag 组装位 `projectile.minion || MinionShot[type] || sentry || SentryShot[type]`
+ *  ——hitCritters gate 接本表（ζ#3/#4 出口收口：即便当前无可达路径也建表防未来陷阱）。 */
+export const MINION_SHOT_PROJS: ReadonlySet<number> = new Set(
+  [374, 376, 389, 195, 408, 433, 614, 818, 1044, 1097, 1106, 1120]);
+
+/** ProjectileID.Sets.SentryShot（同文件相邻行全 14 型）：哨兵弹家族。语义同上。 */
+export const SENTRY_SHOT_PROJS: ReadonlySet<number> = new Set(
+  [680, 664, 666, 668, 694, 695, 696, 644, 642, 378, 379, 309, 967, 1026]);
+
+// ---- ★α-H4 OnHit 域出口谓词（HittableForOnHitRewards 统一收口） ----------------
+// 原版 NPC.cs:91152 `!(CountsAsACritter(target) || target.immortal)`——OnHit 奖励域
+// （蝙蝠棒吸血 BatBat_TryLifeLeeching :44544-51、火之大剑火山窗消耗 Volcano
+// _spawnVolcanoExplosion 消费门等）对【小动物∪不朽体】一律不放行。
+// ★禁再散抄 `!e.def.critter && immortal!==true` 裸读——Game.ts 两处曾各写一份,
+// countsAsCritterOf 还覆盖小动物桶落点成员（def.critter 提取表之外的第二源）。 */
+export function hittableForOnHitRewards(e: unknown): boolean {
+  const t = e as { immortal?: boolean } | null;
+  if (t?.immortal === true) return false;
+  return !countsAsCritterOf(e, false);
+}
+
+/** 弹幕命中小动物。★蓝队二轮 F3 门禁补齐（清零批二波，2026-08-31）：
+ *  原版门 = Player.CanNPCBeHitByPlayerOrPlayerProjectile（Player.cs:20673-20689，
+ *  Damage_PVE_Inner :12622-12625 对每发【友好】弹以 projectile!=null 调用——
+ *  flag = dontHurtCritters ∪ (projectile.minion || MinionShot || sentry || SentryShot)，
+ *  trap 弹复位为可打（:20676-20679，镖陷阱照杀小动物），敌方小动物强制放行
+ *  （:20680-20683）；CountsAsCritter ∧ flag → 拒收）。
+ *  来源分类取数据面自证：SetDefaults hostile=true 且无 friendly 的纯敌对弹
+ *  （教徒冰雾 464/闪电球 465/雷球 466·580 等）按 :12631 `!(hostile & flag2)` 支
+ *  ——小动物非 friendly NPC ⇒ 敌对投射物对其恒无伤（死亡通道只有敌怪接触伤害
+ *  循环），统一在本出口拦死、调用点零改动即达成各站正确语义。
+ *  ★F4（2026-08-31）：projectile 语境显式参 ctx——flag = dontHurtCritters ∪
+ *  (minion ∪ MinionShot ∪ sentry ∪ SentryShot)（:20675）。数据列（vanilla-projectiles.
+ *  json minion 位）兜底之外，MinionProj 各伤害环以自身召唤/哨兵身份传 {minion,sentry}
+ *  强制进入恒拒域：无饰品也照拒普通小动物，唯一放行 = 黑化复权体；玩家直射族
+ *  （Arrow/MagicProj/WeaponProj…）不带 ctx ⇒ 仅受饰品门。trap 复位支持同参。 */
+export interface HitCritterCtx {
+  minion?: boolean;
+  sentry?: boolean;
+  trap?: boolean;
+}
+export function hitCritters(
+  self: { x: number; y: number; w: number; h: number },
+  game: GameHooks,
+  ctx?: HitCritterCtx,
+): boolean {
   const list = (game as unknown as { critters?: () => unknown[] }).critters?.() ?? [];
+  const projId = (self as { projId?: number }).projId ?? 0;
+  const pd = projId > 0 ? projectileData(projId) : null;
+  // 敌对弹面（Damage_PVE_Inner :12631 受理式推导）——hostile-only 恒不结小动物伤害
+  if (pd?.hostile === true && pd?.friendly !== true) return false;
+  // 玩家/环境双面弹（friendly 或无登记）→ :20675 flag 组装 + :20676 trap 复位
+  const eq = (game.player as { equipStats?: { dontHurtCritters?: boolean } } | null)?.equipStats;
+  // ★ζ#3/#4（终局扫尾批）：MinionShot/SentryShot 两张 id 表接进 flag 组装——原版
+  // :20675 组装式含 `MinionShot[type] || SentryShot[type]` 两臂，此前只有 minion 旗
+  // 数据列+ctx 显式位。表见上方（ProjectileID.cs 提取）。
+  let flag = eq?.dontHurtCritters === true || pd?.minion === true
+    || ctx?.minion === true || ctx?.sentry === true
+    || MINION_SHOT_PROJS.has(projId) || SENTRY_SHOT_PROJS.has(projId);
+  if (ctx?.trap === true) flag = false;   // :20676-20679 镖陷阱族复位=可杀小动物
   for (const ent of list) {
     const c = ent as CritterLike;
     if (c.dead) continue;
-    if (projOverlap(self.x, self.y, self.w, self.h, c)) {
-      c.hurt(game);
-      return true;
-    }
+    if (!projOverlap(self.x, self.y, self.w, self.h, c)) continue;
+    // :20680-20688（isCritterThatIsHostileToPlayers 复权 + CountsAsCritter∧flag 拒收）
+    if (flag && !isCritterThatIsHostileToPlayers(c)) continue;
+    c.hurt(game);
+    return true;
   }
   return false;
 }
@@ -213,8 +323,12 @@ export function hitPlayer(
   if (!projOverlap(self.x, self.y, self.w, self.h, p)) return false;
   // R5-F21：DamageVar ±15% 掷骰（Projectile.cs:13762 `num3 = Main.DamageVar(damage,
   // -Main.player[owner].luck)`——Damage_EVP 首段,先掷后吃 banner/resistCold/缩放）。
-  // PvP 弹走 Damage_PVP 的 Main.DamageVar（0.85-1.15,数值侧已含）——同样掷
-  dmg = damageVar(dmg, pvp ? 0 : -p.luck);
+  // ★附带⑤（2026-08-31 二轮蓝队）：PvP 弹【不在此再掷】——Damage_PVP 族在弹被击端
+  //   收口单掷一次（Projectile.cs:14718 `int num = Main.DamageVar(...)`，856 的
+  //   ModifyStellarTuneDamage :14720-14723 在掷后消费），仓内唯一 pvp 调用点
+  //   Game.netPuppetProjContact 已按原文次序预掷+856 修正后再进本函数；此处再掷 =
+  //   双重 ±15% 复合（实测偏移可达 ±0.28σ 面）。keep single-roll：caller 面为唯一掷点
+  if (!pvp) dmg = damageVar(dmg, -p.luck);
   // R5-F22：旗 buff 减伤对敌弹生效（Projectile.cs:13763-13765 `GetBannerBuffEffect(
   // bannerIdToRespondTo)`——bannerIdToRespondTo = 发射 NPC 的 banner（:11112-11116
   // FindBannerToAssociateTo）。本仓弹体侧仅 Dart 带 ownerNpcId,其余族发射者追踪
@@ -484,4 +598,91 @@ export function statusPlayer(game: GameHooks, projId: number, hostile = true): v
     expert: mainExpertMode(game.world),
     frozen: p.buffs.has(BuffType.Frozen) || p.shimmering, // :9749 / :11382 双源
   }, p.buffs);
+}
+
+// ================= ★GC1 弹幕域 immune[owner] 写方桥（清零批二波，2026-08-31；
+//                     蓝队二轮 F1/F5：face 补表自动解析，2026-08-31） =================
+
+/** Projectile.Damage 命中尾免疫档 → Game.noteNpcPlayerImmune 统一写出口。
+ *  档位纯表见 data/vanillaProjImmuneTiers.ts（1457 Projectile.cs:14031-14183 亲读
+ *  提取）；三旗 face 纯代码补表见 data/vanillaProjImmuneFaces.ts（F5——json 无三
+ *  布尔列，SetDefaults :699-10676 全量抓取）。face 解析序：
+ *   调用点显参 true 恒覆盖 > 补表值 > 全缺省（走末档数据面判定）。
+ *  game.noteNpcPlayerImmune 缺位（测试桩/工具调用面）静默跳过。
+ *  penetrate 入参约定 = 写段时刻未递减现存值（Projectile.cs:14189 在梯子后）；
+ *  缺省回落数据面 penetrate ?? 1（单发 flag3 族缺省 → 无写）。 */
+export function noteVanillaProjImmune(
+  game: { noteNpcPlayerImmune?: (npcId: number, ticks: number) => void;
+    player?: unknown } | null | undefined,
+  type: number,
+  npcId: number,
+  opts?: { penetrate?: number | null; localFace?: boolean; idStaticFace?: boolean },
+): void {
+  if (!game || type <= 0 || !(npcId >= 0)) return;
+  // F5：SetDefaults 三旗补表（显参不遮蔽——false 视为「未传」，true 权威）
+  const f = projImmuneFaceOf(type);
+  const cdCol = projectileData(type)?.localNPCHitCooldown;
+  const localOk = f?.usesLocal === true && cdCol !== -2;      // （梯子 :14175 的 cd!=-2 门）
+  const localFace = opts?.localFace === true || localOk;
+  const idStaticFace = opts?.idStaticFace === true || f?.idStatic === true;
+  const appliesSingleHit = f?.applies === true;               // 登记源仅补表（167-170/286/1134）
+  const pen = opts?.penetrate ?? projectileData(type)?.penetrate ?? 1;
+  let ticks = projGlobalImmuneWriteTicks(type, {
+    ...opts, penetrate: pen, localFace, idStaticFace, appliesSingleHit,
+  });
+  if (ticks === PROJ_IMMUNE_SLOW_MAGIC_TIER) {
+    // 632：GetSlowMagicUseTime(5)（Projectile.cs:14056——慢施蓝空过载放大窗）
+    const pl = game.player as { getSlowMagicUseTime?: (t: number) => number } | undefined;
+    ticks = pl?.getSlowMagicUseTime ? Math.max(5, Math.trunc(pl.getSlowMagicUseTime(5))) : 5;
+  }
+  if (ticks < 0) return;                          // 无写档（单发 flag3/标枪族等）
+  game.noteNpcPlayerImmune?.(npcId, ticks);
+}
+
+// ================= ★E dontHurtCritters 统一谓词出口（清零批二波，2026-08-31） =================
+// 唯一标杆：Player.CanNPCBeHitByPlayerOrPlayerProjectile（1457 Player.cs:20673-20689）
+// + NPC.IsCritterThatIsHostileToPlayers（NPC.cs:19849-19856）+
+// NPCID.Sets.CritterThatCanTurnOnPlayers（Terarria1457/Terraria.ID/NPCID.cs:4781）。
+// 禁止各消费面散抄本判定——近战三重门 / 坐骑矿车·踩踏·横向 / 弹幕族一律经本出口。
+
+/** CritterThatCanTurnOnPlayers 成员（NPCID.cs:4781）：敌对小动物群系变体十型。
+ *  IsCritterThatIsHostileToPlayers = 成员 ∧ aiStyle==3（行走 AI 才会翻身咬人） */
+export const CRITTER_TURN_ON_PLAYERS_TYPES = new Set<number>([645, 639, 644, 642, 643, 641, 640, 299, 539, 538]);
+
+export function isCritterThatIsHostileToPlayers(e: unknown): boolean {
+  // ★F2（2026-08-31）运行时位兼读：松鼠系 SetDefaults 恒 aiStyle=7（NPC.cs:12892-96
+  //  type==299 块），黑化是 AI_007 运行时变异（NPC.cs:53958-53974 CritterThatCanTurnOnPlayers
+  //  ∧ ai[3]!=0 → lifeMax 25/damage 20/defense+6/**aiStyle=3**，运行时翻转不走 def）——
+  //  静态 def.aiStyle 判据恒假。真实源 = Enemy 升级路径写入的 blackenedCritter 位；
+  //  def.aiStyle===3 臂保留给"数据面就是行走 AI"的形态（原版 IsCritterThatIsHostileToPlayers
+  //  读的是 NPC 实例 aiStyle,两侧同真值域）
+  const t = e as { vanillaId?: number | null; def?: { aiStyle?: number };
+    blackenedCritter?: boolean } | null | undefined;
+  return t?.vanillaId != null && CRITTER_TURN_ON_PLAYERS_TYPES.has(t.vanillaId)
+    && (t.blackenedCritter === true || t.def?.aiStyle === 3);
+}
+
+/** CountsAsCritter 成员源：def.critter 提取表旗（vanillaNpcs.ts:84,
+ *  tools/extract-critters.mjs）∪ 小动物桶标记（spawnNpcByVanilla 落 critters 桶的
+ *  Enemy 实例——原版同一 CountsAsCritter 数组域）。fromCritterBucket 由扫掠面注入 */
+export function countsAsCritterOf(e: unknown, fromCritterBucket: boolean): boolean {
+  const t = e as { def?: { critter?: boolean } } | null | undefined;
+  return fromCritterBucket || t?.def?.critter === true;
+}
+
+/** CanNPCBeHitByPlayerOrPlayerProjectile 玩家实体面完整形（projectile=null 支 →
+ *  flag=dontHurtCritters；projectile.trap→false 与弹幕 minions/sentry 支由各弹类
+ *  调用端按 projectile!=null 分支另算，不入本出口）。返回 false = 该实体对本玩家
+ *  【不可命中】。 */
+export function playerProjectileCanHitNpcGate(
+  game: { player?: unknown },
+  e: unknown,
+  fromCritterBucket = false,
+): boolean {
+  const eq = (game.player as { equipStats?: { dontHurtCritters?: boolean } } | null)
+    ?.equipStats;
+  let flag = eq?.dontHurtCritters === true;              // （:20675 玩家面）
+  if (isCritterThatIsHostileToPlayers(e)) flag = false;   // （:20679 敌对生物复权）
+  if (countsAsCritterOf(e, fromCritterBucket) && flag) return false;   //（:20683 拒收）
+  return true;
 }

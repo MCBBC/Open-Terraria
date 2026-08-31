@@ -87,6 +87,9 @@ export interface DungeonStyleData {
   /** 平台 item 表（GetPlatformStyle 消费;空表 → 恒 -1 不掷） */
   PlatformItemTypes: number[];
   UnbreakableWallProgressionTier: number;
+  /** ★IIIII88：DitherSnake 边缘抖动门（DungeonGenerationStyles.cs 各档 EdgeDither 字段,
+   *  1457 转录曾缺省——蛇槽涂绘 SkipPaintForEdge 的分叉键）。Default 档恒 false。 */
+  EdgeDither: boolean;
 }
 
 const T = DualDungeonUnbreakableWallTiers;
@@ -97,100 +100,115 @@ export const DungeonGenerationStyles: Record<string, DungeonStyleData> = {
   Cavern: {
     Style: 1, BrickTileType: 38, BrickCrackedTileType: 123, BrickWallType: 349,
     PitTrapTileType: 123, WindowGlassWallType: 21, WindowClosedGlassWallType: 4,
-    WindowEdgeWallType: 5, LiquidType: 0, PlatformItemTypes: [94, 4416],
+    WindowEdgeWallType: 5, LiquidType: -1, PlatformItemTypes: [94, 4416],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: true,
   },
   Snow: {
     Style: 2, BrickTileType: 161, BrickCrackedTileType: 224, BrickWallType: 71,
     ExtraTileTypes: [147], ExtraWallTypes: [40],
     PitTrapTileType: 224, WindowGlassWallType: 90, WindowClosedGlassWallType: 149,
-    WindowEdgeWallType: 31, LiquidType: 0, PlatformItemTypes: [3908],
+    WindowEdgeWallType: 31, LiquidType: -1, PlatformItemTypes: [3908],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: true,
   },
   Desert: {
     Style: 3, BrickTileType: 396, BrickCrackedTileType: 53, BrickWallType: 187,
     ExtraTileTypes: [397, 404], ExtraWallTypes: [216, 223],
     PitTrapTileType: 53, WindowGlassWallType: 89, WindowClosedGlassWallType: 151,
-    WindowEdgeWallType: 34, LiquidType: 0, PlatformItemTypes: [4311],
+    WindowEdgeWallType: 34, LiquidType: -1, PlatformItemTypes: [4311],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: false,
   },
   Corruption: {
     Style: 4, BrickTileType: 25, BrickCrackedTileType: 112, BrickWallType: 3,
     ExtraWallTypes: [188, 189, 190, 191],
     PitTrapTileType: 112, WindowGlassWallType: 88, WindowClosedGlassWallType: 41,
-    WindowEdgeWallType: 33, LiquidType: 0, PlatformItemTypes: [631],
+    WindowEdgeWallType: 33, LiquidType: -1, PlatformItemTypes: [631],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: true,
   },
   Crimson: {
     Style: 5, BrickTileType: 203, BrickCrackedTileType: 234, BrickWallType: 83,
     ExtraWallTypes: [192, 193, 194, 195],
     PitTrapTileType: 234, WindowGlassWallType: 92, WindowClosedGlassWallType: 85,
-    WindowEdgeWallType: 174, LiquidType: 0, PlatformItemTypes: [913],
+    WindowEdgeWallType: 174, LiquidType: -1, PlatformItemTypes: [913],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: true,
   },
   Hallow: {
     Style: 6, BrickTileType: 117, BrickCrackedTileType: 116, BrickWallType: 28,
     ExtraWallTypes: [200, 201, 202, 203],
     PitTrapTileType: 116, WindowGlassWallType: 91, WindowClosedGlassWallType: 43,
-    WindowEdgeWallType: 22, LiquidType: 0, PlatformItemTypes: [633],
+    WindowEdgeWallType: 22, LiquidType: -1, PlatformItemTypes: [633],
     UnbreakableWallProgressionTier: T.Hallow,
+    EdgeDither: true,
   },
   GlowingMushroom: {
     Style: 7, BrickTileType: 59, BrickCrackedTileType: 123, BrickWallType: 80,
     BrickGrassTileType: 70,
     PitTrapTileType: 123, WindowGlassWallType: 90, WindowClosedGlassWallType: 60,
-    WindowEdgeWallType: 78, LiquidType: 0, PlatformItemTypes: [2549],
+    WindowEdgeWallType: 78, LiquidType: -1, PlatformItemTypes: [2549],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: true,
   },
   Jungle: {
     Style: 8, BrickTileType: 59, BrickCrackedTileType: 123, BrickWallType: 64,
     BrickGrassTileType: 60, ExtraWallTypes: [204, 205, 206, 207, 15],
     PitTrapTileType: 123, WindowGlassWallType: 91, WindowClosedGlassWallType: 42,
-    WindowEdgeWallType: 24, LiquidType: 0, PlatformItemTypes: [632],
+    WindowEdgeWallType: 24, LiquidType: -1, PlatformItemTypes: [632],
     UnbreakableWallProgressionTier: T.JungleBoss,
+    EdgeDither: true,
   },
   Beehive: {
     Style: 9, BrickTileType: 225, BrickCrackedTileType: 123, BrickWallType: 86,
     PitTrapTileType: 123, WindowGlassWallType: 89, WindowClosedGlassWallType: 172,
     WindowEdgeWallType: 151, LiquidType: 2, PlatformItemTypes: [2630],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: true,
   },
   Temple: {
     Style: 10, BrickTileType: 226, BrickCrackedTileType: 123, BrickWallType: 87,
     PitTrapTileType: 123, WindowGlassWallType: 92, WindowClosedGlassWallType: 42,
-    WindowEdgeWallType: 24, LiquidType: 0, PlatformItemTypes: [3906],
+    WindowEdgeWallType: 24, LiquidType: -1, PlatformItemTypes: [3906],
     UnbreakableWallProgressionTier: T.Temple,
+    EdgeDither: false,
   },
   Shimmer: {
     Style: 11, BrickTileType: 667, BrickCrackedTileType: 123, BrickWallType: 322,
     PitTrapTileType: 123, WindowGlassWallType: 93, WindowClosedGlassWallType: 149,
     WindowEdgeWallType: 37, LiquidType: 3, PlatformItemTypes: [94],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: true,
   },
   Spider: {
     Style: 12, BrickTileType: 156, BrickCrackedTileType: 123, BrickWallType: 62,
     PitTrapTileType: 123, WindowGlassWallType: 21, WindowClosedGlassWallType: 4,
-    WindowEdgeWallType: 36, LiquidType: 0, PlatformItemTypes: [94],
+    WindowEdgeWallType: 36, LiquidType: -1, PlatformItemTypes: [94],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: true,
   },
   LivingWood: {
     Style: 13, BrickTileType: 191, BrickCrackedTileType: 192, BrickWallType: 244,
     PitTrapTileType: 123, WindowGlassWallType: 21, WindowClosedGlassWallType: 4,
-    WindowEdgeWallType: 196, LiquidType: 0, PlatformItemTypes: [2629],
+    WindowEdgeWallType: 196, LiquidType: -1, PlatformItemTypes: [2629],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: true,
   },
   LivingMahogany: {
     Style: 14, BrickTileType: 383, BrickCrackedTileType: 384, BrickWallType: 244,
     WallPaintColor: 12,
     PitTrapTileType: 123, WindowGlassWallType: 21, WindowClosedGlassWallType: 42,
-    WindowEdgeWallType: 196, LiquidType: 0, PlatformItemTypes: [2629],
+    WindowEdgeWallType: 196, LiquidType: -1, PlatformItemTypes: [2629],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: true,
   },
   Crystal: {
     Style: 15, BrickTileType: 385, BrickCrackedTileType: 116, BrickWallType: 186,
     PitTrapTileType: 116, WindowGlassWallType: 88, WindowClosedGlassWallType: 43,
-    WindowEdgeWallType: 22, LiquidType: 0, PlatformItemTypes: [633],
+    WindowEdgeWallType: 22, LiquidType: -1, PlatformItemTypes: [633],
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: false,
   },
 };
 
@@ -212,9 +230,10 @@ export function getCurrentDungeonStyle(g: {
     WindowGlassWallType: g.windowGlassWallType,
     WindowClosedGlassWallType: g.windowClosedGlassWallType,
     WindowEdgeWallType: g.windowEdgeWallType,
-    LiquidType: 0,
+    LiquidType: -1,   // ★IIIII97：C# DungeonGenerationStyleData.cs:41 缺省 -1（仅 Shimmer=3/Beehive=2 非负）
     PlatformItemTypes: g.windowPlatformItemTypes,
     UnbreakableWallProgressionTier: T.Dungeon,
+    EdgeDither: false,
   };
 }
 
@@ -474,6 +493,9 @@ export interface DualDungeonGenEntry {
   entA: number;
   entB: number;
   entSeed: number;
+  /** ★IIIII93b：drunk 世界 SetupDungeonGenVarVariables 的墙风格重掷值（DC.cs:94-110）。
+   *  非 drunk 世界恒 undefined（分支零掷）——IIIII88 曾照掷照弃，d1 无 wallVariants 可派生。 */
+  wallStyle?: number;
 }
 
 export const dualDungeonState: {
@@ -496,6 +518,17 @@ export const dualDungeonState: {
 export function inAnyPotentialDungeonBounds(x: number, y: number): boolean {
   for (const b of dualDungeonState.potentialBounds) {
     if (x >= b.l && x < b.r && y >= b.t && y < b.b) return true;
+  }
+  return false;
+}
+
+/** DungeonUtils.IntersectsAnyPotentialDungeonBounds（:2148-2165）：逐地牢 outer
+ *  Hitbox 与入参矩形的 XNA 半开相交测试（A.Left<B.Right && B.Left<A.Right &&
+ *  A.Top<B.Bottom && B.Top<A.Bottom）。★调用方必须先 refreshDualPotentialBounds
+ *  （Dunes 头装配）——普通世界 potentialBounds 恒空 → 恒 false（vanilla 同）。 */
+export function intersectsAnyPotentialDungeonBounds(rl: number, rt: number, rr: number, rb: number): boolean {
+  for (const b of dualDungeonState.potentialBounds) {
+    if (rl < b.r && b.l < rr && rt < b.b && b.t < rb) return true;
   }
   return false;
 }

@@ -237,9 +237,14 @@ describe('坐姿状态机（fixedUpdate 集成）', () => {
     npc.fixedUpdate(1 / 60, game);
     expect(npc.sitting).toBe(false);
     const x0 = npc.cx;
+    // ★2026-08-31 对齐批④口径加固：注入实例 rng 屏蔽攻击门随机性——原写法裸跑时
+    // 攻击门(实例缺省挂全局 Math.random)可能在逃逸窗内偶发入态造成站定停顿,
+    // 使「180t 内 ≥16px」断言 ~50% 抖红(已知抖动族归因)。确定性注入后断言语义不变。
+    npc.rng = () => 0.999;
     for (let t = 0; t < 180; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.cx).toBeLessThan(x0 - 16);   // 已向左逃出 ≥1 格（含还击停顿窗口）
     // 站定后还击恢复（flag31 只挡 ai[0]==5 本身——起身即打）
+    npc.rng = () => Math.random();          // 还击阶段恢复真实随机面
     let fired = false;
     for (let t = 0; t < 1500 && !fired; t++) {
       enemy.x = npc.cx + 6 * 16;   // 贴身追踪防逃出 PrettySafe
@@ -561,5 +566,59 @@ describe('坐姿落存档语义（WorldFile.SaveNPCs :1703-1750 / LoadNPCs :2883
     const { game: g2 } = makeGame(w2, { npcs: [restored] });
     for (let t = 0; t < 300; t++) restored.fixedUpdate(1 / 60, g2);
     expect(restored.sitting).toBe(false);
+  });
+});
+
+// ===========================================================================
+// ★2026-08-31 二轮对账批（F6）：行走随机坐椅缺湿身门——flag30 = ai[0]<2 &&
+// !flag16 && !wet（NPC.cs:55768 字面），tryRandomChairSit 条件串补 wet。
+// ===========================================================================
+describe('★F6 随机坐椅 !wet 门（flag30 :55768 字面）', () => {
+  function runCase(wet: boolean): { called: boolean; sitting: boolean } {
+    const world = makeWorld();
+    const { game } = makeGame(world);
+    const npc = new TownNPC('nurse', spotCenter(SPOT_X) - 10, FLOOR * 16) as never;
+    const me = npc as unknown as Record<string, unknown> & { sitting: boolean };
+    me.onGround = true;
+    me.wet = wet;
+    me.rng = () => 0;                          // rand(300)==0 必中（其余门全放行面）
+    const sitFn = (TownNPC.prototype as unknown as Record<string,
+      (w: World, g: never, dir: number) => boolean>).tryRandomChairSit;
+    const called = sitFn.call(me, world, game, 1);
+    return { called, sitting: me.sitting };
+  }
+
+  it('干身:脚下椅格+掷中 → 正常入座', () => {
+    const r = runCase(false);
+    expect(r.called).toBe(true);
+    expect(r.sitting).toBe(true);
+  });
+
+  it('湿身(!wet 不满足):同几何同骰 → 拒绝入座', () => {
+    const r = runCase(true);
+    expect(r.called).toBe(false);
+    expect(r.sitting).toBe(false);
+  });
+
+  // ★治理批 B3（2026-08-31）：SIT 计时掷骰改走实例 rng 注入面后，
+  //   时长分布可确定性钉值——[SIT_TIME_BASE .. SIT_TIME_BASE+SIT_TIME_RAND-1]
+  //   两端点逐一钉死（旧 Math.random 直呼使该分布游离在测试口径之外）。
+  function sitWithDuration(rngRet: number): number {
+    const world = makeWorld();
+    const npc = new TownNPC('guide', spotCenter(SPOT_X) - 10, FLOOR * 16);
+    npc.home = { x: SPOT_X, y: FLOOR - 1 };
+    const { game } = makeGame(world, { npcs: [npc] });
+    npc.rng = () => rngRet;
+    for (let t = 0; t < 120 && !npc.sitting; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.sitting).toBe(true);
+    return (npc as unknown as { sitTimer: number }).sitTimer;
+  }
+
+  it('★B3 时长下限:rng=0 → ai[1]=900+rand(10800)=900 整', () => {
+    expect(sitWithDuration(0)).toBe(SIT_TIME_BASE);            // :53283 分布下端
+  });
+
+  it('★B3 时长上限:rng≈1 → 900+10799（Next 上界不含的离散映射）', () => {
+    expect(sitWithDuration(0.9999999)).toBe(SIT_TIME_BASE + SIT_TIME_RAND - 1);
   });
 });

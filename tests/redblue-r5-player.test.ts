@@ -220,6 +220,20 @@ describe('R5-F13/F14/F15/F17 冲刺', () => {
     expect(p.dashDelay).toBe(0);                       // 未进入滑行态
     expect(p.vx).toBe(0);
   });
+
+  it('★B6② 骑乘 CanDash 坐骑（57 滚轴鞋族）放行配饰档冲刺——非 dash6 走 dash1 原速 16.9', () => {
+    // 原版 ：21579 门只对 !CanDash[mount.Type] 拒绝；CanDash={56..65}
+    // （MountID.cs:11）的 56-61 走 dash=dashType 的配饰档分支
+    const w = mkWorld();
+    const p = mkPlayer(w);
+    p.inv.armor[3] = { id: _iid(977), stack: 1 };      // tabi → dashType=1
+    settle(p, w);
+    p.mount.setMount(57, p);                           // 滚轴鞋上骑（MountID.Sets.CanDash 成员）
+    doubleTap(p, w);
+    expect(p.dashDelay).toBe(-1);                      // 进入滑行态
+    expect(p.vx).toBeCloseTo(16.9, 6);                 // 配饰原速（非坐骑 dashSpeed）
+    p.mount.dismount(p);
+  });
 });
 
 // ============ F1/F3/F5/F6 生命再生（UpdateLifeRegen） ============

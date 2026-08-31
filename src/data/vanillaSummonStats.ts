@@ -108,6 +108,20 @@ export interface SummonSetFx extends SummonFx {
    *  爆炸机关弹 694-696 命中上 Oiled 门（StatusNPC :10786）+ 机关冷却 90→60/30
    *  （GetExplosiveTrapCooldown :66109-66119,冷却档未接登记） */
   huntressT2?: boolean;
+  /** ★批②（2026-08-31）：DD2 套装专精旗标直通位——原版写入链 =
+   *  ArmorSetBonuses.Benefits.SquireTier2(player) 等（Terraria.DataStructures/
+   *  ArmorSetBonuses.cs:68-125）置 Player.setSquireT2/…（Player.cs:2811-2831），
+   *  T3 方法【同时】置 T2 旗（:92-125）。消费点：MinionProj AI_130 学徒 T2
+   *  （range×1.5/angleRatioMax0.1/弹速×1.4 :69331-69335）、AI_134 侍从 T2 弩速
+   *  16→21（:69591-69593）、GetBallistraShotDelay T3 档（:69720-69736）。经
+   *  equipStats.summonSet 直挂透传（computeEquipStats 不改行） */
+  squireT2?: boolean;
+  apprenticeT2?: boolean;
+  monkT2?: boolean;
+  squireT3?: boolean;
+  apprenticeT3?: boolean;
+  monkT3?: boolean;
+  huntressT3?: boolean;
 }
 
 export const SUMMON_SET: Record<string, SummonSetFx> = {
@@ -123,17 +137,18 @@ export const SUMMON_SET: Record<string, SummonSetFx> = {
   '160|168|103': { dmg: 0.10 },                          // 蜂 +10%
   '162|170|105': { dmg: 0.12 },                          // 蜘蛛 +12%
   '185|187|127': { dmg: 0.15, whipRange: 0.3, whipSpd: 1 / 1.15 }, // 黑曜（+15%伤/鞭程+30%/鞭速+15%）
-  // ---- DD2 八组套装（:16107-16157 各 maxTurrets++;键=hs|bs|ls 即源码 head/body/legs 偏移段）----
-  // 套装专精旗标（setSquireT3 等→Etherian mana 消耗/哨兵行为）与 bonus 文本登记未接
-  '204|201|145': { sentry: 1 },      // Squire T2（:16107）
-  '203|200|144': { sentry: 1 },      // Apprentice T2（:16113）
-  '205|202|146': { sentry: 1, huntressT2: true },  // Huntress T2（:16119;腿 146/147 双变体,146 实装）
-  '205|202|147': { sentry: 1, huntressT2: true },  // Huntress T2 腿变体 147（:16121 (legs == 147 || legs == 146)）
-  '206|203|148': { sentry: 1 },      // Monk T2（:16125）
-  '210|204|152': { sentry: 1 },      // Squire T3（:16131）
-  '211|205|153': { sentry: 1 },      // Apprentice T3（:16138）
-  '212|206|154': { sentry: 1, huntressT2: true },  // Huntress T3（:16145;T3 也置 setHuntressT2 :16149）
-  '212|206|155': { sentry: 1, huntressT2: true },  // Huntress T3 腿变体 155（:16147）
-  '213|207|156': { sentry: 1 },      // Monk T3（:16152）
+  // ---- DD2 八组套装（各 maxTurrets++;键=hs|bs|ls 即源码 head/body/legs 偏移段；
+  //      旗标写入链 = ArmorSetBonuses.cs:68-125 Benefits 方法,:475-482 注册表;
+  //      T3 方法同置 T2 旗(:92-125)——批②(2026-08-31)接通 MinionProj 消费位）----
+  '204|201|145': { sentry: 1, squireT2: true },            // Squire T2（:475;3800-3802）
+  '203|200|144': { sentry: 1, apprenticeT2: true },        // Apprentice T2（:476;3797-3799）
+  '205|202|146': { sentry: 1, huntressT2: true },          // Huntress T2（:477;3803-3805）
+  '205|202|147': { sentry: 1, huntressT2: true },          // Huntress T2 腿变体
+  '206|203|148': { sentry: 1, monkT2: true },              // Monk T2（:479;3806-3808）
+  '210|204|152': { sentry: 1, squireT3: true, squireT2: true },        // Squire T3（:481）
+  '211|205|153': { sentry: 1, apprenticeT3: true, apprenticeT2: true },// Apprentice T3（:482）
+  '212|206|154': { sentry: 1, huntressT3: true, huntressT2: true },    // Huntress T3
+  '212|206|155': { sentry: 1, huntressT3: true, huntressT2: true },    // Huntress T3 腿变体
+  '213|207|156': { sentry: 1, monkT3: true, monkT2: true },            // Monk T3
   '189|190|130': { guardian: true },                     // 星尘（不加槽，守护者行为型）
 };

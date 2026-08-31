@@ -791,14 +791,15 @@ function placeBuriedChestInner(
   i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags; trySlope?: boolean; notNearOtherChests?: boolean } = {},
 ): boolean {
   // 下落到地面（cs:35931 `for k=j; k<maxTilesY-10; k++`）
-  // ★DDDD:坠落谓词 = WorldGen.SolidTile(i,k)（cs:70155:active && tileSolid && !tileSolidTop
-  //   && !half && slope==0 && !inActive）——平台/桌族(solidTop)不拦截坠落,vanilla house17
-  //   宝箱(1863,541)穿过楼梯平台落 548(x86 CPB 实锤);曾用 solidTileHB(!d.platform)——
-  //   桌族(87 等无 d.platform 旗)误当拦截层。六谓词与 PC_SOLID_TOP 表一致。
+  // ★DDDD:坠落谓词 = WorldGen.SolidTile(i,k)（cs:70650-70666 全项版:active && tileSolid &&
+  //   !tileSolidTop && !half && slope==0 && !inActive）。★IIIII86:补第六判项 !inActive
+  //   （wire 位 5,与 vanilla/ 副本及 ltSolid 同式）；本种子生成期该位全零(dIa=0 双侧实证),
+  //   项为休眠但对齐全项形防未来读面漂移。
   const solidDrop = (lx: number, ly: number): boolean => {
     if (!st.inBounds(lx, ly)) return false;
     const i = st.idx(lx, ly);
     if (!st.flags[i]) return false;
+    if ((st.wire[i] >>> 5) & 1) return false;                    // ★IIIII86:!inActive()
     const t = st.type[i];
     return genSolidType(t) && !PC_SOLID_TOP.has(TILE_DEFS[t]?.vanilla?.sheet ?? -1)
       && st.half[i] === 0 && st.slope[i] === 0;

@@ -8,6 +8,7 @@ import {
   ItemContainer, ItemSyncEntry, INV_SYNC_SIZES, writePlayerItems, readPlayerItems,
   RoomRules, DEFAULT_ROOM_RULES, rulesFromBits,
   writeDoorEvent, readDoorEvent,
+  writePlayerHurt, readPlayerHurt,
 } from './protocol';
 import {
   writeLeashedFullSync, writeLeashedPartialSync, writeLeashedRemove, writeLeashedPlaceRequest,
@@ -69,6 +70,13 @@ export interface RemotePlayerState {
   mana: number;
   manaMax: number;
   luck: number;
+  /** PvP 免疫余量镜像（tick,2026-08-30 批 msg16 再追加尾段）——被击端把
+   *  player.immune 的 General 冷却余量（原版 immuneTime,PvP 受击窗 8t/常规 40t/
+   *  复活 SpawnImmune 300t）随 hp 变化包上行；本端收到即置位、本地每 tick 衰减。
+   *  消费 = 攻端门禁 API getProxyPvpImmuneRemaining（与原版攻击端直接读
+   *  Main.player[victim].immune 同构,1457 Player.cs:44429）。旧端无尾段 → 镜像
+   *  不重置,仅靠本地衰减归零（缺省 0 = 不拦,改动前行为） */
+  pvpImmuneT: number;
   /** msg13 flagBits[0]（原版 bitsByte26[0]）:躺床态 */
   sleeping: boolean;
 }
@@ -154,6 +162,15 @@ export interface ClientNetHooks {
   onStrikePlayer?: (fromSlot: number, targetSlot: number, dmg: number, kbx: number, kby: number, weaponId: number, flags: number) => void;
   /** 远端玩家 HP（msg16 中继） */
   onHp?: (slot: number, hp: number, maxHp: number) => void;
+  /** 被击端实扣权威飘字到达（msg117 PlayerHurt；2026-08-30 批）——Game 侧在
+   *  目标玩家代理位置 addDamageNumber：crit 位分档 = CombatText.cs:8/:10 真值单源
+   *  （Game.playerHurtFloatColor——普伤 (255,80,90)/暴击 (255,100,30) 橙红系，
+   *  曾注「金色」系措辞误记，二轮 FR4-F 勘正）；dmg 已是被击端实扣终值（含防御/
+   *  endurance），直接显示。
+   *  self slot 的帧服务器已排除发送者，理论上不可达；守卫仍在 handle 内兜底。
+   *  攻端原 InPVP 公式预览飘字（Main.cs:65636 dmg−def×0.5 近似）由此通道替代后
+   *  应删除——本帧到达前攻端「无预显示」即目标行为闭环。 */
+  onPlayerHurt?: (slot: number, dmg: number, x: number, y: number, dir: number, flags: number) => void;
   /** 拴绳实体到达（msg82 module13；Game 经 LeashedEntityManager 重建/刷新/移除）。
    *  仅世界就绪后回调（组装期帧进 pendingLeashed，由 Game 在 loadWorld 完成后消费） */
   onLeashedSync?: (msg: LeashedNetMsg) => void;
@@ -436,7 +453,7 @@ export class ClientNet {
               up: false, down: false, left: false, right: false, jump: false, useItem: false,
               facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
               hostile: false, team: 0, hp: 100, maxHp: 100, sleeping: false,
-              deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0,
+              deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0,
             };
             this.players.set(slot, p);
           }
@@ -481,7 +498,7 @@ export class ClientNet {
             facing: ctrl & 64 ? 1 : -1, selectedItem: sel, dead: !!(flag & 64),
             fresh: true, active: true, lastFresh: performance.now(),
             hostile, team, hp: 100, maxHp: 100, sleeping: false,
-            deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0,
+            deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0,
           };
           this.players.set(slot, p);
         }
@@ -761,6 +778,10 @@ export class ClientNet {
         // 旧 server/旧端无尾段 → 缺省 0,心星条件按未满档退化,登记兼容语义）
         let mana: number | undefined, manaMax: number | undefined, luck: number | undefined;
         if (r.remaining >= 8) { mana = r.i16(); manaMax = r.i16(); luck = r.f32(); }
+        // 尾部 PvP 免疫余量（2026-08-30 批——攻端门禁镜像,见 RemotePlayerState.pvpImmuneT。
+        // 2026-08-31 复核：旧 server 重打包剥此尾 → undefined 分支保持既有镜像,
+        // 只靠 decayProxyImmune 本地衰减归零,绝不残存“永续免伤”——缺省 0 = 不拦）
+        const pvpImmune = r.remaining >= 2 ? r.i16() : undefined;
         // 缓存进状态表（proxy.hp 接线在 Game.simulateRemotePlayers 每帧读取）
         const rp = this.players.get(slot);
         if (rp) {
@@ -770,8 +791,19 @@ export class ClientNet {
           if (mana !== undefined) rp.mana = mana;
           if (manaMax !== undefined) rp.manaMax = manaMax;
           if (luck !== undefined && Number.isFinite(luck)) rp.luck = luck;
+          if (pvpImmune !== undefined) rp.pvpImmuneT = Math.max(0, Math.min(32767, pvpImmune));
         }
         if (slot !== this.mySlot) this.hooks.onHp?.(slot, hp, maxHp);
+        return;
+      }
+      case Msg.PlayerHurt: {
+        // msg117 被击端实扣权威飘字（原版 MessageBuffer.cs:3882-3897 以 quiet Hurt
+        // 重放音效+尘+飘字；本仓重放面只剩飘字 → 直通 hook,呈现接线在 Game 侧）。
+        // 服务器已覆写 slot=发送者并排除发送者本人广播；self 帧防御兜底丢弃
+        // （被击端本地已显示过自己的数字,不双显）。
+        const m = readPlayerHurt(r);
+        if (!m || m.slot === this.mySlot) return;
+        this.hooks.onPlayerHurt?.(m.slot, m.dmg, m.x, m.y, m.dir, m.flags);
         return;
       }
       case Msg.SscSync: {
@@ -843,6 +875,7 @@ export class ClientNet {
   /** Game 每 fixedUpdate 调用：冲洗 tile 队列 + 玩家状态上报（变化驱动 + 66ms 节流） */
   tick() {
     if (!this.active) return;
+    this.decayProxyImmune();
     this.syncInventory(performance.now());
     this.syncHp();
     this.flushPending(); // P1.3 msg21 合帧冲洗
@@ -916,6 +949,46 @@ export class ClientNet {
 
   /** PvP 姿态变化即时上报（msg13 心跳之外快速通道：hostile/team 翻转立刻同步） */
   sendPvpState() { this.sendPlayerState(true); }
+
+  // ================= PvP 免疫余量镜像（msg16 尾段；2026-08-30 批） =================
+  // 原版单进程里 ItemCheck_MeleeHitPVP 攻端门禁串直接读 Main.player[victim].immune
+  // （1457 Player.cs:44429「|| player.immune ||」——1456 :43407 同式,公开免疫布尔旗,
+  // Player.cs :1403 定义）。victim-settles 架构下攻端无该态 → 以 msg16 尾段把被击端
+  // 的 General 冷却余量（=immuneTime,PvP 受击窗 8t/常规 40t/复活 SpawnImmune 300t）
+  // 回传、本地每 tick 衰减成镜像，GA 在攻端门串以 getProxyPvpImmuneRemaining>0 置入。
+  // 降级矩阵（两方向）：旧 server 中继剥尾 → 镜像收不到值 = 恒 0 = 不拦（改动前
+  // 行为）；新客户端→旧 server→新客户端同路退化。旧端帧无尾段时不重置既有镜像
+  // （防混合环境抖动清零），永续残留不存在——衰减是唯一的 0 化路径。
+
+  /** 镜像衰减（tick() 每 fixedUpdate 调一次；1 call = 1 游戏 tick，与原版
+   *  immuneTime-- 节拍对齐）。有向误差只剩包延迟级（<100ms），且只作用于
+   *  「免疫刚结束的窗口」——保守侧偏差，与原版攻端先于 victim 结算读态的时序同型 */
+  private decayProxyImmune() {
+    for (const p of this.players.values()) {
+      if (p.pvpImmuneT > 0) p.pvpImmuneT--;
+    }
+  }
+
+  /** 攻端消费 API：远端玩家 PvP 免疫余量（tick）。
+   *  GA 门串置入契约：`net.getProxyPvpImmuneRemaining(slot) > 0` ⇔ 原版
+   *  `player.immune == true`（1457 :44429 门禁串的同构支——置 continue 位，
+   *  整条命中体跳过：StatusToPlayerPvP/Hurt/OnHit/beetle 蓄能一并不达）。
+   *  自身 slot 与未知 slot 一律 0（未知=不可命中对象,由调用方先行过滤）。 */
+  getProxyPvpImmuneRemaining(slot: number): number {
+    return this.players.get(slot)?.pvpImmuneT ?? 0;
+  }
+
+  /** 被击端结算即时补报钩子（GA 在扣血结算回调后调用——含闪避/免伤早退路径）：
+   *  强制下一次 syncHp 绕过全部节流窗（200ms 变化窗 + 5s 满血心跳）立即携带新鲜
+   *  iframes 上行。原版在同一结算尾无条件连发 msg13/msg16/msg117 三包
+   *  （Player.cs:38658-38661 netMode==1 && !quiet 段），本仓拆面后以此钩子保住
+   *  「免疫态与伤害同帧可见」的时序——尤其闪避路径 hp 不变、无此钩会被心跳吞；
+   *  不调用则退化到 hp 变化驱动的节流上行（实扣路径多数仍即时——必变 hp） */
+  private pvpImmuneHintPending = false;
+  notifyPlayerHurtSettled() {
+    this.pvpImmuneHintPending = true;
+    this.lastHpAt = 0;
+  }
 
   private lastSentCtrl = -1;
   private lastSentSel = -1;
@@ -1092,6 +1165,19 @@ export class ClientNet {
   sendStrikePlayer(targetSlot: number, rawDmg: number, kbx: number, kby: number, weaponId: number, flags: number) {
     this.send(new NetWriter(Msg.StrikePlayer).u8(targetSlot).i16(rawDmg)
       .i16(kbx).i16(kby).u16(weaponId).u8(flags & 0xff).finish());
+  }
+
+  /** 被击端实扣权威飘字广播（msg117 PlayerHurt；2026-08-30 批）。
+   *  GA 调用契约：仅「扣血成功且非闪避/免伤早退」路径发（damagePlayer 返回实扣
+   *  ok>0 的 pvp 命中族）——参数直接来自结算值：
+   *    net.sendPlayerHurt(ok, p.cx, p.cy, Math.sign(p.cx - srcX) || 1,
+   *      PlayerHurtFlags.Pvp | (crit ? PlayerHurtFlags.Crit : 0));
+   *  dmg=实扣终值（hp 减量）;crit/pvp 位决定接收端飘字样式（金 crit/常规红）。
+   *  发送前宜 notifyPlayerHurtSettled() 清 msg16 节流窗（原版三连包时序等价）。
+   *  旧 server 对未知号整包忽略 = 其他端看不到飘字（降级安全） */
+  sendPlayerHurt(dmg: number, x: number, y: number, dir: number, flags: number) {
+    if (this.mySlot < 0) return;
+    this.send(writePlayerHurt({ slot: this.mySlot, dmg, x, y, dir, flags }));
   }
 
   /** 聊天发送（msg82 module1）：text + 尾部 u8 channel + channel0 随附 RGB。
@@ -1271,19 +1357,26 @@ export class ClientNet {
   /** HP 上报（msg16，变化驱动 + 200ms 节流；原版客户端权威）。尾部随附死亡计数
    *  （u16×2 PVE/PVP——计数变化时绕过 HP 节流即发,/death 命令族汇总用）+
    *  mana/luck（i16×2+f32,2026-08-20 per-client 批——房主掉落结算 closestPlayer
-   *  数据源;luck 随 5s 心跳/HP 变化包捎带,旧 server 无尾段忽略） */
+   *  数据源;luck 随 5s 心跳/HP 变化包捎带,旧 server 无尾段忽略）+
+   *  PvP 免疫余量（i16,2026-08-30 批——攻端门禁镜像源,取 game.player.iframes 即
+   *  原版 immuneTime General 槽口径;仅免疫窗内非零,平时随包携带 0 无额外包） */
   private lastHpSent = -1;
   private lastHpAt = 0;
   private lastDeathsSent = '';
   syncHp() {
     if (this.mySlot < 0) return;
-    const p = this.game.player as unknown as { hp: number; maxHp: number; deathsPve: number; deathsPvp: number; mana: number; maxMana: number; luck: number };
+    const p = this.game.player as unknown as { hp: number; maxHp: number; deathsPve: number; deathsPvp: number; mana: number; maxMana: number; luck: number; iframes?: number };
     const now = performance.now();
+    // 结算强制位（notifyPlayerHurtSettled）：仅下一次发送绕过节流，消费即清
+    const forced = this.pvpImmuneHintPending;
+    this.pvpImmuneHintPending = false;
     const deathsKey = `${p.deathsPve},${p.deathsPvp}`;
     const deathsChanged = deathsKey !== this.lastDeathsSent;
-    if (p.hp === this.lastHpSent && !deathsChanged) {
-      if (now - this.lastHpAt < 5000) return; // 满血心跳 5s
-    } else if (p.hp === this.lastHpSent && now - this.lastHpAt < 200) return;
+    if (!forced) {
+      if (p.hp === this.lastHpSent && !deathsChanged) {
+        if (now - this.lastHpAt < 5000) return; // 满血心跳 5s
+      } else if (p.hp === this.lastHpSent && now - this.lastHpAt < 200) return;
+    }
     this.lastHpSent = p.hp;
     this.lastDeathsSent = deathsKey;
     this.lastHpAt = now;
@@ -1291,7 +1384,8 @@ export class ClientNet {
       .u16(p.deathsPve & 0xffff).u16(p.deathsPvp & 0xffff)
       .i16(Math.max(-32768, Math.min(32767, p.mana)))
       .i16(Math.max(-32768, Math.min(32767, p.maxMana)))
-      .f32(Number.isFinite(p.luck) ? p.luck : 0).finish());
+      .f32(Number.isFinite(p.luck) ? p.luck : 0)
+      .i16(Math.max(0, Math.min(32767, p.iframes ?? 0))).finish());
   }
 
   /** per-client 掉落上行（module14；结算端=房主——服务器按 targetSlot 定向转发,

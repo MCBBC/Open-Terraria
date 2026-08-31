@@ -206,6 +206,8 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
   const num2 = Math.floor(300 * (st.w * st.h) / 5040000);
   let remaining = num2;
   let budget = 100000;
+  // ★IIIII95 A/B 回归仪：SW_SPOT_NOFIX=1 时哨兵＝关掉本批新增 remix 臂拍摄基线（见文件头）
+  const noFixArms = (globalThis as { __swSpNoFixArms?: boolean }).__swSpNoFixArms === true;
   // ★CW3 PlaceWall 掷骰债（rig 陷阱①框架耗掷）：Actions.PlaceWall 置墙后调
   //   WorldGen.SquareWallFrame(x,y)+四邻（neighbors=true）——每次 SquareWallFrame 的
   //   中心格 Framing.WallFrame(i,j,resetFrame=true) 耗 genRand.Next(0,3)（Framing.cs:390，
@@ -257,8 +259,16 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
       // ★CW2（cs:16805 非 remix 分支）：深度分档用 **GenVars.rockLayer**
       // （Terrain 游走终值 double = gs.genRockLayer），非 Main.rockLayer（gs.rockLevel），
       // 曾误用 gs.rockLevel → 泥/石墙变体分界偏移；lavaLine 两版同值（gs.lavaLine）
-      if (py < gs.genRockLayer) wallType = 196 + rng.nextInt(4);    // 泥墙变体
-      else if (py >= gs.lavaLine) wallType = 208 + rng.nextInt(4);  // 深层石墙
+      // ★★★IIIII95（Terarria1458 WorldGen.cs cs:16824-16831）：remix 臂——比较方向
+      //   全体翻转（remix 世界地表/地底倒置：Y>rockLayer→泥 196 族）且中带判据为
+      //   `(Y <= lavaLine || Next(2) != 0)`（**短路掷**：Next(2) 仅在 Y>lavaLine 时
+      //   才耗，一半概率落 208 族）。普通世界整支不可达、骰序不变。
+      if (gs.seedFlags.remix && !noFixArms) {
+        if (py > gs.genRockLayer) wallType = 196 + rng.nextInt(4);
+        else if (py <= gs.lavaLine || rng.nextInt(2) !== 0) wallType = 212 + rng.nextInt(4);
+        else wallType = 208 + rng.nextInt(4);
+      } else if (py < gs.genRockLayer) wallType = 196 + rng.nextInt(4);   // 泥墙变体
+      else if (py >= gs.lavaLine) wallType = 208 + rng.nextInt(4);        // 深层石墙
       else wallType = 212 + rng.nextInt(4);
     }
     if (wallType !== 0 && !st.flags[above]) {

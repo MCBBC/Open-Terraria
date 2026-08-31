@@ -21,6 +21,7 @@ import { Arrow, projFrameImg, projFrameCount } from './Arrow';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
+import { hitCritters } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
@@ -31,19 +32,52 @@ import { MushroomBoiExplosionProj, requestMushroomBoiExplosion } from './DeadCel
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
  *  开火动画、第 12t 出火球（弹型/速度/周期/冷却按 FLAMEBURST_TIERS 分层） */
 const FLAMEBURST_TOWER = new Set([663, 665, 667]);
-/** 弩车三档（AI_134 :65584）：帧 0 待机、帧 1-5 开火（每 5t）、第 12t 出弩箭 680
- *  （速 16，T2 21）、25t 结束、冷却 GetBallistraShotDelay */
+/** 弩车三档（AI_134 :65584/1457 :69584）：帧 0 待机、帧 1-5 开火（每 5t）、
+ *  开火第 6t（ai[1]==5）出弩箭 680（速 16，T2 套装 21;num2=num6=5,num2 的初值 12 已被
+ *  `num2 = num6` 覆写——旧"第12t"是初值误读,2026-08-31 批②修）、25t 结束、
+ *  冷却 GetBallistraShotDelay */
 const BALLISTA_TOWER = new Set([677, 678, 679]);
-/** GetBallistraShotDelay 1:1（1457 :69721-69735；1456 :65707 同体）：
+/** DD2 套装旗标消费位（2026-08-31 批②接线）。原版写入链 =
+ *  ballistaPanic（buff 205,Player.cs:11933 读面——SquireT2 受击 AddBuff(205,300) :38526）：
+ *  ★GB3（2026-08-31 清零批二波）：population 位补齐——Player.damage 授予端已落地，
+ *  经 p.ballistaPanicT>0（Player.cs 300t 窗的字段承载,Player.fixedUpdate 逐拍衰减）
+ *  与 p.ballistaPanic 显式位双读面。 */
+export interface Dd2SetFlags {
+  squireT2: boolean; apprenticeT2: boolean; monkT2: boolean;
+  squireT3: boolean; apprenticeT3: boolean; monkT3: boolean; huntressT2: boolean;
+  ballistaPanic: boolean;
+}
+export function dd2SetFlags(playerLike: unknown): Dd2SetFlags {
+  const p = playerLike as {
+    setSquireT2?: boolean; setApprenticeT2?: boolean; setMonkT2?: boolean;
+    setSquireT3?: boolean; setApprenticeT3?: boolean; setMonkT3?: boolean;
+    setHuntressT2?: boolean; ballistaPanic?: boolean; ballistaPanicT?: number;
+    equipStats?: { summonSet?: { squireT2?: boolean; apprenticeT2?: boolean; monkT2?: boolean;
+      squireT3?: boolean; apprenticeT3?: boolean; monkT3?: boolean; huntressT2?: boolean } };
+  } | null | undefined;
+  const ss = p?.equipStats?.summonSet ?? undefined;
+  return {
+    squireT2: ss?.squireT2 === true || p?.setSquireT2 === true,
+    apprenticeT2: ss?.apprenticeT2 === true || p?.setApprenticeT2 === true,
+    monkT2: ss?.monkT2 === true || p?.setMonkT2 === true,
+    squireT3: ss?.squireT3 === true || p?.setSquireT3 === true,
+    apprenticeT3: ss?.apprenticeT3 === true || p?.setApprenticeT3 === true,
+    monkT3: ss?.monkT3 === true || p?.setMonkT3 === true,
+    huntressT2: ss?.huntressT2 === true || p?.setHuntressT2 === true,
+    // ★GB3 双读面：字段窗(授予端 Player.damage)∪ 显式直连位（测试/GW 直连后备）
+    ballistaPanic: (p?.ballistaPanicT ?? 0) > 0 || p?.ballistaPanic === true,
+  };
+}
+
+/** GetBallistraShotDelay 1:1（1457 :69720-69736；1456 :65707 同体）：
  *  基础 160 → 侍从 T3 套装 100 → 弩车恐慌（ballistaPanic）60 → 双真 30。
- *  本仓 setSquireT3/ballistaPanic（DD2 套装/哨兵背包恐慌位）未实装 → 恒 160 档，
- *  档位结构先落（旗标接线随 DD2 套装批） */
+ *  setSquireT3/ballistaPanic 经 dd2SetFlags 读（未穿套装恒 160 档,旗标位 GW 批补） */
 function ballistraShotDelayOf(player: object): number {
-  const p = player as { setSquireT3?: boolean; ballistaPanic?: boolean };
+  const f = dd2SetFlags(player);
   let result = 160;
-  if (p.setSquireT3) result = 100;
-  if (p.ballistaPanic) result = 60;
-  if (p.ballistaPanic && p.setSquireT3) result = 30;
+  if (f.squireT3) result = 100;
+  if (f.ballistaPanic) result = 60;
+  if (f.ballistaPanic && f.squireT3) result = 30;
   return result;
 }
 /** 闪电光环三档（AI_137 :65910）：非射击——光环场伤害（宽 ≤999 扫描增长，
@@ -105,6 +139,47 @@ export function lightningAuraCanHitFrom(
   }
   return false;
 }
+/** AI_130/AI_134 FindTarget 的角度/朝向门族（2026-08-31 批①②「未接」账清偿）：
+ *  - angleRatioMax（AI_130，Projectile.cs:69434/:69456 消费式逐字）
+ *      `!(Math.Abs(v.X) < Math.Abs(v.Y) * ratio)` 不满足即拒——ratio=1 默认（:69166）,
+ *      学徒 T2 套装置 0.1（:69332 垂直覆盖大幅放宽）
+ *  - deadBottomAngle（AI_134，:69481/:69503）：`(|vX| < |vY|·dba) 且 vY>0` 的
+ *      陡下锥内候选拒（0.75,:69580）;上方目标恒通过
+ *  - directionLock：AI_130 第二调用点 canChangeDirection=false（:69404 实参）——
+ *      `(float)direction * v.X < 0f` 即正后方候选跳过（开火帧不再回头转向;
+ *      门不过 → 调用侧回落 (direction,0) 直射）。第一调用点 :69376 可换向=无此门 */
+export interface TowerAimGate {
+  angleRatioMax?: number;
+  deadBottomAngle?: number;
+  /** 存现值 direction（±1）；undefined = canChangeDirection=true 无门 */
+  directionLock?: number;
+}
+
+/**
+ * SafeNormalize 兜底 UnitY 后的方向门判定（FindTarget 内联式 1:1）。
+ * @param dxNorm 归一化 vX（零向量时传 0）
+ * @param dyNorm 归一化 vY（零向量时传 1——SafeNormalize(fallback UnitY)）
+ * @returns false = 该候选被门拒（等价原版 && 短路失败）
+ * @pure 可独立测钉
+ */
+export function towerAimGate(dxNorm: number, dyNorm: number,
+  gate: TowerAimGate | undefined): boolean {
+  if (!gate) return true;
+  if (gate.angleRatioMax !== undefined) {
+    //（:69434/:69456）|vX| < |vY|*ratio → 拒
+    if (Math.abs(dxNorm) < Math.abs(dyNorm) * gate.angleRatioMax) return false;
+  }
+  if (gate.deadBottomAngle !== undefined) {
+    //（:69481/:69503）接受式 = (!(|vX|<|vY|·dba) || !(vY>0)) ⇒ 反之拒
+    if (Math.abs(dxNorm) < Math.abs(dyNorm) * gate.deadBottomAngle && dyNorm > 0) return false;
+  }
+  if (gate.directionLock !== undefined) {
+    //（:69456 经 :69404 实参展开）direction*vX < 0 → 拒
+    if ((gate.directionLock as number) * dxNorm < 0) return false;
+  }
+  return true;
+}
+
 /** 随从帧循环表（源码提取，Projectile.cs 各 AI 内 frameCounter 规则）：
  *  [每帧 tick, 循环帧数, 攻击帧偏移]。375 小鬼攻击中 +4（ai[1]<24 → 真攻击帧）；
  *  未列入的家族（758 吸血蛙 24 帧/951 雪怪 12 帧/1022 蘑菇 16 帧/
@@ -2877,6 +2952,16 @@ export class MinionProj extends Entity {
           applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           this.attackFlash = 24;
         }
+        // ★F4 召唤/哨兵弹伤害时刻的小动物恒拒门（CanNPCBeHitByPlayerOrPlayerProjectile
+        // (npc, projectile)：flag = …∪(projectile.minion ∪ MinionShot ∪ sentry ∪
+        // SentryShot) ⇒ 普通小动物不吃召唤伤（无需饰品）；黑化复权体在出口内放行。
+        // 盒 = :14294-14300 状态2 拳盒（Center+direction×40，80×40））
+        if ((game as unknown as { critters?: () => unknown[] }).critters?.().length) {
+          hitCritters(
+            { x: this.cx + this.facing * 40 - 40, y: this.cy - 20, w: 80, h: 40 },
+            game,
+            { minion: true, sentry: this.sentry });
+        }
       }
       return;
     }
@@ -2915,7 +3000,19 @@ export class MinionProj extends Entity {
   private contact(game: GameHooks, dmg: number, cd: number, pad = 0): boolean {
     const add = (e: unknown, b: string) =>
       (game as unknown as { entities: { add: (x: unknown, y: string) => void } }).entities.add(e, b);
+    // ★F4 召唤/哨兵弹伤害时刻的小动物恒拒门（projectile 语境入统一出口）：
+    // flag=true ⇒ 普通小动物免伤（饰品无关），唯一放行 = 黑化复权体（F2 运行时位）。
+    // 命中返回值并入 anyHit（原版单数组遍历的仓内双桶拆分等价形）
     let anyHit = false;
+    // ★F4 召唤/哨兵弹伤害时刻的小动物恒拒门（projectile 语境入统一出口）：
+    // flag=true ⇒ 普通小动物免伤（饰品无关），唯一放行 = 黑化复权体（F2 运行时位）。
+    // 命中返回值并入 anyHit（原版单数组遍历的仓内双桶拆分等价形）
+    if ((game as unknown as { critters?: () => unknown[] }).critters?.().length) {
+      const hitbox = pad
+        ? { x: this.x - pad, y: this.y - pad, w: this.w + pad * 2, h: this.h + pad * 2 }
+        : { x: this.x, y: this.y, w: this.w, h: this.h };
+      if (hitCritters(hitbox, game, { minion: true, sentry: this.sentry })) anyHit = true;
+    }
     for (const e of game.enemies()) {
       if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const en = e as never as EnemyLike & import('./WhipTag').WhipTagged & {
@@ -3013,6 +3110,18 @@ export class MinionProj extends Entity {
     else if (projId === 1113) { this.w = 18; this.h = 18; }
     // 蘑菇小伙伴 1022（Dead Cells 联动,5456）：20×30（SetDefaults Projectile.cs:9670-9671）
     else if (projId === 1022) { this.w = 20; this.h = 30; }
+    // ★GC 移交收口（终局扫尾批 A7，2026-08-31）：DD2 哨兵塔 SetDefaults 真盒注册——
+    //   此前 663 族/弩车族落 16×16 兜底 ⇒ 判定盒/索敌锚与贴图错位。
+    //   · 爆炸烈焰塔（AI_130）SetDefaults(:7132-7157)：663=30×54 → 665=28×58 →
+    //     667=28×60（逐型覆写 switch 在主块内,终值以此为准）
+    //   · 弩车三档（AI_134,:7243-7255）：677/678/679 恒 26×54
+    //   锚仍成立性核对：F6 弩车瞄准基准 spotY134 = center.Y−(677?4:0)、火焰塔炮口
+    //   Bottom+(dir*6,-Δ)=y+h−tier.dy——两者皆盒相对式,真盒扩容后语义不变；
+    //   首帧放位由落地扫描 y 定格（moveAndCollide 收敛到地面),盒高变化不漂移锚点。
+    else if (projId === 663) { this.w = 30; this.h = 54; }      // :7133-7134 主块
+    else if (projId === 665) { this.w = 28; this.h = 58; }      // :7141-7144 覆写
+    else if (projId === 667) { this.w = 28; this.h = 60; }      // :7145-7148 覆写
+    else if (projId === 677 || projId === 678 || projId === 679) { this.w = 26; this.h = 54; }  // :7244-7245
   }
 
   /** 归属玩家（ownerRef 公开读——Game 抚摸白名单按 owner 过滤） */
@@ -3038,21 +3147,31 @@ export class MinionProj extends Entity {
    *  顶心 vector2=(0.5,0)（:66365-66368）——差 ≤敌半高,不另开通道）。
    *  anchor（★F4 新增,2026-08-30）：显式覆盖距离测点与 'line' 视线起点——
    *  AI_130 炮塔的 shootingSpot=Bottom+(direction*6,-Δ)（FindTarget :69418 端点
-   *  :69426-69456），本体盒中心口径错挂已翻修；缺省行为零变化 */
+   *  :69426-69456），本体盒中心口径错挂已翻修；缺省行为零变化。
+   *  gate（★F6 新增,2026-08-31 批①②）：AI_130/AI_134 FindTarget 的
+   *  angleRatioMax/deadBottomAngle/directionLock 三门族——原版候选判定与距离/视线
+   *  同条 && 链（:69434-69436/:69481-69483），集火路(:27431 OwnerMinionAttackTargetNPC
+   *  模板的第一桶)与全局扫同吃同一谓词且【过门即整段 return】(焦点短路,:69445)。
+   *  缺省 undefined → 零变化 */
   private nearestEnemy(game: GameHooks, maxRange: number,
     sight: 'none' | 'line' | 'point' = 'none', from: 'self' | 'player' = 'self',
-    focusRange = 900, anchor?: { x: number; y: number }): EnemyLike | null {
+    focusRange = 900, anchor?: { x: number; y: number }, gate?: TowerAimGate): EnemyLike | null {
     const p = this.ownerRef();
     if (!p) return null;
     const bx = anchor?.x ?? (from === 'player' ? p.cx : this.cx);
     const by = anchor?.y ?? (from === 'player' ? p.cy : this.cy);
+    // 门向量基点 = 距离测点同心（FindTarget 的 vector 自 shootingSpot 出发）
     let best: EnemyLike | null = null;
     let bestD = maxRange;
     let tagged: EnemyLike | null = null;
     let taggedD = maxRange;
     // 鞭 tag 查询走玩家栈（1457 TagEffectStack——敌实体不再存 tag 态）
     const stack = p.tagEffectStack;
-    // 'line' 起点：anchor 时为 0 尺寸点对（≈原版 CanHitLine(shootingSpot,0,0,…,0,0)）
+    // 'line' 形状分流（★F4 定案 2026-08-31 二轮蓝队）：锚定模式 = FindTarget 字面点对端
+    //  ——CanHitLine(shootingSpot,0,0 → nPC.Center,0,0)（AI_130 :69434/:69456、AI_134
+    //  :69481/:69503）；非锚定 AI_062 族 = 盒线——CanHitLine(position,width,height →
+    //  npc.position,width,height)（:66392）。Center 用浮点半宽、盒左上提取走 int÷ 半宽
+    //  （canHitLineStartTile），奇数尺寸盒在半格交界处端格可差一格 ⇒ 两形不可互换。
     const lx = anchor?.x ?? this.x, ly = anchor?.y ?? this.y;
     const lw = anchor ? 0 : this.w, lh = anchor ? 0 : this.h;
     for (const e of game.enemies()) {
@@ -3060,13 +3179,19 @@ export class MinionProj extends Entity {
       if (!canBeChasedBy(e)) continue;   // CanBeChasedBy :91070/:91141——友好+immortal 族不入索敌（防追踪睡渔夫/假人）
       if (!en || en.dead) continue;
       const d = Math.hypot(en.cx - bx, en.cy - by);
-      if (d < bestD) {
+      // ★F6 方向/角度门：SafeNormalize(shootingSpot→敌心,UnitY)，零距走兜底 (0,1)
+      const dl = d > 0 ? 1 / d : 0;
+      const gnx = d > 0 ? (en.cx - bx) * dl : 0;
+      const gny = d > 0 ? (en.cy - by) * dl : 1;
+      const gated = towerAimGate(gnx, gny, gate);
+      if (gated && d < bestD) {
         // 视线门不过 = 非候选（:66392/:66435 CanHitLine/CanHit 内联于候选判定）
-        if (sight === 'line' && !canHitLine(game.world.store, lx, ly, lw, lh, en.x, en.y, en.w, en.h)) continue;
+        if (sight === 'line' && !canHitLine(game.world.store, lx, ly, lw, lh,
+          anchor ? en.cx : en.x, anchor ? en.cy : en.y, anchor ? 0 : en.w, anchor ? 0 : en.h)) continue;
         if (sight === 'point' && !canHit(game.world.store, this.cx, this.cy, 0, 0, en.cx, en.cy, 0, 0)) continue;
         bestD = d; best = en;
       }
-      if (stack.anyTagged(en.id) && d < taggedD) { taggedD = d; tagged = en; }
+      if (gated && stack.anyTagged(en.id) && d < taggedD) { taggedD = d; tagged = en; }
     }
     // 右键集火优先（OwnerMinionAttackTargetNPC 模板 :27431：有效且距本随从 <900；
     //  AI_062 集火同样过视线门 :66375/:66413,门距 = num12×3——num12 已被 :66327
@@ -3077,7 +3202,17 @@ export class MinionProj extends Entity {
       for (const e of game.enemies()) {
         const en = e as never as EnemyLike;
         if (!en.dead && en.id === focus && Math.hypot(en.cx - bx, en.cy - by) < focusRange) {
-          if (sight === 'line' && !canHitLine(game.world.store, lx, ly, lw, lh, en.x, en.y, en.w, en.h)) break;
+          // ★F6 焦点同吃角度/方向门（FindTarget 内 OwnerMinionAttackTargetNPC 桶
+          //  与全局扫共用同一谓词链 :69426-69456——过门才被采纳）
+          const df = Math.hypot(en.cx - bx, en.cy - by);
+          const dfl = df > 0 ? 1 / df : 0;
+          if (!towerAimGate(
+            df > 0 ? (en.cx - bx) * dfl : 0,
+            df > 0 ? (en.cy - by) * dfl : 1,
+            gate,
+          )) break;
+          if (sight === 'line' && !canHitLine(game.world.store, lx, ly, lw, lh,
+            anchor ? en.cx : en.x, anchor ? en.cy : en.y, anchor ? 0 : en.w, anchor ? 0 : en.h)) break;
           if (sight === 'point' && !canHit(game.world.store, this.cx, this.cy, 0, 0, en.cx, en.cy, 0, 0)) break;
           return en;
         }
@@ -3174,16 +3309,22 @@ export class MinionProj extends Entity {
         //   Center 口径成立，唯 130 错。direction 基于本体 Center DirectionTo.X
         //   （:69382），与选向一致。
         const spot = () => ({ x: this.cx + this.facing * 6, y: this.y + this.h - tier.dy });
+        // ★F6 批①②（2026-08-31）：学徒 T2 套装三层修饰——case 链之后乘（:69331-69335
+        //   的执行序）：shot_range num 900×1.5、angleRatioMax 1→0.1、弹速 num4×1.4。
+        //   角度比门 + canChangeDirection 门由 nearestEnemy(gate) 承载。
+        const f130 = dd2SetFlags(game.player);
+        const range130 = f130.apprenticeT2 ? 1350 : 900;    // (:69165/:69333)
+        const ratio130 = f130.apprenticeT2 ? 0.1 : 1;       // (:69166/:69332)
+        const spdMul130 = f130.apprenticeT2 ? 1.4 : 1;      // (:69334 num4*=1.4——含 case 链加成后)
         if (this.sFire === 0) {
           // 索敌门 = AI_130_FlameBurstTower_FindTarget（1457 Projectile.cs:69418-69462，
           // 1456 :65365 同体）：
-          // 候选须 `Collision.CanHitLine(shootingSpot→NPC.Center)`（:69434/:69456），
-          // 调用点 :69376（待机选向 canChangeDirection=true）。本仓视线门经
-          // nearestEnemy 'line' + anchor 端点（rect 版近似原版 Center 点对）；
-          // 角度比 angleRatioMax/套装 shot_range(num×1.5,num4×1.4 :69399-69403) 未接——
-          // 登记，不影响 LOS 语义。
+          // 候选须 `Collision.CanHitLine(shootingSpot→NPC.Center)`（:69434/:69456）
+          // 且 |vX| ≥ |vY|·angleRatioMax（:69434 角度锥,批②接入）。调用点 :69376
+          // （待机选向 canChangeDirection=true → 无 directionLock）。
           const s = spot();
-          const tgt = this.nearestEnemy(game, 900, 'line', 'self', 900, s);
+          const tgt = this.nearestEnemy(game, range130, 'line', 'self', range130, s,
+            { angleRatioMax: ratio130 });
           if (tgt && this.sCool <= 0) {
             this.facing = tgt.cx >= this.cx ? 1 : -1; // direction = Sign(DirectionTo.X)（:69382）
             this.sFire = 1; this.sFireT = 0;
@@ -3191,16 +3332,20 @@ export class MinionProj extends Entity {
           if (this.sCool > 0) this.sCool--;
         } else {
           if (this.sFireT === 12) {
-            // 开火帧重索敌（:69404，canChangeDirection=false）同样带 CanHitLine 门：
-            // 门不过 → 沿入态朝向直射（原版 num11==-1 支 vector2=(direction,0)）
+            // 开火帧重索敌（:69404，canChangeDirection=false → directionLock=现朝向；
+            // 正后方候选被 :69456 `direction*vX<0` 拒）——门不过 → 沿入态朝向直射
+            // （原版 num11==-1 支 vector2=(direction,0)）
             const s = spot();
-            const tgt = this.nearestEnemy(game, 900, 'line', 'self', 900, s);
+            const tgt = this.nearestEnemy(game, range130, 'line', 'self', range130, s,
+              { angleRatioMax: ratio130, directionLock: this.facing });
             game.playSfxFiles(soundTrackFiles('dd2_flameburst_tower_shot'), 0.9, this.cx, this.cy); // AI_131 :69526（弹幕首帧）
-            // 弹速三档 num4=12/15/18（:69171 基值、case 665 +=3 :69231 / case 667 +=6 :69283）
-            let vx = this.facing * tier.speed, vy = 0;
+            // 弹速三档 num4=12/15/18（:69171 基值、case 665 +=3 :69231 / case 667 +=6
+            //   :69283；学徒 T2 ×1.4 在 case 链【之后】乘 :69334）
+            let vx = this.facing * tier.speed * spdMul130, vy = 0;
             if (tgt) {
               const d = Math.hypot(tgt.cx - s.x, tgt.cy - s.y) || 1;   // 归一自 shootingSpot(:69408)
-              vx = ((tgt.cx - s.x) / d) * tier.speed; vy = ((tgt.cy - s.y) / d) * tier.speed;
+              vx = ((tgt.cx - s.x) / d) * tier.speed * spdMul130;
+              vy = ((tgt.cy - s.y) / d) * tier.speed * spdMul130;
             }
             // 664/666/668 弹 16×16（SetDefaults :7155-7163）→ 炮口 − 8（曾 -5 偏 3px）
             // ★F5 随收：AI_131 弹全程无重力无加速度（:69519-69559 只管声·尘·旋转,
@@ -3215,42 +3360,61 @@ export class MinionProj extends Entity {
         }
         return;
       }
-      // 弩车族（AI_134）：帧 0 待机 → 帧表 1-5（每 5t）→ 第 12t 弩箭 680（速 16）
-      // → 25t 结束 → 冷却 GetBallistraShotDelay
+      // 弩车族（AI_134）：帧 0 待机 → 帧表 1-5（每 5t）→ 开火第 6t 出弩箭 680
+      // （ai[1]==num2=num6=5,:69656——旧"第12t"系把 num2 初值 12 当终值读错,
+      //   num2 已在 :65592/:69593 被 num2=num6 无条件覆写=5）→ 25t 结束 → 冷却
       if (BALLISTA_TOWER.has(this.projId)) {
-        // 1457 :69599-69609（1456 :65607-65617 ai[1]=0）:落位首帧 ai[1]=shotDelay——
-        // 放置后不再立即射第一箭,先等满一档装填（160/100/60/30）
+        // ★F6 批②（2026-08-31）：瞄准/出弹基准点 center.Y−4 仅 677（:65599-6601/
+        //   :69597-69599 字面怪癖,-Δ 不随方向镜像）;deadBottomAngle=0.75 锥形门
+        //   (:69481/:69503)+侍从 T2 弩速 16→21（:69591-69593 num3）
+        const setf134 = dd2SetFlags(game.player);
+        const spotY134 = () => this.cy - (this.projId === 677 ? 4 : 0);
+        const shotSpeed134 = setf134.squireT2 ? 21 : 16;    // num3（:69587/:69592）
+        // 恐慌冷却钳（:69631-69640 空闲态每次递减前先钳 60/T3 双真 30）
+        const panicClamp = (): void => {
+          if (setf134.ballistaPanic && this.sCool > 60) this.sCool = 60;
+          if (setf134.ballistaPanic && setf134.squireT3 && this.sCool > 30) this.sCool = 30;
+        };
+        // 1457 :69599-69609（1456 :65607-65617 ai[1]=0→shotDelay）:落位首帧即满档装填——
+        // 放置后不再立即射第一箭,先等一整段（160/100/60/30）
         if (this.sInit === 0) {
           this.sInit = 1;
           this.sCool = ballistraShotDelayOf(game.player);
         }
         if (this.sFire === 0) {
           // 索敌门 = AI_134_Ballista_FindTarget（Projectile.cs:69465-69507）：
-          // 候选须 `Collision.CanHitLine(shootingSpot→NPC.Center)`（:69481/:69503），
-          // 调用点 :69647（选向+入态）。deadBottomAngle 角度门未接——登记。
-          const tgt = this.nearestEnemy(game, 900, 'line');
+          // 候选须 `Collision.CanHitLine(center→NPC.Center)`（:69481/:69503）且不出
+          // deadBottomAngle 死锥（|vX|<|vY|×0.75 且目标在下）。调用点 :69647。
+          panicClamp();
+          const s134y = spotY134();
+          const tgt = this.nearestEnemy(game, 900, 'line', 'self', 900,
+            { x: this.cx, y: s134y }, { deadBottomAngle: 0.75 });
           if (tgt) this.facing = tgt.cx >= this.cx ? 1 : -1;
           if (tgt && this.sCool <= 0) { this.sFire = 1; this.sFireT = 0; }
           if (this.sCool > 0) this.sCool--;
         } else {
-          if (this.sFireT === 12) {
-            // 开火帧重索敌（:69685）同样带 CanHitLine 门——门不过沿 direction 直射
-            const tgt = this.nearestEnemy(game, 900, 'line');
-            game.playSfxFiles(soundTrackFiles('dd2_ballista_tower_shot'), 0.9, this.cx, this.cy); // AI_134 :65674（开火帧同弩箭）
-            // 原版瞄准与出弹都从本体 Center（:65590 center=base.Center → :65693
-            // NewProjectile(center)；680 弩箭 16×16 → 左上 = Center−8。曾误把
-            // (cx, y+20) 当左上角传 → 弹心恒偏右下半格+炮口近似高度）
-            let vx = this.facing * 16, vy = 0;
+          if (this.sFireT === 5) {
+            // 开火帧重索敌（:69685，ai[1]==num2=5）同样带 CanHitLine/deadBottomAngle 门
+            // ——门不过沿 direction 直射（num10==-1 支 vector=(direction,0),:69688）
+            const tgt = this.nearestEnemy(game, 900, 'line', 'self', 900,
+              { x: this.cx, y: spotY134() }, { deadBottomAngle: 0.75 });
+            game.playSfxFiles(soundTrackFiles('dd2_ballista_tower_shot'), 0.9, this.cx, this.cy); // AI_134 :69656 SoundEngine.PlayTrackedSound（开火帧同弩箭）
+            // 瞄准与出弹都从 center（含 677 的 Y−4;:69597 取心 → :69673 NewProjectile）。
+            // 680 弩箭 16×16 → 左上 = center−8
+            let vx = this.facing * shotSpeed134, vy = 0;
             if (tgt) {
-              const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
-              vx = ((tgt.cx - this.cx) / d) * 16; vy = ((tgt.cy - this.cy) / d) * 16;
+              const sy134 = spotY134();
+              const d = Math.hypot(tgt.cx - this.cx, tgt.cy - sy134) || 1;
+              vx = ((tgt.cx - this.cx) / d) * shotSpeed134;
+              vy = ((tgt.cy - sy134) / d) * shotSpeed134;
             }
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
               // 680 弩箭：AI_001 默认档（0.1@15 缓坠）——重力缺省走规格链（2026-08-14 对账）
-              Object.assign(new Arrow(this.cx - 8, this.cy - 8, vx, vy, dmgOf(), this.knockback, 680, null), { whipTagShot: true }),
+              Object.assign(new Arrow(this.cx - 8, spotY134() - 8, vx, vy, dmgOf(), this.knockback, 680, null),
+                { whipTagShot: true }),
               'projectiles');
           }
-          if (++this.sFireT >= 25) { this.sFire = 0; this.sCool = ballistraShotDelayOf(game.player); }
+          if (++this.sFireT >= 25) { this.sFire = 0; this.sCool = ballistraShotDelayOf(game.player); } // num5*num6=25（:69686）
         }
         return;
       }

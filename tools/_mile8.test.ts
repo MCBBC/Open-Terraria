@@ -11,8 +11,10 @@ import { TILE_DEFS } from '../src/data/tiles';
 import { RNG } from '../src/core/rng';
 
 const RUN = process.env.SW_M8 === '1';
-const VG = process.env.SW_M8_VG ?? '/tmp/sw-num4/van_x86_g';  // 名表源
-const G2 = process.env.SW_M8_G2 ?? '/tmp/sw-slp/g';            // 8 通道真值
+// ★IIIII96b（2026-08-31）重锚：默认 G2/VG 改居 ~/GoldenChains/golden-g（sw-slp/g、
+// sw-num4/van_x86_g 均已被 /tmp 清理灭失；HOME 居所=IIIII90b fresh 重产+manifest 校验链）
+const VG = process.env.SW_M8_VG ?? `${process.env.HOME}/GoldenChains/golden-g`;  // 名表源
+const G2 = process.env.SW_M8_G2 ?? `${process.env.HOME}/GoldenChains/golden-g`;            // 8 通道真值
 // JJJJ 批旁路参：第二种子对拍（默认 9293480/0 保持原行为不变）
 const SEED = process.env.SW_M8_SEED ?? '9293480';
 const EVIL = process.env.SW_M8_EVIL !== undefined ? Number(process.env.SW_M8_EVIL) : 0;

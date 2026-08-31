@@ -1030,6 +1030,26 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
   const PIX = TILE_BY_KEY['pixel_block'];
   if (PIX !== undefined && type === PIX) { drawPixelBlock(ctx, st, x, y, fx, fy, px, py); return; }
   // 751/752(睡着的掘地龟/啮龙蛋):仅锚点帧 (0,0) 绘制,非锚点格整格跳过(:1034-1048)
+  // ---- 吊挂火盆（tile 592，Hanging Brazier）专用切片 ----
+  // 原版：TileDrawing.cs:5585-5587 addFrY = Main.tileFrame[592]*54；素材是
+  // 宽 36px（两列 fx∈{0,18}）的紧凑竖条——每 style 组「火焰(顶)/吊链/盆体」
+  // 按 18px 网格排布、纵向以 54px 为一个动画帧距共 8 帧。通用多格路径会请求
+  // 越出图宽的大矩形 → vframeAt 落空回退 (0,0)＝整物第一格（火焰尖）平铺，
+  // 盆体永不采样（用户实报"一团火悬浮"根因）。此处按原版语义逐格 18px 切片：
+  //   src = (frameX, min(frameY + idx*54, H-18), 18, 18)
+  if (sheet === 592) {
+    const img2 = atlas.ensureVImage('vanilla/Tiles_592.png');
+    if (img2) {
+      const idx = animFrameIdx(592, 24 * 18);          // 与 ChunkCache 重烘登记同拍
+      const syB = Math.min(fy + idx * 54, 432 - 18);
+      const tDef592 = TILE_DEFS[type];
+      const topShift = (tDef592 && (tDef592 as unknown as { tileTop?: number }).tileTop) ?? 0;
+      ctx.drawImage(img2, fx === 0 ? 0 : 18, syB, 18, 18,
+        px, py - topShift, 18, 18);
+      return;
+    }
+    // 图未就绪→落回通用路径（瞬态自愈）
+  }
   if ((sheet === 751 || sheet === 752) && (fx !== 0 || fy !== 0)) return;
   // 矿车轨道（tile 314）：frameX/frameY = 前/后轨【连接 ID】（0-35，非 18px 像素偏移！）。
   // 后轨先画、前轨后画；下行装饰画在下一格、挡板画在上一格（TileDrawing.cs:3823-3857）

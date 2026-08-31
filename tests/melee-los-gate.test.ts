@@ -9,7 +9,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { World } from '../src/world/World';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY } from '../src/data/tiles';
-import { canHit, canHitLine, playerCanHitEntity } from '../src/physics/LineOfSight';
+import { canHit, canHitLine, playerCanHitEntity, losRayAnchors } from '../src/physics/LineOfSight';
 
 const STONE = TILE_BY_KEY['stone'];
 const PLATFORM = TILE_BY_KEY['platform'];
@@ -42,12 +42,15 @@ describe('近战视线门 playerCanHitEntity（Player.CanHit 四射线链）', (
     const { store, player, enemy } = makeScene((st) => {
       for (let ty = 8; ty <= 24; ty++) st.setTile(31, ty, STONE);
     });
-    // 手位点 = Center+(facing*w/2, −h/3)；目标锚点 = Center±h/3 与本体
-    const hx = player.cx + (player.w / 2), hy = player.cy - player.h / 3;
-    const ecx = enemy.x + enemy.w / 2, ecy = enemy.y + enemy.h / 2;
-    expect(canHitLine(store, hx, hy, 0, 0, ecx, ecy - enemy.h / 3, 0, 0)).toBe(false);
-    expect(canHitLine(store, hx, hy, 0, 0, ecx, ecy, 0, 0)).toBe(false);
-    expect(canHitLine(store, hx, player.cy, 0, 0, ecx, ecy + enemy.h / 3, 0, 0)).toBe(false);
+    // ★治理批 B5：三手位射线的端点改走 losRayAnchors 单源（Player.CanHit(Entity)
+    // Player.cs:42858-42862 的 B/C/D 射线公式——手位 gravDir*(−h)/3f 浮点链、
+    // 目标 ±height/3 int÷ 截断、Center f32 物化），淘汰本测试曾自建的浮点 h/3
+    // 对照面（自建式属"半精度镜像",与实体侧 int÷ 口径存在分叉窗——单源后随
+    // 侧别实现同步演进）。A 盒射线保持 canHit 直判不变。
+    const a = losRayAnchors(player, enemy);
+    expect(canHitLine(store, a.hx, a.hyBC, 0, 0, a.exTop, a.eyTop, 0, 0)).toBe(false);   // B: 手位→上锚
+    expect(canHitLine(store, a.hx, a.hyBC, 0, 0, a.exMid, a.eyMid, 0, 0)).toBe(false);   // C: 手位→本体
+    expect(canHitLine(store, a.hx, a.hyD, 0, 0, a.exBot, a.eyBot, 0, 0)).toBe(false);    // D: y=0 手位→下锚
     expect(playerCanHitEntity(store, player, enemy)).toBe(false);
   });
 
@@ -103,7 +106,13 @@ function swingStub(heldVid: number) {
   g.swingHitSet = new Set<number>();
   g.swingTileCutSet = new Set<number>();
   const enemies: Enemy[] = [];
-  g.entities = { critters: [], npcs: [], enemies };
+  // 任务⑤起近战命中可能生成弹幕（火之大剑 978 星坠）——add 支持与 projectiles 桶
+  const projectiles: unknown[] = [];
+  g.entities = {
+    critters: [], npcs: [], enemies,
+    add: (ent: unknown, bucket: string) => { if (bucket === 'projectiles') projectiles.push(ent); return ent; },
+  };
+  g.projectiles = projectiles;
   g.player = player;
   g.world = world;
   g.sfx = { playWavFile: () => true, playFiles: () => true, play: () => {} };
@@ -233,8 +242,16 @@ describe('★J2 Volcano 窗口：盒交拒收→探针受理消费→并集恢�
       } as typeof t.hurt;
     }
     (g as unknown as { updateSwingHits: () => void }).updateSwingHits();
-    expect(order).toEqual(['A', 'B']);                // A=探针受理,B=窗口清后盒支恢复
+    // ★任务② 对齐修正：A 受理后 ：44784 ApplyAttackCooldown() 写 attackCD=max(1,
+    // trunc(max×0.33)) ⇒ 同帧循环内 B 被 :44598 `attackCD<=0` 门拒收（原版攻击CD
+    // 是全 Main.npc 桶共享的命中节流面——此前 ['A','B'] 同帧双中预期系旧版近似）
+    expect(order).toEqual(['A']);
     expect((g.swing as Record<string, unknown>).volcanoWindow).toBe(false);
+    // 冷却窗期满的后续拍：并集态下 B 走盒支恢复受理
+    (g as unknown as { updateSwingHits: () => void }).updateSwingHits();   // 衰减一帧
+    (g as unknown as Record<string, unknown>).meleeAttackCd = 0;           // 剩余窗跳表（等价cd 到期）
+    (g as unknown as { updateSwingHits: () => void }).updateSwingHits();
+    expect(order).toEqual(['A', 'B']);
   });
 
   it('对照：非 121 武器不受窗口影响（探针远场仍走盒|探针并集）', () => {

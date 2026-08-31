@@ -73,7 +73,7 @@ const out = await page.evaluate(async (saveText) => {
       if (id != null) p.inv.slots[slot] = { id, stack: 99 };
     }
     p.inv.selected = 0;
-    return g;
+    return { g, p };
   };
   const makeStage = (g, p) => {
     return async () => {
@@ -99,7 +99,6 @@ const out = await page.evaluate(async (saveText) => {
     const [cxs, cys] = g.camera.worldToScreen(p.cx, p.cy);
     return [cxs + 300, cys];
   };
-  window.__SAVE_TEXT__ = saveTxt;
 
   // ── 场景 A：枪·无弹药 ──
   { const { g, p } = await boot([['vi_98_迷你鲨', 0]]); const stage = makeStage(g, p); p.useTime = 0; await stage(); await fireClick(g); dry = readState(g, p); }

@@ -183,6 +183,14 @@ function squareWallFrameDraw(st: TileStore, rng: RNG, x: number, y: number): voi
   wallFrameDraw(st, rng, x, y);
 }
 
+/** ★IIIII87 导出：WorldGen.SquareWallFrame 单点生成期镜像（=本模块 squareWallFrameDraw，
+ *  上限 1 掷：中心格有墙且非大幅墙时 Next(0,3)+墙21 二掷）。消费端=Convert_ActuallyConvertWall
+ *  尾级联（cs:56813）——SecretSeedDoEnds 净化/神圣转换墙写后必调；此前漏挂导致 wall 转换
+ *  支整段少掷。 */
+export function genSquareWallFrame(st: TileStore, rng: RNG, x: number, y: number): void {
+  squareWallFrameDraw(st, rng, x, y);
+}
+
 /** 放置循环 + Description + SandMound（Sub-A；Hive/入口在 runDesertPass 续） */
 export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): DesertDesc {
   // ▶DesertBiome cs:12532 pass 头重播（RunPass 语义；mound/entrance/hive 三个检查点

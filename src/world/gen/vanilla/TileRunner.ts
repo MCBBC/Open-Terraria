@@ -89,7 +89,7 @@ export interface TileRunnerOpts {
  *  二者 frameImportant=true 但 **tileCut=true** → 原版不跳（耗 dist 掷+可被泥覆写），
  *  近似表跳过 → DirtToMud 起 dist 流偏 ~4.7k 掷,泥 runner 全体错位。现取
  *  Main.cs 全量 frameImportant(411 含循环 435-439+Echo 家族)扣除 tileCut(41)精确集。 */
-const FRAME_IMPORTANT_SKIP_SHEETS = new Set([
+export const FRAME_IMPORTANT_SKIP_SHEETS = new Set([
   4, 5, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 26, 27, 29, 31, 33, 34, 35, 36,
   42, 49, 50, 55, 72, 77, 78, 79, 81, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97,
   98, 99, 100, 101, 102, 103, 104, 105, 106, 114, 125, 126, 128, 129, 132, 133, 134, 135,
@@ -237,6 +237,10 @@ export function tileRunner(
       f({
         i, j, type: o.type, strength: strengthIn, steps: stepsIn,
         trNum3, wsLava: gs.lavaLine,
+        sX: o.speedX ?? 0, sY: o.speedY ?? 0, nyC: o.noYChange ?? false,
+        igT: ignoreTileType, owR: overRide, mw: !!o.mudWall,
+        ws: gs.worldSurface, rl: gs.rockLevel, bd: gs.beachDistance,
+        wl: gs.waterLine, ll: gs.lavaLine,
       });
     }
   }
@@ -246,7 +250,13 @@ export function tileRunner(
   const stW = st.w;
   const ty = st.type, tf = st.flags, twall = st.wall, tliq = st.liquid, tltype = st.liquidType;
   const thalf = st.half, tslope = st.slope;
+  let iter = 0;
+  // ★IIIII87 步级取证计数器（仅挂 __swTrStep 时累加，生产零开销）
+  const trDbg = !!(globalThis as { __swTrStep?: unknown }).__swTrStep;
+  let iRolls = 0, iKills = 0, iSkips = 0;
   while (num1 > 0 && num2 > 0) {
+    iter++;
+    if (trDbg) { iRolls = 0; iKills = 0; iSkips = 0; }
     // ★IIIII14（cs:77181-77185）：drunk 循环头 1/30 跳变——位置瞬移 ±5，三掷
     if (drunkTR && rng.int(0, 29) === 0) {
       px += rng.int(-100, 100) * 0.05;
@@ -280,10 +290,12 @@ export function tileRunner(
         // 植物 decor≈tileCut 不跳。洞穴链阶段世界尚无 framed 活性块，零影响，
         // 后续矿石 pass 与结构 pass 有相对序保证，此门禁主要防未来反序调用。
         const ti = y * stW + x;   // ★曾重复 idx(ci0+ti 同值);内联
-        if (tf[ti] && FRAMED_SKIP[ty[ti]]) continue;
+        if (tf[ti] && FRAMED_SKIP[ty[ti]]) { if (trDbg) iSkips++; continue; }
         if (ignoreTileType >= 0 && ty[ti] === ignoreTileType && tf[ti]) continue;
         const dist = Math.abs(x - px) + Math.abs(y - py);
-        if (dist >= strengthIn * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;
+        const trDraw = rng.int(-10, 10);
+        if (trDbg) iRolls++;
+        if (dist >= strengthIn * 0.5 * (1 + trDraw * 0.015)) continue;
         // 丛林泥墙(原版 mudWall 分支:浅层墙 15,深层墙 64,均避让四邻;落墙走
         // PlaceWall 语义=仅空墙可落+成功必掷 1 颗 Next(0,3))
         // ★局部化:twall=st.wall 提局部 + idx 内联(泥 runner 每格 5-8 次跳读,热点)
@@ -322,6 +334,7 @@ export function tileRunner(
               tltype[ti] = 2;
             }
           }
+          if (trDbg) iKills++;
           // 原版 active(false) **保留 type**（幽灵语义）——挖除清零会让后续
           // 拒绝采样/flag4 判定读错（收尾洞穴循环实测分叉点）
           tf[ti] = 0;
@@ -374,6 +387,15 @@ export function tileRunner(
             tltype[ti] = 0;
           }
         }
+      }
+    }
+    // ★IIIII87 步级取证仪（缺省零开销）：每迭代末报运动学状态，供双端对拍。
+    {
+      const f4 = (globalThis as { __swTrStep?: (o2: Record<string, unknown>) => void }).__swTrStep;
+      if (f4) {
+        const histBuf = trDbg ? Uint8Array.from(tf) : undefined;
+        f4({ iter, px, py, vx, vy, num1, sN2: num2, rolled: iRolls, kills: iKills, skips: iSkips,
+          h: histBuf });
       }
     }
     // 移动 + 大半径加速(原版 12 档阶梯 50..900,每档速度抖动 ±0.05)

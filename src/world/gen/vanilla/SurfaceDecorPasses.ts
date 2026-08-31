@@ -1274,6 +1274,24 @@ export function runDyePlantsPass(st: TileStore, rng: RNG, gs: GenState): void {
 // 4. Vines（cs:20338）
 // ============================================================
 
+/** Collision.CanHitLine 的阻挡谓词（cs:697-702 / :767-770 字面）：active &&
+ *  !inActive() && Main.tileSolid[type] && !Main.tileSolidTop[type]——与 CanHit(Point)
+ *  条件串（:443-453，多 slope==0 && !halfBrick 两腿）不同，CanHitLine 三格 ANY 串
+ *  **不查** slope()/halfBrick()（两段原文均亲读对拍）；也与 WorldGen.SolidTile
+ *  （HalfBrickPass.solidTile，同多 !half&&!slope 两腿）语义有别。★F2 更正
+ *  （2026-08-31）：本文件旧副本误用 HalfBrickPass.solidTile 当谓词 ⇒ 坡面/半砖格
+ *  被误判阻挡 ⇒ GrowMoreVines 密度门错杀藤蔓锚少挂藤蔓。tileSolid 走 genSolidType
+ *  生成期翻转表——与 CanHitLine 读可变 Main.tileSolid[] 同构（137/190/484 等
+ *  平滑期翻转一致生效）；actuator 位字面 0x20=wire bit5（cs:70170 同款域内口径）。 */
+function losSolid(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;                              // active()
+  if (st.wire[i] & 0x20) return false;                         // !inActive()
+  const d = TILE_DEFS[st.type[i]];
+  return genSolidType(st.type[i]) && !!d && !d.platform;       // tileSolid && !tileSolidTop
+}
+
 /** Collision.CanHitLine（Collision.cs:590）1:1：Tile 级视线（3 格宽扫掠） */
 function canHitLine(st: TileStore, x1: number, y1: number, x2: number, y2: number): boolean {
   let num = Math.max(1, Math.min(st.w - 1, x1));                        // 越界钳制（cs:596-627）
@@ -1298,17 +1316,25 @@ function canHitLine(st: TileStore, x1: number, y1: number, x2: number, y2: numbe
   const sx = Math.sign(num3 - num);
   const sy = Math.sign(num4 - num2);
   let done = false, done2 = false;
-  // 3 格宽 swath 任一实心非顶面格 → false（越界 = null → 直接 miss）
-  const blocked = (cx: number, cy: number): boolean =>
+  // ★IIIII87 勘误：blocking swath 按**当前驱动轴**取方向——vanilla case2(Y 驱动,
+  //   Collision.cs:694-718)检查 tile[num,num2±1] 三格=纵列；case1(X 驱动,:720-756)
+  //   检查 tile[num±1,num2]=横列。旧版两个分支都写死横列，在紧邻实心侧列的竖直
+  //   视线上把可通行格误判 blocked ⇒ GrowMoreVines 密度门错杀 vine 锚
+  //   （sgis #89 T0>62×2 @3631,685 即此处；x86 实际该视线畅通故挂藤）。
+  // 越界(null)语义：vanilla 对 ±1 邻界 null 直接 return false——照抄。
+  const blockedV = (cx: number, cy: number): boolean =>
+    !st.inBounds(cx, cy - 1) || !st.inBounds(cx, cy) || !st.inBounds(cx, cy + 1)
+    || losSolid(st, cx, cy - 1) || losSolid(st, cx, cy) || losSolid(st, cx, cy + 1);
+  const blockedH = (cx: number, cy: number): boolean =>
     !st.inBounds(cx - 1, cy) || !st.inBounds(cx, cy) || !st.inBounds(cx + 1, cy)
-    || solidTile(st, cx - 1, cy) || solidTile(st, cx, cy) || solidTile(st, cx + 1, cy);
+    || losSolid(st, cx - 1, cy) || losSolid(st, cx, cy) || losSolid(st, cx + 1, cy);
   do {
     if (mode === 2) {
       f1 += n7;
       const step = f1 | 0;
       f1 -= step;
       for (let s = 0; s < step; s++) {
-        if (blocked(num, num2)) return false;
+        if (blockedV(num, num2)) return false;
         if (rx === 0 && ry === 0) { done = true; break; }
         num += sx; rx--;
         if (rx === 0 && ry === 0 && step === 1) done2 = true;
@@ -1319,14 +1345,14 @@ function canHitLine(st: TileStore, x1: number, y1: number, x2: number, y2: numbe
       const step = f2 | 0;
       f2 -= step;
       for (let s = 0; s < step; s++) {
-        if (blocked(num, num2)) return false;
+        if (blockedH(num, num2)) return false;
         if (rx === 0 && ry === 0) { done = true; break; }
         num2 += sy; ry--;
         if (rx === 0 && ry === 0 && step === 1) done2 = true;
       }
       if (rx !== 0) mode = 2;
     }
-    if (solidTile(st, num, num2)) return false;                          // 中心格复检（cs:763-771）
+    if (losSolid(st, num, num2)) return false;                           // 中心格复检（cs:763-771，F2 批换 CanHitLine 谓词）
   } while (!(done || done2));
   return true;
 }

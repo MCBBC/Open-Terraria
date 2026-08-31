@@ -148,13 +148,18 @@ function nextHellItem(gs: GenState): number {
  *  内已有 BasicChest{21,467} → true。本仓"已有箱"按 chest/dresser 键族近似
  *  （与 MicroBiomesPass isContainer/TileID.Sets.IsAContainer 同口径，含 467/88） */
 function nearOtherChests(st: TileStore, x: number, y: number): boolean {
+  // ★IIIII98 定罪修复：判定集=TileID.Sets.BasicChest（TileID.cs:315）
+  //   **CreateBoolSet(21,467)** 两型——旧实现按 key 子串 'chest'|'dresser' 匹配，
+  //   把抽屉与命名含 chest 的其它瓦片全算近箱 ⇒ REMIX 地下拥挤带（洞屋/沙漠箱群）
+  //   大面积误拒 notNearOtherChests 支（#60 Surface_Chests T21>0×108 缺席型主根因；
+  //   #59 A/B 七七交换族同理）。改 sheet 直查两 id。
   for (let i = x - 25; i < x + 25; i++) {
     for (let j = y - 8; j < y + 8; j++) {
       if (!st.inBounds(i, j)) continue;   // Framing.GetTileSafely 界外 = 空格
       const k = st.idx(i, j);
       if (!st.flags[k]) continue;
-      const key = TILE_DEFS[st.type[k]]?.key ?? '';
-      if (key.includes('chest') || key.includes('dresser')) return true;
+      const sh = TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1;
+      if (sh === 21 || sh === 467) return true;
     }
   }
   return false;
@@ -358,7 +363,7 @@ function prefixRolls(rng: RNG, item: number): void {
   }
 }
 
-interface LootCtx { rng: RNG; gs: GenState; gy: number; flags: ChestFlags; mainKey: string | null; worldH: number }
+interface LootCtx { rng: RNG; gs: GenState; gy: number; flags: ChestFlags; mainKey: string | null; worldH: number; chestStyle?: number }
 
 /**
  * AddBuriedChest 战利品主体(cs:36283-37360)1:1:按深度四分支。
@@ -387,7 +392,17 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   // ★四档链（IL 实证 +0x1419/+0x1DFB：反编译把第二档门折进 flag23 remix 段致漏读）：
   //   地表(flag23&&wooden/sky) → 金档(y<rockLayer,非 remix) → 洞穴档(y<h-250,
   //   cs:36839) → 地狱档。UUUU 批经 /tmp/uuuu-app 织入探针逐掷对拍定谳。
-  const isGold = gy < gs.rockLevel;
+  // ★IIIII86（1458 cs:36892/37192 复核）：REMIX 双带移位此前缺失——
+  //   ①金档 1457 起 remix 改判 `num7 > rockLayer && num7 < h-250`（与地表档之间为
+  //     rockLayer 带），普通档仍 num7<rockLayer；②洞穴档 remx 放行 style7/14
+  //     （PassageRoom 房内无主件箱即使 >h-250 也走洞穴战利品）。曾按普通形硬钉
+  //     gy<rockLevel ⇒ REMIX 世界随机箱(落点≈y800∈(rockLayer,950))整箱走错
+  //     战利品分支，掷流 −1/箱 级偏移→MakePassage 尾摆动环相位漂移（#42 残差源）。
+  const isGold = gs.seedFlags.remix
+    ? (gy > gs.rockLevel && gy <= ctx.worldH - 251)
+    : gy < gs.rockLevel;
+  const caveElig = gy <= ctx.worldH - 250
+    || (gs.seedFlags.remix && (flags.style === 7 || flags.style === 14));
 
   if (isSurface) {
     // ===== 地表木箱/天空箱(cs:36283-36468)=====
@@ -499,7 +514,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (rng.int(0, 2) !== 0) push(2350, rng.int(2, 4));
     if (rng.int(0, 1) === 0) push(flags.ice ? 974 : 8, rng.nextInt(11) + 10); // 冰火把/火把 cs:36820 Next(11)+10（曾 10,19 漏 20;UUUU 改单参+偏移真形）
     if (rng.int(0, 1) === 0) push(72, rng.int(50, 89));
-  } else if (gy <= ctx.worldH - 250) {
+  } else if (caveElig) {   // ★IIIII86：remix style7/14 放行（cs:37192）
     // ===== 洞穴箱(rockLevel ≤ gy ≤ h-250,cs:36789-37163)=====
     // ★门勘误：洞穴/地狱【战利品】分界是 h-250（cs:36839）；h-205 是【样式】门
     // （cs:36162 style4）。[h-250,h-205) 带 = 金箱样式 + 地狱战利品（原版如此）——
@@ -810,14 +825,18 @@ function placeBuriedChestInner(
   i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags; trySlope?: boolean; notNearOtherChests?: boolean } = {},
 ): boolean {
   // 下落到地面（cs:35931 `for k=j; k<maxTilesY-10; k++`）
-  // ★DDDD:坠落谓词 = WorldGen.SolidTile(i,k)（cs:70155:active && tileSolid && !tileSolidTop
-  //   && !half && slope==0 && !inActive）——平台/桌族(solidTop)不拦截坠落,vanilla house17
-  //   宝箱(1863,541)穿过楼梯平台落 548(x86 CPB 实锤);曾用 solidTileHB(!d.platform)——
-  //   桌族(87 等无 d.platform 旗)误当拦截层。六谓词与 PC_SOLID_TOP 表一致。
+  // ★DDDD:坠落谓词 = WorldGen.SolidTile(i,k)（cs:70650-70666 全项版:active && tileSolid &&
+  //   !tileSolidTop && !half && slope==0 && !inActive）——平台/桌族(solidTop)不拦截坠落,
+  //   vanilla house17 宝箱(1863,541)穿过楼梯平台落 548(x86 CPB 实锤);曾用
+  //   solidTileHB(!d.platform)——桌族(87 等无 d.platform 旗)误当拦截层。
+  //   ★IIIII86:补第六判项 !inActive（wire 位 5=致动失活位;与 LivingTreePass ltSolid 同式）
+  //   ——REMIX 现种子生成期该位全零(dIa=0 双侧实证,本项休眠),但对齐 cs:70650 全项形,
+  //   防未来致动写面进图后读面漂移。XVI 章「inner solidDrop 缺 !inActive」注记至此落地。
   const solidDrop = (lx: number, ly: number): boolean => {
     if (!st.inBounds(lx, ly)) return false;
     const i = st.idx(lx, ly);
     if (!st.flags[i]) return false;
+    if ((st.wire[i] >>> 5) & 1) return false;                    // ★IIIII86:!inActive()
     const t = st.type[i];
     return genSolidType(t) && !PC_SOLID_TOP.has(TILE_DEFS[t]?.vanilla?.sheet ?? -1)
       && st.half[i] === 0 && st.slope[i] === 0;
@@ -1142,7 +1161,9 @@ function placeBuriedChestInner(
     }
   }
   // 战利品:四深度分支完整表(此前仅主件+火把/药水,体感稀缺主因之一)
-  const items = rollChestLoot({ rng, gs, gy, flags, mainKey, worldH: st.h }, mainId);
+  const __lend = (globalThis as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void }).__swChestEv;
+  const items = rollChestLoot({ rng, gs, gy, flags, mainKey, worldH: st.h, chestStyle: style }, mainId);
+  __lend?.('lend', i, gy, (globalThis as { __swRollN?: number }).__swRollN ?? -1); // ★IIIII98：loot 段耗骰尾戳
   chests.push({ x: i - 1, y: topY, items });   // Chest.CreateChest(xCoord,yCoord)=(i-1,gy-2)
   if (flags.hell) gs.hellChestIdx++; // cs:36257-36264 放置成功才前进（失败重试取同一件）
   return true;
@@ -1164,9 +1185,14 @@ export function runBuriedChestsPass(st: TileStore, rng: RNG, gs: GenState, chest
   //   （oceanDepths = y ≤ oceanLevel(=(ws+rl)/2+40) 且 x<380 || x>w-380——尾批 2-C 补；
   //   曾漏致海带尝试多掷 1 次 AB，流分叉 @AB#69 (3826,490) 实证）
   const oceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
+  // ★★★IIIII95（Terarria1458 cs:17119-17123）：remix 臂 Y 覆写重掷——普通域
+  //   Next((wsHigh+20+rl)/2, h-230)，remix 再掷 Next((int)Main.worldSurface, h-400)
+  //   **覆写** num7（先掷后覆写双骰恒耗）。此前漏移植 → 洞穴箱整体深度带错位。
+  const remixBC = !!gs.seedFlags.remix;
   for (let n = 0; n < target && fail > 0; ) {
     const x = rng.int(20, w - 21);
-    const y = rng.int(yMin, h - 231);
+    let y = rng.int(yMin, h - 231);
+    if (remixBC) y = rng.int(Math.trunc(gs.worldSurface), h - 401);
     const wl = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : -1;
     // cs:17109：wallDungeon[wall] || wall == 87（神庙墙 87 独立门）→ 整体重掷
     if (isDungeonWall(wl) || wl === 87 || (y <= oceanLevel && (x < gs.beachDistance || x > w - gs.beachDistance))
@@ -1211,18 +1237,26 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
       let x = rng.int(200, w - 201);
       let y = rng.int(Math.floor(gs.worldSurfaceLow), Math.floor(gs.worldSurface) - 1);
       const oceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
-      while (y <= oceanLevel && (x < gs.beachDistance || x > w - gs.beachDistance)) {
-        x = rng.int(300, w - 301);
-        y = rng.int(Math.floor(gs.worldSurfaceLow), Math.floor(gs.worldSurface) - 1);
+      // ★★★IIIII95（Terarria1458 cs:17256-17263）：remix 臂两件——①Y 域覆写重掷
+      //   Next(maxY-400, maxY-150) 且 **跳过** oceanDepths 回避环（else 才有回避）；
+      //   此前漏移植 → REMIX 地表箱/天空箱候选全漂。
+      const remixSC = !!gs.seedFlags.remix;
+      if (remixSC) {
+        y = rng.int(st.h - 401, st.h - 151);
+      } else {
+        while (y <= oceanLevel && (x < gs.beachDistance || x > w - gs.beachDistance)) {
+          x = rng.int(300, w - 301);
+          y = rng.int(Math.floor(gs.worldSurfaceLow), Math.floor(gs.worldSurface) - 1);
+        }
       }
       if (!st.inBounds(x, y)) continue;
       const i = st.idx(x, y);
-      // cs:17260-17284 两分支：空格走墙门（2/59/244，墙 244 → 天空箱）；
-      // 落点活性格走 101×101（步 2）蓄水池采样找墙 244 空格（Next(num8) 命中即换点）
+      // cs:17264-17276 两分支：空格走墙门（2/59/244，墙 244 → 天空箱；★remix 无视
+      //   墙面恒收）——落点活性格走 101×101（步 2）蓄水池采样找墙 244 空格
       let sky = false;
       let cx = x, cy = y;
       if (!st.flags[i]) {
-        if (st.wall[i] === 2 || st.wall[i] === 59 || st.wall[i] === 244) {
+        if (st.wall[i] === 2 || st.wall[i] === 59 || st.wall[i] === 244 || remixSC) {
           if (st.wall[i] === 244) sky = true;
         } else {
           continue;   // flag3=false → 本轮作废

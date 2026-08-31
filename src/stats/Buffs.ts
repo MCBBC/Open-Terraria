@@ -349,6 +349,18 @@ export enum BuffType {
   Lovestruck = 259,            // 坠入爱河(119,爱情药水弹 370 消亡 80px 圈授予)
   GelBalloonBuff = 260,        // 微光史莱姆装扮(320,微光气球弹 936 消亡 80px 圈授予)：
                                //   drenchedGlow / SpawnShimmerSparkle 展示级
+  // ---- ★治理批 B6①（2026-08-31）：盾反伤害 buff 建模销账（此前「枚举未建模以
+  //      字段+倒计时承载」）——vanilla 198 ParryDamageBuff：格挡窗口内接触反噬成功
+  //      → Player.cs:31668 AddBuff(198,300)；消费 = 近战乘区 ×5 + ClearBuff（:44662-
+  //      44664，Projectile.cs:13634 弹幕面同式）。现役授予/消费载体仍为
+  //      Player.parryDamageBuff/parryDamageBuffT（Game.ts 接触反伤区推进,战斗缝合面
+  //      归属另线,不在本批触碰面）——本枚举位使 buffTypeByVanilla(198)/存档名单/
+  //      图标直链贯通,BUFF_NO_SAVE 已含 198(Main.cs:8896-8990 名单)。图标 =
+  //      public/sprites/vanilla/Buff_198.png（terraria-assets/Images 同名源,已入盘,
+  //      无需 remaster 兜底）；名称/描述走原版键（zh-Hans.Games 分片已有
+  //      BuffName.ParryDamageBuff=「惊人一刻」/ BuffDescription.ParryDamageBuff=
+  //      「下次近战攻击伤害提高400%」,12 语言现成,零自造键 → 不走 l10n-custom 流程）
+  Parry = 307,                 // 盾反(198,ParryDamageBuff)：下次近战伤害 ×5 的建模面
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -592,6 +604,9 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   //      的同源 key 解析）----
   [BuffType.Lovestruck]: { vanillaBuff: 119, descKey: 'BuffDescription.Lovestruck', fallbackName: '坠入爱河' },
   [BuffType.GelBalloonBuff]: { vanillaBuff: 320, descKey: 'BuffDescription.GelBalloonBuff', fallbackName: '微光史莱姆装扮' },
+  // ★治理批 B6①：盾反 buff198 建模（枚举位 Parry=307 见枚举尾注）——
+  //   名称/描述均走原版键，零自造 l10n 键
+  [BuffType.Parry]: { vanillaBuff: 198, descKey: 'BuffDescription.ParryDamageBuff', fallbackName: '惊人一刻' },
 };
 
 /** BuffID.Sets.IsFedState（BuffID.cs:16 = {26,206,207,332,333,334}——含饥饿链三态：

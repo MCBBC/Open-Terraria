@@ -761,11 +761,17 @@ export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void
   // ★SSS-CELEB（1458 cs:16880-16882）：tenth → num×1.2（RECON-CELEB「生命水晶」）
   const count = Math.floor(w * h * 0.00002 * (gs.seedFlags?.tenthAnniversary ? 1.2 : 1));
   const maxTries = 10000;
+  // ★★★IIIII95（Terarria1458 cs:16901-16906）：remix 臂 Y 重掷覆写——原版先掷普通域
+  //   Next((int)(ws*2+rl)/3, h-300)，remix 世界再掷 Next((int)Main.worldSurface, h-400)
+  //   **覆写** j（先掷后覆写双骰恒耗，流位不减）；此前漏移植 → REMIX 心晶整体
+  //   深度带错位（#57 T12↔0×800 型双向位移）。
+  const remixLC = !!gs.seedFlags.remix;
   for (let n = 0; n < count; n++) {
     let done = false;
     for (let tries = 0; !done && tries < maxTries; tries++) {
-      const y = rng.int(yMin, h - 301);               // cs:16886 Next(yMin, h-300)
-      const x = rng.int(40, w - 41);                  // cs:16891 Next(40, w-40)
+      let y = rng.int(yMin, h - 301);               // cs:16886 Next(yMin, h-300)
+      if (remixLC) y = rng.int(Math.trunc(gs.worldSurface), h - 401);   // cs:16904 remix 覆写
+      const x = rng.int(40, w - 41);                  // cs:16891/offLimitBorderTiles=40(Main.cs:459)
       done = addLifeCrystal(st, x, y);
     }
   }

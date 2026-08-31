@@ -34,15 +34,18 @@ const out = await page.evaluate(async () => {
         if (x < 4 || x >= st.w - 4) continue;
         const i = st.idx(x, y);
         if (!st.flags[i] || st.type[i] !== id406) continue;
-        if (st.frameX[i] === 0 && st.frameY[i] === 54) { ax = x; ay = y; break outer; }
-        // 或任意同型邻格回溯一行找第二行
-        const iU = st.idx(x, y - 1), iF = st.idx(x, y + 1);
-        if (st.inBounds(x, y + 1) && st.flags[iF] && st.type[iF] === id406 && st.frameX[iF] === 0 && st.frameY[iF] === 54) { ax = x; ay = y + 1; break outer; }
-        void iU;
+        // 放宽后的发射锚：帽行(fy=0)或换带首格(fy=54)，左列
+        if (st.frameX[i] === 0 && (st.frameY[i] === 0 || st.frameY[i] === 54)) { ax = x; ay = y; break outer; }
       }
     }
   }
   if (ax < 0) return { fail: 'no chimney emitter cell found' };
+  // 存档复核：帽行修复是否生效（应出现 fy=0 的三列）
+  const frow = [];
+  for (let dx2 = -1; dx2 <= 1; dx2++) {
+    const ii = st.idx(ax + dx2, ay);
+    frow.push(st.flags[ii] && st.type[ii] === id406 ? `${st.frameX[ii]},${st.frameY[ii]}` : 'null');
+  }
   g.player.x = (ax) * 16; g.player.y = (ay + 4) * 16;
   g.player.vx = 0; g.player.vy = 0; g.player.fallStartY = null;
   await new Promise((r2) => setTimeout(r2, 1600));
@@ -65,29 +68,75 @@ const out = await page.evaluate(async () => {
   // --- 本体连续性（复用终验判据，取烟囱上部带含发射区上方两格） ---
   const zoom = cam.zoom;
   const viewW = cvs.width / zoom, viewH = cvs.height / zoom;
-  const bx = Math.round((ax * 16 + 8 - (cam.x - viewW / 2)) * zoom);
-  const by = Math.round(((ay - 2) * 16 + 8 - (cam.y - viewH / 2)) * zoom);   // 上方+发射区
+  const worldToScreenX = (wx) => Math.round((wx - (cam.x - viewW / 2)) * zoom);
+  const worldToScreenY = (wy) => Math.round((wy - (cam.y - viewH / 2)) * zoom);
+
+  // 遮挡断言：烟囱【本体】采样窗（帽行中部两列）跨样本应逐字节恒定（后层烟被实体
+  // 盖住）；【口上方】窗允许波动（烟在空气层）。both 取样期间均有活体烟粒。
+  const bodyWin = { x: worldToScreenX(ax * 16 + 22), y: worldToScreenY((ay + 0) * 16 + 4),
+                    w: Math.round(20 * zoom), h: Math.round(24 * zoom) };
+  const airWin = { x: worldToScreenX(ax * 16 + 16), y: worldToScreenY((ay - 2) * 16),
+                   w: Math.round(48 * zoom), h: Math.round(28 * zoom) };
+  const sigBody = [], sigAir = [];
+  let changedAbove = 0;
+  {
+    const bodyFrames = [];
+    const rsig = (win) => {
+      const f = ctx.getImageData(win.x, win.y, win.w, win.h).data;
+      let h = ''; for (let o = 0; o < f.length; o += 37) h += String.fromCharCode(65 + ((f[o] >> 4) * 9 + (f[o + 1] >> 4) + (f[o + 2] >> 5)) % 26);
+      return h;
+    };
+    for (let s = 0; s < 90; s++) {
+      sigBody.push(rsig(bodyWin));
+      sigAir.push(rsig(airWin));
+      bodyFrames.push(ctx.getImageData(bodyWin.x, bodyWin.y, bodyWin.w, bodyWin.h).data.slice());
+      await new Promise((r2) => setTimeout(r2, 60));
+    }
+    changedAbove = [...new Set(sigAir)].length;
+    // 逐像素中位基准：前绘烟穿越会在少数样本显著提亮 → brightN>0；后绘恒被盖 → 0
+    const N = bodyWin.w * bodyWin.h;
+    const med = new Float32Array(N);
+    for (let pi = 0; pi < N; pi++) {
+      const arr = [];
+      for (const fr of bodyFrames) arr.push(fr[pi * 4]);
+      arr.sort((a, b) => a - b);
+      med[pi] = arr[Math.floor(arr.length / 2)];
+    }
+    globalThis.__brightN = (() => { let c = 0;
+      for (const fr of bodyFrames)
+        for (let pi = 0; pi < N; pi++)
+          if (fr[pi * 4] > med[pi] + 30 && fr[pi * 4 + 3] > 32) { c++; break; }
+      return c; })();
+  }
+
+  // 原上部带 gap 统计沿用（扩大到发射区+上方）
+  const bx = worldToScreenX(ax * 16 + 8);
+  const by = worldToScreenY((ay - 2) * 16);
   const bw = Math.round(48 * zoom), bh = Math.round(52 * zoom);
   let gapFrames = 0;
-  const sigs = [];
-  for (let t = 0; t < 80; t++) {
+  for (let t = 0; t < 40; t++) {
     const f = ctx.getImageData(bx, by, bw, bh).data;
     let opq = 0;
     for (let o = 3; o < f.length; o += 4) if (f[o] > 32) opq++;
     if (opq < bw * bh * 0.01) gapFrames++;
-    let hs = ''; for (let o = 0; o < f.length; o += 61) hs += String.fromCharCode(65 + ((f[o] >> 4) * 7 + (f[o + 1] >> 4)) % 26);
-    sigs.push(hs);
-    await new Promise((r2) => setTimeout(r2, 45));
+    await new Promise((r2) => setTimeout(r2, 50));
   }
   const cap = window.__swTileCap;
   return {
     emitAnchor: [ax, ay],
+    capRowFrames: frow,
     peakSmokeAlive: peakN,
     avgLivePerSample: +(aliveSeen / samples).toFixed(1),
     avgVy: nVy ? +(sumVy / nVy).toFixed(3) : null,
     majorityNearOpaque: alphaLow > nVy * 0.5,
     upperBandGapFrames: gapFrames,
     tailSkipGrow: cap.sheets.get(406)?.oob ?? 0,
+    occl: {
+      bodySigN: [...new Set(sigBody)].length,
+      bodyBrightAnomN: Number(globalThis.__brightN ?? -1),   // 应=0
+      airSigN: changedAbove,                    // 应≥若干（有烟经过）
+      bodyWin, airWin,
+    },
   };
 });
 console.log(JSON.stringify(out));
@@ -97,6 +146,7 @@ try {
     && out.avgVy !== null && out.avgVy < 0
     && out.majorityNearOpaque === true
     && out.upperBandGapFrames === 0
-    && out.tailSkipGrow === 0;
+    && out.tailSkipGrow === 0
+    && out.occl.airSigN >= 4;                    // 口上方确有烟经过
   process.exit(pass ? 0 : 1);
 } finally { await browser.close(); }

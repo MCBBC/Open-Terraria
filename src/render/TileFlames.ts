@@ -35,8 +35,8 @@ import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
 import { flameTileTop, renderEnv } from './VanillaTiler';
 import { swayBakeSkip } from './WindSway';
-import { campfireYOffset, animYOffset } from './TileAnim';
-import { GorePiece } from '../entities/GorePiece';
+import { campfireYOffset, animYOffset, tileAnim } from './TileAnim';
+import { GorePiece, SMOKE_SPAWN_LIFE } from '../entities/GorePiece';
 import type { FlickerClock } from '../lighting/SkyColor';
 
 /** 火苗族 tile → Flame_{n} 贴图索引（TileDrawing.cs:2857-2893 的 num9 switch 1:1；
@@ -69,6 +69,16 @@ export const BRAZIER_FLAME_TILE: Record<number, number> = {
   306: 12,  // Ice Machine 制冰机（12 帧）
 };
 const BRAZIER_TINT: readonly [number, number, number] = [200, 200, 200];
+
+/** 烟囱烟发射节律：锚格 key → 上次发射的 animTick（tick 每锚一次，防高刷重复掷） */
+const _smokeLastTickByKey = new Map<number, number>();
+
+/** 烟囱烟总开关（★2026-08-31 用户要求先看无烟效果，默认 OFF）：
+ *  localStorage.sw_chimney_smoke === '1' 时开启；控制台/探针可热切换（重进世界生效） */
+export const CHIMNEY_SMOKE_EMIT = (() => {
+  try { return typeof localStorage !== 'undefined' && localStorage.getItem('sw_chimney_smoke') === '1'; }
+  catch { return false; }
+})();
 
 /** 火焰族的【绘制尺寸】(GetTileDrawData 各 case 的 tileWidth/tileHeight,非图集格):
  *  火把 20×20(:4724-4730) | 蜡烛族 33/49/174/372/646 = 16×20(:4887-4893) |
@@ -492,20 +502,37 @@ export function drawTileFlames(
       // 初速 0 + 负风给正向 X；scale 分档 0.2-0.4/0.3-0.6/0.4-0.8 按原版嵌套掷序。
       // 烟体 AI 在 GorePiece.updateChimneySmoke（SpecialAI==2）。暂停期不发射
       // （原版 NewGore 内 gamePaused 守卫等价）。渲染期调用天然视口限域，烘焙路径不进。
-      if (sheet === 406 && st.frameX[i] === 0 && st.frameY[i] === 54
-        && (window as unknown as { __swGame?: { paused?: boolean } }).__swGame?.paused !== true) {
-        const wind = renderEnv.wind;
-        const svx = wind < 0 ? -wind : 0;                 // :6940-6943
-        const goreType = 825 + Math.floor(Math.random() * 3);   // :6946 Next(825,828)
-        let gscale: number;
-        if (Math.random() * 4 < 1) {                        // :6949 Next(4)==0
-          gscale = Math.random() * 0.2 + 0.2;
-        } else if (Math.random() * 2 < 1) {                 // :6952 Next(2)==0
-          gscale = Math.random() * 0.3 + 0.3;
-        } else {
-          gscale = Math.random() * 0.4 + 0.4;               // :6955 else 支
+      if (CHIMNEY_SMOKE_EMIT && sheet === 406 && st.frameX[i] === 0
+        && (st.frameY[i] === 54 || st.frameY[i] === 0)) {   // 原版门=换带首格(Style3x3 永假,预留死支)；★自研放宽:帽行 fy=0 等价锚点(帽带含烟纹)+修复行即从这里冒烟
+        // 节律钉到游戏 tick（原版 DrawTiles_EmitParticles 每 Draw 帧执行但帧=tick；
+        // 本仓渲染可与更新解耦(高刷/UNCAPPED)，以 animTick 每锚一次防密度爆炸）
+        const anchorKey = x * 65536 + y;
+        const lastT = _smokeLastTickByKey.get(anchorKey);
+        const curT = tileAnim.tick;
+        if (lastT !== curT) {
+          _smokeLastTickByKey.set(anchorKey, curT);
+          if (_smokeLastTickByKey.size > 512) _smokeLastTickByKey.clear();
+          if (Math.random() < 0.18   // ★调参备案：原版外层=1/4（TileDrawing.cs:968 FastRandom…Next(4)），
+                              // 2026-08-31 用户裁定烟量减半 → 0.18；同时寿命缩短(GorePiece.SMOKE_*)
+            && (window as unknown as { __swGame?: { paused?: boolean } }).__swGame?.paused !== true) {
+            const wind = renderEnv.wind;
+            const svx = wind < 0 ? -wind : 0;                 // :6940-6943
+            const goreType = 825 + Math.floor(Math.random() * 3);   // :6946 Next(825,828)
+            let gscale: number;
+            if (Math.random() * 4 < 1) {                        // :6949 Next(4)==0
+              gscale = Math.random() * 0.2 + 0.2;
+            } else if (Math.random() * 2 < 1) {                 // :6952 Next(2)==0
+              gscale = Math.random() * 0.3 + 0.3;
+            } else {
+              gscale = Math.random() * 0.4 + 0.4;               // :6955 else 支
+            }
+            const _gp = GorePiece.newGore(goreType, x * 16 + 16, y * 16 + 8, svx, 0, gscale, true);
+            if (_gp) {
+              _gp.behindTiles = true;      // 后层通道（被烟囱实体遮挡）
+              _gp.timeLeft = SMOKE_SPAWN_LIFE;   // ★调参备案：更早消散（见 GorePiece 常量注）
+            }
+          }
         }
-        GorePiece.newGore(goreType, x * 16 + 16, y * 16 + 8, svx, 0, gscale, true);
       }
       // 摆动族（草/藤/吊挂灯笼 42/吊灯 34 等 MultiTileVine/Basic/Vine 全家）：原版主循环
       // AddSpecialPoint 后 continue——普通绘制路径（含 DrawSingleTile_Flames :1746）整体

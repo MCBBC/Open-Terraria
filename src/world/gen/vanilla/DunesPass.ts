@@ -10,6 +10,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY } from '../../../data/tiles';
+import { dualDungeonState, refreshDualPotentialBounds } from './DungeonStyles1457'; // ★IIIII88 双地牢装配
 
 const SAND = TILE_BY_KEY['sand']!;
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
@@ -82,6 +83,41 @@ export function runDunesPass(st: TileStore, rng: RNG, gs: GenState, onIter?: (i:
     }
   }
   gs.dungeonEntSeed = rng.vanilla.next(); // preGenDungeonEntranceSettings.RandomSeed
+  // ★IIIII88 双地牢第二套 genvars 装配（WorldGen.cs:11552-11559）：Dunes pass 头
+  //   `if (SecretSeed.dualDungeons.Enabled) { GenVars.CurrentDungeon = 1;
+  //   SetupDungeonGenVarVariables(GenVars.CurrentDungeonGenVars, genRand);
+  //   GenVars.CurrentDungeon = 0; }`——同一函数再跑一遍（ CurrentDungeon=1 ⇒ odd
+  //   样式表 Snow/Desert/Hallow/Temple + 地牢#1 自己的主题/入口掷）。掷序=主题
+  //   Next(3)、drunk 墙重掷、入口①② Next(3)、entSeed Next()；界域 Create 零掷。
+  //   theme/ent* 掷值落 dualDungeonState.dungeons[1]（DitherSnake/Dungeon 域消费）;
+  //   普通（非 dual）世界整段短路零掷流不变。
+  if (gs.seedFlags.dualDungeons && dualDungeonState.dungeons.length >= 2) {
+    const d1 = dualDungeonState.dungeons[1]!;
+    d1.theme = rng.nextIntRange(0, 3);                       // DungeonCrawler.cs:56
+    if (gs.seedFlags.drunkWorld) d1.wallStyle = rng.nextIntRange(0, 3); // :96 drunk 墙重掷（★IIIII93b 留痕代弃——掷位不变）
+    // :109 CreatePotentialDungeonBounds（对偶侧）+ GetCurrentDungeonStyle/样式表追加：零掷
+    d1.entA = rng.nextIntRange(0, 3);                        // :184-208 入口环（surfaceIsInSpace 拒 Tower 环,门见下）
+    d1.entB = rng.nextIntRange(0, 3);
+    if (gs.seedFlags.surfaceIsInSpace) {
+      let num3 = 50;
+      let flagged = d1.entB !== 0;
+      while (!flagged) {
+        num3--;
+        if (num3 <= 0) { d1.entA = -1; d1.entB = -1; break; }   // 耗尽回退 Legacy（-1 哨兵同主套）
+        d1.entA = rng.nextIntRange(0, 3);
+        d1.entB = rng.nextIntRange(0, 3);
+        flagged = d1.entB !== 0;
+      }
+    }
+    d1.entSeed = rng.vanilla.next();                         // :856 preGen.RandomSeed
+    const d0 = dualDungeonState.dungeons[0]!;                // 主套四掷回填（单源 gs 面）
+    d0.theme = gs.dungeonTheme;
+    d0.entA = gs.dungeonEntA ?? -1;
+    d0.entB = gs.dungeonEntB ?? -1;
+    d0.entSeed = gs.dungeonEntSeed ?? -1;
+    refreshDualPotentialBounds(w, h, gs.worldSurface, gs.genWorldSurfaceHigh,
+      !!gs.seedFlags.drunkWorld || !!gs.seedFlags.noSurface);
+  }
   // ★IIIII44（cs:11561）：Dunes 主门 `if (!Skyblock.denyAllGeneration &&
   //   !SecretSeed.noSurface.Enabled)`——沙丘/金字塔候选整段天空盒跳过；pass 头的
   //   地牢主题/入口五掷在门外照常消耗（x86 实证 slot2 rolls=5 恰为头部掷数）。

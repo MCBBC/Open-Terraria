@@ -36,13 +36,19 @@ export const ZAPPING_JELLYFISH = new Set<number>([63, 64, 103, 242]);
  *   shift  = (0,-n) + (0,n).RotatedBy(fullRotation)
  *   pos.Y += gfxOffY（addGfxOffY=true 支）
  *   return anchor + (pos-anchor).RotatedBy(fullRotation) + shift
- * 本仓恒定语境：fullRotation=0 / gfxOffY=0 / mountPlayerOffset=0（无重力旋转、
- * 不建模就坐挥击与坐骑手持偏移——此时 n 分量两两项抵消，函数=恒等映射）；
- * sleeping/sitting 偏移支（:4229-4239）同此语义缺席。reverseRotation/addGfxOffY/
- * pushFromOriginHack 三可选参均取原版调用点实值（false/true/0，唯一调用族未传）。
- * ★[N1] 登记（红队 R3 2026-08-30）：探针锚对 gfxOffY/mount.PlayerOffset 按 0 近似
- * ——坐骑手持偏移与就坐挥击偏移两支未建模；本仓语境下 n 分量两两项抵消、函数退化为
- * 恒等映射+旋转项，若未来接入坐骑/重力旋转须回到上述结构面重新对拍。 */
+ * sleeping/sitting 偏移支（:4229-4239）语义缺席（本仓 Player.rotatedRelativePoint
+ * 的同款登记——两态与线锚消费互斥）。reverseRotation/addGfxOffY/pushFromOriginHack
+ * 三可选参均取原版调用点实值（false/true/0，唯一调用族未传）。
+ * ★[N1] RESOLVED（2026-08-30 对齐清零批）：gfxOffY / mount.PlayerOffset 不再按 0 近似
+ * ——本仓 Player 已有非零 gfxOffY 写面（Entities/Player.ts:565 声明、:5683 挂绳跳变
+ * 置位、:5693 衰减）与非零 anchorPlayerOffset（Player.ts:5738-5741，矿车 8/10 +
+ * vanilla-mounts.json playerYOffsets 帧），Game.updateSwingHits 的消费点已把这两个
+ * 实际字段经 frame 参传入（见 starfurySwingProbes 调用点），坐骑/重力旋转面全部落进
+ * RotatedRelativePoint 结构本身而非调用点近似。itemLocation.Y 侧的 ApplyUseStyle
+ * `+ mountOffset` 支 = HeightOffsetHitboxCenter（Player.cs:3237-3250：mount.Active →
+ * mount.PlayerOffsetHitbox = −PlayerOffset + data.heightBoost，Mount.cs:424-431；
+ * 折叠凳 → HeightBoost−VisualYOffset）由 Game 侧按本仓坐标闭式承载（推导见其注释：
+ * 本仓骑乘不改玩家盒 ⇒ 原式 ≡ itemLocationY−playerOffset）。 */
 export function rotatedRelativePoint(
   posX: number, posY: number,
   frame: { bottomX: number; bottomY: number; fullRotation?: number;
@@ -50,7 +56,11 @@ export function rotatedRelativePoint(
 ): Pt {
   const fr = frame.fullRotation ?? 0;
   const gfx = frame.gfxOffY ?? 0;
-  const n = (frame.mountPlayerOffset ?? 0) / 2 + 4;
+  // ★R2-09（蓝队二轮）：vanilla `int num2 = mount.PlayerOffset / 2 + 4;`
+  // （Player.cs:4221，1456 :4071 同式）——PlayerOffset 为 int 字段，int/int 除法
+  // 【朝零截断】。负偏移（奇数）时 Math.floor 形（如 −7/2 → −4）与原版截断
+  // （−3）分叉；统一 trunc 形与 entities/Player.ts:5804 同站点一致。
+  const n = Math.trunc((frame.mountPlayerOffset ?? 0) / 2) + 4;
   // shift = (0,-n) + (0,n).RotatedBy(fr)；fr=0 时为 (0,0)，上式照写不化简
   const shx = -n * Math.sin(fr);
   const shy = -n + n * Math.cos(fr);
@@ -117,9 +127,45 @@ function between(x: number, y: number, minX: number, minY: number, maxX: number,
  * 注意它不是对矩形边集的真实最小距——线弦穿盒而不过角时仍返回过角的近似值；
  * 原版如此，勿"修正"。火之大剑(type121)命中门消费该值 ≤16f
  * （1457 Player.cs:44638-44639 / 1456 :43616-43617）。
- * ★[N2] 登记（红队 R3 2026-08-30）：原版敌盒为 Rectangle((int)nPC.position.X,
- * (int)nPC.position.Y, …)（:44631 整数截断），本仓直传浮点实体盒坐标——亚像素级
- * 边界差（≤1px 量级的命中翻转）属登记接受的近似，对拍勿按逐像素判例钉死。 */
+ * ★[N2] RESOLVED（2026-08-30 对齐清零批）：原版敌盒为 Rectangle((int)nPC.position.X,
+ * (int)nPC.position.Y, …)（:44631 整数截断），调用侧已改传截断盒（Game.updateSwingHits
+ * 的 vanRect 助手），本函数保持纯几何语义——入参必须是已截断矩形。 */
+export function intRect(x: number, y: number, w: number, h: number): Rect {
+  // C# Rectangle((int)x,(int)y,w,h)：坐标截断朝零（非 floor；负半轴 −2.5→−2 与 JS
+  // Math.floor 的 −3 不同）。原版所有命中相交都经此构造：
+  //   近战敌盒 :44631 / 捕虫小动物盒 :45089 / 掉落物 :44301 等同式。
+  return { x: Math.trunc(x), y: Math.trunc(y), w, h };
+}
+
+/** C# Rectangle.Intersects 等价（IntXna：lhs.X < rhs.Right && rhs.X < lhs.Right …，
+ * 左闭右开——边界相触 = 不相交）。两侧入参须先过 intRect 截断。 */
+export function rectIntersects(
+  a: Rect, b: Rect,
+): boolean {
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+/**
+ * ★[N5] 挥击三段分档闭式（ItemCheck_ApplyUseStyle / ItemCheck_GetMeleeHitbox /
+ * PlayerDrawLayer bodyFrame 三处共用判定）：
+ *   晚收段 tail：`(double)itemAnimation < (double)itemAnimationMax * 0.333`
+ *     （1457 Player.cs:45526 命中盒缩支 / :51294 持位段 / :36596 bodyFrame 行3）
+ *   早挥段 head：`!(itemAnimation < itemAnimationMax * 0.666)` 即 anim ≥ max·0.666
+ *     （:45536 double 取反写法 / :36596 族对称档）
+ * C# 以【双精度浮点阈值】比较而非有理数三分之一——JS number 同为 IEEE754 double，
+ * `anim < max * 0.333` 位级同构，直接照抄即为"精确离散档边界闭式"；整数形式：
+ *   tail ⟺ anim ≤ ⌈max·0.333⌉−1（若 max·0.333 恰为整数则 anim < 该整数）
+ *   head ⟺ anim ≥ ⌈max·0.666⌉
+ * max 可整除 3 的 ±1 帧分档抖动源：anim=max/3 时 pAnim==1/3，旧式 `pAnim≤1/3`
+ * 把它误入 tail（0.333 < 1/3 严格小，vanilla 判中段）；anim=max·2/3 时 pAnim==2/3，
+ * 旧式 `pAnim>2/3` 把它误留中段（vanilla 判早挥段）。本函数为唯一权威口径，
+ * Game.updateSwingHits 与 Renderer.useStyleBodyRow/drawUseItem 共表统一至此。 */
+export type MeleeThird = 'head' | 'mid' | 'tail';
+export function meleeThirdOf(itemAnimation: number, itemAnimationMax: number): MeleeThird {
+  if (itemAnimation < itemAnimationMax * 0.333) return 'tail';    // cs:45526/:36596
+  if (!(itemAnimation < itemAnimationMax * 0.666)) return 'head'; // cs:45536 双重否定原文形
+  return 'mid';
+}
 export function lineRectangleDistance(rect: Rect, lineStart: Pt, lineEnd: Pt): number {
   const tlX = rect.x,          tlY = rect.y;
   const trX = rect.x + rect.w, trY = rect.y;
@@ -159,8 +205,9 @@ export function lineRectangleDistance(rect: Rect, lineStart: Pt, lineEnd: Pt): n
  * （镜像共轭 rot→±rot）。 */
 export function starfurySwingProbes(
   itemLocation: Pt, itemRotation: number, direction: number, itemScale: number,
+  frame?: Parameters<typeof rotatedRelativePoint>[2],
 ): [Pt, Pt] {
-  const a = getPointOnSwungItemPath(70, 70, 0, itemScale, itemLocation, itemRotation, direction);
-  const b = getPointOnSwungItemPath(70, 70, 0.9, itemScale, itemLocation, itemRotation, direction);
+  const a = getPointOnSwungItemPath(70, 70, 0, itemScale, itemLocation, itemRotation, direction, 1, frame);
+  const b = getPointOnSwungItemPath(70, 70, 0.9, itemScale, itemLocation, itemRotation, direction, 1, frame);
   return [a, b];
 }

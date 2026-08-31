@@ -33,6 +33,19 @@ function buildLoft(): { st: TileStore; lowerHomeX: number; upperHomeX: number; p
   return { st, lowerHomeX: 24, upperHomeX: 28, platRow: P };
 }
 
+import { walkPrediction } from '../src/entities/TownNPC';
+describe('walkPrediction 平台放行(2026-08-31 卡死定谳)', () => {
+  it('平台桥面前不再判为深坑', () => {
+    const st = new TileStore(60, 60);
+    const SOLID = TILE_BY_KEY['stone'], PLAT = (() => { for (const d of TILE_DEFS) if (d?.vanilla?.sheet === 19) return TILE_DEFS.indexOf(d); return -1; })();
+    // 地板行 20 全实心;20..24 行中段换成平台(悬空桥)
+    for (let x = 10; x <= 30; x++) { const i = st.idx(x, 20); st.type[i] = SOLID; st.flags[i] = 1;
+      const j = st.idx(x, 22); st.type[j] = PLAT; st.flags[j] = 1; }
+    const r = walkPrediction(st, 15, 15, false, 1, 16, 19, 42);
+    expect(r.avoidFalling).toBe(false);
+  });
+});
+
 describe('housing 旗重叠双根因', () => {
   it('A·findBannerAnchorY:下层 home 的旗锚=平台行(不穿层进上层)', () => {
     const { st, lowerHomeX, platRow } = buildLoft();

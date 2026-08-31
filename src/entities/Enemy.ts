@@ -105,6 +105,7 @@ import { BuffType } from '../stats/Buffs';
 import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
 import { spawnNpcDeathGore, GorePiece } from './GorePiece';
 import { hslToRgb } from '../player/Appearance';
+import { enemyHurtFloatColor } from '../fx/CombatTextColors';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
 const UNMAPPED_WARNED = new Set<number>();
@@ -1255,6 +1256,9 @@ export class Enemy extends Entity {
   walkCycleT = 0;        // 行走帧累加器（≈原版 frameCounter，按 |vx| 推进）
   crawlT = 0;            // AI_040 爬墙帧累加器（FindFrame case 165 族：(|vx|+|vy|)×0.5，24 循环）
   justHitT = 0;          // 受击单帧旗标计数（hurt() 置 2，AI 消费原版 justHit 语义）
+  /** StrikeNPC 返回值 num41 等价（2026-08-31 批⑥：本次命中防后实扣,hurt() 实扣路径写；
+   *  弹幕调用方读走做 on-hit 门——Projectile.ghostHurt 的 dmg<=1 早退） */
+  lastStrikeDealt = 0;
   /** 岩浆接触冷却（原版 immune[255]=30,NPC.cs:94528）与 onFire 状态（buff 24,秒） */
   lavaCd = 0;
   lavaWet = false;
@@ -1621,6 +1625,12 @@ export class Enemy extends Entity {
   ai1 = 0;
   /** 原版 ai[3]（地牢 AI 族用：诅咒头骨状态/火轮速度档/刺球相位） */
   ai3 = 0;
+  /** ★F2 黑化松鼠族运行时位（NPC.cs:53958-53974：CritterThatCanTurnOnPlayers ∧
+   *  ai[3]!=0 → aiStyle=3 运行时翻转——原版 IsCritterThatIsHostileToPlayers
+   *  （:19849-19856）读的是【实例】aiStyle，本仓 def.aiStyle 恒为出生值 7，
+   *  故以该位承载"已转战士"事实；消费点 = projTargets.isCritterThatIsHostileToPlayers
+   *  （dontHurtCritters 复权放行）∪ Enemy 接触伤害族） */
+  blackenedCritter = false;
   /** 原版 directionY（火轮/刺球对角弹跳的纵向方向；AI_002 飘浮眼亦在此持久化——
    *  玩家死亡后 TargetClosest 无操作,沿用最后垂直方向滑行而非恒上飞） */
   dirY = 1;
@@ -8810,6 +8820,7 @@ export class Enemy extends Entity {
         this.ai3 = 2;
       }
       if (this.ai3 === 2) {
+        this.blackenedCritter = true;     // ★F2：运行时翻转位（等价原版 aiStyle=3 写入）
         if (this.maxHp === 5) {           // lifeMax==5 门（一次性升级）
           this.maxHp = 25;
           this.hp = 25;
@@ -12150,22 +12161,50 @@ export class Enemy extends Entity {
       dmg = 5; kbx = 0; kby = 0;
     }
     const rawDmg = dmg; // 傀儡上报用原始值（下方 def 凘认算只做一次，双端一致）
+    // ★批⑥修订（蓝队二轮 F2②,2026-08-31）：lastStrikeDealt 语义收紧为「本拍
+    // StrikeNPC 结算面」——入口先清零（原版 StrikeNPC 各早退门 :82023-82052 返回 0、
+    // num41 是【单次调用】返回值而非持久字段）。旧「只在实际扣血路径写」的空档 =
+    // dontTakeDamage/iframes 等无伤路径残留上一拍实扣值,ghostHurst 消费群按
+    // lastStrikeDealt ?? dmg 读到陈值虚增预算。凡结算路径见 :12262 与 488 分支写点。
+    this.lastStrikeDealt = 0;
     // 死亡单次门(用户报"多弹头武器打出双份僵尸碎块"):pierce=1 豁免免疫帧后,
     // 同 tick 多弹头(霰弹/食人鱼咬+随从)会全部进 hurt——首发致死后,后续弹头
     // 对"已死未出列"的敌怪二次触发死亡管线(碎块/掉落/音效翻倍)。原版由
     // Damage_PVE 的 npc.active 前置门(Projectile.cs:11869)天然防重;此处等价。
     if (this.dead) return false;
     // ★修齐批②：钛金屏障 on-hit（Player.cs:6927-6936——任意 NPC 伤害源命中,
-    //   cooldown 10t 门+statue/488 豁免;buff306 600t+碎片 908 ≤7）
-    if (fromPlayer && dmg > 0) {
-      const pl = game.player as unknown as { titaniumStormCd?: number; dead?: boolean;
-        cx: number; cy: number;
-        buffs: { apply(t: number, sec: number): void }; equipStats: { titaniumStorm?: boolean } };
-      if (pl && !pl.dead && pl.equipStats?.titaniumStorm) {
-        if ((pl.titaniumStormCd ?? 0) <= 0) {
-          pl.titaniumStormCd = 10;
-          pl.buffs.apply(306, 10);                           // AddBuff(306,600t)=10s
-          game.spawnTitaniumShard?.(pl.cx ?? 0, pl.cy ?? 0);
+    //   cooldown 10t 门+statue/488 豁免;buff306 600t+碎片 908 ≤7）。
+    // ★α-H4（终局扫尾批）：补 OnHit 域 `target.life>5` 豁免门——Player.OnHit 的
+    //   全部调用位都在残血门内（ProcessHitAgainstNPC :44678 / Projectile.Damage
+    //   TryDoingOnHitEffects :13642-44 `ownedBySomeone && targetNPC.life > 5`）；
+    //   此处读受击前 life（=本函数入口 this.hp,防结算尚未发生）。OnHit 域成员 =
+    //   【armorSet proc 类】钛金风暴（本块）；【weapon proc 类】ApplyNPCOnHitEffects
+    //   镜像区（血舌/蓄能/彩纸/潜行/标枪/吸血/蜂群/村正刀气 :44809-44906）在原版
+    //   **不带**该门——两类分界勿混。附带把 flag 豁免（Player.cs:6917-6921
+    //   `type==488 || SpawnedFromStatue` → 不 proc）显式收进同一条件。
+    //  ◆α-H4 结算版（完整 proc 体原子重建——勿再拆成"裸开门等体"两步写）：
+    //    Player.OnHit 钛金支（Player.cs:6916-6935 全量 1:1）：
+    //      flag = victim is NPC && (type==488 || SpawnedFromStatue);
+    //      onHitTitaniumStorm && !flag ⇒ { titaniumStormCooldown=10; AddBuff(306,600);
+    //        ownedProjectileCounts[908]<7 ⇒ NewProjectile(908, dmg50, kb15,
+    //        velocity=Zero 于 owner.Center); }
+    //    方向参数语义 = 不消费击退方向/hitDirection（原版 velocity 显式 Zero,
+    //    :6930-6934 无 num40 参与）；碎片≤7 的 ownedProjectileCounts 门与存活计数
+    //    归 GameHooks.spawnTitaniumShard 实现侧承担（Game.ts 计存活同型数,≤7 上限）。
+    {
+      const plT = game.player as unknown as {
+        dead?: boolean; cx?: number; cy?: number; titaniumStormCd?: number;
+        buffs: { apply(t: number, s: number): void };
+        equipStats?: { titaniumStorm?: boolean };
+      } | null | undefined;
+      const titanExempt = this.vanillaId === 488 || this.spawnedFromStatue;
+      if (fromPlayer && dmg > 0 && !titanExempt && this.hp > 5
+        && plT && !plT.dead && plT.equipStats?.titaniumStorm === true) {
+        if ((plT.titaniumStormCd ?? 0) <= 0) {
+          plT.titaniumStormCd = 10;                      // titaniumStormCooldown=10（:6928）
+          plT.buffs.apply(306, 10);                      // AddBuff(306,600t)=10s（:6929）
+          // ownedProjectileCounts[908]<7 支（:6931-6934）——计数与上限在 Game 端
+          game.spawnTitaniumShard?.(plT.cx ?? 0, plT.cy ?? 0);
         }
       }
     }
@@ -12209,18 +12248,19 @@ export class Enemy extends Entity {
     // 一次打击双份飘值+音效双播（2026-08-23 用户报）。
     // 门（:81998-82000）：(takenDamageMultiplier>1 || Damage!=9999) && lifeMax>1
     // ——DOT 致死的 hurt(9999) 不出飘值；lifeMax≤1 不出。
-    // 色（CombatText.cs:8-14）：friendly=DamagedFriendly(255,80,90)/暴击(255,100,30)；
-    // hostile=DamagedHostile(255,160,80)/暴击(255,100,30)；远端访客来源（msg42
-    // pendingStrikeOwner≥0）×0.4 灰（OthersDamagedHostile :15-16）。
-    // 位置=受击 NPC 锚点（原版 position 矩形）；数值=防后终值（原版 num 同）。
+    // 色（CombatText.cs:8-16 全表）：★附带④ 单源收口 fx/CombatTextColors.ts——
+    // friendly/hostile 分档 + 远端访客 ×0.4 灰；旧 '#665A14' 系误值亲核勘正
+    // （OthersDamagedHostileCrit=(255,100,30)×0.4=#66280C）。
+    // 位置=受击 NPC 锚点（原版 position 矩阵）；数值=防后终值（原版 num 同）。
     {
       const remoteOwner = consumePendingStrikeOwner();
       if ((this.takenDamageMultiplier > 1 || rawDmg !== 9999) && this.maxHp > 1) {
         const friendly = this.def.friendly ?? false;
-        let col: string;
-        if (friendly) col = crit ? '#FF641E' : '#FF505A';
-        else if (remoteOwner !== null && remoteOwner >= 0) col = crit ? '#665A14' : '#664020';
-        else col = crit ? '#FF641E' : '#FFA050';
+        const col = enemyHurtFloatColor({
+          friendly,
+          crit,
+          fromRemoteVisitor: remoteOwner !== null && remoteOwner >= 0,
+        });
         playEnemyHitSound(game, this);
         game.addDamageNumber(this.cx, this.y, dmg, crit, col);
       }
@@ -12242,6 +12282,11 @@ export class Enemy extends Entity {
       this.dummyHitDir = Math.sign(kbx);   // cs:83506 localAI[1]=hitDirection 无条件写入（0=未定向）
       this.iframes = 10;                   // 免疫帧与通用档一致（:13152 对全 NPC 含假人 10t；旧 8 偏差）
       this.hpBarT = 240;
+      // ★蓝队二轮 F2①（2026-08-31）：immortal 只跳过 `life -= num` 扣血段
+      // （StrikeNPC_Inner :82197-82215 的 if (!immortal) 支），num41 在 :82067 防后
+      // 结算、:82400 `return num` 恒 ≥1 与 immortal 无关——lastStrikeDealt 必须
+      // 写足额，否则幽灵套 ghostHurt 的 `dealt<=1 早退` 门让假人永不 proc。
+      this.lastStrikeDealt = dmg;
       return true;
     }
     // realLife 共享生命（StrikeNPC :82132-82137）：伤害扣主段,本段 hp/maxHp 镜像
@@ -12253,6 +12298,14 @@ export class Enemy extends Entity {
     } else {
       this.hp -= dmg;
     }
+    // ★批⑥(2026-08-31)：lastStrikeDealt = StrikeNPC 返回值 num41 等价（防后实扣,
+    // 命中调用方读走做 on-hit 联动门——Projectile.ghostHurt 的 `dmg<=1 早退` 消费）。
+    // 实扣路径写终值;无伤早退分支依赖 hurt() 头部的入口清零=等价返回 0。
+    // （2026-08-31 蓝队二轮 F2 修订：旧「只在实际扣血路径写、早退不触碰」的空档 =
+    //  dontTakeDamage/iframes 等无伤分支残留上一拍实扣值,ghostHurst 消费群
+    //  `lastStrikeDealt ?? dmg` 读到陈值虚增预算——现入口清零 + 本写点 + 488 分支
+    //  写足额三件套收口,消费点兜底已撤（??dmg → ??0）。）
+    this.lastStrikeDealt = dmg;
     // NPC.HitEffect 鸟族块（NPC.cs:87518-87556：61 秃鹫/252 鹦鹉/301 渡鸦同式）：
     // 存活受击 → ceil(防后伤/lifeMax×100) 簇 5 号血尘（DustID.Blood=5；
     // SpeedX=hitDirection/SpeedY=-1 + NewDust 通用抖动）。原版 hitDirection=

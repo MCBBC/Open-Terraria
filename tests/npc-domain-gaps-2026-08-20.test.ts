@@ -328,6 +328,31 @@ describe('④ 树妖结界 buff 165（防 +20/15/10 + 荆棘）', () => {
     expect(guide.dryadWardT).toBe(9);                        // 无树妖施法 → 仅衰减
     void dryad; void npcs_unused;
   });
+
+  // ★治理批 B2（2026-08-31）：vanilla :38804 循环无 owner 排除——树妖本体同受
+  // buff165（Projectile.cs:41957-41973 townNPC 支字面收编）。「tn===this 排除」
+  // 登记偏离销账后的自授予回归。
+  it('★B2 光环自体授予：施法窗内本体同样吃 120t ward（含独处节律化前提面）', () => {
+    const { game, mk } = townEnv();
+    const dryad = mk('dryad');
+    const guide = mk('guide', 102 * 16);                     // 圈内旁证（他体支不回退）
+    dryad.dryadWardT = 0;
+    guide.dryadWardT = 0;
+    // 直驱 updateDryadWardAura（私有,原型注入口径与测试内既有形制一致）：
+    // 弹龄 a=30 首个授义窗口（≥30 且 %10==0）;rng=0.9 跳过尘掷分支隔离断言面
+    (dryad as unknown as { wardT: number }).wardT = 30;
+    (dryad as unknown as { rng: () => number }).rng = () => 0.9;
+    (TownNPC.prototype as unknown as Record<string,
+      (g: unknown) => void>).updateDryadWardAura.call(dryad, game);
+    expect(dryad.dryadWardT).toBe(120);                      // 本体受祝(:38804 无 owner 排除)
+    expect(guide.dryadWardT).toBe(120);                      // 他体支照旧
+    // 非 %10 拍不吃续期（a=31 → 只可能触发无授予路径）
+    (dryad as unknown as { wardT: number }).wardT = 31;
+    (dryad as unknown as { dryadWardT?: number }).dryadWardT = 0;
+    (TownNPC.prototype as unknown as Record<string,
+      (g: unknown) => void>).updateDryadWardAura.call(dryad, game);
+    expect((dryad as unknown as { dryadWardT: number }).dryadWardT).toBe(0);
+  });
 });
 const npcs_unused = 0;
 

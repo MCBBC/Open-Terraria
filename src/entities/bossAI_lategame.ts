@@ -329,6 +329,10 @@ export class IceMistCloud extends Entity {
     // 接触伤害（hostile penetrate=-1，命中不消耗；敌弹 ×2 缩放在 hitPlayer 内）
     hitPlayer(this, game, this.damage);
     hitTownNpcs(this, game, this.damage, 0, 'hostile');
+    // 464 敌对弹对小动物零伤（命中出口中心裁决，2026-08-31 蓝队 F3）：原版
+    // Damage_PVE_Inner :12631 受理式 `!(hostile & flag2)`——小动物非 friendly
+    // NPC ⇒ hostile-only 弹（SetDefaults 464 无 friendly 列）不可能结其对伤；
+    // hitCritters 内按数据面同判恒 false，调用保留为语义锚。
     hitCritters(this, game);
   }
 
@@ -475,6 +479,8 @@ export class LightningOrb extends Entity {
     // 接触伤害（hostile；敌弹 ×2 缩放在 hitPlayer 内）
     hitPlayer(this, game, this.damage);
     hitTownNpcs(this, game, this.damage, 0, 'hostile');
+    // 465 敌对弹对小动物零伤——同 464 裁决（Damage_PVE_Inner :12631；出口中心判，
+    // 本调用恒 false 仅作语义锚,2026-08-31 蓝队 F3）
     hitCritters(this, game);
   }
 

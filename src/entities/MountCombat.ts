@@ -16,7 +16,8 @@
 //   2026-08-30 蓝队复核勘误驳回存档：按体例 20254 正确），第四个相似循环是水平侧撞族
 //   CollideWithNPCs
 //   （1457 :20238-20320 独角兽10/山羊47/马40-42、海盗船44、暗影木45、蜥蜴14、
-//   高尔夫球车17 横向）——不属 JumpMovement，未在本通道内移植，见报告登记：
+//   高尔夫球车17 横向）——不属 JumpMovement，横向侧撞族已另立 mountHorizontalCharges
+//   （★D1 批）并在本文件内维护；dash==6（Chillet 坐骑 62-65）冲撞面见文件尾注（F5①）：
 //     A 史莱姆坐骑弹跳：IsConsideredASlimeMount(type 3|50) && wetSlime==0 && vy>0
 //       盒 = 身体 rect.Offset(0,height-1).Height=2.Inflate(12,6)（脚底 ±(12,6) 横带）
 //       damage=(int)(40×minionDamage) kb=5 npc.immune=10 **velocity.Y=-10 弹跳**
@@ -33,12 +34,12 @@
 //   CanNPCBeHitByPlayerOrPlayerProjectile（1457 :20673 / 1456 :20234）：命中否决条件是
 //     `NPCID.Sets.CountsAsCritter[type] && flag`，flag = dontHurtCritters ∪ projectile 小兵/
 //     哨兵语境（:20677），且 IsCritterThatIsHostileToPlayers 强制放行（:20681）。本通道两端
-//     均为玩家实体直击（projectile==null）⇒ flag = dontHurtCritters——仓库无该饰品面
-//     （Player.ts RefreshMechanicalAccs 对 4767·5323 登记"无消费端不接"）⇒ 小动物【可被】
-//     矿车碾/坐骑踩（正例 ThrowKillFx 光环三桶并扫）。2026-08-30 蓝队复核修正：旧头注
-//     "小动物不入 enemies 桶天然豁免"是把 flag≡false 语境当成了无条件豁免，语义做反。
-//     dontHurtCritters 将来若落地面，须补 CountsAsCritter 门（hostile-to-player critter 支
-//     同步放行）；本通道现不含抑制表。
+//     均为玩家实体直击（projectile==null）⇒ flag = dontHurtCritters。
+//     ★E（2026-08-31 清零批二波）饰品面已实装：4767/5323 → equipStats.dontHurtCritters
+//     （Player.ts RefreshMechanicalAccs 扫描段），全部扫掠面经 canMountHitTarget →
+//     projTargets.playerProjectileCanHitNpcGate 统一出口挂接（CountsAsCritter 成员源 =
+//     def.critter 提取旗 ∪ critters 桶成员；敌对小动物 IsCritterThatIsHostileToPlayers
+//     复权同在出口内）——矿车碾/坐骑踩/横向冲撞三通道一致生效。
 //
 // ③撞怪块时点：1457 Player.Update 内撞怪块（:27748）先于 Minecart.TrackCollision 调用
 //   （:28315，同一函数体顺序推进）——本 tick 的轨驱增量/端点急停/斜坡起飞不进本帧伤害读数；
@@ -53,7 +54,7 @@
 import type { GameHooks } from './types';
 import { damageVar } from '../stats/ScaleStats';
 import { canHit } from '../physics/LineOfSight';
-import { playerCanHitEnemy as _playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy as _playerCanHitEnemy, playerProjectileCanHitNpcGate } from './projTargets';
 import type { TileStore } from '../world/TileStore';
 
 /** IsConsideredASlimeMount（Mount.cs:522-533）：type==3 SlimySaddle ∪ type==50 QueenSlime */
@@ -153,6 +154,16 @@ function npcHitTargets(game: GameHooks): unknown[] {
   return [...(game.enemies() ?? []), ...(game.critters?.() ?? [])];
 }
 
+/** ★E 坐骑通道命中门（CanNPCBeHitByPlayerOrPlayerProjectile 统一出口）：
+ *  扫掠集并扫了 critters 桶 → 桶成员显式作为 CountsAsCritter 成员源传入
+ *  （projTargets.countsAsCritterOf 的第二来源位）。此前"仓库无该饰品面 ⇒
+ *  小动物可被矿车碾/坐骑踩"的头注语义自本批起被 dontHurtCritters 实装取代。 */
+function canMountHitTarget(game: GameHooks, e: unknown, ent: unknown): boolean {
+  const bucket = game.critters?.() ?? [];
+  const fromCritterBucket = bucket.includes(ent);
+  return playerProjectileCanHitNpcGate(game, e, fromCritterBucket);
+}
+
 /** 矿车撞怪主入口（1457 Player.cs:27748-27831 / 1456 :27225 起）——
  *  Minecart.fixedUpdate 每 tick 调一次（速度>4f 才进循环）。cart 取结构窄视图
  *  （runSpeed = 生效档 RunSpeed 值，Minecart 的 superCart-aware getter 取值即可）。
@@ -190,8 +201,10 @@ export function minecartNpcRampage(cart: {
     // 门串（:27772-27773）active && !dontTakeDamage && !friendly && immune[whoAmI]==0 &&
     // CanNPCBeHitByPlayerOrPlayerProjectile && 盒相交——immune==0 ↔ 本仓 e.iframes==0。
     // playerCanHitEnemy 是 friendly 门的超集（多 voodoo 臭蛋例外，矿车本无可触发物品）；
+    // ★E：CountsAsCritter∧dontHurtCritters 拒收经统一出口接入（下二行）；
     // ★无 LOS 门为原版设计，勿加。
     if (e.dead || e.dontTakeDamage) continue;
+    if (!canMountHitTarget(game, e, ent)) continue;   // ★E（:20542 同一门族）
     if (!_playerCanHitEnemy(e, game)) continue;
     if (e.iframes !== undefined && e.iframes !== 0) continue;
     if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
@@ -214,8 +227,11 @@ export function minecartNpcRampage(cart: {
     const resist = e.def?.knockBackResist ?? 1;
     const kb = resist > 0 && resist < 1 ? knockback / resist : knockback;
     // ApplyDamageToNPC(...,sourceItemId=2343)（:27816）——StrikeNPC 族受击音/飘值/
-    // 掉物走 Enemy.hurt 单点管线；fromPlayer=true 计入 DPS
-    e.hurt(dmgOut, dir * kb, 0, game, 0, crit, 0, true);
+    // 掉物走 Enemy.hurt 单点管线；fromPlayer=true 计入 DPS。
+    // ★附带②：armorPen 参改走玩家 GetArmorPenetration(melee:false) 同源链
+    // （ApplyDamageToNPC :20597 `damage += npc.checkArmorPenetration(GetArmorPenetration(
+    // melee:false))`——仓内单桶 equipStats.armorPen；旧直传 0=漏穿甲）
+    e.hurt(dmgOut, dir * kb, 0, game, playerArmorPenOf(game), crit, 0, true);
     hits++;
     e.iframes = 30;                                               // :27819 immune[i]=30
     if (e.dead) {
@@ -284,34 +300,51 @@ const GOLF_CART_STOMP: StompCfg = {
   sourceItem: STOMP_SOURCE_ITEMS.golfCart,
 };
 
-/** 踩踏扇区公共扫掠（对应三个循环的循环体同型部分，1457 :20704-20726 同款）：
- *  盒相交 + (noTileCollide || Collision.CanHit 直判短式) → 结算 → break（每 tick 至多
- *  一个目标，vanilla 循环体 hit 后 break——多目标不连穿）；扫掠集含 critters 桶（原版
- *  循环遍历 Main.npc 全槽，跳过条件只有门串本身，2026-08-30 R6 复核并桶） */
-function stompSweep(p: PlayerLike, game: GameHooks,
-  cfg: StompCfg, st: TileStore | undefined): number {
-  // rect = getRect().Offset(0,height-1).Height=2.Inflate(12,6)
-  const bx = p.x - 12, by = p.y + p.h - 1 - 6, bw = p.w + 24, bh = 2 + 12;
+/** 踩踏扇区公共扫掠核心（★D1 轴参数化改造：横竖两族共用一条门串/hurt 单点/
+ *  break 语义——vanilla CollideWithNPCs(:20536-20577) 与三个踩踏循环 (:20693-20801)
+ *  的命中段同构：盒相交 → (noTileCollide||CanHit) → ApplyDamageToNPC(int 截断一次)
+ *  → nPC.immune[whoAmI]=N → GiveImmuneTimeForCollisionAttack(playerImmune) →
+ *  num++/break。盒由调用方按轴构造后传入，本函数零复制扩展 */
+function collisionAttackSweep(
+  p: PlayerLike, game: GameHooks,
+  cfg: { damage(p: PlayerLike): number; knockback: number; npcImmune: number;
+    playerImmune: number; bounce?: boolean },
+  box: Rect, st: TileStore | undefined,
+): number {
   for (const ent of npcHitTargets(game)) {
     const e = ent as unknown as StompTarget2;
     if (!e || e.dead || e.dontTakeDamage) continue;
+    if (!canMountHitTarget(game, e, ent)) continue;   // ★E：CountsAsCritter∧dontHurtCritters 统一出口
     if (!_playerCanHitEnemy(e, game)) continue;
     if (e.iframes !== undefined && e.iframes !== 0) continue;    // nPC.immune[whoAmI]!=0
-    if (!(bx < e.x + e.w && bx + bw > e.x && by < e.y + e.h && by + bh > e.y)) continue;
+    if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
     // 直判短式 LOS（nPC.noTileCollide || Collision.CanHit(position,w,h,nPC.position,...)）
     if (!(e.noTileCollide || (st ? canHit(st, p.x, p.y, p.w, p.h, e.x, e.y, e.w, e.h) : true))) continue;
     const dmg = cfg.damage(p);
-    // 方向：num2=direction，vx<0→-1 / vx>0→1（:20711-20717，静止时取朝向）
+    // 方向：num2=direction，vx<0→-1 / vx>0→1（:20546-20551 与踩踏 :20711-20717 同式，
+    // 静止时取朝向）
     let dir = p.facing;
     if (p.vx < 0) dir = -1;
     else if (p.vx > 0) dir = 1;
-    e.hurt(dmg, dir * cfg.knockback, 0, game, 0, false, 0, true);   // crit:false 字面（见文件头注）
-    e.iframes = cfg.npcImmune;                                     // nPC.immune[whoAmI]=10/12
-    if (cfg.bounce) p.vy = -10;                                    // velocity.Y=-10f（仅 A 支）
+    e.hurt(dmg, dir * cfg.knockback, 0, game, playerArmorPenOf(game), false, 0, true);   // crit:false 字面（见文件头注）;★附带② AP 同源链
+    e.iframes = cfg.npcImmune;                                     // nPC.immune[whoAmI]=N
+    // ★GC1/D3 统一时钟桥写（NPC.immune[whoAmI] 的第二承载面）：nPC.immune[whoAmI]
+    // 原文即 per-player 槽（本仓双轨制：实体级 iframes 弹幕域直用 + 共享表供近战门）
+    (game as unknown as { noteNpcPlayerImmune?: (id: number, t: number) => void })
+      .noteNpcPlayerImmune?.((e as unknown as { id?: number }).id ?? -1, cfg.npcImmune);
+    if (cfg.bounce) p.vy = -10;                                    // velocity.Y=-10f（仅史莱姆 A 支）
     giveImmuneTimeForCollisionAttackImpl(p, cfg.playerImmune);
     return 1;
   }
   return 0;
+}
+
+/** 踩踏扇区公共扫掠（竖轴封装——脚底横带盒，vanilla 三循环同式） */
+function stompSweep(p: PlayerLike, game: GameHooks,
+  cfg: StompCfg, st: TileStore | undefined): number {
+  // rect = getRect().Offset(0,height-1).Height=2.Inflate(12,6)
+  const bx = p.x - 12, by = p.y + p.h - 1 - 6, bw = p.w + 24, bh = 2 + 12;
+  return collisionAttackSweep(p, game, cfg, { x: bx, y: by, w: bw, h: bh }, st);
 }
 
 interface StompTarget2 {
@@ -348,6 +381,18 @@ function giveImmuneTimeForCollisionAttackImpl(p: { iframes?: number }, time: num
   }
 }
 
+/** ★D3 玩家侧碰撞攻击免疫统一时钟出口（GiveImmuneTimeForCollisionAttack 全调用点收敛：
+ *  vanilla :20654 方法本体单座——调用点 CollideWithNPCs 核心 ：20563 / 踩踏三支
+ *  :20726/:20763/:20800（本文件 sweeper 内建）/ 日耀盾滑行 :21349 / 克盾冲撞 :21277 /
+ *  dash==6 冲撞 :21404（F5①）/ 盾反 buff198 支 :31667。
+ *  ★F5② 勘误：旧注"tabi 冲撞 :21404"系引错——dash==1（忍者足具/黑腰带）在
+ *  DashMovement 全段无 NPC 命中面（:21585-21611 纯位移+尘），:21404 实为 dash==6
+ *  GiveImmune 调用行；tabi 从本清单剔除，勿再回填 */
+export function grantCollisionAttackImmunity(p: { iframes?: number }, time: number): void {
+  stompClock++;
+  giveImmuneTimeForCollisionAttackImpl(p, time);
+}
+
 /** JumpMovement 头部踩踏段总入口（A+C 支；B 支无引擎触发源走显式入口）——
  *  Player.fixedUpdate 每 tick 调一次（vanilla :26945 移动尾无条件调 JumpMovement）。
  *  返回命中数。同时推进免疫连击时钟（见上）。 */
@@ -379,6 +424,220 @@ export function ramRuneDownDashStomp(p: Parameters<typeof mountJumpStomps>[0],
   game: GameHooks): number {
   if (p.vy <= 0) return 0;
   return stompSweep(p, game, RAM_RUNE_STOMP, game.world?.store);
+}
+
+// ---------------------------------------------------------------------------
+// ★D1 水平侧撞族（CollideWithNPCs 四循环，1457 Player.cs:20238-20320；
+//   公共核心 :20536-20577——同 GiveImmuneTimeForCollisionAttack(:20563)/
+//   ApplyDamageToNPC(int 截断一次,:20548)）
+// ---------------------------------------------------------------------------
+
+/** 横向侧撞盒（:20245-20252 / :20259 等，五支同式）：
+ *  rect = getRect(); direction==1 → Offset(width-1,0); Width=2; Inflate(6,12)
+ *  ——朝向一侧的 14×(h+24) 竖条（贴面前沿 ±6px 容差、竖向 ±12px）。左右两个
+ *  facing 各自成条 = 双面向双收。整数化：x/y 已是 int 域。 */
+export function mountChargeBox(x: number, y: number, w: number, h: number,
+  facing: number): Rect {
+  const bx = facing === 1 ? x + (w - 1) : x;
+  return { x: bx - 6, y: y - 12, w: 2 + 12, h: h + 24 };
+}
+
+/** 阈值参数面（Mount.DashSpeed/RunSpeed 生效值 getter——含 SuperCart/疲劳覆写口径，
+ *  由调用方传实例值） */
+interface ChargePlayerLike extends PlayerLike {
+  summonDamageMult: number;
+  mount: { active: boolean; type: number };
+}
+
+/** 五个水平循环的逐型差异表（对照 :20238-20320 分块顺序）：
+ *  flag4 = type∈{40,41,42}（马三件）；10 独角兽 /47 山羊 与其共用阈值与源物品 */
+const CHARGE_HORSE_TYPES = new Set([40, 41, 42]);
+
+function chargeConfigs(mountType: number): Array<{
+  threshold(dashSpeed: number, runSpeed: number): number;
+  damage(p: ChargePlayerLike): number;
+  knockback: number;
+  npcImmune: number;
+  playerImmune: number;
+  sourceItem: number;
+}> | null {
+  if (mountType === 10 || mountType === 47 || CHARGE_HORSE_TYPES.has(mountType)) {
+    // （:20238-20258）：threshold DashSpeed−RunSpeed/2；dmg 60（flag4→30）×minionDamage；
+    // kb 10（flag4→7）；immune30/6；sourceItem=4787 全族
+    const horse = CHARGE_HORSE_TYPES.has(mountType);
+    return [{
+      threshold: (ds, rs) => ds - rs / 2,
+      damage: (p) => Math.trunc((horse ? 30 : 60) * p.summonDamageMult),
+      knockback: horse ? 7 : 10,
+      npcImmune: 30, playerImmune: 6, sourceItem: 4787,
+    }];
+  }
+  if (mountType === 44) {
+    // 海盗船（:20261-20275）：threshold DashSpeed−RunSpeed/4；100×minionDamage；kb12
+    return [{
+      threshold: (ds, rs) => ds - rs / 4,
+      damage: (p) => Math.trunc(100 * p.summonDamageMult),
+      knockback: 12, npcImmune: 30, playerImmune: 6, sourceItem: 4792,
+    }];
+  }
+  if (mountType === 45) {
+    // 暗影木/暗影之骑（:20277-292 蛊）：threshold DashSpeed×0.9；120×minionDamage；kb12
+    return [{
+      threshold: (ds) => ds * 0.9,
+      damage: (p) => Math.trunc(120 * p.summonDamageMult),
+      knockback: 12, npcImmune: 30, playerImmune: 6, sourceItem: 4793,
+    }];
+  }
+  if (mountType === 14) {
+    // 蜥蜴/恐龙坐骑（:20301? 实为 ：20293-20307 段）：threshold RunSpeed/2；
+    // 90×minionDamage；kb10；immune30/6
+    return [{
+      threshold: (_ds, rs) => rs / 2,
+      damage: (p) => Math.trunc(90 * p.summonDamageMult),
+      knockback: 10, npcImmune: 30, playerImmune: 6, sourceItem: 3771,
+    }];
+  }
+  if (mountType === 17) {
+    // 高尔夫球车横撞（:20309-20322）：threshold RunSpeed/2；40×minionDamage；kb10；
+    // immune30/**12**（GiveImmune 12 与竖轴 C 支同档）
+    return [{
+      threshold: (_ds, rs) => rs / 2,
+      damage: (p) => Math.trunc(40 * p.summonDamageMult),
+      knockback: 10, npcImmune: 30, playerImmune: 12, sourceItem: 4264,
+    }];
+  }
+  return null;
+}
+
+/** 横向侧撞族总入口（Player.fixedUpdate 移动尾与 mountJumpStomps 并列——vanilla
+ *  同为 Update 主体内速度终值语境）。返回命中数（≤cfg 数,每 cfg 至多一个目标） */
+export function mountHorizontalCharges(p: {
+  x: number; y: number; w: number; h: number; vx: number; vy: number;
+  facing: number; iframes?: number; wetSlime?: number;
+  summonDamageMult: number;
+  mount: { active: boolean; type: number; runSpeed(): number; dashSpeed: number };
+}, game: GameHooks): number {
+  if (!p.mount.active || !p.mount.runSpeed) return 0;
+  const cfgs = chargeConfigs(p.mount.type);
+  if (!cfgs) return 0;
+  const runSpeed = p.mount.runSpeed();
+  const dashSpeed = p.mount.dashSpeed ?? runSpeed;
+  let hits = 0;
+  for (const c of cfgs) {
+    // 门：|velocity.X| > threshold（:20243/:20261/:20277/:20293/:20309）
+    if (!(Math.abs(p.vx) > c.threshold(dashSpeed, runSpeed))) continue;
+    hits += collisionAttackSweep(p as PlayerLike, game,
+      { damage: c.damage, knockback: c.knockback, npcImmune: c.npcImmune,
+        playerImmune: c.playerImmune },
+      mountChargeBox(p.x, p.y, p.w, p.h, p.facing), game.world?.store);
+  }
+  return hits;
+}
+
+// ---------------------------------------------------------------------------
+// ★F5① dash==6 冲撞面（1457 Player.cs:21354-21405，DashMovement 内 dash 支四；
+//   2026-08-31 蓝队二轮实装——此前头注登记"未移植"，本批补齐）
+//
+// 触发链（原文）：
+//   DashMovement 头 `if (mount.Active && (mount.Type == 62|63|64|65)) dashType = 6`
+//   （:21211-21213）；`if (dashDelay == 0) dash = dashType`（:21215-21217）；骑乘
+//   CanDash 表放行双击冲刺（MountID.Sets.CanDash = {56..65}，MountID.cs:11——仓内旧
+//   近似"CanDash 全假骑乘恒禁冲"对 62-65 为假阴性，触发面在 Player.ts 冲刺段；
+//   ★治理批 B6②：56-61 六型也已放开——骑乘期走配饰档 dash1/2/3 原速,见
+//   MOUNT_CAN_DASH_TYPES 注）。
+//   就绪段 DoCommonDashHandle 分支 :21710-21731：dashing → velocity.Y==0?=-4 →
+//   vx=16×dir5 → vy>0 减半 → 头部撞墙 vx/=2 → dashDelay=-1。
+//   滑行段 ：21521-21527：`Math.Sign(velocity.X) != direction || dashType != 6` →
+//   num17=(dashDelay)=30、vx×0.3、dashTime=0（同向继续滑行+尘/光照，未建模视觉面）。
+//   阻尼档 = 基础 num13=12/num14=0.992/num16=0.96/出口 num17=20（dash6 无覆写）。
+// 命中面（:21354-21405，每 tick dashDelay<0 && myPlayer）：
+//   盒 = (position + velocity×0.5 −(4,4), width+8, height+8)；Width += 60 且
+//   direction==-1 时 X -=60（朝向前沿 60px 带状外扩,运动前视半身投影）；门 =
+//   !active/dontTakeDamage/friendly/immune[whoAmI]>0/(aiStyle112∧ai2>1)/
+//   CanNPCBeHitByPlayerOrPlayerProjectile(→小动物统一出口) ；相交∧(noTileCollide∨
+//   CanHit) → ApplyDamageToNPC(dmg=(150|32)×minionDamage,kb=6,kbGlove×2/kbBuff×1.5,
+//   crit:false 恒字面,sourceItemId=5665 TrustyChilletWhistle 弹源记账) →
+//   npc.immune[whoAmI]=20 → GiveImmuneTimeForCollisionAttack(10)。多目标【不】break。
+// ---------------------------------------------------------------------------
+
+/** MountID.Sets.CanDash（MountID.cs:11 字面 = {56..65}）：蝙蝠 56/滚轴鞋四色
+ *  57-60（IsRollerSkates 集）/仙灵 61/Chillet 四型 62-65。★治理批 B6②：骑乘期
+ *  双击冲刺的门面在此——56-61 走配饰档（dash1/2/3 原速），62-65 走 dash==6 冲撞；
+ *  消费点 Player.ts 双击窗（:21579 门式）。dashSpeed 数值由 vanilla-mounts.json
+ *  承载（提取器已含 56=4.5/57-60=7.5/61=4.5 与 sets.CanDash 全表），冲刺速度本身
+ *  取装备档原值非坐骑值 */
+export const MOUNT_CAN_DASH_TYPES = new Set<number>([56, 57, 58, 59, 60, 61, 62, 63, 64, 65]);
+/** dashType=6 的坐骑族（Player.cs:21211-21213；62 Chillet/63 ChilletIgnis/
+ *  64 TrustyChillet/65 TrustyChilletIgnis——64/65 特例伤害档 150） */
+export const MOUNT_DASH6_TYPES = new Set<number>([62, 63, 64, 65]);
+/** dash==6 冲撞 sourceItemId（ApplyDamageToNPC 第 7 参,仅 DPS 记账面） */
+export const CHILLET_DASH_SOURCE_ITEM = 5665;
+
+/** dash==6 冲撞盒（:21356-21364）：前视半身投影 ×4 抖动均值 −(4,4)，尺寸 ±(8,8)，
+ *  宽再 +60px 朝向带；direction==-1 时整体左移 60 保持带覆盖面前 */
+export function mountDash6Box(x: number, y: number, w: number, h: number,
+  vx: number, vy: number, facing: number): Rect {
+  const bx = Math.trunc(x + vx * 0.5 - 4) - 0;
+  const by = Math.trunc(y + vy * 0.5 - 4);
+  let rx = bx;
+  if (facing === -1) rx -= 60;                    // direction==-1 → X -= num9
+  return { x: rx, y: by, w: w + 8 + 60, h: h + 8 };
+}
+
+/** dash==6 冲撞命中扫掠（滑行期每 tick 一次；调用方保证 dashDelay<0 ∧ myPlayer 语
+ *  境）。返回命中数。flag=mount.Type∈{64,65} → 150 否则 32（:21355/:21391）。 */
+export function chilletDashCharge(
+  p: Parameters<typeof mountJumpStomps>[0] & { equipStats?: { kbGlove?: boolean } },
+  game: GameHooks,
+  titanKbBuff: boolean,
+): number {
+  if (!p.mount.active || !MOUNT_DASH6_TYPES.has(p.mount.type)) return 0;
+  const box = mountDash6Box(p.x, p.y, p.w, p.h, p.vx, p.vy, p.facing);
+  const bonus150 = p.mount.type === 64 || p.mount.type === 65;
+  const st: TileStore | undefined = game.world?.store;
+  let hits = 0;
+  for (const ent of npcHitTargets(game)) {
+    const e = ent as unknown as StompTarget2;
+    if (!e || e.dead || e.dontTakeDamage) continue;
+    // AI_112 仙灵免疫门（:21368 `nPC.aiStyle == 112 && !(nPC.ai[2] <= 1f)` → continue）：
+    // ★治理批 B6③（2026-08-31）由哨兵注释升级为落地实装——该支【现役可达】：本仓
+    // 仙灵 583/584/585 走 Enemy.fairyAI（AI_112_FairyCritter cs:48605 移植,ai[2] 即
+    // 状态载体,虫网释放 ReleaseNPC 进态 2 → 宝箱引导链 3-7 在册）。SetDefaults
+    // （NPC.cs:16608 `type == 583 || type == 584 || type == 585`）下 aiStyle=112 全集
+    // 恰为仙灵三型,故按 vanillaId 判定与原式等价；ai[2] ≤ 1（漂游/逃逸两引导前态）
+    // 照常可被打。同一门在 ：21275（dash==2 克盾）/ solar / 本支三处 dash 命中面
+    // 出现——Player.ts 克盾冲撞(:3953)与日曜冲撞(:4099)两循环属战斗缝合面归属
+    // 另线,本批不触碰,残余缺门已挂账（见批记 leftover）。
+    const es = e as unknown as { vanillaId?: number; ai2?: number };
+    if ((es.vanillaId === 583 || es.vanillaId === 584 || es.vanillaId === 585)
+      && (es.ai2 ?? 0) > 1) continue;
+    if (!canMountHitTarget(game, e, ent)) continue;
+    if (!_playerCanHitEnemy(e, game)) continue;
+    if (e.iframes !== undefined && e.iframes !== 0) continue;      // immune[whoAmI]>0
+    if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
+    if (!(e.noTileCollide || (st ? canHit(st, p.x, p.y, p.w, p.h, e.x, e.y, e.w, e.h) : true))) continue;
+    const dmg = Math.trunc((bonus150 ? 150 : 32) * p.summonDamageMult);   // float→(int)
+    let kbx = 6;
+    if ((p as unknown as { equipStats?: { kbGlove?: boolean } }).equipStats?.kbGlove) kbx *= 2;   // :21393-21395
+    if (titanKbBuff) kbx *= 1.5;                                   // kbBuff 泰坦（:21396-21398）
+    let dir = p.facing;
+    if (p.vx < 0) dir = -1;
+    else if (p.vx > 0) dir = 1;
+    e.hurt(dmg, dir * kbx, 0, game, playerArmorPenOf(game), false, 0, true);   // crit:false 字面(:21402)
+    e.iframes = 20;                                                // nPC.immune[whoAmI]=20（:21403）
+    (game as unknown as { noteNpcPlayerImmune?: (id: number, t: number) => void })
+      .noteNpcPlayerImmune?.((e as unknown as { id?: number }).id ?? -1, 20);
+    grantCollisionAttackImmunity(p, 10);                           // GiveImmuneTimeForCollisionAttack(10)（:21404）
+    hits++;                                                        // ★无 break：逐帧全目标结算
+  }
+  return hits;
+}
+
+/** 玩家 GetArmorPenetration(melee:false) 的仓内唯一桶（equipStats.armorPen——
+ *  vanilla 双字段 armorPenetration/meleeArmorPenetration 中 melee:false 只取前者） */
+function playerArmorPenOf(game: GameHooks): number {
+  return ((game.player as unknown as { equipStats?: { armorPen?: number } } | null)
+    ?.equipStats?.armorPen ?? 0);
 }
 
 // ---------------------------------------------------------------------------

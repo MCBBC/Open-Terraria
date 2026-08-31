@@ -497,11 +497,17 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     // 隧道链:2-4 段;每段 2-4 条全部从段起点出发,段位置=最后一条终点
     // ★IIIII45（HiveBiome.cs Place：1458 注记 cs 153-156）：drunk 隧道段数
     //   num2 += Next(7,10)=int(7,9)（普通世界整支短路零掷）
+    // ★★★IIIII95（HiveBiome.cs:57-65，1456/1457/1458 三代同文）：remix 臂
+    //   num2 += Next(2,5)=int(2,4)——与 CreateHiveTunnel 的 remix 加算(:176-179,
+    //   已落)同批三态实现,此前仅 drunk 臂移植 → REMIX 每个成型蜂巢少耗 1 骰、
+    //   段数恒少一掷域,全 pass 掷流自第一巢起错位(#47 Hives 大域主根因,#48 起级联)。
     let px = x + 0.0, py = y + 0.0;
     const segEnds: Array<[number, number]> = [];
     const segBase = rng.int(2, 4);
     mk?.(`HV_S0 ${segBase}`);   // ★IIIII81：镜像 rig HV S0（bonus 前基值,流位取证用）
-    const segs = segBase + (gs.seedFlags.drunkWorld ? rng.int(7, 9) : 0);
+    const segs = segBase + (gs.seedFlags.drunkWorld ? rng.int(7, 9)
+      : (gs.seedFlags.remix && (globalThis as { __swSpNoFixArms?: boolean }).__swSpNoFixArms !== true)
+        ? rng.int(2, 4) : 0);
     for (let seg = 0; seg < segs; seg++) {
       const tunnels = rng.int(2, 4);
       let ex = px, ey = py;
@@ -980,6 +986,12 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
   for (let n = 0; n < count; n++) {
     let x = rng.int(200, st.w - 201);
     let y = rng.int(yMin, st.h - 231);
+    // ★IIIII98（Terarria1458 cs:17488-17492）：REMIX 深度带覆写——普通首选
+    //   Next((worldSurface+rockLayer)/2, maxY-230) 照掷，remix 再掷
+    //   Next((int)worldSurface,(int)rockLayer) **覆写**（先掷后覆写=恒耗双骰，
+    //   IIII95 深度带家族同款：漏掷 → 巢采样整带错位+重试环少骰）。
+    const remixSn = !!gs.seedFlags.remix;
+    if (remixSn) y = rng.int(Math.trunc(gs.worldSurface), Math.trunc(gs.rockLevel) - 1);
     let c = countTiles(st, x, y);
     __c?.(n, 0, x, y, c.count, c.shroom);
     let tries = 0;
@@ -988,6 +1000,8 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
       // cs:17502-17504：重掷 x 仍 [200,w-200)，y 换 [rockLayer+30, h-230)
       x = rng.int(200, st.w - 201);
       y = rng.int(gs.rockLevel + 30, st.h - 231);
+      // ★IIIII98（cs:17505-17507）：重试环内同样覆写
+      if (remixSn) y = rng.int(Math.trunc(gs.worldSurface), Math.trunc(gs.rockLevel) - 1);
       c = countTiles(st, x, y);
       __c?.(n, tries, x, y, c.count, c.shroom);
       if (c.shroom > 1) c.count = 0;

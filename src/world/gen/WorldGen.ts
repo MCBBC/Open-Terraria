@@ -49,25 +49,67 @@ export interface GenCtx {
   cfg: GenConfig;
 }
 
+/** WorldFileData.TryApplyingCopiedSeed（cs:232-289）dotted 配方路由 1:1：
+ *  `<size>.<gameMode+1>.<evil+1>.<optionBits>.<secrets>|<base>`——前四段为
+ *  尺寸/模式/邪恶/生成选项位掩码，明文秘种子段在前、数字底种在后；
+ *  **世界 RNG = TranslateSeed(明文段+底种)**（不含 dotted 前缀!）。
+ *  optionBits 位序 seedOptionsInOrder（:71-82）：bit0=Drunk、1=NTB、2=FTW、
+ *  3=Anniv、4=DontStarve、5=Remix、6=NoTraps、7=Everything、8=Skyblock。
+ *  非 dotted 输入原样返回 null（零扰动）。 */
+export function tryApplyingCopiedSeed(input: string): {
+  effectiveSeedText: string; size?: 0 | 1 | 2; evil?: -1 | 0 | 1; flags: SeedFlags;
+} | null {
+  const m = /^([1-3])\.([1-4])\.([12])\.(\d+)\.(.+)$/.exec(String(input ?? '').trim());
+  if (!m) return null;
+  const FLAG_BITS = ['drunkWorld', 'notTheBees', 'getGoodWorld', 'tenthAnniversary',
+    'dontStarve', 'remix', 'noTraps', 'everything', 'skyblock'] as const;
+  const flags: SeedFlags = {};
+  const bits = Number(m[4]);
+  for (let i = 0; i < FLAG_BITS.length; i++) {
+    if ((bits >> i) & 1) (flags as Record<string, boolean>)[FLAG_BITS[i]!] = true;
+  }
+  Object.assign(flags, parseSeedChain(m[5]!).flags);
+  return {
+    effectiveSeedText: m[5]!,
+    size: (Number(m[1]) - 1) as 0 | 1 | 2,
+    evil: (Number(m[3]) - 1) as -1 | 0 | 1,
+    flags,
+  };
+}
+
 /** 生成一个世界。passes 按序执行，每帧尽量做完一个 pass 后让出主线程。 */
 export async function generateWorld(cfg: GenConfig, onProgress?: (label: string, p: number) => void): Promise<World> {
+  // ★IIIII88：dotted 秘种子配方路由先行（TryApplyingCopiedSeed cs:232-289）——
+  //   命中时 size/evil 由配方段派生、旗标=配方位掩码+明文秘种子、世界种子按
+  //   「明文|底种」翻译。缺省路径全部保持现行为。
+  const copied = tryApplyingCopiedSeed(cfg.seedText);
+  const effSeedText = copied ? copied.effectiveSeedText : (cfg.seedText || String(Date.now()));
   // 种子解析 1:1 原版 WorldFileData.TranslateSeed（数字→Abs；非数字→Crc32），
   // 生成入口构造 Main.rand = new UnifiedRandom(seed)（WorldGen.cs:11159）。
   // 位级金标见 tests/unified-random.test.ts。
-  const seed = translateSeed(cfg.seedText || String(Date.now()));
-  // size 档派生 W/H（UI 语义）；显式 width/height 仍可用（探针/测试直给）
-  const { width, height } = cfg.size !== undefined ? SIZE_DIMS[cfg.size] : cfg;
+  const seed = translateSeed(effSeedText);
+  // size 档派生 W/H（UI 语义）；显式 width/height 仍可用（探针/测试直给）；
+  // ★dotted 配方命中且调用方未显式给 size 时按配方段派生
+  const effSize = cfg.size !== undefined ? cfg.size : copied?.size;
+  const effEvil = cfg.evil !== undefined && cfg.evil !== -1 ? cfg.evil : (copied ? copied.evil : cfg.evil);
+  const { width, height } = effSize !== undefined ? SIZE_DIMS[effSize] : cfg;
   const world = new World(width, height, seed, cfg.name ?? '新世界');
-  // 旗标解析：cfg.seedFlags 直注优先（S0-1 解耦），缺省回退 seedText 派生（现行为）。
+  // 旗标解析：cfg.seedFlags 直注优先（S0-1 解耦），次选 dotted 配方位，缺省回退 seedText 派生。
   // 运行时消费（血月 1/6 十周年 / drunk 黎明翻转等）
-  world.seedFlags = cfg.seedFlags ?? parseSeedChain(cfg.seedText || '').flags;
+  world.seedFlags = cfg.seedFlags ?? copied?.flags ?? parseSeedChain(effSeedText).flags;
   const rng = new RNG(seed);
   // 注：曾在此 createNoise2D(() => rng.next())——simplex 构造即消耗 RNG 流
   //（建置换表 256+ 次），而全管线无消费者。种子等价必须零预耗，已删除。
   const ctx: GenCtx = {
     world, store: world.store, rng,
     surface: new Float32Array(width),
-    cfg: { ...cfg, width, height },
+    // ★IIIII88：把 routed 结果回灌 ctx.cfg——下游（vanillaTerrain 的 GenState/Reset 等）
+    //   一律消费 effectiveSeedText/有效 evil；seedFlags 单源化（copied 或调用方直注）。
+    cfg: {
+      ...cfg, width, height, evil: effEvil,
+      seedText: effSeedText,
+      ...(copied && !cfg.seedFlags ? { seedFlags: copied.flags } : {}),
+    },
   };
 
   // 单一 vanilla 管线。原 lgcTerrain=false 的 fbm 回退（terrainPass/cavePass/
@@ -342,6 +384,13 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   for (let i = 0; i < passes.length; i++) {
     onProgress?.(passes[i].name, i / passes.length);
     await nextFrame();
+    // ★IIIII87 反演重放窗口仪·通用槽头捕获（缺省零开销；i87Cap 七带版的全槽推广）：
+    //   槽末态=(store 八通道+帧 / gs / chests) 在 reseed 前直递 —— probe 端按目标
+    //   槽名捕快照后以 .swAbort 停管。真值基座=dump N-1（同 slot-end 口径）。
+    {
+      const cap91 = (globalThis as { __swI91Cap?: (st: unknown, g: unknown, ch: unknown, name: string) => void }).__swI91Cap;
+      if (cap91) cap91(ctx.store, ctxGs[0], ctx.world.chests, passes[i].name);
+    }
     // ★RunPass 种子重播（1456 WorldGenerator.cs:497：每个 GenPass 执行前
     //   Main.rand = new UnifiedRandom(_seed)，IL 实证）——槽头重播保证"每槽
     //   至少以新流开始"；槽内含多个原版 pass 的包装（vanillaCaves/vanillaBiomes/
@@ -457,6 +506,7 @@ import { runPilesPass } from './vanilla/PilesPass';
 import { runRemoveSurfaceWaterAboveSandPass, runFragileIcePass } from './vanilla/WaterIcePasses';
 import { tileRunner } from './vanilla/TileRunner';
 import { runDungeonPass } from './vanilla/DungeonPass';
+import { runDualDungeonsDitherSnakePass } from './vanilla/DitherSnakePass'; // ★IIIII88 双地牢蛇槽
 import { dualDungeonState } from './vanilla/DungeonStyles1457';   // ★IIIII88 双地牢共享态（Reset/Dunes 头装配）
 import { runTemplePass, runTemplePart2Pass, runLihzahrdAltarPass } from './vanilla/TemplePass';
 import { runIslandHousePass } from './vanilla/IslandHousePass';
@@ -1050,8 +1100,17 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   } else { rng.reseed(gs.seed); } // ▶IceBiome（dual 跳过锚）
   rng.reseed(gs.seed); // ▶Grass cs:12454
   // ★IIIII16：jagged rocks 打孔臂（cs:12470，skyblock 门内、roundLandmasses/撒草之前）
-  if (gs.seedFlags.digExtraHoles && !gs.seedFlags.skyblock) doDigExtraHoles(store, rng, gs);
+  // ★IIIII93：Grass 段双区段记账钩（仅挂 __swGBand 时生效，缺省零开销）——dig 区段=
+  //   DoDigExtraHoles 全体（cs:2853-2868）、face 区段=本 pass 撒草主循环（:12475-12497）。
+  const i93gb = (globalThis as { __swGBand?: (t: string, d?: unknown) => void }).__swGBand;
+  if (gs.seedFlags.digExtraHoles && !gs.seedFlags.skyblock) {
+    if (i93gb) i93gb('dig-start');
+    doDigExtraHoles(store, rng, gs);
+    if (i93gb) i93gb('dig-end');
+  }
+  if (i93gb) i93gb('face-start');
   runGrassPass(store, rng, gs);          // 17 Grass
+  if (i93gb) i93gb('face-end');
   rng.reseed(gs.seed); // ▶JunglePass cs:12497
   let jx = gs.jungleX;
   if (!gs.seedFlags.dualDungeons) {
@@ -1123,8 +1182,14 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   //   还原点 = SmoothWorld 头 cs:16510 翻 true（本仓数据无法表达该窗口,备案）→
   //   SmoothWorld 尾 cs:16695 翻回 false（HalfBrickPass 接线）。
   flipGenSolid([481, 482, 483], false);
+  // ★IIIII88 双地牢抖动蛇槽（cs:14824-14826 注册于 Dungeon 前；dual 专属 pass——
+  //   非双地牢世界不注册零调用）。输入=dungeonGenVars×2（Reset 侧锚 + Dunes 头装配）。
   i87Cap(); // @DGHEAD
-  rng.reseed(gs.seed); // ▶Dungeon cs:14816（17 内部段不中间重播）
+  if (gs.seedFlags.dualDungeons) {
+    rng.reseed(gs.seed); // ▶DitherSnake cs:14816 DitherSnakePass.ApplyPass(#32 槽)
+    runDualDungeonsDitherSnakePass(store, rng, gs);
+  }
+  rng.reseed(gs.seed); // ▶Dungeon cs:14816（17 内部段不中间重播；dual 链此锚=蛇后态=#033 入口）
   runDungeonPass(store, rng, gs, world.chests); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算(legacy 入口)不迁移 dungeonLocation——但入口塔列仍可能与
   // Reset 期锚点偏差数百格,必须在此回写最终位置。优先取入口门厅可站立点:
@@ -1218,6 +1283,8 @@ function vanillaStructures({ store, rng, world }: GenCtx) {
   // 的 ChestsInJungleShrines(17308)
   rng.reseed(gs.seed); // ▶JungleShrines cs:16059
   ctxShrineSpots[0] = gs.seedFlags.dualDungeons ? [] : runJungleShrinePass(store, rng, gs);
+  // ★IIIII98 探针钩（dormant，零开销）：神龛点跨槽上下文对单 pass 反演重放仪可见
+  try { (globalThis as { __swJCSpots?: unknown }).__swJCSpots = ctxShrineSpots[0]; } catch { /* probe */ }
   // Webs(51) 已按注册序回到 #27 位（vanillaBiomes 前段）——此处旧迟置调用已删
   // 附魔剑圣地已归位到 MicroBiomes pass 内(ThinIce 与 Campsite 之间,原版 cs:21858-21908)
   // ——SwordShrinePass 曾在此槽近似执行(管线错位+洞穴中心方向颠倒),2026-08-13 移除;
@@ -1652,6 +1719,8 @@ function gravitatingSandSlot(ctx: GenCtx) {
   rng.reseed(gs.seed); // ▶OceanCaves cs:15228
   // 海洋洞窟蠕虫+宝藏点记录(→「雕像宝箱」槽 UnderwaterChests 消费)
   ctxOceanTreasures[0] = runOceanCavesPass(store, rng, gs);
+  // ★IIIII98 探针钩（dormant，零开销）：海洋宝藏点对单 pass 反演重放仪可见
+  try { (globalThis as { __swOceanTreasures?: unknown }).__swOceanTreasures = ctxOceanTreasures[0]; } catch { /* probe */ }
 }
 
 // 地下丛林树（原版 UndergroundJungleTrees cs:17952-17970 + GrowUndergroundTree

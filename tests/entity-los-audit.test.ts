@@ -4,13 +4,17 @@
 //   ② 城镇 NPC 入态外加门：弓族斜率 ±0.5（:56048-56049）/ 狼人态 ≤50px（:56022-56025）
 //   ③ 闪电光环三试视线（AI_137_LightningAura_CanHit，Projectile.cs:71574-71614
 //      ——直线不过走 ±π/2 中点弧线两段；目标格实心直接 false）
-// OOA 四塔/浮动哨兵的 CanHitLine 索敌门在 MinionProj 内经 nearestEnemy('line') 落地，
-// 由既有 'line' 通道承载（canHitLine rect 版），此处用纯函数钉弧线几何。
+// OOA 四塔/浮动哨兵的 CanHitLine 索敌门在 MinionProj 内经 nearestEnemy('line') 落地：
+// 锚定 FindTarget 支为点对端（CanHitLine(shootingSpot,0,0→nPC.Center,0,0)，★F4 定案
+// 2026-08-31），非锚定 AI_062 族仍走 canHitLine rect 版（:66392）——分叉场景钉案见
+// tests/tower-aim-gates。此处用纯函数钉弧线几何。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TownNPC } from '../src/entities/TownNPC';
 import { lightningAuraCanHitFrom, FLAMEBURST_TIERS } from '../src/entities/MinionProj';
+import { getSwingStatsAnchor, tweakSwingStats } from '../src/entities/townNpcSwing';
+import { canHit as canHitRect, canHitPoint } from '../src/physics/LineOfSight';
 
 const STONE = TILE_BY_KEY['stone'];
 
@@ -153,44 +157,346 @@ describe('城镇 NPC 入态目标选择 pickSideTarget（NPC.cs:53887-53963 扫�
 
 type SwingFn = (w: unknown, g: unknown) => void;
 
-describe('城镇 NPC 挥击结算视线门（NPC.cs:55635 noTileCollide||CanHit）', () => {
-  // ai[0]==15 攻击态中段 tick：TOWN_ATTACK_TIME[207]=15 → 中段 = max(1,floor(15/2))
-  const SWING_ATK_TICK = Math.max(1, Math.floor(15 / 2));
+// ---- ★2026-08-31 对齐批②：挥击态重写（GetSwingStats/TweakSwingStats 逐拍盒 +
+//      危险侧前探 32px 退出链 + 「换敌再接」重起手,NPC.cs:55615-55686）----
+type SwingSelf = Record<string, unknown> & {
+  atkTimer: number; atkState: number; facing: number;
+};
 
-  function runSwing(fillWall?: (st: World['store']) => void) {
+function makeSwingSelf(cx: number, cy: number, over: Partial<Record<string, unknown>> = {}): SwingSelf {
+  return {
+    vanillaId: 207, givenName: '', tipsy: false,
+    facing: -1, atkState: 15, atkTimer: 0, holdAim: 0, atkTick: 3,
+    walkMode: 0, walkT: 100, turnLock: 0, vx: 0, vy: 0,
+    x: cx - 6, y: cy - 21, w: 12, h: 42, cx, cy,
+    rng: () => 0.2,
+    swingImmune: new Map<number, number>(),
+    prevAi0: 0, dangerSide: 1, threatRaw: false,
+    threatLeft: null, threatRight: null,
+    corneredT: 0, fleeing: false,
+    ...over,
+  } as SwingSelf;
+}
+
+/** 挥击危险侧候选引用(与 TownNPC.dangerUpdate 记录位同构——★治理批 B1②后
+ *  ThreatRef 无 isAlive 位:消费端按原文直读 Main.npc[numXX],不设活性门) */
+function threatRef(x: number, y: number, w: number, h: number) {
+  return { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
+}
+
+describe('城镇 NPC 挥击逐拍判定盒(GetSwingStats/TweakSwingStats) + 结算视线门', () => {
+  const CX = 30 * 16 + 8, CY = 16 * 16 + 8;
+
+  function runSwing(fillWall?: (st: World['store']) => void,
+    over?: Partial<Record<string, unknown>>, victimX = CX - 44) {
     const w = makeWorld();
     fillWall?.(w.store);
-    const cx = 30 * 16 + 8, cy = 16 * 16 + 8;
-    // facing=-1：挥击矩形 = [cx−32, cx] × [cy−16, cy+16]
-    // 身宽缩至 12（矩形锚在 cx,与身宽无关——给墙留净缝）
-    const me = {
-      vanillaId: 207, givenName: '', tipsy: false,
-      facing: -1, atkTick: SWING_ATK_TICK,
-      x: cx - 6, y: cy - 21, w: 12, h: 42, cx, cy,
-    };
+    const me = makeSwingSelf(CX, CY, { atkTimer: 12, ...over });   // 中带 B(ai[1]∈[10,20))
     const hits: string[] = [];
     const victim = {
-      name: 'left',
+      name: 'left', id: 7,
       dead: false, damage: 12, def: {},
-      x: cx - 48, y: cy - 20, w: 18, h: 40,           // 右缘探入矩形内 2px
+      x: victimX, y: CY - 20, w: 18, h: 40,
       hurt(dmg: number): boolean { hits.push(`hit:${dmg}`); return true; },
     };
     const game = { enemies: () => [victim], addDamageNumber: () => undefined };
     const fn = (TownNPC.prototype as unknown as Record<string, SwingFn>).swingUpdate;
     fn.call(me, { store: w.store, flags: {}, difficulty: 0 }, game);
-    return hits;
+    return { hits, me };
   }
 
-  it('明处敌人:命中一次', () => {
-    expect(runSwing()).toHaveLength(1);
+  it('中带(B)判定盒:明处敌人命中一次 + immune 锁 (int)ai[1]+2', () => {
+    const { hits, me } = runSwing();
+    expect(hits).toHaveLength(1);
+    // immune[owner] = (int)ai[1]+2 = 14(NPC.cs:55639)
+    const map = me.swingImmune as Map<number, number>;
+    expect(map.get(7)).toBe(Math.trunc(12) + 2);
   });
 
-  it('隔整列石壁:矩形相交也不打（2026-08-30 补门回归）', () => {
-    const hits = runSwing((st) => {
-      // 本体右沿 cx−6 与敌身之间立一列满高石柱——矩形仍相交但视线全断
-      // （cx=488：敌 440..458、缝 458..482 → 墙列 29 = 464..479 恰在缝内）
-      for (let ty = 12; ty <= 22; ty++) st.setTile(29, ty, STONE);
+  it('隔整列石壁:矩形相交也不打(:55635 noTileCollide||CanHit 站点保真)', () => {
+    const { hits } = runSwing((st) => {
+      // 本体右沿(482)与敌身(444..462)之间立满高石柱——列 29 = 464..479 全断视线
+      for (let ty = 10; ty <= 23; ty++) st.setTile(29, ty, STONE);
     });
     expect(hits).toEqual([]);
+  });
+
+  it('收势带(A)变形:TweakSwingStats W×1.4/H×1.1(+Y 半高下压)逐拍生效', () => {
+    const { hits, me } = runSwing(undefined, { atkTimer: 9 }, CX - 52);
+    // ai[1]=9 < 15×2×0.333 → A 带:盒加宽到 trunc(32×1.4)=44、加高 trunc(35)
+    expect(hits).toHaveLength(1);
+    void me;
+  });
+});
+
+describe('★对齐批② 挥击退出链(NPC.cs:55645-55686)', () => {
+  const CX = 30 * 16 + 8, CY = 16 * 16 + 8;
+
+  /** 真实例驱动（私有位经 any 注入——exitAttackCommon 等原型方法保持可达） */
+  function runExit(fillWall?: (st: World['store']) => void,
+    over?: Partial<Record<string, unknown>>) {
+    const w = makeWorld();
+    fillWall?.(w.store);
+    const n = new TownNPC('dyer', CX - 10, CY - 21);   // cx=CX, cy=CY, w=20
+    const me = n as unknown as Record<string, unknown>;
+    me.facing = -1;
+    for (const [k, v] of Object.entries({
+      atkState: 15, atkTimer: 0, holdAim: 0, atkTick: 3,
+      walkMode: 0, walkT: 100, turnLock: 0,
+      rng: () => 0.2, prevAi0: 0, dangerSide: 1, threatRaw: false,
+      threatLeft: null as unknown, threatRight: null as unknown,
+      corneredT: 0, fleeing: false,
+      ...over,
+    })) me[k] = v;
+    const fn = (TownNPC.prototype as unknown as Record<string, SwingFn>).swingUpdate;
+    fn.call(n, { store: w.store, flags: {}, difficulty: 0 },
+      { enemies: () => [], behavioLog: () => undefined });
+    return me;
+  }
+
+  it('退路堵死(背向危险侧前探 32px 命墙)+主候选可见 → 换敌再接(atkTimer=AttackTime 重起手)', () => {
+    // 危险在左(dangerSide=-1) → 背向探测 = 右 +32px;右立满高石柱封退路。
+    // 主候选 = 同危险侧左敌(num15==-1 → num16 左) 可见 → 立即重接挥击
+    const me = runExit((st) => {
+      for (let ty = 10; ty <= 22; ty++) { st.setTile(31, ty, STONE); st.setTile(32, ty, STONE); }
+    }, {
+      threatRaw: true, dangerSide: -1, facing: -1,
+      threatLeft: threatRef(CX - 60, CY - 20, 18, 40),
+    });
+    expect(me.atkTimer).toBe(15);              // num87 = NPCID.Sets.AttackTime[207]
+    expect(me.atkState).toBe(15);              // ai[0] 保持 15(重起手)
+    expect(me.atkTick).toBe(0);                // localAI[3]=0
+    expect(me.holdAim).toBe(0);                // ai[2]=0
+    expect(me.facing).toBe(-1);                // direction = 朝新目标(同侧)
+  });
+
+  it('入态时是被逼停(prevAi0==8)→ 无墙也连击(:55650 ||localAI[2]==8f 支)', () => {
+    const me = runExit(undefined, {
+      threatRaw: true, dangerSide: 1, facing: 1, prevAi0: 8,
+      threatRight: threatRef(CX + 40, CY - 20, 18, 40),
+    });
+    expect(me.atkState).toBe(15);
+    expect(me.atkTimer).toBe(15);
+  });
+
+  it('主候选失 LOS 单次回退另一侧候选 → 新敌换向(direction 翻面 :55656-55671)', () => {
+    // 危险在左、左侧主候选被柱子遮挡(点对失败)、退路由 localAI[2]==8 支放行
+    // → 回退右侧次候选,方向翻向右
+    const me = runExit((st) => {
+      for (let ty = 10; ty <= 22; ty++) st.setTile(28, ty, STONE);   // 本体与左敌间柱列
+    }, {
+      threatRaw: true, dangerSide: -1, facing: -1, prevAi0: 8,
+      threatLeft: threatRef(CX - 96, CY - 20, 18, 40),               // 柱后→CanHit 点对失败
+      threatRight: threatRef(CX + 44, CY - 20, 18, 40),
+    });
+    expect(me.facing).toBe(1);                 // 换向朝右侧幸存者
+    expect(me.atkState).toBe(15);
+    expect(me.atkTimer).toBe(15);
+  });
+
+  it('★原版不对称:主候选缺位(即使另一侧有活敌)不接链 → 标准退出(:55655 嵌套三元)',
+    () => {
+      const me = runExit((st) => {
+        for (let ty = 10; ty <= 22; ty++) { st.setTile(27, ty, STONE); st.setTile(28, ty, STONE); }
+      }, {
+        threatRaw: true, dangerSide: 1, facing: 1,
+        // 主候选(num17 右)缺位;左侧候选拒救——vanilla 只在【主候选存在但 LOS 断】
+        // 时才动用 num89 回退
+        threatLeft: threatRef(CX - 120, CY - 20, 18, 40),
+      });
+      expect(me.atkState).toBe(0);               // 标准退出
+      expect(me.walkT).toBe(13);                 // legT = 12 + floor(0.2×6)
+      expect(me.atkCd).toBe(7);                  // localAI[1] = 12/2 + floor(0.2×6)
+      expect(me.corneredT).toBe(0);
+    });
+
+  it('被逼停复位支:(localAI[2]==8)&flag16 且主候选缺位(不接链)→ 回 ai[0]=8 态(ai[1]=legT)', () => {
+    const me = runExit(undefined, {
+      threatRaw: true, dangerSide: 1, prevAi0: 8, facing: 1,
+      // prevAi0==8 触发连击尝试,但主候选(num17 右)缺位 → 放弃连击走标准退出,
+      // cornered 复位分支接管
+      threatRight: null,
+      threatLeft: null,
+    });
+    expect(me.atkState).toBe(0);               // ai[0] 归位由 cornered 承载
+    expect(me.corneredT).toBe(13);             // ai[1] = legT 同值
+    expect(me.walkT).toBe(13);
+  });
+
+  it('非危险态自然退出:flag16=false → 纯标准退出(冷却/腿程写入,rng 注入确定性)', () => {
+    const me = runExit(undefined, { threatRaw: false, prevAi0: 0 });
+    expect(me.atkState).toBe(0);
+    expect(me.corneredT).toBe(0);              // 无复位
+    expect(me.walkT).toBe(13);
+    expect(me.atkCd).toBe(7);
+  });
+});
+
+// ---- ★2026-08-31 治理批 B1：换敌再接候选池双偏离翻正回归 ----
+describe('★B1① 危险扫描候选记录前置 CanBeChasedBy 门（NPC.cs:54042 flag19）', () => {
+  const CX = 30 * 16 + 8, CY = 16 * 16 + 8;
+
+  function scan(foes: Array<Record<string, unknown>>) {
+    const w = makeWorld();
+    const n = new TownNPC('dyer', CX - 10, CY - 21);
+    const fn = (TownNPC.prototype as unknown as Record<string,
+      (wd: unknown, g: unknown) => void>).dangerUpdate;
+    fn.call(n, w, { enemies: () => foes } as never);
+    return n as unknown as { threatLeft: unknown; threatRight: unknown; threatRaw: boolean };
+  }
+
+  /** 右侧两敌：近者 dontTakeDamage（过扫描门但不入索敌 :91141 族）、远者普通 */
+  const nearDonT = (x: number) => ({ x: x - 10, y: CY - 20, w: 18, h: 40, dead: false,
+    damage: 40, dontTakeDamage: true, def: { friendly: false } });
+  const farNormal = (x: number) => ({ x: x - 10, y: CY - 20, w: 18, h: 40, dead: false,
+    damage: 30, def: { friendly: false } });
+
+  it('扫描序 [先远后近]:近敌只刷 num14 不覆盖已记录的远候选（沿用上一合格者）', () => {
+    // 原版字面形状:num14 刷新与 flag19 无关,num17 仅在刷新时若过 CanBeChasedBy 才写
+    // ——不过门的更近威胁【保留】此前最近合格候选
+    const r = scan([farNormal(CX + 100), nearDonT(CX + 50)]);
+    expect(r.threatRaw).toBe(true);                    // 威胁面照旧置位(:53887 串)
+    const cand = r.threatRight as { cx: number };
+    expect(cand).not.toBeNull();
+    expect(cand.cx).toBeCloseTo(CX + 100, 5);          // 远者保位
+  });
+
+  it('扫描序 [先近后远]:近敌不过门且 num14 未再刷 → num17 全程空缺(null)', () => {
+    const r = scan([nearDonT(CX + 50), farNormal(CX + 100)]);
+    expect(r.threatRaw).toBe(true);
+    expect(r.threatRight).toBeNull();                  // 远者 dx 更大不入 num14 刷新窗
+  });
+
+  it('双侧皆合格:左右候选各记各的', () => {
+    const r = scan([farNormal(CX + 60), farNormal(CX - 70)]);
+    expect((r.threatRight as { cx: number }).cx).toBeGreaterThan(CX);
+    expect((r.threatLeft as { cx: number }).cx).toBeLessThan(CX);
+  });
+});
+
+describe('★B1② 重接消费无活性门（:55652-55669 直读 Main.npc 无 .active 查询）', () => {
+  const CX = 30 * 16 + 8, CY = 16 * 16 + 8;
+
+  it('同拍先行致死目标(仅 dead 位翻真)仍被重接——原版可链到该拍刚死的怪', () => {
+    const w = makeWorld();
+    const n = new TownNPC('dyer', CX - 10, CY - 21);
+    // 退路堵死:背向危险侧(-1→前探右)立柱
+    for (let ty = 10; ty <= 22; ty++) { w.store.setTile(31, ty, STONE); }
+    const me = n as unknown as Record<string, unknown>;
+    Object.assign(me, {
+      atkState: 15, atkTimer: 0, holdAim: 0, atkTick: 3, facing: -1,
+      walkMode: 0, walkT: 100, turnLock: 0, rng: () => 0.2,
+      prevAi0: 0, dangerSide: -1, threatRaw: true, corneredT: 0, fleeing: false,
+      swingImmune: new Map<number, number>(),
+      threatLeft: threatRef(CX - 80, CY - 20, 18, 40),
+      threatRight: null,
+    });
+    const victim = { id: 11, dead: true };              // 同拍致死——Ref 快照仍在
+    void victim;
+    const log: Array<{ phase?: string }> = [];
+    (TownNPC.prototype as unknown as Record<string, SwingFn>).swingUpdate.call(
+      n, { store: w.store, flags: {}, difficulty: 0 },
+      { enemies: () => [], behavioLog: (_e: string, o: { phase?: string }) => log.push(o) },
+    );
+    expect(log[0]?.phase).toBe('rechain');              // 不设活性门 → 接上
+    expect(me.atkTimer).toBe(15);
+    expect(me.atkState).toBe(15);
+  });
+
+  it('主候选 LOS 断+无次候选 → 照旧标准退出(活性门删除不改变其余分支)', () => {
+    const me2 = (() => {
+      const w = makeWorld();
+      for (let ty = 10; ty <= 22; ty++) st_wall(w.store);
+      const n = new TownNPC('dyer', CX - 10, CY - 21);
+      Object.assign(n as unknown as Record<string, unknown>, {
+        atkState: 15, atkTimer: 0, holdAim: 0, atkTick: 3, facing: 1,
+        walkMode: 0, walkT: 100, turnLock: 0, rng: () => 0.2,
+        prevAi0: 0, dangerSide: 1, threatRaw: true, corneredT: 0, fleeing: false,
+        swingImmune: new Map<number, number>(),
+        threatRight: threatRef(CX + 90, CY - 20, 18, 40),   // 柱后断视
+        threatLeft: null,
+      });
+      (TownNPC.prototype as unknown as Record<string, SwingFn>).swingUpdate.call(
+        n, { store: w.store, flags: {}, difficulty: 0 },
+        { enemies: () => [], behavioLog: () => undefined });
+      return n as unknown as Record<string, unknown>;
+    })();
+    expect(me2.atkState).toBe(0);                       // 标准退出面不变
+  });
+
+  function st_wall(st: World['store']): void {
+    for (let ty = 10; ty <= 22; ty++) { st.setTile(33, ty, STONE); st.setTile(34, ty, STONE); }
+  }
+});
+
+// ---- ★对齐批③ point 版 CanHit 通道保真(R5 leftover#4):
+//      AI_007 站点全部改传 0 尺寸点对,端点 tile 与 rect 写法逐布局零差 ----
+describe('canHitPoint ↔ canHit(rect) 端点等价(AI_007 :54030/:56019 形状换写保真)', () => {
+  interface BoxEnt { cx: number; cy: number; w: number; h: number }
+
+  const cases: Array<{ label: string; layout?: (st: World['store']) => void }> = [
+    { label: '开阔直线' },
+    { label: '中线整柱拦截', layout: (st) => { for (let ty = 14; ty <= 19; ty++) st.setTile(16, ty, STONE); } },
+    { label: '半砖/平台不拦', layout: (st) => { st.setTile(16, 16, TILE_BY_KEY['platform']); } },
+    { label: '旁柱不拦', layout: (st) => { for (let ty = 2; ty <= 8; ty++) st.setTile(16, ty, STONE); } },
+  ];
+
+  for (const c of cases) {
+    it(c.label, () => {
+      const w = makeWorld();
+      c.layout?.(w.store);
+      const a: BoxEnt = { cx: 8 * 16, cy: 16 * 16, w: 20, h: 42 };
+      const b: BoxEnt = { cx: 26 * 16 + 8, cy: 16 * 16 + 4, w: 18, h: 40 };
+      const viaRect = canHitRect(
+        w.store, a.cx - a.w / 2, a.cy - a.h / 2, a.w, a.h,
+        b.cx - b.w / 2, b.cy - b.h / 2, b.w, b.h,
+      );
+      const viaPoint = canHitPoint(w.store, a.cx, a.cy, b.cx, b.cy);
+      expect(viaPoint).toBe(viaRect);
+    });
+  }
+});
+
+
+// ---- GetSwingStats/TweakSwingStats 纯函数钉值(NPC.cs:67247-67370;207 盒 32×32)----
+describe('GetSwingStatsAnchor / tweakSwingStats 三带钉值(207 rect=32)', () => {
+  const CX = 1000, PY = 2000;
+
+  it('中带 B(×0.333..×0.666):锚 = centerX+(16−10)×dir / posY+10,无变形', () => {
+    const a = getSwingStatsAnchor(30, 15, 1, 32, 32, CX, PY);
+    expect(a.x).toBeCloseTo(CX + 6);           // (32/2−10)×(+1)——32 不入 >32 档
+    expect(a.y).toBe(PY + 10);                 // itemH=32:无 >32 分档 → 默认 10
+    const r = { x: Math.trunc(a.x), y: Math.trunc(a.y), w: 32, h: 32 };
+    tweakSwingStats(r, 30, 15, 1);
+    expect(r).toEqual({ x: CX + 6, y: PY + 10, w: 32, h: 32 });   // 中段恒原样
+  });
+
+  it('收势带 A(<×0.333):锚 +6/+24 → W→44/H→35/Y+16(dir=1 无回退)', () => {
+    const a = getSwingStatsAnchor(30, 9, 1, 32, 32, CX, PY);
+    expect(a.x).toBe(CX + 6);                  // (16−10)×(+1)
+    expect(a.y).toBe(PY + 24);
+    const r = { x: a.x, y: a.y, w: 32, h: 32 };
+    tweakSwingStats(r, 30, 9, 1);
+    expect(r.w).toBe(Math.trunc(32 * 1.4));    // 44(:67357)
+    expect(r.h).toBe(Math.trunc(32 * 1.1));    // 35(:67359)
+    expect(r.y).toBe(Math.trunc(PY + 24) + Math.trunc(32 * 0.5));
+  });
+
+  it('收势带 A 反向:X 先回退 trunc(W×1.4)−W(:67355-56)', () => {
+    const a = getSwingStatsAnchor(30, 9, -1, 32, 32, CX, PY);
+    const r = { x: a.x, y: a.y, w: 32, h: 32 };
+    tweakSwingStats(r, 30, 9, -1);
+    expect(r.x).toBe(a.x - (Math.trunc(32 * 1.4) - 32));
+  });
+
+  it('尾带 C(≥×0.666,重起手后 ai[1]=AttackTime 不可达,几何仍钉值):反号锚 + W×2/H×1.4', () => {
+    const a = getSwingStatsAnchor(30, 25, 1, 32, 32, CX, PY);
+    expect(a.x).toBe(CX - 10);                 // centerX − (16−6)×(+1)——32 无 >32/>48 档
+    expect(a.y).toBe(PY + 10);                 // itemH=32:全档不命中 → 10
+    const r = { x: a.x, y: a.y, w: 32, h: 32 };
+    tweakSwingStats(r, 30, 25, 1);
+    expect(r.w).toBe(64);                      // ×2
+    expect(r.h).toBe(Math.trunc(32 * 1.4));
+    expect(r.x).toBe(a.x - Math.trunc(32 * 1.2));   // aimDir==1 回退
   });
 });

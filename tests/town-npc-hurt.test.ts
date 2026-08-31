@@ -9,6 +9,43 @@ import { Inventory } from '../src/items/Inventory';
 import { hitTownNpcs } from '../src/entities/projTargets';
 import { TILE } from '../src/core/constants';
 
+// 穿甲接收端（对齐批④）：TownNPC.hurt 契约 = hurt(dmg,kbX,kbY,game,penPercent?,flatPen?)
+// ——Player.cs:44700 FlyMeal penPercent=1f 的受端应用序（npcCheckArmorPenetration
+// 加伤 → CalculateDamageNPCsTake 减防）。护师 def=15（vanilla-npcs.json / NPC.cs:9029）。
+describe('TownNPC.hurt penPercent/flatPen 受端契约', () => {
+  function nurse() {
+    return new TownNPC('nurse', 100 * 16, 99 * 16, new Inventory());
+  }
+  const mkGame = (n: TownNPC) => ({
+    world: new World(200, 200, 100, 'pen-world'),
+    player: { x: -9999, y: -9999, w: 0, h: 0, dead: true },
+    addDamageNumber: () => {}, spawnParticles: () => {}, playSfx: () => {},
+    playSfxFiles: () => {}, critters: () => [], enemies: () => [],
+  }) as never;
+
+  it('缺省参完全向后兼容：def×0.5 减算不变（40−7.5→33）', () => {
+    const n = nurse();
+    n.hurt(40, 0, 0, mkGame(n));
+    expect(250 - n.hp).toBe(33);
+  });
+  it('penPercent=1（FlyMeal 面）：pool=trunc(def×1)=15 ≤ def → 加成 7（=def/2）', () => {
+    const n = nurse();
+    n.hurt(40, 0, 0, mkGame(n), 1);
+    // round(40 + 7 − 7.5) = 40
+    expect(250 - n.hp).toBe(40);
+  });
+  it('pool 超防钳 def/2：flatPen=40 与 pct=1 同值（40>15 → 7）', () => {
+    const n = nurse();
+    n.hurt(40, 0, 0, mkGame(n), 0, 40);
+    expect(250 - n.hp).toBe(40);
+  });
+  it('pct=0.5：pool=trunc(7.5)=7 <15 → 加成 3；round(40+3−7.5)=36', () => {
+    const n = nurse();
+    n.hurt(40, 0, 0, mkGame(n), 0.5);
+    expect(250 - n.hp).toBe(36);
+  });
+});
+
 function makeEnv(npcList: TownNPC[], enemyList: Array<{ x: number; y: number; w: number; h: number }> = [], killGuide = false) {
   const world = new World(200, 200, 100, 'hurt-test');
   for (let x = 20; x <= 180; x++) world.store.setTileSilent(x, 100, 1);

@@ -278,9 +278,11 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
 /** ★独立 pass "Demon And Crimson Altars"（cs:15825-15885，注册序 LivingTreeWalls(15792)
  *  < 本 pass < SurfaceWaterInJungle(15887)）——与上方 runCorruptionPass 内的 placeAltars
  *  （cs:14241，Corruption pass 猩红分支**逐组**祭坛）是原版两处不同的放置，勿再合并：
- *  本 pass 为全图随机撒 (int)(w*h*3.3E-06) 个（4200×1200 → 16），不读 evilZones，
- *  style = crimson?1:0；x∈[281, w-283) 避开中央 45%-55% 带，y∈[⌊ws*2+rock⌋/3,
- *  ⌊rock+(h-350)*2⌋/3)（两界均先 cast 再整除 3）；落点拒绝采样 = oceanDepths(:10978)
+ *  本 pass 为全图随机撒 (int)(w*h*3.3E-06) 个（4200×1200 → 16，★remix×3=48，
+ *  cs:15846-15849），不读 evilZones，style = crimson?1:0；x∈[281, w-283) 避开中央
+ *  45%-55% 带，y 先掷常规窗 [⌊ws*2+rock⌋/3, ⌊rock+(h-350)*2⌋/3)（两界均先 cast 再
+ *  整除 3；remix 时此掷照常入流只作废）再覆掷 remix 窗 Next(100,(int)(h*0.9))
+ *  （cs:15864-15868/15876-15880 双掷入流）；落点拒绝采样 = oceanDepths(:10978)
  *  ∨ 距微光心 < 150(shimmerSafetyDistance :4104) ∨ dualDungeons 界内（秘种子门，
  *  普通世界恒 false）。每坛重试 ≤10000，IsTileNearby(26,3) 无邻坛才 Place3x2，成坛即停。
  *  微光避让门：本管线微光 pass(cs:15256) 仍整体排在 vanillaBiomes 之后（顺序偏差另案），
@@ -294,7 +296,9 @@ export function runAltarsPass(st: TileStore, rng: RNG, gs: GenState): void {
   // ★pass 头 tileSolid 翻转（cs:15831 `Main.tileSolid[484] = false`）——DesertBiome
   //   头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
   flipGenSolid([484], false);
-  const count = Math.trunc(st.w * st.h * 3.3e-06);   // remixWorldGen×3 / dualDungeons÷2 秘种子门不适用
+  const remixFlag = !!gs.seedFlags.remix;
+  let count = Math.trunc(st.w * st.h * 3.3e-06);
+  if (remixFlag) count *= 3;                         // ★IIIII90 cs:15846-15849：remix×3（16→48）
   const drunkA = !!gs.seedFlags.drunkWorld;
   const styleOf = (x: number): number => {
     if (!drunkA) return gs.crimson ? 1 : 0;
@@ -307,18 +311,29 @@ export function runAltarsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const yLo = Math.trunc(gs.worldSurface * 2 + gs.rockLevel) / 3 | 0;   // (int)(ws*2+rock)/3
   const yHi = Math.trunc(gs.rockLevel + (st.h - 350) * 2) / 3 | 0;      // (int)(rock+(h-350)*2)/3
   const midLo = st.w * 0.45, midHi = st.w * 0.55;
+  // ★IIIII90（cs:15864-15868）y 掷次序 1:1：先掷常规窗 Next(yLo,yHi)，remix 分支
+  //   再覆掷 Next(100,(int)(h*0.9)) —— **两掷都进流**（覆掷只是改值不退骰），拒绝
+  //   重采样内同样双掷（cs:15876-15880）。remix 世界祭坛全域 y∈[100,h*0.9)。
+  const rollY = (): number => {
+    const yN = rng.int(yLo, yHi - 1);                              // Next(yLo, yHi)
+    return remixFlag ? rng.int(100, Math.trunc(st.h * 0.9) - 1) : yN;
+  };
+  // ★IIIII90 取证钩（缺省零开销）：候选级探针（一次性诊断用，tools/_iii90al 装配）
+  const P90 = (globalThis as { __swAltarProbe?: Array<[number, number]> }).__swAltarProbe;
   for (let i = 0; i < count; i++) {
     for (let j = 0; j < 10000; j++) {
       let x = rng.int(281, st.w - 284);                              // Next(281, w-3-280)
       while (x > midLo && x < midHi) x = rng.int(281, st.w - 284);    // 避中央带（重掷仅 x）
-      let y = rng.int(yLo, yHi - 1);                                 // Next(yLo, yHi)
-      // 拒绝采样（cs:15847-15865）：两点全重掷（x 先过中央带门再掷 y）
+      let y = rollY();
+      // 拒绝采样（cs:15869-15881）：两点全重掷（x 先过中央带门再掷 y，remix 双掷照常）
       while (oceanDepths(st, gs, x, y)
         || (gs.shimmerX >= 0 && Math.hypot(x - gs.shimmerX, y - gs.shimmerY) < SHIMMER_SAFETY)) {
+        P90?.push([x, y]);
         x = rng.int(281, st.w - 284);
         while (x > midLo && x < midHi) x = rng.int(281, st.w - 284);
-        y = rng.int(yLo, yHi - 1);
+        y = rollY();
       }
+      P90?.push([x, y]);
       if (!isTileNearby(st, x, y, ALTAR, 3)) place3x2(st, x, y, ALTAR, styleOf(x));
       if (st.type[st.idx(x, y)] === ALTAR) break;                    // 成坛即停（:15877）
     }

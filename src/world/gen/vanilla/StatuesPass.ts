@@ -305,6 +305,14 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   let num = 0; // 样式序游标(cs:16970 顺序轮换)
   const yMin = Math.floor((gs.worldSurface * 2 + gs.rockLevel) / 3);
+  // ★★★IIIII95（Terarria1458 cs:17004-17008 / cs:17018-17022）：remix 臂 Y 域重掷——
+  //   与 LifeCrystals(:16903-16905 覆写型)不同,本 pass 掷后【照掷照弃】(返回值未接),
+  //   首掷与 oceanDepths 回避环内每次重掷各补一骰（remix-only 流位双支）。此前漏
+  //   移植 → REMIX 每候选少耗 1 骰、雕像落点全漂（#58 T105↔0×1000 型双向位移）。
+  const remixStatueY = !!gs.seedFlags.remix;
+  const __dbg = (globalThis as { __swStatDbg?: Record<string, number> }).__swStatDbg;
+  const dbgReset = () => { if (__dbg) { __dbg.attempt = 0; __dbg.oceanLoop = 0; __dbg.placeFail = 0; } };
+  dbgReset();
   for (let i = 0; i < count; i++) {
     if (num >= STATUE.length) num = 0;
     const [sheet, style] = STATUE[num];
@@ -313,15 +321,24 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
     while (!done) {
       let x = rng.int(20, w - 21);
       let y = rng.int(yMin, h - 301);
+      if (remixStatueY) rng.int(Math.trunc(gs.worldSurface), h - 401);   // :17006 照掷照弃
       // 海洋回避(cs:16989 oceanDepths)——y > oceanLevel 直接 false 必须前置：
       // 否则深层海滩列（y 超过海平面线）会被误拒重掷
       const oceanTop = (gs.worldSurface + gs.rockLevel) / 2 + 40;
-      let guard = 100;
-      while (y <= oceanTop && (x < gs.beachDistance || x > w - gs.beachDistance) && guard-- > 0) {
+      // ★IIIII95 结构精确化（cs:16986-17000 原序）：num8 先减、归零即 break【不重掷】，
+      //   其后才重掷并补 remix 弃骰；旧式 guard 在条件里先耗一位与原版 100 次上界错一。
+      let num8 = 100;
+      for (;;) {
+        if (!(y <= oceanTop && (x < gs.beachDistance || x > w - gs.beachDistance))) break;
+        num8--;
+        if (num8 <= 0) break;
         x = rng.int(20, w - 21);
         y = rng.int(yMin, h - 301);
+        if (remixStatueY) rng.int(Math.trunc(gs.worldSurface), h - 401);   // :17020 同上
+        __dbg && (__dbg.oceanLoop = (__dbg.oceanLoop ?? 0) + 1);
       }
-      if (guard <= 0) { done = true; break; }
+      if (num8 <= 0) { done = true; break; }
+      __dbg && (__dbg.attempt = (__dbg.attempt ?? 0) + 1);
       // 向下扫到首个 active 格,雕像坐其上一格(cs:17014-17018)
       while (y < h && !st.flags[st.idx(x, y)]) y++;
       if (y >= h) { done = true; break; }

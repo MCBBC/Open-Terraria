@@ -218,19 +218,20 @@ describe('召唤兽朝向/旋转语义（镜像修复回归）', () => {
     expect(s.y + s.h / 2).toBeCloseTo(m.cy - 8, 6); // 手部高度 −8（曾缺此偏移）
   });
 
-  it('弩车哨兵 677 弩箭 680 锚点 = 本体 Center−8（AI_134 :65590/:65693）', () => {
+  it('弩车哨兵 677 弩箭 680 锚点 = Center+(0,-4)−8（批②:1457 :69597-9599/65717-65719 '
+    + 'center.Y−4 字面怪癖——仅 677 不随方向镜像）', () => {
     const { hooks, player, projectiles } = makeHooks([mkEnemy(1, 60 * 16 + 300, 90 * 16 - 30)]);
     // 哨兵 16×16 落在地面行(100)之上——避免下落漂移干扰锚点断言
     const m = new MinionProj(player.cx, 100 * 16 - 16, 677, 20, 6, true, 0, false, () => player);
     const before = projectiles.length;
-    // 初冷 120 + 开火 12t（SentryCooldown 后第 12 帧出弹）
+    // 初冷 + 开火状态机（出弹帧 ai[1]==num2=num6=5，旧"12t"是 num2 初值误读）
     for (let i = 0; i < 200; i++) m.fixedUpdate(1, hooks);
     const shots = projectiles.slice(before).filter((e): e is Arrow => e instanceof Arrow);
     expect(shots.length).toBeGreaterThanOrEqual(1);
     const s = shots[0];
     expect(s.projId).toBe(680);
     expect(s.x + s.w / 2).toBeCloseTo(m.cx, 6);     // 原版 center=base.Center（曾 y+20 左上角语义偏半格）
-    expect(s.y + s.h / 2).toBeCloseTo(m.cy, 6);
+    expect(s.y + s.h / 2).toBeCloseTo(m.cy - 4, 6); // ★Y−4 仅 677（2026-08-31 批②接入）
   });
 
   it('冰九头蛇哨兵 308 冰弹 309 按 14×14 判定盒居中（309 SetDefaults）', () => {

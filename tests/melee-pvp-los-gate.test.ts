@@ -115,6 +115,8 @@ function pvpShell() {
   g.net = {
     active: true,
     policy: { pvpAllowed: true },
+    players: new Map(),
+    getProxyPvpImmuneRemaining: () => 0,
     sendStrikePlayer: (...args: [number, number, number, number, number, number]) => { sent.push(args); },
   };
   return { g, player, sent };
