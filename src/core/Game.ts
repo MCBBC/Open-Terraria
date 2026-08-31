@@ -451,6 +451,7 @@ import {
   nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx,
   moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx,
   snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor,
+  paladinsShieldHitFx,
 } from '../fx/orchestraFx';
 import { type InfoAccCtx, mphOf } from '../stats/InfoAccs';
 import { npcRarityOf } from '../data/vanillaNpcs';
@@ -4633,6 +4634,7 @@ export class Game implements GameHooks {
       snowTileCount: 0,
       bossDanger: false,
       waterStyle: 0,
+      shimmerAlpha: 0,
       sandstormVisuals: false,
       desertSandTiles: 0,
       splashDust: (x, y, rvx, rvy, waterStyle) => {
@@ -14705,9 +14707,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 默认魔法路径曾硬编码 pierce 1）、extraUpdates 2/4 与 timeLeft 600 由弹表驱动、
         // 点光 0.75（:1026/:1710）
         if (cw.shoot === 20 || cw.shoot === 88) {
-          console.log('[swZap]', 'ENTERED', 'shoot=' + cw.shoot, 'ang_deg=' + Math.round(ang * 180 / Math.PI)); //$TEST
           const zapA = this.resolveShotAnchor(def.key, ang);
-          console.log('[swZap]', 'vel=', Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed); //$TEST
           const zap = new Arrow(zapA.x, zapA.y,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback, cw.shoot, null,
@@ -19891,6 +19891,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       hooks.desertSandTiles = this.scene.desertSandTileCount;
       // 雨滴列 = waterStyle×3+rand(3)（Rain.cs:165/210）+ 溅花尘 dustWater()（Dust.cs:405）
       hooks.waterStyle = this.renderer.waterStyle;
+      // 微光雨门/淡出（Rain.cs:32 + Main.cs:39488；monoFilters 逐帧同源值）
+      hooks.shimmerAlpha = this.renderer.monoFilters.shimmerAlpha;
     }
   }
 
@@ -23264,6 +23266,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     } else if (type === ParticleOrchestraType.StormLightning) {
       // Spawn_StormLightning 主放电——proj1457 bolt 折线渲染为本仓原生承担（M 级⑥清偿）;
       // 占位注册面：远端语义型载荷静默消费（不重复生成折线）
+    } else if (type === ParticleOrchestraType.PaladinsShieldHit) {
+      // Spawn_PaladinsShieldHit :903-973——PositionInWorld=(受击槽,持盾槽) int 对
+      paladinsShieldHitFx(this, Math.trunc(s.posX), Math.trunc(s.posY));
     } else if (type === ParticleOrchestraType.ArcSurge) {
       // Spawn_ArcLightning :1245-1321——(moveX,moveY)=玩家锚,(posX,posY)=弹体终点
       arcSurgeFx(this, s.moveX, s.moveY, s.posX, s.posY, s.invoker, s.uniqueInfo >>> 0);

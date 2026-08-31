@@ -64,6 +64,9 @@ export interface WeatherFxHooks {
    *  Dust.dustWater() :405-421 溅花尘映射）——★曾硬编码纯水 0-2，雪原/丛林等
    *  雨滴与溅花全部用错列（2026-09-01 与 dust 268 同批同族修正） */
   waterStyle: number;
+  /** Main.shimmerAlpha（Renderer.monoFilters.shimmerAlpha 同源逐帧值）——
+   *  MakeRain 停发门（Rain.cs:32）+ DrawRain 色淡出（Main.cs:39488） */
+  shimmerAlpha: number;
   /** 雨滴落水花（Rain.Update :125-134）：真 dust（dustWater()）非色方块——
    *  位置已按原版做完 −velocity、X−2/Y+2；rvx/rvy = 雨滴速度（dust.velocity 链用） */
   splashDust(x: number, y: number, rvx: number, rvy: number, waterStyle: number): void;
@@ -134,7 +137,7 @@ export class WeatherRenderer {
     const w = this.weather;
     const hooks = this.hooks;
     if (!w || !hooks || w.cloudAlpha <= 0 || hooks.atmo < 0.4) return;
-    if ((w.shimmerAlpha ?? 0) > 0) return;       // Main.shimmerAlpha 门（Rain.cs:32）
+    if (hooks.shimmerAlpha > 0) return;          // Main.shimmerAlpha 门（Rain.cs:32）
     let num = (viewW / 1920) * 25;               // MaxWorldViewSize.X≈1920 的比例
     num *= 0.25 + 1 * w.cloudAlpha;              // Rain.cs:28
     if (hooks.bossDanger) num = Math.max(1, num * 0.05);
@@ -434,7 +437,7 @@ export class WeatherRenderer {
         // 光照着色（原版 GetColor×0.85）：量化 8 级 × 3 型预烘焙乘色条（multiply+destination-in），
         // 每滴一次 drawImage——精确到 1/8 亮度量化，替代旧黑罩近似
         const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
-        const v = Math.round((lvl / 7) * 0.85 * 255 * (1 - (w.shimmerAlpha ?? 0)));   // DrawRain :39488 ×(1−shimmerAlpha)
+        const v = Math.round((lvl / 7) * 0.85 * 255 * (1 - hooks.shimmerAlpha));   // DrawRain :39488 ×(1−shimmerAlpha)
         const tinted = tintedRainStrip(tex!, d.type, v);
         if (tinted) {
           ctx.drawImage(tinted, 0, 0, 2, 40, 0, 0, 2 * d.scale, 40 * d.scale);

@@ -310,6 +310,7 @@ function slopeCollide(
   let bestDrop = 0;      // 天花板最大下推量
   let bestSnapY = -1;    // ★面随下贴候选（对角线目标 y；>0 = 有下贴）
   let bestSnapGap = 17;  // 脚底到对角线的正距离（越小越优先）
+  let positionChanged = false;  // 贴合是否实际移动了 body（消费方 Y 冻结判定）
   // ★贴地前瞻行（+1）：跨坡格交界时脚底尚未探入下一行、旧格又已水平出窗——
   // 两候选皆不可见的裸奔缝（v5 探针 t47 定案,每列一次 5 帧空簇的根源）。
   // 仅贴地下行时多扫一行,让下一列对角线提前一帧进入候选窗。
@@ -328,7 +329,12 @@ function slopeCollide(
       // wasGround + vy≥0 + !dropThrough + gap∈(0.05,17px)(=StepDown 吸附窗界
       // Collision.cs:3629)；线 = vy0 + num4(num4 按左/右缘进深钳 [0,TILE],
       // tip-over 场景 num4=0 ⇒ 线=格顶,gap≈0 防误拉)；候选取最贴近脚下者。
-      if (wasGround && b.vy >= 0 && !b.dropThrough && (slope === 1 || slope === 2)) {
+      //   ★上行排除门（2026-09-01 用户日志「上坡一段后掉落」定罪）：爬升方向
+      //   与本坡下落向相反时（slope1 向左爬 / slope2 向右爬），身后仍重叠的
+      //   低位格会持续发候选，把爬势按帽速逐帧拽回低线→爬升停滞致脱梯坠落。
+      //   日志实录：L行 dx-26~79 同帧 dy+16~30 的反向拖拽段。
+      if (wasGround && b.vy >= 0 && !b.dropThrough && (slope === 1 || slope === 2)
+        && !((slope === 1 && b.vx < -0.01) || (slope === 2 && b.vx > 0.01))) {
         const n4s = Math.max(0, Math.min(TILE,
           slope === 1 ? b.x - vx0 : vx0 + TILE - (b.x + b.w)));
         const gapS = vy0 + n4s - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入
@@ -408,6 +414,7 @@ function slopeCollide(
     }
     if (!blocked) {
       b.y = ny;
+      positionChanged = true;
       if (b.vy > 0) b.vy = 0;
       // ★onGround 仅下落/静止贴合置位（原版 velocity.Y==0 落地语义）：上升期（vy<0）
       //   空中经过坡面格的贴合不置——否则裸装半空再按跳会走地面跳跃门=免费二段跳
@@ -457,6 +464,7 @@ function slopeCollide(
     }
   }
   if (bestDrop > 0) {
+    positionChanged = true;
     // 下推守卫:推离后不能嵌进下方实心(对称于抬升守卫)
     const ny = b.y + bestDrop;    let blocked = false;
     const bx0 = Math.floor(b.x / TILE), bx1 = Math.floor((b.x + b.w - 0.01) / TILE);
@@ -596,12 +604,13 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   const feetEntry = b.y + b.h;
   const vyEntry = b.vy;
   b.vyEntry = vyEntry; b.feetEntry = feetEntry;
-  // ★★2026-08-31 根治“阻尼式卡进斜坡”：贴合挪到分轴【之前】（原版顺序——
-  //   TileCollision 内 SlopeCollision 段(:1796-2036)先于 Y/X 扫描）。旧序 X 扫描
-  //   在身体尚未抬升时判定，坡面放行门(feet-|vx|<=top+16 且边缘条件)在
-  //   爬坡/下坡组合下失败 → 拦截+回推 → 棘轮式 -16px 阻尼卡进（实测 11+ tick
-  //   误差 -16 恒定）。新序贴合先抬到当前坡面 → X 扫描看到干净脚下 → 平滑爬升。
-  const slopePreApplied = slopeCollide(b, world, feetEntry, vyEntry, wasGround);
+  // ★★2026-08-31 终版：贴合在分轴【前】+ 贴合后 dy=0（分轴 Y 不再推移）。
+  //   旧序（轴后贴合）棘轮阻尼（-16px 恒定）;首版重排序（轴前贴合但分轴仍推）
+  //   正反馈弹射（±40-90px 传送）。根因=贴合定位坡面后，分轴 Y 仍按原始重力
+  //   dy 推移 → 身体被推离坡面 → 下一帧再贴回 → 循环。
+  //   修=贴合后 dy=0：坡面贴合即最终 Y 定位（等同原版 SlopeCollision 先行、
+  //   Y-sweep 见 vy=0 无附加位移）。X 分轴照常（行走不受影响）。
+  //   面随 assist 的 dy+=|dx| 已被贴合本身覆盖（贴合=定位在坡面上）。
   const maxStep = 8;
   const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / maxStep));
   for (let i = 0; i < steps; i++) {
@@ -611,8 +620,8 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     if (hitY) { b.collideY = true; dy = 0; }
     if (dx === 0 && dy === 0) break;
   }
-  // ★双相贴合·后补相（captureOnly=true：只做沉入抬升，不发面随下贴候选防级联）
-  if (!slopePreApplied) slopeCollide(b, world, feetEntry, vyEntry, wasGround, true);
+  // ★轴后贴合（稳定序）+ 振幅限幅 + G2 + collideY：分轴架构下最稳组合
+  slopeCollide(b, world, feetEntry, vyEntry, wasGround);
   unembedPass(b, world);
 }
 

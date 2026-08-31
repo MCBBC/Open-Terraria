@@ -24,7 +24,7 @@ const out = await page.evaluate(async () => {
       { sandstorm: { happening: true, severity: 0.8, timeLeft: 100, intendedSeverity: 0.8 }, cloudAlpha: 0, windSpeedCurrent: 1, raining: false },
       {
         lightAt: () => light, atmo: 1, snowRatio: 0, snowTileCount: 0, bossDanger: false,
-        waterStyle: 0,
+        waterStyle: 0, shimmerAlpha: 0,
         emitSand() {}, splashDust() {}, sandstormVisuals: true, desertSandTiles: 500,
         sandColors: () => [{ color: '#C8A014', weight: 10 }],
       },

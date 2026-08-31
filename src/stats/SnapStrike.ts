@@ -35,10 +35,14 @@
 //  弹 1121/1131/1132 timeLeft=2 速 UnitY×0.1（:14413-14416）——本仓 Arrow 直生近似。
 //  ★1457 编排器对齐（2026-08-23）：命中尘 = Spawn_SnappingStone{,Melee,Summon}
 //  （ParticleOrchestrator.cs:593-812）Dust 段 1:1 入 vanillaDust 池（见
-//  snapStrikeDust）；FadingParticle/PrettySparkle 环带 + 三音效登记未接（编排器
-//  粒子类型本仓无池；命中尾 Item30/Item20/Item43 三连 PlaySound 同批登记,音频通道
-//  补齐时统一走该登记,勿在此散写合成兜底）。受击者自身脉冲（Projectile.cs:14432-
+//  snapStrikeDust）。受击者自身脉冲（Projectile.cs:14432-
 //  14437 victim.Center,num11=盒径/2 钳 100）已补（R4-33,蓝队）——victimBox 经 ctx 传。
+//  ★B2②（2026-08-31）：命中尾 Item30/Item20/Item43 三连 PlaySound（Projectile.cs
+//  :14453-14463 尾节拍,kind 分支各一声,零目标也播）已接线于 trySnapStrike 尾——
+//  原「三音效同批登记未接」状态退役。节拍面澄清：尾三连是【每次触发一声】的原版
+//  显式 PlaySound（decompiled 直证）；环带侧的命名轨音（L5 批在 snappingStoneRingFx
+//  内接 Item_72/pyroclastic_stone/armlet_of_ruin 随逐弹 Spawn 播）与其为两处不同
+//  节拍位,若两侧同源成立则并存非重复（orchestrator 源不在本反编译树,L5 批归属其批）。
 //  ★F3 接线台账（蓝队四轮）：projectileSnapStrikeBonus 为弹幕侧统一双支入口；
 //  971/975 飞行段原版本体即零伤害结算面（vanilla Damage() 无 971/975 特案,两弹型
 //  也不在本仓任何结算站出现）⇒ "无可接面"判定维持留档,不接线。
@@ -102,6 +106,14 @@ function findTargetWithLineOfSight(
     best = t;
   }
   return best;
+}
+
+/** ★B2② 音高复合卷（LSP.cs:640 case2 default 支 Next(-6,7)×0.01 离散均匀 ±0.06 +
+ *  LSP.cs:1417 尾部显式 pitchOffset 叠加,Clamp(-1,1) 域内无截断影响）。
+ *  Main.rand.Next 整型均匀离散用 floor(rand×13)-6 重建同一支集（仓内 rand=连续 [0,1)
+ *  惯例;13 态等概率）。独立小卷不进 Sfx 全局表——见尾节拍注的表污染论证。 */
+function snapStrikeTailPitch(offset: number): number {
+  return offset + (Math.floor(Math.random() * 13) - 6) * 0.01;
 }
 
 /** TryMakingSnappingStoneStrike（:14347-14465）。victim = 本次受击者（跳过）;
@@ -224,6 +236,25 @@ export function trySnapStrike(
     const vic = (game.enemies() as unknown as SnapStrikeTarget[])
       .find((t) => t?.id === victimId && !t.dead);
     if (vic) vic.onFire3T = Math.max(vic.onFire3T ?? 0, 3);
+  }
+  // ★B2②（2026-08-31）命中尾三音效接线：三连 PlaySound 是本函数【尾节拍】——扫描/
+  //   加伤/上 buff 之后按 kind 分支各发一声（Projectile.cs:14453-14463）：拍击石
+  //   Item30(pitchOffset .3)/焰爆石 Item20(pitchOffset .08)/毁灭臂镗 Item43
+  //   (pitchOffset .3)，vol=原版 volumeScale(0.08/满响/0.08——:14458 第三实参是
+  //   pitchOffset 非音量，重载序 SoundEngine.cs:88)。位置 = Main.player[owner]
+  //   MountedCenter；冷却内不进函数、门关不进函数，零目标照样播（原文无条件尾段）。
+  //   音高复合 = LSP case2 默认抖动 Next(-6,7)×0.01（LegacySoundPlayer.cs:640 default 支,
+  //   style 20/30/43 均无特例）+ 原文 pitchOffset 尾部叠加（LSP.cs:1417 Instance.Pitch
+  //   += offset）→ 本地合卷经【显式】pitch 直传：playWavFile 显式参跳 PITCH_CASE 表，
+  //   故不吃全局 Item 表抖动——严禁改成表登记（PITCH/FILE_CASE_VOL 键全局共享,
+  //   Item_20/43 是多件武器 UseSound 同文件,表改会毒化全武器库音色）。
+  const ocx = owner.mountedCenter.x, ocy = owner.mountedCenter.y;
+  if (kind === 0) {
+    game.playSfxWav?.('Item_30', 0.08, ocx, ocy, snapStrikeTailPitch(0.3));
+  } else if (kind === 1) {
+    game.playSfxWav?.('Item_20', 1, ocx, ocy, snapStrikeTailPitch(0.08));
+  } else {
+    game.playSfxWav?.('Item_43', 0.08, ocx, ocy, snapStrikeTailPitch(0.3));
   }
   return bonus;                                 // dmg += num14（:14457 由调用站并入实伤参）
 }

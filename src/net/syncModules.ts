@@ -326,6 +326,7 @@ export const enum ParticleOrchestraType {
   ClassyCane = 55,          // 税官杖铜币命中小奖纸屑（Player.cs:44726-44732 clientOnly:false）
   PaladinsHammerShockwave = 68,  // 圣骑锤撞墙冲击波（P.cs:19649-19661;MovementVector=Size）
   // ---- 台账 L3 清偿批（2026-08-31）----
+  ChlorophyteLeafCrystalPassive = 16, // 叶绿晶叶驻留绿弧（视觉纯函数 fx/orchestraFx.chlorophyteLeafCrystalPassiveFx 备档;弹体本体归叶绿 SetBonus 代理域——错峰约定）
   ChlorophyteLeafCrystalShot = 17,  // 叶绿叶弹轨迹 streak（Projectile.cs:28285 aiStyle43
                                     //   每子步请求,clientOnly:false;UniqueInfoPiece=hue byte,
                                     //   MovementVector=弹速;视觉本体 fx/orchestraFx.leafCrystalShot,
@@ -403,6 +404,22 @@ export const enum ParticleOrchestraType {
   SnappingStoneRecharge = 79,     // 充能三连（Player.Update_SnappingStone :28607/:28612/:28617
   PyroclasticStoneRecharge = 80,  //   BroadcastOrRequest;Player.ts 冷却归零拍接线+invoker 锚消费）
   ArmletOfRuinRecharge = 81,
+  // ---- 值域补全（终态清单收口——无派发臂的型仅作值域/枚举注册面）----
+  FlameWaders = 1,          // 火行者靴行走焰（P.EmitFlameWaderParticles 同链本体已由
+                            //   FlameParticles 域承担,编排面不重复接线）
+  StellarTune = 2,          // 星律吉他命中星屑（Projectile.cs:72826 clientOnly:true;
+                            //   SparkleGuitarProj 域既有近似视觉,不重复接线）
+  WallOfFleshGoatMountFlames = 3,  // WoF 山羊坐骑火焰（Mount.cs:3940 clientOnly:true;
+                            //   本仓 FlameParticles=唯一移植的编排视觉,L5 前批同口径）
+  DeadCellsBarnacleShotFiring = 36,   // 藤壶射击（P.cs:27036 clientOnly:true——挂点父弹
+                            //   缺省,producer 无锚登记;FX 纯函数在 fx/orchestraFx 备档）
+  ShadowOrbExplosion = 38,  // 暗影球爆炸（Producer=暗影球破坏事件,域内既有近似）
+  DeadCellsBeheadedEffect = 40,       // 斩首效应（Player.cs:24503 clientOnly:true,
+                            //   死亡细胞种子联动域缺 producer 锚登记）
+  DeadCellsBarrelExplosion = 42,      // 木桶爆（≈Arrow 1023 killNow 内联近似,前批口径维持）
+  DeadCellsMushroomBoiTargetFound = 43,  // 蘑菇小伙伴锁定图标（mushroomBoiTargetFoundFx 已接 34 型旁路）
+  FakeFish = 51,            // 假鱼巡游（保持 FakeFish.ts 局部池——密度门同池语义,评估留局部）
+  SporeCloud = 73,        // 叶绿孢子云（Player.cs:26186/NPC.cs:92890 clientOnly:true;本仓孢子云弹 1128 自带视觉——占位注册不重复生成）
 }
 
 /** ParticleOrchestraSettings（21B：Vector2 pos + Vector2 move + i32 unique + u8 invoker） */

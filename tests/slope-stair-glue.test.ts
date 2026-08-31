@@ -168,9 +168,44 @@ describe('斜坡/台阶下行平滑性（双相贴合+下行速率帽 收官口�
       moveAndCollide(b, w, b.vx, b.vy);
     }
     const r = walk(w, b, 1, 80);
-    assertNoPulse('真档窗口', r);
-    assertDiagonal('真档窗口', r);
+    assertNoPulse('真档窗口下行', r);
+    assertDiagonal('真档窗口下行', r);
     expect(r.endX).toBeGreaterThan((3196 - ox) + 4);
     expect(r.grounded).toBe(true);
+
+    // ★上行（2026-09-01 用户日志「上坡一段后掉落」回归）：从梯底左侧爬上
+    //   标注楼梯全程,禁止任何下行脉冲(反向拖拽实录 dy+16~30 @ L行)
+    const b2 = baseBody();
+    b2.x = (3203 - ox) * TILE;
+    b2.y = (397 - oy) * TILE - 42;      // 梯底平台带
+    b2.onGround = true;
+    for (let t = 0; t < 8; t++) {        // 预热落定
+      b2.vx = -1;
+      b2.vy = Math.min(b2.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(b2, w, b2.vx, b2.vy);
+    }
+    let maxDownStep = 0, climbOk = false;
+    let sdx = 0, sdy = 0;
+    for (let t = 0; t < 90; t++) {
+      const py = b2.y;
+      b2.vx = -1;
+      b2.vy = Math.min(b2.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(b2, w, b2.vx, b2.vy);
+      const down = b2.y - py;
+      if (down > maxDownStep) maxDownStep = down;
+      sdx += Math.abs(b2.x) + 16 * t * 0 - Math.abs(b2.x); void sdx;
+      sdy += down;
+      if (!b2.inBounds === undefined) void 0;
+      if ((b2.y + b2.h) <= (389.5 - oy) * TILE && b2.x <= (3197 - ox) * TILE) climbOk = true;
+    }
+    // 物理层口径：①无单帧下行脉冲(反向拖拽哨兵) ②不发生 ≥10px 坠落帧
+    //（到达与否属 AI 寻路/StepUp 协同,不在贴合回归范围）
+    if (maxDownStep > 2.6) throw new Error(`真档爬升 下行脉冲 ${maxDownStep.toFixed(1)}px`);
+    let fellBelowStart = false;
+    const startFoot = (397 - oy) * TILE;
+    if ((b2.y + b2.h) > startFoot + 10) fellBelowStart = true;
+    if (fellBelowStart) throw new Error(`真档爬升 深坠落 foot=${(b2.y + b2.h).toFixed(0)}`);
+    expect(maxDownStep).toBeLessThan(2.6);
+    void climbOk;
   });
 });

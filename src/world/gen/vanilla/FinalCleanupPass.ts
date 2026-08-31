@@ -822,7 +822,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   竖组完整性 + 上锚门整组杀——g #105 (564,328) 孤儿旗帜实证（此前仅 LiquidSim
     //   前置扫镜像覆盖沉降级联，引擎主臂缺席）。稀疏模式同列豁免见上方 frameSparse 清单。
     case 91: checkBannerSweep(st, ctx, x, y); return true;
-    case 518: checkLilyPadSweep(st, ctx, x, y); return true;
+    case 518: if (!((__swProcessEnv ?? {}).SW_I126_LPY_OFF === '1')) checkLilyPadSweep(st, ctx, x, y); return true;
     case 519: checkCatTailSweep(st, ctx, x, y); return true;
     case 549: checkSeaweedSweep(st, ctx, x, y); return true;
     case 571: checkBambooSweep(st, ctx, x, y); return true;

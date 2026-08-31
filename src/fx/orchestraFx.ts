@@ -828,8 +828,8 @@ export function arcSurgeFx(
 export function paladinsShieldHitFx(
   game: GameHooks, targetSlot: number, shieldSlot: number, rng: Rng = Math.random,
 ): void {
-  const a = orchestraPlayerAnchor(game, targetSlot);
-  const b = orchestraPlayerAnchor(game, shieldSlot);
+  const a = orchestraPlayerAnchor(game, targetSlot < 0 ? 255 : targetSlot);
+  const b = orchestraPlayerAnchor(game, shieldSlot < 0 ? 255 : shieldSlot);
   for (const p of [a, b]) {
     if (!p) continue;
     for (let i = 0; i < 4; i++) {

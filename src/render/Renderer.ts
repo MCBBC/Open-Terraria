@@ -470,7 +470,9 @@ function sparkleTintedTex(rgb: readonly [number, number, number]): HTMLCanvasEle
       d[i] = d[i] * a * rgb[0];
       d[i + 1] = d[i + 1] * a * rgb[1];
       d[i + 2] = d[i + 2] * a * rgb[2];
-      d[i + 3] = 255;   // 主画布不透明，lighter 只取 rgb——alpha 摊平无副作用
+      // ★保留真实 alpha（2026-08-31 终修）：曾摊平 255 = 空区变"rgb=0∧a=255"画布，
+      //   任何非 lighter 合成路径（状态泄漏/HMR 半旧模块）都会把臂包围盒画成暗底
+      //   = 用户三轮截图的黑十字。空区 a=0 后【任何】路径数学上零贡献。
     }
     cx.putImageData(id, 0, 0);
   } catch {

@@ -76,7 +76,23 @@ export const PROTO_MAGIC = 'SW1';
  *       降级矩阵（双向）：新 client 发 → 旧 server readPlayerHurt/writePlayerHurt
  *       整字节透传 flags → 旧 client 仅读 bit0/bit1 = 飘字样式不受影响;
  *       旧 client 发 → flags 无 bit2 → 新收端不抽队不充能 = 甲虫少记账（保守
- *       欠计方向——宁可漏记不可把他人伤记进自己壳,与⑤TTL 弃账同向）。*/
+ *       欠计方向——宁可漏记不可把他人伤记进自己壳,与⑤TTL 弃账同向）。
+ *    i) ★B1 钳位纯度批（2026-08-31,纯数值面裁决,不改线格式不升版）：全族 dmg 字段
+ *       的原版语义 =【short 直写回绕】(SendData case 117 writer.Write((short)number2,
+ *       NetMessage.cs:1447;读侧 ReadInt16 后零改写直入 Hurt,MessageBuffer.cs:3888/
+ *       3894)。msg117 写层自造 min(9999) 移除(protocol.writePlayerHurt,同 F-3①
+ *       notePendingMeleeHit 先例「自设帽=新发明近似」);msg27 中继 dmg 钳移除=纯透传
+ *       (原版弹幕快照案 MessageBuffer.cs:1701+1744 读值即赋、TrySendData 复播零改写;
+ *       "超高 dmg 秒杀访客"攻击面已由 hostile 剥除墙 + v7 InOpposingTeam/victim-settles
+ *       双门禁消化,见 room.ts 该处注)。msg42/44 服务器上帽【保留】但定性改挂「策略层
+ *       (滥用治理)」与协议语义切割：其结算面是本仓 client-authority 模型独有的访客直报
+ *       伤害通道(原版 NPC/PvP 伤害均在服务器本地计算,无此暴露面),帽是安全网不是线格式
+ *       契约。双向兼容矩阵：新端发 short 回绕帧 → 旧 server 中继仍钳 ≤9999(msg42/44
+ *       老进程) = 高伤意向被剥到 9999,展示/意向欠额,无崩溃无错账;新 server 透传 × 旧
+ *       client 自钳写 ≥9999 封顶输入 = 矩阵退化为恒等;回绕域仅由脏输入可达,接收端按
+ *       各自合约清洗（msg117 脏帧整拒,msg44 由被击端本地门禁兜底）。Game.
+ *       reportNonPvpPlayerHurt 上游 min(9999)(:2786) 在 Game.ts 属权外未动——实扣
+ *       ≤maxHp 下永不绑定,残余为恒等路径。 */
 export const PROTO_VER = 7;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
@@ -624,10 +640,19 @@ export interface PlayerHurtMsg {
 
 export const PLAYER_HURT_LEN = 13; // u8 + i16 + f32*2 + i8 + u8
 
+/** ★B1 钳位纯度批（2026-08-31）：写层【无钳】= short 直写回绕语义。
+ *  原版 SendData case 117 对 dmg 的唯一编码动作是 `writer.Write((short)number2)`
+ *  （NetMessage.cs:1447，SendPlayerHurt :2615 族同式）——>32767 按 unchecked short
+ *  回绕、<−32768 同理；此后路径再无任何数值改写（收端 ReadInt16 直入 Hurt,
+ *  MessageBuffer.cs:3888/:3894）。本仓曾自造 min(9999) 上帽 = 既非原版语义也非
+ *  策略面（msg117 全链只产飘字展示,零 HP 结算后果）——按 F-3① notePendingMeleeHit
+ *  先例「自设帽=新发明近似」移除。NetWriter.i16 用 setInt16,超界值 ToInt16 截断回绕,
+ *  与 C# unchecked (short) 强转逐字节同型。实扣值域合约见 readPlayerHurt 注：
+ *  合法生产面 dmg∈[1..maxHp]（hp 减量被残血钳小）,回绕域对合法流量不可达。 */
 export function writePlayerHurt(h: PlayerHurtMsg): Uint8Array {
   const w = new NetWriter(Msg.PlayerHurt);
   w.u8(h.slot & 0xff);
-  w.i16(Math.max(-32768, Math.min(9999, h.dmg)));
+  w.i16(h.dmg);
   w.f32(h.x); w.f32(h.y);
   w.i8(Math.max(-1, Math.min(1, h.dir | 0)));
   w.u8(h.flags & 0xff);
@@ -641,7 +666,15 @@ export function readPlayerHurt(r: NetReader): PlayerHurtMsg | null {
   if (r.remaining !== PLAYER_HURT_LEN) return null;
   const slot = r.u8();
   const dmg = r.i16();
-  if (!(dmg > 0)) return null;                       // 零伤/负伤无展示语义
+  // ★B1 钳位纯度批：原版读侧【无 GetShort 后钳】——`int damage = reader.ReadInt16()`
+  //   直入 Player.Hurt（MessageBuffer.cs:3888/:3894），Hurt 内部经
+  //   CalculateDamagePlayersTake 防后 floor≥1 把任意 i16 归一成可见值（Main.cs:67146-
+  //   67155）。本仓重放面只剩飘字、无 Hurt 机，故以【帧级合约】替代数值改写：dmg 段
+  //   语义=实扣 hp 减量∈[1..maxHp]（合法生产面天然出界不可达），≤0 即脏帧整帧拒收
+  //   ——这是拒收门不是钳位（不做任何 in-range 数值改写,对垃圾输入也绝不产出
+  //   「1 点假伤」飘字），与写层 short 回绕直写配套。若未来把重放面扩成 Hurt 式重算,
+  //   此门应改为照抄原文（i16 全域受理 + 收端自身 normalize）。
+  if (!(dmg > 0)) return null;
   const x = r.f32(), y = r.f32(), dir = r.i8(), flags = r.u8();
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;   // S6 NaN 清洗
   return { slot, dmg, x, y, dir, flags };

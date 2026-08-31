@@ -414,25 +414,6 @@ const BOOMERANG_RETURN: Record<number, [number, number]> = {
 export const PHASEBLADE_PROJ = new Set([1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067,
   1068, 1069, 1070, 1071, 1072, 1074, 1075, 1076, 1101, 1102]);
 
-/** 单格形状阻挡判定（Boomerang solidBox 复用；exported：halfbrick 单测共面）。
- *  口径 = 原版弹体 Collision.TileCollision 简化投射物面：
- *   · isSolid 格 = 全格实心；
- *   · halfBrick 格 = 仅【下半 8px】实心（C.cs:2174-2177 vector.Y+=8/num2-=8）,
- *     盒与 [top,top+8) 无纵向交集即不撞（「站半砖上原地飞不出」的修复本体）;
- *   · slope 位维持全格近似（坡面斜线分段语义差异登记）。
- *  st 需要 isSolid/idx/half 表（TileStore 结构兼容子集）。 */
-export function boomerangCellBlocks(
-  st: { isSolid(x: number, y: number): boolean; idx(x: number, y: number): number; half: ArrayLike<number> },
-  tx: number, ty: number, rectTop: number, rectBottom: number): boolean {
-  if (!st.isSolid(tx, ty)) return false;
-  if (st.half[st.idx(tx, ty)]) {
-    const bandTop = ty * TILE + 8;
-    const lo = Math.max(rectTop, bandTop), hi = Math.min(rectBottom, bandTop + 8);
-    if (hi <= lo) return false;
-  }
-  return true;
-}
-
 /** 使用起点【同型在场门】（ItemCheck_CheckCanUse_Inner,Player.cs:52801-52856）：弹型在
  *  列表内时,同 owner 已存在同型 active 弹 ⇒ 该物品本次使用被【静默拒绝】——原版
  *  ItemCheck_TryStartUse 失败即不进 StartActualUse：无挥动动画/无 UseSound/不耗
@@ -916,33 +897,31 @@ export class Boomerang extends Entity {
   /** 移动/撞墙段（HandleMovement 撞墙分支 :18103-18161;分轴探测 = lastVelocity 语义） */
   private moveStep(game: GameHooks, isPhase: boolean): void {
     if (this.ai0 === 1) { this.x += this.vx; this.y += this.vy; return; } // 穿墙（:37145）
-    const st = game.world.store;
-    // ★形状感知阻挡盒（2026-08-31 定罪「站半砖旋刃原地飞不出」）：
-    //  旧实现 = 全格布尔（isSolid），忽略 halfBrick——玩家站在半砖顶时脚线落在
-    //  格内 +8px 处，回旋镖出生盒下缘位于格上半区（跨过该行）⇒ 帧 0 即判撞，
-    //  双轴互斥反弹钉死原地；原版 Collision.TileCollision 对 halfBrick 只取
-    //  【下半 8px】为实心（C.cs:2174-2177 `vector.Y += 8f; num2 -= 8f`），格上半
-    //  区自由。tileSolidTop 家族（平台/家具顶）isSolid 本就 false 且原版弹体
-    //  flag6(fallThrough) 缺省 true（P.cs:17587 系）⇒ 弹体全域穿透平台，天然对齐。
-    //  slope>0 沿用旧全格近似（TileCollision 坡面为斜线分段，此处沿用既有口径，
-    //  差异登记不改）。
-    const solidBox = (x: number, y: number): boolean => {
-      const x0 = Math.floor(x / TILE), y0 = Math.floor(y / TILE);
-      const x1 = Math.floor((x + this.w - 1) / TILE), y1 = Math.floor((y + this.h - 1) / TILE);
-      for (let ty = y0; ty <= y1; ty++) {
-        for (let tx = x0; tx <= x1; tx++) {
-          if (!st.inBounds(tx, ty)) continue;
-          if (boomerangCellBlocks(st, tx, ty, y, y + this.h)) return true;
-        }
-      }
-      return false;
-    };
+    // ★正典碰撞管线（2026-09-01 定罪「站斜砖旋刃原地打转」,终结本族第三次近似迭代：
+    //  ①出生盒心偏移→②半砖全格布尔→③坡面全格布尔）：bespoke solidBox 的
+    //  坡面全格近似与玩家站坡的脚线沉降(格内中段)天然互斥,帧0 即判撞双轴互锁。
+    //  改走 moveAndCollide（=玩家/NPC 同一 Collision.TileCollision/SlopeCollision
+    //  移植管线,半砖下半/坡面对角贴合/平台单向全覆盖;同文件 Molotov/Grenade 族
+    //  先例同款 body 视图）。弹体侧口径:
+    //   · tileCollide = ai[0]!==1（返程穿墙 :37145,管线直写通道）
+    //   · dropThrough = true（原版弹体 flag6 fallThrough 缺省 true,P.cs:17587 系
+    //     ——平台/家具顶全域穿透）
+    //   · stepUp 缺省 false（弹幕不调 StepUp）
+    //  hitX/hitY 取 hitWall/collideY 旗标（slopeCollide 贴合推离不置 collideY,
+    //  纯 tile 拦截才计撞=AI_003 逐轴翻转语义不变）;速度恒以 lvx/lvy 复位,
+    //  保留「出程无摩擦直线」（管线内斜面粘滞辅助等速度编辑不复写回弹体）
     const lvx = this.vx, lvy = this.vy;
-    let hitX = false, hitY = false;
-    const nx = this.x + this.vx;
-    if (solidBox(nx, this.y)) hitX = true; else this.x = nx;
-    const ny = this.y + this.vy;
-    if (solidBox(this.x, ny)) hitY = true; else this.y = ny;
+    const body = {
+      x: this.x, y: this.y, w: this.w, h: this.h,
+      vx: this.vx, vy: this.vy,
+      onGround: false, hitWall: false, hitHead: false, collideY: false,
+      tileCollide: this.ai0 !== 1,
+      dropThrough: true,
+    };
+    moveAndCollide(body, game.world, lvx, lvy);
+    this.x = body.x; this.y = body.y;
+    this.vx = lvx; this.vy = lvy;
+    const hitX = body.hitWall, hitY = body.collideY;
     if (!hitX && !hitY) return;
     if (WALL_BOUNCE_PROJ.has(this.projId)) {
       // 撞墙尘 + 挖掘音（默认族 Collision.HitTiles :18139-18140 + SoundID 0 :18161）

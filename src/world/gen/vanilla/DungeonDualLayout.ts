@@ -887,10 +887,15 @@ class DWormlikeRoom extends DRoomBase {
     let vec = fF(pt.x, pt.y);
     const vecStart = vec;
     const collected: F2[] = [];
+    // ★IIIII129 取证（常态关）：wormlike 节点链逐迭代导出——nodes/radii/dir/side
+    const wormLog = (globalThis as unknown as { __swI129Worm?: Array<Record<string, unknown>> }).__swI129Worm;
+    const wRec = wormLog !== undefined ? { seed: this.settings.randomSeed | 0, x: Math.trunc(pt.x), y: Math.trunc(pt.y), n1: this.settings.firstSideIterations, n2: this.settings.secondSideIterations, dir0: null as unknown, rot2: null as unknown, num0: 0, num20: 0, gen: generating ? 1 : 0, nodes: [] as number[][], radii: [] as number[], inner: [0, 0, 0, 0] as number[], outer: [0, 0, 0, 0] as number[] } : null;
+    if (wRec) { wRec.num0 = num; wRec.num20 = num2; }
     vec = vecStart;
     let dirVec = nextF2CircularEdge(ur, 1, 1);
     let spin = dirVec;
     let idxPos = 0;
+    if (wRec) { wRec.dir0 = [dirVec.x, dirVec.y]; }
     const phHook = (globalThis as { __swI103Phase?: ((tag: string, gen: boolean, seed: number) => void) | undefined }).__swI103Phase;
     if (phHook && !generating) phHook('PH1', false, this.settings.randomSeed | 0);
     for (let side = 0; side < 2; side++) {
@@ -905,15 +910,23 @@ class DWormlikeRoom extends DRoomBase {
         if (phHook && !generating) phHook('PH3', false, this.settings.randomSeed | 0);
         dirVec = rot;
         spin = dirVec;
-        idxPos = 0;
+        // ★IIIII129 定罪（WormlikeDungeonRoom.cs:120-149 + :139-152）：C# 第二侧
+        //   只做 `vector = vector2` 起点复位，**num6 计数器跨两侧共享不清零**——
+        //   Processed 重放路径沿 Positions 数组连续下标继续走第二侧后半段（左侧
+        //   回扫带）。JS 曾在此 `idxPos = 0` ⇒ generate 相位把 side0 节点重放一遍、
+        //   整条左带丢失，InnerBounds 右收 ~19px → 大批蛇槽期砖该被房内清场而
+        //   未被清（SandstoneBrick396/Snow161/Temple226/Hall117 ×~2.5 万格族）。
+        if (wRec) { wRec.rot2 = [dirVec.x, dirVec.y]; }
       }
       for (let k = 0; k < iterations; k++) {
+        if (wRec) { wRec.nodes.push([Math.trunc(vec.x), Math.trunc(vec.y), side]); wRec.radii.push(0); }
         const tF = fr(fr(k) / fr(iterations));
         // ★IIIII99b2 勘误：Utils 只有 **double Lerp**（Utils.cs:107，float 版不存在）——
         //   (int)Utils.Lerp(num,num2,tF) 是 double 域插值后截断，旧 fLerp(f32) 在
         //   跨整数边界步进时产 −1 宽差（#21/#26 box×24 族根因之二）
         num3 = Math.trunc(lerpN(num, num2, tF));
         num5 = num3 + num4;
+        if (wRec) { wRec.radii[wRec.radii.length - 1] = num3; }
         const gx = Math.trunc(vec.x), gy = Math.trunc(vec.y);
         this.outerShape.addBounds(gx - num5 - originI, gy - num5 - originJ, gx + num5 - originI, gy + num5 - originJ);
         this.innerShape.addBounds(gx - num3 - originI, gy - num3 - originJ, gx + num3 - originI, gy + num3 - originJ);
@@ -929,6 +942,13 @@ class DWormlikeRoom extends DRoomBase {
       }
     }
     if (phHook && !generating) phHook('PH4', false, this.settings.randomSeed | 0);
+    if (wRec) {
+      wRec.inner = [this.inner.L, this.inner.T, this.inner.R, this.inner.B];
+      wRec.outer = [this.outer.L, this.outer.T, this.outer.R, this.outer.B];
+      wormLog!.push(wRec);
+      const flush = (globalThis as { __swI129WormFlush?: (r: Record<string, unknown>) => void }).__swI129WormFlush;
+      if (flush) flush(wRec);
+    }
     if (!this.processed) this.positionsArr = collected.slice();
     this.sizeMin = num2; this.sizeMax = num;
     this.inner.calc(); this.outer.calc();

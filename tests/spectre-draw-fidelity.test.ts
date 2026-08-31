@@ -48,7 +48,7 @@ function pngSize(file: string): { w: number; h: number } {
 // ------------------------------------------------------------- hooks 桩
 interface DustRec { x: number; y: number; w: number; h: number; type: number;
   alpha: number; scale: number; noGravity: boolean; handle: { x: number; y: number;
-    vx: number; vy: number; noGravity: boolean } | null }
+    vx: number; vy: number; noGravity: boolean } }
 
 function dustHookSink(): { recs: DustRec[]; spawnDust: NonNullable<GameHooks['spawnDust']> } {
   const recs: DustRec[] = [];

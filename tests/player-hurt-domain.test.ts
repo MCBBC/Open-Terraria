@@ -219,7 +219,7 @@ describe('A1 荆棘反射面（Game.damagePlayer contactOnly 前置段）', () =
   it('★Notes① banner 减伤 (int) 截断非四舍五入：num4=trunc(45×0.75)=33（round 为 34）', () => {
     const s = mkShell();
     s.p.buffs.apply(BuffType.Thorns, 30);             // 撑起反射捕获
-    (s.g._bannerNpcs as Set<number>).add(s.enemy.vanillaId);
+    (s.g._bannerNpcs as Set<number>).add(s.enemy.vanillaId as number);   // 僵尸 3 恒在表（null 型位为 Enemy 字段宽化，运行时不可达）
     const base = s.hurtCalls.length;
     s.hit(45);
     // 受端 num4 截断后进反射面；攻端再包 DamageDealt 样本（经典僵尸 ×1.5）：

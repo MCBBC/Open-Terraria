@@ -3473,8 +3473,12 @@ export class Player extends Entity {
     // 防御/难度系数/endurance/神秘腰布·黑带·克脑闪避族/msg117 全随漏斗生效；受击语音
     // 与本地飘字由漏斗单点承载——删旧手补 playHurtVoice（闪避早退时旧路径照样喊=
     // 双发/错发）、飘字以 damagePreview 预演回填。hitDirection=0 ⇒ kb=false 原式。
-    // 尘在原文是【过渡无条件】段（双向都发）——搬出 stoned 支对齐；Dig 档碎裂声的
-    // wav 别名本仓未建模，登记待音频表接入。
+    // 尘在原文是【过渡无条件】段（双向都发）——搬出 stoned 支对齐；碎裂声
+    // SoundEngine.PlaySound(0,x,y)（:25417,原版序=Hurt→Sound→尘）同为无条件段。
+    // ★B2①（2026-08-31）：legacy 案号 0=Dig 三变体（LSP.cs:443-458 Next(3) 择轨 +
+    // Next(-10,11)×0.01 音高抖动）↔ public/sounds/Dig_{0,1,2}.wav 别名在映射表就位
+    // （WAV_MAP.dig / Sfx PITCH rng('Dig_',0,2) 先例），接真名直播——旧「别名未建模
+    // 登记待接入」状态退役，两态取证=择【接真名】支。
     {
       const stonedNow = this.buffs.has(BuffType.Stoned);
       if (stonedNow !== this.lastStoned) {
@@ -3483,6 +3487,7 @@ export class Player extends Entity {
           this.lastDamageCause = { kind: 'petrified' };
           this.envHurtThroughFunnel(game, dmg, this.cx, this.cy - 10, -1, this.damagePreview(dmg));
         }
+        game.playSfxFiles?.(['Dig_0', 'Dig_1', 'Dig_2'], 1, this.cx, this.cy);   // ★B2① :25417（case0 抖动表内建）
         game.spawnParticles(this.cx, this.cy, '#9A8FA0', 20, 2.2);   // :25422-25429 尘×20
         this.lastStoned = stonedNow;
       }

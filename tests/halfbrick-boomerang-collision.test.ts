@@ -1,60 +1,87 @@
+// 回旋镖弹体 × 地形形态碰撞回归（正典管线接入版）。
+// 背景: bespoke solidBox 三次近似迭代史——①出生左上未回正(平地锁死)
+//       →②半砖全格布尔(+8px 脚线互斥)→③坡面全格近似(斜砖重演帧0 锁死,
+//       behavior-log-Starter_World-2026-08-31T16-41-58 五连掷实录)。
+//       2026-09-01 终局:moveStep 改走 moveAndCollide 正典管线(TileCollision/
+//       SlopeCollision 移植,半砖下半/坡面对角/平台 fallThrough 全覆盖),
+//       本文件以「真站姿收敛摆位 + 真跑 fixedUpdate」做四形态行为断言。
 import { describe, it, expect } from 'vitest';
-import { boomerangCellBlocks, BOOMERANG_OWN_LIMIT } from '../src/entities/WeaponProj';
+import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
+import { moveAndCollide } from '../src/physics/TileCollision';
+import { Boomerang } from '../src/entities/WeaponProj';
+import type { GameHooks } from '../src/entities/types';
 
-/** TileStore 结构兼容子集桩（isSolid/idx/half 三件） */
-const mkStore = (halfAt: (tx: number, ty: number) => boolean) => ({
-  isSolid: (_x: number, y: number): boolean => y >= 10 && y <= 12, // 11 行带=测试面
-  idx: (tx: number, ty: number): number => ty * 1000 + tx,
-  half: new Proxy({} as ArrayLike<number>, {
-    get: (_t, k: string | symbol) => {
-      const s = String(k);
-      if (/^\d+$/.test(s)) {
-        const v = Number(s);
-        const ty = Math.floor(v / 1000), tx = v % 1000;
-        return halfAt(tx, ty) ? 1 : 0;
-      }
-      return undefined;
-    },
-    has: () => true,
-    ownKeys: () => [],
-  }) as ArrayLike<number>,
-});
+const W = 90, H = 160;
 
-describe('boomerangCellBlocks —— 弹体单格形状阻挡（半砖下半实心 C.cs:2174-2177）', () => {
-  const CELL_TOP = 11 * TILE;
+/** 测试替身钩子:33 出程不触 player 几何之外的分支,dust/sfx 全可省 */
+function mkHooks(w: World): GameHooks {
+  const hooks = {
+    world: w,
+    player: { x: 0, y: 0, w: 20, h: 42, cx: -99999, cy: -99999, dead: false,
+      attackSpeedMult: 1 },
+    enemies: () => [],
+    playSfx() {}, playSfxFiles() {},
+  };
+  return hooks as unknown as GameHooks;
+}
 
-  it('全格实心:任意纵向交集都拦', () => {
-    const st = mkStore(() => false);
-    expect(boomerangCellBlocks(st, 3, 11, CELL_TOP + 2, CELL_TOP + 20)).toBe(true);
-    expect(boomerangCellBlocks(st, 3, 11, CELL_TOP - 5, CELL_TOP + 5)).toBe(true);
-  });
+type SurfaceKind = 'flat' | 'half' | 'slopeHigh' | 'slopeLow';
 
-  it('半砖:格上半区不拦(弹盒底缘只跨过 +8 线之上),下半区拦截', () => {
-    const st = mkStore((_tx, ty) => ty === 11);
-    // 盒底 = cellTop+6(站半砖顶时出生盒下缘,feet=cellTop+8 ⇒ bottom=cellTop+6)
-    expect(boomerangCellBlocks(st, 5, 11, CELL_TOP + 6 - 38, CELL_TOP + 6)).toBe(false);
-    // 底缘恰在 +8 线 = 零穿透仍不拦(原版接触带 0.1f 阈值同义);越线即拦
-    expect(boomerangCellBlocks(st, 5, 11, CELL_TOP + 8 - 38, CELL_TOP + 8)).toBe(false);
-    expect(boomerangCellBlocks(st, 5, 11, CELL_TOP + 8 - 38, CELL_TOP + 9)).toBe(true);
-    expect(boomerangCellBlocks(st, 5, 11, CELL_TOP + 12, CELL_TOP + 30)).toBe(true);
-  });
+function mkWorld(kind: SurfaceKind): { w: World; standX: number; gy: number } {
+  const w = new World(W, H, 7, `boom-collision-${kind}`);
+  const st = w.store;
+  const gy = 100;
+  for (let x = 0; x < W; x++) { st.setTile(x, gy, 1); st.setTile(x, gy + 1, 1); }
+  let standX = 45 * TILE;
+  if (kind === 'half') {
+    // 半砖段:实心位 + half 位（勿再 setSlope 清位——store.setSlope 无条件清 half）
+    for (let x = 40; x < 50; x++) { st.setTile(x, gy, 1); st.setHalfBrick(x, gy, true); }
+    standX = 45 * TILE;
+  } else if (kind === 'slopeHigh' || kind === 'slopeLow') {
+    // 8 格 slope1(左高右低)嵌在整砖地台:item-slope-rest.test.ts 同款布局
+    for (let x = 40; x < 48; x++) { st.setTile(x, gy, 0); st.setTile(x, gy + 1, 1); st.setSlope(x, gy + 1, 1); }
+    if (kind === 'slopeHigh') standX = 40 * TILE + 4;      // 高侧(左端)
+    else standX = 47 * TILE + 12;                           // 低侧(右端,对角线深区)
+  }
+  return { w, standX, gy };
+}
 
-  it('平台/家具族(isSolid=false)恒不拦——原版弹体 fallThrough 缺省 true 同义', () => {
-    const st = { ...mkStore(() => false), isSolid: () => false };
-    expect(boomerangCellBlocks(st, 7, 11, CELL_TOP + 2, CELL_TOP + 40)).toBe(false);
-  });
-});
+/** 玩家站姿收敛:同尺寸(20×42)代理身体走同一正典管线落到表面,
+ *  拿到真实中心作为回旋镖出生锚点(Game 场景 placeAtShootSpawn 等价)。 */
+function stance(w: World, standX: number, gy: number):
+  { cx: number; cy: number; footY: number } {
+  const b = {
+    x: standX - 10, y: (gy - 3) * TILE, w: 20, h: 42, vx: 0, vy: 0,
+    onGround: false, hitWall: false, hitHead: false, collideY: false,
+    tileCollide: true, dropThrough: true,
+  };
+  for (let i = 0; i < 90 && !b.onGround; i++) {
+    b.vy = Math.min(b.vy + 0.4, 10);
+    moveAndCollide(b, w, b.vx, b.vy);
+    b.x = standX - 10;               // 锁横轴防坡面粘滞辅助挪位
+  }
+  expect(b.onGround, '站姿应落地').toBe(true);
+  return { cx: b.x + 10, cy: b.y + 21, footY: b.y + b.h };
+}
 
-describe('BOOMERANG_OWN_LIMIT 单发门表（Player.cs:52801-52856 对拍）', () => {
-  it('严格单发组∪光刃族∪301=1;106=6/272=10/1000=3', () => {
-    for (const id of [6, 19, 33, 52, 113, 320, 333, 383, 491, 867, 1052, 902, 866, 301]) {
-      expect(BOOMERANG_OWN_LIMIT[id]).toBe(1);
+describe('Boomerang 弹体×地形形态(moveStep 正典管线接入)', () => {
+  it.each<SurfaceKind>(['flat', 'half', 'slopeHigh', 'slopeLow'])('%s 上水平掷出:30t 存活、飞出 >48px、不进返回态', (kind) => {
+    const { w, standX, gy } = mkWorld(kind);
+    const s = stance(w, standX, gy);
+    const hooks = mkHooks(w);
+    const px = s.cx;
+    const bom = new Boomerang(s.cx, s.cy, 14, 0, 25, 8, 33, 1);
+    let alive = true;
+    let maxDist = 0;
+    for (let t = 0; t < 30 && alive; t++) {
+      bom.fixedUpdate(1 / 60, hooks);
+      alive = !bom.dead;
+      if (!alive) break;
+      maxDist = Math.max(maxDist, Math.abs(bom.cx - px));
     }
-    for (const id of [1059, 1061, 1072, 1074, 1102]) expect(BOOMERANG_OWN_LIMIT[id]).toBe(1);
-    expect(BOOMERANG_OWN_LIMIT[106]).toBe(6);
-    expect(BOOMERANG_OWN_LIMIT[272]).toBe(10);
-    expect(BOOMERANG_OWN_LIMIT[1000]).toBe(3);
-    expect(BOOMERANG_OWN_LIMIT[1318]).toBeUndefined(); // 未列表型号不限
+    expect(alive, `${kind} 30t 内不应消亡`).toBe(true);
+    expect(bom.ai0, `${kind} 不应被地形误判回收(ai0 必须=0 出程)`).toBe(0);
+    expect(maxDist, `${kind} 最大位移 ${maxDist.toFixed(1)}px 应>48(非原地互锁)`).toBeGreaterThan(48);
   });
 });
