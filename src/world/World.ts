@@ -66,8 +66,9 @@ export class Clock {
   }
   get isDay(): boolean { return this.timeOfDay > Clock.DAWN && this.timeOfDay < Clock.DUSK; }
   /** timeOfDay（0=午夜线性 24h）→ 原版**分段** Main.time（昼 4:30AM 起归零 0..54000、
-   *  夜 7:30PM 起归零 0..32400；WorldGen.IsAlchemyPlantHarvestable :66214 /
-   *  手表行 Main.cs:46182-46236 等消费方吃的是这个口径）。
+   *  夜 7:30PM 起归零 0..32400）。消费方（吃数值）：手表行 Main.cs:47601-47610
+   *  （1456 :46182-46236）/ 药草 style5 收获门 WorldGen.cs:66689（1456 :66214）
+   *  `Main.time > 40500` 等。
    *  ★勿把 timeOfDay×86400（绝对钟面刻度）直接当 Main.time 喂给按分段式写的
    *  换算器——两口径恒差 4.5h（昼）/19.5h（夜），曾把手表时间行快拨 4.5h，
    *  上午 9 点天还黑着（2026-08-31 用户实报，Game.infoAccCtx 装配处修正） */

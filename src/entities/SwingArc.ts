@@ -16,7 +16,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
+import { playerCanHitEnemy, canBeChasedBy, applyBannerDamageDealt } from './projTargets';
 import { prettyStarSparkle } from '../render/Renderer';
 import { canHitLine } from '../physics/LineOfSight';
 import { drawStripTrail } from '../fx/TrailShader';
@@ -113,7 +113,7 @@ export class SwingArc extends Entity {
       if (!(ex - bw / 2 < e.x + e.w && ex + bw / 2 > e.x && ey - bh / 2 < e.y + e.h && ey + bh / 2 > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       this.hitSet.add(e.id);
       // ★1457 无头骑士剑 997 命中召南瓜弹 321（Projectile.cs:13728-13732：门 =
       // (!immortal|flag9) && !SpawnedFromStatue && !CountsAsCritter——flag9 仅调试
@@ -349,7 +349,7 @@ export class TrueNightsEdgeSlash extends Entity {
         if (!(ex - reach / 2 < e.x + e.w && ex + reach / 2 > e.x && ey - 30 * this.scaleCur < e.y + e.h && ey + 30 * this.scaleCur > e.y)) continue;
         const crit = Math.random() < this.critChance;
         const dmg = crit ? this.damage * 2 : this.damage;
-        e.hurt(dmg, this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+        e.hurt(applyBannerDamageDealt(game, e, dmg), this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
         this.hitCd.set(e.id, 5);
       }
     }
@@ -475,7 +475,7 @@ export class NightsEdgeFly extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       this.hitCd.set(e.id, 9999);
     }
   }
@@ -744,7 +744,7 @@ export class ZenithSword extends Entity {
       const crit = Math.random() < this.critChance;
       // Main.DamageVar ±15% 浮动（同挥击侧公式）
       const dmg = Math.max(1, Math.round(this.damage * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
-      e.hurt(dmg, this.spriteDir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), this.spriteDir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.hitCd.set(e.id, 7);
     }
   }
@@ -796,51 +796,22 @@ export class ZenithSword extends Entity {
     const num182 = ZenithSword.lerpV(0, 20, this.counter) * ZenithSword.lerpV(68, 60, this.counter);
     const n = this.trail.length / 3;
 
-    // ---- ① 彩带拖尾（FinalFractalHelper.Draw :175-190 → VertexStrip :50-67）----
-    // 顶点对 = oldPos[i]+Size/2 ± (oldRot[i]−π/2)单位向 × trailWidth（AddVertexPair
-    // :153-159——截面沿【刃轴向】随剑旋转，非运动法向）；progressOnStrip =
-    // i/(60−1)（:63，恒除 59——幼年拖尾全程近满色）。颜色（StripColors :54-59
-    // 逐字）：result = trailColor × (1−GetLerpValue(0,0.98,progress))、result.A/=2
-    // ——XNA Color×float 四通道同乘 → 预乘混合（主弹幕批次 BlendState.AlphaBlend
-    // 预乘语义，Main.cs:22032；本项目 Renderer.ts:245 既定结论）下 rgb:alpha=2:1
-    // → canvas 两 pass 精确等价：source-over α=f/2（背景只衰减 f/2）+ lighter
-    // α=f/2（加色）——rgb 合计 = trailColor×f 全亮、无 Opacity 因子（剑亡即整条
-    // 消失，原版拖尾不随 Opacity 淡出）。四边形按 GPU 索引序新→旧叠画。
+    // ---- ① 彩带拖尾（FinalFractalHelper.Draw :175-190）----
+    // ★2026-08-30 GL 化改约：原"平色四边形双 pass + CPU 像素叠层"两段合成整体移除
+    // ——原版只有【一次】PS 条带绘制，平色底条系近似期产物（与真值叠成大团色块，
+    // 用户实报截图）；CPU 像素循环又是卡顿本体。现在 drawStripTrail 内部自动走
+    // GLSpriteLayer 拖尾 pass（GLSpriteLayer.ts 尾部 TRAIL_VS/FS——obj58 逐指令
+    // 1:1），主 ctx 每帧单次合成；GL 不可用时其内部退化 CPU 版仍可用。
     if (n >= 2) {
-      ctx.save();
-      ctx.fillStyle = `rgb(${prof.color[0]},${prof.color[1]},${prof.color[2]})`;
-      for (let i = n - 1; i >= 1; i--) {
-        const f = fractalStripFade((n - 0.5 - i) / (60 - 1));
-        if (f <= 0.02) continue;
-        const x1 = this.trail[i * 3], y1 = this.trail[i * 3 + 1], r1 = this.trail[i * 3 + 2];
-        const x0 = this.trail[i * 3 - 3], y0 = this.trail[i * 3 - 2], r0 = this.trail[i * 3 - 1];
-        const d1x = Math.cos(r1 - Math.PI / 2) * tw, d1y = Math.sin(r1 - Math.PI / 2) * tw;
-        const d0x = Math.cos(r0 - Math.PI / 2) * tw, d0y = Math.sin(r0 - Math.PI / 2) * tw;
-        ctx.beginPath();
-        ctx.moveTo(x1 + d1x, y1 + d1y);
-        ctx.lineTo(x0 + d0x, y0 + d0y);
-        ctx.lineTo(x0 - d0x, y0 - d0y);
-        ctx.lineTo(x1 - d1x, y1 - d1y);
-        ctx.closePath();
-        const a = 0.5 * f;   // A = (255×f)/2（result.A /= 2）
-        ctx.globalAlpha = a;
-        ctx.fill();                                    // 覆盖 pass：dst×(1−f/2)
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.fill();                                    // 加色 pass：+trailColor×f/2
-        ctx.globalCompositeOperation = 'source-over';
-      }
-      ctx.globalAlpha = 1;
-      ctx.restore();
-      // ★shader 审计修齐批：FinalFractalVertex pass 叠层真化（PixelShader.cso
-      //   :2808-2879——s0=Extra_201/s1=Extra_193（FinalFractalHelper.Draw :180-181
-      //   出手侧覆写绑定）×噪声门×锯齿波（uShaderSpecificData=(4,0,0,4)→k=1/4）。
-      //   平色底条保留（预乘语义已验证），此层注入贴图纹理/噪声/锯齿真值
       if (r.atlas) {
-        const ptsFS: Array<{ x: number; y: number; hw: number; r: number; g: number; b: number; a: number }> = [];
+        const ptsFS: Array<{ x: number; y: number; hw: number; rot: number; r: number; g: number; b: number; a: number }> = [];
         for (let i = n - 1; i >= 1; i--) {
           const f = fractalStripFade((n - 0.5 - i) / (60 - 1));
           if (f <= 0.02) continue;
-          ptsFS.push({ x: this.trail[i * 3], y: this.trail[i * 3 + 1], hw: tw * 0.85,
+          // trailWidth = profile 全刃长/2（StripWidth :61-64 恒宽）——0.85 系近似期
+          // 压制倍率，随平色层一并退役
+          ptsFS.push({ x: this.trail[i * 3], y: this.trail[i * 3 + 1], hw: tw,
+            rot: this.trail[i * 3 + 2],
             r: prof.color[0] / 255, g: prof.color[1] / 255, b: prof.color[2] / 255, a: f });
         }
         if (ptsFS.length >= 2) {
@@ -975,7 +946,7 @@ export class LightsBaneSlash extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, Math.sign(this.dirX) * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.dirX) * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.hitCd.set(e.id, 10);
     }
   }
@@ -1073,7 +1044,7 @@ export class GrassSlash extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       this.hitCd.set(e.id, 10);
     }
   }
@@ -1191,7 +1162,7 @@ export class HorsemansPumpkin extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, Math.sign(this.vx || 1) * this.kb, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx || 1) * this.kb, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       // Kill 特效（Projectile.cs:77759-77773：SoundID.Item10 + 2×20 尘 6 反速 ×2）
       game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);
       for (let i = 0; i < 20; i++) {

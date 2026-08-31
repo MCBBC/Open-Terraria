@@ -33,7 +33,7 @@ import { cutTilesBox } from './ProjCutTiles';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { hitTownNpcs, playerCanHitEnemy, canBeChasedBy } from './projTargets';
+import { hitTownNpcs, playerCanHitEnemy, canBeChasedBy, applyBannerDamageDealt } from './projTargets';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 
@@ -72,7 +72,7 @@ type RectLike = { x: number; y: number; w: number; h: number };
 /** 近战弹通用命中结算（音/飘值=StrikeNPC 单点;fromPlayer=DPS 计） */
 function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
   kb: number, kdir: number, pen: number): void {
-  e.hurt(dmg, kdir * kb, 0, game, pen, crit, 0, true);
+  e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * kb, 0, game, pen, crit, 0, true);
 }
 
 /** 浸剂三链（melee 弹命中侧；SkyDragonFury.applyHits 同款——null 门跳过测试态） */

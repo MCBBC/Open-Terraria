@@ -11,9 +11,11 @@ import type { GameHooks } from './types';
 
 interface EnemyLike {
   id: number; x: number; y: number; w: number; h: number; cx?: number; cy?: number;
+  vx?: number; vy?: number;
   dead: boolean; dontTakeDamage?: boolean;
   hurt: (dmg: number, kx: number, ky: number, g: GameHooks, pen?: number,
-    crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean;
+    crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number,
+    srcProjId?: number) => boolean;
 }
 
 /** usesLocalNPCImmunity / usesIDStaticNPCImmunity 族落地的全局窗清零写（GC1：
@@ -121,12 +123,18 @@ export class JavelinStickerProj extends Entity {
       this.rotation = Math.atan2(this.vy, this.vx) + Math.PI / 2;
     }
     // —— 971 尘支（:41519-41537）：偶数帧自尾端（center − norm(v)×8）发尘 4，
-    //     初速 = 目标速度 + (NextFloatDirection×0.35, 2.5)，fadeIn=0.25 无重力
+    //     初速 = **目标 NPC.velocity** + (NextFloatDirection×0.35, 2.5)，fadeIn=0.25
+    //     无重力。★F4（2026-08-31 蓝队三批）：旧式 `-norm(v)×8×0.35` 系把"弹体反向
+    //     归一化"当成了初速——原式 `Vector2 value = npc.velocity +
+    //     new Vector2(rand.NextFloatDirection() × 0.35f, 2.5f)`，法向项整删。
     if (this.projType === 971 && this.timeLeft % 2 === 0 && this.targetId > 0) {
       const len = Math.hypot(this.vx, this.vy);
       const nx = len > 0 ? this.vx / len : 0, ny = len > 0 ? this.vy / len : 0;
+      const tvx = target?.vx ?? 0, tvy = target?.vy ?? 0;   // Main.npc[num12].velocity
+      const dirJ = (Math.random() * 2 - 1) * 0.35;          // NextFloatDirection×0.35
       const d = game.spawnDust?.(Math.trunc(this.cx - nx * 8) - 5, Math.trunc(this.cy - ny * 8) - 5,
-        10, 10, 4, Math.fround(-nx * 8 * 0.35), 2.5, 200, { r: 120, g: 50, b: 120, a: 0 }, 0.65);
+        10, 10, 4, Math.fround(tvx + dirJ), Math.fround(tvy + 2.5),
+        200, { r: 120, g: 50, b: 120, a: 0 }, 0.65);
       if (d) { d.noGravity = true; d.fadeIn = 0.25; }
     }
     // —— 975 尘支（:41539-41571）：中心两笔尘 5（CloneDust 链旋转变体 + 1/3 第三笔）；

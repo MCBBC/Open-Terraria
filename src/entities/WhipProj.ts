@@ -18,7 +18,7 @@
 // 合成自动乘光,StringLine 渔线段链既有口径）。
 import { Entity } from './Entity';
 import { applyProjStatus, applyBuffTicks, applyMeleeImbue } from './projStatus';
-import { hitTownNpcs, playerCanHitEnemy } from './projTargets';
+import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
 import { ConfettiBurstProj } from './meleeOnHitProjs';
@@ -447,7 +447,7 @@ export class WhipProj extends Entity {
             (e as unknown as { vy?: number }).vy ?? 0));
         }
         const wpOwner = this.ownerRef();
-        e.hurt(whipDmg, Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068
+        e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068
         // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）。
         //  1104：Slimed(137) 照表;OnFire(24) 表项抑制、按上方窗口直投（:11255-11272）
         // 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意

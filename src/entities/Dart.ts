@@ -1,7 +1,7 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile } from './projTargets';
+import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, applyBannerDamageDealt } from './projTargets';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, VANILLA_TILE_ID } from '../data/tiles';
@@ -448,7 +448,7 @@ export class TrapShot extends Entity {
         if (trapProjId !== undefined) applyProjStatus(trapProjId, e as unknown as Record<string, number>,
           { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
         // 击退方向 = 弹 direction（Projectile.cs:13652 num40=direction,水平 ±1）
-        e.hurt(this.damage, Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
+        e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
         // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
         // 陷阱弹 id 的全局档按纯表取（现役表内无显型定档/三旗——penetrate 走数据面：
         // 98/184/185/186/980 均 penetrate=-1 ⇒ 末档每次命中写 immune[owner]=10
@@ -531,7 +531,7 @@ export class TrapShot extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
-      e.hurt(this.damage, Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);   // 音/飘值=单点
+      e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * (TRAP_SHOT_STYLE[this.kind].kb ?? 2), 0, game, 0, false, 0, true);   // 音/飘值=单点
     }
   }
 

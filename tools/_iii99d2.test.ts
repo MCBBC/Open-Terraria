@@ -25,12 +25,39 @@ const H = Number(process.env.SW_M8_H ?? 1200);
 
   // —— 捕获 SW_DG_BCTRACE 直印的 MARK|bcA/bcR 行（console.log 转接）——
   const bcLines: string[] = [];
+  // ★IIIII99d2：样本级值流（__swOnRoll 样本钩；x86 SW_ROLLTXT 同位仪）——
+  //   环形缓冲（防 OOM：全程主骰 >1 亿）+ mark 落点快照窗口
+  const RING = 8192;
+  const ring = new Int32Array(RING);
+  let rollN = 0;
+  const snapAt: Array<{ n: number; last: number[]; line: string }> = [];
   const oLog = console.log;
+  {
+    const g = globalThis as unknown as { __swOnRoll?: (v: number, inst: object) => void };
+    const prev = g.__swOnRoll;
+    g.__swOnRoll = (v: number, inst: object) => {
+      ring[rollN % RING] = v;
+      rollN++;
+      prev?.(v, inst);
+    };
+  }
+  const lastK = (k: number): number[] => {
+    const out: number[] = [];
+    const start = Math.max(0, rollN - k);
+    for (let i = start; i < rollN; i++) out.push(ring[i % RING]!);
+    return out;
+  };
   console.log = ((...args: unknown[]) => {
     const s = args.map(String).join(' ');
-    if (s.startsWith('MARK|bc') || s.startsWith('MARK|bs')) bcLines.push(s);
-    else oLog(...args);
+    if (s.startsWith('MARK|bc')) {
+      bcLines.push(s);
+      // 每条 mark 记落点；OK 行重快照（覆盖「accept 尝试→OK」整窗，上限 300 样本）
+      if (s.indexOf('|OK|') >= 0) snapAt.push({ n: rollN, last: lastK(300), line: s });
+      else snapAt.push({ n: rollN, last: [], line: s });
+      oLog(`[idx=${rollN}] ${s}`);
+    } else oLog(...args);
   }) as typeof console.log;
+  writeFileSync(`${OUT}/js-rollval.json`, '[]');
 
   // —— 阶段终态归一化 FNV（与 x86 Snap 全量 dump 可同口径换算比对的哈希面）——
   const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
@@ -97,6 +124,7 @@ const H = Number(process.env.SW_M8_H ?? 1200);
     console.log = oLog;
   }
   writeFileSync(`${OUT}/js-bc.txt`, bcLines.join('\n'));
+  writeFileSync(`${OUT}/js-rollval.json`, JSON.stringify({ totalRolls: rollN, okSnaps: snapAt.filter((s) => s.last.length > 0) }));
   writeFileSync(`${OUT}/js-bounds.txt`, wvLines.filter((l) => l.startsWith('MARK|dungeon') || l.startsWith('MARK|d61')).join('\n'));
   writeFileSync(`${OUT}/js-segs.txt`, segRows.map((r) =>
     `${r.tag}|t=${r.t.toString(16)}|a=${r.a.toString(16)}|w=${r.w.toString(16)}|l=${r.l.toString(16)}|lt=${r.lt.toString(16)}|hf=${r.hf.toString(16)}|sl=${r.sl.toString(16)}|ia=${r.ia.toString(16)}`).join('\n'));

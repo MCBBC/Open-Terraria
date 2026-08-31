@@ -55,6 +55,16 @@ import { COMBAT_TEXT_DAMAGED_FRIENDLY, COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT } from 
 //   - __DOORDBG 诊断插桩采样门（永久旗控调试面）
 // 战斗/状态机判定掷骰（巫师连发表与散布/开门 Next(10)/随机坐椅 rand(300)/社交链/
 // 入攻击态掷门等）一律禁直呼 Math.random。
+//
+// ---- 本文件色值约定（★2026-08-31 治理批 F9 定案）----
+// 「飘字/对话文本」类色值一律单源自 fx/CombatTextColors（CombatText.cs 1:1）：
+//   DamagedFriendly '#FF505A' / DamagedFriendlyCrit '#FF641E'（hurt 受击飘字）/
+//   HealLife '#64FF64'（医师治疗弹/溺死致死链的绿字,CombatText.cs:13）。
+// 豁免清单成员（非文本域,保留字面）——尘粒/演出 tint 族：受击血尘 #B01818、
+// 死亡血爆 #C03030/#8A1818、醉酒金尘 rgba(245,200,30,…)、微光演出 #BFE8FF/
+// #C9C2FF 与到场粒子 #BEAFFF/#BEF5FF/#FF96FF、侦察弹兜底填充 #D8C8A0；
+// 以及上文随机源豁免五件的伴随视觉面。[本仓视觉添加] 标注 = 原版无此视觉件
+// （如溺水 −2 的观感飘字,NPC.cs:96118-96154 为静默扣血）。
 
 /** 关门/高门关态判定(行走预测器放行用——门列不算坑、不算跳障实体) */
 function isClosedDoorOrGate(t: number): boolean {
@@ -3107,7 +3117,8 @@ export class TownNPC extends Entity {
    *    GetAttackDamage_ForTownNPC(num81×num2)，飘值/音效 = Enemy.hurt 单点
    *  - 退出链（ai[1]<=0，:55645-55686）：flag16 → 背向危险侧前探 32px 点对墙探，
    *    退路堵死（或入态时是 ai[0]==8）→「换敌再接」：优先危险侧同侧候选
-   *    （num15==1?num17:num16），点对 CanHit 不过单次回退另一侧候选，皆失 → 不接；
+   *    （num15==1?num17:num16——num15 读伞时刻快照,对话中恒 0 → 恒左,见下注），
+   *    点对 CanHit 不过单次回退另一侧候选，皆失 → 不接；
    *    接上则 ai[1]=AttackTime / localAI[3]=0 重起手并按新目标转向（ai[0] 保持 15，
    *    冷却 localAI[1] 不动）。不接 → 标准退出（cornered 复位 `(localAI[2]==8)&flag16`）*/
   private swingUpdate(world: import('../world/World').World, game: GameHooks): void {
@@ -3154,12 +3165,17 @@ export class TownNPC extends Entity {
     // ---- 退出链（NPC.cs:55645-55686）----
     let chained = false;
     if (this.threatRaw) {                                       // flag16（原始位）
-      const backX = this.cx + (-this.dangerSide) * 32;          // num86 = −num15（:55649）
-      // 前探 32px 点对（CanHit(base.Center,0,0,…)：退路堵死 或 入态时是被逼停）
-      if (!canHitPoint(store, this.cx, this.cy, backX, this.cy) || this.prevAi0 === 8) {
-        // 「换敌再接」候选（:55652-55658）：主候选 = 危险侧【同】侧最近敌
-        const primary = this.dangerSide === 1 ? this.threatRight : this.threatLeft;
-        const alternate = this.dangerSide === 1 ? this.threatLeft : this.threatRight;
+      // ★F4 消费时序收口：num15 的成值位只有两处——收口伞(!flag5,:54099-54100)与
+      // 触发区对话重算(:55763-55764),都【先于】挥击态机执行。退出链(:55649/:55653)
+      // 读到的是"伞时刻"快照：非对话=本拍侧选值；对话中 num15 恒 0 → 前探距离
+      // −0×32=Center(CanHit 恒真,重接只走 prevAi0==8 支)且主候选恒取左(num16)
+      const sideRight = !this.talking && this.dangerSide === 1;
+      const probeX = this.talking ? this.cx : this.cx + -this.dangerSide * 32;
+      // 前探点对（CanHit(base.Center,0,0,…)：退路堵死 或 入态时是被逼停）
+      if (!canHitPoint(store, this.cx, this.cy, probeX, this.cy) || this.prevAi0 === 8) {
+        // 「换敌再接」候选（:55652-55658）：主候选 = 危险侧【同】侧最近敌(num15==1→num17)
+        const primary = sideRight ? this.threatRight : this.threatLeft;
+        const alternate = sideRight ? this.threatLeft : this.threatRight;
         let chosen = primary;
         if (chosen && !canHitPoint(store, this.cx, this.cy, chosen.cx, chosen.cy)) {
           // 单次回退（num89 侧不过即放弃——原版嵌套三元,无第二轮回退）

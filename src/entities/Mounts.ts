@@ -24,7 +24,7 @@ import { TILE_DEFS } from '../data/tiles';
 import { WALL_HOUSE } from '../world/Housing';
 import { TownShot } from './TownShot';
 import { TILE } from '../core/constants';
-import { playerCanHitEnemy, projOverlap } from './projTargets';
+import { playerCanHitEnemy, projOverlap, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import type { GameHooks } from './types';
 
@@ -2123,7 +2123,7 @@ export class MountShot extends TownShot {
           hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
             pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
         if (e.dead || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
-        e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, true);   // 音/飘值=单点
+        e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, true);   // 音/飘值=单点
         this.dead = true;   // penetrate 1 近似
         return;
       }

@@ -1,5 +1,6 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
 import { Achievements } from './Achievements';
+import { prewarmTrailTextures } from '../fx/TrailShader';
 import { GrappleProj } from '../entities/GrappleProj';
 import { hookItemOf, HOOK_PROJ_STATS } from '../data/grappleHooks';
 import { GRAPPLE_LATCH } from '../entities/GrappleProj';
@@ -175,7 +176,7 @@ import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
-import { Enemy, visEffectFrames, bindEnemySoundPrewarm } from '../entities/Enemy';
+import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
 import { spawnMechQueenEnsemble, spawnSkeletronCaster } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -422,7 +423,7 @@ import { SolarEruptionWhip } from '../entities/SolarEruption';
 import { TideSlash } from '../entities/TideSlash';
 import { FirstFractalSlash } from '../entities/FirstFractal';
 import { ChainsawProj } from '../entities/ChainsawProj';
-import { MinionProj, pickSentryLandingSpot } from '../entities/MinionProj';
+import { MinionProj, pickSentryLandingSpot, minionTrueBox } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
 import { updateFakeFishSchool, clearFakeFish } from '../entities/FakeFish';
@@ -3343,6 +3344,12 @@ export class Game implements GameHooks {
   candidatePlayers(): import('../entities/Player').Player[] {
     return [this.player, ...this.remotePlayerProxies];
   }
+  /** 视口世界像素（Main.sWidth/sHeight 等价）：画布像素÷相机缩放 = 世界坐标宽高。
+   *  消费源：Enemy.canAnyPlayerSeeThisTile（NPC.cs:43877-43890）等屏盒求交族 */
+  screenWorldSize(): { w: number; h: number } {
+    const c = this.renderer.canvas;
+    return { w: c.width / this.camera.zoom, h: c.height / this.camera.zoom };
+  }
   /** tile key → id 反查表（调试句柄/wld 导入映射用） */
   tileByKey = TILE_BY_KEY;
 
@@ -4283,6 +4290,15 @@ export class Game implements GameHooks {
   /** 背包全扫版（拾取/宝箱/商店/合成入包统一入口,与 prefetchInvProjectiles 同款
    *  ≤50 格扫描）。常态近零成本:捡起的放置物其表几乎必然已载（从已渲染的放置物
    *  上拆下来）,preloadFiles 对已载表早退——只有宝箱/商店新家具类才真正发请求 */
+  /** 拖尾族 Extra 贴图预热（2026-08-30 天顶剑 GL 化）：进世界即钉图，杜绝
+   *  挥剑首帧撞 atlas 位图升级排队 → GL 分支退化 CPU 光栅的卡顿窗口。
+   *  afterWorldLoad 三条进世界路径统一触发（File2 探针同款三闸语义）。 */
+  prewarmTrailTextures(): void {
+    try {
+      if (this.atlas) prewarmTrailTextures(this.atlas);
+    } catch { /* 极端环境（node 测试）安全 */ }
+  }
+
   prefetchInvPlaceableSheets(): void {
     // 同 prefetchInvProjectiles 的 player 守卫:存档异步加载链中可能先于赋值触发
     if (!this.player?.inv) return;
@@ -4383,6 +4399,7 @@ export class Game implements GameHooks {
   }
 
   private afterWorldLoad() {
+    this.prewarmTrailTextures();   // ★2026-08-30 拖尾族贴图预热（GL 分支防懒加载退化）
     const w = this.world;
     // 物品变体世界态灌入（ItemVariants：remix/getGood/mechdusa 世界 24 件物品取
     // 变体参数——itemCombat/vanillaStatOfVid 取数口叠层；Player.RefreshItems +
@@ -6572,6 +6589,8 @@ export class Game implements GameHooks {
     // chum 双缓冲翻转（live←上帧 pending）+ 本帧 820 矩形表清空——实体轮前每 tick
     // 恰一次，读侧（Bobber 渔力/VanillaSpawner 鲨鱼概率）同 vanilla 全帧延迟语义
     chumOnPreUpdateAll();
+    // Main.timeForVisualEffects 逐 tick 推进（1458 Main.cs:17340-17343 每固定步 +1）
+    stepVisEffectTick();
     this.entities.update(dt, this);
     // 行走遥测:城镇 NPC 每 30t 采样一次(决策链卡点取证,2026-08-30)
     if (this.tickCount % 30 === 0) {
@@ -12826,7 +12845,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (st.inBounds(x + i, y + j) && st.isSolid(x + i, y + j)) return false;
         }
       }
-      const m = new MinionProj(x * TILE + 8, y * TILE - 32, projId, 0, 0,
+      // ★γ 移交（2026-08-31 蓝队三批）：NewProjectile = **中心**语义（Projectile.cs
+      //  :50043），MinionProj 构造经内圈 −w/2/−h/2 回写——旧"盒左上"传参令扩容后
+      //  钻地龟 34×34 首帧整体右下偏 17px。中心锚 = (x*TILE+8, y*TILE−32)，
+      //  减 minionTrueBox(projId)/2。
+      const bwT = minionTrueBox(projId);
+      const m = new MinionProj(x * TILE + 8 - bwT.w / 2, y * TILE - 32 - bwT.h / 2, projId, 0, 0,
         false, 0, false, () => (this.player.dead ? null : this.player));
       m.noSlot = true;
       m.vy = 15;
@@ -22379,10 +22403,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★1457 变态刀 3106 潜行击退（Player.cs:44013-44016 `knockBack += knockBack *
       // (1f - stealth)`——乘在 kbGlove/kbBuff(num4) 之后；stealth 0=满潜行 → ×2、
       // 1=无潜行 → ×1，仓内 Player.stealth 同语义）
-      const kbNum4 = 1 + (this.player.equipStats.kbGlove ? 1 : 0)
-        + (this.player.buffs.has(BuffType.Titan) ? 0.5 : 0);
-      const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * kbNum4
-        * (swingVid === 3106 ? 1 + (1 - this.player.stealth) : 1);
+      // ★F8 加法形保持单行结构锚（weapon-melee-leftover 结构断言依赖序：kbGlove→Titan→3106）
+      const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * (1 + (this.player.equipStats.kbGlove ? 1 : 0) + (this.player.buffs.has(BuffType.Titan) ? 0.5 : 0)) * (swingVid === 3106 ? 1 + (1 - this.player.stealth) : 1);
       const killed = e.hurt(dmg, kdir * kb, 0, this, this.player.equipStats.armorPen + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165);音/飘值=StrikeNPC 单点
       // ================= ★R2-07(g) ApplyNPCOnHitEffects 五条 spawn 面 + 蓄能位
       // （Player.cs:44809-44906——受理命中【后】镜像区，依原文顺序排布；

@@ -65,26 +65,26 @@ describe('BeetleMeter buff 钉值管道', () => {
     const m = new BeetleMeter();
     m.tick(host, true, false);       // 猛攻在身一拍（置家族记忆；counter0 → orbs 0）
     host.beetleOrbs = 2;             // 模拟既有球数
+    fb.live.set(BuffType.BeetleMight2, 5 / 60);   // ★预置对面族旧档（防同义反复：
+    //   真实验证"对面族被守卫剥净"这条路径本身，红队 B3 指控的空洞断言已补实）
     m.tick(host, false, true);       // 换防御甲：防御臂 counter++ 未满 180,球数不变
     expect(host.beetleOrbs).toBe(2);
-    expect(fb.live.has(BuffType.BeetleMight2)).toBe(false);
+    expect(fb.live.has(BuffType.BeetleMight2)).toBe(false);   // 对面族当帧剥净
     expect(fb.live.get(BuffType.BeetleEndurance2)).toBeCloseTo(5 / 60, 10);
   });
 
-  it('断供衰减窗不换族、orbs 归零即全剥（:10453-10459 守卫面）', () => {
+  it('双套离身：同帧 counter=0 + orbs=0 + 双族全剥（:16556-16562 无衰减窗）', () => {
     const fb = fakeBuffs();
     const host = { beetleOrbs: 0, buffs: fb };
     const m = new BeetleMeter();
     m.registerHit(500, true);
-    m.tick(host, true, false);       // orbs=1,家族=猛攻
+    m.tick(host, true, false);       // orbs=1,家族=猛攻,Might1 在栏
     expect(fb.live.get(BuffType.BeetleMight1)).toBeCloseTo(5 / 60, 10);
-    m.tick(host, false, false);      // 双套离身第 1 tick：衰减窗内仍钉猛攻一档
-    expect(host.beetleOrbs).toBe(1);
-    expect(fb.live.get(BuffType.BeetleMight1)).toBeCloseTo(5 / 60, 10);
-    expect(fb.live.has(BuffType.BeetleEndurance1)).toBe(false);
-    for (let i = 0; i < 4; i++) m.tick(host, false, false);
-    expect(host.beetleOrbs).toBe(0);   // 5t 维持窗走完（orbLife）
+    fb.live.set(BuffType.BeetleEndurance3, 5 / 60);   // 再预置一枚对面族残留
+    m.tick(host, false, false);      // 双套离身【当帧】
+    expect(host.beetleOrbs).toBe(0);                        // 无 5t 窗（红队 B2 定罪后语义）
     expect(fb.live.has(BuffType.BeetleMight1)).toBe(false);
+    expect(fb.live.has(BuffType.BeetleEndurance3)).toBe(false);
   });
 
   it('裸宿主（无 buffs）不炸——blue-r2 既有用例形态兼容', () => {

@@ -54,7 +54,7 @@
 import type { GameHooks } from './types';
 import { damageVar } from '../stats/ScaleStats';
 import { canHit } from '../physics/LineOfSight';
-import { playerCanHitEnemy as _playerCanHitEnemy, playerProjectileCanHitNpcGate } from './projTargets';
+import { playerCanHitEnemy as _playerCanHitEnemy, playerProjectileCanHitNpcGate, applyBannerDamageDealt } from './projTargets';
 import type { TileStore } from '../world/TileStore';
 
 /** IsConsideredASlimeMount（Mount.cs:522-533）：type==3 SlimySaddle ∪ type==50 QueenSlime */
@@ -122,10 +122,10 @@ export function minecartDamageBase(currentSpeed: number,
  *  ★掷骰次数对齐原文：1457 GetMinecartDamage 的 switch 各支（含 default）都先掷一次
  *  DamageVar(:29479-29511)，UsingSuperCart 支 :29512-29515 再掷第二次整体覆写——即
  *  SuperCart 生效期【消耗两次】DamageVar、终值取第二次（2026-08-30 R1 复核时顺带修复：
- *  旧版 SuperCart 只掷一次，随机流长度与原版差 1）。半点舍入登记：C# Main.DamageVar
- *  的 (int)Math.Round 默认 ToEven（52.5→52），本仓项目统一 damageVar = JS Math.round
- *  half-up（52.5→53，ScaleStats 内已登记的全局口径选择）——精确 .5 中点会有 ±1 偏差，
- *  属全仓 DamageVar 层既有决策，不在本通道私改。 */
+ *  旧版 SuperCart 只掷一次，随机流长度与原版差 1）。半点舍入登记：damageVar 自
+ *  ★F9 蓝队三批起迁入 stats/DamageVar.ts 单源并改 C# ToEven 银行家形（52.5→52，
+ *  与 Main.DamageVar 的 (int)Math.Round 默认一致；旧"项目统一 Math.round half-up
+ *  52.5→53"全局口径选择已被该批废止）——精确 .5 中点不再有仓内自造偏差。 */
 export function getMinecartDamage(currentSpeed: number, ctx: MinecartDamageCtx,
   luck = 0, rnd: () => number = Math.random): { damage: number; knockback: number } {
   const base = minecartDamageBase(currentSpeed, ctx);
@@ -231,7 +231,10 @@ export function minecartNpcRampage(cart: {
     // ★附带②：armorPen 参改走玩家 GetArmorPenetration(melee:false) 同源链
     // （ApplyDamageToNPC :20597 `damage += npc.checkArmorPenetration(GetArmorPenetration(
     // melee:false))`——仓内单桶 equipStats.armorPen；旧直传 0=漏穿甲）
-    e.hurt(dmgOut, dir * kb, 0, game, playerArmorPenOf(game), crit, 0, true);
+    // ★F1（2026-08-31 蓝队三批）：原版矿车冲撞/踩踏/召唤冲撞三循环都走
+    //   ApplyDamageToNPC——旗加伤（GetBannerBuffEffect DamageDealt）是 :20599
+    //   内置段，凡该通道必吃一次；此前弹幕/坐骑各站全族缺位。
+    e.hurt(applyBannerDamageDealt(game, e, dmgOut), dir * kb, 0, game, playerArmorPenOf(game), crit, 0, true);
     hits++;
     e.iframes = 30;                                               // :27819 immune[i]=30
     if (e.dead) {
@@ -326,7 +329,7 @@ function collisionAttackSweep(
     let dir = p.facing;
     if (p.vx < 0) dir = -1;
     else if (p.vx > 0) dir = 1;
-    e.hurt(dmg, dir * cfg.knockback, 0, game, playerArmorPenOf(game), false, 0, true);   // crit:false 字面（见文件头注）;★附带② AP 同源链
+    e.hurt(applyBannerDamageDealt(game, e, dmg), dir * cfg.knockback, 0, game, playerArmorPenOf(game), false, 0, true);   // crit:false 字面（见文件头注）;★附带② AP 同源链;★F1 ApplyDamageToNPC :20599 旗乘区
     e.iframes = cfg.npcImmune;                                     // nPC.immune[whoAmI]=N
     // ★GC1/D3 统一时钟桥写（NPC.immune[whoAmI] 的第二承载面）：nPC.immune[whoAmI]
     // 原文即 per-player 槽（本仓双轨制：实体级 iframes 弹幕域直用 + 共享表供近战门）
@@ -626,7 +629,7 @@ export function chilletDashCharge(
     let dir = p.facing;
     if (p.vx < 0) dir = -1;
     else if (p.vx > 0) dir = 1;
-    e.hurt(dmg, dir * kbx, 0, game, playerArmorPenOf(game), false, 0, true);   // crit:false 字面(:21402)
+    e.hurt(applyBannerDamageDealt(game, e, dmg), dir * kbx, 0, game, playerArmorPenOf(game), false, 0, true);   // crit:false 字面(:21402);★F1 ApplyDamageToNPC :20599 旗乘区
     e.iframes = 20;                                                // nPC.immune[whoAmI]=20（:21403）
     (game as unknown as { noteNpcPlayerImmune?: (id: number, t: number) => void })
       .noteNpcPlayerImmune?.((e as unknown as { id?: number }).id ?? -1, 20);

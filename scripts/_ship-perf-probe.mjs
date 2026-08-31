@@ -1,0 +1,20 @@
+// 船区卡顿定位仪（2026-08-31）：开 v8.cpu_profiler 采样 4s → ProfileChunk 自时 top
+import puppeteer from 'puppeteer-core';
+import fs from 'node:fs';
+const ORIGIN='http://localhost:5201';
+const MAP='/Users/vinlic/Downloads/map-Starter_World (16).json';
+const browser=await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:'new',defaultViewport:{width:988,height:862},protocolTimeout:600000,args:['--allow-pre-commit-input']});
+const page=await browser.newPage();
+await page.goto(ORIGIN,{waitUntil:'domcontentloaded',timeout:60000});
+await page.waitForFunction(()=>typeof window.__swFlow==='object'&&!!window.__swFlow?.loadJson,{timeout:120000});
+await page.evaluate(async(t)=>{await window.__swFlow.loadJson(t);},fs.readFileSync(MAP,'utf8'));
+await page.waitForFunction(()=>!!window.__swGame?.world?.store?.w,{timeout:240000});
+await new Promise(r=>setTimeout(r,1200));
+await page.evaluate(()=>{const g=window.__swGame;g.player.x=6193*16;g.player.y=(305+4)*16;g.player.vx=0;g.player.vy=0;});
+await new Promise(r=>setTimeout(r,1600));
+await page.tracing.start({categories:['devtools.timeline','v8.execute','disabled-by-default-v8.cpu_profiler','disabled-by-default-devtools.timeline.frame']});
+await new Promise(r=>setTimeout(r,4000));
+const buf=await page.tracing.stop();
+fs.writeFileSync('/tmp/ship-trace.json',buf);
+console.log('trace saved',buf.length,'bytes');
+await browser.close();

@@ -8,7 +8,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 
 interface ArcOwner { cx: number; cy: number; x: number; y: number; w: number; h: number; facing: number; dead: boolean }
 
@@ -71,7 +71,7 @@ export class TerraArc extends Entity {
       if (!(ex - bw / 2 < e.x + e.w && ex + bw / 2 > e.x && ey - bh / 2 < e.y + e.h && ey + bh / 2 > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.hitSet.add(e.id);
     }
     if (this.t >= this.ai1) this.dead = true;                                    // :39554-39557

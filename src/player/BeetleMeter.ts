@@ -20,7 +20,8 @@
 //      beetleCounter++；≥180 且 orbs<3 → orbs+1、counter=0（满 3 时钉在 180）
 //  · 受击减球 Player.Hurt :38608-38623：beetleDefense && orbs>0 → endurance += .15n、
 //      orbs--、beetleCounter=0f（防御消费清空蓄能——防御侧承管）。
-//  · 套离身：原版靠 buff 95-100 的 5t 刷新窗断供过期 → 记 orbLife=5t 到期 orbs=0。
+//  · 套离身：UpdateArmorSets_Always_Beetle :16556-16562 counter=0 + UpdateBuffs 双族
+//      守卫同帧 DelBuff/orbs=0（无断供衰减窗——首版"5t 维持窗"模型系误建，已拆）。
 //
 // 旧时间蓄能近似（Player.fixedUpdate lastMeleeTick/beetleCharge 90t/球 + onMeleeHit
 // 刷窗口）退役路径：Game 近战管线不再调 player.onMeleeHit()，改由本 meter 消费命中。
@@ -44,9 +45,7 @@ export class BeetleMeter {
   private counter = 0;
   /** beetleCountdown（int 字段 :883） */
   private countdown = 0;
-  /** 球 5t 续命（buffTime[j]=5 维持窗等价形）：任一套在身的 tick 刷新为 5 */
-  private orbLife = 0;
-  /** 末次在身的家族（原版 buff 档不变自然倒计时——断供衰减窗内图标不换族） */
+  /** 末次在身的家族（原版 buff 档在身期间不变——换族守卫同帧剥净，衰减窗不存在） */
   private lastOffense = false;
 
   private readOrbs(p: BeetleHost): number {
@@ -85,7 +84,6 @@ export class BeetleMeter {
       if (num < orbs) this.countdown = 0;          // :16678-16680 掉层重置消散计数
       else if (num > orbs) this.counter += 200;    // :16682-16684 升层补贴
       this.writeOrbs(p, num);                      // AddBuff(97+num,5) 可观察面
-      this.orbLife = 5;                            // buffTime[j]=5 维持窗
     } else if (defenseSet) {
       // ApplySetBonus_BeetleDefense :16596-16617
       this.counter++;
@@ -99,25 +97,35 @@ export class BeetleMeter {
           this.counter = T;                        // 满 3 钉住（不累计溢出）
         }
       }
-      this.orbLife = 5;
     } else {
-      // 双套不在身：buff 断供过期（5t 维持窗走完 orbs=0）；counter 冻结
-      // （原版无显式清零点——UpdateArmorSets 不调两臂即静态保留到重入）
-      if (this.readOrbs(p) > 0 && --this.orbLife <= 0) this.writeOrbs(p, 0);
+      // 双套不在身：原版【同帧】清账——UpdateArmorSets_Always_Beetle :16556-16562
+      // `if (!defense && !offense) { beetleCounter = 0f; return; }` + UpdateBuffs
+      // 双族守卫（:10453-10459/:10521-10526）当场 DelBuff 并 orbs=0。无 5t 衰减窗
+      //（首版误建"断供过期"窗且头注称"原版无显式清零点"——红队 B2 以 :16560 定谳推翻）
+      this.counter = 0;
+      this.writeOrbs(p, 0);
     }
     this.pinBuffs(p);
   }
 
   /** buff 图标维持（:10432/:16663-16675 钉值 + :10434-10452/:16686-16696 换档清旧）。
-   *  宿主无 buff 栏（裸测试宿主）时静默跳过。 */
+   *  ★双族各档都过一遍守卫——原版两族 UpdateBuffs 分支各自 `!旗 → DelBuff` 互斥
+   *  （:10453-10459/:10521-10526），换族当帧对面旧档即剥；宿主无 buff 栏（裸测试
+   *  宿主）时静默跳过。 */
   private pinBuffs(p: BeetleHost): void {
     const buffs = (p as { buffs?: { apply(type: number, durationSec: number): void; remove(type: number): void } }).buffs;
     if (!buffs) return;
     const n = this.readOrbs(p);
-    const fam = this.lastOffense ? BEETLE_MIGHT_TIERS : BEETLE_ENDURANCE_TIERS;
+    const cur = this.lastOffense ? BEETLE_MIGHT_TIERS : BEETLE_ENDURANCE_TIERS;
+    const other = this.lastOffense ? BEETLE_ENDURANCE_TIERS : BEETLE_MIGHT_TIERS;
     for (let i = 0; i < 3; i++) {
-      if (n > 0 && i + 1 === n) buffs.apply(fam[i], 5 / 60);
-      else buffs.remove(fam[i]);
+      if (n > 0 && i + 1 === n) {
+        buffs.remove(other[i]);
+        buffs.apply(cur[i], 5 / 60);
+      } else {
+        buffs.remove(cur[i]);
+        buffs.remove(other[i]);
+      }
     }
   }
 

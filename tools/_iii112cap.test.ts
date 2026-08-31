@@ -199,6 +199,10 @@ let SHEET_N = 0;
     if (!winOn) return;
     wr(hkF, `HKM|${name}|${s ?? ''}|${t ?? ''}|n=${rollN}`);
   };
+  g.__swAbGate = (tag: string, ai: number, aj: number, extra?: number) => {
+    if (!winOn) return;
+    wr(hkF, `G|${tag}|${ai},${aj}${extra !== undefined ? '|' + extra : ''}|n=${rollN}`);
+  };
   try {
     await generateWorld({
       width: 4200, height: 1200, seedText: SEED, evil: 0,
@@ -212,5 +216,6 @@ let SHEET_N = 0;
     g.__swOnRoll = oRoll;
     delete g.__swChestEv; delete g.__swChestWrite; delete g.__swChestDbg;
     delete g.__swHouseGate; delete g.__swHouseRooms; delete g.__swHouseEv; delete g.__swHouseStage; delete g.__swHouseMk;
+    delete g.__swAbGate;
   }
 }, 600_000);

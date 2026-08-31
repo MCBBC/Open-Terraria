@@ -32,6 +32,8 @@ import type { Renderer } from '../render/Renderer';
 export interface TrailPt {
   x: number; y: number;          // 世界坐标（ctx 已在相机系）
   hw: number;                    // 半宽 px
+  /** 顶点旋转（刃轴向，AddVertexPair 截面 = (rot−π/2) 向；缺省按相邻点走向推导） */
+  rot?: number;
   r: number; g: number; b: number; a: number;   // 顶点色 0-1（沿程已含淡出）
 }
 
@@ -87,6 +89,42 @@ function sampleAt(im: ImgData | null, u: number, v: number): number {
 }
 
 let scratch: HTMLCanvasElement | null = null;
+
+/** GL 纹理源直连加载器：绕开 atlas.ensureVImage 的 createImageBitmap 异步升级链
+ *  （重负载下升级排队数秒，GL 分支整段退化 CPU 光栅 = 卡顿；2026-08-30 实测定罪：
+ *  probe 中 ensureVImage 6 秒窗口全程 pending 而直连 Image 数毫秒落地）。
+ *  独立缓存：status pending→ok；失败 10s 重试。 */
+const rawImgs = new Map<string, { img: HTMLImageElement | null; failedAt: number }>();
+function ensureRawImg(path: string): HTMLImageElement | null {
+  const hit = rawImgs.get(path);
+  if (hit) {
+    if (hit.img) return hit.img;
+    if (performance.now() - hit.failedAt > 10_000) rawImgs.delete(path);
+    else return null;
+  }
+  const rec = { img: null as HTMLImageElement | null, failedAt: 0 };
+  rawImgs.set(path, rec);
+  const im = new Image();
+  im.onload = () => { rec.img = im; };
+  im.onerror = () => { rec.failedAt = performance.now(); };
+  im.src = `sprites/${encodeURI(path)}`;
+  return null;
+}
+
+/** 进世界预热：把六组 Extra 贴图在【 load 早期】钉进 atlas（+ raw 直连链）。
+ *  痛点：draw 时才懒加载会撞上 atlas.createImageBitmap 升级排队（重负载数秒），
+ *  期间 GL 分支拿不到图 → 整段退化 CPU 光栅 = 挥剑即卡。afterWorldLoad 调用。 */
+export function prewarmTrailTextures(atlas: NonNullable<Renderer['atlas']>): void {
+  const seen = new Set<string>();
+  for (const set of Object.values(EXTRA_SETS)) {
+    for (const path of set.imgs) {
+      if (!path || seen.has(path)) continue;
+      seen.add(path);
+      try { atlas.ensureVImage(path); } catch { /* 预热失败不影响绘制链 */ }
+      ensureRawImg(path);
+    }
+  }
+}
 
 export interface TrailSpec {
   /** 'RainbowRod'(宝石弹)/'MagicMissile'(魔导弹)/'FlameLash'/'LightDisc'
@@ -195,6 +233,69 @@ export function drawStripTrail(
       const o = (pyi * rw + pxi) * 4;
 
       if (set.tech) {
+        // ===== GL 路径：obj58 语义整条交给 GPU（极光同教训——CPU 硬画预乘/混合
+        // 语义对不齐且慢；此处顶点交错后一次 drawElements，主链每帧单次合成）。
+        // p 沿 XNA 约定：pts[0] = 最新（[0]=newest），p=0 为刃后最近段。
+        // ?trailgl=0 = 逃生门（SwiftShader/驱动白名单问题强制 CPU 路径）
+        const dbgOn = (() => { try { return new URLSearchParams(location.search).has('traildbg'); } catch { return false; } })();
+        const dbg = (why: string): void => { if (dbgOn) { const w = (renderer as unknown as { __trailDbg?: Record<string, number> }).__trailDbg ??= {}; w[why] = (w[why] ?? 0) + 1; } };
+        const glfx = (() => {
+          try {
+            if (new URLSearchParams(location.search).get('trailgl') === '0') { dbg('gate-off'); return null; }
+          } catch { /* 非浏览器环境 */ }
+          const g = renderer.acquireGL();
+          if (!g) dbg('no-glfx');
+          return g;
+        })();
+        const img0 = ensureRawImg(set.imgs[0]);
+        const img1 = ensureRawImg(set.imgs[1]);
+        if (!img0) dbg('no-img0');
+        if (!img1) dbg('no-img1');
+        if (glfx && img0 && img1 && img0.width > 0 && img1.width > 0) {
+          const vW = Math.max(2, Math.round(renderer.glViewW));
+          const vH = Math.max(2, Math.round(renderer.glViewH));
+          glfx.resize(vW, vH);
+          glfx.trailFrameBegin(vW, vH, renderer.glCamX, renderer.glCamY);
+          const t0e = glfx.texFromImage(`trail:${set.imgs[0]}`, img0 as unknown as TexImageSource, false, true, true);
+          const t1e = glfx.texFromImage(`trail:${set.imgs[1]}`, img1 as unknown as TexImageSource, false, true, true);
+          if (!t0e || !t1e) dbg('tex-upload-null');
+          if (t0e && t1e) {
+            const m = pts.length;
+            const verts = new Float32Array(m * 2 * 9);
+            const idx = new Uint16Array((m - 1) * 12);
+            const op = spec.opacity;
+            for (let i = 0; i < m; i++) {
+              const q = pts[i];
+              const rot = q.rot
+                ?? (i + 1 < m ? Math.atan2(pts[i + 1].y - q.y, pts[i + 1].x - q.x)
+                  : i > 0 ? Math.atan2(q.y - pts[i - 1].y, q.x - pts[i - 1].x) : 0);
+              const dxC = Math.cos(rot - Math.PI / 2) * q.hw;
+              const dyC = Math.sin(rot - Math.PI / 2) * q.hw;
+              const prog = m > 1 ? i / (m - 1) : 0;   // XNA [0]=newest ⇒ p=0 刃后最近段
+              const d = q.hw * 2;
+              const b = i * 18;
+              // A 侧(+widthDir)：progress=p；B 侧：progress=0（VertexStrip 语义）
+              verts[b] = q.x + dxC; verts[b + 1] = q.y + dyC;
+              verts[b + 2] = q.r * op; verts[b + 3] = q.g * op; verts[b + 4] = q.b * op; verts[b + 5] = q.a * op;
+              verts[b + 6] = prog; verts[b + 7] = d; verts[b + 8] = d;
+              const b2 = b + 9;
+              verts[b2] = q.x - dxC; verts[b2 + 1] = q.y - dyC;
+              verts[b2 + 2] = q.r * op; verts[b2 + 3] = q.g * op; verts[b2 + 4] = q.b * op; verts[b2 + 5] = q.a * op;
+              verts[b2 + 6] = 0; verts[b2 + 7] = 0; verts[b2 + 8] = d;
+            }
+            for (let k = 0; k < m - 1; k++) {
+              const v = k * 2, j = k * 12;
+              // PrepareIndices 正面 + 背面（includeBacksides=true, :93-116）
+              idx[j] = v; idx[j + 1] = v + 1; idx[j + 2] = v + 2;
+              idx[j + 3] = v + 2; idx[j + 4] = v + 1; idx[j + 5] = v + 3;
+              idx[j + 6] = v + 2; idx[j + 7] = v + 1; idx[j + 8] = v;
+              idx[j + 9] = v + 2; idx[j + 10] = v + 3; idx[j + 11] = v + 1;
+            }
+            glfx.trailStrip(t0e, t1e, verts, idx, set.ssd);
+            return true;
+          }
+        }
+        // GL 不可用 → CPU obj58 退化（半分辨率+覆盖格已限流）
         // ===== obj58 逐指令忠实执行 =====
         // ★p 取【时间序】progress：调用方数组 index0=最新（本仓历史环约定），而 XNA
         //   VertexStrip 以 oldest-first 迭代——此处翻转换算，wEnv 尾段(旧端)收 0 才符合

@@ -37,8 +37,9 @@ describe('GLSpriteLayer 回归守卫(源码级锁定)', () => {
   });
 
   it('dispose 字节归零(防跨世界累积)', () => {
-    // 窗 600:同上,容注释间隔,防删调用不防排版
-    expect(SRC).toMatch(/dispose[\s\S]{0,600}bytes = 0/);
+    // 窗 1200:容注释/插段间隔(2026-08-30 拖尾 pass 资源清理插入把 600 窗撑爆),
+    // 守卫意图是防【bytes 归零调用被删】不防排版
+    expect(SRC).toMatch(/dispose[\s\S]{0,1200}bytes = 0/);
   });
 
   it('WebGL2 DOM 源子区上传走 8 参重载(9 参曾把画布左上角贴进目标区 = #362CFF 退化块)', () => {

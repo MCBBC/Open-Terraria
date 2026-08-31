@@ -16,6 +16,9 @@ import { hfIs1457 } from './HellFortPass';
 // ★dungeon-1457 批：placeTrap 双地牢界拒门（WorldGen.cs:8865）三因子承载
 import { placeTrapDualDungeonReject } from './DungeonStyles1457';
 
+const __swProcessEnv: Record<string, string | undefined> = (typeof process !== 'undefined') ? (process as unknown as { env?: Record<string, string | undefined> }).env ?? {} : {};
+
+
 // ---- 内部 id / sheet 解析（表均为原版 sheet id 空间，消费端经 sheetOf 换算） ----
 const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -1109,7 +1112,15 @@ function check2x1Trap(st: TileStore, x: number, y: number): void {
 function killObjectAt(st: TileStore, x: number, y: number): void {
   const t = st.type[st.idx(x, y)];
   const m = MULTI_DEFS.get(t);
-  if (m) {
+  // ★IIIII99c（jagged #76 定罪修复①）：巨石族（滚地仙人掌 484/石巨石 138 等）禁用
+  //   「向后扫同型完整块→整块静默清除」。相邻两具残缺/完整体拼接可形成【chimera
+  //   假锚】——golden 实证：L 体 (2419,487)TL 直杀后，成员 (2420,487)TR 自身被
+  //   清时其扫描窗 {cols(2420..2421)×rows(487..488)} 覆盖 L-TR/L-BR+R-TL/R-BL 四格
+  //   全同型 ⇒ 误判为完整块并连坐抹掉 R 体左列 (2421,487)/(2421,488)（x86 保留！）
+  //   ——vanilla 无此盲扫：残缺判收全权在 TileFrame 尾环的 Check2x2（帧象限一致
+  //   性内建），故此处退化为仅清自身、交给 cascade3x3T→check2x2Gen 精确分派。
+  //   （掷流中性：全族 dustAmount=0 表 KDUST_AMT0_B，级联展开零额外掷。）
+  if (m && !isBoulderType(t)) {
     for (let ay = y; ay > y - m.h; ay--) {
       for (let ax = x; ax > x - m.w; ax--) {
         let full = true;
@@ -1659,7 +1670,7 @@ function sandEv(kind: string, a: number, b: number, v: number): void {
 /** ★III13+#28 回归仲裁开关：SW_I13_LEGACY=1 时关闭本批新增（CheckSuper 分派/
  *  桶尾级联）并回退 IIII10 两刀行为面（plate 尾级联、墙挂真分派），供 A/B 反演。
  *  运行时可切（__i13SetLegacy，隔离重放探针同进程双跑对照）；浏览器无 process 守卫。 */
-let I13_LEGACY = typeof process !== 'undefined' && process.env?.SW_I13_LEGACY === '1';
+let I13_LEGACY = typeof process !== 'undefined' && (__swProcessEnv ?? {})?.SW_I13_LEGACY === '1';
 export function __i13SetLegacy(v: boolean): void { I13_LEGACY = v; }
 function i13Legacy(): boolean { return I13_LEGACY; }
 

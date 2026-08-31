@@ -3933,8 +3933,33 @@ const snap: SnapFn = (name) => {
     //   voice 门 Next(12) 命中再 GetRandomVoiceItem=Next(14)（:37554+Item.cs:49024）。
     //   旧近似 flag9 误挂 !flag10 门 + 残片门误并 flag10 → 上锁 21 箱每箱少掷 1 颗。
     if (flag9 && chestTile === TILE_BY_KEY['chest']) { if (rn(8) === 0) { /* 2192 */ } }
+    // ★IIIII99d2（2026-08-31）：FTW 追加掷（1457 WG.cs:37795-37797 / 1456 :37436-37438 /
+    //   1458 :37803-37805，1457 即终值）——`flag9 && Main.getGoodWorld && genRand.Next(5)==0
+    //   → SetDefaults(5515)`。位序=flag9 砍刀掷(:37792)之后、num9∈23..27 残片掷(:37834)
+    //   之前；仅 tile21 块有此支（467 尾段无 getGoodWorld 掷）。缺此掷=FTW 下每座
+    //   dungeon-wall 21 号箱少耗 1 颗主流骰 → BiomeChests 段 −N 起全城邦相位漂移
+    //   （本批 rig 定罪：x86 fill21 vs JS20 @i=0 同坐标逐格同 attempt；467 箱两侧相等）。
+    //   vanilla 内容面与 2192/5234 同口径（dice 记账为主,5515 不入 SW 箱列——
+    //   本仓 items 表无此 id,dgLootItems 对未注册 id 自动跳过）。
+    if (flag9 && chestTile === TILE_BY_KEY['chest'] && gs.seedFlags.getGoodWorld) {
+      if (rn(5) === 0) { /* 5515 */ }
+    }
     if (chestTile === TILE_BY_KEY['chest'] && num9 >= 23 && num9 <= 27) { if (rn(2) === 0) { /* 5234 */ } }
     else if (chestTile === CHEST2 && num9 === 13) { if (rn(2) === 0) { /* 5234 */ } }
+    // ★IIIII99d（2026-08-31）：rainbowStuff 生物群系箱追加 1260（1458 WG.cs:37920-37927）——
+    //   `if (SecretSeed.rainbowStuff.Enabled && (num10==1156||1571||1569||1572||4607))
+    //   { SetDefaults(1260); Prefix(-1); itemIndex++; }`。位序=21 块残片掷(:37833)/467 块
+    //   残片掷(:37877)之后、vampire 门(:37929)与 voice 门(:37934)之前；1260 是魔法类
+    //   （Item.cs prefix 池 'magic'，DG_PRE_CLASS 已注册）⇒ Prefix(-1) 走单轮
+    //   Next(4)→[Next(36)+Reduced Next(3)] 链。**该支不名单含 1260 本尊**——丛林箱
+    //   （i%5==2, item=1260）落空、其余四族必中 ⇒ 每座 gold/crimson/frozen/desert
+    //   锁箱多耗一颗前缀簇（rb-pc rig 实证 bcRB×4 @rc26826/26912/27045/27076，
+    //   st26 无此掷）。缺此支 = rainbow 链 BiomeChests 窗 −N 骰 → 位点下游相位记账
+    //   全体漂移（XX·IIIII98c 的 +61/+142/−100 尾账与 ±1 边界差皆此 mask 伪影）。
+    //   净效果与其他链零交集：rainbowStuff 关闭时短路，骰流不变。
+    if (gs.seedFlags.rainbowStuff && (num10 === 1156 || num10 === 1571 || num10 === 1569 || num10 === 1572 || num10 === 4607)) {
+      prefixRolls(1260);
+    }
     if (rn(12) === 0) rn(14);
   }
   const dgLoot: number[] = [];

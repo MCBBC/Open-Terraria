@@ -5,9 +5,11 @@
 //           （1457 Projectile.cs:66067-67166，见 ai62Step/abigailBody 注）
 //   flying：其余飞行族悬停玩家侧后环形槽位 → 锁定最近敌俯冲突进（接触伤害+同敌冷却）
 //           → >2000px 瞬移回玩家（原版 minion 回收语义）
-//   ground ：地面步行族（390-392 蜘蛛 AI_026 flag7 / 758 吸血蛙 AI_067 flag2）走
-//           原版步行链（重力+行走+遇障跳/爬墙，见 spiderStep/frogStep 注）；
-//           其余地面近似=重力+碰撞追击
+//   ground ：地面步行族走原版步行链（蜘蛛 390-392 AI_026 flag7 / 吸血蛙 758
+//           AI_067 flag2 两结算段见 ai067WalkChase/spiderStep/frogStep 注;
+//           沙漠虎 833-835 与海盗 393-395 亦于 2026-08-31 台账批归入正轨——
+//           台账批①②,approx-registry「镇民/宠物」⑬）
+//           其余残余地面型暂无在册武器命中（通用重力+碰撞追击兜底保留）
 //   sentry ：定点（施法点）。aiStyle 53 三族 1:1（初冷 120、射速 60/60/90、扇区炮口）；
 //            OOA 四塔（AI_130/134/137/138）与 aiStyle 123（月门/彩虹水晶）各按原版
 import { Entity } from './Entity';
@@ -21,7 +23,7 @@ import { Arrow, projFrameImg, projFrameCount, projSprite } from './Arrow';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
-import { hitCritters } from './projTargets';
+import { hitCritters, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import { playerCanHitEnemy, canBeChasedBy } from './projTargets';
@@ -236,6 +238,73 @@ const MINION_ROT_ONLY = new Set([387, 388, 533, 917, 625, 626, 627, 628, 653]);
  *  玩家→敌（"always knocks enemies away from the player"）,非随从→敌 */
 const MINION_PLAYER_ANCHOR_KB = new Set([697, 699, 707, 708, 759, 1118]);
 
+/** =====================================================================
+ *  ★台账批③（2026-08-31,docs/audit/approx-registry「镇民/宠物」项③）：
+ *  接触冷却家族化——原版 Projectile.localNPCHitCooldown 缺省 -2（Projectile.cs:466,
+ *  SetDefaults 每次重置 :714），三类语义：
+ *   · `-2`（缺省,未覆写型）：Damage_PVE_Inner :12636 immune[owner]==0 门生效 +
+ *     命中尾 :14175 分支全跳过 → 尾支 :14182（penetrate≠1）写 targetNPC.immune[owner]
+ *     =10 ——【吃玩家全局免工件窗】：同玩家全部来源共享该 NPC 的 10t 窗。
+ *   · `local`：SetDefaults 显式 usesLocalNPCImmunity=true + localNPCHitCooldown=N ——
+ *     每弹每敌私表 N t。
+ *   · `idStatic`：usesIDStaticNPCImmunity=true + idStaticNPCHitCooldown=N（immunityIdentity
+ *     =type :10682）——同型全体弹共享按敌的 N t 表。
+ *  下表逐型取 Terarria1458 SetDefaults 实值（行号=块首）；未列入随从 = '-2' 全局窗支。
+ * ===================================================================== */
+export const CONTACT_PLAYER_WINDOW = -2;
+/** number = 局部私表 t（CONTACT_PLAYER_WINDOW=-2 特指全局窗支）;对象 = idStatic 同型桶 */
+export interface IdStaticContact { kind: 'idStatic'; cd: number }
+export type ContactCd = number | IdStaticContact;
+
+/** local/idStatic 逐型表（1458 SetDefaults 行号锚）：数值=local 私表 t；
+ *  {kind:'idStatic'}=同型共享桶。'-2' 缺省族不入表。 */
+const CONTACT_CD_TABLE: Record<number, ContactCd> = {
+  266: { kind: 'idStatic', cd: 12 },   // 宝宝史莱姆（:3527 usesIDStatic）
+  317: 10,                             // 乌鸦（:4110）
+  387: { kind: 'idStatic', cd: 16 },   // 双子激光眼（:4714,曾专用恒 20 迁表）
+  388: { kind: 'idStatic', cd: 12 },   // 痉挛眼（:4730）
+  390: { kind: 'idStatic', cd: 15 },   // 蜘蛛三变体共块（:4754——旧统一 20t → 正轨）
+  391: { kind: 'idStatic', cd: 15 },
+  392: { kind: 'idStatic', cd: 15 },
+  393: 18,                             // 海盗三变体共块（:4765-4770——扑击窗接触伤,local 私表）
+  394: 18,
+  395: 18,
+  407: { kind: 'idStatic', cd: 10 },   // 暴风雨鲨卷（:4893,旧统一 20t → 正轨）
+  533: 12,                             // 致命球（:6008,旧统一 20t → 正轨）
+  623: 5,                              // 星尘守护者（:6713;专段内已用 5 表存照）
+  625: 7,                              // 龙链四段共块（:6756——JS 侧以全链共用 hitCd 实例承载）
+  626: 7,
+  627: 7,
+  628: 7,
+  697: 12,                             // OOA 支线塔/伴生弹族（哨兵端在途消费）
+  688: 3,                              // 闪电光环（:7339,AURA 直伤通道专用表同值）
+  689: 3,
+  690: 3,
+  755: -1,                             // 血蝙蝠（:7792,localCD=-1=攻击轮次免疫,tHit/bHit 承载）
+  758: { kind: 'idStatic', cd: 10 },   // 吸血蛙（:7825——旧误 30t → 正轨）
+  833: 10,                             // 沙漠虎本体（:8095,A① 改链后仍传显式 10 存档）
+  834: 10,
+  835: 10,
+  946: -1,                             // 泰拉棱镜（:8941,同 755 轮次免疫语义）
+  951: { kind: 'idStatic', cd: 10 },   // 雪原精怪 flinx（:8984,通用备用）
+  963: 20,                             // 阿比盖尔（:9113 与既有显式 20 一致）
+  1022: 18,                            // 蘑菇小伙伴（:9679 与显式一致）
+  1036: 20,                            // 雾网蜘蛛（:9781 与显式一致）
+  1093: 9,                             // 帕鲁猫（:10206,palGroundStep 显式同源）
+  1112: 9,
+  1118: 30,
+  1119: 30,
+};
+
+/** 同型共享 idStatic 免疫桶（immunityIdentity=type :10682——实例级 Map 单例承载
+ *  `static float[,] perIDStaticNPCImmunity` :13823/:14037 语义） */
+const IDSTATIC_BUCKETS = new Map<number, MinionHitCd>();
+
+/** 弹型接触冷却解析（-2 全局窗/私表/idStatic 三态）;CONTACT_CD_TABLE 缺项 = 全局窗 */
+function contactResolve(projId: number): ContactCd {
+  return CONTACT_CD_TABLE[projId] ?? CONTACT_PLAYER_WINDOW;
+}
+
 /** 远程射击随从表（Projectile.cs AI_062/AI_026/aiStyle66 射击分支提取）：
  *  shot=射出弹幕 speed=弹速 cd=冷却 t range=射击门距（两者仅余通用路径族消费——
  *  AI_062 五型 373/375/407/423/613 已归 ai62Step 原版链：冷却=ai[1] 随机计数器
@@ -260,10 +329,15 @@ const MINION_SHOOT: Record<number, { shot: number; speed: number; cd?: number; r
   407: { shot: 408, speed: 20, life: 300 },
   423: { shot: 433, speed: 4, life: 100 },                        // 423 分支无覆写 → SetDefaults 100
   613: { shot: 614, speed: 14, life: 300 },
-  191: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8, precallY: true }, // 掷矛抛物线(aiStyle 1) 手部高度 :58764
-  192: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8, precallY: true },
-  193: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8, precallY: true },
-  194: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8, precallY: true },
+  // ★台账批⑭（2026-08-31）：search=索敌检索半径（Minion_FindTargetInRange 式家族
+  // 门——AI_026 flag10 群 = 主周【曼哈顿】窗 num104=700+100=800 内首只（CanHit 盒,
+  // :61424-61446）;search 缺省族回落 self 心距。俾格米缺 search 键曾吃 1000 兜底错档。
+  // 登记剩余差：原版检索基点=玩家心 + 射击门 num139<800+40×slot（slot 递增）——
+  // 本仓 slot 加成未折算（weapon-minion-ai 回归面覆盖基础窗）
+  191: { shot: 195, speed: 11, cd: 30, range: 800, search: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8, precallY: true }, // 掷矛抛物线(aiStyle 1) 手部高度 :58764
+  192: { shot: 195, speed: 11, cd: 30, range: 800, search: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8, precallY: true },
+  193: { shot: 195, speed: 11, cd: 30, range: 800, search: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8, precallY: true },
+  194: { shot: 195, speed: 11, cd: 30, range: 800, search: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8, precallY: true },
   387: { shot: 389, speed: 8, cd: 45, range: 1000, dmgMul: 1.15, life: 300 },  // timeLeft=300(:28981)
   // Foxparks 族（AI_026 flag10 段 :62566-62753）：cd num135 42/30（1113 :62573）；
   // 射程门 num139<800+num134（1113 num134+=360 :62674-62675 → 1160）； muzzleY=-10
@@ -277,6 +351,16 @@ const MINION_SHOOT: Record<number, { shot: number; speed: number; cd?: number; r
   // 1113 索敌检索 1160（:62674-62675 num134+=360 → num139<800+360 :62691；approach num151=450+180 :62672/:62674）
   1113: { shot: 1097, speed: 11, cd: 30, range: 1160, search: 1160, life: 300, muzzleY: -10, burn: 'hellfire' }, // 6149 可靠的火绒狐（1457 新）
 };
+
+/** ★三轮 η 红队：闪电光环 armorPenetrationPercent 门单源（Projectile.cs:13266-13269）。
+ *  `if ((type==688||689||690) && targetNPC.type!=68 && targetNPC.defense<999)
+ *   ⇒ armorPenetrationPercent=1f`——受害者非 68（地牢守卫族）且防御<999 才给 100%
+ *  护穿；守卫/≥999 防御高防位退款池按 0 折算。 */
+export function lightningAuraPenPercent(
+  vanillaId: number | null | undefined, defense: number | undefined,
+): number {
+  return vanillaId !== 68 && (defense ?? 0) < 999 ? 1 : 0;
+}
 
 /** ★三轮蓝队 F5②：MinionProj SetDefaults 真盒单源读口（尺寸初始化链同步本函数）。
  *  Game.spawnDigtoiseOnCursor（Game.ts:12818 调用点在并行 α 的 Game 属主作业区外沿,
@@ -414,12 +498,142 @@ const catmullRom = (
   };
 };
 
+/** Utils.GetLerpValue（Utils.cs:738-752）：clamped 时外值钳边界 */
+export const getLerpValue = (from: number, to: number, t: number): number => {
+  if (from < to) { if (t < from) return 0; if (t > to) return 1; }
+  else { if (t < to) return 1; if (t > from) return 0; }
+  return (t - from) / (to - from);
+};
+
+/** ★台账批⑤（2026-08-31）：Utils.SolveQuadratic（Utils.cs:721-737）+ GetChaseResults
+ *  （Utils.cs:651-708）1:1 —— AI_067_TryJumpingToTarget 蘑菇支蓄跃拦截速度的真预测面。
+ *  旧实现"直瞄归一 ×32"在目标横向移动时永不复现 InterceptTime<120 门内交点。 */
+export interface ChaseResults {
+  intercepts: boolean;
+  time: number;
+  positionX: number;
+  positionY: number;
+  vx: number;
+  vy: number;
+}
+export function solveQuadratic(a: number, b: number, c: number): [number, number] | null {
+  const num = b * b - 4 * a * c;
+  if (num > 0) return [(-b + Math.sqrt(num)) / (2 * a), (-b - Math.sqrt(num)) / (2 * a)];
+  if (num < 0) return null;
+  return [(-b + Math.sqrt(num)) / (2 * a), (-b + Math.sqrt(num)) / (2 * a)];
+}
+export function getChaseResults(
+  chaserX: number, chaserY: number, chaserSpeed: number,
+  runnerX: number, runnerY: number, runnerVx: number, runnerVy: number,
+): ChaseResults {
+  if (chaserX === runnerX && chaserY === runnerY) {
+    return { intercepts: true, time: 0, positionX: chaserX, positionY: chaserY, vx: 0, vy: 0 };
+  }
+  if (chaserSpeed <= 0) {
+    return { intercepts: false, time: 0, positionX: 0, positionY: 0, vx: 0, vy: 0 };
+  }
+  const dx = chaserX - runnerX, dy = chaserY - runnerY;
+  const dist = Math.hypot(dx, dy);
+  const rs = Math.hypot(runnerVx, runnerVy);
+  let time = 0, px = 0, py = 0;
+  if (rs === 0) {
+    time = dist / chaserSpeed;
+    px = runnerX; py = runnerY;
+  } else {
+    const a = chaserSpeed * chaserSpeed - rs * rs;
+    const b = 2 * (dx * runnerVx + dy * runnerVy);
+    const c = -dist * dist;
+    const roots = solveQuadratic(a, b, c);
+    if (!roots || (roots[0] < 0 && roots[1] < 0)) {
+      return { intercepts: false, time: 0, positionX: 0, positionY: 0, vx: 0, vy: 0 };
+    }
+    time = roots[0] > 0 && roots[1] > 0 ? Math.min(roots[0], roots[1]) : Math.max(roots[0], roots[1]);
+    px = runnerX + runnerVx * time;
+    py = runnerY + runnerVy * time;
+  }
+  return {
+    intercepts: true, time, positionX: px, positionY: py,
+    vx: (px - chaserX) / time, vy: (py - chaserY) / time,
+  };
+}
+
+/** Collision.WetCollision（1458 Collision.cs:1575-1650）盒级 1:1 折算：
+ *  内探针 = 盒中心 min(10,W)×min(⌊H/2⌋,H) 小盒；扫 盒左列−1..右下+2 外扩窗，
+ *  液格水面 Y += (256−液量)/32×2（水面段高同步截短）；坡面格带上格带液同判湿。
+ *  台账批⑥：旧实现仅中心单格 liquid>0——顶缘浸水浅滩漏判/半浸早判两向漂移 */
+export function wetCollisionProbe(
+  st: { w: number; h: number; liquid: Uint8Array; slope: Uint8Array; idx(x: number, y: number): number },
+  x: number, y: number, width: number, height: number,
+): boolean {
+  const cxs = x + width / 2, cys = y + height / 2;
+  const pw = Math.floor(Math.min(10, width));
+  const ph = Math.min(Math.floor(height / 2), height);
+  const bx = cxs - pw / 2, by = cys - ph / 2;
+  const i0 = Math.max(0, Math.floor(x / 16) - 1);
+  const i1 = Math.min(st.w - 1, Math.floor((x + width) / 16) + 2);
+  const j0 = Math.max(0, Math.floor(y / 16) - 1);
+  // 上界 = Main.maxTilesY−40（:15806/:15809 字面）;微世界（测试桩）负值回退整体高
+  const yCap = st.h - 40 >= 0 ? st.h - 40 : st.h - 1;
+  const j1 = Math.min(yCap, Math.floor((y + height) / 16) + 2);
+  for (let i = i0; i <= i1; i++) {
+    for (let j = j0; j <= j1; j++) {
+      const idx = st.idx(i, j);
+      if (st.liquid[idx] > 0) {
+        const drop = ((256 - st.liquid[idx]) / 32) * 2;
+        const top = j * 16 + drop;
+        const segH = 16 - Math.trunc(drop);
+        if (bx + pw > i * 16 && bx < i * 16 + 16 && by + ph > top && by < top + segH) return true;
+      } else if (st.slope[idx] > 0 && j > 0) {
+        if (st.liquid[st.idx(i, j - 1)] > 0 && bx + pw > i * 16 && bx < i * 16 + 16
+          && by + ph > j * 16 && by < j * 16 + 16) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Projectile.CanHitWithOwnBody（1458 :12428-12462）本体四试视线 1:1 折算：
+ *  CanHit(整盒→整盒) ∪ CanHitLine 三组端点对（朝向前沿中点 ±h/3 档）。
+ *  ExtendedCanHitCheckRange 族随从型无登记（ProjectileID.Sets 空表）不折算；
+ *  ownerHitCheckDistance=1000 门由调用方射程承载。台账批⑦⑧共用。 */
+export function canHitWithOwnBodyBox(
+  store: import('../world/TileStore').TileStore,
+  sx: number, sy: number, sw: number, sh: number, facing: number,
+  ex: number, ey: number, ew: number, eh: number,
+): boolean {
+  if (canHit(store, sx, sy, sw, sh, ex, ey, ew, eh)) return true;
+  const ox = sx + sw / 2 + facing * sw / 2;
+  if (canHitLine(store, ox, sy + sh / 2 - sh / 3, 0, 0, ex + ew / 2, ey + eh / 2 - eh / 3, 0, 0)) return true;
+  if (canHitLine(store, ox, sy + sh / 2 - sh / 3, 0, 0, ex + ew / 2, ey + eh / 2, 0, 0)) return true;
+  if (canHitLine(store, ox, sy + sh / 2, 0, 0, ex + ew / 2, ey + eh / 2 + eh / 3, 0, 0)) return true;
+  return false;
+}
+
+/** Projectile.CanHitWithMeleeWeapon（1458 :12415-12426）：玩家四点版（gravDir 平地恒 1）。
+ *  台账批⑦ IsInRangeOfMeOrMyOwner 主侧门。 */
+export function canHitWithMeleeWeaponBox(
+  store: import('../world/TileStore').TileStore,
+  px: number, py: number, pw: number, ph: number, pFacing: number,
+  ex: number, ey: number, ew: number, eh: number,
+): boolean {
+  if (canHit(store, px, py, pw, ph, ex, ey, ew, eh)) return true;
+  const ox = px + pw / 2 + pFacing * pw / 2;
+  if (canHitLine(store, ox, py + ph / 2 - ph / 3, 0, 0, ex + ew / 2, ey + eh / 2 - eh / 3, 0, 0)) return true;
+  if (canHitLine(store, ox, py + ph / 2 - ph / 3, 0, 0, ex + ew / 2, ey + eh / 2, 0, 0)) return true;
+  if (canHitLine(store, ox, py + ph / 2, 0, 0, ex + ew / 2, ey + eh / 2 + eh / 3, 0, 0)) return true;
+  return false;
+}
+
 /** 接触伤害的每敌冷却（原版 localNPCImmunity 1:1）：
  *  - Projectile.Update :15330 每 update 先整体衰减（DecrementLocalImmuneTimeCounters
  *    :15926-15941），再跑碰撞（Damage_PVE :11878-11884 要求 array[i]==0）
- *  - 命中写入 immuneArray[victimIndex] = localNPCHitCooldown（:13152-13154，
- *    同时 targetNPC.immune[owner]=0 —— 不吃玩家的全局受击免疫）
- *  ⇒ 命中后恰好 cd 个 tick 再命中（cd=3 → 每 3t 一跳；旧实现"先判后减"多出 1t） */
+ *  - 命中写入 immuneArray[victimIndex] = localNPCHitCooldown（:14179 分支，
+ *    同时 targetNPC.immune[owner]=0 —— 不再吃玩家的全局受击免疫）
+ *  ⇒ 命中后恰好 cd 个 tick 再命中（cd=3 → 每 3t 一跳）
+ *  ★台账批③修正：此表只承载 localCD≥0 的显式族；localCD=-2 缺省族【不进本表】
+ *  （原版两分支全跳过 → 尾支写 npc.immune[owner]=10 玩家全局窗），见 contact()
+ *  的 CONTACT_PLAYER_WINDOW 支与 CONTACT_CD_TABLE。旧头注"不吃玩家免疫"对
+ *  -2 缺省族恰相反——同玩家一切来源共享 NPC 单窗。 */
 export class MinionHitCd {
   private map = new Map<number, number>();
   ready(id: number, cd: number): boolean {
@@ -464,6 +678,8 @@ export class MinionProj extends Entity {
   /** 闪电光环方形场边长（AI_137 :65972-65981 净空测量；0=未测）与场中心 Y（地面点） */
   auraSide = 0;
   auraCy = 0;
+  /** AI_137 电弧声循环 ai[0] 镜像（30t/僧侣T2 25t 一轮,:69955-69979——台账批 C-3472） */
+  private zapCycle = 0;
   /** 朝向（哨兵 spriteDirection / 随从渲染翻转） */
   facing = 1;
   /** 攻击闪光 tick（AI_062 小鬼攻击帧 +4 门：命中后 24t） */
@@ -807,43 +1023,191 @@ export class MinionProj extends Entity {
     this.facing = p.facing;
   }
 
-  /** 沙漠虎本体（833/834/835，aiStyle 67）：地面追击 + 周期 818 多段扑击链
-   *  （AI_067_TigerSpecialAttack :46383-46479 1:1，链长 = 宝石数+1）。
-   *  冷却 localAI[0]（:46705-46712：成功 833→360/834→300/835→240、失败 10t 重试）；
-   *  链发后本体瞬移末段并进入 ai[0]=4 等待（:46475-46478、:46702-46718，等待期
-   *  无接触伤 Damage_CanDealDamage :11782）。接触伤害 ×(1+0.4×(宝石数-1))
-   *  （StormTiger 集 :12101-12105）；818 弹伤 ×(1.5+0.4n)（:12107-12111） */
+  /** 跟随锚接地扫描（AI_067 无目标向量通用块 :51213-51260 折算）：CenteredRectangle
+   *  (锚,Size) 起 20 格逐格下探首实心（tile==null||active 即停）＋玩家→锚 5% 步进
+   *  视线截断（遇实心回退上一采样点）——tiger/pirate 随用随调 */
+  private groundAnchorScan(
+    st: import('../world/TileStore').TileStore, p: Player, ax: number, ay: number,
+  ): { x: number; y: number } {
+    for (let k = 0; k < 20; k++) {
+      if (st.isSolid(Math.floor(ax / 16), Math.floor(ay / 16))) break;
+      ay += 16;
+    }
+    const dx = ax - p.cx, dy = ay - p.cy;
+    let fx = p.cx, fy = p.cy;
+    for (let t = 0.05; t <= 1.001; t += 0.05) {
+      if (st.isSolid(Math.floor((p.cx + dx * t) / 16), Math.floor((p.cy + dy * t) / 16))) break;
+      fx = p.cx + dx * t; fy = p.cy + dy * t;
+    }
+    return { x: fx, y: fy };
+  }
+
+  /** 台账批②共用列扫门（AI_067 :51437-51457）：意图方向前柱（中柱+意图+⌊vx⌋）自
+   *  盒顶行向下 height/16+1 行逐格探测实心 */
+  private ai67FrontWallScan(
+    st: import('../world/TileStore').TileStore, intent: number,
+  ): boolean {
+    const col = Math.floor((this.x + this.w / 2) / 16) + intent + Math.round(this.vx);
+    const top = Math.floor(this.y / 16);
+    for (let r = top; r < top + Math.floor(this.h / 16) + 1; r++) {
+      if (st.inBounds(col, r) && st.isSolid(col, r)) return true;
+    }
+    return false;
+  }
+
+  /** 跳梯三柱选档（AI_067 :51476-51524 逐字）：左/中/右三列底行支承探测
+   *  （solid ∨ halfBrick ∨ slope>0 ∨ 平台承立）任一成立才结算；选档列 =
+   *  中柱＋意图＋(int)velocity.X，行基准 = 底行、探测在中腰行向上 1/2/4/5 格——
+   *  净空 -5.1 / -7.1，顶压 -9.1 / -10.1 / -11.1。拾例外档：越界视作实心（防御式，
+   *  原版以 try/catch 回落 -9.1 同义） */
+  private ai67JumpLadder(st: import('../world/TileStore').TileStore, intent: number): void {
+    const botRow = Math.floor((this.y + this.h) / 16);
+    const supportCols = [Math.floor(this.x / 16),
+      Math.floor((this.x + this.w / 2) / 16), Math.floor((this.x + this.w) / 16)];
+    let supported = false;
+    for (const c of supportCols) {
+      if (!st.inBounds(c, botRow)) continue;
+      const idx = st.idx(c, botRow);
+      if (st.isSolid(c, botRow) || st.half[idx] > 0 || st.slope[idx] > 0
+        || st.isPlatform(c, botRow)) { supported = true; break; }
+    }
+    if (!supported) return;
+    const pc = Math.floor((this.x + this.w / 2) / 16) + intent + Math.trunc(this.vx);
+    const midRow = Math.floor((this.y + this.h / 2) / 16);
+    const solid = (oy: number): boolean => {
+      if (!st.inBounds(pc, midRow + oy)) return true;
+      return st.isSolid(pc, midRow + oy);
+    };
+    if (!solid(-1) && !solid(-2)) this.vy = -5.1;
+    else if (!solid(-2)) this.vy = -7.1;
+    else if (solid(-5)) this.vy = -11.1;
+    else if (solid(-4)) this.vy = -10.1;
+    else this.vy = -9.1;
+  }
+
+  /** ★台账批①（2026-08-31,L 级清偿）：AI_067 步行链【两结算段】1:1 共轨
+   *  （1458 Projectile.cs:51273-52057；1457 :51296-51557 两结算段同体,偏移 +23 行——
+   *  动值先 grep 符号勿信旧注）。参数 tiers=家族"attackTarget!=-1"速度档：
+   *   段① 速度分层与横向积分（:51297-51345）：缺省 0.5/4/4 → 家族档 →
+   *       catch-up（num52<|p.v| ⇒ num52=|p.v|、num50=0.7）→ |Δ|>5 加速
+   *       （超 num51 改 num53=0.1 缓档）/ ±5 死区 vx×0.9 且 |vx|<2×num50 归零。
+   *   段② 跳跃结算（:51363-51619/:52051-52056）：flag21 门（|v15X|≥64 ∨
+   *       (v15Y≤−48∧|v15X|≥8)）→ 前墙列扫 flag19 → 落地（vy==0）跳梯三柱选档 +
+   *       目标高出距离表（-6..-16 @ 60/80/100/120/140/160/190/210/270/310 阈）+
+   *       wet∧num62==0 起跳 ×2；随后 vx 钳 ±num52（flag22 非跃击族恒行）、
+   *       重力 += 0.4+num62·num63 封顶 10（num62=GetLerpValue(0,100,v15Y)×
+   *       GetLerpValue(-2,-6,vy)，跃击中（蘑菇 flag22）免附加项）。跳跃结算顺序与
+   *       原版同拍：settle 先于重力，故首帧积分量一致（-5.1+0.4=-4.7…）。
+   *  @param jumpAboveY 家族 flag20 覆写：设值时额外要求 v15Y<该值（虎 flag3=-80，
+   *          :51428-51431）；undefined=全家族默认放行（海盗 flag 等） */
+  private ai067WalkChase(
+    game: GameHooks, p: Player, ax: number, ay: number,
+    tiers: [number, number, number] | null,
+    opts?: { wet?: boolean; petting?: boolean; jumpAboveY?: number },
+  ): void {
+    const st = game.world.store;
+    const v15x = ax - this.cx, v15y = ay - this.cy;    // vector15 = 锚 − Center
+    let n50 = 0.5, n51 = 4, n52 = 4;                   // :51274-51277 缺省档
+    if (tiers) [n50, n51, n52] = tiers;                // attackTarget!=-1 档（:51296-51340）
+    const pSpd = Math.abs(p.vx) + Math.abs(p.vy);
+    if (n52 < pSpd) { n52 = pSpd; n50 = 0.7; }         // catch-up（:51342-51345）
+    let intent = 0;
+    if (Math.abs(v15x) > 5) {
+      intent = v15x < 0 ? -1 : 1;
+      if (v15x < 0) { if (this.vx > -n51) this.vx -= n50; else this.vx -= 0.1; }   // :51354-51359
+      else { if (this.vx < n51) this.vx += n50; else this.vx += 0.1; }             // :51360-51365
+    } else {                                            // ±5 死区（:51402-51411）
+      this.vx *= 0.9;
+      if (Math.abs(this.vx) < n50 * 2) this.vx = 0;
+    }
+    // 跳跃意图（:51413-51466）：flag21 距门 + flag20 家族覆写 + num55 意图协同；
+    // 虎=flag3 覆写 flag20=(v15Y<-80)（远平地不打墙跳）;抚摸 num56 强制关闭
+    const flag21 = Math.abs(v15x) >= 64 || (v15y <= -48 && Math.abs(v15x) >= 8);
+    let jump = false;
+    if (intent !== 0 && flag21 && !opts?.petting
+      && (opts?.jumpAboveY === undefined || v15y < opts.jumpAboveY)) {
+      jump = this.ai67FrontWallScan(st, intent);
+    }
+    this.stepUp = true;                                 // Collision.StepUp（:51466）
+    this.tileCollide = true;                            // :51273 每 tick 置真
+    const num62 = getLerpValue(0, 100, v15y) * getLerpValue(-2, -6, this.vy);   // :51509
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.vy === 0 && jump) {                        // 结算段（落地才生效）
+      this.ai67JumpLadder(st, intent);
+      if (v15y < -48) {                                 // 高出距离表（:51492-51527）
+        const d = -v15y;
+        this.vy = d < 60 ? -6 : d < 80 ? -7 : d < 100 ? -8 : d < 120 ? -9
+          : d < 140 ? -10 : d < 160 ? -11 : d < 190 ? -12 : d < 210 ? -13
+          : d < 270 ? -14 : d < 310 ? -15 : -16;
+      }
+      if ((opts?.wet ?? false) && num62 === 0) this.vy *= 2;                        // :51616-51619
+    }
+    this.vx = Math.max(-n52, Math.min(n52, this.vx));   // !flag22 钳速（:51625-51631）
+    if (this.vx < 0) this.facing = -1;                  // direction（:52058-52071）
+    else if (this.vx > 0) this.facing = 1;
+    else this.facing = p.cx > this.cx ? 1 : -1;
+    if (this.vx > n50 && intent === 1) this.facing = 1;
+    if (this.vx < -n50 && intent === -1) this.facing = -1;
+    this.vy = Math.min(this.vy + 0.4 + num62, 10);      // 重力 num+num62·num63（:52051-52056）
+  }
+
+  /** 沙漠虎本体 833/834/835（aiStyle 67,AI_067 flag3）。★台账批①（2026-08-31,
+   *  approx-registry「镇民/宠物」⑬ L 级清偿）：地面段两结算段（速度分层 0.7/6/6
+   *  catch-up 系 + 跳梯/高出距离表）替换手写 ±0.12/clamp3.5/5% 小跳近似——
+   *  实现在 ai067WalkChase（1458 Projectile.cs:51273-52057,1457 :51296-51557）。
+   *  · 周期 818 多段扑击链（AI_067_TigerSpecialAttack :49758-49882/AI_067 内联引用；
+   *    旧注 :46383-46479 为 1456 锚）链长 = 宝石数+1；冷却 localAI[0] 成功
+   *    833→360/834→300/835→240、失败 10t 重试（:50855 附近本地计数语义不变）
+   *  · 链发后瞬移末段入 ai[0]=4 等待（等待期无接触伤 Damage_CanDealDamage
+   *    :12453 type∈{833,834,835}∧ai[0]==4 支）；834/835 等待帧 11/其余 9（:10303）
+   *  · 锚：有目标 = nPC.Center（flag3 无侧翼点 :51009-51026）;无目标 = 跟随锚
+   *    (15+p.w/2+40slot)×dir + 接地扫描（:50296-50300/:51213-51260）
+   *  · 有目标且索敌通过 CanHitWithOwnBody 本体四试（Minion_FindTargetInRange
+   *    skipIfCannotHitWithOwnBody :50525）;盒相交∧下落 → vy=-4/vx=dir×10 兔跳
+   *    蹭伤（:51181-51188）
+   *  · 接触冷却 SetDefaults localNPCHitCooldown=10（:8095-8096）✔既有显式一致
+   *  · 未折算登记：目标脚下 15 格无地扫描→ai[0]=5 与 boss>600→ai[0]=5 追离态
+   *    （state5 全态机另批,现触发源仅上述两路径;M 项遗留细化）、flag3 静置尘 269/
+   *    AddLight 0.5（渲染层,C 类）、索敌双距（my/player 加权择近）简化单距 */
   private tigerBody(game: GameHooks, p: Player, dmg0: number): void {
     const gems = Math.max(1, this.peerCount(game, 831));
     const scale = 1 + 0.4 * (gems - 1);
-    // ai[0]==4 等待态（:46702-46718）
+    // ai[0]==4 等待态（:50296 起 flag3 特置；动画帧见 draw）
     if (this.tigerA0 === 4) {
       this.vx = this.vy = 0;
       if (--this.tigerA1 <= 0) { this.tigerA0 = 0; this.tigerA1 = 0; }
       return;
     }
-    // 特殊攻击门（:46705-46712：localAI[0]≤0 且 damage!=0 → 尝试；成功按档冷却/失败 10t）
+    // 特殊攻击门（成功按档冷却/失败 10t 重试）
     if (this.pounceCd > 0) this.pounceCd--;
     else {
       const cd = this.projId === 834 ? 300 : this.projId === 835 ? 240 : 360;
       if (this.tigerSpecialAttack(game, p, dmg0)) { this.pounceCd = cd; return; }
       this.pounceCd = 10;
     }
-    // 地面追击（AI_067 地面段近似）
-    const tgt = this.nearestEnemy(game, 800);
+    const st = game.world.store;
+    // 索敌（num2=800 :50136 flag3 覆写 + 视线本体四试）
+    let tgt = this.nearestEnemy(game, 800, 'line');
+    if (tgt && !canHitWithOwnBodyBox(st, this.x, this.y, this.w, this.h, this.facing,
+      tgt.x, tgt.y, tgt.w, tgt.h)) tgt = null;
+    const wet = wetCollisionProbe(st, this.x, this.y, this.w, this.h);
+    let ax: number, ay: number;
     if (tgt) {
-      this.vx += Math.sign(tgt.cx - this.cx) * 0.12;
-      this.vx = Math.max(-3.5, Math.min(3.5, this.vx));
-      if (this.onGround && tgt.cy < this.cy - 24 && Math.random() < 0.05) this.vy = -6;
-      this.facing = Math.sign(tgt.cx - this.cx) || this.facing;
+      ax = tgt.cx; ay = tgt.cy;
+      // 接敌兔跳（:51181-51188：Hitbox 相交 ∧ velocity.Y>=0 → vy=-4/vx=direction*10）
+      if (this.x < tgt.x + tgt.w && this.x + this.w > tgt.x
+        && this.y < tgt.y + tgt.h && this.y + this.h > tgt.y && this.vy >= 0) {
+        this.vy = -4;
+        this.vx = (tgt.cx >= this.cx ? 1 : -1) * 10;
+      }
     } else {
-      this.vx *= 0.9;
-      const dx = p.cx - this.cx;
-      if (Math.abs(dx) > 60) this.vx = Math.max(-2.5, Math.min(2.5, dx * 0.02));
-      this.facing = Math.sign(dx) || p.facing;
+      ax = p.cx - (15 + p.w / 2) * p.facing - 40 * this.slot * p.facing;   // :50296-50298
+      ay = p.cy;
+      const g = this.groundAnchorScan(st, p, ax, ay);
+      ax = g.x; ay = g.y;
     }
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    this.ai067WalkChase(game, p, ax, ay, tgt ? [1, 8, 8] : null,   // flag3 档 :51322-51325
+      { wet, jumpAboveY: -80 });
     this.contact(game, dmg0 * scale, 10);
   }
 
@@ -913,6 +1277,92 @@ export class MinionProj extends Entity {
     return true;
   }
 
+  /** ---- 海盗随从 393-395（2584 海盗法杖,AI_067 flag 分支,台账批② A 档清偿
+   *  2026-08-31）---- 此前走通用飞行悬停近似（:10 头注"地面型判定省略"面）。
+   *  原版专属段（1458 Projectile.cs：flag 定义 :50020/:50291 跟随锚/:50513 num2=800
+   *  索敌/:51003-51007 扑击门/:51041-51097 高空俯扑+落地尘 gore/:51296-52057 两结算
+   *  段/:50862-50869 扑击态 friendly 窗）：
+   *   · 态机 pirA0=ai[0]（0 地面 / 1 归位飞行 / 2 扑击）、pirA1=ai[1]（扑击倒数 num10=15）
+   *   · 归位飞行（:50636-50712 同族）：tileCollide=false、加速 0.2、限速 max(10,|p.v|)；
+   *     >2000 瞬移；<200 ∧ 主落地 ∧ 头顶净空 → 落地回 0
+   *   · 无目标：跟随锚 (15+p.w/2)+20slot×dir（:50291-50294）＋接地扫描；归位门
+   *     500/300（num3/num4 缺省 :50031-50033）
+   *   · 有目标：anchor=nPC.Center（flag 无侧翼点）;≤20px → ai[0]=2/ai[1]=15
+   *     （num30=20/flag14 支 :51155-51177）；高空俯扑 vy>2∧!wet∧敌顶低于脚底 250px+
+   *     → sqrt(2×0.4×h) 反向起跳封顶 26（:51041-51058,X 抖 ±Next×5）
+   *   · 接触伤仅在扑击窗（走行 friendly=false :50476 缺省不复位——海盗不在置真名单,
+   *     扑击支 :50862 置 true）：SetDefaults localNPCHitCooldown=18（:4765-4770）
+   *   · 移动档 flag 档 = 目标在位 1/8/8（:51317-51321）、catch-up 同共轨两结算段
+   *   · 未折算登记：落地尘 216/gore 580-583·11-14 两象限（渲染 C 类）、boss>600→
+   *     ai[0]=5 态与俯扑前置 position.Y 整分叉 quirk（ai[0]=5 全态机另批）、
+   *     海盗攻击帧机 frame=4+(num10-ai1)/(num10/3)(+3 空)（draw 兜底循环差异,C 类） */
+  private pirA0 = 0;
+  private pirA1 = 0;
+  private pirateStep(game: GameHooks, p: Player, dmg0: number): void {
+    const st = game.world.store;
+    const wet = wetCollisionProbe(st, this.x, this.y, this.w, this.h);
+    const tgt = this.nearestEnemy(game, 800, 'line');
+    // ---- ai[0]==1 归位飞行（:50636-50712 族档）----
+    if (this.pirA0 === 1) {
+      this.tileCollide = false;
+      const dx = p.cx - this.cx, dy = p.cy - this.cy;
+      const dl = Math.hypot(dx, dy);
+      if (dl > 2000) { this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2; }
+      else if (dl < 200 && p.vy === 0 && this.y + this.h <= p.y + p.h && !this.solidOverlap(st)) {
+        this.pirA0 = 0; this.pirA1 = 0;
+        if (this.vy < -6) this.vy = -6;
+      } else {
+        const sp = Math.max(10, Math.abs(p.vx) + Math.abs(p.vy));
+        const l = dl || 1;
+        if (this.vx < dx / l * sp) { this.vx += 0.2; if (this.vx < 0) this.vx += 0.3; }
+        if (this.vx > dx / l * sp) { this.vx -= 0.2; if (this.vx > 0) this.vx -= 0.3; }
+        if (this.vy < dy / l * sp) { this.vy += 0.2; if (this.vy < 0) this.vy += 0.3; }
+        if (this.vy > dy / l * sp) { this.vy -= 0.2; if (this.vy > 0) this.vy -= 0.3; }
+        this.x += this.vx; this.y += this.vy;
+      }
+      this.facing = this.vx !== 0 ? (this.vx > 0 ? 1 : -1) : p.facing;
+      return;
+    }
+    // ---- 地面态 ----
+    let tgtF = tgt && !canHitWithOwnBodyBox(st, this.x, this.y, this.w, this.h, this.facing,
+      tgt.x, tgt.y, tgt.w, tgt.h) ? null : tgt;
+    if (!tgtF) {
+      const dP = Math.hypot(p.cx - this.cx, p.cy - this.cy);
+      if (dP > 2000) { this.x = p.cx - this.w / 2; this.y = p.cy - this.h / 2; }
+      else if (dP > 500 || Math.abs(p.cy - this.cy) > 300) { this.pirA0 = 1; return; }
+    }
+    if (this.pirA0 === 2) {                              // 扑击态（:50861-50927：friendly 置真+帧+重力+倒数,无速度改写）
+      this.vy = Math.min(this.vy + 0.4, 10);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      this.contact(game, dmg0, 18);                      // 扑击窗内才有接触伤（friendly=true 支）
+      if (--this.pirA1 <= 0) { this.pirA0 = 0; this.pirA1 = 0; }     // num9=0 直回 0
+      return;
+    }
+    // ---- 无目标归位门/有目标锚 ----
+    let ax: number, ay: number;
+    if (tgtF) {
+      ax = tgtF.cx; ay = tgtF.cy;
+      // 高空俯扑（:51041-51058）：下落中 ∧ !wet ∧ 敌顶高出脚底 250px → sqrt 蓄力反跳
+      if (this.vy > 2 && !wet && tgtF.y + tgtF.h - (this.y + this.h) < -250) {
+        const h = (this.y + this.h) - (tgtF.y + tgtF.h);
+        this.vy = -Math.min(26, Math.sqrt(Math.max(0, h) * 2 * 0.4));
+        this.vx += (Math.random() * 2 - 1) * Math.random() * 5;
+      }
+      // 扑击门（:51155-51160）：距锚 <20 → 入扑
+      if (Math.hypot(ax - this.cx, ay - this.cy) < 20) {
+        this.pirA0 = 2; this.pirA1 = 15;                 // num10=15（缺省,num9=0 单轮）
+        this.facing = tgtF.cx - this.cx >= 0 ? 1 : -1;   // direction 朝敌（:51175-51176）
+        return;
+      }
+    } else {
+      ax = p.cx - (15 + p.w / 2) * p.facing - 20 * this.slot * p.facing;   // :50291-50294
+      ay = p.cy;
+      const g = this.groundAnchorScan(st, p, ax, ay);
+      ax = g.x; ay = g.y;
+    }
+    this.ai067WalkChase(game, p, ax, ay, tgtF ? [1, 8, 8] : null, { wet });   // flag 档 :51317
+  }
+
   /** 帕鲁地面随从 1093 捣蛋猫 / 1112 可靠的捣蛋猫 / 1118 黏土蓓蕾（AI_067
    *  flag8/flag9 分支折算，Projectile.cs:50014-52160；flag8 = 1093||1112 :50024
    *  共用同一态机——1093（物品 5663 :44475）曾走通用飞行近似,默认帧扫描器
@@ -965,6 +1415,15 @@ export class MinionProj extends Entity {
       }
     }
     if (this.palJoyCd > (flag10 ? 1 : 0)) this.palJoyCd--;
+    // ★台账批 C-920（2026-08-31）：抚摸心形气泡的粒子形态近似升级——原版
+    //  Main.cs:34799-34832 在 localAI[0]∈(1,60) 窗（=本仓 palJoyCd 同窗）画
+    //  EmoteBubble.DrawTemporaryBubble 图标/DrawNotificationIcon 兜底框，本仓无该
+    //  资产与 UI 层（登记在案）;改以同窗心跳节拍粉心粒子上浮（spawnParticles
+    //  现有基建）替代——形态近似非资产复刻,资产入库后应换图标直绘
+    if (flag10 && this.palJoyCd > 1 && this.palJoyCd < 60 && (this.palJoyCd - 8) % 16 === 0) {
+      game.spawnParticles(this.cx + Math.sin(this.age * 0.35) * 6,
+        this.cy - this.h / 2 - 14, '#FF7FB2', 1, 0.6, { life: 36, grav: -0.01 });
+    }
   }
 
   /** 火绒狐 1094/1113 帧态机（AI_026 flag8 帧段 Projectile.cs:64729-64826 1:1 折算）。
@@ -1018,10 +1477,10 @@ export class MinionProj extends Entity {
     const flag8 = this.projId === 1093 || this.projId === 1112;   // :50024
     const num10 = flag8 ? 16 : 30;            // 扑击时长（:50490/:50499）
     const num2 = flag8 ? 800 : 500;           // 索敌射程（:50030/:50052）
-    // wet（Projectile.wet = Collision.WetCollision 每 tick 碰撞盒浸液判定）——本仓
-    // 以中心格液量 >0 近似（Enemy.wet「中心小盒判水线」同法备案），湿身跳 ×2 消费
+    // 台账批⑥：wet = Projectile.wet = Collision.WetCollision 每 tick 盒级浸液判定
+    // （Collision.cs:1575-1650,内探针小盒）——旧中心单格近似退役，湿身跳 ×2 消费
     const stWet = game.world.store;
-    const wet = stWet.liquid[stWet.idx(Math.floor(this.cx / 16), Math.floor(this.cy / 16))] > 0;
+    const wet = wetCollisionProbe(stWet, this.x, this.y, this.w, this.h);
     // ---- ai[0]==1 归位（:50636-50853；先于地面段——原版该态不索敌不行走）----
     if (this.palA0 === 1) {
       const dpx1 = p.cx - this.cx, dpy1 = p.cy - this.cy;
@@ -1242,9 +1701,10 @@ export class MinionProj extends Entity {
    *  :51003-51019 目标偏移点（敌心 +(27,0)×direction,:51022-51026 num30=20+7）/
    *  :51017-51019 无目标清 localAI[2]/ :52108-52152 TryJumpingToTarget 1022 支——
    *  目标高 160px 或归位态且 ai[2]==0 → TargetFound 编排粒子 @Top 前摇 15t → 蓄跃
-   *  32 速朝拦截点（GetChaseResults 近似=直瞄,备案）、ai[2]=30、贴图前摇 ShockIcon/
-   *  爆点 :50598-50621：ai[2]>0 且 IsInRangeOfMeOrMyOwner(敌,60)（本体/主中心距取近,
-   *  :52406-52424 本仓无 CanHitWithOwnBody/MeleeWeapon 二门近似直距）→ 弹 1044
+   *  32 速朝拦截点（★台账批⑤ GetChaseResults 真拦截:getChaseResults Utils.cs:651）、
+   *  ai[2]=30、贴图前摇 ShockIcon/爆点 :50598-50621：ai[2]>0 且 IsInRangeOfMeOrMyOwner
+   *  (敌,60)（★台账批⑦ 双距+CanHitWithOwnBody/CanHitWithMeleeWeapon 盒门真值
+   *  Projectile.cs:52404-52422）→ 弹 1044
    *  （伤×1.33/kb×3,DeadCellsMushroom.ts 承载 AI_117+AoE+爆炸编排粒子音）+
    *  Center=玩家中心+小随机速度;ai[2]<0 逐拍 ++ / >0 空中逐拍 −−贴地归零
    *  （:50622-50630）;Damage_CanDealDamage (1022&&ai[2]>0)=false :12463 → 跃击途中
@@ -1257,14 +1717,21 @@ export class MinionProj extends Entity {
    *  零调用,DEAD_SLOTS 备案）不接。 */
   private mushBoiStep(game: GameHooks, p: Player, dmg0: number): void {
     const st = game.world.store;
-    const wet = st.liquid[st.idx(Math.floor(this.cx / 16), Math.floor(this.cy / 16))] > 0;
+    // 台账批⑥：wet = 盒级 WetCollision（Collision.cs:1575-1650）
+    const wet = wetCollisionProbe(st, this.x, this.y, this.w, this.h);
     // ---- 索敌（检索档 ai[0]==0||1 :50448-50450;视线门 skipIfCannotHitWithOwnBody）----
     const tgt = this.mbA0 === 0 || this.mbA0 === 1 ? this.nearestEnemy(game, 800, 'line') : null;
-    // ---- 爆点判定（:50598-50621,先于移动块）----
+    // ---- 爆点判定（:50598-50621,先于移动块）。台账批⑦：IsInRangeOfMeOrMyOwner
+    //      （Projectile.cs:52404-52422）双距真值——本体距 <60 且 !CanHitWithOwnBody → ∞、
+    //      主距 <60 且 !CanHitWithMeleeWeapon → ∞（旧"min(直距)<60"无盒门,隔墙误爆面）----
     if (this.mbA2 > 0 && tgt) {
-      const dMe = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy);
-      const dP = Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy);
-      if (Math.min(dMe, dP) < 60) {                       // IsInRangeOfMeOrMyOwner(…,60) 直距近似
+      let dMe = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy);
+      if (dMe < 60 && !canHitWithOwnBodyBox(st, this.x, this.y, this.w, this.h, this.facing,
+        tgt.x, tgt.y, tgt.w, tgt.h)) dMe = Infinity;
+      let dP = Math.hypot(tgt.cx - p.cx, tgt.cy - p.cy);
+      if (dP < 60 && !canHitWithMeleeWeaponBox(st, p.x, p.y, p.w, p.h, p.facing,
+        tgt.x, tgt.y, tgt.w, tgt.h)) dP = Infinity;
+      if (dMe <= 60 || dP <= 60) {                        // closerIsMe 择近 ≤60（:52420-52422）
         this.mbA2 = -120;                                 // :50604
         const boom = new MushroomBoiExplosionProj(this.cx, this.cy,
           Math.max(1, Math.round(dmg0 * 1.33)), this.knockback * 3,   // :50606-50607
@@ -1288,11 +1755,20 @@ export class MinionProj extends Entity {
           game.spawnParticles(this.cx, this.y - 40, '#FFFF0A', 4, 1.5, { life: 15, grav: 0 });
         }
         if (++this.mbLai2 >= 15) {                        // :52139-52147
-          const dl = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
-          // GetChaseResults 拦截速度 32 近似=直瞄归一 ×32（目标慢速时同值;零距兜底
-          // SafeNormalize(−UnitY)×32 = 竖直上跃）
-          this.vx = dl > 1 ? (tgt.cx - this.cx) / dl * 32 : 0;
-          this.vy = dl > 1 ? (tgt.cy - this.cy) / dl * 32 : -32;
+          // ★台账批⑤：Utils.GetChaseResults（Utils.cs:651-708）真拦截——
+          //   InterceptionHappens ∧ time<120 → ChaserVelocity；否则
+          //   targetCenter.SafeNormalize(-UnitY)×32（零距兜底 (0,-32) 竖直上跃）
+          const chase = getChaseResults(this.cx, this.cy, 32,
+            tgt.cx, tgt.cy, (tgt as { vx?: number }).vx ?? 0, (tgt as { vy?: number }).vy ?? 0);
+          if (chase.intercepts && chase.time < 120) {
+            this.vx = chase.vx; this.vy = chase.vy;
+          } else {
+            const dl = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy);
+            if (dl > 0) {
+              this.vx = (tgt.cx - this.cx) / dl * 32;
+              this.vy = (tgt.cy - this.cy) / dl * 32;
+            } else { this.vx = 0; this.vy = -32; }
+          }
           this.mbA2 = 30;
           this.mbLai2 = 0;
         }
@@ -1659,8 +2135,10 @@ export class MinionProj extends Entity {
     return { index, total };
   }
 
-  /** AI_156_TryAttackingNPCs（:52694-52725）：距玩家心 1000 内最近敌 + 视线
-   *  （CanHitWithOwnBody :12428 ≈ canHitLine 本仓 LOS 单点近似） */
+  /** AI_156_TryAttackingNPCs（:52694-52725）：距玩家心 1000 内最近敌 + 视线。
+   *  ★台账批⑧：CanHitWithOwnBody 本体四试视线真值（Projectile.cs:12428-12444,
+   *  CanHit 整盒 ∪ 三组 CanHitLine 端点对）——旧 canHitLine 单形状近似退役
+   *  （墙棱半贴/侧沿擦过场景差档,实机验收=弧刀段绕柱起手率一致） */
   private tTarget(game: GameHooks, pcx: number, pcy: number): EnemyLike | null {
     let best: EnemyLike | null = null;
     let bestD = 1000;
@@ -1669,7 +2147,8 @@ export class MinionProj extends Entity {
       if (!canBeChasedBy(e) || !en || en.dead) continue;
       const d = Math.hypot(en.cx - pcx, en.cy - pcy);
       if (d > 1000) continue;
-      if (!canHitLine(game.world.store, this.x, this.y, this.w, this.h, en.x, en.y, en.w, en.h)) continue;
+      if (!canHitWithOwnBodyBox(game.world.store, this.x, this.y, this.w, this.h, this.facing,
+        en.x, en.y, en.w, en.h)) continue;
       if (best === null || d < bestD) { best = en; bestD = d; }
     }
     return best;
@@ -2128,7 +2607,7 @@ export class MinionProj extends Entity {
         }
         if (this.a62A1 !== 0) {
           this.x += this.vx; this.y += this.vy;        // 每子步位移（velocity=v×10 :66560/:66598）
-          this.contact(game, dmg0, 20);                // 每子步命中判定（Damage_PVE 在循环内）
+          this.contact(game, dmg0);                    // 每子步命中判定——台账批③：407=idStatic 10/余族 -2 全局窗
           continue;                                    // :66170/:66208 早退——跳过索敌/分离/射击/姿态
         }
         // 归零子步：重置（:66174-66183/:66232-66247）——原版不 return,继续走完整 AI
@@ -2402,7 +2881,7 @@ export class MinionProj extends Entity {
     }
     this.x += this.vx;
     this.y += this.vy;
-    this.contact(game, dmg0, 20);
+    this.contact(game, dmg0);   // 台账批③：373/375/423/613=-2 全局窗、407=idStatic 10（CONTACT_CD_TABLE）
   }
 
   /** 蜘蛛随从 390-392（AI_026 flag7 步行链 1:1，1457 Projectile.cs :61292-61344 归位门/
@@ -2423,7 +2902,10 @@ export class MinionProj extends Entity {
    *  · 撤退档（localAI[1],:62958-62963+:63003-63012）:命中置 20（StatusNPC :14027-14030）
    *    → 每拍递减;>0 拍 friendly=false（不咬,本仓=跳过 contact）+行走意图=当前速度向
    *    （vx<0 走左/vx>0 走右,穿过/脱离目标）
-   *  · 行走意图（:62943-63018）:num180=500/地下 250（groundLevel 近似）+40×slot;
+   *  · 行走意图（:62943-63018）:num180=500/地下 250（★台账批⑨ worldSurface 语义钉死:
+   *    引擎 world.groundLevel = .wld 头段紧随 spawnX/spawnY 的第一个 f64 =
+   *    Main.worldSurface 存档值,WorldFile.cs:2077 读序;Game.ts wiring.worldSurface =
+   *    w.groundLevel 全仓恒等映射——两名字在此恒等互换,非近似）+40×slot;
    *    无视线最近 <num180 → 朝其 X 走（±5 死区 :62943-62957）;LOS 目标 <800+40×slot →
    *    接触窗+localAI[0]=60 续走（±10 死区 :62963-62975）+目标高出 100px 且 |dx|<50
    *    且贴地 → 跳 -10/-13/-15/-17/-18（:62968-62989）
@@ -2567,7 +3049,9 @@ export class MinionProj extends Entity {
     let flag2 = false, flag3 = false;
     const walkT = losT ?? anyT;
     if (walkT) {
-      const underground = game.world.groundLevel > 0 && this.y > game.world.groundLevel * 16;  // :62931-62939（worldSurface 近似）
+      // 台账批⑨：groundLevel ≡ 存档 Main.worldSurface（WorldFile.cs:2077 读序钉死,
+      // Game wiring.worldSurface = w.groundLevel 恒等映射）——非近似,见类头注
+      const underground = game.world.groundLevel > 0 && this.y > game.world.groundLevel * 16;  // :62931-62939
       const gate = losT ? 800 + 40 * minionPos : (underground ? 250 : 500) + 40 * minionPos;
       const distT = losT ? losD : anyD;
       if (distT < gate) {
@@ -2625,7 +3109,7 @@ export class MinionProj extends Entity {
       this.spFrame = 4 + Math.floor(this.age / 2) % 4;   // :65136-65147 帧 4-7
       this.x += this.vx; this.y += this.vy;
       // 撤退拍 friendly=false（:63004）不咬;命中置撤退计时（StatusNPC :14027-14030）
-      if (!retreat && this.contact(game, dmg0, 20)) this.spLai1 = 20;
+      if (!retreat && this.contact(game, dmg0)) this.spLai1 = 20;   // 台账批③：蜘蛛族 idStatic 15（CONTACT_CD_TABLE :4754）
       return;
     }
     // 步行物理（:63058-63340）
@@ -2695,7 +3179,9 @@ export class MinionProj extends Entity {
   private frogStep(game: GameHooks, p: Player, dmg0: number): void {
     const st = game.world.store;
     this.stepUp = true;
-    const wet = st.liquid[st.idx(Math.floor(this.cx / 16), Math.floor(this.cy / 16))] > 0;
+    // 台账批⑥：wet = Collision.WetCollision 盒级判定（Collision.cs:1575-1650），
+    // 非中心单格——内探针小盒（min(10,W)×H/2）浸液即湿
+    const wet = wetCollisionProbe(st, this.x, this.y, this.w, this.h);
     const tgt = this.nearestEnemy(game, 800, 'line');   // :50213 num2=800 + 视线
     // ---- ai[0]=1 归位飞行（:50636-50712）----
     if (this.frA0 === 1) {
@@ -2724,7 +3210,7 @@ export class MinionProj extends Entity {
       this.vy = Math.min(this.vy + 0.4, 10);          // :50951-50953
       moveAndCollide(this, game.world, this.vx, this.vy);
       if (this.frA1 <= 0) { this.frA0 = 0; this.frA1 = 0; }        // :50954-50956
-      this.contact(game, dmg0, 30);
+      this.contact(game, dmg0);                       // 台账批③：吸血蛙 idStatic 10（CONTACT_CD_TABLE :7825）
       return;
     }
     // ---- 地面态（ai[0]=0,:51186-51619）----
@@ -2789,7 +3275,7 @@ export class MinionProj extends Entity {
       }
       if (wet) this.vy *= 2;                          // :51616-51619 湿身跳翻倍
     }
-    this.contact(game, dmg0, 30);                     // friendly 恒开（:50478-50482）;冷却 :10483 族档
+    this.contact(game, dmg0);                         // friendly 恒开（:50478-50482）;台账批③ idStatic 10（:7825,旧 20t/30t 私表退役）
   }
 
   /** 乌鸦 317（aiStyle 54，AI :27383-27590 1:1）：同类 28px 内互推 0.05
@@ -2980,7 +3466,7 @@ export class MinionProj extends Entity {
           if (!this.hitCd.ready(en.id, 5)) continue; // localNPCHitCooldown=5（:6433）
           const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy,
             this.ownerRef());
-          en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, false, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
+          en.hurt(applyBannerDamageDealt(game, en, res.dmg), Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, false, 1, true); // 随从=单发弹语义(不设敌方帧);fromPlayer=DPS 计
           applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           this.attackFlash = 24;
         }
@@ -3026,10 +3512,28 @@ export class MinionProj extends Entity {
     this.x += this.vx; this.y += this.vy; // 标准位移（velocity 持续衰减）
   }
 
+  /** 同型 idStatic 免疫桶（immunityIdentity=type,perIDStaticNPCImmunity 全局数组：
+   *  Projectile.cs:13823/:14037 写 / :627 读）——同型多实例共享按敌计时 */
+  private idStaticBucket(projId: number): MinionHitCd {
+    let b = IDSTATIC_BUCKETS.get(projId);
+    if (!b) { b = new MinionHitCd(); IDSTATIC_BUCKETS.set(projId, b); }
+    return b;
+  }
+
+  /** 敌方玩家键免疫窗余值（NPC.immune[owner] 等价——单 player 世界即 NPC 单窗；
+   *  测试桩敌无该字段 → 恒视作 0 可打）。台账批③全局窗支的先验门 */
+  private static enemyImmune(en: unknown): boolean {
+    const iv = (en as { iframes?: number } | null)?.iframes;
+    return typeof iv === 'number' && iv > 0;
+  }
+
   /** 接触伤害通用（pad=判定盒外扩）；鞭 tag + TagCrit + proc 统一走 resolveWhipTagHit
    *  （TagEffectState.ModifyHit :216-228 / OnHit :230-243，含黑收成 OnTaggedHit 与
-   *  火鞭/星陨/花瓣/月主弹 proc 首跳）。返回是否命中过（乌鸦命中重置扑击计时） */
-  private contact(game: GameHooks, dmg: number, cd: number, pad = 0): boolean {
+   *  火鞭/星陨/花瓣/月主弹 proc 首跳）。返回是否命中过（乌鸦命中重置扑击计时）。
+   *  ★台账批③：cd 支持 ContactCd 三态——number=局部私表 t；CONTACT_PLAYER_WINDOW(-2)
+   *  =原版缺省族【吃玩家全局免工件窗】（免工件门 + Enemy.hurt(pierce=0) 命中后置
+   *  10t——废统一 20t 私表）；{kind:'idStatic'}=同型共享桶 */
+  private contact(game: GameHooks, dmg: number, cdIn?: ContactCd, pad = 0): boolean {
     const add = (e: unknown, b: string) =>
       (game as unknown as { entities: { add: (x: unknown, y: string) => void } }).entities.add(e, b);
     // ★F4 召唤/哨兵弹伤害时刻的小动物恒拒门（projectile 语境入统一出口）：
@@ -3053,9 +3557,18 @@ export class MinionProj extends Entity {
       if (en.dead) continue;
       if (!(this.x - pad < en.x + en.w && this.x + this.w + pad > en.x
         && this.y - pad < en.y + en.h && this.y + this.h + pad > en.y)) continue;
-      if (!this.hitCd.ready(en.id, cd)) continue;
+      // ★台账批③ 接触冷却三态门（原版 Damage_PVE flag2 :12595 + Damage_PVE_Inner
+      //  immune[owner] 门 :12636 / localNPCHitCooldown 尾支 :14175-14186）
+      {
+        const spec = cdIn === undefined ? contactResolve(this.projId) : cdIn;
+        if (spec === CONTACT_PLAYER_WINDOW) {
+          if (MinionProj.enemyImmune(en)) continue;   // -2 缺省族：玩家全局窗内不重击
+        } else if (typeof spec === 'object') {
+          if (!this.idStaticBucket(this.projId).ready(en.id, spec.cd)) continue;
+        } else if (!this.hitCd.ready(en.id, spec)) continue;
+      }
       // 黑收成 OnTaggedHit 直伤通道（916 等价）
-      en.hurtFx = (d: number) => { en.hurt(d, Math.sign(en.cx - this.cx), -1, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
+      en.hurtFx = (d: number) => { en.hurt(applyBannerDamageDealt(game, en, d), Math.sign(en.cx - this.cx), -1, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
       const res = resolveWhipTagHit(en, dmg, game,
         (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy,
         this.ownerRef());
@@ -3080,7 +3593,7 @@ export class MinionProj extends Entity {
       const kbDir = MINION_PLAYER_ANCHOR_KB.has(this.projId) && owner0
         ? (owner0.cx < en.cx ? 1 : -1)
         : Math.sign(en.cx - this.cx);
-      en.hurt(golemCrit ? res.dmg * 2 : res.dmg,
+      en.hurt(applyBannerDamageDealt(game, en, golemCrit ? res.dmg * 2 : res.dmg),
         kbDir * (this.knockback + mkb), 0, game, pen0, false, 0, true); // 裸kb+minionKB(:52477);fromPlayer=DPS 计
       applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
       this.attackFlash = 24;
@@ -3353,6 +3866,48 @@ export class MinionProj extends Entity {
       // Bottom+(dir*6,-46) 发火球 668）→ 24t 结束回待机并冷却 60t（num8）
       if (FLAMEBURST_TOWER.has(this.projId)) {
         const tier = FLAMEBURST_TIERS[this.projId] ?? FLAMEBURST_TIERS[667];
+        // ★台账批 C-4179（2026-08-31）：AI_130 每 update 双矩形环境尘 1:1
+        //  （1458 Projectile.cs case 663 :69181-69225 / 665 :69229-69272 / 667
+        //  :69276-69320）——①底盆白烟 d270：盒 = (pos.X+w/4, bottom−16,
+        //  w/4×{663:3|665/667:2}, 6)，朝右再左移 w/4；1/2 帧、fadeIn .6-.1.2、
+        //  scale .4、vel 归零后 X 漂移 −dir×rand×fadeIn、noGravity/noLight；
+        //  ②炮口火舌 d6：盒 = Center.X 起 ±w/4 宽（左向左伸）且 +dir×4 偏移、
+        //  Y = bottom−(height−10)，{663|665|667}=各 1/2/3 层每层 1/5 帧、
+        //  fadeIn1/scale1/vel×2。此前整段"未建模"登记消账（spawnDust/addLightAt
+        //  现有基建直映）；flag = ai[2]!=1（被背包携带态不喷）
+        if (!this.carriedByBackpack && game.spawnDust) {
+          const fw = Math.floor(this.w / 4);
+          const emberX = this.x + fw - (this.facing === 1 ? fw : 0);
+          const emberW = this.projId === 663 ? fw * 3 : fw * 2;
+          if (Math.floor(Math.random() * 2) === 0) {
+            const dE = game.spawnDust(emberX - 2, this.y + this.h - 16 - 2,
+              emberW + 4, 10, 270, -this.facing * 2, -2, 200, null, 0.4);
+            if (dE) {
+              const fade = 0.6 + Math.random() * 0.6;
+              dE.fadeIn = fade;
+              dE.vx = 0; dE.vy = 0;
+              dE.vx = -this.facing * Math.random() * fade;
+              dE.noGravity = true; dE.noLight = true;
+            }
+          }
+          const muzLoops = this.projId === 663 ? 1 : this.projId === 665 ? 2 : 3;
+          for (let li = 0; li < muzLoops; li++) {
+            if (Math.floor(Math.random() * 5) !== 0) continue;
+            const mx = this.cx + (this.facing === -1 ? -fw : 0) + this.facing * 4;
+            const my = this.y + this.h - (this.h - 10);
+            const dF = game.spawnDust(mx, my, fw, 10, 6, 0, 0, 0, null, 1);
+            if (dF) {
+              dF.fadeIn = 1;
+              dF.noGravity = true; dF.noLight = true;
+              dF.vx *= 2; dF.vy *= 2;
+            }
+          }
+          // Lighting.AddLight(Center) ∪ (Bottom+(0,-10))，强度倍率按档
+          // （×1 / ×1.2 / ×1.5,:69178-69180/:69226-69228/:69273-69275）
+          const lm = this.projId === 663 ? 1 : this.projId === 665 ? 1.2 : 1.5;
+          game.addLightAt?.(this.cx, this.cy, 0.4 * lm, 0.2 * lm, 0.1 * lm);
+          game.addLightAt?.(this.cx, this.y + this.h - 10, 0.4 * lm, 0.2 * lm, 0.1 * lm);
+        }
         // ★F4 索敌/射击端点换 shootingSpot（2026-08-30 实体侧对账批）：AI_130 的
         //   FindTarget 全部 Distance/CanHitLine 以 vector=Bottom+(direction*6,-Δ)
         //   为端点（1457 Projectile.cs :69182/:69234/:69286 三档锚；FindTarget 定义
@@ -3500,18 +4055,21 @@ export class MinionProj extends Entity {
         }
         const side = this.auraSide;
         if (side > 0) {
-          let zapped = false;   // 电弧音（:65947 场内有敌 DD2_LightningAuraZap）按伤害节拍播
+          let zapped = false;         // 直伤拍标记（供 zap 声窗判定兜底,见批 C-3472 注）
+          let fieldEnemy = false;     // ★台账批 C-3472：原版声扫描面（场内有敌即可,不看 LOS/冷却）
           for (const ent of game.enemies()) {
             if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
             const en = ent as EnemyLike & { dead: boolean } & import('./WhipTag').WhipTagged;
             if (en.dead) continue;
             const ax = this.cx - side / 2, ay = this.auraCy - side / 2;
-            // myRect.Intersects(targetRect)（方形场盒）
+            // myRect.Intersects(targetRect)（方形场盒）——vanilla 扫描的
+            // Colliding(Hitbox,nPC.Hitbox) 同面（:69966-69971）
             if (en.x + en.w <= ax || en.x >= ax + side || en.y + en.h <= ay || en.y >= ay + side) continue;
             // targetRect.Distance(Center) < height/2-20（:14540，敌 AABB 到中心最近点距）
             const nx = Math.max(en.x, Math.min(en.x + en.w, this.cx));
             const ny = Math.max(en.y, Math.min(en.y + en.h, this.auraCy));
             if (Math.hypot(this.cx - nx, this.auraCy - ny) >= side / 2 - 20) continue;
+            fieldEnemy = true;
             // AI_137_CanHit 视线门（Projectile.cs:71574-71614，2026-08-30 补弧线三试
             // +目标双点:15890/:15894 敌盒中心/敌盒上沿中任一通过即命中；目标格实心直接 false）。
             // ★起点基点核对（Entity.cs:86-96）：base.Top=(X+width/2, position.Y)=场盒顶沿中点，
@@ -3531,16 +4089,26 @@ export class MinionProj extends Entity {
             //   ⇒ 防≥999 受害者的退款池计算随 penAdd 整体变形。tag 伤 ×0.5
             //   （ProjectileID.cs:31 SummonTagDamageMultiplier）
             const vAura = en as unknown as { vanillaId?: number | null; def?: { defense?: number } };
-            const penPctAura = vAura.vanillaId !== 68 && (vAura.def?.defense ?? 0) < 999 ? 1 : 0;
+            const penPctAura = lightningAuraPenPercent(vAura.vanillaId, vAura.def?.defense);
             const res = resolveWhipTagHit(en, dmgOf(), game,
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
               SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerRef());
-            en.hurt(res.dmg, 0, 0, game, 0, false, 1, true, penPctAura); // 哨兵射击=单发弹语义;penPercent 门=:13266-69;fromPlayer=DPS 计
+            en.hurt(applyBannerDamageDealt(game, en, res.dmg), 0, 0, game, 0, false, 1, true, penPctAura); // 哨兵射击=单发弹语义;penPercent 门=:13266-69;fromPlayer=DPS 计
             applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           }
-          // 原版是 tracked 循环声（每 tick 场内有敌即续播）——单次 wav 按命中节拍近似，
-          // 每 tick 至多一声
-          if (zapped) game.playSfxFiles(soundTrackFiles('dd2_lightning_aura_zap'), 0.5, this.cx, this.auraCy);
+          // ★台账批 C-3472（2026-08-31）：电弧声密度对齐原版 ai[0] 循环（AI_137
+          //  :69955-69979：ai[0]++ %num3==0 时扫场，场内有敌才 PlayTrackedSound——
+          //  num3=30/僧侣T2 -5→25、T3 不改字面）。旧"每直伤 tick 一声"密度 ×30。
+          //  真值节拍：zapCycle==period-1 且本轮扫描见敌 → 一声。PlayTrackedSound 的
+          //  跨 tick 续播缓冲不入模（单发 wav 密度对齐,C 类已注）。
+          this.zapCycle++;
+          const zapPeriod = dd2SetFlags(game.player).monkT2 ? 25 : 30;
+          if (this.zapCycle >= zapPeriod) {
+            this.zapCycle = 0;
+            if (fieldEnemy || zapped) {
+              game.playSfxFiles(soundTrackFiles('dd2_lightning_aura_zap'), 0.5, this.cx, this.auraCy);
+            }
+          }
         }
         return;
       }
@@ -3566,7 +4134,7 @@ export class MinionProj extends Entity {
               const en = ent as EnemyLike & { dead: boolean };
               if (en.dead) continue;
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
-                en.hurt(dmgOf(), Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, false, 1, true); // 单发弹语义;fromPlayer=DPS 计
+                en.hurt(applyBannerDamageDealt(game, en, dmgOf()), Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, false, 1, true); // 单发弹语义;fromPlayer=DPS 计
                 applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 // 爆炸弹 694 族同属玩家弹——催化指环 6185 亦生效（StatusNPC :11192-11196）
                 applyProjStatus(boomProj, en as unknown as Record<string, number>, { setHuntressT2: ownerH,
@@ -3685,7 +4253,7 @@ export class MinionProj extends Entity {
                 const en = ent as EnemyLike & { dead: boolean };
                 if (en.dead) continue;
                 if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
-                  en.hurt(dmgOf(), Math.sign(en.cx - px) * this.knockback, -2, game, 0, false, 1, true); // 单发弹语义;fromPlayer=DPS 计
+                  en.hurt(applyBannerDamageDealt(game, en, dmgOf()), Math.sign(en.cx - px) * this.knockback, -2, game, 0, false, 1, true); // 单发弹语义;fromPlayer=DPS 计
                   applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 }
               }
@@ -3728,7 +4296,8 @@ export class MinionProj extends Entity {
     // 索敌射程分档（1457 AI_062 :66319-66333）：num12 缺省 400 → 无条件覆盖 2000
     // （=射手族档，423/613 的 300 覆盖同为死赋值）、963=700（:66330-66333）；
     // 致命球 533 走 AI_066 档 num526=2000（:30105-30111,备案项⑥——曾走通用 700 档）；
-    // 其余 AI 族沿用旧近似（AI_026 俾格米 800 等在 MINION_SHOOT 表注）。
+    // 其余 AI 族检索半径 = MINION_SHOOT[].search 键（★台账批⑭ 补表:俾格米 800 等,
+    // 原版门 AI_026 主周曼哈顿 700+100）;缺键 shooter 型 1000 / 无弹型 700 兜底。
     // 射手族/963/533 加视线门（:66392/:66435/:30334 CanHitLine）。
     // 距门测点（备案项⑤）：407/613/423 分支以玩家中心为基准（:66361-66402
     // `Vector2 center = Main.player[owner].Center`;1456 :62416/:62433 同段），
@@ -3755,6 +4324,8 @@ export class MinionProj extends Entity {
     if (ai62) { this.ai62Step(game, p, dmg0, tgt); return; }
     // 地面步行族（备案项②）：蜘蛛 390-392（AI_026 flag7）/ 吸血蛙 758（AI_067 flag2）
     if (this.projId >= 390 && this.projId <= 392) { this.spiderStep(game, p, dmg0); return; }
+    // 海盗三变体（台账批②）：AI_067 flag 步行链正轨（原"统一飞行"近似退役）
+    if (this.projId >= 393 && this.projId <= 395) { this.pirateStep(game, p, dmg0); return; }
     if (this.projId === 758) { this.frogStep(game, p, dmg0); return; }
     if (this.projId === 623) { this.guardianBody(game, p, dmg0); return; }
     if (this.projId === 317) { this.ravenBody(game, p, dmg0); return; }
@@ -4010,11 +4581,12 @@ export class MinionProj extends Entity {
         }
       }
     }
-    // 接触伤害（tag + TagCrit 语义见 contact()）。同型静态免疫冷却按弹型：
-    // 双子 387=16t / 388=12t（idStaticNPCHitCooldown :4436/:4451——激光眼也有
-    // 近身接触伤，非纯远程；388 另有 25 穿甲由 contact 内弹型数据通道自动带）；
-    // 其余随从沿用 20t 近似
-    this.contact(game, dmg0, this.projId === 387 ? 16 : this.projId === 388 ? 12 : 20);
+    // 接触伤害（tag + TagCrit 语义见 contact()）。★台账批③：统一 20t 私表退役——
+    // 冷却走 CONTACT_CD_TABLE 三态解析：双子 387/388 = idStatic 16/12（:4714/:4730）、
+    // 致命球 533 = local 12（:6008）、其余（俾格米 191-194/Foxparks 1094·1113/
+    // 乌鸦外通用飞行族等）= 原版缺省 -2 → 吃玩家全局免工件窗
+    // （Projectile.cs:466 缺省 + Damage_PVE_Inner immune[owner] 门 :12636）
+    this.contact(game, dmg0);
     // 玩家死亡/过远不消失（原版随从持续到上限驱逐或卸装）——仅跟随
     void TILE;
   }

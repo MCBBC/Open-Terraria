@@ -3105,10 +3105,13 @@ export class SkyRenderer {
     return (fc.world.lavaLine || (fc.world.h - 200)) * 16;
   }
 
-  /** IsSunset（AmbienceServer.cs:39-46：白天且 Main.time>40500 → timeOfDay>0.625） */
+  /** IsSunset（AmbienceServer.cs:39-46：白天且 Main.time>40500）。
+   *  ★40500 是分段昼内 ticks → 钟面 = DAWN + 40500/86400 = 0.65625（15:45）——
+   *  曾写 0.625（=40500/64800,分母无语义）提前 45 分钟进 sunset 氛围
+   *  （2026-08-31 手表行口径审查顺带定谳） */
   private isSunset(): boolean {
     const c = this.frameCtx?.clock;
-    return !!c && c.isDay && c.timeOfDay > 0.625;
+    return !!c && c.isDay && c.timeOfDay > ClockVal.DAWN + 40500 / 86400;
   }
 
   /** NPC.butterflyChance<6（AmbienceServer.cs:65）。NPC.cs:94583-94599 每日黎明掷：

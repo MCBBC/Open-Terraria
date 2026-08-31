@@ -9,7 +9,7 @@
 //   通用贴图绘制,勿把那族特例搬进来。
 import { Entity } from './Entity';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
-import { hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy } from './projTargets';
+import { hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projSprite, projFrameImg, projFrameCount, PROJ_ROT_RIGHT } from './Arrow';
 import { projectileData } from '../data/vanillaProjectiles';
 import { TILE } from '../core/constants';
@@ -134,7 +134,7 @@ export class MagicProj extends Entity {
         // + 冷却 300t → 法力星 723(ai2=1)落地掉 4143 法力斗篷之星
         (game as unknown as { tryManaCloakStarOnMagicHit?: (x: number, y: number) => void })
           .tryManaCloakStarOnMagicHit?.(e.x, e.y);
-        e.hurt(crit ? this.damage * 2 : this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
+        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage), Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);   // 音/飘值=单点
         // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
         // 本类承载一碰即碎魔法弹（穿透数缺省 1）——无三旗 face 时末档
         // `penetrate != 1 || applies` 判定为假 ⇒ 无写（:14180-14183 单发 flag3 族既绕

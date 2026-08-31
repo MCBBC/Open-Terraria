@@ -92,8 +92,8 @@ describe('①GetMinecartDamage 数值表（1457 :29474-29518 / 1456 :28776）', 
   it('默认矿车型 25+55×速比', () => {
     expect(MD(0).damage).toBe(25);
     expect(MD(0.25).damage).toBe(39);   // 25+13.75=38.75 → round
-    expect(MD(0.5).damage).toBe(53);    // 25+27.5=52.5 → 项目统一 Math.round（ScaleStats.damageVar；
-                                        // C# Math.Round 默认 ToEven 会得 52——半点 ±1 差异已登记）
+    expect(MD(0.5).damage).toBe(52);    // 25+27.5=52.5 → ★F9 蓝队三批 damageVar 迁入 stats/DamageVar.ts
+                                        // 后改 C# ToEven 银行家形（52），与全仓单源一致
     expect(MD(0.75).damage).toBe(66);
     expect(MD(1).damage).toBe(80);
     expect(MD(1.5).damage).toBe(108);   // 107.5

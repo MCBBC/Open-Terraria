@@ -141,6 +141,8 @@ export interface NpcLiquidHost {
   lavaCd: number;
   onFireT: number;
   onFire3T: number;
+  /** stinky(120) 存量秒——液体即除（TryRemovingWaterPerishableEffects :94433） */
+  stinkyT?: number;
   inWater: boolean;
   liqFactor: number;
   def: { boss?: boolean };
@@ -261,6 +263,10 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
     b.onFireT = 0;                                        // DelBuff(24)
     b.onFire3T = 0;                                       // DelBuff(323)
   }
+  // stinky(120) 液体即除（TryRemovingWaterPerishableEffects 尾段 :94433-94441：
+  // `if (!stinky||netMode==1) return;` 后逐 buff 扫 120 → DelBuff——无 isInLava 门,
+  // 水/岩浆/蜂蜜/微光浸体一律去除;2026-08-31 stinky 清偿补）
+  if (flag && (b.stinkyT ?? 0) > 0) b.stinkyT = 0;
   if (b.wetCount > 0) b.wetCount--;                       // :93734
   b.inWater = b.wet;                                      // 兼容旧字段
   // ---- 5. 移动积分因子（:93748-93762 优先级链）----

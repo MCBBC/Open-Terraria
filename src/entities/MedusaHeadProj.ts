@@ -21,7 +21,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { Player } from './Player';
 import { projSprite, projFrameCount } from './Arrow';
-import { canBeChasedBy } from './projTargets';
+import { canBeChasedBy, applyBannerDamageDealt } from './projTargets';
 import { canHitLine } from '../physics/LineOfSight';
 import { itemCombat } from '../data/vanillaItemCombat';
 import { prefixStat } from '../data/vanillaPrefixes';
@@ -182,7 +182,7 @@ export class MedusaHeadProj extends Entity {
       const tcx = t.x + t.w / 2, tcy = t.y + t.h / 2;
       angSum += Math.atan2(tcy - hy, tcx - hx);
       const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-      t.hurt(crit ? this.damage * 2 : this.damage, 0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      t.hurt(applyBannerDamageDealt(game, t, crit ? this.damage * 2 : this.damage), 0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.beams.push({ x2: tcx, y2: tcy, age: 0, mag: 1 });
     }
     // ---- 4 条随机向散逸束（:45439-45446：1/4 全圆随机,其余 UnitX.RotatedByRandom(π)

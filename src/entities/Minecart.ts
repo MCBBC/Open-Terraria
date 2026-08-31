@@ -25,6 +25,7 @@ import {
   type KillTileCtx, type MountData,
 } from './Mounts';
 import { canHitLine } from '../physics/LineOfSight';
+import { applyBannerDamageDealt } from './projTargets';
 import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
@@ -710,7 +711,8 @@ export class Minecart extends Entity {
         dirX: Math.sign(this.vx), age: 0,
       });
       // damage=60 → Damage()（无 melee/ranged/magic 旗 → 永不暴击；kb 0）
-      e.hurt(SUPER_CART_LASER_DMG, 0, 0, game, 0, false, 0, true);   // 玩家矿车激光=DPS 计
+      // ★F1：Damage 面 → 攻端旗乘区（ApplyBannerDamageDealt 单源）
+      e.hurt(applyBannerDamageDealt(game, e, SUPER_CART_LASER_DMG), 0, 0, game, 0, false, 0, true);   // 玩家矿车激光=DPS 计
     }
   }
 

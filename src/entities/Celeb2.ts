@@ -18,7 +18,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -289,7 +289,7 @@ export class Celeb2Rocket extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=StrikeNPC 单点;fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=StrikeNPC 单点;fromPlayer=DPS 计
       this.explode(game);                              // penetrate 1 → 命中即 Kill
       return;
     }

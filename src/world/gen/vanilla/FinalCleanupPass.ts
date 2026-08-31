@@ -56,6 +56,9 @@ import { runNotTheBees, runFinishNotTheBees } from './NotTheBeesPass';
 // ★SSS-CELEB（2026-08-27）：FinishTenthAnniversaryWorld 全家（1458 cs:24502-24554）
 import { growTree } from './TreePass';
 
+const __swProcessEnv: Record<string, string | undefined> = (typeof process !== 'undefined') ? (process as unknown as { env?: Record<string, string | undefined> }).env ?? {} : {};
+
+
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0(空格)安全退化 */
 const SHEET_TO_INTERNAL = new Map<number, number>();
 for (const d of TILE_DEFS) {
@@ -795,7 +798,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
   }
   // ★IIIII99b：Check2x2 主组（cs(1458 rigsrc):87340-56 直调列）——置于 switch 前，
   //   与 654/TNT 桶同式（vanilla 该组经 goto case 132 并入 Check2x2）
-  if (C2X2_MAIN_GROUP.has(sheet)) {
+  if (!((__swProcessEnv ?? {}).SW_I08_NODISPATCH === '1') && C2X2_MAIN_GROUP.has(sheet)) {
     check2x2Sweep(st, ctx, x, y, sheet);
     return true;
   }

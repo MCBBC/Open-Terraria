@@ -23,7 +23,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 
 /** 敌怪桶最小形状（Enemy.hurt 单点结算） */
 type EnemyLike = {
@@ -114,7 +114,7 @@ export class MushroomBoiExplosionProj extends Entity {
         const crit = Math.random() < this.critChance;
         const dmg = crit ? this.damage * 2 : this.damage;
         const kdir = Math.sign(e.x + e.w / 2 - this.cx) || 1;   // 默认弹体相对向（1044 不在 num40 特列）
-        e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);
+        e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);
       }
     }
     if (this.ai0 >= 3) this.dead = true;            // 3×projFrames(=1) Kill 门（:35105-35108）

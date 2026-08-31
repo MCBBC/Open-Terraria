@@ -278,16 +278,16 @@ function invalidForPiles(st: TileStore, x: number, y: number): boolean {
  *  **底中锚** (x-1..x+1)×(y-1..y)——此前误按底左锚整体右移 1 列；足印全空 +
  *  下列实心 + 186/187 底禁滚石（InvalidTileForPilesOrSpeleothems）。 */
 function place3x2(st: TileStore, x: number, y: number, style: number): boolean {
-  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;   // cs:52099
+  let why = '';
+  const dbg = MK109;
+  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) { if (dbg) mk109(`P3X|x=${x}|y=${y}|bounds`); return false; }   // cs:52099
   let ok = true;
   for (let c = x - 1; c <= x + 1; c++) {
-    for (let d = y - 1; d <= y; d++) if (activeAt(st, c, d)) ok = false;
-    if (invalidForPiles(st, c, y + 1)) ok = false;                    // cs:52143
-    if (!ltSolid2(st, c, y + 1)) ok = false;                          // ★IIIII73:cs:52580 SolidTile2 支柱行（原误 solidAt）
+    for (let d = y - 1; d <= y; d++) if (activeAt(st, c, d)) { ok = false; why += `act(${c},${d},t${sheetAt(st,c,d)})`; }
+    if (invalidForPiles(st, c, y + 1)) { ok = false; why += `bld(${c},${y + 1})`; }                    // cs:52143
+    if (!ltSolid2(st, c, y + 1)) { ok = false; why += `sup(${c},${y + 1},t${sheetAt(st,c,y+1)},a${activeAt(st,c,y+1)?1:0},hf${st.half[st.idx(c,y+1)]},sl${st.slope[st.idx(c,y+1)]})`; }                          // ★IIIII73:cs:52580
   }
-  if (LT_TRACE && x >= 405 && x <= 430 && y >= 140 && y <= 175) {
-    console.log(`P3x2? x=${x} y=${y} style=${style} ok=${ok} st=${ltStream()}`);
-  }
+  if (dbg) mk109(`P3X|x=${x}|y=${y}|sty=${style}|ok=${ok ? 1 : 0}${why ? '|why=' + why : ''}`);
   if (!ok) return false;
   const d0 = TILE_DEFS[PILE2];
   const [bx, by] = furnitureStyleBase(d0.vanilla?.sheet ?? -1, style, 3);
@@ -1293,13 +1293,11 @@ export function runLivingTreesPass(
   // 一次性探针钩（同 WebsPass 模式）：LivingTrees 入口快照（债时间线用）
   const g0 = globalThis as { __swLtCap?: (gs: GenState, st: TileStore) => void };
   try { g0.__swLtCap?.(gs, st); } catch { /* probe */ }
-  // ★IIIII97c 定罪③（cs:15789 前史/TileID.cs tileSolid[192]=true 基线）：原版【本
-  //   pass 全程】活树叶=实心——根系 SolidTile 下探计数、竖井预检 flag4、PlaceSmallPile/
-  //   Place3x2 的 SolidTile2 支撑门全部消费该语义；本仓数据把 192 预置 non-solid 且
-  //   曾只在 pass 尾 flip(false)（no-op）⇒ 叶顶石堆/地被在叶面上放置的成败与原版翻转。
-  //   头部翻 true、尾部已存 flip false，pass 外语义零变化（下游各 pass 认证域不动）。
-  flipGenSolid([LEAF], true);
-  if (MK109) mk109(`SOLIDCHK|leafVanSolid=${vanGenSolidType(LEAF)} genSolid=${genSolidType(LEAF)}`);
+  // ★IIIII97c 备案（未启用）：vanilla 在本 pass 内 tileSolid[192]=true，叶面支撑门
+  //   （SolidTile2 家族）消费该语义。曾试验头部 flipGenSolid([LEAF],true)，单变量
+  //   重放 rc 不动——c37 石堆成败翻转的主因不在叶实心位（详见批章），为不扰动已认证
+  //   下游域，此翻转暂不入线；后续批若定罪 KillTile 链再随拍补。
+  //   （试验时 SOLIDCHK 打印确认 flip 本身生效：leafVanSolid=true。）
   const { w } = st;
   const num = 200;                        // cs:15560 与世界中心 ±200 排除带
   const num2 = 0;                         // cs:15561（extraFloatingIslands 才 >0）

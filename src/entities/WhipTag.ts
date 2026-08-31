@@ -14,7 +14,7 @@
 //  SilverBracer 6156 族 +2f → ×3）。
 import { Arrow, projFrameImg } from './Arrow';
 import { Entity } from './Entity';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { trySnapStrike } from '../stats/SnapStrike';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -316,7 +316,7 @@ export class TagEffectState {
       if (Math.hypot(px - ctx.hx, py - ctx.hy) > 450) continue;
       if (!playerCanHitEnemy(ent, g, ctx.projId || 5478)) continue; // CanBeChasedBy 门
       hits++;
-      en2.hurt(20, 0, 0, g, 0, false, 0, true);               // TryHittingNPC(nPC, 20, 0, null, 5478);fromPlayer=DPS 计
+      en2.hurt(applyBannerDamageDealt(g, en2, 20), 0, 0, g, 0, false, 0, true);               // TryHittingNPC(nPC, 20, 0, null, 5478);fromPlayer=DPS 计
       g.spawnParticles?.(px, py, '#60C8FF', 4, 2.2, { life: 16 }); // BlueLightningSmallLong 近似
     }
     g.playSfxFiles?.(['npc_hit34'], 0.6, ctx.hx, ctx.hy);     // SoundID.NPCHit34 :54（循环外无条件）
@@ -379,7 +379,7 @@ export class TagEffectState {
             };
             if (en2.dead || !playerCanHitEnemy(ent, g, 918)) continue;
             if (Math.abs(en2.cx - ctx.hx) > 48 + en2.w / 2 || Math.abs(en2.cy - ctx.hy) > 48 + en2.h / 2) continue;
-            en2.hurt(boom, Math.sign(en2.cx - ctx.hx) * 2, -2, g, 0, false, 0, true);   // fromPlayer=DPS 计
+            en2.hurt(applyBannerDamageDealt(g, en2, boom), Math.sign(en2.cx - ctx.hx) * 2, -2, g, 0, false, 0, true);   // fromPlayer=DPS 计
           }
           g.spawnParticles?.(ctx.hx, ctx.hy, '#FF7A28', 16, 4, { life: 26 });
         }
@@ -535,7 +535,7 @@ export class MoonLordWhipProc extends Entity {
       if (en.dead || this.hitSet.has(en.id)) continue;
       if (this.x >= en.x + en.w || this.x + this.w <= en.x
         || this.y >= en.y + en.h || this.y + this.h <= en.y) continue;
-      en.hurt(this.damage, 0, 0, game, 50, false, 0, true);   // fromPlayer=DPS 计
+      en.hurt(applyBannerDamageDealt(game, en, this.damage), 0, 0, game, 50, false, 0, true);   // fromPlayer=DPS 计
       // 链式补发（:14015-14018：ai[1]<2 → SpawnMoonLordWhipProc(damage, ai[1]+1)）
       if (this.gen < 2) {
         MoonLordWhipProc.spawn(game,

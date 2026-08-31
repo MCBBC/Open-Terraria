@@ -44,7 +44,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { canHit } from '../physics/LineOfSight';
-import { playerCanHitEnemy, hitCritters } from './projTargets';
+import { playerCanHitEnemy, hitCritters, applyBannerDamageDealt } from './projTargets';
 import { cutTilesBox } from './ProjCutTiles';
 
 /** ★三轮蓝队 F6：immune[owner] 读清双语义（:12636-12641/:14169）。原版 flag3 单发族
@@ -99,7 +99,7 @@ function stellarStrike(
     pierce?: number, fromPlayer?: boolean) => boolean },
   damage: number, kx: number, game: GameHooks, armorPen: number, critChance: number,
 ): void {
-  e.hurt(Math.max(1, damage), kx, 0, game, armorPen,
+  e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage)), kx, 0, game, armorPen,
     Math.random() < critChance, 0, true);          // StrikeNPC 单点（Enemy.hurt 同构）
 }
 
@@ -172,7 +172,7 @@ export function computeStellarTuneShot(inp: StellarShotInput): StellarShotOutput
   //   收窄——删除多余归一化,|v| 恢复 ∈(1,√2]（|Y₀|<0.5 支的 |X|>√3/4、新 |Y|∈[0.5,1)）。
   const e0 = inp.nextEdgeUnit();
   let ux = e0.x, uy = e0.y;
-  if (uy > 0) uy = -uy;
+  if (uy > 0) { ux = -ux; uy = -uy; }            // :48467 `vector35 *= -1f`=整向量取反（曾只翻 Y）
   if (Math.abs(uy) < 0.5) uy = -inp.nextFloat01() * 0.5 - 0.5;
   const dist = Math.hypot(dxa, dya);              // vector34.Length()（钳后终值,:48476）
   return { spawnX: inp.playerCx, spawnY: inp.playerCy,

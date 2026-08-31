@@ -15,7 +15,7 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 
 /** 251 静态免疫表（原版 usesIDStaticNPCImmunity：按弹型共享，非每段独立）。
  *  表项 = 敌 id → 到期时刻（共享钟，多段同 tick 不会重复衰减冷却——
@@ -81,7 +81,7 @@ export class RainbowSegment extends Entity {
       segImmuneUntil.set(e.id, nowMs() + IMMUNE_MS);
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, Math.sign(this.x - e.x) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.x - e.x) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
     }
   }
 

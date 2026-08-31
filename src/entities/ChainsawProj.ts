@@ -20,7 +20,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { damageVar } from '../stats/ScaleStats';
 
@@ -209,7 +209,7 @@ export class ChainsawProj extends Entity {
       const owner = game as unknown as { player?: { luck?: number } };
       const raw = damageVar(this.damage, -(owner.player?.luck ?? 0));
       const dmg = crit ? raw * 2 : raw;
-      e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
       this.hitCd.set(e.id, 10);
     }
   }

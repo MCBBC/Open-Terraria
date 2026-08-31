@@ -180,10 +180,26 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
     const sl = st.slope[j];
     if (sl === 0 || st.half[j]) return false;
     const top = ty * TILE;
-    if (sl === 1) return oy + b.h - avx <= top + TILE && ox >= tx * TILE;
-    if (sl === 2) return oy + b.h - avx <= top + TILE && ox + b.w <= tx * TILE + TILE;
-    if (sl === 3) return oy + avx >= top && ox >= tx * TILE;
-    return oy + avx >= top && ox + b.w <= tx * TILE + TILE; // 4
+    // ★缓嵌防护(2026-08-31):中心点在坡面 solid 三角内时不放行——否则贴墙态
+    //  (touching≠colliding)下每 tick 微移进 solid 区永不弹出。原版条件只看
+    //  "底/顶 vs tile 界"够不到坡面几何精度。
+    //  各坡向 solid 三角判定(cpx=中心相对 tile 左,cpy=中心相对 tile 顶):
+    //  1: solid=左下(cpy>cpx) / 2: solid=右下(cpy>TILE-cpx)
+    //  3: solid=上左(cpy<cpx) / 4: solid=上右(cpy<TILE-cpx)
+    const basePass = (() => {
+      if (sl === 1) return oy + b.h - avx <= top + TILE && ox >= tx * TILE;
+      if (sl === 2) return oy + b.h - avx <= top + TILE && ox + b.w <= tx * TILE + TILE;
+      if (sl === 3) return oy + avx >= top && ox >= tx * TILE;
+      return oy + avx >= top && ox + b.w <= tx * TILE + TILE; // 4
+    })();
+    if (!basePass) return false;
+    // 中心在开放三角内才放行(否则挡下,等同嵌入预防)
+    const cpx = (ox + b.w / 2) - tx * TILE;
+    const cpy = (oy + b.h / 2) - ty * TILE;
+    if (sl === 1) return cpy <= cpx;           // 开放=对角线上方
+    if (sl === 2) return cpy <= TILE - cpx;    // 开放=对角线上方
+    if (sl === 3) return cpy >= cpx;           // 天花板开放=对角线下方
+    return cpy >= TILE - cpx;                   // 4
   };
   // X 轴
   if (dx !== 0) {
@@ -538,7 +554,19 @@ function unembedPass(b: Body, world: World): void {
     for (let tx = nx0; tx <= nx1; tx++) {
       if (!st.inBounds(tx, topRow)) continue;
       const ti = st.idx(tx, topRow);
-      if (st.isSolid(tx, topRow) && st.slope[ti] === 0 && !st.half[ti] && !st.isPlatform(tx, topRow)) {
+      if (st.flags[ti] && st.slope[ti] > 0 && !st.half[ti]) {
+        // ★坡面格:头顶 Y 在坡面 solid 三角内才算嵌入(开放三角=正常贴站不触发;
+        //  原排除坡面格=天花板斜面穿透 bug——头缓入 solid 三角后无检出无弹出)
+        const slopeV2 = st.slope[ti];
+        const headRelX = (b.x + b.w / 2) - tx * TILE;
+        const headRelY = b.y - topRow * TILE;
+        let inSolidTri = false;
+        if (slopeV2 === 1) inSolidTri = headRelY < headRelX;
+        else if (slopeV2 === 2) inSolidTri = headRelY < TILE - headRelX;
+        else if (slopeV2 === 3) inSolidTri = headRelY > headRelX;
+        else if (slopeV2 === 4) inSolidTri = headRelY > TILE - headRelX;
+        if (inSolidTri) { topEmbedded = true; break; }
+      } else if (st.isSolid(tx, topRow) && !st.half[ti] && !st.isPlatform(tx, topRow)) {
         topEmbedded = true;
         break;
       }

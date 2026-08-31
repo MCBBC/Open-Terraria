@@ -18,7 +18,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 
 export const ELECTROSPHERE_PROJ = 443;
 /** timeLeft（NewProjectile :11067-11070 钳 300 = 5s） */
@@ -117,7 +117,7 @@ export class ElectroSphereProj extends Entity {
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if ((e.iframes ?? 0) > 0) continue;                // immune[owner] 门（:11869）
       const crit = Math.random() < (4 + this.critBonus) / 100;
-      e.hurt(Math.max(1, Math.trunc(this.damage)), 0, 0, game, this.armorPen, crit, 2, true);
+      e.hurt(applyBannerDamageDealt(game, e, Math.max(1, Math.trunc(this.damage))), 0, 0, game, this.armorPen, crit, 2, true);
       e.iframes = ELECTROSPHERE_IFRAMES;                 //（:14072-14074，覆写通用档 10）
     }
   }

@@ -27,7 +27,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { canHit } from '../physics/LineOfSight';
-import { canBeChasedBy, playerCanHitEnemy, hitCritters } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy, hitCritters, applyBannerDamageDealt } from './projTargets';
 import { cutTilesBox } from './ProjCutTiles';
 
 /** NPC.canGhostHeal=false 族（NPC.cs SetDefaults 写点——NPC.cs:6270 字段缺省 true；
@@ -361,7 +361,7 @@ export class SpectreSoulProj extends Entity {
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
       // flag3 单发族：pierce 入参 1 = Enemy.hurt 的免疫豁免+不设帧面（:13152 对应位）
-      e.hurt(this.damage, 0, 0, game, 0, false, 1, true);
+      e.hurt(applyBannerDamageDealt(game, e, this.damage), 0, 0, game, 0, false, 1, true);
       this.penetrate--;                            // （:14189 命中尾递减,写段判定用写前值）
       return;                                      // keepIterating=false（单发结算终了）
     }

@@ -824,6 +824,9 @@ function placeBuriedChestInner(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink,
   i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags; trySlope?: boolean; notNearOtherChests?: boolean } = {},
 ): boolean {
+  // ★IIIII99c 取证钩（dormant，__swAbGate 未挂载零开销）：早期门逐段开火标记
+  const __abGate = (globalThis as { __swAbGate?: (tag: string, i: number, j: number, extra?: number) => void }).__swAbGate;
+  __abGate?.('enter', i, j);
   // 下落到地面（cs:35931 `for k=j; k<maxTilesY-10; k++`）
   // ★DDDD:坠落谓词 = WorldGen.SolidTile(i,k)（cs:70650-70666 全项版:active && tileSolid &&
   //   !tileSolidTop && !half && slope==0 && !inActive）——平台/桌族(solidTop)不拦截坠落,
@@ -848,8 +851,8 @@ function placeBuriedChestInner(
     // ★OOOOO：num2/num3 是 vanilla 循环体【行内变量】（cs:35943-44）——每行重置；
     //   非落定行（半砖行）压平的 (i-1,k) 坡 vanilla 不回填（下一轮 num2=-1）。
     slopeL = -1; slopeR = -1;
-    if (st.liquid[k] > 0 && st.liquidType[k] === 4) return false;              // anyShimmer → 整体失败
-    if (st.flags[k] && st.type[k] === LARVA) return false;                      // 幼虫 231 → 整体失败
+    if (st.liquid[k] > 0 && st.liquidType[k] === 4) { __abGate?.('shimmer', i, gy); return false; }              // anyShimmer → 整体失败
+    if (st.flags[k] && st.type[k] === LARVA) { __abGate?.('larva', i, gy); return false; }                      // 幼虫 231 → 整体失败
     // ★OOOOO：trySlope 门（cs:35951-35968）在 SolidTile 判定【之前】逐行执行，门谓词 =
     //   active && tileSolid && !tileSolidTop（不含 slope/half！）——压平 (i,k) 顶坡后
     //   SolidTile 即真 → 箱【落在坡上】。曾把 ±30 盒+压平塞在 solidDrop 门内（要求
@@ -880,7 +883,7 @@ function placeBuriedChestInner(
     }
     // ★IIIII85（cs:36320-36324）remix 中央黑曜柱反爆区拒箱：i∈(0.37w,0.63w) 且
     //   当前行 > h-250 → 整体失败（Zero-drop 门，零掷）。曾整段缺失。
-    if (gs.seedFlags.remix && i > st.w * 0.37 && i < st.w * 0.63 && gy > st.h - 250) return false;
+    if (gs.seedFlags.remix && i > st.w * 0.37 && i < st.w * 0.63 && gy > st.h - 250) { __abGate?.('pillar', i, gy); return false; }
     // ★±2 巨石/祭坛拒绝在扫描循环内**逐行**执行（cs:35992-36002，锚=当前行 k：
     //   InWorld(n,num6,100) && Boulders{138,484,664,665,711-716} || 26 || 237）。
     //   曾在进循环前以起始行 j 只查一次——起始行下方 2 格内的滚石/祭坛全部漏检
@@ -891,13 +894,14 @@ function placeBuriedChestInner(
         const kk = st.idx(xx, yy);
         if (!st.flags[kk]) continue;
         const tt = st.type[kk];
-        if (BOULDER_TILES.has(tt) || tt === ALTAR || tt === TALTAR) return false;
+        if (BOULDER_TILES.has(tt) || tt === ALTAR || tt === TALTAR) { __abGate?.('boulder', i, gy, st.type[kk]); return false; }
       }
     }
     if (solidDrop(i, gy)) break;
   }
-  if (gy >= st.h - 10) return false;
-  if (!solidDrop(i, gy)) return false;
+  if (gy >= st.h - 10) { __abGate?.('nofloor', i, gy); return false; }
+  if (!solidDrop(i, gy)) { __abGate?.('nosolidstop', i, gy); return false; }
+  __abGate?.('land', i, gy);
   // trySlope 失败回填（cs:37567-37575：仅压平过的格才恢复）
   const restoreSlopes = (): void => {
     if (slopeL > -1) st.slope[st.idx(i - 1, gy)] = slopeL;

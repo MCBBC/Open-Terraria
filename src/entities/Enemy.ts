@@ -94,7 +94,7 @@ import {
   resolveDrops, rollCoins, rollHeartsAndStars, rollTypeHearts, rollBossPotionsAndHearts,
   dropVelocity, npcValueOf, type NpcDropCtx,
 } from '../drops/NpcDrops';
-import { isNpcShimmerImmune, npcShimmerTransformTo, npcShimmerTransformToItem } from '../stats/Shimmer';
+import { isNpcShimmerImmune, npcShimmerTransformTo, npcShimmerTransformToItem, vanillaIdOfItem } from '../stats/Shimmer';
 import {
   scaleStats, getAttackDamageForProjectiles, type ScalingStats,
   GDL, remap, mainDifficulty, mainExpertMode, getAttackDamageCappedAtMaster,
@@ -125,10 +125,17 @@ function isThisCenx(name: string | undefined): boolean {
 }
 
 // ================= NPC 侧点光的共享近似源（GameHooks 取不到 FlickerClock/Main 计数器） =========
-/** 近似 Main.timeForVisualEffects（Main.cs:17110-17113：每帧 +1、216000 回卷）。
- *  以 performance.now() 折帧数（16.6667ms/帧）——光色波（hsl 时间色/WrappedLerp）
- *  只需视觉节拍，帧漂移无感 */
+/** Main.timeForVisualEffects 等价（1458 Main.cs:17340-17343 = 台账"17110"同义锚：
+ *  每 tick +1、216000 回卷）。★C 批改型(2026-08-31)：曾 performance.now()/16.6667
+ *  折帧 = 渲染帧时钟,暂停/世界冻结仍走表,与原版 tick 节拍错相——改逐 tick 计数器,
+ *  由 Game 固定步实体轮前的 stepVisEffectTick() 推进;Game 未启动(菜单纯渲染)时
+ *  回退 wall-clock 兜底动画。 */
+let visTickCounter = 0;
+export function stepVisEffectTick(): void {
+  if (++visTickCounter >= 216000) visTickCounter = 0;
+}
 export function visEffectFrames(): number {
+  if (visTickCounter > 0) return visTickCounter;
   return (performance.now() / 16.6667) % 216000;
 }
 /** 近似 Main.mouseTextColor（Main.cs:18066-18073：190↔255 每帧 ±1 三角波，周期 130 帧）。
@@ -270,6 +277,47 @@ const PIRATE_DAY_ACTIVE = new Set([212, 213, 214, 215, 216]);        // invasion
 const MARTIAN_DAY_ACTIVE = new Set([381, 382, 383, 385, 386, 389, 391, 520]);
 // 霜月昼行组（cs:60696 (!snowMoon || npcID!=343/350) 门）：仅霜月期间昼行
 const FROSTMOON_DAY_ACTIVE = new Set([343, 350]);
+// —— NotDiscouraged 完整表的"链内真值"细分（2026-08-31 C 批，1457/1458 NPC.cs
+//    :60895-60925 同锚）：显型直通表 = 大条件链尾 `npcID != X` 串（+73/624 基础项）；
+//    switch 落真组 = case 列表 ∪ default 中 break 的 528-532 四型
+const NOT_DISCOURAGED_CHAIN_TRUE = new Set([
+  73, 624,
+  31, 294, 295, 296, 47, 67, 77, 78, 79, 80, 630, 110, 120, 168, 181, 185, 198,
+  199, 206, 217, 218, 219, 220, 239, 243, 254, 255, 257, 258, 291, 292, 293,
+  379, 380, 464, 470, 424,
+]);
+const NOT_DISCOURAGED_SWITCH_TRUE = new Set([
+  409, 415, 419, 425, 427, 428, 429, 508, 524, 525, 526, 527, 580, 582,
+  528, 529, 530, 532,
+]);
+/** DespawnEncouragement_AIStyle3_Fighters_NotDiscouraged（1457/1458 NPC.cs
+ *  :60895-60925 同锚；C 批 2026-08-31 从 AI_003 呻吟声窗的 despawnEncouraged 主门
+ *  近似升级为完整表；fighterAI 内联 dayActive 逐步保持独立两份=同值集）。
+ *  原文结构：大条件链（!eclipse&&IsItDay&&!SpawnedFromStatue&&Y≤worldSurface&&
+ *  非墓地&&事件档&&显型白名单）【任一项不成立】→ 直接 return true（不被驱散）；
+ *  链全成立才进 switch——case 组∪528-532 → true，余型 = CritterThatCanTurnOnPlayers
+ * （黑化小动物族转战士者昼间可索敌,普通 aiStyle3 战士 false=被驱散）。 */
+/** 导出供回归测试钉住极性表（tests/enemy-approx-clearing-a.test.ts） */
+export function fighterNotDiscouraged(game: GameHooks, e: Enemy): boolean {
+  const id = e.vanillaId ?? -1;
+  if (id < 0) return false;
+  const w = game.world;
+  if (!(w.clock.isDay && !w.clock.eclipse)) return true;             // 夜/日食恒放行
+  if (e.spawnedFromStatue) return true;                              // 雕像产怪豁免
+  if (!(e.cy < w.groundLevel * TILE)) return true;                   // 地下(Y≤worldSurface)
+  if (w.scene?.zoneGraveyard) return true;                           // 目标玩家在墓地
+  if (w.moonEvent?.kind === 1 && FROSTMOON_DAY_ACTIVE.has(id)) return true;
+  if (w.invasionType === 1 && GOBLIN_DAY_ACTIVE.has(id)) return true;
+  if (w.invasionType === 3 && PIRATE_DAY_ACTIVE.has(id)) return true;
+  if (w.invasionType === 4 && MARTIAN_DAY_ACTIVE.has(id)) return true;
+  // dontStarve 世界（theConstant）：164 血肉魔改 163 僵尸族免驱散(:60696 首段)
+  if (!!w.seedFlags?.theConstant && (id === 163 || id === 164)) return true;
+  if (NOT_DISCOURAGED_CHAIN_TRUE.has(id)) return true;               // 显型白名单(+624)
+  if (id === 631 && e.ai2 > 0) return true;                          // 岩石巨人攻击中
+  if (id === 411 && !(e.ai1 >= 90 && e.ai1 < 180)) return true;      // 观星者瞄准窗外
+  // 链全成立 → switch 段落终值
+  return NOT_DISCOURAGED_SWITCH_TRUE.has(id) || CRITTER_TURN_ON_PLAYERS.has(id);
+}
 /** 通用 ai[3] 卡死计数的跳过集（NPC.cs:57472-57546）：425/471 整段跳过（flag9，
  *  ai[3] 被各自状态机独占）；switch 集（flag10）在 ai[2]>0（瞄准/蓄力中）时跳过 */
 const AI3_COUNTER_SKIP_ENTIRELY = new Set([425, 471]);
@@ -1369,8 +1417,12 @@ export class Enemy extends Entity {
   chlorophyteSporeDoT = 0;
   eelWhipDoT = 0;
   /** stinky(120)：苍蝇美食 5129 挥砍命中 5s（Player.StatusToNPC :6203-6206）。
-   *  原版 NPC 侧效果 = 其余敌怪索敌改以 stinky 者为目标（NPC.cs:53888/53899）——
-   *  本仓敌怪索敌 AI 未建模该转向（登记 GAP），字段仅承载 buff 存量/倒计时。
+   *  NPC 侧三消费支（2026-08-31 清偿，行号 1457=1458 同锚）：
+   *   ①险情扫描当威胁(:54033 `!stinky` 子句+玩家支 :54081-54100)→ AI_007 小动物逃离;
+   *   ②自身带味不休整(:54179-54182 ai[0]=0 段首强制起走);
+   *   ③整体变暗(GetNPCColorTintedByBuffs :92208-92214 R×0.7 B×0.55)+苍蝇尘 188
+   *     (UpdateNPC_BuffApplyVFX :92465-92475);
+   *  附：液体即除(TryRemovingWaterPerishableEffects :94433,见 npcLiquid.ts)。
    *  B1 批新增授予源：恶臭药水弹 371 消亡 80px 圈（P.cs:78947-78956 → ThrowKillFx） */
   stinkyT = 0;
   /** lovestruck(119)：爱情药水弹 370 消亡 80px 圈授予（P.cs:78940/:78955）——
@@ -1397,8 +1449,8 @@ export class Enemy extends Entity {
    *  一次乘 npcColor,与逐次乘等价）;本仓返回 [R,G,B] 乘区由 Renderer.drawEnemy 以
    *  tintedSprite(multiply) 消费。ichor 为整色替换 (255,255,0)（:92246-92248）。
    *  求值序 = 原版 if 链顺序（brokenArmor→poisoned→venom→chlorophyteSpore→
-   *  potentAcid→bleeding/hemorrhage→midas→betsysCurse→oiled→drippingSlime→ichor;
-   *  stinky/SparkleSlime/hunter 段本仓无对应态不进）。门 = canDisplayBuffs
+   *  potentAcid→bleeding/hemorrhage→midas→betsysCurse→oiled→stinky→drippingSlime→
+   *  ichor;stinky 段 :92208-92214 已补(2026-08-31),SparkleSlime/hunter 段本仓无对应态不进）。门 = canDisplayBuffs
    *  （:92144,FTW getGood 245-248 石巨人族 false）。1457 新增 chlorophyteSpore
    *  （中毒式 R×0.65 B×0.75）与 potentAcid（剧毒式 G×0.45 R×0.75）两段 */
   get debuffTintRGB(): [number, number, number] | null {
@@ -1415,6 +1467,7 @@ export class Enemy extends Entity {
     if (this.midasT > 0) mul(0.85, 1, 0.3);                      // :92190-92195
     if (this.betsysCurseT > 0) mul(0.8, 0.6, 1);                 // :92197-92202
     if (this.oiledT > 0) mul(0.4, 0.4, 0.4);                     // :92204-92209
+    if (this.stinkyT > 0) mul(0.7, 1, 0.55);                     // :92208-92214 stinky(R×0.7 B×0.55)
     if (this.slimedT > 0) mul(0.8, 0.8, 1);                      // :92222-92227 drippingSlime
     if (this.ichorT > 0) return [255, 255, 0];                   // :92246-92248 整色替换
     return hit ? [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)] : null;
@@ -2250,13 +2303,21 @@ export class Enemy extends Entity {
     //      :92878-92894）。原版走 Dust/ParticleOrchestrator,本仓以 spawnParticles
     //      近似（颜色/概率/速率 1:1;粒子形态差异登记）----
     if (this.chlorophyteSporeT > 0) {
-      // 叶尘 dust 157 4/5（:92315-92323,noGravity、velocity×0.75、scale 1.95）
+      // 叶尘 dust 157（:92321-92330；2026-08-31 C 批：spawnParticles 色近似 →
+      // 真实尘型直生）：盒(position−2,+4)、v=velocity×0.4、alpha180、scale1.95
+      // noGravity；尾段 velocity×0.75 → X 再 ×0.75、Y−1；1/4 概率转重力+scale×0.5
       if (Math.random() < 4 / 5) {
-        game.spawnParticles(
-          this.x + Math.random() * this.w, this.y + Math.random() * this.h,
-          '#7BC043', 1, 0.4, { life: 30 + Math.random() * 12, grav: 0, damp: 0.96 });
+        const d = game.spawnDust?.(this.x - 2, this.y - 2, this.w + 4, this.h + 4,
+          157, this.vx * 0.4, this.vy * 0.4, 180, null, 1.95);
+        if (d) {
+          d.noGravity = true;
+          d.vx *= 0.75; d.vy *= 0.75; d.vx *= 0.75;
+          d.vy -= 1;
+          if (Math.floor(Math.random() * 4) === 0) { d.noGravity = false; d.scale *= 0.5; }
+        }
       }
-      // 孢子云 SporeCloud 1/60 每秒掷（:92878,在 !dontTakeDamage 门之外）
+      // 孢子云 SporeCloud 1/60 每秒掷（:92878,在 !dontTakeDamage 门之外）——
+      // 编排粒子型（ParticleOrchestrator），非 Dust 表项：spawnParticles 近似维持（登记）
       if (Math.floor(Math.random() * 60) === 0) {
         game.spawnParticles(
           this.x + 2 + Math.random() * Math.max(1, this.w - 4),
@@ -2266,10 +2327,28 @@ export class Enemy extends Entity {
       }
     }
     if (this.potentAcidT > 0 && Math.random() < 1 / 2) {
-      // 气泡尘 dust 171 1/2（:92325-92331,noGravity、fadeIn 1.5、scale 0.5）
-      game.spawnParticles(
-        this.x + Math.random() * this.w, this.y + Math.random() * this.h,
-        '#C8E8A0', 1, 0.2, { life: 24, grav: -0.05, damp: 0.97 });
+      // 强酸气泡尘 dust 171 1/2（:92325-92331,noGravity、fadeIn 1.5、scale 0.5；
+      // C 批改真实尘型）
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 171, 0, 0, 100, null, 0.5);
+      if (d) { d.noGravity = true; d.fadeIn = 1.5; }
+    }
+    if (this.stinkyT > 0 && Math.floor(Math.random() * 5) === 0) {
+      // 苍蝇尘 dust188（UpdateNPC_BuffApplyVFX :92465-92475，2026-08-31 清偿：
+      // spawnParticles 色近似 → 真实尘型直生）：Next(-10,11)^2 归一化、X×0.66、
+      // Y 取 |·|；v = 单位向量 × Next(3,5)×0.25；NewDustDirect(position,w,h,188,
+      // vX,vY×0.5,100,default,1.5)，尾段 velocity×0.1、Y−0.5
+      let ux = Math.random() * 21 - 10, uy = Math.random() * 21 - 10;
+      const ul = Math.hypot(ux, uy);
+      if (ul > 0) { ux /= ul; uy /= ul; }
+      ux *= 0.66; uy = Math.abs(uy);
+      const mag = (3 + Math.floor(Math.random() * 2)) * 0.25;   // Next(3,5)
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 188,
+        ux * mag, (uy * mag) * 0.5, 100, null, 1.5);
+      if (d) {
+        d.vx *= 0.1;
+        d.vy *= 0.1;
+        d.vy -= 0.5;
+      }
     }
     if ((this.blueLightningT > 0 || this.redLightningT > 0) && Math.floor(Math.random() * 10) === 0) {
       // Blue/RedLightningSmall 1/10（NPC57:92272-92294 → Spawn_LightningSmall
@@ -2513,14 +2592,16 @@ export class Enemy extends Entity {
       }
       return;   // 原版 critter 段互斥(else-if 链)
     }
-    // AI_003 闲话（:57914-57945）——仅战士族 aiStyle 3 且未被鼓励消散
-    // （:57914 DespawnEncouragement_NotDiscouraged 主语义=白天驱散态不呻吟;
-    //   完整表含雕像/墓地/事件豁免,此处取 despawnEncouraged 旗主门,近似备案）
+    // AI_003 闲话（:57913-57945）——位于 `if (ai[3] < num58 && NotDiscouraged(...))`
+    // 窗内：卡死计数未满 + DespawnEncouragement_AIStyle3_Fighters_NotDiscouraged
+    // （2026-08-31 C 批：despawnEncouraged 旗主门近似 → 完整表 fighterNotDiscouraged）
     // ★微光门分档修正：旧实现全局 `shimmerT>0 早退`,把闲话门一并收窄——原版闲话门 =
     //   `shimmerTransparency < 1f`（:57916,仅全饱和静默）;shimmerT≈transparency×100 →
     //   本仓 shimmerT≥100 才哑,渐入期(0..100)照常呻吟。IdleSounds 是另一档门
     //   (!transparency>0 即浸入即静默,:91185),保持 ==0 门不动。
-    if (this.vanilla?.aiStyle === 3 && !this.despawnEncouraged && !(this.shimmerT >= 100)) {
+    if (this.vanilla?.aiStyle === 3 && !(this.shimmerT >= 100)
+      && this.ai3 < (id === 120 ? 180 : 60)
+      && fighterNotDiscouraged(game, this)) {
       // 值可数组 = 同 tick 多路【独立掷】（原版 AI_003 尾段多条 if 各自 Main.rand.Next,
       // 同帧双中都各播一次——弗兰肯 162 双源 :57918+:57930,F2 2026-08-26）
       const rawCh = CHATTER_SOUNDS[id];
@@ -2554,6 +2635,19 @@ export class Enemy extends Entity {
    *  ——DoesntDespawnToInactivity 条件豁免（139 依赖 134 / 552-578 依赖 548）用 */
   private anyNpcAlive(game: GameHooks, id: number): boolean {
     return (game.enemies() as Enemy[]).some((e) => !e.dead && e.vanillaId === id);
+  }
+
+  /** CanAnyPlayerSeeThisTile（1457/1458 NPC.cs:43877-43890 同锚）：以世界点为中心、
+   *  边长 = 视口像素(sWidth/sHeight)+32 的屏盒与任一【活跃】玩家命中盒求交。
+   *  原版只查 active 不查 dead——本仓 candidates 表含远端代理照算;视口像素 =
+   *  GameHooks.screenWorldSize 缺省退档 1920×1080（2026-08-31 ⑥清偿：换真实
+   *  屏盒求交语义,退役 62×35 格静态单人近似） */
+  private canAnyPlayerSeeThisTile(game: GameHooks, wx: number, wy: number): boolean {
+    const scr = game.screenWorldSize?.() ?? { w: 1920, h: 1080 };
+    const hw = scr.w / 2 + 16, hh = scr.h / 2 + 16;
+    const cands = game.candidatePlayers?.() ?? [game.player];
+    return cands.some((q) => !!q && Math.abs(q.cx - wx) < hw + q.w / 2
+      && Math.abs(q.cy - wy) < hh + q.h / 2);
   }
 
   /** 原版 EncourageDespawn(despawnTime)（NPC.cs:7228-7235）：timeLeft 封顶 + 置鼓励旗 */
@@ -3704,12 +3798,17 @@ export class Enemy extends Entity {
    *  移动：本仓各 AI 自带积分——wet 时经 moveAndCollide 走 liqFactor（461/586 水 0.5；
    *  620 DD2 全速 1），与原版 UpdateCollision 语义一致。
    *  @returns true = 本 tick 已接管（调用方跳过行走/重力） */
-  /** 美杜莎 480 蓄力石化（NPC.cs:56751-56889 1:1）。返回 true = 蓄力中（本 tick 接管 AI）。
+  /** 美杜莎 480 蓄力石化（NPC.cs AI_003_Fighters 前置段，1458 :56932-57140 = 台账
+   *  "P.cs:56751-56889" 的 1456 行号锚；2026-08-31 清偿段序）。返回 true = 本 tick
+   *  接管。原版块位于通用行走【之前】：冷却态只递减 ai[2] 后照常落通用行走（本仓
+   *  返回 false 放行同构）；蓄力两段均以 return 终止本拍 AI——不跑行走加速,重力/
+   *  碰撞由 UpdateMovement 承担（本仓以 applyGravity+moveAndCollide 复刻,曾裸
+   *  x+=vx 无碰撞积分+行走先跑=段序偏差，见 fighterAI 调用点注）。
    *  ai2 语义：>0 冷却递减 / 0 待机判定起手 / <0 蓄力（-(num23+num25)→0）；蓄力两段
    *  均阻尼 vx 0.9，被挑空(|vy|超阈)或受击打断回 num21；走完回 num22。
    *  低血(<1/3)：num21 180→120 / num22 300→240 / num23 180→240 / num24 60→90。
    *  发石化窗（ai2 ≥ -num23 段）：双相对视 + 距<700 + (贴脸<30 或 45°锥) + 三路视线
-   *  任一通 → AddBuff(156, num24+剩余蓄力)（:56885-56888）——变身伤害/死因在 Player 过渡段 */
+   *  任一通 → AddBuff(156, num24+剩余蓄力)（:57018-57024）——变身伤害/死因在 Player 过渡段 */
   private medusaChargeStep(game: GameHooks, player: Player): boolean {
     const lowHp = this.hp < this.maxHp / 3;
     const num21 = lowHp ? 120 : 180;   // 打断冷却
@@ -3720,15 +3819,16 @@ export class Enemy extends Entity {
     if (this.ai2 > 0) {
       this.ai2 -= 1;
     } else if (this.ai2 === 0) {
-      // 待机起手判定（:56764-56771）：正对玩家 + 站地 + <900 + 视线
+      // 待机起手判定（1458 :56957-56966）：正对玩家 + 站地 + <900 +
+      // CanHit(Center,1,1,targetCenter,1,1)——中心 1px 盒视线（2026-08-31 换精确式,
+      // 曾 losClear 逐格塔线近似）
       const facing = (player.cx < this.cx && this.facing < 0) || (player.cx > this.cx && this.facing > 0);
       if (facing && this.vy === 0 && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 900
-        && losClear(game, Math.floor(this.cx / TILE), Math.floor(this.cy / TILE),
-          Math.floor(player.cx / TILE), Math.floor(player.cy / TILE))) {
+        && canHit(game.world.store, this.cx, this.cy, 1, 1, player.cx, player.cy, 1, 1)) {
         this.ai2 = -(num23 + num25);
       }
     } else {
-      // 蓄力两段（:56778-56889）：打断/推进
+      // 蓄力两段（:56973-57040 起手辉光 / :57041-57040 尾 发石化窗）：打断/推进
       this.vx *= 0.9;
       if (this.vy < -2 || this.vy > 4 || this.justHitT > 0) {
         this.ai2 = num21;
@@ -3737,19 +3837,59 @@ export class Enemy extends Entity {
         if (this.ai2 === 0) this.ai2 = num22;
       }
       this.lightRGB = [0.9, 0.75, 0.1];          // :56816/:56820 蓄力点光——曾误写 0-255 标度致 254× 过曝
-      const rem = this.ai2 + num23 + num25;      // 起手辉光段计时（:56798 num26）
+      const rem = this.ai2 + num23 + num25;      // 起手辉光段计时（:56996 num26）
       if (rem === 1) game.playSfxFile?.('Item_17', 1, this.cx, this.cy); // SoundID 4-17(充能)
       if (rem < num25) {
-        // 充能尘（:56801-56813 尘 228 头顶环;num26<num25 含首 tick 0）
-        const hx = this.cx + this.facing * 6, hy = this.y + 6;
-        game.spawnParticles(hx, hy, '#E8A040', 2, 1.6);
+        // 充能尘（1458 :56999-57011 尘 228 头顶环;num26<num25 含首 tick 0）：
+        // 锚 = Top+(spriteDirection×6,6)；单位向量 UnitY.RotatedByRandom(2π)×
+        // (r×0.5+0.5)，offset=v×Lerp(20,30,(rem×3+50)/182)、velocity=v×2、
+        // scale=0.5+r×0.5、noGravity——2026-08-31 由 spawnParticles 色近似改真实尘型
+        const ang = Math.random() * Math.PI * 2;
+        const mlen = Math.random() * 0.5 + 0.5;
+        const vx7 = -Math.sin(ang) * mlen, vy7 = Math.cos(ang) * mlen;
+        const rad7 = 20 + (30 - 20) * ((rem * 3 + 50) / 182);   // Lerp(20,30,(num26×3+50)/182)
+        // 构造零速（原版 NewDust 无速参,Dust.NewDust 自随机+228 烟雾族特例在
+        // spawn 内镜像）,随后按原文覆写 velocity=v×2/scale/noGravity
+        const d7 = game.spawnDust?.(
+          this.cx + this.facing * 6 + vx7 * rad7,
+          this.y + 6 + vy7 * rad7, 0, 0, 228, 0, 0, 0, null,
+          0.5 + Math.random() * 0.5);
+        if (d7) {
+          d7.noGravity = true;
+          d7.vx = vx7 * 2;
+          d7.vy = vy7 * 2;
+        }
+        // 每拍【两】粒（原版 num28 循环 ×2）——第二粒独立随机角
+        const angB = Math.random() * Math.PI * 2;
+        const vx72 = -Math.sin(angB) * mlen, vy72 = Math.cos(angB) * mlen;
+        const d72 = game.spawnDust?.(
+          this.cx + this.facing * 6 + vx72 * rad7,
+          this.y + 6 + vy72 * rad7, 0, 0, 228, 0, 0, 0, null,
+          0.5 + Math.random() * 0.5);
+        if (d72) {
+          d72.noGravity = true;
+          d72.vx = vx72 * 2;
+          d72.vy = vy72 * 2;
+        }
       }
       if (this.ai2 >= -num23) {
-        // 发石化窗（:56835-56888）：尘 + 直击判定
+        // 发石化窗（:57033-57040 尘段 + :57041-57024 石化判定）：锚=Top+(dir×10,10)、
+        // 单位向量同式、offset=v×Lerp、velocity=v×4、scale=0.5+r×0.5、noGravity
         const n29 = this.ai2 + num23;
-        if (n29 < 180 && (Math.random() < 1 / 3 || this.ai2 % 3 === 0)) { // :56844 num29<180 含 0
-          const hx = this.cx + this.facing * 10, hy = this.y + 10;
-          game.spawnParticles(hx, hy, '#E8A040', 1, 2.4);
+        if (n29 < 180 && (Math.random() < 1 / 3 || this.ai2 % 3 === 0)) { // :57042-57043
+          const ang9 = Math.random() * Math.PI * 2;
+          const m9 = Math.random() * 0.5 + 0.5;
+          const v9x = -Math.sin(ang9) * m9, v9y = Math.cos(ang9) * m9;
+          const rad9 = 20 + (30 - 20) * ((n29 * 3 + 50) / 182); // Lerp(20,30,(num29×3+50)/182)
+          const d9 = game.spawnDust?.(
+            this.cx + this.facing * 10 + v9x * rad9,
+            this.y + 10 + v9y * rad9, 0, 0, 228, 0, 0, 0, null,
+            0.5 + Math.random());
+          if (d9) {
+            d9.noGravity = true;
+            d9.vx = v9x * 4;
+            d9.vy = v9y * 4;
+          }
         }
         if (!player.dead && !player.buffs.has(BuffType.Stoned)) {
           const dx = player.cx - this.cx, dy = player.cy - this.cy;
@@ -3775,8 +3915,11 @@ export class Enemy extends Entity {
           }
         }
       }
-      // 蓄力期接管 AI_003 余段（原版两段末尾 return）
-      this.x += this.vx; this.y += this.vy;
+      // 蓄力期接管 AI_003 余段（原版两段末尾 return——通用行走整拍跳过,重力/碰撞
+      // 由 UpdateMovement 承担;2026-08-31 由裸 x+=vx 改 applyGravity+moveAndCollide
+      // 等价复刻,修站立位穿墙/无重力悬浮漂移）。
+      this.applyGravity(game);
+      moveAndCollide(this, game.world, this.vx, this.vy);
       return true;
     }
     return false;
@@ -5286,11 +5429,13 @@ export class Enemy extends Entity {
     return { x, y, w, h };
   }
 
-  /** Transform 1:1（NPC.cs:81861-81919）：换类型 + 按比例结转 HP + ai[0..3] 清零；
-   *  位置按 TryChangingSizeFromBottomCenter（:81836）底边中心锚定改尺寸，
-   *  新碰撞盒与实心块重叠则放弃（原版换尺寸失败语义）。
-   *  game 可选 = TransformVisuals（:81902 Transform 尾对所有转化统一调用）播
-   *  音效用——见 transformVisuals */
+  /** Transform 1:1（1458 NPC.cs:81909-81940 = 台账"81861-81919"同义锚）：换类型 +
+   *  按比例结转 HP + ai[0..3] 清零；位置锚定 = withReposition 的 Y 加旧高减新高
+   *  （底边对齐）+ X 不动（左缘保持），【无】实心重叠检测——★2026-08-31 ⑧清偿：
+   *  删除旧"新盒撞实心整体拒收"多加语义与 X 居中锚定，嵌墙态由物理救援承接
+   * （TryChangingSizeFromBottomCenter 只属于蜘蛛族挪位链 TryMoveToTransformableSpaceInto,
+   *  与本函数并存不互替）。game 可选 = TransformVisuals（:82051 Transform 尾对所有
+   *  转化统一调用）播音效用——见 transformVisuals */
   /** TryMoveToTransformableSpaceInto（NPC.cs:81836-81848 + Collision.
    *  TryChangingSizeFromBottomCenter :2495-2545，K2 批 2026-08-19）：蜘蛛族地↔墙
    *  Transform 前的"挪位"——按目标盒先纵向（需长高：上探优先、余量补下探，探距
@@ -5312,17 +5457,20 @@ export class Enemy extends Entity {
   private tryTransformTo(id: number, st: GameHooks['world']['store'], allowEmbedded = false, game?: GameHooks): boolean {
     const v = vanillaNpc(id);
     if (!v) return false;
+    // ★⑧变换拒收改底边改尺寸式（2026-08-31，1458 NPC.cs:81909-81940=台账
+    //  "81861-81919" 同义锚；allowEmbedded 形参保留兼容蜘蛛链 — withReposition
+    //  仅控制 Y 锚定,X 一律不动）:
+    //  原文序 = position.Y += 旧高（顶移到底缘）→ SetDefaults(newType) 换 w/h →
+    //  position.Y -= 新高 ⇒ 底边对齐、X 不动【左缘保持】,全程无实心重叠检测——
+    //  本仓旧实现"新盒撞实心整体拒收"(+X 居中锚定) 为多加语义已删;嵌墙后由
+    //  unembedPass/物理救援承接(原版同态)。锚定差异表：
+    //   旧 nx=cx−nw/2 → 原版语义左缘不动(nx=this.x)；ny 两版同（底边对齐）
     const oldType = this.vanillaId;
     const s = v.scale ?? 1;
     const nw = Math.round(v.width * s), nh = Math.round(v.height * s);
-    const nx = this.cx - nw / 2, ny = this.y + this.h - nh; // 底边中心锚定
-    if (!allowEmbedded) {
-      for (let tx = Math.floor(nx / TILE); tx <= Math.floor((nx + nw - 0.01) / TILE); tx++) {
-        for (let ty = Math.floor(ny / TILE); ty <= Math.floor((ny + nh - 0.01) / TILE); ty++) {
-          if (st.isSolid(tx, ty)) return false;
-        }
-      }
-    }
+    const nx = this.x;                            // X 恒左缘保持（原版无水平位移）
+    const ny = this.y + this.h - nh;              // Y 底边对齐(:81912-81918)
+    void st;                                      // st 形参保留:嵌墙自检已删
     const oldMax = this.maxHp;
     this.vanillaId = id;
     this.vanilla = v;
@@ -6085,55 +6233,99 @@ export class Enemy extends Entity {
     }
   }
 
-  /** AI_044 飞鱼 224/巨蚁狮蜂 509/蚁狮蜂 581（NPC.cs:30999-31268）：无重力分轴限速追击。
-   *  LOS 计时 ai[0]：有视线=90，无视线每帧 -1，≤0 垂直逃逸（maxX×0.8/accel×0.7，
-   *  目标 Y 偏 ±1000）；|dx|>yGate 时目标 Y 再抬高 yGate/2；撞墙 direction 翻转 vx=±1。
+  /** AI_044 飞鱼 224/巨蚁狮蜂 509/蚁狮蜂 581/眼球飞鱼 587（NPC.cs:31083-31322
+   *  行号 1457=1458 同锚；2026-08-31 清偿：补 587 参数档与白天下潜反转、
+   *  分轴二档加速原文式、同型聚群互斥环——见下各注）。无重力分轴限速追击：
+   *  目标刷新（:31164-31177）：中点视线通 ∨ 非 587 且玩家湿身 ∨ 玩家死 → ai[0]=90，
+   *  否则 ai[0]>0 每帧 −1（两支 TargetClosest 都调）；失视 ai[0]≤0 垂直逃逸
+   *  （maxX×0.8/accel×0.7，目标线 = 中心±1000×directionY）；撞墙 direction 翻转
+   *  vx=±1；wet 浮力除 587。
    *  参数表（xAccel/yAccel/maxX/maxY/xGate/yGate）：224 0.05/0.01/3/1/30/100、
-   *  509 0.08/0.03/4.5/2/40/150、581 0.06/0.02/4/2/40/150。
-   *  同型个体分离（cs:31108）与穿平台（cs:94137）未移植（注释备案） */
+   *  509 0.08/0.03/4.5/2/40/150、581 0.06/0.02/4/2/40/150、**587 0.13/0.09/6.5/
+   *  3.5/0/250**（:31241-31247,xGate=0 → 横向恒加速） */
   private flyingSwarmerAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
-    const T = this.vanillaId === 509
+    const vid = this.vanillaId ?? 224;
+    const T = vid === 509
       ? { ax: 0.08, ay: 0.03, mx: 4.5, my: 2, gx: 40, gy: 150 }
-      : this.vanillaId === 581
+      : vid === 581
         ? { ax: 0.06, ay: 0.02, mx: 4, my: 2, gx: 40, gy: 150 }
-        : { ax: 0.05, ay: 0.01, mx: 3, my: 1, gx: 30, gy: 100 };
-    const los = !!player && !player.dead && this.canSeePlayer(st, player);
-    if (los) this.ai0 = 90;
-    else if (this.ai0 > -1000) this.ai0 -= 1;
+        : vid === 587
+          ? { ax: 0.13, ay: 0.09, mx: 6.5, my: 3.5, gx: 0, gy: 250 }
+          : { ax: 0.05, ay: 0.01, mx: 3, my: 1, gx: 30, gy: 100 };
+    const pLive = !!player && !player.dead;
+    // 目标刷新（:31164-31169）：CanHit(Center,1,1,targetCenter,1,1)=中心点视线；
+    // `(type != 587 && wet)` 门 = 玩家湿身不算"看得见"（飞鱼不入水追击）
+    if (!pLive || (vid !== 587 && !!player?.inWater)
+      || !!(player && canHit(st, this.cx, this.cy, 1, 1, player.cx, player.cy, 1, 1))) {
+      this.ai0 = 90;
+    } else if (this.ai0 > 0) this.ai0 -= 1;
+    // TargetClosest（:31170/:31174 两支都调）
+    if (player) this.facing = this.seekDirX(player);
     let mx = T.mx, ax = T.ax;
+    // 目标线 num717（:31163/:31132/:31202/:31248）：224 = 玩家顶−h/2、
+    // 509/581 = 玩家中心 Y−h/2、587 = 玩家顶缘
     let ty: number;
-    if (this.ai0 <= 0) {
-      // 失视逃逸：垂直爬升/俯冲远离
-      mx *= 0.8; ax *= 0.7;
-      ty = this.cy + Math.sign(this.vx || 1) * 1000;
+    if (vid === 587) {
+      // 白天下潜反转（:31249-31253 `if (Main.dayTime)`）：目标线锁 0（世界顶）
+      // + direction 每 tick 反相——净效果 = 白天恒背向玩家横漂（下一拍复位再反相）
+      // + 全程上浮离地
+      ty = player ? player.y : this.y;
+      if (game.world.clock.isDay) { ty = 0; this.facing = -this.facing; }
+    } else if (player) {
+      ty = vid === 509 || vid === 581 ? player.cy - this.h / 2 : player.y - this.h / 2;
+      if (vid === 509 || vid === 581) this.visAngle = this.vx * 0.1;   // :31135/:31205
     } else {
-      ty = player ? player.y - this.h / 2 : this.cy - 200;
-      if (player && Math.abs(player.cx - this.cx) > T.gy) ty -= T.gy / 2;
+      ty = this.cy;                                  // 无目标退档（原版本体恒持有目标槽）
     }
-    const dx = player ? player.cx - this.cx : this.facing * 200;
-    if (Math.abs(dx) > T.gx) {
-      if (dx < 0 && this.vx > -mx) {
+    // 同型聚群互斥环（:31189-31227 仅 509/581 两支）：同型 ∧ 曼哈顿和 < width →
+    // X/Y 各 ±0.05 轴向推挤（A 左 B 右→左移反之同理,Y 同构）
+    if (vid === 509 || vid === 581) {
+      for (const o of game.enemies()) {
+        const e = o as Enemy;
+        if (e === this || e.dead || e.vanillaId !== vid) continue;
+        if (Math.abs(this.x - e.x) + Math.abs(this.y - e.y) >= this.w) continue;
+        this.vx += this.x < e.x ? -0.05 : 0.05;
+        this.vy += this.y < e.y ? -0.05 : 0.05;
+      }
+    }
+    // 失视逃逸（:31254-31263）：maxX×0.8/accel×0.7、目标线 = 中心+directionY×1000、
+    // 速度定方向（vx<0→dir=-1,vx>0 或 dir==0→1）
+    if (this.ai0 <= 0) {
+      mx *= 0.8; ax *= 0.7;
+      ty = this.cy + (this.dirY ?? 0) * 1000;
+      if (this.vx < 0) this.facing = -1;
+      else if (this.vx > 0 || this.facing === 0) this.facing = 1;
+    }
+    // X 二档加速（:31265-31297 原文式：基础步 ax；若已越帽再加全步，否则仍为正
+    // （朝目标侧）加半步；末尾钳 ±maxX）；门 = 中心水平距|xGate|（587 xGate=0 恒开）
+    const horiz = Math.abs(this.cx - (player ? player.cx : this.cx));   // num716
+    if (horiz > T.gx) {
+      if (this.facing === -1 && this.vx > -mx) {
         this.vx -= ax;
-        if (this.vx > 0) this.vx -= ax;
+        if (this.vx > mx) this.vx -= ax;
+        else if (this.vx > 0) this.vx -= ax / 2;
         if (this.vx < -mx) this.vx = -mx;
-      } else if (dx > 0 && this.vx < mx) {
+      } else if (this.facing === 1 && this.vx < mx) {
         this.vx += ax;
-        if (this.vx < 0) this.vx += ax;
+        if (this.vx < -mx) this.vx += ax;
+        else if (this.vx < 0) this.vx += ax / 2;
         if (this.vx > mx) this.vx = mx;
       }
     }
-    if (this.vy > ty - 4) {
-      this.vy -= T.ay;
-      if (this.vy < 0 && ty > this.cy) this.vy -= T.ay;
-    } else if (this.vy < ty + 4) {
+    // yGate 抬升（:31281-31283）：横向距 > yGate → 目标线再上移 yGate/2
+    if (horiz > T.gy) ty -= T.gy / 2;
+    // 纵向步进（:31284-31308 与【位置】比较而非速度差）：顶缘在目标线上方/线之上
+    if (this.y < ty) {
       this.vy += T.ay;
-      if (this.vy > 0 && ty < this.cy) this.vy += T.ay;
+      if (this.vy < 0) this.vy += T.ay;
+    } else {
+      this.vy -= T.ay;
+      if (this.vy > 0) this.vy -= T.ay;
     }
     this.vy = Math.max(-T.my, Math.min(T.my, this.vy));
-    if (this.vx > 0.1) this.facing = 1; else if (this.vx < -0.1) this.facing = -1;
     // wet 浮力（cs:31256-31266，587 飞鱼眼除外）：vy>0 ×0.95、恒 -0.5 上浮钳 -4
-    if (this.wet && this.vanillaId !== 587) {
+    if (this.wet && vid !== 587) {
       if (this.vy > 0) this.vy *= 0.95;
       this.vy -= 0.5;
       if (this.vy < -4) this.vy = -4;
@@ -6142,9 +6334,12 @@ export class Enemy extends Entity {
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.hitWall) {
       this.facing *= -1;
-      this.vx = this.facing; // cs:31002 反弹后单位速
+      this.vx = this.facing; // cs:31086-31093 反弹后单位速（direction 由旧速翻转）
     }
-    if (this.hitHead || this.onGround) this.vy = oldVy < 0 ? 1 : -1;
+    // collideY 反弹（:31094-31101）：旧速向下 → directionY=-1/vy=-1,向上 → +1/+1——
+    // directionY 是失视逃逸的目标线符号源,须随反弹持久化
+    if (this.hitHead) { this.dirY = 1; this.vy = oldVy < 0 ? 1 : -1; }
+    else if (this.onGround) { this.dirY = -1; this.vy = oldVy < 0 ? 1 : -1; }
   }
 
   /** AI_056 地牢之魂 288（NPC.cs:32915-32936）：穿墙（SetDefaults noTileCollide+noGravity）
@@ -6164,9 +6359,18 @@ export class Enemy extends Entity {
     this.vx = (this.vx * 100 + ex) / 101;
     this.vy = (this.vy * 100 + ey) / 101;
     // rotation 基向 = 目标方向向量 (num886/887) 而非当前速度（cs:32926-32927,
-    // 审计 D dungeonSpirit——曾用速度角致惯性漂移时魂火倒转）+ 每 tick 尾尘 180
+    // 审计 D dungeonSpirit——曾用速度角致惯性漂移时魂火倒转）
     this.visAngle = Math.atan2(ey, ex) - Math.PI / 2;
-    game.spawnParticles(this.cx, this.cy, '#5A7AC0', 1, 0.3, { life: 30, damp: 0.9, grav: 0 });
+    // 每 tick 尾尘 180（:33009-33012；C 批改真实尘型）：NewDust(position,w,h,180)
+    // 随机初速 ×0.1、scale=1.3、noGravity
+    {
+      const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 180);
+      if (d) {
+        d.vx *= 0.1; d.vy *= 0.1;
+        d.scale = 1.3;
+        d.noGravity = true;
+      }
+    }
     this.x += this.vx;
     this.y += this.vy;
   }
@@ -8013,11 +8217,37 @@ export class Enemy extends Entity {
       this.facing = player.cx >= this.cx ? 1 : -1;
     }
     if (inWater) {
-      // 撞轴反弹（cs:24333-24363：collideX/collideY 原速反转；坡面翻转由
-      // moveAndCollide 的 slopeCollide 承担，方向翻转近似）
+      // ---- cs:24344-24372 三连段（2026-08-31 清偿 ⑤斜坡翻向+轴碰撞显式反向）----
+      // 斜坡翻向（cs:24346-24356 原文式）：底缘格及其下一行 topSlope(slope 1|2) 时
+      // 左坡(leftSlope=slope 2|4 侧) → direction=-1、vx=−|vx|；右坡 → +1/+|vx|
+      // （此前交给 moveAndCollide 的 slopeCollide 承担，无显式翻向——沿坡会滑离源向）
+      {
+        const botCol = Math.floor(this.cx / TILE);                  // num277 = Center.X/16
+        const botRow = Math.floor((this.y + this.h) / TILE);        // num278 = (pos.Y+h)/16
+        const slAt = (x: number, y: number): number =>
+          st.inBounds(x, y) && st.isActive(x, y) ? (st.slope[st.idx(x, y)] ?? 0) : 0;
+        const sa = slAt(botCol, botRow);
+        const sb = slAt(botCol, botRow + 1);
+        if (sa === 1 || sa === 2 || sb === 1 || sb === 2) {         // topSlope()
+          const ls = sa === 2 || sb === 2;                          // leftSlope()
+          this.facing = ls ? -1 : 1;
+          this.vx = ls ? -Math.abs(this.vx) : Math.abs(this.vx);
+        }
+      }
+      // 撞轴反弹（cs:24357-24363 collideX / :24364-24371 collideY 显式反向）：
+      // collideX → vx×−1 且 direction 随之；collideY 按【旧速】符号显式 ±|·| 并写
+      // directionY 与 ai[0]（本仓解析后落速被截为 ±0/0.01——以 onGround/hitHead
+      // 标志代"旧速向下/向上撞"的判别位）
       if (this.hitWall) { this.vx *= -1; this.facing *= -1; }
-      if (this.onGround) { if (this.vy > 0) { this.vy = -Math.abs(this.vy); this.ai0 = -1; } }
-      else if (this.hitHead) { if (this.vy < 0) { this.vy = Math.abs(this.vy); this.ai0 = 1; } }
+      if (this.onGround) {
+        this.vy = -Math.abs(this.vy);
+        this.dirY = -1;
+        this.ai0 = -1;
+      } else if (this.hitHead) {
+        this.vy = Math.abs(this.vy || 0.01);
+        this.dirY = 1;
+        this.ai0 = 1;
+      }
       // 玩家湿身 + 视线 → 攻击形（cs:24366-24420 flag24）
       if (playerWet && player && this.canSeePlayer(st, player)) {
         this.lai2 = 1;                                     // :24347 狩猎旗（221 FindFrame 消费）
@@ -8877,7 +9107,9 @@ export class Enemy extends Entity {
         if (e === this || e.dead) continue;
         const et = e.vanillaId ?? -1;
         if (CRITTER_TURN_ON_PLAYERS.has(et) || et === 690) continue;   // :53888 豁免源
-        if (e.def.damage <= 0 || !!e.vanilla?.friendly) continue;             // (friendly||damage<=0)&&!stinky
+        // :54033 原文 = `(friendly||damage<=0) && !stinky` 才跳过——带臭味(120)
+        // 的敌怪【不计】攻击性/阵营,照常计为险情让小动物逃离(2026-08-31 清偿)
+        if ((e.def.damage <= 0 || !!e.vanilla?.friendly) && !(e.stinkyT > 0)) continue;
         if (Math.hypot(e.cx - this.cx, e.cy - this.cy) >= 200) continue;   // num11/num12 均 200
         if (!e.noTileCollide
           && !canHit(st, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
@@ -8885,6 +9117,20 @@ export class Enemy extends Entity {
         const dx = e.cx - this.cx;
         if (dx < 0 && (leftDelta === -1 || dx > leftDelta)) leftDelta = dx;
         if (dx > 0 && (rightDelta === -1 || dx < rightDelta)) rightDelta = dx;
+      }
+      // 玩家 stinky 支（:54081-54100）：无 NPC 险情时,带臭味的玩家也置 flag16/17
+      // ——num13/num14 并入同一方向结算（critter 分支只消费 num15,不消费 num16/17
+      // 槽位）。原版 `(player.stinky || type∉{633,...})` 恒真条件按字面照写为活体门
+      if (!danger) {
+        const cands = game.candidatePlayers?.() ?? [player];
+        for (const q of cands) {
+          if (!q || q.dead || !q.buffs?.has(BuffType.Stinky)) continue;   // player.stinky(:54084)
+          if (Math.hypot(q.cx - this.cx, q.cy - this.cy) >= 200) continue;   // num11=200
+          danger = true;
+          const dx = q.cx - this.cx;
+          if (dx < 0 && (leftDelta === -1 || dx > leftDelta)) leftDelta = dx;
+          if (dx > 0 && (rightDelta === -1 || dx < rightDelta)) rightDelta = dx;
+        }
       }
       if (danger) {
         // num15（:53959）：右侧更近取 1 否则 −1
@@ -8919,6 +9165,9 @@ export class Enemy extends Entity {
     }
     if (this.ai0 === 0) {
       // ---- 站立（:54103-54202）----
+      // 自身 stinky(120) 强制起走（:54179-54182 `if (stinky) ai[0] = 1f;`——带臭味的
+      // 小动物不再回站休整,每拍进入行走态;本拍其余站立段照常求值,下一拍转走）
+      if (this.stinkyT > 0) this.ai0 = 1;
       if (this.lai3 > 0) this.lai3 -= 1;                    // :54040-54042
       if (frog && wet) {
         // 蛙湿身起走（:54049-54056，200+Next(500,700)=700-899）
@@ -10181,15 +10430,17 @@ export class Enemy extends Entity {
         game.playSfx('statueMimicScare', 0.8, this.cx, this.cy);
         return;
       }
-      // 屏外传送（每 10t 一掷；本体不可见才动 :43789-43877）。可见门近似 = 与
-      // despawn 同款固定屏盒（62×35 格）；band = 玩家 ±960/±600px（sWidth/sHeight 静态）
+      // 屏外传送（1458 NPC.cs AI_126_StatueMimic :43912-43977，本体不可见才动）。
+      // 可见门 = CanAnyPlayerSeeThisTile(:43877-43890)：以测点为中心 sWidth+32×
+      // sHeight+32 屏盒 ∩ 任一活跃玩家命中盒——⑥清偿(2026-08-31)：固定 62×35 格
+      // 单人近似 → 真实视口盒+全候选玩家求交（原版传格点取整坐标,此处像素点,
+      // ≤16px 取整差登记）;band ±sWidth/2 同源视口尺寸（原文 num=0）
       if (++this.lai0 < 10) return;
       this.lai0 = 0;
       if (!tgt) return;
-      const vis = (wx: number, wy: number) =>
-        Math.abs(wx - tgt.cx) < TILE * 62 && Math.abs(wy - tgt.cy) < TILE * 35;
-      if (vis(this.cx, this.cy)) return;
-      const halfW = 1920 / 2, halfH = 1200 / 2;
+      const scr6 = game.screenWorldSize?.() ?? { w: 1920, h: 1080 };
+      if (this.canAnyPlayerSeeThisTile(game, this.cx, this.y + this.h)) return;
+      const halfW = scr6.w / 2, halfH = scr6.h / 2;
       let x2: number, x3: number;
       if (Math.abs(tgt.cx - this.cx) < halfW) { x2 = (tgt.cx - halfW) / TILE; x3 = (tgt.cx + halfW) / TILE; }
       else if (tgt.cx < this.cx) { x2 = (tgt.cx + halfW) / TILE; x3 = this.cx / TILE; }
@@ -10216,7 +10467,7 @@ export class Enemy extends Entity {
           cy0++;
         }
         if (ground < 0 || !clearAbove(cx0, ground) || !clearAbove(cx0 + 1, ground)) continue;
-        if (vis((cx0 + 1) * TILE, ground * TILE)) continue;   // CanAnyPlayerSeeThisTile 近似
+        if (this.canAnyPlayerSeeThisTile(game, (cx0 + 1) * TILE, ground * TILE)) continue;   // :43986
         const nx = cx0 * TILE + TILE - this.w / 2, ny = ground * TILE - this.h;
         const dNew = Math.hypot(nx + this.w / 2 - tgt.cx, ny + this.h / 2 - tgt.cy);
         const dOld = Math.hypot(this.cx - tgt.cx, this.cy - tgt.cy);
@@ -12650,10 +12901,21 @@ export class Enemy extends Entity {
           extraGelWorld: !!(w.seedFlags?.tenthAnniversary && w.seedFlags?.drunkWorld
             && !w.seedFlags?.remix && !w.seedFlags?.notTheBees),
           playerHasSickle: (() => {
-            // Player.HasItemInInventoryOrOpenVoidBag（Conditions.cs:1560）：
-            // 背包+四随身银行扫描计数 ≥1；虚空袋 5412 内物格 SW 未建模（登记）
+            // Player.HasItemInInventoryOrOpenVoidBag（Conditions.cs:1560→Player.cs
+            // :56578-56589）：HasItem = 背包 58 格逐槽(:56554-56564);未持有且
+            // useVoidBag() 时再扫 bank4(虚空保险库,Player.banks[3])。
+            // ★⑨清偿(2026-08-31)：补虚空袋支——曾只扫背包（"袋内物格未建模"登记
+            // 已过时,banks[3] 自 F3 批起有真实物格）
             try {
-              return (p.inv.countOf(1786) > 0);
+              for (const s of p.inv.slots) {
+                if (s && s.stack > 0 && vanillaIdOfItem(s.id) === 1786) return true;
+              }
+              if (p.useVoidBag?.() && Array.isArray(p.banks?.[3])) {
+                for (const s of p.banks[3]) {
+                  if (s && s.stack > 0 && vanillaIdOfItem(s.id) === 1786) return true;
+                }
+              }
+              return false;
             } catch { return false; }
           })(),
           extras: game.dropContext?.(),

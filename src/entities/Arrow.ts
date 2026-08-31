@@ -7,7 +7,7 @@ import { drawStripTrail, type TrailPt } from '../fx/TrailShader';
 import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
-import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile } from './projTargets';
+import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile , applyBannerDamageDealt } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { trySnapStrike } from '../stats/SnapStrike';
@@ -854,7 +854,7 @@ export class Arrow extends Entity {
       const cx = e.cx ?? e.x + e.w / 2;
       const cy = e.cy ?? e.y + e.h / 2;
       if (Math.abs(cx - this.cx) < R + e.w / 2 && Math.abs(cy - this.cy) < R + e.h / 2) {
-        e.hurt(dmg, Math.sign(cx - this.cx) * this.knockback * 0.35, 0, game, this.settlePen, false, this.pierceInit, true);
+        e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(cx - this.cx) * this.knockback * 0.35, 0, game, this.settlePen, false, this.pierceInit, true);
       }
     }
     // vector67 = velocity.SafeNormalize（<1 归零,:76993-77000 同公共段）
@@ -891,8 +891,8 @@ export class Arrow extends Entity {
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-        e.hurt(crit ? this.damage * 2 : this.damage,
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage),
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       }
     }
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
@@ -932,8 +932,8 @@ export class Arrow extends Entity {
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-        e.hurt(crit ? this.damage * 2 : this.damage,
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage),
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       }
     }
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
@@ -969,8 +969,8 @@ export class Arrow extends Entity {
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R661 + e.w / 2 && Math.abs(ecy - this.cy) < R661 + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-        e.hurt(crit ? this.damage * 2 : this.damage,
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // fromPlayer=DPS 计
+        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage),
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       }
     }
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
@@ -1025,8 +1025,8 @@ export class Arrow extends Entity {
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R23 + e.w / 2 && Math.abs(ecy - this.cy) < R23 + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-        e.hurt(crit ? this.damage * 2 : this.damage,
-          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // fromPlayer=DPS 计
+        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage),
+          Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       }
     }
     game.spawnParticles(this.cx, this.cy, '#34D0FE', 26, 5, { life: 25, size: 3 });
@@ -4431,7 +4431,7 @@ export class Arrow extends Entity {
             if (rec.hurt && !(tgt as unknown as { dead?: boolean }).dead) {
               const critN = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
               const dN = Math.max(1, Math.trunc(this.damage * 0.15)) * (critN ? 2 : 1);
-              rec.hurt(dN, 0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
+              rec.hurt(applyBannerDamageDealt(game, rec, dN), 0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
             }
           }
         }
@@ -4933,6 +4933,37 @@ export class Arrow extends Entity {
         }
       }
     }
+    // ---- 宝石弹族 723 紫晶/724 黄玉/725 蓝玉/726 翡翠/1133 粉钻（AI_005 专支
+    //      Projectile.cs:24243-24296,1:1）：1/3 拍宝石星尘(num48: 基础 86 星尘/
+    //      1133=87 且 1/6 拍加 89 粉尘,noGravity,v×0.5,alpha 127);723 另有 3 点
+    //      267 蓝白双色螺旋((0,12·scale).RotBy(posY/200+k·2π+rot) − v·0.5 后拖,
+    //      v×0.2·k)——宝石弹的"GL 光晕"观感即此星尘加色层,缺失=平贴图(2026-08-31
+    //      用户报蓝玉法杖"效果不对/没用 GL");alpha 渐显门(-15/拍,ai[1] 地板)本仓
+    //      Arrow.alpha 未建模,星尘直接常开(视觉差 17t 渐显,登记)
+    if (this.projId === 723 || this.projId === 724 || this.projId === 725
+      || this.projId === 726 || this.projId === 1133) {
+      if (Math.random() < 1 / 3) {
+        const dt48 = this.projId === 1133 ? 87 : 86;
+        const d86 = game.spawnDust?.(this.x, this.y, this.w, this.h, dt48, 0, 0, 127, null, 1, true);
+        if (d86) { d86.vx = this.vx * 0.5; d86.vy = this.vy * 0.5; }
+        if (this.projId === 1133 && Math.floor(Math.random() * 6) === 0) {
+          const d89 = game.spawnDust?.(this.x, this.y, this.w, this.h, 89, 0, 0, 127, null, 1, true);
+          if (d89) { d89.vx = 0; d89.vy = 0; }
+        }
+      }
+      if (this.projId === 723) {
+        const rot723 = Math.atan2(this.vy, this.vx);
+        for (let k = 0; k < 3; k++) {
+          const phi = this.y / 200 + k * Math.PI * 2 + rot723;
+          const sx723 = this.cx - Math.sin(phi) * 12 - this.vx * 0.5;
+          const sy723 = this.cy + Math.cos(phi) * 12 - this.vy * 0.5;
+          game.spawnDust?.(sx723 - 2, sy723 - 2, 4, 4, 267, this.vx * 0.2 * k, this.vy * 0.2 * k,
+            0, { r: 0, g: 0, b: 255, a: 255 }, 1, true);
+          game.spawnDust?.(sx723 - 2, sy723 - 2, 4, 4, 267, this.vx * 0.2 * k, this.vy * 0.2 * k,
+            0, { r: 255, g: 255, b: 255, a: 255 }, 0.4, true);
+        }
+      }
+    }
     // AI_001 尾 ±16 钳（:58736-58752）：flag7 = type != 577，全体 aiStyle 1 弹每
     // update 无条件 vy ≤ 16（vy < −16 仅 flag4=1006，重力分支已对称钳 −maxFall）。
     // 蓝队 R7-8：曾钳在重力门内——grav=0 型（flag3 免重力子弹族等）全程不钳；
@@ -5188,7 +5219,7 @@ export class Arrow extends Entity {
         if (((e as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;   // immune[owner] 门
         const critN = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
         const dN = Math.max(1, Math.trunc(this.damage)) * (critN ? 2 : 1);
-        e.hurt(dN, 0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
+        e.hurt(applyBannerDamageDealt(game, e, dN), 0, 0, game, this.settlePen, critN, 1, true);   // 音/飘值=StrikeNPC 单点
         this.nailAi0 = -(e.id + 1);            // :13372-13373 ai[0] = -victimIndex-1
         this.nailAi1 = 0;                      // :13370 ai[1] = 0
         this.vx = e.cx - this.cx;              // :13374 velocity = targetNPC.Center - Center
@@ -5336,7 +5367,7 @@ export class Arrow extends Entity {
         if (this.whipTagShot) {
           const en2 = e as unknown as import('./WhipTag').WhipTagged;
           // 黑收成 OnTaggedHit 直伤通道（916 等价：额外一跳落在被命中敌上）
-          en2.hurtFx = (d: number) => { e.hurt(d, Math.sign(this.vx) * 2, -2, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
+          en2.hurtFx = (d: number) => { e.hurt(applyBannerDamageDealt(game, e, d), Math.sign(this.vx) * 2, -2, game, 0, false, 0, true); };   // 鞭 tag 直伤=DPS 计
           const res = resolveWhipTagHit(en2, dmg, game,
             (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
             SUMMON_TAG_MUL[this.projId] ?? 1, e.x + e.w / 2, e.y + e.h / 2);
@@ -5418,7 +5449,7 @@ export class Arrow extends Entity {
         //   `(int)((float)Damage * damageMultiplier)` C# 截断，Game.fireGemStaffBolts
         //   消费）——弹幕 damage 字段即终值，命中侧不再乘（蓝队 R2-06：命中侧
         //   Math.round 曾致 SwirlTwins 0.6/ArPenSpread 0.5 档在 x.5 处系统性 +1）
-        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);   // 音/飘值=StrikeNPC 单点
+        e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);   // 音/飘值=StrikeNPC 单点
         // ★GC1 写方桥（清零批二波，2026-08-31；蓝队二轮 F4 校准行号 F5 补表面）：
         //  命中尾 npc.immune[owner] 统一写（Projectile.Damage :14031-14183 梯子,
         //  StrikeNPC 后原位）。face 由上方去重支记录：idStatic/local 面 = 原版写 0
@@ -5922,7 +5953,7 @@ export class Arrow extends Entity {
       }
       // pierce=1 档：命中不设敌方免疫帧（:13154-13158 immune[owner]=0 语义），
       // fromPlayer=true 走 DPS/掉落门链；音/飘值=StrikeNPC 单点
-      e.hurt(dmg, Math.sign(e.cx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 1, true);
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(e.cx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 1, true);
       this.pHitCd.set(e.id, PIRANHA_HIT_CD);                 // :13157 localNPCHitCooldown=14
       if (this.pAi1 === 0) { this.pAi1 = 1; this.pTarget = e; }   // :12447-12450 首咬 latch
     }

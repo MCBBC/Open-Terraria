@@ -17,7 +17,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 
 /** 溶液弹型号表（AI_031 switch，cs:25321-25358）：projId → [conv, dust]。
  *  conv = BiomeConversionID（cs:25366 Convert 第二参）；dust = NewDust 型号 */
@@ -238,7 +238,7 @@ export class WaterSplashProj extends Entity {
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
         const crit = Math.random() < this.critChance;
         const dmg = crit ? this.damage * 2 : this.damage;
-        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 1, true);   // 音/飘值=单点
+        e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 1, true);   // 音/飘值=单点
         this.splash(game);
         return;
       }

@@ -36,7 +36,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { applyProjStatus } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import { TILE } from '../core/constants';
@@ -399,7 +399,7 @@ export class PhoenixBolt extends Entity {
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? Math.round(this.damage) * 2 : Math.round(this.damage);
-      e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);
       // OnFire3 480t（StatusNPC :11376-11379 → vanilla-projstatus.json "706" 表驱动）
       applyProjStatus(this.projId, e as unknown as Record<string, number | undefined>);
       // 每次命中伤 ×0.95 截断（Damage_PVE_Inner :14275-14278——穿透衰减）

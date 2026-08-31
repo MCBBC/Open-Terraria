@@ -359,7 +359,9 @@ export function heldItemTipWorld(
     const reach = vid === 3476 ? 14 : 6;                    // :50376-50383
     px = cx + sg * Math.cos(aimL) * reach;
     py = cy + Math.sin(aimL) * reach;                       // offY=p.h/2+sin·reach
-    lx = fw * 0.9; ly = -fh * 0.15;
+    // ★法杖贴图竖绘(花头顶缘中部),斜持 45° 后"上"即瞄准向——tip 取顶缘中点
+    //  而非右缘(右缘取法在斜 45° 上下时偏出 20px+,2026-08-31 用户截图定罪)
+    lx = fw * 0.5; ly = -fh * 0.85;
   } else {
     alpha = aimL;
     const dp = ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF;

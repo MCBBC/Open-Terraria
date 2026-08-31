@@ -2858,6 +2858,7 @@ class HallwayCalculator {
     const r = this.ctx.rng;
     const ST = this.hallStats;
     ST.selCalls++;
+    drlMark(`DR|HCa|i${_drlInstNext}|src=${this.entries.indexOf(source)}`);
     const idxFrom = this.entries.findIndex((e) => e.progressAlongSnake >= source.progressAlongSnake - this.maxProgressDelta);
     const val = Math.min(idxFrom === -1 ? 0 : idxFrom, Math.max(0, this.entries.indexOf(source) - 2));
     const candidates: HallwayRoomEntry[] = [];
@@ -2879,6 +2880,8 @@ class HallwayCalculator {
     //   DR|HC| bs 位型逐位对拍；比较语义对有限 num 等价。
     let bestScore = -Number.MAX_VALUE;
     let drlCands = 0;
+    let drlBestLY = -1.0;
+    let drlBestDCA = -1;
     for (const cand of candidates) {
       if (!this.canConnect(source, cand)) { ST.connFails++; continue; }
       const liquidFlag2 = cand.room.settings.style.LiquidType >= 0;
@@ -2917,12 +2920,31 @@ class HallwayCalculator {
         if (!(num <= bestScore)) {
           best = hallLine;
           bestScore = num;
+          const dvx = hallLine.targetPoint.x - hallLine.sourcePoint.x;
+          const dvy = hallLine.targetPoint.y - hallLine.sourcePoint.y;
+          drlBestLY = Math.abs(safeNormalize(dvx, dvy, 1, 0).y);
+          drlBestDCA = this.distanceFromCommonAncestor(source, cand);
         }
       }
     }
     if (!best) ST.borderFails++;
     else ST.picks++;
-    drlMark(`DR|HC|i${_drlInstNext}|src=${this.entries.indexOf(source)}|cands=${drlCands}|pick=${best ? this.entries.indexOf(best.target) : -1}|bs=${bits64x(bestScore)}|mr=${drlMr()}|rc=${drlRc()}`);
+    let pickTxt: string;
+    if (!best) {
+      pickTxt = `-|bs=${bits64x(bestScore)}`;
+    } else {
+      const dx = best.targetPoint.x - best.sourcePoint.x;
+      const dy = best.targetPoint.y - best.sourcePoint.y;
+      const lnV = Math.sqrt(dx * dx + dy * dy);
+      pickTxt = `${this.entries.indexOf(best.target)}`
+        + `|sp=${Math.trunc(best.sourcePoint.x)},${Math.trunc(best.sourcePoint.y)}`
+        + `|tp=${Math.trunc(best.targetPoint.x)},${Math.trunc(best.targetPoint.y)}`
+        + `|ln=${bits64x(lnV)}`
+        + `|ny=${bits64x(drlBestLY)}`
+        + `|dca=${drlBestDCA}`
+        + `|bs=${bits64x(bestScore)}`;
+    }
+    drlMark(`DR|HC|i${_drlInstNext}|src=${this.entries.indexOf(source)}|cands=${drlCands}|pick=${pickTxt}|mr=${drlMr()}|rc=${drlRc()}`);
     return best ? { line: best, score: bestScore } : null;
   }
 
@@ -2963,18 +2985,24 @@ function roomGetHallwayConnectionPoint(room: DRoomBase, ctx: DualLayoutCtx, othe
   }
   let connectionPoint = v2(room.centerX(), room.centerY());
   let val2 = safeNormalize(otherRoomPos.x - connectionPoint.x, otherRoomPos.y - connectionPoint.y, 1, 0);
+  let drlVyBits = bits64x(val2.y);
+  let drlBr = -1;
   const genRand = ctx.rng;
   if (-0.5 < val2.y && val2.y < 0.7 && genRand.nextInt(2) === 0) {
+    drlBr = 0;
     while (room.isInsideRoom(ctx.st, Math.trunc(connectionPoint.x), Math.trunc(connectionPoint.y))) connectionPoint.y++;
     connectionPoint.y -= 3.0;
   } else if (-0.7 < val2.y && val2.y < 0.5 && genRand.nextInt(3) === 0) {
+    drlBr = 1;
     while (room.isInsideRoom(ctx.st, Math.trunc(connectionPoint.x), Math.trunc(connectionPoint.y))) connectionPoint.y--;
     connectionPoint.y += 3.0;
   } else {
+    drlBr = 2;
     const edge = nextV2CircularEdge(genRand.vanilla, 4.0, 4.0);
     connectionPoint = v2(connectionPoint.x + edge.x, connectionPoint.y + edge.y);
   }
   val2 = safeNormalize(otherRoomPos.x - connectionPoint.x, otherRoomPos.y - connectionPoint.y, 1, 0);
+  drlVyBits = bits64x(val2.y);
   while (room.isInsideRoom(ctx.st, Math.trunc(connectionPoint.x), Math.trunc(connectionPoint.y))) {
     connectionPoint = v2(connectionPoint.x + val2.x, connectionPoint.y + val2.y);
   }
@@ -2982,6 +3010,7 @@ function roomGetHallwayConnectionPoint(room: DRoomBase, ctx: DualLayoutCtx, othe
     connectionPoint = v2(connectionPoint.x - val2.x * settings.hallwayPointAdjuster,
       connectionPoint.y - val2.y * settings.hallwayPointAdjuster);
   }
+  drlMark(`DR|CP|i${_drlInstNext}|cx=${room.centerX()}|cy=${room.centerY()}|ox=${Math.trunc(otherRoomPos.x)}|oy=${Math.trunc(otherRoomPos.y)}|b=${drlBr}|v=${drlVyBits}|px=${Math.trunc(connectionPoint.x)}|py=${Math.trunc(connectionPoint.y)}|q=0`);
   return { quality: CPQuality.Good, point: connectionPoint };
 }
 
@@ -3133,6 +3162,12 @@ class DualProvider {
     settings.orientation = placed.orientation as number;
     settings.x = Math.trunc(placed.pos.x);
     settings.y = Math.trunc(placed.pos.y);
+    // ★IIIII99b2 DR|R/DR|Ro 尝试行（x86 TryMakeRegularRoomOnLine 钩同构；na/nf=f64 位型）
+    const stageGate = (() => {
+      const iL = instIdx;
+      return iL > 0 && this.snakeLines![iL - 1]!.ProgressionStage !== line.ProgressionStage;
+    })();
+    drlMark(`DR|R|i${_drlInstNext}|li=${instIdx}|st=${stageGate ? 1 : 0}|na=${bits64x(normAlong)}|nf=${bits64x(normFrom)}|x=${settings.x}|y=${settings.y}|rt=${settings.roomType}|br=${boundingRadius}`);
     // ★IIIII97 attempt 级取证事件（li=线序 phase=r20|stage ri=循环内序 na/nf=归一距）
     if ((globalThis as { __swI103Att?: (e: Record<string, unknown>) => void }).__swI103Att) {
       (globalThis as { __swI103Att?: (e: Record<string, unknown>) => void }).__swI103Att!({
@@ -3141,8 +3176,12 @@ class DualProvider {
       });
     }
     const room = tryMakeRoom(this.data, this.ctx, settings.x, settings.y, settings, true, boundingRadius + fluffN);
-    if (!room) return null;
+    if (!room) {
+      drlMark(`DR|Ro|i${_drlInstNext}|li=${instIdx}|ok=0`);
+      return null;
+    }
     room.calculateRoom(this.data, this.ctx);
+    drlMark(`DR|Ro|i${_drlInstNext}|li=${instIdx}|ok=1`);
     return room;
   }
 

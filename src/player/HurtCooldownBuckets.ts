@@ -79,17 +79,36 @@ export class HurtCooldownBuckets {
     }
   }
 
+  /** ★F13（2026-08-31 蓝队三批）SetImmuneTimeForAllTypes 桶表满填（Player.cs:
+   *  38298-38306）：`immune=true; immuneTime=time; for(i..) hurtCooldowns[i]=time;`
+   *  ——无 "仅空位" 门，无条件覆写（区别于 applyAfterHit 的 :38680 形）。
+   *  调用面 = 四个闪避/药水站（mysticSash/blackbelt/BOC/大麦酒），WrongBugNet
+   *  与 Lava 等窗一并覆盖（SetImmuneTimeForAllTypes 语义即含全部特殊桶）。 */
+  setAll(ticks: number): void {
+    for (let i = 0; i < IMMUNITY_COOLDOWN_COUNT; i++) this.table.set(i, ticks);
+  }
+
   clear(): void {
     this.table.clear();
   }
 }
 
-/**
- * num10 折算（Player.cs:38674 单行三元展开；只取本地非 pvp 支）：
- * 实扣 == 1 → longInvince ? 40 : 20；实扣 != 1 → longInvince ? 80 : 40。
- * WrongBugNet 原始伤害恒 1 ⇒ 常规路径落在 20/40 档。
- */
 export function hurtImmunityFrames(actualDamageTaken: number, longInvince: boolean): number {
   const one = actualDamageTaken === 1;
   return one ? (longInvince ? 40 : 20) : (longInvince ? 80 : 40);
+}
+
+// ---- ★F13 全局桶表登记（闪避族 SetImmuneTimeForAllTypes 满填通道） ----------------
+// 桶表归 Game 级所有（player 不建第二份）；四个闪避/药水站在 Player.damage 内无
+// game 钩子 → Game 构造期把表登记到模块级，闪避站经 getGlobalHurtBuckets() 取用。
+let GLOBAL_HURT_BUCKETS: HurtCooldownBuckets | null = null;
+
+/** Game 在创建桶表后调用（重复调用以最后一次为准）。 */
+export function registerGlobalHurtBuckets(t: HurtCooldownBuckets | null): void {
+  GLOBAL_HURT_BUCKETS = t;
+}
+
+/** 未绑定（纯单元测/极早期）返回 null——闪避站此时只落 iframes 面。 */
+export function getGlobalHurtBuckets(): HurtCooldownBuckets | null {
+  return GLOBAL_HURT_BUCKETS;
 }

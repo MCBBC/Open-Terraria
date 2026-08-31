@@ -9,7 +9,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { hitTownNpcs, playerCanHitEnemy } from './projTargets';
+import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 
 export class FirstFractalSlash extends Entity {
   w = 32; h = 32;
@@ -66,7 +66,7 @@ export class FirstFractalSlash extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
       this.hitSet.add(e.id);
     }
   }

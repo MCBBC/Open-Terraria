@@ -13,6 +13,7 @@ import { mountJumpStomps, tickSlimeWetState, consumeWetSlimeOnJumpControl,
   MOUNT_DASH6_TYPES, MOUNT_CAN_DASH_TYPES } from './MountCombat';
 import { playerHurtFloatColor } from '../fx/CombatTextColors';
 import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
+import { getGlobalHurtBuckets } from '../player/HurtCooldownBuckets';
 import { randomizeFriendlyInsanityShadow } from './InsanityShadowFriendly';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { vanillaIdOfItem } from '../stats/Shimmer';
@@ -2960,10 +2961,13 @@ export class Player extends Entity {
     // 放 buffs.tick 前会因 inLava 滞后一帧）
     if (this.inLava && this.buffs.has(BuffType.Wet)) this.buffs.remove(BuffType.Wet);
     // 蜂蜜浸入（Player.cs:27436：Collision.honey 命中 → AddBuff(48, 1800t=30s) + honeyWet）。
-    // 判定 = Collision.WetCollision（Collision.cs:1573-1625）：**全身盒**扫蜂蜜格且
-    // liquid>0（任一残量即算）——曾只查脚底单格且 liq>30，脚不沾蜜但身体没入时漏判。
-    // BuffState.apply 是 max 合并（AddBuff 语义），浸着恒 30s，离开后自然倒计时
-    this.inHoney = liquidCollision(world.store, this.x, this.y, this.w, this.h, 3);
+    // 判定 = Collision.WetCollision 探测盒（Collision.cs:1581-1593）：**居中小盒**
+    // num=min(10,Width) × num2=min(Height/2,Height)、首中即返——全身盒系旧版矫枉过正
+    // （红队 A2：曾误注"全身盒"，实为身盒任一角搭到蜜格即宽出一条边缘带，Honey 授予
+    // 与蜜中无字窗口都比原版宽）。曾更早只查脚底单格且 liq>30，同为错
+    const honeyW = Math.min(10, this.w), honeyH = Math.min(Math.floor(this.h / 2), this.h);
+    this.inHoney = liquidCollision(world.store, this.cx - honeyW / 2, (this.y + this.h / 2) - honeyH / 2,
+      honeyW, honeyH, 3);
     if (this.inHoney) this.buffs.apply(BuffType.Honey, 30);
     // ★附带① 出水截跳标记（Player.cs:28074 消费段的进入门 = `else if (wet)`，即
     //   wet 翻转 false 的这一帧）：wet ≙ inWater∪inLava∪inHoney（三桶并集同 :28195
@@ -3545,10 +3549,13 @@ export class Player extends Entity {
         applyRunFriction();
       }
       // 强风推力（buff 194：UpdateBuffs :11923-11926 置 windPushed；CanBePushedByWind
-      // :19869-19893=非锁 tile/非轮滑/坐骑着地持键不推——本仓等价门=坐骑着地+持键）。
+      // :19869-19893 三排除=锁 tile/滚轴鞋坐骑(IsRollerSkates={57,58,59,60},MountID.cs:19)/
+      // 坐骑着地持键。★矿车分支整段早退吃不到推力——原版矿车非滚轴鞋且未持键时
+      // CanBePushedByWind 为真、flag2 照推（红队 B4 备案，本仓矿车链独立未接）。
       // flag2 应用段 :20221-20232=向风速目标推、不越过。★原版 |num2|×40 只作用于
       // cap-slam 分支的减速修正(:19944 num)，本仓两段加速链无该结构，差异备案
-      if (this.buffs.has(BuffType.WindPushed) && !(mnt && this.vy === 0 && ix !== 0)) {
+      const rollerSkates = !!mnt && mnt.type >= 57 && mnt.type <= 60;
+      if (this.buffs.has(BuffType.WindPushed) && !rollerSkates && !(mnt && this.vy === 0 && ix !== 0)) {
         const wind = world.weather?.windSpeedCurrent ?? 0;
         if (wind !== 0) {
           const push = windPushImpulse(wind, this.vy !== 0, ix !== 0);
@@ -6521,24 +6528,27 @@ export class Player extends Entity {
     const eq = this.equipStats;
     // 神秘艺术腰布 6189（Player.Hurt :38501-38505 mysticSashDodge 分支——1457 新,
     // 排在黑带前）：10% 闪避 → SetImmuneTimeForAllTypes(longInvince?120:80)（:38342-38344;
-    // DoMysticSashDodge 紫尘/碎布 gore 登记未接——本仓 damage() 无 game 钩子）
+    // DoMysticSashDodge 紫尘/碎布 gore 登记未接——本仓 damage() 无 game 钩子）。
+    // ★F13（2026-08-31 蓝队三批）：setAll 全桶满填（原版 :38298-38306 无条件循环写
+    // hurtCooldowns[i]，含 WrongBugNet/Lava 特殊桶）走全局登记表。
     if (eq.mysticSashDodge && Math.random() < 0.1) {
-      this.iframes = Math.max(this.iframes, eq.longInvince ? 120 : 80);
+      this.dodgeFullFill(eq.longInvince ? 120 : 80);
       return 0;
     }
     // 黑带/忍者大师装备 10% 闪避（Player.Hurt :38506-38510 → NinjaDodge :38404
-    // SetImmuneTimeForAllTypes 同上——旧漏无敌帧,补）
+    // SetImmuneTimeForAllTypes 同上——旧漏无敌帧,补；★F13 同步桶表满填）
     if (eq.blackBelt && Math.random() < 0.1) {
-      this.iframes = Math.max(this.iframes, eq.longInvince ? 120 : 80);
+      this.dodgeFullFill(eq.longInvince ? 120 : 80);
       return 0;
     }
     // 混乱之脑 3223 完整闪避（Player.Hurt :38511-38515：1/6 且 buff 321 不在栏 →
     // BrainOfConfusionDodge :38331-38340 = SetImmuneTimeForAllTypes(80/120) +
     // brainOfConfusionDodgeAnimationCounter=300 + AddBuff(321,240)【return 0 不掉血】。
     // R5-F25：旧"受扣血后置 bocPulse"= 伤害照扣 + 无 buff321 禁再触发门,已修——
-    // bocPulse 消费端（fixedUpdate）只负责挂 321,困惑反伤走 Game.damagePlayer 命中侧）
+    // bocPulse 消费端（fixedUpdate）只负责挂 321,困惑反伤走 Game.damagePlayer 命中侧；
+    // ★F13 同步桶表满填）
     if (eq.boc && Math.random() < 1 / 6 && !this.buffs.has(BuffType.BrainOfConfusionBuff)) {
-      this.iframes = Math.max(this.iframes, eq.longInvince ? 120 : 80);
+      this.dodgeFullFill(eq.longInvince ? 120 : 80);
       this.bocPulse = 1;
       return 0;
     }
@@ -7332,6 +7342,14 @@ export class Player extends Entity {
       this.eyeState = state;
       this.eyeTimeInState = 0;
     }
+  }
+
+  /** ★F13（2026-08-31 蓝队三批）SetImmuneTimeForAllTypes 仓内形（Player.cs:38298-38306）：
+   *  General 位 = iframes；全部特殊桶（WrongBugNet/Lava 等）经全局登记表【无条件】
+   *  满填——原版循环直写无空位门。未登记（纯单元测桩）只落 iframes 面。 */
+  private dodgeFullFill(ticks: number): void {
+    this.iframes = Math.max(this.iframes, ticks);
+    getGlobalHurtBuckets()?.setAll(ticks);
   }
 
   /** BlinkBecausePlayerGotHurt（:138-141）：受击全闭 20t（Hurt :37916 调用） */

@@ -30,6 +30,9 @@ export interface GameHooks {
    *  时 Enemy.targetClosest 回退 [player]（单机/测试 mock 零回归）。顺序即槽序
    *  近似（本地=房主槽 0 最先，原版平距严格 < 比较取先扫描者） */
   candidatePlayers?(): import('./Player').Player[];
+  /** 视口世界像素（Main.sWidth/sHeight 等价 = 画布尺寸÷缩放）——CanAnyPlayerSeeThisTile
+   *  （NPC.cs:43877-43890 屏盒求交）等消费源。缺省 = 1920×1080 静态退档（单机测试 mock 兼容） */
+  screenWorldSize?(): { w: number; h: number };
   /** MP 掉落结算玩家表（NPCLoot :79634 closestPlayer / per-client 族的数据源；
    *  2026-08-20 per-client 批）。Game 实现 = [本地(slot=mySlot) + 远端代理
    *  （msg13 位 + msg16 尾段 hp/mana/luck 镜像）]；SimHost 实现 = room.onlineClients
@@ -58,7 +61,7 @@ export interface GameHooks {
   /** 玩家侧命中后效真弹入投射物桶（★α-H3④ WeaponProj.hitEnemies confetti 289 支
    *  ——Projectile.cs:13693-96 NewProjectile(289) 等价出射口。Game 实现 =
    *  entities.add(e,'projectiles')，联机由弹幕互播通道自然覆盖） */
-  spawnFriendlyProj?(e: import('./Entity').Entity): void;
+  spawnFriendlyProj?(e: import('./Entity').Entity, opts?: { netSync?: boolean }): void;
   /** 小动物列表(弹幕命中判定用;近战挥砍在 Game 内直接遍历桶) */
   critters(): unknown[];
   /** 城镇 NPC 列表(受击判定用;Game 实现 = entities.npcs 桶) */

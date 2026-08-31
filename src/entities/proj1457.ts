@@ -84,7 +84,7 @@ interface HitTarget {
   x: number; y: number; w: number; h: number;
   id: number;
   dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number, srcProjId?: number) => boolean;
 }
 
 /** 通用命中结算：盒相交 → 暴击掷 → hurt + StatusNPC + 飘字。

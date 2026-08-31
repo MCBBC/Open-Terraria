@@ -25,7 +25,7 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, Arrow } from './Arrow';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { tintedTex } from '../render/StringLine';
 
 /** hslToRgb（原版 Main.hslToRgb 近似——S=1 L=0.5 时的纯色环） */
@@ -156,7 +156,7 @@ export class PrismProng extends Entity {
           const crit = Math.random() < this.critChance;
           let dmg = crit ? this.damage * 2 : this.damage;
           if (charge >= 180) dmg *= 3;                     // 满充 ×3（:30379-30381）
-          e.hurt(dmg, this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+          e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
           // 同敌免疫窗（Damage_PVE_Inner :14058 `type==632 → immune[owner]=
           // GetSlowMagicUseTime(5)`）：常态 5t,蓝空过载（slowMagicUse）×2.5=12t
           // （缺省 5——旧桩 player 无此方法时行为不变）
@@ -530,7 +530,7 @@ export class BlasterBeam extends Entity {
         if (!(bx < e.x + e.w && bx + thick > e.x && by < e.y + e.h && by + thick > e.y)) continue;
         const crit = Math.random() < this.critChance;
         const dmg = crit ? this.damage * 2 : this.damage;
-        e.hurt(dmg, this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+        e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
         this.hitCd.set(e.id, 5);
         break;
       }

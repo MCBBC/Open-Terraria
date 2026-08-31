@@ -14,6 +14,7 @@
 //     4 只紫色残影绕 rotation 轨道 + GetAlpha :76448 White×Opacity）；oldPos 5 段
 //     黑色拖尾（:30119/:30559）与敌对 965 同为登记偏差（TrailCache 未建模）。
 import { Entity } from './Entity';
+import { applyBannerDamageDealt } from './projTargets';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -171,7 +172,7 @@ export class InsanityShadowFriendly extends Entity {
       if (this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y) {
         this.hitEnemies.add(e.id);
-        e.hurt(this.dmg, 0, 0, game, 20, false, 0, true);   // fromPlayer=DPS 计
+        e.hurt(applyBannerDamageDealt(game, e, this.dmg), 0, 0, game, 20, false, 0, true);   // fromPlayer=DPS 计
         if (--this.pierceLeft <= 0) {
           this.dead = true;
           game.onProjectileDeath?.(964, this.x, this.y);

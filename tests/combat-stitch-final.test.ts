@@ -18,7 +18,7 @@ import {
   DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS, MINION_SHOT_PROJS, SENTRY_SHOT_PROJS,
   hittableForOnHitRewards, hitCritters,
 } from '../src/entities/projTargets';
-import { MinionProj } from '../src/entities/MinionProj';
+import { MinionProj, lightningAuraPenPercent } from '../src/entities/MinionProj';
 import { SparkleGuitarProj } from '../src/entities/SparkleGuitarProj';
 import type { GameHooks } from '../src/entities/types';
 import { itemCombat } from '../src/data/vanillaItemCombat';
@@ -136,10 +136,13 @@ describe('★A1 townNPC 分支 crit 掷骰 + TownNPC.hurt 第7形参（ζ 接收
       recLog: null,
     } as never;
     n.hurt(56, 0, 0, gameStub);
-    expect(n.maxHp - n.hp).toBe(49);             // round(56−7.5)=48.5→49
+    // ★F9/η 截断口径（2026-08-31 蓝队三批）：受击终值 = (int)(dmg − def×0.5)
+    // （TownNPC/Enemy 受击统一 trunc；Main.cs:67126-33 double 全程不取整 +
+    // (int) 向零截断）——56 − 15×0.5 = 48.5 → 48（旧 half-up round 预期 49 已废）
+    expect(n.maxHp - n.hp).toBe(48);
     n.iframes = 0;
     n.hurt(56, 0, 0, gameStub, 0, 0, true);
-    expect(n.maxHp - n.hp).toBe(49 + 98);        // 同伤防后 ×2
+    expect(n.maxHp - n.hp).toBe(48 + 97);        // 同伤防后 ×2 = (int)(48.5×2)=97
   });
 });
 
@@ -392,7 +395,8 @@ describe('★A4 出射口：spawnTitaniumShard ≤7 cap + Zero 速度/dmg50×mel
 describe('★A6 弹 856 numUpdates EU 化', () => {
   it('无接触寿尽在 tick=30 进 Kill（旧口径 89/tick 三倍差收口）', () => {
     const p = new Player(24 * 16, 104 * 16, new Inventory());
-    const hooks = { player: p, enemies: () => [],
+    const hooks = { player: p, enemies: () => [], critters: () => [],
+      cutTile: () => {},
       world: new World(220, 160, 40, 'a6') } as never as GameHooks;
     const g = new SparkleGuitarProj(900, 900, 50, -30, 81, 1200, 700);
     let diedAt = -1;
@@ -405,7 +409,8 @@ describe('★A6 弹 856 numUpdates EU 化', () => {
 
   it('曲线 EU 取样对拍（红线：不许只改计时）——tick3 后盒心 ≡ 手推 CatmullRom(num2=9/90)', () => {
     const p = new Player(24 * 16, 104 * 16, new Inventory());
-    const hooks = { player: p, enemies: () => [],
+    const hooks = { player: p, enemies: () => [], critters: () => [],
+      cutTile: () => {},
       world: new World(220, 160, 40, 'a6b') } as never as GameHooks;
     const g = new SparkleGuitarProj(900, 900, 50, -30, 81, 1200, 700);
     for (let t = 1; t <= 3; t++) g.fixedUpdate(1 / 60, hooks);
@@ -448,6 +453,38 @@ describe('★A7 MinionProj 哨兵 SetDefaults 真盒', () => {
     expect([mk(678).w, mk(678).h]).toEqual([26, 54]);
     const plain = new MinionProj(0, 0, 373, 1, 1, false, 0, false, owner);
     expect(plain.w).toBe(16);                        // 五射手非特判型维持基底
+  });
+});
+
+// ============================================================
+// ★三轮蓝队 F5③ 法杖系哨兵真盒补注册（物品 1572/2366/3571/3569/5119/5463→shoot）
+// ============================================================
+describe('★F5③ MinionProj 法杖系哨兵 SetDefaults 真盒', () => {
+  const owner = (): Player | null => null;
+  const mk = (pid: number) => new MinionProj(0, 0, pid, 1, 1, true, 0, true, owner);
+  it('308=80×74 / 377=66×50 / 966=18×60 / 1025=42×38 / 641·643=32×32', () => {
+    expect([mk(308).w, mk(308).h]).toEqual([80, 74]);    // 冰九头蛇(:4001-4002)
+    expect([mk(377).w, mk(377).h]).toEqual([66, 50]);    // 蜘蛛皇后(:4619-4620)
+    expect([mk(966).w, mk(966).h]).toEqual([18, 60]);    // 猎犬底座(:9146-9147)
+    expect([mk(1025).w, mk(1025).h]).toEqual([42, 38]);  // 悬空毒眼球(:9710-9711)
+    expect([mk(641).w, mk(641).h]).toEqual([32, 32]);    // 月门(:6919)
+    expect([mk(643).w, mk(643).h]).toEqual([32, 32]);    // 彩虹水晶(:6932)
+  });
+});
+
+// ============================================================
+// ★三轮 η 红队：闪电光环 penPercent 双条件门（Projectile.cs:13266-13269）
+// ============================================================
+describe('lightningAuraPenPercent 门（非 68 且 def<999 ⇒ 1）', () => {
+  it('守卫拒：vanillaId===68 或防御≥999 → 0；undefined 兜底按 0 防算', () => {
+    expect(lightningAuraPenPercent(68, 0)).toBe(0);        // 地牢守卫族
+    expect(lightningAuraPenPercent(15, 999)).toBe(0);      // 高防位（<999 严格比较）
+    expect(lightningAuraPenPercent(null, undefined)).toBe(1);
+    expect(lightningAuraPenPercent(undefined, 0)).toBe(1);
+  });
+  it('普通过：普通敌 999 内全给 100% 护穿;贴线 998 过 999 拒', () => {
+    expect(lightningAuraPenPercent(202, 20)).toBe(1);
+    expect(lightningAuraPenPercent(77, 998)).toBe(1);
   });
 });
 

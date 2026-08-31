@@ -3789,6 +3789,8 @@ export class UI {
 
   buffBar: HTMLElement | null = null;
   buffBlocks = new Map<BuffType, { block: HTMLElement; icon: ImageBitmap | HTMLImageElement; time: HTMLElement }>();
+  /** buff 键集合签名（tickBuffLive 每帧比对，变更才整刷——见该函数注） */
+  private _buffSig = ' ';   // 初值必不等于任何真实签名 → 首帧 tickBuffLive 即整刷一次
   /** 宠物 buff 显示通道（key = 装备槽 0=宠物 / 1=光宠）。不进 buffBlocks：
    *  BuffType 未扩 62 个宠物成员，宠物 buff 也不在 BuffState.active 里——
    *  原版 UpdatePet/UpdatePetLight（Player.cs:17147-17187）装备槽 buffType 经
@@ -3806,6 +3808,31 @@ export class UI {
     const f = slot === 0 ? g.petFollower : g.lightPetFollower;
     if (!f || f.dead || f.projId !== info.proj) return null;
     return { buff: info.buff, proj: info.proj };
+  }
+
+  /** 每帧轻通道（红队 A1 定罪 2026-08-31：原版 DrawBuffIcon :44042-44060 每帧跑，
+   *  ownedProjectileCounts 每帧重算（:12271）——随从生灭/xN 计数若只随 1Hz 全刷，
+   *  击杀随从后旧计数与图标滞留 ≤1s。此轻通道只维持两帧动态面，不碰图标/tooltip：
+   *  ① buff 键集合变更 → 即时整刷（随从召唤/死亡/药水到期的图标生灭当帧跟手）；
+   *  ② 计数族（BuffTextHandlers）逐帧更新 "xN" 文本，值不变时零 DOM 写。 */
+  tickBuffLive(): void {
+    if (!this.game || this.invPanel.style.display === 'block') return;
+    const buffs = this.game.player.buffs;
+    let sig = '';
+    for (const t of buffs.active.keys()) sig += t + ',';
+    if (sig !== this._buffSig) { this.refreshBuffs(); return; }   // refreshBuffs 会回写 _buffSig
+    for (const [t, ui] of this.buffBlocks) {
+      if (ui.block.style.display === 'none') continue;
+      const projs = BUFF_TEXT_PROJECTILE_COUNTER[BUFF_DEFS[t].vanillaBuff];
+      if (!projs) continue;
+      let n = 0;
+      for (const q of this.game.entities.projectiles) {
+        const pid = (q as { projId?: number }).projId;
+        if (!q.dead && pid !== undefined && projs.includes(pid)) n++;
+      }
+      const want = n > 0 ? `x${n}` : '';
+      if (ui.time.textContent !== want) ui.time.textContent = want;
+    }
   }
 
   /** 每秒左右调用一次（由 Game 经 callbacks 驱动）。
@@ -3881,6 +3908,11 @@ export class UI {
     }
     for (const [t, ui] of this.buffBlocks) {
       if (!seen.has(t)) ui.block.style.display = 'none';
+    }
+    {  // 回写键集合签名（tickBuffLive 的变更检测基准）
+      let sig = '';
+      for (const t of buffs.active.keys()) sig += t + ',';
+      this._buffSig = sig;
     }
     // ---- 宠物/光宠 buff（独立通道；原版同栏追加在普通 buff 之后，无倒计时） ----
     const petStates = ([0, 1] as const).map((slot) => {

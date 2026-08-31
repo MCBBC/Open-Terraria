@@ -1,7 +1,7 @@
 // IIII99b2 批一次性诊断：DualDungeonLayoutProvider 段界记账对拍仪（δ 先行）。
-// x86 侧：i98b2→rrrr 认证树 + DR|S|/DR|HC| DRL 钩（run-ddp-r5，SW_MARKLOG=dr-mark.log）。
+// x86 侧：rrrr 认证树 + DR|S|/DR|HC| DRL 钩（run-ddp-r5.sh，SW_SNAPLOG=dr-mark.log）。
 //   JS 侧：cap-ddual 基座（_iii99seg 同 hydrate）+ DungeonDualLayout.ts __swI113 镜像钩。
-// 输出：两侧行级 diff（首分歧行定位）＋分座段界账本。JS 行存 SW_I113_OUT。
+// 对拍口径：每行尾 rc=N → 段间增量 Δ（首行置 *）；mr 剥离；Snaplog 重复尾巴剥离。
 // 用法：cd game && SW_I113=1 SW_I89_OUT=/tmp/iii99-out/cap-ddual \
 //   SW_I113_X86=/tmp/iii113-out/rig-ddp-r5/dr-mark.log npx vitest run tools/_iii113drl.test.ts
 import { it } from 'vitest';
@@ -48,7 +48,7 @@ function hydrate(): { st: TileStore; gs: GenState } {
   return { st, gs };
 }
 
-(RUN ? it : it.skip)('DR segment ledger js-side capture + pairwise diff vs x86', () => {
+(RUN ? it : it.skip)('DR segment ledger js-side capture + per-seat delta diff vs x86', () => {
   if (!existsSync(X86)) throw new Error(`x86 dr-mark log missing: ${X86}`);
   const du = JSON.parse(readFileSync(`${OUT}/base_dual.json`, 'utf8')) as typeof dualDungeonState;
   dualDungeonState.enabled = du.enabled;
@@ -90,55 +90,68 @@ function hydrate(): { st: TileStore; gs: GenState } {
 
   writeFileSync(JOUT, lines.join('\n') + '\n');
 
-  // —— 分座对拍：把每行尾 |rc=N 换成段间增量 Δ（首行置 *），mr 剥离 ——
-  const normalizeSeatRows = (raw: string[]) => {
-    const rows = raw.map((l) => l.replace(/^(MARK.)?/, ""));
-    const seatOf = (l: string) => l.split("|")[2]?.replace(/^i/, "") ?? "";
-    const out = new Map<string, { txt: string; n: number }[]>();
-    for (const l0 of rows) {
-      let l = l0;
-      // 剥离 Snaplog 追加的重复尾巴：形如 “...|rc=A|rc=A” 且两个数值相同
-      const m = l.match(/^(.*\\|rc=(\\d+))\\|rc=\\2$/);
-      if (m) l = m[1]!;
-      // 剥 mr
-      l = l.replace(/\\|mr=-?\\d+/, "");
+  // —— 归一化 ——
+  // x86 行：MARK| 前缀去除；Snaplog 追加尾 |rc=N（若同行已含另一相同 rc=N）剥除；mr 剥离。
+  const stripDupRc = (l: string): string => {
+    const m = l.match(/^(.*[| ]rc=(\d+))\|rc=\2$/);
+    return m ? m[1]! : l;
+  };
+  const normRow = (l: string): string =>
+    stripDupRc(l.replace(/\|mr=-?\d+/g, '')).replace(/(^|[| ])rc=-?\d+$/, '$1rc=@');
+
+  const seatOf = (l: string): string => l.split('|')[2]?.replace(/^i/, '') ?? '';
+  const groupDeltas = (rawRows: string[]): Map<string, string[]> => {
+    const out = new Map<string, string[]>();
+    let prev = NaN;
+    for (const l of rawRows) {
       const seat = seatOf(l);
-      const nm = l.match(/(^|[ |])rc=(\\d+)$/);
-      const n = nm ? Number(nm[2]) : NaN;
-      const keyTxt = l.replace(/(^|[ |])rc=-?\\d+$/, "$1rc=@");
-      if (!out.has(seat)) out.set(seat, []);
-      out.get(seat)!.push({ txt: keyTxt, n });
+      if (!out.has(seat)) { out.set(seat, []); prev = NaN; }
+      const nMatch = l.match(/rc=(-?\d+)$/);
+      const n = nMatch ? Number(nMatch[1]) : NaN;
+      const d = Number.isNaN(n) || Number.isNaN(prev) ? '*' : String(n - prev);
+      prev = n;
+      out.get(seat)!.push(normRow(l).replace('rc=@', `rc=${d}`));
     }
     return out;
   };
-  const fmt = (list: { txt: string; n: number }[]) => {
+
+  const xtAll = readFileSync(X86, 'utf8').split('\n').filter((l) => l.startsWith('MARK|DR|')).map((l) => l.slice(5))
+    .filter((l) => !l.startsWith('DR|S|MD'))   // MakeDungeon 头探针：JS 无同位钩，剔除
+    .map((l) => l.replace(/^(DR\|(?:R|Ro|CP))\|i(\d+)\|/, (_, tag, n) => `${tag}|i${Number(n) + 1}|`)); // R/Ro/CP 用 CurrentDungeon(0基)，统一到 drlInst(1基)
+
+  console.log(`[i113] x86 rows=${xtAll.length} js rows=${lines.length} mainSample=${rollN} totalSample=${totalN}`);
+
+  const segOnly = (rows: string[]) => rows.filter((l) => !/^DR\|R(o)?\|/.test(l));
+  const attOnly = (rows: string[]) => rows.filter((l) => /^DR\|R(o)?\|/.test(l));
+
+  const diffPair = (label: string, xr0: string[], jr0: string[]) => {
+    let first = -1;
+    const nn = Math.min(xr0.length, jr0.length);
+    for (let i = 0; i < nn; i++) if (xr0[i] !== jr0[i]) { first = i; break; }
+    const eqAll = first < 0 && xr0.length === jr0.length;
+    console.log(eqAll
+      ? `[i113] ${label}: ALL-EQUAL (${xr0.length} rows)`
+      : `[i113] ${label}: FIRST-DIFF @#${first}/${nn} lenX=${xr0.length} lenJ=${jr0.length}`);
+    for (let q = Math.max(0, first - 2); !eqAll && q < Math.min(first + 6, nn, xr0.length, jr0.length); q++) {
+      console.log(`   [${q}] X ${xr0[q]}\n   [${q}] J ${jr0[q]}${xr0[q] === jr0[q] ? '' : '   <<<'}`);
+    }
+  };
+
+  // —— 全座分段流（去掉绝对 rc 基差：把每行 rc 值替换为 Δ）——
+  const withDeltas = (rows: string[]): string[] => {
     let prev = NaN;
-    return list.map((e) => {
-      const d = Number.isNaN(e.n) || Number.isNaN(prev) ? "*" : e.n - prev;
-      prev = e.n;
-      return e.txt.replace("rc=@", `rc=${d === "*" ? "*" : d}`);
+    return rows.map((l0) => {
+      const l = stripDupRc(l0).replace(/\|mr=-?\d+/g, '');
+      const nMatch = l.match(/rc=(-?\d+)$/);
+      const n = nMatch ? Number(nMatch[1]) : NaN;
+      const d = Number.isNaN(n) || Number.isNaN(prev) ? '*' : String(n - prev);
+      prev = n;
+      return l.replace(/(^|[| ])rc=-?\d+$/, `$1rc=${d}`);
     });
   };
-  const xtAll = readFileSync(X86, "utf8").split("\n").filter((l) => l.startsWith("MARK|DR|")).map((l) => l.slice(5))
-    .filter((l) => !l.startsWith("DR|S|MD"));
-  const jsm = normalizeSeatRows(lines);
-  const xsm = normalizeSeatRows(xtAll);
-  console.log(`[i113] x86 rows=${xtAll.length} js rows=${lines.length} mainSample=${rollN} totalSample=${totalN}`);
-  const XJ = fmt(xsm.get("1") ?? []);
-  const JJ = fmt(jsm.get("1") ?? []);
-  void XJ; void JJ;
-  for (const [k, xr0] of [...xsm.entries()].sort()) {
-    const xr = fmt(xr0);
-    const jr = fmt(jsm.get(k) ?? []);
-    let first = -1;
-    const nn = Math.min(xr.length, jr.length);
-    for (let i = 0; i < nn; i++) if (xr[i] !== jr[i]) { first = i; break; }
-    const eqAll = first < 0 && xr.length === jr.length;
-    console.log(eqAll
-      ? `[i113] seat i${k}: ALL-EQUAL (${xr.length} rows)`
-      : `[i113] seat i${k}: FIRST-DIFF @#${first}/${nn} lenX=${xr.length} lenJ=${jr.length}`);
-    for (let q = Math.max(0, first - 2); !eqAll && q < Math.min(first + 5, nn, xr.length, jr.length); q++) {
-      console.log(`   [${q}] X ${xr[q]}\n   [${q}] J ${jr[q]}${xr[q] === jr[q] ? "" : "   <<<"}`);
-    }
+  for (const want of ['SEG', 'ATT'] as const) {
+    const xf = want === 'SEG' ? segOnly(xtAll) : attOnly(xtAll);
+    const jf = want === 'SEG' ? segOnly(lines) : attOnly(lines);
+    diffPair(`${want}`, withDeltas(xf), withDeltas(jf), false);
   }
 });

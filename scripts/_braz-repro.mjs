@@ -22,21 +22,27 @@ const res = await page.evaluate(async () => {
   // 场景：复现用户世界数据——直接写 mark 快照 (fx 0/18, fy 18/36/54 组)
   const T = await import('/src/data/tiles.ts');
   const st = g.world.store;
-  // 场景：出生点旁 6 格高空，吊盆紧贴玩家（chunk 恒载入、相机正中）
-  const bx = g.world.spawnX + 4;
-  const by0 = Math.max(20, Math.floor(g.world.groundLevel) - 8);   // 高空
-  for (const dx of [0,1]) st.setTile(bx+dx, by0, T.TILE_BY_KEY['stone']);   // 天花板
+  // 场景：出生点正右方——小天花板 + 吊挂火盆（玩家不挪动！相机正中 = 火盆可见）
+  const bx = g.world.spawnX + 6;
+  const surfY = (() => { for (let y = 10; y < g.world.h - 10; y++) { if (st.get(bx, y) !== 0) return y; } return Math.floor(g.world.groundLevel); })();
+  // 玩家放在火盆右边平地上
+  g.player.x = (bx + 4) * 16; g.player.y = (surfY - 3) * 16;
+  g.player.vx = 0; g.player.vy = 0; g.player.hp = g.player.maxHp; g.player.dead = false;
+  for (let i = 0; i < 30; i++) g.fixedUpdate(1 / 60);
+  // 站台（脚下方块）+ 天花板（吊盆上方石头）
+  for (const dx of [0, 1, 2]) st.setTile(bx + dx, surfY, T.TILE_BY_KEY['stone']);
+  for (const dx of [0, 1]) st.setTile(bx + dx, surfY - 4, T.TILE_BY_KEY['stone']);
+  // 吊挂火盆 2×3（挂在天花板下方）
   const T592 = T.TILE_BY_KEY['v_592_hanging_brazier'];
-  for (let dy=0; dy<3; dy++) for (let dx=0; dx<2; dx++) {
-    const i2 = st.idx(bx+dx, by0+1+dy);
-    st.setTile(bx+dx, by0+1+dy, T592);
-    st.frameX[i2] = dx*18; st.frameY[i2] = dy*18;
+  for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 2; dx++) {
+    const i2 = st.idx(bx + dx, surfY - 3 + dy);
+    st.setTile(bx + dx, surfY - 3 + dy, T592);
+    st.frameX[i2] = dx * 18; st.frameY[i2] = dy * 18;
   }
-  g.player.x = bx*16 - 40; g.player.y = (by0+2)*16; g.player.vx=0; g.player.vy=0;
-  g.player.hp = g.player.maxHp; g.player.dead=false;
-  for (let i=0;i<60;i++) g.fixedUpdate(1/60);    // 烘焙
-  window.__probeBrazierX = bx; window.__probeBrazierY = by0+1; window.__stRef = st;
-  window.__probeBrazierX = bx; window.__probeBrazierY = by0 + 1; window.__stRef = st;
+  // 强制重烘 + 等待动画 tick
+  g.chunks.markDirtyArea(bx - 1, surfY - 5, bx + 3, surfY + 2);
+  for (let i = 0; i < 30; i++) g.fixedUpdate(1 / 60);
+  window.__probeBrazierX = bx; window.__probeBrazierY = surfY - 3; window.__stRef = st;
   return out;
 });
 console.log(JSON.stringify(res));

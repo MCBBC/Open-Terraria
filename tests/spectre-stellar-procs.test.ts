@@ -14,9 +14,21 @@ import {
 } from '../src/entities/SpectreSoulProj';
 import {
   SparkleGuitarProj, modifyStellarTuneDamage, computeStellarTuneShot,
-  stellarTuneCritChance, catmullRom,
+  stellarTuneCritChance, catmullRom, nextVector2Circular, collectStellarTargets,
+  sparkleGuitarTargetRect,
 } from '../src/entities/SparkleGuitarProj';
 import type { GameHooks } from '../src/entities/types';
+
+/** 种子化 rng（分布形状断言用,mulberry32——只求可重复,不追求密码学性） */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 const W = 220, H = 160;
 function makeStore(): TileStore {
@@ -44,9 +56,15 @@ function mkEnemy(id: number, x: number, y: number, w = 18, h = 40): HurtSpy & {
   }) as never;
 }
 function makeHooks(enemies: unknown[], store = makeStore(),
-  player?: Player): { hooks: GameHooks; added: unknown[]; store: TileStore } {
+  player?: Player): { hooks: GameHooks; added: unknown[]; store: TileStore;
+    cutCalls: Array<{ ix: number; iy: number }>; advanceTick: (n: number) => void } {
   const pl = player ?? new Player(30 * 16, 100 * 16, new Inventory());
   const added: unknown[] = [];
+  // ★F3/F6 测试面：cutTile 记录 + immune[owner] 窗（与 Game.noteNpcPlayerImmune/
+  //   meleeNpcImmuneGateOf 同构的最小 Map/tick 桩）
+  const cutCalls: Array<{ ix: number; iy: number }> = [];
+  const winMap = new Map<number, number>();
+  let simTick = 0;
   const hooks = {
     world: { store, flags: { hardMode: false } } as never,
     player: pl as never,
@@ -55,7 +73,7 @@ function makeHooks(enemies: unknown[], store = makeStore(),
     spawnDrop: () => null,
     damagePlayer: () => {},
     addDamageNumber: () => {},
-    cutTile: () => {},
+    cutTile: (ix: number, iy: number) => { cutCalls.push({ ix, iy }); },
     onEnemyKilled: () => {},
     spawnEnemy: () => {},
     spawnParticles: () => {},
@@ -63,11 +81,23 @@ function makeHooks(enemies: unknown[], store = makeStore(),
     playSfx: () => {},
     playSfxFiles: () => {},
     showPickupLabel: () => {},
+    noteNpcPlayerImmune: (id: number, t: number) => {
+      if (t > 0) winMap.set(id, simTick + t);
+      else if (t === 0) winMap.delete(id);
+    },
+    meleeNpcImmuneGateOf: (id: number): boolean => {
+      const exp = winMap.get(id);
+      if (exp !== undefined && exp <= simTick) { winMap.delete(id); return true; }
+      return exp === undefined ? true : false;
+    },
   };
-  (hooks as unknown as { entities: unknown }).entities = {
-    add: (e: unknown) => { added.push(e); },
+  const anyHooks = hooks as unknown as Record<string, unknown>;
+  anyHooks.entities = { add: (e: unknown) => { added.push(e); } };
+  const advanceTick = (n: number) => { simTick += n; };
+  return {
+    hooks: hooks as unknown as GameHooks, added, store, cutCalls, advanceTick,
+    winPeek: (id: number) => winMap.get(id),
   };
-  return { hooks: hooks as unknown as GameHooks, added, store };
 }
 
 // ---- 批③：弹 661 Colliding（Projectile.cs:15877-15883,★F8 校准）----
@@ -292,7 +322,9 @@ describe('SparkleGuitarProj 出手向量/脚本曲线/AI_167 寿命(:47427)/一�
     expect(lockedOut.vx).toBeCloseTo(0, 9);           // edge unit (0,-1)
     expect(lockedOut.vy).toBeLessThan(0);
     expect(lockedOut.spawnX).toBe(100);
-    // 未锁定：距离 800>700 → 锚点钳回 player + 700 向量,速度幅 = 1400
+    // 未锁定：距离 800>700 → 锚点钳回 player + 700 向量；★F1② 无归一化 ⇒
+    //   |v| = dist×2×|unit|，unit=(1,-0.75)（uy∈<0.5 支 nextFloat01=0.5→-0.75）,
+    //   |unit|=1.25 ∈(1,√2] 波段 —— 旧 /norm 版会把幅值错误压回 1400。
     const free = computeStellarTuneShot({
       playerCx: 100, playerCy: 100, mouseWorldX: 900, mouseWorldY: 100,
       targets: [], targetRoll: () => 0,
@@ -301,7 +333,30 @@ describe('SparkleGuitarProj 出手向量/脚本曲线/AI_167 寿命(:47427)/一�
       nextFloat01: () => 0.5,
     });
     expect(free.aimX).toBeCloseTo(100 + 700, 9);
-    expect(Math.hypot(free.vx, free.vy)).toBeCloseTo(1400, 6);
+    expect(Math.hypot(free.vx, free.vy)).toBeCloseTo(1400 * 1.25, 6);   // ★F1②
+    expect(free.vy).toBeLessThan(0);                   // 上半平面压向
+  });
+
+  it('★F1② |v| 波段对拍：保平支恒 unit、上扬支 (1,√2] 不回落;上限 √2×dist×2', () => {
+    // |Y|≥0.5 原始样本不做改写 → |unit|≡1
+    const calm = computeStellarTuneShot({
+      playerCx: 0, playerCy: 0, mouseWorldX: 500, mouseWorldY: -100,
+      targets: [], targetRoll: () => 0, nextJitter: () => ({ x: 0, y: 0 }),
+      nextEdgeUnit: () => ({ x: Math.SQRT1_2, y: -Math.SQRT1_2 }),
+      nextFloat01: () => 0,
+    });
+    expect(Math.hypot(calm.vx, calm.vy)).toBeCloseTo(Math.hypot(500, 100) * 2, 9);
+    // 上扬支：edge=(cos a≈0.98, sin a>0 取反→-0.199)，f=0.4 → uy=-0.7；
+    // |unit|=√(0.96+0.49)=√1.45——恒 >1 且 <√2（归一化版本恒会缩回 1）
+    const lift = computeStellarTuneShot({
+      playerCx: 0, playerCy: 0, mouseWorldX: 400, mouseWorldY: 50,
+      targets: [], targetRoll: () => 0, nextJitter: () => ({ x: 0, y: 0 }),
+      nextEdgeUnit: () => ({ x: 0.98, y: 0.199 }),
+      nextFloat01: () => 0.4,
+    });
+    expect(lift.vy).toBeCloseTo(-0.7 * 2 * Math.hypot(400, 50), 6);
+    expect(Math.hypot(lift.vx, lift.vy)).toBeGreaterThan(2 * Math.hypot(400, 50));
+    expect(Math.hypot(lift.vx, lift.vy)).toBeLessThan(2 * Math.hypot(400, 50) * Math.SQRT2);
   });
   it('AI_167 触敌即亡(penetrate 默认 1→:14194--→:17312 同拍 Kill)；隔墙 ×0.75 即时折算(:13333)', () => {
     const p = new Player(24 * 16, 104 * 16, new Inventory());   // 玩家左侧 (cx≈394)
@@ -433,5 +488,227 @@ describe('SparkleGuitarProj 出手向量/脚本曲线/AI_167 寿命(:47427)/一�
     expect(v.hits).toEqual([81]);
     expect(mid.hits).toEqual([81]);
     expect(far.hits).toEqual([]);
+  });
+});
+
+// ===================== 三轮蓝队批（F1/F3/F6,2026-08-31） =====================
+describe('★F1① NextVector2Circular 线性半径分布形状（Utils.cs:1301-04）', () => {
+  const N = 40000;
+  const draw = (rng: () => number) => {
+    const s = nextVector2Circular(rng, 24, 24);
+    return { r: Math.hypot(s.x, s.y), a: Math.atan2(s.y, s.x) };
+  };
+  it('E[R]=R/2、P(R<R/2)=0.5 —— 面积均匀(√rand)版两值 = R/3 与 0.25,判别式可分辨', () => {
+    const rng = mulberry32(20260831);
+    let sum = 0, belowHalf = 0;
+    for (let i = 0; i < N; i++) {
+      const { r } = draw(rng);
+      sum += r;
+      if (r < 12) belowHalf++;
+    }
+    expect(sum / N).toBeGreaterThan(11.5);          // ≈12 (线性均值 R/2);√版≈8
+    expect(sum / N).toBeLessThan(12.5);
+    expect(belowHalf / N).toBeGreaterThan(0.485);   // ≈0.5;√版≈0.25
+    expect(belowHalf / N).toBeLessThan(0.515);
+  });
+  it('双掷契约：恰消耗两个 rng 样本（角+半径）——旧内联版每样本掷三次', () => {
+    let calls = 0;
+    nextVector2Circular(() => { calls++; return 0.25; }, 24, 24);
+    expect(calls).toBe(2);
+  });
+});
+
+describe('★F1③ collectStellarTargets 候选携带 velocity 提前量(:47039 门/:48453 锚)', () => {
+  it('矩形过滤照旧;命中候选带 vx/vy,空缺弹速缺省 0', () => {
+    const rect = sparkleGuitarTargetRect(500, 500);
+    const ents = [
+      { x: 700, y: 700, w: 20, h: 20, vx: -1.5, vy: 0.25 },
+      { x: 8000, y: 8000, w: 20, h: 20 },                       // 框外
+      { x: 300, y: 480, w: 16, h: 16 },                          // 框内无速度
+    ];
+    const got = collectStellarTargets(ents, rect, () => true);
+    expect(got.length).toBe(2);
+    expect(got[0]).toEqual({ cx: 710, cy: 710, vx: -1.5, vy: 0.25 });
+    expect(got[1].vx ?? null).toBe(0);
+  });
+  it('CanBeChasedBy 门在收集侧生效', () => {
+    const rect = sparkleGuitarTargetRect(0, 0);
+    const ents = [{ x: -200, y: -100, w: 40, h: 40 }];
+    expect(collectStellarTargets(ents, rect, () => false).length).toBe(0);
+    expect(collectStellarTargets(ents, rect, () => true).length).toBe(1);
+  });
+});
+
+describe('★F3 弹体 CutTiles/小动物旁路（Projectile.cs:12513-12518→CutTiles :15276）', () => {
+  it('856 子步 CutTiles：单 tick 三子步各自盒(+1 外沿)全数上报 game.cutTile', () => {
+    const p = new Player(120, 940, new Inventory());
+    const { hooks, cutCalls } = makeHooks([], undefined, p);
+    const g = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    g.fixedUpdate(1 / 60, hooks);
+    // 手推三子步曲线位（同 stellarSampleRef 法式）：w=32 盒 → 期望 tile 集 =
+    // floor(pos/T)..floor((pos+32)/T)+1 的笛卡尔积;总集按序拼接
+    const pl = hooks.player as unknown as { cx: number; cy: number };
+    const expectedSet = new Set<string>();
+    for (let u = 1; u <= 3; u++) {
+      const t01 = u / 90;
+      const pos = catmullRom(
+        { x: pl.cx + (-g.vx) * 2, y: pl.cy + (-g.vy) * 2 },
+        { x: pl.cx, y: pl.cy },
+        { x: 488, y: 968 },
+        { x: 488 + (-g.vx) * (1 - t01 * 3), y: 968 + (-g.vy) * (1 - t01 * 3) }, t01);
+      const bx = pos.x - 16, by = pos.y - 16;               // w=h=32 → 左上=心−16
+      const x0 = Math.floor(bx / 16), y0 = Math.floor(by / 16);
+      for (let ix = x0; ix <= Math.floor((bx + 32) / 16) + 1; ix++) {
+        for (let iy = y0; iy <= Math.floor((by + 32) / 16) + 1; iy++) {
+          expectedSet.add(`${ix},${iy}`);
+        }
+      }
+    }
+    const gotSet = new Set(cutCalls.map((c) => `${c.ix},${c.iy}`));
+    expect(gotSet).toEqual(expectedSet);
+    // 多子步盒交叠 ⇒ 同 tile 跨子步重复上报（原版每 Damage() 亦重跑 CutTiles,KillTile 幂等）：
+    // 唯一集等价 + 总数≥唯一数 即可
+    expect(cutCalls.length).toBeGreaterThanOrEqual(expectedSet.size);
+  });
+
+  it('856 Kill 爆裂轮同样以 128×128 盒砍一轮(:72840 Damage 再过 :12515 门)', () => {
+    const p = new Player(120, 940, new Inventory());
+    const { hooks, cutCalls } = makeHooks([], undefined, p);
+    const g = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    cutCalls.length = 0;
+    ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
+      .killStellarTune as (gh: GameHooks) => void).call(g, hooks);
+    // 盒左上=(488-64,968-64)=(424,904) → tiles [26..53]×[56..119] 外沿随盒尺寸
+    const xs = cutCalls.map((c) => c.ix);
+    expect(Math.min(...xs)).toBe(Math.floor(424 / 16));
+    expect(cutCalls.some((c) => c.ix === Math.floor((424 + 128) / 16) + 1)).toBe(true);
+  });
+
+  it('356 预热期不砍(friendly=false 早退)；转正后子步照砍', () => {
+    const foeless = makeHooks([]);
+    const orbW = new SpectreSoulProj(100, 100, 1, 1, 30, null);
+    orbW.fixedUpdate(1 / 60, foeless.hooks);
+    expect(foeless.cutCalls.length).toBe(0);                // ai1<60 ⇒ runContact早退
+    // 转正后子步照砍：直置计数器过预热（锁靶必须真实在场——失效重选空场先 Kill）
+    const hb2 = makeHooks([mkEnemy(31, 2600, 1600, 18, 18)]);
+    const lockEnt = mkEnemy(30, 2600, 1596, 18, 18);
+    (hb2.hooks as unknown as { enemies: () => unknown[] }).enemies =
+      () => [lockEnt, mkEnemy(31, 2700, 1610, 18, 18)];
+    const orbH = new SpectreSoulProj(100, 100, 1, 1, 30, lockEnt);
+    (orbH as unknown as { ai1: number }).ai1 = 60;
+    orbH.fixedUpdate(1 / 60, hb2.hooks);
+    expect(hb2.cutCalls.length).toBeGreaterThan(0);
+  });
+
+  it('856/356 命中小动物：一击致死并自毁（MagicProj 形态;356 同步耗穿）', () => {
+    const p = new Player(120, 940, new Inventory());
+    const scene = makeHooks([], undefined, p);
+    let critterHits = 0;
+    const critter = {
+      x: 470, y: 950, w: 14, h: 14, dead: false,
+      hurt(): boolean { critterHits++; critter.dead = true; return true; },
+    };
+    (scene.hooks as unknown as { critters: () => unknown[] }).critters = () => [critter];
+    const g = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    // 直驱 Kill 段（曲线首拍远在玩家侧——小动物命中经爆裂轮 Damage 的 hitCritters 面）
+    ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
+      .killStellarTune as (gh: GameHooks) => void).call(g, scene.hooks);
+    expect(critterHits).toBe(1);                            // 爆裂盒含小动物 ⇒ 一击
+    expect(g.dead).toBe(true);                              // Kill 弹 856 段（带爆裂）
+    expect(scene.cutCalls.length).toBeGreaterThan(0);       // 爆裂 128 盒同拍砍面
+    // 356：friendly 转正后重叠小动物 ⇒ 耗穿一击即死
+    const sceneB = makeHooks([], undefined, new Player(120, 940, new Inventory()));
+    let critterHitsB = 0;
+    const cB = { x: 90, y: 90, w: 16, h: 16, dead: false,
+      hurt(): boolean { critterHitsB++; cB.dead = true; return true; } };
+    (sceneB.hooks as unknown as { critters: () => unknown[] }).critters = () => [cB];
+    const orbLock = mkEnemy(41, 2600, 1600, 18, 18);
+    (sceneB.hooks as unknown as { enemies: () => unknown[] }).enemies = () => [orbLock];
+    const orb = new SpectreSoulProj(95, 95, 0.01, 0.01, 30, orbLock);
+    (orb as unknown as { ai1: number }).ai1 = 60;
+    orb.fixedUpdate(1 / 60, sceneB.hooks);
+    expect(critterHitsB).toBe(1);
+    expect(orb.dead).toBe(true);
+    expect((orb as unknown as { penetrate: number }).penetrate).toBe(0);
+  });
+});
+
+describe('★F6 856 immune[owner] 读清双语义（:12636 拒收门 + :14169 显式清窗）', () => {
+  function burstScene(winTicks?: number): {
+    hooks: GameHooks; victim: ReturnType<typeof mkEnemy>; winPeek: (id: number) => number | undefined;
+    advanceTick: (n: number) => void;
+  } {
+    const p = new Player(120, 940, new Inventory());
+    const scene = makeHooks([], undefined, p);
+    const victim = mkEnemy(10, 494, 950, 18, 18);           // 落于爆裂 128 盒内
+    (scene.hooks as unknown as { enemies: () => unknown[] }).enemies = () => [victim];
+    if (winTicks !== undefined)
+      (scene.hooks as unknown as { noteNpcPlayerImmune: (i: number, t: number) => void })
+        .noteNpcPlayerImmune(victim.id, winTicks);
+    const g = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
+      .killStellarTune as (gh: GameHooks) => void).call(g, scene.hooks);
+    return { ...scene, victim, gproj: g } as never;
+  }
+
+  it('①近战窗拒爆裂：窗内受害者整跳跳过且【不落局部免疫标】', () => {
+    const { hooks } = makeHooks([], undefined, new Player(120, 940, new Inventory()));
+    const victim = mkEnemy(10, 494, 950, 18, 18);           // 落于爆裂 128 盒内
+    (hooks as unknown as { enemies: () => unknown[] }).enemies = () => [victim];
+    const hs = hooks as unknown as { noteNpcPlayerImmune: (i: number, t: number) => void };
+    hs.noteNpcPlayerImmune(victim.id, 10);
+    const g1 = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
+      .killStellarTune as (gh: GameHooks) => void).call(g1, hooks);
+    expect(victim.hits).toEqual([]);                        // 窗开 ⇒ 爆裂整圈不吃
+    // 「不落标」证明：窗过期后同弹同盒再爆一轮即可吃伤（若首轮误写 hitOnce 会仍零伤）
+    const sceneB = makeHooks([], undefined, new Player(120, 940, new Inventory()));
+    (sceneB.hooks as unknown as { enemies: () => unknown[] }).enemies = () => [victim];
+    const g2 = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    g2.critChance = -5;                                     // 排除与第一发共享实例的可能
+    ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
+      .killStellarTune as (gh: GameHooks) => void).call(g2, sceneB.hooks);
+    expect(victim.hits).toEqual([81]);                      // 新弹无窗正常结算
+  });
+
+  it('②爆裂清窗释放后续弹：命中尾 noteNpcPlayerImmune(id,0) 出表,第二发立即可结', () => {
+    const p = new Player(120, 940, new Inventory());
+    const scene = makeHooks([], undefined, p);
+    const victim = mkEnemy(11, 494, 950, 18, 18);
+    (scene.hooks as unknown as { enemies: () => unknown[] }).enemies = () => [victim];
+    const hs = scene.hooks as unknown as { noteNpcPlayerImmune: (i: number, t: number) => void };
+    // 先给一个「已过期但未出表」的残窗 —— meleeNpcGateOf 读惰性清 + 我方写尾显式 0 双保险
+    hs.noteNpcPlayerImmune(victim.id, -0 + 1);              // expiry=tick+1
+    scene.advanceTick(2);                                   // 已过期仍未删表(懒删语义)
+    expect(scene.winPeek(victim.id)).toBeDefined();
+    const gA = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
+      .killStellarTune as (gh: GameHooks) => void).call(gA, scene.hooks);
+    expect(scene.winPeek(victim.id)).toBeUndefined();       // ★尾清窗生效
+    expect(victim.hits).toEqual([81]);                      // 过期窗不拒收
+  });
+
+  it('③独立计数隔离：带窗者拒、不带者结；两账互不串扰,窗满释后后续弹照样落地', () => {
+    const p = new Player(120, 940, new Inventory());
+    const scene = makeHooks([], undefined, p);
+    const wVictim = mkEnemy(12, 494, 950, 18, 18);          // 带窗 10t
+    const clean = mkEnemy(13, 500, 906, 18, 18);            // 同盒但无窗(盒上沿内侧)
+    (scene.hooks as unknown as { enemies: () => unknown[] }).enemies = () => [wVictim, clean];
+    const hs = scene.hooks as unknown as { noteNpcPlayerImmune: (i: number, t: number) => void };
+    hs.noteNpcPlayerImmune(wVictim.id, 10);
+    const g = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
+      .killStellarTune as (gh: GameHooks) => void).call(g, scene.hooks);
+    expect(wVictim.hits).toEqual([]);                       // 带窗拒
+    expect(clean.hits).toEqual([81]);                       // 无窗照结
+    expect(scene.winPeek(clean.id)).toBeUndefined();
+    expect(scene.winPeek(wVictim.id)).toBeDefined();        // 拒收不消费他人窗
+    scene.advanceTick(10);                                  // 窗自然到期
+    const hs0 = scene.hooks as unknown as { noteNpcPlayerImmune: (i: number, t: number) => void };
+    hs0.noteNpcPlayerImmune(wVictim.id, 0);                 // 若有残留任意源也可显式清
+    const later = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
+    ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
+      .killStellarTune as (lh: GameHooks) => void).call(later, scene.hooks);
+    expect(wVictim.hits).toEqual([81]);                     // 后续弹终获释放
   });
 });

@@ -269,6 +269,7 @@ describe('FR3-F broadcast：SparkleGuitarProj 分派序前置出 kind9（曾落 
     g.tickCount = 100;
     g.netProjLast = new Map<number, { x: number; y: number; t: number }>();
     g.netProjCursor = 0;
+    g.netProjForce = new Set<number>();   // ★Z-F4 强制上线通道（2026-08-31 增量）桩
     const orb = new SparkleGuitarProj(2000, 2400, -14, -40, 85, 2600, 2200);
     orb.id = 7;
     // 预置差分基准：上一拍位远离当前位置（首次可见即入批——新鲜建项恒跳过）
@@ -290,11 +291,15 @@ describe('FR3-F broadcast：SparkleGuitarProj 分派序前置出 kind9（曾落 
     return { g, batches };
   }
 
-  it('hostile 房：kind=9|0x40、tag=弹型、aux=0（不携浸剂/crit 位）', () => {
+  it('hostile 房：kind=9|0x40、tag=弹型、aux=旋转相位 t01 千分位（FR5-F；不携浸剂/crit 位——值域 0..1000）', () => {
     const { g, batches } = broadcastShell(true);
     (g as unknown as { netProjBroadcast: () => void }).netProjBroadcast();
     expect(batches.length).toBe(1);
-    expect(batches[0][0]).toMatchObject({ kind: 9 | 0x40, tag: '856', aux: 0, dmg: 85 });
+    // 新建相位 t=0 → aux=0；★FR5-F 后该字段承载相位而非恒 0 占位
+    // （收端 netPhaseApply 消费——Game.netApplyProjSnaps 重锚 + 傀儡 +3/tick 自推进）
+    expect(batches[0][0]).toMatchObject({ kind: 9 | 0x40, tag: '856', dmg: 85 });
+    expect(batches[0][0].aux).toBeGreaterThanOrEqual(0);
+    expect(batches[0][0].aux).toBeLessThanOrEqual(1000);
   });
 
   it('非 hostile：不带 PvP 位', () => {

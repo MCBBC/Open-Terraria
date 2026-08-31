@@ -14,7 +14,8 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { Arrow, projSprite } from './Arrow';
 import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile,
-  resolveProjClass, IS_A_WHIP_PROJS, DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS } from './projTargets';
+  resolveProjClass, IS_A_WHIP_PROJS, DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS,
+  applyBannerDamageDealt } from './projTargets';
 import { ConfettiBurstProj } from './meleeOnHitProjs';
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
@@ -337,7 +338,7 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
           (e as unknown as { vy?: number }).vy ?? 0), { netSync: true });
       }
     }
-    e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
+    e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
     onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     // + 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意命中;
@@ -506,6 +507,85 @@ const BOOMERANG_SIZE: Record<number, number> = {
   1076: 46, 1102: 46,
 };
 
+/** Main.hslToRgb 等价（Color.cs 标准 HSL→RGB,h∈[0,1) s/l∈[0,1]）——
+ *  FlaironSpike Kill 尘 212 的逐粒色相掷（P.cs:74202） */
+function hslToRgbColor(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const chan = (t0: number): number => {
+    let t = t0;
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  return { r: chan(h + 1 / 3) * 255, g: chan(h) * 255, b: chan(h - 1 / 3) * 255 };
+}
+
+/** Collision.HitTilesInACircle 块尘圈近似（Collision.cs:3029-3075）:radiusPx = 圆半径
+ *  （原版第 3/4 参为方形盒边长 W,圆距 = (W+H)/4——传 half 即 radiusPx=W/2）。圆内实格
+ *  effect-only KillTile 出【块色】尘——本仓 spawnDust 逐格冒烟,上限 32 格防刷屏
+ *  （观感等价,登记近似;AnchoredProj 262 回收冲击与 Boomerang 383 撞墙共用） */
+function hitTilesInACircleFx(game: GameHooks, cx: number, cy: number, radiusPx: number): void {
+  const st = game.world.store;
+  const t0x = Math.floor((cx - radiusPx) / TILE), t1x = Math.floor((cx + radiusPx) / TILE);
+  const t0y = Math.floor((cy - radiusPx) / TILE), t1y = Math.floor((cy + radiusPx) / TILE);
+  let n = 0;
+  for (let ty = t0y; ty <= t1y && n < 32; ty++) {
+    for (let tx = t0x; tx <= t1x && n < 32; tx++) {
+      if (!st.inBounds(tx, ty) || !st.isSolid(tx, ty)) continue;
+      const dx = tx * TILE + 8 - cx, dy = ty * TILE + 8 - cy;
+      if (dx * dx + dy * dy > radiusPx * radiusPx) continue;
+      game.spawnDust?.(tx * TILE, ty * TILE, TILE, TILE, 14, 0, 0, 150, null, 1);
+      n++;
+    }
+  }
+}
+
+/** ParticleOrchestrator.Spawn_PaladinsHammerShockwave 粒本体（1458 ParticleOrchestrator.cs
+ *  :816-880;台账 C 批清偿——此前只接 Item180 音）。三段:
+ *  ①50 掷放射环:1/2 → d57(alpha200,scale1.8) / 1/3 → d43(alpha254,scale1.3),
+ *    velocity = (尘落点−盒心)归一 ×9.5 ×rand,noGravity（NewDust 在弹体盒内掷位后定向重写,
+ *    本仓 spawn 后覆写 x/vx 等价 NewDustPerfect 语义差登记≈±2px 抖动）;
+ *  ②命中点 ±3 格(7×7) KillTile_GetTileDustAmount 块尘,上抛调制（num5=4）——本仓冒烟
+ *    粒逐格近似（同圈档上限 32）;gore 池无 API 不接,登记;
+ *  ③音 Item180 已在调用侧（Boomerang.moveStep 301 支）播放 */
+function paladinHammerShockwaveFx(game: GameHooks, x: number, y: number, w: number, h: number): void {
+  const ccx = x + w / 2, ccy = y + h / 2;
+  for (let i = 0; i < 50; i++) {
+    if (Math.random() < 0.5) {
+      const d = game.spawnDust?.(x, y, w, h, 57, 0, 0, 200, null, 1.8);
+      if (d) {
+        const dl = Math.hypot(d.x - ccx, d.y - ccy) || 1;
+        d.noGravity = true;
+        d.vx = ((d.x - ccx) / dl) * 9.5 * Math.random();
+        d.vy = ((d.y - ccy) / dl) * 9.5 * Math.random();
+      }
+    }
+    if (Math.random() < 1 / 3) {
+      const d = game.spawnDust?.(x, y, w, h, 43, 0, 0, 254, null, 1.3);
+      if (d) {
+        const dl = Math.hypot(d.x - ccx, d.y - ccy) || 1;
+        d.noGravity = true;
+        d.vx = ((d.x - ccx) / dl) * 9.5 * Math.random();
+        d.vy = ((d.y - ccy) / dl) * 9.5 * Math.random();
+      }
+    }
+  }
+  // ②7×7 格块尘（:851-871）
+  const ptx = Math.floor(ccx / TILE), pty = Math.floor(ccy / TILE);
+  let n = 0;
+  for (let j = pty - 3; j <= pty + 3 && n < 32; j++) {
+    for (let i2 = ptx - 3; i2 <= ptx + 3 && n < 32; i2++) {
+      if (!game.world.store.inBounds(i2, j) || !game.world.store.isSolid(i2, j)) continue;
+      game.spawnDust?.(i2 * TILE, j * TILE, TILE, TILE, 14, 0, -3, 0, null, 1.12);   // 上抛块尘近似
+      n++;
+    }
+  }
+}
+
 export class Boomerang extends Entity {
   w = 22; h = 22; // 默认（型号表覆盖）
   damage: number;
@@ -534,6 +614,9 @@ export class Boomerang extends Entity {
   private localT = 0;
   /** localAI[1]：光刃悬停音一次性门（:37098-37109） */
   private hoverSfxDone = false;
+  /** localAI[0] 冲击盒档（:15050-15076 Damage_GetHitbox）：383 撞墙≥10 置 300 /
+   *  301 撞墙置 200,下次 Damage 查询消费中心±half 一帧冲击盒后置 -1;0=无 */
+  private boomBox = 0;
   /** rotation（尾段 per-type :37294-37352 + 光刃出程/悬停/返回专属段） */
   private rot = 0;
   /** soundDelay（掷出呼啸 8t/301 10t,:36626-36651;每 tick 自减 :15427-15429） */
@@ -638,9 +721,18 @@ export class Boomerang extends Entity {
     //      后 = 本 tick 自旋仍用上一 tick 符号,与原版"AI(:15434)先于移动/转向(:15674)"
     //      的节拍一致;曾恒用出生 facing → 反弹后自旋不反向）----
     if (this.ai0 !== 1) this.dir = this.vx < 0 ? -1 : 1;
-    // ---- 命中结算（同敌冷却 10t = NPC immune[owner]=10,:13172-13174） ----
+    // ---- 命中结算（同敌冷却 10t = NPC immune[owner]=10,:13172-13174）----
+    // 383/301 撞墙 localAI[0]>0 → Damage_GetHitbox(:15050-15076)：命中盒先
+    // Inflate(−w/2,−h/2) 收点再 Inflate(localAI/2)——末盒 = 弹体中心 ± localAI/2 的
+    // 一帧冲击盒（301=200/383=300 边长）,消费即置 −1。
+    let boomExt: { x: number; y: number; w: number; h: number } | null = null;
+    if (this.boomBox > 0 && (this.projId === 301 || this.projId === 383)) {
+      const half = this.boomBox / 2;
+      boomExt = { x: this.cx - half, y: this.cy - half, w: this.boomBox, h: this.boomBox };
+      this.boomBox = -1;
+    }
     hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || this.dir, this.armorPen,
-      () => this.onHitEnemy());
+      () => this.onHitEnemy(), undefined, false, boomExt);
   }
 
   /** ① 出程段（ai[0]==0,:36783-37087）——分支序与源码一致 */
@@ -822,17 +914,30 @@ export class Boomerang extends Entity {
       // 入态音尘由 aiHover 的 localAI[1] 门承担）
       this.ai0 = 2; this.outT = 0;
     } else {
-      // 撞墙尘 + 挖掘音（同上 :18139-18140/:18161）
-      game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
-      game.playSfx('dig', 1, this.cx, this.cy);
-      // :18152-18160 其余:ai[0]=1 回收 + 速度=-lastVelocity（383 豁免取反 :18156）。
-      // 383 ≥10 的 HitTilesInACircle(300)+Item14 未建模;
-      // 301 圣骑士锤冲击波音（1458 Projectile.cs:19653-19660:type==301 支 owner==
-      // Main.myPlayer 门 → ParticleOrchestrator.Spawn_PaladinsHammerShockwave
-      // ParticleOrchestrator.cs:816-821 内播 SoundID.Item180。本仓 netPuppet 在
-      // fixedUpdate 头早退不进 moveStep = 等价"本地玩家才响";冲击波盒 localAI[0]=200
-      // 粒本体仍未建模,只接音——2026-08-26 B1 批)
-      if (this.projId === 301) game.playSfxFile?.('Item_180', 1, this.cx, this.cy);
+      // HandleMovement 特例档（1458 :19646-19655;1456 同段 :19627-19663——三支互斥,
+      // 替代通用 HitTiles 尘）:
+      //   383 附魔飞刀 ai[1]>=10 → Collision.HitTilesInACircle(300)块尘圈 + Item14;
+      //   301 圣骑士锤 → localAI[0]=200 + ParticleOrchestrator.Spawn_PaladinsHammerShockwave
+      //     （ParticleOrchestrator.cs:816-880:Item180 音已接 + d57/d43 放射环 +
+      //     命中点 7×7 格 KillTile 块尘）——音为本仓 netPuppet 早退等价"本地才响";
+      //   其余（含缺省):Collision.HitTiles 通用尘。2026-08-31 台账 C 批清偿:
+      //   此前 383 圈/301 冲击波粒本体整缺只接了音。
+      let genericDust = true;
+      if (this.projId === 383 && this.outT >= 10) {
+        hitTilesInACircleFx(game, this.cx, this.cy, 150);       // num71=300→半径 (W+H)/4=150
+        game.playSfxFile?.('Item_14', 1, this.cx, this.cy);
+        this.boomBox = 300;                                     // localAI[0]=num71(:15065-15068 GetHitbox)
+        genericDust = false;
+      } else if (this.projId === 301) {
+        paladinHammerShockwaveFx(game, this.x, this.y, this.w, this.h);
+        this.boomBox = 200;                                     // localAI[0]=num72(:15059-15063)
+        genericDust = false;
+      }
+      if (genericDust) {
+        game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
+      }
+      game.playSfx('dig', 1, this.cx, this.cy);                 // SoundID 0(:19666 共享尾)
+      // :18152-18160 其余:ai[0]=1 回收 + 速度=-lastVelocity（383 豁免取反 :18156）
       this.ai0 = 1; this.outT = 0;
       if (this.projId !== 383) { this.vx = -lvx; this.vy = -lvy; }
     }
@@ -1506,21 +1611,10 @@ export class AnchoredProj extends Entity {
   }
 
   /** Collision.HitTilesInACircle 近似(Collision.cs:3029-3075):圆内实格 effect-only
-   *  KillTile 尘——本仓 spawnDust 逐格冒烟,上限 32 格防刷屏(观感等价,登记近似) */
+   *  KillTile 尘——本仓 spawnDust 逐格冒烟,上限 32 格防刷屏(观感等价,登记近似);
+   *  实现收敛进模块级 hitTilesInACircleFx（262 回收冲击与 Boomerang 383 撞墙圈共用） */
   private hitTilesInCircle(game: GameHooks, cx: number, cy: number, r: number): void {
-    const st = game.world.store;
-    const t0x = Math.floor((cx - r) / TILE), t1x = Math.floor((cx + r) / TILE);
-    const t0y = Math.floor((cy - r) / TILE), t1y = Math.floor((cy + r) / TILE);
-    let n = 0;
-    for (let ty = t0y; ty <= t1y && n < 32; ty++) {
-      for (let tx = t0x; tx <= t1x && n < 32; tx++) {
-        if (!st.inBounds(tx, ty) || !st.isSolid(tx, ty)) continue;
-        const dx = tx * TILE + 8 - cx, dy = ty * TILE + 8 - cy;
-        if (dx * dx + dy * dy > r * r) continue;
-        game.spawnDust?.(tx * TILE, ty * TILE, TILE, TILE, 14, 0, 0, 150, null, 1);
-        n++;
-      }
-    }
+    hitTilesInACircleFx(game, cx, cy, r);
   }
 
   draw(r: Renderer, cam: Camera): void {
@@ -2702,7 +2796,7 @@ export class YoyoShotProj extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || 1;
-      e.hurt(dmg, kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
       // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
       // 蓝队二轮 F1/F5 裁决：四型 face 不再依赖调用点硬编码——
       //   1125/1130 usesLocalNPCImmunity(cd=-1) → 写 0 清全局窗（:10541/:10610）；
@@ -3360,13 +3454,43 @@ export class FlailProj extends Entity {
     if (p.facing !== dir) p.facing = dir;
   }
 
-  /** 中心格液体探测:type 省略=任一液体;1水/2岩浆/3蜂蜜/4微光(LIQUID_TYPE)。
-   *  近似 Collision.WetCollision/LavaCollision(:1575-1651)中心探盒:阈值 64(≈1/4 格)
-   *  近似原版表面偏移 (256-liquid)/16 的交叠判定(:1613-1616) */
+  /** 液体接触探测（2026-08-31 台账 B⑥ 清偿——原"中心格+liquid>64"近似退役）:
+   *  type 省略 = Collision.WetCollision（1458 Collision.cs:1575-1652,1456 同段 :1575 起）:
+   *    探针盒 = 弹体盒心 min(10,W) × min(H/2,H)（:1582-1593 num=10/num2=H÷2）;
+   *    扫描窗 = pos/16−1 .. (pos+W)/16+2 双轴;液体格表面带 y = j*16+(256−liq)/16
+   *    （:1610-1613 num5=(256−liq)/32×2）、可见深 = 16−trunc((256−liq)/32×2),
+   *    探针盒与之矩形相交即湿——任意液体>0 含岩浆（阈值不再 64,浅层/边缘浸没亦判湿,
+   *    消费点自动继承:948 入水转态/拖尾尘 !wet 门/case6 微光重力豁免）。
+   *  type==2 岩浆 = LavaCollision（:1657-1691）:【全弹盒】与同一表面带交叠（形状两分!）。
+   *  其余型（3 蜂蜜/4 微光）按 liquidType 细分沿用 Wet 探针形——vanilla 以 honey()/shimmer()
+   *  旗标在 Wet 扫描内附带判定(:1627-1646),本仓参数化等价承载。
+   *  登记缺口:Wet 的坡面支(:1632-1650 active 斜块上方液体算湿)未建模——store 无斜度旗。 */
   private inLiquid(game: GameHooks, type?: number): boolean {
     const st = game.world.store;
-    const i = st.idx(Math.floor((this.x + this.w / 2) / TILE), Math.floor((this.y + this.h / 2) / TILE));
-    return st.liquid[i] > 64 && (type === undefined || st.liquidType[i] === type);
+    const fullBox = type === 2;                       // LavaCollision 全盒档
+    const pw = fullBox ? this.w : Math.min(10, this.w);          // num:int 除
+    const ph = fullBox ? this.h : Math.trunc(this.h / 2);        // num2:min(H/2,H)=H/2
+    const px = fullBox ? this.x : this.x + this.w / 2 - Math.trunc(pw / 2);
+    const py = fullBox ? this.y : this.y + this.h / 2 - Math.trunc(ph / 2);
+    const t0x = Math.floor(this.x / TILE) - 1;
+    const t1x = Math.floor((this.x + this.w) / TILE) + 2;        // 循环 < 上界(原版同构)
+    const t0y = Math.floor(this.y / TILE) - 1;
+    const t1y = Math.floor((this.y + this.h) / TILE) + 2;
+    for (let tx = t0x; tx < t1x; tx++) {
+      for (let ty = t0y; ty < t1y; ty++) {
+        if (!st.inBounds(tx, ty)) continue;
+        const idx = st.idx(tx, ty);
+        const liq = st.liquid[idx];
+        if (liq <= 0) continue;
+        if (type !== undefined && type !== 2 && st.liquidType[idx] !== type) continue;
+        // 表面带（ Wet :1609-1616 / Lava :1672-1680 同式）
+        const surfY = ty * TILE + ((256 - liq) / 32) * 2;
+        const depth = 16 - Math.trunc(((256 - liq) / 32) * 2);
+        if (px + pw > tx * TILE && px < tx * TILE + TILE
+          && py + ph > surfY && py < surfY + depth) return true;
+      }
+    }
+    return false;
   }
 
   /** 757 Drippler 气泡 928(:41243-41246/:41256-41259):两过渡点当场掷出,
@@ -3501,8 +3625,33 @@ export class FlaironSpike extends Entity {
         this.vx = -this.vx; this.vy = -this.vy;
       } else {
         this.dead = true;
-        // Kill 爆尘(:69686-69700):20 颗火尘向外喷(音效 Item54 未提取,登记 GAP)
-        game.spawnParticles(cx0, cy0, '#FF9A3C', 20, 2.5, { life: 30, grav: -0.05 });
+        // Kill 爆尘（1458 P.cs:74184-74208;台账 C 批清偿——旧合成橙粒近似退役）:
+        // Item54 音 + 20× d212 真值尘——NewDust(20×20 盒)后落点归位到半径
+        // 10*scale 圆上、velocity=径向 × 原抖动长,num297<30 恒真分支;
+        // color = hslToRgb(hue 0.4+rand×0.2, sat0.9, lum0.5) 再 lerp 白 30%、
+        // scale0.7、noGravity。spawnDust 宿主缺省退回合成粒子（测试 mock 兼容）
+        game.playSfxFiles(['Item_54'], 1, cx0, cy0);
+        if (game.spawnDust) {
+          for (let i = 0; i < 20; i++) {
+            const d = game.spawnDust(cx0 - 10, cy0 - 10, 20, 20, 212, 0, 0, 0, null, this.ai1);
+            if (!d) break;
+            const len = Math.hypot(d.x - cx0, d.y - cy0) || 1;
+            const ux = (d.x - cx0) / len, uy = (d.y - cy0) / len;
+            const spdLen = Math.hypot(d.vx, d.vy);
+            d.x = cx0 + ux * 10 * this.ai1;
+            d.y = cy0 + uy * 10 * this.ai1;
+            d.vx = ux * spdLen; d.vy = uy * spdLen;
+            const hue = 0.4 + Math.random() * 0.2;
+            const col = hslToRgbColor(hue, 0.9, 0.5);
+            d.color = { r: Math.round(col.r + (255 - col.r) * 0.3),
+              g: Math.round(col.g + (255 - col.g) * 0.3),
+              b: Math.round(col.b + (255 - col.b) * 0.3), a: 255 };
+            d.noGravity = true;
+            d.scale = 0.7;
+          }
+        } else {
+          game.spawnParticles(cx0, cy0, '#FF9A3C', 20, 2.5, { life: 30, grav: -0.05 });
+        }
         return;
       }
     }
@@ -3584,11 +3733,31 @@ export class GrenadeProj extends Entity {
    *  每 update 2×尘 num13 + 2×尘 31 烟尾 */
   private static readonly FIRED_ROCKET = new Set([134, 137, 140, 143, 303,
     776, 780, 784, 787, 790, 793, 796, 799]);
-  /** 烟尾尘型号表（:47974-47990 num13）：普通火箭 6 烟雾 / 776·780 228 / 784·805
-   *  1/3 水 / 787·806 1/3 尘 35 / 790·807 1/3 尘 152 */
-  private static rocketTrailDust(projId: number): number {
+  /** Dust.dustWater() 水样分档（1458 Dust.cs:405-418,台账 C 批清偿——旧恒 33）：
+   *  Main.waterStyle {2→98,3→99,4→100,5→101,6→102,7→103,8→104,9→105,10→123,12→288,
+   *  其余→33}。waterStyle 读 renderer.waterStyle（GameHooks 无此面,探测缺省=33 缺省水） */
+  static waterStyleDust(game: GameHooks): number {
+    const ws = (game as unknown as { renderer?: { waterStyle?: number } }).renderer?.waterStyle ?? 0;
+    switch (ws) {
+      case 2: return 98;
+      case 3: return 99;
+      case 4: return 100;
+      case 5: return 101;
+      case 6: return 102;
+      case 7: return 103;
+      case 8: return 104;
+      case 9: return 105;
+      case 10: return 123;
+      case 12: return 288;
+      default: return 33;
+    }
+  }
+  /** 烟尾尘型号表（1458 :47974-47990 num13;1456 同段 :44255 起）：普通火箭 6 烟雾 /
+   *  776·780 228 / 784·805 1/3 水(=dustWater() 分档) / 787·806 1/3 尘 35 /
+   *  790·807 1/3 尘 152 */
+  private static rocketTrailDust(game: GameHooks, projId: number): number {
     if (projId === 776 || projId === 780) return 228;
-    if (projId === 784 || projId === 805) return Math.random() < 1 / 3 ? 6 : 33;   // Dust.dustWater() 默认水样 33（Dust.cs:405-423，水样分档未建模）
+    if (projId === 784 || projId === 805) return Math.random() < 1 / 3 ? 6 : GrenadeProj.waterStyleDust(game);
     if (projId === 787 || projId === 806) return Math.random() < 1 / 3 ? 6 : 35;
     if (projId === 790 || projId === 807) return Math.random() < 1 / 3 ? 6 : 152;
     return 6;
@@ -3724,7 +3893,7 @@ export class GrenadeProj extends Entity {
       // fadeIn 1+Next(5)×0.1、v×0.05）；出生点 = (x+3+n·v/2)−v/2、盒 (w−8,h−8)。
       // 曾 60% 掷 1 粒合成粒子 = 烟尾密度/形态与原版不符（备案遗留③）
       if (Math.abs(this.vx) >= 8 || Math.abs(this.vy) >= 8) {
-        const dust13 = GrenadeProj.rocketTrailDust(this.projId);
+        const dust13 = GrenadeProj.rocketTrailDust(game, this.projId);
         for (let n = 0; n < 2; n++) {
           const ox = n === 1 ? this.vx * 0.5 : 0;
           const oy = n === 1 ? this.vy * 0.5 : 0;
@@ -3945,19 +4114,78 @@ export class GrenadeProj extends Entity {
       }
       if (stuck) {
         this.vx = 0; this.vy = -0.2;                  // 贴附：抵消重力悬停（:44376-44377）
-        // 773 甲虫炸弹贴附段（AI_016 :47891-47907，1458 同锚）：本体朝向玩家姿态
-        // num9 = DirectionTo(player).ToRotation()+π/2、rotation.AngleLerp(num9,0.2)
-        // （AngleTowards 钳未建模登记）；1/3 掷贴附尘 59 活动感近似
+        // 773 甲虫炸弹贴附段（1458 P.cs:47869-47956;台账 C 批清偿——三段式真值尘 +
+        // AngleLerp(0.2)/AngleTowards(0.05) 双档姿态）。num9 = DirectionTo(player)
+        // .SafeNormalize(UnitX*direction).ToRotation()+π/2;vector2=(rot−π/2) 向量
         if (this.projId === 773) {
           const pc = game.player as unknown as { cx?: number; cy?: number };
-          const dxp = (pc.cx ?? this.cx) - this.cx, dyp = (pc.cy ?? this.cy) - this.cy;
+          const dxp = (pc.cx ?? this.cx + 1) - this.cx, dyp = (pc.cy ?? this.cy) - this.cy;
           const dl = Math.hypot(dxp, dyp);
-          if (dl > 0.001) {
-            const target = Math.atan2(dyp / dl, dxp / dl) + Math.PI / 2;
-            let diff = ((target - this.rot) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+          const num9 = dl > 0 ? Math.atan2(dyp / dl, dxp / dl) + Math.PI / 2 : Math.PI / 2;
+          const rotPrev = this.rot;
+          {   // rotation.AngleLerp(num9,0.2) → AngleTowards(num9,0.05) 双连(:47883-47886;
+              // Utils.cs:2174-2188——AngleTowards 按圆周最短路钳步快进收尾)
+            let diff = ((num9 - this.rot) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
             this.rot += diff * 0.2;
-            if (Math.random() < 1 / 3) {
-              game.spawnParticles?.(this.cx, this.cy, '#B49A72', 2, 1.2, { life: 18, damp: 0.92, size: 2 });
+            const wrapDiff = ((num9 - this.rot) % (Math.PI * 2) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+            const stepN = Math.max(-0.05, Math.min(0.05, wrapDiff));
+            this.rot += stepN;
+          }
+          const vecX = Math.cos(this.rot - Math.PI / 2), vecY = Math.sin(this.rot - Math.PI / 2);
+          const circ25 = () => ({ x: (Math.random() * 2 - 1) * 0.25, y: (Math.random() * 2 - 1) * 0.25 });
+          const placeAt = (d0: { x: number; y: number } | null | undefined,
+            px: number, py: number): void => {           // NewDustPerfect ≈ spawn 后定点覆写
+            if (!d0) return;
+            d0.x = px; d0.y = py;
+          };
+          if (dl > 0 && Math.floor(Math.random() * 3) === 0) {
+            const px = this.cx + vecX * 10, py = this.cy + vecY * 10;
+            const d = game.spawnDust?.(px, py, 5, 5, 59, vecX * 2, vecY * 2, 0, null, 2);
+            if (d) {
+              placeAt(d, px, py);
+              d.noGravity = true;
+              if (Math.floor(Math.random() * 3) === 0) {
+                const jx = circ25(), jy = circ25();
+                d.vx = (vecX * 2 + jx.x) * 1.5; d.vy = (vecY * 2 + jy.y) * 1.5;
+                d.noGravity = false; d.scale /= 2;
+              } else {
+                const jx = circ25(), jy = circ25();
+                d.vx = vecX * 2 + jx.x; d.vy = vecY * 2 + jy.y;
+              }
+            }
+          }
+          if (dl > 0 && Math.floor(Math.random() * 3) === 0) {
+            // 反侧贴附尘朝 GetScarabBombDigDirectionSnap8 八向(P.cs:71607-71621):
+            // DirTo(player) 先行,X²倍幅大于 Y → Y=0 反之亦然,其余 ±1 组合
+            const sxr = dxp > 0 ? -1 : 1, syr = dyp > 0 ? -1 : 1;   // (vector.X>0)?-1:+1——背向玩家
+            let snapX = sxr, snapY = syr;
+            if (Math.abs(dxp / (dl || 1)) > Math.abs(dyp / (dl || 1)) * 2) snapY = 0;
+            else if (Math.abs(dyp / (dl || 1)) > Math.abs(dxp / (dl || 1)) * 2) snapX = 0;
+            const px = this.cx - vecX * 10, py = this.cy - vecY * 10;
+            const d = game.spawnDust?.(px, py, 5, 5, 59, snapX * 1.5, snapY * 1.5, 0, null, 2);
+            if (d) { placeAt(d, px, py); d.noGravity = true; }
+          }
+          if (Math.floor(Math.random() * 15) === 0) {
+            const px = this.cx + vecX * 10, py = this.cy + vecY * 10;
+            const j = circ25();
+            const d = game.spawnDust?.(px, py, 5, 5, 88, vecX * 3 + j.x, vecY * 3 + j.y, 0, null, 2);
+            if (d) { placeAt(d, px, py); d.noGravity = true; }
+          }
+          {   // 七点椭圆环（:47936-47950）:rand30==0 或(转了向且 rand40==0)
+            const changed = rotPrev !== this.rot;
+            const flag2 = Math.floor(Math.random() * 30) === 0
+              || (changed && Math.floor(Math.random() * 40) === 0);
+            if (flag2) {
+              const base = Math.random() * Math.PI * 2;
+              for (let t = 0; t < 1; t += 1 / 7) {
+                const a0 = t * Math.PI * 2 + base;
+                let spX = Math.cos(a0), spY = Math.sin(a0) * 0.3;       // ×(1,0.3)
+                const ca = Math.cos(num9), sa = Math.sin(num9);         // RotatedBy(num9)
+                const rx = spX * ca - spY * sa, ry = spX * sa + spY * ca;
+                const px = this.cx + rx + vecX * 8, py = this.cy + ry + vecY * 8;
+                const d = game.spawnDust?.(px, py, 5, 5, 59, vecX * 3 + rx, vecY * 3 + ry);
+                if (d) { placeAt(d, px, py); d.noGravity = true; d.fadeIn = 1.6; }
+              }
             }
           }
         }
@@ -4168,9 +4396,21 @@ export class GlowstickProj extends Entity {
         if (hitX) this.vx = lastVx * -0.2;
         if (hitY) this.vy = lastVy > 1.5 ? lastVy * -0.2 : 0;
       } else if (this.projId >= 1089) {
-        // 彩虹：近全反射、最低 ±1 保底（cs:18279-18299）
-        if (hitX) this.vx = Math.abs(this.vx - lastVx) < 1 ? (lastVx < 0 ? -1 : 1) : -lastVx * 0.99;
-        if (hitY) this.vy = -lastVy * 0.99;
+        // 彩虹（1458 P.cs:19798-19821;1456 同段 :18279-18299,台账 B⑤ 清偿）：
+        //   X:v = −lastV×0.99;引擎拦轴先置 0 → |Δv|=|lastV|,<1（缓移贴墙）时改定速
+        //   ±1——符号按【翻转后的新速度】取(旧实现用翻转前符号=推回墙内);
+        //   Y:v = −lastV×0.99;特档 lastVy∈(0,1) 缓降触撞 → 定值 −1 上弹（防贴底蠕动,
+        //   旧实现缺该档）。
+        //   本仓 hitX/hitY 为旗标探测语义,v 拦轴尚未置零 → |Δv| 以 |lastV| 等价承载
+        if (hitX) {
+          const nvx = -lastVx * 0.99;
+          this.vx = Math.abs(lastVx) < 1 ? (nvx < 0 ? -1 : 1) : nvx;
+        }
+        if (hitY) {
+          const nvy = -lastVy * 0.99;
+          this.vy = (lastVy > 0 && lastVy < 1) ? -1
+            : Math.abs(lastVy) < 1 ? (nvy < 0 ? -1 : 1) : nvy;
+        }
       } else {
         // 473 矿工 / 515 弹力（默认档，cs:18314-18327）
         if (hitX) this.vx = lastVx * -0.5;
@@ -4532,6 +4772,12 @@ export class DaybreakFlare extends Entity {
   private rot = 0;
   /** timeLeft（SetDefaults 缺省 3600，:526；KillOldestJavelin 的"最老"序据） */
   private timeLeft = 3600;
+  /** oldPos 环（Kill 双环尘落点用:P.cs:73385-73396 num174∈{0,3}——unshift 语义
+   *  与原版 _oldPos 一致,[0]=上一帧） */
+  private oldPos: Array<{ x: number; y: number }> = [];
+  /** direction（尘速度 2.5×direction 用;飞行相跟随 vx 符号——AI_113 不更新 direction,
+   *  原版由 AutomaticallyChangesDirection 在 aiStyle3 段管辖外维持最后飞行朝向） */
+  private killDir = 1;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number) {
     super();
@@ -4541,8 +4787,12 @@ export class DaybreakFlare extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // oldPos 环入队（tick 起点快照 = 上一帧位）
+    const snap = { x: this.x, y: this.y };
     // extraUpdates=1：AI+移动每 tick 跑 2 次（Update :15336-15339 while 语义同 Boomerang）
     for (let i = 0; i < DaybreakFlare.RUNS && !this.dead; i++) this.step(game);
+    this.oldPos.unshift(snap);
+    if (this.oldPos.length > 10) this.oldPos.pop();
   }
 
   /** 单次 AI 迭代（AI_113_TargetSticker 一次） */
@@ -4557,6 +4807,7 @@ export class DaybreakFlare extends Entity {
         this.vy += 0.15;
       }
       this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;            // :38244-38248
+      this.killDir = Math.sign(this.vx) || this.killDir;
     } else {
       // ---- 附着相（:38242-38367）----
       this.localT += 1;                    // :38278
@@ -4599,7 +4850,7 @@ export class DaybreakFlare extends Entity {
       if (!(this.x < rx + rw && this.x + this.w > rx && this.y < ry + rh && this.y + this.h > ry)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      e.hurt(applyBannerDamageDealt(game, e, dmg), (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       // ★GC1 写方桥：镖/标枪附着族（598/636/614）走 Projectile.cs:14039-14051 顶层
       //  分派旁路——纯表返回无写档（附着节流全靠 per-javelin 表与上限管理），其余
       //  id（未来扩种）自动落缺省档。
@@ -4663,8 +4914,28 @@ export class DaybreakFlare extends Entity {
     this.detach();
     this.dead = true;
     game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
-    // Kill 尘爆近似（:68886-68897）；伴生 953 DaybreakExplosion 未实装——登记偏差
-    game.spawnParticles(this.cx, this.cy, '#FFB040', 4, 1.6, { life: 16 });
+    // ---- Kill 双环尘 + 953 爆炸（1458 P.cs:73384-73406;1456 同段 :68886-68912。
+    //      台账 A① 清偿:旧合成粒子近似退役;953 DaybreakExplosion 实装）----
+    const hasDust = typeof game.spawnDust === 'function';
+    for (let num174 = 0; num174 < 6; num174 += 3) {
+      const origin = this.oldPos[num174] ?? { x: this.x, y: this.y };
+      for (let num175 = 0; num175 < 5; num175++) {
+        const type = [6, 259, 158][Math.floor(Math.random() * 3)];
+        const d = game.spawnDust?.(origin.x, origin.y, this.w, this.h, type,
+          2.5 * this.killDir, -2.5, 200);
+        if (d) { d.vx *= 2.4; d.vy *= 2.4; d.scale += Math.random(); }
+        else if (!hasDust && num175 === 0) break;
+      }
+    }
+    if (!hasDust) {
+      // 合成宿主回落（tests/mock 无 spawnDust——观感层近似）
+      game.spawnParticles(this.cx, this.cy, '#FFB040', 4, 1.6, { life: 16 });
+    }
+    // owner==Main.myPlayer 门（:73401-73405）——本机恒真（netPuppet 在 fixedUpdate 头早退）
+    game.spawnFriendlyProj?.(new DaybreakExplosionProj(
+      this.cx, this.cy,
+      0.85 + Math.random() * 1.15,          // ai[1]（:73405 NextFloat 系数）
+      this.damage));                        // damage 满额/kb=10f/:AI_117 内 Item14+光
   }
 
   /** EntityManager 剔除兜底（world unload/测试直弃时摘层数） */
@@ -4682,5 +4953,124 @@ export class DaybreakFlare extends Entity {
   draw(r: Renderer, cam: Camera): void {
     // alpha 淡入（:38139-38146，SetDefaults alpha=255 起步）
     drawProj(r, cam, this, 636, this.rot, '#FFB040', 1 - this.alphaI / 255);
+  }
+}
+
+// ================= DaybreakExplosion 953（aiStyle 117,SetDefaults :8990-9001 +
+//  AI_117 扩盒 Damage :35095-35212;1456 :35090 区段。台账 A① 清偿:整缺→实装） =================
+
+/** 爆炸盒边长（AI_117 ai[0]==1 档:num879=52 × scale——scale = 出生 ai[1]+0.01;
+ *  出生系数 ∈ [0.85,2.0] → 盒边 [44..104]px 中心对称。导出供回归测试对拍）
+ *  projFrames[953]=5（Main.cs:8648）→ 存活 = 3×5 = 15 AI tick */
+export function daybreakExplosionSide(ai1: number): number {
+  return Math.trunc(52 * (ai1 + 0.01));
+}
+
+export class DaybreakExplosionProj extends Entity {
+  readonly projId = 953;
+  damage: number;
+  /** NewProjectile 第 7 参（P.cs:73405） */
+  knockback = 10;
+  dead = false;
+  w = 8; h = 8;                          // SetDefaults(:8991-8992)
+  /** flag58 光（:35125-35127 Lighting.AddLight(0.9,0.8,0.6) 每 AI 拍恒加） */
+  lightRGB: [number, number, number] | null = [0.9, 0.8, 0.6];
+  private ai0 = 0;                       // this.ai[0]++(:35102)
+  private ai1: number;                   // 缩放驱动(:35100 += 0.01)
+  private alphaI = 255;                  // alpha -= 63/AI 拍(:35118-35123)
+  private frame = 0;
+  private frameCounter = 0;
+  hidden = false;                        // frame≥5 → hide=true(:35113-35115)
+  private hitCd = new HitCooldown();
+  /** SetDefaults 无 melee/ranged/magic 类旗（:8990-9001）→ Damage() 不掷暴击、
+   *  不吃近战浸剂/parry——resolveProjClass 走 null 档,hitEnemies 内天然成立,
+   *  勿给本类补 critChance 字段 */
+
+  constructor(cx: number, cy: number, initAi1: number, damage: number) {
+    super();
+    this.x = cx - this.w / 2;            // NewProjectile 居中语义
+    this.y = cy - this.h / 2;
+    this.ai1 = initAi1;
+    this.damage = damage;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.ai1 += 0.01;                    // :35100
+    this.ai0++;                          // :35102
+    if (this.ai0 >= 3 * 5) { this.dead = true; return; }   // :35104-35106 Kill 门
+    if (++this.frameCounter >= 3) {      // :35107-35117
+      this.frameCounter = 0;
+      if (++this.frame >= 5) this.hidden = true;
+    }
+    this.alphaI = Math.max(0, this.alphaI - 63);           // :35118-35123
+    if (this.ai0 !== 1) return;          // :35129 扩盒/Damage/音/尘仅首拍
+    // ---- 首拍：扩盒 → Damage() → 音/尘 ----
+    const side = daybreakExplosionSide(this.ai1);
+    const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
+    this.w = side; this.h = side;        // width=(height=(int)(52×scale)) :35134-35139
+    this.x = cx0 - side / 2; this.y = cy0 - side / 2;
+    // usesLocalNPCImmunity + localNPCHitCooldown=80（:9000-9001）;Damage() 本拍单发
+    hitEnemies(this, game, this.hitCd, 80, 1);
+    game.playSfxFiles(['Item_14'], 1, cx0, cy0);           // SoundID.Item14(:35144)
+    // 尘群（:35146-35193）：Y 环 4×d31 + 10 组(d6 α200/d6 α100 fadeIn2.5)、X 环
+    // 5×d6 + 10×d31——原版 NewDust 后 position 定点覆写,本仓 spawn 后覆写 x/y 等价
+    const hasDust = typeof game.spawnDust === 'function';
+    const yRing = (): { x: number; y: number } => {
+      const th = Math.random() * Math.PI * 2 - Math.PI;    // RotatedByRandom(π)
+      const m = Math.random() * (side / 2);
+      return { x: cx0 - Math.sin(th) * m, y: cy0 + Math.cos(th) * m };   // UnitY.RotatedBy(th)×m
+    };
+    const xRing = (): { x: number; y: number } => {
+      const th = Math.random() * Math.PI * 2 - Math.PI;
+      const m = Math.random() * (side / 2);                // velocity.ToRotation()==0(v=0)
+      return { x: cx0 + Math.cos(th) * m, y: cy0 + Math.sin(th) * m };
+    };
+    for (let i = 0; i < 4 && hasDust; i++) {
+      const p = yRing();
+      const d = game.spawnDust?.(p.x, p.y, 0, 0, 31, 0, 0, 100, null, 1.5);
+      if (d) { d.x = p.x; d.y = p.y; }
+    }
+    for (let i = 0; i < 10 && hasDust; i++) {
+      const pa = yRing(), pb = yRing();
+      const da = game.spawnDust?.(pa.x, pa.y, 0, 0, 6, 0, 0, 200, null, 2.7);
+      if (da) { da.noGravity = true; da.vx *= 3; da.vy *= 3; }
+      const db = game.spawnDust?.(pb.x, pb.y, 0, 0, 6, 0, 0, 100, null, 1.5);
+      if (db) { db.noGravity = true; db.fadeIn = 2.5; db.vx *= 2; db.vy *= 2; }
+    }
+    for (let i = 0; i < 5 && hasDust; i++) {
+      const p = xRing();
+      const d = game.spawnDust?.(p.x, p.y, 0, 0, 6, 0, 0, 0, null, 2.7);
+      if (d) { d.noGravity = true; d.vx *= 3; d.vy *= 3; }
+    }
+    for (let i = 0; i < 10 && hasDust; i++) {
+      const p = xRing();
+      const d = game.spawnDust?.(p.x, p.y, 0, 0, 31, 0, 0, 0, null, 1.5);
+      if (d) { d.noGravity = true; d.vx *= 3; d.vy *= 3; }
+    }
+    if (!hasDust) {
+      game.spawnParticles(cx0, cy0, '#FFB040', 14, 2.4, { life: 18 });
+    }
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    if (this.hidden) return;             // hide=true 后本体不画,光/存活照常
+    // 5 帧竖条动画（projFrames=5;drawProj 无帧参,手绘——YoyoShotProj 1130 同法）
+    const ctx = r.ctx;
+    const img = projSprite(953);
+    if (!ctx || !img || !(img.width > 0)) {
+      drawProj(r, cam, this, 953, 0, '#FFB040', Math.max(0, 1 - this.alphaI / 255), this.w);
+      return;
+    }
+    const fh = img.height / 5;
+    ctx.save();
+    ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = Math.max(0, 1 - this.alphaI / 255);
+    const sw = img.width, sh = fh;
+    const ds = this.w / sw;
+    ctx.drawImage(img, 0, Math.round(this.frame * fh), sw, Math.round(fh),
+      -(sw * ds) / 2, -(fh * ds) / 2, sw * ds, fh * ds);
+    ctx.restore();
   }
 }

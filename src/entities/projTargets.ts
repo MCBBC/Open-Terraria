@@ -160,10 +160,10 @@ export function bannerDamageDealtSample(itemId: number, difficulty: number): num
  *  截断；banner 未激活 / 弹 id 无旗档 → 原值返回。靶点判据 = 受击实体 vanillaId。 */
 export function applyBannerDamageDealt(
   game: GameHooks,
-  target: { vanillaId?: number | null } | null | undefined,
+  target: unknown,
   dmg: number,
 ): number {
-  const vid = target?.vanillaId;
+  const vid = (target as { vanillaId?: number | null } | null | undefined)?.vanillaId;
   if (!vid || vid <= 0) return dmg;
   const g = game as unknown as { bannerNpcActive?: (id: number) => boolean; world?: never };
   if (!g.bannerNpcActive?.(vid)) return dmg;

@@ -39,7 +39,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { hitTownNpcs, playerCanHitEnemy } from './projTargets';
+import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 
 /** 玩家侧挂点（MonkOwner 同口径；cx/cy/facing 实时引用） */
@@ -59,7 +59,7 @@ type EnemyLike = {
 /** 近战弹命中结算（音/飘值=StrikeNPC 单点;fromPlayer=DPS 计） */
 function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
   kb: number, kdir: number, pen: number): void {
-  e.hurt(dmg, kdir * kb, 0, game, pen, crit, 0, true);
+  e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * kb, 0, game, pen, crit, 0, true);
 }
 
 /** 浸剂三链（melee=true 弹命中侧；MonkStaffFury.applyImbue 同式） */
