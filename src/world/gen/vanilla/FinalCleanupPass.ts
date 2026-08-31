@@ -2858,28 +2858,94 @@ function checkCactusSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): b
   }
   return false;
 }
-/** CheckLilyPad（cs:59227）：非水杀；换 frameY；上方有水再生一格 518 */
-/** CheckLilyPad ★IIIII99b 备案：原版含【上浮整株移动+自身失活+下沉一格+失配 KillTile】四支，
- *  本仓仅镜像「非水杀+地基帧修正+上浮前半」且漏 paint 拷贝与级联；IIIII99b 曾全量重写，
- *  终清理睡莲 13 格收敛但牵动 Piles(3696,566) 小堆掷流二次漂移 ⇒ 复归旧半臂，全量版未接 */
+/** CheckLilyPad 全量版（IIIII105 批落地；反编译逐句锚 1457 WorldGen.cs:59694-59788
+ *  ＝rigsrc 计数 cs:58967-59085，下同）——派发 TileFrameImportant case 518
+ *  （cs:86246，经 SquareTileFrame/TileFrame 级联与 FinalCleanup 全图重帧扫到达；
+ *  Liquid.DelWater 尾臂在 LiquidSim.checkLilyPad 运行时域独立承载）。
+ *  四支全镜像：【非水 KillTile / 上浮整株（新格写入+paint 拷贝+自身失活+
+ *  SquareTileFrame(resetFrame:false) 级联）/ 自身含水维持 / 下沉一格】
+ *  +【地基失配整杀 / 下方失配 KillTile】。
+ *  ★IIIII99b 曾试修全量后回退：当时树静性未证（后续 DFC/DFH 战役定性该批
+ *  「Piles(3696,566)/Stalac 二次漂移」为并行车道 WIP 混流伪影，XIII 章
+ *  『单次回归不可采信』），本批于静默窗以冻结基座反演重放重证后正式接线。 */
 function checkLilyPadSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   const i = st.idx(x, y);
-  if (st.liquid[i]! > 0 && st.liquidType[i] !== LIQUID_TYPE.WATER) { killTileGen(st, ctx, x, y); return; }
-  let ny = y;
-  while (ny < st.h - 50 && (!st.flags[st.idx(x, ny)] || !genSolidType(st.type[st.idx(x, ny)])
-    || TILE_DEFS[st.type[st.idx(x, ny)]]?.platform)) ny++;
-  const g = sheetAt2(st, x, ny);
-  let fy = -1;
-  if (g === 2 || g === 477) fy = 0;
-  else if (g === 109 || g === 116) fy = 18;
-  else if (g === 60) fy = 36;
-  if (fy >= 0) {
-    st.frameY[i] = fy;
+  // ① liquidType() != 0 → KillTile（cs 头门，与液量无关；本仓 +1 编码下位形即
+  //   LAVA/HONEY/SHIMMER——NONE/WATER 位形均放行）
+  const lt = st.liquidType[i];
+  if (lt !== LIQUID_TYPE.NONE && lt !== LIQUID_TYPE.WATER) { killTileGen(st, ctx, x, y); return; }
+  // ② 下潜找地基（active ∧ tileSolid ∧ 非 tileSolidTop 停；上界 maxY-50）
+  let num = y;
+  for (;;) {
+    if (!(num < st.h - 50)) break;                       // cs 循环限位支
+    const q = st.idx(x, num);
+    // ★C# 循环体 null 早退（Main.tile[x,num]==null return）：此处映射为越界即停，
+    //   底缘受 h-50 上界保护实践中不可达（catTail 同款守卫惯例）
+    if (!st.inBounds(x, num)) return;
+    if (!(!st.flags[q] || !genSolidType(st.type[q]) || !!TILE_DEFS[st.type[q]]?.platform)) break;
+    num++;
+  }
+  // ③ 地基 sheet → frameY 行表（{2,477}→0、{109,116}→18、{60}→36；147/1456 反编译
+  //   有 `type==109||type==109||type==116` 重言式，语义≡单组 {109,116}）
+  const sh = SWEEP_SHEET[st.type[st.idx(x, num)]];
+  let num2 = -1;
+  if (sh === 2 || sh === 477) num2 = 0;
+  else if (sh === 109 || sh === 116) num2 = 18;
+  else if (sh === 60) num2 = 36;
+  if (num2 < 0) { killTileGen(st, ctx, x, y); return; }  // 地基失配 → 整杀（else 支）
+  if (st.frameY[i] !== num2) st.frameY[i] = num2;         // frameY 归位（带 net 发送，gen 免）
+  // ④ 上浮整株：上方空且含水 → 整垫上移（half/slope 清零 + paint 拷贝）
+  if (st.inBounds(x, y - 1)) {
     const up = st.idx(x, y - 1);
     if (st.liquid[up]! > 0 && !st.flags[up]) {
       st.setTileSilent(x, y - 1, sid(518), st.frameX[i]!, st.frameY[i]!);
+      st.half[up] = 0; st.slope[up] = 0;
+      st.paint[up] = st.paint[i];                        // color(cur.color())（cs 逐字段）
+      st.flags[i] = 0; st.type[i] = 0;                   // 自身失活（paint/half/slope/wall 保留=原版置 active(false)+type=0）
+      squareTileFrameAtFalse(st, ctx, x, y - 1);         // SquareTileFrame(x,y-1,false)
+      return;
+    }
+  } else {
+    return;                                              // 顶缘不设垫（C# 此处 NRE 不可达，守卫防御化）
+  }
+  if (st.liquid[i] !== 0) return;                        // 自格含水维持（⑤维持原位）
+  // ⑥ 下沉一格：GetTileSafely(x,y+1) 非活跃 → 下移（写序同④）
+  const dn = st.idx(x, y + 1), dAct = !!(st.inBounds(x, y + 1) && st.flags[dn]);
+  if (!dAct) {
+    st.setTileSilent(x, y + 1, sid(518), st.frameX[i], st.frameY[i]);
+    st.half[dn] = 0; st.slope[dn] = 0;
+    st.paint[dn] = st.paint[i];
+    st.flags[i] = 0; st.type[i] = 0;
+    squareTileFrameAtFalse(st, ctx, x, y + 1);
+    return;
+  }
+  // ⑦ 下方失配杀：tileSafely.active() && !Platforms[t] && (!tileSolid[t] ||
+  //   tileSolidTop[t])（cs 逐字面）——Platforms=TileID.Sets.Platforms{19,427,435-439}
+  //   （Main.cs 连接帧表两处同源）；tileSolidTop 以 defs.platform 近似
+  //   （catTail 等 gen 扫既定约定；solid∧solidTop 家族 Main.cs 手赋仅 239/380，
+  //   二者入 defs 后并入 platform 位族）；tileSolid 走 genSolid 覆写表
+  if (st.inBounds(x, y + 1)) {
+    const bt = st.type[dn];
+    if (!PLATFORMS.has(SWEEP_SHEET[bt])
+      && (!genSolidType(bt) || !!TILE_DEFS[bt]?.platform)) {
+      killTileGen(st, ctx, x, y);
     }
   }
+}
+
+/** SquareTileFrame(i,j,resetFrame:false)（cs:80924 九宫；TileFrame 缺省参=false 实证
+ *  cs:82605 ⇒ 八邻本就走 resetFrame:false，仅中心受实参——睡莲移动臂落点级联专用，
+ *  与 squareTileFrame(中心恒 true,178 掷门注释) 唯一差异在中心复位旗 */
+function squareTileFrameAtFalse(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  tileFrameGen(st, ctx, x - 1, y - 1, false);
+  tileFrameGen(st, ctx, x - 1, y, false);
+  tileFrameGen(st, ctx, x - 1, y + 1, false);
+  tileFrameGen(st, ctx, x, y - 1, false);
+  tileFrameGen(st, ctx, x, y, false);
+  tileFrameGen(st, ctx, x, y + 1, false);
+  tileFrameGen(st, ctx, x + 1, y - 1, false);
+  tileFrameGen(st, ctx, x + 1, y, false);
+  tileFrameGen(st, ctx, x + 1, y + 1, false);
 }
 
 

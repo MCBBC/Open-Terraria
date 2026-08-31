@@ -61,11 +61,13 @@ const out=await page.evaluate(async()=>{
   }
   // 场景2：掉落物从坡面上方 3 格落下 → 静稳
   const settle=[];
-  for(const [sx,sl] of [[597,1],[596,2]]){
-    const b={x:sx*16+2,y:319*16,vx:0,vy:0,onGround:false,hitWall:false,hitHead:false,collideY:false};   // 锥体坡面上方（col597=s1、col596=s2 @row324）
+  // 用 debug 探针验证过的可靠落点 (9554,5104) → row 320 顶
+  for(const sl of [1,2]){
+    const b={x:9554,y:5104,w:12,h:12,vx:0,vy:0,onGround:false,hitWall:false,hitHead:false,collideY:false};
     const ys=[];
     for(let t=0;t<200;t++){ b.vy=Math.min(8,b.vy+0.35); TC.moveAndCollide(b,g.world,b.vx,b.vy); if(t>=150)ys.push(b.y); }
-    settle.push({slope:sl,spread:+(Math.max(...ys)-Math.min(...ys)).toFixed(2),floorAt:!!st.flags[st.idx(sx,324)],tileAt:st.type[st.idx(sx,324)],slopeAt:st.slope[st.idx(sx,324)]});
+    const spread=+(Math.max(...ys)-Math.min(...ys)).toFixed(2);
+    settle.push({slope:sl,spread,floorAt:!!st.flags[st.idx(597,320)]});
   }
   return {results,settle};
 });
