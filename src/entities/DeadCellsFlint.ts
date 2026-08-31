@@ -40,6 +40,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 // Spawn_DeadCellsFlint 编排本体（收编池;L5 批 2026-08-31——本地直生 + broadcast 上行同用）
 import { deadCellsFlintFx } from '../fx/orchestraFx';
@@ -59,10 +60,19 @@ type EnemyLike = {
   hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
 };
 
-/** 近战弹命中结算（音/飘值=StrikeNPC 单点;fromPlayer=DPS 计） */
+/** 近战弹命中结算（音/飘值=StrikeNPC 单点;fromPlayer=DPS 计）
+ *  ★F3 接线（蓝队四轮）：火石枪族弹（1043 斩击波/1041 尖刺，数据面 melee）→
+ *  焰爆石/拍击石双支（Projectile.cs:13439-13446）在本共享出口单点接线 */
 function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
-  kb: number, kdir: number, pen: number): void {
-  e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * kb, 0, game, pen, crit, 0, true);
+  kb: number, kdir: number, pen: number,
+  host?: { projId: number; x: number; y: number; w: number; h: number }): void {
+  const snapBonusFlint = projectileSnapStrikeBonus(game,
+    { projId: host?.projId }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+    { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+      targeterBox: host ? { x: host.x, y: host.y, w: host.w, h: host.h } : undefined });
+  e.hurt(applyBannerDamageDealt(game, e, dmg)
+    + (snapBonusFlint ? Math.trunc(snapBonusFlint * (crit ? 2 : 1)) : 0),
+    kdir * kb, 0, game, pen, crit, 0, true);
 }
 
 /** 浸剂三链（melee=true 弹命中侧；MonkStaffFury.applyImbue 同式） */
@@ -356,7 +366,7 @@ export class FlintWaveProj extends Entity {
       const dmg = crit ? this.damage * 2 : this.damage;
       // 击退=远离玩家中心（:13664-13666 aiStyle 188-191 特列）
       const kdir = this.owner.cx < ecx ? 1 : -1;
-      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen);
+      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
       applyImbue(game, e);
       if (this.hits >= 2) break;                                // penetrate=2 上限
     }
@@ -497,7 +507,7 @@ export class FlintSpikeProj extends Entity {
       // 击退=远离玩家中心（1041 属 AI_190 特列? 否——1041 走默认弹体向;
       // 但 EmitSpikes 弹速自带出手向,原版 num40 缺省=弹体速度向投影。取速度 x 向）
       const kdir = Math.sign(this.vx) || 1;
-      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen);
+      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
       applyImbue(game, e);
       if (this.hits >= 4) break;                      // penetrate=4 上限
     }

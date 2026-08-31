@@ -6,6 +6,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { canBeClearedDuringGenerationDual } from './DungeonStyles1457';
 
 const MUD = TILE_BY_KEY['mud']!;
 const CLAY = TILE_BY_KEY['clay']!;
@@ -295,6 +296,11 @@ export function tileRunner(
         const dist = Math.abs(x - px) + Math.abs(y - py);
         const trDraw = rng.int(-10, 10);
         if (trDbg) iRolls++;
+        // ★IIIII121：逐格决策仪（缺省零开销）
+        {
+          const fc = (globalThis as { __swTrCell?: (seq: number, o2: Record<string, number>) => void }).__swTrCell;
+          if (fc) fc((globalThis as { __swTrRunSeq?: { v: number } }).__swTrRunSeq?.v ?? -1, { ti, x, y, px, py, num1, dist, draw: trDraw });
+        }
         if (dist >= strengthIn * 0.5 * (1 + trDraw * 0.015)) continue;
         // 丛林泥墙(原版 mudWall 分支:浅层墙 15,深层墙 64,均避让四邻;落墙走
         // PlaceWall 语义=仅空墙可落+成功必掷 1 颗 Next(0,3))
@@ -348,7 +354,10 @@ export function tileRunner(
             // Main.tileStone[type](放置类型是宝石族)且目标非石头 → flag4
             flag4 = STONE_PLACED.has(type) && cur !== T.STONE;
             // CanBeClearedDuringGeneration:false 的 tile 被覆盖时恒 flag4
-            if (NOT_CLEARABLE.has(cur)) flag4 = true;
+            // ★IIIII121：动态支（WorldGen.cs:81453-81460）——dualDungeons 世界在
+            //   potential bounds 内的 isDungeonTile 表成员不可清（如 Jungle 砖=泥59,
+            //   Silt 脉/Ores 在界域内改写泥即从这来）。type 以 vanilla sheet 判定。
+            if (NOT_CLEARABLE.has(cur) || !canBeClearedDuringGenerationDual(TILE_DEFS[cur]?.vanilla?.sheet ?? -1, x, y)) flag4 = true;
             if (cur === T.STONE) {
               // 泥不替换近地表的石头(±50 抖动)
               if (type === MUD) {
@@ -375,6 +384,11 @@ export function tileRunner(
             ty[ti] = type;
             // cs:77338-77341:flag = type>=0 && !SaveSlopes[type] → 写后 ClearSlope()
             if (!SAVE_SLOPES[type]) { thalf[ti] = 0; tslope[ti] = 0; }
+            // ★IIIII121：写迹仪（缺省零开销，探针专项）
+            {
+              const fw = (globalThis as { __swTrWrite?: (runnerSeq: number, ti: number) => void }).__swTrWrite;
+              if (fw) fw((globalThis as { __swTrRunSeq?: { v: number } }).__swTrRunSeq?.v ?? -1, ti);
+            }
           }
           if (addTile) {
             tf[ti] = 1;

@@ -62,27 +62,69 @@ ctx.onmessage = async (e) => {
       return;
     }
     if (req.type === 'generate') {
+      // ★预览抓帧与进度锚点同步（2026-08-31）：共享一个 400ms 冷却钟——
+      //   槽边界帧（onWorldPartial）与进度里程碑帧（换窗 / Δp≥1% / 完成）都过同一
+      //   闸门 ⇒ 总量≤2.5fps。相对旧实现（每槽必出一帧、长 pass 冻结数秒）：
+      //   总帧数持平略降，长 pass 内补 5-10 帧（Jungle/Desert/Underworld 逐段啃出）。
+      //   世界引用在首个 partial 即捕获——生成期全程同一实例，中途变更引用只会更晚出现。
+      //   进度驱动的里程碑帧无已完成槽可归属 → 标 passIndex=lastSlot+1/沿用最后槽名
+      //   （消费端 GenWorldPreview 不读这两个字段，仅存档语义）。
+      let latestWorld: import('../world/World').World | null = null;
+      let lastSlot = -1;
+      let lastName = '';
+      let lastProgLabel: string | undefined = undefined;
+      let lastShotP = -1;                       // 最近一次里程碑帧的总进度基线
+      let nextShotAt = 0;                       // 共享冷却钟（Date.now() 域）
+      const PREVIEW_MIN_MS = 400;
+      const PREVIEW_MIN_DP = 0.01;
+      const shootIfDue = (): boolean => {
+        if (!latestWorld) return false;
+        const now = Date.now();
+        if (now < nextShotAt) return false;
+        nextShotAt = now + PREVIEW_MIN_MS;
+        // 背景分层上下文（对齐游戏内小地图；生成早期世界面未定 → 兜底浅蓝）
+        const bg = latestWorld.groundLevel > 0
+          ? { groundLevel: latestWorld.groundLevel, rockLevel: latestWorld.rockLevel }
+          : undefined;
+        const f = renderPreviewBitmap(latestWorld.store, 1024, bg);
+        ctx.postMessage(
+          { id: req.id, type: 'preview', passIndex: Math.max(0, lastSlot), passName: lastName, width: f.width, height: f.height, rgba: f.rgba.buffer as ArrayBuffer },
+          [f.rgba.buffer],
+        );
+        return true;
+      };
       const world = await generateWorld(
         {
           width: req.cfg.width, height: req.cfg.height, size: req.cfg.size, seedText: req.cfg.seedText,
           name: req.cfg.name, evil: req.cfg.evil, seedFlags: req.cfg.seedFlags,
-          // 生成期实时预览：worker 侧降采样 RGBA → transfer（替代旧 onWorldPartial 整 world 回调）
+          // 槽边界帧：捕获世界引用 + 过共享冷却闸（不再是"每槽必出"，被闸削掉的
+          // 突发由同节拍的里程碑帧就近补位）
           onWorldPartial: req.cfg.preview
             ? (w, passIndex, passName) => {
-              // 背景分层上下文（对齐游戏内小地图；生成早期世界面未定 → 兜底浅蓝）
-              const bg = w.groundLevel > 0
-                ? { groundLevel: w.groundLevel, rockLevel: w.rockLevel }
-                : undefined;
-              const f = renderPreviewBitmap(w.store, 1024, bg);
-              ctx.postMessage(
-                { id: req.id, type: 'preview', passIndex, passName, width: f.width, height: f.height, rgba: f.rgba.buffer as ArrayBuffer },
-                [f.rgba.buffer],
-              );
+              latestWorld = w;
+              lastSlot = passIndex;
+              lastName = passName;
+              shootIfDue();
             }
             : undefined,
         },
-        (label, p, local) => ctx.postMessage(
-          { id: req.id, type: 'progress', phase: 'generate', ...(label !== undefined ? { label } : {}), p, local }),
+        (label, p, local) => {
+          ctx.postMessage(
+            { id: req.id, type: 'progress', phase: 'generate', ...(label !== undefined ? { label } : {}), p, local });
+          if (!req.cfg.preview) return;
+          // 里程碑判定（与限流后的进度流同源节奏）：
+          //  - 换窗（label 变化=beginVan 有词条跨边界）
+          //  - Δp≥1%（加权总进度实质推进的粘滞段快照）
+          //  - p≥1（'完成' force 终帧保证成图一定出片）
+          const boundary = label !== undefined && label !== lastProgLabel;
+          if (lastProgLabel === undefined && label === undefined) return; // 首条粘滞前不判定
+          lastProgLabel = label !== undefined ? label : lastProgLabel;
+          const now = Date.now();
+          if (now < nextShotAt) return;
+          if (boundary || p >= 1 || Math.abs(p - lastShotP) >= PREVIEW_MIN_DP) {
+            if (shootIfDue()) lastShotP = p;
+          }
+        },
       );
       // 二次沉降(cs:21051)自 2026-08-17 起归位 generateWorld 管线内（蜂巢幼虫之后、
       // 仙人掌珊瑚之前）——此处不再生成后补跑（曾晚 8 个 pass：#98 液体门读到未沉水体）

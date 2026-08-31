@@ -3,7 +3,8 @@
 // :22130-22247）行为回归——操控转向 / 松手语义 / 旋转角 / 穿透 / 持按连发。
 import { describe, it, expect, afterEach } from 'vitest';
 import { World } from '../src/world/World';
-import { MagicMissileProj, StarfuryStar, FlyingKnifeProj } from '../src/entities/MissileProj';
+import { MagicMissileProj, StarfuryStar, FlyingKnifeProj,
+  limitPointToPlayerReachableArea } from '../src/entities/MissileProj';
 
 /** 本文件构造的导弹登记表——afterEach 统一出链（清模块级 ALIVE） */
 const made: MagicMissileProj[] = [];
@@ -393,24 +394,27 @@ describe('FlyingKnifeProj 491（AI_009_MagicMissiles_Old :40753-40910，入口 :
 
   afterEach(() => { knives.length = 0; });   // 飞刀无模块级登记表，纯对象弃置即可
 
-  it('远距操控：速度 4:1 朝光标方向收敛、上限 20（:40794-40817 num=20 :40764）', () => {
+  it('远距操控：速度 4:1 朝【钳后】光标方向收敛、上限 20（:40794-40817 num=20 :40764；A6 联改：光标先经 LimitPointToPlayerReachableArea）', () => {
     const { hooks } = makeHooks();
-    const k = mkKnife(hooks, { x: 20 * 16, y: 40 * 16, vx: 0, vy: 0 });
+    const p = (hooks as unknown as { player: { cx: number; cy: number } }).player;
+    const aimRaw = { x: 80 * 16, y: 40 * 16 };
+    const k = mkKnife(hooks, { x: 20 * 16, y: 40 * 16, vx: 0, vy: 0,
+      aim: () => ({ ...aimRaw }) });
+    // oracle：消费侧首拍就以钳后点为目标——以导出 helper 复算原版可达区目标
+    const lim = limitPointToPlayerReachableArea(aimRaw.x, aimRaw.y, p.cx, p.cy, 1600, 1600);
+    const cx0 = k.cx, cy0 = k.cy;                 // 首拍转向前的刀心
+    const dx0 = lim[0] - cx0, dy0 = lim[1] - cy0;
+    const dd = Math.hypot(dx0, dy0);
+    expect(dd).toBeGreaterThan(100);              // 方向支成立前提
     fly(k, hooks, 1);
-    // 中心 (333,653)→光标 (1280,640)：d≈947>100 → 方向支，v=(0×4+dir×20)/5
-    expect(Math.hypot(k.vx, k.vy)).toBeCloseTo(4.0, 3);
-    expect(k.vx).toBeGreaterThan(0);
-    fly(k, hooks, 4);   // 再 4 拍 → v=(4v+20)/5 迭代至 ≈13.45
-    expect(Math.hypot(k.vx, k.vy)).toBeCloseTo(13.4464, 2);
-    // 长直线未进 <100 档：单调爬到 20 上限（:40783-40787 钳位）
-    const far = mkKnife(hooks, { x: 10 * 16, y: 40 * 16, vx: 0, vy: 0 });
-    fly(far, hooks, 40);   // ≈760px 进度，距光标仍 >300 → 恒处方向支
-    expect(Math.hypot(far.vx, far.vy)).toBeGreaterThan(19.9);
-    expect(far.vx).toBeGreaterThan(0);
-    // 近距悬停轨道：转向混叠会让瞬时速率回落，但钳位与轨道半径必须成立
-    fly(k, hooks, 60);
+    // v=(vel×4+dir×20)/5，初速 0 → dir×4：方向与量级都以钳后点为 oracle
+    expect(k.vx).toBeCloseTo((dx0 / dd * 20) / 5, 3);
+    expect(k.vy).toBeCloseTo((dy0 / dd * 20) / 5, 3);
+    // 持续 120 拍：速率顶在 20 上限内、刀整体逼近钳后点（刹车环围绕可达区面）
+    fly(k, hooks, 119);
     expect(Math.hypot(k.vx, k.vy)).toBeLessThanOrEqual(20.001);
-    expect(Math.hypot(k.cx - 80 * 16, k.cy - 40 * 16)).toBeLessThan(300);
+    const dAfter = Math.hypot(lim[0] - k.cx, lim[1] - k.cy);
+    expect(dAfter).toBeLessThan(dd);
   });
 
   it('近距 <100px：只沿当前方向 ×1.1 加速并自锁 ai[0]=−10（:40778-40793）', () => {
@@ -448,12 +452,13 @@ describe('FlyingKnifeProj 491（AI_009_MagicMissiles_Old :40753-40910，入口 :
     expect(k.dead).toBe(true);           // 回手 20px 内消失（:40873-40876）
   });
 
-  it('撞块：命中轴 lastVelocity 取反 + 操控态自锁 ai[0]=−10（:17053-17066）', () => {
+  it('撞块：命中轴 lastVelocity 取反 + 操控态自锁 ai[0]=−10（:17053-17066；松开 channel 排除操控转向耦合，A6 后小世界盒收缩失真与旧断言解耦）', () => {
     const { hooks, st } = makeHooks();
     for (let y = 39; y <= 41; y++) st.setTileSilent(60, y, 1);   // 60 列三格墙
-    const k = mkKnife(hooks, { x: 55 * 16, y: 40 * 16, vx: 6, vy: 0 });
-    // 逐拍捕捉首次反弹：vx 由正翻负的那拍（原版 AI 先行改写速度、碰撞用改写后的
-    // lastVelocity 取反——量级保持，非衰减反弹）
+    const k = mkKnife(hooks, { x: 55 * 16, y: 40 * 16, vx: 6, vy: 0,
+      channel: () => false });           // 松手后 ai0=1 回收但 localT≤15 不穿墙→纯弹式撞墙
+    // 逐拍捕捉首次反弹：vx 由正翻负的那拍（原版碰撞用 lastVelocity 取反——
+    // 量级不变,非衰减反弹）
     let flipped = false, locked = false, bounceVx = 0;
     for (let t = 0; t < 40 && !(flipped && locked); t++) {
       const lvx = k.vx;
@@ -461,16 +466,35 @@ describe('FlyingKnifeProj 491（AI_009_MagicMissiles_Old :40753-40910，入口 :
       if (!flipped && lvx > 0 && k.vx < 0) {
         flipped = true;
         bounceVx = k.vx;
-        // steer 当拍把速度朝 20 推（lvx→≈lvx×1.12 上限 20），反弹 = 该值取反
-        expect(Math.abs(k.vx)).toBeGreaterThan(lvx);
-        expect(Math.abs(k.vx)).toBeLessThanOrEqual(20.001);
-        expect(k['ai0']).toBe(-10);                   // 操控态撞墙自锁
+        // 无转向改写：反弹值 = 入射值原样取反
+        expect(Math.abs(k.vx)).toBeCloseTo(lvx, 5);
+        expect(k['ai0']).toBe(1);                     // 已松手态（不再有操控自锁）
       }
-      if (k['ai0'] === -10) locked = true;
+      if (Math.abs(k['ai0'] as number) === 10) locked = true;
     }
     expect(flipped).toBe(true);
     expect(bounceVx).toBeLessThan(0);
     expect(k.dead).toBe(false);          // 491 撞块反弹不灭
+  });
+
+  it('操控态撞墙自锁：channel 中撞块 → 反射翻向与自锁计数均出现（:17053-17066）', () => {
+    const { hooks, st } = makeHooks();
+    for (let y = 39; y <= 41; y++) st.setTileSilent(60, y, 1);
+    const k = mkKnife(hooks, { x: 56 * 16, y: 40 * 16, vx: 8, vy: 0,
+      aim: () => ({ x: 100 * 16, y: 41 * 16 }),
+      channel: () => true });
+    let flipped = false, everLock = false;
+    for (let t = 0; t < 120 && !(flipped && everLock); t++) {
+      const lvx = k.vx;
+      k.fixedUpdate(1 / 60, hooks);
+      if (!flipped && lvx > 0 && k.vx < 0) {
+        flipped = true;
+        expect(Math.abs(k.vx)).toBeLessThanOrEqual(20.001);   // steer 推至 ≤20 再取反
+      }
+      if ((k['ai0'] ?? 0) === -10) everLock = true;           // 撞墙/刹车任一路径入自锁
+    }
+    expect(flipped).toBe(true);
+    expect(everLock).toBe(true);
   });
 
   it('穿透 −1：同敌 10t 冷却后可再中（immune[owner]=10 :13189-13192）', () => {

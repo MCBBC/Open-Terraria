@@ -24,6 +24,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { hitTownNpcs, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import type { VDust } from '../fx/VanillaDust';
@@ -71,10 +72,19 @@ type EnemyLike = {
 
 /** 近战弹通用命中结算（音效 + hurt——四型号均无 StatusNPC 表项；浸剂三链仅
  *  707 持械主攻在调用点接，708/709/1110 原版同为 melee 但经 NewProjectile 链
- *  的 StatusNPC 走 Projectile.Damage 同门——此处统一接齐） */
+ *  的 StatusNPC 走 Projectile.Damage 同门——此处统一接齐）
+ *  ★F3 接线（蓝队四轮）：四型号（707/708/709/1110）数据面 melee → 焰爆石/拍击石
+ *  双支（Projectile.cs:13439-13446）在本共享出口单点接线；加伤在 banner 外随暴击并入 */
 function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
-  kb: number, kdir: number, pen: number): void {
-  e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * kb, 0, game, pen, crit, 0, true);   // ★F1 旗乘区;音/飘值=StrikeNPC 单点;fromPlayer=DPS 计
+  kb: number, kdir: number, pen: number,
+  host?: { projId: number; x: number; y: number; w: number; h: number }): void {
+  const snapBonusFury = projectileSnapStrikeBonus(game,
+    { projId: host?.projId }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+    { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+      targeterBox: host ? { x: host.x, y: host.y, w: host.w, h: host.h } : undefined });
+  e.hurt(applyBannerDamageDealt(game, e, dmg)
+    + (snapBonusFury ? Math.trunc(snapBonusFury * (crit ? 2 : 1)) : 0),
+    kdir * kb, 0, game, pen, crit, 0, true);   // ★F1 旗乘区;音/飘值=StrikeNPC 单点;fromPlayer=DPS 计
 }
 
 /** 尘 31 火花（NewDustDirect box 抖动 + DirectionTo 反溅——707/709 通用近似） */
@@ -229,7 +239,7 @@ export class SkyDragonSpin extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || this.dir;
-      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen);
+      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
       // 浸剂三链（netMode/测试态 player 可为 null——null 门跳过，原版单机恒有主）
       const pl = game.player as unknown as { buffs?: { has: (b: never) => boolean }; equipStats?: { frostBurn: boolean; magmaStone: boolean } } | null;
       if (pl?.buffs) applyMeleeImbue(pl.buffs, e as unknown as Record<string, number>,
@@ -366,7 +376,7 @@ export class SkyDragonSwing extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       hurtEnemy(game, e, dmg, crit, this.knockback,
-        Math.sign((e.x + e.w / 2) - this.cx) || this.owner.facing, this.armorPen);
+        Math.sign((e.x + e.w / 2) - this.cx) || this.owner.facing, this.armorPen, this);
     }
     if (at <= 2) { this.dead = true; }               // :66643-66647（anim≤2 Kill/reuseDelay2）
   }
@@ -450,7 +460,7 @@ export class SkyDragonShot extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      hurtEnemy(game, e, dmg, crit, this.knockback, Math.sign(this.vx) || 1, this.armorPen);
+      hurtEnemy(game, e, dmg, crit, this.knockback, Math.sign(this.vx) || 1, this.armorPen, this);
       this.explode(game);                            // penetrate 1 → 命中即 Kill
       return;
     }
@@ -585,7 +595,7 @@ export class SkyDragonCircle extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       hurtEnemy(game, e, dmg, crit, this.knockback,
-        Math.sign((e.x + e.w / 2) - this.cx0) || 1, this.armorPen);
+        Math.sign((e.x + e.w / 2) - this.cx0) || 1, this.armorPen, this);
     }
   }
 

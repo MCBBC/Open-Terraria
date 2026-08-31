@@ -524,7 +524,7 @@ export class TrapShot extends Entity {
           // 数据面无类旗弹恒双拒）+ 返回 num14 加伤并入实伤参
           const snapBonusTrap = projectileSnapStrikeBonus(game, { projId: trapProjId },
             e.x + e.w / 2, e.y + e.h / 2, (e as unknown as { id?: number }).id ?? -1,
-            { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+            { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
           // 击退方向 = 弹 direction（Projectile.cs:13652 num40=direction,水平 ±1）
           e.hurt(applyBannerDamageDealt(game, e, this.damage)
             + (snapBonusTrap ? Math.trunc(snapBonusTrap * 1) : 0),
@@ -628,7 +628,7 @@ export class TrapShot extends Entity {
       if (blProjId !== undefined) {
         snapBonusBlast = projectileSnapStrikeBonus(game, { projId: blProjId },
           e.x + e.w / 2, e.y + e.h / 2, (e as unknown as { id?: number }).id ?? -1,
-          { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
+          { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
       }
       e.hurt(applyBannerDamageDealt(game, e, this.damage)
         + (snapBonusBlast ? Math.trunc(snapBonusBlast * 1) : 0),

@@ -19,6 +19,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;

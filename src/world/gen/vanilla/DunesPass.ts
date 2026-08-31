@@ -10,7 +10,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY } from '../../../data/tiles';
-import { dualDungeonState, refreshDualPotentialBounds } from './DungeonStyles1457'; // ★IIIII88 双地牢装配
+import { dualDungeonState, refreshDualPotentialBounds, setupDualDungeonTileProtection } from './DungeonStyles1457'; // ★IIIII88 双地牢装配
 
 const SAND = TILE_BY_KEY['sand']!;
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
@@ -117,6 +117,10 @@ export function runDunesPass(st: TileStore, rng: RNG, gs: GenState, onIter?: (i:
     d0.entSeed = gs.dungeonEntSeed ?? -1;
     refreshDualPotentialBounds(w, h, gs.worldSurface, gs.genWorldSurfaceHigh,
       !!gs.seedFlags.drunkWorld || !!gs.seedFlags.noSurface);
+    // ★IIIII121：CanBeClearedDuringGeneration 动态支 isDungeonTile 合并表
+    //  （SetupDungeonGenVarVariables 尾段 crawler :131-176;界域 Create 同处零掷）——
+    //  Dunes 头即绪,Silt(123 脉)/OresAndShinies 等生成期清块面开始消费。
+    setupDualDungeonTileProtection(gs.dungeonTheme, d1.theme, !!gs.crimson);
   }
   // ★IIIII44（cs:11561）：Dunes 主门 `if (!Skyblock.denyAllGeneration &&
   //   !SecretSeed.noSurface.Enabled)`——沙丘/金字塔候选整段天空盒跳过；pass 头的

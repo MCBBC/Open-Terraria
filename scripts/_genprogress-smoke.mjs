@@ -25,6 +25,7 @@ await page.evaluateOnNewDocument(() => {
       this.addEventListener('message', (e) => {
         const d = e.data;
         if (d && d.type === 'progress') recs.push({ label: d.label, p: d.p, local: d.local });
+        if (d && d.type === 'preview') recs.push({ pv: true, at: performance.now(), idx: d.passIndex, name: d.passName, w: d.width });
       });
     }
   };
@@ -36,7 +37,8 @@ await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForFunction(() => typeof window.__swFlow === 'object' && !!window.__swFlow?.newWorld, { timeout: 180000 });
 const t0 = Date.now();
 try {
-  await page.evaluate(() => window.__swFlow.newWorld(String(424242), 4200, 1200));
+  // 走真实创建流（双进度条 + worker 预览抓帧），legacy newWorld 桥不带 preview opts
+  await page.evaluate(() => window.__swFlow.createWorldProbe());
 } catch (e) {
   console.log('NEWWORLD_THROW:', JSON.stringify({ msg: String(e).slice(0, 200), errs: errs.slice(0, 8) }));
   process.exit(3);
@@ -48,20 +50,36 @@ let out;
 try {
   out = await page.evaluate(() => {
   const r = globalThis.__swProgRecs ?? [];   // 兜底：织入未命中时按空集判等
+  const pvs = r.filter((e) => e.pv);         // 预览帧事件（到达序）
+  const gaps = [];
+  for (let i = 1; i < pvs.length; i++) gaps.push(+(pvs[i].at - pvs[i - 1].at).toFixed(0));
+  const minGap = gaps.length ? Math.min(...gaps) : -1;
+  const over1sGaps = gaps.filter((g) => g > 1000).length;   // >1s 冻结段计数
+  const maxWidths = [...new Set(pvs.map((e) => e.w))];
   let mono = true; let prev = -1;
   for (const e of r) {
+    if (e.pv) continue;
     if (e.p < prev - 1e-9 && e.p !== 1) { mono = false; break; }
     if (e.p > prev) prev = e.p;
   }
-  const withLocal = r.filter((e) => typeof e.local === 'number');
-  const stickyUndefinedLabel = r.filter((e) => e.label === undefined).length;
+  const prog = r.filter((e) => !e.pv);
+  const withLocal = prog.filter((e) => typeof e.local === 'number');
+  const stickyUndefinedLabel = prog.filter((e) => e.label === undefined).length;
   // 相邻采样间距分布（顺滑度）：>8% 跳变的次数
   let bigJumps = 0; let p0 = -1;
-  for (const e of r) { if (p0 >= 0 && e.p > p0 + 0.08 && e.p !== 1) bigJumps++; p0 = Math.max(p0, e.p); }
+  for (const e of prog) { if (p0 >= 0 && e.p > p0 + 0.08 && e.p !== 1) bigJumps++; p0 = Math.max(p0, e.p); }
+  const firstLabels = [];
+  for (const e of prog) {
+    if (firstLabels.length >= 6) break;
+    firstLabels.push(`${String(e.label)}@${e.p.toFixed(3)}${e.local != null ? `l${e.local.toFixed(2)}` : ''}`);
+  }
+  const prevShotsWithIdx = pvs.map((e) => `${e.idx}:${(e.name || '').slice(0, 8)}`);
   return {
-    total: r.length, withLocal: withLocal.length, stickyUndefinedLabel, mono, bigJumps,
-    firstLabels: r.slice(0, 6).map((e) => `${String(e.label)}@${e.p.toFixed(3)}${e.local != null ? `l${e.local.toFixed(2)}` : ''}`),
-    last: r[r.length - 1],
+    total: prog.length, withLocal: withLocal.length, stickyUndefinedLabel, mono, bigJumps,
+    firstLabels: firstLabels.slice(0, 6),
+    previews: pvs.length, previewMinGapMs: minGap, previewOver1sGaps: over1sGaps,
+    previewFirstShots: prevShotsWithIdx.slice(0, 8), previewMaxWidths: maxWidths.slice(0, 2),
+    last: prog[prog.length - 1] ?? null,
   };
 });
 } catch (e) {

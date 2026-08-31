@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Game } from '../src/core/Game';
 import { World } from '../src/world/World';
+import type { TileStore } from '../src/world/TileStore';
+import type { DustColor } from '../src/fx/VanillaDust';
 import { NetModule, NetReader } from '../src/net/protocol';
 import {
   ParticleOrchestraType, writeParticleModule, readParticleModule,
@@ -30,7 +32,7 @@ function mkApply(g: Game) {
   };
 }
 
-function mkGame(store?: unknown) {
+function mkGame(store?: TileStore) {
   const particles: PartRec[] = [];
   const dusts: DustRec[] = [];
   const wavs: Array<{ file: string; vol: number }> = [];
@@ -42,8 +44,12 @@ function mkGame(store?: unknown) {
   };
   g.spawnDust = (x: number, y: number, w: number, h: number, type: number,
     vx = 0, vy = 0, alpha = 0,
-    _color?: unknown, scale = 1, noGravity = false) => {
-    const ret = { x, y, vx: 1.1, vy: -1.1, noGravity };
+    _color?: DustColor | null, scale = 1, noGravity = false) => {
+    const ret = {
+      active: true, x, y, vx: 1.1, vy: -1.1, type, scale, alpha, fadeIn: 0,
+      noGravity, noLight: false, noLightEmittance: false, color: _color ?? null,
+      rotation: 0, fx: 0, fy: 0, followPlayer: false, followOnce: false, dyeVid: -1,
+    } satisfies Partial<import('../src/fx/VanillaDust').VDust> as import('../src/fx/VanillaDust').VDust;
     dusts.push({ x, y, w, h, type, vx, vy, alpha, scale, ret });
     return ret;
   };
@@ -236,14 +242,14 @@ describe('module8 编排粒子 L5 批（fx/orchestraFx + netApplyParticleOrchest
   describe('RepelAt/FakeFish.beRepelled', () => {
     // ★wetCollision 扫描带钳 min(st.h−40,…)：本仓测试世界高 200 → j1≤160,
     //   行 ≥160 的液体对湿判不可见——水箱行取 100..150 干地带内
-    function waterStore(): unknown {
+    function waterStore(): TileStore {
       const w = new World(160, 200, 30, 'orch-wet');
       for (let x = 60; x <= 120; x++) {
         for (let y = 100; y <= 150; y++) w.store.setLiquid(x, y, 255, 1);
       }
       return w.store;
     }
-    const DRY = new World(160, 200, 30, 'orch-dry').store;
+    const DRY: TileStore = new World(160, 200, 30, 'orch-dry').store;
 
     it('环内推离（水体）：速度指离源且幅=Remap(ring,100,0,2,5);_gotRepelled 置位后二次免疫', () => {
       clearFakeFish();
@@ -263,7 +269,7 @@ describe('module8 编排粒子 L5 批（fx/orchestraFx + netApplyParticleOrchest
       const firstVx = f.vx;
       f.beRepelled(ws, sx, sy, 21);                         // _gotRepelled 门 → 二次调用免疫
       expect(f.vx).toBe(firstVx);
-      setFakeFishRandom(() => Math.random);
+      setFakeFishRandom(Math.random);
     });
 
     it('干地前向探干 → 重掷游向收幅(target×0.1 :542-543)/态归 FreeRoaming', () => {
@@ -275,7 +281,7 @@ describe('module8 编排粒子 L5 批（fx/orchestraFx + netApplyParticleOrchest
       g.beRepelled(DRY, g.x - 50, g.y, 21);
       expect(Math.hypot(g.vx, g.vy)).toBeLessThan(2);       // 重掷后 |v| = 0.1×target(≤5)
       expect(g.stateId).toBe(0);                            // State.FreeRoaming(:547)
-      setFakeFishRandom(() => Math.random);
+      setFakeFishRandom(Math.random);
     });
 
     it('环外 ≥100 静默;寿命压缩按进度 lerp(1,0.85)·prog==1 档 0.7(:551-560)', () => {
@@ -295,7 +301,7 @@ describe('module8 编排粒子 L5 批（fx/orchestraFx + netApplyParticleOrchest
       late.lifeCounted = 200; late.lifeTotal = 400;         // prog=remap(.5,0,.25)=1 → ×0.7
       late.beRepelled(DRY, 0, 0, 21);
       expect(late.lifeCounted).toBe(Math.trunc(400 * 0.7));
-      setFakeFishRandom(() => Math.random);
+      setFakeFishRandom(Math.random);
     });
   });
 

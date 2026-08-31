@@ -6,6 +6,8 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { ITEM_DEFS, ITEM_RECOVERABLE_IMPORTANT } from '../data/items';
 import { coinIndexOf } from '../items/Inventory';
 import type { Player } from './Player';
+import { IGNORES_ENCUMBERING_STONE_VIDS } from './Player';
+import { getDropScanCtx } from './dropScanCtx';
 import {
   canShimmerItem, coinLuckAmount, getTransformToItem,
   decraftOutcome, isItemDecraftableAndUnlocked,
@@ -165,11 +167,30 @@ export class ItemDrop extends Entity {
       // 原版 GrabItems(Player.cs:34461-34524):hitbox 相交=直接拾取;
       // 否则玩家盒 ±42px(defaultItemGrabRange :2406)扩展盒相交=拉取；
       // 宝藏磁石(+94)/金戒指族(+12)扩展范围（Player.grabRangeBonus 聚合）
-      const GRAB_RANGE = 42 + ((player as { grabRangeBonus?: number }).grabRangeBonus ?? 0)
-        // 拾心药水（lifeMagnet）：红心单独扩大拾取范围
-        + (this.pickup === 'heart' ? ((player as { heartGrabBonus?: number }).heartGrabBonus ?? 0) : 0)
-        // 魔力磁石（manaMagnet：星 184/1735/1868 专用吸附，Player.cs:34495 专属拉取通道）
-        + (this.pickup === 'star' ? ((player as { manaMagnetBonus?: number }).manaMagnetBonus ?? 0) : 0);
+      // ★帧扫描快照（dropScanCtx.ts 头注；trace 实测 equip 热点 54.4% 主线程自耗
+      //   时——grabRangeBonus/canAccept 曾每帧每物触发 equipStats 内容键全量重建）。
+      //   三项加成与 preventAll 在一帧内恒定（拾取写面不触及任何输入域），同值严格
+      //   等价；快照缺席（单测/探针直调本 fixedUpdate 不经 Entities.update）回退旧逐
+      //   次计算路径。
+      const scan = getDropScanCtx(player);
+      const vidThis = vanillaIdOfItem(this.itemId);
+      let GRAB_RANGE: number;
+      let canAccept: boolean;
+      if (scan) {
+        GRAB_RANGE = 42 + scan.grab
+          // 拾心药水（lifeMagnet）：红心单独扩大拾取范围
+          + (this.pickup === 'heart' ? scan.heart : 0)
+          // 魔力磁石（manaMagnet：星 184/1735/1868 专用吸附，Player.cs:34495 专属拉取通道）
+          + (this.pickup === 'star' ? scan.star : 0);
+        canAccept = !scan.preventAll || IGNORES_ENCUMBERING_STONE_VIDS.has(vidThis);
+      } else {
+        GRAB_RANGE = 42 + ((player as { grabRangeBonus?: number }).grabRangeBonus ?? 0)
+          + (this.pickup === 'heart' ? ((player as { heartGrabBonus?: number }).heartGrabBonus ?? 0) : 0)
+          + (this.pickup === 'star' ? ((player as { manaMagnetBonus?: number }).manaMagnetBonus ?? 0) : 0);
+        canAccept = (player as unknown as {
+          canAcceptItemIntoInventory?: (vid: number) => boolean;
+        }).canAcceptItemIntoInventory?.(vidThis) ?? true;
+      }
       const touching =
         this.x < player.x + player.w && this.x + this.w > player.x &&
         this.y < player.y + player.h && this.y + this.h > player.y;
@@ -183,9 +204,6 @@ export class ItemDrop extends Entity {
       //  上（两通道一并跳过）、CanPullItem :39453 复判同一门。心/星吸附本就属白名单,
       //  阻挡面=其余一切物品。MP 候补：packet 自报 take 只在本地拾取成立后发生,
       //  无独立 intake 位可漏。
-      const canAccept = (player as unknown as {
-        canAcceptItemIntoInventory?: (vid: number) => boolean;
-      }).canAcceptItemIntoInventory?.(vanillaIdOfItem(this.itemId)) ?? true;
       if (touching && canAccept) {
         if (this.pickup) {
           if (this.pickup === 'heart') {

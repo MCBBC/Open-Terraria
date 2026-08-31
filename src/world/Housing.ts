@@ -106,6 +106,32 @@ export function validateSavedHome(st: TileStore, x: number, y: number): boolean 
   return !!(q.room && q.room.tiles.has(st.idx(x, y)));
 }
 
+/**
+ * 原版 homeTile → 本仓站立格归一（2026-08-31 wld 导入入住丢失定谳）：
+ *   原版存档的 homeTileX/Y 是「住房领取锚点」——住房菜单点击格（MoveTownNPC:
+ *   WorldGen.cs:4602 由 UI 传入 x,y）/ QuickFindHome 扫描点，房间校验自任意
+ *   非实心点泛洪均可成立，故常落在家具/平台/地板等【房界格】上；本仓 home
+ *   约定=房间内站立空格（floodRoom 站立尾程 ：535-540 会拒绝实心种子）。
+ *   归一策略：自原值向上找首个「非实心且其泛出房间同时包含原锚点与自身」的
+ *   候选列内格——地板/平台锚点上抬 1 格即标准站位；家具行上方同室空气亦天然
+ *   通过。同室约束（room.tiles.has(原锚点)）防上抬钻进楼上邻室误认领；
+ *   实心原锚点也是房界格（roomTiles 含界格 WorldGen.cs:6076-6080），可命中。
+ *   查不到合格候选返回 null（调用方转 homeless 走原有幽灵告警路径）。
+ */
+export function snapSavedHome(st: TileStore, x: number, y: number): [number, number] | null {
+  if (x < 10 || x >= st.w - 10 || y < 10 || y >= st.h - 10) return null;
+  const origIdx = st.idx(x, y);
+  for (let dy = 0; dy <= 6; dy++) {
+    const cy = y - dy;
+    if (cy < 10 || cy >= st.h - 10) break;
+    // 实心格直接跳过（queryRoom 'solid' 种子预检也判负,显式跳过省一次全泛洪）
+    if (st.flags[st.idx(x, cy)] && tileSolidLike(st.type[st.idx(x, cy)])) continue;
+    const q = queryRoom(st, x, cy, { ignoreNeeds: true });
+    if (q.room && q.room.tiles.has(origIdx) && q.room.tiles.has(st.idx(x, cy))) return [x, cy];
+  }
+  return null;
+}
+
 // ================= home 共室去重（2026-08-30 报告 §3-3 加固·增量小批，
 //  Game 读档 pass / 入驻轮分配收尾 / 写盘前三路共用的纯函数） =================
 

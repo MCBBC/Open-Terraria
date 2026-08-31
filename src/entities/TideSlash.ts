@@ -13,6 +13,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 
 export class TideSlash extends Entity {
   w = 16; h = 16;
@@ -120,7 +121,16 @@ export class TideSlash extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★F3 接线（蓝队四轮）：波涌之刃弹 451 数据面 melee（SetDefaults 类旗投影）→
+      // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner
+      // 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
+      const snapBonusTide = projectileSnapStrikeBonus(game,
+        { projId: 451 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusTide ? Math.trunc(snapBonusTide * (crit ? 2 : 1)) : 0),
+        Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.hitSet.add(e.id);
       this.hitCd.set(e.id, 10);
     }

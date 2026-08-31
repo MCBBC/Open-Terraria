@@ -333,7 +333,7 @@ describe('④ 树妖结界 buff 165（防 +20/15/10 + 荆棘）', () => {
   // buff165（Projectile.cs:41957-41973 townNPC 支字面收编）。「tn===this 排除」
   // 登记偏离销账后的自授予回归。
   it('★B2 光环自体授予：施法窗内本体同样吃 120t ward（含独处节律化前提面）', () => {
-    const { game, mk } = townEnv();
+    const { game, mk, world } = townEnv();                   // 新签名 (world, game) 双参——B2 案适配
     const dryad = mk('dryad');
     const guide = mk('guide', 102 * 16);                     // 圈内旁证（他体支不回退）
     dryad.dryadWardT = 0;
@@ -343,14 +343,14 @@ describe('④ 树妖结界 buff 165（防 +20/15/10 + 荆棘）', () => {
     (dryad as unknown as { wardT: number }).wardT = 30;
     (dryad as unknown as { rng: () => number }).rng = () => 0.9;
     (TownNPC.prototype as unknown as Record<string,
-      (g: unknown) => void>).updateDryadWardAura.call(dryad, game);
+      (w: unknown, g: unknown) => void>).updateDryadWardAura.call(dryad, world, game);
     expect(dryad.dryadWardT).toBe(120);                      // 本体受祝(:38804 无 owner 排除)
     expect(guide.dryadWardT).toBe(120);                      // 他体支照旧
     // 非 %10 拍不吃续期（a=31 → 只可能触发无授予路径）
     (dryad as unknown as { wardT: number }).wardT = 31;
     (dryad as unknown as { dryadWardT?: number }).dryadWardT = 0;
     (TownNPC.prototype as unknown as Record<string,
-      (g: unknown) => void>).updateDryadWardAura.call(dryad, game);
+      (w: unknown, g: unknown) => void>).updateDryadWardAura.call(dryad, world, game);
     expect((dryad as unknown as { dryadWardT: number }).dryadWardT).toBe(0);
   });
 });

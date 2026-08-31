@@ -2,6 +2,7 @@
 import type { GameHooks } from './types';
 import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
+import { beginDropScanCtx } from './dropScanCtx';
 
 export abstract class Entity {
   id = 0;
@@ -97,6 +98,12 @@ export class EntityManager {
   update(dt: number, game: GameHooks) {
     // 就地压缩替代 6×filter(2026-08 审计 G9:每 tick 6 个新数组,60Hz 恒定分配)
     for (const list of [this.enemies, this.drops, this.npcs, this.projectiles, this.props, this.critters]) {
+      if (list === this.drops) {
+        // ★掉落扫描帧上下文（见 dropScanCtx.ts 头注；trace 实测 equip 热点 54.4%
+        //   主线程自耗时——ItemDrop 每帧每物触发 equipStats 内容键全量重建）。
+        //   enter drops 桶前一次快照 ⇒ 帧内逐物访问与逐次计算严格同值
+        beginDropScanCtx((game as { player?: unknown }).player);
+      }
       for (const e of list) e.fixedUpdate(dt, game);
       compact(list);
     }

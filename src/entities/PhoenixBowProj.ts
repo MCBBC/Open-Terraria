@@ -37,6 +37,7 @@ import type { Camera } from '../render/Camera';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyProjStatus } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import { TILE } from '../core/constants';
@@ -399,7 +400,16 @@ export class PhoenixBolt extends Entity {
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? Math.round(this.damage) * 2 : Math.round(this.damage);
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);
+      // ★F3 接线（蓝队四轮）：凤凰弹 706 数据面 ranged（SetDefaults :7462-7473）→
+      // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner
+      // 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
+      const snapBonusPhoenix = projectileSnapStrikeBonus(game, this,
+        e.x + e.w / 2, e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusPhoenix ? Math.trunc(snapBonusPhoenix * (crit ? 2 : 1)) : 0),
+        Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);
       // OnFire3 480t（StatusNPC :11376-11379 → vanilla-projstatus.json "706" 表驱动）
       applyProjStatus(this.projId, e as unknown as Record<string, number | undefined>);
       // 每次命中伤 ×0.95 截断（Damage_PVE_Inner :14275-14278——穿透衰减）

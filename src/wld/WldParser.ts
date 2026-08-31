@@ -23,7 +23,7 @@ export interface WldTileData {
 }
 
 export interface WldChest { x: number; y: number; name: string; items: Array<{ id: number; stack: number } | null>; }
-export interface WldNPC { spriteId: number; name: string; x: number; y: number; homeX: number; homeY: number; }
+export interface WldNPC { spriteId: number; name: string; x: number; y: number; homeX: number; homeY: number; homeless: boolean; }
 
 export interface WldWorld {
   version: number;
@@ -465,14 +465,18 @@ export function parseWld(buf: Uint8Array): WldWorld {
       if (version < 190) r.string();
       const displayName = r.string();
       const x = r.f32(), y = r.f32();
-      r.boolean(); // homeless
+      // ★homeless 不能丢（2026-08-31）：原版无家 NPC 的 homeTile 并非恒 -1——
+      //   SetDefaults 复位是 -1（NPC.cs:8542-8545），但换人/驱逐等链
+      //   （WorldGen.cs:2214-2217 换人 NewNPC 142 等）会带着正值 homeTile 置
+      //   homeless=true；仅凭 homeX>=0 判"已入住"会把无家者错判成有房
+      const homeless = r.boolean();
       const homeX = r.i32(), homeY = r.i32();
       if (version >= 213) {
         const flag = r.u8();
         if (flag & 1) r.i32();
       }
       if (version >= 315) r.boolean();
-      npcs.push({ spriteId, name: displayName, x, y, homeX, homeY });
+      npcs.push({ spriteId, name: displayName, x, y, homeX, homeY, homeless });
     }
   }
 

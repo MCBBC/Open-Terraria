@@ -19,12 +19,14 @@ import { TILE_BY_KEY } from '../src/data/tiles';
 import { Game } from '../src/core/Game';
 import {
   getGlobalHurtBuckets, registerGlobalHurtBuckets, ImmunityCooldownID,
-  IMMUNITY_COOLDOWN_COUNT, HurtCooldownBuckets,
+  IMMUNITY_COOLDOWN_COUNT, HurtCooldownBuckets, npcContactBucketId,
   type HurtCooldownBuckets as BucketTable,
 } from '../src/player/HurtCooldownBuckets';
 import { COLD_DAMAGE_NPCS, applyBannerDamageDealt } from '../src/entities/projTargets';
 import { ITEM_BY_KEY } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
+import { COIN_KEYS } from '../src/items/Inventory';
+import { getAttackDamageScaledByDifficulty } from '../src/stats/ScaleStats';
 import type { Enemy } from '../src/entities/Enemy';
 
 const iid = (vid: number): number => {
@@ -35,7 +37,7 @@ const iid = (vid: number): number => {
 };
 
 // ---- 漏斗壳（Game.prototype 桩,对齐 pvp-settle-broadcast 手法） --------------
-interface ReflectCall { d: number; kbx: number; kby: number }
+interface ReflectCall { d: number; kbx: number; kby: number; armorPen?: number; fromPlayer?: boolean }
 function mkShell(opts?: { net?: boolean }) {
   const g = Object.create(Game.prototype) as Record<string, any>;
   const w = new World(96, 96, 7, 'hurt-domain');
@@ -46,8 +48,10 @@ function mkShell(opts?: { net?: boolean }) {
     cx: 66 * 16, cy: 61 * 16, x: 66 * 16 - 12, y: 60 * 16, w: 24, h: 42,
     vx: 1.5, vy: 0, vanillaId: 3, dead: false, dontTakeDamage: false,
     def: { damage: 40, name: 'Zombie' },
-    hurt: vi.fn((d: number, kbx: number, kby: number): number => {
-      hurtCalls.push({ d, kbx, kby });
+    hurt: vi.fn((d: number, kbx: number, kby: number,
+      _g?: unknown, armorPen?: number, _crit?: boolean, _pierce?: number,
+      fromPlayer?: boolean): number => {
+      hurtCalls.push({ d, kbx, kby, armorPen, fromPlayer });
       return d;
     }),
   };
@@ -81,8 +85,57 @@ function mkShell(opts?: { net?: boolean }) {
 
 afterEach(() => registerGlobalHurtBuckets(null));
 
+// ---- 漏斗壳（envHarness,A2/F3 共用——置模块顶层供各 describe 引用） ----------
+function envHarness(w: World, p: Player) {
+  const captures: Array<{ args: unknown[]; chanId: number | undefined; iframesAtHit: number }> = [];
+  const settlements: boolean[] = [];                 // ★F2 settlePlayerDeath 受理记录
+  let settledOnce = false;
+  const hooks = {
+    world: w,
+    player: p,
+    enemies: (): unknown[] => [],
+    critters: (): unknown[] => [],
+    projectiles: (): unknown[] => [],
+    spawnDrop: () => null,
+    damagePlayer: vi.fn(function (this: null, ...args: unknown[]): number {
+      const chan = (p as unknown as { __swNextHitBucket?: { id: number } }).__swNextHitBucket;
+      captures.push({ args, chanId: chan?.id, iframesAtHit: p.iframes });
+      return 40;
+    }),
+    // ★F2：直扣致死站结算面（溺水/舌 DoT/墙舌世界边）——幂等形与真身一致
+    settlePlayerDeath: vi.fn((pvp: boolean): void => {
+      if (!p.dead || settledOnce) return;
+      settledOnce = true;
+      settlements.push(pvp);
+      if (pvp) p.deathsPvp++;                        // 真身面最小镜像（计数由 Game 承担）
+      else p.deathsPve++;
+    }),
+    addDamageNumber: vi.fn(),
+    cutTile: vi.fn(),
+    breakTile: vi.fn(),
+    fellCactus: vi.fn(),
+    onEnemyKilled: vi.fn(),
+    spawnEnemy: vi.fn(),
+    spawnParticles: vi.fn(),
+    broadcastParticleOrchestra: vi.fn(),
+    notifyInventoryChanged: vi.fn(),
+    playSfx: vi.fn(),
+    playSfxFiles: vi.fn(),
+    showPickupLabel: vi.fn(),
+    punchCamera: vi.fn(),
+    achievements: undefined,
+    sfx: { play: vi.fn(), playWavFile: vi.fn() },
+  };
+  return { hooks, captures, settlements };
+}
+
+/** 通用小环境：f=世界布景回调（拿到 store），返回摆好的玩家 */
+function tallWorld(seed: number): World {
+  return new World(72, 96, seed, `hurt-a2-${seed}`);
+}
+
 describe('A1 荆棘反射面（Game.damagePlayer contactOnly 前置段）', () => {
-  it('药水 thorns=1：反 (int)(dmg×1)，无二次 ±15% 复掷；kb=10×0.65 方向推离玩家', () => {
+  it('药水 thorns=1：反 (int)(dmg×1)，无二次 ±15% 复掷；kb=10 裸值推离玩家（★F5① 删 ×0.65）', () => {
     const s = mkShell();
     s.p.buffs.apply(BuffType.Thorns, 30);
     const base = s.hurtCalls.length;
@@ -91,7 +144,17 @@ describe('A1 荆棘反射面（Game.damagePlayer contactOnly 前置段）', () =
     expect(s.hurtCalls.length - base).toBe(1);                        // 单支
     expect(s.hurtCalls[base].d).toBe(Math.min(1000, Math.trunc(37 * 1)));
     const num3 = s.enemy.cx + s.enemy.w / 2 < s.p.cx + s.p.w / 2 ? 1 : -1;
-    expect(s.hurtCalls[base].kbx).toBe(-num3 * 10 * 0.65);            // :31642
+    expect(s.hurtCalls[base].kbx).toBe(-num3 * 10);                   // :31642 kb 共享局部量原值直进
+    // ★F5②：ApplyDamageToNPC 攻端面——armorPen（GetArmorPenetration(false)）随调用入参、
+    // fromPlayer=true 接 OnHit 族（钛金屏障仓形单点在 Enemy.hurt 内嵌）
+    expect(s.hurtCalls[base].fromPlayer).toBe(true);
+    expect(s.hurtCalls[base].armorPen).toBe(s.p.equipStats.armorPen);   // 裸玩家=0
+    s.p.inv.armor[3] = { id: iid(3212), stack: 1 };                     // 刺钉项链：armorPen+5
+    expect(s.p.equipStats.armorPen).toBe(5);                            // 真实聚合链取值
+    s.p.iframes = 0;                                                    // 出无敌窗再命中
+    const base2 = s.hurtCalls.length;
+    s.hit(37);
+    expect(s.hurtCalls[base2].armorPen).toBe(5);
     expect(ret).toBeGreaterThan(0);
     expect(s.p.hp).toBeLessThan(hpBefore);
   });
@@ -136,6 +199,24 @@ describe('A1 荆棘反射面（Game.damagePlayer contactOnly 前置段）', () =
     expect(s.hurtCalls[0].d).toBe(20);
   });
 
+  it('★Notes① banner 减伤 (int) 截断非四舍五入：num4=trunc(45×0.75)=33（round 为 34）', () => {
+    const s = mkShell();
+    s.p.buffs.apply(BuffType.Thorns, 30);             // 撑起反射捕获
+    (s.g._bannerNpcs as Set<number>).add(s.enemy.vanillaId);
+    const base = s.hurtCalls.length;
+    s.hit(45);
+    // 受端 num4 截断后进反射面；攻端再包 DamageDealt 样本（经典僵尸 ×1.5）：
+    // d = trunc(min(1000, trunc(num4)) × Dealt) —— 经两段截断链取证
+    const num4 = Math.max(1, Math.trunc(45 * 0.75));
+    expect(num4).toBe(33);
+    const dealtNum4 = applyBannerDamageDealt(s.g as never, s.enemy as never, num4);
+    expect(dealtNum4).toBe(Math.trunc(33 * 1.5));     // 攻端 DamageDealt 面生效
+    expect(s.hurtCalls[base].d).toBe(Math.min(1000, dealtNum4));
+    // 反证 round 基准会差一：34→trunc(34×1.5)=51 ≠ 49
+    expect(Math.trunc(applyBannerDamageDealt(s.g as never, s.enemy as never,
+      Math.round(45 * 0.75)))).not.toBe(dealtNum4);
+  });
+
   it('甲虫减伤与反射互不乘算：反=num4 原基准,endurance 只作用于本体实扣', () => {
     const s = mkShell();
     s.p.buffs.apply(BuffType.Thorns, 30);
@@ -167,7 +248,8 @@ describe('A1 荆棘反射面（Game.damagePlayer contactOnly 前置段）', () =
     expect(s.hurtCalls.length).toBe(1);               // 单反 ×2
     expect(s.hurtCalls[0].d).toBe(100);               // trunc(50×2)
     // 敌在玩家右 ⇒ num3=-1 ⇒ 反射方向 -num3=+1 推离玩家;kb 变量共享改 5（:31616/:31642）
-    expect(s.hurtCalls[0].kbx).toBe(1 * 5 * 0.65);
+    // ★F5①：裸值直进（删仓自 ×0.65 无源乘区）
+    expect(s.hurtCalls[0].kbx).toBe(5);
     expect(s.hurtCalls[0].kby).toBe(-2);
     expect(s.p.iframes).toBeGreaterThanOrEqual(30);   // :31667 longInvince=false 档
     expect((s.p as unknown as { parryDamageBuff: boolean }).parryDamageBuff).toBe(true);
@@ -218,42 +300,6 @@ describe('A1 荆棘反射面（Game.damagePlayer contactOnly 前置段）', () =
 });
 
 describe('A2 环境伤四站 msg117 漏斗（dir/kb/桶/飘字单点）', () => {
-  function envHarness(w: World, p: Player) {
-    const captures: Array<{ args: unknown[]; chanId: number | undefined }> = [];
-    const hooks = {
-      world: w,
-      player: p,
-      enemies: (): unknown[] => [],
-      critters: (): unknown[] => [],
-      projectiles: (): unknown[] => [],
-      spawnDrop: () => null,
-      damagePlayer: vi.fn(function (this: null, ...args: unknown[]): number {
-        const chan = (p as unknown as { __swNextHitBucket?: { id: number } }).__swNextHitBucket;
-        captures.push({ args, chanId: chan?.id });
-        return 40;
-      }),
-      addDamageNumber: vi.fn(),
-      cutTile: vi.fn(),
-      breakTile: vi.fn(),
-      fellCactus: vi.fn(),
-      onEnemyKilled: vi.fn(),
-      spawnEnemy: vi.fn(),
-      spawnParticles: vi.fn(),
-      broadcastParticleOrchestra: vi.fn(),
-      notifyInventoryChanged: vi.fn(),
-      playSfx: vi.fn(),
-      playSfxFiles: vi.fn(),
-      showPickupLabel: vi.fn(),
-      punchCamera: vi.fn(),
-      achievements: undefined,
-      sfx: { play: vi.fn(), playWavFile: vi.fn() },
-    };
-    return { hooks, captures };
-  }
-  /** 通用小环境：f=世界布景回调（拿到 store），返回摆好的玩家 */
-  function tallWorld(seed: number): World {
-    return new World(72, 96, seed, `hurt-a2-${seed}`);
-  }
 
   it('岩浆站：kb=false/hitDir=0/Lava(4) 桶注入/OnFire 只在实扣>0 授予', () => {
     registerGlobalHurtBuckets(new HurtCooldownBuckets());
@@ -296,7 +342,7 @@ describe('A2 环境伤四站 msg117 漏斗（dir/kb/桶/飘字单点）', () => 
     expect(captures.length).toBeGreaterThanOrEqual(1); // 窗外恢复受理
   });
 
-  it('摔落站：immune=false 预清(:25566)+dir0/kb 假;落地不弹起(vx 零漂移)', () => {
+  it('摔落站：immune=false 前置清(:25559)+dir0/kb 假;整数格距截断 ×10（40 格 ⇒ trunc15×10=150）', () => {
     const w = new World(80, 80, 13, 'hurt-fall');
     const st = w.store;
     for (let x = 10; x <= 46; x++) st.setTileSilent(x, 44, TILE_BY_KEY['dirt']);
@@ -305,12 +351,13 @@ describe('A2 环境伤四站 msg117 漏斗（dir/kb/桶/飘字单点）', () => 
     for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);   // 先落定
     expect(captures.length).toBe(0);
     p.iframes = 9;                                    // 旧实现被 General 吞;原版先清 immune
-    p.fallStartY = p.y - 40 * 16;                     // 落差 40 格 ⇒ (40−25)×10=150
+    p.fallStartY = Math.trunc(p.y / 16) * 16 - 40 * 16;   // 落差 40 整格（:25503 两端截断）
     const vyBefore = p.vy;
     p.vx = 0;
     p.fixedUpdate(1 / 60, hooks as never);
     expect(captures.length).toBe(1);
     expect(captures[0].args[0]).toBe(150);
+    expect(captures[0].iframesAtHit).toBe(0);         // ★F1①：常规支在 Hurt【前】已清 immune
     expect(captures[0].args[6]).toBe(false);          // hitDirection=0 ⇒ 击退段整跳
     expect((captures[0].args[7] as { hitDir?: number }).hitDir).toBe(0);
     expect(captures[0].chanId).toBeUndefined();       // General 缺省不注桶
@@ -318,35 +365,75 @@ describe('A2 环境伤四站 msg117 漏斗（dir/kb/桶/飘字单点）', () => 
     expect(Math.abs(p.vy - vyBefore)).toBeLessThan(0.6);
   });
 
-  it('石化摔落分支：（格−2）×20 同属漏斗家族（:25539-25545）', () => {
+  it('★F1② 截格取整：像素落差 >25 格但整格差恰 25 ⇒ 不结伤（删 max(1,…)=1 补底越权）', () => {
+    const w = new World(80, 80, 14, 'hurt-fall-frac');
+    const st = w.store;
+    for (let x = 10; x <= 46; x++) st.setTileSilent(x, 44, TILE_BY_KEY['dirt']);
+    const p = new Player(28 * 16, 40 * 16, new Inventory());
+    const { hooks, captures } = envHarness(w, p);
+    for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);
+    // 站立 y = groundRow*16 − h，h%16 ≠ 0 ⇒ y 留非零格内分数：fallStart 对齐到
+    // 「landTile−25」上沿时像素距离超 25 格而整格差 =25 → 原版 num17≤0 跳过
+    p.fallStartY = (Math.trunc(p.y / 16) - 25) * 16;
+    p.fixedUpdate(1 / 60, hooks as never);
+    expect(p.fallStartY).toBeNull();
+    expect(captures.length).toBe(0);                  // 旧 round+补底会在 0~1 区强行打 1 点
+  }, 20000);
+
+  it('★F1② 整格差 26 ⇒ 恰为 trunc(26−25)×10=10（round 形会随格内分数偏到 11..20）', () => {
+    const w = new World(80, 80, 15, 'hurt-fall-trunc');
+    const st = w.store;
+    for (let x = 10; x <= 46; x++) st.setTileSilent(x, 44, TILE_BY_KEY['dirt']);
+    const p = new Player(28 * 16, 40 * 16, new Inventory());
+    const { hooks, captures } = envHarness(w, p);
+    for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);
+    p.fallStartY = (Math.trunc(p.y / 16) - 26) * 16;
+    p.fixedUpdate(1 / 60, hooks as never);
+    expect(captures.length).toBe(1);
+    expect(captures[0].args[0]).toBe(10);
+  }, 20000);
+
+  it('石化摔落分支：(截断格−2)×20 + immune 在 Hurt【后】清（:25549-25550 先后序=F1 分形）', () => {
     const w = new World(80, 80, 17, 'hurt-stonefall');
     const st = w.store;
     for (let x = 10; x <= 46; x++) st.setTileSilent(x, 44, TILE_BY_KEY['dirt']);
     const p = new Player(28 * 16, 40 * 16, new Inventory());
     const { hooks, captures } = envHarness(w, p);
     for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);
-    p.fallStartY = p.y - 30 * 16;                     // 30 格 ⇒ (30−2)×20=560
+    p.fallStartY = (Math.trunc(p.y / 16) - 30) * 16;  // 30 整格 ⇒ (30−2)×20=560
+    p.iframes = 9;                                    // 入站免疫窗——石化支不前置清
+    p.lastStoned = true;                              // 变身过渡已在更早 tick 完成——封住 F3 成型侧捕获
     p.buffs.apply(BuffType.Stoned, 5);
     p.fixedUpdate(1 / 60, hooks as never);
-    expect(captures.length).toBe(1);
-    expect(captures[0].args[0]).toBe(560);
+    const fallStone = captures.find((c) => c.args[0] === 560);
+    expect(fallStone).toBeDefined();                  // （变身过渡同拍也会撞漏斗:已在 lastStoned 抑制）
+    expect(fallStone!.iframesAtHit).toBeGreaterThan(0);// ★F1①：Hurt 收到时 iframes 未前置清（tick 内自然衰减后仍>0）
+
+    expect(p.iframes).toBe(0);                        // 出站后才被 :25550 清位
   });
 
-  it('触格伤（尖刺“砸压”家族）：TileContactDamage(0) 桶注入+dir0/kb 假', () => {
+  it('触格伤（尖刺“砸压”家族）：表值过 DamageVar 掷骰（r=.5 档0 ⇒ 60）+TileContactDamage(0) 桶注入', () => {
     registerGlobalHurtBuckets(new HurtCooldownBuckets());
     const w = tallWorld(19);
     const st = w.store;
     for (let x = 10; x <= 60; x++) st.setTileSilent(x, 54, TILE_BY_KEY['dirt']);
-    st.setTileSilent(34, 52, TILE_BY_KEY['v_48_spike']);   // vanilla sheet 48=尖刺 60
+    st.setTileSilent(34, 52, TILE_BY_KEY['v_48_spike']);   // vanilla sheet 48=尖刺 基准60
     st.setTileSilent(35, 52, TILE_BY_KEY['v_48_spike']);
     const p = new Player(33 * 16, 44 * 16, new Inventory());
     const { hooks, captures } = envHarness(w, p);
-    for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);
-    expect(captures.length).toBeGreaterThanOrEqual(1);
-    expect(captures[0].args[0]).toBe(60);
-    expect(captures[0].chanId).toBe(ImmunityCooldownID.TileContactDamage);   // ★桶 0
-    expect(captures[0].args[6]).toBe(false);
-    expect((captures[0].args[7] as { hitDir?: number }).hitDir).toBe(0);
+    // ★F4：Main.DamageVar(num, −luck)（Player.cs:29211 字面）。掷 0.5 → 离散档
+    // ⌊15.5⌋−15=0 ⇒ ×1.00（toEvenRound 不偏）——确定性单点取证。luck 缺省 0 无重掷。
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
+      for (let i = 0; i < 45; i++) p.fixedUpdate(1 / 60, hooks as never);
+      expect(captures.length).toBeGreaterThanOrEqual(1);
+      expect(captures[0].args[0]).toBe(60);               // DamageVar 后终值=基准值本证
+      expect(captures[0].chanId).toBe(ImmunityCooldownID.TileContactDamage);   // ★桶 0
+      expect(captures[0].args[6]).toBe(false);
+      expect((captures[0].args[7] as { hitDir?: number }).hitDir).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('虚空坠杀：9999 直入漏斗 General 缺省,标 noLocalFloat（原文本无飘字面）', () => {
@@ -361,24 +448,30 @@ describe('A2 环境伤四站 msg117 漏斗（dir/kb/桶/飘字单点）', () => 
     expect((entry!.args[7] as { noLocalFloat?: boolean }).noLocalFloat).toBe(true);
   });
 
-  it('溺水不走 Hurt/漏斗：直扣 HP 且漏斗恒不被调——原版 :23449 无 Send 点（构造性反例）', () => {
+  it('溺水不走 Hurt/漏斗：直扣 HP；★F2 致死帧走完整死亡管线（计数单次/非致死零结算）', () => {
     const w = tallWorld(29);
     const st = w.store;
     for (let x = 20; x <= 40; x++) st.setTileSilent(x, 48, TILE_BY_KEY['dirt']);
     for (let x = 20; x <= 40; x++) for (let y = 26; y <= 46; y++) st.setLiquid(x, y, 220, 1);
     const p = new Player(28 * 16, 32 * 16, new Inventory());
-    const { hooks, captures } = envHarness(w, p);
+    const { hooks, captures, settlements } = envHarness(w, p);
     p.breath = 3;                                     // 快进：两拍即见直扣
     p.hp = 4;                                         // 低血量促死（直扣 2/批）
-    const hpBefore = p.hp;
+    const deathsBefore = p.deathsPve;
     for (let i = 0; i < 120 && !p.dead; i++) {
       p.fixedUpdate(1 / 60, hooks as never);
       if (!p.dead) { p.x = 28 * 16; p.y = 32 * 16; p.vy = 0; }  // 保持浸没
     }
     expect(p.dead).toBe(true);                                    // 必死
-    expect(hooks.damagePlayer).not.toHaveBeenCalled();            // 漏斗零命中 ★
+    expect(hooks.damagePlayer).not.toHaveBeenCalled();            // 漏斗零命中 ★（:23449 无 Send 点）
     expect(captures.length).toBe(0);
-    expect(p.hp).toBeLessThan(hpBefore);                          // 直扣通道扣过血
+    // ★F2：致死帧补 KillMe(ByOther(1),10) 完整管线——settlePlayerDeath 单次受理、
+    // PVE 计数入账；后续 tick 复入幂等门不再计（settledOnce 剪枝断言）
+    expect(settlements.length).toBe(1);
+    expect(settlements[0]).toBe(false);
+    expect(p.deathsPve).toBe(deathsBefore + 1);
+    for (let i = 0; i < 10; i++) p.fixedUpdate(1 / 60, hooks as never);
+    expect(settlements.length).toBe(1);
   }, 20000);
 
   it('msg117 dir 字面透传：显式 0 按钉语义直发,缺省维持 sign 推算（既有五支不变）', () => {
@@ -470,5 +563,192 @@ describe('攻端 DamageDealt 旗乘区包装（ApplyDamageToNPC :20599 仓形单
       bannerNpcActive: () => true,
       world: { difficulty: 0 },
     } as never, dummy, 77)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---- ★F2/★Notes⑤ 前半（四轮蓝队新增） --------------------------------------
+describe('★F2 死亡管线单点：settlePlayerDeath 幂等 + 软核 DropCoins 面向', () => {
+  function deathShell() {
+    const g = Object.create(Game.prototype) as Record<string, any>;
+    const w = new World(48, 48, 99, 'hurt-death');
+    const p = new Player(24 * 16, 20 * 16, new Inventory());
+    const drops: Array<{ key: string; stack: number }> = [];
+    g.player = p;
+    g.world = w;
+    g.spawnDrop = vi.fn((_x: number, _y: number, key: string, stack: number): null => {
+      drops.push({ key, stack });
+      return null;
+    });
+    return { g, p, w, drops };
+  }
+
+  it('软核：PVE 计数、DropCoins 掉实体+lostCoins 覆写、垃圾桶清空、同死幂等', () => {
+    const { g, p, drops } = deathShell();
+    p.inv.add(iid(71), 50);                       // 铜币 ×50
+    p.inv.trash = { id: iid(9), stack: 3 };       // 垃圾桶持物（DeathTrash :53394）
+    p.deathsPve = 0;
+    p.dead = true;                                // 调用方先标死（漏斗/fixedUpdate 过渡语义）
+    g.settlePlayerDeath(false);
+    expect(p.deathsPve).toBe(1);
+    expect(p.respawnTimer).toBe(0);
+    expect(p.deadTime).toBe(0);
+    expect(p.inv.trash).toBeNull();               // 死亡清垃圾桶
+    const kept = p.inv.countOf(iid(71));
+    const dropped = drops
+      .filter((d) => d.key === COIN_KEYS[0])
+      .reduce((s, d) => s + d.stack, 0);
+    expect(kept).toBeLessThan(50);                // 经典掉一半档
+    expect(dropped).toBe(50 - kept);              // 掉落落地可拾（非凭空蒸发）
+    expect(g.lostCoins).toBe(dropped);            // 「掉了{0}」= 实掉面额累计
+    g.settlePlayerDeath(false);                   // 同一死复入 → 幂等门吞
+    expect(p.deathsPve).toBe(1);
+    expect(g.lostCoins).toBe(dropped);
+  });
+
+  it('pvp 归因分道：deathsPvp++ 且不触发 DropCoins（lostCoins 置 0）', () => {
+    const { g, p, drops } = deathShell();
+    p.inv.add(iid(71), 80);
+    p.deathsPvp = 0;
+    p.dead = true;
+    g.settlePlayerDeath(true);
+    expect(p.deathsPvp).toBe(1);
+    expect(p.deathsPve).toBe(0);
+    expect(p.inv.countOf(iid(71))).toBe(80);      // PvP 死亡不掉钱
+    expect(drops.length).toBe(0);
+    expect(g.lostCoins).toBe(0);
+  });
+
+  it('respawnPlayer 复位幂等门——新的一死重新入账', () => {
+    const { g, p, w } = deathShell();
+    p.dead = true;
+    g.settlePlayerDeath(false);
+    expect(p.deathsPve).toBe(1);
+    (g as { respawnPlayer(): void }).respawnPlayer();
+    expect((p as unknown as { __swDeathSettled?: boolean }).__swDeathSettled).toBe(false);
+    p.hp = 0; p.dead = true;
+    g.settlePlayerDeath(false);
+    expect(p.deathsPve).toBe(2);
+  });
+
+  it('护栏：!dead 直调零结算（误触不计数）', () => {
+    const { g, p } = deathShell();
+    g.settlePlayerDeath(false);
+    expect(p.deathsPve).toBe(0);
+    expect((p as unknown as { __swDeathSettled?: boolean }).__swDeathSettled).toBeUndefined();
+  });
+});
+
+describe('★F3 石化变身走通用漏斗（:25419 !quiet Hurt 形）', () => {
+  it('过渡即 Hurt：防御链/msg117 漏斗载体、双向尘单次、老手补语音删除后无双发', () => {
+    const w = new World(72, 96, 41, 'hurt-stoned-tf');
+    const st = w.store;
+    for (let x = 10; x <= 60; x++) st.setTileSilent(x, 52, TILE_BY_KEY['dirt']);
+    const p = new Player(30 * 16, 44 * 16, new Inventory());
+    const { hooks, captures } = envHarness(w, p);
+    p.buffs.apply(BuffType.Stoned, 5);
+    for (let i = 0; i < 8 && captures.length === 0; i++) {
+      p.fixedUpdate(1 / 60, hooks as never);
+      if (!captures.length) { p.x = 30 * 16; p.y = 46 * 16 - 42; p.vy = 0.2; }
+    }
+    expect(captures.length).toBeGreaterThanOrEqual(1);
+    const c = captures[0];
+    // 经典档 GDL.CLASSIC=1（非 0!）——EnemyDamageMultiplier.Sample(classic) 后 trunc
+    expect(c.args[0]).toBe(getAttackDamageScaledByDifficulty(20, 1));
+    expect(c.args[3]).toBeUndefined();                          // attacker=undefined
+    expect(c.args[4]).toBe(false);
+    expect(c.args[5]).toBe(false);
+    expect(c.args[6]).toBe(false);                              // hitDirection=0 ⇒ kb=false
+    expect((c.args[7] as { floatDealt?: number }).floatDealt).toBeDefined();
+  }, 20000);
+
+  it('解除侧同样触发过渡尘（旧实现只在成型侧撒）', async () => {
+    const w = new World(72, 96, 42, 'hurt-stoned-off');
+    const st = w.store;
+    for (let x = 10; x <= 60; x++) st.setTileSilent(x, 52, TILE_BY_KEY['dirt']);
+    const p = new Player(30 * 16, 44 * 16, new Inventory());
+    const hooks = envHarness(w, p).hooks as unknown as Record<string, any>;
+    p.buffs.apply(BuffType.Stoned, 5);
+    const particles: string[] = [];
+    hooks.spawnParticles = (_x: unknown, _y: unknown, color: string): void => { particles.push(color); };
+    for (let i = 0; i < 400 && !particles.includes('#9A8FA0'); i++) {
+      p.fixedUpdate(1 / 60, hooks as never);
+    }
+    // 成型侧已发尘；剥除石化 buff 触发反向过渡再发一次
+    p.buffs.remove(BuffType.Stoned);
+    p.fixedUpdate(1 / 60, hooks as never);
+    expect(particles.filter((c) => c === '#9A8FA0').length).toBeGreaterThanOrEqual(2);
+  }, 20000);
+});
+
+describe('★F3 血肉墙嘴 Hurt 漏斗（:22464 !quiet 形）', () => {
+  it('嘴带受理：attacker 缺省/经典 50 值/floatDealt 回填；受理后固定推离 ±4.5、−3.5 保持', () => {
+    const w = new World(120, 96, 37, 'hurt-wof');
+    const p = new Player(60 * 16, 50 * 16, new Inventory());
+    const { hooks, captures } = envHarness(w, p);
+    const wall = {
+      vanillaId: 113, dead: false,
+      x: p.x + 61, y: p.y - 20, w: 100, h: 100, cx: p.x + 111, cy: p.y,
+      facing: 1, difficulty: 1, def: { damage: 50, name: 'Wall of Flesh' },
+    } as unknown as Enemy;
+    (hooks as unknown as { enemies: () => unknown[] }).enemies = (): unknown[] => [wall];
+    p.buffs.apply(BuffType.Horrified, 1);           // gross 在栏
+    (p as unknown as { wofTongue(g: unknown, wo: unknown, dt: number): void })
+      .wofTongue(hooks, w, 1 / 60);
+    expect(captures.length).toBe(1);
+    expect(captures[0].args[0]).toBe(getAttackDamageScaledByDifficulty(50, 1));   // 难度缩放基准(GDL.CLASSIC=1)
+    expect(captures[0].args[3]).toBeUndefined();    // attacker 位缺省 ⇒ banner/反射不适用
+    expect((captures[0].args[7] as { floatDealt?: number }).floatDealt).toBeDefined();
+    expect(p.vx).toBeCloseTo(4.5);                  // :37910 固定推离（facing>0 → +x）
+    expect(p.vy).toBeCloseTo(-3.5);
+    expect(p.fallStartY).toBe(p.y);                 // :37912 同段 fallStart 重置
+    // 手补双发源删除：漏斗单点承载飘字/语音（hook 无独立 addDamageNumber 断言必要）
+  });
+
+  it('hp 直改致死站（DoT 分块/世界边 KillMe）由 fixedUpdate 过渡兜 settle——舌 DoT 面实证', () => {
+    // 专家模式下 tongued 分块直扣 hp（:19142-19148 KillMe 门），漏斗零参与；致死帧
+    // 经 Player.fixedUpdate hp<=0 过渡块进 settlePlayerDeath 完整管线
+    const w = new World(120, 96, 38, 'hurt-wof-dot');
+    w.difficulty = 1;                                 // 专家 ⇒ mainExpertMode 真
+    const st = w.store;
+    for (let x = 40; x <= 90; x++) st.setTileSilent(x, 60, TILE_BY_KEY['dirt']);
+    const p = new Player(60 * 16, 56 * 16, new Inventory());
+    const { hooks, captures, settlements } = envHarness(w, p);
+    const wall = {
+      vanillaId: 113, dead: false,
+      x: p.x + 456, y: p.y - 20, w: 100, h: 100, cx: p.x + 506, cy: p.y,
+      facing: 1, difficulty: 1, def: { damage: 50, name: 'Wall of Flesh' },
+    } as unknown as Enemy;
+    (hooks as unknown as { enemies: () => unknown[] }).enemies = (): unknown[] => [wall];
+    // 嘴带 mouth=wall.x−56=p.x+400；带区判据 p.x+w>mouth ⇒ 布景外置成【带外】，
+    // 本测只隔离舌 DoT 流干路径（嘴带受理已由上一案覆盖）
+    expect(p.x + p.w > wall.x - 56).toBe(false);
+    p.buffs.apply(BuffType.Horrified, 99);
+    p.buffs.apply(BuffType.TheTongue, 99);
+    p.hp = 8;
+    for (let i = 0; i < 240 && !p.dead; i++) {
+      p.fixedUpdate(1 / 60, hooks as never);
+      if (!p.dead) { p.x = 60 * 16; p.y = 56 * 16; p.vy = 0.2; }
+    }
+    expect(p.dead).toBe(true);                      // DoT 流干致死
+    expect(captures.length).toBe(0);                // 漏斗零参与（直扣语义）
+    expect(settlements.length).toBe(1);             // ★F2 过渡块兜入完整管线
+    expect(settlements[0]).toBe(false);
+    expect(p.deathsPve).toBe(1);
+  }, 20000);
+});
+
+describe('★Notes⑤ 前半 NPC 接触分桶（BossNoCheese 表 + npcContactBucketId）', () => {
+  it('396/397/398/400/401 → BossNoCheese(1)；常规怪 General(-1)', () => {
+    expect(npcContactBucketId(396, 3)).toBe(ImmunityCooldownID.BossNoCheese);
+    expect(npcContactBucketId(397, 3)).toBe(ImmunityCooldownID.BossNoCheese);
+    expect(npcContactBucketId(398, 3)).toBe(ImmunityCooldownID.BossNoCheese);
+    expect(npcContactBucketId(400, 3)).toBe(ImmunityCooldownID.BossNoCheese);   // 真眼（伤害盒另行清空）
+    expect(npcContactBucketId(401, 3)).toBe(ImmunityCooldownID.BossNoCheese);
+    expect(npcContactBucketId(3, 0)).toBe(-1);                  // 僵尸常桶
+  });
+  it('636 分支：ai[0]∈{0,10} 整段 continue（null），其余进桶（:31582-31585 字面）', () => {
+    expect(npcContactBucketId(636, 0)).toBeNull();
+    expect(npcContactBucketId(636, 10)).toBeNull();
+    expect(npcContactBucketId(636, 5)).toBe(ImmunityCooldownID.BossNoCheese);
   });
 });

@@ -31,7 +31,7 @@ import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDo
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, IS_BIOME_TORCH_STYLE } from '../world/Torch';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
-import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, dedupeHomes } from '../world/Housing';
+import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE, validateSavedHome, snapSavedHome, dedupeHomes } from '../world/Housing';
 import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS, containerHover, dresserHover } from '../render/CursorItemIcon';
 import hoverIcons from '../data/vanilla-hovericons.json';
 
@@ -4959,8 +4959,18 @@ export class Game implements GameHooks {
           // ★ghost home 过滤(2026-08-30 housing 副因B):legacy 存档的 home 可能是
           //   站位穿层时代写出的房间外坐标——不在任何真实房间 tiles 内即丢弃
           //  (转 homeless,后续 updateTownNpcArrival 自然重分配),否则双房旗重叠。
-          if (validateSavedHome(this.world.store, n.home[0], n.home[1])) {
-            t.home = { x: n.home[0], y: n.home[1] }; t.leashHome = true;
+          // ★wld 导入归一（2026-08-31 入住丢失定谳）：原版存档 homeTile 是住房
+          //  领取锚点（菜单点击格/QuickFindHome 扫描点,WorldGen.cs:4602/:5684ff），
+          //  常落在家具/平台/地板【界格】上;本仓 home 约定=站立空格——直接验会
+          //  撞 queryRoom 'solid' 种子预检/站立尾程全数拒收 → 全员转 homeless,
+          //  导入世界须重新指定入住。先原值直验(自有存档快路径),失败再 snap。
+          let hx = n.home[0], hy = n.home[1];
+          if (!validateSavedHome(this.world.store, hx, hy)) {
+            const snapped = snapSavedHome(this.world.store, hx, hy);
+            if (snapped) { hx = snapped[0]; hy = snapped[1]; }
+          }
+          if (validateSavedHome(this.world.store, hx, hy)) {
+            t.home = { x: hx, y: hy }; t.leashHome = true;
           } else if (!this._ghostHomeWarned) {
             this._ghostHomeWarned = true;
             console.warn(`[housing] 读档过滤幽灵 home: ${n.key} @(${n.home[0]},${n.home[1]}) 不在任何房间内 —— 已转 homeless`);
@@ -13652,6 +13662,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               bvx0 + nrand(35) * 0.02, bvy0 + nrand(35) * 0.02,
               dmgBee, kbBee, strongBee ? 566 : 181, null, { grav: 0 });
             bee.frostEligible = false;   // magic=true 弹（Projectile.cs:48804）不吃冰霜引擎
+            // ★F5（蓝队四轮 grep 防第三处命中项）：蜂枪发蜂位原版 `magic = true`
+            // （Player.cs:48805——1121 BeeGun 专支）——SetDefaults 零旗但 spawn 位覆写；
+            // 仓内形态 = projClass 显式字段（数据面表保持 SetDefaults 直写真值）
+            bee.projClass = 'magic';     // 运行时旗覆写（Player.cs:48805 本站）
             bee.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
             bee.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
             this.entities.add(bee, 'projectiles');

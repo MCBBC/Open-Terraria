@@ -2993,16 +2993,19 @@ export class VanillaSpawner {
         this.queueFireflyExtras(rng, ffId);
         return D(ffId);
       }
-      // L4439：乌鸦 Raven 301——(万圣节 || 墓地) && 1/12（节日未接 → 墓地单门）
-      if (this.ZoneGraveyard && N(12)) return D(301);
+      // L4439：乌鸦 Raven 301——(万圣节 || 墓地) && 1/12
+      if ((this.world.clock.halloween || this.ZoneGraveyard) && N(12)) return D(301);
       // L4444：幽灵 Ghost 316——墓地专属 1/30
       if (this.ZoneGraveyard && N(30)) return D(316);
       // L4449：南瓜跳跳 Hoppin' Jack 304——(万圣节 || 墓地) && hardMode && 1/10
-      if (this.ZoneGraveyard && hardMode && N(10)) return D(304);
+      //  （★旧实现漏了 halloween 单边门——halloween 未杀骷髅王也照出）
+      if ((this.world.clock.halloween || this.ZoneGraveyard) && hardMode && N(10)) return D(304);
       // L4454：Next(6) 或 满月（moonPhase==4）1/2 门
       if (N(6) || (moonPhase === 4 && N(2))) {
         // L4456：hard 1/3 → Wandering Eye 133
         if (hardMode && N(3)) return D(133);
+        // L4561：万圣节眼球变异 Next(317,319)=317|318（★旧注"节日未接"已接——季节旗建模后补）
+        if (this.world.clock.halloween && N(2)) return D(rng.int(0, 1) + 317);
         // L4464：1/2 → 恶魔眼族（1/4 小眼 -43）
         if (N(2)) return D(N(4) ? -43 : 2);
         // L4471-4516：switch(Next(5)) 僵尸族 190-194；各 1/3 小变体与本体【同帧同出】
@@ -3068,7 +3071,10 @@ export class VanillaSpawner {
       if (N(this.torchZombieChance)) {
         return D(this.spawnArmedZombies && expert && N(2) ? 591 : 590);
       }
-      // L4634：halloween/xMas 节日僵尸 319-321/331-332 段略（节日未接）
+      // L4634/L4639：万圣僵尸 319|320|321（Next(319,322)，1/2 门）/ 圣诞僵尸
+      //  331|332（Next(331,333)，1/2 门）——★旧注"节日未接"已接（季节旗建模后补）
+      if (this.world.clock.halloween && N(2)) return D(rng.int(0, 2) + 319);
+      if (this.world.clock.xMas && N(2)) return D(rng.int(0, 1) + 331);
       // L4644：专家持械僵尸 430-436——spawnArmedZombies && zombieStyle!=1 &&
       //   expertMode && Next(3)==0，按 zombieStyle 选型（0→430/2→432/3→433/4→434/
       //   5→435/6→436；style 1 无持械变体；switch 缺省 430）
@@ -3228,6 +3234,8 @@ export class VanillaSpawner {
       if (N(3)) return D(cavernMonsterType[rng.int(0, 1)][rng.int(0, 2)]);
       // L5010：ZoneGlowshroom && tile 70/190 → 孢子骷髅 635（蘑菇草/发光蘑菇块落脚）
       if (this.ZoneGlowshroom && (t === T.MUSHROOM_GRASS || t === T.MUSHROOM_BLOCK)) return D(635);
+      // L5115：万圣洞穴幽魂 Next(322,325)=322|323|324（1/2 门——★旧注"节日未接"已接）
+      if (this.world.clock.halloween && N(2)) return D(rng.int(0, 2) + 322);
       // L5120-5139：专家模式骨堆小动物——原版怪癖：`num56=Next(4)` 后三个 `==0`
       // 判定连写（1456 同款 :5031-5055），450/451 死码，实际分布 = 449×1/4、452×3/4。
       // 按反编译照抄（勿"修"成均匀四选）

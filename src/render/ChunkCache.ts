@@ -122,7 +122,7 @@ export class ChunkCache {
     if (c === undefined || c < 0) {
       const total = this.wallPages.length * ChunkCache.CELLS_PER_PAGE;
       if (total > 0) {
-        const pref = hash2(k) % total;
+        const pref = hash2(k, 0x9e3779b9, 0) % total;   // 单键散列：key 为 x、常数作 y
         const fi = this.cellFree.indexOf(pref);
         if (fi >= 0) {
           this.cellFree.splice(fi, 1);

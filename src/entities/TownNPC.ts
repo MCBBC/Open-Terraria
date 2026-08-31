@@ -1793,7 +1793,9 @@ export class TownNPC extends Entity {
       //     布线（:54143-54165）——社交拆对 + ai[0]=1（坐姿起身即此链的改写效应）+
       //     ai[1]=120+Next(120) + localAI[3]=0 + direction=-num15
       const fleeDir = -this.dangerSide;
-      if (this.walkMode === 1) {
+      // ★状态互斥：坐姿5/社交3·4·16·17 在原版都是非 1 态，恒走逃离布线臂——
+      // 本仓 walkMode 与它们并行存在（forceSit 不清走态残留），必须显式排除
+      if (this.walkMode === 1 && !this.sitting && !this.social) {
         // 行走臂（:54166-54171 字面 `direction != -num15 → direction=-num15`）
         if (this.facing !== fleeDir) this.facing = fleeDir;
         this.fleeing = true;                                   // :54467 逃速档
@@ -2023,7 +2025,11 @@ export class TownNPC extends Entity {
     const atRest = rest != null && myX === rest.x && myY === rest.y;
     if (this.turnLock > 0) this.turnLock--;                    // :54040-54042 站定态递减
     let wantDir = 0;
-    if (this.stationary || this.sitting || this.healing) return 0;   // 守卫老人/坐姿/治疗态不游走（ai[0]∉{0,1}）
+    if (this.stationary || this.sitting || this.healing
+      || this.atkState !== 0) return 0;   // ★状态机互斥：ai[0]∈{10..15} 时 idle/walk
+      // 两臂整体挂起（原版同一 else-if 阶梯，攻击支独占）——否则游走臂的拴绳
+      // 随机转身(:2118 rand(80))会在攻击态中翻 facing,把瞄准转向背离目标侧
+
     if (this.walkMode === 0) {
       // ---- 站定态（:54032-54168）----
       // 湿身城镇史莱姆强制走动（:54047-54054 flag10 = IsTownSlime；鳄鱼 flag9
@@ -2229,6 +2235,8 @@ export class TownNPC extends Entity {
       const dur = 420 * (rnd() < 0.5
         ? 1 + Math.floor(rnd() * 2)      // Next(1,3) ∈ {1,2}
         : 1 + Math.floor(rnd() * 3));    // Next(1,4) ∈ {1,2,3}
+      // ★阶梯语义对齐（蓝队补记）：C# else-if 一旦分支条件匹配，即便 body 内
+      // 目标扫描落空也整拍收尾——不续走后续 else-if 再耗掷。下同（②③④'⑤）。
       const partner = this.findChatPartner(world, game, false);
       if (partner) {
         const dir = this.x < partner.x ? 1 : -1;
@@ -2238,6 +2246,7 @@ export class TownNPC extends Entity {
         partner.facing = -dir;
         return true;
       }
+      return false;
     } else if (canTalk && this.walkMode === 0 && rnd() * 1800 < 1) {
       // ② 石头剪刀布对局（:55675-55701）
       const dur = 420 * (rnd() < 0.5
@@ -2256,6 +2265,7 @@ export class TownNPC extends Entity {
         partner.facing = -dir;
         return true;
       }
+      return false;
     } else if (!isPet && this.walkMode === 0 && rnd() * 1200 < 1
       && (this.vanillaId === 208
         || (!!world.scene?.partyUp && (TOWN_ATTACK_TYPE[this.vanillaId] ?? -1) === 0))) {
@@ -2269,6 +2279,7 @@ export class TownNPC extends Entity {
         this.facing = pl.x + pl.w / 2 < this.cx ? -1 : 1;
         return true;
       }
+      return false;   // 分支已命中掷门、玩家扫描落空 → 整拍收尾（阶梯语义）
     } else if (!isPet && this.walkMode === 0 && rnd() * 600 < 1 && this.vanillaId === 550) {
       // ④' 酒馆老板扔麦酒演出（:55886-55905 新批）：站定 1/600，玩家 150px +
       // CanHitLine(Top→Top) 才演——ai0=18 / ai1=300 / ai2=玩家槽 / 面向玩家。
@@ -2281,6 +2292,7 @@ export class TownNPC extends Entity {
         this.facing = pl.x + pl.w / 2 < this.cx ? -1 : 1;
         return true;
       }
+      return false;   // 分支已命中掷门、玩家扫描落空 → 整拍收尾（阶梯语义）
     } else if (!isPet && this.walkMode === 0 && rnd() * 1800 < 1) {
       // ④ 发呆（:55757-55762→1458 :55950 族）：45t（原版 45×Next(1,2)=45×1 恒定）
       this.social = { kind: 2, t: 45, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };
@@ -2307,6 +2319,7 @@ export class TownNPC extends Entity {
         this.facing = pl.x + pl.w / 2 < this.cx ? -1 : 1;
         return true;
       }
+      return false;   // 分支已命中掷门、玩家扫描落空 → 整拍收尾（阶梯语义）
     } else if (this.walkMode === 1 && rnd() * 600 < 1
       && this.plotAvoidClear(world.store)) {
       // ⑥ 驻足看家具（:55816-55835）：前方 10px 格 InteractableByNPCs
@@ -3686,7 +3699,7 @@ export class TownNPC extends Entity {
     if (a >= 500) radius = 600 + (1200 - 600) * Math.min(1, (a - 500) / 100);
     else if (a >= 100) radius = 300 + (600 - 300) * Math.min(1, (a - 100) / 200);
     if (a >= 30) {
-      const pl = game.player;
+      const pl = (game as { player?: typeof import('./Player').Player | undefined }).player;   // 测试桩可能不载 player——生产恒有，防御读
       if (pl && !pl.dead
         && Math.hypot(pl.cx - this.cx, pl.cy - this.cy) <= radius) {
         pl.buffs.apply(BuffType.DryadsWard, 2);   // AddBuff(165,120)=2s

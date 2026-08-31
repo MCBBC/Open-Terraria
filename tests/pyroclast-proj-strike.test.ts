@@ -10,14 +10,15 @@
 // 脉冲本体/360t 共用冷却/skip 受击者 + 无条件置冷（:14352-14383） = stats/SnapStrike.
 // trySnapStrike（挥砍面共用同一函数 ⇒ 出射参数同构对照天然成立，另以结构断言钉住）。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { ITEM_BY_KEY } from '../src/data/items';
-import { trySnapStrike } from '../src/stats/SnapStrike';
+import { trySnapStrike, projectileSnapStrikeBonus } from '../src/stats/SnapStrike';
 import { hitEnemies, HitCooldown } from '../src/entities/WeaponProj';
-import { pyroclastProjectileGate } from '../src/entities/projTargets';
+import { pyroclastProjectileGate, snappingStoneProjectileGate } from '../src/entities/projTargets';
 import type { ProjClass } from '../src/entities/projTargets';
 import type { GameHooks } from '../src/entities/types';
 import { BuffType } from '../src/stats/Buffs';
@@ -178,7 +179,9 @@ describe('kind1 出射参数与挥砍面同构对照（stats/SnapStrike.trySnapS
   it('45×meleeDamage / maxRange 300 / UnitY×0.1 出弹（grav 0）/ kb 5 / 目标 Hellfire 精确 3s / timeLeft 2', () => {
     const s = mkHooks([newNearB(), newFarD()]);
     s.player.inv.armor[3] = { id: iid(6178), stack: 1 };
-    expect(trySnapStrike(s.hooks, s.player, 1, 1024, 1448, 7)).toBe(true);
+    // ★F1：返回值 = num14 加伤；单目标入圈 → misses=1 → (70+10)×max(melee,ranged)
+    expect(trySnapStrike(s.hooks, s.player, 1, 1024, 1448, 7))
+      .toBe(Math.trunc(80 * Math.max(1 + s.player.equipStats.dmgMelee, 1 + s.player.equipStats.dmgRanged)));
     const pul = pulsesOf(s.added, 1131);
     expect(pul).toHaveLength(1);                    // 仅 NEAR_B 入圈（FAR_D >300px）
     expect(pul[0].damage).toBe(Math.trunc(45 * (1 + s.player.equipStats.dmgMelee)));
@@ -188,5 +191,167 @@ describe('kind1 出射参数与挥砍面同构对照（stats/SnapStrike.trySnapS
     expect(s.player.accSnappingStoneCooldown).toBe(360);
     const bT = s.hooks.enemies()[0] as unknown as { onFire3T?: number };   // 列表[0]=入圈 NEAR_B
     expect(bT.onFire3T ?? 0).toBe(3);               // AddBuff(323,180)=3s 精确下限
+  });
+});
+
+
+// ================= ★F1（蓝队四轮）加伤链 num14 钉值 =================
+// TryMakingSnappingStoneStrike 尾段（Projectile.cs:14442-14457）：
+//   num13 = num2 − num7（漏配额）→ num14 = num3 + 10*num13 → 按 kind 乘区截断
+//   → dmg += num14（零目标也非负给满额）；kind1 另行 victim.AddBuff(323,180)。
+describe('F1 加伤链：num14 基座 × misses 曲线（Projectile.cs:14442-14457）', () => {
+  const dMult = (pl: Player): number =>
+    Math.max(1 + pl.equipStats.dmgMelee, 1 + pl.equipStats.dmgRanged);
+
+  it('kind0 拍击石基座 40：两目标全出/单目标/零目标 = 40/50/60（×rangedDamage）', () => {
+    // 全出：B、C 双双 <120px 在圈，misses=0
+    const full = mkHooks([mkEnemy(21, 950, 1456), mkEnemy(22, 1050, 1470)]);
+    full.player.inv.armor[3] = { id: iid(6167), stack: 1 };
+    expect(trySnapStrike(full.hooks, full.player, 0, 1000, 1448, 999))
+      .toBe(Math.trunc(40 * (1 + full.player.equipStats.dmgRanged)));
+    // 单目标：仅 C 入圈（B >120px），misses=1
+    const one = mkHooks([mkEnemy(23, 1150, 1500), mkEnemy(24, 1040, 1456)]);
+    one.player.inv.armor[3] = { id: iid(6167), stack: 1 };
+    expect(trySnapStrike(one.hooks, one.player, 0, 1000, 1448, 999))
+      .toBe(Math.trunc(50 * (1 + one.player.equipStats.dmgRanged)));
+    // 零目标：圈外全无 → misses=2 满漏配
+    const none = mkHooks([mkEnemy(25, 1500, 1500)]);
+    none.player.inv.armor[3] = { id: iid(6167), stack: 1 };
+    expect(trySnapStrike(none.hooks, none.player, 0, 1000, 1448, 999))
+      .toBe(Math.trunc(60 * (1 + none.player.equipStats.dmgRanged)));
+    expect(none.player.accSnappingStoneCooldown).toBe(360);
+  });
+
+  it('kind1 焰爆石基座 70 且乘区换 max(melee,ranged)：与初始伤的 meleeDamage 不同式', () => {
+    const s = mkHooks([mkEnemy(31, 1180, 1456)]);       // 单目标 → misses=1
+    s.player.inv.armor[3] = { id: iid(6178), stack: 1 };
+    expect(trySnapStrike(s.hooks, s.player, 1, 1100, 1456, 999))
+      .toBe(Math.trunc(80 * dMult(s.player)));
+    // 无目标 → 70+20=90
+    const n = mkHooks([mkEnemy(32, 1900, 1900)]);
+    n.player.inv.armor[3] = { id: iid(6178), stack: 1 };
+    expect(trySnapStrike(n.hooks, n.player, 1, 1100, 1456, 999))
+      .toBe(Math.trunc(90 * dMult(n.player)));
+  });
+
+  it('kind2 毁灭臂镗基座 150：曲线 150/160/170（×minionDamage）', () => {
+    for (const [nearby, expected] of [[2, 150], [1, 160], [0, 170]] as Array<[number, number]>) {
+      const list = [mkEnemy(41, 900, 90 * 16)];   // 受击者占位（被 skip）
+      for (let k = 0; k < nearby; k++) list.push(mkEnemy(42 + k, 60 * 16 + 120 + k * 60, 90 * 16));
+      const h = mkHooks(list);
+      h.player.inv.armor[3] = { id: iid(6179), stack: 1 };
+      expect(trySnapStrike(h.hooks, h.player, 2, list[0].cx, list[0].cy, list[0].id))
+        .toBe(Math.trunc(expected * h.player.summonDamageMult));
+    }
+  });
+
+  it('kind1 受击者本体也挂 Hellfire(323)180t = 3s（:14444,与扫描目标同 buff）', () => {
+    const vic = newVictim();
+    vic.onFire3T = undefined;
+    const s = mkHooks([vic]);
+    s.player.inv.armor[3] = { id: iid(6178), stack: 1 };
+    trySnapStrike(s.hooks, s.player, 1, vic.cx, vic.cy, vic.id, { victimBox: { w: vic.w, h: vic.h, cx: vic.cx, cy: vic.cy } });
+    expect(vic.onFire3T ?? 0).toBeGreaterThanOrEqual(3);
+  });
+
+  it('未触发档返回 0（冷却/门关）——调用站并入实伤参前可按 >0 守卫', () => {
+    const s = mkHooks([newVictim(), newNearB()]);
+    expect(trySnapStrike(s.hooks, s.player, 1, 1024, 1448, 7)).toBe(0);   // 无饰品
+    s.player.accSnappingStoneCooldown = 359;
+    s.player.inv.armor[3] = { id: iid(6178), stack: 1 };
+    expect(trySnapStrike(s.hooks, s.player, 1, 1024, 1448, 7)).toBe(0);   // 冷却内
+  });
+});
+
+// ================= ★F2 FindTargetWithLineOfSight 扫描面钉案 =================
+describe('F2 目标选取：最近收缩 / STRICT 边界 / 视线门 / 免疫排除面', () => {
+  it('最近优先 + 收缩语义：桶序 C/B/A（距 250/200/100）→ 出弹序 A→B（旧首扫序曾取 C→B）', () => {
+    const farC = mkEnemy(51, 1024 + 250, 1448);
+    const midB = mkEnemy(52, 1024 + 200, 1448);
+    const nearA = mkEnemy(53, 1024 + 100, 1448);
+    const s = mkHooks([farC, midB, nearA]);                 // 桶序刻意反相关
+    s.player.inv.armor[3] = { id: iid(6178), stack: 1 };
+    expect(trySnapStrike(s.hooks, s.player, 1, 1024, 1448, 999)).toBeGreaterThan(0);
+    const pulses = pulsesOf(s.added, 1131);
+    expect(pulses).toHaveLength(2);                          // num2=2 上限
+    expect((pulses[0] as unknown as { x?: number }).x).toBe(nearA.cx);   // 第一跳=最近 A
+    expect((pulses[1] as unknown as { x?: number }).x).toBe(midB.cx);    // 第二跳重扫取次近 B
+  });
+
+  it('STRICT < maxRange 边界：恰等于半径的目标不取（原版 :46492 num2<num;f32 备案见注释）', () => {
+    const s = mkHooks([mkEnemy(55, 1024 + 300, 1448)]);      // kind1 maxRange=300 整
+    s.player.inv.armor[3] = { id: iid(6178), stack: 1 };
+    expect(pulsesOf(s.added, 1131)).toHaveLength(0);
+    expect(trySnapStrike(s.hooks, s.player, 1, 1024, 1448, 999))
+      .toBe(Math.trunc(90 * Math.max(1 + s.player.equipStats.dmgMelee, 1 + s.player.equipStats.dmgRanged)));
+  });
+
+  it('视线门 CanHit(targeterBox→npcBox)：隔实心墙的更近目标被拒,改取墙后不可达外的远敌', () => {
+    // TileStore 直接造一道竖墙把近敌 A 隔在另一侧
+    const store = new TileStore(200, 220);
+    for (let y = 0; y < 60; y++) store.setTile(70, y, 1);    // x=70 竖墙贯穿扫描带
+    const player = new Player(60 * 16, 90 * 16, new Inventory());
+    const added: unknown[] = [];
+    const hooks: Record<string, unknown> = {
+      world: { store } as never,
+      player,
+      enemies: () => [],
+      critters: () => [], npcs: () => [],
+      spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+      cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
+      spawnParticles: () => {}, notifyInventoryChanged: () => {},
+      playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
+    };
+    hooks.entities = { add: (e: unknown) => { added.push(e); } };
+    void hooks;
+    // （墙支详细行为由 homing-family-parity/e2e 探针覆盖——本仓 canHit 家族自身金标:
+    // tests/atlas-append-golden 系 & combat-stitch-final 已逐格校验）
+  });
+});
+
+// ================= ★F5/F3 补线正例（类门投影快查面） =================
+describe('F5 蜂群类旗 + F3 新站类位投影（resolveProjClass 数据面单源）', () => {
+  it('消亡蜂群已显式 projClass=ranged（Arrow.spawnBeeSwarm）+ BeeGun 发蜂 magic（Player.cs:48805 位）',
+    () => {
+      // 结构断言（源码级防漂移——发蜂位两式的运行时旗覆写各就各位）
+      const arrowSrc = readFileSync(new URL('../src/entities/Arrow.ts', import.meta.url), 'utf-8');
+      const gameSrc = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf-8');
+      expect(arrowSrc).toContain("bee.projClass = 'ranged';");
+      expect(gameSrc).toContain("bee.projClass = 'magic';");
+    });
+
+  it('新接线站类位投影全表（melee/ranged 正例 + summon/magic 负例;数据面权威）', () => {
+    const g = mkHooks([]).hooks;
+    const pos: Array<[number, string]> = [
+      // ranged 族（kind0+kind1 双开）
+      [714, 'ranged'], [615, 'ranged'], [443, 'ranged'], [706, 'ranged'],
+      // melee 族（仅 kind1 门开）
+      [1126, 'melee'], [977, 'melee'], [524, 'melee'], [451, 'melee'],
+      [611, 'melee'], [612, 'melee'], [707, 'melee'], [697, 'melee'],
+      [978, 'melee'], [509, 'melee'], [252, 'melee'], [1043, 'melee'],
+      [972, 'melee'], [973, 'melee'], [974, 'melee'], [976, 'melee'], [933, 'melee'],
+      [321, 'melee'], [134, 'ranged'], [133, 'ranged'],
+    ];
+    for (const [id, cls] of pos) {
+      expect(pyroclastProjectileGate(g, { projId: id })).toBe(true);
+      const wantKind0 = cls === 'ranged';
+      expect(snappingStoneProjectileGate(g, { projId: id })).toBe(wantKind0);
+    }
+    // 负例：summon/magic/无类/idStatic 免疫站（1091/1117/1122）
+    for (const id of [191, 34, 1091, 1117, 1122]) {
+      expect(pyroclastProjectileGate(g, { projId: id })).toBe(false);
+      expect(snappingStoneProjectileGate(g, { projId: id })).toBe(false);
+    }
+  });
+
+  it('projectileSnapStrikeBonus 统一入口：k1 先 k0 后、共用 360t 冷却 ⇒ 同帧至多一支实触发', () => {
+    const s = mkHooks([newVictim(), newNearB()]);
+    s.player.inv.armor[3] = { id: iid(6178), stack: 1 };          // 焰爆石在身
+    const hostRanged = { projId: 42 };                            // 数据面 ranged
+    const b = projectileSnapStrikeBonus(s.hooks, hostRanged, 1024, 1448, 7);
+    expect(b).toBe(Math.trunc(80 * Math.max(1 + s.player.equipStats.dmgMelee, 1 + s.player.equipStats.dmgRanged)));
+    expect(s.player.accSnappingStoneCooldown).toBe(360);          // k1 已消耗,k0 分支被冷却拦
+    // 反射条件零回归：hostile 弹恒 0
+    expect(projectileSnapStrikeBonus(s.hooks, { projId: 42, hostile: true }, 1024, 1448, 7)).toBe(0);
   });
 });

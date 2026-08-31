@@ -5635,7 +5635,15 @@ export class Arrow extends Entity {
           crit = res.crit;
         } else {
           // 暴击：基 4% + spawn 注入的系暴击/item.crit（P:2300-2304/P:25230-25232）
-          crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+          // ★Notes（蓝队四轮，2026-08-31）：TryConsumingTimerCrit 并入（Projectile.cs
+          //  :12928——Damage_PVE 每次命中在类三连掷后统一调用,对一切玩家弹生效;
+          //  蓄能暴击 6170 满蓄/负窗 → 强制 crit。脉冲弹 1121/1131/1132 出射后同样
+          //  在本环结算 ⇒ 注入面即此处；与 WeaponProj.hitEnemies :303 先例同式）。
+          //  仓内已有先例：VolcanoBlastProj/MountCombat/meleeOnHitProjs(977/524)。
+          crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100)
+            || ((game.player as unknown as
+              { tryConsumingTimerCrit?: (g: unknown, x: number, y: number, w: number, h: number) => boolean }
+              | null)?.tryConsumingTimerCrit?.(game, e.x, e.y, e.w, e.h) ?? false);
           if (crit) dmg *= 2;
         }
         if (this.ignite) {

@@ -1282,6 +1282,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     joinRoom: (url: string, token: string) => joinRoom(url, token), // 探针桥：房间制加入
     createRoom: (addr: string, opts: Record<string, unknown>) => createRoom(addr, opts as never), // 探针桥：建房
     loadJson: (text: string) => loadFromJson(text), // 读自有 json 存档（探针）
+    /** 探针桥：直达真实创建流（UIWorldLoadState 双进度条+worker 预览抓帧链路，
+     *  与 legacy newWorld 桥的差异=带 ?wprev/opts 全套参数——GenProgress 探针用） */
+    createWorldProbe: (cfg?: Record<string, unknown>) => createWorldFlow({
+      name: '进度探针', seed: String(424242), w: 4200, h: 1200,
+      size: 0, difficulty: 0, evil: -1 as const, ...(cfg ?? {}),
+    } as never),
     itemByKey: (key: string) => ITEM_BY_KEY[key]
       ?? (key.startsWith('vi_') ? undefined : undefined), // 探针桥：物品 id（key=完整定义键）
     /** 探针桥：原版 id → 定义键 → 内部 id（键名卫生批后 roomprobe 等老探针的

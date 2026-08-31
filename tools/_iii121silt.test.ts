@@ -13,10 +13,26 @@ import { TILE_DEFS } from '../src/data/tiles';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMudPass';
 import { TILE_BY_KEY } from '../src/data/tiles';
+import { canBeClearedDuringGenerationDual, dualDungeonState, setupDualDungeonTileProtection } from '../src/world/gen/vanilla/DungeonStyles1457';
 import { tileRunner, FRAME_IMPORTANT_SKIP_SHEETS } from '../src/world/gen/vanilla/TileRunner';
 
 
 const FRAME_IMP = new Set<number>(FRAME_IMPORTANT_SKIP_SHEETS);
+
+/** 探针侧双地牢态装配（cap-ddual base_dual.json 同源——与全管线 Dunes 头等价） */
+function setupProbeDualState(): void {
+  const du = JSON.parse(readFileSync('/tmp/iii99-out/cap-ddual/base_dual.json', 'utf8')) as {
+    enabled: boolean;
+    potentialBounds: Array<{ l: number; t: number; r: number; b: number }>;
+    dungeons: Array<{ theme: number }>;
+  };
+  dualDungeonState.enabled = du.enabled;
+  dualDungeonState.potentialBounds = du.potentialBounds as never;
+  if (!du.dungeons || du.dungeons.length < 2) return;
+  setupDualDungeonTileProtection(du.dungeons[0]!.theme, du.dungeons[1]!.theme, false);
+  void canBeClearedDuringGenerationDual;
+}
+
 const RUN = process.env.SW_I121 === '1';
 const G2 = '/tmp/iii84-out/x86-i78-ddual';
 const W = 4200, H = 1200;
@@ -144,6 +160,7 @@ function hydrate(idx: number, nm: string): TileStore {
   (globalThis as { __swTrCall?: (o: Record<string, unknown>) => void }).__swTrCall = (o) => {
     calls.push(`${calls.length}|${Math.round(Number(o.i))}|${Math.round(Number(o.j))}|${Number(o.strength).toFixed(2)}|${Math.round(Number(o.steps))}`);
   };
+  setupProbeDualState();
   const stB = hydrate(24, 'Dirt_To_Mud');
   runSiltPass(stB, new RNG(seedNum), mkGs());
   delete (globalThis as { __swTrCall?: unknown }).__swTrCall;
@@ -328,6 +345,67 @@ function hydrate(idx: number, nm: string): TileStore {
   }
   console.log(`[i121f2] done cursor=${cursor}/${traceR.length} mismatchRuns=${mismatchRuns} acceptAll=${acceptAll.size}`);
 
+  // 逐格决策仪（run58 抽样对拍）
+  {
+    const TRGT2 = 58;
+    const gg = globalThis as { __swTrCell?: (seq: number, o: Record<string, number>) => void; __swTrRunSeq?: { v: number }; __swTrCall?: unknown };
+    const seq = { v: -1 };
+    gg.__swTrRunSeq = seq;
+    gg.__swTrCall = () => { seq.v++; };
+    const cellsRec: Array<{ ti: number; x: number; y: number; px: number; py: number; n1: number; dist: number; draw: number }> = [];
+    gg.__swTrCell = (r, o) => { if (r === TRGT2) cellsRec.push({ ti: Number(o.ti), x: Number(o.x), y: Number(o.y), px: Number(o.px), py: Number(o.py), n1: Number(o.num1), dist: Number(o.dist), draw: Number(o.draw) }); };
+    // ★全 pass 计数模式：visited/accepted 引擎级总账
+    let visAll = 0, accAll = 0;
+    gg.__swTrRunSeq = seq;
+    gg.__swTrCall = () => { seq.v++; };
+    gg.__swTrCell = (r, o) => { void r; visAll++; if (!(Number(o.dist) >= Number(o.num1) * 0.5 * (1 + Number(o.draw) * 0.015))) accAll++; };
+    const stC = hydrate(24, 'Dirt_To_Mud');
+    runSiltPass(stC, new RNG(seedNum), mkGs());
+    console.log(`[countAll] engine visited=${visAll} accepted=${accAll}`);
+    gg.__swTrCell = (r, o) => { if (r === TRGT2) cellsRec.push({ ti: Number(o.ti), x: Number(o.x), y: Number(o.y), px: Number(o.px), py: Number(o.py), num1: Number(o.num1), dist: Number(o.dist), draw: Number(o.draw) }); };
+    const stC2 = hydrate(24, 'Dirt_To_Mud');
+    runSiltPass(stC2, new RNG(seedNum), mkGs());
+    delete gg.__swTrCell;
+    delete gg.__swTrCall;
+    delete gg.__swTrRunSeq;
+    console.log(`[cellRun58] engine visited=${cellsRec.length}`);
+    // 引擎接受集（type 变化含 slope/half 不变类型——仅用 type）
+    const accE = new Set<number>();
+    {
+      // 用事件盒重演可精确恢复：此处直接以「本 runner 视角内容演化」重算接受与真实访问序一致
+      // ——利用 cell 记录本身：visit 序即接受判定输入；draw 值已录。接受 ⇔ dist<thr
+      for (const cr of cellsRec) {
+        if (!(cr.dist >= cr.n1 * 0.5 * (1 + cr.draw * 0.015))) accE.add(cr.ti);
+      }
+    }
+    console.log(`[cellRun58] engine accepts=${accE.size}`);
+    // 写迹仪采集运行（同前）拿 writeRunner 映射，取该 runner 的引擎写集做对照
+    void accE;
+    const wrTallyLocal = new Map<number, number>();
+    for (let ti = 0; ti < W * H; ti++) if (tC0[ti] !== stC.type[ti]) wrTallyLocal.set(ti, 58);
+    let mismCell = 0;
+    const sampleMis: string[] = [];
+    for (const [ti] of wrTallyLocal) {
+      if (!accE.has(ti)) { mismCell++; if (sampleMis.length < 8) sampleMis.push(`${ti % W},${(ti / W) | 0}`); }
+    }
+    console.log(`[cellRun58] engineWrites=${wrTallyLocal.size} notAcceptedButWritten=${mismCell}(${sampleMis.join(' ')})`);
+  }
+
+  // 写迹仪取证：runner 序号 → 每次真实写的格
+  const writeRunner = new Int32Array(W * H).fill(-1);
+  {
+    const gg = globalThis as { __swTrWrite?: (seq: number, ti: number) => void; __swTrRunSeq?: { v: number }; __swTrCall?: unknown };
+    const seq = { v: -1 };
+    gg.__swTrRunSeq = seq;
+    gg.__swTrCall = () => { seq.v++; };
+    gg.__swTrWrite = (r, ti) => { writeRunner[ti] = r; };
+    const stW = hydrate(24, 'Dirt_To_Mud');
+    runSiltPass(stW, new RNG(seedNum), mkGs());
+    delete gg.__swTrWrite;
+    delete gg.__swTrCall;
+    delete gg.__swTrRunSeq;
+  }
+
   // 引擎写集
   const gsW = mkGs();
   const stEng = hydrate(24, 'Dirt_To_Mud');
@@ -341,6 +419,21 @@ function hydrate(idx: number, nm: string): TileStore {
   const simOnly: number[] = [];
   for (const qi of acceptAll) if (!engAcc.has(qi)) simOnly.push(qi);
   console.log(`[i121f2] engWritten=${engAcc.size} simAccepted=${acceptAll.size} engOnly=${engOnly.length} simOnly=${simOnly.length}`);
+  {
+    const wrTally = new Map<number, number>();
+    for (const qi of engOnly.slice(0, 20000)) wrTally.set(writeRunner[qi], (wrTally.get(writeRunner[qi]) ?? 0) + 1);
+    const top = [...wrTally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+    console.log(`[i121f2] engOnly writer-run top: ${JSON.stringify(top)} distinct=${wrTally.size}`);
+    // 抽一个 top runner 与其步态对照
+    const kk = top[0]?.[0];
+    if (kk !== undefined && kk >= 0) {
+      const cE = callsL[kk]!;
+      console.log(`[i121f2] sample run#${kk}: i=${cE[1]} j=${cE[2]} st=${cE[3]} sp=${cE[4]} steps=${evAll[kk]?.length}`);
+      for (const e of (evAll[kk] ?? []).slice(0, 6)) {
+        console.log(`   ev it${e.iter} px=${e.px.toFixed(3)} py=${e.py.toFixed(3)} n1=${e.num1.toFixed(3)} rolled=${e.rolled} skips=${e.skips}`);
+      }
+    }
+  }
   writeFileSync('/tmp/iii121-out/eng-only.txt', engOnly.map((i) => `${i % W},${(i / W) | 0}`).join('\n') + '\n');
   // engOnly 底物类型 + 归属（查事件扩展盒覆盖）
   const preT = le16(`${pre(24, 'Dirt_To_Mud')}.typ`);
@@ -350,6 +443,54 @@ function hydrate(idx: number, nm: string): TileStore {
   // 裕度直方图（差集 ∩ 接受集）
   const unowned = [...diffSet].filter((i) => !recMap.has(i));
   console.log(`[i121f2] accepted diff-cells=${recMap.size}/992 unowned=${unowned.length}`);
+  // ★owner census：真值事件盒覆盖下的 owner 分布（含空隙案复核）
+  {
+    const ownersOf = new Map<number, Set<number>>();
+    for (const qi of unowned) ownersOf.set(qi, new Set());
+    const cand: number[] = [];
+    // 只扫描 loop2 小跑者（k>=504）——大跑者的盒大、事件少，先粗扫全部但限定了格数
+    for (let k = 0; k < evAll.length; k++) {
+      for (const e of evAll[k] ?? []) {
+        const x0 = Math.max(1, Math.floor(e.px - e.num1 * 0.5));
+        const x1 = Math.min(W - 1, Math.floor(e.px + e.num1 * 0.5));
+        const y0 = Math.max(1, Math.floor(e.py - e.num1 * 0.5));
+        const y1 = Math.min(H - 1, Math.floor(e.py + e.num1 * 0.5));
+        void x0; void x1; void y0; void y1;
+      }
+    }
+    // 对每个 unowned 格扫其附近 ±6 的所有步态盒
+    const xyOf = new Map<number, string>();
+    for (let yy = 0; yy < H; yy++) { /* 惰性生成 */ }
+    for (const qi of unowned) {
+      const ex = qi % W, ey = (qi / W) | 0;
+      const tally = new Map<number, number>();
+      for (let k = 0; k < evAll.length; k++) {
+        const evs = evAll[k];
+        // 快速拒绝：runner 起点（i,j）远离则跳过
+        const si = callsL[k]![1], sj = callsL[k]![2];
+        if (Math.abs(si - ex) > 60 || Math.abs(sj - ey) > 60) continue;
+        for (const e of evs ?? []) {
+          const x0 = Math.max(1, Math.floor(e.px - e.num1 * 0.5) - 2);
+          const x1 = Math.min(W - 1, Math.ceil(e.px + e.num1 * 0.5) + 2);
+          const y0 = Math.max(1, Math.floor(e.py - e.num1 * 0.5) - 2);
+          const y1 = Math.min(H - 1, Math.ceil(e.py + e.num1 * 0.5) + 2);
+          if (ex >= x0 && ex <= x1 && ey >= y0 && ey <= y1) { tally.set(k, (tally.get(k) ?? 0) + 1); break; }
+        }
+      }
+      for (const kk of tally.keys()) ownersOf.get(qi)!.add(kk);
+    }
+    let cov0 = 0, cov1p = 0;
+    const runTally = new Map<number, number>();
+    for (const [qi, oo] of ownersOf) {
+      if (oo.size === 0) cov0++;
+      else cov1p++;
+      for (const kk of oo) runTally.set(kk, (runTally.get(kk) ?? 0) + 1);
+    }
+    const top = [...runTally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14);
+    console.log(`[i121f2] unowned ownership: noneBox=${cov0} boxed=${cov1p} topRuns=${JSON.stringify(top)} distinctRuns=${runTally.size}`);
+    writeFileSync('/tmp/iii121-out/unowned-owners.txt', [...ownersOf].map(([qi, oo]) => `${qi % W},${(qi / W) | 0}|${[...oo].join(' ')}`).join('\n') + '\n');
+    void cand; void xyOf;
+  }
   const hist = new Map<string, number>();
   const samp = new Map<string, { xy: string; r: Rec }>();
   for (const [idx, arr] of recMap) {

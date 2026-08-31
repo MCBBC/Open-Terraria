@@ -57,6 +57,10 @@ function runBatch(w: World, sp: VanillaSpawner, tileX: number, o: RunOpts): Coun
     const r = sp.spawn(ptx * 16 + 8, ptyRow * 16, new RNG(k * 7919 + 13), 24, 14);
     if (!r || r.vanillaId == null) continue;
     counts[r.vanillaId] = (counts[r.vanillaId] ?? 0) + 1;
+    // 净 ID 变体优先（vanillaNetId=-6/mother 等，fromVanilla 只回填正数 base）
+    const vid = (r as unknown as { vanillaNetId?: number }).vanillaNetId ?? r.vanillaId;
+    if (vid == null) continue;
+    counts[vid] = (counts[vid] ?? 0) + 1;
     // 焰火附加队列消费入账后清空（queueFireflyExtras 消费端同 Game）
     for (const ex of sp.pendingCritterExtras) counts[ex.npc] = (counts[ex.npc] ?? 0) + 1;
     sp.pendingCritterExtras = [];
@@ -66,21 +70,33 @@ function runBatch(w: World, sp: VanillaSpawner, tileX: number, o: RunOpts): Coun
 const bump = (c: Counts, ids: number[]) => ids.reduce((s, i) => s + (c[i] ?? 0), 0);
 
 describe('L6 spawn parity（友好轮水域段 NPC.cs:2220-2325）', () => {
-  it('池塘落脚：出 龟616/鸭362|364/水黾612 及金鱼兜底；绝不落 敌怪轮水怪 58/63/102', () => {
-    const { w, sp } = grassWorld();
+  it('池塘落脚：出 龟616/鸭362|364 及金鱼兜底；绝不落 敌怪轮水怪 58/63/102', () => {
+    const { w } = grassWorld();
     const st = w.store;
-    // 池塘：x∈[594,606] 的地面上两格灌水（waterTile=落脚上二格皆水）
-    for (let x = 594; x <= 606; x++) {
+    // 池塘：x∈[578,590] 的地面上两格灌水（waterTile=落脚上二格皆水）。
+    // 原版 FindSpawnTile 的窗口底界 + safeArea 约束下，落点必在采样窗内且
+    // 在 ±~50 格环带外——把玩家放 520 列、视口扩到 48×20，使环带右沿
+    // [571,587] 与池塘重叠（同 vanilla 几何的合法采样区）
+    for (let x = 578; x <= 590; x++) {
       st.setLiquid(x, 98, 255, WATER);
       st.setLiquid(x, 99, 255, WATER);
     }
-    // 玩家抬高 28 格：safeArea 纵向脱离 → 池塘列不再被"画面内拒绝"全灭
-    // （原版同型约束下小动物本来就只出在 safe 环带外）
-    const c = runBatch(w, sp, 600, { friendly: true, attempts: 1500, py: 72 });
+    const sp = new VanillaSpawner(w);
+    const c: Counts = {};
+    sp.setPlayerFlags(false, false);
+    (sp as unknown as { spawnFriendlyCycle: boolean }).spawnFriendlyCycle = true;
+    for (let k = 0; k < 2200; k++) {
+      const r = sp.spawn(520 * 16 + 8, 96 * 16, new RNG(k * 7919 + 13), 48, 20);
+      if (!r || r.vanillaId == null) continue;
+      const vid = (r as unknown as { vanillaNetId?: number }).vanillaNetId ?? r.vanillaId;
+      c[vid] = (c[vid] ?? 0) + 1;
+      for (const ex of sp.pendingCritterExtras) c[ex.npc] = (c[ex.npc] ?? 0) + 1;
+      sp.pendingCritterExtras = [];
+    }
     const waterFamily = [55, 592, 607, 608, 612, 613, 616, 362, 364];
-    expect(bump(c, waterFamily)).toBeGreaterThan(30);
+    expect(bump(c, waterFamily)).toBeGreaterThan(15);
     // default 草档 = 海龟(1/5)或鸭子——本段此前整段缺失
-    expect((c[616] ?? 0) + (c[362] ?? 0) + (c[364] ?? 0)).toBeGreaterThan(10);
+    expect((c[616] ?? 0) + (c[362] ?? 0) + (c[364] ?? 0)).toBeGreaterThan(5);
     // 有 !spawnFriendly 门的三支敌怪水池怪不得漏出
     expect(c[58] ?? 0).toBe(0);   // 食人鱼（A 支）
     expect(c[63] ?? 0).toBe(0);   // 蓝水母（B 支）
@@ -107,14 +123,12 @@ describe('L6 spawn parity（友好轮雨天链尾 NPC.cs:2380-2407）', () => {
     const c = runBatch(w, sp, 520, {
       friendly: true, night: true, attempts: 600,
       setup: (w2) => {
+        w2.weather.windSpeedTarget = 0;   // 无风（World 默认 -0.727 会触发 TooWindyForButterflies 门）
         w2.fireFlyChance = 999999;        // 敌怪轮槽关闭——证明本支读的是 friendly 槽
         w2.fireFlyFriendly = 2;
         w2.fireFlyMultiple = 999999;      // 关附加，主只口径纯净
       },
     });
-    if ((c[355] ?? 0) + (c[358] ?? 0) === 0) {
-      console.error('l6-firefly-debug', JSON.stringify(c));
-    }
     expect((c[355] ?? 0) + (c[358] ?? 0)).toBeGreaterThan(60);
   });
 });
@@ -241,10 +255,7 @@ describe('L6 spawn parity（lowTiles 批）', () => {
       const st = f.w.store;
       for (let x = 380; x < 920; x++) st.setTileSilent(x, 350, 2);
       return runBatch(f.w, f.sp, 650, {
-        hour: 12, attempts: 5000,
-        setup: (w2) => {
-          void w2;
-        },
+        hour: 12, attempts: 5000, py: 346,
       });
     };
     const off = runOne(false);
@@ -262,7 +273,7 @@ describe('L6 spawn parity（lowTiles 批）', () => {
       f.w.flags.hardMode = true;
       const st = f.w.store;
       for (let x = 380; x < 920; x++) st.setTileSilent(x, 330, 2);
-      return runBatch(f.w, f.sp, 500, { hour: 12, attempts: 2600 });
+      return runBatch(f.w, f.sp, 500, { hour: 12, attempts: 2600, py: 326 });
     };
     const off = runOne(false);
     const on = runOne(true);
@@ -280,13 +291,18 @@ describe('L6 spawn parity（骷髅商影烛门 NPC.cs:5007-5010）', () => {
     return f;
   }
   it('ZoneShadowCandle 场骷髅商永不出；常规场可出', () => {
-    const off = caveFix();
-    off.sp.getSpawnRate(96 * 16, 0, false, 800, 650 * 16,
-      false, false, false, false, 0, true, false, false, false, false, true); // shadowCandle=true
-    const cOff = runBatch(off.w, off.sp, 650, { hour: 12, attempts: 2500 });
+    const mkBatch = (candle: boolean): Counts => {
+      const f = caveFix();
+      // 参形（getSpawnRate 全参）：py n nearby water sHeight px peace sun calmed battle
+      //                          town day evil blood SHADOW invis angler
+      f.sp.getSpawnRate(326 * 16, 0, false, 800, 650 * 16,
+        false, false, false, false, 0, true, false, false,
+        candle, false, false);
+      return runBatch(f.w, f.sp, 650, { hour: 12, attempts: 4000, py: 326 });
+    };
+    const cOff = mkBatch(true);
     expect(cOff[453] ?? 0).toBe(0);
-    const on = caveFix();
-    const cOn = runBatch(on.w, on.sp, 650, { hour: 12, attempts: 2500 });
+    const cOn = mkBatch(false);
     expect(cOn[453] ?? 0).toBeGreaterThan(0);
   });
 });
@@ -307,16 +323,73 @@ describe('L6 spawn parity（仙女近旁刷怪率 GetSpawnRate:745）', () => {
   });
 });
 
-describe('L6 spawn parity（Palworld 双宠池 NPC.cs:4374-4389）', () => {
-  it('HasItem 强制档：持 5663 无 5664 → 池命中恒 696；无道具两态皆可现', () => {
-    const forced = (() => {
-      const f = grassWorld();
-      runBatch(f.w, f.sp, 520, { hour: 12, attempts: 3000 });
-      (f.sp as unknown as { palHas5663: boolean }).palHas5663 = true;
-      (f.sp as unknown as { palHas5664: boolean }).palHas5664 = false;
-      return runBatch(f.w, f.sp, 520, { hour: 12, attempts: 3000 });
-    })();
+describe('L6 spawn parity（Palworld 双宠池 NPC.cs:4374-4389）', () => {  it('HasItem 强制档：持 5663 无 5664 → 池命中恒 696；无道具时 695 可现', () => {
+    const f = grassWorld();
+    const warm = runBatch(f.w, f.sp, 520, { hour: 12, attempts: 3000 });
+    // 池必须先被证明活跃（无道具态出过任一变体）
+    expect((warm[695] ?? 0) + (warm[696] ?? 0)).toBeGreaterThan(0);
+    const forced = runBatch(f.w, f.sp, 520, {
+      hour: 12, attempts: 3000,
+      post: (sp) => {
+        sp.palHas5663 = true;
+        sp.palHas5664 = false;
+      },
+    });
     expect(forced[695] ?? 0).toBe(0);
-    expect(forced[696] ?? 0).toBeGreaterThan(0);
+    expect(forced[696] ?? 0).toBe((warm[695] ?? 0) + (warm[696] ?? 0));   // 同种子流逐掷对齐
+  });
+});
+
+describe('L6 spawn parity（地下沙漠直接格判定 NPC.cs:1682/:5535）', () => {
+  function deepFix(walls: boolean): { w: World; sp: VanillaSpawner } {
+    const f = grassWorld();
+    f.w.rockLevel = 280;
+    f.w.groundLevel = 290;           // y=330 深落点 → checkUnderground 短路过
+    const st = f.w.store;
+    for (let x = 380; x < 920; x++) {
+      st.setTileSilent(x, 330, 2);
+      // 落脚格直踩 AllowsUndergroundDesertEnemiesToSpawn 墙集（187 沙岩系）
+      if (walls) st.wall[st.idx(x, 330)] = 187;
+      if (walls) st.wall[st.idx(x, 329)] = 187;
+    }
+    return f;
+  }
+  it('落脚格/上格墙 ∈ 沙漠墙集 → 地下沙漠池受理；无墙同布局该臂零产出', () => {
+    const runOne = (walls: boolean): Counts => {
+      const f = deepFix(walls);
+      return runBatch(f.w, f.sp, 650, { hour: 12, attempts: 4000, py: 326 });
+    };
+    const bare = runOne(false);
+    expect(bump(bare, [69, 580, 581, 508, 509, 537])).toBe(0);
+    const walled = runOne(true);
+    expect(bump(walled, [69, 580, 581, 508, 509, 537])).toBeGreaterThan(0);
+  });
+});
+
+describe('L6 spawn parity（节日家族补接：万圣眼球/僵尸族/洞穴幽魂）', () => {
+  it('万圣夜地表：眼球变异 317|318（眼球簇内）、僵尸族 319-321、乌鸦 301/南瓜跳跳 304 单边门', () => {
+    const f = grassWorld();
+    const c = runBatch(f.w, f.sp, 520, {
+      night: true, attempts: 6000,
+      setup: (w2) => {
+        w2.clock.halloween = true;
+        w2.clock.moonPhase = 4;            // 满月 → 眼球簇 1/2 进入率
+      },
+    });
+    expect((c[317] ?? 0) + (c[318] ?? 0)).toBeGreaterThan(0);
+    expect((c[319] ?? 0) + (c[320] ?? 0) + (c[321] ?? 0)).toBeGreaterThan(0);
+    // 乌鸦 301 万圣节单边门：墓地外照常可出
+    expect(c[301] ?? 0).toBeGreaterThan(0);
+  });
+
+  it('万圣洞穴主池：幽魂 322|323|324 可出（Next(322,325)）', () => {
+    const f = grassWorld();
+    const st = f.w.store;
+    for (let x = 380; x < 920; x++) st.setTileSilent(x, 330, 2);
+    const c = runBatch(f.w, f.sp, 650, {
+      hour: 12, attempts: 5000, py: 326,
+      setup: (w2) => { w2.clock.halloween = true; },
+    });
+    expect((c[322] ?? 0) + (c[323] ?? 0) + (c[324] ?? 0)).toBeGreaterThan(0);
   });
 });

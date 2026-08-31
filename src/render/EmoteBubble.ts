@@ -27,6 +27,9 @@ export function emoteSnapshot(): Array<{ emote: number; lifeTime: number }> {
   return bubbles.map((b) => ({ emote: b.emote, lifeTime: b.lifeTime }));
 }
 
+/** 测试/探针：清空全部气泡（隔离用例间模块态） */
+export function emoteClearAll(): void { bubbles.length = 0; }
+
 // 探针句柄：挂在 window 上保证与 Game/Renderer 同一模块实例（HMR ?t= 分叉时
 // 动态 import 会拿到另一份模块实例，气泡数恒 0 的假象来源）
 if (typeof window !== 'undefined') {

@@ -19,8 +19,6 @@
 //  - 风暴门 :53399-53402：Main.IsItStorming（= _shouldUseStormMusic，迟滞机
 //    Main.cs:12927-12960，阈值 0.34/0.4/0.4/0.5 见 :66137-66140）且
 //    position.Y/16 < worldSurface
-vi.stubGlobal('localStorage', { getItem: (k: string) => (k === 'sw_slope_g2' ? '0' : null) });
-// A/B 鉴别桩：G2 关闭态跑本文件——若转绿则 1% 距离差归因 G2，否则为在册抖动族
 import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { TownNPC } from '../src/entities/TownNPC';

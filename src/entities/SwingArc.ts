@@ -17,6 +17,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, canBeChasedBy, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { prettyStarSparkle } from '../render/Renderer';
 import { canHitLine } from '../physics/LineOfSight';
 import { drawStripTrail } from '../fx/TrailShader';
@@ -113,7 +114,16 @@ export class SwingArc extends Entity {
       if (!(ex - bw / 2 < e.x + e.w && ex + bw / 2 > e.x && ey - bh / 2 < e.y + e.h && ey + bh / 2 > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(applyBannerDamageDealt(game, e, dmg), this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
+      // ★F3 接线（蓝队四轮）①：锚弧（this.projId=972/982/983/997/984，数据面 melee）
+      // → 焰爆石/拍击石双支（Projectile.cs:13439-13446）；加伤在 banner 外随暴击并入
+      const snapBonusArc = projectileSnapStrikeBonus(game,
+        { projId: this.projId }, (e as { cx?: number }).cx ?? e.x + e.w / 2,
+        (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.cx, cy: e.cy },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusArc ? Math.trunc(snapBonusArc * (crit ? 2 : 1)) : 0),
+        this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       this.hitSet.add(e.id);
       // ★1457 无头骑士剑 997 命中召南瓜弹 321（Projectile.cs:13728-13732：门 =
       // (!immortal|flag9) && !SpawnedFromStatue && !CountsAsCritter——flag9 仅调试
@@ -349,7 +359,17 @@ export class TrueNightsEdgeSlash extends Entity {
         if (!(ex - reach / 2 < e.x + e.w && ex + reach / 2 > e.x && ey - 30 * this.scaleCur < e.y + e.h && ey + 30 * this.scaleCur > e.y)) continue;
         const crit = Math.random() < this.critChance;
         const dmg = crit ? this.damage * 2 : this.damage;
-        e.hurt(applyBannerDamageDealt(game, e, dmg), this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
+        // ★F3 接线（蓝队四轮）②：真永夜刃伸长斩 973（数据面 melee）——双支同序；
+        // 排除面 = 本弹 local 免疫窗投影
+        const snapBonusTrueEdge = projectileSnapStrikeBonus(game,
+          { projId: 973 }, (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
+          { victimBox: { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+            cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 },
+            targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+        e.hurt(applyBannerDamageDealt(game, e, dmg)
+          + (snapBonusTrueEdge ? Math.trunc(snapBonusTrueEdge * (crit ? 2 : 1)) : 0),
+          this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
         this.hitCd.set(e.id, 5);
       }
     }
@@ -475,7 +495,15 @@ export class NightsEdgeFly extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
+      // ★F3 接线（蓝队四轮）③：永夜刃飞斩变体 972（数据面 melee）——双支同序
+      const snapBonusFly = projectileSnapStrikeBonus(game,
+        { projId: 972 }, e.cx ?? e.x + e.w / 2, e.cy ?? e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2,
+          cy: e.cy ?? e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusFly ? Math.trunc(snapBonusFly * (crit ? 2 : 1)) : 0),
+        Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       this.hitCd.set(e.id, 9999);
     }
   }
@@ -744,6 +772,12 @@ export class ZenithSword extends Entity {
       const crit = Math.random() < this.critChance;
       // Main.DamageVar ±15% 浮动（同挥击侧公式）
       const dmg = Math.max(1, Math.round(this.damage * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
+      // ★F3 接线（蓝队四轮）④：天顶剑终弹 933（数据面 melee）——双支同序；加伤随暴击并入
+      const snapBonusZenith = projectileSnapStrikeBonus(game,
+        { projId: 933 }, e.cx ?? e.x + e.w / 2, e.cy ?? e.y + e.h / 2, e.id,
+{ victimBox: { w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2,
+          cy: e.cy ?? e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
       e.hurt(applyBannerDamageDealt(game, e, dmg), this.spriteDir * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.hitCd.set(e.id, 7);
     }
@@ -998,6 +1032,12 @@ export class LightsBaneSlash extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
+      // ★F3 接线（蓝队四轮）⑤：魔光剑斩痕 974（数据面 melee）——双支同序
+      const snapBonusLb = projectileSnapStrikeBonus(game,
+        { projId: 974 }, e.cx ?? e.x + e.w / 2, e.cy ?? e.y + e.h / 2, e.id,
+{ victimBox: { w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2,
+          cy: e.cy ?? e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.dirX) * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.hitCd.set(e.id, 10);
     }
@@ -1096,7 +1136,15 @@ export class GrassSlash extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
+      // ★F3 接线（蓝队四轮）⑥：草剑飞叶 976（数据面 melee）——双支同序
+      const snapBonusGrass = projectileSnapStrikeBonus(game,
+        { projId: 976 }, e.cx ?? e.x + e.w / 2, e.cy ?? e.y + e.h / 2, e.id,
+{ victimBox: { w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2,
+          cy: e.cy ?? e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusGrass ? Math.trunc(snapBonusGrass * (crit ? 2 : 1)) : 0),
+        Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       this.hitCd.set(e.id, 10);
     }
   }
@@ -1214,6 +1262,12 @@ export class HorsemansPumpkin extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
+      // ★F3 接线（蓝队四轮）⑦：无头骑士南瓜弹 321（数据面 melee）——双支同序
+      const snapBonusPumpkin = projectileSnapStrikeBonus(game,
+        { projId: 321 }, e.cx ?? e.x + e.w / 2, e.cy ?? e.y + e.h / 2, e.id,
+{ victimBox: { w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2,
+          cy: e.cy ?? e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx || 1) * this.kb, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       // Kill 特效（Projectile.cs:77759-77773：SoundID.Item10 + 2×20 尘 6 反速 ×2）
       game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);

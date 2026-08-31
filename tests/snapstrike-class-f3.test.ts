@@ -80,7 +80,8 @@ describe('F3：脉冲弹出射类旗现场定类 + crit 通道注入', () => {
     expect(player.equipStats.accPyroclast).toBe(true);
     expect(player.critChance('melee')).toBe(0);                 // 近战通道为零值
     expect(player.critChance('ranged')).toBe(5);
-    expect(trySnapStrike(hooks, player, 1, 960, 1440, 999)).toBe(true);
+    expect(trySnapStrike(hooks, player, 1, 960, 1440, 999))
+      .toBe(Math.trunc((70 + 10 * (2 - 2)) * Math.max(1 + player.equipStats.dmgMelee, 1 + player.equipStats.dmgRanged)));   // ★F1:两目标全出 misses=0
     const pulses = pulsesOf(added, 1131);
     expect(pulses.length).toBe(2);                              // num2=2 目标上限
     for (const pu of pulses) {
@@ -94,26 +95,39 @@ describe('F3：脉冲弹出射类旗现场定类 + crit 通道注入', () => {
     const { hooks, player, added } = mkHooks([mkEnemy(1, 1080, 1440)]);
     player.inv.armor[3] = { id: iid(6178), stack: 1 };
     player.buffs.apply(BuffType.Werewolf, 30);
-    expect(trySnapStrike(hooks, player, 1, 960, 1440, 999)).toBe(true);
+    expect(trySnapStrike(hooks, player, 1, 960, 1440, 999))
+      .toBe(Math.trunc((70 + 10 * (2 - 1)) * Math.max(1 + player.equipStats.dmgMelee, 1 + player.equipStats.dmgRanged)));   // ★F1:单目标 misses=1
     const a = pulsesOf(added, 1131)[0];
     expect(a.projClass).toBe('melee');
     expect(a.critChance).toBeCloseTo((4 + 2) / 100, 10);
     // 持平档（0 vs 0）：flag4 = mC>rC 为 false → ranged（原版比较符严格大于）
     const h2 = mkHooks([mkEnemy(2, 1080, 1440)]);
     h2.player.inv.armor[3] = { id: iid(6178), stack: 1 };
-    expect(trySnapStrike(h2.hooks, h2.player, 1, 960, 1440, 999)).toBe(true);
+    expect(trySnapStrike(h2.hooks, h2.player, 1, 960, 1440, 999))
+      .toBe(Math.trunc((70 + 10 * (2 - 1)) * Math.max(1 + h2.player.equipStats.dmgMelee, 1 + h2.player.equipStats.dmgRanged)));   // ★F1
     const b = pulsesOf(h2.added, 1131)[0];
     expect(b.projClass).toBe('ranged');
     expect(b.critChance).toBeCloseTo((4 + 0) / 100, 10);
   });
 
   it('拍击石 6167 kind0：1121 数据面/显式双致 ranged（原版本就无翻旗）——近战暴击再高也只吃远程掷臂', () => {
-    const { hooks, player, added } = mkHooks([mkEnemy(1, 1080, 1440)]);
+    // ★STRICT 边界钉案（蓝队四轮）：先证"恰等于 maxRange=120px 的目标【不】取"
+    // （原版 :46492 `num2 < num` 严格小于;旧仓 `>` 宽松判定曾把 120px 收进圈）
+    {
+      const edge = mkHooks([mkEnemy(21, 1080, 1440)]);          // |1080-960| = 120 = maxRange
+      edge.player.inv.armor[3] = { id: iid(6167), stack: 1 };
+      expect(pulsesOf(edge.added, 1121)).toHaveLength(0);       // 零脉冲 = STRICT 拒收
+      expect(trySnapStrike(edge.hooks, edge.player, 0, 960, 1440, 999))
+        .toBe(Math.trunc((40 + 10 * 2) * (1 + edge.player.equipStats.dmgRanged)));   // 全漏配档 =(40+20)
+      expect(edge.player.accSnappingStoneCooldown).toBe(360);   // 无目标也置冷
+    }
+    const { hooks, player, added } = mkHooks([mkEnemy(1, 1040, 1440)]);   // 距 80 < 120 ✓
     player.inv.armor[3] = { id: iid(6167), stack: 1 };          // 拍击石 → accSnappingStone 门
     player.buffs.apply(BuffType.Werewolf, 30);
     player.buffs.apply(BuffType.Tipsy, 30);
     expect(player.critChance('melee')).toBeGreaterThan(player.critChance('ranged'));
-    expect(trySnapStrike(hooks, player, 0, 960, 1440, 999)).toBe(true);
+    expect(trySnapStrike(hooks, player, 0, 960, 1440, 999))
+      .toBe(Math.trunc((40 + 10 * (2 - 1)) * (1 + player.equipStats.dmgRanged)));   // ★F1:misses=1
     const pu = pulsesOf(added, 1121)[0];
     expect(pu).toBeDefined();
     expect(pu.projClass).toBe('ranged');
@@ -124,7 +138,8 @@ describe('F3：脉冲弹出射类旗现场定类 + crit 通道注入', () => {
     const { hooks, player, added } = mkHooks([mkEnemy(1, 1180, 1440)]);   // 距触发点 220 < 400
     player.inv.armor[3] = { id: iid(6179), stack: 1 };          // 毁灭臂镗 → accArmletOfRuin 门
     expect(player.equipStats.accArmletOfRuin).toBe(true);
-    expect(trySnapStrike(hooks, player, 2, 960, 1440, 999)).toBe(true);
+    expect(trySnapStrike(hooks, player, 2, 960, 1440, 999))
+      .toBe(Math.trunc((150 + 10 * (2 - 1)) * player.summonDamageMult));   // ★F1:kind2 加伤基座 150
     const pu = pulsesOf(added, 1132)[0];
     expect(pu).toBeDefined();
     expect(pu.projClass).toBeUndefined();                       // 无类旗不伪造

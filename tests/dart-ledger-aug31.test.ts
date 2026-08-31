@@ -12,7 +12,7 @@ import { FlyingKnifeProj, limitPointToPlayerReachableArea,
 import { World } from '../src/world/World';
 import type { GameHooks } from '../src/entities/types';
 
-const made: Array<{ destroy?: () => void }> = [];
+const made: unknown[] = [];
 
 interface MockEnemy {
   id: number; x: number; y: number; w: number; h: number;
@@ -53,7 +53,7 @@ function makeHooks(enemies: unknown[] = [], tiles = 300): GameHooks {
 }
 
 afterEach(() => {
-  for (const m of [...made]) m.destroy?.();
+  for (const m of [...made]) (m as { destroy?: () => void }).destroy?.();
   made.length = 0;
 });
 
@@ -141,7 +141,7 @@ describe('A2 537 观星者激光：宿主失联下拍即灭', () => {
     d.fixedUpdate(1, g);
     expect(d.dead).toBe(false);
     let dmgCalls = 0;
-    (g as { damagePlayer: () => void }).damagePlayer = () => { dmgCalls++; };
+    (g as unknown as { damagePlayer: () => void }).damagePlayer = () => { dmgCalls++; };
     host.dead = true;
     d.fixedUpdate(1, g);
     expect(d.dead).toBe(true);
@@ -186,7 +186,7 @@ describe('B5 束测距 LaserScan→HitLine 整格量化(Collision.cs:4599/:782)'
     const g = makeHooks([], 600);
     const w = (g.world as unknown as { store: {
       setTileSilent(x: number, y: number, t: number): void } });
-    for (let y = 0; y < 600; y++) w.store.setTileSilent(420, y, 1);   // x=420 格全高墙
+    for (let y = 0; y < 600; y++) w.store.setTileSilent(360, y, 1);   // x=360 格全高墙(距起点格 144≤150)
     // 束原点（宿主眼）=格 (246,251)：host.cx+6=3944、host.cy−4=4016
     const host = beamHost(3938, 4020);
     (g.enemies as unknown as () => unknown[]) = () => [host];
@@ -196,7 +196,7 @@ describe('B5 束测距 LaserScan→HitLine 整格量化(Collision.cs:4599/:782)'
     made.push(d);
     d.fixedUpdate(1, g);
     const len = (d as unknown as { beamLen: number }).beamLen;
-    const expectLen = ((420 - 246) * 16) * 0.5;            // col=(420,251)→174 格×16 ×Lerp0.5
+    const expectLen = ((360 - 246) * 16) * 0.5;            // col=(360,251)→114+? 格×16 ×Lerp0.5
     expect(len).toBeCloseTo(expectLen, 5);
   });
 });

@@ -704,12 +704,20 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       selected: 0,
     },
     // 城镇 NPC（原版 WorldFile town NPC 段）：spriteId→key（bound 型映射并置 bound），
-    // 坐标=像素，home=tile（-1=homeless）。原版 Starter_World 等 wld 自带的已入驻 NPC
-    // 此前被丢弃——读档只剩"向导+五人组"，入住系统重复搬入出生房
+    // 坐标=像素，home=tile。原版 Starter_World 等 wld 自带的已入驻 NPC 此前被丢弃——
+    // 读档只剩"向导+五人组"，入住系统重复搬入出生房。
+    // ★home 判定三条件（2026-08-31 入住丢失定谳）：
+    //  ① homeless 位必须为 false——原版无家者可带正值 homeTile（换人链 WorldGen.cs:
+    //     2214-2217、QuickFindHome 失败支 ：5705 均保留旧值，唯 SetDefaults 才置 -1）；
+    //  ② 原版 homeTileX/Y 存的是「住房领取锚点」（菜单点击格/QuickFindHome 扫描点），
+    //     可落在家具/平台/地板等【房界格】上；本仓 home 约定=站立空格。此差异在
+    //     读档侧用 snapSavedHome 归一（Game afterWorldLoad），导入侧原样透传；
+    //  ③ -1 兜底（老档/corrupt 防御）。
     npcs: wld.npcs.flatMap((n): NonNullable<SaveData['npcs']> => {
       const entry = TOWN_NPC_KEY_BY_ID[n.spriteId];
       if (!entry) return [];   // 旅商/骷髅商等不落存档的类型跳过
-      const home = n.homeX >= 0 && n.homeY >= 0 ? [n.homeX, n.homeY] as [number, number] : null;
+      const hasHome = !n.homeless && n.homeX >= 0 && n.homeY >= 0;
+      const home = hasHome ? [n.homeX, n.homeY] as [number, number] : null;
       return [{ key: entry.key, x: n.x, y: n.y, home, bound: entry.bound, givenName: n.name || undefined }];
     }),
     // ★R16-1（2026-08-24）：LoadWorldFlags 全量旗标透传（WldParser.flags ~40 位：

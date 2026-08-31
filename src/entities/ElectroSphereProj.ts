@@ -19,6 +19,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 
 export const ELECTROSPHERE_PROJ = 443;
 /** timeLeft（NewProjectile :11067-11070 钳 300 = 5s） */
@@ -117,7 +118,16 @@ export class ElectroSphereProj extends Entity {
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if ((e.iframes ?? 0) > 0) continue;                // immune[owner] 门（:11869）
       const crit = Math.random() < (4 + this.critBonus) / 100;
-      e.hurt(applyBannerDamageDealt(game, e, Math.max(1, Math.trunc(this.damage))), 0, 0, game, this.armorPen, crit, 2, true);
+      // ★F3 接线（蓝队四轮）：电球 443 数据面 ranged（SetDefaults :5139-5149）→
+      // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner
+      // 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
+      const snapBonusSphere = projectileSnapStrikeBonus(game,
+        { projId: ELECTROSPHERE_PROJ }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(applyBannerDamageDealt(game, e, Math.max(1, Math.trunc(this.damage)))
+        + (snapBonusSphere ? Math.trunc(snapBonusSphere * (crit ? 2 : 1)) : 0),
+        0, 0, game, this.armorPen, crit, 2, true);
       e.iframes = ELECTROSPHERE_IFRAMES;                 //（:14072-14074，覆写通用档 10）
     }
   }

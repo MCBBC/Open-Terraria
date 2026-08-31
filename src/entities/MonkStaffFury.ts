@@ -34,6 +34,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { hitTownNpcs, playerCanHitEnemy, canBeChasedBy, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 
@@ -69,10 +70,19 @@ type EnemyLike = {
 
 type RectLike = { x: number; y: number; w: number; h: number };
 
-/** 近战弹通用命中结算（音/飘值=StrikeNPC 单点;fromPlayer=DPS 计） */
+/** 近战弹通用命中结算（音/飘值=StrikeNPC 单点;fromPlayer=DPS 计）
+ *  ★F3 接线（蓝队四轮）：四型号（697/698/699/700）数据面 melee → 焰爆石/拍击石双支
+ *  （Projectile.cs:13439-13446）在本共享出口单点接线；加伤在 banner 外随暴击并入 */
 function hurtEnemy(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean,
-  kb: number, kdir: number, pen: number): void {
-  e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * kb, 0, game, pen, crit, 0, true);
+  kb: number, kdir: number, pen: number,
+  host?: { projId: number; x: number; y: number; w: number; h: number }): void {
+  const snapBonusFury = projectileSnapStrikeBonus(game,
+    { projId: host?.projId }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+    { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+      targeterBox: host ? { x: host.x, y: host.y, w: host.w, h: host.h } : undefined });
+  e.hurt(applyBannerDamageDealt(game, e, dmg)
+    + (snapBonusFury ? Math.trunc(snapBonusFury * (crit ? 2 : 1)) : 0),
+    kdir * kb, 0, game, pen, crit, 0, true);
 }
 
 /** 浸剂三链（melee 弹命中侧；SkyDragonFury.applyHits 同款——null 门跳过测试态） */
@@ -273,7 +283,7 @@ export class MonkStaffSpin extends Entity {
       const dmg = crit ? this.damage * 2 : this.damage;
       // 击退向远离【玩家】中心（Damage num40 特列 :13652-13661）
       const kdir = Math.sign((e.x + e.w / 2) - this.owner.cx) || this.dir;
-      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen);
+      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
       applyImbue(game, e);
     }
     // ---- CutTiles 沿挥轴 ±40（:15326-15334，宽 width×scale≈21.6 → 12px 步进采样）----
@@ -358,7 +368,7 @@ export class MonkSlam extends Entity {
       const dmg = crit ? this.damage * 2 : this.damage;
       // 击退向 = 默认弹体相对向（698 不在 Damage num40 特列 :13652-13661）
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || this.vxSign;
-      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen);
+      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
       applyImbue(game, e);
     }
   }
@@ -508,7 +518,7 @@ export class GhastlyGlaiveProj extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign((e.x + e.w / 2) - this.owner.cx) || facing;   // 远离玩家（:13652-13661）
-      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen);
+      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
       applyImbue(game, e);
       // SummonMonkGhast（Damage :14272-14274 → :15238-15265；localAI[0]=1000 单次门）
       if (!this.ghastSummoned) this.summonGhast(game);
@@ -651,7 +661,7 @@ export class MonkGhast extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       const kdir = Math.sign(this.vx) || 1;          // 默认弹体方向（700 不在 num40 特列）
-      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen);
+      hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen, this);
       applyImbue(game, e);
     }
   }

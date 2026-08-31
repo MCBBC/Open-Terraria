@@ -90,6 +90,11 @@ export interface DungeonStyleData {
   /** ★IIIII88：DitherSnake 边缘抖动门（DungeonGenerationStyles.cs 各档 EdgeDither 字段,
    *  1457 转录曾缺省——蛇槽涂绘 SkipPaintForEdge 的分叉键）。Default 档恒 false。 */
   EdgeDither: boolean;
+  /** ★IIIII121：子风格表（Cavern=[Shimmer,Spider,LivingWood] / Hallow=[Crystal] /
+   *  Jungle=[Beehive,LivingMahogany],DungeonGenerationStyles.cs :224/:472/:638）——
+   *  canBeClearedDuringGenerationDual 合并 isDungeonTile 时须随主风格一并入表
+   *  （DungeonCrawler.cs:146-154 合并语义）。 */
+  SubStyles?: DungeonStyleData[];
 }
 
 const T = DualDungeonUnbreakableWallTiers;
@@ -211,6 +216,12 @@ export const DungeonGenerationStyles: Record<string, DungeonStyleData> = {
     EdgeDither: false,
   },
 };
+
+// ★IIIII121：子风格表回填（自引用须在 record 定义后完成;DungeonGenerationStyles.cs
+//   :224 Cavern=[Shimmer,Spider,LivingWood] / :472 Hallow=[Crystal] / :638 Jungle=[Beehive,LivingMahogany]）
+DungeonGenerationStyles.Cavern.SubStyles = [DungeonGenerationStyles.Shimmer, DungeonGenerationStyles.Spider, DungeonGenerationStyles.LivingWood];
+DungeonGenerationStyles.Hallow.SubStyles = [DungeonGenerationStyles.Crystal];
+DungeonGenerationStyles.Jungle.SubStyles = [DungeonGenerationStyles.Beehive, DungeonGenerationStyles.LivingMahogany];
 
 /** DungeonGenerationStyles.GetCurrentDungeonStyle（:680-719）：Default 档工厂——
  *  砖族取自 CurrentDungeonGenVars（SetupDungeonGenVarVariables :56-108 掷的主题）。
@@ -511,7 +522,69 @@ export const dualDungeonState: {
    *  （WorldGen.cs:11488-11490 Reset 双地牢支：1-0.075×maxTilesY/1200）——
    *  DitherSnake 控制线边界带宽系数（DungeonControlLine 静态字段同源）。 */
   normalizedDistanceSafeFromDither: number;
+  /** ★IIIII121：CanBeClearedDuringGeneration 动态支的 isDungeonTile 合并表
+   *  （每地牢一张,vanilla sheet id 索引;Dunes 头 setup 后绪,Silt/Ores 等清块面消费）。 */
+  tileProtection?: boolean[][];
 } = { enabled: false, potentialBounds: [], dungeons: [], normalizedDistanceSafeFromDither: 1 };
+
+/** ★IIIII121：SetupDungeonGenVarVariables×2 的 isDungeonTile 合并面
+ *  （DungeonCrawler.cs:131-176 完整语义——克隆 Main.tileDungeon 基表
+ *  {41,43,44,677,678,679},再并入两套样式表（含 SubStyles）的
+ *  BrickTileType/BrickGrassTileType/ExtraTileTypes）。★奇偶分支条件
+ *  `num2 == 0 || num2 != 1` 恒真 ⇒ **两座地牢都用 [Cavern,Crimson|Corruption,
+ *  Jungle,Default]** ——原反编译 else 支死码,勿按直觉改回奇偶二分。
+ *  在 Dunes 头（主题两掷齐后）调用;早于 Silt/OresAndShinies 消费窗。 */
+function boolArrayOf(vals: number[]): boolean[] {
+  const t = new Array<boolean>(1024).fill(false);
+  for (const v of vals) t[v] = true;
+  return t;
+}
+
+export function setupDualDungeonTileProtection(d0Theme: number, d1Theme: number, crimson: boolean): void {
+  if (!dualDungeonState.enabled) return;
+  const styleListFor = (theme: number): DungeonStyleData[] => [
+    DungeonGenerationStyles.Cavern,
+    crimson ? DungeonGenerationStyles.Crimson : DungeonGenerationStyles.Corruption,
+    DungeonGenerationStyles.Jungle,
+    getCurrentDungeonStyle({
+      brickTileType: theme === 0 ? 41 : theme === 1 ? 43 : 44,
+      brickCrackedTileType: theme === 0 ? 481 : theme === 1 ? 482 : 483,
+      brickWallType: theme === 0 ? 7 : theme === 1 ? 8 : 9,
+      windowGlassWallType: theme === 0 ? 91 : theme === 1 ? 92 : 90,
+      windowClosedGlassWallType: theme === 0 ? 96 : theme === 1 ? 94 : 98,
+      windowEdgeWallType: theme === 0 ? 8 : theme === 1 ? 9 : 7,
+      windowPlatformItemTypes: [theme === 0 ? 1386 : theme === 1 ? 1385 : 1384],
+    }),
+  ];
+  const base = boolArrayOf([41, 43, 44, 677, 678, 679]);
+  const merge = (list: DungeonStyleData[]): boolean[] => {
+    const t = base.slice();
+    for (const s of list) {
+      const fam: DungeonStyleData[] = [s, ...(s.SubStyles ?? [])];
+      for (const st of fam) {
+        t[st.BrickTileType] = true;
+        if (st.BrickGrassTileType !== undefined) t[st.BrickGrassTileType] = true;
+        if (st.ExtraTileTypes !== undefined) for (const v of st.ExtraTileTypes) t[v] = true;
+      }
+    }
+    return t;
+  };
+  dualDungeonState.tileProtection = [merge(styleListFor(d0Theme)), merge(styleListFor(d1Theme))];
+}
+
+/** WorldGen.CanBeClearedDuringGeneration 双地牢动态支（WorldGen.cs:81453-81460）：
+ *  generating && dualDungeons.Enabled && InAnyPotentialDungeonBounds(x,y)
+ *  && IsConsideredDungeonTile(type, allDungeons:true) ⇒ **不可清**。@returns true=可清 */
+export function canBeClearedDuringGenerationDual(typeSheet: number, x: number, y: number): boolean {
+  const tp = dualDungeonState.tileProtection;
+  if (!dualDungeonState.enabled || !tp || tp.length === 0) return true;
+  if (!inAnyPotentialDungeonBounds(x, y)) return true;
+  if (typeSheet < 0) return true;
+  for (const tbl of tp) {
+    if (typeSheet < tbl.length && tbl[typeSheet]) return false;
+  }
+  return true;
+}
 
 /** DungeonUtils.InAnyPotentialDungeonBounds（:2136-2165,ContainsWithFluff fluff=0 语义
  *  =半开矩形含端判定;JS 侧 DungeonPass.potContains 同构）。 */

@@ -49,6 +49,7 @@ import { projSprite } from './Arrow';
 import { applyProjStatus } from './projStatus';
 import { hitCritters, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { damageVarRoll } from '../stats/DamageVar';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { GorePiece } from './GorePiece';
 import type { GameHooks } from './types';
 import { playerCanHitEntity } from '../physics/LineOfSight';
@@ -268,7 +269,15 @@ export class VolcanoBlastProj extends Entity {
       let dmgVar = damageVarRoll(this.damage,
         ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
       dmgVar = applyBannerDamageDealt(game, e, dmgVar);
-      e.hurt(dmgVar * (crit ? 2 : 1),
+      // ★F3 接线（蓝队四轮）：978 火山大剑爆焰数据面 melee（SetDefaults :9255-9271）→
+      // 焰爆石/拍击石双支（Projectile.cs:13439-13446）随 Damage() 生效；加伤在 banner
+      // 采样外、随暴击并入实伤参（序注见 stats/SnapStrike.ts F1 迁移）
+      const snapBonusVolcano = projectileSnapStrikeBonus(game,
+        { projId: 978 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(dmgVar * (crit ? 2 : 1)
+        + (snapBonusVolcano ? Math.trunc(snapBonusVolcano * (crit ? 2 : 1)) : 0),
         kdir * Math.abs(this.knockback || 1), 0, game, this.armorPen, crit, 0, true);
       // StatusNPC（Projectile.cs:11365）：AddBuff(24,180)=On Fire! 3s（提取表驱动）
       applyProjStatus(978, e as unknown as Record<string, number | undefined>);

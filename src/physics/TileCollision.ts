@@ -275,12 +275,14 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
  *    坡面爬行不反弹。
  *  天花板坡对称：门取 max(当前头，入口头+速度Y)。
  *  ★回退开关：localStorage sw_slope_g2='0'（重进世界生效）恢复旧无条件贴合。 */
-const SLOPE_G2 = (() => {
+let SLOPE_G2 = (() => {
   try { return typeof localStorage === 'undefined' || localStorage.getItem('sw_slope_g2') !== '0'; }
   catch { return true; }
 })();
 /** 回退审计用（tests/slope-g2 kill-switch 断言）：G2 门当前是否启用 */
 export const SLOPE_G2_ENABLED = SLOPE_G2;
+/** 运行时切换（探针 A/B 鉴别用；生产回退仍走 localStorage 重进世界） */
+export function setSlopeG2(v: boolean): void { SLOPE_G2 = v; }
 
 /** 原版 Collision.SlopeCollision（1456 Collision.cs:1796-2036）适配：
  *  常规碰撞后对重叠坡面格做对角线贴合——身体沉到斜面下时抬回斜面上
@@ -459,10 +461,6 @@ function slopeCollide(
       b.vy = 0;
     }
   }
-  // ★临时诊断钩（sw_slope_dbg=true 启用;验证后删）:slopeCollide 决策快照
-  const dbg = (globalThis as { __SW_SLOPEDBG?: unknown[] }).__SW_SLOPEDBG;
-  if (dbg && bestLift < 0) dbg.push({ phase: 'lift', lift: -bestLift, x: b.x, feet: b.y + b.h });
-  if (dbg && bestSnapY > 0) dbg.push({ phase: 'snap', gap: bestSnapGap, snapY: bestSnapY, x: b.x, feet: b.y + b.h });
 }
 
 /** 原版 Collision.noSlopeCollision（Collision.cs:2038-2113）+ NPC.Collision_MoveBlazingWheel

@@ -18,7 +18,7 @@ import { TileStore } from '../src/world/TileStore';
 import { RNG } from '../src/core/rng';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 import type { ChestSink } from '../src/world/gen/vanilla/BuriedChestsPass';
-import { flipGenSolid } from '../src/world/gen/vanilla/GenSolid';
+import { flipGenSolid, snapshotGenSolid, restoreGenSolid } from '../src/world/gen/vanilla/GenSolid';
 import { rollHouseChestCounts } from '../src/world/gen/vanilla/CaveHousePass';
 import { runCaveHousesPass } from '../src/world/gen/vanilla/CaveHousePass';
 import { runStatuesPass } from '../src/world/gen/vanilla/StatuesPass';
@@ -111,6 +111,10 @@ function desVal(v: unknown): unknown {
             const gs = lastGenState();
             if (!gs) throw new Error('gs missing');
             writeFileSync(`${OUT}/base_gs.json`, JSON.stringify(serVal(gs)));
+            // ★IIIII101：GenSolid 固有翻转态快照（MountCaves 137/130 等跨 pass 持久
+            //   翻转在重放侧默认缺失曾致房找半砖面漂移——控制链 gold-g 同样复现）
+            const snap = snapshotGenSolid();
+            writeFileSync(`${OUT}/base_gensolid.json`, JSON.stringify([...snap.entries()]));
             console.log(`captured @${lab} out=${OUT}`);
             done = true;
           }
@@ -189,6 +193,13 @@ function cmpAgainst(tag: string, idx: number, st: TileStore): void {
 (RUN_RE ? it : it.skip)(`replay statues+chest bundle vs G2`, () => {
   const N = W * H;
   const { st, gs } = hydrate();
+  // ★IIIII101：GenSolid 固有翻转态恢复（重放侧缺省=默认表，漏掉 MountCaves
+  //   137/130 等跨 pass 持久翻转曾致房找结果漂——控制链 gold-g 同样复现）
+  if (existsSync(`${OUT}/base_gensolid.json`)) {
+    const arr = JSON.parse(readFileSync(`${OUT}/base_gensolid.json`, 'utf8')) as [number, boolean][];
+    restoreGenSolid(new Map(arr));
+    console.log(`[i101] GenSolid 快照恢复 (${arr.length} 项)`);
+  }
   // 基座自检 vs #058_Statues（base 取自 ▶UHBChests 重播点=前态，须逐位相等）
   {
     const pre = `${G2}/058_${DUMPNAME.get(58)}`;

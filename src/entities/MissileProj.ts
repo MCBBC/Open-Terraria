@@ -522,8 +522,9 @@ export class MagicMissileProj extends Entity {
       // 返回 num14 加伤随暴击并入实伤参。
       const snapBonusMissile = projectileSnapStrikeBonus(game, this,
         (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
-        e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
-          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+        e.id, { victimBox: { w: e.w, h: e.h,
+          cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
         + (snapBonusMissile ? Math.trunc(snapBonusMissile * (crit ? 2 : 1)) : 0),
         Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);   // 音/飘值=单点
@@ -891,8 +892,9 @@ export class FlyingKnifeProj extends Entity {
       // 天然拒；返回 num14 加伤随暴击并入实伤参
       const snapBonusKnife = projectileSnapStrikeBonus(game, this,
         (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
-        e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
-          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+        e.id, { victimBox: { w: e.w, h: e.h,
+          cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
         + (snapBonusKnife ? Math.trunc(snapBonusKnife * (crit ? 2 : 1)) : 0),
         Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点
@@ -1004,8 +1006,9 @@ export class StarfuryStar extends Entity {
       // 老星怒落星 9 数据面 melee → 过 kind1 门即脉冲；返回 num14 加伤随暴击并入实伤参
       const snapBonusStar = projectileSnapStrikeBonus(game, this,
         (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
-        e.id, { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
-          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 });
+        e.id, { victimBox: { w: e.w, h: e.h,
+          cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
+          cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
       e.hurt(applyBannerDamageDealt(game, e, dmg)
         + (snapBonusStar ? Math.trunc(snapBonusStar * (crit ? 2 : 1)) : 0),
         Math.sign(this.vx) * 5, 0, game, this.armorPen, crit, this.pierce, true);   // 音/飘值=单点

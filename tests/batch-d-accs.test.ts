@@ -139,19 +139,22 @@ describe('拍击石系三脉冲', () => {
     const { hooks, player, added } = makeHooks(victims);
     player.inv.armor[3] = { id: iid(6179), stack: 1 };
     const hit = trySnapStrike(hooks, player, 2, victims[0].cx, victims[0].cy, victims[0].id);
-    expect(hit).toBe(true);
+    // ★F1：返回值改为 num14 加伤（150 基座 + 10×misses=0 两发全出 ×minionDamage）
+    expect(hit).toBe(Math.trunc(150 * player.summonDamageMult));
     const strikes = added.filter((a) => (a as { projId?: number }).projId === 1132);
     expect(strikes.length).toBe(2);                       // num2 = 2 目标上限
     expect(player.accSnappingStoneCooldown).toBe(360);    // :14382-14383
     // 冷却内再触发 = false
-    expect(trySnapStrike(hooks, player, 2, victims[0].cx, victims[0].cy, victims[0].id)).toBe(false);
+    expect(trySnapStrike(hooks, player, 2, victims[0].cx, victims[0].cy, victims[0].id)).toBe(0);   // 冷却拦下=加伤 0（旧布尔 false 档）
   });
 
   it('焰爆石 kind1：45×近战伤/300px + 目标 323 Hellfire 180t（:14360-14362/:14396-14401）', () => {
     const victims = [mkEnemy(4, 60 * 16, 90 * 16), mkEnemy(5, 60 * 16 + 100, 90 * 16)];
     const { hooks, player, added } = makeHooks(victims);
     player.inv.armor[3] = { id: iid(6178), stack: 1 };
-    expect(trySnapStrike(hooks, player, 1, victims[0].cx, victims[0].cy, victims[0].id)).toBe(true);
+    // ★F1：misses=1（只找到 victims[1] 一目标）→ (70+10)×max(melee,ranged)
+    expect(trySnapStrike(hooks, player, 1, victims[0].cx, victims[0].cy, victims[0].id))
+      .toBe(Math.trunc((70 + 10) * Math.max(1 + player.equipStats.dmgMelee, 1 + player.equipStats.dmgRanged)));
     expect(added.some((a) => (a as { projId?: number }).projId === 1131)).toBe(true);
     expect(victims[1].onFire3T).toBe(3);                  // AddBuff(323,180)=3s
   });
@@ -159,9 +162,12 @@ describe('拍击石系三脉冲', () => {
   it('无对应饰品 → 不触发（门在调用侧,此处兜底）;拍击石 kind0 伤 = 30×远程伤（:14356-14358）', () => {
     const v = [mkEnemy(6, 60 * 16, 90 * 16), mkEnemy(7, 60 * 16 + 100, 90 * 16)];
     const { hooks, player, added } = makeHooks(v);
-    expect(trySnapStrike(hooks, player, 0, v[0].cx, v[0].cy, v[0].id)).toBe(false);
+    expect(trySnapStrike(hooks, player, 0, v[0].cx, v[0].cy, v[0].id)).toBe(0);   // 无饰品=不触发
+    expect(player.accSnappingStoneCooldown).toBe(0);
     player.inv.armor[3] = { id: iid(6167), stack: 1 };    // 拍击石
-    expect(trySnapStrike(hooks, player, 0, v[0].cx, v[0].cy, v[0].id)).toBe(true);
+    // ★F1：两目标全出 → misses=0 下限档 = (40+0)×rangedDamage
+    expect(trySnapStrike(hooks, player, 0, v[0].cx, v[0].cy, v[0].id))
+      .toBe(Math.trunc(40 * (1 + player.equipStats.dmgRanged)));
     expect(added.some((a) => (a as { projId?: number }).projId === 1121)).toBe(true);
   });
 });

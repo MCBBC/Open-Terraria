@@ -14,6 +14,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 
 /** Daybreak（BuffType 189）——611/612 命中授予 300t（:10703-10708）；无 Buff 表直写计时 */
 function applyDaybreak(e: Record<string, number>): void {
@@ -58,7 +59,13 @@ export class SolarFlare extends Entity {
       if (!(this.cx - reach < e.x + e.w && this.cx + reach > e.x && this.cy - reach < e.y + e.h && this.cy + reach > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, 0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★F3 接线（蓝队四轮）：爆焰 612 数据面 melee → 焰爆石/拍击石双支（13439-46）
+      const snapBonusFlare612 = projectileSnapStrikeBonus(game,
+        { projId: 612 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(dmg + (snapBonusFlare612 ? Math.trunc(snapBonusFlare612 * (crit ? 2 : 1)) : 0),
+        0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       applyDaybreak(e as unknown as Record<string, number>);
       this.hitCd.set(e.id, 4);
     }
@@ -138,7 +145,15 @@ export class SolarEruptionWhip extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(dmg, Math.sign(this.vx) * 2, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★F3 接线（蓝队四轮）：链鞭 611 数据面 melee（SetDefaults :6399-6415）→
+      // 焰爆石/拍击石双支（13439-46）；加伤随暴击并入实伤参
+      const snapBonusWhip611 = projectileSnapStrikeBonus(game,
+        { projId: 611 }, e.cx ?? e.x + e.w / 2, e.cy ?? e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2,
+          cy: e.cy ?? e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(dmg + (snapBonusWhip611 ? Math.trunc(snapBonusWhip611 * (crit ? 2 : 1)) : 0),
+        Math.sign(this.vx) * 2, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       applyDaybreak(e as unknown as Record<string, number>);
       this.hitCd.set(e.id, 4);
       if (this.lai1 <= 0) {                            // 612 节流（:13229-13236）

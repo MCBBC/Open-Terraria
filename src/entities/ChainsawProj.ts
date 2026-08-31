@@ -23,6 +23,7 @@ import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { damageVar } from '../stats/ScaleStats';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 
 /** 玩家侧挂点状态（RotatedRelativePoint 消费，Player.cs:4063-4089）：
  *  cx/cy = MountedCenter（:3189-3194；本仓不建模坐骑挂点偏移，恒等玩家中心）；
@@ -209,7 +210,15 @@ export class ChainsawProj extends Entity {
       const owner = game as unknown as { player?: { luck?: number } };
       const raw = damageVar(this.damage, -(owner.player?.luck ?? 0));
       const dmg = crit ? raw * 2 : raw;
-      e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
+      // ★F3 接线（蓝队四轮）：链锯/钻头持械弹（509 屠夫链锯/252 叶绿插孔锤，
+      // 数据面 melee）→ 焰爆石/拍击石双支（Projectile.cs:13439-13446）；加伤随暴击并入
+      const snapBonusSaw = projectileSnapStrikeBonus(game,
+        { projId: this.projId }, e.x + e.w / 2, e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusSaw ? Math.trunc(snapBonusSaw * (crit ? 2 : 1)) : 0),
+        Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
       this.hitCd.set(e.id, 10);
     }
   }
