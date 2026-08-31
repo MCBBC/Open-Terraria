@@ -165,9 +165,9 @@ describe('拍击石系三脉冲', () => {
     expect(trySnapStrike(hooks, player, 0, v[0].cx, v[0].cy, v[0].id)).toBe(0);   // 无饰品=不触发
     expect(player.accSnappingStoneCooldown).toBe(0);
     player.inv.armor[3] = { id: iid(6167), stack: 1 };    // 拍击石
-    // ★F1：两目标全出 → misses=0 下限档 = (40+0)×rangedDamage
+    // ★F1：扫描候选仅 v[1]（v[0] 本体=skipTargets）→ misses=1 档 = (40+10)
     expect(trySnapStrike(hooks, player, 0, v[0].cx, v[0].cy, v[0].id))
-      .toBe(Math.trunc(40 * (1 + player.equipStats.dmgRanged)));
+      .toBe(Math.trunc((40 + 10 * (2 - 1)) * (1 + player.equipStats.dmgRanged)));
     expect(added.some((a) => (a as { projId?: number }).projId === 1121)).toBe(true);
   });
 });

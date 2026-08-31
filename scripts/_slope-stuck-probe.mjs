@@ -10,49 +10,30 @@ await page.waitForFunction(()=>typeof window.__swFlow==='object'&&!!window.__swF
 await page.evaluate(async(t)=>{await window.__swFlow.loadJson(t);},fs.readFileSync(MAP,'utf8'));
 await page.waitForFunction(()=>!!window.__swGame?.world?.store?.w,{timeout:240000});
 const out=await page.evaluate(async()=>{
-  const LEGACY=(window.__swSlopeLegacy==='1');
-  const TCm=TC;
-  if(LEGACY){ const { setSlopeG2 }=await import('/src/physics/TileCollision.ts'); setSlopeG2(false); }
-  const g=window.__swGame,st=g.world.store;
+  const g=window.__swGame;
   const TC=await import('/src/physics/TileCollision.ts');
-  const TDS=await import('/src/data/tiles.ts');
-  const stuck=[];
-  // 枚举区域内所有坡格 + 四方向接近
-  for(let ty=315;ty<=335;ty++)for(let tx=594;tx<=612;tx++){
-    if(!st.inBounds(tx,ty))continue;
-    const i=st.idx(tx,ty);
-    const sl=st.slope[i];
-    if(!sl)continue;
-    for(const dir of [-1,1]){
-      // 起始位：沿 dir 反方向退 24px，脚贴该格顶
-      const w=20,h=42;
-      const sx=tx*16+8+(dir===1?-(w/2)-24:(w/2)+24)-w/2;
-      const sy=ty*16-h;
-      const b={x:sx,y:sy,w,h,vx:0,vy:0,onGround:false,hitWall:false,hitHead:false,collideY:false,stepUp:true,stepUpNpc:true};
-      const x0=b.x;
-      let sawWall=false;
-      for(let t=0;t<150;t++){
-        b.vx=1.0*dir; b.vy=Math.min(8,b.vy+0.35);
-        TC.moveAndCollide(b,g.world,b.vx,b.vy);
-        if(b.hitWall)sawWall=true;
-      }
-      const moved=Math.abs(b.x-x0);
-      // 卡死判定：位移<4 且 前方紧邻非实心（即不是被真墙挡）
-      const aheadX=Math.floor((dir>0?b.x+b.w+2:b.x-2)/16);
-      const aheadSolid=st.isSolid(aheadX,Math.floor((b.y+b.h-1)/16))||st.slope[st.idx(aheadX,Math.floor((b.y+b.h-1)/16))]>0;
-      if(moved<4&&!aheadSolid){
-        // 记录卡点几何
-        const cx=Math.floor((b.x+(dir>0?b.w+2:-2))/16), cy=Math.floor((b.y+b.h-1)/16);
-        stuck.push({slopeAt:[tx,ty],sl,dir,moved:+moved.toFixed(1),
-          end:[+b.x.toFixed(1),+b.y.toFixed(1)],ahead:[cx,cy],
-          aheadTile:TDS.TILE_DEFS[st.type[st.idx(cx,cy)]]?.vanilla?.sheet??-1,
-          aheadSlope:st.slope[st.idx(cx,cy)],og:b.onGround});
-      }
-    }
-  }
-  if(LEGACY){ const { setSlopeG2 }=await import('/src/physics/TileCollision.ts'); setSlopeG2(true); }
-  return {legacy:LEGACY,n:stuck.length,stuck:stuck.slice(0,14)};
+  const { setSlopeG2 }=await import('/src/physics/TileCollision.ts');
+  const { Enemy }=await import('/src/entities/Enemy.ts');
+  const run=(label,useG2,species)=>{
+    setSlopeG2(useG2);
+    // 玩家放西墙侧（飞行眼朝玩家俯冲=用户现场方向）
+    g.player.x=9500; g.player.y=5200;
+    const z=new Enemy(species,9635,5196-30);
+    if(species==='demon_eye') z.vanillaId=2;   // 真实生成器会带 vid=2（AI_002 floatEyeAI 路由）
+    const routed = { key:z.key, vid:z.vanillaId };
+    g.entities.add(z,'enemies');
+    const traj=[];
+    let posChanges=0,lastX=z.x;
+    for(let t=0;t<300;t++){ z.fixedUpdate(1/60,g); if(Math.abs(z.x-lastX)>0.01){posChanges++;lastX=z.x;} if(t%30===0||t===299) traj.push({t,x:+z.x.toFixed(1),y:+z.y.toFixed(1),vx:+z.vx.toFixed(2),vy:+z.vy.toFixed(2),og:z.onGround,cx:z.collideX??null,cy:z.collideY??null}); }
+    g.entities.remove?.(z) ?? (z.dead=true);
+    return {label,routed,posChanges,finalX:+z.x.toFixed(1),traj};
+  };
+  const post=run('eye-post-G2(新)',true,'demon_eye');
+  const pre=run('eye-pre-G2(旧)',false,'demon_eye');
+  setSlopeG2(true);
+  return {post,pre};
 });
+
 
 console.log(JSON.stringify(out,null,1));
 process.exit(0);

@@ -387,6 +387,21 @@ function labelOf(file: string, line: number): string {
         // 升级为 throw（对拍结论须绝对可信时开启）。
         onWorldPartial: (w, i, pn) => {
           if (!curStore) curStore = w.store as never as typeof curStore;
+          // ★IIIII102 槽末管线态落盘（SW_I81_SAVE=「中文槽名」→ /tmp 下 serialize 全通道）
+          const saveSlot = process.env.SW_I81_SAVE;
+          if (saveSlot && pn === saveSlot && !process.env.__swI81Saved) {
+            process.env.__swI81Saved = '1';
+            const dir = process.env.SW_I81_SAVEOUT ?? `/tmp/iiiiii102-out/pipeslot-${saveSlot}`;
+            const { mkdirSync, writeFileSync } = require('node:fs') as typeof import('node:fs');
+            mkdirSync(dir, { recursive: true });
+            const stv = w.store as unknown as Record<string, Uint8Array | Uint16Array>;
+            for (const c of ['flags', 'type', 'frameX', 'frameY', 'wall', 'liquid', 'liquidType', 'half', 'slope', 'wire', 'paint', 'paintWall', 'coat']) {
+              const a = stv[c]!;
+              writeFileSync(`${dir}/base_${c}.bin`, Buffer.from(a.buffer, a.byteOffset, a.byteLength));
+            }
+            writeFileSync(`${dir}/base_hdr.json`, JSON.stringify({ w: (w.store as unknown as { w: number }).w, h: (w.store as unknown as { h: number }).h }));
+            console.log(`[i81] pipeslot saved: ${pn} -> ${dir}`);
+          }
           const ent = SLOT_END.get(i);
           if (ent === undefined) return;
           if (ent.nm !== pn) {

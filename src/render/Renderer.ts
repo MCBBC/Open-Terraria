@@ -366,15 +366,14 @@ export function heldItemTipWorld(
     //  而非右缘(右缘取法在斜 45° 上下时偏出 20px+,2026-08-31 用户截图定罪)
     lx = fw * 0.5; ly = -fh * 0.85;
   } else {
-    // ★枪族 v9 极坐标(2026-08-31):出生点 = 枢轴(pivot) + 瞄准单位·前伸。
-    //  pivot_y = cy − fh/2(与 drawUseItem translate 一致,枪管在手上方);
-    //  前伸 = dp[0]+fw(每武器 barrel reach,含定制握把);
-    //  零垂直于瞄准的横向分量 → 竖直瞄时弹在鼠标柱上,朝向翻转零跳变。
-    //  (v7 曾用 cy−4 → 比实际 pivot 低 5-14px,各角度正弦放大不一致偏移)
+    // ★枪族 v11(2026-08-31 终版):出生点 = 中心 + 瞄准单位·reach + (0, −fh/2)。
+    //  reach = fw + dp[0](每武器 barrel reach,含定制握把偏移);
+    //  垂直偏移 = −fh/2(手持贴图 pivot 高度,恒定不随角度旋转);
+    //  无横向恒定偏移 → 竖直瞄准弹在鼠标柱上(±0),水平瞄准枪口在前方。
+    //  (v10 的 handX=(fw/2+2)·sg 在近垂直时不衰减 = 左右偏移28px,已删)
     const dp = ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF;
-    const fwd = dp[0] + fw;
-    const pivotY = cy - fh * 0.5;
-    return { x: cx + Math.cos(aimWorld) * fwd, y: pivotY + Math.sin(aimWorld) * fwd };
+    const reach = fw + dp[0];
+    return { x: cx + Math.cos(aimWorld) * reach, y: cy - fh * 0.5 + Math.sin(aimWorld) * reach };
   }
   const wr = sg * alpha;
   const c = Math.cos(wr), s = Math.sin(wr);

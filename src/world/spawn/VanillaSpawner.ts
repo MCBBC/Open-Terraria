@@ -1041,8 +1041,14 @@ export class VanillaSpawner {
       spawnRate = Math.trunc(spawnRate / value);
       maxSpawns = Math.trunc(maxSpawns * value);
     }
-    // L696：未杀骷髅王 rate=10（clamp 之后赋值，不受 ≥60 下限影响——守卫快速轮换）。
-    // ★IIIII61 WorldGen.Skyblock.lowTiles（NPC.cs:791-793）：空岛低格世界 spawnRate ÷2
+    // L787-790：未杀骷髅王 rate=10（旅程滑杆之后、skyblock 整除之前——
+    //  地牢守卫(68) 快速轮换主守卫；杀过骷髅王保持常规地牢修正 ×0.3/×1.8）。
+    //  ★并行会话曾在本轮把该 arm 意外挤丢（只剩注释），dg.spawnRate 由 10 漂成
+    //  常规链终值——测试门 dungeon-spawn/progression 已锁回
+    if (this.ZoneDungeon && !this.downedBoss3) {
+      spawnRate = 10;
+    }
+    // L791-794：WorldGen.Skyblock.lowTiles 空岛低格世界 spawnRate ÷2
     //  ——原版紧跟地牢 arm 之后顺序执行（地牢 rate=10 同样被整除为 5）
     if (this.world.skyblockLowTiles) {
       spawnRate = Math.floor(spawnRate / 2);

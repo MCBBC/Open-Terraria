@@ -881,7 +881,13 @@ export class Arrow extends Entity {
       const cx = e.cx ?? e.x + e.w / 2;
       const cy = e.cy ?? e.y + e.h / 2;
       if (Math.abs(cx - this.cx) < R + e.w / 2 && Math.abs(cy - this.cy) < R + e.h / 2) {
-        e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(cx - this.cx) * this.knockback * 0.35, 0, game, this.settlePen, false, this.pierceInit, true);
+        // ★F3 对账收口（蓝队四轮）：Kill 爆箱重结算 = 原 Damage() 面（resize 后
+        //   二次结算）→ 双支单源站位；宝石弹族数据面 magic ⇒ 门内恒拒=原版同真值,
+        //   未来分流翻旗自动生效。
+        const snapBonusGemAoe = projectileSnapStrikeBonus(game,
+          { projId: this.projId }, cx, cy, (e as unknown as { id?: number }).id ?? -1,
+          { victimBox: { w: e.w, h: e.h, cx, cy } });
+        e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusGemAoe ? Math.trunc(snapBonusGemAoe * 1) : 0), Math.sign(cx - this.cx) * this.knockback * 0.35, 0, game, this.settlePen, false, this.pierceInit, true);
       }
     }
     // vector67 = velocity.SafeNormalize（<1 归零,:76993-77000 同公共段）
@@ -918,7 +924,11 @@ export class Arrow extends Entity {
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage),
+        const snapBonusDeath = projectileSnapStrikeBonus(game,
+          { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
+          { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
+        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
+          + (snapBonusDeath ? Math.trunc(snapBonusDeath * (crit ? 2 : 1)) : 0),
           Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       }
     }
@@ -959,7 +969,11 @@ export class Arrow extends Entity {
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage),
+        const snapBonusDeath = projectileSnapStrikeBonus(game,
+          { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
+          { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
+        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
+          + (snapBonusDeath ? Math.trunc(snapBonusDeath * (crit ? 2 : 1)) : 0),
           Math.sign(ecx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       }
     }
@@ -996,7 +1010,11 @@ export class Arrow extends Entity {
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R661 + e.w / 2 && Math.abs(ecy - this.cy) < R661 + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage),
+        const snapBonusBurst = projectileSnapStrikeBonus(game,
+          { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
+          { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
+        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
+          + (snapBonusBurst ? Math.trunc(snapBonusBurst * (crit ? 2 : 1)) : 0),
           Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       }
     }
@@ -1052,7 +1070,11 @@ export class Arrow extends Entity {
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R23 + e.w / 2 && Math.abs(ecy - this.cy) < R23 + e.h / 2) {
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage),
+        const snapBonusBurst = projectileSnapStrikeBonus(game,
+          { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
+          { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });   // ★F3 对账收口:爆箱=原 Damage() 面
+        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
+          + (snapBonusBurst ? Math.trunc(snapBonusBurst * (crit ? 2 : 1)) : 0),
           Math.sign(ecx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 0, true);   // ★F1 旗乘区;fromPlayer=DPS 计
       }
     }

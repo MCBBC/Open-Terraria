@@ -4,7 +4,8 @@
 // ③ 敌怪接触(GetHurtByOtherNPCs :93605)/岩浆(:94511)/溺水(:96118)走 TownNPC 内置。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
-import { TownNPC } from '../src/entities/TownNPC';
+import { TownNPC, drownCollision } from '../src/entities/TownNPC';
+import { TILE_BY_KEY } from '../src/data/tiles';
 import { Inventory } from '../src/items/Inventory';
 import { hitTownNpcs } from '../src/entities/projTargets';
 import { TILE } from '../src/core/constants';
@@ -159,5 +160,152 @@ describe('城镇 NPC 受击链(巫毒门/hostile/环境)', () => {
     }
     for (let t = 0; t < 200 * 7 + 10; t++) guide.fixedUpdate(1 / 60, game);
     expect(guide.hp).toBeLessThan(250);
+  });
+});
+
+// =====================================================================
+// ★蓝队修复批回归（2026-08-31，四轮对抗 F1-F6）
+// =====================================================================
+describe('★F4 DrownCollision 探针几何（Collision.cs:1385-1430，gravDir=1）', () => {
+  // 标定世界：y=40*16+4 → 探针盒 = x[165..175]（列10）× y[642..654]（行 40）。
+  // 世界高取 160：DrownCollision 扫描上缘钳 maxTilesY−40（row 段须落在钳内）
+  const Y = 40 * 16 + 4;
+  function mk() {
+    const world = new World(60, 160, 30, 'drown-geom');
+    return world.store;
+  }
+  it('全液格命中：探针盒与降面液面四严格不等式成立', () => {
+    const st = mk();
+    st.liquid[st.idx(10, 40)] = 255; st.liquidType[st.idx(10, 40)] = 1;
+    expect(drownCollision(st, 160, Y, 20, 42)).toBe(true);
+  });
+  it('降面水位边界（liquid=64 → 液面下探 12px）：未触面 false / 触面 true', () => {
+    const st = mk();
+    st.liquid[st.idx(10, 40)] = 64;
+    // y=640：探针 [638..650]，液面顶 652 → 底 650 不大于之 → false
+    expect(drownCollision(st, 160, 40 * 16, 20, 42)).toBe(false);
+    // y=643：探针底 653 > 652 → true（:1422 字面 `vector.Y + num2 > vector2.Y` 严格式）
+    expect(drownCollision(st, 160, 40 * 16 + 3, 20, 42)).toBe(true);
+  });
+  it('lava(2)/shimmer(4) 显式不计水（原文本面 !tile.lava() && !tile.shimmer()）', () => {
+    for (const lt of [2, 4]) {
+      const st = mk();
+      st.liquid[st.idx(10, 40)] = 255; st.liquidType[st.idx(10, 40)] = lt;
+      expect(drownCollision(st, 160, Y, 20, 42)).toBe(false);
+    }
+  });
+  it('扫描首行实心排除：includeSlopes=false 跳过 / true 且 blockType!=0 计水', () => {
+    // y=320 → 扫描首行 j0=floor(320/16)−1=19；探针 [318..330] 与行19 相交
+    const st = mk();
+    st.setTileSilent(10, 19, TILE_BY_KEY['dirt']!);   // active 实心 + 带液（半格内液形态）
+    st.liquid[st.idx(10, 19)] = 255; st.liquidType[st.idx(10, 19)] = 1;
+    expect(drownCollision(st, 160, 320, 20, 42)).toBe(false);          // 默认排除
+    expect(drownCollision(st, 160, 320, 20, 42, false)).toBe(false);
+    st.slope[st.idx(10, 19)] = 2;                                       // blockType!=0
+    expect(drownCollision(st, 160, 320, 20, 42, true)).toBe(true);      // includeSlopes 计入
+  });
+});
+
+describe('★F6 溺水致死一击（force 通道端到端 + 非强制守门判别）', () => {
+  it('深水浸头：呼吸耗尽后静默 −2 直扣至 hp≤0 → hp=1 → hurt(2,…,force) 死亡分支', () => {
+    const guide = new TownNPC('guide', 100 * 16, 99 * 16);
+    guide.stationary = true;
+    const { world, game } = makeEnv([guide], []);
+    // 头部探针带（Top−2..+12 行段 ≈ row96/97 起落区）全覆盖：95..99 全列注水
+    for (let y = 92; y <= 99; y++) {
+      world.store.liquid[world.store.idx(100, y)] = 255;
+      world.store.liquidType[world.store.idx(100, y)] = 1;
+    }
+    let died = false;
+    for (let t = 0; t < 6000 && !died; t++) {
+      guide.fixedUpdate(1 / 60, game);
+      died = guide.dead;
+    }
+    expect(guide.dead).toBe(true);
+    // 致死一击链终值：hp 先钳 1(:96077) 再吃 StrikeNPCNoInteraction(2) 的防御减算下限 1 → 0
+    expect(guide.hp).toBe(0);
+    expect(guide.iframes).toBeGreaterThan(0);   // 死亡经 hurt 主链结算（iframes=10 已置）
+  });
+
+  it('force 判别：iframes>0 或 ai[0]==25(shimmerRise) 下普通 hurt 早退 false，仅 force 结算', () => {
+    const a = new TownNPC('nurse', 100 * 16, 99 * 16, new Inventory());
+    const g = makeEnv([a], []).game;
+    a.iframes = 10;
+    expect(a.hurt(40, 0, 0, g)).toBe(false);
+    expect(a.hp).toBe(250);                       // 早退零结算
+    expect(a.hurt(40, 0, 0, g, 0, 0, false, true)).toBe(true);   // force 直击通道
+    expect(a.hp).toBeLessThan(250);
+    const b = new TownNPC('nurse', 120 * 16, 99 * 16, new Inventory());
+    (b as unknown as { shimmerRise: boolean }).shimmerRise = true;   // ai[0]==25 dontTakeDamage
+    // 承接位（hurt 内非 force 早退）——外部测试只经强制转型写私有旗
+    expect(b.hurt(9, 0, 0, g)).toBe(false);
+    expect(b.hurt(9, 0, 0, g, 0, 0, false, true)).toBe(true);
+    expect(b.hp).toBeLessThan(b.maxHp);
+  });
+});
+
+describe('★F3 互殴准入门与 GetMeleeCollisionData 加宽族', () => {
+  it('CritterThatCanTurnOnPlayers 十型攻击者（639 等十表）不伤城镇 NPC（:93573 门②）', () => {
+    const g = new TownNPC('guide', 100 * 16, 99 * 16);
+    g.stationary = true;
+    const critter = { x: 100 * 16 + 4, y: 96 * 16, w: 20, h: 40, dead: false,
+      damage: 40, vanillaId: 639 };   // 十型集 ∈ NPCID.cs:4781
+    const { game } = makeEnv([g], [critter]);
+    g.fixedUpdate(1 / 60, game);
+    expect(g.hp).toBe(250);
+  });
+  it('type 400 攻击者 npcRect=default 恒不中（:96147-51 替换语义）', () => {
+    const g = new TownNPC('guide', 100 * 16, 99 * 16);
+    g.stationary = true;
+    const foe = { x: 100 * 16 + 4, y: 96 * 16, w: 20, h: 40, dead: false,
+      damage: 40, vanillaId: 400 };
+    const { game } = makeEnv([g], [foe]);
+    g.fixedUpdate(1 / 60, game);
+    expect(g.hp).toBe(250);
+  });
+  it('持械僵尸(430)咬合态武器侧 +34px 加宽命中；非咬合同位不中；伤害【不乘】1.25（乘区死参）', () => {
+    const mkCase = (ai2: number) => {
+      const g = new TownNPC('guide', 100 * 16, 99 * 16);
+      g.stationary = true;
+      g.rng = () => 0.5;                        // tier0 无偏——首击掷等于原值
+      // 落位按「首拍坐标」计算（envHurtUpdate 在 moveAndCollide 前跑——
+      // 第一拍受害盒 = spawn 位 [1598..1618]）：x=1020 的普通盒(宽18→[1620..])
+      // 与之不交；咬合态左扩 34 → [1586..1638] 相交。
+      const z = { x: 100 * 16 + 20, y: 96 * 16, w: 18, h: 40, dead: false,
+        damage: 40, vanillaId: 430, facing: -1, ai2 };
+      const { game } = makeEnv([g], [z]);
+      g.fixedUpdate(1 / 60, game);
+      return 250 - g.hp;
+    };
+    // 受端 = 向导 def(vanilla)=30：trunc(40×1 − 30×0.5)=25；若乘区被接将放大至 31+
+    expect(mkCase(7)).toBe(25);
+    expect(mkCase(0)).toBe(0);                  // 未咬合：同位素触不及（间隙 10px）
+  });
+});
+
+describe('★F1③ HurtingBees 二次调用无 friendly/type37 门（:91601-03）', () => {
+  function beeReflectLog(): number[] {
+    return [];
+  }
+  it('蜂(210)接触可伤老者(37)；老者反蜇臂照常执行；普通敌怪仍被 :91593 门挡在体外', () => {
+    const om = new TownNPC('old_man', 100 * 16, 98 * 16, new Inventory());
+    expect((om as unknown as { vanillaId: number }).vanillaId).toBe(37);
+    om.stationary = true;
+    const reflected: Array<{ amount: number }> = [];
+    const bee = { x: 100 * 16 + 4, y: 96 * 16, w: 20, h: 30, dead: false,
+      damage: 12, vanillaId: 210,
+      hurt(amount: number) { reflected.push({ amount }); return true; } };
+    const { game } = makeEnv([om], [bee]);
+    om.fixedUpdate(1 / 60, game);
+    expect(om.hp).toBeLessThan(om.maxHp);       // ★F1③ 定案：老人伤害面放开
+    expect(reflected.length).toBe(1);           // HurtingBees 反蜇枝一次（:93682-96）
+
+    const om2 = new TownNPC('old_man', 120 * 16, 98 * 16, new Inventory());
+    om2.stationary = true;
+    const walker = { x: 120 * 16 + 4, y: 94 * 16, w: 20, h: 40, dead: false,
+      damage: 40, vanillaId: 8 };
+    const env2 = makeEnv([om2], [walker]);
+    om2.fixedUpdate(1 / 60, env2.game);
+    expect(om2.hp).toBe(om2.maxHp);             // 三连门 type!=37 依旧不动普通互殴
   });
 });

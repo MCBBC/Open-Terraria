@@ -16,6 +16,7 @@ import { TileStore } from '../src/world/TileStore';
 import { RNG, UnifiedRandom } from '../src/core/rng';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 import { runMicroBiomesPass, placeLavaTrap } from '../src/world/gen/vanilla/MicroBiomesPass';
+import { LIQUID_TYPE } from '../src/world/TileStore';
 import { snapshotGenSolid, restoreGenSolid } from '../src/world/gen/vanilla/GenSolid';
 
 const RUN_CAP = process.env.SW_I121CAP === '1';
@@ -33,7 +34,8 @@ const FLAGS = process.env.SW_I118_FLAGS !== undefined
 
 interface ChestLike { x: number; y: number; items: Array<{ id: number; stack: number } | null>; [k: string]: unknown }
 
-const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
+const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
+const SHEET = SHEET_OF;
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number') SHEET[i] = s;
@@ -163,6 +165,24 @@ const le16 = (p: string): Uint16Array => {
   // 掷数计镜
   const rcBox = { n: 0 };
   const rng = new RNG(gs.seed);
+  // ★IIIII99f 偏置实验：SW_I121_BIAS=k —— pass 起点额外预耗 k 个裸样本（模拟
+  //   上游某处多/少掷一枚）；负数无法预耗→用 setSeed 后快进 (S+k) 重放不可行，
+  //   故只支持正偏置（k>0）。
+  const BIAS = Number(process.env.SW_I121_BIAS ?? 0);
+  if (BIAS > 0) {
+    const urBias = (rng as unknown as { vanilla?: { next(): number } }).vanilla;
+    for (let z = 0; z < BIAS; z++) urBias?.next();
+    console.log(`[bias] pre-consumed ${BIAS} raw samples`);
+  }
+  (globalThis as unknown as { __swBiasAtLava?: number }).__swBiasAtLava =
+    Number(process.env.SW_I121_LAVABIAS ?? 0);
+  (globalThis as unknown as { __swBiasAtLavaSucc?: number }).__swBiasAtLavaSucc =
+    Number(process.env.SW_I121_SUCCBIAS ?? 0);
+  if (BIAS > 0) {
+    const urBias = (rng as unknown as { vanilla?: { next(): number } }).vanilla;
+    for (let z = 0; z < BIAS; z++) urBias?.next();
+    console.log(`[bias] pre-consumed ${BIAS} raw samples`);
+  }
   const rp = rng as unknown as Record<string, unknown>;
   for (const k of ['int', 'nextInt', 'next']) {
     const orig = rp[k] as (...a: unknown[]) => unknown;
@@ -202,6 +222,17 @@ const le16 = (p: string): Uint16Array => {
   }
   console.log(`runMicroBiomesPass ${Date.now() - t0}ms rolls=${rcBox.n} TRUE-rolls=${trueRolls} chestsIn=${chests.length}`);
   (globalThis as unknown as { __swOnRoll?: unknown }).__swOnRoll = oRoll;
+
+  if (process.env.SW_I121_SAVE === '1') {
+    const rec2 = st as unknown as Record<string, Uint8Array | Uint16Array>;
+    const bufOf2 = (v: Uint8Array | Uint16Array): Buffer => Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+    for (const [nm, v] of Object.entries(rec2)) {
+      if (v instanceof Uint8Array || v instanceof Uint16Array) {
+        try { writeFileSync(`${OUT}/replay_${nm}.bin`, bufOf2(v)); } catch { /* skip */ }
+      }
+    }
+    console.log(`saved replay channels -> ${OUT}/replay_*.bin`);
+  }
   // 八通道对拍（mile8 同构）
   let dA = 0, dT = 0, dW = 0, dL = 0, dHf = 0, dSl = 0, dLt = 0, dIa = 0, dGh = 0;
   const pair = new Map<string, number>();
@@ -254,41 +285,180 @@ const le16 = (p: string): Uint16Array => {
     `${bad ? `✗ first=${fI < 0 ? '' : `(${fI % W},${Math.floor(fI / W)})`} pairs=` + [...pair.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, n]) => `${k}×${n}`).join(' ') : '✓ zero'}`);
 }, 900_000);
 
-const RUN_MATCH = process.env.SW_I121MATCH === '1';
 
-(RUN_MATCH ? it : it.skip)('locate x86 lava-phase start sample index', () => {
-  const drl = process.env.SW_I121_DRL ?? `${OUT}/x86r-i121/drl.txt`;
-  const xs: number[][] = [];
-  for (const l of readFileSync(drl, 'utf8').split('\n')) {
-    if (!l.startsWith('118LT|')) continue;
-    const p = l.split('|');
-    xs.push([Number(p[1]), Number(p[2]), Number(p[3]), Number(p[4]), Number(p[5])]);
-  }
-  console.log(`x86 records=${xs.length}`);
-  const F = xs.findIndex(r => r[4] === 1);
-  const chain = xs.slice(0, F + 1);   // 失败链 + 首成功
-  console.log(`first success idx=${F} x,y=(${chain[F][2]},${chain[F][3]})`);
-  const seedNum = Math.abs(Number(SEED));
-  // 正向快进 + 候选起点：需要先有样本序列。做法：维护克隆式状态检查成本高，
-  // 改为**逐候选重放**：从 0 快进到 s（next() 消耗），再验证链。300k×重放太大
-  // ⇒ 反转：线性扫描时对每个位置 p 记录 (pair) 是否等于首失败尝试坐标，再浅验。
-  // 简化实现：一次遍历，缓存连续两 raw? Next(min,max) 由 sample 映射而非裸 int——
-  // 因此直接在每个消费点做映射判断不可行 ⇒ 采用「顺序推进 + 链匹配」贪心：
-  // 只有当当前连续两次 Next(200,4000)/Next(795,990) 恰好等于首条记录才进入链验。
-  let attempts = 0; const cands: number[] = [];
-  for (;;) {
-    // 读一对 draw
-    const r1 = ur.peek();
-    void r1;
-    const a = ur.nextIntRange(200, 4000);
-    const b = ur.nextIntRange(795, 990);
-    if (a === chain[0][2] && b === chain[0][3] && chain[0][4] === 0) {
-      cands.push(attempts);
+
+const RUN_SIM = process.env.SW_I121SIM === '1';
+
+(RUN_SIM ? it : it.skip)('simulate lava-trap phase from sample offset delta', () => {
+  const { st, gs } = hydrate();
+  const S = Number(process.env.SW_I121_S ?? 171529);
+  const DL = Number(process.env.SW_I121_DL ?? 6);
+  const results: Array<{ d: number; cols: number[]; succs: number }> = [];
+  for (let d = -DL; d <= DL; d++) {
+    const { st: stD } = hydrate();          // ★每 δ 全新基座，防跨轮写面污染
+    void st;
+    const ur = new UnifiedRandom(Math.abs(Number(SEED)));
+    // 快进到 S+d（next() 每次一个样本）
+    for (let z = 0; z < S + d; z++) ur.next();
+    const simRng = new RNG(gs.seed);
+    const cols: number[] = [];
+    let succs = 0;
+    let exhausted = 0;
+    {
+      const dbg: string[] = [];
+      const u2 = new UnifiedRandom(Math.abs(Number(SEED)));
+      for (let z = 0; z < S + d; z++) u2.next();
+      for (let q = 0; q < 3; q++) dbg.push(`${u2.nextIntRange(200, st.w - 200)},${u2.nextIntRange(gs.lavaLine - 100, st.h - 210)}`);
+      console.log(`δ=${d} firstPairs=[${dbg.join(' | ')}]`);
     }
-    attempts++;
-    // placeLavaTrap 只在成功分支写盘；失败链纯读。找到全部候选后停止扩展上限
-    if (attempts > 320000) break;
+    outer: for (let j = 0; j < Math.trunc(st.w * 0.02); j++) {
+      for (let k = 0; k < 10150; k++) {
+        const ax = ur.nextIntRange(200, st.w - 200);
+        const ay = ur.nextIntRange(gs.lavaLine - 100, st.h - 210);
+        if (placeLavaTrap(stD, gs as never, ax, ay, simRng)) {
+          cols.push(ax); succs++;
+          continue outer;
+        }
+      }
+      exhausted++;
+    }
+    results.push({ d, cols, succs });
+    console.log(`δ=${d}: succ=${succs} exhaustedJ=${exhausted} cols=[${cols.join(',')}]`);
   }
-  console.log(`scan done cands=[${cands}]`);
-  void placeLavaTrap; void st;
-});
+  void results;
+}, 900_000);
+
+const RUN_TRACE = process.env.SW_I121TRACE === '1';
+
+/** 纯读副本：placeLavaTrap 门级轨迹（IIIII99f 取证） */
+function traceLava(st: TileStore, gs: GenState, ox: number, oy: number): string {
+  const log: string[] = [];
+  const activeAt = (x: number, y: number): boolean => st.flags[st.idx(x, y)] === 1;
+  const SOTP = new Set([19, 239, 380, 427, 435, 436, 437, 438, 439]);
+  const DUNGEON = new Set([41, 43, 44, 48, 478, 479, 480]);
+  const solidGate = (x: number, y: number): boolean => {
+    if (!st.inBounds(x, y)) return false;
+    const idx = st.idx(x, y);
+    if (!st.flags[idx]) return false;
+    const t = SHEET_OF[st.type[idx]!];
+    return !(SOTP.has(t ?? -1));
+  };
+  const num = 5, minLava = 50, maxDrop = 40, scanR = 20, minGap = 4;
+  const i0 = st.idx(ox, oy);
+  if (st.flags[i0]) return 'R1-origin-active';
+  if (st.liquid[i0] !== 255 || st.liquidType[i0] !== LIQUID_TYPE.LAVA) return 'R2-origin-notfulllava';
+  let lavaCells = 0;
+  for (let dx = -num; dx <= num; dx++) for (let dy = -num; dy <= num; dy++) {
+    if (!st.inBounds(ox + dx, oy + dy)) continue;
+    const idx = st.idx(ox + dx, oy + dy);
+    if (!st.flags[idx] && st.liquid[idx] === 255 && st.liquidType[idx] === LIQUID_TYPE.LAVA) lavaCells++;
+  }
+  if (lavaCells < minLava) return `R3-lavacells=${lavaCells}`;
+  let num7 = oy;
+  for (;;) { if (activeAt(ox, num7)) break; num7++; if (num7 > st.h - 200 || num7 >= st.h) return 'R4-no-active-down'; }
+  log.push(`A-firstActive=(y=${num7})`);
+  {
+    const shT = SHEET_OF[st.type[st.idx(ox, num7)]!];
+    if (!solidGate(ox, num7)) return `B-floor-not-solid(type=${shT})`;
+    log.push(`B-anchorSolid(type=${shT})`);
+  }
+  const num8 = num7;
+  for (let k = ox - scanR; k <= ox + scanR; k++) for (let l = num7 - scanR; l <= num7 + scanR; l++) {
+    if (st.inBounds(k, l) && (st.wire[st.idx(k, l)] & 1) !== 0) return `C-wire-red-near(${k},${l})`;
+  }
+  while (activeAt(ox, num7) && solidGate(ox, num7)) {
+    num7++;
+    if (num7 > st.h - 200 || num7 >= st.h) return 'D-runaway-through-solid';
+  }
+  log.push(`D-crustEnd(y=${num7})`);
+  {
+    const bt = SHEET_OF[st.type[st.idx(ox, num7 - 1)]!];
+    if (DUNGEON.has(bt ?? -1) || bt === 225 || bt === 226) return `E-dungeon/hive-above(${bt})`;
+  }
+  const num9 = num7;
+  for (;;) {
+    if (activeAt(ox, num7)) break;
+    num7++;
+    if (num7 > st.h - 200 || num7 >= st.h) return 'G-airgap-runaway';
+    if (st.liquid[st.idx(ox, num7)] > 0) return 'G-liquid-in-cavity';
+  }
+  log.push(`G-floorFound(y=${num7})`);
+  {
+    const ft = SHEET_OF[st.type[st.idx(ox, num7)]!];
+    if (!solidGate(ox, num7)) return `H-floor-not-solid(${ft})`;
+    if ((ft ?? -1) === 162) return 'H-thinIce-floor';
+  }
+  const num10 = num7 - 1;
+  if (num10 - num8 > maxDrop) return `I-dropTooBig(${num10 - num8})`;
+  if (num10 - num9 < minGap) return `J-gapTooSmall(${num10 - num9})`;
+  log.push(`OK anchor=(${ox},${num10}) drop=${num10 - num8} gap=${num10 - num9} crustLen=${num9 - num8}`);
+  return 'OK:' + log.join('|');
+}
+
+(RUN_TRACE ? it : it.skip)('gate-level trace over residual pools', () => {
+  const { st, gs } = hydrate();
+  const ZONES: Array<[number, number, number, number]> = [
+    [548, 566, 802, 816],
+    [1976, 1994, 795, 812],
+    [2985, 3010, 853, 862],
+    [3015, 3032, 905, 928],
+    [1758, 1774, 938, 962],
+  ];
+  for (const [x0, x1, y0, y1] of ZONES) {
+    console.log(`=== zone ${x0}..${x1} × ${y0}..${y1}`);
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const i = st.idx(x, y);
+        if (st.flags[i]) continue;
+        if (st.liquid[i] !== 255 || st.liquidType[i] !== LIQUID_TYPE.LAVA) continue;
+        const r = traceLava(st, gs as never, x, y);
+        if (r.startsWith('OK')) console.log(`  org(${x},${y}): ${r}`);
+      }
+    }
+  }
+}, 600_000);
+
+
+const RUN_GREEDY = process.env.SW_I121GREEDY === '1';
+
+(RUN_GREEDY ? it : it.skip)('greedy subset search for +1 cascade patches', () => {
+  const xt = le16(`${G2}/097_Micro_Biomes.typ`);
+  const xa = readFileSync(`${G2}/097_Micro_Biomes.act`);
+  const xsl = readFileSync(`${G2}/097_Micro_Biomes.slope`);
+  const Y0 = 780;
+  const W2 = W;
+  const evalSet = (sel: Set<number>): { a: number; sl: number } => {
+    const { st: stI, gs: gsI, chests: chsI } = hydrate();
+    const rI = new RNG(gsI.seed);
+    (globalThis as unknown as { __swSuccSet?: Set<number>; __swSuccSeen?: number }).__swSuccSet = sel;
+    (globalThis as unknown as { __swSuccSeen?: number }).__swSuccSeen = 0;
+    runMicroBiomesPass(stI, rI, gsI, chsI as never);
+    let a = 0, sl = 0;
+    for (let y = Y0; y < H; y++) for (let x = 200; x < W2 - 200; x++) {
+      const i2 = y * W2 + x;
+      const va2 = xa[i2]!, ja2 = stI.flags[i2]! & 1;
+      if (va2 !== ja2) a++;
+      else if (xsl[i2] !== stI.slope[i2]) sl++;
+    }
+    return { a, sl };
+  };
+  let cur = new Set<number>();
+  let best = evalSet(cur);
+  console.log(`base: A=${best.a} Sl=${best.sl}`);
+  const NMAX = Number(process.env.SW_I121_NMAX ?? 36);
+  const steps = Number(process.env.SW_I121_STEPS ?? 10);
+  for (let stp = 0; stp < steps; stp++) {
+    let bi = -1, bA = best.a, bSl = best.sl;
+    for (let cand = 1; cand <= NMAX; cand++) {
+      if (cur.has(cand)) continue;
+      const trial = new Set(cur); trial.add(cand);
+      const r = evalSet(trial);
+      console.log(`  step${stp} +${cand}: A=${r.a} Sl=${r.sl}`);
+      if (r.a + r.sl * 0.02 < bA + bSl * 0.02) { bi = cand; bA = r.a; bSl = r.sl; }
+    }
+    if (bi < 0) break;
+    cur.add(bi); best = { a: bA, sl: bSl };
+    console.log(`picked ${bi}: A=${bA} Sl=${bSl}`);
+  }
+  console.log(`FINAL set=[${[...cur].join(',')}] A=${best.a} Sl=${best.sl}`);
+}, 3_600_000);

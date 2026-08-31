@@ -55,6 +55,7 @@ function mkProtoGame(opts?: { px?: number; py?: number }) {
   const g = Object.create(Game.prototype) as unknown as Record<string, any>;
   g.world = world;
   g.player = {
+    inv: { slots: [] },
     cx: opts?.px ?? (40 * TILE), cy: opts?.py ?? (90 * TILE),
     x: (opts?.px ?? (40 * TILE)) - 10, y: (opts?.py ?? (90 * TILE)) - 21, w: 20, h: 42,
     dead: false, facing: 1,
@@ -65,8 +66,12 @@ function mkProtoGame(opts?: { px?: number; py?: number }) {
   g.camera = { viewW: 1280, viewH: 800 };
   g.chunks = { markDirtyArea: (_a: number, _b: number, _c: number, _d: number) => {} };
   g.entities = { enemies: [], critters: [], npcs: [], drops: [], add: () => {} };
-  g.drops = [];                                        // breakTile→spawnDrop 掉落上限扫描面
-  g.sfx = { play: (n: string) => { sfxNames.push(n); } };
+  g.drops = [];
+  g.dmgNumbers = [];
+  g.addDamageNumber = (x: number, y: number, n: number) => { (g as any).dmgNumbers.push(n); };
+  g.playHurtVoice = () => {};                                        // breakTile→spawnDrop 掉落上限扫描面
+  g.sfx = { play: (n: string) => { sfxNames.push(n); },
+    playWavFile: (f: string) => { sfxNames.push(f); return true; } };
   g.spawnParticles = () => {};
   return { g, world, playerRecords, sfxNames };
 }

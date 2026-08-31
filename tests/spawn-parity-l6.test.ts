@@ -35,6 +35,8 @@ interface RunOpts {
   rain?: boolean;
   friendly?: boolean;
   attempts?: number;
+  /** spawn() 循环前的世界态注入（雨/旗标等） */
+  setup?: (w: World) => void;
   /** 玩家所在格行（默认 96——地表夹具；深层夹具须传落脚带内值） */
   py?: number;
   /** 玩家所在列（默认 = tileX） */

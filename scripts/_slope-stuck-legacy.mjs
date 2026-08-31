@@ -11,11 +11,11 @@ await page.evaluate(async(t)=>{await window.__swFlow.loadJson(t);},fs.readFileSy
 await page.waitForFunction(()=>!!window.__swGame?.world?.store?.w,{timeout:240000});
 const out=await page.evaluate(async()=>{
   const LEGACY=true;
-  const TCm=TC;
-  if(LEGACY){ const { setSlopeG2 }=await import('/src/physics/TileCollision.ts'); setSlopeG2(false); }
+
   const g=window.__swGame,st=g.world.store;
   const TC=await import('/src/physics/TileCollision.ts');
   const TDS=await import('/src/data/tiles.ts');
+  if(LEGACY){ const { setSlopeG2 }=await import('/src/physics/TileCollision.ts'); setSlopeG2(false); }
   const stuck=[];
   // 枚举区域内所有坡格 + 四方向接近
   for(let ty=315;ty<=335;ty++)for(let tx=594;tx<=612;tx++){

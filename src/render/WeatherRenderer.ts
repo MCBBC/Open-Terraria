@@ -26,6 +26,8 @@ interface SnowFlake {
   vx: number; vy: number;
   scale: number;
   life: number;
+  /** NewDust 帧掷（Dust.cs:177 frame.Y=10×rand(3)）→ 源矩形 (760,10×frame,8,8) */
+  frame: number;
   active: boolean;
 }
 
@@ -37,8 +39,15 @@ interface SandGrain {
   fadeIn: number;
   /** EmitDust 四色（(200,160,20)/(103,98,122)/(135,43,34)/(213,196,197)，alpha 180） */
   cr: number; cg: number; cb: number;
+  /** NewDust 帧掷（Dust.cs:177+186-190 双重 while：X=10×268−2000=680、Y=10×rand(3)+60）
+   *  → 源矩形 (680, 60+10×frame, 8, 8)。★曾误读 (680,20)=dust 168 的蓝十字格，
+   *  蓝底×沙色乘=暗绿被用户当"树叶"（2026-08-31 定谳） */
+  frame: number;
   active: boolean;
 }
+
+/** EmitDust 四色统一 alpha（Sandstorm.cs:179-182 四个 Color 字面量同值） */
+const SAND_COLOR_ALPHA = 180;
 
 export interface WeatherFxHooks {
   /** 光照采样（0-255 RGB；雨滴着色 ×0.85） */
@@ -70,7 +79,7 @@ function getRainTex(): ImageBitmap | HTMLImageElement | null {
 let dustTex: ImageBitmap | HTMLImageElement | null = null;
 function getDustTex(): ImageBitmap | HTMLImageElement | null {
   loadBitmapOnly('vanilla/Dust.png', () => dustTex !== null, (x) => { dustTex = x; });
-  return dustTex;  // 1000×120 = 10px 格；雪花 = dust 76 (760,0)
+  return dustTex;  // 1000×120 = 10px 格、帧 8×8；雪花 = dust 76 (760,0/10/20)、沙尘 = dust 268 (680,60/70/80)
 }
 
 export class WeatherRenderer {
@@ -282,7 +291,7 @@ export class WeatherRenderer {
       }
       vy *= 1 + 0.3 * w.cloudAlpha;
       const k = 1 + w.cloudAlpha * 0.5;                         // 末端 velocity ×= 1+0.5α
-      const f: SnowFlake = { x: sx, y: sy, vx: vx * k, vy: vy * k, scale, life: 200 + Math.floor(Math.random() * 100), active: true };
+      const f: SnowFlake = { x: sx, y: sy, vx: vx * k, vy: vy * k, scale, life: 200 + Math.floor(Math.random() * 100), frame: Math.floor(Math.random() * 3), active: true };
       this.snow.push(f);
       live++;
     }
@@ -338,7 +347,7 @@ export class WeatherRenderer {
       this.sand.push({
         x, y, vx, vy, scale: 0.9,                           // :181 scale=0.9（速度链后置）
         fadeIn: num13 * 0.2,                                // :178
-        cr, cg, cb, active: true,
+        cr, cg, cb, frame: Math.floor(Math.random() * 3), active: true,
       });
       num9--;
     };
@@ -413,8 +422,11 @@ export class WeatherRenderer {
   }
 
   /** 雪/沙尘 precip（★r15 R15-1 拆分：原版雪=dust 76、沙尘=dust 268 走 DrawDust
-   *  :63241——碎块后、前景水前；Renderer 在 gore 后调用本方法）。
-   *  雪粒 Dust.png dust76 源矩形 760,0，光照着色不 ×0.85——雪花本色白亮。 */
+   *  Main.cs:39501——碎块后、前景水前；Renderer 在 gore 后调用本方法）。
+   *  通用支（:39714-39732）：基画 GetAlpha(light) 全幅 + dust.color 非零时叠画
+   *  GetColor(light)；GetColor = color−(255−light) 逐通道钳 [0,255]（Dust.cs:2801-2847），
+   *  overlay alpha = color.A 同式（雪 76 无 color=单画）。帧 8×8、origin (4,4)、rot 0。
+   *  光照纯黑 → dust.active=false（:39730）——两池同遵。 */
   drawPrecipDust(r: Renderer, world: World) {
     const hooks = this.hooks;
     if (!hooks) return;
@@ -428,25 +440,35 @@ export class WeatherRenderer {
         const tx = Math.floor((f.x + 5) / TILE);
         const ty = Math.floor((f.y + 5) / TILE);
         const [lr, lg, lb] = hooks.lightAt(tx, ty);
+        if (lr === 0 && lg === 0 && lb === 0) { f.active = false; continue; } // :39730
         const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
-        const tinted = tintedFlake(dTex, Math.round((lvl / 7) * 255));
-        if (tinted) ctx.drawImage(tinted, f.x - 5 * f.scale, f.y - 5 * f.scale, 10 * f.scale, 10 * f.scale);
+        const tinted = tintedFlake(dTex, Math.round((lvl / 7) * 255), f.frame);
+        if (tinted) ctx.drawImage(tinted, f.x - 4 * f.scale, f.y - 4 * f.scale, 8 * f.scale, 8 * f.scale);
       }
-      // ---- 沙尘 grain（dust 268；DrawDust :38403-38429 双画：环境光底 + GetColor
-      //      （dust.color×light）叠加；帧 = Dust.png 源矩形 (680,20)，origin (4,4)，rot 0 ----
+      // ---- 沙尘 grain（dust 268；DrawDust 通用支双画：环境光底 + GetColor 叠画）----
       for (const g of this.sand) {
         if (!g.active) continue;
         const tx = Math.floor((g.x + 4) / TILE);
         const ty = Math.floor((g.y + 4) / TILE);
         const [lr, lg, lb] = hooks.lightAt(tx, ty);
+        if (lr === 0 && lg === 0 && lb === 0) { g.active = false; continue; } // :39730
         const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
         const v = Math.round((lvl / 7) * 255);
-        const base = tintedFlake(dTex, v);                 // 基画（dust 268 帧同 10px 格）
-        const over = tintedSand(dTex, g.cr, g.cg, g.cb, v); // GetColor 叠画（color×light）
+        const base = tintedDust268(dTex, v, v, v, g.frame); // 基画 = GetAlpha(light)（全幅）
+        // 叠画 = GetColor(light) = color+light−255 逐通道；alpha = color.A+light−255
+        // （雪 76 无 color 不叠，沙尘四色 A=180）——★曾按 dust.color×light 乘色且
+        //   丢 alpha 通道：乘出来的暗绿十字即"沙尘暴飞树叶"假象（2026-08-31）
+        const gc = (c: number) => Math.max(0, Math.min(255, c + v - 255));
+        const over = tintedDust268(dTex, gc(g.cr), gc(g.cg), gc(g.cb), g.frame);
+        const ga = gc(SAND_COLOR_ALPHA) / 255;
         const dx = g.x - 4 * g.scale, dy = g.y - 4 * g.scale;
-        const sz = 10 * g.scale;
+        const sz = 8 * g.scale;
         if (base) ctx.drawImage(base, dx, dy, sz, sz);
-        if (over) ctx.drawImage(over, dx, dy, sz, sz);
+        if (over) {
+          ctx.globalAlpha = ga;
+          ctx.drawImage(over, dx, dy, sz, sz);
+          ctx.globalAlpha = 1;
+        }
       }
       ctx.restore();
     }
@@ -485,43 +507,46 @@ function stIn(world: World, tx: number, ty: number): boolean {
   return world.store.inBounds(tx, ty);
 }
 
-/** 雪花乘色缓存（8 级亮度）：Dust.png 源矩形 (760,0,10,10) = dust 76 */
-const flakeTintCache = new Map<number, HTMLCanvasElement>();
-function tintedFlake(tex: ImageBitmap | HTMLImageElement, v: number): HTMLCanvasElement | null {
-  const hit = flakeTintCache.get(v);
+/** 雪花乘色缓存（8 级亮度 × 3 帧）：Dust.png 源矩形 (760,10×frame,8,8) = dust 76
+ *  （NewDust frame 8×8、frame.Y=10×rand(3)，Dust.cs:176-190） */
+const flakeTintCache = new Map<string, HTMLCanvasElement>();
+function tintedFlake(tex: ImageBitmap | HTMLImageElement, v: number, frame: number): HTMLCanvasElement | null {
+  const key = `${frame}|${v}`;
+  const hit = flakeTintCache.get(key);
   if (hit) return hit;
   if (typeof document === 'undefined') return null;
   const c = document.createElement('canvas');
-  c.width = 10; c.height = 10;
+  c.width = 8; c.height = 8;
   const cx = c.getContext('2d')!;
-  cx.drawImage(tex, 760, 0, 10, 10, 0, 0, 10, 10);
+  cx.drawImage(tex, 760, 10 * frame, 8, 8, 0, 0, 8, 8);
   cx.globalCompositeOperation = 'multiply';
   cx.fillStyle = `rgb(${v},${v},${v})`;
-  cx.fillRect(0, 0, 10, 10);
+  cx.fillRect(0, 0, 8, 8);
   cx.globalCompositeOperation = 'destination-in';
-  cx.drawImage(tex, 760, 0, 10, 10, 0, 0, 10, 10);
-  flakeTintCache.set(v, c);
+  cx.drawImage(tex, 760, 10 * frame, 8, 8, 0, 0, 8, 8);
+  flakeTintCache.set(key, c);
   return c;
 }
 
-/** 沙尘 grain 乘色缓存：Dust.png 源矩形 (680,20,10,10) = dust 268，
- *  按 EmitDust 四色（GetColor = dust.color × light，DrawDust :38423-38429 叠画） */
+/** 沙尘 grain 乘色缓存：Dust.png 源矩形 (680,60+10×frame,8,8) = dust 268 三帧
+ *  （NewDust while 双轮：frame.Y = 10×rand(3)+60——★(680,20) 是 dust 168 的蓝十字格，
+ *  蓝底被 GetColor 沙色乘成暗绿 = 「树叶」假象根因，2026-08-31 定谳）。
+ *  RGB 乘色入缓存；overlay 的 alpha 通道（GetColor 同式）由调用方 globalAlpha 施加 */
 const sandTintCache = new Map<string, HTMLCanvasElement>();
-function tintedSand(tex: ImageBitmap | HTMLImageElement, cr: number, cg: number, cb: number, v: number): HTMLCanvasElement | null {
-  const key = `${cr},${cg},${cb},${v}`;
+function tintedDust268(tex: ImageBitmap | HTMLImageElement, cr: number, cg: number, cb: number, frame: number): HTMLCanvasElement | null {
+  const key = `${frame}|${cr},${cg},${cb}`;
   const hit = sandTintCache.get(key);
   if (hit) return hit;
   if (typeof document === 'undefined') return null;
   const c = document.createElement('canvas');
-  c.width = 10; c.height = 10;
+  c.width = 8; c.height = 8;
   const cx = c.getContext('2d')!;
-  cx.drawImage(tex, 680, 20, 10, 10, 0, 0, 10, 10);
+  cx.drawImage(tex, 680, 60 + 10 * frame, 8, 8, 0, 0, 8, 8);
   cx.globalCompositeOperation = 'multiply';
-  const m = (c1: number) => Math.round((c1 * v) / 255);   // color×light（Dust.GetColor 同义）
-  cx.fillStyle = `rgb(${m(cr)},${m(cg)},${m(cb)})`;
-  cx.fillRect(0, 0, 10, 10);
+  cx.fillStyle = `rgb(${cr},${cg},${cb})`;
+  cx.fillRect(0, 0, 8, 8);
   cx.globalCompositeOperation = 'destination-in';
-  cx.drawImage(tex, 680, 20, 10, 10, 0, 0, 10, 10);
+  cx.drawImage(tex, 680, 60 + 10 * frame, 8, 8, 0, 0, 8, 8);
   sandTintCache.set(key, c);
   return c;
 }

@@ -59,7 +59,9 @@ export class SolarFlare extends Entity {
       if (!(this.cx - reach < e.x + e.w && this.cx + reach > e.x && this.cy - reach < e.y + e.h && this.cy + reach > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      // ★F3 接线（蓝队四轮）：爆焰 612 数据面 melee → 焰爆石/拍击石双支（13439-46）
+      // ★F3 接线（蓝队四轮）：爆焰 612 ——vanilla SetDefaults :6586-96 对其【不写】
+      // 类旗（611 才有 melee :6575）⇒ 双类门对其恒拒 = 原版同真值；本站仍统一走
+      // 单源入口（未来 612 若随版本翻旗自动生效），当前为无行为站位。
       const snapBonusFlare612 = projectileSnapStrikeBonus(game,
         { projId: 612 }, e.x + e.w / 2, e.y + e.h / 2, e.id,
         { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },

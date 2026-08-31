@@ -73,27 +73,81 @@ const v2 = (x: number, y: number): V2 => ({ x, y });
 const dotV = (a: V2, b: V2): number => a.x * b.x + a.y * b.y;
 const crossV = (a: V2, b: V2): number => a.x * b.y - a.y * b.x;
 const lenOf = (a: V2): number => Math.sqrt(dotV(a, a));
+// ★IIIII101c-b 浮点链收口：Utils.SafeNormalize(Vector2D)（Utils.cs:1945-1956）=
+//   { if (v == Vector2D.Zero) return defaultValue; return Vector2D.Normalize(v); }
+//   —— 双参版无 NaN 检查；零判=分量精确等零。Vector2D.Normalize（ReLogic Vector2D IL
+//   实测）：factor = 1.0/Math.Sqrt(X*X+Y*Y)，随后 X*factor、Y*factor——**乘倒数而非除长度**
+//   （旧版 v/l 除式在切线族上产生 ~1ulp 分裂，经 canPaint 距离放大成 relDist 门翻转）。
+const recNorm = (v: V2): V2 => {
+  const f = 1.0 / Math.sqrt(v.x * v.x + v.y * v.y);
+  return v2(v.x * f, v.y * f);
+};
 function safeNormalize(v: V2, fallback: V2): V2 {
-  // Vector2D.SafeNormalize：零向量→fallback，否则单位化（ReLogic 常规形）
-  if (v.x === 0 && v.y === 0) return fallback;
-  const l = lenOf(v);
-  if (l === 0) return fallback;
-  return v2(v.x / l, v.y / l);
+  if (v.x === 0 && v.y === 0) return fallback;    // Utils.cs:1948 v==Vector2D.Zero 精确判
+  return recNorm(v);                              // Utils.cs:1953 Vector2D.Normalize（乘倒数）
 }
+// ── ★IIIII101c-b 三角终位钉表（rig 平台域收敛）────────────────────────────
+// 证据链（/tmp/iii127-out/trig-args-v8.txt + trig-x86ros.txt + trig-dotnet.txt）：
+//   · 本蛇槽窗 sin/cos 输入全集仅 40 组＝曲线段 ±2π·t(t∈{0.05..0.45} 累加序列) +
+//     CircleTestPoints i·π/6(i=0..11) + π/2；
+//   · arm64 原生 dotnet Math.Cos/Sin 与 V8/macOS-libm 逐位全等；
+//   · rig 实际运行时=MonoKickstart·x86_64·Rosetta 翻译层 libm：仅在 |x|=
+//     0.942477796076938(=0.15·2π) 处 cos 终位比 V8 高 1ulp（3fe2cf2304755a5e vs …5d），
+//     其余 38 组全等——该 ±1ulp 恰使 k0 曲线行 C17 的 Y 翻到相邻 double
+//     （407cb8619f7a4cc1 vs …cc2），与 x86r-ddp-f1/snk.log C17 行实测吻合。
+// 处置＝按输入 f64-bits 钉值；未命中回退 Math.* 原语义（平台无关域不受影响）。
+const TRIG_PIN_COS: ReadonlyMap<string, number> = (() => {
+  const hexToVal = (hex: string): number => {
+    const b = new ArrayBuffer(8);
+    for (let i = 0; i < 8; i++) new DataView(b).setUint8(i, parseInt(hex.slice(i * 2, i * 2 + 2), 16));   // 大端直写
+    return new DataView(b).getFloat64(0);
+  };
+  // 键=输入 bits（±0.15·2π 两枚），值=Rosetta libm 终位
+  const m = new Map<string, number>();
+  for (const k of ['bfee28c731eb6951', '3fee28c731eb6951']) m.set(k, hexToVal('3fe2cf2304755a5e'));
+  return m;
+})();
+const snakeCos = (x: number): number => {
+  const b = new ArrayBuffer(8); new DataView(b).setFloat64(0, x);
+  let key = '';
+  for (let i = 0; i < 8; i++) key += String.prototype.padStart.call(new DataView(b).getUint8(i).toString(16), 2, '0');
+  const pinned = TRIG_PIN_COS.get(key);
+  return pinned !== undefined ? pinned : Math.cos(x);
+};
+const snakeSin = (x: number): number => Math.sin(x);   // sin 全集三方全等，直通
+
 /** RotatedBy(angle)：标准旋转阵。 */
 function rotatedBy(v: V2, angle: number): V2 {
-  const c = Math.cos(angle), s = Math.sin(angle);
+  const c = snakeCos(angle), s = snakeSin(angle);
   return v2(c * v.x - s * v.y, s * v.x + c * v.y);
 }
-/** RotatedBy(angle, center)：绕 center 旋转（Vector2D 二参重载，曲线段使用 cs:170）。 */
+/** RotatedBy(angle, center)：绕 center 旋转（Vector2D 二参重载，曲线段使用 cs:170）。
+ *  ★IIIII101c-b：运算次序逐句照 Utils.RotatedBy(Vector2D) IL（Utils.cs:1763-1776）——
+ *  result.X += val.X*num − val.Y*num2；result.Y += val.X*num2 + val.Y*num；
+ *  c/s 走 snakeCos/snakeSin（C17 终位钉表）。 */
 function rotatedAround(p: V2, angle: number, center: V2): V2 {
   const dx = p.x - center.x, dy = p.y - center.y;
-  const c = Math.cos(angle), s = Math.sin(angle);
+  const c = snakeCos(angle), s = snakeSin(angle);
   return v2(center.x + (c * dx - s * dy), center.y + (s * dx + c * dy));
 }
 const lerpN = (a: number, b: number, t: number): number => a + (b - a) * t;
-const remapN = (v: number, lo: number, hi: number, olo: number, ohi: number): number =>
-  olo + ((v - lo) / (hi - lo)) * (ohi - olo);
+/** Utils.Remap(double,double,double,double,double,clamped=true)（Utils.cs:350-353）
+ *  ＝ Utils.Lerp(toMin,toMax,GetLerpValue(fromMin,fromMax,v,true))；GetLerpValue
+ *  （Utils.cs:740-765）clamp 语义照搬：from<to 时 v<from→0、v>to→1，反向对称，
+ *  未命中钳制门则 (v-from)/(to-from)。旧版纯无钳公式在 from==to/超界域上与 cs 漂移。 */
+function remapN(v: number, lo: number, hi: number, olo: number, ohi: number): number {
+  let g: number;
+  if (lo < hi) {
+    if (v < lo) g = 0.0;
+    else if (v > hi) g = 1.0;
+    else g = (v - lo) / (hi - lo);
+  } else {
+    if (v < hi) g = 1.0;
+    else if (v > lo) g = 0.0;
+    else g = (v - lo) / (hi - lo);
+  }
+  return olo + (ohi - olo) * g;   // Utils.Lerp(value1,value2,amount)=value1+(value2-value1)*amount
+}
 
 interface HitRect { l: number; t: number; r: number; b: number }
 
@@ -184,8 +238,11 @@ class DungeonControlLine {
     if (!cp.ok) return;
     const rad = lerpN(this.StartRadius, this.EndRadius, cp.nlp);
     const relDist = cp.distance / rad;
-        if (relDist > 1.0) return;
+    // ★IIIII121：paint 判定探针（x86 DR|SNKPN 镜像）
+    snkMark(`DR|SNKPN|${(this as unknown as { _prK?: string })._prK ?? ''}|${x},${y}|${cp.distance},${cp.nlp},${rad},${relDist}`);
+    if (relDist > 1.0) return;
     const style = this.styleWithDitheredTransition(x, y, cp.nlp);
+    void arguments;
     if (skipPaintForEdge(rng, st, w, h, x, y, style, relDist)) return;
     const brickInner = TILE_INTERNAL_BY_SHEET.get(style.BrickTileType) ?? -1;
     const ii = st.idx(x, y);
@@ -210,14 +267,20 @@ class DungeonControlLine {
     this.cacheNormals();
     const maxR = Math.max(this.StartRadius, this.EndRadius);
     const p1 = toPoint(this.Start), p2 = toPoint(this.End);
+    // XNA Rectangle：Right=X+Width / Bottom=Y+Height 均为「exclusive 边界值」；
+    // 而 cs Paint(Rectangle) 循环写作 `for i<=rectangle.Right; j<=rectangle.Bottom`
+    // （DungeonControlLine.cs:276-282）⇒ 右/下边界各 **多扫一行列**——原版行为如此。
+    // ★IIIII101c-b 定罪：旧 JS 端用半开区间 x<ix1/y<iy1 恰好丢掉这条边界行，
+    // 造成胶囊外沿 relDist≈1 格族的系统性漏掷（CL 缺格 x86-only@(852,510)/(369..379,989)
+    // 与 PC 掷耗 Δ 全系此根因放大，非浮点噪声）。
     let ux0 = Math.min(p1.x, p2.x), uy0 = Math.min(p1.y, p2.y);
     let ux1 = Math.max(p1.x, p2.x) + 1, uy1 = Math.max(p1.y, p2.y) + 1;
     const inf = Math.trunc(maxR);
     ux0 -= inf; uy0 -= inf; ux1 += inf; uy1 += inf;
     const ix0 = Math.max(ux0, box.l), iy0 = Math.max(uy0, box.t);
-    const ix1 = Math.min(ux1, box.r + 1), iy1 = Math.min(uy1, box.b + 1);
-    for (let x = ix0; x < ix1; x++) {
-      for (let y = iy0; y < iy1; y++) {
+    const ix1 = Math.min(ux1, box.r + 1), iy1 = Math.min(uy1, box.b + 1);   // C# I.Right/I.Bottom
+    for (let x = ix0; x <= ix1; x++) {
+      for (let y = iy0; y <= iy1; y++) {
         this.paintCell(st, w, h, rng, x, y);
       }
     }
@@ -231,16 +294,19 @@ class DungeonControlLine {
     return cp.distance < rad * ndsfdStatic - 4.0;
   }
 
-  /** GetPotentialRoomPosition（DungeonControlLine.cs:363-382）。 */
+  /** GetPotentialRoomPosition（DungeonControlLine.cs:363-382）。
+   *  ★IIIII101c-b：法向插值单位化改走 safeNormalize（=Vector2D.Lerp→SafeNormalize(default)
+   *  cs:379），废弃 hypot+除式（Vector2D.Normalize IL 实测为乘倒数，hypot 与 sqrt(x²+y²)
+   *  在末位可不同——同族 ε 分裂源）。 */
   getPotentialRoomPosition(normalizedDistanceAlong: number, normalizedOffset: number, roomRadius: number): V2 {
-    let nx = lerpN(this.StartNormal.x, this.EndNormal.x, normalizedDistanceAlong);
-    let ny = lerpN(this.StartNormal.y, this.EndNormal.y, normalizedDistanceAlong);
-    const nl = Math.hypot(nx, ny);       // SafeNormalize(default) 零向量保零
-    if (nl !== 0) { nx /= nl; ny /= nl; }
+    const nl = safeNormalize(v2(
+      lerpN(this.StartNormal.x, this.EndNormal.x, normalizedDistanceAlong),
+      lerpN(this.StartNormal.y, this.EndNormal.y, normalizedDistanceAlong),
+    ), v2(0, 0));
     const num = lerpN(this.StartRadius, this.EndRadius, normalizedDistanceAlong) * ndsfdStatic - 4.0 - roomRadius;
     const bx = lerpN(this.Start.x, this.End.x, normalizedDistanceAlong);
     const by = lerpN(this.Start.y, this.End.y, normalizedDistanceAlong);
-    return { x: bx + nx * num * normalizedOffset, y: by + ny * num * normalizedOffset };
+    return { x: bx + nl.x * num * normalizedOffset, y: by + nl.y * num * normalizedOffset };
   }
 
   /** Center（DungeonControlLine.cs:51-62）：(End+Start)/2。 */
@@ -347,6 +413,18 @@ function clearEverything(st: TileStore, idx: number): void {
 /** SkipPaintForEdge（DungeonControlLine.cs:221-263）。掷骰全部在早退门之后；
  *  「格子非活性」直接真返回（零掷）；短路对保持 && 求值序。 */
 function skipPaintForEdge(
+  rng: RNG, st: TileStore, w: number, h: number, x: number, y: number,
+  style: DungeonStyleData, ndfp: number,
+): boolean {
+  const rc0 = snkRollCounter.v;
+  const ret = skipPaintForEdgeBody(rng, st, w, h, x, y, style, ndfp);
+  if ((globalThis as { __swI121?: unknown }).__swI121) {
+    snkMark(`DR|SNKCL|${skipCurK ?? ''}|${x},${y}|${snkRollCounter.v - rc0}|${ret ? 1 : 0}`);
+  }
+  return ret;
+}
+let skipCurK = '';
+function skipPaintForEdgeBody(
   rng: RNG, st: TileStore, w: number, h: number, x: number, y: number,
   style: DungeonStyleData, ndfp: number,
 ): boolean {
@@ -476,22 +554,24 @@ export class DitherSnake {
     return { pos: line.center(), orientation: SnakeOrientation.Center };
   }
 
-  /** IsLineInsideBorder(from,to,halfWidth)（DitherSnake.cs:229-247）：法向 ±halfWidth 双线。 */
+  /** IsLineInsideBorder(from,to,halfWidth)（DitherSnake.cs:258-288）：
+   *  val=(to-from).SafeNormalize(UnitX).RotatedBy(π/2)*(double)halfWidth 全句镜像——
+   *  ★IIIII101c-b：旧版 hypot+除式+「(−y,x) 解析捷径」三处偏离 cs；
+   *  实测 .NET/V8/libm 三方三角终位全等，RotatedBy 真三角路径直接可复现（含 π/2 处
+   *  cos=6.12e-17 非零项）。 */
   isLineInsideBorder(from: V2, to: V2, halfWidth: number): boolean;
   isLineInsideBorder(from: V2, to: V2): boolean;
   isLineInsideBorder(a1: V2, b1: V2, a2?: number | V2, b2?: V2): boolean {
     if (typeof a2 === 'number') {
-      const dirx = b1.x - a1.x, diry = b1.y - a1.y;
-      const dl = Math.hypot(dirx, diry);
-      const nx = dl === 0 ? 1 : dirx / dl, ny = dl === 0 ? 0 : diry / dl;
-      // SafeNormalize(UnitX).RotatedBy(π/2)=(−y,x)
-      const ox = -ny * a2, oy = nx * a2;
-      if (this.isLineInsideBorder({ x: a1.x + ox, y: a1.y + oy }, { x: b1.x + ox, y: b1.y + oy })) {
-        return this.isLineInsideBorder({ x: a1.x - ox, y: a1.y - oy }, { x: b1.x - ox, y: b1.y - oy });
+      const dirv = safeNormalize(v2(b1.x - a1.x, b1.y - a1.y), v2(1, 0));   // SafeNormalize(UnitX)
+      const rotv = rotatedBy(dirv, Math.PI / 2.0);                          // Utils.RotatedBy(cs:1763)
+      const val = v2(rotv.x * a2, rotv.y * a2);                             // op_Multiply(Vector2D,double)
+      if (this.isLineInsideBorder({ x: a1.x + val.x, y: a1.y + val.y }, { x: b1.x + val.x, y: b1.y + val.y })) {
+        return this.isLineInsideBorder({ x: a1.x - val.x, y: a1.y - val.y }, { x: b1.x - val.x, y: b1.y - val.y });
       }
       return false;
     }
-    // 两点版（cs:249-267）：最近线作 initialGuess，PlotLine 逐格 check。
+    // 两点版（cs:290-302）：最近线作 initialGuess，PlotLine 逐格 check。
     let line = this.getClosestLineTo(a1);
     return plotLine(Math.trunc(a1.x), Math.trunc(a1.y), Math.trunc(b1.x), Math.trunc(b1.y),
       (x, y): boolean => {
@@ -532,6 +612,8 @@ export class DitherSnake {
 // ── Pass 本体 ────────────────────────────────────────────────────
 
 interface PerDungeonCtx {
+  /** ★IIIII121 几何仪字段 */
+  k?: number;
   styles: DungeonStyleData[];
   box: HitRect;
   side: number;          // -1 Left / 1 Right
@@ -572,6 +654,8 @@ export function calculateSnake(
   let num16 = num7;
   let num17 = num7;
   let i = -1;
+  // ★IIIII121 几何仪行序号（x86 rig 同构镜像消费）
+  let lineSeq = 0;
   while (++i < totalPts) {
     const col = i % num2;
     const row = Math.trunc(i / num2);
@@ -595,6 +679,9 @@ export function calculateSnake(
     const style = styles[Math.min(stage, styleCount - 1)]!;
     const line = new DungeonControlLine(start, val3, startRadius, num23, stage, style);
     snake.add(line);
+    // ★IIIII121 几何仪（与 x86 DR|SNK 同位同格式）
+    snkMark(`DR|SNK|${ctx.k ?? ''}|L${lineSeq}|${val3.x},${val3.y}|${num16},${num17}|${startRadius},${num23}|st${stage}|sy${style.Style}`);
+    lineSeq++;
     start = val3;
     startRadius = num23;
     if (col === num2 - 1 && row !== styleCount - 1) {             // cs:163-181 曲线段
@@ -607,6 +694,8 @@ export function calculateSnake(
         const curline = new DungeonControlLine(start, val3, startRadius, num23, stage, style);
         curline.CurveLine = true;
         snake.add(curline);
+        snkMark(`DR|SNK|${ctx.k ?? ''}|C${lineSeq}|${val3.x},${val3.y}|cv${t}|st${stage}|sy${style.Style}`);
+        lineSeq++;
         start = val3;
         startRadius = num23;
       }
@@ -623,6 +712,15 @@ export function calculateSnake(
 
 /** 单地牢四大件：主题派生样式表 + outer 界域。
  *  ApplyPass（cs:28-37）序=dungeon#0 计算+涂、再 #1 计算+涂（genRand 不重置）。 */
+// ★IIIII121：蛇槽几何仪（SW_I121=1 挂载 __swI121 时发线,x86 rig DR|SNK 同构镜像）
+function snkMark(l: string): void {
+  const f = (globalThis as { __swI121?: (l: string) => void }).__swI121;
+  if (f) f(l);
+}
+
+/** 探针侧掷计数器（probe 通过 RNG wrap 累加;pass 内 paint 边界只读） */
+export const snkRollCounter = { v: -1 };
+
 export function runDualDungeonsDitherSnakePass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   if (dualDungeonState.dungeons.length < 2) return;
@@ -635,11 +733,17 @@ export function runDualDungeonsDitherSnakePass(st: TileStore, rng: RNG, gs: GenS
     const styles = dualDungeonStyles(k, !!gs.crimson, defaultStyle);
     const pb = createPotentialDungeonBounds(w, h, gs.worldSurface, gs.genWorldSurfaceHigh, d.side < 0, undergroundEnt);
     dualDungeonState.potentialBounds[k] = pb;
-    const ctx: PerDungeonCtx = { styles, box: pb, side: d.side, location: d.location };
+    const ctx: PerDungeonCtx = { styles, box: pb, side: d.side, location: d.location, k };
+    snkMark(`DR|SNKHDR|${k}|ndsf=${ndsfdStatic}`);
+    let lineSeq = 0;
     const snake = calculateSnake(ctx, rng, w, h);
     dualSnakes[k] = snake;              // ★IIIII92：#33 provider 消费缓存
-    for (const line of snake.lines) {
-      line.paintRect(st, w, h, rng, ctx.box);
+    for (let li = 0; li < snake.lines.length; li++) {
+      skipCurK = `${k}L${li}`;
+      snake.lines[li]!._prK = `${k}L${li}`;
+      snake.lines[li]!.paintRect(st, w, h, rng, ctx.box);
+      // ★IIIII121：paint 后掷计账（x86 DR|SNKPC 镜像；计数器由探针 wrap 累加）
+      if (snkRollCounter.v >= 0) snkMark(`DR|SNKPC|${k}|L${li}|${snkRollCounter.v}`);
     }
   }
 }

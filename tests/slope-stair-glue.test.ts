@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { moveAndCollide } from '../src/physics/TileCollision';
 import { World } from '../src/world/World';
+import { TILE_BY_KEY } from '../src/data/tiles';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../src/core/constants';
 
 const W = 60, H = 40, BASE = 22;
@@ -49,6 +50,16 @@ function buildStair(w: World, half: boolean): void {
     st.setTile(x, ty + 1, 1);
   }
 }
+/** 平台族：kind='flat' 错层平台 / 'hammer' 平台锤坡 */
+function buildPlatformStair(w: World, kind: 'flat' | 'hammer'): void {
+  const st = w.store;
+  for (let x = 0; x < 10; x++) st.setTile(x, BASE - 2, 1);
+  for (let c = 0; c < 16; c++) {
+    const idx = st.idx(10 + c, BASE - 2 + c);
+    st.setTile(10 + c, BASE - 2 + c, 2);            // 平台
+    if (kind === 'hammer') st.slope[idx] = 1;
+  }
+}
 
 /** 以 vx=±1 匀速行走,返回空中帧数与终点 x（格） */
 function walk(w: World, b: BodyT, dir: 1 | -1, ticks: number):
@@ -72,6 +83,13 @@ describe('斜坡楼梯下行不丢接地（Collision.cs SlopeCollision 双向贴
     expect(walk(w, baseBody(), 1, 200).air).toBe(0);
 
     w = new World(W, H, 7, 'half-stair'); buildStair(w, true);
+    expect(walk(w, baseBody(), 1, 200).air).toBe(0);
+
+    // 平台族（用户家楼梯常见砌法）
+    w = new World(W, H, 7, 'plat-flat'); buildPlatformStair(w, 'flat');
+    expect(walk(w, baseBody(), 1, 200).air).toBe(0);
+
+    w = new World(W, H, 7, 'plat-hammer'); buildPlatformStair(w, 'hammer');
     expect(walk(w, baseBody(), 1, 200).air).toBe(0);
   });
 
@@ -114,5 +132,40 @@ describe('斜坡楼梯下行不丢接地（Collision.cs SlopeCollision 双向贴
     // 核心断言：真腾空（非被按到坡面上拖行）。修正前该场景 onGround 门已挡,
     // 此用例锁定修复不会被未来的宽容化无声回退。
     expect(airborneTicks).toBeGreaterThan(40);
+  });
+
+  it('★平台锤坡+支撑柱楼梯下行零空帧（用户存档定罪形,2026-08-31）', () => {
+    // 真实存档 Starter_World 的玩家标注楼梯（marks no1..no7）：每列一块
+    // 木平台(type11)锤成 slope=1 ╲,下方有满格支撑柱。曾因 isPlatSlope 的
+    // 脚带门/上行方向档先于下贴候选评估,交界帧候选窗裸奔 → 存档实测
+    // 63/80 空帧缓慢坠落。本用例按同款几何合成复现。
+    const PT = TILE_BY_KEY['platform'];
+    const STONE = TILE_BY_KEY['stone'] ?? 1;
+    expect(PT).toBeDefined();
+    const w = new World(W, H, 7, 'plat-hammer-pillar');
+    const st = w.store;
+    for (let x = 0; x < W - 4; x++) { if (x < 8 || x >= 24) continue; }
+    for (let x = 0; x < 10; x++) st.setTile(x, BASE - 2, 1);   // 起步平台
+    for (let c = 0; c < 14; c++) {
+      const x = 10 + c, ty = BASE - 2 + c;
+      st.setTile(x, ty, PT!);                    // 平台
+      st.slope[st.idx(x, ty)] = 1;               // 锤成 ╲
+      st.setTile(x, ty + 1, STONE as number);    // 支撑柱
+      if (c > 0) st.setTile(x, ty, PT as number);
+    }
+    const b = baseBody();
+    b.x = 9.4 * TILE;
+    b.y = (BASE - 2) * TILE - 42 + 6;            // 落在起步平台顶稍上
+    b.onGround = true;
+    let air = 0;
+    for (let t = 0; t < 90; t++) {
+      b.vx = 1;
+      b.vy = Math.min(b.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(b, w, b.vx, b.vy);
+      if (!b.onGround) air++;
+    }
+    // 允许 ≤1 帧瞬态（交界角单帧闪烁,实机不可见）；≥3 帧即裸奔缝复发
+    expect(air).toBeLessThanOrEqual(1);
+    expect((b.x / TILE) - 9.4).toBeGreaterThan(80 / 16 - 2);   // 水平线性推进未卡死
   });
 });

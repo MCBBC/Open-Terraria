@@ -593,8 +593,14 @@ export class MagicMissileProj extends Entity {
         if (!(Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2)) continue;
         if (!playerCanHitEnemy(e, game, this.projId)) continue;
         const crit = Math.random() < this.critChance;
-        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage), Math.sign(this.vx) * this.knockback,
-          0, game, this.armorPen, crit, 0, true);
+        // ★F3 对账收口（蓝队四轮）：79 彩虹魔杖 Kill 死亡爆 = Resize 后 Damage()
+        // 二次结算面 → 双支单源站位（79 数据面 magic ⇒ 恒拒=原版同真值,翻旗自动生效）
+        const snapBonusRainbow = projectileSnapStrikeBonus(game,
+          { projId: this.projId }, ecx, ecy, e.id ?? -1,
+          { victimBox: { w: e.w, h: e.h, cx: ecx, cy: ecy } });
+        e.hurt(applyBannerDamageDealt(game, e, crit ? this.damage * 2 : this.damage)
+          + (snapBonusRainbow ? Math.trunc(snapBonusRainbow * (crit ? 2 : 1)) : 0),
+          Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);
       }
       game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);
       // 沿 oldPos 尾迹迸散（:72436-72487）：逐点 hue 相位、数量按点序衰减（≥0.3 −1、

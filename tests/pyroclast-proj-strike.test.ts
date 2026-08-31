@@ -18,7 +18,7 @@ import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { ITEM_BY_KEY } from '../src/data/items';
 import { trySnapStrike, projectileSnapStrikeBonus } from '../src/stats/SnapStrike';
 import { hitEnemies, HitCooldown } from '../src/entities/WeaponProj';
-import { pyroclastProjectileGate, snappingStoneProjectileGate } from '../src/entities/projTargets';
+import { pyroclastProjectileGate, snappingStoneProjectileGate, projClassOfProjId } from '../src/entities/projTargets';
 import type { ProjClass } from '../src/entities/projTargets';
 import type { GameHooks } from '../src/entities/types';
 import { BuffType } from '../src/stats/Buffs';
@@ -32,7 +32,7 @@ const iid = (vid: number): number => {
 
 interface MockEnemy {
   id: number; x: number; y: number; w: number; h: number;
-  dead: boolean; cx: number; cy: number;
+  dead: boolean; cx: number; cy: number; onFire3T?: number;
   hurt: (d: number, kx: number, ky: number, g: unknown) => boolean; hits: number[];
 }
 const mkEnemy = (id: number, cx: number, cy: number): MockEnemy => {
@@ -321,13 +321,16 @@ describe('F5 蜂群类旗 + F3 新站类位投影（resolveProjClass 数据面�
     });
 
   it('新接线站类位投影全表（melee/ranged 正例 + summon/magic 负例;数据面权威）', () => {
-    const g = mkHooks([]).hooks;
+    const s0 = mkHooks([]);
+    s0.player.inv.armor[3] = { id: iid(6178), stack: 1 };   // kind1 门饰品位（accPyroclast）
+    s0.player.inv.armor[4] = { id: iid(6167), stack: 1 };   // kind0 门饰品位（accSnappingStone）
+    const g = s0.hooks;
     const pos: Array<[number, string]> = [
       // ranged 族（kind0+kind1 双开）
       [714, 'ranged'], [615, 'ranged'], [443, 'ranged'], [706, 'ranged'],
       // melee 族（仅 kind1 门开）
       [1126, 'melee'], [977, 'melee'], [524, 'melee'], [451, 'melee'],
-      [611, 'melee'], [612, 'melee'], [707, 'melee'], [697, 'melee'],
+      [611, 'melee'], [707, 'melee'], [697, 'melee'],
       [978, 'melee'], [509, 'melee'], [252, 'melee'], [1043, 'melee'],
       [972, 'melee'], [973, 'melee'], [974, 'melee'], [976, 'melee'], [933, 'melee'],
       [321, 'melee'], [134, 'ranged'], [133, 'ranged'],
@@ -337,7 +340,10 @@ describe('F5 蜂群类旗 + F3 新站类位投影（resolveProjClass 数据面�
       const wantKind0 = cls === 'ranged';
       expect(snappingStoneProjectileGate(g, { projId: id })).toBe(wantKind0);
     }
-    // 负例：summon/magic/无类/idStatic 免疫站（1091/1117/1122）
+    // 负例：summon/magic/无类/idStatic 免疫站（1091/1117/1122）+ 日耀爆焰 612——
+    // vanilla SetDefaults（Projectile.cs:6586-6596）对 612【不写】melee 旗
+    // （611 才写 :6575）→ 数据面 cls=null，两门恒拒（SolarEruption 站接线为门内自证）。
+    expect(projClassOfProjId(612)).toBeNull();
     for (const id of [191, 34, 1091, 1117, 1122]) {
       expect(pyroclastProjectileGate(g, { projId: id })).toBe(false);
       expect(snappingStoneProjectileGate(g, { projId: id })).toBe(false);

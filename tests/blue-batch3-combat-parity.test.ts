@@ -339,7 +339,10 @@ describe('三批结构锚', () => {
 
   it('F1 弹侧旗乘区接线：dealContacts/hitEnemies/Arrow 主结算均走 applyBannerDamageDealt', () => {
     expect(src('src/entities/proj1457.ts').includes('dmg = applyBannerDamageDealt(game, e, dmg);')).toBe(true);
-    expect(src('src/entities/WeaponProj.ts').includes('e.hurt(applyBannerDamageDealt(game, e, dmg), kdir * self.knockback')).toBe(true);
+    // ★F1（蓝队四轮）重锚：焰爆石加伤在 banner【后】并入（Projectile.cs:14457 晚于
+    // :13387）⇒ 加伤表达式插在 applyBanner 与击退实参之间是正确终态——锚放宽为
+    // 「hurt 首参以 applyBannerDamageDealt 打头、kdir 实参仍在其中」的正则形。
+    expect(/e\.hurt\(applyBannerDamageDealt\(game, e, dmg\)[^;]*?, kdir \* self\.knockback/.test(src('src/entities/WeaponProj.ts'))).toBe(true);
     expect(src('src/entities/Arrow.ts').split('applyBannerDamageDealt(').length - 1).toBeGreaterThanOrEqual(8);
   });
 });

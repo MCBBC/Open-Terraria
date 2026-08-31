@@ -583,10 +583,18 @@ function makeTileDustRoll(ctx: SweepCtx, sheet: number, fx: number): void {
     case 385:
       r.nextIntRange(68, 71);
       return;
+    // ★III122（cs:68850-6873）：type254 南瓜——原实现档位整体错一档（曾 fx<72→
+    //   Next(3)，其余顺移）：真文是 **fx<72 零掷**（num=3 恒定），≥72 才有
+    //   单次判掷（<108 Next(3) / <144 Next(2) / else Next(4)），外层 GetTileDustAmount
+    //   默认 10 次/格循环不变（cs:67127 无 254 特例=default 10）。pumpkin 链 mile8
+    //   #90 花域受理门族首差定罪：小南瓜（PlacePumpkin 头变异 fx∈{0,36} 常态）
+    //   每杀多耗 10 样本 ⇒ 花圃锚窗内骰流早漂， placements/升级 ±Next(3) 全错位。
     case 254:
-      if (fx < 72) r.nextInt(3);
-      else if (fx < 108) r.nextInt(2);
-      else r.nextInt(4);
+      if (fx >= 72) {
+        if (fx < 108) r.nextInt(3);
+        else if (fx < 144) r.nextInt(2);
+        else r.nextInt(4);
+      }
       return;
     default:
       if (FURNITURE_DUST.has(sheet)) r.nextInt(3);
@@ -598,6 +606,7 @@ function makeTileDustRoll(ctx: SweepCtx, sheet: number, fx: number): void {
 function killTileGen(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
+  __swFnt39('KT', x, y);   // IIII100e2：K 分解镜像（rig KillTile 入口 KT 同位）
   // IIII68b：KillTile 入口时序探针（x86 KTPRE 同位；无钩零开销）
   try {
     const gt = (globalThis as unknown as { __swShimTargets?: Set<string> }).__swShimTargets;
@@ -780,6 +789,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     || sheet === 411 || sheet === 752 || sheet === 751 || sheet === 654   // IIII33：Check2x2 自读帧族同列（138 同款）
     || sheet === 5 || sheet === 596 || sheet === 616
     || sheet === 34 || sheet === 27
+    || sheet === 254   // IIII103c：Check2x2Style 自读帧族同列（sparse 免疫，27/34 同款）
     || C3X2_TYPES.has(sheet)
     // KKKKK：新击杀族同列（自读帧族——嵌合基座伪杀/互喂风险，C3X2 同款处置；
     //   #101 槽 frameSparse=false 不受影响，真实行为由生产管线承载）
@@ -966,6 +976,11 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   27→Next(2)×10/格），JS 单杀=掷流 1034 处分叉全漂（掷差 307）。
     case 27:
       checkSunflowerSweep(st, ctx, x, y, sheet);
+      return true;
+    // ★IIIII103c（cs:87239-42 → Check2x2Style cs:52761）：南瓜 254 派发落地——
+    //   pumpkin 链 mile8 #90 首差定罪根因（详见函数头）。 PumpkinSeeds 成员仅此型。
+    case 254:
+      check2x2StyleSweep(st, ctx, x, y);
       return true;
     case 373: case 374: case 375: case 461: case 709: {   // IsADripTile（cs:85750）
       const up = st.idx(x, y - 1);
@@ -1444,6 +1459,73 @@ function checkSunflowerSweep(st: TileStore, ctx: SweepCtx, x: number, y: number,
   }
   ctx.destroyObject = false;                                                // cs:53810（无尾扫）
 }
+
+/* ── Check2x2Style（cs:52761-52898）——★IIIII103c：case254 南瓜派发落地 ──
+ * 花域受理门族 mile8 #90 定罪根因之一：南瓜=2×2 多格物（PlacePumpkin cs:52902
+ * fx∈{0,18}+fy=Next(6)*36+{0,18}），任意成员格被杀后其 SquareTileFrame 邻帧
+ * TileFrame→case254→Check2x2Style 完整性/支撑门失配 → destroyObject 整组杀
+ * + **case254 尾 ITEM 掷（生成期照常消费 genRand！）**：
+ *   fx<72 零掷；72..107 Next(2) 中签再 Next(1,3)；108..143 Next(2,6)；
+ *   ≥144 Next(5,11)+(!halloween 短路免 200 面)。JS 此前缺整条臂 → 花圃锚窗内
+ *   上层瓜悬空残留在 JS（x86 已杀）→ 同窗后续受理面/掷流全错位（本批单窗重放
+ *   实证 x86-only 杀@(3572..3573,241)/(3596..3597,243) 与 ±Next(3) 升级帧漂移）。
+ * 反解/完整性逐句镜像；地面门=SolidTileAllowBottomSlope(cs:70706，solidAllowBottom
+ * 助手既有)+type==254 支柱草族 {2,109,477,492} 门（cs:52804-13）。尾扫
+ * [left-1..left+3)×[top-1..top+3) 列主序（cs:52895-97）；group 内其他类型维持
+ * 未派发备案（in-gen 在场成员唯 254）。 */
+function check2x2StyleSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  if (ctx.destroyObject) return;                                            // cs:52763
+  let flag = false;
+  const i0 = st.idx(x, y);
+  const top = y - (Math.trunc(st.frameY[i0]! / 18) & 1);                    // 组顶行 cs:52765-70（fy18 单位奇偶归一）
+  let colU = Math.trunc(st.frameX[i0]! / 18);
+  let style = 0;
+  while (colU > 1) { colU -= 2; style++; }                                  // cs:52771-77（style 基=36px 步）
+  const left = x - colU;
+  const fxBase = style * 36;
+  for (let k = left; k < left + 2; k++) {
+    for (let l = top; l < top + 2; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }                    // null→new Tile=失配
+      const q = st.idx(k, l);
+      if (!st.flags[q] || SWEEP_SHEET[st.type[q]] !== 254 || st.frameX[q] !== (k - left) * 18 + fxBase) flag = true;   // cs:52788-90
+    }
+    if (!st.inBounds(k, top + 2)) { flag = true; continue; }
+    if (!solidAllowBottom(st, k, top + 2)) { flag = true; }                 // cs:52792 SolidTileAllowBottomSlope
+    else {
+      const g = st.idx(k, top + 2);
+      const gs = SWEEP_SHEET[st.type[g]];
+      if (gs !== 2 && gs !== 109 && gs !== 477 && gs !== 492) flag = true;  // cs:52797-13（活性草族门）
+    }
+  }
+  if (!flag) return;
+  const fxSelf = st.frameX[i0]!;                                            // cs:52823 杀前捕获（尾掷档位）
+  ctx.destroyObject = true;                                                 // cs:52824
+  for (let m = left; m < left + 2; m++) {
+    for (let n = top; n < top + 2; n++) {
+      if (!st.inBounds(m, n)) continue;
+      const q = st.idx(m, n);
+      if (st.flags[q] && SWEEP_SHEET[st.type[q]] === 254) killTileGen(st, ctx, m, n);
+    }
+  }
+  {                                                                         // case 254 尾掷（Item.NewItem 不建模但 genRand 照耗，cs:52841-67）
+    if (fxSelf >= 72) {
+      if (fxSelf < 108) {
+        if (ctx.rng?.nextInt(2) === 0) ctx.rng?.nextIntRange(1, 3);         // cs:52846-51
+      } else if (fxSelf < 144) {
+        ctx.rng?.nextIntRange(2, 6);                                        // cs:52853-57
+      } else {
+        ctx.rng?.nextIntRange(5, 11);                                       // cs:52858-61
+        if (HALLOWEEN_GEN && ctx.rng) ctx.rng.nextInt(200);                 // Main.halloween 短路面（生成期缺省 false）
+      }
+    }
+  }
+  ctx.destroyObject = false;                                                // cs:52891
+  for (let cx2 = left - 1; cx2 < left + 3; cx2++) {                         // cs:52893-97 列主序尾扫
+    for (let cy2 = top - 1; cy2 < top + 3; cy2++) tileFrameGen(st, ctx, cx2, cy2, false);
+  }
+}
+/** Main.halloween 缺省 false（rig 世界生成期与 SW 一致）；若未来接入季节门在此接 */
+const HALLOWEEN_GEN = false;
 
 // ============================================================
 // KKKKK 批补：#101 击杀级联三族（金标 14 格实证——文件头"零击杀证据"陈旧）
@@ -1936,12 +2018,14 @@ function checkOnTableSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, s
 /** CheckPile（cs:46891）+ Check2x1（cs:46989）：frameY==18→2x1；支撑/地基门杀 */
 function checkPileSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   const i = st.idx(x, y);
+  __swFnt39('CP', x, y, st.frameY[i]! + ',' + st.type[i]);   // IIII100e2：K 分解镜像
   if (st.frameY[i] === 18 || sheetAt2(st, x, y) === 649) {
     check2x1Sweep(st, ctx, x, y, sheetAt2(st, x, y));
     return;
   }
   if (!solidAllowBottom(st, x, y + 1)) { killTileGen(st, ctx, x, y); return; }
   const fx18 = Math.floor(st.frameX[i]! / 18);
+  __swFnt39('CPN', x, y, fx18 + ',' + st.type[i]);   // IIII100e2：组号+型（rig CPN 同位）
   const belowSh = activeAt2(st, x, y + 1) ? sheetAt2(st, x, y + 1) : -1;
   if (belowSh < 0) return;
   if (fx18 >= 36 && fx18 <= 47) {

@@ -746,7 +746,7 @@ export function resolveWhipTagHit(
   if (changes.addProjectileTagDamage && owner?.equipStats.accArmletOfRuin) {
     const vw = en.w ?? 16, vh = en.h ?? 16, vx0 = en.x ?? hx, vy0 = en.y ?? hy;
     snapBonusKind2 = trySnapStrike(game, owner, 2, hx, hy, en.id,
-      { w: vw, h: vh, cx: vx0 + vw / 2, cy: vy0 + vh / 2 });   // R4-33 victim 自脉冲
+      { victimBox: { w: vw, h: vh, cx: vx0 + vw / 2, cy: vy0 + vh / 2 } });   // R4-33 victim 自脉冲
   }
   if (crit) dmg *= 2;
   if (snapBonusKind2 > 0) dmg += Math.trunc(snapBonusKind2 * (crit ? 2 : 1));

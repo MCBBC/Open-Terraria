@@ -77,6 +77,12 @@ function placeWallFrameRollsMB(st: TileStore, rng: RNG, x: number, y: number): v
   wallFrameRollMB(st, rng, x, y - 1);
   wallFrameRollMB(st, rng, x, y + 1);
 }
+/** IIII100e2：K 分解窗口包络发线（与 FinalCleanupPass.__swFnt39 同 globalThis 槽） */
+function __swFnt39(tag: string, x: number, y: number): void {
+  const pr = (globalThis as unknown as { __swFntProbeI39?: { emit?: (l: string) => void; rc?: () => number } }).__swFntProbeI39;
+  const em = pr?.emit;
+  if (em) em(tag + '|' + x + ',' + y + '|' + (pr?.rc ? pr.rc() : -1));
+}
 import { placeBuriedChest, nextJungleItem, type ChestSink } from './BuriedChestsPass';
 import { GENERAL_PLACEMENT_FORBID } from './GenState';
 
@@ -2524,8 +2530,15 @@ export function placeLavaTrap(st: TileStore, gs: GenState, x: number, y: number,
   // ★CCCCC：双帧——case135 支恒调（cs:60225-27）+ 尾（cs:60284）。SQ 织入：
   //   van PT135 后 SQ×2 ×31 + SQ×1 ×4（门败/非活性），曾单帧
   st.setTileSilent(x, num10, PLATE, 0, 126);
+  // IIII100e2：K 分解窗口包络（__swFnt39 同词表;rig 侧 K13Log 对位）——
+  //   TWO=窗开(=rig case135 支进入) → SQ#1 → SQ1E → SQ2S(vanilla cs:60758 active
+  //   门尾 STF) → TP3/TWEND 窗闭。级联腿(SQ/TF/TI/KT/CP/CPN)由 FinalCleanupPass 钩发。
+  __swFnt39('TWO', x, num10);
   genSquareTileFrame(st, rng0!, x, num10);
+  __swFnt39('SQ1E', x, num10);
   genSquareTileFrame(st, rng0!, x, num10);
+  __swFnt39('TP3', x, num10);
+  __swFnt39('TWEND', x, num10);
   // 线 + 致动石栅(cs:8721-8730):num8..num9-1 致动,num8..num10 红线
   for (let m = num8; m <= num10; m++) {
     if (!st.inBounds(x, m)) continue;

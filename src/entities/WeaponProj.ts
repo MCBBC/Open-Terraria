@@ -356,9 +356,9 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
       (e as { cx?: number }).cx ?? e.x + e.w / 2, (e as { cy?: number }).cy ?? e.y + e.h / 2,
       e.id, { victimBox: { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
         cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
-    e.hurt(applyBannerDamageDealt(game, e, dmg)
-      + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0),
-      kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
+    // （结构锚 tests/blue-batch3-combat-parity「F1 弹侧旗乘区」钉本站 hurt 首参字面——
+    //   加伤并入写成同行表达式,勿再折行拆散 applyBannerDamageDealt 前缀）
+    e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0), kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
     onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     // + 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意命中;

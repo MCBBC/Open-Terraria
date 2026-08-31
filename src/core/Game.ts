@@ -12982,10 +12982,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  "缩短"是正确行为(不能隔墙开火);原版出生=盒中心同样永远够不到墙外语义。
    **/
   private resolveShotAnchor(spriteKey: string, ang: number): { x: number; y: number } {
-    // ★v8(2026-08-31 终案):原版字面=盒中心(Player.cs:47603)。枪口出膛观感
-    //  由渲染层实现(Arrow.draw 角色盒内不渲染弹体,穿出后可见)——不再用任何
-    //  几何出生点近似(heldItemTipWorld 保留在 Renderer 备查但本函数不再消费)。
-    return { x: this.player.cx, y: this.player.cy };
+    // ★v11(2026-08-31 终版):heldItemTipWorld 极坐标(枪族:中心+瞄准·reach+(0,−fh/2))。
+    //  渲染隐藏由 Arrow.draw / GrenadeProj.draw 角色盒内不渲染弹体实现。
+    const vid = viIdFromKey(spriteKey);
+    const swAr = this.renderer?.atlas ? atlasIconForKey(this.renderer.atlas, spriteKey) : null;
+    return heldItemTipWorld(
+      this.player.cx, this.player.cy, this.player.facing === -1 ? -1 : 1, ang,
+      vid, swAr?.sw ?? 16, swAr?.sh ?? 16);
   }
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
@@ -14676,8 +14679,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 默认魔法路径曾硬编码 pierce 1）、extraUpdates 2/4 与 timeLeft 600 由弹表驱动、
         // 点光 0.75（:1026/:1710）
         if (cw.shoot === 20 || cw.shoot === 88) {
-          // 出膛锚 v5（曾 R30 批误归玩家中心——激光应从枪口出,与持枪姿势同源）
+          console.log('[swZap]', 'ENTERED', 'shoot=' + cw.shoot, 'ang_deg=' + Math.round(ang * 180 / Math.PI)); //$TEST
           const zapA = this.resolveShotAnchor(def.key, ang);
+          console.log('[swZap]', 'vel=', Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed); //$TEST
           const zap = new Arrow(zapA.x, zapA.y,
             Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
             cw.damage, cw.knockback, cw.shoot, null,

@@ -9,6 +9,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 
 interface ArcOwner { cx: number; cy: number; x: number; y: number; w: number; h: number; facing: number; dead: boolean }
 
@@ -71,7 +72,16 @@ export class TerraArc extends Entity {
       if (!(ex - bw / 2 < e.x + e.w && ex + bw / 2 > e.x && ey - bh / 2 < e.y + e.h && ey + bh / 2 > e.y)) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(applyBannerDamageDealt(game, e, dmg), this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★F3 接线（蓝队四轮·全量对账补站）：泰拉刃弧 984 数据面 melee（SetDefaults
+      // 类旗投影）→ 焰爆石/拍击石双支（Projectile.cs:13439-13446）；加伤随暴击并入
+      const snapBonusTerra = projectileSnapStrikeBonus(game,
+        { projId: 984 }, (e as { cx?: number }).cx ?? e.x + e.w / 2,
+        (e as { cy?: number }).cy ?? e.y + e.h / 2, e.id,
+        { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 },
+          targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h } });
+      e.hurt(applyBannerDamageDealt(game, e, dmg)
+        + (snapBonusTerra ? Math.trunc(snapBonusTerra * (crit ? 2 : 1)) : 0),
+        this.ai0 * 6.5, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
       this.hitSet.add(e.id);
     }
     if (this.t >= this.ai1) this.dead = true;                                    // :39554-39557

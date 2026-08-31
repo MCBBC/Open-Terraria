@@ -239,7 +239,12 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
         && (b.y + b.h) - dy <= ty * TILE + 1; // 上一位置在平台之上
       if (dir > 0) {
         if (!solid && !plat) continue;
-        if (slopePass(tx, ty, b.x, oldY)) continue; // 坡面格交给 slopeCollide 对角线贴合
+        // ★天花板坡(3/4)顶面=实体地面（原版 topSlopes() 仅指 1/2：slope3/4 只参与
+        //   "从下方顶头"结算，从上方踩其顶面按整块落地——Collision.cs:1610 solid 判
+        //   `!tile.topSlopes()`。曾全坡一律交给 slopePass → 嵌入 6px 的 walked-on
+        //   3/4 被拒重新着地 = 僵尸/掉落物在锤型天花坡上永久钉死+3px 抖动判例）
+        const slv = st.slope[st.idx(tx, ty)] ?? 0;
+        if (slv !== 3 && slv !== 4 && slopePass(tx, ty, b.x, oldY)) continue; // 坡面格交给 slopeCollide 对角线贴合
         // 落地门槛（Collision.cs:1610/1631）：新底部越过盒顶 且 上一位置在盒顶之上，
         // 否则（嵌入/侧入）不吸附——半砖盒顶是 ty*16+8，只进入行上半不算落地
         const top = span ? span[0] : ty * TILE;
@@ -314,6 +319,23 @@ function slopeCollide(
       const i = st.idx(tx, ty);
       const slope = st.slope[i];
       if (slope === 0 || st.half[i]) continue;
+      const vx0 = tx * TILE, vy0 = ty * TILE;
+      // ★面随下贴候选（真·must-be-first，2026-08-31 存档复现定案）：必须置于
+      // 【所有】前进性 continue（平台脚带门/上行方向档/重叠门）之前——跨两坡格
+      // 交界瞬间旧格已水平出窗、新格脚底未入其脚带,任一前门先跑都会让该格在
+      // 交界帧不可见（实心坡 v5-t47 / 平台坡存档 t32 双例定罪）。门 =
+      // wasGround + vy≥0 + !dropThrough + gap∈(0.05,17px)(=StepDown 吸附窗界
+      // Collision.cs:3629)；线 = vy0 + num4(num4 按左/右缘进深钳 [0,TILE],
+      // tip-over 场景 num4=0 ⇒ 线=格顶,gap≈0 防误拉)；候选取最贴近脚下者。
+      if (wasGround && b.vy >= 0 && !b.dropThrough && (slope === 1 || slope === 2)) {
+        const n4s = Math.max(0, Math.min(TILE,
+          slope === 1 ? b.x - vx0 : vx0 + TILE - (b.x + b.w)));
+        const gapS = vy0 + n4s - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入
+        if (gapS > 0.05 && gapS < bestSnapGap) {
+          bestSnapGap = gapS;
+          bestSnapY = vy0 + n4s;
+        }
+      }
       // 坡面平台（平台锤楼梯，slope 恒 1/2——3/4 不存在于平台锤循环）：单向门
       // 1:1（Collision.cs:1851-1866）——上升中不挡（交给 stepUp 爬楼梯）；
       // 脚带内 [格顶, 格底+1+|vx|] 才接；上行方向档（slope1 且 vx≥0 /
@@ -327,24 +349,6 @@ function slopeCollide(
         if (b.y + b.h < ty * TILE || b.y + b.h - (1 + Math.abs(b.vx)) > ty * TILE + TILE) continue;
         if (((slope === 1 && b.vx >= 0) || (slope === 2 && b.vx <= 0))
           && Math.floor((b.y + b.h) / TILE) - 1 === ty) continue;
-      }
-      const vx0 = tx * TILE, vy0 = ty * TILE;
-      // ★面随下贴候选——必须在重叠门前评估（下坡丢接地对症,2026-08-31 楼梯
-      //   下行=跌落感定案）：跨两坡格交界的瞬间旧格已水平出窗、新格脚底尚未
-      //   垂直入格，第 326 行的重叠门两侧都拒收 → 候选窗裸奔 4~5 帧（v5 探针
-      //   t47 定案）→ vy 自由落体成簇 → FindFrame 腾空帧。此处对【贴地下行】
-      //   的实心地面坡（1/2）提前发候选：线 = vy0 + num4（num4 仍按本格左/右缘
-      //   进深钳 [0,TILE]——天然防误拉：tip-over 场景 num4=0 → 线=格顶=平地
-      //   齐平,gap≈0 不触发）。门 = wasGround + vy≥0 + gap∈(0.05,17px)
-      //   （=StepDown 吸附窗界,Collision.cs:3629）；候选取最贴近脚下者。
-      if (wasGround && b.vy >= 0 && !isPlatSlope && slope <= 2) {
-        const n4s = Math.max(0, Math.min(TILE,
-          slope === 1 ? b.x - vx0 : vx0 + TILE - (b.x + b.w)));
-        const gapS = vy0 + n4s - (b.y + b.h);          // >0 浮于面上 / ≤0 沉入
-        if (gapS > 0.05 && gapS < bestSnapGap) {
-          bestSnapGap = gapS;
-          bestSnapY = vy0 + n4s;
-        }
       }
       if (b.x + b.w <= vx0 || b.x >= vx0 + TILE || b.y + b.h <= vy0 || b.y >= vy0 + TILE) continue;
       // 对角线水平偏移（:1882-1893/1927-1934）：slope1/3 取身体左缘进格深度,
@@ -577,6 +581,12 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   const feetEntry = b.y + b.h;
   const vyEntry = b.vy;
   b.vyEntry = vyEntry; b.feetEntry = feetEntry;
+  // ★★2026-08-31 根治“阻尼式卡进斜坡”：贴合挪到分轴【之前】（原版顺序——
+  //   TileCollision 内 SlopeCollision 段(:1796-2036)先于 Y/X 扫描）。旧序 X 扫描
+  //   在身体尚未抬升时判定，坡面放行门(feet-|vx|<=top+16 且边缘条件)在
+  //   爬坡/下坡组合下失败 → 拦截+回推 → 棘轮式 -16px 阻尼卡进（实测 11+ tick
+  //   误差 -16 恒定）。新序贴合先抬到当前坡面 → X 扫描看到干净脚下 → 平滑爬升。
+  slopeCollide(b, world, feetEntry, vyEntry, wasGround);
   const maxStep = 8;
   const steps = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy)) / maxStep));
   for (let i = 0; i < steps; i++) {
@@ -586,7 +596,6 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     if (hitY) { b.collideY = true; dy = 0; }
     if (dx === 0 && dy === 0) break;
   }
-  slopeCollide(b, world, feetEntry, vyEntry, wasGround);
   unembedPass(b, world);
 }
 

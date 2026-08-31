@@ -1659,21 +1659,39 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
                 st.half[t5] = 0;
               }
               // PlaceTile(m, n, 3)：液体拒绝（tile 3 在 cs:59492 黑名单）+
-              // IsFitToPlaceFlowerIn（cs:58247：下方草族整砖）+ 墙门 + 帧三选一
+              // IsFitToPlaceFlowerIn（cs:58247：下方草族整砖）
+              // ★IIIII103c 重构（原版 PlaceTile 分支序 1:1，cs:60019-60061）：
+              //   ① IsFit 门用 **KillTile 后的活性支撑格现读值**（C# Tile 引用语义——
+              //     杀写/级联可能已改写支撑格型）；② 支撑∈{78,380,579}（丛林/蘑菇变体
+              //     草）走「丛林花圃帧」支 =NextFromList(22 档)+条件 Next(3)，**无墙门**；
+              //   ③ 其余（含 477/普通草 2）才验双墙 AllowsPlantsToGrow 走蘑菇1/50→
+              //     染料1/35|墙63..70→草丛 6 变体三连掷链。旧实现把两支揉成一团：
+              //     丛林支撑误吃墙门+掷链错位 ⇒ 掷流早漂。
               let placed = false;
               const kk = st.idx(m, n);
+              const s5Live = SHEET[st.type[t5]];
+              const fitBelow = s5Live === 2 || s5Live === 78 || s5Live === 380
+                || s5Live === 477 || s5Live === 579;
               if (st.liquid[kk] === 0
                 && st.flags[t5] && st.slope[t5] === 0 && !st.half[t5]
-                && (s5 === 2 || s5 === 78 || s5 === 380 || s5 === 477 || s5 === 579 || st.type[t5] === GRASS)
-                && WALL_ALLOWS_PLANTS.has(st.wall[kk]) && WALL_ALLOWS_PLANTS.has(st.wall[t5])) {
-                flCap?.(m, n, `fit s5=${s5} wk=${st.wall[kk]}`);
-                let fx: number;
-                if (rng.int(0, 49) === 0) fx = 144;                     // 蘑菇 1/50
-                else if (rng.int(0, 34) === 0 || (st.wall[kk] >= 63 && st.wall[kk] <= 70)) {
-                  fx = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20][rng.int(0, 13)] * 18;
-                } else fx = rng.int(0, 5) * 18;                         // 草丛 6 变体
-                st.setTileSilent(m, n, PLANT_SHORT, fx, 0);
-                placed = true;
+                && fitBelow) {
+                if (s5Live === 78 || s5Live === 380 || s5Live === 579) {
+                  flCap?.(m, n, `fitJ s5=${s5Live}`);
+                  let v = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+                    20, 21, 24, 27, 30, 33, 36, 39, 42][rng.int(0, 21)];  // NextFromList×22（cs:60028）
+                  if (v >= 21) v += rng.int(0, 2);                        // switch 高档位 += Next(3)（cs:60030-41）
+                  st.setTileSilent(m, n, PLANT_SHORT, v * 18, 0);
+                  placed = true;
+                } else if (WALL_ALLOWS_PLANTS.has(st.wall[kk]) && WALL_ALLOWS_PLANTS.has(st.wall[t5])) {
+                  flCap?.(m, n, `fit s5=${s5Live} wk=${st.wall[kk]}`);
+                  let fx: number;
+                  if (rng.int(0, 49) === 0) fx = 144;                     // 蘑菇 1/50
+                  else if (rng.int(0, 34) === 0 || (st.wall[kk] >= 63 && st.wall[kk] <= 70)) {
+                    fx = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20][rng.int(0, 13)] * 18;
+                  } else fx = rng.int(0, 5) * 18;                         // 草丛 6 变体
+                  st.setTileSilent(m, n, PLANT_SHORT, fx, 0);
+                  placed = true;
+                }
               }
               if (placed && st.flags[kk] && SHEET[st.type[kk]] === 3) {
                 st.frameX[kk] = (num7 + rng.int(0, 2)) * 18;            // 花圃重帧（cs:20720）

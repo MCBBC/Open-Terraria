@@ -20,7 +20,10 @@ import { Arrow } from '../src/entities/Arrow';
 import { canHit, canHitLine } from '../src/physics/LineOfSight';
 import type { GameHooks } from '../src/entities/types';
 
-const W = 200, H = 120;
+// ★蓝队四轮（2026-08-31）：H 120→200——WetCollision 几何升级版按原版 Collision.cs:1603-05
+// 上下界钳 maxTilesY−40，120 行店帧行 90 的注水格落在扫描带外（j1=min(H−40,…)=80）；
+// 原版世界高度≫160，测试店随之加高即可，物理面其余用例不受扰
+const W = 200, H = 200;
 function makeStore(): TileStore {
   const store = new TileStore(W, H);
   for (let x = 0; x < W; x++) for (let y = 100; y < H; y++) store.setTile(x, y, 1);
