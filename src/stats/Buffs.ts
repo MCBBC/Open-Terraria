@@ -361,6 +361,25 @@ export enum BuffType {
   //      BuffName.ParryDamageBuff=「惊人一刻」/ BuffDescription.ParryDamageBuff=
   //      「下次近战攻击伤害提高400%」,12 语言现成,零自造键 → 不走 l10n-custom 流程）
   Parry = 307,                 // 盾反(198,ParryDamageBuff)：下次近战伤害 ×5 的建模面
+  // ---- 甲虫套装 buff 族（2026-08-31 实装；BuffID.BeetleEndurance1..3=95/96/97、
+  //      BeetleMight1..3=98/99/100——内部名带档位后缀）。图标族:noTimeDisplay[95-100]
+  //      (Main.cs:9232-9237)恒无字、buffNoSave(:9148-9152)不落盘由 BeetleMeter 每帧重算。
+  //      档位编码:95-97 ↔ n=vanilla−94 球(壳族,:10433);98-100 ↔ n=vanilla−97 球
+  //      (猛攻族,:10498)。维持=壳族效果循环直写 buffTime=5(:10432)+猛攻每帧
+  //      AddBuff(...,5)(:16663-16675)→ 统一 5t=5/60 秒重钉 ----
+  BeetleEndurance1 = 308,      // 甲虫耐力一档(95):减伤 15%（Hurt :38610 0.15×orbs 消费）
+  BeetleEndurance2 = 309,      // 甲虫耐力二档(96):减伤 30%
+  BeetleEndurance3 = 310,      // 甲虫耐力三档(97):减伤 45%
+  BeetleMight1 = 311,          // 甲虫力量一档(98):近战伤/速 +10%（:10518-10520 直加）
+  BeetleMight2 = 312,          // 甲虫力量二档(99):近战伤/速 +20%
+  BeetleMight3 = 313,          // 甲虫力量三档(100):近战伤/速 +30%
+  // ---- 环境光环五缺口补图（SceneMetrics 十族 :25723-25764 的后五位;效果侧已实装的
+  //      四族只补 buff 图标,沙暴 194 风推效果另接移动积分）----
+  WaterCandle = 314,           // 水蜡烛(86):敌刷率×0.75/上限×1.5 的镜像图标（效果在 VanillaSpawner）
+  HeartLamp = 315,             // 心灯(89):生命再生 +2（1HP/s 效果在 lanternHeal 旁路）
+  MonsterBanner = 316,         // 旗帜(147):对同型敌增伤/减伤（效果三链已在 BannerStrength 采样）
+  WindPushed = 317,            // 强风(194):windPushed 风推（:11923-11926/:19922-19946）
+  ShadowCandle = 318,          // 暗影蜡烛(350):刷怪旗覆写镜像（效果在 VanillaSpawner）
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -628,6 +647,21 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   // ★治理批 B6①：盾反 buff198 建模（枚举位 Parry=307 见枚举尾注）——
   //   名称/描述均走原版键，零自造 l10n 键
   [BuffType.Parry]: { vanillaBuff: 198, descKey: 'BuffDescription.ParryDamageBuff', fallbackName: '惊人一刻' },
+  // 甲虫套装族（名称/描述走原版键 BuffDescription.BeetleEndurance1..3/BeetleMight1..3，
+  // l10n 语料 12 语言现成零自造；fallbackName 对齐 zh-Hans「甲虫耐力/甲虫力量」三档同名）
+  [BuffType.BeetleEndurance1]: { vanillaBuff: 95, descKey: 'BuffDescription.BeetleEndurance1', fallbackName: '甲虫耐力' },
+  [BuffType.BeetleEndurance2]: { vanillaBuff: 96, descKey: 'BuffDescription.BeetleEndurance2', fallbackName: '甲虫耐力' },
+  [BuffType.BeetleEndurance3]: { vanillaBuff: 97, descKey: 'BuffDescription.BeetleEndurance3', fallbackName: '甲虫耐力' },
+  [BuffType.BeetleMight1]: { vanillaBuff: 98, descKey: 'BuffDescription.BeetleMight1', fallbackName: '甲虫力量' },
+  [BuffType.BeetleMight2]: { vanillaBuff: 99, descKey: 'BuffDescription.BeetleMight2', fallbackName: '甲虫力量' },
+  [BuffType.BeetleMight3]: { vanillaBuff: 100, descKey: 'BuffDescription.BeetleMight3', fallbackName: '甲虫力量' },
+  // 环境光环五缺口（同走原版键零自造；86/350 原版不在 buffNoSave(:9124-9175 无)——
+  // 表保持如实不追加）
+  [BuffType.WaterCandle]: { vanillaBuff: 86, descKey: 'BuffDescription.WaterCandle', fallbackName: '水蜡烛' },
+  [BuffType.HeartLamp]: { vanillaBuff: 89, descKey: 'BuffDescription.HeartLamp', fallbackName: '心灯' },
+  [BuffType.MonsterBanner]: { vanillaBuff: 147, descKey: 'BuffDescription.MonsterBanner', fallbackName: '旗帜' },
+  [BuffType.WindPushed]: { vanillaBuff: 194, descKey: 'BuffDescription.WindPushed', fallbackName: '强风' },
+  [BuffType.ShadowCandle]: { vanillaBuff: 350, descKey: 'BuffDescription.ShadowCandle', fallbackName: '暗影蜡烛' },
 };
 
 /** BuffID.Sets.IsFedState（BuffID.cs:16 = {26,206,207,332,333,334}——含饥饿链三态：

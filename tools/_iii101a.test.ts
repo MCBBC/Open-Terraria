@@ -255,7 +255,7 @@ const le16 = (p: string): Uint16Array => {
         buf[pp++] = store.wall[ii]! & 0xff; buf[pp++] = (store.wall[ii] >>> 8) & 0xff;
         buf[pp++] = store.half[ii]! | ((store.slope[ii]!) << 4);
       }
-      writeFileSync(`${OUTDIR}/c${c}.bin`, buf);
+      writeFileSync(`${OUTDIR}/r${rcBox.n}_c${c}.bin`, buf);
     };
   }
   const t0 = Date.now();

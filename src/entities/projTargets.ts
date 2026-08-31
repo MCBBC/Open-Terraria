@@ -103,8 +103,9 @@ export function resolveProjClass(
   return p.meleeProj === true ? 'melee' : null;
 }
 
-/** ProjectileID.Sets.IsAWhip（Terarria1457/Terraria.ID/ProjectileID.cs:35 全 17 型）：
- *  浸剂/nano/confetti 门的 whip 并集臂（`melee||IsAWhip[type]`,:11211/:13688）。 */
+/** ProjectileID.Sets.IsAWhip（Terarria1457/Terraria.ID/ProjectileID.cs:35 全 18 型，
+ *  一行全量含 1104 火鞭——tests/whip-set-alignment.test.ts 钉长度防漂移）：
+ *  浸剂/nano/confetti 门的 whip 并集臂（`melee||IsAWhip[type]`,:11197/:13687）。 */
 export const IS_A_WHIP_PROJS: ReadonlySet<number> = new Set(
   [847, 841, 848, 849, 912, 913, 914, 915, 952, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1104]);
 

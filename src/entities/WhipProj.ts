@@ -20,6 +20,8 @@ import { Entity } from './Entity';
 import { applyProjStatus, applyBuffTicks, applyMeleeImbue } from './projStatus';
 import { hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import type { GameHooks } from './types';
+import { BuffType } from '../stats/Buffs';
+import { ConfettiBurstProj } from './meleeOnHitProjs';
 import type { Player } from './Player';
 import { projSprite } from './Arrow';
 import { MinionProj } from './MinionProj';
@@ -403,6 +405,13 @@ export class WhipProj extends Entity {
         spark1104 = true;
       }
     }
+    // 浸剂旗快照（每次 tryHit 调用读一次,同 WeaponProj.hitEnemies 口径）——★F2
+    // 补接：真鞭伤害走本自有命中环,nano 乘区/party 彩带此前只在弹幕环
+    // WeaponProj.hitEnemies 接过（grep 实证本文件原零引用）
+    const whipImbuNano = ((game.player as unknown as {
+      buffs?: { has?: (bt: BuffType) => boolean } } | null)?.buffs?.has(BuffType.ImbueNano)) === true;
+    const whipImbuParty = ((game.player as unknown as {
+      buffs?: { has?: (bt: BuffType) => boolean } } | null)?.buffs?.has(BuffType.ImbueParty)) === true;
     for (const p of pts) {
       // 城镇 NPC:巫毒窄门(原版鞭=friendly 弹,同 Damage_PVE_Inner :11970-11972——
       // 仅向导 22/裁缝师 54 装备对应巫毒娃娃时可伤;18×18 控制点盒同敌怪判定)
@@ -416,9 +425,29 @@ export class WhipProj extends Entity {
         // myRect 置于控制点中心后与敌 AABB 求交（:14487-14493；18×18 → 半宽 9）
         if (p.x - 9 >= e.x + e.w || p.x + 9 <= e.x || p.y - 9 >= e.y + e.h || p.y + 9 <= e.y) continue;
         this.hitSet.add(e.id);
-        const dmg = this.dmgNow; // 当前鞭伤（已含召唤乘区+护穿；衰减链前）
+        // ★F2 浸剂命中环（Projectile.cs:13687-96 门 `ownedBySomeone&&(melee||IsAWhip)`
+        //  ——鞭 SetDefaults 全走 DefaultToWhip【无 melee 类旗】(:8145/:8668/:9739+,
+        //  DefaultToWhip :10706-10718 只设 aiStyle165/friendly/penetrate−1),IsAWhip 臂
+        //  即为此设）。Position = StatusNPC（上方 applyMeleeImbue 的原版同位在
+        //  StrikeNPC 前）→ nano/party → StrikeNPC：
+        //   · nano（meleeEnchant==6）：dmg=(int)(dmg×GetNanoFlaskDamageBoost()=1.05f)
+        //     —— DamageVar 后、StrikeNPC 前（Player.cs:44760-64 挥砍侧同位次）。
+        //   · party（meleeEnchant==7）：出弹 289 彩带于目标 Center、速=目标速度、
+        //     伤 0 kb 0（:13693-95 NewProjectile(GetProjectileSource_FromThis(),…)），
+        //     经 GameHooks.spawnFriendlyProj 口（types.ts:61；Game 实现 = entities.add,
+        //     与 WeaponProj 弹幕侧同通道,不造第二出口）。
+        //   鞭无类旗 → 原版 crit 三连掷(:12906-12912)轮不到鞭（repo hurt 恒 crit=false
+        //   同源,勿补掷）;parry ×5 门 = melee&&!DontApplyParry（:13631）鞭不在门内。
+        const whipDmg = whipImbuNano ? Math.trunc(this.dmgNow * 1.05)   // (int)(dmg×1.05f)
+          : this.dmgNow;                                                // 当前鞭伤（衰减链前）
+        if (whipImbuParty) {
+          game.spawnFriendlyProj?.(new ConfettiBurstProj(
+            e.x + e.w / 2, e.y + e.h / 2,
+            (e as unknown as { vx?: number }).vx ?? 0,
+            (e as unknown as { vy?: number }).vy ?? 0));
+        }
         const wpOwner = this.ownerRef();
-        e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068
+        e.hurt(whipDmg, Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068
         // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）。
         //  1104：Slimed(137) 照表;OnFire(24) 表项抑制、按上方窗口直投（:11255-11272）
         // 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意

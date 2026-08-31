@@ -69,14 +69,16 @@ function hydrate(): { st: TileStore; gs: GenState } {
 
   // —— 挂载镜像接收器与主实例掷计数（x86 SW_MAINROLL=1 同口径：首样本锁 MainInst）——
   const lines: string[] = [];
-  const g = globalThis as unknown as { __swI113?: (l: string) => void; __swOnRoll?: (v: number, inst: object) => void; __swRollN?: number };
+  const g = globalThis as unknown as { __swI113?: (l: string) => void; __swOnRoll?: (v: number, inst: object) => void; __swRollN?: number; __swRollTotal?: number };
   g.__swI113 = (l) => lines.push(l);
   let rollN = 0;
   let totalN = 0;
   let mainInst: object | undefined;
   g.__swRollN = 0;
+  g.__swRollTotal = 0;
   g.__swOnRoll = (_v, inst) => {
     totalN++;
+    g.__swRollTotal = totalN;
     if (mainInst === undefined) mainInst = inst;
     else if (inst !== mainInst) return;
     rollN++;
@@ -88,13 +90,20 @@ function hydrate(): { st: TileStore; gs: GenState } {
 
   writeFileSync(JOUT, lines.join('\n') + '\n');
 
-  // —— x86 侧解析 + 两两对比 ——
-  const xt = readFileSync(X86, 'utf8').split('\n').filter((l) => l.startsWith('MARK|DR|')).map((l) => l.slice(5));
+  // —— x86 侧解析 + 两两对比（归一化：去 SW_MARKRC 追加的重复 |rc=、mr 与 JS 无可比面）——
+  const normX86 = (l: string): string =>
+    l.replace(/(?:\|rc=\d+){2}$/, (m) => m.slice(0, m.indexOf('|', 1)))
+      .replace(/\|mr=-?\d+\|/, '|');
+  const xtRaw = readFileSync(X86, 'utf8').split('\n').filter((l) => l.startsWith('MARK|DR|')).map((l) => normX86(l.slice(5)))
+    .filter((l) => !l.startsWith('DR|S|MD'));   // MakeDungeon 头探针：JS 侧无同位钩，剔除
+  // JS 侧同样剥掉 |mr= 使可比键一致（JS 双计数恒等）
+  const xt = xtRaw.map((l) => l.replace(/\|mr=\d+\|/, '|'));
+  const jsNorm = lines.map((l) => l.replace(/\|mr=\d+\|/, '|'));
   console.log(`[i113] x86 lines=${xt.length} js lines=${lines.length} mainSample=${rollN} totalSample=${totalN}`);
   let first = -1;
   const n = Math.min(xt.length, lines.length);
   for (let i = 0; i < n; i++) {
-    if (xt[i] !== lines[i]) { first = i; break; }
+    if (xt[i] !== jsNorm[i]) { first = i; break; }
   }
   const ctx2 = Math.max(0, first - 3);
   if (first >= 0) {

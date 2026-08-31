@@ -25,7 +25,8 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { canHit } from '../physics/LineOfSight';
-import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy, hitCritters } from './projTargets';
+import { cutTilesBox } from './ProjCutTiles';
 
 /** NPC.canGhostHeal=false 族（NPC.cs SetDefaults 写点——NPC.cs:6270 字段缺省 true；
  *  false 站点 :13921(type384)/:13961(type387)/:13978(type388)/:15839(type523)）。
@@ -258,60 +259,68 @@ export class SpectreSoulProj extends Entity {
   get warmup(): number { return this.ai1; }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
-    if (--this.life <= 0) { this.dead = true; return; }
-    this.ai1++;                                  //（:29370）
-    // 曼哈顿怪癖窗（与 ghostHurt 收集同构但作用对象是弹自身盒,:29384-29385）
-    const quirkDist = (e: { x: number; y: number; w: number; h: number }): number =>
-      Math.abs(e.x + e.w / 2 - this.x + this.w / 2)
-      + Math.abs(e.y + e.h / 2 - this.y + this.h / 2);
+    // ★三轮蓝队 F2（EU 半套化修正,2026-08-31）：原版 numUpdates 循环
+    //   （Projectile.cs:16780-16782 `numUpdates = extraUpdates; while(numUpdates>=0)`）
+    //   把 AI()【与位移、Damage、timeLeft--】全部包进子步循环——AI 在 :16880、位移
+    //   :17121 HandleMovement、Damage :17188、timeLeft--/判死 :17309-17315，四位一体。
+    //   extraUpdates=3 ⇒ 每拍 4 个完整子步；此前本仓只把「位移+接触」×4 而把 AI 面
+    //   （ai[1]++/重锁/(v×29+dir×4)/30 混合）留在拍级执行＝半套化：预热被拉长 4 倍
+    //   （60 计数→60t，原版 15t）、寿命错走 3600t（原版 900t=3600÷4）、追踪混合速率
+    //   ÷4（每子步都该向目标推进 1/30+4px 合成）。现整面并入子步循环，
+    //   现位移接触 ×4 语义不动。子步内序 = AI→位移→命中→timeLeft/penetrate 判死
+    //   （触敌即亡链保序：Damage 先于 timeLeft/pene 检查,双杀面同拍出,状态一致）。
+    for (let u = 0; u <= 3 && !this.dead; u++) {       // numUpdates 循环体 ×4（EU=3）
+      this.ai1++;                                      //（:29370 每【子步】自增）
+      // 曼哈顿怪癖窗（与 ghostHurt 收集同构但作用对象是弹自身盒,:29384-29385）
+      const quirkDist = (e: { x: number; y: number; w: number; h: number }): number =>
+        Math.abs(e.x + e.w / 2 - this.x + this.w / 2)
+        + Math.abs(e.y + e.h / 2 - this.y + this.h / 2);
 
-    if (this.ai1 >= 60) {                        //（:29371 预热完成）
-      this.friendly = true;
-      const ents = game.enemies();
-      const byId = (id: number): unknown => ents.find((e) => (e as { id: number }).id === id);
-      // num438：现锁 ai[0]；仅当「无效锁/无锁」且 owner 本地时重选（:29374）
-      let num438 = -1;
-      let lockEnt: unknown = null;
-      if (this.lockId >= 0) {
-        const cur = byId(this.lockId);
-        if (cur && canBeChasedBy(cur)) { num438 = this.lockId; lockEnt = cur; }
-      }
-      //（:29374 失效或无锁 → 掷新目标。原版主门 = Main.myPlayer == owner——单人恒真；
-      //  开联机后此处须按 owner 过门,备案 GW 缝合点）
-      if (num438 === -1) {
-        const cand: unknown[] = [];
-        for (let i = 0; i < ents.length; i++) {
-          if (!ents[i] || (ents[i] as { dead: boolean }).dead) continue;
-          if (!canBeChasedBy(ents[i])) continue;
-          const q = quirkDist(ents[i] as never as { x: number; y: number; w: number; h: number });
-          if (q < 800) cand.push(ents[i]);
+      if (this.ai1 >= 60) {                            //（:29371 预热完成≈tick 15）
+        this.friendly = true;
+        const ents = game.enemies();
+        const byId = (id: number): unknown => ents.find((e) => (e as { id: number }).id === id);
+        // num438：现锁 ai[0]；仅当「无效锁/无锁」且 owner 本地时重选（:29374）
+        let num438 = -1;
+        let lockEnt: unknown = null;
+        if (this.lockId >= 0) {
+          const cur = byId(this.lockId);
+          if (cur && canBeChasedBy(cur)) { num438 = this.lockId; lockEnt = cur; }
         }
-        if (cand.length === 0) { this.dead = true; return; }        //（:29399-29401 Kill）
-        const pick = cand[Math.floor(Math.random() * cand.length)]; //（:29403 Main.rand.Next）
-        num438 = (pick as { id: number }).id;
-        this.lockId = num438;                    //（:29404 ai[0] 回写 + netUpdate）
-        lockEnt = pick;
+        //（:29374 失效或无锁 → 掷新目标。原版主门 = Main.myPlayer == owner——单人恒真；
+        //  开联机后此处须按 owner 过门,备案 GW 缝合点）
+        if (num438 === -1) {
+          const cand: unknown[] = [];
+          for (let i = 0; i < ents.length; i++) {
+            if (!ents[i] || (ents[i] as { dead: boolean }).dead) continue;
+            if (!canBeChasedBy(ents[i])) continue;
+            const q = quirkDist(ents[i] as never as { x: number; y: number; w: number; h: number });
+            if (q < 800) cand.push(ents[i]);
+          }
+          if (cand.length === 0) { this.dead = true; return; }        //（:29399-29401 Kill）
+          const pick = cand[Math.floor(Math.random() * cand.length)]; //（:29403 Main.rand.Next）
+          num438 = (pick as { id: number }).id;
+          this.lockId = num438;                    //（:29404 ai[0] 回写 + netUpdate）
+          lockEnt = pick;
+        }
+        if (num438 !== -1 && lockEnt) {             //（:29405）
+          const e = lockEnt as { x: number; y: number; w: number; h: number };
+          const tx = e.x + e.w / 2, ty = e.y + e.h / 2;
+          const dx = tx - this.cx, dy = ty - this.cy;
+          const dl = Math.hypot(dx, dy) || 1;
+          const wantX = dx / dl * 4, wantY = dy / dl * 4;              // num442=4（:29407）
+          //（:29414-29415 num447=30）velocity = (v×29 + dir×4)/30 ——每【子步】应用
+          this.vx = (this.vx * 29 + wantX) / 30;
+          this.vy = (this.vy * 29 + wantY) / 30;
+        }
       }
-      if (num438 !== -1 && lockEnt) {             //（:29405）
-        const e = lockEnt as { x: number; y: number; w: number; h: number };
-        const tx = e.x + e.w / 2, ty = e.y + e.h / 2;
-        const dx = tx - this.cx, dy = ty - this.cy;
-        const dl = Math.hypot(dx, dy) || 1;
-        const wantX = dx / dl * 4, wantY = dy / dl * 4;              // num442=4（:29407）
-        //（:29414-29415 num447=30）velocity = (v×29 + dir×4)/30
-        this.vx = (this.vx * 29 + wantX) / 30;
-        this.vy = (this.vy * 29 + wantY) / 30;
-      }
-    }
 
-    // extraUpdates=3 ⇒ 每 tick 共 4 子步位移（Projectile.Update numUpdates 链）
-    // ★红2γ 移交核证（蓝队二轮收口,2026-08-31）：子步序 = 位移→伤害→耗穿即杀，
-    // 对应原版 Update 三位（Projectile.cs:16880/:17184/:17312）——penetrate 归零拍
-    // 同拍 Kill，不留后续子步。
-    for (let u = 0; u <= 3; u++) {
+      // ---- 位移 + 接触（HandleMovement :17121 → Damage :17188）----
       this.x += this.vx;
       this.y += this.vy;
       this.runContactHits(game);
+      // ---- timeLeft-- 与 penetrate 判死（:17309-17315,均在 Damage 之后逐子步消费）
+      if (--this.life <= 0) { this.dead = true; break; }   // timeLeft 3600 计数÷4子步 ⇒ 寿命 900t
       if (this.penetrate === 0) { this.dead = true; break; }   // （:17312 penetrate-- → 0 ⇒ Kill）
     }
   }
@@ -328,6 +337,17 @@ export class SpectreSoulProj extends Entity {
 
   private runContactHits(game: GameHooks): void {
     if (!this.friendly || this.damage <= 0 || this.penetrate <= 0) return;
+    // ★三轮蓝队 F3（Damage() 内旁路 :12513-12518）：356 friendly∧owner 本地∧¬minion∧
+    //   type≠1054 全过,CanCutTiles(:15407) aiStyle59/type356 不在排除表 → 每子步本盒
+    //   (+1 外沿) 砍 tileCut 物（预热期 friendly=false 早退=原版同态不砍）。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
+    // 小动物（PVE victim 循环受理面）：一击致死并耗穿自毁（MagicProj 形态同构,桶序先小动物）
+    if (hitCritters(this, game)) { this.penetrate--; return; }
+    // ★三轮蓝队 F6 定域注：356 不吃 immune[owner] 拒收窗也不写清——原版 :12635-12641 的
+    //   flag3 = maxPenetrate==1 ∧ ¬usesLocalNPCImmunity ∧ ¬usesIDStaticNPCImmunity 对
+    //   356 恒真（SetDefaults :4466 三项全缺省）⇒ `(owner<0 || immune[owner]==0) | flag3`
+    //   恒放行；写尾 :14168-14173 usesLocal 支与 :14175 penetrate!=1 支皆不入 ⇒ 无写面。
+    //   （856 是反向判例——usesLocal=true 破 flag3，见 SparkleGuitarProj 同批门。）
     for (const ent of game.enemies()) {
       const e = ent as never as {
         id: number; x: number; y: number; w: number; h: number; dead: boolean; maxHp?: number;

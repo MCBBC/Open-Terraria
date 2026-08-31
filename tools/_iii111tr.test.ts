@@ -356,7 +356,8 @@ function cmpAgainst(tag: string, idx: number, st: TileStore): void {
     const rec = st as unknown as Record<string, Uint8Array | Uint16Array>;
     const hdrS: Record<string, number> = { w: st.w, h: st.h };
     for (const c of CHANS) {
-      writeFileSync(`${OUT}/final_${c}.bin`, Buffer.from(rec[c]!.buffer, rec[c]!.byteOffset, rec[c]!.byteLength));
+      const a = rec[c]!;
+      writeFileSync(`${OUT}/final_${c}.bin`, Buffer.from(a.buffer as ArrayBuffer, a.byteOffset, a.byteLength));
     }
     writeFileSync(`${OUT}/final_hdr.json`, JSON.stringify(hdrS));
   }

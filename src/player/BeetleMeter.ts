@@ -24,7 +24,19 @@
 //
 // 旧时间蓄能近似（Player.fixedUpdate lastMeleeTick/beetleCharge 90t/球 + onMeleeHit
 // 刷窗口）退役路径：Game 近战管线不再调 player.onMeleeHit()，改由本 meter 消费命中。
-// Player.fixedUpdate 的旧支因 lastMeleeTick 恒 0 而惰性失效，不构成双写。
+// Player.fixedUpdate 旧支与 onMeleeHit 方法已随 2026-08-31 buff 图标实装一并拆除。
+
+// buff 图标维持（2026-08-31 实装）：壳族=UpdateBuffs 效果循环直写 buffTime[j]=5
+// （Player.cs:10432）+ 换档立删旧档（:10434-10452）；猛攻族=ApplySetBonus 每帧
+// AddBuff(97+num,5)（:16663-16675）+ 清非当档（:16686-16696）。两族坍缩为
+// "每帧重钉当档 5t + 立删非当档"；noTimeDisplay[95-100]（Main.cs:9232-9237）恒无字、
+// buffNoSave（:9148-9152）不落盘，图标/数值由本 meter 单一来源驱动。
+
+import { BuffType } from '../stats/Buffs';
+
+/** 档位↔buff 映射（:16636 AddBuff(95+beetleOrbs,5) 壳族 / :16678 AddBuff(97+num,5) 猛攻族） */
+const BEETLE_ENDURANCE_TIERS = [BuffType.BeetleEndurance1, BuffType.BeetleEndurance2, BuffType.BeetleEndurance3] as const;
+const BEETLE_MIGHT_TIERS = [BuffType.BeetleMight1, BuffType.BeetleMight2, BuffType.BeetleMight3] as const;
 
 /** 单实例状态（挂在玩家对象上；本模块无 DOM/引擎依赖）。 */
 export class BeetleMeter {
@@ -34,6 +46,8 @@ export class BeetleMeter {
   private countdown = 0;
   /** 球 5t 续命（buffTime[j]=5 维持窗等价形）：任一套在身的 tick 刷新为 5 */
   private orbLife = 0;
+  /** 末次在身的家族（原版 buff 档不变自然倒计时——断供衰减窗内图标不换族） */
+  private lastOffense = false;
 
   private readOrbs(p: BeetleHost): number {
     return p.beetleOrbs ?? 0;
@@ -54,6 +68,8 @@ export class BeetleMeter {
    *  与原版同域）。player 宿主须暴露 beetleOrbs 数值面。 */
   tick(p: BeetleHost, offenseSet: boolean, defenseSet: boolean): void {
     const orbs = this.readOrbs(p);
+    if (offenseSet) this.lastOffense = true;
+    else if (defenseSet) this.lastOffense = false;
     if (offenseSet) {
       // ApplySetBonus_BeetleDamage :16622-16691
       this.counter -= 3;
@@ -88,6 +104,20 @@ export class BeetleMeter {
       // 双套不在身：buff 断供过期（5t 维持窗走完 orbs=0）；counter 冻结
       // （原版无显式清零点——UpdateArmorSets 不调两臂即静态保留到重入）
       if (this.readOrbs(p) > 0 && --this.orbLife <= 0) this.writeOrbs(p, 0);
+    }
+    this.pinBuffs(p, offenseSet);
+  }
+
+  /** buff 图标维持（:10432/:16663-16675 钉值 + :10434-10452/:16686-16696 换档清旧）。
+   *  宿主无 buff 栏（裸测试宿主）时静默跳过。 */
+  private pinBuffs(p: BeetleHost, _offenseSet: boolean): void {
+    const buffs = (p as { buffs?: { apply(type: number, durationSec: number): void; remove(type: number): void } }).buffs;
+    if (!buffs) return;
+    const n = this.readOrbs(p);
+    const fam = this.lastOffense ? BEETLE_MIGHT_TIERS : BEETLE_ENDURANCE_TIERS;
+    for (let i = 0; i < 3; i++) {
+      if (n > 0 && i + 1 === n) buffs.apply(fam[i], 5 / 60);
+      else buffs.remove(fam[i]);
     }
   }
 

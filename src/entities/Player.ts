@@ -49,6 +49,21 @@ import { journeyPowers } from '../world/JourneyPowers';
  *  对应原版 Player.creativeGodMode 每帧自 power 授予 Player.cs:25208） */
 function journeyGodmodeActive(): boolean { return journeyPowers().godmode; }
 
+/** 强风推力脉冲（buff 194 MightyWind；Player.cs:19922-19946 逐系数 1:1——
+ *  基速 sign(wind)×0.06、强风(|wind|>0.5)×1.37、腾空 ×1.5、持方向键 ×0.8 且钳
+ *  ±0.072。应用侧(:20221-20232 flag2 段)向风速目标推、不越过。纯函数便于对拍 */
+export function windPushImpulse(windSpeed: number, airborne: boolean, hasInput: boolean): number {
+  let push = Math.sign(windSpeed) * 0.06;
+  if (Math.abs(windSpeed) > 0.5) push *= 1.37;
+  if (airborne) push *= 1.5;
+  if (hasInput) {
+    push *= 0.8;
+    if (push > 0.072) push = 0.072;
+    else if (push < -0.072) push = -0.072;
+  }
+  return push;
+}
+
 /** 蘑菇矿潜行加成轴 = Utils.Remap(stealth, 1f, 0.75f, 1f, 0f)（1457 Player.cs:26015
  *  num26；Utils.cs:345-348 Remap = Lerp(toMin,toMax,GetLerpValue(fromMin,fromMax,v,
  *  clamped))，Utils.cs:315-342 反序轴钳制）——s=1（无潜行）→1、s=0.75→0、s<0.75 钳 0，
@@ -881,11 +896,10 @@ export class Player extends Entity {
     }
     return out;
   }
-  /** 甲虫攻击球（0-3）：近战命中蓄能，受击掉一颗 */
+  /** 甲虫攻击球（0-3）：蓄能/衰减/家族唯一权威 = BeetleMeter（Game 每 tick 驱动；
+   *  buff 图标 95-100 亦由 meter 钉挂）。旧 lastMeleeTick/beetleCharge 时间蓄能
+   *  近似已拆（2026-08-31，meter 单一来源化） */
   beetleOrbs = 0;
-  private beetleCharge = 0;
-  /** 近战续航窗口（onMeleeHit 刷新；fixedUpdate 内蓄能消费） */
-  private lastMeleeTick = 0;
   /** 潜行度：1=无潜行(全可见)、0=满潜行——越低越隐（1457 Player.cs:1545 初值 1f；
    *  消费式全走 (1−stealth) 加成：变态刀伤/暴 :25970-25971、星璇伤/暴/仇恨
    *  :26043-26045、蘑菇矿 Remap :26015-26018）。此前误写 0=出生即"满潜行"，
@@ -1931,12 +1945,20 @@ export class Player extends Entity {
    *  封顶 3 后取倒数，作为 useAnimation/useTime 的时长乘数。原"猛爪手套 ×2"档已废——
    *  原版猛爪手套 211 只给 meleeSpeed += 0.12 + autoReuseGlove（:14559-14562），
    *  0.12 已经 vanilla-accfx.json 走 equipStats.meleeSpeed，不应再翻倍。 */
+  /** 甲虫力量档球数（buff 98/99/100 在场派生——原版攻伤/攻速由 UpdateBuffs 的
+   *  98-100 分支直加（:10518-10520），穿防御壳攒出的球【不】给猛攻数值） */
+  private get beetleMightOrbs(): number {
+    return this.buffs.has(BuffType.BeetleMight3) ? 3
+      : this.buffs.has(BuffType.BeetleMight2) ? 2
+        : this.buffs.has(BuffType.BeetleMight1) ? 1 : 0;
+  }
+
   get attackSpeedMult(): number {
     const raw = (1 + this.equipStats.meleeSpeed)
       * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1)
       * (this.buffs.has(BuffType.Werewolf) ? 1.051 : 1)      // 狼人 meleeSpeed += 5.1%（:11489）
       * (this.buffs.has(BuffType.Weak) ? 0.949 : 1)          // 虚弱 meleeSpeed -= 5.1%（:11507）
-      * (1 + 0.1 * this.beetleOrbs)                          // 甲虫攻击球攻速（:10071+）
+      * (1 + 0.1 * this.beetleMightOrbs)                     // 甲虫力量攻速（:10518-10520 98-100 分支）
       * (1 + this.buffs.wellFedMeleeSpeed)                   // 食物近战速 +5/7.5/10%（:11528+）
       * (1 + this.buffs.hungerMeleeSpeed);                   // 饥饿/极饿近战速 -5/-10%（:11566+/:11589+）
     return raw > 3 ? 1 / 3 : 1 / raw;                        // :28566-28573
@@ -1978,7 +2000,7 @@ export class Player extends Entity {
       if (this.buffs.has(BuffType.Tipsy)) m += 0.1;
       if (this.buffs.has(BuffType.Werewolf)) m += 0.051;      // 狼人（:11488）
       if (this.buffs.has(BuffType.Weak)) m -= 0.051;         // 虚弱（:11506）
-      m += 0.1 * this.beetleOrbs;                              // 甲虫攻击球每颗 +10%（:10071+）
+      m += 0.1 * this.beetleMightOrbs;                         // 甲虫力量每档 +10%（:10518-10520 98-100 分支）
       if (this.heldPsychoKnife) m += (1 - this.stealth) * 3;   // 变态刀潜行（:25487）
     }
     m += this.buffs.wellFedDamage;   // 食物三档全系 +5/7.5/10%（:11527+）
@@ -2076,11 +2098,6 @@ export class Player extends Entity {
    *  调用侧用可选链（`?.()`）——容忍测试 mock player 缺该方法 */
   onChannelManaHold(): void {
     this.manaAnimTicks = Math.max(this.manaAnimTicks, 1);
-  }
-  /** 甲虫进攻套：近战命中蓄能（45 次/球，满 3 球；受击掉球见 damage()） */
-  onMeleeHit(): void {
-    // ⑰ 时间蓄能（原版持续近战 ~90t/球）：命中只刷新续航窗口，蓄能走 fixedUpdate 每 tick
-    if (this.equipStats.beetleOff || this.equipStats.beetleDef) this.lastMeleeTick = 30;
   }
 
   // ---- 1457 配饰四件本体（ammoCycler / sentry backpack / accTimerCrit /
@@ -3491,6 +3508,18 @@ export class Player extends Entity {
         // 无输入减速（:19771-19800:地面 0.2 / 空中 0.1 加法钳 0）
         applyRunFriction();
       }
+      // 强风推力（buff 194：UpdateBuffs :11923-11926 置 windPushed；CanBePushedByWind
+      // :19869-19893=非锁 tile/非轮滑/坐骑着地持键不推——本仓等价门=坐骑着地+持键）。
+      // flag2 应用段 :20221-20232=向风速目标推、不越过。★原版 |num2|×40 只作用于
+      // cap-slam 分支的减速修正(:19944 num)，本仓两段加速链无该结构，差异备案
+      if (this.buffs.has(BuffType.WindPushed) && !(mnt && this.vy === 0 && ix !== 0)) {
+        const wind = world.weather?.windSpeedCurrent ?? 0;
+        if (wind !== 0) {
+          const push = windPushImpulse(wind, this.vy !== 0, ix !== 0);
+          if (push < 0 && this.vx > push) { this.vx += push; if (this.vx < push) this.vx = push; }
+          else if (push > 0 && this.vx < push) { this.vx += push; if (this.vx > push) this.vx = push; }
+        }
+      }
     } else if (ix !== 0) {
       if ((!animBusy || this.itemUseTurn) && mountAllowDir) this.facing = ix; // 滑行中朝向仍随输入（同 :19546 门）
     }
@@ -3977,7 +4006,10 @@ export class Player extends Entity {
           const dmg = Math.max(1, Math.round(30 * this.damageMult('melee')) * (crit ? 2 : 1));
           const kb = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);
           en.hurt(dmg, dir * kb, -4, game, 0, false, 0, true);   // 克脑盾冲撞=玩家伤害=DPS 计(:20811 PlayerAttack 族)
-          game.addDamageNumber(en.cx, en.cy, dmg, crit, crit ? '#FF8040' : '#FFD080');
+          // ★FR4-F（三轮蓝队）：删自发飘字——Enemy.hurt 单点已发（受击音+飘值同点，
+          // 见 Enemy.hurt 内 :82006-82015 收口注）；免疫早返 false 时本行曾仍弹
+          // 「幻影伤害」（2026-08-31 二轮红队同案复核）。色走单源敌方族表
+          // （fx/CombatTextColors.enemyHurtFloatColor），勿在调用方重设
           // ★D3 玩家侧碰撞攻击免疫统一时钟（克盾冲撞 GiveImmune(4)——vanilla
           //  DashMovement 冲撞段 :21277 GiveImmuneTimeForCollisionAttack(4) 同位）
           grantCollisionAttackImmunity(this, 4);
@@ -4143,7 +4175,8 @@ export class Player extends Entity {
           (game as unknown as { noteNpcPlayerImmune?: (id: number, t: number) => void })
             .noteNpcPlayerImmune?.(en.id ?? -1, 6);
           grantCollisionAttackImmunity(this, 4);
-          game.addDamageNumber(en.cx, en.cy, dmg3, crit3, crit3 ? '#FF8040' : '#FFD080');
+          // ★FR4-F（三轮蓝队）：删自发飘字——Enemy.hurt 单点已发（同克盾冲撞站；
+          // 免疫早返 false 时不再出幻影伤害，色归敌方族表单源）
           // 不置 solarDashing=false——滑行全程逐帧结算（原版 :21352 无终止写）
         }
       } else if (this.dashDelay >= 0) {
@@ -4574,14 +4607,8 @@ export class Player extends Entity {
       this.nebulaManaAccum += this.nebula[2] * dt;
       if (this.nebulaManaAccum >= 6) { this.nebulaManaAccum -= 6; this.mana = Math.min(this.maxMana, this.mana + 1); }
     }
-    // 甲虫球时间蓄能（进攻+防御共用；窗口内每 tick +1，90t/球；受击掉球见 damage()）
-    if (this.lastMeleeTick > 0) {
-      this.lastMeleeTick--;
-      if ((this.equipStats.beetleOff || this.equipStats.beetleDef) && ++this.beetleCharge >= 90) {
-        this.beetleCharge = 0;
-        this.beetleOrbs = Math.min(3, this.beetleOrbs + 1);
-      }
-    } else this.beetleCharge = Math.max(0, this.beetleCharge - 2); // 断战缓退
+    // 甲虫球蓄能已迁 BeetleMeter（Game.tick 驱动）——旧 lastMeleeTick/beetleCharge
+    // 时间蓄能近似拆除（2026-08-31）
     // 鞭 buff 倒计时（WhipTagEffect.PlayerBuffTime=180 系）
     for (const k of Object.keys(this.whipBuffs)) {
       if (--this.whipBuffs[Number(k)] <= 0) delete this.whipBuffs[Number(k)];
@@ -6514,8 +6541,13 @@ export class Player extends Entity {
     if (pvp && this.hp <= 0) this.lastPvpDeath = true;
     this.sinceHurt = 0; // 受击打断自然回血
     this.lifeRegenTime = 0; // 同源清零（Player.Hurt :37784 lifeRegenTime=0）
-    // 甲虫攻击球受击掉一颗
-    if (this.beetleOrbs > 0) this.beetleOrbs--;
+    // 甲虫防御壳受击掉一颗（Player.Hurt :38608-38625：仅 beetleDefense 侧消费，
+    // 减伤 0.15×orbs 同拍先行（:6448 同序）；掉球后蓄能计数清零（:38624 →
+    // BeetleMeter.resetCounter，meter 挂玩家对象）。猛攻族不掉球——自然抽水衰减）
+    if (this.equipStats.beetleDef && this.beetleOrbs > 0) {
+      this.beetleOrbs--;
+      (this as unknown as { __swBeetle?: { resetCounter(): void } }).__swBeetle?.resetCounter();
+    }
     // 隐身药水受击破隐（Hurt :38566-38575 `if (invis) DelBuff(10)`——buff 10 在栏
     // 即删。R5-F27：旧受击不破隐,已补）
     if (this.buffs.has(BuffType.Invisibility)) this.buffs.remove(BuffType.Invisibility);

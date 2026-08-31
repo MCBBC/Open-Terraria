@@ -143,7 +143,10 @@ function drlMark(s: string): void {
   const h = (globalThis as { __swI113?: (line: string) => void }).__swI113;
   if (h) h(s);
 }
-function drlRn(): number { return (globalThis as { __swRollN?: number }).__swRollN ?? -1; }
+/** 主实例计数（=x86 JJHook.MainRolls,SW_MAINROLL=1 口径）。 */
+function drlMr(): number { return (globalThis as { __swRollN?: number }).__swRollN ?? -1; }
+/** 全样本计数（=x86 JJHook.RollCount）。 */
+function drlRc(): number { return (globalThis as { __swRollTotal?: number }).__swRollTotal ?? -1; }
 /** C# BitConverter.DoubleToInt64Bits(d).ToString("x16")（无符号 16 位十六进制）。 */
 function bits64x(d: number): string {
   const dv = new DataView(new ArrayBuffer(8));
@@ -2729,7 +2732,7 @@ class HallwayCalculator {
     for (const l of ls) sum += l.LineLength;
     this.avgLineLength = ls.length ? sum / ls.length : 1;
     this.maxProgressDelta = 300.0 / this.avgLineLength;
-    drlMark(`DR|HC|i${_drlInstNext}|CTOR e=${this.entries.length}|av=${bits64x(this.avgLineLength)}|mp=${bits64x(this.maxProgressDelta)}|rc=${drlRn()}`);
+    drlMark(`DR|HC|i${_drlInstNext}|CTOR e=${this.entries.length}|av=${bits64x(this.avgLineLength)}|mp=${bits64x(this.maxProgressDelta)}|mr=${drlMr()}|rc=${drlRc()}`);
   }
   generate(): DHallBase[] {
     // 楼梯井通道（rooms.Skip(2)，Next(2)==0）
@@ -2740,7 +2743,7 @@ class HallwayCalculator {
         if (pick && pick.score > 0.0) this.makeHall(pick.line, DPHallType.Stairwell);
       }
     }
-    drlMark(`DR|HC|i${_drlInstNext}|GA sw=${this.stairwells.length}|rc=${drlRn()}`);
+    drlMark(`DR|HC|i${_drlInstNext}|GA sw=${this.stairwells.length}|mr=${drlMr()}|rc=${drlRc()}`);
     // 常规走廊（rooms.Skip(1)，无反链者必连+Next(2) 可选厅）
     for (let i = 1; i < this.entries.length; i++) {
       const entry = this.entries[i]!;
@@ -2762,7 +2765,7 @@ class HallwayCalculator {
         if (pick && pick.score > -2.0) this.makeHall(pick.line, hallType);
       }
     }
-    drlMark(`DR|HC|i${_drlInstNext}|GB h=${this.hallsOut.length}|rc=${drlRn()}`);
+    drlMark(`DR|HC|i${_drlInstNext}|GB h=${this.hallsOut.length}|mr=${drlMr()}|rc=${drlRc()}`);
     return this.hallsOut;
   }
 
@@ -2919,7 +2922,7 @@ class HallwayCalculator {
     }
     if (!best) ST.borderFails++;
     else ST.picks++;
-    drlMark(`DR|HC|i${_drlInstNext}|src=${this.entries.indexOf(source)}|cands=${drlCands}|pick=${best ? this.entries.indexOf(best.target) : -1}|bs=${bits64x(bestScore)}|rc=${drlRn()}`);
+    drlMark(`DR|HC|i${_drlInstNext}|src=${this.entries.indexOf(source)}|cands=${drlCands}|pick=${best ? this.entries.indexOf(best.target) : -1}|bs=${bits64x(bestScore)}|mr=${drlMr()}|rc=${drlRc()}`);
     return best ? { line: best, score: bestScore } : null;
   }
 
@@ -3366,14 +3369,14 @@ class DualProvider {
     drlMark(`DR|S|i${iN}|EH rc=${drlRn()}`);
     ctx.snap('dualStartRooms');
     const biomeRooms = this.calculateBiomeRooms(snakeLines, snakeInst);
-    drlMark(`DR|S|i${iN}|BIO n=${biomeRooms.length}|bt=${biomeRooms.map((r) => r.settings.roomType).join(',')}|rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|BIO n=${biomeRooms.length}|bt=${biomeRooms.map((r) => r.settings.roomType).join(',')}|mr=${drlMr()}|rc=${drlRc()}`);
     const regularRooms = this.calculateRooms(snakeLines);
-    drlMark(`DR|S|i${iN}|RM n=${regularRooms.length}|rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|RM n=${regularRooms.length}|mr=${drlMr()}|rc=${drlRc()}`);
     void biomeRooms;
     void regularRooms;
     ctx.snap('dualLayout');
     this.convertSpecializedRooms(regularRooms);
-    drlMark(`DR|S|i${iN}|CSR dr=${data.rooms.length}|rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|CSR dr=${data.rooms.length}|mr=${drlMr()}|rc=${drlRc()}`);
     // specialized 替换已就地写回 regularRooms 元素——hallway 域=biome+regular+starting
     const hallInput: DRoomBase[] = [...biomeRooms, ...regularRooms, startingRoom];
     (data as unknown as { hallSnake?: import('./DitherSnakePass').DitherSnake }).hallSnake = snakeInst;
@@ -3381,7 +3384,7 @@ class DualProvider {
     (data as unknown as { __i103Calc?: HallwayCalculator }).__i103Calc = calculator;
     const halls = calculator.generate();
     this.convertSpecializedHalls(halls);
-    drlMark(`DR|S|i${iN}|CSH h=${data.halls.length}|rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|CSH h=${data.halls.length}|mr=${drlMr()}|rc=${drlRc()}`);
     ctx.snap('dualHalls');
     this.calculateDungeonBounds(data.halls);
     drlMark(`DR|S|i${iN}|BND rc=${drlRn()}`);
@@ -3411,7 +3414,7 @@ class DualProvider {
         if (hh.calculated && !hh.generated) { countGen++; hh.generateHallData(data, ctx); }
       }
     }
-    drlMark(`DR|S|i${iN}|HG g=${countGen}|rc=${drlRn()}`);
+    drlMark(`DR|S|i${iN}|HG g=${countGen}|mr=${drlMr()}|rc=${drlRc()}`);
     ctx.snap('dualHallsGen');
     // MakeDungeon :391-413（Dual 支跳过最高房扫描）
     const first = data.rooms[0]!;

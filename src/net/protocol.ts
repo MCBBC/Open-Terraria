@@ -37,7 +37,20 @@ export const PROTO_MAGIC = 'SW1';
  *       :25712-714 每帧 `meleeCrit += inventory[selectedItem].crit` 无条件跨系别
  *       加算,此前快照漏项致 PvP 暴击率跨端偏低 ≤20pp。双向降级矩阵：
  *       新端发→旧端收 = 旧端照常 (aux>>4)&255 读到即新终值（自动变准）；
- *       旧端发→新端收 = 缺持械加成＝旧行为不变。低 4 位浸剂段不动。*/
+ *       旧端发→新端收 = 缺持械加成＝旧行为不变。低 4 位浸剂段不动。
+ *    e) msg27 kind=9（星璇之音）aux 启用为旋转相位 t01 千分位量化（不升版——
+ *       kind9 支此前恒发 0,无共用面）：★FR5-F 傀儡 draw 读 private localAI[0] 而
+ *       快照通道不携相位 → 远端恒静态角。发送端每快照携 round(t01×1000)；
+ *       收端到包重锚 + 快照间隔内本地 +3/tick 等速自推进（发端 extraUpdates=2
+ *       ⇒ 每 tick 三子步 AI）。降级：旧收端忽略 aux=旧静态角行为；旧发端 aux=0
+ *       对新收端 = 相位钉 0（同旧行为）。弃 seen→tickCount 自推相位案：tickCount
+ *       为各端自会话起点计数,跨端零对齐保证（裁决备案）。
+ *    f) msg117 dir/srcX 语义钉死（★FR3-F 三轮蓝队，纯注释不改线格式）：
+ *       srcX 锚点全站统一为【伤害源中心 x 世界 px】；dir ∈ {−1,+1}=击退向,
+ *       0=零击退/未定义——狱火光环（原版 hitDirection=0 :10348）/圣骑士盾转移
+ *       （:37751 同式）按原文传 0,近战类=攻端 facing 字段（:44434/:44491,非位置
+ *       符号推算）。⚠ 当前接收端不消费 dir（Game.onPlayerHurt 形参 _dir 弃用），
+ *       改造消费面前勿把 0 当「缺省未定」重新编码成 ±1——会放大成假击退。*/
 export const PROTO_VER = 7;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
@@ -118,7 +131,10 @@ export const enum Msg {
                        //   线格式 {u8 slot, i16 dmg, f32 x, f32 y, i8 dir, u8 flags}——
                        //   slot 服务器权威覆写为发送者（被击者本人,防冒名假飘字）、
                        //   dmg = 本地实扣值（hp 减量,含防御/endurance 链终值,与原版
-                       //   CombatText 显示的 num2 同口径）、dir = 击退向 ±1、
+                       //   CombatText 显示的 num2 同口径）、
+                       //   x,y = 被击端受击锚点;srcX 语义（★FR3-F）=伤害源中心 x;
+                       //   dir = 击退向 ±1（0=零击退形制：狱火/盾转移原文 hitDirection 0,
+                       //   近战=攻端 facing——语义与「收端当前不消费」事实见 PROTO_VER 注 f）、
                        //   flags bit0=crit / bit1=pvp（原版 SendPlayerHurt bitsByte[0]/[1]
                        //   同义,NetMessage.cs:2615-2621）。原版接收端以 msg117 重放 Hurt
                        //   （MessageBuffer.cs:3882-3897：Hurt(quiet:true) → 音效+尘+飘字）；

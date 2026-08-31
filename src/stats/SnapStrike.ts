@@ -3,7 +3,8 @@
 //                【消费端已接 entities/Arrow.ts 通用命中环：!hostile（≈ownedBySomeone）
 //                + projectileData.ranged 位门】
 //  6178 焰爆石   kind 1（melee|ranged 命中触发 :13439-13442）——45×meleeDamage/300px/
-//                弹 1131 + 目标 323 Hellfire 180t（:14396-14401）
+//                弹 1131 + 目标 323 Hellfire 180t（:14396-14401）；1131 出射逐弹按
+//                持有者 meleeCrit>rangedCrit 现场定类 :14414-14418（★F3,见 trySnapStrike）
 //  6179 毁灭臂镗 kind 2（tag 命中触发 :13447-13450）——150×minionDamage/400px/弹 1132
 //  共用冷却 Player.accSnappingStoneCooldown=360t（:14382-14383,Player.ts:571 字段/
 //  :3837 逐 t 递减——Update_SnappingStone :28592-28604 同款）;命中盒外目标取
@@ -18,6 +19,7 @@ import type { GameHooks } from '../entities/types';
 import type { Player } from '../entities/Player';
 import { Arrow } from '../entities/Arrow';
 import { canBeChasedBy } from '../entities/projTargets';
+import type { ProjClass } from '../entities/projTargets';
 
 export interface SnapStrikeTarget {
   id: number;
@@ -61,6 +63,27 @@ export function trySnapStrike(
     projId = 1132;
   }
   owner.accSnappingStoneCooldown = 360;                            // :14382-14383
+  // ★F3 类旗现场定类（Projectile.cs:14414-14418）：flag2（kind1）支在 NewProjectile 后
+  //  逐弹覆写 `bool flag4 = Main.player[owner].meleeCrit > Main.player[owner].rangedCrit;
+  //  proj.melee = flag4; proj.ranged = !flag4` —— 弹 1131 SetDefaults 静态 melee=true
+  //  （:10613-10624）但每次出射按持有者双 crit 现值重定类；弹 1121 静态 ranged=true
+  //  （:10493-10504）/弹 1132 不设任何类旗（:10626-10637）原版均【无】翻旗。
+  //  crit 掷随类旗走 Damage() 三连掷（:12906-12912，meleeCrit/rangedCrit 含基 4——
+  //  Player.cs:2413/:18458），repo 无类旗弹不进掷臂 → 经 Arrow.critChance 注入同一
+  //  概率并把决策以显式 projClass 字段钉在实体上（resolveProjClass 第一级=显式字段，
+  //  后续消费面与数据面 static melee 一致性由本字段兜住）；1132 原版无类旗 = 恒不暴击
+  //  （<0 阈值 → rand<threshold 恒假,Math.random() 抽取次数不变）。
+  let strikeClass: ProjClass | null = null;
+  let strikeCritPct = -0.01;                    // 负百分点 = 原版无掷档（1132）
+  if (kind === 0) {
+    strikeClass = 'ranged';                     // 1121 数据面同值（static ranged）
+    strikeCritPct = 4 + owner.critChance('ranged');
+  } else if (kind === 1) {
+    const mC = owner.critChance('melee'), rC = owner.critChance('ranged');
+    const meleeWin = mC > rC;                   // flag4（:14415）
+    strikeClass = meleeWin ? 'melee' : 'ranged';
+    strikeCritPct = 4 + (meleeWin ? mC : rC);
+  }
   const add = (e: unknown) =>
     (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(e, 'projectiles');
   let strikes = 0;
@@ -72,7 +95,11 @@ export function trySnapStrike(
     if (Math.hypot(t.cx - hx, t.cy - hy) > maxRange) continue;
     strikes++;
     // NewProjectile(nPC.Center, UnitY*0.1, projId, dmg, kb 5) + timeLeft=2（:14413-14416）
-    add(new Arrow(t.cx, t.cy - 4, 0, 0.1, dmg, 5, projId, null, { grav: 0, life: 2, pierce: 1 }));
+    const pulse = new Arrow(t.cx, t.cy - 4, 0, 0.1, dmg, 5, projId, null,
+      { grav: 0, life: 2, pierce: 1 });
+    (pulse as { projClass?: ProjClass }).projClass = strikeClass ?? undefined;   // ★F3 :14414-14418
+    pulse.critChance = Math.min(1, strikeCritPct / 100);   // 负值原样穿过=不暴击（1132 档）
+    add(pulse);
     if (kind === 1) t.onFire3T = Math.max(t.onFire3T ?? 0, 3);     // AddBuff(323,180)=3s（:14399）
     // ★1457 编排器粒子尘链等价（Spawn_SnappingStone{,Melee,Summon}）——位置取目标
     //  中心（原版 = lerp(盒内随机点, Center, 0.6)，备案）；FadingParticle/PrettySparkle

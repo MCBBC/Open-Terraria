@@ -5063,13 +5063,13 @@ const snap: SnapFn = (name) => {
       const bi = st.idx(i, y + 1);
       if (st.flags[bi] === 0 || (!solidTile2D(i, y + 1) && !TILE_TABLE_D.has(st.type[bi]))) return false;
     }
-    const num22 = TILE_DEFS[t]?.vanilla?.sheet === 172 ? 38 : 36;
-    for (let i = x - 1; i < x + 1; i++) for (let j = y - 1; j < y + 1; j++) {
-      dgWr(i, j, t);
-      const fi = st.idx(i, j);
-      st.frameX[fi] = (i - x + 1) * 18;
-      st.frameY[fi] = style * num22 + (j - y + 1) * 18;
-    }
+    // ★IIIII99b 备案（本批不落地，挂账下批「地牢家具帧正确化」）：真值应写
+    //   frameY=style*36+row*18（烛台 item1408-10→style46/47/48；x86 实测 1692/1710）。
+    //   本批试修后 Piles/Stalac 域掷流二次漂移（toad 全程复跑实证：(3696,566)
+    //   小堆 185 多置 1 格起连片投影）⇒ 下游存在以帧字节为读数的隐性消费者，
+    //   单刀直改写侧不可收口，须连带定罪后再动。残余域=终清理
+    //   (3509..10,529..30)/(3851..52,696..97) 两组烛台 ×8 格挂账。
+    for (let i = x - 1; i < x + 1; i++) for (let j = y - 1; j < y + 1; j++) dgWr(i, j, t);
     return true;
   }
   // Place3x3（cs:53549 354/355 分支A；★53650 起 = PlaceSunflower，勿混——

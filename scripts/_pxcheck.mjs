@@ -15,9 +15,12 @@ const out = await page.evaluate(async () => {
   const g = window.__swGame;
   const T = await import('/src/data/tiles.ts');
   const st = g.world.store;
+  // 深层岩腔：worldgen 后段 pass 会覆写高空直写（曾全棕清场竞争）
   const bx = g.world.spawnX + 4;
-  const by0 = Math.max(20, Math.floor(g.world.groundLevel) - 8);
-  for (const dx of [0,1]) st.setTile(bx+dx, by0, T.TILE_BY_KEY['stone']);
+  const by0 = (g.world.rockLevel ?? (g.world.groundLevel + 200)) + 40;
+  for (let dy2 = 0; dy2 < 5; dy2++) for (let dx2 = -1; dx2 < 3; dx2++) st.setTile(bx+dx2, by0+dy2-1, 0);  // 挖腔
+  const rockType = st.get(bx+2, by0+4) || 1;
+  for (const dx of [0,1]) st.setTile(bx+dx, by0, rockType);   // 天花板=邻近岩石
   const T592 = T.TILE_BY_KEY['v_592_hanging_brazier'];
   for (let dy=0; dy<3; dy++) for (let dx=0; dx<2; dx++) {
     const i2 = st.idx(bx+dx, by0+1+dy);

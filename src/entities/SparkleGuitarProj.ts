@@ -44,7 +44,24 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { canHit } from '../physics/LineOfSight';
-import { playerCanHitEnemy } from './projTargets';
+import { playerCanHitEnemy, hitCritters } from './projTargets';
+import { cutTilesBox } from './ProjCutTiles';
+
+/** ★三轮蓝队 F6：immune[owner] 读清双语义（:12636-12641/:14169）。原版 flag3 单发族
+ *  （maxPenetrate==1 ∧ 无两旗）豁免此窗——但 856 usesLocalNPCImmunity=true ⇒ flag3
+ *  恒假 ⇒ 【完整吃】该窗：immune[owner]!=0 的受害者在命中轮【整个被跳过】（localNPCImmunity
+ *  表也不写——拒收发生在任何写尾之前）；命中落地后写尾 :14169 `targetNPC.immune[owner]=0`
+ *  （usesLocalNPCImmunity && cooldown≠-2 支）清掉近战桥留下的全局窗。
+ *  读 = Game.meleeNpcPlayerImmune 同构 duck-call（VolcanoBlastProj/meleeOnHitProjs 先例）；
+ *  写 = noteNpcPlayerImmune(id,0)（GC1 出口）。 */
+function sparkImmuneWindowOpen(e: { id: number }, game: GameHooks): boolean {
+  const gate = game as unknown as { meleeNpcImmuneGateOf?: (id: number) => boolean };
+  return !(gate.meleeNpcImmuneGateOf?.(e.id) === false);
+}
+function sparkImmuneWindowClear(e: { id: number }, game: GameHooks): void {
+  (game as unknown as { noteNpcPlayerImmune?: (id: number, t: number) => void })
+    .noteNpcPlayerImmune?.(e.id, 0);
+}
 
 /** XNA Vector2.CatmullRom（同 MinionProj 内私有实现;此处独立避免跨类内联依赖） */
 export function catmullRom(
@@ -106,7 +123,8 @@ export interface StellarShotInput {
    *  空表 ⇒ 落未锁定支。注入端由 GA 缝合（实体循环） */
   targets: Array<{ cx: number; cy: number; vx?: number; vy?: number }> | null;
   targetRoll: () => number;                       // Main.rand.Next(validTargets.Count)（:48454）
-  /** NextVector2Circular(24f,24f) 圆盘均匀样本（:48460 抖动——保持原版圆盘分布语义） */
+  /** NextVector2Circular(24f,24f) 抖动样本（:48459——★三轮蓝队 F1①：Utils.cs:1301-04
+   *  NextVector2Unit()×(w,h)×NextFloat()，半径【线性均匀】非 √ 盘均匀;注入端单角+单乘子） */
   nextJitter: () => { x: number; y: number };
   /** NextVector2CircularEdge(1f,1f) 单位向量（:48465 方向形参） */
   nextEdgeUnit: () => { x: number; y: number };
@@ -146,13 +164,16 @@ export function computeStellarTuneShot(inp: StellarShotInput): StellarShotOutput
       aimX = inp.playerCx + dxa; aimY = inp.playerCy + dya;   //（:48461-48463）
     }
   }
-  // 方向形参：单位向量,Y>0 取反压上半平面,|Y|<0.5 再给上扬保底（:48465-48477）
+  // 方向形参：单位向量,Y>0 取反压上半平面,|Y|<0.5 再给上扬保底（:48463-48470）。
+  // ★三轮蓝队 F1②：|y|<0.5 改写 Y 后【不归一化】——原版 vector35 = Unit×(1,1) 全程
+  //   只做取反/Y 覆写两步线性变换,vector35*=-1f(:48467) 与 vector35.Y=…(:48469) 之后
+  //   直接 `vector35 *= vector34.Length()*2f`(:48471)。此处曾自加 /=norm 还原单位向量
+  //   ⇒ 曲线形参量值系统性偏小（|v| 由 (1,√2] 波段压回 1）,CatmullRom P0/P3 张距随之
+  //   收窄——删除多余归一化,|v| 恢复 ∈(1,√2]（|Y₀|<0.5 支的 |X|>√3/4、新 |Y|∈[0.5,1)）。
   const e0 = inp.nextEdgeUnit();
   let ux = e0.x, uy = e0.y;
   if (uy > 0) uy = -uy;
   if (Math.abs(uy) < 0.5) uy = -inp.nextFloat01() * 0.5 - 0.5;
-  const norm = Math.hypot(ux, uy) || 1;
-  ux /= norm; uy /= norm;
   const dist = Math.hypot(dxa, dya);              // vector34.Length()（钳后终值,:48476）
   return { spawnX: inp.playerCx, spawnY: inp.playerCy,
     vx: ux * dist * 2, vy: uy * dist * 2, aimX, aimY };
@@ -196,6 +217,18 @@ export class SparkleGuitarProj extends Entity {
     this.aimX = aimX; this.aimY = aimY;
   }
 
+  /** ★FR5-F（三轮蓝队）：傀儡旋转相位通道（msg27 kind9 aux 千分位量化 t01——
+   *  每快照重锚 + 本地等速自推进，见 Game.netProjBroadcast/netApplyProjSnaps 注）。
+   *  phase01 取 mod-90：rotation=2π×t/90 以 90 为周期，wrap 视觉精确等价。 */
+  get phase01(): number {
+    return (((this.t % 90) + 90) % 90) / 90;
+  }
+  /** 收端到包重锚（发端真值，千分位量化误差 ≤0.045/t01 → 视觉不可辨） */
+  netPhaseApply(t01: number): void {
+    if (!Number.isFinite(t01)) return;
+    this.t = Math.max(0, Math.round(Math.min(1, Math.max(0, t01)) * 90));
+  }
+
   /** AI_167 脚本位置推导（测试友好:playerCenter 可注入覆盖默认 game.player 中心） */
   private splineAt(t01: number, pcx: number, pcy: number): { x: number; y: number } {
     const nvx = -this.vx, nvy = -this.vy;          // vector2 = -velocity（:47434）
@@ -211,7 +244,7 @@ export class SparkleGuitarProj extends Entity {
     // 对玩家（PvP bit6）由收端本地结算 Damage_PVP 族（Game.netPuppetProjContact——
     // 含 ModifyStellarTuneDamage ×0.75 折算与 crit 掷点缺席判定,见彼处注释）。
     // AI_167 spline 锚「发射者 Center」是发送端权威路径,收端不重放（netPuppetStep 插值跟随）
-    if (this.netPuppet) { this.netPuppetStep(); return; }
+    if (this.netPuppet) { this.netPuppetStep(); this.t += 3; return; }
     const p = game.player as { cx: number; cy: number; x: number; y: number; w: number; h: number };
     // ---- ★γ 移交硬伤收口（终局扫尾批 A6）：numUpdates 循环 1:1 —— 原版
     //      Projectile.Update(:16781-16782) `numUpdates = extraUpdates; while(numUpdates>=0)`
@@ -233,6 +266,15 @@ export class SparkleGuitarProj extends Entity {
       this.x = pos.x - this.w / 2;
       this.y = pos.y - this.h / 2;
 
+      // ---- Damage() 子步内旁路（:12513-12518）：CutTiles 先于全部受害循环。
+      //      ★三轮蓝队 F3：856 friendly∧owner 本地∧¬npcProj∧¬minion∧type≠1054 全过,
+      //      CanCutTiles(:15407) aiStyle167/type856 不在排除表 → 每子步按本盒(+1 外沿)
+      //      砍 tileCut 物（瓦罐/杂草）。此前缺席=跨类旧账清偿（ProjCutTiles 单点）----
+      cutTilesBox(game, this.x, this.y, this.w, this.h);
+      // 小动物（Damage_PVE 同一 victim 循环）：一击致死并消耗弹体（MagicProj 形态同构,
+      // 先于怪物桶——既定桶序）→ 死亡走 Kill 弹 856 段=带爆裂真结算
+      if (hitCritters(this, game)) { this.killStellarTune(game); return; }
+
       // ---- 命中（Damage():17184 每 update 跑 extraUpdates+1=3 次；PVE 梯 :12572/:12615。
       //      penetrate 默认 1（:366）且 SetDefaults 不重设 ⇒ 首个有效敌 :14194 penetrate--
       //      →0 → Update :17312 同拍 Kill()——弹 856 是单发：触敌即亡+死亡爆裂。
@@ -247,6 +289,9 @@ export class SparkleGuitarProj extends Entity {
         if (!(this.x < e.x + e.w && this.x + this.w > e.x
           && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
         if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+        // ★三轮蓝队 F6：immune[owner]!=0 拒收门（:12635-12641）——先于 localNPCImmunity
+        //   写面，被拒受害者连 hitOnce 标记都不落（原版拒收 return 在任何写尾之前）
+        if (!sparkImmuneWindowOpen(e, game)) continue;
         if (this.hitOnce.has(e.id)) continue;
         this.hitOnce.add(e.id);                    // array[victimIndex] = -1（:14158-14163）
         // ★ModifyStellarTuneDamage（:13333-13339 命中结算点）：每轮即时判 LOS——
@@ -256,6 +301,9 @@ export class SparkleGuitarProj extends Entity {
           p.x, p.y, p.w, p.h);
         stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
           stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance);
+        // ★F6 命中尾显式清窗（:14169 usesLocalNPCImmunity 支 immune[owner]=0）——
+        //   近战桥留下的全局窗在本弹命中面被覆盖清零（noteNpcPlayerImmune(id,0) 出表）
+        sparkImmuneWindowClear(e, game);
         this.killStellarTune(game);                // penetrate==0 → 同拍 Kill（含爆裂结算）
         break;                                     // keepIterating=false 单敌截断（:12603/:14203）
       }
@@ -278,6 +326,11 @@ export class SparkleGuitarProj extends Entity {
     this.x = this.cx - bw / 2;                     // position = Center → 盒左上随 128 展开
     this.y = this.cy - bh / 2;
     this.w = bw; this.h = bh;
+    // ★三轮蓝队 F3/F6：Kill 段尾的 Damage()（:72840）同样走 :12515 CutTiles 门——
+    //   856 全门通过 ⇒ 以【爆裂后的 128×128 盒】再砍一轮（放大前后视觉差=爆裂圈内的
+    //   草/瓦罐也会被清）;小动物亦在 PVE victim 循环受理面内（本弹已 dead,无自毁语义）
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
+    hitCritters(this, game);
     const p = game.player as { x: number; y: number; w: number; h: number };
     // ModifyStellarTuneDamage 本轮逐命中评估(:13335),但本轮内弹盒恒 128、玩家盒不变
     // ⇒ 判值全体一致,评一次即等价（避免 per-victim 重复世界查询）
@@ -293,10 +346,14 @@ export class SparkleGuitarProj extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;
+      // ★F6：拒收门同样罩住爆裂轮逐受害者（flag3 恒假,窗关闭者跳过且不落标）；
+      //   命中尾同款显式清窗（:14169）——被近战免伤窗盖住的敌人爆裂不吃,已开伤者清窗
+      if (!sparkImmuneWindowOpen(e, game)) continue;
       if (this.hitOnce.has(e.id)) continue;        // flag2（:12598 usesLocalNPCImmunity array[i]==0）
       this.hitOnce.add(e.id);
       stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
         stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance);
+      sparkImmuneWindowClear(e, game);
     }
   }
 

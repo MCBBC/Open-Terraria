@@ -59,15 +59,21 @@ describe('方块环境粒子规则表（TileParticles）', () => {
         expect(r.dxBox).toBeDefined();
         expect(r.dyBox).toBeDefined();
       }
-      // 列帧门 + 出生盒（L6893-6924：NewDust(i*16+2, ∓4, 4×8) + 列修正 ±rand(8)）。
-      // ★dxBox = 命中格自身左上相对值（发射器 x = cellX*16 + 盒采样）：
-      //   col0 [2,13) / col1 [2,6) / col2 [-6,6) → 绝对羽流 = X0+[2,13)∪[18,22)∪[26,38)
+      // 列帧门 + 出生盒。★精确语义（Dust.NewDust :167-170：X 项 rand.Next(W−4)+4，
+      // W=4 ⇒ 恒 +6 零散布）+ 列修正 ±rand(8)。dxBox = 命中格自身相对：
+      //   col0 [6,14) / col1 [6,7)(点) / col2 [-1,7) → 绝对羽流 = X0+[6,14)∪{22}∪[31,38)
       const byCol = new Map(rules.map((r) => [r.fx0!, r] as const));
-      expect(byCol.get(0)!.dxBox).toEqual([2, 13]);   // 2+rand(4)+rand(8)
-      expect(byCol.get(18)!.dxBox).toEqual([2, 6]);   // 2+rand(4)（绝对 = 本列+18..22）
-      expect(byCol.get(36)!.dxBox).toEqual([-6, 6]);  // 2+rand(4)−rand(8)（绝对 = 本列+26..38）
-      // 绝对羽流右界 ≤38px（火堆 48px 宽）——右列盒尾 32+6=38
-      expect(byCol.get(36)!.dxBox![1] + 32).toBeLessThanOrEqual(38);
+      expect(byCol.get(0)!.dxBox).toEqual([6, 14]);   // 6+rand(8)
+      expect(byCol.get(18)!.dxBox).toEqual([6, 7]);   // 恰 +6（绝对 = X0+22）
+      expect(byCol.get(36)!.dxBox).toEqual([-1, 7]);  // 6−rand(8)（绝对 = X0+31..38）
+      // 三列等权均值 ≈ X0+22（离散中点）：仅比火焰中心(24)偏左 ~2px = 原版固有
+      const mid = (box: readonly [number, number]) => (box[0] + box[1] - 1) / 2;
+      const mean = (mid(byCol.get(0)!.dxBox!) + 16 + byCol.get(18)!.dxBox![0]
+        + 32 + mid(byCol.get(36)!.dxBox!)) / 3;
+      expect(mean).toBeGreaterThan(20);
+      expect(mean).toBeLessThan(24);
+      // 原版初速 vx=±0.4 + ×0.98 阻尼 ⇒ 上升期横向涂抹（防"细直柱"读感）
+      for (const r of rules) expect(r.sideways).toBe(0.3);
       // 帧门：仅点火行（215 fy0=0 / 592 fy0=18）各自列命中
       const fy = sheet === 215 ? 0 : 18;
       expect(ruleMatches(byCol.get(0)!, 0, fy)).toBe(true);
@@ -75,8 +81,8 @@ describe('方块环境粒子规则表（TileParticles）', () => {
       expect(ruleMatches(byCol.get(36)!, 36, fy)).toBe(true);
       expect(ruleMatches(byCol.get(36)!, 36, fy === 0 ? 18 : 0)).toBe(false);
     }
-    expect(TILE_PARTICLE_RULES.get(215)![0].dyBox).toEqual([-4, 4]);
-    expect(TILE_PARTICLE_RULES.get(592)![0].dyBox).toEqual([4, 12]);
+    expect(TILE_PARTICLE_RULES.get(215)![0].dyBox).toEqual([0, 4]);   // NewDust Y 项：j*16−4+[4,8)
+    expect(TILE_PARTICLE_RULES.get(592)![0].dyBox).toEqual([8, 12]);  // j*16+4+[4,8)
   });
 
   it('dust 色表覆盖规则引用的所有基础色键', () => {

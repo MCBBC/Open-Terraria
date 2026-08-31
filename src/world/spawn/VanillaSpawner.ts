@@ -257,7 +257,8 @@ export class VanillaSpawner {
   private expert = false;
   private waterTile = false;
   private noWorms = false;
-  /** ZoneShadowCandle（NPC.cs:328-333 tile 646 扫描 → noWorms/noGroundWorms=false + townNPCs=0） */
+  /** ZoneShadowCandle（NPC.cs:328-333 tile 646 扫描 → noWorms/noGroundWorms=false + townNPCs=0；
+   *  ★本仓未建模 noGroundWorms/AFK 计数链（:412 afkCounter 门），影子蜡烛支只清已建模面） */
   private shadowCandle = false;         // 原版 wallHouse（房屋内不出蠕虫）
   /** GetSpawnRate 城镇段置位（NPC.cs:717/:734/:750/:767/:792/:814）：城镇 NPC ≥1 时
    *  蠕虫抑制。原版与 wallHouse 同字段（GetSpawnRate 在 SetSpawnFlags 之后调用,
@@ -915,8 +916,10 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 0.2);
       maxSpawns = Math.floor(maxSpawns * 3);
     } else if (zoneJungle) {
-      if (shadowCandle) { townNPCs = 0; this.noWorms = false;  }
-    else if (townNPCs === 0) {
+      // 影子蜡烛覆写（NPC.cs:420-425 三连写 noWorms/noGroundWorms=false + townNPCs=0；
+      // noGroundWorms 链未建模，见 :260 注）
+      if (shadowCandle) { townNPCs = 0; this.noWorms = false; }
+      else if (townNPCs === 0) {
         spawnRate = Math.floor(spawnRate * 0.4);
         maxSpawns = Math.floor(maxSpawns * 1.5);
       } else if (townNPCs === 1) {

@@ -17,13 +17,38 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 }
 const le16 = (p: string): Uint16Array => { const b = readFileSync(p); return new Uint16Array(b.buffer, b.byteOffset, b.length >> 1); };
 const u8 = (p: string): Uint8Array => new Uint8Array(readFileSync(p).buffer ?? readFileSync(p));
+// 槽名→x86 pass 名（_mile8 SLOT_END 中段+尾段抄表；dump 序号由名表现场反查）
+const SLOT2NAME = new Map<number, string>([
+  [31,'地表装饰'],[32,'矿骨堆'],[33,'出生点'],[34,'草墙'],[35,'起始镇民'],[36,'向日葵'],
+  [37,'栽树'],[38,'炼金草药'],[39,'染料植物'],[40,'蛛网蜂巢'],[41,'地表植物'],[42,'丛林植物P2'],
+  [43,'藤蔓'],[44,'地表花'],[45,'地表蘑菇'],[46,'宝石系统'],[47,'长苔藓'],[48,'丛林墙'],
+  [49,'蜂巢幼虫'],[50,'微群系'],[51,'二次沉降'],[52,'仙人掌珊瑚'],[53,'瓦片清理'],[54,'蜥蜴祭坛'],
+  [55,'水生植物'],[56,'钟乳石宝石树'],[57,'断线陷阱清理'],[58,'终清理'],
+]);
+const CN2XNAME = new Map<string,string>([
+  ['矿骨堆','Piles'],['出生点','Spawn_Point'],['草墙','Grass_Wall'],['起始镇民','Guide'],
+  ['向日葵','Sunflowers'],['栽树','Planting_Trees'],['炼金草药','Herbs'],['染料植物','Dye_Plants'],
+  ['蛛网蜂巢','Webs_And_Honey'],['地表植物','Glowing_Mushrooms_and_Jungle_Plants'],
+  ['丛林植物P2','Jungle_Plants'],['藤蔓','Vines'],['地表花','Flowers'],['地表蘑菇','Mushrooms'],
+  ['宝石系统','Random_Gems'],['长苔藓','Moss_Grass'],['丛林墙','Muds_Walls_In_Jungle'],
+  ['蜂巢幼虫','Larva'],['微群系','Micro_Biomes'],['二次沉降','Settle_Liquids_Again'],
+  ['仙人掌珊瑚','Cactus__Palm_Trees____Coral'],['瓦片清理','Tile_Cleanup'],['蜥蜴祭坛','Lihzahrd_Altars'],
+  ['水生植物','Water_Plants'],['钟乳石宝石树','Stalac'],['断线陷阱清理','Remove_Broken_Traps'],
+  ['终清理','Final_Cleanup'],
+]);
 const dumpNames: Record<number, string> = {};
 for (const f of readdirSync(G2)) { const m = f.match(/^(\d{3})_(.+)\.typ$/); if (m) dumpNames[Number(m[1])] = m[2]!; }
 const vT = (tid: number): string => (SHEET[tid] >= 0 ? String(SHEET[tid]) : '?');
 
 (RUN ? it : it.skip)('III99b js-slot × x86-dump four-channel diff', () => {
   const slots = readdirSync(JS).filter((f) => /^s\d\d_flags\.bin$/.test(f)).map((f) => Number(f.slice(1, 3))).sort();
-  const dumpIdxOf = (s: number): number => s - 50 + 97; // 微群系=50↔97 … 终清理=58↔105（残片清扫59无dump）
+  const NAME2IDX = new Map<string, number>();
+  for (const f of readdirSync(G2)) { const m = f.match(/^(\d{3})_(.+)\.typ$/); if (m) NAME2IDX.set(m[2]!, Number(m[1])); }
+  const dumpIdxOf = (sl: number): number => {
+    const cn = SLOT2NAME.get(sl);
+    const xn = cn ? CN2XNAME.get(cn) : undefined;
+    return xn !== undefined && NAME2IDX.has(xn) ? NAME2IDX.get(xn)! : sl - 50 + 97;
+  };
   const winDefs: Array<[string, number, number, number, number]> = [
     ['keg', 2680, 2745, 880, 930],
     ['stalac', 2700, 2730, 700, 1080],

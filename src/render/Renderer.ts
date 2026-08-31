@@ -9465,12 +9465,11 @@ export class Renderer {
         // num46:108 巫师 +2（:23227）;坐姿运行时减档（NPCAddHeight 尾 :22377-22386
         // townNPC&&ai[0]==5：−4,124 再 −2,637 猫/656 兔/城镇史莱姆 670+678-684 再 −10）
         const nidT = n.vanillaId ?? -1;
-        let addYT = (nidT === 108 ? 2 : 0) + (Renderer.HB_ADD_H[nidT] ?? 0)
-          + (n.sitting ? -4 + (nidT === 124 ? -2 : 0)
-            + (nidT === 637 || nidT === 656 || Renderer.TOWN_SLIME_IDS.has(nidT) ? -10 : 0) : 0);
-        // ★「落脚贴合」v6 内禀计算(同 drawEnemy):按本次切片内容底行实时对齐盒底。
-        // 坐姿保持原版 -4/-10 档不叠加
-        if (!n.sitting && npcFootFlushOn() && !npcFootBiasExempt(nidT)) {
+        let addYT = (nidT === 108 ? 2 : 0) + (Renderer.HB_ADD_H[nidT] ?? 0);
+        // ★「落脚贴合」v6.1:坐姿不再豁免——原版 -4/-10 坐姿档是"猜"的逐型常数,
+        // 对 64px cell 的染料商不够(实测坐姿仍沉 6px)。改为统一由内禀扫描精确对齐。
+        // 示波器(window.__FLUSHDBG)已归档,不再需要
+        if (npcFootFlushOn() && !npcFootBiasExempt(nidT)) {
           const fmaxRow = npcContentBottomRow(r.img, r.sy, r.sw, r.sh);
           if (fmaxRow >= 0) {
             const dyTargetT = n.h / 2 - fmaxRow - 1;
@@ -9478,17 +9477,6 @@ export class Renderer {
               + npcFootBiasExtra() + npcFootBiasOverride(nidT);
             flushT = Math.max(-24, Math.min(24, flushT));
             addYT += flushT;
-            // ★临时示波器(window.__FLUSHDBG 开启时记录首帧)
-            if ((window as unknown as { __FLUSHDBG?: boolean }).__FLUSHDBG && !(window as unknown as { __flushDbgSeen?: Set<number> }).__flushDbgSeen?.has(nidT)) {
-              const seen = (window as unknown as { __flushDbgSeen?: Set<number> }).__flushDbgSeen ?? new Set();
-              seen.add(nidT);
-              (window as unknown as { __flushDbgSeen?: Set<number> }).__flushDbgSeen = seen;
-              ((window as unknown as { __flushDbg?: unknown[] }).__flushDbg ??= []).push({
-                vid: nidT, h: n.h, sh: r.sh, fmaxRow,
-                addYTBefore: addYT - flushT, flushT,
-                sw: r.sw, sheetIsProfile: true,
-              });
-            }
           }
         }
         ctx.translate(n.cx, n.cy); // 盒中心
@@ -9858,6 +9846,11 @@ export class Renderer {
    *  实体循环先于 drawPlayer → 直画会被纸娃娃盖住(2026-08-24 用户报"身上没棱镜")。
    *  PrismProj.draw 登记 → drawPlayer 后冲刷(世界变换仍活,世界坐标闭包直画) */
   prismCrystalQueue: Array<() => void> = [];
+
+  /** ★HOUSE 出膛锚供体（drawUseItem useStyle5 刷新,2026-08-31）：本地玩家手持
+   *  枪口/杖尖的世界坐标,与绘制同变换(translate+镜像+旋转)——发射链回读使
+   *  弹出生点=绘制尖端本体,左右朝向构造性对称。t=采样时刻(freshness 门) */
+  lastHeldTipWorld: { x: number; y: number; t: number } | null = null;
 
   /** 队列消费（合成后调用）：局部变换 = worldToScreen(wx,wy) + scale(facing·z, z)。
    *  stealth 逐层公式（drawinfo.stealth = settled）：34/40×s、51 luna×s、44×s、
@@ -12363,6 +12356,23 @@ export class Renderer {
       if (fvid >= 0 && FLAME_ITEMS.has(fvid)) {
         drawHeldItemFlame(ctx, this.atlas, fvid, p.facing, { x: drawOX, y: drawOY, w: ar.sw, h: ar.sh }, flicker);
       }
+    }
+    // ★HOUSE 出膛锚供体（2026-08-31）：useStyle5 手持帧把枪口/杖尖世界坐标暴露给
+    //  发射链（Game 射击点回读 lastHeldTipWorld,替代几何近似模型）——与绘制完全
+    //  同变换(translate+镜像+旋转),左右朝向构造性对称,常量退役。
+    //  枪族 tip=精灵右缘中点(管口,drawOX+fw, drawOY+fh/2);
+    //  法杖 tip=花头尖端(斜持 aim+45°,取 (sw·0.9, −sh·0.15))。
+    if (us === 5 && ar && !hide) {
+      const isStaff = heldVid >= 0 && STAFF_ITEMS.has(heldVid);
+      const tipLx = isStaff ? ar.sw * 0.9 : drawOX + ar.sw;
+      const tipLy = isStaff ? -ar.sh * 0.15 : drawOY + ar.sh * 0.5;
+      const ca = Math.cos(rot), sa = Math.sin(rot);
+      const rx = tipLx * ca - tipLy * sa, ry = tipLx * sa + tipLy * ca;
+      this.lastHeldTipWorld = {
+        x: p.cx + p.facing * offX + (p.facing === -1 ? -rx : rx),
+        y: p.y + offY + ry,
+        t: performance.now(),
+      };
     }
     ctx.restore();
   }

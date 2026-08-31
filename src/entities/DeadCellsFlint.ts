@@ -193,7 +193,12 @@ export class FlintChargeProj extends Entity {
   knockback: number;
   critChance = 0.04;
   armorPen = 0;
-  meleeProj = true;                                   // SetDefaults melee=true（浸剂链随弹不随物）
+  // ★注释勘误（F2 批）：1040 是 1457 SetDefaults 的【无类旗反例】（Projectile.cs
+  //  9836-9848 区段：2×2 aiStyle198 tileCollide=false penetrate=-1 alpha=255
+  //  manualDirectionChange——无 melee/ranged,同族 1043/1041 明确带 melee）。
+  //  下旗为 resolveProjClass 兜底槽的历史类字段（projTargets「新代码勿再散写」），
+  //  本类不进任何按类结算环（命中面在 1043/1041 弹体侧）= 纯惰性声明,非浸剂门依据。
+  meleeProj = true;
   dead = false;
   lightRGB: [number, number, number] | null = null;
 

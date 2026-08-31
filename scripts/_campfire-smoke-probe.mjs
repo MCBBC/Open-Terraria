@@ -22,6 +22,11 @@ const out = await page.evaluate(async () => {
     await new Promise((r) => setTimeout(r, 1000));
   }
   await new Promise((r) => setTimeout(r, 1200));
+  // 关掉欢迎弹窗（截图干净）
+  const btns = [...document.querySelectorAll('button')];
+  const ok = btns.find((b) => /我知道/.test(b.textContent ?? ''));
+  if (ok) ok.click();
+  await new Promise((r) => setTimeout(r, 300));
   const g = window.__swGame;
   const st = g.world.store;
   const tiles = await import('/src/data/tiles.ts');
